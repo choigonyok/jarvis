@@ -1,0 +1,45 @@
+services:
+  agent:
+    build: ./agent
+    environment:
+      # Subscription billing. Generate with: claude setup-token
+      # Empty is allowed here so the image can be built without one; the agent
+      # itself refuses to start without it, with the same instruction.
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      # The agent computes "오늘" for the model; in UTC that is a day off for
+      # anyone east of Greenwich once it passes midnight locally.
+      TZ: ${TZ:-Asia/Seoul}
+      JARVIS_MODEL: ${JARVIS_MODEL:-}
+      # Tools that skip the approval card. Read-only only - calendar writes
+      # are deliberately absent, so every one of them lands on a card.
+      JARVIS_ALLOWED_TOOLS: ${JARVIS_ALLOWED_TOOLS:-Read,Glob,Grep,TodoWrite,mcp__calendar__list_events}
+      JARVIS_APPROVAL_TIMEOUT: ${JARVIS_APPROVAL_TIMEOUT:-30m}
+      JARVIS_TURN_TIMEOUT: ${JARVIS_TURN_TIMEOUT:-2h}
+      JARVIS_DEBUG: ${JARVIS_DEBUG:-false}
+    volumes:
+      # Everything the agent may read and act on, once approved.
+      - ${JARVIS_WORKSPACE_HOST:-./workspace}:/workspace
+      # The CLI's own state, kept out of the workspace.
+      - jarvis-home:/home/jarvis
+      # Module data. Outside the workspace so the module's tools are the only
+      # way in - the CLI cannot Read or Write around them.
+      - jarvis-data:/data
+    # Not published: only web reaches the agent, over the compose network.
+    expose:
+      - "8080"
+    restart: unless-stopped
+
+  web:
+    build: ./web
+    environment:
+      AGENT_URL: http://agent:8080
+    ports:
+      - "${JARVIS_WEB_PORT:-3000}:3000"
+    depends_on:
+      agent:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  jarvis-home:
+  jarvis-data:
