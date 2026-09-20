@@ -1,0 +1,194 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-instrument);
+  --font-mono: var(--font-jetbrains);
+  --font-heading: var(--font-instrument);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+
+  /* Jarvis: one grayscale ramp, three signal hues */
+  --color-dim: var(--dim);
+  --color-faint: var(--faint);
+  --color-edge: var(--edge);
+  --color-edge-soft: var(--edge-soft);
+  --color-glass: var(--glass);
+  --color-glass-raised: var(--glass-raised);
+  --color-well: var(--well);
+  --color-approve: var(--approve);
+  --color-reject: var(--reject);
+  --color-online: var(--online);
+
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+}
+
+/* Dark is the only mode this console ships. */
+:root,
+.dark {
+  --background: oklch(0.158 0.004 265);
+  --foreground: oklch(0.945 0.002 265);
+
+  --dim: oklch(0.672 0.004 265);
+  --faint: oklch(0.58 0.005 265);
+  --edge: oklch(1 0 0 / 9%);
+  --edge-soft: oklch(1 0 0 / 5%);
+  --glass: oklch(1 0 0 / 3.5%);
+  --glass-raised: oklch(1 0 0 / 6.5%);
+  --well: oklch(0 0 0 / 28%);
+
+  --approve: oklch(0.755 0.153 150);
+  --reject: oklch(0.687 0.176 25);
+  --online: oklch(0.79 0.152 152);
+
+  --card: oklch(1 0 0 / 3.5%);
+  --card-foreground: var(--foreground);
+  --popover: oklch(0.205 0.004 265);
+  --popover-foreground: var(--foreground);
+  --primary: oklch(0.945 0.002 265);
+  --primary-foreground: oklch(0.18 0.004 265);
+  --secondary: oklch(1 0 0 / 7%);
+  --secondary-foreground: var(--foreground);
+  --muted: oklch(1 0 0 / 6%);
+  --muted-foreground: var(--dim);
+  --accent: oklch(1 0 0 / 7%);
+  --accent-foreground: var(--foreground);
+  --destructive: var(--reject);
+  --border: var(--edge);
+  --input: var(--edge);
+  --ring: oklch(0.62 0.004 265);
+  --radius: 0.75rem;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "ss01", "cv05";
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  html {
+    @apply font-sans;
+    color-scheme: dark;
+  }
+  /* Timestamps must not jitter as the clock ticks. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.01em;
+  }
+}
+
+@layer utilities {
+  .scrollbar-hairline {
+    scrollbar-width: thin;
+    scrollbar-color: oklch(1 0 0 / 10%) transparent;
+  }
+  .scrollbar-hairline::-webkit-scrollbar {
+    width: 6px;
+  }
+  .scrollbar-hairline::-webkit-scrollbar-thumb {
+    background: oklch(1 0 0 / 9%);
+    border-radius: 999px;
+  }
+}
+
+/* The one orchestrated moment: a decision landing on a request. */
+@keyframes edge-wipe {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+@keyframes settle-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+@keyframes think {
+  0%,
+  60%,
+  100% {
+    opacity: 0.22;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 0.85;
+    transform: translateY(-2px);
+  }
+}
+
+.anim-edge {
+  transform-origin: top;
+  animation: edge-wipe 420ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.anim-settle {
+  animation: settle-in 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.anim-breathe {
+  animation: breathe 2.6s ease-in-out infinite;
+}
+.anim-think > span {
+  animation: think 1.25s ease-in-out infinite;
+}
+.anim-think > span:nth-child(2) {
+  animation-delay: 0.16s;
+}
+.anim-think > span:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .anim-edge,
+  .anim-settle,
+  .anim-breathe,
+  .anim-think > span {
+    animation: none !important;
+  }
+  * {
+    transition-duration: 1ms !important;
+  }
+}
