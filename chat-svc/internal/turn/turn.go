@@ -38,4 +38,7 @@ type Turn struct {
 	// SessionID is the CLI session this turn came from. Kept so a restart can
 	// tell which turns the model still has in its own context.
 	SessionID string `json:"sessionId,omitempty"`
+	// Thread is whose conversation this is: "" for the operator, "guest" for
+	// the guest account. Each agent reads and writes only its own.
+	Thread string `json:"thread,omitempty"`
 }

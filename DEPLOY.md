@@ -41,6 +41,14 @@
 `agent.choigonyok.com` 은 2026-10-07 에 DNS 와 두 터널의 ingress 에서 모두 지웠다. 맥미니의
 예전 native cloudflared(`macmini` 터널)는 다른 프로젝트 호스트명 때문에 남아 있다.
 
+**손님 계정.** Access 정책은 운영자와 손님 두 이메일을 허용한다. 콘솔은 Access 가
+서명한 이메일로 역할을 정하고(`web/src/lib/role.ts`, Worker 비밀값 `ACCESS_OWNERS`/`ACCESS_GUESTS` - 이메일이라 공개 저장소에 두지 않는다), 손님은
+대화·운동·캘린더 페이지와 `/api/agent`·`/api/workout` 만 미들웨어에서 통과한다 - 나머지는 403
+이거나 첫 화면으로 돌려보낸다. 손님의 대화는 별도 컨테이너 `agent-guest`(`JARVIS_ROLE=guest`)가
+받는다: chat-svc 의 thread `guest`, 별도 CLI 홈·승인 카드, 캘린더 모듈만, 내장 도구는 웹 검색뿐,
+브라우저 토큰·자산·가계부 주소 없음. 게이트웨이 경로 `/agent-guest/…`(VPC `jarvis-agent-guest`).
+Google OAuth 앱이 테스트 모드라 손님 이메일을 Google Cloud 의 테스트 사용자에도 넣어야 한다.
+
 **에이전트의 `/mcp` 와 `/intercept` 는 게이트웨이에서 막는다.** `/mcp` 는 Claude Code 가
 루프백으로 부르는 도구 서버라 인증이 없다. 밖에서 닿으면 승인 카드를 건너뛰는 길이 된다.
 

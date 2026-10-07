@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"regexp"
 
 	"github.com/choigonyok/jarvis/chat-svc/internal/store"
 	"github.com/choigonyok/jarvis/chat-svc/internal/turn"
@@ -53,8 +54,18 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// threadName is "" (the operator) or a short lowercase name. Anything else is
+// refused rather than stored: a typo would quietly start a second, empty
+// conversation.
+var threadName = regexp.MustCompile(`^[a-z0-9-]{0,32}$`)
+
 func (s *Server) list(w http.ResponseWriter, r *http.Request) {
-	turns, err := s.store.All(r.Context(), s.tz)
+	thread := r.URL.Query().Get("thread")
+	if !threadName.MatchString(thread) {
+		writeErr(w, http.StatusBadRequest, "thread 이름이 올바르지 않습니다.")
+		return
+	}
+	turns, err := s.store.All(r.Context(), s.tz, thread)
 	if err != nil {
 		s.log.Error("스레드를 불러오지 못했습니다", "err", err)
 		writeErr(w, http.StatusInternalServerError, "스레드를 불러오지 못했습니다.")
@@ -71,6 +82,10 @@ func (s *Server) append(w http.ResponseWriter, r *http.Request) {
 	}
 	// 빈 턴은 화면에 빈 말풍선으로 나타난다. 에이전트도 걸러내지만, 여기서
 	// 막아야 다른 호출자가 같은 실수를 반복하지 않는다.
+	if !threadName.MatchString(in.Thread) {
+		writeErr(w, http.StatusBadRequest, "thread 이름이 올바르지 않습니다.")
+		return
+	}
 	if in.Text == "" && len(in.Paragraphs) == 0 && in.ProposalID == "" {
 		writeErr(w, http.StatusBadRequest, "내용이 없는 턴입니다.")
 		return

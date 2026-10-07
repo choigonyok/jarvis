@@ -29,10 +29,13 @@ interface Env {
   KAKAOTALK: Fetcher;
   STATUS: Fetcher;
   BROWSER: Fetcher;
+  AGENT_GUEST: Fetcher;
 }
 
 const SERVICES: Record<string, { binding: keyof Env; origin: string }> = {
   agent: { binding: "AGENT", origin: "http://agent:8080" },
+  // The guest account's own agent (its own conversation, calendar only).
+  "agent-guest": { binding: "AGENT_GUEST", origin: "http://agent-guest:8080" },
   workout: { binding: "WORKOUT", origin: "http://workout:8091" },
   assets: { binding: "ASSETS", origin: "http://assets:8092" },
   spending: { binding: "SPENDING", origin: "http://spending:8095" },
@@ -97,7 +100,9 @@ export default {
 
     const service = SERVICES[name];
     if (!service) return json(404, "그런 서비스가 없습니다.");
-    if (name === "agent" && !AGENT_ROUTES.has(rest[0] ?? "")) return json(404, "그런 경로가 없습니다.");
+    if ((name === "agent" || name === "agent-guest") && !AGENT_ROUTES.has(rest[0] ?? "")) {
+      return json(404, "그런 경로가 없습니다.");
+    }
 
     const target = `${service.origin}/${rest.join("/")}${url.search}`;
     const headers = new Headers(request.headers);
