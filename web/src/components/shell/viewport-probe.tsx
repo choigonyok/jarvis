@@ -50,7 +50,6 @@ export function ViewportProbe() {
         `visualViewport ${Math.round(window.visualViewport?.height ?? 0)}`,
         `vh ${sized("100vh")} dvh ${sized("100dvh")} svh ${sized("100svh")} lvh ${sized("100lvh")}`,
         `safe top ${cs.paddingTop} bottom ${cs.paddingBottom}`,
-        `gap ${getComputedStyle(document.documentElement).getPropertyValue("--standalone-gap") || "-"}`,
         `html ${Math.round(document.documentElement.getBoundingClientRect().height)}  bar bottom ${bar ? Math.round(bar.bottom) : "-"}`,
       ]);
       probe.remove();

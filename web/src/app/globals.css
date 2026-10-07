@@ -110,14 +110,14 @@
        scroll and 100vh keeps measuring the taller state, so a composer pinned
        to the bottom sits below the fold. dvh follows what is actually
        visible. */
-    height: calc(100dvh + var(--standalone-gap, 0px));
+    height: 100dvh;
     /* Rubber-banding the whole page would peel the fixed bars away from the
        edges of the screen. Scrolling happens inside the transcript. */
     overscroll-behavior: none;
     -webkit-text-size-adjust: 100%;
   }
   body {
-    height: calc(100dvh + var(--standalone-gap, 0px));
+    height: 100dvh;
   }
   /* Safari zooms the page whenever a focused field is under 16px, which on
      this console meant every one of them. Below the tablet breakpoint the
@@ -459,18 +459,25 @@ html {
   background-color: var(--background);
 }
 
-/* iOS home-screen apps with a translucent status bar draw from the very top
-   but report a viewport that ends short of the screen by the status bar's
-   height, so the page stopped above an empty strip and a fixed bottom bar
-   floated over it. The gap is that inset, and only there - a measured value
-   (innerHeight at launch) came out too large and pushed the bar off-screen. */
-@media (display-mode: standalone) {
-  :root {
-    --standalone-gap: env(safe-area-inset-top);
+/* The screen's height. In the browser, dvh - Safari's bars come and go. In
+   a home-screen app there are no bars, and dvh is not to be trusted there:
+   measured on an iPhone it reported the small viewport (svh = screen - status
+   bar, 793 of 852) at one launch and the full screen at the next, which
+   showed as an empty strip under the page. lvh was the full screen every
+   time, so a home-screen app uses it.
+
+   Things pinned to the bottom (the tab bar, the voice and screen overlays)
+   are placed from the top with this height rather than with bottom: 0, so
+   they land on the real bottom edge whichever viewport iOS reports. */
+@utility screen-h {
+  height: 100dvh;
+  @media (display-mode: standalone) {
+    height: 100lvh;
   }
 }
-
-/* The fixed things that sit on the bottom edge, pushed down by the same gap. */
-@utility bottom-screen {
-  bottom: calc(-1 * var(--standalone-gap, 0px));
+@media (display-mode: standalone) {
+  html,
+  body {
+    height: 100lvh !important;
+  }
 }
