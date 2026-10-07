@@ -1,12 +1,14 @@
 // Package permission adapts Claude Code's tool-permission callback to a
 // proposal. Claude Code is launched with --permission-prompt-tool pointing
 // here, so every tool call it wants to make that is not pre-allowed lands in
-// this handler and blocks until a person decides.
+// this handler.
 //
-// This used to be the approval system. It is now one producer of proposals -
-// the one that happens to have a caller to keep waiting. A detector that
-// notices something on its own opens a proposal the same way and simply does
-// not read the decision channel.
+// The handler does not wait for the person. It used to - and the CLI's HTTP
+// client gives up on an MCP call after five minutes no matter what
+// MCP_TOOL_TIMEOUT says, so a card left for five minutes came back as a
+// failed call, the model retried, and the same card appeared twice. Now the
+// call returns at once with "the card is up", the turn ends, and the decision
+// starts a new turn when it comes (Resolve).
 package permission
 
 import (
@@ -16,6 +18,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -53,23 +56,38 @@ type Response struct {
 // raised by a future detector has no transcript at all.
 type Transcript interface {
 	AttachProposal(proposalID string)
-	SetThinking(bool)
 }
+
+// FollowUp starts a turn the operator did not type: the assistant hearing
+// how a card it raised was decided.
+type FollowUp interface {
+	Enqueue(prompt string)
+}
+
+// grantTTL bounds how long an approval waits for the model to come back and
+// make the call. The follow-up turn starts right after the decision, so this
+// only has to outlast a queue behind a long turn.
+const grantTTL = 2 * time.Hour
 
 type Gate struct {
 	proposals *proposal.Store
 	modules   *module.Registry
 	thread    Transcript
-	wait      time.Duration
+	followUp  FollowUp
 	log       *slog.Logger
 	debug     bool
+
+	mu sync.Mutex
+	// grants are approved calls the CLI runs itself (Bash, WebSearch, an
+	// outside MCP server). Keyed by tool and exact arguments, spent once: the
+	// operator approved that call, not the tool.
+	grants map[string]time.Time
 }
 
 func NewGate(
 	proposals *proposal.Store,
 	modules *module.Registry,
 	transcript Transcript,
-	wait time.Duration,
 	debug bool,
 	log *slog.Logger,
 ) *Gate {
@@ -77,11 +95,15 @@ func NewGate(
 		proposals: proposals,
 		modules:   modules,
 		thread:    transcript,
-		wait:      wait,
 		log:       log,
 		debug:     debug,
+		grants:    map[string]time.Time{},
 	}
 }
+
+// SetFollowUp wires the runner in. It is created after the gate, because the
+// runner's MCP config points at the gate's handler.
+func (g *Gate) SetFollowUp(f FollowUp) { g.followUp = f }
 
 // Handler returns an http.Handler to mount at the path the CLI is pointed at.
 func (g *Gate) Handler() http.Handler {
@@ -89,7 +111,7 @@ func (g *Gate) Handler() http.Handler {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        ToolName,
-		Description: "운영자에게 도구 실행 승인을 요청합니다. 결정이 날 때까지 반환하지 않습니다.",
+		Description: "운영자에게 도구 실행 승인을 요청합니다. 카드를 올리고 바로 반환합니다.",
 	}, g.decide)
 
 	return mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
@@ -113,36 +135,122 @@ func (g *Gate) decide(ctx context.Context, _ *mcp.CallToolRequest, in Request) (
 		return reply(Response{Behavior: "deny", Message: err.Error()})
 	}
 
-	p, decisions := g.proposals.Open(proposal.Proposal{
+	// The second half of an approval: the operator said yes, and the model
+	// is back making exactly the call that was approved.
+	if g.spend(tool, act.Input) {
+		return reply(Response{Behavior: "allow"})
+	}
+
+	if waiting, ok := g.proposals.FindPending(act); ok {
+		return reply(Response{
+			Behavior: "deny",
+			Message: fmt.Sprintf("같은 요청의 승인 카드(%s)가 이미 올라가 있습니다. 다시 요청하지 마세요. "+
+				"운영자가 결정하면 그 결과가 새 메시지로 옵니다. 지금은 응답을 마치세요.", waiting.ID),
+		})
+	}
+
+	p, _ := g.proposals.Open(proposal.Proposal{
 		Origin: proposal.OriginChat,
 		Action: act,
 		Card:   card,
 	})
 	g.thread.AttachProposal(p.ID)
 
-	// While a card is up the agent is waiting on a person, not working.
-	g.thread.SetThinking(false)
-	defer g.thread.SetThinking(true)
+	// Denied in the CLI's terms, pending in ours. The wording carries the
+	// difference: nothing was refused, the turn just must not wait here.
+	return reply(Response{
+		Behavior: "deny",
+		Message: fmt.Sprintf("승인 카드(%s)를 올렸습니다. 아직 실행되지 않았고, 반려된 것도 아닙니다. "+
+			"결정을 기다리지 말고, 무엇을 요청했는지 한 줄로 알린 뒤 이번 응답을 마치세요. "+
+			"운영자가 승인하거나 반려하면 그 결과가 새 메시지로 옵니다. 이 도구를 다시 호출하지 마세요.", p.ID),
+	})
+}
 
-	wait, cancel := context.WithTimeout(ctx, g.wait)
-	defer cancel()
-
-	select {
-	case d := <-decisions:
-		if d == proposal.Reject {
-			return reply(Response{
-				Behavior: "deny",
-				Message:  "운영자가 반려했습니다. 실행하지 마세요. 같은 목적을 이룰 더 안전한 방법이 있으면 제안하고, 없으면 여기서 멈추세요.",
-			})
-		}
-		return reply(Response{Behavior: "allow"})
-	case <-wait.Done():
-		g.proposals.Abandon(p.ID, "제한 시간 안에 결정이 나지 않았습니다.")
-		return reply(Response{
-			Behavior: "deny",
-			Message:  "제한 시간 안에 결정이 나지 않아 요청이 만료되었습니다.",
-		})
+// Resolve acts on a decision about a card this gate raised, and wakes the
+// assistant with the outcome.
+//
+// A module's action is run here, by the module, with the exact input the
+// operator saw - the model is told what happened rather than asked to redo
+// it. A tool the CLI runs itself cannot be run from here, so the approval
+// becomes a one-time grant for that exact call and the model is asked to make
+// it again.
+func (g *Gate) Resolve(p proposal.Proposal, d proposal.Decision) {
+	if p.Origin != proposal.OriginChat {
+		return
 	}
+	title := p.Card.Title
+
+	if d == proposal.Reject {
+		g.enqueue(fmt.Sprintf("[반려] 운영자가 승인 카드 %s(%s)를 반려했습니다.\n%s\n\n"+
+			"실행하지 마세요. 이유를 캐묻지 말고, 같은 목적을 이루는 덜 위험한 방법이 있으면 제안하고 없으면 짧게 확인만 하세요.",
+			p.ID, title, p.Card.Body))
+		return
+	}
+
+	if actuator, _, ok := g.modules.Lookup(p.Action.Kind); ok {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		res, err := actuator.Execute(ctx, p.Action)
+		if err != nil {
+			g.proposals.Settle(p.ID, proposal.Failed, err.Error())
+			g.enqueue(fmt.Sprintf("[승인 후 실패] 운영자가 승인 카드 %s(%s)를 승인했지만 실행에 실패했습니다: %s\n\n"+
+				"무엇이 실패했는지 알리고, 고칠 수 있으면 고친 요청을 다시 올리세요.", p.ID, title, err))
+			return
+		}
+		g.proposals.Settle(p.ID, proposal.Executed, res.Note)
+		g.enqueue(fmt.Sprintf("[승인됨·실행 완료] 운영자가 승인 카드 %s(%s)를 승인했고, 이미 실행했습니다: %s\n\n"+
+			"같은 도구를 다시 호출하지 마세요. 원래 하던 일이 남았으면 이어서 하고, 없으면 결과를 짧게 알리세요.",
+			p.ID, title, res.Note))
+		return
+	}
+
+	tool := toolOf(p.Action.Kind)
+	g.grant(tool, p.Action.Input)
+	g.enqueue(fmt.Sprintf("[승인됨] 운영자가 승인 카드 %s(%s)를 승인했습니다. 아직 실행되지 않았습니다.\n"+
+		"지금 %s 도구를 정확히 이 인자로 다시 호출하면 카드 없이 실행됩니다. 인자를 하나라도 바꾸면 새 카드가 올라갑니다.\n%s\n\n"+
+		"실행한 뒤 원래 하던 일을 이어서 하세요.", p.ID, title, tool, string(proposal.Canonical(p.Action.Input))))
+}
+
+func (g *Gate) enqueue(prompt string) {
+	if g.followUp == nil {
+		g.log.Error("결정을 전달할 곳이 없습니다", "prompt", prompt)
+		return
+	}
+	g.followUp.Enqueue(prompt)
+}
+
+func grantKey(tool string, input json.RawMessage) string {
+	return tool + "\x00" + string(proposal.Canonical(input))
+}
+
+func (g *Gate) grant(tool string, input json.RawMessage) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.grants[grantKey(tool, input)] = time.Now().Add(grantTTL)
+}
+
+// spend uses up a grant for this exact call, if there is a live one.
+func (g *Gate) spend(tool string, input json.RawMessage) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	now := time.Now()
+	for k, until := range g.grants {
+		if now.After(until) {
+			delete(g.grants, k)
+		}
+	}
+	k := grantKey(tool, input)
+	if _, ok := g.grants[k]; !ok {
+		return false
+	}
+	delete(g.grants, k)
+	return true
+}
+
+// toolOf is the CLI's name for an action describe() made from one of its own
+// tools: "claude.Bash" → "Bash".
+func toolOf(kind string) string {
+	return strings.TrimPrefix(kind, "claude.")
 }
 
 // describe turns a tool call into an action and the card that stands for it.

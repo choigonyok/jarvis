@@ -5,6 +5,7 @@
 package httpapi
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,6 +30,17 @@ type Server struct {
 	mcp           map[string]http.Handler
 	log           *slog.Logger
 	allowedOrigin string
+	// interceptToken is the shared secret the browser container presents when
+	// it stops a payment. Empty means the endpoint refuses everything.
+	interceptToken string
+	// backgroundLogin is the sign-in hosts a background task may reach
+	// without asking (see postIntercept).
+	backgroundLogin map[string]bool
+	// apiToken guards the routes the console drives. Empty leaves them open,
+	// which is right when nothing but the compose network can reach this port
+	// and wrong the moment a tunnel gives the agent a public hostname.
+	apiToken     string
+	approvalWait time.Duration
 }
 
 // Sender is whatever drives a turn. Keeping it an interface means the
@@ -45,21 +57,30 @@ type Deps struct {
 	Bus       *bus.Bus
 	// MCP maps a mount path to its server: the permission gate at /mcp, one
 	// module server per path beneath it.
-	MCP           map[string]http.Handler
-	AllowedOrigin string
-	Log           *slog.Logger
+	MCP            map[string]http.Handler
+	AllowedOrigin  string
+	InterceptToken string
+	// BackgroundLogin names hosts a background task may sign in through.
+	BackgroundLogin []string
+	APIToken        string
+	ApprovalWait    time.Duration
+	Log             *slog.Logger
 }
 
 func New(d Deps) *Server {
 	return &Server{
-		thread:        d.Thread,
-		proposals:     d.Proposals,
-		calendar:      d.Calendar,
-		runner:        d.Runner,
-		bus:           d.Bus,
-		mcp:           d.MCP,
-		log:           d.Log,
-		allowedOrigin: d.AllowedOrigin,
+		thread:          d.Thread,
+		proposals:       d.Proposals,
+		calendar:        d.Calendar,
+		runner:          d.Runner,
+		bus:             d.Bus,
+		mcp:             d.MCP,
+		log:             d.Log,
+		allowedOrigin:   d.AllowedOrigin,
+		interceptToken:  d.InterceptToken,
+		backgroundLogin: hostSet(d.BackgroundLogin),
+		apiToken:        d.APIToken,
+		approvalWait:    d.ApprovalWait,
 	}
 }
 
@@ -69,16 +90,22 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 
-	mux.HandleFunc("GET /thread", s.getThread)
-	mux.HandleFunc("POST /messages", s.postMessage)
-	mux.HandleFunc("GET /events", s.events)
+	// Everything the console drives. The bearer check is on each of them
+	// rather than on the mux, so /healthz stays open for the healthcheck and
+	// /intercept and /mcp keep the separate secrets they already have.
+	mux.HandleFunc("GET /thread", s.guard(s.getThread))
+	mux.HandleFunc("POST /messages", s.guard(s.postMessage))
+	mux.HandleFunc("GET /events", s.guard(s.events))
 
-	mux.HandleFunc("GET /proposals", s.getProposals)
-	mux.HandleFunc("POST /proposals/{id}/decision", s.postDecision)
+	mux.HandleFunc("GET /proposals", s.guard(s.getProposals))
+	mux.HandleFunc("POST /proposals/{id}/decision", s.guard(s.postDecision))
 
-	mux.HandleFunc("GET /calendar", s.getCalendar)
-	mux.HandleFunc("POST /calendar", s.postCalendar)
-	mux.HandleFunc("DELETE /calendar/{id}", s.deleteCalendar)
+	// The browser container dials this when a page tries to pay.
+	mux.HandleFunc("POST /intercept", s.postIntercept)
+
+	mux.HandleFunc("GET /calendar", s.guard(s.getCalendar))
+	mux.HandleFunc("POST /calendar", s.guard(s.postCalendar))
+	mux.HandleFunc("DELETE /calendar/{id}", s.guard(s.deleteCalendar))
 
 	// Claude Code dials these. The permission gate sits at /mcp; module
 	// servers mount beneath it, and the more specific pattern wins.
@@ -89,6 +116,32 @@ func (s *Server) Handler() http.Handler {
 	return s.withCORS(mux)
 }
 
+// guard requires the console's bearer token. It is a plain equality check on
+// a value both sides read from the environment: there is exactly one caller,
+// and anything more would be a login in front of a login.
+func (s *Server) guard(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.apiToken == "" {
+			next(w, r)
+			return
+		}
+		// Only the console's server-side proxy calls these, and it can set a
+		// header - the browser never holds this token.
+		// CutPrefix, not TrimPrefix: the scheme is required, so a header that
+		// is only the raw token does not quietly count as presenting it.
+		presented, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if !ok {
+			writeErr(w, http.StatusUnauthorized, "인증이 필요합니다.")
+			return
+		}
+		if subtle.ConstantTimeCompare([]byte(presented), []byte(s.apiToken)) != 1 {
+			writeErr(w, http.StatusUnauthorized, "인증이 필요합니다.")
+			return
+		}
+		next(w, r)
+	}
+}
+
 // withCORS stays closed unless an origin is configured; the default topology
 // puts the Next.js server in front, so the browser never talks here directly.
 func (s *Server) withCORS(next http.Handler) http.Handler {
@@ -96,7 +149,7 @@ func (s *Server) withCORS(next http.Handler) http.Handler {
 		if s.allowedOrigin != "" {
 			w.Header().Set("Access-Control-Allow-Origin", s.allowedOrigin)
 			w.Header().Set("Vary", "Origin")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)
@@ -177,13 +230,18 @@ func (s *Server) getCalendar(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// postCalendar is the operator editing their own calendar. It bypasses the
-// proposal gate on purpose: a person typing into their own calendar has
-// already decided, and asking them to approve themselves would be theatre.
+// postCalendar is the operator editing an existing entry by hand, which needs
+// no card. A new entry does: the calendar is shared with a partner since it
+// moved to uniple, and the operator asked that every addition be approved.
+// New entries come in through the calendar tools and their approval card.
 func (s *Server) postCalendar(w http.ResponseWriter, r *http.Request) {
 	var in calendar.Event
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&in); err != nil {
 		writeErr(w, http.StatusBadRequest, "본문을 읽을 수 없습니다.")
+		return
+	}
+	if in.ID == "" {
+		writeErr(w, http.StatusForbidden, "새 일정은 대화에서 요청해 승인 카드를 거쳐 추가합니다.")
 		return
 	}
 	// An edit keeps whoever created it; only a new entry is stamped as mine.
@@ -267,4 +325,14 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeErr(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+func hostSet(hosts []string) map[string]bool {
+	out := map[string]bool{}
+	for _, h := range hosts {
+		if h = strings.ToLower(strings.TrimSpace(h)); h != "" {
+			out[h] = true
+		}
+	}
+	return out
 }

@@ -4,14 +4,45 @@
 **Claude Code 구독으로 과금됩니다** (API 크레딧 아님).
 
 ```
-web (Next.js)  ──┐  사람이 읽고 결재하는 화면 (대화 / 캘린더)
-                 ├─ /api/agent/* 프록시 (자격증명은 서버에만)
-agent (Go)     ──┤
-                 ├─ core/proposal        ← 제안과 결재. 이 시스템의 심장
-                 ├─ MCP /mcp             ← 권한 질의를 제안으로 바꾸는 어댑터
-                 ├─ MCP /mcp/calendar    ← 모듈이 모델에게 내주는 도구
-                 └─ exec: claude -p ...  ← 구독으로 과금, 실제 실행
+web (Next.js)    사람이 읽고 결재하는 화면. 자격증명은 서버측에만, 전부 프록시
+      │
+      ├─ /api/agent/*      → agent
+      ├─ /api/workout      → workout-svc
+      ├─ /api/portfolio    → assets-svc
+      ├─ /api/spending/*   → spending-svc
+      ├─ /api/kakaotalk/*  → kakaotalk-client
+      └─ /api/status/*     → status-svc
+
+agent (Go)       결정하는 곳
+      ├─ core/proposal        ← 제안과 결재. 이 시스템의 심장
+      ├─ MCP /mcp             ← 권한 질의를 제안으로 바꾸는 어댑터
+      ├─ MCP /mcp/calendar    ← 모듈이 모델에게 내주는 도구
+      ├─ SSE /events          ← 라이브 스트림과 진행 상태 (영속되지 않음)
+      └─ exec: claude -p ...  ← 구독으로 과금, 실제 실행
+
+기능 서비스      각자 디렉터리 하나, 이미지 하나, 상태는 Postgres 에
+      ├─ chat-svc      :8094  대화 기록
+      ├─ calendar-svc  :8093  일정 + 충돌 검사
+      ├─ workout-svc   :8091  운동 기록
+      ├─ assets-svc    :8092  업비트·KIS (주문 가능한 키가 여기에만)
+      ├─ spending-svc  :8095  가계부 (카드사 카톡 알림 → 분류·월 합계·예산)
+      ├─ kakaotalk-client :8090  카톡 수집
+      └─ status-svc    :8096  상태 탭 (기능별 판정, 읽기만)
+
+postgres + pgvector  이벤트 로그, 파생 테이블, 회수용 벡터
 ```
+
+각 서비스의 README 에 경계를 그은 이유와 검증한 것이 있습니다:
+[chat-svc](chat-svc/README.md) · [calendar-svc](calendar-svc/README.md) ·
+[workout-svc](workout-svc/README.md) · [assets-svc](assets-svc/README.md) ·
+[spending-svc](spending-svc/README.md) ·
+[status-svc](status-svc/README.md) ·
+[db](db/README.md)
+
+**에이전트에 남은 것과 나간 것.** 저장소는 전부 나갔고, 결정은 전부 남았습니다.
+승인 카드·도구 스키마·`Reversible` 선언·SSE·진행 상태는 대화와 게이트의
+속성이라 에이전트의 것입니다. 제안 저장소도 남았습니다 — 그건 게이트의 다른
+반쪽이고, 결정이 날 때까지 반환하지 않는 핸들러와 한 몸입니다.
 
 제안(proposal)은 저장되는 객체이지 대화의 속성이 아닙니다. 그래서 **대화 없이도
 제안이 열릴 수 있습니다** — 나중에 카톡 감지기가 "캠핑 일정 추가할까요?"를 띄우는
@@ -55,9 +86,10 @@ CLI에 넘기는 `MCP_TIMEOUT`/`MCP_TOOL_TIMEOUT`은 **밀리초**입니다(CLI 
 
 ### 캘린더
 
-- 저장 위치는 `JARVIS_CALENDAR_PATH`(컨테이너에선 `/data/calendar.json`)이며,
-  **워크스페이스 바깥**입니다. 안에 두면 CLI의 `Read`/`Write` 도구가 모듈의 스키마와
-  승인 카드를 우회하는 두 번째 문이 됩니다.
+- 일정은 `calendar-svc`(Postgres)에 있고, 주소는 `JARVIS_CALENDAR_URL`입니다.
+  전에는 워크스페이스 바깥의 JSON 파일이었는데, 이유는 같습니다 — 안에 두면
+  CLI의 `Read`/`Write` 도구가 모듈의 스키마와 승인 카드를 우회하는 두 번째 문이
+  됩니다. 이제 에이전트의 파일시스템에 캘린더가 **아예 없습니다.**
 - 모델에겐 도구 4개만 보입니다: `list_events`(무승인) / `create_event` /
   `update_event` / `delete_event`.
 - 시간대는 `TZ`(기본 `Asia/Seoul`)입니다. 컨테이너 기본값인 UTC로 두면 한국 시간
@@ -67,28 +99,92 @@ CLI에 넘기는 `MCP_TIMEOUT`/`MCP_TOOL_TIMEOUT`은 **밀리초**입니다(CLI 
   거부되고, 변환은 모델이 합니다 — 오늘 날짜는 **매 턴** 시스템 프롬프트에 주입됩니다
   (부팅 시 한 번이 아니라).
 
+### 자산
+
+- 읽기 전용입니다. 모듈이 `ContextSource` 만 구현하고 `Actuator` 가 없으므로
+  승인할 동작 자체가 없습니다. 주문 가능한 키는 `assets-svc` 에만 있고, 에이전트는
+  `JARVIS_ASSETS_URL` 로 GET 만 칩니다.
+- 모델에게 보이는 도구는 셋이고 전부 무승인입니다: `get_portfolio`(총액·종목·원금 대비·
+  기간 변동) / `get_allocation`(목표 비중 대비와 옮길 금액) / `get_history`(일별 스냅샷).
+- 목표 비중 계산은 `assets-svc/src/target.ts` 한 곳에 있습니다. 웹과 에이전트가 같은
+  `/portfolio` 의 `allocation` 을 읽으므로, 새 배당·금 종목은 거기에만 추가하면 됩니다.
+- 캘린더와 달리 부팅 때 서비스를 확인하지 않습니다. 증권사 장애가 대화까지 막을 이유가
+  없고, 조회 실패는 도구 오류로 모델에게 전달됩니다.
+
+### 가계부
+
+- 자산과 같은 읽기 전용 모듈입니다. 도구 `get_spending`(월 합계·지난달 같은 날까지 비교·
+  예산 속도·분류·정기 결제·건별 내역) 하나이고 무승인입니다. 분류 변경과 예산은 화면에서 합니다.
+- **백그라운드 주문 조회.** 쿠팡 결제가 새로 들어오면 에이전트가 대화와 분리된
+  Claude 세션(`claudecode.Background`)을 띄워 브라우저로 주문목록을 읽고 상품별로 나눕니다.
+  이 세션에는 내장 도구(셸·파일)가 없고, 브라우저 읽기·클릭과 결과 기록 도구 두 개만 허용되며
+  (`--permission-mode dontAsk`), 나머지는 묻지 않고 거부됩니다. 글자 입력이 없어 로그인·결제를
+  할 수 없습니다. 기록 도구는 `/mcp/spending-enrich` 에 있지만 대화의 MCP 설정에는 들어가지
+  않습니다. 사람이 말을 걸면 즉시 멈추고 나중에 다시 합니다 — 브라우저는 창 하나를 같이 씁니다.
+  `JARVIS_ENRICH=false` 로 끕니다.
+  백그라운드 작업이 브라우저를 쓰는 동안 결제 안전장치(`/intercept`)에 걸린 요청은 카드를 띄우지
+  않고 그 자리에서 결정합니다 — 그 카드 앞에는 아무것도 시작하지 않은 사람이 앉아 있기 때문입니다.
+  `JARVIS_BACKGROUND_LOGIN_HOSTS`(기본 `nid.naver.com`)는 허용하고(브라우저에 저장된 비밀번호로 로그인
+  버튼만 누르게 함), 나머지 — 모든 결제 호스트 — 는 거부합니다.
+
 ## 실행
 
 ```bash
 npx @anthropic-ai/claude-code setup-token    # 1년짜리 토큰 발급
 cp .env.example .env                          # CLAUDE_CODE_OAUTH_TOKEN 채우기
+openssl rand -hex 24                          # JARVIS_POSTGRES_PASSWORD 에 넣기
 docker compose up --build
 # http://localhost:3000
 ```
+
+`JARVIS_POSTGRES_PASSWORD` 가 없으면 compose 가 그 자리에서 멈춥니다. 기본값을
+두지 않은 것은 의도입니다 — 리포지터리에 적힌 비밀번호는 비밀번호가 아닙니다.
+
+스키마는 `db-migrate` 가 부팅 때 적용하고, 나머지 서비스는 그것이 성공으로 끝난
+뒤에 뜹니다. 몇 번 돌려도 안전합니다.
+
+기존 JSON 파일에 있던 데이터를 옮기려면(한 번만):
+
+```bash
+docker compose --profile import run --rm calendar-import   # calendar.json
+docker compose --profile import run --rm workout-import    # workout.json
+docker compose --profile import run --rm chat-import       # thread.json
+```
+
+원본은 지우지 않습니다. 화면에서 확인한 뒤에 지우세요. `chat-import` 는 턴에
+자연키가 없어 **여러 번 돌리면 중복되므로**, 이미 턴이 있으면 멈춥니다.
 
 `ANTHROPIC_API_KEY`가 환경에 있으면 **에이전트가 부팅을 거부합니다.** 조용히 API
 종량 과금으로 새는 것을 막기 위한 의도적인 동작입니다.
 
 ## 개발 중 따로 띄우기
 
+에이전트는 이제 혼자 뜨지 못합니다. 부팅할 때 `calendar-svc` 와 `chat-svc` 의
+`/health` 를 확인하고, 없으면 포기합니다 — 빈 대화로 시작해서 첫 턴에 기록을
+덮어쓰는 것보다 뜨지 않는 편이 낫습니다. 그래서 의존 서비스는 도커로 띄운 채
+에이전트만 로컬에서 돌리는 것이 가장 편합니다.
+
 ```bash
-# 터미널 1
+# 데이터베이스와 기능 서비스만 도커로
+docker compose up -d postgres calendar chat workout assets
+
+# 터미널 1 — 에이전트
 cd agent && CLAUDE_CODE_OAUTH_TOKEN=... JARVIS_WORKSPACE=../workspace \
+  JARVIS_CALENDAR_URL=http://localhost:8093 \
+  JARVIS_CHAT_URL=http://localhost:8094 \
+  JARVIS_API_TOKEN=<.env 의 값> \
   JARVIS_DEBUG=true go run ./cmd/agent
 
-# 터미널 2
-cd web && AGENT_URL=http://localhost:8080 npm run dev
+# 터미널 2 — 웹
+cd web && AGENT_URL=http://localhost:8080 \
+  WORKOUT_URL=http://localhost:8091 \
+  ASSETS_URL=http://localhost:8092 \
+  JARVIS_API_TOKEN=<.env 의 값> npm run dev
 ```
+
+`JARVIS_API_TOKEN` 을 빼먹으면 서비스들이 401을 돌려줍니다. 서비스 하나만
+고칠 때는 그것만 로컬에서 돌리고 나머지는 도커에 두면 됩니다 — 각 서비스의
+README 에 단독 실행 명령이 있습니다.
 
 로컬에 `claude` CLI가 없으면 `JARVIS_CLAUDE_BIN`으로 경로를 지정하세요.
 

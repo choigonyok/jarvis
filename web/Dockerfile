@@ -15,7 +15,11 @@ RUN npm run build
 FROM node:22-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0
-RUN addgroup -g 10001 nodejs && adduser -D -u 10001 -G nodejs nextjs
+RUN addgroup -g 10001 nodejs && adduser -D -u 10001 -G nodejs nextjs \
+ # The workout log's volume. Docker seeds a fresh named volume from the
+ # image's directory, ownership included - without this the mount arrives
+ # root-owned and the unprivileged server cannot write to it.
+ && mkdir -p /data && chown nextjs:nodejs /data
 # output:"standalone" emits server.js plus only the node_modules it traced.
 COPY --from=build --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=build --chown=nextjs:nodejs /app/.next/static ./.next/static

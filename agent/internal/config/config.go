@@ -39,15 +39,67 @@ type Config struct {
 	PublicMCPURL string
 	// ModuleMCPURLs is one entry per module that exposes tools to the model,
 	// keyed by module name. Filled at boot from the registry, so a module
-	// that is not enabled is a module the model cannot see.
+	// that is not enabled is a module the model cannot see. These are dialled
+	// over loopback inside the container and carry no credential.
 	ModuleMCPURLs map[string]string
-	// CalendarPath is the calendar module's file. Deliberately outside the
-	// workspace mount: if it sat inside, the CLI's own Read and Write tools
-	// would be a second door into the data, and the calendar tools' schema
-	// and approval cards could be walked straight past.
-	CalendarPath  string
+	// ExtraMCPURLs are servers with no module behind them (JARVIS_EXTRA_MCP,
+	// "name=url,name=url"). They reach the model but not the registry, so the
+	// approval gate cannot render their cards - it falls back to the generic
+	// renderer, and their actions carry no action.Spec and therefore no
+	// Reversible declaration.
+	//
+	// Kept apart from ModuleMCPURLs because these leave the container: the
+	// token below is sent to them and must not be sent anywhere else.
+	ExtraMCPURLs map[string]string
+	// ExtraMCPToken is sent as a bearer token to ExtraMCPURLs. An extra
+	// server listens on an interface the whole network can reach - a module
+	// server does not - so this is what stands between that port and anyone
+	// else on the same wifi. Empty means no header is sent.
+	ExtraMCPToken string
+	// CalendarURL is where calendar-svc listens. The events used to be a file
+	// here, kept deliberately outside the workspace mount so the CLI's own
+	// Read and Write could not be a second door into them. They are in
+	// Postgres behind that service now, which closes the same door more
+	// firmly: there is no path on this filesystem to walk past the calendar
+	// tools' schema and approval cards.
+	CalendarURL string
+	// ChatURL is where chat-svc listens. The transcript used to be a file in
+	// /data, kept outside the workspace so the CLI's own Read and Write could
+	// not be a second door into it; it is in Postgres behind that service now.
+	ChatURL string
+	// AssetsURL is where assets-svc listens. The agent reads it and nothing
+	// more: the brokerage keys stay in that service, and the routes this
+	// token opens there are lookups plus the principal ledger, which no tool
+	// here calls.
+	AssetsURL string
+	// SpendingURL is where spending-svc listens. Read-only, like assets.
+	SpendingURL string
+	// Enrich turns on the background lookup of marketplace orders (what a
+	// "쿠팡 8,900원" charge actually bought). It needs the browser server in
+	// ExtraMCPURLs; without it the loop does not start.
+	Enrich bool
+	// BackgroundLogin is the sign-in hosts a background task may use without
+	// asking - so the order lookup can press 로그인 on a form the browser has
+	// filled in from its saved passwords. Payment hosts are never on it.
+	BackgroundLogin []string
+	EnrichInterval  time.Duration
+	EnrichCooldown  time.Duration
+	EnrichTimeout   time.Duration
+	// ProposalsPath is still a file, and still outside the workspace for that
+	// same reason. The proposal store did not move: it is the approval gate's
+	// other half, and a handler that does not return until a decision is made
+	// is not something to put behind a network hop while moving storage around.
+	ProposalsPath string
+	// SessionPath keeps the CLI session id. Without it a restart starts a new
+	// session, and the transcript on screen would be one the model has no
+	// memory of.
+	SessionPath   string
 	AllowedOrigin string
-	Debug         bool
+	// APIToken guards the routes the console drives. Unset leaves them open,
+	// which is fine while only the compose network can reach :8080 and not
+	// fine once a tunnel publishes it - see the boot check below.
+	APIToken string
+	Debug    bool
 }
 
 func Load() (Config, error) {
@@ -64,19 +116,47 @@ func Load() (Config, error) {
 		// nothing and a card in front of every lookup would train the
 		// operator to approve without reading. Writes are never on this list.
 		AllowedTools: splitList(env("JARVIS_ALLOWED_TOOLS",
-			"Read,Glob,Grep,TodoWrite,mcp__calendar__list_events")),
-		PermissionMode: env("JARVIS_PERMISSION_MODE", "manual"),
-		ApprovalWait:   envDuration("JARVIS_APPROVAL_TIMEOUT", 30*time.Minute),
-		TurnTimeout:    envDuration("JARVIS_TURN_TIMEOUT", 2*time.Hour),
-		PublicMCPURL:   env("JARVIS_MCP_URL", "http://127.0.0.1:8080/mcp"),
-		ModuleMCPURLs:  map[string]string{},
-		CalendarPath:   env("JARVIS_CALENDAR_PATH", "./data/calendar.json"),
-		AllowedOrigin:  env("JARVIS_ALLOWED_ORIGIN", ""),
-		Debug:          envBool("JARVIS_DEBUG", false),
+			"Read,Glob,Grep,TodoWrite,mcp__calendar__list_events,"+
+				"mcp__assets__get_portfolio,mcp__assets__get_allocation,mcp__assets__get_history,"+
+				"mcp__spending__get_spending")),
+		PermissionMode:  env("JARVIS_PERMISSION_MODE", "manual"),
+		ApprovalWait:    envDuration("JARVIS_APPROVAL_TIMEOUT", 30*time.Minute),
+		TurnTimeout:     envDuration("JARVIS_TURN_TIMEOUT", 2*time.Hour),
+		PublicMCPURL:    env("JARVIS_MCP_URL", "http://127.0.0.1:8080/mcp"),
+		ModuleMCPURLs:   map[string]string{},
+		ExtraMCPURLs:    parseMCPURLs(os.Getenv("JARVIS_EXTRA_MCP")),
+		ExtraMCPToken:   os.Getenv("JARVIS_MCP_TOKEN"),
+		CalendarURL:     env("JARVIS_CALENDAR_URL", "http://localhost:8093"),
+		ChatURL:         env("JARVIS_CHAT_URL", "http://localhost:8094"),
+		AssetsURL:       env("JARVIS_ASSETS_URL", "http://localhost:8092"),
+		SpendingURL:     env("JARVIS_SPENDING_URL", "http://localhost:8095"),
+		Enrich:          envBool("JARVIS_ENRICH", true),
+		BackgroundLogin: splitList(env("JARVIS_BACKGROUND_LOGIN_HOSTS", "nid.naver.com")),
+		EnrichInterval:  envDuration("JARVIS_ENRICH_INTERVAL", time.Minute),
+		EnrichCooldown:  envDuration("JARVIS_ENRICH_COOLDOWN", 10*time.Minute),
+		EnrichTimeout:   envDuration("JARVIS_ENRICH_TIMEOUT", 8*time.Minute),
+		ProposalsPath:   env("JARVIS_PROPOSALS_PATH", "./data/proposals.json"),
+		SessionPath:     env("JARVIS_SESSION_PATH", "./data/session.json"),
+		AllowedOrigin:   env("JARVIS_ALLOWED_ORIGIN", ""),
+		APIToken:        os.Getenv("JARVIS_API_TOKEN"),
+		Debug:           envBool("JARVIS_DEBUG", false),
 	}
 
 	if c.OAuthToken == "" {
 		return c, fmt.Errorf("CLAUDE_CODE_OAUTH_TOKEN is not set (run: claude setup-token)")
+	}
+	// An extra MCP server is reachable from outside this machine; the token is
+	// the only thing in front of it. Booting without one would leave that port
+	// open and say nothing, so refuse - the same reason the check below exists.
+	if len(c.ExtraMCPURLs) > 0 && c.ExtraMCPToken == "" {
+		return c, fmt.Errorf("JARVIS_EXTRA_MCP is set without JARVIS_MCP_TOKEN; those servers would accept anyone who can reach the port")
+	}
+	// A configured origin means a browser somewhere else is expected to reach
+	// this process, which means :8080 is published. Unguarded, that is the
+	// whole assistant - and the approval gate with it - open to whoever finds
+	// the hostname.
+	if c.AllowedOrigin != "" && c.APIToken == "" {
+		return c, fmt.Errorf("JARVIS_ALLOWED_ORIGIN is set without JARVIS_API_TOKEN; the console's routes would accept anyone who can reach the port")
 	}
 	if os.Getenv("ANTHROPIC_API_KEY") != "" {
 		// The CLI prefers the OAuth token, but an API key sitting in the
@@ -94,20 +174,56 @@ const defaultSystemPrompt = `당신은 Jarvis입니다. 한 사람의 개인 어
 - 한 일은 한 일로, 하려는 일은 하려는 일로 구분해서 말하세요. 하지 않은 일을 했다고 말하지 마세요.
 
 승인
-- 상태를 바꾸는 도구는 실행 전에 운영자의 승인을 받습니다. 승인 카드가 뜨고, 결정이 날 때까지 멈춥니다.
+- 상태를 바꾸는 도구는 실행 전에 운영자의 승인을 받습니다. 도구를 부르면 승인 카드가 올라가고, 호출은 바로 "카드를 올렸다"는 답으로 끝납니다.
+- 카드를 올렸으면 결정을 기다리지 말고, 무엇을 요청했는지 한 줄로 알린 뒤 응답을 마치세요. 같은 도구를 다시 부르지 마세요.
+- 운영자가 결정하면 [승인됨…] 또는 [반려]로 시작하는 메시지가 옵니다. 운영자가 직접 친 말이 아니라 카드 결과이니, 그 안내대로 이어서 하세요.
 - 반려되면 이유를 캐묻지 말고, 같은 목적을 이루는 덜 위험한 방법을 제안하거나 거기서 멈추세요.
 - 되돌릴 수 없는 일은 한 번에 하나씩만 시도하세요. 한 번에 여러 개를 몰아서 요청하지 마세요.
+
+결제
+- 결제 수단은 네이버페이 하나입니다. 다른 수단은 쓰지 마세요.
+- 결제 화면에서는 네이버페이를 고르세요. 네이버페이를 지원하지 않는 곳이면 결제하지 말고, 무엇을 사려다 멈췄는지 보고하세요.
+- 쇼핑몰 자체 간편결제(쿠팡페이 등)로 가는 요청은 네트워크에서 막힙니다. 막혔다면 우회할 방법을 찾지 말고 네이버페이로 돌아오거나 멈추세요.
 
 캘린더
 - 일정은 calendar 도구로만 다루세요. 캘린더 파일을 직접 읽거나 쓰려고 하지 마세요.
 - 일정을 고치거나 지우기 전에 list_events로 id를 먼저 확인하세요.
-- 날짜는 YYYY-MM-DD, 시각은 HH:MM으로만 넘기세요.`
+- 날짜는 YYYY-MM-DD, 시각은 HH:MM으로만 넘기세요.
+
+자산
+- 투자 자산은 assets 도구로만 조회하세요(get_portfolio, get_allocation, get_history). 전부 읽기 전용이고, 주문·이체 도구는 없습니다.
+- 숫자는 도구가 준 값을 그대로 쓰세요. 반올림하거나 다시 계산하지 마세요.
+- 수익률은 get_portfolio의 기간 변동이나 원금 대비로 말하세요. get_history의 총액 변화에는 입출금이 섞여 있습니다.
+- "조회 실패"가 있으면 그 계좌가 빠진 값이라고 먼저 밝히세요.
+- 매수·매도를 권할 수는 있지만, 대신 주문할 수는 없다는 걸 분명히 하세요.
+
+가계부
+- 지출은 spending 도구(get_spending)로만 조회하세요. 카드사 카톡 결제 알림으로 모은 것이고 읽기 전용입니다.
+- 진행 중인 달은 지난달 전체가 아니라 "지난달 같은 날까지"와 비교하세요.
+- "주의"나 "읽지 못한 카드 알림"이 있으면 합계가 빠졌을 수 있다고 먼저 밝히세요.
+- 분류를 바꾸거나 예산을 정하는 건 가계부 화면에서 하도록 안내하세요.`
 
 func env(k, def string) string {
 	if v := os.Getenv(k); v != "" {
 		return v
 	}
 	return def
+}
+
+// parseMCPURLs reads "name=url,name=url" into the server map. A malformed
+// entry is dropped rather than failing the boot: a typo in an optional extra
+// server must not take the assistant down with it.
+func parseMCPURLs(s string) map[string]string {
+	out := map[string]string{}
+	for _, entry := range splitList(s) {
+		name, url, ok := strings.Cut(entry, "=")
+		name, url = strings.TrimSpace(name), strings.TrimSpace(url)
+		if !ok || name == "" || url == "" {
+			continue
+		}
+		out[name] = url
+	}
+	return out
 }
 
 func splitList(s string) []string {

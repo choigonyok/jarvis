@@ -11,13 +11,17 @@
 package proposal
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/choigonyok/jarvis/agent/internal/core/action"
 	"github.com/choigonyok/jarvis/agent/internal/core/bus"
+	"github.com/choigonyok/jarvis/agent/internal/core/jsonfile"
 )
 
 type State string
@@ -34,6 +38,10 @@ const (
 // this" and "I noticed something" deserve different trust.
 const (
 	OriginChat = "chat" // 운영자가 대화에서 직접 시킨 일
+	// OriginIntercept is a request the browser was about to send, stopped at
+	// the network rather than at a tool call. Nobody asked for it in words -
+	// it is where a page the agent is driving tried to spend money.
+	OriginIntercept = "intercept"
 )
 
 type Proposal struct {
@@ -62,9 +70,10 @@ var (
 	ErrAlreadyDecided = errors.New("proposal already decided")
 )
 
-// Store keeps every proposal this process has raised, and releases whoever is
-// waiting on a decision. One operator, one process: in memory is enough, and
-// the browser re-hydrates from List on reconnect.
+// Store keeps every proposal raised here, and releases whoever is waiting on
+// a decision. One operator, one process, so a mutex and a slice are the whole
+// concurrency story; Persist adds a file behind them so the record of what was
+// decided outlives the container it was decided in.
 type Store struct {
 	mu      sync.Mutex
 	order   []*Proposal
@@ -72,6 +81,61 @@ type Store struct {
 	waiters map[string]chan Decision
 	seq     int
 	bus     *bus.Bus
+	// path is empty until Persist is called.
+	path string
+	log  *slog.Logger
+	// onDecide hears every decision after it is recorded. Nobody blocks on a
+	// card raised in conversation any more; this is how its decision gets
+	// back to whoever has to act on it.
+	onDecide []func(Proposal, Decision)
+}
+
+type file struct {
+	Proposals []*Proposal `json:"proposals"`
+	Seq       int         `json:"seq"`
+}
+
+// Persist points the store at a file and reads what is already there.
+//
+// A card raised in conversation stays pending across a restart: nothing is
+// blocked on it, and its decision reaches the assistant through OnDecide
+// whenever it comes. Anything else still pending is settled as rejected on the
+// way in - an intercepted payment is a held network request, and that request
+// died with the process that held it.
+func (s *Store) Persist(path string, log *slog.Logger) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var saved file
+	if err := jsonfile.Load(path, &saved); err != nil {
+		return err
+	}
+	s.order = saved.Proposals
+	s.seq = saved.Seq
+	for _, p := range s.order {
+		if p.State == Pending && p.Origin != OriginChat {
+			p.State = Rejected
+			p.Note = "에이전트가 재시작되어 만료되었습니다."
+			if p.DecidedAt == "" {
+				p.DecidedAt = time.Now().Format("15:04")
+			}
+		}
+		s.byID[p.ID] = p
+	}
+	s.path = path
+	s.log = log
+	return nil
+}
+
+// save must be called with the lock held. Logged rather than returned for the
+// same reason as the transcript: the decision was already made.
+func (s *Store) save() {
+	if s.path == "" {
+		return
+	}
+	if err := jsonfile.Save(s.path, file{Proposals: s.order, Seq: s.seq}); err != nil && s.log != nil {
+		s.log.Error("제안을 저장하지 못했습니다", "err", err)
+	}
 }
 
 func NewStore(b *bus.Bus) *Store {
@@ -101,6 +165,7 @@ func (s *Store) Open(p Proposal) (*Proposal, <-chan Decision) {
 	// Buffered so a producer that walked away never blocks the deciding side.
 	ch := make(chan Decision, 1)
 	s.waiters[stored.ID] = ch
+	s.save()
 	snapshot := *stored
 	s.mu.Unlock()
 
@@ -134,7 +199,9 @@ func (s *Store) Decide(id string, d Decision) error {
 	}
 	ch := s.waiters[id]
 	delete(s.waiters, id)
+	s.save()
 	snapshot := *p
+	listeners := s.onDecide
 	s.mu.Unlock()
 
 	if ch != nil {
@@ -142,7 +209,48 @@ func (s *Store) Decide(id string, d Decision) error {
 		close(ch)
 	}
 	s.bus.Publish(bus.Event{Type: "proposal", Proposal: snapshot})
+	// Off the request: acting on a decision can take a while (running the
+	// action, starting a turn), and the person who tapped the button should
+	// see the card settle now.
+	for _, fn := range listeners {
+		go fn(snapshot, d)
+	}
 	return nil
+}
+
+// OnDecide registers fn to hear every decision. Register before serving.
+func (s *Store) OnDecide(fn func(Proposal, Decision)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onDecide = append(s.onDecide, fn)
+}
+
+// FindPending returns the card already waiting on the same action, if any.
+// The model asking twice for the same thing is one question, not two cards.
+func (s *Store) FindPending(a action.Action) (Proposal, bool) {
+	want := Canonical(a.Input)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, p := range s.order {
+		if p.State == Pending && p.Action.Kind == a.Kind && bytes.Equal(Canonical(p.Action.Input), want) {
+			return *p, true
+		}
+	}
+	return Proposal{}, false
+}
+
+// Canonical re-encodes JSON with sorted keys and no insignificant whitespace,
+// so two encodings of the same arguments compare equal.
+func Canonical(raw json.RawMessage) []byte {
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return raw
+	}
+	out, err := json.Marshal(v)
+	if err != nil {
+		return raw
+	}
+	return out
 }
 
 // Settle records how the action ended. Called by whoever ran it.
@@ -158,6 +266,7 @@ func (s *Store) Settle(id string, state State, note string) {
 	if p.DecidedAt == "" {
 		p.DecidedAt = time.Now().Format("15:04")
 	}
+	s.save()
 	snapshot := *p
 	s.mu.Unlock()
 	s.bus.Publish(bus.Event{Type: "proposal", Proposal: snapshot})
@@ -176,6 +285,7 @@ func (s *Store) Abandon(id, note string) {
 	p.Note = note
 	p.DecidedAt = time.Now().Format("15:04")
 	delete(s.waiters, id)
+	s.save()
 	snapshot := *p
 	s.mu.Unlock()
 	s.bus.Publish(bus.Event{Type: "proposal", Proposal: snapshot})

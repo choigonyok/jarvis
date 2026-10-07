@@ -70,22 +70,25 @@ func (m *Module) Specs() []action.Spec {
 // and a field absent here is one it cannot send.
 
 type CreateInput struct {
-	Date  string `json:"date" jsonschema:"일정 날짜. YYYY-MM-DD 형식의 절대 날짜만 보낸다. '다음 주 화요일' 같은 상대 표현은 직접 계산해서 변환한다."`
-	Title string `json:"title" jsonschema:"일정 제목. 사람이 캘린더에서 읽을 한 줄."`
-	Start string `json:"start,omitempty" jsonschema:"시작 시각. HH:MM 24시간제. 종일 일정이면 비운다."`
-	End   string `json:"end,omitempty" jsonschema:"끝나는 시각. HH:MM 24시간제."`
-	Place string `json:"place,omitempty" jsonschema:"장소."`
-	Memo  string `json:"memo,omitempty" jsonschema:"짧은 메모."`
+	Date    string `json:"date" jsonschema:"일정 날짜. YYYY-MM-DD 형식의 절대 날짜만 보낸다. '다음 주 화요일' 같은 상대 표현은 직접 계산해서 변환한다."`
+	EndDate string `json:"endDate,omitempty" jsonschema:"여러 날에 걸친 일정의 마지막 날. YYYY-MM-DD. 하루짜리면 비운다."`
+	Shared  bool   `json:"shared,omitempty" jsonschema:"애인과 함께하는 일정(데이트, 여행 등)이면 true. 캘린더는 둘이 같이 보는 커플 캘린더이고, false 면 '내 일정'으로 표시된다."`
+	Title   string `json:"title" jsonschema:"일정 제목. 사람이 캘린더에서 읽을 한 줄."`
+	Start   string `json:"start,omitempty" jsonschema:"시작 시각. HH:MM 24시간제. 종일 일정이면 비운다."`
+	End     string `json:"end,omitempty" jsonschema:"끝나는 시각. HH:MM 24시간제."`
+	Place   string `json:"place,omitempty" jsonschema:"장소."`
+	Memo    string `json:"memo,omitempty" jsonschema:"짧은 메모."`
 }
 
 type UpdateInput struct {
-	ID    string `json:"id" jsonschema:"수정할 일정의 id. list_events 로 먼저 확인한다."`
-	Date  string `json:"date,omitempty" jsonschema:"바꿀 날짜. YYYY-MM-DD."`
-	Title string `json:"title,omitempty" jsonschema:"바꿀 제목."`
-	Start string `json:"start,omitempty" jsonschema:"바꿀 시작 시각. HH:MM."`
-	End   string `json:"end,omitempty" jsonschema:"바꿀 종료 시각. HH:MM."`
-	Place string `json:"place,omitempty" jsonschema:"바꿀 장소."`
-	Memo  string `json:"memo,omitempty" jsonschema:"바꿀 메모."`
+	ID      string `json:"id" jsonschema:"수정할 일정의 id. list_events 로 먼저 확인한다. 반복 일정의 하루(id 에 #)는 수정할 수 없다."`
+	EndDate string `json:"endDate,omitempty" jsonschema:"바꿀 마지막 날. YYYY-MM-DD."`
+	Date    string `json:"date,omitempty" jsonschema:"바꿀 날짜. YYYY-MM-DD."`
+	Title   string `json:"title,omitempty" jsonschema:"바꿀 제목."`
+	Start   string `json:"start,omitempty" jsonschema:"바꿀 시작 시각. HH:MM."`
+	End     string `json:"end,omitempty" jsonschema:"바꿀 종료 시각. HH:MM."`
+	Place   string `json:"place,omitempty" jsonschema:"바꿀 장소."`
+	Memo    string `json:"memo,omitempty" jsonschema:"바꿀 메모."`
 }
 
 type DeleteInput struct {
@@ -116,7 +119,7 @@ func (m *Module) Preview(_ context.Context, a action.Action) (action.Card, error
 		return action.Card{
 			Title:       "일정을 추가합니다",
 			Body:        line(eventOf(in)),
-			Consequence: "캘린더에 추가됩니다.",
+			Consequence: "uniple 커플 캘린더에 추가되고, 상대방 화면에도 바로 보입니다.",
 		}, nil
 
 	case KindUpdate:
@@ -144,10 +147,17 @@ func (m *Module) Preview(_ context.Context, a action.Action) (action.Card, error
 		if !ok {
 			return action.Card{}, ErrNotFound
 		}
+		consequence := "되돌릴 수 없습니다."
+		if before.Owner == OwnerPartner {
+			consequence = "상대방의 일정입니다. 되돌릴 수 없습니다."
+		}
+		if before.Recurrence != "" && strings.Contains(before.ID, "#") {
+			consequence = "반복 일정 중 이 날 하루만 지웁니다. " + consequence
+		}
 		return action.Card{
 			Title:       "일정을 삭제합니다",
 			Body:        line(before),
-			Consequence: "되돌릴 수 없습니다.",
+			Consequence: consequence,
 		}, nil
 	}
 	return action.Card{}, fmt.Errorf("모르는 동작입니다: %s", a.Kind)
@@ -231,9 +241,21 @@ func line(e Event) string {
 	} else {
 		b.WriteString(" 종일")
 	}
+	if e.EndDate != "" {
+		b.WriteString(" ~ " + korDate(e.EndDate))
+	}
 	b.WriteString("  " + e.Title)
 	if e.Place != "" {
 		b.WriteString(" · " + e.Place)
+	}
+	switch e.Owner {
+	case OwnerShared:
+		b.WriteString(" [함께]")
+	case OwnerPartner:
+		b.WriteString(" [상대]")
+	}
+	if e.Recurrence != "" {
+		b.WriteString(" [반복]")
 	}
 	return b.String()
 }
@@ -247,13 +269,19 @@ func korDate(date string) string {
 }
 
 func eventOf(in CreateInput) Event {
+	owner := OwnerMe
+	if in.Shared {
+		owner = OwnerShared
+	}
 	return Event{
-		Date:  in.Date,
-		Start: in.Start,
-		End:   in.End,
-		Title: in.Title,
-		Place: in.Place,
-		Memo:  in.Memo,
+		Owner:   owner,
+		EndDate: in.EndDate,
+		Date:    in.Date,
+		Start:   in.Start,
+		End:     in.End,
+		Title:   in.Title,
+		Place:   in.Place,
+		Memo:    in.Memo,
 	}
 }
 
@@ -263,6 +291,9 @@ func merge(base Event, in UpdateInput) Event {
 	out := base
 	if in.Date != "" {
 		out.Date = in.Date
+	}
+	if in.EndDate != "" {
+		out.EndDate = in.EndDate
 	}
 	if in.Title != "" {
 		out.Title = in.Title

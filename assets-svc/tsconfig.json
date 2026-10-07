@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "nodenext",
+    "lib": ["ES2023"],
+    "outDir": "dist",
+    "rootDir": "src",
+    // 웹 서비스와 같은 엄격도. venues.ts / change.ts 는 거기서 그대로 옮겨온
+    // 코드이므로, 여기서만 규칙을 올리면 잘 돌던 코드를 고치게 된다.
+    "strict": true,
+    "sourceMap": true,
+    "declaration": false,
+    "skipLibCheck": true
+  },
+  "include": ["src"]
+}
