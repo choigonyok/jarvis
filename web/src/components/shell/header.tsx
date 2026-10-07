@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -220,8 +220,10 @@ export function TabBar({
   hidden?: boolean;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
   const role = useRole();
   const [more, setMore] = useState(false);
+  const [navigating, startNavigation] = useTransition();
 
   // Icons only, so more of them fit: everything a person opens every day is
   // one tap away, and only the rarely visited wait behind 더보기.
@@ -229,10 +231,85 @@ export function TabBar({
   const pick = (hrefs: string[]) => hrefs.flatMap((h) => (byHref.has(h) ? [byHref.get(h)!] : []));
   const mainTabs = pick(role === "guest" ? GUEST_BAR : OWNER_BAR);
   const moreTabs = role === "guest" ? [] : pick(OWNER_MORE);
+  const moreSlot = moreTabs.length > 0 ? mainTabs.length : -1;
 
   const inMore = moreTabs.some((tab) => tab.href === pathname);
   const slots = mainTabs.length + (moreTabs.length > 0 ? 1 : 0);
-  const at = inMore ? mainTabs.length : mainTabs.findIndex((tab) => tab.href === pathname);
+  const at = inMore ? moreSlot : mainTabs.findIndex((tab) => tab.href === pathname);
+
+  // Where the lens is. It moves the moment a tab is chosen, not when the page
+  // has loaded: the bar answers the finger, and the page follows when it is
+  // ready (the old one stays up until then - a transition, not a blank).
+  const [chosen, setChosen] = useState(at);
+  useEffect(() => {
+    // The route settled (or changed from elsewhere): the lens follows it.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setChosen(at);
+  }, [at]);
+
+  // Every tab is prefetched, so most switches have nothing left to wait for.
+  useEffect(() => {
+    for (const tab of [...mainTabs, ...moreTabs]) router.prefetch(tab.href);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [role]);
+
+  function go(slot: number) {
+    if (slot === moreSlot) {
+      setMore(true);
+      return;
+    }
+    const tab = mainTabs[slot];
+    if (!tab) return;
+    setChosen(slot);
+    if (tab.href !== pathname) startNavigation(() => router.push(tab.href));
+  }
+
+  // Dragging along the bar, as on iOS: the lens follows the finger and the tab
+  // under it on release is the one opened.
+  const track = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ startX: number; moved: boolean; width: number; left: number } | null>(null);
+  // Where the finger is along the bar, and the slot under it - both worked out
+  // in the pointer handler, which is where the bar's width is known.
+  const [held, setHeld] = useState<{ x: number; slot: number } | null>(null);
+  const suppressClick = useRef(false);
+  const slotAt = (x: number, width: number) =>
+    Math.min(slots - 1, Math.max(0, Math.floor((x / width) * slots)));
+
+  function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    const box = track.current?.getBoundingClientRect();
+    if (!box) return;
+    drag.current = { startX: e.clientX, moved: false, width: box.width, left: box.left };
+  }
+  function onPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    const d = drag.current;
+    if (!d) return;
+    if (!d.moved && Math.abs(e.clientX - d.startX) < 8) return;
+    if (!d.moved) {
+      d.moved = true;
+      // From here the bar owns the gesture: the page does not scroll, and the
+      // tab the press started on is not "clicked" on release.
+      e.currentTarget.setPointerCapture(e.pointerId);
+    }
+    const x = Math.min(d.width, Math.max(0, e.clientX - d.left));
+    setHeld({ x, slot: slotAt(x, d.width) });
+  }
+  function onPointerUp(e: React.PointerEvent<HTMLDivElement>) {
+    const d = drag.current;
+    drag.current = null;
+    if (!d?.moved) return;
+    suppressClick.current = true;
+    setTimeout(() => (suppressClick.current = false), 0);
+    setHeld(null);
+    go(slotAt(Math.min(d.width, Math.max(0, e.clientX - d.left)), d.width));
+  }
+  function onPointerCancel() {
+    drag.current = null;
+    setHeld(null);
+  }
+
+  const dragging = held !== null;
+  const lit = held ? held.slot : chosen;
+  const slotWidth = 100 / slots;
 
   const item =
     "tap liquid-press relative z-10 flex flex-1 items-center justify-center rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50";
@@ -261,19 +338,35 @@ export function TabBar({
           slots <= 4 ? "max-w-[15rem]" : "max-w-[26rem]",
         )}
       >
-        <div className="relative flex flex-1">
-          {/* The lens: one slot wide, slid to the current one. */}
+        <div
+          ref={track}
+          className="relative flex flex-1 touch-none select-none"
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerCancel}
+        >
+          {/* The lens: one slot wide. It sits on the chosen tab, follows the
+              finger while dragging, and breathes while the page loads. */}
           <span
             aria-hidden
-            className="liquid-lens pointer-events-none absolute inset-y-0 left-0 rounded-full"
+            className={cn(
+              "liquid-lens pointer-events-none absolute inset-y-0 left-0 rounded-full",
+              dragging && "liquid-lens-held",
+              navigating && !dragging && "liquid-lens-waiting",
+            )}
             style={{
-              width: `${100 / slots}%`,
-              transform: `translateX(${Math.max(at, 0) * 100}%)`,
-              opacity: at >= 0 ? 1 : 0,
+              width: `${slotWidth}%`,
+              transform: dragging
+                ? // Scaled after the move, so the growth does not stretch the
+                  // distance too and drift the lens off the finger.
+                  `translateX(calc(${held.x}px - 50%)) scale(1.12)`
+                : `translateX(${Math.max(lit, 0) * 100}%)`,
+              opacity: lit >= 0 || dragging ? 1 : 0,
             }}
           />
-          {mainTabs.map((tab) => {
-            const active = pathname === tab.href;
+          {mainTabs.map((tab, slot) => {
+            const active = slot === lit;
             const Icon = ICON[tab.href] ?? Ellipsis;
             // Only the surface that renders the queue wears the mark, so it
             // reads as "there is something to decide over there".
@@ -282,9 +375,17 @@ export function TabBar({
               <Link
                 key={tab.href}
                 href={tab.href}
+                prefetch
+                draggable={false}
                 aria-label={marked ? `${tab.label}, 결재 대기 ${pending}건` : tab.label}
                 title={tab.label}
-                aria-current={active ? "page" : undefined}
+                aria-current={pathname === tab.href ? "page" : undefined}
+                onClick={(e) => {
+                  // Navigation is ours, so the lens can move before the page does.
+                  e.preventDefault();
+                  if (suppressClick.current) return;
+                  go(slot);
+                }}
                 className={cn(item, active ? "text-foreground" : "text-dim")}
               >
                 <span className="relative">
@@ -305,12 +406,15 @@ export function TabBar({
               <SheetTrigger
                 aria-label={inMore ? `다른 화면 (지금: ${moreTabs.find((t) => t.href === pathname)?.label})` : "다른 화면"}
                 title="다른 화면"
-                className={cn(item, inMore ? "text-foreground" : "text-dim")}
+                onClick={(e) => {
+                  if (suppressClick.current) e.preventDefault();
+                }}
+                className={cn(item, lit === moreSlot ? "text-foreground" : "text-dim")}
               >
                 {(() => {
                   // Inside 더보기, the slot shows where you are rather than "more".
                   const Icon = inMore ? (ICON[pathname] ?? Ellipsis) : Ellipsis;
-                  return <Icon aria-hidden className="size-[22px]" strokeWidth={inMore ? 2.1 : 1.7} />;
+                  return <Icon aria-hidden className="size-[22px]" strokeWidth={lit === moreSlot ? 2.1 : 1.7} />;
                 })()}
               </SheetTrigger>
               <SheetContent
@@ -330,7 +434,13 @@ export function TabBar({
                       <Link
                         key={tab.href}
                         href={tab.href}
-                        onClick={() => setMore(false)}
+                        prefetch
+                        onClick={(e) => {
+                          e.preventDefault();
+                          setMore(false);
+                          setChosen(moreSlot);
+                          if (!active) startNavigation(() => router.push(tab.href));
+                        }}
                         aria-current={active ? "page" : undefined}
                         className={cn(
                           "flex min-h-12 items-center gap-3 rounded-xl px-3 text-[14.5px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
