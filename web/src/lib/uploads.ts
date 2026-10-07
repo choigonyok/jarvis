@@ -15,20 +15,45 @@ const MAX_EDGE = 2048;
  * portrait shot stays upright.
  */
 export async function shrink(file: File): Promise<Blob> {
-  const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
-  const scale = Math.min(1, MAX_EDGE / Math.max(bitmap.width, bitmap.height));
-  const w = Math.round(bitmap.width * scale);
-  const h = Math.round(bitmap.height * scale);
+  const source = await decode(file);
+  const scale = Math.min(1, MAX_EDGE / Math.max(source.width, source.height));
+  const w = Math.round(source.width * scale);
+  const h = Math.round(source.height * scale);
   const canvas = document.createElement("canvas");
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("사진을 줄이지 못했습니다.");
-  ctx.drawImage(bitmap, 0, 0, w, h);
-  bitmap.close();
+  ctx.drawImage(source.image, 0, 0, w, h);
+  source.close();
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.86));
   if (!blob) throw new Error("사진을 줄이지 못했습니다.");
   return blob;
+}
+
+type Decoded = { image: CanvasImageSource; width: number; height: number; close: () => void };
+
+/**
+ * createImageBitmap first; an <img> when it refuses the file. Safari has
+ * turned down some HEIC photos in createImageBitmap that it shows fine in an
+ * <img>, and an <img> applies the EXIF rotation by itself.
+ */
+async function decode(file: File): Promise<Decoded> {
+  try {
+    const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+    return { image: bitmap, width: bitmap.width, height: bitmap.height, close: () => bitmap.close() };
+  } catch {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.src = url;
+    try {
+      await img.decode();
+    } catch {
+      URL.revokeObjectURL(url);
+      throw new Error("이 사진 형식은 읽을 수 없습니다.");
+    }
+    return { image: img, width: img.naturalWidth, height: img.naturalHeight, close: () => URL.revokeObjectURL(url) };
+  }
 }
 
 /** Uploads one photo; resolves to the name the agent gave it. */
