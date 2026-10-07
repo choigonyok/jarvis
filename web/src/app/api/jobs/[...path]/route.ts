@@ -1,9 +1,9 @@
-// Server-side proxy to market-svc. /api/market/<path> → <MARKET_URL>/<path>.
+// Server-side proxy to jobs-svc. /api/jobs/<path> → <JOBS_URL>/<path>.
 //
 // The bearer token stays here, and this route sits behind the console login
-// (see src/middleware.ts), which keeps the guest out. market-svc never talks to
-// Joongna itself; the agent's background worker does.
-const MARKET_URL = process.env.MARKET_URL ?? "http://localhost:8097";
+// (see src/middleware.ts), which keeps the guest out. jobs-svc only records;
+// the agent's scheduler is what runs a job.
+const JOBS_URL = process.env.JOBS_URL ?? "http://localhost:8098";
 const API_TOKEN = process.env.JARVIS_API_TOKEN ?? "";
 
 export const runtime = "nodejs";
@@ -15,7 +15,7 @@ async function proxy(
 ): Promise<Response> {
   const { path } = await context.params;
   const search = new URL(request.url).search;
-  const target = `${MARKET_URL.replace(/\/$/, "")}/${path.map(encodeURIComponent).join("/")}${search}`;
+  const target = `${JOBS_URL.replace(/\/$/, "")}/${path.map(encodeURIComponent).join("/")}${search}`;
 
   const headers = new Headers();
   if (API_TOKEN) headers.set("authorization", `Bearer ${API_TOKEN}`);
@@ -32,7 +32,7 @@ async function proxy(
       signal: request.signal,
     });
   } catch {
-    return Response.json({ error: "중고나라 서비스에 연결하지 못했습니다." }, { status: 502 });
+    return Response.json({ error: "작업 서비스에 연결하지 못했습니다." }, { status: 502 });
   }
 
   const out = new Headers();

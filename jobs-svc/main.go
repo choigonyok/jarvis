@@ -1,10 +1,10 @@
-// Command market-svc keeps the operator's Joongna listings: drafts approved in
-// conversation, the changes waiting to reach Joongna, and what the shop page
-// last showed (status, views, likes, chats).
+// Command jobs-svc keeps the operator's jobs: work handed over in
+// conversation that the agent carries out in the background, on whatever
+// cadence the job itself decides - with what each run did, what it remembers
+// for the next, what it is keeping track of, and which sites need a login.
 //
-// It never talks to Joongna itself. The agent's background worker does that
-// with the shared browser and reports back here; this service is the record
-// and the queue.
+// It never does the work. The agent's scheduler takes due jobs from here and
+// runs them; this service is the record the 작업 tab reads.
 package main
 
 import (
@@ -19,8 +19,8 @@ import (
 
 	_ "time/tzdata"
 
-	"github.com/choigonyok/jarvis/market-svc/internal/api"
-	"github.com/choigonyok/jarvis/market-svc/internal/store"
+	"github.com/choigonyok/jarvis/jobs-svc/internal/api"
+	"github.com/choigonyok/jarvis/jobs-svc/internal/store"
 )
 
 func main() {
@@ -31,7 +31,7 @@ func main() {
 		log.Error("DATABASE_URL 이 없습니다. 이 서비스는 Postgres 없이 할 수 있는 일이 없습니다.")
 		os.Exit(1)
 	}
-	addr := getenv("LISTEN_ADDR", ":8097")
+	addr := getenv("LISTEN_ADDR", ":8098")
 	token := os.Getenv("API_TOKEN")
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -47,15 +47,14 @@ func main() {
 	srv := &http.Server{
 		Addr: addr,
 		Handler: api.New(st, token,
-			duration("MARKET_SYNC_EVERY", time.Hour),
-			// 판매가 끝나고 이만큼 지나면 사진 파일을 지운다.
-			duration("MARKET_PURGE_AFTER", 30*24*time.Hour),
+			// 작업이 끝나고 이만큼 지나면 첨부 사진 파일을 지운다.
+			duration("JOBS_PURGE_AFTER", 30*24*time.Hour),
 			log).Handler(),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}
 	go func() {
-		log.Info("market-svc 가 듣기 시작했습니다", "addr", addr)
+		log.Info("jobs-svc 가 듣기 시작했습니다", "addr", addr)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("HTTP 서버", "err", err)
 			stop()
@@ -63,7 +62,7 @@ func main() {
 	}()
 
 	<-ctx.Done()
-	log.Info("market-svc 를 내립니다")
+	log.Info("jobs-svc 를 내립니다")
 	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(shutdown)

@@ -34,9 +34,9 @@ export function ProposalCard({
   );
   const [refusal, setRefusal] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  // A number field left empty is the one thing a form card cannot be approved
-  // without (the price of a listing): the operator fills it in, never the model.
-  const missing = fields.some((f) => f.kind === "number" && !(values[f.key] ?? "").replace(/[^\d]/g, ""));
+  // A required field left empty (the price of a listing, say) is the one thing
+  // a form card cannot be approved without: the operator fills it in, never the model.
+  const missing = fields.filter((f) => f.required && !(values[f.key] ?? "").trim());
 
   async function decide(d: Decision) {
     setRefusal(null);
@@ -101,7 +101,7 @@ export function ProposalCard({
             "scrollbar-hairline mt-3 rounded-md bg-well px-3 py-2.5 leading-relaxed text-dim",
             literal
               ? "overflow-x-auto font-mono text-[12px]"
-              : "tnum font-sans text-[13px] whitespace-pre-wrap",
+              : "tnum font-sans text-[13px] whitespace-pre-wrap [&_code]:font-sans",
           )}
         >
           <code>{proposal.card.body}</code>
@@ -145,16 +145,16 @@ export function ProposalCard({
               variant="outline"
               size="sm"
               onClick={() => void decide("approved")}
-              disabled={busy || missing}
+              disabled={busy || missing.length > 0}
               className="h-12 border-edge bg-glass-raised text-[13.5px] text-foreground hover:border-approve/35 hover:bg-approve/12 hover:text-approve sm:h-8 sm:px-3.5 sm:text-[0.8rem] dark:bg-glass-raised dark:hover:bg-approve/12"
             >
               승인
             </Button>
           </div>
         )}
-        {!settled && (refusal || missing) ? (
+        {!settled && (refusal || missing.length > 0) ? (
           <p role={refusal ? "alert" : undefined} className={cn("mt-2 px-1 text-[12px]", refusal ? "text-reject" : "text-faint")}>
-            {refusal ?? "가격을 적으면 승인할 수 있습니다."}
+            {refusal ?? `${missing.map((f) => f.label).join(", ")}을(를) 적으면 승인할 수 있습니다.`}
           </p>
         ) : null}
       </div>
@@ -215,7 +215,7 @@ function FormFields({
                   autoComplete="off"
                   value={value ? Number(value.replace(/[^\d]/g, "") || 0).toLocaleString("ko-KR") : ""}
                   onChange={(e) => onChange(f.key, e.target.value.replace(/[^\d]/g, ""))}
-                  placeholder="얼마에 팔까요"
+                  placeholder="숫자로 적기"
                   className={cn(input, "tnum h-12 pe-9 text-[20px] font-medium sm:h-11 sm:text-[18px]")}
                 />
                 <span aria-hidden className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-[14px] text-faint">
@@ -259,6 +259,7 @@ function FormFields({
                 className={cn(input, "h-11 sm:h-9")}
               />
             )}
+            {f.hint ? <p className="mt-1.5 text-[11.5px] leading-relaxed whitespace-pre-wrap text-faint">{f.hint}</p> : null}
           </div>
         );
       })}
@@ -268,12 +269,18 @@ function FormFields({
 
 /** A decided form card shows what was approved, not the inputs. */
 function FormSummary({ fields }: { fields: CardField[] }) {
-  const get = (k: string) => fields.find((f) => f.key === k)?.value ?? "";
-  const price = get("priceKrw");
+  const shown = fields.filter((f) => f.value && f.kind !== "textarea").slice(0, 4);
+  if (shown.length === 0) return null;
   return (
-    <p className="mt-2 text-[13.5px] text-dim">
-      <span className="text-foreground/90">{get("title")}</span>
-      {price ? <span className="tnum ms-2">{Number(price).toLocaleString("ko-KR")}원</span> : null}
-    </p>
+    <dl className="mt-2 space-y-0.5 text-[13px]">
+      {shown.map((f) => (
+        <div key={f.key} className="flex gap-2">
+          <dt className="shrink-0 text-faint">{f.label}</dt>
+          <dd className="tnum min-w-0 truncate text-foreground/85">
+            {f.kind === "number" ? Number(f.value).toLocaleString("ko-KR") : f.value}
+          </dd>
+        </div>
+      ))}
+    </dl>
   );
 }

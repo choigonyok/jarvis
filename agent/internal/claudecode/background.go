@@ -34,6 +34,17 @@ type Task struct {
 	Extra   []string
 	Allowed []string
 	Timeout time.Duration
+	// OnStep, when set, hears each tool call and each bit of text the model
+	// writes while the task runs - how a person watching sees progress.
+	OnStep func(Step)
+}
+
+// Step is one thing a background task did: a tool call (Tool and Input set)
+// or a line of its own text (Text set).
+type Step struct {
+	Tool  string
+	Input json.RawMessage
+	Text  string
 }
 
 // InBackground is true while a background task holds the browser.
@@ -87,7 +98,7 @@ func (r *Runner) Background(parent context.Context, t Task) (string, error) {
 	if err := cmd.Start(); err != nil {
 		return "", fmt.Errorf("claude 실행: %w", err)
 	}
-	result, scanErr := backgroundResult(stdout)
+	result, scanErr := backgroundResult(stdout, t.OnStep)
 	waitErr := cmd.Wait()
 
 	r.mu.Lock()
@@ -169,10 +180,15 @@ func (r *Runner) backgroundArgs(t Task) ([]string, error) {
 
 // backgroundResult reads the stream only for its outcome: the final result
 // text (for the log) and whether the CLI reported an error.
-func backgroundResult(stdout interface{ Read([]byte) (int, error) }) (string, error) {
+func backgroundResult(stdout interface{ Read([]byte) (int, error) }, onStep func(Step)) (string, error) {
 	var result string
 	var failed error
 	err := scan(stdout, func(ev event) {
+		if onStep != nil && ev.Type == "assistant" && !ev.IsAPIErrorMessage {
+			for _, s := range stepsOf(ev.Message) {
+				onStep(s)
+			}
+		}
 		switch {
 		case ev.Type == "assistant" && ev.IsAPIErrorMessage:
 			failed = fmt.Errorf("claude api error: %s", ev.Error)
@@ -187,4 +203,30 @@ func backgroundResult(stdout interface{ Read([]byte) (int, error) }) (string, er
 		return result, failed
 	}
 	return result, err
+}
+
+func stepsOf(raw json.RawMessage) []Step {
+	var msg struct {
+		Content []struct {
+			Type  string          `json:"type"`
+			Text  string          `json:"text"`
+			Name  string          `json:"name"`
+			Input json.RawMessage `json:"input"`
+		} `json:"content"`
+	}
+	if len(raw) == 0 || json.Unmarshal(raw, &msg) != nil {
+		return nil
+	}
+	var out []Step
+	for _, b := range msg.Content {
+		switch b.Type {
+		case "tool_use":
+			out = append(out, Step{Tool: b.Name, Input: b.Input})
+		case "text":
+			if t := strings.TrimSpace(b.Text); t != "" {
+				out = append(out, Step{Text: t})
+			}
+		}
+	}
+	return out
 }

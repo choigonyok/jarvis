@@ -16,7 +16,7 @@ import {
   MessagesSquare,
   MonitorPlay,
   ReceiptText,
-  Store,
+  ListChecks,
   Wallet,
 } from "lucide-react";
 import {
@@ -46,7 +46,7 @@ const ICON: Record<string, LucideIcon> = {
   "/record": ClipboardCheck,
   "/assets": Wallet,
   "/spending": ReceiptText,
-  "/market": Store,
+  "/jobs": ListChecks,
   "/calendar": CalendarDays,
   "/screen": MonitorPlay,
   "/kakao": MessagesSquare,
@@ -67,13 +67,13 @@ const primary: Tab[] = [
   { href: "/record", label: "기록" },
 ];
 
-// 자산이 secondary의 첫 칸인 이유는 all이 이 배열을 그대로 펼치기 때문이다:
-// 넓은 화면의 읽는 순서가 대화 → 운동 → 자산 → 가계부로 이어져야 "쌓아두는
-// 것"끼리 붙어 있는다.
+// all 이 이 배열을 그대로 펼치므로, 넓은 화면의 읽는 순서가 대화 → 운동 →
+// 작업 → 자산 → 가계부로 이어진다: 맡긴 일 다음에 "쌓아두는 것"끼리 붙어 있다.
 const secondary: Tab[] = [
+  // 맡긴 일이 지금 어디까지 왔는지. 대화 바로 다음에 읽힌다.
+  { href: "/jobs", label: "작업" },
   { href: "/assets", label: "자산" },
   { href: "/spending", label: "가계부" },
-  { href: "/market", label: "중고나라" },
   { href: "/calendar", label: "캘린더" },
   { href: "/screen", label: "화면" },
   { href: "/kakao", label: "카톡" },
@@ -98,8 +98,8 @@ const visible = (tabs: Tab[], role: Role) =>
  * conversation, money in and money out - always sit in it; the guest has
  * three tabs and no 더보기.
  */
-const OWNER_BAR = ["/", "/assets", "/spending", "/calendar", "/workout", "/record"];
-const OWNER_MORE = ["/market", "/screen", "/kakao", "/status"];
+const OWNER_BAR = ["/", "/jobs", "/assets", "/spending", "/calendar", "/workout", "/record"];
+const OWNER_MORE = ["/screen", "/kakao", "/status"];
 const GUEST_BAR = ["/", "/calendar", "/workout"];
 
 /** Where a waiting decision is announced: the surface that lists them by name. */

@@ -1,4 +1,4 @@
-module github.com/choigonyok/jarvis/market-svc
+module github.com/choigonyok/jarvis/jobs-svc
 
 go 1.25.0
 
