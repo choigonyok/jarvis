@@ -26,7 +26,9 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { Notifications } from "@/components/shell/notifications";
 import { useRole } from "@/components/shell/role";
+import { UsageBars } from "@/components/shell/usage-bars";
 import { GUEST_PAGES, type Role } from "@/lib/role";
 import type { Connection } from "@/lib/thread";
 import { cn } from "@/lib/utils";
@@ -129,7 +131,8 @@ export function Header({
   pending: number;
 }) {
   const pathname = usePathname();
-  const tabs = visible(all, useRole());
+  const role = useRole();
+  const tabs = visible(all, role);
   const router = useRouter();
   const status = connectionCopy[connection];
 
@@ -191,7 +194,9 @@ export function Header({
           </nav>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-1 sm:gap-3">
+          {role === "owner" ? <UsageBars /> : null}
+          {role === "owner" ? <Notifications /> : null}
           <span className="flex items-center gap-1.5 text-[11.5px] text-faint">
             <span
               aria-hidden

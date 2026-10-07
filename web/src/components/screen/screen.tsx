@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { type RemoteRFB, RemoteTouch } from "@/components/screen/remote-touch";
 import { Header, TabBar } from "@/components/shell/header";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { useThread } from "@/lib/use-thread";
@@ -26,7 +27,17 @@ export function Screen({ vncUrl, ticketed = false }: { vncUrl: string; ticketed?
   const pending = waitingList.length;
 
   const mount = useRef<HTMLDivElement>(null);
-  const rfb = useRef<{ viewOnly: boolean; disconnect: () => void } | null>(null);
+  const rfb = useRef<RemoteRFB | null>(null);
+  // A finger gets the touch layer; a mouse keeps noVNC's own handling.
+  const touch = useSyncExternalStore(
+    (fn) => {
+      const mq = window.matchMedia("(pointer: coarse)");
+      mq.addEventListener("change", fn);
+      return () => mq.removeEventListener("change", fn);
+    },
+    () => window.matchMedia("(pointer: coarse)").matches,
+    () => false,
+  );
   const [state, setState] = useState<State>("connecting");
   const [controlling, setControlling] = useState(false);
 
@@ -69,7 +80,7 @@ export function Screen({ vncUrl, ticketed = false }: { vncUrl: string; ticketed?
       });
 
       client = instance;
-      rfb.current = instance;
+      rfb.current = instance as unknown as RemoteRFB;
     }).catch(() => {
       if (live) setState("closed");
     });
@@ -178,6 +189,7 @@ export function Screen({ vncUrl, ticketed = false }: { vncUrl: string; ticketed?
           )}
         >
           <div ref={mount} className="absolute inset-0" />
+          {controlling && touch && state === "open" ? <RemoteTouch rfb={rfb} canvasHost={mount} /> : null}
 
           {state !== "open" && (
             <div className="absolute inset-0 grid place-items-center px-8">

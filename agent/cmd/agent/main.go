@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/module/spending"
 	"github.com/choigonyok/jarvis/agent/internal/thread"
 	"github.com/choigonyok/jarvis/agent/internal/uploads"
+	"github.com/choigonyok/jarvis/agent/internal/usage"
 )
 
 func main() {
@@ -123,6 +125,9 @@ func main() {
 	cancelStart()
 
 	runner := claudecode.New(cfg, transcript, log)
+	// Subscription use, read off every run's stream; kept beside the proposals.
+	usageTracker := usage.New(filepath.Join(filepath.Dir(cfg.ProposalsPath), "usage.json"))
+	runner.SetUsage(usageTracker)
 
 	// 묶음 가맹점(쿠팡·네이버페이) 결제가 새로 들어왔을 때만 깨어나, 대화와
 	// 분리된 세션으로 주문목록을 읽어 상품별로 나눈다.
@@ -149,6 +154,8 @@ func main() {
 	} else if jobsModule != nil {
 		log.Warn("브라우저 MCP 가 없어 작업을 실행하지 않습니다", "need", jobs.BrowserServer)
 	}
+	// A reading older than an hour is refreshed with the smallest request.
+	go runner.WatchUsage(enrichCtx, time.Hour)
 	// A card does not hold a turn open; its decision starts the next one.
 	gate.SetFollowUp(runner)
 	proposals.OnDecide(gate.Resolve)
@@ -170,6 +177,7 @@ func main() {
 			ApprovalWait:    cfg.ApprovalWait,
 			Uploads:         photos,
 			Modules:         modules,
+			Usage:           usageTracker,
 			Log:             log,
 		}).Handler(),
 		// No WriteTimeout: /events streams and /mcp blocks on a human.

@@ -50,7 +50,7 @@ const SERVICES: Record<string, { binding: keyof Env; origin: string }> = {
 const AGENT_ROLE: Record<string, string> = { agent: "owner", "agent-guest": "guest" };
 
 /** The agent routes the console drives. Anything else on the agent is internal. */
-const AGENT_ROUTES = new Set(["healthz", "thread", "messages", "events", "proposals", "calendar", "uploads"]);
+const AGENT_ROUTES = new Set(["healthz", "thread", "messages", "events", "proposals", "calendar", "uploads", "usage"]);
 
 function same(a: string, b: string): boolean {
   // Constant time: the comparison should not say how much of a guess was right.

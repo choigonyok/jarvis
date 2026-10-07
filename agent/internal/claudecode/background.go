@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/choigonyok/jarvis/agent/internal/usage"
 )
 
 // ErrYielded is what a background task returns when a person started a turn
@@ -98,7 +101,7 @@ func (r *Runner) Background(parent context.Context, t Task) (string, error) {
 	if err := cmd.Start(); err != nil {
 		return "", fmt.Errorf("claude 실행: %w", err)
 	}
-	result, scanErr := backgroundResult(stdout, t.OnStep)
+	result, scanErr := backgroundResult(stdout, t.OnStep, r.usage.Observe)
 	waitErr := cmd.Wait()
 
 	r.mu.Lock()
@@ -180,10 +183,13 @@ func (r *Runner) backgroundArgs(t Task) ([]string, error) {
 
 // backgroundResult reads the stream only for its outcome: the final result
 // text (for the log) and whether the CLI reported an error.
-func backgroundResult(stdout interface{ Read([]byte) (int, error) }, onStep func(Step)) (string, error) {
+func backgroundResult(stdout interface{ Read([]byte) (int, error) }, onStep func(Step), onRate func(json.RawMessage)) (string, error) {
 	var result string
 	var failed error
 	err := scan(stdout, func(ev event) {
+		if ev.Type == "rate_limit_event" && onRate != nil {
+			onRate(ev.RateLimitInfo)
+		}
 		if onStep != nil && ev.Type == "assistant" && !ev.IsAPIErrorMessage {
 			for _, s := range stepsOf(ev.Message) {
 				onStep(s)
@@ -229,4 +235,52 @@ func stepsOf(raw json.RawMessage) []Step {
 		}
 	}
 	return out
+}
+
+// SetUsage wires the tracker every run reports to.
+func (r *Runner) SetUsage(u *usage.Tracker) { r.usage = u }
+
+// ProbeUsage reads the subscription's usage when no run has for a while: the
+// smallest possible request (one word, the small model, no tools, no
+// session), only for the rate_limit_event it brings back. It does nothing
+// while a turn or a background task runs - those report usage themselves.
+func (r *Runner) ProbeUsage(ctx context.Context) error {
+	if !r.Idle() || r.usage == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, r.cfg.ClaudeBin,
+		"-p", ".", "--output-format", "stream-json", "--verbose",
+		"--model", "haiku", "--tools", "", "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`,
+		"--no-session-persistence", "--permission-mode", "dontAsk")
+	cmd.Dir = os.TempDir()
+	cmd.Env = r.env()
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	_, _ = backgroundResult(stdout, nil, r.usage.Observe)
+	return cmd.Wait()
+}
+
+// WatchUsage probes whenever the last reading is older than every.
+func (r *Runner) WatchUsage(ctx context.Context, every time.Duration) {
+	tick := time.NewTicker(5 * time.Minute)
+	defer tick.Stop()
+	for {
+		if r.usage != nil && r.usage.Stale(time.Now(), every) {
+			if err := r.ProbeUsage(ctx); err != nil {
+				r.log.Warn("사용량을 읽지 못했습니다", "err", err)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+	}
 }

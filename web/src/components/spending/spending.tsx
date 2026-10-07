@@ -172,7 +172,7 @@ export function Spending() {
 
           {book ? (
             <div className={cn("transition-opacity", loading && "opacity-60")}>
-              <Headline book={book} current={current} />
+              <Headline book={book} current={current} day={day} />
               <Status book={book} onOpenUnparsed={() => setUnparsedOpen(true)} onRetried={done} />
 
               <section className="mt-6" aria-label="이번 달 속도">
@@ -305,7 +305,26 @@ export function Spending() {
   );
 }
 
-function Headline({ book, current }: { book: Book; current: boolean }) {
+function Headline({ book, current, day }: { book: Book; current: boolean; day: string | null }) {
+  // A day picked on the strip takes over the headline: its total is what
+  // the person is now looking at.
+  const picked = day ? book.daily.find((d) => d.date === day) : undefined;
+  if (picked) {
+    return (
+      <div>
+        <p className="tnum text-[34px] leading-none font-semibold tracking-tight text-foreground sm:text-[40px]">
+          {krw(picked.totalKrw)}
+        </p>
+        <p className="mt-2 text-[13px] text-dim">
+          {dayLabel(picked.date)}에 쓴 돈
+          <span className="tnum text-faint"> · {picked.count}건</span>
+        </p>
+        <p className="tnum mt-0.5 text-[13px] text-faint">
+          {current ? "이번 달" : monthLabel(book.month)} 전체 {krw(book.totalKrw)}
+        </p>
+      </div>
+    );
+  }
   // While the month runs, the fair comparison is last month up to the same
   // moment; a finished month compares whole with whole.
   const base = current ? book.prev.sameDayKrw : book.prev.totalKrw;

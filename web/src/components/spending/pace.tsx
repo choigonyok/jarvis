@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef, useState } from "react";
 import { krw } from "@/lib/portfolio";
 import { type Book, dayLabel } from "@/lib/spending";
 import { cn } from "@/lib/utils";
@@ -134,59 +135,153 @@ function DayStrip({
   onSelectDay: (date: string | null) => void;
 }) {
   const max = Math.max(1, ...book.daily.map((d) => d.totalKrw));
+  // The day under the finger while scrubbing, like a stock chart's
+  // crosshair: hold, then slide. A mouse scrubs by hovering.
+  const [scrub, setScrub] = useState<number | null>(null);
+  const strip = useRef<HTMLDivElement>(null);
+  const hold = useRef<{ timer: number; id: number; x: number; y: number } | null>(null);
+  const scrubbed = useRef(false);
+  const n = book.daily.length;
+
+  const at = (clientX: number) => {
+    const r = strip.current?.getBoundingClientRect();
+    if (!r || n === 0) return null;
+    const i = Math.floor(((clientX - r.left) / r.width) * n);
+    return Math.min(n - 1, Math.max(0, i));
+  };
+  const cancelHold = () => {
+    if (hold.current) window.clearTimeout(hold.current.timer);
+    hold.current = null;
+  };
+
+  const shown = scrub !== null ? book.daily[scrub] : null;
+
   return (
     <div className="mt-5">
-      <div
-        role="group"
-        aria-label="날짜별 지출. 누르면 그날 내역만 봅니다"
-        className="flex h-16 items-end gap-[2px] sm:h-20 sm:gap-[3px]"
-      >
-        {book.daily.map((d, i) => {
-          const future = d.date > book.today;
-          const today = d.date === book.today;
-          const selected = selectedDay === d.date;
-          const h = d.totalKrw > 0 ? Math.max(0.06, d.totalKrw / max) : 0;
-          return (
-            <button
-              key={d.date}
-              type="button"
-              disabled={future}
-              onClick={() => onSelectDay(selected ? null : d.date)}
-              aria-pressed={selected}
-              aria-label={`${dayLabel(d.date)} ${d.count ? `${krw(d.totalKrw)} ${d.count}건` : "지출 없음"}`}
-              className="group relative flex h-full min-w-0 flex-1 items-end rounded-[2px] outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:cursor-default"
-            >
-              <span
-                className={cn(
-                  "block w-full rounded-[2px] transition-colors",
-                  h === 0 && (future ? "h-px bg-edge-soft" : "h-px bg-edge"),
-                  h > 0 &&
-                    (selected
-                      ? "bg-foreground"
-                      : selectedDay
-                        ? "bg-foreground/20 group-hover:bg-foreground/40"
-                        : today
-                          ? "bg-foreground/85"
-                          : "bg-foreground/40 group-hover:bg-foreground/60"),
-                )}
-                style={h > 0 ? { height: `${h * 100}%` } : undefined}
-              />
-              {/* Week starts, as a tick under the strip: enough to find a
-                  date without a row of 31 numbers. */}
-              {i === 0 || weekday(d.date) === 1 ? (
+      <div className="relative">
+        {shown ? (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -top-12 z-10 rounded-lg border border-edge bg-background/95 px-2.5 py-1.5 whitespace-nowrap shadow-lg backdrop-blur-md"
+            style={{
+              left: `${((scrub! + 0.5) / n) * 100}%`,
+              transform: `translateX(${scrub! < n * 0.2 ? "-15%" : scrub! > n * 0.8 ? "-85%" : "-50%"})`,
+            }}
+          >
+            <p className="text-[11px] text-faint">{dayLabel(shown.date)}</p>
+            <p className="tnum text-[13.5px] font-medium text-foreground">
+              {shown.count ? `${krw(shown.totalKrw)} · ${shown.count}건` : "지출 없음"}
+            </p>
+          </div>
+        ) : null}
+        <div
+          ref={strip}
+          role="group"
+          aria-label="날짜별 지출. 누르면 그날 내역만 봅니다. 누른 채로 밀면 날짜별 금액을 봅니다"
+          className="relative flex h-16 touch-pan-y items-end gap-[2px] select-none [-webkit-touch-callout:none] sm:h-20 sm:gap-[3px]"
+          onContextMenu={(e) => e.preventDefault()}
+          onPointerDown={(e) => {
+            scrubbed.current = false;
+            if (e.pointerType === "mouse") return;
+            const { clientX, clientY, pointerId } = e;
+            hold.current = {
+              id: pointerId,
+              x: clientX,
+              y: clientY,
+              timer: window.setTimeout(() => {
+                scrubbed.current = true;
+                strip.current?.setPointerCapture(pointerId);
+                setScrub(at(clientX));
+                navigator.vibrate?.(8);
+              }, 280),
+            };
+          }}
+          onPointerMove={(e) => {
+            if (e.pointerType === "mouse") {
+              setScrub(at(e.clientX));
+              return;
+            }
+            const h = hold.current;
+            if (scrubbed.current) {
+              setScrub(at(e.clientX));
+            } else if (h && Math.hypot(e.clientX - h.x, e.clientY - h.y) > 8) {
+              // Moved before the hold landed: a scroll or a swipe, not a scrub.
+              cancelHold();
+            }
+          }}
+          onPointerUp={() => {
+            cancelHold();
+            if (scrubbed.current) setScrub(null);
+          }}
+          onPointerCancel={() => {
+            cancelHold();
+            scrubbed.current = false;
+            setScrub(null);
+          }}
+          onPointerLeave={(e) => e.pointerType === "mouse" && setScrub(null)}
+        >
+          {shown ? (
+            <span
+              aria-hidden
+              className="pointer-events-none absolute inset-y-0 w-px bg-foreground/50"
+              style={{ left: `${((scrub! + 0.5) / n) * 100}%` }}
+            />
+          ) : null}
+          {book.daily.map((d, i) => {
+            const future = d.date > book.today;
+            const today = d.date === book.today;
+            const selected = selectedDay === d.date;
+            const hovered = scrub === i;
+            const h = d.totalKrw > 0 ? Math.max(0.06, d.totalKrw / max) : 0;
+            return (
+              <button
+                key={d.date}
+                type="button"
+                disabled={future}
+                onClick={() => {
+                  // Letting go of a scrub is not a tap on the day it ended on.
+                  if (scrubbed.current) {
+                    scrubbed.current = false;
+                    return;
+                  }
+                  onSelectDay(selected ? null : d.date);
+                }}
+                aria-pressed={selected}
+                aria-label={`${dayLabel(d.date)} ${d.count ? `${krw(d.totalKrw)} ${d.count}건` : "지출 없음"}`}
+                className="group relative flex h-full min-w-0 flex-1 items-end rounded-[2px] outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:cursor-default"
+              >
                 <span
-                  aria-hidden
                   className={cn(
-                    "tnum absolute top-full mt-1 left-0 text-[10px] leading-none",
-                    today || selected ? "text-dim" : "text-faint",
+                    "block w-full rounded-[2px] transition-colors",
+                    h === 0 && (future ? "h-px bg-edge-soft" : "h-px bg-edge"),
+                    h > 0 &&
+                      (selected || hovered
+                        ? "bg-foreground"
+                        : selectedDay || scrub !== null
+                          ? "bg-foreground/20 group-hover:bg-foreground/40"
+                          : today
+                            ? "bg-foreground/85"
+                            : "bg-foreground/40 group-hover:bg-foreground/60"),
                   )}
-                >
-                  {Number(d.date.slice(8))}
-                </span>
-              ) : null}
-            </button>
-          );
-        })}
+                  style={h > 0 ? { height: `${h * 100}%` } : undefined}
+                />
+                {/* Week starts, as a tick under the strip: enough to find a
+                    date without a row of 31 numbers. */}
+                {i === 0 || weekday(d.date) === 1 ? (
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "tnum absolute top-full mt-1 left-0 text-[10px] leading-none",
+                      today || selected ? "text-dim" : "text-faint",
+                    )}
+                  >
+                    {Number(d.date.slice(8))}
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
       </div>
       <div className="h-4" />
     </div>
