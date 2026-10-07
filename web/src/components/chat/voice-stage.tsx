@@ -97,13 +97,18 @@ export function VoiceStage({
     // Not after "paused": that device wants a tap, and asking again without
     // one only gets refused again.
     if (
-      !listening &&
-      state !== "paused" &&
-      state !== "denied" &&
-      state !== "failed" &&
-      state !== "unsupported"
+      listening ||
+      state === "paused" ||
+      state === "denied" ||
+      state === "failed" ||
+      state === "unsupported"
     )
-      start({ auto: true });
+      return;
+    // A beat after the voice stops before the mic opens: an iPhone has to
+    // switch its audio from playing to recording, and asked too soon it
+    // refuses - which is what turned the stage into "tap to talk".
+    const reopen = setTimeout(() => start({ auto: true }), 600);
+    return () => clearTimeout(reopen);
   }, [started, speaking, thinking, listening, state, start, stop]);
   const said = [draft, interim].filter(Boolean).join(" ");
 
@@ -173,7 +178,7 @@ export function VoiceStage({
     caption = (
       <Caption
         tone="hint"
-        text="이 기기에서는 답을 들은 뒤 말하기를 한 번 눌러야 마이크가 다시 열립니다."
+        text={`이 기기가 마이크를 자동으로 다시 열지 못하게 했습니다. 말하기를 눌러 이어서 말하세요.${error ? ` (${error})` : ""}`}
       />
     );
   } else if (stopped) {

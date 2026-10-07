@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Instrument_Sans, JetBrains_Mono } from "next/font/google";
 import { headers } from "next/headers";
 import { RoleProvider } from "@/components/shell/role";
+import { ViewportProbe } from "@/components/shell/viewport-probe";
 import { ROLE_HEADER } from "@/lib/role";
 import "./globals.css";
 
@@ -53,22 +54,9 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
       lang="ko"
       className={`dark ${instrument.variable} ${jetbrains.variable} antialiased`}
     >
-      <head>
-        {/* iOS home-screen apps with a translucent status bar report a
-            viewport shorter than the screen - by the status bar's height -
-            while drawing from the very top, so the page stops short and the
-            bottom strip stays empty. Measured rather than assumed: the
-            difference, only when launched from the home screen, only in
-            portrait, becomes --standalone-gap, and the root and the bottom
-            bar stretch by it. Zero everywhere else. */}
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `(function(){function f(){var s=window.navigator.standalone||matchMedia("(display-mode: standalone)").matches;var p=matchMedia("(orientation: portrait)").matches;var g=0;if(s&&p){g=Math.round(screen.height-window.innerHeight);if(g<0||g>120)g=0;}document.documentElement.style.setProperty("--standalone-gap",g+"px");}f();addEventListener("resize",f);addEventListener("orientationchange",f);})();`,
-          }}
-        />
-      </head>
       <body className="overflow-hidden">
         <RoleProvider role={role}>{children}</RoleProvider>
+        <ViewportProbe />
       </body>
     </html>
   );
