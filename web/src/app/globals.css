@@ -294,20 +294,68 @@
 }
 
 .liquid-glass {
-  background: linear-gradient(180deg, oklch(1 0 0 / 11%), oklch(1 0 0 / 4%) 70%);
-  -webkit-backdrop-filter: blur(22px) saturate(180%);
-  backdrop-filter: blur(22px) saturate(180%);
+  /* Barely any paint of its own: the colour is whatever is behind it,
+     brightened and saturated the way thick glass concentrates light. */
+  position: relative;
+  isolation: isolate;
+  background:
+    linear-gradient(180deg, oklch(1 0 0 / 6%), oklch(1 0 0 / 2%) 55%, oklch(1 0 0 / 3.5%));
+  -webkit-backdrop-filter: blur(20px) saturate(210%) brightness(1.12);
+  backdrop-filter: blur(20px) saturate(210%) brightness(1.12);
   box-shadow:
-    inset 0 1px 0 oklch(1 0 0 / 24%),
-    inset 0 -1px 0 oklch(1 0 0 / 5%),
-    inset 0 0 0 0.5px oklch(1 0 0 / 10%),
-    0 12px 32px -10px oklch(0 0 0 / 65%),
-    0 2px 8px oklch(0 0 0 / 35%);
+    /* thickness: a dark line just inside the lit rim */
+    inset 0 0 0 1.5px oklch(0 0 0 / 22%),
+    /* light pooled along the bottom inner edge, as if passing through */
+    inset 0 -10px 18px -12px oklch(1 0 0 / 14%),
+    0 22px 44px -16px oklch(0 0 0 / 75%),
+    0 6px 14px -4px oklch(0 0 0 / 40%);
+}
+/* The rim: a one-pixel ring lit from the upper left and fading round to the
+   lower right - the edge catching light from one direction is what reads as
+   glass rather than as a grey pill. Drawn as a gradient masked to a ring. */
+.liquid-glass::before,
+.liquid-lens::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+.liquid-glass::before {
+  background: linear-gradient(
+    135deg,
+    oklch(1 0 0 / 62%) 0%,
+    oklch(1 0 0 / 22%) 22%,
+    oklch(1 0 0 / 5%) 48%,
+    oklch(1 0 0 / 9%) 74%,
+    oklch(1 0 0 / 30%) 100%
+  );
+}
+/* The top face: a soft pool of light where the bar faces upward. */
+.liquid-glass::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    radial-gradient(90% 70% at 30% -25%, oklch(1 0 0 / 16%), transparent 60%),
+    radial-gradient(60% 55% at 85% 130%, oklch(1 0 0 / 6%), transparent 70%);
+}
+.liquid-glass > * {
+  position: relative;
+  z-index: 1;
 }
 /* Without a backdrop to blur, a near-clear bar over text is unreadable. */
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .liquid-glass {
-    background: oklch(0.21 0.004 265 / 96%);
+    background: oklch(0.22 0.004 265 / 96%);
   }
 }
 
@@ -319,21 +367,42 @@
     inset 0 0 0 0.5px oklch(1 0 0 / 8%);
 }
 
+/* The lens: a droplet of brighter glass under the current tab. Lit on top,
+   pressed in underneath, with its own rim - so it sits *in* the bar rather
+   than being painted on it. */
 .liquid-lens {
-  background: radial-gradient(120% 150% at 50% 0%, oklch(1 0 0 / 18%), oklch(1 0 0 / 7%) 62%, oklch(1 0 0 / 5%));
+  background:
+    radial-gradient(130% 90% at 50% -10%, oklch(1 0 0 / 24%), oklch(1 0 0 / 9%) 55%, oklch(1 0 0 / 6%) 100%);
   box-shadow:
-    inset 0 1px 0 oklch(1 0 0 / 28%),
-    inset 0 0 0 0.5px oklch(1 0 0 / 14%),
-    0 1px 5px oklch(0 0 0 / 35%);
+    inset 0 -6px 10px -6px oklch(0 0 0 / 45%),
+    inset 0 4px 8px -6px oklch(1 0 0 / 40%),
+    0 4px 12px -4px oklch(0 0 0 / 55%);
   /* A slight overshoot, like the system spring: the lens arrives, it does not
      teleport. It only moves when someone taps. */
   transition:
-    transform 460ms cubic-bezier(0.3, 1.35, 0.5, 1),
-    width 460ms cubic-bezier(0.3, 1.35, 0.5, 1),
+    transform 480ms cubic-bezier(0.3, 1.35, 0.5, 1),
+    width 480ms cubic-bezier(0.3, 1.35, 0.5, 1),
     opacity 200ms ease;
 }
+.liquid-lens::before {
+  background: linear-gradient(
+    160deg,
+    oklch(1 0 0 / 70%) 0%,
+    oklch(1 0 0 / 18%) 35%,
+    oklch(1 0 0 / 4%) 60%,
+    oklch(1 0 0 / 22%) 100%
+  );
+}
+/* A press is felt before the lens moves: the icon gives a little. */
+.liquid-press:active > * {
+  transform: scale(0.88);
+}
+.liquid-press > * {
+  transition: transform 160ms ease;
+}
 @media (prefers-reduced-motion: reduce) {
-  .liquid-lens {
+  .liquid-lens,
+  .liquid-press > * {
     transition: none;
   }
 }
