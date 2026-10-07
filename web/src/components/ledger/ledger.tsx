@@ -36,7 +36,7 @@ export function Ledger() {
           decidable. A bar pointing at what is already on screen is nagging. */}
       <StandingBar pending={pending} muted />
 
-      <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain">
+      <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
         <div className="mx-auto w-full max-w-[42rem] px-4 pt-5 pb-10 sm:px-8 sm:pt-6 sm:pb-6">
           <div
             role="radiogroup"

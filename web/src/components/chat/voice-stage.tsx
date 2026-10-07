@@ -91,19 +91,29 @@ export function VoiceStage({
       if (listening) stop();
       return;
     }
+    // Not after "paused": that device wants a tap, and asking again without
+    // one only gets refused again.
     if (
       !listening &&
+      state !== "paused" &&
       state !== "denied" &&
       state !== "failed" &&
       state !== "unsupported"
     )
-      start();
+      start({ auto: true });
   }, [started, speaking, listening, state, start, stop]);
   const said = [draft, interim].filter(Boolean).join(" ");
 
   // One number drives the ring, whichever side of the conversation is live.
   const energy = speaking ? pulse : listening ? level : 0;
   const stopped = state === "denied" || state === "failed";
+  const paused = state === "paused";
+
+  /** The tap a device like iOS Safari asks for before it lets the mic reopen. */
+  function resume() {
+    onStopSpeaking();
+    start();
+  }
 
   function begin() {
     setStarted(true);
@@ -131,6 +141,8 @@ export function VoiceStage({
     ? { text: "대기 중", tone: "idle" }
     : stopped
       ? { text: "음성 인식 멈춤", tone: "error" }
+      : paused && !speaking
+        ? { text: "눌러서 말하기", tone: "idle" }
       : speaking
         ? { text: "Jarvis가 말하는 중", tone: "speaking" }
         : thinking
@@ -148,6 +160,13 @@ export function VoiceStage({
       <Caption
         tone="hint"
         text="시작을 누르고 말하세요. 말이 끝나면 Jarvis가 소리로 답합니다."
+      />
+    );
+  } else if (paused && !speaking && !thinking) {
+    caption = (
+      <Caption
+        tone="hint"
+        text="이 기기에서는 답을 들은 뒤 말하기를 한 번 눌러야 마이크가 다시 열립니다."
       />
     );
   } else if (stopped) {
@@ -257,6 +276,24 @@ export function VoiceStage({
             이 브라우저는 음성 인식을 지원하지 않습니다. Chrome이나 Safari에서
             열면 쓸 수 있습니다.
           </p>
+        ) : started && paused && !speaking ? (
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={resume}
+              className="flex h-12 min-w-[8rem] items-center justify-center gap-2 rounded-full bg-foreground px-7 text-[14.5px] font-medium text-background transition-opacity outline-none hover:opacity-90 focus-visible:ring-3 focus-visible:ring-ring/50"
+            >
+              <Mic aria-hidden className="size-4" />
+              말하기
+            </button>
+            <button
+              type="button"
+              onClick={end}
+              className="flex h-12 items-center justify-center rounded-full border border-edge px-5 text-[14px] text-dim transition-colors outline-none hover:border-white/20 hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+            >
+              끝내기
+            </button>
+          </div>
         ) : started ? (
           <button
             type="button"

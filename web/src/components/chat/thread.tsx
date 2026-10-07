@@ -268,7 +268,9 @@ export function Thread() {
         </div>
       </main>
 
-      <footer className="relative shrink-0">
+      {/* Lifted above the floating tab bar; it drops back down while typing,
+          when the bar hides. */}
+      <footer className="pb-tabbar relative shrink-0 transition-[padding] duration-300 ease-out motion-reduce:transition-none">
         {/* The transcript dissolves into the composer instead of stopping at a rule. */}
         <div
           aria-hidden

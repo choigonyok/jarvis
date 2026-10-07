@@ -61,6 +61,10 @@ func main() {
 	// Adding a feature is one Add call. Removing one is deleting the line -
 	// nothing below this block names a specific module.
 	calendarStore := calendar.NewStore(cfg.CalendarURL, cfg.APIToken, events)
+	if cfg.Guest {
+		// The guest is the calendar's other person: their entries are "나" here.
+		calendarStore.FromPartnerSide()
+	}
 	calendarModule := calendar.New(calendarStore)
 	modules.Add(calendarModule)
 
@@ -121,6 +125,7 @@ func main() {
 	srv := &http.Server{
 		Addr: cfg.Addr,
 		Handler: httpapi.New(httpapi.Deps{
+			Role:            map[bool]string{true: "guest", false: "owner"}[cfg.Guest],
 			Thread:          transcript,
 			Proposals:       proposals,
 			Calendar:        calendarStore,

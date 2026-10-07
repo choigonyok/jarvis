@@ -14,7 +14,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
  */
 
 export type Listening =
-  "idle" | "listening" | "denied" | "failed" | "unsupported";
+  "idle" | "listening" | "paused" | "denied" | "failed" | "unsupported";
 
 /**
  * Errors restarting cannot fix. Chrome sends audio to Google's recognizer, so
@@ -54,6 +54,12 @@ export function useRecognition({
   // The recognizer is built once and lives for the page, so it has to reach
   // fresh state through a ref rather than closing over a stale callback.
   const wanted = useRef(false);
+  // Whether the current session was opened by a tap. iOS Safari - and a
+  // home-screen web app most of all - refuses to start recognition without
+  // one, and says so as "not-allowed", the same code as a denied mic. Refused
+  // on an automatic reopen, that is not a denial: it is the platform asking
+  // for a tap, and the screen should ask for one rather than give up.
+  const tapped = useRef(false);
 
   useEffect(() => {
     final.current = onFinal;
@@ -112,10 +118,16 @@ export function useRecognition({
 
     engine.onerror = (event) => {
       console.warn("[voice] recognition error:", event.error, event.message);
-      if (
-        event.error === "not-allowed" ||
-        event.error === "service-not-allowed"
-      ) {
+      const refused =
+        event.error === "not-allowed" || event.error === "service-not-allowed";
+      // On an automatic reopen, a refusal (or the mic still held by the voice
+      // that just finished speaking) means "tap to talk", not "broken".
+      if (!tapped.current && (refused || event.error === "audio-capture")) {
+        wanted.current = false;
+        setState("paused");
+        return;
+      }
+      if (refused) {
         wanted.current = false;
         setState("denied");
         return;
@@ -137,15 +149,16 @@ export function useRecognition({
       // Chrome stops the recognizer on its own after a stretch of silence.
       // If the user has not asked to stop, start it again so the mic stays on.
       if (wanted.current) {
+        tapped.current = false;
         try {
           engine.start();
         } catch {
-          setState("idle");
+          setState("paused");
         }
       } else {
         // A fatal error has already said why it stopped; keep that on screen.
         setState((prev) =>
-          prev === "failed" || prev === "denied" ? prev : "idle",
+          prev === "failed" || prev === "denied" || prev === "paused" ? prev : "idle",
         );
       }
     };
@@ -160,16 +173,19 @@ export function useRecognition({
     };
   }, [lang]);
 
-  const start = useCallback(() => {
+  /** `auto` when nobody tapped for this start - the hands-free reopen after Jarvis speaks. */
+  const start = useCallback((opts?: { auto?: boolean }) => {
     const engine = recognition.current;
     if (!engine) return;
+    tapped.current = !opts?.auto;
     wanted.current = true;
     setError(null);
     try {
       engine.start();
       setState("listening");
     } catch {
-      // Already running - which is the state we wanted anyway.
+      // Already running - which is the state we wanted anyway. Refused
+      // outright (no tap) surfaces through onerror instead.
       setState("listening");
     }
   }, []);

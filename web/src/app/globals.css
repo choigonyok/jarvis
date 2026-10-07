@@ -263,3 +263,84 @@
     transition-duration: 1ms !important;
   }
 }
+
+/* ── Liquid Glass ───────────────────────────────────────────────────────────
+   The phone's tab bar floats over the page, the way iOS 26 does it: a capsule
+   of frosted glass, lifted off the edges, with a lit rim along its top and a
+   lens of brighter glass under the current tab that slides when you tap.
+
+   Only the floating bar samples what is behind it (backdrop-filter). The
+   desktop header's tab pill uses the same tint and rim without the blur -
+   two blurred bars on one screen sample each other in Chrome, which once
+   showed as the header's labels ghosting into the tab bar.
+
+   The rim is light, not a line: the approval card stays the only element in
+   this product with a border. */
+
+:root {
+  /* What the floating bar takes from the bottom of the page. Zero unless the
+     bar is on screen, so a page without it (or a hidden one, while typing)
+     keeps its content where it was. */
+  --tabbar-space: 0px;
+}
+@media (max-width: 639px) {
+  body:has([data-tabbar]:not([data-hidden])) {
+    --tabbar-space: calc(4.75rem + max(env(safe-area-inset-bottom), 0.5rem));
+  }
+}
+
+@utility pb-tabbar {
+  padding-bottom: var(--tabbar-space);
+}
+
+.liquid-glass {
+  background: linear-gradient(180deg, oklch(1 0 0 / 11%), oklch(1 0 0 / 4%) 70%);
+  -webkit-backdrop-filter: blur(22px) saturate(180%);
+  backdrop-filter: blur(22px) saturate(180%);
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 24%),
+    inset 0 -1px 0 oklch(1 0 0 / 5%),
+    inset 0 0 0 0.5px oklch(1 0 0 / 10%),
+    0 12px 32px -10px oklch(0 0 0 / 65%),
+    0 2px 8px oklch(0 0 0 / 35%);
+}
+/* Without a backdrop to blur, a near-clear bar over text is unreadable. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .liquid-glass {
+    background: oklch(0.21 0.004 265 / 96%);
+  }
+}
+
+/* Same material, no blur: for glass that sits on a solid surface. */
+.liquid-glass-flat {
+  background: linear-gradient(180deg, oklch(1 0 0 / 7%), oklch(1 0 0 / 3%));
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 14%),
+    inset 0 0 0 0.5px oklch(1 0 0 / 8%);
+}
+
+.liquid-lens {
+  background: radial-gradient(120% 150% at 50% 0%, oklch(1 0 0 / 18%), oklch(1 0 0 / 7%) 62%, oklch(1 0 0 / 5%));
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 28%),
+    inset 0 0 0 0.5px oklch(1 0 0 / 14%),
+    0 1px 5px oklch(0 0 0 / 35%);
+  /* A slight overshoot, like the system spring: the lens arrives, it does not
+     teleport. It only moves when someone taps. */
+  transition:
+    transform 460ms cubic-bezier(0.3, 1.35, 0.5, 1),
+    width 460ms cubic-bezier(0.3, 1.35, 0.5, 1),
+    opacity 200ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .liquid-lens {
+    transition: none;
+  }
+}
+
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}

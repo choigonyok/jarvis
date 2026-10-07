@@ -35,7 +35,7 @@ interface Env {
 const SERVICES: Record<string, { binding: keyof Env; origin: string }> = {
   agent: { binding: "AGENT", origin: "http://agent:8080" },
   // The guest account's own agent (its own conversation, calendar only).
-  "agent-guest": { binding: "AGENT_GUEST", origin: "http://agent-guest:8080" },
+  "agent-guest": { binding: "AGENT_GUEST", origin: "http://agent-guest:8081" },
   workout: { binding: "WORKOUT", origin: "http://workout:8091" },
   assets: { binding: "ASSETS", origin: "http://assets:8092" },
   spending: { binding: "SPENDING", origin: "http://spending:8095" },
@@ -43,6 +43,9 @@ const SERVICES: Record<string, { binding: keyof Env; origin: string }> = {
   status: { binding: "STATUS", origin: "http://status:8096" },
   vnc: { binding: "BROWSER", origin: "http://browser:6080" },
 };
+
+/** Which agent must have answered, by route. */
+const AGENT_ROLE: Record<string, string> = { agent: "owner", "agent-guest": "guest" };
 
 /** The agent routes the console drives. Anything else on the agent is internal. */
 const AGENT_ROUTES = new Set(["healthz", "thread", "messages", "events", "proposals", "calendar"]);
@@ -110,12 +113,22 @@ export default {
     const hasBody = request.method !== "GET" && request.method !== "HEAD";
     try {
       // The response is handed back as it arrives - /agent/events is a stream.
-      return await (env[service.binding] as Fetcher).fetch(target, {
+      const res = await (env[service.binding] as Fetcher).fetch(target, {
         method: request.method,
         headers,
         body: hasBody ? request.body : undefined,
         redirect: "manual",
       });
+      // Both agents ride one tunnel, and a pooled connection has been seen to
+      // land on the other one. Each agent names itself on every response; one
+      // from the wrong agent is dropped here, never passed on - the guest must
+      // not be handed the operator's conversation, nor the other way round.
+      const expect = AGENT_ROLE[name];
+      if (expect && res.headers.get("x-jarvis-agent") !== expect) {
+        await res.body?.cancel();
+        return json(502, "다른 jarvis 가 응답했습니다. 잠시 뒤 다시 시도하세요.");
+      }
+      return res;
     } catch {
       return json(502, `${name} 서비스에 닿지 못했습니다. 맥미니와 터널을 확인하세요.`);
     }

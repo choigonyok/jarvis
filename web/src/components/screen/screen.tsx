@@ -118,7 +118,7 @@ export function Screen({ vncUrl, ticketed = false }: { vncUrl: string; ticketed?
           "inset-x-safe min-h-0 flex-1",
           controlling
             ? "pb-safe fixed inset-0 z-50 flex flex-col bg-background/95 p-3 backdrop-blur-sm sm:p-6"
-            : "mx-auto flex w-full max-w-[46rem] flex-col px-4 py-3 sm:px-8 sm:py-4",
+            : "mx-auto flex w-full max-w-[46rem] flex-col px-4 pt-3 pb-[calc(var(--tabbar-space)+0.75rem)] sm:px-8 sm:py-4",
         )}
       >
         <div className="mb-2.5 flex shrink-0 items-center justify-between gap-3">

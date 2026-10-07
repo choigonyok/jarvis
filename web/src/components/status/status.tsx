@@ -99,7 +99,7 @@ export function Status() {
 
       {/* inset-x-safe and px-4 both set padding-left, so they sit on
           different elements: the notch inset outside, the gutter inside. */}
-      <main className="scrollbar-hairline inset-x-safe min-h-0 flex-1 overflow-y-auto overscroll-contain">
+      <main className="scrollbar-hairline inset-x-safe min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
         <div className="mx-auto w-full max-w-[46rem] px-4 pt-6 pb-10 sm:px-8 sm:pt-10">
           {!report ? (
             <p className="pt-10 text-center text-[13px] text-faint">

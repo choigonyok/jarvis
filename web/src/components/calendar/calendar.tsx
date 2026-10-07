@@ -137,7 +137,7 @@ export function Calendar() {
       <Header connection={connection} pending={pendingCount} />
       <StandingBar pending={waiting} href="/record" />
 
-      <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain">
+      <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
         {/* The month and the day it selects are one view, so on a screen wide
             enough to hold both side by side they stop taking turns down the
             page: the grid keeps its place while the day's detail changes
