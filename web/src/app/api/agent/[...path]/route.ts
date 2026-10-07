@@ -1,3 +1,5 @@
+import { ROLE_HEADER } from "@/lib/role";
+
 // The browser never talks to the agent directly: the API key and the agent's
 // surface stay on the server side of this proxy.
 const AGENT_URL = process.env.AGENT_URL ?? "http://localhost:8080";
@@ -5,6 +7,9 @@ const AGENT_URL = process.env.AGENT_URL ?? "http://localhost:8080";
 // public hostname of its own. This is what stops that hostname from being a
 // way around the login: the agent refuses anything without it.
 const AGENT_TOKEN = process.env.JARVIS_API_TOKEN ?? "";
+// The guest account talks to its own agent: its own conversation, calendar
+// only. The middleware decides who is a guest and stamps the request.
+const AGENT_GUEST_URL = process.env.AGENT_GUEST_URL ?? "";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,8 +19,13 @@ async function proxy(
   context: { params: Promise<{ path: string[] }> },
 ) {
   const { path } = await context.params;
+  const guest = request.headers.get(ROLE_HEADER) === "guest";
+  if (guest && !AGENT_GUEST_URL) {
+    return Response.json({ error: "손님용 jarvis 가 설정되지 않았습니다." }, { status: 503 });
+  }
+  const base = guest ? AGENT_GUEST_URL : AGENT_URL;
   const target = new URL(
-    `${AGENT_URL.replace(/\/$/, "")}/${path.join("/")}`,
+    `${base.replace(/\/$/, "")}/${path.join("/")}`,
   );
   target.search = new URL(request.url).search;
 

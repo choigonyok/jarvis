@@ -20,6 +20,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -49,6 +50,8 @@ type Turn struct {
 	// was raised here; what the card says, and what became of it, is the
 	// proposal's business.
 	ProposalID string `json:"proposalId,omitempty"`
+	// Thread is whose conversation this turn belongs to; see Store.thread.
+	Thread string `json:"thread,omitempty"`
 }
 
 // Store is the client to chat-svc, plus the run state that is nobody else's
@@ -64,9 +67,19 @@ type Store struct {
 	client *http.Client
 	bus    *bus.Bus
 
+	// thread is the conversation this agent owns in chat-svc: "" for the
+	// operator, "guest" for the guest agent. It reads and writes only that.
+	thread string
+
 	mu       sync.Mutex
 	thinking bool
 	log      *slog.Logger
+}
+
+// ForThread scopes the store to one conversation.
+func (s *Store) ForThread(name string) *Store {
+	s.thread = name
+	return s
 }
 
 func NewStore(baseURL, token string, b *bus.Bus) *Store {
@@ -169,7 +182,7 @@ func (s *Store) Snapshot() ([]*Turn, bool) {
 	var payload struct {
 		Turns []*Turn `json:"turns"`
 	}
-	if err := s.do(ctx, http.MethodGet, "/turns", nil, &payload); err != nil {
+	if err := s.do(ctx, http.MethodGet, "/turns?thread="+url.QueryEscape(s.thread), nil, &payload); err != nil {
 		s.log.Error("스레드를 불러오지 못했습니다", "err", err)
 		return nil, thinking
 	}
@@ -207,6 +220,7 @@ func (s *Store) append(t *Turn) *Turn {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	t.Thread = s.thread
 	var saved Turn
 	if err := s.do(ctx, http.MethodPost, "/turns", t, &saved); err != nil {
 		s.log.Error("턴을 저장하지 못했습니다", "err", err)

@@ -178,6 +178,10 @@ func (r *Runner) args(prompt string) []string {
 		// and this process is expected to stay up for weeks.
 		"--append-system-prompt", r.systemPrompt(),
 	}
+	if r.cfg.BuiltinTools != nil {
+		// Only these built-in tools exist for the model (the guest agent).
+		args = append(args, "--tools", *r.cfg.BuiltinTools)
+	}
 	if tools := r.cfg.AllowedTools; len(tools) > 0 {
 		// Pre-allowed tools never reach the card; keep this list read-only.
 		args = append(args, "--allowedTools", strings.Join(tools, ","))

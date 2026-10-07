@@ -40,7 +40,8 @@ func main() {
 	// One bus, three producers, one stream out. A proposal raised with no
 	// conversation behind it reaches the browser the same way a chat turn does.
 	events := bus.New()
-	transcript := thread.NewStore(cfg.ChatURL, cfg.APIToken, events)
+	// The guest agent keeps its own conversation; it never reads the operator's.
+	transcript := thread.NewStore(cfg.ChatURL, cfg.APIToken, events).ForThread(cfg.Thread)
 	proposals := proposal.NewStore(events)
 	modules := module.NewRegistry()
 
@@ -63,25 +64,31 @@ func main() {
 	calendarModule := calendar.New(calendarStore)
 	modules.Add(calendarModule)
 
-	assetsModule := assets.New(assets.NewStore(cfg.AssetsURL, cfg.APIToken))
-	modules.Add(assetsModule)
-
-	spendingModule := spending.New(spending.NewStore(cfg.SpendingURL, cfg.APIToken))
-	modules.Add(spendingModule)
-
 	gate := permission.NewGate(proposals, modules, transcript, cfg.Debug, log)
 	mcpMounts := map[string]http.Handler{
 		"/mcp":                        gate.Handler(),
 		"/mcp/" + calendar.ServerName: calendarModule.Handler(),
-		"/mcp/" + assets.ServerName:   assetsModule.Handler(),
-		"/mcp/" + spending.ServerName: spendingModule.Handler(),
-		// Mounted but never put in the chat's MCP config: only the
-		// background order lookup is handed this server.
-		"/mcp/" + spending.EnrichServerName: spendingModule.EnrichHandler(),
 	}
 	cfg.ModuleMCPURLs[calendar.ServerName] = cfg.PublicMCPURL + "/" + calendar.ServerName
-	cfg.ModuleMCPURLs[assets.ServerName] = cfg.PublicMCPURL + "/" + assets.ServerName
-	cfg.ModuleMCPURLs[spending.ServerName] = cfg.PublicMCPURL + "/" + spending.ServerName
+
+	// The operator's money: assets and spending. The guest agent is built
+	// without them - no module, no MCP server, no tool - so there is nothing
+	// for its model to call, whatever it is asked.
+	var spendingModule *spending.Module
+	if !cfg.Guest {
+		assetsModule := assets.New(assets.NewStore(cfg.AssetsURL, cfg.APIToken))
+		modules.Add(assetsModule)
+		spendingModule = spending.New(spending.NewStore(cfg.SpendingURL, cfg.APIToken))
+		modules.Add(spendingModule)
+
+		mcpMounts["/mcp/"+assets.ServerName] = assetsModule.Handler()
+		mcpMounts["/mcp/"+spending.ServerName] = spendingModule.Handler()
+		// Mounted but never put in the chat's MCP config: only the
+		// background order lookup is handed this server.
+		mcpMounts["/mcp/"+spending.EnrichServerName] = spendingModule.EnrichHandler()
+		cfg.ModuleMCPURLs[assets.ServerName] = cfg.PublicMCPURL + "/" + assets.ServerName
+		cfg.ModuleMCPURLs[spending.ServerName] = cfg.PublicMCPURL + "/" + spending.ServerName
+	}
 
 	startCtx, cancelStart := context.WithTimeout(context.Background(), 10*time.Second)
 	if err := modules.Start(startCtx); err != nil {
@@ -97,14 +104,14 @@ func main() {
 	// 분리된 세션으로 주문목록을 읽어 상품별로 나눈다.
 	enrichCtx, stopEnrich := context.WithCancel(context.Background())
 	defer stopEnrich()
-	if _, ok := cfg.ExtraMCPURLs[spending.BrowserServer]; cfg.Enrich && ok {
+	if _, ok := cfg.ExtraMCPURLs[spending.BrowserServer]; spendingModule != nil && cfg.Enrich && ok {
 		go spendingModule.RunEnricher(enrichCtx, runner, spending.EnrichConfig{
 			EnrichURL: cfg.PublicMCPURL + "/" + spending.EnrichServerName,
 			Interval:  cfg.EnrichInterval,
 			Cooldown:  cfg.EnrichCooldown,
 			Timeout:   cfg.EnrichTimeout,
 		}, log)
-	} else if cfg.Enrich {
+	} else if spendingModule != nil && cfg.Enrich {
 		log.Warn("브라우저 MCP 가 없어 묶음 결제 조회를 켜지 않습니다", "need", spending.BrowserServer)
 	}
 	// A card does not hold a turn open; its decision starts the next one.

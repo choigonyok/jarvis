@@ -11,6 +11,8 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { useRole } from "@/components/shell/role";
+import { GUEST_PAGES, type Role } from "@/lib/role";
 import type { Connection } from "@/lib/thread";
 import { cn } from "@/lib/utils";
 
@@ -57,6 +59,10 @@ const all: Tab[] = [
   { href: "/record", label: "기록" },
 ];
 
+/** The tabs a role is shown. The middleware is what actually refuses the rest. */
+const visible = (tabs: Tab[], role: Role) =>
+  role === "guest" ? tabs.filter((t) => GUEST_PAGES.has(t.href)) : tabs;
+
 /** Where a waiting decision is announced: the surface that lists them by name. */
 const pendingHome = "/record";
 
@@ -84,6 +90,7 @@ export function Header({
   pending: number;
 }) {
   const pathname = usePathname();
+  const tabs = visible(all, useRole());
   const router = useRouter();
   const status = connectionCopy[connection];
 
@@ -108,7 +115,7 @@ export function Header({
           </h1>
           {/* The same links, in the bar below, on a phone. */}
           <nav className="hidden items-baseline gap-3 sm:flex" aria-label="화면">
-            {all.map((tab) => {
+            {tabs.map((tab) => {
               const active = pathname === tab.href;
               return (
                 <Link
@@ -174,8 +181,11 @@ export function TabBar({
   hidden?: boolean;
 }) {
   const pathname = usePathname();
+  const role = useRole();
+  const mainTabs = visible(primary, role);
+  const moreTabs = visible(secondary, role);
   const [more, setMore] = useState(false);
-  const inMore = secondary.some((tab) => tab.href === pathname);
+  const inMore = moreTabs.some((tab) => tab.href === pathname);
 
   return (
     <nav
@@ -186,7 +196,7 @@ export function TabBar({
       )}
     >
       <div className="flex items-stretch justify-around px-1">
-        {primary.map((tab) => {
+        {mainTabs.map((tab) => {
           const active = pathname === tab.href;
           // Only the surface that renders the queue wears the mark, so it
           // reads as "there is something to decide over there" rather than as
@@ -238,7 +248,7 @@ export function TabBar({
               </SheetTitle>
             </SheetHeader>
             <div className="px-2 pb-4">
-              {secondary.map((tab) => (
+              {moreTabs.map((tab) => (
                 <Link
                   key={tab.href}
                   href={tab.href}

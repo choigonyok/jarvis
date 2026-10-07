@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { accessIdentity } from "@/lib/access";
 import { SESSION_COOKIE, valid } from "@/lib/auth";
+import { ROLE_HEADER, type Role, guestMay, roleFor } from "@/lib/role";
 
 /**
  * The gate. Everything behind it - the thread, the calendar, the live browser
@@ -14,14 +15,38 @@ export async function middleware(request: NextRequest) {
   // has already proven who they are, more strictly than a password here would.
   const assertion =
     request.headers.get("cf-access-jwt-assertion") ?? request.cookies.get("CF_Authorization")?.value;
-  if ((await accessIdentity(assertion)) !== null) return NextResponse.next();
-
+  const identity = await accessIdentity(assertion);
   const token = request.cookies.get(SESSION_COOKIE)?.value;
-  if (await valid(token)) return NextResponse.next();
+  const isApi = request.nextUrl.pathname.startsWith("/api/");
+
+  let role: Role | null = null;
+  if (identity !== null) {
+    role = roleFor(identity);
+    if (!role) {
+      // Through Access, but on neither list: the lists are the narrower answer.
+      return isApi
+        ? NextResponse.json({ error: "이 계정에는 권한이 없습니다." }, { status: 403 })
+        : new NextResponse("이 계정에는 권한이 없습니다.", { status: 403 });
+    }
+  } else if (await valid(token)) {
+    role = "owner";
+  }
+
+  if (role) {
+    if (role === "guest" && !guestMay(request.nextUrl.pathname)) {
+      return isApi
+        ? NextResponse.json({ error: "이 계정에서는 열 수 없습니다." }, { status: 403 })
+        : NextResponse.redirect(new URL("/", request.url));
+    }
+    // Overwritten on every request, so a client cannot send its own.
+    const headers = new Headers(request.headers);
+    headers.set(ROLE_HEADER, role);
+    return NextResponse.next({ request: { headers } });
+  }
 
   // An expired session inside a fetch should read as 401, not as a login page
   // arriving where JSON was expected.
-  if (request.nextUrl.pathname.startsWith("/api/")) {
+  if (isApi) {
     return NextResponse.json({ error: "인증이 필요합니다." }, { status: 401 });
   }
 

@@ -131,6 +131,40 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # 손님 계정(livvyvvi)의 jarvis. 운영자의 agent 와 같은 이미지지만 따로 돈다:
+  # 대화(thread=guest)·CLI 기억(볼륨)·승인 카드가 모두 따로이고, 모듈은 캘린더뿐이다.
+  # 자산·가계부 서비스 주소도, 브라우저 토큰도 받지 않는다 - 모델이 부를 도구가
+  # 없을 뿐 아니라, 이 컨테이너가 그 문을 여는 열쇠 자체를 갖고 있지 않다.
+  # (JARVIS_API_TOKEN 은 캘린더·대화 서비스 때문에 필요하다. 그래서 손님 모드의
+  # 모델에게는 셸·파일 도구가 없다 - 환경변수를 읽을 길을 막는다.)
+  agent-guest:
+    build: ./agent
+    environment:
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      TZ: ${TZ:-Asia/Seoul}
+      JARVIS_MODEL: ${JARVIS_MODEL:-}
+      JARVIS_ROLE: guest
+      JARVIS_API_TOKEN: ${JARVIS_API_TOKEN:-}
+      JARVIS_ALLOWED_ORIGIN: ${JARVIS_ALLOWED_ORIGIN:-}
+      JARVIS_APPROVAL_TIMEOUT: ${JARVIS_APPROVAL_TIMEOUT:-30m}
+      JARVIS_TURN_TIMEOUT: ${JARVIS_TURN_TIMEOUT:-2h}
+      JARVIS_CALENDAR_URL: http://calendar:8093
+      JARVIS_CHAT_URL: http://chat:8094
+    volumes:
+      - jarvis-guest-workspace:/workspace
+      - jarvis-guest-home:/home/jarvis
+      - jarvis-guest-data:/data
+    expose:
+      - "8080"
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+      calendar:
+        condition: service_healthy
+      chat:
+        condition: service_healthy
+    restart: unless-stopped
+
   # 운동 기록. 웹의 라우트 핸들러 + 볼륨의 JSON 파일이었던 것이 서비스가 됐다.
   # 계약은 그대로다(책 전체를 주고받는다) - 저장소만 Postgres 로 바뀌었다.
   #
@@ -560,6 +594,9 @@ services:
     restart: unless-stopped
 
 volumes:
+  jarvis-guest-workspace:
+  jarvis-guest-home:
+  jarvis-guest-data:
   jarvis-postgres:
   jarvis-web-data:
   jarvis-home:

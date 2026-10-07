@@ -50,9 +50,12 @@
     // Cloudflare Access in front of this Worker. A request carrying a valid
     // assertion for this app skips the console's own password (src/lib/access.ts).
     "ACCESS_TEAM_DOMAIN": "choigonyok.cloudflareaccess.com",
-    "ACCESS_AUD": "25196893d2c65f51618b38a9593a3f5fbb5f449f14754e24f9f0b08ab9e2bb42"
+    "ACCESS_AUD": "25196893d2c65f51618b38a9593a3f5fbb5f449f14754e24f9f0b08ab9e2bb42",
+    // The guest account's own agent, through the gateway.
+    "AGENT_GUEST_URL": "https://jarvis-be.choigonyok.com/agent-guest"
   }
 
   // Secrets (see DEPLOY.md): AGENT_URL, JARVIS_API_TOKEN, JARVIS_AUTH_ID,
-  // JARVIS_AUTH_PASSWORD, JARVIS_AUTH_SECRET.
+  // JARVIS_AUTH_PASSWORD, JARVIS_AUTH_SECRET, and ACCESS_OWNERS / ACCESS_GUESTS
+  // (who is who behind Access - email addresses, so not in this public file).
 }

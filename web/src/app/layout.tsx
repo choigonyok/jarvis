@@ -1,5 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { Instrument_Sans, JetBrains_Mono } from "next/font/google";
+import { headers } from "next/headers";
+import { RoleProvider } from "@/components/shell/role";
+import { ROLE_HEADER } from "@/lib/role";
 import "./globals.css";
 
 const instrument = Instrument_Sans({
@@ -34,13 +37,17 @@ export const viewport: Viewport = {
   maximumScale: 5,
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  // Stamped by the middleware; absent on /login, where nobody is signed in yet.
+  const role = (await headers()).get(ROLE_HEADER) === "guest" ? "guest" : "owner";
   return (
     <html
       lang="ko"
       className={`dark ${instrument.variable} ${jetbrains.variable} antialiased`}
     >
-      <body className="overflow-hidden">{children}</body>
+      <body className="overflow-hidden">
+        <RoleProvider role={role}>{children}</RoleProvider>
+      </body>
     </html>
   );
 }

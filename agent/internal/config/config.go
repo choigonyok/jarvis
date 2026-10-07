@@ -78,6 +78,17 @@ type Config struct {
 	// "쿠팡 8,900원" charge actually bought). It needs the browser server in
 	// ExtraMCPURLs; without it the loop does not start.
 	Enrich bool
+	// Guest is the second agent, for the guest account (JARVIS_ROLE=guest).
+	// It has its own conversation (Thread), its own CLI home and session, only
+	// the calendar module, no browser, and no built-in tools beyond web search -
+	// the shell and file tools could read this process's environment, and with
+	// it the token every service accepts.
+	Guest bool
+	// Thread is this agent's conversation in chat-svc: "" or "guest".
+	Thread string
+	// BuiltinTools, when set, is passed as --tools: the only built-in CLI
+	// tools the model gets. Nil means the CLI's default set.
+	BuiltinTools *string
 	// BackgroundLogin is the sign-in hosts a background task may use without
 	// asking - so the order lookup can press 로그인 on a form the browser has
 	// filled in from its saved passwords. Payment hosts are never on it.
@@ -142,6 +153,18 @@ func Load() (Config, error) {
 		Debug:           envBool("JARVIS_DEBUG", false),
 	}
 
+	if c.Guest = env("JARVIS_ROLE", "") == "guest"; c.Guest {
+		c.Thread = "guest"
+		c.SystemPrompt = env("JARVIS_SYSTEM_PROMPT", guestSystemPrompt)
+		c.AllowedTools = splitList(env("JARVIS_ALLOWED_TOOLS", "TodoWrite,WebSearch,WebFetch,mcp__calendar__list_events"))
+		builtins := "WebSearch,WebFetch,TodoWrite"
+		c.BuiltinTools = &builtins
+		// No browser: it is logged in to the operator's shops and pay. No
+		// background lookups: those belong to the operator's spending.
+		c.ExtraMCPURLs = map[string]string{}
+		c.Enrich = false
+	}
+
 	if c.OAuthToken == "" {
 		return c, fmt.Errorf("CLAUDE_CODE_OAUTH_TOKEN is not set (run: claude setup-token)")
 	}
@@ -202,6 +225,32 @@ const defaultSystemPrompt = `당신은 Jarvis입니다. 한 사람의 개인 어
 - 진행 중인 달은 지난달 전체가 아니라 "지난달 같은 날까지"와 비교하세요.
 - "주의"나 "읽지 못한 카드 알림"이 있으면 합계가 빠졌을 수 있다고 먼저 밝히세요.
 - 분류를 바꾸거나 예산을 정하는 건 가계부 화면에서 하도록 안내하세요.`
+
+// guestSystemPrompt is for the guest account's agent. It knows nothing of the
+// operator's money, messages or shopping - not by instruction alone but
+// because it has no tool that could look - and the prompt says so, so that it
+// answers "I can't see that" rather than guessing.
+const guestSystemPrompt = `당신은 Jarvis입니다. 지금 대화 상대는 운영자가 초대한 손님 계정의 사용자이고, 이 대화는 그 사람과의 1:1 스레드입니다.
+
+말투와 분량
+- 한국어로, 담백하게. 인사말과 사족 없이 본론부터.
+- 한 번에 두세 문단을 넘기지 마세요. 목록이 꼭 필요할 때만 목록을 쓰세요.
+- 한 일은 한 일로, 하려는 일은 하려는 일로 구분해서 말하세요. 하지 않은 일을 했다고 말하지 마세요.
+
+할 수 있는 것과 없는 것
+- 함께 쓰는 캘린더 조회·수정, 웹 검색, 일반적인 질문에 답할 수 있습니다.
+- 운영자의 자산·투자·지출·카드 내역·카카오톡 메시지·쇼핑 계정에는 접근할 수 없습니다. 그런 것을 물으면 이 계정에서는 볼 수 없다고 짧게 답하세요. 추측해서 말하지 마세요.
+- 운영자와 나눈 다른 대화는 볼 수 없습니다.
+
+승인
+- 일정을 추가·수정·삭제하는 도구는 실행 전에 이 대화의 사용자에게 승인을 받습니다. 도구를 부르면 승인 카드가 올라가고, 호출은 바로 "카드를 올렸다"는 답으로 끝납니다.
+- 카드를 올렸으면 결정을 기다리지 말고, 무엇을 요청했는지 한 줄로 알린 뒤 응답을 마치세요. 같은 도구를 다시 부르지 마세요.
+- [승인됨…] 또는 [반려]로 시작하는 메시지는 카드 결과이니, 그 안내대로 이어서 하세요.
+
+캘린더
+- 일정은 calendar 도구로만 다루세요.
+- 일정을 고치거나 지우기 전에 list_events로 id를 먼저 확인하세요.
+- 날짜는 YYYY-MM-DD, 시각은 HH:MM으로만 넘기세요.`
 
 func env(k, def string) string {
 	if v := os.Getenv(k); v != "" {

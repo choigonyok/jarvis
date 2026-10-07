@@ -20,7 +20,8 @@
     { "binding": "SPENDING", "service_id": "01a11684-33db-7b40-bb44-f62e14bd9628" },
     { "binding": "KAKAOTALK", "service_id": "01a11684-3c70-7311-9ff9-ba9cac386c46" },
     { "binding": "STATUS", "service_id": "01a11684-43c2-72b1-9065-5045a0a58cf1" },
-    { "binding": "BROWSER", "service_id": "01a1168b-598c-7b83-a0a4-e30db679e437" }
+    { "binding": "BROWSER", "service_id": "01a1168b-598c-7b83-a0a4-e30db679e437" },
+    { "binding": "AGENT_GUEST", "service_id": "01a116d3-fa8c-77f0-a52c-774130a9e043" }
   ]
   // JARVIS_API_TOKEN arrives as a secret: wrangler secret put JARVIS_API_TOKEN
 }

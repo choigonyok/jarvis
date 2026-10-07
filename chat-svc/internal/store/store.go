@@ -77,8 +77,8 @@ const selectList = `
 // that quietly stops at 200 turns would read as history having been lost. When
 // this gets slow the fix is a window the UI asks for, not a cap the service
 // imposes without saying so.
-func (s *Store) All(ctx context.Context, tz string) ([]turn.Turn, error) {
-	rows, err := s.pool.Query(ctx, selectList+` order by at, id`, tz)
+func (s *Store) All(ctx context.Context, tz, thread string) ([]turn.Turn, error) {
+	rows, err := s.pool.Query(ctx, selectList+` where thread = $2 order by at, id`, tz, thread)
 	if err != nil {
 		return nil, fmt.Errorf("턴 조회: %w", err)
 	}
@@ -125,8 +125,8 @@ func (s *Store) Append(ctx context.Context, t turn.Turn, tz string) (turn.Turn, 
 
 	rows, err := s.pool.Query(ctx, `
 		with inserted as (
-		  insert into turns (id, role, at, paragraphs, body, proposal_id, session_id)
-		  values ($2, $3, now(), $4, nullif($5,''), nullif($6,''), nullif($7,''))
+		  insert into turns (id, role, at, paragraphs, body, proposal_id, session_id, thread)
+		  values ($2, $3, now(), $4, nullif($5,''), nullif($6,''), nullif($7,''), $8)
 		  returning *
 		)
 		select id, role,
@@ -137,7 +137,7 @@ func (s *Store) Append(ctx context.Context, t turn.Turn, tz string) (turn.Turn, 
 		       coalesce(proposal_id, ''),
 		       coalesce(session_id, '')
 		  from inserted`,
-		tz, id, string(t.Role), paragraphs, t.Text, t.ProposalID, t.SessionID)
+		tz, id, string(t.Role), paragraphs, t.Text, t.ProposalID, t.SessionID, t.Thread)
 	if err != nil {
 		return turn.Turn{}, fmt.Errorf("턴 저장: %w", err)
 	}
@@ -154,5 +154,6 @@ func (s *Store) Append(ctx context.Context, t turn.Turn, tz string) (turn.Turn, 
 		&saved.Paragraphs, &saved.Text, &saved.ProposalID, &saved.SessionID); err != nil {
 		return turn.Turn{}, fmt.Errorf("저장된 턴 읽기: %w", err)
 	}
+	saved.Thread = t.Thread
 	return saved, nil
 }
