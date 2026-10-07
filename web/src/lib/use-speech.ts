@@ -124,6 +124,7 @@ export function useRecognition({
       // that just finished speaking) means "tap to talk", not "broken".
       if (!tapped.current && (refused || event.error === "audio-capture")) {
         wanted.current = false;
+        setError(event.error);
         setState("paused");
         return;
       }
