@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -112,10 +112,10 @@ const pendingHome = "/record";
  * decision rather than a red numeric badge: red here means 반려 and 실패, and
  * spending it on "you have mail" would break the colour grammar.
  *
- * The header itself stays solid; only the phone's floating tab bar blurs what
- * is behind it. Two backdrop-filter bars on one screen sample each other in
- * Chrome, which once showed as the tab labels ghosting into the header - so
- * the header's tab pill is the same glass, without the blur.
+ * The header stays solid, with plain text tabs on a wide screen. Only the
+ * phone's floating tab bar is glass: two backdrop-filter bars on one screen
+ * sample each other in Chrome, which once showed as the tab labels ghosting
+ * into the header.
  */
 export function Header({
   connection,
@@ -144,12 +144,29 @@ export function Header({
   return (
     <header className="inset-x-safe shrink-0 border-b border-edge-soft bg-background">
       <div className="mx-auto flex h-13 w-full max-w-[52rem] items-center justify-between px-4 sm:h-14 sm:px-8">
-        <div className="flex min-w-0 items-center gap-4">
-          <h1 className="shrink-0 text-[15px] font-semibold tracking-tight text-foreground">
+        <div className="flex items-baseline gap-4">
+          <h1 className="text-[15px] font-semibold tracking-tight text-foreground">
             Jarvis
           </h1>
           {/* The same links, in the bar below, on a phone. */}
-          <GlassTabs tabs={tabs} pathname={pathname} />
+          <nav className="hidden items-baseline gap-3 sm:flex" aria-label="화면">
+            {tabs.map((tab) => {
+              const active = pathname === tab.href;
+              return (
+                <Link
+                  key={tab.href}
+                  href={tab.href}
+                  aria-current={active ? "page" : undefined}
+                  className={cn(
+                    "rounded-sm text-[13px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+                    active ? "text-foreground" : "text-faint hover:text-dim",
+                  )}
+                >
+                  {tab.label}
+                </Link>
+              );
+            })}
+          </nav>
         </div>
 
         <div className="flex items-center gap-3">
@@ -186,59 +203,6 @@ export function Header({
 }
 
 /**
- * The wide header's tabs: one capsule of the same glass as the phone's bar,
- * with the lens under the current page. Tabs differ in width, so the lens is
- * measured onto its tab rather than stepped by a fixed amount.
- */
-function GlassTabs({ tabs, pathname }: { tabs: Tab[]; pathname: string }) {
-  const refs = useRef(new Map<string, HTMLAnchorElement>());
-  const [lens, setLens] = useState<{ x: number; w: number } | null>(null);
-
-  useLayoutEffect(() => {
-    const el = refs.current.get(pathname);
-    // Measured after layout; the state is the measurement, not derived data.
-    setLens(el ? { x: el.offsetLeft, w: el.offsetWidth } : null);
-  }, [pathname, tabs]);
-
-  return (
-    <nav
-      aria-label="화면"
-      className="liquid-glass-flat scrollbar-none relative hidden min-w-0 items-center overflow-x-auto rounded-full p-1 sm:flex"
-    >
-      <span
-        aria-hidden
-        className="liquid-lens pointer-events-none absolute top-1 bottom-1 left-0 rounded-full"
-        style={{
-          width: lens?.w ?? 0,
-          transform: `translateX(${lens?.x ?? 0}px)`,
-          opacity: lens ? 1 : 0,
-        }}
-      />
-      {tabs.map((tab) => {
-        const active = pathname === tab.href;
-        return (
-          <Link
-            key={tab.href}
-            href={tab.href}
-            ref={(el) => {
-              if (el) refs.current.set(tab.href, el);
-              else refs.current.delete(tab.href);
-            }}
-            aria-current={active ? "page" : undefined}
-            className={cn(
-              "relative shrink-0 rounded-full px-3 py-1.5 text-[13px] whitespace-nowrap transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
-              active ? "text-foreground" : "text-faint hover:text-dim",
-            )}
-          >
-            {tab.label}
-          </Link>
-        );
-      })}
-    </nav>
-  );
-}
-
-/**
  * The phone's navigation: a capsule of glass floating over the page, lifted
  * off the edges and the home indicator, the way iOS 26 draws its tab bar. The
  * page scrolls beneath it (see --tabbar-space in globals.css, which gives the
@@ -271,7 +235,7 @@ export function TabBar({
   const at = inMore ? mainTabs.length : mainTabs.findIndex((tab) => tab.href === pathname);
 
   const item =
-    "tap relative z-10 flex flex-1 items-center justify-center rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50";
+    "tap liquid-press relative z-10 flex flex-1 items-center justify-center rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50";
 
   return (
     <nav
