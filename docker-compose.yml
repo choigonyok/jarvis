@@ -131,7 +131,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # 손님 계정(livvyvvi)의 jarvis. 운영자의 agent 와 같은 이미지지만 따로 돈다:
+  # 손님 계정의 jarvis. 운영자의 agent 와 같은 이미지지만 따로 돈다:
   # 대화(thread=guest)·CLI 기억(볼륨)·승인 카드가 모두 따로이고, 모듈은 캘린더뿐이다.
   # 자산·가계부 서비스 주소도, 브라우저 토큰도 받지 않는다 - 모델이 부를 도구가
   # 없을 뿐 아니라, 이 컨테이너가 그 문을 여는 열쇠 자체를 갖고 있지 않다.
