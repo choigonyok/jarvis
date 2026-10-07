@@ -20,7 +20,7 @@ type State = "connecting" | "open" | "closed";
  * takes it. Taking control is the one loud moment on this surface, because it
  * is the one moment the operator is no longer only watching.
  */
-export function Screen({ vncUrl }: { vncUrl: string }) {
+export function Screen({ vncUrl, ticketed = false }: { vncUrl: string; ticketed?: boolean }) {
   const { proposals, connection } = useThread();
   const waitingList = proposals.filter(isPending);
   const pending = waitingList.length;
@@ -37,12 +37,21 @@ export function Screen({ vncUrl }: { vncUrl: string }) {
     let live = true;
     let client: { viewOnly: boolean; disconnect: () => void } | null = null;
 
+    // Through the gateway the address carries a one-minute ticket, fetched
+    // fresh for every connection; otherwise it is fixed.
+    const address = ticketed
+      ? fetch("/api/screen/ticket", { cache: "no-store" }).then(async (res) => {
+          if (!res.ok) throw new Error(String(res.status));
+          return ((await res.json()) as { url: string }).url;
+        })
+      : Promise.resolve(vncUrl || defaultURL());
+
     // noVNC touches WebSocket and the DOM on import, so it cannot be part of
     // the server bundle.
-    import("@novnc/novnc").then(({ default: RFB }) => {
+    Promise.all([import("@novnc/novnc"), address]).then(([{ default: RFB }, url]) => {
       if (!live) return;
 
-      const instance = new RFB(target, vncUrl || defaultURL(), {});
+      const instance = new RFB(target, url, {});
       // Scale to whatever width the layout gives us; never resize the remote
       // screen, because the agent's session should not change shape when a
       // person happens to be looking at it.
@@ -61,6 +70,8 @@ export function Screen({ vncUrl }: { vncUrl: string }) {
 
       client = instance;
       rfb.current = instance;
+    }).catch(() => {
+      if (live) setState("closed");
     });
 
     return () => {
@@ -68,7 +79,7 @@ export function Screen({ vncUrl }: { vncUrl: string }) {
       client?.disconnect();
       rfb.current = null;
     };
-  }, [vncUrl]);
+  }, [vncUrl, ticketed]);
 
   const toggleControl = useCallback(() => {
     setControlling((on) => {

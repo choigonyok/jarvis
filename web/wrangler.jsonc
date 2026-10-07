@@ -44,7 +44,9 @@
     "ASSETS_URL": "https://jarvis-be.choigonyok.com/assets",
     "SPENDING_URL": "https://jarvis-be.choigonyok.com/spending",
     "KAKAOTALK_URL": "https://jarvis-be.choigonyok.com/kakaotalk",
-    "STATUS_URL": "https://jarvis-be.choigonyok.com/status"
+    "STATUS_URL": "https://jarvis-be.choigonyok.com/status",
+    // 화면 탭의 VNC 웹소켓. 주소에 /api/screen/ticket 이 만든 1분짜리 입장권을 붙인다.
+    "JARVIS_VNC_GATEWAY": "wss://jarvis-be.choigonyok.com/vnc/websockify"
   }
 
   // Secrets (see DEPLOY.md): AGENT_URL, JARVIS_API_TOKEN, JARVIS_AUTH_ID,

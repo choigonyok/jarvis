@@ -7,6 +7,9 @@
  * - The bearer token. The console Worker holds it; nobody else does. A
  *   request without it never reaches the tunnel - the services check it too,
  *   but they should not be the first thing a stranger can knock on.
+ * - /vnc/websockify (the 화면 tab) may instead carry a ticket in its query:
+ *   a browser cannot put a header on a WebSocket. The console Worker signs
+ *   the ticket with the same token, for 60 seconds - see ticketValid.
  * - For the agent, only the routes the console uses. The agent also serves
  *   /mcp (the tools Claude Code calls - unauthenticated, because they are
  *   meant to be dialled over loopback) and /intercept (the payment guard's
@@ -25,6 +28,7 @@ interface Env {
   SPENDING: Fetcher;
   KAKAOTALK: Fetcher;
   STATUS: Fetcher;
+  BROWSER: Fetcher;
 }
 
 const SERVICES: Record<string, { binding: keyof Env; origin: string }> = {
@@ -34,6 +38,7 @@ const SERVICES: Record<string, { binding: keyof Env; origin: string }> = {
   spending: { binding: "SPENDING", origin: "http://spending:8095" },
   kakaotalk: { binding: "KAKAOTALK", origin: "http://kakaotalk:8090" },
   status: { binding: "STATUS", origin: "http://status:8096" },
+  vnc: { binding: "BROWSER", origin: "http://browser:6080" },
 };
 
 /** The agent routes the console drives. Anything else on the agent is internal. */
@@ -48,17 +53,48 @@ function same(a: string, b: string): boolean {
   return diff === 0;
 }
 
+const hex = (buf: ArrayBuffer) =>
+  [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+
+/**
+ * "<expiry epoch seconds>.<hex HMAC-SHA256(token, 'vnc:' + expiry)>". The
+ * console Worker mints it (web/src/app/api/screen/ticket); it only opens the
+ * VNC socket, and only until it expires.
+ */
+async function ticketValid(ticket: string | null, token: string, now = Date.now()): Promise<boolean> {
+  if (!ticket) return false;
+  const [exp, sig] = ticket.split(".");
+  if (!exp || !sig || !/^\d+$/.test(exp) || Number(exp) * 1000 < now) return false;
+  const key = await crypto.subtle.importKey(
+    "raw", new TextEncoder().encode(token), { name: "HMAC", hash: "SHA-256" }, false, ["sign"],
+  );
+  const want = hex(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`vnc:${exp}`)));
+  return same(sig, want);
+}
+
 const json = (status: number, error: string) =>
   Response.json({ error }, { status, headers: { "cache-control": "no-store" } });
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     if (!env.JARVIS_API_TOKEN) return json(503, "게이트웨이에 토큰이 설정되지 않았습니다.");
-    const auth = request.headers.get("authorization") ?? "";
-    if (!same(auth, `Bearer ${env.JARVIS_API_TOKEN}`)) return json(401, "인증이 필요합니다.");
-
     const url = new URL(request.url);
     const [, name = "", ...rest] = url.pathname.split("/");
+
+    const auth = request.headers.get("authorization") ?? "";
+    const bearer = same(auth, `Bearer ${env.JARVIS_API_TOKEN}`);
+    if (name === "vnc") {
+      // The socket and nothing else: noVNC's own pages are not needed.
+      if (rest.join("/") !== "websockify") return json(404, "그런 경로가 없습니다.");
+      if (!bearer && !(await ticketValid(url.searchParams.get("ticket"), env.JARVIS_API_TOKEN))) {
+        return json(401, "입장권이 없거나 만료됐습니다.");
+      }
+      url.searchParams.delete("ticket");
+      // Handed over whole, so the WebSocket upgrade goes through as one.
+      return (env.BROWSER as Fetcher).fetch(new Request(`http://browser:6080/websockify${url.search}`, request));
+    }
+    if (!bearer) return json(401, "인증이 필요합니다.");
+
     const service = SERVICES[name];
     if (!service) return json(404, "그런 서비스가 없습니다.");
     if (name === "agent" && !AGENT_ROUTES.has(rest[0] ?? "")) return json(404, "그런 경로가 없습니다.");

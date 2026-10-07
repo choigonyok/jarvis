@@ -5,5 +5,12 @@ import { Screen } from "@/components/screen/screen";
 export const dynamic = "force-dynamic";
 
 export default function Page() {
-  return <Screen vncUrl={process.env.JARVIS_VNC_URL ?? ""} />;
+  // With a gateway configured the socket address comes with a fresh ticket
+  // from /api/screen/ticket; without one, the page dials the host directly.
+  return (
+    <Screen
+      vncUrl={process.env.JARVIS_VNC_URL ?? ""}
+      ticketed={Boolean(process.env.JARVIS_VNC_GATEWAY)}
+    />
+  );
 }
