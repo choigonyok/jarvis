@@ -32,6 +32,15 @@
 - 맥미니 쪽: `scripts/mini up`, `scripts/mini compose --profile cloudflare up -d tunnel`.
   `web` 컨테이너는 `web` 프로필이라 맥미니에서는 뜨지 않는다.
 
+**`jarvis.choigonyok.com` 앞에는 Cloudflare Access 가 있다.** Zero Trust 앱 `jarvis`
+(팀 `choigonyok.cloudflareaccess.com`, Free 플랜), 정책 `only me` 는 운영자 이메일 하나만 허용하고
+로그인은 이메일 일회용 코드(One-time PIN)다. 세션 7일. 그 뒤에 콘솔 자체 로그인이 한 번 더 있다.
+게이트웨이(`jarvis-be`)는 Access 대상이 아니다 - 사람이 아니라 콘솔 Worker 가 부르는 곳이고,
+`JARVIS_API_TOKEN` 이 그 문을 지킨다.
+
+`agent.choigonyok.com` 은 2026-10-07 에 DNS 와 두 터널의 ingress 에서 모두 지웠다. 맥미니의
+예전 native cloudflared(`macmini` 터널)는 다른 프로젝트 호스트명 때문에 남아 있다.
+
 **에이전트의 `/mcp` 와 `/intercept` 는 게이트웨이에서 막는다.** `/mcp` 는 Claude Code 가
 루프백으로 부르는 도구 서버라 인증이 없다. 밖에서 닿으면 승인 카드를 건너뛰는 길이 된다.
 
