@@ -3,14 +3,30 @@
 import { useEffect, useState } from "react";
 
 /**
- * Add ?vp=1 to any page to see how this device reports its screen - the numbers
- * the home-screen layout depends on. Nothing renders otherwise.
+ * How this device reports its screen - the numbers the home-screen layout
+ * depends on. On with ?vp=1, or by tapping the header's "Jarvis" five times
+ * (a home-screen app has no address bar to type into). Nothing renders otherwise.
  */
+export const PROBE_KEY = "jarvis.viewport-probe";
 export function ViewportProbe() {
   const [lines, setLines] = useState<string[] | null>(null);
 
+  const [on, setOn] = useState(false);
   useEffect(() => {
-    if (!new URLSearchParams(window.location.search).has("vp")) return;
+    const read = () => {
+      let stored = false;
+      try {
+        stored = localStorage.getItem(PROBE_KEY) === "1";
+      } catch {}
+      setOn(new URLSearchParams(window.location.search).has("vp") || stored);
+    };
+    read();
+    addEventListener("jarvis:probe", read);
+    return () => removeEventListener("jarvis:probe", read);
+  }, []);
+
+  useEffect(() => {
+    if (!on) return;
     const probe = document.createElement("div");
     probe.style.cssText =
       "position:fixed;left:0;top:0;width:0;visibility:hidden;" +
@@ -42,9 +58,9 @@ export function ViewportProbe() {
     read();
     addEventListener("resize", read);
     return () => removeEventListener("resize", read);
-  }, []);
+  }, [on]);
 
-  if (!lines) return null;
+  if (!on || !lines) return null;
   return (
     <pre className="pointer-events-none fixed top-24 left-2 z-[100] rounded-lg bg-black/85 p-2 font-mono text-[10px] leading-snug text-white">
       {lines.join("\n")}

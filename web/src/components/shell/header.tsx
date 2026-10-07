@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
+import { PROBE_KEY } from "@/components/shell/viewport-probe";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -129,6 +130,21 @@ export function Header({
   const router = useRouter();
   const status = connectionCopy[connection];
 
+  // Five quick taps on the name toggle the screen-measurement overlay - the
+  // only way to reach it inside a home-screen app, which has no address bar.
+  const taps = useRef<number[]>([]);
+  function secretTap() {
+    const now = Date.now();
+    taps.current = [...taps.current.filter((t) => now - t < 1500), now];
+    if (taps.current.length < 5) return;
+    taps.current = [];
+    try {
+      const on = localStorage.getItem(PROBE_KEY) === "1";
+      localStorage.setItem(PROBE_KEY, on ? "0" : "1");
+    } catch {}
+    dispatchEvent(new Event("jarvis:probe"));
+  }
+
   async function signOut() {
     const res = await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
     const body = (await res?.json().catch(() => null)) as { next?: string } | null;
@@ -145,7 +161,10 @@ export function Header({
     <header className="inset-x-safe pt-safe shrink-0 border-b border-edge-soft bg-background">
       <div className="mx-auto flex h-13 w-full max-w-[52rem] items-center justify-between px-4 sm:h-14 sm:px-8">
         <div className="flex items-baseline gap-4">
-          <h1 className="text-[15px] font-semibold tracking-tight text-foreground">
+          <h1
+            className="text-[15px] font-semibold tracking-tight text-foreground select-none"
+            onClick={secretTap}
+          >
             Jarvis
           </h1>
           {/* The same links, in the bar below, on a phone. */}

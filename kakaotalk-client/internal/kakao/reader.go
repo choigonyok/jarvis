@@ -39,14 +39,16 @@ type Config struct {
 
 // Reader holds a resolved, verified handle to the source database.
 type Reader struct {
-	cfg     Config
-	dbPath  string
-	key     string
-	scratch string
-	bin     string
-	userID  int64
-	uuid    string
-	mainMod time.Time
+	cfg        Config
+	dbPath     string
+	key        string
+	scratch    string
+	bin        string
+	userID     int64
+	uuid       string
+	mainMod    time.Time
+	mainSize   int64
+	mainCopied time.Time
 }
 
 // Message is one row of NTChatMessage joined with sender/room names.
@@ -182,31 +184,41 @@ func findDBFile(dir string) (string, error) {
 	}
 }
 
-// copyLiveFiles copies main (only when its mtime changed) plus -wal/-shm into the
-// scratch dir. Copying all three keeps the SQLite snapshot consistent so the
-// newest, still-WAL-resident messages are visible.
+// copyLiveFiles copies main (only when its mtime changed) plus -wal into the
+// scratch dir, so the newest, still-WAL-resident messages are visible.
+//
+// The -shm (the WAL index) is deliberately not copied, and any old copy is
+// removed: SQLite then rebuilds the index from the WAL itself when it opens
+// the copy. KakaoTalk updates -shm through a memory map, which never moves its
+// mtime, and a file shared into a container can be served from a cache that
+// trusts the mtime - a stale index there tells SQLite the WAL ends where it
+// ended hours ago, and every message since reads as absent. (Seen on the Mac
+// mini after it slept and woke: the WAL kept growing, nothing new was read.)
 func (r *Reader) copyLiveFiles() (string, error) {
 	dst := filepath.Join(r.scratch, "work.db")
 	fi, err := os.Stat(r.dbPath)
 	if err != nil {
 		return "", err
 	}
-	if !fi.ModTime().Equal(r.mainMod) {
+	// Re-copied when its mtime or size moves, and at least every 30 seconds
+	// regardless. After the Mac slept and woke, KakaoTalk folded the WAL into
+	// the main file and started a fresh WAL without the main file's mtime
+	// moving - the stale copy here plus the new WAL read as "nothing new" for
+	// over an hour, until a restart copied the main file again.
+	if !fi.ModTime().Equal(r.mainMod) || fi.Size() != r.mainSize || time.Since(r.mainCopied) > 30*time.Second {
 		if err := copyFile(r.dbPath, dst); err != nil {
 			return "", err
 		}
-		r.mainMod = fi.ModTime()
+		r.mainMod, r.mainSize, r.mainCopied = fi.ModTime(), fi.Size(), time.Now()
 	}
-	for _, suffix := range []string{"-wal", "-shm"} {
-		src := r.dbPath + suffix
-		out := dst + suffix
-		if _, err := os.Stat(src); err != nil {
-			_ = os.Remove(out)
-			continue
-		}
-		if err := copyFile(src, out); err != nil {
-			return "", err
-		}
+	_ = os.Remove(dst + "-shm")
+	src := r.dbPath + "-wal"
+	if _, err := os.Stat(src); err != nil {
+		_ = os.Remove(dst + "-wal")
+		return dst, nil
+	}
+	if err := copyFile(src, dst+"-wal"); err != nil {
+		return "", err
 	}
 	return dst, nil
 }
