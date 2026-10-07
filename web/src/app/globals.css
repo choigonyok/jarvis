@@ -344,3 +344,17 @@
     display: none;
   }
 }
+
+/* A phone page never pans sideways. Anything wider than the screen is cut at
+   the page and at each scroller; the strips that are meant to scroll sideways
+   (room chips, the header's tab pill) do so inside themselves. */
+@media (max-width: 639px) {
+  html,
+  body {
+    overflow-x: hidden;
+    overscroll-behavior-x: none;
+  }
+  main {
+    overflow-x: hidden;
+  }
+}

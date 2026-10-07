@@ -89,6 +89,15 @@ const all: Tab[] = [
 const visible = (tabs: Tab[], role: Role) =>
   role === "guest" ? tabs.filter((t) => GUEST_PAGES.has(t.href)) : tabs;
 
+/**
+ * The phone's bar, icons only. The operator's daily surfaces - the
+ * conversation, money in and money out - always sit in it; the guest has
+ * three tabs and no 더보기.
+ */
+const OWNER_BAR = ["/", "/assets", "/spending", "/calendar", "/workout", "/record"];
+const OWNER_MORE = ["/screen", "/kakao", "/status"];
+const GUEST_BAR = ["/", "/calendar", "/workout"];
+
 /** Where a waiting decision is announced: the surface that lists them by name. */
 const pendingHome = "/record";
 
@@ -250,19 +259,19 @@ export function TabBar({
   const role = useRole();
   const [more, setMore] = useState(false);
 
-  // 더보기 for a single tab is a sheet with one row; put that tab in the bar.
-  let mainTabs = visible(primary, role);
-  let moreTabs = visible(secondary, role);
-  if (moreTabs.length === 1) {
-    mainTabs = [...mainTabs, ...moreTabs];
-    moreTabs = [];
-  }
+  // Icons only, so more of them fit: everything a person opens every day is
+  // one tap away, and only the rarely visited wait behind 더보기.
+  const byHref = new Map([...primary, ...secondary].map((t) => [t.href, t]));
+  const pick = (hrefs: string[]) => hrefs.flatMap((h) => (byHref.has(h) ? [byHref.get(h)!] : []));
+  const mainTabs = pick(role === "guest" ? GUEST_BAR : OWNER_BAR);
+  const moreTabs = role === "guest" ? [] : pick(OWNER_MORE);
+
   const inMore = moreTabs.some((tab) => tab.href === pathname);
   const slots = mainTabs.length + (moreTabs.length > 0 ? 1 : 0);
   const at = inMore ? mainTabs.length : mainTabs.findIndex((tab) => tab.href === pathname);
 
   const item =
-    "tap relative z-10 flex flex-1 flex-col items-center justify-center gap-0.5 rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50";
+    "tap relative z-10 flex flex-1 items-center justify-center rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50";
 
   return (
     <nav
@@ -277,11 +286,17 @@ export function TabBar({
       // the rounded corners or under the home indicator.
       style={{
         paddingBottom: "max(env(safe-area-inset-bottom), 0.5rem)",
-        paddingLeft: "max(env(safe-area-inset-left), 1.25rem)",
-        paddingRight: "max(env(safe-area-inset-right), 1.25rem)",
+        paddingLeft: "max(env(safe-area-inset-left), 1rem)",
+        paddingRight: "max(env(safe-area-inset-right), 1rem)",
       }}
     >
-      <div className="liquid-glass pointer-events-auto relative mx-auto flex h-16 max-w-[24rem] rounded-full p-1.5">
+      <div
+        className={cn(
+          "liquid-glass pointer-events-auto relative mx-auto flex h-[3.75rem] rounded-full p-1.5",
+          // A short bar for a short list: three icons do not stretch edge to edge.
+          slots <= 4 ? "max-w-[15rem]" : "max-w-[26rem]",
+        )}
+      >
         <div className="relative flex flex-1">
           {/* The lens: one slot wide, slid to the current one. */}
           <span
@@ -297,27 +312,26 @@ export function TabBar({
             const active = pathname === tab.href;
             const Icon = ICON[tab.href] ?? Ellipsis;
             // Only the surface that renders the queue wears the mark, so it
-            // reads as "there is something to decide over there" rather than
-            // as decoration repeated five times.
+            // reads as "there is something to decide over there".
             const marked = pending > 0 && tab.href === pendingHome;
             return (
               <Link
                 key={tab.href}
                 href={tab.href}
+                aria-label={marked ? `${tab.label}, 결재 대기 ${pending}건` : tab.label}
+                title={tab.label}
                 aria-current={active ? "page" : undefined}
                 className={cn(item, active ? "text-foreground" : "text-dim")}
               >
                 <span className="relative">
-                  <Icon aria-hidden className="size-[21px]" strokeWidth={active ? 2.1 : 1.7} />
+                  <Icon aria-hidden className="size-[22px]" strokeWidth={active ? 2.1 : 1.7} />
                   {marked ? (
                     <span
-                      role="status"
-                      aria-label={`결재 대기 ${pending}건`}
+                      aria-hidden
                       className="anim-breathe absolute -top-0.5 -right-1.5 size-[6px] rounded-full bg-foreground/80"
                     />
                   ) : null}
                 </span>
-                <span className="text-[10.5px] leading-none font-medium">{tab.label}</span>
               </Link>
             );
           })}
@@ -325,13 +339,15 @@ export function TabBar({
           {moreTabs.length > 0 ? (
             <Sheet open={more} onOpenChange={setMore}>
               <SheetTrigger
-                aria-label="다른 화면"
+                aria-label={inMore ? `다른 화면 (지금: ${moreTabs.find((t) => t.href === pathname)?.label})` : "다른 화면"}
+                title="다른 화면"
                 className={cn(item, inMore ? "text-foreground" : "text-dim")}
               >
-                <Ellipsis aria-hidden className="size-[21px]" strokeWidth={inMore ? 2.1 : 1.7} />
-                <span className="text-[10.5px] leading-none font-medium">
-                  {inMore ? (moreTabs.find((t) => t.href === pathname)?.label ?? "더보기") : "더보기"}
-                </span>
+                {(() => {
+                  // Inside 더보기, the slot shows where you are rather than "more".
+                  const Icon = inMore ? (ICON[pathname] ?? Ellipsis) : Ellipsis;
+                  return <Icon aria-hidden className="size-[22px]" strokeWidth={inMore ? 2.1 : 1.7} />;
+                })()}
               </SheetTrigger>
               <SheetContent
                 side="bottom"
