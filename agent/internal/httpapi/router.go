@@ -33,6 +33,7 @@ type Server struct {
 	// interceptToken is the shared secret the browser container presents when
 	// it stops a payment. Empty means the endpoint refuses everything.
 	interceptToken string
+	role           string
 	// backgroundLogin is the sign-in hosts a background task may reach
 	// without asking (see postIntercept).
 	backgroundLogin map[string]bool
@@ -50,6 +51,9 @@ type Sender interface {
 }
 
 type Deps struct {
+	// Role is "owner" or "guest": which agent this is. Every response says so
+	// (X-Jarvis-Agent), and the gateway refuses one from the wrong agent.
+	Role      string
 	Thread    *thread.Store
 	Proposals *proposal.Store
 	Calendar  *calendar.Store
@@ -78,6 +82,7 @@ func New(d Deps) *Server {
 		log:             d.Log,
 		allowedOrigin:   d.AllowedOrigin,
 		interceptToken:  d.InterceptToken,
+		role:            d.Role,
 		backgroundLogin: hostSet(d.BackgroundLogin),
 		apiToken:        d.APIToken,
 		approvalWait:    d.ApprovalWait,
@@ -113,7 +118,7 @@ func (s *Server) Handler() http.Handler {
 		mux.Handle(path, handler)
 		mux.Handle(strings.TrimSuffix(path, "/")+"/", handler)
 	}
-	return s.withCORS(mux)
+	return s.withCORS(s.identify(mux))
 }
 
 // guard requires the console's bearer token. It is a plain equality check on
@@ -140,6 +145,21 @@ func (s *Server) guard(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(w, r)
 	}
+}
+
+// identify stamps every response with which agent answered. Two agents share
+// a tunnel, and the gateway checks this before passing a response on - a
+// connection that lands on the wrong one must not hand one person's
+// conversation to the other.
+func (s *Server) identify(next http.Handler) http.Handler {
+	role := s.role
+	if role == "" {
+		role = "owner"
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Jarvis-Agent", role)
+		next.ServeHTTP(w, r)
+	})
 }
 
 // withCORS stays closed unless an origin is configured; the default topology

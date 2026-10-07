@@ -59,6 +59,8 @@ type Client struct {
 	me        string
 	block     string
 	space     string
+	// partner is the other person's user id, learned from their own entries.
+	partner string
 }
 
 func Open(ctx context.Context, dsn string, cfg Config) (*Client, error) {
@@ -488,8 +490,16 @@ func (c *Client) Put(ctx context.Context, e event.Event) (event.Event, error) {
 
 	var saved []row
 	if e.ID == "" {
-		owner, err := ownerID(e.Owner, me, true, nil)
-		if err != nil {
+		var owner *string
+		if e.Owner == event.OwnerPartner {
+			// Only the guest console asks for this: the guest is the partner,
+			// and their own entry belongs on their own name.
+			pid, err := c.partnerID(ctx, block, me)
+			if err != nil {
+				return event.Event{}, err
+			}
+			owner = &pid
+		} else if owner, err = ownerID(e.Owner, me, true, nil); err != nil {
 			return event.Event{}, err
 		}
 		fields["id"] = newUUID()
@@ -530,10 +540,40 @@ func (c *Client) Put(ctx context.Context, e event.Event) (event.Event, error) {
 	return saved[0].toEvent(me), nil
 }
 
+// partnerID is the other person in the couple, read off an entry they own.
+// uniple has no member list this token can read, but every entry carries its
+// owner, and the first one that is not mine is theirs. Cached: it does not change.
+func (c *Client) partnerID(ctx context.Context, block, me string) (string, error) {
+	c.mu.Lock()
+	known := c.partner
+	c.mu.Unlock()
+	if known != "" {
+		return known, nil
+	}
+	q := url.Values{}
+	q.Set("block_id", "eq."+block)
+	q.Set("owner_user_id", "neq."+me)
+	q.Set("select", "owner_user_id")
+	q.Set("limit", "1")
+	var rows []struct {
+		OwnerUserID *string `json:"owner_user_id"`
+	}
+	if err := c.rest(ctx, http.MethodGet, "calendar_events?"+q.Encode(), nil, &rows); err != nil {
+		return "", err
+	}
+	if len(rows) == 0 || rows[0].OwnerUserID == nil || *rows[0].OwnerUserID == "" {
+		return "", event.ValidationError{Msg: "상대방이 만든 일정이 아직 없어 상대방 이름으로 저장할 수 없습니다. '함께' 일정으로 만들어 주세요"}
+	}
+	c.mu.Lock()
+	c.partner = *rows[0].OwnerUserID
+	c.mu.Unlock()
+	return *rows[0].OwnerUserID, nil
+}
+
 // ownerID maps owner to the column. Empty means mine for a new entry and
 // "leave it" for an existing one (whose owner may be nil: shared). "partner"
-// can only be kept, never assigned: putting an entry on someone else's name is
-// not this service's call.
+// is kept here, never assigned - a new partner entry is made by Put itself,
+// for the guest console, through partnerID.
 func ownerID(owner, me string, isNew bool, current *string) (*string, error) {
 	switch owner {
 	case event.OwnerMe:

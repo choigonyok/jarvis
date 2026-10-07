@@ -46,7 +46,12 @@
 대화·운동·캘린더 페이지와 `/api/agent`·`/api/workout` 만 미들웨어에서 통과한다 - 나머지는 403
 이거나 첫 화면으로 돌려보낸다. 손님의 대화는 별도 컨테이너 `agent-guest`(`JARVIS_ROLE=guest`)가
 받는다: chat-svc 의 thread `guest`, 별도 CLI 홈·승인 카드, 캘린더 모듈만, 내장 도구는 웹 검색뿐,
-브라우저 토큰·자산·가계부 주소 없음. 게이트웨이 경로 `/agent-guest/…`(VPC `jarvis-agent-guest`).
+브라우저 토큰·자산·가계부 주소 없음. 게이트웨이 경로 `/agent-guest/…`(VPC `jarvis-agent-guest`, 포트 8081).
+두 에이전트는 응답마다 `X-Jarvis-Agent: owner|guest` 를 붙이고, 게이트웨이는 경로와 맞지 않는
+응답을 버리고 502 를 돌려준다. 같은 터널·같은 포트(8080)였을 때 Workers VPC 의 연결이 다른
+에이전트에 붙는 일이 실제로 있었다(2026-10-08) - 그래서 포트도 나눴다.
+손님 쪽 캘린더는 관점이 뒤집힌다: 손님 jarvis 의 캘린더 저장소(`FromPartnerSide`)가 나↔상대를
+바꿔 읽고 쓰고, 손님이 만든 개인 일정은 calendar-svc 가 상대방(uniple partner) 이름으로 저장한다.
 Google OAuth 앱이 테스트 모드라 손님 이메일을 Google Cloud 의 테스트 사용자에도 넣어야 한다.
 
 **에이전트의 `/mcp` 와 `/intercept` 는 게이트웨이에서 막는다.** `/mcp` 는 Claude Code 가

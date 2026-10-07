@@ -156,3 +156,37 @@ func TestFactsReadsThroughTheInterface(t *testing.T) {
 }
 
 func isoToday() string { return time.Now().Format("2006-01-02") }
+
+// The guest console is the calendar's other person. What they make as their own
+// reaches the service as the partner's, and the operator's own entries read to
+// them as the partner's - the same calendar, seen from the other side.
+func TestPartnerSide(t *testing.T) {
+	operator := newFakeService(t)
+	guest := &Store{base: operator.base, token: operator.token, client: operator.client, bus: operator.bus}
+	guest.FromPartnerSide()
+
+	mine, err := operator.Put(Event{Date: "2026-10-10", Title: "운영자 일정", Owner: OwnerMe})
+	if err != nil {
+		t.Fatal(err)
+	}
+	theirs, err := guest.Put(Event{Date: "2026-10-11", Title: "손님 일정", Owner: OwnerMe})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if theirs.Owner != OwnerMe || theirs.Source != SourceHuman {
+		t.Fatalf("손님에게 돌아온 자기 일정: %+v", theirs)
+	}
+	stored, _ := operator.Get(theirs.ID)
+	if stored.Owner != OwnerPartner || stored.Source != SourcePartner {
+		t.Fatalf("서비스에는 상대 일정으로 가야 합니다: %+v", stored)
+	}
+	seen, _ := guest.Get(mine.ID)
+	if seen.Owner != OwnerPartner {
+		t.Fatalf("운영자 일정이 손님에게 상대 일정으로 보여야 합니다: %+v", seen)
+	}
+	for _, e := range guest.Range("", "") {
+		if e.ID == theirs.ID && e.Owner != OwnerMe {
+			t.Fatalf("목록에서도 손님 자신의 일정은 나: %+v", e)
+		}
+	}
+}

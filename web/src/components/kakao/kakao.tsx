@@ -35,7 +35,7 @@ export function Kakao() {
       <Header connection={connection} pending={pending} />
       <StandingBar pending={waitingList} href="/record" />
 
-      <main className="inset-x-safe mx-auto flex min-h-0 w-full max-w-[46rem] flex-1 flex-col px-4 sm:px-8">
+      <main className="inset-x-safe pb-tabbar mx-auto flex min-h-0 w-full max-w-[46rem] flex-1 flex-col px-4 sm:px-8">
         {/* 방 고르기. 수집된 방만 나온다 - 목록 상태만 있고 본문이 없는 방은
             읽을 것이 없으므로 자리를 차지할 이유가 없다. */}
         <div className="scrollbar-hairline shrink-0 overflow-x-auto overscroll-x-contain py-2 sm:py-3">
