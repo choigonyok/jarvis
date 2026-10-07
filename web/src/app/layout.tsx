@@ -42,10 +42,11 @@ export const viewport: Viewport = {
   // the safe-area insets are what keep controls out from under them.
   viewportFit: "cover",
   themeColor: "#0b0d12",
-  // Pinch-zoom stays available in the browser - capping it would fail anyone
-  // who needs to magnify a proposal before approving it. The home-screen app
-  // is the exception and locks it (components/shell/no-zoom.tsx).
-  maximumScale: 5,
+  // maximum-scale=1 is what stops iOS from zooming in when a text field takes
+  // focus. Safari ignores it for a pinch since iOS 10, so the browser can
+  // still be pinch-zoomed; the home-screen app locks that too
+  // (components/shell/no-zoom.tsx).
+  maximumScale: 1,
 };
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {

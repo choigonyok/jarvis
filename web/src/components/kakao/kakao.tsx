@@ -35,11 +35,14 @@ export function Kakao() {
       <Header connection={connection} pending={pending} />
       <StandingBar pending={waitingList} href="/record" />
 
-      <main className="inset-x-safe pb-tabbar mx-auto flex min-h-0 w-full max-w-[46rem] flex-1 flex-col px-4 sm:px-8">
+      <main className="inset-x-safe pb-tabbar mx-auto flex min-h-0 w-full max-w-[46rem] flex-1 flex-col overflow-x-hidden px-4 sm:px-8">
         {/* 방 고르기. 수집된 방만 나온다 - 목록 상태만 있고 본문이 없는 방은
             읽을 것이 없으므로 자리를 차지할 이유가 없다. */}
-        <div className="scrollbar-hairline shrink-0 overflow-x-auto overscroll-x-contain py-2 sm:py-3">
-          <div className="flex items-center gap-1.5">
+        {/* Wrapped, not a sideways strip: on a phone a row that scrolls
+            sideways drags the whole tab with it. Two rows show, the rest
+            scroll up and down. */}
+        <div className="scrollbar-hairline max-h-[5.25rem] shrink-0 overflow-x-hidden overflow-y-auto overscroll-contain py-2 sm:max-h-none sm:py-3">
+          <div className="flex flex-wrap items-center gap-1.5">
             {rooms.map((room) => {
               const active = room.id === selected;
               return (
@@ -49,7 +52,7 @@ export function Kakao() {
                   onClick={() => setSelected(room.id)}
                   aria-current={active ? "true" : undefined}
                   className={cn(
-                    "flex min-h-9 shrink-0 items-center rounded-md px-3 text-[12.5px] whitespace-nowrap transition-colors sm:min-h-0 sm:px-2.5 sm:py-1",
+                    "flex min-h-9 max-w-full shrink-0 items-center rounded-md px-3 text-[12.5px] whitespace-nowrap transition-colors sm:min-h-0 sm:px-2.5 sm:py-1",
                     "outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
                     active
                       ? "bg-glass-raised text-foreground"
@@ -66,7 +69,7 @@ export function Kakao() {
           </div>
         </div>
 
-        <div className="scrollbar-hairline min-h-0 flex-1 overflow-y-auto overscroll-contain pb-4 sm:pb-6">
+        <div className="scrollbar-hairline min-h-0 flex-1 touch-pan-y overflow-x-hidden overflow-y-auto overscroll-contain pb-4 sm:pb-6">
           {!hydrated ? null : error ? (
             <p className="pt-10 text-center text-[13px] text-faint">{error}</p>
           ) : rooms.length === 0 ? (
@@ -132,7 +135,7 @@ function Line({
             <span className="shrink-0 text-[11px] text-faint tabular-nums">
               {message.time}
             </span>
-            <p className="max-w-[78%] rounded-xl bg-glass-raised px-3 py-1.5 text-[14px] leading-[1.7] text-pretty text-foreground sm:max-w-[26rem]">
+            <p className="max-w-[78%] rounded-xl bg-glass-raised px-3 py-1.5 text-[14px] leading-[1.7] text-pretty [overflow-wrap:anywhere] whitespace-pre-wrap text-foreground sm:max-w-[26rem]">
               {message.text}
             </p>
           </>
@@ -145,7 +148,7 @@ function Line({
               {!repeated && message.sender && (
                 <p className="text-[11.5px] text-dim">{message.sender}</p>
               )}
-              <p className="text-[14px] leading-[1.7] text-pretty text-foreground/90 sm:max-w-[30rem]">
+              <p className="text-[14px] leading-[1.7] text-pretty [overflow-wrap:anywhere] whitespace-pre-wrap text-foreground/90 sm:max-w-[30rem]">
                 {message.text}
               </p>
             </div>

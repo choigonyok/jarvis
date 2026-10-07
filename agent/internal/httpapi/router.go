@@ -22,6 +22,7 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/module/calendar"
 	"github.com/choigonyok/jarvis/agent/internal/thread"
 	"github.com/choigonyok/jarvis/agent/internal/uploads"
+	"github.com/choigonyok/jarvis/agent/internal/usage"
 )
 
 type Server struct {
@@ -48,6 +49,7 @@ type Server struct {
 	// uploads holds photos attached in conversation; nil turns them off.
 	uploads *uploads.Store
 	modules *module.Registry
+	usage   *usage.Tracker
 }
 
 // Sender is whatever drives a turn. Keeping it an interface means the
@@ -78,7 +80,9 @@ type Deps struct {
 	Uploads *uploads.Store
 	// Modules is consulted when a decision carries edits to a card.
 	Modules *module.Registry
-	Log     *slog.Logger
+	// Usage is the subscription's 5-hour and weekly use, served at /usage.
+	Usage *usage.Tracker
+	Log   *slog.Logger
 }
 
 func New(d Deps) *Server {
@@ -98,6 +102,7 @@ func New(d Deps) *Server {
 		approvalWait:    d.ApprovalWait,
 		uploads:         d.Uploads,
 		modules:         d.Modules,
+		usage:           d.Usage,
 	}
 }
 
@@ -113,6 +118,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /thread", s.guard(s.getThread))
 	mux.HandleFunc("POST /messages", s.guard(s.postMessage))
 	mux.HandleFunc("POST /uploads", s.guard(s.postUpload))
+	mux.HandleFunc("GET /usage", s.guard(s.getUsage))
 	mux.HandleFunc("GET /uploads/{name}", s.guard(s.getUpload))
 	mux.HandleFunc("GET /events", s.guard(s.events))
 
@@ -307,6 +313,15 @@ func (s *Server) revise(ctx context.Context, id string, edits map[string]string)
 		return "이미 결재된 요청입니다.", http.StatusConflict
 	}
 	return "", 0
+}
+
+func (s *Server) getUsage(w http.ResponseWriter, r *http.Request) {
+	if s.usage == nil {
+		writeJSON(w, http.StatusOK, usage.Usage{})
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, s.usage.Snapshot(time.Now()))
 }
 
 // postUpload stores one photo, sent as the raw request body.

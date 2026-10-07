@@ -195,7 +195,7 @@ export function Assets() {
               {/* An assets-svc older than this page sends no allocation. */}
               {data.allocation ? (
                 <section className="mt-7 border-t border-edge-soft pt-5" aria-label="목표 비중">
-                  <TargetAllocation allocation={data.allocation} />
+                  <TargetAllocation allocation={data.allocation} holdings={data.holdings} />
                 </section>
               ) : null}
 

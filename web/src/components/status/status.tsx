@@ -14,6 +14,7 @@ import {
 } from "@/lib/status";
 import { isPending } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
+import { type UsageWindow, pct, resetLabel, tone, useUsage } from "@/lib/use-usage";
 import { cn } from "@/lib/utils";
 
 /**
@@ -122,6 +123,8 @@ export function Status() {
                 </button>
                 {error ? <span role="alert">{error}</span> : null}
               </div>
+
+              <ClaudeUsage />
 
               {report.groups.map((group) => {
                 const rows = results.filter((r) => r.group === group);
@@ -380,5 +383,53 @@ function Mark({ state, className }: { state: CheckState; className?: string }) {
         <span className="h-px w-[7px] bg-faint" />
       )}
     </span>
+  );
+}
+
+/** The Claude subscription: how much of the 5-hour and weekly windows is gone. */
+function ClaudeUsage() {
+  const usage = useUsage();
+  return (
+    <section className="mt-9 sm:mt-11" aria-labelledby="group-claude">
+      <h2 id="group-claude" className="mb-2.5 text-[12px] text-faint">
+        Claude 사용량
+      </h2>
+      {usage?.fiveHour || usage?.sevenDay ? (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <UsageCard name="5시간" w={usage.fiveHour} />
+          <UsageCard name="주간" w={usage.sevenDay} />
+        </div>
+      ) : (
+        <p className="text-[13px] text-dim">아직 읽지 못했습니다. 대화나 작업이 한 번 돌면 채워집니다.</p>
+      )}
+      {usage?.at ? (
+        <p className="tnum mt-2 text-[11.5px] text-faint">
+          {new Date(usage.at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}{" "}
+          기준{usage.status && usage.status !== "allowed" ? ` · ${usage.status === "rejected" ? "한도에 걸림" : "한도에 가까움"}` : ""}
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+function UsageCard({ name, w }: { name: string; w?: UsageWindow }) {
+  const p = pct(w);
+  return (
+    <div className="rounded-xl bg-glass px-4 py-3.5">
+      <div className="flex items-baseline justify-between">
+        <span className="text-[13px] text-dim">{name}</span>
+        <span className="tnum text-[20px] font-medium text-foreground">
+          {p == null ? "-" : p}
+          <span className="ms-0.5 text-[13px] text-dim">%</span>
+        </span>
+      </div>
+      <span aria-hidden className="mt-2.5 block h-1.5 overflow-hidden rounded-full bg-foreground/12">
+        <span className={cn("block h-full rounded-full", tone(p))} style={{ width: `${p ?? 0}%` }} />
+      </span>
+      <p className="tnum mt-2 text-[11.5px] text-faint">
+        {p == null ? "" : `남은 ${100 - p}%`}
+        {w?.resetsAt ? ` · ${resetLabel(w.resetsAt)} 초기화` : ""}
+      </p>
+    </div>
   );
 }

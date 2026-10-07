@@ -297,7 +297,9 @@ func (m *Module) Handler() http.Handler {
 			return toolText(err.Error(), true), nil, nil
 		}
 		m.wake()
-		return toolText(fmt.Sprintf("작업 %d '%s' 를 만들었습니다. 곧 백그라운드에서 시작합니다. 운영자에게 작업 탭에서 진행을 볼 수 있다고 짧게 알리세요.", j.ID, j.Title), false), nil, nil
+		return toolText(fmt.Sprintf("작업 %d '%s' 를 만들었습니다. 운영자는 이걸 이미 압니다: "+
+			"작업을 만들었다, 백그라운드에서 시작한다, 작업 탭에서 볼 수 있다 같은 안내는 하지 마세요. "+
+			"운영자에게 물어볼 것이나 알려야 할 다른 사실이 있을 때만 그것을 말하고, 없으면 '맡겼습니다.' 한마디로 끝내세요.", j.ID, j.Title), false), nil, nil
 	})
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_jobs",

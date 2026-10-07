@@ -22,6 +22,7 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/config"
 	"github.com/choigonyok/jarvis/agent/internal/core/jsonfile"
 	"github.com/choigonyok/jarvis/agent/internal/thread"
+	"github.com/choigonyok/jarvis/agent/internal/usage"
 )
 
 var ErrBusy = errors.New("이미 처리 중인 요청이 있습니다")
@@ -39,6 +40,8 @@ type Runner struct {
 	queue []string
 	// bgCancel stops the background task in flight, if any (see Background).
 	bgCancel func()
+	// usage hears every rate_limit_event, chat and background alike.
+	usage *usage.Tracker
 }
 
 // session is the one field of the CLI's state this agent owns. The transcript
@@ -319,6 +322,9 @@ type event struct {
 	// Jarvis speaking, so they must not land in the thread as a reply.
 	IsAPIErrorMessage bool   `json:"is_api_error_message"`
 	Error             string `json:"error"`
+	// RateLimitInfo rides on "rate_limit_event": how much of the
+	// subscription's 5-hour and weekly windows is used (see package usage).
+	RateLimitInfo json.RawMessage `json:"rate_limit_info"`
 }
 
 type assistantMessage struct {
@@ -366,6 +372,8 @@ func scan(stdout interface{ Read([]byte) (int, error) }, each func(event)) error
 
 func (r *Runner) handle(ev event) error {
 	switch ev.Type {
+	case "rate_limit_event":
+		r.usage.Observe(ev.RateLimitInfo)
 	case "system":
 		if ev.SessionID != "" {
 			r.mu.Lock()
