@@ -26,7 +26,7 @@ interface Env {
   WORKOUT: Fetcher;
   ASSETS: Fetcher;
   SPENDING: Fetcher;
-  MARKET: Fetcher;
+  JOBS: Fetcher;
   KAKAOTALK: Fetcher;
   STATUS: Fetcher;
   BROWSER: Fetcher;
@@ -40,7 +40,7 @@ const SERVICES: Record<string, { binding: keyof Env; origin: string }> = {
   workout: { binding: "WORKOUT", origin: "http://workout:8091" },
   assets: { binding: "ASSETS", origin: "http://assets:8092" },
   spending: { binding: "SPENDING", origin: "http://spending:8095" },
-  market: { binding: "MARKET", origin: "http://market:8097" },
+  jobs: { binding: "JOBS", origin: "http://jobs:8098" },
   kakaotalk: { binding: "KAKAOTALK", origin: "http://kakaotalk:8090" },
   status: { binding: "STATUS", origin: "http://status:8096" },
   vnc: { binding: "BROWSER", origin: "http://browser:6080" },

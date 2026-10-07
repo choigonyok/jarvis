@@ -17,6 +17,10 @@ export type CardField = {
   kind: "text" | "textarea" | "number" | "select";
   value: string;
   options?: string[];
+  /** Approval stays off while this is empty. */
+  required?: boolean;
+  /** A line under the field: a price reference, a format. */
+  hint?: string;
 };
 
 export type ProposalCardBody = {

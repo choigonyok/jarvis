@@ -18,7 +18,7 @@
     { "binding": "WORKOUT", "service_id": "01a11684-0ff6-7952-98f7-d5c292ab7f1d" },
     { "binding": "ASSETS", "service_id": "01a11684-2eb6-70a2-a9f3-32850b76c941" },
     { "binding": "SPENDING", "service_id": "01a11684-33db-7b40-bb44-f62e14bd9628" },
-    { "binding": "MARKET", "service_id": "01a1172f-f2da-7a92-b1d7-52cfa3ac9d82" },
+    { "binding": "JOBS", "service_id": "01a11747-21c6-7831-b4fe-9d154cb54bfa" },
     { "binding": "KAKAOTALK", "service_id": "01a11684-3c70-7311-9ff9-ba9cac386c46" },
     { "binding": "STATUS", "service_id": "01a11684-43c2-72b1-9065-5045a0a58cf1" },
     { "binding": "BROWSER", "service_id": "01a1168b-598c-7b83-a0a4-e30db679e437" },

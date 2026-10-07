@@ -81,14 +81,14 @@ type Config struct {
 	// UploadsDir is where photos attached in conversation are kept. Empty
 	// turns attachments off (the guest agent).
 	UploadsDir string
-	// MarketURL is where market-svc listens: Joongna listings and the queue
-	// of changes the background worker carries to Joongna.
-	MarketURL string
-	// Market turns on that worker. Like Enrich, it needs the browser server.
-	Market         bool
-	MarketInterval time.Duration
-	MarketCooldown time.Duration
-	MarketTimeout  time.Duration
+	// JobsURL is where jobs-svc listens: work handed over in conversation,
+	// run in the background on whatever cadence each job decides.
+	JobsURL string
+	// Jobs turns on the scheduler. Like Enrich, it needs the browser server.
+	Jobs         bool
+	JobsInterval time.Duration
+	JobsCooldown time.Duration
+	JobsTimeout  time.Duration
 	// Guest is the second agent, for the guest account (JARVIS_ROLE=guest).
 	// It has its own conversation (Thread), its own CLI home and session, only
 	// the calendar module, no browser, and no built-in tools beyond web search -
@@ -140,7 +140,7 @@ func Load() (Config, error) {
 		AllowedTools: splitList(env("JARVIS_ALLOWED_TOOLS",
 			"Read,Glob,Grep,TodoWrite,mcp__calendar__list_events,"+
 				"mcp__assets__get_portfolio,mcp__assets__get_allocation,mcp__assets__get_history,"+
-				"mcp__spending__get_spending,mcp__market__list_listings,mcp__market__search_prices")),
+				"mcp__spending__get_spending,mcp__jobs__create_job,mcp__jobs__list_jobs,mcp__jobs__instruct_job")),
 		PermissionMode: env("JARVIS_PERMISSION_MODE", "manual"),
 		ApprovalWait:   envDuration("JARVIS_APPROVAL_TIMEOUT", 30*time.Minute),
 		TurnTimeout:    envDuration("JARVIS_TURN_TIMEOUT", 2*time.Hour),
@@ -154,13 +154,13 @@ func Load() (Config, error) {
 		SpendingURL:    env("JARVIS_SPENDING_URL", "http://localhost:8095"),
 		Enrich:         envBool("JARVIS_ENRICH", true),
 		UploadsDir:     env("JARVIS_UPLOADS_DIR", ""),
-		MarketURL:      env("JARVIS_MARKET_URL", "http://localhost:8097"),
-		Market:         envBool("JARVIS_MARKET", true),
-		MarketInterval: envDuration("JARVIS_MARKET_INTERVAL", time.Minute),
-		// Least time between two browser runs. Joongna is a marketplace that
-		// watches for bots; one change every couple of minutes is a person.
-		MarketCooldown:  envDuration("JARVIS_MARKET_COOLDOWN", 2*time.Minute),
-		MarketTimeout:   envDuration("JARVIS_MARKET_TIMEOUT", 10*time.Minute),
+		JobsURL:        env("JARVIS_JOBS_URL", "http://localhost:8098"),
+		Jobs:           envBool("JARVIS_JOBS", true),
+		JobsInterval:   envDuration("JARVIS_JOBS_INTERVAL", 30*time.Second),
+		// Least time between two runs of any job. Sites watch for bots; a
+		// person does not click through two shops in the same minute.
+		JobsCooldown:    envDuration("JARVIS_JOBS_COOLDOWN", time.Minute),
+		JobsTimeout:     envDuration("JARVIS_JOBS_TIMEOUT", 15*time.Minute),
 		BackgroundLogin: splitList(env("JARVIS_BACKGROUND_LOGIN_HOSTS", "nid.naver.com")),
 		EnrichInterval:  envDuration("JARVIS_ENRICH_INTERVAL", time.Minute),
 		EnrichCooldown:  envDuration("JARVIS_ENRICH_COOLDOWN", 10*time.Minute),
@@ -182,7 +182,7 @@ func Load() (Config, error) {
 		// background lookups: those belong to the operator's spending.
 		c.ExtraMCPURLs = map[string]string{}
 		c.Enrich = false
-		c.Market = false
+		c.Jobs = false
 		c.UploadsDir = ""
 	}
 
@@ -247,14 +247,13 @@ const defaultSystemPrompt = `당신은 Jarvis입니다. 한 사람의 개인 어
 - "주의"나 "읽지 못한 카드 알림"이 있으면 합계가 빠졌을 수 있다고 먼저 밝히세요.
 - 분류를 바꾸거나 예산을 정하는 건 가계부 화면에서 하도록 안내하세요.
 
-중고나라
-- 사진과 함께 팔아 달라는 요청이 오면: 첨부 사진을 Read로 모두 열어 보고, 무엇인지(브랜드·모델·구성품·상태·하자)를 파악하세요.
-- search_prices로 중고나라 시세를 확인하고, 그 요약을 post_listing의 reference에 넣으세요.
-- 가격은 운영자가 직접 말한 경우에만 priceKrw에 넣고, 말하지 않았으면 0으로 두세요. 운영자가 카드에서 직접 적습니다. 시세로 가격을 정하지 마세요.
-- 거래 방식은 택배거래입니다. 택배비는 작고 가벼운 물건이면 포함(included), 크거나 무거우면 별도(separate)로 제안하세요.
-- 사진에서 확신할 수 없는 정보(용량, 구입 시기, 하자 유무)는 지어내지 말고 설명에 확인이 필요하다고 짧게 적거나 운영자에게 물으세요.
-- post_listing은 초안 카드를 올립니다. 운영자가 카드에서 고쳐서 승인하면 백그라운드에서 등록되고, 진행은 중고나라 탭에서 보입니다.
-- 이미 올린 글의 상태는 list_listings로 확인하세요. 가격 변경·예약중·판매완료·끌어올리기·삭제는 중고나라 탭에서 하도록 안내하세요.`
+작업
+- 시간이 걸리거나 나중에 다시 봐야 하는 일, 웹사이트에서 해 둘 일은 create_job 으로 작업을 만들어 맡기세요. 예: 중고나라에 팔기, 가격 내려가면 알려주기, 택배 도착 지켜보기, 예약 열리면 알려주기.
+- 대화 안에서 브라우저로 직접 하지 말고 작업으로 넘기세요. 작업은 백그라운드에서 진행되고, 필요하면 스스로 주기적으로 다시 확인하며, 운영자에게 카드로 묻거나 로그인을 요청합니다. 진행은 작업 탭에서 보입니다.
+- goal 에는 끝났을 때의 상태를, instructions 에는 운영자가 말한 조건·선호·금지와 대화에서 알아낸 사실을 빠짐없이 적으세요. 주기를 말하지 않았으면 적지 않아도 됩니다 - 작업이 목표를 보고 정합니다.
+- 사진이 첨부되어 있으면 Read로 먼저 보고, 알아낸 것(물건 이름·구성·상태)을 instructions 에 적고 photos 에 사진 이름을 넣으세요.
+- 판매처럼 운영자가 정할 값(가격 등)이 있으면 지어내지 말라고 instructions 에 적으세요. 작업이 시세를 참고로 보여 주고 카드에서 받습니다.
+- 진행 중인 작업에 대한 요청(가격 바꿔줘, 그만해)은 list_jobs 로 찾아 instruct_job 으로 전하세요.`
 
 // guestSystemPrompt is for the guest account's agent. It knows nothing of the
 // operator's money, messages or shopping - not by instruction alone but

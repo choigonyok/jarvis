@@ -48,6 +48,10 @@ type Field struct {
 	Kind    string   `json:"kind"`
 	Value   string   `json:"value"`
 	Options []string `json:"options,omitempty"`
+	// Required blocks approval while the field is empty.
+	Required bool `json:"required,omitempty"`
+	// Hint is a line under the field (a price reference, a format).
+	Hint string `json:"hint,omitempty"`
 }
 
 // Spec is a module's declaration of one action it accepts.
