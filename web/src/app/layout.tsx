@@ -23,6 +23,14 @@ export const metadata: Metadata = {
   // Added to the home screen this runs without Safari's chrome, which is the
   // right shape for something you open to approve one thing and close.
   appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "Jarvis" },
+  // Next emits only the newer "mobile-web-app-capable"; iOS still keys the
+  // translucent status bar off the Apple name, and without it a home-screen
+  // launch draws the page below the notch and leaves the strip blank.
+  other: { "apple-mobile-web-app-capable": "yes" },
+  icons: {
+    icon: [{ url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" }],
+    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+  },
 };
 
 export const viewport: Viewport = {

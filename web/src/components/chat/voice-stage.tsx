@@ -198,7 +198,7 @@ export function VoiceStage({
   }
 
   return (
-    <div className="pb-safe inset-x-safe fixed inset-0 z-50 flex flex-col bg-background">
+    <div className="pb-safe pt-safe inset-x-safe fixed inset-0 z-50 flex flex-col bg-background">
       <div className="flex h-13 shrink-0 items-center justify-between px-3 sm:h-14 sm:px-6">
         <IconButton onClick={leave} label="음성 모드 나가기">
           <X aria-hidden className="size-[18px]" />
