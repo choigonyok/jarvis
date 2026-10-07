@@ -34,7 +34,7 @@
 
 **`jarvis.choigonyok.com` 앞에는 Cloudflare Access 가 있다.** Zero Trust 앱 `jarvis`
 (팀 `choigonyok.cloudflareaccess.com`, Free 플랜), 정책 `only me` 는 운영자 이메일 하나만 허용하고
-로그인은 이메일 일회용 코드(One-time PIN)다. 앱·팀 세션 모두 730h(약 1개월). 그 뒤에 콘솔 자체 로그인이 한 번 더 있다.
+로그인은 Google(OAuth 클라이언트는 운영자의 Google Cloud 프로젝트 jarvis-access, 테스트 사용자 본인만)과 예비로 이메일 일회용 코드. 앱·팀 세션 모두 730h(약 1개월). 그 뒤에 콘솔 자체 로그인이 한 번 더 있다.
 게이트웨이(`jarvis-be`)는 Access 대상이 아니다 - 사람이 아니라 콘솔 Worker 가 부르는 곳이고,
 `JARVIS_API_TOKEN` 이 그 문을 지킨다.
 
