@@ -14,8 +14,8 @@ RUN apk add --no-cache ca-certificates git ripgrep bash \
  && npm install -g @anthropic-ai/claude-code \
  && npm cache clean --force \
  && adduser -D -u 10001 jarvis \
- && mkdir -p /workspace /home/jarvis /data \
- && chown -R jarvis:jarvis /workspace /home/jarvis /data
+ && mkdir -p /workspace /home/jarvis /data /uploads \
+ && chown -R jarvis:jarvis /workspace /home/jarvis /data /uploads
 
 COPY --from=build /out/agent /usr/local/bin/agent
 USER jarvis
