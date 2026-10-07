@@ -1,0 +1,58 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "jarvis",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-09-20",
+  // nodejs_compat is what lets the Next server bundle run here at all;
+  // global_fetch_strictly_public makes a fetch to jarvis.choigonyok.com from
+  // inside the Worker leave and come back, instead of looping into itself.
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "account_id": "bcc3c444a19c4b54e7bb86ccdaf09d1d",
+
+  "assets": {
+    "binding": "ASSETS",
+    "directory": ".open-next/assets"
+  },
+
+  // 운동 기록이 사는 곳. Workers has no filesystem, so the volume the Docker
+  // image uses has no counterpart here - lib/store.ts picks whichever exists.
+  "kv_namespaces": [
+    { "binding": "JARVIS_KV", "id": "a9ba636ca1a442ee95a099ecb1e798f4" }
+  ],
+
+  "observability": {
+    "enabled": true
+  },
+
+  // The console answers on its own name, not on workers.dev: this thing drives
+  // a logged-in browser, and a second public hostname for it is a second door.
+  "routes": [
+    {
+      "pattern": "jarvis.choigonyok.com",
+      "custom_domain": true
+    }
+  ],
+  "workers_dev": false,
+
+  // Every backend is reached through the gateway Worker (edge/), which rides a
+  // Workers VPC binding into the Mac mini. The addresses are not secret - the
+  // gateway refuses anything without JARVIS_API_TOKEN, which is a secret here.
+  // AGENT_URL stays a secret only because it was created as one; its value is
+  // https://jarvis-be.choigonyok.com/agent.
+  "vars": {
+    "WORKOUT_URL": "https://jarvis-be.choigonyok.com/workout",
+    "ASSETS_URL": "https://jarvis-be.choigonyok.com/assets",
+    "SPENDING_URL": "https://jarvis-be.choigonyok.com/spending",
+    "KAKAOTALK_URL": "https://jarvis-be.choigonyok.com/kakaotalk",
+    "STATUS_URL": "https://jarvis-be.choigonyok.com/status",
+    // 화면 탭의 VNC 웹소켓. 주소에 /api/screen/ticket 이 만든 1분짜리 입장권을 붙인다.
+    "JARVIS_VNC_GATEWAY": "wss://jarvis-be.choigonyok.com/vnc/websockify",
+    // Cloudflare Access in front of this Worker. A request carrying a valid
+    // assertion for this app skips the console's own password (src/lib/access.ts).
+    "ACCESS_TEAM_DOMAIN": "choigonyok.cloudflareaccess.com",
+    "ACCESS_AUD": "25196893d2c65f51618b38a9593a3f5fbb5f449f14754e24f9f0b08ab9e2bb42"
+  }
+
+  // Secrets (see DEPLOY.md): AGENT_URL, JARVIS_API_TOKEN, JARVIS_AUTH_ID,
+  // JARVIS_AUTH_PASSWORD, JARVIS_AUTH_SECRET.
+}

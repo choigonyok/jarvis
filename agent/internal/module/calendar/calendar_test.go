@@ -3,7 +3,6 @@ package calendar
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,11 +14,7 @@ import (
 
 func newTestModule(t *testing.T) *Module {
 	t.Helper()
-	store := NewStore(filepath.Join(t.TempDir(), "calendar.json"), bus.New())
-	if err := store.Load(); err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	return New(store)
+	return New(newFakeService(t))
 }
 
 func act(t *testing.T, kind string, in any) action.Action {
@@ -88,9 +83,16 @@ func TestUpdateIsAPatch(t *testing.T) {
 
 // The calendar must survive a restart: it is the one part of this process
 // whose loss the operator would actually notice.
-func TestSurvivesReload(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "calendar.json")
-	first := New(NewStore(path, bus.New()))
+//
+// What that means changed with the split. The agent no longer holds the events
+// at all, so this is no longer "the file is re-read" but "a fresh agent sees
+// what the previous one wrote" - which is the property the operator actually
+// cares about, and now it holds across a restart of *this* process without the
+// events ever being on its disk.
+func TestSurvivesRestart(t *testing.T) {
+	service := newFakeService(t)
+
+	first := New(service)
 	if err := first.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -99,12 +101,13 @@ func TestSurvivesReload(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	second := New(NewStore(path, bus.New()))
+	// 같은 서비스를 가리키는 새 스토어. 에이전트가 재시작된 것과 같다.
+	second := New(NewStore(service.base, "", bus.New()))
 	if err := second.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	if got := second.store.Range("", ""); len(got) != 1 || got[0].Title != "합주" {
-		t.Fatalf("다시 읽지 못했습니다: %+v", got)
+		t.Fatalf("서비스에서 다시 읽지 못했습니다: %+v", got)
 	}
 }
 

@@ -1,6 +1,10 @@
 // The browser never talks to the agent directly: the API key and the agent's
 // surface stay on the server side of this proxy.
 const AGENT_URL = process.env.AGENT_URL ?? "http://localhost:8080";
+// Once the console is served from Cloudflare, the agent is reachable at a
+// public hostname of its own. This is what stops that hostname from being a
+// way around the login: the agent refuses anything without it.
+const AGENT_TOKEN = process.env.JARVIS_API_TOKEN ?? "";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,6 +24,7 @@ async function proxy(
   if (contentType) headers.set("content-type", contentType);
   const accept = request.headers.get("accept");
   if (accept) headers.set("accept", accept);
+  if (AGENT_TOKEN) headers.set("authorization", `Bearer ${AGENT_TOKEN}`);
 
   let upstream: Response;
   try {

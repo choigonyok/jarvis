@@ -1,0 +1,26 @@
+{
+  "$schema": "../web/node_modules/wrangler/config-schema.json",
+  // jarvis-be.choigonyok.com: the console Worker's one way into the Mac mini.
+  //
+  // Nothing on the Mac mini listens on the internet. These bindings are
+  // Workers VPC services that ride the jarvis-agent tunnel (cloudflared in the
+  // compose stack) and reach each service by its compose name.
+  "name": "jarvis-be",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-20",
+  "account_id": "bcc3c444a19c4b54e7bb86ccdaf09d1d",
+  "routes": [{ "pattern": "jarvis-be.choigonyok.com", "custom_domain": true }],
+  // No workers.dev name: a second hostname is a second door.
+  "workers_dev": false,
+  "observability": { "enabled": true },
+  "vpc_services": [
+    { "binding": "AGENT", "service_id": "01a11683-b21a-73a0-9d99-87fd7580549a" },
+    { "binding": "WORKOUT", "service_id": "01a11684-0ff6-7952-98f7-d5c292ab7f1d" },
+    { "binding": "ASSETS", "service_id": "01a11684-2eb6-70a2-a9f3-32850b76c941" },
+    { "binding": "SPENDING", "service_id": "01a11684-33db-7b40-bb44-f62e14bd9628" },
+    { "binding": "KAKAOTALK", "service_id": "01a11684-3c70-7311-9ff9-ba9cac386c46" },
+    { "binding": "STATUS", "service_id": "01a11684-43c2-72b1-9065-5045a0a58cf1" },
+    { "binding": "BROWSER", "service_id": "01a1168b-598c-7b83-a0a4-e30db679e437" }
+  ]
+  // JARVIS_API_TOKEN arrives as a secret: wrangler secret put JARVIS_API_TOKEN
+}

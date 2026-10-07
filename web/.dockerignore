@@ -4,3 +4,7 @@ node_modules
 Dockerfile
 .dockerignore
 npm-debug.log*
+.open-next
+.wrangler
+wrangler.jsonc
+open-next.config.ts
