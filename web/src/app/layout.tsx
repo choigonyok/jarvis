@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Instrument_Sans, JetBrains_Mono } from "next/font/google";
 import { headers } from "next/headers";
 import { RoleProvider } from "@/components/shell/role";
+import { NoZoom } from "@/components/shell/no-zoom";
 import { ViewportProbe } from "@/components/shell/viewport-probe";
 import { ROLE_HEADER } from "@/lib/role";
 import "./globals.css";
@@ -41,8 +42,9 @@ export const viewport: Viewport = {
   // the safe-area insets are what keep controls out from under them.
   viewportFit: "cover",
   themeColor: "#0b0d12",
-  // Pinch-zoom stays available - capping it would fail anyone who needs to
-  // magnify a proposal before approving it.
+  // Pinch-zoom stays available in the browser - capping it would fail anyone
+  // who needs to magnify a proposal before approving it. The home-screen app
+  // is the exception and locks it (components/shell/no-zoom.tsx).
   maximumScale: 5,
 };
 
@@ -57,6 +59,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
       <body className="overflow-hidden">
         <RoleProvider role={role}>{children}</RoleProvider>
         <ViewportProbe />
+        <NoZoom />
       </body>
     </html>
   );
