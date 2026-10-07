@@ -26,6 +26,7 @@ interface Env {
   WORKOUT: Fetcher;
   ASSETS: Fetcher;
   SPENDING: Fetcher;
+  MARKET: Fetcher;
   KAKAOTALK: Fetcher;
   STATUS: Fetcher;
   BROWSER: Fetcher;
@@ -39,6 +40,7 @@ const SERVICES: Record<string, { binding: keyof Env; origin: string }> = {
   workout: { binding: "WORKOUT", origin: "http://workout:8091" },
   assets: { binding: "ASSETS", origin: "http://assets:8092" },
   spending: { binding: "SPENDING", origin: "http://spending:8095" },
+  market: { binding: "MARKET", origin: "http://market:8097" },
   kakaotalk: { binding: "KAKAOTALK", origin: "http://kakaotalk:8090" },
   status: { binding: "STATUS", origin: "http://status:8096" },
   vnc: { binding: "BROWSER", origin: "http://browser:6080" },
@@ -48,7 +50,7 @@ const SERVICES: Record<string, { binding: keyof Env; origin: string }> = {
 const AGENT_ROLE: Record<string, string> = { agent: "owner", "agent-guest": "guest" };
 
 /** The agent routes the console drives. Anything else on the agent is internal. */
-const AGENT_ROUTES = new Set(["healthz", "thread", "messages", "events", "proposals", "calendar"]);
+const AGENT_ROUTES = new Set(["healthz", "thread", "messages", "events", "proposals", "calendar", "uploads"]);
 
 function same(a: string, b: string): boolean {
   // Constant time: the comparison should not say how much of a guess was right.

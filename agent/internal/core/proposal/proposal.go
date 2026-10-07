@@ -42,6 +42,10 @@ const (
 	// the network rather than at a tool call. Nobody asked for it in words -
 	// it is where a page the agent is driving tried to spend money.
 	OriginIntercept = "intercept"
+	// OriginNotice is a background job asking the operator to do something
+	// by hand (log in again) before it can go on. Approving says "done".
+	// Nothing is held open on it, so it survives a restart like a chat card.
+	OriginNotice = "notice"
 )
 
 type Proposal struct {
@@ -113,7 +117,7 @@ func (s *Store) Persist(path string, log *slog.Logger) error {
 	s.order = saved.Proposals
 	s.seq = saved.Seq
 	for _, p := range s.order {
-		if p.State == Pending && p.Origin != OriginChat {
+		if p.State == Pending && p.Origin != OriginChat && p.Origin != OriginNotice {
 			p.State = Rejected
 			p.Note = "에이전트가 재시작되어 만료되었습니다."
 			if p.DecidedAt == "" {
@@ -215,6 +219,26 @@ func (s *Store) Decide(id string, d Decision) error {
 	for _, fn := range listeners {
 		go fn(snapshot, d)
 	}
+	return nil
+}
+
+// Revise swaps a pending proposal's action and card for an edited one, just
+// before it is decided. Only the operator's own edits come through here.
+func (s *Store) Revise(id string, a action.Action, c action.Card) error {
+	s.mu.Lock()
+	p, ok := s.byID[id]
+	if !ok {
+		s.mu.Unlock()
+		return ErrNotFound
+	}
+	if p.State != Pending {
+		s.mu.Unlock()
+		return ErrAlreadyDecided
+	}
+	p.Action = a
+	p.Card = c
+	s.save()
+	s.mu.Unlock()
 	return nil
 }
 

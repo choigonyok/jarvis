@@ -31,6 +31,9 @@ type Turn struct {
 	AtISO      string   `json:"atIso,omitempty"`
 	Paragraphs []string `json:"paragraphs,omitempty"`
 	Text       string   `json:"text,omitempty"`
+	// Images are photos the operator attached, by upload name. The files are
+	// the agent's (its /uploads volume); the transcript only remembers which.
+	Images []string `json:"images,omitempty"`
 	// ProposalID points at the proposal store, which is still a file in the
 	// agent. The transcript records that a card was raised here; what the card
 	// says, and what became of it, is the proposal's business.

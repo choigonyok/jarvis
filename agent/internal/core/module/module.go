@@ -48,6 +48,14 @@ type Actuator interface {
 	Execute(ctx context.Context, a action.Action) (action.Result, error)
 }
 
+// Editor is an Actuator whose card is a form. Revise applies the operator's
+// edits to an action and renders the card again from the result, so what is
+// approved is what runs - the edits never ride beside the input.
+type Editor interface {
+	Actuator
+	Revise(ctx context.Context, a action.Action, edits map[string]string) (action.Action, action.Card, error)
+}
+
 // ContextSource supplies facts to reason with. The calendar is one (what is
 // already booked); a knowledge graph would be another.
 type ContextSource interface {

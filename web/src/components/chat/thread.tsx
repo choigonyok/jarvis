@@ -7,10 +7,13 @@ import { ProposalCard } from "@/components/chat/proposal-card";
 import { Markdown } from "@/components/chat/markdown";
 import { VoiceStage } from "@/components/chat/voice-stage";
 import { Header, TabBar } from "@/components/shell/header";
+import { useRole } from "@/components/shell/role";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { isPending } from "@/lib/thread";
+import { photoUrl } from "@/lib/uploads";
 import { speakable, useSpeech } from "@/lib/use-speech";
 import { useThread } from "@/lib/use-thread";
+import { cn } from "@/lib/utils";
 
 const MODE_KEY = "jarvis:chat-mode";
 
@@ -34,7 +37,44 @@ function Rail({ at }: { at?: string }) {
 const ROW =
   "grid grid-cols-[minmax(0,1fr)] sm:grid-cols-[3.5rem_minmax(0,1fr)]";
 
+/**
+ * Photos sent with a message, above its bubble. One photo is shown whole-ish;
+ * several become a square grid, the way a messenger stacks an album. A photo
+ * deleted after its listing ended shows as an empty tile, not a broken icon.
+ */
+function Photos({ names }: { names: string[] }) {
+  const single = names.length === 1;
+  return (
+    <div
+      className={cn(
+        "grid max-w-[80%] gap-1 sm:max-w-[26rem]",
+        single ? "grid-cols-1" : names.length === 2 || names.length === 4 ? "grid-cols-2" : "grid-cols-3",
+      )}
+    >
+      {names.map((name) => (
+        <a
+          key={name}
+          href={photoUrl(name)}
+          target="_blank"
+          rel="noreferrer"
+          className="block overflow-hidden rounded-xl border border-edge-soft bg-well outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element -- served by the agent behind the proxy */}
+          <img
+            src={photoUrl(name)}
+            alt="보낸 사진"
+            loading="lazy"
+            onError={(e) => (e.currentTarget.style.visibility = "hidden")}
+            className={cn("block object-cover", single ? "max-h-72 w-auto max-w-full" : "aspect-square w-24 sm:w-28")}
+          />
+        </a>
+      ))}
+    </div>
+  );
+}
+
 export function Thread() {
+  const role = useRole();
   const {
     turns,
     proposals,
@@ -208,16 +248,19 @@ export function Thread() {
                     {proposal ? (
                       <ProposalCard
                         proposal={proposal}
-                        onDecide={(d) => void decide(proposal.id, d)}
+                        onDecide={(d, edits) => decide(proposal.id, d, edits)}
                       />
                     ) : null}
                   </div>
                 </li>
               ) : (
                 <li key={turn.id} className="flex flex-col items-end gap-1.5">
-                  <p className="max-w-[80%] rounded-2xl border border-edge bg-glass-raised px-4 py-2.5 text-[14.5px] leading-relaxed text-foreground backdrop-blur-md sm:max-w-[26rem]">
-                    {turn.text}
-                  </p>
+                  {turn.images?.length ? <Photos names={turn.images} /> : null}
+                  {turn.text ? (
+                    <p className="max-w-[80%] rounded-2xl border border-edge bg-glass-raised px-4 py-2.5 text-[14.5px] leading-relaxed text-foreground backdrop-blur-md sm:max-w-[26rem]">
+                      {turn.text}
+                    </p>
+                  ) : null}
                   <span className="tnum pr-1 text-[11px] text-faint">
                     {turn.at}
                   </span>
@@ -231,7 +274,7 @@ export function Thread() {
                 <div className="min-w-0">
                   <ProposalCard
                     proposal={proposal}
-                    onDecide={(d) => void decide(proposal.id, d)}
+                    onDecide={(d, edits) => decide(proposal.id, d, edits)}
                   />
                 </div>
               </li>
@@ -278,7 +321,8 @@ export function Thread() {
         />
         <div className="inset-x-safe mx-auto w-full max-w-[46rem] px-4 pb-3 sm:px-8 sm:pb-6">
           <Composer
-            onSend={(text) => void send(text)}
+            onSend={(text, images) => send(text, images)}
+            allowPhotos={role === "owner"}
             onVoice={() => switchMode("voice")}
             onFocusChange={setTyping}
           />

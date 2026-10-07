@@ -46,6 +46,8 @@ type Turn struct {
 	AtISO      string   `json:"atIso,omitempty"`
 	Paragraphs []string `json:"paragraphs,omitempty"`
 	Text       string   `json:"text,omitempty"`
+	// Images are photos the operator attached, by upload name.
+	Images []string `json:"images,omitempty"`
 	// ProposalID points at core/proposal. The transcript records that a card
 	// was raised here; what the card says, and what became of it, is the
 	// proposal's business.
@@ -189,8 +191,8 @@ func (s *Store) Snapshot() ([]*Turn, bool) {
 	return payload.Turns, thinking
 }
 
-func (s *Store) AppendUser(text string) *Turn {
-	return s.append(&Turn{Role: RoleUser, Text: text})
+func (s *Store) AppendUser(text string, images ...string) *Turn {
+	return s.append(&Turn{Role: RoleUser, Text: text, Images: images})
 }
 
 func (s *Store) AppendAgent(paragraphs []string) *Turn {

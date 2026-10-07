@@ -41,7 +41,8 @@ async function proxy(
     upstream = await fetch(target, {
       method: request.method,
       headers,
-      body: request.method === "GET" ? undefined : await request.text(),
+      // Bytes, not text: a photo upload passes through here too.
+      body: request.method === "GET" ? undefined : await request.arrayBuffer(),
       cache: "no-store",
       // The event stream must outlive the request that opened it.
       signal: request.signal,
@@ -54,7 +55,7 @@ async function proxy(
   }
 
   const out = new Headers();
-  for (const key of ["content-type", "cache-control"]) {
+  for (const key of ["content-type", "cache-control", "content-length"]) {
     const value = upstream.headers.get(key);
     if (value) out.set(key, value);
   }
