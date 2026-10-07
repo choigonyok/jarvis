@@ -88,7 +88,13 @@ export function Header({
   const status = connectionCopy[connection];
 
   async function signOut() {
-    await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
+    const res = await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
+    const body = (await res?.json().catch(() => null)) as { next?: string } | null;
+    if (body?.next && body.next !== "/login") {
+      // Cloudflare Access's own sign-out: a full page load, not a client route.
+      window.location.href = body.next;
+      return;
+    }
     router.replace("/login");
     router.refresh();
   }
