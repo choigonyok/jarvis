@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Keyboard, Mic, Volume2, VolumeX, X } from "lucide-react";
 import { useMicLevel } from "@/lib/use-mic-level";
-import { useRecognition } from "@/lib/use-speech";
+import { unlockSpeech, useRecognition } from "@/lib/use-speech";
 import { cn } from "@/lib/utils";
 
 /**
@@ -87,7 +87,10 @@ export function VoiceStage({
   // after every single answer, which is the thing this mode exists to avoid.
   useEffect(() => {
     if (!started) return;
-    if (speaking) {
+    // Closed while Jarvis thinks as well as while it talks: an open mic keeps
+    // an iPhone in call mode, and the answer then plays through the earpiece -
+    // too quietly to hear. It reopens once the answer has been spoken.
+    if (speaking || thinking) {
       if (listening) stop();
       return;
     }
@@ -101,7 +104,7 @@ export function VoiceStage({
       state !== "unsupported"
     )
       start({ auto: true });
-  }, [started, speaking, listening, state, start, stop]);
+  }, [started, speaking, thinking, listening, state, start, stop]);
   const said = [draft, interim].filter(Boolean).join(" ");
 
   // One number drives the ring, whichever side of the conversation is live.
@@ -112,12 +115,16 @@ export function VoiceStage({
   /** The tap a device like iOS Safari asks for before it lets the mic reopen. */
   function resume() {
     onStopSpeaking();
+    // After the stop, not before: stopping cancels whatever is queued.
+    unlockSpeech();
     start();
   }
 
   function begin() {
     setStarted(true);
     onStopSpeaking();
+    // After the stop, not before: stopping cancels whatever is queued.
+    unlockSpeech();
     start();
   }
 
@@ -198,7 +205,7 @@ export function VoiceStage({
   }
 
   return (
-    <div className="pb-safe pt-safe inset-x-safe fixed inset-0 z-50 flex flex-col bg-background">
+    <div className="pb-safe pt-safe inset-x-safe bottom-screen fixed inset-x-0 top-0 z-50 flex flex-col bg-background">
       <div className="flex h-13 shrink-0 items-center justify-between px-3 sm:h-14 sm:px-6">
         <IconButton onClick={leave} label="음성 모드 나가기">
           <X aria-hidden className="size-[18px]" />

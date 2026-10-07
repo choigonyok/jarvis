@@ -110,14 +110,14 @@
        scroll and 100vh keeps measuring the taller state, so a composer pinned
        to the bottom sits below the fold. dvh follows what is actually
        visible. */
-    height: 100dvh;
+    height: calc(100dvh + var(--standalone-gap, 0px));
     /* Rubber-banding the whole page would peel the fixed bars away from the
        edges of the screen. Scrolling happens inside the transcript. */
     overscroll-behavior: none;
     -webkit-text-size-adjust: 100%;
   }
   body {
-    height: 100dvh;
+    height: calc(100dvh + var(--standalone-gap, 0px));
   }
   /* Safari zooms the page whenever a focused field is under 16px, which on
      this console meant every one of them. Below the tablet breakpoint the
@@ -457,4 +457,10 @@
    home-screen app shows the root, and a white root reads as a hole. */
 html {
   background-color: var(--background);
+}
+
+/* The fixed things that sit on the bottom edge, pushed down by the same gap
+   (see --standalone-gap in app/layout.tsx). */
+@utility bottom-screen {
+  bottom: calc(-1 * var(--standalone-gap, 0px));
 }
