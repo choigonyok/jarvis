@@ -68,7 +68,7 @@ services:
       JARVIS_MODEL: ${JARVIS_MODEL:-}
       # Tools that skip the approval card. Read-only only - calendar writes
       # are deliberately absent, so every one of them lands on a card.
-      JARVIS_ALLOWED_TOOLS: ${JARVIS_ALLOWED_TOOLS:-Read,Glob,Grep,TodoWrite,mcp__calendar__list_events,mcp__assets__get_portfolio,mcp__assets__get_allocation,mcp__assets__get_history,mcp__spending__get_spending}
+      JARVIS_ALLOWED_TOOLS: ${JARVIS_ALLOWED_TOOLS:-Read,Glob,Grep,TodoWrite,mcp__calendar__list_events,mcp__assets__get_portfolio,mcp__assets__get_allocation,mcp__assets__get_history,mcp__spending__get_spending,mcp__market__list_listings,mcp__market__search_prices}
       # MCP servers with no module behind them, as name=url. The browser runs
       # on the host - the container has no display and no Chrome - so this
       # dials back out through host.docker.internal.
@@ -94,6 +94,11 @@ services:
       JARVIS_ASSETS_URL: http://assets:8092
       # 가계부도 읽기만 한다.
       JARVIS_SPENDING_URL: http://spending:8095
+      # 중고나라 판매 글. 승인된 초안을 넣고, 백그라운드 작업자가 큐를 처리한다.
+      JARVIS_MARKET_URL: http://market:8097
+      # 대화에 첨부한 사진. 브라우저 컨테이너도 같은 볼륨을 읽기 전용으로 붙여
+      # 판매 글 양식에 사진을 넣는다.
+      JARVIS_UPLOADS_DIR: /uploads
       # 아직 아무도 읽지 않는다. 제안·스레드 저장소가 파일에서 이 데이터베이스로
       # 옮겨갈 때 쓰는 자리를 미리 잡아둔 것이다.
       JARVIS_DATABASE_URL: >-
@@ -106,6 +111,7 @@ services:
       # Module data. Outside the workspace so the module's tools are the only
       # way in - the CLI cannot Read or Write around them.
       - jarvis-data:/data
+      - jarvis-uploads:/uploads
     # Bound to loopback, not exposed to the network. The browser container
     # reaches the agent over the compose network, but the KakaoTalk collectors
     # run on the host - accessibility is a macOS API - and this is how they
@@ -231,6 +237,33 @@ services:
       - "127.0.0.1:${JARVIS_SPENDING_PORT:-8095}:8095"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8095/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # 중고나라 판매 글과, 중고나라에 반영할 변경의 큐. 중고나라와 직접 말하지
+  # 않는다 - 에이전트의 백그라운드 작업자가 브라우저로 하고 결과를 여기 적는다.
+  market:
+    build: ./market-svc
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      LISTEN_ADDR: ":8097"
+      DATABASE_URL: >-
+        postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
+      API_TOKEN: ${JARVIS_API_TOKEN:-}
+      MARKET_SYNC_EVERY: ${MARKET_SYNC_EVERY:-1h}
+      MARKET_PURGE_AFTER: ${MARKET_PURGE_AFTER:-720h}
+    expose:
+      - "8097"
+    ports:
+      - "127.0.0.1:${JARVIS_MARKET_PORT:-8097}:8097"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8097/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -440,6 +473,9 @@ services:
     volumes:
       # Where being logged in lives. Empty this and every site asks again.
       - chrome-profile:/profile
+      # Photos attached in conversation, for browser_upload_files. Read-only:
+      # the browser puts them into forms and never writes here.
+      - jarvis-uploads:/uploads:ro
     ports:
       # noVNC, for the first login and for watching what it is doing. Bound to
       # loopback: this view drives a logged-in browser and has no password.
@@ -612,3 +648,4 @@ volumes:
   jarvis-data:
   jarvis-kakaotalk-data:
   chrome-profile:
+  jarvis-uploads:

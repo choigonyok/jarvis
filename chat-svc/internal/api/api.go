@@ -86,7 +86,7 @@ func (s *Server) append(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "thread 이름이 올바르지 않습니다.")
 		return
 	}
-	if in.Text == "" && len(in.Paragraphs) == 0 && in.ProposalID == "" {
+	if in.Text == "" && len(in.Paragraphs) == 0 && in.ProposalID == "" && len(in.Images) == 0 {
 		writeErr(w, http.StatusBadRequest, "내용이 없는 턴입니다.")
 		return
 	}

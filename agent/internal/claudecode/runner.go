@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -70,7 +71,10 @@ func (r *Runner) remember(id string) {
 
 // Send posts the operator's message and launches a turn. It returns once the
 // process is started; output reaches the client over SSE.
-func (r *Runner) Send(text string) error {
+//
+// Attached photos are named in the prompt by path. The model opens them with
+// Read, which shows it the image; the transcript keeps only the names.
+func (r *Runner) Send(text string, images []string) error {
 	r.mu.Lock()
 	if r.running {
 		r.mu.Unlock()
@@ -80,9 +84,26 @@ func (r *Runner) Send(text string) error {
 	r.yieldLocked()
 	r.mu.Unlock()
 
-	r.store.AppendUser(text)
-	go r.loop(text)
+	r.store.AppendUser(text, images...)
+	go r.loop(withImages(text, images, r.cfg.UploadsDir))
 	return nil
+}
+
+func withImages(text string, images []string, dir string) string {
+	if len(images) == 0 {
+		return text
+	}
+	var b strings.Builder
+	if strings.TrimSpace(text) == "" {
+		b.WriteString("(글 없이 사진만 보냈습니다.)")
+	} else {
+		b.WriteString(text)
+	}
+	fmt.Fprintf(&b, "\n\n[첨부 사진 %d장 - Read 도구로 하나씩 열어 보세요]\n", len(images))
+	for _, name := range images {
+		b.WriteString(filepath.Join(dir, name) + "\n")
+	}
+	return b.String()
 }
 
 // Enqueue starts a turn the operator did not type - how a card's decision
@@ -177,6 +198,10 @@ func (r *Runner) args(prompt string) []string {
 		// Rendered per turn, not at boot: the prompt carries today's date,
 		// and this process is expected to stay up for weeks.
 		"--append-system-prompt", r.systemPrompt(),
+	}
+	if r.cfg.UploadsDir != "" {
+		// Attached photos live outside the workspace; Read may open them.
+		args = append(args, "--add-dir", r.cfg.UploadsDir)
 	}
 	if r.cfg.BuiltinTools != nil {
 		// Only these built-in tools exist for the model (the guest agent).

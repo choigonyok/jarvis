@@ -5,6 +5,7 @@
 package httpapi
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -16,9 +17,11 @@ import (
 
 	"github.com/choigonyok/jarvis/agent/internal/claudecode"
 	"github.com/choigonyok/jarvis/agent/internal/core/bus"
+	"github.com/choigonyok/jarvis/agent/internal/core/module"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
 	"github.com/choigonyok/jarvis/agent/internal/module/calendar"
 	"github.com/choigonyok/jarvis/agent/internal/thread"
+	"github.com/choigonyok/jarvis/agent/internal/uploads"
 )
 
 type Server struct {
@@ -42,12 +45,15 @@ type Server struct {
 	// and wrong the moment a tunnel gives the agent a public hostname.
 	apiToken     string
 	approvalWait time.Duration
+	// uploads holds photos attached in conversation; nil turns them off.
+	uploads *uploads.Store
+	modules *module.Registry
 }
 
 // Sender is whatever drives a turn. Keeping it an interface means the
 // transport does not care that a CLI subprocess sits behind it.
 type Sender interface {
-	Send(text string) error
+	Send(text string, images []string) error
 }
 
 type Deps struct {
@@ -68,7 +74,11 @@ type Deps struct {
 	BackgroundLogin []string
 	APIToken        string
 	ApprovalWait    time.Duration
-	Log             *slog.Logger
+	// Uploads, when set, accepts photos at /uploads and on messages.
+	Uploads *uploads.Store
+	// Modules is consulted when a decision carries edits to a card.
+	Modules *module.Registry
+	Log     *slog.Logger
 }
 
 func New(d Deps) *Server {
@@ -86,6 +96,8 @@ func New(d Deps) *Server {
 		backgroundLogin: hostSet(d.BackgroundLogin),
 		apiToken:        d.APIToken,
 		approvalWait:    d.ApprovalWait,
+		uploads:         d.Uploads,
+		modules:         d.Modules,
 	}
 }
 
@@ -100,6 +112,8 @@ func (s *Server) Handler() http.Handler {
 	// /intercept and /mcp keep the separate secrets they already have.
 	mux.HandleFunc("GET /thread", s.guard(s.getThread))
 	mux.HandleFunc("POST /messages", s.guard(s.postMessage))
+	mux.HandleFunc("POST /uploads", s.guard(s.postUpload))
+	mux.HandleFunc("GET /uploads/{name}", s.guard(s.getUpload))
 	mux.HandleFunc("GET /events", s.guard(s.events))
 
 	mux.HandleFunc("GET /proposals", s.guard(s.getProposals))
@@ -196,18 +210,35 @@ func (s *Server) getThread(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Text string `json:"text"`
+		Text   string   `json:"text"`
+		Images []string `json:"images"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "본문을 읽을 수 없습니다.")
 		return
 	}
 	text := strings.TrimSpace(body.Text)
-	if text == "" {
+	if text == "" && len(body.Images) == 0 {
 		writeErr(w, http.StatusBadRequest, "메시지가 비어 있습니다.")
 		return
 	}
-	if err := s.runner.Send(text); err != nil {
+	if len(body.Images) > 0 {
+		if s.uploads == nil {
+			writeErr(w, http.StatusBadRequest, "이 대화에서는 사진을 보낼 수 없습니다.")
+			return
+		}
+		if len(body.Images) > 12 {
+			writeErr(w, http.StatusBadRequest, "사진은 한 번에 12장까지입니다.")
+			return
+		}
+		for _, name := range body.Images {
+			if _, err := s.uploads.Path(name); err != nil {
+				writeErr(w, http.StatusBadRequest, "올린 사진을 찾을 수 없습니다. 다시 첨부해 주세요.")
+				return
+			}
+		}
+	}
+	if err := s.runner.Send(text, body.Images); err != nil {
 		if errors.Is(err, claudecode.ErrBusy) {
 			writeErr(w, http.StatusConflict, err.Error())
 			return
@@ -225,12 +256,21 @@ func (s *Server) getProposals(w http.ResponseWriter, r *http.Request) {
 func (s *Server) postDecision(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Decision string `json:"decision"`
+		// Edits are the card's form fields as the operator left them.
+		Edits map[string]string `json:"edits"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "본문을 읽을 수 없습니다.")
 		return
 	}
-	err := s.proposals.Decide(r.PathValue("id"), proposal.Decision(body.Decision))
+	id := r.PathValue("id")
+	if proposal.Decision(body.Decision) == proposal.Approve {
+		if msg, code := s.revise(r.Context(), id, body.Edits); msg != "" {
+			writeErr(w, code, msg)
+			return
+		}
+	}
+	err := s.proposals.Decide(id, proposal.Decision(body.Decision))
 	switch {
 	case errors.Is(err, proposal.ErrNotFound):
 		writeErr(w, http.StatusNotFound, "그런 요청이 없습니다.")
@@ -241,6 +281,63 @@ func (s *Server) postDecision(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.WriteHeader(http.StatusNoContent)
 	}
+}
+
+// revise runs an approval of a form card through its module first: the
+// operator's edits become the action that runs, and a value the module will
+// not accept (an empty price) stops the approval with a reason.
+func (s *Server) revise(ctx context.Context, id string, edits map[string]string) (string, int) {
+	p, ok := s.proposals.Get(id)
+	if !ok || p.State != proposal.Pending || len(p.Card.Fields) == 0 || s.modules == nil {
+		if len(edits) > 0 && ok && len(p.Card.Fields) == 0 {
+			return "이 카드는 고칠 수 없습니다.", http.StatusBadRequest
+		}
+		return "", 0
+	}
+	actuator, _, found := s.modules.Lookup(p.Action.Kind)
+	editor, editable := actuator.(module.Editor)
+	if !found || !editable {
+		return "", 0
+	}
+	act, card, err := editor.Revise(ctx, p.Action, edits)
+	if err != nil {
+		return err.Error(), http.StatusBadRequest
+	}
+	if err := s.proposals.Revise(id, act, card); err != nil {
+		return "이미 결재된 요청입니다.", http.StatusConflict
+	}
+	return "", 0
+}
+
+// postUpload stores one photo, sent as the raw request body.
+func (s *Server) postUpload(w http.ResponseWriter, r *http.Request) {
+	if s.uploads == nil {
+		writeErr(w, http.StatusNotFound, "사진을 받지 않습니다.")
+		return
+	}
+	name, err := s.uploads.Save(http.MaxBytesReader(w, r.Body, uploads.MaxBytes+1))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]string{"name": name})
+}
+
+func (s *Server) getUpload(w http.ResponseWriter, r *http.Request) {
+	if s.uploads == nil {
+		writeErr(w, http.StatusNotFound, "사진을 받지 않습니다.")
+		return
+	}
+	path, err := s.uploads.Path(r.PathValue("name"))
+	if err != nil {
+		// Deleted 30 days after a sale; the console shows a placeholder.
+		writeErr(w, http.StatusNotFound, err.Error())
+		return
+	}
+	// The name is random and the content never changes under it.
+	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	http.ServeFile(w, r, path)
 }
 
 func (s *Server) getCalendar(w http.ResponseWriter, r *http.Request) {

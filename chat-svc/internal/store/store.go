@@ -67,7 +67,8 @@ const selectList = `
 	       coalesce(paragraphs, '{}'),
 	       coalesce(body, ''),
 	       coalesce(proposal_id, ''),
-	       coalesce(session_id, '')
+	       coalesce(session_id, ''),
+	       coalesce(images, '{}')
 	  from turns`
 
 // All returns the whole transcript, oldest first.
@@ -88,7 +89,7 @@ func (s *Store) All(ctx context.Context, tz, thread string) ([]turn.Turn, error)
 	for rows.Next() {
 		var t turn.Turn
 		if err := rows.Scan(&t.ID, &t.Role, &t.At, &t.AtISO, &t.Paragraphs,
-			&t.Text, &t.ProposalID, &t.SessionID); err != nil {
+			&t.Text, &t.ProposalID, &t.SessionID, &t.Images); err != nil {
 			return nil, fmt.Errorf("턴 읽기: %w", err)
 		}
 		out = append(out, t)
@@ -123,10 +124,15 @@ func (s *Store) Append(ctx context.Context, t turn.Turn, tz string) (turn.Turn, 
 		paragraphs = t.Paragraphs
 	}
 
+	var images any
+	if len(t.Images) > 0 {
+		images = t.Images
+	}
+
 	rows, err := s.pool.Query(ctx, `
 		with inserted as (
-		  insert into turns (id, role, at, paragraphs, body, proposal_id, session_id, thread)
-		  values ($2, $3, now(), $4, nullif($5,''), nullif($6,''), nullif($7,''), $8)
+		  insert into turns (id, role, at, paragraphs, body, proposal_id, session_id, thread, images)
+		  values ($2, $3, now(), $4, nullif($5,''), nullif($6,''), nullif($7,''), $8, $9)
 		  returning *
 		)
 		select id, role,
@@ -135,9 +141,10 @@ func (s *Store) Append(ctx context.Context, t turn.Turn, tz string) (turn.Turn, 
 		       coalesce(paragraphs, '{}'),
 		       coalesce(body, ''),
 		       coalesce(proposal_id, ''),
-		       coalesce(session_id, '')
+		       coalesce(session_id, ''),
+		       coalesce(images, '{}')
 		  from inserted`,
-		tz, id, string(t.Role), paragraphs, t.Text, t.ProposalID, t.SessionID, t.Thread)
+		tz, id, string(t.Role), paragraphs, t.Text, t.ProposalID, t.SessionID, t.Thread, images)
 	if err != nil {
 		return turn.Turn{}, fmt.Errorf("턴 저장: %w", err)
 	}
@@ -151,7 +158,7 @@ func (s *Store) Append(ctx context.Context, t turn.Turn, tz string) (turn.Turn, 
 	}
 	var saved turn.Turn
 	if err := rows.Scan(&saved.ID, &saved.Role, &saved.At, &saved.AtISO,
-		&saved.Paragraphs, &saved.Text, &saved.ProposalID, &saved.SessionID); err != nil {
+		&saved.Paragraphs, &saved.Text, &saved.ProposalID, &saved.SessionID, &saved.Images); err != nil {
 		return turn.Turn{}, fmt.Errorf("저장된 턴 읽기: %w", err)
 	}
 	saved.Thread = t.Thread

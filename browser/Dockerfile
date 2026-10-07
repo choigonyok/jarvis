@@ -16,7 +16,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY bridge.py guard.py entrypoint.sh /app/
+COPY bridge.py guard.py upload.py entrypoint.sh /app/
 COPY payment-hosts.json /app/payment-hosts.json
 COPY config.json /config/browseruse/config.json
 

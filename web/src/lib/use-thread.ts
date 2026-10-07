@@ -74,31 +74,36 @@ export function useThread() {
 
   const connection = useAgentStream(onEvent, () => void hydrate());
 
-  const send = useCallback(async (text: string) => {
+  /** Resolves true once the agent took the message. */
+  const send = useCallback(async (text: string, images?: string[]) => {
     setError(null);
     try {
       const res = await fetch(`${API}/messages`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify(images?.length ? { text, images } : { text }),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { error?: string } | null;
         setError(body?.error ?? "메시지를 보내지 못했습니다.");
+        return false;
       }
+      return true;
     } catch {
       setError("에이전트에 연결하지 못했습니다.");
+      return false;
     }
   }, []);
 
   const decide = useCallback(
-    async (proposalId: string, decision: Decision) => {
+    async (proposalId: string, decision: Decision, edits?: Record<string, string>) => {
       setError(null);
-      const message = await decideProposal(proposalId, decision);
+      const message = await decideProposal(proposalId, decision, edits);
       if (message) {
         setError(message);
         void hydrate();
       }
+      return message;
     },
     [hydrate],
   );

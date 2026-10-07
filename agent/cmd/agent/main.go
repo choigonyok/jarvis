@@ -24,8 +24,10 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/httpapi"
 	"github.com/choigonyok/jarvis/agent/internal/module/assets"
 	"github.com/choigonyok/jarvis/agent/internal/module/calendar"
+	"github.com/choigonyok/jarvis/agent/internal/module/market"
 	"github.com/choigonyok/jarvis/agent/internal/module/spending"
 	"github.com/choigonyok/jarvis/agent/internal/thread"
+	"github.com/choigonyok/jarvis/agent/internal/uploads"
 )
 
 func main() {
@@ -79,6 +81,14 @@ func main() {
 	// without them - no module, no MCP server, no tool - so there is nothing
 	// for its model to call, whatever it is asked.
 	var spendingModule *spending.Module
+	var marketModule *market.Module
+	var photos *uploads.Store
+	if cfg.UploadsDir != "" {
+		if photos, err = uploads.New(cfg.UploadsDir); err != nil {
+			log.Error("사진 폴더를 열지 못했습니다", "dir", cfg.UploadsDir, "err", err)
+			os.Exit(1)
+		}
+	}
 	if !cfg.Guest {
 		assetsModule := assets.New(assets.NewStore(cfg.AssetsURL, cfg.APIToken))
 		modules.Add(assetsModule)
@@ -92,6 +102,16 @@ func main() {
 		mcpMounts["/mcp/"+spending.EnrichServerName] = spendingModule.EnrichHandler()
 		cfg.ModuleMCPURLs[assets.ServerName] = cfg.PublicMCPURL + "/" + assets.ServerName
 		cfg.ModuleMCPURLs[spending.ServerName] = cfg.PublicMCPURL + "/" + spending.ServerName
+
+		// 중고나라. 판매 글은 사진이 있어야 하므로 사진 폴더가 있을 때만 켠다.
+		if photos != nil {
+			marketModule = market.New(market.NewStore(cfg.MarketURL, cfg.APIToken), photos)
+			modules.Add(marketModule)
+			mcpMounts["/mcp/"+market.ServerName] = marketModule.Handler()
+			// Background only, like spending-enrich.
+			mcpMounts["/mcp/"+market.WorkerServerName] = marketModule.WorkerHandler()
+			cfg.ModuleMCPURLs[market.ServerName] = cfg.PublicMCPURL + "/" + market.ServerName
+		}
 	}
 
 	startCtx, cancelStart := context.WithTimeout(context.Background(), 10*time.Second)
@@ -118,6 +138,18 @@ func main() {
 	} else if spendingModule != nil && cfg.Enrich {
 		log.Warn("브라우저 MCP 가 없어 묶음 결제 조회를 켜지 않습니다", "need", spending.BrowserServer)
 	}
+	// 승인된 판매 글 등록, 탭에서 요청한 변경, 한 시간마다 현황 확인.
+	if _, ok := cfg.ExtraMCPURLs[market.BrowserServer]; marketModule != nil && cfg.Market && ok {
+		marketModule.Notify(proposals)
+		go marketModule.RunWorker(enrichCtx, runner, market.WorkerConfig{
+			WorkerURL: cfg.PublicMCPURL + "/" + market.WorkerServerName,
+			Interval:  cfg.MarketInterval,
+			Cooldown:  cfg.MarketCooldown,
+			Timeout:   cfg.MarketTimeout,
+		}, log)
+	} else if marketModule != nil && cfg.Market {
+		log.Warn("브라우저 MCP 가 없어 중고나라 작업을 켜지 않습니다", "need", market.BrowserServer)
+	}
 	// A card does not hold a turn open; its decision starts the next one.
 	gate.SetFollowUp(runner)
 	proposals.OnDecide(gate.Resolve)
@@ -137,6 +169,8 @@ func main() {
 			BackgroundLogin: cfg.BackgroundLogin,
 			APIToken:        cfg.APIToken,
 			ApprovalWait:    cfg.ApprovalWait,
+			Uploads:         photos,
+			Modules:         modules,
 			Log:             log,
 		}).Handler(),
 		// No WriteTimeout: /events streams and /mcp blocks on a human.

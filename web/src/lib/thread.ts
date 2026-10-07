@@ -10,6 +10,25 @@ export type ProposalAction = {
   input: Record<string, unknown>;
 };
 
+/** One value on a card the operator may change before approving. */
+export type CardField = {
+  key: string;
+  label: string;
+  kind: "text" | "textarea" | "number" | "select";
+  value: string;
+  options?: string[];
+};
+
+export type ProposalCardBody = {
+  title: string;
+  body: string;
+  consequence: string;
+  /** Upload names shown on the card. */
+  images?: string[];
+  /** Present when the card is a form (a Joongna draft). */
+  fields?: CardField[];
+};
+
 /**
  * A proposal is a stored object, not a property of a chat turn: it can be
  * raised with no conversation behind it, which is how a detector will
@@ -19,7 +38,7 @@ export type Proposal = {
   id: string;
   origin: string;
   action: ProposalAction;
-  card: { title: string; body: string; consequence: string };
+  card: ProposalCardBody;
   confidence?: number;
   state: ProposalState;
   note?: string;
@@ -33,6 +52,8 @@ export type Turn = {
   at: string;
   paragraphs?: string[];
   text?: string;
+  /** Photos the operator attached, by upload name (see lib/uploads.ts). */
+  images?: string[];
   /** Points at a proposal; the card itself lives in the proposal store. */
   proposalId?: string;
 };

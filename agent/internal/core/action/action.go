@@ -32,6 +32,22 @@ type Card struct {
 	Title       string `json:"title"`
 	Body        string `json:"body"`
 	Consequence string `json:"consequence"`
+	// Images are upload names shown on the card - what a listing will look
+	// like is half its photos.
+	Images []string `json:"images,omitempty"`
+	// Fields make the card a form: the operator may change these before
+	// approving, and the module turns the edits into a new input (Editor).
+	Fields []Field `json:"fields,omitempty"`
+}
+
+// Field is one value on a card the operator may edit.
+type Field struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+	// Kind is "text", "textarea", "number" or "select".
+	Kind    string   `json:"kind"`
+	Value   string   `json:"value"`
+	Options []string `json:"options,omitempty"`
 }
 
 // Spec is a module's declaration of one action it accepts.

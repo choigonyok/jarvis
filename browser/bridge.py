@@ -22,6 +22,7 @@ from mcp.types import (
     CallToolResult,
     ListToolsResult,
     PaginatedRequestParams,
+    Tool,
 )
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from starlette.applications import Starlette
@@ -29,6 +30,8 @@ from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 from starlette.routing import Mount
+
+import upload
 
 HOST = os.environ.get("MCP_BROWSER_HOST", "0.0.0.0")
 PORT = int(os.environ.get("MCP_BROWSER_PORT", "8931"))
@@ -59,7 +62,8 @@ _upstream: ClientSession | None = None
 
 async def handle_list_tools(_ctx, _params: PaginatedRequestParams | None) -> ListToolsResult:
     tools = (await _upstream.list_tools()).tools
-    return ListToolsResult(tools=[t for t in tools if t.name not in HIDDEN])
+    # browser-use에 없는 도구 하나를 여기서 더한다: 파일 선택 칸 채우기.
+    return ListToolsResult(tools=[t for t in tools if t.name not in HIDDEN] + [Tool(**upload.TOOL)])
 
 
 async def handle_call_tool(_ctx, params: CallToolRequestParams) -> CallToolResult:
@@ -68,6 +72,13 @@ async def handle_call_tool(_ctx, params: CallToolRequestParams) -> CallToolResul
             content=[{"type": "text", "text": f"{params.name} is not available here"}],
             isError=True,
         )
+    if params.name == upload.TOOL["name"]:
+        args = params.arguments or {}
+        try:
+            text = await upload.upload(list(args.get("paths") or []), args.get("selector"))
+        except Exception as e:
+            return CallToolResult(content=[{"type": "text", "text": str(e)}], isError=True)
+        return CallToolResult(content=[{"type": "text", "text": text}])
     return await _upstream.call_tool(params.name, params.arguments or {})
 
 

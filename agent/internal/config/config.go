@@ -78,6 +78,17 @@ type Config struct {
 	// "쿠팡 8,900원" charge actually bought). It needs the browser server in
 	// ExtraMCPURLs; without it the loop does not start.
 	Enrich bool
+	// UploadsDir is where photos attached in conversation are kept. Empty
+	// turns attachments off (the guest agent).
+	UploadsDir string
+	// MarketURL is where market-svc listens: Joongna listings and the queue
+	// of changes the background worker carries to Joongna.
+	MarketURL string
+	// Market turns on that worker. Like Enrich, it needs the browser server.
+	Market         bool
+	MarketInterval time.Duration
+	MarketCooldown time.Duration
+	MarketTimeout  time.Duration
 	// Guest is the second agent, for the guest account (JARVIS_ROLE=guest).
 	// It has its own conversation (Thread), its own CLI home and session, only
 	// the calendar module, no browser, and no built-in tools beyond web search -
@@ -129,19 +140,27 @@ func Load() (Config, error) {
 		AllowedTools: splitList(env("JARVIS_ALLOWED_TOOLS",
 			"Read,Glob,Grep,TodoWrite,mcp__calendar__list_events,"+
 				"mcp__assets__get_portfolio,mcp__assets__get_allocation,mcp__assets__get_history,"+
-				"mcp__spending__get_spending")),
-		PermissionMode:  env("JARVIS_PERMISSION_MODE", "manual"),
-		ApprovalWait:    envDuration("JARVIS_APPROVAL_TIMEOUT", 30*time.Minute),
-		TurnTimeout:     envDuration("JARVIS_TURN_TIMEOUT", 2*time.Hour),
-		PublicMCPURL:    env("JARVIS_MCP_URL", "http://127.0.0.1:8080/mcp"),
-		ModuleMCPURLs:   map[string]string{},
-		ExtraMCPURLs:    parseMCPURLs(os.Getenv("JARVIS_EXTRA_MCP")),
-		ExtraMCPToken:   os.Getenv("JARVIS_MCP_TOKEN"),
-		CalendarURL:     env("JARVIS_CALENDAR_URL", "http://localhost:8093"),
-		ChatURL:         env("JARVIS_CHAT_URL", "http://localhost:8094"),
-		AssetsURL:       env("JARVIS_ASSETS_URL", "http://localhost:8092"),
-		SpendingURL:     env("JARVIS_SPENDING_URL", "http://localhost:8095"),
-		Enrich:          envBool("JARVIS_ENRICH", true),
+				"mcp__spending__get_spending,mcp__market__list_listings,mcp__market__search_prices")),
+		PermissionMode: env("JARVIS_PERMISSION_MODE", "manual"),
+		ApprovalWait:   envDuration("JARVIS_APPROVAL_TIMEOUT", 30*time.Minute),
+		TurnTimeout:    envDuration("JARVIS_TURN_TIMEOUT", 2*time.Hour),
+		PublicMCPURL:   env("JARVIS_MCP_URL", "http://127.0.0.1:8080/mcp"),
+		ModuleMCPURLs:  map[string]string{},
+		ExtraMCPURLs:   parseMCPURLs(os.Getenv("JARVIS_EXTRA_MCP")),
+		ExtraMCPToken:  os.Getenv("JARVIS_MCP_TOKEN"),
+		CalendarURL:    env("JARVIS_CALENDAR_URL", "http://localhost:8093"),
+		ChatURL:        env("JARVIS_CHAT_URL", "http://localhost:8094"),
+		AssetsURL:      env("JARVIS_ASSETS_URL", "http://localhost:8092"),
+		SpendingURL:    env("JARVIS_SPENDING_URL", "http://localhost:8095"),
+		Enrich:         envBool("JARVIS_ENRICH", true),
+		UploadsDir:     env("JARVIS_UPLOADS_DIR", ""),
+		MarketURL:      env("JARVIS_MARKET_URL", "http://localhost:8097"),
+		Market:         envBool("JARVIS_MARKET", true),
+		MarketInterval: envDuration("JARVIS_MARKET_INTERVAL", time.Minute),
+		// Least time between two browser runs. Joongna is a marketplace that
+		// watches for bots; one change every couple of minutes is a person.
+		MarketCooldown:  envDuration("JARVIS_MARKET_COOLDOWN", 2*time.Minute),
+		MarketTimeout:   envDuration("JARVIS_MARKET_TIMEOUT", 10*time.Minute),
 		BackgroundLogin: splitList(env("JARVIS_BACKGROUND_LOGIN_HOSTS", "nid.naver.com")),
 		EnrichInterval:  envDuration("JARVIS_ENRICH_INTERVAL", time.Minute),
 		EnrichCooldown:  envDuration("JARVIS_ENRICH_COOLDOWN", 10*time.Minute),
@@ -163,6 +182,8 @@ func Load() (Config, error) {
 		// background lookups: those belong to the operator's spending.
 		c.ExtraMCPURLs = map[string]string{}
 		c.Enrich = false
+		c.Market = false
+		c.UploadsDir = ""
 	}
 
 	if c.OAuthToken == "" {
@@ -224,7 +245,16 @@ const defaultSystemPrompt = `당신은 Jarvis입니다. 한 사람의 개인 어
 - 지출은 spending 도구(get_spending)로만 조회하세요. 카드사 카톡 결제 알림으로 모은 것이고 읽기 전용입니다.
 - 진행 중인 달은 지난달 전체가 아니라 "지난달 같은 날까지"와 비교하세요.
 - "주의"나 "읽지 못한 카드 알림"이 있으면 합계가 빠졌을 수 있다고 먼저 밝히세요.
-- 분류를 바꾸거나 예산을 정하는 건 가계부 화면에서 하도록 안내하세요.`
+- 분류를 바꾸거나 예산을 정하는 건 가계부 화면에서 하도록 안내하세요.
+
+중고나라
+- 사진과 함께 팔아 달라는 요청이 오면: 첨부 사진을 Read로 모두 열어 보고, 무엇인지(브랜드·모델·구성품·상태·하자)를 파악하세요.
+- search_prices로 중고나라 시세를 확인하고, 그 요약을 post_listing의 reference에 넣으세요.
+- 가격은 운영자가 직접 말한 경우에만 priceKrw에 넣고, 말하지 않았으면 0으로 두세요. 운영자가 카드에서 직접 적습니다. 시세로 가격을 정하지 마세요.
+- 거래 방식은 택배거래입니다. 택배비는 작고 가벼운 물건이면 포함(included), 크거나 무거우면 별도(separate)로 제안하세요.
+- 사진에서 확신할 수 없는 정보(용량, 구입 시기, 하자 유무)는 지어내지 말고 설명에 확인이 필요하다고 짧게 적거나 운영자에게 물으세요.
+- post_listing은 초안 카드를 올립니다. 운영자가 카드에서 고쳐서 승인하면 백그라운드에서 등록되고, 진행은 중고나라 탭에서 보입니다.
+- 이미 올린 글의 상태는 list_listings로 확인하세요. 가격 변경·예약중·판매완료·끌어올리기·삭제는 중고나라 탭에서 하도록 안내하세요.`
 
 // guestSystemPrompt is for the guest account's agent. It knows nothing of the
 // operator's money, messages or shopping - not by instruction alone but

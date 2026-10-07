@@ -43,6 +43,7 @@
     "WORKOUT_URL": "https://jarvis-be.choigonyok.com/workout",
     "ASSETS_URL": "https://jarvis-be.choigonyok.com/assets",
     "SPENDING_URL": "https://jarvis-be.choigonyok.com/spending",
+    "MARKET_URL": "https://jarvis-be.choigonyok.com/market",
     "KAKAOTALK_URL": "https://jarvis-be.choigonyok.com/kakaotalk",
     "STATUS_URL": "https://jarvis-be.choigonyok.com/status",
     // 화면 탭의 VNC 웹소켓. 주소에 /api/screen/ticket 이 만든 1분짜리 입장권을 붙인다.

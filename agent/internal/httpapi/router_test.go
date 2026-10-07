@@ -1,7 +1,9 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -9,14 +11,16 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/choigonyok/jarvis/agent/internal/core/action"
 	"github.com/choigonyok/jarvis/agent/internal/core/bus"
+	"github.com/choigonyok/jarvis/agent/internal/core/module"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
 )
 
 type bgRunner struct{ bg bool }
 
-func (r bgRunner) Send(string) error  { return nil }
-func (r bgRunner) InBackground() bool { return r.bg }
+func (r bgRunner) Send(string, []string) error { return nil }
+func (r bgRunner) InBackground() bool          { return r.bg }
 
 // While a background task drives the browser, a payment host is refused on
 // the spot: no card is opened for a person who did not start anything.
@@ -104,5 +108,62 @@ func TestGuard(t *testing.T) {
 				t.Fatalf("handler reached = %v, want %v", got, tc.want == http.StatusOK)
 			}
 		})
+	}
+}
+
+// editor is a module whose card is a form: it needs a "price" before it may
+// run, and an edit replaces the input.
+type editor struct{}
+
+func (editor) Name() string                { return "shop" }
+func (editor) Start(context.Context) error { return nil }
+func (editor) Stop(context.Context) error  { return nil }
+func (editor) Specs() []action.Spec        { return []action.Spec{{Kind: "shop.sell"}} }
+func (editor) Preview(context.Context, action.Action) (action.Card, error) {
+	return action.Card{Title: "sell"}, nil
+}
+func (editor) Execute(context.Context, action.Action) (action.Result, error) {
+	return action.Result{}, nil
+}
+func (editor) Revise(_ context.Context, a action.Action, edits map[string]string) (action.Action, action.Card, error) {
+	if edits["price"] == "" {
+		return a, action.Card{}, errors.New("가격을 적어 주세요.")
+	}
+	raw, _ := json.Marshal(map[string]string{"price": edits["price"]})
+	return action.Action{Kind: a.Kind, Input: raw}, action.Card{Title: "sell", Fields: []action.Field{{Key: "price"}}}, nil
+}
+
+// Approving a form card goes through the module: a missing value stops the
+// approval, and an edited value is what the proposal then carries.
+func TestDecisionWithEdits(t *testing.T) {
+	props := proposal.NewStore(bus.New())
+	reg := module.NewRegistry()
+	reg.Add(editor{})
+	s := &Server{proposals: props, modules: reg, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	p, _ := props.Open(proposal.Proposal{
+		Action: action.Action{Kind: "shop.sell", Input: json.RawMessage(`{}`)},
+		Card:   action.Card{Title: "sell", Fields: []action.Field{{Key: "price"}}},
+	})
+
+	decide := func(body string) int {
+		req := httptest.NewRequest(http.MethodPost, "/proposals/"+p.ID+"/decision", strings.NewReader(body))
+		req.SetPathValue("id", p.ID)
+		rec := httptest.NewRecorder()
+		s.postDecision(rec, req)
+		return rec.Code
+	}
+
+	if code := decide(`{"decision":"approved"}`); code != http.StatusBadRequest {
+		t.Fatalf("approval without a price: %d", code)
+	}
+	if got, _ := props.Get(p.ID); got.State != proposal.Pending {
+		t.Fatalf("state after refused approval: %s", got.State)
+	}
+	if code := decide(`{"decision":"approved","edits":{"price":"9000"}}`); code != http.StatusNoContent {
+		t.Fatalf("approval with a price: %d", code)
+	}
+	got, _ := props.Get(p.ID)
+	if got.State != proposal.Approved || string(got.Action.Input) != `{"price":"9000"}` {
+		t.Fatalf("after approval: %s %s", got.State, got.Action.Input)
 	}
 }

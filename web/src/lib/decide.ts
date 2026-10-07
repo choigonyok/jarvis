@@ -9,12 +9,14 @@ import { API, type Decision } from "@/lib/thread";
 export async function decideProposal(
   proposalId: string,
   decision: Decision,
+  /** A form card's fields as the operator left them. */
+  edits?: Record<string, string>,
 ): Promise<string | null> {
   try {
     const res = await fetch(`${API}/proposals/${proposalId}/decision`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ decision }),
+      body: JSON.stringify(edits ? { decision, edits } : { decision }),
     });
     if (res.ok) return null;
     const body = (await res.json().catch(() => null)) as { error?: string } | null;
