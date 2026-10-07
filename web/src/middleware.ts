@@ -63,6 +63,8 @@ export const config = {
   matcher: [
     // Everything except the login surface, the auth endpoints, and the assets
     // the login page itself needs to render.
-    "/((?!login|api/auth/|_next/static|_next/image|favicon.ico).*)",
+    // The home-screen manifest and icons too: the phone fetches them on its
+    // own, and a guest's role would otherwise turn them into a redirect.
+    "/((?!login|api/auth/|_next/static|_next/image|favicon.ico|manifest.webmanifest|icons/).*)",
   ],
 };

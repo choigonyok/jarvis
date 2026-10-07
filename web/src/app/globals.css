@@ -149,6 +149,11 @@
   .pb-safe {
     padding-bottom: max(env(safe-area-inset-bottom), 0px);
   }
+  /* The status bar on a home-screen web app: the page runs under it, so the
+     top bar takes its height as padding and its background fills behind it. */
+  .pt-safe {
+    padding-top: env(safe-area-inset-top);
+  }
   .inset-x-safe {
     padding-left: env(safe-area-inset-left);
     padding-right: env(safe-area-inset-right);
@@ -290,7 +295,9 @@
 }
 
 @utility pb-tabbar {
-  padding-bottom: var(--tabbar-space);
+  /* With the bar hidden (typing) the space is zero, but the home indicator is
+     still there - nothing settles underneath it. */
+  padding-bottom: max(var(--tabbar-space), env(safe-area-inset-bottom));
 }
 
 .liquid-glass {
@@ -444,4 +451,10 @@
   main {
     overflow-x: hidden;
   }
+}
+
+/* What shows past the page: an iPhone pulled past the top or bottom of a
+   home-screen app shows the root, and a white root reads as a hole. */
+html {
+  background-color: var(--background);
 }

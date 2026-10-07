@@ -142,7 +142,7 @@ export function Header({
   }
 
   return (
-    <header className="inset-x-safe shrink-0 border-b border-edge-soft bg-background">
+    <header className="inset-x-safe pt-safe shrink-0 border-b border-edge-soft bg-background">
       <div className="mx-auto flex h-13 w-full max-w-[52rem] items-center justify-between px-4 sm:h-14 sm:px-8">
         <div className="flex items-baseline gap-4">
           <h1 className="text-[15px] font-semibold tracking-tight text-foreground">
