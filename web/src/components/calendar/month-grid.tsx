@@ -3,10 +3,11 @@
 import { useEffect, useRef } from "react";
 import { addDays, monthCells, WEEKDAYS, type Cursor } from "@/lib/month";
 import { cn } from "@/lib/utils";
+import { OWNER_LABEL, OwnerDot, type Owner } from "@/components/calendar/owner";
 
 export type DayMark = {
-  /** 확정된 일정 수. 점의 개수를 정한다. */
-  events: number;
+  /** 그날 확정된 일정마다 그 주인. 점의 개수와 색을 정한다. */
+  owners: Owner[];
   /** 결재를 기다리는 제안이 있는 날. */
   pending: boolean;
 };
@@ -96,35 +97,33 @@ export function MonthGrid({
               aria-label={ariaLabel(cell.date, cell.day, cell.weekday, mark)}
               onClick={() => onSelect(cell.date)}
               className={cn(
-                "flex h-12 flex-col items-center justify-center gap-1 rounded-lg transition-colors outline-none sm:h-14",
+                "flex h-12 flex-col items-center justify-center gap-[3px] rounded-lg transition-colors outline-none sm:h-14",
                 "focus-visible:ring-3 focus-visible:ring-ring/50",
                 isSelected ? "bg-glass-raised" : "hover:bg-glass",
               )}
             >
               <span
                 className={cn(
-                  "tnum text-[13px] leading-none",
+                  "tnum grid size-6 place-items-center rounded-full text-[13.5px] leading-none sm:text-[13px]",
                   !cell.inMonth && "text-faint/60",
                   cell.inMonth && (isSelected || isToday ? "text-foreground" : "text-dim"),
-                  isToday && "font-semibold",
+                  isToday && "font-semibold ring-1 ring-foreground/45",
                 )}
               >
                 {cell.day}
               </span>
 
-              {/* 한 줄뿐인 신호: 점이 있으면 뭔가 있는 날, 숨쉬면 결재 대기. */}
-              <span aria-hidden className="flex h-[5px] items-center gap-[3px]">
+              {/* 점 하나가 일정 하나, 색이 그 주인: 파랑은 나, 호박색은 상대,
+                  반반은 함께. 숨쉬는 빈 원은 결재 대기. */}
+              <span
+                aria-hidden
+                className={cn("flex h-[7px] items-center gap-[3px]", !cell.inMonth && "opacity-40")}
+              >
                 {mark?.pending ? (
-                  <span className="anim-breathe size-[5px] rounded-full border border-dim" />
+                  <span className="anim-breathe size-[7px] rounded-full border border-dim" />
                 ) : null}
-                {Array.from({ length: Math.min(mark?.events ?? 0, 3) }).map((_, i) => (
-                  <span
-                    key={i}
-                    className={cn(
-                      "size-[3px] rounded-full",
-                      cell.inMonth ? "bg-dim" : "bg-faint/60",
-                    )}
-                  />
+                {(mark?.owners ?? []).slice(0, 3).map((owner, i) => (
+                  <OwnerDot key={i} owner={owner} />
                 ))}
               </span>
             </button>
@@ -138,7 +137,12 @@ export function MonthGrid({
 function ariaLabel(date: string, day: number, weekday: number, mark?: DayMark): string {
   const month = Number(date.slice(5, 7));
   const parts = [`${month}월 ${day}일 ${WEEKDAYS[weekday]}요일`];
-  if (mark?.events) parts.push(`일정 ${mark.events}건`);
+  if (mark?.owners.length) {
+    const counts = new Map<Owner, number>();
+    for (const o of mark.owners) counts.set(o, (counts.get(o) ?? 0) + 1);
+    const detail = [...counts].map(([o, n]) => `${OWNER_LABEL[o]} ${n}`).join(", ");
+    parts.push(`일정 ${mark.owners.length}건(${detail})`);
+  }
   if (mark?.pending) parts.push("결재 대기 있음");
   return parts.join(", ");
 }

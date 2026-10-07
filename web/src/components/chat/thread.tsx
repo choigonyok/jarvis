@@ -1,46 +1,187 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Composer } from "@/components/chat/composer";
+import { ModeToggle, type ChatMode } from "@/components/chat/mode-toggle";
 import { ProposalCard } from "@/components/chat/proposal-card";
-import { Header } from "@/components/shell/header";
+import { Markdown } from "@/components/chat/markdown";
+import { VoiceStage } from "@/components/chat/voice-stage";
+import { Header, TabBar } from "@/components/shell/header";
+import { StandingBar } from "@/components/shell/standing-bar";
 import { isPending } from "@/lib/thread";
+import { speakable, useSpeech } from "@/lib/use-speech";
 import { useThread } from "@/lib/use-thread";
 
-/** Timestamps and status live in the rail, so the body stays a clean measure. */
+const MODE_KEY = "jarvis:chat-mode";
+
+/**
+ * Timestamps and status live in the rail, so the body stays a clean measure.
+ *
+ * The rail is a wide-screen luxury: 44px of gutter is an eighth of a phone,
+ * spent on a stamp nobody reads while scrolling the last three turns. It
+ * collapses below sm. What matters for an audit - when a request was decided -
+ * is on the proposal card itself and survives the collapse.
+ */
 function Rail({ at }: { at?: string }) {
   return (
-    <div className="pt-[3px] pr-3 text-right sm:pr-4">
+    <div className="hidden pt-[3px] pr-3 text-right sm:block sm:pr-4">
       {at ? <span className="tnum text-[11px] text-faint">{at}</span> : null}
     </div>
   );
 }
 
-export function Thread() {
-  const { turns, proposals, byId, thinking, connection, error, hydrated, send, decide } =
-    useThread();
-  const bottomRef = useRef<HTMLDivElement>(null);
+/** The agent's side of the transcript, railed on wide screens, flush on phones. */
+const ROW =
+  "grid grid-cols-[minmax(0,1fr)] sm:grid-cols-[3.5rem_minmax(0,1fr)]";
 
-  const pending = proposals.filter(isPending).length;
+export function Thread() {
+  const {
+    turns,
+    proposals,
+    byId,
+    thinking,
+    connection,
+    error,
+    hydrated,
+    send,
+    decide,
+  } = useThread();
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLElement>(null);
+  const [mode, setMode] = useState<ChatMode>("text");
+  const [muted, setMuted] = useState(false);
+  const { speak, cancel, speaking, pulse, progress } = useSpeech();
+  // The bottom bar gives up its space while the keyboard is up: it is covered
+  // anyway, and the transcript needs those 44px more than the tabs do.
+  const [typing, setTyping] = useState(false);
+  // Only replies that land while you are listening get read out. Without this
+  // the backlog would be recited from the top the moment you switch modes.
+  const spoken = useRef<string | null>(null);
+
+  const waiting = proposals.filter(isPending);
+  const pending = waiting.length;
+  // The bar speaks for what you cannot see. A card sitting in the transcript
+  // in front of you is already saying it.
+  const [cardsVisible, setCardsVisible] = useState(false);
 
   // A proposal nobody asked for has no turn pointing at it. Until a detector
   // exists to raise one, this renders nothing - but it is what makes the
   // chat able to show one the day it does.
   const attached = new Set(turns.map((t) => t.proposalId).filter(Boolean));
-  const unattached = proposals.filter((p) => isPending(p) && !attached.has(p.id));
+  const unattached = proposals.filter(
+    (p) => isPending(p) && !attached.has(p.id),
+  );
 
+  // Arriving at the bottom should be instant. Smooth-scrolling a transcript
+  // that is thousands of pixels long means landing on a card that is still
+  // moving - and on a phone that card is usually why you opened this.
+  const landed = useRef(false);
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    bottomRef.current?.scrollIntoView({
+      behavior: landed.current ? "smooth" : "instant",
+      block: "end",
+    });
+    landed.current = true;
   }, [turns, proposals, thinking, error]);
 
-  return (
-    <div className="flex h-full flex-col">
-      <Header connection={connection} pending={pending} />
+  // Watch the waiting cards themselves rather than guessing from scroll
+  // position: the bar exists to speak for a decision you cannot see, so what
+  // it needs to know is literally whether one is on screen.
+  useEffect(() => {
+    const root = scrollRef.current;
+    if (!root || pending === 0) {
+      setCardsVisible(false);
+      return;
+    }
+    const cards = root.querySelectorAll("[data-pending-card]");
+    if (cards.length === 0) {
+      setCardsVisible(false);
+      return;
+    }
+    const seen = new Set<Element>();
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) seen.add(entry.target);
+          else seen.delete(entry.target);
+        }
+        setCardsVisible(seen.size > 0);
+      },
+      { root, threshold: 0.35 },
+    );
+    for (const card of cards) observer.observe(card);
+    return () => observer.disconnect();
+  }, [pending, turns, proposals]);
 
-      <main className="scrollbar-hairline relative flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-[46rem] px-5 pt-10 pb-6 sm:px-8">
+  // The chosen mode should survive a reload; reading it in an effect keeps the
+  // server render and the first client render identical.
+  useEffect(() => {
+    const saved = window.localStorage.getItem(MODE_KEY);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (saved === "voice" || saved === "text") setMode(saved);
+  }, []);
+
+  const last = turns.at(-1);
+
+  useEffect(() => {
+    if (mode !== "voice") {
+      cancel();
+      spoken.current = null;
+      return;
+    }
+    // Entering voice mode marks whatever is already on screen as heard.
+    if (spoken.current === null) {
+      spoken.current = last?.id ?? "";
+      return;
+    }
+    if (muted) return;
+    if (!last || last.role !== "agent" || last.id === spoken.current) return;
+    spoken.current = last.id;
+    const text = speakable(last.paragraphs?.join("\n\n") ?? "");
+    if (text) speak(text);
+  }, [mode, muted, last, speak, cancel]);
+
+  function switchMode(next: ChatMode) {
+    setMode(next);
+    window.localStorage.setItem(MODE_KEY, next);
+  }
+
+  // The transcript is the same one either way - the stage is a different
+  // window onto it, not a second store. Leaving voice mode drops you back
+  // into the thread with everything that was said sitting in it as text.
+  if (mode === "voice") {
+    return (
+      <VoiceStage
+        onSend={(text) => void send(text)}
+        speaking={speaking}
+        pulse={pulse}
+        progress={progress}
+        onStopSpeaking={cancel}
+        muted={muted}
+        onMutedChange={setMuted}
+        onExit={() => switchMode("text")}
+        lastSaid={
+          last?.role === "agent"
+            ? speakable(last.paragraphs?.join("\n\n") ?? "")
+            : undefined
+        }
+        thinking={thinking}
+      />
+    );
+  }
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <Header connection={connection} pending={pending} />
+      <StandingBar pending={waiting} href="/record" muted={cardsVisible} />
+
+      <main
+        ref={scrollRef}
+        className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain"
+      >
+        <div className="mx-auto w-full max-w-[46rem] px-4 pt-7 pb-12 sm:px-8 sm:pt-10 sm:pb-6">
           {hydrated && turns.length === 0 ? (
-            <div className="grid grid-cols-[2.75rem_minmax(0,1fr)] sm:grid-cols-[3.5rem_minmax(0,1fr)]">
+            <div className={ROW}>
               <Rail />
               <p className="max-w-[32rem] text-[14.5px] leading-[1.75] text-dim">
                 무엇을 맡길지 적어주세요. 상태를 바꾸는 일은 실행 전에 승인
@@ -51,25 +192,18 @@ export function Thread() {
 
           <ol className="space-y-7">
             {turns.map((turn) => {
-              const proposal = turn.proposalId ? byId.get(turn.proposalId) : undefined;
+              const proposal = turn.proposalId
+                ? byId.get(turn.proposalId)
+                : undefined;
               return turn.role === "agent" ? (
-                <li
-                  key={turn.id}
-                  className="grid grid-cols-[2.75rem_minmax(0,1fr)] sm:grid-cols-[3.5rem_minmax(0,1fr)]"
-                >
+                <li key={turn.id} className={ROW}>
                   <Rail at={turn.at} />
                   <div className="min-w-0">
                     {turn.paragraphs?.length ? (
-                      <div className="space-y-2.5">
-                        {turn.paragraphs.map((p, i) => (
-                          <p
-                            key={i}
-                            className="max-w-[36rem] text-[14.5px] leading-[1.75] text-pretty text-foreground/90"
-                          >
-                            {p}
-                          </p>
-                        ))}
-                      </div>
+                      // The runner split the message on blank lines; putting
+                      // them back is what makes a list or a code fence one
+                      // block again.
+                      <Markdown>{turn.paragraphs.join("\n\n")}</Markdown>
                     ) : null}
                     {proposal ? (
                       <ProposalCard
@@ -84,16 +218,15 @@ export function Thread() {
                   <p className="max-w-[80%] rounded-2xl border border-edge bg-glass-raised px-4 py-2.5 text-[14.5px] leading-relaxed text-foreground backdrop-blur-md sm:max-w-[26rem]">
                     {turn.text}
                   </p>
-                  <span className="tnum pr-1 text-[11px] text-faint">{turn.at}</span>
+                  <span className="tnum pr-1 text-[11px] text-faint">
+                    {turn.at}
+                  </span>
                 </li>
               );
             })}
 
             {unattached.map((proposal) => (
-              <li
-                key={proposal.id}
-                className="grid grid-cols-[2.75rem_minmax(0,1fr)] sm:grid-cols-[3.5rem_minmax(0,1fr)]"
-              >
+              <li key={proposal.id} className={ROW}>
                 <Rail at={proposal.at} />
                 <div className="min-w-0">
                   <ProposalCard
@@ -106,12 +239,15 @@ export function Thread() {
 
             {thinking ? (
               <li
-                className="grid grid-cols-[2.75rem_minmax(0,1fr)] sm:grid-cols-[3.5rem_minmax(0,1fr)]"
+                className={ROW}
                 aria-live="polite"
                 aria-label="Jarvis가 작업 중입니다"
               >
                 <Rail />
-                <span aria-hidden className="anim-think flex h-6 items-center gap-1">
+                <span
+                  aria-hidden
+                  className="anim-think flex h-6 items-center gap-1"
+                >
                   <span className="size-[5px] rounded-full bg-dim" />
                   <span className="size-[5px] rounded-full bg-dim" />
                   <span className="size-[5px] rounded-full bg-dim" />
@@ -120,10 +256,7 @@ export function Thread() {
             ) : null}
 
             {error ? (
-              <li
-                className="grid grid-cols-[2.75rem_minmax(0,1fr)] sm:grid-cols-[3.5rem_minmax(0,1fr)]"
-                role="status"
-              >
+              <li className={ROW} role="status">
                 <Rail />
                 <p className="max-w-[36rem] border-l-2 border-reject pl-3 text-[13.5px] leading-relaxed text-dim">
                   {error}
@@ -141,10 +274,21 @@ export function Thread() {
           aria-hidden
           className="pointer-events-none absolute inset-x-0 -top-10 h-10 bg-gradient-to-b from-transparent to-background"
         />
-        <div className="mx-auto w-full max-w-[46rem] px-5 pb-6 sm:px-8">
-          <Composer onSend={(text) => void send(text)} />
+        <div className="inset-x-safe mx-auto w-full max-w-[46rem] px-4 pb-3 sm:px-8 sm:pb-6">
+          <Composer
+            onSend={(text) => void send(text)}
+            onVoice={() => switchMode("voice")}
+            onFocusChange={setTyping}
+          />
+          {/* On a phone this switch is the mic inside the composer; spending a
+              third bar on it would leave the transcript a strip. */}
+          <div className="mt-2 hidden justify-center sm:flex">
+            <ModeToggle mode={mode} onChange={switchMode} />
+          </div>
         </div>
       </footer>
+
+      <TabBar pending={pending} hidden={typing} />
     </div>
   );
 }

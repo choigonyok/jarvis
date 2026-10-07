@@ -26,6 +26,10 @@ ENV JARVIS_ADDR=:8080 \
     JARVIS_WORKSPACE=/workspace \
     JARVIS_HOME=/home/jarvis \
     JARVIS_CALENDAR_PATH=/data/calendar.json \
+    JARVIS_THREAD_PATH=/data/thread.json \
+    JARVIS_PROPOSALS_PATH=/data/proposals.json \
+    JARVIS_SESSION_PATH=/data/session.json \
+    JARVIS_KAKAO_DB=/data/kakao.db \
     JARVIS_MCP_URL=http://127.0.0.1:8080/mcp
 EXPOSE 8080
 HEALTHCHECK --interval=15s --timeout=3s --start-period=5s \

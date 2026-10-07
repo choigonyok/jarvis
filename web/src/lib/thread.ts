@@ -45,9 +45,20 @@ export type CalendarEvent = {
   title: string;
   place?: string;
   memo?: string;
-  source: "jarvis" | "me";
+  source: "jarvis" | "me" | "partner";
   updatedAt: string;
+  /** Last day of a multi-day entry. Absent for a single day. */
+  endDate?: string;
+  /** Whose entry it is on the shared couple calendar. Labels, never hides. */
+  owner?: "me" | "partner" | "shared";
+  /** Set on a repeating entry; its days carry ids "<series>#<date>". */
+  recurrence?: string;
 };
+
+/** True when the entry is on `date`, counting every day of a multi-day one. */
+export function covers(e: Pick<CalendarEvent, "date" | "endDate">, date: string): boolean {
+  return e.date <= date && date <= (e.endDate || e.date);
+}
 
 export type CalendarChange = {
   op: "upsert" | "delete";

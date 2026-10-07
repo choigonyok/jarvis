@@ -1,0 +1,14 @@
+{
+  "browser_profile": {
+    "default": {
+      "id": "default",
+      "default": true,
+      "headless": false,
+      "user_data_dir": "/profile",
+      "executable_path": "/usr/bin/chromium",
+      "downloads_path": "/profile/Downloads"
+    }
+  },
+  "llm": {},
+  "agent": {}
+}

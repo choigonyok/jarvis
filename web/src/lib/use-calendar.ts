@@ -93,7 +93,10 @@ export function useCalendar(cursor: Cursor) {
 
   // The header's count covers every pending proposal, not only this module's:
   // one queue, one number, wherever the operator happens to be standing.
-  const pendingCount = useMemo(() => proposals.filter(isPending).length, [proposals]);
+  // The whole queue, not just its size: the standing bar names what is
+  // waiting, and a count cannot be named.
+  const waiting = useMemo(() => proposals.filter(isPending), [proposals]);
+  const pendingCount = waiting.length;
 
   const save = useCallback(
     async (event: Partial<CalendarEvent>) => {
@@ -141,5 +144,16 @@ export function useCalendar(cursor: Cursor) {
     [hydrate],
   );
 
-  return { events, proposed, pendingCount, connection, error, loaded, save, remove, decide };
+  return {
+    events,
+    proposed,
+    waiting,
+    pendingCount,
+    connection,
+    error,
+    loaded,
+    save,
+    remove,
+    decide,
+  };
 }
