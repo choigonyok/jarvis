@@ -243,6 +243,24 @@ function pickVoice(voices: SpeechSynthesisVoice[], lang: string) {
   );
 }
 
+/**
+ * iOS lets a page speak on its own only after it has spoken once inside a
+ * tap. Answers arrive long after any tap, so the voice stage calls this from
+ * its buttons: a silent utterance, there and then, opens the way for the rest.
+ */
+export function unlockSpeech() {
+  const synth = typeof window === "undefined" ? undefined : window.speechSynthesis;
+  if (!synth) return;
+  try {
+    const u = new SpeechSynthesisUtterance(" ");
+    u.volume = 0;
+    synth.speak(u);
+    synth.resume();
+  } catch {
+    // Nothing to unlock on this engine.
+  }
+}
+
 export function useSpeech(lang = "ko-KR") {
   const [speaking, setSpeaking] = useState(false);
   /**

@@ -320,7 +320,7 @@ export function TabBar({
       data-tabbar
       data-hidden={hidden || undefined}
       className={cn(
-        "pointer-events-none fixed inset-x-0 bottom-0 z-40 transition-[transform,opacity] duration-300 ease-out motion-reduce:transition-none sm:hidden",
+        "bottom-screen pointer-events-none fixed inset-x-0 z-40 transition-[transform,opacity] duration-300 ease-out motion-reduce:transition-none sm:hidden",
         hidden ? "translate-y-[140%] opacity-0" : "translate-y-0 opacity-100",
       )}
       // Off the edges like the system bar: a gutter on each side, never inside

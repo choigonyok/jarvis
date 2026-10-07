@@ -117,7 +117,7 @@ export function Screen({ vncUrl, ticketed = false }: { vncUrl: string; ticketed?
         className={cn(
           "inset-x-safe min-h-0 flex-1",
           controlling
-            ? "pb-safe fixed inset-0 z-50 flex flex-col bg-background/95 p-3 pt-[max(env(safe-area-inset-top),0.75rem)] backdrop-blur-sm sm:p-6"
+            ? "pb-safe bottom-screen fixed inset-x-0 top-0 z-50 flex flex-col bg-background/95 p-3 pt-[max(env(safe-area-inset-top),0.75rem)] backdrop-blur-sm sm:p-6"
             : "mx-auto flex w-full max-w-[46rem] flex-col px-4 pt-3 pb-[calc(var(--tabbar-space)+0.75rem)] sm:px-8 sm:py-4",
         )}
       >
