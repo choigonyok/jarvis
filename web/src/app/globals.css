@@ -393,6 +393,21 @@
     oklch(1 0 0 / 22%) 100%
   );
 }
+/* Held under a dragging finger: a little larger, and no easing - it is
+   wherever the finger is. */
+.liquid-lens-held {
+  transition: opacity 200ms ease;
+}
+/* The tab is chosen and the page is still on its way. */
+.liquid-lens-waiting {
+  animation: lens-wait 1.1s ease-in-out infinite;
+}
+@keyframes lens-wait {
+  50% {
+    opacity: 0.6;
+  }
+}
+
 /* A press is felt before the lens moves: the icon gives a little. */
 .liquid-press:active > * {
   transform: scale(0.88);
@@ -404,6 +419,9 @@
   .liquid-lens,
   .liquid-press > * {
     transition: none;
+  }
+  .liquid-lens-waiting {
+    animation: none;
   }
 }
 
