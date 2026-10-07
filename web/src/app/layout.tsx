@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Instrument_Sans, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -17,15 +17,30 @@ const jetbrains = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "Jarvis",
   description: "개인 AI 어시스턴트와의 대화, 그리고 실행 요청 결재.",
+  // Added to the home screen this runs without Safari's chrome, which is the
+  // right shape for something you open to approve one thing and close.
+  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "Jarvis" },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  // cover lets the background run under the notch and the home indicator;
+  // the safe-area insets are what keep controls out from under them.
+  viewportFit: "cover",
+  themeColor: "#0b0d12",
+  // Pinch-zoom stays available - capping it would fail anyone who needs to
+  // magnify a proposal before approving it.
+  maximumScale: 5,
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="ko"
-      className={`dark ${instrument.variable} ${jetbrains.variable} h-full antialiased`}
+      className={`dark ${instrument.variable} ${jetbrains.variable} antialiased`}
     >
-      <body className="h-full overflow-hidden">{children}</body>
+      <body className="overflow-hidden">{children}</body>
     </html>
   );
 }

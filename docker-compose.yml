@@ -1,4 +1,60 @@
 services:
+  # 진실의 원천. 이벤트 로그와 모든 파생 테이블이 여기 있고, 회수용 벡터도
+  # 같은 데이터베이스에 있다(pgvector). 벡터를 따로 떼어 Qdrant 를 두지 않은
+  # 이유는 이 규모에서 검색 성능이 문제가 아니라 - 조각은 잘해야 수만 건이다 -
+  # 회수 조건이 대개 "이 사람 + 최근 30일 + 의미 유사"처럼 섞여 있어서,
+  # 사람 id 와 날짜를 두 저장소에 중복해서 들고 있는 값이 그 이득보다 크기
+  # 때문이다.
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      # 비밀번호에 기본값을 두지 않는다. 루프백에만 열려 있다고는 해도,
+      # 리포지터리에 적힌 비밀번호는 비밀번호가 아니다.
+      #   openssl rand -hex 24
+      POSTGRES_PASSWORD: ${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}
+      POSTGRES_USER: ${JARVIS_POSTGRES_USER:-jarvis}
+      POSTGRES_DB: ${JARVIS_POSTGRES_DB:-jarvis}
+      # initdb 때의 TZ 가 서버의 timezone 기본값이 된다. UTC 로 초기화되면
+      # 날짜만 찍는 조회가 한국 시간 자정~09시에 하루 밀린다.
+      TZ: ${TZ:-Asia/Seoul}
+    volumes:
+      - jarvis-postgres:/var/lib/postgresql/data
+    # 루프백에만. psql 로 직접 들여다보는 것이 개발 중 가장 빠른 디버깅 경로라
+    # 포트는 열어둔다.
+    ports:
+      - "127.0.0.1:${JARVIS_POSTGRES_PORT:-5432}:5432"
+    expose:
+      - "5432"
+    healthcheck:
+      # -U 를 주지 않으면 컨테이너의 root 로 물어보고, 그 역할은 없으므로
+      # 영원히 unhealthy 로 남는다.
+      test:
+        ["CMD-SHELL", "pg_isready -U ${JARVIS_POSTGRES_USER:-jarvis} -d ${JARVIS_POSTGRES_DB:-jarvis}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  # 스키마. 한 번 돌고 끝나는 서비스이고, 나머지는 이것이 성공으로 끝난 뒤에
+  # 뜬다. postgres 이미지를 그대로 쓰는 이유는 psql 이 이미 안에 있어서다.
+  db-migrate:
+    image: pgvector/pgvector:pg17
+    entrypoint: ["/bin/sh", "/db/migrate.sh"]
+    environment:
+      PGHOST: postgres
+      PGUSER: ${JARVIS_POSTGRES_USER:-jarvis}
+      PGDATABASE: ${JARVIS_POSTGRES_DB:-jarvis}
+      PGPASSWORD: ${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}
+      TZ: ${TZ:-Asia/Seoul}
+    volumes:
+      - ./db:/db:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # 성공하면 끝이다. 재시작하면 "변경 없음"을 무한히 찍는다.
+    restart: "no"
+
   agent:
     build: ./agent
     environment:
@@ -12,10 +68,36 @@ services:
       JARVIS_MODEL: ${JARVIS_MODEL:-}
       # Tools that skip the approval card. Read-only only - calendar writes
       # are deliberately absent, so every one of them lands on a card.
-      JARVIS_ALLOWED_TOOLS: ${JARVIS_ALLOWED_TOOLS:-Read,Glob,Grep,TodoWrite,mcp__calendar__list_events}
+      JARVIS_ALLOWED_TOOLS: ${JARVIS_ALLOWED_TOOLS:-Read,Glob,Grep,TodoWrite,mcp__calendar__list_events,mcp__assets__get_portfolio,mcp__assets__get_allocation,mcp__assets__get_history,mcp__spending__get_spending}
+      # MCP servers with no module behind them, as name=url. The browser runs
+      # on the host - the container has no display and no Chrome - so this
+      # dials back out through host.docker.internal.
+      JARVIS_EXTRA_MCP: ${JARVIS_EXTRA_MCP:-}
+      # Bearer token for the servers above. They listen where the network can
+      # reach them; this is what keeps that port from being an open door.
+      JARVIS_MCP_TOKEN: ${JARVIS_MCP_TOKEN:-}
+      # Guards the routes the console drives. Required once the agent is
+      # published (JARVIS_ALLOWED_ORIGIN set, or a tunnel in front of it).
+      JARVIS_API_TOKEN: ${JARVIS_API_TOKEN:-}
+      JARVIS_ALLOWED_ORIGIN: ${JARVIS_ALLOWED_ORIGIN:-}
       JARVIS_APPROVAL_TIMEOUT: ${JARVIS_APPROVAL_TIMEOUT:-30m}
       JARVIS_TURN_TIMEOUT: ${JARVIS_TURN_TIMEOUT:-2h}
       JARVIS_DEBUG: ${JARVIS_DEBUG:-false}
+      # 캘린더는 이제 calendar-svc 가 갖고 있다. 에이전트는 카드와 도구
+      # 스키마만 들고 있고, 일정은 여기로 묻는다.
+      JARVIS_CALENDAR_URL: http://calendar:8093
+      # 대화 기록도 마찬가지다. SSE 와 진행 상태는 에이전트에 남아 있다.
+      JARVIS_CHAT_URL: http://chat:8094
+      # 자산은 읽기만 한다. 주문 가능한 키는 assets-svc 에만 있고, 에이전트는
+      # 거기 GET 만 친다. 부팅 의존성은 걸지 않는다 - 증권사가 죽었다고
+      # 대화까지 막을 이유가 없고, 조회 실패는 도구 오류로 모델에게 간다.
+      JARVIS_ASSETS_URL: http://assets:8092
+      # 가계부도 읽기만 한다.
+      JARVIS_SPENDING_URL: http://spending:8095
+      # 아직 아무도 읽지 않는다. 제안·스레드 저장소가 파일에서 이 데이터베이스로
+      # 옮겨갈 때 쓰는 자리를 미리 잡아둔 것이다.
+      JARVIS_DATABASE_URL: >-
+        postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
     volumes:
       # Everything the agent may read and act on, once approved.
       - ${JARVIS_WORKSPACE_HOST:-./workspace}:/workspace
@@ -24,22 +106,463 @@ services:
       # Module data. Outside the workspace so the module's tools are the only
       # way in - the CLI cannot Read or Write around them.
       - jarvis-data:/data
-    # Not published: only web reaches the agent, over the compose network.
+    # Bound to loopback, not exposed to the network. The browser container
+    # reaches the agent over the compose network, but the KakaoTalk collectors
+    # run on the host - accessibility is a macOS API - and this is how they
+    # push what they read. Same trust model as the browser bridge: loopback
+    # plus the shared token, and the web proxy still carries no credentials.
+    ports:
+      - "127.0.0.1:${JARVIS_AGENT_PORT:-8080}:8080"
     expose:
       - "8080"
+    # 짧은 목록 형식과 조건 형식을 섞을 수 없어서 둘 다 조건으로 적는다.
+    depends_on:
+      browser:
+        condition: service_started
+      # 스키마가 없는 데이터베이스에 연결해서 테이블이 없다고 실패하는 것보다,
+      # 마이그레이션이 끝날 때까지 기다리는 편이 낫다.
+      db-migrate:
+        condition: service_completed_successfully
+      # 캘린더 모듈의 Start() 와 대화 스토어의 Connect() 가 각 서비스의 /health
+      # 를 친다. 없으면 에이전트가 부팅을 포기하므로, 순서를 운에 맡기지 않는다.
+      calendar:
+        condition: service_healthy
+      chat:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # 운동 기록. 웹의 라우트 핸들러 + 볼륨의 JSON 파일이었던 것이 서비스가 됐다.
+  # 계약은 그대로다(책 전체를 주고받는다) - 저장소만 Postgres 로 바뀌었다.
+  #
+  # 볼륨이 없는 것에 주의: 상태가 전부 데이터베이스에 있으므로 이 컨테이너는
+  # 언제든 버려도 된다.
+  workout:
+    build: ./workout-svc
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      LISTEN_ADDR: ":8091"
+      DATABASE_URL: >-
+        postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
+      # 스택의 나머지와 같은 베어러. /health 만 예외다.
+      API_TOKEN: ${JARVIS_API_TOKEN:-}
+    expose:
+      - "8091"
+    # 루프백에만. psql 처럼 curl 로 직접 두드리는 것이 가장 빠른 확인이다.
+    ports:
+      - "127.0.0.1:${JARVIS_WORKOUT_PORT:-8091}:8091"
+    healthcheck:
+      # /health 는 데이터베이스를 ping 한다. 연결이 안 되면 unhealthy 여야
+      # 웹이 그 위에 뜨지 않는다.
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8091/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # 가계부. 카드사가 카톡으로 보내는 결제 알림을 카톡 수집기에서 읽어 분류하고
+  # 월별로 더한다. 카톡 DB 를 직접 열지 않고 수집기의 API 로 읽는다 - 암호화된
+  # 파일을 만지는 프로세스는 이 맥에 하나면 된다.
+  #
+  # 수집기에 부팅 의존성을 걸지 않았다. 카톡이 꺼져 있어도 지난 내역은 보여야
+  # 하고, 수집은 연결되는 대로 커서부터 이어진다.
+  spending:
+    build: ./spending-svc
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      LISTEN_ADDR: ":8095"
+      DATABASE_URL: >-
+        postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
+      API_TOKEN: ${JARVIS_API_TOKEN:-}
+      KAKAOTALK_URL: http://kakaotalk:8090
+      # 이름에 "카드"가 없는 결제 알림 채널(예: 카카오뱅크)을 쉼표로 더한다.
+      # 카카오페이 같은 간편결제는 기본으로 빼 두었다 - 카드로 충전·결제되면
+      # 카드 알림과 두 번 잡힌다.
+      SPENDING_EXTRA_CHANNELS: ${SPENDING_EXTRA_CHANNELS:-}
+    expose:
+      - "8095"
+    ports:
+      - "127.0.0.1:${JARVIS_SPENDING_PORT:-8095}:8095"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8095/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # 대화. 무엇을 말했는지만 여기 있다.
+  #
+  # 캘린더와 같은 경계다. 에이전트에 남은 것은 실행 중인 프로세스의 것들이다:
+  # 라이브 SSE 스트림, "지금 턴이 진행 중인가" 플래그, 그리고 몰고 있는 Claude
+  # Code 세션. 셋 다 재시작을 넘겨 살아남지 않는 것이 의도다 - 방금 시작한
+  # 프로세스는 턴 중간에 있지 않다 - 그래서 데이터베이스에 있을 이유가 없다.
+  #
+  # 제안 저장소는 옮기지 않았다. 그건 승인 게이트의 다른 반쪽이고, 결정이 날
+  # 때까지 반환하지 않는 핸들러와 한 몸이다.
+  chat:
+    build: ./chat-svc
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      LISTEN_ADDR: ":8094"
+      DATABASE_URL: >-
+        postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
+      API_TOKEN: ${JARVIS_API_TOKEN:-}
+    expose:
+      - "8094"
+    ports:
+      - "127.0.0.1:${JARVIS_CHAT_PORT:-8094}:8094"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8094/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # 에이전트 볼륨의 thread.json 을 chat-svc 로 옮긴다:
+  #   docker compose --profile import run --rm chat-import
+  #
+  # 캘린더·운동과 달리 여러 번 돌리면 대화가 중복된다(턴에는 자연키가 없다).
+  # 이미 턴이 있으면 멈추고, 정말 덧붙이려면 FORCE=true 가 필요하다.
+  chat-import:
+    profiles: ["import"]
+    image: python:3.12-alpine
+    entrypoint: ["python3", "/scripts/import-thread.py"]
+    environment:
+      CHAT_URL: http://chat:8094
+      API_TOKEN: ${JARVIS_API_TOKEN:-}
+      FORCE: ${FORCE:-}
+    volumes:
+      - ./scripts:/scripts:ro
+      - jarvis-data:/data:ro
+    depends_on:
+      chat:
+        condition: service_healthy
+    restart: "no"
+
+  # 캘린더. 일정의 저장만 여기 있다.
+  #
+  # 앞의 두 서비스와 경계가 다르다: 승인 카드·MCP 도구 스키마·되돌림 가능 여부는
+  # agent 에 남았다. 그것들은 대화와 게이트의 속성이고, 여기로 옮기면 하나의
+  # 결정이 두 프로세스에 걸쳐 쪼개진다. 이 서비스는 시키는 대로 한다 - 여기
+  # 도달한 쓰기는 사람이 직접 친 것이거나 사람이 승인한 것이다.
+  #
+  # 파일이 워크스페이스 바깥에 있어야 했던 이유(CLI 의 Read/Write 가 모듈의
+  # 스키마와 카드를 우회하는 두 번째 문이 되는 것)는 이제 더 확실히 해결된다:
+  # 에이전트의 파일시스템에 캘린더가 아예 없다.
+  calendar:
+    build: ./calendar-svc
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      LISTEN_ADDR: ":8093"
+      DATABASE_URL: >-
+        postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
+      API_TOKEN: ${JARVIS_API_TOKEN:-}
+      # 일정 저장소. uniple 이면 커플 앱의 공유 캘린더를 비공식 Supabase
+      # 호출로 쓴다(calendar-svc/README.md). postgres 로 되돌리면 예전 표를 쓴다.
+      CALENDAR_BACKEND: ${CALENDAR_BACKEND:-uniple}
+      UNIPLE_URL: ${UNIPLE_URL:-https://api.uniple.app}
+      # 앱 번들에 공개돼 있는 anon 키. 비밀이 아니지만 앱이 바꾸면 따라 바꿔야 한다.
+      UNIPLE_ANON_KEY: ${UNIPLE_ANON_KEY:-}
+      # 첫 로그인 토큰. 쓰자마자 회전하므로 이후의 진짜 값은 Postgres
+      # (uniple_session)에 있다. 다른 값을 넣으면 그것으로 다시 시작한다.
+      UNIPLE_REFRESH_TOKEN: ${UNIPLE_REFRESH_TOKEN:-}
+      UNIPLE_BLOCK_ID: ${UNIPLE_BLOCK_ID:-}
+    expose:
+      - "8093"
+    ports:
+      - "127.0.0.1:${JARVIS_CALENDAR_PORT:-8093}:8093"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8093/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # 자산. 업비트·KIS 를 읽는 유일한 자리다.
+  #
+  # 이 서비스가 따로 있는 첫 번째 이유는 키다: 주문을 낼 수 있는 키가 브라우저에
+  # HTML 을 내주는 프로세스의 환경변수로 있을 이유가 없다. 읽기 전용으로만
+  # 쓰지만, 그건 코드의 약속이고 키의 권한은 그대로다.
+  #
+  # Go 가 아닌 것도 의도다. 업비트 JWT·KIS OAuth·과거 종가 페이징은 이미
+  # TypeScript 로 돌고 있었고, 그 코드에는 어렵게 얻은 예외 처리가 주석까지
+  # 남아 있다. 다시 쓰는 것은 잘 돌던 연동을 깨뜨릴 위험만 산다.
+  assets:
+    build: ./assets-svc
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      PORT: "8092"
+      API_TOKEN: ${JARVIS_API_TOKEN:-}
+      # 스냅샷용. 없어도 자산 조회는 된다 - 증권사가 현재 보유의 원천이고,
+      # 데이터베이스가 답하는 것은 "그때 무엇을 들고 있었나"뿐이다.
+      DATABASE_URL: >-
+        postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
+      UPBIT_ACCESS_KEY: ${UPBIT_ACCESS_KEY:-}
+      UPBIT_SECRET_KEY: ${UPBIT_SECRET_KEY:-}
+      KIS_APP_KEY: ${KIS_APP_KEY:-}
+      KIS_APP_SECRET: ${KIS_APP_SECRET:-}
+      KIS_ACCOUNT_NO: ${KIS_ACCOUNT_NO:-}
+      KIS_ACCOUNT_PRODUCT: ${KIS_ACCOUNT_PRODUCT:-01}
+      KIS_MOCK: ${KIS_MOCK:-false}
+      # 금현물 계좌. 한투 API 키는 계좌마다 따로 발급되므로 위 주식 계좌와
+      # 별개의 키다. 비어 있으면 금은 "계좌 연결 전"으로 남는다.
+      KIS_GOLD_APP_KEY: ${KIS_GOLD_APP_KEY:-}
+      KIS_GOLD_APP_SECRET: ${KIS_GOLD_APP_SECRET:-}
+      KIS_GOLD_ACCOUNT_NO: ${KIS_GOLD_ACCOUNT_NO:-}
+      KIS_GOLD_ACCOUNT_PRODUCT: ${KIS_GOLD_ACCOUNT_PRODUCT:-01}
+      # 원금을 세기 시작하는 날. 그날 들고 있던 자산은 원금 기록에 "시작
+      # 자산"으로 한 줄 적고, 그 뒤의 입출금만 더하고 뺀다.
+      PRINCIPAL_SINCE: ${PRINCIPAL_SINCE:-2026-05-01}
+      # 조회할 곳이 없는 고정 자산(JSON 배열). 개인 금액이라 코드가 아니라 .env 에 둔다.
+      FIXED_ASSETS: ${FIXED_ASSETS:-}
+    expose:
+      - "8092"
+    ports:
+      - "127.0.0.1:${JARVIS_ASSETS_PORT:-8092}:8092"
+    healthcheck:
+      # 데이터베이스가 없어도 200 이다. 이 서비스의 필수 조건이 아니다.
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8092/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # 에이전트 볼륨의 calendar.json 을 calendar-svc 로 옮긴다:
+  #   docker compose --profile import run --rm calendar-import
+  #
+  # python 이미지인 이유: 파일은 일정의 배열이고 서비스는 하나씩 받으므로
+  # 쪼개야 하는데, curl 이미지에는 JSON 파서가 없고 python 이미지에는 curl 이
+  # 없다. 표준 라이브러리만으로 끝내는 쪽이 도구 두 개를 요구하는 것보다 낫다.
+  calendar-import:
+    profiles: ["import"]
+    image: python:3.12-alpine
+    entrypoint: ["python3", "/scripts/import-calendar.py"]
+    environment:
+      CALENDAR_URL: http://calendar:8093
+      API_TOKEN: ${JARVIS_API_TOKEN:-}
+    volumes:
+      - ./scripts:/scripts:ro
+      # 읽기 전용. 원본을 지우지 않는다.
+      - jarvis-data:/data:ro
+    depends_on:
+      calendar:
+        condition: service_healthy
+    restart: "no"
+
+  # 볼륨의 workout.json 을 workout-svc 로 옮긴다. 한 번만 돌리면 된다:
+  #   docker compose --profile import run --rm workout-import
+  workout-import:
+    profiles: ["import"]
+    image: curlimages/curl:latest
+    entrypoint: ["/bin/sh", "/scripts/import-workout.sh"]
+    environment:
+      WORKOUT_URL: http://workout:8091
+      API_TOKEN: ${JARVIS_API_TOKEN:-}
+    volumes:
+      - ./scripts:/scripts:ro
+      # 읽기 전용. 이 작업은 원본을 지우지 않는다.
+      - jarvis-web-data:/data:ro
+    depends_on:
+      workout:
+        condition: service_healthy
+    restart: "no"
+
+  browser:
+    build: ./browser
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      # Same token the agent sends. The port is on the compose network only,
+      # but a bridge that accepts anything is a bridge that will be pointed at
+      # something else later.
+      MCP_BROWSER_TOKEN: ${JARVIS_MCP_TOKEN:-}
+    volumes:
+      # Where being logged in lives. Empty this and every site asks again.
+      - chrome-profile:/profile
+    ports:
+      # noVNC, for the first login and for watching what it is doing. Bound to
+      # loopback: this view drives a logged-in browser and has no password.
+      - "127.0.0.1:${JARVIS_VNC_PORT:-6080}:6080"
+    expose:
+      - "8931"
+    # Chromium needs more than the default 64MB of shared memory or it crashes
+    # on pages of any size.
+    shm_size: "1gb"
     restart: unless-stopped
 
   web:
     build: ./web
+    # 웹은 Cloudflare Workers(jarvis.choigonyok.com)에서 돈다. 이 컨테이너는 맥북에서
+    # 전부를 한 번에 띄울 때만 쓴다: docker compose --profile web up
+    # 맥미니에서 기본으로 뜨지 않게 한 이유: 그 맥미니의 다른 터널이 localhost:3000 을
+    # 공개 호스트명으로 내보내고 있었다(2026-10-07).
+    profiles: ["web"]
     environment:
       AGENT_URL: http://agent:8080
+      # The KakaoTalk collector, reachable on the compose network. The web tab
+      # proxies to it server-side; the browser never talks to it directly.
+      KAKAOTALK_URL: http://kakaotalk:8090
+      # Where the page dials for the browser's screen. Empty means "the host
+      # you are viewing this from, port 6080" - right for the usual case of
+      # opening this on the machine running the stack.
+      JARVIS_VNC_URL: ${JARVIS_VNC_URL:-}
+      # The single operator. Nothing behind the login is reachable without a
+      # session cookie, the agent proxy included.
+      JARVIS_AUTH_ID: ${JARVIS_AUTH_ID:-}
+      JARVIS_AUTH_PASSWORD: ${JARVIS_AUTH_PASSWORD:-}
+      # Signs session cookies. Left empty it is derived from the password, so
+      # sessions still work - setting it means a password change and a session
+      # purge are separate decisions.
+      JARVIS_AUTH_SECRET: ${JARVIS_AUTH_SECRET:-}
+      # The same token the agent checks. Sent server-side only; the browser
+      # never sees it.
+      JARVIS_API_TOKEN: ${JARVIS_API_TOKEN:-}
+      # 증권사 키는 더 이상 여기 없다. assets-svc 가 갖고 있고, 웹은
+      # /api/portfolio 를 그쪽으로 프록시만 한다. 키를 브라우저에 HTML 을
+      # 내주는 프로세스에서 빼는 것이 분리의 목적 중 하나다.
+      ASSETS_URL: http://assets:8092
+      # 운동 기록도 마찬가지다. workout-svc 가 갖고 있다.
+      WORKOUT_URL: http://workout:8091
+      # 가계부. spending-svc 가 갖고 있다.
+      SPENDING_URL: http://spending:8095
+      # 상태 탭. status-svc 가 판정한다.
+      STATUS_URL: http://status:8096
+    volumes:
+      # 남은 것은 workout.json 하나뿐이고, 그것도 workout-svc 로 옮긴 뒤에는
+      # 읽히지 않는다. 볼륨은 그 파일을 옮길 때까지만 유지한다.
+      #   docker compose run --rm workout-import   (scripts/import-workout.sh)
+      - jarvis-web-data:/data
     ports:
-      - "${JARVIS_WEB_PORT:-3000}:3000"
+      # 루프백에만. 밖에서 들어오는 길은 Cloudflare Access 뒤의 터널 하나뿐이어야
+      # 한다 - 0.0.0.0 으로 열면 같은 공유기의 아무 기기나 Access 를 건너뛴다.
+      - "127.0.0.1:${JARVIS_WEB_PORT:-3000}:3000"
     depends_on:
       agent:
         condition: service_healthy
+      workout:
+        condition: service_healthy
+      assets:
+        condition: service_healthy
+      spending:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Near-real-time KakaoTalk collector. It polls the local KakaoTalk SQLCipher
+  # database once a second, stores new messages incrementally in its own SQLite
+  # file, and serves them read-only for the web tab.
+  #
+  # The database is keyed to the machine: the passphrase is derived from the
+  # Mac's IOPlatformUUID and the account id. A Linux container cannot read
+  # IOPlatformUUID, so KAKAO_UUID and KAKAO_USER_ID (or KAKAO_SQLCIPHER_KEY)
+  # must be supplied, and the KakaoTalk container directory is bind-mounted
+  # read-only. For the lowest latency, running the binary on the host is more
+  # reliable than the VM file-share; this service is the containerised option.
+  kakaotalk:
+    build: ./kakaotalk-client
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      POLL_INTERVAL: ${KAKAO_POLL_INTERVAL:-1s}
+      LISTEN_ADDR: ":8090"
+      STORE_PATH: /data/kakaotalk.db
+      KAKAO_CONTAINER_DIR: /kakao/app-support
+      KAKAO_PLIST_DIR: /kakao/preferences
+      # Identity. Pass the account id (skips the one-time recovery scan) and the
+      # machine UUID, or a pre-derived passphrase in KAKAO_SQLCIPHER_KEY.
+      KAKAO_UUID: ${KAKAO_UUID:-}
+      KAKAO_USER_ID: ${KAKAO_USER_ID:-}
+      KAKAO_SQLCIPHER_KEY: ${KAKAO_SQLCIPHER_KEY:-}
+      # Same bearer scheme as the rest of the stack; guards every route but
+      # /health.
+      API_TOKEN: ${JARVIS_API_TOKEN:-}
+    volumes:
+      - jarvis-kakaotalk-data:/data
+      # The live encrypted database and its -wal/-shm siblings, read-only.
+      - ${KAKAO_CONTAINER_HOST:-${HOME}/Library/Containers/com.kakao.KakaoTalkMac/Data/Library/Application Support/com.kakao.KakaoTalkMac}:/kakao/app-support:ro
+      - ${KAKAO_PLIST_HOST:-${HOME}/Library/Containers/com.kakao.KakaoTalkMac/Data/Library/Preferences}:/kakao/preferences:ro
+    ports:
+      - "127.0.0.1:${KAKAO_PORT:-8090}:8090"
+    expose:
+      - "8090"
+    restart: unless-stopped
+
+  # 상태. "뭐가 고장났나"를 컨테이너가 아니라 기능 단위로 답한다 - 카톡이
+  # 들어오고 있나, 에이전트 브라우저가 쿠팡에 아직 로그인돼 있나, uniple 이
+  # 캘린더를 아직 들여보내나.
+  #
+  # 읽기만 한다. 각 서비스의 상태 응답, Postgres 의 타임스탬프처럼 이미 있는
+  # 신호로 판정하고, 주문목록 접근만 브라우저로 직접 열어 본다. uniple 토큰은 쓸 때마다
+  # 회전하고 KIS 토큰은 1분에 하나만 나오므로, 그것을 소모하는 감시는 감시 대상을
+  # 망가뜨리는 원인이 된다.
+  #
+  # 부팅 의존성이 없다. 감시 대상이 죽어 있는 것이 이 서비스가 보여줘야 할 상태다.
+  status:
+    build: ./status-svc
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      LISTEN_ADDR: ":8096"
+      DATABASE_URL: >-
+        postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
+      API_TOKEN: ${JARVIS_API_TOKEN:-}
+      KAKAOTALK_URL: http://kakaotalk:8090
+      SPENDING_URL: http://spending:8095
+      ASSETS_URL: http://assets:8092
+      CALENDAR_URL: http://calendar:8093
+      CHAT_URL: http://chat:8094
+      WORKOUT_URL: http://workout:8091
+      AGENT_URL: http://agent:8080
+      BROWSER_ADDR: browser:8931
+      # 쿠팡·네이버페이 주문목록이 열리는지는 에이전트 브라우저 새 탭에서 직접
+      # 열어 보고 판단한다(30분마다). 쿠키가 남아 있어도 로그아웃일 수 있었다.
+      BROWSER_MCP_URL: http://browser:8931/
+      BROWSER_MCP_TOKEN: ${JARVIS_MCP_TOKEN:-}
+    expose:
+      - "8096"
+    ports:
+      - "127.0.0.1:${JARVIS_STATUS_PORT:-8096}:8096"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8096/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # The agent is a Go process driving a Chromium container and a CLI; none of
+  # that runs on Workers, so when the console is served from Cloudflare this is
+  # how the Worker reaches back to it - outbound only, no port opened on the
+  # host. Opt in with: docker compose --profile cloudflare up -d
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    profiles: ["cloudflare"]
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    # 공개 ingress 는 두지 않는다. Workers VPC 서비스(edge/)가 이 터널을 통해
+    # agent·workout 등에 이름으로 닿는다 - 서비스들은 이 네트워크 안에만 있다.
+    depends_on:
+      - agent
     restart: unless-stopped
 
 volumes:
+  jarvis-postgres:
+  jarvis-web-data:
   jarvis-home:
   jarvis-data:
+  jarvis-kakaotalk-data:
+  chrome-profile:

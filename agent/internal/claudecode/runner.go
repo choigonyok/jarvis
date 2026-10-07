@@ -19,6 +19,7 @@ import (
 
 	"github.com/choigonyok/jarvis/agent/internal/adapter/permission"
 	"github.com/choigonyok/jarvis/agent/internal/config"
+	"github.com/choigonyok/jarvis/agent/internal/core/jsonfile"
 	"github.com/choigonyok/jarvis/agent/internal/thread"
 )
 
@@ -32,10 +33,39 @@ type Runner struct {
 	mu        sync.Mutex
 	sessionID string
 	running   bool
+	// queue holds turns nobody typed - a card's decision arriving while
+	// another turn is running. They run, in order, as soon as it ends.
+	queue []string
+	// bgCancel stops the background task in flight, if any (see Background).
+	bgCancel func()
+}
+
+// session is the one field of the CLI's state this agent owns. The transcript
+// itself lives in the CLI's own home directory.
+type session struct {
+	ID string `json:"id"`
 }
 
 func New(cfg config.Config, store *thread.Store, log *slog.Logger) *Runner {
-	return &Runner{cfg: cfg, store: store, log: log}
+	r := &Runner{cfg: cfg, store: store, log: log}
+	// A restart that forgets the session id leaves the operator looking at a
+	// transcript the model cannot remember. Failing to read it is not fatal:
+	// the next turn opens a new session, which is exactly what happened before
+	// this file existed.
+	var saved session
+	if err := jsonfile.Load(cfg.SessionPath, &saved); err != nil {
+		log.Error("세션 id를 읽지 못했습니다", "err", err)
+	}
+	r.sessionID = saved.ID
+	return r
+}
+
+// remember stores the session id the CLI reported, so the next process resumes
+// the same conversation.
+func (r *Runner) remember(id string) {
+	if err := jsonfile.Save(r.cfg.SessionPath, session{ID: id}); err != nil {
+		r.log.Error("세션 id를 저장하지 못했습니다", "err", err)
+	}
 }
 
 // Send posts the operator's message and launches a turn. It returns once the
@@ -47,24 +77,53 @@ func (r *Runner) Send(text string) error {
 		return ErrBusy
 	}
 	r.running = true
+	r.yieldLocked()
 	r.mu.Unlock()
 
 	r.store.AppendUser(text)
+	go r.loop(text)
+	return nil
+}
 
-	go func() {
-		defer func() {
-			r.mu.Lock()
-			r.running = false
-			r.mu.Unlock()
-			r.store.SetThinking(false)
-		}()
-		r.store.SetThinking(true)
-		if err := r.turn(text); err != nil {
+// Enqueue starts a turn the operator did not type - how a card's decision
+// reaches the model. It is not written to the transcript as the operator's
+// words; the card's own change of state is what the operator sees, and the
+// reply is what follows it. Queued behind a running turn rather than refused:
+// a decision must never be dropped because the assistant was busy.
+func (r *Runner) Enqueue(prompt string) {
+	r.mu.Lock()
+	if r.running {
+		r.queue = append(r.queue, prompt)
+		r.mu.Unlock()
+		return
+	}
+	r.running = true
+	r.yieldLocked()
+	r.mu.Unlock()
+	go r.loop(prompt)
+}
+
+// loop runs one turn, then whatever queued up behind it, and only then lets
+// the runner go idle. Holding running across the queue is what stops an
+// operator's message from slipping in between a decision and its follow-up.
+func (r *Runner) loop(prompt string) {
+	r.store.SetThinking(true)
+	for {
+		if err := r.turn(prompt); err != nil {
 			r.log.Error("turn failed", "err", err)
 			r.store.Fail(userFacingError(err))
 		}
-	}()
-	return nil
+		r.mu.Lock()
+		if len(r.queue) == 0 {
+			r.running = false
+			r.mu.Unlock()
+			r.store.SetThinking(false)
+			return
+		}
+		prompt = r.queue[0]
+		r.queue = r.queue[1:]
+		r.mu.Unlock()
+	}
 }
 
 func (r *Runner) turn(prompt string) error {
@@ -166,6 +225,18 @@ func (r *Runner) mcpConfig() string {
 	for name, url := range r.cfg.ModuleMCPURLs {
 		servers[name] = map[string]any{"type": "http", "url": url}
 	}
+	// Servers outside the container. These listen where others can reach
+	// them, so the bearer token goes only here - a module server is on
+	// loopback and has no business seeing it.
+	for name, url := range r.cfg.ExtraMCPURLs {
+		entry := map[string]any{"type": "http", "url": url}
+		if r.cfg.ExtraMCPToken != "" {
+			entry["headers"] = map[string]any{
+				"Authorization": "Bearer " + r.cfg.ExtraMCPToken,
+			}
+		}
+		servers[name] = entry
+	}
 	cfg := map[string]any{"mcpServers": servers}
 	body, err := json.Marshal(cfg)
 	if err != nil {
@@ -181,10 +252,9 @@ func (r *Runner) env() []string {
 	// non-ASCII content on its way through the shell.
 	// Both MCP limits are MILLISECONDS to the CLI (MCP_TIMEOUT defaults to
 	// 30000, MCP_TOOL_TIMEOUT is documented as a hard wall-clock limit per
-	// call that progress notifications do not extend). Passing seconds here
-	// made the real limit 1.8s, and a tool call that waits on a person is
-	// always slower than that: the card was approved and the write never ran.
-	// The budget has to cover the human, so it is the approval wait plus slack.
+	// call that progress notifications do not extend). The approval tool no
+	// longer waits on a person, but browser tools that hit a payment card
+	// still do, so the budget still covers the approval wait.
 	budget := (r.cfg.ApprovalWait + 5*time.Minute).Milliseconds()
 
 	env := []string{
@@ -230,48 +300,68 @@ type assistantMessage struct {
 }
 
 func (r *Runner) consume(stdout interface{ Read([]byte) (int, error) }) error {
+	var failed error
+	err := scan(stdout, func(ev event) {
+		if failed != nil {
+			return
+		}
+		if r.cfg.Debug {
+			r.log.Info("stream event", "type", ev.Type, "subtype", ev.Subtype)
+		}
+		failed = r.handle(ev)
+	})
+	if failed != nil {
+		return failed
+	}
+	return err
+}
+
+// scan reads stream-json lines. Lines it cannot parse are skipped rather
+// than failing the turn.
+func scan(stdout interface{ Read([]byte) (int, error) }, each func(event)) error {
 	scanner := bufio.NewScanner(stdout)
 	// Tool results can be large; the default 64KB line cap is not enough.
 	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
-
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue
 		}
 		var ev event
-		if err := json.Unmarshal([]byte(line), &ev); err != nil {
-			if r.cfg.Debug {
-				r.log.Info("unparsed stream line", "line", clamp(line, 500))
-			}
-			continue
-		}
-		if r.cfg.Debug {
-			r.log.Info("stream event", "type", ev.Type, "subtype", ev.Subtype)
-		}
-
-		switch ev.Type {
-		case "system":
-			if ev.SessionID != "" {
-				r.mu.Lock()
-				r.sessionID = ev.SessionID
-				r.mu.Unlock()
-			}
-		case "assistant":
-			if ev.IsAPIErrorMessage {
-				return fmt.Errorf("claude api error: %s: %s",
-					ev.Error, clamp(strings.Join(paragraphsOf(ev.Message), " "), 300))
-			}
-			for _, p := range paragraphsOf(ev.Message) {
-				r.store.AppendAgent([]string{p})
-			}
-		case "result":
-			if ev.IsError {
-				return fmt.Errorf("claude result error: %s", clamp(ev.Result, 500))
-			}
+		if json.Unmarshal([]byte(line), &ev) == nil {
+			each(ev)
 		}
 	}
 	return scanner.Err()
+}
+
+func (r *Runner) handle(ev event) error {
+	switch ev.Type {
+	case "system":
+		if ev.SessionID != "" {
+			r.mu.Lock()
+			changed := r.sessionID != ev.SessionID
+			r.sessionID = ev.SessionID
+			r.mu.Unlock()
+			if changed {
+				r.remember(ev.SessionID)
+			}
+		}
+	case "assistant":
+		if ev.IsAPIErrorMessage {
+			return fmt.Errorf("claude api error: %s: %s",
+				ev.Error, clamp(strings.Join(paragraphsOf(ev.Message), " "), 300))
+		}
+		// One message, one turn. Splitting it per paragraph used to read
+		// fine as plain text, but a fenced code block with a blank line
+		// in it would land as two turns and stop being one block.
+		r.store.AppendAgent(paragraphsOf(ev.Message))
+	case "result":
+		if ev.IsError {
+			return fmt.Errorf("claude result error: %s", clamp(ev.Result, 500))
+		}
+	}
+	return nil
 }
 
 func paragraphsOf(raw json.RawMessage) []string {

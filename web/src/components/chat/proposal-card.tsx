@@ -30,8 +30,11 @@ export function ProposalCard({
 
   return (
     <article
+      // The thread's standing bar watches for these: a decision on screen
+      // does not need announcing at the top of the page.
+      data-pending-card={settled ? undefined : ""}
       className={cn(
-        "relative mt-4 max-w-[34rem] overflow-hidden rounded-xl border border-edge bg-glass backdrop-blur-md",
+        "relative mt-4 w-full max-w-[34rem] overflow-hidden rounded-xl border border-edge bg-glass backdrop-blur-md",
         "transition-colors duration-300",
         settled && "border-edge-soft",
       )}
@@ -58,11 +61,18 @@ export function ProposalCard({
 
         {/* Mono is reserved for a literal command the CLI would run. A
             module renders its change as a sentence, and setting that in mono
-            would blur the line between "this is text" and "this is code". */}
+            would blur the line between "this is text" and "this is code".
+
+            That split decides wrapping too: a command must not be re-wrapped,
+            because a broken line changes what it says, so it scrolls. A
+            sentence has no such constraint and wraps, which is what a narrow
+            screen needs. */}
         <pre
           className={cn(
-            "mt-3 overflow-x-auto rounded-md bg-well px-3 py-2.5 leading-relaxed text-dim",
-            literal ? "font-mono text-[12px]" : "tnum text-[13px]",
+            "scrollbar-hairline mt-3 rounded-md bg-well px-3 py-2.5 leading-relaxed text-dim",
+            literal
+              ? "overflow-x-auto font-mono text-[12px]"
+              : "tnum text-[13px] whitespace-pre-wrap",
           )}
         >
           <code>{proposal.card.body}</code>
@@ -77,7 +87,7 @@ export function ProposalCard({
         {settled ? (
           <p
             className={cn(
-              "anim-settle flex items-center gap-1.5 text-[11.5px]",
+              "anim-settle flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11.5px]",
               settled.tone,
             )}
           >
@@ -87,12 +97,16 @@ export function ProposalCard({
             {proposal.note ? <span className="text-faint">· {proposal.note}</span> : null}
           </p>
         ) : (
-          <div className="flex items-center justify-end gap-1.5">
+          /* This is the decision the whole product exists to collect, and on
+             a phone it was a pair of 32px targets sitting a thumb-width apart.
+             Full width, 48px, and a real gap between them: reaching for 승인
+             must not be able to land on 반려. */
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end sm:gap-1.5">
             <Button
               variant="ghost"
               size="sm"
               onClick={() => onDecide("rejected")}
-              className="h-8 px-3 text-dim hover:bg-reject/10 hover:text-reject"
+              className="h-12 text-[13.5px] text-dim hover:bg-reject/10 hover:text-reject sm:h-8 sm:px-3 sm:text-[0.8rem]"
             >
               반려
             </Button>
@@ -100,7 +114,7 @@ export function ProposalCard({
               variant="outline"
               size="sm"
               onClick={() => onDecide("approved")}
-              className="h-8 border-edge bg-glass-raised px-3.5 text-foreground hover:border-approve/35 hover:bg-approve/12 hover:text-approve dark:bg-glass-raised dark:hover:bg-approve/12"
+              className="h-12 border-edge bg-glass-raised text-[13.5px] text-foreground hover:border-approve/35 hover:bg-approve/12 hover:text-approve sm:h-8 sm:px-3.5 sm:text-[0.8rem] dark:bg-glass-raised dark:hover:bg-approve/12"
             >
               승인
             </Button>

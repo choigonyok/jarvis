@@ -6,8 +6,17 @@ import { timeLabel, type Ghost } from "@/lib/proposed";
 import type { CalendarEvent, Decision } from "@/lib/thread";
 import { cn } from "@/lib/utils";
 
-/** A settled entry. Nothing marks who put it here: an approved change is the
- *  operator's change, the same as one they typed. */
+import { OWNER_LABEL, OwnerBar, ownerOf, ownerText } from "@/components/calendar/owner";
+
+const md = (date: string) => `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}`;
+
+/** A settled entry. The calendar is shared with a partner, so every row says
+ *  whose it is twice over: the colored edge to scan by, and the word to be
+ *  sure. Who *wrote* it is said only when it is not who you would guess - a
+ *  shared plan the partner put in.
+ *
+ *  A partner's entry has no delete button. Removing something from someone
+ *  else's day is a conversation, not a tap. */
 export function EventRow({
   event,
   pending,
@@ -18,16 +27,19 @@ export function EventRow({
   onDelete: () => void;
 }) {
   const leaving = pending?.op === "delete";
+  const owner = ownerOf(event);
+  const rest = meta(event);
 
   return (
     <div
       className={cn(
-        "group/row flex items-baseline gap-3 rounded-lg py-1.5 pr-1 pl-2 transition-colors",
+        "group/row flex items-start gap-3 rounded-lg py-2 pr-1 pl-2 transition-colors",
         "hover:bg-glass focus-within:bg-glass",
         leaving && "opacity-45",
       )}
     >
-      <span className="tnum w-[4.25rem] shrink-0 text-[12px] text-dim">
+      <OwnerBar owner={owner} className="my-0.5" />
+      <span className="tnum w-[3.6rem] shrink-0 pt-px text-[12px] leading-snug text-dim sm:w-[4.25rem]">
         {timeLabel(event)}
       </span>
       <span className="min-w-0 flex-1 text-[14.5px] leading-snug text-foreground/90">
@@ -37,18 +49,39 @@ export function EventRow({
         {event.place ? (
           <span className="text-dim"> · {event.place}</span>
         ) : null}
+        <span className="mt-0.5 block text-[11.5px] leading-tight text-faint">
+          <span className={cn("font-medium", ownerText[owner])}>{OWNER_LABEL[owner]}</span>
+          {rest ? ` · ${rest}` : null}
+        </span>
+        {event.memo ? (
+          <span className="mt-1 line-clamp-2 block text-[12.5px] leading-normal whitespace-pre-line text-dim">
+            {event.memo}
+          </span>
+        ) : null}
       </span>
+      {/* Hidden until pointed at is hidden forever on a touch screen, so
+          `touch-visible` brings it back wherever hover does not exist. */}
+      {owner === "partner" ? null : (
       <Button
         variant="ghost"
         size="icon-xs"
         onClick={onDelete}
         aria-label={`${event.title} 삭제`}
-        className="shrink-0 text-faint opacity-0 transition-opacity group-hover/row:opacity-100 hover:bg-reject/10 hover:text-reject focus-visible:opacity-100"
+        className="tap touch-visible -my-2 shrink-0 text-faint opacity-0 transition-opacity group-hover/row:opacity-100 hover:bg-reject/10 hover:text-reject focus-visible:opacity-100 sm:my-0 sm:size-6 sm:min-h-0 sm:min-w-0"
       >
-        <Trash2 aria-hidden className="size-3.5" />
+        <Trash2 aria-hidden className="size-4 sm:size-3.5" />
       </Button>
+      )}
     </div>
   );
+}
+
+function meta(e: CalendarEvent): string {
+  const parts: string[] = [];
+  if (e.source === "partner" && ownerOf(e) !== "partner") parts.push("상대가 등록");
+  if (e.endDate) parts.push(`${md(e.date)}–${md(e.endDate)}`);
+  if (e.recurrence) parts.push("반복");
+  return parts.join(" · ");
 }
 
 const ghostCopy: Record<Ghost["op"], { label: string; consequence: string }> = {
@@ -80,7 +113,7 @@ export function GhostRow({
 
       {preview ? (
         <div className="mt-1.5 flex items-baseline gap-3">
-          <span className="tnum w-[4.25rem] shrink-0 text-[12px] text-dim">
+          <span className="tnum w-[3.6rem] shrink-0 text-[12px] text-dim sm:w-[4.25rem]">
             {timeLabel(preview)}
           </span>
           <span className="min-w-0 flex-1 text-[14.5px] leading-snug text-foreground/90">
@@ -92,12 +125,14 @@ export function GhostRow({
 
       <p className="mt-1.5 text-[12px] leading-normal text-dim">{copy.consequence}</p>
 
-      <div className="mt-2 flex items-center justify-end gap-1.5">
+      {/* The same decision as the chat's card, so it gets the same treatment
+          on a phone: full width, real height, a gap you cannot thumb across. */}
+      <div className="mt-2.5 grid grid-cols-2 gap-2 sm:mt-2 sm:flex sm:items-center sm:justify-end sm:gap-1.5">
         <Button
           variant="ghost"
           size="sm"
           onClick={() => onDecide("rejected")}
-          className="h-7 px-2.5 text-[12.5px] text-dim hover:bg-reject/10 hover:text-reject"
+          className="h-11 text-[13px] text-dim hover:bg-reject/10 hover:text-reject sm:h-7 sm:px-2.5 sm:text-[12.5px]"
         >
           반려
         </Button>
@@ -105,7 +140,7 @@ export function GhostRow({
           variant="outline"
           size="sm"
           onClick={() => onDecide("approved")}
-          className="h-7 border-edge bg-glass-raised px-3 text-[12.5px] text-foreground hover:border-approve/35 hover:bg-approve/12 hover:text-approve dark:bg-glass-raised dark:hover:bg-approve/12"
+          className="h-11 border-edge bg-glass-raised text-[13px] text-foreground hover:border-approve/35 hover:bg-approve/12 hover:text-approve sm:h-7 sm:px-3 sm:text-[12.5px] dark:bg-glass-raised dark:hover:bg-approve/12"
         >
           승인
         </Button>
