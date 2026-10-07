@@ -481,3 +481,10 @@ html {
     height: 100lvh !important;
   }
 }
+
+/* The home-screen app does not zoom (components/shell/no-zoom.tsx); a double
+   tap must not either. pan-x pan-y keeps scrolling and taps, drops zooming. */
+.no-zoom,
+.no-zoom body {
+  touch-action: pan-x pan-y;
+}
