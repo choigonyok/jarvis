@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useLayoutEffect, useRef } from "react";
 import { Header, TabBar } from "@/components/shell/header";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { useKakao, type KakaoMessage } from "@/lib/use-kakao";
@@ -24,10 +24,25 @@ export function Kakao() {
   const pending = waitingList.length;
   const { rooms, selected, setSelected, messages, error, hydrated } = useKakao();
 
-  // 새로 고칠 때마다 맨 아래로. 이 화면에서 찾는 것은 늘 최근 대화다.
-  const bottom = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    bottom.current?.scrollIntoView({ block: "end" });
+  // 방을 열면 맨 아래(최근 대화)로. 그 뒤 수집이 새로 고칠 때는, 이미 맨
+  // 아래를 보고 있을 때만 따라 내려간다 - 위로 올려 읽던 사람을 몇 초마다
+  // 끌어내리면 지난 대화를 읽을 수가 없다.
+  const scroller = useRef<HTMLDivElement>(null);
+  const pinned = useRef(true);
+  const shownRoom = useRef<string | null>(null);
+  const lastKey = useRef("");
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const last = messages[messages.length - 1];
+    const key = `${messages.length}:${last?.date ?? ""}:${last?.time ?? ""}:${last?.text ?? ""}`;
+    const roomChanged = shownRoom.current !== selected;
+    if (roomChanged || (pinned.current && key !== lastKey.current)) {
+      el.scrollTop = el.scrollHeight;
+      pinned.current = true;
+    }
+    shownRoom.current = selected;
+    lastKey.current = key;
   }, [messages, selected]);
 
   return (
@@ -69,7 +84,14 @@ export function Kakao() {
           </div>
         </div>
 
-        <div className="scrollbar-hairline min-h-0 flex-1 touch-pan-y overflow-x-hidden overflow-y-auto overscroll-contain pb-4 sm:pb-6">
+        <div
+          ref={scroller}
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+          }}
+          className="scrollbar-hairline min-h-0 flex-1 touch-pan-y overflow-x-hidden overflow-y-auto overscroll-contain pb-4 sm:pb-6"
+        >
           {!hydrated ? null : error ? (
             <p className="pt-10 text-center text-[13px] text-faint">{error}</p>
           ) : rooms.length === 0 ? (
@@ -89,7 +111,6 @@ export function Kakao() {
               {messages.map((m, i) => (
                 <Line key={i} message={m} previous={messages[i - 1]} />
               ))}
-              <div ref={bottom} />
             </div>
           )}
         </div>
@@ -135,7 +156,7 @@ function Line({
             <span className="shrink-0 text-[11px] text-faint tabular-nums">
               {message.time}
             </span>
-            <p className="max-w-[78%] rounded-xl bg-glass-raised px-3 py-1.5 text-[14px] leading-[1.7] text-pretty [overflow-wrap:anywhere] whitespace-pre-wrap text-foreground sm:max-w-[26rem]">
+            <p className="max-w-[78%] rounded-xl bg-glass-raised px-3 py-1.5 text-[14px] leading-[1.7] [word-break:break-all] whitespace-pre-wrap text-foreground sm:max-w-[26rem]">
               {message.text}
             </p>
           </>
@@ -148,7 +169,7 @@ function Line({
               {!repeated && message.sender && (
                 <p className="text-[11.5px] text-dim">{message.sender}</p>
               )}
-              <p className="text-[14px] leading-[1.7] text-pretty [overflow-wrap:anywhere] whitespace-pre-wrap text-foreground/90 sm:max-w-[30rem]">
+              <p className="text-[14px] leading-[1.7] [word-break:break-all] whitespace-pre-wrap text-foreground/90 sm:max-w-[30rem]">
                 {message.text}
               </p>
             </div>
