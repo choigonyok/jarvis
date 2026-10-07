@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { accessIdentity } from "@/lib/access";
 import { SESSION_COOKIE, valid } from "@/lib/auth";
 
 /**
@@ -9,6 +10,12 @@ import { SESSION_COOKIE, valid } from "@/lib/auth";
  * present a cookie.
  */
 export async function middleware(request: NextRequest) {
+  // Through Cloudflare Access, the signed assertion is the session: the person
+  // has already proven who they are, more strictly than a password here would.
+  const assertion =
+    request.headers.get("cf-access-jwt-assertion") ?? request.cookies.get("CF_Authorization")?.value;
+  if ((await accessIdentity(assertion)) !== null) return NextResponse.next();
+
   const token = request.cookies.get(SESSION_COOKIE)?.value;
   if (await valid(token)) return NextResponse.next();
 

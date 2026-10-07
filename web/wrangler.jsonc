@@ -46,7 +46,11 @@
     "KAKAOTALK_URL": "https://jarvis-be.choigonyok.com/kakaotalk",
     "STATUS_URL": "https://jarvis-be.choigonyok.com/status",
     // 화면 탭의 VNC 웹소켓. 주소에 /api/screen/ticket 이 만든 1분짜리 입장권을 붙인다.
-    "JARVIS_VNC_GATEWAY": "wss://jarvis-be.choigonyok.com/vnc/websockify"
+    "JARVIS_VNC_GATEWAY": "wss://jarvis-be.choigonyok.com/vnc/websockify",
+    // Cloudflare Access in front of this Worker. A request carrying a valid
+    // assertion for this app skips the console's own password (src/lib/access.ts).
+    "ACCESS_TEAM_DOMAIN": "choigonyok.cloudflareaccess.com",
+    "ACCESS_AUD": "25196893d2c65f51618b38a9593a3f5fbb5f449f14754e24f9f0b08ab9e2bb42"
   }
 
   // Secrets (see DEPLOY.md): AGENT_URL, JARVIS_API_TOKEN, JARVIS_AUTH_ID,
