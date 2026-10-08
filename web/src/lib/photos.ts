@@ -8,8 +8,8 @@ export type Bucket = { timeBucket: string; count: number };
 export type Asset = {
   id: string;
   isImage: boolean;
-  /** "0:00:12.345000" for a video. */
-  duration: string | null;
+  /** A video's length: milliseconds in the timeline, "0:00:12.345000" in search. */
+  duration: number | string | null;
   takenAt: string;
   ratio: number;
 };
@@ -17,7 +17,7 @@ export type Asset = {
 type Columns = {
   id: string[];
   isImage: boolean[];
-  duration: (string | null)[];
+  duration: (number | string | null)[];
   fileCreatedAt: string[];
   ratio: (number | null)[];
 };
@@ -44,11 +44,16 @@ export const thumbUrl = (id: string, size: "thumbnail" | "preview" = "thumbnail"
 export const videoUrl = (id: string) => `${PHOTOS}/assets/${id}/video/playback`;
 export const originalUrl = (id: string) => `${PHOTOS}/assets/${id}/original`;
 
-/** "0:01:05.120000" → "1:05". */
-export function clip(duration: string | null): string {
-  if (!duration) return "";
-  const [h, m, s] = duration.split(":").map((x) => Number(x));
-  const total = Math.round(h * 3600 + m * 60 + s);
+/** 65120 (ms) or "0:01:05.120000" → "1:05". */
+export function clip(duration: number | string | null): string {
+  if (duration == null || duration === "") return "";
+  let total: number;
+  if (typeof duration === "number") total = Math.round(duration / 1000);
+  else {
+    const [h, m, s] = duration.split(":").map((x) => Number(x));
+    total = Math.round(h * 3600 + m * 60 + s);
+  }
+  if (!Number.isFinite(total)) return "";
   const mm = Math.floor(total / 60);
   return `${mm}:${String(total % 60).padStart(2, "0")}`;
 }
