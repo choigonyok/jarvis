@@ -1,7 +1,7 @@
 import { changesFor } from "./change.js";
 import * as db from "./db.js";
 import { allocationOf } from "./target.js";
-import type { FixedAsset, Holding, Portfolio, Principal, PrincipalPart, Venue } from "./types.js";
+import type { CashLine, FixedAsset, Holding, Portfolio, Principal, PrincipalPart, Venue } from "./types.js";
 import { kisGoldAccount, kisHoldings, upbitFlows, upbitHoldings, usdKrwRate } from "./venues.js";
 
 /**
@@ -53,11 +53,11 @@ export async function buildPortfolio(): Promise<Portfolio> {
   const [upbit, kis, gold, principalFlows] = await Promise.all([
     upbitHoldings().catch((e: Error) => {
       problems.push(`업비트: ${e.message}`);
-      return { holdings: [] as Holding[], cashKrw: 0, problems: [] as string[] };
+      return { holdings: [] as Holding[], cashKrw: 0, cash: [] as CashLine[], problems: [] as string[] };
     }),
     kisHoldings(usdKrw).catch((e: Error) => {
       problems.push(`한국투자증권: ${e.message}`);
-      return { holdings: [] as Holding[], cashKrw: 0, problems: [] as string[] };
+      return { holdings: [] as Holding[], cashKrw: 0, cash: [] as CashLine[], problems: [] as string[] };
     }),
     kisGoldAccount().catch((e: Error) => {
       problems.push(`금현물: ${e.message}`);
@@ -90,14 +90,16 @@ export async function buildPortfolio(): Promise<Portfolio> {
 
   // Priced against history, so this is how the basket moved rather than how
   // much money went in or out.
-  const { changes, series } = await changesFor(holdings, usdKrw).catch(() => ({
+  const { changes, series, holdingSeries } = await changesFor(holdings, usdKrw).catch(() => ({
     changes: {
       day: { rate: null, amountKrw: null, missing: [] },
       month: { rate: null, amountKrw: null, missing: [] },
       year: { rate: null, amountKrw: null, missing: [] },
     },
     series: { day: [], month: [], year: [] },
+    holdingSeries: {},
   }));
+  const cash = [...upbit.cash, ...kis.cash, ...(gold?.cash ?? [])].sort((a, b) => b.valueKrw - a.valueKrw);
 
   // A principal missing either half would be wrong with nothing saying so -
   // the failure is already in `problems`, and the figure is withheld.
@@ -157,6 +159,9 @@ export async function buildPortfolio(): Promise<Portfolio> {
   return {
     holdings,
     cashKrw,
+    cash,
+    goldGramKrw: gold?.gramKrw ?? null,
+    holdingSeries,
     totalKrw: total,
     costKrw,
     profitKrw: invested - costKrw,

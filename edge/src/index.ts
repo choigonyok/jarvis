@@ -28,6 +28,7 @@ interface Env {
   SPENDING: Fetcher;
   JOBS: Fetcher;
   KAKAOTALK: Fetcher;
+  IMESSAGE: Fetcher;
   STATUS: Fetcher;
   BROWSER: Fetcher;
   AGENT_GUEST: Fetcher;
@@ -42,6 +43,7 @@ const SERVICES: Record<string, { binding: keyof Env; origin: string }> = {
   spending: { binding: "SPENDING", origin: "http://spending:8095" },
   jobs: { binding: "JOBS", origin: "http://jobs:8098" },
   kakaotalk: { binding: "KAKAOTALK", origin: "http://kakaotalk:8090" },
+  imessage: { binding: "IMESSAGE", origin: "http://imessage:8099" },
   status: { binding: "STATUS", origin: "http://status:8096" },
   vnc: { binding: "BROWSER", origin: "http://browser:6080" },
 };

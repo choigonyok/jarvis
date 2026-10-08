@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-// The collector's read-only surface, behind the login proxy. The browser never
-// holds its bearer token; the proxy attaches it server-side.
-const API = "/api/kakaotalk";
+// The collectors' read-only surfaces, behind the login proxy. The browser never
+// holds their bearer token; the proxy attaches it server-side. KakaoTalk and
+// iMessage serve the same shape (kakaotalk-client, imessage-client).
+export type Source = "kakao" | "imessage";
+const BASE: Record<Source, string> = { kakao: "/api/kakaotalk", imessage: "/api/imessage" };
 
 export type KakaoRoom = {
   id: string; // chat_id — the stable key; names can repeat or be a peer's name
@@ -67,7 +69,8 @@ function fmtTime(epoch: number): string {
  * surface is a window onto a database, not a live conversation, and the
  * collector itself only looks once a second.
  */
-export function useKakao() {
+export function useKakao(source: Source = "kakao") {
+  const API = BASE[source];
   const [rooms, setRooms] = useState<KakaoRoom[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [messages, setMessages] = useState<KakaoMessage[]>([]);
@@ -96,7 +99,7 @@ export function useKakao() {
     } finally {
       setHydrated(true);
     }
-  }, []);
+  }, [API]);
 
   const loadMessages = useCallback(async (chatId: string) => {
     try {
@@ -122,7 +125,7 @@ export function useKakao() {
     } catch {
       setError("메시지를 불러오지 못했습니다.");
     }
-  }, []);
+  }, [API]);
 
   useEffect(() => {
     void loadRooms();

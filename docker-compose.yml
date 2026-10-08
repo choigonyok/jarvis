@@ -582,6 +582,33 @@ services:
       - "8090"
     restart: unless-stopped
 
+  # iMessage·문자. kakaotalk 처럼 맥의 메시지 앱 데이터베이스(chat.db)를 앞으로만
+  # 읽어 따로 쌓고, 같은 모양으로 내준다. 이름은 연락처(AddressBook)에서 찾는다.
+  #
+  # ~/Library/Messages 는 macOS 개인정보 보호 대상이라, Docker Desktop 에 "전체
+  # 디스크 접근 권한"을 주기 전에는 마운트 자체가 실패한다. 그래서 프로필 뒤에
+  # 둔다 - 권한을 준 뒤 COMPOSE_PROFILES 에 imessage 를 더하거나
+  # `docker compose --profile imessage up -d imessage` 로 띄운다.
+  imessage:
+    build: ./imessage-client
+    profiles: ["imessage"]
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      LISTEN_ADDR: ":8099"
+      POLL_INTERVAL: ${IMESSAGE_POLL_INTERVAL:-2s}
+      CHAT_DB: /messages/chat.db
+      CONTACTS_DB: /addressbook/AddressBook-v22.abcddb
+      API_TOKEN: ${JARVIS_API_TOKEN:-}
+    volumes:
+      - jarvis-imessage-data:/data
+      - ${HOME}/Library/Messages:/messages:ro
+      - ${HOME}/Library/Application Support/AddressBook:/addressbook:ro
+    ports:
+      - "127.0.0.1:${IMESSAGE_PORT:-8099}:8099"
+    expose:
+      - "8099"
+    restart: unless-stopped
+
   # 상태. "뭐가 고장났나"를 컨테이너가 아니라 기능 단위로 답한다 - 카톡이
   # 들어오고 있나, 에이전트 브라우저가 쿠팡에 아직 로그인돼 있나, uniple 이
   # 캘린더를 아직 들여보내나.
@@ -649,3 +676,4 @@ volumes:
   jarvis-kakaotalk-data:
   chrome-profile:
   jarvis-uploads:
+  jarvis-imessage-data:

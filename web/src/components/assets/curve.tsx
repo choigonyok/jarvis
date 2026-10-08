@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { WINDOW_LABEL, percent, type Point, type Window } from "@/lib/portfolio";
+import { type Holding, type ReturnPoint, WINDOW_LABEL, percent, type Point, type Window } from "@/lib/portfolio";
 import { cn } from "@/lib/utils";
 
 /**
@@ -20,16 +20,57 @@ import { cn } from "@/lib/utils";
 export function Curve({
   series,
   rates,
+  holdings = [],
+  holdingSeries = {},
+  subject,
+  onSubject,
 }: {
   series: Record<Window, Point[]>;
   rates: Record<Window, number | null>;
+  holdings?: Holding[];
+  /** Per holding: its price return over each window. */
+  holdingSeries?: Record<string, Record<Window, ReturnPoint[]>>;
+  /** A holding id, or null for the whole basket. */
+  subject: string | null;
+  onSubject: (id: string | null) => void;
 }) {
   const [window, setWindow] = useState<Window>("month");
-  const points = series[window] ?? [];
-  const rate = rates[window];
+  const held = subject ? holdings.find((h) => h.id === subject) : undefined;
+  // One shape for both: dates and the return since the window began.
+  const points: ReturnPoint[] = held
+    ? (holdingSeries[held.id]?.[window] ?? [])
+    : (() => {
+        const ps = series[window] ?? [];
+        const base = ps[0]?.valueKrw ?? 0;
+        return base > 0 ? ps.map((p) => ({ date: p.date, rate: (p.valueKrw - base) / base })) : [];
+      })();
+  const rate = held ? (points.length >= 2 ? points[points.length - 1].rate : null) : rates[window];
+  const charted = holdings.filter((h) => (holdingSeries[h.id]?.month?.length ?? 0) >= 2);
 
   return (
-    <section aria-label="총자산 변화">
+    <section aria-label={held ? `${held.name} 수익률 변화` : "총자산 변화"}>
+      {charted.length > 0 ? (
+        <div role="tablist" aria-label="그래프 대상" className="-ms-1 mb-3 flex flex-wrap gap-1">
+          {[{ id: null as string | null, name: "전체" }, ...charted.map((h) => ({ id: h.id as string | null, name: h.name }))].map((t) => {
+            const on = (t.id ?? null) === (held?.id ?? null);
+            return (
+              <button
+                key={t.id ?? "all"}
+                type="button"
+                role="tab"
+                aria-selected={on}
+                onClick={() => onSubject(t.id)}
+                className={cn(
+                  "max-w-[10rem] truncate rounded-md px-2.5 py-1 text-[12px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+                  on ? "bg-glass-raised text-foreground" : "text-faint hover:text-dim",
+                )}
+              >
+                {t.name}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
       <div className="mb-3 flex items-center justify-between gap-3">
         <p className="tnum text-[13px]">
           {rate === null ? (
@@ -39,7 +80,10 @@ export function Curve({
               {percent(rate, 2)}
             </span>
           )}
-          <span className="ms-2 text-faint">{WINDOW_LABEL[window]}</span>
+          <span className="ms-2 text-faint">
+            {held ? `${held.name} 수익률 · ` : ""}
+            {WINDOW_LABEL[window]}
+          </span>
         </p>
 
         <div
@@ -68,12 +112,12 @@ export function Curve({
         </div>
       </div>
 
-      <Plot points={points} />
+      <Plot points={points} label={held ? `${held.name} 수익률` : "총자산 변화"} />
     </section>
   );
 }
 
-function Plot({ points }: { points: Point[] }) {
+function Plot({ points, label }: { points: ReturnPoint[]; label: string }) {
   if (points.length < 2) {
     return (
       <div className="flex h-28 items-center rounded-lg border border-edge-soft bg-glass px-4">
@@ -85,9 +129,8 @@ function Plot({ points }: { points: Point[] }) {
     );
   }
 
-  const base = points[0].valueKrw;
   // Percent from the window's start: the line is about movement, not size.
-  const values = points.map((p) => (p.valueKrw - base) / base);
+  const values = points.map((p) => p.rate);
   const top = Math.max(...values, 0);
   const bottom = Math.min(...values, 0);
   // A flat month should not be magnified into a mountain range.
@@ -110,7 +153,7 @@ function Plot({ points }: { points: Point[] }) {
         preserveAspectRatio="none"
         className="h-28 w-full"
         role="img"
-        aria-label={`총자산 변화 ${percent(values[values.length - 1], 2)}`}
+        aria-label={`${label} ${percent(values[values.length - 1], 2)}`}
       >
         <defs>
           <linearGradient id="curve-fill" x1="0" y1="0" x2="0" y2="1">

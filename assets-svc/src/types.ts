@@ -25,6 +25,24 @@ export type Holding = {
   costKrw: number;
 };
 
+/**
+ * Cash, by account and currency. cashKrw is their sum; these say where it
+ * sits and in what. Upbit's USDT is here, as dollars - a stablecoin held to
+ * be dollars is cash, not a coin bet.
+ */
+export type CashLine = {
+  id: string;
+  venue: "upbit" | "kis" | "gold";
+  currency: "KRW" | "USD";
+  label: string;
+  /** In `currency`. */
+  amount: number;
+  valueKrw: number;
+};
+
+/** One holding's price return since the start of a window, day by day. */
+export type ReturnPoint = { date: string; rate: number };
+
 export type Window = "day" | "month" | "year";
 
 export type Point = { date: string; valueKrw: number };
@@ -118,6 +136,11 @@ export type Allocation = {
 export type Portfolio = {
   holdings: Holding[];
   cashKrw: number;
+  cash: CashLine[];
+  /** KRX gold, won per gram - so a plan can buy gold before any is held. Null without a gold account. */
+  goldGramKrw: number | null;
+  /** Per holding id: its price return over each window. */
+  holdingSeries: Record<string, Record<Window, ReturnPoint[]>>;
   totalKrw: number;
   costKrw: number;
   profitKrw: number;

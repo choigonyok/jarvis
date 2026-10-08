@@ -52,11 +52,35 @@ const MIN_COIN_ORDER = 5_000;
 /** Below this a bucket's gap is not worth an order. */
 const MIN_ORDER = 10_000;
 
-/** Whole units unless it is a coin. */
+/** Whole units unless it is a coin. KRX gold's unit is a gram. */
 function unitOf(h: Holding): number | null {
-  if (h.kind === "coin" || h.quantity <= 0) return null;
-  return h.valueKrw / h.quantity;
+  if (h.kind === "coin") return null;
+  if (h.quantity > 0) return h.valueKrw / h.quantity;
+  // Not held yet (the KRX gold stand-in): its quoted price is the unit.
+  return h.currency === "KRW" && h.price > 0 ? h.price : null;
 }
+
+/** Whole units held - KRX gold's grams come back as 4.9999 from value/price. */
+const wholeHeld = (h: Holding) => Math.floor(h.quantity + 1e-6);
+
+export type PlanOptions = {
+  /** KRX gold, won per gram: lets the gold bucket be filled before any gold is held. */
+  goldGramKrw?: number | null;
+};
+
+const GOLD_STANDIN = (gramKrw: number): Holding => ({
+  id: "gold:KRX",
+  venue: "gold",
+  kind: "gold",
+  symbol: "M04020000",
+  name: "금현물 (KRX)",
+  quantity: 0,
+  avgPrice: 0,
+  price: gramKrw,
+  currency: "KRW",
+  valueKrw: 0,
+  costKrw: 0,
+});
 
 type Ctx = {
   rows: Allocation["rows"];
@@ -65,7 +89,7 @@ type Ctx = {
   total: number;
 };
 
-function context(allocation: Allocation, holdings: Holding[]): Ctx {
+function context(allocation: Allocation, holdings: Holding[], opts: PlanOptions = {}): Ctx {
   const bucketOf = new Map<string, Bucket>();
   for (const r of allocation.rows) for (const s of r.symbols) bucketOf.set(s, r.id);
   const byBucket = new Map<Bucket, Holding[]>();
@@ -73,6 +97,9 @@ function context(allocation: Allocation, holdings: Holding[]): Ctx {
     const b = bucketOf.get(h.symbol);
     if (!b || b === "cash") continue;
     byBucket.set(b, [...(byBucket.get(b) ?? []), h]);
+  }
+  if (!byBucket.get("gold")?.length && opts.goldGramKrw && opts.goldGramKrw > 0) {
+    byBucket.set("gold", [GOLD_STANDIN(opts.goldGramKrw)]);
   }
   // Largest position first: that is where a buy or a sell goes.
   for (const list of byBucket.values()) list.sort((a, b) => b.valueKrw - a.valueKrw);
@@ -110,7 +137,7 @@ function ordersFor(bucket: Bucket, delta: number, ctx: Ctx, round: "nearest" | "
       }
       continue;
     }
-    const units = Math.min(h.quantity, Math.round(left / unit));
+    const units = Math.min(wholeHeld(h), Math.round(left / unit));
     if (units > 0) {
       out.push({ bucket, holding: h, side: "sell", units, unitKrw: unit, amountKrw: units * unit });
       left -= units * unit;
@@ -146,8 +173,8 @@ function finish(ctx: Ctx, orders: Order[], deposit: number, unpicked: Plan["unpi
 }
 
 /** Buy and sell so each bucket lands as near its target as whole units allow. */
-export function rebalancePlan(allocation: Allocation, holdings: Holding[]): Plan {
-  const ctx = context(allocation, holdings);
+export function rebalancePlan(allocation: Allocation, holdings: Holding[], opts: PlanOptions = {}): Plan {
+  const ctx = context(allocation, holdings, opts);
   const orders: Order[] = [];
   const unpicked: Plan["unpicked"] = [];
   for (const r of ctx.rows) {
@@ -168,8 +195,13 @@ export function rebalancePlan(allocation: Allocation, holdings: Holding[]): Plan
  * units; then the leftover buys one more unit at a time where the shortfall
  * is largest, until nothing more fits.
  */
-export function depositPlan(allocation: Allocation, holdings: Holding[], depositKrw: number): Plan {
-  const ctx = context(allocation, holdings);
+export function depositPlan(
+  allocation: Allocation,
+  holdings: Holding[],
+  depositKrw: number,
+  opts: PlanOptions = {},
+): Plan {
+  const ctx = context(allocation, holdings, opts);
   const total = ctx.total + depositKrw;
   const need = new Map<Bucket, number>();
   // Cash is a bucket too: when it is short, its share of the deposit simply

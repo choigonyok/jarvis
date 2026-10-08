@@ -18,6 +18,19 @@ export type Holding = {
   costKrw: number;
 };
 
+/** Cash by account and currency (Upbit's USDT counts as dollars). */
+export type CashLine = {
+  id: string;
+  venue: "upbit" | "kis" | "gold";
+  currency: "KRW" | "USD";
+  label: string;
+  amount: number;
+  valueKrw: number;
+};
+
+/** One holding's price return since the window began. */
+export type ReturnPoint = { date: string; rate: number };
+
 export type Window = "day" | "month" | "year";
 
 export type Point = { date: string; valueKrw: number };
@@ -112,6 +125,11 @@ export type Portfolio = {
   allocation?: Allocation;
   /** A venue that failed is named rather than silently missing. */
   problems: string[];
+  /** Absent from an older assets-svc. */
+  cash?: CashLine[];
+  /** KRX gold, won per gram. */
+  goldGramKrw?: number | null;
+  holdingSeries?: Record<string, Record<Window, ReturnPoint[]>>;
 };
 
 export function profitOf(h: Holding) {

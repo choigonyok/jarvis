@@ -1,4 +1,4 @@
-import type { Holding, Change, Changes, Point, Window } from "./types.js";
+import type { Holding, Change, Changes, Point, ReturnPoint, Window } from "./types.js";
 import { kisDailyCloses, kisGoldDailyCloses, upbitDailyCloses } from "./venues.js";
 
 /**
@@ -111,10 +111,41 @@ export function seriesFrom(
   return points;
 }
 
+/**
+ * One holding's price return since the window began, day by day: how that
+ * asset moved, whatever amount of it is held. The first trading day of the
+ * window is 0%. Price only - for a dollar share the dollar price, so the
+ * curve is the share's, not the exchange rate's.
+ */
+export function returnSeries(
+  closes: Map<string, number>,
+  days: number,
+  now = new Date(),
+): ReturnPoint[] {
+  const points: ReturnPoint[] = [];
+  let base: number | null = null;
+  let last: number | null = null;
+  for (let i = days; i >= 0; i -= 1) {
+    const date = isoDaysAgo(i, now);
+    const close = closeOnOrBefore(closes, date, 5);
+    if (close === null) continue;
+    if (base === null) base = close;
+    // A weekend repeats Friday's close; one point per trading day is enough.
+    if (close === last && i !== 0) continue;
+    last = close;
+    points.push({ date, rate: close / base - 1 });
+  }
+  return points;
+}
+
 export async function changesFor(
   holdings: Holding[],
   usdKrw: number,
-): Promise<{ changes: Changes; series: Record<Window, Point[]> }> {
+): Promise<{
+  changes: Changes;
+  series: Record<Window, Point[]>;
+  holdingSeries: Record<string, Record<Window, ReturnPoint[]>>;
+}> {
   const histories = await historiesFor(holdings);
   const result = {} as Changes;
 
@@ -147,5 +178,16 @@ export async function changesFor(
     year: seriesFrom(holdings, histories, usdKrw, DAYS.year),
   };
 
-  return { changes: result, series };
+  const holdingSeries: Record<string, Record<Window, ReturnPoint[]>> = {};
+  for (const h of holdings) {
+    const closes = histories.get(h.id) ?? new Map<string, number>();
+    if (closes.size === 0) continue;
+    holdingSeries[h.id] = {
+      day: returnSeries(closes, DAYS.day),
+      month: returnSeries(closes, DAYS.month),
+      year: returnSeries(closes, DAYS.year),
+    };
+  }
+
+  return { changes: result, series, holdingSeries };
 }
