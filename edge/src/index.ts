@@ -32,6 +32,9 @@ interface Env {
   STATUS: Fetcher;
   BROWSER: Fetcher;
   AGENT_GUEST: Fetcher;
+  IMMICH: Fetcher;
+  /** Immich's API key for the gallery. Only this gateway holds it. */
+  IMMICH_API_KEY?: string;
 }
 
 const SERVICES: Record<string, { binding: keyof Env; origin: string }> = {
@@ -45,6 +48,7 @@ const SERVICES: Record<string, { binding: keyof Env; origin: string }> = {
   kakaotalk: { binding: "KAKAOTALK", origin: "http://kakaotalk:8090" },
   imessage: { binding: "IMESSAGE", origin: "http://imessage:8099" },
   status: { binding: "STATUS", origin: "http://status:8096" },
+  immich: { binding: "IMMICH", origin: "http://immich:2283" },
   vnc: { binding: "BROWSER", origin: "http://browser:6080" },
 };
 
@@ -111,9 +115,25 @@ export default {
       return json(404, "그런 경로가 없습니다.");
     }
 
+    // The gallery reads Immich and searches it, nothing else: no upload,
+    // no delete, no settings - the phone app does those, through Access.
+    if (name === "immich") {
+      const path = rest.join("/");
+      const search = request.method === "POST" && /^api\/search\/(smart|metadata)$/.test(path);
+      if (!(request.method === "GET" || request.method === "HEAD" || search) || !path.startsWith("api/")) {
+        return json(405, "갤러리는 읽기만 합니다.");
+      }
+      if (!env.IMMICH_API_KEY) return json(503, "IMMICH_API_KEY 가 설정되지 않았습니다.");
+    }
+
     const target = `${service.origin}/${rest.join("/")}${url.search}`;
     const headers = new Headers(request.headers);
     headers.delete("host");
+    if (name === "immich") {
+      // Immich would read our bearer as one of its own sessions and refuse it.
+      headers.delete("authorization");
+      headers.set("x-api-key", env.IMMICH_API_KEY!);
+    }
     const hasBody = request.method !== "GET" && request.method !== "HEAD";
     try {
       // The response is handed back as it arrives - /agent/events is a stream.

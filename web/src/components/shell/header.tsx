@@ -17,6 +17,7 @@ import {
   MonitorPlay,
   ReceiptText,
   ListChecks,
+  Images,
   Wallet,
 } from "lucide-react";
 import {
@@ -49,6 +50,7 @@ const ICON: Record<string, LucideIcon> = {
   "/assets": Wallet,
   "/spending": ReceiptText,
   "/jobs": ListChecks,
+  "/photos": Images,
   "/calendar": CalendarDays,
   "/screen": MonitorPlay,
   "/kakao": MessagesSquare,
@@ -77,6 +79,7 @@ const secondary: Tab[] = [
   { href: "/assets", label: "자산" },
   { href: "/spending", label: "가계부" },
   { href: "/calendar", label: "캘린더" },
+  { href: "/photos", label: "사진" },
   { href: "/screen", label: "화면" },
   { href: "/kakao", label: "카톡" },
   // 맨 끝. 매일 여는 곳이 아니라 뭔가 이상할 때 찾아오는 곳이다.
@@ -101,7 +104,7 @@ const visible = (tabs: Tab[], role: Role) =>
  * three tabs and no 더보기.
  */
 const OWNER_BAR = ["/", "/jobs", "/assets", "/spending", "/calendar", "/workout", "/record"];
-const OWNER_MORE = ["/screen", "/kakao", "/status"];
+const OWNER_MORE = ["/photos", "/screen", "/kakao", "/status"];
 const GUEST_BAR = ["/", "/calendar", "/workout"];
 
 /** Where a waiting decision is announced: the surface that lists them by name. */
