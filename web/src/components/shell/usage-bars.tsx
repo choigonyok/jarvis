@@ -5,8 +5,9 @@ import { capPct, pct, resetLabel, tone, usd, useUsage } from "@/lib/use-usage";
 import { cn } from "@/lib/utils";
 
 /**
- * Two hairlines in the header: the Claude subscription's 5-hour window on
- * top, the weekly one below. Always there, never asking for attention until
+ * Three hairlines in the header: the Claude subscription's 5-hour window on
+ * top, the weekly one below it, and the memory API key's spend against its
+ * daily cap at the bottom. Always there, never asking for attention until
  * they fill. Holding them (or hovering, on a pointer) shows the numbers.
  */
 export function UsageBars() {
@@ -26,10 +27,12 @@ export function UsageBars() {
 
   const five = pct(usage?.fiveHour);
   const week = pct(usage?.sevenDay);
+  const api = capPct(usage?.api);
   const label =
     five == null && week == null
       ? "Claude 사용량을 아직 읽지 못했습니다"
-      : `Claude 사용량: 5시간 ${five ?? "-"}%, 주간 ${week ?? "-"}%`;
+      : `Claude 사용량: 5시간 ${five ?? "-"}%, 주간 ${week ?? "-"}%` +
+        (api == null ? "" : `, 기억용 API 하루 상한의 ${api}%`);
 
   return (
     <div ref={wrap} className="relative">
@@ -53,6 +56,7 @@ export function UsageBars() {
       >
         <Bar value={five} />
         <Bar value={week} />
+        {usage?.api ? <Bar value={api} /> : null}
       </button>
 
       {open ? (
