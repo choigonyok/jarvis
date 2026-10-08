@@ -8,7 +8,7 @@ COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/imessage-client .
 
 FROM alpine:3.20
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache ca-certificates tzdata && mkdir -p /data
 WORKDIR /app
 COPY --from=build /out/imessage-client /app/imessage-client
 ENV STORE_PATH=/data/imessage.db \

@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -30,7 +31,12 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	st, err := store.Open(getenv("STORE_PATH", "./data/imessage.db"))
+	storePath := getenv("STORE_PATH", "./data/imessage.db")
+	if err := os.MkdirAll(filepath.Dir(storePath), 0o755); err != nil {
+		log.Error("저장소 폴더를 만들지 못했습니다", "err", err)
+		os.Exit(1)
+	}
+	st, err := store.Open(storePath)
 	if err != nil {
 		log.Error("저장소를 열지 못했습니다", "err", err)
 		os.Exit(1)
