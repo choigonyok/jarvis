@@ -192,3 +192,66 @@ func clip(s string, n int) string {
 	}
 	return string(r[:n])
 }
+
+// APIUsage is what the extraction model (pay-as-you-go API, not the
+// subscription) has cost, as memory-svc counts it.
+type APIUsage struct {
+	Model    string  `json:"model"`
+	Enabled  bool    `json:"enabled"`
+	DailyUSD float64 `json:"dailyUsd"`
+	TodayUSD float64 `json:"todayUsd"`
+	Month    struct {
+		USD   float64 `json:"usd"`
+		Calls int     `json:"calls"`
+	} `json:"month"`
+	Days []struct {
+		Day          string  `json:"day"`
+		USD          float64 `json:"usd"`
+		Calls        int     `json:"calls"`
+		InputTokens  int     `json:"inputTokens"`
+		OutputTokens int     `json:"outputTokens"`
+	} `json:"days"`
+}
+
+func (s *Store) APIUsage(ctx context.Context) (*APIUsage, error) {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.base+"/status", nil)
+	if err != nil {
+		return nil, err
+	}
+	if s.token != "" {
+		req.Header.Set("Authorization", "Bearer "+s.token)
+	}
+	res, err := s.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+	if res.StatusCode >= 300 {
+		return nil, fmt.Errorf("기억 서비스가 %d 로 응답했습니다", res.StatusCode)
+	}
+	var st struct {
+		Model      string  `json:"model"`
+		LLM        bool    `json:"llm"`
+		DailyUSD   float64 `json:"dailyUsd"`
+		SpentToday float64 `json:"spentToday"`
+		Month      struct {
+			USD   float64 `json:"usd"`
+			Calls int     `json:"calls"`
+		} `json:"month"`
+		Usage json.RawMessage `json:"usage"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&st); err != nil {
+		return nil, err
+	}
+	u := &APIUsage{Model: st.Model, Enabled: st.LLM, DailyUSD: st.DailyUSD, TodayUSD: st.SpentToday}
+	u.Month.USD, u.Month.Calls = st.Month.USD, st.Month.Calls
+	if len(st.Usage) > 0 {
+		_ = json.Unmarshal(st.Usage, &u.Days)
+	}
+	return u, nil
+}
+
+// APIUsage is the module's view of the same, for the console's usage panel.
+func (m *Module) APIUsage(ctx context.Context) (any, error) { return m.store.APIUsage(ctx) }

@@ -47,9 +47,10 @@ type Server struct {
 	apiToken     string
 	approvalWait time.Duration
 	// uploads holds photos attached in conversation; nil turns them off.
-	uploads *uploads.Store
-	modules *module.Registry
-	usage   *usage.Tracker
+	uploads  *uploads.Store
+	modules  *module.Registry
+	usage    *usage.Tracker
+	apiUsage func(ctx context.Context) (any, error)
 }
 
 // Sender is whatever drives a turn. Keeping it an interface means the
@@ -82,7 +83,9 @@ type Deps struct {
 	Modules *module.Registry
 	// Usage is the subscription's 5-hour and weekly use, served at /usage.
 	Usage *usage.Tracker
-	Log   *slog.Logger
+	// APIUsage, when set, adds the memory model's pay-as-you-go spend to /usage.
+	APIUsage func(ctx context.Context) (any, error)
+	Log      *slog.Logger
 }
 
 func New(d Deps) *Server {
@@ -103,6 +106,7 @@ func New(d Deps) *Server {
 		uploads:         d.Uploads,
 		modules:         d.Modules,
 		usage:           d.Usage,
+		apiUsage:        d.APIUsage,
 	}
 }
 
@@ -316,12 +320,21 @@ func (s *Server) revise(ctx context.Context, id string, edits map[string]string)
 }
 
 func (s *Server) getUsage(w http.ResponseWriter, r *http.Request) {
-	if s.usage == nil {
-		writeJSON(w, http.StatusOK, usage.Usage{})
-		return
+	out := struct {
+		usage.Usage
+		API any `json:"api,omitempty"`
+	}{}
+	if s.usage != nil {
+		out.Usage = s.usage.Snapshot(time.Now())
+	}
+	if s.apiUsage != nil {
+		// Memory down only drops the API panel; the subscription bars still show.
+		if api, err := s.apiUsage(r.Context()); err == nil {
+			out.API = api
+		}
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, s.usage.Snapshot(time.Now()))
+	writeJSON(w, http.StatusOK, out)
 }
 
 // postUpload stores one photo, sent as the raw request body.
