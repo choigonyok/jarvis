@@ -1,0 +1,80 @@
+# Immich: 사진·영상 백업. 공식 docker-compose.yml(v3)을 따르고, 바꾼 것은 셋이다.
+#
+# - 원본(UPLOAD_LOCATION)은 맥미니 디스크의 폴더에 바로 둔다. Docker 가상 디스크
+#   (기본 64GB, 빌드 캐시와 같이 씀)에 두면 라이브러리가 그 한도에 묶인다.
+# - immich-server 를 jarvis 네트워크에도 붙인다. 폰 앱이 들어오는 터널
+#   (immich.choigonyok.com)과 갤러리 탭이 쓰는 게이트웨이(Workers VPC)가 jarvis
+#   compose 안의 cloudflared 를 거쳐 이 이름으로 닿는다.
+# - 2283 은 집 네트워크에 연다: 폰 앱이 집 와이파이에서는 맥미니 주소로 바로
+#   올린다(Cloudflare 무료 요금제는 100MB 넘는 업로드를 막아 긴 영상은 밖에서
+#   못 올린다). 밖에서는 immich.choigonyok.com 의 Cloudflare Access 를 거친다.
+#
+# 실행: scripts/mini compose -f immich/docker-compose.yml up -d
+# 비밀(DB 비밀번호)은 맥미니의 immich/.env 에만 있다(.env.example 참고).
+name: immich
+
+services:
+  immich-server:
+    container_name: immich_server
+    image: ghcr.io/immich-app/immich-server:${IMMICH_VERSION:-v3}
+    volumes:
+      - ${UPLOAD_LOCATION}:/data
+      - /etc/localtime:/etc/localtime:ro
+    env_file:
+      - .env
+    ports:
+      - "2283:2283"
+    networks:
+      default:
+      jarvis:
+        aliases: [immich]
+    depends_on:
+      - redis
+      - database
+    restart: always
+    healthcheck:
+      disable: false
+
+  immich-machine-learning:
+    container_name: immich_machine_learning
+    image: ghcr.io/immich-app/immich-machine-learning:${IMMICH_VERSION:-v3}
+    volumes:
+      - model-cache:/cache
+    env_file:
+      - .env
+    restart: always
+    healthcheck:
+      disable: false
+
+  redis:
+    container_name: immich_redis
+    image: docker.io/valkey/valkey:9@sha256:c123e3715db63d06d4ad6964884037aa0d5d4d703939b9929954112889708e1d
+    healthcheck:
+      test: redis-cli ping | grep -q PONG || exit 1
+    restart: always
+
+  database:
+    container_name: immich_postgres
+    image: ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0@sha256:bcf63357191b76a916ae5eb93464d65c07511da41e3bf7a8416db519b40b1c23
+    environment:
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_DB: ${DB_DATABASE_NAME}
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    # The database is small and Postgres wants a real filesystem, so it stays
+    # in a Docker volume rather than a shared folder.
+    volumes:
+      - immich-pgdata:/var/lib/postgresql/data
+    shm_size: 128mb
+    restart: always
+    healthcheck:
+      disable: false
+
+volumes:
+  model-cache:
+  immich-pgdata:
+
+networks:
+  jarvis:
+    name: jarvis_default
+    external: true
