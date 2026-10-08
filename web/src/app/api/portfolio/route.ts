@@ -44,9 +44,14 @@ export async function GET(request: Request) {
   // 않는다 - 곡선은 과거 종가로 현재 바스켓을 다시 매겨서 그리고, 그쪽이
   // 입출금을 수익률로 착각하지 않는다. 스냅샷이 답하는 것은 "그때 실제로
   // 무엇을 들고 있었나"라는 다른 질문이다.
-  const days = new URL(request.url).searchParams.get("history");
+  const params = new URL(request.url).searchParams;
+  const days = params.get("history");
   return forward(
     request,
-    days ? `/history?days=${encodeURIComponent(days)}` : "/portfolio",
+    days
+      ? `/history?days=${encodeURIComponent(days)}`
+      : params.get("fresh") === "1"
+        ? "/portfolio?fresh=1"
+        : "/portfolio",
   );
 }

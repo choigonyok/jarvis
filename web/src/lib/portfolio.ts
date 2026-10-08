@@ -125,6 +125,8 @@ export type Portfolio = {
   allocation?: Allocation;
   /** A venue that failed is named rather than silently missing. */
   problems: string[];
+  /** The last answer, served while a fresh one is being built; `at` says how old. */
+  stale?: boolean;
   /** Absent from an older assets-svc. */
   cash?: CashLine[];
   /** KRX gold, won per gram. */

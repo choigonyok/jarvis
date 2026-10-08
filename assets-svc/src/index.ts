@@ -12,7 +12,7 @@
 import { createServer } from "node:http";
 
 import * as db from "./db.js";
-import { PRINCIPAL_SINCE, buildPortfolio } from "./portfolio.js";
+import { PRINCIPAL_SINCE, buildPortfolio, invalidateVenues } from "./portfolio.js";
 
 const PORT = Number(process.env.PORT ?? process.env.LISTEN_PORT ?? 8092);
 const TOKEN = process.env.API_TOKEN ?? "";
@@ -21,20 +21,36 @@ const TZ = process.env.TZ ?? "Asia/Seoul";
 db.connect(process.env.DATABASE_URL);
 
 /**
- * Both brokerages are rate-limited and the history walk is a dozen round
- * trips, so a full build takes seconds. Two tabs opening at once should not
- * pay for it twice, and the numbers on a portfolio screen do not need to be
- * fresher than this.
+ * The assembled portfolio. Each venue keeps its own freshness underneath
+ * (portfolio.ts, freshness.ts) and past closes live in the database, so a
+ * rebuild is cheap; this only stops two tabs from building it twice.
+ *
+ * Past FRESH_MS the last answer is still served at once - marked stale - and
+ * a rebuild starts behind it (stale-while-revalidate). The page shows the
+ * time the numbers are from and asks again a moment later, so nobody waits
+ * on the brokerages to see their balance.
  */
-const TTL_MS = 30_000;
+const FRESH_MS = 10_000;
 let cached: { at: number; body: string } | null = null;
 let inflight: Promise<string> | null = null;
 // Bumped by a ledger write, so a build that started before it does not put
 // the old principal back into the cache.
 let generation = 0;
 
-async function portfolioJson(): Promise<string> {
-  if (cached && Date.now() - cached.at < TTL_MS) return cached.body;
+async function portfolioJson(force = false): Promise<string> {
+  if (force) {
+    invalidateVenues();
+    cached = null;
+  }
+  if (cached) {
+    if (Date.now() - cached.at < FRESH_MS) return cached.body;
+    rebuild().catch((e: Error) => console.error("자산을 다시 계산하지 못했습니다:", e.message));
+    return `{"stale":true,${cached.body.slice(1)}`;
+  }
+  return rebuild();
+}
+
+async function rebuild(): Promise<string> {
   if (inflight) return inflight;
 
   const started = generation;
@@ -161,7 +177,7 @@ const server = createServer((req, res) => {
   }
 
   if (url.pathname === "/portfolio") {
-    void portfolioJson()
+    void portfolioJson(url.searchParams.get("fresh") === "1")
       .then((body) => send(res, 200, body))
       .catch((e: Error) => {
         console.error("자산을 계산하지 못했습니다:", e.message);
