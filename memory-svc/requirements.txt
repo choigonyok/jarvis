@@ -1,0 +1,6 @@
+graphiti-core[falkordb]==0.30.2
+anthropic==1.12.1
+fastapi
+uvicorn
+httpx
+psycopg[binary]

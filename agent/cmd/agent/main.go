@@ -26,6 +26,7 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/module/assets"
 	"github.com/choigonyok/jarvis/agent/internal/module/calendar"
 	"github.com/choigonyok/jarvis/agent/internal/module/jobs"
+	"github.com/choigonyok/jarvis/agent/internal/module/memory"
 	"github.com/choigonyok/jarvis/agent/internal/module/spending"
 	"github.com/choigonyok/jarvis/agent/internal/thread"
 	"github.com/choigonyok/jarvis/agent/internal/uploads"
@@ -116,6 +117,16 @@ func main() {
 		}
 	}
 
+	// 장기 기억. 주인은 "owner", 손님은 "guest" 그룹만 읽는다.
+	var memoryModule *memory.Module
+	if cfg.MemoryURL != "" {
+		memoryModule = memory.New(memory.NewStore(cfg.MemoryURL, cfg.APIToken,
+			map[bool]string{true: "guest", false: "owner"}[cfg.Guest]))
+		modules.Add(memoryModule)
+		mcpMounts["/mcp/"+memory.ServerName] = memoryModule.Handler()
+		cfg.ModuleMCPURLs[memory.ServerName] = cfg.PublicMCPURL + "/" + memory.ServerName
+	}
+
 	startCtx, cancelStart := context.WithTimeout(context.Background(), 10*time.Second)
 	if err := modules.Start(startCtx); err != nil {
 		cancelStart()
@@ -128,6 +139,9 @@ func main() {
 	// Subscription use, read off every run's stream; kept beside the proposals.
 	usageTracker := usage.New(filepath.Join(filepath.Dir(cfg.ProposalsPath), "usage.json"))
 	runner.SetUsage(usageTracker)
+	if memoryModule != nil {
+		runner.SetRecall(memoryModule.Recall)
+	}
 
 	// 묶음 가맹점(쿠팡·네이버페이) 결제가 새로 들어왔을 때만 깨어나, 대화와
 	// 분리된 세션으로 주문목록을 읽어 상품별로 나눈다.

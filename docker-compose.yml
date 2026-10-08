@@ -68,7 +68,7 @@ services:
       JARVIS_MODEL: ${JARVIS_MODEL:-}
       # Tools that skip the approval card. Read-only only - calendar writes
       # are deliberately absent, so every one of them lands on a card.
-      JARVIS_ALLOWED_TOOLS: ${JARVIS_ALLOWED_TOOLS:-Read,Glob,Grep,TodoWrite,mcp__calendar__list_events,mcp__assets__get_portfolio,mcp__assets__get_allocation,mcp__assets__get_history,mcp__spending__get_spending,mcp__jobs__create_job,mcp__jobs__list_jobs,mcp__jobs__instruct_job}
+      JARVIS_ALLOWED_TOOLS: ${JARVIS_ALLOWED_TOOLS:-Read,Glob,Grep,TodoWrite,mcp__calendar__list_events,mcp__assets__get_portfolio,mcp__assets__get_allocation,mcp__assets__get_history,mcp__spending__get_spending,mcp__memory__search_memory,mcp__jobs__create_job,mcp__jobs__list_jobs,mcp__jobs__instruct_job}
       # MCP servers with no module behind them, as name=url. The browser runs
       # on the host - the container has no display and no Chrome - so this
       # dials back out through host.docker.internal.
@@ -96,6 +96,7 @@ services:
       JARVIS_SPENDING_URL: http://spending:8095
       # 작업. 대화에서 맡긴 일을 기록하는 곳이고, 실행은 에이전트의 스케줄러가 한다.
       JARVIS_JOBS_URL: http://jobs:8098
+      JARVIS_MEMORY_URL: http://memory:8100
       # 대화에 첨부한 사진. 브라우저 컨테이너도 같은 볼륨을 읽기 전용으로 붙여
       # 작업이 웹 양식에 사진을 넣는다.
       JARVIS_UPLOADS_DIR: /uploads
@@ -158,6 +159,7 @@ services:
       JARVIS_ALLOWED_ORIGIN: ${JARVIS_ALLOWED_ORIGIN:-}
       JARVIS_APPROVAL_TIMEOUT: ${JARVIS_APPROVAL_TIMEOUT:-30m}
       JARVIS_TURN_TIMEOUT: ${JARVIS_TURN_TIMEOUT:-2h}
+      JARVIS_MEMORY_URL: http://memory:8100
       JARVIS_CALENDAR_URL: http://calendar:8093
       JARVIS_CHAT_URL: http://chat:8094
     volumes:
@@ -607,6 +609,59 @@ services:
       - "8099"
     restart: unless-stopped
 
+  # 기억. jarvis 곳곳의 데이터를 Graphiti 지식 그래프(FalkorDB)에 쌓고, 에이전트가
+  # /search 로 꺼내 쓴다. 대화·카톡·iMessage 같은 글은 Claude Haiku 5.5(API 키,
+  # 사용량 과금)로 사람·장소·약속을 뽑고, 캘린더·가계부·자산·운동·작업·사진은
+  # LLM 없이 그대로 넣는다. 임베딩은 맥미니의 bge-m3(ollama)라 무료다.
+  # 손님 대화는 group "guest" 로 따로 쌓여 운영자 기억과 섞이지 않는다.
+  memory:
+    build: ./memory-svc
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      DATABASE_URL: >-
+        postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}
+      API_TOKEN: ${JARVIS_API_TOKEN:-}
+      # 없으면 글 추출만 쉬고 구조화 데이터는 계속 쌓는다.
+      MEMORY_OWNER_NAME: ${MEMORY_OWNER_NAME:-}
+      ANTHROPIC_API_KEY: ${MEMORY_ANTHROPIC_API_KEY:-}
+      MEMORY_DAILY_USD: ${MEMORY_DAILY_USD:-1.0}
+      MEMORY_BACKFILL_DAYS: ${MEMORY_BACKFILL_DAYS:-30}
+      MEMORY_INTERVAL: ${MEMORY_INTERVAL:-300}
+      IMMICH_API_KEY: ${IMMICH_API_KEY:-}
+    expose:
+      - "8100"
+    ports:
+      - "127.0.0.1:${JARVIS_MEMORY_PORT:-8100}:8100"
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+      falkordb:
+        condition: service_started
+      ollama:
+        condition: service_started
+    restart: unless-stopped
+
+  falkordb:
+    # 6.0 changed db.idx.fulltext.createNodeIndex; graphiti-core 0.30 calls the 4.x form.
+    image: falkordb/falkordb:v4.22.0
+    volumes:
+      - jarvis-falkordb:/var/lib/falkordb/data
+    expose:
+      - "6379"
+    restart: unless-stopped
+
+  # bge-m3: 한국어를 잘 다루는 임베딩 모델. 처음 뜰 때 한 번 받는다(약 1.2GB).
+  ollama:
+    image: ollama/ollama:latest
+    entrypoint: ["/bin/sh", "-c", "ollama serve & until ollama list >/dev/null 2>&1; do sleep 1; done; ollama pull bge-m3; wait"]
+    environment:
+      OLLAMA_KEEP_ALIVE: 24h
+    volumes:
+      - jarvis-ollama:/root/.ollama
+    expose:
+      - "11434"
+    restart: unless-stopped
+
   # 상태. "뭐가 고장났나"를 컨테이너가 아니라 기능 단위로 답한다 - 카톡이
   # 들어오고 있나, 에이전트 브라우저가 쿠팡에 아직 로그인돼 있나, uniple 이
   # 캘린더를 아직 들여보내나.
@@ -675,3 +730,5 @@ volumes:
   chrome-profile:
   jarvis-uploads:
   jarvis-imessage-data:
+  jarvis-falkordb:
+  jarvis-ollama:
