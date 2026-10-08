@@ -585,13 +585,11 @@ services:
   # iMessage·문자. kakaotalk 처럼 맥의 메시지 앱 데이터베이스(chat.db)를 앞으로만
   # 읽어 따로 쌓고, 같은 모양으로 내준다. 이름은 연락처(AddressBook)에서 찾는다.
   #
-  # ~/Library/Messages 는 macOS 개인정보 보호 대상이라, Docker Desktop 에 "전체
-  # 디스크 접근 권한"을 주기 전에는 마운트 자체가 실패한다. 그래서 프로필 뒤에
-  # 둔다 - 권한을 준 뒤 COMPOSE_PROFILES 에 imessage 를 더하거나
-  # `docker compose --profile imessage up -d imessage` 로 띄운다.
+  # ~/Library/Messages 는 macOS 개인정보 보호 대상이라 Docker 가 직접 마운트하지
+  # 못한다. 그래서 scripts/imessage-mirror.sh 가 SSH 권한으로 ~/.jarvis-mirror 에
+  # 복사해 두고(LaunchAgent com.jarvis.imessage-mirror), 이 컨테이너는 그 복사본을 읽는다.
   imessage:
     build: ./imessage-client
-    profiles: ["imessage"]
     environment:
       TZ: ${TZ:-Asia/Seoul}
       LISTEN_ADDR: ":8099"
@@ -601,8 +599,8 @@ services:
       API_TOKEN: ${JARVIS_API_TOKEN:-}
     volumes:
       - jarvis-imessage-data:/data
-      - ${HOME}/Library/Messages:/messages:ro
-      - ${HOME}/Library/Application Support/AddressBook:/addressbook:ro
+      - ${IMESSAGE_MIRROR:-${HOME}/.jarvis-mirror}/messages:/messages:ro
+      - ${IMESSAGE_MIRROR:-${HOME}/.jarvis-mirror}/addressbook:/addressbook:ro
     ports:
       - "127.0.0.1:${IMESSAGE_PORT:-8099}:8099"
     expose:
