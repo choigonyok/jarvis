@@ -42,7 +42,13 @@ type Runner struct {
 	bgCancel func()
 	// usage hears every rate_limit_event, chat and background alike.
 	usage *usage.Tracker
+	// recall, when set, returns what long-term memory holds about a message,
+	// put in front of it for the model (not in the transcript).
+	recall func(ctx context.Context, text string) string
 }
+
+// SetRecall hands every typed message to fn before the model sees it.
+func (r *Runner) SetRecall(fn func(ctx context.Context, text string) string) { r.recall = fn }
 
 // session is the one field of the CLI's state this agent owns. The transcript
 // itself lives in the CLI's own home directory.
@@ -88,7 +94,15 @@ func (r *Runner) Send(text string, images []string) error {
 	r.mu.Unlock()
 
 	r.store.AppendUser(text, images...)
-	go r.loop(withImages(text, images, r.cfg.UploadsDir))
+	prompt := withImages(text, images, r.cfg.UploadsDir)
+	go func() {
+		if r.recall != nil {
+			if known := r.recall(context.Background(), text); known != "" {
+				prompt = known + "\n" + prompt
+			}
+		}
+		r.loop(prompt)
+	}()
 	return nil
 }
 

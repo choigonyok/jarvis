@@ -84,6 +84,8 @@ type Config struct {
 	// JobsURL is where jobs-svc listens: work handed over in conversation,
 	// run in the background on whatever cadence each job decides.
 	JobsURL string
+	// MemoryURL is memory-svc (the Graphiti knowledge graph).
+	MemoryURL string
 	// Jobs turns on the scheduler. Like Enrich, it needs the browser server.
 	Jobs         bool
 	JobsInterval time.Duration
@@ -140,7 +142,7 @@ func Load() (Config, error) {
 		AllowedTools: splitList(env("JARVIS_ALLOWED_TOOLS",
 			"Read,Glob,Grep,TodoWrite,mcp__calendar__list_events,"+
 				"mcp__assets__get_portfolio,mcp__assets__get_allocation,mcp__assets__get_history,"+
-				"mcp__spending__get_spending,mcp__jobs__create_job,mcp__jobs__list_jobs,mcp__jobs__instruct_job")),
+				"mcp__spending__get_spending,mcp__memory__search_memory,mcp__jobs__create_job,mcp__jobs__list_jobs,mcp__jobs__instruct_job")),
 		PermissionMode: env("JARVIS_PERMISSION_MODE", "manual"),
 		ApprovalWait:   envDuration("JARVIS_APPROVAL_TIMEOUT", 30*time.Minute),
 		TurnTimeout:    envDuration("JARVIS_TURN_TIMEOUT", 2*time.Hour),
@@ -155,8 +157,10 @@ func Load() (Config, error) {
 		Enrich:         envBool("JARVIS_ENRICH", true),
 		UploadsDir:     env("JARVIS_UPLOADS_DIR", ""),
 		JobsURL:        env("JARVIS_JOBS_URL", "http://localhost:8098"),
-		Jobs:           envBool("JARVIS_JOBS", true),
-		JobsInterval:   envDuration("JARVIS_JOBS_INTERVAL", 30*time.Second),
+		// Empty turns long-term memory off: no tool, nothing recalled.
+		MemoryURL:    os.Getenv("JARVIS_MEMORY_URL"),
+		Jobs:         envBool("JARVIS_JOBS", true),
+		JobsInterval: envDuration("JARVIS_JOBS_INTERVAL", 30*time.Second),
 		// Least time between two runs of any job. Sites watch for bots; a
 		// person does not click through two shops in the same minute.
 		JobsCooldown:    envDuration("JARVIS_JOBS_COOLDOWN", time.Minute),
@@ -175,7 +179,7 @@ func Load() (Config, error) {
 	if c.Guest = env("JARVIS_ROLE", "") == "guest"; c.Guest {
 		c.Thread = "guest"
 		c.SystemPrompt = env("JARVIS_SYSTEM_PROMPT", guestSystemPrompt)
-		c.AllowedTools = splitList(env("JARVIS_ALLOWED_TOOLS", "TodoWrite,WebSearch,WebFetch,mcp__calendar__list_events"))
+		c.AllowedTools = splitList(env("JARVIS_ALLOWED_TOOLS", "TodoWrite,WebSearch,WebFetch,mcp__calendar__list_events,mcp__memory__search_memory"))
 		builtins := "WebSearch,WebFetch,TodoWrite"
 		c.BuiltinTools = &builtins
 		// No browser: it is logged in to the operator's shops and pay. No
