@@ -3,6 +3,7 @@ import { Instrument_Sans, JetBrains_Mono } from "next/font/google";
 import { headers } from "next/headers";
 import { RoleProvider } from "@/components/shell/role";
 import { NoZoom } from "@/components/shell/no-zoom";
+import { PullToRefresh } from "@/components/shell/pull-to-refresh";
 import { ViewportProbe } from "@/components/shell/viewport-probe";
 import { ROLE_HEADER } from "@/lib/role";
 import "./globals.css";
@@ -61,6 +62,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
         <RoleProvider role={role}>{children}</RoleProvider>
         <ViewportProbe />
         <NoZoom />
+        <PullToRefresh />
       </body>
     </html>
   );

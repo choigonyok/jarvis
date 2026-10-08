@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { Curve } from "@/components/assets/curve";
 import { PrincipalLedger, PrincipalParts } from "@/components/assets/principal";
@@ -36,6 +36,9 @@ export function Assets() {
   const [data, setData] = useState<Portfolio | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // Whose curve the chart shows: a holding id, or null for the whole basket.
+  const [subject, setSubject] = useState<string | null>(null);
+  const chart = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -180,22 +183,28 @@ export function Assets() {
 
           {data && data.holdings.length > 0 ? (
             <>
-              {/* The graph tracks the total, not each holding: per-position
-                  movement is already spelled out in the list below, and two
-                  charts saying the same thing differently is one too many. */}
-              <Curve
-                series={data.series}
-                rates={{
-                  day: data.changes.day.rate,
-                  month: data.changes.month.rate,
-                  year: data.changes.year.rate,
-                }}
-              />
+              {/* The whole basket by default; a holding picked here or in
+                  the list below shows its own return curve instead - a
+                  percentage, so a small position is as readable as a big one. */}
+              <div ref={chart} className="scroll-mt-4">
+                <Curve
+                  series={data.series}
+                  rates={{
+                    day: data.changes.day.rate,
+                    month: data.changes.month.rate,
+                    year: data.changes.year.rate,
+                  }}
+                  holdings={data.holdings}
+                  holdingSeries={data.holdingSeries}
+                  subject={subject}
+                  onSubject={setSubject}
+                />
+              </div>
 
               {/* An assets-svc older than this page sends no allocation. */}
               {data.allocation ? (
                 <section className="mt-7 border-t border-edge-soft pt-5" aria-label="목표 비중">
-                  <TargetAllocation allocation={data.allocation} holdings={data.holdings} />
+                  <TargetAllocation allocation={data.allocation} holdings={data.holdings} goldGramKrw={data.goldGramKrw} />
                 </section>
               ) : null}
 
@@ -210,10 +219,21 @@ export function Assets() {
                   {data.holdings.map((h) => {
                     const profit = profitOf(h);
                     const gain = profit >= 0;
+                    const charted = (data.holdingSeries?.[h.id]?.month?.length ?? 0) >= 2;
                     return (
-                      <div
+                      <button
                         key={h.id}
-                        className="flex items-baseline gap-3 rounded-lg px-2 py-2.5 transition-colors hover:bg-glass"
+                        type="button"
+                        disabled={!charted}
+                        onClick={() => {
+                          setSubject(h.id);
+                          chart.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                        }}
+                        aria-label={`${h.name} 수익률 그래프 보기`}
+                        className={cn(
+                          "flex w-full items-baseline gap-3 rounded-lg px-2 py-2.5 text-left transition-colors outline-none hover:bg-glass focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-default",
+                          subject === h.id && "bg-glass",
+                        )}
                       >
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-[14px] text-foreground/90">
@@ -241,10 +261,36 @@ export function Assets() {
                             <span className="text-faint">{signedKrw(profit)}</span>
                           </p>
                         </div>
-                      </div>
+                      </button>
                     );
                   })}
                 </div>
+
+                {data.cash?.length ? (
+                  <div className="mt-4 border-t border-edge-soft pt-3">
+                    <p className="mb-1 px-2 text-[12px] text-faint">현금</p>
+                    {data.cash.map((c) => (
+                      <div key={c.id} className="flex items-baseline gap-3 rounded-lg px-2 py-2.5">
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-[14px] text-foreground/90">
+                            {c.currency === "USD" ? "달러" : "원화"}
+                            <span className="ms-2 text-[12px] text-faint">{c.label}</span>
+                          </p>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <p className="tnum text-[14px] text-foreground/90">
+                            {c.currency === "USD"
+                              ? `$${c.amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                              : krw(c.amount)}
+                          </p>
+                          {c.currency === "USD" ? (
+                            <p className="tnum mt-0.5 text-[11.5px] text-faint">{krw(c.valueKrw)}</p>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
               </section>
 
               <p className="mt-6 text-[11.5px] text-faint">

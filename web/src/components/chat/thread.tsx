@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Composer } from "@/components/chat/composer";
 import { ModeToggle, type ChatMode } from "@/components/chat/mode-toggle";
 import { ProposalCard } from "@/components/chat/proposal-card";
@@ -112,17 +112,35 @@ export function Thread() {
     (p) => isPending(p) && !attached.has(p.id),
   );
 
-  // Arriving at the bottom should be instant. Smooth-scrolling a transcript
-  // that is thousands of pixels long means landing on a card that is still
-  // moving - and on a phone that card is usually why you opened this.
+  // Opening the tab lands on the newest turn before anything is painted - no
+  // scroll from the top. After that, new turns pull the view down only while
+  // the reader is at the bottom; someone scrolled up to read is left there.
   const landed = useRef(false);
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({
-      behavior: landed.current ? "smooth" : "instant",
-      block: "end",
-    });
-    landed.current = true;
+  const pinned = useRef(true);
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el || turns.length === 0) return;
+    if (!landed.current) {
+      el.scrollTop = el.scrollHeight;
+      landed.current = true;
+      pinned.current = true;
+      return;
+    }
+    if (pinned.current) bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [turns, proposals, thinking, error]);
+
+  // Photos and long markdown finish laying out after the first paint; while
+  // the reader is pinned to the bottom, keep them there as the page grows.
+  useEffect(() => {
+    const el = scrollRef.current;
+    const content = el?.firstElementChild;
+    if (!el || !content) return;
+    const ro = new ResizeObserver(() => {
+      if (pinned.current) el.scrollTop = el.scrollHeight;
+    });
+    ro.observe(content);
+    return () => ro.disconnect();
+  }, []);
 
   // Watch the waiting cards themselves rather than guessing from scroll
   // position: the bar exists to speak for a decision you cannot see, so what
@@ -217,6 +235,10 @@ export function Thread() {
 
       <main
         ref={scrollRef}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+        }}
         className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain"
       >
         <div className="mx-auto w-full max-w-[46rem] px-4 pt-7 pb-12 sm:px-8 sm:pt-10 sm:pb-6">

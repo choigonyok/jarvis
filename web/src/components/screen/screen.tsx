@@ -188,7 +188,7 @@ export function Screen({ vncUrl, ticketed = false }: { vncUrl: string; ticketed?
               : "min-h-0 w-full flex-1 sm:aspect-[16/10] sm:flex-none",
           )}
         >
-          <div ref={mount} className="absolute inset-0" />
+          <div ref={mount} data-no-pull className="absolute inset-0" />
           {controlling && touch && state === "open" ? <RemoteTouch rfb={rfb} canvasHost={mount} /> : null}
 
           {state !== "open" && (

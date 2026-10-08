@@ -34,7 +34,15 @@ const pct = (rate: number) => {
  * number is read. Below it, the gaps are paired into transfers, because what
  * you actually do is move money from one bucket into another.
  */
-export function TargetAllocation({ allocation, holdings }: { allocation: Allocation; holdings: Holding[] }) {
+export function TargetAllocation({
+  allocation,
+  holdings,
+  goldGramKrw,
+}: {
+  allocation: Allocation;
+  holdings: Holding[];
+  goldGramKrw?: number | null;
+}) {
   const { rows, moves, totalKrw } = allocation;
   if (totalKrw <= 0) return null;
 
@@ -168,7 +176,7 @@ export function TargetAllocation({ allocation, holdings }: { allocation: Allocat
         생긴 차이는 &lsquo;여유&rsquo;로 표시해요.
       </p>
 
-      <Planner allocation={allocation} holdings={holdings} />
+      <Planner allocation={allocation} holdings={holdings} goldGramKrw={goldGramKrw} />
     </div>
   );
 }
@@ -178,13 +186,26 @@ export function TargetAllocation({ allocation, holdings }: { allocation: Allocat
  * coins by amount. Two questions - "rebalance what I have" and "I have new
  * cash, where does it go" - answered with the same rounding.
  */
-function Planner({ allocation, holdings }: { allocation: Allocation; holdings: Holding[] }) {
+function Planner({
+  allocation,
+  holdings,
+  goldGramKrw,
+}: {
+  allocation: Allocation;
+  holdings: Holding[];
+  goldGramKrw?: number | null;
+}) {
   const [mode, setMode] = useState<"rebalance" | "deposit">("rebalance");
   const [amount, setAmount] = useState("");
   const deposit = Number(amount.replace(/[^\d]/g, "")) || 0;
   const plan = useMemo(
-    () => (mode === "rebalance" ? rebalancePlan(allocation, holdings) : deposit > 0 ? depositPlan(allocation, holdings, deposit) : null),
-    [mode, allocation, holdings, deposit],
+    () =>
+      mode === "rebalance"
+        ? rebalancePlan(allocation, holdings, { goldGramKrw })
+        : deposit > 0
+          ? depositPlan(allocation, holdings, deposit, { goldGramKrw })
+          : null,
+    [mode, allocation, holdings, deposit, goldGramKrw],
   );
 
   return (
@@ -341,7 +362,7 @@ function Orders({ title, orders }: { title: string; orders: Order[] }) {
 /** A share's price in its own currency: a US share is bought in dollars. */
 function unitPrice(h: Holding): string {
   if (h.currency === "USD") return `$${h.price.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
-  return krw(h.valueKrw / h.quantity);
+  return krw(h.quantity > 0 ? h.valueKrw / h.quantity : h.price);
 }
 
 function Dot({ id }: { id: Bucket }) {

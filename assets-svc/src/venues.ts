@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomUUID } from "node:crypto";
-import type { Flow, Holding } from "./types.js";
+import type { CashLine, Flow, Holding } from "./types.js";
 
 /**
  * Reading the two brokerages.
@@ -95,9 +95,13 @@ async function upbitKrwMarkets(): Promise<Set<string>> {
   return set;
 }
 
+/** Coins held to be dollars. Shown and allocated as dollar cash. */
+const DOLLAR_COINS = new Set(["USDT", "USDC"]);
+
 export async function upbitHoldings(): Promise<{
   holdings: Holding[];
   cashKrw: number;
+  cash: CashLine[];
   problems: string[];
 }> {
   if (!env("UPBIT_ACCESS_KEY")) throw new Error("업비트 키가 설정되지 않았습니다.");
@@ -113,7 +117,10 @@ export async function upbitHoldings(): Promise<{
     accounts.find((a) => a.currency === "KRW")?.balance ?? 0,
   );
   const problems: string[] = [];
-  if (coins.length === 0) return { holdings: [], cashKrw, problems };
+  const cash: CashLine[] = cashKrw > 0
+    ? [{ id: "upbit:KRW", venue: "upbit", currency: "KRW", label: "업비트 원화", amount: cashKrw, valueKrw: cashKrw }]
+    : [];
+  if (coins.length === 0) return { holdings: [], cashKrw, cash, problems };
 
   const listed = await upbitKrwMarkets().catch(() => {
     problems.push("업비트 마켓 목록을 불러오지 못했습니다.");
@@ -140,7 +147,23 @@ export async function upbitHoldings(): Promise<{
     }
   }
 
-  const holdings = coins.map<Holding>((c) => {
+  const dollars = coins.filter((c) => DOLLAR_COINS.has(c.currency));
+  let dollarKrw = 0;
+  for (const c of dollars) {
+    const qty = Number(c.balance) + Number(c.locked);
+    const price = priceOf.get(`KRW-${c.currency}`) ?? Number(c.avg_buy_price);
+    dollarKrw += qty * price;
+    cash.push({
+      id: `upbit:${c.currency}`,
+      venue: "upbit",
+      currency: "USD",
+      label: `업비트 ${c.currency}`,
+      amount: qty,
+      valueKrw: qty * price,
+    });
+  }
+
+  const holdings = coins.filter((c) => !DOLLAR_COINS.has(c.currency)).map<Holding>((c) => {
     const qty = Number(c.balance) + Number(c.locked);
     const avg = Number(c.avg_buy_price);
     const price = priceOf.get(`KRW-${c.currency}`) ?? avg;
@@ -172,7 +195,7 @@ export async function upbitHoldings(): Promise<{
     problems.push(`업비트에 원화 마켓이 없어 시세를 못 구한 종목: ${named.join(", ")}`);
   }
 
-  return { holdings, cashKrw, problems };
+  return { holdings, cashKrw: cashKrw + dollarKrw, cash, problems };
 }
 
 type UpbitTransfer = {
@@ -380,7 +403,7 @@ type KisCurrency = {
 async function kisForeignCash(
   token: string,
   usdKrw: number,
-): Promise<{ cashKrw: number; problems: string[] }> {
+): Promise<{ cashKrw: number; usd: number; problems: string[] }> {
   const { cano, prod } = kisAccount();
   const query = new URLSearchParams({
     CANO: cano,
@@ -396,6 +419,7 @@ async function kisForeignCash(
   );
 
   let cashKrw = 0;
+  let usd = 0;
   const unpriced: string[] = [];
   for (const row of body.output2 ?? []) {
     const amount =
@@ -403,11 +427,15 @@ async function kisForeignCash(
       Number(row.frcr_sll_amt_smtl) -
       Number(row.frcr_buy_amt_smtl);
     if (!(amount > 0)) continue;
-    if (row.crcy_cd === "USD") cashKrw += amount * usdKrw;
+    if (row.crcy_cd === "USD") {
+      cashKrw += amount * usdKrw;
+      usd += amount;
+    }
     else unpriced.push(row.crcy_cd);
   }
   return {
     cashKrw,
+    usd,
     problems: unpriced.length
       ? [`한국투자증권: 환율을 몰라 빠진 외화 예수금 ${unpriced.join(", ")}`]
       : [],
@@ -417,6 +445,7 @@ async function kisForeignCash(
 export async function kisHoldings(usdKrw: number): Promise<{
   holdings: Holding[];
   cashKrw: number;
+  cash: CashLine[];
   problems: string[];
 }> {
   if (!env("KIS_APP_KEY")) throw new Error("한국투자증권 키가 설정되지 않았습니다.");
@@ -510,12 +539,20 @@ export async function kisHoldings(usdKrw: number): Promise<{
   // A failed dollar lookup is named, not fatal: the shares still answered.
   const foreign = await kisForeignCash(token, usdKrw).catch((e: Error) => ({
     cashKrw: 0,
+    usd: 0,
     problems: [`한국투자증권 외화 예수금: ${e.message}`],
   }));
+
+  const cash: CashLine[] = [];
+  if (cashKrw > 0) cash.push({ id: "kis:KRW", venue: "kis", currency: "KRW", label: "한국투자 원화", amount: cashKrw, valueKrw: cashKrw });
+  if (foreign.usd > 0) {
+    cash.push({ id: "kis:USD", venue: "kis", currency: "USD", label: "한국투자 달러", amount: foreign.usd, valueKrw: foreign.cashKrw });
+  }
 
   return {
     holdings,
     cashKrw: cashKrw + foreign.cashKrw,
+    cash,
     problems: foreign.problems,
   };
 }
@@ -629,6 +666,9 @@ const KRX_GOLD = "M04020000";
 export async function kisGoldAccount(): Promise<{
   holdings: Holding[];
   cashKrw: number;
+  cash: CashLine[];
+  /** Won per gram, asked even when nothing is held, so gold can be planned. */
+  gramKrw: number | null;
 } | null> {
   const app = goldApp();
   if (!app.key) return null;
@@ -653,7 +693,9 @@ export async function kisGoldAccount(): Promise<{
   const total = Number(body.output2?.tot_asst_amt ?? 0);
   const cashKrw = Number(body.output2?.dncl_amt ?? 0);
   const valueKrw = Math.max(0, total - cashKrw);
-  if (valueKrw < 1) return { holdings: [], cashKrw };
+  const cash: CashLine[] = cashKrw > 0
+    ? [{ id: "gold:KRW", venue: "gold", currency: "KRW", label: "금현물 계좌 원화", amount: cashKrw, valueKrw: cashKrw }]
+    : [];
 
   const price = await json<{ output?: { stck_prpr?: string } }>(
     `${KIS_BASE}/uapi/domestic-stock/v1/quotations/inquire-price?${new URLSearchParams({
@@ -661,7 +703,9 @@ export async function kisGoldAccount(): Promise<{
       FID_INPUT_ISCD: KRX_GOLD,
     })}`,
     { headers: kisHeaders(token, "FHKST01010100", app) },
-  ).then((b) => Number(b.output?.stck_prpr ?? 0));
+  ).then((b) => Number(b.output?.stck_prpr ?? 0)).catch(() => 0);
+  const gramKrw = price > 0 ? price : null;
+  if (valueKrw < 1) return { holdings: [], cashKrw, cash, gramKrw };
 
   const grams = price > 0 ? valueKrw / price : 0;
   // A zero purchase total means KIS did not say - fall back to value, which
@@ -684,6 +728,8 @@ export async function kisGoldAccount(): Promise<{
       },
     ],
     cashKrw,
+    cash,
+    gramKrw,
   };
 }
 

@@ -20,12 +20,31 @@ function upsert<T extends { id: string }>(list: T[], next: T): T[] {
   return copy;
 }
 
+// The last thread this page saw. Coming back to a tab renders it at once -
+// already scrolled to the newest turn - and the fetch then only corrects it.
+let cached: { turns: Turn[]; proposals: Proposal[]; thinking: boolean } | null = null;
+
 export function useThread() {
-  const [turns, setTurns] = useState<Turn[]>([]);
-  const [proposals, setProposals] = useState<Proposal[]>([]);
-  const [thinking, setThinking] = useState(false);
+  const [turns, setTurnsState] = useState<Turn[]>(() => cached?.turns ?? []);
+  const [proposals, setProposalsState] = useState<Proposal[]>(() => cached?.proposals ?? []);
+  const [thinking, setThinking] = useState(() => cached?.thinking ?? false);
   const [error, setError] = useState<string | null>(null);
-  const [hydrated, setHydrated] = useState(false);
+  const [hydrated, setHydrated] = useState(() => cached !== null);
+
+  const setTurns = useCallback((next: Turn[] | ((prev: Turn[]) => Turn[])) => {
+    setTurnsState((prev) => {
+      const value = typeof next === "function" ? next(prev) : next;
+      cached = { turns: value, proposals: cached?.proposals ?? [], thinking: cached?.thinking ?? false };
+      return value;
+    });
+  }, []);
+  const setProposals = useCallback((next: Proposal[] | ((prev: Proposal[]) => Proposal[])) => {
+    setProposalsState((prev) => {
+      const value = typeof next === "function" ? next(prev) : next;
+      cached = { turns: cached?.turns ?? [], proposals: value, thinking: cached?.thinking ?? false };
+      return value;
+    });
+  }, []);
 
   const hydrate = useCallback(async () => {
     try {
@@ -44,7 +63,7 @@ export function useThread() {
     } finally {
       setHydrated(true);
     }
-  }, []);
+  }, [setTurns, setProposals]);
 
   const onEvent = useCallback((event: AgentEvent) => {
     switch (event.type) {
@@ -62,7 +81,7 @@ export function useThread() {
         setThinking(false);
         break;
     }
-  }, []);
+  }, [setTurns, setProposals]);
 
   // Hydrate first, then follow. A reconnect re-hydrates so dropped frames heal.
   useEffect(() => {
