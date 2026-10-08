@@ -5,12 +5,29 @@ import { API } from "@/lib/thread";
 
 /** The Claude subscription's use, as the agent last read it (agent/internal/usage). */
 export type UsageWindow = { utilization: number; resetsAt: string };
+/** The memory model's pay-as-you-go API spend (memory-svc), not the subscription. */
+export type ApiUsage = {
+  model: string;
+  enabled: boolean;
+  dailyUsd: number;
+  todayUsd: number;
+  month: { usd: number; calls: number };
+  days: { day: string; usd: number; calls: number; inputTokens: number; outputTokens: number }[];
+};
 export type Usage = {
   fiveHour?: UsageWindow;
   sevenDay?: UsageWindow;
   status?: string;
   at?: string;
+  api?: ApiUsage;
 };
+
+/** "$0.0123" under a dollar, "$1.23" above. */
+export const usd = (v: number) => `$${v < 1 ? v.toFixed(v < 0.01 ? 4 : 3) : v.toFixed(2)}`;
+
+/** Today's spend against the daily cap, as a percent. */
+export const capPct = (a?: ApiUsage) =>
+  a && a.dailyUsd > 0 ? Math.min(100, Math.round((a.todayUsd / a.dailyUsd) * 100)) : null;
 
 // One fetch shared by every component on the page (the header bars and the
 // 상태 tab both read it), refreshed once a minute.

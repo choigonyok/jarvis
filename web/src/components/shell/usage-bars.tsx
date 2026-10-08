@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { pct, resetLabel, tone, useUsage } from "@/lib/use-usage";
+import { capPct, pct, resetLabel, tone, usd, useUsage } from "@/lib/use-usage";
 import { cn } from "@/lib/utils";
 
 /**
@@ -63,6 +63,21 @@ export function UsageBars() {
           <p className="mb-2 text-[11.5px] text-faint">Claude 구독 사용량</p>
           <Line name="5시간" value={five} resets={usage?.fiveHour?.resetsAt} />
           <Line name="주간" value={week} resets={usage?.sevenDay?.resetsAt} />
+          {usage?.api ? (
+            <div className="mt-2 border-t border-edge pt-2">
+              <p className="mb-1 text-[11.5px] text-faint">기억용 API (Haiku 5.5)</p>
+              <div className="flex items-baseline justify-between py-1">
+                <span className="text-dim">오늘</span>
+                <span className="tnum text-[13px] text-foreground">
+                  {usd(usage.api.todayUsd)} <span className="text-faint">/ {usd(usage.api.dailyUsd)}</span>
+                </span>
+              </div>
+              <span aria-hidden className="block h-1 overflow-hidden rounded-full bg-foreground/12">
+                <span className={cn("block h-full rounded-full", tone(capPct(usage.api)))} style={{ width: `${capPct(usage.api) ?? 0}%` }} />
+              </span>
+              <p className="tnum mt-1 text-[10.5px] text-faint">이번 달 {usd(usage.api.month.usd)}</p>
+            </div>
+          ) : null}
           {usage?.at ? (
             <p className="mt-2 text-[10.5px] text-faint">
               {new Date(usage.at).toLocaleTimeString("ko-KR", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", hour12: false })}{" "}

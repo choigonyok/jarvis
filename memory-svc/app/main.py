@@ -15,6 +15,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query
 
 from . import sources
 from .graph import Graph
+from .llm import MODEL
 from .state import State
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -90,7 +91,7 @@ async def search(q: str = Query(min_length=1), group: str = Query(pattern="^(own
 @app.get("/status", dependencies=[Depends(auth)])
 async def status():
     s = await state.status()
-    s.update({"running": running["now"], "llm": HAS_KEY, "dailyUsd": DAILY_USD, "spentToday": round(await state.spent_today(), 4)})
+    s.update({"running": running["now"], "llm": HAS_KEY, "model": MODEL, "dailyUsd": DAILY_USD, "spentToday": round(await state.spent_today(), 4)})
     return s
 
 

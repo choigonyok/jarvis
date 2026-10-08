@@ -14,7 +14,7 @@ import {
 } from "@/lib/status";
 import { isPending } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
-import { type UsageWindow, pct, resetLabel, tone, useUsage } from "@/lib/use-usage";
+import { type ApiUsage, type UsageWindow, capPct, pct, resetLabel, tone, usd, useUsage } from "@/lib/use-usage";
 import { cn } from "@/lib/utils";
 
 /**
@@ -402,6 +402,7 @@ function ClaudeUsage() {
       ) : (
         <p className="text-[13px] text-dim">아직 읽지 못했습니다. 대화나 작업이 한 번 돌면 채워집니다.</p>
       )}
+      {usage?.api ? <ApiUsageCard api={usage.api} /> : null}
       {usage?.at ? (
         <p className="tnum mt-2 text-[11.5px] text-faint">
           {new Date(usage.at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}{" "}
@@ -409,6 +410,42 @@ function ClaudeUsage() {
         </p>
       ) : null}
     </section>
+  );
+}
+
+/** The memory model's API key: billed per token, so it is shown in dollars
+ *  against the daily cap memory-svc stops at, with the last week beneath. */
+function ApiUsageCard({ api }: { api: ApiUsage }) {
+  const p = capPct(api);
+  const days = [...api.days].reverse();
+  const top = Math.max(...days.map((d) => d.usd), 0.0001);
+  return (
+    <div className="mt-3 rounded-xl bg-glass px-4 py-3.5">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-[13px] text-dim">기억용 API · Haiku 5.5</span>
+        <span className="tnum text-[20px] font-medium text-foreground">
+          {usd(api.todayUsd)}
+          <span className="ms-1 text-[13px] text-dim">/ {usd(api.dailyUsd)}</span>
+        </span>
+      </div>
+      <span aria-hidden className="mt-2.5 block h-1.5 overflow-hidden rounded-full bg-foreground/12">
+        <span className={cn("block h-full rounded-full", tone(p))} style={{ width: `${p ?? 0}%` }} />
+      </span>
+      <p className="tnum mt-2 text-[11.5px] text-faint">
+        {api.enabled ? (p != null && p >= 100 ? "오늘 상한에 닿아 내일 이어서 수집" : "오늘 쓴 금액 · 하루 상한") : "API 키가 없어 대화 추출 꺼짐"}
+        {` · 이번 달 ${usd(api.month.usd)} (${api.month.calls.toLocaleString()}회)`}
+      </p>
+      {days.length > 0 ? (
+        <ul className="mt-3 flex h-12 items-end gap-1.5" aria-label="최근 7일 API 사용 금액">
+          {days.map((d) => (
+            <li key={d.day} className="flex flex-1 flex-col items-center gap-1" title={`${d.day} ${usd(d.usd)} · ${d.calls}회`}>
+              <span className="block w-full rounded-sm bg-foreground/50" style={{ height: `${Math.max(2, (d.usd / top) * 32)}px` }} />
+              <span className="tnum text-[10px] text-faint">{d.day.slice(8)}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
   );
 }
 

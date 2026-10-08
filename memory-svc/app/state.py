@@ -72,7 +72,19 @@ class State:
                 "select day, input_tokens, output_tokens, calls from memory_usage order by day desc limit 7"
             )
         ).fetchall()
+        month = await (
+            await self.conn.execute(
+                """select coalesce(sum(input_tokens), 0)::bigint, coalesce(sum(output_tokens), 0)::bigint, coalesce(sum(calls), 0)::bigint
+                   from memory_usage where day >= date_trunc('month', current_date)"""
+            )
+        ).fetchone()
         return {
+            "month": {
+                "inputTokens": month[0],
+                "outputTokens": month[1],
+                "calls": month[2],
+                "usd": round(month[0] * USD_PER_INPUT + month[1] * USD_PER_OUTPUT, 4),
+            },
             "sources": [
                 {"source": r[0], "lastRun": r[1].isoformat() if r[1] else None, "lastError": r[2], "items": r[3]}
                 for r in rows

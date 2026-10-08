@@ -174,6 +174,12 @@ func main() {
 	gate.SetFollowUp(runner)
 	proposals.OnDecide(gate.Resolve)
 
+	// The guest is not shown what the operator's API key costs.
+	var apiUsage func(context.Context) (any, error)
+	if memoryModule != nil && !cfg.Guest {
+		apiUsage = memoryModule.APIUsage
+	}
+
 	srv := &http.Server{
 		Addr: cfg.Addr,
 		Handler: httpapi.New(httpapi.Deps{
@@ -192,6 +198,7 @@ func main() {
 			Uploads:         photos,
 			Modules:         modules,
 			Usage:           usageTracker,
+			APIUsage:        apiUsage,
 			Log:             log,
 		}).Handler(),
 		// No WriteTimeout: /events streams and /mcp blocks on a human.
