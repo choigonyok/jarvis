@@ -3,6 +3,25 @@ import * as db from "./db.js";
 import { allocationOf } from "./target.js";
 import type { CashLine, FixedAsset, Holding, Portfolio, Principal, PrincipalPart, Venue } from "./types.js";
 import { kisGoldAccount, kisHoldings, upbitFlows, upbitHoldings, usdKrwRate } from "./venues.js";
+import { CLOSED_TTL_MS, OPEN_TTL_MS, UPBIT_TTL_MS, krxOpen, memo, usOpen } from "./freshness.js";
+
+// Each venue's answer, reused for as long as its numbers can actually have
+// moved - see freshness.ts. The exchange rate rides with Upbit (it is the
+// USDT market).
+const rate = memo(() => UPBIT_TTL_MS, usdKrwRate);
+const upbitCached = memo(() => UPBIT_TTL_MS, upbitHoldings);
+let lastRate = 0;
+const kisCached = memo(
+  () => (krxOpen() || usOpen() ? OPEN_TTL_MS : CLOSED_TTL_MS),
+  () => kisHoldings(lastRate),
+);
+const goldCached = memo(() => (krxOpen() ? OPEN_TTL_MS : CLOSED_TTL_MS), kisGoldAccount);
+const flowsCached = memo(() => CLOSED_TTL_MS, () => upbitFlows(PRINCIPAL_SINCE));
+
+/** Drop every cached venue answer: a trade or a principal entry was just recorded. */
+export function invalidateVenues(): void {
+  for (const m of [upbitCached, kisCached, goldCached, flowsCached]) m.clear();
+}
 
 /**
  * 조회할 곳이 없는 고정 자산(주택청약 등). 더 넣지도 빼지도 않을 돈이라 값이
@@ -47,24 +66,27 @@ export const PRINCIPAL_SINCE = process.env.PRINCIPAL_SINCE?.trim() || "2026-05-0
  * nothing would say so.
  */
 export async function buildPortfolio(): Promise<Portfolio> {
-  const usdKrw = await usdKrwRate();
+  const usdKrw = await rate.get();
+  // A dollar balance cached at another rate would disagree with the page.
+  if (Math.abs(usdKrw - lastRate) / (lastRate || 1) > 0.002) kisCached.clear();
+  lastRate = usdKrw;
   const problems: string[] = [];
 
   const [upbit, kis, gold, principalFlows] = await Promise.all([
-    upbitHoldings().catch((e: Error) => {
+    upbitCached.get().catch((e: Error) => {
       problems.push(`업비트: ${e.message}`);
       return { holdings: [] as Holding[], cashKrw: 0, cash: [] as CashLine[], problems: [] as string[] };
     }),
-    kisHoldings(usdKrw).catch((e: Error) => {
+    kisCached.get().catch((e: Error) => {
       problems.push(`한국투자증권: ${e.message}`);
       return { holdings: [] as Holding[], cashKrw: 0, cash: [] as CashLine[], problems: [] as string[] };
     }),
-    kisGoldAccount().catch((e: Error) => {
+    goldCached.get().catch((e: Error) => {
       problems.push(`금현물: ${e.message}`);
       return undefined;
     }),
     Promise.all([
-      upbitFlows(PRINCIPAL_SINCE).catch((e: Error) => {
+      flowsCached.get().catch((e: Error) => {
         problems.push(`업비트 입출금 내역: ${e.message}`);
         return null;
       }),

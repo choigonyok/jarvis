@@ -40,13 +40,22 @@ export function Assets() {
   const [subject, setSubject] = useState<string | null>(null);
   const chart = useRef<HTMLDivElement>(null);
 
-  const load = useCallback(async () => {
+  // The service answers at once with what it last had (marked stale) and
+  // rebuilds behind it; ask again shortly to pick up the fresh numbers.
+  const followUp = useRef<number | null>(null);
+  const again = useRef<(tries: number) => void>(() => {});
+  const load = useCallback(async (fresh = false, tries = 0) => {
+    if (followUp.current) window.clearTimeout(followUp.current);
     setLoading(true);
     try {
-      const res = await fetch("/api/portfolio", { cache: "no-store" });
+      const res = await fetch(`/api/portfolio${fresh ? "?fresh=1" : ""}`, { cache: "no-store" });
       if (!res.ok) throw new Error(String(res.status));
-      setData((await res.json()) as Portfolio);
+      const next = (await res.json()) as Portfolio;
+      setData(next);
       setError(null);
+      if (next.stale && tries < 4) {
+        followUp.current = window.setTimeout(() => again.current(tries + 1), 2500);
+      }
     } catch {
       setError("잔고를 불러오지 못했습니다.");
     } finally {
@@ -55,10 +64,17 @@ export function Assets() {
   }, []);
 
   useEffect(() => {
+    again.current = (tries) => void load(false, tries);
+  }, [load]);
+
+  useEffect(() => {
     // Not a cascading render: load only sets state once the fetch it starts
     // has resolved. The lint rule cannot see past the async call.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
+    return () => {
+      if (followUp.current) window.clearTimeout(followUp.current);
+    };
   }, [load]);
 
   // Measured against money put in when the ledger is readable; against what
@@ -95,11 +111,24 @@ export function Assets() {
                   </span>
                 </p>
               ) : null}
+              {data ? (
+                <p className="tnum mt-1.5 text-[11.5px] text-faint" aria-live="polite">
+                  {new Date(data.at).toLocaleTimeString("ko-KR", {
+                    timeZone: "Asia/Seoul",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    second: "2-digit",
+                    hour12: false,
+                  })}{" "}
+                  기준{data.stale || loading ? " · 갱신 중…" : ""}
+                </p>
+              ) : null}
             </div>
 
             <button
               type="button"
-              onClick={() => void load()}
+              // The button means "now": the service drops what it cached.
+              onClick={() => void load(true)}
               disabled={loading}
               aria-label="잔고 새로 불러오기"
               className="tap flex shrink-0 items-center justify-center rounded-lg text-faint transition-colors outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-40 sm:size-9 sm:min-h-0 sm:min-w-0"

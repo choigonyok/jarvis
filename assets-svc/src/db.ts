@@ -173,6 +173,49 @@ export async function deleteFlow(id: number): Promise<boolean> {
   return (rowCount ?? 0) > 0;
 }
 
+export async function loadKisToken(keyHash: string): Promise<{ token: string; expires: number } | null> {
+  if (!pool) return null;
+  const { rows } = await pool.query<{ token: string; expires: Date }>(
+    `select token, expires from kis_tokens where key_hash = $1`,
+    [keyHash],
+  );
+  return rows[0] ? { token: rows[0].token, expires: rows[0].expires.getTime() } : null;
+}
+
+export async function saveKisToken(keyHash: string, token: string, expires: number): Promise<void> {
+  if (!pool) return;
+  await pool.query(
+    `insert into kis_tokens (key_hash, token, expires) values ($1, $2, $3)
+     on conflict (key_hash) do update set token = excluded.token, expires = excluded.expires`,
+    [keyHash, token, new Date(expires)],
+  );
+}
+
+/** Stored closes for one holding since `since` (YYYY-MM-DD). Empty without a database. */
+export async function loadCloses(key: string, since: string): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (!pool) return out;
+  const { rows } = await pool.query<{ d: string; close: string }>(
+    `select to_char(on_date, 'YYYY-MM-DD') as d, close from price_closes
+      where key = $1 and on_date >= $2 order by on_date`,
+    [key, since],
+  );
+  for (const r of rows) out.set(r.d, Number(r.close));
+  return out;
+}
+
+export async function saveCloses(key: string, closes: Map<string, number>): Promise<void> {
+  if (!pool || closes.size === 0) return;
+  const dates = [...closes.keys()];
+  const values = dates.map((d) => closes.get(d)!);
+  await pool.query(
+    `insert into price_closes (key, on_date, close)
+     select $1, d::date, c from unnest($2::text[], $3::numeric[]) as t(d, c)
+     on conflict (key, on_date) do update set close = excluded.close`,
+    [key, dates, values],
+  );
+}
+
 export async function close(): Promise<void> {
   await pool?.end();
   pool = null;

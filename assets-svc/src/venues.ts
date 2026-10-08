@@ -1,4 +1,5 @@
 import { createHash, createHmac, randomUUID } from "node:crypto";
+import * as db from "./db.js";
 import type { CashLine, Flow, Holding } from "./types.js";
 
 /**
@@ -17,20 +18,58 @@ function env(name: string): string {
   return process.env[name]?.trim() ?? "";
 }
 
-const KIS_BASE =
+const KIS_BASE: string =
   env("KIS_MOCK") === "true"
     ? "https://openapivts.koreainvestment.com:29443"
     : "https://openapi.koreainvestment.com:9443";
 
+/**
+ * KIS allows each app key a handful of calls a second (20 on a real account)
+ * and answers the excess with EGW00201 "초당 거래건수를 초과하였습니다".
+ * Everything a portfolio build asks for - balances on three exchanges,
+ * foreign cash, a page of closes per share, the gold account - used to leave
+ * at once, so a single tap after the cache expired could trip it. Calls to KIS
+ * now queue per key, a fixed gap apart, and a rate-limit answer is waited out
+ * and asked again instead of becoming an error on screen.
+ */
+const KIS_GAP_MS = Number(process.env.KIS_GAP_MS ?? 80);
+const kisQueues = new Map<string, Promise<void>>();
+
+function kisSlot(key: string): Promise<void> {
+  const prev = kisQueues.get(key) ?? Promise.resolve();
+  const next = prev.then(() => new Promise<void>((r) => setTimeout(r, KIS_GAP_MS)));
+  kisQueues.set(key, next);
+  return prev;
+}
+
+const isRateLimited = (text: string) => text.includes("EGW00201") || text.includes("초당 거래건수");
+
 // `cache: "no-store"` 가 빠져 있다. 그건 Next.js 가 fetch 를 감싸서 응답을
 // 캐시하는 것을 끄기 위한 것이었고, Node 의 fetch 는 애초에 캐시하지 않는다.
-// 신선도는 index.ts 의 30초 TTL 이 관리한다.
+// 신선도는 index.ts 와 portfolio.ts 의 캐시가 관리한다.
 async function json<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, init);
-  if (!res.ok) {
-    throw new Error(`${res.status} ${(await res.text()).slice(0, 200)}`);
+  const kis = url.startsWith(KIS_BASE);
+  const key = kis ? String((init?.headers as Record<string, string> | undefined)?.appkey ?? "token") : "";
+  for (let attempt = 0; ; attempt += 1) {
+    if (kis) await kisSlot(key);
+    const res = await fetch(url, init);
+    if (res.ok) {
+      const body = (await res.json()) as T;
+      // KIS sometimes reports the limit inside a 200.
+      const code = (body as { msg_cd?: string } | null)?.msg_cd;
+      if (kis && code === "EGW00201" && attempt < 3) {
+        await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+        continue;
+      }
+      return body;
+    }
+    const text = await res.text();
+    if (kis && isRateLimited(text) && attempt < 3) {
+      await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+      continue;
+    }
+    throw new Error(`${res.status} ${text.slice(0, 200)}`);
   }
-  return (await res.json()) as T;
 }
 
 /* ─────────────────────────── Upbit ─────────────────────────── */
@@ -325,9 +364,29 @@ function goldApp(): KisApp {
   return { key: env("KIS_GOLD_APP_KEY"), secret: env("KIS_GOLD_APP_SECRET") };
 }
 
+const keyHash = (key: string) => createHash("sha256").update(key).digest("hex");
+// One issue at a time per key: two builds asking at once must not both hit
+// the once-a-minute endpoint.
+const kisTokenInflight = new Map<string, Promise<string>>();
+
 async function kisAccessToken(app: KisApp = stockApp()): Promise<string> {
   const kisToken = kisTokens.get(app.key);
   if (kisToken && kisToken.expires > Date.now() + 60_000) return kisToken.value;
+  const pending = kisTokenInflight.get(app.key);
+  if (pending) return pending;
+  const p = issueKisToken(app).finally(() => kisTokenInflight.delete(app.key));
+  kisTokenInflight.set(app.key, p);
+  return p;
+}
+
+async function issueKisToken(app: KisApp): Promise<string> {
+  // A restart reuses the day-long token it already had (db.kisToken):
+  // issuing is limited to once a minute per key.
+  const saved = await db.loadKisToken(keyHash(app.key)).catch(() => null);
+  if (saved && saved.expires > Date.now() + 60_000) {
+    kisTokens.set(app.key, { value: saved.token, expires: saved.expires });
+    return saved.token;
+  }
 
   const body = await json<{ access_token: string; expires_in?: number }>(
     `${KIS_BASE}/oauth2/tokenP`,
@@ -346,6 +405,7 @@ async function kisAccessToken(app: KisApp = stockApp()): Promise<string> {
     expires: Date.now() + (body.expires_in ?? 86_400) * 1000,
   };
   kisTokens.set(app.key, token);
+  await db.saveKisToken(keyHash(app.key), token.value, token.expires).catch(() => {});
   return token.value;
 }
 

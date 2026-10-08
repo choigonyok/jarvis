@@ -1,4 +1,5 @@
 import type { Holding, Change, Changes, Point, ReturnPoint, Window } from "./types.js";
+import * as db from "./db.js";
 import { kisDailyCloses, kisGoldDailyCloses, upbitDailyCloses } from "./venues.js";
 
 /**
@@ -56,19 +57,53 @@ function closeOnOrBefore(
  * Both the windowed rates and the curve are built from the same data, so it
  * would be wasteful - and worse, capable of disagreeing - to ask twice.
  */
+function fetchCloses(h: Holding, days: number): Promise<Map<string, number>> {
+  const none = () => new Map<string, number>();
+  if (h.venue === "upbit") return upbitDailyCloses(h.symbol, days).catch(none);
+  if (h.venue === "gold") return kisGoldDailyCloses(days).catch(none);
+  if (h.currency === "USD") return kisDailyCloses(h.symbol, days).catch(none);
+  // Domestic shares would need a third endpoint; none are held.
+  return Promise.resolve(none());
+}
+
+/** How far back the curves and the year window reach. */
+const HISTORY_DAYS = 400;
+/** How often the most recent closes are asked for again (today's moves until the close). */
+const RECENT_EVERY_MS = 30 * 60_000;
+const recentChecked = new Map<string, number>();
+const memory = new Map<string, Map<string, number>>();
+
+/**
+ * Every holding's daily closes, from the database where possible.
+ *
+ * A past close never changes, so the full 400 days are fetched once per
+ * holding and kept (price_closes). After that only the latest page is asked
+ * for, at most every half hour, to pick up the days since. This was the bulk
+ * of the KIS calls behind a portfolio build - and the reason one tap could
+ * exceed the per-second limit - and caching it loses no freshness at all.
+ */
 async function historiesFor(holdings: Holding[]) {
   const histories = new Map<string, Map<string, number>>();
+  const since = isoDaysAgo(HISTORY_DAYS + 7);
   await Promise.all(
     holdings.map(async (h) => {
-      const closes =
-        h.venue === "upbit"
-          ? await upbitDailyCloses(h.symbol, 400).catch(() => new Map())
-          : h.venue === "gold"
-            ? await kisGoldDailyCloses(400).catch(() => new Map())
-          : h.currency === "USD"
-            ? await kisDailyCloses(h.symbol, 400).catch(() => new Map())
-            : // Domestic shares would need a third endpoint; none are held.
-              new Map<string, number>();
+      let closes = memory.get(h.id) ?? (await db.loadCloses(h.id, since).catch(() => new Map<string, number>()));
+      const newest = [...closes.keys()].sort().at(-1);
+      const covered = closes.size > 0 && [...closes.keys()].sort()[0] <= isoDaysAgo(HISTORY_DAYS - 30);
+      const due = Date.now() - (recentChecked.get(h.id) ?? 0) > RECENT_EVERY_MS;
+      if (!newest || (!covered && due && closes.size < 30)) {
+        // First sight of this holding: the whole window, once.
+        const fetched = await fetchCloses(h, HISTORY_DAYS);
+        closes = new Map([...closes, ...fetched]);
+        await db.saveCloses(h.id, fetched).catch(() => {});
+        recentChecked.set(h.id, Date.now());
+      } else if (due) {
+        const fetched = await fetchCloses(h, 10);
+        closes = new Map([...closes, ...fetched]);
+        await db.saveCloses(h.id, fetched).catch(() => {});
+        recentChecked.set(h.id, Date.now());
+      }
+      memory.set(h.id, closes);
       histories.set(h.id, closes);
     }),
   );
