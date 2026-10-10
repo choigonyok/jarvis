@@ -30,6 +30,7 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/core/action"
 	"github.com/choigonyok/jarvis/agent/internal/core/module"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
+	"github.com/choigonyok/jarvis/agent/internal/notify"
 )
 
 // ServerName is the MCP server the judging turn proposes through.
@@ -63,6 +64,9 @@ type Config struct {
 	MCPBase   string
 	EventsURL string
 	Token     string
+	// Out is where suggestions are reported (the events outbox). Nil posts
+	// straight to EventsURL.
+	Out *notify.Client
 }
 
 type Engine struct {
@@ -89,11 +93,15 @@ type job struct {
 }
 
 func New(l *Ledger, p *proposal.Store, m *module.Registry, bg Background, cfg Config, log *slog.Logger) *Engine {
-	return &Engine{
+	e := &Engine{
 		ledger: l, proposals: p, modules: m, bg: bg, cfg: cfg, log: log,
 		http: &http.Client{Timeout: 10 * time.Second}, now: time.Now,
 		queue: make(chan job, 32),
 	}
+	if e.cfg.Out == nil {
+		e.cfg.Out = notify.New(cfg.EventsURL, "", cfg.Token, log)
+	}
+	return e
 }
 
 // --- gate 1: what could this be a suggestion about? -------------------------
@@ -380,28 +388,7 @@ func (e *Engine) OnDecide(p proposal.Proposal, d proposal.Decision) {
 	})
 }
 
-func (e *Engine) emit(ev map[string]any) {
-	if e.cfg.EventsURL == "" {
-		return
-	}
-	go func() {
-		body, _ := json.Marshal(ev)
-		req, err := http.NewRequest(http.MethodPost, strings.TrimRight(e.cfg.EventsURL, "/")+"/events", bytes.NewReader(body))
-		if err != nil {
-			return
-		}
-		req.Header.Set("Content-Type", "application/json")
-		if e.cfg.Token != "" {
-			req.Header.Set("Authorization", "Bearer "+e.cfg.Token)
-		}
-		resp, err := e.http.Do(req)
-		if err != nil {
-			e.log.Warn("이벤트를 보내지 못했습니다", "err", err)
-			return
-		}
-		resp.Body.Close()
-	}()
-}
+func (e *Engine) emit(ev map[string]any) { e.cfg.Out.Emit(ev) }
 
 // Subscribe registers this agent with events-svc for Types, retrying until
 // events-svc answers.

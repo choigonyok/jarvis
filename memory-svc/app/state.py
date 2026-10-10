@@ -20,6 +20,10 @@ class State:
     async def open(self):
         self.conn = await psycopg.AsyncConnection.connect(self.dsn, autocommit=True)
 
+    async def enqueue_event(self, event: dict):
+        """Leave an event in the outbox (migration 034) for events-svc."""
+        await self.conn.execute("insert into event_outbox (payload) values (%s)", (json.dumps(event, ensure_ascii=False),))
+
     async def cursor(self, source: str) -> dict:
         row = await (await self.conn.execute("select cursor from memory_state where source = %s", (source,))).fetchone()
         return row[0] if row else {}

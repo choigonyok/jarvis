@@ -124,7 +124,9 @@ func (s *Store) Persist(path string, log *slog.Logger) error {
 	s.order = saved.Proposals
 	s.seq = saved.Seq
 	for _, p := range s.order {
-		if p.State == Pending && p.Origin != OriginChat && p.Origin != OriginNotice {
+		// A suggestion waits too: approving it runs its action directly, with
+		// no turn that the restart could have cut short.
+		if p.State == Pending && p.Origin != OriginChat && p.Origin != OriginNotice && p.Origin != OriginSuggest {
 			p.State = Rejected
 			p.Note = "에이전트가 재시작되어 만료되었습니다."
 			if p.DecidedAt == "" {

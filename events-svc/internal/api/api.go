@@ -9,6 +9,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -96,6 +97,20 @@ func (in incoming) event() (store.Event, string) {
 		return e, "notify 에는 title 과 tier(now, digest, log)가 필요합니다"
 	}
 	return e, ""
+}
+
+// Parse reads a POST /events body - or the same payload left in the
+// outbox - into an event, or says what is wrong with it.
+func Parse(raw []byte) (store.Event, error) {
+	var in incoming
+	if err := json.Unmarshal(raw, &in); err != nil {
+		return store.Event{}, errors.New("JSON 을 읽지 못했습니다")
+	}
+	e, problem := in.event()
+	if problem != "" {
+		return e, errors.New(problem)
+	}
+	return e, nil
 }
 
 func validTier(t string) bool { return t == "now" || t == "digest" || t == "log" }
