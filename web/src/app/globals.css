@@ -257,7 +257,19 @@
   animation-delay: 0.32s;
 }
 
+/* A push arriving with the console open drops in from the top, once. */
+@keyframes push-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+}
+.push-toast {
+  animation: push-drop 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .push-toast,
   .anim-edge,
   .anim-settle,
   .anim-breathe,

@@ -13,6 +13,16 @@ import type { useRouter } from "next/navigation";
  */
 const RESUME = "jarvis:resume";
 const INBOX = "jarvis:inbox";
+const SHOWN = "jarvis:push-shown";
+
+/** A push as the service worker relays it to an open console. */
+export type ShownPush = { title: string; body?: string; url?: string };
+
+export function onPushShown(fn: (p: ShownPush) => void): () => void {
+  const handle = (e: Event) => fn((e as CustomEvent<ShownPush>).detail);
+  window.addEventListener(SHOWN, handle);
+  return () => window.removeEventListener(SHOWN, handle);
+}
 
 export function onResume(fn: () => void): () => void {
   const visible = () => document.visibilityState === "visible" && fn();
@@ -34,20 +44,32 @@ export function onInboxRequest(fn: () => void): () => void {
 }
 
 /**
- * A tapped notification, as the service worker reports it (public/sw.js):
- * re-read everything, and go to the screen it is about if that is not the
- * one showing.
+ * What the service worker tells an open console (public/sw.js). A push that
+ * just arrived: re-read now - the inbox, the cards - and show it in the app
+ * if the app is on screen. A tapped notification: re-read, and go to the
+ * screen it is about if that is not the one showing.
  */
+export function handleWorkerMessage(data: unknown, go: (path: string) => void) {
+  const msg = data as { type?: string; title?: string; body?: string; url?: string } | null;
+  if (msg?.type === "jarvis:push") {
+    window.dispatchEvent(new Event(RESUME));
+    if (document.visibilityState === "visible") {
+      const detail: ShownPush = { title: msg.title || "jarvis", body: msg.body, url: msg.url };
+      window.dispatchEvent(new CustomEvent<ShownPush>(SHOWN, { detail }));
+    }
+    return;
+  }
+  if (msg?.type !== "jarvis:open") return;
+  const target = new URL(String(msg.url || "/"), window.location.origin);
+  window.dispatchEvent(new Event(RESUME));
+  if (target.searchParams.get("inbox") === "1") window.dispatchEvent(new Event(INBOX));
+  if (target.pathname !== window.location.pathname) go(target.pathname + target.search);
+}
+
 export function useNotificationOpen(router: ReturnType<typeof useRouter>) {
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
-    const onMessage = (e: MessageEvent) => {
-      if (e.data?.type !== "jarvis:open") return;
-      const target = new URL(String(e.data.url || "/"), window.location.origin);
-      window.dispatchEvent(new Event(RESUME));
-      if (target.searchParams.get("inbox") === "1") window.dispatchEvent(new Event(INBOX));
-      if (target.pathname !== window.location.pathname) router.push(target.pathname + target.search);
-    };
+    const onMessage = (e: MessageEvent) => handleWorkerMessage(e.data, (path) => router.push(path));
     navigator.serviceWorker.addEventListener("message", onMessage);
     return () => navigator.serviceWorker.removeEventListener("message", onMessage);
   }, [router]);
