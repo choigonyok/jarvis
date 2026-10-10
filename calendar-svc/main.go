@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/calendar-svc/internal/api"
+	"github.com/choigonyok/jarvis/calendar-svc/internal/notify"
 	"github.com/choigonyok/jarvis/calendar-svc/internal/store"
 	"github.com/choigonyok/jarvis/calendar-svc/internal/uniple"
 )
@@ -74,7 +75,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:         addr,
-		Handler:      api.New(backend, token, log).Handler(),
+		Handler:      api.New(backend, token, log, notify.New(os.Getenv("NOTIFY_URL"), token, log)).Handler(),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/calendar-svc/internal/event"
+	"github.com/choigonyok/jarvis/calendar-svc/internal/notify"
 	"github.com/choigonyok/jarvis/calendar-svc/internal/store"
 )
 
@@ -33,13 +34,15 @@ type Backend interface {
 var _ Backend = (*store.Store)(nil)
 
 type Server struct {
-	store Backend
-	token string
-	log   *slog.Logger
+	store  Backend
+	token  string
+	log    *slog.Logger
+	notify *notify.Client
 }
 
-func New(s Backend, token string, log *slog.Logger) *Server {
-	return &Server{store: s, token: token, log: log}
+// New serves the calendar. notifier may be nil: then nothing is announced.
+func New(s Backend, token string, log *slog.Logger, notifier *notify.Client) *Server {
+	return &Server{store: s, token: token, log: log, notify: notifier}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -117,6 +120,21 @@ func (s *Server) put(w http.ResponseWriter, r *http.Request) {
 		s.log.Error("일정 저장에 실패했습니다", "err", err)
 		writeErr(w, http.StatusInternalServerError, "일정을 저장하지 못했습니다.")
 		return
+	}
+	// A new entry the partner owns is the guest's agent writing on the shared
+	// calendar - the one change here the operator did not make, so it is
+	// worth telling them. (One the partner adds in the uniple app does not
+	// pass through here.)
+	if in.ID == "" && saved.Owner == "partner" {
+		when := saved.Date[5:]
+		if saved.Start != "" {
+			when += " " + saved.Start
+		}
+		s.notify.Send(notify.Event{
+			Source: "calendar", Kind: "calendar.partner", Tier: "now",
+			Title: "상대가 일정을 추가했어요", Body: when + " " + saved.Title,
+			URL: "/calendar", Key: "calendar:" + saved.ID,
+		})
 	}
 	writeJSON(w, http.StatusOK, saved)
 }

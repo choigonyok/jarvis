@@ -65,6 +65,7 @@ export const config = {
     // the login page itself needs to render.
     // The home-screen manifest and icons too: the phone fetches them on its
     // own, and a guest's role would otherwise turn them into a redirect.
-    "/((?!login|api/auth/|_next/static|_next/image|favicon.ico|manifest.webmanifest|icons/).*)",
+    // The service worker too: the browser fetches it on its own to update it.
+    "/((?!login|api/auth/|_next/static|_next/image|favicon.ico|manifest.webmanifest|icons/|sw\\.js).*)",
   ],
 };

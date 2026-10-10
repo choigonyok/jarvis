@@ -92,6 +92,8 @@ type Store struct {
 	// card raised in conversation any more; this is how its decision gets
 	// back to whoever has to act on it.
 	onDecide []func(Proposal, Decision)
+	// onOpen hears every new card - how it reaches the phone (notify-svc).
+	onOpen []func(Proposal)
 }
 
 type file struct {
@@ -171,10 +173,22 @@ func (s *Store) Open(p Proposal) (*Proposal, <-chan Decision) {
 	s.waiters[stored.ID] = ch
 	s.save()
 	snapshot := *stored
+	hooks := append([]func(Proposal){}, s.onOpen...)
 	s.mu.Unlock()
 
 	s.bus.Publish(bus.Event{Type: "proposal", Proposal: snapshot})
+	for _, fn := range hooks {
+		fn(snapshot)
+	}
 	return stored, ch
+}
+
+// OnOpen registers fn to hear every proposal as it is raised. Register before
+// serving; fn must not block - it runs on the producer's goroutine.
+func (s *Store) OnOpen(fn func(Proposal)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onOpen = append(s.onOpen, fn)
 }
 
 // Decide records the operator's call and releases the waiter. Approved is a

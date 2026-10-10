@@ -1,10 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { Bell, X } from "lucide-react";
 import { summarize } from "@/lib/ledger";
 import type { Proposal } from "@/lib/thread";
-import { useNotify } from "@/lib/use-notify";
 import { cn } from "@/lib/utils";
 
 /**
@@ -27,7 +25,6 @@ export function StandingBar({
   href?: string;
   muted?: boolean;
 }) {
-  const notify = useNotify(pending);
   const count = pending.length;
   const show = count > 0 && !muted;
 
@@ -54,30 +51,6 @@ export function StandingBar({
             summarize(pending[0])
           ) : null}
         </p>
-
-        {/* Offered in words before a permission prompt: asking on load is the
-            quickest way to be denied for good. */}
-        {notify.state === "off" ? (
-          <button
-            type="button"
-            onClick={() => void notify.enable()}
-            aria-label="알림 받기"
-            className="tap flex shrink-0 items-center gap-1.5 rounded-lg px-1 text-[12px] text-faint transition-colors outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50 sm:min-h-0 sm:min-w-0"
-          >
-            <Bell aria-hidden className="size-3.5" />
-            <span className="hidden sm:inline">알림 받기</span>
-          </button>
-        ) : notify.state === "on" ? (
-          <button
-            type="button"
-            onClick={notify.disable}
-            aria-label="알림 끄기"
-            className="tap flex shrink-0 items-center gap-1.5 rounded-lg px-1 text-[12px] text-faint transition-colors outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50 sm:min-h-0 sm:min-w-0"
-          >
-            <Bell aria-hidden className="size-3.5 fill-current" />
-            <X aria-hidden className="size-3" />
-          </button>
-        ) : null}
 
         <Link
           href={href}

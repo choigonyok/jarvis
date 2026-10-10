@@ -123,7 +123,11 @@ type Config struct {
 	// which is fine while only the compose network can reach :8080 and not
 	// fine once a tunnel publishes it - see the boot check below.
 	APIToken string
-	Debug    bool
+
+	// NotifyURL is notify-svc: a card raised here becomes a push to the
+	// operator's phone. Empty sends nothing.
+	NotifyURL string
+	Debug     bool
 }
 
 func Load() (Config, error) {
@@ -173,6 +177,7 @@ func Load() (Config, error) {
 		SessionPath:     env("JARVIS_SESSION_PATH", "./data/session.json"),
 		AllowedOrigin:   env("JARVIS_ALLOWED_ORIGIN", ""),
 		APIToken:        os.Getenv("JARVIS_API_TOKEN"),
+		NotifyURL:       os.Getenv("JARVIS_NOTIFY_URL"),
 		Debug:           envBool("JARVIS_DEBUG", false),
 	}
 

@@ -25,7 +25,9 @@ import (
 
 	"github.com/choigonyok/jarvis/spending-svc/internal/api"
 	"github.com/choigonyok/jarvis/spending-svc/internal/ingest"
+	"github.com/choigonyok/jarvis/spending-svc/internal/notify"
 	"github.com/choigonyok/jarvis/spending-svc/internal/store"
+	"github.com/choigonyok/jarvis/spending-svc/internal/watch"
 )
 
 func main() {
@@ -68,6 +70,8 @@ func main() {
 		log,
 	)
 	go in.Run(ctx)
+	// What the ledger has to say goes to notify-svc; nothing without NOTIFY_URL.
+	go watch.New(st, notify.New(os.Getenv("NOTIFY_URL"), token, log), log).Run(ctx)
 
 	srv := &http.Server{
 		Addr:         addr,
