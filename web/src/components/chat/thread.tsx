@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Composer } from "@/components/chat/composer";
 import { ModeToggle, type ChatMode } from "@/components/chat/mode-toggle";
 import { ProposalCard } from "@/components/chat/proposal-card";
+import { onFocusProposal } from "@/lib/resume";
 import { Markdown } from "@/components/chat/markdown";
 import { VoiceStage } from "@/components/chat/voice-stage";
 import { Header, TabBar } from "@/components/shell/header";
@@ -128,6 +129,39 @@ export function Thread() {
     }
     if (pinned.current) bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [turns, proposals, thinking, error]);
+
+  // A tapped push about a card lands on that card - not the bottom of the
+  // thread - and marks it for a moment. From ?proposal= when the tap opened
+  // this screen, or from the service worker when it was already open. The
+  // card may arrive after the tap (the thread is still loading): it is
+  // looked for again as turns and cards come in.
+  const wanted = useRef<string | null>(null);
+  const focusCard = useCallback(() => {
+    const id = wanted.current;
+    const card = id ? scrollRef.current?.querySelector<HTMLElement>(`[data-proposal-id="${CSS.escape(id)}"]`) : null;
+    if (!card) return;
+    wanted.current = null;
+    pinned.current = false;
+    card.scrollIntoView({ behavior: "smooth", block: "center" });
+    card.classList.remove("card-flash");
+    void card.offsetWidth; // restart the animation on a second tap
+    card.classList.add("card-flash");
+    const url = new URL(window.location.href);
+    if (url.searchParams.has("proposal")) {
+      url.searchParams.delete("proposal");
+      window.history.replaceState(window.history.state, "", url.pathname + url.search);
+    }
+  }, []);
+  useEffect(() => {
+    wanted.current = new URLSearchParams(window.location.search).get("proposal");
+    return onFocusProposal((id) => {
+      wanted.current = id;
+      focusCard();
+    });
+  }, [focusCard]);
+  useEffect(() => {
+    if (wanted.current) focusCard();
+  }, [turns, proposals, focusCard]);
 
   // Photos and long markdown finish laying out after the first paint; while
   // the reader is pinned to the bottom, keep them there as the page grows.

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { X } from "lucide-react";
-import { onPushShown, type ShownPush } from "@/lib/resume";
+import { handleWorkerMessage, onPushShown, type ShownPush } from "@/lib/resume";
 
 /**
  * A push that arrives while the console is on screen, shown inside it: the
@@ -42,11 +42,10 @@ export function PushToast() {
     showing.current = false;
     setPush(null);
   };
+  // Same as tapping the phone's own notification.
   const open = () => {
     dismiss();
-    const target = new URL(push.url || "/", window.location.origin);
-    if (target.searchParams.get("inbox") === "1") window.dispatchEvent(new Event("jarvis:inbox"));
-    if (target.pathname !== window.location.pathname) router.push(target.pathname + target.search);
+    handleWorkerMessage({ type: "jarvis:open", url: push.url }, (path) => router.push(path));
   };
 
   return (

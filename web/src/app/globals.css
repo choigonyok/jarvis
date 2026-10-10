@@ -257,6 +257,21 @@
   animation-delay: 0.32s;
 }
 
+/* The card a tapped push was about: an outline that says "this one", then
+   goes. */
+@keyframes card-flash {
+  0%,
+  40% {
+    box-shadow: 0 0 0 2px var(--foreground);
+  }
+  100% {
+    box-shadow: 0 0 0 2px transparent;
+  }
+}
+.card-flash {
+  animation: card-flash 1.8s ease-out;
+}
+
 /* A push arriving with the console open drops in from the top, once. */
 @keyframes push-drop {
   from {
@@ -270,6 +285,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .push-toast,
+  .card-flash,
   .anim-edge,
   .anim-settle,
   .anim-breathe,

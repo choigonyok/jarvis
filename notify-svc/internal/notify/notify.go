@@ -178,7 +178,7 @@ func (s *Service) deliver(ctx context.Context, ns []store.Notification, group st
 		payload = push.Payload{
 			Title:  fmt.Sprintf("%s %d건", group, len(out)),
 			Body:   clip(strings.Join(titles, " · "), 180),
-			URL:    "/?inbox=1",
+			URL:    groupURL(out),
 			Tag:    "group",
 			Urgent: urgent,
 		}
@@ -189,6 +189,25 @@ func (s *Service) deliver(ctx context.Context, ns []store.Notification, group st
 		}
 	}
 	return s.store.MarkDelivered(ctx, ids)
+}
+
+// groupURL is where a tap on a grouped push goes: the screen they are all
+// about, if they are about one - and the inbox, to see them side by side,
+// only when they are not.
+func groupURL(ns []store.Notification) string {
+	path := func(u string) string { p, _, _ := strings.Cut(u, "?"); return p }
+	same, samePath := true, true
+	for _, n := range ns[1:] {
+		same = same && n.URL == ns[0].URL
+		samePath = samePath && path(n.URL) == path(ns[0].URL)
+	}
+	switch {
+	case same:
+		return ns[0].URL
+	case samePath:
+		return path(ns[0].URL)
+	}
+	return "/?inbox=1"
 }
 
 func (s *Service) settings(ctx context.Context) Settings {

@@ -14,6 +14,14 @@ import type { useRouter } from "next/navigation";
 const RESUME = "jarvis:resume";
 const INBOX = "jarvis:inbox";
 const SHOWN = "jarvis:push-shown";
+const FOCUS = "jarvis:focus-proposal";
+
+/** A tapped push about one card: the thread scrolls to it (chat/thread.tsx). */
+export function onFocusProposal(fn: (id: string) => void): () => void {
+  const handle = (e: Event) => fn((e as CustomEvent<string>).detail);
+  window.addEventListener(FOCUS, handle);
+  return () => window.removeEventListener(FOCUS, handle);
+}
 
 /** A push as the service worker relays it to an open console. */
 export type ShownPush = { title: string; body?: string; url?: string };
@@ -63,7 +71,13 @@ export function handleWorkerMessage(data: unknown, go: (path: string) => void) {
   const target = new URL(String(msg.url || "/"), window.location.origin);
   window.dispatchEvent(new Event(RESUME));
   if (target.searchParams.get("inbox") === "1") window.dispatchEvent(new Event(INBOX));
-  if (target.pathname !== window.location.pathname) go(target.pathname + target.search);
+  if (target.pathname !== window.location.pathname) {
+    // Another screen: it reads ?proposal= itself once it mounts.
+    go(target.pathname + target.search);
+    return;
+  }
+  const card = target.searchParams.get("proposal");
+  if (card) window.dispatchEvent(new CustomEvent<string>(FOCUS, { detail: card }));
 }
 
 export function useNotificationOpen(router: ReturnType<typeof useRouter>) {
