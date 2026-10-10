@@ -28,6 +28,7 @@ ENV JARVIS_ADDR=:8080 \
     JARVIS_CALENDAR_PATH=/data/calendar.json \
     JARVIS_THREAD_PATH=/data/thread.json \
     JARVIS_PROPOSALS_PATH=/data/proposals.json \
+    JARVIS_SUGGESTIONS_PATH=/data/suggestions.json \
     JARVIS_SESSION_PATH=/data/session.json \
     JARVIS_KAKAO_DB=/data/kakao.db \
     JARVIS_MCP_URL=http://127.0.0.1:8080/mcp

@@ -1,9 +1,12 @@
 package suggest
 
 import (
+	"slices"
+
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/google/jsonschema-go/jsonschema"
 	"io"
 	"log/slog"
 	"net/http"
@@ -107,8 +110,8 @@ func TestTriage(t *testing.T) {
 	if _, _, ok := triage(Event{Type: "memory.plan", Data: json.RawMessage(`{"fact":""}`)}); ok {
 		t.Fatal("빈 약속이 통과했습니다")
 	}
-	a, _, _ := triage(Event{Type: "memory.plan", Data: json.RawMessage(`{"fact":"은주와 토요일 저녁 약속"}`)})
-	b, _, _ := triage(Event{Type: "memory.plan", Data: json.RawMessage(`{"fact":"은주와 토요일 저녁 약속"}`)})
+	a, _, _ := triage(Event{Type: "memory.plan", Data: json.RawMessage(`{"fact":"친구와 토요일 저녁 약속"}`)})
+	b, _, _ := triage(Event{Type: "memory.plan", Data: json.RawMessage(`{"fact":"친구와 토요일 저녁 약속"}`)})
 	if !strings.HasPrefix(a, "plan:") || a != b {
 		t.Fatalf("같은 약속은 같은 주제여야 합니다: %q %q", a, b)
 	}
@@ -120,8 +123,8 @@ func TestTriage(t *testing.T) {
 func TestProposeCardThenQuietAndDecision(t *testing.T) {
 	e, bg, props, sk := setup(t)
 	bg.input = &ProposeInput{
-		Title: "토요일 저녁 약속을 캘린더에", Body: "10/18 19:00 은주와 저녁", Why: "카톡에서 약속했는데 캘린더에 없음",
-		Action: "calendar.create_event", ActionInput: json.RawMessage(`{"date":"2026-10-18","title":"은주와 저녁","start":"19:00"}`),
+		Title: "토요일 저녁 약속을 캘린더에", Body: "10/18 19:00 친구와 저녁", Why: "카톡에서 약속했는데 캘린더에 없음",
+		Action: "calendar.create_event", ActionInput: map[string]any{"date": "2026-10-18", "title": "저녁 약속", "start": "19:00"},
 		Confidence: 0.8,
 	}
 	j := &job{ev: Event{Type: "memory.plan", Key: "memory:plan:1"}, topic: "plan:abc", brief: "약속"}
@@ -194,3 +197,38 @@ func contains(xs []string, x string) bool {
 }
 
 func asJSON(v any) string { b, _ := json.Marshal(v); return string(b) }
+
+// The tool's schema must let the judging turn send action_input as an
+// object - the shape it is told to send.
+func TestActionInputSchemaIsAnObject(t *testing.T) {
+	s, err := jsonschema.For[ProposeInput](nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := s.Properties["action_input"]
+	if got.Type != "object" && !slices.Contains(got.Types, "object") {
+		t.Fatalf("action_input schema is %v %v, want an object", got.Type, got.Types)
+	}
+}
+
+// A call refused for its input leaves the turn free to send it again.
+func TestRefusedProposeCanBeRetried(t *testing.T) {
+	e, _, props, _ := setup(t)
+	j := &job{ev: Event{Type: "memory.plan"}, topic: "plan:retry", brief: "약속"}
+	e.cur = j
+	bad := ProposeInput{Title: "약속", Body: "일요일 점심", Action: "calendar.create_event", ActionInput: map[string]any{"title": "점심"}, Confidence: 0.8}
+	if _, err := e.propose(context.Background(), bad); err == nil {
+		t.Fatal("date 없는 일정이 통과했습니다")
+	}
+	good := bad
+	good.ActionInput = map[string]any{"date": "2026-10-18", "title": "점심", "start": "12:00"}
+	if _, err := e.propose(context.Background(), good); err != nil {
+		t.Fatalf("고쳐 보낸 제안이 거절됐습니다: %v", err)
+	}
+	if _, err := e.propose(context.Background(), good); err == nil {
+		t.Fatal("한 판단에서 두 번 제안됐습니다")
+	}
+	if len(props.List()) != 1 {
+		t.Fatalf("카드 %d개", len(props.List()))
+	}
+}

@@ -178,6 +178,7 @@ func (e *Engine) Run(ctx context.Context) {
 			err := e.judge(ctx, &j)
 			switch {
 			case errors.Is(err, claudecode.ErrBusy), errors.Is(err, claudecode.ErrYielded):
+				e.log.Info("다른 일이 돌고 있어 3분 뒤 다시 판단합니다", "topic", j.topic, "tries", j.tries+1)
 				if j.tries++; j.tries < 6 {
 					go func(j job) {
 						select {
@@ -233,7 +234,7 @@ func (e *Engine) judge(ctx context.Context, j *job) error {
 		e.now().Format("2006-01-02 15:04 (Mon)"), j.brief, j.ev.Type, string(j.ev.Data), past.String())
 
 	base := strings.TrimRight(e.cfg.MCPBase, "/")
-	_, err := e.bg.Background(ctx, claudecode.Task{
+	reply, err := e.bg.Background(ctx, claudecode.Task{
 		Name:   "제안 판단 " + j.topic,
 		Prompt: prompt,
 		System: system,
@@ -252,7 +253,20 @@ func (e *Engine) judge(ctx context.Context, j *job) error {
 		},
 		Timeout: 4 * time.Minute,
 	})
+	if err == nil {
+		// Most judgements end in no suggestion; the reply says why, and
+		// without it there is no telling a quiet "no" from nothing at all.
+		e.log.Info("제안을 판단했습니다", "topic", j.topic, "proposed", j.proposed, "reply", clip(reply, 300))
+	}
 	return err
+}
+
+func clip(s string, n int) string {
+	s = strings.TrimSpace(s)
+	if r := []rune(s); len(r) > n {
+		return string(r[:n]) + "…"
+	}
+	return s
 }
 
 // --- the one tool the judging turn can change anything with -----------------
@@ -262,7 +276,9 @@ type ProposeInput struct {
 	Body        string          `json:"body" jsonschema:"무엇을 하자는지, 숫자와 근거로 짧게."`
 	Why         string          `json:"why" jsonschema:"왜 지금 이걸 제안하는지 한두 문장."`
 	Action      string          `json:"action" jsonschema:"승인 시 실행할 것: calendar.create_event, 또는 실행 없이 계획만이면 none."`
-	ActionInput json.RawMessage `json:"action_input,omitempty" jsonschema:"action 의 입력. calendar.create_event 면 {date,title,start,place,shared}. none 이면 비운다."`
+	// An object, not json.RawMessage: that is a []byte, which the tool's
+	// schema advertises as an array of 0-255 - and an object is then refused.
+	ActionInput map[string]any `json:"action_input,omitempty" jsonschema:"action 의 입력. calendar.create_event 면 {date,title,start,place,shared}. none 이면 비운다."`
 	Confidence  float64         `json:"confidence" jsonschema:"운영자에게 실제로 도움이 될 가능성, 0~1."`
 }
 
@@ -285,18 +301,17 @@ func (e *Engine) Handler() http.Handler {
 }
 
 func (e *Engine) propose(ctx context.Context, in ProposeInput) (string, error) {
+	// Counted only once it is through: a call refused for its input must
+	// leave the turn free to send it again, corrected.
 	e.mu.Lock()
 	j := e.cur
-	if j != nil && j.proposed {
-		e.mu.Unlock()
-		return "", errors.New("이번 판단에서는 이미 제안했습니다")
-	}
-	if j != nil {
-		j.proposed = true
-	}
+	proposed := j != nil && j.proposed
 	e.mu.Unlock()
 	if j == nil {
 		return "", errors.New("판단 중인 일이 없습니다")
+	}
+	if proposed {
+		return "", errors.New("이번 판단에서는 이미 제안했습니다")
 	}
 	in.Title, in.Body = strings.TrimSpace(in.Title), strings.TrimSpace(in.Body)
 	if in.Title == "" || in.Body == "" {
@@ -306,6 +321,7 @@ func (e *Engine) propose(ctx context.Context, in ProposeInput) (string, error) {
 	// What the action itself will do, as its module shows it on any card -
 	// rendering it is also how a malformed input is caught before a card exists.
 	var preview action.Card
+	var input json.RawMessage
 	if in.Action != "" && in.Action != "none" {
 		if !Executable[in.Action] {
 			return "", fmt.Errorf("%s 는 제안으로 실행할 수 없습니다. 계획만이면 action 을 none 으로", in.Action)
@@ -314,16 +330,22 @@ func (e *Engine) propose(ctx context.Context, in ProposeInput) (string, error) {
 		if !ok {
 			return "", fmt.Errorf("%s 를 실행할 모듈이 없습니다", in.Action)
 		}
-		if !json.Valid(in.ActionInput) {
-			return "", errors.New("action_input 이 JSON 이 아닙니다")
+		if len(in.ActionInput) == 0 {
+			return "", errors.New("action_input 이 비어 있습니다")
 		}
 		var err error
-		if preview, err = actuator.Preview(ctx, action.Action{Kind: in.Action, Input: in.ActionInput}); err != nil {
+		if input, err = json.Marshal(in.ActionInput); err != nil {
+			return "", errors.New("action_input 을 JSON 으로 만들 수 없습니다")
+		}
+		if preview, err = actuator.Preview(ctx, action.Action{Kind: in.Action, Input: input}); err != nil {
 			return "", fmt.Errorf("action_input 을 확인하세요: %w", err)
 		}
 		kind = in.Action
 	}
 	now := e.now()
+	e.mu.Lock()
+	j.proposed = true
+	e.mu.Unlock()
 
 	// Not sure enough for a card: a line in tonight's digest instead.
 	if in.Confidence < 0.6 {
@@ -343,7 +365,7 @@ func (e *Engine) propose(ctx context.Context, in ProposeInput) (string, error) {
 	}
 	p, _ := e.proposals.Open(proposal.Proposal{
 		Origin:     proposal.OriginSuggest,
-		Action:     action.Action{Kind: kind, Input: in.ActionInput},
+		Action:     action.Action{Kind: kind, Input: input},
 		Card:       action.Card{Title: in.Title, Body: cardBody(in, preview), Consequence: consequence},
 		Confidence: in.Confidence,
 	})
