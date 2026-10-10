@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { onResume } from "@/lib/resume";
 import { API, type AgentEvent, type Connection } from "@/lib/thread";
 
 /**
@@ -28,29 +29,44 @@ export function useAgentStream(
   });
 
   useEffect(() => {
-    const source = new EventSource(`${API}/events`);
+    let source: EventSource;
     let dropped = false;
 
-    source.onopen = () => {
-      setConnection("open");
-      // A reopened stream means frames were missed while it was down.
-      if (dropped) reconnect.current();
-      dropped = false;
+    const open = () => {
+      source = new EventSource(`${API}/events`);
+      source.onopen = () => {
+        setConnection("open");
+        // A reopened stream means frames were missed while it was down.
+        if (dropped) reconnect.current();
+        dropped = false;
+      };
+      source.onerror = () => {
+        // EventSource retries on its own; say so rather than looking dead.
+        dropped = true;
+        setConnection("closed");
+      };
+      source.onmessage = (raw) => {
+        try {
+          handler.current(JSON.parse(raw.data) as AgentEvent);
+        } catch {
+          /* 해석할 수 없는 프레임은 버린다 */
+        }
+      };
     };
-    source.onerror = () => {
-      // EventSource retries on its own; say so rather than looking dead.
-      dropped = true;
-      setConnection("closed");
-    };
-    source.onmessage = (raw) => {
-      try {
-        handler.current(JSON.parse(raw.data) as AgentEvent);
-      } catch {
-        /* 해석할 수 없는 프레임은 버린다 */
-      }
-    };
+    open();
 
-    return () => source.close();
+    // Back from the background the stream may be dead without having said
+    // so: start a fresh one, and re-read what it would have carried.
+    const stop = onResume(() => {
+      source.close();
+      dropped = true;
+      open();
+    });
+
+    return () => {
+      stop();
+      source.close();
+    };
   }, []);
 
   return connection;

@@ -37,8 +37,13 @@ self.addEventListener("notificationclick", (event) => {
       const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
       for (const w of windows) {
         if (new URL(w.url).origin === self.location.origin) {
+          // The open console re-reads and moves to the screen itself
+          // (lib/resume.ts). navigate() would reload the whole app - and a
+          // home-screen app on iOS does not reliably do even that, so the
+          // tap used to show what the page had before it was suspended.
           await w.focus();
-          return w.navigate(url);
+          w.postMessage({ type: "jarvis:open", url });
+          return;
         }
       }
       return self.clients.openWindow(url);

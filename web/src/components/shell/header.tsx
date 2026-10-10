@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { PROBE_KEY } from "@/components/shell/viewport-probe";
+import { useNotificationOpen } from "@/lib/resume";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -138,6 +139,7 @@ export function Header({
   const tabs = visible(all, role);
   const router = useRouter();
   const status = connectionCopy[connection];
+  useNotificationOpen(router);
 
   // Five quick taps on the name toggle the screen-measurement overlay - the
   // only way to reach it inside a home-screen app, which has no address bar.
