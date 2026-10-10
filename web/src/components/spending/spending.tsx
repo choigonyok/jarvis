@@ -20,9 +20,11 @@ import {
   type Book,
   type Tx,
   ago,
+  categoryKrw,
   clock,
   dayKey,
   dayLabel,
+  inCategory,
   monthLabel,
   send,
   shiftMonth,
@@ -117,11 +119,14 @@ export function Spending() {
     return book.transactions.filter(
       (t) =>
         (!day || dayKey(t.approvedAt) === day) &&
-        (!category || t.category === category) &&
+        (!category || inCategory(t, category)) &&
         (!q || t.merchant.toLowerCase().includes(q) || t.memo.toLowerCase().includes(q)),
     );
   }, [book, day, category, query]);
-  const shownTotal = shown.reduce((sum, t) => sum + t.signedKrw, 0);
+  const shownTotal = shown.reduce(
+    (sum, t) => sum + (category ? categoryKrw(t, category) : t.signedKrw),
+    0,
+  );
   const filtered = Boolean(day || category || query.trim());
 
   const current = month === thisMonth();

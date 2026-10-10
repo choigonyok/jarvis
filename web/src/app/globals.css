@@ -10,6 +10,7 @@
   --font-sans: var(--font-instrument);
   --font-mono: var(--font-jetbrains);
   --font-heading: var(--font-instrument);
+  --font-score: var(--font-scoreboard);
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
@@ -69,7 +70,7 @@
   /* Whose day it is on the shared calendar. Identity, not signal: the hues
      sit well away from approve/reject green and red, and "shared" is not a
      third color but the two of them together. */
-  --mine: oklch(0.78 0.105 238);
+  --mine: oklch(0.78 0.11 300);
   --partner: oklch(0.83 0.115 72);
 
   --card: oklch(1 0 0 / 3.5%);

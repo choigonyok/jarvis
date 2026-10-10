@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  carrySets,
   routinesOf,
   today,
   type Book,
+  type Exercise,
   type Routine,
   type Session,
   type WorkoutSet,
@@ -128,20 +130,6 @@ export function useWorkout() {
     (routine: Routine) => {
       const stamp = Date.now();
       update((b) => {
-        const earlier = [...b.sessions].sort((x, y) => y.startedAt - x.startedAt);
-        const lastSetsFor = (name: string): WorkoutSet[] => {
-          const key = name.trim().toLowerCase();
-          for (const session of earlier) {
-            const match = session.exercises.find(
-              (e) => e.name.trim().toLowerCase() === key,
-            );
-            if (match && match.sets.length > 0) {
-              return match.sets.map((set) => ({ ...set, done: false }));
-            }
-          }
-          return [{ weight: 0, reps: 0, done: false }];
-        };
-
         const session: Session = {
           id: `w-${stamp}`,
           date: today(),
@@ -150,7 +138,7 @@ export function useWorkout() {
           exercises: routine.exercises.map((name, i) => ({
             id: `e-${stamp}-${i}`,
             name,
-            sets: lastSetsFor(name),
+            sets: carrySets(b.sessions, name),
           })),
           startedAt: stamp,
         };
@@ -166,21 +154,49 @@ export function useWorkout() {
     [update],
   );
 
+  /**
+   * Finish a session, at `at` if it ended earlier than now (a session left
+   * open overnight ended at its last set, not at breakfast).
+   *
+   * Sets never ticked were planned, not lifted, so they are dropped rather
+   * than kept as zeroes - next time's "지난번" is then what actually happened.
+   * A session with nothing ticked was a false start, not a rest day with a
+   * zero in it, and goes entirely.
+   */
   const endSession = useCallback(
-    (id: string) => {
+    (id: string, at?: number) => {
       update((b) => ({
         ...b,
-        sessions: b.sessions
-          .map((s) => (s.id === id ? { ...s, endedAt: Date.now() } : s))
-          // A session where nothing was ticked off was a false start, not a
-          // rest day with a zero in it.
-          .filter(
-            (s) =>
-              s.id !== id ||
-              s.exercises.some((e) => e.sets.some((set) => set.done)),
-          ),
+        sessions: b.sessions.flatMap((s) => {
+          if (s.id !== id) return [s];
+          const exercises = s.exercises
+            .map((e) => ({ ...e, sets: e.sets.filter((set) => set.done) }))
+            .filter((e) => e.sets.length > 0);
+          if (exercises.length === 0) return [];
+          return [{ ...s, exercises, endedAt: Math.max(s.startedAt, at ?? Date.now()) }];
+        }),
       }));
     },
+    [update],
+  );
+
+  /** Take a session out of the log. Returns it, so the caller can offer undo. */
+  const removeSession = useCallback(
+    (id: string): Session | null => {
+      const found = latest.current.sessions.find((s) => s.id === id) ?? null;
+      update((b) => ({ ...b, sessions: b.sessions.filter((s) => s.id !== id) }));
+      return found;
+    },
+    [update],
+  );
+
+  const restoreSession = useCallback(
+    (session: Session) =>
+      update((b) =>
+        b.sessions.some((s) => s.id === session.id)
+          ? b
+          : { ...b, sessions: [...b.sessions, session] },
+      ),
     [update],
   );
 
@@ -209,11 +225,23 @@ export function useWorkout() {
           {
             id: `e-${Date.now()}`,
             name,
-            // One empty set to type into, so adding a lift is one tap.
-            sets: [{ weight: 0, reps: 0, done: false }],
+            sets: carrySets(latest.current.sessions, name),
           },
         ],
       }));
+    },
+    [patchSession],
+  );
+
+  /** Put a removed movement back where it was. */
+  const insertExercise = useCallback(
+    (id: string, exercise: Exercise, at: number) => {
+      patchSession(id, (s) => {
+        if (s.exercises.some((e) => e.id === exercise.id)) return s;
+        const exercises = [...s.exercises];
+        exercises.splice(Math.min(at, exercises.length), 0, exercise);
+        return { ...s, exercises };
+      });
     },
     [patchSession],
   );
@@ -263,7 +291,10 @@ export function useWorkout() {
     startRoutine,
     saveRoutines,
     endSession,
+    removeSession,
+    restoreSession,
     addExercise,
+    insertExercise,
     patchSets,
     removeExercise,
     setNote,

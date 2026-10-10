@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Instrument_Sans, JetBrains_Mono } from "next/font/google";
+import { Barlow_Condensed, Instrument_Sans, JetBrains_Mono } from "next/font/google";
 import { headers } from "next/headers";
 import { RoleProvider } from "@/components/shell/role";
 import { NoZoom } from "@/components/shell/no-zoom";
@@ -12,6 +12,15 @@ const instrument = Instrument_Sans({
   variable: "--font-instrument",
   subsets: ["latin"],
   weight: ["400", "500", "600"],
+});
+
+// The workout tab's numerals only - loads, reps, the clock. A condensed
+// athletic face reads like the whiteboard at the gym, and fits a five-digit
+// load in a stepper without shrinking it.
+const scoreboard = Barlow_Condensed({
+  variable: "--font-scoreboard",
+  subsets: ["latin"],
+  weight: ["500", "600"],
 });
 
 const jetbrains = JetBrains_Mono({
@@ -56,7 +65,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="ko"
-      className={`dark ${instrument.variable} ${jetbrains.variable} antialiased`}
+      className={`dark ${instrument.variable} ${jetbrains.variable} ${scoreboard.variable} antialiased`}
     >
       <body className="overflow-hidden">
         <RoleProvider role={role}>{children}</RoleProvider>

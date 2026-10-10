@@ -42,6 +42,18 @@ export type Item = {
 
 export const SITE_LABEL: Record<string, string> = { coupang: "쿠팡", naverpay: "네이버페이" };
 
+/** An opened-up order counts by its items, as spending-svc's category totals do. */
+const byItems = (t: Tx) => t.status === "ok" && (t.items?.length ?? 0) > 0;
+
+export const inCategory = (t: Tx, category: string) =>
+  byItems(t) ? t.items!.some((it) => it.category === category) : t.category === category;
+
+/** What this row adds to one category: only its items in it, for an opened-up order. */
+export const categoryKrw = (t: Tx, category: string) =>
+  byItems(t)
+    ? t.items!.reduce((sum, it) => sum + (it.category === category ? it.amountKrw : 0), 0)
+    : t.signedKrw;
+
 export type CategoryTotal = {
   name: string;
   totalKrw: number;

@@ -12,7 +12,7 @@ import {
   shiftMonth,
   type Cursor,
 } from "@/lib/month";
-import { clock, durationOf, type Session } from "@/lib/workout";
+import type { Session } from "@/lib/workout";
 import { cn } from "@/lib/utils";
 
 /**
@@ -23,11 +23,20 @@ import { cn } from "@/lib/utils";
  * is something that either happened or did not. Mixing them would make the
  * calendar half diary and half plan, and neither half readable.
  *
- * So a day here is empty or it is not. A day that was trained carries the
- * routine's name and how long it took, which together answer the two
- * questions you ask of a training month: what am I doing, and am I doing it.
+ * So a day here is empty or it is not, and a trained day carries the
+ * routine's name. Pressing a trained day narrows the log below to it, the
+ * way the ledger's day bars narrow its list - the grid is how you find a
+ * day, the log is how you read it.
  */
-export function WorkoutCalendar({ sessions }: { sessions: Session[] }) {
+export function WorkoutCalendar({
+  sessions,
+  selected,
+  onSelect,
+}: {
+  sessions: Session[];
+  selected: string | null;
+  onSelect: (date: string | null) => void;
+}) {
   const today = isoDate(new Date());
   const [cursor, setCursor] = useState<Cursor>(() => cursorOf(today));
 
@@ -58,7 +67,7 @@ export function WorkoutCalendar({ sessions }: { sessions: Session[] }) {
               variant="ghost"
               size="sm"
               onClick={() => setCursor(cursorOf(today))}
-              className="h-9 px-2.5 text-[12.5px] text-dim hover:text-foreground sm:h-7"
+              className="h-11 px-3 text-[12.5px] text-dim hover:text-foreground sm:h-7"
             >
               이번 달
             </Button>
@@ -92,33 +101,25 @@ export function WorkoutCalendar({ sessions }: { sessions: Session[] }) {
         ))}
       </div>
 
-      <div className="grid grid-cols-7 gap-px" role="grid" aria-label="운동한 날">
+      <div className="grid grid-cols-7 gap-px">
         {cells.map((cell) => {
           const done = byDate.get(cell.date);
           const isToday = cell.date === today;
+          const chosen = selected === cell.date;
+          const label = done
+            ? `${cell.date}, ${done.map((s) => s.routineName ?? "운동").join(", ")}`
+            : cell.date;
           // A trained day is filled; an untrained one is just a number. No
           // dots, no legend - the month reads as a pattern of blocks, which
           // is what "am I keeping it up" actually looks like.
-          return (
-            <div
-              key={cell.date}
-              role="gridcell"
-              aria-label={
-                done
-                  ? `${cell.date}, ${done.map((s) => s.routineName ?? "운동").join(", ")}`
-                  : cell.date
-              }
-              className={cn(
-                "flex h-12 flex-col items-center justify-center gap-0.5 rounded-lg sm:h-14",
-                done ? "bg-approve/12" : cell.inMonth ? "bg-glass" : "",
-              )}
-            >
+          const body = (
+            <>
               <span
                 className={cn(
                   "tnum text-[12px] leading-none",
                   !cell.inMonth && "text-faint/50",
                   cell.inMonth && (done ? "text-approve/90" : "text-faint"),
-                  isToday && "font-semibold",
+                  isToday && "font-semibold underline decoration-2 underline-offset-[3px]",
                 )}
               >
                 {cell.day}
@@ -128,36 +129,31 @@ export function WorkoutCalendar({ sessions }: { sessions: Session[] }) {
                   {done[0].routineName ?? "운동"}
                 </span>
               ) : null}
+            </>
+          );
+          const shape = cn(
+            "flex h-12 flex-col items-center justify-center gap-0.5 rounded-lg sm:h-14",
+            done ? "bg-approve/12" : cell.inMonth ? "bg-glass" : "",
+            chosen && "ring-2 ring-foreground/70",
+          );
+          return done && cell.inMonth ? (
+            <button
+              key={cell.date}
+              type="button"
+              aria-label={label}
+              aria-pressed={chosen}
+              onClick={() => onSelect(chosen ? null : cell.date)}
+              className={cn(shape, "outline-none hover:bg-approve/18 focus-visible:ring-3 focus-visible:ring-ring/50")}
+            >
+              {body}
+            </button>
+          ) : (
+            <div key={cell.date} aria-label={label} className={shape}>
+              {body}
             </div>
           );
         })}
       </div>
-
-      {/* The list under the grid, because a 9px label in a cell can say which
-          day it was but not how long it took. */}
-      {trained > 0 ? (
-        <ul className="mt-3 space-y-1">
-          {cells
-            .filter((c) => c.inMonth && byDate.has(c.date))
-            .reverse()
-            .map((cell) => {
-              const done = byDate.get(cell.date) ?? [];
-              const minutes = done.reduce((sum, s) => sum + durationOf(s), 0);
-              return (
-                <li
-                  key={cell.date}
-                  className="flex items-baseline gap-3 px-1 text-[12.5px]"
-                >
-                  <span className="tnum w-6 shrink-0 text-faint">{cell.day}</span>
-                  <span className="min-w-0 flex-1 truncate text-dim">
-                    {done.map((s) => s.routineName ?? "운동").join(", ")}
-                  </span>
-                  <span className="tnum shrink-0 text-faint">{clock(minutes)}</span>
-                </li>
-              );
-            })}
-        </ul>
-      ) : null}
     </section>
   );
 }
