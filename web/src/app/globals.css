@@ -280,6 +280,9 @@
   }
 }
 @keyframes push-rise {
+  from {
+    transform: translateY(var(--drag, 0px));
+  }
   to {
     transform: translateY(calc(-100% - 24px - env(safe-area-inset-top)));
   }
