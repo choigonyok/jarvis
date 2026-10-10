@@ -186,6 +186,13 @@ export async function buildPortfolio(): Promise<Portfolio> {
     }
   }
 
+  // The gold account's trades say when its gold was first bought (since the
+  // principal's start); with no buy in them it was held from before.
+  if (gold && goldSettled) {
+    const firstBuy = goldSettled.find((x) => x.krw < 0)?.date ?? null;
+    for (const h of gold.holdings) h.since = firstBuy;
+  }
+
   // Each KIS account's cash today against its last day's: what the settled
   // trades do not explain is a deposit or withdrawal, written into the ledger
   // before it is read below. Only with both halves - a guess from one would
