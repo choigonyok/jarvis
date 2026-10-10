@@ -33,6 +33,7 @@ interface Env {
   BROWSER: Fetcher;
   AGENT_GUEST: Fetcher;
   IMMICH: Fetcher;
+  NOTIFY: Fetcher;
   /** Immich's API key for the gallery. Only this gateway holds it. */
   IMMICH_API_KEY?: string;
 }
@@ -49,6 +50,9 @@ const SERVICES: Record<string, { binding: keyof Env; origin: string }> = {
   imessage: { binding: "IMESSAGE", origin: "http://imessage:8099" },
   status: { binding: "STATUS", origin: "http://status:8096" },
   immich: { binding: "IMMICH", origin: "http://immich:2283" },
+  // The inbox, its settings and this device's push subscription. Producers
+  // reach notify-svc inside the compose network, not through here.
+  notify: { binding: "NOTIFY", origin: "http://notify:8097" },
   vnc: { binding: "BROWSER", origin: "http://browser:6080" },
 };
 

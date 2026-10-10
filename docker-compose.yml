@@ -79,6 +79,7 @@ services:
       # Guards the routes the console drives. Required once the agent is
       # published (JARVIS_ALLOWED_ORIGIN set, or a tunnel in front of it).
       JARVIS_API_TOKEN: ${JARVIS_API_TOKEN:-}
+      JARVIS_NOTIFY_URL: http://notify:8097
       JARVIS_ALLOWED_ORIGIN: ${JARVIS_ALLOWED_ORIGIN:-}
       JARVIS_APPROVAL_TIMEOUT: ${JARVIS_APPROVAL_TIMEOUT:-30m}
       JARVIS_TURN_TIMEOUT: ${JARVIS_TURN_TIMEOUT:-2h}
@@ -228,6 +229,7 @@ services:
       DATABASE_URL: >-
         postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
       API_TOKEN: ${JARVIS_API_TOKEN:-}
+      NOTIFY_URL: http://notify:8097
       KAKAOTALK_URL: http://kakaotalk:8090
       # 이름에 "카드"가 없는 결제 알림 채널(예: 카카오뱅크)을 쉼표로 더한다.
       # 카카오페이 같은 간편결제는 기본으로 빼 두었다 - 카드로 충전·결제되면
@@ -346,6 +348,7 @@ services:
       DATABASE_URL: >-
         postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
       API_TOKEN: ${JARVIS_API_TOKEN:-}
+      NOTIFY_URL: http://notify:8097
       # 일정 저장소. uniple 이면 커플 앱의 공유 캘린더를 비공식 Supabase
       # 호출로 쓴다(calendar-svc/README.md). postgres 로 되돌리면 예전 표를 쓴다.
       CALENDAR_BACKEND: ${CALENDAR_BACKEND:-uniple}
@@ -386,6 +389,7 @@ services:
       TZ: ${TZ:-Asia/Seoul}
       PORT: "8092"
       API_TOKEN: ${JARVIS_API_TOKEN:-}
+      NOTIFY_URL: http://notify:8097
       # 스냅샷용. 없어도 자산 조회는 된다 - 증권사가 현재 보유의 원천이고,
       # 데이터베이스가 답하는 것은 "그때 무엇을 들고 있었나"뿐이다.
       DATABASE_URL: >-
@@ -680,6 +684,7 @@ services:
       DATABASE_URL: >-
         postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
       API_TOKEN: ${JARVIS_API_TOKEN:-}
+      NOTIFY_URL: http://notify:8097
       KAKAOTALK_URL: http://kakaotalk:8090
       SPENDING_URL: http://spending:8095
       ASSETS_URL: http://assets:8092
@@ -708,6 +713,35 @@ services:
   # that runs on Workers, so when the console is served from Cloudflare this is
   # how the Worker reaches back to it - outbound only, no port opened on the
   # host. Opt in with: docker compose --profile cloudflare up -d
+
+  # 알림. 여러 서비스가 정해진 모양의 이벤트(POST /events)를 보내면, 저장·중복
+  # 제거·방해 금지·저녁 요약을 거쳐 웹 푸시로 폰에 보낸다. 알림함도 여기서 읽는다.
+  # VAPID 키는 .env 에만 둔다(공개 저장소).
+  notify:
+    build: ./notify-svc
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      LISTEN_ADDR: ":8097"
+      DATABASE_URL: >-
+        postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
+      API_TOKEN: ${JARVIS_API_TOKEN:-}
+      VAPID_PUBLIC_KEY: ${JARVIS_VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${JARVIS_VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${JARVIS_VAPID_SUBJECT:-https://jarvis.choigonyok.com}
+    expose:
+      - "8097"
+    ports:
+      - "127.0.0.1:${JARVIS_NOTIFY_PORT:-8097}:8097"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8097/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
   tunnel:
     image: cloudflare/cloudflared:latest
     profiles: ["cloudflare"]

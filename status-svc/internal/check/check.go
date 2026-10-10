@@ -87,7 +87,14 @@ type Runner struct {
 	mu      sync.RWMutex
 	results map[string]*Result
 	running map[string]bool
+
+	// onChange hears a probe's verdict whenever its state differs from the
+	// last one - and its first verdict, with prev Unknown.
+	onChange func(p Probe, prev State, v Verdict)
 }
+
+// OnChange registers fn for state changes. Set before Run; fn must not block.
+func (r *Runner) OnChange(fn func(p Probe, prev State, v Verdict)) { r.onChange = fn }
 
 func NewRunner(groups []string, probes []Probe, log *slog.Logger) *Runner {
 	return &Runner{
@@ -164,6 +171,13 @@ func (r *Runner) runOne(ctx context.Context, p Probe) {
 	defer r.mu.Unlock()
 	r.running[p.ID] = false
 	prev := r.results[p.ID]
+	if r.onChange != nil && (prev == nil || prev.State != v.State) {
+		was := Unknown
+		if prev != nil {
+			was = prev.State
+		}
+		r.onChange(p, was, v)
+	}
 	since := now
 	if prev != nil && prev.State == v.State {
 		since = prev.Since

@@ -28,6 +28,7 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/module/jobs"
 	"github.com/choigonyok/jarvis/agent/internal/module/memory"
 	"github.com/choigonyok/jarvis/agent/internal/module/spending"
+	"github.com/choigonyok/jarvis/agent/internal/notify"
 	"github.com/choigonyok/jarvis/agent/internal/thread"
 	"github.com/choigonyok/jarvis/agent/internal/uploads"
 	"github.com/choigonyok/jarvis/agent/internal/usage"
@@ -173,6 +174,26 @@ func main() {
 	// A card does not hold a turn open; its decision starts the next one.
 	gate.SetFollowUp(runner)
 	proposals.OnDecide(gate.Resolve)
+
+	// Every card waiting on the operator reaches the phone. The guest's cards
+	// are the guest's: they do not ring the operator.
+	if notifier := notify.New(cfg.NotifyURL, cfg.APIToken, log); notifier != nil && !cfg.Guest {
+		proposals.OnOpen(func(p proposal.Proposal) {
+			kind, title := "approval.pending", "결재 대기"
+			if p.Origin == proposal.OriginNotice {
+				// A background job asking for something done by hand (log in again).
+				kind, title = "job.request", "작업이 기다려요"
+			}
+			body := p.Card.Title
+			if p.Card.Body != "" {
+				body += " - " + p.Card.Body
+			}
+			notifier.Send(notify.Event{
+				Source: "agent", Kind: kind, Tier: "now", Level: "warn",
+				Title: title, Body: body, URL: "/", Key: "proposal:" + p.ID,
+			})
+		})
+	}
 
 	// The guest is not shown what the operator's API key costs.
 	var apiUsage func(context.Context) (any, error)

@@ -26,6 +26,7 @@ import (
 	"github.com/choigonyok/jarvis/status-svc/internal/api"
 	"github.com/choigonyok/jarvis/status-svc/internal/browser"
 	"github.com/choigonyok/jarvis/status-svc/internal/check"
+	"github.com/choigonyok/jarvis/status-svc/internal/notify"
 	"github.com/choigonyok/jarvis/status-svc/internal/probes"
 )
 
@@ -65,6 +66,27 @@ func main() {
 		Browser:     browser.New(getenv("BROWSER_MCP_URL", "http://localhost:8931/"), os.Getenv("BROWSER_MCP_TOKEN")),
 		DB:          pool,
 	}), log)
+	// A probe going wrong is the one kind of news nobody would otherwise
+	// notice: the page looks fine while payments quietly stop arriving.
+	// Broken now is a push, a warning waits for the evening digest, and
+	// recovering is only noted. A first verdict that is broken counts too, but
+	// once a day at most - a restart is not news.
+	if notifier := notify.New(os.Getenv("NOTIFY_URL"), token, log); notifier != nil {
+		runner.OnChange(func(p check.Probe, prev check.State, v check.Verdict) {
+			day := time.Now().Format("2006-01-02")
+			switch {
+			case v.State == check.Fail:
+				notifier.Send(notify.Event{Source: "status", Kind: "status.fail", Tier: "now", Level: "alert",
+					Title: p.Name + " 이상", Body: v.Summary, URL: "/status", Key: "status:" + p.ID + ":fail:" + day})
+			case v.State == check.Warn && prev != check.Unknown:
+				notifier.Send(notify.Event{Source: "status", Kind: "status.warn", Tier: "digest", Level: "warn",
+					Title: p.Name + " 주의", Body: v.Summary, URL: "/status", Key: "status:" + p.ID + ":warn:" + day})
+			case v.State == check.OK && (prev == check.Fail || prev == check.Warn):
+				notifier.Send(notify.Event{Source: "status", Kind: "status.ok", Tier: "log",
+					Title: p.Name + " 다시 정상", Body: v.Summary, URL: "/status"})
+			}
+		})
+	}
 	go runner.Run(ctx)
 
 	addr := getenv("LISTEN_ADDR", ":8096")
