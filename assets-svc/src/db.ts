@@ -297,6 +297,26 @@ export async function saveCloses(key: string, closes: Map<string, number>): Prom
   );
 }
 
+/**
+ * Leave events in the outbox (migration 034) for events-svc to pick up - so
+ * one sent while events-svc is restarting arrives late instead of never.
+ * False when there is no database or the write failed; the caller then
+ * posts them directly.
+ */
+export async function enqueueEvents(events: unknown[]): Promise<boolean> {
+  if (!pool || events.length === 0) return false;
+  try {
+    await pool.query(
+      "insert into event_outbox (payload) select * from unnest($1::jsonb[])",
+      [events.map((e) => JSON.stringify(e))],
+    );
+    return true;
+  } catch (err) {
+    console.error("이벤트를 outbox 에 쓰지 못해 바로 보냅니다:", (err as Error).message);
+    return false;
+  }
+}
+
 export async function close(): Promise<void> {
   await pool?.end();
   pool = null;

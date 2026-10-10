@@ -128,6 +128,10 @@ type Config struct {
 	// operator's phone. Empty sends nothing.
 	NotifyURL string
 
+	// DatabaseURL is Postgres. Today only the events outbox writes to it:
+	// what the agent reports reaches events-svc even if it is restarting.
+	DatabaseURL string
+
 	// EventsURL is events-svc: the assistant subscribes there for events
 	// worth a suggestion (internal/suggest) and reports its suggestions back.
 	// SelfURL is where events-svc reaches this agent; SuggestionsPath keeps
@@ -186,6 +190,7 @@ func Load() (Config, error) {
 		AllowedOrigin:   env("JARVIS_ALLOWED_ORIGIN", ""),
 		APIToken:        os.Getenv("JARVIS_API_TOKEN"),
 		NotifyURL:       os.Getenv("JARVIS_NOTIFY_URL"),
+		DatabaseURL:     os.Getenv("JARVIS_DATABASE_URL"),
 		EventsURL:       os.Getenv("JARVIS_EVENTS_URL"),
 		SelfURL:         env("JARVIS_SELF_URL", "http://agent:8080"),
 		SuggestionsPath: env("JARVIS_SUGGESTIONS_PATH", "./data/suggestions.json"),

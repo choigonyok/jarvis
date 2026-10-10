@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -50,6 +51,8 @@ func main() {
 	st := store.New(pool)
 	b := bus.New(st, token, log)
 	go b.Run(ctx)
+	go drain(ctx, st, b.Notify, log)
+	go prune(ctx, st, time.Duration(atoi(getenv("EVENTS_RETAIN_DAYS", "90")))*24*time.Hour, log)
 
 	addr := getenv("LISTEN_ADDR", ":8101")
 	srv := &http.Server{
@@ -70,6 +73,54 @@ func main() {
 	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(shutdown)
+}
+
+// drain keeps the outbox empty: what services wrote there becomes events.
+// A second is as late as an event gets when events-svc is up.
+func drain(ctx context.Context, st *store.Store, wake func(), log *slog.Logger) {
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+	for {
+		n, err := st.Drain(ctx, 200, api.Parse, func(id int64, err error) {
+			log.Warn("outbox 의 이벤트를 버립니다", "id", id, "err", err)
+		})
+		switch {
+		case err != nil && ctx.Err() == nil:
+			log.Warn("outbox 를 비우지 못했습니다", "err", err)
+		case n > 0:
+			wake()
+			continue // there may be more
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+// prune drops what every consumer has long since taken, once a day.
+func prune(ctx context.Context, st *store.Store, keep time.Duration, log *slog.Logger) {
+	for {
+		if n, err := st.Prune(ctx, keep); err != nil && ctx.Err() == nil {
+			log.Warn("오래된 이벤트를 지우지 못했습니다", "err", err)
+		} else if n > 0 {
+			log.Info("오래된 이벤트를 지웠습니다", "count", n)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(24 * time.Hour):
+		}
+	}
+}
+
+func atoi(s string) int {
+	n, err := strconv.Atoi(s)
+	if err != nil || n <= 0 {
+		return 90
+	}
+	return n
 }
 
 func getenv(key, fallback string) string {

@@ -186,6 +186,7 @@ func main() {
 		}
 		suggester = suggest.New(ledger, proposals, modules, runner, suggest.Config{
 			MCPBase: cfg.PublicMCPURL, EventsURL: cfg.EventsURL, Token: cfg.APIToken,
+			Out: notify.New(cfg.EventsURL, cfg.DatabaseURL, cfg.APIToken, log),
 		}, log)
 		mcpMounts["/mcp/"+suggest.ServerName] = suggester.Handler()
 		proposals.OnDecide(suggester.OnDecide)
@@ -202,7 +203,7 @@ func main() {
 
 	// Every card waiting on the operator reaches the phone. The guest's cards
 	// are the guest's: they do not ring the operator.
-	if notifier := notify.New(cfg.NotifyURL, cfg.APIToken, log); notifier != nil && !cfg.Guest {
+	if notifier := notify.New(cfg.NotifyURL, cfg.DatabaseURL, cfg.APIToken, log); notifier != nil && !cfg.Guest {
 		proposals.OnOpen(func(p proposal.Proposal) {
 			kind, title := "approval.pending", "결재 대기"
 			if p.Origin == proposal.OriginSuggest {

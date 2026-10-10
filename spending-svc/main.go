@@ -71,7 +71,7 @@ func main() {
 	)
 	go in.Run(ctx)
 	// What the ledger has to say goes to notify-svc; nothing without NOTIFY_URL.
-	go watch.New(st, notify.New(os.Getenv("NOTIFY_URL"), token, log), log).Run(ctx)
+	go watch.New(st, notify.New(os.Getenv("NOTIFY_URL"), dsn, token, log), log).Run(ctx)
 
 	srv := &http.Server{
 		Addr:         addr,

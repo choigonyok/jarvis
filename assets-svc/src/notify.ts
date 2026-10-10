@@ -1,3 +1,4 @@
+import { enqueueEvents } from "./db.js";
 import type { Portfolio } from "./types.js";
 
 /**
@@ -110,8 +111,15 @@ export function eventsOf(p: Portfolio, now = new Date()): Event[] {
 
 /** Sends the portfolio's events; never throws, never waits on the caller. */
 export function announce(p: Portfolio): void {
+  const events = eventsOf(p);
+  void enqueueEvents(events).then((queued) => {
+    if (!queued) post(events);
+  });
+}
+
+function post(events: Event[]): void {
   if (!URL) return;
-  for (const e of eventsOf(p)) {
+  for (const e of events) {
     void fetch(`${URL.replace(/\/$/, "")}/events`, {
       method: "POST",
       headers: { "content-type": "application/json", ...(TOKEN ? { authorization: `Bearer ${TOKEN}` } : {}) },

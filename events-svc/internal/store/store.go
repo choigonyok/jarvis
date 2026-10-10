@@ -50,6 +50,28 @@ func New(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 // Append stores an event. A key already stored is reported as a duplicate
 // and changes nothing, so senders may repeat themselves freely.
 func (s *Store) Append(ctx context.Context, e Event) (Event, bool, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Event{}, false, err
+	}
+	defer tx.Rollback(ctx)
+	saved, dup, err := appendTx(ctx, tx, e)
+	if err != nil {
+		return Event{}, false, err
+	}
+	return saved, dup, tx.Commit(ctx)
+}
+
+// appendLock serialises appends. Consumers read past a cursor by id, and
+// ids are handed out before commit: two appends at once could commit 8
+// after 9 was delivered, and 8 would be skipped for good. Under the lock
+// they commit in id order. At this volume the wait is nothing.
+const appendLock = 0x6576656e7473 // "events"
+
+func appendTx(ctx context.Context, tx pgx.Tx, e Event) (Event, bool, error) {
+	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock($1)`, appendLock); err != nil {
+		return Event{}, false, err
+	}
 	var key *string
 	if e.Key != "" {
 		key = &e.Key
@@ -64,7 +86,7 @@ func (s *Store) Append(ctx context.Context, e Event) (Event, bool, error) {
 	if e.OccurredAt.IsZero() {
 		e.OccurredAt = time.Now()
 	}
-	err := s.pool.QueryRow(ctx, `
+	err := tx.QueryRow(ctx, `
 		insert into events (source, type, subject, data, notify, dedupe_key, occurred_at)
 		values ($1, $2, $3, $4, $5, $6, $7)
 		on conflict (dedupe_key) do nothing
@@ -74,6 +96,64 @@ func (s *Store) Append(ctx context.Context, e Event) (Event, bool, error) {
 		return Event{}, true, nil
 	}
 	return e, false, err
+}
+
+// Drain moves what senders left in the outbox (migration 034) into the log,
+// oldest first, each row in the same transaction as its event - so a row is
+// in the log exactly once, however a crash falls. parse turns a payload into
+// an event, or says why it never will be one: such a row is dropped (and
+// reported) rather than retried forever. It returns how many it moved.
+func (s *Store) Drain(ctx context.Context, limit int, parse func([]byte) (Event, error), rejected func(id int64, err error)) (int, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+	rows, err := tx.Query(ctx, `select id, payload from event_outbox order by id limit $1 for update skip locked`, limit)
+	if err != nil {
+		return 0, err
+	}
+	type row struct {
+		id      int64
+		payload []byte
+	}
+	var batch []row
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.id, &r.payload); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		batch = append(batch, r)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	moved := 0
+	for _, r := range batch {
+		if e, err := parse(r.payload); err != nil {
+			rejected(r.id, err)
+		} else if _, dup, err := appendTx(ctx, tx, e); err != nil {
+			return 0, err
+		} else if !dup {
+			moved++
+		}
+		if _, err := tx.Exec(ctx, `delete from event_outbox where id = $1`, r.id); err != nil {
+			return 0, err
+		}
+	}
+	return moved, tx.Commit(ctx)
+}
+
+// Prune deletes events older than keep that every consumer is already past.
+// One a consumer has yet to take stays, however old.
+func (s *Store) Prune(ctx context.Context, keep time.Duration) (int64, error) {
+	tag, err := s.pool.Exec(ctx, `
+		delete from events
+		 where received_at < now() - make_interval(secs => $1)
+		   and id <= (select coalesce(min(cursor), 0) from event_subscriptions)`, keep.Seconds())
+	return tag.RowsAffected(), err
 }
 
 // After is the next events past cursor, oldest first.

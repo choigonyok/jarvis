@@ -70,7 +70,7 @@ PLAN_WORDS = ("약속", "만나", "만날", "하기로", "예약", "일정", "�
 
 
 async def on_extract(group: str, source: str, edges):
-    if group != "owner" or not EVENTS_URL or "6시간 묶음" in source:
+    if group != "owner" or "6시간 묶음" in source:
         return
     since = datetime.now(timezone.utc) - timedelta(days=1)
     for e in edges:
@@ -91,7 +91,15 @@ async def on_extract(group: str, source: str, edges):
 
 async def emit(event: dict):
     """Fire and forget: the event log is a nicety, never a reason to stop
-    remembering."""
+    remembering. The outbox first, so a restarting events-svc loses nothing;
+    straight to events-svc if that fails."""
+    try:
+        await state.enqueue_event(event)
+        return
+    except Exception as e:
+        log.warning("이벤트를 outbox 에 쓰지 못해 바로 보냅니다: %s", e)
+    if not EVENTS_URL:
+        return
     try:
         async with httpx.AsyncClient(timeout=10, headers={"Authorization": f"Bearer {TOKEN}"} if TOKEN else {}) as c:
             r = await c.post(EVENTS_URL.rstrip("/") + "/events", json=event)

@@ -71,7 +71,7 @@ func main() {
 	// Broken now is a push, a warning waits for the evening digest, and
 	// recovering is only noted. A first verdict that is broken counts too, but
 	// once a day at most - a restart is not news.
-	if notifier := notify.New(os.Getenv("NOTIFY_URL"), token, log); notifier != nil {
+	if notifier := notify.New(os.Getenv("NOTIFY_URL"), os.Getenv("DATABASE_URL"), token, log); notifier != nil {
 		runner.OnChange(func(p check.Probe, prev check.State, v check.Verdict) {
 			day := time.Now().Format("2006-01-02")
 			switch {
