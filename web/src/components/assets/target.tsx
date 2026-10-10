@@ -3,7 +3,8 @@
 import { useMemo, useState } from "react";
 import { plannedGains } from "@/components/assets/realized";
 import { type Holding, type Realized, krw, signedKrw, taxFor } from "@/lib/portfolio";
-import type { Allocation, Bucket } from "@/lib/target";
+import { cn } from "@/lib/utils";
+import type { Allocation, Bucket, Drift } from "@/lib/target";
 import { type Order, depositPlan, rebalancePlan } from "@/lib/trade-plan";
 
 /**
@@ -34,28 +35,71 @@ function Dot({ id }: { id: Bucket }) {
   );
 }
 
+/** The band, from assets-svc; an older one did not send it, so the same rule stands in. */
+const bandOf = (r: Drift) => r.band ?? Math.min(0.07, r.target / 2);
+const SHORT: Record<Bucket, string> = { growth: "유망주", coin: "코인", cash: "현금", dividend: "배당", gold: "금" };
+
 /**
- * Where the money sits, as one bar with each target's end ticked on it: a
- * slice running past its tick is over target. The folded view.
+ * How far each bucket sits from its target, as five small columns: the
+ * middle line is the target, a bar up is over and down is under, and the
+ * shaded strip is the band it may wander in. A bar through the strip's edge
+ * is out of band - the one thing the folded view needs to show, readable
+ * even for a 5% bucket that a stacked bar draws as a sliver.
  */
-export function AllocationBar({ allocation }: { allocation: Allocation }) {
+export function DriftColumns({ allocation }: { allocation: Allocation }) {
   const { rows } = allocation;
-  const ticks = rows.slice(0, -1).map((_, i) => rows.slice(0, i + 1).reduce((sum, r) => sum + r.target, 0));
+  // One scale for all, so a bigger bar is a bigger miss.
+  const reach = Math.max(...rows.map((r) => Math.max(Math.abs(r.current - r.target), bandOf(r))), 0.01) * 1.15;
+  const H = 44;
+  const y = (d: number) => H / 2 - (d / reach) * (H / 2);
   return (
-    <div className="relative">
-      <div
-        className="flex h-2 w-full gap-[2px] overflow-hidden rounded-full"
-        role="img"
-        aria-label={rows.map((r) => `${r.label} ${pct(r.current)}, 목표 ${pct(r.target)}`).join("; ")}
-      >
-        {rows.map((r) =>
-          r.current > 0.001 ? <span key={r.id} style={{ width: `${r.current * 100}%`, background: HUE[r.id] }} /> : null,
-        )}
-      </div>
-      {ticks.map((t, i) => (
-        <span key={i} aria-hidden className="absolute -top-1 h-4 w-px bg-foreground/70" style={{ left: `${t * 100}%` }} />
-      ))}
-    </div>
+    <ul className="grid grid-cols-5 gap-2" aria-label="목표 대비 차이">
+      {rows.map((r) => {
+        const d = r.current - r.target;
+        const band = bandOf(r);
+        const pp = Math.round(d * 100);
+        return (
+          <li key={r.id} className="min-w-0 text-center">
+            <svg
+              viewBox={`0 0 20 ${H}`}
+              preserveAspectRatio="none"
+              className="h-11 w-full"
+              role="img"
+              aria-label={`${r.label} 지금 ${pct(r.current)}, 목표 ${pct(r.target)}${r.inBand ? "" : ", 허용 범위 밖"}`}
+            >
+              <rect x="0" y={y(band)} width="20" height={y(-band) - y(band)} rx="1.5" fill="oklch(1 0 0 / 6%)" />
+              <line x1="0" x2="20" y1={H / 2} y2={H / 2} stroke="oklch(1 0 0 / 30%)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+              <rect
+                x="7"
+                y={Math.min(y(d), H / 2)}
+                width="6"
+                height={Math.max(0.6, Math.abs(y(d) - H / 2))}
+                rx="1"
+                fill={HUE[r.id]}
+                opacity={r.inBand ? 0.75 : 1}
+              />
+              {!r.inBand ? (
+                <rect
+                  x="5.5"
+                  y={Math.min(y(d), H / 2) - 1.5}
+                  width="9"
+                  height={Math.abs(y(d) - H / 2) + 3}
+                  rx="2"
+                  fill="none"
+                  className="stroke-reject"
+                  strokeWidth="1.2"
+                  vectorEffect="non-scaling-stroke"
+                />
+              ) : null}
+            </svg>
+            <p className={cn("mt-1 truncate text-[11px]", r.inBand ? "text-faint" : "text-foreground")}>{SHORT[r.id]}</p>
+            <p className={cn("tnum text-[11px]", r.inBand ? "text-faint" : "font-semibold text-foreground")}>
+              {pp === 0 ? "0" : `${pp > 0 ? "+" : "−"}${Math.abs(pp)}%p`}
+            </p>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -90,18 +134,24 @@ export function AllocationDetail({
 
   return (
     <div className="space-y-2.5">
-      <ul className="flex flex-wrap gap-x-3 gap-y-1 text-[12px]">
+      <ul className="divide-y divide-edge-soft border-y border-edge-soft">
         {rows.map((r) => (
-          <li key={r.id} className="tnum flex items-center gap-1.5">
+          <li key={r.id} className="tnum flex items-baseline gap-2 py-2 text-[12.5px]">
             <Dot id={r.id} />
-            <span className={r.inBand ? "text-faint" : "text-foreground"}>{r.label}</span>
+            <span className="min-w-0 flex-1 truncate">
+              <span className={r.inBand ? "text-dim" : "text-foreground"}>{r.label}</span>
+              {r.symbols.length ? <span className="ms-1.5 text-[11px] text-faint">{r.symbols.join(" ")}</span> : null}
+            </span>
             <span className={r.inBand ? "text-dim" : "font-semibold text-foreground"}>{pct(r.current)}</span>
-            <span className="text-faint">({pct(r.target)})</span>
+            <span className="text-faint">→ {pct(r.target)}</span>
+            <span className="w-[5.5rem] shrink-0 text-right text-[11.5px] text-faint">
+              {Math.abs(r.gapKrw) < 10_000 ? "맞음" : `${krwShort(Math.abs(r.gapKrw))} ${r.gapKrw > 0 ? "부족" : "많음"}`}
+            </span>
           </li>
         ))}
       </ul>
       <p className="text-[11px] leading-relaxed text-faint">
-        막대 위 눈금이 목표 경계예요. 허용 범위는 목표 ±7%p, 비중이 작은 자산은 목표의 절반까지예요.
+        허용 범위는 목표 ±7%p, 비중이 작은 자산은 목표의 절반까지예요. 그림의 옅은 띠가 그 범위예요.
       </p>
 
       {rebalance.orders.length || rebalance.unpicked.length ? (
@@ -147,6 +197,13 @@ export function AllocationDetail({
       </label>
     </div>
   );
+}
+
+/** ₩136,000 → "₩13.6만"; under ten thousand stays in won. */
+function krwShort(v: number): string {
+  if (v < 10_000) return krw(v);
+  const man = v / 10_000;
+  return `₩${man >= 100 ? Math.round(man).toLocaleString("ko-KR") : man.toFixed(1)}만`;
 }
 
 /** "스페이스X 2주 팔기 약 ₩44만", "BTC ₩32만 사기". */

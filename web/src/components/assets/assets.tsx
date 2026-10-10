@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { RealizedSection } from "@/components/assets/realized";
-import { ProfitBar, ProfitLegend, Row } from "@/components/assets/summary";
-import { AllocationBar, AllocationDetail } from "@/components/assets/target";
+import { ProfitLines, ProfitOther, Row } from "@/components/assets/summary";
+import { AllocationDetail, DriftColumns } from "@/components/assets/target";
 import { Track } from "@/components/assets/track";
 import { Header, TabBar } from "@/components/shell/header";
 import { StandingBar } from "@/components/shell/standing-bar";
@@ -202,15 +202,13 @@ export function Assets() {
                   onToggle={() => toggle("bridge")}
                   detail={
                     <div className="space-y-5">
-                      {bridge ? <ProfitLegend {...bridge} /> : null}
+                      {bridge ? <ProfitOther {...bridge} /> : null}
                       {data.realized ? <RealizedSection realized={data.realized} /> : null}
                     </div>
                   }
                 >
                   {bridge ? (
-                    <div className="pt-1.5">
-                      <ProfitBar {...bridge} />
-                    </div>
+                    <ProfitLines {...bridge} />
                   ) : (
                     <span className="tnum text-[13px] text-dim">평가손익 {signedKrw(unrealizedKrw)}</span>
                   )}
@@ -240,8 +238,8 @@ export function Assets() {
                     ) : (
                       <p className="text-[13px] text-dim">정상</p>
                     )}
-                    <div className="mt-2.5">
-                      <AllocationBar allocation={allocation} />
+                    <div className="mt-3">
+                      <DriftColumns allocation={allocation} />
                     </div>
                   </Row>
                 ) : null}
