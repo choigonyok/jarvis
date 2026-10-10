@@ -9,6 +9,7 @@ exactly one group, so neither can read the other's.
 import asyncio
 import logging
 import os
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 
@@ -66,7 +67,10 @@ async def loop():
 
 # What in a conversation reads like a plan: worth telling the assistant, which
 # decides whether it becomes a suggestion (a calendar entry, say).
-PLAN_WORDS = ("약속", "만나", "만날", "하기로", "예약", "일정", "모임", "가기로", "보기로", "방문")
+# "~기로" covers 하기로, 먹기로, 가기로, 보기로...: how a plan gets settled in
+# Korean, whatever the verb. A false hit costs one judging turn; the agent
+# decides whether it is worth a card.
+PLAN_WORDS = re.compile(r"약속|만나|만날|기로|예약|일정|모임|방문|확정|식사|저녁|점심|브런치")
 
 
 async def on_extract(group: str, source: str, edges):
@@ -76,7 +80,7 @@ async def on_extract(group: str, source: str, edges):
     for e in edges:
         fact = (getattr(e, "fact", "") or "").strip()
         valid_at = getattr(e, "valid_at", None)
-        if not fact or not any(w in fact for w in PLAN_WORDS):
+        if not fact or not PLAN_WORDS.search(fact):
             continue
         if valid_at is not None and valid_at < since:
             continue  # already past: nothing to put on a calendar
