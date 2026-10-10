@@ -94,9 +94,15 @@ function PushToast() {
       onPointerUp={() => {
         const d = drag.current;
         drag.current = null;
-        if (box.current) box.current.style.transform = "";
-        if (!d) return;
-        if (d.dy < -24) return leave(); // flicked up
+        if (!d || !box.current) return;
+        if (d.dy < -24) {
+          // Flicked up: it carries on from where the finger let go. Put back
+          // to its place first, the exit would start from there - a jump
+          // down and a second rise, which looked like a second banner.
+          box.current.style.setProperty("--drag", `${d.dy}px`);
+          return leave();
+        }
+        box.current.style.transform = "";
         if (d.dy > -6) return open(); // a tap
         timer.current = window.setTimeout(() => leaveRef.current(), SHOWN_MS);
       }}
