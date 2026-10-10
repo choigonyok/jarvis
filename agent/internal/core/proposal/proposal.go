@@ -46,6 +46,11 @@ const (
 	// by hand (log in again) before it can go on. Approving says "done".
 	// Nothing is held open on it, so it survives a restart like a chat card.
 	OriginNotice = "notice"
+	// OriginSuggest is the assistant offering something nobody asked for,
+	// because an event made it worth asking (internal/suggest). Approving runs
+	// the action it carries, if any; rejecting is remembered so it is not
+	// offered again soon.
+	OriginSuggest = "suggest"
 )
 
 type Proposal struct {

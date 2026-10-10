@@ -26,6 +26,7 @@ import (
 )
 
 type Server struct {
+	consume       http.HandlerFunc
 	thread        *thread.Store
 	proposals     *proposal.Store
 	calendar      *calendar.Store
@@ -85,7 +86,9 @@ type Deps struct {
 	Usage *usage.Tracker
 	// APIUsage, when set, adds the memory model's pay-as-you-go spend to /usage.
 	APIUsage func(ctx context.Context) (any, error)
-	Log      *slog.Logger
+	// Consume, when set, takes events from events-svc (internal/suggest).
+	Consume http.HandlerFunc
+	Log     *slog.Logger
 }
 
 func New(d Deps) *Server {
@@ -107,6 +110,7 @@ func New(d Deps) *Server {
 		modules:         d.Modules,
 		usage:           d.Usage,
 		apiUsage:        d.APIUsage,
+		consume:         d.Consume,
 	}
 }
 
@@ -135,6 +139,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /calendar", s.guard(s.getCalendar))
 	mux.HandleFunc("POST /calendar", s.guard(s.postCalendar))
 	mux.HandleFunc("DELETE /calendar/{id}", s.guard(s.deleteCalendar))
+
+	// events-svc delivers here what the assistant subscribed to.
+	if s.consume != nil {
+		mux.HandleFunc("POST /consume", s.guard(s.consume))
+	}
 
 	// Claude Code dials these. The permission gate sits at /mcp; module
 	// servers mount beneath it, and the more specific pattern wins.

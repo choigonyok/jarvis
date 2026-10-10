@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -29,6 +30,7 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/module/memory"
 	"github.com/choigonyok/jarvis/agent/internal/module/spending"
 	"github.com/choigonyok/jarvis/agent/internal/notify"
+	"github.com/choigonyok/jarvis/agent/internal/suggest"
 	"github.com/choigonyok/jarvis/agent/internal/thread"
 	"github.com/choigonyok/jarvis/agent/internal/uploads"
 	"github.com/choigonyok/jarvis/agent/internal/usage"
@@ -171,6 +173,29 @@ func main() {
 	}
 	// A reading older than an hour is refreshed with the smallest request.
 	go runner.WatchUsage(enrichCtx, time.Hour)
+
+	// Speaking first: events-svc delivers what could be worth a suggestion,
+	// and the assistant judges it in the background (internal/suggest). The
+	// guest's agent does not suggest - it has none of the operator's data.
+	var suggester *suggest.Engine
+	if cfg.EventsURL != "" && !cfg.Guest {
+		ledger, err := suggest.OpenLedger(cfg.SuggestionsPath)
+		if err != nil {
+			log.Error("제안 기록을 읽지 못했습니다", "err", err)
+			os.Exit(1)
+		}
+		suggester = suggest.New(ledger, proposals, modules, runner, suggest.Config{
+			MCPBase: cfg.PublicMCPURL, EventsURL: cfg.EventsURL, Token: cfg.APIToken,
+		}, log)
+		mcpMounts["/mcp/"+suggest.ServerName] = suggester.Handler()
+		proposals.OnDecide(suggester.OnDecide)
+		go suggester.Run(enrichCtx)
+		go suggester.Subscribe(enrichCtx, strings.TrimRight(cfg.SelfURL, "/")+"/consume")
+	}
+	var consume http.HandlerFunc
+	if suggester != nil {
+		consume = suggester.Consume
+	}
 	// A card does not hold a turn open; its decision starts the next one.
 	gate.SetFollowUp(runner)
 	proposals.OnDecide(gate.Resolve)
@@ -180,6 +205,9 @@ func main() {
 	if notifier := notify.New(cfg.NotifyURL, cfg.APIToken, log); notifier != nil && !cfg.Guest {
 		proposals.OnOpen(func(p proposal.Proposal) {
 			kind, title := "approval.pending", "결재 대기"
+			if p.Origin == proposal.OriginSuggest {
+				kind, title = "suggestion.new", "제안"
+			}
 			if p.Origin == proposal.OriginNotice {
 				// A background job asking for something done by hand (log in again).
 				kind, title = "job.request", "작업이 기다려요"
@@ -220,6 +248,7 @@ func main() {
 			Modules:         modules,
 			Usage:           usageTracker,
 			APIUsage:        apiUsage,
+			Consume:         consume,
 			Log:             log,
 		}).Handler(),
 		// No WriteTimeout: /events streams and /mcp blocks on a human.

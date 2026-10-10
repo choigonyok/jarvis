@@ -175,6 +175,10 @@ func (g *Gate) decide(ctx context.Context, _ *mcp.CallToolRequest, in Request) (
 // becomes a one-time grant for that exact call and the model is asked to make
 // it again.
 func (g *Gate) Resolve(p proposal.Proposal, d proposal.Decision) {
+	if p.Origin == proposal.OriginSuggest {
+		g.resolveSuggestion(p, d)
+		return
+	}
 	if p.Origin != proposal.OriginChat {
 		return
 	}
@@ -209,6 +213,29 @@ func (g *Gate) Resolve(p proposal.Proposal, d proposal.Decision) {
 	g.enqueue(fmt.Sprintf("[승인됨] 운영자가 승인 카드 %s(%s)를 승인했습니다. 아직 실행되지 않았습니다.\n"+
 		"지금 %s 도구를 정확히 이 인자로 다시 호출하면 카드 없이 실행됩니다. 인자를 하나라도 바꾸면 새 카드가 올라갑니다.\n%s\n\n"+
 		"실행한 뒤 원래 하던 일을 이어서 하세요.", p.ID, title, tool, string(proposal.Canonical(p.Action.Input))))
+}
+
+// resolveSuggestion settles a card the assistant raised on its own. Approved,
+// it runs the action it carries (a calendar entry) or, carrying none, is
+// recorded as seen. Nothing goes into the conversation: the operator did not
+// start this, and the card's own state says how it ended.
+func (g *Gate) resolveSuggestion(p proposal.Proposal, d proposal.Decision) {
+	if d != proposal.Approve {
+		return
+	}
+	actuator, _, ok := g.modules.Lookup(p.Action.Kind)
+	if !ok {
+		g.proposals.Settle(p.ID, proposal.Executed, "확인했습니다.")
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	res, err := actuator.Execute(ctx, p.Action)
+	if err != nil {
+		g.proposals.Settle(p.ID, proposal.Failed, err.Error())
+		return
+	}
+	g.proposals.Settle(p.ID, proposal.Executed, res.Note)
 }
 
 func (g *Gate) enqueue(prompt string) {

@@ -12,10 +12,11 @@ import os
 import secrets
 from datetime import datetime, timedelta, timezone
 
+import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 
 from . import sources
-from .graph import Graph
+from .graph import Graph, kst
 from .llm import MODEL
 from .state import State
 
@@ -26,6 +27,7 @@ TOKEN = os.environ.get("API_TOKEN", "")
 INTERVAL = int(os.environ.get("MEMORY_INTERVAL", "300"))
 DAILY_USD = float(os.environ.get("MEMORY_DAILY_USD", "1.0"))
 HAS_KEY = bool(os.environ.get("ANTHROPIC_API_KEY"))
+EVENTS_URL = os.environ.get("EVENTS_URL", "")
 
 state = State()
 graph: Graph | None = None
@@ -62,6 +64,43 @@ async def loop():
         wake.clear()
 
 
+# What in a conversation reads like a plan: worth telling the assistant, which
+# decides whether it becomes a suggestion (a calendar entry, say).
+PLAN_WORDS = ("약속", "만나", "만날", "하기로", "예약", "일정", "모임", "가기로", "보기로", "방문")
+
+
+async def on_extract(group: str, source: str, edges):
+    if group != "owner" or not EVENTS_URL or "6시간 묶음" in source:
+        return
+    since = datetime.now(timezone.utc) - timedelta(days=1)
+    for e in edges:
+        fact = (getattr(e, "fact", "") or "").strip()
+        valid_at = getattr(e, "valid_at", None)
+        if not fact or not any(w in fact for w in PLAN_WORDS):
+            continue
+        if valid_at is not None and valid_at < since:
+            continue  # already past: nothing to put on a calendar
+        await emit({
+            "source": "memory",
+            "type": "memory.plan",
+            "subject": fact[:80],
+            "key": f"memory.plan:{e.uuid}",
+            "data": {"fact": fact, "validAt": kst(valid_at), "source": source},
+        })
+
+
+async def emit(event: dict):
+    """Fire and forget: the event log is a nicety, never a reason to stop
+    remembering."""
+    try:
+        async with httpx.AsyncClient(timeout=10, headers={"Authorization": f"Bearer {TOKEN}"} if TOKEN else {}) as c:
+            r = await c.post(EVENTS_URL.rstrip("/") + "/events", json=event)
+            if r.status_code >= 300:
+                log.warning("이벤트를 보내지 못했습니다: %s %s", r.status_code, r.text[:200])
+    except Exception as e:
+        log.warning("이벤트를 보내지 못했습니다: %s", e)
+
+
 async def lifespan(app: FastAPI):
     global graph
     await state.open()
@@ -80,6 +119,7 @@ async def lifespan(app: FastAPI):
             await state.add_diary(group, fact)
 
     graph.on_fact = on_fact
+    graph.on_extract = on_extract
     task = asyncio.create_task(loop())
     yield
     task.cancel()

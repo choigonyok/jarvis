@@ -91,13 +91,14 @@ class Graph:
         # Heard after every direct fact: the 6-hour diary (sources.diary) is
         # made of these lines.
         self.on_fact = None
+        self.on_extract = None
 
     async def setup(self):
         for d in self.drivers.values():
             await d.build_indices_and_constraints()
 
     async def episode(self, group: str, key: str, name: str, body: str, source_description: str, when: datetime):
-        await self.g.add_episode(
+        result = await self.g.add_episode(
             name=name,
             episode_body=body,
             source_description=source_description,
@@ -106,6 +107,8 @@ class Graph:
             group_id=group,
             custom_extraction_instructions=EXTRACTION_NOTE,
         )
+        if self.on_extract:
+            await self.on_extract(group, source_description, getattr(result, "edges", None) or [])
 
     async def node(self, group: str, kind: str, key: str, name: str, summary: str = "") -> str:
         nid = stable_id(group, "node", kind, key)

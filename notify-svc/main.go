@@ -8,12 +8,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -77,6 +80,12 @@ func main() {
 		}
 	}()
 
+	// Take events from the event log rather than (only) directly: register
+	// with events-svc and keep at it until it answers - it may come up later.
+	if eventsURL := os.Getenv("EVENTS_URL"); eventsURL != "" {
+		go subscribe(ctx, eventsURL, getenv("NOTIFY_SELF_URL", "http://notify:8097/consume"), os.Getenv("API_TOKEN"), log)
+	}
+
 	addr := getenv("LISTEN_ADDR", ":8097")
 	srv := &http.Server{
 		Addr:         addr,
@@ -96,6 +105,32 @@ func main() {
 	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(shutdown)
+}
+
+// subscribe registers this service with events-svc for every event type; it
+// ignores the ones that carry no wording.
+func subscribe(ctx context.Context, eventsURL, self, token string, log *slog.Logger) {
+	body, _ := json.Marshal(map[string]any{"url": self, "types": []string{"*"}})
+	for wait := time.Second; ; wait = min(wait*2, time.Minute) {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodPut, strings.TrimRight(eventsURL, "/")+"/subscriptions/notify", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode < 300 {
+				log.Info("events-svc 에 구독했습니다")
+				return
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
+		}
+	}
 }
 
 func getenv(key, fallback string) string {
