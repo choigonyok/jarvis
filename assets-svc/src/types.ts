@@ -221,8 +221,22 @@ export type Realized = {
  */
 export type TrackPoint = { date: string; totalKrw: number; principalKrw: number };
 
+/**
+ * The return against principal taken apart: what sales made, what is still
+ * held, and the rest - named where it can be. The parts add up to
+ * principal.profitKrw exactly; "rest" is whatever is left after the named ones.
+ */
+export type Bridge = {
+  realizedKrw: number;
+  unrealizedKrw: number;
+  otherKrw: number;
+  other: { id: string; label: string; krw: number }[];
+};
+
 export type Portfolio = {
   holdings: Holding[];
+  /** Null without both a principal and sales to go on. */
+  bridge: Bridge | null;
   /**
    * The pot day by day, from the daily snapshots, with today's live numbers
    * as the last point. Empty when the principal or the snapshots cannot be read.

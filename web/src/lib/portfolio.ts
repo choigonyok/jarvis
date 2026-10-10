@@ -171,8 +171,19 @@ export function taxFor(gainKrw: number, basket: TaxBasket): number {
 /** One recorded day of the whole pot: its worth, and what had been put in by then. */
 export type TrackPoint = { date: string; totalKrw: number; principalKrw: number };
 
+/** The return against principal, taken apart; the parts add up to it. */
+export type Bridge = {
+  realizedKrw: number;
+  unrealizedKrw: number;
+  otherKrw: number;
+  /** The remainder, by cause where one can be measured; the last is what is left. */
+  other: { id: string; label: string; krw: number }[];
+};
+
 export type Portfolio = {
   holdings: Holding[];
+  /** Absent from an older assets-svc; null without principal and sales. */
+  bridge?: Bridge | null;
   /** Day by day, today last. Absent from an older assets-svc. */
   track?: TrackPoint[];
   /** Absent from an older assets-svc; null when no sales could be read. */

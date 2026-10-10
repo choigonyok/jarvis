@@ -4,6 +4,7 @@ import { allocationOf } from "./target.js";
 import { detectFlow, reconcile } from "./kis-flows.js";
 import { COIN_TAX_FROM, replayKis, replayUpbit, salesFrom, summarize } from "./realized.js";
 import type {
+  Bridge,
   CashLine,
   FixedAsset,
   Holding,
@@ -236,6 +237,8 @@ export async function buildPortfolio(): Promise<Portfolio> {
   const total = invested + cashKrw + fixedKrw;
   const [auto, manual] = principalFlows;
   let principal: Principal | null = null;
+  // What holding dollars at KIS cost or made; null when it could not be replayed.
+  let kisFxKrw: number | null = null;
   if (auto && manual) {
     problems.push(...auto.problems);
     const flows = [...auto.flows, ...manual].sort((a, b) =>
@@ -283,10 +286,14 @@ export async function buildPortfolio(): Promise<Portfolio> {
       rate: principalKrw > 0 ? (total - principalKrw) / principalKrw : 0,
       parts,
       flows,
-      checks: accounts.flatMap((a) =>
-        a.cash && a.settlements ? reconcile(a.venue, flows, a.settlements, a.cash, usdKrw) : [],
-      ),
+      checks: [],
     };
+    for (const a of accounts) {
+      if (!a.cash || !a.settlements) continue;
+      const r = reconcile(a.venue, flows, a.settlements, a.cash, usdKrw);
+      principal.checks.push(...r.checks);
+      if (a.venue === "kis") kisFxKrw = r.fxKrw;
+    }
   }
 
   // Upbit's sales need what is held now to know what was held at the start.
@@ -303,6 +310,36 @@ export async function buildPortfolio(): Promise<Portfolio> {
       problems.push(...replay.problems);
     } else missing.push("upbit");
     realized = summarize(sales, holdings, PRINCIPAL_SINCE, thisYear(), missing);
+  }
+
+  // The headline return, taken apart (see Bridge). "Other" is the remainder,
+  // and the named parts of it are the causes that can be measured: dollars
+  // held at KIS while the rate moved, USDT's own price, fees outside any
+  // trade's cost. What is left of it is dividends, interest and the gap
+  // between KIS's booked rate and the one an exchange actually got.
+  let bridge: Bridge | null = null;
+  if (principal && realized) {
+    const unrealizedKrw = holdings.reduce((sum, h) => sum + h.valueKrw - h.costKrw, 0);
+    const otherKrw = principal.profitKrw - realized.totalKrw - unrealizedKrw;
+    const dollarCoinsKrw = upbit.cash.filter((c) => c.currency === "USD").reduce((sum, c) => sum + c.valueKrw, 0);
+    const goldPart = principal.parts.find((p) => p.venue === "gold");
+    const goldUnrealized = holdings.filter((h) => h.venue === "gold").reduce((sum, h) => sum + h.valueKrw - h.costKrw, 0);
+    const named = [
+      { id: "fx", label: "달러 환율(한투)", krw: kisFxKrw ?? 0 },
+      { id: "usdt", label: "테더 시세", krw: "dollarCostKrw" in upbit ? dollarCoinsKrw - upbit.dollarCostKrw : 0 },
+      {
+        id: "fees",
+        label: "출금·매수 수수료",
+        krw: -(upbitFlowsRead?.feesKrw ?? 0) + (goldPart?.profitKrw != null ? goldPart.profitKrw - goldUnrealized : 0),
+      },
+    ];
+    const rest = otherKrw - named.reduce((sum, n) => sum + n.krw, 0);
+    bridge = {
+      realizedKrw: realized.totalKrw,
+      unrealizedKrw,
+      otherKrw,
+      other: [...named, { id: "rest", label: "배당·이자·환전 차이", krw: rest }].filter((n) => Math.abs(n.krw) >= 1),
+    };
   }
 
   // The pot over time: each snapshot's total against what had gone in by its
@@ -323,6 +360,7 @@ export async function buildPortfolio(): Promise<Portfolio> {
 
   return {
     holdings,
+    bridge,
     track,
     realized,
     cashKrw,

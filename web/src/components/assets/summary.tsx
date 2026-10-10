@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
-import { type Portfolio, krw, signedKrw } from "@/lib/portfolio";
+import { type Bridge, type Portfolio, krw, signedKrw } from "@/lib/portfolio";
 import { cn } from "@/lib/utils";
 
 /**
@@ -16,20 +16,30 @@ import { cn } from "@/lib/utils";
 export function Row({
   id,
   title,
-  open,
+  open = false,
   onToggle,
   children,
   detail,
 }: {
   id: string;
   title: string;
-  open: boolean;
-  onToggle: () => void;
+  open?: boolean;
+  onToggle?: () => void;
   /** The answer, always visible. */
   children: ReactNode;
-  /** The section the answer comes from, shown when open. */
-  detail: ReactNode;
+  /** The section the answer comes from, shown when open. None: the row is the whole answer. */
+  detail?: ReactNode;
 }) {
+  if (detail === undefined || !onToggle) {
+    return (
+      <section aria-labelledby={`${id}-title`} className="flex items-start gap-3 border-t border-edge-soft py-4">
+        <span id={`${id}-title`} className="w-[4.5rem] shrink-0 pt-px text-[12.5px] text-faint">
+          {title}
+        </span>
+        <div className="min-w-0 flex-1">{children}</div>
+      </section>
+    );
+  }
   return (
     <section aria-labelledby={`${id}-title`} className="border-t border-edge-soft">
       <button
@@ -68,15 +78,7 @@ export function Row({
  * rate moved, exchange and transfer fees, dividends. It is the difference,
  * not a guess - so the three always add up to the headline.
  */
-export function ProfitBridge({
-  realizedKrw,
-  unrealizedKrw,
-  otherKrw,
-}: {
-  realizedKrw: number;
-  unrealizedKrw: number;
-  otherKrw: number;
-}) {
+export function ProfitBridge({ realizedKrw, unrealizedKrw, otherKrw, other }: Bridge) {
   const parts = [
     { key: "realized", label: "판 것", value: realizedKrw, tone: 0.9 },
     { key: "unrealized", label: "들고 있는 것", value: unrealizedKrw, tone: 0.55 },
@@ -113,6 +115,17 @@ export function ProfitBridge({
           </li>
         ))}
       </ul>
+      {/* The remainder, by cause: each measured on its own, the last is what is left. */}
+      {other.length ? (
+        <ul className="mt-1.5 space-y-0.5 border-l border-edge-soft ps-3 text-[11.5px]">
+          {other.map((o) => (
+            <li key={o.id} className="tnum flex justify-between gap-3 sm:justify-start">
+              <span className="text-faint">{o.label}</span>
+              <span className="text-dim">{signedKrw(o.krw)}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </div>
   );
 }

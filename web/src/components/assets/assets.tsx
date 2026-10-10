@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
-import { PrincipalLedger, PrincipalParts } from "@/components/assets/principal";
 import { RealizedSection } from "@/components/assets/realized";
 import { ProfitBridge, Row, todos } from "@/components/assets/summary";
 import { TargetAllocation } from "@/components/assets/target";
@@ -10,6 +9,7 @@ import { Track } from "@/components/assets/track";
 import { Header, TabBar } from "@/components/shell/header";
 import { StandingBar } from "@/components/shell/standing-bar";
 import {
+  PART_LABEL,
   krw,
   percent,
   profitOf,
@@ -22,14 +22,14 @@ import { isPending } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
 import { cn } from "@/lib/utils";
 
-type Fold = "bridge" | "todo" | "principal" | "track";
+type Fold = "bridge" | "todo";
 
 /**
  * What you own, and how far it has moved from what you paid.
  *
- * Four questions answered a line each - how much was made, what wants doing,
- * what went in, how the pot has grown - with the section behind each folded under
- * it, and the holdings always in view. Laid out in full it ran past four phone
+ * Three questions answered a line each - how much was made, what wants doing,
+ * what went in - with the detail behind the first two folded under them, the
+ * holdings always in view, and the pot's size and return over time below. Laid out in full it ran past four phone
  * screens; this fits the answers on one.
  *
  * Read-only on purpose. The keys behind this can place orders; this surface
@@ -43,12 +43,7 @@ export function Assets() {
   const [data, setData] = useState<Portfolio | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [open, setOpen] = useState<Record<Fold, boolean>>({
-    bridge: false,
-    todo: false,
-    principal: false,
-    track: false,
-  });
+  const [open, setOpen] = useState<Record<Fold, boolean>>({ bridge: false, todo: false });
   const toggle = (k: Fold) => setOpen((o) => ({ ...o, [k]: !o[k] }));
 
   // The service answers at once with what it last had (marked stale) and
@@ -96,14 +91,9 @@ export function Assets() {
   const rate = principal ? principal.rate : (data?.returnRate ?? 0);
   const up = profit >= 0;
 
-  // The headline return, taken apart: what was sold, what is still held, and
-  // the rest (see ProfitBridge). Only with both a ledger and sales to go on.
-  const realizedKrw = data?.realized?.totalKrw ?? 0;
+  // The headline return, taken apart by assets-svc (see ProfitBridge).
+  const bridge = data?.bridge ?? null;
   const unrealizedKrw = data?.holdings.reduce((sum, h) => sum + profitOf(h), 0) ?? 0;
-  const bridge =
-    principal && data?.realized
-      ? { realizedKrw, unrealizedKrw, otherKrw: profit - realizedKrw - unrealizedKrw }
-      : null;
   const todo = data ? todos(data) : [];
   const overseas = data?.realized?.tax.baskets.find((b) => b.kind === "overseas");
   const since = principal
@@ -199,7 +189,7 @@ export function Assets() {
               <div className="border-b border-edge-soft">
                 <Row
                   id="assets-bridge"
-                  title="얼마 벌었나"
+                  title="수익"
                   open={open.bridge}
                   onToggle={() => toggle("bridge")}
                   detail={data.realized ? <RealizedSection realized={data.realized} /> : null}
@@ -260,50 +250,21 @@ export function Assets() {
                 </Row>
 
                 {principal ? (
-                  <Row
-                    id="assets-principal"
-                    title="원금"
-                    open={open.principal}
-                    onToggle={() => toggle("principal")}
-                    detail={
-                      <>
-                        <div className="mb-6">
-                          <PrincipalParts parts={principal.parts} fixed={data.fixed ?? []} />
-                        </div>
-                        <PrincipalLedger principal={principal} onChange={() => void load()} />
-                      </>
-                    }
-                  >
+                  <Row id="assets-principal" title="원금">
                     <p className="tnum text-[13px] text-foreground/90">
                       {krw(principal.principalKrw)}
                       <span className="ms-2 text-faint">{since}부터 넣은 돈</span>
                     </p>
+                    <p className="tnum mt-1 text-[12px] leading-relaxed text-faint">
+                      {[
+                        ...principal.parts
+                          .filter((p) => p.principalKrw !== 0)
+                          .map((p) => `${PART_LABEL[p.venue]} ${krw(p.principalKrw)}`),
+                        ...(data.fixed ?? []).map((f) => `${f.label} ${krw(f.valueKrw)}`),
+                      ].join(" · ")}
+                    </p>
                   </Row>
                 ) : null}
-
-                {/* The whole pot over time - its size and its return - not
-                    any one holding's price. */}
-                <Row
-                  id="assets-track"
-                  title="자산 변화"
-                  open={open.track}
-                  onToggle={() => toggle("track")}
-                  detail={<Track points={track} />}
-                >
-                  {first && track.length >= 2 ? (
-                    <p className="tnum text-[13px] text-dim">
-                      {Number(first.date.slice(5, 7))}/{Number(first.date.slice(8, 10))}부터{" "}
-                      <span className="whitespace-nowrap text-foreground/90">
-                        {krw(first.totalKrw)} → {krw(data.totalKrw)}
-                      </span>{" "}
-                      <span className="whitespace-nowrap">
-                        수익률 {percent(rateOf0(first), 1)} → {percent(rate, 1)}
-                      </span>
-                    </p>
-                  ) : (
-                    <p className="text-[13px] text-faint">하루에 한 번 기록해요. 이틀치부터 보여요.</p>
-                  )}
-                </Row>
               </div>
             ) : null}
           </div>
@@ -357,19 +318,22 @@ export function Assets() {
                       </div>
                     );
                   })}
-                </div>
 
-                {data.cash?.some((c) => c.valueKrw >= 1) ? (
-                  <div className="mt-4 border-t border-edge-soft pt-3">
-                    <p className="mb-1 px-2 text-[12px] text-faint">현금</p>
-                    {data.cash
-                      .filter((c) => c.valueKrw >= 1)
-                      .map((c) => (
+
+                  {/* Cash and the fixed amounts are held too: one list, each
+                      with its share of the total. */}
+                  {(data.cash ?? [])
+                    .filter((c) => c.valueKrw >= 1)
+                    .map((c) => (
                       <div key={c.id} className="flex items-baseline gap-3 rounded-lg px-2 py-2.5">
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-[14px] text-foreground/90">
                             {c.currency === "USD" ? "달러" : "원화"}
                             <span className="ms-2 text-[12px] text-faint">{c.label}</span>
+                          </p>
+                          <p className="tnum mt-0.5 text-[11.5px] text-faint">
+                            현금
+                            {data.totalKrw > 0 ? ` · ${Math.round((c.valueKrw / data.totalKrw) * 100)}%` : ""}
                           </p>
                         </div>
                         <div className="shrink-0 text-right">
@@ -384,8 +348,19 @@ export function Assets() {
                         </div>
                       </div>
                     ))}
-                  </div>
-                ) : null}
+                  {(data.fixed ?? []).map((f) => (
+                    <div key={f.id} className="flex items-baseline gap-3 rounded-lg px-2 py-2.5">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[14px] text-foreground/90">{f.label}</p>
+                        <p className="tnum mt-0.5 text-[11.5px] text-faint">
+                          고정 · 비중 계산 제외
+                          {data.totalKrw > 0 ? ` · ${Math.round((f.valueKrw / data.totalKrw) * 100)}%` : ""}
+                        </p>
+                      </div>
+                      <p className="tnum shrink-0 text-right text-[14px] text-foreground/90">{krw(f.valueKrw)}</p>
+                    </div>
+                  ))}
+                </div>
               </section>
             ) : !loading && !error && data ? (
               <p className="text-[13.5px] leading-relaxed text-faint">
@@ -394,6 +369,30 @@ export function Assets() {
               </p>
             ) : null}
           </div>
+
+          {/* The whole pot over time - its size and its return - not any
+              one holding's price. Below everything, across both columns. */}
+          {data && data.holdings.length > 0 ? (
+            <section aria-labelledby="assets-track-title" className="mt-10 lg:col-span-2">
+              <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                <h2 id="assets-track-title" className="text-[13px] text-dim">
+                  자산 변화
+                </h2>
+                {first && track.length >= 2 ? (
+                  <p className="tnum text-[12px] text-faint">
+                    {Number(first.date.slice(5, 7))}/{Number(first.date.slice(8, 10))}부터{" "}
+                    <span className="whitespace-nowrap">
+                      {krw(first.totalKrw)} → {krw(data.totalKrw)}
+                    </span>{" "}
+                    <span className="whitespace-nowrap">
+                      수익률 {percent(rateOf0(first), 1)} → {percent(rate, 1)}
+                    </span>
+                  </p>
+                ) : null}
+              </div>
+              <Track points={track} />
+            </section>
+          ) : null}
         </div>
       </main>
 
