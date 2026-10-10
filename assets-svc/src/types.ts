@@ -130,6 +130,8 @@ export type Drift = {
   /** Positive: buy this much. Negative: sell this much. */
   gapKrw: number;
   inBand: boolean;
+  /** How far `current` may sit from `target` and still be in band (see bandOf). */
+  band: number;
   symbols: string[];
 };
 

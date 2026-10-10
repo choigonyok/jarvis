@@ -82,6 +82,7 @@ export function driftOf(holdings: Holding[], cashKrw: number): {
       target: b.target,
       gapKrw: b.target * totalKrw - valueKrw,
       inBand: Math.abs(current - b.target) <= bandOf(b.target),
+      band: bandOf(b.target),
       symbols: symbols.get(b.id) ?? [],
     };
   });

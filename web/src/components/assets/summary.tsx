@@ -84,57 +84,40 @@ const parts = ({ realizedKrw, unrealizedKrw, otherKrw }: Bridge) => [
   { key: "other", label: "환율·수수료·기타", value: otherKrw, tone: 0.3 },
 ];
 
-/** The bridge as one bar, segment by segment - the folded view. */
-export function ProfitBar(bridge: Bridge) {
-  const ps = parts(bridge);
-  const scale = ps.reduce((sum, p) => sum + Math.abs(p.value), 0) || 1;
+/**
+ * The three parts, one per line - the folded view. Each line is a number
+ * with its sign; together they add up to the headline return.
+ */
+export function ProfitLines(bridge: Bridge) {
   return (
-    <div
-      className="flex h-2 w-full gap-[2px] overflow-hidden rounded-full"
-      role="img"
-      aria-label={ps.map((p) => `${p.label} ${signedKrw(p.value)}`).join(", ")}
-    >
-      {ps.map((p) =>
-        Math.abs(p.value) / scale >= 0.005 ? (
-          <span
-            key={p.key}
-            className={p.value >= 0 ? "bg-approve" : "bg-reject"}
-            style={{ width: `${(Math.abs(p.value) / scale) * 100}%`, opacity: p.tone }}
-          />
-        ) : null,
-      )}
-    </div>
+    <ul className="space-y-1">
+      {parts(bridge).map((p) => (
+        <li key={p.key} className="tnum flex items-baseline justify-between gap-3 text-[13px]">
+          <span className="text-dim">{p.label}</span>
+          <span className={p.value >= 0 ? "text-approve/85" : "text-reject/85"}>{signedKrw(p.value)}</span>
+        </li>
+      ))}
+    </ul>
   );
 }
 
-/** What each segment of the bar is, and the remainder by cause - the opened view. */
-export function ProfitLegend(bridge: Bridge) {
+/** What "환율·수수료·기타" is made of: each cause measured on its own, the last what is left. */
+export function ProfitOther({ other, otherKrw }: Bridge) {
+  if (!other.length) return null;
   return (
     <div>
-      <ul className="flex flex-wrap gap-x-4 gap-y-1 text-[12px]">
-        {parts(bridge).map((p) => (
-          <li key={p.key} className="tnum flex items-baseline gap-1.5">
-            <span
-              aria-hidden
-              className={cn("size-1.5 self-center rounded-full", p.value >= 0 ? "bg-approve" : "bg-reject")}
-              style={{ opacity: p.tone }}
-            />
-            <span className="text-faint">{p.label}</span>
-            <span className={p.value >= 0 ? "text-approve/85" : "text-reject/85"}>{signedKrw(p.value)}</span>
+      <p className="tnum mb-1.5 flex justify-between text-[12px] text-faint">
+        <span>환율·수수료·기타 세부</span>
+        <span>{signedKrw(otherKrw)}</span>
+      </p>
+      <ul className="space-y-0.5 border-l border-edge-soft ps-3 text-[12px]">
+        {other.map((o) => (
+          <li key={o.id} className="tnum flex justify-between gap-3">
+            <span className="text-faint">{o.label}</span>
+            <span className="text-dim">{signedKrw(o.krw)}</span>
           </li>
         ))}
       </ul>
-      {/* The remainder, by cause: each measured on its own, the last is what is left. */}
-      {bridge.other.length ? (
-        <ul className="mt-1.5 space-y-0.5 border-l border-edge-soft ps-3 text-[11.5px]">
-          {bridge.other.map((o) => (
-            <li key={o.id} className="tnum flex justify-between gap-3 sm:justify-start">
-              <span className="text-faint">{o.label}</span>
-              <span className="text-dim">{signedKrw(o.krw)}</span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
     </div>
   );
 }
