@@ -2,14 +2,14 @@ import { changesFor } from "./change.js";
 import * as db from "./db.js";
 import { allocationOf } from "./target.js";
 import { detectFlow, reconcile } from "./kis-flows.js";
-import { COIN_TAX_FROM, replayUpbit, salesFrom, summarize } from "./realized.js";
+import { COIN_TAX_FROM, replayKis, replayUpbit, salesFrom, summarize } from "./realized.js";
 import type { CashLine, FixedAsset, Holding, Portfolio, Principal, PrincipalPart, Realized, Venue } from "./types.js";
 import {
   goldSettlements,
   kisGoldAccount,
   kisHoldings,
-  kisSales,
-  kisSettlements,
+  kisTrades,
+  settlementsOf,
   upbitDailyCloses,
   upbitFills,
   upbitFlows,
@@ -19,8 +19,8 @@ import {
 import { CLOSED_TTL_MS, OPEN_TTL_MS, UPBIT_TTL_MS, krxOpen, memo, usOpen } from "./freshness.js";
 
 // Each venue's answer, reused for as long as its numbers can actually have
-// moved - see freshness.ts. The exchange rate rides with Upbit (it is the
-// USDT market).
+// moved - see freshness.ts. Upbit's USDT price values USDT and is the
+// fallback rate; KIS's own base rate values everything held at KIS.
 const rate = memo(() => UPBIT_TTL_MS, usdKrwRate);
 const upbitCached = memo(() => UPBIT_TTL_MS, upbitHoldings);
 let lastRate = 0;
@@ -34,8 +34,9 @@ const flowsCached = memo(() => CLOSED_TTL_MS, () => upbitFlows(PRINCIPAL_SINCE))
 // Past sales change only when something is sold, so they ride the slow TTL;
 // the refresh button (invalidateVenues) is how a sale just made shows up.
 const thisYear = () => Number(new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" }).slice(0, 4));
-const kisSalesCached = memo(() => CLOSED_TTL_MS, () => kisSales(salesFrom(PRINCIPAL_SINCE, thisYear())));
-const kisSettlementsCached = memo(() => CLOSED_TTL_MS, () => kisSettlements(PRINCIPAL_SINCE));
+// One read of KIS's fills serves the realized returns (back to January, for
+// the tax) and the cash checks (from the principal's start).
+const kisTradesCached = memo(() => CLOSED_TTL_MS, () => kisTrades(salesFrom(PRINCIPAL_SINCE, thisYear())));
 const goldSettlementsCached = memo(() => CLOSED_TTL_MS, () => goldSettlements(PRINCIPAL_SINCE));
 const upbitTradesCached = memo(() => CLOSED_TTL_MS, async () => {
   // Coin gains are not taxed before COIN_TAX_FROM, so until then there is no
@@ -46,15 +47,22 @@ const upbitTradesCached = memo(() => CLOSED_TTL_MS, async () => {
   const days = Math.ceil((Date.now() - Date.parse(from)) / 86_400_000) + 2;
   const closeAtStart = new Map<string, number>();
   for (const symbol of new Set(fills.map((f) => f.symbol))) {
-    const close = (await upbitDailyCloses(symbol, days)).get(from);
+    // Held on the first morning: the close the day before, as the ledger counts it.
+    const close = (await upbitDailyCloses(symbol, days)).get(dayBefore(from));
     if (close) closeAtStart.set(symbol, close);
   }
   return { fills, closeAtStart };
 });
 
+function dayBefore(date: string): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
 /** Drop every cached venue answer: a trade or a principal entry was just recorded. */
 export function invalidateVenues(): void {
-  for (const m of [upbitCached, kisCached, goldCached, flowsCached, kisSalesCached, kisSettlementsCached, goldSettlementsCached, upbitTradesCached]) {
+  for (const m of [upbitCached, kisCached, goldCached, flowsCached, kisTradesCached, goldSettlementsCached, upbitTradesCached]) {
     m.clear();
   }
 }
@@ -102,13 +110,14 @@ export const PRINCIPAL_SINCE = process.env.PRINCIPAL_SINCE?.trim() || "2026-05-0
  * nothing would say so.
  */
 export async function buildPortfolio(): Promise<Portfolio> {
-  const usdKrw = await rate.get();
-  // A dollar balance cached at another rate would disagree with the page.
-  if (Math.abs(usdKrw - lastRate) / (lastRate || 1) > 0.002) kisCached.clear();
-  lastRate = usdKrw;
+  const usdtKrw = await rate.get();
+  // KIS falls back to this rate only without one of its own; a balance cached
+  // at an older fallback would disagree with the page.
+  if (Math.abs(usdtKrw - lastRate) / (lastRate || 1) > 0.002) kisCached.clear();
+  lastRate = usdtKrw;
   const problems: string[] = [];
 
-  const [upbit, kis, gold, upbitFlowsRead, kisSold, upbitTrades, settlements, goldSettled] = await Promise.all([
+  const [upbit, kis, gold, upbitFlowsRead, kisFills, upbitTrades, goldSettled] = await Promise.all([
     upbitCached.get().catch((e: Error) => {
       problems.push(`업비트: ${e.message}`);
       return { holdings: [] as Holding[], cashKrw: 0, cash: [] as CashLine[], problems: [] as string[] };
@@ -120,6 +129,7 @@ export async function buildPortfolio(): Promise<Portfolio> {
         cashKrw: 0,
         cash: [] as CashLine[],
         settledCash: null as { krw: number; usd: number } | null,
+        usdKrw: usdtKrw,
         problems: [] as string[],
       };
     }),
@@ -131,16 +141,12 @@ export async function buildPortfolio(): Promise<Portfolio> {
       problems.push(`업비트 입출금 내역: ${e.message}`);
       return null;
     }),
-    kisSalesCached.get().catch((e: Error) => {
-      problems.push(`한국투자증권 매도 내역: ${e.message}`);
+    kisTradesCached.get().catch((e: Error) => {
+      problems.push(`한국투자증권 거래내역: ${e.message}`);
       return null;
     }),
     upbitTradesCached.get().catch((e: Error) => {
       problems.push(`업비트 체결 내역: ${e.message}`);
-      return null;
-    }),
-    kisSettlementsCached.get().catch((e: Error) => {
-      problems.push(`한국투자증권 거래내역: ${e.message}`);
       return null;
     }),
     goldSettlementsCached.get().catch((e: Error) => {
@@ -148,6 +154,23 @@ export async function buildPortfolio(): Promise<Portfolio> {
       return null;
     }),
   ]);
+
+  // The page's dollar rate is KIS's: almost every dollar held is held there.
+  const usdKrw = kis.usdKrw;
+  const settlements = kisFills ? settlementsOf(kisFills, PRINCIPAL_SINCE) : null;
+
+  // KIS's sales on the won actually paid and received, and what is still held
+  // at the won it cost - see replayKis. A holding whose quantity the replay
+  // agrees with takes that cost; one it does not (bought before the fills
+  // reach) keeps the dollar cost at today's rate.
+  const kisReplay = kisFills ? replayKis(kisFills) : null;
+  if (kisReplay) {
+    problems.push(...kisReplay.problems);
+    for (const h of kis.holdings) {
+      const pos = kisReplay.held.get(h.symbol);
+      if (pos && Math.abs(pos.quantity - h.quantity) < 1e-6 && pos.costKrw > 0) h.costKrw = pos.costKrw;
+    }
+  }
 
   // Each KIS account's cash today against its last day's: what the settled
   // trades do not explain is a deposit or withdrawal, written into the ledger
@@ -260,9 +283,9 @@ export async function buildPortfolio(): Promise<Portfolio> {
   // A venue whose balance failed has no such answer, and its replay would be
   // wrong - so it is left out, which `problems` already explains.
   let realized: Realized | null = null;
-  if (kisSold || upbitTrades) {
-    const sales = [...(kisSold ?? [])];
-    const missing: Realized["missing"] = kisSold ? [] : ["kis"];
+  if (kisReplay || upbitTrades) {
+    const sales = [...(kisReplay?.sales ?? [])];
+    const missing: Realized["missing"] = kisReplay ? [] : ["kis"];
     if (upbitTrades && !problems.some((p) => p.startsWith("업비트: "))) {
       const heldNow = new Map(upbit.holdings.map((h) => [h.symbol, h.quantity]));
       const replay = replayUpbit(upbitTrades.fills, heldNow, upbitTrades.closeAtStart);

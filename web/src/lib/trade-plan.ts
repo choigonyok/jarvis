@@ -172,11 +172,17 @@ function finish(ctx: Ctx, orders: Order[], deposit: number, unpicked: Plan["unpi
   };
 }
 
-/** Buy and sell so each bucket lands as near its target as whole units allow. */
+/**
+ * Buy and sell so each bucket lands as near its target as whole units allow -
+ * once something has left its band. While every bucket is inside, there is
+ * nothing to do: the allocation section says "목표 비중대로예요", and a plan
+ * suggesting a small BTC sale under it said the opposite.
+ */
 export function rebalancePlan(allocation: Allocation, holdings: Holding[], opts: PlanOptions = {}): Plan {
   const ctx = context(allocation, holdings, opts);
   const orders: Order[] = [];
   const unpicked: Plan["unpicked"] = [];
+  if (allocation.rows.every((r) => r.inBand)) return finish(ctx, orders, 0, unpicked);
   for (const r of ctx.rows) {
     if (r.id === "cash") continue;
     const delta = r.target * ctx.total - (ctx.value.get(r.id) ?? 0);

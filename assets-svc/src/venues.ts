@@ -1,6 +1,6 @@
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import * as db from "./db.js";
-import type { CashLine, Flow, Holding, Sale } from "./types.js";
+import type { CashLine, Flow, Holding } from "./types.js";
 
 /**
  * Reading the two brokerages.
@@ -523,16 +523,23 @@ type KisCurrency = {
 };
 
 /**
- * Dollars sitting in the account, settled or about to be.
+ * Dollars sitting in the account, settled or about to be, and KIS's own rate
+ * for the day.
  *
  * The domestic balance only counts won. Without this, selling a share made
  * the total drop by the whole sale until settlement - and even after it, the
  * dollars never showed up at all.
+ *
+ * The rate is KIS's base rate (bass_exrt), the one its own valuation uses.
+ * Upbit's USDT price was used before and runs a premium over it (1,361 against
+ * 1,339 on 2026-10-10) - the dollar side read 1.6% richer than KIS says it is.
  */
-async function kisForeignCash(
-  token: string,
-  usdKrw: number,
-): Promise<{ cashKrw: number; usd: number; settledUsd: number; problems: string[] }> {
+async function kisForeignCash(token: string): Promise<{
+  usd: number;
+  settledUsd: number;
+  rate: number | null;
+  problems: string[];
+}> {
   const { cano, prod } = kisAccount();
   const query = new URLSearchParams({
     CANO: cano,
@@ -542,12 +549,11 @@ async function kisForeignCash(
     TR_MKET_CD: "00",
     INQR_DVSN_CD: "00",
   });
-  const body = await json<{ output2?: KisCurrency[] }>(
+  const body = await json<{ output1?: { bass_exrt?: string; buy_crcy_cd?: string }[]; output2?: KisCurrency[] }>(
     `${KIS_BASE}/uapi/overseas-stock/v1/trading/inquire-present-balance?${query}`,
     { headers: kisHeaders(token, "CTRP6504R") },
   );
 
-  let cashKrw = 0;
   let usd = 0;
   let settledUsd = 0;
   const unpriced: string[] = [];
@@ -558,23 +564,26 @@ async function kisForeignCash(
       Number(row.frcr_sll_amt_smtl) -
       Number(row.frcr_buy_amt_smtl);
     if (!(amount > 0)) continue;
-    if (row.crcy_cd === "USD") {
-      cashKrw += amount * usdKrw;
-      usd += amount;
-    }
+    if (row.crcy_cd === "USD") usd += amount;
     else unpriced.push(row.crcy_cd);
   }
+  const rate = Number(body.output1?.find((r) => r.buy_crcy_cd === "USD" && Number(r.bass_exrt) > 0)?.bass_exrt);
   return {
-    cashKrw,
     usd,
     settledUsd,
+    rate: rate > 0 ? rate : null,
     problems: unpriced.length
       ? [`한국투자증권: 환율을 몰라 빠진 외화 예수금 ${unpriced.join(", ")}`]
       : [],
   };
 }
 
-export async function kisHoldings(usdKrw: number): Promise<{
+/**
+ * The share account: holdings, cash, and the rate they are valued at.
+ * `fallbackRate` (Upbit's USDT) is used only when KIS gives no rate - with no
+ * dollar holding to quote one against.
+ */
+export async function kisHoldings(fallbackRate: number): Promise<{
   holdings: Holding[];
   cashKrw: number;
   cash: CashLine[];
@@ -586,6 +595,8 @@ export async function kisHoldings(usdKrw: number): Promise<{
    * gone missing.
    */
   settledCash: { krw: number; usd: number } | null;
+  /** The rate everything dollar here was valued at. */
+  usdKrw: number;
   problems: string[];
 }> {
   if (!env("KIS_APP_KEY")) throw new Error("한국투자증권 키가 설정되지 않았습니다.");
@@ -593,6 +604,16 @@ export async function kisHoldings(usdKrw: number): Promise<{
   const token = await kisAccessToken();
   const { cano, prod } = kisAccount();
   const holdings: Holding[] = [];
+
+  // Asked first: its rate values everything below. A failed lookup is named,
+  // not fatal - the shares still answer, at the fallback rate.
+  const foreign = await kisForeignCash(token).catch((e: Error) => ({
+    usd: 0,
+    settledUsd: null,
+    rate: null,
+    problems: [`한국투자증권 외화 예수금: ${e.message}`],
+  }));
+  const usdKrw = foreign.rate ?? fallbackRate;
 
   // 국내
   const domesticQuery = new URLSearchParams({
@@ -671,30 +692,25 @@ export async function kisHoldings(usdKrw: number): Promise<{
         price,
         currency: "USD",
         valueKrw: qty * price * usdKrw,
+        // Dollars at today's rate until realized.ts replaces it with the won
+        // actually paid - the rate the shares were bought at is not here.
         costKrw: qty * avg * usdKrw,
       });
     }
   }
 
-  // A failed dollar lookup is named, not fatal: the shares still answered.
-  const foreign = await kisForeignCash(token, usdKrw).catch((e: Error) => ({
-    cashKrw: 0,
-    usd: 0,
-    settledUsd: null,
-    problems: [`한국투자증권 외화 예수금: ${e.message}`],
-  }));
-
   const cash: CashLine[] = [];
   if (cashKrw > 0) cash.push({ id: "kis:KRW", venue: "kis", currency: "KRW", label: "한국투자 원화", amount: cashKrw, valueKrw: cashKrw });
   if (foreign.usd > 0) {
-    cash.push({ id: "kis:USD", venue: "kis", currency: "USD", label: "한국투자 달러", amount: foreign.usd, valueKrw: foreign.cashKrw });
+    cash.push({ id: "kis:USD", venue: "kis", currency: "USD", label: "한국투자 달러", amount: foreign.usd, valueKrw: foreign.usd * usdKrw });
   }
 
   return {
     holdings,
-    cashKrw: cashKrw + foreign.cashKrw,
+    cashKrw: cashKrw + foreign.usd * usdKrw,
     cash,
     settledCash: foreign.settledUsd === null ? null : { krw: cashKrw, usd: foreign.settledUsd },
+    usdKrw,
     problems: foreign.problems,
   };
 }
@@ -706,21 +722,56 @@ export async function kisHoldings(usdKrw: number): Promise<{
  */
 export type Settlement = { date: string; krw: number; usd: number; rate: number };
 
-type KisTrans = { sttl_dt: string; sll_buy_dvsn_cd: string; frcr_excc_amt_1: string; erlm_exrt: string };
+/** One overseas fill, as CTOS4001R reports it. */
+export type KisTrade = {
+  /** YYYY-MM-DD. */
+  date: string;
+  settleDate: string;
+  side: "buy" | "sell";
+  symbol: string;
+  name: string;
+  quantity: number;
+  /**
+   * The won this fill moved, at KIS's rate on its own day: a purchase's
+   * amount plus fees, a sale's minus. Buying at one rate and selling at
+   * another is in the difference - which is what a won return, and the
+   * capital-gains return, are made of.
+   */
+  netKrw: number;
+  /** A sale's amount before fees, in won. */
+  grossKrw: number;
+  /** The same fill in dollars, as the dollar balance moved. */
+  netUsd: number;
+  rate: number;
+};
+
+type KisTrans = {
+  trad_dt: string;
+  sttl_dt: string;
+  sll_buy_dvsn_cd: string;
+  pdno: string;
+  ovrs_item_name: string;
+  ccld_qty: string;
+  tr_amt: string;
+  wcrc_excc_amt: string;
+  frcr_excc_amt_1: string;
+  erlm_exrt: string;
+};
+
+const dashed = (d: string) => `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
 
 /**
- * Overseas trades since `since`, as the dollars each one settled for, by
- * settlement day (CTOS4001R). frcr_excc_amt_1 is what actually moved in the
- * dollar balance: a purchase's amount plus its fee, a sale's minus. The
- * account settles in dollars - a sale's proceeds stay dollars until they are
- * exchanged by hand. Domestic trades are not read; the domestic side is unused.
+ * Overseas fills traded since `since` (CTOS4001R), oldest first. Both the
+ * realized returns (realized.ts) and the cash checks (settlementsOf) are
+ * made from these, so they are asked once. Domestic trades are not read; the
+ * domestic side is unused.
  */
-export async function kisSettlements(since: string): Promise<Settlement[]> {
+export async function kisTrades(since: string): Promise<KisTrade[]> {
   if (!env("KIS_APP_KEY")) return [];
   const token = await kisAccessToken();
   const { cano, prod } = kisAccount();
   const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
-  const byDay = new Map<string, Settlement>();
+  const trades: KisTrade[] = [];
   let lastPage = "";
   let fk = "";
   let nk = "";
@@ -740,7 +791,7 @@ export async function kisSettlements(since: string): Promise<Settlement[]> {
     const body = await json<{
       rt_cd: string;
       msg1?: string;
-      output1?: (KisTrans & Record<string, string>)[];
+      output1?: KisTrans[];
       ctx_area_fk100?: string;
       ctx_area_nk100?: string;
     }>(`${KIS_BASE}/uapi/overseas-stock/v1/trading/inquire-period-trans?${query}`, {
@@ -753,108 +804,42 @@ export async function kisSettlements(since: string): Promise<Settlement[]> {
     if (pageKey === lastPage) break;
     lastPage = pageKey;
     for (const row of body.output1 ?? []) {
-      if (!row.sttl_dt) continue;
-      const d = row.sttl_dt;
-      const date = `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
-      const usd = Number(row.frcr_excc_amt_1) * (row.sll_buy_dvsn_cd === "01" ? 1 : -1);
-      const day = byDay.get(date) ?? { date, krw: 0, usd: 0, rate: Number(row.erlm_exrt) };
-      day.usd += usd;
-      byDay.set(date, day);
+      if (!row.trad_dt || !row.sttl_dt || !(Number(row.ccld_qty) > 0)) continue;
+      const sell = row.sll_buy_dvsn_cd === "01";
+      trades.push({
+        date: dashed(row.trad_dt),
+        settleDate: dashed(row.sttl_dt),
+        side: sell ? "sell" : "buy",
+        symbol: row.pdno,
+        name: row.ovrs_item_name || row.pdno,
+        quantity: Number(row.ccld_qty),
+        netKrw: Number(row.wcrc_excc_amt),
+        grossKrw: Number(row.tr_amt),
+        netUsd: Number(row.frcr_excc_amt_1),
+        rate: Number(row.erlm_exrt),
+      });
     }
     fk = body.ctx_area_fk100?.trim() ?? "";
     nk = body.ctx_area_nk100?.trim() ?? "";
     if (!nk || (body.output1 ?? []).length === 0) break;
   }
-  return [...byDay.values()].sort((a, b) => a.date.localeCompare(b.date));
+  return trades.sort((a, b) => a.date.localeCompare(b.date));
 }
 
-type KisPeriodProfit = {
-  trad_day: string;
-  ovrs_pdno: string;
-  ovrs_item_name: string;
-  slcl_qty: string;
-  /** In won when asked with WCRC_FRCR_DVSN_CD=02, as below. */
-  frcr_pchs_amt1: string;
-  frcr_sll_amt_smtl1: string;
-  stck_sll_tlex: string;
-  ovrs_rlzt_pfls_amt: string;
-};
-
 /**
- * Overseas sales since `since`, each with the profit KIS itself booked.
- *
- * Asked in won (WCRC_FRCR_DVSN_CD=02): KIS converts both the cost and the
- * proceeds at the sale day's rate, so currency gains between buying and
- * selling are not in it. Good enough for an estimate; a filed return uses
- * each leg's own day.
- *
- * Domestic sales are not read: the domestic account is empty, and a minority
- * holder's domestic gains are not taxed anyway.
+ * The share account's dollars by settlement day, for fills traded on or
+ * after `since`: what actually moved in the dollar balance. The account
+ * settles in dollars - a sale's proceeds stay dollars until exchanged by hand.
  */
-export async function kisSales(since: string): Promise<Sale[]> {
-  if (!env("KIS_APP_KEY")) return [];
-  const token = await kisAccessToken();
-  const { cano, prod } = kisAccount();
-  const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
-  const sales: Sale[] = [];
-  let lastPage = "";
-  let fk = "";
-  let nk = "";
-
-  for (let page = 0; page < 10; page += 1) {
-    const query = new URLSearchParams({
-      CANO: cano,
-      ACNT_PRDT_CD: prod,
-      OVRS_EXCG_CD: "",
-      NATN_CD: "",
-      CRCY_CD: "",
-      PDNO: "",
-      INQR_STRT_DT: since.replace(/-/g, ""),
-      INQR_END_DT: today.replace(/-/g, ""),
-      WCRC_FRCR_DVSN_CD: "02",
-      CTX_AREA_FK200: fk,
-      CTX_AREA_NK200: nk,
-    });
-    const body = await json<{
-      rt_cd: string;
-      msg1?: string;
-      output1?: KisPeriodProfit[];
-      ctx_area_fk200?: string;
-      ctx_area_nk200?: string;
-    }>(`${KIS_BASE}/uapi/overseas-stock/v1/trading/inquire-period-profit?${query}`, {
-      headers: { ...kisHeaders(token, "TTTS3039R"), ...(page > 0 ? { tr_cont: "N" } : {}) },
-    });
-    if (body.rt_cd !== "0") throw new Error(body.msg1?.trim() || "기간손익 조회 실패");
-
-    // KIS has no id per row, and two identical sales are two sales; only a
-    // page handed back twice is dropped.
-    const pageKey = JSON.stringify(body.output1 ?? []);
-    if (pageKey === lastPage) break;
-    lastPage = pageKey;
-    for (const row of body.output1 ?? []) {
-      const quantity = Number(row.slcl_qty);
-      if (!(quantity > 0)) continue;
-      const d = row.trad_day;
-      sales.push({
-        id: `kis:${d}:${row.ovrs_pdno}:${sales.length}`,
-        date: `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`,
-        venue: "kis",
-        kind: "stock",
-        symbol: row.ovrs_pdno,
-        name: row.ovrs_item_name || row.ovrs_pdno,
-        quantity,
-        proceedsKrw: Number(row.frcr_sll_amt_smtl1),
-        costKrw: Number(row.frcr_pchs_amt1),
-        feeKrw: Number(row.stck_sll_tlex),
-        profitKrw: Number(row.ovrs_rlzt_pfls_amt),
-      });
-    }
-    // An empty page, or no continuation key, is the end.
-    fk = body.ctx_area_fk200?.trim() ?? "";
-    nk = body.ctx_area_nk200?.trim() ?? "";
-    if (!nk || (body.output1 ?? []).length === 0) break;
+export function settlementsOf(trades: KisTrade[], since: string): Settlement[] {
+  const byDay = new Map<string, Settlement>();
+  for (const t of trades) {
+    if (t.date < since) continue;
+    const day = byDay.get(t.settleDate) ?? { date: t.settleDate, krw: 0, usd: 0, rate: t.rate };
+    day.usd += t.side === "sell" ? t.netUsd : -t.netUsd;
+    byDay.set(t.settleDate, day);
   }
-  return sales;
+  return [...byDay.values()].sort((a, b) => a.date.localeCompare(b.date));
 }
 
 /**

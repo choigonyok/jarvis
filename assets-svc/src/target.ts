@@ -15,7 +15,9 @@ import type { Allocation, Bucket, Drift, Holding, Move } from "./types.js";
 export const BUCKETS: { id: Bucket; label: string; target: number }[] = [
   { id: "growth", label: "유망주", target: 0.45 },
   { id: "coin", label: "메이저코인", target: 0.3 },
-  { id: "cash", label: "현금(달러)", target: 0.12 },
+  // Meant to be dollars, but won cash counts here too - there is no other
+  // bucket for it - so the label does not promise dollars.
+  { id: "cash", label: "현금", target: 0.12 },
   { id: "dividend", label: "배당주", target: 0.08 },
   { id: "gold", label: "금", target: 0.05 },
 ];

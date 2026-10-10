@@ -1,15 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { Curve } from "@/components/assets/curve";
 import { PrincipalLedger, PrincipalParts } from "@/components/assets/principal";
 import { RealizedSection } from "@/components/assets/realized";
+import { ProfitBridge, Row, todos } from "@/components/assets/summary";
 import { TargetAllocation } from "@/components/assets/target";
 import { Header, TabBar } from "@/components/shell/header";
 import { StandingBar } from "@/components/shell/standing-bar";
 import {
-  WINDOW_LABEL,
   krw,
   percent,
   profitOf,
@@ -17,40 +17,20 @@ import {
   rateOf,
   signedKrw,
   type Portfolio,
-  type Window,
 } from "@/lib/portfolio";
 import { isPending } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
 import { cn } from "@/lib/utils";
 
-/**
- * The four things the tab answers, one at a time below a summary that stays.
- * Together they ran past four phone screens; apart, each is one or two.
- */
-type View = "holdings" | "target" | "realized" | "principal";
-const VIEWS: { id: View; label: string }[] = [
-  { id: "holdings", label: "보유" },
-  { id: "target", label: "비중" },
-  { id: "realized", label: "수익" },
-  { id: "principal", label: "원금" },
-];
-const VIEW_KEY = "jarvis.assets.view";
-
-/** Wide enough for the summary and the chart to sit beside the views (lg). */
-function useWide(): boolean {
-  return useSyncExternalStore(
-    (onChange) => {
-      const mq = window.matchMedia("(min-width: 1024px)");
-      mq.addEventListener("change", onChange);
-      return () => mq.removeEventListener("change", onChange);
-    },
-    () => window.matchMedia("(min-width: 1024px)").matches,
-    () => false,
-  );
-}
+type Fold = "bridge" | "todo" | "principal" | "curve";
 
 /**
  * What you own, and how far it has moved from what you paid.
+ *
+ * Four questions answered a line each - how much was made, what wants doing,
+ * what went in, how prices moved - with the section behind each folded under
+ * it, and the holdings always in view. Laid out in full it ran past four phone
+ * screens; this fits the answers on one.
  *
  * Read-only on purpose. The keys behind this can place orders; this surface
  * only ever asks what is there. Anything that spends money in this product
@@ -66,27 +46,13 @@ export function Assets() {
   // Whose curve the chart shows: a holding id, or null for the whole basket.
   const [subject, setSubject] = useState<string | null>(null);
   const chart = useRef<HTMLDivElement>(null);
-  const wide = useWide();
-  // Which view was open last time; a fresh browser starts on holdings.
-  const [view, setView] = useState<View>("holdings");
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(VIEW_KEY) as View | null;
-      // Read once after mount: storage is not there during the server render.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      if (saved && VIEWS.some((v) => v.id === saved)) setView(saved);
-    } catch {
-      // Storage refused (private window): start on holdings.
-    }
-  }, []);
-  const pick = (next: View) => {
-    setView(next);
-    try {
-      localStorage.setItem(VIEW_KEY, next);
-    } catch {
-      // Not remembered; still switches.
-    }
-  };
+  const [open, setOpen] = useState<Record<Fold, boolean>>({
+    bridge: false,
+    todo: false,
+    principal: false,
+    curve: false,
+  });
+  const toggle = (k: Fold) => setOpen((o) => ({ ...o, [k]: !o[k] }));
 
   // The service answers at once with what it last had (marked stale) and
   // rebuilds behind it; ask again shortly to pick up the fresh numbers.
@@ -133,26 +99,20 @@ export function Assets() {
   const rate = principal ? principal.rate : (data?.returnRate ?? 0);
   const up = profit >= 0;
 
-  // The whole basket by default; a holding picked in the list shows its own
-  // return curve instead - a percentage, so a small position is as readable
-  // as a big one. Beside the views on a wide screen, atop holdings otherwise.
-  const curve =
-    data && data.holdings.length > 0 ? (
-      <div ref={chart} className="scroll-mt-16">
-        <Curve
-          series={data.series}
-          rates={{
-            day: data.changes.day.rate,
-            month: data.changes.month.rate,
-            year: data.changes.year.rate,
-          }}
-          holdings={data.holdings}
-          holdingSeries={data.holdingSeries}
-          subject={subject}
-          onSubject={setSubject}
-        />
-      </div>
-    ) : null;
+  // The headline return, taken apart: what was sold, what is still held, and
+  // the rest (see ProfitBridge). Only with both a ledger and sales to go on.
+  const realizedKrw = data?.realized?.totalKrw ?? 0;
+  const unrealizedKrw = data?.holdings.reduce((sum, h) => sum + profitOf(h), 0) ?? 0;
+  const bridge =
+    principal && data?.realized
+      ? { realizedKrw, unrealizedKrw, otherKrw: profit - realizedKrw - unrealizedKrw }
+      : null;
+  const todo = data ? todos(data) : [];
+  const overseas = data?.realized?.tax.baskets.find((b) => b.kind === "overseas");
+  const since = principal
+    ? `${Number(principal.since.slice(5, 7))}/${Number(principal.since.slice(8, 10))}`
+    : "";
+  const month = data?.changes.month;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -160,10 +120,8 @@ export function Assets() {
       <StandingBar pending={waiting} href="/record" />
 
       <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
-        <div className="mx-auto w-full max-w-[42rem] px-4 pt-5 pb-12 sm:px-8 sm:pt-7 sm:pb-6 lg:grid lg:max-w-[74rem] lg:grid-cols-[minmax(0,25rem)_minmax(0,1fr)] lg:gap-14">
-          {/* The summary stays put: on a phone above the views, on a wide
-              screen beside them with the chart. */}
-          <div className="lg:sticky lg:top-7 lg:self-start">
+        <div className="mx-auto w-full max-w-[42rem] px-4 pt-5 pb-12 sm:px-8 sm:pt-7 sm:pb-6 lg:grid lg:max-w-[72rem] lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)] lg:gap-14">
+          <div className="min-w-0">
             <div className="mb-6 flex items-start justify-between gap-4">
               <div>
                 <p className="text-[12px] text-faint">총자산</p>
@@ -192,7 +150,8 @@ export function Assets() {
                       second: "2-digit",
                       hour12: false,
                     })}{" "}
-                    기준{data.stale || loading ? " · 갱신 중…" : ""}
+                    기준 · 환율 {krw(data.usdKrw)}/$
+                    {data.stale || loading ? " · 갱신 중…" : ""}
                   </p>
                 ) : null}
               </div>
@@ -212,50 +171,10 @@ export function Assets() {
               </button>
             </div>
 
-            {/* Three windows on one row. Change over time is a different fact
-                from profit against cost - this basket moved this much, whether
-                or not you are up on what you paid - so it gets its own band
-                rather than crowding into the headline. */}
-            {data ? (
-              <div className="mb-6 grid grid-cols-3 gap-px overflow-hidden rounded-xl border border-edge-soft bg-edge-soft">
-                {(["day", "month", "year"] as Window[]).map((window) => {
-                  const change = data.changes[window];
-                  const gain = (change.rate ?? 0) >= 0;
-                  return (
-                    <div key={window} className="bg-background px-3 py-2.5">
-                      <p className="text-[11px] text-faint">{WINDOW_LABEL[window]}</p>
-                      {change.rate === null ? (
-                        <p className="mt-1 text-[14px] text-faint">—</p>
-                      ) : (
-                        <>
-                          <p
-                            className={cn(
-                              "tnum mt-1 text-[15px] leading-none",
-                              gain ? "text-approve/85" : "text-reject/85",
-                            )}
-                          >
-                            {percent(change.rate, 2)}
-                          </p>
-                          <p className="tnum mt-1 text-[11px] text-faint">
-                            {signedKrw(change.amountKrw ?? 0)}
-                          </p>
-                        </>
-                      )}
-                      {change.missing.length > 0 ? (
-                        <p className="mt-1 text-[10.5px] leading-tight text-faint">
-                          {change.missing.join(", ")} 제외
-                        </p>
-                      ) : null}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : null}
-
             {error ? (
               <p
                 role="status"
-                className="border-l-2 border-reject pl-3 text-[13.5px] leading-relaxed text-dim"
+                className="mb-5 border-l-2 border-reject pl-3 text-[13.5px] leading-relaxed text-dim"
               >
                 {error} 키 설정을 확인하고 다시 시도해 주세요.
               </p>
@@ -276,192 +195,229 @@ export function Assets() {
               </ul>
             ) : null}
 
-            {wide && curve}
+            {data && data.holdings.length > 0 ? (
+              <div className="border-b border-edge-soft">
+                <Row
+                  id="assets-bridge"
+                  title="얼마 벌었나"
+                  open={open.bridge}
+                  onToggle={() => toggle("bridge")}
+                  detail={data.realized ? <RealizedSection realized={data.realized} /> : null}
+                >
+                  {bridge ? (
+                    <ProfitBridge {...bridge} />
+                  ) : (
+                    <span className="tnum text-[13px] text-dim">
+                      평가손익 {signedKrw(unrealizedKrw)}
+                    </span>
+                  )}
+                  {overseas?.inForce ? (
+                    <p className="tnum mt-2 text-[12px] text-faint">
+                      올해 해외주식 {signedKrw(overseas.gainKrw)} · 양도세{" "}
+                      {overseas.taxKrw > 0 ? `약 ${krw(overseas.taxKrw)}` : "없음"} · 공제{" "}
+                      {krw(Math.max(0, overseas.deductionKrw - Math.max(0, overseas.gainKrw)))} 남음
+                    </p>
+                  ) : null}
+                </Row>
+
+                <Row
+                  id="assets-todo"
+                  title="할 일"
+                  open={open.todo}
+                  onToggle={() => toggle("todo")}
+                  detail={
+                    data.allocation ? (
+                      <TargetAllocation
+                        allocation={data.allocation}
+                        holdings={data.holdings}
+                        goldGramKrw={data.goldGramKrw}
+                        tax={data.realized?.tax}
+                      />
+                    ) : null
+                  }
+                >
+                  {todo.length ? (
+                    <ul className="space-y-1">
+                      {todo.map((t) => (
+                        <li
+                          key={t.text}
+                          className="flex gap-2 text-[13px] leading-snug text-foreground/90"
+                        >
+                          <span
+                            aria-hidden
+                            className="mt-[0.45em] size-1.5 shrink-0 rounded-full bg-reject"
+                          />
+                          {t.text}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-[13px] text-dim">
+                      없어요{" "}
+                      <span className="text-faint">· 비중은 허용 범위 안, 원금 기록도 맞아요</span>
+                    </p>
+                  )}
+                </Row>
+
+                {principal ? (
+                  <Row
+                    id="assets-principal"
+                    title="원금"
+                    open={open.principal}
+                    onToggle={() => toggle("principal")}
+                    detail={
+                      <>
+                        <div className="mb-6">
+                          <PrincipalParts parts={principal.parts} fixed={data.fixed ?? []} />
+                        </div>
+                        <PrincipalLedger principal={principal} onChange={() => void load()} />
+                      </>
+                    }
+                  >
+                    <p className="tnum text-[13px] text-foreground/90">
+                      {krw(principal.principalKrw)}
+                      <span className="ms-2 text-faint">{since}부터 넣은 돈</span>
+                    </p>
+                  </Row>
+                ) : null}
+
+                {/* Today's holdings at past prices: how the prices moved, not
+                    what was made - the bridge above is that. */}
+                <Row
+                  id="assets-curve"
+                  title="가격 흐름"
+                  open={open.curve}
+                  onToggle={() => toggle("curve")}
+                  detail={
+                    <div ref={chart} className="scroll-mt-4">
+                      <Curve
+                        series={data.series}
+                        rates={{
+                          day: data.changes.day.rate,
+                          month: data.changes.month.rate,
+                          year: data.changes.year.rate,
+                        }}
+                        holdings={data.holdings}
+                        holdingSeries={data.holdingSeries}
+                        subject={subject}
+                        onSubject={setSubject}
+                      />
+                    </div>
+                  }
+                >
+                  <p className="tnum text-[13px] text-dim">
+                    {month?.rate != null ? (
+                      <>
+                        지금 종목 1개월{" "}
+                        <span className={month.rate >= 0 ? "text-approve/85" : "text-reject/85"}>
+                          {percent(month.rate, 1)}
+                        </span>
+                      </>
+                    ) : (
+                      "지금 종목의 가격 변화"
+                    )}
+                    <span className="ms-2 text-faint">수익이 아니라 시세 변화예요</span>
+                  </p>
+                </Row>
+              </div>
+            ) : null}
           </div>
 
-          <div className="min-w-0">
+          <div className="min-w-0 max-lg:mt-8">
             {data && data.holdings.length > 0 ? (
-              <>
-                <div
-                  role="tablist"
-                  aria-label="자산 보기"
-                  className="sticky top-0 z-10 -mx-4 mb-5 flex gap-1 bg-background/85 px-4 py-2 backdrop-blur-md sm:-mx-8 sm:px-8 lg:mx-0 lg:px-0"
-                >
-                  {VIEWS.map((v) => {
-                    // A dot where something wants a look: a bucket out of its
-                    // band, or a ledger that disagrees with the trades.
-                    const flag =
-                      (v.id === "target" && data.allocation?.rows.some((r) => !r.inBand)) ||
-                      (v.id === "principal" && (principal?.checks?.length ?? 0) > 0);
+              <section aria-label="보유 종목">
+                <p className="mb-1 px-2 text-[12px] text-faint">보유</p>
+                <div className="space-y-0.5">
+                  {data.holdings.map((h) => {
+                    const profit = profitOf(h);
+                    const gain = profit >= 0;
+                    // Sold earlier, so no longer in the row's own profit.
+                    const sold = data.realized?.lines.find((l) => l.id === h.id)?.profitKrw ?? 0;
+                    const charted = (data.holdingSeries?.[h.id]?.month?.length ?? 0) >= 2;
                     return (
                       <button
-                        key={v.id}
+                        key={h.id}
                         type="button"
-                        role="tab"
-                        id={`assets-tab-${v.id}`}
-                        aria-selected={view === v.id}
-                        aria-controls="assets-view"
-                        onClick={() => pick(v.id)}
+                        disabled={!charted}
+                        onClick={() => {
+                          setSubject(h.id);
+                          setOpen((o) => ({ ...o, curve: true }));
+                          // After the row has opened and laid the chart out.
+                          requestAnimationFrame(() => chart.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+                        }}
+                        aria-label={`${h.name} 수익률 그래프 보기`}
                         className={cn(
-                          "tap relative min-h-10 flex-1 rounded-lg text-[13.5px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 sm:min-h-9 sm:flex-none sm:px-4",
-                          view === v.id ? "bg-glass-raised text-foreground" : "text-dim hover:text-foreground",
+                          "flex w-full items-baseline gap-3 rounded-lg px-2 py-2.5 text-left transition-colors outline-none hover:bg-glass focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-default",
+                          subject === h.id && "bg-glass",
                         )}
                       >
-                        {v.label}
-                        {flag ? (
-                          <span
-                            aria-label="확인할 것 있음"
-                            className="absolute top-2 right-[calc(50%-1.5rem)] size-1.5 rounded-full bg-reject sm:right-1.5"
-                          />
-                        ) : null}
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-[14px] text-foreground/90">
+                            {h.name}
+                          </p>
+                          <p className="tnum mt-0.5 text-[11.5px] text-faint">
+                            {quantity(h.quantity)}
+                            {h.kind === "stock" ? "주" : h.kind === "gold" ? "g" : ""} · 평단{" "}
+                            {h.currency === "USD"
+                              ? `$${h.avgPrice.toFixed(2)}`
+                              : krw(h.avgPrice)}
+                            {data.totalKrw > 0 ? ` · ${Math.round((h.valueKrw / data.totalKrw) * 100)}%` : ""}
+                          </p>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <p className="tnum text-[14px] text-foreground/90">
+                            {krw(h.valueKrw)}
+                          </p>
+                          <p
+                            className={cn(
+                              "tnum mt-0.5 text-[11.5px]",
+                              gain ? "text-approve/75" : "text-reject/75",
+                            )}
+                          >
+                            {percent(rateOf(h))}{" "}
+                            <span className="text-faint">{signedKrw(profit)}</span>
+                          </p>
+                          {sold !== 0 ? (
+                            <p className="tnum mt-0.5 text-[11.5px] text-faint">
+                              판 것{" "}
+                              <span className={sold >= 0 ? "text-approve/75" : "text-reject/75"}>{signedKrw(sold)}</span>
+                              <span className="ms-1.5">합계 {signedKrw(profit + sold)}</span>
+                            </p>
+                          ) : null}
+                        </div>
                       </button>
                     );
                   })}
                 </div>
 
-                <div id="assets-view" role="tabpanel" aria-labelledby={`assets-tab-${view}`}>
-                  {view === "holdings" ? (
-                    <>
-                      {wide ? null : curve}
-                      <section className={cn(!wide && "mt-7 border-t border-edge-soft pt-5")} aria-label="보유 종목">
-                        <div className="space-y-0.5">
-                          {data.holdings.map((h) => {
-                            const profit = profitOf(h);
-                            const gain = profit >= 0;
-                            // Sold earlier, so no longer in the row's own profit.
-                            const sold = data.realized?.lines.find((l) => l.id === h.id)?.profitKrw ?? 0;
-                            const charted = (data.holdingSeries?.[h.id]?.month?.length ?? 0) >= 2;
-                            return (
-                              <button
-                                key={h.id}
-                                type="button"
-                                disabled={!charted}
-                                onClick={() => {
-                                  setSubject(h.id);
-                                  chart.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-                                }}
-                                aria-label={`${h.name} 수익률 그래프 보기`}
-                                className={cn(
-                                  "flex w-full items-baseline gap-3 rounded-lg px-2 py-2.5 text-left transition-colors outline-none hover:bg-glass focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-default",
-                                  subject === h.id && "bg-glass",
-                                )}
-                              >
-                                <div className="min-w-0 flex-1">
-                                  <p className="truncate text-[14px] text-foreground/90">
-                                    {h.name}
-                                  </p>
-                                  <p className="tnum mt-0.5 text-[11.5px] text-faint">
-                                    {quantity(h.quantity)}
-                                    {h.kind === "stock" ? "주" : h.kind === "gold" ? "g" : ""} · 평단{" "}
-                                    {h.currency === "USD"
-                                      ? `$${h.avgPrice.toFixed(2)}`
-                                      : krw(h.avgPrice)}
-                                  </p>
-                                </div>
-                                <div className="shrink-0 text-right">
-                                  <p className="tnum text-[14px] text-foreground/90">
-                                    {krw(h.valueKrw)}
-                                  </p>
-                                  <p
-                                    className={cn(
-                                      "tnum mt-0.5 text-[11.5px]",
-                                      gain ? "text-approve/75" : "text-reject/75",
-                                    )}
-                                  >
-                                    {percent(rateOf(h))}{" "}
-                                    <span className="text-faint">{signedKrw(profit)}</span>
-                                  </p>
-                                  {sold !== 0 ? (
-                                    <p className="tnum mt-0.5 text-[11.5px] text-faint">
-                                      판 것{" "}
-                                      <span className={sold >= 0 ? "text-approve/75" : "text-reject/75"}>{signedKrw(sold)}</span>
-                                      <span className="ms-1.5">합계 {signedKrw(profit + sold)}</span>
-                                    </p>
-                                  ) : null}
-                                </div>
-                              </button>
-                            );
-                          })}
+                {data.cash?.some((c) => c.valueKrw >= 1) ? (
+                  <div className="mt-4 border-t border-edge-soft pt-3">
+                    <p className="mb-1 px-2 text-[12px] text-faint">현금</p>
+                    {data.cash
+                        .filter((c) => c.valueKrw >= 1)
+                        .map((c) => (
+                      <div key={c.id} className="flex items-baseline gap-3 rounded-lg px-2 py-2.5">
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-[14px] text-foreground/90">
+                            {c.currency === "USD" ? "달러" : "원화"}
+                            <span className="ms-2 text-[12px] text-faint">{c.label}</span>
+                          </p>
                         </div>
-
-                        {data.cash?.length ? (
-                          <div className="mt-4 border-t border-edge-soft pt-3">
-                            <p className="mb-1 px-2 text-[12px] text-faint">현금</p>
-                            {data.cash.map((c) => (
-                              <div key={c.id} className="flex items-baseline gap-3 rounded-lg px-2 py-2.5">
-                                <div className="min-w-0 flex-1">
-                                  <p className="truncate text-[14px] text-foreground/90">
-                                    {c.currency === "USD" ? "달러" : "원화"}
-                                    <span className="ms-2 text-[12px] text-faint">{c.label}</span>
-                                  </p>
-                                </div>
-                                <div className="shrink-0 text-right">
-                                  <p className="tnum text-[14px] text-foreground/90">
-                                    {c.currency === "USD"
-                                      ? `$${c.amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                                      : krw(c.amount)}
-                                  </p>
-                                  {c.currency === "USD" ? (
-                                    <p className="tnum mt-0.5 text-[11.5px] text-faint">{krw(c.valueKrw)}</p>
-                                  ) : null}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        ) : null}
-                      </section>
-                    </>
-                  ) : null}
-
-                  {/* An assets-svc older than this page sends no allocation. */}
-                  {view === "target" ? (
-                    data.allocation ? (
-                      <section aria-label="목표 비중">
-                        <TargetAllocation
-                          allocation={data.allocation}
-                          holdings={data.holdings}
-                          goldGramKrw={data.goldGramKrw}
-                          tax={data.realized?.tax}
-                        />
-                      </section>
-                    ) : (
-                      <p className="text-[13px] text-faint">자산 서비스가 목표 비중을 보내지 않았어요.</p>
-                    )
-                  ) : null}
-
-                  {view === "realized" ? (
-                    data.realized ? (
-                      <section aria-label="판 것">
-                        <RealizedSection realized={data.realized} />
-                      </section>
-                    ) : (
-                      <p className="text-[13px] text-faint">매도 내역을 읽지 못했어요.</p>
-                    )
-                  ) : null}
-
-                  {view === "principal" ? (
-                    principal ? (
-                      <section aria-label="원금 기록">
-                        <div className="mb-6">
-                          <PrincipalParts parts={principal.parts} fixed={data.fixed ?? []} />
+                        <div className="shrink-0 text-right">
+                          <p className="tnum text-[14px] text-foreground/90">
+                            {c.currency === "USD"
+                              ? `$${c.amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                              : krw(c.amount)}
+                          </p>
+                          {c.currency === "USD" ? (
+                            <p className="tnum mt-0.5 text-[11.5px] text-faint">{krw(c.valueKrw)}</p>
+                          ) : null}
                         </div>
-                        <PrincipalLedger principal={principal} onChange={() => void load()} />
-                      </section>
-                    ) : (
-                      <p className="text-[13px] text-faint">원금 기록을 읽지 못했어요.</p>
-                    )
-                  ) : null}
-                </div>
-
-                <p className="mt-6 text-[11.5px] text-faint">
-                  환율 {krw(data.usdKrw)}/$ 기준 ·{" "}
-                  {new Date(data.at).toLocaleTimeString("ko-KR", {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}{" "}
-                  기준
-                </p>
-              </>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </section>
             ) : !loading && !error && data ? (
               <p className="text-[13.5px] leading-relaxed text-faint">
                 보유 중인 종목이 없습니다. 업비트나 증권 계좌에 자산이 생기면 여기에
