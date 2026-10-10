@@ -9,7 +9,6 @@ import { Track } from "@/components/assets/track";
 import { Header, TabBar } from "@/components/shell/header";
 import { StandingBar } from "@/components/shell/standing-bar";
 import {
-  PART_LABEL,
   krw,
   percent,
   profitOf,
@@ -22,7 +21,7 @@ import { isPending } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
 import { cn } from "@/lib/utils";
 
-type Fold = "bridge" | "alloc" | "principal";
+type Fold = "bridge" | "alloc";
 
 /**
  * What you own, and how far it has moved from what you paid.
@@ -43,7 +42,7 @@ export function Assets() {
   const [data, setData] = useState<Portfolio | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [open, setOpen] = useState<Record<Fold, boolean>>({ bridge: false, alloc: false, principal: false });
+  const [open, setOpen] = useState<Record<Fold, boolean>>({ bridge: false, alloc: false });
   const toggle = (k: Fold) => setOpen((o) => ({ ...o, [k]: !o[k] }));
 
   // The service answers at once with what it last had (marked stale) and
@@ -248,27 +247,12 @@ export function Assets() {
                 ) : null}
 
                 {principal ? (
-                  <Row
-                    id="assets-principal"
-                    title="원금"
-                    open={open.principal}
-                    onToggle={() => toggle("principal")}
-                    detail={
-                      <p className="tnum text-[12px] leading-relaxed text-faint">
-                        {[
-                          ...principal.parts
-                            .filter((p) => p.principalKrw !== 0)
-                            .map((p) => `${PART_LABEL[p.venue]} ${krw(p.principalKrw)}`),
-                          ...(data.fixed ?? []).map((f) => `${f.label} ${krw(f.valueKrw)}`),
-                        ].join(" · ")}
-                      </p>
-                    }
-                  >
+                  <Row id="assets-principal" title="원금">
                     <p className="tnum text-[13px] text-foreground/90">
                       {krw(principal.principalKrw)}
                       <span className="ms-2 text-faint">{since}부터 넣은 돈</span>
                     </p>
-                    {/* A ledger that disagrees with the trades is said here, folded or not. */}
+                    {/* A ledger that disagrees with the trades is the one thing said here. */}
                     {principal.checks?.map((c) => (
                       <p key={`${c.kind}-${c.date ?? ""}`} className="mt-1 text-[12px] leading-relaxed text-dim">
                         <span aria-hidden className="me-1.5 inline-block size-1.5 rounded-full bg-reject align-middle" />
