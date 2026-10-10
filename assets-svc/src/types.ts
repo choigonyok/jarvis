@@ -23,6 +23,12 @@ export type Holding = {
   /** Converted to KRW so one total can exist. */
   valueKrw: number;
   costKrw: number;
+  /**
+   * The day the current position was opened (its first buy after last being
+   * empty), from the trade history. Null: held since before the history
+   * reaches. Absent: not known for this venue.
+   */
+  since?: string | null;
 };
 
 /**

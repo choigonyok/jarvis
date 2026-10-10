@@ -10,6 +10,7 @@ import asyncio
 import logging
 import os
 import secrets
+from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 
@@ -70,6 +71,15 @@ async def lifespan(app: FastAPI):
 
     graph = Graph(on_usage)
     await graph.setup()
+
+    # Each direct fact also becomes a diary line, for the 6-hour episode
+    # (sources.diary) - but only news: a backfill or a re-write of something
+    # long past would turn the next diary into a history lesson.
+    async def on_fact(group: str, fact: str, valid_at):
+        if group == "owner" and (valid_at is None or valid_at >= datetime.now(timezone.utc) - timedelta(days=3)):
+            await state.add_diary(group, fact)
+
+    graph.on_fact = on_fact
     task = asyncio.create_task(loop())
     yield
     task.cancel()
