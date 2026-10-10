@@ -77,6 +77,8 @@ function PushToast() {
       ref={box}
       role="status"
       aria-live="polite"
+      // A drag on the banner is the banner's: not the page's pull to refresh.
+      data-no-pull=""
       className={`push-toast fixed inset-x-0 z-50 mx-auto w-[calc(100%-32px)] max-w-[26rem] touch-none select-none ${leaving ? "push-toast-leave" : ""}`}
       style={{ top: "calc(env(safe-area-inset-top) + 8px)" }}
       onPointerDown={(e) => {
@@ -115,7 +117,6 @@ function PushToast() {
           {more ? <span className="tnum ml-1.5 text-[12px] font-normal text-faint">외 {more}건</span> : null}
         </span>
         {push.body ? <span className="mt-0.5 line-clamp-2 block text-[13px] leading-snug text-dim">{push.body}</span> : null}
-        <span aria-hidden className="mx-auto mt-2 block h-1 w-8 rounded-full bg-edge" />
       </button>
     </div>
   );
