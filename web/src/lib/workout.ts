@@ -348,6 +348,253 @@ export function groupOf(name: string): MuscleGroup {
   return GROUP_OF.get(name.trim()) ?? "기타";
 }
 
+const sameName = (a: string, b: string) =>
+  a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/** Newest first, the one in progress (`excludeId`) left out. */
+function earlierThan(sessions: Session[], excludeId?: string): Session[] {
+  return sessions
+    .filter((s) => s.id !== excludeId)
+    .sort((a, b) => b.startedAt - a.startedAt);
+}
+
+/**
+ * The sets of the last time this movement was actually trained.
+ *
+ * This is the "지난번" column every serious log has: the number you are
+ * trying to beat, on the row you are about to lift. Only sessions where the
+ * movement had a set ticked off count - a row added and abandoned is not a
+ * last time.
+ */
+export function previousSets(
+  sessions: Session[],
+  name: string,
+  excludeId?: string,
+): WorkoutSet[] | null {
+  for (const session of earlierThan(sessions, excludeId)) {
+    const match = session.exercises.find((e) => sameName(e.name, name));
+    const done = match?.sets.filter((s) => s.done) ?? [];
+    if (done.length > 0) return done;
+  }
+  return null;
+}
+
+/**
+ * Which earlier set row `index` should be compared with.
+ *
+ * Warm-ups against warm-ups and working sets against working sets, each by
+ * its own order - otherwise adding one warm-up today would shift every
+ * comparison down a row and set 1 would be read against last time's ramp.
+ */
+export function previousFor(
+  previous: WorkoutSet[] | null,
+  sets: WorkoutSet[],
+  index: number,
+): WorkoutSet | null {
+  if (!previous) return null;
+  const warm = Boolean(sets[index]?.warmup);
+  const nth = sets.slice(0, index).filter((s) => Boolean(s.warmup) === warm).length;
+  return previous.filter((s) => Boolean(s.warmup) === warm)[nth] ?? null;
+}
+
+/**
+ * The sets a movement starts with: last time's, unticked.
+ *
+ * The first thing on screen is what you lifted last rather than a row of
+ * zeroes to retype - logging is then a tick, and progress is one stepper tap.
+ */
+export function carrySets(sessions: Session[], name: string): WorkoutSet[] {
+  const previous = previousSets(sessions, name);
+  return previous
+    ? previous.map((s) => ({ ...s, done: false }))
+    : [{ weight: 0, reps: 0, done: false }];
+}
+
+/** Every movement ever logged, most recently trained first, with how it went. */
+export function recentExercises(
+  sessions: Session[],
+): { name: string; date: string; top: WorkoutSet | null }[] {
+  const seen = new Map<string, { name: string; date: string; top: WorkoutSet | null }>();
+  for (const session of earlierThan(sessions)) {
+    for (const exercise of session.exercises) {
+      const key = exercise.name.trim().toLowerCase();
+      if (seen.has(key)) continue;
+      const working = exercise.sets.filter((s) => s.done && !s.warmup);
+      if (working.length === 0) continue;
+      const top = working.reduce((a, b) => (b.weight > a.weight ? b : a));
+      seen.set(key, { name: exercise.name.trim(), date: session.date, top });
+    }
+  }
+  return [...seen.values()];
+}
+
+/** One movement across sessions, newest first - what the history sheet lists. */
+export function exerciseHistory(
+  sessions: Session[],
+  name: string,
+): { id: string; date: string; sets: WorkoutSet[]; volume: number; oneRm: number | null }[] {
+  const out = [];
+  for (const session of earlierThan(sessions)) {
+    if (!session.endedAt) continue;
+    const match = session.exercises.find((e) => sameName(e.name, name));
+    if (!match) continue;
+    const sets = match.sets.filter((s) => s.done);
+    if (sets.length === 0) continue;
+    let oneRm: number | null = null;
+    for (const set of sets) {
+      if (set.warmup) continue;
+      const e = estimate1RM(set.weight, set.reps);
+      if (e !== null && (oneRm === null || e > oneRm)) oneRm = e;
+    }
+    out.push({ id: session.id, date: session.date, sets, volume: volumeOf(match), oneRm });
+  }
+  return out;
+}
+
+/** Barbell lifts - the ones a plate breakdown means anything for. */
+const BARBELL = new Set([
+  "벤치프레스",
+  "스쿼트",
+  "데드리프트",
+  "루마니안 데드리프트",
+  "바벨로우",
+  "오버헤드프레스",
+]);
+
+export function isBarbell(name: string): boolean {
+  const n = name.trim();
+  return BARBELL.has(n) || n.includes("바벨");
+}
+
+/** How much one tap of the stepper moves the load. Dumbbells jump by 2kg racks. */
+export function weightStep(name: string): number {
+  return name.includes("덤벨") ? 2 : 2.5;
+}
+
+const BAR = 20;
+const PLATES = [20, 15, 10, 5, 2.5, 1.25];
+
+/**
+ * The plates on each side of a 20kg bar, heaviest first, or null if the load
+ * cannot be built from a standard set (or is the bar alone).
+ *
+ * Adding up 62.5 - 20 = 42.5, halved, in your head between sets is exactly
+ * the arithmetic that goes wrong when you are out of breath.
+ */
+export function platesPerSide(weight: number): number[] | null {
+  let side = (weight - BAR) / 2;
+  if (side <= 0) return null;
+  const out: number[] = [];
+  for (const plate of PLATES) {
+    while (side >= plate - 1e-9) {
+      out.push(plate);
+      side -= plate;
+    }
+  }
+  return Math.abs(side) < 1e-6 ? out : null;
+}
+
+function roundTo(value: number, step: number): number {
+  return Math.round(value / step) * step;
+}
+
+/**
+ * Warm-up sets leading up to a working load.
+ *
+ * The usual ramp - the empty bar, then about half, 70% and 85% - with the
+ * reps falling as the load climbs, so the warm-up primes rather than tires.
+ * Steps that round onto each other or onto the working load are dropped.
+ */
+export function warmupRamp(name: string, work: number): WorkoutSet[] {
+  if (work <= 0) return [];
+  const step = weightStep(name);
+  const barbell = isBarbell(name);
+  const plan: [number, number][] = barbell
+    ? [
+        [BAR, 10],
+        [roundTo(work * 0.5, step), 5],
+        [roundTo(work * 0.7, step), 3],
+        [roundTo(work * 0.85, step), 1],
+      ]
+    : [
+        [roundTo(work * 0.5, step), 10],
+        [roundTo(work * 0.75, step), 5],
+      ];
+  const out: WorkoutSet[] = [];
+  let last = 0;
+  for (const [weight, reps] of plan) {
+    if (weight <= last || weight >= work || (barbell && weight < BAR)) continue;
+    out.push({ weight, reps, done: false, warmup: true });
+    last = weight;
+  }
+  return out;
+}
+
+/** A place in a session: which movement, which row. */
+export type SetRef = { exerciseId: string; index: number };
+
+/**
+ * The next set not yet ticked, reading on from `after` and wrapping round.
+ *
+ * This is what the dock points at - after a tick it moves on by itself, so
+ * the hand that just racked the bar does not also have to find the next row.
+ */
+export function nextOpen(session: Session, after?: SetRef | null): SetRef | null {
+  const flat: SetRef[] = [];
+  for (const exercise of session.exercises) {
+    exercise.sets.forEach((_, index) => flat.push({ exerciseId: exercise.id, index }));
+  }
+  const isOpen = (ref: SetRef) =>
+    !session.exercises.find((e) => e.id === ref.exerciseId)?.sets[ref.index]?.done;
+  const start = after
+    ? flat.findIndex((r) => r.exerciseId === after.exerciseId && r.index === after.index) + 1
+    : 0;
+  for (let i = 0; i < flat.length; i++) {
+    const ref = flat[(start + i) % flat.length];
+    if (isOpen(ref)) return ref;
+  }
+  return null;
+}
+
+/**
+ * What this session beat: a heavier working set than ever, or a better
+ * estimated 1RM. A movement's first time is not a record - there was nothing
+ * to beat - so it is left out rather than celebrated for showing up.
+ */
+export function sessionRecords(
+  session: Session,
+  sessions: Session[],
+): { name: string; kind: "무게" | "1RM"; value: number; before: number }[] {
+  const earlier = sessions.filter((s) => s.id !== session.id && s.startedAt < session.startedAt);
+  const out: { name: string; kind: "무게" | "1RM"; value: number; before: number }[] = [];
+  for (const exercise of session.exercises) {
+    const working = exercise.sets.filter((s) => s.done && !s.warmup);
+    if (working.length === 0) continue;
+    const top = heaviest(earlier, exercise.name);
+    const now = Math.max(...working.map((s) => s.weight));
+    if (top > 0 && now > top) {
+      out.push({ name: exercise.name, kind: "무게", value: now, before: top });
+      continue;
+    }
+    const best = bestSet(earlier, exercise.name);
+    const mine = Math.max(...working.map((s) => estimate1RM(s.weight, s.reps) ?? 0));
+    if (best && mine > best.oneRm + 0.05) {
+      out.push({ name: exercise.name, kind: "1RM", value: mine, before: best.oneRm });
+    }
+  }
+  return out;
+}
+
+/** 62.5×8, or 12회 for a bodyweight set - "0kg" is not how anyone says a dip. */
+export function setLabel(set: Pick<WorkoutSet, "weight" | "reps">): string {
+  return set.weight > 0 ? `${load(set.weight)}×${set.reps}` : `${set.reps}회`;
+}
+
+/** 62.5, 60, 1.25 - a load as people say it, without a trailing ".0". */
+export function load(value: number): string {
+  return Number.isInteger(value) ? String(value) : String(Math.round(value * 100) / 100);
+}
+
 /** Volume per body part across the given sessions. */
 export function volumeByGroup(sessions: Session[]): Map<MuscleGroup, number> {
   const out = new Map<MuscleGroup, number>();
