@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { Curve } from "@/components/assets/curve";
 import { PrincipalLedger, PrincipalParts } from "@/components/assets/principal";
+import { RealizedSection } from "@/components/assets/realized";
 import { TargetAllocation } from "@/components/assets/target";
 import { Header, TabBar } from "@/components/shell/header";
 import { StandingBar } from "@/components/shell/standing-bar";
@@ -233,7 +234,12 @@ export function Assets() {
               {/* An assets-svc older than this page sends no allocation. */}
               {data.allocation ? (
                 <section className="mt-7 border-t border-edge-soft pt-5" aria-label="목표 비중">
-                  <TargetAllocation allocation={data.allocation} holdings={data.holdings} goldGramKrw={data.goldGramKrw} />
+                  <TargetAllocation
+                    allocation={data.allocation}
+                    holdings={data.holdings}
+                    goldGramKrw={data.goldGramKrw}
+                    tax={data.realized?.tax}
+                  />
                 </section>
               ) : null}
 
@@ -248,6 +254,8 @@ export function Assets() {
                   {data.holdings.map((h) => {
                     const profit = profitOf(h);
                     const gain = profit >= 0;
+                    // Sold earlier, so no longer in the row's own profit.
+                    const sold = data.realized?.lines.find((l) => l.id === h.id)?.profitKrw ?? 0;
                     const charted = (data.holdingSeries?.[h.id]?.month?.length ?? 0) >= 2;
                     return (
                       <button
@@ -289,6 +297,13 @@ export function Assets() {
                             {percent(rateOf(h))}{" "}
                             <span className="text-faint">{signedKrw(profit)}</span>
                           </p>
+                          {sold !== 0 ? (
+                            <p className="tnum mt-0.5 text-[11.5px] text-faint">
+                              판 것{" "}
+                              <span className={sold >= 0 ? "text-approve/75" : "text-reject/75"}>{signedKrw(sold)}</span>
+                              <span className="ms-1.5">합계 {signedKrw(profit + sold)}</span>
+                            </p>
+                          ) : null}
                         </div>
                       </button>
                     );
@@ -321,6 +336,12 @@ export function Assets() {
                   </div>
                 ) : null}
               </section>
+
+              {data.realized ? (
+                <section className="mt-7 border-t border-edge-soft pt-5" aria-label="판 것">
+                  <RealizedSection realized={data.realized} />
+                </section>
+              ) : null}
 
               <p className="mt-6 text-[11.5px] text-faint">
                 환율 {krw(data.usdKrw)}/$ 기준 ·{" "}

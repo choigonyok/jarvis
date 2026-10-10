@@ -77,6 +77,15 @@ export type Flow = {
 };
 
 /** Return against money actually put in since `since`. */
+/** Where the hand-kept ledger disagrees with the brokerage's trades. */
+export type LedgerCheck = {
+  venue: Venue;
+  kind: "short" | "total";
+  date?: string;
+  amountKrw: number;
+  message: string;
+};
+
 export type Principal = {
   since: string;
   principalKrw: number;
@@ -84,6 +93,8 @@ export type Principal = {
   rate: number;
   parts: PrincipalPart[];
   flows: Flow[];
+  /** Absent from an older assets-svc. */
+  checks?: LedgerCheck[];
 };
 
 export const VENUE_LABEL: Record<Venue, string> = {
@@ -101,8 +112,66 @@ export const PART_LABEL: Record<Venue, string> = {
   other: "기타",
 };
 
+/** One sale and what it made (KIS books it; Upbit's is replayed in assets-svc). */
+export type Sale = {
+  id: string;
+  date: string;
+  venue: "kis" | "upbit";
+  kind: "stock" | "coin";
+  symbol: string;
+  name: string;
+  quantity: number;
+  proceedsKrw: number;
+  costKrw: number;
+  feeKrw: number;
+  profitKrw: number;
+};
+
+/** Everything sold of one holding since the principal's start. Same id as the Holding. */
+export type RealizedLine = {
+  id: string;
+  venue: "kis" | "upbit";
+  kind: "stock" | "coin";
+  symbol: string;
+  name: string;
+  sales: number;
+  proceedsKrw: number;
+  costKrw: number;
+  profitKrw: number;
+  /** False: sold out. */
+  held: boolean;
+};
+
+/** A year's capital-gains tax for one basket: overseas shares, or virtual assets. */
+export type TaxBasket = {
+  kind: "overseas" | "coin";
+  gainKrw: number;
+  deductionKrw: number;
+  rate: number;
+  taxKrw: number;
+  /** False while not in force (virtual assets before 2027). */
+  inForce: boolean;
+};
+
+export type Realized = {
+  since: string;
+  missing: ("kis" | "upbit")[];
+  sales: Sale[];
+  lines: RealizedLine[];
+  totalKrw: number;
+  tax: { year: number; baskets: TaxBasket[] };
+};
+
+/** The same rule as assets-svc: a year's net gain, less the deduction, at the rate. */
+export function taxFor(gainKrw: number, basket: TaxBasket): number {
+  if (!basket.inForce) return 0;
+  return Math.floor(Math.max(0, gainKrw - basket.deductionKrw) * basket.rate);
+}
+
 export type Portfolio = {
   holdings: Holding[];
+  /** Absent from an older assets-svc; null when no sales could be read. */
+  realized?: Realized | null;
   /** Cash sitting at each venue, in KRW. */
   cashKrw: number;
   totalKrw: number;

@@ -40,9 +40,17 @@ const portfolioJSON = `{
       {"venue":"kis","valueKrw":1100000,"principalKrw":2678406,"profitKrw":-1578406,"rate":-0.589},
       {"venue":"gold","valueKrw":null,"principalKrw":0,"profitKrw":null,"rate":null}
     ],
-    "flows": []
+    "flows": [],
+    "checks": [{"venue":"kis","kind":"total","amountKrw":12000,"message":"기록대로면 한국투자증권에 ₩12,000이 남아야 하는데 지금 ₩0이에요."}]
   },
   "fixed": [{"id":"housing-subscription","label":"주택청약","valueKrw":1000000}],
+  "realized": {"since":"2026-05-01","missing":[],"totalKrw":10000,
+    "lines":[{"id":"kis:CVX","venue":"kis","kind":"stock","symbol":"CVX","name":"셰브론","sales":1,
+      "proceedsKrw":510000,"costKrw":500000,"profitKrw":10000,"held":false}],
+    "sales":[],
+    "tax":{"year":2026,"baskets":[
+      {"kind":"overseas","gainKrw":2600000,"deductionKrw":2500000,"rate":0.22,"taxKrw":22000,"inForce":true},
+      {"kind":"coin","gainKrw":-40000,"deductionKrw":2500000,"rate":0.22,"taxKrw":0,"inForce":false}]}},
   "allocation": {
     "rows": [
       {"id":"growth","label":"유망주","valueKrw":1050000,"current":0.4637,"target":0.45,"gapKrw":-31000,"inBand":true,"symbols":["AAPL"]},
@@ -157,6 +165,10 @@ func TestPortfolioReadsWithNulls(t *testing.T) {
 		"금현물 · 원금 ₩0 · 평가 불가",
 		"조회 실패: 금현물: 키 없음",
 		"목표 비중 이탈: 메이저코인 44%→목표 30%",
+		"원금 기록 불일치: 기록대로면 한국투자증권에 ₩12,000이 남아야",
+		"셰브론(CVX) · 1번 · +₩10,000 (+2.00%) · 다 팖",
+		"2026년 해외주식 실현손익 +₩2,600,000 · 공제 ₩2,500,000 · 예상 양도세 ₩22,000",
+		"2026년 코인 실현손익 −₩40,000 · 아직 과세 안 함",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("%q 가 없습니다:\n%s", want, text)

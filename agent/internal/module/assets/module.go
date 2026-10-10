@@ -70,6 +70,10 @@ func renderSummary(p Portfolio) string {
 	if pr := p.Principal; pr != nil {
 		fmt.Fprintf(&b, "원금 대비 %s (%s, %s부터 넣은 원금 %s)\n",
 			signedKrw(pr.ProfitKrw), pct(pr.Rate), pr.Since, krw(pr.PrincipalKrw))
+		// The principal is only as right as the ledger under it.
+		for _, c := range pr.Checks {
+			b.WriteString("원금 기록 불일치: " + c.Message + "\n")
+		}
 	}
 	var changes []string
 	for _, w := range windowLabel {
@@ -121,6 +125,30 @@ func renderPortfolio(p Portfolio) string {
 	}
 	for _, f := range p.Fixed {
 		fmt.Fprintf(&b, "- %s · 고정 %s (비중 계산 제외)\n", f.Label, krw(f.ValueKrw))
+	}
+
+	if r := p.Realized; r != nil {
+		fmt.Fprintf(&b, "\n판 것 (%s부터 실현손익 %s, 수수료 뺀 값)\n", r.Since, signedKrw(r.TotalKrw))
+		for _, l := range r.Lines {
+			state := "보유 중"
+			if !l.Held {
+				state = "다 팖"
+			}
+			fmt.Fprintf(&b, "- %s(%s) · %d번 · %s (%s) · %s\n",
+				l.Name, l.Symbol, l.Sales, signedKrw(l.ProfitKrw), pct(rateOf(l.CostKrw+l.ProfitKrw, l.CostKrw)), state)
+		}
+		for _, t := range r.Tax.Baskets {
+			label := map[string]string{"overseas": "해외주식", "coin": "코인"}[t.Kind]
+			if !t.InForce {
+				fmt.Fprintf(&b, "- %d년 %s 실현손익 %s · 아직 과세 안 함\n", r.Tax.Year, label, signedKrw(t.GainKrw))
+				continue
+			}
+			fmt.Fprintf(&b, "- %d년 %s 실현손익 %s · 공제 %s · 예상 양도세 %s (22%%, 매도일 환율 기준 추정)\n",
+				r.Tax.Year, label, signedKrw(t.GainKrw), krw(t.DeductionKrw), krw(t.TaxKrw))
+		}
+		for _, v := range r.Missing {
+			fmt.Fprintf(&b, "- %s 매도 내역을 읽지 못해 빠짐\n", venueLabel[v])
+		}
 	}
 
 	if pr := p.Principal; pr != nil && len(pr.Parts) > 0 {

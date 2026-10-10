@@ -131,13 +131,16 @@ export async function history(days: number): Promise<SnapshotRow[]> {
   }));
 }
 
-/** Hand-recorded flows on or after `since`, oldest first. */
+/**
+ * Stored flows on or after `since`, oldest first: hand-recorded ones, and the
+ * KIS and gold-account deposits found from their cash (source 'auto', see kis-flows.ts).
+ */
 export async function manualFlows(since: string): Promise<Flow[]> {
   if (!pool) return [];
   const { rows } = await pool.query<{
-    id: string; on_date: string; venue: Flow["venue"]; amount_krw: string; memo: string;
+    id: string; on_date: string; venue: Flow["venue"]; amount_krw: string; memo: string; source: Flow["source"];
   }>(
-    `select id, to_char(on_date, 'YYYY-MM-DD') as on_date, venue, amount_krw, memo
+    `select id, to_char(on_date, 'YYYY-MM-DD') as on_date, venue, amount_krw, memo, source
        from principal_flows
       where on_date >= $1::date
       order by on_date, id`,
@@ -149,7 +152,7 @@ export async function manualFlows(since: string): Promise<Flow[]> {
     venue: r.venue,
     amountKrw: Number(r.amount_krw),
     memo: r.memo,
-    source: "manual",
+    source: r.source,
   }));
 }
 
@@ -169,8 +172,86 @@ export async function addFlow(f: {
 
 export async function deleteFlow(id: number): Promise<boolean> {
   if (!pool) throw new Error("데이터베이스가 연결되지 않았습니다.");
-  const { rowCount } = await pool.query("delete from principal_flows where id = $1", [id]);
+  // Only what was written by hand: a found deposit would come back on the next look anyway.
+  const { rowCount } = await pool.query("delete from principal_flows where id = $1 and source = 'manual'", [id]);
   return (rowCount ?? 0) > 0;
+}
+
+/** One account's settled cash on one day, per currency, and the net settled trades up to it. */
+export type CashDay = {
+  venue: "kis" | "gold";
+  date: string;
+  cashKrw: number;
+  cashUsd: number;
+  settledKrw: number;
+  settledUsd: number;
+};
+
+/**
+ * Write today's cash for an account (replacing an earlier look today) and
+ * hand back its last day before, which is what today is measured against.
+ */
+export async function recordCash(day: CashDay): Promise<CashDay | null> {
+  if (!pool) return null;
+  await pool.query(
+    `insert into kis_cash_daily (venue, on_date, cash_krw, cash_usd, settled_krw, settled_usd)
+     values ($1, $2::date, $3, $4, $5, $6)
+     on conflict (venue, on_date) do update
+       set cash_krw = excluded.cash_krw, cash_usd = excluded.cash_usd,
+           settled_krw = excluded.settled_krw, settled_usd = excluded.settled_usd, observed_at = now()`,
+    [day.venue, day.date, day.cashKrw, day.cashUsd, day.settledKrw, day.settledUsd],
+  );
+  const { rows } = await pool.query<{
+    on_date: string; cash_krw: string; cash_usd: string; settled_krw: string; settled_usd: string;
+  }>(
+    `select to_char(on_date, 'YYYY-MM-DD') as on_date, cash_krw, cash_usd, settled_krw, settled_usd
+       from kis_cash_daily where venue = $1 and on_date < $2::date order by on_date desc limit 1`,
+    [day.venue, day.date],
+  );
+  const r = rows[0];
+  return r
+    ? {
+        venue: day.venue,
+        date: r.on_date,
+        cashKrw: Number(r.cash_krw),
+        cashUsd: Number(r.cash_usd),
+        settledKrw: Number(r.settled_krw),
+        settledUsd: Number(r.settled_usd),
+      }
+    : null;
+}
+
+/** The found flow for an account on `date`, if any. */
+export async function autoFlow(venue: CashDay["venue"], date: string): Promise<number | null> {
+  if (!pool) return null;
+  const { rows } = await pool.query<{ amount_krw: string }>(
+    `select amount_krw from principal_flows where venue = $1 and source = 'auto' and on_date = $2::date`,
+    [venue, date],
+  );
+  return rows[0] ? Number(rows[0].amount_krw) : null;
+}
+
+/** Set (or, with null, clear) the found flow for an account on `date`. */
+export async function setAutoFlow(
+  venue: CashDay["venue"],
+  date: string,
+  amountKrw: number | null,
+  memo: string,
+): Promise<void> {
+  if (!pool) return;
+  if (amountKrw === null) {
+    await pool.query(
+      `delete from principal_flows where venue = $1 and source = 'auto' and on_date = $2::date`,
+      [venue, date],
+    );
+    return;
+  }
+  await pool.query(
+    `insert into principal_flows (on_date, venue, amount_krw, memo, source) values ($1::date, $2, $3, $4, 'auto')
+     on conflict (venue, on_date) where source = 'auto'
+       do update set amount_krw = excluded.amount_krw, memo = excluded.memo`,
+    [date, venue, amountKrw, memo],
+  );
 }
 
 export async function loadKisToken(keyHash: string): Promise<{ token: string; expires: number } | null> {
