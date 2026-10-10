@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { RealizedSection } from "@/components/assets/realized";
 import { ProfitBridge, Row, todos } from "@/components/assets/summary";
-import { TargetAllocation } from "@/components/assets/target";
+import { AllocationBrief } from "@/components/assets/target";
 import { Track } from "@/components/assets/track";
 import { Header, TabBar } from "@/components/shell/header";
 import { StandingBar } from "@/components/shell/standing-bar";
@@ -22,7 +22,7 @@ import { isPending } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
 import { cn } from "@/lib/utils";
 
-type Fold = "bridge" | "todo";
+type Fold = "bridge";
 
 /**
  * What you own, and how far it has moved from what you paid.
@@ -43,7 +43,7 @@ export function Assets() {
   const [data, setData] = useState<Portfolio | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [open, setOpen] = useState<Record<Fold, boolean>>({ bridge: false, todo: false });
+  const [open, setOpen] = useState<Record<Fold, boolean>>({ bridge: false });
   const toggle = (k: Fold) => setOpen((o) => ({ ...o, [k]: !o[k] }));
 
   // The service answers at once with what it last had (marked stale) and
@@ -210,22 +210,9 @@ export function Assets() {
                   ) : null}
                 </Row>
 
-                <Row
-                  id="assets-todo"
-                  title="할 일"
-                  open={open.todo}
-                  onToggle={() => toggle("todo")}
-                  detail={
-                    data.allocation ? (
-                      <TargetAllocation
-                        allocation={data.allocation}
-                        holdings={data.holdings}
-                        goldGramKrw={data.goldGramKrw}
-                        tax={data.realized?.tax}
-                      />
-                    ) : null
-                  }
-                >
+                {/* Open, but short: what to do in sentences, then the allocation
+                    and its orders in a few lines (AllocationBrief). */}
+                <Row id="assets-todo" title="할 일">
                   {todo.length ? (
                     <ul className="space-y-1">
                       {todo.map((t) => (
@@ -247,6 +234,14 @@ export function Assets() {
                       <span className="text-faint">· 비중은 허용 범위 안, 원금 기록도 맞아요</span>
                     </p>
                   )}
+                  {data.allocation ? (
+                    <AllocationBrief
+                      allocation={data.allocation}
+                      holdings={data.holdings}
+                      goldGramKrw={data.goldGramKrw}
+                      tax={data.realized?.tax}
+                    />
+                  ) : null}
                 </Row>
 
                 {principal ? (
