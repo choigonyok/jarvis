@@ -3,7 +3,17 @@ import * as db from "./db.js";
 import { allocationOf } from "./target.js";
 import { detectFlow, reconcile } from "./kis-flows.js";
 import { COIN_TAX_FROM, replayKis, replayUpbit, salesFrom, summarize } from "./realized.js";
-import type { CashLine, FixedAsset, Holding, Portfolio, Principal, PrincipalPart, Realized, Venue } from "./types.js";
+import type {
+  CashLine,
+  FixedAsset,
+  Holding,
+  Portfolio,
+  Principal,
+  PrincipalPart,
+  Realized,
+  TrackPoint,
+  Venue,
+} from "./types.js";
 import {
   goldSettlements,
   kisGoldAccount,
@@ -295,8 +305,25 @@ export async function buildPortfolio(): Promise<Portfolio> {
     realized = summarize(sales, holdings, PRINCIPAL_SINCE, thisYear(), missing);
   }
 
+  // The pot over time: each snapshot's total against what had gone in by its
+  // day, and today live. Snapshots are taken on every build and, failing
+  // that, once an hour by index.ts, so a day is missing only if the service
+  // was down all of it.
+  let track: TrackPoint[] = [];
+  if (principal) {
+    const flows = principal.flows;
+    const putIn = (date: string) =>
+      fixedKrw + flows.filter((f) => f.date <= date).reduce((sum, f) => sum + f.amountKrw, 0);
+    const rows = await db.history(3650).catch(() => []);
+    track = rows
+      .filter((r) => r.date >= PRINCIPAL_SINCE && r.date < today)
+      .map((r) => ({ date: r.date, totalKrw: r.totalKrw, principalKrw: putIn(r.date) }));
+    track.push({ date: today, totalKrw: total, principalKrw: principal.principalKrw });
+  }
+
   return {
     holdings,
+    track,
     realized,
     cashKrw,
     cash,

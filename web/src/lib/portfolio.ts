@@ -168,8 +168,13 @@ export function taxFor(gainKrw: number, basket: TaxBasket): number {
   return Math.floor(Math.max(0, gainKrw - basket.deductionKrw) * basket.rate);
 }
 
+/** One recorded day of the whole pot: its worth, and what had been put in by then. */
+export type TrackPoint = { date: string; totalKrw: number; principalKrw: number };
+
 export type Portfolio = {
   holdings: Holding[];
+  /** Day by day, today last. Absent from an older assets-svc. */
+  track?: TrackPoint[];
   /** Absent from an older assets-svc; null when no sales could be read. */
   realized?: Realized | null;
   /** Cash sitting at each venue, in KRW. */
