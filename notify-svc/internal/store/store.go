@@ -85,6 +85,13 @@ func (s *Store) MarkDelivered(ctx context.Context, ids []int64) error {
 	return err
 }
 
+// Supersede marks a still-pending notification as done without a push:
+// something better (a suggestion card about the same thing) took its place.
+func (s *Store) Supersede(ctx context.Context, key string) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `update notifications set delivered_at = now() where dedupe_key = $1 and delivered_at is null`, key)
+	return tag.RowsAffected() > 0, err
+}
+
 // Pending is what of one tier is still waiting to go out, oldest first.
 func (s *Store) Pending(ctx context.Context, tier string) ([]Notification, error) {
 	rows, err := s.pool.Query(ctx, `select `+cols+` from notifications where tier = $1 and delivered_at is null order by created_at`, tier)

@@ -14,6 +14,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -42,6 +43,7 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "push": s.push.Ready()})
 	})
 	mux.HandleFunc("POST /events", s.auth(s.event))
+	mux.HandleFunc("POST /consume", s.auth(s.consume))
 	mux.HandleFunc("GET /notifications", s.auth(s.list))
 	mux.HandleFunc("POST /notifications/read", s.auth(s.read))
 	mux.HandleFunc("GET /settings", s.auth(func(w http.ResponseWriter, r *http.Request) {
@@ -83,6 +85,62 @@ func (s *Server) event(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"duplicate": true})
 	default:
 		writeJSON(w, http.StatusCreated, n)
+	}
+}
+
+// consumed is an event as events-svc delivers it.
+type consumed struct {
+	ID     int64           `json:"id"`
+	Source string          `json:"source"`
+	Type   string          `json:"type"`
+	Data   json.RawMessage `json:"data"`
+	Key    string          `json:"key"`
+	Notify *struct {
+		Tier, Level, Title, Body, URL string
+	} `json:"notify"`
+}
+
+// consume takes events from events-svc. An event with wording becomes a
+// notification by its tier; one without is not for a person to read and is
+// taken without a word. A suggestion raised about something already waiting
+// in tonight's digest takes that line's place.
+func (s *Server) consume(w http.ResponseWriter, r *http.Request) {
+	var e consumed
+	if !readJSON(w, r, &e) {
+		return
+	}
+	if e.Type == "suggestion.raised" {
+		var d struct {
+			Supersedes []string `json:"supersedes"`
+		}
+		_ = json.Unmarshal(e.Data, &d)
+		for _, key := range d.Supersedes {
+			if _, err := s.store.Supersede(r.Context(), key); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "알림을 정리하지 못했습니다."})
+				return
+			}
+		}
+	}
+	if e.Notify == nil {
+		writeJSON(w, http.StatusOK, map[string]bool{"ignored": true})
+		return
+	}
+	key := e.Key
+	if key == "" {
+		key = fmt.Sprintf("event:%d", e.ID)
+	}
+	_, _, err := s.svc.Accept(r.Context(), notify.Event{
+		Source: e.Source, Kind: e.Type, Tier: e.Notify.Tier, Level: e.Notify.Level,
+		Title: e.Notify.Title, Body: e.Notify.Body, URL: e.Notify.URL, Key: key,
+	})
+	switch {
+	case errors.Is(err, notify.ErrInvalid):
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+	case err != nil:
+		s.log.Error("알림을 처리하지 못했습니다", "err", err, "type", e.Type)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "알림을 처리하지 못했습니다."})
+	default:
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	}
 }
 
