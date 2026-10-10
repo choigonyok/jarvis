@@ -1,5 +1,5 @@
 import type { Holding, Realized, RealizedLine, Sale, Tax, TaxBasket } from "./types.js";
-import { DOLLAR_COINS, type UpbitFill } from "./venues.js";
+import { DOLLAR_COINS, type KisTrade, type UpbitFill } from "./venues.js";
 
 /**
  * What has already been taken off the table.
@@ -31,8 +31,8 @@ const EPS = 1e-9;
  * its own average: a moving average of what was paid, unchanged by a sale.
  *
  * The replay starts at `from` with whatever was held then - today's quantity
- * with every fill since undone - priced at that day's close, the same way the
- * principal ledger counts what was held on its first day. Buy fees are part
+ * with every fill since undone - priced at the close the day before, the same
+ * way the principal ledger counts what was held on its first morning. Buy fees are part
  * of the cost; a sale's fee comes off its proceeds.
  *
  * A sale of more than the replay holds (a coin transferred in) has no known
@@ -104,6 +104,67 @@ export function replayUpbit(
     }
   }
   return { sales, problems };
+}
+
+/**
+ * KIS's own profit per sale (its period-profit report) converts the cost and
+ * the proceeds both at the sale day's rate, so a won that strengthened while
+ * the shares were held does not show: shares bought at 1,466 and sold at
+ * 1,430 read far richer than they were - by about 40% on this account's
+ * sales up to 2026-10-10.
+ * The won actually paid and received is in every fill (KisTrade.netKrw), so
+ * the sales are replayed from those instead, on a moving average in won - the
+ * same footing a capital-gains return takes, each leg at its own day's rate.
+ *
+ * What is still held comes out of the same replay as its won cost
+ * (`held`), so a holding's own return carries the currency too.
+ *
+ * Shares already held before `trades` begin have no known cost; a sale of
+ * them is counted at its own price (no gain) and named.
+ */
+export function replayKis(
+  trades: KisTrade[],
+): { sales: Sale[]; held: Map<string, { quantity: number; costKrw: number }>; problems: string[] } {
+  const sales: Sale[] = [];
+  const problems: string[] = [];
+  const book = new Map<string, { quantity: number; costKrw: number }>();
+  for (const t of trades) {
+    const pos = book.get(t.symbol) ?? { quantity: 0, costKrw: 0 };
+    if (t.side === "buy") {
+      pos.quantity += t.quantity;
+      pos.costKrw += t.netKrw;
+      book.set(t.symbol, pos);
+      continue;
+    }
+    const covered = Math.min(t.quantity, pos.quantity);
+    const avg = pos.quantity > EPS ? pos.costKrw / pos.quantity : 0;
+    const excess = t.quantity - covered;
+    const soldCost = covered * avg + excess * (t.netKrw / t.quantity);
+    if (excess > EPS) {
+      problems.push(`한국투자증권 ${t.name}: ${t.date} 매도분 일부는 조회 기간 전에 산 것이라 손익 0으로 셌습니다.`);
+    }
+    pos.quantity -= covered;
+    pos.costKrw -= covered * avg;
+    if (pos.quantity < EPS) {
+      pos.quantity = 0;
+      pos.costKrw = 0;
+    }
+    book.set(t.symbol, pos);
+    sales.push({
+      id: `kis:${t.date}:${t.symbol}:${sales.length}`,
+      date: t.date,
+      venue: "kis",
+      kind: "stock",
+      symbol: t.symbol,
+      name: t.name,
+      quantity: t.quantity,
+      proceedsKrw: t.grossKrw,
+      costKrw: soldCost,
+      feeKrw: t.grossKrw - t.netKrw,
+      profitKrw: t.netKrw - soldCost,
+    });
+  }
+  return { sales, held: book, problems };
 }
 
 /** One basket's tax on a year's net gain. Losses in the year offset gains; nothing carries over. */

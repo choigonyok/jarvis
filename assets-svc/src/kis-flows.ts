@@ -9,7 +9,7 @@ import type { Settlement } from "./venues.js";
  * The share account holds won and dollars (the gold account only won, and
  * settles its trades in won; the same sums hold with the dollar side at zero). Won moves when money comes in or goes
  * out, and when it is exchanged; dollars move when a trade settles (KIS says
- * by how much - kisSettlements), when they are exchanged, and with the odd
+ * by how much - settlementsOf), when they are exchanged, and with the odd
  * dividend. An exchange takes from one side what it gives the other, so at
  * one rate it nets out:
  *

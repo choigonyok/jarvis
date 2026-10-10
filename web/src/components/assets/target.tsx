@@ -255,14 +255,30 @@ function Planner({
         </label>
       ) : null}
 
-      {plan ? <PlanView plan={plan} deposit={mode === "deposit" ? deposit : 0} tax={tax} /> : (
+      {plan ? <PlanView
+          plan={plan}
+          deposit={mode === "deposit" ? deposit : 0}
+          tax={tax}
+          inBand={allocation.rows.every((r) => r.inBand)}
+        /> : (
         <p className="text-[12.5px] text-faint">금액을 적으면 어디에 얼마씩 사면 되는지 계산해요.</p>
       )}
     </section>
   );
 }
 
-function PlanView({ plan, deposit, tax }: { plan: Plan; deposit: number; tax?: Realized["tax"] }) {
+function PlanView({
+  plan,
+  deposit,
+  tax,
+  inBand,
+}: {
+  plan: Plan;
+  deposit: number;
+  tax?: Realized["tax"];
+  /** Every bucket inside its band: the rebalance plan is empty on purpose. */
+  inBand: boolean;
+}) {
   const buys = plan.orders.filter((o) => o.side === "buy");
   const sells = plan.orders.filter((o) => o.side === "sell");
   const gains = plannedGains(sells);
@@ -273,7 +289,11 @@ function PlanView({ plan, deposit, tax }: { plan: Plan; deposit: number; tax?: R
     <div>
       {nothing ? (
         <p className="text-[13px] text-dim">
-          {deposit ? "이 금액으로는 살 수 있는 단위가 없어요. 현금으로 두면 돼요." : "주 단위로는 지금이 가장 가까워요."}
+          {deposit
+            ? "이 금액으로는 살 수 있는 단위가 없어요. 현금으로 두면 돼요."
+            : inBand
+              ? "모두 허용 범위 안이라 지금은 사고팔 게 없어요."
+              : "주 단위로는 지금이 가장 가까워요."}
         </p>
       ) : null}
       {sells.length > 0 ? <Orders title="팔기" orders={sells} /> : null}
