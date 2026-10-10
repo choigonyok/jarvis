@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
-import { type Bridge, type Portfolio, krw, signedKrw } from "@/lib/portfolio";
+import { type Bridge, signedKrw } from "@/lib/portfolio";
 import { cn } from "@/lib/utils";
 
 /**
@@ -78,32 +78,41 @@ export function Row({
  * rate moved, exchange and transfer fees, dividends. It is the difference,
  * not a guess - so the three always add up to the headline.
  */
-export function ProfitBridge({ realizedKrw, unrealizedKrw, otherKrw, other }: Bridge) {
-  const parts = [
-    { key: "realized", label: "판 것", value: realizedKrw, tone: 0.9 },
-    { key: "unrealized", label: "들고 있는 것", value: unrealizedKrw, tone: 0.55 },
-    { key: "other", label: "환율·수수료·기타", value: otherKrw, tone: 0.3 },
-  ];
-  const scale = parts.reduce((sum, p) => sum + Math.abs(p.value), 0) || 1;
+const parts = ({ realizedKrw, unrealizedKrw, otherKrw }: Bridge) => [
+  { key: "realized", label: "판 것", value: realizedKrw, tone: 0.9 },
+  { key: "unrealized", label: "들고 있는 것", value: unrealizedKrw, tone: 0.55 },
+  { key: "other", label: "환율·수수료·기타", value: otherKrw, tone: 0.3 },
+];
+
+/** The bridge as one bar, segment by segment - the folded view. */
+export function ProfitBar(bridge: Bridge) {
+  const ps = parts(bridge);
+  const scale = ps.reduce((sum, p) => sum + Math.abs(p.value), 0) || 1;
+  return (
+    <div
+      className="flex h-2 w-full gap-[2px] overflow-hidden rounded-full"
+      role="img"
+      aria-label={ps.map((p) => `${p.label} ${signedKrw(p.value)}`).join(", ")}
+    >
+      {ps.map((p) =>
+        Math.abs(p.value) / scale >= 0.005 ? (
+          <span
+            key={p.key}
+            className={p.value >= 0 ? "bg-approve" : "bg-reject"}
+            style={{ width: `${(Math.abs(p.value) / scale) * 100}%`, opacity: p.tone }}
+          />
+        ) : null,
+      )}
+    </div>
+  );
+}
+
+/** What each segment of the bar is, and the remainder by cause - the opened view. */
+export function ProfitLegend(bridge: Bridge) {
   return (
     <div>
-      <div
-        className="flex h-2 w-full gap-[2px] overflow-hidden rounded-full"
-        role="img"
-        aria-label={parts.map((p) => `${p.label} ${signedKrw(p.value)}`).join(", ")}
-      >
-        {parts.map((p) =>
-          Math.abs(p.value) / scale >= 0.005 ? (
-            <span
-              key={p.key}
-              className={p.value >= 0 ? "bg-approve" : "bg-reject"}
-              style={{ width: `${(Math.abs(p.value) / scale) * 100}%`, opacity: p.tone }}
-            />
-          ) : null,
-        )}
-      </div>
-      <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[12px]">
-        {parts.map((p) => (
+      <ul className="flex flex-wrap gap-x-4 gap-y-1 text-[12px]">
+        {parts(bridge).map((p) => (
           <li key={p.key} className="tnum flex items-baseline gap-1.5">
             <span
               aria-hidden
@@ -116,9 +125,9 @@ export function ProfitBridge({ realizedKrw, unrealizedKrw, otherKrw, other }: Br
         ))}
       </ul>
       {/* The remainder, by cause: each measured on its own, the last is what is left. */}
-      {other.length ? (
+      {bridge.other.length ? (
         <ul className="mt-1.5 space-y-0.5 border-l border-edge-soft ps-3 text-[11.5px]">
-          {other.map((o) => (
+          {bridge.other.map((o) => (
             <li key={o.id} className="tnum flex justify-between gap-3 sm:justify-start">
               <span className="text-faint">{o.label}</span>
               <span className="text-dim">{signedKrw(o.krw)}</span>
@@ -128,35 +137,4 @@ export function ProfitBridge({ realizedKrw, unrealizedKrw, otherKrw, other }: Br
       ) : null}
     </div>
   );
-}
-
-/**
- * What wants doing, in sentences: a bucket out of its band (as the transfer
- * that fixes it), a ledger that disagrees with the trades, a year's gains
- * nearing the tax-free allowance. Empty is an answer too.
- */
-export function todos(data: Portfolio): { text: string; where: "target" | "principal" | "realized" }[] {
-  const out: { text: string; where: "target" | "principal" | "realized" }[] = [];
-  const a = data.allocation;
-  if (a) {
-    const label = (id: string) => a.rows.find((r) => r.id === id)?.label ?? id;
-    for (const m of a.moves.filter((m) => !m.optional)) {
-      out.push({ text: `${label(m.from)}에서 ${label(m.to)}로 ${krw(m.amountKrw)} 옮기기`, where: "target" });
-    }
-  }
-  for (const c of data.principal?.checks ?? []) {
-    out.push({ text: `원금 기록 확인: ${c.message.split(". ")[0]}.`, where: "principal" });
-  }
-  const overseas = data.realized?.tax.baskets.find((b) => b.kind === "overseas" && b.inForce);
-  if (overseas) {
-    if (overseas.taxKrw > 0) {
-      out.push({ text: `올해 해외주식 양도세 약 ${krw(overseas.taxKrw)} - 내년 5월에 신고해요`, where: "realized" });
-    } else if (overseas.gainKrw >= overseas.deductionKrw * 0.8) {
-      out.push({
-        text: `해외주식 공제가 ${krw(overseas.deductionKrw - overseas.gainKrw)}만 남았어요 - 더 팔면 세금이 붙어요`,
-        where: "realized",
-      });
-    }
-  }
-  return out;
 }
