@@ -1,3 +1,4 @@
+import { PushBridge } from "@/components/shell/push-toast";
 import type { Metadata, Viewport } from "next";
 import { Barlow_Condensed, Instrument_Sans, JetBrains_Mono } from "next/font/google";
 import { headers } from "next/headers";
@@ -72,7 +73,10 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
       className={`dark ${instrument.variable} ${jetbrains.variable} ${scoreboard.variable} antialiased`}
     >
       <body className="overflow-hidden">
-        <RoleProvider role={role}>{children}</RoleProvider>
+        <RoleProvider role={role}>
+          {children}
+          <PushBridge />
+        </RoleProvider>
         <ViewportProbe />
         <NoZoom />
         <PullToRefresh />
