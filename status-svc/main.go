@@ -76,8 +76,15 @@ func main() {
 			day := time.Now().Format("2006-01-02")
 			switch {
 			case v.State == check.Fail:
-				notifier.Send(notify.Event{Source: "status", Kind: "status.fail", Tier: "now", Level: "alert",
-					Title: p.Name + " 이상", Body: v.Summary, URL: "/status", Key: "status:" + p.ID + ":fail:" + day})
+				// Only if it stays broken: a deploy restarts every service and
+				// trips the probes for a minute, which is not news.
+				ev := notify.Event{Source: "status", Kind: "status.fail", Tier: "now", Level: "alert",
+					Title: p.Name + " 이상", Body: v.Summary, URL: "/status", Key: "status:" + p.ID + ":fail:" + day}
+				time.AfterFunc(failHold, func() {
+					if runner.State(p.ID) == check.Fail {
+						notifier.Send(ev)
+					}
+				})
 			case v.State == check.Warn && prev != check.Unknown:
 				notifier.Send(notify.Event{Source: "status", Kind: "status.warn", Tier: "digest", Level: "warn",
 					Title: p.Name + " 주의", Body: v.Summary, URL: "/status", Key: "status:" + p.ID + ":warn:" + day})
@@ -109,6 +116,9 @@ func main() {
 	defer cancel()
 	_ = srv.Shutdown(shutdown)
 }
+
+// failHold is how long a probe has to stay broken before it is pushed.
+const failHold = 5 * time.Minute
 
 func getenv(key, def string) string {
 	if v := os.Getenv(key); v != "" {

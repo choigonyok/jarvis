@@ -93,6 +93,13 @@ type Runner struct {
 	onChange func(p Probe, prev State, v Verdict)
 }
 
+// State is a probe's latest state, Unknown before its first run.
+func (r *Runner) State(id string) State {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.state(id)
+}
+
 // OnChange registers fn for state changes. Set before Run; fn must not block.
 func (r *Runner) OnChange(fn func(p Probe, prev State, v Verdict)) { r.onChange = fn }
 
