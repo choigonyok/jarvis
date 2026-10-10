@@ -2,8 +2,6 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { PROBE_KEY } from "@/components/shell/viewport-probe";
-import { useNotificationOpen } from "@/lib/resume";
-import { PushToast } from "@/components/shell/push-toast";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -140,7 +138,6 @@ export function Header({
   const tabs = visible(all, role);
   const router = useRouter();
   const status = connectionCopy[connection];
-  useNotificationOpen(router);
 
   // Five quick taps on the name toggle the screen-measurement overlay - the
   // only way to reach it inside a home-screen app, which has no address bar.
@@ -203,7 +200,6 @@ export function Header({
         <div className="flex items-center gap-1 sm:gap-3">
           {role === "owner" ? <UsageBars /> : null}
           {role === "owner" ? <Notifications /> : null}
-          {role === "owner" ? <PushToast /> : null}
           <span className="flex items-center gap-1.5 text-[11.5px] text-faint">
             <span
               aria-hidden

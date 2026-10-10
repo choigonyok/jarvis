@@ -2,73 +2,117 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { X } from "lucide-react";
-import { handleWorkerMessage, onPushShown, type ShownPush } from "@/lib/resume";
+import { useRole } from "@/components/shell/role";
+import { handleWorkerMessage, onPushShown, useNotificationOpen, type ShownPush } from "@/lib/resume";
+
+const SHOWN_MS = 4000;
+const LEAVE_MS = 240;
 
 /**
- * A push that arrives while the console is on screen, shown inside it: the
- * phone's own banner is easy to miss with the app in front, and the screen
- * behind it has already re-read (lib/resume.ts). Tapping it goes where the
- * push points; it leaves on its own after a few seconds.
+ * Pushes while the console is on screen, on every tab: the service worker's
+ * messages are heard here (lib/resume.ts), and a push that arrives drops a
+ * banner in from above the screen, holds for a few seconds and goes back up.
+ * A tap goes where the push points; flicking it up sends it away early.
+ * Mounted once, in the root layout.
  */
-export function PushToast() {
+export function PushBridge() {
+  const role = useRole();
+  const router = useRouter();
+  useNotificationOpen(router);
+  return role === "owner" ? <PushToast /> : null;
+}
+
+function PushToast() {
   const router = useRouter();
   const [push, setPush] = useState<ShownPush | null>(null);
+  const [leaving, setLeaving] = useState(false);
   const [more, setMore] = useState(0);
-  const timer = useRef<number | undefined>(undefined);
   const showing = useRef(false);
+  const timer = useRef<number | undefined>(undefined);
+  const drag = useRef<{ y: number; dy: number } | null>(null);
+  const box = useRef<HTMLDivElement>(null);
+
+  const leave = () => {
+    window.clearTimeout(timer.current);
+    setLeaving(true);
+    timer.current = window.setTimeout(() => {
+      showing.current = false;
+      setPush(null);
+      setLeaving(false);
+    }, LEAVE_MS);
+  };
+  const leaveRef = useRef(leave);
+  useEffect(() => {
+    leaveRef.current = leave;
+  });
 
   useEffect(
     () =>
       onPushShown((p) => {
-        // One at a time: a second push while one is up replaces it and is
-        // counted, rather than stacking banners over the screen.
+        // One banner at a time: a second push while one is up replaces it
+        // and is counted, rather than stacking over the screen.
         setMore((m) => (showing.current ? m + 1 : 0));
         showing.current = true;
         setPush(p);
+        setLeaving(false);
         window.clearTimeout(timer.current);
-        timer.current = window.setTimeout(() => {
-          showing.current = false;
-          setPush(null);
-        }, 7000);
+        timer.current = window.setTimeout(() => leaveRef.current(), SHOWN_MS);
       }),
     [],
   );
   useEffect(() => () => window.clearTimeout(timer.current), []);
 
   if (!push) return null;
-  const dismiss = () => {
-    window.clearTimeout(timer.current);
-    showing.current = false;
-    setPush(null);
-  };
-  // Same as tapping the phone's own notification.
+
   const open = () => {
-    dismiss();
+    leave();
     handleWorkerMessage({ type: "jarvis:open", url: push.url }, (path) => router.push(path));
   };
 
   return (
     <div
+      ref={box}
       role="status"
       aria-live="polite"
-      className="push-toast fixed inset-x-0 z-50 mx-auto flex w-[calc(100%-32px)] max-w-[26rem] items-start rounded-2xl border border-edge bg-glass-raised shadow-lg backdrop-blur-xl"
+      className={`push-toast fixed inset-x-0 z-50 mx-auto w-[calc(100%-32px)] max-w-[26rem] touch-none select-none ${leaving ? "push-toast-leave" : ""}`}
       style={{ top: "calc(env(safe-area-inset-top) + 8px)" }}
+      onPointerDown={(e) => {
+        e.currentTarget.setPointerCapture(e.pointerId);
+        drag.current = { y: e.clientY, dy: 0 };
+        window.clearTimeout(timer.current); // held while touched
+      }}
+      onPointerMove={(e) => {
+        if (!drag.current || !box.current) return;
+        drag.current.dy = Math.min(0, e.clientY - drag.current.y);
+        box.current.style.transform = `translateY(${drag.current.dy}px)`;
+      }}
+      onPointerUp={() => {
+        const d = drag.current;
+        drag.current = null;
+        if (box.current) box.current.style.transform = "";
+        if (!d) return;
+        if (d.dy < -24) return leave(); // flicked up
+        if (d.dy > -6) return open(); // a tap
+        timer.current = window.setTimeout(() => leaveRef.current(), SHOWN_MS);
+      }}
+      onPointerCancel={() => {
+        drag.current = null;
+        if (box.current) box.current.style.transform = "";
+        timer.current = window.setTimeout(() => leaveRef.current(), SHOWN_MS);
+      }}
     >
-      <button type="button" onClick={open} className="min-w-0 flex-1 px-4 py-3 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50 rounded-2xl">
+      <button
+        type="button"
+        onClick={(e) => e.preventDefault()}
+        onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && open()}
+        className="block w-full rounded-2xl border border-edge bg-glass-raised px-4 py-3 text-left shadow-lg backdrop-blur-xl outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+      >
         <span className="block text-[14px] font-semibold text-foreground">
           {push.title}
           {more ? <span className="tnum ml-1.5 text-[12px] font-normal text-faint">외 {more}건</span> : null}
         </span>
         {push.body ? <span className="mt-0.5 line-clamp-2 block text-[13px] leading-snug text-dim">{push.body}</span> : null}
-      </button>
-      <button
-        type="button"
-        onClick={dismiss}
-        aria-label="닫기"
-        className="flex size-11 shrink-0 items-center justify-center rounded-xl text-faint outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50"
-      >
-        <X aria-hidden className="size-4" />
+        <span aria-hidden className="mx-auto mt-2 block h-1 w-8 rounded-full bg-edge" />
       </button>
     </div>
   );
