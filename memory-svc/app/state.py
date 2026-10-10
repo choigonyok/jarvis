@@ -47,6 +47,23 @@ class State:
     async def mark(self, key: str):
         await self.conn.execute("insert into memory_done (key) values (%s) on conflict do nothing", (key,))
 
+    async def add_diary(self, group: str, line: str):
+        await self.conn.execute("insert into memory_diary (grp, line) values (%s, %s)", (group, line[:500]))
+
+    async def diary(self, group: str, start, end) -> list[tuple[int, str]]:
+        """Unused lines written in [start, end), oldest first."""
+        rows = await (
+            await self.conn.execute(
+                "select id, line from memory_diary where grp = %s and used_at is null and at >= %s and at < %s order by at, id",
+                (group, start, end),
+            )
+        ).fetchall()
+        return [(r[0], r[1]) for r in rows]
+
+    async def diary_used(self, ids: list[int]):
+        if ids:
+            await self.conn.execute("update memory_diary set used_at = now() where id = any(%s)", (ids,))
+
     async def add_usage(self, input_tokens: int, output_tokens: int):
         await self.conn.execute(
             """insert into memory_usage (day, input_tokens, output_tokens, calls) values (current_date, %s, %s, 1)

@@ -179,7 +179,10 @@ export async function buildPortfolio(): Promise<Portfolio> {
     problems.push(...kisReplay.problems);
     for (const h of kis.holdings) {
       const pos = kisReplay.held.get(h.symbol);
-      if (pos && Math.abs(pos.quantity - h.quantity) < 1e-6 && pos.costKrw > 0) h.costKrw = pos.costKrw;
+      if (pos && Math.abs(pos.quantity - h.quantity) < 1e-6 && pos.costKrw > 0) {
+        h.costKrw = pos.costKrw;
+        h.since = pos.since;
+      } else if (!pos) h.since = null; // held since before the fills reach
     }
   }
 
@@ -306,6 +309,11 @@ export async function buildPortfolio(): Promise<Portfolio> {
     if (upbitTrades && !problems.some((p) => p.startsWith("업비트: "))) {
       const heldNow = new Map(upbit.holdings.map((h) => [h.symbol, h.quantity]));
       const replay = replayUpbit(upbitTrades.fills, heldNow, upbitTrades.closeAtStart);
+      for (const h of upbit.holdings) {
+        const since = replay.opened.get(h.symbol);
+        // A coin with no fill since the start was held all along.
+        h.since = since === undefined ? null : since || null;
+      }
       sales.push(...replay.sales);
       problems.push(...replay.problems);
     } else missing.push("upbit");

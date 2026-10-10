@@ -243,7 +243,13 @@ async def spending(ctx: Ctx):
 async def assets(ctx: Ctx):
     """What is held (and since when), and money moved in and out. Prices and
     valuations stay out: they change every minute and the assets tools read
-    them live - a copy here would only be a stale number."""
+    them live - a copy here would only be a stale number.
+
+    "Since" is the day the position was opened, from the trade history
+    (assets-svc works it out); null means held since before the history
+    reaches. A holding that is missing is only called sold when every venue
+    answered: a venue that failed to load leaves its holdings out of the
+    answer, and that once wrote "sold" over a position still held."""
     cur = await ctx.state.cursor("assets")
     held: dict = cur.get("held", {})
     async with http() as c:
@@ -252,25 +258,34 @@ async def assets(ctx: Ctx):
         p = r.json()
     added = 0
     today = datetime.now(KST)
+    complete = not (p.get("problems") or [])
     seen = {}
     for x in p.get("holdings") or []:
         unit = "주" if x["kind"] == "stock" else ("g" if x["kind"] == "gold" else "")
         qty = round(x["quantity"], 4)
-        seen[x["id"]] = {"name": x["name"], "symbol": x["symbol"], "since": held.get(x["id"], {}).get("since", today.date().isoformat())}
-        fact = f"{x['name']}({x['symbol']})을 {qty}{unit} 보유 중 ({seen[x['id']]['since']}부터)"
-        key = f"assets:{x['id']}:{h(qty)}"
+        since = x.get("since")
+        seen[x["id"]] = {"name": x["name"], "symbol": x["symbol"]}
+        when = f"{since}부터" if since else "기록 시작(5월 1일) 전부터"
+        fact = f"{x['name']}({x['symbol']})을 {qty}{unit} 보유 중 ({when})"
+        key = f"assets:{x['id']}:{h(qty, since)}"
         if await ctx.state.done(key):
             continue
         await ctx.graph.fact("owner", f"holding:{x['id']}", "보유", ("Asset", x["symbol"], x["name"]), fact,
-                             valid_at=kst_day(seen[x["id"]]["since"]))
+                             valid_at=kst_day(since) if since else None)
         await ctx.state.mark(key)
         added += 1
-    for hid, info in held.items():
-        if hid not in seen:
-            await ctx.graph.fact("owner", f"holding:{hid}", "보유", ("Asset", info["symbol"], info["name"]),
-                                 f"{info['name']}({info['symbol']})을 {info['since']}부터 보유했다가 {today:%Y-%m-%d}에 모두 처분",
-                                 valid_at=kst_day(info["since"]), invalid_at=today)
+    if complete:
+        for hid, info in held.items():
+            if hid in seen:
+                continue
+            # Its own edge: the holding's edge keeps what was held, this says it ended.
+            await ctx.graph.fact("owner", f"holding-sold:{hid}:{today:%Y-%m-%d}", "처분", ("Asset", info["symbol"], info["name"]),
+                                 f"{info['name']}({info['symbol']})을 {today:%Y-%m-%d}에 모두 처분",
+                                 valid_at=today)
             added += 1
+    else:
+        # What this answer left out is unknown, not sold: keep remembering it as held.
+        seen = {**held, **seen}
     for f in ((p.get("principal") or {}).get("flows") or []):
         key = f"flow:{f['id']}"
         if await ctx.state.done(key):
@@ -280,6 +295,16 @@ async def assets(ctx: Ctx):
         await ctx.graph.fact("owner", key, verb, ("Account", f["venue"], venue),
                              f"{f['date']} {venue}에 {won(abs(f['amountKrw']))} {verb}" + (f" ({f['memo']})" if f.get("memo") else ""),
                              valid_at=kst_day(f["date"]))
+        await ctx.state.mark(key)
+        added += 1
+    for sale in ((p.get("realized") or {}).get("sales") or []):
+        key = f"sale:{sale['id']}"
+        if await ctx.state.done(key):
+            continue
+        unit = "주" if sale["kind"] == "stock" else ""
+        await ctx.graph.fact("owner", key, "매도", ("Asset", sale["symbol"], sale["name"]),
+                             f"{sale['date']} {sale['name']} {round(sale['quantity'], 8)}{unit} 매도, 실현손익 {won(sale['profitKrw'])}",
+                             valid_at=kst_day(sale["date"]))
         await ctx.state.mark(key)
         added += 1
     await ctx.state.save("assets", {"held": seen}, added)
@@ -297,11 +322,13 @@ async def workout(ctx: Ctx):
         if s.get("date", "") < cutoff:
             continue
         for ex in s.get("exercises") or []:
-            sets = [x for x in ex.get("sets") or [] if x.get("done") and not x.get("warmup")]
+            # A set with no reps was ticked by mistake or left blank: not a set.
+            sets = [x for x in ex.get("sets") or [] if x.get("done") and not x.get("warmup") and (x.get("reps") or 0) > 0]
             if not sets:
                 continue
             top = max(sets, key=lambda x: (x.get("weight") or 0, x.get("reps") or 0))
-            fact = f"{s['date']} {ex['name']} {len(sets)}세트, 최고 {top.get('weight', 0)}kg×{top.get('reps', 0)}회"
+            best = f"{top['weight']}kg×{top['reps']}회" if top.get("weight") else f"맨몸 {top['reps']}회"
+            fact = f"{s['date']} {ex['name']} {len(sets)}세트, 최고 {best}"
             key = f"workout:{s['id']}:{ex['id']}:{h(fact)}"
             if await ctx.state.done(key):
                 continue
@@ -387,6 +414,36 @@ async def photos(ctx: Ctx):
     return added
 
 
+async def diary(ctx: Ctx):
+    """Every six hours (KST 00, 06, 12, 18), the structured facts written in
+    the window just closed go to the LLM as one episode. The facts themselves
+    are already in the graph, exact; the episode is for linking - the café a
+    payment went to, the person on the calendar - to the same people and
+    places the conversations mention, which only LLM extraction can resolve.
+    A window waits while the day's LLM budget is spent."""
+    cur = await ctx.state.cursor("diary")
+    now = datetime.now(KST)
+    end = now.replace(hour=now.hour - now.hour % 6, minute=0, second=0, microsecond=0)
+    done = datetime.fromisoformat(cur["through"]) if cur.get("through") else end - timedelta(hours=6)
+    added = 0
+    while done < end:
+        start, stop = done, done + timedelta(hours=6)
+        lines = await ctx.state.diary("owner", start, stop)
+        if lines:
+            if not await ctx.llm_ok():
+                break
+            body = "\n".join(f"- {line}" for _, line in lines)
+            await ctx.graph.episode(
+                "owner", f"diary:{start:%Y%m%d%H}", f"{start:%m/%d %H}시~{stop:%H}시 기록",
+                body, "jarvis 의 일정·지출·자산·운동·작업·사진 기록 6시간 묶음", stop,
+            )
+            await ctx.state.diary_used([i for i, _ in lines])
+            added += 1
+        done = stop
+        await ctx.state.save("diary", {"through": done.isoformat()}, added)
+    return added
+
+
 ALL = {
     # Structured first: they cost nothing and make the free text's people and
     # places land next to things already known.
@@ -399,4 +456,6 @@ ALL = {
     "chat": chat,
     "kakao": lambda ctx: messenger(ctx, "kakao", "카카오톡"),
     "imessage": lambda ctx: messenger(ctx, "imessage", "iMessage"),
+    # Last: it bundles what the structured sources above just wrote.
+    "diary": diary,
 }

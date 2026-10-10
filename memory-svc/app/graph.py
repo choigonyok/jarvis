@@ -13,6 +13,7 @@ Two ways in:
 import os
 import uuid
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from graphiti_core import Graphiti
 from graphiti_core.cross_encoder.client import CrossEncoderClient
@@ -23,6 +24,7 @@ from graphiti_core.nodes import EntityNode, EpisodeType
 
 from .llm import HaikuClient
 
+KST = ZoneInfo("Asia/Seoul")
 NS = uuid.UUID("6f1d3c52-8a3e-4c1b-9a63-6b9e3b8f2a11")
 
 # Who "나" is in each partition.
@@ -43,6 +45,13 @@ class PassThrough(CrossEncoderClient):
 
     async def rank(self, query: str, passages: list[str]) -> list[tuple[str, float]]:
         return [(p, 1.0 - i / max(len(passages), 1)) for i, p in enumerate(passages)]
+
+
+def kst(t: datetime | None) -> str | None:
+    """Seoul time; a stored time without a zone is UTC, as Graphiti writes it."""
+    if t is None:
+        return None
+    return (t if t.tzinfo else t.replace(tzinfo=timezone.utc)).astimezone(KST).isoformat()
 
 
 def stable_id(*parts: str) -> str:
@@ -79,6 +88,9 @@ class Graph:
         # searches have to go to that graph too, not the driver's default_db.
         self.drivers = {g: driver.clone(database=g) for g in SELF_NAME}
         self._nodes: set[str] = set()
+        # Heard after every direct fact: the 6-hour diary (sources.diary) is
+        # made of these lines.
+        self.on_fact = None
 
     async def setup(self):
         for d in self.drivers.values():
@@ -137,6 +149,8 @@ class Graph:
         )
         await edge.generate_embedding(self.embedder)
         await edge.save(self.drivers[group])
+        if self.on_fact:
+            await self.on_fact(group, fact, valid_at)
 
     async def search(self, query: str, group: str, limit: int = 10) -> list[dict]:
         edges = await self.g.search(query, group_ids=[group], num_results=limit, driver=self.drivers[group])
@@ -144,8 +158,10 @@ class Graph:
             {
                 "fact": e.fact,
                 "relation": e.name,
-                "validAt": e.valid_at.isoformat() if e.valid_at else None,
-                "invalidAt": e.invalid_at.isoformat() if e.invalid_at else None,
+                # Seoul time: a fact valid from 10/9 00:00 KST is 10/8 in UTC,
+                # and a date cut from the UTC form read as the day before.
+                "validAt": kst(e.valid_at),
+                "invalidAt": kst(e.invalid_at),
             }
             for e in edges
         ]

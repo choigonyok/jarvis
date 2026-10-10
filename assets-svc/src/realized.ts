@@ -42,9 +42,11 @@ export function replayUpbit(
   fills: UpbitFill[],
   heldNow: Map<string, number>,
   closeAtStart: Map<string, number>,
-): { sales: Sale[]; problems: string[] } {
+): { sales: Sale[]; opened: Map<string, string | null>; problems: string[] } {
   const sales: Sale[] = [];
   const problems: string[] = [];
+  // When each coin's current position began; null when it was already held at the start.
+  const opened = new Map<string, string | null>();
   const bySymbol = new Map<string, UpbitFill[]>();
   for (const f of fills) {
     if (DOLLAR_COINS.has(f.symbol)) continue; // dollars bought and sold are cash, not a bet
@@ -69,8 +71,10 @@ export function replayUpbit(
       }
     }
 
+    opened.set(symbol, qty > EPS ? null : "");
     for (const f of list) {
       if (f.side === "bid") {
+        if (qty <= EPS) opened.set(symbol, f.date);
         qty += f.volume;
         cost += f.fundsKrw + f.feeKrw;
         continue;
@@ -103,7 +107,7 @@ export function replayUpbit(
       });
     }
   }
-  return { sales, problems };
+  return { sales, opened, problems };
 }
 
 /**
@@ -124,13 +128,19 @@ export function replayUpbit(
  */
 export function replayKis(
   trades: KisTrade[],
-): { sales: Sale[]; held: Map<string, { quantity: number; costKrw: number }>; problems: string[] } {
+): {
+  sales: Sale[];
+  held: Map<string, { quantity: number; costKrw: number; since: string }>;
+  problems: string[];
+} {
   const sales: Sale[] = [];
   const problems: string[] = [];
-  const book = new Map<string, { quantity: number; costKrw: number }>();
+  const book = new Map<string, { quantity: number; costKrw: number; since: string }>();
   for (const t of trades) {
-    const pos = book.get(t.symbol) ?? { quantity: 0, costKrw: 0 };
+    const pos = book.get(t.symbol) ?? { quantity: 0, costKrw: 0, since: t.date };
     if (t.side === "buy") {
+      // A buy into an empty position opens a new one.
+      if (pos.quantity <= EPS) pos.since = t.date;
       pos.quantity += t.quantity;
       pos.costKrw += t.netKrw;
       book.set(t.symbol, pos);
