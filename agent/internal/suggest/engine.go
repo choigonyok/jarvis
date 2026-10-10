@@ -67,6 +67,10 @@ type Config struct {
 	// Out is where suggestions are reported (the events outbox). Nil posts
 	// straight to EventsURL.
 	Out *notify.Client
+	// Say puts a raised card in the conversation, under the agent's line
+	// on why: there it stays, approved or rejected, instead of floating
+	// below the transcript only while it waits. Nil leaves it floating.
+	Say func(lead string, proposalID string)
 }
 
 type Engine struct {
@@ -272,14 +276,14 @@ func clip(s string, n int) string {
 // --- the one tool the judging turn can change anything with -----------------
 
 type ProposeInput struct {
-	Title       string          `json:"title" jsonschema:"카드 제목. 한 줄."`
-	Body        string          `json:"body" jsonschema:"무엇을 하자는지, 숫자와 근거로 짧게."`
-	Why         string          `json:"why" jsonschema:"왜 지금 이걸 제안하는지 한두 문장."`
-	Action      string          `json:"action" jsonschema:"승인 시 실행할 것: calendar.create_event, 또는 실행 없이 계획만이면 none."`
+	Title  string `json:"title" jsonschema:"카드 제목. 한 줄."`
+	Body   string `json:"body" jsonschema:"무엇을 하자는지, 숫자와 근거로 짧게."`
+	Why    string `json:"why" jsonschema:"대화창에서 카드 바로 위에 남길 한두 문장: 왜 지금 이걸 먼저 제안하는지, 운영자에게 말하듯."`
+	Action string `json:"action" jsonschema:"승인 시 실행할 것: calendar.create_event, 또는 실행 없이 계획만이면 none."`
 	// An object, not json.RawMessage: that is a []byte, which the tool's
 	// schema advertises as an array of 0-255 - and an object is then refused.
 	ActionInput map[string]any `json:"action_input,omitempty" jsonschema:"action 의 입력. calendar.create_event 면 {date,title,start,place,shared}. none 이면 비운다."`
-	Confidence  float64         `json:"confidence" jsonschema:"운영자에게 실제로 도움이 될 가능성, 0~1."`
+	Confidence  float64        `json:"confidence" jsonschema:"운영자에게 실제로 도움이 될 가능성, 0~1."`
 }
 
 // Executable is what a suggestion may carry to run on approval.
@@ -366,10 +370,17 @@ func (e *Engine) propose(ctx context.Context, in ProposeInput) (string, error) {
 	p, _ := e.proposals.Open(proposal.Proposal{
 		Origin:     proposal.OriginSuggest,
 		Action:     action.Action{Kind: kind, Input: input},
-		Card:       action.Card{Title: in.Title, Body: cardBody(in, preview), Consequence: consequence},
+		Card:       action.Card{Title: in.Title, Body: cardBody(in, preview, e.cfg.Say == nil), Consequence: consequence},
 		Confidence: in.Confidence,
 	})
 	e.ledger.Record(j.topic, p.ID, in.Title, now)
+	if e.cfg.Say != nil {
+		lead := strings.TrimSpace(in.Why)
+		if lead == "" {
+			lead = "먼저 여쭤볼게요."
+		}
+		e.cfg.Say(lead, p.ID)
+	}
 	supersedes := []string{}
 	if j.ev.Key != "" {
 		supersedes = append(supersedes, j.ev.Key)
@@ -382,12 +393,14 @@ func (e *Engine) propose(ctx context.Context, in ProposeInput) (string, error) {
 	return "카드를 올렸습니다.", nil
 }
 
-func cardBody(in ProposeInput, preview action.Card) string {
+// cardBody is what the card says. The why goes on it only when there is no
+// line in the conversation above it to say so.
+func cardBody(in ProposeInput, preview action.Card, withWhy bool) string {
 	body := in.Body
 	if preview.Body != "" {
 		body += "\n\n" + preview.Body
 	}
-	if why := strings.TrimSpace(in.Why); why != "" {
+	if why := strings.TrimSpace(in.Why); why != "" && withWhy {
 		body += "\n\n왜: " + why
 	}
 	return body

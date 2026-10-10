@@ -187,6 +187,7 @@ func main() {
 		suggester = suggest.New(ledger, proposals, modules, runner, suggest.Config{
 			MCPBase: cfg.PublicMCPURL, EventsURL: cfg.EventsURL, Token: cfg.APIToken,
 			Out: notify.New(cfg.EventsURL, cfg.DatabaseURL, cfg.APIToken, log),
+			Say: func(lead, id string) { transcript.Raise([]string{lead}, id) },
 		}, log)
 		mcpMounts["/mcp/"+suggest.ServerName] = suggester.Handler()
 		proposals.OnDecide(suggester.OnDecide)
