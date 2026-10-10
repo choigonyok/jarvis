@@ -277,7 +277,8 @@ function PlanView({ plan, deposit, tax }: { plan: Plan; deposit: number; tax?: R
         </p>
       ) : null}
       {sells.length > 0 ? <Orders title="팔기" orders={sells} /> : null}
-      {tax && sells.length > 0 && Math.abs(gains.overseas + gains.coin) >= 1 ? (
+      {/* Under a thousand won is rounding, not something to weigh a sale by. */}
+      {tax && sells.length > 0 && Math.abs(gains.overseas + gains.coin) >= 1_000 ? (
         <div className="mt-3 space-y-4">
           <p className="tnum text-[12.5px] text-dim">
             이번에 팔면 실현되는 손익 약{" "}
