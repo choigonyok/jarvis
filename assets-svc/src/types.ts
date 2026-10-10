@@ -215,8 +215,19 @@ export type Realized = {
   tax: Tax;
 };
 
+/**
+ * One recorded day of the whole pot: what it was worth and how much had been
+ * put in by then. Their gap is the return; the rate is that over principal.
+ */
+export type TrackPoint = { date: string; totalKrw: number; principalKrw: number };
+
 export type Portfolio = {
   holdings: Holding[];
+  /**
+   * The pot day by day, from the daily snapshots, with today's live numbers
+   * as the last point. Empty when the principal or the snapshots cannot be read.
+   */
+  track: TrackPoint[];
   /** Null when neither brokerage's sales could be read. */
   realized: Realized | null;
   cashKrw: number;

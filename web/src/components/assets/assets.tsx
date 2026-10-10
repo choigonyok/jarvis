@@ -2,11 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
-import { Curve } from "@/components/assets/curve";
 import { PrincipalLedger, PrincipalParts } from "@/components/assets/principal";
 import { RealizedSection } from "@/components/assets/realized";
 import { ProfitBridge, Row, todos } from "@/components/assets/summary";
 import { TargetAllocation } from "@/components/assets/target";
+import { Track } from "@/components/assets/track";
 import { Header, TabBar } from "@/components/shell/header";
 import { StandingBar } from "@/components/shell/standing-bar";
 import {
@@ -22,13 +22,13 @@ import { isPending } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
 import { cn } from "@/lib/utils";
 
-type Fold = "bridge" | "todo" | "principal" | "curve";
+type Fold = "bridge" | "todo" | "principal" | "track";
 
 /**
  * What you own, and how far it has moved from what you paid.
  *
  * Four questions answered a line each - how much was made, what wants doing,
- * what went in, how prices moved - with the section behind each folded under
+ * what went in, how the pot has grown - with the section behind each folded under
  * it, and the holdings always in view. Laid out in full it ran past four phone
  * screens; this fits the answers on one.
  *
@@ -43,14 +43,11 @@ export function Assets() {
   const [data, setData] = useState<Portfolio | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  // Whose curve the chart shows: a holding id, or null for the whole basket.
-  const [subject, setSubject] = useState<string | null>(null);
-  const chart = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState<Record<Fold, boolean>>({
     bridge: false,
     todo: false,
     principal: false,
-    curve: false,
+    track: false,
   });
   const toggle = (k: Fold) => setOpen((o) => ({ ...o, [k]: !o[k] }));
 
@@ -112,7 +109,10 @@ export function Assets() {
   const since = principal
     ? `${Number(principal.since.slice(5, 7))}/${Number(principal.since.slice(8, 10))}`
     : "";
-  const month = data?.changes.month;
+  const track = data?.track ?? [];
+  const first = track[0];
+  const rateOf0 = (p: { totalKrw: number; principalKrw: number }) =>
+    p.principalKrw > 0 ? (p.totalKrw - p.principalKrw) / p.principalKrw : 0;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -281,43 +281,28 @@ export function Assets() {
                   </Row>
                 ) : null}
 
-                {/* Today's holdings at past prices: how the prices moved, not
-                    what was made - the bridge above is that. */}
+                {/* The whole pot over time - its size and its return - not
+                    any one holding's price. */}
                 <Row
-                  id="assets-curve"
-                  title="가격 흐름"
-                  open={open.curve}
-                  onToggle={() => toggle("curve")}
-                  detail={
-                    <div ref={chart} className="scroll-mt-4">
-                      <Curve
-                        series={data.series}
-                        rates={{
-                          day: data.changes.day.rate,
-                          month: data.changes.month.rate,
-                          year: data.changes.year.rate,
-                        }}
-                        holdings={data.holdings}
-                        holdingSeries={data.holdingSeries}
-                        subject={subject}
-                        onSubject={setSubject}
-                      />
-                    </div>
-                  }
+                  id="assets-track"
+                  title="자산 변화"
+                  open={open.track}
+                  onToggle={() => toggle("track")}
+                  detail={<Track points={track} />}
                 >
-                  <p className="tnum text-[13px] text-dim">
-                    {month?.rate != null ? (
-                      <>
-                        지금 종목 1개월{" "}
-                        <span className={month.rate >= 0 ? "text-approve/85" : "text-reject/85"}>
-                          {percent(month.rate, 1)}
-                        </span>
-                      </>
-                    ) : (
-                      "지금 종목의 가격 변화"
-                    )}
-                    <span className="ms-2 text-faint">수익이 아니라 시세 변화예요</span>
-                  </p>
+                  {first && track.length >= 2 ? (
+                    <p className="tnum text-[13px] text-dim">
+                      {Number(first.date.slice(5, 7))}/{Number(first.date.slice(8, 10))}부터{" "}
+                      <span className="whitespace-nowrap text-foreground/90">
+                        {krw(first.totalKrw)} → {krw(data.totalKrw)}
+                      </span>{" "}
+                      <span className="whitespace-nowrap">
+                        수익률 {percent(rateOf0(first), 1)} → {percent(rate, 1)}
+                      </span>
+                    </p>
+                  ) : (
+                    <p className="text-[13px] text-faint">하루에 한 번 기록해요. 이틀치부터 보여요.</p>
+                  )}
                 </Row>
               </div>
             ) : null}
@@ -333,24 +318,8 @@ export function Assets() {
                     const gain = profit >= 0;
                     // Sold earlier, so no longer in the row's own profit.
                     const sold = data.realized?.lines.find((l) => l.id === h.id)?.profitKrw ?? 0;
-                    const charted = (data.holdingSeries?.[h.id]?.month?.length ?? 0) >= 2;
                     return (
-                      <button
-                        key={h.id}
-                        type="button"
-                        disabled={!charted}
-                        onClick={() => {
-                          setSubject(h.id);
-                          setOpen((o) => ({ ...o, curve: true }));
-                          // After the row has opened and laid the chart out.
-                          requestAnimationFrame(() => chart.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
-                        }}
-                        aria-label={`${h.name} 수익률 그래프 보기`}
-                        className={cn(
-                          "flex w-full items-baseline gap-3 rounded-lg px-2 py-2.5 text-left transition-colors outline-none hover:bg-glass focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-default",
-                          subject === h.id && "bg-glass",
-                        )}
-                      >
+                      <div key={h.id} className="flex items-baseline gap-3 rounded-lg px-2 py-2.5">
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-[14px] text-foreground/90">
                             {h.name}
@@ -385,7 +354,7 @@ export function Assets() {
                             </p>
                           ) : null}
                         </div>
-                      </button>
+                      </div>
                     );
                   })}
                 </div>
@@ -394,8 +363,8 @@ export function Assets() {
                   <div className="mt-4 border-t border-edge-soft pt-3">
                     <p className="mb-1 px-2 text-[12px] text-faint">현금</p>
                     {data.cash
-                        .filter((c) => c.valueKrw >= 1)
-                        .map((c) => (
+                      .filter((c) => c.valueKrw >= 1)
+                      .map((c) => (
                       <div key={c.id} className="flex items-baseline gap-3 rounded-lg px-2 py-2.5">
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-[14px] text-foreground/90">

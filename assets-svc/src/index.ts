@@ -50,6 +50,10 @@ async function portfolioJson(force = false): Promise<string> {
   return rebuild();
 }
 
+/** The day the last build was saved as a snapshot, Seoul time. */
+let builtOn = "";
+const seoulToday = () => new Date().toLocaleDateString("sv-SE", { timeZone: TZ });
+
 async function rebuild(): Promise<string> {
   if (inflight) return inflight;
 
@@ -61,9 +65,13 @@ async function rebuild(): Promise<string> {
 
     // 스냅샷은 곁일이다. 실패해도 자산 조회는 그대로 답해야 하므로 await 하지
     // 않고, 오류는 로그로만 남긴다.
-    db.saveSnapshot(portfolio, TZ).catch((e: Error) => {
-      console.error("스냅샷을 저장하지 못했습니다:", e.message);
-    });
+    db.saveSnapshot(portfolio, TZ)
+      .then(() => {
+        builtOn = seoulToday();
+      })
+      .catch((e: Error) => {
+        console.error("스냅샷을 저장하지 못했습니다:", e.message);
+      });
     return body;
   })();
 
@@ -205,6 +213,19 @@ const server = createServer((req, res) => {
 server.listen(PORT, () => {
   console.log(`assets-svc 가 듣기 시작했습니다: :${PORT}`);
 });
+
+// 자산 변화는 하루 한 장의 스냅샷으로 기록된다. 스냅샷은 누가 자산을 볼 때마다
+// 찍히는데, 아무도 안 본 날은 비게 된다. 그래서 한 시간마다 오늘 것이 있는지
+// 보고 없으면 직접 계산해 남긴다. 한투 입출금 감지도 같은 계산에서 돌아서,
+// 이게 있어야 하루 단위로 정확하다.
+const daily = setInterval(() => {
+  if (builtOn === seoulToday()) return;
+  rebuild().catch((e: Error) => console.error("오늘 스냅샷을 남기지 못했습니다:", e.message));
+}, 60 * 60_000);
+daily.unref();
+setTimeout(() => {
+  if (builtOn !== seoulToday()) rebuild().catch(() => {});
+}, 60_000).unref();
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
