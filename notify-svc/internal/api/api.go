@@ -9,6 +9,8 @@
 //	POST   /subscriptions       a browser's PushSubscription
 //	DELETE /subscriptions       {endpoint}
 //	POST   /test                a push to every device, to see it arrive
+//	POST   /presence            a console on screen, or leaving it
+//	GET    /stream              pushes as they go out, for an open console
 package api
 
 import (
@@ -20,7 +22,9 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/choigonyok/jarvis/notify-svc/internal/live"
 	"github.com/choigonyok/jarvis/notify-svc/internal/notify"
 	"github.com/choigonyok/jarvis/notify-svc/internal/push"
 	"github.com/choigonyok/jarvis/notify-svc/internal/store"
@@ -30,12 +34,13 @@ type Server struct {
 	svc   *notify.Service
 	store *store.Store
 	push  *push.Pusher
+	live  *live.Hub
 	token string
 	log   *slog.Logger
 }
 
-func New(svc *notify.Service, st *store.Store, p *push.Pusher, token string, log *slog.Logger) *Server {
-	return &Server{svc: svc, store: st, push: p, token: token, log: log}
+func New(svc *notify.Service, st *store.Store, p *push.Pusher, hub *live.Hub, token string, log *slog.Logger) *Server {
+	return &Server{svc: svc, store: st, push: p, live: hub, token: token, log: log}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -57,6 +62,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /subscriptions", s.auth(s.subscribe))
 	mux.HandleFunc("DELETE /subscriptions", s.auth(s.unsubscribe))
 	mux.HandleFunc("POST /test", s.auth(s.test))
+	mux.HandleFunc("POST /presence", s.auth(s.presence))
+	mux.HandleFunc("GET /stream", s.auth(s.stream))
 	return mux
 }
 
@@ -248,6 +255,55 @@ func (s *Server) test(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]int{"sent": n})
+}
+
+// presence is a console saying it is on screen ({endpoint, visible: true},
+// every few seconds) or leaving ({visible: false}). See internal/live.
+func (s *Server) presence(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Endpoint string `json:"endpoint"`
+		Visible  bool   `json:"visible"`
+	}
+	if !readJSON(w, r, &in) {
+		return
+	}
+	s.live.Seen(in.Endpoint, in.Visible)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// stream sends an open console each push as it goes out (server-sent
+// events), so the page can show it in place of the phone's banner.
+func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
+	rc := http.NewResponseController(w)
+	_ = rc.SetWriteDeadline(time.Time{}) // open for as long as the page is
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, ": open\n\n")
+	_ = rc.Flush()
+	msgs, stop := s.live.Subscribe()
+	defer stop()
+	beat := time.NewTicker(15 * time.Second)
+	defer beat.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-beat.C:
+			// Keeps proxies from closing a quiet stream.
+			if _, err := io.WriteString(w, ": beat\n\n"); err != nil {
+				return
+			}
+		case m := <-msgs:
+			if _, err := fmt.Fprintf(w, "data: %s\n\n", m); err != nil {
+				return
+			}
+		}
+		if err := rc.Flush(); err != nil {
+			return
+		}
+	}
 }
 
 func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {

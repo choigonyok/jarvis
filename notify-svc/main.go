@@ -25,6 +25,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/choigonyok/jarvis/notify-svc/internal/api"
+	"github.com/choigonyok/jarvis/notify-svc/internal/live"
 	"github.com/choigonyok/jarvis/notify-svc/internal/notify"
 	"github.com/choigonyok/jarvis/notify-svc/internal/push"
 	"github.com/choigonyok/jarvis/notify-svc/internal/store"
@@ -54,11 +55,12 @@ func main() {
 	}
 
 	st := store.New(pool)
+	hub := live.New()
 	pusher := push.New(push.Keys{
 		Public:  os.Getenv("VAPID_PUBLIC_KEY"),
 		Private: os.Getenv("VAPID_PRIVATE_KEY"),
 		Subject: getenv("VAPID_SUBJECT", "https://jarvis.choigonyok.com"),
-	}, st, log)
+	}, st, hub, log)
 	if !pusher.Ready() {
 		log.Warn("VAPID 키가 없어 푸시는 보내지 않고 알림함에만 쌓습니다")
 	}
@@ -89,7 +91,7 @@ func main() {
 	addr := getenv("LISTEN_ADDR", ":8097")
 	srv := &http.Server{
 		Addr:         addr,
-		Handler:      api.New(svc, st, pusher, os.Getenv("API_TOKEN"), log).Handler(),
+		Handler:      api.New(svc, st, pusher, hub, os.Getenv("API_TOKEN"), log).Handler(),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 60 * time.Second,
 	}
