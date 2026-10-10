@@ -16,6 +16,7 @@ import (
 
 	webpush "github.com/SherClockHolmes/webpush-go"
 
+	"github.com/choigonyok/jarvis/notify-svc/internal/live"
 	"github.com/choigonyok/jarvis/notify-svc/internal/store"
 )
 
@@ -40,11 +41,13 @@ type Keys struct {
 type Pusher struct {
 	keys  Keys
 	store *store.Store
+	live  *live.Hub
 	log   *slog.Logger
 }
 
-func New(keys Keys, s *store.Store, log *slog.Logger) *Pusher {
-	return &Pusher{keys: keys, store: s, log: log}
+// New returns a pusher. live may be nil: then every device gets the push.
+func New(keys Keys, s *store.Store, hub *live.Hub, log *slog.Logger) *Pusher {
+	return &Pusher{keys: keys, store: s, live: hub, log: log}
 }
 
 func (p *Pusher) Ready() bool { return p.keys.Public != "" && p.keys.Private != "" }
@@ -55,14 +58,18 @@ func (p *Pusher) PublicKey() string { return p.keys.Public }
 // service says no longer exists is forgotten; one that fails otherwise keeps
 // its place until it has failed many times in a row.
 func (p *Pusher) Send(ctx context.Context, pl Payload) (int, error) {
+	body, err := json.Marshal(pl)
+	if err != nil {
+		return 0, err
+	}
+	// Every open console hears it at once, and shows it in the page.
+	if p.live != nil {
+		p.live.Broadcast(body)
+	}
 	if !p.Ready() {
 		return 0, nil
 	}
 	subs, err := p.store.Subscriptions(ctx)
-	if err != nil {
-		return 0, err
-	}
-	body, err := json.Marshal(pl)
 	if err != nil {
 		return 0, err
 	}
@@ -72,6 +79,12 @@ func (p *Pusher) Send(ctx context.Context, pl Payload) (int, error) {
 	}
 	sent := 0
 	for _, sub := range subs {
+		// On screen: the page shows it (above); a phone banner would only
+		// cover that.
+		if p.live != nil && p.live.Present(sub.Endpoint) {
+			sent++
+			continue
+		}
 		resp, err := webpush.SendNotificationWithContext(ctx, body, &webpush.Subscription{
 			Endpoint: sub.Endpoint,
 			Keys:     webpush.Keys{P256dh: sub.P256dh, Auth: sub.Auth},

@@ -60,11 +60,10 @@ export function onInboxRequest(fn: () => void): () => void {
 export function handleWorkerMessage(data: unknown, go: (path: string) => void) {
   const msg = data as { type?: string; title?: string; body?: string; url?: string } | null;
   if (msg?.type === "jarvis:push") {
+    // A push that reached the phone: the phone showed it, so the page only
+    // re-reads. What the page shows itself comes over its own stream
+    // (useLiveNotifications), for devices notify-svc knows are looking.
     window.dispatchEvent(new Event(RESUME));
-    if (document.visibilityState === "visible") {
-      const detail: ShownPush = { title: msg.title || "jarvis", body: msg.body, url: msg.url };
-      window.dispatchEvent(new CustomEvent<ShownPush>(SHOWN, { detail }));
-    }
     return;
   }
   if (msg?.type !== "jarvis:open") return;
@@ -78,6 +77,80 @@ export function handleWorkerMessage(data: unknown, go: (path: string) => void) {
   }
   const card = target.searchParams.get("proposal");
   if (card) window.dispatchEvent(new CustomEvent<string>(FOCUS, { detail: card }));
+}
+
+/** Show a push in the page and re-read, as one that came over the stream. */
+export function showInApp(p: ShownPush) {
+  window.dispatchEvent(new Event(RESUME));
+  window.dispatchEvent(new CustomEvent<ShownPush>(SHOWN, { detail: p }));
+}
+
+/**
+ * While the console is on screen: an open stream from notify-svc, and every
+ * 10 seconds a word that this device is looking - so notify-svc sends what
+ * happens over the stream, shown in the page, instead of a phone push whose
+ * banner would cover it. Leaving the screen closes the stream and says so;
+ * a phone that suspends the page without a word stops saying it, and
+ * notify-svc goes back to pushing 15 seconds later (internal/live).
+ */
+export function useLiveNotifications(enabled: boolean) {
+  useEffect(() => {
+    if (!enabled) return;
+    let source: EventSource | null = null;
+    let ping: number | undefined;
+    let endpoint = "";
+    const presence = (visible: boolean) => {
+      if (!endpoint) return;
+      const body = JSON.stringify({ endpoint, visible });
+      if (!visible && navigator.sendBeacon) {
+        navigator.sendBeacon("/api/notify/presence", new Blob([body], { type: "application/json" }));
+        return;
+      }
+      void fetch("/api/notify/presence", { method: "POST", headers: { "content-type": "application/json" }, body, keepalive: true }).catch(() => {});
+    };
+    const start = () => {
+      if (source) return;
+      source = new EventSource("/api/notify/stream");
+      source.onmessage = (e) => {
+        try {
+          const p = JSON.parse(e.data) as ShownPush;
+          showInApp({ title: p.title || "jarvis", body: p.body, url: p.url });
+        } catch {
+          /* 해석할 수 없는 프레임은 버린다 */
+        }
+      };
+      // Only a device whose stream is open may say it is looking: one that
+      // said so with a broken stream would get neither a push nor a banner.
+      const say = () => source?.readyState === EventSource.OPEN && presence(true);
+      source.onopen = say;
+      ping = window.setInterval(say, 10_000);
+    };
+    const stop = () => {
+      window.clearInterval(ping);
+      source?.close();
+      source = null;
+      presence(false);
+    };
+    const onVisibility = () => (document.visibilityState === "visible" ? start() : stop());
+
+    // The push subscription's endpoint is what notify-svc knows this device by.
+    void (async () => {
+      try {
+        const reg = await navigator.serviceWorker?.getRegistration();
+        endpoint = (await reg?.pushManager.getSubscription())?.endpoint ?? "";
+      } catch {
+        endpoint = "";
+      }
+      if (document.visibilityState === "visible") start();
+    })();
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pagehide", stop);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pagehide", stop);
+      stop();
+    };
+  }, [enabled]);
 }
 
 export function useNotificationOpen(router: ReturnType<typeof useRouter>) {

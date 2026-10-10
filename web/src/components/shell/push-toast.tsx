@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useRole } from "@/components/shell/role";
-import { handleWorkerMessage, onPushShown, useNotificationOpen, type ShownPush } from "@/lib/resume";
+import { handleWorkerMessage, onPushShown, useLiveNotifications, useNotificationOpen, type ShownPush } from "@/lib/resume";
 
 const SHOWN_MS = 4000;
 const LEAVE_MS = 240;
@@ -19,6 +19,9 @@ export function PushBridge() {
   const role = useRole();
   const router = useRouter();
   useNotificationOpen(router);
+  // Not on /login: nobody is signed in to stream to there.
+  const signedIn = !usePathname().startsWith("/login");
+  useLiveNotifications(role === "owner" && signedIn);
   return role === "owner" ? <PushToast /> : null;
 }
 

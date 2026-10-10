@@ -19,6 +19,8 @@ async function proxy(request: Request, context: { params: Promise<{ path: string
       headers,
       body: request.method === "GET" || request.method === "HEAD" ? undefined : await request.text(),
       cache: "no-store",
+      // /stream stays open while the page does; closing the page closes it.
+      signal: request.signal,
     });
     return new Response(upstream.body, {
       status: upstream.status,
