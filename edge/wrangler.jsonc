@@ -24,7 +24,8 @@
     { "binding": "IMMICH", "service_id": "01a11bd8-d0dc-7fd1-9177-3f6a87e65da7" },
     { "binding": "STATUS", "service_id": "01a11684-43c2-72b1-9065-5045a0a58cf1" },
     { "binding": "BROWSER", "service_id": "01a1168b-598c-7b83-a0a4-e30db679e437" },
-    { "binding": "AGENT_GUEST", "service_id": "01a116d3-fa8c-77f0-a52c-774130a9e043" }
+    { "binding": "AGENT_GUEST", "service_id": "01a116d3-fa8c-77f0-a52c-774130a9e043" },
+    { "binding": "NOTIFY", "service_id": "01a12614-1eb7-7611-9760-96ac0e54c96f" }
   ]
   // JARVIS_API_TOKEN arrives as a secret: wrangler secret put JARVIS_API_TOKEN
 }
