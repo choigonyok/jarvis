@@ -220,7 +220,8 @@ func main() {
 			}
 			notifier.Send(notify.Event{
 				Source: "agent", Kind: kind, Tier: "now", Level: "warn",
-				Title: title, Body: body, URL: "/", Key: "proposal:" + p.ID,
+				// Straight to the card, not the bottom of the thread.
+				Title: title, Body: body, URL: "/?proposal=" + p.ID, Key: "proposal:" + p.ID,
 			})
 		})
 	}

@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/choigonyok/jarvis/notify-svc/internal/notify"
 	"github.com/choigonyok/jarvis/notify-svc/internal/push"
@@ -230,10 +231,18 @@ func (s *Server) unsubscribe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+// test pushes to every device at once, quiet hours or not. Optional
+// {title, body, url}: where a tap on it goes, to try that too.
 func (s *Server) test(w http.ResponseWriter, r *http.Request) {
-	n, err := s.push.Send(r.Context(), push.Payload{
-		Title: "알림이 잘 와요", Body: "jarvis 에서 보낸 시험 알림이에요.", URL: "/?inbox=1", Tag: "test",
-	})
+	in := push.Payload{Title: "알림이 잘 와요", Body: "jarvis 에서 보낸 시험 알림이에요.", URL: "/"}
+	if r.ContentLength > 0 && !readJSON(w, r, &in) {
+		return
+	}
+	if !strings.HasPrefix(in.URL, "/") || strings.HasPrefix(in.URL, "//") {
+		in.URL = "/"
+	}
+	in.Tag = "test"
+	n, err := s.push.Send(r.Context(), in)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "보내지 못했습니다."})
 		return

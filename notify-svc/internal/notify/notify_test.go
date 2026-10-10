@@ -187,3 +187,27 @@ func TestInvalidEvent(t *testing.T) {
 		t.Fatalf("바깥 주소가 남았습니다: %q", n.URL)
 	}
 }
+
+// A grouped push goes to the screen its notifications are about, and to
+// the inbox only when they are about different ones.
+func TestGroupURL(t *testing.T) {
+	n := func(urls ...string) []store.Notification {
+		out := make([]store.Notification, len(urls))
+		for i, u := range urls {
+			out[i] = store.Notification{URL: u}
+		}
+		return out
+	}
+	for _, c := range []struct {
+		in   []store.Notification
+		want string
+	}{
+		{n("/spending", "/spending"), "/spending"},
+		{n("/?proposal=p-1", "/?proposal=p-2"), "/"},
+		{n("/spending", "/assets"), "/?inbox=1"},
+	} {
+		if got := groupURL(c.in); got != c.want {
+			t.Fatalf("%v: %q, want %q", c.in, got, c.want)
+		}
+	}
+}
