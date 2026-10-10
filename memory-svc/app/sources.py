@@ -287,12 +287,14 @@ async def assets(ctx: Ctx):
         # What this answer left out is unknown, not sold: keep remembering it as held.
         seen = {**held, **seen}
     for f in ((p.get("principal") or {}).get("flows") or []):
-        key = f"flow:{f['id']}"
+        # A ledger row corrected later (amount, day, memo) is written again
+        # over the same edge, so the graph follows the correction.
+        key = f"flow:{f['id']}:{h(f['amountKrw'], f['date'], f.get('memo'))}"
         if await ctx.state.done(key):
             continue
         verb = "입금" if f["amountKrw"] >= 0 else "출금"
         venue = {"upbit": "업비트", "kis": "한국투자증권", "gold": "금현물 계좌"}.get(f["venue"], f["venue"])
-        await ctx.graph.fact("owner", key, verb, ("Account", f["venue"], venue),
+        await ctx.graph.fact("owner", f"flow:{f['id']}", verb, ("Account", f["venue"], venue),
                              f"{f['date']} {venue}에 {won(abs(f['amountKrw']))} {verb}" + (f" ({f['memo']})" if f.get("memo") else ""),
                              valid_at=kst_day(f["date"]))
         await ctx.state.mark(key)
