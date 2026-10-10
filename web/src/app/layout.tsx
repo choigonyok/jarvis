@@ -40,7 +40,11 @@ export const metadata: Metadata = {
   // launch draws the page below the notch and leaves the strip blank.
   other: { "apple-mobile-web-app-capable": "yes" },
   icons: {
-    icon: [{ url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" }],
+    // A tab is 16px: the simplified three-line mark, the full one above that.
+    icon: [
+      { url: "/icons/favicon-32.png", sizes: "32x32", type: "image/png" },
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+    ],
     apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
   },
 };
