@@ -17,15 +17,25 @@ self.addEventListener("push", (event) => {
   }
   const title = data.title || "jarvis";
   event.waitUntil(
-    self.registration.showNotification(title, {
-      body: data.body || "",
-      tag: data.tag || undefined,
-      // A replaced notification with the same tag still deserves a buzz.
-      renotify: Boolean(data.tag),
-      icon: "/icons/icon-192.v2.png",
-      badge: "/icons/icon-192.v2.png",
-      data: { url: data.url || "/" },
-    }),
+    (async () => {
+      // Always shown: a push that shows nothing is what gets a site's push
+      // permission withdrawn (iOS counts them).
+      await self.registration.showNotification(title, {
+        body: data.body || "",
+        tag: data.tag || undefined,
+        // A replaced notification with the same tag still deserves a buzz.
+        renotify: Boolean(data.tag),
+        icon: "/icons/icon-192.v2.png",
+        badge: "/icons/icon-192.v2.png",
+        data: { url: data.url || "/" },
+      });
+      // And an open console hears of it at once: it re-reads, and shows it
+      // in the app if it is on screen (lib/resume.ts).
+      const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      for (const w of windows) {
+        w.postMessage({ type: "jarvis:push", title, body: data.body || "", url: data.url || "/" });
+      }
+    })(),
   );
 });
 
@@ -41,7 +51,9 @@ self.addEventListener("notificationclick", (event) => {
           // (lib/resume.ts). navigate() would reload the whole app - and a
           // home-screen app on iOS does not reliably do even that, so the
           // tap used to show what the page had before it was suspended.
-          await w.focus();
+          // Refused focus (a browser that allows it only for some taps)
+          // must not cost the re-read.
+          await w.focus().catch(() => {});
           w.postMessage({ type: "jarvis:open", url });
           return;
         }
