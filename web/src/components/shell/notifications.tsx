@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { onInboxRequest, onResume } from "@/lib/resume";
 import { Bell, Settings2 } from "lucide-react";
 import { usePush } from "@/lib/use-push";
 import { cn } from "@/lib/utils";
@@ -78,11 +79,10 @@ export function Notifications() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- the fetch sets state when it resolves
     void load();
     const id = window.setInterval(() => void load(), 60_000);
-    const back = () => document.visibilityState === "visible" && void load();
-    document.addEventListener("visibilitychange", back);
+    const stop = onResume(() => void load());
     return () => {
       window.clearInterval(id);
-      document.removeEventListener("visibilitychange", back);
+      stop();
     };
   }, [load]);
 
@@ -92,6 +92,8 @@ export function Notifications() {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- opened once, from the URL a tap arrived with
       setOpen(true);
     }
+    // ...or, with the console already open, tells it so (lib/resume.ts).
+    return onInboxRequest(() => setOpen(true));
   }, []);
 
   useEffect(() => {
