@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { RealizedSection } from "@/components/assets/realized";
-import { ProfitBridge, Row, todos } from "@/components/assets/summary";
-import { AllocationBrief } from "@/components/assets/target";
+import { ProfitBar, ProfitLegend, Row } from "@/components/assets/summary";
+import { AllocationBar, AllocationDetail } from "@/components/assets/target";
 import { Track } from "@/components/assets/track";
 import { Header, TabBar } from "@/components/shell/header";
 import { StandingBar } from "@/components/shell/standing-bar";
@@ -22,7 +22,7 @@ import { isPending } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
 import { cn } from "@/lib/utils";
 
-type Fold = "bridge";
+type Fold = "bridge" | "alloc" | "principal";
 
 /**
  * What you own, and how far it has moved from what you paid.
@@ -43,7 +43,7 @@ export function Assets() {
   const [data, setData] = useState<Portfolio | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [open, setOpen] = useState<Record<Fold, boolean>>({ bridge: false });
+  const [open, setOpen] = useState<Record<Fold, boolean>>({ bridge: false, alloc: false, principal: false });
   const toggle = (k: Fold) => setOpen((o) => ({ ...o, [k]: !o[k] }));
 
   // The service answers at once with what it last had (marked stale) and
@@ -94,8 +94,17 @@ export function Assets() {
   // The headline return, taken apart by assets-svc (see ProfitBridge).
   const bridge = data?.bridge ?? null;
   const unrealizedKrw = data?.holdings.reduce((sum, h) => sum + profitOf(h), 0) ?? 0;
-  const todo = data ? todos(data) : [];
-  const overseas = data?.realized?.tax.baskets.find((b) => b.kind === "overseas");
+  // Off target: a bucket outside its band, said as the transfer that fixes it.
+  const allocation = data?.allocation;
+  const offBand = allocation ? allocation.rows.filter((r) => !r.inBand) : [];
+  const fixes = allocation
+    ? allocation.moves
+        .filter((m) => !m.optional)
+        .map((m) => {
+          const label = (id: string) => allocation.rows.find((r) => r.id === id)?.label ?? id;
+          return `${label(m.from)}에서 ${label(m.to)}로 ${krw(m.amountKrw)} 옮기기`;
+        })
+    : [];
   const since = principal
     ? `${Number(principal.since.slice(5, 7))}/${Number(principal.since.slice(8, 10))}`
     : "";
@@ -192,72 +201,80 @@ export function Assets() {
                   title="수익"
                   open={open.bridge}
                   onToggle={() => toggle("bridge")}
-                  detail={data.realized ? <RealizedSection realized={data.realized} /> : null}
+                  detail={
+                    <div className="space-y-5">
+                      {bridge ? <ProfitLegend {...bridge} /> : null}
+                      {data.realized ? <RealizedSection realized={data.realized} /> : null}
+                    </div>
+                  }
                 >
                   {bridge ? (
-                    <ProfitBridge {...bridge} />
+                    <div className="pt-1.5">
+                      <ProfitBar {...bridge} />
+                    </div>
                   ) : (
-                    <span className="tnum text-[13px] text-dim">
-                      평가손익 {signedKrw(unrealizedKrw)}
-                    </span>
+                    <span className="tnum text-[13px] text-dim">평가손익 {signedKrw(unrealizedKrw)}</span>
                   )}
-                  {overseas?.inForce ? (
-                    <p className="tnum mt-2 text-[12px] text-faint">
-                      올해 해외주식 {signedKrw(overseas.gainKrw)} · 양도세{" "}
-                      {overseas.taxKrw > 0 ? `약 ${krw(overseas.taxKrw)}` : "없음"} · 공제{" "}
-                      {krw(Math.max(0, overseas.deductionKrw - Math.max(0, overseas.gainKrw)))} 남음
-                    </p>
-                  ) : null}
                 </Row>
 
-                {/* Open, but short: what to do in sentences, then the allocation
-                    and its orders in a few lines (AllocationBrief). */}
-                <Row id="assets-todo" title="할 일">
-                  {todo.length ? (
-                    <ul className="space-y-1">
-                      {todo.map((t) => (
-                        <li
-                          key={t.text}
-                          className="flex gap-2 text-[13px] leading-snug text-foreground/90"
-                        >
-                          <span
-                            aria-hidden
-                            className="mt-[0.45em] size-1.5 shrink-0 rounded-full bg-reject"
-                          />
-                          {t.text}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="text-[13px] text-dim">
-                      없어요{" "}
-                      <span className="text-faint">· 비중은 허용 범위 안, 원금 기록도 맞아요</span>
-                    </p>
-                  )}
-                  {data.allocation ? (
-                    <AllocationBrief
-                      allocation={data.allocation}
-                      holdings={data.holdings}
-                      goldGramKrw={data.goldGramKrw}
-                      tax={data.realized?.tax}
-                    />
-                  ) : null}
-                </Row>
+                {allocation ? (
+                  <Row
+                    id="assets-alloc"
+                    title="비중"
+                    open={open.alloc}
+                    onToggle={() => toggle("alloc")}
+                    detail={
+                      <AllocationDetail
+                        allocation={allocation}
+                        holdings={data.holdings}
+                        goldGramKrw={data.goldGramKrw}
+                        tax={data.realized?.tax}
+                      />
+                    }
+                  >
+                    {offBand.length ? (
+                      <p className="flex items-baseline gap-2 text-[13px] text-foreground/90">
+                        <span aria-hidden className="size-1.5 shrink-0 self-center rounded-full bg-reject" />
+                        비정상
+                        <span className="text-[12px] text-dim">{fixes.join(" · ")}</span>
+                      </p>
+                    ) : (
+                      <p className="text-[13px] text-dim">정상</p>
+                    )}
+                    <div className="mt-2.5">
+                      <AllocationBar allocation={allocation} />
+                    </div>
+                  </Row>
+                ) : null}
 
                 {principal ? (
-                  <Row id="assets-principal" title="원금">
+                  <Row
+                    id="assets-principal"
+                    title="원금"
+                    open={open.principal}
+                    onToggle={() => toggle("principal")}
+                    detail={
+                      <p className="tnum text-[12px] leading-relaxed text-faint">
+                        {[
+                          ...principal.parts
+                            .filter((p) => p.principalKrw !== 0)
+                            .map((p) => `${PART_LABEL[p.venue]} ${krw(p.principalKrw)}`),
+                          ...(data.fixed ?? []).map((f) => `${f.label} ${krw(f.valueKrw)}`),
+                        ].join(" · ")}
+                      </p>
+                    }
+                  >
                     <p className="tnum text-[13px] text-foreground/90">
                       {krw(principal.principalKrw)}
                       <span className="ms-2 text-faint">{since}부터 넣은 돈</span>
                     </p>
-                    <p className="tnum mt-1 text-[12px] leading-relaxed text-faint">
-                      {[
-                        ...principal.parts
-                          .filter((p) => p.principalKrw !== 0)
-                          .map((p) => `${PART_LABEL[p.venue]} ${krw(p.principalKrw)}`),
-                        ...(data.fixed ?? []).map((f) => `${f.label} ${krw(f.valueKrw)}`),
-                      ].join(" · ")}
-                    </p>
+                    {/* A ledger that disagrees with the trades is said here, folded or not. */}
+                    {principal.checks?.map((c) => (
+                      <p key={`${c.kind}-${c.date ?? ""}`} className="mt-1 text-[12px] leading-relaxed text-dim">
+                        <span aria-hidden className="me-1.5 inline-block size-1.5 rounded-full bg-reject align-middle" />
+                        {c.message}
+                      </p>
+                    ))}
                   </Row>
                 ) : null}
               </div>

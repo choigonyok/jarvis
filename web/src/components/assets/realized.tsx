@@ -6,7 +6,6 @@ import {
   type TaxBasket,
   krw,
   percent,
-  quantity,
   signedKrw,
   taxFor,
 } from "@/lib/portfolio";
@@ -23,7 +22,7 @@ import { cn } from "@/lib/utils";
  * sale costs tax.
  */
 export function RealizedSection({ realized }: { realized: Realized }) {
-  const { lines, sales, totalKrw, tax, since, missing } = realized;
+  const { lines, totalKrw, tax, since, missing } = realized;
   const up = totalKrw >= 0;
   const [, m, d] = since.split("-").map(Number);
 
@@ -83,47 +82,6 @@ export function RealizedSection({ realized }: { realized: Realized }) {
         ))}
       </div>
 
-      {sales.length > 0 ? (
-        <details className="group mt-5">
-          <summary className="tap -ms-1 flex min-h-9 cursor-pointer list-none items-center gap-1.5 rounded-lg px-1 text-[12.5px] text-dim outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 [&::-webkit-details-marker]:hidden">
-            <svg aria-hidden viewBox="0 0 8 8" className="size-2 transition-transform group-open:rotate-90 motion-reduce:transition-none">
-              <path d="M2 1l4 3-4 3z" fill="currentColor" />
-            </svg>
-            매도 내역 {sales.length}건
-          </summary>
-          <table className="mt-2 w-full text-[12px]">
-            <thead>
-              <tr className="text-[11px] text-faint">
-                <th className="pb-1.5 text-left font-normal">날짜</th>
-                <th className="pb-1.5 text-left font-normal">종목</th>
-                <th className="hidden pb-1.5 text-right font-normal sm:table-cell">판 금액</th>
-                <th className="pb-1.5 text-right font-normal">손익</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sales.map((s) => (
-                <tr key={s.id} className="border-t border-edge-soft">
-                  <td className="tnum py-1.5 pr-2 whitespace-nowrap text-faint">{s.date.slice(5).replace("-", ".")}</td>
-                  <td className="py-1.5 pr-2">
-                    <span className="text-dim">{s.name}</span>
-                    <span className="tnum ms-1.5 text-[11px] text-faint">
-                      {quantity(s.quantity)}
-                      {s.kind === "stock" ? "주" : ""}
-                    </span>
-                  </td>
-                  <td className="tnum hidden py-1.5 text-right text-faint sm:table-cell">{krw(s.proceedsKrw)}</td>
-                  <td className={cn("tnum py-1.5 text-right", s.profitKrw >= 0 ? "text-approve/80" : "text-reject/80")}>
-                    {signedKrw(s.profitKrw)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <p className="mt-2 text-[11px] leading-relaxed text-faint">
-            수수료를 뺀 금액이에요. 한국투자증권은 증권사가 낸 손익을, 업비트는 체결 내역을 평균 매수가로 다시 계산한 값을 써요.
-          </p>
-        </details>
-      ) : null}
     </div>
   );
 }

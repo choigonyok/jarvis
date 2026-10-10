@@ -35,13 +35,36 @@ function Dot({ id }: { id: Bucket }) {
 }
 
 /**
- * The allocation and what to do about it, in a few lines that stay open:
- * one bar of where the money sits with the targets ticked on it, the buckets
- * as "now (target)", the orders only when something has left its band, and
- * a field for new cash that answers with what to buy. The full section above
- * (ribbons, transfers, tables) said the same at four times the height.
+ * Where the money sits, as one bar with each target's end ticked on it: a
+ * slice running past its tick is over target. The folded view.
  */
-export function AllocationBrief({
+export function AllocationBar({ allocation }: { allocation: Allocation }) {
+  const { rows } = allocation;
+  const ticks = rows.slice(0, -1).map((_, i) => rows.slice(0, i + 1).reduce((sum, r) => sum + r.target, 0));
+  return (
+    <div className="relative">
+      <div
+        className="flex h-2 w-full gap-[2px] overflow-hidden rounded-full"
+        role="img"
+        aria-label={rows.map((r) => `${r.label} ${pct(r.current)}, 목표 ${pct(r.target)}`).join("; ")}
+      >
+        {rows.map((r) =>
+          r.current > 0.001 ? <span key={r.id} style={{ width: `${r.current * 100}%`, background: HUE[r.id] }} /> : null,
+        )}
+      </div>
+      {ticks.map((t, i) => (
+        <span key={i} aria-hidden className="absolute -top-1 h-4 w-px bg-foreground/70" style={{ left: `${t * 100}%` }} />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The bar explained, and what to do about it: the buckets as "now (target)",
+ * the orders only when something has left its band, and a field for new
+ * cash that answers with what to buy. The opened view.
+ */
+export function AllocationDetail({
   allocation,
   holdings,
   goldGramKrw,
@@ -60,37 +83,13 @@ export function AllocationBrief({
     () => (deposit > 0 ? depositPlan(allocation, holdings, deposit, { goldGramKrw }) : null),
     [allocation, holdings, deposit, goldGramKrw],
   );
-  if (allocation.totalKrw <= 0) return null;
-
-  // Where each target ends, across the same bar: a slice running past its tick is over.
-  const ticks = rows.slice(0, -1).map((_, i) => rows.slice(0, i + 1).reduce((sum, r) => sum + r.target, 0));
   const sells = rebalance.orders.filter((o) => o.side === "sell");
   const gains = plannedGains(sells);
   const overseas = tax?.baskets.find((b) => b.kind === "overseas" && b.inForce);
   const taxUp = overseas ? taxFor(overseas.gainKrw + gains.overseas, overseas) - taxFor(overseas.gainKrw, overseas) : 0;
 
   return (
-    <div className="mt-3 space-y-2.5">
-      <div className="relative">
-        <div
-          className="flex h-2 w-full gap-[2px] overflow-hidden rounded-full"
-          role="img"
-          aria-label={rows.map((r) => `${r.label} ${pct(r.current)}, 목표 ${pct(r.target)}`).join("; ")}
-        >
-          {rows.map((r) =>
-            r.current > 0.001 ? <span key={r.id} style={{ width: `${r.current * 100}%`, background: HUE[r.id] }} /> : null,
-          )}
-        </div>
-        {ticks.map((t, i) => (
-          <span
-            key={i}
-            aria-hidden
-            className="absolute -top-1 h-4 w-px bg-foreground/70"
-            style={{ left: `${t * 100}%` }}
-          />
-        ))}
-      </div>
-
+    <div className="space-y-2.5">
       <ul className="flex flex-wrap gap-x-3 gap-y-1 text-[12px]">
         {rows.map((r) => (
           <li key={r.id} className="tnum flex items-center gap-1.5">
@@ -101,6 +100,9 @@ export function AllocationBrief({
           </li>
         ))}
       </ul>
+      <p className="text-[11px] leading-relaxed text-faint">
+        막대 위 눈금이 목표 경계예요. 허용 범위는 목표 ±7%p, 비중이 작은 자산은 목표의 절반까지예요.
+      </p>
 
       {rebalance.orders.length || rebalance.unpicked.length ? (
         <div className="text-[12.5px] leading-relaxed">
