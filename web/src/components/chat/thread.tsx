@@ -118,6 +118,10 @@ export function Thread() {
   // the reader is at the bottom; someone scrolled up to read is left there.
   const landed = useRef(false);
   const pinned = useRef(true);
+  // The card a tapped push brought the reader to. While set, nothing pulls
+  // the view back to the bottom - not new turns, not photos above finishing
+  // their layout - until the reader touches the thread themselves.
+  const held = useRef<HTMLElement | null>(null);
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el || turns.length === 0) return;
@@ -127,6 +131,7 @@ export function Thread() {
       pinned.current = true;
       return;
     }
+    if (held.current) return;
     if (pinned.current) bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [turns, proposals, thinking, error]);
 
@@ -142,7 +147,10 @@ export function Thread() {
     if (!card) return;
     wanted.current = null;
     pinned.current = false;
-    card.scrollIntoView({ behavior: "smooth", block: "center" });
+    held.current = card;
+    // At once, not smooth: from the bottom of a long thread a smooth scroll
+    // is a long ride, and its first frames still read as "at the bottom".
+    card.scrollIntoView({ block: "center" });
     card.classList.remove("card-flash");
     void card.offsetWidth; // restart the animation on a second tap
     card.classList.add("card-flash");
@@ -162,6 +170,20 @@ export function Thread() {
   useEffect(() => {
     if (wanted.current) focusCard();
   }, [turns, proposals, focusCard]);
+  // The reader taking over - a touch, a wheel, typing, anywhere on the page
+  // (the composer is outside the thread) - lets go of a held card.
+  useEffect(() => {
+    const release = () => (held.current = null);
+    const opts = { capture: true, passive: true } as const;
+    document.addEventListener("pointerdown", release, opts);
+    document.addEventListener("wheel", release, opts);
+    document.addEventListener("keydown", release, true);
+    return () => {
+      document.removeEventListener("pointerdown", release, opts);
+      document.removeEventListener("wheel", release, opts);
+      document.removeEventListener("keydown", release, true);
+    };
+  }, []);
 
   // Photos and long markdown finish laying out after the first paint; while
   // the reader is pinned to the bottom, keep them there as the page grows.
@@ -170,7 +192,9 @@ export function Thread() {
     const content = el?.firstElementChild;
     if (!el || !content) return;
     const ro = new ResizeObserver(() => {
-      if (pinned.current) el.scrollTop = el.scrollHeight;
+      // Photos above a held card push it down as they load: keep it centred.
+      if (held.current) held.current.scrollIntoView({ block: "center" });
+      else if (pinned.current) el.scrollTop = el.scrollHeight;
     });
     ro.observe(content);
     return () => ro.disconnect();
@@ -270,9 +294,11 @@ export function Thread() {
       <main
         ref={scrollRef}
         onScroll={(e) => {
+          if (held.current) return; // our own scroll to a card, not the reader's
           const el = e.currentTarget;
           pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
         }}
+
         className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain"
       >
         <div className="mx-auto w-full max-w-[46rem] px-4 pt-7 pb-12 sm:px-8 sm:pt-10 sm:pb-6">
