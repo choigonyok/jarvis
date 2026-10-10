@@ -122,6 +122,8 @@ func TestTriage(t *testing.T) {
 
 func TestProposeCardThenQuietAndDecision(t *testing.T) {
 	e, bg, props, sk := setup(t)
+	var said []string
+	e.cfg.Say = func(lead, id string) { said = append(said, lead+"|"+id) }
 	bg.input = &ProposeInput{
 		Title: "토요일 저녁 약속을 캘린더에", Body: "10/18 19:00 친구와 저녁", Why: "카톡에서 약속했는데 캘린더에 없음",
 		Action: "calendar.create_event", ActionInput: map[string]any{"date": "2026-10-18", "title": "저녁 약속", "start": "19:00"},
@@ -137,6 +139,12 @@ func TestProposeCardThenQuietAndDecision(t *testing.T) {
 	list := props.List()
 	if len(list) != 1 || list[0].Origin != proposal.OriginSuggest || list[0].Action.Kind != "calendar.create_event" {
 		t.Fatalf("카드: %+v", list)
+	}
+	if len(said) != 1 || said[0] != "카톡에서 약속했는데 캘린더에 없음|"+list[0].ID {
+		t.Fatalf("대화에 남긴 줄: %v", said)
+	}
+	if strings.Contains(list[0].Card.Body, "왜:") {
+		t.Fatalf("대화에 이유를 남겼는데 카드에도 있습니다: %q", list[0].Card.Body)
 	}
 	raised := sk.wait(t, 1)[0]
 	if raised["type"] != "suggestion.raised" || !strings.Contains(asJSON(raised["data"]), "memory:plan:1") {

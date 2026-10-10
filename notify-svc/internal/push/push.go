@@ -5,9 +5,14 @@ package push
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strings"
 
 	webpush "github.com/SherClockHolmes/webpush-go"
 
@@ -83,6 +88,8 @@ func (p *Pusher) Send(ctx context.Context, pl Payload) (int, error) {
 			_ = p.store.PushResult(ctx, sub.Endpoint, false)
 			continue
 		}
+		// The push service says why it refused in the body (Apple: {"reason": ...}).
+		reason, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		resp.Body.Close()
 		switch {
 		case resp.StatusCode == http.StatusGone || resp.StatusCode == http.StatusNotFound:
@@ -92,22 +99,29 @@ func (p *Pusher) Send(ctx context.Context, pl Payload) (int, error) {
 			sent++
 			_ = p.store.PushResult(ctx, sub.Endpoint, true)
 		default:
-			p.log.Warn("푸시 서비스가 거절했습니다", "status", resp.StatusCode)
+			p.log.Warn("푸시 서비스가 거절했습니다", "status", resp.StatusCode, "host", host(sub.Endpoint), "reason", strings.TrimSpace(string(reason)))
 			_ = p.store.PushResult(ctx, sub.Endpoint, false)
 		}
 	}
 	return sent, nil
 }
 
-// A push topic collapses undelivered messages with the same topic on the push
-// service; it must be URL-safe base64 and at most 32 characters.
-func topic(tag string) string {
-	out := make([]byte, 0, 32)
-	for i := 0; i < len(tag) && len(out) < 32; i++ {
-		c := tag[i]
-		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_' {
-			out = append(out, c)
-		}
+func host(endpoint string) string {
+	if u, err := url.Parse(endpoint); err == nil {
+		return u.Host
 	}
-	return string(out)
+	return ""
+}
+
+// A push topic collapses undelivered messages with the same topic on the push
+// service. It must be at most 32 characters of URL-safe base64 - and Apple
+// decodes it as such: "suggestionnew" (13 characters) is not base64 of
+// anything and was refused as BadWebPushTopic, while "test" passed. A hash of
+// the tag, encoded, is always exactly 32 valid characters.
+func topic(tag string) string {
+	if tag == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(tag))
+	return base64.RawURLEncoding.EncodeToString(sum[:24])
 }

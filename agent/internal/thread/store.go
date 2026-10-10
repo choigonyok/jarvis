@@ -208,6 +208,13 @@ func (s *Store) AttachProposal(proposalID string) {
 	s.append(&Turn{Role: RoleAgent, ProposalID: proposalID})
 }
 
+// Raise records a card nobody asked for - a suggestion - with what the
+// agent says about it, as one turn. It stays where it was raised, decided or
+// not, like any card raised in conversation.
+func (s *Store) Raise(paragraphs []string, proposalID string) {
+	s.append(&Turn{Role: RoleAgent, Paragraphs: paragraphs, ProposalID: proposalID})
+}
+
 // append stores the turn and publishes it.
 //
 // The id and the clock come back from the service rather than being minted
