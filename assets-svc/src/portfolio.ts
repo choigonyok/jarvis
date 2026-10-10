@@ -1,8 +1,21 @@
 import { changesFor } from "./change.js";
 import * as db from "./db.js";
 import { allocationOf } from "./target.js";
-import type { CashLine, FixedAsset, Holding, Portfolio, Principal, PrincipalPart, Venue } from "./types.js";
-import { kisGoldAccount, kisHoldings, upbitFlows, upbitHoldings, usdKrwRate } from "./venues.js";
+import { detectFlow, reconcile } from "./kis-flows.js";
+import { COIN_TAX_FROM, replayUpbit, salesFrom, summarize } from "./realized.js";
+import type { CashLine, FixedAsset, Holding, Portfolio, Principal, PrincipalPart, Realized, Venue } from "./types.js";
+import {
+  goldSettlements,
+  kisGoldAccount,
+  kisHoldings,
+  kisSales,
+  kisSettlements,
+  upbitDailyCloses,
+  upbitFills,
+  upbitFlows,
+  upbitHoldings,
+  usdKrwRate,
+} from "./venues.js";
 import { CLOSED_TTL_MS, OPEN_TTL_MS, UPBIT_TTL_MS, krxOpen, memo, usOpen } from "./freshness.js";
 
 // Each venue's answer, reused for as long as its numbers can actually have
@@ -18,9 +31,32 @@ const kisCached = memo(
 const goldCached = memo(() => (krxOpen() ? OPEN_TTL_MS : CLOSED_TTL_MS), kisGoldAccount);
 const flowsCached = memo(() => CLOSED_TTL_MS, () => upbitFlows(PRINCIPAL_SINCE));
 
+// Past sales change only when something is sold, so they ride the slow TTL;
+// the refresh button (invalidateVenues) is how a sale just made shows up.
+const thisYear = () => Number(new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" }).slice(0, 4));
+const kisSalesCached = memo(() => CLOSED_TTL_MS, () => kisSales(salesFrom(PRINCIPAL_SINCE, thisYear())));
+const kisSettlementsCached = memo(() => CLOSED_TTL_MS, () => kisSettlements(PRINCIPAL_SINCE));
+const goldSettlementsCached = memo(() => CLOSED_TTL_MS, () => goldSettlements(PRINCIPAL_SINCE));
+const upbitTradesCached = memo(() => CLOSED_TTL_MS, async () => {
+  // Coin gains are not taxed before COIN_TAX_FROM, so until then there is no
+  // reason to walk Upbit back past the principal's start, a week per call.
+  const year = thisYear();
+  const from = year >= COIN_TAX_FROM ? salesFrom(PRINCIPAL_SINCE, year) : PRINCIPAL_SINCE;
+  const fills = await upbitFills(from);
+  const days = Math.ceil((Date.now() - Date.parse(from)) / 86_400_000) + 2;
+  const closeAtStart = new Map<string, number>();
+  for (const symbol of new Set(fills.map((f) => f.symbol))) {
+    const close = (await upbitDailyCloses(symbol, days)).get(from);
+    if (close) closeAtStart.set(symbol, close);
+  }
+  return { fills, closeAtStart };
+});
+
 /** Drop every cached venue answer: a trade or a principal entry was just recorded. */
 export function invalidateVenues(): void {
-  for (const m of [upbitCached, kisCached, goldCached, flowsCached]) m.clear();
+  for (const m of [upbitCached, kisCached, goldCached, flowsCached, kisSalesCached, kisSettlementsCached, goldSettlementsCached, upbitTradesCached]) {
+    m.clear();
+  }
 }
 
 /**
@@ -72,30 +108,69 @@ export async function buildPortfolio(): Promise<Portfolio> {
   lastRate = usdKrw;
   const problems: string[] = [];
 
-  const [upbit, kis, gold, principalFlows] = await Promise.all([
+  const [upbit, kis, gold, upbitFlowsRead, kisSold, upbitTrades, settlements, goldSettled] = await Promise.all([
     upbitCached.get().catch((e: Error) => {
       problems.push(`업비트: ${e.message}`);
       return { holdings: [] as Holding[], cashKrw: 0, cash: [] as CashLine[], problems: [] as string[] };
     }),
     kisCached.get().catch((e: Error) => {
       problems.push(`한국투자증권: ${e.message}`);
-      return { holdings: [] as Holding[], cashKrw: 0, cash: [] as CashLine[], problems: [] as string[] };
+      return {
+        holdings: [] as Holding[],
+        cashKrw: 0,
+        cash: [] as CashLine[],
+        settledCash: null as { krw: number; usd: number } | null,
+        problems: [] as string[],
+      };
     }),
     goldCached.get().catch((e: Error) => {
       problems.push(`금현물: ${e.message}`);
       return undefined;
     }),
-    Promise.all([
-      flowsCached.get().catch((e: Error) => {
-        problems.push(`업비트 입출금 내역: ${e.message}`);
-        return null;
-      }),
-      db.manualFlows(PRINCIPAL_SINCE).catch((e: Error) => {
-        problems.push(`원금 기록: ${e.message}`);
-        return null;
-      }),
-    ]),
+    flowsCached.get().catch((e: Error) => {
+      problems.push(`업비트 입출금 내역: ${e.message}`);
+      return null;
+    }),
+    kisSalesCached.get().catch((e: Error) => {
+      problems.push(`한국투자증권 매도 내역: ${e.message}`);
+      return null;
+    }),
+    upbitTradesCached.get().catch((e: Error) => {
+      problems.push(`업비트 체결 내역: ${e.message}`);
+      return null;
+    }),
+    kisSettlementsCached.get().catch((e: Error) => {
+      problems.push(`한국투자증권 거래내역: ${e.message}`);
+      return null;
+    }),
+    goldSettlementsCached.get().catch((e: Error) => {
+      problems.push(`금현물 매매 내역: ${e.message}`);
+      return null;
+    }),
   ]);
+
+  // Each KIS account's cash today against its last day's: what the settled
+  // trades do not explain is a deposit or withdrawal, written into the ledger
+  // before it is read below. Only with both halves - a guess from one would
+  // be stored.
+  const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
+  const accounts = [
+    { venue: "kis" as const, cash: kis.settledCash, settlements, label: "한국투자증권" },
+    { venue: "gold" as const, cash: gold ? { krw: gold.cashKrw, usd: 0 } : null, settlements: goldSettled, label: "금현물" },
+  ];
+  for (const a of accounts) {
+    if (!a.cash || !a.settlements) continue;
+    await detectFlow(a.venue, today, a.cash, a.settlements, usdKrw).catch((e: Error) => {
+      problems.push(`${a.label} 입출금 감지: ${e.message}`);
+    });
+  }
+  const principalFlows = [
+    upbitFlowsRead,
+    await db.manualFlows(PRINCIPAL_SINCE).catch((e: Error) => {
+      problems.push(`원금 기록: ${e.message}`);
+      return null;
+    }),
+  ] as const;
 
   // Airdrop dust - a ten-millionth of a token worth nothing - is not a
   // position. It would take a row, a slice of the allocation bar and a line
@@ -175,11 +250,31 @@ export async function buildPortfolio(): Promise<Portfolio> {
       rate: principalKrw > 0 ? (total - principalKrw) / principalKrw : 0,
       parts,
       flows,
+      checks: accounts.flatMap((a) =>
+        a.cash && a.settlements ? reconcile(a.venue, flows, a.settlements, a.cash, usdKrw) : [],
+      ),
     };
+  }
+
+  // Upbit's sales need what is held now to know what was held at the start.
+  // A venue whose balance failed has no such answer, and its replay would be
+  // wrong - so it is left out, which `problems` already explains.
+  let realized: Realized | null = null;
+  if (kisSold || upbitTrades) {
+    const sales = [...(kisSold ?? [])];
+    const missing: Realized["missing"] = kisSold ? [] : ["kis"];
+    if (upbitTrades && !problems.some((p) => p.startsWith("업비트: "))) {
+      const heldNow = new Map(upbit.holdings.map((h) => [h.symbol, h.quantity]));
+      const replay = replayUpbit(upbitTrades.fills, heldNow, upbitTrades.closeAtStart);
+      sales.push(...replay.sales);
+      problems.push(...replay.problems);
+    } else missing.push("upbit");
+    realized = summarize(sales, holdings, PRINCIPAL_SINCE, thisYear(), missing);
   }
 
   return {
     holdings,
+    realized,
     cashKrw,
     cash,
     goldGramKrw: gold?.gramKrw ?? null,

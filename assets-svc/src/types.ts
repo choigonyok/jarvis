@@ -93,6 +93,19 @@ export type Flow = {
  * against what the current holdings cost - selling at a loss and buying
  * again resets cost, and money taken out disappears from it entirely.
  */
+/**
+ * A place the hand-kept ledger disagrees with what the brokerage's trades
+ * say (see kis-flows.ts). "short": the books went negative on `date`;
+ * "total": the ledger does not end at today's cash, off by `amountKrw`.
+ */
+export type LedgerCheck = {
+  venue: Venue;
+  kind: "short" | "total";
+  date?: string;
+  amountKrw: number;
+  message: string;
+};
+
 export type Principal = {
   since: string;
   principalKrw: number;
@@ -101,6 +114,8 @@ export type Principal = {
   /** The same sum, split by account. */
   parts: PrincipalPart[];
   flows: Flow[];
+  /** Empty when the ledger agrees with the trades, or they could not be read. */
+  checks: LedgerCheck[];
 };
 
 /** The allocation buckets. Brokerages know coin and stock; the rest is ours - see target.ts. */
@@ -133,8 +148,77 @@ export type Allocation = {
   totalKrw: number;
 };
 
+/**
+ * One sale and what it made. KIS reports this itself; Upbit does not, so its
+ * sales are worked out by replaying the trades (see realized.ts).
+ */
+export type Sale = {
+  /** "kis:20261006:SPCX:0", "upbit:<order uuid>". */
+  id: string;
+  date: string;
+  venue: "kis" | "upbit";
+  kind: "stock" | "coin";
+  symbol: string;
+  name: string;
+  quantity: number;
+  /** What the sale brought in, before fees, in won. */
+  proceedsKrw: number;
+  /** What the units sold had cost (moving average), in won. */
+  costKrw: number;
+  feeKrw: number;
+  /** proceeds - cost - fee. */
+  profitKrw: number;
+};
+
+/** Everything sold of one holding since `since`, added up. */
+export type RealizedLine = {
+  /** Same id as the Holding it belongs to: "kis:SPCX", "upbit:BTC". */
+  id: string;
+  venue: "kis" | "upbit";
+  kind: "stock" | "coin";
+  symbol: string;
+  name: string;
+  sales: number;
+  proceedsKrw: number;
+  costKrw: number;
+  profitKrw: number;
+  /** Still held. False: sold out - the line is all that is left of it. */
+  held: boolean;
+};
+
+/**
+ * Capital-gains tax, estimated for one calendar year. Overseas shares and
+ * (from 2027) virtual assets are taxed separately, each with its own 2.5M
+ * deduction, at 22% local tax included. Domestic minority shares and KRX gold
+ * are not taxed and are not here.
+ */
+export type TaxBasket = {
+  kind: "overseas" | "coin";
+  /** Net gain realized so far this year (losses offset gains), in won. */
+  gainKrw: number;
+  deductionKrw: number;
+  rate: number;
+  taxKrw: number;
+  /** False while the tax is not in force (virtual assets before 2027). */
+  inForce: boolean;
+};
+
+export type Tax = { year: number; baskets: TaxBasket[] };
+
+export type Realized = {
+  since: string;
+  /** A venue whose sales could not be read: its lines and tax are missing, not zero. */
+  missing: ("kis" | "upbit")[];
+  sales: Sale[];
+  lines: RealizedLine[];
+  totalKrw: number;
+  tax: Tax;
+};
+
 export type Portfolio = {
   holdings: Holding[];
+  /** Null when neither brokerage's sales could be read. */
+  realized: Realized | null;
   cashKrw: number;
   cash: CashLine[];
   /** KRX gold, won per gram - so a plan can buy gold before any is held. Null without a gold account. */

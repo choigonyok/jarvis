@@ -49,12 +49,21 @@ type PrincipalPart struct {
 	Rate         *float64 `json:"rate"`
 }
 
+// LedgerCheck is a place the hand-kept ledger disagrees with the trades.
+type LedgerCheck struct {
+	Venue     string  `json:"venue"`
+	Kind      string  `json:"kind"` // short | total
+	AmountKrw float64 `json:"amountKrw"`
+	Message   string  `json:"message"`
+}
+
 type Principal struct {
 	Since        string          `json:"since"`
 	PrincipalKrw float64         `json:"principalKrw"`
 	ProfitKrw    float64         `json:"profitKrw"`
 	Rate         float64         `json:"rate"`
 	Parts        []PrincipalPart `json:"parts"`
+	Checks       []LedgerCheck   `json:"checks"`
 }
 
 type FixedAsset struct {
@@ -89,6 +98,38 @@ type Allocation struct {
 	TotalKrw float64 `json:"totalKrw"`
 }
 
+// RealizedLine is everything sold of one holding since the principal's start.
+type RealizedLine struct {
+	ID        string  `json:"id"`
+	Name      string  `json:"name"`
+	Symbol    string  `json:"symbol"`
+	Sales     int     `json:"sales"`
+	ProfitKrw float64 `json:"profitKrw"`
+	CostKrw   float64 `json:"costKrw"`
+	Held      bool    `json:"held"`
+}
+
+// TaxBasket is one year's capital-gains estimate: overseas shares or coins.
+type TaxBasket struct {
+	Kind         string  `json:"kind"` // overseas | coin
+	GainKrw      float64 `json:"gainKrw"`
+	DeductionKrw float64 `json:"deductionKrw"`
+	TaxKrw       float64 `json:"taxKrw"`
+	InForce      bool    `json:"inForce"`
+}
+
+// Realized is what has already been sold: per holding, and this year's tax.
+type Realized struct {
+	Since    string         `json:"since"`
+	Missing  []string       `json:"missing"`
+	Lines    []RealizedLine `json:"lines"`
+	TotalKrw float64        `json:"totalKrw"`
+	Tax      struct {
+		Year    int         `json:"year"`
+		Baskets []TaxBasket `json:"baskets"`
+	} `json:"tax"`
+}
+
 // Portfolio is the subset of /portfolio this module reads. The curve series
 // are left out: they are for drawing, and a model reading three hundred
 // points learns nothing the window changes do not already say.
@@ -103,6 +144,7 @@ type Portfolio struct {
 	Changes    map[string]Change `json:"changes"`
 	At         string            `json:"at"`
 	Principal  *Principal        `json:"principal"`
+	Realized   *Realized         `json:"realized"`
 	Fixed      []FixedAsset      `json:"fixed"`
 	Allocation *Allocation       `json:"allocation"`
 	Problems   []string          `json:"problems"`

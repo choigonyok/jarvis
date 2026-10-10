@@ -1,6 +1,6 @@
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import * as db from "./db.js";
-import type { CashLine, Flow, Holding } from "./types.js";
+import type { CashLine, Flow, Holding, Sale } from "./types.js";
 
 /**
  * Reading the two brokerages.
@@ -11,7 +11,7 @@ import type { CashLine, Flow, Holding } from "./types.js";
  * is now in a service of its own rather than one import away from a browser
  * bundle.
  *
- * Read-only by design: balances and prices. Nothing here writes.
+ * Read-only by design: balances, prices and past trades. Nothing here writes.
  */
 
 function env(name: string): string {
@@ -135,7 +135,7 @@ async function upbitKrwMarkets(): Promise<Set<string>> {
 }
 
 /** Coins held to be dollars. Shown and allocated as dollar cash. */
-const DOLLAR_COINS = new Set(["USDT", "USDC"]);
+export const DOLLAR_COINS = new Set(["USDT", "USDC"]);
 
 export async function upbitHoldings(): Promise<{
   holdings: Holding[];
@@ -318,6 +318,75 @@ export async function upbitFlows(
   return { flows, problems };
 }
 
+/** One filled (or part-filled) Upbit order, as the replay in realized.ts needs it. */
+export type UpbitFill = {
+  uuid: string;
+  /** KST, YYYY-MM-DD. */
+  date: string;
+  at: string;
+  symbol: string;
+  side: "bid" | "ask";
+  volume: number;
+  /** Won paid or received, before the fee. */
+  fundsKrw: number;
+  feeKrw: number;
+};
+
+type UpbitOrder = {
+  uuid: string;
+  side: "bid" | "ask";
+  market: string;
+  created_at: string;
+  executed_volume: string;
+  executed_funds?: string;
+  paid_fee: string;
+};
+
+/**
+ * Every won-market order that filled since `since` (YYYY-MM-DD).
+ *
+ * Upbit answers closed orders seven days at a time, so the range is walked
+ * back a week per call. A market buy (`ord_type: price`) ends as "cancel" -
+ * the leftover won it could not spend is cancelled - so cancelled orders are
+ * read too and kept when anything filled; leaving them out lost every market
+ * buy and made later sales look like coins sold out of nowhere.
+ */
+export async function upbitFills(since: string): Promise<UpbitFill[]> {
+  if (!env("UPBIT_ACCESS_KEY")) return [];
+  const iso = (d: Date) => d.toISOString().replace(/\.\d+Z$/, "+00:00");
+  const floor = Date.parse(`${since}T00:00:00+09:00`);
+  const out = new Map<string, UpbitFill>();
+
+  for (let end = Date.now(); end > floor; end -= 7 * 86_400_000) {
+    const start = Math.max(floor, end - 7 * 86_400_000);
+    for (const state of ["done", "cancel"]) {
+      const query = `state=${state}&limit=1000&order_by=desc&start_time=${iso(new Date(start))}&end_time=${iso(new Date(end))}`;
+      const rows = await json<UpbitOrder[]>(
+        `https://api.upbit.com/v1/orders/closed?${query.replace(/\+/g, "%2B")}`,
+        { headers: { Authorization: `Bearer ${upbitToken(query)}` } },
+      );
+      for (const o of rows) {
+        const volume = Number(o.executed_volume);
+        if (!(volume > 0) || !o.market.startsWith("KRW-")) continue;
+        const at = o.created_at;
+        out.set(o.uuid, {
+          uuid: o.uuid,
+          date: new Date(at).toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" }),
+          at,
+          symbol: o.market.slice(4),
+          side: o.side,
+          volume,
+          fundsKrw: Number(o.executed_funds ?? 0),
+          feeKrw: Number(o.paid_fee),
+        });
+      }
+      // Upbit allows a handful of these a second.
+      await new Promise((r) => setTimeout(r, 120));
+    }
+  }
+  return [...out.values()].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+}
+
 /**
  * What a coin closed at on a given day, as YYYY-MM-DD -> price.
  *
@@ -463,7 +532,7 @@ type KisCurrency = {
 async function kisForeignCash(
   token: string,
   usdKrw: number,
-): Promise<{ cashKrw: number; usd: number; problems: string[] }> {
+): Promise<{ cashKrw: number; usd: number; settledUsd: number; problems: string[] }> {
   const { cano, prod } = kisAccount();
   const query = new URLSearchParams({
     CANO: cano,
@@ -480,8 +549,10 @@ async function kisForeignCash(
 
   let cashKrw = 0;
   let usd = 0;
+  let settledUsd = 0;
   const unpriced: string[] = [];
   for (const row of body.output2 ?? []) {
+    if (row.crcy_cd === "USD") settledUsd += Number(row.frcr_dncl_amt_2) || 0;
     const amount =
       Number(row.frcr_dncl_amt_2) +
       Number(row.frcr_sll_amt_smtl) -
@@ -496,6 +567,7 @@ async function kisForeignCash(
   return {
     cashKrw,
     usd,
+    settledUsd,
     problems: unpriced.length
       ? [`한국투자증권: 환율을 몰라 빠진 외화 예수금 ${unpriced.join(", ")}`]
       : [],
@@ -506,6 +578,14 @@ export async function kisHoldings(usdKrw: number): Promise<{
   holdings: Holding[];
   cashKrw: number;
   cash: CashLine[];
+  /**
+   * Cash that has settled, each currency on its own - a sale settles in
+   * dollars and stays dollars until it is exchanged, so adding the two at
+   * today's rate would turn every move of the rate into money in or out.
+   * Null when the dollar side could not be read: a half would read as money
+   * gone missing.
+   */
+  settledCash: { krw: number; usd: number } | null;
   problems: string[];
 }> {
   if (!env("KIS_APP_KEY")) throw new Error("한국투자증권 키가 설정되지 않았습니다.");
@@ -600,6 +680,7 @@ export async function kisHoldings(usdKrw: number): Promise<{
   const foreign = await kisForeignCash(token, usdKrw).catch((e: Error) => ({
     cashKrw: 0,
     usd: 0,
+    settledUsd: null,
     problems: [`한국투자증권 외화 예수금: ${e.message}`],
   }));
 
@@ -613,8 +694,167 @@ export async function kisHoldings(usdKrw: number): Promise<{
     holdings,
     cashKrw: cashKrw + foreign.cashKrw,
     cash,
+    settledCash: foreign.settledUsd === null ? null : { krw: cashKrw, usd: foreign.settledUsd },
     problems: foreign.problems,
   };
+}
+
+/**
+ * One settlement day's net money - sales +, purchases -, fees already in.
+ * The share account settles in dollars, with KIS's rate that day (the nearest
+ * thing to what an exchange then cost); the gold account settles in won.
+ */
+export type Settlement = { date: string; krw: number; usd: number; rate: number };
+
+type KisTrans = { sttl_dt: string; sll_buy_dvsn_cd: string; frcr_excc_amt_1: string; erlm_exrt: string };
+
+/**
+ * Overseas trades since `since`, as the dollars each one settled for, by
+ * settlement day (CTOS4001R). frcr_excc_amt_1 is what actually moved in the
+ * dollar balance: a purchase's amount plus its fee, a sale's minus. The
+ * account settles in dollars - a sale's proceeds stay dollars until they are
+ * exchanged by hand. Domestic trades are not read; the domestic side is unused.
+ */
+export async function kisSettlements(since: string): Promise<Settlement[]> {
+  if (!env("KIS_APP_KEY")) return [];
+  const token = await kisAccessToken();
+  const { cano, prod } = kisAccount();
+  const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
+  const byDay = new Map<string, Settlement>();
+  let lastPage = "";
+  let fk = "";
+  let nk = "";
+  for (let page = 0; page < 20; page += 1) {
+    const query = new URLSearchParams({
+      CANO: cano,
+      ACNT_PRDT_CD: prod,
+      ERLM_STRT_DT: since.replace(/-/g, ""),
+      ERLM_END_DT: today.replace(/-/g, ""),
+      OVRS_EXCG_CD: "",
+      PDNO: "",
+      SLL_BUY_DVSN_CD: "00",
+      LOAN_DVSN_CD: "",
+      CTX_AREA_FK100: fk,
+      CTX_AREA_NK100: nk,
+    });
+    const body = await json<{
+      rt_cd: string;
+      msg1?: string;
+      output1?: (KisTrans & Record<string, string>)[];
+      ctx_area_fk100?: string;
+      ctx_area_nk100?: string;
+    }>(`${KIS_BASE}/uapi/overseas-stock/v1/trading/inquire-period-trans?${query}`, {
+      headers: { ...kisHeaders(token, "CTOS4001R"), ...(page > 0 ? { tr_cont: "N" } : {}) },
+    });
+    if (body.rt_cd !== "0") throw new Error(body.msg1?.trim() || "거래내역 조회 실패");
+    // Two identical fills on one day are two trades, so rows are not deduped;
+    // only a page handed back twice is.
+    const pageKey = JSON.stringify(body.output1 ?? []);
+    if (pageKey === lastPage) break;
+    lastPage = pageKey;
+    for (const row of body.output1 ?? []) {
+      if (!row.sttl_dt) continue;
+      const d = row.sttl_dt;
+      const date = `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
+      const usd = Number(row.frcr_excc_amt_1) * (row.sll_buy_dvsn_cd === "01" ? 1 : -1);
+      const day = byDay.get(date) ?? { date, krw: 0, usd: 0, rate: Number(row.erlm_exrt) };
+      day.usd += usd;
+      byDay.set(date, day);
+    }
+    fk = body.ctx_area_fk100?.trim() ?? "";
+    nk = body.ctx_area_nk100?.trim() ?? "";
+    if (!nk || (body.output1 ?? []).length === 0) break;
+  }
+  return [...byDay.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+type KisPeriodProfit = {
+  trad_day: string;
+  ovrs_pdno: string;
+  ovrs_item_name: string;
+  slcl_qty: string;
+  /** In won when asked with WCRC_FRCR_DVSN_CD=02, as below. */
+  frcr_pchs_amt1: string;
+  frcr_sll_amt_smtl1: string;
+  stck_sll_tlex: string;
+  ovrs_rlzt_pfls_amt: string;
+};
+
+/**
+ * Overseas sales since `since`, each with the profit KIS itself booked.
+ *
+ * Asked in won (WCRC_FRCR_DVSN_CD=02): KIS converts both the cost and the
+ * proceeds at the sale day's rate, so currency gains between buying and
+ * selling are not in it. Good enough for an estimate; a filed return uses
+ * each leg's own day.
+ *
+ * Domestic sales are not read: the domestic account is empty, and a minority
+ * holder's domestic gains are not taxed anyway.
+ */
+export async function kisSales(since: string): Promise<Sale[]> {
+  if (!env("KIS_APP_KEY")) return [];
+  const token = await kisAccessToken();
+  const { cano, prod } = kisAccount();
+  const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
+  const sales: Sale[] = [];
+  let lastPage = "";
+  let fk = "";
+  let nk = "";
+
+  for (let page = 0; page < 10; page += 1) {
+    const query = new URLSearchParams({
+      CANO: cano,
+      ACNT_PRDT_CD: prod,
+      OVRS_EXCG_CD: "",
+      NATN_CD: "",
+      CRCY_CD: "",
+      PDNO: "",
+      INQR_STRT_DT: since.replace(/-/g, ""),
+      INQR_END_DT: today.replace(/-/g, ""),
+      WCRC_FRCR_DVSN_CD: "02",
+      CTX_AREA_FK200: fk,
+      CTX_AREA_NK200: nk,
+    });
+    const body = await json<{
+      rt_cd: string;
+      msg1?: string;
+      output1?: KisPeriodProfit[];
+      ctx_area_fk200?: string;
+      ctx_area_nk200?: string;
+    }>(`${KIS_BASE}/uapi/overseas-stock/v1/trading/inquire-period-profit?${query}`, {
+      headers: { ...kisHeaders(token, "TTTS3039R"), ...(page > 0 ? { tr_cont: "N" } : {}) },
+    });
+    if (body.rt_cd !== "0") throw new Error(body.msg1?.trim() || "기간손익 조회 실패");
+
+    // KIS has no id per row, and two identical sales are two sales; only a
+    // page handed back twice is dropped.
+    const pageKey = JSON.stringify(body.output1 ?? []);
+    if (pageKey === lastPage) break;
+    lastPage = pageKey;
+    for (const row of body.output1 ?? []) {
+      const quantity = Number(row.slcl_qty);
+      if (!(quantity > 0)) continue;
+      const d = row.trad_day;
+      sales.push({
+        id: `kis:${d}:${row.ovrs_pdno}:${sales.length}`,
+        date: `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`,
+        venue: "kis",
+        kind: "stock",
+        symbol: row.ovrs_pdno,
+        name: row.ovrs_item_name || row.ovrs_pdno,
+        quantity,
+        proceedsKrw: Number(row.frcr_sll_amt_smtl1),
+        costKrw: Number(row.frcr_pchs_amt1),
+        feeKrw: Number(row.stck_sll_tlex),
+        profitKrw: Number(row.ovrs_rlzt_pfls_amt),
+      });
+    }
+    // An empty page, or no continuation key, is the end.
+    fk = body.ctx_area_fk200?.trim() ?? "";
+    nk = body.ctx_area_nk200?.trim() ?? "";
+    if (!nk || (body.output1 ?? []).length === 0) break;
+  }
+  return sales;
 }
 
 /**
@@ -791,6 +1031,69 @@ export async function kisGoldAccount(): Promise<{
     cash,
     gramKrw,
   };
+}
+
+type KisPeriodTrade = {
+  trad_dt: string;
+  buy_amt: string;
+  sll_amt: string;
+  fee: string;
+  tl_tax: string;
+};
+
+/**
+ * The gold account's trades since `since`, as the won each trading day
+ * moved (TTTC8715R, period trade profit - the one trade history this account
+ * answers; the daily-fill calls refuse it). KRX gold settles the same day.
+ */
+export async function goldSettlements(since: string): Promise<Settlement[]> {
+  const app = goldApp();
+  if (!app.key) return [];
+  const token = await kisAccessToken(app);
+  const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
+  const byDay = new Map<string, Settlement>();
+  let lastPage = "";
+  let fk = "";
+  let nk = "";
+  for (let page = 0; page < 20; page += 1) {
+    const query = new URLSearchParams({
+      CANO: env("KIS_GOLD_ACCOUNT_NO").replace(/-/g, "").slice(0, 8),
+      ACNT_PRDT_CD: env("KIS_GOLD_ACCOUNT_PRODUCT") || "01",
+      SORT_DVSN: "00",
+      PDNO: "",
+      INQR_STRT_DT: since.replace(/-/g, ""),
+      INQR_END_DT: today.replace(/-/g, ""),
+      CBLC_DVSN: "00",
+      CTX_AREA_FK100: fk,
+      CTX_AREA_NK100: nk,
+    });
+    const body = await json<{
+      rt_cd: string;
+      msg1?: string;
+      output1?: KisPeriodTrade[];
+      ctx_area_fk100?: string;
+      ctx_area_nk100?: string;
+    }>(`${KIS_BASE}/uapi/domestic-stock/v1/trading/inquire-period-trade-profit?${query}`, {
+      headers: { ...kisHeaders(token, "TTTC8715R", app), ...(page > 0 ? { tr_cont: "N" } : {}) },
+    });
+    if (body.rt_cd !== "0") throw new Error(body.msg1?.trim() || "매매 내역 조회 실패");
+    const pageKey = JSON.stringify(body.output1 ?? []);
+    if (pageKey === lastPage) break;
+    lastPage = pageKey;
+    for (const row of body.output1 ?? []) {
+      const d = row.trad_dt;
+      if (!d) continue;
+      const date = `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
+      const krw = Number(row.sll_amt) - Number(row.buy_amt) - Number(row.fee) - Number(row.tl_tax);
+      const day = byDay.get(date) ?? { date, krw: 0, usd: 0, rate: 0 };
+      day.krw += krw;
+      byDay.set(date, day);
+    }
+    fk = body.ctx_area_fk100?.trim() ?? "";
+    nk = body.ctx_area_nk100?.trim() ?? "";
+    if (!nk || (body.output1 ?? []).length === 0) break;
+  }
+  return [...byDay.values()].sort((a, b) => a.date.localeCompare(b.date));
 }
 
 /** KRX gold closes per gram, YYYY-MM-DD -> price, a hundred days a call. */

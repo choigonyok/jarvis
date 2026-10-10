@@ -21,10 +21,12 @@ const signed = (v: number) => `${v > 0 ? "+" : "−"}${krw(Math.abs(v))}`;
  * The money that went in and came out, which is what the headline return is
  * measured against.
  *
- * Upbit rows arrive on their own; KIS has no API for its transfers, so those
+ * Upbit rows arrive on their own. KIS has no API for its transfers; they are
+ * now found from its daily cash (marked 자동), and the ones from before that
  * - and whatever was already held on the start day - are written down here.
- * Only hand-written rows can be removed: an Upbit row that looks wrong is a
- * question for Upbit, not something to delete.
+ * The written ones are checked against KIS's trades, and a mismatch is said
+ * above the list. Only hand-written rows can be removed: a found row that
+ * looks wrong is a question for the brokerage, not something to delete.
  *
  * In and out are not gain and loss, so the amounts stay out of green and red.
  */
@@ -64,6 +66,19 @@ export function PrincipalLedger({
           </span>
         </p>
       </div>
+
+      {principal.checks?.length ? (
+        <ul className="mb-3 space-y-1" aria-label="기록 대조">
+          {principal.checks.map((c) => (
+            <li
+              key={`${c.kind}-${c.date ?? ""}`}
+              className="border-l-2 border-reject/60 pl-3 text-[12.5px] leading-relaxed text-dim"
+            >
+              {c.message}
+            </li>
+          ))}
+        </ul>
+      ) : null}
 
       <ul className="space-y-px">
         {flows.map((f) => (

@@ -42,7 +42,8 @@ func (m *Module) Handler() http.Handler {
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "get_portfolio",
 		Description: "투자 자산 현황을 조회한다: 총자산, 현금, 보유 종목별 평가·손익, 원금 대비 수익, " +
-			"1일/1개월/1년 변동, 계좌별(업비트·한국투자증권·금현물) 원금 대비. 읽기 전용, 최대 30초 전 값.",
+			"1일/1개월/1년 변동, 계좌별(업비트·한국투자증권·금현물) 원금 대비, 종목별 매도 실현손익(다 판 종목 포함)과 " +
+			"올해 양도세 추정(해외주식·코인 각각 250만원 공제, 22%). 읽기 전용, 최대 30초 전 값.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ PortfolioInput) (*mcp.CallToolResult, any, error) {
 		p, err := m.store.Portfolio(ctx)
 		if err != nil {

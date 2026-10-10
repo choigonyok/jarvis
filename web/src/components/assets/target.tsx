@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { type Holding, krw } from "@/lib/portfolio";
+import { TaxGauge, plannedGains } from "@/components/assets/realized";
+import { type Holding, type Realized, krw, signedKrw } from "@/lib/portfolio";
 import type { Allocation, Bucket, Drift } from "@/lib/target";
 import { type Order, type Plan, depositPlan, rebalancePlan } from "@/lib/trade-plan";
 import { cn } from "@/lib/utils";
@@ -38,10 +39,13 @@ export function TargetAllocation({
   allocation,
   holdings,
   goldGramKrw,
+  tax,
 }: {
   allocation: Allocation;
   holdings: Holding[];
   goldGramKrw?: number | null;
+  /** This year's realized gains, so a planned sale can say what it costs in tax. */
+  tax?: Realized["tax"];
 }) {
   const { rows, moves, totalKrw } = allocation;
   if (totalKrw <= 0) return null;
@@ -176,7 +180,7 @@ export function TargetAllocation({
         생긴 차이는 &lsquo;여유&rsquo;로 표시해요.
       </p>
 
-      <Planner allocation={allocation} holdings={holdings} goldGramKrw={goldGramKrw} />
+      <Planner allocation={allocation} holdings={holdings} goldGramKrw={goldGramKrw} tax={tax} />
     </div>
   );
 }
@@ -190,10 +194,12 @@ function Planner({
   allocation,
   holdings,
   goldGramKrw,
+  tax,
 }: {
   allocation: Allocation;
   holdings: Holding[];
   goldGramKrw?: number | null;
+  tax?: Realized["tax"];
 }) {
   const [mode, setMode] = useState<"rebalance" | "deposit">("rebalance");
   const [amount, setAmount] = useState("");
@@ -249,16 +255,19 @@ function Planner({
         </label>
       ) : null}
 
-      {plan ? <PlanView plan={plan} deposit={mode === "deposit" ? deposit : 0} /> : (
+      {plan ? <PlanView plan={plan} deposit={mode === "deposit" ? deposit : 0} tax={tax} /> : (
         <p className="text-[12.5px] text-faint">금액을 적으면 어디에 얼마씩 사면 되는지 계산해요.</p>
       )}
     </section>
   );
 }
 
-function PlanView({ plan, deposit }: { plan: Plan; deposit: number }) {
+function PlanView({ plan, deposit, tax }: { plan: Plan; deposit: number; tax?: Realized["tax"] }) {
   const buys = plan.orders.filter((o) => o.side === "buy");
   const sells = plan.orders.filter((o) => o.side === "sell");
+  const gains = plannedGains(sells);
+  // Only the baskets this plan sells into, and only where the tax is in force.
+  const taxed = (tax?.baskets ?? []).filter((b) => b.inForce && Math.abs(gains[b.kind]) >= 1);
   const nothing = plan.orders.length === 0 && plan.unpicked.length === 0;
   return (
     <div>
@@ -268,6 +277,17 @@ function PlanView({ plan, deposit }: { plan: Plan; deposit: number }) {
         </p>
       ) : null}
       {sells.length > 0 ? <Orders title="팔기" orders={sells} /> : null}
+      {tax && sells.length > 0 && Math.abs(gains.overseas + gains.coin) >= 1 ? (
+        <div className="mt-3 space-y-4">
+          <p className="tnum text-[12.5px] text-dim">
+            이번에 팔면 실현되는 손익 약{" "}
+            <span className="text-foreground">{signedKrw(gains.overseas + gains.coin)}</span>
+          </p>
+          {taxed.map((b) => (
+            <TaxGauge key={b.kind} basket={b} year={tax.year} addKrw={gains[b.kind]} />
+          ))}
+        </div>
+      ) : null}
       {buys.length > 0 ? <Orders title="사기" orders={buys} /> : null}
       {plan.unpicked.length > 0 ? (
         <ul className="mt-2 space-y-1">
