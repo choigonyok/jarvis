@@ -115,6 +115,11 @@ export async function detectFlow(
  * The inferred exchanges can be off by their rate, so the end is only
  * flagged past that margin. What cannot be caught is a mistake that cancels
  * out while cash sat in the account; that needs the brokerage's statement.
+ *
+ * The same replay says what holding dollars cost or made (`fxKrw`): each
+ * dollar is carried at the won it was booked at, and when it is spent,
+ * exchanged, or still held today, the rate then against that is a currency
+ * gain or loss - the part of the return neither a sale nor a holding carries.
  */
 export function reconcile(
   venue: CashVenue,
@@ -122,7 +127,7 @@ export function reconcile(
   settlements: Settlement[],
   now: { krw: number; usd: number },
   usdKrw: number,
-): LedgerCheck[] {
+): { checks: LedgerCheck[]; fxKrw: number } {
   const wonIn = new Map<string, number>();
   for (const f of flows) if (f.venue === venue) wonIn.set(f.date, (wonIn.get(f.date) ?? 0) + f.amountKrw);
   for (const s of settlements) wonIn.set(s.date, (wonIn.get(s.date) ?? 0) + s.krw);
@@ -146,21 +151,39 @@ export function reconcile(
   const checks: LedgerCheck[] = [];
   let krw = 0;
   let usd = 0;
+  // The won the dollars held were booked at, all together.
+  let usdCost = 0;
+  let fxKrw = 0;
   let exchanged = 0;
   let dry = false;
+  // Dollars leaving the balance at `rate`: a gain or loss against their cost.
+  const spend = (amount: number, rate: number) => {
+    const avg = usd > 0 ? usdCost / usd : rate;
+    fxKrw += amount * (rate - avg);
+    usdCost -= amount * avg;
+    usd -= amount;
+  };
   for (const date of days) {
     krw += wonIn.get(date) ?? 0;
-    usd += usdIn.get(date) ?? 0;
     const rate = rateOn(date);
-    if (usd < 0) {
-      // Dollars short: won was exchanged for them.
-      krw += usd * rate;
-      exchanged += -usd * rate;
-      usd = 0;
-    } else if (krw < 0 && usd > 0) {
+    const moved = usdIn.get(date) ?? 0;
+    if (moved > 0) {
+      usd += moved;
+      usdCost += moved * rate;
+    } else if (moved < 0) {
+      const fromBalance = Math.min(-moved, Math.max(0, usd));
+      if (fromBalance > 0) spend(fromBalance, rate);
+      const short = -moved - fromBalance;
+      if (short > 0) {
+        // Dollars short: won was exchanged for them, at the day's rate.
+        krw -= short * rate;
+        exchanged += short * rate;
+      }
+    }
+    if (krw < 0 && usd > 0) {
       // Won short: dollars were exchanged for it.
       const take = Math.min(usd, -krw / rate);
-      usd -= take;
+      spend(take, rate);
       krw += take * rate;
       exchanged += take * rate;
     }
@@ -178,6 +201,8 @@ export function reconcile(
     dry = below;
   }
 
+  // Dollars still held, at today's rate against what they were booked at.
+  if (usd > 0) fxKrw += usd * usdKrw - usdCost;
   const expected = krw + usd * usdKrw;
   const actual = now.krw + now.usd * usdKrw;
   const diff = expected - actual;
@@ -192,5 +217,5 @@ export function reconcile(
           : `기록대로면 ${ACCOUNT[venue]}에 ${won(expected)}이 남아야 하는데 지금 ${won(actual)}이에요. 적지 않은 입금이나 작게 적힌 금액이 ${won(-diff)}쯤 있어요.`,
     });
   }
-  return checks;
+  return { checks, fxKrw };
 }

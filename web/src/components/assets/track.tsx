@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { type TrackPoint, krw, percent, signedKrw } from "@/lib/portfolio";
 import { cn } from "@/lib/utils";
 
@@ -14,11 +14,23 @@ import { cn } from "@/lib/utils";
  * differently from a gain (only the total moves). The rate chart is that gap
  * over the principal, against a zero line.
  *
- * One cursor serves both: hovering or touching a day marks it in each and
- * says that day's numbers once, above them.
+ * Touching or hovering a day marks it in both and opens a small card at that
+ * point with the day's numbers; touching anywhere else closes it.
  */
 export function Track({ points }: { points: TrackPoint[] }) {
   const [at, setAt] = useState<number | null>(null);
+  const [on, setOn] = useState<"size" | "rate">("size");
+  const root = useRef<HTMLDivElement>(null);
+
+  // A touch outside the charts closes the card; hovering away does the same.
+  useEffect(() => {
+    if (at === null) return;
+    const close = (e: PointerEvent) => {
+      if (!root.current?.contains(e.target as Node)) setAt(null);
+    };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [at]);
 
   if (points.length < 2) {
     return (
@@ -29,32 +41,23 @@ export function Track({ points }: { points: TrackPoint[] }) {
   }
 
   const rate = (p: TrackPoint) => (p.principalKrw > 0 ? (p.totalKrw - p.principalKrw) / p.principalKrw : 0);
-  const shown = points[at ?? points.length - 1];
-  const md = (d: string) => `${Number(d.slice(5, 7))}.${Number(d.slice(8, 10))}`;
-
-  // Pointer position to the nearest recorded day.
-  const pick = (e: React.PointerEvent<HTMLDivElement>) => {
-    const box = e.currentTarget.getBoundingClientRect();
-    const f = Math.min(1, Math.max(0, (e.clientX - box.left) / box.width));
-    setAt(Math.round(f * (points.length - 1)));
-  };
+  const dates = points.map((p) => p.date);
+  const card =
+    at === null ? null : (
+      <Card point={points[at]} rate={rate(points[at])} />
+    );
+  const hover = (which: "size" | "rate") => ({
+    onPick: (i: number) => {
+      setOn(which);
+      setAt(i);
+    },
+    onLeave: (e: React.PointerEvent) => {
+      if (e.pointerType === "mouse") setAt(null);
+    },
+  });
 
   return (
-    <div
-      onPointerMove={pick}
-      onPointerDown={pick}
-      onPointerLeave={() => setAt(null)}
-      className="touch-pan-y"
-    >
-      <p className="tnum mb-3 text-[12.5px] text-dim" aria-live="polite">
-        <span className="text-foreground/90">{md(shown.date)}</span>
-        <span className="ms-2">총자산 {krw(shown.totalKrw)}</span>
-        <span className="ms-2 text-faint">원금 {krw(shown.principalKrw)}</span>
-        <span className={cn("ms-2", rate(shown) >= 0 ? "text-approve/85" : "text-reject/85")}>
-          {percent(rate(shown), 2)}
-        </span>
-      </p>
-
+    <div ref={root}>
       <Chart
         label="총자산"
         legend={
@@ -69,7 +72,9 @@ export function Track({ points }: { points: TrackPoint[] }) {
         ]}
         format={(v) => `${Math.round(v / 10_000).toLocaleString("ko-KR")}만`}
         at={at}
-        dates={points.map((p) => p.date)}
+        card={on === "size" ? card : null}
+        dates={dates}
+        {...hover("size")}
       />
 
       <Chart
@@ -80,12 +85,25 @@ export function Track({ points }: { points: TrackPoint[] }) {
         format={(v) => percent(v, 1)}
         zero
         at={at}
-        dates={points.map((p) => p.date)}
+        card={on === "rate" ? card : null}
+        dates={dates}
+        {...hover("rate")}
       />
+    </div>
+  );
+}
 
-      <p className="tnum mt-3 text-[11.5px] text-faint">
-        {md(points[0].date)}부터 {points.length}일 · 수익 {signedKrw(points[0].totalKrw - points[0].principalKrw)} →{" "}
-        {signedKrw(points[points.length - 1].totalKrw - points[points.length - 1].principalKrw)}
+function Card({ point, rate }: { point: TrackPoint; rate: number }) {
+  const gain = point.totalKrw - point.principalKrw;
+  return (
+    <div className="tnum w-max rounded-lg border border-edge bg-background/95 px-3 py-2 text-[12px] leading-relaxed shadow-lg backdrop-blur-sm">
+      <p className="text-foreground/90">
+        {Number(point.date.slice(5, 7))}월 {Number(point.date.slice(8, 10))}일
+      </p>
+      <p className="text-dim">총자산 {krw(point.totalKrw)}</p>
+      <p className="text-faint">넣은 원금 {krw(point.principalKrw)}</p>
+      <p className={gain >= 0 ? "text-approve/85" : "text-reject/85"}>
+        {signedKrw(gain)} ({percent(rate, 2)})
       </p>
     </div>
   );
@@ -118,7 +136,10 @@ function Chart({
   format,
   zero = false,
   at,
+  card,
   dates,
+  onPick,
+  onLeave,
   className,
 }: {
   label: string;
@@ -128,7 +149,11 @@ function Chart({
   /** Draw and include a zero line (for a rate). */
   zero?: boolean;
   at: number | null;
+  /** The day's numbers, opened over this chart at the marked day. */
+  card: React.ReactNode;
   dates: string[];
+  onPick: (i: number) => void;
+  onLeave: (e: React.PointerEvent) => void;
   className?: string;
 }) {
   const all = series.flatMap((s) => s.values);
@@ -148,11 +173,18 @@ function Chart({
   const y = (v: number) => H - ((v - bottom) / (top - bottom)) * H;
   const path = (values: number[], step?: boolean) =>
     values
-      .map((v, i) =>
-        i === 0 ? `M${x(i)},${y(v)}` : step ? `H${x(i)} V${y(v)}` : `L${x(i)},${y(v)}`,
-      )
+      .map((v, i) => (i === 0 ? `M${x(i)},${y(v)}` : step ? `H${x(i)} V${y(v)}` : `L${x(i)},${y(v)}`))
       .join(" ");
   const last = series[0].values[n - 1];
+
+  // Pointer position to the nearest recorded day.
+  const pick = (e: React.PointerEvent<HTMLDivElement>) => {
+    const box = e.currentTarget.getBoundingClientRect();
+    const f = Math.min(1, Math.max(0, (e.clientX - box.left) / box.width));
+    onPick(Math.round(f * (n - 1)));
+  };
+  // Keep the card inside the chart: anchored left, centred, or right by where the day falls.
+  const side = at === null ? 0 : at / (n - 1);
 
   return (
     <figure className={className}>
@@ -161,49 +193,71 @@ function Chart({
       </figcaption>
       {/* Room above and below the plot for the scale's two labels. */}
       <div className="relative rounded-lg border border-edge-soft bg-glass px-3 pt-6 pb-6">
-        <svg
-          viewBox={`0 0 ${W} ${H}`}
-          preserveAspectRatio="none"
-          className="h-28 w-full overflow-visible"
-          role="img"
-          aria-label={`${label}: ${dates[0]} ${format(series[0].values[0])}에서 ${dates[n - 1]} ${format(last)}`}
-        >
-          {zero ? (
-            <line
-              x1="0"
-              x2={W}
-              y1={y(0)}
-              y2={y(0)}
-              stroke="oklch(1 0 0 / 14%)"
-              strokeWidth="1"
-              vectorEffect="non-scaling-stroke"
-            />
-          ) : null}
+        <div className="relative touch-pan-y" onPointerDown={pick} onPointerMove={pick} onPointerLeave={onLeave}>
+          <svg
+            viewBox={`0 0 ${W} ${H}`}
+            preserveAspectRatio="none"
+            className="h-28 w-full overflow-visible"
+            role="img"
+            aria-label={`${label}: ${dates[0]} ${format(series[0].values[0])}에서 ${dates[n - 1]} ${format(last)}`}
+          >
+            {zero ? (
+              <line
+                x1="0"
+                x2={W}
+                y1={y(0)}
+                y2={y(0)}
+                stroke="oklch(1 0 0 / 14%)"
+                strokeWidth="1"
+                vectorEffect="non-scaling-stroke"
+              />
+            ) : null}
+            {at !== null ? (
+              <line
+                x1={x(at)}
+                x2={x(at)}
+                y1="0"
+                y2={H}
+                stroke="oklch(1 0 0 / 22%)"
+                strokeWidth="1"
+                vectorEffect="non-scaling-stroke"
+              />
+            ) : null}
+            {series.map((s, i) => (
+              <path
+                key={i}
+                d={path(s.values, s.step)}
+                fill="none"
+                stroke={s.dashed ? "oklch(1 0 0 / 38%)" : "oklch(1 0 0 / 82%)"}
+                strokeWidth="2"
+                strokeDasharray={s.dashed ? "4 3" : undefined}
+                strokeLinejoin="round"
+                strokeLinecap="round"
+                vectorEffect="non-scaling-stroke"
+              />
+            ))}
+          </svg>
           {at !== null ? (
-            <line
-              x1={x(at)}
-              x2={x(at)}
-              y1="0"
-              y2={H}
-              stroke="oklch(1 0 0 / 22%)"
-              strokeWidth="1"
-              vectorEffect="non-scaling-stroke"
+            // The marked day's point on the first series.
+            <span
+              aria-hidden
+              className="pointer-events-none absolute size-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-foreground ring-2 ring-background"
+              style={{ left: `${(x(at) / W) * 100}%`, top: `${(y(series[0].values[at]) / H) * 100}%` }}
             />
           ) : null}
-          {series.map((s, i) => (
-            <path
-              key={i}
-              d={path(s.values, s.step)}
-              fill="none"
-              stroke={s.dashed ? "oklch(1 0 0 / 38%)" : "oklch(1 0 0 / 82%)"}
-              strokeWidth="2"
-              strokeDasharray={s.dashed ? "4 3" : undefined}
-              strokeLinejoin="round"
-              strokeLinecap="round"
-              vectorEffect="non-scaling-stroke"
-            />
-          ))}
-        </svg>
+          {card && at !== null ? (
+            <div
+              role="status"
+              className={cn(
+                "pointer-events-none absolute -top-4 z-10",
+                side < 0.3 ? "translate-x-2" : side > 0.7 ? "-translate-x-[calc(100%+0.5rem)]" : "-translate-x-1/2",
+              )}
+              style={{ left: `${(x(at) / W) * 100}%` }}
+            >
+              {card}
+            </div>
+          ) : null}
+        </div>
         {/* The scale's two ends, in words, so the line can be read without a grid. */}
         <span className="tnum pointer-events-none absolute top-1.5 right-3 text-[10.5px] text-faint">
           {format(top)}

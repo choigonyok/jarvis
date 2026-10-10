@@ -141,6 +141,8 @@ export async function upbitHoldings(): Promise<{
   holdings: Holding[];
   cashKrw: number;
   cash: CashLine[];
+  /** What the dollar coins held cost (Upbit's average), so their own move can be told apart. */
+  dollarCostKrw: number;
   problems: string[];
 }> {
   if (!env("UPBIT_ACCESS_KEY")) throw new Error("업비트 키가 설정되지 않았습니다.");
@@ -159,7 +161,7 @@ export async function upbitHoldings(): Promise<{
   const cash: CashLine[] = cashKrw > 0
     ? [{ id: "upbit:KRW", venue: "upbit", currency: "KRW", label: "업비트 원화", amount: cashKrw, valueKrw: cashKrw }]
     : [];
-  if (coins.length === 0) return { holdings: [], cashKrw, cash, problems };
+  if (coins.length === 0) return { holdings: [], cashKrw, cash, dollarCostKrw: 0, problems };
 
   const listed = await upbitKrwMarkets().catch(() => {
     problems.push("업비트 마켓 목록을 불러오지 못했습니다.");
@@ -188,8 +190,10 @@ export async function upbitHoldings(): Promise<{
 
   const dollars = coins.filter((c) => DOLLAR_COINS.has(c.currency));
   let dollarKrw = 0;
+  let dollarCostKrw = 0;
   for (const c of dollars) {
     const qty = Number(c.balance) + Number(c.locked);
+    dollarCostKrw += qty * Number(c.avg_buy_price);
     const price = priceOf.get(`KRW-${c.currency}`) ?? Number(c.avg_buy_price);
     dollarKrw += qty * price;
     cash.push({
@@ -234,7 +238,7 @@ export async function upbitHoldings(): Promise<{
     problems.push(`업비트에 원화 마켓이 없어 시세를 못 구한 종목: ${named.join(", ")}`);
   }
 
-  return { holdings, cashKrw: cashKrw + dollarKrw, cash, problems };
+  return { holdings, cashKrw: cashKrw + dollarKrw, cash, dollarCostKrw, problems };
 }
 
 type UpbitTransfer = {
@@ -242,6 +246,7 @@ type UpbitTransfer = {
   currency: string;
   state: string;
   amount: string;
+  fee?: string;
   transaction_type: string;
   created_at: string;
 };
@@ -258,8 +263,8 @@ type UpbitTransfer = {
  */
 export async function upbitFlows(
   since: string,
-): Promise<{ flows: Flow[]; problems: string[] }> {
-  if (!env("UPBIT_ACCESS_KEY")) return { flows: [], problems: [] };
+): Promise<{ flows: Flow[]; feesKrw: number; problems: string[] }> {
+  if (!env("UPBIT_ACCESS_KEY")) return { flows: [], feesKrw: 0, problems: [] };
 
   const list = async (path: "deposits" | "withdraws") => {
     const out: UpbitTransfer[] = [];
@@ -287,6 +292,11 @@ export async function upbitFlows(
   const problems: string[] = [];
   const closes = new Map<string, Map<string, number>>();
   const flows: Flow[] = [];
+  // Won withdrawals carry a ₩1,000 fee on top of the amount; the amount is
+  // what counts as taken out, so the fee is a cost - added up here to be named.
+  const feesKrw = withdraws
+    .filter((w) => w.state === "DONE" && w.currency === "KRW")
+    .reduce((sum, w) => sum + (Number(w.fee) || 0), 0);
   for (const { row, sign } of done) {
     const date = row.created_at.slice(0, 10);
     let krw = Number(row.amount);
@@ -315,7 +325,7 @@ export async function upbitFlows(
       source: "auto",
     });
   }
-  return { flows, problems };
+  return { flows, feesKrw, problems };
 }
 
 /** One filled (or part-filled) Upbit order, as the replay in realized.ts needs it. */
