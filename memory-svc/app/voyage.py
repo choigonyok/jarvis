@@ -59,8 +59,11 @@ class Voyage:
         self, texts: list[str], model: str = "voyage-4", input_type: str | None = None, dimension: int | None = None
     ) -> list[list[float]]:
         """input_type "query" or "document" lets the model embed the two sides
-        differently; None embeds both the same way."""
-        body: dict = {"input": texts, "model": model}
+        differently; None embeds both the same way. Voyage refuses an empty
+        string, and a node can have an empty name - it gets a dash."""
+        if not texts:
+            return []
+        body: dict = {"input": [t if t and t.strip() else "-" for t in texts], "model": model}
         if input_type:
             body["input_type"] = input_type
         if dimension:
@@ -72,9 +75,15 @@ class Voyage:
         self, query: str, documents: list[str], model: str = "rerank-3-lite", top_k: int | None = None
     ) -> list[tuple[int, float]]:
         """(index into documents, relevance), best first. Billed as query
-        tokens times the number of documents plus the documents' tokens."""
-        body: dict = {"query": query, "documents": documents, "model": model}
+        tokens times the number of documents plus the documents' tokens. An
+        empty document (Voyage refuses those) is left out and ranks last."""
+        keep = [i for i, d in enumerate(documents) if d and d.strip()]
+        if not keep or not query.strip():
+            return [(i, 0.0) for i in range(len(documents))][: top_k or None]
+        body: dict = {"query": query, "documents": [documents[i] for i in keep], "model": model}
         if top_k:
             body["top_k"] = top_k
         out = await self._post("/rerank", body)
-        return [(d["index"], d["relevance_score"]) for d in out["data"]]
+        ranked = [(keep[d["index"]], d["relevance_score"]) for d in out["data"]]
+        rest = [(i, 0.0) for i in range(len(documents)) if i not in set(keep)]
+        return (ranked + rest)[: top_k or None]

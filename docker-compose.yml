@@ -614,10 +614,11 @@ services:
       - "8099"
     restart: unless-stopped
 
-  # 기억. jarvis 곳곳의 데이터를 Graphiti 지식 그래프(FalkorDB)에 쌓고, 에이전트가
-  # /search 로 꺼내 쓴다. 대화·카톡·iMessage 같은 글은 Claude Haiku 5.5(API 키,
-  # 사용량 과금)로 사람·장소·약속을 뽑고, 캘린더·가계부·자산·운동·작업·사진은
-  # LLM 없이 그대로 넣는다. 임베딩은 맥미니의 bge-m3(ollama)라 무료다.
+  # 기억. jarvis 곳곳의 데이터를 Graphiti 지식 그래프(FalkorDB)에 쌓고, 에이전트와
+  # mind 가 /search 로 꺼내 쓴다. mind 가 원문으로 확인한 사실은 /facts 로 받아
+  # Graphiti 가 같은 사람·장소에 묶고 모순을 정리한다. 캘린더·가계부·자산·운동·
+  # 작업·사진은 LLM 없이 그대로 넣는다. LLM 은 Claude Haiku 5.5, 임베딩과 재정렬은
+  # Voyage(voyage-4-large, rerank-3) - 둘 다 API 키, 사용량 과금.
   # 손님 대화는 group "guest" 로 따로 쌓여 운영자 기억과 섞이지 않는다.
   memory:
     build: ./memory-svc
@@ -636,6 +637,8 @@ services:
       # 검색용 Voyage 키(MongoDB Atlas 에서 만든 al-… 는 ai.mongodb.com 으로 간다).
       # 쓴 토큰을 세어 헤더·상태 탭에 금액으로 보인다.
       VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
+      # 비우면 전부. mind 가 대화를 읽기 시작하면 chat·kakao·imessage 를 뺀다.
+      MEMORY_SOURCES: ${MEMORY_SOURCES:-}
       EVENTS_URL: http://events:8101
     expose:
       - "8100"
@@ -646,8 +649,6 @@ services:
         condition: service_completed_successfully
       falkordb:
         condition: service_started
-      ollama:
-        condition: service_started
     restart: unless-stopped
 
   falkordb:
@@ -657,18 +658,6 @@ services:
       - jarvis-falkordb:/var/lib/falkordb/data
     expose:
       - "6379"
-    restart: unless-stopped
-
-  # bge-m3: 한국어를 잘 다루는 임베딩 모델. 처음 뜰 때 한 번 받는다(약 1.2GB).
-  ollama:
-    image: ollama/ollama:latest
-    entrypoint: ["/bin/sh", "-c", "ollama serve & until ollama list >/dev/null 2>&1; do sleep 1; done; ollama pull bge-m3; wait"]
-    environment:
-      OLLAMA_KEEP_ALIVE: 24h
-    volumes:
-      - jarvis-ollama:/root/.ollama
-    expose:
-      - "11434"
     restart: unless-stopped
 
   # 상태. "뭐가 고장났나"를 컨테이너가 아니라 기능 단위로 답한다 - 카톡이
@@ -796,4 +785,3 @@ volumes:
   jarvis-uploads:
   jarvis-imessage-data:
   jarvis-falkordb:
-  jarvis-ollama:

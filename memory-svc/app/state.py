@@ -78,6 +78,17 @@ class State:
             (input_tokens, output_tokens),
         )
 
+    async def fact_result(self, ref: str) -> dict | None:
+        """What Graphiti made of a fact already put in (migration 037)."""
+        row = await (await self.conn.execute("select result from memory_facts where ref = %s", (ref,))).fetchone()
+        return row[0] if row else None
+
+    async def save_fact(self, ref: str, group: str, result: dict):
+        await self.conn.execute(
+            "insert into memory_facts (ref, grp, result) values (%s, %s, %s) on conflict (ref) do nothing",
+            (ref, group, json.dumps(result, ensure_ascii=False)),
+        )
+
     async def add_voyage_usage(self, model: str, tokens: int):
         await self.conn.execute(
             """insert into voyage_usage (day, model, tokens, calls) values (current_date, %s, %s, 1)

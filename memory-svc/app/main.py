@@ -1,8 +1,9 @@
 """memory-svc: jarvis' long-term memory, a Graphiti knowledge graph.
 
 Every MEMORY_INTERVAL it collects what is new across jarvis (sources.py) into
-the graph; agents ask it with /search. The operator's data lives in group
-"owner", the guest's conversation in group "guest" - and a search names
+the graph, and mind puts in the facts it has checked (/facts); agents and mind
+ask it with /search, /nodes and /topics. The operator's data lives in group
+"owner", the guest's conversation in group "guest" - and every call names
 exactly one group, so neither can read the other's.
 """
 
@@ -15,9 +16,10 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from . import sources
-from .graph import Graph, kst
+from .graph import EMBED_MODEL, Graph, kst
 from .llm import MODEL
 from .state import State
 
@@ -30,6 +32,13 @@ DAILY_USD = float(os.environ.get("MEMORY_DAILY_USD", "1.0"))
 HAS_KEY = bool(os.environ.get("ANTHROPIC_API_KEY"))
 VOYAGE_KEY = bool(os.environ.get("VOYAGE_API_KEY"))
 EVENTS_URL = os.environ.get("EVENTS_URL", "")
+# Which collectors run. Once mind reads the conversations, chat, kakao and
+# imessage come off this list.
+SOURCES = [s.strip() for s in (os.environ.get("MEMORY_SOURCES") or ",".join(sources.ALL)).split(",") if s.strip()]
+if unknown := [s for s in SOURCES if s not in sources.ALL]:
+    log.warning("MEMORY_SOURCES 에 모르는 수집기가 있어 뺍니다: %s", ", ".join(unknown))
+    SOURCES = [s for s in SOURCES if s in sources.ALL]
+GROUP = "^(owner|guest)$"
 
 state = State()
 graph: Graph | None = None
@@ -46,10 +55,28 @@ async def llm_ok() -> bool:
     return HAS_KEY and await state.spent_today() < DAILY_USD
 
 
+async def embeddings():
+    """A new EMBED_MODEL re-embeds the whole graph once: vectors from two
+    models cannot be compared, so search would rank by noise until it did.
+    Checked every round, so a failed attempt is tried again."""
+    if (await state.cursor("embeddings")).get("model") == EMBED_MODEL:
+        return
+    running["now"] = "embeddings"
+    try:
+        n = await graph.reembed()
+        await state.save("embeddings", {"model": EMBED_MODEL}, n)
+        log.info("그래프를 %s 로 다시 임베딩했습니다: %d개", EMBED_MODEL, n)
+    except Exception as e:
+        log.warning("다시 임베딩하지 못했습니다: %s", e)
+        await state.fail("embeddings", f"{type(e).__name__}: {e}")
+
+
 async def loop():
     ctx = sources.Ctx(graph, state, llm_ok)
     while True:
-        for name, run in sources.ALL.items():
+        await embeddings()
+        for name in SOURCES:
+            run = sources.ALL[name]
             running["now"] = name
             try:
                 n = await run(ctx)
@@ -121,7 +148,7 @@ async def lifespan(app: FastAPI):
     def on_usage(i: int, o: int):
         asyncio.get_running_loop().create_task(state.add_usage(i, o))
 
-    graph = Graph(on_usage)
+    graph = Graph(on_usage, state.add_voyage_usage)
     await graph.setup()
 
     # Each direct fact also becomes a diary line, for the 6-hour episode
@@ -147,8 +174,91 @@ async def health():
 
 
 @app.get("/search", dependencies=[Depends(auth)])
-async def search(q: str = Query(min_length=1), group: str = Query(pattern="^(owner|guest)$"), limit: int = 10):
-    return {"facts": await graph.search(q, group, max(1, min(limit, 30)))}
+async def search(
+    q: str = Query(min_length=1),
+    group: str = Query(pattern=GROUP),
+    limit: int = 10,
+    center: str | None = Query(None, description="사람·장소 노드 id: 그 주변 두 단계의 사실도 후보로"),
+    mode: str = Query("rerank", pattern="^(rerank|mmr|rrf)$"),
+):
+    return {"facts": await graph.search(q, group, max(1, min(limit, 30)), center=center, mode=mode)}
+
+
+@app.get("/nodes", dependencies=[Depends(auth)])
+async def find(q: str = Query(min_length=1), group: str = Query(pattern=GROUP), limit: int = 5):
+    return {"nodes": await graph.find(q, group, max(1, min(limit, 20)))}
+
+
+@app.get("/nodes/{uid}", dependencies=[Depends(auth)])
+async def profile(uid: str, group: str = Query(pattern=GROUP), limit: int = 30):
+    p = await graph.profile(group, uid, max(1, min(limit, 100)))
+    if p is None:
+        raise HTTPException(404, "그런 노드가 없습니다.")
+    return p
+
+
+class Endpoint(BaseModel):
+    """One end of a fact: a node mind already knows (id), the operator
+    ("self"), or a name for Graphiti to resolve against the nodes it has."""
+
+    id: str | None = None
+    name: str = ""
+    kind: str | None = None
+    self_: bool = Field(False, alias="self")
+
+
+class FactIn(BaseModel):
+    ref: str = Field(min_length=1, max_length=200)
+    source: Endpoint
+    target: Endpoint
+    relation: str = Field(min_length=1, max_length=80)
+    fact: str = Field(min_length=1, max_length=1000)
+    validAt: str | None = None
+    invalidAt: str | None = None
+
+
+class FactsIn(BaseModel):
+    group: str = Field(pattern=GROUP)
+    facts: list[FactIn] = Field(max_length=50)
+
+
+@app.post("/facts", dependencies=[Depends(auth)])
+async def add_facts(body: FactsIn):
+    """Facts mind has checked against their source, one add_triplet each. A
+    ref seen before is answered from memory_facts without asking Graphiti
+    again; one that cannot go in now (the day's LLM budget, an error) comes
+    back with `later`, for mind to send again."""
+    for f in body.facts:
+        if not all(e.id or e.name.strip() or e.self_ for e in (f.source, f.target)):
+            raise HTTPException(422, f"{f.ref}: 사실의 양 끝에는 id, 이름, self 중 하나가 있어야 합니다.")
+    out = []
+    for f in body.facts:
+        if (done := await state.fact_result(f.ref)) is not None:
+            out.append(done)
+            continue
+        if not await llm_ok():
+            out.append({"ref": f.ref, "later": "오늘 LLM 예산을 다 써서 내일 넣습니다."})
+            continue
+        try:
+            r = await graph.triplet(body.group, f.ref, f.model_dump(by_alias=True))
+        except Exception as e:
+            log.warning("사실을 넣지 못했습니다 (%s): %s", f.ref, e)
+            out.append({"ref": f.ref, "later": f"{type(e).__name__}: {e}"[:300]})
+            continue
+        await state.save_fact(f.ref, body.group, r)
+        out.append(r)
+    return {"results": out}
+
+
+@app.get("/topics", dependencies=[Depends(auth)])
+async def topics(group: str = Query(pattern=GROUP)):
+    return {"topics": await graph.topics(group)}
+
+
+@app.post("/topics", dependencies=[Depends(auth)])
+async def build_topics(group: str = Query(pattern=GROUP)):
+    """Rebuild now rather than at the weekly run."""
+    return {"topics": await graph.communities(group)}
 
 
 @app.get("/status", dependencies=[Depends(auth)])
