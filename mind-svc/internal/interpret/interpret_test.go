@@ -2,6 +2,7 @@ package interpret
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -180,5 +181,28 @@ func TestRecallIsShown(t *testing.T) {
 	}
 	if script.Calls() != 1 || !strings.Contains(script.Prompts[0], "## 이미 기억하는 것") || !strings.Contains(script.Prompts[0], "매운 음식") {
 		t.Fatalf("기억이 프롬프트에 있어야 합니다: %v", script.Prompts)
+	}
+}
+
+// A backlog longer than one batch is read on, not left until the room speaks
+// again.
+func TestBacklogIsReadOn(t *testing.T) {
+	ctx := context.Background()
+	c, st, script := setup(t, `{"changes":[]}`)
+	c.cfg.MaxBatch = 2
+	for i, text := range []string{"하나", "둘", "셋"} {
+		say(t, st, fmt.Sprintf("sim:%d", i+1), text, false, time.Date(2026, 10, 12, 20, i, 0, 0, seoul))
+	}
+	if err := c.Read(ctx, "r"); err != nil {
+		t.Fatal(err)
+	}
+	if _, due := c.Pending()["r"]; !due {
+		t.Fatal("남은 메시지가 있으면 다시 읽을 차례여야 합니다")
+	}
+	if err := c.Read(ctx, "r"); err != nil {
+		t.Fatal(err)
+	}
+	if _, due := c.Pending()["r"]; due || script.Calls() != 2 {
+		t.Fatalf("다 읽으면 끝: due=%v calls=%d", due, script.Calls())
 	}
 }

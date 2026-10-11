@@ -194,8 +194,9 @@ func (c *Conversation) Read(ctx context.Context, room string) error {
 		c.done(room)
 		return nil
 	}
-	// A long backlog is read in batches, oldest first.
-	if len(fresh) > c.cfg.MaxBatch {
+	// A long backlog is read in batches, oldest first; the rest is read next.
+	more := len(fresh) > c.cfg.MaxBatch
+	if more {
 		fresh = fresh[:c.cfg.MaxBatch]
 	}
 	last := fresh[len(fresh)-1].SentAt
@@ -237,6 +238,12 @@ func (c *Conversation) Read(ctx context.Context, room string) error {
 		return err
 	}
 	c.log.Info("대화를 해석했습니다", "room", room, "messages", len(fresh), "changes", applied, "proposed", len(ops))
+	if more {
+		c.mu.Lock()
+		c.due[room] = c.now()
+		c.mu.Unlock()
+		return nil
+	}
 	c.done(room)
 	return nil
 }
