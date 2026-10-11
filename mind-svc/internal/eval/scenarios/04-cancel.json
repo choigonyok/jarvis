@@ -1,0 +1,25 @@
+{
+  "name": "확정된 저녁이 취소됨",
+  "room": "seoyeon",
+  "roomName": "서연",
+  "turns": [
+    {
+      "messages": [
+        { "at": "2026-10-14T19:00", "from": "서연", "text": "토요일 6시에 성수에서 저녁 어때?" },
+        { "at": "2026-10-14T19:01", "me": true, "text": "좋아!" }
+      ],
+      "script": {"changes":[{"op":"create","kind":"plan","set":{"title":"서연과 저녁","status":"confirmed","date":"2026-10-17","start":"18:00","place":"성수","people":["서연"]},"evidence":[{"line":1,"quote":"토요일 6시에 성수에서 저녁 어때"},{"line":2,"quote":"좋아"}],"confidence":0.9,"why":"제안과 동의"}]},
+      "expect": { "plans": [{ "status": "confirmed", "date": "2026-10-17", "start": "18:00", "place": "성수" }], "intents": ["calendar.create"] }
+    },
+    { "approve": "calendar.create", "expect": { "calendarCount": 1 } },
+    {
+      "messages": [
+        { "at": "2026-10-16T10:00", "from": "서연", "text": "미안 토요일에 일이 생겨서 못 갈 것 같아 다음에 보자" },
+        { "at": "2026-10-16T10:05", "me": true, "text": "아 그래 알겠어 다음에 보자" }
+      ],
+      "script": {"changes":[{"op":"cancel","kind":"plan","ref":"P1","evidence":[{"line":1,"quote":"못 갈 것 같아"}],"confidence":0.9,"why":"취소됨"}]},
+      "expect": { "plans": [{ "status": "cancelled" }], "planCount": 1, "intents": ["calendar.delete"] }
+    },
+    { "approve": "calendar.delete", "expect": { "calendarCount": 0, "plans": [{ "status": "cancelled", "onCalendar": false }] } }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "name": "거절된 제안은 확정되지 않음",
+  "room": "jisu4",
+  "roomName": "지수",
+  "turns": [
+    {
+      "messages": [
+        { "at": "2026-10-12T20:00", "from": "지수", "text": "이번 주말에 등산 갈래?" },
+        { "at": "2026-10-12T20:03", "me": true, "text": "아 이번 주는 좀 힘들 것 같아 다음에 가자" }
+      ],
+      "script": {"changes":[]},
+      "expect": { "noPlans": [{ "status": "confirmed" }, { "status": "proposed" }], "noActions": true }
+    }
+  ]
+}

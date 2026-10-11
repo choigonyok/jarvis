@@ -1,0 +1,15 @@
+{
+  "name": "내가 참여하지 않는 남의 일정은 기록하지 않음",
+  "room": "jisu3",
+  "roomName": "지수",
+  "turns": [
+    {
+      "messages": [
+        { "at": "2026-10-12T18:00", "from": "지수", "text": "나 다음 주에 민수랑 부산 가기로 했어" },
+        { "at": "2026-10-12T18:01", "me": true, "text": "오 좋겠다 재밌게 놀다 와" }
+      ],
+      "script": {"changes":[]},
+      "expect": { "noPlans": [{ "status": "confirmed" }], "noActions": true }
+    }
+  ]
+}

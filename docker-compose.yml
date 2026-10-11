@@ -637,10 +637,10 @@ services:
       # 검색용 Voyage 키(MongoDB Atlas 에서 만든 al-… 는 ai.mongodb.com 으로 간다).
       # 쓴 토큰을 세어 헤더·상태 탭에 금액으로 보인다.
       VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
-      # 비우면 전부. mind 가 대화를 읽기 시작하면 kakao·imessage 를 빼고,
-      # jarvis 대화는 손님 것만 남긴다(MEMORY_CHAT_GROUPS=guest).
-      MEMORY_SOURCES: ${MEMORY_SOURCES:-}
-      MEMORY_CHAT_GROUPS: ${MEMORY_CHAT_GROUPS:-owner,guest}
+      # 카톡·iMessage·운영자의 jarvis 대화는 mind 가 읽고 확인한 사실만 /facts 로
+      # 보낸다. 여기서는 구조화 데이터와 손님 대화, 6시간 일지, 주간 주제만.
+      MEMORY_SOURCES: ${MEMORY_SOURCES:-calendar,spending,assets,workout,jobs,photos,chat,diary,topics}
+      MEMORY_CHAT_GROUPS: ${MEMORY_CHAT_GROUPS:-guest}
       EVENTS_URL: http://events:8101
     expose:
       - "8100"
@@ -763,6 +763,52 @@ services:
     depends_on:
       db-migrate:
         condition: service_completed_successfully
+    restart: unless-stopped
+  # 인지 루프 실험(mind-svc). 감지 → 관측 로그(events) → 해석 → 세계 모델 →
+  # 주의·스킬 → 자율성 관문 → 행동. 평소 배포에는 뜨지 않고, 켤 때만:
+  #   docker compose --profile mind up -d mind
+  # 캘린더는 기본이 메모리라 실제 캘린더를 건드리지 않는다. 실제로 쓰려면
+  # MIND_CALENDAR=http. 콘솔은 루프백 8102 에만 열린다.
+  # 인지 루프. 카톡·iMessage·jarvis 대화를 읽어 일정·열린 고리(세계 모델)와
+  # 기억할 사실(근거 장부 → memory-svc)을 원문 인용으로 확인해 남긴다. 확정된
+  # 일정은 memory.plan 으로 에이전트의 제안 엔진에 넘긴다. 콘솔은 맥미니의
+  # 127.0.0.1:8102.
+  mind:
+    build: ./mind-svc
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      DATABASE_URL: >-
+        postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
+      API_TOKEN: ${JARVIS_API_TOKEN:-}
+      EVENTS_URL: http://events:8101
+      MIND_SELF_URL: http://mind:8102/consume
+      KAKAOTALK_URL: http://kakaotalk:8090
+      IMESSAGE_URL: http://imessage:8099
+      CALENDAR_URL: http://calendar:8093
+      MIND_CALENDAR: ${MIND_CALENDAR:-memory}
+      MIND_ANTHROPIC_API_KEY: ${MEMORY_ANTHROPIC_API_KEY:-}
+      MIND_CONTENT_KEY: ${MIND_CONTENT_KEY:-}
+      MIND_OWNER_NAME: ${MEMORY_OWNER_NAME:-}
+      MIND_UI_OPEN: "true"
+      # 장기 기억: 확인한 사실을 memory-svc(/facts)로 보내고 해석할 때 꺼내 읽는다.
+      MIND_MEMORY_URL: http://memory:8100
+      # 운영자와 jarvis 의 대화도 대화방 하나로 읽는다.
+      CHAT_URL: http://chat:8094
+      MIND_CHAT_POLL: 60s
+      # 처음 뜰 때 지난 대화를 얼마나 읽나. memory-svc 가 5분마다 이미 읽어 왔으니
+      # 겹치는 만큼 같은 일정이 카드로 다시 올라오지 않게 짧게.
+      MIND_BACKFILL: ${MIND_BACKFILL:-1h}
+      # 확정된 일정을 memory.plan 으로 알린다 - 에이전트의 제안 엔진이 캘린더 카드로.
+      MIND_PLAN_EVENTS: "true"
+      # 스킬·관문의 알림은 콘솔에만(관문을 하나로 합치기 전까지).
+      MIND_QUIET: ${MIND_QUIET:-true}
+    ports:
+      - "127.0.0.1:${JARVIS_MIND_PORT:-8102}:8102"
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+      events:
+        condition: service_started
     restart: unless-stopped
   tunnel:
     image: cloudflare/cloudflared:latest

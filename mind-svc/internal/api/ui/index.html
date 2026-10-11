@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>mind 콘솔</title>
+<style>
+/* The loop on one screen, left to right as it runs: what was seen, what is
+   believed, what was decided. Grayscale like the jarvis console; colour only
+   where it means something (approve, reject, the loop's own green). */
+:root {
+  --bg: #0e1013; --panel: #15181d; --raised: #1c2027; --line: #2a2f37; --ink: #e9ebee; --dim: #a3a9b2; --faint: #6f7680;
+  --loop: #4cc3ae; --ok: #5fcf8a; --no: #ef7d70; --warn: #e6b45a;
+  --sans: system-ui, -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.55 var(--sans); }
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--loop); outline-offset: 2px; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+header h1 { font-size: 16px; margin: 0; font-weight: 650; letter-spacing: -0.01em; }
+.chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; font-size: 12px; color: var(--dim); white-space: nowrap; }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+.dot.on { background: var(--ok); } .dot.off { background: var(--no); }
+.tools { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+.btn { background: var(--raised); border: 1px solid var(--line); border-radius: 8px; padding: 6px 11px; font-size: 13px; min-height: 34px; }
+.btn:hover { border-color: var(--faint); }
+.btn.ok { border-color: color-mix(in srgb, var(--ok) 60%, transparent); color: var(--ok); }
+.btn.no { border-color: color-mix(in srgb, var(--no) 50%, transparent); color: var(--no); }
+.btn[disabled] { opacity: .4; cursor: default; }
+main { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(300px, 1.1fr) minmax(320px, 1.2fr); height: calc(100% - 59px); }
+section.col { min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--line); }
+section.col:last-child { border-right: 0; }
+.colhead { display: flex; align-items: baseline; gap: 8px; padding: 12px 16px 8px; }
+.colhead h2 { font-size: 13px; margin: 0; font-weight: 600; color: var(--dim); }
+.colhead .step { color: var(--loop); font: 500 11px var(--mono); }
+.scroll { overflow-y: auto; padding: 0 16px 16px; flex: 1; min-height: 0; }
+.tabs { display: none; }
+@media (max-width: 960px) {
+  main { grid-template-columns: minmax(0, 1fr); height: auto; }
+  section.col { border-right: 0; display: none; min-height: 70vh; }
+  section.col.show { display: flex; }
+  .tabs { display: flex; gap: 4px; padding: 8px 16px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); z-index: 2; }
+  .tabs button { flex: 1; background: none; border: 1px solid var(--line); border-radius: 8px; padding: 8px; min-height: 40px; color: var(--dim); }
+  .tabs button[aria-selected="true"] { color: var(--ink); border-color: var(--loop); }
+}
+
+/* rooms + chat */
+.rooms { display: flex; gap: 6px; overflow-x: auto; padding: 0 16px 8px; }
+.room { border: 1px solid var(--line); background: none; border-radius: 999px; padding: 4px 12px; font-size: 13px; white-space: nowrap; color: var(--dim); }
+.room[aria-pressed="true"] { color: var(--ink); border-color: var(--ink); }
+.room .n { color: var(--warn); margin-left: 4px; font-size: 11px; }
+.chat { display: flex; flex-direction: column; gap: 6px; padding-top: 6px; }
+.msg { max-width: 82%; padding: 7px 11px; border-radius: 14px; background: var(--raised); border: 1px solid var(--line); }
+.msg.me { align-self: flex-end; background: color-mix(in srgb, var(--loop) 16%, var(--raised)); border-color: color-mix(in srgb, var(--loop) 35%, var(--line)); }
+.msg .who { font-size: 11px; color: var(--faint); }
+.msg.read { opacity: .7; }
+.waiting { font-size: 12px; color: var(--warn); text-align: center; padding: 6px; }
+.composer { display: grid; gap: 6px; padding: 10px 16px 14px; border-top: 1px solid var(--line); }
+.composer .row { display: flex; gap: 6px; }
+.composer input, .composer select { background: var(--panel); border: 1px solid var(--line); color: var(--ink); border-radius: 8px; padding: 8px 10px; font: inherit; min-height: 38px; min-width: 0; }
+.composer input[type=text] { flex: 1; }
+.empty { color: var(--faint); font-size: 13px; padding: 14px 2px; }
+
+/* world */
+.ent { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; background: var(--panel); }
+.ent.dead { opacity: .55; }
+.ent header { all: unset; display: flex; gap: 8px; align-items: center; cursor: pointer; }
+.ent h3 { font-size: 14px; margin: 0; font-weight: 600; flex: 1; min-width: 0; }
+.kind { font: 11px var(--mono); color: var(--faint); }
+.st { font-size: 11px; border-radius: 999px; padding: 1px 8px; border: 1px solid var(--line); color: var(--dim); }
+.st.confirmed, .st.open { color: var(--loop); border-color: color-mix(in srgb, var(--loop) 45%, transparent); }
+.st.proposed { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.st.cancelled, .st.closed, .st.done { color: var(--faint); }
+.facts { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--dim); font-size: 13px; margin-top: 4px; }
+.cal { color: var(--ok); }
+.st.stored { color: var(--loop); border-color: color-mix(in srgb, var(--loop) 45%, transparent); }
+.st.pending { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.st.failed { color: var(--no); border-color: color-mix(in srgb, var(--no) 45%, transparent); }
+.st.duplicate { color: var(--faint); }
+.triple { font: 11.5px var(--mono); color: var(--faint); overflow-wrap: anywhere; }
+.judge { font-size: 12.5px; color: var(--dim); margin-top: 4px; }
+.judge s { color: var(--faint); }
+.hist { margin-top: 8px; border-top: 1px dashed var(--line); padding-top: 8px; display: grid; gap: 8px; }
+.ch { font-size: 12.5px; color: var(--dim); }
+.ch b { color: var(--ink); font-weight: 500; }
+.quote { color: var(--ink); background: var(--raised); border-radius: 6px; padding: 1px 6px; }
+
+/* intents */
+.int { border: 1px solid var(--line); border-left: 3px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; background: var(--panel); display: grid; gap: 4px; }
+.int.pending { border-left-color: var(--warn); }
+.int.executed { border-left-color: var(--ok); }
+.int.rejected, .int.undone, .int.failed { border-left-color: var(--no); }
+.int.superseded, .int.dropped { opacity: .5; }
+.int .top { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; color: var(--faint); }
+.int .title { font-weight: 600; }
+.int .meta { font-size: 12.5px; color: var(--dim); }
+.int .acts { display: flex; gap: 6px; margin-top: 4px; }
+.dec { font-size: 11px; border-radius: 4px; padding: 1px 6px; background: var(--raised); color: var(--dim); }
+h4 { font-size: 12px; color: var(--dim); font-weight: 600; margin: 16px 0 6px; }
+.list { display: grid; gap: 4px; font-size: 12.5px; color: var(--dim); }
+.list div { border-bottom: 1px solid var(--line); padding: 4px 0; }
+.toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--raised); border: 1px solid var(--no); color: var(--ink); padding: 8px 14px; border-radius: 8px; font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>mind 콘솔</h1>
+  <span class="chip" id="mode">-</span>
+  <span class="chip"><span class="dot" id="llmdot"></span><span id="llm">-</span></span>
+  <span class="chip" id="now">-</span>
+  <span class="chip"><span class="dot" id="memdot"></span><span id="mem">-</span></span>
+  <div class="tools">
+    <button class="btn" id="readAll" title="조용해지기를 기다리지 않고 모든 대화를 지금 해석">지금 해석</button>
+    <button class="btn" id="settle" title="가라앉는 중인 변화를 스킬에 지금 넘김">지금 넘기기</button>
+    <button class="btn" id="morning">아침 브리핑</button>
+    <button class="btn clock" data-advance="1h">+1시간</button>
+    <button class="btn clock" data-advance="24h">+1일</button>
+  </div>
+</header>
+<nav class="tabs" role="tablist">
+  <button role="tab" data-col="c1" aria-selected="true">대화</button>
+  <button role="tab" data-col="c2" aria-selected="false">세계 모델</button>
+  <button role="tab" data-col="c3" aria-selected="false">결정</button>
+</nav>
+<main>
+  <section class="col show" id="c1">
+    <div class="colhead"><span class="step">감지 · 해석</span><h2>대화</h2></div>
+    <div class="rooms" id="rooms"></div>
+    <div class="scroll" id="chatScroll"><div class="chat" id="chat"></div></div>
+    <form class="composer" id="composer">
+      <div class="row">
+        <select id="who" aria-label="보내는 사람"><option value="other">상대</option><option value="me">나</option></select>
+        <input type="text" id="roomName" aria-label="대화방 이름" placeholder="대화방 (예: 지수)" value="지수">
+      </div>
+      <div class="row">
+        <input type="text" id="text" aria-label="메시지" placeholder="이번 주말에 강릉 갈까?" autocomplete="off">
+        <button class="btn" type="submit">보내기</button>
+      </div>
+    </form>
+  </section>
+  <section class="col" id="c2">
+    <div class="colhead"><span class="step">세계 모델 · 기억</span><h2>일정 · 열린 고리 · 기억할 사실</h2></div>
+    <div class="scroll" id="world"></div>
+  </section>
+  <section class="col" id="c3">
+    <div class="colhead"><span class="step">주의 · 스킬 → 관문 → 행동</span><h2>의도와 결정</h2></div>
+    <div class="scroll"><div id="intents"></div>
+      <h4>알림</h4><div class="list" id="notices"></div>
+      <h4>캘린더 (메모리)</h4><div class="list" id="calendar"></div>
+      <h4>타이머</h4><div class="list" id="timers"></div>
+      <h4>신뢰 단계</h4><div class="list" id="levels"></div>
+    </div>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const t = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleString("ko-KR", { month: "numeric", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false }); };
+const STATUS = { proposed: "제안됨", confirmed: "확정", cancelled: "취소", done: "끝남", open: "열림", closed: "닫힘" };
+const DECISION = { execute: "바로 실행", notify: "실행 후 알림", ask: "질문", digest: "요약", drop: "버림" };
+const ISTATUS = { pending: "대기", executed: "완료", rejected: "거절됨", undone: "되돌림", dropped: "버림", superseded: "대체됨", failed: "실패" };
+const KIND = { "calendar.create": "캘린더 추가", "calendar.update": "캘린더 수정", "calendar.delete": "캘린더 삭제", info: "알림" };
+const LEVEL = { auto: "알아서", notify: "하고 알림", ask: "먼저 묻기", never: "안 함" };
+const FSTATUS = { pending: "보내는 중", stored: "기억함", duplicate: "이미 앎", failed: "포기" };
+let room = null, open = new Set(), snap = null;
+
+async function call(path, body) {
+  const r = await fetch(path, { method: body === undefined ? "GET" : "POST", headers: { "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const out = await r.json().catch(() => ({}));
+  if (!r.ok) { toast(out.error || r.status); throw new Error(out.error); }
+  return out;
+}
+function toast(msg) { const el = document.createElement("div"); el.className = "toast"; el.textContent = msg; document.body.append(el); setTimeout(() => el.remove(), 3500); }
+
+async function refresh() {
+  try { snap = await call("/api/snapshot"); } catch { return; }
+  render();
+}
+
+function render() {
+  const s = snap;
+  $("mode").textContent = s.mode === "memory" ? "메모리 모드" : s.mode;
+  $("llmdot").className = "dot " + (s.llm.ready ? "on" : "off");
+  $("llm").textContent = s.llm.ready ? `${s.llm.model} · 오늘 $${s.llm.spentUsd.toFixed(4)}` : "LLM 키 없음";
+  $("now").textContent = t(s.now) + (s.settling ? ` · 가라앉는 중 ${s.settling}` : "");
+  $("memdot").className = "dot " + (s.memory ? "on" : "off");
+  $("mem").textContent = s.memory ? "장기 기억 연결됨" : "장기 기억 없음";
+  document.querySelectorAll(".clock").forEach((b) => (b.disabled = s.mode !== "memory"));
+
+  const rooms = s.rooms || [];
+  if (!room && rooms.length) room = rooms[0].room;
+  $("rooms").innerHTML = rooms.map((r) => `<button class="room" data-room="${esc(r.room)}" aria-pressed="${r.room === room}">${esc(r.name)}${r.uninterpreted ? `<span class="n">${r.uninterpreted}</span>` : ""}</button>`).join("");
+  const cur = rooms.find((r) => r.room === room);
+  const stick = $("chatScroll").scrollHeight - $("chatScroll").scrollTop - $("chatScroll").clientHeight < 40;
+  if (!cur) $("chat").innerHTML = `<div class="empty">아래에서 대화를 보내 보세요. 상대가 제안하고("이번 주말에 강릉 갈까?") 내가 답하면("그러자!") 몇 초 뒤 해석됩니다.</div>`;
+  else {
+    const read = new Date(cur.interpreted).getTime();
+    $("chat").innerHTML = cur.messages.map((m) => `<div class="msg ${m.isMine ? "me" : ""} ${new Date(m.sentAt).getTime() <= read ? "read" : ""}"><div class="who">${m.isMine ? "나" : esc(m.sender || "상대")} · ${t(m.sentAt)}</div>${esc(m.text)}</div>`).join("") +
+      (cur.readAt ? `<div class="waiting">조용해지면 해석: ${t(cur.readAt)}</div>` : "");
+  }
+  if (stick) $("chatScroll").scrollTop = $("chatScroll").scrollHeight;
+
+  const changes = s.changes || [];
+  $("world").innerHTML = (s.entities || []).map((e) => {
+    const st = e.state, live = !["cancelled", "done", "closed"].includes(st.status);
+    const facts = [st.date && `📅 ${st.date}${st.endDate ? "~" + st.endDate : ""}${st.start ? " " + st.start : ""}`, st.place && `📍 ${st.place}`, st.people?.length && `👥 ${st.people.join(", ")}`, st.owner && `담당 ${st.owner === "me" ? "나" : "상대"}`, st.due && `기한 ${st.due}`, st.calendarId && `<span class="cal">캘린더 ✓</span>`].filter(Boolean);
+    const hist = open.has(e.id) ? `<div class="hist">${changes.filter((c) => c.entityId === e.id).map(change).join("") || "<div class='ch'>이력 불러오는 중…</div>"}</div>` : "";
+    return `<article class="ent ${live ? "" : "dead"}"><header data-ent="${e.id}"><span class="kind">${e.kind === "plan" ? "일정" : "고리"}</span><h3>${esc(st.title)}</h3><span class="st ${st.status}">${STATUS[st.status] || st.status}</span></header><div class="facts">${facts.map((f) => `<span>${f}</span>`).join("")}</div>${hist}</article>`;
+  }).join("") || `<div class="empty">아직 아는 것이 없습니다.</div>`;
+  $("world").innerHTML += `<h4>기억할 사실</h4>` + ((s.facts || []).map(fact).join("") ||
+    `<div class="empty">대화에서 취향·관계·근황이 나오면 원문 인용과 함께 여기 적히고 장기 기억으로 갑니다.</div>`);
+  if ((s.aliases || []).length) {
+    $("world").innerHTML += `<h4>사람 · 장소 (기억의 노드)</h4><div class="list">` +
+      s.aliases.map((a) => `<div><b>${esc(a.name)}</b> ${a.kind ? esc(a.kind) + " · " : ""}${esc(a.node.slice(0, 8))} · ${a.seen}번</div>`).join("") + `</div>`;
+  }
+
+  $("intents").innerHTML = (s.intents || []).map((i) => {
+    const acts = i.status === "pending" ? `<button class="btn ok" data-act="approve" data-id="${i.id}">승인</button><button class="btn no" data-act="reject" data-id="${i.id}">거절</button>`
+      : i.status === "executed" && i.reversible && i.kind !== "info" ? `<button class="btn" data-act="undo" data-id="${i.id}">되돌리기</button>` : "";
+    const ev = (i.evidence || []).map((e) => `<span class="quote">“${esc(e.quote)}”</span>`).join(" ");
+    return `<article class="int ${i.status}" id="${i.id}"><div class="top"><span>${KIND[i.kind] || i.kind}</span><span class="dec">${DECISION[i.decision] || i.decision || ""}</span><span>${ISTATUS[i.status] || i.status}</span><span>· ${esc(i.skill)} · ${t(i.createdAt)}</span></div>
+      <div class="title">${esc(i.title)}</div>${i.body ? `<div class="meta">${esc(i.body).replace(/\n/g, "<br>")}</div>` : ""}
+      ${i.preview ? `<div class="meta">하는 일: ${esc(i.preview)}</div>` : ""}<div class="meta">${esc(i.reason)}${i.why ? " · " + esc(i.why) : ""}${i.confidence < 1 ? ` · 확신 ${Math.round(i.confidence * 100)}%` : ""}</div>
+      ${ev ? `<div class="meta">근거 ${ev}</div>` : ""}${i.error ? `<div class="meta" style="color:var(--no)">${esc(i.error)}</div>` : ""}<div class="acts">${acts}</div></article>`;
+  }).join("") || `<div class="empty">스킬이 아직 아무것도 하자고 하지 않았습니다.</div>`;
+
+  $("notices").innerHTML = s.mode === "stack" && !s.notices ? "<div>알림은 관측 로그를 거쳐 notify-svc 로 갑니다.</div>"
+    : (s.notices || []).slice().reverse().slice(0, 12).map((n) => `<div>${n.tier === "now" ? "🔔" : "🌙"} <b>${esc(n.title)}</b> ${esc(n.body).replace(/\n/g, " · ")}</div>`).join("") || "<div>없음</div>";
+  $("calendar").innerHTML = (s.calendar || []).map((c) => `<div>${esc(c.date)}${c.start ? " " + c.start : ""} <b>${esc(c.title)}</b>${c.place ? " @" + esc(c.place) : ""}</div>`).join("") || "<div>비어 있음</div>";
+  $("timers").innerHTML = (s.timers || []).map((tm) => `<div>${tm.firedAt ? "✓" : "⏰"} ${t(tm.fireAt)} · ${esc(tm.skill)}/${esc(tm.name)}</div>`).join("") || "<div>없음</div>";
+  $("levels").innerHTML = Object.entries(s.levels || {}).map(([k, [l, why]]) => `<div><b>${KIND[k] || k}</b> ${LEVEL[l] || l} · ${esc(why)}</div>`).join("");
+}
+
+// One entry of the evidence ledger: what was said, where it stands, and what
+// long-term memory made of it.
+function fact(f) {
+  const ev = (f.evidence || []).map((e) => `<span class="quote">“${esc(e.quote)}”</span>`).join(" ");
+  const m = f.memory || {};
+  const judge = [
+    m.duplicate && `이미 알던 사실: ${esc(m.edgeFact)}`,
+    m.expired && "더 나중 사실이 있어 지난 것으로 기억",
+    ...(m.ended || []).map((x) => `끝낸 사실: <s>${esc(x.fact)}</s>`),
+    f.status === "pending" && f.error && `다시 보낼 예정 (${f.tries}번째): ${esc(f.error)}`,
+    f.status === "failed" && `보내지 못함: ${esc(f.error)}`,
+  ].filter(Boolean);
+  const end = (p) => esc(p.self ? "나" : p.name);
+  return `<article class="ent"><header><span class="kind">사실</span><h3>${esc(f.text)}</h3><span class="st ${f.status}">${FSTATUS[f.status] || f.status}</span></header>
+    <div class="triple">${end(f.subject)} —${esc(f.relation)}→ ${end(f.object)}${f.validAt ? " · " + esc(f.validAt) + "부터" : ""}</div>
+    ${ev ? `<div class="judge">근거 ${ev}</div>` : ""}${judge.map((j) => `<div class="judge">${j}</div>`).join("")}</article>`;
+}
+
+function change(c) {
+  const b = c.before || {}, a = c.after || {};
+  const keys = ["title", "status", "date", "endDate", "start", "end", "place", "owner", "due", "calendarId"];
+  const diff = c.before ? keys.filter((k) => (b[k] || "") !== (a[k] || "")).map((k) => `${k} <b>${esc(b[k] || "∅")} → ${esc(a[k] || "∅")}</b>`).join(", ") : "<b>새로 생김</b>";
+  const ev = (c.evidence || []).map((e) => `<span class="quote">“${esc(e.quote)}”</span>`).join(" ");
+  return `<div class="ch">${t(c.at)} · ${esc(c.actor)} · ${diff}${ev ? "<br>근거 " + ev : ""}${c.why ? " · " + esc(c.why) : ""}${c.confidence < 1 ? ` · 확신 ${Math.round(c.confidence * 100)}%` : ""}</div>`;
+}
+
+document.addEventListener("click", async (ev) => {
+  const el = ev.target.closest("[data-room],[data-ent],[data-act],[data-col],[data-advance]");
+  if (!el) return;
+  if (el.dataset.room) { room = el.dataset.room; const r = snap.rooms.find((x) => x.room === room); if (r) $("roomName").value = r.name; render(); }
+  else if (el.dataset.ent) {
+    const id = el.dataset.ent;
+    if (open.has(id)) open.delete(id); else {
+      open.add(id);
+      const { changes } = await call(`/api/entities/${id}/changes`);
+      const known = new Set(snap.changes.map((c) => c.id));
+      snap.changes.push(...changes.filter((c) => !known.has(c.id)));
+    }
+    render();
+  } else if (el.dataset.act) { await call(`/api/intents/${el.dataset.id}/${el.dataset.act}`, {}); refresh(); }
+  else if (el.dataset.col) {
+    document.querySelectorAll(".tabs button").forEach((b) => b.setAttribute("aria-selected", b === el));
+    document.querySelectorAll("section.col").forEach((c) => c.classList.toggle("show", c.id === el.dataset.col));
+  } else if (el.dataset.advance) { await call("/api/clock", { advance: el.dataset.advance }); await call("/api/settle", {}); refresh(); }
+});
+$("composer").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const text = $("text").value.trim(), name = $("roomName").value.trim() || "지수";
+  if (!text) return;
+  const mine = $("who").value === "me";
+  const id = name.replace(/\s+/g, "-");
+  await call("/api/simulate", { room: id, roomName: name, sender: mine ? "" : name, mine, text });
+  room = "sim:" + id;
+  $("text").value = "";
+  refresh();
+});
+$("readAll").onclick = async () => { await call("/api/read", {}); await call("/api/settle", {}); refresh(); };
+$("settle").onclick = async () => { await call("/api/settle", {}); refresh(); };
+$("morning").onclick = async () => { await call("/api/tick", { name: "morning" }); refresh(); };
+refresh();
+setInterval(refresh, 1500);
+</script>
+</body>
+</html>

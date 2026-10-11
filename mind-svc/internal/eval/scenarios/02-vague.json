@@ -1,0 +1,15 @@
+{
+  "name": "언제 한번 보자는 약속이 아님",
+  "room": "hajun",
+  "roomName": "하준",
+  "turns": [
+    {
+      "messages": [
+        { "at": "2026-10-12T12:30", "from": "하준", "text": "다음에 언제 밥 한번 먹자" },
+        { "at": "2026-10-12T12:31", "me": true, "text": "그래 언제 한번 보자 ㅎㅎ" }
+      ],
+      "script": {"changes":[]},
+      "expect": { "noPlans": [{ "status": "confirmed" }], "noActions": true }
+    }
+  ]
+}

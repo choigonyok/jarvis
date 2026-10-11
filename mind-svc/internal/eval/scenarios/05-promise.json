@@ -1,0 +1,24 @@
+{
+  "name": "내가 한 약속은 열린 고리로",
+  "room": "boss",
+  "roomName": "팀장님",
+  "turns": [
+    {
+      "messages": [
+        { "at": "2026-10-12T15:00", "from": "팀장님", "text": "내일까지 견적서 보내줄 수 있어요?" },
+        { "at": "2026-10-12T15:02", "me": true, "text": "네 내일 오전까지 보내드릴게요" }
+      ],
+      "script": {"changes":[{"op":"create","kind":"loop","set":{"title":"팀장님께 견적서 보내기","owner":"me","due":"2026-10-13T12:00"},"evidence":[{"line":2,"quote":"내일 오전까지 보내드릴게요"}],"confidence":0.85,"why":"운영자가 한 약속"}]},
+      "expect": { "loops": [{ "owner": "me", "due": "2026-10-13", "status": "open" }], "noActions": true }
+    },
+    { "advance": "18h", "expect": { "intents": ["info"] } },
+    {
+      "messages": [
+        { "at": "2026-10-13T10:30", "me": true, "text": "견적서 메일로 보내드렸습니다" },
+        { "at": "2026-10-13T10:31", "from": "팀장님", "text": "네 받았어요 감사합니다" }
+      ],
+      "script": {"changes":[{"op":"close","kind":"loop","ref":"L1","evidence":[{"line":1,"quote":"견적서 메일로 보내드렸습니다"}],"confidence":0.9,"why":"보냄"}]},
+      "expect": { "loops": [{ "status": "closed" }] }
+    }
+  ]
+}

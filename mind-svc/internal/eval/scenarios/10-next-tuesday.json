@@ -1,0 +1,12 @@
+{
+  "name": "다음 주 화요일 예약 안내",
+  "room": "clinic",
+  "roomName": "연세치과",
+  "turns": [
+    {
+      "messages": [{ "at": "2026-10-15T14:00", "from": "연세치과", "text": "다음 주 화요일 오후 3시 정기검진 예약되셨습니다" }],
+      "script": {"changes":[{"op":"create","kind":"plan","set":{"title":"연세치과 정기검진","status":"confirmed","date":"2026-10-20","start":"15:00","place":"연세치과"},"evidence":[{"line":1,"quote":"다음 주 화요일 오후 3시 정기검진 예약되셨습니다"}],"confidence":0.9,"why":"예약 확정 안내"}]},
+      "expect": { "plans": [{ "status": "confirmed", "date": "2026-10-20", "start": "15:00", "titleHas": "검진" }], "intents": ["calendar.create"] }
+    }
+  ]
+}

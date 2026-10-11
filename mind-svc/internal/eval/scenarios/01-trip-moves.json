@@ -1,0 +1,36 @@
+{
+  "name": "주말 강릉 여행이 춘천으로 바뀜",
+  "room": "jisu",
+  "roomName": "지수",
+  "turns": [
+    {
+      "messages": [{ "at": "2026-10-12T20:01", "from": "지수", "text": "이번 주말에 강릉 갈까?" }],
+      "script": {"changes":[{"op":"create","kind":"plan","set":{"title":"지수와 강릉 여행","status":"proposed","date":"2026-10-17","place":"강릉","people":["지수"]},"evidence":[{"line":1,"quote":"강릉 갈까"}],"confidence":0.8,"why":"주말 여행 제안"}]},
+      "expect": { "plans": [{ "status": "proposed", "place": "강릉" }], "planCount": 1, "noActions": true }
+    },
+    {
+      "messages": [{ "at": "2026-10-12T20:03", "me": true, "text": "그러자! 토요일 아침에 출발하자" }],
+      "script": {"changes":[{"op":"update","kind":"plan","ref":"P1","set":{"status":"confirmed","date":"2026-10-17"},"evidence":[{"line":1,"quote":"그러자"}],"confidence":0.9,"why":"동의함"}]},
+      "expect": { "plans": [{ "status": "confirmed", "place": "강릉", "date": "2026-10-17" }], "planCount": 1, "intents": ["calendar.create"] }
+    },
+    {
+      "approve": "calendar.create",
+      "expect": { "calendar": [{ "place": "강릉", "date": "2026-10-17" }], "plans": [{ "place": "강릉", "onCalendar": true }] }
+    },
+    {
+      "messages": [
+        { "at": "2026-10-13T09:10", "from": "지수", "text": "근데 강릉은 좀 추울 것 같은데 춘천으로 가자" },
+        { "at": "2026-10-13T09:12", "me": true, "text": "좋아 춘천 가자" }
+      ],
+      "script": {"changes":[{"op":"update","kind":"plan","ref":"P1","set":{"place":"춘천","title":"지수와 춘천 여행"},"evidence":[{"line":1,"quote":"춘천으로 가자"},{"line":2,"quote":"좋아 춘천 가자"}],"confidence":0.9,"why":"장소를 춘천으로 바꿈"}]},
+      "expect": { "plans": [{ "status": "confirmed", "place": "춘천", "onCalendar": true }], "planCount": 1, "intents": ["calendar.update"] }
+    },
+    {
+      "approve": "calendar.update",
+      "expect": { "calendar": [{ "place": "춘천", "date": "2026-10-17" }], "calendarCount": 1 }
+    },
+    { "advance": "84h", "expect": { "intents": ["info"] } },
+    { "advance": "12h" },
+    { "tick": "morning", "expect": { "intents": ["info"] } }
+  ]
+}
