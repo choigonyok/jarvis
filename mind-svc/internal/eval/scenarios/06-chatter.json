@@ -1,0 +1,15 @@
+{
+  "name": "잡담은 아무것도 남기지 않음",
+  "room": "jisu2",
+  "roomName": "지수",
+  "turns": [
+    {
+      "messages": [
+        { "at": "2026-10-12T21:00", "from": "지수", "text": "ㅋㅋㅋ 오늘 날씨 미쳤다" },
+        { "at": "2026-10-12T21:01", "me": true, "text": "진짜 완전 가을이네" }
+      ],
+      "script": {"changes":[]},
+      "expect": { "planCount": 0, "noLoops": true, "noActions": true }
+    }
+  ]
+}

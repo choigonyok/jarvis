@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# mind-svc 를 맥북에서 돌려 본다.
+#
+#   scripts/mind dev      메모리 모드로 go run (DB·Docker 없이). http://localhost:8102
+#   scripts/mind stack    Postgres + events-svc + mind 를 docker compose 로 (docker-compose.mind.yml)
+#   scripts/mind down     stack 내리기. 데이터까지 지우려면 scripts/mind down -v
+#   scripts/mind eval     평가 시나리오를 실제 모델로
+#   scripts/mind test     go test (모델 없이, 결정적으로)
+#
+# LLM 키: MIND_ANTHROPIC_API_KEY 가 환경에 있으면 그것을, 없으면 맥미니 .env 의
+# MEMORY_ANTHROPIC_API_KEY 를 실행할 때만 ssh 로 읽어 환경 변수로 넘긴다.
+# 파일로 복사하지 않고 출력하지도 않는다.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+HOST="${MINI_HOST:-macmini}"
+
+key() {
+  if [[ -z "${MIND_ANTHROPIC_API_KEY:-}" ]]; then
+    MIND_ANTHROPIC_API_KEY="$(ssh -o LogLevel=ERROR -o ConnectTimeout=10 "$HOST" \
+      "grep -E '^MEMORY_ANTHROPIC_API_KEY=' ~/jarvis/.env | cut -d= -f2-" 2>/dev/null || true)"
+    if [[ -z "$MIND_ANTHROPIC_API_KEY" ]]; then
+      echo "LLM 키를 찾지 못했습니다. MIND_ANTHROPIC_API_KEY 를 직접 넣거나 맥미니 접속을 확인하세요." >&2
+      echo "(키 없이도 뜨지만 대화를 해석하지 않습니다)" >&2
+    fi
+  fi
+  export MIND_ANTHROPIC_API_KEY
+}
+
+case "${1:-}" in
+  dev)   key; cd "$ROOT/mind-svc" && exec go run . ;;
+  stack) key; cd "$ROOT" && exec docker compose -f docker-compose.mind.yml up --build ;;
+  down)  shift; cd "$ROOT" && exec docker compose -f docker-compose.mind.yml down "$@" ;;
+  eval)  key; cd "$ROOT/mind-svc" && exec go run . eval ;;
+  test)  cd "$ROOT/mind-svc" && exec go test ./... ;;
+  *)     sed -n '2,15p' "$0"; exit 1 ;;
+esac

@@ -770,6 +770,37 @@ services:
       db-migrate:
         condition: service_completed_successfully
     restart: unless-stopped
+  # 인지 루프 실험(mind-svc). 감지 → 관측 로그(events) → 해석 → 세계 모델 →
+  # 주의·스킬 → 자율성 관문 → 행동. 평소 배포에는 뜨지 않고, 켤 때만:
+  #   docker compose --profile mind up -d mind
+  # 캘린더는 기본이 메모리라 실제 캘린더를 건드리지 않는다. 실제로 쓰려면
+  # MIND_CALENDAR=http. 콘솔은 루프백 8102 에만 열린다.
+  mind:
+    build: ./mind-svc
+    profiles: ["mind"]
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      DATABASE_URL: >-
+        postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
+      API_TOKEN: ${JARVIS_API_TOKEN:-}
+      EVENTS_URL: http://events:8101
+      MIND_SELF_URL: http://mind:8102/consume
+      KAKAOTALK_URL: http://kakaotalk:8090
+      IMESSAGE_URL: http://imessage:8099
+      CALENDAR_URL: http://calendar:8093
+      MIND_CALENDAR: ${MIND_CALENDAR:-memory}
+      MIND_ANTHROPIC_API_KEY: ${MEMORY_ANTHROPIC_API_KEY:-}
+      MIND_CONTENT_KEY: ${MIND_CONTENT_KEY:-}
+      MIND_OWNER_NAME: ${MEMORY_OWNER_NAME:-}
+      MIND_UI_OPEN: "true"
+    ports:
+      - "127.0.0.1:${JARVIS_MIND_PORT:-8102}:8102"
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+      events:
+        condition: service_started
+    restart: unless-stopped
   tunnel:
     image: cloudflare/cloudflared:latest
     profiles: ["cloudflare"]

@@ -1,0 +1,16 @@
+{
+  "name": "나와의 채팅에 남긴 확정 메모",
+  "room": "self",
+  "roomName": "메모",
+  "turns": [
+    {
+      "messages": [
+        { "at": "2026-10-11T03:50", "me": true, "text": "내일모레 뭐 일정 없으면 저녁이나 먹을까?" },
+        { "at": "2026-10-11T03:53", "me": true, "text": "그러자 뭐 그래야겠다" },
+        { "at": "2026-10-11T03:53", "me": true, "text": "민지랑 저녁 내일 모레 먹는 걸로 확정" }
+      ],
+      "script": {"changes":[{"op":"create","kind":"plan","set":{"title":"민지와 저녁","status":"confirmed","date":"2026-10-13","people":["민지"]},"evidence":[{"line":3,"quote":"민지랑 저녁 내일 모레 먹는 걸로 확정"}],"confidence":0.9,"why":"확정 메모"}]},
+      "expect": { "plans": [{ "status": "confirmed", "date": "2026-10-13", "people": ["민지"] }], "planCount": 1, "intents": ["calendar.create"] }
+    }
+  ]
+}

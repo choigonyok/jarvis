@@ -1,0 +1,71 @@
+// Package store keeps everything the loop remembers: the world model and its
+// history, the text of observed messages, how far each conversation has been
+// read, the skills' timers, the intents and what came of them, and the
+// sensors' cursors.
+//
+// Two implementations behind one interface: Memory, for running the whole
+// loop on a laptop with nothing else (and for tests), and Postgres (migration
+// 035) for the stack.
+package store
+
+import (
+	"context"
+	"time"
+
+	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+)
+
+type Store interface {
+	// World model. Put writes an entity whose Version is the one it was read
+	// at (0 for a new one) and records the change; a stale version is
+	// model.ErrConflict.
+	Entity(ctx context.Context, id string) (model.Entity, error)
+	Entities(ctx context.Context, kind, room string, liveOnly bool) ([]model.Entity, error)
+	Put(ctx context.Context, e model.Entity, c model.Change) (model.Entity, model.Change, error)
+	Changes(ctx context.Context, entityID string, limit int) ([]model.Change, error)
+
+	// Content: observed messages, idempotent by Ref.
+	PutMessage(ctx context.Context, m model.Message) error
+	Message(ctx context.Context, ref string) (model.Message, error)
+	// RoomMessages is a room's messages sent after `after` and before
+	// `before` (zero: no bound), oldest first, at most limit of the newest.
+	// Both bounds are exclusive: "after what was already read" must not
+	// depend on how finely a database keeps time.
+	RoomMessages(ctx context.Context, room string, after, before time.Time, limit int) ([]model.Message, error)
+	Rooms(ctx context.Context) ([]Room, error)
+
+	// How far each conversation has been interpreted.
+	MarkRoom(ctx context.Context, room string, through time.Time) error
+
+	// Timers: one per (skill, entity, name); setting it again moves it.
+	SetTimer(ctx context.Context, t model.Timer) error
+	CancelTimers(ctx context.Context, skill, entityID string) error
+	DueTimers(ctx context.Context, now time.Time) ([]model.Timer, error)
+	FireTimer(ctx context.Context, id int64, at time.Time) error
+	Timers(ctx context.Context) ([]model.Timer, error)
+
+	// Intents.
+	PutIntent(ctx context.Context, in model.Intent) error
+	Intent(ctx context.Context, id string) (model.Intent, error)
+	Intents(ctx context.Context, limit int) ([]model.Intent, error)
+	IntentsFor(ctx context.Context, entityID string) ([]model.Intent, error)
+	// IntentsSince is every intent created since t, newest first - what the
+	// gate learns from and counts against the day's budget.
+	IntentsSince(ctx context.Context, t time.Time) ([]model.Intent, error)
+
+	// Sensor cursors.
+	Cursor(ctx context.Context, name string) (int64, error)
+	SetCursor(ctx context.Context, name string, v int64) error
+}
+
+// Room is a conversation as the store knows it.
+type Room struct {
+	Room          string    `json:"room"`
+	Name          string    `json:"name"`
+	Source        string    `json:"source"`
+	LastAt        time.Time `json:"lastAt"`
+	Interpreted   time.Time `json:"interpreted"` // messages up to here have been read
+	Messages      int       `json:"messages"`
+	OnlyMine      bool      `json:"onlyMine"` // every message is mine: a notes-to-self room
+	Uninterpreted int       `json:"uninterpreted"`
+}

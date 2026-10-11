@@ -1,0 +1,15 @@
+{
+  "name": "부탁받은 일은 내 열린 고리",
+  "room": "mom2",
+  "roomName": "엄마",
+  "turns": [
+    {
+      "messages": [
+        { "at": "2026-10-14T17:30", "from": "엄마", "text": "올 때 우유 좀 사다 줘" },
+        { "at": "2026-10-14T17:31", "me": true, "text": "응 알겠어" }
+      ],
+      "script": {"changes":[{"op":"create","kind":"loop","set":{"title":"우유 사 가기","owner":"me","due":"2026-10-14","people":["엄마"]},"evidence":[{"line":1,"quote":"우유 좀 사다 줘"},{"line":2,"quote":"응 알겠어"}],"confidence":0.85,"why":"부탁을 수락함"}]},
+      "expect": { "loops": [{ "owner": "me", "status": "open", "titleHas": "우유" }], "noActions": true }
+    }
+  ]
+}

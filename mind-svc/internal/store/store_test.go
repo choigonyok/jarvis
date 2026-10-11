@@ -1,0 +1,153 @@
+package store
+
+import (
+	"context"
+	"errors"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+)
+
+// contract is what every Store must do, run against each implementation.
+func contract(t *testing.T, st Store) {
+	ctx := context.Background()
+	at := time.Date(2026, 10, 12, 20, 0, 0, 0, time.UTC)
+
+	// Entities: optimistic versions, history with before/after.
+	e, c, err := st.Put(ctx, model.Entity{ID: "plan_1", Kind: model.KindPlan, Room: "r", State: model.State{Title: "강릉", Status: model.Proposed}}, model.Change{Actor: "interpreter", At: at, Evidence: []model.Evidence{{Ref: "sim:1", Quote: "강릉 갈까"}}, Confidence: 0.8})
+	if err != nil || e.Version != 1 || c.Before != nil || c.ID == 0 {
+		t.Fatalf("만들기: %+v %+v %v", e, c, err)
+	}
+	stale := e
+	e.State.Status = model.Confirmed
+	e, c, err = st.Put(ctx, e, model.Change{Actor: "interpreter", At: at.Add(time.Minute)})
+	if err != nil || e.Version != 2 || c.Before == nil || c.Before.Status != model.Proposed || c.After.Status != model.Confirmed {
+		t.Fatalf("고치기: %+v %+v %v", e, c, err)
+	}
+	if _, _, err := st.Put(ctx, stale, model.Change{At: at}); !errors.Is(err, model.ErrConflict) {
+		t.Fatalf("낡은 버전은 충돌이어야 합니다: %v", err)
+	}
+	if _, _, err := st.Put(ctx, model.Entity{ID: "plan_1", Kind: model.KindPlan}, model.Change{At: at}); !errors.Is(err, model.ErrConflict) {
+		t.Fatalf("같은 id 를 새로 만들면 충돌이어야 합니다: %v", err)
+	}
+	got, err := st.Entity(ctx, "plan_1")
+	if err != nil || got.State.Status != model.Confirmed || !got.CreatedAt.Equal(at) {
+		t.Fatalf("읽기: %+v %v", got, err)
+	}
+	cs, _ := st.Changes(ctx, "plan_1", 10)
+	if len(cs) != 2 || cs[0].Version != 2 || len(cs[1].Evidence) != 1 {
+		t.Fatalf("이력: %+v", cs)
+	}
+	e.State.Status = model.Cancelled
+	_, _, _ = st.Put(ctx, e, model.Change{At: at.Add(2 * time.Minute)})
+	if live, _ := st.Entities(ctx, model.KindPlan, "r", true); len(live) != 0 {
+		t.Fatalf("취소된 건 살아 있지 않습니다: %+v", live)
+	}
+
+	// Messages and rooms.
+	for i, text := range []string{"강릉 갈까?", "그러자"} {
+		m := model.Message{Ref: "sim:" + string(rune('1'+i)), Source: "sim", Room: "r", RoomName: "지수", IsMine: i == 1, SentAt: at.Add(time.Duration(i) * time.Minute), Text: text}
+		if err := st.PutMessage(ctx, m); err != nil {
+			t.Fatal(err)
+		}
+		_ = st.PutMessage(ctx, m) // idempotent
+	}
+	msg, err := st.Message(ctx, "sim:1")
+	if err != nil || msg.Text != "강릉 갈까?" {
+		t.Fatalf("메시지: %+v %v", msg, err)
+	}
+	rooms, _ := st.Rooms(ctx)
+	if len(rooms) != 1 || rooms[0].Messages != 2 || rooms[0].Uninterpreted != 2 || rooms[0].OnlyMine {
+		t.Fatalf("방: %+v", rooms)
+	}
+	_ = st.MarkRoom(ctx, "r", at)
+	rooms, _ = st.Rooms(ctx)
+	if rooms[0].Uninterpreted != 1 {
+		t.Fatalf("해석한 뒤 남은 것: %+v", rooms)
+	}
+	ms, _ := st.RoomMessages(ctx, "r", at, time.Time{}, 10)
+	if len(ms) != 1 || ms[0].Text != "그러자" {
+		t.Fatalf("새 메시지: %+v", ms)
+	}
+
+	// Timers.
+	_ = st.SetTimer(ctx, model.Timer{Skill: "schedule", EntityID: "plan_1", Name: "prep", FireAt: at.Add(time.Hour)})
+	_ = st.SetTimer(ctx, model.Timer{Skill: "schedule", EntityID: "plan_1", Name: "prep", FireAt: at.Add(2 * time.Hour)})
+	if due, _ := st.DueTimers(ctx, at.Add(90*time.Minute)); len(due) != 0 {
+		t.Fatalf("옮긴 타이머는 아직: %+v", due)
+	}
+	due, _ := st.DueTimers(ctx, at.Add(3*time.Hour))
+	if len(due) != 1 {
+		t.Fatalf("타이머: %+v", due)
+	}
+	_ = st.FireTimer(ctx, due[0].ID, at.Add(3*time.Hour))
+	if due, _ := st.DueTimers(ctx, at.Add(4*time.Hour)); len(due) != 0 {
+		t.Fatalf("울린 타이머는 다시 안 울립니다: %+v", due)
+	}
+	_ = st.CancelTimers(ctx, "schedule", "plan_1")
+	if all, _ := st.Timers(ctx); len(all) != 0 {
+		t.Fatalf("지운 타이머: %+v", all)
+	}
+
+	// Intents.
+	in := model.Intent{ID: "int_1", Skill: "schedule", Kind: "calendar.create", EntityID: "plan_1", Status: model.Pending, CreatedAt: at}
+	_ = st.PutIntent(ctx, in)
+	in.Status = model.Executed
+	_ = st.PutIntent(ctx, in)
+	_ = st.PutIntent(ctx, model.Intent{ID: "int_2", Kind: "info", Status: model.Executed, CreatedAt: at.Add(time.Hour)})
+	all, _ := st.Intents(ctx, 10)
+	if len(all) != 2 || all[0].ID != "int_2" {
+		t.Fatalf("의도는 최근 순: %+v", all)
+	}
+	got1, _ := st.Intent(ctx, "int_1")
+	if got1.Status != model.Executed {
+		t.Fatalf("의도 갱신: %+v", got1)
+	}
+	if for1, _ := st.IntentsFor(ctx, "plan_1"); len(for1) != 1 {
+		t.Fatalf("엔티티별: %+v", for1)
+	}
+	if since, _ := st.IntentsSince(ctx, at.Add(30*time.Minute)); len(since) != 1 {
+		t.Fatalf("이후: %+v", since)
+	}
+
+	// Cursors.
+	if v, _ := st.Cursor(ctx, "sensor:kakao"); v != 0 {
+		t.Fatal("없는 커서는 0")
+	}
+	_ = st.SetCursor(ctx, "sensor:kakao", 3215)
+	if v, _ := st.Cursor(ctx, "sensor:kakao"); v != 3215 {
+		t.Fatalf("커서: %d", v)
+	}
+}
+
+func TestMemory(t *testing.T) { contract(t, NewMemory()) }
+
+// Against a throwaway Postgres with migration 035 applied:
+// MIND_TEST_DATABASE_URL=postgres://... go test ./internal/store/
+func TestPostgres(t *testing.T) {
+	dsn := os.Getenv("MIND_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("MIND_TEST_DATABASE_URL 이 없어 건너뜁니다")
+	}
+	pool, err := pgxpool.New(context.Background(), dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	if _, err := pool.Exec(context.Background(), `truncate mind_messages, mind_rooms, mind_entities, mind_changes, mind_timers, mind_intents, mind_cursors restart identity cascade`); err != nil {
+		t.Fatal(err)
+	}
+	key := make([]byte, 32)
+	st := NewPostgres(pool, key)
+	contract(t, st)
+	var sealed bool
+	var body []byte
+	_ = pool.QueryRow(context.Background(), `select sealed, body from mind_messages where ref = 'sim:1'`).Scan(&sealed, &body)
+	if !sealed || string(body) == "강릉 갈까?" {
+		t.Fatal("키가 있으면 원문이 봉해져야 합니다")
+	}
+}

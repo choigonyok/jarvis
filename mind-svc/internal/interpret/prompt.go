@@ -1,0 +1,165 @@
+package interpret
+
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+)
+
+// The interpreter reads; it does not decide what to do. What it returns is a
+// set of changes to the world model, each resting on a line of the new
+// messages, quoted - which the caller checks against the messages before
+// believing it.
+const system = `너는 개인 비서의 "해석기"다. 운영자의 메신저 대화를 읽고, 운영자의 삶에 관한 세계 모델(일정과 열린 고리)을 어떻게 바꿔야 하는지 JSON 으로만 답한다. 무엇을 할지 판단하거나 제안하지 않는다. 대화에 실제로 있는 것만 기록한다.
+
+세계 모델의 대상
+- plan(일정): 운영자가 참여할, 실제로 일어날 일. 약속, 식사, 여행, 예약한 방문, 모임.
+  status: proposed(제안됐지만 아직 합의 전) | confirmed(합의·확정·예약됨) | cancelled(취소됨) | done(이미 지난 일)
+- loop(열린 고리): 아직 끝나지 않은 일.
+  owner: me(운영자가 해야 할 것 - 운영자가 한 약속, 운영자가 받은 부탁) | them(상대가 운영자에게 해 주기로 한 것)
+  status: open | closed
+
+규칙
+1. "새 메시지"만 해석한다. "앞선 대화"는 맥락으로만 쓴다.
+2. 이미 아는 대상(P1, L1 …)에 관한 말이면 새로 만들지 말고 그 ref 를 update / cancel / close 한다. 장소나 시간이 바뀌어도 같은 일이면 같은 대상이다. 예: "강릉 가자"였던 여행에 "춘천으로 가자"는 장소 변경이다.
+3. "~할까?", "~어때?"처럼 제안만 있고 답이 없으면 proposed. 누군가 동의하거나("그래", "좋아", "그러자", "콜") 확정·예약을 말하면 confirmed. 혼자 쓰는 메모("~하는 걸로 확정")도 확정이다.
+   언제인지 정하지 않은 막연한 말("언제 한번 보자", "다음에 밥 먹자", "시간 되면 보자")은 동의했더라도 일정으로 만들지 않는다. 날짜나 요일, "이번 주말"처럼 때를 가리키는 말이 있어야 일정이다.
+4. 날짜는 그 메시지를 보낸 시각을 기준으로 절대 날짜(YYYY-MM-DD)로 바꾼다. 요일과 날짜는 직접 계산하지 말고 "날짜표"에서 찾는다: "목요일"은 표에서 가장 가까운 목요일, "다음 주 화요일"은 표에서 "다음 주"인 화요일, "이번 주말"은 가장 가까운 토요일. 새벽에 보낸 "내일"도 보낸 날짜 기준이다. 시간은 24시간 HH:MM. 앞서 말한 날에 이어지는 말("그날 저녁에는", "점심 먹고 나서")은 그 날짜를 쓴다. 말하지 않은 날짜·시간·장소는 지어내지 말고 비운다. "저녁"만 말했으면 start 는 비우고 title 에 담는다.
+5. 농담, 가정, 운영자가 참여하지 않는 남의 일, 지난 일 회상, 광고·알림은 기록하지 않는다.
+6. 모든 변경에는 근거가 있어야 한다. evidence 에 새 메시지의 줄 번호(line)와 그 줄에 글자 그대로 있는 짧은 인용(quote)을 넣는다. 근거가 앞선 대화에만 있으면 바꾸지 않는다.
+7. confidence 는 그 변경이 맞을 가능성(0~1)이다.
+8. 바꿀 것이 없으면 {"changes": []}.
+
+출력은 JSON 하나만, 설명 없이:
+{"changes":[
+ {"op":"create","kind":"plan","set":{"title":"지수와 강릉 여행","status":"proposed","date":"2026-10-17","place":"강릉","people":["지수"]},"evidence":[{"line":1,"quote":"강릉 갈까"}],"confidence":0.8,"why":"주말 강릉 여행 제안"},
+ {"op":"update","kind":"plan","ref":"P1","set":{"status":"confirmed"},"evidence":[{"line":2,"quote":"그러자"}],"confidence":0.9,"why":"동의함"},
+ {"op":"cancel","kind":"plan","ref":"P1","evidence":[{"line":3,"quote":"다음에 가자"}],"confidence":0.85,"why":"미룸"},
+ {"op":"create","kind":"loop","set":{"title":"지수에게 숙소 링크 보내기","owner":"me","due":"2026-10-13","plan":"P1"},"evidence":[{"line":4,"quote":"링크 보내줄게"}],"confidence":0.8,"why":"운영자가 한 약속"},
+ {"op":"close","kind":"loop","ref":"L1","evidence":[{"line":5,"quote":"보냈어"}],"confidence":0.9,"why":"보냄"}
+]}
+set 에 쓸 수 있는 키: title, status, date, endDate, start, end, place, people, owner, due, plan, note. update 에는 바뀐 키만 넣는다.
+title 은 캘린더에 그대로 쓸 짧은 한국어다("민지와 저녁", "지수와 강릉 여행"). people 에 운영자는 넣지 않는다. plan 은 그 고리가 속한 일정의 ref 다.`
+
+// view is how an entity is shown to the interpreter, by a short ref.
+type view struct {
+	ref    string
+	entity model.Entity
+}
+
+func prompt(roomName, owner string, now time.Time, loc *time.Location, known []view, context, fresh []model.Message) string {
+	var b strings.Builder
+	last := now
+	if len(fresh) > 0 {
+		last = fresh[len(fresh)-1].SentAt
+	}
+	fmt.Fprintf(&b, "대화방: %s\n기준 시각(마지막 새 메시지): %s\n운영자: %s (\"나\")\n\n", roomName, stamp(last, loc, true), owner)
+	b.WriteString(dateTable(last, loc))
+
+	b.WriteString("## 이 대화방에서 이미 아는 것\n")
+	if len(known) == 0 {
+		b.WriteString("없음\n")
+	}
+	for _, v := range known {
+		b.WriteString(v.ref + " " + describe(v.entity) + "\n")
+	}
+
+	b.WriteString("\n## 앞선 대화 (맥락, 이미 해석함)\n")
+	if len(context) == 0 {
+		b.WriteString("없음\n")
+	}
+	for _, m := range context {
+		fmt.Fprintf(&b, "%s %s: %s\n", stamp(m.SentAt, loc, false), who(m, owner), oneLine(m.Text))
+	}
+
+	b.WriteString("\n## 새 메시지 (해석할 것)\n")
+	for i, m := range fresh {
+		fmt.Fprintf(&b, "[%d] %s %s: %s\n", i+1, stamp(m.SentAt, loc, false), who(m, owner), oneLine(m.Text))
+	}
+	return b.String()
+}
+
+// dateTable is the next two weeks from the reference day, each with its
+// weekday and how it would be called - models count weekdays badly, and a
+// table to look things up in removes the counting.
+func dateTable(ref time.Time, loc *time.Location) string {
+	ref = ref.In(loc)
+	day := time.Date(ref.Year(), ref.Month(), ref.Day(), 0, 0, 0, 0, loc)
+	// Weeks run Monday to Sunday.
+	monday := day.AddDate(0, 0, -((int(day.Weekday()) + 6) % 7))
+	var b strings.Builder
+	b.WriteString("## 날짜표 (기준일부터 2주)\n")
+	for i := range 14 {
+		d := day.AddDate(0, 0, i)
+		var tags []string
+		switch i {
+		case 0:
+			tags = append(tags, "오늘")
+		case 1:
+			tags = append(tags, "내일")
+		case 2:
+			tags = append(tags, "모레")
+		}
+		switch weeks := int(d.Sub(monday).Hours()/24) / 7; weeks {
+		case 0:
+			tags = append(tags, "이번 주")
+		case 1:
+			tags = append(tags, "다음 주")
+		default:
+			tags = append(tags, "다다음 주")
+		}
+		fmt.Fprintf(&b, "%s (%s) %s\n", d.Format("2006-01-02"), weekdays[d.Weekday()], strings.Join(tags, " · "))
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+func describe(e model.Entity) string {
+	s := e.State
+	parts := []string{"[" + e.Kind + "] " + s.Title, "상태 " + s.Status}
+	add := func(label, v string) {
+		if v != "" {
+			parts = append(parts, label+" "+v)
+		}
+	}
+	add("날짜", s.Date)
+	add("~", s.EndDate)
+	add("시작", s.Start)
+	add("끝", s.End)
+	add("장소", s.Place)
+	if len(s.People) > 0 {
+		add("함께", strings.Join(s.People, ", "))
+	}
+	add("담당", s.Owner)
+	add("기한", s.Due)
+	if s.CalendarID != "" {
+		parts = append(parts, "캘린더에 등록됨")
+	}
+	return strings.Join(parts, " · ")
+}
+
+var weekdays = []string{"일", "월", "화", "수", "목", "금", "토"}
+
+func stamp(t time.Time, loc *time.Location, year bool) string {
+	t = t.In(loc)
+	if year {
+		return fmt.Sprintf("%s (%s) %s", t.Format("2006-01-02"), weekdays[t.Weekday()], t.Format("15:04"))
+	}
+	return fmt.Sprintf("%s(%s) %s", t.Format("01/02"), weekdays[t.Weekday()], t.Format("15:04"))
+}
+
+func who(m model.Message, owner string) string {
+	if m.IsMine {
+		return owner + "(나)"
+	}
+	if m.Sender == "" {
+		return "상대"
+	}
+	return m.Sender
+}
+
+func oneLine(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
