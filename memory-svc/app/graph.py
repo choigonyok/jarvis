@@ -171,12 +171,14 @@ class Graph:
     async def setup(self):
         for d in self.drivers.values():
             await d.build_indices_and_constraints()
-            for rel, props in EDGE_RANGE_INDICES.items():
-                for p in props:
-                    try:
-                        await d.execute_query(f"DROP INDEX FOR ()-[e:{rel}]-() ON (e.{p})")
-                    except Exception:
-                        pass  # not there
+            rows, _, _ = await d.execute_query(
+                "CALL db.indexes() YIELD label, properties, types, entitytype "
+                "WHERE entitytype = 'RELATIONSHIP' RETURN label, properties, types"
+            )
+            for r in rows:
+                for p in r["properties"]:
+                    if r["label"] in EDGE_RANGE_INDICES and "RANGE" in (r["types"].get(p) or []):
+                        await d.execute_query(f"DROP INDEX FOR ()-[e:{r['label']}]-() ON (e.{p})")
 
     # --- writing -------------------------------------------------------------
 
