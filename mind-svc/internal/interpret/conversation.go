@@ -65,9 +65,12 @@ type Conversation struct {
 
 	mu      sync.Mutex
 	due     map[string]time.Time // room -> when to read it
+	waiting map[string]int       // room -> messages observed since it was last read
 	others  map[string]bool      // room has someone besides me in it
 	backoff map[string]time.Time // room -> not before (after a failed read)
 	reading sync.Mutex           // one read at a time
+	read    time.Time            // the last read that went through
+	failed  string               // why the last read failed, until one works
 }
 
 func NewConversation(cfg Config, st store.Store, w *world.World, client llm.Client, loc *time.Location, now func() time.Time, log *slog.Logger) *Conversation {
@@ -85,7 +88,7 @@ func NewConversation(cfg Config, st store.Store, w *world.World, client llm.Clie
 	}
 	return &Conversation{
 		cfg: cfg, st: st, world: w, llm: client, loc: loc, now: now, log: log,
-		due: map[string]time.Time{}, others: map[string]bool{}, backoff: map[string]time.Time{},
+		due: map[string]time.Time{}, waiting: map[string]int{}, others: map[string]bool{}, backoff: map[string]time.Time{},
 	}
 }
 
@@ -107,7 +110,8 @@ func (c *Conversation) Resume(ctx context.Context) error {
 }
 
 // Observe notes a new message: its room is read once it has been quiet long
-// enough.
+// enough - or now, once a batch's worth is waiting: a busy group chat may
+// never fall quiet.
 func (c *Conversation) Observe(m model.Message) {
 	if c.cfg.Noise != nil && c.cfg.Noise.MatchString(m.RoomName) {
 		return
@@ -123,6 +127,11 @@ func (c *Conversation) Observe(m model.Message) {
 		idle = c.cfg.IdleSim
 	case !c.others[m.Room]:
 		idle = c.cfg.IdleSelf
+	}
+	c.waiting[m.Room]++
+	if c.waiting[m.Room] >= c.cfg.MaxBatch {
+		c.due[m.Room] = c.now()
+		return
 	}
 	c.due[m.Room] = c.now().Add(idle)
 }
@@ -237,6 +246,9 @@ func (c *Conversation) Read(ctx context.Context, room string) error {
 	if err := c.st.MarkRoom(ctx, room, last); err != nil {
 		return err
 	}
+	c.mu.Lock()
+	c.read, c.failed = c.now(), ""
+	c.mu.Unlock()
 	c.log.Info("대화를 해석했습니다", "room", room, "messages", len(fresh), "changes", applied, "proposed", len(ops))
 	if more {
 		c.mu.Lock()
@@ -253,6 +265,7 @@ func (c *Conversation) done(room string) {
 	defer c.mu.Unlock()
 	delete(c.due, room)
 	delete(c.backoff, room)
+	delete(c.waiting, room)
 }
 
 func (c *Conversation) retryLater(room string, err error) {
@@ -263,6 +276,15 @@ func (c *Conversation) retryLater(room string, err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.backoff[room] = c.now().Add(wait)
+	c.failed = err.Error()
+}
+
+// LastRead is when a room was last read, and why the latest attempt failed
+// if it did - for the status screen.
+func (c *Conversation) LastRead() (time.Time, string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.read, c.failed
 }
 
 // known is what the world model holds for this room, by short ref: live

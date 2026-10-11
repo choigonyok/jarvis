@@ -62,6 +62,8 @@ func main() {
 		ChatURL:     getenv("CHAT_URL", "http://localhost:8094"),
 		WorkoutURL:  getenv("WORKOUT_URL", "http://localhost:8091"),
 		AgentURL:    getenv("AGENT_URL", "http://localhost:8080"),
+		MindURL:     getenv("MIND_URL", "http://localhost:8102"),
+		MemoryURL:   getenv("MEMORY_URL", "http://localhost:8100"),
 		BrowserAddr: getenv("BROWSER_ADDR", "localhost:8931"),
 		Browser:     browser.New(getenv("BROWSER_MCP_URL", "http://localhost:8931/"), os.Getenv("BROWSER_MCP_TOKEN")),
 		DB:          pool,

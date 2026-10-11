@@ -1,6 +1,7 @@
 // Package api is mind-svc's HTTP surface.
 //
 //	GET  /health
+//	GET  /status                      reading and remembering in a few numbers (token)
 //	POST /consume                     events-svc delivers an observation (token)
 //	GET  /                            the console: simulator, world model, intents
 //	GET  /api/snapshot                everything the console shows
@@ -56,6 +57,14 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "mode": s.m.Opts.Mode, "llm": s.m.Opts.LLM.Ready()})
 	})
 	mux.HandleFunc("POST /consume", s.auth(true, s.consume))
+	mux.HandleFunc("GET /status", s.auth(true, func(w http.ResponseWriter, r *http.Request) {
+		st, err := s.m.Status(r.Context())
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, st)
+	}))
 	mux.HandleFunc("GET /{$}", s.auth(false, func(w http.ResponseWriter, r *http.Request) {
 		page, _ := ui.ReadFile("ui/index.html")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

@@ -40,11 +40,11 @@ type Result struct {
 		ID   string `json:"id"`
 		Fact string `json:"fact"`
 	} `json:"edge"`
-	Duplicate bool               `json:"duplicate"`
-	Expired   bool               `json:"expired"`
-	Source    model.MemoryNode   `json:"source"`
-	Target    model.MemoryNode   `json:"target"`
-	Ended     []model.Ended      `json:"ended"`
+	Duplicate bool             `json:"duplicate"`
+	Expired   bool             `json:"expired"`
+	Source    model.MemoryNode `json:"source"`
+	Target    model.MemoryNode `json:"target"`
+	Ended     []model.Ended    `json:"ended"`
 }
 
 func (r Result) Stored() *model.Stored {

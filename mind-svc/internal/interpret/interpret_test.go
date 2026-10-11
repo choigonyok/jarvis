@@ -206,3 +206,20 @@ func TestBacklogIsReadOn(t *testing.T) {
 		t.Fatalf("다 읽으면 끝: due=%v calls=%d", due, script.Calls())
 	}
 }
+
+// A room that never falls quiet is still read once a batch's worth waits.
+func TestBusyRoomIsReadWithoutQuiet(t *testing.T) {
+	c, _, _ := setup(t, `{"changes":[]}`)
+	c.cfg.MaxBatch, c.cfg.Idle = 3, time.Hour
+	for i := range 3 {
+		c.Observe(model.Message{Ref: fmt.Sprintf("sim:%d", i), Source: "kakao", Room: "busy", RoomName: "단톡", Sender: "누군가", SentAt: c.now()})
+		if i < 2 {
+			if c.Pending()["busy"].Equal(c.now()) {
+				t.Fatalf("%d번째에서 벌써 읽을 차례", i+1)
+			}
+		}
+	}
+	if !c.Pending()["busy"].Equal(c.now()) {
+		t.Fatal("한 번에 읽을 만큼 쌓이면 조용해지기를 기다리지 않아야 합니다")
+	}
+}

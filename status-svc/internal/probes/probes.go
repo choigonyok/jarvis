@@ -29,6 +29,8 @@ type Config struct {
 	ChatURL     string
 	WorkoutURL  string
 	AgentURL    string
+	MindURL     string
+	MemoryURL   string
 	BrowserAddr string // host:port of the browser MCP bridge
 	Browser     *browser.Client
 	DB          *pgxpool.Pool
@@ -62,6 +64,22 @@ func All(cfg Config) []check.Probe {
 			Deps:  []string{"kakao.collector"},
 			Every: 30 * time.Second,
 			Run:   e.kakaoMessages,
+		},
+		{
+			ID: "mind.reading", Group: "수집", Name: "대화 해석",
+			Rule:  "mind 가 카톡·iMessage·jarvis 대화를 읽고 있으면 정상. 읽히지 않은 메시지가 30분 넘게 밀리면 주의, 2시간을 넘거나 LLM 키가 없으면 이상. 방이 3분 조용해지면(나와의 채팅은 45초) 읽는 게 보통이에요.",
+			Fix:   "mind 콘솔(맥미니 127.0.0.1:8102)에서 밀린 방을 보세요. 해석이 실패하고 있다면 오늘 LLM 예산(MIND_DAILY_USD)이나 키를 확인하세요.",
+			Deps:  []string{"svc.mind", "kakao.messages"},
+			Every: time.Minute,
+			Run:   e.mindReading,
+		},
+		{
+			ID: "mind.memory", Group: "수집", Name: "기억으로 보내기",
+			Rule:  "해석에서 나온 기억할 사실이 기억 서비스에 들어가고 있으면 정상. 1시간 넘게 기다리는 사실이 있으면 주의, 6시간을 넘으면 이상.",
+			Fix:   "기억 서비스가 응답하는지, 오늘 LLM 예산(MEMORY_DAILY_USD)이 남았는지 보세요. 기다리던 사실은 다시 보내져요.",
+			Deps:  []string{"svc.memory", "mind.reading"},
+			Every: time.Minute,
+			Run:   e.mindMemory,
 		},
 		{
 			ID: "spending.alerts", Group: "수집", Name: "카드 결제 알림",
@@ -182,6 +200,8 @@ func All(cfg Config) []check.Probe {
 		e.service("svc.calendar", "캘린더 서비스", cfg.CalendarURL, []string{"postgres"}),
 		e.service("svc.chat", "대화 기록 서비스", cfg.ChatURL, []string{"postgres"}),
 		e.service("svc.workout", "운동 기록 서비스", cfg.WorkoutURL, []string{"postgres"}),
+		e.service("svc.mind", "인지 루프(mind)", cfg.MindURL, []string{"postgres"}),
+		e.service("svc.memory", "기억 서비스", cfg.MemoryURL, []string{"postgres"}),
 	}
 }
 
@@ -237,6 +257,83 @@ func (e *env) kakaoMessages(ctx context.Context) check.Verdict {
 		v.State, v.Summary = check.Warn, fmt.Sprintf("%s째 새 카톡이 없어요. 카카오톡이 꺼졌을 수 있어요.", span(age))
 	default:
 		v.State, v.Summary = check.OK, "새 메시지가 들어오고 있어요."
+	}
+	return v
+}
+
+type mindStatus struct {
+	LLM struct {
+		Ready bool    `json:"ready"`
+		Spent float64 `json:"spentUsd"`
+	} `json:"llm"`
+	Rooms         int            `json:"rooms"`
+	Unread        int            `json:"unread"`
+	OldestUnread  *time.Time     `json:"oldestUnread"`
+	LastRead      *time.Time     `json:"lastRead"`
+	ReadError     string         `json:"readError"`
+	Memory        bool           `json:"memory"`
+	Facts         map[string]int `json:"facts"`
+	OldestPending *time.Time     `json:"oldestPending"`
+	FactError     string         `json:"factError"`
+}
+
+func (e *env) mindReading(ctx context.Context) check.Verdict {
+	var st mindStatus
+	if err := e.get(ctx, e.client, e.MindURL+"/status", &st); err != nil {
+		return fail("mind 상태를 읽지 못했어요: " + err.Error())
+	}
+	facts := []string{fmt.Sprintf("대화방 %d개 · 아직 안 읽은 메시지 %d개", st.Rooms, st.Unread), fmt.Sprintf("오늘 해석 비용 $%.4f", st.LLM.Spent)}
+	if st.ReadError != "" {
+		facts = append(facts, "최근 해석 실패: "+clip(st.ReadError, 140))
+	}
+	v := check.Verdict{ObservedAt: st.LastRead, ObservedLabel: "마지막 해석", Facts: facts}
+	var behind time.Duration
+	if st.OldestUnread != nil {
+		behind = time.Since(*st.OldestUnread)
+	}
+	switch {
+	case !st.LLM.Ready:
+		v.State, v.Summary = check.Fail, "LLM 키가 없어 대화를 쌓기만 하고 읽지 못해요."
+	case behind > 2*time.Hour:
+		v.State, v.Summary = check.Fail, fmt.Sprintf("%s째 읽히지 않은 대화가 있어요.", span(behind))
+	case behind > 30*time.Minute:
+		v.State, v.Summary = check.Warn, fmt.Sprintf("%s째 읽히지 않은 대화가 있어요.", span(behind))
+	default:
+		v.State, v.Summary = check.OK, "대화를 읽고 있어요."
+	}
+	return v
+}
+
+func (e *env) mindMemory(ctx context.Context) check.Verdict {
+	var st mindStatus
+	if err := e.get(ctx, e.client, e.MindURL+"/status", &st); err != nil {
+		return fail("mind 상태를 읽지 못했어요: " + err.Error())
+	}
+	f := st.Facts
+	facts := []string{fmt.Sprintf("기억함 %d · 이미 알던 것 %d · 기다림 %d", f["stored"], f["duplicate"], f["pending"])}
+	if f["failed"] > 0 {
+		// Shown, not alarmed on: a fact given up on stays given up on, and a
+		// row that warned forever would push every day.
+		facts = append(facts, fmt.Sprintf("여러 번 실패해 포기한 사실 %d개 (mind 콘솔에서 볼 수 있어요)", f["failed"]))
+	}
+	if st.FactError != "" {
+		facts = append(facts, "기다리는 이유: "+clip(st.FactError, 140))
+	}
+	v := check.Verdict{ObservedAt: st.OldestPending, ObservedLabel: "가장 오래 기다린 사실", Facts: facts}
+	var waiting time.Duration
+	if st.OldestPending != nil {
+		waiting = time.Since(*st.OldestPending)
+	}
+	switch {
+	case !st.Memory:
+		v.State, v.Summary = check.Fail, "장기 기억이 연결되어 있지 않아 사실이 장부에만 쌓여요."
+	case waiting > 6*time.Hour:
+		v.State, v.Summary = check.Fail, fmt.Sprintf("%s째 기억에 넣지 못한 사실이 있어요.", span(waiting))
+	case waiting > time.Hour:
+		v.State, v.Summary = check.Warn, fmt.Sprintf("%s째 기억에 넣지 못한 사실이 있어요.", span(waiting))
+	default:
+		v.State, v.Summary = check.OK, "기억할 사실이 기억 서비스에 들어가고 있어요."
+		v.ObservedAt = nil
 	}
 	return v
 }

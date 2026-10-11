@@ -53,11 +53,11 @@ type Options struct {
 }
 
 type Mind struct {
-	Opts    Options
-	World   *world.World
-	Conv    *interpret.Conversation
-	Actions *interpret.Actions
-	Attn    *attention.Attention
+	Opts     Options
+	World    *world.World
+	Conv     *interpret.Conversation
+	Actions  *interpret.Actions
+	Attn     *attention.Attention
 	Gate     *gate.Gate
 	Skills   []skill.Skill
 	Remember *Remember // nil without long-term memory
@@ -175,6 +175,64 @@ func (m *Mind) ReadAll(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// Status is the loop's health in a few numbers, for the status screen: is it
+// reading, is anything left unread for long, are facts reaching memory.
+type Status struct {
+	LLM           LLMState       `json:"llm"`
+	Rooms         int            `json:"rooms"`
+	Unread        int            `json:"unread"`                  // messages not yet interpreted
+	OldestUnread  *time.Time     `json:"oldestUnread,omitempty"`  // the oldest of them
+	LastRead      *time.Time     `json:"lastRead,omitempty"`      // the last read that went through
+	ReadError     string         `json:"readError,omitempty"`     // why the latest read failed
+	Memory        bool           `json:"memory"`                  // long-term memory is connected
+	Facts         map[string]int `json:"facts"`                   // by status
+	OldestPending *time.Time     `json:"oldestPending,omitempty"` // the oldest fact still waiting for memory
+	FactError     string         `json:"factError,omitempty"`     // why the latest waiting fact was not taken
+}
+
+func (m *Mind) Status(ctx context.Context) (Status, error) {
+	st := m.Opts.Store
+	s := Status{LLM: LLMState{m.Opts.LLM.Ready(), m.Opts.LLM.Model(), m.Opts.LLM.Spent()}, Memory: m.Opts.Memory != nil, Facts: map[string]int{}}
+	rooms, err := st.Rooms(ctx)
+	if err != nil {
+		return s, err
+	}
+	s.Rooms = len(rooms)
+	for _, r := range rooms {
+		if r.Uninterpreted == 0 {
+			continue
+		}
+		s.Unread += r.Uninterpreted
+		// Oldest first, as many as are unread: the first is the oldest.
+		unread, err := st.RoomMessages(ctx, r.Room, r.Interpreted, time.Time{}, r.Uninterpreted)
+		if err != nil {
+			return s, err
+		}
+		if len(unread) > 0 && (s.OldestUnread == nil || unread[0].SentAt.Before(*s.OldestUnread)) {
+			at := unread[0].SentAt
+			s.OldestUnread = &at
+		}
+	}
+	if at, why := m.Conv.LastRead(); !at.IsZero() || why != "" {
+		if !at.IsZero() {
+			s.LastRead = &at
+		}
+		s.ReadError = why
+	}
+	facts, err := st.Facts(ctx, 1000)
+	if err != nil {
+		return s, err
+	}
+	for _, f := range facts {
+		s.Facts[f.Status]++
+		if f.Status == model.FactPending && (s.OldestPending == nil || f.CreatedAt.Before(*s.OldestPending)) {
+			at := f.CreatedAt
+			s.OldestPending, s.FactError = &at, f.Error
+		}
+	}
+	return s, nil
 }
 
 // Snapshot is everything the console shows.
