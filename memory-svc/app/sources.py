@@ -23,6 +23,9 @@ log = logging.getLogger("memory.sources")
 KST = ZoneInfo("Asia/Seoul")
 TOKEN = os.environ.get("API_TOKEN", "")
 BACKFILL_DAYS = int(os.environ.get("MEMORY_BACKFILL_DAYS", "30"))
+# Whose jarvis conversation this extracts: once mind reads the operator's,
+# only the guest's is left here.
+CHAT_GROUPS = [g.strip() for g in os.environ.get("MEMORY_CHAT_GROUPS", "owner,guest").split(",") if g.strip()]
 # Rooms that are notifications, not conversations: card and bank alerts are
 # already the household book, and channels are ads.
 EXCLUDE_ROOMS = re.compile(os.environ.get("MEMORY_EXCLUDE_ROOMS", r"카드|은행|뱅크|페이|증권|알림|광고|쿠폰|배송|택배|채널"))
@@ -72,6 +75,8 @@ async def chat(ctx: Ctx):
     thread goes to the owner graph, the guest's to the guest graph."""
     added = 0
     for thread, group in (("", "owner"), ("guest", "guest")):
+        if group not in CHAT_GROUPS:
+            continue
         if not await ctx.llm_ok():
             break
         source = f"chat:{group}"

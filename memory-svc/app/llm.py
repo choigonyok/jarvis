@@ -27,6 +27,10 @@ MODEL = "claude-haiku-5-5"
 # Graphiti's prompts are English, and left alone so are its summaries and topic
 # names; this memory is read in Korean.
 KOREAN = "사실·요약·설명·주제 이름은 한국어 문장으로 쓴다(형식이 정해진 값은 지시를 따른다). 사람·장소·가게·물건 이름은 원문 그대로 쓴다."
+# Deciding that two facts are the same, or that one ends another, writes over
+# what was known; with low effort Haiku once ended "민지는 위염이 있다" with
+# "민지는 매운 음식을 못 먹는다". These get more thought than extraction does.
+CAREFUL = {"EdgeDuplicate", "NodeResolutions"}
 
 
 class HaikuClient(LLMClient):
@@ -51,7 +55,7 @@ class HaikuClient(LLMClient):
             # Room for adaptive thinking on top of the JSON itself.
             "max_tokens": max(int(max_tokens or 0), 8192),
             "messages": convo,
-            "output_config": {"effort": "low"},
+            "output_config": {"effort": "medium" if response_model is not None and response_model.__name__ in CAREFUL else "low"},
         }
         if system:
             params["system"] = system
