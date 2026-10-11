@@ -14,7 +14,20 @@ import {
 } from "@/lib/status";
 import { isPending } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
-import { type ApiUsage, type UsageWindow, capPct, pct, resetLabel, tone, usd, useUsage } from "@/lib/use-usage";
+import {
+  type ApiUsage,
+  type UsageWindow,
+  type VoyageUsage,
+  capPct,
+  freeLabel,
+  freePct,
+  pct,
+  resetLabel,
+  tokens,
+  tone,
+  usd,
+  useUsage,
+} from "@/lib/use-usage";
 import { cn } from "@/lib/utils";
 
 /**
@@ -403,6 +416,7 @@ function ClaudeUsage() {
         <p className="text-[13px] text-dim">아직 읽지 못했습니다. 대화나 작업이 한 번 돌면 채워집니다.</p>
       )}
       {usage?.api ? <ApiUsageCard api={usage.api} /> : null}
+      {usage?.api?.voyage ? <VoyageUsageCard v={usage.api.voyage} /> : null}
       {usage?.at ? (
         <p className="tnum mt-2 text-[11.5px] text-faint">
           {new Date(usage.at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}{" "}
@@ -439,6 +453,47 @@ function ApiUsageCard({ api }: { api: ApiUsage }) {
         <ul className="mt-3 flex h-12 items-end gap-1.5" aria-label="최근 7일 API 사용 금액">
           {days.map((d) => (
             <li key={d.day} className="flex flex-1 flex-col items-center gap-1" title={`${d.day} ${usd(d.usd)} · ${d.calls}회`}>
+              <span className="block w-full rounded-sm bg-foreground/50" style={{ height: `${Math.max(2, (d.usd / top) * 32)}px` }} />
+              <span className="tnum text-[10px] text-faint">{d.day.slice(8)}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+/** The search key (Voyage, through MongoDB Atlas): dollars at list price, with
+ *  the bar showing how far the most used model is into its free tokens - Atlas
+ *  bills only past them - and the last week beneath. */
+function VoyageUsageCard({ v }: { v: VoyageUsage }) {
+  const p = freePct(v);
+  const top = Math.max(...v.days.map((d) => d.usd), 0.000001);
+  return (
+    <div className="mt-3 rounded-xl bg-glass px-4 py-3.5">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-[13px] text-dim">검색용 API · Voyage</span>
+        <span className="tnum text-[20px] font-medium text-foreground">
+          {usd(v.todayUsd)}
+          <span className="ms-1 text-[13px] text-dim">오늘</span>
+        </span>
+      </div>
+      <span aria-hidden className="mt-2.5 block h-1.5 overflow-hidden rounded-full bg-foreground/12">
+        <span className={cn("block h-full rounded-full", tone(p))} style={{ width: `${p ?? 0}%` }} />
+      </span>
+      <p className="tnum mt-2 text-[11.5px] text-faint">
+        {v.enabled ? `무료 토큰 ${freeLabel(v)} 사용` : "API 키가 없음"}
+        {` · 이번 달 ${usd(v.month.usd)} 정가 (${v.month.calls.toLocaleString()}회) · 청구 ${usd(v.billedUsd)}`}
+      </p>
+      {v.models.length > 0 ? (
+        <p className="tnum mt-1 text-[11.5px] text-faint">
+          {v.models.map((m) => `${m.model} ${tokens(m.tokens)}`).join(" · ")} 토큰
+        </p>
+      ) : null}
+      {v.days.length > 0 ? (
+        <ul className="mt-3 flex h-12 items-end gap-1.5" aria-label="최근 7일 검색용 API 사용 금액">
+          {v.days.map((d) => (
+            <li key={d.day} className="flex flex-1 flex-col items-center gap-1" title={`${d.day} ${usd(d.usd)} · ${tokens(d.tokens)} 토큰`}>
               <span className="block w-full rounded-sm bg-foreground/50" style={{ height: `${Math.max(2, (d.usd / top) * 32)}px` }} />
               <span className="tnum text-[10px] text-faint">{d.day.slice(8)}</span>
             </li>

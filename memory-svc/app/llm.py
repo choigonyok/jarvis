@@ -24,6 +24,9 @@ from graphiti_core.prompts.models import Message
 log = logging.getLogger("memory.llm")
 
 MODEL = "claude-haiku-5-5"
+# Graphiti's prompts are English, and left alone so are its summaries and topic
+# names; this memory is read in Korean.
+KOREAN = "사실·요약·설명·주제 이름은 한국어 문장으로 쓴다(형식이 정해진 값은 지시를 따른다). 사람·장소·가게·물건 이름은 원문 그대로 쓴다."
 
 
 class HaikuClient(LLMClient):
@@ -39,7 +42,7 @@ class HaikuClient(LLMClient):
         max_tokens: int = DEFAULT_MAX_TOKENS,
         model_size: ModelSize = ModelSize.medium,
     ) -> dict[str, typing.Any]:
-        system = "\n\n".join(m.content for m in messages if m.role == "system")
+        system = "\n\n".join([m.content for m in messages if m.role == "system"] + [KOREAN])
         convo = [{"role": m.role, "content": m.content} for m in messages if m.role in ("user", "assistant")]
         if not convo or convo[-1]["role"] != "user":
             convo.append({"role": "user", "content": "위 지시대로 답하세요."})

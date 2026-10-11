@@ -1,14 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { capPct, pct, resetLabel, tone, usd, useUsage } from "@/lib/use-usage";
+import { capPct, freeLabel, freePct, pct, resetLabel, tone, usd, useUsage } from "@/lib/use-usage";
 import { cn } from "@/lib/utils";
 
 /**
- * Three hairlines in the header: the Claude subscription's 5-hour window on
- * top, the weekly one below it, and the memory API key's spend against its
- * daily cap at the bottom. Always there, never asking for attention until
- * they fill. Holding them (or hovering, on a pointer) shows the numbers.
+ * Hairlines in the header: the Claude subscription's 5-hour window on top, the
+ * weekly one below it, the memory API key's spend against its daily cap, and
+ * how far the search key (Voyage) is into its free tokens. Always there, never
+ * asking for attention until they fill. Holding them (or hovering, on a
+ * pointer) shows the numbers.
  */
 export function UsageBars() {
   const usage = useUsage();
@@ -28,11 +29,14 @@ export function UsageBars() {
   const five = pct(usage?.fiveHour);
   const week = pct(usage?.sevenDay);
   const api = capPct(usage?.api);
+  const voyage = usage?.api?.voyage;
+  const free = freePct(voyage);
   const label =
     five == null && week == null
       ? "Claude 사용량을 아직 읽지 못했습니다"
       : `Claude 사용량: 5시간 ${five ?? "-"}%, 주간 ${week ?? "-"}%` +
-        (api == null ? "" : `, 기억용 API 하루 상한의 ${api}%`);
+        (api == null ? "" : `, 기억용 API 하루 상한의 ${api}%`) +
+        (voyage ? `, 검색용 API 오늘 ${usd(voyage.todayUsd)}` : "");
 
   return (
     <div ref={wrap} className="relative">
@@ -57,6 +61,7 @@ export function UsageBars() {
         <Bar value={five} />
         <Bar value={week} />
         {usage?.api ? <Bar value={api} /> : null}
+        {voyage ? <Bar value={free} /> : null}
       </button>
 
       {open ? (
@@ -80,6 +85,25 @@ export function UsageBars() {
                 <span className={cn("block h-full rounded-full", tone(capPct(usage.api)))} style={{ width: `${capPct(usage.api) ?? 0}%` }} />
               </span>
               <p className="tnum mt-1 text-[10.5px] text-faint">이번 달 {usd(usage.api.month.usd)}</p>
+            </div>
+          ) : null}
+          {voyage ? (
+            <div className="mt-2 border-t border-edge pt-2">
+              <p className="mb-1 text-[11.5px] text-faint">검색용 API (Voyage)</p>
+              <div className="flex items-baseline justify-between py-1">
+                <span className="text-dim">오늘</span>
+                <span className="tnum text-[13px] text-foreground">{usd(voyage.todayUsd)}</span>
+              </div>
+              <div className="flex items-baseline justify-between pb-1">
+                <span className="text-dim">무료 토큰</span>
+                <span className="tnum text-[13px] text-foreground">{freeLabel(voyage)} 사용</span>
+              </div>
+              <span aria-hidden className="block h-1 overflow-hidden rounded-full bg-foreground/12">
+                <span className={cn("block h-full rounded-full", tone(free))} style={{ width: `${free ?? 0}%` }} />
+              </span>
+              <p className="tnum mt-1 text-[10.5px] text-faint">
+                이번 달 {usd(voyage.month.usd)} (정가) · 청구 {usd(voyage.billedUsd)}
+              </p>
             </div>
           ) : null}
           {usage?.at ? (

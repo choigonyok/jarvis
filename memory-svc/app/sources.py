@@ -446,6 +446,21 @@ async def diary(ctx: Ctx):
     return added
 
 
+async def topics(ctx: Ctx):
+    """Once a week, the owner graph's topics are rebuilt: which people, places
+    and things belong together, each with a summary. One LLM call per pair of
+    summaries merged, so it waits for a day with budget left."""
+    cur = await ctx.state.cursor("topics")
+    now = datetime.now(KST)
+    if cur.get("at") and now - datetime.fromisoformat(cur["at"]) < timedelta(days=7):
+        return 0
+    if not await ctx.llm_ok():
+        return 0
+    n = await ctx.graph.communities("owner")
+    await ctx.state.save("topics", {"at": now.isoformat()}, n)
+    return n
+
+
 ALL = {
     # Structured first: they cost nothing and make the free text's people and
     # places land next to things already known.
@@ -458,6 +473,7 @@ ALL = {
     "chat": chat,
     "kakao": lambda ctx: messenger(ctx, "kakao", "카카오톡"),
     "imessage": lambda ctx: messenger(ctx, "imessage", "iMessage"),
-    # Last: it bundles what the structured sources above just wrote.
+    # It bundles what the structured sources above just wrote.
     "diary": diary,
+    "topics": topics,
 }
