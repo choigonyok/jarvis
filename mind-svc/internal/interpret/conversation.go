@@ -8,11 +8,15 @@
 //
 // Nothing here matches words. A model reads the conversation and proposes
 // changes, each with the line it rests on quoted; a change whose quote is not
-// in that line is not believed.
+// in that line is not believed. The same goes for facts worth remembering
+// (what someone likes, who is whose friend): believed ones are written to the
+// evidence ledger, which sends them on to long-term memory.
 package interpret
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -40,7 +44,15 @@ type Config struct {
 	MinConf  float64       // changes below this are not applied
 	// Noise is rooms not worth reading at all: alerts, ads, banks.
 	Noise *regexp.Regexp
+	// Recall is what long-term memory already holds about a room's people,
+	// shown to the model as context (nil: nothing is shown).
+	Recall func(ctx context.Context, room, roomName string, fresh []model.Message) []string
+	// OnFact hears that a fact went into the ledger (to send it soon).
+	OnFact func()
 }
+
+// KindFact is a fact for long-term memory, beside the world model's kinds.
+const KindFact = "fact"
 
 type Conversation struct {
 	cfg   Config
@@ -197,7 +209,11 @@ func (c *Conversation) Read(ctx context.Context, room string) error {
 		return err
 	}
 
-	answer, err := c.llm.Complete(ctx, system, prompt(name, c.cfg.Owner, c.now(), c.loc, known, earlier, fresh))
+	var remembered []string
+	if c.cfg.Recall != nil {
+		remembered = c.cfg.Recall(ctx, room, name, fresh)
+	}
+	answer, err := c.llm.Complete(ctx, system, prompt(name, c.cfg.Owner, c.now(), c.loc, known, remembered, earlier, fresh))
 	if err != nil {
 		c.retryLater(room, err)
 		return err
@@ -315,6 +331,9 @@ func (c *Conversation) apply(ctx context.Context, room string, o op, fresh []mod
 		return skip(fmt.Sprintf("확신도 %.2f", o.Confidence))
 	}
 	kind := o.Kind
+	if kind == KindFact {
+		return c.remember(ctx, room, o, evidence, skip)
+	}
 	if kind != model.KindPlan && kind != model.KindLoop {
 		return skip("모르는 종류 " + kind)
 	}
@@ -362,6 +381,78 @@ func (c *Conversation) apply(ctx context.Context, room string, o op, fresh []mod
 		return changed, err
 	}
 	return skip("모르는 op " + o.Op)
+}
+
+// remember writes a believed fact to the evidence ledger, pending for
+// memory. The same sentence already written for this room (a room read again
+// after a failure) is not written twice.
+func (c *Conversation) remember(ctx context.Context, room string, o op, evidence []model.Evidence, skip func(string) (bool, error)) (bool, error) {
+	str := func(k string) string {
+		var v string
+		if raw, ok := o.Set[k]; ok && json.Unmarshal(raw, &v) == nil {
+			return strings.TrimSpace(v)
+		}
+		return ""
+	}
+	subject, object, relation, text := str("subject"), str("object"), relationName(str("relation")), str("text")
+	if subject == "" || object == "" || relation == "" || text == "" {
+		return skip("사실의 두 끝·관계·문장 중 빠진 것이 있음")
+	}
+	recent, err := c.st.Facts(ctx, 300)
+	if err != nil {
+		return false, err
+	}
+	for _, f := range recent {
+		if f.Room == room && norm(f.Text) == norm(text) {
+			return skip("이미 적은 사실")
+		}
+	}
+	now := c.now()
+	f := model.Fact{
+		ID: "mf_" + randomHex(6), Room: room, Subject: c.party(subject, str("subjectKind")), Relation: relation,
+		Object: c.party(object, str("objectKind")), Text: text, Evidence: evidence, Confidence: o.Confidence, Why: o.Why,
+		Status: model.FactPending, NextTry: now, CreatedAt: now,
+	}
+	if v := str("validAt"); dateRE.MatchString(v) {
+		f.ValidAt = v
+	}
+	if err := c.st.PutFact(ctx, f); err != nil {
+		return false, err
+	}
+	if c.cfg.OnFact != nil {
+		c.cfg.OnFact()
+	}
+	return true, nil
+}
+
+// party is one end of a fact: "나" (or the operator's name) is the operator.
+func (c *Conversation) party(name, kind string) model.Party {
+	if name == "나" || name == c.cfg.Owner || name == c.cfg.Owner+"(나)" {
+		return model.Party{Name: "나", Self: true}
+	}
+	switch kind {
+	case "Person", "Place", "Org", "Thing", "Event":
+	default:
+		kind = "Thing"
+	}
+	return model.Party{Name: name, Kind: kind}
+}
+
+var relationRE = regexp.MustCompile(`[^A-Z0-9_]+`)
+
+// relationName is "DISLIKES" whatever spacing or case the model used.
+func relationName(s string) string {
+	s = relationRE.ReplaceAllString(strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(s), " ", "_")), "")
+	if len(s) > 60 {
+		s = s[:60]
+	}
+	return strings.Trim(s, "_")
+}
+
+func randomHex(n int) string {
+	b := make([]byte, n)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
 // same finds a live entity this create is really about: a plan with the

@@ -1,0 +1,33 @@
+{
+  "name": "상대가 말한 취향과 근황은 기억하고 농담은 넘김",
+  "room": "jisu3",
+  "roomName": "지수",
+  "turns": [
+    {
+      "messages": [
+        { "at": "2026-10-12T19:10", "from": "지수", "text": "나 요즘 위염 때문에 매운 거 아예 못 먹어 ㅠ" },
+        { "at": "2026-10-12T19:11", "from": "지수", "text": "그리고 나 이직했어! 다음 달부터 판교로 출근해" },
+        { "at": "2026-10-12T19:12", "me": true, "text": "헐 축하해!! 몸 조심하고" }
+      ],
+      "script": {"changes":[
+        {"op":"remember","kind":"fact","set":{"subject":"지수","subjectKind":"Person","relation":"CANNOT_EAT","object":"매운 음식","objectKind":"Thing","text":"지수는 위염 때문에 매운 음식을 못 먹는다"},"evidence":[{"line":1,"quote":"매운 거 아예 못 먹어"}],"confidence":0.9,"why":"지수가 직접 말함"},
+        {"op":"remember","kind":"fact","set":{"subject":"지수","subjectKind":"Person","relation":"WORKS_AT","object":"판교","objectKind":"Place","text":"지수는 이직해서 다음 달부터 판교로 출근한다"},"evidence":[{"line":2,"quote":"이직했어"}],"confidence":0.85,"why":"근황"}
+      ]},
+      "expect": {
+        "facts": [
+          { "subject": "지수", "textHasAny": ["매운"] },
+          { "subject": "지수", "textHasAny": ["이직", "판교"] }
+        ],
+        "planCount": 0, "noActions": true
+      }
+    },
+    {
+      "messages": [
+        { "at": "2026-10-12T19:20", "from": "지수", "text": "ㅋㅋㅋ 사실 나 재벌 3세야" },
+        { "at": "2026-10-12T19:21", "me": true, "text": "ㅋㅋㅋ 그래 회장님 밥 사줘" }
+      ],
+      "script": {"changes":[]},
+      "expect": { "noFactHas": ["재벌"], "planCount": 0 }
+    }
+  ]
+}

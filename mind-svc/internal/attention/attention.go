@@ -34,6 +34,9 @@ type Attention struct {
 	loc     *time.Location
 	now     func() time.Time
 	log     *slog.Logger
+	// Recall is what long-term memory holds about people, for skills to
+	// mention (nil: nothing).
+	Recall func(ctx context.Context, people []string) []string
 
 	mu      sync.Mutex
 	pending map[string]*batch
@@ -246,3 +249,10 @@ func (v view) IntentsFor(ctx context.Context, id string) ([]model.Intent, error)
 }
 func (v view) Now() time.Time      { return v.a.now() }
 func (v view) Loc() *time.Location { return v.a.loc }
+
+func (v view) Recall(ctx context.Context, people []string) []string {
+	if v.a.Recall == nil || len(people) == 0 {
+		return nil
+	}
+	return v.a.Recall(ctx, people)
+}

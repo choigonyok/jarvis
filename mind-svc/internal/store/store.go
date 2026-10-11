@@ -1,11 +1,11 @@
 // Package store keeps everything the loop remembers: the world model and its
 // history, the text of observed messages, how far each conversation has been
-// read, the skills' timers, the intents and what came of them, and the
-// sensors' cursors.
+// read, the skills' timers, the intents and what came of them, the sensors'
+// cursors, and the facts sent to long-term memory with what they rested on.
 //
 // Two implementations behind one interface: Memory, for running the whole
-// loop on a laptop with nothing else (and for tests), and Postgres (migration
-// 035) for the stack.
+// loop on a laptop with nothing else (and for tests), and Postgres (migrations
+// 035, 038) for the stack.
 package store
 
 import (
@@ -56,6 +56,19 @@ type Store interface {
 	// Sensor cursors.
 	Cursor(ctx context.Context, name string) (int64, error)
 	SetCursor(ctx context.Context, name string, v int64) error
+
+	// Facts: the evidence ledger of what goes to long-term memory, and its
+	// outbox - a pending fact is sent until memory answers.
+	PutFact(ctx context.Context, f model.Fact) error
+	Fact(ctx context.Context, id string) (model.Fact, error)
+	Facts(ctx context.Context, limit int) ([]model.Fact, error) // newest first
+	// DueFacts is pending facts whose next try has come, oldest first.
+	DueFacts(ctx context.Context, now time.Time, limit int) ([]model.Fact, error)
+
+	// Aliases: names in conversation → memory nodes. Putting a name again
+	// moves it to the node given and counts it seen once more.
+	PutAlias(ctx context.Context, a model.Alias) error
+	Aliases(ctx context.Context) ([]model.Alias, error)
 }
 
 // Room is a conversation as the store knows it.

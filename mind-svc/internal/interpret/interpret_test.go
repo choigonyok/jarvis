@@ -123,3 +123,62 @@ func TestDateTable(t *testing.T) {
 		}
 	}
 }
+
+// A fact is believed like a change - its quote must be in its line - and goes
+// to the ledger pending, with "나" as the operator and the relation tidied.
+// Read again, the same sentence is not written twice.
+func TestFactsGoToTheLedger(t *testing.T) {
+	ctx := context.Background()
+	c, st, _ := setup(t, `{"changes":[
+		{"op":"remember","kind":"fact","set":{"subject":"지수","subjectKind":"Person","relation":"dislikes","object":"매운 음식","objectKind":"Food","text":"지수는 매운 음식을 못 먹는다"},"evidence":[{"line":1,"quote":"매운 거 못 먹어"}],"confidence":0.9},
+		{"op":"remember","kind":"fact","set":{"subject":"윤","relation":"FRIEND_OF","object":"지수","objectKind":"Person","text":"지수는 나의 대학 동기다"},"evidence":[{"line":2,"quote":"대학 동기"}],"confidence":0.8},
+		{"op":"remember","kind":"fact","set":{"subject":"지수","relation":"LIVES_IN","object":"부산","text":"지수는 부산에 산다"},"evidence":[{"line":1,"quote":"부산 살아"}],"confidence":0.9},
+		{"op":"remember","kind":"fact","set":{"subject":"지수","relation":"","object":"x","text":"관계 없음"},"evidence":[{"line":1,"quote":"매운"}],"confidence":0.9}
+	]}`)
+	nudged := 0
+	c.cfg.OnFact = func() { nudged++ }
+	say(t, st, "sim:1", "나 매운 거 못 먹어 ㅠ", false, time.Date(2026, 10, 12, 20, 1, 0, 0, seoul))
+	say(t, st, "sim:2", "우리 대학 동기잖아", true, time.Date(2026, 10, 12, 20, 2, 0, 0, seoul))
+	if err := c.Read(ctx, "r"); err != nil {
+		t.Fatal(err)
+	}
+	fs, _ := st.Facts(ctx, 10)
+	if len(fs) != 2 || nudged != 2 {
+		t.Fatalf("근거가 맞고 빠진 데 없는 사실 둘만 남아야 합니다: %+v (nudged %d)", fs, nudged)
+	}
+	byText := map[string]model.Fact{}
+	for _, f := range fs {
+		byText[f.Text] = f
+	}
+	spicy := byText["지수는 매운 음식을 못 먹는다"]
+	if spicy.Relation != "DISLIKES" || spicy.Object.Kind != "Thing" || spicy.Status != model.FactPending || spicy.Evidence[0].Ref != "sim:1" {
+		t.Fatalf("관계 이름·종류·상태·근거: %+v", spicy)
+	}
+	if friend := byText["지수는 나의 대학 동기다"]; !friend.Subject.Self || friend.Subject.Name != "나" {
+		t.Fatalf("운영자 이름은 나로: %+v", friend)
+	}
+
+	say(t, st, "sim:3", "ㅋㅋ", false, time.Date(2026, 10, 12, 20, 3, 0, 0, seoul))
+	if err := c.Read(ctx, "r"); err != nil {
+		t.Fatal(err)
+	}
+	if fs, _ := st.Facts(ctx, 10); len(fs) != 2 {
+		t.Fatalf("같은 문장은 다시 적지 않습니다: %d", len(fs))
+	}
+}
+
+// What memory already holds is shown to the model as context, apart from the
+// conversation.
+func TestRecallIsShown(t *testing.T) {
+	c, st, script := setup(t, `{"changes":[]}`)
+	c.cfg.Recall = func(context.Context, string, string, []model.Message) []string {
+		return []string{"지수는 매운 음식을 못 먹는다"}
+	}
+	say(t, st, "sim:1", "저녁 뭐 먹지", false, time.Date(2026, 10, 12, 20, 1, 0, 0, seoul))
+	if err := c.Read(context.Background(), "r"); err != nil {
+		t.Fatal(err)
+	}
+	if script.Calls() != 1 || !strings.Contains(script.Prompts[0], "## 이미 기억하는 것") || !strings.Contains(script.Prompts[0], "매운 음식") {
+		t.Fatalf("기억이 프롬프트에 있어야 합니다: %v", script.Prompts)
+	}
+}

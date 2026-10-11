@@ -21,6 +21,8 @@ type Memory struct {
 	timers   []model.Timer
 	intents  map[string]model.Intent
 	cursors  map[string]int64
+	facts    map[string]model.Fact
+	aliases  map[string]model.Alias
 	seq      int64
 }
 
@@ -31,6 +33,8 @@ func NewMemory() *Memory {
 		marks:    map[string]time.Time{},
 		intents:  map[string]model.Intent{},
 		cursors:  map[string]int64{},
+		facts:    map[string]model.Fact{},
+		aliases:  map[string]model.Alias{},
 	}
 }
 
@@ -286,6 +290,90 @@ func (m *Memory) SetCursor(_ context.Context, name string, v int64) error {
 	defer m.mu.Unlock()
 	m.cursors[name] = v
 	return nil
+}
+
+func (m *Memory) PutFact(_ context.Context, f model.Fact) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	f.Evidence = slices.Clone(f.Evidence)
+	m.facts[f.ID] = f
+	return nil
+}
+
+func (m *Memory) Fact(_ context.Context, id string) (model.Fact, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	f, ok := m.facts[id]
+	if !ok {
+		return model.Fact{}, model.ErrNotFound
+	}
+	return f, nil
+}
+
+func (m *Memory) Facts(_ context.Context, limit int) ([]model.Fact, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]model.Fact, 0, len(m.facts))
+	for _, f := range m.facts {
+		out = append(out, f)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].ID > out[j].ID
+		}
+		return out[i].CreatedAt.After(out[j].CreatedAt)
+	})
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (m *Memory) DueFacts(_ context.Context, now time.Time, limit int) ([]model.Fact, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []model.Fact{}
+	for _, f := range m.facts {
+		if f.Status == model.FactPending && !f.NextTry.After(now) {
+			out = append(out, f)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].CreatedAt.Before(out[j].CreatedAt)
+	})
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (m *Memory) PutAlias(_ context.Context, a model.Alias) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cur, ok := m.aliases[a.Name]
+	a.Seen = 1
+	if ok {
+		a.Seen = cur.Seen + 1
+		if a.Kind == "" {
+			a.Kind = cur.Kind
+		}
+	}
+	m.aliases[a.Name] = a
+	return nil
+}
+
+func (m *Memory) Aliases(_ context.Context) ([]model.Alias, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]model.Alias, 0, len(m.aliases))
+	for _, a := range m.aliases {
+		out = append(out, a)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
 }
 
 func clone(e model.Entity) model.Entity {

@@ -12,6 +12,8 @@
 //	POST /api/intents/{id}/{approve|reject|undo}
 //	GET  /api/entities/{id}/changes   an entity's history, with evidence
 //	POST /api/replay                  {after, limit} the log through a fresh loop, in memory
+//	GET  /api/recall?q=&person=       what is known: world model + long-term memory
+//	POST /api/facts/flush             send the ledger's pending facts to memory now
 //
 // /api and the console need the token unless open: in the stack the port is
 // bound to the host's loopback, and a laptop run has nothing to protect.
@@ -72,6 +74,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/intents/{id}/{action}", s.auth(false, s.decide))
 	mux.HandleFunc("GET /api/entities/{id}/changes", s.auth(false, s.changes))
 	mux.HandleFunc("POST /api/replay", s.auth(false, s.replay))
+	mux.HandleFunc("GET /api/recall", s.auth(false, s.recall))
+	mux.HandleFunc("POST /api/facts/flush", s.auth(false, s.flush))
 	return mux
 }
 
@@ -100,6 +104,34 @@ func (s *Server) consume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) recall(w http.ResponseWriter, r *http.Request) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	people := r.URL.Query()["person"]
+	if q == "" && len(people) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "q 나 person 이 필요합니다."})
+		return
+	}
+	rec, err := s.m.Recall(r.Context(), q, people, 10)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, rec)
+}
+
+func (s *Server) flush(w http.ResponseWriter, r *http.Request) {
+	if s.m.Remember == nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "장기 기억이 연결되어 있지 않습니다."})
+		return
+	}
+	n, err := s.m.Remember.Flush(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"sent": n, "error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"sent": n})
 }
 
 func (s *Server) snapshot(w http.ResponseWriter, r *http.Request) {

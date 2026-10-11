@@ -124,9 +124,56 @@ func contract(t *testing.T, st Store) {
 	}
 }
 
-func TestMemory(t *testing.T) { contract(t, NewMemory()) }
+// facts is the evidence ledger and the alias table, for every Store.
+func facts(t *testing.T, st Store) {
+	ctx := context.Background()
+	at := time.Date(2026, 10, 12, 20, 0, 0, 0, time.UTC)
+	f := model.Fact{
+		ID: "mf_1", Room: "r", Subject: model.Party{Name: "지수", Kind: "Person"}, Relation: "DISLIKES",
+		Object: model.Party{Name: "매운 음식", Kind: "Thing"}, Text: "지수는 매운 음식을 못 먹는다",
+		Evidence: []model.Evidence{{Ref: "sim:1", Quote: "매운 거 못 먹어"}}, Confidence: 0.9,
+		Status: model.FactPending, NextTry: at, CreatedAt: at,
+	}
+	if err := st.PutFact(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	later := f
+	later.ID, later.CreatedAt, later.NextTry = "mf_2", at.Add(time.Minute), at.Add(time.Hour)
+	_ = st.PutFact(ctx, later)
+	due, err := st.DueFacts(ctx, at.Add(time.Minute), 10)
+	if err != nil || len(due) != 1 || due[0].ID != "mf_1" || due[0].Evidence[0].Quote != "매운 거 못 먹어" {
+		t.Fatalf("때가 된 것만 나와야 합니다: %+v %v", due, err)
+	}
+	f.Status, f.Memory = model.FactStored, &model.Stored{Edge: "e1", Source: model.MemoryNode{ID: "n1", Name: "지수"}}
+	_ = st.PutFact(ctx, f)
+	if due, _ := st.DueFacts(ctx, at.Add(2*time.Hour), 10); len(due) != 1 || due[0].ID != "mf_2" {
+		t.Fatalf("넣은 것은 다시 나오지 않아야 합니다: %+v", due)
+	}
+	got, err := st.Fact(ctx, "mf_1")
+	if err != nil || got.Memory == nil || got.Memory.Source.ID != "n1" {
+		t.Fatalf("기억의 판단이 남아야 합니다: %+v %v", got, err)
+	}
+	if all, _ := st.Facts(ctx, 10); len(all) != 2 || all[0].ID != "mf_2" {
+		t.Fatalf("최근 것부터: %+v", all)
+	}
+	if _, err := st.Fact(ctx, "mf_x"); !errors.Is(err, model.ErrNotFound) {
+		t.Fatalf("없는 사실: %v", err)
+	}
 
-// Against a throwaway Postgres with migration 035 applied:
+	_ = st.PutAlias(ctx, model.Alias{Name: "지수", Kind: "Person", Node: "n1", At: at})
+	_ = st.PutAlias(ctx, model.Alias{Name: "지수", Node: "n2", At: at.Add(time.Minute)})
+	as, err := st.Aliases(ctx)
+	if err != nil || len(as) != 1 || as[0].Node != "n2" || as[0].Seen != 2 || as[0].Kind != "Person" {
+		t.Fatalf("이름은 마지막 노드로, 본 횟수는 늘고, 종류는 남아야 합니다: %+v %v", as, err)
+	}
+}
+
+func TestMemory(t *testing.T) {
+	contract(t, NewMemory())
+	facts(t, NewMemory())
+}
+
+// Against a throwaway Postgres with migrations 035 and 038 applied:
 // MIND_TEST_DATABASE_URL=postgres://... go test ./internal/store/
 func TestPostgres(t *testing.T) {
 	dsn := os.Getenv("MIND_TEST_DATABASE_URL")
@@ -138,12 +185,13 @@ func TestPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	if _, err := pool.Exec(context.Background(), `truncate mind_messages, mind_rooms, mind_entities, mind_changes, mind_timers, mind_intents, mind_cursors restart identity cascade`); err != nil {
+	if _, err := pool.Exec(context.Background(), `truncate mind_messages, mind_rooms, mind_entities, mind_changes, mind_timers, mind_intents, mind_cursors, mind_facts, mind_aliases restart identity cascade`); err != nil {
 		t.Fatal(err)
 	}
 	key := make([]byte, 32)
 	st := NewPostgres(pool, key)
 	contract(t, st)
+	facts(t, st)
 	var sealed bool
 	var body []byte
 	_ = pool.QueryRow(context.Background(), `select sealed, body from mind_messages where ref = 'sim:1'`).Scan(&sealed, &body)

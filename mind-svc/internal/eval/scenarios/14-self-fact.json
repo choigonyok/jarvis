@@ -1,0 +1,22 @@
+{
+  "name": "나와의 채팅: 산 물건은 사실, 예약은 일정",
+  "room": "self2",
+  "roomName": "메모",
+  "turns": [
+    {
+      "messages": [
+        { "at": "2026-10-12T22:00", "me": true, "text": "에어팟 프로 3 샀다 39만원" },
+        { "at": "2026-10-12T22:01", "me": true, "text": "토요일 오후 3시 미용실 예약함" }
+      ],
+      "script": {"changes":[
+        {"op":"remember","kind":"fact","set":{"subject":"나","relation":"BOUGHT","object":"에어팟 프로 3","objectKind":"Thing","text":"나는 에어팟 프로 3를 39만원에 샀다","validAt":"2026-10-12"},"evidence":[{"line":1,"quote":"에어팟 프로 3 샀다"}],"confidence":0.9,"why":"구매 메모"},
+        {"op":"create","kind":"plan","set":{"title":"미용실","status":"confirmed","date":"2026-10-17","start":"15:00"},"evidence":[{"line":2,"quote":"미용실 예약함"}],"confidence":0.9,"why":"예약"}
+      ]},
+      "expect": {
+        "facts": [{ "subject": "나", "textHasAny": ["에어팟"] }],
+        "noFactHas": ["미용실"],
+        "plans": [{ "status": "confirmed", "date": "2026-10-17", "start": "15:00" }]
+      }
+    }
+  ]
+}

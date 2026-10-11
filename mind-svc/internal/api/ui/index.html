@@ -77,6 +77,13 @@ section.col:last-child { border-right: 0; }
 .st.cancelled, .st.closed, .st.done { color: var(--faint); }
 .facts { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--dim); font-size: 13px; margin-top: 4px; }
 .cal { color: var(--ok); }
+.st.stored { color: var(--loop); border-color: color-mix(in srgb, var(--loop) 45%, transparent); }
+.st.pending { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.st.failed { color: var(--no); border-color: color-mix(in srgb, var(--no) 45%, transparent); }
+.st.duplicate { color: var(--faint); }
+.triple { font: 11.5px var(--mono); color: var(--faint); overflow-wrap: anywhere; }
+.judge { font-size: 12.5px; color: var(--dim); margin-top: 4px; }
+.judge s { color: var(--faint); }
 .hist { margin-top: 8px; border-top: 1px dashed var(--line); padding-top: 8px; display: grid; gap: 8px; }
 .ch { font-size: 12.5px; color: var(--dim); }
 .ch b { color: var(--ink); font-weight: 500; }
@@ -105,6 +112,7 @@ h4 { font-size: 12px; color: var(--dim); font-weight: 600; margin: 16px 0 6px; }
   <span class="chip" id="mode">-</span>
   <span class="chip"><span class="dot" id="llmdot"></span><span id="llm">-</span></span>
   <span class="chip" id="now">-</span>
+  <span class="chip"><span class="dot" id="memdot"></span><span id="mem">-</span></span>
   <div class="tools">
     <button class="btn" id="readAll" title="조용해지기를 기다리지 않고 모든 대화를 지금 해석">지금 해석</button>
     <button class="btn" id="settle" title="가라앉는 중인 변화를 스킬에 지금 넘김">지금 넘기기</button>
@@ -135,7 +143,7 @@ h4 { font-size: 12px; color: var(--dim); font-weight: 600; margin: 16px 0 6px; }
     </form>
   </section>
   <section class="col" id="c2">
-    <div class="colhead"><span class="step">세계 모델</span><h2>일정 · 열린 고리</h2></div>
+    <div class="colhead"><span class="step">세계 모델 · 기억</span><h2>일정 · 열린 고리 · 기억할 사실</h2></div>
     <div class="scroll" id="world"></div>
   </section>
   <section class="col" id="c3">
@@ -157,6 +165,7 @@ const DECISION = { execute: "바로 실행", notify: "실행 후 알림", ask: "
 const ISTATUS = { pending: "대기", executed: "완료", rejected: "거절됨", undone: "되돌림", dropped: "버림", superseded: "대체됨", failed: "실패" };
 const KIND = { "calendar.create": "캘린더 추가", "calendar.update": "캘린더 수정", "calendar.delete": "캘린더 삭제", info: "알림" };
 const LEVEL = { auto: "알아서", notify: "하고 알림", ask: "먼저 묻기", never: "안 함" };
+const FSTATUS = { pending: "보내는 중", stored: "기억함", duplicate: "이미 앎", failed: "포기" };
 let room = null, open = new Set(), snap = null;
 
 async function call(path, body) {
@@ -178,6 +187,8 @@ function render() {
   $("llmdot").className = "dot " + (s.llm.ready ? "on" : "off");
   $("llm").textContent = s.llm.ready ? `${s.llm.model} · 오늘 $${s.llm.spentUsd.toFixed(4)}` : "LLM 키 없음";
   $("now").textContent = t(s.now) + (s.settling ? ` · 가라앉는 중 ${s.settling}` : "");
+  $("memdot").className = "dot " + (s.memory ? "on" : "off");
+  $("mem").textContent = s.memory ? "장기 기억 연결됨" : "장기 기억 없음";
   document.querySelectorAll(".clock").forEach((b) => (b.disabled = s.mode !== "memory"));
 
   const rooms = s.rooms || [];
@@ -200,6 +211,12 @@ function render() {
     const hist = open.has(e.id) ? `<div class="hist">${changes.filter((c) => c.entityId === e.id).map(change).join("") || "<div class='ch'>이력 불러오는 중…</div>"}</div>` : "";
     return `<article class="ent ${live ? "" : "dead"}"><header data-ent="${e.id}"><span class="kind">${e.kind === "plan" ? "일정" : "고리"}</span><h3>${esc(st.title)}</h3><span class="st ${st.status}">${STATUS[st.status] || st.status}</span></header><div class="facts">${facts.map((f) => `<span>${f}</span>`).join("")}</div>${hist}</article>`;
   }).join("") || `<div class="empty">아직 아는 것이 없습니다.</div>`;
+  $("world").innerHTML += `<h4>기억할 사실</h4>` + ((s.facts || []).map(fact).join("") ||
+    `<div class="empty">대화에서 취향·관계·근황이 나오면 원문 인용과 함께 여기 적히고 장기 기억으로 갑니다.</div>`);
+  if ((s.aliases || []).length) {
+    $("world").innerHTML += `<h4>사람 · 장소 (기억의 노드)</h4><div class="list">` +
+      s.aliases.map((a) => `<div><b>${esc(a.name)}</b> ${a.kind ? esc(a.kind) + " · " : ""}${esc(a.node.slice(0, 8))} · ${a.seen}번</div>`).join("") + `</div>`;
+  }
 
   $("intents").innerHTML = (s.intents || []).map((i) => {
     const acts = i.status === "pending" ? `<button class="btn ok" data-act="approve" data-id="${i.id}">승인</button><button class="btn no" data-act="reject" data-id="${i.id}">거절</button>`
@@ -211,11 +228,29 @@ function render() {
       ${ev ? `<div class="meta">근거 ${ev}</div>` : ""}${i.error ? `<div class="meta" style="color:var(--no)">${esc(i.error)}</div>` : ""}<div class="acts">${acts}</div></article>`;
   }).join("") || `<div class="empty">스킬이 아직 아무것도 하자고 하지 않았습니다.</div>`;
 
-  $("notices").innerHTML = s.mode === "stack" ? "<div>스택 모드에서는 알림이 관측 로그를 거쳐 notify-svc 로 갑니다.</div>"
+  $("notices").innerHTML = s.mode === "stack" && !s.notices ? "<div>알림은 관측 로그를 거쳐 notify-svc 로 갑니다.</div>"
     : (s.notices || []).slice().reverse().slice(0, 12).map((n) => `<div>${n.tier === "now" ? "🔔" : "🌙"} <b>${esc(n.title)}</b> ${esc(n.body).replace(/\n/g, " · ")}</div>`).join("") || "<div>없음</div>";
   $("calendar").innerHTML = (s.calendar || []).map((c) => `<div>${esc(c.date)}${c.start ? " " + c.start : ""} <b>${esc(c.title)}</b>${c.place ? " @" + esc(c.place) : ""}</div>`).join("") || "<div>비어 있음</div>";
   $("timers").innerHTML = (s.timers || []).map((tm) => `<div>${tm.firedAt ? "✓" : "⏰"} ${t(tm.fireAt)} · ${esc(tm.skill)}/${esc(tm.name)}</div>`).join("") || "<div>없음</div>";
   $("levels").innerHTML = Object.entries(s.levels || {}).map(([k, [l, why]]) => `<div><b>${KIND[k] || k}</b> ${LEVEL[l] || l} · ${esc(why)}</div>`).join("");
+}
+
+// One entry of the evidence ledger: what was said, where it stands, and what
+// long-term memory made of it.
+function fact(f) {
+  const ev = (f.evidence || []).map((e) => `<span class="quote">“${esc(e.quote)}”</span>`).join(" ");
+  const m = f.memory || {};
+  const judge = [
+    m.duplicate && `이미 알던 사실: ${esc(m.edgeFact)}`,
+    m.expired && "더 나중 사실이 있어 지난 것으로 기억",
+    ...(m.ended || []).map((x) => `끝낸 사실: <s>${esc(x.fact)}</s>`),
+    f.status === "pending" && f.error && `다시 보낼 예정 (${f.tries}번째): ${esc(f.error)}`,
+    f.status === "failed" && `보내지 못함: ${esc(f.error)}`,
+  ].filter(Boolean);
+  const end = (p) => esc(p.self ? "나" : p.name);
+  return `<article class="ent"><header><span class="kind">사실</span><h3>${esc(f.text)}</h3><span class="st ${f.status}">${FSTATUS[f.status] || f.status}</span></header>
+    <div class="triple">${end(f.subject)} —${esc(f.relation)}→ ${end(f.object)}${f.validAt ? " · " + esc(f.validAt) + "부터" : ""}</div>
+    ${ev ? `<div class="judge">근거 ${ev}</div>` : ""}${judge.map((j) => `<div class="judge">${j}</div>`).join("")}</article>`;
 }
 
 function change(c) {

@@ -1,7 +1,8 @@
 // Package mind assembles the loop: observations come in from the log, the
-// interpreters turn them into changes to the world model, attention hands
-// the changes to skills, skills hand intents to the gate, the gate acts -
-// and what it did comes back in as an observation.
+// interpreters turn them into changes to the world model (and facts for
+// long-term memory), attention hands the changes to skills, skills hand
+// intents to the gate, the gate acts - and what it did comes back in as an
+// observation.
 //
 // One process holds all the layers for now, each behind its own package and
 // interface, so a layer can move out on its own when it needs to.
@@ -21,6 +22,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/gate"
 	"github.com/choigonyok/jarvis/mind-svc/internal/interpret"
 	"github.com/choigonyok/jarvis/mind-svc/internal/llm"
+	"github.com/choigonyok/jarvis/mind-svc/internal/memory"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
 	"github.com/choigonyok/jarvis/mind-svc/internal/skill"
@@ -42,6 +44,12 @@ type Options struct {
 	Policy    gate.Policy
 	URL       string // where a notice links to
 	Mode      string // memory | stack
+	// Memory is long-term memory (memory-svc); nil keeps facts in the
+	// ledger, pending.
+	Memory memory.Client
+	// PlanEvents announces confirmed plans as memory.plan events, the shape
+	// the agent's suggestion engine already turns into calendar cards.
+	PlanEvents bool
 }
 
 type Mind struct {
@@ -50,8 +58,9 @@ type Mind struct {
 	Conv    *interpret.Conversation
 	Actions *interpret.Actions
 	Attn    *attention.Attention
-	Gate    *gate.Gate
-	Skills  []skill.Skill
+	Gate     *gate.Gate
+	Skills   []skill.Skill
+	Remember *Remember // nil without long-term memory
 }
 
 func New(o Options) *Mind {
@@ -60,7 +69,12 @@ func New(o Options) *Mind {
 	}
 	m := &Mind{Opts: o}
 	m.World = world.New(o.Store, o.Now)
-	m.Conv = interpret.NewConversation(o.Interpret, o.Store, m.World, o.LLM, o.Loc, o.Now, o.Logger)
+	cfg := o.Interpret
+	if o.Memory != nil {
+		m.Remember = NewRemember(o.Store, o.Memory, o.Now, o.Logger)
+		cfg.Recall, cfg.OnFact = m.recallRoom, m.Remember.Nudge
+	}
+	m.Conv = interpret.NewConversation(cfg, o.Store, m.World, o.LLM, o.Loc, o.Now, o.Logger)
 	m.Actions = &interpret.Actions{World: m.World}
 	notifier := o.Notifier
 	if notifier == nil {
@@ -70,6 +84,12 @@ func New(o Options) *Mind {
 	m.Gate = gate.New(o.Store, acts, notifier, o.Log, o.Policy, o.Loc, o.Now, o.URL, o.Logger)
 	m.Skills = []skill.Skill{skill.Schedule{}, skill.Loops{}, skill.Brief{}}
 	m.Attn = attention.New(m.Skills, m.World, o.Store, m.Gate, o.Settle, o.Loc, o.Now, o.Logger)
+	if o.Memory != nil {
+		m.Attn.Recall = m.recallPeople
+	}
+	if o.PlanEvents {
+		m.World.Listen(m.announcePlan)
+	}
 	return m
 }
 
@@ -102,6 +122,9 @@ func (m *Mind) Run(ctx context.Context, every time.Duration) {
 	}
 	go m.Conv.Run(ctx, every)
 	go m.Attn.Run(ctx, every)
+	if m.Remember != nil {
+		go m.Remember.Run(ctx, 15*time.Second)
+	}
 }
 
 // Simulate is a message from the console's simulator: stored and logged
@@ -168,6 +191,9 @@ type Snapshot struct {
 	Settling int                   `json:"settling"`
 	Notices  []act.Notice          `json:"notices,omitempty"`
 	Calendar []model.CalendarEvent `json:"calendar,omitempty"`
+	Facts    []model.Fact          `json:"facts"`
+	Aliases  []model.Alias         `json:"aliases"`
+	Memory   bool                  `json:"memory"` // long-term memory is connected
 }
 
 type LLMState struct {
@@ -217,6 +243,13 @@ func (m *Mind) Snapshot(ctx context.Context) (Snapshot, error) {
 	if s.Levels, err = m.Gate.Levels(ctx); err != nil {
 		return s, err
 	}
+	if s.Facts, err = st.Facts(ctx, 80); err != nil {
+		return s, err
+	}
+	if s.Aliases, err = st.Aliases(ctx); err != nil {
+		return s, err
+	}
+	s.Memory = m.Opts.Memory != nil
 	if n, ok := m.Opts.Notifier.(*act.MemoryNotifier); ok {
 		s.Notices = n.All()
 	}

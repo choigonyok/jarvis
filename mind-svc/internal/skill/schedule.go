@@ -99,19 +99,29 @@ func (s Schedule) OnTimer(ctx context.Context, v View, e model.Entity, t model.T
 			body += "\n아직 남은 일: " + strings.Join(titles, ", ")
 			in.Urgent = true // there is something to do about it
 		}
-		in.Body = body
+		in.Body = withMemory(body, v.Recall(ctx, st.People))
 		return Result{Intents: []model.Intent{in}}
 	case "soon":
 		body := "곧 시작해요"
 		if st.Place != "" {
 			body = st.Place + " · " + body
 		}
+		body = withMemory(body, v.Recall(ctx, st.People))
 		return Result{Intents: []model.Intent{{
 			Kind: "info", EntityID: e.ID, Title: st.Start + " " + st.Title, Body: body,
 			Reason: "두 시간 전 알림", Confidence: 1, Urgent: true,
 		}}}
 	}
 	return Result{}
+}
+
+// withMemory adds what memory holds about the people a plan is with - the
+// thing worth knowing before seeing them.
+func withMemory(body string, lines []string) string {
+	if len(lines) == 0 {
+		return body
+	}
+	return body + "\n기억: " + strings.Join(lines, " · ")
 }
 
 // add is "put it on the calendar" - unless the operator already turned this

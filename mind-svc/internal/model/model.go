@@ -193,3 +193,85 @@ type CalendarAction struct {
 	EventID string        `json:"eventId,omitempty"`
 	Event   CalendarEvent `json:"event"`
 }
+
+// Fact is something worth remembering that is neither a plan nor a loop: what
+// someone likes or cannot eat, who is whose friend, a job changed, a thing
+// bought. It is read from a conversation like any change, resting on a quoted
+// line, and goes to long-term memory (memory-svc), where Graphiti puts it on
+// the people and places already known and retires what it contradicts. The
+// fact itself is the evidence ledger's entry: what was said, where, and what
+// memory made of it.
+type Fact struct {
+	ID         string     `json:"id"` // mf_…: also the ref memory-svc keys it by
+	Room       string     `json:"room"`
+	Subject    Party      `json:"subject"`
+	Relation   string     `json:"relation"` // LIKES, FRIEND_OF, WORKS_AT …
+	Object     Party      `json:"object"`
+	Text       string     `json:"text"`              // the fact as one Korean sentence
+	ValidAt    string     `json:"validAt,omitempty"` // YYYY-MM-DD it became true, when said
+	Evidence   []Evidence `json:"evidence"`
+	Confidence float64    `json:"confidence"`
+	Why        string     `json:"why,omitempty"`
+
+	Status  string    `json:"status"` // pending | stored | duplicate | failed
+	Tries   int       `json:"tries"`
+	NextTry time.Time `json:"nextTry"`
+	Error   string    `json:"error,omitempty"`
+	// Memory is memory-svc's answer: Graphiti's judgement, not the
+	// conversation's - which node each end went on, whether it repeated a
+	// fact already known, which facts it ended.
+	Memory    *Stored    `json:"memory,omitempty"`
+	CreatedAt time.Time  `json:"createdAt"`
+	StoredAt  *time.Time `json:"storedAt,omitempty"`
+}
+
+// Fact statuses.
+const (
+	FactPending   = "pending"   // waiting to go to memory (or to go again)
+	FactStored    = "stored"    // memory has it as a new fact
+	FactDuplicate = "duplicate" // memory already knew it
+	FactFailed    = "failed"    // given up after too many tries
+)
+
+// Party is one end of a fact: the operator, or someone or something by name -
+// with the memory node it is, once known.
+type Party struct {
+	Name string `json:"name"`
+	Kind string `json:"kind,omitempty"` // Person | Place | Org | Thing | Event
+	Self bool   `json:"self,omitempty"`
+	Node string `json:"node,omitempty"`
+}
+
+// Stored is what memory made of a fact.
+type Stored struct {
+	Edge      string     `json:"edge"`
+	EdgeFact  string     `json:"edgeFact"` // the fact as memory keeps it: the earlier wording if this repeated one
+	Duplicate bool       `json:"duplicate"`
+	Expired   bool       `json:"expired"` // memory reads it as already superseded by something later
+	Source    MemoryNode `json:"source"`
+	Target    MemoryNode `json:"target"`
+	Ended     []Ended    `json:"ended,omitempty"`
+}
+
+type MemoryNode struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// Ended is a fact memory retired because this one contradicts it.
+type Ended struct {
+	ID        string `json:"id"`
+	Fact      string `json:"fact"`
+	InvalidAt string `json:"invalidAt,omitempty"`
+}
+
+// Alias ties a name said in conversation to the memory node it is - the table
+// that keeps "지수" in one room and "지수" in another the same person once
+// memory has said so.
+type Alias struct {
+	Name string    `json:"name"`
+	Kind string    `json:"kind,omitempty"`
+	Node string    `json:"node"`
+	Seen int       `json:"seen"`
+	At   time.Time `json:"at"`
+}

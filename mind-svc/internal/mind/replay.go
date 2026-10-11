@@ -10,6 +10,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/act"
 	"github.com/choigonyok/jarvis/mind-svc/internal/clock"
 	"github.com/choigonyok/jarvis/mind-svc/internal/llm"
+	"github.com/choigonyok/jarvis/mind-svc/internal/memory"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
@@ -22,6 +23,7 @@ type Report struct {
 	Reads        int            `json:"reads"`
 	Entities     []model.Entity `json:"entities"`
 	Intents      []model.Intent `json:"intents"`
+	Facts        []model.Fact   `json:"facts"`
 	Errors       []string       `json:"errors,omitempty"`
 }
 
@@ -40,6 +42,9 @@ func (m *Mind) Replay(ctx context.Context, client llm.Client, after int64, limit
 	opts.Store, opts.Log, opts.LLM, opts.Now = st, log, client, clk.Now
 	opts.Calendar, opts.Notifier, opts.Logger, opts.Mode = act.NewMemoryCalendar(), &act.MemoryNotifier{}, quiet, "replay"
 	opts.Settle = 0
+	// Facts stay in the replay: a memory of its own, nothing sent to the
+	// real one, no plan announced to the agent.
+	opts.Memory, opts.PlanEvents = memory.NewFake(clk.Now), false
 	r := New(opts)
 	rctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -98,6 +103,10 @@ func (m *Mind) Replay(ctx context.Context, client llm.Client, after int64, limit
 	readQuiet(clk.Now(), true)
 	rep.Entities, _ = st.Entities(rctx, "", "", false)
 	rep.Intents, _ = st.Intents(rctx, 1000)
+	if r.Remember != nil {
+		_, _ = r.Remember.Flush(rctx)
+	}
+	rep.Facts, _ = st.Facts(rctx, 1000)
 	return rep, nil
 }
 

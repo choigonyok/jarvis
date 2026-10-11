@@ -131,3 +131,107 @@ func (s *Messenger) fetch(ctx context.Context, after int64) ([]collected, error)
 	}
 	return out.Messages, json.NewDecoder(resp.Body).Decode(&out)
 }
+
+// Chat reads the operator's conversation with jarvis (chat-svc) as one more
+// room: what the operator tells the assistant - "다음 주 화요일 치과 예약했어",
+// what it found when asked - is read like any conversation.
+type Chat struct {
+	URL      string
+	Token    string
+	Store    store.Store
+	Log      obs.Log
+	Backfill time.Duration
+	Every    time.Duration
+	Out      *slog.Logger
+	HTTP     *http.Client
+}
+
+type turn struct {
+	ID         string   `json:"id"`
+	Role       string   `json:"role"` // user | agent
+	AtISO      string   `json:"atIso"`
+	Text       string   `json:"text"`
+	Paragraphs []string `json:"paragraphs"`
+}
+
+func (s *Chat) Run(ctx context.Context) {
+	if s.HTTP == nil {
+		s.HTTP = &http.Client{Timeout: 30 * time.Second}
+	}
+	t := time.NewTicker(s.Every)
+	defer t.Stop()
+	for {
+		if err := s.Poll(ctx); err != nil && ctx.Err() == nil {
+			s.Out.Warn("jarvis 대화를 읽지 못했습니다", "err", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+// Poll observes the turns after the last one seen (by time). The cursor is
+// the last turn's time in microseconds.
+func (s *Chat) Poll(ctx context.Context) error {
+	cur, err := s.Store.Cursor(ctx, "sensor:chat")
+	if err != nil {
+		return err
+	}
+	since := time.Now().Add(-s.Backfill)
+	if cur > 0 {
+		since = time.UnixMicro(cur)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(s.URL, "/")+"/turns?thread=", nil)
+	if err != nil {
+		return err
+	}
+	if s.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+s.Token)
+	}
+	resp, err := s.HTTP.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("chat-svc: %d", resp.StatusCode)
+	}
+	var out struct {
+		Turns []turn `json:"turns"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return err
+	}
+	last := since
+	for _, t := range out.Turns {
+		at, err := time.Parse(time.RFC3339Nano, t.AtISO)
+		if err != nil || !at.After(since) {
+			continue
+		}
+		text := strings.TrimSpace(t.Text)
+		if text == "" {
+			text = strings.TrimSpace(strings.Join(t.Paragraphs, "\n"))
+		}
+		if text != "" {
+			msg := model.Message{
+				Ref: "chat:" + t.ID, Source: "chat", Room: "chat:owner", RoomName: "jarvis",
+				IsMine: t.Role == "user", SentAt: at, Text: text,
+			}
+			if !msg.IsMine {
+				msg.Sender = "Jarvis(비서)"
+			}
+			if err := mind.Observe(ctx, s.Store, s.Log, msg); err != nil {
+				return err
+			}
+		}
+		if at.After(last) {
+			last = at
+		}
+	}
+	if last.After(since) || cur == 0 {
+		return s.Store.SetCursor(ctx, "sensor:chat", last.UnixMicro())
+	}
+	return nil
+}

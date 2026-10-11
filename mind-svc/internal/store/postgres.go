@@ -16,7 +16,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 )
 
-// Postgres is the store in the stack (migration 035). Message text is sealed
+// Postgres is the store in the stack (migrations 035, 038). Message text is sealed
 // with AES-GCM when a key is given: a database dump alone does not hand
 // over anyone's conversations.
 type Postgres struct {
@@ -372,6 +372,84 @@ func (p *Postgres) Cursor(ctx context.Context, name string) (int64, error) {
 func (p *Postgres) SetCursor(ctx context.Context, name string, v int64) error {
 	_, err := p.db.Exec(ctx, `insert into mind_cursors (name, value) values ($1, $2) on conflict (name) do update set value = excluded.value`, name, v)
 	return err
+}
+
+func (p *Postgres) PutFact(ctx context.Context, f model.Fact) error {
+	body, err := json.Marshal(f)
+	if err != nil {
+		return err
+	}
+	_, err = p.db.Exec(ctx, `
+		insert into mind_facts (id, room, body, status, next_try, created_at) values ($1, $2, $3, $4, $5, $6)
+		on conflict (id) do update set body = excluded.body, status = excluded.status, next_try = excluded.next_try`,
+		f.ID, f.Room, body, f.Status, f.NextTry, f.CreatedAt)
+	return err
+}
+
+func (p *Postgres) facts(ctx context.Context, q string, args ...any) ([]model.Fact, error) {
+	rows, err := p.db.Query(ctx, `select body from mind_facts `+q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []model.Fact{}
+	for rows.Next() {
+		var body []byte
+		if err := rows.Scan(&body); err != nil {
+			return nil, err
+		}
+		var f model.Fact
+		if err := json.Unmarshal(body, &f); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) Fact(ctx context.Context, id string) (model.Fact, error) {
+	fs, err := p.facts(ctx, `where id = $1`, id)
+	if err != nil {
+		return model.Fact{}, err
+	}
+	if len(fs) == 0 {
+		return model.Fact{}, model.ErrNotFound
+	}
+	return fs[0], nil
+}
+
+func (p *Postgres) Facts(ctx context.Context, limit int) ([]model.Fact, error) {
+	return p.facts(ctx, `order by created_at desc, id desc limit $1`, limit)
+}
+
+func (p *Postgres) DueFacts(ctx context.Context, now time.Time, limit int) ([]model.Fact, error) {
+	return p.facts(ctx, `where status = 'pending' and next_try <= $1 order by created_at, id limit $2`, now, limit)
+}
+
+func (p *Postgres) PutAlias(ctx context.Context, a model.Alias) error {
+	_, err := p.db.Exec(ctx, `
+		insert into mind_aliases (name, kind, node, seen, at) values ($1, $2, $3, 1, $4)
+		on conflict (name) do update set node = excluded.node, seen = mind_aliases.seen + 1, at = excluded.at,
+		  kind = case when excluded.kind = '' then mind_aliases.kind else excluded.kind end`,
+		a.Name, a.Kind, a.Node, a.At)
+	return err
+}
+
+func (p *Postgres) Aliases(ctx context.Context) ([]model.Alias, error) {
+	rows, err := p.db.Query(ctx, `select name, kind, node, seen, at from mind_aliases order by name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []model.Alias{}
+	for rows.Next() {
+		var a model.Alias
+		if err := rows.Scan(&a.Name, &a.Kind, &a.Node, &a.Seen, &a.At); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
 }
 
 func (p *Postgres) seal(plain []byte) ([]byte, bool, error) {

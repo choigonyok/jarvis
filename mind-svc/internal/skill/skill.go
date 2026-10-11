@@ -33,6 +33,10 @@ type View interface {
 	IntentsFor(ctx context.Context, entityID string) ([]model.Intent, error)
 	Now() time.Time
 	Loc() *time.Location
+	// Recall is a few things long-term memory holds about these people -
+	// "지수: 매운 음식을 못 먹음" - to put in front of the operator when it
+	// helps. Empty when memory has nothing or is not there.
+	Recall(ctx context.Context, people []string) []string
 }
 
 type Result struct {

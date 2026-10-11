@@ -27,6 +27,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/gate"
 	"github.com/choigonyok/jarvis/mind-svc/internal/interpret"
 	"github.com/choigonyok/jarvis/mind-svc/internal/llm"
+	"github.com/choigonyok/jarvis/mind-svc/internal/memory"
 	"github.com/choigonyok/jarvis/mind-svc/internal/mind"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
@@ -75,6 +76,19 @@ type Expect struct {
 	NoActions     bool     `json:"noActions,omitempty"` // no action intents raised this turn
 	Calendar      []Match  `json:"calendar,omitempty"`
 	CalendarCount *int     `json:"calendarCount,omitempty"`
+	// Facts for long-term memory, as the ledger holds them.
+	Facts     []FactMatch `json:"facts,omitempty"`     // each must match some fact
+	NoFacts   bool        `json:"noFacts,omitempty"`   // none at all
+	NoFactHas []string    `json:"noFactHas,omitempty"` // no fact's text has any of these
+}
+
+// FactMatch is a partial description of a fact; empty fields match anything.
+// TextHasAny is several words for the same thing, since the model words a
+// fact its own way: one of them must be in the text.
+type FactMatch struct {
+	Subject    string   `json:"subject,omitempty"` // "나" for the operator
+	ObjectHas  string   `json:"objectHas,omitempty"`
+	TextHasAny []string `json:"textHasAny,omitempty"`
 }
 
 // Match is a partial description; empty fields match anything.
@@ -172,7 +186,7 @@ func Run(ctx context.Context, sc Scenario, client llm.Client, loc *time.Location
 	m := mind.New(mind.Options{
 		Store: st, Log: log, LLM: client, Calendar: cal, Notifier: &act.MemoryNotifier{},
 		Loc: loc, Now: clk.Now, Logger: quiet, Interpret: interpret.Config{Owner: "나"},
-		Settle: 0, Policy: gate.DefaultPolicy(), Mode: "eval",
+		Settle: 0, Policy: gate.DefaultPolicy(), Mode: "eval", Memory: memory.NewFake(clk.Now),
 	})
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -182,6 +196,7 @@ func Run(ctx context.Context, sc Scenario, client llm.Client, loc *time.Location
 			log.Drain()
 			m.Attn.Settle(ctx)
 		}
+		_, _ = m.Remember.Flush(ctx)
 	}
 	room := "sim:" + sc.Room
 
@@ -314,6 +329,22 @@ func check(ctx context.Context, st store.Store, cal *act.MemoryCalendar, ex Expe
 	if ex.CalendarCount != nil && len(cal.All()) != *ex.CalendarCount {
 		out = append(out, fmt.Sprintf("캘린더 일정 %d개여야 하는데 %d개", *ex.CalendarCount, len(cal.All())))
 	}
+	facts, _ := st.Facts(ctx, 1000)
+	for _, want := range ex.Facts {
+		if !slices.ContainsFunc(facts, func(f model.Fact) bool { return factMatches(f, want) }) {
+			out = append(out, "이런 사실이 없음: "+descFact(want)+" · 지금: "+factSummary(facts))
+		}
+	}
+	if ex.NoFacts && len(facts) > 0 {
+		out = append(out, "기억할 사실이 없어야 함: "+factSummary(facts))
+	}
+	for _, word := range ex.NoFactHas {
+		for _, f := range facts {
+			if strings.Contains(f.Text, word) {
+				out = append(out, fmt.Sprintf("%q 가 든 사실이 없어야 함: %s", word, f.Text))
+			}
+		}
+	}
 	for _, want := range ex.Calendar {
 		found := false
 		for _, e := range cal.All() {
@@ -358,6 +389,35 @@ func matches(e model.Entity, m Match) bool {
 		return false
 	}
 	return true
+}
+
+func factMatches(f model.Fact, m FactMatch) bool {
+	if m.Subject != "" && f.Subject.Name != m.Subject && f.Object.Name != m.Subject {
+		return false
+	}
+	if m.ObjectHas != "" && !strings.Contains(f.Object.Name+" "+f.Subject.Name, m.ObjectHas) {
+		return false
+	}
+	if len(m.TextHasAny) > 0 && !slices.ContainsFunc(m.TextHasAny, func(w string) bool { return strings.Contains(f.Text, w) }) {
+		return false
+	}
+	return true
+}
+
+func descFact(m FactMatch) string {
+	b, _ := json.Marshal(m)
+	return string(b)
+}
+
+func factSummary(fs []model.Fact) string {
+	if len(fs) == 0 {
+		return "없음"
+	}
+	var parts []string
+	for _, f := range fs {
+		parts = append(parts, fmt.Sprintf("[%s -%s-> %s: %s]", f.Subject.Name, f.Relation, f.Object.Name, f.Text))
+	}
+	return strings.Join(parts, " ")
 }
 
 func desc(m Match) string {

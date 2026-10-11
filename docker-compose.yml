@@ -787,6 +787,14 @@ services:
       MIND_CONTENT_KEY: ${MIND_CONTENT_KEY:-}
       MIND_OWNER_NAME: ${MEMORY_OWNER_NAME:-}
       MIND_UI_OPEN: "true"
+      # 장기 기억: 확인한 사실을 memory-svc(/facts)로 보내고 해석할 때 꺼내 읽는다.
+      MIND_MEMORY_URL: http://memory:8100
+      # 운영자와 jarvis 의 대화도 대화방 하나로 읽는다.
+      CHAT_URL: http://chat:8094
+      # 확정된 일정을 memory.plan 으로 알린다 - 에이전트의 제안 엔진이 캘린더 카드로.
+      MIND_PLAN_EVENTS: "true"
+      # 스킬·관문의 알림은 콘솔에만(관문을 하나로 합치기 전까지).
+      MIND_QUIET: ${MIND_QUIET:-true}
     ports:
       - "127.0.0.1:${JARVIS_MIND_PORT:-8102}:8102"
     depends_on:
