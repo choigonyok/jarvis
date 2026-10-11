@@ -691,6 +691,8 @@ services:
       CHAT_URL: http://chat:8094
       WORKOUT_URL: http://workout:8091
       AGENT_URL: http://agent:8080
+      MIND_URL: http://mind:8102
+      MEMORY_URL: http://memory:8100
       BROWSER_ADDR: browser:8931
       # 쿠팡·네이버페이 주문목록이 열리는지는 에이전트 브라우저 새 탭에서 직접
       # 열어 보고 판단한다(30분마다). 쿠키가 남아 있어도 로그아웃일 수 있었다.
