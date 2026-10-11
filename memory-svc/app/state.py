@@ -7,6 +7,8 @@ from datetime import date
 
 import psycopg
 
+from .voyage import FREE_TOKENS, free_tokens, price
+
 # Claude Haiku 5.5, prompts up to 100K tokens: $0.10 / $0.50 per MTok.
 USD_PER_INPUT = 0.10 / 1_000_000
 USD_PER_OUTPUT = 0.50 / 1_000_000
@@ -75,6 +77,71 @@ class State:
                  output_tokens = memory_usage.output_tokens + excluded.output_tokens, calls = memory_usage.calls + 1""",
             (input_tokens, output_tokens),
         )
+
+    async def add_voyage_usage(self, model: str, tokens: int):
+        await self.conn.execute(
+            """insert into voyage_usage (day, model, tokens, calls) values (current_date, %s, %s, 1)
+               on conflict (day, model) do update set tokens = voyage_usage.tokens + excluded.tokens,
+                 calls = voyage_usage.calls + 1""",
+            (model, tokens),
+        )
+
+    async def voyage_usage(self) -> dict:
+        """What the Voyage key has cost at list price - today, this month, the
+        last week - and how far into its free tokens the most used model is.
+        Atlas bills only past a model's free tokens, so `billedUsd` is this
+        month's tokens beyond them, counting every day since the first."""
+        rows = await (
+            await self.conn.execute(
+                """select day, model, tokens, calls, day = current_date, day >= date_trunc('month', current_date),
+                          day > current_date - 7
+                   from voyage_usage order by day, model"""
+            )
+        ).fetchall()
+        used: dict[str, int] = {}
+        today = {"usd": 0.0, "tokens": 0}
+        month = {"usd": 0.0, "tokens": 0, "calls": 0}
+        models: dict[str, dict] = {}
+        days: dict[str, dict] = {}
+        billed = 0.0
+        for day, model, tokens, calls, is_today, in_month, in_week in rows:
+            usd = tokens * price(model)
+            before = used.get(model, 0)
+            used[model] = before + tokens
+            beyond = max(0, used[model] - max(before, free_tokens(model)))
+            if is_today:
+                today["usd"] += usd
+                today["tokens"] += tokens
+            if in_month:
+                month["usd"] += usd
+                month["tokens"] += tokens
+                month["calls"] += calls
+                billed += beyond * price(model)
+                m = models.setdefault(model, {"model": model, "tokens": 0, "usd": 0.0})
+                m["tokens"] += tokens
+                m["usd"] += usd
+            if in_week:
+                key = day.isoformat()
+                d = days.setdefault(key, {"day": key, "usd": 0.0, "tokens": 0, "calls": 0})
+                d["usd"] += usd
+                d["tokens"] += tokens
+                d["calls"] += calls
+        # The gauge follows models that have free tokens; one without them is
+        # billed from its first token and shows up in billedUsd instead.
+        top = max((m for m in used if free_tokens(m)), key=lambda m: used[m], default=None)
+        return {
+            "todayUsd": round(today["usd"], 6),
+            "todayTokens": today["tokens"],
+            "month": {**month, "usd": round(month["usd"], 6)},
+            "billedUsd": round(billed, 6),
+            "free": {
+                "model": top,
+                "tokens": FREE_TOKENS,
+                "usedPct": 0.0 if top is None else min(100.0, round(100 * used[top] / FREE_TOKENS, 4)),
+            },
+            "models": sorted(({**m, "usd": round(m["usd"], 6)} for m in models.values()), key=lambda m: -m["tokens"]),
+            "days": [{**d, "usd": round(d["usd"], 6)} for d in days.values()],
+        }
 
     async def spent_today(self) -> float:
         row = await (

@@ -13,6 +13,20 @@ export type ApiUsage = {
   todayUsd: number;
   month: { usd: number; calls: number };
   days: { day: string; usd: number; calls: number; inputTokens: number; outputTokens: number }[];
+  voyage?: VoyageUsage;
+};
+/** The search-side Voyage key (MongoDB Atlas). Atlas has no API for a key's
+ *  use, so memory-svc counts the tokens each response reports. Dollars are list
+ *  price; each model's first 200M tokens are free and only `billedUsd` is owed. */
+export type VoyageUsage = {
+  enabled: boolean;
+  todayUsd: number;
+  todayTokens: number;
+  month: { usd: number; tokens: number; calls: number };
+  billedUsd: number;
+  free: { model: string | null; tokens: number; usedPct: number };
+  models: { model: string; tokens: number; usd: number }[];
+  days: { day: string; usd: number; tokens: number; calls: number }[];
 };
 export type Usage = {
   fiveHour?: UsageWindow;
@@ -22,12 +36,28 @@ export type Usage = {
   api?: ApiUsage;
 };
 
-/** "$0.0123" under a dollar, "$1.23" above. */
-export const usd = (v: number) => `$${v < 1 ? v.toFixed(v < 0.01 ? 4 : 3) : v.toFixed(2)}`;
+/** "$0" for nothing, "$0.0123" under a dollar, "$1.23" above. */
+export const usd = (v: number) => (v === 0 ? "$0" : `$${v < 1 ? v.toFixed(v < 0.01 ? 4 : 3) : v.toFixed(2)}`);
 
 /** Today's spend against the daily cap, as a percent. */
 export const capPct = (a?: ApiUsage) =>
   a && a.dailyUsd > 0 ? Math.min(100, Math.round((a.todayUsd / a.dailyUsd) * 100)) : null;
+
+/** How much of its free tokens the most used Voyage model has spent, as the
+ *  bar's percent: billing starts when it fills. */
+export const freePct = (v?: VoyageUsage) => (v ? Math.round(Math.min(100, v.free.usedPct)) : null);
+
+/** "0.01% 미만", "0.25%", "37%". */
+export const freeLabel = (v: VoyageUsage) => {
+  const p = v.free.usedPct;
+  if (p === 0) return "0%";
+  if (p < 0.01) return "0.01% 미만";
+  return p < 1 ? `${p.toFixed(2)}%` : `${Math.round(p)}%`;
+};
+
+/** "3,400", "1.2만", "2억" - token counts in the reader's units. */
+export const tokens = (n: number) =>
+  n < 10_000 ? n.toLocaleString("ko-KR") : new Intl.NumberFormat("ko-KR", { notation: "compact", maximumFractionDigits: 1 }).format(n);
 
 // One fetch shared by every component on the page (the header bars and the
 // 상태 tab both read it), refreshed once a minute.

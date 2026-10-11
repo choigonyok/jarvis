@@ -633,6 +633,9 @@ services:
       MEMORY_BACKFILL_DAYS: ${MEMORY_BACKFILL_DAYS:-30}
       MEMORY_INTERVAL: ${MEMORY_INTERVAL:-300}
       IMMICH_API_KEY: ${IMMICH_API_KEY:-}
+      # 검색용 Voyage 키(MongoDB Atlas 에서 만든 al-… 는 ai.mongodb.com 으로 간다).
+      # 쓴 토큰을 세어 헤더·상태 탭에 금액으로 보인다.
+      VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
       EVENTS_URL: http://events:8101
     expose:
       - "8100"

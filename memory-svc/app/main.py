@@ -28,6 +28,7 @@ TOKEN = os.environ.get("API_TOKEN", "")
 INTERVAL = int(os.environ.get("MEMORY_INTERVAL", "300"))
 DAILY_USD = float(os.environ.get("MEMORY_DAILY_USD", "1.0"))
 HAS_KEY = bool(os.environ.get("ANTHROPIC_API_KEY"))
+VOYAGE_KEY = bool(os.environ.get("VOYAGE_API_KEY"))
 EVENTS_URL = os.environ.get("EVENTS_URL", "")
 
 state = State()
@@ -154,6 +155,9 @@ async def search(q: str = Query(min_length=1), group: str = Query(pattern="^(own
 async def status():
     s = await state.status()
     s.update({"running": running["now"], "llm": HAS_KEY, "model": MODEL, "dailyUsd": DAILY_USD, "spentToday": round(await state.spent_today(), 4)})
+    # The search-side key: shown once there is a key or anything it has used.
+    voyage = await state.voyage_usage()
+    s["voyage"] = {**voyage, "enabled": VOYAGE_KEY} if VOYAGE_KEY or voyage["month"]["calls"] else None
     return s
 
 

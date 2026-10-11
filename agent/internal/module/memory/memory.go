@@ -211,6 +211,9 @@ type APIUsage struct {
 		InputTokens  int     `json:"inputTokens"`
 		OutputTokens int     `json:"outputTokens"`
 	} `json:"days"`
+	// Voyage is the search-side key (embeddings, reranking) as memory-svc
+	// counts it, passed through as is; absent while there is no key.
+	Voyage json.RawMessage `json:"voyage,omitempty"`
 }
 
 func (s *Store) APIUsage(ctx context.Context) (*APIUsage, error) {
@@ -240,12 +243,16 @@ func (s *Store) APIUsage(ctx context.Context) (*APIUsage, error) {
 			USD   float64 `json:"usd"`
 			Calls int     `json:"calls"`
 		} `json:"month"`
-		Usage json.RawMessage `json:"usage"`
+		Usage  json.RawMessage `json:"usage"`
+		Voyage json.RawMessage `json:"voyage"`
 	}
 	if err := json.NewDecoder(res.Body).Decode(&st); err != nil {
 		return nil, err
 	}
 	u := &APIUsage{Model: st.Model, Enabled: st.LLM, DailyUSD: st.DailyUSD, TodayUSD: st.SpentToday}
+	if len(st.Voyage) > 0 && string(st.Voyage) != "null" {
+		u.Voyage = st.Voyage
+	}
 	u.Month.USD, u.Month.Calls = st.Month.USD, st.Month.Calls
 	if len(st.Usage) > 0 {
 		_ = json.Unmarshal(st.Usage, &u.Days)
