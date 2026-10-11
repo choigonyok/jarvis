@@ -1,0 +1,26 @@
+{
+  "name": "바뀐 사실은 앞의 사실을 끝냄",
+  "room": "jisu5",
+  "roomName": "지수",
+  "turns": [
+    {
+      "messages": [
+        { "at": "2026-10-12T19:10", "from": "지수", "text": "나 요즘 위염 때문에 매운 거 아예 못 먹어 ㅠ" }
+      ],
+      "script": {"changes":[
+        {"op":"remember","kind":"fact","set":{"subject":"지수","subjectKind":"Person","relation":"CANNOT_EAT","object":"매운 음식","objectKind":"Thing","text":"지수는 요즘 매운 음식을 아예 못 먹는다"},"evidence":[{"line":1,"quote":"매운 거 아예 못 먹어"}],"confidence":0.9},
+        {"op":"remember","kind":"fact","set":{"subject":"지수","subjectKind":"Person","relation":"HAS_HEALTH_ISSUE","object":"위염","objectKind":"Thing","text":"지수는 위염이 있다"},"evidence":[{"line":1,"quote":"위염 때문에"}],"confidence":0.85}
+      ]},
+      "expect": { "facts": [{ "subject": "지수", "textHasAny": ["매운"] }] }
+    },
+    {
+      "messages": [
+        { "at": "2026-10-20T20:00", "from": "지수", "text": "약 먹고 나서 요즘은 매운 것도 조금씩은 먹어" }
+      ],
+      "script": {"changes":[
+        {"op":"remember","kind":"fact","set":{"subject":"지수","subjectKind":"Person","relation":"EATS","object":"매운 음식","objectKind":"Thing","text":"지수는 약을 먹은 뒤로 매운 음식을 조금씩 먹는다"},"evidence":[{"line":1,"quote":"매운 것도 조금씩은 먹어"}],"confidence":0.9,"ends":["M1"]}
+      ]},
+      "expect": { "ended": ["못 먹"], "noFactsLike": [{ "subject": "나" }] }
+    }
+  ]
+}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -172,14 +173,14 @@ func TestFactsGoToTheLedger(t *testing.T) {
 // conversation.
 func TestRecallIsShown(t *testing.T) {
 	c, st, script := setup(t, `{"changes":[]}`)
-	c.cfg.Recall = func(context.Context, string, string, []model.Message) []string {
-		return []string{"지수는 매운 음식을 못 먹는다"}
+	c.cfg.Recall = func(context.Context, string, string, []model.Message) []Memory {
+		return []Memory{{ID: "e1", Fact: "지수는 매운 음식을 못 먹는다"}}
 	}
 	say(t, st, "sim:1", "저녁 뭐 먹지", false, time.Date(2026, 10, 12, 20, 1, 0, 0, seoul))
 	if err := c.Read(context.Background(), "r"); err != nil {
 		t.Fatal(err)
 	}
-	if script.Calls() != 1 || !strings.Contains(script.Prompts[0], "## 이미 기억하는 것") || !strings.Contains(script.Prompts[0], "매운 음식") {
+	if script.Calls() != 1 || !strings.Contains(script.Prompts[0], "## 이미 기억하는 것") || !strings.Contains(script.Prompts[0], "M1 지수는 매운 음식을 못 먹는다") {
 		t.Fatalf("기억이 프롬프트에 있어야 합니다: %v", script.Prompts)
 	}
 }
@@ -221,5 +222,49 @@ func TestBusyRoomIsReadWithoutQuiet(t *testing.T) {
 	}
 	if !c.Pending()["busy"].Equal(c.now()) {
 		t.Fatal("한 번에 읽을 만큼 쌓이면 조용해지기를 기다리지 않아야 합니다")
+	}
+}
+
+// "나" in someone else's message is them: a fact about the operator has to
+// rest on something the operator said, and one that does not is dropped.
+func TestOperatorFactsNeedTheOperatorsWords(t *testing.T) {
+	ctx := context.Background()
+	c, st, _ := setup(t, `{"changes":[
+		{"op":"remember","kind":"fact","set":{"subject":"나","relation":"CANNOT_EAT","object":"고수","text":"나는 고수를 못 먹는다"},"evidence":[{"line":1,"quote":"나 고수 진짜 못 먹어"}],"confidence":0.9},
+		{"op":"remember","kind":"fact","set":{"subject":"민수","subjectKind":"Person","relation":"CANNOT_EAT","object":"고수","text":"민수는 고수를 못 먹는다"},"evidence":[{"line":1,"quote":"나 고수 진짜 못 먹어"}],"confidence":0.9},
+		{"op":"remember","kind":"fact","set":{"subject":"나","relation":"LIKES","object":"고수","text":"나는 고수를 잘 먹는다"},"evidence":[{"line":2,"quote":"난 잘 먹는데"}],"confidence":0.9}
+	]}`)
+	say(t, st, "sim:1", "나 고수 진짜 못 먹어", false, time.Date(2026, 10, 12, 20, 1, 0, 0, seoul))
+	say(t, st, "sim:2", "난 잘 먹는데", true, time.Date(2026, 10, 12, 20, 2, 0, 0, seoul))
+	if err := c.Read(ctx, "r"); err != nil {
+		t.Fatal(err)
+	}
+	fs, _ := st.Facts(ctx, 10)
+	var texts []string
+	for _, f := range fs {
+		texts = append(texts, f.Text)
+	}
+	if len(fs) != 2 || slices.Contains(texts, "나는 고수를 못 먹는다") {
+		t.Fatalf("남의 말로 나를 적으면 안 됩니다: %v", texts)
+	}
+}
+
+// A changed fact names what it ends by the M ref it was shown, and the ledger
+// keeps memory's id for it.
+func TestFactEndsWhatItReplaces(t *testing.T) {
+	ctx := context.Background()
+	c, st, _ := setup(t, `{"changes":[
+		{"op":"remember","kind":"fact","set":{"subject":"지수","relation":"EATS","object":"매운 음식","text":"지수는 요즘 매운 음식도 조금 먹는다"},"evidence":[{"line":1,"quote":"매운 것도 조금씩은 먹어"}],"confidence":0.9,"ends":["M2","M9"]}
+	]}`)
+	c.cfg.Recall = func(context.Context, string, string, []model.Message) []Memory {
+		return []Memory{{ID: "e1", Fact: "지수는 서울에 산다"}, {ID: "e2", Fact: "지수는 매운 음식을 못 먹는다"}}
+	}
+	say(t, st, "sim:1", "요즘은 매운 것도 조금씩은 먹어", false, time.Date(2026, 10, 12, 20, 1, 0, 0, seoul))
+	if err := c.Read(ctx, "r"); err != nil {
+		t.Fatal(err)
+	}
+	fs, _ := st.Facts(ctx, 10)
+	if len(fs) != 1 || len(fs[0].Ends) != 1 || fs[0].Ends[0].ID != "e2" {
+		t.Fatalf("M2 만, 기억의 id 로: %+v", fs)
 	}
 }

@@ -77,9 +77,13 @@ type Expect struct {
 	Calendar      []Match  `json:"calendar,omitempty"`
 	CalendarCount *int     `json:"calendarCount,omitempty"`
 	// Facts for long-term memory, as the ledger holds them.
-	Facts     []FactMatch `json:"facts,omitempty"`     // each must match some fact
-	NoFacts   bool        `json:"noFacts,omitempty"`   // none at all
-	NoFactHas []string    `json:"noFactHas,omitempty"` // no fact's text has any of these
+	Facts       []FactMatch `json:"facts,omitempty"`       // each must match some fact
+	NoFacts     bool        `json:"noFacts,omitempty"`     // none at all
+	NoFactHas   []string    `json:"noFactHas,omitempty"`   // no fact's text has any of these
+	NoFactsLike []FactMatch `json:"noFactsLike,omitempty"` // no fact may match any of these
+	// Ended: for each word, memory has ended a fact with it in, as a result
+	// of a fact mind sent.
+	Ended []string `json:"ended,omitempty"`
 }
 
 // FactMatch is a partial description of a fact; empty fields match anything.
@@ -338,6 +342,29 @@ func check(ctx context.Context, st store.Store, cal *act.MemoryCalendar, ex Expe
 	if ex.NoFacts && len(facts) > 0 {
 		out = append(out, "기억할 사실이 없어야 함: "+factSummary(facts))
 	}
+	for _, not := range ex.NoFactsLike {
+		for _, f := range facts {
+			if factMatches(f, not) {
+				out = append(out, "있으면 안 되는 사실이 있음: "+descFact(not)+" · "+f.Text)
+			}
+		}
+	}
+	for _, word := range ex.Ended {
+		found := false
+		for _, f := range facts {
+			for _, e := range (func() []model.Ended {
+				if f.Memory == nil {
+					return nil
+				}
+				return f.Memory.Ended
+			})() {
+				found = found || strings.Contains(e.Fact, word)
+			}
+		}
+		if !found {
+			out = append(out, fmt.Sprintf("%q 가 든 사실을 기억이 끝냈어야 함 · 지금: %s", word, factSummary(facts)))
+		}
+	}
 	for _, word := range ex.NoFactHas {
 		for _, f := range facts {
 			if strings.Contains(f.Text, word) {
@@ -392,7 +419,7 @@ func matches(e model.Entity, m Match) bool {
 }
 
 func factMatches(f model.Fact, m FactMatch) bool {
-	if m.Subject != "" && f.Subject.Name != m.Subject && f.Object.Name != m.Subject {
+	if m.Subject != "" && f.Subject.Name != m.Subject {
 		return false
 	}
 	if m.ObjectHas != "" && !strings.Contains(f.Object.Name+" "+f.Subject.Name, m.ObjectHas) {

@@ -1,0 +1,23 @@
+{
+  "name": "단톡에서 남이 한 '나'는 그 사람",
+  "room": "uni",
+  "roomName": "대학 동기 단톡",
+  "turns": [
+    {
+      "messages": [
+        { "at": "2026-10-12T21:00", "from": "민수", "text": "나 고수 진짜 못 먹어 냄새만 맡아도 힘듦" },
+        { "at": "2026-10-12T21:01", "from": "하은", "text": "ㅋㅋ 나도 고수는 별로" },
+        { "at": "2026-10-12T21:02", "me": true, "text": "난 고수 잘 먹는데" }
+      ],
+      "script": {"changes":[
+        {"op":"remember","kind":"fact","set":{"subject":"민수","subjectKind":"Person","relation":"CANNOT_EAT","object":"고수","objectKind":"Thing","text":"민수는 고수를 못 먹는다"},"evidence":[{"line":1,"quote":"나 고수 진짜 못 먹어"}],"confidence":0.9},
+        {"op":"remember","kind":"fact","set":{"subject":"하은","subjectKind":"Person","relation":"DISLIKES","object":"고수","objectKind":"Thing","text":"하은은 고수를 좋아하지 않는다"},"evidence":[{"line":2,"quote":"나도 고수는 별로"}],"confidence":0.8},
+        {"op":"remember","kind":"fact","set":{"subject":"나","relation":"LIKES","object":"고수","objectKind":"Thing","text":"나는 고수를 잘 먹는다"},"evidence":[{"line":3,"quote":"난 고수 잘 먹는데"}],"confidence":0.85}
+      ]},
+      "expect": {
+        "facts": [{ "subject": "민수", "textHasAny": ["고수"] }],
+        "noFactsLike": [{ "subject": "나", "textHasAny": ["못 먹", "별로", "좋아하지 않"] }]
+      }
+    }
+  ]
+}

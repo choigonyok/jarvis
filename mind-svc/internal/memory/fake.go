@@ -72,9 +72,17 @@ func (f *Fake) Put(_ context.Context, facts []model.Fact) ([]Result, error) {
 		if at == "" {
 			at = f.now().Format("2006-01-02")
 		}
+		named := map[string]bool{}
+		for _, e := range in.Ends {
+			named[e.ID] = true
+		}
 		for i := range f.facts {
 			x := &f.facts[i]
-			if !x.Ended() && x.Source.ID == r.Source.ID && x.Target.ID == r.Target.ID && x.Relation == in.Relation {
+			same := x.Source.ID == r.Source.ID && x.Target.ID == r.Target.ID && x.Relation == in.Relation
+			// What mind names as ended goes, as memory-svc does: the same
+			// subject, or the same two the other way round.
+			about := x.Source.ID == r.Source.ID || (x.Source.ID == r.Target.ID && x.Target.ID == r.Source.ID)
+			if !x.Ended() && (same || named[x.ID] && about) {
 				x.InvalidAt = at
 				r.Ended = append(r.Ended, model.Ended{ID: x.ID, Fact: x.Fact, InvalidAt: at})
 			}

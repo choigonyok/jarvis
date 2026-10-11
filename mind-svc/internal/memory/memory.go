@@ -119,19 +119,24 @@ func partyOf(p model.Party) party {
 
 func (c *HTTP) Put(ctx context.Context, facts []model.Fact) ([]Result, error) {
 	type in struct {
-		Ref      string `json:"ref"`
-		Source   party  `json:"source"`
-		Target   party  `json:"target"`
-		Relation string `json:"relation"`
-		Fact     string `json:"fact"`
-		ValidAt  string `json:"validAt,omitempty"`
+		Ref      string   `json:"ref"`
+		Source   party    `json:"source"`
+		Target   party    `json:"target"`
+		Relation string   `json:"relation"`
+		Fact     string   `json:"fact"`
+		ValidAt  string   `json:"validAt,omitempty"`
+		Ends     []string `json:"ends,omitempty"`
 	}
 	body := struct {
 		Group string `json:"group"`
 		Facts []in   `json:"facts"`
 	}{Group: c.Group}
 	for _, f := range facts {
-		body.Facts = append(body.Facts, in{f.ID, partyOf(f.Subject), partyOf(f.Object), f.Relation, f.Text, f.ValidAt})
+		var ends []string
+		for _, e := range f.Ends {
+			ends = append(ends, e.ID)
+		}
+		body.Facts = append(body.Facts, in{f.ID, partyOf(f.Subject), partyOf(f.Object), f.Relation, f.Text, f.ValidAt, ends})
 	}
 	var out struct {
 		Results []Result `json:"results"`

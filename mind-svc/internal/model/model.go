@@ -212,6 +212,9 @@ type Fact struct {
 	Evidence   []Evidence `json:"evidence"`
 	Confidence float64    `json:"confidence"`
 	Why        string     `json:"why,omitempty"`
+	// Ends is what memory already held that this fact, by the same words,
+	// says is no longer so ("요즘은 매운 것도 먹어" ends "매운 걸 못 먹는다").
+	Ends []Ended `json:"ends,omitempty"`
 
 	Status  string    `json:"status"` // pending | stored | duplicate | failed
 	Tries   int       `json:"tries"`

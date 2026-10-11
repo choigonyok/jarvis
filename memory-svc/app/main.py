@@ -215,6 +215,8 @@ class FactIn(BaseModel):
     fact: str = Field(min_length=1, max_length=1000)
     validAt: str | None = None
     invalidAt: str | None = None
+    # Facts mind read as no longer so by this one's words, by edge id.
+    ends: list[str] = Field(default_factory=list, max_length=20)
 
 
 class FactsIn(BaseModel):

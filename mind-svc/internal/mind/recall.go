@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/choigonyok/jarvis/mind-svc/internal/interpret"
 	"github.com/choigonyok/jarvis/mind-svc/internal/memory"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
@@ -95,8 +96,9 @@ func (m *Mind) nodesOf(ctx context.Context, names []string) ([]string, error) {
 // recallRoom is what memory holds that bears on a stretch of conversation,
 // for the interpreter to read it with: centred on the person the room is
 // named after when memory knows them. Facts memory holds as ended are left
-// out - the interpreter needs what is true now.
-func (m *Mind) recallRoom(ctx context.Context, room, roomName string, fresh []model.Message) []string {
+// out - the interpreter needs what is true now, and names by id the ones a
+// new fact ends.
+func (m *Mind) recallRoom(ctx context.Context, room, roomName string, fresh []model.Message) []interpret.Memory {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	people := []string{roomName}
@@ -123,10 +125,10 @@ func (m *Mind) recallRoom(ctx context.Context, room, roomName string, fresh []mo
 		m.Opts.Logger.Warn("기억을 찾지 못했습니다", "room", room, "err", err)
 		return nil
 	}
-	var out []string
+	var out []interpret.Memory
 	for _, h := range hits {
 		if !h.Ended() {
-			out = append(out, h.Fact)
+			out = append(out, interpret.Memory{ID: h.ID, Fact: h.Fact})
 		}
 	}
 	return out

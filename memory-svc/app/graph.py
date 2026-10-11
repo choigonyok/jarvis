@@ -276,6 +276,7 @@ class Graph:
         )
         async with self.writing:
             resolved, ended, source, target = await self._add_triplet(group, src, edge, dst)
+            ended += await self._end(group, f.get("ends") or [], resolved, source, target)
         # The same retired fact can come back twice.
         ended = list({e.uuid: e for e in ended if e.uuid != resolved.uuid}.values())
         if self.on_fact and resolved.uuid == edge.uuid:
@@ -348,6 +349,26 @@ class Graph:
         await create_entity_node_embeddings(self.embedder, [src, dst])
         await add_nodes_and_edges_bulk(driver, [], [], [src, dst], edges, self.embedder)
         return resolved, ended, src, dst
+
+    async def _end(self, group: str, ids: list[str], new: EntityEdge, source: EntityNode, target: EntityNode) -> list[EntityEdge]:
+        """End the facts mind named: it read them as no longer so, with the
+        words that say it quoted. Graphiti may already have. Only a fact about
+        the same subject, or between the same two, is ended - one that only
+        shares the object ("매운 음식") would be someone else's."""
+        driver, ended = self.drivers[group], []
+        for eid in ids:
+            try:
+                e = await EntityEdge.get_by_uuid(driver, eid)
+            except EdgeNotFoundError:
+                continue
+            nodes = {e.source_node_uuid, e.target_node_uuid}
+            if e.uuid == new.uuid or e.invalid_at is not None or not (source.uuid in nodes and (e.source_node_uuid == source.uuid or target.uuid in nodes)):
+                continue
+            e.invalid_at = new.valid_at or now()
+            e.expired_at = now()
+            await e.save(driver)
+            ended.append(e)
+        return ended
 
     async def communities(self, group: str) -> int:
         """Topics: clusters of related people, places and things, each with an

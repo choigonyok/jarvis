@@ -46,13 +46,20 @@ type Config struct {
 	Noise *regexp.Regexp
 	// Recall is what long-term memory already holds about a room's people,
 	// shown to the model as context (nil: nothing is shown).
-	Recall func(ctx context.Context, room, roomName string, fresh []model.Message) []string
+	Recall func(ctx context.Context, room, roomName string, fresh []model.Message) []Memory
 	// OnFact hears that a fact went into the ledger (to send it soon).
 	OnFact func()
 }
 
 // KindFact is a fact for long-term memory, beside the world model's kinds.
 const KindFact = "fact"
+
+// Memory is one fact long-term memory holds, as shown to the interpreter: by
+// a short ref (M1, M2 …) a new fact can name it as the one it ends.
+type Memory struct {
+	ID   string // memory's edge id
+	Fact string
+}
 
 type Conversation struct {
 	cfg   Config
@@ -219,7 +226,7 @@ func (c *Conversation) Read(ctx context.Context, room string) error {
 		return err
 	}
 
-	var remembered []string
+	var remembered []Memory
 	if c.cfg.Recall != nil {
 		remembered = c.cfg.Recall(ctx, room, name, fresh)
 	}
@@ -235,7 +242,7 @@ func (c *Conversation) Read(ctx context.Context, room string) error {
 	}
 	applied := 0
 	for _, o := range ops {
-		ok, err := c.apply(ctx, room, o, fresh, known)
+		ok, err := c.apply(ctx, room, o, fresh, known, remembered)
 		if err != nil {
 			return err
 		}
@@ -323,6 +330,7 @@ type op struct {
 	Evidence   []cite                     `json:"evidence"`
 	Confidence float64                    `json:"confidence"`
 	Why        string                     `json:"why"`
+	Ends       []string                   `json:"ends"` // a fact: what it ends, by M ref
 }
 
 type cite struct {
@@ -347,7 +355,7 @@ func parse(answer string) ([]op, error) {
 // apply checks a proposed change and writes it. A change it does not
 // believe - no evidence that holds, a ref that names nothing, too unsure -
 // is logged and skipped, not an error.
-func (c *Conversation) apply(ctx context.Context, room string, o op, fresh []model.Message, known []view) (bool, error) {
+func (c *Conversation) apply(ctx context.Context, room string, o op, fresh []model.Message, known []view, remembered []Memory) (bool, error) {
 	skip := func(why string) (bool, error) {
 		c.log.Info("해석 결과를 버립니다", "room", room, "op", o.Op, "ref", o.Ref, "why", why)
 		return false, nil
@@ -361,7 +369,7 @@ func (c *Conversation) apply(ctx context.Context, room string, o op, fresh []mod
 	}
 	kind := o.Kind
 	if kind == KindFact {
-		return c.remember(ctx, room, o, evidence, skip)
+		return c.remember(ctx, room, o, evidence, fresh, remembered, skip)
 	}
 	if kind != model.KindPlan && kind != model.KindLoop {
 		return skip("모르는 종류 " + kind)
@@ -415,7 +423,7 @@ func (c *Conversation) apply(ctx context.Context, room string, o op, fresh []mod
 // remember writes a believed fact to the evidence ledger, pending for
 // memory. The same sentence already written for this room (a room read again
 // after a failure) is not written twice.
-func (c *Conversation) remember(ctx context.Context, room string, o op, evidence []model.Evidence, skip func(string) (bool, error)) (bool, error) {
+func (c *Conversation) remember(ctx context.Context, room string, o op, evidence []model.Evidence, fresh []model.Message, remembered []Memory, skip func(string) (bool, error)) (bool, error) {
 	str := func(k string) string {
 		var v string
 		if raw, ok := o.Set[k]; ok && json.Unmarshal(raw, &v) == nil {
@@ -426,6 +434,18 @@ func (c *Conversation) remember(ctx context.Context, room string, o op, evidence
 	subject, object, relation, text := str("subject"), str("object"), relationName(str("relation")), str("text")
 	if subject == "" || object == "" || relation == "" || text == "" {
 		return skip("사실의 두 끝·관계·문장 중 빠진 것이 있음")
+	}
+	// A fact about the operator rests on something the operator said: another
+	// person's "나 고수 못 먹어" is about them, and reading it as the
+	// operator's is the mistake this catches.
+	if c.party(subject, "").Self {
+		mine := map[string]bool{}
+		for _, m := range fresh {
+			mine[m.Ref] = m.IsMine
+		}
+		if !slices.ContainsFunc(evidence, func(e model.Evidence) bool { return mine[e.Ref] }) {
+			return skip("운영자에 관한 사실인데 운영자가 한 말이 근거가 아님")
+		}
 	}
 	recent, err := c.st.Facts(ctx, 300)
 	if err != nil {
@@ -444,6 +464,12 @@ func (c *Conversation) remember(ctx context.Context, room string, o op, evidence
 	}
 	if v := str("validAt"); dateRE.MatchString(v) {
 		f.ValidAt = v
+	}
+	for _, ref := range o.Ends {
+		var n int
+		if _, err := fmt.Sscanf(strings.TrimSpace(ref), "M%d", &n); err == nil && n >= 1 && n <= len(remembered) {
+			f.Ends = append(f.Ends, model.Ended{ID: remembered[n-1].ID, Fact: remembered[n-1].Fact})
+		}
 	}
 	if err := c.st.PutFact(ctx, f); err != nil {
 		return false, err
