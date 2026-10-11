@@ -641,6 +641,9 @@ services:
       # 보낸다. 여기서는 구조화 데이터와 손님 대화, 6시간 일지, 주간 주제만.
       MEMORY_SOURCES: ${MEMORY_SOURCES:-calendar,spending,assets,workout,jobs,photos,chat,diary,topics}
       MEMORY_CHAT_GROUPS: ${MEMORY_CHAT_GROUPS:-guest}
+      # Graphiti 가 한 번에 부르는 LLM 수. 기본 20 이면 주간 주제 묶음이 API 한도에
+      # 걸려(429) 재시도로 버틴다.
+      SEMAPHORE_LIMIT: "6"
       EVENTS_URL: http://events:8101
     expose:
       - "8100"
