@@ -23,10 +23,10 @@ from . import patches  # noqa: F401 - before Graphiti makes any driver
 from graphiti_core import Graphiti
 from graphiti_core.cross_encoder.client import CrossEncoderClient
 from graphiti_core.driver.falkordb_driver import FalkorDriver
-from graphiti_core.edges import EntityEdge
+from graphiti_core.edges import EntityEdge, create_entity_edge_embeddings
 from graphiti_core.embedder.client import EmbedderClient
-from graphiti_core.errors import NodeNotFoundError
-from graphiti_core.nodes import EntityNode, EpisodeType
+from graphiti_core.errors import EdgeNotFoundError, NodeNotFoundError
+from graphiti_core.nodes import EntityNode, EpisodeType, EpisodicNode, create_entity_node_embeddings
 from graphiti_core.search.search import search as graph_search
 from graphiti_core.search.search_config import (
     EdgeReranker,
@@ -37,7 +37,11 @@ from graphiti_core.search.search_config import (
     NodeSearchMethod,
     SearchConfig,
 )
+from graphiti_core.search.search_config_recipes import EDGE_HYBRID_SEARCH_RRF
 from graphiti_core.search.search_filters import SearchFilters
+from graphiti_core.utils.bulk_utils import add_nodes_and_edges_bulk
+from graphiti_core.utils.maintenance.edge_operations import resolve_extracted_edge
+from graphiti_core.utils.maintenance.node_operations import resolve_extracted_nodes
 
 from .llm import HaikuClient
 from .voyage import Voyage
@@ -148,9 +152,9 @@ class Graph:
         # Graphiti keeps each group in its own FalkorDB graph; direct saves and
         # searches have to go to that graph too, not the driver's default_db.
         self.drivers = {g: driver.clone(database=g) for g in SELF_NAME}
-        # add_episode picks the group's graph per call, but add_triplet writes
-        # through its instance's own driver - so each group gets an instance
-        # bound to its graph.
+        # add_episode picks the group's graph per call; Graphiti's resolving
+        # helpers read through a clients bundle bound to one graph - so each
+        # group gets an instance bound to its graph, for its clients.
         self.groups = {
             g: Graphiti(graph_driver=d, llm_client=self.llm, embedder=self.embedder, cross_encoder=reranker)
             for g, d in self.drivers.items()
@@ -269,11 +273,9 @@ class Graph:
             episodes=[],
         )
         async with self.writing:
-            result = await self.groups[group].add_triplet(src, edge, dst)
-        resolved = result.edges[0]
-        # add_triplet can hand back the same retired fact twice.
-        ended = list({e.uuid: e for e in result.edges[1:] if e.uuid != resolved.uuid}.values())
-        source, target = result.nodes
+            resolved, ended, source, target = await self._add_triplet(group, src, edge, dst)
+        # The same retired fact can come back twice.
+        ended = list({e.uuid: e for e in ended if e.uuid != resolved.uuid}.values())
         if self.on_fact and resolved.uuid == edge.uuid:
             await self.on_fact(group, resolved.fact, resolved.valid_at)
         return {
@@ -286,6 +288,64 @@ class Graph:
             "target": {"id": target.uuid, "name": target.name},
             "ended": [{"id": e.uuid, "fact": e.fact, "invalidAt": kst(e.invalid_at)} for e in ended],
         }
+
+    async def _add_triplet(self, group: str, source: EntityNode, edge: EntityEdge, target: EntityNode):
+        """Graphiti's add_triplet (0.30.2), except that a new fact is weighed
+        only against facts about its own subject, and only ends facts about the
+        same matter. Graphiti's looks for what it contradicts across the whole
+        graph, and "지수는 매운 음식을 못 먹는다" ended "나는 요즘 매운 음식도
+        잘 먹는다" - someone else - because both are about spicy food. A repeat
+        is still looked for between the same two nodes."""
+        driver, clients = self.drivers[group], self.groups[group].clients
+        ends = []
+        for node in (source, target):
+            try:
+                ends.append(await EntityNode.get_by_uuid(driver, node.uuid))
+            except NodeNotFoundError:
+                if node.name_embedding is None:
+                    await node.generate_name_embedding(self.embedder)
+                found, _, _ = await resolve_extracted_nodes(clients, [node])
+                ends.append(found[0])
+        src, dst = ends
+        edge.source_node_uuid, edge.target_node_uuid = src.uuid, dst.uuid
+        try:
+            known = await EntityEdge.get_by_uuid(driver, edge.uuid)
+            if (known.source_node_uuid, known.target_node_uuid) != (src.uuid, dst.uuid):
+                edge.uuid = str(uuid.uuid4())  # an id taken by another pair: a new edge
+        except EdgeNotFoundError:
+            pass
+        if edge.fact_embedding is None:
+            await edge.generate_embedding(self.embedder)
+
+        async def among(edges: list[EntityEdge]) -> list[EntityEdge]:
+            if not edges:
+                return []
+            found = await graph_search(
+                clients, edge.fact, [group], EDGE_HYBRID_SEARCH_RRF,
+                SearchFilters(edge_uuids=[e.uuid for e in edges]), driver=driver,
+            )
+            return found.edges
+
+        repeats = await among(await EntityEdge.get_between_nodes(driver, src.uuid, dst.uuid))
+        about = await among(await EntityEdge.get_by_node_uuid(driver, src.uuid))
+        episode = EpisodicNode(
+            name="", source=EpisodeType.text, source_description="", content="",
+            valid_at=edge.valid_at or now(), entity_edges=[], group_id=group,
+        )
+        resolved, ended, _ = await resolve_extracted_edge(self.llm, edge, repeats, about, episode, None)
+        # Ended only if it is about the same thing (the same far node) or the
+        # same kind of fact (the same relation): a fact the model called a
+        # contradiction otherwise is left as it was - a true fact wrongly
+        # ended is lost, two facts side by side are not.
+        def same_matter(e: EntityEdge) -> bool:
+            other = e.target_node_uuid if e.source_node_uuid == src.uuid else e.source_node_uuid
+            return other == dst.uuid or e.name == edge.name
+        ended = [e for e in ended if same_matter(e)]
+        edges = [resolved] + ended
+        await create_entity_edge_embeddings(self.embedder, edges)
+        await create_entity_node_embeddings(self.embedder, [src, dst])
+        await add_nodes_and_edges_bulk(driver, [], [], [src, dst], edges, self.embedder)
+        return resolved, ended, src, dst
 
     async def communities(self, group: str) -> int:
         """Topics: clusters of related people, places and things, each with an

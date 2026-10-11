@@ -637,8 +637,10 @@ services:
       # 검색용 Voyage 키(MongoDB Atlas 에서 만든 al-… 는 ai.mongodb.com 으로 간다).
       # 쓴 토큰을 세어 헤더·상태 탭에 금액으로 보인다.
       VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
-      # 비우면 전부. mind 가 대화를 읽기 시작하면 chat·kakao·imessage 를 뺀다.
+      # 비우면 전부. mind 가 대화를 읽기 시작하면 kakao·imessage 를 빼고,
+      # jarvis 대화는 손님 것만 남긴다(MEMORY_CHAT_GROUPS=guest).
       MEMORY_SOURCES: ${MEMORY_SOURCES:-}
+      MEMORY_CHAT_GROUPS: ${MEMORY_CHAT_GROUPS:-owner,guest}
       EVENTS_URL: http://events:8101
     expose:
       - "8100"
