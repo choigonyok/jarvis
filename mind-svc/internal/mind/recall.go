@@ -156,6 +156,25 @@ func (m *Mind) recallPeople(ctx context.Context, people []string) []string {
 	return out
 }
 
+// roomLabel is how a room reads in a card: "카카오톡 '지수' 대화".
+func (m *Mind) roomLabel(ctx context.Context, room string) string {
+	rooms, err := m.Opts.Store.Rooms(ctx)
+	if err != nil {
+		return "대화"
+	}
+	for _, r := range rooms {
+		if r.Room != room {
+			continue
+		}
+		app := map[string]string{"kakao": "카카오톡", "imessage": "iMessage", "chat": "jarvis", "sim": "시뮬레이터"}[r.Source]
+		if app == "" {
+			app = r.Source
+		}
+		return fmt.Sprintf("%s '%s' 대화", app, r.Name)
+	}
+	return "대화"
+}
+
 // announcePlan tells the log about a plan that became confirmed, or a
 // confirmed one that moved, as a memory.plan event - the agent's suggestion
 // engine reads those and offers the calendar card. The key changes only with
@@ -179,11 +198,11 @@ func (m *Mind) announcePlan(e model.Entity, c model.Change) {
 	if t, _, ok := skill.When(s, m.Opts.Loc); ok {
 		valid = t.Format(time.RFC3339)
 	}
-	data, _ := json.Marshal(map[string]string{"fact": fact + " (확정)", "validAt": valid, "source": "mind " + e.Room})
 	key := fmt.Sprintf("memory.plan:mind:%s:%s:%s:%s", e.ID, s.Date, s.Start, s.Place)
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
+		data, _ := json.Marshal(map[string]string{"fact": fact + " (확정)", "validAt": valid, "source": m.roomLabel(ctx, e.Room)})
 		if err := m.Opts.Log.Append(ctx, obs.Observation{
 			Source: "mind", Type: "memory.plan", Subject: e.ID, Data: data, Key: key, OccurredAt: m.Opts.Now(),
 		}); err != nil {
