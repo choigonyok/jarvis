@@ -826,3 +826,37 @@ func (p *Postgres) OpenExpectations(ctx context.Context, key string) ([]model.Ex
 func (p *Postgres) Expectations(ctx context.Context, predictionID string) ([]model.Expectation, error) {
 	return scanBodies[model.Expectation](ctx, p, `select body from mind_expectations where prediction_id = $1 order by match_key`, predictionID)
 }
+
+func (p *Postgres) AddReplySituation(ctx context.Context, r model.ReplySituation) error {
+	_, err := p.db.Exec(ctx, `insert into mind_reply_examples (kind, room, in_ref, out_ref, gap_days, at) values ($1, $2, $3, $4, $5, $6)
+		on conflict (kind, in_ref) do nothing`, r.Kind, r.Room, r.InRef, r.OutRef, r.GapDays, r.At)
+	return err
+}
+
+func (p *Postgres) AnswerReplySituations(ctx context.Context, room, outRef string) error {
+	_, err := p.db.Exec(ctx, `update mind_reply_examples set out_ref = $2 where room = $1 and out_ref = ''`, room, outRef)
+	return err
+}
+
+func (p *Postgres) ReplyExamples(ctx context.Context, kind string, limit int) ([]model.ReplySituation, error) {
+	rows, err := p.db.Query(ctx, `select kind, room, in_ref, out_ref, gap_days, at from mind_reply_examples
+		where kind = $1 and out_ref <> '' order by at desc limit $2`, kind, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []model.ReplySituation{}
+	for rows.Next() {
+		var r model.ReplySituation
+		if err := rows.Scan(&r.Kind, &r.Room, &r.InRef, &r.OutRef, &r.GapDays, &r.At); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) ResetReplySituations(ctx context.Context) error {
+	_, err := p.db.Exec(ctx, `delete from mind_reply_examples`)
+	return err
+}

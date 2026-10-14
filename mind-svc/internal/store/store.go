@@ -121,6 +121,14 @@ type Store interface {
 	OpenExpectations(ctx context.Context, key string) ([]model.Expectation, error)
 	Expectations(ctx context.Context, predictionID string) ([]model.Expectation, error)
 
+	// Reply situations: AddReplySituation opens one (idempotent by kind
+	// and in-ref); AnswerReplySituations gives the open ones of a room their
+	// reply; ReplyExamples is the latest answered ones of a kind.
+	AddReplySituation(ctx context.Context, r model.ReplySituation) error
+	AnswerReplySituations(ctx context.Context, room, outRef string) error
+	ReplyExamples(ctx context.Context, kind string, limit int) ([]model.ReplySituation, error)
+	ResetReplySituations(ctx context.Context) error
+
 	// Aliases: names in conversation → memory nodes. Putting a name again
 	// moves it to the node given and counts it seen once more.
 	PutAlias(ctx context.Context, a model.Alias) error

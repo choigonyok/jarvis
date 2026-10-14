@@ -20,6 +20,7 @@ import (
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/act"
 	"github.com/choigonyok/jarvis/mind-svc/internal/attention"
+	"github.com/choigonyok/jarvis/mind-svc/internal/draft"
 	"github.com/choigonyok/jarvis/mind-svc/internal/gate"
 	"github.com/choigonyok/jarvis/mind-svc/internal/interpret"
 	"github.com/choigonyok/jarvis/mind-svc/internal/link"
@@ -116,13 +117,17 @@ func New(o Options) *Mind {
 	if photos == nil {
 		photos = &act.MemoryPhotos{}
 	}
+	drafter := o.Drafter
+	if drafter == nil {
+		drafter = &draft.Drafter{St: o.Store, LLM: o.LLM, Owner: o.Interpret.Owner}
+	}
 	jobs := o.Jobs
 	if jobs == nil {
 		jobs = &act.MemoryJobs{}
 	}
 	acts := act.NewRegistry(act.CalendarActuator{Cal: o.Calendar}, act.Note{},
-		act.SettleActuator{Drafts: o.Drafter}, act.PhotosActuator{Photos: photos}, act.CartActuator{Jobs: jobs},
-		act.DraftActuator{Drafts: o.Drafter})
+		act.SettleActuator{Drafts: drafter}, act.PhotosActuator{Photos: photos}, act.CartActuator{Jobs: jobs},
+		act.DraftActuator{Drafts: drafter})
 	m.Gate = gate.New(o.Store, acts, notifier, o.Log, o.Policy, o.Loc, o.Now, o.URL, o.Logger)
 	m.Gate.OnDecide = m.learn
 	m.mornings = append(m.mornings, m.people, m.gift)
@@ -154,6 +159,9 @@ func (m *Mind) Handle(ctx context.Context, o obs.Observation) error {
 			return err
 		}
 		m.Conv.Observe(msg)
+		if err := m.reply(ctx, msg); err != nil {
+			m.Opts.Logger.Warn("답장 상황을 기록하지 못했습니다", "err", err)
+		}
 	case obs.ActionExecuted, obs.ActionUndone:
 		return m.Actions.Handle(ctx, o)
 	case obs.OccurrenceObserved:

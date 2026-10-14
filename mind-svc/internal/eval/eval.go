@@ -26,6 +26,7 @@ import (
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/act"
 	"github.com/choigonyok/jarvis/mind-svc/internal/clock"
+	"github.com/choigonyok/jarvis/mind-svc/internal/draft"
 	"github.com/choigonyok/jarvis/mind-svc/internal/gate"
 	"github.com/choigonyok/jarvis/mind-svc/internal/interpret"
 	"github.com/choigonyok/jarvis/mind-svc/internal/link"
@@ -55,6 +56,8 @@ type Scenario struct {
 	Reflect json.RawMessage `json:"reflect,omitempty"`
 	// Allocation is what assets-svc would say of the allocation.
 	Allocation []mind.Drift `json:"allocation,omitempty"`
+	// Drafts are the drafting answers for the scripted run, by recipient.
+	Drafts map[string]string `json:"drafts,omitempty"`
 }
 
 // Turn is one step: messages arrive and the room is read, or the person
@@ -87,6 +90,10 @@ type Msg struct {
 	From string `json:"from,omitempty"`
 	Me   bool   `json:"me,omitempty"`
 	Text string `json:"text"`
+	// Room puts the message in another conversation (history the scenario
+	// needs), not read by the interpreter.
+	Room     string `json:"room,omitempty"`
+	RoomName string `json:"roomName,omitempty"`
 }
 
 type Expect struct {
@@ -128,6 +135,10 @@ type Expect struct {
 	Infos []string `json:"infos,omitempty"`
 	// Brier: the run's predictions so far score at most this.
 	Brier *float64 `json:"brier,omitempty"`
+	// CardHas: words some card raised this turn has in its title, preview
+	// or body. Compared: a draft was compared with what the operator sent.
+	CardHas  []string `json:"cardHas,omitempty"`
+	Compared bool     `json:"compared,omitempty"`
 }
 
 // NoteMatch is a partial description of a note.
@@ -300,12 +311,20 @@ func RunAll(ctx context.Context, client llm.Client, loc *time.Location) ([]Resul
 func Scripted(sc Scenario) llm.Client {
 	var scripts []json.RawMessage
 	for _, t := range sc.Turns {
-		if len(t.Messages) > 0 {
+		if mainRoom(t.Messages) {
 			scripts = append(scripts, t.Script)
 		}
 	}
 	n := 0
 	return &llm.Script{Answer: func(system, user string) (string, error) {
+		if system == draft.System {
+			for to, text := range sc.Drafts {
+				if strings.Contains(user, "받는 사람: "+to+"\n") {
+					return text, nil
+				}
+			}
+			return "", errors.New("초안 답이 없습니다")
+		}
 		if system == reflect.System {
 			if len(sc.Reflect) == 0 {
 				return `{"hypotheses":[]}`, nil
@@ -411,15 +430,21 @@ func Run(ctx context.Context, sc Scenario, client llm.Client, loc *time.Location
 					return res
 				}
 				clk.Pin(at)
-				if _, err := m.Simulate(ctx, room, sc.RoomName, msg.From, msg.Me, msg.Text, at); err != nil {
+				to, name := room, sc.RoomName
+				if msg.Room != "" {
+					to, name = "sim:"+msg.Room, msg.RoomName
+				}
+				if _, err := m.Simulate(ctx, to, name, msg.From, msg.Me, msg.Text, at); err != nil {
 					fail(i, "%v", err)
 					return res
 				}
 			}
 			log.Drain()
-			if err := m.Conv.Read(ctx, room); err != nil {
-				fail(i, "해석 실패: %v", err)
-				return res
+			if mainRoom(t.Messages) {
+				if err := m.Conv.Read(ctx, room); err != nil {
+					fail(i, "해석 실패: %v", err)
+					return res
+				}
 			}
 		case t.Approve != "" || t.Reject != "":
 			kind := t.Approve + t.Reject
@@ -719,8 +744,32 @@ func summary(es []model.Entity) string {
 	return strings.Join(parts, " ")
 }
 
+func mainRoom(msgs []Msg) bool {
+	for _, m := range msgs {
+		if m.Room == "" {
+			return true
+		}
+	}
+	return false
+}
+
 func checkCards(ctx context.Context, st store.Store, ex Expect, seen map[string]bool, cards []gate.Card) []string {
 	var out []string
+	for _, w := range ex.CardHas {
+		if !slices.ContainsFunc(cards, func(c gate.Card) bool { return strings.Contains(c.Title+"\n"+c.Preview+"\n"+c.Body, w) }) {
+			var all []string
+			for _, c := range cards {
+				all = append(all, c.Title+" / "+c.Preview)
+			}
+			out = append(out, fmt.Sprintf("카드에 %q 가 있어야 함 · 나온 것: %v", w, all))
+		}
+	}
+	if ex.Compared {
+		intents, _ := st.Intents(ctx, 10000)
+		if !slices.ContainsFunc(intents, func(in model.Intent) bool { return strings.Contains(string(in.Result), "similarity") }) {
+			out = append(out, "초안과 실제로 보낸 답장을 비교했어야 함")
+		}
+	}
 	titles := make([]string, len(cards))
 	for i, c := range cards {
 		titles[i] = c.Title

@@ -29,6 +29,13 @@ type DraftRequest struct {
 	Purpose  string   `json:"purpose"` // what the message must get across
 	Facts    []string `json:"facts"`   // numbers and names it must keep exactly
 	Examples []string `json:"examples,omitempty"`
+	// Room is the conversation it goes to, when known; Situation the kind
+	// of moment (reconnect) whose replies are shown as examples; Incoming
+	// the message it answers (the drafter reads it by IncomingRef).
+	Room        string `json:"room,omitempty"`
+	Situation   string `json:"situation,omitempty"`
+	Incoming    string `json:"-"`
+	IncomingRef string `json:"incomingRef,omitempty"`
 }
 
 // Template is the drafter with no model: the facts in a plain sentence.

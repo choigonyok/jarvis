@@ -176,6 +176,22 @@ func TestMemory(t *testing.T) {
 	occurrences(t, NewMemory())
 	judge(t, NewMemory())
 	self(t, NewMemory())
+	replies(t, NewMemory())
+}
+
+func replies(t *testing.T, st Store) {
+	ctx := context.Background()
+	at := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
+	_ = st.AddReplySituation(ctx, model.ReplySituation{Kind: "reconnect", Room: "kakao:1", InRef: "kakao:10", GapDays: 90, At: at})
+	_ = st.AddReplySituation(ctx, model.ReplySituation{Kind: "reconnect", Room: "kakao:1", InRef: "kakao:10", GapDays: 90, At: at})
+	if ex, _ := st.ReplyExamples(ctx, "reconnect", 5); len(ex) != 0 {
+		t.Fatalf("답하기 전엔 예시가 아님: %+v", ex)
+	}
+	_ = st.AnswerReplySituations(ctx, "kakao:1", "kakao:11")
+	ex, _ := st.ReplyExamples(ctx, "reconnect", 5)
+	if len(ex) != 1 || ex[0].OutRef != "kakao:11" || ex[0].GapDays != 90 {
+		t.Fatalf("예시: %+v", ex)
+	}
 }
 
 // self: notes with their versions, predictions and expectations.
@@ -334,7 +350,7 @@ func TestPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	if _, err := pool.Exec(context.Background(), `truncate mind_messages, mind_rooms, mind_entities, mind_changes, mind_timers, mind_intents, mind_cursors, mind_facts, mind_aliases, mind_policy_stats, mind_occurrences, mind_links, mind_thing_classes, mind_link_cache, mind_pattern_counts, mind_notes, mind_note_versions, mind_predictions, mind_expectations restart identity cascade`); err != nil {
+	if _, err := pool.Exec(context.Background(), `truncate mind_messages, mind_rooms, mind_entities, mind_changes, mind_timers, mind_intents, mind_cursors, mind_facts, mind_aliases, mind_policy_stats, mind_occurrences, mind_links, mind_thing_classes, mind_link_cache, mind_pattern_counts, mind_notes, mind_note_versions, mind_predictions, mind_expectations, mind_reply_examples restart identity cascade`); err != nil {
 		t.Fatal(err)
 	}
 	key := make([]byte, 32)
@@ -345,6 +361,7 @@ func TestPostgres(t *testing.T) {
 	occurrences(t, st)
 	judge(t, st)
 	self(t, st)
+	replies(t, st)
 	var sealed bool
 	var body []byte
 	_ = pool.QueryRow(context.Background(), `select sealed, body from mind_messages where ref = 'sim:1'`).Scan(&sealed, &body)

@@ -243,6 +243,17 @@ type Expectation struct {
 	MetBy        string    `json:"metBy,omitempty"`
 }
 
+// ReplySituation is a kind of moment a reply was written in - someone
+// writing after a long silence - and the operator's first reply to it.
+type ReplySituation struct {
+	Kind    string    `json:"kind"` // reconnect
+	Room    string    `json:"room"`
+	InRef   string    `json:"inRef"`
+	OutRef  string    `json:"outRef,omitempty"`
+	GapDays int       `json:"gapDays"`
+	At      time.Time `json:"at"`
+}
+
 // Evidence is the line of an observation a belief rests on. Ref names the
 // observed message; Quote is the words, which must appear in it.
 type Evidence struct {

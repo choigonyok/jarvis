@@ -1,32 +1,161 @@
 {
-  "name": "S6 모임 정산: 함께한 저녁에 내가 낸 96,000원 → 1인 32,000원, 송금이 오면 고리가 닫힌다",
-  "room": "dinner",
-  "roomName": "민수, 지훈",
-  "turns": [
+ "name": "S6 모임 정산: 함께한 저녁에 내가 낸 96,000원 → 1인 32,000원, 송금이 오면 고리가 닫힌다",
+ "room": "dinner",
+ "roomName": "민수, 지훈",
+ "turns": [
+  {
+   "messages": [
     {
-      "messages": [
-        { "at": "2026-10-14T12:00", "from": "민수", "text": "금요일 7시 강남 고깃집 ㄱ?" },
-        { "at": "2026-10-14T12:01", "from": "지훈", "text": "ㄱㄱ" },
-        { "at": "2026-10-14T12:02", "me": true, "text": "좋아 금요일 7시!" }
+     "at": "2026-10-14T12:00",
+     "from": "민수",
+     "text": "금요일 7시 강남 고깃집 ㄱ?"
+    },
+    {
+     "at": "2026-10-14T12:01",
+     "from": "지훈",
+     "text": "ㄱㄱ"
+    },
+    {
+     "at": "2026-10-14T12:02",
+     "me": true,
+     "text": "좋아 금요일 7시!"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "create",
+      "kind": "plan",
+      "set": {
+       "title": "민수·지훈과 저녁",
+       "status": "confirmed",
+       "date": "2026-10-16",
+       "start": "19:00",
+       "place": "강남 고깃집",
+       "people": [
+        "민수",
+        "지훈"
+       ],
+       "type": "식사",
+       "area": "강남"
+      },
+      "evidence": [
+       {
+        "line": 1,
+        "quote": "금요일 7시 강남 고깃집"
+       },
+       {
+        "line": 3,
+        "quote": "좋아 금요일 7시"
+       }
       ],
-      "script": {"changes":[{"op":"create","kind":"plan","set":{"title":"민수·지훈과 저녁","status":"confirmed","date":"2026-10-16","start":"19:00","place":"강남 고깃집","people":["민수","지훈"],"type":"식사","area":"강남"},"evidence":[{"line":1,"quote":"금요일 7시 강남 고깃집"},{"line":3,"quote":"좋아 금요일 7시"}],"confidence":0.9,"why":"셋이 합의"}]},
-      "expect": { "cards": ["캘린더에 추가"] }
-    },
-    { "approve": "calendar.create" },
+      "confidence": 0.9,
+      "why": "셋이 합의"
+     }
+    ]
+   },
+   "expect": {
+    "cards": [
+     "캘린더에 추가"
+    ]
+   }
+  },
+  {
+   "approve": "calendar.create"
+  },
+  {
+   "at": "2026-10-16T21:10",
+   "occur": [
     {
-      "at": "2026-10-16T21:10",
-      "occur": [
-        { "id": "spending:7001", "kind": "purchase", "at": "2026-10-16T20:40", "title": "육전식당 강남점", "place": "육전식당 강남점", "area": "강남", "class": "식비", "amount": 96000 },
-        { "id": "spending:7002", "kind": "purchase", "at": "2026-10-16T19:20", "title": "주식회사 디앤씨", "class": "기타", "amount": 4500 }
-      ],
-      "expect": { "cards": ["1인 32,000원"], "cardCount": 1 }
+     "id": "spending:7001",
+     "kind": "purchase",
+     "at": "2026-10-16T20:40",
+     "title": "육전식당 강남점",
+     "place": "육전식당 강남점",
+     "area": "강남",
+     "class": "식비",
+     "amount": 96000
     },
-    { "approve": "settle.request", "expect": { "loops": [ { "owner": "them", "titleHas": "민수", "status": "open", "due": "2026-10-19" }, { "owner": "them", "titleHas": "지훈", "status": "open" } ] } },
     {
-      "at": "2026-10-17T10:05",
-      "occur": [ { "id": "kakaopay:1", "kind": "transfer", "at": "2026-10-17T10:00", "title": "카카오페이 송금", "people": ["김민수"], "amount": 32000, "quote": "김민수님이 32,000원을 보냈어요" } ],
-      "expect": { "loops": [ { "titleHas": "민수", "status": "closed" }, { "titleHas": "지훈", "status": "open" } ], "noCards": true }
-    },
-    { "advance": "60h", "expect": { "intents": ["info"], "noCards": true } }
-  ]
+     "id": "spending:7002",
+     "kind": "purchase",
+     "at": "2026-10-16T19:20",
+     "title": "주식회사 디앤씨",
+     "class": "기타",
+     "amount": 4500
+    }
+   ],
+   "expect": {
+    "cards": [
+     "1인 32,000원"
+    ],
+    "cardCount": 1,
+    "cardHas": [
+     "민수: ",
+     "지훈: ",
+     "32,000원"
+    ]
+   }
+  },
+  {
+   "approve": "settle.request",
+   "expect": {
+    "loops": [
+     {
+      "owner": "them",
+      "titleHas": "민수",
+      "status": "open",
+      "due": "2026-10-19"
+     },
+     {
+      "owner": "them",
+      "titleHas": "지훈",
+      "status": "open"
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-10-17T10:05",
+   "occur": [
+    {
+     "id": "kakaopay:1",
+     "kind": "transfer",
+     "at": "2026-10-17T10:00",
+     "title": "카카오페이 송금",
+     "people": [
+      "김민수"
+     ],
+     "amount": 32000,
+     "quote": "김민수님이 32,000원을 보냈어요"
+    }
+   ],
+   "expect": {
+    "loops": [
+     {
+      "titleHas": "민수",
+      "status": "closed"
+     },
+     {
+      "titleHas": "지훈",
+      "status": "open"
+     }
+    ],
+    "noCards": true
+   }
+  },
+  {
+   "advance": "60h",
+   "expect": {
+    "intents": [
+     "info"
+    ],
+    "noCards": true
+   }
+  }
+ ],
+ "drafts": {
+  "민수": "민수야 오늘 잘 먹었다 ㅋㅋ 1인 32,000원이야!",
+  "지훈": "지훈아 오늘 즐거웠어 1인 32,000원 보내줘~"
+ }
 }

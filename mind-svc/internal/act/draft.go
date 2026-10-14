@@ -13,11 +13,13 @@ import (
 type DraftActuator struct{ Drafts Drafter }
 
 type draft struct {
-	To      string `json:"to"`
-	Text    string `json:"text"`
-	Purpose string `json:"purpose"`
-	PlanID  string `json:"planId,omitempty"`
-	Room    string `json:"room,omitempty"`
+	To          string `json:"to"`
+	Text        string `json:"text"`
+	Purpose     string `json:"purpose"`
+	PlanID      string `json:"planId,omitempty"`
+	Room        string `json:"room,omitempty"`
+	Situation   string `json:"situation,omitempty"`
+	IncomingRef string `json:"incomingRef,omitempty"`
 }
 
 func (DraftActuator) Kinds() []string { return []string{"message.draft"} }
@@ -28,7 +30,12 @@ func (a DraftActuator) Prepare(ctx context.Context, _ string, payload json.RawMe
 		return nil, err
 	}
 	if a.Drafts != nil && d.Purpose != "" {
-		if text, err := a.Drafts.Draft(ctx, DraftRequest{To: d.To, Purpose: d.Purpose, Facts: []string{d.Text}}); err == nil && strings.TrimSpace(text) != "" {
+		var facts []string
+		if d.Text != "" {
+			facts = []string{d.Text}
+		}
+		if text, err := a.Drafts.Draft(ctx, DraftRequest{To: d.To, Purpose: d.Purpose, Facts: facts, Room: d.Room,
+			Situation: d.Situation, IncomingRef: d.IncomingRef}); err == nil && strings.TrimSpace(text) != "" {
 			d.Text = strings.TrimSpace(text)
 		}
 	}

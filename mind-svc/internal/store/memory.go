@@ -33,6 +33,7 @@ type Memory struct {
 	versions map[string][]model.Note
 	preds    map[string]model.Prediction
 	expects  map[[2]string]model.Expectation
+	replies  []model.ReplySituation
 	seq      int64
 }
 
@@ -729,4 +730,46 @@ func (m *Memory) expectsWhere(keep func(model.Expectation) bool) []model.Expecta
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].PredictionID+out[i].Key < out[j].PredictionID+out[j].Key })
 	return out
+}
+
+func (m *Memory) AddReplySituation(_ context.Context, r model.ReplySituation) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, x := range m.replies {
+		if x.Kind == r.Kind && x.InRef == r.InRef {
+			return nil
+		}
+	}
+	m.replies = append(m.replies, r)
+	return nil
+}
+
+func (m *Memory) AnswerReplySituations(_ context.Context, room, outRef string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := range m.replies {
+		if m.replies[i].Room == room && m.replies[i].OutRef == "" {
+			m.replies[i].OutRef = outRef
+		}
+	}
+	return nil
+}
+
+func (m *Memory) ReplyExamples(_ context.Context, kind string, limit int) ([]model.ReplySituation, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []model.ReplySituation
+	for i := len(m.replies) - 1; i >= 0 && len(out) < limit; i-- {
+		if r := m.replies[i]; r.Kind == kind && r.OutRef != "" {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+func (m *Memory) ResetReplySituations(context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.replies = nil
+	return nil
 }
