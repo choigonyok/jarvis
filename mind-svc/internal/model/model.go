@@ -159,6 +159,82 @@ type Pattern struct {
 	LastSeen time.Time `json:"lastSeen"`
 }
 
+// Note is something believed about the operator, in a sentence a person
+// can read and correct ("캠핑 며칠 전에 장작을 산다"), with what it rests on
+// and how sure. A hypothesis until the operator confirms it; every change
+// is a new version with its reason.
+type Note struct {
+	ID         string    `json:"id"`
+	Text       string    `json:"text"`
+	Scope      string    `json:"scope,omitempty"` // 캠핑, 운동, 사람:지수 …
+	Status     string    `json:"status"`          // hypothesis | confirmed | rejected
+	Confidence float64   `json:"confidence"`
+	Evidence   []string  `json:"evidence,omitempty"` // refs: occurrences, plans, days
+	Rule       *Rule     `json:"rule,omitempty"`     // the machine-readable form predictions use
+	Version    int       `json:"version"`
+	Reason     string    `json:"reason,omitempty"` // why this version
+	CreatedAt  time.Time `json:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
+}
+
+// Note statuses.
+const (
+	Hypothesis = "hypothesis"
+	// Confirmed and Rejected as for links.
+)
+
+// Rule is a note as something a prediction can be made from.
+//
+//	prep: before a plan of PlanKind, a thing of Class is bought about
+//	      Bucket before (Support of Total plans)
+//	rate: on days Feature(Arg) holds, Target happens at Rate, against Base
+//	      on other days (Days such days seen)
+type Rule struct {
+	Kind     string   `json:"kind"`
+	PlanKind string   `json:"planKind,omitempty"`
+	Class    string   `json:"class,omitempty"`
+	Bucket   string   `json:"bucket,omitempty"`
+	Support  int      `json:"support,omitempty"`
+	Total    int      `json:"total,omitempty"`
+	Target   string   `json:"target,omitempty"`
+	Feature  string   `json:"feature,omitempty"`
+	Arg      string   `json:"arg,omitempty"`
+	Rate     float64  `json:"rate,omitempty"`
+	Base     float64  `json:"base,omitempty"`
+	Days     int      `json:"days,omitempty"`
+	Except   []string `json:"except,omitempty"` // conditions the operator added ("직전 캠핑 후 남은 경우")
+}
+
+// Prediction is something expected, with a probability and a time by which
+// it will be known: "오늘 운동 65%", "11/14까지 장작 구매 60%". Scored
+// against what happened (Brier: (prob − outcome)²); a miss is a surprise,
+// and the night reflects on surprises only.
+type Prediction struct {
+	ID        string     `json:"id"`
+	Target    string     `json:"target"` // workout:2026-10-15, buy:장작:plan_x
+	Text      string     `json:"text"`
+	Prob      float64    `json:"prob"`
+	Due       time.Time  `json:"due"`
+	Basis     []string   `json:"basis,omitempty"` // note ids
+	PlanID    string     `json:"planId,omitempty"`
+	Outcome   *bool      `json:"outcome,omitempty"`
+	Score     *float64   `json:"score,omitempty"`
+	Surprise  bool       `json:"surprise,omitempty"`
+	Reflected bool       `json:"reflected,omitempty"`
+	CreatedAt time.Time  `json:"createdAt"`
+	ScoredAt  *time.Time `json:"scoredAt,omitempty"`
+}
+
+// Expectation is a prediction waiting for an occurrence, found by key: a
+// new occurrence is checked against the open expectations of its key only.
+type Expectation struct {
+	PredictionID string    `json:"predictionId"`
+	Key          string    `json:"key"` // purchase.item:장작, workout, transfer:민수
+	Due          time.Time `json:"due"`
+	State        string    `json:"state"` // open | met | missed
+	MetBy        string    `json:"metBy,omitempty"`
+}
+
 // Evidence is the line of an observation a belief rests on. Ref names the
 // observed message; Quote is the words, which must appear in it.
 type Evidence struct {

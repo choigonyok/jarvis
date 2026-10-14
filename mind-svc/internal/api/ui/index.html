@@ -31,7 +31,10 @@ header h1 { font-size: 16px; margin: 0; font-weight: 650; letter-spacing: -0.01e
 .btn.ok { border-color: color-mix(in srgb, var(--ok) 60%, transparent); color: var(--ok); }
 .btn.no { border-color: color-mix(in srgb, var(--no) 50%, transparent); color: var(--no); }
 .btn[disabled] { opacity: .4; cursor: default; }
-main { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(300px, 1.1fr) minmax(320px, 1.2fr); height: calc(100% - 59px); }
+main { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(280px, 1.1fr) minmax(300px, 1.1fr) minmax(300px, 1.1fr); height: calc(100% - 59px); }
+.note .acts, .lnk .acts { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.lnk { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; margin: 6px 0; }
+.situation { white-space: pre-wrap; font-size: 13px; border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
 section.col { min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--line); }
 section.col:last-child { border-right: 0; }
 .colhead { display: flex; align-items: baseline; gap: 8px; padding: 12px 16px 8px; }
@@ -125,6 +128,7 @@ h4 { font-size: 12px; color: var(--dim); font-weight: 600; margin: 16px 0 6px; }
   <button role="tab" data-col="c1" aria-selected="true">대화</button>
   <button role="tab" data-col="c2" aria-selected="false">세계 모델</button>
   <button role="tab" data-col="c3" aria-selected="false">결정</button>
+  <button role="tab" data-col="c4" aria-selected="false">패턴</button>
 </nav>
 <main>
   <section class="col show" id="c1">
@@ -153,6 +157,16 @@ h4 { font-size: 12px; color: var(--dim); font-weight: 600; margin: 16px 0 6px; }
       <h4>캘린더 (메모리)</h4><div class="list" id="calendar"></div>
       <h4>타이머</h4><div class="list" id="timers"></div>
       <h4>신뢰 단계</h4><div class="list" id="levels"></div>
+    </div>
+  </section>
+  <section class="col" id="c4">
+    <div class="colhead"><span class="step">지금 · 노트 · 예측</span><h2>패턴</h2></div>
+    <div class="scroll">
+      <h4>지금 상황</h4><div class="situation" id="situation"></div>
+      <h4>나에 대한 노트</h4><div id="notes"></div>
+      <h4>추정 링크 (맞으면 확인, 아니면 아님)</h4><div id="links"></div>
+      <h4>예측</h4><div class="list" id="predictions"></div>
+      <h4>반복</h4><div class="list" id="patterns"></div>
     </div>
   </section>
 </main>
@@ -233,7 +247,22 @@ function render() {
   $("calendar").innerHTML = (s.calendar || []).map((c) => `<div>${esc(c.date)}${c.start ? " " + c.start : ""} <b>${esc(c.title)}</b>${c.place ? " @" + esc(c.place) : ""}</div>`).join("") || "<div>비어 있음</div>";
   $("timers").innerHTML = (s.timers || []).map((tm) => `<div>${tm.firedAt ? "✓" : "⏰"} ${t(tm.fireAt)} · ${esc(tm.skill)}/${esc(tm.name)}</div>`).join("") || "<div>없음</div>";
   $("levels").innerHTML = Object.entries(s.levels || {}).map(([k, [l, why]]) => `<div><b>${KIND[k] || k}</b> ${LEVEL[l] || l} · ${esc(why)}</div>`).join("");
+
+  $("situation").textContent = s.situation?.text || "";
+  $("notes").innerHTML = (s.notes || []).map((n) => `<article class="ent note ${n.status === "rejected" ? "dead" : ""}"><header><span class="kind">노트</span><h3>${esc(n.text)}</h3><span class="st">${NSTATUS[n.status] || n.status}</span></header>
+    <div class="facts"><span>신뢰 ${Math.round(n.confidence * 100)}%</span><span>v${n.version}</span>${(n.evidence || []).map((e) => `<span>${esc(e)}</span>`).join("")}</div>
+    ${n.reason ? `<div class="judge">${esc(n.reason)}</div>` : ""}
+    <div class="acts">${n.status !== "confirmed" ? `<button class="btn ok" data-note="${n.id}" data-status="confirmed">맞아요</button>` : ""}${n.status !== "rejected" ? `<button class="btn no" data-note="${n.id}" data-status="rejected">아니에요</button>` : ""}<button class="btn" data-note="${n.id}" data-status="" data-edit="1">고치기</button></div></article>`).join("") ||
+    `<div class="empty">밤마다 반복과 틀린 예측에서 노트가 생깁니다.</div>`;
+  $("links").innerHTML = (s.links || []).filter((l) => l.state === "estimated" || l.by === "user").map((l) => `<div class="lnk"><b>${esc(l.fromTitle)}</b> —${REL[l.rel] || l.rel}→ <b>${esc(l.toTitle)}</b> · ${LSTATE[l.state] || l.state} ${Math.round(l.confidence * 100)}%<div class="meta">${esc(l.why || "")}</div>
+    ${l.state === "estimated" ? `<div class="acts"><button class="btn ok" data-link="1" data-from="${esc(l.from)}" data-to="${esc(l.to)}" data-rel="${l.rel}" data-state="confirmed">맞아요</button><button class="btn no" data-link="1" data-from="${esc(l.from)}" data-to="${esc(l.to)}" data-rel="${l.rel}" data-state="rejected">아니에요</button></div>` : ""}</div>`).join("") || `<div class="empty">확인할 추정 링크가 없습니다.</div>`;
+  $("predictions").innerHTML = (s.brier ? `<div>최근 2주 Brier ${s.brier.score.toFixed(3)} (${s.brier.n}개, 낮을수록 좋음 · 늘 50%면 0.25)</div>` : "") +
+    ((s.predictions || []).slice().reverse().slice(0, 20).map((p) => `<div>${p.outcome === undefined ? "⏳" : p.outcome ? "✅" : "❌"}${p.surprise ? " 😮" : ""} ${esc(p.text || p.target)} · ${t(p.due)}${p.score !== undefined ? ` · 점수 ${p.score.toFixed(2)}` : ""}</div>`).join("") || "<div>없음</div>");
+  $("patterns").innerHTML = (s.patterns || []).filter((p) => p.kindB).map((p) => `<div>${esc(p.kindA)} 전에 ${esc(p.kindB)} · ${esc(p.bucket)} · ${p.support}번</div>`).join("") || "<div>없음</div>";
 }
+const NSTATUS = { hypothesis: "가설", confirmed: "확정", rejected: "기각" };
+const LSTATE = { estimated: "추정", confirmed: "확정", rejected: "아님" };
+const REL = { during: "중에", prep_for: "준비", used_during: "쓰려고", with: "함께" };
 
 // One entry of the evidence ledger: what was said, where it stands, and what
 // long-term memory made of it.
@@ -262,7 +291,7 @@ function change(c) {
 }
 
 document.addEventListener("click", async (ev) => {
-  const el = ev.target.closest("[data-room],[data-ent],[data-act],[data-col],[data-advance]");
+  const el = ev.target.closest("[data-room],[data-ent],[data-act],[data-col],[data-advance],[data-note],[data-link]");
   if (!el) return;
   if (el.dataset.room) { room = el.dataset.room; const r = snap.rooms.find((x) => x.room === room); if (r) $("roomName").value = r.name; render(); }
   else if (el.dataset.ent) {
@@ -274,7 +303,17 @@ document.addEventListener("click", async (ev) => {
       snap.changes.push(...changes.filter((c) => !known.has(c.id)));
     }
     render();
-  } else if (el.dataset.act) { await call(`/api/intents/${el.dataset.id}/${el.dataset.act}`, {}); refresh(); }
+  } else if (el.dataset.act) {
+    const body = el.dataset.act === "reject" ? { reason: prompt("거절하는 이유가 있으면 적어 주세요 (비워도 됩니다)") || "" } : {};
+    await call(`/api/intents/${el.dataset.id}/${el.dataset.act}`, body); refresh();
+  } else if (el.dataset.note) {
+    const text = el.dataset.edit ? prompt("노트를 고쳐 주세요") : "";
+    if (el.dataset.edit && !text) return;
+    const reason = el.dataset.status === "rejected" ? (prompt("왜 아닌가요? (비워도 됩니다)") || "") : "";
+    await call(`/api/notes/${el.dataset.note}`, { status: el.dataset.status, text, reason }); refresh();
+  } else if (el.dataset.link) {
+    await call("/api/links", { from: el.dataset.from, to: el.dataset.to, rel: el.dataset.rel, state: el.dataset.state }); refresh();
+  }
   else if (el.dataset.col) {
     document.querySelectorAll(".tabs button").forEach((b) => b.setAttribute("aria-selected", b === el));
     document.querySelectorAll("section.col").forEach((c) => c.classList.toggle("show", c.id === el.dataset.col));

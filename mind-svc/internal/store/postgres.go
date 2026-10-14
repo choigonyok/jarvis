@@ -715,3 +715,114 @@ func (p *Postgres) ResetPatterns(ctx context.Context) error {
 	_, err := p.db.Exec(ctx, `delete from mind_pattern_counts`)
 	return err
 }
+
+func (p *Postgres) PutNote(ctx context.Context, n model.Note) error {
+	body, err := json.Marshal(n)
+	if err != nil {
+		return err
+	}
+	tx, err := p.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `insert into mind_notes (id, status, scope, body, version, updated_at) values ($1, $2, $3, $4, $5, $6)
+		on conflict (id) do update set status = excluded.status, scope = excluded.scope, body = excluded.body, version = excluded.version, updated_at = excluded.updated_at`,
+		n.ID, n.Status, n.Scope, body, n.Version, n.UpdatedAt); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `insert into mind_note_versions (note_id, version, body, at) values ($1, $2, $3, $4)
+		on conflict (note_id, version) do update set body = excluded.body, at = excluded.at`, n.ID, n.Version, body, n.UpdatedAt); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func scanBodies[T any](ctx context.Context, p *Postgres, q string, args ...any) ([]T, error) {
+	rows, err := p.db.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []T{}
+	for rows.Next() {
+		var body []byte
+		if err := rows.Scan(&body); err != nil {
+			return nil, err
+		}
+		var v T
+		if err := json.Unmarshal(body, &v); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) Note(ctx context.Context, id string) (model.Note, error) {
+	out, err := scanBodies[model.Note](ctx, p, `select body from mind_notes where id = $1`, id)
+	if err != nil {
+		return model.Note{}, err
+	}
+	if len(out) == 0 {
+		return model.Note{}, model.ErrNotFound
+	}
+	return out[0], nil
+}
+
+func (p *Postgres) Notes(ctx context.Context) ([]model.Note, error) {
+	return scanBodies[model.Note](ctx, p, `select body from mind_notes order by body->>'createdAt', id`)
+}
+
+func (p *Postgres) NoteVersions(ctx context.Context, id string) ([]model.Note, error) {
+	return scanBodies[model.Note](ctx, p, `select body from mind_note_versions where note_id = $1 order by version`, id)
+}
+
+func (p *Postgres) PutPrediction(ctx context.Context, pr model.Prediction) error {
+	body, err := json.Marshal(pr)
+	if err != nil {
+		return err
+	}
+	_, err = p.db.Exec(ctx, `insert into mind_predictions (id, target, due, scored, body, created_at) values ($1, $2, $3, $4, $5, $6)
+		on conflict (id) do update set target = excluded.target, due = excluded.due, scored = excluded.scored, body = excluded.body`,
+		pr.ID, pr.Target, pr.Due, pr.ScoredAt != nil, body, pr.CreatedAt)
+	return err
+}
+
+func (p *Postgres) Prediction(ctx context.Context, id string) (model.Prediction, error) {
+	out, err := scanBodies[model.Prediction](ctx, p, `select body from mind_predictions where id = $1`, id)
+	if err != nil {
+		return model.Prediction{}, err
+	}
+	if len(out) == 0 {
+		return model.Prediction{}, model.ErrNotFound
+	}
+	return out[0], nil
+}
+
+func (p *Postgres) Predictions(ctx context.Context, from, to time.Time) ([]model.Prediction, error) {
+	return scanBodies[model.Prediction](ctx, p, `select body from mind_predictions where due >= $1 and due < $2 order by due, id`, from, to)
+}
+
+func (p *Postgres) DuePredictions(ctx context.Context, now time.Time) ([]model.Prediction, error) {
+	return scanBodies[model.Prediction](ctx, p, `select body from mind_predictions where not scored and due <= $1 order by due, id`, now)
+}
+
+func (p *Postgres) PutExpectation(ctx context.Context, e model.Expectation) error {
+	body, err := json.Marshal(e)
+	if err != nil {
+		return err
+	}
+	_, err = p.db.Exec(ctx, `insert into mind_expectations (prediction_id, match_key, due, state, body) values ($1, $2, $3, $4, $5)
+		on conflict (prediction_id, match_key) do update set due = excluded.due, state = excluded.state, body = excluded.body`,
+		e.PredictionID, e.Key, e.Due, e.State, body)
+	return err
+}
+
+func (p *Postgres) OpenExpectations(ctx context.Context, key string) ([]model.Expectation, error) {
+	return scanBodies[model.Expectation](ctx, p, `select body from mind_expectations where match_key = $1 and state = 'open' order by prediction_id`, key)
+}
+
+func (p *Postgres) Expectations(ctx context.Context, predictionID string) ([]model.Expectation, error) {
+	return scanBodies[model.Expectation](ctx, p, `select body from mind_expectations where prediction_id = $1 order by match_key`, predictionID)
+}

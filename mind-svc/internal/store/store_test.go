@@ -175,6 +175,57 @@ func TestMemory(t *testing.T) {
 	policy(t, NewMemory())
 	occurrences(t, NewMemory())
 	judge(t, NewMemory())
+	self(t, NewMemory())
+}
+
+// self: notes with their versions, predictions and expectations.
+func self(t *testing.T, st Store) {
+	ctx := context.Background()
+	at := time.Date(2026, 10, 8, 3, 0, 0, 0, time.UTC)
+	n := model.Note{ID: "note_1", Text: "캠핑 며칠 전 장작을 산다", Status: model.Hypothesis, Confidence: 0.5, Version: 1, CreatedAt: at, UpdatedAt: at,
+		Rule: &model.Rule{Kind: "prep", PlanKind: "캠핑", Class: "장작", Bucket: "d3", Support: 1, Total: 1}}
+	_ = st.PutNote(ctx, n)
+	n.Version, n.Status, n.Reason, n.UpdatedAt = 2, model.Confirmed, "운영자가 확인", at.Add(time.Hour)
+	_ = st.PutNote(ctx, n)
+	got, err := st.Note(ctx, "note_1")
+	if err != nil || got.Status != model.Confirmed || got.Rule.Class != "장작" {
+		t.Fatalf("노트: %+v %v", got, err)
+	}
+	vs, _ := st.NoteVersions(ctx, "note_1")
+	if len(vs) != 2 || vs[0].Status != model.Hypothesis || vs[1].Reason != "운영자가 확인" {
+		t.Fatalf("버전: %+v", vs)
+	}
+	if all, _ := st.Notes(ctx); len(all) != 1 {
+		t.Fatalf("노트 목록: %+v", all)
+	}
+	pr := model.Prediction{ID: "pred_1", Target: "workout:2026-10-08", Text: "오늘 운동", Prob: 0.65, Due: at.Add(20 * time.Hour), CreatedAt: at}
+	_ = st.PutPrediction(ctx, pr)
+	if due, _ := st.DuePredictions(ctx, at); len(due) != 0 {
+		t.Fatalf("아직 기한 전: %+v", due)
+	}
+	if due, _ := st.DuePredictions(ctx, at.Add(21*time.Hour)); len(due) != 1 {
+		t.Fatalf("기한 지남: %+v", due)
+	}
+	scored := at.Add(21 * time.Hour)
+	pr.ScoredAt = &scored
+	_ = st.PutPrediction(ctx, pr)
+	if due, _ := st.DuePredictions(ctx, at.Add(22*time.Hour)); len(due) != 0 {
+		t.Fatalf("채점한 것은 빼야: %+v", due)
+	}
+	if day, _ := st.Predictions(ctx, at, at.Add(24*time.Hour)); len(day) != 1 {
+		t.Fatalf("기간 예측: %+v", day)
+	}
+	_ = st.PutExpectation(ctx, model.Expectation{PredictionID: "pred_1", Key: "workout", Due: pr.Due, State: "open"})
+	if open, _ := st.OpenExpectations(ctx, "workout"); len(open) != 1 {
+		t.Fatalf("열린 기대: %+v", open)
+	}
+	_ = st.PutExpectation(ctx, model.Expectation{PredictionID: "pred_1", Key: "workout", Due: pr.Due, State: "met", MetBy: "workout:x"})
+	if open, _ := st.OpenExpectations(ctx, "workout"); len(open) != 0 {
+		t.Fatalf("채운 기대는 닫힘: %+v", open)
+	}
+	if all, _ := st.Expectations(ctx, "pred_1"); len(all) != 1 || all[0].MetBy != "workout:x" {
+		t.Fatalf("기대: %+v", all)
+	}
 }
 
 // judge: the common-sense caches and the pattern counts.
@@ -283,7 +334,7 @@ func TestPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	if _, err := pool.Exec(context.Background(), `truncate mind_messages, mind_rooms, mind_entities, mind_changes, mind_timers, mind_intents, mind_cursors, mind_facts, mind_aliases, mind_policy_stats, mind_occurrences, mind_links, mind_thing_classes, mind_link_cache, mind_pattern_counts restart identity cascade`); err != nil {
+	if _, err := pool.Exec(context.Background(), `truncate mind_messages, mind_rooms, mind_entities, mind_changes, mind_timers, mind_intents, mind_cursors, mind_facts, mind_aliases, mind_policy_stats, mind_occurrences, mind_links, mind_thing_classes, mind_link_cache, mind_pattern_counts, mind_notes, mind_note_versions, mind_predictions, mind_expectations restart identity cascade`); err != nil {
 		t.Fatal(err)
 	}
 	key := make([]byte, 32)
@@ -293,6 +344,7 @@ func TestPostgres(t *testing.T) {
 	policy(t, st)
 	occurrences(t, st)
 	judge(t, st)
+	self(t, st)
 	var sealed bool
 	var body []byte
 	_ = pool.QueryRow(context.Background(), `select sealed, body from mind_messages where ref = 'sim:1'`).Scan(&sealed, &body)

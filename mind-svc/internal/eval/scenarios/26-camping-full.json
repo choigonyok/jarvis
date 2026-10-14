@@ -1,0 +1,205 @@
+{
+ "name": "S1 전체: 처음 → 배움 → 다음 캠핑 이틀 전 장작 카드, 승인하면 장바구니 작업과 노트 신뢰도 상승",
+ "room": "minji-camp2",
+ "roomName": "민지",
+ "judge": {
+  "참나무 장작": {
+   "class": "장작",
+   "rel": "prep_for",
+   "plausibility": 0.9,
+   "why": "장작은 캠핑 화로용 대표 준비물"
+  }
+ },
+ "turns": [
+  {
+   "messages": [
+    {
+     "at": "2026-10-01T21:10",
+     "from": "민지",
+     "text": "10/6 가평 캠핑 ㄱ?"
+    },
+    {
+     "at": "2026-10-01T21:11",
+     "me": true,
+     "text": "ㄱㄱ"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "create",
+      "kind": "plan",
+      "set": {
+       "title": "민지와 가평 캠핑",
+       "status": "confirmed",
+       "date": "2026-10-06",
+       "endDate": "2026-10-07",
+       "place": "가평",
+       "people": [
+        "민지"
+       ],
+       "type": "캠핑",
+       "area": "가평"
+      },
+      "evidence": [
+       {
+        "line": 1,
+        "quote": "10/6"
+       },
+       {
+        "line": 2,
+        "quote": "ㄱㄱ"
+       }
+      ],
+      "confidence": 0.9,
+      "why": "캠핑 합의"
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-10-03T12:45",
+   "occur": [
+    {
+     "id": "spending:101",
+     "kind": "purchase",
+     "at": "2026-10-03T12:40",
+     "title": "쿠팡",
+     "class": "쇼핑",
+     "amount": 20000
+    },
+    {
+     "id": "spending:101#1",
+     "kind": "purchase.item",
+     "at": "2026-10-03T12:40",
+     "title": "참나무 장작 10kg",
+     "class": "쇼핑",
+     "amount": 20000,
+     "quote": "참나무 장작 10kg 20,000원"
+    }
+   ]
+  },
+  {
+   "at": "2026-10-07T20:00",
+   "occur": [
+    {
+     "id": "photo:g1",
+     "kind": "photo",
+     "at": "2026-10-06T15:00",
+     "area": "Gapyeong-gun"
+    },
+    {
+     "id": "spending:102",
+     "kind": "purchase",
+     "at": "2026-10-06T14:20",
+     "title": "자라섬캠핑장 가평점",
+     "area": "가평",
+     "class": "여행",
+     "amount": 45000
+    }
+   ]
+  },
+  {
+   "at": "2026-10-08T03:00",
+   "tick": "night",
+   "expect": {
+    "notes": [
+     {
+      "textHas": "캠핑 며칠 전에 장작을 산다",
+      "status": "hypothesis"
+     }
+    ]
+   }
+  },
+  {
+   "messages": [
+    {
+     "at": "2026-11-10T20:00",
+     "from": "민지",
+     "text": "11/15 가평 캠핑 ㄱ?"
+    },
+    {
+     "at": "2026-11-10T20:01",
+     "me": true,
+     "text": "ㄱㄱ"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "create",
+      "kind": "plan",
+      "set": {
+       "title": "민지와 가평 캠핑 2",
+       "status": "confirmed",
+       "date": "2026-11-15",
+       "endDate": "2026-11-16",
+       "place": "가평",
+       "people": [
+        "민지"
+       ],
+       "type": "캠핑",
+       "area": "가평"
+      },
+      "evidence": [
+       {
+        "line": 1,
+        "quote": "11/15"
+       },
+       {
+        "line": 2,
+        "quote": "ㄱㄱ"
+       }
+      ],
+      "confidence": 0.9,
+      "why": "캠핑 합의"
+     }
+    ]
+   },
+   "expect": {
+    "predictions": [
+     {
+      "targetHas": "buy:장작",
+      "minProb": 0.55,
+      "maxProb": 0.7
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-11-11T07:00",
+   "tick": "predict",
+   "expect": {
+    "noCards": true
+   }
+  },
+  {
+   "at": "2026-11-12T07:00",
+   "tick": "predict",
+   "expect": {
+    "cards": [
+     "11/15 캠핑. 지난번엔 3일 전에 참나무 장작 10kg(2만 원)을 샀어요. 담아둘까요?"
+    ],
+    "cardCount": 1
+   }
+  },
+  {
+   "at": "2026-11-12T07:05",
+   "tick": "predict",
+   "expect": {
+    "noCards": true
+   }
+  },
+  {
+   "approve": "cart.add",
+   "expect": {
+    "notes": [
+     {
+      "textHas": "장작",
+      "minConf": 0.7
+     }
+    ]
+   }
+  }
+ ]
+}

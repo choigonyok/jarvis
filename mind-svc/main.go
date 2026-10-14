@@ -144,6 +144,11 @@ func main() {
 		log.Warn("MIND_MEMORY_URL 이 없어 기억할 사실은 장부에만 쌓습니다")
 	}
 
+	// Jobs: a cart job goes to jobs-svc (the agent's browser runs it).
+	var jobs act.Jobs
+	if url := os.Getenv("JOBS_URL"); mode == "stack" && url != "" {
+		jobs = act.JobsSvc{URL: url, Token: token}
+	}
 	// Photos: albums go to Immich when it is there.
 	var photos act.Photos
 	if url, key := os.Getenv("IMMICH_URL"), os.Getenv("IMMICH_API_KEY"); mode == "stack" && url != "" && key != "" {
@@ -154,7 +159,7 @@ func main() {
 		Store: st, Log: logOut, LLM: client, Calendar: calendar, Notifier: notifier,
 		Loc: loc, Now: clk.Now, Logger: log, Interpret: cfg, Settle: settle,
 		Policy: gate.DefaultPolicy(), URL: getenv("MIND_UI_URL", "http://localhost:8102/"), Mode: mode,
-		Memory: mem, PlanEvents: os.Getenv("MIND_PLAN_EVENTS") == "true", Photos: photos,
+		Memory: mem, PlanEvents: os.Getenv("MIND_PLAN_EVENTS") == "true", Photos: photos, Jobs: jobs,
 	})
 	if !client.Ready() {
 		log.Warn("LLM 키(MIND_ANTHROPIC_API_KEY)가 없어 대화를 해석하지 않습니다. 메시지는 쌓아 둡니다.")

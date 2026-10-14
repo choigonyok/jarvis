@@ -34,6 +34,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/mind"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
+	"github.com/choigonyok/jarvis/mind-svc/internal/reflect"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 	"github.com/choigonyok/jarvis/mind-svc/internal/world"
 )
@@ -50,6 +51,8 @@ type Scenario struct {
 	// Judge is the common-sense answers for the scripted run, by a word of
 	// the item they are about.
 	Judge map[string]json.RawMessage `json:"judge,omitempty"`
+	// Reflect is the night's hypotheses for the scripted run.
+	Reflect json.RawMessage `json:"reflect,omitempty"`
 }
 
 // Turn is one step: messages arrive and the room is read, or the person
@@ -58,6 +61,7 @@ type Turn struct {
 	Messages []Msg  `json:"messages,omitempty"`
 	Approve  string `json:"approve,omitempty"` // the latest pending intent of this kind
 	Reject   string `json:"reject,omitempty"`
+	Reason   string `json:"reason,omitempty"`  // the reason given with a reject
 	Undo     string `json:"undo,omitempty"`    // the latest executed intent of this kind
 	Advance  string `json:"advance,omitempty"` // move the clock, firing timers
 	Tick     string `json:"tick,omitempty"`
@@ -112,6 +116,32 @@ type Expect struct {
 	Links    []LinkMatch    `json:"links,omitempty"`
 	NoLinks  []LinkMatch    `json:"noLinks,omitempty"`
 	Patterns []PatternMatch `json:"patterns,omitempty"`
+	// Notes that must be there and must not; predictions that must be.
+	Notes       []NoteMatch `json:"notes,omitempty"`
+	NoNotes     []NoteMatch `json:"noNotes,omitempty"`
+	Predictions []PredMatch `json:"predictions,omitempty"`
+	// Infos: lines raised this turn (info intents), each by a word of the title.
+	Infos []string `json:"infos,omitempty"`
+}
+
+// NoteMatch is a partial description of a note.
+type NoteMatch struct {
+	TextHas string  `json:"textHas"`
+	Status  string  `json:"status,omitempty"`
+	MinConf float64 `json:"minConf,omitempty"`
+	MaxConf float64 `json:"maxConf,omitempty"`
+	Except  string  `json:"except,omitempty"`  // a condition it must carry
+	Feature string  `json:"feature,omitempty"` // its rule's feature
+}
+
+// PredMatch is a partial description of a prediction.
+type PredMatch struct {
+	TargetHas string  `json:"targetHas"`
+	MinProb   float64 `json:"minProb,omitempty"`
+	MaxProb   float64 `json:"maxProb,omitempty"`
+	Scored    *bool   `json:"scored,omitempty"`
+	Outcome   *bool   `json:"outcome,omitempty"`
+	Surprise  *bool   `json:"surprise,omitempty"`
 }
 
 // LinkMatch is a partial description of a link: From is an occurrence id
@@ -266,6 +296,12 @@ func Scripted(sc Scenario) llm.Client {
 	}
 	n := 0
 	return &llm.Script{Answer: func(system, user string) (string, error) {
+		if system == reflect.System {
+			if len(sc.Reflect) == 0 {
+				return `{"hypotheses":[]}`, nil
+			}
+			return string(sc.Reflect), nil
+		}
 		if system == link.JudgeSystem {
 			for word, answer := range sc.Judge {
 				if strings.Contains(user, word) {
@@ -372,7 +408,7 @@ func Run(ctx context.Context, sc Scenario, client llm.Client, loc *time.Location
 			if t.Approve != "" {
 				_, err = m.Gate.Approve(ctx, id)
 			} else {
-				_, err = m.Gate.Reject(ctx, id)
+				_, err = m.Gate.RejectWhy(ctx, id, t.Reason)
 			}
 			if err != nil {
 				fail(i, "%v", err)
@@ -426,6 +462,9 @@ func Run(ctx context.Context, sc Scenario, client llm.Client, loc *time.Location
 				fail(i, "%s", f)
 			}
 			for _, f := range checkLinks(ctx, st, *t.Expect) {
+				fail(i, "%s", f)
+			}
+			for _, f := range checkSelf(ctx, st, *t.Expect, seen) {
 				fail(i, "%s", f)
 			}
 			if t.Expect.Now != nil {
@@ -766,6 +805,80 @@ func checkLinks(ctx context.Context, st store.Store, ex Expect) []string {
 		if !found {
 			b, _ := json.Marshal(want)
 			out = append(out, "이런 패턴 수가 없음: "+string(b)+" · 있는 것: "+strings.Join(seen, ", "))
+		}
+	}
+	return out
+}
+
+func checkSelf(ctx context.Context, st store.Store, ex Expect, seen map[string]bool) []string {
+	var out []string
+	notes, _ := st.Notes(ctx)
+	show := func() string {
+		var parts []string
+		for _, n := range notes {
+			parts = append(parts, fmt.Sprintf("[%s %s %.2f]", n.Text, n.Status, n.Confidence))
+		}
+		return strings.Join(parts, " ")
+	}
+	match := func(n model.Note, w NoteMatch) bool {
+		if w.Feature != "" && (n.Rule == nil || n.Rule.Feature != w.Feature) {
+			return false
+		}
+		if !strings.Contains(n.Text, w.TextHas) || w.Status != "" && n.Status != w.Status ||
+			w.MinConf > 0 && n.Confidence < w.MinConf-1e-9 || w.MaxConf > 0 && n.Confidence > w.MaxConf+1e-9 {
+			return false
+		}
+		if w.Except != "" && (n.Rule == nil || !slices.ContainsFunc(n.Rule.Except, func(e string) bool { return strings.Contains(e, w.Except) })) {
+			return false
+		}
+		return true
+	}
+	for _, w := range ex.Notes {
+		if !slices.ContainsFunc(notes, func(n model.Note) bool { return match(n, w) }) {
+			b, _ := json.Marshal(w)
+			out = append(out, "이런 노트가 없음: "+string(b)+" · 지금: "+show())
+		}
+	}
+	for _, w := range ex.NoNotes {
+		if slices.ContainsFunc(notes, func(n model.Note) bool { return match(n, w) }) {
+			b, _ := json.Marshal(w)
+			out = append(out, "있으면 안 되는 노트: "+string(b)+" · 지금: "+show())
+		}
+	}
+	if len(ex.Predictions) > 0 {
+		prs, _ := st.Predictions(ctx, time.Time{}, time.Date(3000, 1, 1, 0, 0, 0, 0, time.UTC))
+		var parts []string
+		for _, p := range prs {
+			parts = append(parts, fmt.Sprintf("[%s %.2f]", p.Target, p.Prob))
+		}
+		for _, w := range ex.Predictions {
+			found := false
+			for _, p := range prs {
+				if !strings.Contains(p.Target, w.TargetHas) || w.MinProb > 0 && p.Prob < w.MinProb-1e-9 || w.MaxProb > 0 && p.Prob > w.MaxProb+1e-9 ||
+					w.Scored != nil && (p.ScoredAt != nil) != *w.Scored || w.Outcome != nil && (p.Outcome == nil || *p.Outcome != *w.Outcome) ||
+					w.Surprise != nil && p.Surprise != *w.Surprise {
+					continue
+				}
+				found = true
+			}
+			if !found {
+				b, _ := json.Marshal(w)
+				out = append(out, "이런 예측이 없음: "+string(b)+" · 지금: "+strings.Join(parts, " "))
+			}
+		}
+	}
+	if len(ex.Infos) > 0 {
+		intents, _ := st.Intents(ctx, 10000)
+		var titles []string
+		for _, in := range intents {
+			if !seen[in.ID] && in.Kind == "info" {
+				titles = append(titles, in.Title)
+			}
+		}
+		for _, w := range ex.Infos {
+			if !slices.ContainsFunc(titles, func(t string) bool { return strings.Contains(t, w) }) {
+				out = append(out, fmt.Sprintf("%q 알림이 나와야 함 · 나온 것: %v", w, titles))
+			}
 		}
 	}
 	return out

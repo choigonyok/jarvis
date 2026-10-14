@@ -95,6 +95,9 @@ type Gate struct {
 	out    *slog.Logger
 
 	mu sync.Mutex
+	// OnDecide hears every intent the operator answered (approved, turned
+	// down, undid) - what notes learn from.
+	OnDecide func(ctx context.Context, in model.Intent)
 }
 
 func New(st store.Store, acts *act.Registry, n act.Notifier, log obs.Log, p Policy, loc *time.Location, now func() time.Time, url string, out *slog.Logger) *Gate {
@@ -111,6 +114,15 @@ func (g *Gate) Submit(ctx context.Context, in model.Intent) (model.Intent, error
 	in.Status = model.Pending
 	if in.Evidence == nil {
 		in.Evidence = []model.Evidence{}
+	}
+	// The ledger first: a topic raised, approved or turned down lately is
+	// not raised again - not even to replace its own open question.
+	if quiet, why, err := g.quietTopic(ctx, in); err != nil {
+		return in, err
+	} else if quiet {
+		at := g.now()
+		in.Decision, in.Status, in.Why, in.DecidedBy, in.DecidedAt = model.Drop, model.Dropped, why, "policy", &at
+		return in, g.st.PutIntent(ctx, in)
 	}
 	// A newer intent about the same thing replaces a question still open:
 	// the plan moved again before anyone answered.
@@ -138,13 +150,6 @@ func (g *Gate) Submit(ctx context.Context, in model.Intent) (model.Intent, error
 	a, ok := g.acts.For(in.Kind)
 	if !ok {
 		in.Status, in.Error = model.Failed, "이 행동을 할 수 있는 곳이 없습니다"
-		return in, g.st.PutIntent(ctx, in)
-	}
-	if quiet, why, err := g.quietTopic(ctx, in); err != nil {
-		return in, err
-	} else if quiet {
-		at := g.now()
-		in.Decision, in.Status, in.Why, in.DecidedBy, in.DecidedAt = model.Drop, model.Dropped, why, "policy", &at
 		return in, g.st.PutIntent(ctx, in)
 	}
 	if p, ok := a.(act.Preparer); ok {
@@ -225,7 +230,7 @@ func (g *Gate) Approve(ctx context.Context, id string) (model.Intent, error) {
 	g.run(ctx, a, &in, "user")
 	_ = g.st.CountPolicy(ctx, in.Skill, in.ContextKey(), model.OutcomeApproved, g.now())
 	g.closeCard(ctx, in)
-	return in, g.st.PutIntent(ctx, in)
+	return in, g.decided(ctx, in)
 }
 
 // Reject turns down an intent that was asked.
@@ -249,7 +254,7 @@ func (g *Gate) RejectWhy(ctx context.Context, id, reason string) (model.Intent, 
 	}
 	_ = g.st.CountPolicy(ctx, in.Skill, in.ContextKey(), model.OutcomeRejected, at)
 	g.closeCard(ctx, in)
-	return in, g.st.PutIntent(ctx, in)
+	return in, g.decided(ctx, in)
 }
 
 // Undo takes back something done. The result is fed back as an observation,
@@ -276,7 +281,18 @@ func (g *Gate) Undo(ctx context.Context, id string) (model.Intent, error) {
 	g.observe(ctx, obs.ActionUndone, in, res)
 	_ = g.st.CountPolicy(ctx, in.Skill, in.ContextKey(), model.OutcomeUndone, g.now())
 	g.closeCard(ctx, in)
-	return in, g.st.PutIntent(ctx, in)
+	return in, g.decided(ctx, in)
+}
+
+// decided records an answered intent and tells whoever learns from it.
+func (g *Gate) decided(ctx context.Context, in model.Intent) error {
+	if err := g.st.PutIntent(ctx, in); err != nil {
+		return err
+	}
+	if g.OnDecide != nil {
+		g.OnDecide(ctx, in)
+	}
+	return nil
 }
 
 // Withdraw drops a skill's open questions about an entity.

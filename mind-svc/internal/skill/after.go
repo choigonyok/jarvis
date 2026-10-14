@@ -42,8 +42,8 @@ func (After) OnChange(ctx context.Context, v View, e model.Entity, changes []mod
 	now := v.Now()
 	at := end
 	if st.Status == model.Done || at.Before(now) {
-		if now.Sub(end) > recent && st.Status != model.Done {
-			return Result{}
+		if now.Sub(end) > recent {
+			return Result{} // long over: closed by the night, not news
 		}
 		at = now
 	}

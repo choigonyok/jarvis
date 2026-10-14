@@ -214,6 +214,20 @@
       "rel": "prep_for",
       "minConf": 0.65
      }
+    ],
+    "notes": [
+     {
+      "textHas": "캠핑 며칠 전에 장작을 산다",
+      "status": "hypothesis"
+     }
+    ],
+    "noNotes": [
+     {
+      "textHas": "생수"
+     },
+     {
+      "textHas": "프로틴"
+     }
     ]
    }
   },
@@ -395,6 +409,17 @@
       "kindA": "캠핑",
       "kindB": "생수",
       "support": 3
+     }
+    ],
+    "notes": [
+     {
+      "textHas": "생수를 산다",
+      "status": "hypothesis"
+     }
+    ],
+    "noNotes": [
+     {
+      "textHas": "프로틴"
      }
     ]
    }

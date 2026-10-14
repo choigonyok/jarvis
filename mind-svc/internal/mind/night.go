@@ -5,11 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/link"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+	"github.com/choigonyok/jarvis/mind-svc/internal/world"
 )
 
 // The night (03:00) tidies what the day left: the repetition counts gain the
@@ -34,6 +37,10 @@ func (m *Mind) Night(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := m.closePast(ctx, now); err != nil {
+		return err
+	}
+	var kinds []string
 	for _, p := range ended {
 		if err := m.countPlan(ctx, p); err != nil {
 			return err
@@ -41,9 +48,23 @@ func (m *Mind) Night(ctx context.Context) error {
 		if err := m.corroborate(ctx, p); err != nil {
 			return err
 		}
+		if !slices.Contains(kinds, p.State.Type) {
+			kinds = append(kinds, p.State.Type)
+		}
 	}
 	if err := m.Opts.Store.SetCursor(ctx, "night:patterns", now.UnixMilli()); err != nil {
 		return err
+	}
+	if err := m.notesFromPatterns(ctx, kinds); err != nil {
+		return err
+	}
+	// What was predicted for yesterday is known now; what missed is looked
+	// at, and only that.
+	if _, err := m.Predict.Score(ctx); err != nil {
+		return err
+	}
+	if _, err := m.Reflect.Night(ctx); err != nil {
+		m.Opts.Logger.Warn("성찰하지 못했습니다", "err", err)
 	}
 	for _, step := range m.nightly {
 		if err := step(ctx); err != nil {
@@ -73,6 +94,31 @@ func (m *Mind) ended(ctx context.Context, since, until time.Time) ([]model.Entit
 		}
 	}
 	return out, nil
+}
+
+// closePast marks done the confirmed plans that are over: a trip last month
+// is not still "confirmed", and a conversation about the next one is not
+// read as moving it.
+func (m *Mind) closePast(ctx context.Context, now time.Time) error {
+	loc := m.Opts.Loc
+	plans, err := m.Opts.Store.PlansOn(ctx, now.In(loc).AddDate(0, 0, -30).Format("2006-01-02"), now.In(loc).Format("2006-01-02"))
+	if err != nil {
+		return err
+	}
+	for _, p := range plans {
+		if p.State.Status != model.Confirmed {
+			continue
+		}
+		sp, ok := m.World.Span(ctx, p, now, loc)
+		if !ok || now.Sub(sp.End) < 3*time.Hour {
+			continue
+		}
+		if _, _, err := m.World.Update(ctx, p.ID, func(s *model.State) bool { s.Status = model.Done; return true },
+			world.Meta{Actor: "observer", Why: "날짜가 지남"}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // countPlan adds one plan to the repetition counts: one more plan of its
@@ -133,7 +179,8 @@ func (m *Mind) corroborate(ctx context.Context, p model.Entity) error {
 	}
 	now := m.Opts.Now()
 	for _, l := range links {
-		if l.To != p.ID || (l.Rel != model.PrepFor && l.Rel != model.UsedDuring) || l.State != model.Estimated || l.By == "user" {
+		if l.To != p.ID || (l.Rel != model.PrepFor && l.Rel != model.UsedDuring) || l.State != model.Estimated || l.By == "user" ||
+			strings.Contains(l.Why, link.Happened) {
 			continue
 		}
 		up := math.Min(0.9, math.Round((l.Confidence+0.1)*100)/100)
@@ -141,7 +188,7 @@ func (m *Mind) corroborate(ctx context.Context, p model.Entity) error {
 			continue
 		}
 		l.Confidence, l.UpdatedAt = up, now
-		l.Why += " · 일정이 실제로 있었음"
+		l.Why += link.Happened
 		if err := m.Opts.Store.PutLink(ctx, l); err != nil {
 			return err
 		}
@@ -167,18 +214,27 @@ func (m *Mind) RebuildPatterns(ctx context.Context) (int, error) {
 	return len(ended), m.Opts.Store.SetCursor(ctx, "night:patterns", m.Opts.Now().UnixMilli())
 }
 
-// Tick runs a time of day: the night's work, or a tick the skills hear.
+// Tick runs a time of day: the night's work, the morning's predictions,
+// or a tick the skills hear.
 func (m *Mind) Tick(ctx context.Context, name string) error {
-	if name == "night" {
+	switch name {
+	case "night":
 		return m.Night(ctx)
+	case "predict":
+		return m.Morning(ctx)
 	}
 	m.Attn.Tick(ctx, name)
 	return nil
 }
 
-// nights runs the night once a day at 03:00, or the first moment after,
-// remembering across restarts that it did.
+// nights runs the night once a day at 03:00.
 func (m *Mind) nights(ctx context.Context, every time.Duration) {
+	m.daily(ctx, every, "tick:night", nightAt, m.Night)
+}
+
+// daily runs step once a day at minute (after midnight), or the first
+// moment after, remembering across restarts that it did.
+func (m *Mind) daily(ctx context.Context, every time.Duration, cursor string, minute int, step func(context.Context) error) {
 	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
@@ -188,19 +244,19 @@ func (m *Mind) nights(ctx context.Context, every time.Duration) {
 		case <-t.C:
 		}
 		now := m.Opts.Now().In(m.Opts.Loc)
-		if now.Hour()*60+now.Minute() < nightAt {
+		if now.Hour()*60+now.Minute() < minute {
 			continue
 		}
 		today, _ := strconv.ParseInt(now.Format("20060102"), 10, 64)
-		last, err := m.Opts.Store.Cursor(ctx, "tick:night")
+		last, err := m.Opts.Store.Cursor(ctx, cursor)
 		if err != nil || last >= today {
 			continue
 		}
-		if err := m.Opts.Store.SetCursor(ctx, "tick:night", today); err != nil {
+		if err := m.Opts.Store.SetCursor(ctx, cursor, today); err != nil {
 			continue
 		}
-		if err := m.Night(ctx); err != nil {
-			m.Opts.Logger.Warn("밤 정리를 하지 못했습니다", "err", fmt.Sprint(err))
+		if err := step(ctx); err != nil {
+			m.Opts.Logger.Warn("하루 한 번 하는 일을 하지 못했습니다", "what", cursor, "err", fmt.Sprint(err))
 		}
 	}
 }

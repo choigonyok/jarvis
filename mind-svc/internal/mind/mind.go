@@ -27,6 +27,9 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/memory"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
+	"github.com/choigonyok/jarvis/mind-svc/internal/predict"
+	"github.com/choigonyok/jarvis/mind-svc/internal/reflect"
+	"github.com/choigonyok/jarvis/mind-svc/internal/self"
 	"github.com/choigonyok/jarvis/mind-svc/internal/skill"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 	"github.com/choigonyok/jarvis/mind-svc/internal/world"
@@ -56,6 +59,8 @@ type Options struct {
 	Photos act.Photos
 	// Drafter writes the messages the operator may send; nil: a template.
 	Drafter act.Drafter
+	// Jobs is where browser jobs are made (jobs-svc); nil keeps them in memory.
+	Jobs act.Jobs
 }
 
 type Mind struct {
@@ -68,8 +73,13 @@ type Mind struct {
 	Skills   []skill.Skill
 	Remember *Remember // nil without long-term memory
 	Link     *link.Linker
-	// nightly is the night's further steps, in order (reflection, notes).
-	nightly []func(ctx context.Context) error
+	Self     *self.Self
+	Predict  *predict.Predictor
+	Reflect  *reflect.Reflector
+	// nightly and mornings are further steps of the night and the morning,
+	// in order.
+	nightly  []func(ctx context.Context) error
+	mornings []func(ctx context.Context) error
 }
 
 func New(o Options) *Mind {
@@ -85,8 +95,16 @@ func New(o Options) *Mind {
 	}
 	m.Conv = interpret.NewConversation(cfg, o.Store, m.World, o.LLM, o.Loc, o.Now, o.Logger)
 	m.Actions = &interpret.Actions{World: m.World}
-	m.Link = &link.Linker{St: o.Store, World: m.World, Loc: o.Loc, Now: o.Now, Log: o.Logger,
-		Judge: &link.Judge{St: o.Store, LLM: o.LLM}}
+	judge := &link.Judge{St: o.Store, LLM: o.LLM}
+	m.Link = &link.Linker{St: o.Store, World: m.World, Loc: o.Loc, Now: o.Now, Log: o.Logger, Judge: judge}
+	m.Self = &self.Self{St: o.Store, Now: o.Now}
+	m.Predict = &predict.Predictor{St: o.Store, World: m.World, Judge: judge, Loc: o.Loc, Now: o.Now}
+	m.Reflect = &reflect.Reflector{St: o.Store, LLM: o.LLM, Predict: m.Predict, Self: m.Self, Loc: o.Loc, Now: o.Now}
+	m.Link.OnPlan = func(ctx context.Context, e model.Entity) {
+		if _, err := m.Predict.Prep(ctx, e); err != nil {
+			o.Logger.Warn("준비물 예측을 하지 못했습니다", "plan", e.ID, "err", err)
+		}
+	}
 	m.World.Listen(m.Link.Watch)
 	notifier := o.Notifier
 	if notifier == nil {
@@ -96,9 +114,14 @@ func New(o Options) *Mind {
 	if photos == nil {
 		photos = &act.MemoryPhotos{}
 	}
+	jobs := o.Jobs
+	if jobs == nil {
+		jobs = &act.MemoryJobs{}
+	}
 	acts := act.NewRegistry(act.CalendarActuator{Cal: o.Calendar}, act.Note{},
-		act.SettleActuator{Drafts: o.Drafter}, act.PhotosActuator{Photos: photos})
+		act.SettleActuator{Drafts: o.Drafter}, act.PhotosActuator{Photos: photos}, act.CartActuator{Jobs: jobs})
 	m.Gate = gate.New(o.Store, acts, notifier, o.Log, o.Policy, o.Loc, o.Now, o.URL, o.Logger)
+	m.Gate.OnDecide = m.learn
 	m.Skills = []skill.Skill{skill.Schedule{}, skill.Loops{}, skill.Brief{}, skill.After{}}
 	m.Attn = attention.New(m.Skills, m.World, o.Store, m.Gate, o.Settle, o.Loc, o.Now, o.Logger)
 	m.Link.OnLink = m.Attn.OnLink
@@ -134,7 +157,15 @@ func (m *Mind) Handle(ctx context.Context, o obs.Observation) error {
 		if err := json.Unmarshal(o.Data, &ref); err != nil {
 			return nil
 		}
-		return m.Link.Occurrence(ctx, ref.ID)
+		if err := m.Link.Occurrence(ctx, ref.ID); err != nil {
+			return err
+		}
+		if occ, err := m.Opts.Store.Occurrence(ctx, ref.ID); err == nil {
+			if _, err := m.Predict.Match(ctx, occ); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 	return nil
 }
@@ -148,6 +179,7 @@ func (m *Mind) Run(ctx context.Context, every time.Duration) {
 	go m.Attn.Run(ctx, every)
 	go m.Link.Run(ctx, every)
 	go m.nights(ctx, 30*time.Second)
+	go m.daily(ctx, 30*time.Second, "tick:predict", morningAt, m.Morning)
 	if m.Remember != nil {
 		go m.Remember.Run(ctx, 15*time.Second)
 	}
@@ -293,6 +325,25 @@ type Snapshot struct {
 	Aliases   []model.Alias         `json:"aliases"`
 	Memory    bool                  `json:"memory"` // long-term memory is connected
 	Situation world.Situation       `json:"situation"`
+	// What is believed about the operator, and how well it predicts.
+	Notes       []model.Note       `json:"notes"`
+	Links       []LinkView         `json:"links"`
+	Predictions []model.Prediction `json:"predictions"`
+	Brier       *Brier             `json:"brier,omitempty"`
+	Patterns    []model.Pattern    `json:"patterns"`
+}
+
+// LinkView is a link with the names of its ends, for the console.
+type LinkView struct {
+	model.Link
+	FromTitle string `json:"fromTitle"`
+	ToTitle   string `json:"toTitle"`
+}
+
+// Brier is how well the last fortnight's predictions did.
+type Brier struct {
+	Score float64 `json:"score"`
+	N     int     `json:"n"`
 }
 
 type LLMState struct {
@@ -352,6 +403,40 @@ func (m *Mind) Snapshot(ctx context.Context) (Snapshot, error) {
 	if s.Situation, err = m.Situation(ctx); err != nil {
 		return s, err
 	}
+	if s.Notes, err = st.Notes(ctx); err != nil {
+		return s, err
+	}
+	now := m.Opts.Now()
+	if s.Predictions, err = st.Predictions(ctx, now.Add(-14*24*time.Hour), now.Add(14*24*time.Hour)); err != nil {
+		return s, err
+	}
+	if score, n, err := m.Predict.Brier(ctx, now.Add(-14*24*time.Hour), now); err == nil && n > 0 {
+		s.Brier = &Brier{Score: score, N: n}
+	}
+	if s.Patterns, err = st.Patterns(ctx, ""); err != nil {
+		return s, err
+	}
+	links, err := st.LinksSince(ctx, now.Add(-60*24*time.Hour))
+	if err != nil {
+		return s, err
+	}
+	for i := len(links) - 1; i >= 0 && len(s.Links) < 60; i-- {
+		l := links[i]
+		if l.Rel == model.With {
+			continue
+		}
+		v := LinkView{Link: l}
+		if o, err := st.Occurrence(ctx, l.From); err == nil {
+			v.FromTitle = o.Title
+			if v.FromTitle == "" {
+				v.FromTitle = o.Kind + " " + o.At.In(m.Opts.Loc).Format("01/02 15:04")
+			}
+		}
+		if e, err := st.Entity(ctx, l.To); err == nil {
+			v.ToTitle = e.State.Title
+		}
+		s.Links = append(s.Links, v)
+	}
 	if n, ok := m.Opts.Notifier.(*act.MemoryNotifier); ok {
 		s.Notices = n.All()
 	}
@@ -365,6 +450,28 @@ func (m *Mind) Snapshot(ctx context.Context) (Snapshot, error) {
 }
 
 func jsonUnmarshal(b []byte, v any) error { return json.Unmarshal(b, v) }
+
+// DecideLink is the operator's word on a link: it is so (confirmed) or it
+// is not (rejected). Neither the rules nor the judge overwrite it after.
+func (m *Mind) DecideLink(ctx context.Context, from, to, rel, state string) (model.Link, error) {
+	if state != model.Confirmed && state != model.Rejected {
+		return model.Link{}, fmt.Errorf("모르는 상태 %q", state)
+	}
+	links, err := m.Opts.Store.LinksOf(ctx, from)
+	if err != nil {
+		return model.Link{}, err
+	}
+	for _, l := range links {
+		if l.To == to && l.Rel == rel {
+			l.State, l.By, l.UpdatedAt = state, "user", m.Opts.Now()
+			if state == model.Confirmed {
+				l.Confidence = 1
+			}
+			return l, m.Opts.Store.PutLink(ctx, l)
+		}
+	}
+	return model.Link{}, model.ErrNotFound
+}
 
 // Situation is the world model's "right now", which the conversation is
 // shown every turn.

@@ -102,6 +102,25 @@ type Store interface {
 	Patterns(ctx context.Context, kindA string) ([]model.Pattern, error)
 	ResetPatterns(ctx context.Context) error
 
+	// Notes about the operator, with their versions. PutNote writes the
+	// note and records its version (Version must be the next one).
+	PutNote(ctx context.Context, n model.Note) error
+	Note(ctx context.Context, id string) (model.Note, error)
+	Notes(ctx context.Context) ([]model.Note, error)
+	NoteVersions(ctx context.Context, id string) ([]model.Note, error)
+
+	// Predictions, and the expectations they wait on.
+	PutPrediction(ctx context.Context, p model.Prediction) error
+	Prediction(ctx context.Context, id string) (model.Prediction, error)
+	// Predictions is every prediction due in [from, to).
+	Predictions(ctx context.Context, from, to time.Time) ([]model.Prediction, error)
+	// DuePredictions is the unscored predictions due by now.
+	DuePredictions(ctx context.Context, now time.Time) ([]model.Prediction, error)
+	PutExpectation(ctx context.Context, e model.Expectation) error
+	// OpenExpectations is the open expectations of a key.
+	OpenExpectations(ctx context.Context, key string) ([]model.Expectation, error)
+	Expectations(ctx context.Context, predictionID string) ([]model.Expectation, error)
+
 	// Aliases: names in conversation → memory nodes. Putting a name again
 	// moves it to the node given and counts it seen once more.
 	PutAlias(ctx context.Context, a model.Alias) error

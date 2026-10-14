@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"slices"
 	"strings"
 	"sync"
@@ -36,6 +37,9 @@ type Linker struct {
 	// Judge is common sense for purchases made for a plan; nil draws only
 	// the links that need none.
 	Judge *Judge
+	// OnPlan hears each changed plan after it was linked (predictions are
+	// made for it).
+	OnPlan func(ctx context.Context, e model.Entity)
 
 	mu      sync.Mutex
 	pending []string // plans changed, to be linked
@@ -90,6 +94,9 @@ func (l *Linker) Settle(ctx context.Context) {
 		}
 		if err := l.Plan(ctx, e); err != nil {
 			l.Log.Warn("일정을 잇지 못했습니다", "plan", id, "err", err)
+		}
+		if l.OnPlan != nil {
+			l.OnPlan(ctx, e)
 		}
 	}
 }
@@ -170,6 +177,9 @@ func (l *Linker) Plan(ctx context.Context, p model.Entity) error {
 }
 
 const early = 30 * time.Minute
+
+// Happened marks a link raised because its plan was seen to happen.
+const Happened = " · 일정이 실제로 있었음"
 
 func planned(p model.Entity) bool {
 	s := p.State.Status
@@ -263,6 +273,12 @@ func (l *Linker) put(ctx context.Context, link model.Link) error {
 	for _, e := range existing {
 		if e.To != link.To || e.Rel != link.Rel {
 			continue
+		}
+		if link.By == "judge" && strings.Contains(e.Why, Happened) && !strings.Contains(link.Why, Happened) {
+			// Judged again (the plan changed): the plan having happened still
+			// stands for it.
+			link.Confidence = min(0.9, math.Round((link.Confidence+0.1)*100)/100)
+			link.Why += Happened
 		}
 		if e.By == "user" || e.State == model.Rejected ||
 			e.State == link.State && e.Confidence == link.Confidence {

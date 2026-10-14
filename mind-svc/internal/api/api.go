@@ -15,6 +15,9 @@
 //	POST /api/intents/{id}/{approve|reject|undo}   reject takes {reason}
 //	POST /api/policy/rebuild          recount approval stats from the intents
 //	POST /api/patterns/rebuild        recount repetitions from the plans and purchases
+//	POST /api/notes/{id}              {status, text, reason} the operator on a note
+//	GET  /api/notes/{id}/versions     a note's versions, with why each
+//	POST /api/links                   {from, to, rel, state} the operator on a link
 //	GET  /api/entities/{id}/changes   an entity's history, with evidence
 //	POST /api/replay                  {after, limit} the log through a fresh loop, in memory
 //	GET  /api/recall?q=&person=       what is known: world model + long-term memory
@@ -105,6 +108,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/intents", s.auth(false, s.submit))
 	mux.HandleFunc("POST /api/intents/{id}/{action}", s.auth(false, s.decide))
 	mux.HandleFunc("POST /api/policy/rebuild", s.auth(false, s.rebuildPolicy))
+	mux.HandleFunc("POST /api/notes/{id}", s.auth(false, s.decideNote))
+	mux.HandleFunc("GET /api/notes/{id}/versions", s.auth(false, func(w http.ResponseWriter, r *http.Request) {
+		vs, err := s.m.Opts.Store.NoteVersions(r.Context(), r.PathValue("id"))
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"versions": vs})
+	}))
+	mux.HandleFunc("POST /api/links", s.auth(false, s.decideLink))
 	mux.HandleFunc("POST /api/patterns/rebuild", s.auth(false, func(w http.ResponseWriter, r *http.Request) {
 		n, err := s.m.RebuildPatterns(r.Context())
 		if err != nil {
@@ -338,6 +351,49 @@ func (s *Server) rebuildPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]int{"intents": n})
+}
+
+// decideNote is the operator confirming, rejecting or rewording a note.
+func (s *Server) decideNote(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Status string `json:"status"`
+		Text   string `json:"text"`
+		Reason string `json:"reason"`
+	}
+	if !readJSON(w, r, &in) {
+		return
+	}
+	n, err := s.m.Self.Decide(r.Context(), r.PathValue("id"), in.Status, in.Text, in.Reason)
+	switch {
+	case errors.Is(err, model.ErrNotFound):
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "그런 노트가 없습니다."})
+	case err != nil:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+	default:
+		writeJSON(w, http.StatusOK, n)
+	}
+}
+
+// decideLink is the operator saying a link is so, or is not.
+func (s *Server) decideLink(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		From  string `json:"from"`
+		To    string `json:"to"`
+		Rel   string `json:"rel"`
+		State string `json:"state"`
+	}
+	if !readJSON(w, r, &in) {
+		return
+	}
+	l, err := s.m.DecideLink(r.Context(), in.From, in.To, in.Rel, in.State)
+	switch {
+	case errors.Is(err, model.ErrNotFound):
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "그런 링크가 없습니다."})
+	case err != nil:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+	default:
+		writeJSON(w, http.StatusOK, l)
+	}
 }
 
 func (s *Server) decide(w http.ResponseWriter, r *http.Request) {

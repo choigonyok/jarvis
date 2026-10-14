@@ -29,6 +29,10 @@ type Memory struct {
 	things   map[string]string
 	cache    map[[2]string]model.Judgement
 	patterns map[[4]string]model.Pattern
+	notes    map[string]model.Note
+	versions map[string][]model.Note
+	preds    map[string]model.Prediction
+	expects  map[[2]string]model.Expectation
 	seq      int64
 }
 
@@ -47,6 +51,10 @@ func NewMemory() *Memory {
 		things:   map[string]string{},
 		cache:    map[[2]string]model.Judgement{},
 		patterns: map[[4]string]model.Pattern{},
+		notes:    map[string]model.Note{},
+		versions: map[string][]model.Note{},
+		preds:    map[string]model.Prediction{},
+		expects:  map[[2]string]model.Expectation{},
 	}
 }
 
@@ -615,4 +623,110 @@ func (m *Memory) ResetPatterns(context.Context) error {
 	defer m.mu.Unlock()
 	m.patterns = map[[4]string]model.Pattern{}
 	return nil
+}
+
+func (m *Memory) PutNote(_ context.Context, n model.Note) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n.Evidence = slices.Clone(n.Evidence)
+	m.notes[n.ID] = n
+	m.versions[n.ID] = append(m.versions[n.ID], n)
+	return nil
+}
+
+func (m *Memory) Note(_ context.Context, id string) (model.Note, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n, ok := m.notes[id]
+	if !ok {
+		return model.Note{}, model.ErrNotFound
+	}
+	return n, nil
+}
+
+func (m *Memory) Notes(_ context.Context) ([]model.Note, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []model.Note{}
+	for _, n := range m.notes {
+		out = append(out, n)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].CreatedAt.Before(out[j].CreatedAt) || out[i].CreatedAt.Equal(out[j].CreatedAt) && out[i].ID < out[j].ID
+	})
+	return out, nil
+}
+
+func (m *Memory) NoteVersions(_ context.Context, id string) ([]model.Note, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return slices.Clone(m.versions[id]), nil
+}
+
+func (m *Memory) PutPrediction(_ context.Context, p model.Prediction) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.preds[p.ID] = p
+	return nil
+}
+
+func (m *Memory) Prediction(_ context.Context, id string) (model.Prediction, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.preds[id]
+	if !ok {
+		return model.Prediction{}, model.ErrNotFound
+	}
+	return p, nil
+}
+
+func (m *Memory) Predictions(_ context.Context, from, to time.Time) ([]model.Prediction, error) {
+	return m.predsWhere(func(p model.Prediction) bool { return !p.Due.Before(from) && p.Due.Before(to) }), nil
+}
+
+func (m *Memory) DuePredictions(_ context.Context, now time.Time) ([]model.Prediction, error) {
+	return m.predsWhere(func(p model.Prediction) bool { return p.ScoredAt == nil && !p.Due.After(now) }), nil
+}
+
+func (m *Memory) predsWhere(keep func(model.Prediction) bool) []model.Prediction {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []model.Prediction{}
+	for _, p := range m.preds {
+		if keep(p) {
+			out = append(out, p)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Due.Before(out[j].Due) || out[i].Due.Equal(out[j].Due) && out[i].ID < out[j].ID
+	})
+	return out
+}
+
+func (m *Memory) PutExpectation(_ context.Context, e model.Expectation) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.expects[[2]string{e.PredictionID, e.Key}] = e
+	return nil
+}
+
+func (m *Memory) OpenExpectations(_ context.Context, key string) ([]model.Expectation, error) {
+	return m.expectsWhere(func(e model.Expectation) bool { return e.Key == key && e.State == "open" }), nil
+}
+
+func (m *Memory) Expectations(_ context.Context, predictionID string) ([]model.Expectation, error) {
+	return m.expectsWhere(func(e model.Expectation) bool { return e.PredictionID == predictionID }), nil
+}
+
+func (m *Memory) expectsWhere(keep func(model.Expectation) bool) []model.Expectation {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []model.Expectation{}
+	for _, e := range m.expects {
+		if keep(e) {
+			out = append(out, e)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].PredictionID+out[i].Key < out[j].PredictionID+out[j].Key })
+	return out
 }
