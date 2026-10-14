@@ -19,6 +19,7 @@
 //	GET  /api/notes/{id}/versions     a note's versions, with why each
 //	POST /api/links                   {from, to, rel, state} the operator on a link
 //	POST /api/replies/rebuild         re-index reply situations from the messages
+//	GET  /api/things                  what was bought in half a year, by class, with restock cycles
 //	GET  /api/entities/{id}/changes   an entity's history, with evidence
 //	POST /api/replay                  {after, limit} the log through a fresh loop, in memory
 //	GET  /api/recall?q=&person=       what is known: world model + long-term memory
@@ -124,6 +125,14 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, http.StatusOK, map[string]any{"versions": vs})
 	}))
 	mux.HandleFunc("POST /api/links", s.auth(false, s.decideLink))
+	mux.HandleFunc("GET /api/things", s.auth(false, func(w http.ResponseWriter, r *http.Request) {
+		things, err := s.m.Things(r.Context(), 0)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"things": things})
+	}))
 	mux.HandleFunc("POST /api/replies/rebuild", s.auth(false, func(w http.ResponseWriter, r *http.Request) {
 		n, err := s.m.RebuildReplies(r.Context())
 		if err != nil {

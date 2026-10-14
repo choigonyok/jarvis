@@ -111,6 +111,9 @@ func New(o Options) *Mind {
 		if _, err := m.Predict.Prep(ctx, e); err != nil {
 			o.Logger.Warn("준비물 예측을 하지 못했습니다", "plan", e.ID, "err", err)
 		}
+		if err := m.ceremony(ctx, e); err != nil {
+			o.Logger.Warn("경조사 장부를 보지 못했습니다", "plan", e.ID, "err", err)
+		}
 	}
 	m.World.Listen(m.Link.Watch)
 	notifier := o.Notifier
@@ -138,8 +141,8 @@ func New(o Options) *Mind {
 		m.learn(ctx, in)
 		m.answered(ctx, in)
 	}
-	m.mornings = append(m.mornings, m.people, m.gift)
-	m.nightly = append(m.nightly, m.expireQuestions, m.statedPreferences)
+	m.mornings = append(m.mornings, m.people, m.gift, m.weekend, m.restock)
+	m.nightly = append(m.nightly, m.expireQuestions, m.statedPreferences, m.deliveries)
 	m.Skills = []skill.Skill{skill.Schedule{}, skill.Loops{}, skill.Brief{}, skill.After{}}
 	m.Attn = attention.New(m.Skills, m.World, o.Store, m.Gate, o.Settle, o.Loc, o.Now, o.Logger)
 	m.Link.OnLink = m.Attn.OnLink
@@ -189,6 +192,9 @@ func (m *Mind) Handle(ctx context.Context, o obs.Observation) error {
 				return err
 			}
 			if err := m.late(ctx, occ); err != nil {
+				return err
+			}
+			if err := m.nearWish(ctx, occ); err != nil {
 				return err
 			}
 		}

@@ -1,0 +1,135 @@
+{
+ "name": "경조사 장부: 민수 결혼식이 잡히면 '내 결혼식 때 축의금 10만 원 받음'을 알려 준다",
+ "room": "minsu-wed",
+ "roomName": "민수",
+ "turns": [
+  {
+   "messages": [
+    {
+     "at": "2026-03-02T21:00",
+     "me": true,
+     "text": "민수야 결혼식 와줘서 고마워! 축의금 10만 원 잘 받았어"
+    },
+    {
+     "at": "2026-03-02T21:05",
+     "from": "민수",
+     "text": "ㅋㅋ 당연하지 축하해 형"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "remember",
+      "kind": "fact",
+      "set": {
+       "subject": "나",
+       "subjectKind": "Person",
+       "relation": "RECEIVED_FROM",
+       "object": "민수",
+       "objectKind": "Person",
+       "text": "내 결혼식 때 민수에게 축의금 10만 원을 받았다",
+       "validAt": "2026-03-01"
+      },
+      "evidence": [
+       {
+        "line": 1,
+        "quote": "축의금 10만 원 잘 받았어"
+       }
+      ],
+      "confidence": 0.9,
+      "why": "운영자가 직접 말함"
+     }
+    ]
+   },
+   "expect": {
+    "facts": [
+     {
+      "subject": "나",
+      "objectHas": "민수",
+      "textHasAny": [
+       "10만 원"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "messages": [
+    {
+     "at": "2026-10-15T20:00",
+     "from": "민수",
+     "text": "형 나 11월 21일에 결혼해!! 와줄 거지?"
+    },
+    {
+     "at": "2026-10-15T20:02",
+     "me": true,
+     "text": "헐 축하해!! 당연히 가지"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "create",
+      "kind": "plan",
+      "set": {
+       "title": "민수 결혼식",
+       "status": "confirmed",
+       "date": "2026-11-21",
+       "people": [
+        "민수"
+       ],
+       "type": "경조사"
+      },
+      "evidence": [
+       {
+        "line": 1,
+        "quote": "11월 21일에 결혼해"
+       },
+       {
+        "line": 2,
+        "quote": "당연히 가지"
+       }
+      ],
+      "confidence": 0.9,
+      "why": "청첩과 참석"
+     }
+    ]
+   },
+   "expect": {
+    "infos": [
+     "민수 결혼식(11/21) · 민수님과 주고받은 기록",
+     "10만 원"
+    ]
+   }
+  },
+  {
+   "messages": [
+    {
+     "at": "2026-10-16T09:00",
+     "from": "민수",
+     "text": "장소는 강남 웨딩홀이야"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "update",
+      "kind": "plan",
+      "ref": "P1",
+      "set": {
+       "place": "강남 웨딩홀"
+      },
+      "evidence": [
+       {
+        "line": 1,
+        "quote": "강남 웨딩홀"
+       }
+      ],
+      "confidence": 0.9,
+      "why": "장소"
+     }
+    ]
+   }
+  }
+ ]
+}

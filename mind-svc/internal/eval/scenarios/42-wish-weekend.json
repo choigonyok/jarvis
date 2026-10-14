@@ -1,0 +1,76 @@
+{
+ "name": "버킷리스트: 가고 싶다던 곳을 주말이 빈 금요일 아침에, 그리고 그 근처에 도착하면",
+ "room": "owner",
+ "roomName": "jarvis",
+ "turns": [
+  {
+   "messages": [
+    {
+     "at": "2026-09-01T22:00",
+     "me": true,
+     "text": "언젠가 제주 비자림 꼭 가보고 싶다"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "remember",
+      "kind": "fact",
+      "set": {
+       "subject": "나",
+       "subjectKind": "Person",
+       "relation": "WANTS_TO_VISIT",
+       "object": "비자림",
+       "objectKind": "Place",
+       "text": "나는 제주 비자림에 가보고 싶다"
+      },
+      "evidence": [
+       {
+        "line": 1,
+        "quote": "제주 비자림 꼭 가보고 싶다"
+       }
+      ],
+      "confidence": 0.85,
+      "why": "가고 싶은 곳"
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-10-22T07:00",
+   "tick": "predict",
+   "expect": {
+    "noCards": true
+   }
+  },
+  {
+   "at": "2026-10-23T07:00",
+   "tick": "predict",
+   "expect": {
+    "infos": [
+     "비자림 어때요?"
+    ],
+    "noCards": true
+   }
+  },
+  {
+   "at": "2026-11-12T10:05",
+   "occur": [
+    {
+     "id": "visit:jeju",
+     "kind": "visit",
+     "at": "2026-11-12T10:00",
+     "title": "비자림",
+     "place": "비자림",
+     "area": "구좌읍",
+     "class": "other"
+    }
+   ],
+   "expect": {
+    "infos": [
+     "비자림, 지금 근처예요"
+    ]
+   }
+  }
+ ]
+}

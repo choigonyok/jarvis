@@ -1,0 +1,85 @@
+{
+ "name": "가진 물건: 3주마다 사던 생수를 다음 차례 이틀 전 아침에 알려 준다",
+ "room": "owner",
+ "roomName": "jarvis",
+ "judge": {
+  "삼다수": {
+   "class": "생수",
+   "rel": "unrelated",
+   "plausibility": 0.1,
+   "why": "일상 소모품"
+  }
+ },
+ "turns": [
+  {
+   "at": "2026-10-13T11:00",
+   "occur": [
+    {
+     "id": "spending:w0",
+     "kind": "purchase",
+     "at": "2026-09-01T10:00",
+     "title": "쿠팡",
+     "class": "쇼핑",
+     "amount": 6000
+    },
+    {
+     "id": "spending:w0#1",
+     "kind": "purchase.item",
+     "at": "2026-09-01T10:00",
+     "title": "삼다수 2L 12병",
+     "class": "쇼핑",
+     "amount": 6000
+    },
+    {
+     "id": "spending:w1",
+     "kind": "purchase",
+     "at": "2026-09-22T10:00",
+     "title": "쿠팡",
+     "class": "쇼핑",
+     "amount": 6000
+    },
+    {
+     "id": "spending:w1#1",
+     "kind": "purchase.item",
+     "at": "2026-09-22T10:00",
+     "title": "삼다수 2L 12병",
+     "class": "쇼핑",
+     "amount": 6000
+    },
+    {
+     "id": "spending:w2",
+     "kind": "purchase",
+     "at": "2026-10-13T10:00",
+     "title": "쿠팡",
+     "class": "쇼핑",
+     "amount": 6000
+    },
+    {
+     "id": "spending:w2#1",
+     "kind": "purchase.item",
+     "at": "2026-10-13T10:00",
+     "title": "삼다수 2L 12병",
+     "class": "쇼핑",
+     "amount": 6000
+    }
+   ]
+  },
+  {
+   "at": "2026-10-25T07:00",
+   "tick": "predict",
+   "expect": {
+    "noCards": true
+   }
+  },
+  {
+   "at": "2026-11-01T07:00",
+   "tick": "predict",
+   "expect": {
+    "infos": [
+     "생수 살 때 됐어요 (보통 21일마다, 마지막 10/13)"
+    ],
+    "noCards": true
+   }
+  }
+ ]
+}

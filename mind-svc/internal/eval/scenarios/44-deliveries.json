@@ -1,0 +1,15 @@
+{
+ "name": "배달 1단계: 카드 결제로 배달 빈도와 때를 노트로 (메뉴는 못 읽음)",
+ "room": "owner",
+ "roomName": "jarvis",
+ "turns": [
+  {"at": "2026-10-20T23:00", "occur": [
+   {"id": "spending:d1", "kind": "purchase", "at": "2026-10-02T19:10", "title": "배달의민족", "class": "식비", "amount": 23000},
+   {"id": "spending:d2", "kind": "purchase", "at": "2026-10-09T19:40", "title": "배달의민족", "class": "식비", "amount": 19000},
+   {"id": "spending:d3", "kind": "purchase", "at": "2026-10-16T20:05", "title": "쿠팡이츠", "class": "식비", "amount": 27000},
+   {"id": "spending:d4", "kind": "purchase", "at": "2026-10-14T12:10", "title": "요기요", "class": "식비", "amount": 12000},
+   {"id": "spending:x1", "kind": "purchase", "at": "2026-10-15T12:10", "title": "김밥천국", "class": "식비", "amount": 8000}
+  ]},
+  {"at": "2026-10-21T03:00", "tick": "night", "expect": {"notes": [{"textHas": "배달은 최근 4주 4번(주 1.0회), 주로 저녁, 금요일에 많다", "status": "hypothesis"}]}}
+ ]
+}
