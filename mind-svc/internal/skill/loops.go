@@ -27,6 +27,9 @@ func (Loops) OnChange(_ context.Context, v View, e model.Entity, _ []model.Chang
 		if !strings.Contains(e.State.Due, "T") {
 			remind = at.Add(-9 * time.Hour) // 09:00 on the day
 		}
+		if e.State.Type == "정산" {
+			remind = at // the evening of the third day
+		}
 		if remind.Before(v.Now()) {
 			remind = v.Now()
 		}
@@ -46,6 +49,14 @@ func (Loops) OnTimer(_ context.Context, v View, e model.Entity, t model.Timer) R
 			who = "상대"
 		}
 		title = who + "가 하기로 한 것: " + title
+	}
+	if e.State.Type == "정산" {
+		// Money owed is a line in the evening, not a push: it is the
+		// other person's to do.
+		return Result{Intents: []model.Intent{{
+			Kind: "info", EntityID: e.ID, Title: e.State.Title + " - 아직이에요", Body: "기한 " + dueText(e.State.Due, v.Loc()),
+			Reason: "정산이 3일째 들어오지 않음", Confidence: 1,
+		}}}
 	}
 	return Result{Intents: []model.Intent{{
 		Kind: "info", EntityID: e.ID, Title: title, Body: "기한 " + dueText(e.State.Due, v.Loc()),

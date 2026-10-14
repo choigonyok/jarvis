@@ -144,11 +144,17 @@ func main() {
 		log.Warn("MIND_MEMORY_URL 이 없어 기억할 사실은 장부에만 쌓습니다")
 	}
 
+	// Photos: albums go to Immich when it is there.
+	var photos act.Photos
+	if url, key := os.Getenv("IMMICH_URL"), os.Getenv("IMMICH_API_KEY"); mode == "stack" && url != "" && key != "" {
+		photos = act.Immich{URL: url, Key: key, Public: os.Getenv("IMMICH_PUBLIC_URL")}
+	}
+
 	m := mind.New(mind.Options{
 		Store: st, Log: logOut, LLM: client, Calendar: calendar, Notifier: notifier,
 		Loc: loc, Now: clk.Now, Logger: log, Interpret: cfg, Settle: settle,
 		Policy: gate.DefaultPolicy(), URL: getenv("MIND_UI_URL", "http://localhost:8102/"), Mode: mode,
-		Memory: mem, PlanEvents: os.Getenv("MIND_PLAN_EVENTS") == "true",
+		Memory: mem, PlanEvents: os.Getenv("MIND_PLAN_EVENTS") == "true", Photos: photos,
 	})
 	if !client.Ready() {
 		log.Warn("LLM 키(MIND_ANTHROPIC_API_KEY)가 없어 대화를 해석하지 않습니다. 메시지는 쌓아 둡니다.")
@@ -166,9 +172,16 @@ func main() {
 				continue
 			}
 			s := &sensor.Messenger{Name: name, URL: url, Token: token, Store: st, Log: logOut, Exclude: exclude,
-				Backfill: duration("MIND_BACKFILL", 6*time.Hour), Every: duration("MIND_POLL", 5*time.Second), Out: log}
+				Backfill: duration("MIND_BACKFILL", 6*time.Hour), Every: duration("MIND_POLL", 5*time.Second), Out: log,
+				Payments: regexp.MustCompile(getenv("MIND_PAYMENT_ROOMS", `^(카카오페이|토스)$`)), Occur: m}
 			go s.Run(ctx)
 		}
+		// Structured sources, read by rule into occurrences: spending, workouts,
+		// the calendar (whose entries also become plans), photos.
+		structured := &sensor.Structured{Store: st, Observer: m, World: m.World, Token: token, Loc: loc, Out: log,
+			SpendingURL: os.Getenv("SPENDING_URL"), WorkoutURL: os.Getenv("WORKOUT_URL"), CalendarURL: os.Getenv("MIND_CALENDAR_READ_URL"),
+			ImmichURL: os.Getenv("IMMICH_URL"), ImmichKey: os.Getenv("IMMICH_API_KEY")}
+		go structured.Run(ctx, duration("MIND_STRUCTURED_POLL", 2*time.Minute))
 		if url := os.Getenv("CHAT_URL"); url != "" {
 			s := &sensor.Chat{URL: url, Token: token, Store: st, Log: logOut,
 				Backfill: duration("MIND_BACKFILL", 6*time.Hour), Every: duration("MIND_CHAT_POLL", 20*time.Second), Out: log}

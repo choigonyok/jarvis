@@ -22,6 +22,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/attention"
 	"github.com/choigonyok/jarvis/mind-svc/internal/gate"
 	"github.com/choigonyok/jarvis/mind-svc/internal/interpret"
+	"github.com/choigonyok/jarvis/mind-svc/internal/link"
 	"github.com/choigonyok/jarvis/mind-svc/internal/llm"
 	"github.com/choigonyok/jarvis/mind-svc/internal/memory"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
@@ -51,6 +52,10 @@ type Options struct {
 	// PlanEvents announces confirmed plans as memory.plan events, the shape
 	// the agent's suggestion engine already turns into calendar cards.
 	PlanEvents bool
+	// Photos is where albums are made (Immich); nil keeps them in memory.
+	Photos act.Photos
+	// Drafter writes the messages the operator may send; nil: a template.
+	Drafter act.Drafter
 }
 
 type Mind struct {
@@ -62,6 +67,7 @@ type Mind struct {
 	Gate     *gate.Gate
 	Skills   []skill.Skill
 	Remember *Remember // nil without long-term memory
+	Link     *link.Linker
 }
 
 func New(o Options) *Mind {
@@ -77,14 +83,22 @@ func New(o Options) *Mind {
 	}
 	m.Conv = interpret.NewConversation(cfg, o.Store, m.World, o.LLM, o.Loc, o.Now, o.Logger)
 	m.Actions = &interpret.Actions{World: m.World}
+	m.Link = &link.Linker{St: o.Store, World: m.World, Loc: o.Loc, Now: o.Now, Log: o.Logger}
+	m.World.Listen(m.Link.Watch)
 	notifier := o.Notifier
 	if notifier == nil {
 		notifier = act.EventsNotifier{Log: noticeLog{o.Log}, Out: o.Logger}
 	}
-	acts := act.NewRegistry(act.CalendarActuator{Cal: o.Calendar}, act.Note{})
+	photos := o.Photos
+	if photos == nil {
+		photos = &act.MemoryPhotos{}
+	}
+	acts := act.NewRegistry(act.CalendarActuator{Cal: o.Calendar}, act.Note{},
+		act.SettleActuator{Drafts: o.Drafter}, act.PhotosActuator{Photos: photos})
 	m.Gate = gate.New(o.Store, acts, notifier, o.Log, o.Policy, o.Loc, o.Now, o.URL, o.Logger)
-	m.Skills = []skill.Skill{skill.Schedule{}, skill.Loops{}, skill.Brief{}}
+	m.Skills = []skill.Skill{skill.Schedule{}, skill.Loops{}, skill.Brief{}, skill.After{}}
 	m.Attn = attention.New(m.Skills, m.World, o.Store, m.Gate, o.Settle, o.Loc, o.Now, o.Logger)
+	m.Link.OnLink = m.Attn.OnLink
 	if o.Memory != nil {
 		m.Attn.Recall = m.recallPeople
 	}
@@ -112,6 +126,12 @@ func (m *Mind) Handle(ctx context.Context, o obs.Observation) error {
 		m.Conv.Observe(msg)
 	case obs.ActionExecuted, obs.ActionUndone:
 		return m.Actions.Handle(ctx, o)
+	case obs.OccurrenceObserved:
+		var ref obs.OccurrenceRef
+		if err := json.Unmarshal(o.Data, &ref); err != nil {
+			return nil
+		}
+		return m.Link.Occurrence(ctx, ref.ID)
 	}
 	return nil
 }
@@ -123,6 +143,7 @@ func (m *Mind) Run(ctx context.Context, every time.Duration) {
 	}
 	go m.Conv.Run(ctx, every)
 	go m.Attn.Run(ctx, every)
+	go m.Link.Run(ctx, every)
 	if m.Remember != nil {
 		go m.Remember.Run(ctx, 15*time.Second)
 	}

@@ -147,6 +147,14 @@ func (g *Gate) Submit(ctx context.Context, in model.Intent) (model.Intent, error
 		in.Decision, in.Status, in.Why, in.DecidedBy, in.DecidedAt = model.Drop, model.Dropped, why, "policy", &at
 		return in, g.st.PutIntent(ctx, in)
 	}
+	if p, ok := a.(act.Preparer); ok {
+		prepared, err := p.Prepare(ctx, in.Kind, in.Payload)
+		if err != nil {
+			in.Status, in.Error = model.Failed, "준비 실패: "+err.Error()
+			return in, g.st.PutIntent(ctx, in)
+		}
+		in.Payload = prepared
+	}
 	preview, err := a.Preview(ctx, in.Kind, in.Payload)
 	if already := (*act.Already)(nil); errors.As(err, &already) {
 		// Nothing to do but know it: linked, not asked.

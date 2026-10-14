@@ -46,3 +46,18 @@ var romanized = map[string]string{
 	"yeongdeungpo-gu": "영등포", "dongjak-gu": "동작", "gwanak-gu": "관악", "seocho-gu": "서초", "gangnam-gu": "강남", "songpa-gu": "송파",
 	"gangdong-gu": "강동",
 }
+
+var cities = func() map[string]bool {
+	m := map[string]bool{}
+	for _, k := range romanized {
+		m[k] = true
+	}
+	return m
+}()
+
+// City is whether a region names a whole city, county or district - the
+// grain a photo's place comes in - rather than a neighbourhood.
+func City(s string) bool {
+	r := Region(s)
+	return r != "" && cities[r]
+}

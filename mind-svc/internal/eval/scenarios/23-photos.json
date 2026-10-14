@@ -1,0 +1,46 @@
+{
+  "name": "S7 데이트 사진: 일정 시간 안, 지수가 찍힌 사진 23장 → 5장 골라 보낼지 묻는다",
+  "room": "jisu-photos",
+  "roomName": "지수",
+  "turns": [
+    {
+      "messages": [
+        { "at": "2026-10-18T10:00", "from": "지수", "text": "오늘 1시에 성수에서 데이트 ㄱ" },
+        { "at": "2026-10-18T10:01", "me": true, "text": "좋아 1시에 성수!" }
+      ],
+      "script": {"changes":[{"op":"create","kind":"plan","set":{"title":"지수와 성수 데이트","status":"confirmed","date":"2026-10-18","start":"13:00","place":"성수","people":["지수"],"type":"데이트","area":"성수동"},"evidence":[{"line":1,"quote":"1시에 성수에서 데이트"},{"line":2,"quote":"좋아 1시에 성수"}],"confidence":0.9,"why":"합의"}]}
+    },
+    { "approve": "calendar.create" },
+    {
+      "at": "2026-10-18T19:30",
+      "occur": [
+        { "id": "photo:p01", "kind": "photo", "at": "2026-10-18T13:20", "area": "Seoul", "people": ["지수"] },
+        { "id": "photo:p02", "kind": "photo", "at": "2026-10-18T13:22", "area": "Seoul", "people": ["지수"], "class": "favorite" },
+        { "id": "photo:p03", "kind": "photo", "at": "2026-10-18T13:40", "area": "Seoul" },
+        { "id": "photo:p04", "kind": "photo", "at": "2026-10-18T14:05", "area": "Seoul", "people": ["지수"] },
+        { "id": "photo:p05", "kind": "photo", "at": "2026-10-18T14:30", "area": "Seoul" },
+        { "id": "photo:p06", "kind": "photo", "at": "2026-10-18T14:31", "area": "Seoul" },
+        { "id": "photo:p07", "kind": "photo", "at": "2026-10-18T14:50", "area": "Seoul", "people": ["지수"] },
+        { "id": "photo:p08", "kind": "photo", "at": "2026-10-18T15:10", "area": "Seoul" },
+        { "id": "photo:p09", "kind": "photo", "at": "2026-10-18T15:12", "area": "Seoul" },
+        { "id": "photo:p10", "kind": "photo", "at": "2026-10-18T15:30", "area": "Seoul", "people": ["지수"] },
+        { "id": "photo:p11", "kind": "photo", "at": "2026-10-18T15:45", "area": "Seoul" },
+        { "id": "photo:p12", "kind": "photo", "at": "2026-10-18T16:00", "area": "Seoul" },
+        { "id": "photo:p13", "kind": "photo", "at": "2026-10-18T16:20", "area": "Seoul", "people": ["지수"] },
+        { "id": "photo:p14", "kind": "photo", "at": "2026-10-18T16:40", "area": "Seoul" },
+        { "id": "photo:p15", "kind": "photo", "at": "2026-10-18T17:00", "area": "Seoul" },
+        { "id": "photo:p16", "kind": "photo", "at": "2026-10-18T17:05", "area": "Seoul", "people": ["지수"] },
+        { "id": "photo:p17", "kind": "photo", "at": "2026-10-18T17:30", "area": "Seoul" },
+        { "id": "photo:p18", "kind": "photo", "at": "2026-10-18T17:50", "area": "Seoul" },
+        { "id": "photo:p19", "kind": "photo", "at": "2026-10-18T18:10", "area": "Seoul" },
+        { "id": "photo:p20", "kind": "photo", "at": "2026-10-18T18:15", "area": "Seoul", "people": ["지수"] },
+        { "id": "photo:p21", "kind": "photo", "at": "2026-10-18T18:30", "area": "Seoul" },
+        { "id": "photo:p22", "kind": "photo", "at": "2026-10-18T18:40", "area": "Seoul" },
+        { "id": "photo:p23", "kind": "photo", "at": "2026-10-18T18:50", "area": "Seoul" },
+        { "id": "photo:x01", "kind": "photo", "at": "2026-10-18T11:00", "area": "Seoul" }
+      ],
+      "expect": { "cards": ["오늘 사진 23장", "지수에게 보낼까요"], "cardCount": 1 }
+    },
+    { "approve": "photos.album", "expect": { "noCards": true } }
+  ]
+}

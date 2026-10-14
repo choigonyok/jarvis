@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -194,6 +195,13 @@ func occurrences(t *testing.T, st Store) {
 	}
 	if none, _ := st.Occurrences(ctx, at.Add(2*time.Hour), at.Add(3*time.Hour)); len(none) != 0 {
 		t.Fatalf("구간 밖: %+v", none)
+	}
+	for i, ps := range []model.State{{Title: "캠핑", Date: "2026-10-06", EndDate: "2026-10-07"}, {Title: "저녁", Date: "2026-10-09"}, {Title: "언젠가"}} {
+		_, _, _ = st.Put(ctx, model.Entity{ID: fmt.Sprintf("plan_on%d", i), Kind: model.KindPlan, State: ps}, model.Change{Actor: "t", At: at})
+	}
+	on, _ := st.PlansOn(ctx, "2026-10-07", "2026-10-08")
+	if len(on) != 1 || on[0].State.Title != "캠핑" {
+		t.Fatalf("그날 걸친 일정: %+v", on)
 	}
 	l := model.Link{From: "spending:1#1", To: "plan_x", Rel: model.PrepFor, Confidence: 0.6, State: model.Estimated, By: "judge", CreatedAt: at, UpdatedAt: at}
 	_ = st.PutLink(ctx, l)

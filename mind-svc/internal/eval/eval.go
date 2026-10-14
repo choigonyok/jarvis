@@ -272,6 +272,7 @@ func Run(ctx context.Context, sc Scenario, client llm.Client, loc *time.Location
 	quiesce := func() {
 		for range 5 {
 			log.Drain()
+			m.Link.Settle(ctx)
 			m.Attn.Settle(ctx)
 		}
 		_, _ = m.Remember.Flush(ctx)

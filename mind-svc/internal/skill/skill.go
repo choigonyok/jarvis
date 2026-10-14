@@ -26,6 +26,13 @@ type Skill interface {
 	OnTick(ctx context.Context, v View, tick string) Result
 }
 
+// LinkAware is a skill that wants to hear when something is linked to an
+// entity it owns (a payment during a dinner); others hear only changes to
+// the entity itself.
+type LinkAware interface {
+	WantsLinks() bool
+}
+
 // View is the world as a skill may read it.
 type View interface {
 	Entity(ctx context.Context, id string) (model.Entity, error)
@@ -37,6 +44,11 @@ type View interface {
 	// "지수: 매운 음식을 못 먹음" - to put in front of the operator when it
 	// helps. Empty when memory has nothing or is not there.
 	Recall(ctx context.Context, people []string) []string
+	// Links is every link from or to an id; Occurrence one occurrence.
+	Links(ctx context.Context, id string) ([]model.Link, error)
+	Occurrence(ctx context.Context, id string) (model.Occurrence, error)
+	// Span is when a plan starts and (probably) ends.
+	Span(ctx context.Context, e model.Entity) (start, end time.Time, ok bool)
 }
 
 type Result struct {

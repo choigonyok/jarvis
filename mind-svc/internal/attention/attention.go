@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -66,6 +67,25 @@ func (a *Attention) OnChange(e model.Entity, c model.Change) {
 	}
 	b.changes = append(b.changes, c)
 	b.due = a.now().Add(a.settle)
+}
+
+// OnLink hands a new link to the skills that own its ends, as a change to
+// the entity would be: a payment during a dinner is news about the dinner.
+func (a *Attention) OnLink(_ context.Context, l model.Link) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, id := range []string{l.From, l.To} {
+		if !strings.HasPrefix(id, model.KindPlan+"_") && !strings.HasPrefix(id, model.KindLoop+"_") {
+			continue
+		}
+		b := a.pending[id]
+		if b == nil {
+			b = &batch{}
+			a.pending[id] = b
+		}
+		b.changes = append(b.changes, model.Change{EntityID: id, Actor: "linker", Why: "link " + l.Rel + " " + l.From, At: a.now()})
+		b.due = a.now().Add(a.settle)
+	}
 }
 
 // Waiting is how many entities are settling, for the console.
@@ -154,9 +174,18 @@ func (a *Attention) dispatch(ctx context.Context, id string, changes []model.Cha
 	if err != nil {
 		return
 	}
+	linksOnly := true
+	for _, c := range changes {
+		if c.Actor != "linker" {
+			linksOnly = false
+		}
+	}
 	for _, s := range a.skills {
 		if !s.Wants(e) {
 			continue
+		}
+		if l, ok := s.(skill.LinkAware); linksOnly && (!ok || !l.WantsLinks()) {
+			continue // a link is news only to a skill that reads links
 		}
 		mine := true
 		for _, c := range changes {
@@ -249,6 +278,19 @@ func (v view) IntentsFor(ctx context.Context, id string) ([]model.Intent, error)
 }
 func (v view) Now() time.Time      { return v.a.now() }
 func (v view) Loc() *time.Location { return v.a.loc }
+
+func (v view) Links(ctx context.Context, id string) ([]model.Link, error) {
+	return v.a.st.LinksOf(ctx, id)
+}
+
+func (v view) Occurrence(ctx context.Context, id string) (model.Occurrence, error) {
+	return v.a.st.Occurrence(ctx, id)
+}
+
+func (v view) Span(ctx context.Context, e model.Entity) (time.Time, time.Time, bool) {
+	sp, ok := v.a.world.Span(ctx, e, v.a.now(), v.a.loc)
+	return sp.Start, sp.End, ok
+}
 
 func (v view) Recall(ctx context.Context, people []string) []string {
 	if v.a.Recall == nil || len(people) == 0 {

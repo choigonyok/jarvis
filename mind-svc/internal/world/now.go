@@ -19,6 +19,9 @@ type Situation struct {
 	At    time.Time `json:"at"`
 	Plans []Ongoing `json:"plans"`
 	Next  *Ongoing  `json:"next,omitempty"` // the next plan today, if none is going on
+	// Today is today's plans with no time: on the day, but not "going on"
+	// at any particular moment.
+	Today []Ongoing `json:"today,omitempty"`
 	Clues []Clue    `json:"clues"`
 	Guess *Guess    `json:"guess,omitempty"`
 	Text  string    `json:"text"`
@@ -107,6 +110,12 @@ func (w *World) Situation(ctx context.Context, now time.Time, loc *time.Location
 		if !ok {
 			continue
 		}
+		if st.Start == "" && st.EndDate == "" {
+			if st.Date == today {
+				s.Today = append(s.Today, o)
+			}
+			continue
+		}
 		switch {
 		case !now.Before(o.Start) && now.Before(o.End):
 			s.Plans = append(s.Plans, o)
@@ -134,6 +143,14 @@ func (w *World) Situation(ctx context.Context, now time.Time, loc *time.Location
 	s.Guess = guess(s)
 	s.Text = s.text()
 	return s, nil
+}
+
+// Span is when a plan starts and ends: its own end, or the usual length of
+// its kind (the operator's own average once there are a few). Untimed
+// one-day plans span the day.
+func (w *World) Span(ctx context.Context, e model.Entity, now time.Time, loc *time.Location) (Ongoing, bool) {
+	avg, n := w.lengths(ctx, now, loc)
+	return span(e, loc, avg, n)
 }
 
 // span is when a plan starts and (by its own end, or the usual length of
@@ -217,7 +234,7 @@ func (w *World) lengths(ctx context.Context, now time.Time, loc *time.Location) 
 // surer, one somewhere else makes it doubtful. Without a plan, a fresh clue
 // says only where the operator was.
 func guess(s Situation) *Guess {
-	if len(s.Plans) > 0 {
+	if len(s.Plans) > 0 && (s.Plans[0].Place != "" || s.Plans[0].Area != "" || len(s.Plans[0].People) > 0) {
 		p := s.Plans[0]
 		g := &Guess{Place: p.Place, PlaceKind: p.PlaceKind, Area: p.Area, With: p.People, PlanID: p.ID, Confidence: 0.45}
 		if p.EndKnown {
@@ -310,6 +327,13 @@ func (s Situation) text() string {
 		}
 		b.WriteString(line + "\n")
 	}
+	for _, p := range s.Today {
+		line := "- 오늘(시간 미정): " + label(p)
+		if p.Place != "" {
+			line += " @" + p.Place
+		}
+		b.WriteString(line + "\n")
+	}
 	if s.Next != nil {
 		b.WriteString("- 오늘 다음 일정: " + s.Next.Start.Format("15:04") + " " + label(*s.Next))
 		if s.Next.Place != "" {
@@ -325,7 +349,7 @@ func (s Situation) text() string {
 		b.WriteString("- 최근 위치 단서: " + strings.Join(parts, ", ") + "\n")
 	}
 	switch g := s.Guess; {
-	case g == nil && len(s.Plans) == 0 && s.Next == nil:
+	case g == nil && len(s.Plans) == 0 && s.Next == nil && len(s.Today) == 0:
 		b.WriteString("- 진행 중인 일정도 최근 위치 단서도 없음. 위치·동행이 필요한 답이면 먼저 물어볼 것\n")
 	case g == nil:
 		b.WriteString("- 추정 없음. 위치·동행이 필요한 답이면 먼저 물어볼 것\n")

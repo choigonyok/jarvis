@@ -1,0 +1,23 @@
+{
+  "name": "S11 침묵: 일정 시간 안이라는 것뿐인(추정) 결제·사진으로는 제안하지 않는다",
+  "room": "team",
+  "roomName": "팀 저녁",
+  "turns": [
+    {
+      "messages": [
+        { "at": "2026-10-14T12:00", "from": "팀장님", "text": "목요일 7시 회식합니다" },
+        { "at": "2026-10-14T12:01", "me": true, "text": "넵 참석하겠습니다" }
+      ],
+      "script": {"changes":[{"op":"create","kind":"plan","set":{"title":"팀 회식","status":"confirmed","date":"2026-10-15","start":"19:00","people":["팀장님"],"type":"회식"},"evidence":[{"line":1,"quote":"목요일 7시 회식합니다"},{"line":2,"quote":"넵 참석하겠습니다"}],"confidence":0.9,"why":"참석"}]}
+    },
+    { "reject": "calendar.create" },
+    {
+      "at": "2026-10-15T22:30",
+      "occur": [
+        { "id": "spending:8001", "kind": "purchase", "at": "2026-10-15T20:10", "title": "주식회사 에이치엠", "class": "기타", "amount": 120000 },
+        { "id": "spending:8002", "kind": "purchase", "at": "2026-10-15T20:30", "title": "쿠팡", "class": "쇼핑", "amount": 33000 }
+      ],
+      "expect": { "noCards": true }
+    }
+  ]
+}

@@ -71,6 +71,24 @@ func (m *Memory) Entities(_ context.Context, kind, room string, liveOnly bool) (
 	return out, nil
 }
 
+func (m *Memory) PlansOn(_ context.Context, from, to string) ([]model.Entity, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []model.Entity{}
+	for _, e := range m.entities {
+		st := e.State
+		last := st.EndDate
+		if last == "" {
+			last = st.Date
+		}
+		if e.Kind == model.KindPlan && st.Date != "" && st.Date <= to && last >= from {
+			out = append(out, e)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
 func (m *Memory) Put(_ context.Context, e model.Entity, c model.Change) (model.Entity, model.Change, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

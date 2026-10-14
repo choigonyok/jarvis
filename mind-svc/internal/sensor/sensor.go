@@ -28,6 +28,11 @@ type Messenger struct {
 	Store   store.Store
 	Log     obs.Log
 	Exclude *regexp.Regexp // rooms that are alerts, ads, banks
+	// Payments are the payment apps' rooms ("카카오페이"): not read as
+	// conversation, but a notice of money received in them is a transfer
+	// (Occur records it).
+	Payments *regexp.Regexp
+	Occur    Observer
 	// Backfill is how far back a first start reads. A first start does not
 	// read the years before it: that is a backlog to replay deliberately,
 	// not to interpret on the way in.
@@ -81,6 +86,13 @@ func (s *Messenger) Poll(ctx context.Context) error {
 		}
 		for _, m := range batch {
 			sent := time.Unix(m.SentAt, 0)
+			if s.Payments != nil && s.Occur != nil && s.Payments.MatchString(m.ChatName) && (!first || sent.After(since)) {
+				if o, ok := Transfer(fmt.Sprintf("%s-pay:%d", s.Name, m.RowID), sent, m.Text); ok {
+					if err := s.Occur.Observe(ctx, o); err != nil {
+						return err
+					}
+				}
+			}
 			if (!first || sent.After(since)) && s.worth(m) {
 				msg := model.Message{
 					Ref: fmt.Sprintf("%s:%d", s.Name, m.RowID), Source: s.Name,

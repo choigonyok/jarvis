@@ -791,6 +791,14 @@ services:
       # 승인하면 mind 가 calendar-svc 에 실제로 쓴다.
       MIND_CALENDAR: ${MIND_CALENDAR:-http}
       MIND_UI_URL: /
+      # 구조화 소스(가계부·운동·캘린더·사진)를 규칙으로 발생(occurrence)으로 읽는다. 캘린더의
+      # 일정은 세계 모델의 일정이 되고, 일정 시간·장소 안의 결제·사진은 during 으로 이어진다.
+      SPENDING_URL: http://spending:8095
+      WORKOUT_URL: http://workout:8091
+      MIND_CALENDAR_READ_URL: http://calendar:8093
+      IMMICH_URL: http://immich:2283
+      IMMICH_API_KEY: ${IMMICH_API_KEY:-}
+      IMMICH_PUBLIC_URL: ${IMMICH_PUBLIC_URL:-}
       MIND_ANTHROPIC_API_KEY: ${MEMORY_ANTHROPIC_API_KEY:-}
       MIND_CONTENT_KEY: ${MIND_CONTENT_KEY:-}
       MIND_OWNER_NAME: ${MEMORY_OWNER_NAME:-}

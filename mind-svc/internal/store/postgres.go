@@ -68,6 +68,27 @@ func (p *Postgres) Entities(ctx context.Context, kind, room string, liveOnly boo
 	return out, rows.Err()
 }
 
+func (p *Postgres) PlansOn(ctx context.Context, from, to string) ([]model.Entity, error) {
+	rows, err := p.db.Query(ctx, `
+		select id, kind, room, state, version, created_at, updated_at from mind_entities
+		 where kind = 'plan' and coalesce(state->>'date', '') <> '' and state->>'date' <= $2
+		   and coalesce(nullif(state->>'endDate', ''), state->>'date') >= $1
+		 order by id`, from, to)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []model.Entity{}
+	for rows.Next() {
+		e, err := scanEntity(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 func scanEntity(row pgx.Row) (model.Entity, error) {
 	var e model.Entity
 	var state []byte

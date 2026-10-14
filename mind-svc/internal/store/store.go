@@ -23,6 +23,10 @@ type Store interface {
 	Entities(ctx context.Context, kind, room string, liveOnly bool) ([]model.Entity, error)
 	Put(ctx context.Context, e model.Entity, c model.Change) (model.Entity, model.Change, error)
 	Changes(ctx context.Context, entityID string, limit int) ([]model.Change, error)
+	// PlansOn is every plan whose days (date to endDate) touch [from, to],
+	// both YYYY-MM-DD: what an occurrence on a day can belong to, found
+	// without reading every plan there ever was.
+	PlansOn(ctx context.Context, from, to string) ([]model.Entity, error)
 
 	// Content: observed messages, idempotent by Ref.
 	PutMessage(ctx context.Context, m model.Message) error
