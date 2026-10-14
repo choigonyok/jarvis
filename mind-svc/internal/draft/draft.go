@@ -63,7 +63,7 @@ func (d *Drafter) Draft(ctx context.Context, req act.DraftRequest) (string, erro
 	for _, e := range examples {
 		b.WriteString("- " + e + "\n")
 	}
-	out, err := d.LLM.Complete(ctx, System, b.String())
+	out, err := d.LLM.Complete(llm.WithPurpose(ctx, llm.Draft), System, b.String())
 	if err != nil {
 		return "", err
 	}

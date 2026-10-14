@@ -177,6 +177,18 @@ func TestMemory(t *testing.T) {
 	judge(t, NewMemory())
 	self(t, NewMemory())
 	replies(t, NewMemory())
+	usage(t, NewMemory())
+}
+
+func usage(t *testing.T, st Store) {
+	ctx := context.Background()
+	_ = st.AddUsage(ctx, model.Usage{Day: "2026-10-14", Purpose: "judge", Calls: 1, USD: 0.001, In: 100, Out: 20})
+	_ = st.AddUsage(ctx, model.Usage{Day: "2026-10-15", Purpose: "judge", Calls: 1, USD: 0.002, In: 100, Out: 20})
+	_ = st.AddUsage(ctx, model.Usage{Day: "2026-10-15", Purpose: "judge", Calls: 1, USD: 0.002, In: 100, Out: 20})
+	us, _ := st.Usages(ctx, "2026-10-15")
+	if len(us) != 1 || us[0].Calls != 2 || us[0].In != 200 || us[0].USD < 0.0039 {
+		t.Fatalf("사용량: %+v", us)
+	}
 }
 
 func replies(t *testing.T, st Store) {
@@ -350,7 +362,7 @@ func TestPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	if _, err := pool.Exec(context.Background(), `truncate mind_messages, mind_rooms, mind_entities, mind_changes, mind_timers, mind_intents, mind_cursors, mind_facts, mind_aliases, mind_policy_stats, mind_occurrences, mind_links, mind_thing_classes, mind_link_cache, mind_pattern_counts, mind_notes, mind_note_versions, mind_predictions, mind_expectations, mind_reply_examples restart identity cascade`); err != nil {
+	if _, err := pool.Exec(context.Background(), `truncate mind_messages, mind_rooms, mind_entities, mind_changes, mind_timers, mind_intents, mind_cursors, mind_facts, mind_aliases, mind_policy_stats, mind_occurrences, mind_links, mind_thing_classes, mind_link_cache, mind_pattern_counts, mind_notes, mind_note_versions, mind_predictions, mind_expectations, mind_reply_examples, mind_llm_usage restart identity cascade`); err != nil {
 		t.Fatal(err)
 	}
 	key := make([]byte, 32)
@@ -362,6 +374,7 @@ func TestPostgres(t *testing.T) {
 	judge(t, st)
 	self(t, st)
 	replies(t, st)
+	usage(t, st)
 	var sealed bool
 	var body []byte
 	_ = pool.QueryRow(context.Background(), `select sealed, body from mind_messages where ref = 'sim:1'`).Scan(&sealed, &body)

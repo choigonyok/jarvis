@@ -23,6 +23,37 @@ type Client interface {
 	Spent() float64
 }
 
+// Purposes a call is made for, for the cost report.
+const (
+	Interpret = "interpret"
+	Judge     = "judge"
+	Reflect   = "reflect"
+	Draft     = "draft"
+)
+
+type purposeKey struct{}
+
+// WithPurpose tags the calls made with ctx: what they are for.
+func WithPurpose(ctx context.Context, purpose string) context.Context {
+	return context.WithValue(ctx, purposeKey{}, purpose)
+}
+
+// PurposeOf is what a call is for; interpreting, unless tagged.
+func PurposeOf(ctx context.Context) string {
+	if p, ok := ctx.Value(purposeKey{}).(string); ok && p != "" {
+		return p
+	}
+	return Interpret
+}
+
+// Use is one call's cost, for whoever keeps the books.
+type Use struct {
+	Purpose string
+	In, Out int
+	USD     float64
+	At      time.Time
+}
+
 var ErrBudget = errors.New("오늘 LLM 예산을 다 썼습니다")
 var ErrNoKey = errors.New("LLM 키가 없습니다")
 
@@ -41,6 +72,17 @@ type Anthropic struct {
 	mu    sync.Mutex
 	day   string
 	spent float64
+
+	// OnUse hears every call's cost (the store keeps it).
+	OnUse func(Use)
+}
+
+// Seed starts today's spend from what was spent before a restart, so the
+// daily budget holds across one.
+func (a *Anthropic) Seed(spent float64) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.day, a.spent = a.now().Format("2006-01-02"), spent
 }
 
 func NewAnthropic(key, model string, dailyUSD float64) *Anthropic {
@@ -115,7 +157,11 @@ func (a *Anthropic) Complete(ctx context.Context, system, user string) (string, 
 		}
 		return "", fmt.Errorf("LLM 이 거절했습니다 (%d): %s", resp.StatusCode, msg)
 	}
-	a.add(float64(out.Usage.In)*a.inPrice + float64(out.Usage.Out)*a.outPrice)
+	cost := float64(out.Usage.In)*a.inPrice + float64(out.Usage.Out)*a.outPrice
+	a.add(cost)
+	if a.OnUse != nil {
+		a.OnUse(Use{Purpose: PurposeOf(ctx), In: out.Usage.In, Out: out.Usage.Out, USD: cost, At: a.now()})
+	}
 	var text strings.Builder
 	for _, c := range out.Content {
 		if c.Type == "text" {

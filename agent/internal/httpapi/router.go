@@ -50,10 +50,11 @@ type Server struct {
 	apiToken     string
 	approvalWait time.Duration
 	// uploads holds photos attached in conversation; nil turns them off.
-	uploads  *uploads.Store
-	modules  *module.Registry
-	usage    *usage.Tracker
-	apiUsage func(ctx context.Context) (any, error)
+	uploads   *uploads.Store
+	modules   *module.Registry
+	usage     *usage.Tracker
+	apiUsage  func(ctx context.Context) (any, error)
+	mindUsage func(ctx context.Context) (any, error)
 }
 
 // Sender is whatever drives a turn. Keeping it an interface means the
@@ -91,6 +92,8 @@ type Deps struct {
 	Usage *usage.Tracker
 	// APIUsage, when set, adds the memory model's pay-as-you-go spend to /usage.
 	APIUsage func(ctx context.Context) (any, error)
+	// MindUsage, when set, adds mind's model spend (by purpose) to /usage.
+	MindUsage func(ctx context.Context) (any, error)
 	// Consume, when set, takes events from events-svc (internal/suggest).
 	Consume http.HandlerFunc
 	Log     *slog.Logger
@@ -116,6 +119,7 @@ func New(d Deps) *Server {
 		modules:         d.Modules,
 		usage:           d.Usage,
 		apiUsage:        d.APIUsage,
+		mindUsage:       d.MindUsage,
 		consume:         d.Consume,
 	}
 }
@@ -351,7 +355,8 @@ func (s *Server) revise(ctx context.Context, id string, edits map[string]string)
 func (s *Server) getUsage(w http.ResponseWriter, r *http.Request) {
 	out := struct {
 		usage.Usage
-		API any `json:"api,omitempty"`
+		API  any `json:"api,omitempty"`
+		Mind any `json:"mind,omitempty"`
 	}{}
 	if s.usage != nil {
 		out.Usage = s.usage.Snapshot(time.Now())
@@ -360,6 +365,11 @@ func (s *Server) getUsage(w http.ResponseWriter, r *http.Request) {
 		// Memory down only drops the API panel; the subscription bars still show.
 		if api, err := s.apiUsage(r.Context()); err == nil {
 			out.API = api
+		}
+	}
+	if s.mindUsage != nil {
+		if mu, err := s.mindUsage(r.Context()); err == nil {
+			out.Mind = mu
 		}
 	}
 	w.Header().Set("Cache-Control", "no-store")

@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { capPct, freeLabel, freePct, pct, resetLabel, tone, usd, useUsage } from "@/lib/use-usage";
+import { capPct, freeLabel, freePct, pct, PURPOSE, resetLabel, tone, usd, useUsage } from "@/lib/use-usage";
 import { cn } from "@/lib/utils";
 
 /**
  * Hairlines in the header: the Claude subscription's 5-hour window on top, the
  * weekly one below it, the memory API key's spend against its daily cap, and
- * how far the search key (Voyage) is into its free tokens. Always there, never
+ * how far the search key (Voyage) is into its free tokens, and mind's model
+ * spend against its daily cap. Always there, never
  * asking for attention until they fill. Holding them (or hovering, on a
  * pointer) shows the numbers.
  */
@@ -31,12 +32,15 @@ export function UsageBars() {
   const api = capPct(usage?.api);
   const voyage = usage?.api?.voyage;
   const free = freePct(voyage);
+  const mind = usage?.mind;
+  const mindPct = capPct(mind);
   const label =
     five == null && week == null
       ? "Claude 사용량을 아직 읽지 못했습니다"
       : `Claude 사용량: 5시간 ${five ?? "-"}%, 주간 ${week ?? "-"}%` +
         (api == null ? "" : `, 기억용 API 하루 상한의 ${api}%`) +
-        (voyage ? `, 검색용 API 오늘 ${usd(voyage.todayUsd)}` : "");
+        (voyage ? `, 검색용 API 오늘 ${usd(voyage.todayUsd)}` : "") +
+        (mindPct == null ? "" : `, 판단용 API 하루 상한의 ${mindPct}%`);
 
   return (
     <div ref={wrap} className="relative">
@@ -62,6 +66,7 @@ export function UsageBars() {
         <Bar value={week} />
         {usage?.api ? <Bar value={api} /> : null}
         {voyage ? <Bar value={free} /> : null}
+        {mind ? <Bar value={mindPct} /> : null}
       </button>
 
       {open ? (
@@ -104,6 +109,35 @@ export function UsageBars() {
               <p className="tnum mt-1 text-[10.5px] text-faint">
                 이번 달 {usd(voyage.month.usd)} (정가) · 청구 {usd(voyage.billedUsd)}
               </p>
+            </div>
+          ) : null}
+          {mind ? (
+            <div className="mt-2 border-t border-edge pt-2">
+              <p className="mb-1 text-[11.5px] text-faint">판단용 API (mind)</p>
+              <div className="flex items-baseline justify-between py-1">
+                <span className="text-dim">오늘</span>
+                <span className="tnum text-[13px] text-foreground">
+                  {usd(mind.todayUsd)} <span className="text-faint">/ {usd(mind.dailyUsd)}</span>
+                </span>
+              </div>
+              <span aria-hidden className="block h-1 overflow-hidden rounded-full bg-foreground/12">
+                <span className={cn("block h-full rounded-full", tone(mindPct))} style={{ width: `${mindPct ?? 0}%` }} />
+              </span>
+              <p className="tnum mt-1 text-[10.5px] text-faint">
+                이번 달 {usd(mind.month.usd)} · {mind.month.calls}번
+              </p>
+              {mind.purposes.length ? (
+                <ul className="mt-1 space-y-0.5">
+                  {mind.purposes.map((p) => (
+                    <li key={p.purpose} className="tnum flex justify-between text-[10.5px] text-faint">
+                      <span>{PURPOSE[p.purpose] ?? p.purpose}</span>
+                      <span>
+                        {p.calls}번 · {usd(p.usd)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
           ) : null}
           {usage?.at ? (

@@ -244,6 +244,11 @@ func main() {
 		apiUsage = memoryModule.APIUsage
 	}
 
+	var mindUsage func(context.Context) (any, error)
+	if mindClient != nil {
+		mindUsage = mindClient.Usage
+	}
+
 	srv := &http.Server{
 		Addr: cfg.Addr,
 		Handler: httpapi.New(httpapi.Deps{
@@ -264,6 +269,7 @@ func main() {
 			Modules:         modules,
 			Usage:           usageTracker,
 			APIUsage:        apiUsage,
+			MindUsage:       mindUsage,
 			Consume:         consume,
 			Log:             log,
 		}).Handler(),

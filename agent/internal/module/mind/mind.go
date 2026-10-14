@@ -126,6 +126,22 @@ func (m *Module) Execute(ctx context.Context, a action.Action) (action.Result, e
 	return action.Result{Note: strings.TrimSpace("했습니다. " + out.Preview)}, nil
 }
 
+// Usage is mind's model cost (its /status usage), passed through as is.
+func (c Client) Usage(ctx context.Context) (any, error) {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	var st struct {
+		Usage json.RawMessage `json:"usage"`
+	}
+	if err := c.Do(ctx, http.MethodGet, "/status", nil, &st); err != nil {
+		return nil, err
+	}
+	if len(st.Usage) == 0 || string(st.Usage) == "null" {
+		return nil, errors.New("사용량이 없습니다")
+	}
+	return st.Usage, nil
+}
+
 // Reject tells mind the operator turned a question down.
 func (c Client) Reject(ctx context.Context, intentID, reason string) error {
 	return c.Do(ctx, http.MethodPost, "/api/intents/"+intentID+"/reject", map[string]string{"reason": reason}, nil)

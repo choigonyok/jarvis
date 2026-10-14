@@ -34,6 +34,7 @@ type Memory struct {
 	preds    map[string]model.Prediction
 	expects  map[[2]string]model.Expectation
 	replies  []model.ReplySituation
+	usage    map[[2]string]model.Usage
 	seq      int64
 }
 
@@ -772,4 +773,34 @@ func (m *Memory) ResetReplySituations(context.Context) error {
 	defer m.mu.Unlock()
 	m.replies = nil
 	return nil
+}
+
+func (m *Memory) AddUsage(_ context.Context, u model.Usage) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.usage == nil {
+		m.usage = map[[2]string]model.Usage{}
+	}
+	k := [2]string{u.Day, u.Purpose}
+	cur := m.usage[k]
+	cur.Day, cur.Purpose = u.Day, u.Purpose
+	cur.Calls += u.Calls
+	cur.USD += u.USD
+	cur.In += u.In
+	cur.Out += u.Out
+	m.usage[k] = cur
+	return nil
+}
+
+func (m *Memory) Usages(_ context.Context, from string) ([]model.Usage, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []model.Usage{}
+	for _, u := range m.usage {
+		if u.Day >= from {
+			out = append(out, u)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Day+out[i].Purpose < out[j].Day+out[j].Purpose })
+	return out, nil
 }

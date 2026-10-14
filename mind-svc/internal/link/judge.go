@@ -54,7 +54,7 @@ func (j *Judge) Of(ctx context.Context, item, planKind string) (model.Judgement,
 	if class != "" {
 		user = fmt.Sprintf("상품: %q (분류: %s) / 일정 종류: %s", item, class, planKind)
 	}
-	answer, err := j.LLM.Complete(ctx, JudgeSystem, user)
+	answer, err := j.LLM.Complete(llm.WithPurpose(ctx, llm.Judge), JudgeSystem, user)
 	if err != nil {
 		return model.Judgement{}, err
 	}

@@ -28,19 +28,32 @@ export type VoyageUsage = {
   models: { model: string; tokens: number; usd: number }[];
   days: { day: string; usd: number; tokens: number; calls: number }[];
 };
+/** mind-svc's own model (interpreting, judging, reflecting, drafting), by
+ *  what each call was for. */
+export type MindUsage = {
+  model: string;
+  dailyUsd: number;
+  todayUsd: number;
+  month: { usd: number; calls: number };
+  purposes: { purpose: string; calls: number; usd: number }[];
+};
 export type Usage = {
   fiveHour?: UsageWindow;
   sevenDay?: UsageWindow;
   status?: string;
   at?: string;
   api?: ApiUsage;
+  mind?: MindUsage;
 };
+
+/** What a mind call was for, as the panel names it. */
+export const PURPOSE: Record<string, string> = { interpret: "대화 해석", judge: "상식 판정", reflect: "밤 성찰", draft: "답장 초안" };
 
 /** "$0" for nothing, "$0.0123" under a dollar, "$1.23" above. */
 export const usd = (v: number) => (v === 0 ? "$0" : `$${v < 1 ? v.toFixed(v < 0.01 ? 4 : 3) : v.toFixed(2)}`);
 
 /** Today's spend against the daily cap, as a percent. */
-export const capPct = (a?: ApiUsage) =>
+export const capPct = (a?: { dailyUsd: number; todayUsd: number }) =>
   a && a.dailyUsd > 0 ? Math.min(100, Math.round((a.todayUsd / a.dailyUsd) * 100)) : null;
 
 /** How much of its free tokens the most used Voyage model has spent, as the

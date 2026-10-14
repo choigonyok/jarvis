@@ -129,6 +129,11 @@ type Store interface {
 	ReplyExamples(ctx context.Context, kind string, limit int) ([]model.ReplySituation, error)
 	ResetReplySituations(ctx context.Context) error
 
+	// LLM usage by day and purpose. AddUsage adds one call; Usages is every
+	// day from `from` (YYYY-MM-DD) on.
+	AddUsage(ctx context.Context, u model.Usage) error
+	Usages(ctx context.Context, from string) ([]model.Usage, error)
+
 	// Aliases: names in conversation → memory nodes. Putting a name again
 	// moves it to the node given and counts it seen once more.
 	PutAlias(ctx context.Context, a model.Alias) error

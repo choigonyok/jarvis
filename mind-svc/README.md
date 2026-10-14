@@ -146,6 +146,10 @@ GET  /api/recall?q=&person=            세계 모델 + 장기 기억에서 아�
 POST /api/facts/flush                  장부에서 기다리는 사실을 지금 기억으로
 ```
 
+모델 비용은 날짜·용도(대화 해석 `interpret`, 상식 판정 `judge`, 밤 성찰 `reflect`, 답장 초안 `draft`)별로
+`mind_llm_usage`(045)에 쌓인다. 재시작해도 하루 예산(`MIND_DAILY_USD`)이 다시 차지 않고, `/status` 의 `usage` 를
+에이전트가 `/usage` 로 넘겨 웹 헤더의 사용량 막대에 "판단용 API (mind)" 한 줄로 보인다(오늘/상한, 이번 달, 용도별).
+
 `/api` 와 콘솔은 메모리 모드에서만 토큰 없이 열린다. 스택에서는 `Authorization: Bearer $API_TOKEN`,
 브라우저는 한 번 `/?token=$API_TOKEN` 으로 열면 HttpOnly 쿠키를 받고 주소창에서 토큰을 지운다.
 스택은 `API_TOKEN` 이 비면 뜨지 않는다(로컬 시험만 `API_TOKEN_OPTIONAL=true`).

@@ -40,6 +40,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/llm"
 	"github.com/choigonyok/jarvis/mind-svc/internal/memory"
 	"github.com/choigonyok/jarvis/mind-svc/internal/mind"
+	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
 	"github.com/choigonyok/jarvis/mind-svc/internal/sensor"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
@@ -132,6 +133,21 @@ func main() {
 		}
 	}
 
+	// The books: every model call's cost by day and purpose, kept so the
+	// daily budget holds across a restart and the header can show it.
+	today := time.Now().In(loc).Format("2006-01-02")
+	if us, err := st.Usages(ctx, today); err == nil {
+		spent := 0.0
+		for _, u := range us {
+			spent += u.USD
+		}
+		client.Seed(spent)
+	}
+	client.OnUse = func(u llm.Use) {
+		_ = st.AddUsage(context.Background(), model.Usage{Day: u.At.In(loc).Format("2006-01-02"), Purpose: u.Purpose,
+			Calls: 1, USD: u.USD, In: int64(u.In), Out: int64(u.Out)})
+	}
+
 	// Long-term memory: memory-svc when there is one; on a laptop without
 	// one, a stand-in in this process so the console still shows facts going
 	// in and coming back judged.
@@ -165,6 +181,7 @@ func main() {
 		Loc: loc, Now: clk.Now, Logger: log, Interpret: cfg, Settle: settle,
 		Policy: gate.DefaultPolicy(), URL: getenv("MIND_UI_URL", "http://localhost:8102/"), Mode: mode,
 		Memory: mem, PlanEvents: os.Getenv("MIND_PLAN_EVENTS") == "true", Photos: photos, Jobs: jobs, Assets: assets,
+		DailyUSD: number("MIND_DAILY_USD", 1.0),
 	})
 	if !client.Ready() {
 		log.Warn("LLM 키(MIND_ANTHROPIC_API_KEY)가 없어 대화를 해석하지 않습니다. 메시지는 쌓아 둡니다.")

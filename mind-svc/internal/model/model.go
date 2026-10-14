@@ -254,6 +254,16 @@ type ReplySituation struct {
 	At      time.Time `json:"at"`
 }
 
+// Usage is a day's model calls for one purpose, and their cost.
+type Usage struct {
+	Day     string  `json:"day"`
+	Purpose string  `json:"purpose"`
+	Calls   int     `json:"calls"`
+	USD     float64 `json:"usd"`
+	In      int64   `json:"inTokens"`
+	Out     int64   `json:"outTokens"`
+}
+
 // Evidence is the line of an observation a belief rests on. Ref names the
 // observed message; Quote is the words, which must appear in it.
 type Evidence struct {

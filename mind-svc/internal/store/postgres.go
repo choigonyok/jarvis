@@ -860,3 +860,29 @@ func (p *Postgres) ResetReplySituations(ctx context.Context) error {
 	_, err := p.db.Exec(ctx, `delete from mind_reply_examples`)
 	return err
 }
+
+func (p *Postgres) AddUsage(ctx context.Context, u model.Usage) error {
+	_, err := p.db.Exec(ctx, `insert into mind_llm_usage (day, purpose, calls, usd, in_tokens, out_tokens) values ($1, $2, $3, $4, $5, $6)
+		on conflict (day, purpose) do update set calls = mind_llm_usage.calls + excluded.calls, usd = mind_llm_usage.usd + excluded.usd,
+			in_tokens = mind_llm_usage.in_tokens + excluded.in_tokens, out_tokens = mind_llm_usage.out_tokens + excluded.out_tokens`,
+		u.Day, u.Purpose, u.Calls, u.USD, u.In, u.Out)
+	return err
+}
+
+func (p *Postgres) Usages(ctx context.Context, from string) ([]model.Usage, error) {
+	rows, err := p.db.Query(ctx, `select to_char(day, 'YYYY-MM-DD'), purpose, calls, usd, in_tokens, out_tokens from mind_llm_usage
+		where day >= $1::date order by day, purpose`, from)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []model.Usage{}
+	for rows.Next() {
+		var u model.Usage
+		if err := rows.Scan(&u.Day, &u.Purpose, &u.Calls, &u.USD, &u.In, &u.Out); err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}

@@ -64,6 +64,8 @@ type Options struct {
 	Jobs act.Jobs
 	// Assets is the allocation, read only; nil: not known.
 	Assets Assets
+	// DailyUSD is the model's daily budget, for the report.
+	DailyUSD float64
 }
 
 type Mind struct {
@@ -280,6 +282,58 @@ type Status struct {
 	Facts         map[string]int `json:"facts"`                   // by status
 	OldestPending *time.Time     `json:"oldestPending,omitempty"` // the oldest fact still waiting for memory
 	FactError     string         `json:"factError,omitempty"`     // why the latest waiting fact was not taken
+	Usage         *Usage         `json:"usage,omitempty"`         // what the model cost
+}
+
+// Usage is the model's cost: today against the budget, and this month by
+// what it was for.
+type Usage struct {
+	Model    string  `json:"model"`
+	DailyUSD float64 `json:"dailyUsd"`
+	TodayUSD float64 `json:"todayUsd"`
+	Month    struct {
+		USD   float64 `json:"usd"`
+		Calls int     `json:"calls"`
+	} `json:"month"`
+	Purposes []model.Usage `json:"purposes"` // this month, by purpose
+}
+
+// Cost is the model's usage report.
+func (m *Mind) Cost(ctx context.Context) (*Usage, error) {
+	now := m.Opts.Now().In(m.Opts.Loc)
+	us, err := m.Opts.Store.Usages(ctx, time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, m.Opts.Loc).Format("2006-01-02"))
+	if err != nil {
+		return nil, err
+	}
+	out := &Usage{Model: m.Opts.LLM.Model(), DailyUSD: m.Opts.DailyUSD, Purposes: []model.Usage{}}
+	by := map[string]*model.Usage{}
+	today := now.Format("2006-01-02")
+	for _, u := range us {
+		if u.Day == today {
+			out.TodayUSD += u.USD
+		}
+		out.Month.USD += u.USD
+		out.Month.Calls += u.Calls
+		p := by[u.Purpose]
+		if p == nil {
+			p = &model.Usage{Purpose: u.Purpose}
+			by[u.Purpose] = p
+		}
+		p.Calls += u.Calls
+		p.USD += u.USD
+		p.In += u.In
+		p.Out += u.Out
+	}
+	for _, k := range []string{"interpret", "judge", "reflect", "draft"} {
+		if p := by[k]; p != nil {
+			out.Purposes = append(out.Purposes, *p)
+			delete(by, k)
+		}
+	}
+	for _, p := range by {
+		out.Purposes = append(out.Purposes, *p)
+	}
+	return out, nil
 }
 
 func (m *Mind) Status(ctx context.Context) (Status, error) {
@@ -310,6 +364,9 @@ func (m *Mind) Status(ctx context.Context) (Status, error) {
 			s.LastRead = &at
 		}
 		s.ReadError = why
+	}
+	if s.Usage, err = m.Cost(ctx); err != nil {
+		return s, err
 	}
 	facts, err := st.Facts(ctx, 1000)
 	if err != nil {

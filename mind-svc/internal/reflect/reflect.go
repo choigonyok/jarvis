@@ -133,7 +133,7 @@ func (r *Reflector) workout(ctx context.Context, surprises []model.Prediction) (
 	if r.LLM == nil || !r.LLM.Ready() {
 		return res, nil
 	}
-	answer, err := r.LLM.Complete(ctx, System, r.prompt(pool, surprised))
+	answer, err := r.LLM.Complete(llm.WithPurpose(ctx, llm.Reflect), System, r.prompt(pool, surprised))
 	if err != nil {
 		return res, err
 	}
