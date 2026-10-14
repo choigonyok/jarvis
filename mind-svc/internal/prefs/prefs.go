@@ -133,6 +133,16 @@ func (p *Prefs) Record(ctx context.Context, source string, r Review) ([]model.Pr
 			seen[a.Dimension] = true
 		}
 	}
+	// "기타" said the same way at three or more places is a dimension of its
+	// own from now on; the observations stay as they were, and are read
+	// under it.
+	for _, o := range obs {
+		if o.Dimension == Other && o.Detail != "" {
+			if promoted, err := p.Promoted(ctx, o.Detail); err == nil && promoted {
+				seen[Key(o.Detail)] = true
+			}
+		}
+	}
 	var moved []model.Preference
 	for d := range seen {
 		if d == Other {
@@ -203,6 +213,17 @@ func (p *Prefs) Recompute(ctx context.Context, dimension string) ([]model.Prefer
 	obs, err := p.St.ObservationsOn(ctx, dimension)
 	if err != nil {
 		return nil, err
+	}
+	if !slices.Contains(Common, dimension) && !slices.Contains(Camp, dimension) {
+		others, err := p.St.ObservationsOn(ctx, Other)
+		if err != nil {
+			return nil, err
+		}
+		for _, o := range others {
+			if Key(o.Detail) == dimension {
+				obs = append(obs, o)
+			}
+		}
 	}
 	existing, err := p.St.Preferences(ctx)
 	if err != nil {
@@ -296,6 +317,46 @@ func With(names string) string {
 		return string(r) + "과"
 	}
 	return string(r) + "와"
+}
+
+// Key is a free description brought to one form, to tell when two say the
+// same: spaces and trailing endings dropped ("벌레가 많음" = "벌레 많음").
+func Key(detail string) string {
+	var words []string
+	for _, w := range strings.Fields(detail) {
+		r := []rune(w)
+		if len(r) > 1 && strings.ContainsRune("가이은는을를", r[len(r)-1]) {
+			w = string(r[:len(r)-1])
+		}
+		words = append(words, w)
+	}
+	k := strings.Join(words, "")
+	for _, suf := range []string{"했음", "함", "음", "다", "요"} {
+		if r := []rune(k); len(r) > len([]rune(suf))+1 {
+			k = strings.TrimSuffix(k, suf)
+		}
+	}
+	return k
+}
+
+// promote: places that must say the same "기타" before it becomes a
+// dimension.
+const promote = 3
+
+// Promoted is whether a "기타" description has been said of enough
+// different places to be a dimension.
+func (p *Prefs) Promoted(ctx context.Context, detail string) (bool, error) {
+	others, err := p.St.ObservationsOn(ctx, Other)
+	if err != nil {
+		return false, err
+	}
+	places := map[string]bool{}
+	for _, o := range others {
+		if Key(o.Detail) == Key(detail) {
+			places[o.SubjectType+":"+o.Subject] = true
+		}
+	}
+	return len(places) >= promote, nil
 }
 
 // Decide is the operator's answer to a confirmation card.

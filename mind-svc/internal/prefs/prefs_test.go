@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 )
 
@@ -62,5 +63,24 @@ func TestRules(t *testing.T) {
 	}
 	if d, pol, ok := Stated("LIKES", "조용한 곳이 좋아"); !ok || d != "소음" || pol != -1 {
 		t.Fatalf("조용한 곳을 좋아함 = 소음에 민감: %s %d %v", d, pol, ok)
+	}
+}
+
+// The same "기타" at three places becomes a dimension, read from the
+// observations as they were.
+func TestPromote(t *testing.T) {
+	ctx := context.Background()
+	st := store.NewMemory()
+	p := &Prefs{St: st, Now: func() time.Time { return time.Date(2026, 10, 20, 21, 0, 0, 0, time.UTC) }}
+	for i, place := range []string{"A", "B", "C"} {
+		_ = st.AddObservations(ctx, []model.Observation{{SubjectType: "캠핑장", Subject: place, Dimension: Other, Polarity: -1,
+			Detail: []string{"벌레가 많음", "벌레 많음", "벌레가 많다"}[i], Source: place}})
+	}
+	if ok, _ := p.Promoted(ctx, "벌레 많음"); !ok {
+		t.Fatal("세 곳이면 새 차원")
+	}
+	ps, err := p.Recompute(ctx, Key("벌레 많음"))
+	if err != nil || len(ps) != 1 || len(ps[0].Subjects) != 3 {
+		t.Fatalf("승격한 차원으로 선호 추정: %+v %v", ps, err)
 	}
 }
