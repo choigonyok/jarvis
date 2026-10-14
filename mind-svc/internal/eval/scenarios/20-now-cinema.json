@@ -1,0 +1,19 @@
+{
+  "name": "S4 변형: 영화관이면 근처 가게인지 집에 가서인지 확인하라고 적는다",
+  "room": "jisu-cinema",
+  "roomName": "지수",
+  "turns": [
+    {
+      "messages": [
+        { "at": "2026-10-18T11:00", "from": "지수", "text": "오늘 3시 CGV 홍대 영화 예매했어!" },
+        { "at": "2026-10-18T11:01", "me": true, "text": "오 좋아 거기서 봐" }
+      ],
+      "script": {"changes":[{"op":"create","kind":"plan","set":{"title":"지수와 영화","status":"confirmed","date":"2026-10-18","start":"15:00","place":"CGV 홍대","people":["지수"],"type":"공연","placeKind":"영화관","area":"동교동"},"evidence":[{"line":1,"quote":"3시 CGV 홍대 영화 예매했어"},{"line":2,"quote":"오 좋아 거기서 봐"}],"confidence":0.9,"why":"예매와 동의"}]}
+    },
+    {
+      "at": "2026-10-18T16:00",
+      "occur": [ { "id": "spending:9003", "kind": "purchase", "at": "2026-10-18T14:55", "title": "CGV 홍대 매점", "place": "CGV 홍대", "area": "홍대", "amount": 9000 } ],
+      "expect": { "now": { "placeHas": "CGV 홍대", "with": "지수", "textHas": ["영화관", "근처 가게를 원하는지"] } }
+    }
+  ]
+}

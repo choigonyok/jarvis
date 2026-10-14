@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,7 +35,10 @@ type Runner struct {
 
 	mu        sync.Mutex
 	sessionID string
-	running   bool
+	// The last reading of mind's situation, reused for a few seconds.
+	nowText string
+	nowAt   time.Time
+	running bool
 	// queue holds turns nobody typed - a card's decision arriving while
 	// another turn is running. They run, in order, as soon as it ends.
 	queue []string
@@ -254,8 +258,62 @@ func (r *Runner) systemPrompt() string {
 현재 시각
 - 오늘은 %s, 지금은 %s입니다. 타임존은 %s입니다.
 - '내일', '다음 주 화요일' 같은 상대 날짜는 직접 절대 날짜로 계산해서 도구에 넘기세요.`,
-		today, now.Format("15:04"), now.Location())
+		today, now.Format("15:04"), now.Location()) + r.situation()
 }
+
+// situation is mind's "right now" - the plan that may be going on, the
+// latest hints of where the operator is, and a guess with how sure it is -
+// put in front of the model every turn instead of left for a tool to find.
+// Without mind, or when it does not answer quickly, the turn goes on
+// without it.
+func (r *Runner) situation() string {
+	if r.cfg.MindURL == "" || r.cfg.Guest {
+		return ""
+	}
+	r.mu.Lock()
+	if time.Since(r.nowAt) < situationFresh {
+		text := r.nowText
+		r.mu.Unlock()
+		return text
+	}
+	r.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(r.cfg.MindURL, "/")+"/now", nil)
+	if err != nil {
+		return ""
+	}
+	if r.cfg.APIToken != "" {
+		req.Header.Set("Authorization", "Bearer "+r.cfg.APIToken)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		r.log.Warn("지금 상황을 mind 에서 읽지 못했습니다", "err", err)
+		return ""
+	}
+	defer resp.Body.Close()
+	var now struct {
+		Text string `json:"text"`
+	}
+	if resp.StatusCode >= 300 || json.NewDecoder(resp.Body).Decode(&now) != nil || strings.TrimSpace(now.Text) == "" {
+		return ""
+	}
+	text := "\n\n" + situationRules + "\n" + now.Text
+	r.mu.Lock()
+	r.nowText, r.nowAt = text, time.Now()
+	r.mu.Unlock()
+	return text
+}
+
+// situationFresh is how long one reading of the situation is reused.
+const situationFresh = 30 * time.Second
+
+const situationRules = `지금 상황 (mind 세계 모델이 일정·결제·사진으로 규칙에 따라 계산한 것. 도구로 찾지 말고 이것을 쓰세요)
+- 위치·동행이 답에 필요한데 추정의 신뢰도가 0.5 미만이거나 추정이 없으면, 추측하지 말고 먼저 짧게 물어보세요(예: "지금 지수네 집이세요?").
+- 이 추정을 답에 썼으면 답의 첫 줄에 가정을 한 줄로 밝히세요. 예: "지수네 집 기준으로 골랐어요(15:40 사진 위치)."
+- 운영자가 정정하면("벌써 집에 왔어") 그 말을 그대로 믿고 답을 고치세요. mind 가 대화를 읽어 다음 추정에 반영합니다.
+- 주문·결제·메시지 발송은 확신과 상관없이 항상 먼저 묻습니다.`
 
 var weekdays = [...]string{"일", "월", "화", "수", "목", "금", "토"}
 

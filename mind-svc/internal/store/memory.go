@@ -24,6 +24,8 @@ type Memory struct {
 	facts    map[string]model.Fact
 	aliases  map[string]model.Alias
 	policy   map[[2]string]model.PolicyStat
+	occurs   map[string]model.Occurrence
+	links    map[[3]string]model.Link
 	seq      int64
 }
 
@@ -37,6 +39,8 @@ func NewMemory() *Memory {
 		facts:    map[string]model.Fact{},
 		aliases:  map[string]model.Alias{},
 		policy:   map[[2]string]model.PolicyStat{},
+		occurs:   map[string]model.Occurrence{},
+		links:    map[[3]string]model.Link{},
 	}
 }
 
@@ -444,4 +448,75 @@ func (m *Memory) ResetPolicy(context.Context) error {
 	defer m.mu.Unlock()
 	m.policy = map[[2]string]model.PolicyStat{}
 	return nil
+}
+
+func (m *Memory) PutOccurrence(_ context.Context, o model.Occurrence) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	o.People, o.Things = slices.Clone(o.People), slices.Clone(o.Things)
+	m.occurs[o.ID] = o
+	return nil
+}
+
+func (m *Memory) Occurrence(_ context.Context, id string) (model.Occurrence, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	o, ok := m.occurs[id]
+	if !ok {
+		return model.Occurrence{}, model.ErrNotFound
+	}
+	return o, nil
+}
+
+func (m *Memory) Occurrences(_ context.Context, from, to time.Time, kinds ...string) ([]model.Occurrence, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []model.Occurrence{}
+	for _, o := range m.occurs {
+		if o.At.Before(from) || !o.At.Before(to) || (len(kinds) > 0 && !slices.Contains(kinds, o.Kind)) {
+			continue
+		}
+		out = append(out, o)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].At.Equal(out[j].At) {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].At.Before(out[j].At)
+	})
+	return out, nil
+}
+
+func (m *Memory) PutLink(_ context.Context, l model.Link) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	l.Evidence = slices.Clone(l.Evidence)
+	m.links[[3]string{l.From, l.To, l.Rel}] = l
+	return nil
+}
+
+func (m *Memory) LinksOf(_ context.Context, id string) ([]model.Link, error) {
+	return m.linksWhere(func(l model.Link) bool { return l.From == id || l.To == id }), nil
+}
+
+func (m *Memory) LinksSince(_ context.Context, t time.Time) ([]model.Link, error) {
+	return m.linksWhere(func(l model.Link) bool { return !l.UpdatedAt.Before(t) }), nil
+}
+
+func (m *Memory) linksWhere(keep func(model.Link) bool) []model.Link {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []model.Link{}
+	for _, l := range m.links {
+		if keep(l) {
+			out = append(out, l)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].UpdatedAt.Equal(out[j].UpdatedAt) {
+			return out[i].From+out[i].To+out[i].Rel < out[j].From+out[j].To+out[j].Rel
+		}
+		return out[i].UpdatedAt.Before(out[j].UpdatedAt)
+	})
+	return out
 }

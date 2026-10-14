@@ -17,7 +17,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"path"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -32,12 +34,14 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
+	"github.com/choigonyok/jarvis/mind-svc/internal/world"
 )
 
 //go:embed scenarios/*.json
 var files embed.FS
 
 type Scenario struct {
+	File     string `json:"-"`
 	Name     string `json:"name"`
 	Room     string `json:"room"`
 	RoomName string `json:"roomName"`
@@ -58,6 +62,8 @@ type Turn struct {
 	Submit *model.Intent `json:"submit,omitempty"`
 	// At pins the clock before the turn runs (2026-10-12T20:01).
 	At string `json:"at,omitempty"`
+	// Occur is things that happened, as a sensor would record them.
+	Occur []Occur `json:"occur,omitempty"`
 	// Script is what the model should answer to this turn's reading, for the
 	// deterministic run.
 	Script json.RawMessage `json:"script,omitempty"`
@@ -96,6 +102,53 @@ type Expect struct {
 	NoCards   bool     `json:"noCards,omitempty"`
 	// Dropped: kinds the gate dropped this turn (the ledger kept quiet).
 	Dropped []string `json:"dropped,omitempty"`
+	// Now: the situation after this turn.
+	Now *NowMatch `json:"now,omitempty"`
+}
+
+// Occur is an occurrence as a scenario writes it: local times.
+type Occur struct {
+	ID     string   `json:"id"`
+	Kind   string   `json:"kind"`
+	At     string   `json:"at"`
+	Until  string   `json:"until,omitempty"`
+	Title  string   `json:"title,omitempty"`
+	Place  string   `json:"place,omitempty"`
+	Area   string   `json:"area,omitempty"`
+	People []string `json:"people,omitempty"`
+	Things []string `json:"things,omitempty"`
+	Class  string   `json:"class,omitempty"`
+	Amount int64    `json:"amount,omitempty"`
+	Count  int      `json:"count,omitempty"`
+	Quote  string   `json:"quote,omitempty"`
+}
+
+func (o Occur) model(loc *time.Location) (model.Occurrence, error) {
+	at, err := time.ParseInLocation("2006-01-02T15:04", o.At, loc)
+	if err != nil {
+		return model.Occurrence{}, err
+	}
+	out := model.Occurrence{ID: o.ID, Kind: o.Kind, At: at, Title: o.Title, Place: o.Place, Area: o.Area, People: o.People,
+		Things: o.Things, Class: o.Class, Amount: o.Amount, Count: o.Count, Ref: o.ID, Quote: o.Quote}
+	if o.Until != "" {
+		u, err := time.ParseInLocation("2006-01-02T15:04", o.Until, loc)
+		if err != nil {
+			return model.Occurrence{}, err
+		}
+		out.Until = &u
+	}
+	return out, nil
+}
+
+// NowMatch is what the situation should say.
+type NowMatch struct {
+	PlaceHas      string   `json:"placeHas,omitempty"`
+	With          string   `json:"with,omitempty"`
+	MinConfidence float64  `json:"minConfidence,omitempty"`
+	MaxConfidence float64  `json:"maxConfidence,omitempty"`
+	TextHas       []string `json:"textHas,omitempty"`
+	TextNot       []string `json:"textNot,omitempty"`
+	NoGuess       bool     `json:"noGuess,omitempty"`
 }
 
 // FactMatch is a partial description of a fact; empty fields match anything.
@@ -146,19 +199,28 @@ func Load() ([]Scenario, error) {
 		if sc.Name == "" {
 			sc.Name = e.Name()
 		}
+		sc.File = e.Name()
 		out = append(out, sc)
 	}
 	return out, nil
 }
 
-// RunAll runs every scenario with the given model.
+// RunAll runs every scenario with the given model - or, with
+// MIND_EVAL_ONLY set, those whose file name matches it (a regexp).
 func RunAll(ctx context.Context, client llm.Client, loc *time.Location) ([]Result, error) {
 	scs, err := Load()
 	if err != nil {
 		return nil, err
 	}
+	only, err := regexp.Compile(os.Getenv("MIND_EVAL_ONLY"))
+	if err != nil {
+		return nil, fmt.Errorf("MIND_EVAL_ONLY: %w", err)
+	}
 	var out []Result
 	for _, sc := range scs {
+		if !only.MatchString(sc.File) {
+			continue
+		}
 		out = append(out, Run(ctx, sc, client, loc))
 	}
 	return out, nil
@@ -225,6 +287,16 @@ func Run(ctx context.Context, sc Scenario, client llm.Client, loc *time.Location
 				return res
 			}
 			clk.Pin(at)
+		}
+		for _, oc := range t.Occur {
+			o, err := oc.model(loc)
+			if err != nil {
+				fail(i, "발생 %q: %v", oc.ID, err)
+				return res
+			}
+			if err := m.Observe(ctx, o); err != nil {
+				fail(i, "%v", err)
+			}
 		}
 		before, _ := st.Intents(ctx, 10000)
 		seen := map[string]bool{}
@@ -312,6 +384,15 @@ func Run(ctx context.Context, sc Scenario, client llm.Client, loc *time.Location
 			}
 			for _, f := range checkCards(ctx, st, *t.Expect, seen, cards) {
 				fail(i, "%s", f)
+			}
+			if t.Expect.Now != nil {
+				now, err := m.Situation(ctx)
+				if err != nil {
+					fail(i, "%v", err)
+				}
+				for _, f := range checkNow(now, *t.Expect.Now) {
+					fail(i, "%s", f)
+				}
 			}
 		}
 	}
@@ -548,6 +629,46 @@ func checkCards(ctx context.Context, st store.Store, ex Expect, seen map[string]
 			if !slices.Contains(dropped, k) {
 				out = append(out, fmt.Sprintf("관문이 %s 를 버렸어야 함 · 버린 것: %v", k, dropped))
 			}
+		}
+	}
+	return out
+}
+
+func checkNow(s world.Situation, want NowMatch) []string {
+	var out []string
+	g := s.Guess
+	show := func() string { return strings.ReplaceAll(s.Text, "\n", " / ") }
+	if want.NoGuess {
+		if g != nil {
+			out = append(out, "추정이 없어야 함 · "+show())
+		}
+		return out
+	}
+	if g == nil && (want.PlaceHas != "" || want.With != "" || want.MinConfidence > 0) {
+		return append(out, "추정이 있어야 함 · "+show())
+	}
+	if g != nil {
+		if want.PlaceHas != "" && !strings.Contains(g.Place+" "+g.Area, want.PlaceHas) {
+			out = append(out, fmt.Sprintf("장소에 %q 가 있어야 함 · %s", want.PlaceHas, show()))
+		}
+		if want.With != "" && !slices.Contains(g.With, want.With) {
+			out = append(out, fmt.Sprintf("%q 와 함께여야 함 · %s", want.With, show()))
+		}
+		if want.MinConfidence > 0 && g.Confidence < want.MinConfidence-1e-9 {
+			out = append(out, fmt.Sprintf("신뢰도 %.2f 이상이어야 함 · %s", want.MinConfidence, show()))
+		}
+		if want.MaxConfidence > 0 && g.Confidence > want.MaxConfidence+1e-9 {
+			out = append(out, fmt.Sprintf("신뢰도 %.2f 이하여야 함 · %s", want.MaxConfidence, show()))
+		}
+	}
+	for _, w := range want.TextHas {
+		if !strings.Contains(s.Text, w) {
+			out = append(out, fmt.Sprintf("요약에 %q 가 있어야 함 · %s", w, show()))
+		}
+	}
+	for _, w := range want.TextNot {
+		if strings.Contains(s.Text, w) {
+			out = append(out, fmt.Sprintf("요약에 %q 가 없어야 함 · %s", w, show()))
 		}
 	}
 	return out

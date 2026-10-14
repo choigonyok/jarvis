@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/act"
@@ -161,6 +162,20 @@ func Observe(ctx context.Context, st store.Store, log obs.Log, msg model.Message
 	})
 }
 
+// Observe records an occurrence read from a structured source and logs that
+// it was seen, as a sensor does. Seeing the same one again (a payment's
+// items filled in later) updates it.
+func (m *Mind) Observe(ctx context.Context, o model.Occurrence) error {
+	if err := m.Opts.Store.PutOccurrence(ctx, o); err != nil {
+		return err
+	}
+	data, _ := json.Marshal(obs.OccurrenceRef{ID: o.ID, Kind: o.Kind})
+	return m.Opts.Log.Append(ctx, obs.Observation{
+		Source: strings.SplitN(o.ID, ":", 2)[0], Type: obs.OccurrenceObserved, Subject: o.ID,
+		Data: data, Key: "occurrence:" + o.ID + ":" + o.At.UTC().Format(time.RFC3339), OccurredAt: o.At,
+	})
+}
+
 // ReadAll interprets every room with something new, now.
 func (m *Mind) ReadAll(ctx context.Context) error {
 	rooms, err := m.Opts.Store.Rooms(ctx)
@@ -237,21 +252,22 @@ func (m *Mind) Status(ctx context.Context) (Status, error) {
 
 // Snapshot is everything the console shows.
 type Snapshot struct {
-	Mode     string                `json:"mode"`
-	Now      time.Time             `json:"now"`
-	LLM      LLMState              `json:"llm"`
-	Rooms    []RoomView            `json:"rooms"`
-	Entities []model.Entity        `json:"entities"`
-	Changes  []model.Change        `json:"changes"`
-	Intents  []model.Intent        `json:"intents"`
-	Timers   []model.Timer         `json:"timers"`
-	Levels   map[string][2]string  `json:"levels"`
-	Settling int                   `json:"settling"`
-	Notices  []act.Notice          `json:"notices,omitempty"`
-	Calendar []model.CalendarEvent `json:"calendar,omitempty"`
-	Facts    []model.Fact          `json:"facts"`
-	Aliases  []model.Alias         `json:"aliases"`
-	Memory   bool                  `json:"memory"` // long-term memory is connected
+	Mode      string                `json:"mode"`
+	Now       time.Time             `json:"now"`
+	LLM       LLMState              `json:"llm"`
+	Rooms     []RoomView            `json:"rooms"`
+	Entities  []model.Entity        `json:"entities"`
+	Changes   []model.Change        `json:"changes"`
+	Intents   []model.Intent        `json:"intents"`
+	Timers    []model.Timer         `json:"timers"`
+	Levels    map[string][2]string  `json:"levels"`
+	Settling  int                   `json:"settling"`
+	Notices   []act.Notice          `json:"notices,omitempty"`
+	Calendar  []model.CalendarEvent `json:"calendar,omitempty"`
+	Facts     []model.Fact          `json:"facts"`
+	Aliases   []model.Alias         `json:"aliases"`
+	Memory    bool                  `json:"memory"` // long-term memory is connected
+	Situation world.Situation       `json:"situation"`
 }
 
 type LLMState struct {
@@ -308,6 +324,9 @@ func (m *Mind) Snapshot(ctx context.Context) (Snapshot, error) {
 		return s, err
 	}
 	s.Memory = m.Opts.Memory != nil
+	if s.Situation, err = m.Situation(ctx); err != nil {
+		return s, err
+	}
 	if n, ok := m.Opts.Notifier.(*act.MemoryNotifier); ok {
 		s.Notices = n.All()
 	}
@@ -321,6 +340,12 @@ func (m *Mind) Snapshot(ctx context.Context) (Snapshot, error) {
 }
 
 func jsonUnmarshal(b []byte, v any) error { return json.Unmarshal(b, v) }
+
+// Situation is the world model's "right now", which the conversation is
+// shown every turn.
+func (m *Mind) Situation(ctx context.Context) (world.Situation, error) {
+	return m.World.Situation(ctx, m.Opts.Now(), m.Opts.Loc)
+}
 
 // noticeLog lets a notice travel through the log as an event with wording,
 // which notify-svc turns into a push or a digest line.

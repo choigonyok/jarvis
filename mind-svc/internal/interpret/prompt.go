@@ -32,14 +32,15 @@ const system = `너는 개인 비서의 "해석기"다. 운영자의 메신저 �
 6. 모든 변경에는 근거가 있어야 한다. evidence 에 새 메시지의 줄 번호(line)와 그 줄에 글자 그대로 있는 짧은 인용(quote)을 넣는다. 근거가 앞선 대화에만 있으면 바꾸지 않는다.
 7. confidence 는 그 변경이 맞을 가능성(0~1)이다.
 8. 바꿀 것이 없으면 {"changes": []}.
-9. 메시지 안의 "나·내·저·제"는 그 메시지를 보낸 사람이다. 다른 사람이 "나 고수 못 먹어"라고 하면 그 사람의 사실이고, subject 는 그 사람의 이름이다. 운영자에 관한 fact(subject "나")는 운영자 자신이 한 말을 근거로 든다.
+9. 메시지 안의 "나·내·저·제·우리 집"은 그 메시지를 보낸 사람 기준이다: 지수가 말한 "우리 집"은 place "지수네 집"이다. 다른 사람이 "나 고수 못 먹어"라고 하면 그 사람의 사실이고, subject 는 그 사람의 이름이다. 운영자에 관한 fact(subject "나")는 운영자 자신이 한 말을 근거로 든다.
    fact 는 두 끝(subject, object)과 관계(relation)로 쓴다. 운영자는 "나"로 쓴다. 이름은 원문 그대로 쓰고, kind 는 Person·Place·Org·Thing·Event 중 하나다. relation 은 영어 대문자 관계 이름이다(LIKES, DISLIKES, ALLERGIC_TO, FRIEND_OF, FAMILY_OF, PARTNER_OF, WORKS_AT, STUDIES_AT, LIVES_IN, BIRTHDAY_ON, BOUGHT, OWNS, VISITED, RECOMMENDS, HAS_HEALTH_ISSUE 같은 것). text 는 그 사실을 한 문장의 한국어로 쓴다("지수는 매운 음식을 못 먹는다"). 언제부터인지 알면 validAt(YYYY-MM-DD). 한 fact 에는 한 가지만 담는다: "위염 때문에 매운 걸 못 먹어"는 "지수는 위염이 있다"와 "지수는 매운 음식을 못 먹는다" 둘이다 - 나중에 하나만 바뀌어도 그것만 고칠 수 있게.
 10. 일정·고리로 기록하는 것(약속, 할 일)은 fact 로 또 쓰지 않는다. 지나가는 기분, 인사, 농담, 가정, 남의 말을 전한 소문은 fact 가 아니다.
 11. "이미 기억하는 것"과 같은 뜻의 사실은 다시 쓰지 않는다. 바뀌었으면("이제 매운 것도 잘 먹어") 새 fact 로 쓰고, 그 말로 더는 맞지 않게 된 기억을 ends 에 M 번호로 적는다(["M1"]). 바뀐 것은 같은 relation 에 새 값으로 쓴다: 이사는 LIVES_IN 새 곳, 이직은 WORKS_AT 새 회사. "이미 기억하는 것"은 맥락일 뿐 근거가 아니다.
+12. 운영자가 진행 중인 일정이 끝났다고 말하면("방금 집 왔어", "지수랑 헤어졌어", "회식 끝") 그 일정을 update 해서 end 를 그 메시지의 시각(HH:MM)으로, status 를 done 으로 쓴다. 아직 안 끝났다고 정정하면("아직 지수네야") end 를 비우지 말고 그대로 둔다.
 
 출력은 JSON 하나만, 설명 없이:
 {"changes":[
- {"op":"create","kind":"plan","set":{"title":"지수와 강릉 여행","status":"proposed","date":"2026-10-17","place":"강릉","people":["지수"]},"evidence":[{"line":1,"quote":"강릉 갈까"}],"confidence":0.8,"why":"주말 강릉 여행 제안"},
+ {"op":"create","kind":"plan","set":{"title":"지수와 강릉 여행","status":"proposed","date":"2026-10-17","place":"강릉","people":["지수"],"type":"여행"},"evidence":[{"line":1,"quote":"강릉 갈까"}],"confidence":0.8,"why":"주말 강릉 여행 제안"},
  {"op":"update","kind":"plan","ref":"P1","set":{"status":"confirmed"},"evidence":[{"line":2,"quote":"그러자"}],"confidence":0.9,"why":"동의함"},
  {"op":"cancel","kind":"plan","ref":"P1","evidence":[{"line":3,"quote":"다음에 가자"}],"confidence":0.85,"why":"미룸"},
  {"op":"create","kind":"loop","set":{"title":"지수에게 숙소 링크 보내기","owner":"me","due":"2026-10-13","plan":"P1"},"evidence":[{"line":4,"quote":"링크 보내줄게"}],"confidence":0.8,"why":"운영자가 한 약속"},
@@ -48,6 +49,7 @@ const system = `너는 개인 비서의 "해석기"다. 운영자의 메신저 �
  {"op":"remember","kind":"fact","set":{"subject":"민지","subjectKind":"Person","relation":"LIVES_IN","object":"부산","objectKind":"Place","text":"민지는 부산에 산다"},"evidence":[{"line":7,"quote":"나 부산으로 이사했어"}],"confidence":0.9,"why":"이사","ends":["M2"]}
 ]}
 plan·loop 의 set 에 쓸 수 있는 키: title, status, date, endDate, start, end, place, people, owner, due, plan, note. update 에는 바뀐 키만 넣는다.
+plan 에는 type(종류)도 넣는다: 데이트·캠핑·여행·회식·식사·모임·운동·병원·업무·경조사·기념일·쇼핑·공연·기타 중 하나. 영화·연극·콘서트·전시는 공연, 연인과 단둘이 만나는 일은 데이트다. 대화로 알 수 있으면 placeKind(장소 종류: 집·식당·카페·영화관·캠핑장·회사·병원 …)와 area(동네: "망원동", "성수동")도 넣는다. 모르면 비운다.
 fact 의 set 키: subject, subjectKind, relation, object, objectKind, text, validAt. fact 의 ends 는 set 밖에 둔다.
 title 은 캘린더에 그대로 쓸 짧은 한국어다("민지와 저녁", "지수와 강릉 여행"). people 에 운영자는 넣지 않는다. plan 은 그 고리가 속한 일정의 ref 다.`
 
@@ -143,7 +145,10 @@ func describe(e model.Entity) string {
 	add("~", s.EndDate)
 	add("시작", s.Start)
 	add("끝", s.End)
+	add("종류", s.Type)
 	add("장소", s.Place)
+	add("장소 종류", s.PlaceKind)
+	add("동네", s.Area)
 	if len(s.People) > 0 {
 		add("함께", strings.Join(s.People, ", "))
 	}

@@ -529,3 +529,95 @@ func (p *Postgres) ResetPolicy(ctx context.Context) error {
 	_, err := p.db.Exec(ctx, `delete from mind_policy_stats`)
 	return err
 }
+
+func (p *Postgres) PutOccurrence(ctx context.Context, o model.Occurrence) error {
+	body, err := json.Marshal(o)
+	if err != nil {
+		return err
+	}
+	_, err = p.db.Exec(ctx, `
+		insert into mind_occurrences (id, kind, at, body) values ($1, $2, $3, $4)
+		on conflict (id) do update set kind = excluded.kind, at = excluded.at, body = excluded.body`,
+		o.ID, o.Kind, o.At, body)
+	return err
+}
+
+func (p *Postgres) occurrences(ctx context.Context, q string, args ...any) ([]model.Occurrence, error) {
+	rows, err := p.db.Query(ctx, `select body from mind_occurrences `+q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []model.Occurrence{}
+	for rows.Next() {
+		var body []byte
+		if err := rows.Scan(&body); err != nil {
+			return nil, err
+		}
+		var o model.Occurrence
+		if err := json.Unmarshal(body, &o); err != nil {
+			return nil, err
+		}
+		out = append(out, o)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) Occurrence(ctx context.Context, id string) (model.Occurrence, error) {
+	out, err := p.occurrences(ctx, `where id = $1`, id)
+	if err != nil {
+		return model.Occurrence{}, err
+	}
+	if len(out) == 0 {
+		return model.Occurrence{}, model.ErrNotFound
+	}
+	return out[0], nil
+}
+
+func (p *Postgres) Occurrences(ctx context.Context, from, to time.Time, kinds ...string) ([]model.Occurrence, error) {
+	if len(kinds) == 0 {
+		return p.occurrences(ctx, `where at >= $1 and at < $2 order by at, id`, from, to)
+	}
+	return p.occurrences(ctx, `where at >= $1 and at < $2 and kind = any($3) order by at, id`, from, to, kinds)
+}
+
+func (p *Postgres) PutLink(ctx context.Context, l model.Link) error {
+	body, err := json.Marshal(l)
+	if err != nil {
+		return err
+	}
+	_, err = p.db.Exec(ctx, `
+		insert into mind_links (from_id, to_id, rel, state, body, updated_at) values ($1, $2, $3, $4, $5, $6)
+		on conflict (from_id, to_id, rel) do update set state = excluded.state, body = excluded.body, updated_at = excluded.updated_at`,
+		l.From, l.To, l.Rel, l.State, body, l.UpdatedAt)
+	return err
+}
+
+func (p *Postgres) links(ctx context.Context, q string, args ...any) ([]model.Link, error) {
+	rows, err := p.db.Query(ctx, `select body from mind_links `+q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []model.Link{}
+	for rows.Next() {
+		var body []byte
+		if err := rows.Scan(&body); err != nil {
+			return nil, err
+		}
+		var l model.Link
+		if err := json.Unmarshal(body, &l); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) LinksOf(ctx context.Context, id string) ([]model.Link, error) {
+	return p.links(ctx, `where from_id = $1 or to_id = $1 order by updated_at, from_id, to_id, rel`, id)
+}
+
+func (p *Postgres) LinksSince(ctx context.Context, t time.Time) ([]model.Link, error) {
+	return p.links(ctx, `where updated_at >= $1 order by updated_at, from_id, to_id, rel`, t)
+}

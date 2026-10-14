@@ -172,6 +172,40 @@ func TestMemory(t *testing.T) {
 	contract(t, NewMemory())
 	facts(t, NewMemory())
 	policy(t, NewMemory())
+	occurrences(t, NewMemory())
+}
+
+// occurrences and links: idempotent by id, read by time window and kind,
+// links from either end and by when they changed.
+func occurrences(t *testing.T, st Store) {
+	ctx := context.Background()
+	at := time.Date(2026, 10, 3, 12, 40, 0, 0, time.UTC)
+	o := model.Occurrence{ID: "spending:1#1", Kind: "purchase.item", At: at, Title: "참나무 장작 10kg", Class: "연료/캠핑", Amount: 20000, Ref: "spending:1"}
+	_ = st.PutOccurrence(ctx, o)
+	o.Amount = 21000
+	_ = st.PutOccurrence(ctx, o)
+	_ = st.PutOccurrence(ctx, model.Occurrence{ID: "photo:a", Kind: "photo", At: at.Add(time.Hour), Area: "가평"})
+	got, _ := st.Occurrences(ctx, at, at.Add(2*time.Hour))
+	if len(got) != 2 || got[0].Amount != 21000 {
+		t.Fatalf("발생: %+v", got)
+	}
+	if only, _ := st.Occurrences(ctx, at, at.Add(2*time.Hour), "photo"); len(only) != 1 || only[0].ID != "photo:a" {
+		t.Fatalf("종류로: %+v", only)
+	}
+	if none, _ := st.Occurrences(ctx, at.Add(2*time.Hour), at.Add(3*time.Hour)); len(none) != 0 {
+		t.Fatalf("구간 밖: %+v", none)
+	}
+	l := model.Link{From: "spending:1#1", To: "plan_x", Rel: model.PrepFor, Confidence: 0.6, State: model.Estimated, By: "judge", CreatedAt: at, UpdatedAt: at}
+	_ = st.PutLink(ctx, l)
+	l.State, l.UpdatedAt = model.Confirmed, at.Add(time.Hour)
+	_ = st.PutLink(ctx, l)
+	of, _ := st.LinksOf(ctx, "plan_x")
+	if len(of) != 1 || of[0].State != model.Confirmed {
+		t.Fatalf("링크: %+v", of)
+	}
+	if since, _ := st.LinksSince(ctx, at.Add(30*time.Minute)); len(since) != 1 {
+		t.Fatalf("바뀐 링크: %+v", since)
+	}
 }
 
 // policy: counts per (skill, context), the last answer, and a reset.
@@ -212,7 +246,7 @@ func TestPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	if _, err := pool.Exec(context.Background(), `truncate mind_messages, mind_rooms, mind_entities, mind_changes, mind_timers, mind_intents, mind_cursors, mind_facts, mind_aliases, mind_policy_stats restart identity cascade`); err != nil {
+	if _, err := pool.Exec(context.Background(), `truncate mind_messages, mind_rooms, mind_entities, mind_changes, mind_timers, mind_intents, mind_cursors, mind_facts, mind_aliases, mind_policy_stats, mind_occurrences, mind_links restart identity cascade`); err != nil {
 		t.Fatal(err)
 	}
 	key := make([]byte, 32)
@@ -220,6 +254,7 @@ func TestPostgres(t *testing.T) {
 	contract(t, st)
 	facts(t, st)
 	policy(t, st)
+	occurrences(t, st)
 	var sealed bool
 	var body []byte
 	_ = pool.QueryRow(context.Background(), `select sealed, body from mind_messages where ref = 'sim:1'`).Scan(&sealed, &body)

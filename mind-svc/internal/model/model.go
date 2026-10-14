@@ -64,6 +64,14 @@ type State struct {
 	Place   string   `json:"place,omitempty"`
 	People  []string `json:"people,omitempty"`
 	Shared  bool     `json:"shared,omitempty"` // on the couple's shared calendar
+	// Type is what kind of plan it is (데이트, 캠핑, 회식, 여행 …): what
+	// the patterns and the expected length of a plan are kept by.
+	Type string `json:"type,omitempty"`
+	// PlaceKind is what kind of place it is (집, 식당, 영화관, 캠핑장 …);
+	// Area the neighbourhood it is in (망원동), when known - what a payment
+	// or a photo's place is matched against.
+	PlaceKind string `json:"placeKind,omitempty"`
+	Area      string `json:"area,omitempty"`
 
 	// Loops.
 	Owner  string `json:"owner,omitempty"`  // me: I owe it | them: owed to me
@@ -75,6 +83,59 @@ type State struct {
 
 	Note string `json:"note,omitempty"`
 }
+
+// Plan types the interpreter labels plans with.
+var PlanTypes = []string{"데이트", "캠핑", "여행", "회식", "식사", "모임", "운동", "병원", "업무", "경조사", "기념일", "쇼핑", "공연", "기타"}
+
+// Occurrence is something that happened, read from a structured source by
+// rule: a payment, an item in it, a photo, a workout, a calendar entry, a
+// transfer. Each is an index onto its source, which keeps the original -
+// Ref says where.
+type Occurrence struct {
+	ID     string     `json:"id"`   // spending:812, spending:812#1, photo:<asset>, workout:2026-10-14 …
+	Kind   string     `json:"kind"` // purchase | purchase.item | photo | workout | calendar | transfer
+	At     time.Time  `json:"at"`
+	Until  *time.Time `json:"until,omitempty"`
+	Title  string     `json:"title"`           // the merchant, the item, the entry's title
+	Place  string     `json:"place,omitempty"` // where it was, as the source names it
+	Area   string     `json:"area,omitempty"`  // the neighbourhood, when the source tells it
+	People []string   `json:"people,omitempty"`
+	Things []string   `json:"things,omitempty"`
+	// Class is what kind of thing (an item's category, 연료/캠핑) or of
+	// plan (a calendar entry's type).
+	Class  string `json:"class,omitempty"`
+	Amount int64  `json:"amount,omitempty"` // won
+	Count  int    `json:"count,omitempty"`  // photos in a batch, sets in a workout
+	Ref    string `json:"ref"`              // the source's own id
+	Quote  string `json:"quote,omitempty"`  // a few words of the source, for a card's grounds
+}
+
+// Link is a relation between two things that happened or will: a payment
+// during a date, firewood bought for a camping trip, a dinner with someone.
+// From and To are occurrence or entity ids.
+type Link struct {
+	From       string    `json:"from"`
+	To         string    `json:"to"`
+	Rel        string    `json:"rel"` // during | prep_for | used_during | with | after | replaces
+	Confidence float64   `json:"confidence"`
+	State      string    `json:"state"` // estimated | confirmed | rejected
+	Evidence   []string  `json:"evidence,omitempty"`
+	Why        string    `json:"why,omitempty"`
+	By         string    `json:"by"` // rule | judge | pattern | user
+	CreatedAt  time.Time `json:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
+}
+
+// Link states: Estimated, then Confirmed or Rejected (the same words as a
+// plan's and an intent's). And the relations.
+const (
+	Estimated = "estimated"
+
+	During     = "during"
+	PrepFor    = "prep_for"
+	UsedDuring = "used_during"
+	With       = "with"
+)
 
 // Evidence is the line of an observation a belief rests on. Ref names the
 // observed message; Quote is the words, which must appear in it.

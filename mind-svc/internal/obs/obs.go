@@ -40,7 +40,16 @@ const (
 	MessageObserved = "message.observed" // a chat message; text in the content store
 	ActionExecuted  = "action.executed"  // the gate did something
 	ActionUndone    = "action.undone"    // and took it back
+	// OccurrenceObserved is something that happened, read from a structured
+	// source (a payment, a photo, a workout); the occurrence is in the store.
+	OccurrenceObserved = "occurrence.observed"
 )
+
+// OccurrenceRef is an occurrence.observed's data.
+type OccurrenceRef struct {
+	ID   string `json:"id"`
+	Kind string `json:"kind"`
+}
 
 // MessageRef is a message.observed's data.
 type MessageRef struct {

@@ -1,0 +1,25 @@
+{
+  "name": "S4 정정: 운영자가 집에 왔다고 하면 데이트가 끝나고 추정이 사라진다",
+  "room": "owner",
+  "roomName": "jarvis",
+  "turns": [
+    {
+      "messages": [
+        { "at": "2026-10-18T11:00", "me": true, "text": "오늘 2시에 망원동 지수네 집에서 데이트" }
+      ],
+      "script": {"changes":[{"op":"create","kind":"plan","set":{"title":"지수네 집 데이트","status":"confirmed","date":"2026-10-18","start":"14:00","place":"지수네 집","people":["지수"],"type":"데이트","placeKind":"집","area":"망원동"},"evidence":[{"line":1,"quote":"오늘 2시에 망원동 지수네 집에서 데이트"}],"confidence":0.9,"why":"운영자의 메모"}]}
+    },
+    {
+      "at": "2026-10-18T15:45",
+      "occur": [ { "id": "photo:b1", "kind": "photo", "at": "2026-10-18T15:40", "place": "망원동", "area": "망원동", "count": 2 } ],
+      "expect": { "now": { "placeHas": "지수네 집", "minConfidence": 0.6 } }
+    },
+    {
+      "messages": [
+        { "at": "2026-10-18T17:30", "me": true, "text": "방금 집 왔어 배달은 됐어" }
+      ],
+      "script": {"changes":[{"op":"update","kind":"plan","ref":"P1","set":{"end":"17:30","status":"done"},"evidence":[{"line":1,"quote":"방금 집 왔어"}],"confidence":0.85,"why":"데이트가 끝남"}]},
+      "expect": { "plans": [{ "status": "done", "titleHas": "데이트" }], "now": { "noGuess": true, "textNot": ["진행 중일 수 있는 일정"] } }
+    }
+  ]
+}

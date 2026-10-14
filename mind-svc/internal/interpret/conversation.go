@@ -318,8 +318,31 @@ func (c *Conversation) known(ctx context.Context, room string) ([]view, error) {
 			out = append(out, view{ref: fmt.Sprintf("L%d", nl), entity: e})
 		}
 	}
+	if OwnerRoom(room) {
+		// What the operator tells the assistant is often about a plan made
+		// elsewhere ("방금 집 왔어" ends the date agreed in 지수's room):
+		// today's confirmed plans from every room are shown here too.
+		today := c.now().In(c.loc).Format("2006-01-02")
+		plans, err := c.world.Entities(ctx, model.KindPlan, "", true)
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range plans {
+			st := e.State
+			if e.Room == room || st.Status != model.Confirmed || st.Date == "" ||
+				!(st.Date == today || st.Date < today && st.EndDate >= today) {
+				continue
+			}
+			np++
+			out = append(out, view{ref: fmt.Sprintf("P%d", np), entity: e})
+		}
+	}
 	return out, nil
 }
+
+// OwnerRoom is the operator's own conversation with the assistant, where
+// what is said is about the operator's day anywhere.
+func OwnerRoom(room string) bool { return strings.HasSuffix(room, ":owner") }
 
 // op is one change the model proposes.
 type op struct {
@@ -584,6 +607,17 @@ func setAll(s *model.State, kind string, set map[string]json.RawMessage, refs ma
 	}
 	if v, ok := str("place"); ok {
 		s.Place = v
+	}
+	if kind == model.KindPlan {
+		if v, ok := str("type"); ok && (v == "" || slices.Contains(model.PlanTypes, v)) {
+			s.Type = v
+		}
+		if v, ok := str("placeKind"); ok {
+			s.PlaceKind = v
+		}
+		if v, ok := str("area"); ok {
+			s.Area = v
+		}
 	}
 	if v, ok := str("note"); ok {
 		s.Note = v

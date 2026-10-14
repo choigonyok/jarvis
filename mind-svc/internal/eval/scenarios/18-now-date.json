@@ -1,0 +1,30 @@
+{
+  "name": "S4 지금 상황: 데이트 중, 같은 동네 결제·사진 → 지수네 집에서 지수와 (0.85)",
+  "room": "jisu-now",
+  "roomName": "지수",
+  "turns": [
+    {
+      "messages": [
+        { "at": "2026-10-18T11:00", "from": "지수", "text": "오늘 2시에 망원동 우리 집에서 데이트하자 ㅎㅎ" },
+        { "at": "2026-10-18T11:01", "me": true, "text": "좋아 2시에 갈게" }
+      ],
+      "script": {"changes":[{"op":"create","kind":"plan","set":{"title":"지수네 집 데이트","status":"confirmed","date":"2026-10-18","start":"14:00","place":"지수네 집","people":["지수"],"type":"데이트","placeKind":"집","area":"망원동"},"evidence":[{"line":1,"quote":"2시에 망원동 우리 집에서 데이트하자"},{"line":2,"quote":"좋아 2시에 갈게"}],"confidence":0.9,"why":"지수가 초대했고 운영자가 동의함"}]},
+      "expect": { "plans": [{ "status": "confirmed", "date": "2026-10-18", "start": "14:00" }] }
+    },
+    {
+      "at": "2026-10-18T15:45",
+      "occur": [
+        { "id": "spending:9001", "kind": "purchase", "at": "2026-10-18T15:20", "title": "GS25 망원점", "place": "GS25 망원점", "area": "망원동", "amount": 8400 },
+        { "id": "photo:a1", "kind": "photo", "at": "2026-10-18T15:40", "place": "망원동", "area": "망원동", "count": 3 }
+      ]
+    },
+    {
+      "at": "2026-10-18T16:00",
+      "expect": { "now": {
+        "placeHas": "지수네 집", "with": "지수", "minConfidence": 0.85,
+        "textHas": ["데이트", "14:00~", "끝 시각 미정", "6시간으로", "15:20 망원동 결제", "15:40 망원동 사진", "지수네 집에서 지수와 함께"],
+        "textNot": ["먼저 물어볼 것"]
+      } }
+    }
+  ]
+}

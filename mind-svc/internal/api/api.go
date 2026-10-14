@@ -5,6 +5,7 @@
 //	POST /consume                     events-svc delivers an observation (token)
 //	GET  /                            the console: simulator, world model, intents
 //	GET  /api/snapshot                everything the console shows
+//	GET  /now                         the situation right now, by rule: what the conversation is shown each turn
 //	POST /api/simulate                {room, roomName, sender, mine, text, at?}
 //	POST /api/read                    {room?} interpret now instead of waiting for quiet
 //	POST /api/settle                  hand settling changes to the skills now
@@ -84,6 +85,14 @@ func (s *Server) Handler() http.Handler {
 		_, _ = w.Write(page)
 	})
 	mux.HandleFunc("GET /api/snapshot", s.auth(false, s.snapshot))
+	mux.HandleFunc("GET /now", s.auth(false, func(w http.ResponseWriter, r *http.Request) {
+		now, err := s.m.Situation(r.Context())
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, now)
+	}))
 	mux.HandleFunc("POST /api/simulate", s.auth(false, s.simulate))
 	mux.HandleFunc("POST /api/read", s.auth(false, s.read))
 	mux.HandleFunc("POST /api/settle", s.auth(false, func(w http.ResponseWriter, r *http.Request) {

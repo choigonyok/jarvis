@@ -1,0 +1,23 @@
+{
+  "name": "S4 변형: 위치 단서가 없으면 추측하지 않고 묻는다",
+  "room": "jisu-unsure",
+  "roomName": "지수",
+  "turns": [
+    {
+      "messages": [
+        { "at": "2026-10-18T11:00", "from": "지수", "text": "오늘 2시에 망원동 우리 집에서 데이트하자 ㅎㅎ" },
+        { "at": "2026-10-18T11:01", "me": true, "text": "좋아 2시에 갈게" }
+      ],
+      "script": {"changes":[{"op":"create","kind":"plan","set":{"title":"지수네 집 데이트","status":"confirmed","date":"2026-10-18","start":"14:00","place":"지수네 집","people":["지수"],"type":"데이트","placeKind":"집","area":"망원동"},"evidence":[{"line":1,"quote":"2시에 망원동 우리 집에서 데이트하자"},{"line":2,"quote":"좋아 2시에 갈게"}],"confidence":0.9,"why":"초대와 동의"}]}
+    },
+    {
+      "at": "2026-10-18T16:00",
+      "expect": { "now": { "maxConfidence": 0.49, "textHas": ["확실하지 않음", "먼저 물어볼 것"] } }
+    },
+    {
+      "at": "2026-10-18T16:30",
+      "occur": [ { "id": "spending:9002", "kind": "purchase", "at": "2026-10-18T16:20", "title": "스타벅스 강남역점", "place": "스타벅스 강남역점", "area": "역삼동", "amount": 6500 } ],
+      "expect": { "now": { "maxConfidence": 0.3, "textHas": ["역삼동 결제(다른 곳)", "먼저 물어볼 것"] } }
+    }
+  ]
+}

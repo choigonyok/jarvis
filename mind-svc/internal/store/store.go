@@ -72,6 +72,19 @@ type Store interface {
 	CountPolicy(ctx context.Context, skill, context, outcome string, at time.Time) error
 	ResetPolicy(ctx context.Context) error
 
+	// Occurrences: what happened, read from structured sources; idempotent
+	// by ID. Between is [from, to), kinds empty for all, oldest first.
+	PutOccurrence(ctx context.Context, o model.Occurrence) error
+	Occurrence(ctx context.Context, id string) (model.Occurrence, error)
+	Occurrences(ctx context.Context, from, to time.Time, kinds ...string) ([]model.Occurrence, error)
+
+	// Links between occurrences and entities, one per (from, to, rel).
+	PutLink(ctx context.Context, l model.Link) error
+	// LinksOf is every link from or to id.
+	LinksOf(ctx context.Context, id string) ([]model.Link, error)
+	// LinksSince is every link changed at or after t, oldest first.
+	LinksSince(ctx context.Context, t time.Time) ([]model.Link, error)
+
 	// Aliases: names in conversation → memory nodes. Putting a name again
 	// moves it to the node given and counts it seen once more.
 	PutAlias(ctx context.Context, a model.Alias) error
