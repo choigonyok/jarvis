@@ -11,12 +11,14 @@ export async function decideProposal(
   decision: Decision,
   /** A form card's fields as the operator left them. */
   edits?: Record<string, string>,
+  /** Why, when the operator says - a rejection's reason. */
+  reason?: string,
 ): Promise<string | null> {
   try {
     const res = await fetch(`${API}/proposals/${proposalId}/decision`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(edits ? { decision, edits } : { decision }),
+      body: JSON.stringify({ decision, ...(edits ? { edits } : {}), ...(reason?.trim() ? { reason: reason.trim() } : {}) }),
     });
     if (res.ok) return null;
     const body = (await res.json().catch(() => null)) as { error?: string } | null;

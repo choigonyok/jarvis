@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -65,6 +66,18 @@ type Proposal struct {
 	Note       string  `json:"note,omitempty"`
 	At         string  `json:"at"`
 	DecidedAt  string  `json:"decidedAt,omitempty"`
+	// Reason is what the operator said when deciding - why a card was
+	// turned down. It is what the next judgement about the same thing reads.
+	Reason string `json:"reason,omitempty"`
+	// Edits is every change the operator made to a form card before
+	// deciding, oldest first: what was proposed and what they wanted instead.
+	Edits []Edit `json:"edits,omitempty"`
+}
+
+// Edit is one revision of a form card by the operator.
+type Edit struct {
+	At     string            `json:"at"`
+	Fields map[string]string `json:"fields"`
 }
 
 type Decision string
@@ -202,7 +215,10 @@ func (s *Store) OnOpen(fn func(Proposal)) {
 // terminal state for a proposal the CLI then runs itself - the calendar's own
 // live update is better evidence that it happened than a duplicated note.
 // Settle exists for the producer that executes an action on its own.
-func (s *Store) Decide(id string, d Decision) error {
+func (s *Store) Decide(id string, d Decision) error { return s.DecideWhy(id, d, "") }
+
+// DecideWhy decides with the operator's reason, kept on the proposal.
+func (s *Store) DecideWhy(id string, d Decision, reason string) error {
 	if d != Approve && d != Reject {
 		return fmt.Errorf("invalid decision %q", d)
 	}
@@ -217,6 +233,12 @@ func (s *Store) Decide(id string, d Decision) error {
 		return ErrAlreadyDecided
 	}
 	p.DecidedAt = time.Now().Format("15:04")
+	if r := []rune(strings.TrimSpace(reason)); len(r) > 0 {
+		if len(r) > 500 {
+			r = r[:500]
+		}
+		p.Reason = string(r)
+	}
 	if d == Reject {
 		p.State = Rejected
 	} else {
@@ -246,6 +268,11 @@ func (s *Store) Decide(id string, d Decision) error {
 // Revise swaps a pending proposal's action and card for an edited one, just
 // before it is decided. Only the operator's own edits come through here.
 func (s *Store) Revise(id string, a action.Action, c action.Card) error {
+	return s.ReviseWith(id, a, c, nil)
+}
+
+// ReviseWith revises a form card and records the operator's edits.
+func (s *Store) ReviseWith(id string, a action.Action, c action.Card, edits map[string]string) error {
 	s.mu.Lock()
 	p, ok := s.byID[id]
 	if !ok {
@@ -258,6 +285,9 @@ func (s *Store) Revise(id string, a action.Action, c action.Card) error {
 	}
 	p.Action = a
 	p.Card = c
+	if len(edits) > 0 {
+		p.Edits = append(p.Edits, Edit{At: time.Now().Format(time.RFC3339), Fields: edits})
+	}
 	s.save()
 	s.mu.Unlock()
 	return nil

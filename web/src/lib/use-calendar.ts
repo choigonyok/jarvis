@@ -134,8 +134,8 @@ export function useCalendar(cursor: Cursor) {
   }, []);
 
   const decide = useCallback(
-    async (proposalId: string, decision: Decision) => {
-      const message = await decideProposal(proposalId, decision);
+    async (proposalId: string, decision: Decision, reason?: string) => {
+      const message = await decideProposal(proposalId, decision, undefined, reason);
       if (message) {
         setError(message);
         void hydrate();

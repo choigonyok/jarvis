@@ -330,7 +330,7 @@ export function Thread() {
                     {proposal ? (
                       <ProposalCard
                         proposal={proposal}
-                        onDecide={(d, edits) => decide(proposal.id, d, edits)}
+                        onDecide={(d, edits, reason) => decide(proposal.id, d, edits, reason)}
                       />
                     ) : null}
                   </div>
@@ -356,7 +356,7 @@ export function Thread() {
                 <div className="min-w-0">
                   <ProposalCard
                     proposal={proposal}
-                    onDecide={(d, edits) => decide(proposal.id, d, edits)}
+                    onDecide={(d, edits, reason) => decide(proposal.id, d, edits, reason)}
                   />
                 </div>
               </li>

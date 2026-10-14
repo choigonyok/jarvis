@@ -542,7 +542,7 @@ func (e *Engine) OnDecide(p proposal.Proposal, d proposal.Decision) {
 		if json.Unmarshal(p.Action.Input, &in) == nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			if err := e.cfg.Mind.Reject(ctx, in.IntentID, p.Note); err != nil {
+			if err := e.cfg.Mind.Reject(ctx, in.IntentID, p.Reason); err != nil {
 				e.log.Warn("mind 에 거절을 알리지 못했습니다", "intent", in.IntentID, "err", err)
 			}
 		}
@@ -553,7 +553,7 @@ func (e *Engine) OnDecide(p proposal.Proposal, d proposal.Decision) {
 	}
 	e.emit(map[string]any{
 		"source": "agent", "type": "suggestion.decided", "subject": p.ID,
-		"data": map[string]any{"topic": en.Topic, "proposalId": p.ID, "title": en.Title, "decision": string(d)},
+		"data": map[string]any{"topic": en.Topic, "proposalId": p.ID, "title": en.Title, "decision": string(d), "reason": p.Reason, "edits": len(p.Edits)},
 		"key":  "suggestion:decided:" + p.ID,
 	})
 }

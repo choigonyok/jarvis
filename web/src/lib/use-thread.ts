@@ -115,9 +115,9 @@ export function useThread() {
   }, []);
 
   const decide = useCallback(
-    async (proposalId: string, decision: Decision, edits?: Record<string, string>) => {
+    async (proposalId: string, decision: Decision, edits?: Record<string, string>, reason?: string) => {
       setError(null);
-      const message = await decideProposal(proposalId, decision, edits);
+      const message = await decideProposal(proposalId, decision, edits, reason);
       if (message) {
         setError(message);
         void hydrate();

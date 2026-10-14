@@ -92,3 +92,20 @@ func TestIrreversibleNeverRunsItself(t *testing.T) {
 		t.Fatalf("got %v, want %v", got, RouteDrop)
 	}
 }
+
+// A rejection keeps the operator's reason, and a form card every edit made
+// before the decision.
+func TestReasonAndEdits(t *testing.T) {
+	s := NewStore(bus.New())
+	p, _ := s.Open(Proposal{Origin: OriginSuggest, Action: action.Action{Kind: "x.y"}})
+	if err := s.ReviseWith(p.ID, action.Action{Kind: "x.y"}, action.Card{Title: "t"}, map[string]string{"price": "10000"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DecideWhy(p.ID, Reject, "  지금은 필요 없어  "); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Get(p.ID)
+	if got.Reason != "지금은 필요 없어" || len(got.Edits) != 1 || got.Edits[0].Fields["price"] != "10000" {
+		t.Fatalf("이유와 수정 내역: %+v", got)
+	}
+}

@@ -48,6 +48,10 @@ export type Proposal = {
   note?: string;
   at: string;
   decidedAt?: string;
+  /** What the operator said when deciding - why it was turned down. */
+  reason?: string;
+  /** Every change the operator made to a form card before deciding. */
+  edits?: { at: string; fields: Record<string, string> }[];
 };
 
 export type Turn = {

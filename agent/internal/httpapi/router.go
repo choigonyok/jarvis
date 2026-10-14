@@ -301,6 +301,8 @@ func (s *Server) postDecision(w http.ResponseWriter, r *http.Request) {
 		Decision string `json:"decision"`
 		// Edits are the card's form fields as the operator left them.
 		Edits map[string]string `json:"edits"`
+		// Reason is why, when the operator says (a rejection, mostly).
+		Reason string `json:"reason"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "본문을 읽을 수 없습니다.")
@@ -313,7 +315,7 @@ func (s *Server) postDecision(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	err := s.proposals.Decide(id, proposal.Decision(body.Decision))
+	err := s.proposals.DecideWhy(id, proposal.Decision(body.Decision), body.Reason)
 	switch {
 	case errors.Is(err, proposal.ErrNotFound):
 		writeErr(w, http.StatusNotFound, "그런 요청이 없습니다.")
@@ -346,7 +348,7 @@ func (s *Server) revise(ctx context.Context, id string, edits map[string]string)
 	if err != nil {
 		return err.Error(), http.StatusBadRequest
 	}
-	if err := s.proposals.Revise(id, act, card); err != nil {
+	if err := s.proposals.ReviseWith(id, act, card, edits); err != nil {
 		return "이미 결재된 요청입니다.", http.StatusConflict
 	}
 	return "", 0

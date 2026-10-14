@@ -21,7 +21,7 @@ export function JobSheet({
 }: {
   job: Job | null;
   proposals: Proposal[];
-  onDecide: (id: string, d: Decision, edits?: Record<string, string>) => Promise<string | null>;
+  onDecide: (id: string, d: Decision, edits?: Record<string, string>, reason?: string) => Promise<string | null>;
   onOpenChange: (open: boolean) => void;
   onChanged: () => void;
 }) {
@@ -48,7 +48,7 @@ function Body({
 }: {
   job: Job;
   proposals: Proposal[];
-  onDecide: (id: string, d: Decision, edits?: Record<string, string>) => Promise<string | null>;
+  onDecide: (id: string, d: Decision, edits?: Record<string, string>, reason?: string) => Promise<string | null>;
   onChanged: () => void;
 }) {
   const [detail, setDetail] = useState<JobDetail | null>(null);
@@ -120,8 +120,8 @@ function Body({
           <ProposalCard
             key={p.id}
             proposal={p}
-            onDecide={async (d, edits) => {
-              const err = await onDecide(p.id, d, edits);
+            onDecide={async (d, edits, reason) => {
+              const err = await onDecide(p.id, d, edits, reason);
               if (!err) {
                 await load();
                 onChanged();

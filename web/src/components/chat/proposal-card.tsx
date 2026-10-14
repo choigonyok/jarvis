@@ -23,7 +23,7 @@ export function ProposalCard({
 }: {
   proposal: Proposal;
   /** May resolve to a reason the decision was refused (a form card missing a value). */
-  onDecide: (decision: Decision, edits?: Record<string, string>) => Promise<string | null> | void;
+  onDecide: (decision: Decision, edits?: Record<string, string>, reason?: string) => Promise<string | null> | void;
 }) {
   const settled =
     proposal.state === "pending" ? null : settledCopy[proposal.state];
@@ -34,14 +34,18 @@ export function ProposalCard({
   );
   const [refusal, setRefusal] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // 반려 asks, once, why - optional, one tap for the usual reasons. The reason
+  // is kept with the card and is what the next suggestion of the kind reads.
+  const [asking, setAsking] = useState(false);
+  const [why, setWhy] = useState("");
   // A required field left empty (the price of a listing, say) is the one thing
   // a form card cannot be approved without: the operator fills it in, never the model.
   const missing = fields.filter((f) => f.required && !(values[f.key] ?? "").trim());
 
-  async function decide(d: Decision) {
+  async function decide(d: Decision, because?: string) {
     setRefusal(null);
     setBusy(true);
-    const reason = await onDecide(d, form && d === "approved" ? values : undefined);
+    const reason = await onDecide(d, form && d === "approved" ? values : undefined, because);
     setBusy(false);
     if (reason) setRefusal(reason);
   }
@@ -127,7 +131,56 @@ export function ProposalCard({
             {settled.label}
             <span className="tnum text-faint">· {proposal.decidedAt}</span>
             {proposal.note ? <span className="text-faint">· {proposal.note}</span> : null}
+            {proposal.reason ? <span className="text-faint">· 이유: {proposal.reason}</span> : null}
           </p>
+        ) : asking ? (
+          <div className="anim-settle space-y-2">
+            <p className="px-1 text-[12px] text-dim">반려하는 이유가 있으면 알려 주세요. 다음 제안에 반영해요.</p>
+            <div className="flex flex-wrap gap-1.5">
+              {QUICK_REASONS.map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => setWhy(r)}
+                  aria-pressed={why === r}
+                  className={cn(
+                    "h-9 rounded-full border px-3 text-[12.5px] sm:h-7 sm:text-[12px]",
+                    why === r ? "border-reject/40 bg-reject/10 text-reject" : "border-edge-soft text-dim hover:text-foreground",
+                  )}
+                >
+                  {r}
+                </button>
+              ))}
+            </div>
+            <input
+              value={why}
+              onChange={(e) => setWhy(e.target.value)}
+              placeholder="직접 적기 (비워도 돼요)"
+              aria-label="반려 이유"
+              maxLength={300}
+              className={cn(input, "h-11 sm:h-8")}
+            />
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-1.5">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setAsking(false)}
+                disabled={busy}
+                className="h-12 text-[13.5px] text-dim sm:h-8 sm:px-3 sm:text-[0.8rem]"
+              >
+                취소
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void decide("rejected", why)}
+                disabled={busy}
+                className="h-12 border-edge text-[13.5px] text-reject hover:bg-reject/10 sm:h-8 sm:px-3.5 sm:text-[0.8rem]"
+              >
+                반려
+              </Button>
+            </div>
+          </div>
         ) : (
           /* This is the decision the whole product exists to collect, and on
              a phone it was a pair of 32px targets sitting a thumb-width apart.
@@ -137,7 +190,7 @@ export function ProposalCard({
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => void decide("rejected")}
+              onClick={() => setAsking(true)}
               disabled={busy}
               className="h-12 text-[13.5px] text-dim hover:bg-reject/10 hover:text-reject sm:h-8 sm:px-3 sm:text-[0.8rem]"
             >
@@ -163,6 +216,9 @@ export function ProposalCard({
     </article>
   );
 }
+
+/** The reasons a card is usually turned down, a tap each. */
+const QUICK_REASONS = ["지금은 필요 없어", "이미 했어", "틀렸어", "다시 묻지 마"];
 
 const input =
   "w-full rounded-lg border border-edge-soft bg-well px-3 text-[16px] text-foreground outline-none placeholder:text-faint focus-visible:border-edge focus-visible:ring-3 focus-visible:ring-ring/50 sm:text-[13.5px]";

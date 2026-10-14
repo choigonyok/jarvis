@@ -185,9 +185,13 @@ func (g *Gate) Resolve(p proposal.Proposal, d proposal.Decision) {
 	title := p.Card.Title
 
 	if d == proposal.Reject {
-		g.enqueue(fmt.Sprintf("[반려] 운영자가 승인 카드 %s(%s)를 반려했습니다.\n%s\n\n"+
+		why := ""
+		if p.Reason != "" {
+			why = "\n반려 이유: " + p.Reason
+		}
+		g.enqueue(fmt.Sprintf("[반려] 운영자가 승인 카드 %s(%s)를 반려했습니다.\n%s%s\n\n"+
 			"실행하지 마세요. 이유를 캐묻지 말고, 같은 목적을 이루는 덜 위험한 방법이 있으면 제안하고 없으면 짧게 확인만 하세요.",
-			p.ID, title, p.Card.Body))
+			p.ID, title, p.Card.Body, why))
 		return
 	}
 
