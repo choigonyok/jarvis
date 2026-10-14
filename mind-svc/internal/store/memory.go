@@ -26,6 +26,9 @@ type Memory struct {
 	policy   map[[2]string]model.PolicyStat
 	occurs   map[string]model.Occurrence
 	links    map[[3]string]model.Link
+	things   map[string]string
+	cache    map[[2]string]model.Judgement
+	patterns map[[4]string]model.Pattern
 	seq      int64
 }
 
@@ -41,6 +44,9 @@ func NewMemory() *Memory {
 		policy:   map[[2]string]model.PolicyStat{},
 		occurs:   map[string]model.Occurrence{},
 		links:    map[[3]string]model.Link{},
+		things:   map[string]string{},
+		cache:    map[[2]string]model.Judgement{},
+		patterns: map[[4]string]model.Pattern{},
 	}
 }
 
@@ -537,4 +543,76 @@ func (m *Memory) linksWhere(keep func(model.Link) bool) []model.Link {
 		return out[i].UpdatedAt.Before(out[j].UpdatedAt)
 	})
 	return out
+}
+
+func (m *Memory) ThingClass(_ context.Context, name string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c, ok := m.things[name]
+	if !ok {
+		return "", model.ErrNotFound
+	}
+	return c, nil
+}
+
+func (m *Memory) PutThingClass(_ context.Context, name, class string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.things[name] = class
+	return nil
+}
+
+func (m *Memory) LinkCache(_ context.Context, class, planKind string) (model.Judgement, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	j, ok := m.cache[[2]string{class, planKind}]
+	if !ok {
+		return model.Judgement{}, model.ErrNotFound
+	}
+	return j, nil
+}
+
+func (m *Memory) PutLinkCache(_ context.Context, planKind string, j model.Judgement) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.cache[[2]string{j.Class, planKind}] = j
+	return nil
+}
+
+func (m *Memory) CountPattern(_ context.Context, p model.Pattern) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	k := [4]string{p.KindA, p.Rel, p.KindB, p.Bucket}
+	cur := m.patterns[k]
+	cur.KindA, cur.Rel, cur.KindB, cur.Bucket = p.KindA, p.Rel, p.KindB, p.Bucket
+	cur.Support += p.Support
+	cur.Total += p.Total
+	if p.LastSeen.After(cur.LastSeen) {
+		cur.LastSeen = p.LastSeen
+	}
+	m.patterns[k] = cur
+	return nil
+}
+
+func (m *Memory) Patterns(_ context.Context, kindA string) ([]model.Pattern, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []model.Pattern{}
+	for _, p := range m.patterns {
+		if kindA == "" || p.KindA == kindA {
+			out = append(out, p)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		return a.KindA+a.Rel+a.KindB+a.Bucket < b.KindA+b.Rel+b.KindB+b.Bucket
+	})
+	return out, nil
+}
+
+func (m *Memory) ResetPatterns(context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.patterns = map[[4]string]model.Pattern{}
+	return nil
 }

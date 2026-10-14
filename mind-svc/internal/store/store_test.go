@@ -174,6 +174,35 @@ func TestMemory(t *testing.T) {
 	facts(t, NewMemory())
 	policy(t, NewMemory())
 	occurrences(t, NewMemory())
+	judge(t, NewMemory())
+}
+
+// judge: the common-sense caches and the pattern counts.
+func judge(t *testing.T, st Store) {
+	ctx := context.Background()
+	if _, err := st.ThingClass(ctx, "참나무 장작 10kg"); !errors.Is(err, model.ErrNotFound) {
+		t.Fatalf("없는 분류: %v", err)
+	}
+	_ = st.PutThingClass(ctx, "참나무 장작 10kg", "장작")
+	if c, _ := st.ThingClass(ctx, "참나무 장작 10kg"); c != "장작" {
+		t.Fatalf("분류: %q", c)
+	}
+	_ = st.PutLinkCache(ctx, "캠핑", model.Judgement{Class: "장작", Rel: model.PrepFor, Plausibility: 0.9, Why: "화로"})
+	if j, err := st.LinkCache(ctx, "장작", "캠핑"); err != nil || j.Plausibility < 0.89 || j.Rel != model.PrepFor {
+		t.Fatalf("상식: %+v %v", j, err)
+	}
+	at := time.Date(2026, 10, 8, 3, 0, 0, 0, time.UTC)
+	_ = st.CountPattern(ctx, model.Pattern{KindA: "캠핑", Rel: model.PrepFor, Total: 1, LastSeen: at})
+	_ = st.CountPattern(ctx, model.Pattern{KindA: "캠핑", Rel: model.PrepFor, KindB: "장작", Bucket: "d3", Support: 1, LastSeen: at})
+	_ = st.CountPattern(ctx, model.Pattern{KindA: "캠핑", Rel: model.PrepFor, KindB: "장작", Bucket: "d3", Support: 1, LastSeen: at.Add(time.Hour)})
+	ps, _ := st.Patterns(ctx, "캠핑")
+	if len(ps) != 2 || ps[1].Support != 2 || ps[0].Total != 1 || !ps[1].LastSeen.Equal(at.Add(time.Hour)) {
+		t.Fatalf("패턴: %+v", ps)
+	}
+	_ = st.ResetPatterns(ctx)
+	if ps, _ := st.Patterns(ctx, ""); len(ps) != 0 {
+		t.Fatalf("비워야: %+v", ps)
+	}
 }
 
 // occurrences and links: idempotent by id, read by time window and kind,
@@ -254,7 +283,7 @@ func TestPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	if _, err := pool.Exec(context.Background(), `truncate mind_messages, mind_rooms, mind_entities, mind_changes, mind_timers, mind_intents, mind_cursors, mind_facts, mind_aliases, mind_policy_stats, mind_occurrences, mind_links restart identity cascade`); err != nil {
+	if _, err := pool.Exec(context.Background(), `truncate mind_messages, mind_rooms, mind_entities, mind_changes, mind_timers, mind_intents, mind_cursors, mind_facts, mind_aliases, mind_policy_stats, mind_occurrences, mind_links, mind_thing_classes, mind_link_cache, mind_pattern_counts restart identity cascade`); err != nil {
 		t.Fatal(err)
 	}
 	key := make([]byte, 32)
@@ -263,6 +292,7 @@ func TestPostgres(t *testing.T) {
 	facts(t, st)
 	policy(t, st)
 	occurrences(t, st)
+	judge(t, st)
 	var sealed bool
 	var body []byte
 	_ = pool.QueryRow(context.Background(), `select sealed, body from mind_messages where ref = 'sim:1'`).Scan(&sealed, &body)

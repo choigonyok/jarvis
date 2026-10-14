@@ -28,6 +28,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/clock"
 	"github.com/choigonyok/jarvis/mind-svc/internal/gate"
 	"github.com/choigonyok/jarvis/mind-svc/internal/interpret"
+	"github.com/choigonyok/jarvis/mind-svc/internal/link"
 	"github.com/choigonyok/jarvis/mind-svc/internal/llm"
 	"github.com/choigonyok/jarvis/mind-svc/internal/memory"
 	"github.com/choigonyok/jarvis/mind-svc/internal/mind"
@@ -46,6 +47,9 @@ type Scenario struct {
 	Room     string `json:"room"`
 	RoomName string `json:"roomName"`
 	Turns    []Turn `json:"turns"`
+	// Judge is the common-sense answers for the scripted run, by a word of
+	// the item they are about.
+	Judge map[string]json.RawMessage `json:"judge,omitempty"`
 }
 
 // Turn is one step: messages arrive and the room is read, or the person
@@ -104,6 +108,31 @@ type Expect struct {
 	Dropped []string `json:"dropped,omitempty"`
 	// Now: the situation after this turn.
 	Now *NowMatch `json:"now,omitempty"`
+	// Links that must exist and must not; patterns that must be counted.
+	Links    []LinkMatch    `json:"links,omitempty"`
+	NoLinks  []LinkMatch    `json:"noLinks,omitempty"`
+	Patterns []PatternMatch `json:"patterns,omitempty"`
+}
+
+// LinkMatch is a partial description of a link: From is an occurrence id
+// (or its prefix), ToTitle a word of the plan's title.
+type LinkMatch struct {
+	From    string  `json:"from"`
+	ToTitle string  `json:"toTitle,omitempty"`
+	Rel     string  `json:"rel,omitempty"`
+	State   string  `json:"state,omitempty"`
+	MinConf float64 `json:"minConf,omitempty"`
+	MaxConf float64 `json:"maxConf,omitempty"`
+}
+
+// PatternMatch is a count that must be there: Support for a class, Total
+// for the kind (KindB empty).
+type PatternMatch struct {
+	KindA   string `json:"kindA"`
+	KindB   string `json:"kindB,omitempty"`
+	Bucket  string `json:"bucket,omitempty"`
+	Support int    `json:"support,omitempty"`
+	Total   int    `json:"total,omitempty"`
 }
 
 // Occur is an occurrence as a scenario writes it: local times.
@@ -236,7 +265,15 @@ func Scripted(sc Scenario) llm.Client {
 		}
 	}
 	n := 0
-	return &llm.Script{Answer: func(_, _ string) (string, error) {
+	return &llm.Script{Answer: func(system, user string) (string, error) {
+		if system == link.JudgeSystem {
+			for word, answer := range sc.Judge {
+				if strings.Contains(user, word) {
+					return string(answer), nil
+				}
+			}
+			return `{"class":"기타","rel":"unrelated","plausibility":0,"why":"모름"}`, nil
+		}
 		if n >= len(scripts) {
 			return "", errors.New("스크립트가 모자랍니다")
 		}
@@ -357,7 +394,9 @@ func Run(ctx context.Context, sc Scenario, client llm.Client, loc *time.Location
 			}
 			clk.Advance(d)
 		case t.Tick != "":
-			m.Attn.Tick(ctx, t.Tick)
+			if err := m.Tick(ctx, t.Tick); err != nil {
+				fail(i, "%v", err)
+			}
 		case t.Submit != nil:
 			in := *t.Submit
 			if in.Skill == "" {
@@ -384,6 +423,9 @@ func Run(ctx context.Context, sc Scenario, client llm.Client, loc *time.Location
 				fail(i, "%s", f)
 			}
 			for _, f := range checkCards(ctx, st, *t.Expect, seen, cards) {
+				fail(i, "%s", f)
+			}
+			for _, f := range checkLinks(ctx, st, *t.Expect) {
 				fail(i, "%s", f)
 			}
 			if t.Expect.Now != nil {
@@ -670,6 +712,60 @@ func checkNow(s world.Situation, want NowMatch) []string {
 	for _, w := range want.TextNot {
 		if strings.Contains(s.Text, w) {
 			out = append(out, fmt.Sprintf("요약에 %q 가 없어야 함 · %s", w, show()))
+		}
+	}
+	return out
+}
+
+func checkLinks(ctx context.Context, st store.Store, ex Expect) []string {
+	var out []string
+	match := func(want LinkMatch) (bool, string) {
+		var seen []string
+		occ, _ := st.Occurrences(ctx, time.Time{}, time.Date(3000, 1, 1, 0, 0, 0, 0, time.UTC))
+		for _, o := range occ {
+			if !strings.HasPrefix(o.ID, want.From) {
+				continue
+			}
+			links, _ := st.LinksOf(ctx, o.ID)
+			for _, l := range links {
+				plan, _ := st.Entity(ctx, l.To)
+				seen = append(seen, fmt.Sprintf("%s-%s->%s(%s %.2f)", l.From, l.Rel, plan.State.Title, l.State, l.Confidence))
+				if l.From != o.ID || (want.Rel != "" && l.Rel != want.Rel) || (want.State != "" && l.State != want.State) ||
+					(want.ToTitle != "" && !strings.Contains(plan.State.Title, want.ToTitle)) ||
+					(want.MinConf > 0 && l.Confidence < want.MinConf-1e-9) || (want.MaxConf > 0 && l.Confidence > want.MaxConf+1e-9) {
+					continue
+				}
+				return true, ""
+			}
+		}
+		return false, strings.Join(seen, " ")
+	}
+	for _, want := range ex.Links {
+		if ok, seen := match(want); !ok {
+			b, _ := json.Marshal(want)
+			out = append(out, "이런 링크가 없음: "+string(b)+" · 있는 것: "+seen)
+		}
+	}
+	for _, not := range ex.NoLinks {
+		if ok, _ := match(not); ok {
+			b, _ := json.Marshal(not)
+			out = append(out, "있으면 안 되는 링크: "+string(b))
+		}
+	}
+	for _, want := range ex.Patterns {
+		ps, _ := st.Patterns(ctx, want.KindA)
+		found := false
+		var seen []string
+		for _, p := range ps {
+			seen = append(seen, fmt.Sprintf("%s>%s/%s %d/%d", p.KindA, p.KindB, p.Bucket, p.Support, p.Total))
+			if p.KindB == want.KindB && (want.Bucket == "" || p.Bucket == want.Bucket) &&
+				(want.KindB == "" && p.Total == want.Total || want.KindB != "" && p.Support == want.Support) {
+				found = true
+			}
+		}
+		if !found {
+			b, _ := json.Marshal(want)
+			out = append(out, "이런 패턴 수가 없음: "+string(b)+" · 있는 것: "+strings.Join(seen, ", "))
 		}
 	}
 	return out

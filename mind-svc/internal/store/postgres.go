@@ -642,3 +642,76 @@ func (p *Postgres) LinksOf(ctx context.Context, id string) ([]model.Link, error)
 func (p *Postgres) LinksSince(ctx context.Context, t time.Time) ([]model.Link, error) {
 	return p.links(ctx, `where updated_at >= $1 order by updated_at, from_id, to_id, rel`, t)
 }
+
+func (p *Postgres) ThingClass(ctx context.Context, name string) (string, error) {
+	var c string
+	err := p.db.QueryRow(ctx, `select class from mind_thing_classes where name = $1`, name).Scan(&c)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", model.ErrNotFound
+	}
+	return c, err
+}
+
+func (p *Postgres) PutThingClass(ctx context.Context, name, class string) error {
+	_, err := p.db.Exec(ctx, `insert into mind_thing_classes (name, class) values ($1, $2)
+		on conflict (name) do update set class = excluded.class, at = now()`, name, class)
+	return err
+}
+
+func (p *Postgres) LinkCache(ctx context.Context, class, planKind string) (model.Judgement, error) {
+	j := model.Judgement{Class: class}
+	err := p.db.QueryRow(ctx, `select rel, plausibility, why from mind_link_cache where thing_class = $1 and plan_kind = $2`,
+		class, planKind).Scan(&j.Rel, &j.Plausibility, &j.Why)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return model.Judgement{}, model.ErrNotFound
+	}
+	return j, err
+}
+
+func (p *Postgres) PutLinkCache(ctx context.Context, planKind string, j model.Judgement) error {
+	_, err := p.db.Exec(ctx, `insert into mind_link_cache (thing_class, plan_kind, rel, plausibility, why) values ($1, $2, $3, $4, $5)
+		on conflict (thing_class, plan_kind) do update set rel = excluded.rel, plausibility = excluded.plausibility, why = excluded.why, at = now()`,
+		j.Class, planKind, j.Rel, j.Plausibility, j.Why)
+	return err
+}
+
+func (p *Postgres) CountPattern(ctx context.Context, pt model.Pattern) error {
+	var seen *time.Time
+	if !pt.LastSeen.IsZero() {
+		seen = &pt.LastSeen
+	}
+	_, err := p.db.Exec(ctx, `
+		insert into mind_pattern_counts (kind_a, rel, kind_b, gap_bucket, support, total, last_seen) values ($1, $2, $3, $4, $5, $6, $7)
+		on conflict (kind_a, rel, kind_b, gap_bucket) do update set support = mind_pattern_counts.support + excluded.support,
+			total = mind_pattern_counts.total + excluded.total,
+			last_seen = greatest(mind_pattern_counts.last_seen, excluded.last_seen)`,
+		pt.KindA, pt.Rel, pt.KindB, pt.Bucket, pt.Support, pt.Total, seen)
+	return err
+}
+
+func (p *Postgres) Patterns(ctx context.Context, kindA string) ([]model.Pattern, error) {
+	rows, err := p.db.Query(ctx, `select kind_a, rel, kind_b, gap_bucket, support, total, last_seen from mind_pattern_counts
+		where $1 = '' or kind_a = $1 order by kind_a, rel, kind_b, gap_bucket`, kindA)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []model.Pattern{}
+	for rows.Next() {
+		var pt model.Pattern
+		var seen *time.Time
+		if err := rows.Scan(&pt.KindA, &pt.Rel, &pt.KindB, &pt.Bucket, &pt.Support, &pt.Total, &seen); err != nil {
+			return nil, err
+		}
+		if seen != nil {
+			pt.LastSeen = *seen
+		}
+		out = append(out, pt)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) ResetPatterns(ctx context.Context) error {
+	_, err := p.db.Exec(ctx, `delete from mind_pattern_counts`)
+	return err
+}

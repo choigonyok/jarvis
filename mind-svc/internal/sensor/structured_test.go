@@ -52,7 +52,9 @@ func TestRules(t *testing.T) {
 
 type observer struct{ st store.Store }
 
-func (o observer) Observe(ctx context.Context, oc model.Occurrence) error { return o.st.PutOccurrence(ctx, oc) }
+func (o observer) Observe(ctx context.Context, oc model.Occurrence) error {
+	return o.st.PutOccurrence(ctx, oc)
+}
 
 // The calendar's entries become plans and stay in step; a conversation's
 // plan on the calendar speaks for its entry; an entry gone cancels its plan.

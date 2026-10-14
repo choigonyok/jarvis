@@ -11,6 +11,7 @@ package link
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -32,6 +33,9 @@ type Linker struct {
 	// OnLink hears every link drawn or changed (the judge and the skills
 	// look again).
 	OnLink func(ctx context.Context, l model.Link)
+	// Judge is common sense for purchases made for a plan; nil draws only
+	// the links that need none.
+	Judge *Judge
 
 	mu      sync.Mutex
 	pending []string // plans changed, to be linked
@@ -99,6 +103,14 @@ func (l *Linker) Occurrence(ctx context.Context, id string) error {
 	if o.Kind == "transfer" {
 		return l.paid(ctx, o)
 	}
+	if o.Kind == "purchase.item" {
+		day := o.At.In(l.Loc)
+		plans, err := l.St.PlansOn(ctx, day.Format("2006-01-02"), day.Add(window).Format("2006-01-02"))
+		if err != nil {
+			return err
+		}
+		return l.prepAll(ctx, o, plans)
+	}
 	if !slices.Contains(duringKinds, o.Kind) {
 		return nil
 	}
@@ -129,6 +141,21 @@ func (l *Linker) Plan(ctx context.Context, p model.Entity) error {
 	sp, ok := l.World.Span(ctx, p, l.Now(), l.Loc)
 	if !ok {
 		return nil
+	}
+	if l.Judge != nil && p.State.Type != "" && p.State.Type != "기타" {
+		items, err := l.St.Occurrences(ctx, sp.Start.Add(-window), sp.Start, "purchase.item")
+		if err != nil {
+			return err
+		}
+		for _, it := range items {
+			plans, err := l.St.PlansOn(ctx, it.At.In(l.Loc).Format("2006-01-02"), it.At.Add(window).In(l.Loc).Format("2006-01-02"))
+			if err != nil {
+				return err
+			}
+			if err := l.prepAll(ctx, it, plans); err != nil {
+				return err
+			}
+		}
 	}
 	occ, err := l.St.Occurrences(ctx, sp.Start.Add(-early), sp.End, duringKinds...)
 	if err != nil {
@@ -274,6 +301,40 @@ func containsAny(s string, words []string) bool {
 		}
 	}
 	return false
+}
+
+// prepAll judges an item against every plan it may have been bought for,
+// sharing it among the plans common sense allows (exclusivity).
+func (l *Linker) prepAll(ctx context.Context, item model.Occurrence, plans []model.Entity) error {
+	if l.Judge == nil {
+		return nil
+	}
+	var fit []model.Entity
+	for _, p := range plans {
+		if !planned(p) || p.State.Type == "" || p.State.Type == "기타" {
+			continue
+		}
+		sp, ok := l.World.Span(ctx, p, l.Now(), l.Loc)
+		if !ok || !sp.Start.After(item.At) || sp.Start.Sub(item.At) > window {
+			continue
+		}
+		j, err := l.Judge.Of(ctx, item.Title, p.State.Type)
+		if errors.Is(err, ErrNoModel) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if j.Rel != "unrelated" && j.Plausibility >= weak {
+			fit = append(fit, p)
+		}
+	}
+	for _, p := range fit {
+		if err := l.prep(ctx, item, p, len(fit)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // paid closes what someone owed the operator once their transfer arrives:

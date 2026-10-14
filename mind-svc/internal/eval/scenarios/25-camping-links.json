@@ -1,0 +1,493 @@
+{
+ "name": "S1 링크: 장작은 상식으로(추정 0.6), 프로틴은 아니고, 생수는 캠핑 3번 반복 뒤에야",
+ "room": "minji-camp",
+ "roomName": "민지",
+ "judge": {
+  "참나무 장작": {
+   "class": "장작",
+   "rel": "prep_for",
+   "plausibility": 0.9,
+   "why": "장작은 캠핑 화로용 대표 준비물"
+  },
+  "마이프로틴": {
+   "class": "프로틴",
+   "rel": "unrelated",
+   "plausibility": 0.05,
+   "why": "운동 보충제는 캠핑과 무관"
+  },
+  "삼다수": {
+   "class": "생수",
+   "rel": "used_during",
+   "plausibility": 0.3,
+   "why": "캠핑에서도 마시지만 평소에도 산다"
+  }
+ },
+ "turns": [
+  {
+   "messages": [
+    {
+     "at": "2026-10-01T21:10",
+     "from": "민지",
+     "text": "10/6 가평 캠핑 ㄱ?"
+    },
+    {
+     "at": "2026-10-01T21:11",
+     "me": true,
+     "text": "ㄱㄱ"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "create",
+      "kind": "plan",
+      "set": {
+       "title": "민지와 가평 캠핑",
+       "status": "confirmed",
+       "date": "2026-10-06",
+       "endDate": "2026-10-07",
+       "place": "가평",
+       "people": [
+        "민지"
+       ],
+       "type": "캠핑",
+       "area": "가평"
+      },
+      "evidence": [
+       {
+        "line": 1,
+        "quote": "10/6"
+       },
+       {
+        "line": 2,
+        "quote": "ㄱㄱ"
+       }
+      ],
+      "confidence": 0.9,
+      "why": "캠핑 합의"
+     }
+    ]
+   },
+   "expect": {
+    "plans": [
+     {
+      "status": "confirmed",
+      "date": "2026-10-06"
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-10-03T12:45",
+   "occur": [
+    {
+     "id": "spending:101",
+     "kind": "purchase",
+     "at": "2026-10-03T12:40",
+     "title": "쿠팡",
+     "class": "쇼핑",
+     "amount": 61000
+    },
+    {
+     "id": "spending:101#1",
+     "kind": "purchase.item",
+     "at": "2026-10-03T12:40",
+     "title": "참나무 장작 10kg",
+     "class": "쇼핑",
+     "amount": 20000
+    },
+    {
+     "id": "spending:101#2",
+     "kind": "purchase.item",
+     "at": "2026-10-03T12:40",
+     "title": "마이프로틴 웨이 1kg",
+     "class": "쇼핑",
+     "amount": 35000
+    },
+    {
+     "id": "spending:101#3",
+     "kind": "purchase.item",
+     "at": "2026-10-03T12:40",
+     "title": "삼다수 2L 12병",
+     "class": "쇼핑",
+     "amount": 6000
+    }
+   ],
+   "expect": {
+    "links": [
+     {
+      "from": "spending:101#1",
+      "toTitle": "캠핑",
+      "rel": "prep_for",
+      "state": "estimated",
+      "minConf": 0.55,
+      "maxConf": 0.65
+     }
+    ],
+    "noLinks": [
+     {
+      "from": "spending:101#2"
+     },
+     {
+      "from": "spending:101#3"
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-10-07T20:00",
+   "occur": [
+    {
+     "id": "photo:g1",
+     "kind": "photo",
+     "at": "2026-10-06T15:00",
+     "area": "Gapyeong-gun",
+     "place": "Gapyeong-gun, Gyeonggi-do"
+    },
+    {
+     "id": "photo:g2",
+     "kind": "photo",
+     "at": "2026-10-06T18:30",
+     "area": "Gapyeong-gun",
+     "place": "Gapyeong-gun, Gyeonggi-do"
+    },
+    {
+     "id": "spending:102",
+     "kind": "purchase",
+     "at": "2026-10-06T14:20",
+     "title": "자라섬캠핑장 가평점",
+     "place": "자라섬캠핑장 가평점",
+     "area": "가평",
+     "class": "여행",
+     "amount": 45000
+    },
+    {
+     "id": "spending:103",
+     "kind": "purchase",
+     "at": "2026-10-06T17:00",
+     "title": "가평잣고을 가평점",
+     "place": "가평잣고을 가평점",
+     "area": "가평",
+     "class": "식비",
+     "amount": 32000
+    }
+   ],
+   "expect": {
+    "links": [
+     {
+      "from": "photo:g1",
+      "rel": "during",
+      "state": "confirmed"
+     },
+     {
+      "from": "spending:102",
+      "rel": "during",
+      "state": "confirmed"
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-10-08T03:00",
+   "tick": "night",
+   "expect": {
+    "patterns": [
+     {
+      "kindA": "캠핑",
+      "total": 1
+     },
+     {
+      "kindA": "캠핑",
+      "kindB": "장작",
+      "bucket": "d3",
+      "support": 1
+     },
+     {
+      "kindA": "캠핑",
+      "kindB": "생수",
+      "support": 1
+     }
+    ],
+    "links": [
+     {
+      "from": "spending:101#1",
+      "rel": "prep_for",
+      "minConf": 0.65
+     }
+    ]
+   }
+  },
+  {
+   "messages": [
+    {
+     "at": "2026-10-20T20:00",
+     "from": "민지",
+     "text": "10/24 가평 캠핑 또 ㄱ?"
+    },
+    {
+     "at": "2026-10-20T20:01",
+     "me": true,
+     "text": "ㄱㄱ"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "create",
+      "kind": "plan",
+      "set": {
+       "title": "민지와 가평 캠핑 2",
+       "status": "confirmed",
+       "date": "2026-10-24",
+       "endDate": "2026-10-25",
+       "place": "가평",
+       "people": [
+        "민지"
+       ],
+       "type": "캠핑",
+       "area": "가평"
+      },
+      "evidence": [
+       {
+        "line": 1,
+        "quote": "10/24"
+       },
+       {
+        "line": 2,
+        "quote": "ㄱㄱ"
+       }
+      ],
+      "confidence": 0.9,
+      "why": "캠핑 합의"
+     }
+    ]
+   },
+   "expect": {
+    "plans": [
+     {
+      "status": "confirmed",
+      "date": "2026-10-24"
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-10-22T09:05",
+   "occur": [
+    {
+     "id": "spending:201#1",
+     "kind": "purchase.item",
+     "at": "2026-10-22T09:00",
+     "title": "삼다수 2L 12병",
+     "class": "쇼핑",
+     "amount": 6000
+    }
+   ],
+   "expect": {
+    "noLinks": [
+     {
+      "from": "spending:201#1"
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-10-26T03:00",
+   "tick": "night",
+   "expect": {
+    "patterns": [
+     {
+      "kindA": "캠핑",
+      "total": 2
+     },
+     {
+      "kindA": "캠핑",
+      "kindB": "생수",
+      "support": 2
+     }
+    ]
+   }
+  },
+  {
+   "messages": [
+    {
+     "at": "2026-11-02T20:00",
+     "from": "민지",
+     "text": "11/7 가평 캠핑 ㄱ?"
+    },
+    {
+     "at": "2026-11-02T20:01",
+     "me": true,
+     "text": "ㄱㄱ"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "create",
+      "kind": "plan",
+      "set": {
+       "title": "민지와 가평 캠핑 3",
+       "status": "confirmed",
+       "date": "2026-11-07",
+       "endDate": "2026-11-08",
+       "place": "가평",
+       "people": [
+        "민지"
+       ],
+       "type": "캠핑",
+       "area": "가평"
+      },
+      "evidence": [
+       {
+        "line": 1,
+        "quote": "11/7"
+       },
+       {
+        "line": 2,
+        "quote": "ㄱㄱ"
+       }
+      ],
+      "confidence": 0.9,
+      "why": "캠핑 합의"
+     }
+    ]
+   },
+   "expect": {
+    "plans": [
+     {
+      "status": "confirmed",
+      "date": "2026-11-07"
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-11-05T09:05",
+   "occur": [
+    {
+     "id": "spending:301#1",
+     "kind": "purchase.item",
+     "at": "2026-11-05T09:00",
+     "title": "삼다수 2L 12병",
+     "class": "쇼핑",
+     "amount": 6000
+    }
+   ],
+   "expect": {
+    "noLinks": [
+     {
+      "from": "spending:301#1"
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-11-09T03:00",
+   "tick": "night",
+   "expect": {
+    "patterns": [
+     {
+      "kindA": "캠핑",
+      "total": 3
+     },
+     {
+      "kindA": "캠핑",
+      "kindB": "생수",
+      "support": 3
+     }
+    ]
+   }
+  },
+  {
+   "messages": [
+    {
+     "at": "2026-11-16T20:00",
+     "from": "민지",
+     "text": "11/21 가평 캠핑 ㄱ?"
+    },
+    {
+     "at": "2026-11-16T20:01",
+     "me": true,
+     "text": "ㄱㄱ"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "create",
+      "kind": "plan",
+      "set": {
+       "title": "민지와 가평 캠핑 4",
+       "status": "confirmed",
+       "date": "2026-11-21",
+       "endDate": "2026-11-22",
+       "place": "가평",
+       "people": [
+        "민지"
+       ],
+       "type": "캠핑",
+       "area": "가평"
+      },
+      "evidence": [
+       {
+        "line": 1,
+        "quote": "11/21"
+       },
+       {
+        "line": 2,
+        "quote": "ㄱㄱ"
+       }
+      ],
+      "confidence": 0.9,
+      "why": "캠핑 합의"
+     }
+    ]
+   },
+   "expect": {
+    "plans": [
+     {
+      "status": "confirmed",
+      "date": "2026-11-21"
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-11-19T09:05",
+   "occur": [
+    {
+     "id": "spending:401#1",
+     "kind": "purchase.item",
+     "at": "2026-11-19T09:00",
+     "title": "삼다수 2L 12병",
+     "class": "쇼핑",
+     "amount": 6000
+    },
+    {
+     "id": "spending:401#2",
+     "kind": "purchase.item",
+     "at": "2026-11-19T09:00",
+     "title": "마이프로틴 웨이 1kg",
+     "class": "쇼핑",
+     "amount": 35000
+    }
+   ],
+   "expect": {
+    "links": [
+     {
+      "from": "spending:401#1",
+      "toTitle": "캠핑",
+      "state": "estimated",
+      "minConf": 0.45
+     }
+    ],
+    "noLinks": [
+     {
+      "from": "spending:401#2"
+     }
+    ]
+   }
+  }
+ ]
+}

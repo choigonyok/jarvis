@@ -89,6 +89,19 @@ type Store interface {
 	// LinksSince is every link changed at or after t, oldest first.
 	LinksSince(ctx context.Context, t time.Time) ([]model.Link, error)
 
+	// The judge's caches: a thing's class by its name, and common sense
+	// about (class, plan kind). ErrNotFound when not judged yet.
+	ThingClass(ctx context.Context, name string) (string, error)
+	PutThingClass(ctx context.Context, name, class string) error
+	LinkCache(ctx context.Context, class, planKind string) (model.Judgement, error)
+	PutLinkCache(ctx context.Context, planKind string, j model.Judgement) error
+
+	// Patterns: counts of repetition. CountPattern adds to a row (support
+	// and total by the deltas); Patterns is every row for a plan kind.
+	CountPattern(ctx context.Context, p model.Pattern) error
+	Patterns(ctx context.Context, kindA string) ([]model.Pattern, error)
+	ResetPatterns(ctx context.Context) error
+
 	// Aliases: names in conversation → memory nodes. Putting a name again
 	// moves it to the node given and counts it seen once more.
 	PutAlias(ctx context.Context, a model.Alias) error

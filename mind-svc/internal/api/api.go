@@ -9,11 +9,12 @@
 //	POST /api/simulate                {room, roomName, sender, mine, text, at?}
 //	POST /api/read                    {room?} interpret now instead of waiting for quiet
 //	POST /api/settle                  hand settling changes to the skills now
-//	POST /api/tick                    {name: "morning"}
+//	POST /api/tick                    {name: "morning" | "night"}
 //	POST /api/clock                   {advance: "25h"} move a memory-mode clock (tests the timers)
 //	POST /api/intents                 {skill, kind, topic, title, body, reason, confidence, payload} an intent from outside
 //	POST /api/intents/{id}/{approve|reject|undo}   reject takes {reason}
 //	POST /api/policy/rebuild          recount approval stats from the intents
+//	POST /api/patterns/rebuild        recount repetitions from the plans and purchases
 //	GET  /api/entities/{id}/changes   an entity's history, with evidence
 //	POST /api/replay                  {after, limit} the log through a fresh loop, in memory
 //	GET  /api/recall?q=&person=       what is known: world model + long-term memory
@@ -104,6 +105,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/intents", s.auth(false, s.submit))
 	mux.HandleFunc("POST /api/intents/{id}/{action}", s.auth(false, s.decide))
 	mux.HandleFunc("POST /api/policy/rebuild", s.auth(false, s.rebuildPolicy))
+	mux.HandleFunc("POST /api/patterns/rebuild", s.auth(false, func(w http.ResponseWriter, r *http.Request) {
+		n, err := s.m.RebuildPatterns(r.Context())
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]int{"plans": n})
+	}))
 	mux.HandleFunc("GET /api/entities/{id}/changes", s.auth(false, s.changes))
 	mux.HandleFunc("POST /api/replay", s.auth(false, s.replay))
 	mux.HandleFunc("GET /api/recall", s.auth(false, s.recall))
@@ -270,7 +279,10 @@ func (s *Server) tick(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &in) {
 		return
 	}
-	s.m.Attn.Tick(r.Context(), in.Name)
+	if err := s.m.Tick(r.Context(), in.Name); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 

@@ -68,6 +68,8 @@ type Mind struct {
 	Skills   []skill.Skill
 	Remember *Remember // nil without long-term memory
 	Link     *link.Linker
+	// nightly is the night's further steps, in order (reflection, notes).
+	nightly []func(ctx context.Context) error
 }
 
 func New(o Options) *Mind {
@@ -83,7 +85,8 @@ func New(o Options) *Mind {
 	}
 	m.Conv = interpret.NewConversation(cfg, o.Store, m.World, o.LLM, o.Loc, o.Now, o.Logger)
 	m.Actions = &interpret.Actions{World: m.World}
-	m.Link = &link.Linker{St: o.Store, World: m.World, Loc: o.Loc, Now: o.Now, Log: o.Logger}
+	m.Link = &link.Linker{St: o.Store, World: m.World, Loc: o.Loc, Now: o.Now, Log: o.Logger,
+		Judge: &link.Judge{St: o.Store, LLM: o.LLM}}
 	m.World.Listen(m.Link.Watch)
 	notifier := o.Notifier
 	if notifier == nil {
@@ -144,6 +147,7 @@ func (m *Mind) Run(ctx context.Context, every time.Duration) {
 	go m.Conv.Run(ctx, every)
 	go m.Attn.Run(ctx, every)
 	go m.Link.Run(ctx, every)
+	go m.nights(ctx, 30*time.Second)
 	if m.Remember != nil {
 		go m.Remember.Run(ctx, 15*time.Second)
 	}

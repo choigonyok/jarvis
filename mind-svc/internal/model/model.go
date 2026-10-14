@@ -137,6 +137,28 @@ const (
 	With       = "with"
 )
 
+// Judgement is common sense about a kind of thing and a kind of plan, not
+// about any one purchase: is firewood something bought for camping?
+type Judgement struct {
+	Class        string  `json:"class"`
+	Rel          string  `json:"rel"` // prep_for | used_during | unrelated
+	Plausibility float64 `json:"plausibility"`
+	Why          string  `json:"why,omitempty"`
+}
+
+// Pattern is a repetition counted from what happened: of Total plans of
+// kind A, Support had a thing of class B bought within Bucket before. The
+// row with B empty holds Total alone.
+type Pattern struct {
+	KindA    string    `json:"kindA"`
+	Rel      string    `json:"rel"`
+	KindB    string    `json:"kindB"`
+	Bucket   string    `json:"bucket"` // d1 | d3 | d7 | d14
+	Support  int       `json:"support"`
+	Total    int       `json:"total"`
+	LastSeen time.Time `json:"lastSeen"`
+}
+
 // Evidence is the line of an observation a belief rests on. Ref names the
 // observed message; Quote is the words, which must appear in it.
 type Evidence struct {
