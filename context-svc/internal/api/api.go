@@ -309,8 +309,53 @@ type Now struct {
 	FixAt    *time.Time     `json:"fixAt,omitempty"`
 	Visits   []store.Visit  `json:"visits"` // regions the operator is in now
 	Signals  map[string]Sig `json:"signals"`
+	State    State          `json:"state"`
 	Summary  string         `json:"summary"`
 	Mode     int            `json:"mode"`
+}
+
+// State is the current state in one place, derived from the visits and
+// the signals: what an answer may need to know before it is given.
+type State struct {
+	Driving bool `json:"driving"`
+	Meeting bool `json:"meeting"`
+	Home    bool `json:"home"`
+	Work    bool `json:"work"`
+	Focus   bool `json:"focus"`
+}
+
+// Derive works the state out. A signal older than its kind lasts is not
+// believed: a meeting app in front an hour ago says nothing of now.
+func Derive(n Now, now time.Time) State {
+	fresh := func(kind string, within time.Duration) (string, bool) {
+		sg, ok := n.Signals[kind]
+		if !ok || now.Sub(sg.At) > within {
+			return "", false
+		}
+		return sg.State, true
+	}
+	var st State
+	if v, ok := fresh("device.carplay", 4*time.Hour); ok && (v == "connected" || v == "on") {
+		st.Driving = true
+	}
+	if v, ok := fresh("mac.app", 15*time.Minute); ok && v == "meeting" {
+		st.Meeting = true
+	}
+	if v, ok := fresh("device.focus", 12*time.Hour); ok && v != "" && v != "off" && v != "끔" {
+		st.Focus = true
+		if strings.Contains(v, "운전") || strings.Contains(strings.ToLower(v), "driving") {
+			st.Driving = true
+		}
+	}
+	for _, v := range n.Visits {
+		switch v.Kind {
+		case "home":
+			st.Home = true
+		case "work":
+			st.Work = true
+		}
+	}
+	return st
 }
 
 type Sig struct {
@@ -351,6 +396,7 @@ func (s *Server) current(w http.ResponseWriter, r *http.Request) {
 			out.Mode = m.Mode
 		}
 	}
+	out.State = Derive(out, s.now())
 	out.Summary = Summary(out, s.now())
 	writeJSON(w, http.StatusOK, out)
 }
@@ -364,6 +410,14 @@ func Summary(n Now, now time.Time) string {
 	}
 	if len(n.Visits) == 0 && n.FixAt != nil {
 		parts = append(parts, "등록된 영역 밖")
+	}
+	for _, f := range []struct {
+		on   bool
+		what string
+	}{{n.State.Driving, "운전 중"}, {n.State.Meeting, "회의 중"}, {n.State.Focus, "집중 모드"}} {
+		if f.on {
+			parts = append(parts, f.what)
+		}
 	}
 	keys := make([]string, 0, len(n.Signals))
 	for k := range n.Signals {

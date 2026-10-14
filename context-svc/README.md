@@ -55,10 +55,32 @@ DELETE /regions/{name}
    `Authorization: Bearer <CONTEXT_SIGNAL_TOKEN>`, JSON `{"source":"shortcut","kind":"device.carplay","state":"connected"}`.
    첫 실행 때 도메인 연결을 "항상 허용".
 
+## 현재 상태 한 장
+
+`/now` 의 `state` 는 체류와 신호에서 만든 파생값이다: 운전 중(CarPlay 연결 4시간 안, 또는 운전 집중 모드), 회의 중
+(맥 앞의 앱이 회의 앱, 15분 안), 집·회사(머무는 영역의 종류), 집중 모드. 오래된 신호는 믿지 않는다. agent 는 매
+턴 이 한 줄을 지금 상황 옆에 둔다.
+
+## 맥 수집기
+
+`cmd/mac-collector` 는 맥에서 하나만 도는 읽는 프로세스다(kakaotalk-client 처럼). `scripts/mac-collector install`
+로 빌드해 LaunchAgent(`com.jarvis.mac-collector`)로 띄우고, 신호 토큰은 설치할 때 맥미니 `.env` 에서 읽어
+`~/.config/jarvis/signal-token`(0600)에 둔다. 보내는 것은 **종류뿐**이다:
+
+- `mac.app`: 앞에 있는 앱의 종류(meeting · code · chat · browser · other). 앱 이름·창 제목은 보내지 않는다.
+- `mac.clipboard`: 방금 복사한 것의 종류(tracking 송장번호 · address 주소 · date 날짜). 내용은 보내지 않고,
+  비밀번호 관리자가 앞에 있을 때는 클립보드를 보지도 않는다.
+- `mac.download`, `mac.screenshot`: 새 파일의 확장자. macOS 가 폴더 접근을 물어서 기본으로 끈다(`-files`).
+
+카메라·마이크 사용 여부는 권한 없이 믿을 만하게 읽을 길이 없어, 회의 중은 앞에 있는 앱으로만 판단한다.
+지우려면 `scripts/mac-collector uninstall`.
+
 ## 검증한 것
 
 - `internal/place`: 거리, 정확도를 감안한 영역 포함, 모드 전환 규칙(배터리 포함).
 - `internal/api` (Postgres, `CONTEXT_TEST_DATABASE_URL`): Basic 인증 거부, 위치만으로 체류 열기, 이탈 이벤트로
   Move 명령, 진입 이벤트가 빠져도 다음 위치로 체류를 다시 열고 Significant 명령, 신호 토큰으로 쓰고 읽지 못함,
   잘못된 kind 거부, 지금·체류 조회, 오래된 원본 지우기.
+- `cmd/mac-collector`: 앱 종류, 클립보드 패턴(키처럼 생긴 문자열은 아무 종류도 아님), 비밀번호 관리자.
+- 현재 상태 파생: 오래된 회의 신호는 무시, CarPlay 연결이면 운전 중.
 - 운영에서 게이트웨이를 거쳐: 토큰 없는 `/context/now` 는 401, 자격 없는 `/context/owntracks` 도 401.

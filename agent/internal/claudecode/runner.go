@@ -301,6 +301,9 @@ func (r *Runner) situation() string {
 		return ""
 	}
 	text := "\n\n" + situationRules + "\n" + now.Text
+	if state := r.deviceState(); state != "" {
+		text += "\n- 기기·위치 상태: " + state
+	}
 	if strings.TrimSpace(now.Prefs) != "" {
 		text += "\n\n" + prefsRules + "\n" + now.Prefs
 	}
@@ -308,6 +311,35 @@ func (r *Runner) situation() string {
 	r.nowText, r.nowAt = text, time.Now()
 	r.mu.Unlock()
 	return text
+}
+
+// deviceState is context-svc's one line (in which region, driving, in a
+// meeting, how old the last fix), or nothing without it.
+func (r *Runner) deviceState() string {
+	if r.cfg.ContextURL == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(r.cfg.ContextURL, "/")+"/now", nil)
+	if err != nil {
+		return ""
+	}
+	if r.cfg.APIToken != "" {
+		req.Header.Set("Authorization", "Bearer "+r.cfg.APIToken)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	var now struct {
+		Summary string `json:"summary"`
+	}
+	if resp.StatusCode >= 300 || json.NewDecoder(resp.Body).Decode(&now) != nil {
+		return ""
+	}
+	return now.Summary
 }
 
 const prefsRules = `알고 있는 취향 (회고 카드와 운영자의 말에서. 장소·가게·숙소를 고를 때 쓰세요)

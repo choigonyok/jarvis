@@ -103,3 +103,19 @@ func TestFlow(t *testing.T) {
 		t.Fatalf("그보다 이른 원본 둘을 지움: %d", n)
 	}
 }
+
+func TestDerive(t *testing.T) {
+	now := time.Date(2026, 10, 15, 18, 0, 0, 0, time.UTC)
+	n := Now{Signals: map[string]Sig{
+		"device.carplay": {State: "connected", At: now.Add(-10 * time.Minute)},
+		"mac.app":        {State: "meeting", At: now.Add(-2 * time.Hour)},
+	}, Visits: []store.Visit{{Region: "집", Kind: "home"}}}
+	st := Derive(n, now)
+	if !st.Driving || st.Meeting || !st.Home {
+		t.Fatalf("운전 중, 회의는 지난 일, 집: %+v", st)
+	}
+	n.State = st
+	if s := Summary(n, now); !strings.Contains(s, "운전 중") || strings.Contains(s, "회의 중") {
+		t.Fatalf("요약: %s", s)
+	}
+}
