@@ -798,6 +798,8 @@ services:
       MIND_CALENDAR_READ_URL: http://calendar:8093
       # 준비물 카드를 승인하면 장바구니에 담기만 하는 작업을 jobs-svc 에 만든다(결제는 안 함).
       JOBS_URL: http://jobs:8098
+      # 월급 카드에 비중 차이를 적으려고 자산 배분을 읽기만 한다.
+      ASSETS_URL: http://assets:8092
       IMMICH_URL: http://immich:2283
       IMMICH_API_KEY: ${IMMICH_API_KEY:-}
       IMMICH_PUBLIC_URL: ${IMMICH_PUBLIC_URL:-}

@@ -1,0 +1,122 @@
+{
+ "name": "S8 배송까지 계산한 선물: 1주년 8일 전, 지수가 갖고 싶다던 향수를 이번 주 주문하자고",
+ "room": "jisu-gift",
+ "roomName": "지수",
+ "turns": [
+  {
+   "messages": [
+    {
+     "at": "2026-09-18T22:00",
+     "from": "지수",
+     "text": "나 조말론 향수 진짜 갖고 싶다 ㅠㅠ"
+    },
+    {
+     "at": "2026-09-18T22:01",
+     "me": true,
+     "text": "ㅋㅋㅋ 기억해둘게"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "remember",
+      "kind": "fact",
+      "set": {
+       "subject": "지수",
+       "subjectKind": "Person",
+       "relation": "WANTS",
+       "object": "조말론 향수",
+       "objectKind": "Thing",
+       "text": "지수는 조말론 향수를 갖고 싶어 한다"
+      },
+      "evidence": [
+       {
+        "line": 1,
+        "quote": "조말론 향수 진짜 갖고 싶다"
+       }
+      ],
+      "confidence": 0.9,
+      "why": "지수가 직접 말함"
+     }
+    ]
+   },
+   "expect": {
+    "facts": [
+     {
+      "subject": "지수",
+      "textHasAny": [
+       "향수"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "messages": [
+    {
+     "at": "2026-10-10T21:00",
+     "me": true,
+     "text": "10/30 우리 1주년이다"
+    },
+    {
+     "at": "2026-10-10T21:01",
+     "from": "지수",
+     "text": "응!! 벌써 1년이네"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "create",
+      "kind": "plan",
+      "set": {
+       "title": "지수와 1주년",
+       "status": "confirmed",
+       "date": "2026-10-30",
+       "people": [
+        "지수"
+       ],
+       "type": "기념일"
+      },
+      "evidence": [
+       {
+        "line": 1,
+        "quote": "10/30 우리 1주년이다"
+       },
+       {
+        "line": 2,
+        "quote": "응!!"
+       }
+      ],
+      "confidence": 0.9,
+      "why": "기념일"
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-10-21T07:00",
+   "tick": "predict",
+   "expect": {
+    "noCards": true
+   }
+  },
+  {
+   "at": "2026-10-22T07:00",
+   "tick": "predict",
+   "expect": {
+    "cards": [
+     "기념일 8일 남음. 조말론 향수는 배송 최대 6일이라 이번 주 주문 필요"
+    ],
+    "cardCount": 1
+   }
+  },
+  {
+   "at": "2026-10-23T07:00",
+   "tick": "predict",
+   "expect": {
+    "noCards": true
+   }
+  }
+ ]
+}

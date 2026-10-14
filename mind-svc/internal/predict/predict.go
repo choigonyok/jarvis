@@ -401,7 +401,10 @@ func Holds(feature, arg string, d Day, loc *time.Location) bool {
 				continue
 			}
 			start := st.Hour()*60 + st.Minute()
-			if feature == "evening" && start >= cut || feature == "late_leave" && pl.State.Type == "업무" && start >= cut-120 {
+			// A work plan in the evening is a late leave ahead of time: one
+			// starting after the usual leaving hour, or within two hours of
+			// the cut.
+			if feature == "evening" && start >= cut || feature == "late_leave" && pl.State.Type == "업무" && start >= min(cut-120, 18*60+30) {
 				return true
 			}
 		}

@@ -1,0 +1,58 @@
+{
+ "name": "S9 월급과 적립: 월급이 들어오면 금 비중 차이와 늘 하던 적립을 계획으로만",
+ "room": "owner",
+ "roomName": "jarvis",
+ "allocation": [
+  {
+   "label": "금",
+   "current": 0.07,
+   "target": 0.1
+  },
+  {
+   "label": "주식",
+   "current": 0.63,
+   "target": 0.6
+  }
+ ],
+ "turns": [
+  {
+   "at": "2026-10-24T09:00",
+   "note": {
+    "id": "note_salary",
+    "text": "월급이 들어오면 2일 안에 적립 매수한다 (6번 중 5번)",
+    "scope": "자산",
+    "rule": {
+     "kind": "salary",
+     "plan": "금현물 30만, ETF 50만"
+    }
+   }
+  },
+  {
+   "at": "2026-10-25T09:05",
+   "occur": [
+    {
+     "id": "bank:1",
+     "kind": "deposit",
+     "at": "2026-10-25T09:00",
+     "title": "급여 입금",
+     "class": "급여",
+     "amount": 3200000,
+     "quote": "급여 3,200,000원 입금"
+    }
+   ],
+   "expect": {
+    "cards": [
+     "월급 들어왔어요. 금 비중 목표보다 3%p 낮음. 이번 달 적립 금현물 30만, ETF 50만 어떠세요?"
+    ],
+    "cardCount": 1
+   }
+  },
+  {
+   "approve": "note",
+   "expect": {
+    "noCards": true,
+    "calendarCount": 0
+   }
+  }
+ ]
+}

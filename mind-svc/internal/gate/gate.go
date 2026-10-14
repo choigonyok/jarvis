@@ -68,8 +68,10 @@ type Policy struct {
 
 func DefaultPolicy() Policy {
 	return Policy{
-		Levels:          map[string]string{"calendar.create": AskFor, "calendar.update": AskFor, "calendar.delete": AskFor},
-		Fixed:           map[string]bool{"calendar.delete": true},
+		Levels: map[string]string{"calendar.create": AskFor, "calendar.update": AskFor, "calendar.delete": AskFor},
+		// Orders, messages and the like are asked every time, however often
+		// they were approved: nothing here pays or sends by itself.
+		Fixed:           map[string]bool{"calendar.delete": true, "cart.add": true, "message.draft": true, "settle.request": true},
 		Promote:         3,
 		PromoteRate:     0.8,
 		Window:          30 * 24 * time.Hour,

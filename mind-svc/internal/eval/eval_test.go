@@ -25,6 +25,9 @@ func TestScenariosScripted(t *testing.T) {
 			for _, f := range r.Failures {
 				t.Error(f)
 			}
+			if r.Scored > 0 {
+				t.Logf("예측 %d개 · Brier %.3f", r.Scored, r.Brier)
+			}
 		})
 	}
 }

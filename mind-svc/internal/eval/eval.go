@@ -53,6 +53,8 @@ type Scenario struct {
 	Judge map[string]json.RawMessage `json:"judge,omitempty"`
 	// Reflect is the night's hypotheses for the scripted run.
 	Reflect json.RawMessage `json:"reflect,omitempty"`
+	// Allocation is what assets-svc would say of the allocation.
+	Allocation []mind.Drift `json:"allocation,omitempty"`
 }
 
 // Turn is one step: messages arrive and the room is read, or the person
@@ -72,6 +74,8 @@ type Turn struct {
 	At string `json:"at,omitempty"`
 	// Occur is things that happened, as a sensor would record them.
 	Occur []Occur `json:"occur,omitempty"`
+	// Note is a note the operator wrote (confirmed), before the turn runs.
+	Note *model.Note `json:"note,omitempty"`
 	// Script is what the model should answer to this turn's reading, for the
 	// deterministic run.
 	Script json.RawMessage `json:"script,omitempty"`
@@ -122,6 +126,8 @@ type Expect struct {
 	Predictions []PredMatch `json:"predictions,omitempty"`
 	// Infos: lines raised this turn (info intents), each by a word of the title.
 	Infos []string `json:"infos,omitempty"`
+	// Brier: the run's predictions so far score at most this.
+	Brier *float64 `json:"brier,omitempty"`
 }
 
 // NoteMatch is a partial description of a note.
@@ -235,6 +241,10 @@ type Match struct {
 type Result struct {
 	Name     string
 	Failures []string
+	// Brier is the mean Brier score of the predictions the run scored, and
+	// Scored how many.
+	Brier  float64
+	Scored int
 }
 
 func (r Result) Pass() bool { return len(r.Failures) == 0 }
@@ -338,6 +348,7 @@ func Run(ctx context.Context, sc Scenario, client llm.Client, loc *time.Location
 		Store: st, Log: log, LLM: client, Calendar: cal, Notifier: &act.MemoryNotifier{},
 		Loc: loc, Now: clk.Now, Logger: quiet, Interpret: interpret.Config{Owner: "나"},
 		Settle: 0, Policy: gate.DefaultPolicy(), Mode: "eval", Memory: memory.NewFake(clk.Now),
+		Assets: assets(sc.Allocation),
 	})
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -361,6 +372,19 @@ func Run(ctx context.Context, sc Scenario, client llm.Client, loc *time.Location
 				return res
 			}
 			clk.Pin(at)
+		}
+		if t.Note != nil {
+			n := *t.Note
+			if n.ID == "" {
+				n.ID = fmt.Sprintf("note_eval_%d", i)
+			}
+			n.Status, n.Version, n.CreatedAt, n.UpdatedAt = model.Confirmed, 1, clk.Now(), clk.Now()
+			if n.Confidence == 0 {
+				n.Confidence = 0.9
+			}
+			if err := st.PutNote(ctx, n); err != nil {
+				fail(i, "%v", err)
+			}
 		}
 		for _, oc := range t.Occur {
 			o, err := oc.model(loc)
@@ -467,6 +491,11 @@ func Run(ctx context.Context, sc Scenario, client llm.Client, loc *time.Location
 			for _, f := range checkSelf(ctx, st, *t.Expect, seen) {
 				fail(i, "%s", f)
 			}
+			if t.Expect.Brier != nil {
+				if b, n, _ := m.Predict.Brier(ctx, time.Time{}, time.Date(3000, 1, 1, 0, 0, 0, 0, time.UTC)); n == 0 || b > *t.Expect.Brier {
+					fail(i, "Brier %.3f (%d개) 가 %.3f 이하여야 함", b, n, *t.Expect.Brier)
+				}
+			}
 			if t.Expect.Now != nil {
 				now, err := m.Situation(ctx)
 				if err != nil {
@@ -478,7 +507,15 @@ func Run(ctx context.Context, sc Scenario, client llm.Client, loc *time.Location
 			}
 		}
 	}
+	res.Brier, res.Scored, _ = m.Predict.Brier(ctx, time.Time{}, time.Date(3000, 1, 1, 0, 0, 0, 0, time.UTC))
 	return res
+}
+
+func assets(rows []mind.Drift) mind.Assets {
+	if rows == nil {
+		return nil
+	}
+	return mind.StaticAssets(rows)
 }
 
 func latest(intents []model.Intent, kind, status string) string {

@@ -160,6 +160,19 @@ func Object(noun string) string {
 	return noun + "를"
 }
 
+// Topic is a noun with its topic particle: 향수는, 장작은.
+func Topic(noun string) string {
+	r := []rune(noun)
+	if len(r) == 0 {
+		return noun
+	}
+	last := r[len(r)-1]
+	if last >= 0xAC00 && last <= 0xD7A3 && (last-0xAC00)%28 != 0 {
+		return noun + "은"
+	}
+	return noun + "는"
+}
+
 // Shrunk is a rate pulled toward the usual one the fewer times it was seen:
 // (k + m·base) / (n + m).
 func Shrunk(k, n int, base, m float64) float64 {

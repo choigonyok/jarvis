@@ -1,0 +1,89 @@
+{
+ "name": "S10 지각 예고: 18:25 판교에서 결제, 강남까지 45분 → 7시 약속에 10분 늦음, 초안만",
+ "room": "minsu-late",
+ "roomName": "민수",
+ "turns": [
+  {
+   "at": "2026-10-23T08:00",
+   "note": {
+    "id": "note_travel",
+    "text": "판교에서 강남까지 보통 45분",
+    "scope": "이동",
+    "rule": {
+     "kind": "travel",
+     "from": "판교",
+     "to": "강남",
+     "minutes": 45
+    }
+   }
+  },
+  {
+   "messages": [
+    {
+     "at": "2026-10-23T09:00",
+     "from": "민수",
+     "text": "오늘 7시 강남역에서 보자"
+    },
+    {
+     "at": "2026-10-23T09:01",
+     "me": true,
+     "text": "ㅇㅋ 7시!"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "create",
+      "kind": "plan",
+      "set": {
+       "title": "민수와 저녁",
+       "status": "confirmed",
+       "date": "2026-10-23",
+       "start": "19:00",
+       "place": "강남역",
+       "area": "강남",
+       "people": [
+        "민수"
+       ],
+       "type": "식사"
+      },
+      "evidence": [
+       {
+        "line": 1,
+        "quote": "오늘 7시 강남역에서 보자"
+       },
+       {
+        "line": 2,
+        "quote": "ㅇㅋ 7시"
+       }
+      ],
+      "confidence": 0.9,
+      "why": "합의"
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-10-23T18:26",
+   "occur": [
+    {
+     "id": "spending:5001",
+     "kind": "purchase",
+     "at": "2026-10-23T18:25",
+     "title": "GS25 판교점",
+     "place": "GS25 판교점",
+     "area": "판교",
+     "class": "편의점·마트",
+     "amount": 2400,
+     "quote": "GS25 판교점 2,400원"
+    }
+   ],
+   "expect": {
+    "cards": [
+     "민수에게 '10분 정도 늦을 것 같아 미안!' 보낼까요?"
+    ],
+    "cardCount": 1
+   }
+  }
+ ]
+}

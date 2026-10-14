@@ -1,0 +1,117 @@
+{
+ "name": "S5 만날 때 챙길 것: 9/14에 빌려주기로 한 책을 민수 만나는 날 아침에",
+ "room": "minsu",
+ "roomName": "민수",
+ "turns": [
+  {
+   "messages": [
+    {
+     "at": "2026-09-14T20:00",
+     "from": "민수",
+     "text": "그 사피엔스 재밌어?"
+    },
+    {
+     "at": "2026-09-14T20:01",
+     "me": true,
+     "text": "응 완전 추천! 그 책 다음에 빌려줄게"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "create",
+      "kind": "loop",
+      "set": {
+       "title": "민수에게 사피엔스 빌려주기",
+       "owner": "me",
+       "people": [
+        "민수"
+       ]
+      },
+      "evidence": [
+       {
+        "line": 2,
+        "quote": "그 책 다음에 빌려줄게"
+       }
+      ],
+      "confidence": 0.85,
+      "why": "운영자가 한 약속"
+     }
+    ]
+   },
+   "expect": {
+    "loops": [
+     {
+      "owner": "me",
+      "titleHas": "사피엔스",
+      "status": "open"
+     }
+    ]
+   }
+  },
+  {
+   "messages": [
+    {
+     "at": "2026-10-20T12:00",
+     "from": "민수",
+     "text": "토요일 저녁에 밥 ㄱ?"
+    },
+    {
+     "at": "2026-10-20T12:01",
+     "me": true,
+     "text": "좋아 토요일 7시!"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "create",
+      "kind": "plan",
+      "set": {
+       "title": "민수와 저녁",
+       "status": "confirmed",
+       "date": "2026-10-24",
+       "start": "19:00",
+       "people": [
+        "민수"
+       ],
+       "type": "식사"
+      },
+      "evidence": [
+       {
+        "line": 2,
+        "quote": "좋아 토요일 7시"
+       }
+      ],
+      "confidence": 0.9,
+      "why": "합의"
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-10-23T07:00",
+   "tick": "predict",
+   "expect": {
+    "noCards": true
+   }
+  },
+  {
+   "at": "2026-10-24T07:00",
+   "tick": "predict",
+   "expect": {
+    "infos": [
+     "오늘 민수 만나는 날. 9/14에 「민수에게 사피엔스 빌려주기」"
+    ],
+    "noCards": true
+   }
+  },
+  {
+   "at": "2026-10-24T07:10",
+   "tick": "predict",
+   "expect": {
+    "noCards": true
+   }
+  }
+ ]
+}

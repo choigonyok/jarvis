@@ -189,6 +189,8 @@ const (
 //	      Bucket before (Support of Total plans)
 //	rate: on days Feature(Arg) holds, Target happens at Rate, against Base
 //	      on other days (Days such days seen)
+//	travel: from From to To takes about Minutes
+//	salary: once pay arrives, Plan is bought within days
 type Rule struct {
 	Kind     string   `json:"kind"`
 	PlanKind string   `json:"planKind,omitempty"`
@@ -203,6 +205,12 @@ type Rule struct {
 	Base     float64  `json:"base,omitempty"`
 	Days     int      `json:"days,omitempty"`
 	Except   []string `json:"except,omitempty"` // conditions the operator added ("직전 캠핑 후 남은 경우")
+	// travel: from From to To usually takes Minutes.
+	From    string `json:"from,omitempty"`
+	To      string `json:"to,omitempty"`
+	Minutes int    `json:"minutes,omitempty"`
+	// salary: what is bought once pay arrives (a plan in words).
+	Plan string `json:"plan,omitempty"`
 }
 
 // Prediction is something expected, with a probability and a time by which

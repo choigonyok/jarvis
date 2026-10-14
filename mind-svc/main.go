@@ -144,6 +144,11 @@ func main() {
 		log.Warn("MIND_MEMORY_URL 이 없어 기억할 사실은 장부에만 쌓습니다")
 	}
 
+	// Assets: the allocation, read only.
+	var assets mind.Assets
+	if url := os.Getenv("ASSETS_URL"); mode == "stack" && url != "" {
+		assets = mind.AssetsHTTP{URL: url, Token: token}
+	}
 	// Jobs: a cart job goes to jobs-svc (the agent's browser runs it).
 	var jobs act.Jobs
 	if url := os.Getenv("JOBS_URL"); mode == "stack" && url != "" {
@@ -159,7 +164,7 @@ func main() {
 		Store: st, Log: logOut, LLM: client, Calendar: calendar, Notifier: notifier,
 		Loc: loc, Now: clk.Now, Logger: log, Interpret: cfg, Settle: settle,
 		Policy: gate.DefaultPolicy(), URL: getenv("MIND_UI_URL", "http://localhost:8102/"), Mode: mode,
-		Memory: mem, PlanEvents: os.Getenv("MIND_PLAN_EVENTS") == "true", Photos: photos, Jobs: jobs,
+		Memory: mem, PlanEvents: os.Getenv("MIND_PLAN_EVENTS") == "true", Photos: photos, Jobs: jobs, Assets: assets,
 	})
 	if !client.Ready() {
 		log.Warn("LLM 키(MIND_ANTHROPIC_API_KEY)가 없어 대화를 해석하지 않습니다. 메시지는 쌓아 둡니다.")
@@ -236,6 +241,14 @@ func runEval(ctx context.Context, client llm.Client, loc *time.Location) int {
 		for _, f := range r.Failures {
 			fmt.Printf("      - %s\n", f)
 		}
+	}
+	sum, n := 0.0, 0
+	for _, r := range results {
+		sum += r.Brier * float64(r.Scored)
+		n += r.Scored
+	}
+	if n > 0 {
+		fmt.Printf("\n예측 %d개 · 평균 Brier %.3f (낮을수록 좋음, 늘 50%%면 0.25)", n, sum/float64(n))
 	}
 	fmt.Printf("\n%d개 중 %d개 통과 · 이번 실행 비용 약 $%.4f\n", len(results), len(results)-failed, client.Spent())
 	if failed > 0 {

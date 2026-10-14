@@ -61,6 +61,8 @@ type Options struct {
 	Drafter act.Drafter
 	// Jobs is where browser jobs are made (jobs-svc); nil keeps them in memory.
 	Jobs act.Jobs
+	// Assets is the allocation, read only; nil: not known.
+	Assets Assets
 }
 
 type Mind struct {
@@ -119,9 +121,11 @@ func New(o Options) *Mind {
 		jobs = &act.MemoryJobs{}
 	}
 	acts := act.NewRegistry(act.CalendarActuator{Cal: o.Calendar}, act.Note{},
-		act.SettleActuator{Drafts: o.Drafter}, act.PhotosActuator{Photos: photos}, act.CartActuator{Jobs: jobs})
+		act.SettleActuator{Drafts: o.Drafter}, act.PhotosActuator{Photos: photos}, act.CartActuator{Jobs: jobs},
+		act.DraftActuator{Drafts: o.Drafter})
 	m.Gate = gate.New(o.Store, acts, notifier, o.Log, o.Policy, o.Loc, o.Now, o.URL, o.Logger)
 	m.Gate.OnDecide = m.learn
+	m.mornings = append(m.mornings, m.people, m.gift)
 	m.Skills = []skill.Skill{skill.Schedule{}, skill.Loops{}, skill.Brief{}, skill.After{}}
 	m.Attn = attention.New(m.Skills, m.World, o.Store, m.Gate, o.Settle, o.Loc, o.Now, o.Logger)
 	m.Link.OnLink = m.Attn.OnLink
@@ -162,6 +166,12 @@ func (m *Mind) Handle(ctx context.Context, o obs.Observation) error {
 		}
 		if occ, err := m.Opts.Store.Occurrence(ctx, ref.ID); err == nil {
 			if _, err := m.Predict.Match(ctx, occ); err != nil {
+				return err
+			}
+			if err := m.salary(ctx, occ); err != nil {
+				return err
+			}
+			if err := m.late(ctx, occ); err != nil {
 				return err
 			}
 		}
