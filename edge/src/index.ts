@@ -10,6 +10,10 @@
  * - /vnc/websockify (the 화면 tab) may instead carry a ticket in its query:
  *   a browser cannot put a header on a WebSocket. The console Worker signs
  *   the ticket with the same token, for 60 seconds - see ticketValid.
+ * - /context/owntracks and /context/signals face the phone (OwnTracks, iOS
+ *   Shortcuts), which must not hold the stack's token: they pass without it,
+ *   POST only, and context-svc checks their own credentials (OwnTracks' Basic
+ *   auth, the signal token). Everything else on context needs the token.
  * - For the agent, only the routes the console uses. The agent also serves
  *   /mcp (the tools Claude Code calls - unauthenticated, because they are
  *   meant to be dialled over loopback) and /intercept (the payment guard's
@@ -34,6 +38,7 @@ interface Env {
   AGENT_GUEST: Fetcher;
   IMMICH: Fetcher;
   NOTIFY: Fetcher;
+  CONTEXT: Fetcher;
   /** Immich's API key for the gallery. Only this gateway holds it. */
   IMMICH_API_KEY?: string;
 }
@@ -53,6 +58,7 @@ const SERVICES: Record<string, { binding: keyof Env; origin: string }> = {
   // The inbox, its settings and this device's push subscription. Producers
   // reach notify-svc inside the compose network, not through here.
   notify: { binding: "NOTIFY", origin: "http://notify:8097" },
+  context: { binding: "CONTEXT", origin: "http://context:8103" },
   vnc: { binding: "BROWSER", origin: "http://browser:6080" },
 };
 
@@ -111,7 +117,9 @@ export default {
       // Handed over whole, so the WebSocket upgrade goes through as one.
       return (env.BROWSER as Fetcher).fetch(new Request(`http://browser:6080/websockify${url.search}`, request));
     }
-    if (!bearer) return json(401, "인증이 필요합니다.");
+    // The phone's own doors: their credentials are checked by context-svc.
+    const phone = name === "context" && request.method === "POST" && rest.length === 1 && (rest[0] === "owntracks" || rest[0] === "signals");
+    if (!bearer && !phone) return json(401, "인증이 필요합니다.");
 
     const service = SERVICES[name];
     if (!service) return json(404, "그런 서비스가 없습니다.");

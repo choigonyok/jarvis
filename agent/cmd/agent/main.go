@@ -29,6 +29,7 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/module/jobs"
 	"github.com/choigonyok/jarvis/agent/internal/module/memory"
 	mindmod "github.com/choigonyok/jarvis/agent/internal/module/mind"
+	"github.com/choigonyok/jarvis/agent/internal/module/place"
 	"github.com/choigonyok/jarvis/agent/internal/module/spending"
 	"github.com/choigonyok/jarvis/agent/internal/notify"
 	"github.com/choigonyok/jarvis/agent/internal/suggest"
@@ -129,6 +130,14 @@ func main() {
 		modules.Add(memoryModule)
 		mcpMounts["/mcp/"+memory.ServerName] = memoryModule.Handler()
 		cfg.ModuleMCPURLs[memory.ServerName] = cfg.PublicMCPURL + "/" + memory.ServerName
+	}
+
+	// Where the operator is (context-svc), read only. Not the guest's.
+	if cfg.ContextURL != "" && !cfg.Guest {
+		placeModule := place.New(cfg.ContextURL, cfg.APIToken)
+		modules.Add(placeModule)
+		mcpMounts["/mcp/"+place.ServerName] = placeModule.Handler()
+		cfg.ModuleMCPURLs[place.ServerName] = cfg.PublicMCPURL + "/" + place.ServerName
 	}
 
 	// mind-svc's gate: its cards become approval cards here, and approving

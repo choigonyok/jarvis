@@ -1,0 +1,98 @@
+{
+ "name": "위치 체류: 폰이 지수네(망원동)에 있다고 하면 결제·사진 없이도 0.95, 끝나면 사라진다",
+ "room": "jisu-here",
+ "roomName": "지수",
+ "turns": [
+  {
+   "messages": [
+    {
+     "at": "2026-10-18T11:00",
+     "from": "지수",
+     "text": "오늘 2시에 망원동 우리 집에서 데이트하자 ㅎㅎ"
+    },
+    {
+     "at": "2026-10-18T11:01",
+     "me": true,
+     "text": "좋아 2시에 갈게"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "create",
+      "kind": "plan",
+      "set": {
+       "title": "지수네 집 데이트",
+       "status": "confirmed",
+       "date": "2026-10-18",
+       "start": "14:00",
+       "place": "지수네 집",
+       "people": [
+        "지수"
+       ],
+       "type": "데이트",
+       "placeKind": "집",
+       "area": "망원동"
+      },
+      "evidence": [
+       {
+        "line": 1,
+        "quote": "2시에 망원동 우리 집에서 데이트하자"
+       },
+       {
+        "line": 2,
+        "quote": "좋아 2시에 갈게"
+       }
+      ],
+      "confidence": 0.9,
+      "why": "초대와 동의"
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-10-18T15:00",
+   "occur": [
+    {
+     "id": "visit:1",
+     "kind": "visit",
+     "at": "2026-10-18T14:05",
+     "title": "지수네",
+     "place": "지수네",
+     "area": "망원동",
+     "class": "other"
+    }
+   ],
+   "expect": {
+    "now": {
+     "placeHas": "지수네",
+     "with": "지수",
+     "minConfidence": 0.95,
+     "textHas": [
+      "14:05부터 지수네"
+     ]
+    }
+   }
+  },
+  {
+   "at": "2026-10-18T20:00",
+   "occur": [
+    {
+     "id": "visit:1",
+     "kind": "visit",
+     "at": "2026-10-18T14:05",
+     "until": "2026-10-18T19:40",
+     "title": "지수네",
+     "place": "지수네",
+     "area": "망원동",
+     "class": "other"
+    }
+   ],
+   "expect": {
+    "now": {
+     "noGuess": true
+    }
+   }
+  }
+ ]
+}

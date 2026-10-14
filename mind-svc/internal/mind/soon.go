@@ -249,8 +249,14 @@ func points(f float64) float64 {
 // 같아 미안!' 보낼까요?". The message is a draft; sending it is the
 // operator's.
 func (m *Mind) late(ctx context.Context, o model.Occurrence) error {
-	if (o.Kind != "purchase" && o.Kind != "photo") || o.Area == "" && o.Place == "" {
+	if (o.Kind != "purchase" && o.Kind != "photo" && o.Kind != "visit") || o.Area == "" && o.Place == "" {
 		return nil // nowhere known: no grounds to say anything
+	}
+	if o.Kind == "visit" {
+		if o.Until == nil {
+			return nil // arrived, not leaving
+		}
+		o.At = *o.Until // leaving the region is setting out
 	}
 	st, loc := m.Opts.Store, m.Opts.Loc
 	now := m.Opts.Now()

@@ -207,7 +207,7 @@ func main() {
 		// the calendar (whose entries also become plans), photos.
 		structured := &sensor.Structured{Store: st, Observer: m, World: m.World, Token: token, Loc: loc, Out: log,
 			SpendingURL: os.Getenv("SPENDING_URL"), WorkoutURL: os.Getenv("WORKOUT_URL"), CalendarURL: os.Getenv("MIND_CALENDAR_READ_URL"),
-			ImmichURL: os.Getenv("IMMICH_URL"), ImmichKey: os.Getenv("IMMICH_API_KEY")}
+			ImmichURL: os.Getenv("IMMICH_URL"), ImmichKey: os.Getenv("IMMICH_API_KEY"), ContextURL: os.Getenv("CONTEXT_URL")}
 		go structured.Run(ctx, duration("MIND_STRUCTURED_POLL", 2*time.Minute))
 		if url := os.Getenv("CHAT_URL"); url != "" {
 			s := &sensor.Chat{URL: url, Token: token, Store: st, Log: logOut,

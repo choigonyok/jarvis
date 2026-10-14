@@ -42,6 +42,7 @@ type Structured struct {
 	CalendarURL string
 	ImmichURL   string
 	ImmichKey   string
+	ContextURL  string // context-svc: stays in regions
 	// Back is how far back a first start reads.
 	Back time.Duration
 }
@@ -58,7 +59,7 @@ func (s *Structured) Run(ctx context.Context, every time.Duration) {
 	defer t.Stop()
 	for {
 		for name, poll := range map[string]func(context.Context) error{
-			"spending": s.Spending, "workout": s.Workout, "calendar": s.Calendar, "photos": s.Photos,
+			"spending": s.Spending, "workout": s.Workout, "calendar": s.Calendar, "photos": s.Photos, "visits": s.Visits,
 		} {
 			if err := poll(ctx); err != nil && ctx.Err() == nil {
 				s.Out.Warn("구조화 소스를 읽지 못했습니다", "source", name, "err", err)
@@ -506,6 +507,42 @@ func People(title string) []string {
 		}
 	}
 	return out
+}
+
+// --- visits -----------------------------------------------------------------
+
+// Visits reads the stays in regions of the last two days (context-svc): an
+// arrival is a visit, its departure fills its end.
+func (s *Structured) Visits(ctx context.Context) error {
+	if s.ContextURL == "" {
+		return nil
+	}
+	from := s.Now().Add(-48 * time.Hour).UTC().Format(time.RFC3339)
+	var out struct {
+		Visits []struct {
+			ID        int64      `json:"id"`
+			Region    string     `json:"region"`
+			Kind      string     `json:"kind"`
+			Area      string     `json:"area"`
+			EnteredAt time.Time  `json:"enteredAt"`
+			LeftAt    *time.Time `json:"leftAt"`
+		} `json:"visits"`
+	}
+	if err := s.get(ctx, s.ContextURL+"/visits?from="+from, &out); err != nil {
+		return err
+	}
+	for _, v := range out.Visits {
+		area := v.Area
+		if area == "" {
+			area = v.Region
+		}
+		ref := fmt.Sprintf("visit:%d", v.ID)
+		if err := s.observe(ctx, model.Occurrence{ID: ref, Kind: "visit", At: v.EnteredAt, Until: v.LeftAt, Title: v.Region,
+			Place: v.Region, Area: area, Class: v.Kind, Ref: ref, Quote: v.Region}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // --- transfers --------------------------------------------------------------

@@ -31,6 +31,7 @@ type Config struct {
 	AgentURL    string
 	MindURL     string
 	MemoryURL   string
+	ContextURL  string
 	BrowserAddr string // host:port of the browser MCP bridge
 	Browser     *browser.Client
 	DB          *pgxpool.Pool
@@ -80,6 +81,14 @@ func All(cfg Config) []check.Probe {
 			Deps:  []string{"svc.memory", "mind.reading"},
 			Every: time.Minute,
 			Run:   e.mindMemory,
+		},
+		{
+			ID: "context.location", Group: "수집", Name: "위치 수신",
+			Rule:  "폰의 OwnTracks 가 보낸 마지막 위치가 36시간 안이면 정상, 36–72시간이면 주의, 72시간을 넘으면 이상. 한 번도 받지 않았으면 측정하지 않아요(설정 전). 크게 움직이지 않는 날은 위치가 드물게 와요.",
+			Fix:   "폰에서 OwnTracks 가 위치 권한 '항상 허용'인지, 모드가 Quiet 가 아닌지, 서버 주소·비밀번호가 맞는지 보세요. 배터리가 8% 아래면 일부러 조용히 둬요.",
+			Deps:  []string{"svc.context"},
+			Every: 5 * time.Minute,
+			Run:   e.location,
 		},
 		{
 			ID: "spending.alerts", Group: "수집", Name: "카드 결제 알림",
@@ -202,6 +211,7 @@ func All(cfg Config) []check.Probe {
 		e.service("svc.workout", "운동 기록 서비스", cfg.WorkoutURL, []string{"postgres"}),
 		e.service("svc.mind", "인지 루프(mind)", cfg.MindURL, []string{"postgres"}),
 		e.service("svc.memory", "기억 서비스", cfg.MemoryURL, []string{"postgres"}),
+		e.service("svc.context", "위치·현재 상태", cfg.ContextURL, []string{"postgres"}),
 	}
 }
 
@@ -300,6 +310,33 @@ func (e *env) mindReading(ctx context.Context) check.Verdict {
 		v.State, v.Summary = check.Warn, fmt.Sprintf("%s째 읽히지 않은 대화가 있어요.", span(behind))
 	default:
 		v.State, v.Summary = check.OK, "대화를 읽고 있어요."
+	}
+	return v
+}
+
+func (e *env) location(ctx context.Context) check.Verdict {
+	var now struct {
+		FixAt   *time.Time `json:"fixAt"`
+		Summary string     `json:"summary"`
+		Visits  []struct {
+			Region string `json:"region"`
+		} `json:"visits"`
+	}
+	if err := e.get(ctx, e.client, e.ContextURL+"/now", &now); err != nil {
+		return fail("위치 상태를 읽지 못했어요: " + err.Error())
+	}
+	v := check.Verdict{ObservedAt: now.FixAt, ObservedLabel: "마지막 위치", Facts: []string{now.Summary}}
+	if now.FixAt == nil {
+		v.State, v.Summary = check.Unknown, "아직 위치를 받은 적이 없어요(OwnTracks 설정 전)."
+		return v
+	}
+	switch age := time.Since(*now.FixAt); {
+	case age > 72*time.Hour:
+		v.State, v.Summary = check.Fail, fmt.Sprintf("%s째 위치가 오지 않아요.", span(age))
+	case age > 36*time.Hour:
+		v.State, v.Summary = check.Warn, fmt.Sprintf("%s째 위치가 오지 않아요.", span(age))
+	default:
+		v.State, v.Summary = check.OK, "위치를 받고 있어요."
 	}
 	return v
 }

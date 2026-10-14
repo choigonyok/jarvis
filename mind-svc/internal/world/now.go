@@ -23,8 +23,11 @@ type Situation struct {
 	// at any particular moment.
 	Today []Ongoing `json:"today,omitempty"`
 	Clues []Clue    `json:"clues"`
-	Guess *Guess    `json:"guess,omitempty"`
-	Text  string    `json:"text"`
+	// Here is the region the phone says the operator is in (context-svc),
+	// if any: the surest clue there is.
+	Here  *Clue  `json:"here,omitempty"`
+	Guess *Guess `json:"guess,omitempty"`
+	Text  string `json:"text"`
 }
 
 // Ongoing is a plan that may be going on now.
@@ -130,6 +133,18 @@ func (w *World) Situation(ctx context.Context, now time.Time, loc *time.Location
 	if err != nil {
 		return s, err
 	}
+	// Where the phone says the operator is: a stay in a region that has not
+	// ended. Read over a day, since an arrival may be hours old.
+	stays, err := w.st.Occurrences(ctx, now.Add(-24*time.Hour), now.Add(time.Minute), "visit")
+	if err != nil {
+		return s, err
+	}
+	for i := len(stays) - 1; i >= 0; i-- {
+		if v := stays[i]; v.Until == nil {
+			s.Here = &Clue{At: v.At.In(loc), Kind: "visit", Title: v.Title, Place: v.Place, Area: v.Area}
+			break
+		}
+	}
 	for i := len(occ) - 1; i >= 0; i-- { // newest first
 		o := occ[i]
 		if o.Area == "" && o.Place == "" {
@@ -234,6 +249,14 @@ func (w *World) lengths(ctx context.Context, now time.Time, loc *time.Location) 
 // surer, one somewhere else makes it doubtful. Without a plan, a fresh clue
 // says only where the operator was.
 func guess(s Situation) *Guess {
+	if h := s.Here; h != nil {
+		g := &Guess{Place: h.Place, Area: h.Area, Confidence: 0.85, Basis: []string{h.At.Format("15:04") + "부터 " + h.Place + "(위치)"}}
+		if len(s.Plans) > 0 && SamePlace(h.Area, h.Place, s.Plans[0].Area, s.Plans[0].Place) {
+			p := s.Plans[0]
+			g.Place, g.PlaceKind, g.With, g.PlanID, g.Confidence = p.Place, p.PlaceKind, p.People, p.ID, 0.95
+		}
+		return g
+	}
 	if len(s.Plans) > 0 && (s.Plans[0].Place != "" || s.Plans[0].Area != "" || len(s.Plans[0].People) > 0) {
 		p := s.Plans[0]
 		g := &Guess{Place: p.Place, PlaceKind: p.PlaceKind, Area: p.Area, With: p.People, PlanID: p.ID, Confidence: 0.45}
@@ -290,7 +313,7 @@ func clamp(f float64) float64 {
 }
 
 func (c Clue) line() string {
-	what := map[string]string{"purchase": "결제", "photo": "사진"}[c.Kind]
+	what := map[string]string{"purchase": "결제", "photo": "사진", "visit": "도착"}[c.Kind]
 	where := c.Area
 	if where == "" {
 		where = c.Place
@@ -340,6 +363,9 @@ func (s Situation) text() string {
 			b.WriteString(" @" + s.Next.Place)
 		}
 		b.WriteString("\n")
+	}
+	if s.Here != nil {
+		b.WriteString("- 위치: " + s.Here.At.Format("15:04") + "부터 " + s.Here.Place + "\n")
 	}
 	if len(s.Clues) > 0 {
 		var parts []string

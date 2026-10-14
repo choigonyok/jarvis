@@ -97,6 +97,9 @@ type Config struct {
 	// MindURL is mind-svc: the one gate every suggestion goes through, and
 	// the world model the conversation is told about. Empty: no mind.
 	MindURL string
+	// ContextURL is context-svc: where the operator is, and the devices'
+	// state. Empty: no context tool.
+	ContextURL string
 	// Jobs turns on the scheduler. Like Enrich, it needs the browser server.
 	Jobs         bool
 	JobsInterval time.Duration
@@ -169,7 +172,7 @@ func Load() (Config, error) {
 		AllowedTools: splitList(env("JARVIS_ALLOWED_TOOLS",
 			"Read,Glob,Grep,TodoWrite,mcp__calendar__list_events,"+
 				"mcp__assets__get_portfolio,mcp__assets__get_allocation,mcp__assets__get_history,"+
-				"mcp__spending__get_spending,mcp__memory__search_memory,mcp__jobs__create_job,mcp__jobs__list_jobs,mcp__jobs__instruct_job")),
+				"mcp__spending__get_spending,mcp__memory__search_memory,mcp__context__get_context,mcp__jobs__create_job,mcp__jobs__list_jobs,mcp__jobs__instruct_job")),
 		PermissionMode:   env("JARVIS_PERMISSION_MODE", "manual"),
 		ApprovalWait:     envDuration("JARVIS_APPROVAL_TIMEOUT", 30*time.Minute),
 		TurnTimeout:      envDuration("JARVIS_TURN_TIMEOUT", 2*time.Hour),
@@ -188,6 +191,7 @@ func Load() (Config, error) {
 		// Empty turns long-term memory off: no tool, nothing recalled.
 		MemoryURL:    os.Getenv("JARVIS_MEMORY_URL"),
 		MindURL:      os.Getenv("JARVIS_MIND_URL"),
+		ContextURL:   os.Getenv("JARVIS_CONTEXT_URL"),
 		Jobs:         envBool("JARVIS_JOBS", true),
 		JobsInterval: envDuration("JARVIS_JOBS_INTERVAL", 30*time.Second),
 		// Least time between two runs of any job. Sites watch for bots; a
