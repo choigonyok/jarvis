@@ -106,7 +106,6 @@ GET  /now                              지금 상황(규칙으로 계산한 요�
 POST /api/simulate                     {room, roomName, sender, mine, text, at?}
 POST /api/read                         {room?} 조용해지기를 기다리지 않고 지금 해석
 POST /api/settle                       가라앉는 중인 변화를 지금 스킬에
-POST /api/tick                         {name: "morning"}
 POST /api/clock                        {advance: "24h"} 메모리 모드에서 시계 옮기기
 POST /api/intents                      외부(에이전트 판단 턴)의 의도: {skill, kind, topic, context, title, body, reason, confidence, value, payload}
 POST /api/intents/{id}/approve|reject|undo   reject 는 {reason}
