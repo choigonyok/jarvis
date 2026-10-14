@@ -134,6 +134,15 @@ type Store interface {
 	AddUsage(ctx context.Context, u model.Usage) error
 	Usages(ctx context.Context, from string) ([]model.Usage, error)
 
+	// Reviews: observations as given, attributes computed from them, and
+	// preferences. ForgetObservations drops a review's answers (undone).
+	AddObservations(ctx context.Context, obs []model.Observation) error
+	ForgetObservations(ctx context.Context, source string) error
+	ObservationsOn(ctx context.Context, dimension string) ([]model.Observation, error)
+	Attributes(ctx context.Context, subjectType, subject string) ([]model.Attribute, error)
+	PutPreference(ctx context.Context, p model.Preference) error
+	Preferences(ctx context.Context) ([]model.Preference, error)
+
 	// Aliases: names in conversation → memory nodes. Putting a name again
 	// moves it to the node given and counts it seen once more.
 	PutAlias(ctx context.Context, a model.Alias) error

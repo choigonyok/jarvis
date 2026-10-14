@@ -456,10 +456,15 @@ func (e *Engine) raiseCard(ev Event) {
 	if c.Mode == "undo" {
 		kind = mind.Undo
 	}
-	input, _ := json.Marshal(mind.Input{IntentID: c.IntentID})
+	card := mind.CardText(c)
+	in := mind.Input{IntentID: c.IntentID}
+	if len(card.Fields) > 0 {
+		in.Card = &card // a form: redrawn with the answers on approval
+	}
+	input, _ := json.Marshal(in)
 	p, _ := e.proposals.Open(proposal.Proposal{
 		Origin: proposal.OriginSuggest, Action: action.Action{Kind: kind, Input: input},
-		Card: mind.CardText(c), Confidence: c.Confidence,
+		Card: card, Confidence: c.Confidence,
 	})
 	if e.cfg.Say != nil {
 		lead := strings.TrimSpace(c.Reason)

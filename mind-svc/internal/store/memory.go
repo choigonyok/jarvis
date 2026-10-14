@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"sort"
 	"sync"
@@ -35,6 +36,8 @@ type Memory struct {
 	expects  map[[2]string]model.Expectation
 	replies  []model.ReplySituation
 	usage    map[[2]string]model.Usage
+	obs      []model.Observation
+	prefs    map[string]model.Preference
 	seq      int64
 }
 
@@ -802,5 +805,90 @@ func (m *Memory) Usages(_ context.Context, from string) ([]model.Usage, error) {
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Day+out[i].Purpose < out[j].Day+out[j].Purpose })
+	return out, nil
+}
+
+func (m *Memory) AddObservations(_ context.Context, obs []model.Observation) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, o := range obs {
+		m.seq++
+		o.ID = m.seq
+		m.obs = append(m.obs, o)
+	}
+	return nil
+}
+
+func (m *Memory) ForgetObservations(_ context.Context, source string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := m.obs[:0]
+	for _, o := range m.obs {
+		if o.Source != source {
+			out = append(out, o)
+		}
+	}
+	m.obs = out
+	return nil
+}
+
+func (m *Memory) ObservationsOn(_ context.Context, dimension string) ([]model.Observation, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []model.Observation{}
+	for _, o := range m.obs {
+		if o.Dimension == dimension {
+			out = append(out, o)
+		}
+	}
+	return out, nil
+}
+
+func (m *Memory) Attributes(_ context.Context, subjectType, subject string) ([]model.Attribute, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	sum := map[string]*model.Attribute{}
+	var order []string
+	for _, o := range m.obs {
+		if o.SubjectType != subjectType || o.Subject != subject || o.Dimension == "" {
+			continue
+		}
+		a := sum[o.Dimension]
+		if a == nil {
+			a = &model.Attribute{SubjectType: subjectType, Subject: subject, Dimension: o.Dimension}
+			sum[o.Dimension] = a
+			order = append(order, o.Dimension)
+		}
+		a.Value += float64(o.Polarity)
+		a.Count++
+	}
+	sort.Strings(order)
+	out := []model.Attribute{}
+	for _, d := range order {
+		a := *sum[d]
+		a.Value /= float64(a.Count)
+		out = append(out, a)
+	}
+	return out, nil
+}
+
+func (m *Memory) PutPreference(_ context.Context, p model.Preference) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.prefs == nil {
+		m.prefs = map[string]model.Preference{}
+	}
+	m.prefs[fmt.Sprint(p.Dimension, "|", p.Polarity, "|", p.Scope)] = p
+	return nil
+}
+
+func (m *Memory) Preferences(context.Context) ([]model.Preference, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []model.Preference{}
+	for _, p := range m.prefs {
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Dimension+out[i].Scope < out[j].Dimension+out[j].Scope })
 	return out, nil
 }

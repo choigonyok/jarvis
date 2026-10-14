@@ -43,6 +43,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/mind"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
+	"github.com/choigonyok/jarvis/mind-svc/internal/world"
 )
 
 //go:embed ui/index.html
@@ -96,7 +97,11 @@ func (s *Server) Handler() http.Handler {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		writeJSON(w, http.StatusOK, now)
+		writeJSON(w, http.StatusOK, struct {
+			world.Situation
+			// Prefs is what is known of the operator's taste, with grounds.
+			Prefs string `json:"prefs,omitempty"`
+		}{now, s.m.PreferencesText(r.Context())})
 	}))
 	mux.HandleFunc("POST /api/simulate", s.auth(false, s.simulate))
 	mux.HandleFunc("POST /api/read", s.auth(false, s.read))
@@ -411,7 +416,11 @@ func (s *Server) decide(w http.ResponseWriter, r *http.Request) {
 	var err error
 	switch r.PathValue("action") {
 	case "approve":
-		in, err = s.m.Gate.Approve(r.Context(), id)
+		var body struct {
+			Answers map[string]string `json:"answers"`
+		}
+		_ = json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&body)
+		in, err = s.m.Gate.ApproveWith(r.Context(), id, body.Answers)
 	case "reject":
 		var body struct {
 			Reason string `json:"reason"`

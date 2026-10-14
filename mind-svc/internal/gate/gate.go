@@ -71,7 +71,7 @@ func DefaultPolicy() Policy {
 		Levels: map[string]string{"calendar.create": AskFor, "calendar.update": AskFor, "calendar.delete": AskFor},
 		// Orders, messages and the like are asked every time, however often
 		// they were approved: nothing here pays or sends by itself.
-		Fixed:           map[string]bool{"calendar.delete": true, "cart.add": true, "message.draft": true, "settle.request": true},
+		Fixed:           map[string]bool{"calendar.delete": true, "cart.add": true, "message.draft": true, "settle.request": true, "review.place": true, "preference.confirm": true},
 		Promote:         3,
 		PromoteRate:     0.8,
 		Window:          30 * 24 * time.Hour,
@@ -219,11 +219,39 @@ func (g *Gate) Submit(ctx context.Context, in model.Intent) (model.Intent, error
 
 // Approve does an intent that was asked.
 func (g *Gate) Approve(ctx context.Context, id string) (model.Intent, error) {
+	return g.ApproveWith(ctx, id, nil)
+}
+
+// ApproveWith does it with the operator's answers to its form, put in the
+// payload's "answers" for the action to read; a form with a required
+// question unanswered is not approved.
+func (g *Gate) ApproveWith(ctx context.Context, id string, answers map[string]string) (model.Intent, error) {
 	g.mu.Lock()
-	defer g.mu.Unlock()
+	in, err := g.approveWithLocked(ctx, id, answers)
+	g.mu.Unlock()
+	if err == nil {
+		g.hear(ctx, in)
+	}
+	return in, err
+}
+
+func (g *Gate) approveWithLocked(ctx context.Context, id string, answers map[string]string) (model.Intent, error) {
 	in, err := g.pending(ctx, id)
 	if err != nil {
 		return in, err
+	}
+	for _, f := range in.Fields {
+		if f.Required && strings.TrimSpace(answers[f.Key]) == "" {
+			return in, fmt.Errorf("%s 에 답해 주세요", f.Label)
+		}
+	}
+	if len(answers) > 0 {
+		var payload map[string]any
+		if err := json.Unmarshal(in.Payload, &payload); err != nil || payload == nil {
+			payload = map[string]any{}
+		}
+		payload["answers"] = answers
+		in.Payload, _ = json.Marshal(payload)
 	}
 	a, ok := g.acts.For(in.Kind)
 	if !ok {
@@ -244,7 +272,15 @@ func (g *Gate) Reject(ctx context.Context, id string) (model.Intent, error) {
 // what the next judgement about the same thing reads.
 func (g *Gate) RejectWhy(ctx context.Context, id, reason string) (model.Intent, error) {
 	g.mu.Lock()
-	defer g.mu.Unlock()
+	in, err := g.rejectWhyLocked(ctx, id, reason)
+	g.mu.Unlock()
+	if err == nil {
+		g.hear(ctx, in)
+	}
+	return in, err
+}
+
+func (g *Gate) rejectWhyLocked(ctx context.Context, id, reason string) (model.Intent, error) {
 	in, err := g.pending(ctx, id)
 	if err != nil {
 		return in, err
@@ -263,7 +299,15 @@ func (g *Gate) RejectWhy(ctx context.Context, id, reason string) (model.Intent, 
 // so the world model learns the entry is gone.
 func (g *Gate) Undo(ctx context.Context, id string) (model.Intent, error) {
 	g.mu.Lock()
-	defer g.mu.Unlock()
+	in, err := g.undoLocked(ctx, id)
+	g.mu.Unlock()
+	if err == nil {
+		g.hear(ctx, in)
+	}
+	return in, err
+}
+
+func (g *Gate) undoLocked(ctx context.Context, id string) (model.Intent, error) {
 	in, err := g.st.Intent(ctx, id)
 	if err != nil {
 		return in, err
@@ -286,15 +330,16 @@ func (g *Gate) Undo(ctx context.Context, id string) (model.Intent, error) {
 	return in, g.decided(ctx, in)
 }
 
-// decided records an answered intent and tells whoever learns from it.
+// decided records an answered intent; hear, once the gate is free again,
+// tells whoever learns from it (which may raise a new intent of its own).
 func (g *Gate) decided(ctx context.Context, in model.Intent) error {
-	if err := g.st.PutIntent(ctx, in); err != nil {
-		return err
-	}
-	if g.OnDecide != nil {
+	return g.st.PutIntent(ctx, in)
+}
+
+func (g *Gate) hear(ctx context.Context, in model.Intent) {
+	if g.OnDecide != nil && (in.Status == model.Executed || in.Status == model.Rejected || in.Status == model.Undone) {
 		g.OnDecide(ctx, in)
 	}
-	return nil
 }
 
 // Withdraw drops a skill's open questions about an entity.
@@ -545,6 +590,7 @@ type Card struct {
 	Evidence   []model.Evidence `json:"evidence,omitempty"`
 	Confidence float64          `json:"confidence"`
 	Reversible bool             `json:"reversible"`
+	Fields     []model.Field    `json:"fields,omitempty"`
 }
 
 // The one path a card takes to the operator, and back.
@@ -555,9 +601,13 @@ const (
 
 func (g *Gate) card(ctx context.Context, in model.Intent, mode string) {
 	data, _ := json.Marshal(Card{IntentID: in.ID, Mode: mode, Skill: in.Skill, Kind: in.Kind, Title: in.Title, Body: in.Body,
-		Preview: in.Preview, Reason: in.Reason, Why: in.Why, Evidence: in.Evidence, Confidence: in.Confidence, Reversible: in.Reversible})
+		Preview: in.Preview, Reason: in.Reason, Why: in.Why, Evidence: in.Evidence, Confidence: in.Confidence, Reversible: in.Reversible,
+		Fields: in.Fields})
 	g.append(ctx, obs.Observation{Source: "mind", Type: CardRaised, Subject: in.ID, Data: data, Key: CardRaised + ":" + in.ID, OccurredAt: g.now()})
 }
+
+// Close tells the agent a card went stale (withdrawn from outside the gate).
+func (g *Gate) Close(ctx context.Context, in model.Intent) { g.closeCard(ctx, in) }
 
 // closeCard tells the agent a card it shows was answered here, or went
 // stale, so it stops asking.

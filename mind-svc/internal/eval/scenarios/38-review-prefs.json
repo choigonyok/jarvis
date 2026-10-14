@@ -1,0 +1,151 @@
+{
+ "name": "회고 → 선호: 두 캠핑장에서 소음이 아쉬웠다면 '가족과 갈 때 소음에 민감'을 추정하고 한 번 물어 확정한다",
+ "room": "owner",
+ "roomName": "jarvis",
+ "turns": [
+  {
+   "messages": [
+    {
+     "at": "2026-10-01T20:00",
+     "me": true,
+     "text": "10/10~11 솔숲캠핑장 가족 캠핑 예약"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "create",
+      "kind": "plan",
+      "set": {
+       "title": "솔숲캠핑장 가족 캠핑",
+       "status": "confirmed",
+       "date": "2026-10-10",
+       "endDate": "2026-10-11",
+       "place": "솔숲캠핑장",
+       "people": [
+        "가족"
+       ],
+       "type": "캠핑"
+      },
+      "evidence": [
+       {
+        "line": 1,
+        "quote": "10/10~11 솔숲캠핑장 가족 캠핑 예약"
+       }
+      ],
+      "confidence": 0.9,
+      "why": "메모"
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-10-12T21:00",
+   "tick": "review",
+   "expect": {
+    "cards": [
+     "솔숲캠핑장 (10/10) 어땠어요?"
+    ],
+    "cardCount": 1
+   }
+  },
+  {
+   "approve": "review.place",
+   "answers": {
+    "score": "2",
+    "bad": "소음·매너,사이트 간격"
+   },
+   "expect": {
+    "noCards": true,
+    "observations": 3,
+    "prefsNot": [
+     "소음"
+    ]
+   }
+  },
+  {
+   "messages": [
+    {
+     "at": "2026-10-13T20:00",
+     "me": true,
+     "text": "10/17~18 강변캠핑장 가족 캠핑 예약"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "create",
+      "kind": "plan",
+      "set": {
+       "title": "강변캠핑장 가족 캠핑",
+       "status": "confirmed",
+       "date": "2026-10-17",
+       "endDate": "2026-10-18",
+       "place": "강변캠핑장",
+       "people": [
+        "가족"
+       ],
+       "type": "캠핑"
+      },
+      "evidence": [
+       {
+        "line": 1,
+        "quote": "10/17~18 강변캠핑장 가족 캠핑 예약"
+       }
+      ],
+      "confidence": 0.9,
+      "why": "메모"
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-10-19T21:00",
+   "tick": "review",
+   "expect": {
+    "cards": [
+     "강변캠핑장 (10/17) 어땠어요?"
+    ],
+    "cardCount": 1
+   }
+  },
+  {
+   "approve": "review.place",
+   "answers": {
+    "score": "2",
+    "bad": "소음·매너",
+    "good": "뷰"
+   },
+   "expect": {
+    "cards": [
+     "소음에 민감하다 맞나요?"
+    ],
+    "cardHas": [
+     "2곳에서 소음이(가) 아쉬웠음"
+    ],
+    "prefsHas": [
+     "소음에 민감하다 (추정"
+    ]
+   }
+  },
+  {
+   "approve": "preference.confirm",
+   "answers": {
+    "answer": "네, 기억해 줘"
+   },
+   "expect": {
+    "prefsHas": [
+     "소음에 민감하다 (확정"
+    ],
+    "noCards": true
+   }
+  },
+  {
+   "at": "2026-10-19T21:30",
+   "tick": "review",
+   "expect": {
+    "noCards": true
+   }
+  }
+ ]
+}

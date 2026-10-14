@@ -1,0 +1,49 @@
+{
+ "name": "직접 한 말은 근거 수와 상관없이 확정: '난 원래 시끄러운 거 싫어'",
+ "room": "owner",
+ "roomName": "jarvis",
+ "turns": [
+  {
+   "messages": [
+    {
+     "at": "2026-10-20T22:00",
+     "me": true,
+     "text": "난 원래 시끄러운 거 진짜 싫어"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "remember",
+      "kind": "fact",
+      "set": {
+       "subject": "나",
+       "subjectKind": "Person",
+       "relation": "DISLIKES",
+       "object": "시끄러운 곳",
+       "objectKind": "Thing",
+       "text": "나는 시끄러운 곳을 싫어한다"
+      },
+      "evidence": [
+       {
+        "line": 1,
+        "quote": "시끄러운 거 진짜 싫어"
+       }
+      ],
+      "confidence": 0.9,
+      "why": "운영자가 직접 말함"
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-10-21T03:00",
+   "tick": "night",
+   "expect": {
+    "prefsHas": [
+     "소음에 민감하다 (확정 · 직접 말함"
+    ]
+   }
+  }
+ ]
+}

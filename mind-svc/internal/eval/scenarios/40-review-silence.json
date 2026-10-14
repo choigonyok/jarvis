@@ -1,0 +1,266 @@
+{
+ "name": "회고의 침묵: '다시 묻지 마'로 거절한 곳은 다시 묻지 않고, 아니라고 한 추정은 다시 묻지 않는다",
+ "room": "owner",
+ "roomName": "jarvis",
+ "turns": [
+  {
+   "messages": [
+    {
+     "at": "2026-10-01T20:00",
+     "me": true,
+     "text": "10/10~11 솔숲캠핑장 가족 캠핑 예약"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "create",
+      "kind": "plan",
+      "set": {
+       "title": "솔숲캠핑장 가족 캠핑",
+       "status": "confirmed",
+       "date": "2026-10-10",
+       "endDate": "2026-10-11",
+       "place": "솔숲캠핑장",
+       "people": [
+        "가족"
+       ],
+       "type": "캠핑"
+      },
+      "evidence": [
+       {
+        "line": 1,
+        "quote": "10/10~11 솔숲캠핑장 가족 캠핑 예약"
+       }
+      ],
+      "confidence": 0.9,
+      "why": "메모"
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-10-12T21:00",
+   "tick": "review",
+   "expect": {
+    "cardCount": 1
+   }
+  },
+  {
+   "reject": "review.place",
+   "reason": "다시 묻지 마"
+  },
+  {
+   "messages": [
+    {
+     "at": "2026-10-26T20:00",
+     "me": true,
+     "text": "11/7~8 솔숲캠핑장 또 가족 캠핑"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "create",
+      "kind": "plan",
+      "set": {
+       "title": "솔숲캠핑장 가족 캠핑",
+       "status": "confirmed",
+       "date": "2026-11-07",
+       "endDate": "2026-11-08",
+       "place": "솔숲캠핑장",
+       "people": [
+        "가족"
+       ],
+       "type": "캠핑"
+      },
+      "evidence": [
+       {
+        "line": 1,
+        "quote": "11/7~8 솔숲캠핑장 또 가족 캠핑"
+       }
+      ],
+      "confidence": 0.9,
+      "why": "메모"
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-11-09T21:00",
+   "tick": "review",
+   "expect": {
+    "noCards": true
+   }
+  },
+  {
+   "messages": [
+    {
+     "at": "2026-11-10T20:00",
+     "me": true,
+     "text": "11/14~15 강변캠핑장 가족 캠핑"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "create",
+      "kind": "plan",
+      "set": {
+       "title": "강변캠핑장 가족 캠핑",
+       "status": "confirmed",
+       "date": "2026-11-14",
+       "endDate": "2026-11-15",
+       "place": "강변캠핑장",
+       "people": [
+        "가족"
+       ],
+       "type": "캠핑"
+      },
+      "evidence": [
+       {
+        "line": 1,
+        "quote": "11/14~15 강변캠핑장 가족 캠핑"
+       }
+      ],
+      "confidence": 0.9,
+      "why": "메모"
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-11-16T21:00",
+   "tick": "review",
+   "expect": {
+    "cardCount": 1
+   }
+  },
+  {
+   "approve": "review.place",
+   "answers": {
+    "score": "2",
+    "bad": "소음·매너"
+   }
+  },
+  {
+   "messages": [
+    {
+     "at": "2026-11-17T20:00",
+     "me": true,
+     "text": "11/21~22 숲속캠핑장 가족 캠핑"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "create",
+      "kind": "plan",
+      "set": {
+       "title": "숲속캠핑장 가족 캠핑",
+       "status": "confirmed",
+       "date": "2026-11-21",
+       "endDate": "2026-11-22",
+       "place": "숲속캠핑장",
+       "people": [
+        "가족"
+       ],
+       "type": "캠핑"
+      },
+      "evidence": [
+       {
+        "line": 1,
+        "quote": "11/21~22 숲속캠핑장 가족 캠핑"
+       }
+      ],
+      "confidence": 0.9,
+      "why": "메모"
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-11-23T21:00",
+   "tick": "review",
+   "expect": {
+    "cardCount": 1
+   }
+  },
+  {
+   "approve": "review.place",
+   "answers": {
+    "score": "1",
+    "bad": "소음·매너"
+   },
+   "expect": {
+    "cards": [
+     "소음에 민감하다 맞나요?"
+    ]
+   }
+  },
+  {
+   "reject": "preference.confirm",
+   "expect": {
+    "prefsNot": [
+     "소음"
+    ]
+   }
+  },
+  {
+   "messages": [
+    {
+     "at": "2026-11-24T20:00",
+     "me": true,
+     "text": "11/28~29 별빛캠핑장 가족 캠핑"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "create",
+      "kind": "plan",
+      "set": {
+       "title": "별빛캠핑장 가족 캠핑",
+       "status": "confirmed",
+       "date": "2026-11-28",
+       "endDate": "2026-11-29",
+       "place": "별빛캠핑장",
+       "people": [
+        "가족"
+       ],
+       "type": "캠핑"
+      },
+      "evidence": [
+       {
+        "line": 1,
+        "quote": "11/28~29 별빛캠핑장 가족 캠핑"
+       }
+      ],
+      "confidence": 0.9,
+      "why": "메모"
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-11-30T21:00",
+   "tick": "review",
+   "expect": {
+    "cardCount": 1
+   }
+  },
+  {
+   "approve": "review.place",
+   "answers": {
+    "score": "1",
+    "bad": "소음·매너"
+   },
+   "expect": {
+    "noCards": true,
+    "prefsNot": [
+     "소음"
+    ]
+   }
+  }
+ ]
+}

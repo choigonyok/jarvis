@@ -178,6 +178,38 @@ func TestMemory(t *testing.T) {
 	self(t, NewMemory())
 	replies(t, NewMemory())
 	usage(t, NewMemory())
+	reviews(t, NewMemory())
+}
+
+func reviews(t *testing.T, st Store) {
+	ctx := context.Background()
+	at := time.Date(2026, 10, 12, 21, 0, 0, 0, time.UTC)
+	_ = st.AddObservations(ctx, []model.Observation{
+		{SubjectType: "캠핑장", Subject: "솔숲캠핑장", Dimension: "소음", Polarity: -1, Score: 2, Context: map[string]string{"with": "가족"}, Source: "int_a", At: at},
+		{SubjectType: "캠핑장", Subject: "솔숲캠핑장", Dimension: "뷰·자연", Polarity: 1, Score: 2, Source: "int_a", At: at},
+		{SubjectType: "캠핑장", Subject: "솔숲캠핑장", Dimension: "소음", Polarity: -1, Score: 3, Source: "int_b", At: at},
+	})
+	attrs, _ := st.Attributes(ctx, "캠핑장", "솔숲캠핑장")
+	byDim := map[string]model.Attribute{}
+	for _, a := range attrs {
+		byDim[a.Dimension] = a
+	}
+	if len(attrs) != 2 || byDim["소음"].Value != -1 || byDim["소음"].Count != 2 || byDim["뷰·자연"].Value != 1 {
+		t.Fatalf("속성: %+v", attrs)
+	}
+	noise, _ := st.ObservationsOn(ctx, "소음")
+	if len(noise) != 2 || noise[0].Context["with"] != "가족" {
+		t.Fatalf("관찰: %+v", noise)
+	}
+	_ = st.ForgetObservations(ctx, "int_b")
+	if noise, _ := st.ObservationsOn(ctx, "소음"); len(noise) != 1 {
+		t.Fatalf("되돌린 회고의 답은 빠짐: %+v", noise)
+	}
+	_ = st.PutPreference(ctx, model.Preference{Dimension: "소음", Polarity: -1, Status: "estimated", Subjects: []string{"a", "b"}, UpdatedAt: at})
+	_ = st.PutPreference(ctx, model.Preference{Dimension: "소음", Polarity: -1, Status: "confirmed", Subjects: []string{"a", "b"}, UpdatedAt: at})
+	if ps, _ := st.Preferences(ctx); len(ps) != 1 || ps[0].Status != "confirmed" {
+		t.Fatalf("선호: %+v", ps)
+	}
 }
 
 func usage(t *testing.T, st Store) {
@@ -362,7 +394,7 @@ func TestPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	if _, err := pool.Exec(context.Background(), `truncate mind_messages, mind_rooms, mind_entities, mind_changes, mind_timers, mind_intents, mind_cursors, mind_facts, mind_aliases, mind_policy_stats, mind_occurrences, mind_links, mind_thing_classes, mind_link_cache, mind_pattern_counts, mind_notes, mind_note_versions, mind_predictions, mind_expectations, mind_reply_examples, mind_llm_usage restart identity cascade`); err != nil {
+	if _, err := pool.Exec(context.Background(), `truncate mind_messages, mind_rooms, mind_entities, mind_changes, mind_timers, mind_intents, mind_cursors, mind_facts, mind_aliases, mind_policy_stats, mind_occurrences, mind_links, mind_thing_classes, mind_link_cache, mind_pattern_counts, mind_notes, mind_note_versions, mind_predictions, mind_expectations, mind_reply_examples, mind_llm_usage, mind_observations, mind_preferences restart identity cascade`); err != nil {
 		t.Fatal(err)
 	}
 	key := make([]byte, 32)
@@ -375,6 +407,7 @@ func TestPostgres(t *testing.T) {
 	self(t, st)
 	replies(t, st)
 	usage(t, st)
+	reviews(t, st)
 	var sealed bool
 	var body []byte
 	_ = pool.QueryRow(context.Background(), `select sealed, body from mind_messages where ref = 'sim:1'`).Scan(&sealed, &body)

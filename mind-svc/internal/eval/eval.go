@@ -35,6 +35,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/mind"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
+	"github.com/choigonyok/jarvis/mind-svc/internal/prefs"
 	"github.com/choigonyok/jarvis/mind-svc/internal/reflect"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 	"github.com/choigonyok/jarvis/mind-svc/internal/world"
@@ -66,10 +67,12 @@ type Turn struct {
 	Messages []Msg  `json:"messages,omitempty"`
 	Approve  string `json:"approve,omitempty"` // the latest pending intent of this kind
 	Reject   string `json:"reject,omitempty"`
-	Reason   string `json:"reason,omitempty"`  // the reason given with a reject
-	Undo     string `json:"undo,omitempty"`    // the latest executed intent of this kind
-	Advance  string `json:"advance,omitempty"` // move the clock, firing timers
-	Tick     string `json:"tick,omitempty"`
+	Reason   string `json:"reason,omitempty"` // the reason given with a reject
+	// Answers are the form's answers given with an approve.
+	Answers map[string]string `json:"answers,omitempty"`
+	Undo    string            `json:"undo,omitempty"`    // the latest executed intent of this kind
+	Advance string            `json:"advance,omitempty"` // move the clock, firing timers
+	Tick    string            `json:"tick,omitempty"`
 	// Submit is an intent from outside the loop (the agent's judging turn),
 	// handed to the gate as POST /api/intents would.
 	Submit *model.Intent `json:"submit,omitempty"`
@@ -139,6 +142,12 @@ type Expect struct {
 	// or body. Compared: a draft was compared with what the operator sent.
 	CardHas  []string `json:"cardHas,omitempty"`
 	Compared bool     `json:"compared,omitempty"`
+	// PrefsHas: what the conversation is told of the operator's taste has
+	// these; PrefsNot: and not these.
+	PrefsHas []string `json:"prefsHas,omitempty"`
+	PrefsNot []string `json:"prefsNot,omitempty"`
+	// Observations: answers recorded so far.
+	Observations *int `json:"observations,omitempty"`
 }
 
 // NoteMatch is a partial description of a note.
@@ -325,6 +334,9 @@ func Scripted(sc Scenario) llm.Client {
 			}
 			return "", errors.New("초안 답이 없습니다")
 		}
+		if system == prefs.System {
+			return `{"items":[]}`, nil
+		}
 		if system == reflect.System {
 			if len(sc.Reflect) == 0 {
 				return `{"hypotheses":[]}`, nil
@@ -455,7 +467,7 @@ func Run(ctx context.Context, sc Scenario, client llm.Client, loc *time.Location
 			}
 			var err error
 			if t.Approve != "" {
-				_, err = m.Gate.Approve(ctx, id)
+				_, err = m.Gate.ApproveWith(ctx, id, t.Answers)
 			} else {
 				_, err = m.Gate.RejectWhy(ctx, id, t.Reason)
 			}
@@ -515,6 +527,29 @@ func Run(ctx context.Context, sc Scenario, client llm.Client, loc *time.Location
 			}
 			for _, f := range checkSelf(ctx, st, *t.Expect, seen) {
 				fail(i, "%s", f)
+			}
+			if len(t.Expect.PrefsHas)+len(t.Expect.PrefsNot) > 0 {
+				text := m.PreferencesText(ctx)
+				for _, w := range t.Expect.PrefsHas {
+					if !strings.Contains(text, w) {
+						fail(i, "취향에 %q 가 있어야 함 · 지금: %q", w, text)
+					}
+				}
+				for _, w := range t.Expect.PrefsNot {
+					if strings.Contains(text, w) {
+						fail(i, "취향에 %q 가 없어야 함 · 지금: %q", w, text)
+					}
+				}
+			}
+			if t.Expect.Observations != nil {
+				n := 0
+				for _, d := range append(append([]string{"", "기타"}, prefs.Common...), prefs.Camp...) {
+					obs, _ := st.ObservationsOn(ctx, d)
+					n += len(obs)
+				}
+				if n != *t.Expect.Observations {
+					fail(i, "관찰 %d개여야 하는데 %d개", *t.Expect.Observations, n)
+				}
 			}
 			if t.Expect.Brier != nil {
 				if b, n, _ := m.Predict.Brier(ctx, time.Time{}, time.Date(3000, 1, 1, 0, 0, 0, 0, time.UTC)); n == 0 || b > *t.Expect.Brier {

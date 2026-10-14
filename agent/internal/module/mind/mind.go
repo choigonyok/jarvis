@@ -52,6 +52,9 @@ type Card struct {
 	Evidence   []Evidence `json:"evidence"`
 	Confidence float64    `json:"confidence"`
 	Reversible bool       `json:"reversible"`
+	// Fields make it a form: a question (a review, "맞나요?") answered on
+	// the card, the answers sent back with the approval.
+	Fields []action.Field `json:"fields,omitempty"`
 }
 
 type Evidence struct {
@@ -59,9 +62,12 @@ type Evidence struct {
 	Quote string `json:"quote"`
 }
 
-// Input is what an approval card carries to mind.
+// Input is what an approval card carries to mind. A form card also keeps
+// its own card, to redraw it with the operator's answers, and the answers.
 type Input struct {
-	IntentID string `json:"intentId"`
+	IntentID string            `json:"intentId"`
+	Card     *action.Card      `json:"card,omitempty"`
+	Answers  map[string]string `json:"answers,omitempty"`
 }
 
 // Client talks to mind-svc's API.
@@ -100,6 +106,32 @@ func (m *Module) Preview(_ context.Context, a action.Action) (action.Card, error
 	return action.Card{Title: a.Kind}, nil
 }
 
+// Revise is the operator's answers to a form card: kept in the input (sent
+// with the approval), shown back on the card. A required answer left empty
+// stops the approval.
+func (m *Module) Revise(_ context.Context, a action.Action, edits map[string]string) (action.Action, action.Card, error) {
+	var in Input
+	if err := json.Unmarshal(a.Input, &in); err != nil || in.Card == nil {
+		return a, action.Card{}, errors.New("답을 받을 수 있는 카드가 아닙니다")
+	}
+	card := *in.Card
+	card.Fields = append([]action.Field(nil), card.Fields...)
+	answers := map[string]string{}
+	for i, f := range card.Fields {
+		v := strings.TrimSpace(edits[f.Key])
+		if f.Required && v == "" {
+			return a, action.Card{}, fmt.Errorf("%s을(를) 골라 주세요.", f.Label)
+		}
+		card.Fields[i].Value = v
+		if v != "" {
+			answers[f.Key] = v
+		}
+	}
+	in.Answers = answers
+	input, _ := json.Marshal(in)
+	return action.Action{Kind: a.Kind, Input: input}, card, nil
+}
+
 func (m *Module) Execute(ctx context.Context, a action.Action) (action.Result, error) {
 	var in Input
 	if err := json.Unmarshal(a.Input, &in); err != nil || in.IntentID == "" {
@@ -114,7 +146,11 @@ func (m *Module) Execute(ctx context.Context, a action.Action) (action.Result, e
 		Preview string `json:"preview"`
 		Error   string `json:"error"`
 	}
-	if err := m.c.Do(ctx, http.MethodPost, "/api/intents/"+in.IntentID+"/"+op, nil, &out); err != nil {
+	var body any
+	if len(in.Answers) > 0 {
+		body = map[string]any{"answers": in.Answers}
+	}
+	if err := m.c.Do(ctx, http.MethodPost, "/api/intents/"+in.IntentID+"/"+op, body, &out); err != nil {
 		return action.Result{}, err
 	}
 	if out.Status == "failed" {
@@ -228,8 +264,10 @@ func CardText(c Card) action.Card {
 			b.WriteString("\n근거: “" + e.Quote + "”")
 		}
 	}
-	card := action.Card{Title: c.Title, Body: strings.TrimSpace(b.String())}
+	card := action.Card{Title: c.Title, Body: strings.TrimSpace(b.String()), Fields: c.Fields}
 	switch {
+	case len(c.Fields) > 0:
+		card.Consequence = "승인하면 답을 보냅니다. 장소의 특징과 내 취향을 따로 배워요."
 	case c.Mode == "undo":
 		card.Title = "처리했어요: " + c.Title
 		card.Consequence = "승인하면 되돌립니다. 반려하면 그대로 둡니다."

@@ -886,3 +886,74 @@ func (p *Postgres) Usages(ctx context.Context, from string) ([]model.Usage, erro
 	}
 	return out, rows.Err()
 }
+
+func (p *Postgres) AddObservations(ctx context.Context, obs []model.Observation) error {
+	for _, o := range obs {
+		c, _ := json.Marshal(o.Context)
+		if _, err := p.db.Exec(ctx, `insert into mind_observations (subject_type, subject_id, dimension, polarity, score, detail, context, source_id, at)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, o.SubjectType, o.Subject, o.Dimension, o.Polarity, o.Score, o.Detail, c, o.Source, o.At); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *Postgres) ForgetObservations(ctx context.Context, source string) error {
+	_, err := p.db.Exec(ctx, `delete from mind_observations where source_id = $1`, source)
+	return err
+}
+
+func (p *Postgres) ObservationsOn(ctx context.Context, dimension string) ([]model.Observation, error) {
+	rows, err := p.db.Query(ctx, `select id, subject_type, subject_id, dimension, polarity, score, detail, context, source_id, at
+		from mind_observations where dimension = $1 order by at, id`, dimension)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []model.Observation{}
+	for rows.Next() {
+		var o model.Observation
+		var c []byte
+		if err := rows.Scan(&o.ID, &o.SubjectType, &o.Subject, &o.Dimension, &o.Polarity, &o.Score, &o.Detail, &c, &o.Source, &o.At); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal(c, &o.Context)
+		out = append(out, o)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) Attributes(ctx context.Context, subjectType, subject string) ([]model.Attribute, error) {
+	rows, err := p.db.Query(ctx, `select subject_type, subject_id, dimension, value, evidence_count from mind_attributes
+		where subject_type = $1 and subject_id = $2 order by dimension`, subjectType, subject)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []model.Attribute{}
+	for rows.Next() {
+		var a model.Attribute
+		var v float32
+		if err := rows.Scan(&a.SubjectType, &a.Subject, &a.Dimension, &v, &a.Count); err != nil {
+			return nil, err
+		}
+		a.Value = float64(v)
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) PutPreference(ctx context.Context, pr model.Preference) error {
+	body, err := json.Marshal(pr)
+	if err != nil {
+		return err
+	}
+	_, err = p.db.Exec(ctx, `insert into mind_preferences (dimension, polarity, scope, status, body, updated_at) values ($1, $2, $3, $4, $5, $6)
+		on conflict (dimension, polarity, scope) do update set status = excluded.status, body = excluded.body, updated_at = excluded.updated_at`,
+		pr.Dimension, pr.Polarity, pr.Scope, pr.Status, body, pr.UpdatedAt)
+	return err
+}
+
+func (p *Postgres) Preferences(ctx context.Context) ([]model.Preference, error) {
+	return scanBodies[model.Preference](ctx, p, `select body from mind_preferences order by dimension, scope`)
+}

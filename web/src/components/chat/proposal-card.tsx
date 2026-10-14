@@ -261,7 +261,7 @@ function FormFields({
         const value = values[f.key] ?? "";
         return (
           <div key={f.key}>
-            <label htmlFor={f.kind === "select" ? undefined : id} className="mb-1.5 block text-[12px] text-dim">
+            <label htmlFor={f.kind === "select" || f.kind === "multi" ? undefined : id} className="mb-1.5 block text-[12px] text-dim">
               {f.label}
             </label>
             {f.kind === "number" ? (
@@ -288,6 +288,29 @@ function FormFields({
                 onChange={(e) => onChange(f.key, e.target.value)}
                 className={cn(input, "scrollbar-hairline resize-y py-2.5 leading-relaxed")}
               />
+            ) : f.kind === "multi" ? (
+              <div role="group" aria-label={f.label} className="flex flex-wrap gap-1.5">
+                {(f.options ?? []).map((o) => {
+                  const picked = value ? value.split(",").filter(Boolean) : [];
+                  const on = picked.includes(o);
+                  return (
+                    <button
+                      key={o}
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() =>
+                        onChange(f.key, (on ? picked.filter((p) => p !== o) : [...picked, o]).join(","))
+                      }
+                      className={cn(
+                        "min-h-10 rounded-full border px-3 text-[13px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 sm:min-h-8 sm:text-[12.5px]",
+                        on ? "border-edge bg-glass-raised text-foreground" : "border-edge-soft text-dim hover:bg-glass",
+                      )}
+                    >
+                      {o}
+                    </button>
+                  );
+                })}
+              </div>
             ) : f.kind === "select" ? (
               <div role="radiogroup" aria-label={f.label} className="flex flex-wrap gap-1.5">
                 {(f.options ?? []).map((o) => {

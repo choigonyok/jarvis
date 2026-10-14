@@ -14,7 +14,8 @@ export type ProposalAction = {
 export type CardField = {
   key: string;
   label: string;
-  kind: "text" | "textarea" | "number" | "select";
+  /** multi: several options, kept comma-joined ("소음·매너,청결"). */
+  kind: "text" | "textarea" | "number" | "select" | "multi";
   value: string;
   options?: string[];
   /** Approval stays off while this is empty. */

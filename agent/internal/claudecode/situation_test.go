@@ -21,14 +21,14 @@ func TestSituationInSystemPrompt(t *testing.T) {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		_, _ = w.Write([]byte(`{"text":"[지금 상황 · 16:00]\n- 추정: 지수네 집에서 지수와 함께 (0.85) · 근거: 15:40 망원동 사진"}`))
+		_, _ = w.Write([]byte(`{"text":"[지금 상황 · 16:00]\n- 추정: 지수네 집에서 지수와 함께 (0.85) · 근거: 15:40 망원동 사진","prefs":"- 소음에 민감하다 (확정 · 2곳에서 소음이(가) 아쉬웠음)"}`))
 	}))
 	defer mind.Close()
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	r := &Runner{cfg: config.Config{SystemPrompt: "base", MindURL: mind.URL, APIToken: "tok"}, log: quiet}
 	got := r.systemPrompt()
-	for _, want := range []string{"현재 시각", "지수네 집에서 지수와 함께 (0.85)", "0.5 미만", "첫 줄에 가정을"} {
+	for _, want := range []string{"현재 시각", "지수네 집에서 지수와 함께 (0.85)", "0.5 미만", "첫 줄에 가정을", "알고 있는 취향", "소음에 민감하다 (확정"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("시스템 프롬프트에 %q 가 없습니다:\n%s", want, got)
 		}

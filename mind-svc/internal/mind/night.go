@@ -222,6 +222,8 @@ func (m *Mind) Tick(ctx context.Context, name string) error {
 		return m.Night(ctx)
 	case "predict":
 		return m.Morning(ctx)
+	case "review":
+		return m.reviews(ctx)
 	}
 	m.Attn.Tick(ctx, name)
 	return nil

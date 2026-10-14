@@ -264,6 +264,46 @@ type Usage struct {
 	Out     int64   `json:"outTokens"`
 }
 
+// Observation is one answer of a review, as given: about a subject (a
+// campsite, a restaurant), on a dimension (소음, 청결 …), which way, and in
+// what company and season. Never interpreted, never deleted.
+type Observation struct {
+	ID          int64             `json:"id"`
+	SubjectType string            `json:"subjectType"` // 캠핑장 | 식당 | 숙소 | 카페
+	Subject     string            `json:"subject"`
+	Dimension   string            `json:"dimension"` // '' for the overall score alone
+	Polarity    int               `json:"polarity"`  // +1 | -1 | 0
+	Score       int               `json:"score"`     // the visit's 1~5
+	Detail      string            `json:"detail,omitempty"`
+	Context     map[string]string `json:"context,omitempty"` // with, season, weekday
+	Source      string            `json:"source"`            // the review intent
+	At          time.Time         `json:"at"`
+}
+
+// Attribute is what a subject is like on a dimension, from its observations.
+type Attribute struct {
+	SubjectType string  `json:"subjectType"`
+	Subject     string  `json:"subject"`
+	Dimension   string  `json:"dimension"`
+	Value       float64 `json:"value"` // mean polarity, −1~1
+	Count       int     `json:"count"`
+}
+
+// Preference is what the operator is like, drawn from several subjects
+// ("소음에 민감하다"): estimated until confirmed, never asked again once
+// turned down.
+type Preference struct {
+	Dimension  string    `json:"dimension"`
+	Polarity   int       `json:"polarity"` // −1: minds it when bad; +1: seeks it
+	Scope      string    `json:"scope,omitempty"`
+	Status     string    `json:"status"`   // estimated | confirmed | rejected
+	Subjects   []string  `json:"subjects"` // the different places it rests on
+	Counter    []string  `json:"counter,omitempty"`
+	Confidence float64   `json:"confidence"`
+	Why        string    `json:"why,omitempty"`
+	UpdatedAt  time.Time `json:"updatedAt"`
+}
+
 // Evidence is the line of an observation a belief rests on. Ref names the
 // observed message; Quote is the words, which must appear in it.
 type Evidence struct {
@@ -320,6 +360,9 @@ type Intent struct {
 	// Card is whether a card went out for it (mind.card): what the agent
 	// shows and the operator answers.
 	Card bool `json:"card,omitempty"`
+	// Fields make its card a form - a question to answer, not only approve.
+	// The answers come back in the payload's "answers".
+	Fields []Field `json:"fields,omitempty"`
 
 	Decision  string `json:"decision"`            // execute | notify | ask | digest | drop
 	Why       string `json:"why,omitempty"`       // why the gate decided so
@@ -352,6 +395,17 @@ const (
 	Superseded = "superseded"
 	Failed     = "failed"
 )
+
+// Field is one question on a form card.
+type Field struct {
+	Key      string   `json:"key"`
+	Label    string   `json:"label"`
+	Kind     string   `json:"kind"` // select | multi | text | textarea | number
+	Value    string   `json:"value,omitempty"`
+	Options  []string `json:"options,omitempty"`
+	Required bool     `json:"required,omitempty"`
+	Hint     string   `json:"hint,omitempty"`
+}
 
 // ContextKey is the intent's situation for learning: Context, or the kind.
 func (in Intent) ContextKey() string {

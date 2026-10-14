@@ -29,6 +29,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
 	"github.com/choigonyok/jarvis/mind-svc/internal/predict"
+	"github.com/choigonyok/jarvis/mind-svc/internal/prefs"
 	"github.com/choigonyok/jarvis/mind-svc/internal/reflect"
 	"github.com/choigonyok/jarvis/mind-svc/internal/self"
 	"github.com/choigonyok/jarvis/mind-svc/internal/skill"
@@ -81,6 +82,7 @@ type Mind struct {
 	Self     *self.Self
 	Predict  *predict.Predictor
 	Reflect  *reflect.Reflector
+	Prefs    *prefs.Prefs
 	// nightly and mornings are further steps of the night and the morning,
 	// in order.
 	nightly  []func(ctx context.Context) error
@@ -129,10 +131,15 @@ func New(o Options) *Mind {
 	}
 	acts := act.NewRegistry(act.CalendarActuator{Cal: o.Calendar}, act.Note{},
 		act.SettleActuator{Drafts: drafter}, act.PhotosActuator{Photos: photos}, act.CartActuator{Jobs: jobs},
-		act.DraftActuator{Drafts: drafter})
+		act.DraftActuator{Drafts: drafter}, act.ReviewActuator{})
 	m.Gate = gate.New(o.Store, acts, notifier, o.Log, o.Policy, o.Loc, o.Now, o.URL, o.Logger)
-	m.Gate.OnDecide = m.learn
+	m.Prefs = &prefs.Prefs{St: o.Store, LLM: o.LLM, Now: o.Now}
+	m.Gate.OnDecide = func(ctx context.Context, in model.Intent) {
+		m.learn(ctx, in)
+		m.answered(ctx, in)
+	}
 	m.mornings = append(m.mornings, m.people, m.gift)
+	m.nightly = append(m.nightly, m.expireQuestions, m.statedPreferences)
 	m.Skills = []skill.Skill{skill.Schedule{}, skill.Loops{}, skill.Brief{}, skill.After{}}
 	m.Attn = attention.New(m.Skills, m.World, o.Store, m.Gate, o.Settle, o.Loc, o.Now, o.Logger)
 	m.Link.OnLink = m.Attn.OnLink
@@ -200,6 +207,7 @@ func (m *Mind) Run(ctx context.Context, every time.Duration) {
 	go m.Link.Run(ctx, every)
 	go m.nights(ctx, 30*time.Second)
 	go m.daily(ctx, 30*time.Second, "tick:predict", morningAt, m.Morning)
+	go m.daily(ctx, 30*time.Second, "tick:review", reviewAt, m.reviews)
 	if m.Remember != nil {
 		go m.Remember.Run(ctx, 15*time.Second)
 	}

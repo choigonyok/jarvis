@@ -294,17 +294,25 @@ func (r *Runner) situation() string {
 	}
 	defer resp.Body.Close()
 	var now struct {
-		Text string `json:"text"`
+		Text  string `json:"text"`
+		Prefs string `json:"prefs"`
 	}
 	if resp.StatusCode >= 300 || json.NewDecoder(resp.Body).Decode(&now) != nil || strings.TrimSpace(now.Text) == "" {
 		return ""
 	}
 	text := "\n\n" + situationRules + "\n" + now.Text
+	if strings.TrimSpace(now.Prefs) != "" {
+		text += "\n\n" + prefsRules + "\n" + now.Prefs
+	}
 	r.mu.Lock()
 	r.nowText, r.nowAt = text, time.Now()
 	r.mu.Unlock()
 	return text
 }
+
+const prefsRules = `알고 있는 취향 (회고 카드와 운영자의 말에서. 장소·가게·숙소를 고를 때 쓰세요)
+- 썼으면 근거를 한 줄로 밝히세요. 예: "조용한 곳 위주로 골랐어요 (지난 캠핑장 2곳에서 소음 지적)".
+- 추정은 확정처럼 말하지 말고, 범위("가족과 갈 때")가 있으면 그때만 쓰세요.`
 
 // situationFresh is how long one reading of the situation is reused.
 const situationFresh = 30 * time.Second
