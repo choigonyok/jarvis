@@ -46,9 +46,38 @@ func (r *Registry) For(kind string) (Actuator, bool) {
 	return a, ok
 }
 
+// Note is a suggestion with nothing to run: a plan for the operator to
+// carry out (rebalance this much, order that). Approving it records that it
+// was seen and agreed; undoing it takes that back. Payments, orders and
+// messages stay here - outside what the assistant does by itself.
+type Note struct{}
+
+func (Note) Kinds() []string { return []string{"note"} }
+
+func (Note) Preview(_ context.Context, _ string, payload json.RawMessage) (string, error) {
+	var p struct {
+		Plan string `json:"plan"`
+	}
+	_ = json.Unmarshal(payload, &p)
+	if strings.TrimSpace(p.Plan) == "" {
+		return "실행하는 것 없이 확인만 기록합니다", nil
+	}
+	return "실행하는 것 없이 확인만 기록합니다 · " + p.Plan, nil
+}
+
+func (Note) Execute(context.Context, string, json.RawMessage) (json.RawMessage, json.RawMessage, error) {
+	return json.RawMessage(`{}`), json.RawMessage(`{"op":"none"}`), nil
+}
+
+func (Note) Undo(context.Context, string, json.RawMessage) (json.RawMessage, error) {
+	return json.RawMessage(`{}`), nil
+}
+
 // Calendar is where entries live: calendar-svc in the stack, a map on a
 // laptop.
 type Calendar interface {
+	// Range is the entries from one day to another, both inclusive.
+	Range(ctx context.Context, from, to string) ([]model.CalendarEvent, error)
 	Get(ctx context.Context, id string) (model.CalendarEvent, error)
 	Put(ctx context.Context, e model.CalendarEvent) (model.CalendarEvent, error)
 	Delete(ctx context.Context, id string) (model.CalendarEvent, error)
@@ -67,7 +96,38 @@ type calendarUndo struct {
 	Event model.CalendarEvent `json:"event"`
 }
 
-func (c CalendarActuator) Preview(_ context.Context, kind string, payload json.RawMessage) (string, error) {
+// Already is an action whose result is already there: the gate records it
+// as done, with ID as its result, and asks nobody.
+type Already struct {
+	ID   string
+	Line string
+}
+
+func (a *Already) Error() string { return "이미 있습니다: " + a.Line }
+
+// existing is an entry on the same day whose title is the event's, or holds
+// it, or is held by it.
+func (c CalendarActuator) existing(ctx context.Context, e model.CalendarEvent) (model.CalendarEvent, bool) {
+	to := e.Date
+	if e.EndDate != "" {
+		to = e.EndDate
+	}
+	evs, err := c.Cal.Range(ctx, e.Date, to)
+	if err != nil {
+		return model.CalendarEvent{}, false
+	}
+	norm := func(s string) string { return strings.Join(strings.Fields(s), "") }
+	want := norm(e.Title)
+	for _, x := range evs {
+		got := norm(x.Title)
+		if x.Date == e.Date && want != "" && got != "" && (got == want || strings.Contains(got, want) || strings.Contains(want, got)) {
+			return x, true
+		}
+	}
+	return model.CalendarEvent{}, false
+}
+
+func (c CalendarActuator) Preview(ctx context.Context, kind string, payload json.RawMessage) (string, error) {
 	var a model.CalendarAction
 	if err := json.Unmarshal(payload, &a); err != nil {
 		return "", err
@@ -79,6 +139,13 @@ func (c CalendarActuator) Preview(_ context.Context, kind string, payload json.R
 	}
 	if kind != "calendar.create" && a.EventID == "" {
 		return "", errors.New("어느 일정인지(eventId)가 필요합니다")
+	}
+	if kind == "calendar.create" {
+		// Put there already - by hand, or before this loop was the one that
+		// asked: link to it rather than ask to add it twice.
+		if same, ok := c.existing(ctx, a.Event); ok {
+			return "", &Already{ID: same.ID, Line: same.Date + " " + same.Title}
+		}
 	}
 	line := a.Event.Date
 	if a.Event.Start != "" {
@@ -175,6 +242,18 @@ func NewMemoryCalendar() *MemoryCalendar {
 	return &MemoryCalendar{evs: map[string]model.CalendarEvent{}}
 }
 
+func (m *MemoryCalendar) Range(_ context.Context, from, to string) ([]model.CalendarEvent, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []model.CalendarEvent
+	for _, e := range m.evs {
+		if e.Date >= from && e.Date <= to {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
 func (m *MemoryCalendar) Get(_ context.Context, id string) (model.CalendarEvent, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -223,6 +302,13 @@ type HTTPCalendar struct {
 	URL   string
 	Token string
 	HTTP  *http.Client
+}
+
+func (h HTTPCalendar) Range(ctx context.Context, from, to string) ([]model.CalendarEvent, error) {
+	var out struct {
+		Events []model.CalendarEvent `json:"events"`
+	}
+	return out.Events, h.do(ctx, http.MethodGet, "/events?from="+from+"&to="+to, nil, &out)
 }
 
 func (h HTTPCalendar) Get(ctx context.Context, id string) (model.CalendarEvent, error) {
@@ -309,6 +395,9 @@ func (m *MemoryNotifier) Notify(_ context.Context, n Notice) {
 		m.all = m.all[len(m.all)-100:]
 	}
 }
+
+// Local: with no agent to show cards, the console shows them as notices.
+func (m *MemoryNotifier) Local() bool { return true }
 
 func (m *MemoryNotifier) All() []Notice {
 	m.mu.Lock()

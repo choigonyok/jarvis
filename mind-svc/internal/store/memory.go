@@ -23,6 +23,7 @@ type Memory struct {
 	cursors  map[string]int64
 	facts    map[string]model.Fact
 	aliases  map[string]model.Alias
+	policy   map[[2]string]model.PolicyStat
 	seq      int64
 }
 
@@ -35,6 +36,7 @@ func NewMemory() *Memory {
 		cursors:  map[string]int64{},
 		facts:    map[string]model.Fact{},
 		aliases:  map[string]model.Alias{},
+		policy:   map[[2]string]model.PolicyStat{},
 	}
 }
 
@@ -388,4 +390,58 @@ func sortMessages(ms []model.Message) {
 		}
 		return ms[i].SentAt.Before(ms[j].SentAt)
 	})
+}
+
+func (m *Memory) Policy(_ context.Context, skill, context string) (model.PolicyStat, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.policy[[2]string{skill, context}]
+	if !ok {
+		return model.PolicyStat{Skill: skill, Context: context}, nil
+	}
+	return p, nil
+}
+
+func (m *Memory) Policies(_ context.Context) ([]model.PolicyStat, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]model.PolicyStat, 0, len(m.policy))
+	for _, p := range m.policy {
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Skill+out[i].Context < out[j].Skill+out[j].Context })
+	return out, nil
+}
+
+func (m *Memory) CountPolicy(_ context.Context, skill, context, outcome string, at time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	k := [2]string{skill, context}
+	p, ok := m.policy[k]
+	if !ok {
+		p = model.PolicyStat{Skill: skill, Context: context}
+	}
+	switch outcome {
+	case model.OutcomeShown:
+		p.Shown++
+	case model.OutcomeApproved:
+		p.Approved++
+		p.Last = outcome
+	case model.OutcomeRejected:
+		p.Rejected++
+		p.Last = outcome
+	case model.OutcomeUndone:
+		p.Undone++
+		p.Last = outcome
+	}
+	p.UpdatedAt = at
+	m.policy[k] = p
+	return nil
+}
+
+func (m *Memory) ResetPolicy(context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.policy = map[[2]string]model.PolicyStat{}
+	return nil
 }

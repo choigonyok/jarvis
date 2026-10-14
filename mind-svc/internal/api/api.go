@@ -10,7 +10,9 @@
 //	POST /api/settle                  hand settling changes to the skills now
 //	POST /api/tick                    {name: "morning"}
 //	POST /api/clock                   {advance: "25h"} move a memory-mode clock (tests the timers)
-//	POST /api/intents/{id}/{approve|reject|undo}
+//	POST /api/intents                 {skill, kind, topic, title, body, reason, confidence, payload} an intent from outside
+//	POST /api/intents/{id}/{approve|reject|undo}   reject takes {reason}
+//	POST /api/policy/rebuild          recount approval stats from the intents
 //	GET  /api/entities/{id}/changes   an entity's history, with evidence
 //	POST /api/replay                  {after, limit} the log through a fresh loop, in memory
 //	GET  /api/recall?q=&person=       what is known: world model + long-term memory
@@ -90,7 +92,9 @@ func (s *Server) Handler() http.Handler {
 	}))
 	mux.HandleFunc("POST /api/tick", s.auth(false, s.tick))
 	mux.HandleFunc("POST /api/clock", s.auth(false, s.moveClock))
+	mux.HandleFunc("POST /api/intents", s.auth(false, s.submit))
 	mux.HandleFunc("POST /api/intents/{id}/{action}", s.auth(false, s.decide))
+	mux.HandleFunc("POST /api/policy/rebuild", s.auth(false, s.rebuildPolicy))
 	mux.HandleFunc("GET /api/entities/{id}/changes", s.auth(false, s.changes))
 	mux.HandleFunc("POST /api/replay", s.auth(false, s.replay))
 	mux.HandleFunc("GET /api/recall", s.auth(false, s.recall))
@@ -280,6 +284,41 @@ func (s *Server) moveClock(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]time.Time{"now": s.clock.Advance(d)})
 }
 
+// submit takes an intent from outside the loop - the agent's judging turn
+// over an event mind does not read (a portfolio out of band) - and hands it
+// to the same gate every skill's intent goes through: one ledger, one
+// budget, one way a card reaches the operator.
+func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
+	var in model.Intent
+	if !readJSON(w, r, &in) {
+		return
+	}
+	in.Title, in.Body = strings.TrimSpace(in.Title), strings.TrimSpace(in.Body)
+	if in.Skill == "" || in.Kind == "" || in.Title == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "skill, kind, title 이 필요합니다."})
+		return
+	}
+	in.Skill = "ext:" + strings.TrimPrefix(in.Skill, "ext:")
+	in.Decision, in.Status, in.Card, in.Tier, in.Result, in.Undo, in.Error = "", "", false, "", nil, nil, ""
+	out, err := s.m.Gate.Submit(r.Context(), in)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusCreated, out)
+}
+
+// rebuildPolicy recounts the approval stats from the intents they are
+// derived from.
+func (s *Server) rebuildPolicy(w http.ResponseWriter, r *http.Request) {
+	n, err := s.m.Gate.Rebuild(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"intents": n})
+}
+
 func (s *Server) decide(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var in model.Intent
@@ -288,7 +327,11 @@ func (s *Server) decide(w http.ResponseWriter, r *http.Request) {
 	case "approve":
 		in, err = s.m.Gate.Approve(r.Context(), id)
 	case "reject":
-		in, err = s.m.Gate.Reject(r.Context(), id)
+		var body struct {
+			Reason string `json:"reason"`
+		}
+		_ = json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&body)
+		in, err = s.m.Gate.RejectWhy(r.Context(), id, strings.TrimSpace(body.Reason))
 	case "undo":
 		in, err = s.m.Gate.Undo(r.Context(), id)
 	default:

@@ -116,6 +116,22 @@ type Intent struct {
 	Evidence   []Evidence      `json:"evidence,omitempty"`
 	Reversible bool            `json:"reversible"`
 	Urgent     bool            `json:"urgent,omitempty"`
+	// Topic is what the intent is about for the gate's ledger: an intent on
+	// a topic turned down, approved or raised lately is not raised again.
+	// Empty: the entity is the topic, and a newer intent about it replaces
+	// an unanswered one instead.
+	Topic string `json:"topic,omitempty"`
+	// Context is the situation the gate learns approval rates under, with
+	// the skill: (schedule, calendar.create) is one, (prep, 캠핑) another.
+	// Empty: the kind.
+	Context string `json:"context,omitempty"`
+	// Value is how much it is worth to the operator to be told, 0~1 (0:
+	// the default, 1). A card is raised only if confidence × approval rate
+	// × value is worth the interruption.
+	Value float64 `json:"value,omitempty"`
+	// Card is whether a card went out for it (mind.card): what the agent
+	// shows and the operator answers.
+	Card bool `json:"card,omitempty"`
 
 	Decision  string `json:"decision"`            // execute | notify | ask | digest | drop
 	Why       string `json:"why,omitempty"`       // why the gate decided so
@@ -147,6 +163,42 @@ const (
 	Dropped    = "dropped"
 	Superseded = "superseded"
 	Failed     = "failed"
+)
+
+// ContextKey is the intent's situation for learning: Context, or the kind.
+func (in Intent) ContextKey() string {
+	if in.Context != "" {
+		return in.Context
+	}
+	return in.Kind
+}
+
+// PolicyStat is how one (skill, context) has gone: cards shown, and what the
+// operator did with them. Derived from the intents; kept so a decision does
+// not count the whole history again.
+type PolicyStat struct {
+	Skill     string    `json:"skill"`
+	Context   string    `json:"context"`
+	Shown     int       `json:"shown"`
+	Approved  int       `json:"approved"`
+	Rejected  int       `json:"rejected"`
+	Undone    int       `json:"undone"`
+	Last      string    `json:"last,omitempty"` // approved | rejected | undone
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// Rate is the approval rate with a uniform prior: (approved+1)/(decided+2),
+// so a context nobody answered yet reads 0.5, not 0 or 1.
+func (p PolicyStat) Rate() float64 {
+	return float64(p.Approved+1) / float64(p.Approved+p.Rejected+p.Undone+2)
+}
+
+// Outcomes of an intent the stats count.
+const (
+	OutcomeShown    = "shown"
+	OutcomeApproved = "approved"
+	OutcomeRejected = "rejected"
+	OutcomeUndone   = "undone"
 )
 
 // Timer is a skill asking to look at an entity again at a time.

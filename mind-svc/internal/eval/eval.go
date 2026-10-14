@@ -53,6 +53,11 @@ type Turn struct {
 	Undo     string `json:"undo,omitempty"`    // the latest executed intent of this kind
 	Advance  string `json:"advance,omitempty"` // move the clock, firing timers
 	Tick     string `json:"tick,omitempty"`
+	// Submit is an intent from outside the loop (the agent's judging turn),
+	// handed to the gate as POST /api/intents would.
+	Submit *model.Intent `json:"submit,omitempty"`
+	// At pins the clock before the turn runs (2026-10-12T20:01).
+	At string `json:"at,omitempty"`
 	// Script is what the model should answer to this turn's reading, for the
 	// deterministic run.
 	Script json.RawMessage `json:"script,omitempty"`
@@ -84,6 +89,13 @@ type Expect struct {
 	// Ended: for each word, memory has ended a fact with it in, as a result
 	// of a fact mind sent.
 	Ended []string `json:"ended,omitempty"`
+	// Cards: cards raised this turn (mind.card, what reaches the operator),
+	// each matched by a word in its title; NoCards: none at all.
+	Cards     []string `json:"cards,omitempty"`
+	CardCount *int     `json:"cardCount,omitempty"`
+	NoCards   bool     `json:"noCards,omitempty"`
+	// Dropped: kinds the gate dropped this turn (the ledger kept quiet).
+	Dropped []string `json:"dropped,omitempty"`
 }
 
 // FactMatch is a partial description of a fact; empty fields match anything.
@@ -204,7 +216,16 @@ func Run(ctx context.Context, sc Scenario, client llm.Client, loc *time.Location
 	}
 	room := "sim:" + sc.Room
 
+	var logSeen int64
 	for i, t := range sc.Turns {
+		if t.At != "" {
+			at, err := time.ParseInLocation("2006-01-02T15:04", t.At, loc)
+			if err != nil {
+				fail(i, "시각 %q 을 읽지 못함", t.At)
+				return res
+			}
+			clk.Pin(at)
+		}
 		before, _ := st.Intents(ctx, 10000)
 		seen := map[string]bool{}
 		for _, in := range before {
@@ -264,11 +285,32 @@ func Run(ctx context.Context, sc Scenario, client llm.Client, loc *time.Location
 			clk.Advance(d)
 		case t.Tick != "":
 			m.Attn.Tick(ctx, t.Tick)
+		case t.Submit != nil:
+			in := *t.Submit
+			if in.Skill == "" {
+				in.Skill = "ext:suggest"
+			}
+			if _, err := m.Gate.Submit(ctx, in); err != nil {
+				fail(i, "%v", err)
+			}
 		}
 		quiesce()
+		var cards []gate.Card
+		obsAll, _ := log.Read(ctx, logSeen, 100000)
+		for _, o := range obsAll {
+			logSeen = o.ID
+			if o.Type == gate.CardRaised {
+				var c gate.Card
+				_ = json.Unmarshal(o.Data, &c)
+				cards = append(cards, c)
+			}
+		}
 
 		if t.Expect != nil {
 			for _, f := range check(ctx, st, cal, *t.Expect, seen) {
+				fail(i, "%s", f)
+			}
+			for _, f := range checkCards(ctx, st, *t.Expect, seen, cards) {
 				fail(i, "%s", f)
 			}
 		}
@@ -475,4 +517,38 @@ func summary(es []model.Entity) string {
 		parts = append(parts, p+"]")
 	}
 	return strings.Join(parts, " ")
+}
+
+func checkCards(ctx context.Context, st store.Store, ex Expect, seen map[string]bool, cards []gate.Card) []string {
+	var out []string
+	titles := make([]string, len(cards))
+	for i, c := range cards {
+		titles[i] = c.Title
+	}
+	if ex.NoCards && len(cards) > 0 {
+		out = append(out, fmt.Sprintf("카드가 없어야 함 · 나온 것: %v", titles))
+	}
+	if ex.CardCount != nil && len(cards) != *ex.CardCount {
+		out = append(out, fmt.Sprintf("카드 %d개여야 하는데 %d개: %v", *ex.CardCount, len(cards), titles))
+	}
+	for _, w := range ex.Cards {
+		if !slices.ContainsFunc(titles, func(t string) bool { return strings.Contains(t, w) }) {
+			out = append(out, fmt.Sprintf("%q 카드가 나와야 함 · 나온 것: %v", w, titles))
+		}
+	}
+	if len(ex.Dropped) > 0 {
+		intents, _ := st.Intents(ctx, 10000)
+		var dropped []string
+		for _, in := range intents {
+			if !seen[in.ID] && in.Status == model.Dropped {
+				dropped = append(dropped, in.Kind)
+			}
+		}
+		for _, k := range ex.Dropped {
+			if !slices.Contains(dropped, k) {
+				out = append(out, fmt.Sprintf("관문이 %s 를 버렸어야 함 · 버린 것: %v", k, dropped))
+			}
+		}
+	}
+	return out
 }

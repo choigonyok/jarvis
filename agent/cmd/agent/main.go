@@ -28,6 +28,7 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/module/calendar"
 	"github.com/choigonyok/jarvis/agent/internal/module/jobs"
 	"github.com/choigonyok/jarvis/agent/internal/module/memory"
+	mindmod "github.com/choigonyok/jarvis/agent/internal/module/mind"
 	"github.com/choigonyok/jarvis/agent/internal/module/spending"
 	"github.com/choigonyok/jarvis/agent/internal/notify"
 	"github.com/choigonyok/jarvis/agent/internal/suggest"
@@ -130,6 +131,16 @@ func main() {
 		cfg.ModuleMCPURLs[memory.ServerName] = cfg.PublicMCPURL + "/" + memory.ServerName
 	}
 
+	// mind-svc's gate: its cards become approval cards here, and approving
+	// one is this module asking mind to do it. The guest has no mind.
+	var mindClient *mindmod.Client
+	if cfg.MindURL != "" && !cfg.Guest {
+		mindModule := mindmod.New(mindmod.Client{URL: cfg.MindURL, Token: cfg.APIToken})
+		modules.Add(mindModule)
+		c := mindModule.Client()
+		mindClient = &c
+	}
+
 	startCtx, cancelStart := context.WithTimeout(context.Background(), 10*time.Second)
 	if err := modules.Start(startCtx); err != nil {
 		cancelStart()
@@ -186,8 +197,9 @@ func main() {
 		}
 		suggester = suggest.New(ledger, proposals, modules, runner, suggest.Config{
 			MCPBase: cfg.PublicMCPURL, EventsURL: cfg.EventsURL, Token: cfg.APIToken,
-			Out: notify.New(cfg.EventsURL, cfg.DatabaseURL, cfg.APIToken, log),
-			Say: func(lead, id string) { transcript.Raise([]string{lead}, id) },
+			Out:  notify.New(cfg.EventsURL, cfg.DatabaseURL, cfg.APIToken, log),
+			Say:  func(lead, id string) { transcript.Raise([]string{lead}, id) },
+			Mind: mindClient,
 		}, log)
 		mcpMounts["/mcp/"+suggest.ServerName] = suggester.Handler()
 		proposals.OnDecide(suggester.OnDecide)

@@ -107,13 +107,9 @@ func TestTriage(t *testing.T) {
 	if topic, _, ok := triage(Event{Type: "assets.band"}); !ok || topic != "rebalance" {
 		t.Fatalf("assets.band: %q %v", topic, ok)
 	}
-	if _, _, ok := triage(Event{Type: "memory.plan", Data: json.RawMessage(`{"fact":""}`)}); ok {
-		t.Fatal("빈 약속이 통과했습니다")
-	}
-	a, _, _ := triage(Event{Type: "memory.plan", Data: json.RawMessage(`{"fact":"친구와 토요일 저녁 약속"}`)})
-	b, _, _ := triage(Event{Type: "memory.plan", Data: json.RawMessage(`{"fact":"친구와 토요일 저녁 약속"}`)})
-	if !strings.HasPrefix(a, "plan:") || a != b {
-		t.Fatalf("같은 약속은 같은 주제여야 합니다: %q %q", a, b)
+	// mind reads the conversations now; memory-svc's plan events are not judged.
+	if _, _, ok := triage(Event{Type: "memory.plan", Data: json.RawMessage(`{"fact":"친구와 토요일 저녁 약속"}`)}); ok {
+		t.Fatal("memory.plan 이 통과했습니다")
 	}
 	if _, _, ok := triage(Event{Type: "spending.big"}); ok {
 		t.Fatal("구독하지 않은 종류가 통과했습니다")

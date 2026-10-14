@@ -171,6 +171,33 @@ func facts(t *testing.T, st Store) {
 func TestMemory(t *testing.T) {
 	contract(t, NewMemory())
 	facts(t, NewMemory())
+	policy(t, NewMemory())
+}
+
+// policy: counts per (skill, context), the last answer, and a reset.
+func policy(t *testing.T, st Store) {
+	ctx := context.Background()
+	at := time.Date(2026, 10, 12, 20, 0, 0, 0, time.UTC)
+	for _, o := range []string{model.OutcomeShown, model.OutcomeApproved, model.OutcomeShown, model.OutcomeRejected, model.OutcomeShown} {
+		if err := st.CountPolicy(ctx, "schedule", "calendar.create", o, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p, err := st.Policy(ctx, "schedule", "calendar.create")
+	if err != nil || p.Shown != 3 || p.Approved != 1 || p.Rejected != 1 || p.Last != model.OutcomeRejected {
+		t.Fatalf("승인율 통계: %+v %v", p, err)
+	}
+	if none, _ := st.Policy(ctx, "x", "y"); none.Shown != 0 || none.Rate() != 0.5 {
+		t.Fatalf("처음 보는 맥락: %+v", none)
+	}
+	all, _ := st.Policies(ctx)
+	if len(all) != 1 {
+		t.Fatalf("목록: %+v", all)
+	}
+	_ = st.ResetPolicy(ctx)
+	if all, _ := st.Policies(ctx); len(all) != 0 {
+		t.Fatalf("비워야 합니다: %+v", all)
+	}
 }
 
 // Against a throwaway Postgres with migrations 035 and 038 applied:
@@ -185,13 +212,14 @@ func TestPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	if _, err := pool.Exec(context.Background(), `truncate mind_messages, mind_rooms, mind_entities, mind_changes, mind_timers, mind_intents, mind_cursors, mind_facts, mind_aliases restart identity cascade`); err != nil {
+	if _, err := pool.Exec(context.Background(), `truncate mind_messages, mind_rooms, mind_entities, mind_changes, mind_timers, mind_intents, mind_cursors, mind_facts, mind_aliases, mind_policy_stats restart identity cascade`); err != nil {
 		t.Fatal(err)
 	}
 	key := make([]byte, 32)
 	st := NewPostgres(pool, key)
 	contract(t, st)
 	facts(t, st)
+	policy(t, st)
 	var sealed bool
 	var body []byte
 	_ = pool.QueryRow(context.Background(), `select sealed, body from mind_messages where ref = 'sim:1'`).Scan(&sealed, &body)

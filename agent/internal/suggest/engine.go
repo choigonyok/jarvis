@@ -13,8 +13,6 @@ package suggest
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -30,15 +28,19 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/core/action"
 	"github.com/choigonyok/jarvis/agent/internal/core/module"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
+	"github.com/choigonyok/jarvis/agent/internal/module/mind"
 	"github.com/choigonyok/jarvis/agent/internal/notify"
 )
 
 // ServerName is the MCP server the judging turn proposes through.
 const ServerName = "suggest"
 
-// Types is what the assistant subscribes to - the events a rule below knows
-// how to turn into a topic.
-var Types = []string{"assets.band", "memory.plan"}
+// Types is what the assistant subscribes to: the events a rule below knows
+// how to turn into a topic, and mind's cards - mind-svc's gate is the one
+// that decides what reaches the operator, and this is where its questions
+// become approval cards. (memory.plan is gone: mind reads the conversations,
+// and its schedule skill raises the calendar card itself.)
+var Types = []string{"assets.band", mind.CardRaised, mind.CardClosed}
 
 // Event is one event as events-svc delivers it.
 type Event struct {
@@ -71,6 +73,11 @@ type Config struct {
 	// on why: there it stays, approved or rejected, instead of floating
 	// below the transcript only while it waits. Nil leaves it floating.
 	Say func(lead string, proposalID string)
+	// Mind is mind-svc's gate. With it, what the judging turn proposes is
+	// submitted there - one ledger, one budget, one trust level for every
+	// card - and comes back as a mind.card if it should ring. Nil: the
+	// judging turn opens its cards itself (no mind running).
+	Mind *mind.Client
 }
 
 type Engine struct {
@@ -121,21 +128,6 @@ func triage(ev Event) (topic, brief string, ok bool) {
 		}
 		// One topic for the whole allocation: a rebalance is one plan, not one per bucket.
 		return "rebalance", brief, true
-	case "memory.plan":
-		var d struct {
-			Fact    string `json:"fact"`
-			ValidAt string `json:"validAt"`
-			Source  string `json:"source"`
-		}
-		if json.Unmarshal(ev.Data, &d) != nil || strings.TrimSpace(d.Fact) == "" {
-			return "", "", false
-		}
-		sum := sha256.Sum256([]byte(d.Fact))
-		brief = fmt.Sprintf("%s에서 약속·계획이 나왔다: %q", d.Source, d.Fact)
-		if d.ValidAt != "" {
-			brief += " (기억이 붙인 때: " + d.ValidAt + ")"
-		}
-		return "plan:" + hex.EncodeToString(sum[:6]), brief, true
 	}
 	return "", "", false
 }
@@ -147,6 +139,16 @@ func (e *Engine) Consume(w http.ResponseWriter, r *http.Request) {
 	var ev Event
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10)).Decode(&ev); err != nil {
 		http.Error(w, "JSON 을 읽지 못했습니다", http.StatusBadRequest)
+		return
+	}
+	switch ev.Type {
+	case mind.CardRaised:
+		e.raiseCard(ev)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	case mind.CardClosed:
+		e.closeCard(ev)
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	topic, brief, ok := triage(ev)
@@ -347,6 +349,9 @@ func (e *Engine) propose(ctx context.Context, in ProposeInput) (string, error) {
 		kind = in.Action
 	}
 	now := e.now()
+	if e.cfg.Mind != nil {
+		return e.submit(ctx, j, in, kind, input, now)
+	}
 	e.mu.Lock()
 	j.proposed = true
 	e.mu.Unlock()
@@ -393,6 +398,124 @@ func (e *Engine) propose(ctx context.Context, in ProposeInput) (string, error) {
 	return "카드를 올렸습니다.", nil
 }
 
+// submit hands what the judging turn proposes to mind's gate, which decides
+// whether it rings (a mind.card comes back), waits for the evening, or is
+// dropped as a topic raised or turned down lately.
+func (e *Engine) submit(ctx context.Context, j *job, in ProposeInput, kind string, input json.RawMessage, now time.Time) (string, error) {
+	intent := map[string]any{
+		"skill": "suggest", "kind": "note", "topic": j.topic, "context": strings.SplitN(j.topic, ":", 2)[0],
+		"title": in.Title, "body": in.Body, "reason": strings.TrimSpace(in.Why), "confidence": in.Confidence,
+		"payload": map[string]any{"plan": in.Body},
+	}
+	if kind == "calendar.create_event" {
+		var c struct {
+			Date, Title, Start, Place string
+			Shared                    bool
+		}
+		_ = json.Unmarshal(input, &c)
+		owner := "me"
+		if c.Shared {
+			owner = "shared"
+		}
+		intent["kind"] = "calendar.create"
+		intent["reversible"] = true
+		intent["payload"] = map[string]any{"event": map[string]any{"title": c.Title, "date": c.Date, "start": c.Start, "place": c.Place, "owner": owner, "memo": "jarvis 제안"}}
+	} else {
+		intent["reversible"] = true // a note runs nothing
+	}
+	got, err := e.cfg.Mind.Submit(ctx, intent)
+	if err != nil {
+		return "", fmt.Errorf("mind 관문에 넘기지 못했습니다: %w", err)
+	}
+	e.mu.Lock()
+	j.proposed = true
+	e.mu.Unlock()
+	e.ledger.Record(j.topic, "", in.Title, now)
+	switch {
+	case got.Card:
+		return "mind 관문이 카드로 올렸습니다.", nil
+	case got.Decision == "drop":
+		return "mind 관문이 올리지 않았습니다: " + got.Why, nil
+	default:
+		return "mind 관문이 저녁 요약으로 미뤘습니다: " + got.Why, nil
+	}
+}
+
+// raiseCard opens an approval card for a question mind's gate decided
+// should reach the operator. A card mind sent before (a redelivery) is not
+// opened twice.
+func (e *Engine) raiseCard(ev Event) {
+	var c mind.Card
+	if json.Unmarshal(ev.Data, &c) != nil || c.IntentID == "" {
+		return
+	}
+	if _, ok := e.findCard(c.IntentID); ok {
+		return
+	}
+	kind := mind.Approve
+	if c.Mode == "undo" {
+		kind = mind.Undo
+	}
+	input, _ := json.Marshal(mind.Input{IntentID: c.IntentID})
+	p, _ := e.proposals.Open(proposal.Proposal{
+		Origin: proposal.OriginSuggest, Action: action.Action{Kind: kind, Input: input},
+		Card: mind.CardText(c), Confidence: c.Confidence,
+	})
+	if e.cfg.Say != nil {
+		lead := strings.TrimSpace(c.Reason)
+		if c.Mode == "undo" {
+			lead = "믿고 맡기신 일이라 먼저 했어요. 아니면 되돌릴게요."
+		}
+		if lead == "" {
+			lead = "먼저 여쭤볼게요."
+		}
+		e.cfg.Say(lead, p.ID)
+	}
+	e.emit(map[string]any{
+		"source": "agent", "type": "suggestion.raised", "subject": p.ID,
+		"data": map[string]any{"topic": "mind:" + c.Skill, "proposalId": p.ID, "title": c.Title, "intentId": c.IntentID},
+		"key":  "suggestion:raised:" + p.ID,
+	})
+}
+
+// closeCard settles the card of an intent answered or withdrawn in mind
+// itself (the console, a newer judgement), so it stops asking here.
+func (e *Engine) closeCard(ev Event) {
+	var d struct {
+		IntentID string `json:"intentId"`
+		Status   string `json:"status"`
+	}
+	if json.Unmarshal(ev.Data, &d) != nil {
+		return
+	}
+	p, ok := e.findCard(d.IntentID)
+	if !ok || p.State != proposal.Pending {
+		return
+	}
+	switch d.Status {
+	case "executed", "undone":
+		e.proposals.Settle(p.ID, proposal.Executed, "다른 곳에서 처리했습니다.")
+	case "superseded":
+		e.proposals.Abandon(p.ID, "새 판단으로 바뀌었습니다.")
+	default:
+		e.proposals.Abandon(p.ID, "다른 곳에서 정리했습니다.")
+	}
+}
+
+// findCard is the card of a mind intent, if one was opened.
+func (e *Engine) findCard(intentID string) (proposal.Proposal, bool) {
+	for _, p := range e.proposals.List() {
+		if p.Action.Kind != mind.Approve && p.Action.Kind != mind.Undo {
+			continue
+		}
+		var in mind.Input
+		if json.Unmarshal(p.Action.Input, &in) == nil && in.IntentID == intentID {
+			return p, true
+		}
+	}
+	return proposal.Proposal{}, false
+}
+
 // cardBody is what the card says. The why goes on it only when there is no
 // line in the conversation above it to say so.
 func cardBody(in ProposeInput, preview action.Card, withWhy bool) string {
@@ -411,6 +534,18 @@ func cardBody(in ProposeInput, preview action.Card, withWhy bool) string {
 func (e *Engine) OnDecide(p proposal.Proposal, d proposal.Decision) {
 	if p.Origin != proposal.OriginSuggest {
 		return
+	}
+	if p.Action.Kind == mind.Approve && d == proposal.Reject && e.cfg.Mind != nil {
+		// Approving runs through the module (mind.approve); turning down
+		// is told to mind here, so its gate learns from it.
+		var in mind.Input
+		if json.Unmarshal(p.Action.Input, &in) == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := e.cfg.Mind.Reject(ctx, in.IntentID, p.Note); err != nil {
+				e.log.Warn("mind 에 거절을 알리지 못했습니다", "intent", in.IntentID, "err", err)
+			}
+		}
 	}
 	en, ok := e.ledger.Decide(p.ID, string(d), e.now())
 	if !ok {

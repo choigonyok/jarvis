@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,7 +36,7 @@ func newFixture(p Policy) *fixture {
 }
 
 func create(entity string) model.Intent {
-	payload, _ := json.Marshal(model.CalendarAction{Event: model.CalendarEvent{Title: "저녁", Date: "2026-10-17"}})
+	payload, _ := json.Marshal(model.CalendarAction{Event: model.CalendarEvent{Title: "저녁 " + entity, Date: "2026-10-17"}})
 	return model.Intent{Skill: "schedule", Kind: "calendar.create", EntityID: entity, Payload: payload, Title: "캘린더에 추가", Confidence: 0.9, Reversible: true}
 }
 
@@ -136,5 +137,61 @@ func TestPreviewRejectsBadPayload(t *testing.T) {
 	in, _ := f.g.Submit(context.Background(), model.Intent{Skill: "schedule", Kind: "calendar.create", Payload: json.RawMessage(`{"event":{"title":"x","date":"내일"}}`), Confidence: 1, Reversible: true})
 	if in.Status != model.Failed || len(f.note.All()) != 0 {
 		t.Fatalf("미리보기에서 걸러져야 합니다: %+v", in)
+	}
+}
+
+// A question that rings goes out as one mind.card, and an answer given here
+// closes it; a newer intent closes the one it replaces.
+func TestCardsGoOutAndClose(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(DefaultPolicy())
+	first, _ := f.g.Submit(ctx, create("plan_x"))
+	second, _ := f.g.Submit(ctx, create("plan_x"))
+	if !first.Card || !second.Card {
+		t.Fatalf("카드로 나가야 합니다: %+v %+v", first, second)
+	}
+	if _, err := f.g.RejectWhy(ctx, second.ID, "이미 넣었어"); err != nil {
+		t.Fatal(err)
+	}
+	f.log.Drain()
+	all, _ := f.log.Read(ctx, 0, 100)
+	var got []string
+	for _, o := range all {
+		got = append(got, o.Type+":"+o.Subject)
+	}
+	want := []string{CardRaised + ":" + first.ID, CardClosed + ":" + first.ID, CardRaised + ":" + second.ID, CardClosed + ":" + second.ID}
+	if len(got) != len(want) {
+		t.Fatalf("카드 이벤트: %v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("카드 이벤트: %v", got)
+		}
+	}
+	rej, _ := f.st.Intent(ctx, second.ID)
+	if rej.Error != "이미 넣었어" {
+		t.Fatalf("거절 이유가 남아야 합니다: %+v", rej)
+	}
+	stat, _ := f.st.Policy(ctx, "schedule", "calendar.create")
+	if stat.Shown != 2 || stat.Rejected != 1 || stat.Last != model.OutcomeRejected {
+		t.Fatalf("승인율 통계: %+v", stat)
+	}
+	if n, err := f.g.Rebuild(ctx); err != nil || n != 2 {
+		t.Fatalf("다시 세기: %d %v", n, err)
+	}
+	again, _ := f.st.Policy(ctx, "schedule", "calendar.create")
+	if again.Shown != 2 || again.Rejected != 1 {
+		t.Fatalf("다시 센 통계가 같아야 합니다: %+v", again)
+	}
+}
+
+// An entry already on the calendar is linked, not asked about twice.
+func TestAlreadyOnCalendarIsLinked(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(DefaultPolicy())
+	there, _ := f.cal.Put(ctx, model.CalendarEvent{Title: "저녁 plan_y 약속", Date: "2026-10-17"})
+	in, _ := f.g.Submit(ctx, create("plan_y"))
+	if in.Status != model.Executed || in.Card || len(f.cal.All()) != 1 || !strings.Contains(string(in.Result), there.ID) {
+		t.Fatalf("이미 있는 일정은 연결만: %+v %v", in, f.cal.All())
 	}
 }

@@ -94,6 +94,9 @@ type Config struct {
 	JobsURL string
 	// MemoryURL is memory-svc (the Graphiti knowledge graph).
 	MemoryURL string
+	// MindURL is mind-svc: the one gate every suggestion goes through, and
+	// the world model the conversation is told about. Empty: no mind.
+	MindURL string
 	// Jobs turns on the scheduler. Like Enrich, it needs the browser server.
 	Jobs         bool
 	JobsInterval time.Duration
@@ -184,6 +187,7 @@ func Load() (Config, error) {
 		JobsURL:          env("JARVIS_JOBS_URL", "http://localhost:8098"),
 		// Empty turns long-term memory off: no tool, nothing recalled.
 		MemoryURL:    os.Getenv("JARVIS_MEMORY_URL"),
+		MindURL:      os.Getenv("JARVIS_MIND_URL"),
 		Jobs:         envBool("JARVIS_JOBS", true),
 		JobsInterval: envDuration("JARVIS_JOBS_INTERVAL", 30*time.Second),
 		// Least time between two runs of any job. Sites watch for bots; a

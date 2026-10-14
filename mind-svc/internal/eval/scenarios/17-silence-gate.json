@@ -1,0 +1,30 @@
+{
+  "name": "S11 침묵: 거절한 주제는 다시 묻지 않고, 하루 카드 한도를 넘지 않는다",
+  "room": "gate",
+  "roomName": "관문",
+  "turns": [
+    {
+      "at": "2026-10-13T09:00",
+      "submit": {"kind": "note", "topic": "rebalance", "context": "rebalance", "title": "리밸런싱: 금 비중 3%p 낮음", "body": "금현물 30만 원 적립", "reason": "목표 비중 이탈", "confidence": 0.8, "payload": {"plan": "금현물 30만 원"}},
+      "expect": {"cards": ["리밸런싱"], "cardCount": 1}
+    },
+    { "reject": "note", "expect": {"noCards": true} },
+    {
+      "at": "2026-10-15T09:00",
+      "submit": {"kind": "note", "topic": "rebalance", "context": "rebalance", "title": "리밸런싱: 금 비중 3%p 낮음", "confidence": 0.9, "payload": {}},
+      "expect": {"noCards": true, "dropped": ["note"]}
+    },
+    {
+      "at": "2026-10-28T09:00",
+      "submit": {"kind": "note", "topic": "rebalance", "context": "rebalance", "title": "리밸런싱: 금 비중 4%p 낮음", "confidence": 0.9, "value": 1, "payload": {}},
+      "expect": {"cards": ["리밸런싱"]}
+    },
+    { "at": "2026-11-02T08:00", "submit": {"kind": "note", "topic": "t1", "context": "c1", "title": "제안1", "confidence": 1, "payload": {}}, "expect": {"cardCount": 1} },
+    { "submit": {"kind": "note", "topic": "t2", "context": "c2", "title": "제안2", "confidence": 1, "payload": {}}, "expect": {"cardCount": 1} },
+    { "submit": {"kind": "note", "topic": "t3", "context": "c3", "title": "제안3", "confidence": 1, "payload": {}}, "expect": {"cardCount": 1} },
+    { "submit": {"kind": "note", "topic": "t4", "context": "c4", "title": "제안4", "confidence": 1, "payload": {}}, "expect": {"cardCount": 1} },
+    { "submit": {"kind": "note", "topic": "t5", "context": "c5", "title": "제안5", "confidence": 1, "payload": {}}, "expect": {"cardCount": 1} },
+    { "submit": {"kind": "note", "topic": "t6", "context": "c6", "title": "제안6", "confidence": 1, "payload": {}}, "expect": {"noCards": true} },
+    { "submit": {"kind": "note", "topic": "t7", "context": "c7", "title": "확신 낮은 제안", "confidence": 0.5, "payload": {}}, "expect": {"noCards": true} }
+  ]
+}

@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -475,4 +476,56 @@ func (p *Postgres) open(body []byte, sealed bool) ([]byte, error) {
 		return nil, errors.New("봉해진 메시지가 잘렸습니다")
 	}
 	return p.aead.Open(nil, body[:n], body[n:], nil)
+}
+
+func (p *Postgres) policies(ctx context.Context, q string, args ...any) ([]model.PolicyStat, error) {
+	rows, err := p.db.Query(ctx, `select skill, context_key, shown, approved, rejected, undone, last, updated_at from mind_policy_stats `+q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []model.PolicyStat{}
+	for rows.Next() {
+		var s model.PolicyStat
+		if err := rows.Scan(&s.Skill, &s.Context, &s.Shown, &s.Approved, &s.Rejected, &s.Undone, &s.Last, &s.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) Policy(ctx context.Context, skill, context string) (model.PolicyStat, error) {
+	out, err := p.policies(ctx, `where skill = $1 and context_key = $2`, skill, context)
+	if err != nil || len(out) == 0 {
+		return model.PolicyStat{Skill: skill, Context: context}, err
+	}
+	return out[0], nil
+}
+
+func (p *Postgres) Policies(ctx context.Context) ([]model.PolicyStat, error) {
+	return p.policies(ctx, `order by skill, context_key`)
+}
+
+func (p *Postgres) CountPolicy(ctx context.Context, skill, context, outcome string, at time.Time) error {
+	col := map[string]string{model.OutcomeShown: "shown", model.OutcomeApproved: "approved", model.OutcomeRejected: "rejected", model.OutcomeUndone: "undone"}[outcome]
+	if col == "" {
+		return errors.New("모르는 결과 " + outcome)
+	}
+	last := "last"
+	if outcome != model.OutcomeShown {
+		last = "'" + outcome + "'"
+	}
+	_, err := p.db.Exec(ctx, `
+		insert into mind_policy_stats (skill, context_key, `+col+`, last, updated_at)
+		values ($1, $2, 1, $3, $4)
+		on conflict (skill, context_key) do update set `+col+` = mind_policy_stats.`+col+` + 1,
+			last = `+strings.ReplaceAll(last, "last", "mind_policy_stats.last")+`, updated_at = excluded.updated_at`,
+		skill, context, map[bool]string{true: "", false: outcome}[outcome == model.OutcomeShown], at)
+	return err
+}
+
+func (p *Postgres) ResetPolicy(ctx context.Context) error {
+	_, err := p.db.Exec(ctx, `delete from mind_policy_stats`)
+	return err
 }

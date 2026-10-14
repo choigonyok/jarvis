@@ -65,6 +65,13 @@ type Store interface {
 	// DueFacts is pending facts whose next try has come, oldest first.
 	DueFacts(ctx context.Context, now time.Time, limit int) ([]model.Fact, error)
 
+	// Policy: approval counts per (skill, context). Count adds one outcome;
+	// ResetPolicy empties the table before a rebuild from the intents.
+	Policy(ctx context.Context, skill, context string) (model.PolicyStat, error)
+	Policies(ctx context.Context) ([]model.PolicyStat, error)
+	CountPolicy(ctx context.Context, skill, context, outcome string, at time.Time) error
+	ResetPolicy(ctx context.Context) error
+
 	// Aliases: names in conversation → memory nodes. Putting a name again
 	// moves it to the node given and counts it seen once more.
 	PutAlias(ctx context.Context, a model.Alias) error

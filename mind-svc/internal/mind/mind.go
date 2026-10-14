@@ -80,7 +80,7 @@ func New(o Options) *Mind {
 	if notifier == nil {
 		notifier = act.EventsNotifier{Log: noticeLog{o.Log}, Out: o.Logger}
 	}
-	acts := act.NewRegistry(act.CalendarActuator{Cal: o.Calendar})
+	acts := act.NewRegistry(act.CalendarActuator{Cal: o.Calendar}, act.Note{})
 	m.Gate = gate.New(o.Store, acts, notifier, o.Log, o.Policy, o.Loc, o.Now, o.URL, o.Logger)
 	m.Skills = []skill.Skill{skill.Schedule{}, skill.Loops{}, skill.Brief{}}
 	m.Attn = attention.New(m.Skills, m.World, o.Store, m.Gate, o.Settle, o.Loc, o.Now, o.Logger)
