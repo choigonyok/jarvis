@@ -21,6 +21,7 @@
 package api
 
 import (
+	"crypto/subtle"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -65,12 +66,21 @@ func (s *Server) Handler() http.Handler {
 		}
 		writeJSON(w, http.StatusOK, st)
 	}))
-	mux.HandleFunc("GET /{$}", s.auth(false, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		if s.login(w, r) {
+			return
+		}
+		if !s.open && !s.presented(r) {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte("콘솔은 토큰이 필요합니다. /?token=<API_TOKEN> 으로 한 번 여세요.\n"))
+			return
+		}
 		page, _ := ui.ReadFile("ui/index.html")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
 		_, _ = w.Write(page)
-	}))
+	})
 	mux.HandleFunc("GET /api/snapshot", s.auth(false, s.snapshot))
 	mux.HandleFunc("POST /api/simulate", s.auth(false, s.simulate))
 	mux.HandleFunc("POST /api/read", s.auth(false, s.read))
@@ -88,16 +98,49 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-// auth guards a route with the token; the console's routes are let through
-// when the server is open. /consume always needs it.
+// auth guards a route with the token. The console's routes are let through
+// only when the server is open - a memory-mode run on a laptop, with nothing
+// to protect; /consume always needs it. A browser cannot send a bearer
+// header, so the console also takes the token as a cookie, set once by
+// opening /?token=….
 func (s *Server) auth(always bool, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if (always || !s.open) && s.token != "" && r.Header.Get("Authorization") != "Bearer "+s.token {
+		if (always || !s.open) && !s.presented(r) {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "인증이 필요합니다."})
 			return
 		}
 		next(w, r)
 	}
+}
+
+const tokenCookie = "mind_token"
+
+// presented is whether the request carries the token, as a bearer header or
+// as the console's cookie. With no token configured nothing passes.
+func (s *Server) presented(r *http.Request) bool {
+	if s.token == "" {
+		return false
+	}
+	if same(r.Header.Get("Authorization"), "Bearer "+s.token) {
+		return true
+	}
+	c, err := r.Cookie(tokenCookie)
+	return err == nil && same(c.Value, s.token)
+}
+
+func same(a, b string) bool { return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1 }
+
+// login trades /?token=… for the cookie and sends the browser back to /, so
+// the token does not stay in the address bar or the history.
+func (s *Server) login(w http.ResponseWriter, r *http.Request) bool {
+	t := r.URL.Query().Get("token")
+	if t == "" || s.token == "" || !same(t, s.token) {
+		return false
+	}
+	http.SetCookie(w, &http.Cookie{Name: tokenCookie, Value: s.token, Path: "/", HttpOnly: true,
+		SameSite: http.SameSiteStrictMode, MaxAge: 30 * 24 * 3600})
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+	return true
 }
 
 // consume takes one observation from events-svc. A failure is a 500, so

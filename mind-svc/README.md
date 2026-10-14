@@ -93,8 +93,9 @@ GET  /api/recall?q=&person=            세계 모델 + 장기 기억에서 아�
 POST /api/facts/flush                  장부에서 기다리는 사실을 지금 기억으로
 ```
 
-`/api` 와 콘솔은 `MIND_UI_OPEN=true`(스택에서 루프백에만 열 때)거나 메모리 모드면 토큰 없이,
-아니면 `Authorization: Bearer $API_TOKEN`.
+`/api` 와 콘솔은 메모리 모드에서만 토큰 없이 열린다. 스택에서는 `Authorization: Bearer $API_TOKEN`,
+브라우저는 한 번 `/?token=$API_TOKEN` 으로 열면 HttpOnly 쿠키를 받고 주소창에서 토큰을 지운다.
+스택은 `API_TOKEN` 이 비면 뜨지 않는다(로컬 시험만 `API_TOKEN_OPTIONAL=true`).
 
 ## 설정
 

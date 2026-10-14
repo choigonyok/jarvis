@@ -35,6 +35,8 @@ type Server struct {
 	mcp           map[string]http.Handler
 	log           *slog.Logger
 	allowedOrigin string
+	// mcpToken guards /mcp: only the CLI this agent runs holds it.
+	mcpToken string
 	// interceptToken is the shared secret the browser container presents when
 	// it stops a payment. Empty means the endpoint refuses everything.
 	interceptToken string
@@ -71,7 +73,10 @@ type Deps struct {
 	Bus       *bus.Bus
 	// MCP maps a mount path to its server: the permission gate at /mcp, one
 	// module server per path beneath it.
-	MCP            map[string]http.Handler
+	MCP map[string]http.Handler
+	// MCPToken is what a caller of /mcp must present (config's
+	// InternalMCPToken). Empty leaves /mcp open - tests only.
+	MCPToken       string
 	AllowedOrigin  string
 	InterceptToken string
 	// BackgroundLogin names hosts a background task may sign in through.
@@ -99,6 +104,7 @@ func New(d Deps) *Server {
 		runner:          d.Runner,
 		bus:             d.Bus,
 		mcp:             d.MCP,
+		mcpToken:        d.MCPToken,
 		log:             d.Log,
 		allowedOrigin:   d.AllowedOrigin,
 		interceptToken:  d.InterceptToken,
@@ -148,8 +154,9 @@ func (s *Server) Handler() http.Handler {
 	// Claude Code dials these. The permission gate sits at /mcp; module
 	// servers mount beneath it, and the more specific pattern wins.
 	for path, handler := range s.mcp {
-		mux.Handle(path, handler)
-		mux.Handle(strings.TrimSuffix(path, "/")+"/", handler)
+		guarded := s.guardMCP(handler)
+		mux.Handle(path, guarded)
+		mux.Handle(strings.TrimSuffix(path, "/")+"/", guarded)
 	}
 	return s.withCORS(s.identify(mux))
 }
@@ -178,6 +185,19 @@ func (s *Server) guard(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(w, r)
 	}
+}
+
+// guardMCP lets through only the CLI this agent started: it alone was handed
+// the token, in its MCP config. Without this anything on the compose network
+// could approve a card through the permission gate or raise a suggestion.
+func (s *Server) guardMCP(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.mcpToken != "" && subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+s.mcpToken)) != 1 {
+			writeErr(w, http.StatusUnauthorized, "인증이 필요합니다.")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // identify stamps every response with which agent answered. Two agents share

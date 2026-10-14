@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"strconv"
@@ -40,8 +42,14 @@ type Config struct {
 	// ModuleMCPURLs is one entry per module that exposes tools to the model,
 	// keyed by module name. Filled at boot from the registry, so a module
 	// that is not enabled is a module the model cannot see. These are dialled
-	// over loopback inside the container and carry no credential.
+	// over loopback inside the container, with InternalMCPToken.
 	ModuleMCPURLs map[string]string
+	// InternalMCPToken guards this agent's own /mcp routes. The CLI is the
+	// only caller and is handed it in its MCP config; anything else on the
+	// compose network that dials agent:8080/mcp - the permission gate, the
+	// propose tool, a job's run tools - is refused. Made fresh at every
+	// start unless JARVIS_MCP_INTERNAL_TOKEN pins it.
+	InternalMCPToken string
 	// ExtraMCPURLs are servers with no module behind them (JARVIS_EXTRA_MCP,
 	// "name=url,name=url"). They reach the model but not the registry, so the
 	// approval gate cannot render their cards - it falls back to the generic
@@ -159,20 +167,21 @@ func Load() (Config, error) {
 			"Read,Glob,Grep,TodoWrite,mcp__calendar__list_events,"+
 				"mcp__assets__get_portfolio,mcp__assets__get_allocation,mcp__assets__get_history,"+
 				"mcp__spending__get_spending,mcp__memory__search_memory,mcp__jobs__create_job,mcp__jobs__list_jobs,mcp__jobs__instruct_job")),
-		PermissionMode: env("JARVIS_PERMISSION_MODE", "manual"),
-		ApprovalWait:   envDuration("JARVIS_APPROVAL_TIMEOUT", 30*time.Minute),
-		TurnTimeout:    envDuration("JARVIS_TURN_TIMEOUT", 2*time.Hour),
-		PublicMCPURL:   env("JARVIS_MCP_URL", "http://127.0.0.1:8080/mcp"),
-		ModuleMCPURLs:  map[string]string{},
-		ExtraMCPURLs:   parseMCPURLs(os.Getenv("JARVIS_EXTRA_MCP")),
-		ExtraMCPToken:  os.Getenv("JARVIS_MCP_TOKEN"),
-		CalendarURL:    env("JARVIS_CALENDAR_URL", "http://localhost:8093"),
-		ChatURL:        env("JARVIS_CHAT_URL", "http://localhost:8094"),
-		AssetsURL:      env("JARVIS_ASSETS_URL", "http://localhost:8092"),
-		SpendingURL:    env("JARVIS_SPENDING_URL", "http://localhost:8095"),
-		Enrich:         envBool("JARVIS_ENRICH", true),
-		UploadsDir:     env("JARVIS_UPLOADS_DIR", ""),
-		JobsURL:        env("JARVIS_JOBS_URL", "http://localhost:8098"),
+		PermissionMode:   env("JARVIS_PERMISSION_MODE", "manual"),
+		ApprovalWait:     envDuration("JARVIS_APPROVAL_TIMEOUT", 30*time.Minute),
+		TurnTimeout:      envDuration("JARVIS_TURN_TIMEOUT", 2*time.Hour),
+		PublicMCPURL:     env("JARVIS_MCP_URL", "http://127.0.0.1:8080/mcp"),
+		ModuleMCPURLs:    map[string]string{},
+		ExtraMCPURLs:     parseMCPURLs(os.Getenv("JARVIS_EXTRA_MCP")),
+		ExtraMCPToken:    os.Getenv("JARVIS_MCP_TOKEN"),
+		InternalMCPToken: env("JARVIS_MCP_INTERNAL_TOKEN", randomToken()),
+		CalendarURL:      env("JARVIS_CALENDAR_URL", "http://localhost:8093"),
+		ChatURL:          env("JARVIS_CHAT_URL", "http://localhost:8094"),
+		AssetsURL:        env("JARVIS_ASSETS_URL", "http://localhost:8092"),
+		SpendingURL:      env("JARVIS_SPENDING_URL", "http://localhost:8095"),
+		Enrich:           envBool("JARVIS_ENRICH", true),
+		UploadsDir:       env("JARVIS_UPLOADS_DIR", ""),
+		JobsURL:          env("JARVIS_JOBS_URL", "http://localhost:8098"),
 		// Empty turns long-term memory off: no tool, nothing recalled.
 		MemoryURL:    os.Getenv("JARVIS_MEMORY_URL"),
 		Jobs:         envBool("JARVIS_JOBS", true),
@@ -226,6 +235,12 @@ func Load() (Config, error) {
 	// the hostname.
 	if c.AllowedOrigin != "" && c.APIToken == "" {
 		return c, fmt.Errorf("JARVIS_ALLOWED_ORIGIN is set without JARVIS_API_TOKEN; the console's routes would accept anyone who can reach the port")
+	}
+	// Even unpublished, :8080 is reachable from every container on the
+	// compose network. Running open is for a local trial only, and has to
+	// be asked for.
+	if c.APIToken == "" && !envBool("JARVIS_ALLOW_OPEN", false) {
+		return c, fmt.Errorf("JARVIS_API_TOKEN is not set; set it, or JARVIS_ALLOW_OPEN=true for a local trial")
 	}
 	if os.Getenv("ANTHROPIC_API_KEY") != "" {
 		// The CLI prefers the OAuth token, but an API key sitting in the
@@ -362,4 +377,13 @@ func envDuration(k string, def time.Duration) time.Duration {
 		return def
 	}
 	return d
+}
+
+// randomToken is 32 random bytes, hex.
+func randomToken() string {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
+	return hex.EncodeToString(b)
 }

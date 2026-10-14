@@ -167,3 +167,31 @@ func TestDecisionWithEdits(t *testing.T) {
 		t.Fatalf("after approval: %s %s", got.State, got.Action.Input)
 	}
 }
+
+// /mcp and everything under it answer only the CLI holding the internal
+// token; the console's API token does not open it.
+func TestMCPGuard(t *testing.T) {
+	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
+	s := New(Deps{MCP: map[string]http.Handler{"/mcp": ok, "/mcp/suggest": ok}, MCPToken: "inner", APIToken: "outer"})
+	h := s.Handler()
+	for _, tc := range []struct {
+		path, header string
+		want         int
+	}{
+		{"/mcp", "", http.StatusUnauthorized},
+		{"/mcp/suggest", "", http.StatusUnauthorized},
+		{"/mcp/suggest", "Bearer outer", http.StatusUnauthorized},
+		{"/mcp/suggest/x", "Bearer inner", http.StatusOK},
+		{"/mcp", "Bearer inner", http.StatusOK},
+	} {
+		req := httptest.NewRequest(http.MethodPost, tc.path, nil)
+		if tc.header != "" {
+			req.Header.Set("Authorization", tc.header)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != tc.want {
+			t.Errorf("%s %q: %d, want %d", tc.path, tc.header, rec.Code, tc.want)
+		}
+	}
+}

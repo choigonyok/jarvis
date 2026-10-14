@@ -9,6 +9,7 @@
  * Read-only toward the brokerages: balances and prices, never an order. The
  * one thing it writes is its own principal ledger.
  */
+import { timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 
 import * as db from "./db.js";
@@ -17,6 +18,20 @@ import { PRINCIPAL_SINCE, buildPortfolio, invalidateVenues } from "./portfolio.j
 
 const PORT = Number(process.env.PORT ?? process.env.LISTEN_PORT ?? 8092);
 const TOKEN = process.env.API_TOKEN ?? "";
+// An empty token would open the brokerage balances to anything on the
+// network. Only a local trial may run so, and has to say it.
+if (!TOKEN && process.env.API_TOKEN_OPTIONAL !== "true") {
+  console.error("API_TOKEN 이 비어 있습니다. 로컬 시험이라면 API_TOKEN_OPTIONAL=true");
+  process.exit(1);
+}
+
+/** Whether the header carries the token, compared in constant time. */
+function presented(header: string | undefined): boolean {
+  if (!TOKEN) return true; // API_TOKEN_OPTIONAL: a local trial
+  const want = Buffer.from(`Bearer ${TOKEN}`);
+  const got = Buffer.from(header ?? "");
+  return got.length === want.length && timingSafeEqual(got, want);
+}
 const TZ = process.env.TZ ?? "Asia/Seoul";
 
 db.connect(process.env.DATABASE_URL);
@@ -175,7 +190,7 @@ const server = createServer((req, res) => {
     return;
   }
 
-  if (TOKEN && req.headers.authorization !== `Bearer ${TOKEN}`) {
+  if (!presented(req.headers.authorization)) {
     send(res, 401, { error: "인증이 필요합니다." });
     return;
   }

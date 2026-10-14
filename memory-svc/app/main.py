@@ -27,6 +27,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname
 log = logging.getLogger("memory")
 
 TOKEN = os.environ.get("API_TOKEN", "")
+# An empty token would leave the graph - everything jarvis knows about the
+# operator - open to anything on the network. Only a local trial may run so.
+if not TOKEN and os.environ.get("API_TOKEN_OPTIONAL") != "true":
+    raise SystemExit("API_TOKEN 이 비어 있습니다. 로컬 시험이라면 API_TOKEN_OPTIONAL=true")
 INTERVAL = int(os.environ.get("MEMORY_INTERVAL", "300"))
 DAILY_USD = float(os.environ.get("MEMORY_DAILY_USD", "1.0"))
 HAS_KEY = bool(os.environ.get("ANTHROPIC_API_KEY"))

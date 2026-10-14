@@ -95,6 +95,12 @@ docker compose --profile cloudflare up -d --build
 않는다. 터널 호스트명은 공개 주소이므로, 토큰이 없으면 그 주소를 아는 사람은
 로그인을 건너뛰고 어시스턴트를 그대로 쓸 수 있다.
 
+`JARVIS_API_TOKEN` 은 이제 언제나 필요하다(2026-10-15). compose 가 빈 값을 거부하고, 서비스도
+빈 `API_TOKEN` 으로는 뜨지 않는다 - 공개하지 않아도 compose 네트워크의 모든 컨테이너가 서로의
+포트에 닿기 때문이다. 토큰 비교는 상수 시간이다. 로컬 시험만 `API_TOKEN_OPTIONAL=true`
+(agent 는 `JARVIS_ALLOW_OPEN=true`). agent 의 `/mcp/*` 는 기동할 때 만든 내부 토큰을 CLI 의
+MCP 설정에만 실어 보내므로, 다른 컨테이너에서는 401 이다.
+
 ## 3. Worker 쪽
 
 ```sh

@@ -261,15 +261,12 @@ var weekdays = [...]string{"일", "월", "화", "수", "목", "금", "토"}
 
 func (r *Runner) mcpConfig() string {
 	servers := map[string]any{
-		permission.ServerName: map[string]any{
-			"type": "http",
-			"url":  r.cfg.PublicMCPURL,
-		},
+		permission.ServerName: r.internal(r.cfg.PublicMCPURL),
 	}
 	// One entry per module that talks to the model. Dropping a module from
 	// the registry is what should remove it here, so this reads it back.
 	for name, url := range r.cfg.ModuleMCPURLs {
-		servers[name] = map[string]any{"type": "http", "url": url}
+		servers[name] = r.internal(url)
 	}
 	// Servers outside the container. These listen where others can reach
 	// them, so the bearer token goes only here - a module server is on
@@ -289,6 +286,16 @@ func (r *Runner) mcpConfig() string {
 		return "{}"
 	}
 	return string(body)
+}
+
+// internal is an MCP entry for one of this agent's own servers, carrying the
+// token its /mcp routes ask of every caller.
+func (r *Runner) internal(url string) map[string]any {
+	entry := map[string]any{"type": "http", "url": url}
+	if r.cfg.InternalMCPToken != "" {
+		entry["headers"] = map[string]any{"Authorization": "Bearer " + r.cfg.InternalMCPToken}
+	}
+	return entry
 }
 
 func (r *Runner) env() []string {

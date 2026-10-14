@@ -136,7 +136,7 @@ func (r *Runner) yieldLocked() {
 func (r *Runner) backgroundArgs(t Task) ([]string, error) {
 	servers := map[string]any{}
 	for name, url := range t.Servers {
-		servers[name] = map[string]any{"type": "http", "url": url}
+		servers[name] = r.internal(url)
 	}
 	for _, name := range t.Extra {
 		url, ok := r.cfg.ExtraMCPURLs[name]

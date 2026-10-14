@@ -242,6 +242,7 @@ func main() {
 			Runner:          runner,
 			Bus:             events,
 			MCP:             mcpMounts,
+			MCPToken:        cfg.InternalMCPToken,
 			AllowedOrigin:   cfg.AllowedOrigin,
 			InterceptToken:  cfg.ExtraMCPToken,
 			BackgroundLogin: cfg.BackgroundLogin,

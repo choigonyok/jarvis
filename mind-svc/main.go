@@ -89,6 +89,10 @@ func main() {
 		log.Info("메모리 모드: 데이터베이스·실제 캘린더 없이 돕니다")
 	} else {
 		mode, movable = "stack", nil
+		if token == "" && os.Getenv("API_TOKEN_OPTIONAL") != "true" {
+			log.Error("API_TOKEN 이 비어 있습니다. 스택에서는 관측 로그와 콘솔을 지키는 토큰이 필요합니다")
+			os.Exit(1)
+		}
 		settle = duration("MIND_SETTLE", time.Minute)
 		pcfg, err := pgxpool.ParseConfig(dsn)
 		if err != nil {
@@ -176,7 +180,7 @@ func main() {
 	addr := getenv("LISTEN_ADDR", ":8102")
 	srv := &http.Server{
 		Addr:         addr,
-		Handler:      api.New(m, token, os.Getenv("MIND_UI_OPEN") == "true" || mode == "memory", movable, log).Handler(),
+		Handler:      api.New(m, token, mode == "memory", movable, log).Handler(),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 3 * time.Minute, // a replay runs the model
 	}

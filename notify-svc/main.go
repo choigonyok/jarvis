@@ -33,6 +33,12 @@ import (
 
 func main() {
 	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	// An empty token would leave every route open to anything on the
+	// network. Only a local trial may run that way, and must say so.
+	if os.Getenv("API_TOKEN") == "" && os.Getenv("API_TOKEN_OPTIONAL") != "true" {
+		log.Error("API_TOKEN 이 비어 있습니다. 로컬 시험이라면 API_TOKEN_OPTIONAL=true")
+		os.Exit(1)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 

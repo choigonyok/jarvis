@@ -78,7 +78,7 @@ services:
       JARVIS_MCP_TOKEN: ${JARVIS_MCP_TOKEN:-}
       # Guards the routes the console drives. Required once the agent is
       # published (JARVIS_ALLOWED_ORIGIN set, or a tunnel in front of it).
-      JARVIS_API_TOKEN: ${JARVIS_API_TOKEN:-}
+      JARVIS_API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
       JARVIS_NOTIFY_URL: http://events:8101
       JARVIS_EVENTS_URL: http://events:8101
       JARVIS_ALLOWED_ORIGIN: ${JARVIS_ALLOWED_ORIGIN:-}
@@ -157,7 +157,7 @@ services:
       # Workers VPC 의 연결이 다른 쪽에 붙는 일이 있었다(2026-10-08).
       JARVIS_ADDR: ":8081"
       JARVIS_MCP_URL: http://127.0.0.1:8081/mcp
-      JARVIS_API_TOKEN: ${JARVIS_API_TOKEN:-}
+      JARVIS_API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
       JARVIS_ALLOWED_ORIGIN: ${JARVIS_ALLOWED_ORIGIN:-}
       JARVIS_APPROVAL_TIMEOUT: ${JARVIS_APPROVAL_TIMEOUT:-30m}
       JARVIS_TURN_TIMEOUT: ${JARVIS_TURN_TIMEOUT:-2h}
@@ -197,7 +197,7 @@ services:
       DATABASE_URL: >-
         postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
       # 스택의 나머지와 같은 베어러. /health 만 예외다.
-      API_TOKEN: ${JARVIS_API_TOKEN:-}
+      API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
     expose:
       - "8091"
     # 루프백에만. psql 처럼 curl 로 직접 두드리는 것이 가장 빠른 확인이다.
@@ -229,7 +229,7 @@ services:
       LISTEN_ADDR: ":8095"
       DATABASE_URL: >-
         postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
-      API_TOKEN: ${JARVIS_API_TOKEN:-}
+      API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
       NOTIFY_URL: http://events:8101
       KAKAOTALK_URL: http://kakaotalk:8090
       # 이름에 "카드"가 없는 결제 알림 채널(예: 카카오뱅크)을 쉼표로 더한다.
@@ -260,7 +260,7 @@ services:
       LISTEN_ADDR: ":8098"
       DATABASE_URL: >-
         postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
-      API_TOKEN: ${JARVIS_API_TOKEN:-}
+      API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
       # 작업이 끝나고 이만큼 지나면 첨부 사진을 지운다.
       JOBS_PURGE_AFTER: ${JOBS_PURGE_AFTER:-720h}
     expose:
@@ -294,7 +294,7 @@ services:
       LISTEN_ADDR: ":8094"
       DATABASE_URL: >-
         postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
-      API_TOKEN: ${JARVIS_API_TOKEN:-}
+      API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
     expose:
       - "8094"
     ports:
@@ -321,7 +321,7 @@ services:
     entrypoint: ["python3", "/scripts/import-thread.py"]
     environment:
       CHAT_URL: http://chat:8094
-      API_TOKEN: ${JARVIS_API_TOKEN:-}
+      API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
       FORCE: ${FORCE:-}
     volumes:
       - ./scripts:/scripts:ro
@@ -348,7 +348,7 @@ services:
       LISTEN_ADDR: ":8093"
       DATABASE_URL: >-
         postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
-      API_TOKEN: ${JARVIS_API_TOKEN:-}
+      API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
       NOTIFY_URL: http://events:8101
       # 일정 저장소. uniple 이면 커플 앱의 공유 캘린더를 비공식 Supabase
       # 호출로 쓴다(calendar-svc/README.md). postgres 로 되돌리면 예전 표를 쓴다.
@@ -389,7 +389,7 @@ services:
     environment:
       TZ: ${TZ:-Asia/Seoul}
       PORT: "8092"
-      API_TOKEN: ${JARVIS_API_TOKEN:-}
+      API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
       NOTIFY_URL: http://events:8101
       # 스냅샷용. 없어도 자산 조회는 된다 - 증권사가 현재 보유의 원천이고,
       # 데이터베이스가 답하는 것은 "그때 무엇을 들고 있었나"뿐이다.
@@ -441,7 +441,7 @@ services:
     entrypoint: ["python3", "/scripts/import-calendar.py"]
     environment:
       CALENDAR_URL: http://calendar:8093
-      API_TOKEN: ${JARVIS_API_TOKEN:-}
+      API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
     volumes:
       - ./scripts:/scripts:ro
       # 읽기 전용. 원본을 지우지 않는다.
@@ -459,7 +459,7 @@ services:
     entrypoint: ["/bin/sh", "/scripts/import-workout.sh"]
     environment:
       WORKOUT_URL: http://workout:8091
-      API_TOKEN: ${JARVIS_API_TOKEN:-}
+      API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
     volumes:
       - ./scripts:/scripts:ro
       # 읽기 전용. 이 작업은 원본을 지우지 않는다.
@@ -520,7 +520,7 @@ services:
       JARVIS_AUTH_SECRET: ${JARVIS_AUTH_SECRET:-}
       # The same token the agent checks. Sent server-side only; the browser
       # never sees it.
-      JARVIS_API_TOKEN: ${JARVIS_API_TOKEN:-}
+      JARVIS_API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
       # 증권사 키는 더 이상 여기 없다. assets-svc 가 갖고 있고, 웹은
       # /api/portfolio 를 그쪽으로 프록시만 한다. 키를 브라우저에 HTML 을
       # 내주는 프로세스에서 빼는 것이 분리의 목적 중 하나다.
@@ -577,7 +577,7 @@ services:
       KAKAO_SQLCIPHER_KEY: ${KAKAO_SQLCIPHER_KEY:-}
       # Same bearer scheme as the rest of the stack; guards every route but
       # /health.
-      API_TOKEN: ${JARVIS_API_TOKEN:-}
+      API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
     volumes:
       - jarvis-kakaotalk-data:/data
       # The live encrypted database and its -wal/-shm siblings, read-only.
@@ -603,7 +603,7 @@ services:
       POLL_INTERVAL: ${IMESSAGE_POLL_INTERVAL:-2s}
       CHAT_DB: /messages/chat.db
       CONTACTS_DB: /addressbook/AddressBook-v22.abcddb
-      API_TOKEN: ${JARVIS_API_TOKEN:-}
+      API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
     volumes:
       - jarvis-imessage-data:/data
       - ${IMESSAGE_MIRROR:-${HOME}/.jarvis-mirror}/messages:/messages:ro
@@ -626,7 +626,7 @@ services:
       TZ: ${TZ:-Asia/Seoul}
       DATABASE_URL: >-
         postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}
-      API_TOKEN: ${JARVIS_API_TOKEN:-}
+      API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
       # 없으면 글 추출만 쉬고 구조화 데이터는 계속 쌓는다.
       MEMORY_OWNER_NAME: ${MEMORY_OWNER_NAME:-}
       ANTHROPIC_API_KEY: ${MEMORY_ANTHROPIC_API_KEY:-}
@@ -682,7 +682,7 @@ services:
       LISTEN_ADDR: ":8096"
       DATABASE_URL: >-
         postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
-      API_TOKEN: ${JARVIS_API_TOKEN:-}
+      API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
       NOTIFY_URL: http://events:8101
       KAKAOTALK_URL: http://kakaotalk:8090
       SPENDING_URL: http://spending:8095
@@ -725,7 +725,7 @@ services:
       LISTEN_ADDR: ":8097"
       DATABASE_URL: >-
         postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
-      API_TOKEN: ${JARVIS_API_TOKEN:-}
+      API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
       VAPID_PUBLIC_KEY: ${JARVIS_VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${JARVIS_VAPID_PRIVATE_KEY:-}
       VAPID_SUBJECT: ${JARVIS_VAPID_SUBJECT:-https://jarvis.choigonyok.com}
@@ -754,7 +754,7 @@ services:
       LISTEN_ADDR: ":8101"
       DATABASE_URL: >-
         postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
-      API_TOKEN: ${JARVIS_API_TOKEN:-}
+      API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
     expose:
       - "8101"
     ports:
@@ -777,14 +777,14 @@ services:
   # 인지 루프. 카톡·iMessage·jarvis 대화를 읽어 일정·열린 고리(세계 모델)와
   # 기억할 사실(근거 장부 → memory-svc)을 원문 인용으로 확인해 남긴다. 확정된
   # 일정은 memory.plan 으로 에이전트의 제안 엔진에 넘긴다. 콘솔은 맥미니의
-  # 127.0.0.1:8102.
+  # 127.0.0.1:8102 이고 토큰이 필요하다: 한 번 /?token=<JARVIS_API_TOKEN> 으로 연다.
   mind:
     build: ./mind-svc
     environment:
       TZ: ${TZ:-Asia/Seoul}
       DATABASE_URL: >-
         postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
-      API_TOKEN: ${JARVIS_API_TOKEN:-}
+      API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
       EVENTS_URL: http://events:8101
       MIND_SELF_URL: http://mind:8102/consume
       KAKAOTALK_URL: http://kakaotalk:8090
@@ -794,7 +794,6 @@ services:
       MIND_ANTHROPIC_API_KEY: ${MEMORY_ANTHROPIC_API_KEY:-}
       MIND_CONTENT_KEY: ${MIND_CONTENT_KEY:-}
       MIND_OWNER_NAME: ${MEMORY_OWNER_NAME:-}
-      MIND_UI_OPEN: "true"
       # 장기 기억: 확인한 사실을 memory-svc(/facts)로 보내고 해석할 때 꺼내 읽는다.
       MIND_MEMORY_URL: http://memory:8100
       # 운영자와 jarvis 의 대화도 대화방 하나로 읽는다.

@@ -42,6 +42,11 @@ func main() {
 	interval := envDuration("POLL_INTERVAL", time.Second)
 	batch := int(envInt64("POLL_BATCH", 500))
 	addr := getenv("LISTEN_ADDR", ":8090")
+	// An empty token would leave every route open to anything on the
+	// network. Only a local trial may run that way, and must say so.
+	if os.Getenv("API_TOKEN") == "" && os.Getenv("API_TOKEN_OPTIONAL") != "true" {
+		log.Fatal("API_TOKEN 이 비어 있습니다. 로컬 시험이라면 API_TOKEN_OPTIONAL=true")
+	}
 	token := os.Getenv("API_TOKEN")
 
 	st, err := store.Open(storePath)

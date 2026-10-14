@@ -144,3 +144,51 @@ func TestConsoleEndToEnd(t *testing.T) {
 		t.Fatalf("consume without token: %d", resp.StatusCode)
 	}
 }
+
+// In the stack the console is never open: the token comes as a bearer
+// header, or once in the address bar, traded for a cookie.
+func TestClosedConsole(t *testing.T) {
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	m := mind.New(mind.Options{
+		Store: store.NewMemory(), Log: obs.NewMemoryLog(quiet), LLM: &llm.Script{}, Calendar: act.NewMemoryCalendar(),
+		Notifier: &act.MemoryNotifier{}, Loc: seoul, Now: time.Now, Logger: quiet, Policy: gate.DefaultPolicy(), Mode: "stack",
+	})
+	srv := httptest.NewServer(New(m, "secret", false, nil, quiet).Handler())
+	defer srv.Close()
+	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+
+	get := func(path string, set func(*http.Request)) *http.Response {
+		req, _ := http.NewRequest(http.MethodGet, srv.URL+path, nil)
+		if set != nil {
+			set(req)
+		}
+		resp, err := noRedirect.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp
+	}
+	for _, path := range []string{"/", "/api/snapshot", "/status"} {
+		if code := get(path, nil).StatusCode; code != http.StatusUnauthorized {
+			t.Fatalf("%s without token: %d", path, code)
+		}
+	}
+	if code := get("/?token=wrong", nil).StatusCode; code != http.StatusUnauthorized {
+		t.Fatalf("wrong token: %d", code)
+	}
+	if code := get("/api/snapshot", func(r *http.Request) { r.Header.Set("Authorization", "Bearer secret") }).StatusCode; code != http.StatusOK {
+		t.Fatalf("bearer: %d", code)
+	}
+	login := get("/?token=secret", nil)
+	if login.StatusCode != http.StatusSeeOther || len(login.Cookies()) != 1 || !login.Cookies()[0].HttpOnly {
+		t.Fatalf("login: %d %v", login.StatusCode, login.Cookies())
+	}
+	cookie := login.Cookies()[0]
+	if code := get("/api/snapshot", func(r *http.Request) { r.AddCookie(cookie) }).StatusCode; code != http.StatusOK {
+		t.Fatalf("cookie: %d", code)
+	}
+	if code := get("/", func(r *http.Request) { r.AddCookie(&http.Cookie{Name: tokenCookie, Value: "wrong"}) }).StatusCode; code != http.StatusUnauthorized {
+		t.Fatalf("wrong cookie: %d", code)
+	}
+}

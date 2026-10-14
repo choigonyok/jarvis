@@ -9,6 +9,7 @@ import (
 // of its reach, so they are pinned here rather than left to the compose file.
 func TestGuestRole(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "x")
+	t.Setenv("JARVIS_API_TOKEN", "api")
 	t.Setenv("JARVIS_ROLE", "guest")
 	t.Setenv("JARVIS_EXTRA_MCP", "mcp-browser=http://browser:8931/mcp")
 	t.Setenv("JARVIS_MCP_TOKEN", "tok")
@@ -38,6 +39,7 @@ func TestGuestRole(t *testing.T) {
 
 func TestOwnerUnchanged(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "x")
+	t.Setenv("JARVIS_API_TOKEN", "api")
 	t.Setenv("JARVIS_ROLE", "")
 	c, err := Load()
 	if err != nil {
@@ -45,5 +47,24 @@ func TestOwnerUnchanged(t *testing.T) {
 	}
 	if c.Guest || c.Thread != "" || c.BuiltinTools != nil {
 		t.Fatalf("운영자 설정이 바뀌었습니다: guest=%v thread=%q tools=%v", c.Guest, c.Thread, c.BuiltinTools)
+	}
+}
+
+// No token is no agent, unless a local trial asks for it; and the internal
+// MCP token is made fresh when not pinned.
+func TestTokens(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "x")
+	t.Setenv("JARVIS_API_TOKEN", "")
+	if _, err := Load(); err == nil {
+		t.Fatal("빈 JARVIS_API_TOKEN 으로 떴습니다")
+	}
+	t.Setenv("JARVIS_ALLOW_OPEN", "true")
+	a, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := Load()
+	if len(a.InternalMCPToken) != 64 || a.InternalMCPToken == b.InternalMCPToken {
+		t.Fatalf("내부 MCP 토큰: %q %q", a.InternalMCPToken, b.InternalMCPToken)
 	}
 }

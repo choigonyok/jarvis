@@ -8,6 +8,7 @@ package api
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -60,7 +61,7 @@ func (s *Server) Handler() http.Handler {
 
 func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if s.token != "" && r.Header.Get("Authorization") != "Bearer "+s.token {
+		if s.token != "" && subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+s.token)) != 1 {
 			writeErr(w, http.StatusUnauthorized, "인증이 필요합니다.")
 			return
 		}
