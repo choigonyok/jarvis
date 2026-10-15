@@ -13,9 +13,13 @@ type Setup = {
 /**
  * Connecting the phone, in the order it is done on the phone itself. The
  * setup holds the phone's credentials, so it is fetched only when asked
- * (behind the console login) and kept in this component's memory, never
- * rendered until a step needs it: the OwnTracks link is followed straight
- * away, and the shortcut values are copied rather than read off the screen.
+ * (behind the console login) and kept in this component's memory.
+ *
+ * Opening OwnTracks is two taps on purpose: iOS Safari ignores a jump to
+ * another app's scheme that does not come straight from a tap, and a jump
+ * made after waiting for the fetch no longer does. So the first tap fetches,
+ * and the second is a plain link to owntracks:///config?inline=…, followed by
+ * the browser itself. The link can also be copied, for pasting into Safari.
  */
 export function PhoneSetup() {
   const [setup, setSetup] = useState<Setup | null>(null);
@@ -45,10 +49,6 @@ export function PhoneSetup() {
     }
   }
 
-  async function openOwnTracks() {
-    const s = await load();
-    if (s) window.location.href = s.link;
-  }
 
   async function copy(key: string, text: string) {
     try {
@@ -80,22 +80,39 @@ export function PhoneSetup() {
             </a>
           </Step>
           <Step n={2}>
-            OwnTracks 설정에서 <span className="text-foreground">외부 설정 허용(URL·파일)</span>을 켭니다. 26.2.3부터
-            기본으로 꺼져 있어요.
+            OwnTracks 지도 왼쪽 위 ⓘ → Settings → Remote Control에서{" "}
+            <span className="text-foreground">Allow external configuration</span>을 켭니다. 26.2.3부터 기본으로 꺼져 있어요.
           </Step>
           <Step n={3}>
             <span className="block">
-              아래 버튼을 누르면 OwnTracks가 열리고 바뀌는 내용을 보여 줘요. 확인하면 서버 주소·계정·모니터링(Significant)·원격
-              설정이 한 번에 들어갑니다.
+              &ldquo;jarvis 설정 불러오기&rdquo; 다음에 &ldquo;OwnTracks 열어서 설정 넣기&rdquo;를 누르면 OwnTracks가 바뀌는 내용을 보여
+              줘요. Continue를 누르면 서버 주소·계정·모니터링(Significant)·원격 설정이 한 번에 들어갑니다.
             </span>
-            <Button
-              variant="outline"
-              className="mt-2 h-11 w-full sm:w-auto sm:px-4"
-              onClick={() => void openOwnTracks()}
-              disabled={busy}
-            >
-              {busy ? "불러오는 중" : "OwnTracks에 jarvis 설정 넣기"}
-            </Button>
+            {setup ? (
+              <span className="mt-2 flex flex-col gap-2 sm:flex-row">
+                <a
+                  href={setup.link}
+                  className="inline-flex h-11 w-full items-center justify-center rounded-lg border border-border bg-background px-4 text-sm font-medium text-foreground outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 sm:w-auto"
+                >
+                  OwnTracks 열어서 설정 넣기
+                </a>
+                <Button variant="ghost" className="h-11 w-full sm:w-auto sm:px-3" onClick={() => void copy("link", setup.link)}>
+                  {copied === "link" ? "복사했어요" : "링크 복사"}
+                </Button>
+              </span>
+            ) : (
+              <Button
+                variant="outline"
+                className="mt-2 h-11 w-full sm:w-auto sm:px-4"
+                onClick={() => void load()}
+                disabled={busy}
+              >
+                {busy ? "불러오는 중" : "jarvis 설정 불러오기"}
+              </Button>
+            )}
+            <span className="mt-2 block text-[12px] text-faint">
+              OwnTracks가 열렸는데 아무것도 바뀌지 않으면 2번 스위치가 꺼져 있는 거예요. 링크 복사 후 Safari 주소창에 붙여 넣어도 열려요.
+            </span>
           </Step>
           <Step n={4}>
             위치 권한을 <span className="text-foreground">항상 허용</span>으로 둡니다. 집·회사 같은 영역은 OwnTracks에서
