@@ -28,6 +28,11 @@ func TestNearby(t *testing.T) {
 		case "/busy":
 			w.WriteHeader(http.StatusGatewayTimeout)
 		case "/search":
+			if r.URL.Query().Get("bounded") == "1" {
+				w.Write([]byte(`[{"osm_type":"node","osm_id":9,"lat":"37.5562","lon":"126.9106","name":"대신 찾은 식당","type":"restaurant","extratags":{"cuisine":"korean"}},
+					{"osm_type":"node","osm_id":10,"lat":"37.5563","lon":"126.9107","name":"","type":"restaurant"}]`))
+				return
+			}
 			w.Write([]byte(`[{"lat":"37.5500","lon":"126.9100","display_name":"망원동"}]`))
 		}
 	}))
@@ -65,6 +70,12 @@ func TestNearby(t *testing.T) {
 	}
 	if _, err := m.Nearby(ctx, p, "카페", 0, 0); err != nil || !strings.Contains(asked, `"amenity"="cafe"`) {
 		t.Fatalf("카페: %s %v", asked, err)
+	}
+	// Every mirror down: Nominatim's category search over the box.
+	overpassURLs = []string{maps.URL + "/busy", maps.URL + "/busy"}
+	shops, err = m.Nearby(ctx, Point{Lat: 37.556, Lon: 126.910}, "식당", 300, 5)
+	if err != nil || len(shops) != 1 || shops[0].Name != "대신 찾은 식당" || shops[0].Kind != "restaurant · korean" {
+		t.Fatalf("대신 찾기: %+v %v", shops, err)
 	}
 }
 
