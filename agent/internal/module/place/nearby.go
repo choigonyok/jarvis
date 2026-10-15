@@ -84,13 +84,15 @@ func (m *Module) Where(ctx context.Context, near string) (Point, error) {
 		}
 		return Point{}, errors.New("최근 위치가 없습니다. 어디 근처인지 이름으로 물어보세요")
 	}
-	var regions []struct {
-		Name string  `json:"name"`
-		Lat  float64 `json:"lat"`
-		Lon  float64 `json:"lon"`
+	var regions struct {
+		Regions []struct {
+			Name string  `json:"name"`
+			Lat  float64 `json:"lat"`
+			Lon  float64 `json:"lon"`
+		} `json:"regions"`
 	}
 	if err := m.get(ctx, m.url+"/regions", &regions); err == nil {
-		for _, r := range regions {
+		for _, r := range regions.Regions {
 			if r.Name == near {
 				return Point{r.Lat, r.Lon, "등록된 영역 '" + r.Name + "'"}, nil
 			}

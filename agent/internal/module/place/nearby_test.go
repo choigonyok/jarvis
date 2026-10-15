@@ -39,7 +39,7 @@ func TestNearby(t *testing.T) {
 		case "/now":
 			w.Write([]byte(`{"location":{"lat":37.556123,"lon":126.910456,"acc":10},"fixAt":"` + fix + `","summary":"x"}`))
 		case "/regions":
-			w.Write([]byte(`[{"name":"지수네 집","lat":37.5601,"lon":126.9201}]`))
+			w.Write([]byte(`{"regions":[{"name":"지수네 집","kind":"other","lat":37.5601,"lon":126.9201,"radiusM":50}]}`))
 		}
 	}))
 	defer ctxsvc.Close()
