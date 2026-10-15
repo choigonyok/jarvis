@@ -129,5 +129,9 @@ notify-svc 가 이것을 듣고 **운전·회의 중에는 즉시 알림을 붙�
   location now" 를 누르면 집 체류가 열렸다 닫히고, 서버가 응답에 `setConfiguration monitoring 2` 를 실어("폰의 위치 모드를 바꿉니다
   from=1 to=2") 앱 화면의 모드가 Significant → Move 로 바뀌며, 그다음 보고부터 `m=2` 로 온다. 시험 빌드에서 바꾼 것은 "외부 설정
   허용" 기본값(폰에서는 사람이 켜는 스위치), 로컬 http 를 위한 ATS 완화, 이 Xcode 에 맞춘 프로젝트 형식뿐이다.
+- **실제 아이폰으로**(2026-10-15, OwnTracks 27.0.1, iOS 27.0): 웹의 폰 연결로 설정을 넣자 게이트웨이로 보고가 들어왔다(tid `me`,
+  Basic 인증 통과). `PUT /owntracks/cmd {"action":"status"}` 에 폰이 상태 메시지로 답했고, `PUT /owntracks/mode {"mode":2}` 를 걸자
+  다음 보고의 응답으로 setConfiguration 이 나가 그 뒤 보고가 `m=2`(Move)로 왔다. 처음 한 번은 원격 설정 스위치가 꺼져 있어 적용되지
+  않았는데, 그때 서버가 보낸 것을 바뀐 것으로 쳐서 다시 보내지 않던 것을 고쳤다: 이제 보고의 `m` 이 기준이다.
 - 폰 설정 링크(Postgres 흐름 테스트): 토큰 없이 401, inline 을 풀면 HTTP 모드·URL·계정·Significant·cmd·remoteConfiguration.
   waypoints 로 영역이 들어오고 여기서 정한 종류·동네는 남는다. 수집기의 배달앱 알림 줄 읽기(다시 넣기·다른 앱은 무시).
