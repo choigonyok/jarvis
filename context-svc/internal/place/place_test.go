@@ -3,6 +3,7 @@ package place
 import (
 	"slices"
 	"testing"
+	"time"
 )
 
 func TestInsideAndMode(t *testing.T) {
@@ -28,5 +29,41 @@ func TestInsideAndMode(t *testing.T) {
 	}
 	if m := Mode(Move, "", "", 5, false); m != Quiet {
 		t.Fatalf("배터리가 거의 없으면 조용히: %d", m)
+	}
+}
+
+func TestTrips(t *testing.T) {
+	seoul, _ := time.LoadLocation("Asia/Seoul")
+	at := func(d, hm string) time.Time {
+		x, _ := time.ParseInLocation("2006-01-02 15:04", d+" "+hm, seoul)
+		return x
+	}
+	out := func(d, hm string) *time.Time { x := at(d, hm); return &x }
+	stays := []Stay{
+		{Region: "회사", Area: "강남", In: at("2026-10-13", "09:00"), Out: out("2026-10-13", "18:20")},
+		{Region: "집", Area: "망원동", In: at("2026-10-13", "19:05"), Out: out("2026-10-14", "08:20")},
+		{Region: "회사", Area: "강남", In: at("2026-10-14", "09:10"), Out: out("2026-10-14", "18:30")},
+		{Region: "강남역 헬스장", Area: "강남", In: at("2026-10-14", "18:40"), Out: out("2026-10-14", "20:00")}, // same area: no trip
+		{Region: "집", Area: "망원동", In: at("2026-10-14", "20:45"), Out: out("2026-10-15", "08:15")},
+		{Region: "회사", Area: "강남", In: at("2026-10-15", "09:05"), Out: out("2026-10-15", "18:00")},
+		{Region: "편의점", In: at("2026-10-15", "10:00"), Out: out("2026-10-15", "10:05")}, // inside 회사's stay
+		{Region: "집", Area: "망원동", In: at("2026-10-15", "23:30")},                       // 5h30 later: not a trip
+	}
+	trips := Trips(stays)
+	got := map[string]int{}
+	for _, tr := range trips {
+		got[tr.From+"→"+tr.To]++
+	}
+	if got["강남→망원동"] != 2 || got["망원동→강남"] != 2 || len(trips) != 4 {
+		t.Fatalf("trips: %+v", trips)
+	}
+	routes := Routes(trips, seoul)
+	for _, r := range routes {
+		if r.From == "강남" && (r.Minutes != 45 || r.Trips != 2) {
+			t.Errorf("강남→망원동: %+v", r)
+		}
+		if r.From == "망원동" && (r.Minutes != 50 || r.Leave != "08:17") {
+			t.Errorf("망원동→강남: %+v", r)
+		}
 	}
 }

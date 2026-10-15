@@ -5,7 +5,8 @@
 // The tiers are the sender's call - it knows whether someone has to act - and
 // the settings are the person's: a category turned off is never pushed, and
 // quiet hours hold even an urgent push until morning, when everything held
-// goes out as one.
+// goes out as one. Driving or in a meeting (context-svc's context.state)
+// holds pushes the same way, until it ends.
 package notify
 
 import (
@@ -75,6 +76,31 @@ type Service struct {
 	// One decision at a time: an event arriving while the minute tick flushes
 	// must not be pushed twice.
 	mu sync.Mutex
+	// busyUntil: driving or in a meeting, by context-svc; pushes wait. It
+	// lapses by itself in case the end is never heard.
+	busyUntil time.Time
+	busyWhy   string
+	heldBusy  bool // what waits was held for being busy, not for the night
+}
+
+// busyLapse is how long "busy" is believed without a word that it ended.
+const busyLapse = 4 * time.Hour
+
+// Busy says the operator is driving or in a meeting (why), or no longer.
+// While busy, pushes wait as in quiet hours and go out together after.
+func (s *Service) Busy(on bool, why string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if on {
+		s.busyUntil, s.busyWhy = s.now().Add(busyLapse), why
+		return
+	}
+	s.busyUntil, s.busyWhy = time.Time{}, ""
+}
+
+// held is whether a push now would wait: quiet hours, or busy.
+func (s *Service) held(set Settings) bool {
+	return s.quiet(set) || s.now().Before(s.busyUntil)
 }
 
 func New(s Store, p Sender, loc *time.Location) *Service {
@@ -107,10 +133,12 @@ func (s *Service) Accept(ctx context.Context, e Event) (store.Notification, bool
 	switch {
 	case saved.Tier == "log", saved.Tier == "now" && muted(set, saved.Kind):
 		err = s.store.MarkDelivered(ctx, []int64{saved.ID})
-	case saved.Tier == "now" && !s.quiet(set):
+	case saved.Tier == "now" && !s.held(set):
 		err = s.deliver(ctx, []store.Notification{saved}, "")
+	case saved.Tier == "now" && !s.quiet(set):
+		s.heldBusy = true
 	}
-	// digest, or now during quiet hours: left pending for Tick.
+	// digest, or now during quiet hours or while busy: left pending for Tick.
 	return saved, false, err
 }
 
@@ -120,16 +148,21 @@ func (s *Service) Tick(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	set := s.settings(ctx)
-	if s.quiet(set) {
+	if s.held(set) {
 		return nil
 	}
 	held, err := s.store.Pending(ctx, "now")
 	if err != nil {
 		return err
 	}
-	if err := s.deliver(ctx, held, "밤사이 알림"); err != nil {
+	group := "밤사이 알림"
+	if s.heldBusy {
+		group = "운전·회의 중 알림"
+	}
+	if err := s.deliver(ctx, held, group); err != nil {
 		return err
 	}
+	s.heldBusy = false
 
 	now := s.now().In(s.loc)
 	today := now.Format("2006-01-02")

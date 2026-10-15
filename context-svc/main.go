@@ -80,7 +80,9 @@ func main() {
 	}()
 
 	addr := getenv("LISTEN_ADDR", ":8103")
-	srv := &http.Server{Addr: addr, Handler: api.New(st, cfg, events, log).Handler(), ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second}
+	server := api.New(st, cfg, events, log)
+	go server.Watch(ctx, time.Minute)
+	srv := &http.Server{Addr: addr, Handler: server.Handler(), ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second}
 	go func() {
 		log.Info("context-svc 가 듣기 시작했습니다", "addr", addr)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {

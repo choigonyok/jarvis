@@ -14,7 +14,10 @@
   단축어·수집기는 신호 토큰(`CONTEXT_SIGNAL_TOKEN`). 신호 토큰으로는 아무것도 읽지 못한다.
 - **원본 좌표는 30일만**(`CONTEXT_RAW_DAYS`). 원본은 공용 `raw_events` 가 아니라 `context_raw` 에 둔다:
   `raw_events` 는 추가 전용 트리거가 있어 지울 수 없고, 위치 원본은 지워야 한다. 체류·현재 상태는 오래 둔다.
-- **좌표마다 판단하지 않는다.** 이벤트는 영역 진입·이탈(`location.enter`/`location.leave`, 알림함에만)뿐이다.
+- **좌표마다 판단하지 않는다.** 이벤트는 영역 진입·이탈(`location.enter`/`location.leave`, 알림함에만)과
+  현재 상태가 바뀔 때(`context.state`)뿐이다.
+- **이동 시간은 여기서 잰다.** 지도 API 의 예상값을 저장하지 않는다. 실제로 걸린 시간은 체류에서 나온다(한 영역을
+  나선 시각 → 다음 영역에 든 시각). 그 길을 자주 다니면 mind 가 이동 시간 노트로 만든다.
 
 ## 받는 것
 
@@ -35,11 +38,20 @@ POST /signals     {source, kind, state, at?} (Bearer 신호 토큰). kind 는 de
 Move 를 하지 않고, 8% 미만이면 Quiet. 서버가 먼저 폰을 깨울 수 없어서, 바꾸는 계기는 늘 폰이 보낸 보고다.
 OwnTracks 에서 원격 설정(Remote configuration)을 켜야 적용된다.
 
+필드 이름은 OwnTracks 문서(owntracks.org/booklet, 2026-10-15 확인)와 맞췄다: `configuration.monitoring` 은 -1 Quiet,
+0 Manual, 1 Significant, 2 Move. `setConfiguration` 명령은 JSON 문서의 `cmd` 에 iOS·Android 둘 다로 있고, 앱의
+`cmd`(명령에 응답)와 `remoteConfiguration`(원격 설정 허용)이 켜져 있어야 한다. HTTP 문서는 응답 본문에 `cmd` 를
+담을 수 있다고 하지만 그 예시 목록에는 `setConfiguration` 이 없어서, 폰에서 한 번 실제로 바뀌는지 보는 것이 남았다
+(안 바뀌면 모드 전환만 빠지고 위치·체류는 그대로 된다). `bs`(배터리 상태)는 0 모름, 1 빠짐, 2 충전 중, 3 가득.
+
 ## 읽는 것 (Bearer API 토큰)
 
 ```
 GET    /now                 지금: 머무는 영역(언제부터), 마지막 위치와 나이, 신호, 한 줄 요약
 GET    /visits?from=&to=    체류 (RFC 3339 또는 YYYY-MM-DD)
+GET    /travel?days=60      체류에서 잰 이동: trips(나선 곳·시각 → 든 곳·시각, 분)와 routes(길마다 횟수, 걸린 시간의
+                            중앙값, 보통 나서는 시각). 곳의 이름은 영역의 동네(area), 없으면 영역 이름. 3시간 넘게
+                            어느 영역에도 없던 사이는 이동으로 치지 않고, 안에 든 영역(건물 ⊂ 동네)도 이동이 아니다
 GET    /regions             PUT /regions {name, kind(home|work|camp|shop|food|other), lat, lon, radiusM, area}
 DELETE /regions/{name}
 ```
@@ -60,6 +72,13 @@ DELETE /regions/{name}
 `/now` 의 `state` 는 체류와 신호에서 만든 파생값이다: 운전 중(CarPlay 연결 4시간 안, 또는 운전 집중 모드), 회의 중
 (맥 앞의 앱이 회의 앱, 15분 안), 집·회사(머무는 영역의 종류), 집중 모드. 오래된 신호는 믿지 않는다. agent 는 매
 턴 이 한 줄을 지금 상황 옆에 둔다.
+
+이 한 장이 바뀌면(보고가 올 때마다, 그리고 신호가 낡아 끝나는 것까지 1분마다 확인) `context.state` 이벤트를 낸다:
+`{state, changed: ["운전 시작", "집 끝"], summary}`. 마지막으로 알린 상태는 `context_state` 의 `derived` 키에 둔다.
+notify-svc 가 이것을 듣고 **운전·회의 중에는 즉시 알림을 붙잡았다가** 끝나면 "운전·회의 중 알림 N건"으로 한 번에
+보낸다(방해 금지 시간과 같은 방식, 끝을 못 들어도 4시간 뒤 풀림). agent 의 Source 인터페이스(`module.Source`)는
+실행 경로가 없어서(레지스트리가 모으기만 한다) 쓰지 않았다: 에이전트는 이벤트를 events-svc 구독(`/consume`)으로 받고,
+상태는 매 턴 읽는다.
 
 ## 맥 수집기
 
@@ -82,5 +101,8 @@ DELETE /regions/{name}
   Move 명령, 진입 이벤트가 빠져도 다음 위치로 체류를 다시 열고 Significant 명령, 신호 토큰으로 쓰고 읽지 못함,
   잘못된 kind 거부, 지금·체류 조회, 오래된 원본 지우기.
 - `cmd/mac-collector`: 앱 종류, 클립보드 패턴(키처럼 생긴 문자열은 아무 종류도 아님), 비밀번호 관리자.
-- 현재 상태 파생: 오래된 회의 신호는 무시, CarPlay 연결이면 운전 중.
+- 현재 상태 파생: 오래된 회의 신호는 무시, CarPlay 연결이면 운전 중. 바뀐 것의 말(`운전 시작,집 끝`).
+- 이동(`place.Trips`·`Routes`): 같은 동네 안의 영역 이동, 다른 체류 안에 든 짧은 체류, 3시간 넘는 공백은 이동이
+  아니고, 걸린 시간은 중앙값. API 흐름에서 집 → 회사 30분, 회사 → 집 67분이 `/travel` 로 나오고, 신호가 오면
+  `derived` 상태가 운전 중으로 바뀐다.
 - 운영에서 게이트웨이를 거쳐: 토큰 없는 `/context/now` 는 401, 자격 없는 `/context/owntracks` 도 401.

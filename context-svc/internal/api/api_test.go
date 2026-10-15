@@ -102,6 +102,56 @@ func TestFlow(t *testing.T) {
 	if n, _ := st.Purge(ctx, time.Unix(1760540000, 0)); n != 2 {
 		t.Fatalf("그보다 이른 원본 둘을 지움: %d", n)
 	}
+
+	// The way between home and work, from the stays: 30 minutes there,
+	// 67 back.
+	if code, _ := do("PUT", "/regions", `{"name":"회사","kind":"work","lat":37.4979,"lon":127.0276,"radiusM":150,"area":"강남"}`, api); code != 200 {
+		t.Fatalf("영역: %d", code)
+	}
+	for _, b := range []string{`{"_type":"transition","event":"enter","desc":"회사","tst":1760505400}`, `{"_type":"transition","event":"leave","desc":"회사","tst":1760536000}`} {
+		if code, body := do("POST", "/owntracks", b, phone); code != 200 {
+			t.Fatalf("회사: %d %s", code, body)
+		}
+	}
+	code, body = do("GET", "/travel?days=400", "", api)
+	var tr struct {
+		Trips  []any
+		Routes []struct {
+			From, To string
+			Minutes  int
+		}
+	}
+	_ = json.Unmarshal([]byte(body), &tr)
+	ways := map[string]int{}
+	for _, r := range tr.Routes {
+		ways[r.From+"→"+r.To] = r.Minutes
+	}
+	if code != 200 || len(tr.Trips) != 2 || ways["망원동→강남"] != 30 || ways["강남→망원동"] != 67 {
+		t.Fatalf("이동: %d %s", code, body)
+	}
+
+	// The state in one place is kept as it was last announced, and moves
+	// with each report.
+	var derived State
+	if _, err := st.Get(ctx, "derived", &derived); err != nil || !derived.Home || derived.Driving {
+		t.Fatalf("집, 운전 아님: %+v %v", derived, err)
+	}
+	if code, _ := do("POST", "/signals", `{"source":"shortcut","kind":"device.carplay","state":"connected"}`, func(r *http.Request) { r.Header.Set("Authorization", "Bearer sig") }); code != 204 {
+		t.Fatalf("신호: %d", code)
+	}
+	if _, err := st.Get(ctx, "derived", &derived); err != nil || !derived.Driving {
+		t.Fatalf("운전 시작: %+v %v", derived, err)
+	}
+}
+
+func TestChanged(t *testing.T) {
+	got := Changed(State{Home: true}, State{Driving: true})
+	if strings.Join(got, ",") != "운전 시작,집 끝" {
+		t.Fatalf("%v", got)
+	}
+	if got := Changed(State{Meeting: true}, State{Meeting: true}); len(got) != 0 {
+		t.Fatalf("%v", got)
+	}
 }
 
 func TestDerive(t *testing.T) {

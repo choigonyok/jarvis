@@ -7,11 +7,18 @@
 //	                         collector, Home Assistant (bearer: the signal token)
 //	GET    /now              where and in what state, now (bearer: API token)
 //	GET    /visits?from=&to= stays in regions
+//	GET    /travel?days=60   the journeys between regions, from the stays,
+//	                         and how long each way usually takes
 //	GET    /regions          PUT /regions {name, kind, lat, lon, radiusM, area}
 //	DELETE /regions/{name}
 //
 // Only /owntracks and /signals face the phone, through the gateway; each
 // has its own credential, so the phone never holds the stack's token.
+//
+// When the state in one place changes (driving, in a meeting, home, at
+// work, focus), an event says so: context.state, for whatever listens -
+// notify-svc holds pushes while driving or in a meeting. It is checked on
+// every report and every minute, since a signal also ends by going stale.
 package api
 
 import (
@@ -26,6 +33,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/choigonyok/jarvis/context-svc/internal/notify"
@@ -47,13 +55,19 @@ type Server struct {
 	events *notify.Client
 	log    *slog.Logger
 	now    func() time.Time
+	loc    *time.Location
+	mu     sync.Mutex // one state check at a time
 }
 
 func New(st *store.Store, cfg Config, events *notify.Client, log *slog.Logger) *Server {
 	if cfg.Trust == 0 {
 		cfg.Trust = 300
 	}
-	return &Server{st: st, cfg: cfg, events: events, log: log, now: time.Now}
+	loc, err := time.LoadLocation("Asia/Seoul")
+	if err != nil {
+		loc = time.Local
+	}
+	return &Server{st: st, cfg: cfg, events: events, log: log, now: time.Now, loc: loc}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -65,6 +79,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /signals", s.signals)
 	mux.HandleFunc("GET /now", s.bearer(s.current))
 	mux.HandleFunc("GET /visits", s.bearer(s.visits))
+	mux.HandleFunc("GET /travel", s.bearer(s.travel))
 	mux.HandleFunc("GET /regions", s.bearer(s.regions))
 	mux.HandleFunc("PUT /regions", s.bearer(s.putRegion))
 	mux.HandleFunc("DELETE /regions/{name}", s.bearer(s.deleteRegion))
@@ -139,6 +154,7 @@ func (s *Server) owntracks(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "위치를 반영하지 못했습니다", err)
 		return
 	}
+	s.Check(ctx)
 	writeJSON(w, http.StatusOK, cmds)
 }
 
@@ -298,6 +314,7 @@ func (s *Server) signals(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "상태를 남기지 못했습니다", err)
 		return
 	}
+	s.Check(r.Context())
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -365,24 +382,30 @@ type Sig struct {
 }
 
 func (s *Server) current(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
+	out, err := s.snapshot(r.Context())
+	if err != nil {
+		s.fail(w, "상태를 읽지 못했습니다", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// snapshot is the state in one place, now.
+func (s *Server) snapshot(ctx context.Context) (Now, error) {
 	out := Now{Signals: map[string]Sig{}, Mode: place.Significant}
 	var loc Location
 	if at, err := s.st.Get(ctx, "location", &loc); err == nil {
 		out.Location, out.FixAt = &loc, &at
 	} else if !errors.Is(err, store.ErrNotFound) {
-		s.fail(w, "상태를 읽지 못했습니다", err)
-		return
+		return out, err
 	}
 	var err error
 	if out.Visits, err = s.st.Open(ctx); err != nil {
-		s.fail(w, "체류를 읽지 못했습니다", err)
-		return
+		return out, err
 	}
 	states, err := s.st.States(ctx)
 	if err != nil {
-		s.fail(w, "상태를 읽지 못했습니다", err)
-		return
+		return out, err
 	}
 	for _, st := range states {
 		if k, ok := strings.CutPrefix(st.Key, "signal:"); ok {
@@ -398,7 +421,102 @@ func (s *Server) current(w http.ResponseWriter, r *http.Request) {
 	}
 	out.State = Derive(out, s.now())
 	out.Summary = Summary(out, s.now())
-	writeJSON(w, http.StatusOK, out)
+	return out, nil
+}
+
+// Check compares the state in one place with the one last announced, and
+// announces it when it changed: context.state, with what changed.
+func (s *Server) Check(ctx context.Context) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n, err := s.snapshot(ctx)
+	if err != nil {
+		s.log.Warn("상태를 읽지 못했습니다", "err", err)
+		return
+	}
+	var last State
+	if _, err := s.st.Get(ctx, "derived", &last); err != nil && !errors.Is(err, store.ErrNotFound) {
+		return
+	}
+	changed := Changed(last, n.State)
+	if len(changed) == 0 {
+		return
+	}
+	now := s.now()
+	if err := s.st.Set(ctx, "derived", n.State, now); err != nil {
+		s.log.Warn("상태를 남기지 못했습니다", "err", err)
+		return
+	}
+	s.events.Emit(map[string]any{
+		"source": "context", "type": "context.state", "subject": strings.Join(changed, ", "),
+		"data":       map[string]any{"state": n.State, "changed": changed, "summary": n.Summary},
+		"key":        fmt.Sprintf("context.state:%d", now.UnixNano()),
+		"occurredAt": now,
+	})
+}
+
+// Watch checks the state every minute: a signal ends by going stale too.
+func (s *Server) Watch(ctx context.Context, every time.Duration) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			s.Check(ctx)
+		}
+	}
+}
+
+// Changed is what differs between two states, in words: "운전 시작",
+// "회의 끝".
+func Changed(a, b State) []string {
+	var out []string
+	for _, f := range []struct {
+		was, is bool
+		what    string
+	}{{a.Driving, b.Driving, "운전"}, {a.Meeting, b.Meeting, "회의"}, {a.Home, b.Home, "집"}, {a.Work, b.Work, "회사"}, {a.Focus, b.Focus, "집중 모드"}} {
+		switch {
+		case !f.was && f.is:
+			out = append(out, f.what+" 시작")
+		case f.was && !f.is:
+			out = append(out, f.what+" 끝")
+		}
+	}
+	return out
+}
+
+// travel is the journeys between regions over the last days, and how long
+// each way usually takes - from the stays, not from a map: the time it
+// actually took.
+func (s *Server) travel(w http.ResponseWriter, r *http.Request) {
+	days := 60
+	if v := r.URL.Query().Get("days"); v != "" {
+		if _, err := fmt.Sscan(v, &days); err != nil || days < 1 || days > 400 {
+			writeErr(w, http.StatusBadRequest, "days 는 1~400 입니다.")
+			return
+		}
+	}
+	now := s.now()
+	vs, err := s.st.Visits(r.Context(), now.AddDate(0, 0, -days), now.Add(time.Minute))
+	if err != nil {
+		s.fail(w, "체류를 읽지 못했습니다", err)
+		return
+	}
+	stays := make([]place.Stay, len(vs))
+	for i, v := range vs {
+		stays[i] = place.Stay{Region: v.Region, Area: v.Area, In: v.EnteredAt, Out: v.LeftAt}
+	}
+	trips := place.Trips(stays)
+	if trips == nil {
+		trips = []place.Trip{}
+	}
+	routes := place.Routes(trips, s.loc)
+	if routes == nil {
+		routes = []place.Route{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"trips": trips, "routes": routes})
 }
 
 // Summary is the state in a line: where (since when), what the devices

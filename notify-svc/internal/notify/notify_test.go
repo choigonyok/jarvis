@@ -129,6 +129,31 @@ func TestQuietHoursHoldThenOnePushInTheMorning(t *testing.T) {
 	}
 }
 
+func TestBusyHoldsUntilItEnds(t *testing.T) {
+	svc, _, snd, now := setup("2026-10-10 18:00")
+	ctx := context.Background()
+	svc.Busy(true, "운전")
+	svc.Accept(ctx, ev("mind.card", "now", "늦는다고 보낼까요?", ""))
+	svc.Accept(ctx, ev("collect.fail", "now", "카톡 수집 멈춤", ""))
+	svc.Tick(ctx)
+	if len(snd.sent) != 0 {
+		t.Fatalf("운전 중에 나갔습니다: %+v", snd.sent)
+	}
+	svc.Busy(false, "")
+	svc.Tick(ctx)
+	if len(snd.sent) != 1 || !strings.HasPrefix(snd.sent[0].Title, "운전·회의 중 알림 2건") {
+		t.Fatalf("운전이 끝나면 한 번에 나가야 합니다: %+v", snd.sent)
+	}
+	// Never heard the end: it lapses.
+	svc.Busy(true, "회의")
+	svc.Accept(ctx, ev("mind.card", "now", "카드", ""))
+	*now = now.Add(busyLapse + time.Minute)
+	svc.Tick(ctx)
+	if len(snd.sent) != 2 {
+		t.Fatalf("끝을 못 들어도 풀려야 합니다: %+v", snd.sent)
+	}
+}
+
 func TestDigestOnceAtItsTime(t *testing.T) {
 	svc, st, snd, now := setup("2026-10-10 12:00")
 	ctx := context.Background()

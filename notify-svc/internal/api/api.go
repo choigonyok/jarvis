@@ -130,6 +130,21 @@ func (s *Server) consume(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	if e.Type == "context.state" {
+		// Driving or in a meeting: pushes wait until it ends.
+		var d struct {
+			State struct {
+				Driving bool `json:"driving"`
+				Meeting bool `json:"meeting"`
+			} `json:"state"`
+		}
+		_ = json.Unmarshal(e.Data, &d)
+		why := "회의"
+		if d.State.Driving {
+			why = "운전"
+		}
+		s.svc.Busy(d.State.Driving || d.State.Meeting, why)
+	}
 	if e.Notify == nil {
 		writeJSON(w, http.StatusOK, map[string]bool{"ignored": true})
 		return
