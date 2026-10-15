@@ -1,0 +1,98 @@
+{
+ "name": "이동 시간 노트는 체류 기록에서 저절로: 밤에 '강남→망원동 45분' 노트가 생기고, 회사를 18:30에 나서면 19:00 약속에 늦는다는 초안 카드",
+ "room": "owner",
+ "roomName": "jarvis",
+ "routes": [
+  {
+   "from": "강남",
+   "to": "망원동",
+   "trips": 6,
+   "minutes": 45,
+   "leave": "18:20"
+  },
+  {
+   "from": "망원동",
+   "to": "강남",
+   "trips": 2,
+   "minutes": 50,
+   "leave": "08:15"
+  }
+ ],
+ "turns": [
+  {
+   "at": "2026-10-16T03:00",
+   "tick": "night",
+   "expect": {
+    "notes": [
+     {
+      "textHas": "강남에서 망원동까지 보통 45분"
+     }
+    ],
+    "noNotes": [
+     {
+      "textHas": "망원동에서 강남까지"
+     }
+    ]
+   }
+  },
+  {
+   "messages": [
+    {
+     "at": "2026-10-16T09:00",
+     "me": true,
+     "text": "오늘 7시 망원동에서 엄마랑 저녁"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "create",
+      "kind": "plan",
+      "set": {
+       "title": "엄마와 저녁",
+       "status": "confirmed",
+       "date": "2026-10-16",
+       "start": "19:00",
+       "place": "망원동",
+       "people": [
+        "엄마"
+       ],
+       "type": "식사"
+      },
+      "evidence": [
+       {
+        "line": 1,
+        "quote": "7시 망원동에서 엄마랑 저녁"
+       }
+      ],
+      "confidence": 0.9,
+      "why": "확정 메모"
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-10-16T18:31",
+   "occur": [
+    {
+     "id": "visit:901",
+     "kind": "visit",
+     "at": "2026-10-16T09:02",
+     "until": "2026-10-16T18:30",
+     "title": "회사",
+     "place": "회사",
+     "area": "강남",
+     "class": "work"
+    }
+   ],
+   "expect": {
+    "cards": [
+     "엄마에게 '20분 정도 늦을 것 같아 미안!' 보낼까요?"
+    ],
+    "cardHas": [
+     "강남에서 망원동까지 보통 45분"
+    ]
+   }
+  }
+ ]
+}

@@ -48,7 +48,13 @@ var options = map[string]struct {
 	"가까움": {"접근성", +1}, "가성비": {"가격 대비", +1}, "친절함": {"응대", +1}, "여유로움": {"공간", +1},
 }
 
-// Bad and Good are the card's choices for a kind of subject.
+// Places are the subjects whose answers teach preferences: what a place is
+// like, and so what the operator is like. A purchase, a workout, a decision
+// or a week is reviewed too, but its answers stay its own.
+var Places = map[string]bool{"캠핑장": true, "숙소": true, "식당": true, "카페": true}
+
+// Bad and Good are the card's choices for a kind of subject, before the
+// dimensions the answers grew (Options).
 func Bad(subjectType string) []string {
 	if subjectType == "캠핑장" {
 		return []string{"소음·매너", "화장실·샤워장", "사이트 간격", "청결", "가격 대비", "접근성", "예약·응대"}
@@ -92,11 +98,26 @@ func (p *Prefs) Record(ctx context.Context, source string, r Review) ([]model.Pr
 	score, _ := strconv.Atoi(strings.TrimSpace(r.Answers["score"]))
 	at := p.Now()
 	base := model.Observation{SubjectType: r.SubjectType, Subject: r.Subject, Score: score, Context: r.Context, Source: source, At: at}
+	if !Places[r.SubjectType] {
+		return nil, p.St.AddObservations(ctx, Others(base, r.Answers))
+	}
 	obs := []model.Observation{base} // the score alone
 	seen := map[string]bool{}
+	grown, err := p.promoted(ctx)
+	if err != nil {
+		return nil, err
+	}
 	for _, key := range []string{"bad", "good"} {
 		for _, choice := range split(r.Answers[key]) {
 			o, ok := options[choice]
+			for _, g := range grown {
+				if g.Label == choice {
+					o, ok = struct {
+						dim string
+						pol int
+					}{g.Label, g.Polarity}, true
+				}
+			}
 			if !ok || seen[o.dim] {
 				continue
 			}
@@ -136,10 +157,15 @@ func (p *Prefs) Record(ctx context.Context, source string, r Review) ([]model.Pr
 	// "기타" said the same way at three or more places is a dimension of its
 	// own from now on; the observations stay as they were, and are read
 	// under it.
+	if grown, err = p.promoted(ctx); err != nil {
+		return nil, err
+	}
 	for _, o := range obs {
 		if o.Dimension == Other && o.Detail != "" {
-			if promoted, err := p.Promoted(ctx, o.Detail); err == nil && promoted {
-				seen[Key(o.Detail)] = true
+			for _, g := range grown {
+				if Key(g.Label) == Key(o.Detail) {
+					seen[g.Label] = true
+				}
 			}
 		}
 	}
@@ -220,7 +246,7 @@ func (p *Prefs) Recompute(ctx context.Context, dimension string) ([]model.Prefer
 			return nil, err
 		}
 		for _, o := range others {
-			if Key(o.Detail) == dimension {
+			if Key(o.Detail) == Key(dimension) {
 				obs = append(obs, o)
 			}
 		}
@@ -357,6 +383,217 @@ func (p *Prefs) Promoted(ctx context.Context, detail string) (bool, error) {
 		}
 	}
 	return len(places) >= promote, nil
+}
+
+// Grown is a dimension that grew out of "기타": what was written (the
+// words said most often), and the way it was said.
+type Grown struct {
+	Label    string
+	Polarity int
+	Places   int
+}
+
+// promoted is every "기타" said the same way at enough different places.
+func (p *Prefs) promoted(ctx context.Context) ([]Grown, error) {
+	others, err := p.St.ObservationsOn(ctx, Other)
+	if err != nil {
+		return nil, err
+	}
+	type acc struct {
+		places map[string]bool
+		pol    int
+		words  map[string]int
+	}
+	by := map[string]*acc{}
+	var keys []string
+	for _, o := range others {
+		k := Key(o.Detail)
+		if k == "" {
+			continue
+		}
+		a := by[k]
+		if a == nil {
+			a = &acc{places: map[string]bool{}, words: map[string]int{}}
+			by[k] = a
+			keys = append(keys, k)
+		}
+		a.places[o.SubjectType+":"+o.Subject] = true
+		a.pol += o.Polarity
+		a.words[strings.TrimSpace(o.Detail)]++
+	}
+	var out []Grown
+	for _, k := range keys {
+		a := by[k]
+		if len(a.places) < promote {
+			continue
+		}
+		label, best := "", 0
+		for w, n := range a.words {
+			if n > best || n == best && w < label {
+				label, best = w, n
+			}
+		}
+		pol := -1
+		if a.pol > 0 {
+			pol = 1
+		}
+		out = append(out, Grown{Label: label, Polarity: pol, Places: len(a.places)})
+	}
+	return out, nil
+}
+
+// Retirement: a dimension stops being offered on the card when it went
+// unchosen for months while reviews kept coming, or when choosing it says
+// nothing about the score. Its observations stay, so it can come back.
+const (
+	unusedFor      = 120 * 24 * time.Hour
+	reviewsToJudge = 8
+	unrelated      = 0.3
+)
+
+// Options are the card's choices for a kind of subject: the starting set
+// less what was retired, and what grew out of "기타". Retired lists what
+// was taken off, with why.
+func (p *Prefs) Options(ctx context.Context, subjectType string) (bad, good []string, retired map[string]string, err error) {
+	scores, err := p.St.ObservationsOn(ctx, "")
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	retired = map[string]string{}
+	now := p.Now()
+	recent, mean, n := 0, 0.0, 0
+	first := now
+	byVisit := map[string]int{}
+	for _, sc := range scores {
+		if !Places[sc.SubjectType] || sc.Score == 0 {
+			continue
+		}
+		if now.Sub(sc.At) < unusedFor {
+			recent++
+		}
+		if sc.At.Before(first) {
+			first = sc.At
+		}
+		mean += float64(sc.Score)
+		n++
+		byVisit[sc.Source] = sc.Score
+	}
+	if n > 0 {
+		mean /= float64(n)
+	}
+	judge := func(dim string) error {
+		if _, done := retired[dim]; done {
+			return nil
+		}
+		obs, err := p.St.ObservationsOn(ctx, dim)
+		if err != nil {
+			return err
+		}
+		last := time.Time{}
+		sum := map[int]float64{}
+		cnt := map[int]int{}
+		for _, o := range obs {
+			if !Places[o.SubjectType] {
+				continue
+			}
+			if o.At.After(last) {
+				last = o.At
+			}
+			if s, ok := byVisit[o.Source]; ok {
+				sum[o.Polarity] += float64(s)
+				cnt[o.Polarity]++
+			}
+		}
+		if recent >= reviewsToJudge && now.Sub(first) >= unusedFor && now.Sub(last) >= unusedFor {
+			retired[dim] = fmt.Sprintf("최근 넉 달 회고 %d번에 한 번도 고르지 않음", recent)
+			return nil
+		}
+		if cnt[-1]+cnt[1] >= reviewsToJudge {
+			says := false
+			for _, pol := range []int{-1, 1} {
+				if cnt[pol] >= 3 && math.Abs(sum[pol]/float64(cnt[pol])-mean) >= unrelated {
+					says = true
+				}
+			}
+			if !says {
+				retired[dim] = fmt.Sprintf("%d번 골랐지만 점수와 상관이 없음", cnt[-1]+cnt[1])
+			}
+		}
+		return nil
+	}
+	keep := func(choices []string) ([]string, error) {
+		var out []string
+		for _, c := range choices {
+			if err := judge(options[c].dim); err != nil {
+				return nil, err
+			}
+			if _, gone := retired[options[c].dim]; !gone {
+				out = append(out, c)
+			}
+		}
+		return out, nil
+	}
+	if bad, err = keep(Bad(subjectType)); err != nil {
+		return nil, nil, nil, err
+	}
+	if good, err = keep(Good(subjectType)); err != nil {
+		return nil, nil, nil, err
+	}
+	grown, err := p.promoted(ctx)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	for _, g := range grown {
+		if err := judge(g.Label); err != nil {
+			return nil, nil, nil, err
+		}
+		if _, gone := retired[g.Label]; gone {
+			continue
+		}
+		if g.Polarity < 0 {
+			bad = append(bad, g.Label)
+		} else {
+			good = append(good, g.Label)
+		}
+	}
+	return bad, good, retired, nil
+}
+
+// Others are the answers to a review of something that is not a place - a
+// purchase, a workout, a decision, a week - as observations of that
+// subject: the score, and each answer under its own name. They teach no
+// preference about places.
+func Others(base model.Observation, a Answers) []model.Observation {
+	base.Detail = strings.TrimSpace(a["note"])
+	out := []model.Observation{base}
+	ways := map[string]map[string]int{
+		"again":     {"또 살래요": 1, "다른 걸로": 0, "안 살래요": -1},
+		"condition": {"좋았음": 1, "보통": 0, "피곤했음": -1},
+		"reason":    {"이유가 맞았음": 1, "반쯤": 0, "빗나감": -1},
+	}
+	names := map[string]string{"again": "재구매", "condition": "컨디션", "reason": "판단 이유"}
+	asks := map[string]string{"물건": "again", "운동": "condition", "결정": "reason"}
+	for _, key := range []string{"again", "condition", "reason"} {
+		if asks[base.SubjectType] != key {
+			continue
+		}
+		if pol, ok := ways[key][strings.TrimSpace(a[key])]; ok {
+			x := base
+			x.Dimension, x.Polarity, x.Detail = names[key], pol, a[key]
+			out = append(out, x)
+		}
+	}
+	for _, t := range []struct {
+		key, dim string
+		pol      int
+	}{{"good", "좋았던 일", 1}, {"bad", "아쉬웠던 일", -1}, {"next", "다음 주", 0}} {
+		if v := strings.TrimSpace(a[t.key]); v != "" && base.SubjectType == "주" {
+			x := base
+			x.Dimension, x.Polarity, x.Detail = t.dim, t.pol, v
+			out = append(out, x)
+		}
+	}
+	return out
 }
 
 // Decide is the operator's answer to a confirmation card.

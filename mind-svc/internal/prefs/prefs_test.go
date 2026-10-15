@@ -2,6 +2,8 @@ package prefs
 
 import (
 	"context"
+	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -82,5 +84,84 @@ func TestPromote(t *testing.T) {
 	ps, err := p.Recompute(ctx, Key("벌레 많음"))
 	if err != nil || len(ps) != 1 || len(ps[0].Subjects) != 3 {
 		t.Fatalf("승격한 차원으로 선호 추정: %+v %v", ps, err)
+	}
+}
+
+// The card offers what grew out of "기타" (its words as said, its way), and
+// stops offering what went unchosen for months or says nothing about the
+// score; the observations stay.
+func TestOptions(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 10, 20, 21, 0, 0, 0, time.UTC)
+	st := store.NewMemory()
+	p := &Prefs{St: st, Now: func() time.Time { return now }}
+	add := func(src, subject string, at time.Time, score int, dims ...model.Observation) {
+		obs := []model.Observation{{SubjectType: "캠핑장", Subject: subject, Score: score, Source: src, At: at}}
+		for _, d := range dims {
+			d.SubjectType, d.Subject, d.Score, d.Source, d.At = "캠핑장", subject, score, src, at
+			obs = append(obs, d)
+		}
+		if err := st.AddObservations(ctx, obs); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := now.AddDate(0, -6, 0)
+	// "벌레 많음" at three places: offered among the bad.
+	for i, s := range []string{"A", "B", "C"} {
+		add("o"+s, s, old, []int{3, 4, 3}[i], model.Observation{Dimension: Other, Polarity: -1, Detail: []string{"벌레 많음", "벌레가 많음", "벌레 많음"}[i]})
+	}
+	bad, _, retired, err := p.Options(ctx, "캠핑장")
+	if err != nil || !slices.Contains(bad, "벌레 많음") || len(retired) != 0 {
+		t.Fatalf("기타에서 자란 차원: %v %v %v", bad, retired, err)
+	}
+	// Ten more reviews in the last months: 접근성 never chosen since the
+	// start; 청결 chosen at both high and low scores alike.
+	for i := range 10 {
+		score := 2 + 3*(i%2) // 2, 5, 2, 5 …
+		add(fmt.Sprint("r", i), fmt.Sprint("R", i), now.AddDate(0, 0, -10*i), score,
+			model.Observation{Dimension: "청결", Polarity: -1}, model.Observation{Dimension: "소음", Polarity: -1 + 2*(i%2)})
+	}
+	bad, good, retired, err := p.Options(ctx, "캠핑장")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(bad, "접근성") || slices.Contains(good, "가까움") || retired["접근성"] == "" {
+		t.Errorf("넉 달 동안 안 고른 차원은 정리: %v %v %v", bad, good, retired)
+	}
+	if slices.Contains(bad, "청결") || retired["청결"] == "" {
+		t.Errorf("점수와 상관없는 차원은 정리: %v %v", bad, retired)
+	}
+	if !slices.Contains(bad, "소음·매너") {
+		t.Errorf("점수와 함께 움직이는 소음은 남음: %v %v", bad, retired)
+	}
+	if obs, _ := st.ObservationsOn(ctx, "청결"); len(obs) != 10 {
+		t.Errorf("관찰은 지우지 않음: %d", len(obs))
+	}
+	// Choosing a grown dimension records it under its words.
+	if _, err := p.Record(ctx, "x", Review{SubjectType: "캠핑장", Subject: "D", Answers: Answers{"score": "1", "bad": "벌레 많음"}}); err != nil {
+		t.Fatal(err)
+	}
+	if obs, _ := st.ObservationsOn(ctx, "벌레 많음"); len(obs) != 1 || obs[0].Polarity != -1 {
+		t.Errorf("자란 차원으로 기록: %+v", obs)
+	}
+}
+
+// A purchase, a workout, a week: answers kept under their own names, no
+// preference about places.
+func TestOthers(t *testing.T) {
+	ctx := context.Background()
+	st := store.NewMemory()
+	p := &Prefs{St: st, Now: func() time.Time { return time.Date(2026, 10, 20, 21, 0, 0, 0, time.UTC) }}
+	moved, err := p.Record(ctx, "w", Review{SubjectType: "물건", Subject: "캠핑 의자", Answers: Answers{"score": "2", "again": "안 살래요", "note": "허리가 아픔"}})
+	if err != nil || len(moved) != 0 {
+		t.Fatalf("%v %v", moved, err)
+	}
+	attrs, _ := st.Attributes(ctx, "물건", "캠핑 의자")
+	if len(attrs) != 1 || attrs[0].Dimension != "재구매" || attrs[0].Value >= 0 {
+		t.Fatalf("다시 안 산다: %+v", attrs)
+	}
+	obs := Others(model.Observation{SubjectType: "주", Subject: "2026-W42"}, Answers{"score": "4", "good": "캠핑", "bad": "야근", "next": "운동 세 번"})
+	if len(obs) != 4 || obs[3].Dimension != "다음 주" || obs[3].Detail != "운동 세 번" {
+		t.Fatalf("주간 회고: %+v", obs)
 	}
 }

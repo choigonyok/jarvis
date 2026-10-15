@@ -1,7 +1,8 @@
 """memory-svc: jarvis' long-term memory, a Graphiti knowledge graph.
 
 Every MEMORY_INTERVAL it collects what is new across jarvis (sources.py) into
-the graph, and mind puts in the facts it has checked (/facts); agents and mind
+the graph, mind puts in the facts it has checked (/facts) and the structured
+records it read (/records); agents and mind
 ask it with /search, /nodes and /topics. The operator's data lives in group
 "owner", the guest's conversation in group "guest" - and every call names
 exactly one group, so neither can read the other's.
@@ -37,7 +38,9 @@ HAS_KEY = bool(os.environ.get("ANTHROPIC_API_KEY"))
 VOYAGE_KEY = bool(os.environ.get("VOYAGE_API_KEY"))
 EVENTS_URL = os.environ.get("EVENTS_URL", "")
 # Which collectors run. Once mind reads the conversations, chat, kakao and
-# imessage come off this list.
+# imessage come off this list; once mind reads the structured sources and
+# sends them to /records, calendar, spending, assets, workout, jobs and photos
+# do too (compose's default is chat,diary,topics).
 SOURCES = [s.strip() for s in (os.environ.get("MEMORY_SOURCES") or ",".join(sources.ALL)).split(",") if s.strip()]
 if unknown := [s for s in SOURCES if s not in sources.ALL]:
     log.warning("MEMORY_SOURCES 에 모르는 수집기가 있어 뺍니다: %s", ", ".join(unknown))
@@ -254,6 +257,49 @@ async def add_facts(body: FactsIn):
         await state.save_fact(f.ref, body.group, r)
         out.append(r)
     return {"results": out}
+
+
+class NodeRef(BaseModel):
+    kind: str = Field(min_length=1, max_length=40)
+    key: str = Field(min_length=1, max_length=300)
+    name: str = Field(min_length=1, max_length=300)
+
+
+class RecordIn(BaseModel):
+    key: str = Field(min_length=1, max_length=300)
+    relation: str = Field(min_length=1, max_length=80)
+    target: NodeRef
+    source: NodeRef | None = None
+    fact: str = Field(min_length=1, max_length=2000)
+    validAt: str | None = None
+
+
+class RecordsIn(BaseModel):
+    group: str = Field(pattern=GROUP)
+    records: list[RecordIn] = Field(max_length=200)
+
+
+@app.post("/records", dependencies=[Depends(auth)])
+async def add_records(body: RecordsIn):
+    """Structured records mind read from the services that keep them
+    (calendar, spending, assets, workouts, jobs, photos): one reader for each
+    source, so what mind reasons over and what memory remembers are the same
+    reading. Written straight to the graph like the collectors did (no LLM),
+    on the same edge keys; a record already there word for word is skipped."""
+    written = 0
+    for r in body.records:
+        done = f"record:{r.key}:{sources.h(r.fact, r.validAt)}"
+        if await state.done(done):
+            continue
+        if not await graph.has_fact(body.group, r.key, r.fact):
+            valid_at = datetime.fromisoformat(r.validAt) if r.validAt else None
+            await graph.fact(body.group, r.key, r.relation, (r.target.kind, r.target.key, r.target.name), r.fact,
+                             valid_at=valid_at, source=(r.source.kind, r.source.key, r.source.name) if r.source else None)
+            written += 1
+        await state.mark(done)
+    if written:
+        log.info("mind 가 보낸 기록 %d개를 넣었습니다", written)
+    return {"written": written}
 
 
 @app.get("/topics", dependencies=[Depends(auth)])

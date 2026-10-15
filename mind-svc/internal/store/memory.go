@@ -38,6 +38,7 @@ type Memory struct {
 	usage    map[[2]string]model.Usage
 	obs      []model.Observation
 	prefs    map[string]model.Preference
+	records  map[string]string
 	seq      int64
 }
 
@@ -60,6 +61,7 @@ func NewMemory() *Memory {
 		versions: map[string][]model.Note{},
 		preds:    map[string]model.Prediction{},
 		expects:  map[[2]string]model.Expectation{},
+		records:  map[string]string{},
 	}
 }
 
@@ -891,4 +893,35 @@ func (m *Memory) Preferences(context.Context) ([]model.Preference, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Dimension+out[i].Scope < out[j].Dimension+out[j].Scope })
 	return out, nil
+}
+
+func (m *Memory) FactsOn(_ context.Context, relation string, from, to time.Time) ([]model.Fact, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []model.Fact{}
+	for _, f := range m.facts {
+		if f.Relation == relation && !f.CreatedAt.Before(from) && f.CreatedAt.Before(to) {
+			out = append(out, f)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].CreatedAt.Before(out[j].CreatedAt)
+	})
+	return out, nil
+}
+
+func (m *Memory) RecordHash(_ context.Context, key string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.records[key], nil
+}
+
+func (m *Memory) PutRecordHash(_ context.Context, key, hash string, _ time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.records[key] = hash
+	return nil
 }

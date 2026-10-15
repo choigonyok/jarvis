@@ -72,7 +72,44 @@ func (p *Predictor) Put(ctx context.Context, pr model.Prediction, keys ...string
 			return pr, err
 		}
 	}
+	for _, t := range p.timers(pr) {
+		if err := p.St.SetTimer(ctx, t); err != nil {
+			return pr, err
+		}
+	}
 	return pr, nil
+}
+
+// Timer names of an expectation (skill "expect"): the day-before and
+// two-hours-before look of a plan, made general - any prediction is looked
+// at again when it is due (scored then, not the next night), and a prep
+// purchase still unmet is brought up ahead of it.
+const (
+	ExpectSkill = "expect"
+	DueTimer    = "due"
+	LeadTimer   = "lead"
+)
+
+// Lead is how far ahead of its due a prep purchase is brought up.
+const Lead = 3 * 24 * time.Hour
+
+func (p *Predictor) timers(pr model.Prediction) []model.Timer {
+	now := p.Now()
+	out := []model.Timer{{Skill: ExpectSkill, EntityID: pr.ID, Name: DueTimer, FireAt: pr.Due}}
+	if strings.HasPrefix(pr.Target, "buy:") && pr.PlanID != "" && pr.Due.Sub(now) > 24*time.Hour {
+		// The first morning (07:00) within three days of it; now, if that
+		// is past.
+		d := pr.Due.Add(-Lead).In(p.Loc)
+		lead := time.Date(d.Year(), d.Month(), d.Day(), 7, 0, 0, 0, p.Loc)
+		if lead.Before(d) {
+			lead = lead.AddDate(0, 0, 1)
+		}
+		if lead.Before(now) {
+			lead = now
+		}
+		out = append(out, model.Timer{Skill: ExpectSkill, EntityID: pr.ID, Name: LeadTimer, FireAt: lead})
+	}
+	return out
 }
 
 // --- workouts ----------------------------------------------------------------
@@ -315,34 +352,49 @@ func (p *Predictor) Score(ctx context.Context) ([]model.Prediction, error) {
 	}
 	var out []model.Prediction
 	for _, pr := range due {
-		exps, err := p.St.Expectations(ctx, pr.ID)
+		pr, err := p.score(ctx, pr, now)
 		if err != nil {
-			return out, err
-		}
-		happened := false
-		for _, e := range exps {
-			if e.State == "met" {
-				happened = true
-			} else if e.State == "open" {
-				e.State = "missed"
-				if err := p.St.PutExpectation(ctx, e); err != nil {
-					return out, err
-				}
-			}
-		}
-		o := 0.0
-		if happened {
-			o = 1
-		}
-		score := (pr.Prob - o) * (pr.Prob - o)
-		pr.Outcome, pr.Score, pr.ScoredAt = &happened, &score, &now
-		pr.Surprise = math.Abs(pr.Prob-o) >= Surprise
-		if err := p.St.PutPrediction(ctx, pr); err != nil {
 			return out, err
 		}
 		out = append(out, pr)
 	}
 	return out, nil
+}
+
+// ScoreOne scores one prediction whose due has come (its due timer): a miss
+// is a surprise the night's reflection takes up.
+func (p *Predictor) ScoreOne(ctx context.Context, id string) (model.Prediction, error) {
+	pr, err := p.St.Prediction(ctx, id)
+	if err != nil || pr.ScoredAt != nil || pr.Due.After(p.Now()) {
+		return pr, err
+	}
+	return p.score(ctx, pr, p.Now())
+}
+
+func (p *Predictor) score(ctx context.Context, pr model.Prediction, now time.Time) (model.Prediction, error) {
+	exps, err := p.St.Expectations(ctx, pr.ID)
+	if err != nil {
+		return pr, err
+	}
+	happened := false
+	for _, e := range exps {
+		if e.State == "met" {
+			happened = true
+		} else if e.State == "open" {
+			e.State = "missed"
+			if err := p.St.PutExpectation(ctx, e); err != nil {
+				return pr, err
+			}
+		}
+	}
+	o := 0.0
+	if happened {
+		o = 1
+	}
+	score := (pr.Prob - o) * (pr.Prob - o)
+	pr.Outcome, pr.Score, pr.ScoredAt = &happened, &score, &now
+	pr.Surprise = math.Abs(pr.Prob-o) >= Surprise
+	return pr, p.St.PutPrediction(ctx, pr)
 }
 
 // Brier is the mean Brier score of the predictions scored in [from, to),

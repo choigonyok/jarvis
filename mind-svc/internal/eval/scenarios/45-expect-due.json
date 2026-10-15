@@ -1,0 +1,163 @@
+{
+ "name": "기대 대조: 예측은 기한 타이머로 그때 채점된다 - 밤을 기다리지 않고, 빗나가면 놀라움으로 성찰 대기열에",
+ "room": "owner",
+ "roomName": "jarvis",
+ "turns": [
+  {
+   "at": "2026-10-14T23:00",
+   "occur": [
+    {
+     "id": "workout:2026-09-17",
+     "kind": "workout",
+     "at": "2026-09-17T19:30",
+     "until": "2026-09-17T20:40",
+     "title": "운동"
+    },
+    {
+     "id": "workout:2026-09-21",
+     "kind": "workout",
+     "at": "2026-09-21T19:30",
+     "until": "2026-09-21T20:40",
+     "title": "운동"
+    },
+    {
+     "id": "workout:2026-09-22",
+     "kind": "workout",
+     "at": "2026-09-22T19:30",
+     "until": "2026-09-22T20:40",
+     "title": "운동"
+    },
+    {
+     "id": "workout:2026-09-23",
+     "kind": "workout",
+     "at": "2026-09-23T19:30",
+     "until": "2026-09-23T20:40",
+     "title": "운동"
+    },
+    {
+     "id": "workout:2026-09-24",
+     "kind": "workout",
+     "at": "2026-09-24T19:30",
+     "until": "2026-09-24T20:40",
+     "title": "운동"
+    },
+    {
+     "id": "workout:2026-09-28",
+     "kind": "workout",
+     "at": "2026-09-28T19:30",
+     "until": "2026-09-28T20:40",
+     "title": "운동"
+    },
+    {
+     "id": "workout:2026-09-29",
+     "kind": "workout",
+     "at": "2026-09-29T19:30",
+     "until": "2026-09-29T20:40",
+     "title": "운동"
+    },
+    {
+     "id": "workout:2026-09-30",
+     "kind": "workout",
+     "at": "2026-09-30T19:30",
+     "until": "2026-09-30T20:40",
+     "title": "운동"
+    },
+    {
+     "id": "workout:2026-10-01",
+     "kind": "workout",
+     "at": "2026-10-01T19:30",
+     "until": "2026-10-01T20:40",
+     "title": "운동"
+    },
+    {
+     "id": "workout:2026-10-05",
+     "kind": "workout",
+     "at": "2026-10-05T19:30",
+     "until": "2026-10-05T20:40",
+     "title": "운동"
+    },
+    {
+     "id": "workout:2026-10-06",
+     "kind": "workout",
+     "at": "2026-10-06T19:30",
+     "until": "2026-10-06T20:40",
+     "title": "운동"
+    },
+    {
+     "id": "workout:2026-10-07",
+     "kind": "workout",
+     "at": "2026-10-07T19:30",
+     "until": "2026-10-07T20:40",
+     "title": "운동"
+    },
+    {
+     "id": "workout:2026-10-08",
+     "kind": "workout",
+     "at": "2026-10-08T19:30",
+     "until": "2026-10-08T20:40",
+     "title": "운동"
+    },
+    {
+     "id": "workout:2026-10-12",
+     "kind": "workout",
+     "at": "2026-10-12T19:30",
+     "until": "2026-10-12T20:40",
+     "title": "운동"
+    },
+    {
+     "id": "workout:2026-10-13",
+     "kind": "workout",
+     "at": "2026-10-13T19:30",
+     "until": "2026-10-13T20:40",
+     "title": "운동"
+    },
+    {
+     "id": "workout:2026-10-14",
+     "kind": "workout",
+     "at": "2026-10-14T19:30",
+     "until": "2026-10-14T20:40",
+     "title": "운동"
+    }
+   ]
+  },
+  {
+   "at": "2026-10-15T07:00",
+   "tick": "predict",
+   "expect": {
+    "predictions": [
+     {
+      "targetHas": "workout:2026-10-15",
+      "minProb": 0.6,
+      "scored": false
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-10-15T23:00",
+   "advance": "1m",
+   "expect": {
+    "predictions": [
+     {
+      "targetHas": "workout:2026-10-15",
+      "scored": false
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-10-16T00:10",
+   "advance": "1m",
+   "expect": {
+    "predictions": [
+     {
+      "targetHas": "workout:2026-10-15",
+      "scored": true,
+      "outcome": false,
+      "surprise": true
+     }
+    ]
+   }
+  }
+ ]
+}

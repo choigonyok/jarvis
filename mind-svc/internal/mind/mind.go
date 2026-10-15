@@ -65,6 +65,9 @@ type Options struct {
 	Jobs act.Jobs
 	// Assets is the allocation, read only; nil: not known.
 	Assets Assets
+	// Travel is how long the usual ways take, measured from the stays in
+	// regions (context-svc); nil: not known.
+	Travel Travel
 	// DailyUSD is the model's daily budget, for the report.
 	DailyUSD float64
 }
@@ -142,10 +145,11 @@ func New(o Options) *Mind {
 		m.answered(ctx, in)
 	}
 	m.mornings = append(m.mornings, m.people, m.gift, m.weekend, m.restock)
-	m.nightly = append(m.nightly, m.expireQuestions, m.statedPreferences, m.deliveries)
-	m.Skills = []skill.Skill{skill.Schedule{}, skill.Loops{}, skill.Brief{}, skill.After{}}
+	m.nightly = append(m.nightly, m.expireQuestions, m.statedPreferences, m.deliveries, m.travelNotes)
+	m.Skills = []skill.Skill{skill.Schedule{}, skill.Loops{}, skill.Brief{}, skill.After{}, skill.Protect{}}
 	m.Attn = attention.New(m.Skills, m.World, o.Store, m.Gate, o.Settle, o.Loc, o.Now, o.Logger)
 	m.Link.OnLink = m.Attn.OnLink
+	m.Attn.Expect = m.onExpect
 	if o.Memory != nil {
 		m.Attn.Recall = m.recallPeople
 	}

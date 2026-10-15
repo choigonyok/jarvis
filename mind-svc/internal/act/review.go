@@ -17,9 +17,10 @@ type ReviewActuator struct{}
 func (ReviewActuator) Kinds() []string { return []string{"review.place", "preference.confirm"} }
 
 type answered struct {
-	Subject string            `json:"subject"`
-	Text    string            `json:"text"`
-	Answers map[string]string `json:"answers"`
+	SubjectType string            `json:"subjectType"`
+	Subject     string            `json:"subject"`
+	Text        string            `json:"text"`
+	Answers     map[string]string `json:"answers"`
 }
 
 func (ReviewActuator) Preview(_ context.Context, kind string, payload json.RawMessage) (string, error) {
@@ -28,7 +29,13 @@ func (ReviewActuator) Preview(_ context.Context, kind string, payload json.RawMe
 		return "", err
 	}
 	if kind == "review.place" {
-		return fmt.Sprintf("%s 회고를 기록합니다 (이 장소의 특징과 내 취향을 따로 배워요)", a.Subject), nil
+		switch a.SubjectType {
+		case "캠핑장", "숙소", "식당", "카페", "":
+			return fmt.Sprintf("%s 회고를 기록합니다 (이 장소의 특징과 내 취향을 따로 배워요)", a.Subject), nil
+		case "주":
+			return "이번 주 회고를 기록합니다", nil
+		}
+		return fmt.Sprintf("%s 회고를 기록합니다", a.Subject), nil
 	}
 	return fmt.Sprintf("답을 취향으로 기록합니다: %s", a.Text), nil
 }

@@ -110,6 +110,26 @@ type Occurrence struct {
 	Quote  string `json:"quote,omitempty"`  // a few words of the source, for a card's grounds
 }
 
+// Record is a structured record for long-term memory - a calendar entry, a
+// charge, a holding, a workout, a job, a day's photos - as memory-svc writes
+// it straight to its graph: one edge, keyed by the source's own id, from the
+// operator (or Source) to Target.
+type Record struct {
+	Key      string `json:"key"`
+	Relation string `json:"relation"`
+	Target   Node   `json:"target"`
+	Source   *Node  `json:"source,omitempty"`
+	Fact     string `json:"fact"`
+	ValidAt  string `json:"validAt,omitempty"` // RFC 3339
+}
+
+// Node is one end of a record: its kind, its key in the source, its name.
+type Node struct {
+	Kind string `json:"kind"`
+	Key  string `json:"key"`
+	Name string `json:"name"`
+}
+
 // Link is a relation between two things that happened or will: a payment
 // during a date, firewood bought for a camping trip, a dinner with someone.
 // From and To are occurrence or entity ids.

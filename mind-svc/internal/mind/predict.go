@@ -133,6 +133,39 @@ func (m *Mind) prepCards(ctx context.Context, now time.Time) error {
 	return nil
 }
 
+// onExpect is an expectation's timer: due, the prediction is scored now -
+// a miss is a surprise for tonight's reflection; ahead, a prep purchase
+// still unmet is brought up, as the morning would.
+func (m *Mind) onExpect(ctx context.Context, t model.Timer) {
+	switch t.Name {
+	case predict.DueTimer:
+		pr, err := m.Predict.ScoreOne(ctx, t.EntityID)
+		if err != nil {
+			m.Opts.Logger.Warn("예측을 채점하지 못했습니다", "err", err)
+			return
+		}
+		if pr.Surprise {
+			m.Opts.Logger.Info("예측이 빗나갔습니다(오늘 밤 성찰)", "prediction", pr.Text)
+		}
+	case predict.LeadTimer:
+		pr, err := m.Opts.Store.Prediction(ctx, t.EntityID)
+		if err != nil || pr.ScoredAt != nil || len(pr.Basis) == 0 {
+			return
+		}
+		exps, _ := m.Opts.Store.Expectations(ctx, pr.ID)
+		for _, e := range exps {
+			if e.State == "met" {
+				return
+			}
+		}
+		if in, ok := m.prepIntent(ctx, pr); ok {
+			if _, err := m.Gate.Submit(ctx, in); err != nil {
+				m.Opts.Logger.Warn("준비 카드를 넘기지 못했습니다", "err", err)
+			}
+		}
+	}
+}
+
 func (m *Mind) prepIntent(ctx context.Context, pr model.Prediction) (model.Intent, bool) {
 	st := m.Opts.Store
 	note, err := st.Note(ctx, pr.Basis[0])

@@ -106,7 +106,7 @@ func (w *World) Situation(ctx context.Context, now time.Time, loc *time.Location
 	today := now.Format("2006-01-02")
 	for _, p := range plans {
 		st := p.State
-		if st.Status != model.Confirmed || st.Date == "" {
+		if st.Status != model.Confirmed || st.Date == "" || st.Owner == "partner" { // someone else's day is not where I am
 			continue
 		}
 		o, ok := span(p, loc, avg, n)

@@ -68,6 +68,14 @@ type Store interface {
 	Facts(ctx context.Context, limit int) ([]model.Fact, error) // newest first
 	// DueFacts is pending facts whose next try has come, oldest first.
 	DueFacts(ctx context.Context, now time.Time, limit int) ([]model.Fact, error)
+	// FactsOn is the facts with a relation created in [from, to), oldest
+	// first.
+	FactsOn(ctx context.Context, relation string, from, to time.Time) ([]model.Fact, error)
+
+	// Records sent to long-term memory: the hash of what was last sent
+	// under a key ("" when nothing was).
+	RecordHash(ctx context.Context, key string) (string, error)
+	PutRecordHash(ctx context.Context, key, hash string, at time.Time) error
 
 	// Policy: approval counts per (skill, context). Count adds one outcome;
 	// ResetPolicy empties the table before a rebuild from the intents.

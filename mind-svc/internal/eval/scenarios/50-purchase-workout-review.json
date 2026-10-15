@@ -1,0 +1,80 @@
+{
+ "name": "산 지 2주 된 물건과 오늘 운동을 묻는다(하루 두 개까지, 운동은 사흘에 한 번, 먹을 것은 묻지 않음)",
+ "room": "owner",
+ "roomName": "jarvis",
+ "turns": [
+  {
+   "at": "2026-10-15T20:30",
+   "occur": [
+    {
+     "id": "spending:p1#1",
+     "kind": "purchase.item",
+     "at": "2026-10-01T10:00",
+     "title": "접이식 캠핑 의자",
+     "class": "캠핑",
+     "amount": 59000
+    },
+    {
+     "id": "spending:p2#1",
+     "kind": "purchase.item",
+     "at": "2026-10-01T10:00",
+     "title": "햇반 24개",
+     "class": "식품",
+     "amount": 31000
+    },
+    {
+     "id": "workout:c",
+     "kind": "workout",
+     "at": "2026-10-15T19:00",
+     "until": "2026-10-15T20:00",
+     "title": "하체",
+     "things": [
+      "스쿼트",
+      "런지"
+     ]
+    }
+   ]
+  },
+  {
+   "at": "2026-10-15T21:00",
+   "tick": "review",
+   "expect": {
+    "cards": [
+     "접이식 캠핑 의자, 2주 써보니 어때요?",
+     "오늘 하체, 얼마나 힘들었어요?"
+    ],
+    "cardCount": 2
+   }
+  },
+  {
+   "approve": "review.place",
+   "answers": {
+    "score": "3",
+    "condition": "피곤했음",
+    "again": "안 살래요"
+   },
+   "expect": {
+    "observations": 2
+   }
+  },
+  {
+   "at": "2026-10-16T20:30",
+   "occur": [
+    {
+     "id": "workout:d",
+     "kind": "workout",
+     "at": "2026-10-16T19:00",
+     "until": "2026-10-16T20:00",
+     "title": "등"
+    }
+   ]
+  },
+  {
+   "at": "2026-10-16T21:00",
+   "tick": "review",
+   "expect": {
+    "noCards": true
+   }
+  }
+ ]
+}

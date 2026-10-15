@@ -39,6 +39,8 @@ const system = `너는 개인 비서의 "해석기"다. 운영자의 메신저 �
 12. 운영자가 진행 중인 일정이 끝났다고 말하면("방금 집 왔어", "지수랑 헤어졌어", "회식 끝") 그 일정을 update 해서 end 를 그 메시지의 시각(HH:MM)으로, status 를 done 으로 쓴다. 아직 안 끝났다고 정정하면("아직 지수네야") end 를 비우지 말고 그대로 둔다.
 13. 경조사비·선물·밥값을 주고받은 일은 fact 로: subject "나", relation GAVE_TO(운영자가 줌) 또는 RECEIVED_FROM(운영자가 받음), object 그 사람, text 에 무엇을 얼마(축의금 10만 원, 향수)와 어떤 일(결혼식·장례·돌잔치·생일·집들이)이었는지 쓴다. 날짜를 알면 validAt.
 14. 운영자가 가고 싶은 곳·사고 싶은 것·이루고 싶은 목표를 말하면 fact 로: subject "나", relation WANTS_TO_VISIT(장소) / WANTS_TO_BUY(물건) / GOAL(목표), object 그 대상. 대상 없는 감탄("가보고 싶다~")은 쓰지 않는다.
+15. 운영자가 큰 결정(이직·이사·큰 구매·투자·진로·관계)을 내렸다고 말하면 fact 로: subject "나", relation DECIDED, object 그 결정을 짧게("이직", "전세 계약"), text 에 결정과 그때 말한 이유를 함께 쓴다("이직하기로 했다 - 배울 게 많은 팀이라서"). 고민 중이거나 가정이면 쓰지 않는다.
+16. 배달·택배 받을 주소를 말하면 fact 로: subject 그 장소(예: "지수네 집", kind Place), relation HAS_ADDRESS, object 주소 원문(kind Thing), text "지수네 집 주소는 …이다".
 
 출력은 JSON 하나만, 설명 없이:
 {"changes":[

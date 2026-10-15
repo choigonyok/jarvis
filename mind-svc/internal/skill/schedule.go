@@ -68,7 +68,13 @@ func (s Schedule) OnChange(ctx context.Context, v View, e model.Entity, changes 
 		}
 	}
 	moved := base != nil && base.CalendarID != "" && calendarFields(*base) != calendarFields(st)
-	if moved {
+	// Moved on the calendar itself (by hand, or by an approved move): the
+	// calendar already says so.
+	fromCalendar := true
+	for _, c := range changes {
+		fromCalendar = fromCalendar && c.Actor == "sensor:calendar"
+	}
+	if moved && !fromCalendar {
 		r.Intents = append(r.Intents, s.move(e, *base, changes))
 	}
 	if linked || moved {

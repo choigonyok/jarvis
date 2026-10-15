@@ -19,7 +19,7 @@ func TestRules(t *testing.T) {
 			t.Errorf("AreaOf(%q) = %q, want %q", in, got, want)
 		}
 	}
-	for in, want := range map[string]string{"민수·지훈과 저녁": "식사", "가평 캠핑": "캠핑", "치과": "병원", "팀 회의": "업무", "엄마 생일": "기념일", "뭔가": "기타"} {
+	for in, want := range map[string]string{"민수·지훈과 저녁": "식사", "가평 캠핑": "캠핑", "치과": "병원", "팀 회의": "업무", "엄마 생일": "기념일", "100일": "기념일", "1주년": "기념일", "뭔가": "기타"} {
 		if got := Classify(in); got != want {
 			t.Errorf("Classify(%q) = %q, want %q", in, got, want)
 		}

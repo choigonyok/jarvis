@@ -1,8 +1,8 @@
 // Package attention decides what the assistant thinks about, and when.
 //
-// Four things call for attention: a change in the world model, a timer a
-// skill set coming due, the time of day (the morning), and - later -
-// context such as arriving home. Changes are not handed on one by one: a
+// Four things call for attention: a change in the world model, a timer
+// coming due (a skill's look again before a plan, or an expectation's due),
+// the time of day (the morning), and context such as arriving home. Changes are not handed on one by one: a
 // plan that goes proposed → confirmed → moved within a minute is one thing
 // to think about, so changes to an entity settle for a while and are handed
 // to its owning skill together. A skill is not handed back the changes it
@@ -38,6 +38,11 @@ type Attention struct {
 	// Recall is what long-term memory holds about people, for skills to
 	// mention (nil: nothing).
 	Recall func(ctx context.Context, people []string) []string
+	// Expect takes the timers of expectations (skill "expect"): a
+	// prediction due, a prep purchase to bring up ahead of it. The day-before
+	// and two-hours-before looks of a plan are skills' timers; these are the
+	// same thing for anything predicted.
+	Expect func(ctx context.Context, t model.Timer)
 
 	mu      sync.Mutex
 	pending map[string]*batch
@@ -153,6 +158,13 @@ func (a *Attention) step(ctx context.Context, all bool) int {
 	for _, t := range timers {
 		if err := a.st.FireTimer(ctx, t.ID, now); err != nil {
 			a.log.Warn("타이머를 처리하지 못했습니다", "err", err)
+			continue
+		}
+		if t.Skill == "expect" {
+			if a.Expect != nil {
+				a.Expect(ctx, t)
+			}
+			n++
 			continue
 		}
 		e, err := a.world.Entity(ctx, t.EntityID)
@@ -297,4 +309,21 @@ func (v view) Recall(ctx context.Context, people []string) []string {
 		return nil
 	}
 	return v.a.Recall(ctx, people)
+}
+
+func (v view) Travel(ctx context.Context, from, to model.State) (int, string, bool) {
+	notes, err := v.a.st.Notes(ctx)
+	if err != nil {
+		return 0, "", false
+	}
+	for _, n := range notes {
+		r := n.Rule
+		if n.Status == model.Rejected || r == nil || r.Kind != "travel" || r.Minutes <= 0 {
+			continue
+		}
+		if world.SamePlace(from.Area, from.Place, r.From, "") && world.SamePlace(to.Area, to.Place, r.To, "") {
+			return r.Minutes, n.Text, true
+		}
+	}
+	return 0, "", false
 }

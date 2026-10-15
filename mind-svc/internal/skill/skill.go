@@ -49,6 +49,9 @@ type View interface {
 	Occurrence(ctx context.Context, id string) (model.Occurrence, error)
 	// Span is when a plan starts and (probably) ends.
 	Span(ctx context.Context, e model.Entity) (start, end time.Time, ok bool)
+	// Travel is how long the way from one plan's place to another's
+	// usually takes, by a travel note, and the note.
+	Travel(ctx context.Context, from, to model.State) (minutes int, note string, ok bool)
 }
 
 type Result struct {

@@ -57,6 +57,8 @@ type Scenario struct {
 	Reflect json.RawMessage `json:"reflect,omitempty"`
 	// Allocation is what assets-svc would say of the allocation.
 	Allocation []mind.Drift `json:"allocation,omitempty"`
+	// Routes are the ways measured from the stays (context-svc /travel).
+	Routes []mind.Route `json:"routes,omitempty"`
 	// Drafts are the drafting answers for the scripted run, by recipient.
 	Drafts map[string]string `json:"drafts,omitempty"`
 }
@@ -265,9 +267,66 @@ type Result struct {
 	// Scored how many.
 	Brier  float64
 	Scored int
+	// Interruptions: cards raised (what reached the operator), on how many
+	// days, and the most on one day. Approved and Rejected are the cards the
+	// operator answered.
+	Cards, CardDays, BusiestDay int
+	Approved, Rejected          int
 }
 
 func (r Result) Pass() bool { return len(r.Failures) == 0 }
+
+// Summary is the runs' metrics in a line: predictions (Brier), the
+// approval rate of the cards answered, and the interruptions a day.
+func Summary(rs []Result) string {
+	var scored, cards, days, busiest, ok, no int
+	brier := 0.0
+	for _, r := range rs {
+		scored += r.Scored
+		brier += r.Brier * float64(r.Scored)
+		cards += r.Cards
+		days += r.CardDays
+		busiest = max(busiest, r.BusiestDay)
+		ok += r.Approved
+		no += r.Rejected
+	}
+	out := fmt.Sprintf("시나리오 %d개", len(rs))
+	if scored > 0 {
+		out += fmt.Sprintf(" · 예측 %d개 Brier %.3f", scored, brier/float64(scored))
+	}
+	if ok+no > 0 {
+		out += fmt.Sprintf(" · 답한 카드 %d장 승인율 %.0f%%", ok+no, 100*float64(ok)/float64(ok+no))
+	}
+	if days > 0 {
+		out += fmt.Sprintf(" · 카드 %d장, 카드가 나온 날 하루 평균 %.1f장(최대 %d장)", cards, float64(cards)/float64(days), busiest)
+	}
+	return out
+}
+
+// interruptions counts the run's cards by day and the operator's answers.
+func interruptions(ctx context.Context, st store.Store, loc *time.Location, res *Result) {
+	intents, _ := st.Intents(ctx, 100000)
+	perDay := map[string]int{}
+	for _, in := range intents {
+		if !in.Card {
+			continue
+		}
+		res.Cards++
+		perDay[in.CreatedAt.In(loc).Format("2006-01-02")]++
+		if in.DecidedBy == "user" {
+			switch in.Status {
+			case model.Rejected:
+				res.Rejected++
+			case model.Executed, model.Undone, model.Failed:
+				res.Approved++
+			}
+		}
+	}
+	res.CardDays = len(perDay)
+	for _, n := range perDay {
+		res.BusiestDay = max(res.BusiestDay, n)
+	}
+}
 
 // Load is every scenario.
 func Load() ([]Scenario, error) {
@@ -379,7 +438,7 @@ func Run(ctx context.Context, sc Scenario, client llm.Client, loc *time.Location
 		Store: st, Log: log, LLM: client, Calendar: cal, Notifier: &act.MemoryNotifier{},
 		Loc: loc, Now: clk.Now, Logger: quiet, Interpret: interpret.Config{Owner: "나"},
 		Settle: 0, Policy: gate.DefaultPolicy(), Mode: "eval", Memory: memory.NewFake(clk.Now),
-		Assets: assets(sc.Allocation),
+		Assets: assets(sc.Allocation), Travel: travel(sc.Routes),
 	})
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -543,7 +602,7 @@ func Run(ctx context.Context, sc Scenario, client llm.Client, loc *time.Location
 			}
 			if t.Expect.Observations != nil {
 				n := 0
-				for _, d := range append(append([]string{"", "기타"}, prefs.Common...), prefs.Camp...) {
+				for _, d := range append(append([]string{"", "기타", "재구매", "컨디션", "판단 이유", "좋았던 일", "아쉬웠던 일", "다음 주"}, prefs.Common...), prefs.Camp...) {
 					obs, _ := st.ObservationsOn(ctx, d)
 					n += len(obs)
 				}
@@ -568,7 +627,15 @@ func Run(ctx context.Context, sc Scenario, client llm.Client, loc *time.Location
 		}
 	}
 	res.Brier, res.Scored, _ = m.Predict.Brier(ctx, time.Time{}, time.Date(3000, 1, 1, 0, 0, 0, 0, time.UTC))
+	interruptions(ctx, st, loc, &res)
 	return res
+}
+
+func travel(routes []mind.Route) mind.Travel {
+	if routes == nil {
+		return nil
+	}
+	return mind.StaticTravel(routes)
 }
 
 func assets(rows []mind.Drift) mind.Assets {

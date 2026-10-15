@@ -27,11 +27,13 @@ agent (Go)       결정하는 곳
       ├─ assets-svc    :8092  업비트·KIS (주문 가능한 키가 여기에만)
       ├─ spending-svc  :8095  가계부 (카드사 카톡 알림 → 분류·월 합계·예산)
       ├─ kakaotalk-client :8090  카톡 수집
-      ├─ context-svc   :8103  위치·현재 상태 (OwnTracks·단축어 → 영역 체류, 원본 30일)
+      ├─ context-svc   :8103  위치·현재 상태 (OwnTracks·단축어 → 영역 체류·실제 이동 시간, 원본 30일)
       └─ status-svc    :8096  상태 탭 (기능별 판정, 읽기만)
 
 mind-svc :8102   인지 루프. 감지 → 해석 → 세계 모델(일정·고리·발생·링크·지금 상황) →
                  노트·예측·밤 성찰 → 스킬 → 하나뿐인 관문(카드는 mind.card → agent 결재 카드)
+                 구조화 소스(일정·지출·자산·운동·작업·사진)를 읽는 곳도 여기 하나: 같은 읽기를
+                 memory-svc(Graphiti)에 기록으로 넘긴다
 
 postgres + pgvector  이벤트 로그, 파생 테이블, 회수용 벡터
 ```

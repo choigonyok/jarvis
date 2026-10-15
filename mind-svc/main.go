@@ -165,6 +165,11 @@ func main() {
 	if url := os.Getenv("ASSETS_URL"); mode == "stack" && url != "" {
 		assets = mind.AssetsHTTP{URL: url, Token: token}
 	}
+	// Travel: how long the usual ways take, from the stays (context-svc).
+	var travel mind.Travel
+	if url := os.Getenv("CONTEXT_URL"); mode == "stack" && url != "" {
+		travel = mind.TravelHTTP{URL: url, Token: token}
+	}
 	// Jobs: a cart job goes to jobs-svc (the agent's browser runs it).
 	var jobs act.Jobs
 	if url := os.Getenv("JOBS_URL"); mode == "stack" && url != "" {
@@ -180,7 +185,7 @@ func main() {
 		Store: st, Log: logOut, LLM: client, Calendar: calendar, Notifier: notifier,
 		Loc: loc, Now: clk.Now, Logger: log, Interpret: cfg, Settle: settle,
 		Policy: gate.DefaultPolicy(), URL: getenv("MIND_UI_URL", "http://localhost:8102/"), Mode: mode,
-		Memory: mem, PlanEvents: os.Getenv("MIND_PLAN_EVENTS") == "true", Photos: photos, Jobs: jobs, Assets: assets,
+		Memory: mem, PlanEvents: os.Getenv("MIND_PLAN_EVENTS") == "true", Photos: photos, Jobs: jobs, Assets: assets, Travel: travel,
 		DailyUSD: number("MIND_DAILY_USD", 1.0),
 	})
 	if !client.Ready() {
@@ -204,10 +209,17 @@ func main() {
 			go s.Run(ctx)
 		}
 		// Structured sources, read by rule into occurrences: spending, workouts,
-		// the calendar (whose entries also become plans), photos.
+		// the calendar (whose entries also become plans), photos, assets, jobs.
 		structured := &sensor.Structured{Store: st, Observer: m, World: m.World, Token: token, Loc: loc, Out: log,
 			SpendingURL: os.Getenv("SPENDING_URL"), WorkoutURL: os.Getenv("WORKOUT_URL"), CalendarURL: os.Getenv("MIND_CALENDAR_READ_URL"),
-			ImmichURL: os.Getenv("IMMICH_URL"), ImmichKey: os.Getenv("IMMICH_API_KEY"), ContextURL: os.Getenv("CONTEXT_URL")}
+			ImmichURL: os.Getenv("IMMICH_URL"), ImmichKey: os.Getenv("IMMICH_API_KEY"), ContextURL: os.Getenv("CONTEXT_URL"),
+			AssetsURL: os.Getenv("ASSETS_URL"), JobsURL: os.Getenv("JOBS_URL")}
+		// One reader for each source: memory remembers what is read here
+		// (memory-svc's own collectors for these sources are then off -
+		// MEMORY_SOURCES).
+		if h, ok := mem.(*memory.HTTP); ok && os.Getenv("MIND_RECORDS") != "false" {
+			structured.Records = h
+		}
 		go structured.Run(ctx, duration("MIND_STRUCTURED_POLL", 2*time.Minute))
 		if url := os.Getenv("CHAT_URL"); url != "" {
 			s := &sensor.Chat{URL: url, Token: token, Store: st, Log: logOut,
@@ -259,14 +271,7 @@ func runEval(ctx context.Context, client llm.Client, loc *time.Location) int {
 			fmt.Printf("      - %s\n", f)
 		}
 	}
-	sum, n := 0.0, 0
-	for _, r := range results {
-		sum += r.Brier * float64(r.Scored)
-		n += r.Scored
-	}
-	if n > 0 {
-		fmt.Printf("\n예측 %d개 · 평균 Brier %.3f (낮을수록 좋음, 늘 50%%면 0.25)", n, sum/float64(n))
-	}
+	fmt.Printf("\n%s\n(Brier 는 낮을수록 좋음, 늘 50%%면 0.25)", eval.Summary(results))
 	fmt.Printf("\n%d개 중 %d개 통과 · 이번 실행 비용 약 $%.4f\n", len(results), len(results)-failed, client.Spent())
 	if failed > 0 {
 		return 1

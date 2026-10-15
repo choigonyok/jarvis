@@ -19,6 +19,7 @@ func TestScenariosScripted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var results []Result
 	for _, sc := range scs {
 		t.Run(sc.Name, func(t *testing.T) {
 			r := Run(context.Background(), sc, Scripted(sc), seoul)
@@ -28,8 +29,13 @@ func TestScenariosScripted(t *testing.T) {
 			if r.Scored > 0 {
 				t.Logf("예측 %d개 · Brier %.3f", r.Scored, r.Brier)
 			}
+			if r.Cards > 0 {
+				t.Logf("카드 %d장(하루 최대 %d장) · 승인 %d · 거절 %d", r.Cards, r.BusiestDay, r.Approved, r.Rejected)
+			}
+			results = append(results, r)
 		})
 	}
+	t.Log(Summary(results))
 }
 
 // The same scenarios with the real model, when a key is given:
@@ -49,5 +55,6 @@ func TestScenariosLive(t *testing.T) {
 			t.Errorf("%s: %s", r.Name, f)
 		}
 	}
+	t.Log(Summary(results))
 	t.Logf("비용 약 $%.4f", client.Spent())
 }

@@ -1,0 +1,53 @@
+{
+ "name": "배달 주소는 한 번 들으면 기억으로: 장소의 주소를 사실로 남긴다",
+ "room": "owner",
+ "roomName": "jarvis",
+ "turns": [
+  {
+   "messages": [
+    {
+     "at": "2026-10-15T16:02",
+     "me": true,
+     "text": "지수네 집 주소는 망원로 12길 34, 201호야. 배달 시킬 때 여기로"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "remember",
+      "kind": "fact",
+      "set": {
+       "subject": "지수네 집",
+       "subjectKind": "Place",
+       "relation": "HAS_ADDRESS",
+       "object": "망원로 12길 34, 201호",
+       "objectKind": "Thing",
+       "text": "지수네 집 주소는 망원로 12길 34, 201호이다"
+      },
+      "evidence": [
+       {
+        "line": 1,
+        "quote": "지수네 집 주소는 망원로 12길 34, 201호야"
+       }
+      ],
+      "confidence": 0.95,
+      "why": "주소를 직접 말함"
+     }
+    ]
+   },
+   "expect": {
+    "facts": [
+     {
+      "subject": "지수네 집",
+      "objectHas": "망원로 12길 34"
+     }
+    ],
+    "noPlans": [
+     {
+      "titleHas": "배달"
+     }
+    ]
+   }
+  }
+ ]
+}

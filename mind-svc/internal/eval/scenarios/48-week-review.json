@@ -1,0 +1,84 @@
+{
+ "name": "일요일 주간 회고: 한 주의 기록을 보여 주고 묻는다, 답은 그 주의 관찰로, '묻지 마'면 다음 주부터 안 묻는다",
+ "room": "owner",
+ "roomName": "jarvis",
+ "turns": [
+  {
+   "at": "2026-10-17T20:00",
+   "occur": [
+    {
+     "id": "workout:a",
+     "kind": "workout",
+     "at": "2026-10-13T19:00",
+     "until": "2026-10-13T20:00",
+     "title": "가슴"
+    },
+    {
+     "id": "workout:b",
+     "kind": "workout",
+     "at": "2026-10-15T19:00",
+     "until": "2026-10-15T20:00",
+     "title": "하체"
+    },
+    {
+     "id": "spending:w1",
+     "kind": "purchase",
+     "at": "2026-10-14T12:30",
+     "title": "김밥천국 역삼점",
+     "class": "식비",
+     "amount": 9000
+    }
+   ]
+  },
+  {
+   "at": "2026-10-18T21:00",
+   "tick": "review",
+   "expect": {
+    "cards": [
+     "이번 주 어땠어요?"
+    ],
+    "cardHas": [
+     "운동 2번",
+     "9,000원"
+    ],
+    "cardCount": 1
+   }
+  },
+  {
+   "approve": "review.place",
+   "answers": {
+    "score": "4",
+    "good": "캠핑 다녀옴",
+    "bad": "야근 이틀",
+    "next": "운동 세 번"
+   },
+   "expect": {
+    "observations": 4,
+    "noCards": true
+   }
+  },
+  {
+   "at": "2026-10-25T21:00",
+   "tick": "review",
+   "expect": {
+    "cards": [
+     "이번 주 어땠어요?"
+    ]
+   }
+  },
+  {
+   "reject": "review.place",
+   "reason": "주간 회고는 묻지 마",
+   "expect": {
+    "noCards": true
+   }
+  },
+  {
+   "at": "2026-11-01T21:00",
+   "tick": "review",
+   "expect": {
+    "noCards": true
+   }
+  }
+ ]
+}

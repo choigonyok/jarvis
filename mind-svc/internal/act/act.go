@@ -174,6 +174,30 @@ func (c CalendarActuator) Execute(ctx context.Context, kind string, payload json
 	if err := json.Unmarshal(payload, &a); err != nil {
 		return nil, nil, err
 	}
+	// A form's answers (a move's date and time, as the operator left them)
+	// stand over what was proposed.
+	var form struct {
+		Answers map[string]string `json:"answers"`
+	}
+	_ = json.Unmarshal(payload, &form)
+	if d := strings.TrimSpace(form.Answers["date"]); d != "" {
+		if _, err := time.Parse("2006-01-02", d); err != nil {
+			return nil, nil, errors.New("날짜는 YYYY-MM-DD 입니다")
+		}
+		a.Event.Date = d
+	}
+	if t := strings.TrimSpace(form.Answers["start"]); t != "" {
+		start, err := time.Parse("15:04", t)
+		if err != nil {
+			return nil, nil, errors.New("시작은 HH:MM 입니다")
+		}
+		if old, err := time.Parse("15:04", a.Event.Start); err == nil && a.Event.End != "" {
+			if end, err := time.Parse("15:04", a.Event.End); err == nil {
+				a.Event.End = start.Add(end.Sub(old)).Format("15:04")
+			}
+		}
+		a.Event.Start = t
+	}
 	switch kind {
 	case "calendar.create":
 		saved, err := c.Cal.Put(ctx, a.Event)

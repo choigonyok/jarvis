@@ -6,9 +6,10 @@ Three ways in:
   add_triplet puts its people and places on the nodes already known, merges it
   with the same fact said before, and retires the facts it contradicts.
 - `fact()` - structured records (calendar, spending, assets, workouts, jobs,
-  photos). Written straight to the graph with IDs derived from the source's
-  own keys, so the same thing always lands on the same node and edge and no
-  LLM is asked whether two of them are the same.
+  photos), which mind reads and sends (/records). Written straight to the
+  graph with IDs derived from the source's own keys, so the same thing always
+  lands on the same node and edge and no LLM is asked whether two of them are
+  the same.
 - `episode()` - free text, Graphiti's own extraction: the 6-hour diary (which
   keeps people's summaries current), and conversations until mind reads them.
 """
@@ -240,6 +241,15 @@ class Graph:
         await edge.save(self.drivers[group])
         if self.on_fact:
             await self.on_fact(group, fact, valid_at)
+
+    async def has_fact(self, group: str, key: str, fact: str) -> bool:
+        """Whether the edge a structured record lands on already says this,
+        word for word: then writing it again would only re-embed it."""
+        try:
+            e = await EntityEdge.get_by_uuid(self.drivers[group], stable_id(group, "edge", key))
+        except EdgeNotFoundError:
+            return False
+        return (e.fact or "") == fact
 
     async def _endpoint(self, group: str, spec: dict) -> EntityNode:
         """A node mind names: by id when it knows one (and the node is still

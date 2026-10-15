@@ -448,6 +448,25 @@ func (p *Postgres) DueFacts(ctx context.Context, now time.Time, limit int) ([]mo
 	return p.facts(ctx, `where status = 'pending' and next_try <= $1 order by created_at, id limit $2`, now, limit)
 }
 
+func (p *Postgres) FactsOn(ctx context.Context, relation string, from, to time.Time) ([]model.Fact, error) {
+	return p.facts(ctx, `where body->>'relation' = $1 and created_at >= $2 and created_at < $3 order by created_at, id`, relation, from, to)
+}
+
+func (p *Postgres) RecordHash(ctx context.Context, key string) (string, error) {
+	var h string
+	err := p.db.QueryRow(ctx, `select hash from mind_records where key = $1`, key).Scan(&h)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return h, err
+}
+
+func (p *Postgres) PutRecordHash(ctx context.Context, key, hash string, at time.Time) error {
+	_, err := p.db.Exec(ctx, `insert into mind_records (key, hash, sent_at) values ($1, $2, $3)
+		on conflict (key) do update set hash = excluded.hash, sent_at = excluded.sent_at`, key, hash, at)
+	return err
+}
+
 func (p *Postgres) PutAlias(ctx context.Context, a model.Alias) error {
 	_, err := p.db.Exec(ctx, `
 		insert into mind_aliases (name, kind, node, seen, at) values ($1, $2, $3, 1, $4)

@@ -268,10 +268,21 @@ func (m *Mind) restock(ctx context.Context) error {
 			continue
 		}
 		last := t.Last.In(m.Opts.Loc)
+		body := strings.Join(t.Items, ", ")
+		// What the two-week question said of them: one not to buy again is
+		// said so.
+		for _, it := range t.Items {
+			attrs, _ := m.Opts.Store.Attributes(ctx, "물건", it)
+			for _, a := range attrs {
+				if a.Dimension == "재구매" && a.Value < 0 {
+					body += fmt.Sprintf(" · '%s'는 다시 안 산다고 하셨어요", it)
+				}
+			}
+		}
 		if _, err := m.Gate.Submit(ctx, model.Intent{
 			Skill: "life", Kind: "info", Topic: "restock:" + t.Class + ":" + last.Format("2006-01-02"),
 			Title:  fmt.Sprintf("%s 살 때 됐어요 (보통 %d일마다, 마지막 %s)", t.Class, t.CycleDays, md(last)),
-			Body:   strings.Join(t.Items, ", "),
+			Body:   body,
 			Reason: "가진 물건", Confidence: 1,
 		}); err != nil {
 			return err

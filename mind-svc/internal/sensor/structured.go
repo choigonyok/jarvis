@@ -24,9 +24,11 @@ type Observer interface {
 }
 
 // Structured reads the services that keep structured records - spending,
-// photos, workouts, the calendar - into occurrences, by rule. Each source is
-// read over a fixed window around now, and an occurrence is observed again
-// only when it changed, so a poll costs the window, not the history.
+// photos, workouts, the calendar, assets, jobs - into occurrences, by rule,
+// and hands long-term memory the same reading as records (records.go): one
+// reader for each source. Each source is read over a fixed window around
+// now, and an occurrence is observed (a record sent) again only when it
+// changed, so a poll costs the window, not the history.
 type Structured struct {
 	Store    store.Store
 	Observer Observer
@@ -43,8 +45,17 @@ type Structured struct {
 	ImmichURL   string
 	ImmichKey   string
 	ContextURL  string // context-svc: stays in regions
+	AssetsURL   string
+	JobsURL     string
+	// Records, when set, is long-term memory: what is read here is also
+	// remembered there.
+	Records Recorder
 	// Back is how far back a first start reads.
 	Back time.Duration
+
+	queued   []queued
+	assetsAt time.Time // the portfolio's last read
+	wideAt   time.Time // the calendar's last read of a year each way
 }
 
 // Run polls every source every so often until ctx ends.
@@ -60,9 +71,15 @@ func (s *Structured) Run(ctx context.Context, every time.Duration) {
 	for {
 		for name, poll := range map[string]func(context.Context) error{
 			"spending": s.Spending, "workout": s.Workout, "calendar": s.Calendar, "photos": s.Photos, "visits": s.Visits,
+			"assets": s.Assets, "jobs": s.Jobs, "photo-days": s.PhotoDays,
 		} {
 			if err := poll(ctx); err != nil && ctx.Err() == nil {
 				s.Out.Warn("구조화 소스를 읽지 못했습니다", "source", name, "err", err)
+			}
+		}
+		if s.Records != nil {
+			if err := s.flush(ctx); err != nil && ctx.Err() == nil {
+				s.Out.Warn("구조화 기록을 기억으로 보내지 못했습니다", "queued", len(s.queued), "err", err)
 			}
 		}
 		select {
@@ -95,6 +112,8 @@ type tx struct {
 	Category   string    `json:"category"`
 	ApprovedAt time.Time `json:"approvedAt"`
 	Status     string    `json:"status"`
+	Memo       string    `json:"memo"`
+	Excluded   bool      `json:"excluded"`
 	Items      []struct {
 		ID        int64  `json:"id"`
 		Name      string `json:"name"`
@@ -119,6 +138,11 @@ func (s *Structured) Spending(ctx context.Context) error {
 			return err
 		}
 		for _, t := range out.Transactions {
+			if !t.Excluded {
+				if err := s.record(ctx, s.SpendingRecord(t)); err != nil {
+					return err
+				}
+			}
 			if t.Status != "ok" || t.Kind != "approval" || t.AmountKrw <= 0 {
 				continue
 			}
@@ -169,22 +193,21 @@ func (s *Structured) Workout(ctx context.Context) error {
 		return nil
 	}
 	var book struct {
-		Sessions []struct {
-			ID          string `json:"id"`
-			Date        string `json:"date"`
-			RoutineName string `json:"routineName"`
-			Exercises   []struct {
-				Name string `json:"name"`
-			} `json:"exercises"`
-			StartedAt int64  `json:"startedAt"`
-			EndedAt   *int64 `json:"endedAt"`
-		} `json:"sessions"`
+		Sessions []session `json:"sessions"`
 	}
 	if err := s.get(ctx, s.WorkoutURL+"/workout", &book); err != nil {
 		return err
 	}
 	since := s.Now().Add(-s.back())
+	cutoff := s.Now().In(s.Loc).AddDate(-1, 0, 0).Format("2006-01-02")
 	for _, w := range book.Sessions {
+		if w.Date >= cutoff {
+			for _, r := range s.WorkoutRecords(w) {
+				if err := s.record(ctx, r); err != nil {
+					return err
+				}
+			}
+		}
 		at := time.UnixMilli(w.StartedAt)
 		if w.StartedAt == 0 || at.Before(since) || w.EndedAt == nil {
 			continue
@@ -204,6 +227,26 @@ func (s *Structured) Workout(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+type session struct {
+	ID          string `json:"id"`
+	Date        string `json:"date"`
+	RoutineName string `json:"routineName"`
+	Exercises   []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+		Sets []set  `json:"sets"`
+	} `json:"exercises"`
+	StartedAt int64  `json:"startedAt"`
+	EndedAt   *int64 `json:"endedAt"`
+}
+
+type set struct {
+	Weight float64 `json:"weight"`
+	Reps   int     `json:"reps"`
+	Done   bool    `json:"done"`
+	Warmup bool    `json:"warmup"`
 }
 
 func (s *Structured) back() time.Duration {
@@ -278,6 +321,7 @@ type asset struct {
 	ExifInfo      *struct {
 		City             *string `json:"city"`
 		State            *string `json:"state"`
+		Country          *string `json:"country"`
 		DateTimeOriginal *string `json:"dateTimeOriginal"`
 	} `json:"exifInfo"`
 	People []struct {
@@ -328,6 +372,7 @@ type entry struct {
 	Place   string `json:"place"`
 	Owner   string `json:"owner"`
 	Source  string `json:"source"`
+	Memo    string `json:"memo"`
 }
 
 // CalendarRoom is the room plans read from the calendar live in.
@@ -336,20 +381,40 @@ const CalendarRoom = "calendar"
 // Calendar reads the calendar from a week back to two months ahead. Each
 // entry is an occurrence, and - unless a plan from a conversation already
 // is it - a plan in the world model, kept in step with the entry: moved
-// when it moves, cancelled when it goes.
+// when it moves, cancelled when it goes. Memory remembers a year each way,
+// so once an hour the read reaches that far for its records.
 func (s *Structured) Calendar(ctx context.Context) error {
 	if s.CalendarURL == "" || s.World == nil {
 		return nil
 	}
 	now := s.Now().In(s.Loc)
 	from, to := now.AddDate(0, 0, -7).Format("2006-01-02"), now.AddDate(0, 2, 0).Format("2006-01-02")
+	wide := s.Records != nil && s.Now().Sub(s.wideAt) >= time.Hour
+	readFrom, readTo := from, to
+	if wide {
+		readFrom, readTo = now.AddDate(-1, 0, 0).Format("2006-01-02"), now.AddDate(1, 0, 0).Format("2006-01-02")
+	}
 	var out struct {
 		Events []entry `json:"events"`
 	}
-	if err := s.get(ctx, s.CalendarURL+"/events?from="+from+"&to="+to, &out); err != nil {
+	if err := s.get(ctx, s.CalendarURL+"/events?from="+readFrom+"&to="+readTo, &out); err != nil {
 		return err
 	}
-	return s.SyncCalendar(ctx, out.Events, from, to)
+	var near []entry
+	for _, ev := range out.Events {
+		for _, r := range s.CalendarRecords(ev) {
+			if err := s.record(ctx, r); err != nil {
+				return err
+			}
+		}
+		if ev.Date <= to && max(ev.Date, ev.EndDate) >= from {
+			near = append(near, ev)
+		}
+	}
+	if wide {
+		s.wideAt = s.Now()
+	}
+	return s.SyncCalendar(ctx, near, from, to)
 }
 
 // SyncCalendar brings the world model in step with the calendar's entries
@@ -452,8 +517,12 @@ func orMidnight(t string) string {
 }
 
 func fromEntry(ev entry) model.State {
-	return model.State{Title: ev.Title, Status: model.Confirmed, Date: ev.Date, EndDate: ev.EndDate, Start: ev.Start, End: ev.End,
+	st := model.State{Title: ev.Title, Status: model.Confirmed, Date: ev.Date, EndDate: ev.EndDate, Start: ev.Start, End: ev.End,
 		Place: ev.Place, People: People(ev.Title), Shared: ev.Owner == "shared", CalendarID: ev.ID, Type: Classify(ev.Title)}
+	if ev.Owner == "partner" {
+		st.Owner = "partner" // the partner's own entry: theirs, not mine to guard or be at
+	}
+	return st
 }
 
 // classes are the words in an entry's title that say what kind of plan it
@@ -468,7 +537,7 @@ var classes = []struct {
 	{"데이트", []string{"데이트", "💕", "❤"}},
 	{"회식", []string{"회식", "송년회", "워크샵"}},
 	{"경조사", []string{"결혼식", "돌잔치", "장례", "조문"}},
-	{"기념일", []string{"기념일", "생일", "주년"}},
+	{"기념일", []string{"기념일", "생일", "주년", "100일", "200일", "300일", "500일", "1000일"}},
 	{"병원", []string{"병원", "치과", "진료", "검진", "의원", "약속 진료"}},
 	{"운동", []string{"PT", "헬스", "운동", "필라테스", "요가", "클라이밍", "러닝"}},
 	{"공연", []string{"영화", "공연", "콘서트", "뮤지컬", "전시"}},

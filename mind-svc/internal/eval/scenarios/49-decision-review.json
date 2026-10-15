@@ -1,0 +1,80 @@
+{
+ "name": "큰 결정 석 달 뒤: 그때 말한 이유를 근거로 '지금 보면 어때요?'를 묻는다",
+ "room": "owner",
+ "roomName": "jarvis",
+ "turns": [
+  {
+   "messages": [
+    {
+     "at": "2026-07-14T22:00",
+     "me": true,
+     "text": "결국 이직하기로 했다. 배울 게 많은 팀이라서"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "remember",
+      "kind": "fact",
+      "set": {
+       "subject": "나",
+       "subjectKind": "Person",
+       "relation": "DECIDED",
+       "object": "이직",
+       "objectKind": "Event",
+       "text": "이직하기로 했다 - 배울 게 많은 팀이라서"
+      },
+      "evidence": [
+       {
+        "line": 1,
+        "quote": "이직하기로 했다. 배울 게 많은 팀이라서"
+       }
+      ],
+      "confidence": 0.9,
+      "why": "직접 결정을 말함"
+     }
+    ]
+   },
+   "expect": {
+    "facts": [
+     {
+      "subject": "나",
+      "objectHas": "이직",
+      "textHasAny": [
+       "배울"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-10-13T21:00",
+   "tick": "review",
+   "expect": {
+    "noCards": true
+   }
+  },
+  {
+   "at": "2026-10-14T21:00",
+   "tick": "review",
+   "expect": {
+    "cards": [
+     "석 달 전 '이직', 지금 보면 어때요?"
+    ],
+    "cardHas": [
+     "배울"
+    ]
+   }
+  },
+  {
+   "approve": "review.place",
+   "answers": {
+    "score": "5",
+    "reason": "이유가 맞았음"
+   },
+   "expect": {
+    "observations": 2
+   }
+  }
+ ]
+}

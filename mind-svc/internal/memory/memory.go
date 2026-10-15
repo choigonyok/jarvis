@@ -144,6 +144,19 @@ func (c *HTTP) Put(ctx context.Context, facts []model.Fact) ([]Result, error) {
 	return out.Results, c.do(ctx, http.MethodPost, "/facts", body, &out)
 }
 
+// Records sends structured records (POST /records): written straight to
+// the graph, no model asked.
+func (c *HTTP) Records(ctx context.Context, recs []model.Record) error {
+	body := struct {
+		Group   string         `json:"group"`
+		Records []model.Record `json:"records"`
+	}{c.Group, recs}
+	var out struct {
+		Written int `json:"written"`
+	}
+	return c.do(ctx, http.MethodPost, "/records", body, &out)
+}
+
 func (c *HTTP) Search(ctx context.Context, q, center string, limit int) ([]Hit, error) {
 	v := url.Values{"q": {q}, "group": {c.Group}, "limit": {fmt.Sprint(limit)}}
 	if center != "" {
