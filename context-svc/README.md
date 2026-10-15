@@ -123,5 +123,11 @@ notify-svc 가 이것을 듣고 **운전·회의 중에는 즉시 알림을 붙�
   아니고, 걸린 시간은 중앙값. API 흐름에서 집 → 회사 30분, 회사 → 집 67분이 `/travel` 로 나오고, 신호가 오면
   `derived` 상태가 운전 중으로 바뀐다.
 - 운영에서 게이트웨이를 거쳐: 토큰 없는 `/context/now` 는 401, 자격 없는 `/context/owntracks` 도 401.
+- **실제 OwnTracks 앱으로**(2026-10-15, owntracks/ios 소스를 Xcode 26.2 로 빌드해 iOS 26.2 시뮬레이터에서, 로컬 context-svc 와 임시
+  Postgres 상대로 - 운영 데이터는 건드리지 않음): UI 테스트가 `/owntracks/setup` 의 링크를 열고 "Process Configuration → Continue"를
+  누르면 앱 설정에 `mode 3`·URL·계정·`cmd 1`·`remoteConfiguration 1`·`monitoring 1` 이 들어간다. 위치를 집 → 강남으로 옮기며 "Send
+  location now" 를 누르면 집 체류가 열렸다 닫히고, 서버가 응답에 `setConfiguration monitoring 2` 를 실어("폰의 위치 모드를 바꿉니다
+  from=1 to=2") 앱 화면의 모드가 Significant → Move 로 바뀌며, 그다음 보고부터 `m=2` 로 온다. 시험 빌드에서 바꾼 것은 "외부 설정
+  허용" 기본값(폰에서는 사람이 켜는 스위치), 로컬 http 를 위한 ATS 완화, 이 Xcode 에 맞춘 프로젝트 형식뿐이다.
 - 폰 설정 링크(Postgres 흐름 테스트): 토큰 없이 401, inline 을 풀면 HTTP 모드·URL·계정·Significant·cmd·remoteConfiguration.
   waypoints 로 영역이 들어오고 여기서 정한 종류·동네는 남는다. 수집기의 배달앱 알림 줄 읽기(다시 넣기·다른 앱은 무시).
