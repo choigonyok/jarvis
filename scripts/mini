@@ -12,6 +12,8 @@
 #   scripts/mini compose …          그 밖의 docker compose 명령 그대로
 #   scripts/mini env-push           이 맥북의 .env 를 맥미니로 (덮어쓰기 전에 묻는다)
 #   scripts/mini check              접속·도커·.env 가 준비됐는지
+#   scripts/mini console            맥미니의 mind 콘솔을 이 맥 브라우저로 연다(로컬 18102 → 맥미니 8102)
+#                                   (ssh 터널 + 토큰으로 한 번 로그인, 토큰은 화면에 찍지 않음)
 #   scripts/mini volumes-push 볼륨…  맥북의 도커 볼륨을 맥미니로 (양쪽 스택이 내려가 있을 때)
 #
 # 왜 docker context(ssh://) 가 아니라 rsync + ssh 인가: compose 의 바인드 마운트
@@ -133,5 +135,15 @@ case "$cmd" in
   env-push) env_push ;;
   check)    check ;;
   volumes-push) volumes_push "$@" ;;
+  console)
+    # 이 맥의 8102 는 로컬 mind(scripts/mind)가 쓸 수 있어 다른 포트로 잇는다.
+    port="${MINI_CONSOLE_PORT:-18102}"
+    if ! nc -z 127.0.0.1 "$port" 2>/dev/null; then
+      ssh -fN -o ExitOnForwardFailure=yes -o LogLevel=ERROR -L "$port:127.0.0.1:8102" "$HOST"
+    fi
+    token="$(ssh -o LogLevel=ERROR "$HOST" "grep -E '^JARVIS_API_TOKEN=' ~/$DIR/.env | cut -d= -f2- | tr -d '\"'")"
+    # 콘솔이 토큰을 HttpOnly 쿠키로 바꾸고 주소창에서 지운다.
+    open "http://127.0.0.1:$port/?token=${token}"
+    echo "맥미니 mind 콘솔을 열었습니다: http://127.0.0.1:$port (터널을 끄려면 pkill -f 'L $port:127.0.0.1:8102')" ;;
   *) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac
