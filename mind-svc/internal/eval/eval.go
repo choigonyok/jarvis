@@ -59,6 +59,9 @@ type Scenario struct {
 	Allocation []mind.Drift `json:"allocation,omitempty"`
 	// Routes are the ways measured from the stays (context-svc /travel).
 	Routes []mind.Route `json:"routes,omitempty"`
+	// Prefs are the scripted run's answers to "map this note onto
+	// dimensions", by a word of the note.
+	Prefs map[string]json.RawMessage `json:"prefs,omitempty"`
 	// Drafts are the drafting answers for the scripted run, by recipient.
 	Drafts map[string]string `json:"drafts,omitempty"`
 }
@@ -144,8 +147,12 @@ type Expect struct {
 	Brier *float64 `json:"brier,omitempty"`
 	// CardHas: words some card raised this turn has in its title, preview
 	// or body. Compared: a draft was compared with what the operator sent.
-	CardHas  []string `json:"cardHas,omitempty"`
-	Compared bool     `json:"compared,omitempty"`
+	CardHas []string `json:"cardHas,omitempty"`
+	// OptionHas: words some choice offered in a card raised this turn's form
+	// has; OptionNot: words no choice has.
+	OptionHas []string `json:"optionHas,omitempty"`
+	OptionNot []string `json:"optionNot,omitempty"`
+	Compared  bool     `json:"compared,omitempty"`
 	// PrefsHas: what the conversation is told of the operator's taste has
 	// these; PrefsNot: and not these.
 	PrefsHas []string `json:"prefsHas,omitempty"`
@@ -396,6 +403,11 @@ func Scripted(sc Scenario) llm.Client {
 			return "", errors.New("초안 답이 없습니다")
 		}
 		if system == prefs.System {
+			for word, answer := range sc.Prefs {
+				if strings.Contains(user, word) {
+					return string(answer), nil
+				}
+			}
 			return `{"items":[]}`, nil
 		}
 		if system == reflect.System {
@@ -866,6 +878,25 @@ func checkCards(ctx context.Context, st store.Store, ex Expect, seen map[string]
 				all = append(all, c.Title+" / "+c.Preview)
 			}
 			out = append(out, fmt.Sprintf("카드에 %q 가 있어야 함 · 나온 것: %v", w, all))
+		}
+	}
+	var options []string
+	for _, c := range cards {
+		for _, f := range c.Fields {
+			options = append(options, f.Options...)
+		}
+	}
+	has := func(w string) bool {
+		return slices.ContainsFunc(options, func(o string) bool { return strings.Contains(o, w) })
+	}
+	for _, w := range ex.OptionHas {
+		if !has(w) {
+			out = append(out, fmt.Sprintf("카드 선택지에 %q 가 있어야 함 · 있는 것: %v", w, options))
+		}
+	}
+	for _, w := range ex.OptionNot {
+		if has(w) {
+			out = append(out, fmt.Sprintf("카드 선택지에 %q 가 없어야 함", w))
 		}
 	}
 	if ex.Compared {

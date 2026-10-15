@@ -1,0 +1,204 @@
+{
+ "name": "반대 근거: 소음이 아쉬웠던 곳이 쌓이면 추정이 오르고, 시끄럽다고 알려진 곳에 다시 가서 5점을 주면 반대 근거가 되어 추정이 내려간다",
+ "room": "owner",
+ "roomName": "jarvis",
+ "turns": [
+  {
+   "messages": [
+    {
+     "at": "2026-09-20T20:00",
+     "me": true,
+     "text": "10/03~04 솔숲캠핑장 캠핑 예약"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "create",
+      "kind": "plan",
+      "set": {
+       "title": "솔숲캠핑장 캠핑",
+       "status": "confirmed",
+       "date": "2026-10-03",
+       "endDate": "2026-10-04",
+       "place": "솔숲캠핑장",
+       "type": "캠핑"
+      },
+      "evidence": [
+       {
+        "line": 1,
+        "quote": "솔숲캠핑장 캠핑 예약"
+       }
+      ],
+      "confidence": 0.9,
+      "why": "메모"
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-10-05T21:00",
+   "tick": "review"
+  },
+  {
+   "approve": "review.place",
+   "answers": {
+    "score": "2",
+    "bad": "소음·매너"
+   }
+  },
+  {
+   "messages": [
+    {
+     "at": "2026-09-21T20:00",
+     "me": true,
+     "text": "10/10~11 강변캠핑장 캠핑 예약"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "create",
+      "kind": "plan",
+      "set": {
+       "title": "강변캠핑장 캠핑",
+       "status": "confirmed",
+       "date": "2026-10-10",
+       "endDate": "2026-10-11",
+       "place": "강변캠핑장",
+       "type": "캠핑"
+      },
+      "evidence": [
+       {
+        "line": 1,
+        "quote": "강변캠핑장 캠핑 예약"
+       }
+      ],
+      "confidence": 0.9,
+      "why": "메모"
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-10-12T21:00",
+   "tick": "review"
+  },
+  {
+   "approve": "review.place",
+   "answers": {
+    "score": "2",
+    "bad": "소음·매너"
+   },
+   "expect": {
+    "prefsHas": [
+     "소음에 민감하다 (추정 67%"
+    ]
+   }
+  },
+  {
+   "messages": [
+    {
+     "at": "2026-09-22T20:00",
+     "me": true,
+     "text": "10/17~18 숲속캠핑장 캠핑 예약"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "create",
+      "kind": "plan",
+      "set": {
+       "title": "숲속캠핑장 캠핑",
+       "status": "confirmed",
+       "date": "2026-10-17",
+       "endDate": "2026-10-18",
+       "place": "숲속캠핑장",
+       "type": "캠핑"
+      },
+      "evidence": [
+       {
+        "line": 1,
+        "quote": "숲속캠핑장 캠핑 예약"
+       }
+      ],
+      "confidence": 0.9,
+      "why": "메모"
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-10-19T21:00",
+   "tick": "review"
+  },
+  {
+   "approve": "review.place",
+   "answers": {
+    "score": "2",
+    "bad": "소음·매너"
+   },
+   "expect": {
+    "prefsHas": [
+     "소음에 민감하다 (추정 75%"
+    ]
+   }
+  },
+  {
+   "messages": [
+    {
+     "at": "2026-10-20T20:00",
+     "me": true,
+     "text": "10/24~25 숲속캠핑장 또 캠핑 예약"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "create",
+      "kind": "plan",
+      "set": {
+       "title": "숲속캠핑장 캠핑",
+       "status": "confirmed",
+       "date": "2026-10-24",
+       "endDate": "2026-10-25",
+       "place": "숲속캠핑장",
+       "type": "캠핑"
+      },
+      "evidence": [
+       {
+        "line": 1,
+        "quote": "숲속캠핑장 또 캠핑 예약"
+       }
+      ],
+      "confidence": 0.9,
+      "why": "메모"
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-10-26T21:00",
+   "tick": "review",
+   "expect": {
+    "cards": [
+     "숲속캠핑장 (10/24) 어땠어요?"
+    ]
+   }
+  },
+  {
+   "approve": "review.place",
+   "answers": {
+    "score": "5",
+    "good": "뷰"
+   },
+   "expect": {
+    "prefsHas": [
+     "반대로 1곳",
+     "소음에 민감하다 (추정 60%"
+    ]
+   }
+  }
+ ]
+}

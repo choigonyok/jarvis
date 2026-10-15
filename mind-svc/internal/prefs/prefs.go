@@ -111,7 +111,7 @@ func (p *Prefs) Record(ctx context.Context, source string, r Review) ([]model.Pr
 		for _, choice := range split(r.Answers[key]) {
 			o, ok := options[choice]
 			for _, g := range grown {
-				if g.Label == choice {
+				if Key(g.Label) == Key(choice) { // "벌레 많음" is "벌레가 많음"
 					o, ok = struct {
 						dim string
 						pol int

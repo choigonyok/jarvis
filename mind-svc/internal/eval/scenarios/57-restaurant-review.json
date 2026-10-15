@@ -1,0 +1,158 @@
+{
+ "name": "새 식당 회고: 처음 결제한 식당을 저녁에 묻고, 한 줄 서술은 모델이 차원으로(차원 밖이면 기타), 세 곳에서 같은 기타는 그 자리에서 추정이 되고 다음 카드의 선택지가 된다",
+ "room": "owner",
+ "roomName": "jarvis",
+ "prefs": {
+  "벌레": {
+   "items": [
+    {
+     "dimension": "기타",
+     "polarity": -1,
+     "detail": "벌레 많음"
+    }
+   ]
+  }
+ },
+ "turns": [
+  {
+   "at": "2026-10-05T19:40",
+   "occur": [
+    {
+     "id": "spending:r0",
+     "kind": "purchase",
+     "at": "2026-10-05T19:30",
+     "title": "망원 국숫집",
+     "class": "식비",
+     "amount": 24000
+    }
+   ]
+  },
+  {
+   "at": "2026-10-05T21:00",
+   "tick": "review",
+   "expect": {
+    "cards": [
+     "망원 국숫집 (10/5) 어땠어요?"
+    ],
+    "optionNot": [
+     "벌레"
+    ]
+   }
+  },
+  {
+   "approve": "review.place",
+   "answers": {
+    "score": "2",
+    "note": "벌레가 좀 많았어"
+   }
+  },
+  {
+   "at": "2026-10-07T19:40",
+   "occur": [
+    {
+     "id": "spending:r1",
+     "kind": "purchase",
+     "at": "2026-10-07T19:30",
+     "title": "연남 파스타",
+     "class": "식비",
+     "amount": 25000
+    }
+   ]
+  },
+  {
+   "at": "2026-10-07T21:00",
+   "tick": "review",
+   "expect": {
+    "cards": [
+     "연남 파스타 (10/7) 어땠어요?"
+    ],
+    "optionNot": [
+     "벌레"
+    ]
+   }
+  },
+  {
+   "approve": "review.place",
+   "answers": {
+    "score": "2",
+    "note": "벌레가 많더라"
+   }
+  },
+  {
+   "at": "2026-10-09T19:40",
+   "occur": [
+    {
+     "id": "spending:r2",
+     "kind": "purchase",
+     "at": "2026-10-09T19:30",
+     "title": "합정 덮밥",
+     "class": "식비",
+     "amount": 26000
+    }
+   ]
+  },
+  {
+   "at": "2026-10-09T21:00",
+   "tick": "review",
+   "expect": {
+    "cards": [
+     "합정 덮밥 (10/9) 어땠어요?"
+    ]
+   }
+  },
+  {
+   "approve": "review.place",
+   "answers": {
+    "score": "2",
+    "note": "여기도 벌레 많음"
+   },
+   "expect": {
+    "cards": [
+     "에 민감하다 맞나요?"
+    ],
+    "cardHas": [
+     "3곳에서 벌레"
+    ]
+   }
+  },
+  {
+   "at": "2026-10-12T19:40",
+   "occur": [
+    {
+     "id": "spending:r9",
+     "kind": "purchase",
+     "at": "2026-10-12T19:30",
+     "title": "상수 카레",
+     "class": "식비",
+     "amount": 21000
+    }
+   ]
+  },
+  {
+   "at": "2026-10-12T21:00",
+   "tick": "review",
+   "expect": {
+    "cards": [
+     "상수 카레 (10/12) 어땠어요?"
+    ],
+    "optionHas": [
+     "벌레",
+     "소음·매너"
+    ]
+   }
+  },
+  {
+   "approve": "review.place",
+   "answers": {
+    "score": "1",
+    "bad": "벌레 많음"
+   },
+   "expect": {
+    "prefsHas": [
+     "에 민감하다 (추정",
+     "4곳에서 벌레"
+    ]
+   }
+  }
+ ]
+}
