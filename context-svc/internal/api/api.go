@@ -593,8 +593,8 @@ func (s *Server) putCmd(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Action string `json:"action"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&in); err != nil || (in.Action != "status" && in.Action != "reportLocation") {
-		writeErr(w, http.StatusBadRequest, "action 은 status 나 reportLocation 입니다.")
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&in); err != nil || (in.Action != "status" && in.Action != "reportLocation" && in.Action != "waypoints") {
+		writeErr(w, http.StatusBadRequest, "action 은 status·reportLocation·waypoints 입니다.")
 		return
 	}
 	if err := s.st.Set(r.Context(), "owntracks.cmd", map[string]string{"action": in.Action}, s.now()); err != nil {
