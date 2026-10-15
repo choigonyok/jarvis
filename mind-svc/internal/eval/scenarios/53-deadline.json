@@ -1,0 +1,85 @@
+{
+ "name": "기한이 있는 일: 전세 만기를 말해 두면 석 달 전·한 달 전·일주일 전 아침에 한 번씩",
+ "room": "owner",
+ "roomName": "jarvis",
+ "turns": [
+  {
+   "messages": [
+    {
+     "at": "2026-10-01T22:00",
+     "me": true,
+     "text": "전세 계약 2027년 1월 14일 만기. 연장할지 이사할지 정해야 함"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "remember",
+      "kind": "fact",
+      "set": {
+       "subject": "나",
+       "subjectKind": "Person",
+       "relation": "EXPIRES_ON",
+       "object": "전세 계약",
+       "objectKind": "Thing",
+       "text": "전세 계약이 2027-01-14 에 만기된다",
+       "validAt": "2027-01-14"
+      },
+      "evidence": [
+       {
+        "line": 1,
+        "quote": "전세 계약 2027년 1월 14일 만기"
+       }
+      ],
+      "confidence": 0.95,
+      "why": "직접 말함"
+     }
+    ]
+   },
+   "expect": {
+    "facts": [
+     {
+      "subject": "나",
+      "objectHas": "전세"
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-10-15T07:00",
+   "tick": "predict",
+   "expect": {
+    "noInfoHas": [
+     "전세"
+    ]
+   }
+  },
+  {
+   "at": "2026-10-16T07:00",
+   "tick": "predict",
+   "expect": {
+    "infos": [
+     "전세 계약 만기까지 90일 (1/14)"
+    ]
+   }
+  },
+  {
+   "at": "2026-10-17T07:00",
+   "tick": "predict",
+   "expect": {
+    "noInfoHas": [
+     "전세"
+    ]
+   }
+  },
+  {
+   "at": "2026-12-15T07:00",
+   "tick": "predict",
+   "expect": {
+    "infos": [
+     "전세 계약 만기까지 30일"
+    ]
+   }
+  }
+ ]
+}

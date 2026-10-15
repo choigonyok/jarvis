@@ -48,6 +48,27 @@ func (s *Store) Raw(ctx context.Context, source, kind string, at time.Time, body
 	return err
 }
 
+// Readings is the numeric reports of a kind since a time, oldest first:
+// what the raw log still holds (CONTEXT_RAW_DAYS), which is the baseline's
+// window.
+func (s *Store) Readings(ctx context.Context, kind string, since time.Time) ([]place.Reading, error) {
+	rows, err := s.pool.Query(ctx, `select at, (body->>'state')::double precision from context_raw
+		where kind = $1 and at >= $2 and body->>'state' ~ '^-?[0-9]+(\.[0-9]+)?$' order by at`, kind, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []place.Reading
+	for rows.Next() {
+		var r place.Reading
+		if err := rows.Scan(&r.At, &r.Value); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // Purge drops raw reports older than before.
 func (s *Store) Purge(ctx context.Context, before time.Time) (int64, error) {
 	tag, err := s.pool.Exec(ctx, `delete from context_raw where at < $1`, before)

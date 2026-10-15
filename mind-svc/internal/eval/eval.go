@@ -136,8 +136,10 @@ type Expect struct {
 	Notes       []NoteMatch `json:"notes,omitempty"`
 	NoNotes     []NoteMatch `json:"noNotes,omitempty"`
 	Predictions []PredMatch `json:"predictions,omitempty"`
-	// Infos: lines raised this turn (info intents), each by a word of the title.
-	Infos []string `json:"infos,omitempty"`
+	// Infos: lines raised this turn (info intents), each by a word of the title;
+	// NoInfoHas: no line raised this turn has any of these words.
+	Infos     []string `json:"infos,omitempty"`
+	NoInfoHas []string `json:"noInfoHas,omitempty"`
 	// Brier: the run's predictions so far score at most this.
 	Brier *float64 `json:"brier,omitempty"`
 	// CardHas: words some card raised this turn has in its title, preview
@@ -1055,7 +1057,7 @@ func checkSelf(ctx context.Context, st store.Store, ex Expect, seen map[string]b
 			}
 		}
 	}
-	if len(ex.Infos) > 0 {
+	if len(ex.Infos) > 0 || len(ex.NoInfoHas) > 0 {
 		intents, _ := st.Intents(ctx, 10000)
 		var titles []string
 		for _, in := range intents {
@@ -1066,6 +1068,11 @@ func checkSelf(ctx context.Context, st store.Store, ex Expect, seen map[string]b
 		for _, w := range ex.Infos {
 			if !slices.ContainsFunc(titles, func(t string) bool { return strings.Contains(t, w) }) {
 				out = append(out, fmt.Sprintf("%q 알림이 나와야 함 · 나온 것: %v", w, titles))
+			}
+		}
+		for _, w := range ex.NoInfoHas {
+			if slices.ContainsFunc(titles, func(t string) bool { return strings.Contains(t, w) }) {
+				out = append(out, fmt.Sprintf("%q 알림이 나오면 안 됨 · 나온 것: %v", w, titles))
 			}
 		}
 	}

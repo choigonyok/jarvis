@@ -1,0 +1,59 @@
+{
+ "name": "투자 판단 메모: 산 이유를 말해 두면 팔 때 그 이유를 옆에",
+ "room": "owner",
+ "roomName": "jarvis",
+ "turns": [
+  {
+   "messages": [
+    {
+     "at": "2026-05-02T21:00",
+     "me": true,
+     "text": "금 ETF는 인플레이션 헤지로 샀다. 3년은 들고 갈 생각"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "remember",
+      "kind": "fact",
+      "set": {
+       "subject": "나",
+       "subjectKind": "Person",
+       "relation": "INVESTED_BECAUSE",
+       "object": "금 ETF",
+       "objectKind": "Thing",
+       "text": "금 ETF 는 인플레이션 헤지로 샀다 - 3년은 들고 갈 생각"
+      },
+      "evidence": [
+       {
+        "line": 1,
+        "quote": "금 ETF는 인플레이션 헤지로 샀다"
+       }
+      ],
+      "confidence": 0.9
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-10-15T10:00",
+   "occur": [
+    {
+     "id": "asset:sale:s1",
+     "kind": "asset",
+     "at": "2026-10-15T00:00",
+     "title": "금 ETF",
+     "class": "매도",
+     "amount": 12000,
+     "quote": "2026-10-15 금 ETF 1주 매도, 실현손익 12,000원"
+    }
+   ],
+   "expect": {
+    "infos": [
+     "금 ETF 매도 · 살 때 이유",
+     "인플레이션"
+    ]
+   }
+  }
+ ]
+}

@@ -364,6 +364,9 @@ type Now struct {
 	State    State          `json:"state"`
 	Summary  string         `json:"summary"`
 	Mode     int            `json:"mode"`
+	// Health is each body measure a shortcut sends, against the operator's
+	// own usual (the median of the 28 days before).
+	Health []place.Health `json:"health,omitempty"`
 }
 
 // State is the current state in one place, derived from the visits and
@@ -454,6 +457,19 @@ func (s *Server) snapshot(ctx context.Context) (Now, error) {
 			out.Mode = m.Mode
 		}
 	}
+	for kind := range out.Signals {
+		if !strings.HasPrefix(kind, "health.") {
+			continue
+		}
+		rs, err := s.st.Readings(ctx, kind, s.now().AddDate(0, 0, -30))
+		if err != nil {
+			return out, err
+		}
+		if h, ok := place.Baseline(kind, rs, s.loc); ok {
+			out.Health = append(out.Health, h)
+		}
+	}
+	slices.SortFunc(out.Health, func(a, b place.Health) int { return strings.Compare(a.Kind, b.Kind) })
 	out.State = Derive(out, s.now())
 	out.Summary = Summary(out, s.now())
 	return out, nil
@@ -552,6 +568,9 @@ func (s *Server) setup(w http.ResponseWriter, r *http.Request) {
 				{"when": "집중 모드 끔", "body": `{"source":"shortcut","kind":"device.focus","state":"off"}`},
 				{"when": "충전기 연결", "body": `{"source":"shortcut","kind":"device.charging","state":"on"}`},
 				{"when": "충전기 분리", "body": `{"source":"shortcut","kind":"device.charging","state":"off"}`},
+				{"when": "매일 아침: 심박 변이(건강 샘플 찾기의 값)", "body": `{"source":"shortcut","kind":"health.hrv","state":"<값>"}`},
+				{"when": "매일 아침: 안정 시 심박", "body": `{"source":"shortcut","kind":"health.hr_rest","state":"<값>"}`},
+				{"when": "매일 아침: 어젯밤 수면 시간(시간)", "body": `{"source":"shortcut","kind":"health.sleep","state":"<값>"}`},
 			},
 		},
 	}
@@ -609,8 +628,16 @@ func Summary(n Now, now time.Time) string {
 			parts = append(parts, f.what)
 		}
 	}
+	for _, h := range n.Health {
+		if h.Notable() && now.Sub(h.At) < 36*time.Hour {
+			parts = append(parts, h.Line())
+		}
+	}
 	keys := make([]string, 0, len(n.Signals))
 	for k := range n.Signals {
+		if strings.HasPrefix(k, "health.") {
+			continue // said against the usual above, or not at all
+		}
 		keys = append(keys, k)
 	}
 	slices.Sort(keys)

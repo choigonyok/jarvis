@@ -188,6 +188,7 @@ type Thing struct {
 	CycleDays int       `json:"cycleDays,omitempty"`
 	Next      string    `json:"next,omitempty"` // when it usually runs out
 	Last      time.Time `json:"last"`
+	Sizes     []string  `json:"sizes,omitempty"` // as the items' names say: 270mm, XL
 }
 
 // Things is what was bought in the last half year, by class, with how
@@ -223,6 +224,11 @@ func (m *Mind) Things(ctx context.Context, classify int) ([]Thing, error) {
 		}
 		if !slices.Contains(t.Items, it.Title) {
 			t.Items = append(t.Items, it.Title)
+			for _, sz := range Sizes(it.Title) {
+				if !slices.Contains(t.Sizes, sz) {
+					t.Sizes = append(t.Sizes, sz)
+				}
+			}
 		}
 		day := it.At.In(loc).Format("2006-01-02")
 		if !slices.Contains(t.Bought, day) {

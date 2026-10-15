@@ -75,3 +75,26 @@ func TestKindOf(t *testing.T) {
 		}
 	}
 }
+
+// The usual is one's own: the median of the days before, one reading a day;
+// too few days and nothing is said.
+func TestBaseline(t *testing.T) {
+	seoul, _ := time.LoadLocation("Asia/Seoul")
+	day0 := time.Date(2026, 10, 1, 8, 0, 0, 0, seoul)
+	var rs []Reading
+	for i, v := range []float64{44, 46, 45, 47, 43, 45, 46, 99} { // 99 the same day as 46, superseded
+		at := day0.AddDate(0, 0, i)
+		if i == 7 {
+			at = day0.AddDate(0, 0, 6).Add(time.Hour)
+		}
+		rs = append(rs, Reading{at, v})
+	}
+	if _, ok := Baseline("health.hrv", rs, seoul); ok {
+		t.Fatal("엿새로는 평소를 말하지 않음")
+	}
+	rs = append(rs, Reading{day0.AddDate(0, 0, 8), 38})
+	h, ok := Baseline("health.hrv", rs, seoul)
+	if !ok || h.Baseline != 45 || h.Value != 38 || h.Days != 7 || !h.Notable() || h.Line() != "심박 변이(HRV) 38 (평소 45보다 16% 낮음)" {
+		t.Fatalf("%+v %v %q", h, ok, h.Line())
+	}
+}

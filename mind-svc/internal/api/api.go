@@ -19,7 +19,10 @@
 //	GET  /api/notes/{id}/versions     a note's versions, with why each
 //	POST /api/links                   {from, to, rel, state} the operator on a link
 //	POST /api/replies/rebuild         re-index reply situations from the messages
-//	GET  /api/things                  what was bought in half a year, by class, with restock cycles
+//	GET  /api/things                  what was bought in half a year, by class, with restock cycles and sizes
+//	GET  /api/fixed                   monthly charges (subscriptions, bills) and which changed
+//	GET  /api/places                  the operator's own map: places reviewed, best first
+//	GET  /api/meals?days=30           meals as the card saw them: delivered, at home, which meal
 //	GET  /api/entities/{id}/changes   an entity's history, with evidence
 //	POST /api/replay                  {after, limit} the log through a fresh loop, in memory
 //	GET  /api/recall?q=&person=       what is known: world model + long-term memory
@@ -37,6 +40,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -125,6 +129,34 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, http.StatusOK, map[string]any{"versions": vs})
 	}))
 	mux.HandleFunc("POST /api/links", s.auth(false, s.decideLink))
+	mux.HandleFunc("GET /api/fixed", s.auth(false, func(w http.ResponseWriter, r *http.Request) {
+		fixed, err := s.m.FixedCosts(r.Context())
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"fixed": fixed})
+	}))
+	mux.HandleFunc("GET /api/places", s.auth(false, func(w http.ResponseWriter, r *http.Request) {
+		places, err := s.m.Places(r.Context())
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"places": places})
+	}))
+	mux.HandleFunc("GET /api/meals", s.auth(false, func(w http.ResponseWriter, r *http.Request) {
+		days, _ := strconv.Atoi(r.URL.Query().Get("days"))
+		if days == 0 {
+			days = 30
+		}
+		meals, err := s.m.Meals(r.Context(), max(1, min(days, 365)))
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"meals": meals})
+	}))
 	mux.HandleFunc("GET /api/things", s.auth(false, func(w http.ResponseWriter, r *http.Request) {
 		things, err := s.m.Things(r.Context(), 0)
 		if err != nil {

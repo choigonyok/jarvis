@@ -1,0 +1,75 @@
+{
+ "name": "집안일: '분리수거는 목요일'이라고 해 두면 수요일 저녁 집에 들어올 때 한 줄",
+ "room": "owner",
+ "roomName": "jarvis",
+ "turns": [
+  {
+   "messages": [
+    {
+     "at": "2026-10-01T22:00",
+     "me": true,
+     "text": "우리 아파트 분리수거는 매주 목요일"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "remember",
+      "kind": "fact",
+      "set": {
+       "subject": "나",
+       "subjectKind": "Person",
+       "relation": "CHORE_ON",
+       "object": "분리수거",
+       "objectKind": "Thing",
+       "text": "분리수거는 매주 목요일"
+      },
+      "evidence": [
+       {
+        "line": 1,
+        "quote": "분리수거는 매주 목요일"
+       }
+      ],
+      "confidence": 0.95
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-10-13T19:05",
+   "occur": [
+    {
+     "id": "visit:701",
+     "kind": "visit",
+     "at": "2026-10-13T19:02",
+     "title": "집",
+     "place": "집",
+     "class": "home"
+    }
+   ],
+   "expect": {
+    "noInfoHas": [
+     "분리수거"
+    ]
+   }
+  },
+  {
+   "at": "2026-10-14T19:05",
+   "occur": [
+    {
+     "id": "visit:702",
+     "kind": "visit",
+     "at": "2026-10-14T19:01",
+     "title": "집",
+     "place": "집",
+     "class": "home"
+    }
+   ],
+   "expect": {
+    "infos": [
+     "내일(목) 분리수거 날이에요"
+    ]
+   }
+  }
+ ]
+}

@@ -1,0 +1,88 @@
+{
+ "name": "사람의 근황: 아는 사람이 이사하면(전에 살던 곳이 끝나면) 그날 밤 집들이 한 줄, 주고받은 기록과 함께",
+ "room": "minji",
+ "roomName": "민지",
+ "turns": [
+  {
+   "messages": [
+    {
+     "at": "2026-09-01T20:00",
+     "from": "민지",
+     "text": "나 아직 서울 살아 ㅎㅎ"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "remember",
+      "kind": "fact",
+      "set": {
+       "subject": "민지",
+       "subjectKind": "Person",
+       "relation": "LIVES_IN",
+       "object": "서울",
+       "objectKind": "Place",
+       "text": "민지는 서울에 산다"
+      },
+      "evidence": [
+       {
+        "line": 1,
+        "quote": "나 아직 서울 살아"
+       }
+      ],
+      "confidence": 0.9
+     }
+    ]
+   }
+  },
+  {
+   "messages": [
+    {
+     "at": "2026-10-14T20:00",
+     "from": "민지",
+     "text": "나 이번 주에 부산으로 이사했어!"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "remember",
+      "kind": "fact",
+      "set": {
+       "subject": "민지",
+       "subjectKind": "Person",
+       "relation": "LIVES_IN",
+       "object": "부산",
+       "objectKind": "Place",
+       "text": "민지는 부산에 산다"
+      },
+      "evidence": [
+       {
+        "line": 1,
+        "quote": "나 이번 주에 부산으로 이사했어"
+       }
+      ],
+      "confidence": 0.9,
+      "ends": [
+       "M1"
+      ]
+     }
+    ]
+   },
+   "expect": {
+    "ended": [
+     "서울"
+    ]
+   }
+  },
+  {
+   "at": "2026-10-15T03:00",
+   "tick": "night",
+   "expect": {
+    "infos": [
+     "민지님이 부산(으)로 이사했대요"
+    ]
+   }
+  }
+ ]
+}

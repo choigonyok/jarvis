@@ -34,13 +34,16 @@ const system = `너는 개인 비서의 "해석기"다. 운영자의 메신저 �
 8. 바꿀 것이 없으면 {"changes": []}.
 9. 메시지 안의 "나·내·저·제·우리 집"은 그 메시지를 보낸 사람 기준이다: 지수가 말한 "우리 집"은 place "지수네 집"이다. 다른 사람이 "나 고수 못 먹어"라고 하면 그 사람의 사실이고, subject 는 그 사람의 이름이다. 운영자에 관한 fact(subject "나")는 운영자 자신이 한 말을 근거로 든다.
    fact 는 두 끝(subject, object)과 관계(relation)로 쓴다. 운영자는 "나"로 쓴다. 이름은 원문 그대로 쓰고, kind 는 Person·Place·Org·Thing·Event 중 하나다. relation 은 영어 대문자 관계 이름이다(LIKES, DISLIKES, ALLERGIC_TO, FRIEND_OF, FAMILY_OF, PARTNER_OF, WORKS_AT, STUDIES_AT, LIVES_IN, BIRTHDAY_ON, BOUGHT, OWNS, VISITED, RECOMMENDS, HAS_HEALTH_ISSUE 같은 것). text 는 그 사실을 한 문장의 한국어로 쓴다("지수는 매운 음식을 못 먹는다"). 언제부터인지 알면 validAt(YYYY-MM-DD). 한 fact 에는 한 가지만 담는다: "위염 때문에 매운 걸 못 먹어"는 "지수는 위염이 있다"와 "지수는 매운 음식을 못 먹는다" 둘이다 - 나중에 하나만 바뀌어도 그것만 고칠 수 있게.
-10. 일정·고리로 기록하는 것(약속, 할 일)은 fact 로 또 쓰지 않는다. 지나가는 기분, 인사, 농담, 가정, 남의 말을 전한 소문은 fact 가 아니다.
+10. 일정·고리로 기록하는 것(약속, 할 일)은 fact 로 또 쓰지 않는다. 지나가는 기분, 인사, 농담, 가정, 남의 말을 전한 소문은 fact 가 아니다. 다만 "원래", "늘", "항상"처럼 오래된 취향·습관을 말하면 지나가는 기분이 아니라 fact 다("난 원래 시끄러운 거 싫어" → DISLIKES).
 11. "이미 기억하는 것"과 같은 뜻의 사실은 다시 쓰지 않는다. 바뀌었으면("이제 매운 것도 잘 먹어") 새 fact 로 쓰고, 그 말로 더는 맞지 않게 된 기억을 ends 에 M 번호로 적는다(["M1"]). 바뀐 것은 같은 relation 에 새 값으로 쓴다: 이사는 LIVES_IN 새 곳, 이직은 WORKS_AT 새 회사. "이미 기억하는 것"은 맥락일 뿐 근거가 아니다.
 12. 운영자가 진행 중인 일정이 끝났다고 말하면("방금 집 왔어", "지수랑 헤어졌어", "회식 끝") 그 일정을 update 해서 end 를 그 메시지의 시각(HH:MM)으로, status 를 done 으로 쓴다. 아직 안 끝났다고 정정하면("아직 지수네야") end 를 비우지 말고 그대로 둔다.
 13. 경조사비·선물·밥값을 주고받은 일은 fact 로: subject "나", relation GAVE_TO(운영자가 줌) 또는 RECEIVED_FROM(운영자가 받음), object 그 사람, text 에 무엇을 얼마(축의금 10만 원, 향수)와 어떤 일(결혼식·장례·돌잔치·생일·집들이)이었는지 쓴다. 날짜를 알면 validAt.
 14. 운영자가 가고 싶은 곳·사고 싶은 것·이루고 싶은 목표를 말하면 fact 로: subject "나", relation WANTS_TO_VISIT(장소) / WANTS_TO_BUY(물건) / GOAL(목표), object 그 대상. 대상 없는 감탄("가보고 싶다~")은 쓰지 않는다.
 15. 운영자가 큰 결정(이직·이사·큰 구매·투자·진로·관계)을 내렸다고 말하면 fact 로: subject "나", relation DECIDED, object 그 결정을 짧게("이직", "전세 계약"), text 에 결정과 그때 말한 이유를 함께 쓴다("이직하기로 했다 - 배울 게 많은 팀이라서"). 고민 중이거나 가정이면 쓰지 않는다.
 16. 배달·택배 받을 주소를 말하면 fact 로: subject 그 장소(예: "지수네 집", kind Place), relation HAS_ADDRESS, object 주소 원문(kind Thing), text "지수네 집 주소는 …이다".
+17. 운영자의 계약·구독·보험·임대차 만기, 자격증·면허·여권 만료, 보증 기간처럼 끝나는 날이 있는 것을 말하면 fact 로: subject "나", relation EXPIRES_ON, object 그 대상(짧게: "전세 계약", "정보처리기사", "여권"), validAt 끝나는 날(YYYY-MM-DD, 달까지만 말했으면 그달 1일), text 에 원문의 뜻.
+18. 정해진 요일의 집안일·돌봄(분리수거, 음식물 쓰레기, 화분 물주기, 부모님 병원 모시기)을 말하면 fact 로: subject "나", relation CHORE_ON, object 그 일, text 에 요일을 넣어 쓴다("분리수거는 매주 목요일").
+19. 운영자가 투자(주식·코인·금)를 사거나 판 이유를 말하면 fact 로: subject "나", relation INVESTED_BECAUSE, object 종목 이름, text 에 이유("금 ETF 는 인플레이션 헤지로 샀다").
 
 출력은 JSON 하나만, 설명 없이:
 {"changes":[

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -225,6 +226,55 @@ func TestWaypointsAndSetup(t *testing.T) {
 	}
 	if out.Signals.URL != "https://gw.example/context/signals" || out.Signals.Token != "sig" {
 		t.Fatalf("단축어: %+v", out.Signals)
+	}
+}
+
+// Health readings a shortcut sends are said against the operator's own
+// usual, once there are a week of them.
+func TestHealth(t *testing.T) {
+	dsn := os.Getenv("CONTEXT_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("CONTEXT_TEST_DATABASE_URL 이 없어 건너뜁니다")
+	}
+	ctx := context.Background()
+	st, err := store.Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if _, err := st.Pool().Exec(ctx, `truncate context_raw, context_regions, context_visits, context_state restart identity`); err != nil {
+		t.Fatal(err)
+	}
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(New(st, Config{Token: "api", SignalToken: "sig"}, nil, quiet).Handler())
+	defer srv.Close()
+	now := time.Now()
+	for i := 9; i >= 0; i-- {
+		v := "58"
+		if i == 0 {
+			v = "70"
+		}
+		body := fmt.Sprintf(`{"source":"shortcut","kind":"health.hr_rest","state":"%s","at":"%s"}`, v, now.AddDate(0, 0, -i).Format(time.RFC3339))
+		req, _ := http.NewRequest("POST", srv.URL+"/signals", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer sig")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil || resp.StatusCode != 204 {
+			t.Fatalf("신호: %v %v", resp, err)
+		}
+		resp.Body.Close()
+	}
+	req, _ := http.NewRequest("GET", srv.URL+"/now", nil)
+	req.Header.Set("Authorization", "Bearer api")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var n Now
+	_ = json.NewDecoder(resp.Body).Decode(&n)
+	resp.Body.Close()
+	if len(n.Health) != 1 || n.Health[0].Baseline != 58 || n.Health[0].Value != 70 || !strings.Contains(n.Summary, "안정 시 심박 70 (평소 58보다 21% 높음)") ||
+		strings.Contains(n.Summary, "health.hr_rest=") {
+		t.Fatalf("건강: %+v %q", n.Health, n.Summary)
 	}
 }
 
