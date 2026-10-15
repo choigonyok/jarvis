@@ -253,6 +253,29 @@ func TestWaypointsAndSetup(t *testing.T) {
 	if r := reply(); r != "[]\n" {
 		t.Fatalf("한 번만: %s", r)
 	}
+	// The phone says it is still in Significant (it did not take the
+	// command): the rule's Move is sent again on the way out of a region.
+	if err := st.PutRegion(ctx, place.Region{Name: "집", Kind: "home", Lat: 37.1, Lon: 127.1, RadiusM: 100}); err != nil {
+		t.Fatal(err)
+	}
+	say := func(body string) string {
+		req, _ := http.NewRequest("POST", srv.URL+"/owntracks", strings.NewReader(body))
+		req.SetBasicAuth("phone", "pw")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return string(b)
+	}
+	say(`{"_type":"location","lat":37.1,"lon":127.1,"acc":10,"tst":1760600100,"m":1}`)
+	if r := say(`{"_type":"location","lat":37.3,"lon":127.3,"acc":10,"tst":1760600200,"m":1}`); !strings.Contains(r, `"monitoring":2`) {
+		t.Fatalf("집을 나섬 → Move: %s", r)
+	}
+	if r := say(`{"_type":"location","lat":37.31,"lon":127.31,"acc":10,"tst":1760600300,"m":1}`); r != "[]\n" {
+		t.Fatalf("모드 변화가 없으면 규칙으로는 다시 보내지 않음: %s", r)
+	}
 }
 
 // Health readings a shortcut sends are said against the operator's own

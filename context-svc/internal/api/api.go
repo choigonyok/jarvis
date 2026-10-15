@@ -130,6 +130,7 @@ type report struct {
 	Event     string   `json:"event"` // enter | leave
 	Desc      string   `json:"desc"`  // the region's name
 	Rad       int      `json:"rad"`   // a waypoint's radius
+	M         *int     `json:"m"`     // the monitoring mode the phone is in
 	// Waypoints: the regions set on the phone, sent when they change.
 	Waypoints []report `json:"waypoints"`
 }
@@ -277,6 +278,12 @@ func (s *Server) ingest(ctx context.Context, rep report, at time.Time) ([]map[st
 	}
 	current.Mode = place.Significant
 	_, _ = s.st.Get(ctx, "owntracks.mode", &current)
+	// The phone says which mode it is in: that, not what was last sent,
+	// is what a change is judged against - a command it did not take is
+	// sent again.
+	if rep.M != nil && *rep.M >= place.Quiet && *rep.M <= place.Move {
+		current.Mode = *rep.M
+	}
 	// Questions asked by hand (PUT /owntracks/cmd) go with this reply, once.
 	var extra []map[string]any
 	var ask struct {
