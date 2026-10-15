@@ -109,7 +109,7 @@ func (m *Mind) FixedCosts(ctx context.Context) ([]Fixed, error) {
 	for _, p := range pays {
 		by[p.Title] = append(by[p.Title], p)
 	}
-	var out []Fixed
+	out := []Fixed{}
 	for merchant, ps := range by {
 		sort.Slice(ps, func(i, j int) bool { return ps[i].At.Before(ps[j].At) })
 		months := map[string]model.Occurrence{}
