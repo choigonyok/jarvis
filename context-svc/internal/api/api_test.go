@@ -227,6 +227,32 @@ func TestWaypointsAndSetup(t *testing.T) {
 	if out.Signals.URL != "https://gw.example/context/signals" || out.Signals.Token != "sig" {
 		t.Fatalf("단축어: %+v", out.Signals)
 	}
+
+	// A mode asked for by hand goes out with the next reply, once.
+	req, _ = http.NewRequest("PUT", srv.URL+"/owntracks/mode", strings.NewReader(`{"mode":2}`))
+	req.Header.Set("Authorization", "Bearer api")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil || resp.StatusCode != 202 {
+		t.Fatalf("모드 요청: %v %v", resp, err)
+	}
+	resp.Body.Close()
+	reply := func() string {
+		req, _ := http.NewRequest("POST", srv.URL+"/owntracks", strings.NewReader(`{"_type":"location","lat":37.1,"lon":127.1,"acc":10,"tst":1760600000,"batt":80}`))
+		req.SetBasicAuth("phone", "pw")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return string(b)
+	}
+	if r := reply(); !strings.Contains(r, `"monitoring":2`) || !strings.Contains(r, "setConfiguration") {
+		t.Fatalf("요청한 모드가 답에: %s", r)
+	}
+	if r := reply(); r != "[]\n" {
+		t.Fatalf("한 번만: %s", r)
+	}
 }
 
 // Health readings a shortcut sends are said against the operator's own

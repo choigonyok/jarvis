@@ -11,6 +11,9 @@
 //	                         and how long each way usually takes
 //	GET    /regions          PUT /regions {name, kind, lat, lon, radiusM, area}
 //	DELETE /regions/{name}
+//	PUT    /owntracks/mode   {mode: -1|0|1|2} tell the phone to watch this way
+//	                         with the reply to its next report (the server
+//	                         cannot wake it) - "follow closely now"
 //	GET    /owntracks/setup  the phone's setup: an OwnTracks configuration
 //	                         (owntracks:///config?inline=…) and what the
 //	                         shortcuts post - for the console, behind its login
@@ -92,6 +95,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /regions", s.bearer(s.putRegion))
 	mux.HandleFunc("DELETE /regions/{name}", s.bearer(s.deleteRegion))
 	mux.HandleFunc("GET /owntracks/setup", s.bearer(s.setup))
+	mux.HandleFunc("PUT /owntracks/mode", s.bearer(s.putMode))
 	return mux
 }
 
@@ -270,6 +274,23 @@ func (s *Server) ingest(ctx context.Context, rep report, at time.Time) ([]map[st
 	current.Mode = place.Significant
 	_, _ = s.st.Get(ctx, "owntracks.mode", &current)
 	want := current.Mode
+	// Asked for by hand (PUT /owntracks/mode): said with this reply, once.
+	var asked struct {
+		Mode *int `json:"mode"`
+	}
+	if _, err := s.st.Get(ctx, "owntracks.asked", &asked); err == nil && asked.Mode != nil {
+		if err := s.st.Drop(ctx, "owntracks.asked"); err != nil {
+			return nil, err
+		}
+		if err := s.st.Set(ctx, "owntracks.mode", map[string]int{"mode": *asked.Mode}, s.now()); err != nil {
+			return nil, err
+		}
+		s.log.Info("폰의 위치 모드를 바꿉니다(요청)", "from", current.Mode, "to", *asked.Mode)
+		for _, m := range moves {
+			s.announce(m.event, m.region, kindOf[m.region], at)
+		}
+		return place.Command(*asked.Mode), nil
+	}
 	for _, m := range moves {
 		s.announce(m.event, m.region, kindOf[m.region], at)
 		want = place.Mode(want, m.event, kindOf[m.region], rep.Batt, rep.BS == 2 || rep.BS == 3)
@@ -536,6 +557,23 @@ func Changed(a, b State) []string {
 		}
 	}
 	return out
+}
+
+// putMode asks the phone to watch another way, with the reply to its next
+// report: Move to follow closely for a while, Significant to save battery.
+func (s *Server) putMode(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Mode *int `json:"mode"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&in); err != nil || in.Mode == nil || *in.Mode < place.Quiet || *in.Mode > place.Move {
+		writeErr(w, http.StatusBadRequest, "mode 는 -1(Quiet)·0(Manual)·1(Significant)·2(Move) 중 하나입니다.")
+		return
+	}
+	if err := s.st.Set(r.Context(), "owntracks.asked", map[string]int{"mode": *in.Mode}, s.now()); err != nil {
+		s.fail(w, "모드를 남기지 못했습니다", err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"mode": *in.Mode, "when": "폰의 다음 보고에 답으로"})
 }
 
 // setup is what the phone needs, for the console to hand over: OwnTracks'

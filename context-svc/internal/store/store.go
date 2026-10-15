@@ -180,6 +180,12 @@ func (s *Store) Set(ctx context.Context, key string, value any, at time.Time) er
 	return err
 }
 
+// Drop removes a key of the current state.
+func (s *Store) Drop(ctx context.Context, key string) error {
+	_, err := s.pool.Exec(ctx, `delete from context_state where key = $1`, key)
+	return err
+}
+
 func (s *Store) Get(ctx context.Context, key string, into any) (time.Time, error) {
 	var body []byte
 	var at time.Time
