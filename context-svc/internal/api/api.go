@@ -11,6 +11,9 @@
 //	                         and how long each way usually takes
 //	GET    /regions          PUT /regions {name, kind, lat, lon, radiusM, area}
 //	DELETE /regions/{name}
+//	PUT    /owntracks/cmd    {action: status|reportLocation} ask the phone, with
+//	                         the next reply (status: it answers with its app
+//	                         version and state - is it hearing commands?)
 //	PUT    /owntracks/mode   {mode: -1|0|1|2} tell the phone to watch this way
 //	                         with the reply to its next report (the server
 //	                         cannot wake it) - "follow closely now"
@@ -96,6 +99,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /regions/{name}", s.bearer(s.deleteRegion))
 	mux.HandleFunc("GET /owntracks/setup", s.bearer(s.setup))
 	mux.HandleFunc("PUT /owntracks/mode", s.bearer(s.putMode))
+	mux.HandleFunc("PUT /owntracks/cmd", s.bearer(s.putCmd))
 	return mux
 }
 
@@ -273,6 +277,18 @@ func (s *Server) ingest(ctx context.Context, rep report, at time.Time) ([]map[st
 	}
 	current.Mode = place.Significant
 	_, _ = s.st.Get(ctx, "owntracks.mode", &current)
+	// Questions asked by hand (PUT /owntracks/cmd) go with this reply, once.
+	var extra []map[string]any
+	var ask struct {
+		Action string `json:"action"`
+	}
+	if _, err := s.st.Get(ctx, "owntracks.cmd", &ask); err == nil && ask.Action != "" {
+		if err := s.st.Drop(ctx, "owntracks.cmd"); err != nil {
+			return nil, err
+		}
+		extra = append(extra, map[string]any{"_type": "cmd", "action": ask.Action})
+		s.log.Info("폰에 명령을 보냅니다", "action", ask.Action)
+	}
 	want := current.Mode
 	// Asked for by hand (PUT /owntracks/mode): said with this reply, once.
 	var asked struct {
@@ -289,7 +305,7 @@ func (s *Server) ingest(ctx context.Context, rep report, at time.Time) ([]map[st
 		for _, m := range moves {
 			s.announce(m.event, m.region, kindOf[m.region], at)
 		}
-		return place.Command(*asked.Mode), nil
+		return append(place.Command(*asked.Mode), extra...), nil
 	}
 	for _, m := range moves {
 		s.announce(m.event, m.region, kindOf[m.region], at)
@@ -299,13 +315,16 @@ func (s *Server) ingest(ctx context.Context, rep report, at time.Time) ([]map[st
 		want = place.Mode(want, "", "", rep.Batt, rep.BS == 2 || rep.BS == 3)
 	}
 	if want == current.Mode {
-		return []map[string]any{}, nil
+		if extra == nil {
+			extra = []map[string]any{}
+		}
+		return extra, nil
 	}
 	if err := s.st.Set(ctx, "owntracks.mode", map[string]int{"mode": want}, s.now()); err != nil {
 		return nil, err
 	}
 	s.log.Info("폰의 위치 모드를 바꿉니다", "from", current.Mode, "to", want)
-	return place.Command(want), nil
+	return append(place.Command(want), extra...), nil
 }
 
 // announce reports an arrival or a departure as an event: to the inbox,
@@ -557,6 +576,25 @@ func Changed(a, b State) []string {
 		}
 	}
 	return out
+}
+
+// putCmd asks the phone something with the next reply: its status (which
+// says whether it hears commands at all, and its version) or a fix now.
+// Nothing that would make it send its configuration back (dump: it holds
+// the password).
+func (s *Server) putCmd(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Action string `json:"action"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&in); err != nil || (in.Action != "status" && in.Action != "reportLocation") {
+		writeErr(w, http.StatusBadRequest, "action 은 status 나 reportLocation 입니다.")
+		return
+	}
+	if err := s.st.Set(r.Context(), "owntracks.cmd", map[string]string{"action": in.Action}, s.now()); err != nil {
+		s.fail(w, "명령을 남기지 못했습니다", err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"action": in.Action, "when": "폰의 다음 보고에 답으로"})
 }
 
 // putMode asks the phone to watch another way, with the reply to its next
