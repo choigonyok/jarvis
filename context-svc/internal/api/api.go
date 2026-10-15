@@ -11,6 +11,9 @@
 //	                         and how long each way usually takes
 //	GET    /regions          PUT /regions {name, kind, lat, lon, radiusM, area}
 //	DELETE /regions/{name}
+//	GET    /owntracks/setup  the phone's setup: an OwnTracks configuration
+//	                         (owntracks:///config?inline=…) and what the
+//	                         shortcuts post - for the console, behind its login
 //
 // Only /owntracks and /signals face the phone, through the gateway; each
 // has its own credential, so the phone never holds the stack's token.
@@ -24,12 +27,14 @@ package api
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -45,6 +50,9 @@ type Config struct {
 	Token       string // the stack's API token: reads and regions
 	SignalToken string // what shortcuts and collectors present on /signals
 	User, Pass  string // OwnTracks' HTTP Basic credentials
+	// Public is where the phone reaches this service (the gateway's
+	// /context), for the setup it is given.
+	Public string
 	// Trust: a fix less accurate than this (meters) does not move visits.
 	Trust float64
 }
@@ -83,6 +91,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /regions", s.bearer(s.regions))
 	mux.HandleFunc("PUT /regions", s.bearer(s.putRegion))
 	mux.HandleFunc("DELETE /regions/{name}", s.bearer(s.deleteRegion))
+	mux.HandleFunc("GET /owntracks/setup", s.bearer(s.setup))
 	return mux
 }
 
@@ -112,6 +121,9 @@ type report struct {
 	InRegions []string `json:"inregions"`
 	Event     string   `json:"event"` // enter | leave
 	Desc      string   `json:"desc"`  // the region's name
+	Rad       int      `json:"rad"`   // a waypoint's radius
+	// Waypoints: the regions set on the phone, sent when they change.
+	Waypoints []report `json:"waypoints"`
 }
 
 // Location is the last fix, as /now tells it.
@@ -225,6 +237,29 @@ func (s *Server) ingest(ctx context.Context, rep report, at time.Time) ([]map[st
 				moves = append(moves, move{"enter", n})
 			}
 		}
+	case "waypoints", "waypoint":
+		// Regions made on the phone come here as they are: kept by name, a
+		// kind guessed from it unless one was set here.
+		wps := rep.Waypoints
+		if rep.Type == "waypoint" {
+			wps = []report{rep}
+		}
+		for _, wp := range wps {
+			name := strings.TrimSpace(wp.Desc)
+			if name == "" || (wp.Lat == 0 && wp.Lon == 0) {
+				continue
+			}
+			rg := place.Region{Name: name, Kind: place.KindOf(name), Lat: wp.Lat, Lon: wp.Lon, RadiusM: max(wp.Rad, 50)}
+			for _, old := range regions {
+				if old.Name == name {
+					rg.Kind, rg.Area = old.Kind, old.Area
+				}
+			}
+			if err := s.st.PutRegion(ctx, rg); err != nil {
+				return nil, err
+			}
+		}
+		return []map[string]any{}, nil
 	default:
 		return []map[string]any{}, nil
 	}
@@ -485,6 +520,43 @@ func Changed(a, b State) []string {
 		}
 	}
 	return out
+}
+
+// setup is what the phone needs, for the console to hand over: OwnTracks'
+// configuration as a link the app imports (HTTP mode to the gateway, Basic
+// auth, Significant, commands and remote configuration on so the reply can
+// switch modes), and what the shortcuts post. Behind the API token: it
+// holds the phone's credentials.
+func (s *Server) setup(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.User == "" || s.cfg.Pass == "" || s.cfg.Public == "" {
+		writeErr(w, http.StatusServiceUnavailable, "OWNTRACKS_USER/OWNTRACKS_PASSWORD 와 CONTEXT_PUBLIC_URL 이 있어야 합니다.")
+		return
+	}
+	base := strings.TrimRight(s.cfg.Public, "/")
+	cfg := map[string]any{
+		"_type": "configuration", "mode": 3, "url": base + "/owntracks",
+		"auth": true, "username": s.cfg.User, "password": s.cfg.Pass,
+		"deviceId": "iphone", "tid": "me",
+		"monitoring": place.Significant, "cmd": true, "remoteConfiguration": true,
+	}
+	body, _ := json.Marshal(cfg)
+	out := map[string]any{
+		"link": "owntracks:///config?inline=" + url.QueryEscape(base64.StdEncoding.EncodeToString(body)),
+		"url":  base + "/owntracks",
+		"signals": map[string]any{
+			"url": base + "/signals", "token": s.cfg.SignalToken,
+			"examples": []map[string]string{
+				{"when": "CarPlay 연결", "body": `{"source":"shortcut","kind":"device.carplay","state":"connected"}`},
+				{"when": "CarPlay 끊김", "body": `{"source":"shortcut","kind":"device.carplay","state":"disconnected"}`},
+				{"when": "집중 모드 켬", "body": `{"source":"shortcut","kind":"device.focus","state":"on"}`},
+				{"when": "집중 모드 끔", "body": `{"source":"shortcut","kind":"device.focus","state":"off"}`},
+				{"when": "충전기 연결", "body": `{"source":"shortcut","kind":"device.charging","state":"on"}`},
+				{"when": "충전기 분리", "body": `{"source":"shortcut","kind":"device.charging","state":"off"}`},
+			},
+		},
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, out)
 }
 
 // travel is the journeys between regions over the last days, and how long

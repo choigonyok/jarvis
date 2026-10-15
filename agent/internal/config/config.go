@@ -172,7 +172,7 @@ func Load() (Config, error) {
 		AllowedTools: splitList(env("JARVIS_ALLOWED_TOOLS",
 			"Read,Glob,Grep,TodoWrite,mcp__calendar__list_events,"+
 				"mcp__assets__get_portfolio,mcp__assets__get_allocation,mcp__assets__get_history,"+
-				"mcp__spending__get_spending,mcp__memory__search_memory,mcp__context__get_context,mcp__jobs__create_job,mcp__jobs__list_jobs,mcp__jobs__instruct_job")),
+				"mcp__spending__get_spending,mcp__memory__search_memory,mcp__context__get_context,mcp__context__find_nearby,mcp__jobs__create_job,mcp__jobs__list_jobs,mcp__jobs__instruct_job")),
 		PermissionMode:   env("JARVIS_PERMISSION_MODE", "manual"),
 		ApprovalWait:     envDuration("JARVIS_APPROVAL_TIMEOUT", 30*time.Minute),
 		TurnTimeout:      envDuration("JARVIS_TURN_TIMEOUT", 2*time.Hour),

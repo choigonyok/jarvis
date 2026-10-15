@@ -28,8 +28,8 @@ const (
 	ServerName = "context"
 )
 
-// Tools is what the conversation may call without a card: it only reads.
-var Tools = []string{"mcp__" + ServerName + "__get_context"}
+// Tools is what the conversation may call without a card: they only read.
+var Tools = []string{"mcp__" + ServerName + "__get_context", "mcp__" + ServerName + "__find_nearby"}
 
 // Now is context-svc's GET /now.
 type Now struct {
@@ -107,6 +107,35 @@ func (m *Module) Handler() http.Handler {
 		}
 		body, _ := json.Marshal(now)
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: now.Summary + "\n" + string(body)}}}, nil, nil
+	})
+	type nearbyIn struct {
+		Near   string `json:"near,omitempty" jsonschema:"어디 근처인지: 비우면 지금 위치, 등록된 영역 이름(예: 집, 지수네 집), 또는 지도에서 찾을 장소·동네 이름(예: 망원동, 강남역)"`
+		What   string `json:"what,omitempty" jsonschema:"무엇을: 식당(기본)·배달·카페·술집·편의점·마트·약국"`
+		Radius int    `json:"radiusM,omitempty" jsonschema:"반경 미터(기본 800, 최대 3000)"`
+		Limit  int    `json:"limit,omitempty" jsonschema:"최대 개수(기본 8)"`
+	}
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "find_nearby",
+		Description: "어느 곳 근처의 식당·카페·편의점 등을 OpenStreetMap 에서 찾는다(읽기 전용, 키 없음). 가까운 순으로 이름·종류·거리·주소·영업시간. " +
+			"지도 데이터가 빠진 곳이 있으니 후보로만 쓰고, 답에는 출처(OpenStreetMap)와 어디 기준인지 밝힌다. 주문·예약은 하지 않는다.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in nearbyIn) (*mcp.CallToolResult, any, error) {
+		fail := func(err error) (*mcp.CallToolResult, any, error) {
+			return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}}}, nil, nil
+		}
+		p, err := m.Where(ctx, in.Near)
+		if err != nil {
+			return fail(err)
+		}
+		shops, err := m.Nearby(ctx, p, in.What, in.Radius, in.Limit)
+		if err != nil {
+			return fail(err)
+		}
+		head := fmt.Sprintf("%s 기준, OpenStreetMap 에서 %d곳", p.From, len(shops))
+		if len(shops) == 0 {
+			head += " - 지도에 없거나 반경이 좁습니다(radiusM 을 넓혀 보세요)"
+		}
+		body, _ := json.Marshal(shops)
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: head + "\n" + string(body)}}}, nil, nil
 	})
 	return mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
 }

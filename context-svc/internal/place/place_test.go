@@ -67,3 +67,11 @@ func TestTrips(t *testing.T) {
 		}
 	}
 }
+
+func TestKindOf(t *testing.T) {
+	for name, want := range map[string]string{"집": "home", "우리 집": "home", "지수네 집": "other", "회사": "work", "판교 사무실": "work", "솔숲캠핑장": "camp", "이마트": "shop"} {
+		if got := KindOf(name); got != want {
+			t.Errorf("KindOf(%q) = %q, want %q", name, got, want)
+		}
+	}
+}

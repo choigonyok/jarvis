@@ -39,10 +39,11 @@ Move 를 하지 않고, 8% 미만이면 Quiet. 서버가 먼저 폰을 깨울 �
 OwnTracks 에서 원격 설정(Remote configuration)을 켜야 적용된다.
 
 필드 이름은 OwnTracks 문서(owntracks.org/booklet, 2026-10-15 확인)와 맞췄다: `configuration.monitoring` 은 -1 Quiet,
-0 Manual, 1 Significant, 2 Move. `setConfiguration` 명령은 JSON 문서의 `cmd` 에 iOS·Android 둘 다로 있고, 앱의
-`cmd`(명령에 응답)와 `remoteConfiguration`(원격 설정 허용)이 켜져 있어야 한다. HTTP 문서는 응답 본문에 `cmd` 를
-담을 수 있다고 하지만 그 예시 목록에는 `setConfiguration` 이 없어서, 폰에서 한 번 실제로 바뀌는지 보는 것이 남았다
-(안 바뀌면 모드 전환만 빠지고 위치·체류는 그대로 된다). `bs`(배터리 상태)는 0 모름, 1 빠짐, 2 충전 중, 3 가득.
+0 Manual, 1 Significant, 2 Move. `bs`(배터리 상태)는 0 모름, 1 빠짐, 2 충전 중, 3 가득. HTTP 문서의 응답 예시에는
+`setConfiguration` 이 없어서 iOS 앱 소스(owntracks/ios)로 확인했다: HTTP 응답 본문의 배열을 원소마다 `oneMessage` 로
+넘기고, `cmd` 는 자기 기기 토픽으로 처리되어 앱의 `cmd` 설정이 켜져 있으면 `setConfiguration` 을, `remoteConfiguration`
+이 켜져 있으면 적용한다(`Settings fromDictionary` 가 `monitoring` 을 바꾸고 위치 관리자에 바로 반영). 여기서 보내는 명령과
+설정은 앱의 JSON 스키마(`message.json`/`messages.json`)로 검증했다.
 
 ## 읽는 것 (Bearer API 토큰)
 
@@ -58,10 +59,17 @@ DELETE /regions/{name}
 
 ## 폰 설정 (iPhone)
 
+jarvis 웹의 **상태 → 폰 연결**을 아이폰에서 열고 차례로 누른다. 웹은 로그인 뒤에서 `GET /owntracks/setup`(API 토큰)을
+읽어, OwnTracks 설정 전체(HTTP 모드, 게이트웨이 URL, Basic 계정, Significant, `cmd`·`remoteConfiguration` 켬)를
+`owntracks:///config?inline=…` 링크 하나로 넘긴다. 비밀값은 버튼을 누를 때만 읽고 화면에 그리지 않는다.
+
 1. OwnTracks(App Store, 게시자 Christoph Krey) 설치, 위치 권한 "항상 허용".
-2. 설정 → 연결: 모드 HTTP, URL `https://jarvis-be.choigonyok.com/context/owntracks`, 인증 사용자
-   `OWNTRACKS_USER`, 비밀번호 `OWNTRACKS_PASSWORD`(맥미니 `.env`). 원격 설정 허용.
-3. 모니터링 Significant. 영역(Regions)에 집·회사를 추가하거나, 서버에 `PUT /regions` 로 넣는다(둘 다 쓰인다).
+2. OwnTracks 설정에서 외부 설정 허용(URL·파일)을 켠다 - 26.2.3(2026-05)부터 보안 때문에 기본으로 꺼져 있고, 가져온
+   설정으로는 켤 수 없다(앱 소스의 CHANGELOG).
+3. "OwnTracks에 jarvis 설정 넣기" → 앱이 바뀌는 내용을 보여 주면 확인.
+4. 영역(Regions)은 앱에서 만들면 된다: 앱이 보내는 `waypoints` 메시지를 받아 `context_regions` 에 이름으로 넣는다(종류는
+   이름으로 짐작: "집"·"우리 집"은 home, "회사"·"사무실"은 work, 캠핑·마트·식당…, "지수네 집"은 other. 여기서 정한 종류와
+   동네는 지키고 위치·반경만 갱신). 서버에 `PUT /regions` 로 넣어도 된다.
 4. 단축어 개인용 자동화(CarPlay 연결/해제, 집중 모드 켬/끔, 충전기 연결/해제): "즉시 실행", "실행 시 알림" 끔,
    동작은 "URL 내용 가져오기" 하나 - POST `https://jarvis-be.choigonyok.com/context/signals`, 헤더
    `Authorization: Bearer <CONTEXT_SIGNAL_TOKEN>`, JSON `{"source":"shortcut","kind":"device.carplay","state":"connected"}`.
@@ -90,6 +98,9 @@ notify-svc 가 이것을 듣고 **운전·회의 중에는 즉시 알림을 붙�
 - `mac.clipboard`: 방금 복사한 것의 종류(tracking 송장번호 · address 주소 · date 날짜). 내용은 보내지 않고,
   비밀번호 관리자가 앞에 있을 때는 클립보드를 보지도 않는다.
 - `mac.download`, `mac.screenshot`: 새 파일의 확장자. macOS 가 폴더 접근을 물어서 기본으로 끈다(`-files`).
+- `mac.notification`: 아이폰 미러링으로 이 맥에 들어온 **배달앱 알림**(`delivery.baemin`·`delivery.coupangeats`·`delivery.yogiyo`
+  ·`delivery.ddangyo`). 통합 로그의 알림 센터 줄(`Adding notification to storage: <번들>:<id>`)만 따라가며, 앱 종류만 보내고
+  내용은 보내지 않는다. 배달앱이 아닌 앱의 알림은 무시한다(`-notifications=false` 로 끔).
 
 카메라·마이크 사용 여부는 권한 없이 믿을 만하게 읽을 길이 없어, 회의 중은 앞에 있는 앱으로만 판단한다.
 지우려면 `scripts/mac-collector uninstall`.
@@ -106,3 +117,5 @@ notify-svc 가 이것을 듣고 **운전·회의 중에는 즉시 알림을 붙�
   아니고, 걸린 시간은 중앙값. API 흐름에서 집 → 회사 30분, 회사 → 집 67분이 `/travel` 로 나오고, 신호가 오면
   `derived` 상태가 운전 중으로 바뀐다.
 - 운영에서 게이트웨이를 거쳐: 토큰 없는 `/context/now` 는 401, 자격 없는 `/context/owntracks` 도 401.
+- 폰 설정 링크(Postgres 흐름 테스트): 토큰 없이 401, inline 을 풀면 HTTP 모드·URL·계정·Significant·cmd·remoteConfiguration.
+  waypoints 로 영역이 들어오고 여기서 정한 종류·동네는 남는다. 수집기의 배달앱 알림 줄 읽기(다시 넣기·다른 앱은 무시).

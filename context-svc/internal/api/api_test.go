@@ -2,16 +2,19 @@ package api
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/choigonyok/jarvis/context-svc/internal/place"
 	"github.com/choigonyok/jarvis/context-svc/internal/store"
 )
 
@@ -32,7 +35,7 @@ func TestFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv := httptest.NewServer(New(st, Config{Token: "api", SignalToken: "sig", User: "phone", Pass: "pw"}, nil, quiet).Handler())
+	srv := httptest.NewServer(New(st, Config{Token: "api", SignalToken: "sig", User: "phone", Pass: "pw", Public: "https://gw.example/context"}, nil, quiet).Handler())
 	defer srv.Close()
 
 	do := func(method, path, body string, set func(*http.Request)) (int, string) {
@@ -141,6 +144,87 @@ func TestFlow(t *testing.T) {
 	}
 	if _, err := st.Get(ctx, "derived", &derived); err != nil || !derived.Driving {
 		t.Fatalf("운전 시작: %+v %v", derived, err)
+	}
+}
+
+// The phone's regions come in with its waypoints message, and the console
+// can hand the phone its whole configuration as one link.
+func TestWaypointsAndSetup(t *testing.T) {
+	dsn := os.Getenv("CONTEXT_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("CONTEXT_TEST_DATABASE_URL 이 없어 건너뜁니다")
+	}
+	ctx := context.Background()
+	st, err := store.Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if _, err := st.Pool().Exec(ctx, `truncate context_raw, context_regions, context_visits, context_state restart identity`); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.PutRegion(ctx, place.Region{Name: "회사", Kind: "work", Lat: 1, Lon: 1, RadiusM: 100, Area: "판교"}); err != nil {
+		t.Fatal(err)
+	}
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(New(st, Config{Token: "api", SignalToken: "sig", User: "phone", Pass: "pw", Public: "https://gw.example/context"}, nil, quiet).Handler())
+	defer srv.Close()
+	post := func(body string) int {
+		req, _ := http.NewRequest("POST", srv.URL+"/owntracks", strings.NewReader(body))
+		req.SetBasicAuth("phone", "pw")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if code := post(`{"_type":"waypoints","waypoints":[{"_type":"waypoint","desc":"집","lat":37.55,"lon":126.91,"rad":120,"tst":1},
+		{"_type":"waypoint","desc":"회사","lat":37.40,"lon":127.11,"rad":200,"tst":1},{"_type":"waypoint","desc":"지수네 집","lat":37.56,"lon":126.92,"rad":30,"tst":1}]}`); code != 200 {
+		t.Fatalf("waypoints: %d", code)
+	}
+	regions, _ := st.Regions(ctx)
+	got := map[string]place.Region{}
+	for _, r := range regions {
+		got[r.Name] = r
+	}
+	if got["집"].Kind != "home" || got["집"].RadiusM != 120 || got["회사"].Area != "판교" || got["회사"].Lat != 37.40 || got["지수네 집"].Kind != "other" || got["지수네 집"].RadiusM != 50 {
+		t.Fatalf("영역: %+v", got)
+	}
+
+	req, _ := http.NewRequest("GET", srv.URL+"/owntracks/setup", nil)
+	resp, _ := http.DefaultClient.Do(req)
+	resp.Body.Close()
+	if resp.StatusCode != 401 {
+		t.Fatalf("토큰 없는 설정: %d", resp.StatusCode)
+	}
+	req.Header.Set("Authorization", "Bearer api")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out struct {
+		Link    string
+		Signals struct{ URL, Token string }
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	resp.Body.Close()
+	u, err := url.Parse(out.Link)
+	if err != nil || u.Scheme != "owntracks" || u.Path != "/config" {
+		t.Fatalf("링크: %q %v", out.Link, err)
+	}
+	raw, err := base64.StdEncoding.DecodeString(u.Query().Get("inline"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg map[string]any
+	_ = json.Unmarshal(raw, &cfg)
+	if cfg["_type"] != "configuration" || cfg["mode"] != 3.0 || cfg["url"] != "https://gw.example/context/owntracks" || cfg["username"] != "phone" ||
+		cfg["password"] != "pw" || cfg["cmd"] != true || cfg["remoteConfiguration"] != true || cfg["monitoring"] != 1.0 {
+		t.Fatalf("설정: %s", raw)
+	}
+	if out.Signals.URL != "https://gw.example/context/signals" || out.Signals.Token != "sig" {
+		t.Fatalf("단축어: %+v", out.Signals)
 	}
 }
 

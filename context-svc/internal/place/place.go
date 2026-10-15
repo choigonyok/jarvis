@@ -6,6 +6,7 @@ package place
 import (
 	"math"
 	"slices"
+	"strings"
 )
 
 // Region is a named circle: home, work, a campsite.
@@ -16,6 +17,33 @@ type Region struct {
 	Lon     float64 `json:"lon"`
 	RadiusM int     `json:"radiusM"`
 	Area    string  `json:"area,omitempty"`
+}
+
+// KindOf guesses a region's kind from its name, for a region made on the
+// phone: 집 is home, 회사 is work, and so on.
+func KindOf(name string) string {
+	n := strings.ToLower(strings.TrimSpace(name))
+	// Home is the operator's own: "지수네 집" is somewhere else.
+	switch strings.ReplaceAll(n, " ", "") {
+	case "집", "우리집", "home", "myhome", "내집":
+		return "home"
+	}
+	for _, k := range []struct {
+		kind  string
+		words []string
+	}{
+		{"work", []string{"회사", "직장", "사무실", "office", "work"}},
+		{"camp", []string{"캠핑", "camp"}},
+		{"shop", []string{"마트", "편의점", "시장", "mart"}},
+		{"food", []string{"식당", "카페", "cafe"}},
+	} {
+		for _, w := range k.words {
+			if strings.Contains(n, w) {
+				return k.kind
+			}
+		}
+	}
+	return "other"
 }
 
 // Meters between two points (haversine).

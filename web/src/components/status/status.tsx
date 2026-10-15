@@ -29,6 +29,7 @@ import {
   useUsage,
 } from "@/lib/use-usage";
 import { cn } from "@/lib/utils";
+import { PhoneSetup } from "./phone-setup";
 
 /**
  * Is anything broken - answered per feature, not per container.
@@ -151,6 +152,8 @@ export function Status() {
                   </section>
                 );
               })}
+
+              <PhoneSetup />
             </>
           )}
         </div>
