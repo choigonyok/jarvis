@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# 맥미니의 전제(DEPLOY.md)를 점검해 ~/.jarvis-host/host.json 에 적는다. 맥미니에서 돈다.
+# status-svc 가 그 파일을 읽어 상태 탭의 "기반"에 보여 준다 - 컨테이너는 이것들을 직접 볼 수 없다.
+#
+#   scripts/host-check run        지금 한 번
+#   scripts/host-check install    LaunchAgent com.jarvis.host-check 로 10분마다
+#   scripts/host-check uninstall
+#
+# 적는 것: FileVault 상태, Time Machine 대상 유무, iMessage 미러 방식(binary | ssh), 마지막 백업 날짜.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+OUT="$HOME/.jarvis-host"
+LABEL=com.jarvis.host-check
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+BACKUPS="${JARVIS_BACKUP_DIR:-$HOME/jarvis-backups}"
+
+run() {
+  mkdir -p "$OUT"
+  chmod 755 "$OUT" # the status container reads it (read-only mount); nothing secret is in it
+  local fv tm mirror last
+  fv=$(fdesetup status 2>/dev/null | sed -n 's/^FileVault is \([A-Za-z]*\).*/\1/p' | head -1)
+  tm=false
+  tmutil destinationinfo 2>/dev/null | grep -q "^Name" && tm=true
+  mirror=$(cut -d' ' -f1 "$HOME/.jarvis-mirror/mode" 2>/dev/null || true)
+  last=$(find "$BACKUPS" -mindepth 1 -maxdepth 1 -type d -name '20*' 2>/dev/null | sort | tail -1 | xargs -n1 basename 2>/dev/null || true)
+  printf '{"checkedAt":"%s","filevault":"%s","timemachine":%s,"mirror":"%s","lastBackup":"%s"}\n' \
+    "$(date +%Y-%m-%dT%H:%M:%S%z | sed 's/\(..\)$/:\1/')" "${fv:-unknown}" "$tm" "$mirror" "$last" > "$OUT/host.json.tmp"
+  mv "$OUT/host.json.tmp" "$OUT/host.json"
+  chmod 644 "$OUT/host.json"
+}
+
+case "${1:-}" in
+  run) run; cat "$OUT/host.json" ;;
+  install)
+    mkdir -p "$(dirname "$PLIST")"
+    cat > "$PLIST" <<PL
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>$LABEL</string>
+  <key>ProgramArguments</key><array><string>$ROOT/scripts/host-check</string><string>run</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>StartInterval</key><integer>600</integer>
+  <key>StandardErrorPath</key><string>/tmp/jarvis-host-check.log</string>
+</dict></plist>
+PL
+    launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+    launchctl bootstrap "gui/$(id -u)" "$PLIST"
+    sleep 2
+    echo "설치했습니다: $LABEL (10분마다) → $OUT/host.json"
+    cat "$OUT/host.json" 2>/dev/null || true
+    ;;
+  uninstall)
+    launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+    rm -f "$PLIST"
+    echo "지웠습니다"
+    ;;
+  *) sed -n '2,10p' "$0"; exit 1 ;;
+esac

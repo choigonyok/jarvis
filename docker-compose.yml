@@ -722,6 +722,10 @@ services:
       - "8096"
     ports:
       - "127.0.0.1:${JARVIS_STATUS_PORT:-8096}:8096"
+    volumes:
+      # 맥미니의 전제(FileVault·Time Machine·iMessage 미러·백업)를 scripts/host-check 가
+      # 10분마다 적는 곳. 컨테이너는 이것들을 직접 볼 수 없다. 읽기만 한다.
+      - ${HOME}/.jarvis-host:/host:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8096/health || exit 1"]
       interval: 15s

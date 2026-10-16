@@ -32,7 +32,11 @@ type Config struct {
 	MemoryURL   string
 	ContextURL  string
 	BrowserAddr string // host:port of the browser MCP bridge
-	DB          *pgxpool.Pool
+	// HostFile is what scripts/host-check writes on the Mac mini (FileVault,
+	// Time Machine, the iMessage mirror, the last backup) - things a
+	// container cannot see for itself.
+	HostFile string
+	DB       *pgxpool.Pool
 }
 
 type env struct {
@@ -210,6 +214,10 @@ func All(cfg Config) []check.Probe {
 		e.service("svc.mind", "인지 루프(mind)", cfg.MindURL, []string{"postgres"}),
 		e.service("svc.memory", "기억 서비스", cfg.MemoryURL, []string{"postgres"}),
 		e.service("svc.context", "위치·현재 상태", cfg.ContextURL, []string{"postgres"}),
+		e.hostFileVault(),
+		e.hostTimeMachine(),
+		e.hostMirror(),
+		e.hostBackup(),
 	}
 }
 

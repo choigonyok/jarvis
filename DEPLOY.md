@@ -50,9 +50,18 @@
 - **Time Machine 대상 디스크가 있어야 한다.** `scripts/backup` 은 매일 `~/jarvis-backups` 에
   떠 두기만 하고, 맥미니 밖으로 옮기는 것은 Time Machine 이다. `tmutil destinationinfo` 로 확인한다.
 - **iMessage 미러는 전용 바이너리에만 전체 디스크 접근 권한을 준다.**
-  `scripts/imessage-mirror install` → 권한 부여 → `scripts/imessage-mirror switch`. 그 뒤 원격
-  로그인(sshd-keygen-wrapper)의 전체 디스크 접근 권한은 끈다.
+  `scripts/imessage-mirror install` 로 바이너리를 LaunchAgent 에 올린다(권한이 없는 동안은 예전 SSH
+  방식으로 대신 돌고 5분마다 다시 확인한다). 시스템 설정 → 개인정보 보호 및 보안 → 전체 디스크 접근
+  권한에 `~/.local/bin/jarvis-imessage-mirror` 를 추가하면 5분 안에 저절로 직접 복사로 바뀐다. 그 뒤
+  원격 로그인(sshd-keygen-wrapper)의 권한을 끄고 authorized_keys 의 jarvis-imessage-mirror 줄을 지운다.
 - **서비스별 DB 역할 비밀번호:** `scripts/db-roles` (`.env` 의 `JARVIS_DB_PASSWORD_*`).
+
+위 전제는 `scripts/host-check`(LaunchAgent com.jarvis.host-check, 10분마다)가 점검해
+`~/.jarvis-host/host.json` 에 적고, 상태 탭 "기반"의 맥미니 디스크 암호화 · 백업의 바깥 사본 ·
+iMessage 미러 권한 · 매일 백업 항목이 그것을 보여 준다.
+
+DB 가 필요한 테스트는 `scripts/dbtest` 로 돌린다(맥북 Docker 에 일회용 Postgres, 마이그레이션 전부,
+각 서비스의 역할로).
 
 `agent.choigonyok.com` 은 2026-10-07 에 DNS 와 두 터널의 ingress 에서 모두 지웠다. 맥미니의
 예전 native cloudflared(`macmini` 터널)는 다른 프로젝트 호스트명 때문에 남아 있다.
