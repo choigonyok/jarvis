@@ -3,7 +3,7 @@
 # db/migrations 전부를 db-migrate 와 같은 스크립트(db/migrate.sh)로 적용한 뒤,
 # JARVIS_TEST_DSN 을 주고 go test 를 돌리고, 끝나면 컨테이너를 지운다.
 #
-#   scripts/dbtest                       기본: DB 테스트가 있는 서비스 전부
+#   scripts/dbtest                       기본: DB 테스트가 있는 서비스 전부(memory-svc 는 FalkorDB)
 #   scripts/dbtest spending-svc mind-svc 서비스 디렉터리 여러 개
 #   scripts/dbtest spending-svc -run Cancel   서비스 뒤의 인자는 go test 로 넘어간다
 #
@@ -17,7 +17,7 @@ IMAGE=pgvector/pgvector:pg17
 
 dirs=()
 while [[ $# -gt 0 && "$1" != -* ]]; do dirs+=("$1"); shift; done
-[[ ${#dirs[@]} -gt 0 ]] || dirs=(spending-svc context-svc events-svc mind-svc calendar-svc workout-svc chat-svc)
+[[ ${#dirs[@]} -gt 0 ]] || dirs=(spending-svc context-svc events-svc mind-svc calendar-svc workout-svc chat-svc memory-svc)
 
 cleanup() { docker rm -f "$NAME" >/dev/null 2>&1 || true; docker network rm "$NET" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
@@ -34,7 +34,24 @@ for r in $(docker exec "$NAME" psql -U jarvis -d jarvis -Atc "select rolname fro
   docker exec "$NAME" psql -qU jarvis -d jarvis -c "alter role $r password 'test'" >/dev/null
 done
 failed=()
+# memory-svc is Python against FalkorDB: its own image, a throwaway FalkorDB, unittest.
+memorytest() {
+  local fk="$NAME-falkordb"
+  docker run -d --name "$fk" --network "$NET" falkordb/falkordb:v4.22.0 >/dev/null
+  until docker exec "$fk" redis-cli PING 2>/dev/null | grep -q PONG; do sleep 1; done
+  docker build -q -t jarvis-memory-test "$ROOT/memory-svc" >/dev/null
+  docker run --rm --network "$NET" -e FALKORDB_HOST="$fk" -e VOYAGE_API_KEY=test -e ANTHROPIC_API_KEY=test \
+    -v "$ROOT/memory-svc/tests:/app/tests:ro" jarvis-memory-test python -m unittest discover -s tests -v "$@"
+  local rc=$?
+  docker rm -f "$fk" >/dev/null 2>&1
+  return $rc
+}
 for d in "${dirs[@]}"; do
+  if [[ "$d" == memory-svc ]]; then
+    echo "== memory-svc (FalkorDB)"
+    memorytest || failed+=("$d")
+    continue
+  fi
   role="${DBTEST_ROLE:-svc_${d%-svc}}"   # DBTEST_ROLE=jarvis 면 소유자로(권한 문제인지 가릴 때)
   docker exec "$NAME" psql -U jarvis -d jarvis -Atc "select 1 from pg_roles where rolname = '$role'" | grep -q 1 || role=jarvis
   echo "== $d (역할 $role)"

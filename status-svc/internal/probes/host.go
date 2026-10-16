@@ -18,6 +18,7 @@ type hostFacts struct {
 	TimeMachine bool      `json:"timemachine"` // a destination is set
 	Mirror      string    `json:"mirror"`      // binary | ssh | ""
 	LastBackup  string    `json:"lastBackup"`  // YYYY-MM-DD of the newest backup, "" = none
+	FalkorAOF   string    `json:"falkordbAOF"` // CONFIG GET appendonly: yes | no | "" (not reached)
 }
 
 // readHost returns the facts, or the verdict to show when there are none to
@@ -120,5 +121,21 @@ func (e *env) hostBackup() check.Probe {
 				return check.Verdict{State: check.OK, Summary: fmt.Sprintf("마지막 백업 %s.", h.LastBackup)}
 			}
 			return check.Verdict{State: check.Fail, Summary: fmt.Sprintf("마지막 백업이 %d일 전(%s)이에요.", age, h.LastBackup)}
+		})
+}
+
+func (e *env) hostFalkorAOF() check.Probe {
+	return e.hostProbe("host.falkordb", "기억 그래프 저장(AOF)",
+		"FalkorDB 의 appendonly 가 yes 면 정상. 꺼져 있으면 마지막 스냅숏 뒤의 기억이 비정상 종료에 사라져요.",
+		"docker-compose.yml 의 falkordb REDIS_ARGS(--appendonly yes)를 확인하고 falkordb 를 다시 띄우세요.",
+		func(h hostFacts) check.Verdict {
+			switch h.FalkorAOF {
+			case "yes":
+				return check.Verdict{State: check.OK, Summary: "켜져 있어요(매초 fsync)."}
+			case "":
+				return check.Verdict{State: check.Unknown, Summary: "FalkorDB 에 묻지 못했어요."}
+			default:
+				return check.Verdict{State: check.Fail, Summary: "꺼져 있어요. 마지막 스냅숏 뒤의 쓰기가 비정상 종료에 사라져요."}
+			}
 		})
 }

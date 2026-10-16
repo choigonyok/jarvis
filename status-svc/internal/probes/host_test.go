@@ -35,6 +35,14 @@ func TestHostProbes(t *testing.T) {
 	if run(e.hostFileVault()) != check.OK || run(e.hostTimeMachine()) != check.OK || run(e.hostMirror()) != check.OK || run(e.hostBackup()) != check.Fail {
 		t.Fatal("켜짐·있음·바이너리는 정상, 오래된 백업은 이상")
 	}
+	write(`{"checkedAt":"` + now + `","falkordbAOF":"no"}`)
+	if run(e.hostFalkorAOF()) != check.Fail {
+		t.Fatal("AOF 가 꺼졌으면 이상")
+	}
+	write(`{"checkedAt":"` + now + `","falkordbAOF":"yes"}`)
+	if run(e.hostFalkorAOF()) != check.OK {
+		t.Fatal("AOF 가 켜져 있으면 정상")
+	}
 	write(`{"checkedAt":"` + now + `","filevault":"Off"}`)
 	e.FileVaultOffAccepted = true
 	if v := e.hostFileVault().Run(context.Background()); v.State != check.OK || v.Summary == "" {

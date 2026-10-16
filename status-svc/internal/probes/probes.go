@@ -221,6 +221,7 @@ func All(cfg Config) []check.Probe {
 		e.hostTimeMachine(),
 		e.hostMirror(),
 		e.hostBackup(),
+		e.hostFalkorAOF(),
 	}
 }
 

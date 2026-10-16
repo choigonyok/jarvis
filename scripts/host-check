@@ -6,8 +6,10 @@
 #   scripts/host-check install    LaunchAgent com.jarvis.host-check 로 10분마다
 #   scripts/host-check uninstall
 #
-# 적는 것: FileVault 상태, Time Machine 대상 유무, iMessage 미러 방식(binary | ssh), 마지막 백업 날짜.
+# 적는 것: FileVault 상태, Time Machine 대상 유무, iMessage 미러 방식(binary | ssh), 마지막 백업 날짜,
+# FalkorDB 의 AOF(appendonly) 설정.
 set -euo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.orbstack/bin:/Applications/Docker.app/Contents/Resources/bin:$PATH"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$HOME/.jarvis-host"
 LABEL=com.jarvis.host-check
@@ -17,14 +19,15 @@ BACKUPS="${JARVIS_BACKUP_DIR:-$HOME/jarvis-backups}"
 run() {
   mkdir -p "$OUT"
   chmod 755 "$OUT" # the status container reads it (read-only mount); nothing secret is in it
-  local fv tm mirror last
+  local fv tm mirror last aof
   fv=$(fdesetup status 2>/dev/null | sed -n 's/^FileVault is \([A-Za-z]*\).*/\1/p' | head -1)
   tm=false
   tmutil destinationinfo 2>/dev/null | grep -q "^Name" && tm=true
   mirror=$(cut -d' ' -f1 "$HOME/.jarvis-mirror/mode" 2>/dev/null || true)
   last=$(find "$BACKUPS" -mindepth 1 -maxdepth 1 -type d -name '20*' 2>/dev/null | sort | tail -1 | xargs -n1 basename 2>/dev/null || true)
-  printf '{"checkedAt":"%s","filevault":"%s","timemachine":%s,"mirror":"%s","lastBackup":"%s"}\n' \
-    "$(date +%Y-%m-%dT%H:%M:%S%z | sed 's/\(..\)$/:\1/')" "${fv:-unknown}" "$tm" "$mirror" "$last" > "$OUT/host.json.tmp"
+  aof=$(cd "$ROOT" && docker compose exec -T falkordb redis-cli CONFIG GET appendonly 2>/dev/null | tail -1 | tr -d '\r' || true)
+  printf '{"checkedAt":"%s","filevault":"%s","timemachine":%s,"mirror":"%s","lastBackup":"%s","falkordbAOF":"%s"}\n' \
+    "$(date +%Y-%m-%dT%H:%M:%S%z | sed 's/\(..\)$/:\1/')" "${fv:-unknown}" "$tm" "$mirror" "$last" "$aof" > "$OUT/host.json.tmp"
   mv "$OUT/host.json.tmp" "$OUT/host.json"
   chmod 644 "$OUT/host.json"
 }
