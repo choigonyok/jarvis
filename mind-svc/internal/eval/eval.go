@@ -119,6 +119,7 @@ type Expect struct {
 	NoFacts     bool        `json:"noFacts,omitempty"`     // none at all
 	NoFactHas   []string    `json:"noFactHas,omitempty"`   // no fact's text has any of these
 	NoFactsLike []FactMatch `json:"noFactsLike,omitempty"` // no fact may match any of these
+	MaxFacts    *int        `json:"maxFacts,omitempty"`    // at most this many facts in all
 	// Ended: for each word, memory has ended a fact with it in, as a result
 	// of a fact mind sent.
 	Ended []string `json:"ended,omitempty"`
@@ -721,6 +722,9 @@ func check(ctx context.Context, st store.Store, cal *act.MemoryCalendar, ex Expe
 		if !slices.ContainsFunc(facts, func(f model.Fact) bool { return factMatches(f, want) }) {
 			out = append(out, "이런 사실이 없음: "+descFact(want)+" · 지금: "+factSummary(facts))
 		}
+	}
+	if ex.MaxFacts != nil && len(facts) > *ex.MaxFacts {
+		out = append(out, fmt.Sprintf("사실이 %d개 이하여야 하는데 %d개: %s", *ex.MaxFacts, len(facts), factSummary(facts)))
 	}
 	if ex.NoFacts && len(facts) > 0 {
 		out = append(out, "기억할 사실이 없어야 함: "+factSummary(facts))

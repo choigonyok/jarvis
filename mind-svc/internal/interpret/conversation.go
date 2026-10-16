@@ -59,6 +59,8 @@ const KindFact = "fact"
 type Memory struct {
 	ID   string // memory's edge id
 	Fact string
+	// The fact's ends and relation, to know a repeat of it in other words.
+	Subject, Relation, Object string
 }
 
 type Conversation struct {
@@ -524,6 +526,25 @@ func (c *Conversation) remember(ctx context.Context, room string, o op, evidence
 			return skip("이미 적은 사실")
 		}
 	}
+	confidence := o.Confidence
+	if hearsay {
+		confidence = min(confidence, hearsayConfidence)
+	}
+	if isWeighty(relation, object) && (confidence < weightyConfidence || !saidBy(evidence, fresh, subject, c.party(subject, "").Self)) {
+		return skip("결혼·자녀 같은 큰 사실은 당사자가 분명히 말한 것만")
+	}
+	same, against, err := c.knownLike(ctx, c.endsOf(subject, relation, object), remembered)
+	if err != nil {
+		return false, err
+	}
+	if same && !slices.Contains(recurring, relation) {
+		return skip("이미 아는 사실을 다르게 쓴 것")
+	}
+	for _, f := range against {
+		if confidence <= f.Confidence {
+			return skip("더 확실한 사실과 반대: " + f.Text)
+		}
+	}
 	now := c.now()
 	f := model.Fact{
 		ID: "mf_" + randomHex(6), Room: room, Subject: c.party(subject, str("subjectKind")), Relation: relation,
@@ -569,13 +590,18 @@ func (c *Conversation) party(name, kind string) model.Party {
 
 var relationRE = regexp.MustCompile(`[^A-Z0-9_]+`)
 
-// relationName is "DISLIKES" whatever spacing or case the model used.
+// relationName is "DISLIKES" whatever spacing or case the model used, and
+// one name for a relation the model calls several things.
 func relationName(s string) string {
 	s = relationRE.ReplaceAllString(strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(s), " ", "_")), "")
 	if len(s) > 60 {
 		s = s[:60]
 	}
-	return strings.Trim(s, "_")
+	s = strings.Trim(s, "_")
+	if a, ok := relationAlias[s]; ok {
+		return a
+	}
+	return s
 }
 
 func randomHex(n int) string {

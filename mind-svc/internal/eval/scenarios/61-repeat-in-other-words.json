@@ -1,0 +1,27 @@
+{
+  "name": "연인 사이라는 사실은 한 번이면 된다",
+  "room": "couple",
+  "roomName": "지수",
+  "turns": [
+    {
+      "messages": [
+        { "at": "2026-10-12T22:00", "from": "지수", "text": "우리 사귄 지 벌써 100일이야" },
+        { "at": "2026-10-12T22:01", "me": true, "text": "벌써? 내 여자친구 최고" }
+      ],
+      "script": {"changes":[
+        {"op":"remember","kind":"fact","set":{"subject":"나","relation":"PARTNER_OF","object":"지수","objectKind":"Person","text":"나는 지수와 연인 사이다"},"evidence":[{"line":2,"quote":"내 여자친구 최고"}],"confidence":0.9}
+      ]},
+      "expect": { "facts": [{ "subject": "나", "objectHas": "지수" }] }
+    },
+    {
+      "messages": [
+        { "at": "2026-10-13T22:00", "from": "지수", "text": "여보 사랑해" },
+        { "at": "2026-10-13T22:01", "me": true, "text": "나도 사랑해 여보" }
+      ],
+      "script": {"changes":[
+        {"op":"remember","kind":"fact","set":{"subject":"지수","subjectKind":"Person","relation":"IS_IN_RELATIONSHIP_WITH","object":"나","objectKind":"Person","text":"지수와 나는 서로 여보라고 부르는 연인이다"},"evidence":[{"line":1,"quote":"여보 사랑해"}],"confidence":0.8}
+      ]},
+      "expect": { "maxFacts": 1 }
+    }
+  ]
+}

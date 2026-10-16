@@ -1,0 +1,23 @@
+{
+  "name": "상대에게 한 '또 담타...'는 듣는 사람의 일",
+  "room": "couple",
+  "roomName": "지수",
+  "turns": [
+    {
+      "messages": [
+        { "at": "2026-10-12T15:00", "me": true, "text": "잠깐 나갔다 올게" },
+        { "at": "2026-10-12T15:01", "from": "지수", "text": "또 담타..." },
+        { "at": "2026-10-12T15:02", "from": "지수", "text": "또 연초 피운다 ㅡㅡ 하루에 몇 번이야" },
+        { "at": "2026-10-12T15:03", "me": true, "text": "미안 두 개만 필게" }
+      ],
+      "script": {"changes":[
+        {"op":"remember","kind":"fact","set":{"subject":"나","relation":"SMOKES","object":"담배","objectKind":"Thing","text":"나는 담배를 피운다"},"evidence":[{"line":4,"quote":"두 개만 필게"}],"confidence":0.8}
+      ]},
+      "expect": {
+        "noFactsLike": [
+          { "subject": "지수", "textHasAny": ["담배", "흡연", "연초", "피운", "피워"] }
+        ]
+      }
+    }
+  ]
+}

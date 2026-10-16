@@ -1,0 +1,25 @@
+{
+  "name": "애칭은 결혼이 아니고 '우리 애'는 아이가 아니다",
+  "room": "couple",
+  "roomName": "지수",
+  "turns": [
+    {
+      "messages": [
+        { "at": "2026-10-12T21:00", "from": "지수", "text": "여보 퇴근했어?" },
+        { "at": "2026-10-12T21:01", "me": true, "text": "응 여보 이제 가" },
+        { "at": "2026-10-12T21:02", "from": "지수", "text": "근데 주말에 우리 애를 어떻게 데리고 가지? 인형 가방에 안 들어가" },
+        { "at": "2026-10-12T21:03", "me": true, "text": "ㅋㅋ 안고 가자" }
+      ],
+      "script": {"changes":[
+        {"op":"remember","kind":"fact","set":{"subject":"나","relation":"IS_SPOUSE_OF","object":"지수","objectKind":"Person","text":"나와 지수는 부부 사이다"},"evidence":[{"line":2,"quote":"응 여보 이제 가"}],"confidence":0.7},
+        {"op":"remember","kind":"fact","set":{"subject":"지수","subjectKind":"Person","relation":"FAMILY_OF","object":"아이","objectKind":"Person","text":"지수에게 아이가 있다"},"evidence":[{"line":3,"quote":"우리 애를 어떻게 데리고 가지"}],"confidence":0.6}
+      ]},
+      "expect": {
+        "noFactsLike": [
+          { "textHasAny": ["부부", "결혼", "배우자", "남편", "아내"] },
+          { "textHasAny": ["아이가", "자녀", "아기", "아들", "딸"] }
+        ]
+      }
+    }
+  ]
+}

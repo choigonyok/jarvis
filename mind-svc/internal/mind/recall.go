@@ -125,7 +125,7 @@ func (m *Mind) recallRoom(ctx context.Context, room, roomName string, fresh []mo
 	var out []interpret.Memory
 	for _, h := range hits {
 		if !h.Ended() {
-			out = append(out, interpret.Memory{ID: h.ID, Fact: h.Fact})
+			out = append(out, interpret.Memory{ID: h.ID, Fact: h.Fact, Subject: h.Source.Name, Relation: h.Relation, Object: h.Target.Name})
 		}
 	}
 	return out
