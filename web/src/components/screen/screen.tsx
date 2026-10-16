@@ -49,20 +49,21 @@ export function Screen({ vncUrl, ticketed = false }: { vncUrl: string; ticketed?
     let client: { viewOnly: boolean; disconnect: () => void } | null = null;
 
     // Through the gateway the address carries a one-minute ticket, fetched
-    // fresh for every connection; otherwise it is fixed.
-    const address = ticketed
+    // fresh for every connection, with the screen's own password; otherwise
+    // it is fixed.
+    const address: Promise<{ url: string; password?: string }> = ticketed
       ? fetch("/api/screen/ticket", { cache: "no-store" }).then(async (res) => {
           if (!res.ok) throw new Error(String(res.status));
-          return ((await res.json()) as { url: string }).url;
+          return (await res.json()) as { url: string; password?: string };
         })
-      : Promise.resolve(vncUrl || defaultURL());
+      : Promise.resolve({ url: vncUrl || defaultURL() });
 
     // noVNC touches WebSocket and the DOM on import, so it cannot be part of
     // the server bundle.
-    Promise.all([import("@novnc/novnc"), address]).then(([{ default: RFB }, url]) => {
+    Promise.all([import("@novnc/novnc"), address]).then(([{ default: RFB }, { url, password }]) => {
       if (!live) return;
 
-      const instance = new RFB(target, url, {});
+      const instance = new RFB(target, url, password ? { credentials: { password } } : {});
       // Scale to whatever width the layout gives us; never resize the remote
       // screen, because the agent's session should not change shape when a
       // person happens to be looking at it.

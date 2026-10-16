@@ -29,10 +29,18 @@ while ! xdpyinfo -display :99 >/dev/null 2>&1; do
     sleep 0.1
 done
 
-# 사람이 최초 로그인과 본인인증을 직접 하는 창구. 6080은 compose에서
-# 127.0.0.1로만 묶는다.
-x11vnc -display :99 -forever -shared -nopw -quiet -bg
-websockify --web=/usr/share/novnc 6080 localhost:5900 &
+# 사람이 최초 로그인과 본인인증을 직접 하는 창구. VNC 서버는 이 컨테이너
+# 안에서만 듣고(-localhost), 밖에서 오는 길은 websockify(6080) 하나다. 그 길로
+# 와도 비밀번호(VNC_PASSWORD)가 있어야 화면이 열린다 - 같은 네트워크의 다른
+# 컨테이너든, 게이트웨이의 입장권을 가진 쪽이든. 비밀번호가 없으면 창구를
+# 열지 않는다(브라우저는 그대로 돈다). noVNC 페이지는 쓰지 않으므로 내보내지 않는다.
+if [ -n "${VNC_PASSWORD:-}" ]; then
+    x11vnc -storepasswd "$VNC_PASSWORD" /tmp/vncpass >/dev/null 2>&1
+    x11vnc -display :99 -forever -shared -localhost -rfbauth /tmp/vncpass -quiet -bg
+    websockify 6080 localhost:5900 &
+else
+    echo "VNC_PASSWORD 가 없어 원격 화면을 열지 않습니다" >&2
+fi
 
 # 결제로 나가는 요청만 멈춰 세우는 감시자. 별도 프로세스라 여기서 죽어도
 # MCP는 계속 돈다 - 그리고 Fetch는 결제 패턴에만 걸려 있으므로, 죽더라도

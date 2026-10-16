@@ -8,6 +8,10 @@
 // It is only needed to open the socket; a session that is already open runs on.
 const GATEWAY = process.env.JARVIS_VNC_GATEWAY ?? "";
 const GATEWAY_TOKEN = process.env.JARVIS_EDGE_TOKEN ?? "";
+// The screen's own password (x11vnc, browser/entrypoint.sh): the socket is
+// the browser that is logged in to the operator's shops, so even past the
+// ticket it does not open without it. Handed to this signed-in page only.
+const VNC_PASSWORD = process.env.JARVIS_VNC_PASSWORD ?? "";
 const TTL_SECONDS = 60;
 
 export const dynamic = "force-dynamic";
@@ -29,7 +33,7 @@ export async function GET() {
   );
   const sig = hex(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`vnc:${exp}`)));
   return Response.json(
-    { url: `${GATEWAY}?ticket=${exp}.${sig}` },
+    { url: `${GATEWAY}?ticket=${exp}.${sig}`, ...(VNC_PASSWORD ? { password: VNC_PASSWORD } : {}) },
     { headers: { "cache-control": "no-store" } },
   );
 }
