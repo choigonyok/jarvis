@@ -621,7 +621,6 @@ export function Thread() {
             be one padding, and the safe area (0 on most phones) would win. */}
         <div className="inset-x-safe">
           <div className={cn("mx-auto w-full max-w-[46rem] px-4 sm:px-8 sm:pb-6", typing ? "pb-2" : "pb-0")}>
-            <QueuedMessages queue={queue} onSteer={(id) => void steer(id)} onDrop={(id) => void drop(id)} />
             <Composer
               onSend={async (text, images) => {
                 const ok = await send(text, images, quoting?.id);
@@ -641,6 +640,10 @@ export function Thread() {
               }
               onCancelQuote={() => setQuoting(null)}
               inputRef={inputRef}
+              busy={thinking}
+              queued={
+                <QueuedMessages queue={queue} onSteer={steer} onDrop={drop} onRestore={(text, images) => void send(text, images)} />
+              }
             />
             {/* On a phone this switch is the mic inside the composer; spending a
                 third bar on it would leave the transcript a strip. */}

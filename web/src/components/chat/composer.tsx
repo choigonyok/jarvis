@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { ArrowUp, ImagePlus, Mic, Reply, X } from "lucide-react";
 import { uploadPhoto } from "@/lib/uploads";
 import { cn } from "@/lib/utils";
@@ -25,6 +25,8 @@ export function Composer({
   quoting,
   onCancelQuote,
   inputRef,
+  queued,
+  busy = false,
 }: {
   /** Resolves false when the message did not go out, so what was typed comes back. */
   onSend: (text: string, images: string[]) => Promise<boolean> | void;
@@ -37,6 +39,10 @@ export function Composer({
   onCancelQuote?: () => void;
   /** The text field, for whoever needs to focus it in the same gesture. */
   inputRef?: RefObject<HTMLTextAreaElement | null>;
+  /** What was sent while Jarvis works, shown at the top of this glass. */
+  queued?: ReactNode;
+  /** Jarvis is working: what is sent now waits its turn, and the field says so. */
+  busy?: boolean;
 }) {
   const [value, setValue] = useState("");
   const [photos, setPhotos] = useState<Attachment[]>([]);
@@ -112,8 +118,11 @@ export function Composer({
   // The tab bar's own shape and glass, so the two read as one family: a pill
   // the bar's height (3.75rem) on a single line, round controls the size of a
   // tab slot. It grows from there, keeping the radius, as a message gets long.
+  // data-lead tells what sits left of the text - the photo button or only
+  // padding - so a queued line above can start where the typing starts.
   return (
-    <div className="composer liquid-glass rounded-[1.875rem] p-1.5">
+    <div className="composer group/composer liquid-glass rounded-[1.875rem] p-1.5" data-lead={allowPhotos ? "icon" : "text"}>
+      {queued}
       {quoting ? (
         <div className="flex items-start gap-2 pt-1.5 pr-1 pb-1 pl-3.5">
           <Reply aria-hidden className="mt-[3px] size-3.5 shrink-0 text-faint" />
@@ -216,7 +225,13 @@ export function Composer({
             }
           }}
           placeholder={
-            quoting ? "이걸로 무엇을 할까요?" : photos.length ? "사진에 대해 한마디 (예: 중고나라에 올려줘)" : "Jarvis에게 메시지"
+            quoting
+              ? "이걸로 무엇을 할까요?"
+              : photos.length
+                ? "사진에 대해 한마디 (예: 중고나라에 올려줘)"
+                : busy
+                  ? "끝나면 이어서 보낼 말"
+                  : "Jarvis에게 메시지"
           }
           aria-label="Jarvis에게 보낼 메시지"
           className={cn(
