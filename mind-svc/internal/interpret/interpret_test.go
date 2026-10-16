@@ -298,3 +298,23 @@ func TestUnreadableBatchShrinksThenQuarantines(t *testing.T) {
 		t.Fatal("끝내 못 읽은 메시지는 건너뛰어야 합니다")
 	}
 }
+
+// 15: what someone else says about the operator is kept, as hearsay with a
+// low confidence - not dropped, and not taken for the operator's own words.
+func TestHearsayAboutTheOperatorIsKeptLow(t *testing.T) {
+	ctx := context.Background()
+	c, st, _ := setup(t, `{"changes":[
+		{"op":"remember","kind":"fact","set":{"subject":"나","relation":"CANNOT_EAT","object":"고수","text":"나는 고수를 못 먹는다"},"evidence":[{"line":1,"quote":"너 고수 못 먹잖아"}],"confidence":0.9,"why":"지수가 말함"}
+	]}`)
+	say(t, st, "sim:1", "너 고수 못 먹잖아", false, time.Date(2026, 10, 12, 20, 1, 0, 0, seoul))
+	if err := c.Read(ctx, "r"); err != nil {
+		t.Fatal(err)
+	}
+	fs, _ := st.Facts(ctx, 10)
+	if len(fs) != 1 {
+		t.Fatalf("상대가 운영자에 대해 한 말은 남아야 합니다: %+v", fs)
+	}
+	if fs[0].Confidence > hearsayConfidence || !strings.Contains(fs[0].Why, "상대가 한 말") || !fs[0].Subject.Self {
+		t.Fatalf("낮은 확신도의 들은 말로 남아야 합니다: %+v", fs[0])
+	}
+}

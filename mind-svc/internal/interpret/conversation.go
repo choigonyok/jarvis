@@ -497,16 +497,22 @@ func (c *Conversation) remember(ctx context.Context, room string, o op, evidence
 	if subject == "" || object == "" || relation == "" || text == "" {
 		return skip("사실의 두 끝·관계·문장 중 빠진 것이 있음")
 	}
-	// A fact about the operator rests on something the operator said: another
-	// person's "나 고수 못 먹어" is about them, and reading it as the
-	// operator's is the mistake this catches.
+	// A fact about the operator best rests on something the operator said.
+	// What someone else said about the operator ("너 고수 못 먹잖아") is kept
+	// too, as hearsay with a low confidence - but another person's own "나 고수
+	// 못 먹어" is about them, and reading it as the operator's is the mistake
+	// this still catches.
+	hearsay := false
 	if c.party(subject, "").Self {
 		mine := map[string]bool{}
 		for _, m := range fresh {
 			mine[m.Ref] = m.IsMine
 		}
 		if !slices.ContainsFunc(evidence, func(e model.Evidence) bool { return mine[e.Ref] }) {
-			return skip("운영자에 관한 사실인데 운영자가 한 말이 근거가 아님")
+			if speaksOfThemselves(evidence, c.cfg.Owner) {
+				return skip("상대가 자기 이야기를 한 것을 운영자의 사실로 읽음")
+			}
+			hearsay = true
 		}
 	}
 	recent, err := c.st.Facts(ctx, 300)
@@ -526,6 +532,12 @@ func (c *Conversation) remember(ctx context.Context, room string, o op, evidence
 	}
 	if v := str("validAt"); dateRE.MatchString(v) {
 		f.ValidAt = v
+	}
+	if hearsay {
+		f.Confidence = min(f.Confidence, hearsayConfidence)
+		if !strings.Contains(f.Why, "상대가 한 말") {
+			f.Why = strings.TrimSpace("상대가 한 말. " + f.Why)
+		}
 	}
 	for _, ref := range o.Ends {
 		var n int
@@ -699,4 +711,35 @@ func clean(people []string) []string {
 
 func norm(s string) string {
 	return strings.ToLower(strings.Join(strings.Fields(s), ""))
+}
+
+// hearsayConfidence caps a fact about the operator that only someone else
+// said: kept, so it can be asked about or confirmed later, but never taken
+// for something the operator said.
+const hearsayConfidence = 0.4
+
+var (
+	// The speaker talking about themselves: a first-person subject.
+	firstPersonRE = regexp.MustCompile(`(^|[\s"'“‘(])(나는|난|나|내가|제가|저는|전|저|우리)([\s,.!?~]|$)`)
+	// The operator addressed or named: second person.
+	secondPersonRE = regexp.MustCompile(`(^|[\s"'“‘(])(너|넌|너는|니가|네가|당신|자기|형|오빠|누나|언니)([\s,.!?~가는도랑]|$)`)
+)
+
+// speaksOfThemselves says whether the quoted lines are their speakers talking
+// about themselves - "나 고수 진짜 못 먹어" - rather than about the operator
+// ("너 고수 못 먹잖아", "윤석이 이사 간대").
+func speaksOfThemselves(evidence []model.Evidence, owner string) bool {
+	for _, e := range evidence {
+		q := strings.TrimSpace(e.Quote)
+		if q == "" {
+			continue
+		}
+		if secondPersonRE.MatchString(q) || (owner != "" && strings.Contains(q, owner)) {
+			return false
+		}
+		if firstPersonRE.MatchString(q) {
+			return true
+		}
+	}
+	return false
 }
