@@ -127,11 +127,16 @@ export function reconcile(
   settlements: Settlement[],
   now: { krw: number; usd: number },
   usdKrw: number,
+  today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" }),
 ): { checks: LedgerCheck[]; fxKrw: number } {
+  // `now` is settled cash: a trade that settles after today is not in it yet.
+  // Counting it read every sale as money gone until its settlement day (a US
+  // share settles the next business day - 2026-10-17's test sale).
+  const due = settlements.filter((s) => s.date <= today);
   const wonIn = new Map<string, number>();
   for (const f of flows) if (f.venue === venue) wonIn.set(f.date, (wonIn.get(f.date) ?? 0) + f.amountKrw);
-  for (const s of settlements) wonIn.set(s.date, (wonIn.get(s.date) ?? 0) + s.krw);
-  const usdIn = new Map(settlements.map((s) => [s.date, s.usd]));
+  for (const s of due) wonIn.set(s.date, (wonIn.get(s.date) ?? 0) + s.krw);
+  const usdIn = new Map(due.map((s) => [s.date, s.usd]));
   const days = [...new Set([...wonIn.keys(), ...usdIn.keys()])].sort();
   // KIS's rate on the nearest trading day, before or after.
   const rateOn = (date: string) => {
