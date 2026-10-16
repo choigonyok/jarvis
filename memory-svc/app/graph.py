@@ -201,6 +201,14 @@ class Graph:
         nid = stable_id(group, "node", kind, key)
         if nid in self._nodes:
             return nid
+        # 캐시는 재시작하면 빈다. 이미 있는 노드를 새로 만들어 저장하면 쌓인
+        # summary 가 빈 값으로 덮인다.
+        try:
+            await EntityNode.get_by_uuid(self.drivers[group], nid)
+            self._nodes.add(nid)
+            return nid
+        except NodeNotFoundError:
+            pass
         n = EntityNode(uuid=nid, name=name, group_id=group, labels=["Entity", kind], summary=summary, created_at=now())
         await n.generate_name_embedding(self.embedder)
         await n.save(self.drivers[group])
@@ -238,9 +246,21 @@ class Graph:
             episodes=[],
         )
         await edge.generate_embedding(self.embedder)
+        await self._drop_if_moved(group, edge)
         await edge.save(self.drivers[group])
         if self.on_fact:
             await self.on_fact(group, fact, valid_at)
+
+    async def _drop_if_moved(self, group: str, edge: EntityEdge):
+        """Saving an edge MERGEs on its endpoints too, so an edge whose source
+        or target changed would be written beside the old one, same uuid,
+        twice. The old one is removed first."""
+        try:
+            old = await EntityEdge.get_by_uuid(self.drivers[group], edge.uuid)
+        except EdgeNotFoundError:
+            return
+        if (old.source_node_uuid, old.target_node_uuid) != (edge.source_node_uuid, edge.target_node_uuid):
+            await old.delete(self.drivers[group])
 
     async def has_fact(self, group: str, key: str, fact: str) -> bool:
         """Whether the edge a structured record lands on already says this,
@@ -357,6 +377,7 @@ class Graph:
         edges = [resolved] + ended
         await create_entity_edge_embeddings(self.embedder, edges)
         await create_entity_node_embeddings(self.embedder, [src, dst])
+        await self._drop_if_moved(group, resolved)
         await add_nodes_and_edges_bulk(driver, [], [], [src, dst], edges, self.embedder)
         return resolved, ended, src, dst
 

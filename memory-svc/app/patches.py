@@ -27,9 +27,25 @@ say little.
 """
 
 from collections import defaultdict
+from importlib.metadata import version
 
 from graphiti_core.driver import falkordb_driver
 from graphiti_core.utils.maintenance import community_operations
+
+# These patches replace module attributes by name. On another Graphiti they may
+# miss without a sound (a renamed function, a caller that imported it
+# directly), so a different version stops the service instead.
+PATCHED_FOR = "0.30.2"
+if version("graphiti-core") != PATCHED_FOR:
+    raise RuntimeError(f"app/patches.py 는 graphiti-core {PATCHED_FOR} 용입니다 (설치: {version('graphiti-core')})")
+for _mod, _name in [
+    (falkordb_driver, "get_range_indices"),
+    (community_operations, "label_propagation"),
+    (community_operations, "build_community"),
+    (community_operations, "get_community_clusters"),
+]:
+    if not callable(getattr(_mod, _name, None)):
+        raise RuntimeError(f"패치할 {_mod.__name__}.{_name} 가 없습니다")
 
 MAX_ROUNDS = 50
 MIN_TOPIC = 3

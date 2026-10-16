@@ -1,6 +1,9 @@
+# Direct dependencies. Every transitive version is fixed in constraints.txt
+# (pip freeze of the running image): app/patches.py replaces Graphiti
+# internals, and an unnoticed upgrade would make those patches miss.
 graphiti-core[falkordb]==0.30.2
 anthropic==1.12.1
-fastapi
-uvicorn
-httpx
-psycopg[binary]
+fastapi==0.143.0
+uvicorn==0.54.0
+httpx==0.28.1
+psycopg[binary]==3.3.6

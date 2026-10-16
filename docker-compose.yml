@@ -697,6 +697,10 @@ services:
   falkordb:
     # 6.0 changed db.idx.fulltext.createNodeIndex; graphiti-core 0.30 calls the 4.x form.
     image: falkordb/falkordb:v4.22.0
+    environment:
+      # RDB 스냅숏만으로는 마지막 저장 뒤 쓰기가 비정상 종료에 사라진다. AOF 를
+      # 매초 fsync 로 함께 둔다.
+      REDIS_ARGS: "--appendonly yes --appendfsync everysec"
     volumes:
       - jarvis-falkordb:/var/lib/falkordb/data
     expose:
