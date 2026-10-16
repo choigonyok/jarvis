@@ -11,7 +11,9 @@ import type { CashLine, Flow, Holding } from "./types.js";
  * is now in a service of its own rather than one import away from a browser
  * bundle.
  *
- * Read-only by design: balances, prices and past trades. Nothing here writes.
+ * Reading is most of it: balances, prices and past trades. The one writing
+ * part is at the end - placing an order (upbitOrder, kisUsOrder) - and only
+ * orders.ts calls it, after a person approved exactly those orders.
  */
 
 function env(name: string): string {
@@ -1122,4 +1124,112 @@ export async function kisGoldDailyCloses(days: number): Promise<Map<string, numb
     end = new Date(start.getTime() - 86_400_000);
   }
   return out;
+}
+
+/* ─────────────────────────── Orders ─────────────────────────── */
+
+/** Upbit's last trade price for a KRW market, for turning won into a coin amount. */
+export async function upbitPrice(market: string): Promise<number> {
+  const [t] = await json<{ trade_price: number }[]>(`https://api.upbit.com/v1/ticker?markets=${encodeURIComponent(market)}`);
+  if (!t?.trade_price) throw new Error(`${market} 시세를 읽지 못했습니다`);
+  return t.trade_price;
+}
+
+export type UpbitOrderAnswer = { uuid: string; state: string; side: string; ord_type: string };
+
+/**
+ * A market order on Upbit: buying spends `price` won ("price" order),
+ * selling sells `volume` coins ("market" order). The token carries a hash
+ * of the parameters as a query string, as for any request with parameters.
+ */
+export async function upbitOrder(o: {
+  market: string;
+  side: "bid" | "ask";
+  price?: string;
+  volume?: string;
+}): Promise<UpbitOrderAnswer> {
+  const params: Record<string, string> = {
+    market: o.market,
+    side: o.side,
+    ord_type: o.side === "bid" ? "price" : "market",
+    ...(o.price ? { price: o.price } : {}),
+    ...(o.volume ? { volume: o.volume } : {}),
+  };
+  const query = Object.entries(params)
+    .map(([k, v]) => `${k}=${v}`)
+    .join("&");
+  const res = await fetch("https://api.upbit.com/v1/orders", {
+    method: "POST",
+    headers: { authorization: `Bearer ${upbitToken(query)}`, "content-type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  const body = (await res.json().catch(() => null)) as (UpbitOrderAnswer & { error?: { message?: string; name?: string } }) | null;
+  if (!res.ok || !body?.uuid) {
+    throw new Error(body?.error?.message ?? body?.error?.name ?? `업비트가 거절했습니다 (${res.status})`);
+  }
+  return body;
+}
+
+/** The quote exchange codes (NAS/NYS/AMS) and the order ones KIS wants for them. */
+const ORDER_EXCHANGE: Record<string, string> = { NAS: "NASD", NYS: "NYSE", AMS: "AMEX" };
+const usExchange = new Map<string, string>();
+
+/**
+ * The last price of a US share and the exchange it trades on - the order
+ * must name the right one, and only the right one quotes it (KO is NYSE
+ * and is empty under NAS). Found once per symbol.
+ */
+export async function kisUsQuote(symbol: string): Promise<{ excd: string; last: number }> {
+  const token = await kisAccessToken();
+  const known = usExchange.get(symbol);
+  for (const excd of known ? [known] : ["NAS", "NYS", "AMS"]) {
+    const q = new URLSearchParams({ AUTH: "", EXCD: excd, SYMB: symbol });
+    const body = await json<{ output?: { last?: string } }>(`${KIS_BASE}/uapi/overseas-price/v1/quotations/price?${q}`, {
+      headers: kisHeaders(token, "HHDFS00000300"),
+    }).catch(() => ({}) as { output?: { last?: string } });
+    const last = Number(body.output?.last ?? 0);
+    if (last > 0) {
+      usExchange.set(symbol, excd);
+      return { excd, last };
+    }
+  }
+  throw new Error(`${symbol} 의 시세를 찾지 못했습니다`);
+}
+
+/**
+ * A limit order for US shares at `price` dollars. KIS's API takes no plain
+ * market order for the US, so orders.ts prices a buy a little over the last
+ * trade and a sell a little under it: filled at once in a normal market,
+ * and never at a price far from what the person saw.
+ */
+export async function kisUsOrder(o: {
+  symbol: string;
+  excd: string;
+  side: "buy" | "sell";
+  qty: number;
+  price: number;
+}): Promise<{ odno: string; message: string }> {
+  const token = await kisAccessToken();
+  const { cano, prod } = kisAccount();
+  const mock = env("KIS_MOCK") === "true";
+  const trId = o.side === "buy" ? (mock ? "VTTT1002U" : "TTTT1002U") : mock ? "VTTT1001U" : "TTTT1006U";
+  const body = {
+    CANO: cano,
+    ACNT_PRDT_CD: prod,
+    OVRS_EXCG_CD: ORDER_EXCHANGE[o.excd] ?? o.excd,
+    PDNO: o.symbol,
+    ORD_QTY: String(o.qty),
+    OVRS_ORD_UNPR: o.price.toFixed(2),
+    CTAC_TLNO: "",
+    MGCO_APTM_ODNO: "",
+    SLL_TYPE: o.side === "sell" ? "00" : "",
+    ORD_SVR_DVSN_CD: "0",
+    ORD_DVSN: "00",
+  };
+  const res = await json<{ rt_cd?: string; msg_cd?: string; msg1?: string; output?: { ODNO?: string } }>(
+    `${KIS_BASE}/uapi/overseas-stock/v1/trading/order`,
+    { method: "POST", headers: kisHeaders(token, trId), body: JSON.stringify(body) },
+  );
+  if (res.rt_cd !== "0") throw new Error(`${(res.msg1 ?? "").trim()} (${res.msg_cd ?? "?"})`);
+  return { odno: res.output?.ODNO ?? "", message: (res.msg1 ?? "").trim() };
 }

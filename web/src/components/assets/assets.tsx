@@ -2,12 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
+import { OrderRecord, OrderSheet, PlanSheet } from "@/components/assets/orders";
 import { RealizedSection } from "@/components/assets/realized";
 import { ProfitLines, ProfitOther, Row } from "@/components/assets/summary";
 import { AllocationDetail, DriftColumns } from "@/components/assets/target";
 import { Track } from "@/components/assets/track";
 import { Header, TabBar } from "@/components/shell/header";
 import { StandingBar } from "@/components/shell/standing-bar";
+import { checkRebalance, recentOrders, requestsOf, sendOrders, type OrderResult, type PlacedOrder } from "@/lib/orders";
 import {
   krw,
   percent,
@@ -15,13 +17,18 @@ import {
   quantity,
   rateOf,
   signedKrw,
+  type Holding,
   type Portfolio,
 } from "@/lib/portfolio";
+import type { Plan } from "@/lib/trade-plan";
 import { isPending } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
 import { cn } from "@/lib/utils";
 
-type Fold = "bridge" | "alloc";
+type Fold = "bridge" | "alloc" | "orders";
+
+/** A confirm sheet for several orders: what it is called, why, and how its orders are checked. */
+type PlanAsk = { title: string; reason: string; load: () => Promise<{ results: OrderResult[]; planId?: string | null }> };
 
 /**
  * What you own, and how far it has moved from what you paid.
@@ -31,9 +38,11 @@ type Fold = "bridge" | "alloc";
  * holdings always in view, and the pot's size and return over time below. Laid out in full it ran past four phone
  * screens; this fits the answers on one.
  *
- * Read-only on purpose. The keys behind this can place orders; this surface
- * only ever asks what is there. Anything that spends money in this product
- * goes through the approval card, and a dashboard is not the place for that.
+ * Orders start here too - a holding tapped, the rebalance plan, what new cash
+ * buys - and every one ends on a sheet that names exactly what will be sent,
+ * checked by assets-svc first, with one button that sends that (orders.tsx).
+ * The rebalance card mind raises in the conversation sends the same orders
+ * when approved.
  */
 export function Assets() {
   const { proposals, connection } = useThread();
@@ -42,8 +51,28 @@ export function Assets() {
   const [data, setData] = useState<Portfolio | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [open, setOpen] = useState<Record<Fold, boolean>>({ bridge: false, alloc: false });
+  const [open, setOpen] = useState<Record<Fold, boolean>>({ bridge: false, alloc: false, orders: false });
   const toggle = (k: Fold) => setOpen((o) => ({ ...o, [k]: !o[k] }));
+  const [ordering, setOrdering] = useState<Holding | null>(null);
+  const [asking, setAsking] = useState<PlanAsk | null>(null);
+  const [record, setRecord] = useState<PlacedOrder[]>([]);
+  const reloadRecord = useCallback(() => void recentOrders().then(setRecord), []);
+  useEffect(() => {
+    reloadRecord();
+  }, [reloadRecord]);
+
+  // A notification about a section opens it (lib/focus.ts): the allocation
+  // and its rows, the tax inside 수익.
+  useEffect(() => {
+    const opened = (e: Event) => {
+      const id = (e.target as HTMLElement).dataset.focus ?? "";
+      if (id.startsWith("allocation")) setOpen((o) => ({ ...o, alloc: true }));
+      if (id === "tax") setOpen((o) => ({ ...o, bridge: true }));
+    };
+    document.addEventListener("jarvis:focused", opened);
+    return () => document.removeEventListener("jarvis:focused", opened);
+  }, []);
+
 
   // The service answers at once with what it last had (marked stale) and
   // rebuilds behind it; ask again shortly to pick up the fresh numbers.
@@ -71,6 +100,12 @@ export function Assets() {
   useEffect(() => {
     again.current = (tries) => void load(false, tries);
   }, [load]);
+
+  // A placed order changes the holdings: read them afresh, and the record.
+  const placed = () => {
+    reloadRecord();
+    window.setTimeout(() => void load(true), 1500);
+  };
 
   useEffect(() => {
     // Not a cascading render: load only sets state once the fetch it starts
@@ -198,12 +233,17 @@ export function Assets() {
                 <Row
                   id="assets-bridge"
                   title="수익"
+                  focus="summary"
                   open={open.bridge}
                   onToggle={() => toggle("bridge")}
                   detail={
                     <div className="space-y-5">
                       {bridge ? <ProfitOther {...bridge} /> : null}
-                      {data.realized ? <RealizedSection realized={data.realized} /> : null}
+                      {data.realized ? (
+                        <div data-focus="tax">
+                          <RealizedSection realized={data.realized} />
+                        </div>
+                      ) : null}
                     </div>
                   }
                 >
@@ -218,12 +258,23 @@ export function Assets() {
                   <Row
                     id="assets-alloc"
                     title="비중"
+                    focus="allocation"
                     open={open.alloc}
                     onToggle={() => toggle("alloc")}
                     detail={
                       <AllocationDetail
                         allocation={allocation}
                         tax={data.realized?.tax}
+                        onRebalance={() =>
+                          setAsking({ title: "리밸런싱 주문", reason: "rebalance", load: checkRebalance })
+                        }
+                        onFill={(plan: Plan) =>
+                          setAsking({
+                            title: "새로 넣을 돈으로 사기",
+                            reason: "deposit",
+                            load: () => sendOrders(requestsOf(plan), { reason: "deposit", dryRun: true }),
+                          })
+                        }
                       />
                     }
                   >
@@ -243,7 +294,7 @@ export function Assets() {
                 ) : null}
 
                 {principal ? (
-                  <Row id="assets-principal" title="원금">
+                  <Row id="assets-principal" title="원금" focus="principal">
                     <p className="tnum text-[13px] text-foreground/90">
                       {krw(principal.principalKrw)}
                       <span className="ms-2 text-faint">{since}부터 넣은 돈</span>
@@ -257,6 +308,21 @@ export function Assets() {
                     ))}
                   </Row>
                 ) : null}
+
+                <Row
+                  id="assets-orders"
+                  title="주문"
+                  focus="orders"
+                  open={open.orders}
+                  onToggle={() => toggle("orders")}
+                  detail={<OrderRecord orders={record} holdings={data.holdings} />}
+                >
+                  <p className="text-[13px] text-dim">
+                    {record[0]
+                      ? `최근 ${new Date(record[0].createdAt).toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric" })} · ${record.filter((o) => o.status === "placed").length}건 보냄`
+                      : "종목을 누르면 사고팔 수 있어요"}
+                  </p>
+                </Row>
               </div>
             ) : null}
           </div>
@@ -272,42 +338,49 @@ export function Assets() {
                     // Sold earlier, so no longer in the row's own profit.
                     const sold = data.realized?.lines.find((l) => l.id === h.id)?.profitKrw ?? 0;
                     return (
-                      <div key={h.id} className="flex items-baseline gap-3 rounded-lg px-2 py-2.5">
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-[14px] text-foreground/90">
+                      <button
+                        type="button"
+                        key={h.id}
+                        data-focus={`holding:${h.id}`}
+                        onClick={() => setOrdering(h)}
+                        aria-label={`${h.name} 주문`}
+                        className="flex w-full items-baseline gap-3 rounded-lg px-2 py-2.5 text-left transition-colors outline-none hover:bg-glass focus-visible:ring-3 focus-visible:ring-ring/50"
+                      >
+                        <span className="block min-w-0 flex-1">
+                          <span className="block truncate text-[14px] text-foreground/90">
                             {h.name}
-                          </p>
-                          <p className="tnum mt-0.5 text-[11.5px] text-faint">
+                          </span>
+                          <span className="block tnum mt-0.5 text-[11.5px] text-faint">
                             {quantity(h.quantity)}
                             {h.kind === "stock" ? "주" : h.kind === "gold" ? "g" : ""} · 평단{" "}
                             {h.currency === "USD"
                               ? `$${h.avgPrice.toFixed(2)}`
                               : krw(h.avgPrice)}
                             {data.totalKrw > 0 ? ` · ${Math.round((h.valueKrw / data.totalKrw) * 100)}%` : ""}
-                          </p>
-                        </div>
-                        <div className="shrink-0 text-right">
-                          <p className="tnum text-[14px] text-foreground/90">
+                          </span>
+                        </span>
+                        <span className="block shrink-0 text-right">
+                          <span className="block tnum text-[14px] text-foreground/90">
                             {krw(h.valueKrw)}
-                          </p>
-                          <p
+                          </span>
+                          <span
                             className={cn(
-                              "tnum mt-0.5 text-[11.5px]",
+                              "tnum mt-0.5 block text-[11.5px]",
                               gain ? "text-approve/75" : "text-reject/75",
                             )}
                           >
                             {percent(rateOf(h))}{" "}
                             <span className="text-faint">{signedKrw(profit)}</span>
-                          </p>
+                          </span>
                           {sold !== 0 ? (
-                            <p className="tnum mt-0.5 text-[11.5px] text-faint">
+                            <span className="block tnum mt-0.5 text-[11.5px] text-faint">
                               판 것{" "}
                               <span className={sold >= 0 ? "text-approve/75" : "text-reject/75"}>{signedKrw(sold)}</span>
                               <span className="ms-1.5">합계 {signedKrw(profit + sold)}</span>
-                            </p>
+                            </span>
                           ) : null}
-                        </div>
-                      </div>
+                        </span>
+                      </button>
                     );
                   })}
 
@@ -387,6 +460,24 @@ export function Assets() {
           ) : null}
         </div>
       </main>
+
+      <OrderSheet
+        holding={ordering}
+        usdKrw={data?.usdKrw ?? 0}
+        onOpenChange={(v) => !v && setOrdering(null)}
+        onPlaced={placed}
+      />
+      {asking ? (
+        <PlanSheet
+          open
+          onOpenChange={(v) => !v && setAsking(null)}
+          title={asking.title}
+          reason={asking.reason}
+          load={asking.load}
+          holdings={data?.holdings ?? []}
+          onPlaced={placed}
+        />
+      ) : null}
 
       <TabBar pending={waiting.length} />
     </div>

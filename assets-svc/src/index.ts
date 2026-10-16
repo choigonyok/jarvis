@@ -6,8 +6,9 @@
  * process that also serves the browser. They are here now, and the web service
  * proxies to this.
  *
- * Read-only toward the brokerages: balances and prices, never an order. The
- * one thing it writes is its own principal ledger.
+ * Toward the brokerages it reads - balances and prices - and places orders
+ * only through /orders, the orders a person approved (orders.ts). It writes
+ * its own principal ledger and the record of every order.
  */
 import { timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
@@ -16,6 +17,7 @@ import * as db from "./db.js";
 import type { Allocation, Holding } from "./types.js";
 import { announce } from "./notify.js";
 import { PRINCIPAL_SINCE, buildPortfolio, invalidateVenues } from "./portfolio.js";
+import { placeOrders, requestsOf, type OrderRequest } from "./orders.js";
 import { depositPlan, rebalancePlan } from "./trade-plan.js";
 
 const PORT = Number(process.env.PORT ?? process.env.LISTEN_PORT ?? 8092);
@@ -172,10 +174,92 @@ async function principal(
   send(res, 405, { error: "지원하지 않는 요청입니다." });
 }
 
+/** What a request may ask to have placed - only the fields an order has. */
+function requestOf(raw: unknown): OrderRequest {
+  const o = (raw ?? {}) as Record<string, unknown>;
+  return {
+    venue: o.venue as OrderRequest["venue"],
+    symbol: String(o.symbol ?? ""),
+    side: o.side as OrderRequest["side"],
+    units: o.units === null || o.units === undefined ? null : Number(o.units),
+    amountKrw: Number(o.amountKrw),
+  };
+}
+
+/**
+ * GET /orders: the latest orders placed. POST /orders: place these
+ * ({orders, reason, planId?, dryRun?}). POST /orders/rebalance: the current
+ * rebalance plan, checked (dryRun) or placed. Placing reads the brokerages
+ * afresh first - what is held now, not ten seconds ago - and the next look
+ * at the portfolio is fresh too.
+ */
+async function orders(
+  req: import("node:http").IncomingMessage,
+  res: import("node:http").ServerResponse,
+  url: URL,
+) {
+  if (req.method === "GET" && url.pathname === "/orders") {
+    const limit = Number(url.searchParams.get("limit") ?? 20);
+    send(res, 200, { orders: await db.recentOrders(Number.isFinite(limit) && limit > 0 ? Math.min(limit, 100) : 20) });
+    return;
+  }
+  if (req.method !== "POST") {
+    send(res, 405, { error: "지원하지 않는 요청입니다." });
+    return;
+  }
+  const body = (await readBody(req).catch(() => null)) as {
+    orders?: unknown[]; reason?: unknown; planId?: unknown; dryRun?: unknown;
+  } | null;
+  const dryRun = body?.dryRun === true;
+  const p = JSON.parse(await portfolioJson(!dryRun)) as {
+    holdings: Holding[]; allocation?: Allocation; goldGramKrw: number | null;
+  };
+  const placed = () => {
+    if (dryRun) return;
+    invalidateVenues();
+    cached = null;
+    generation += 1;
+  };
+
+  if (url.pathname === "/orders") {
+    const list = Array.isArray(body?.orders) ? body.orders : [];
+    if (list.length === 0 || list.length > 12) {
+      send(res, 400, { error: "주문이 1~12개 필요합니다." });
+      return;
+    }
+    const out = await placeOrders(list.map(requestOf), p.holdings, {
+      reason: typeof body?.reason === "string" ? body.reason.slice(0, 40) : "manual",
+      planId: typeof body?.planId === "string" ? body.planId.slice(0, 40) : undefined,
+      dryRun,
+    });
+    placed();
+    send(res, 200, out);
+    return;
+  }
+
+  if (url.pathname === "/orders/rebalance") {
+    if (!p.allocation) {
+      send(res, 503, { error: "목표 비중을 계산하지 못했습니다." });
+      return;
+    }
+    const plan = rebalancePlan(p.allocation, p.holdings, { goldGramKrw: p.goldGramKrw });
+    const requests = requestsOf(plan);
+    const out = requests.length
+      ? await placeOrders(requests, p.holdings, { reason: "rebalance", dryRun })
+      : { planId: null, results: [] };
+    placed();
+    send(res, 200, { ...out, unpicked: plan.unpicked, buckets: plan.buckets, inBand: p.allocation.rows.every((r) => r.inBand) });
+    return;
+  }
+
+  send(res, 404, { error: "그런 경로가 없습니다." });
+}
+
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");
+  const writes = url.pathname.startsWith("/principal") || url.pathname.startsWith("/orders");
 
-  if (req.method !== "GET" && !url.pathname.startsWith("/principal")) {
+  if (req.method !== "GET" && !writes) {
     send(res, 405, { error: "GET 만 받습니다." });
     return;
   }
@@ -201,6 +285,14 @@ const server = createServer((req, res) => {
     void principal(req, res, url).catch((e: Error) => {
       console.error("원금 기록을 바꾸지 못했습니다:", e.message);
       send(res, 503, { error: "원금 기록을 바꾸지 못했습니다." });
+    });
+    return;
+  }
+
+  if (url.pathname === "/orders" || url.pathname === "/orders/rebalance") {
+    void orders(req, res, url).catch((e: Error) => {
+      console.error("주문을 처리하지 못했습니다:", e.message);
+      send(res, 502, { error: "주문을 처리하지 못했습니다." });
     });
     return;
   }

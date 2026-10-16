@@ -20,11 +20,14 @@ export function Row({
   onToggle,
   children,
   detail,
+  focus,
 }: {
   id: string;
   title: string;
   open?: boolean;
   onToggle?: () => void;
+  /** What a notification calls this row (?focus=, lib/focus.ts). */
+  focus?: string;
   /** The answer, always visible. */
   children: ReactNode;
   /** The section the answer comes from, shown when open. None: the row is the whole answer. */
@@ -32,7 +35,7 @@ export function Row({
 }) {
   if (detail === undefined || !onToggle) {
     return (
-      <section aria-labelledby={`${id}-title`} className="flex items-start gap-3 border-t border-edge-soft py-4">
+      <section aria-labelledby={`${id}-title`} data-focus={focus} className="flex items-start gap-3 border-t border-edge-soft py-4">
         <span id={`${id}-title`} className="w-[4.5rem] shrink-0 pt-px text-[12.5px] text-faint">
           {title}
         </span>
@@ -41,7 +44,7 @@ export function Row({
     );
   }
   return (
-    <section aria-labelledby={`${id}-title`} className="border-t border-edge-soft">
+    <section aria-labelledby={`${id}-title`} data-focus={focus} className="border-t border-edge-soft">
       <button
         type="button"
         onClick={onToggle}

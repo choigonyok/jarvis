@@ -137,9 +137,15 @@ function usePlan(totalKrw: number, deposit: number): { rebalance: Plan; fill: Pl
 export function AllocationDetail({
   allocation,
   tax,
+  onRebalance,
+  onFill,
 }: {
   allocation: Allocation;
   tax?: Realized["tax"];
+  /** Opens the confirm sheet for the rebalance orders. */
+  onRebalance?: () => void;
+  /** Opens the confirm sheet for what new cash buys. */
+  onFill?: (plan: Plan) => void;
 }) {
   const { rows } = allocation;
   const [amount, setAmount] = useState("");
@@ -154,7 +160,7 @@ export function AllocationDetail({
     <div className="space-y-2.5">
       <ul className="divide-y divide-edge-soft border-y border-edge-soft">
         {rows.map((r) => (
-          <li key={r.id} className="tnum flex items-baseline gap-2 py-2 text-[12.5px]">
+          <li key={r.id} data-focus={`allocation:${r.id}`} className="tnum flex items-baseline gap-2 py-2 text-[12.5px]">
             <Dot id={r.id} />
             <span className="min-w-0 flex-1 truncate">
               <span className={r.inBand ? "text-dim" : "text-foreground"}>{r.label}</span>
@@ -187,6 +193,11 @@ export function AllocationDetail({
               {taxUp > 0 ? `양도세 약 ${krw(taxUp)} 늘어남` : "공제 안이라 양도세 없음"}
             </p>
           ) : null}
+          {onRebalance && rebalance.orders.length ? (
+            <button type="button" onClick={onRebalance} className={planButton}>
+              이 계획대로 주문
+            </button>
+          ) : null}
         </div>
       ) : null}
 
@@ -213,9 +224,18 @@ export function AllocationDetail({
           </span>
         ) : null}
       </label>
+      {onFill && fill?.orders.length ? (
+        <button type="button" onClick={() => onFill(fill)} className={planButton}>
+          이대로 사기
+        </button>
+      ) : null}
     </div>
   );
 }
+
+/** Opens a confirm sheet - quiet, since the sheet holds the one bright button. */
+const planButton =
+  "tap mt-1 inline-flex items-center rounded-lg bg-glass px-3 text-[12.5px] text-foreground/90 outline-none transition-colors hover:bg-glass-raised focus-visible:ring-3 focus-visible:ring-ring/50";
 
 /** ₩136,000 → "₩13.6만"; under ten thousand stays in won. */
 function krwShort(v: number): string {

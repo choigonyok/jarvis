@@ -317,6 +317,71 @@ export async function enqueueEvents(events: unknown[]): Promise<boolean> {
   }
 }
 
+/** An order as placed (or refused), for asset_orders (migration 055). */
+export type OrderRow = {
+  id?: number;
+  createdAt?: string;
+  venue: "upbit" | "kis" | "gold";
+  symbol: string;
+  side: "buy" | "sell";
+  units: number | null;
+  amountKrw: number;
+  limitPrice: number | null;
+  currency: "KRW" | "USD";
+  reason: string;
+  planId: string | null;
+  status: "placed" | "failed" | "manual";
+  brokerId: string | null;
+  message: string;
+};
+
+/**
+ * Write down an order. Never throws: the order is already at the broker (or
+ * refused) whatever happens here, and the caller reports that either way.
+ */
+export async function recordOrder(o: OrderRow): Promise<void> {
+  if (!pool) return;
+  try {
+    await pool.query(
+      `insert into asset_orders (venue, symbol, side, units, amount_krw, limit_price, currency, reason, plan_id, status, broker_id, message)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+      [o.venue, o.symbol, o.side, o.units, Math.round(o.amountKrw), o.limitPrice, o.currency, o.reason, o.planId, o.status, o.brokerId, o.message.slice(0, 500)],
+    );
+  } catch (err) {
+    console.error("주문 기록을 남기지 못했습니다:", (err as Error).message);
+  }
+}
+
+/** The latest orders, newest first. */
+export async function recentOrders(limit: number): Promise<OrderRow[]> {
+  if (!pool) return [];
+  const { rows } = await pool.query<{
+    id: string; created_at: Date; venue: OrderRow["venue"]; symbol: string; side: OrderRow["side"];
+    units: string | null; amount_krw: string; limit_price: string | null; currency: OrderRow["currency"];
+    reason: string; plan_id: string | null; status: OrderRow["status"]; broker_id: string | null; message: string;
+  }>(
+    `select id, created_at, venue, symbol, side, units, amount_krw, limit_price, currency, reason, plan_id, status, broker_id, message
+       from asset_orders order by created_at desc, id desc limit $1`,
+    [limit],
+  );
+  return rows.map((r) => ({
+    id: Number(r.id),
+    createdAt: r.created_at.toISOString(),
+    venue: r.venue,
+    symbol: r.symbol,
+    side: r.side,
+    units: r.units === null ? null : Number(r.units),
+    amountKrw: Number(r.amount_krw),
+    limitPrice: r.limit_price === null ? null : Number(r.limit_price),
+    currency: r.currency,
+    reason: r.reason,
+    planId: r.plan_id,
+    status: r.status,
+    brokerId: r.broker_id,
+    message: r.message,
+  }));
+}
+
 export async function close(): Promise<void> {
   await pool?.end();
   pool = null;
