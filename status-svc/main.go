@@ -72,6 +72,7 @@ func main() {
 		MemoryURL:    getenv("MEMORY_URL", "http://localhost:8100"),
 		ContextURL:   getenv("CONTEXT_URL", "http://localhost:8103"),
 		PhonenoteURL: getenv("PHONENOTE_URL", "http://localhost:8104"),
+		VaultURL:     getenv("VAULT_URL", "http://localhost:8105"),
 		BrowserAddr:  getenv("BROWSER_ADDR", "localhost:8931"),
 		HostFile:     getenv("HOST_FACTS", "/host/host.json"),
 		// 운영자의 결정(2026-10-16): 무인 재시작을 위해 FileVault 를 끈 채로 둔다.

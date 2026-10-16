@@ -33,7 +33,9 @@ type Config struct {
 	ContextURL  string
 	// PhonenoteURL is phonenote-svc: the phone's notifications.
 	PhonenoteURL string
-	BrowserAddr  string // host:port of the browser MCP bridge
+	// VaultURL is vault-svc: the saved logins. Only its health is read.
+	VaultURL    string
+	BrowserAddr string // host:port of the browser MCP bridge
 	// HostFile is what scripts/host-check writes on the Mac mini (FileVault,
 	// Time Machine, the iMessage mirror, the last backup) - things a
 	// container cannot see for itself.
@@ -228,6 +230,7 @@ func All(cfg Config) []check.Probe {
 		e.service("svc.memory", "기억 서비스", cfg.MemoryURL, []string{"postgres"}),
 		e.service("svc.context", "위치·현재 상태", cfg.ContextURL, []string{"postgres"}),
 		e.service("svc.phonenote", "폰 알림 해석", cfg.PhonenoteURL, []string{"postgres"}),
+		e.service("svc.vault", "로그인 정보 보관함", cfg.VaultURL, []string{"postgres"}),
 		e.hostFileVault(),
 		e.hostTimeMachine(),
 		e.hostMirror(),
