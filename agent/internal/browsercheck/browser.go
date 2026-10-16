@@ -29,6 +29,10 @@ type Client struct {
 	// One check at a time: each one opens and closes a tab, and two at once
 	// could close each other's.
 	mu sync.Mutex
+	// poll and tries pace the wait for the new tab (zero: a second, twenty
+	// times); tests shorten them.
+	poll  time.Duration
+	tries int
 }
 
 func New(url, token string) *Client {
@@ -90,16 +94,23 @@ func (c *Client) Open(ctx context.Context, target string, busyHosts []string) (L
 	// appear meanwhile belong to whatever else is driving the browser (the
 	// agent, a job) and are left alone. Ours is the first new tab, preferring
 	// one on the target's host or still blank when several appear at once.
-	host := ""
+	site := ""
 	if u, err := url.Parse(target); err == nil {
-		host = u.Hostname()
+		site = siteOf(u.Hostname())
 	}
 	var mine string
 	var landed string
 	// A freshly started browser took 18 seconds to open a tab; give the page
 	// as long again to land before calling it a failure.
-	for i := 0; i < 20; i++ {
-		time.Sleep(time.Second)
+	poll, tries := c.poll, c.tries
+	if poll == 0 {
+		poll = time.Second
+	}
+	if tries == 0 {
+		tries = 20
+	}
+	for i := 0; i < tries; i++ {
+		time.Sleep(poll)
 		after, err := s.tabs(ctx)
 		if err != nil {
 			continue
@@ -116,7 +127,15 @@ func (c *Client) Open(ctx context.Context, target string, busyHosts []string) (L
 			if seen[t.ID] {
 				continue
 			}
-			if cur == nil || (!strings.Contains(cur.URL, host) && (strings.Contains(t.URL, host) || strings.HasPrefix(t.URL, "about:"))) {
+			// A new tab already on another site is someone else's (a job
+			// opened it while this one was starting); ours is blank or on the
+			// target's site - its login page included.
+			blank := t.URL == "" || strings.HasPrefix(t.URL, "about:")
+			ours := sameSite(t.URL, site)
+			if !blank && !ours {
+				continue
+			}
+			if cur == nil || (!sameSite(cur.URL, site) && ours) {
 				cur = t
 			}
 		}
@@ -128,6 +147,19 @@ func (c *Client) Open(ctx context.Context, target string, busyHosts []string) (L
 			landed = cur.URL
 			if i >= 2 { // at least three seconds, for the redirect
 				break
+			}
+		}
+	}
+	if mine == "" {
+		// A browser that was not running is started by the navigate itself,
+		// and the tab can show up after the wait is over. One last look, so
+		// that tab is not left behind: a new one on the target's host is ours.
+		if after, err := s.tabs(ctx); err == nil {
+			for _, t := range after {
+				if !seen[t.ID] && sameSite(t.URL, site) {
+					mine = t.ID
+					break
+				}
 			}
 		}
 	}
@@ -292,4 +324,36 @@ func (s *session) post(ctx context.Context, msg any) ([]byte, error) {
 		return nil, err
 	}
 	return nil, errors.New("응답이 비었습니다")
+}
+
+// siteOf is a host's site: its last two labels (coupang.com), or three
+// under a second-level domain like co.kr.
+func siteOf(host string) string {
+	labels := strings.Split(strings.TrimSuffix(host, "."), ".")
+	n := 2
+	if len(labels) >= 3 {
+		switch labels[len(labels)-2] {
+		case "co", "or", "go", "ne", "ac", "re", "pe", "com", "net", "org":
+			if len(labels[len(labels)-1]) == 2 { // a country code: shop.co.kr
+				n = 3
+			}
+		}
+	}
+	if len(labels) < n {
+		return host
+	}
+	return strings.Join(labels[len(labels)-n:], ".")
+}
+
+// sameSite says whether raw is on site (the site itself or a subdomain).
+func sameSite(raw, site string) bool {
+	if site == "" {
+		return false
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	h := u.Hostname()
+	return h == site || strings.HasSuffix(h, "."+site)
 }

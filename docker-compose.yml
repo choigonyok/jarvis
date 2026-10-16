@@ -563,7 +563,7 @@ services:
     expose:
       - "8090"
     tmpfs:
-      - /scratch:size=256m,mode=0700
+      - /scratch:size=256m,mode=0700,uid=65532,gid=65532
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8090/health"]
       interval: 30s

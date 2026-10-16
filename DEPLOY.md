@@ -60,6 +60,18 @@
   원격 로그인(sshd-keygen-wrapper)의 권한을 끄고 authorized_keys 의 jarvis-imessage-mirror 줄을 지운다.
 - **서비스별 DB 역할 비밀번호:** `scripts/db-roles` (`.env` 의 `JARVIS_DB_PASSWORD_*`).
 
+**root 로 돌던 이미지에서 올릴 때 한 번(2026-10-16):** 수집기와 브라우저가 이제 root 가 아니다.
+예전 볼륨의 소유자를 바꾼다 - 새로 만드는 볼륨은 이미지가 처음부터 맞는 소유자로 만든다.
+
+```bash
+docker run --rm -v jarvis_jarvis-kakaotalk-data:/d alpine:3.22 chown -R 65532:65532 /d
+docker run --rm -v jarvis_jarvis-imessage-data:/d alpine:3.22 chown -R 65532:65532 /d
+docker run --rm -v jarvis_chrome-profile:/p alpine:3.22 chown -R 10002:10002 /p
+```
+
+브라우저 컨테이너를 다시 띄우면 쿠팡 로그인이 풀린다(네이버는 '로그인 상태 유지'로 남는다).
+상태 탭의 "쿠팡 주문 내역"이 이상으로 바뀌면 화면 탭에서 쿠팡에 다시 로그인한다.
+
 위 전제는 `scripts/host-check`(LaunchAgent com.jarvis.host-check, 10분마다)가 점검해
 `~/.jarvis-host/host.json` 에 적고, 상태 탭 "기반"의 맥미니 디스크 암호화 · 백업의 바깥 사본 ·
 iMessage 미러 권한 · 매일 백업 항목이 그것을 보여 준다.

@@ -5,7 +5,7 @@ set -e
 # Xvfb가 남긴 락이 그대로 있으면 "Server is already active for display 99"로
 # 죽고, 재시작 루프가 된다.
 rm -f /tmp/.X99-lock
-rm -rf /tmp/.X11-unix
+rm -f /tmp/.X11-unix/X99 # 디렉터리는 이미지가 root 로 만들어 두었다
 
 # Chrome은 프로필에 자기 컨테이너 호스트명으로 된 락을 남긴다. 컨테이너가
 # 죽으면 그 호스트는 사라지는데 락은 볼륨에 남아서, 다음 기동 때 Chrome이

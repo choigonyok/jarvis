@@ -10,7 +10,7 @@ COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/imessage-client .
 
 FROM alpine:3.22
-RUN apk add --no-cache ca-certificates tzdata && mkdir -p /data
+RUN apk add --no-cache ca-certificates tzdata && mkdir -p /data && chown 65532:65532 /data
 WORKDIR /app
 COPY --from=build /out/imessage-client /app/imessage-client
 ENV STORE_PATH=/data/imessage.db \
@@ -18,4 +18,6 @@ ENV STORE_PATH=/data/imessage.db \
     CHAT_DB=/messages/chat.db \
     LISTEN_ADDR=:8099
 EXPOSE 8099
+# root 로 돌 이유가 없다: 미러는 읽기 전용 마운트이고, /data 는 이 사용자의 것이다.
+USER 65532:65532
 ENTRYPOINT ["/app/imessage-client"]

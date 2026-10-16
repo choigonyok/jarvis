@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 )
 
 // fakeBrowser is the browser's MCP bridge: tabs, navigate, close. While the
@@ -17,6 +18,10 @@ type fakeBrowser struct {
 	tabs   []tab
 	lists  int
 	closed []string
+	// lateAfter, when set, holds the navigated tab back until that many tab
+	// lists have been made (a cold browser starting up).
+	lateAfter int
+	late      bool
 }
 
 func (f *fakeBrowser) handle(w http.ResponseWriter, r *http.Request) {
@@ -40,6 +45,10 @@ func (f *fakeBrowser) handle(w http.ResponseWriter, r *http.Request) {
 		text = `{"url":"https://agent.example/working"}`
 	case "browser_list_tabs":
 		f.lists++
+		if f.late && f.lateAfter > 0 && f.lists >= f.lateAfter {
+			f.tabs = append(f.tabs, tab{ID: "t-late", URL: "https://shop.example/orders"})
+			f.late = false
+		}
 		if f.lists == 3 { // after the check opened its tab
 			f.tabs = append(f.tabs, tab{ID: "t-other", URL: "https://other.example/job"})
 			for i := range f.tabs {
@@ -51,6 +60,10 @@ func (f *fakeBrowser) handle(w http.ResponseWriter, r *http.Request) {
 		b, _ := json.Marshal(f.tabs)
 		text = string(b)
 	case "browser_navigate":
+		if f.lateAfter > 0 {
+			f.late = true
+			break
+		}
 		f.tabs = append(f.tabs, tab{ID: "t-mine", URL: "about:blank"})
 		text = "Opened new tab"
 	case "browser_close_tab":
@@ -84,5 +97,39 @@ func TestOpenClosesOnlyItsOwnTab(t *testing.T) {
 	defer f.mu.Unlock()
 	if len(f.closed) != 1 || f.closed[0] != "t-mine" {
 		t.Fatalf("자기가 연 탭만 닫아야 합니다: %v", f.closed)
+	}
+}
+
+// A cold browser: the tab the check asked for shows up only after the wait.
+// The check fails (nothing landed in time) but does not leave the tab open.
+func TestLateTabIsStillClosed(t *testing.T) {
+	// One list before the navigate and three during the wait; the tab is
+	// listed from the fifth - the last look after the wait.
+	f := &fakeBrowser{tabs: []tab{{ID: "t-agent", URL: "https://agent.example/working"}}, lateAfter: 5}
+	srv := httptest.NewServer(http.HandlerFunc(f.handle))
+	defer srv.Close()
+	c := New(srv.URL, "tok")
+	c.poll, c.tries = time.Millisecond, 3
+	if l, err := c.Open(context.Background(), "https://shop.example/orders", nil); err == nil {
+		t.Fatalf("제때 열리지 않았으면 실패로 답해야 합니다: %+v lists=%d tabs=%v", l, f.lists, f.tabs)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.closed) != 1 || f.closed[0] != "t-late" {
+		t.Fatalf("늦게 뜬 자기 탭도 닫아야 합니다: %v", f.closed)
+	}
+}
+
+func TestSiteOf(t *testing.T) {
+	for host, want := range map[string]string{
+		"mc.coupang.com": "coupang.com", "login.coupang.com": "coupang.com",
+		"shop.co.kr": "shop.co.kr", "m.shop.co.kr": "shop.co.kr", "naver.com": "naver.com",
+	} {
+		if got := siteOf(host); got != want {
+			t.Errorf("siteOf(%q) = %q, want %q", host, got, want)
+		}
+	}
+	if !sameSite("https://login.coupang.com/login", "coupang.com") || sameSite("https://notcoupang.com/", "coupang.com") {
+		t.Error("sameSite")
 	}
 }
