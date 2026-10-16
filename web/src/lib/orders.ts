@@ -76,3 +76,33 @@ export async function recentOrders(limit = 20): Promise<PlacedOrder[]> {
   const body = (await res.json().catch(() => null)) as { orders?: PlacedOrder[] } | null;
   return body?.orders ?? [];
 }
+
+/** A standing order: the same limit order each session until it fills (assets-svc standing.ts). */
+export type Standing = {
+  id: number;
+  createdAt: string;
+  symbol: string;
+  side: "buy" | "sell";
+  units: number;
+  limitPrice: number;
+  reason: string;
+  status: "active" | "filled" | "cancelled" | "expired";
+  placedOn: string | null;
+  message: string;
+  expiresOn: string | null;
+  doneAt: string | null;
+};
+
+export async function standingOrders(): Promise<Standing[]> {
+  const res = await fetch("/api/portfolio/standing", { cache: "no-store" });
+  if (!res.ok) return [];
+  const body = (await res.json().catch(() => null)) as { standing?: Standing[] } | null;
+  return body?.standing ?? [];
+}
+
+export async function cancelStanding(id: number): Promise<string> {
+  const res = await fetch(`/api/portfolio/standing/${id}`, { method: "DELETE" });
+  const body = (await res.json().catch(() => null)) as { message?: string; error?: string } | null;
+  if (!res.ok) throw new Error(body?.error ?? "취소하지 못했어요.");
+  return body?.message ?? "취소했어요";
+}

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Check, X } from "lucide-react";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { type OrderRequest, type OrderResult, type PlacedOrder, sendOrders } from "@/lib/orders";
+import { type OrderRequest, type OrderResult, type PlacedOrder, type Standing, cancelStanding, sendOrders } from "@/lib/orders";
 import { type Holding, krw, quantity } from "@/lib/portfolio";
 import { cn } from "@/lib/utils";
 
@@ -335,11 +335,79 @@ export function OrderSheet({
 const when = (iso: string) =>
   new Date(iso).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
 
-/** The record: what was sent, when, and how it went. */
-export function OrderRecord({ orders, holdings }: { orders: PlacedOrder[]; holdings: Holding[] }) {
-  const names = new Map(holdings.map((h) => [`${h.venue}:${h.symbol}`, h.name]));
-  if (orders.length === 0) return <p className="text-[12.5px] text-faint">아직 낸 주문이 없어요.</p>;
+/**
+ * Standing orders waiting for their price - "내려오면 사" - each placed again
+ * every session until it fills. Cancelling also cancels today's order at the
+ * broker.
+ */
+function Waiting({ standing, names, onChanged }: { standing: Standing[]; names: Map<string, string>; onChanged: () => void }) {
+  const [busy, setBusy] = useState<number | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const active = standing.filter((o) => o.status === "active");
+  const done = standing.filter((o) => o.status !== "active").slice(0, 3);
+  if (active.length === 0 && done.length === 0) return null;
   return (
+    <section aria-label="대기 주문" className="mb-3">
+      <p className="mb-1 text-[11.5px] text-faint">대기 주문 · 체결될 때까지 거래일마다 다시 내요</p>
+      <ul className="divide-y divide-edge-soft">
+        {[...active, ...done].map((o) => {
+          const name = names.get(`kis:${o.symbol}`) ?? o.symbol;
+          return (
+            <li key={o.id} className="flex items-start gap-3 py-2 text-[12.5px]">
+              <span className="min-w-0 flex-1">
+                <span className={o.status === "active" ? "text-foreground/90" : "text-faint"}>
+                  {name} {o.units}주 ${o.limitPrice.toFixed(2)} {o.side === "buy" ? "이하에 매수" : "이상에 매도"}
+                </span>
+                <span className="block text-[11.5px] leading-relaxed text-faint">
+                  {o.status === "filled" ? "체결됐어요" : o.status === "cancelled" ? "취소됨" : o.status === "expired" ? "기한이 지났어요" : o.message}
+                </span>
+              </span>
+              {o.status === "active" ? (
+                <button
+                  type="button"
+                  disabled={busy === o.id}
+                  onClick={async () => {
+                    setBusy(o.id);
+                    try {
+                      setNote(await cancelStanding(o.id));
+                      onChanged();
+                    } catch (e) {
+                      setNote((e as Error).message);
+                    } finally {
+                      setBusy(null);
+                    }
+                  }}
+                  className="tap shrink-0 rounded-lg px-2 text-[12px] text-faint outline-none hover:text-reject focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50"
+                >
+                  취소
+                </button>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+      {note ? <p className="mt-1 text-[11.5px] text-dim">{note}</p> : null}
+    </section>
+  );
+}
+
+/** The record: standing orders waiting, then what was sent, when, and how it went. */
+export function OrderRecord({
+  orders,
+  holdings,
+  standing = [],
+  onChanged = () => {},
+}: {
+  orders: PlacedOrder[];
+  holdings: Holding[];
+  standing?: Standing[];
+  onChanged?: () => void;
+}) {
+  const names = new Map(holdings.map((h) => [`${h.venue}:${h.symbol}`, h.name]));
+  if (orders.length === 0 && standing.length === 0) return <p className="text-[12.5px] text-faint">아직 낸 주문이 없어요.</p>;
+  return (
+    <>
+    <Waiting standing={standing} names={names} onChanged={onChanged} />
     <ul className="divide-y divide-edge-soft">
       {orders.map((o) => (
         <li key={o.id} className="flex items-baseline gap-3 py-2 text-[12.5px]">
@@ -347,6 +415,7 @@ export function OrderRecord({ orders, holdings }: { orders: PlacedOrder[]; holdi
           <span className="min-w-0 flex-1">
             <span className="text-foreground/90">{orderLine(o, names)}</span>
             {o.reason === "rebalance" ? <span className="ms-1.5 text-[11px] text-faint">리밸런싱</span> : null}
+            {o.reason === "standing" ? <span className="ms-1.5 text-[11px] text-faint">대기 주문</span> : null}
             {o.status !== "placed" ? (
               <span className={cn("block text-[11.5px]", o.status === "failed" ? "text-reject/90" : "text-faint")}>{o.message}</span>
             ) : null}
@@ -357,5 +426,6 @@ export function OrderRecord({ orders, holdings }: { orders: PlacedOrder[]; holdi
         </li>
       ))}
     </ul>
+    </>
   );
 }

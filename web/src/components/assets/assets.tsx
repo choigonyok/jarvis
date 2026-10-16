@@ -9,7 +9,16 @@ import { AllocationDetail, DriftColumns } from "@/components/assets/target";
 import { Track } from "@/components/assets/track";
 import { Header, TabBar } from "@/components/shell/header";
 import { StandingBar } from "@/components/shell/standing-bar";
-import { checkRebalance, recentOrders, requestsOf, sendOrders, type OrderResult, type PlacedOrder } from "@/lib/orders";
+import {
+  checkRebalance,
+  recentOrders,
+  requestsOf,
+  sendOrders,
+  standingOrders,
+  type OrderResult,
+  type PlacedOrder,
+  type Standing,
+} from "@/lib/orders";
 import {
   krw,
   percent,
@@ -56,7 +65,11 @@ export function Assets() {
   const [ordering, setOrdering] = useState<Holding | null>(null);
   const [asking, setAsking] = useState<PlanAsk | null>(null);
   const [record, setRecord] = useState<PlacedOrder[]>([]);
-  const reloadRecord = useCallback(() => void recentOrders().then(setRecord), []);
+  const [standing, setStanding] = useState<Standing[]>([]);
+  const reloadRecord = useCallback(() => {
+    void recentOrders().then(setRecord);
+    void standingOrders().then(setStanding);
+  }, []);
   useEffect(() => {
     reloadRecord();
   }, [reloadRecord]);
@@ -315,10 +328,16 @@ export function Assets() {
                   focus="orders"
                   open={open.orders}
                   onToggle={() => toggle("orders")}
-                  detail={<OrderRecord orders={record} holdings={data.holdings} />}
+                  detail={<OrderRecord orders={record} holdings={data.holdings} standing={standing} onChanged={reloadRecord} />}
                 >
                   <p className="text-[13px] text-dim">
-                    {record[0]
+                    {standing.some((o) => o.status === "active")
+                      ? `대기 주문 ${standing.filter((o) => o.status === "active").length}건 · ` +
+                        standing
+                          .filter((o) => o.status === "active")
+                          .map((o) => `${data.holdings.find((h) => h.symbol === o.symbol)?.name ?? o.symbol} $${o.limitPrice.toFixed(2)} ${o.side === "buy" ? "이하 매수" : "이상 매도"}`)
+                          .join(", ")
+                      : record[0]
                       ? `최근 ${new Date(record[0].createdAt).toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric" })} · ${record.filter((o) => o.status === "placed").length}건 보냄`
                       : "종목을 누르면 사고팔 수 있어요"}
                   </p>
