@@ -182,13 +182,19 @@ func main() {
 		log.Warn("브라우저 MCP 가 없어 묶음 결제 조회를 켜지 않습니다", "need", spending.BrowserServer)
 	}
 	if _, ok := cfg.ExtraMCPURLs[jobs.BrowserServer]; jobsModule != nil && ok {
-		go jobsModule.Run(enrichCtx, runner, jobs.SchedulerConfig{
-			RunURL:     cfg.PublicMCPURL + "/job-run",
-			Interval:   cfg.JobsInterval,
-			Cooldown:   cfg.JobsCooldown,
-			Timeout:    cfg.JobsTimeout,
-			UploadsDir: cfg.UploadsDir,
-		})
+		guard, err := jobs.NewBridgeGuard(cfg.ExtraMCPURLs[jobs.BrowserServer], cfg.ExtraMCPToken)
+		if err != nil {
+			log.Error("작업을 사이트 안에 묶을 수 없어 작업을 실행하지 않습니다", "err", err)
+		} else {
+			go jobsModule.Run(enrichCtx, runner, jobs.SchedulerConfig{
+				RunURL:     cfg.PublicMCPURL + "/job-run",
+				Interval:   cfg.JobsInterval,
+				Cooldown:   cfg.JobsCooldown,
+				Timeout:    cfg.JobsTimeout,
+				UploadsDir: cfg.UploadsDir,
+				Guard:      guard,
+			})
+		}
 	} else if jobsModule != nil {
 		log.Warn("브라우저 MCP 가 없어 작업을 실행하지 않습니다", "need", jobs.BrowserServer)
 	}
@@ -319,6 +325,9 @@ func main() {
 			"proposals", len(proposals.List()),
 			"permission_tool", permission.QualifiedToolName(),
 			"auto_allowed", cfg.AllowedTools)
+		if len(cfg.DroppedTools) > 0 {
+			log.Warn("JARVIS_ALLOWED_TOOLS 에서 카드를 건너뛰면 안 되는 도구를 뺐습니다", "dropped", cfg.DroppedTools)
+		}
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("서버가 죽었습니다", "err", err)
 			os.Exit(1)

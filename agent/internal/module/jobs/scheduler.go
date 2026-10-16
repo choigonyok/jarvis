@@ -46,6 +46,10 @@ type SchedulerConfig struct {
 	Timeout  time.Duration
 	// UploadsDir is where the job's photos are, for the prompt.
 	UploadsDir string
+	// Guard holds the browser to the job's sites while it runs. Without it
+	// (no browser) nothing is held - and a run that cannot be held does not
+	// start.
+	Guard SiteGuard
 }
 
 // Run takes due jobs one at a time, whenever the person is not using the
@@ -84,6 +88,18 @@ func (m *Module) runOnce(ctx context.Context, bg Background, cfg SchedulerConfig
 	if err != nil {
 		m.log.Warn("작업을 읽지 못했습니다", "job", j.ID, "err", err)
 		return
+	}
+	if cfg.Guard != nil {
+		// Held a minute past the run's own limit, in case Release never comes.
+		if err := cfg.Guard.Restrict(ctx, d.Job.Sites, cfg.Timeout+time.Minute); err != nil {
+			m.log.Warn("작업을 사이트 안에 묶지 못해 이번 실행을 건너뜁니다", "job", j.ID, "err", err)
+			return
+		}
+		defer func() {
+			if err := cfg.Guard.Release(context.WithoutCancel(ctx)); err != nil {
+				m.log.Warn("작업의 사이트 제한을 풀지 못했습니다(시간이 지나면 풀립니다)", "job", j.ID, "err", err)
+			}
+		}()
 	}
 	run, err := m.store.StartRun(ctx, j.ID)
 	if err != nil {
@@ -203,6 +219,7 @@ const runSystem = `당신은 Jarvis의 백그라운드 작업 실행입니다. �
 - 결제는 하지 않습니다. 돈이 드는 단계(결제, 유료 옵션, 충전)가 나오면 멈추고 ask 로 알립니다. 결제 요청은 네트워크에서도 막힙니다.
 - 같은 일을 두 번 하지 마세요. 밖으로 나가는 행동 직전에 remember 로 "하는 중", 직후에 결과(글 주소 등)를 남깁니다. 메모에 "하는 중"이 남아 있으면 먼저 실제로 됐는지 확인합니다.
 - 작업과 관계없는 페이지, 다른 사람의 글·채팅에는 손대지 마세요.
+- 열 수 있는 사이트는 작업의 "쓰는 사이트"(같은 도메인의 다른 주소 포함)와 네이버 로그인 화면뿐이고, 그 밖은 브라우저가 막습니다. 다른 사이트가 꼭 필요하면 ask 로 운영자에게 알리고 마칩니다.
 - 직접 연 탭은 끝날 때 닫으세요.
 
 로그인
@@ -232,7 +249,9 @@ func prompt(d Detail, uploadsDir string, now time.Time) string {
 		fmt.Fprintf(&b, "\n운영자 지시\n%s\n", j.Instructions)
 	}
 	if len(j.Sites) > 0 {
-		fmt.Fprintf(&b, "\n쓰는 사이트: %s\n", strings.Join(j.Sites, ", "))
+		fmt.Fprintf(&b, "\n쓰는 사이트: %s (이 밖의 사이트는 열리지 않습니다)\n", strings.Join(j.Sites, ", "))
+	} else {
+		b.WriteString("\n쓰는 사이트: 없음 - 이 작업은 웹사이트를 열 수 없습니다.\n")
 	}
 	if len(j.Photos) > 0 {
 		b.WriteString("\n첨부 사진 (view_photos 로 보고, 업로드는 아래 경로로 browser_upload_files)\n")

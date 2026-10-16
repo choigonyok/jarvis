@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -27,8 +28,12 @@ type Config struct {
 	Home         string
 	SystemPrompt string
 	// AllowedTools skip the approval card entirely. Read-only tools belong
-	// here; anything that writes does not.
+	// here; anything that writes does not. Files are read only inside the
+	// workspace and the uploads (scoped Read/Grep/Glob rules, added at load);
+	// see unsafeTool for what is taken off whatever the environment says.
 	AllowedTools []string
+	// DroppedTools are entries of JARVIS_ALLOWED_TOOLS that were refused.
+	DroppedTools []string
 	// PermissionMode decides what Claude Code asks about at all. "manual"
 	// routes decisions to a person; the auto/accept modes would silently
 	// bypass the card, so changing this weakens the gate.
@@ -164,13 +169,15 @@ func Load() (Config, error) {
 		Workspace:    env("JARVIS_WORKSPACE", "."),
 		Home:         env("JARVIS_HOME", os.Getenv("HOME")),
 		SystemPrompt: env("JARVIS_SYSTEM_PROMPT", defaultSystemPrompt),
-		// list_events is here for the same reason Read is: looking costs
-		// nothing and a card in front of every lookup would train the
-		// operator to approve without reading. Writes are never on this list.
+		// list_events is here for the same reason reading the workspace is:
+		// looking costs nothing and a card in front of every lookup would
+		// train the operator to approve without reading. Writes are never on
+		// this list - nor is starting or redirecting a job, which then runs on
+		// its own in the logged-in browser.
 		AllowedTools: splitList(env("JARVIS_ALLOWED_TOOLS",
-			"Read,Glob,Grep,TodoWrite,mcp__calendar__list_events,"+
+			"TodoWrite,mcp__calendar__list_events,"+
 				"mcp__assets__get_portfolio,mcp__assets__get_allocation,mcp__assets__get_history,"+
-				"mcp__spending__get_spending,mcp__memory__search_memory,mcp__context__get_context,mcp__context__find_nearby,mcp__jobs__create_job,mcp__jobs__list_jobs,mcp__jobs__instruct_job")),
+				"mcp__spending__get_spending,mcp__memory__search_memory,mcp__context__get_context,mcp__context__find_nearby,mcp__jobs__list_jobs")),
 		PermissionMode:   env("JARVIS_PERMISSION_MODE", "manual"),
 		ApprovalWait:     envDuration("JARVIS_APPROVAL_TIMEOUT", 30*time.Minute),
 		TurnTimeout:      envDuration("JARVIS_TURN_TIMEOUT", 2*time.Hour),
@@ -252,7 +259,56 @@ func Load() (Config, error) {
 		// environment is a billing surprise waiting to happen. Say so loudly.
 		return c, fmt.Errorf("ANTHROPIC_API_KEY is set alongside CLAUDE_CODE_OAUTH_TOKEN; unset it so usage bills to the subscription")
 	}
+	c.AllowedTools, c.DroppedTools = safeAllowed(c.AllowedTools)
+	if !c.Guest {
+		c.AllowedTools = append(c.AllowedTools, readRules(c.Workspace, c.UploadsDir)...)
+	}
 	return c, nil
+}
+
+// unsafeTool is an allowlist entry that may never skip the card, whatever
+// JARVIS_ALLOWED_TOOLS says. A bare file tool reads anywhere in the container
+// - the CLI's own credentials, /proc/<pid>/environ with every token - so
+// reading is allowed only by path (readRules). Shell and edits write. A job,
+// once made or redirected, runs on its own in the logged-in browser.
+func unsafeTool(t string) bool {
+	switch t {
+	case "Read", "Glob", "Grep", "mcp__jobs__create_job", "mcp__jobs__instruct_job":
+		return true
+	}
+	for _, prefix := range []string{"Bash", "Edit", "Write", "MultiEdit", "NotebookEdit"} {
+		if t == prefix || strings.HasPrefix(t, prefix+"(") {
+			return true
+		}
+	}
+	return false
+}
+
+func safeAllowed(tools []string) (kept, dropped []string) {
+	for _, t := range tools {
+		if unsafeTool(t) {
+			dropped = append(dropped, t)
+		} else {
+			kept = append(kept, t)
+		}
+	}
+	return kept, dropped
+}
+
+// readRules are the only file reading that skips the card: the workspace,
+// and the photos attached in conversation. The CLI also blocks reads outside
+// its working directories altogether (runner: blockReadsOutsideWorkingDirectories).
+func readRules(workspace, uploads string) []string {
+	var out []string
+	if abs, err := filepath.Abs(workspace); err == nil {
+		out = append(out, "Read(/"+abs+"/**)", "Grep(/"+abs+"/**)", "Glob(/"+abs+"/**)")
+	}
+	if uploads != "" {
+		if abs, err := filepath.Abs(uploads); err == nil {
+			out = append(out, "Read(/"+abs+"/**)")
+		}
+	}
+	return out
 }
 
 const defaultSystemPrompt = `당신은 Jarvis입니다. 한 사람의 개인 어시스턴트로, 그 사람과 1:1 스레드에서만 대화합니다.

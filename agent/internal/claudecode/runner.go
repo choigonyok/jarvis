@@ -423,6 +423,11 @@ func (r *Runner) args() []string {
 		// The instructions only: a resumed session keeps the ones it was
 		// opened with, so what changes per turn goes in the message (now).
 		"--append-system-prompt", r.systemPrompt(),
+		// Reads stop at the working directories - the workspace and the
+		// uploads (--add-dir). Nothing else in the container is the model's
+		// to read, with a card or without: not the CLI's credentials, not
+		// /etc, not another process's environment.
+		"--settings", `{"permissions":{"blockReadsOutsideWorkingDirectories":true}}`,
 	}
 	if r.cfg.UploadsDir != "" {
 		// Attached photos live outside the workspace; Read may open them.

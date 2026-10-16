@@ -265,7 +265,7 @@ type CreateInput struct {
 	Title        string   `json:"title" jsonschema:"작업 탭에 보일 짧은 이름. 예: '에어팟 프로 2 중고나라 판매'"`
 	Goal         string   `json:"goal" jsonschema:"끝났을 때 무엇이 이뤄져 있어야 하는지. 예: '중고나라에 판매 글을 올리고, 팔릴 때까지 반응을 지켜보다 판매되면 끝낸다.'"`
 	Instructions string   `json:"instructions,omitempty" jsonschema:"운영자가 말한 조건과 선호를 빠짐없이: 가격 정책, 거래 방식, 알려 달라는 때, 하지 말라는 것. 대화에서 알아낸 사실(사진 속 물건 정보 등)도."`
-	Sites        []string `json:"sites,omitempty" jsonschema:"로그인해서 쓸 사이트 호스트. 예: ['web.joongna.com']"`
+	Sites        []string `json:"sites,omitempty" jsonschema:"이 작업이 브라우저로 열 사이트 호스트 전부 - 로그인해서 쓰는 곳도, 조사하며 볼 곳도. 실행 중에는 여기 적힌 사이트(와 같은 도메인의 다른 주소) 밖으로는 열리지 않는다. 예: ['web.joongna.com'], ['search.shopping.naver.com', 'www.danawa.com']"`
 	Photos       []string `json:"photos,omitempty" jsonschema:"쓸 첨부 사진 파일 이름(경로의 마지막 부분)."`
 }
 

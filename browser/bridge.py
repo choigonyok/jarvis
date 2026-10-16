@@ -9,9 +9,11 @@ browser-use MCP는 stdio로만 말한다. 그래서 브라우저는 이 맥에�
 """
 
 import contextlib
+import json
 import os
 import secrets
 import sys
+import time
 
 import uvicorn
 from mcp import ClientSession, StdioServerParameters
@@ -29,10 +31,11 @@ from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
-from starlette.routing import Mount
+from starlette.routing import Mount, Route
 
 import pin
 import upload
+import jobsites
 
 HOST = os.environ.get("MCP_BROWSER_HOST", "0.0.0.0")
 PORT = int(os.environ.get("MCP_BROWSER_PORT", "8931"))
@@ -101,6 +104,27 @@ class RequireToken(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+async def job_sites(request):
+    """작업 한 번이 도는 동안 브라우저를 그 작업의 사이트 안에 묶고(POST), 끝나면
+    푼다(DELETE). 지키는 것은 guard.py 다 - 이 파일을 읽어 그 밖으로 가는 페이지
+    이동을 막는다. 에이전트가 풀지 못하고 죽어도 seconds 가 지나면 풀린다."""
+    if request.method == "DELETE":
+        with contextlib.suppress(FileNotFoundError):
+            os.remove(jobsites.FILE)
+        return JSONResponse({"ok": True})
+    try:
+        body = await request.json()
+        sites = [str(x).strip().lower() for x in body.get("sites") or [] if str(x).strip()]
+        seconds = max(60, min(int(body.get("seconds") or 0), 6 * 3600))
+    except (ValueError, TypeError, AttributeError):
+        return JSONResponse({"error": "sites, seconds 가 필요합니다"}, status_code=400)
+    tmp = jobsites.FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"sites": sites, "until": time.time() + seconds}, f)
+    os.replace(tmp, jobsites.FILE)
+    return JSONResponse({"ok": True, "sites": sites})
+
+
 def build_app() -> Starlette:
     manager = StreamableHTTPSessionManager(app=app, stateless=True)
 
@@ -124,7 +148,7 @@ def build_app() -> Starlette:
     # "/"에 문다. "/mcp"에 물리면 Starlette이 "/mcp/"로 307을 보내고,
     # POST 리다이렉트는 클라이언트마다 따라가는 방식이 다르다.
     return Starlette(
-        routes=[Mount("/", app=handle)],
+        routes=[Route("/job-sites", job_sites, methods=["POST", "DELETE"]), Mount("/", app=handle)],
         middleware=[Middleware(RequireToken)] if TOKEN else [],
         lifespan=lifespan,
     )

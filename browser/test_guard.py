@@ -57,3 +57,52 @@ class GuardRules(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class JobSites(unittest.TestCase):
+    """작업이 도는 동안: 탭의 최상위 이동은 그 작업의 사이트 안에서만."""
+
+    def setUp(self):
+        import tempfile
+        import time
+
+        import jobsites
+
+        self.jobsites = jobsites
+        self.dir = tempfile.TemporaryDirectory()
+        jobsites.FILE = os.path.join(self.dir.name, "job-sites.json")
+        jobsites._cache.update(mtime=None, value=None)
+        self.g = guard.Guard(*guard.load_rules())
+        self.g.pages["s-page"] = "T1"
+        self.hold = lambda sites, seconds=600: json.dump(
+            {"sites": sites, "until": time.time() + seconds}, open(jobsites.FILE, "w")
+        )
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def test_nothing_is_held_without_a_job(self):
+        self.assertFalse(self.g.leaves_job("s-page", "T1", "https://evil.example/"))
+
+    def test_a_job_stays_on_its_sites(self):
+        self.hold(["www.coupang.com"])
+        self.assertTrue(self.g.leaves_job("s-page", "T1", "https://evil.example/?d=1"))
+        self.assertFalse(self.g.leaves_job("s-page", "T1", "https://checkout.coupang.com/pay"))
+        self.assertFalse(self.g.leaves_job("s-page", "T1", "https://nid.naver.com/nidlogin.login"))
+
+    def test_frames_inside_a_tab_are_not_its_location(self):
+        self.hold(["www.coupang.com"])
+        self.assertFalse(self.g.leaves_job("s-page", "F9", "https://ads.example/"))
+        self.assertFalse(self.g.leaves_job("s-iframe", None, "https://ads.example/"))
+
+    def test_a_job_without_sites_opens_none(self):
+        self.hold([])
+        self.assertTrue(self.g.leaves_job("s-page", "T1", "https://www.google.com/"))
+        self.assertFalse(self.g.leaves_job("s-page", "T1", "about:blank"))
+
+    def test_an_expired_hold_lets_go(self):
+        self.hold(["www.coupang.com"], seconds=-1)
+        self.assertFalse(self.g.leaves_job("s-page", "T1", "https://evil.example/"))
+
+    def test_every_navigation_is_watched(self):
+        self.assertIn({"urlPattern": "*", "resourceType": "Document", "requestStage": "Request"}, self.g.patterns)

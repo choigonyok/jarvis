@@ -16,6 +16,10 @@
 
 browser-use는 건드리지 않는다. 같은 Chromium에 CDP로 따로 붙은 감시자라,
 어떤 도구가 눌렀든 상관없이 걸린다.
+
+백그라운드 작업이 도는 동안에는 하나를 더 본다: 탭의 페이지 이동이 그 작업의
+사이트(jobsites.py) 밖으로 가면 막는다. 작업은 아무도 보지 않는 채로 로그인된
+브라우저를 쓰므로, 읽은 페이지가 어디로 가라고 하든 제 사이트 밖으로는 못 간다.
 """
 
 import asyncio
@@ -30,6 +34,8 @@ from urllib.parse import urlparse
 
 import aiohttp
 import websockets
+
+import jobsites
 
 log = logging.getLogger("guard")
 
@@ -87,12 +93,28 @@ class Guard:
             [{"urlPattern": f"*{h}*", "requestStage": "Request"} for h in ask_hosts]
             + [{"urlPattern": p, "requestStage": "Request"} for p in ask_patterns]
             + [{"urlPattern": p, "requestStage": "Request"} for p in block_patterns]
+            # 페이지 이동은 전부 멈춰 본다: 작업이 도는 동안 그 사이트 밖으로
+            # 가는지(leaves_job). 작업이 없으면 바로 보낸다.
+            + [{"urlPattern": "*", "resourceType": "Document", "requestStage": "Request"}]
         )
+        # 붙은 탭(page)의 세션 → 그 탭의 id(= 최상위 프레임 id).
+        self.pages: dict[str, str] = {}
         self._next_id = 0
         self._send_lock = asyncio.Lock()
         # 한 번 승인한 결제 흐름은 같은 호스트의 후속 요청마다 다시 묻지 않는다.
         # 결제 한 건이 카드 한 장이어야 쓸 수 있다.
         self._approved: dict[str, float] = {}
+
+    def leaves_job(self, session: str | None, frame_id: str | None, url: str) -> bool:
+        """작업이 도는 중에, 탭의 최상위 페이지가 그 작업의 사이트 밖으로 가려는가.
+        탭 안의 iframe(광고, 보안문자)은 보지 않는다 - 탭이 어디에 있는지가 문제다."""
+        sites = jobsites.current()
+        if sites is None:
+            return False
+        page = self.pages.get(session or "")
+        if page is None or (frame_id and frame_id != page):
+            return False
+        return not jobsites.allowed(url, sites)
 
     def matches(self, host: str) -> bool:
         host = host.lower()
@@ -151,6 +173,16 @@ class Guard:
 
         async def go():
             await self.send(ws, "Fetch.continueRequest", {"requestId": rid}, session)
+
+        if p.get("resourceType") == "Document" and self.leaves_job(session, p.get("frameId"), url):
+            log.warning("작업의 사이트 밖으로 가는 이동을 막았습니다: %s", url[:120])
+            await self.send(
+                ws,
+                "Fetch.failRequest",
+                {"requestId": rid, "errorReason": "BlockedByClient"},
+                session,
+            )
+            return
 
         if p.get("resourceType") in SKIP_TYPES:
             await go()
@@ -216,6 +248,8 @@ class Guard:
                 if method == "Target.attachedToTarget":
                     t = msg["params"]["targetInfo"]
                     session = msg["params"]["sessionId"]
+                    if t.get("type") == "page":
+                        self.pages[session] = t.get("targetId", "")
                     if t.get("type") in ("page", "iframe"):
                         # 패턴에 걸리는 요청만 멈춘다. guard가 죽어도 일반
                         # 탐색은 영향을 받지 않는다는 뜻이다.
@@ -224,6 +258,8 @@ class Guard:
                         # 감시를 켠 뒤에야 풀어 준다. 워커처럼 감시하지 않는
                         # 대상도 멈춰 있으므로 반드시 풀어야 한다.
                         await self.send(ws, "Runtime.runIfWaitingForDebugger", {}, session)
+                elif method == "Target.detachedFromTarget":
+                    self.pages.pop(msg["params"].get("sessionId", ""), None)
                 elif method == "Fetch.requestPaused":
                     asyncio.create_task(self.on_paused(ws, msg))
 

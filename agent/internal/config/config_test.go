@@ -68,3 +68,51 @@ func TestTokens(t *testing.T) {
 		t.Fatalf("내부 MCP 토큰: %q %q", a.InternalMCPToken, b.InternalMCPToken)
 	}
 }
+
+// Files are read without a card only inside the workspace and the uploads,
+// and nothing in the environment can put a bare file tool, a shell, an edit
+// or starting a job back on the list.
+func TestReadsAreScopedAndUnsafeToolsDropped(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "x")
+	t.Setenv("JARVIS_API_TOKEN", "api")
+	t.Setenv("JARVIS_ROLE", "")
+	t.Setenv("JARVIS_WORKSPACE", "/workspace")
+	t.Setenv("JARVIS_UPLOADS_DIR", "/uploads")
+	t.Setenv("JARVIS_ALLOWED_TOOLS", "Read,Glob,Grep,TodoWrite,mcp__jobs__create_job,mcp__jobs__instruct_job,mcp__jobs__list_jobs,Bash(ls),Edit")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	has := func(tool string) bool {
+		for _, x := range c.AllowedTools {
+			if x == tool {
+				return true
+			}
+		}
+		return false
+	}
+	for _, want := range []string{"TodoWrite", "mcp__jobs__list_jobs", "Read(//workspace/**)", "Grep(//workspace/**)", "Glob(//workspace/**)", "Read(//uploads/**)"} {
+		if !has(want) {
+			t.Errorf("%s 가 있어야 합니다: %v", want, c.AllowedTools)
+		}
+	}
+	for _, gone := range []string{"Read", "Glob", "Grep", "mcp__jobs__create_job", "mcp__jobs__instruct_job", "Bash(ls)", "Edit"} {
+		if has(gone) {
+			t.Errorf("%s 는 카드를 건너뛰면 안 됩니다: %v", gone, c.AllowedTools)
+		}
+	}
+	if len(c.DroppedTools) != 7 {
+		t.Errorf("뺀 도구: %v", c.DroppedTools)
+	}
+
+	t.Setenv("JARVIS_ALLOWED_TOOLS", "")
+	c, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range c.AllowedTools {
+		if unsafeTool(tool) {
+			t.Errorf("기본값에 %s", tool)
+		}
+	}
+}
