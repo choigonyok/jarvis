@@ -59,6 +59,8 @@ export type Session = {
 
 export type Book = {
   sessions: Session[];
+  /** Server write counter. A full replace must name the one it was built on. */
+  revision?: number;
   /** Seconds. What the rest timer counts down to. */
   restTarget?: number;
   routines?: Routine[];

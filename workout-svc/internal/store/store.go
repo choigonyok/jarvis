@@ -62,6 +62,9 @@ func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 // wrong.
 func (s *Store) Load(ctx context.Context) (book.Book, error) {
 	out := book.Book{Sessions: []book.Session{}}
+	if err := s.pool.QueryRow(ctx, revisionSQL).Scan(&out.Revision); err != nil {
+		return out, fmt.Errorf("리비전 조회: %w", err)
+	}
 
 	rows, err := s.pool.Query(ctx, `
 		select id, on_date, coalesce(routine_id,''), coalesce(routine_name,''),
@@ -217,70 +220,162 @@ func (s *Store) loadRestTarget(ctx context.Context, out *book.Book) error {
 // whose exercises hash the same are left completely alone; only the session
 // row's own columns are upserted, which is a handful of writes instead of
 // thousands.
-func (s *Store) Save(ctx context.Context, b book.Book) error {
+// ErrConflict means the book changed since the revision the caller named.
+var ErrConflict = errors.New("revision conflict")
+
+const revisionSQL = `select coalesce((select (value->>'n')::bigint from settings
+	where scope = 'workout' and key = 'revision'), 0)`
+
+// bump serialises writers and moves the revision on. expect < 0 skips the check.
+func bump(ctx context.Context, tx pgx.Tx, expect int64) (int64, error) {
+	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtext('workout.book'))`); err != nil {
+		return 0, fmt.Errorf("잠금: %w", err)
+	}
+	var cur int64
+	if err := tx.QueryRow(ctx, revisionSQL).Scan(&cur); err != nil {
+		return 0, fmt.Errorf("리비전 조회: %w", err)
+	}
+	if expect >= 0 && expect != cur {
+		return cur, ErrConflict
+	}
+	if _, err := tx.Exec(ctx,
+		`select set_setting('workout', 'revision', jsonb_build_object('n', $1::bigint))`, cur+1); err != nil {
+		return 0, fmt.Errorf("리비전 저장: %w", err)
+	}
+	return cur + 1, nil
+}
+
+func (s *Store) Save(ctx context.Context, b book.Book, expect int64) (int64, error) {
 	book.Normalize(&b)
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("트랜잭션 시작: %w", err)
+		return 0, fmt.Errorf("트랜잭션 시작: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // 커밋 후에는 무해하다
 
-	// 현재 저장된 해시. 무엇을 다시 쓸지 정하는 근거다.
-	stored := map[string]string{}
-	rows, err := tx.Query(ctx, `select id, coalesce(content_hash,'') from workout_sessions`)
+	rev, err := bump(ctx, tx, expect)
 	if err != nil {
-		return fmt.Errorf("해시 조회: %w", err)
+		return rev, err
 	}
-	for rows.Next() {
-		var id, hash string
-		if err := rows.Scan(&id, &hash); err != nil {
-			rows.Close()
-			return fmt.Errorf("해시 읽기: %w", err)
-		}
-		stored[id] = hash
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("해시 순회: %w", err)
+
+	stored, err := storedHashes(ctx, tx)
+	if err != nil {
+		return 0, err
 	}
 
 	// 루틴이 세션보다 먼저다. 세션의 routine_id 는 존재하는 루틴만 참조하도록
 	// 서브쿼리로 걸러지므로, 순서가 뒤집히면 같은 요청에 함께 온 새 루틴을
 	// 가리키는 세션이 조용히 routine_id = NULL 로 저장된다.
 	if err := saveRoutines(ctx, tx, b.Routines); err != nil {
-		return err
+		return 0, err
 	}
 
 	sent := make(map[string]struct{}, len(b.Sessions))
 	for _, session := range b.Sessions {
 		sent[session.ID] = struct{}{}
 		if err := saveSession(ctx, tx, session, stored[session.ID]); err != nil {
-			return err
+			return 0, err
 		}
 	}
 
-	// 화면이 보내지 않은 세션은 지워진 것이다. endSession 이 아무것도 체크하지
-	// 않은 세션을 걸러내는 경로가 실제로 이걸 쓴다.
+	// 전체 교체에서 보내지 않은 세션은 지워진 것이다. 리비전 확인을 통과했으니
+	// 그사이 다른 사람이 더한 세션이 아니다.
 	for id := range stored {
 		if _, ok := sent[id]; ok {
 			continue
 		}
-		if _, err := tx.Exec(ctx, `delete from workout_sessions where id = $1`, id); err != nil {
-			return fmt.Errorf("세션 삭제(%s): %w", id, err)
+		if err := deleteSession(ctx, tx, id); err != nil {
+			return 0, err
 		}
 	}
 
-	if b.RestTarget != nil {
-		if _, err := tx.Exec(ctx,
-			`select set_setting('workout', 'restTarget', jsonb_build_object('seconds', $1::int))`,
-			*b.RestTarget); err != nil {
-			return fmt.Errorf("휴식 목표 저장: %w", err)
-		}
+	if err := saveRestTarget(ctx, tx, b.RestTarget); err != nil {
+		return 0, err
 	}
-
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("커밋: %w", err)
+		return 0, fmt.Errorf("커밋: %w", err)
+	}
+	return rev, nil
+}
+
+// Apply writes only what changed. No revision check: sessions are written by
+// id, so two writers touching different sessions cannot lose each other's work.
+func (s *Store) Apply(ctx context.Context, c book.Changes) (int64, error) {
+	b := book.Book{Sessions: c.Sessions, Routines: c.Routines}
+	book.Normalize(&b)
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("트랜잭션 시작: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // 커밋 후에는 무해하다
+
+	rev, err := bump(ctx, tx, -1)
+	if err != nil {
+		return 0, err
+	}
+	stored, err := storedHashes(ctx, tx)
+	if err != nil {
+		return 0, err
+	}
+	if err := saveRoutines(ctx, tx, b.Routines); err != nil {
+		return 0, err
+	}
+	for _, session := range b.Sessions {
+		if err := saveSession(ctx, tx, session, stored[session.ID]); err != nil {
+			return 0, err
+		}
+	}
+	for _, id := range c.Deleted {
+		if err := deleteSession(ctx, tx, id); err != nil {
+			return 0, err
+		}
+	}
+	if err := saveRestTarget(ctx, tx, c.RestTarget); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("커밋: %w", err)
+	}
+	return rev, nil
+}
+
+func storedHashes(ctx context.Context, tx pgx.Tx) (map[string]string, error) {
+	stored := map[string]string{}
+	rows, err := tx.Query(ctx, `select id, coalesce(content_hash,'') from workout_sessions`)
+	if err != nil {
+		return nil, fmt.Errorf("해시 조회: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, hash string
+		if err := rows.Scan(&id, &hash); err != nil {
+			return nil, fmt.Errorf("해시 읽기: %w", err)
+		}
+		stored[id] = hash
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("해시 순회: %w", err)
+	}
+	return stored, nil
+}
+
+func deleteSession(ctx context.Context, tx pgx.Tx, id string) error {
+	if _, err := tx.Exec(ctx, `delete from workout_sessions where id = $1`, id); err != nil {
+		return fmt.Errorf("세션 삭제(%s): %w", id, err)
+	}
+	return nil
+}
+
+func saveRestTarget(ctx context.Context, tx pgx.Tx, seconds *int) error {
+	if seconds == nil {
+		return nil
+	}
+	if _, err := tx.Exec(ctx,
+		`select set_setting('workout', 'restTarget', jsonb_build_object('seconds', $1::int))`,
+		*seconds); err != nil {
+		return fmt.Errorf("휴식 목표 저장: %w", err)
 	}
 	return nil
 }

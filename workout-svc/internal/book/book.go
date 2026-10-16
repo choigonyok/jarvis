@@ -59,6 +59,19 @@ type Book struct {
 	Sessions   []Session `json:"sessions"`
 	RestTarget *int      `json:"restTarget,omitempty"` // seconds
 	Routines   []Routine `json:"routines,omitempty"`
+	// Revision counts writes. A full replace must name the revision it was
+	// built on, so two writers cannot silently undo each other.
+	Revision int64 `json:"revision"`
+}
+
+// Changes is a partial write: only what changed since the client last saved.
+// Sessions not named here are left alone, which is what lets the guest and the
+// operator write the same book without one wiping the other.
+type Changes struct {
+	Sessions   []Session `json:"sessions,omitempty"`
+	Deleted    []string  `json:"deleted,omitempty"`
+	RestTarget *int      `json:"restTarget,omitempty"`
+	Routines   []Routine `json:"routines,omitempty"`
 }
 
 // Fingerprint is what decides whether a session needs rewriting. It covers

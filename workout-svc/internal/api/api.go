@@ -5,9 +5,12 @@ package api
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/choigonyok/jarvis/workout-svc/internal/book"
 	"github.com/choigonyok/jarvis/workout-svc/internal/store"
@@ -29,6 +32,10 @@ func (s *Server) Handler() http.Handler {
 	// 화면이 쓰는 경로. 계약은 분리 전과 같다 - 책 전체를 주고받는다.
 	mux.HandleFunc("GET /workout", s.auth(s.get))
 	mux.HandleFunc("PUT /workout", s.auth(s.put))
+	// 바뀐 세션만 쓰는 경로. 손님과 운영자가 같은 책을 써도 서로 지우지 않는다.
+	mux.HandleFunc("POST /workout/changes", s.auth(s.changes))
+	mux.HandleFunc("PUT /workout/sessions/{id}", s.auth(s.putSession))
+	mux.HandleFunc("DELETE /workout/sessions/{id}", s.auth(s.deleteSession))
 	// 룰 게이트가 쓰는 경로. 제안을 열지 말지 판단하는 데 필요한 것만.
 	mux.HandleFunc("GET /stats", s.auth(s.stats))
 	return mux
@@ -62,7 +69,63 @@ func (s *Server) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("ETag", strconv.Quote(strconv.FormatInt(b.Revision, 10)))
 	writeJSON(w, http.StatusOK, b)
+}
+
+// expected reads the revision a full replace was built on: If-Match, or
+// ?rev= for sendBeacon, which cannot set headers. -1 = 확인하지 않음.
+func expected(r *http.Request) (int64, bool) {
+	v := strings.Trim(strings.TrimPrefix(r.Header.Get("If-Match"), "W/"), `"`)
+	if v == "" {
+		v = r.URL.Query().Get("rev")
+	}
+	if v == "" || v == "*" {
+		return -1, true
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	return n, err == nil
+}
+
+func (s *Server) written(w http.ResponseWriter, rev int64, err error) {
+	if errors.Is(err, store.ErrConflict) {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error": "다른 곳에서 기록이 바뀌었습니다. 새로 불러와 주세요.", "revision": rev})
+		return
+	}
+	if err != nil {
+		s.log.Error("기록을 저장하지 못했습니다", "err", err)
+		writeErr(w, http.StatusInternalServerError, "기록을 저장하지 못했습니다.")
+		return
+	}
+	w.Header().Set("ETag", strconv.Quote(strconv.FormatInt(rev, 10)))
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "revision": rev})
+}
+
+func (s *Server) changes(w http.ResponseWriter, r *http.Request) {
+	var c book.Changes
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&c); err != nil {
+		writeErr(w, http.StatusBadRequest, "본문을 읽을 수 없습니다.")
+		return
+	}
+	rev, err := s.store.Apply(r.Context(), c)
+	s.written(w, rev, err)
+}
+
+func (s *Server) putSession(w http.ResponseWriter, r *http.Request) {
+	var one book.Session
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&one); err != nil {
+		writeErr(w, http.StatusBadRequest, "본문을 읽을 수 없습니다.")
+		return
+	}
+	one.ID = r.PathValue("id")
+	rev, err := s.store.Apply(r.Context(), book.Changes{Sessions: []book.Session{one}})
+	s.written(w, rev, err)
+}
+
+func (s *Server) deleteSession(w http.ResponseWriter, r *http.Request) {
+	rev, err := s.store.Apply(r.Context(), book.Changes{Deleted: []string{r.PathValue("id")}})
+	s.written(w, rev, err)
 }
 
 func (s *Server) put(w http.ResponseWriter, r *http.Request) {
@@ -86,12 +149,13 @@ func (s *Server) put(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.store.Save(r.Context(), b); err != nil {
-		s.log.Error("기록을 저장하지 못했습니다", "err", err)
-		writeErr(w, http.StatusInternalServerError, "기록을 저장하지 못했습니다.")
+	expect, ok := expected(r)
+	if !ok {
+		writeErr(w, http.StatusBadRequest, "If-Match 를 읽을 수 없습니다.")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	rev, err := s.store.Save(r.Context(), b, expect)
+	s.written(w, rev, err)
 }
 
 func (s *Server) stats(w http.ResponseWriter, r *http.Request) {

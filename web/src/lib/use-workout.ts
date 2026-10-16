@@ -19,13 +19,41 @@ import {
  * ticked off between breaths - a request per tap would be a request per
  * second with wet hands on hotel wifi. A pending write is flushed on unload
  * so nothing logged is lost by closing the tab.
+ *
+ * Only what changed since the last save goes over the wire - sessions by id,
+ * deletions by id. The guest and the operator share this book, and sending
+ * the whole thing used to delete whatever the other had added since.
  */
+type Changes = {
+  sessions?: Session[];
+  deleted?: string[];
+  restTarget?: number;
+  routines?: Routine[];
+};
+
+function diff(from: Book, to: Book): Changes | null {
+  const before = new Map(from.sessions.map((s) => [s.id, JSON.stringify(s)]));
+  const ids = new Set(to.sessions.map((s) => s.id));
+  const out: Changes = {};
+  const sessions = to.sessions.filter((s) => before.get(s.id) !== JSON.stringify(s));
+  if (sessions.length) out.sessions = sessions;
+  const deleted = from.sessions.map((s) => s.id).filter((id) => !ids.has(id));
+  if (deleted.length) out.deleted = deleted;
+  if (to.restTarget !== undefined && to.restTarget !== from.restTarget) out.restTarget = to.restTarget;
+  if (to.routines && JSON.stringify(to.routines) !== JSON.stringify(from.routines)) {
+    out.routines = to.routines;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 export function useWorkout() {
   const [book, setBook] = useState<Book>({ sessions: [] });
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latest = useRef<Book>(book);
+  // What the server is known to hold. Changes are measured against this.
+  const saved = useRef<Book>(book);
 
   useEffect(() => {
     void (async () => {
@@ -35,6 +63,7 @@ export function useWorkout() {
         const data = (await res.json()) as Book;
         setBook(data);
         latest.current = data;
+        saved.current = data;
       } catch {
         setError("기록을 불러오지 못했습니다.");
       } finally {
@@ -44,13 +73,16 @@ export function useWorkout() {
   }, []);
 
   const save = useCallback(async (next: Book) => {
+    const changes = diff(saved.current, next);
+    if (!changes) return;
     try {
-      const res = await fetch("/api/workout", {
-        method: "PUT",
+      const res = await fetch("/api/workout/changes", {
+        method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(next),
+        body: JSON.stringify(changes),
       });
       if (!res.ok) throw new Error(String(res.status));
+      saved.current = next;
       setError(null);
     } catch {
       setError("기록을 저장하지 못했습니다.");
@@ -76,9 +108,11 @@ export function useWorkout() {
       if (!timer.current) return;
       clearTimeout(timer.current);
       timer.current = null;
+      const changes = diff(saved.current, latest.current);
+      if (!changes) return;
       navigator.sendBeacon?.(
-        "/api/workout",
-        new Blob([JSON.stringify(latest.current)], { type: "application/json" }),
+        "/api/workout/changes",
+        new Blob([JSON.stringify(changes)], { type: "application/json" }),
       );
     };
     window.addEventListener("pagehide", flush);
