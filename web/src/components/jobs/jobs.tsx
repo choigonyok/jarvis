@@ -89,9 +89,9 @@ export function Jobs() {
 
           {jobs ? (
             live.length > 0 ? (
-              <ul className="space-y-1">
+              <ul className="space-y-1" data-focus="waiting">
                 {live.map((j) => (
-                  <li key={j.id}>
+                  <li key={j.id} data-focus={`job:${j.id}`}>
                     <Row job={j} onOpen={() => setOpenId(j.id)} />
                   </li>
                 ))}

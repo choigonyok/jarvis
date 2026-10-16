@@ -180,6 +180,8 @@ services:
       JARVIS_MEMORY_URL: http://memory:8100
       JARVIS_CALENDAR_URL: http://calendar:8093
       JARVIS_CHAT_URL: http://chat:8094
+      # 손님의 결재 카드는 손님 기기로(audience guest). 운영자에게는 가지 않는다.
+      JARVIS_NOTIFY_URL: http://events:8101
     volumes:
       - jarvis-guest-workspace:/workspace
       - jarvis-guest-home:/home/jarvis

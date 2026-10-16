@@ -289,6 +289,11 @@
   border-radius: 10px;
   animation: turn-flash 1.6s ease-out;
 }
+/* The section a notification was about, arrived at (lib/focus.ts). */
+.focus-flash {
+  border-radius: 10px;
+  animation: turn-flash 2.2s ease-out;
+}
 
 /* Search marks in the thread (CSS Custom Highlight API): every place the words
    appear, and the one in view, inverted - no hue, the signal colours keep
@@ -329,6 +334,7 @@
   .push-toast-leave,
   .card-flash,
   .turn-flash,
+  .focus-flash,
   .anim-edge,
   .anim-settle,
   .anim-breathe,

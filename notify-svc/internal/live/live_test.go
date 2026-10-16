@@ -26,10 +26,10 @@ func TestPresenceExpiresAndLeaving(t *testing.T) {
 
 func TestBroadcastReachesOpenStreamsOnly(t *testing.T) {
 	h := New()
-	a, closeA := h.Subscribe()
-	b, closeB := h.Subscribe()
+	a, closeA := h.Subscribe("owner")
+	b, closeB := h.Subscribe("owner")
 	closeB()
-	h.Broadcast([]byte("x"))
+	h.Broadcast("owner", []byte("x"))
 	select {
 	case got := <-a:
 		if string(got) != "x" {
@@ -44,4 +44,26 @@ func TestBroadcastReachesOpenStreamsOnly(t *testing.T) {
 	default:
 	}
 	closeA()
+}
+
+// The guest's console hears the guest's notifications, never the operator's.
+func TestBroadcastStaysWithItsPerson(t *testing.T) {
+	h := New()
+	owner, closeOwner := h.Subscribe("owner")
+	guest, closeGuest := h.Subscribe("guest")
+	defer closeOwner()
+	defer closeGuest()
+	h.Broadcast("owner", []byte("home"))
+	select {
+	case <-guest:
+		t.Fatal("the guest heard the operator's notification")
+	default:
+	}
+	if got := <-owner; string(got) != "home" {
+		t.Fatalf("operator got %q", got)
+	}
+	h.Broadcast("guest", []byte("card"))
+	if got := <-guest; string(got) != "card" {
+		t.Fatalf("guest got %q", got)
+	}
 }

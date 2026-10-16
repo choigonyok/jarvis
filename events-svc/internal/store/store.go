@@ -19,6 +19,9 @@ type Notify struct {
 	Title string `json:"title"`
 	Body  string `json:"body,omitempty"`
 	URL   string `json:"url,omitempty"`
+	// Audience is who the notification is for (notify-svc): "" is the
+	// operator, "guest" the guest account.
+	Audience string `json:"audience,omitempty"`
 }
 
 // Event is one thing that happened, as delivered to consumers.

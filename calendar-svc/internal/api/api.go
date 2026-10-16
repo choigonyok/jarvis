@@ -13,6 +13,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/choigonyok/jarvis/calendar-svc/internal/event"
@@ -122,20 +123,13 @@ func (s *Server) put(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "일정을 저장하지 못했습니다.")
 		return
 	}
-	// A new entry the partner owns is the guest's agent writing on the shared
-	// calendar - the one change here the operator did not make, so it is
-	// worth telling them. (One the partner adds in the uniple app does not
-	// pass through here.)
-	if in.ID == "" && saved.Owner == "partner" {
-		when := saved.Date[5:]
-		if saved.Start != "" {
-			when += " " + saved.Start
-		}
-		s.notify.Send(notify.Event{
-			Source: "calendar", Kind: "calendar.partner", Tier: "now",
-			Title: "상대가 일정을 추가했어요", Body: when + " " + saved.Title,
-			URL: "/calendar", Key: "calendar:" + saved.ID,
-		})
+	// A new entry is worth telling the other person about: one the guest's
+	// jarvis writes (X-Jarvis-Side: partner) goes to the operator, one the
+	// operator's side writes goes to the guest. A tap lands on that day with
+	// the entry marked. (One added in the uniple app does not pass through
+	// here.)
+	if in.ID == "" {
+		s.notify.Send(added(saved, r.Header.Get("X-Jarvis-Side") == "partner"))
 	}
 	writeJSON(w, http.StatusOK, saved)
 }
@@ -183,4 +177,22 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 
 func writeErr(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
+}
+
+// added is the notification for a new entry, for whoever did not write it.
+func added(e event.Event, byPartner bool) notify.Event {
+	when := e.Date[5:]
+	if e.Start != "" {
+		when += " " + e.Start
+	}
+	n := notify.Event{
+		Source: "calendar", Kind: "calendar.partner", Tier: "now",
+		Title: "상대가 일정을 추가했어요", Body: when + " " + e.Title,
+		URL: "/calendar?date=" + e.Date + "&focus=event:" + url.QueryEscape(e.ID),
+		Key: "calendar:" + e.ID,
+	}
+	if !byPartner {
+		n.Audience, n.Key = "guest", "guest-calendar:"+e.ID
+	}
+	return n
 }

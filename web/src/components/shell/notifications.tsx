@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { openTarget, targetOf } from "@/lib/focus";
 import { onInboxRequest, onResume } from "@/lib/resume";
 import { Bell, Settings2 } from "lucide-react";
 import { usePush } from "@/lib/use-push";
@@ -166,7 +167,8 @@ export function Notifications() {
                       onClick={() => {
                         if (!n.readAt) void markRead([n.id]);
                         setOpen(false);
-                        router.push(n.url || "/");
+                        // Into the screen and onto the part it is about.
+                        openTarget(targetOf(n), (path) => router.push(path));
                       }}
                       className="flex w-full gap-2.5 px-3.5 py-2.5 text-left outline-none hover:bg-glass focus-visible:bg-glass"
                     >

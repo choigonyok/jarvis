@@ -54,22 +54,24 @@ func (p *Pusher) Ready() bool { return p.keys.Public != "" && p.keys.Private != 
 
 func (p *Pusher) PublicKey() string { return p.keys.Public }
 
-// Send pushes to every device and reports how many took it. A device the push
-// service says no longer exists is forgotten; one that fails otherwise keeps
-// its place until it has failed many times in a row.
-func (p *Pusher) Send(ctx context.Context, pl Payload) (int, error) {
+// Send pushes to every device of one person (store.Owner, store.Guest) and
+// reports how many took it. A device the push service says no longer exists
+// is forgotten; one that fails otherwise keeps its place until it has failed
+// many times in a row.
+func (p *Pusher) Send(ctx context.Context, audience string, pl Payload) (int, error) {
 	body, err := json.Marshal(pl)
 	if err != nil {
 		return 0, err
 	}
-	// Every open console hears it at once, and shows it in the page.
+	// Every console of theirs that is open hears it at once, and shows it in
+	// the page.
 	if p.live != nil {
-		p.live.Broadcast(body)
+		p.live.Broadcast(audience, body)
 	}
 	if !p.Ready() {
 		return 0, nil
 	}
-	subs, err := p.store.Subscriptions(ctx)
+	subs, err := p.store.Subscriptions(ctx, audience)
 	if err != nil {
 		return 0, err
 	}

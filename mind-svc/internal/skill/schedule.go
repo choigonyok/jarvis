@@ -3,6 +3,7 @@ package skill
 import (
 	"context"
 	"encoding/json"
+	"net/url"
 	"strings"
 	"time"
 
@@ -96,7 +97,7 @@ func (s Schedule) OnTimer(ctx context.Context, v View, e model.Entity, t model.T
 		if st.Place != "" {
 			body += " · " + st.Place
 		}
-		in := model.Intent{Kind: "info", EntityID: e.ID, Title: "내일 " + st.Title, Reason: "하루 전 확인", Confidence: 1}
+		in := model.Intent{Kind: "info", EntityID: e.ID, Title: "내일 " + st.Title, Reason: "하루 전 확인", Confidence: 1, Link: CalendarLink(st)}
 		if len(loops) > 0 {
 			titles := make([]string, len(loops))
 			for i, l := range loops {
@@ -115,7 +116,7 @@ func (s Schedule) OnTimer(ctx context.Context, v View, e model.Entity, t model.T
 		body = withMemory(body, v.Recall(ctx, st.People))
 		return Result{Intents: []model.Intent{{
 			Kind: "info", EntityID: e.ID, Title: st.Start + " " + st.Title, Body: body,
-			Reason: "두 시간 전 알림", Confidence: 1, Urgent: true,
+			Reason: "두 시간 전 알림", Confidence: 1, Urgent: true, Link: CalendarLink(st),
 		}}}
 	}
 	return Result{}
@@ -145,8 +146,22 @@ func (s Schedule) add(ctx context.Context, v View, e model.Entity, changes []mod
 		Kind: "calendar.create", EntityID: e.ID, Payload: payload,
 		Title:  "캘린더에 추가: " + Day(e.State, v.Loc()) + " " + e.State.Title,
 		Reason: "대화에서 확정됐는데 캘린더에 없어요", Confidence: confidence(changes),
-		Evidence: evidence(changes), Reversible: true,
+		Evidence: evidence(changes), Reversible: true, Link: CalendarLink(e.State),
 	}, true
+}
+
+// CalendarLink is the console's calendar on the plan's day, with its entry
+// marked when it is on the calendar already (web/src/lib/focus.ts).
+func CalendarLink(st model.State) string {
+	q := url.Values{}
+	if st.Date != "" {
+		q.Set("date", st.Date)
+	}
+	q.Set("focus", "day")
+	if st.CalendarID != "" {
+		q.Set("focus", "event:"+st.CalendarID)
+	}
+	return "/calendar?" + q.Encode()
 }
 
 func (s Schedule) move(e model.Entity, before model.State, changes []model.Change) model.Intent {
@@ -156,7 +171,7 @@ func (s Schedule) move(e model.Entity, before model.State, changes []model.Chang
 		Kind: "calendar.update", EntityID: e.ID, Payload: payload,
 		Title:  "캘린더 수정: " + e.State.Title + " (" + diff(before, e.State) + ")",
 		Reason: "대화에서 일정이 바뀌었어요", Confidence: confidence(changes),
-		Evidence: evidence(changes), Reversible: true,
+		Evidence: evidence(changes), Reversible: true, Link: CalendarLink(e.State),
 	}
 }
 

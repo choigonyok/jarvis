@@ -29,6 +29,7 @@ import {
   send,
   shiftMonth,
 } from "@/lib/spending";
+import { onOpenParams } from "@/lib/focus";
 import { isPending } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
 import { cn } from "@/lib/utils";
@@ -113,6 +114,24 @@ export function Spending() {
     setCategory(null);
   };
 
+  // A notification's target (lib/focus.ts): the month it is about; a
+  // payment's row with nothing filtering it out; a day as that day's rows.
+  useEffect(() => {
+    const apply = (params: URLSearchParams) => {
+      const m = params.get("month");
+      if (m && /^\d{4}-\d{2}$/.test(m)) goMonth(m);
+      const focus = params.get("focus") ?? "";
+      if (focus.startsWith("tx:")) {
+        setDay(null);
+        setCategory(null);
+        setQuery("");
+      }
+      if (focus.startsWith("day:")) setDay(focus.slice(4));
+    };
+    apply(new URLSearchParams(window.location.search));
+    return onOpenParams(apply);
+  }, []);
+
   const shown = useMemo(() => {
     if (!book) return [];
     const q = query.trim().toLowerCase();
@@ -180,7 +199,7 @@ export function Spending() {
               <Headline book={book} current={current} day={day} />
               <Status book={book} onOpenUnparsed={() => setUnparsedOpen(true)} onRetried={done} />
 
-              <section className="mt-6" aria-label="이번 달 속도">
+              <section className="mt-6" aria-label="이번 달 속도" data-focus="budget">
                 <Pace
                   book={book}
                   selectedDay={day}
@@ -225,7 +244,11 @@ export function Spending() {
                 </section>
               ) : null}
 
-              <section className="mt-6 border-t border-edge-soft pt-5" aria-label="내역">
+              <section
+                className="mt-6 border-t border-edge-soft pt-5"
+                aria-label="내역"
+                data-focus={day ? `day:${day}` : "recent"}
+              >
                 <div className="mb-3 flex items-center gap-2 px-2">
                   <h2 className="text-[13px] text-dim">내역</h2>
                   <label className="relative ms-auto min-w-0 flex-1 sm:max-w-56">
@@ -393,6 +416,7 @@ function Status({
       ))}
       {book.unparsed.length > 0 ? (
         <button
+          data-focus="unparsed"
           type="button"
           onClick={onOpenUnparsed}
           className="tap -mx-1 flex items-center gap-1.5 rounded-md px-1 text-left text-[12.5px] text-foreground/90 outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"

@@ -174,6 +174,12 @@ func (s *Store) do(ctx context.Context, method, path string, body any, out any) 
 	if s.token != "" {
 		req.Header.Set("Authorization", "Bearer "+s.token)
 	}
+	// Who is writing: the service only ever sees the operator's side of the
+	// entry, so this is how it knows the guest's jarvis made a change - and
+	// that it is the operator, not the guest, to tell about it.
+	if s.partnerSide {
+		req.Header.Set("X-Jarvis-Side", "partner")
+	}
 
 	res, err := s.client.Do(req)
 	if err != nil {

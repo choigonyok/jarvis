@@ -383,6 +383,10 @@ type Intent struct {
 	// Fields make its card a form - a question to answer, not only approve.
 	// The answers come back in the payload's "answers".
 	Fields []Field `json:"fields,omitempty"`
+	// Link is where a tap on its notice goes in the console: the calendar
+	// entry a reminder is about, the 자산 screen's allocation. Empty: the
+	// console's front (the gate's url).
+	Link string `json:"link,omitempty"`
 
 	Decision  string `json:"decision"`            // execute | notify | ask | digest | drop
 	Why       string `json:"why,omitempty"`       // why the gate decided so

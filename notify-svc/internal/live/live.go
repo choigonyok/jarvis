@@ -21,13 +21,13 @@ const Fresh = 15 * time.Second
 
 type Hub struct {
 	mu      sync.Mutex
-	seen    map[string]time.Time // push endpoint -> last "on screen"
-	streams map[chan []byte]struct{}
+	seen    map[string]time.Time   // push endpoint -> last "on screen"
+	streams map[chan []byte]string // -> whose console it is
 	now     func() time.Time
 }
 
 func New() *Hub {
-	return &Hub{seen: map[string]time.Time{}, streams: map[chan []byte]struct{}{}, now: time.Now}
+	return &Hub{seen: map[string]time.Time{}, streams: map[chan []byte]string{}, now: time.Now}
 }
 
 // Seen records what a device said: on screen, or leaving.
@@ -52,11 +52,11 @@ func (h *Hub) Present(endpoint string) bool {
 	return ok && h.now().Sub(at) < Fresh
 }
 
-// Subscribe opens a stream; the returned func closes it.
-func (h *Hub) Subscribe() (<-chan []byte, func()) {
+// Subscribe opens a stream for one person's console; the returned func closes it.
+func (h *Hub) Subscribe(audience string) (<-chan []byte, func()) {
 	ch := make(chan []byte, 8)
 	h.mu.Lock()
-	h.streams[ch] = struct{}{}
+	h.streams[ch] = audience
 	h.mu.Unlock()
 	return ch, func() {
 		h.mu.Lock()
@@ -65,12 +65,15 @@ func (h *Hub) Subscribe() (<-chan []byte, func()) {
 	}
 }
 
-// Broadcast sends a message to every open stream. A stream too far behind
-// misses it rather than holding the sender up.
-func (h *Hub) Broadcast(msg []byte) {
+// Broadcast sends a message to every open stream of one person. A stream too
+// far behind misses it rather than holding the sender up.
+func (h *Hub) Broadcast(audience string, msg []byte) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	for ch := range h.streams {
+	for ch, who := range h.streams {
+		if who != audience {
+			continue
+		}
 		select {
 		case ch <- msg:
 		default:

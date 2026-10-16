@@ -9,10 +9,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"time"
 
-	"github.com/choigonyok/jarvis/spending-svc/internal/book"
 	"github.com/choigonyok/jarvis/gocommon/notify"
+	"github.com/choigonyok/jarvis/spending-svc/internal/book"
 	"github.com/choigonyok/jarvis/spending-svc/internal/store"
 )
 
@@ -73,7 +74,7 @@ func (w *Watcher) check(ctx context.Context) error {
 	for _, u := range unparsed {
 		w.notify.Send(notify.Event{
 			Source: "spending", Kind: "spending.unparsed", Tier: "digest", Level: "warn",
-			Title: "읽지 못한 카드 알림", Body: u.ChatName + ": 합계에서 빠져 있어요", URL: "/spending",
+			Title: "읽지 못한 카드 알림", Body: u.ChatName + ": 합계에서 빠져 있어요", URL: "/spending?focus=unparsed",
 			Key: "spending:unparsed:" + u.MessageID,
 		})
 	}
@@ -82,11 +83,15 @@ func (w *Watcher) check(ctx context.Context) error {
 
 // Events is what this month says right now. Only recent rows count, so the
 // first run after a deploy does not report a month of old payments.
+//
+// Each one's tap lands on what it is about (?focus=, see web/src/lib/focus.ts):
+// the payment's row, the budget line, the day's bar.
 func Events(sum book.Summary, now time.Time) []notify.Event {
 	var out []notify.Event
-	add := func(kind, tier, level, title, body, key string) {
+	page := "/spending?month=" + sum.Month + "&focus="
+	add := func(kind, tier, level, title, body, key, focus string) {
 		out = append(out, notify.Event{Source: "spending", Kind: kind, Tier: tier, Level: level,
-			Title: title, Body: body, URL: "/spending", Key: key})
+			Title: title, Body: body, URL: page + url.QueryEscape(focus), Key: key})
 	}
 	recent := now.Add(-72 * time.Hour)
 	for _, t := range sum.Transactions {
@@ -95,16 +100,17 @@ func Events(sum book.Summary, now time.Time) []notify.Event {
 		}
 		id := fmt.Sprint(t.ID)
 		when := t.ApprovedAt.Format("1/2 15:04")
+		row := "tx:" + id
 		switch {
 		case t.Status == "refund":
-			add("spending.refund", "digest", "info", "환불 "+won(-t.SignedKrw), t.Merchant+" · "+when, "spending:refund:"+id)
+			add("spending.refund", "digest", "info", "환불 "+won(-t.SignedKrw), t.Merchant+" · "+when, "spending:refund:"+id, row)
 		case t.Status == "cancel":
-			add("spending.cancel", "digest", "info", "결제 취소 "+won(t.AmountKrw), t.Merchant+" · "+when, "spending:cancel:"+id)
+			add("spending.cancel", "digest", "info", "결제 취소 "+won(t.AmountKrw), t.Merchant+" · "+when, "spending:cancel:"+id, row)
 		case t.Status != "ok":
 		case t.Currency != "" && t.Currency != "KRW":
-			add("spending.foreign", "digest", "info", "해외 결제 "+won(t.AmountKrw), t.Merchant+" · "+when, "spending:foreign:"+id)
+			add("spending.foreign", "digest", "info", "해외 결제 "+won(t.AmountKrw), t.Merchant+" · "+when, "spending:foreign:"+id, row)
 		case t.AmountKrw >= BigKrw:
-			add("spending.big", "digest", "info", "큰 결제 "+won(t.AmountKrw), t.Merchant+" · "+when, "spending:big:"+id)
+			add("spending.big", "digest", "info", "큰 결제 "+won(t.AmountKrw), t.Merchant+" · "+when, "spending:big:"+id, row)
 		}
 	}
 
@@ -113,16 +119,16 @@ func Events(sum book.Summary, now time.Time) []notify.Event {
 		if budget <= 0 {
 			return
 		}
-		label := "이번 달"
+		label, focus := "이번 달", "budget"
 		if name != "" {
-			label = name
+			label, focus = name, "category:"+name
 		}
 		ratio := float64(total) / float64(budget)
 		switch {
 		case ratio >= 1:
-			add("spending.budget", "now", "warn", label+" 예산을 넘었어요", won(total)+" / 예산 "+won(budget), "spending:budget:"+sum.Month+":"+name+":100")
+			add("spending.budget", "now", "warn", label+" 예산을 넘었어요", won(total)+" / 예산 "+won(budget), "spending:budget:"+sum.Month+":"+name+":100", focus)
 		case ratio >= 0.8:
-			add("spending.budget", "digest", "info", label+" 예산의 80%를 썼어요", won(total)+" / 예산 "+won(budget), "spending:budget:"+sum.Month+":"+name+":80")
+			add("spending.budget", "digest", "info", label+" 예산의 80%를 썼어요", won(total)+" / 예산 "+won(budget), "spending:budget:"+sum.Month+":"+name+":80", focus)
 		}
 	}
 	if sum.BudgetKrw != nil {
@@ -152,7 +158,7 @@ func Events(sum book.Summary, now time.Time) []notify.Event {
 		if count == 0 {
 			title = "오늘은 쓴 돈이 없어요"
 		}
-		add("spending.daily", "digest", "info", title, body, "spending:daily:"+today)
+		add("spending.daily", "digest", "info", title, body, "spending:daily:"+today, "day:"+today)
 	}
 	return out
 }

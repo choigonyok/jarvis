@@ -30,7 +30,7 @@ export function Categories({
         const over = c.budgetKrw !== null && c.totalKrw > c.budgetKrw;
         const share = book.totalKrw > 0 ? c.totalKrw / book.totalKrw : 0;
         return (
-          <li key={c.name}>
+          <li key={c.name} data-focus={`category:${c.name}`}>
             <button
               type="button"
               onClick={() => onSelect(active ? null : c.name)}

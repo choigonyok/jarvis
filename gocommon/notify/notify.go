@@ -33,6 +33,9 @@ type Event struct {
 	Body   string `json:"body,omitempty"`
 	URL    string `json:"url,omitempty"`
 	Key    string `json:"key,omitempty"`
+	// Audience is who it is for: "" or "owner" (the operator), "guest" (the
+	// guest account - only what is theirs, never the operator's own).
+	Audience string `json:"audience,omitempty"`
 }
 
 type Client struct {

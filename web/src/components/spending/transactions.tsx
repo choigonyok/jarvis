@@ -25,7 +25,7 @@ export function Transactions({ txs, onOpen }: { txs: Tx[]; onOpen: (t: Tx) => vo
           </div>
           <ul className="space-y-px">
             {g.txs.map((t) => (
-              <li key={t.id}>
+              <li key={t.id} data-focus={`tx:${t.id}`}>
                 <Row t={t} onOpen={() => onOpen(t)} />
               </li>
             ))}

@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import type { useRouter } from "next/navigation";
+import { openTarget } from "@/lib/focus";
 
 /**
  * Coming back to the console. A phone suspends a home-screen app in the
@@ -70,13 +71,14 @@ export function handleWorkerMessage(data: unknown, go: (path: string) => void) {
   const target = new URL(String(msg.url || "/"), window.location.origin);
   window.dispatchEvent(new Event(RESUME));
   if (target.searchParams.get("inbox") === "1") window.dispatchEvent(new Event(INBOX));
-  if (target.pathname !== window.location.pathname) {
-    // Another screen: it reads ?proposal= itself once it mounts.
-    go(target.pathname + target.search);
+  const card = target.searchParams.get("proposal");
+  if (card && target.pathname === window.location.pathname) {
+    window.dispatchEvent(new CustomEvent<string>(FOCUS, { detail: card }));
     return;
   }
-  const card = target.searchParams.get("proposal");
-  if (card) window.dispatchEvent(new CustomEvent<string>(FOCUS, { detail: card }));
+  // Another screen reads ?proposal= / ?focus= itself once it mounts; this
+  // one is told (lib/focus.ts).
+  openTarget(target.pathname + target.search, go);
 }
 
 /** Show a push in the page and re-read, as one that came over the stream. */

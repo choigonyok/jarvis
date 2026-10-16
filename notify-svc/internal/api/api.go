@@ -11,6 +11,10 @@
 //	POST   /test                a push to every device, to see it arrive
 //	POST   /presence            a console on screen, or leaving it
 //	GET    /stream              pushes as they go out, for an open console
+//
+// The console's routes are one person's: X-Jarvis-Audience (guest, or the
+// operator when absent) says whose inbox, devices and settings. The console
+// proxy sets it from the signed-in role and never passes a browser's own.
 package api
 
 import (
@@ -55,11 +59,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /notifications", s.auth(s.list))
 	mux.HandleFunc("POST /notifications/read", s.auth(s.read))
 	mux.HandleFunc("GET /settings", s.auth(func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, s.svc.Settings(r.Context()))
+		writeJSON(w, http.StatusOK, s.svc.Settings(r.Context(), audience(r)))
 	}))
 	mux.HandleFunc("PUT /settings", s.auth(s.saveSettings))
 	mux.HandleFunc("GET /categories", s.auth(func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"categories": notify.Categories})
+		writeJSON(w, http.StatusOK, map[string]any{"categories": notify.CategoriesFor(audience(r))})
 	}))
 	mux.HandleFunc("GET /vapid", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"publicKey": s.push.PublicKey(), "ready": s.push.Ready()})
@@ -70,6 +74,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /presence", s.auth(s.presence))
 	mux.HandleFunc("GET /stream", s.auth(s.stream))
 	return mux
+}
+
+// audience is whose console is asking.
+func audience(r *http.Request) string {
+	if r.Header.Get("X-Jarvis-Audience") == store.Guest {
+		return store.Guest
+	}
+	return store.Owner
 }
 
 func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
@@ -109,7 +121,7 @@ type consumed struct {
 	Data   json.RawMessage `json:"data"`
 	Key    string          `json:"key"`
 	Notify *struct {
-		Tier, Level, Title, Body, URL string
+		Tier, Level, Title, Body, URL, Audience string
 	} `json:"notify"`
 }
 
@@ -160,6 +172,7 @@ func (s *Server) consume(w http.ResponseWriter, r *http.Request) {
 	_, _, err := s.svc.Accept(r.Context(), notify.Event{
 		Source: e.Source, Kind: e.Type, Tier: e.Notify.Tier, Level: e.Notify.Level,
 		Title: e.Notify.Title, Body: e.Notify.Body, URL: e.Notify.URL, Key: key,
+		Audience: e.Notify.Audience,
 	})
 	switch {
 	case errors.Is(err, notify.ErrInvalid):
@@ -177,7 +190,7 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	items, unread, err := s.store.List(r.Context(), limit)
+	items, unread, err := s.store.List(r.Context(), audience(r), limit)
 	if err != nil {
 		s.log.Error("알림함을 읽지 못했습니다", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "알림함을 읽지 못했습니다."})
@@ -193,7 +206,7 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &body) {
 		return
 	}
-	if err := s.store.MarkRead(r.Context(), body.IDs); err != nil {
+	if err := s.store.MarkRead(r.Context(), audience(r), body.IDs); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "읽음으로 바꾸지 못했습니다."})
 		return
 	}
@@ -205,7 +218,7 @@ func (s *Server) saveSettings(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &in) {
 		return
 	}
-	saved, err := s.svc.SaveSettings(r.Context(), in)
+	saved, err := s.svc.SaveSettings(r.Context(), audience(r), in)
 	switch {
 	case errors.Is(err, notify.ErrInvalid):
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -245,7 +258,7 @@ func (s *Server) subscribe(w http.ResponseWriter, r *http.Request) {
 		ua = ua[:300]
 	}
 	if err := s.store.Subscribe(r.Context(), store.Subscription{
-		Endpoint: body.Endpoint, P256dh: body.Keys.P256dh, Auth: body.Keys.Auth, UserAgent: ua,
+		Audience: audience(r), Endpoint: body.Endpoint, P256dh: body.Keys.P256dh, Auth: body.Keys.Auth, UserAgent: ua,
 	}); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "구독을 저장하지 못했습니다."})
 		return
@@ -264,8 +277,8 @@ func (s *Server) unsubscribe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-// test pushes to every device at once, quiet hours or not. Optional
-// {title, body, url}: where a tap on it goes, to try that too.
+// test pushes to every device of the asking person at once, quiet hours or
+// not. Optional {title, body, url}: where a tap on it goes, to try that too.
 func (s *Server) test(w http.ResponseWriter, r *http.Request) {
 	in := push.Payload{Title: "알림이 잘 와요", Body: "jarvis 에서 보낸 시험 알림이에요.", URL: "/"}
 	if r.ContentLength > 0 && !readJSON(w, r, &in) {
@@ -275,7 +288,7 @@ func (s *Server) test(w http.ResponseWriter, r *http.Request) {
 		in.URL = "/"
 	}
 	in.Tag = "test"
-	n, err := s.push.Send(r.Context(), in)
+	n, err := s.push.Send(r.Context(), audience(r), in)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "보내지 못했습니다."})
 		return
@@ -308,7 +321,7 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.WriteString(w, ": open\n\n")
 	_ = rc.Flush()
-	msgs, stop := s.live.Subscribe()
+	msgs, stop := s.live.Subscribe(audience(r))
 	defer stop()
 	beat := time.NewTicker(15 * time.Second)
 	defer beat.Stop()

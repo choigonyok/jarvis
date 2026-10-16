@@ -13,7 +13,7 @@ import (
 
 type fakeStore struct {
 	rows     []store.Notification
-	settings []byte
+	settings map[string][]byte
 }
 
 func (f *fakeStore) Insert(_ context.Context, n store.Notification) (store.Notification, bool, error) {
@@ -37,31 +37,39 @@ func (f *fakeStore) MarkDelivered(_ context.Context, ids []int64) error {
 	return nil
 }
 
-func (f *fakeStore) Pending(_ context.Context, tier string) ([]store.Notification, error) {
+func (f *fakeStore) Pending(_ context.Context, audience, tier string) ([]store.Notification, error) {
 	var out []store.Notification
 	for _, r := range f.rows {
-		if r.Tier == tier && r.DeliveredAt == nil {
+		if r.Audience == audience && r.Tier == tier && r.DeliveredAt == nil {
 			out = append(out, r)
 		}
 	}
 	return out, nil
 }
 
-func (f *fakeStore) Settings(_ context.Context, v any) error {
-	if f.settings == nil {
+func (f *fakeStore) Settings(_ context.Context, audience string, v any) error {
+	if f.settings[audience] == nil {
 		return nil
 	}
-	return json.Unmarshal(f.settings, v)
+	return json.Unmarshal(f.settings[audience], v)
 }
 
-func (f *fakeStore) WriteSettings(_ context.Context, v any) error {
-	f.settings, _ = json.Marshal(v)
+func (f *fakeStore) WriteSettings(_ context.Context, audience string, v any) error {
+	if f.settings == nil {
+		f.settings = map[string][]byte{}
+	}
+	f.settings[audience], _ = json.Marshal(v)
 	return nil
 }
 
-type fakeSender struct{ sent []push.Payload }
+// fakeSender keeps what went out, and to whom (the guest's pushes in guest).
+type fakeSender struct{ sent, guest []push.Payload }
 
-func (f *fakeSender) Send(_ context.Context, p push.Payload) (int, error) {
+func (f *fakeSender) Send(_ context.Context, audience string, p push.Payload) (int, error) {
+	if audience == store.Guest {
+		f.guest = append(f.guest, p)
+		return 1, nil
+	}
 	f.sent = append(f.sent, p)
 	return 1, nil
 }
@@ -174,7 +182,7 @@ func TestDigestOnceAtItsTime(t *testing.T) {
 	if len(snd.sent) != 1 {
 		t.Fatalf("하루에 두 번 나갔습니다")
 	}
-	if p, _ := st.Pending(ctx, "digest"); len(p) != 1 {
+	if p, _ := st.Pending(ctx, store.Owner, "digest"); len(p) != 1 {
 		t.Fatalf("늦은 건은 내일 요약으로 남아야 합니다: %d", len(p))
 	}
 }
@@ -184,7 +192,7 @@ func TestMutedCategoryIsKeptButNotPushed(t *testing.T) {
 	ctx := context.Background()
 	set := Defaults()
 	set.Muted = []string{"calendar"}
-	if _, err := svc.SaveSettings(ctx, set); err != nil {
+	if _, err := svc.SaveSettings(ctx, store.Owner, set); err != nil {
 		t.Fatal(err)
 	}
 	svc.Accept(ctx, ev("calendar.partner", "now", "새 공유 일정", ""))
@@ -197,7 +205,7 @@ func TestDigestInsideQuietHoursIsRefused(t *testing.T) {
 	svc, _, _, _ := setup("2026-10-10 14:00")
 	set := Defaults()
 	set.DigestAt = "07:00"
-	if _, err := svc.SaveSettings(context.Background(), set); err == nil {
+	if _, err := svc.SaveSettings(context.Background(), store.Owner, set); err == nil {
 		t.Fatal("방해 금지 시간 안의 요약 시각이 저장됐습니다")
 	}
 }
@@ -234,5 +242,62 @@ func TestGroupURL(t *testing.T) {
 		if got := groupURL(c.in); got != c.want {
 			t.Fatalf("%v: %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+// The guest's notifications go to the guest's devices only, on the guest's
+// own settings; being busy is the operator's and does not hold them.
+func TestGuestIsTheirOwnPerson(t *testing.T) {
+	svc, st, snd, now := setup("2026-10-10 18:00")
+	ctx := context.Background()
+	svc.Busy(true, "운전")
+	guest := ev("approval.pending", "now", "결재 대기", "")
+	guest.Audience = store.Guest
+	if _, _, err := svc.Accept(ctx, guest); err != nil {
+		t.Fatal(err)
+	}
+	if len(snd.guest) != 1 || len(snd.sent) != 0 {
+		t.Fatalf("손님 카드는 손님에게 바로: guest=%d owner=%d", len(snd.guest), len(snd.sent))
+	}
+	if st.rows[0].Audience != store.Guest {
+		t.Fatalf("받는 사람이 저장되지 않았습니다: %q", st.rows[0].Audience)
+	}
+
+	// The guest's quiet hours hold the guest's push, not the operator's.
+	set := Defaults()
+	set.QuietStart, set.QuietEnd = "18:00", "19:00"
+	if _, err := svc.SaveSettings(ctx, store.Guest, set); err != nil {
+		t.Fatal(err)
+	}
+	svc.Busy(false, "")
+	svc.Accept(ctx, guest)
+	svc.Accept(ctx, ev("collect.fail", "now", "카톡 수집 멈춤", ""))
+	if len(snd.guest) != 1 || len(snd.sent) != 1 {
+		t.Fatalf("손님 방해 금지는 손님 것만: guest=%d owner=%d", len(snd.guest), len(snd.sent))
+	}
+	*now = now.Add(time.Hour)
+	svc.Tick(ctx)
+	if len(snd.guest) != 2 || len(snd.sent) != 1 {
+		t.Fatalf("끝나면 손님에게 나가야 합니다: guest=%d owner=%d", len(snd.guest), len(snd.sent))
+	}
+	if svc.Settings(ctx, store.Owner).QuietStart != Defaults().QuietStart {
+		t.Fatal("손님 설정이 운영자 설정을 바꿨습니다")
+	}
+
+	bad := ev("approval.pending", "now", "t", "")
+	bad.Audience = "everyone"
+	if _, _, err := svc.Accept(ctx, bad); err == nil {
+		t.Fatal("모르는 받는 사람이 통과했습니다")
+	}
+}
+
+func TestGuestSeesOnlyTheirCategories(t *testing.T) {
+	for _, c := range CategoriesFor(store.Guest) {
+		if c.ID == "location" || c.ID == "assets" || c.ID == "spending" {
+			t.Fatalf("운영자 전용 분류가 손님에게 보입니다: %s", c.ID)
+		}
+	}
+	if len(CategoriesFor(store.Owner)) != len(Categories) {
+		t.Fatal("운영자 분류가 줄었습니다")
 	}
 }

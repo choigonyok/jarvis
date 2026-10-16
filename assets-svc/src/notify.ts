@@ -32,6 +32,9 @@ export function eventsOf(p: Portfolio, now = new Date()): Event[] {
   const hour = Number(now.toLocaleString("en-US", { timeZone: "Asia/Seoul", hour: "2-digit", hour12: false }));
   const out: Event[] = [];
   const add = (e: Omit<Event, "source" | "url"> & { url?: string }) => out.push({ source: "assets", url: "/assets", ...e });
+  // A tap lands on the part of the 자산 screen the notice is about (?focus=,
+  // web/src/lib/focus.ts).
+  const at = (focus: string) => `/assets?focus=${encodeURIComponent(focus)}`;
 
   for (const r of p.allocation.rows) {
     if (r.inBand) continue;
@@ -40,6 +43,7 @@ export function eventsOf(p: Portfolio, now = new Date()): Event[] {
       kind: "assets.band",
       tier: "digest",
       level: "warn",
+      url: at(`allocation:${r.id}`),
       title: `${r.label} 비중이 범위를 벗어났어요`,
       body: `지금 ${Math.round(r.current * 100)}% · 목표 ${Math.round(r.target * 100)}% (${pp > 0 ? "+" : ""}${pp}%p)`,
       key: `assets:band:${r.id}:${today}`,
@@ -53,6 +57,7 @@ export function eventsOf(p: Portfolio, now = new Date()): Event[] {
     add({
       kind: "assets.flow",
       tier: "digest",
+      url: at("principal"),
       title: `${f.venue === "gold" ? "금현물 계좌" : "한국투자증권"} ${f.amountKrw > 0 ? "입금" : "출금"} ${won(Math.abs(f.amountKrw))} 감지`,
       body: "현금 변화에서 결제된 매매를 뺀 금액이에요. 맞는지 확인해 주세요.",
       key: `assets:flow:${f.id}:${Math.round(f.amountKrw)}`,
@@ -64,6 +69,7 @@ export function eventsOf(p: Portfolio, now = new Date()): Event[] {
       kind: "assets.ledger",
       tier: "digest",
       level: "warn",
+      url: at("principal"),
       title: "원금 기록이 매매와 맞지 않아요",
       body: c.message,
       key: `assets:check:${c.venue}:${c.kind}:${c.date ?? ""}:${Math.round(c.amountKrw / 1000)}`,
@@ -78,6 +84,7 @@ export function eventsOf(p: Portfolio, now = new Date()): Event[] {
         kind: "assets.tax",
         tier: "digest",
         level: "warn",
+        url: at("tax"),
         title: "해외주식 양도세 공제를 넘었어요",
         body: `올해 실현손익 ${signed(overseas.gainKrw)} · 예상 양도세 ${won(overseas.taxKrw)}`,
         key: `assets:tax:over:${year}`,
@@ -86,6 +93,7 @@ export function eventsOf(p: Portfolio, now = new Date()): Event[] {
       add({
         kind: "assets.tax",
         tier: "digest",
+        url: at("tax"),
         title: "해외주식 공제가 얼마 안 남았어요",
         body: `남은 공제 ${won(overseas.deductionKrw - overseas.gainKrw)} - 더 팔면 양도세가 붙어요`,
         key: `assets:tax:80:${year}`,
@@ -101,6 +109,7 @@ export function eventsOf(p: Portfolio, now = new Date()): Event[] {
     add({
       kind: "assets.daily",
       tier: "digest",
+      url: at("summary"),
       title: `총자산 ${won(p.totalKrw)} · 수익률 ${rate >= 0 ? "+" : ""}${rate.toFixed(1)}%`,
       body: change === null ? "" : `어제보다 ${signed(change)} (입출금 뺀 값)`,
       key: `assets:daily:${today}`,

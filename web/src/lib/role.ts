@@ -3,8 +3,9 @@
  *
  * Two people sign in through Cloudflare Access. The operator sees everything.
  * The guest gets the conversation (their own - a separate agent), the workout
- * log and the shared calendar, and nothing that is the operator's alone:
- * assets, spending, KakaoTalk, the agent's browser, the approval ledger.
+ * log, the shared calendar and their own notifications (notify-svc keeps each
+ * person's apart), and nothing that is the operator's alone: assets,
+ * spending, KakaoTalk, the agent's browser, the approval ledger.
  *
  * The role comes from the email Access signed (see lib/access.ts), matched
  * against ACCESS_OWNERS and ACCESS_GUESTS. An Access-verified email on neither
@@ -35,7 +36,7 @@ export function roleFor(email: string): Role | null {
 /** The pages a guest can open - also the tabs a guest is shown. */
 export const GUEST_PAGES = new Set(["/", "/workout", "/calendar"]);
 /** API routes a guest may call: the route itself, or anything beneath it - never a sibling with a longer name. */
-const GUEST_API = ["/api/agent", "/api/workout"];
+const GUEST_API = ["/api/agent", "/api/workout", "/api/notify"];
 
 export function guestMay(pathname: string): boolean {
   if (GUEST_PAGES.has(pathname)) return true;

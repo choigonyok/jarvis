@@ -69,12 +69,13 @@ type incoming struct {
 	Key        string          `json:"key"`
 	OccurredAt *time.Time      `json:"occurredAt"`
 
-	Kind  string `json:"kind"`
-	Tier  string `json:"tier"`
-	Level string `json:"level"`
-	Title string `json:"title"`
-	Body  string `json:"body"`
-	URL   string `json:"url"`
+	Kind     string `json:"kind"`
+	Tier     string `json:"tier"`
+	Level    string `json:"level"`
+	Title    string `json:"title"`
+	Body     string `json:"body"`
+	URL      string `json:"url"`
+	Audience string `json:"audience"`
 }
 
 func (in incoming) event() (store.Event, string) {
@@ -85,7 +86,7 @@ func (in incoming) event() (store.Event, string) {
 	if e.Type == "" && in.Kind != "" {
 		e.Type = in.Kind
 		if e.Notify == nil && in.Title != "" {
-			e.Notify = &store.Notify{Tier: in.Tier, Level: in.Level, Title: in.Title, Body: in.Body, URL: in.URL}
+			e.Notify = &store.Notify{Tier: in.Tier, Level: in.Level, Title: in.Title, Body: in.Body, URL: in.URL, Audience: in.Audience}
 		}
 	}
 	switch {

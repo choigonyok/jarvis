@@ -1,5 +1,6 @@
-// Package store keeps notifications, push subscriptions and the one row of
-// settings in Postgres (migration 031).
+// Package store keeps notifications, push subscriptions and each person's
+// settings in Postgres (migrations 031, 054). Everything is someone's: the
+// operator ("owner") or the guest account ("guest"), and every read names whose.
 package store
 
 import (
@@ -12,8 +13,18 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// The two people notifications are for.
+const (
+	Owner = "owner"
+	Guest = "guest"
+)
+
+// Audiences is everyone a notification can be for.
+var Audiences = []string{Owner, Guest}
+
 type Notification struct {
 	ID          int64      `json:"id"`
+	Audience    string     `json:"audience"`
 	Source      string     `json:"source"`
 	Kind        string     `json:"kind"`
 	Tier        string     `json:"tier"`
@@ -28,6 +39,7 @@ type Notification struct {
 }
 
 type Subscription struct {
+	Audience  string
 	Endpoint  string
 	P256dh    string
 	Auth      string
@@ -38,13 +50,21 @@ type Store struct{ pool *pgxpool.Pool }
 
 func New(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
-const cols = `id, source, kind, tier, level, title, body, url, dedupe_key, created_at, delivered_at, read_at`
+const cols = `id, audience, source, kind, tier, level, title, body, url, dedupe_key, created_at, delivered_at, read_at`
 
 func scan(row pgx.Row) (Notification, error) {
 	var n Notification
-	err := row.Scan(&n.ID, &n.Source, &n.Kind, &n.Tier, &n.Level, &n.Title, &n.Body, &n.URL,
+	err := row.Scan(&n.ID, &n.Audience, &n.Source, &n.Kind, &n.Tier, &n.Level, &n.Title, &n.Body, &n.URL,
 		&n.DedupeKey, &n.CreatedAt, &n.DeliveredAt, &n.ReadAt)
 	return n, err
+}
+
+// who is an audience as stored: anything not the guest is the operator's.
+func who(audience string) string {
+	if audience == Guest {
+		return Guest
+	}
+	return Owner
 }
 
 func collect(rows pgx.Rows) ([]Notification, error) {
@@ -64,11 +84,11 @@ func collect(rows pgx.Rows) ([]Notification, error) {
 // it was and reports duplicate, so a sender can retry or repeat freely.
 func (s *Store) Insert(ctx context.Context, n Notification) (Notification, bool, error) {
 	row := s.pool.QueryRow(ctx, `
-		insert into notifications (source, kind, tier, level, title, body, url, dedupe_key)
-		values ($1, $2, $3, $4, $5, $6, $7, $8)
+		insert into notifications (audience, source, kind, tier, level, title, body, url, dedupe_key)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		on conflict (dedupe_key) do nothing
 		returning `+cols,
-		n.Source, n.Kind, n.Tier, n.Level, n.Title, n.Body, n.URL, n.DedupeKey)
+		who(n.Audience), n.Source, n.Kind, n.Tier, n.Level, n.Title, n.Body, n.URL, n.DedupeKey)
 	saved, err := scan(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Notification{}, true, nil
@@ -92,18 +112,18 @@ func (s *Store) Supersede(ctx context.Context, key string) (bool, error) {
 	return tag.RowsAffected() > 0, err
 }
 
-// Pending is what of one tier is still waiting to go out, oldest first.
-func (s *Store) Pending(ctx context.Context, tier string) ([]Notification, error) {
-	rows, err := s.pool.Query(ctx, `select `+cols+` from notifications where tier = $1 and delivered_at is null order by created_at`, tier)
+// Pending is what of one tier is still waiting to go out to one person, oldest first.
+func (s *Store) Pending(ctx context.Context, audience, tier string) ([]Notification, error) {
+	rows, err := s.pool.Query(ctx, `select `+cols+` from notifications where audience = $1 and tier = $2 and delivered_at is null order by created_at`, who(audience), tier)
 	if err != nil {
 		return nil, err
 	}
 	return collect(rows)
 }
 
-// List is the inbox: newest first, and how many are unread in all.
-func (s *Store) List(ctx context.Context, limit int) ([]Notification, int, error) {
-	rows, err := s.pool.Query(ctx, `select `+cols+` from notifications order by created_at desc limit $1`, limit)
+// List is one person's inbox: newest first, and how many are unread in all.
+func (s *Store) List(ctx context.Context, audience string, limit int) ([]Notification, int, error) {
+	rows, err := s.pool.Query(ctx, `select `+cols+` from notifications where audience = $1 order by created_at desc limit $2`, who(audience), limit)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -112,22 +132,24 @@ func (s *Store) List(ctx context.Context, limit int) ([]Notification, int, error
 		return nil, 0, err
 	}
 	var unread int
-	err = s.pool.QueryRow(ctx, `select count(*) from notifications where read_at is null`).Scan(&unread)
+	err = s.pool.QueryRow(ctx, `select count(*) from notifications where audience = $1 and read_at is null`, who(audience)).Scan(&unread)
 	return items, unread, err
 }
 
-// MarkRead marks the given ids read, or every unread one when ids is empty.
-func (s *Store) MarkRead(ctx context.Context, ids []int64) error {
+// MarkRead marks the given ids of one person's read, or every unread one of
+// theirs when ids is empty.
+func (s *Store) MarkRead(ctx context.Context, audience string, ids []int64) error {
 	if len(ids) == 0 {
-		_, err := s.pool.Exec(ctx, `update notifications set read_at = now() where read_at is null`)
+		_, err := s.pool.Exec(ctx, `update notifications set read_at = now() where audience = $1 and read_at is null`, who(audience))
 		return err
 	}
-	_, err := s.pool.Exec(ctx, `update notifications set read_at = now() where id = any($1) and read_at is null`, ids)
+	_, err := s.pool.Exec(ctx, `update notifications set read_at = now() where audience = $1 and id = any($2) and read_at is null`, who(audience), ids)
 	return err
 }
 
-func (s *Store) Subscriptions(ctx context.Context) ([]Subscription, error) {
-	rows, err := s.pool.Query(ctx, `select endpoint, p256dh, auth, user_agent from push_subscriptions order by created_at`)
+// Subscriptions are one person's devices.
+func (s *Store) Subscriptions(ctx context.Context, audience string) ([]Subscription, error) {
+	rows, err := s.pool.Query(ctx, `select audience, endpoint, p256dh, auth, user_agent from push_subscriptions where audience = $1 order by created_at`, who(audience))
 	if err != nil {
 		return nil, err
 	}
@@ -135,7 +157,7 @@ func (s *Store) Subscriptions(ctx context.Context) ([]Subscription, error) {
 	out := []Subscription{}
 	for rows.Next() {
 		var sub Subscription
-		if err := rows.Scan(&sub.Endpoint, &sub.P256dh, &sub.Auth, &sub.UserAgent); err != nil {
+		if err := rows.Scan(&sub.Audience, &sub.Endpoint, &sub.P256dh, &sub.Auth, &sub.UserAgent); err != nil {
 			return nil, err
 		}
 		out = append(out, sub)
@@ -143,12 +165,14 @@ func (s *Store) Subscriptions(ctx context.Context) ([]Subscription, error) {
 	return out, rows.Err()
 }
 
+// Subscribe keeps a device for a person. The same browser signed in as the
+// other person moves to them.
 func (s *Store) Subscribe(ctx context.Context, sub Subscription) error {
 	_, err := s.pool.Exec(ctx, `
-		insert into push_subscriptions (endpoint, p256dh, auth, user_agent) values ($1, $2, $3, $4)
-		on conflict (endpoint) do update set p256dh = excluded.p256dh, auth = excluded.auth,
-		  user_agent = excluded.user_agent, failures = 0`,
-		sub.Endpoint, sub.P256dh, sub.Auth, sub.UserAgent)
+		insert into push_subscriptions (audience, endpoint, p256dh, auth, user_agent) values ($1, $2, $3, $4, $5)
+		on conflict (endpoint) do update set audience = excluded.audience, p256dh = excluded.p256dh,
+		  auth = excluded.auth, user_agent = excluded.user_agent, failures = 0`,
+		who(sub.Audience), sub.Endpoint, sub.P256dh, sub.Auth, sub.UserAgent)
 	return err
 }
 
@@ -171,22 +195,27 @@ func (s *Store) PushResult(ctx context.Context, endpoint string, ok bool) error 
 	return err
 }
 
-// Settings reads the one settings row into v (a pointer); WriteSettings replaces it.
-func (s *Store) Settings(ctx context.Context, v any) error {
+// Settings reads one person's settings into v (a pointer), leaving v as it
+// was when they have none yet; WriteSettings replaces them.
+func (s *Store) Settings(ctx context.Context, audience string, v any) error {
 	var raw []byte
-	if err := s.pool.QueryRow(ctx, `select settings from notify_settings where id`).Scan(&raw); err != nil {
+	err := s.pool.QueryRow(ctx, `select settings from notify_audience_settings where audience = $1`, who(audience)).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
 		return err
 	}
 	return json.Unmarshal(raw, v)
 }
 
-func (s *Store) WriteSettings(ctx context.Context, v any) error {
+func (s *Store) WriteSettings(ctx context.Context, audience string, v any) error {
 	raw, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
 	_, err = s.pool.Exec(ctx, `
-		insert into notify_settings (id, settings, updated_at) values (true, $1, now())
-		on conflict (id) do update set settings = excluded.settings, updated_at = now()`, raw)
+		insert into notify_audience_settings (audience, settings, updated_at) values ($1, $2, now())
+		on conflict (audience) do update set settings = excluded.settings, updated_at = now()`, who(audience), raw)
 	return err
 }

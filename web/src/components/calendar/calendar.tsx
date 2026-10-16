@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { EventRow, GhostRow } from "@/components/calendar/event-row";
 import { MonthGrid, type DayMark } from "@/components/calendar/month-grid";
@@ -18,6 +18,7 @@ import {
   shiftMonth,
   type Cursor,
 } from "@/lib/month";
+import { onOpenParams } from "@/lib/focus";
 import { ghostsFor, type CreateGhost, type Ghost } from "@/lib/proposed";
 import { covers } from "@/lib/thread";
 import { useCalendar } from "@/lib/use-calendar";
@@ -32,6 +33,16 @@ import { cn } from "@/lib/utils";
 export function Calendar() {
   const today = isoDate(new Date());
   const [selected, setSelected] = useState(today);
+  // A notification about an entry opens its day (?date=, lib/focus.ts); the
+  // header then brings the entry itself into view.
+  useEffect(() => {
+    const open = (params: URLSearchParams) => {
+      const date = params.get("date");
+      if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) setSelected(date);
+    };
+    open(new URLSearchParams(window.location.search));
+    return onOpenParams(open);
+  }, []);
   // The month on screen follows the selected day - there is no second piece
   // of state that could disagree with it.
   const cursor: Cursor = useMemo(() => cursorOf(selected), [selected]);
@@ -236,6 +247,7 @@ export function Calendar() {
           <section
             className="mt-7 border-t border-edge-soft pt-5 lg:mt-0 lg:border-t-0 lg:border-l lg:border-edge-soft lg:pt-0 lg:pl-10"
             aria-live="polite"
+            data-focus="day"
           >
             {/* A row is a time, a title and a way to remove it. Let the column
                 run to 1000px and those three sit a screen apart. */}
@@ -257,7 +269,9 @@ export function Calendar() {
               {dayEvents.map((event) => {
                 const ghost = attached.get(event.id);
                 return (
-                  <div key={event.id} className="space-y-1.5">
+                  // A repeating entry's days are "<series>#<date>"; a
+                  // notification names the series.
+                  <div key={event.id} className="space-y-1.5" data-focus={`event:${event.id.split("#")[0]}`}>
                     <EventRow
                       event={event}
                       pending={ghost}

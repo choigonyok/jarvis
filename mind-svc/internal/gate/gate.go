@@ -416,9 +416,19 @@ func (g *Gate) tell(ctx context.Context, in model.Intent, title, body string) {
 		level = "warn"
 	}
 	g.notify.Notify(ctx, act.Notice{
-		Title: title, Body: strings.TrimSpace(body), URL: g.url + "#" + in.ID,
+		Title: title, Body: strings.TrimSpace(body), URL: g.link(in),
 		Tier: in.Tier, Level: level, Key: "mind:" + in.ID, At: g.now(),
 	})
+}
+
+// link is where a tap on a notice goes: what the intent names (a calendar
+// day, the 자산 screen) when the gate's url is the console's own - a path -
+// and otherwise that url, marked with the intent.
+func (g *Gate) link(in model.Intent) string {
+	if in.Link != "" && strings.HasPrefix(g.url, "/") {
+		return in.Link
+	}
+	return g.url + "#" + in.ID
 }
 
 // decide is the policy applied to one action.

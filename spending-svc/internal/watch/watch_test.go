@@ -29,12 +29,12 @@ func TestEvents(t *testing.T) {
 		got[e.Key] = e.Tier + " " + e.Title
 	}
 	want := map[string]string{
-		"spending:big:1":                  "digest 큰 결제 ₩150,000",
-		"spending:foreign:2":              "digest 해외 결제 ₩30,000",
-		"spending:refund:3":               "digest 환불 ₩12,000",
-		"spending:budget:2026-10::80":     "digest 이번 달 예산의 80%를 썼어요",
+		"spending:big:1":                 "digest 큰 결제 ₩150,000",
+		"spending:foreign:2":             "digest 해외 결제 ₩30,000",
+		"spending:refund:3":              "digest 환불 ₩12,000",
+		"spending:budget:2026-10::80":    "digest 이번 달 예산의 80%를 썼어요",
 		"spending:budget:2026-10:식비:100": "now 식비 예산을 넘었어요",
-		"spending:daily:2026-10-10":       "digest 오늘 ₩45,000 썼어요 (3건)",
+		"spending:daily:2026-10-10":      "digest 오늘 ₩45,000 썼어요 (3건)",
 	}
 	for k, v := range want {
 		if got[k] != v {
@@ -48,5 +48,21 @@ func TestEvents(t *testing.T) {
 	}
 	if len(got) != len(want) {
 		t.Errorf("알림 수: got %d want %d: %v", len(got), len(want), got)
+	}
+
+	// A tap lands on what it is about.
+	urls := map[string]string{}
+	for _, e := range Events(sum, now) {
+		urls[e.Key] = e.URL
+	}
+	for key, url := range map[string]string{
+		"spending:big:1":                 "/spending?month=2026-10&focus=tx%3A1",
+		"spending:budget:2026-10::80":    "/spending?month=2026-10&focus=budget",
+		"spending:budget:2026-10:식비:100": "/spending?month=2026-10&focus=category%3A%EC%8B%9D%EB%B9%84",
+		"spending:daily:2026-10-10":      "/spending?month=2026-10&focus=day%3A2026-10-10",
+	} {
+		if urls[key] != url {
+			t.Errorf("%s: 누르면 %q, want %q", key, urls[key], url)
+		}
 	}
 }

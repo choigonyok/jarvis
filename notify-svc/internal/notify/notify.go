@@ -7,6 +7,10 @@
 // quiet hours hold even an urgent push until morning, when everything held
 // goes out as one. Driving or in a meeting (context-svc's context.state)
 // holds pushes the same way, until it ends.
+//
+// Every notification is someone's: the operator's (owner) or the guest
+// account's. Each has their own inbox, devices, settings, quiet hours and
+// digest; being busy is the operator's state and holds only theirs.
 package notify
 
 import (
@@ -38,6 +42,8 @@ type Event struct {
 	URL string `json:"url"`
 	// The same key twice is one notification: retries and repeats are free.
 	Key string `json:"key"`
+	// Who it is for: owner (the default) or guest.
+	Audience string `json:"audience,omitempty"`
 }
 
 // Category is one kind of notification a sender may use (the part of kind
@@ -62,6 +68,21 @@ var Categories = []Category{
 	{"assets", "자산", "비중 이탈, 입출금 감지, 하루 자산"},
 }
 
+// GuestCategories is what the guest account is sent: their own jarvis's
+// cards, and the shared calendar as the operator's side changes it.
+var GuestCategories = []Category{
+	{"approval", "결재 대기", "내 jarvis 가 승인을 기다릴 때"},
+	{"calendar", "공유 일정", "상대가 일정을 추가했을 때"},
+}
+
+// CategoriesFor is the settings list one person is shown.
+func CategoriesFor(audience string) []Category {
+	if audience == store.Guest {
+		return GuestCategories
+	}
+	return Categories
+}
+
 type Settings struct {
 	// Categories that are never pushed (still kept in the inbox).
 	Muted []string `json:"muted"`
@@ -81,13 +102,13 @@ func Defaults() Settings {
 type Store interface {
 	Insert(ctx context.Context, n store.Notification) (store.Notification, bool, error)
 	MarkDelivered(ctx context.Context, ids []int64) error
-	Pending(ctx context.Context, tier string) ([]store.Notification, error)
-	Settings(ctx context.Context, v any) error
-	WriteSettings(ctx context.Context, v any) error
+	Pending(ctx context.Context, audience, tier string) ([]store.Notification, error)
+	Settings(ctx context.Context, audience string, v any) error
+	WriteSettings(ctx context.Context, audience string, v any) error
 }
 
 type Sender interface {
-	Send(ctx context.Context, p push.Payload) (int, error)
+	Send(ctx context.Context, audience string, p push.Payload) (int, error)
 }
 
 type Service struct {
@@ -120,9 +141,10 @@ func (s *Service) Busy(on bool, why string) {
 	s.busyUntil, s.busyWhy = time.Time{}, ""
 }
 
-// held is whether a push now would wait: quiet hours, or busy.
-func (s *Service) held(set Settings) bool {
-	return s.quiet(set) || s.now().Before(s.busyUntil)
+// held is whether a push to audience now would wait: their quiet hours, or
+// (the operator's only) busy.
+func (s *Service) held(audience string, set Settings) bool {
+	return s.quiet(set) || (audience == store.Owner && s.now().Before(s.busyUntil))
 }
 
 func New(s Store, p Sender, loc *time.Location) *Service {
@@ -151,12 +173,13 @@ func (s *Service) Accept(ctx context.Context, e Event) (store.Notification, bool
 	if err != nil || dup {
 		return saved, dup, err
 	}
-	set := s.settings(ctx)
+	who := n.Audience
+	set := s.settings(ctx, who)
 	switch {
 	case saved.Tier == "log", saved.Tier == "now" && muted(set, saved.Kind):
 		err = s.store.MarkDelivered(ctx, []int64{saved.ID})
-	case saved.Tier == "now" && !s.held(set):
-		err = s.deliver(ctx, []store.Notification{saved}, "")
+	case saved.Tier == "now" && !s.held(who, set):
+		err = s.deliver(ctx, who, []store.Notification{saved}, "")
 	case saved.Tier == "now" && !s.quiet(set):
 		s.heldBusy = true
 	}
@@ -165,50 +188,62 @@ func (s *Service) Accept(ctx context.Context, e Event) (store.Notification, bool
 }
 
 // Tick runs every minute: what quiet hours held goes out when they end, and
-// the digest goes out once a day at its time.
+// the digest goes out once a day at its time - for each person on their own
+// clock.
 func (s *Service) Tick(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	set := s.settings(ctx)
-	if s.held(set) {
+	var errs []error
+	for _, who := range store.Audiences {
+		errs = append(errs, s.tick(ctx, who))
+	}
+	return errors.Join(errs...)
+}
+
+func (s *Service) tick(ctx context.Context, who string) error {
+	set := s.settings(ctx, who)
+	if s.held(who, set) {
 		return nil
 	}
-	held, err := s.store.Pending(ctx, "now")
+	held, err := s.store.Pending(ctx, who, "now")
 	if err != nil {
 		return err
 	}
 	group := "밤사이 알림"
-	if s.heldBusy {
+	if s.heldBusy && who == store.Owner {
 		group = "운전·회의 중 알림"
 	}
-	if err := s.deliver(ctx, held, group); err != nil {
+	if err := s.deliver(ctx, who, held, group); err != nil {
 		return err
 	}
-	s.heldBusy = false
+	if who == store.Owner {
+		s.heldBusy = false
+	}
 
 	now := s.now().In(s.loc)
 	today := now.Format("2006-01-02")
 	if set.LastDigest == today || minutes(now) < clock(set.DigestAt, 21*60) {
 		return nil
 	}
-	pending, err := s.store.Pending(ctx, "digest")
+	pending, err := s.store.Pending(ctx, who, "digest")
 	if err != nil {
 		return err
 	}
-	if err := s.deliver(ctx, pending, "오늘 요약"); err != nil {
+	if err := s.deliver(ctx, who, pending, "오늘 요약"); err != nil {
 		return err
 	}
 	set.LastDigest = today
-	return s.store.WriteSettings(ctx, set)
+	return s.store.WriteSettings(ctx, who, set)
 }
 
-// deliver pushes notifications - one as itself, several as one titled
-// `group` - and marks them all delivered. Muted ones are marked without a push.
-func (s *Service) deliver(ctx context.Context, ns []store.Notification, group string) error {
+// deliver pushes one person's notifications - one as itself, several as one
+// titled `group` - and marks them all delivered. Muted ones are marked
+// without a push.
+func (s *Service) deliver(ctx context.Context, who string, ns []store.Notification, group string) error {
 	if len(ns) == 0 {
 		return nil
 	}
-	set := s.settings(ctx)
+	set := s.settings(ctx, who)
 	ids := make([]int64, 0, len(ns))
 	var out []store.Notification
 	for _, n := range ns {
@@ -239,7 +274,7 @@ func (s *Service) deliver(ctx context.Context, ns []store.Notification, group st
 		}
 	}
 	if payload.Title != "" {
-		if _, err := s.push.Send(ctx, payload); err != nil {
+		if _, err := s.push.Send(ctx, who, payload); err != nil {
 			return err
 		}
 	}
@@ -265,22 +300,23 @@ func groupURL(ns []store.Notification) string {
 	return "/?inbox=1"
 }
 
-func (s *Service) settings(ctx context.Context) Settings {
+func (s *Service) settings(ctx context.Context, who string) Settings {
 	set := Defaults()
-	_ = s.store.Settings(ctx, &set)
+	_ = s.store.Settings(ctx, who, &set)
 	if set.Muted == nil {
 		set.Muted = []string{}
 	}
 	return set
 }
 
-// Settings and SaveSettings are the API's view: LastDigest is kept as it was.
-func (s *Service) Settings(ctx context.Context) Settings { return s.settings(ctx) }
+// Settings and SaveSettings are the API's view of one person's settings:
+// LastDigest is kept as it was.
+func (s *Service) Settings(ctx context.Context, who string) Settings { return s.settings(ctx, who) }
 
-func (s *Service) SaveSettings(ctx context.Context, in Settings) (Settings, error) {
+func (s *Service) SaveSettings(ctx context.Context, who string, in Settings) (Settings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cur := s.settings(ctx)
+	cur := s.settings(ctx, who)
 	for _, v := range []string{in.QuietStart, in.QuietEnd, in.DigestAt} {
 		if clock(v, -1) < 0 {
 			return cur, invalid("시각은 HH:MM 이어야 합니다")
@@ -296,7 +332,7 @@ func (s *Service) SaveSettings(ctx context.Context, in Settings) (Settings, erro
 	if in.Muted == nil {
 		in.Muted = []string{}
 	}
-	return in, s.store.WriteSettings(ctx, in)
+	return in, s.store.WriteSettings(ctx, who, in)
 }
 
 func (s *Service) quiet(set Settings) bool {
@@ -355,8 +391,15 @@ func normalize(e Event) (store.Notification, error) {
 	if !strings.HasPrefix(e.URL, "/") || strings.HasPrefix(e.URL, "//") {
 		e.URL = "/"
 	}
+	switch e.Audience {
+	case "":
+		e.Audience = store.Owner
+	case store.Owner, store.Guest:
+	default:
+		return store.Notification{}, invalid("audience 는 owner, guest 중 하나입니다")
+	}
 	n := store.Notification{
-		Source: clip(e.Source, 40), Kind: clip(e.Kind, 60), Tier: e.Tier, Level: e.Level,
+		Audience: e.Audience, Source: clip(e.Source, 40), Kind: clip(e.Kind, 60), Tier: e.Tier, Level: e.Level,
 		Title: clip(e.Title, 120), Body: clip(strings.TrimSpace(e.Body), 600), URL: clip(e.URL, 300),
 	}
 	if k := strings.TrimSpace(e.Key); k != "" {

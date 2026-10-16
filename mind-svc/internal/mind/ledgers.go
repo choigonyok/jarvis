@@ -573,6 +573,7 @@ func (m *Mind) portfolioBand(ctx context.Context, o obs.Observation) error {
 		Title:  title + " - 리밸런싱을 검토해 보세요",
 		Body:   strings.TrimSpace(n.Body + "\n자산 탭의 목표 비중에서 매매 계획을 볼 수 있어요."),
 		Reason: "목표 비중의 허용 범위를 벗어남", Confidence: 0.8,
+		Link: "/assets?focus=allocation",
 	})
 	return err
 }

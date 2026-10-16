@@ -30,6 +30,7 @@ import {
 import { Notifications } from "@/components/shell/notifications";
 import { useRole } from "@/components/shell/role";
 import { UsageBars } from "@/components/shell/usage-bars";
+import { focusSection, forgetFocus, onFocusRequest } from "@/lib/focus";
 import { GUEST_PAGES, type Role } from "@/lib/role";
 import { dropPush } from "@/lib/use-push";
 import type { Connection } from "@/lib/thread";
@@ -165,6 +166,29 @@ export function Header({
   const router = useRouter();
   const status = connectionCopy[connection];
 
+  // A notification's target (?focus=, lib/focus.ts): every screen has this
+  // header, so every screen brings the part a notification is about into
+  // view - on arrival, or when told while already showing.
+  useEffect(() => {
+    let stop = () => {};
+    const show = (id: string) => {
+      stop();
+      stop = focusSection(id);
+    };
+    const first = new URLSearchParams(window.location.search).get("focus");
+    if (first) {
+      show(first);
+      // After the screen's own effects have read it (they run after this
+      // one: the header is their child).
+      window.setTimeout(forgetFocus, 0);
+    }
+    const off = onFocusRequest(show);
+    return () => {
+      off();
+      stop();
+    };
+  }, []);
+
   // Five quick taps on the name toggle the screen-measurement overlay - the
   // only way to reach it inside a home-screen app, which has no address bar.
   const taps = useRef<number[]>([]);
@@ -237,7 +261,9 @@ export function Header({
           {/* The guest's bars are their own agent's: the subscription only,
               never what the operator's API keys cost. */}
           <UsageBars />
-          {role === "owner" ? <Notifications /> : null}
+          {/* Each person's own: the guest's inbox holds their jarvis's cards
+              and the shared calendar, never the operator's arrivals. */}
+          <Notifications />
           <span className="flex items-center gap-1.5 text-[11.5px] text-faint">
             <span
               aria-hidden

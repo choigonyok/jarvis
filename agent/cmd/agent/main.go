@@ -236,9 +236,14 @@ func main() {
 	gate.SetFollowUp(runner)
 	proposals.OnDecide(gate.Resolve)
 
-	// Every card waiting on the operator reaches the phone. The guest's cards
-	// are the guest's: they do not ring the operator.
-	if notifier := notify.New(cfg.NotifyURL, cfg.DatabaseURL, cfg.APIToken, log); notifier != nil && !cfg.Guest {
+	// Every card waiting on someone reaches their phone. The guest's cards are
+	// the guest's: they ring the guest's devices (audience guest), never the
+	// operator's.
+	if notifier := notify.New(cfg.NotifyURL, cfg.DatabaseURL, cfg.APIToken, log); notifier != nil {
+		audience, keyPrefix := "", "proposal:"
+		if cfg.Guest {
+			audience, keyPrefix = "guest", "guest-proposal:"
+		}
 		proposals.OnOpen(func(p proposal.Proposal) {
 			kind, title := "approval.pending", "결재 대기"
 			if p.Origin == proposal.OriginSuggest {
@@ -255,7 +260,8 @@ func main() {
 			notifier.Send(notify.Event{
 				Source: "agent", Kind: kind, Tier: "now", Level: "warn",
 				// Straight to the card, not the bottom of the thread.
-				Title: title, Body: body, URL: "/?proposal=" + p.ID, Key: "proposal:" + p.ID,
+				Title: title, Body: body, URL: "/?proposal=" + p.ID, Key: keyPrefix + p.ID,
+				Audience: audience,
 			})
 		})
 	}
