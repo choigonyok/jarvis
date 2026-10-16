@@ -4,7 +4,7 @@ services:
   # 테이블은 049 에서 지웠다. 이미지가 pgvector 인 것은 새로 설치할 때 초기
   # 마이그레이션(001·009·013)이 vector 확장을 만들기 때문뿐이다.
   postgres:
-    image: pgvector/pgvector:pg17
+    image: pgvector/pgvector:pg17@sha256:ac08538c6f8b9904c33c8224c5e5706dbe760aca29db1d096972b4052c22a75d
     environment:
       # 비밀번호에 기본값을 두지 않는다. 루프백에만 열려 있다고는 해도,
       # 리포지터리에 적힌 비밀번호는 비밀번호가 아니다.
@@ -39,7 +39,7 @@ services:
   # 스키마. 한 번 돌고 끝나는 서비스이고, 나머지는 이것이 성공으로 끝난 뒤에
   # 뜬다. postgres 이미지를 그대로 쓰는 이유는 psql 이 이미 안에 있어서다.
   db-migrate:
-    image: pgvector/pgvector:pg17
+    image: pgvector/pgvector:pg17@sha256:ac08538c6f8b9904c33c8224c5e5706dbe760aca29db1d096972b4052c22a75d
     entrypoint: ["/bin/sh", "/db/migrate.sh"]
     environment:
       PGHOST: postgres

@@ -11,7 +11,7 @@ name: jarvis-mind
 
 services:
   postgres:
-    image: pgvector/pgvector:pg17
+    image: pgvector/pgvector:pg17@sha256:ac08538c6f8b9904c33c8224c5e5706dbe760aca29db1d096972b4052c22a75d
     environment:
       POSTGRES_PASSWORD: mind-local
       POSTGRES_USER: jarvis
@@ -26,7 +26,7 @@ services:
       retries: 30
 
   db-migrate:
-    image: pgvector/pgvector:pg17
+    image: pgvector/pgvector:pg17@sha256:ac08538c6f8b9904c33c8224c5e5706dbe760aca29db1d096972b4052c22a75d
     entrypoint: ["/bin/sh", "/db/migrate.sh"]
     environment:
       PGHOST: postgres

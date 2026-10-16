@@ -99,7 +99,7 @@ restore_test() {
   docker network create "$net" >/dev/null
 
   docker run -d --name "$pg" --network "$net" -e POSTGRES_PASSWORD=restore -e POSTGRES_USER=jarvis \
-    -e POSTGRES_DB=jarvis pgvector/pgvector:pg17 >/dev/null
+    -e POSTGRES_DB=jarvis pgvector/pgvector:pg17@sha256:ac08538c6f8b9904c33c8224c5e5706dbe760aca29db1d096972b4052c22a75d >/dev/null
   until docker exec "$pg" pg_isready -U jarvis >/dev/null 2>&1; do sleep 1; done
   docker exec -i "$pg" pg_restore -U jarvis -d jarvis --no-owner < "$last/postgres.dump" 2>&1 | tail -3 || true
   local tables live

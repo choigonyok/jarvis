@@ -9,6 +9,7 @@
 #   올린다(Cloudflare 무료 요금제는 100MB 넘는 업로드를 막아 긴 영상은 밖에서
 #   못 올린다). 밖에서는 immich.choigonyok.com 의 Cloudflare Access 를 거친다.
 #
+# 버전은 고정한다(IMMICH_VERSION, 기본 v3.3.0). 올릴 때는 릴리스 노트의 DB 마이그레이션을 보고 바꾼다.
 # 실행: scripts/mini compose -f immich/docker-compose.yml up -d
 # 비밀(DB 비밀번호)은 맥미니의 immich/.env 에만 있다(.env.example 참고).
 name: immich
@@ -16,7 +17,7 @@ name: immich
 services:
   immich-server:
     container_name: immich_server
-    image: ghcr.io/immich-app/immich-server:${IMMICH_VERSION:-v3}
+    image: ghcr.io/immich-app/immich-server:${IMMICH_VERSION:-v3.3.0}
     volumes:
       - ${UPLOAD_LOCATION}:/data
       - /etc/localtime:/etc/localtime:ro
@@ -41,7 +42,7 @@ services:
 
   immich-machine-learning:
     container_name: immich_machine_learning
-    image: ghcr.io/immich-app/immich-machine-learning:${IMMICH_VERSION:-v3}
+    image: ghcr.io/immich-app/immich-machine-learning:${IMMICH_VERSION:-v3.3.0}
     volumes:
       - model-cache:/cache
     env_file:

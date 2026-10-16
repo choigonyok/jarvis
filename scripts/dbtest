@@ -13,7 +13,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 NAME="jarvis-dbtest-$$"
 NET="$NAME-net"
-IMAGE=pgvector/pgvector:pg17
+IMAGE=pgvector/pgvector:pg17@sha256:ac08538c6f8b9904c33c8224c5e5706dbe760aca29db1d096972b4052c22a75d
 
 dirs=()
 while [[ $# -gt 0 && "$1" != -* ]]; do dirs+=("$1"); shift; done
