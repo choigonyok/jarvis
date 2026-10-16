@@ -27,6 +27,7 @@ import (
 
 type Server struct {
 	consume       http.HandlerFunc
+	browserChecks http.Handler
 	thread        *thread.Store
 	proposals     *proposal.Store
 	calendar      *calendar.Store
@@ -96,7 +97,9 @@ type Deps struct {
 	MindUsage func(ctx context.Context) (any, error)
 	// Consume, when set, takes events from events-svc (internal/suggest).
 	Consume http.HandlerFunc
-	Log     *slog.Logger
+	// BrowserChecks serves the browser login checks (GET) and asks for one (POST).
+	BrowserChecks http.Handler
+	Log           *slog.Logger
 }
 
 func New(d Deps) *Server {
@@ -121,6 +124,7 @@ func New(d Deps) *Server {
 		apiUsage:        d.APIUsage,
 		mindUsage:       d.MindUsage,
 		consume:         d.Consume,
+		browserChecks:   d.BrowserChecks,
 	}
 }
 
@@ -153,6 +157,9 @@ func (s *Server) Handler() http.Handler {
 	// events-svc delivers here what the assistant subscribed to.
 	if s.consume != nil {
 		mux.HandleFunc("POST /consume", s.guard(s.consume))
+	}
+	if s.browserChecks != nil {
+		mux.HandleFunc("/browser-checks", s.guard(s.browserChecks.ServeHTTP))
 	}
 
 	// Claude Code dials these. The permission gate sits at /mcp; module

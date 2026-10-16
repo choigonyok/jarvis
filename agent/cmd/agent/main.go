@@ -18,6 +18,7 @@ import (
 	_ "time/tzdata"
 
 	"github.com/choigonyok/jarvis/agent/internal/adapter/permission"
+	"github.com/choigonyok/jarvis/agent/internal/browsercheck"
 	"github.com/choigonyok/jarvis/agent/internal/claudecode"
 	"github.com/choigonyok/jarvis/agent/internal/config"
 	"github.com/choigonyok/jarvis/agent/internal/core/bus"
@@ -191,6 +192,24 @@ func main() {
 	} else if jobsModule != nil {
 		log.Warn("브라우저 MCP 가 없어 작업을 실행하지 않습니다", "need", jobs.BrowserServer)
 	}
+	// 쇼핑몰 로그인 확인. 브라우저를 쓰는 것은 에이전트뿐이므로, 대화·작업이 없을
+	// 때 여기서 연다. status-svc 는 결과만 읽는다(/browser-checks).
+	var browserChecks http.Handler
+	if u, ok := cfg.ExtraMCPURLs[spending.BrowserServer]; ok && !cfg.Guest {
+		checker := &browsercheck.Checker{
+			Client: browsercheck.New(u, cfg.ExtraMCPToken),
+			Sites: []browsercheck.Site{
+				{ID: "coupang", Orders: "https://mc.coupang.com/ssr/desktop/order/list", LoginHost: "login.coupang.com"},
+			},
+			// 다른 탭이 로그인 화면이면(누가 비밀번호를 치는 중일 수 있다) 열지 않는다.
+			BusyHosts: []string{"login.coupang.com", "nid.naver.com", "pay.naver.com"},
+			Every:     30 * time.Minute,
+			Idle:      runner.Idle,
+			Log:       log,
+		}
+		browserChecks = checker.Handler()
+		go checker.Run(enrichCtx)
+	}
 	// A reading older than an hour is refreshed with the smallest request.
 	go runner.WatchUsage(enrichCtx, time.Hour)
 
@@ -280,6 +299,7 @@ func main() {
 			APIUsage:        apiUsage,
 			MindUsage:       mindUsage,
 			Consume:         consume,
+			BrowserChecks:   browserChecks,
 			Log:             log,
 		}).Handler(),
 		// No WriteTimeout: /events streams and /mcp blocks on a human.

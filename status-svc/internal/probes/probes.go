@@ -16,7 +16,6 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/choigonyok/jarvis/status-svc/internal/browser"
 	"github.com/choigonyok/jarvis/status-svc/internal/check"
 )
 
@@ -33,7 +32,6 @@ type Config struct {
 	MemoryURL   string
 	ContextURL  string
 	BrowserAddr string // host:port of the browser MCP bridge
-	Browser     *browser.Client
 	DB          *pgxpool.Pool
 }
 
@@ -110,7 +108,7 @@ func All(cfg Config) []check.Probe {
 		// ── 가계부 상품 상세 ──────────────────────────────────────────────
 		{
 			ID: "enrich.coupang", Group: "가계부 상품 상세", Name: "쿠팡 주문 내역",
-			Rule:  "에이전트 브라우저 새 탭에서 쿠팡 주문목록을 열어 봐요. 열리면 정상, 로그인 화면으로 넘어가면 이상. 30분마다, 그리고 다시 확인을 누를 때 확인해요.",
+			Rule:  "에이전트가 대화·작업이 없을 때 30분마다 브라우저 새 탭에서 쿠팡 주문목록을 열어 봐요. 열리면 정상, 로그인 화면으로 넘어가면 이상. 여기서는 그 결과를 읽어요.",
 			Fix:   "화면 탭에서 에이전트 브라우저로 coupang.com에 로그인하세요. 로그인이 끝나면 멈춰 있던 상품 상세 조회도 다시 시도해야 해요.",
 			Deps:  []string{"browser"},
 			Every: 30 * time.Minute, MinGap: time.Minute,
@@ -483,24 +481,41 @@ func (e *env) recordOnly(st site) func(context.Context) check.Verdict {
 	}
 }
 
-// enrich opens the order history in the agent's browser, as the agent would,
-// and judges by where it lands. A cookie on disk is not evidence: the profile
-// kept every long-lived Coupang cookie while the order page sent it to login.
+// enrich judges by where the order history landed when the agent last opened
+// it in its browser (agent /browser-checks). A cookie on disk is not
+// evidence: the profile kept every long-lived Coupang cookie while the order
+// page sent it to login. The agent opens it, not this service: it is the
+// browser's one user and knows when nothing else is driving it.
 func (e *env) enrich(st site) func(context.Context) check.Verdict {
 	return func(ctx context.Context) check.Verdict {
 		job := e.enrichJob(ctx, st.source)
 		now := time.Now()
 		v := check.Verdict{Facts: job.facts, ObservedAt: &now, ObservedLabel: "브라우저로 확인"}
 
-		if e.Browser == nil {
-			v.State, v.Summary, v.ObservedAt = check.Unknown, "브라우저 연결 설정이 없어요.", nil
+		var out struct {
+			Results map[string]struct {
+				URL   string    `json:"url"`
+				Busy  bool      `json:"busy"`
+				Error string    `json:"error"`
+				At    time.Time `json:"at"`
+			} `json:"results"`
+		}
+		if err := e.get(ctx, e.client, e.AgentURL+"/browser-checks", &out); err != nil {
+			v.State, v.Summary, v.ObservedAt = check.Unknown, "에이전트에서 확인 결과를 읽지 못했어요: "+clip(err.Error(), 120), nil
 			return v
 		}
-		landing, err := e.Browser.Open(ctx, st.orders, []string{coupang.loginHost, naverpay.loginHost, "pay.naver.com"})
-		if err != nil {
-			v.State, v.Summary, v.ObservedAt = check.Unknown, "브라우저로 열어 보지 못했어요: "+clip(err.Error(), 120), nil
+		res, ok := out.Results[st.source]
+		if !ok {
+			v.State, v.ObservedAt = check.Unknown, nil
+			v.Summary = "에이전트가 아직 열어 보지 않았어요. 대화·작업이 없을 때 열어 봐요."
 			return v
 		}
+		v.ObservedAt = &res.At
+		if res.Error != "" {
+			v.State, v.Summary = check.Unknown, "브라우저로 열어 보지 못했어요: "+clip(res.Error, 120)
+			return v
+		}
+		landing := res
 		if landing.Busy {
 			// Someone may be typing a password there; a new tab would take
 			// the focus away. This site's own login page is itself the

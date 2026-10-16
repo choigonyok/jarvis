@@ -24,7 +24,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/choigonyok/jarvis/status-svc/internal/api"
-	"github.com/choigonyok/jarvis/status-svc/internal/browser"
 	"github.com/choigonyok/jarvis/status-svc/internal/check"
 	"github.com/choigonyok/jarvis/status-svc/internal/notify"
 	"github.com/choigonyok/jarvis/status-svc/internal/probes"
@@ -72,7 +71,6 @@ func main() {
 		MemoryURL:   getenv("MEMORY_URL", "http://localhost:8100"),
 		ContextURL:  getenv("CONTEXT_URL", "http://localhost:8103"),
 		BrowserAddr: getenv("BROWSER_ADDR", "localhost:8931"),
-		Browser:     browser.New(getenv("BROWSER_MCP_URL", "http://localhost:8931/"), os.Getenv("BROWSER_MCP_TOKEN")),
 		DB:          pool,
 	}), log)
 	// A probe going wrong is the one kind of news nobody would otherwise

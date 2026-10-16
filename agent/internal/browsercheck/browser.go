@@ -1,4 +1,4 @@
-// Package browser asks the agent's browser whether a site's order history
+// Package browsercheck asks the agent's browser whether a site's order history
 // opens: it loads the page in a new tab, reads where it landed, and closes
 // the tab. Landing on a login page is the answer "logged out" - the only
 // answer that matters, and one a cookie on disk turned out not to give (a
@@ -6,7 +6,7 @@
 //
 // It talks to the browser's MCP bridge with the smallest client that works:
 // JSON-RPC over HTTP, one session per check.
-package browser
+package browsercheck
 
 import (
 	"bufio"
