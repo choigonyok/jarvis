@@ -55,10 +55,22 @@ export type Proposal = {
   edits?: { at: string; fields: Record<string, string> }[];
 };
 
+/** An earlier turn a message quotes - swiped on the thread before sending. */
+export type TurnRef = {
+  id: string;
+  role: "agent" | "user";
+  at?: string;
+  text: string;
+};
+
 export type Turn = {
   id: string;
   role: "agent" | "user";
   at: string;
+  /** Full timestamp (chat-svc); `at` is only the wall clock. */
+  atIso?: string;
+  /** The earlier message this one quotes. */
+  ref?: TurnRef;
   paragraphs?: string[];
   text?: string;
   /** Photos the operator attached, by upload name (see lib/uploads.ts). */
@@ -108,4 +120,24 @@ export const API = "/api/agent";
 
 export function isPending(p: Proposal): boolean {
   return p.state === "pending";
+}
+
+/** Markdown as one plain line, for a quote: marks dropped, links as their words. */
+export function plainText(md: string): string {
+  return md
+    .replace(/```[^\n]*\n?/g, "")
+    .replace(/`([^`]*)`/g, "$1")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/^\s{0,3}(#{1,6}|>|[-*+]|\d+\.)\s+/gm, "")
+    .replace(/\*\*|__|~~/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** What a turn says, as a quote of it shows: its words, or its photos. */
+export function quoteText(turn: Pick<Turn, "paragraphs" | "text" | "images">): string {
+  const text = plainText(turn.paragraphs?.length ? turn.paragraphs.join("\n\n") : (turn.text ?? ""));
+  if (text) return text;
+  return turn.images?.length ? `사진 ${turn.images.length}장` : "";
 }

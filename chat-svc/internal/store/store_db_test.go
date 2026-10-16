@@ -61,3 +61,36 @@ func TestTurnsSince(t *testing.T) {
 		t.Fatalf("since 뒤의 것만: %+v %v", newer, err)
 	}
 }
+
+// 2: a turn that quotes an earlier one keeps the quote, read back as written.
+func TestTurnKeepsItsReference(t *testing.T) {
+	dsn := os.Getenv("JARVIS_TEST_DSN")
+	if dsn == "" {
+		t.Skip("JARVIS_TEST_DSN 이 없어 건너뜁니다 (scripts/dbtest)")
+	}
+	ctx := context.Background()
+	s, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.Close)
+	first, err := s.Append(ctx, turn.Turn{Role: turn.RoleAgent, Paragraphs: []string{"알람시계 T872 는 16,900원입니다."}, Thread: "dbtest-ref"}, "Asia/Seoul")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := &turn.Ref{ID: first.ID, Role: turn.RoleAgent, At: first.At, Text: "알람시계 T872 는 16,900원입니다."}
+	saved, err := s.Append(ctx, turn.Turn{Role: turn.RoleUser, Text: "이 제품 구매해줘", Ref: ref, Thread: "dbtest-ref"}, "Asia/Seoul")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.Ref == nil || saved.Ref.ID != first.ID {
+		t.Fatalf("저장한 턴이 참조를 돌려줘야 합니다: %+v", saved.Ref)
+	}
+	all, err := s.All(ctx, "Asia/Seoul", "dbtest-ref", time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := all[len(all)-1].Ref; got == nil || got.Text != ref.Text || got.Role != turn.RoleAgent {
+		t.Fatalf("다시 읽어도 참조가 남아야 합니다: %+v", got)
+	}
+}

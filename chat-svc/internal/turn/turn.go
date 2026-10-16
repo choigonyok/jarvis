@@ -44,4 +44,15 @@ type Turn struct {
 	// Thread is whose conversation this is: "" for the operator, "guest" for
 	// the guest account. Each agent reads and writes only its own.
 	Thread string `json:"thread,omitempty"`
+	// Ref is the earlier message the operator pointed at when sending this
+	// one (swiped on the console).
+	Ref *Ref `json:"ref,omitempty"`
+}
+
+// Ref is a quoted earlier turn: which one, who said it, when, and how it began.
+type Ref struct {
+	ID   string `json:"id"`
+	Role Role   `json:"role"`
+	At   string `json:"at,omitempty"`
+	Text string `json:"text"`
 }

@@ -94,13 +94,17 @@ export function useThread() {
   const connection = useAgentStream(onEvent, () => void hydrate());
 
   /** Resolves true once the agent took the message. */
-  const send = useCallback(async (text: string, images?: string[]) => {
+  const send = useCallback(async (text: string, images?: string[], refId?: string) => {
     setError(null);
     try {
       const res = await fetch(`${API}/messages`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(images?.length ? { text, images } : { text }),
+        body: JSON.stringify({
+          text,
+          ...(images?.length ? { images } : {}),
+          ...(refId ? { ref: { id: refId } } : {}),
+        }),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { error?: string } | null;

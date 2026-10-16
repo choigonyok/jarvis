@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { ArrowUp, ImagePlus, Mic, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { useEffect, useRef, useState, type RefObject } from "react";
+import { ArrowUp, ImagePlus, Mic, Reply, X } from "lucide-react";
 import { uploadPhoto } from "@/lib/uploads";
 import { cn } from "@/lib/utils";
 
@@ -11,11 +10,21 @@ type Attachment = { key: string; preview: string; name?: string; error?: string 
 
 const MAX_PHOTOS = 12;
 
+/** The earlier message the next one will quote, as the composer shows it. */
+export type Quoting = { label: string; text: string };
+
+/** A round control the height of the bar's inner track, like a tab bar slot. */
+const round =
+  "tap flex size-12 shrink-0 items-center justify-center rounded-full outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50";
+
 export function Composer({
   onSend,
   onVoice,
   onFocusChange,
   allowPhotos = false,
+  quoting,
+  onCancelQuote,
+  inputRef,
 }: {
   /** Resolves false when the message did not go out, so what was typed comes back. */
   onSend: (text: string, images: string[]) => Promise<boolean> | void;
@@ -23,10 +32,16 @@ export function Composer({
   onVoice?: () => void;
   onFocusChange?: (focused: boolean) => void;
   allowPhotos?: boolean;
+  /** Set while a swiped message waits to be quoted by the next one. */
+  quoting?: Quoting | null;
+  onCancelQuote?: () => void;
+  /** The text field, for whoever needs to focus it in the same gesture. */
+  inputRef?: RefObject<HTMLTextAreaElement | null>;
 }) {
   const [value, setValue] = useState("");
   const [photos, setPhotos] = useState<Attachment[]>([]);
-  const areaRef = useRef<HTMLTextAreaElement>(null);
+  const ownRef = useRef<HTMLTextAreaElement>(null);
+  const areaRef = inputRef ?? ownRef;
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -37,11 +52,19 @@ export function Composer({
     // lower where the screen is shorter.
     const cap = window.innerWidth < 640 ? 112 : 168;
     el.style.height = `${Math.min(el.scrollHeight, cap)}px`;
-  }, [value]);
+  }, [value, areaRef]);
 
   const uploading = photos.some((p) => !p.name && !p.error);
   const ready = photos.filter((p) => p.name);
   const canSend = !uploading && (value.trim() !== "" || ready.length > 0);
+
+  // Escape lets go of a quote, the way it closes anything else that is open.
+  useEffect(() => {
+    if (!quoting) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onCancelQuote?.();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [quoting, onCancelQuote]);
 
   function attach(files: FileList | null) {
     if (!files) return;
@@ -86,10 +109,31 @@ export function Composer({
     for (const p of sent) URL.revokeObjectURL(p.preview);
   }
 
+  // The tab bar's own shape and glass, so the two read as one family: a pill
+  // the bar's height (3.75rem) on a single line, round controls the size of a
+  // tab slot. It grows from there, keeping the radius, as a message gets long.
   return (
-    <div className="rounded-2xl border border-edge bg-glass px-2 py-2 backdrop-blur-xl transition-colors focus-within:border-white/18">
+    <div className="composer liquid-glass rounded-[1.875rem] p-1.5">
+      {quoting ? (
+        <div className="flex items-start gap-2 pt-1.5 pr-1 pb-1 pl-3.5">
+          <Reply aria-hidden className="mt-[3px] size-3.5 shrink-0 text-faint" />
+          <div className="min-w-0 flex-1">
+            <p className="text-[12px] leading-snug text-dim">{quoting.label}</p>
+            <p className="truncate text-[12.5px] leading-snug text-faint">{quoting.text}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onCancelQuote}
+            aria-label="참조 빼기"
+            className="flex size-8 shrink-0 items-center justify-center rounded-full text-faint outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+          >
+            <X aria-hidden className="size-4" />
+          </button>
+        </div>
+      ) : null}
+
       {photos.length > 0 ? (
-        <ul className="scrollbar-none -mx-0.5 mb-1.5 flex gap-1.5 overflow-x-auto px-0.5 pt-0.5" aria-label="첨부한 사진">
+        <ul className="scrollbar-none mb-1 flex gap-1.5 overflow-x-auto px-2.5 pt-1.5" aria-label="첨부한 사진">
           {photos.map((p) => (
             <li key={p.key} className="relative shrink-0">
               {/* eslint-disable-next-line @next/next/no-img-element -- a local object URL, nothing to optimise */}
@@ -97,7 +141,7 @@ export function Composer({
                 src={p.preview}
                 alt=""
                 className={cn(
-                  "size-16 rounded-lg object-cover transition-opacity",
+                  "size-16 rounded-2xl object-cover transition-opacity",
                   !p.name && !p.error && "opacity-45",
                   p.error && "opacity-30 grayscale",
                 )}
@@ -116,7 +160,7 @@ export function Composer({
                 type="button"
                 onClick={() => remove(p.key)}
                 aria-label="사진 빼기"
-                className="absolute -top-0.5 -right-0.5 flex size-6 items-center justify-center rounded-full border border-edge bg-background/90 text-dim outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+                className="absolute -top-0.5 -right-0.5 flex size-6 items-center justify-center rounded-full bg-background/90 text-dim outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
               >
                 <X aria-hidden className="size-3.5" />
               </button>
@@ -125,7 +169,7 @@ export function Composer({
         </ul>
       ) : null}
 
-      <div className="flex items-end gap-1">
+      <div className="flex items-end">
         {allowPhotos ? (
           <>
             <input
@@ -139,16 +183,15 @@ export function Composer({
                 e.target.value = "";
               }}
             />
-            <Button
-              variant="ghost"
-              size="icon-sm"
+            <button
+              type="button"
               onClick={() => fileRef.current?.click()}
               disabled={photos.length >= MAX_PHOTOS}
               aria-label="사진 첨부"
-              className="tap mb-0.5 shrink-0 rounded-lg text-faint hover:text-foreground"
+              className={cn(round, "text-faint hover:text-foreground disabled:opacity-40")}
             >
-              <ImagePlus aria-hidden className="size-[18px]" />
-            </Button>
+              <ImagePlus aria-hidden className="size-5" strokeWidth={1.8} />
+            </button>
           </>
         ) : null}
 
@@ -172,11 +215,13 @@ export function Composer({
               void send();
             }
           }}
-          placeholder={photos.length ? "사진에 대해 한마디 (예: 중고나라에 올려줘)" : "Jarvis에게 메시지"}
+          placeholder={
+            quoting ? "이걸로 무엇을 할까요?" : photos.length ? "사진에 대해 한마디 (예: 중고나라에 올려줘)" : "Jarvis에게 메시지"
+          }
           aria-label="Jarvis에게 보낼 메시지"
           className={cn(
-            "scrollbar-hairline max-h-28 flex-1 resize-none bg-transparent py-2.5 text-[14.5px] leading-relaxed text-foreground outline-none placeholder:text-faint sm:max-h-[168px] sm:py-2",
-            allowPhotos ? "px-1" : "px-2.5",
+            "scrollbar-hairline max-h-28 min-h-12 flex-1 resize-none bg-transparent py-3 text-[14.5px] leading-relaxed text-foreground outline-none placeholder:text-faint sm:max-h-[168px]",
+            allowPhotos ? "px-1" : "pl-3.5 pr-1",
           )}
         />
 
@@ -185,28 +230,28 @@ export function Composer({
             the bottom of the screen; a mic beside the send button is the
             grammar every messaging app already taught. */}
         {onVoice ? (
-          <Button
-            variant="ghost"
-            size="icon-sm"
+          <button
+            type="button"
             onClick={onVoice}
             aria-label="음성으로 말하기"
-            className="tap mb-0.5 shrink-0 rounded-lg text-faint hover:text-foreground sm:hidden"
+            className={cn(round, "text-faint hover:text-foreground sm:hidden")}
           >
-            <Mic aria-hidden className="size-[18px]" />
-          </Button>
+            <Mic aria-hidden className="size-5" strokeWidth={1.8} />
+          </button>
         ) : null}
 
         {/* Deliberately quiet: the brightest control in this product is 승인. */}
-        <Button
-          variant="outline"
-          size="icon-sm"
+        <button
+          type="button"
           onClick={() => void send()}
           disabled={!canSend}
           aria-label={uploading ? "사진을 올리는 중" : "메시지 보내기"}
-          className="tap mb-0.5 shrink-0 rounded-lg border-edge bg-glass-raised text-dim hover:text-foreground disabled:opacity-40 sm:size-8 sm:min-h-0 sm:min-w-0 dark:bg-glass-raised dark:hover:bg-white/12"
+          className={cn(round, "group text-dim disabled:opacity-40")}
         >
-          <ArrowUp aria-hidden className="size-[18px] sm:size-4" />
-        </Button>
+          <span className="liquid-glass-flat flex size-9 items-center justify-center rounded-full transition-colors group-enabled:group-hover:text-foreground">
+            <ArrowUp aria-hidden className="size-[18px]" />
+          </span>
+        </button>
       </div>
     </div>
   );

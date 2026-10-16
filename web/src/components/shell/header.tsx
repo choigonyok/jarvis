@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
 import { PROBE_KEY } from "@/components/shell/viewport-probe";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -112,6 +112,28 @@ const GUEST_BAR = ["/", "/calendar", "/workout"];
 const pendingHome = "/record";
 
 /**
+ * The status-bar tap every phone app answers: back to the top of what you are
+ * reading. Each page reads in its own scroller (a <main>, the KakaoTalk
+ * list), so the one taken is the largest on screen that is scrolled down.
+ */
+function scrollPageToTop() {
+  let best: Element | null = null;
+  let area = 0;
+  const scrollers = document.querySelectorAll('[class*="overflow-y-auto"], [class*="overflow-auto"]');
+  for (const el of [document.scrollingElement, ...scrollers]) {
+    if (!el || el.scrollTop <= 0) continue;
+    const r = el.getBoundingClientRect();
+    const a = Math.max(0, Math.min(r.bottom, innerHeight) - Math.max(r.top, 0)) * r.width;
+    if (a > area) {
+      area = a;
+      best = el;
+    }
+  }
+  const smooth = !matchMedia("(prefers-reduced-motion: reduce)").matches;
+  best?.scrollTo({ top: 0, behavior: smooth ? "smooth" : "auto" });
+}
+
+/**
  * One header for every surface, in two shapes.
  *
  * On a laptop this is a console you sit in front of, and the whole status line
@@ -130,9 +152,12 @@ const pendingHome = "/record";
 export function Header({
   connection,
   pending,
+  actions,
 }: {
   connection: Connection;
   pending: number;
+  /** A page's own controls, first in the right-hand cluster (the chat's search). */
+  actions?: ReactNode;
 }) {
   const pathname = usePathname();
   const role = useRole();
@@ -170,7 +195,14 @@ export function Header({
   }
 
   return (
-    <header className="inset-x-safe pt-safe shrink-0 border-b border-edge-soft bg-background">
+    <header
+      className="inset-x-safe pt-safe shrink-0 border-b border-edge-soft bg-background"
+      onClick={(e) => {
+        // A tap on the bar itself - not on one of its controls.
+        if ((e.target as Element).closest("a, button, input, [role='button'], [role='tooltip'], [role='dialog']")) return;
+        scrollPageToTop();
+      }}
+    >
       <div className="mx-auto flex h-13 w-full max-w-[52rem] items-center justify-between px-4 sm:h-14 sm:px-8">
         <div className="flex items-baseline gap-4">
           <h1
@@ -201,7 +233,10 @@ export function Header({
         </div>
 
         <div className="flex items-center gap-1 sm:gap-3">
-          {role === "owner" ? <UsageBars /> : null}
+          {actions}
+          {/* The guest's bars are their own agent's: the subscription only,
+              never what the operator's API keys cost. */}
+          <UsageBars />
           {role === "owner" ? <Notifications /> : null}
           <span className="flex items-center gap-1.5 text-[11.5px] text-faint">
             <span

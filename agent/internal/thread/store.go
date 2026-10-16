@@ -54,7 +54,42 @@ type Turn struct {
 	ProposalID string `json:"proposalId,omitempty"`
 	// Thread is whose conversation this turn belongs to; see Store.thread.
 	Thread string `json:"thread,omitempty"`
+	// Ref is the earlier message the operator pointed at (swiped) when
+	// sending this one.
+	Ref *Ref `json:"ref,omitempty"`
 }
+
+// Ref is a quoted earlier turn: which one, who said it, when, and how it began.
+type Ref struct {
+	ID   string `json:"id"`
+	Role Role   `json:"role"`
+	At   string `json:"at,omitempty"`
+	Text string `json:"text"`
+}
+
+// RefTo quotes turn t: its words (the start of them) and who said them.
+func RefTo(t *Turn) *Ref {
+	text := t.Text
+	if len(t.Paragraphs) > 0 {
+		text = strings.Join(t.Paragraphs, "\n\n")
+	}
+	if text == "" && len(t.Images) > 0 {
+		text = fmt.Sprintf("(사진 %d장)", len(t.Images))
+	}
+	if r := []rune(text); len(r) > 600 {
+		text = string(r[:600]) + "…"
+	}
+	at := t.At
+	// Read, not sliced: chat-svc writes the stamp in the database session's
+	// zone, which is not promised to be the operator's.
+	if ts, err := time.Parse(time.RFC3339Nano, t.AtISO); err == nil {
+		at = ts.In(refZone).Format("01-02 15:04")
+	}
+	return &Ref{ID: t.ID, Role: t.Role, At: at, Text: text}
+}
+
+// refZone is the operator's clock (TZ, Asia/Seoul in the container).
+var refZone = time.Local
 
 // Store is the client to chat-svc, plus the run state that is nobody else's
 // business.
@@ -193,6 +228,22 @@ func (s *Store) Snapshot() ([]*Turn, bool) {
 
 func (s *Store) AppendUser(text string, images ...string) *Turn {
 	return s.append(&Turn{Role: RoleUser, Text: text, Images: images})
+}
+
+// AppendUserRef is AppendUser for a message that quotes an earlier one.
+func (s *Store) AppendUserRef(text string, ref *Ref, images ...string) *Turn {
+	return s.append(&Turn{Role: RoleUser, Text: text, Images: images, Ref: ref})
+}
+
+// Find is the turn with this id, from the stored transcript.
+func (s *Store) Find(id string) *Turn {
+	turns, _ := s.Snapshot()
+	for _, t := range turns {
+		if t.ID == id {
+			return t
+		}
+	}
+	return nil
 }
 
 func (s *Store) AppendAgent(paragraphs []string) *Turn {

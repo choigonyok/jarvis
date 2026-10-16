@@ -51,7 +51,7 @@ export function Kakao() {
     <div className="flex h-full min-h-0 flex-col">
       <Header connection={connection} pending={pending} />
       <StandingBar pending={waitingList} href="/record" />
-      <div className="inset-x-safe mx-auto w-full max-w-[46rem] shrink-0 px-4 pt-2 sm:px-8 sm:pt-3">
+      <div className="px-gutter mx-auto w-full max-w-[46rem] shrink-0 pt-2 sm:pt-3">
         <div role="tablist" aria-label="메신저" className="inline-flex gap-0.5 rounded-lg border border-edge-soft bg-glass p-0.5">
           {(
             [
@@ -108,7 +108,7 @@ function Feed({ source }: { source: Source }) {
 
   return (
     <>
-      <main className="inset-x-safe pb-tabbar mx-auto flex min-h-0 w-full max-w-[46rem] flex-1 flex-col overflow-x-hidden px-4 sm:px-8">
+      <main className="px-gutter pb-tabbar mx-auto flex min-h-0 w-full max-w-[46rem] flex-1 flex-col overflow-x-hidden">
         {/* 방 고르기. 수집된 방만 나온다 - 목록 상태만 있고 본문이 없는 방은
             읽을 것이 없으므로 자리를 차지할 이유가 없다. */}
         {/* Wrapped, not a sideways strip: on a phone a row that scrolls

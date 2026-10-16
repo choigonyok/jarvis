@@ -272,6 +272,36 @@
   animation: card-flash 1.8s ease-out;
 }
 
+/* A quoted message brought into view: a wash of light around it that fades.
+   The spread paints past the text without moving anything. */
+@keyframes turn-flash {
+  0%,
+  35% {
+    background: oklch(1 0 0 / 8%);
+    box-shadow: 0 0 0 10px oklch(1 0 0 / 8%);
+  }
+  100% {
+    background: transparent;
+    box-shadow: 0 0 0 10px transparent;
+  }
+}
+.turn-flash {
+  border-radius: 10px;
+  animation: turn-flash 1.6s ease-out;
+}
+
+/* Search marks in the thread (CSS Custom Highlight API): every place the words
+   appear, and the one in view, inverted - no hue, the signal colours keep
+   their meanings. */
+::highlight(chat-search) {
+  background-color: oklch(1 0 0 / 20%);
+  color: inherit;
+}
+::highlight(chat-search-current) {
+  background-color: var(--foreground);
+  color: var(--background);
+}
+
 /* A push arriving with the console open drops in from above the screen,
    holds, and goes back up the way it came. */
 @keyframes push-drop {
@@ -298,6 +328,7 @@
   .push-toast,
   .push-toast-leave,
   .card-flash,
+  .turn-flash,
   .anim-edge,
   .anim-settle,
   .anim-breathe,
@@ -332,6 +363,18 @@
 @media (max-width: 639px) {
   body:has([data-tabbar]:not([data-hidden])) {
     --tabbar-space: calc(4.75rem + max(env(safe-area-inset-bottom), 0.5rem));
+  }
+}
+
+/* A side gutter that never sits inside the notch: the larger of the two. One
+   element given both inset-x-safe and px-4 loses the gutter (both set
+   padding-left, and the safe area - 0 on most phones - wins). */
+@utility px-gutter {
+  padding-left: max(env(safe-area-inset-left), 1rem);
+  padding-right: max(env(safe-area-inset-right), 1rem);
+  @media (width >= 40rem) {
+    padding-left: max(env(safe-area-inset-left), 2rem);
+    padding-right: max(env(safe-area-inset-right), 2rem);
   }
 }
 
@@ -405,6 +448,19 @@
   .liquid-glass {
     background: oklch(0.22 0.004 265 / 96%);
   }
+}
+
+/* The composer is the bar's sibling: the same glass, its rim lit a little
+   brighter while you write in it. */
+.composer.liquid-glass:focus-within::before {
+  background: linear-gradient(
+    135deg,
+    oklch(1 0 0 / 78%) 0%,
+    oklch(1 0 0 / 34%) 26%,
+    oklch(1 0 0 / 14%) 55%,
+    oklch(1 0 0 / 20%) 78%,
+    oklch(1 0 0 / 40%) 100%
+  );
 }
 
 /* Same material, no blur: for glass that sits on a solid surface. */

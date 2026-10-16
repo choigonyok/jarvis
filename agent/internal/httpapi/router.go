@@ -69,6 +69,11 @@ type Sender interface {
 	Send(text string, images []string) error
 }
 
+// refSender also sends a message that quotes an earlier turn.
+type refSender interface {
+	SendRef(text string, images []string, ref *thread.Ref) error
+}
+
 type Deps struct {
 	// Role is "owner" or "guest": which agent this is. Every response says so
 	// (X-Jarvis-Agent), and the gateway refuses one from the wrong agent.
@@ -274,6 +279,10 @@ func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Text   string   `json:"text"`
 		Images []string `json:"images"`
+		// Ref names an earlier turn the operator swiped to quote.
+		Ref *struct {
+			ID string `json:"id"`
+		} `json:"ref"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "본문을 읽을 수 없습니다.")
@@ -300,7 +309,31 @@ func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if err := s.runner.Send(text, body.Images); err != nil {
+	var ref *thread.Ref
+	if body.Ref != nil && body.Ref.ID != "" && s.thread != nil {
+		quoted := s.thread.Find(body.Ref.ID)
+		if quoted == nil {
+			writeErr(w, http.StatusBadRequest, "참조한 메시지를 찾을 수 없습니다.")
+			return
+		}
+		ref = thread.RefTo(quoted)
+		// A turn that is only a card says nothing itself; its card does.
+		if ref.Text == "" && quoted.ProposalID != "" {
+			if p, ok := s.proposals.Get(quoted.ProposalID); ok {
+				ref.Text = strings.TrimSpace("[승인 카드 · " + string(p.State) + "] " + p.Card.Title + "\n" + p.Card.Body)
+				if r := []rune(ref.Text); len(r) > 600 {
+					ref.Text = string(r[:600]) + "…"
+				}
+			}
+		}
+	}
+	var err error
+	if rs, ok := s.runner.(refSender); ok && ref != nil {
+		err = rs.SendRef(text, body.Images, ref)
+	} else {
+		err = s.runner.Send(text, body.Images)
+	}
+	if err != nil {
 		if errors.Is(err, claudecode.ErrBusy) {
 			writeErr(w, http.StatusConflict, err.Error())
 			return

@@ -88,6 +88,13 @@ func (r *Runner) remember(id string) {
 // Attached photos are named in the prompt by path. The model opens them with
 // Read, which shows it the image; the transcript keeps only the names.
 func (r *Runner) Send(text string, images []string) error {
+	return r.SendRef(text, images, nil)
+}
+
+// SendRef starts a turn for a message that quotes an earlier one: the model
+// is handed the quoted message ahead of what the operator wrote, so "이 제품
+// 구매해줘" knows which product.
+func (r *Runner) SendRef(text string, images []string, ref *thread.Ref) error {
 	r.mu.Lock()
 	if r.running {
 		r.mu.Unlock()
@@ -97,8 +104,12 @@ func (r *Runner) Send(text string, images []string) error {
 	r.yieldLocked()
 	r.mu.Unlock()
 
-	r.store.AppendUser(text, images...)
-	prompt := withImages(text, images, r.cfg.UploadsDir)
+	if ref != nil {
+		r.store.AppendUserRef(text, ref, images...)
+	} else {
+		r.store.AppendUser(text, images...)
+	}
+	prompt := withRef(withImages(text, images, r.cfg.UploadsDir), ref)
 	go func() {
 		if r.recall != nil {
 			if known := r.recall(context.Background(), text); known != "" {
@@ -108,6 +119,18 @@ func (r *Runner) Send(text string, images []string) error {
 		r.loop(prompt)
 	}()
 	return nil
+}
+
+// withRef puts the quoted message in front of the prompt, marked as a quote.
+func withRef(prompt string, ref *thread.Ref) string {
+	if ref == nil {
+		return prompt
+	}
+	who := "운영자"
+	if ref.Role == thread.RoleAgent {
+		who = "Jarvis(당신)"
+	}
+	return fmt.Sprintf("[운영자가 참조한 이전 메시지 · %s · %s]\n%s\n[참조 끝]\n\n%s", who, ref.At, ref.Text, prompt)
 }
 
 func withImages(text string, images []string, dir string) string {

@@ -3,6 +3,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -68,7 +69,8 @@ const selectList = `
 	       coalesce(body, ''),
 	       coalesce(proposal_id, ''),
 	       coalesce(session_id, ''),
-	       coalesce(images, '{}')
+	       coalesce(images, '{}'),
+	       coalesce(ref::text, '')
 	  from turns`
 
 // All returns the whole transcript, oldest first.
@@ -89,10 +91,12 @@ func (s *Store) All(ctx context.Context, tz, thread string, since time.Time) ([]
 	out := []turn.Turn{}
 	for rows.Next() {
 		var t turn.Turn
+		var ref string
 		if err := rows.Scan(&t.ID, &t.Role, &t.At, &t.AtISO, &t.Paragraphs,
-			&t.Text, &t.ProposalID, &t.SessionID, &t.Images); err != nil {
+			&t.Text, &t.ProposalID, &t.SessionID, &t.Images, &ref); err != nil {
 			return nil, fmt.Errorf("턴 읽기: %w", err)
 		}
+		t.Ref = readRef(ref)
 		out = append(out, t)
 	}
 	return out, rows.Err()
@@ -132,8 +136,8 @@ func (s *Store) Append(ctx context.Context, t turn.Turn, tz string) (turn.Turn, 
 
 	rows, err := s.pool.Query(ctx, `
 		with inserted as (
-		  insert into turns (id, role, at, paragraphs, body, proposal_id, session_id, thread, images)
-		  values ($2, $3, now(), $4, nullif($5,''), nullif($6,''), nullif($7,''), $8, $9)
+		  insert into turns (id, role, at, paragraphs, body, proposal_id, session_id, thread, images, ref)
+		  values ($2, $3, now(), $4, nullif($5,''), nullif($6,''), nullif($7,''), $8, $9, $10::jsonb)
 		  returning *
 		)
 		select id, role,
@@ -143,9 +147,10 @@ func (s *Store) Append(ctx context.Context, t turn.Turn, tz string) (turn.Turn, 
 		       coalesce(body, ''),
 		       coalesce(proposal_id, ''),
 		       coalesce(session_id, ''),
-		       coalesce(images, '{}')
+		       coalesce(images, '{}'),
+		       coalesce(ref::text, '')
 		  from inserted`,
-		tz, id, string(t.Role), paragraphs, t.Text, t.ProposalID, t.SessionID, t.Thread, images)
+		tz, id, string(t.Role), paragraphs, t.Text, t.ProposalID, t.SessionID, t.Thread, images, refJSON(t.Ref))
 	if err != nil {
 		return turn.Turn{}, fmt.Errorf("턴 저장: %w", err)
 	}
@@ -158,10 +163,32 @@ func (s *Store) Append(ctx context.Context, t turn.Turn, tz string) (turn.Turn, 
 		return turn.Turn{}, fmt.Errorf("턴이 저장되지 않았습니다")
 	}
 	var saved turn.Turn
+	var ref string
 	if err := rows.Scan(&saved.ID, &saved.Role, &saved.At, &saved.AtISO,
-		&saved.Paragraphs, &saved.Text, &saved.ProposalID, &saved.SessionID, &saved.Images); err != nil {
+		&saved.Paragraphs, &saved.Text, &saved.ProposalID, &saved.SessionID, &saved.Images, &ref); err != nil {
 		return turn.Turn{}, fmt.Errorf("저장된 턴 읽기: %w", err)
 	}
+	saved.Ref = readRef(ref)
 	saved.Thread = t.Thread
 	return saved, nil
+}
+
+// refJSON is the ref column's value: NULL when the turn quotes nothing.
+func refJSON(r *turn.Ref) any {
+	if r == nil || r.ID == "" {
+		return nil
+	}
+	b, _ := json.Marshal(r)
+	return string(b)
+}
+
+func readRef(raw string) *turn.Ref {
+	if raw == "" {
+		return nil
+	}
+	var r turn.Ref
+	if json.Unmarshal([]byte(raw), &r) != nil || r.ID == "" {
+		return nil
+	}
+	return &r
 }

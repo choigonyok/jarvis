@@ -1,20 +1,24 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Reply } from "lucide-react";
 import { Composer } from "@/components/chat/composer";
 import { ModeToggle, type ChatMode } from "@/components/chat/mode-toggle";
 import { ProposalCard } from "@/components/chat/proposal-card";
+import { SwipeRow } from "@/components/chat/swipe-row";
+import { SearchBar, SearchToggle, useThreadSearch } from "@/components/chat/thread-search";
 import { onFocusProposal } from "@/lib/resume";
 import { Markdown } from "@/components/chat/markdown";
 import { VoiceStage } from "@/components/chat/voice-stage";
 import { Header, TabBar } from "@/components/shell/header";
 import { useRole } from "@/components/shell/role";
 import { StandingBar } from "@/components/shell/standing-bar";
-import { isPending } from "@/lib/thread";
+import { isPending, plainText, quoteText, type Turn, type TurnRef } from "@/lib/thread";
 import { photoUrl } from "@/lib/uploads";
 import { speakable, useSpeech } from "@/lib/use-speech";
 import { useThread } from "@/lib/use-thread";
 import { cn } from "@/lib/utils";
+import { clock, dayLabel, refTime, turnDay, turnTime } from "@/lib/when";
 
 const MODE_KEY = "jarvis:chat-mode";
 
@@ -26,11 +30,61 @@ const MODE_KEY = "jarvis:chat-mode";
  * collapses below sm. What matters for an audit - when a request was decided -
  * is on the proposal card itself and survives the collapse.
  */
-function Rail({ at }: { at?: string }) {
+function Rail({ at, onRef }: { at?: string; onRef?: () => void }) {
   return (
-    <div className="hidden pt-[3px] pr-3 text-right sm:block sm:pr-4">
+    <div className="hidden flex-col items-end gap-1 pt-[3px] pr-3 sm:flex sm:pr-4" data-search-skip>
       {at ? <span className="tnum text-[11px] text-faint">{at}</span> : null}
+      {onRef ? <RefButton onClick={onRef} /> : null}
     </div>
+  );
+}
+
+/**
+ * Quoting with a pointer. On a touch screen the message is swiped instead
+ * (SwipeRow), so this is not rendered there at all - an invisible button a
+ * thumb could still hit would be worse than none.
+ */
+function RefButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label="이 메시지 참조"
+      title="참조"
+      className="hidden size-6 items-center justify-center rounded-md text-faint opacity-0 transition-opacity outline-none group-hover/turn:opacity-100 hover:text-foreground focus-visible:opacity-100 focus-visible:ring-3 focus-visible:ring-ring/50 pointer-fine:flex"
+    >
+      <Reply aria-hidden className="size-3.5" />
+    </button>
+  );
+}
+
+/** Where one day of the conversation ends and the next begins. */
+function DayDivider({ day }: { day: string }) {
+  return (
+    <li className="flex justify-center" data-search-skip>
+      <span className="tnum text-[11.5px] text-faint">{dayLabel(day)}</span>
+    </li>
+  );
+}
+
+/**
+ * The message a message answers, at the top of its bubble the way a
+ * messenger shows a reply. Tapping it goes back up to that message.
+ */
+function Quote({ quote, at, onJump }: { quote: TurnRef; at: string; onJump: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onJump}
+      data-search-skip
+      className="mb-2 block w-full rounded-xl bg-well px-3 py-2 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+    >
+      <span className="tnum block text-[11.5px] text-faint">
+        {quote.role === "agent" ? "Jarvis" : "나"}
+        {at ? ` · ${at}` : ""}
+      </span>
+      <span className="line-clamp-2 text-[13px] leading-snug text-dim">{plainText(quote.text) || "사진"}</span>
+    </button>
   );
 }
 
@@ -89,6 +143,11 @@ export function Thread() {
   } = useThread();
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const search = useThreadSearch(scrollRef);
+  // The earlier message the next one quotes: swiped (or, with a pointer, the
+  // button beside its time), shown above the composer until sent or dropped.
+  const [quoting, setQuoting] = useState<TurnRef | null>(null);
   const [mode, setMode] = useState<ChatMode>("text");
   const [muted, setMuted] = useState(false);
   const { speak, cancel, speaking, pulse, progress } = useSpeech();
@@ -183,6 +242,37 @@ export function Thread() {
       document.removeEventListener("wheel", release, opts);
       document.removeEventListener("keydown", release, true);
     };
+  }, []);
+
+  const quote = useCallback(
+    (turn: Turn) => {
+      // A turn that is only a card is quoted by what the card asks.
+      const card = turn.proposalId ? byId.get(turn.proposalId)?.card.title : undefined;
+      const text = quoteText(turn) || (card ? `승인 카드: ${card}` : "");
+      setQuoting({ id: turn.id, role: turn.role, at: turnTime(turn.atIso, turn.at), text });
+      // In the same gesture as the swipe, so a phone raises its keyboard.
+      inputRef.current?.focus({ preventScroll: true });
+    },
+    [byId],
+  );
+  // When a quoted turn is on the page its own stamp says when; one that has
+  // scrolled out of the loaded thread falls back to the agent's.
+  const refAt = (ref: TurnRef) => {
+    const t = turns.find((x) => x.id === ref.id);
+    return t ? turnTime(t.atIso, t.at) : refTime(ref.at);
+  };
+
+  // A quote tapped in a bubble goes back to the message it quotes, and marks
+  // it the way a tapped push marks a card.
+  const jumpTo = useCallback((id: string) => {
+    const row = scrollRef.current?.querySelector<HTMLElement>(`[data-turn-id="${CSS.escape(id)}"]`);
+    if (!row) return;
+    pinned.current = false;
+    held.current = row;
+    row.scrollIntoView({ block: "center" });
+    row.classList.remove("turn-flash");
+    void row.offsetWidth;
+    row.classList.add("turn-flash");
   }, []);
 
   // Photos and long markdown finish laying out after the first paint; while
@@ -288,7 +378,8 @@ export function Thread() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <Header connection={connection} pending={pending} />
+      <Header connection={connection} pending={pending} actions={<SearchToggle search={search} />} />
+      <SearchBar search={search} />
       <StandingBar pending={waiting} href="/record" muted={cardsVisible} />
 
       <main
@@ -313,40 +404,74 @@ export function Thread() {
           ) : null}
 
           <ol className="space-y-7">
-            {turns.map((turn) => {
+            {turns.map((turn, i) => {
               const proposal = turn.proposalId
                 ? byId.get(turn.proposalId)
                 : undefined;
+              // A divider where the day changes: with it, a turn's own stamp
+              // only has to say the time, and a reply that came hours later
+              // - a suggestion overnight - is plainly not a live one.
+              const day = turnDay(turn.atIso);
+              const divider = day && day !== turnDay(turns[i - 1]?.atIso) ? <DayDivider day={day} /> : null;
+              const time = clock(turn.atIso, turn.at);
               return turn.role === "agent" ? (
-                <li key={turn.id} className={ROW}>
-                  <Rail at={turn.at} />
-                  <div className="min-w-0">
-                    {turn.paragraphs?.length ? (
-                      // The runner split the message on blank lines; putting
-                      // them back is what makes a list or a code fence one
-                      // block again.
-                      <Markdown>{turn.paragraphs.join("\n\n")}</Markdown>
-                    ) : null}
-                    {proposal ? (
-                      <ProposalCard
-                        proposal={proposal}
-                        onDecide={(d, edits, reason) => decide(proposal.id, d, edits, reason)}
-                      />
-                    ) : null}
-                  </div>
-                </li>
+                <Fragment key={turn.id}>
+                  {divider}
+                  <li data-turn-id={turn.id} className="group/turn">
+                    <SwipeRow onRef={() => quote(turn)}>
+                      <div className={ROW}>
+                        <Rail at={time} onRef={() => quote(turn)} />
+                        <div className="min-w-0">
+                          {turn.paragraphs?.length ? (
+                            // The runner split the message on blank lines; putting
+                            // them back is what makes a list or a code fence one
+                            // block again.
+                            <Markdown>{turn.paragraphs.join("\n\n")}</Markdown>
+                          ) : null}
+                          {proposal ? (
+                            <ProposalCard
+                              proposal={proposal}
+                              onDecide={(d, edits, reason) => decide(proposal.id, d, edits, reason)}
+                            />
+                          ) : null}
+                          {/* The rail holds the time on a wide screen; a phone
+                              has no rail, so it sits under the message. */}
+                          {time ? (
+                            <p className="tnum mt-1.5 text-[11px] text-faint sm:hidden" data-search-skip>
+                              {time}
+                            </p>
+                          ) : null}
+                        </div>
+                      </div>
+                    </SwipeRow>
+                  </li>
+                </Fragment>
               ) : (
-                <li key={turn.id} className="flex flex-col items-end gap-1.5">
-                  {turn.images?.length ? <Photos names={turn.images} /> : null}
-                  {turn.text ? (
-                    <p className="max-w-[80%] rounded-2xl border border-edge bg-glass-raised px-4 py-2.5 text-[14.5px] leading-relaxed text-foreground backdrop-blur-md sm:max-w-[26rem]">
-                      {turn.text}
-                    </p>
-                  ) : null}
-                  <span className="tnum pr-1 text-[11px] text-faint">
-                    {turn.at}
-                  </span>
-                </li>
+                <Fragment key={turn.id}>
+                  {divider}
+                  <li data-turn-id={turn.id} className="group/turn">
+                    <SwipeRow onRef={() => quote(turn)} className="flex flex-col items-end gap-1.5">
+                      {turn.ref && !turn.text ? (
+                        <div className="max-w-[80%] sm:max-w-[26rem]">
+                          <Quote quote={turn.ref} at={refAt(turn.ref)} onJump={() => jumpTo(turn.ref!.id)} />
+                        </div>
+                      ) : null}
+                      {turn.images?.length ? <Photos names={turn.images} /> : null}
+                      {turn.text ? (
+                        <div className="max-w-[80%] rounded-2xl border border-edge bg-glass-raised px-4 py-2.5 text-[14.5px] leading-relaxed text-foreground backdrop-blur-md sm:max-w-[26rem]">
+                          {turn.ref ? (
+                            <Quote quote={turn.ref} at={refAt(turn.ref)} onJump={() => jumpTo(turn.ref!.id)} />
+                          ) : null}
+                          <p className="break-words whitespace-pre-wrap">{turn.text}</p>
+                        </div>
+                      ) : null}
+                      <span className="flex items-center gap-1.5 pr-1" data-search-skip>
+                        <RefButton onClick={() => quote(turn)} />
+                        <span className="tnum text-[11px] text-faint">{time}</span>
+                      </span>
+                    </SwipeRow>
+                  </li>
+                </Fragment>
               );
             })}
 
@@ -394,24 +519,44 @@ export function Thread() {
       </main>
 
       {/* Lifted above the floating tab bar; it drops back down while typing,
-          when the bar hides. */}
+          when the bar hides. On a phone it floats a gutter above the bar and
+          a gutter in from the edges - the bar's own spacing, so the two read
+          as a pair. */}
       <footer className="pb-tabbar relative shrink-0 transition-[padding] duration-300 ease-out motion-reduce:transition-none">
         {/* The transcript dissolves into the composer instead of stopping at a rule. */}
         <div
           aria-hidden
           className="pointer-events-none absolute inset-x-0 -top-10 h-10 bg-gradient-to-b from-transparent to-background"
         />
-        <div className="inset-x-safe mx-auto w-full max-w-[46rem] px-4 pb-3 sm:px-8 sm:pb-6">
-          <Composer
-            onSend={(text, images) => send(text, images)}
-            allowPhotos={role === "owner"}
-            onVoice={() => switchMode("voice")}
-            onFocusChange={setTyping}
-          />
-          {/* On a phone this switch is the mic inside the composer; spending a
-              third bar on it would leave the transcript a strip. */}
-          <div className="mt-2 hidden justify-center sm:flex">
-            <ModeToggle mode={mode} onChange={switchMode} />
+        {/* Two boxes: the safe-area padding and the gutter would otherwise
+            be one padding, and the safe area (0 on most phones) would win. */}
+        <div className="inset-x-safe">
+          <div className={cn("mx-auto w-full max-w-[46rem] px-4 sm:px-8 sm:pb-6", typing ? "pb-2" : "pb-0")}>
+            <Composer
+              onSend={async (text, images) => {
+                const ok = await send(text, images, quoting?.id);
+                if (ok) setQuoting(null);
+                return ok;
+              }}
+              allowPhotos={role === "owner"}
+              onVoice={() => switchMode("voice")}
+              onFocusChange={setTyping}
+              quoting={
+                quoting
+                  ? {
+                      label: quoting.role === "agent" ? "Jarvis에게 답장" : "내 메시지에 답장",
+                      text: quoting.text || "사진",
+                    }
+                  : null
+              }
+              onCancelQuote={() => setQuoting(null)}
+              inputRef={inputRef}
+            />
+            {/* On a phone this switch is the mic inside the composer; spending a
+                third bar on it would leave the transcript a strip. */}
+            <div className="mt-2 hidden justify-center sm:flex">
+              <ModeToggle mode={mode} onChange={switchMode} />
+            </div>
           </div>
         </div>
       </footer>
