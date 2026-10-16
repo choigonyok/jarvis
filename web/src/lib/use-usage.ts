@@ -47,7 +47,13 @@ export type Usage = {
 };
 
 /** What a mind call was for, as the panel names it. */
-export const PURPOSE: Record<string, string> = { interpret: "대화 해석", judge: "상식 판정", reflect: "밤 성찰", draft: "답장 초안" };
+export const PURPOSE: Record<string, string> = {
+  interpret: "대화 해석",
+  judge: "상식 판정",
+  reflect: "밤 성찰",
+  draft: "답장 초안",
+  history: "지난 대화 읽기",
+};
 
 /** "$0" for nothing, "$0.0123" under a dollar, "$1.23" above. */
 export const usd = (v: number) => (v === 0 ? "$0" : `$${v < 1 ? v.toFixed(v < 0.01 ? 4 : 3) : v.toFixed(2)}`);

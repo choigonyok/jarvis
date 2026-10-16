@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { openTarget, targetOf } from "@/lib/focus";
 import { onInboxRequest, onResume } from "@/lib/resume";
 import { Bell, Settings2 } from "lucide-react";
+import { HeaderPanel } from "@/components/shell/panel";
 import { usePush } from "@/lib/use-push";
 import { cn } from "@/lib/utils";
 
@@ -94,8 +95,13 @@ export function Notifications() {
     const close = (e: PointerEvent) => {
       if (!wrap.current?.contains(e.target as Node)) setOpen(false);
     };
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
     document.addEventListener("pointerdown", close);
-    return () => document.removeEventListener("pointerdown", close);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", esc);
+    };
   }, [open]);
 
   const markRead = async (ids: number[]) => {
@@ -128,10 +134,10 @@ export function Notifications() {
       </button>
 
       {open ? (
-        <div className="absolute top-full right-0 z-50 mt-1 w-[21rem] overflow-hidden rounded-xl border border-edge bg-background/95 shadow-lg backdrop-blur-md max-sm:fixed max-sm:inset-x-3 max-sm:top-[calc(env(safe-area-inset-top)+3.5rem)] max-sm:w-auto">
-          <div className="flex items-center justify-between gap-2 border-b border-edge-soft px-3.5 py-2">
-            <p className="text-[13px] text-foreground">{view === "list" ? "알림" : "알림 설정"}</p>
-            <div className="flex items-center gap-1">
+        <HeaderPanel
+          title={view === "list" ? "알림" : "알림 설정"}
+          aside={
+            <>
               {view === "list" && unread ? (
                 <button
                   type="button"
@@ -150,8 +156,9 @@ export function Notifications() {
               >
                 {view === "list" ? <Settings2 aria-hidden className="size-4" /> : <Bell aria-hidden className="size-4" />}
               </button>
-            </div>
-          </div>
+            </>
+          }
+        >
 
           {view === "list" ? (
             <ul className="max-h-[min(28rem,70vh)] overflow-y-auto overscroll-contain">
@@ -194,7 +201,7 @@ export function Notifications() {
           ) : (
             <NotifySettings />
           )}
-        </div>
+        </HeaderPanel>
       ) : null}
     </div>
   );

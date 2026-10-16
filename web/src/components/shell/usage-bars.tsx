@@ -1,21 +1,25 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { HeaderPanel } from "@/components/shell/panel";
 import { capPct, freeLabel, freePct, pct, PURPOSE, resetLabel, tone, usd, useUsage } from "@/lib/use-usage";
 import { cn } from "@/lib/utils";
 
 /**
  * Hairlines in the header: the Claude subscription's 5-hour window on top, the
- * weekly one below it, the memory API key's spend against its daily cap, and
- * how far the search key (Voyage) is into its free tokens, and mind's model
- * spend against its daily cap. Always there, never
- * asking for attention until they fill. Holding them (or hovering, on a
- * pointer) shows the numbers.
+ * weekly one below it, then the API keys that cost money by use - memory's
+ * against its daily cap, the search key (Voyage) into its free tokens, mind's
+ * against its daily cap. Always there, never asking for attention until they
+ * fill. A tap shows the numbers.
+ *
+ * Every line in the panel is the same meter: a name and its figure, the bar,
+ * and one line under it that says when it resets or what the month came to.
+ * Two groups - what the subscription allows, what the keys cost - so the eye
+ * learns one shape and reads five of them.
  */
 export function UsageBars() {
   const usage = useUsage();
   const [open, setOpen] = useState(false);
-  const hold = useRef<number | null>(null);
   const wrap = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -23,8 +27,13 @@ export function UsageBars() {
     const close = (e: PointerEvent) => {
       if (!wrap.current?.contains(e.target as Node)) setOpen(false);
     };
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
     document.addEventListener("pointerdown", close);
-    return () => document.removeEventListener("pointerdown", close);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", esc);
+    };
   }, [open]);
 
   const five = pct(usage?.fiveHour);
@@ -41,6 +50,10 @@ export function UsageBars() {
         (api == null ? "" : `, 기억용 API 하루 상한의 ${api}%`) +
         (voyage ? `, 검색용 API 오늘 ${usd(voyage.todayUsd)}` : "") +
         (mindPct == null ? "" : `, 판단용 API 하루 상한의 ${mindPct}%`);
+  const paid = Boolean(usage?.api || voyage || mind);
+  const at = usage?.at
+    ? new Date(usage.at).toLocaleTimeString("ko-KR", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", hour12: false })
+    : null;
 
   return (
     <div ref={wrap} className="relative">
@@ -48,19 +61,8 @@ export function UsageBars() {
         type="button"
         aria-label={label}
         aria-expanded={open}
-        onPointerDown={(e) => {
-          if (e.pointerType === "mouse") return;
-          hold.current = window.setTimeout(() => setOpen(true), 350);
-        }}
-        onPointerUp={() => hold.current && window.clearTimeout(hold.current)}
-        onPointerLeave={(e) => {
-          if (hold.current) window.clearTimeout(hold.current);
-          if (e.pointerType === "mouse") setOpen(false);
-        }}
-        onPointerEnter={(e) => e.pointerType === "mouse" && setOpen(true)}
         onClick={() => setOpen((v) => !v)}
-        onContextMenu={(e) => e.preventDefault()}
-        className="flex h-11 w-12 flex-col justify-center gap-[3px] rounded-lg px-1.5 outline-none select-none [-webkit-touch-callout:none] focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-8"
+        className="flex h-11 w-12 flex-col justify-center gap-[3px] rounded-lg px-1.5 outline-none select-none focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-8"
       >
         <Bar value={five} />
         <Bar value={week} />
@@ -70,83 +72,77 @@ export function UsageBars() {
       </button>
 
       {open ? (
-        <div
-          role="tooltip"
-          className="absolute top-full right-0 z-50 mt-1 w-56 rounded-xl border border-edge bg-background/95 p-3 text-[12px] shadow-lg backdrop-blur-md"
-        >
-          <p className="mb-2 text-[11.5px] text-faint">Claude 구독 사용량</p>
-          <Line name="5시간" value={five} resets={usage?.fiveHour?.resetsAt} />
-          <Line name="주간" value={week} resets={usage?.sevenDay?.resetsAt} />
-          {usage?.api ? (
-            <div className="mt-2 border-t border-edge pt-2">
-              <p className="mb-1 text-[11.5px] text-faint">기억용 API (Haiku 5.5)</p>
-              <div className="flex items-baseline justify-between py-1">
-                <span className="text-dim">오늘</span>
-                <span className="tnum text-[13px] text-foreground">
-                  {usd(usage.api.todayUsd)} <span className="text-faint">/ {usd(usage.api.dailyUsd)}</span>
-                </span>
-              </div>
-              <span aria-hidden className="block h-1 overflow-hidden rounded-full bg-foreground/12">
-                <span className={cn("block h-full rounded-full", tone(capPct(usage.api)))} style={{ width: `${capPct(usage.api) ?? 0}%` }} />
-              </span>
-              <p className="tnum mt-1 text-[10.5px] text-faint">이번 달 {usd(usage.api.month.usd)}</p>
-            </div>
-          ) : null}
-          {voyage ? (
-            <div className="mt-2 border-t border-edge pt-2">
-              <p className="mb-1 text-[11.5px] text-faint">검색용 API (Voyage)</p>
-              <div className="flex items-baseline justify-between py-1">
-                <span className="text-dim">오늘</span>
-                <span className="tnum text-[13px] text-foreground">{usd(voyage.todayUsd)}</span>
-              </div>
-              <div className="flex items-baseline justify-between pb-1">
-                <span className="text-dim">무료 토큰</span>
-                <span className="tnum text-[13px] text-foreground">{freeLabel(voyage)} 사용</span>
-              </div>
-              <span aria-hidden className="block h-1 overflow-hidden rounded-full bg-foreground/12">
-                <span className={cn("block h-full rounded-full", tone(free))} style={{ width: `${free ?? 0}%` }} />
-              </span>
-              <p className="tnum mt-1 text-[10.5px] text-faint">
-                이번 달 {usd(voyage.month.usd)} (정가) · 청구 {usd(voyage.billedUsd)}
-              </p>
-            </div>
-          ) : null}
-          {mind ? (
-            <div className="mt-2 border-t border-edge pt-2">
-              <p className="mb-1 text-[11.5px] text-faint">판단용 API (mind)</p>
-              <div className="flex items-baseline justify-between py-1">
-                <span className="text-dim">오늘</span>
-                <span className="tnum text-[13px] text-foreground">
-                  {usd(mind.todayUsd)} <span className="text-faint">/ {usd(mind.dailyUsd)}</span>
-                </span>
-              </div>
-              <span aria-hidden className="block h-1 overflow-hidden rounded-full bg-foreground/12">
-                <span className={cn("block h-full rounded-full", tone(mindPct))} style={{ width: `${mindPct ?? 0}%` }} />
-              </span>
-              <p className="tnum mt-1 text-[10.5px] text-faint">
-                이번 달 {usd(mind.month.usd)} · {mind.month.calls}번
-              </p>
-              {mind.purposes.length ? (
-                <ul className="mt-1 space-y-0.5">
-                  {mind.purposes.map((p) => (
-                    <li key={p.purpose} className="tnum flex justify-between text-[10.5px] text-faint">
-                      <span>{PURPOSE[p.purpose] ?? p.purpose}</span>
-                      <span>
-                        {p.calls}번 · {usd(p.usd)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </div>
-          ) : null}
-          {usage?.at ? (
-            <p className="mt-2 text-[10.5px] text-faint">
-              {new Date(usage.at).toLocaleTimeString("ko-KR", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", hour12: false })}{" "}
-              기준
-            </p>
-          ) : null}
-        </div>
+        <HeaderPanel title="사용량" aside={at ? <span className="tnum text-[11.5px] text-faint">{at} 기준</span> : null}>
+          <div className="max-h-[min(30rem,72vh)] space-y-4 overflow-y-auto overscroll-contain px-3.5 py-3">
+            <Group name="Claude 구독">
+              <Meter
+                name="5시간"
+                figure={five == null ? "-" : `${five}%`}
+                value={five}
+                note={usage?.fiveHour?.resetsAt ? `${resetLabel(usage.fiveHour.resetsAt)} 초기화` : undefined}
+              />
+              <Meter
+                name="주간"
+                figure={week == null ? "-" : `${week}%`}
+                value={week}
+                note={usage?.sevenDay?.resetsAt ? `${resetLabel(usage.sevenDay.resetsAt)} 초기화` : undefined}
+              />
+            </Group>
+
+            {paid ? (
+              <Group name="API 사용료 (오늘)">
+                {usage?.api ? (
+                  <Meter
+                    name="기억"
+                    detail={usage.api.model}
+                    figure={
+                      <>
+                        {usd(usage.api.todayUsd)} <span className="text-faint">/ {usd(usage.api.dailyUsd)}</span>
+                      </>
+                    }
+                    value={api}
+                    note={`이번 달 ${usd(usage.api.month.usd)}`}
+                  />
+                ) : null}
+                {voyage ? (
+                  <Meter
+                    name="검색"
+                    detail="Voyage"
+                    figure={usd(voyage.todayUsd)}
+                    value={free}
+                    note={`무료 토큰 ${freeLabel(voyage)} 사용 · 이번 달 ${usd(voyage.month.usd)}, 청구 ${usd(voyage.billedUsd)}`}
+                  />
+                ) : null}
+                {mind ? (
+                  <Meter
+                    name="판단"
+                    detail="mind"
+                    figure={
+                      <>
+                        {usd(mind.todayUsd)} <span className="text-faint">/ {usd(mind.dailyUsd)}</span>
+                      </>
+                    }
+                    value={mindPct}
+                    note={`이번 달 ${usd(mind.month.usd)} · ${mind.month.calls}번`}
+                  >
+                    {mind.purposes.length ? (
+                      <ul className="mt-1 space-y-0.5">
+                        {mind.purposes.map((p) => (
+                          <li key={p.purpose} className="tnum flex justify-between text-[11px] text-faint">
+                            <span>{PURPOSE[p.purpose] ?? p.purpose}</span>
+                            <span>
+                              {p.calls}번 · {usd(p.usd)}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </Meter>
+                ) : null}
+              </Group>
+            ) : null}
+          </div>
+        </HeaderPanel>
       ) : null}
     </div>
   );
@@ -163,17 +159,46 @@ function Bar({ value }: { value: number | null }) {
   );
 }
 
-function Line({ name, value, resets }: { name: string; value: number | null; resets?: string }) {
+function Group({ name, children }: { name: string; children: ReactNode }) {
   return (
-    <div className="py-1">
-      <div className="flex items-baseline justify-between">
-        <span className="text-dim">{name}</span>
-        <span className="tnum text-[13px] text-foreground">{value == null ? "-" : `${value}% 사용`}</span>
+    <section>
+      <p className="mb-1.5 text-[11.5px] text-faint">{name}</p>
+      <div className="space-y-3">{children}</div>
+    </section>
+  );
+}
+
+/** One line of the panel: name and figure, the bar, and what to know about it. */
+function Meter({
+  name,
+  detail,
+  figure,
+  value,
+  note,
+  children,
+}: {
+  name: string;
+  /** Which model or service, quieter than the name. */
+  detail?: string;
+  figure: ReactNode;
+  value: number | null;
+  note?: string;
+  children?: ReactNode;
+}) {
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-3 text-[12.5px]">
+        <span className="text-dim">
+          {name}
+          {detail ? <span className="ms-1.5 text-[11px] text-faint">{detail}</span> : null}
+        </span>
+        <span className="tnum text-[13px] text-foreground">{figure}</span>
       </div>
-      <span aria-hidden className="mt-1 block h-1 overflow-hidden rounded-full bg-foreground/12">
-        <span className={cn("block h-full rounded-full", tone(value))} style={{ width: `${value ?? 0}%` }} />
+      <span aria-hidden className="mt-1.5 block h-1 overflow-hidden rounded-full bg-foreground/12">
+        <span className={cn("block h-full rounded-full", tone(value))} style={{ width: `${Math.min(100, value ?? 0)}%` }} />
       </span>
-      {resets ? <p className="tnum mt-1 text-[10.5px] text-faint">{resetLabel(resets)} 초기화</p> : null}
+      {note ? <p className="tnum mt-1 text-[11px] leading-snug text-faint">{note}</p> : null}
+      {children}
     </div>
   );
 }
