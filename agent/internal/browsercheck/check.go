@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 )
@@ -37,10 +39,28 @@ type Checker struct {
 	Every     time.Duration
 	Idle      func() bool
 	Log       *slog.Logger
+	// Relogin, when set, signs a logged-out site back in (with the login the
+	// vault keeps - see main), and the site is looked at again right after.
+	// It is tried at most once per ReloginEvery a site: a login that keeps
+	// failing is a locked account waiting to happen.
+	Relogin      func(ctx context.Context, s Site) error
+	ReloginEvery time.Duration
+	// StillOut hears a site that is logged out after a relogin was tried.
+	StillOut func(s Site, why string)
 
 	mu      sync.Mutex
 	results map[string]Result
 	kick    chan struct{}
+	tried   map[string]time.Time
+}
+
+// LoggedOut is whether a landing is the site's login page.
+func LoggedOut(r Result, s Site) bool {
+	if r.Error != "" || r.Busy || r.URL == "" || s.LoginHost == "" {
+		return false
+	}
+	u, err := url.Parse(r.URL)
+	return err == nil && strings.EqualFold(u.Hostname(), s.LoginHost)
 }
 
 func (c *Checker) init() {
@@ -49,6 +69,7 @@ func (c *Checker) init() {
 	if c.results == nil {
 		c.results = map[string]Result{}
 		c.kick = make(chan struct{}, 1)
+		c.tried = map[string]time.Time{}
 	}
 }
 
@@ -76,22 +97,59 @@ func (c *Checker) Run(ctx context.Context) {
 			if !forced && time.Since(last) < c.Every {
 				continue
 			}
-			r := Result{At: time.Now()}
-			l, err := c.Client.Open(ctx, s.Orders, c.BusyHosts)
-			if err != nil {
-				r.Error = err.Error()
-			} else {
-				r.URL, r.Busy = l.URL, l.Busy
-			}
-			c.mu.Lock()
-			c.results[s.ID] = r
-			c.mu.Unlock()
-			if c.Log != nil {
-				c.Log.Info("브라우저로 로그인 상태를 확인했습니다", "site", s.ID, "url", r.URL, "busy", r.Busy, "err", r.Error)
+			r := c.look(ctx, s)
+			if LoggedOut(r, s) && c.Relogin != nil && c.due(s.ID) {
+				err := c.Relogin(ctx, s)
+				if c.Log != nil {
+					c.Log.Info("로그인이 풀려 저장된 정보로 다시 로그인해 봤습니다", "site", s.ID, "err", err)
+				}
+				if err == nil {
+					r = c.look(ctx, s)
+				}
+				if LoggedOut(r, s) && c.StillOut != nil {
+					why := "로그인 뒤에도 로그인 화면으로 돌아왔습니다(문자 인증·보안문자일 수 있습니다)"
+					if err != nil {
+						why = err.Error()
+					}
+					c.StillOut(s, why)
+				}
 			}
 		}
 		forced = false
 	}
+}
+
+// look opens the site and records where it landed.
+func (c *Checker) look(ctx context.Context, s Site) Result {
+	r := Result{At: time.Now()}
+	l, err := c.Client.Open(ctx, s.Orders, c.BusyHosts)
+	if err != nil {
+		r.Error = err.Error()
+	} else {
+		r.URL, r.Busy = l.URL, l.Busy
+	}
+	c.mu.Lock()
+	c.results[s.ID] = r
+	c.mu.Unlock()
+	if c.Log != nil {
+		c.Log.Info("브라우저로 로그인 상태를 확인했습니다", "site", s.ID, "url", r.URL, "busy", r.Busy, "err", r.Error)
+	}
+	return r
+}
+
+// due is whether a relogin of this site may be tried now, and marks it tried.
+func (c *Checker) due(id string) bool {
+	every := c.ReloginEvery
+	if every <= 0 {
+		every = 6 * time.Hour
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if time.Since(c.tried[id]) < every {
+		return false
+	}
+	c.tried[id] = time.Now()
+	return true
 }
 
 // Handler serves GET (the latest results) and POST (check again soon).

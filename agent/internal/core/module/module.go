@@ -56,6 +56,16 @@ type Editor interface {
 	Revise(ctx context.Context, a action.Action, edits map[string]string) (action.Action, action.Card, error)
 }
 
+// SecretSink is an Actuator whose card takes values that must never be kept
+// with the card nor reach the model - a password. At approval the card's
+// private fields (action.Field.IsPrivate) are handed here before anything
+// else sees the decision, and are dropped from the edits the card records.
+// An error stops the approval, and the card stays as it was.
+type SecretSink interface {
+	Actuator
+	AcceptSecrets(ctx context.Context, a action.Action, secrets map[string]string) error
+}
+
 // ContextSource supplies facts to reason with. The calendar is one (what is
 // already booked); a knowledge graph would be another.
 type ContextSource interface {

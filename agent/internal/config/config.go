@@ -97,6 +97,9 @@ type Config struct {
 	// JobsURL is where jobs-svc listens: work handed over in conversation,
 	// run in the background on whatever cadence each job decides.
 	JobsURL string
+	// VaultURL is vault-svc: the operator's saved logins. Empty leaves the
+	// vault module out (the guest, a laptop run).
+	VaultURL string
 	// MemoryURL is memory-svc (the Graphiti knowledge graph).
 	MemoryURL string
 	// MindURL is mind-svc: the one gate every suggestion goes through, and
@@ -177,7 +180,8 @@ func Load() (Config, error) {
 		AllowedTools: splitList(env("JARVIS_ALLOWED_TOOLS",
 			"TodoWrite,mcp__calendar__list_events,"+
 				"mcp__assets__get_portfolio,mcp__assets__get_allocation,mcp__assets__get_history,"+
-				"mcp__spending__get_spending,mcp__memory__search_memory,mcp__context__get_context,mcp__context__find_nearby,mcp__jobs__list_jobs")),
+				"mcp__spending__get_spending,mcp__memory__search_memory,mcp__context__get_context,mcp__context__find_nearby,mcp__jobs__list_jobs,"+
+				"mcp__vault__list_logins")),
 		PermissionMode:   env("JARVIS_PERMISSION_MODE", "manual"),
 		ApprovalWait:     envDuration("JARVIS_APPROVAL_TIMEOUT", 30*time.Minute),
 		TurnTimeout:      envDuration("JARVIS_TURN_TIMEOUT", 2*time.Hour),
@@ -193,6 +197,7 @@ func Load() (Config, error) {
 		Enrich:           envBool("JARVIS_ENRICH", true),
 		UploadsDir:       env("JARVIS_UPLOADS_DIR", ""),
 		JobsURL:          env("JARVIS_JOBS_URL", "http://localhost:8098"),
+		VaultURL:         os.Getenv("JARVIS_VAULT_URL"),
 		// Empty turns long-term memory off: no tool, nothing recalled.
 		MemoryURL:    os.Getenv("JARVIS_MEMORY_URL"),
 		MindURL:      os.Getenv("JARVIS_MIND_URL"),
@@ -230,6 +235,7 @@ func Load() (Config, error) {
 		c.Enrich = false
 		c.Jobs = false
 		c.UploadsDir = ""
+		c.VaultURL = ""
 	}
 
 	if c.OAuthToken == "" {
@@ -333,6 +339,12 @@ const defaultSystemPrompt = `당신은 Jarvis입니다. 한 사람의 개인 어
 - 승인되면 [결제 승인됨]으로 시작하는 메시지가 옵니다. 그때 같은 결제 단계를 다시 진행하면 통과합니다. [결제 반려됨]이면 결제하지 마세요.
 - 쿠팡 결제 비밀번호 키패드가 나오면 browser_enter_payment_pin 을 부르세요. 비밀번호를 묻거나 추측하거나 직접 누르지 마세요.
 - 그 밖의 쇼핑몰 자체 간편결제로 가는 요청은 네트워크에서 막힙니다. 막혔다면 우회할 방법을 찾지 말고 네이버페이로 돌아오거나 멈추세요.
+
+로그인
+- 로그인 화면이 나오면 browser_fill_login 으로 저장된 아이디·비밀번호를 넣고 로그인 버튼을 누르세요. 값은 그 도구가 직접 넣고 당신에게는 보이지 않습니다.
+- 저장된 정보가 없다고 하면 save_login(사이트 주소, 이름)으로 저장 카드를 올리세요. 운영자가 카드의 칸에 직접 넣습니다. 무엇이 저장돼 있는지는 list_logins 로 봅니다.
+- 비밀번호를 대화로 묻거나, 받거나, 다시 적지 마세요. 운영자가 대화에 비밀번호를 쳤으면 그 값을 쓰거나 되풀이하지 말고, save_login 카드로 넣어 달라고 하세요.
+- 문자·이메일 인증, 보안문자, 새 기기 확인이 나오면 더 시도하지 말고, 화면 탭에서 직접 해 달라고 운영자에게 알리세요.
 
 캘린더
 - 일정은 calendar 도구로만 다루세요. 캘린더 파일을 직접 읽거나 쓰려고 하지 마세요.

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/agent/internal/claudecode"
+	"github.com/choigonyok/jarvis/agent/internal/core/action"
 	"github.com/choigonyok/jarvis/agent/internal/core/bus"
 	"github.com/choigonyok/jarvis/agent/internal/core/module"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
@@ -28,6 +29,7 @@ import (
 type Server struct {
 	consume       http.HandlerFunc
 	browserChecks http.Handler
+	vault         http.Handler
 	thread        *thread.Store
 	proposals     *proposal.Store
 	calendar      *calendar.Store
@@ -118,6 +120,9 @@ type Deps struct {
 	Consume http.HandlerFunc
 	// BrowserChecks serves the browser login checks (GET) and asks for one (POST).
 	BrowserChecks http.Handler
+	// Vault, when set, serves the saved logins to the console: the list and
+	// its uses (GET /vault) and forgetting one (DELETE /vault/{domain}).
+	Vault http.Handler
 	// FollowUp tells the assistant how a payment card was decided.
 	FollowUp interface{ Enqueue(prompt string) }
 	Log      *slog.Logger
@@ -146,6 +151,7 @@ func New(d Deps) *Server {
 		mindUsage:       d.MindUsage,
 		consume:         d.Consume,
 		browserChecks:   d.BrowserChecks,
+		vault:           d.Vault,
 		followUp:        d.FollowUp,
 	}
 	if d.Proposals != nil {
@@ -189,6 +195,10 @@ func (s *Server) Handler() http.Handler {
 	}
 	if s.browserChecks != nil {
 		mux.HandleFunc("/browser-checks", s.guard(s.browserChecks.ServeHTTP))
+	}
+	if s.vault != nil {
+		mux.HandleFunc("/vault", s.guard(s.vault.ServeHTTP))
+		mux.HandleFunc("/vault/", s.guard(s.vault.ServeHTTP))
 	}
 
 	// Claude Code dials these. The permission gate sits at /mcp; module
@@ -411,6 +421,11 @@ func (s *Server) postDecision(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if proposal.Decision(body.Decision) == proposal.Approve {
+		// Private fields first, and out of the edits before they are kept.
+		if msg, code := s.acceptSecrets(r.Context(), id, body.Edits); msg != "" {
+			writeErr(w, code, msg)
+			return
+		}
 		if msg, code := s.revise(r.Context(), id, body.Edits); msg != "" {
 			writeErr(w, code, msg)
 			return
@@ -427,6 +442,49 @@ func (s *Server) postDecision(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.WriteHeader(http.StatusNoContent)
 	}
+}
+
+// acceptSecrets hands a card's private fields (a password) to its module and
+// deletes them from edits, so what the card records - and what the model is
+// told - never holds them. A card with private fields but no module to take
+// them is refused rather than approved without them.
+func (s *Server) acceptSecrets(ctx context.Context, id string, edits map[string]string) (string, int) {
+	p, ok := s.proposals.Get(id)
+	if !ok || p.State != proposal.Pending {
+		return "", 0
+	}
+	var private []action.Field
+	for _, f := range p.Card.Fields {
+		if f.IsPrivate() {
+			private = append(private, f)
+		}
+	}
+	if len(private) == 0 {
+		return "", 0
+	}
+	secrets := map[string]string{}
+	for _, f := range private {
+		secrets[f.Key] = edits[f.Key]
+		delete(edits, f.Key)
+	}
+	for _, f := range private {
+		if f.Required && strings.TrimSpace(secrets[f.Key]) == "" {
+			return f.Label + " 칸을 채워 주세요.", http.StatusBadRequest
+		}
+	}
+	var sink module.SecretSink
+	if s.modules != nil {
+		if actuator, _, found := s.modules.Lookup(p.Action.Kind); found {
+			sink, _ = actuator.(module.SecretSink)
+		}
+	}
+	if sink == nil {
+		return "이 카드의 비밀 칸을 받을 곳이 없습니다.", http.StatusBadRequest
+	}
+	if err := sink.AcceptSecrets(ctx, p.Action, secrets); err != nil {
+		return err.Error(), http.StatusBadRequest
+	}
+	return "", 0
 }
 
 // revise runs an approval of a form card through its module first: the

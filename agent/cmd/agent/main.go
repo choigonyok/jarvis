@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -32,11 +33,13 @@ import (
 	mindmod "github.com/choigonyok/jarvis/agent/internal/module/mind"
 	"github.com/choigonyok/jarvis/agent/internal/module/place"
 	"github.com/choigonyok/jarvis/agent/internal/module/spending"
+	"github.com/choigonyok/jarvis/agent/internal/module/vault"
 	"github.com/choigonyok/jarvis/agent/internal/suggest"
 	"github.com/choigonyok/jarvis/agent/internal/thread"
 	"github.com/choigonyok/jarvis/agent/internal/uploads"
 	"github.com/choigonyok/jarvis/agent/internal/usage"
 	"github.com/choigonyok/jarvis/gocommon/notify"
+	"github.com/choigonyok/jarvis/gocommon/site"
 )
 
 func main() {
@@ -91,6 +94,7 @@ func main() {
 	// for its model to call, whatever it is asked.
 	var spendingModule *spending.Module
 	var jobsModule *jobs.Module
+	var vaultModule *vault.Module
 	var photos *uploads.Store
 	if cfg.UploadsDir != "" {
 		if photos, err = uploads.New(cfg.UploadsDir); err != nil {
@@ -111,6 +115,15 @@ func main() {
 		mcpMounts["/mcp/"+spending.EnrichServerName] = spendingModule.EnrichHandler()
 		cfg.ModuleMCPURLs[assets.ServerName] = cfg.PublicMCPURL + "/" + assets.ServerName
 		cfg.ModuleMCPURLs[spending.ServerName] = cfg.PublicMCPURL + "/" + spending.ServerName
+
+		// 로그인 정보 보관함. 저장은 카드(비밀번호 칸 - 값은 모델을 거치지 않는다),
+		// 쓰는 것은 브라우저의 browser_fill_login.
+		if cfg.VaultURL != "" {
+			vaultModule = vault.New(vault.NewClient(cfg.VaultURL, cfg.APIToken), log)
+			modules.Add(vaultModule)
+			mcpMounts["/mcp/"+vault.ServerName] = vaultModule.Handler()
+			cfg.ModuleMCPURLs[vault.ServerName] = cfg.PublicMCPURL + "/" + vault.ServerName
+		}
 
 		// 작업. 대화에서 맡긴 일을 백그라운드에서, 작업이 정한 주기로 한다.
 		if photos != nil && cfg.Jobs {
@@ -213,6 +226,19 @@ func main() {
 			Idle:      runner.Idle,
 			Log:       log,
 		}
+		// 풀린 로그인은 보관함의 정보로 다시 한다. 안 되면(문자 인증 등) 알린다.
+		if vaultModule != nil {
+			checker.Relogin = relogin(runner, vaultModule, u, cfg.ExtraMCPToken)
+			loginNote := notify.New(cfg.NotifyURL, cfg.DatabaseURL, cfg.APIToken, log)
+			checker.StillOut = func(s browsercheck.Site, why string) {
+				loginNote.Send(notify.Event{
+					Source: "agent", Kind: "browser.login", Tier: "now", Level: "warn",
+					Title: s.ID + " 자동 로그인이 안 됐어요",
+					Body:  why + " - 화면 탭에서 직접 로그인해 주세요.",
+					URL:   "/screen", Key: "relogin:" + s.ID + ":" + time.Now().Format("2006-01-02T15"),
+				})
+			}
+		}
 		browserChecks = checker.Handler()
 		go checker.Run(enrichCtx)
 	}
@@ -306,6 +332,7 @@ func main() {
 			MindUsage:       mindUsage,
 			Consume:         consume,
 			BrowserChecks:   browserChecks,
+			Vault:           vaultConsole(vaultModule),
 			FollowUp:        runner,
 			Log:             log,
 		}).Handler(),
@@ -343,4 +370,57 @@ func main() {
 	_ = srv.Shutdown(ctx)
 	_ = modules.Stop(ctx)
 	log.Info("종료했습니다")
+}
+
+// vaultConsole is the saved logins' console view, or nothing without a vault.
+func vaultConsole(m *vault.Module) http.Handler {
+	if m == nil {
+		return nil
+	}
+	return m.ConsoleHandler()
+}
+
+// relogin signs a logged-out site back in with the login the vault keeps: a
+// background task, held to that site's domain, that opens the page, has the
+// browser fill the login (browser_fill_login - the model never sees it) and
+// presses the button. Anything beyond a plain login - a code by text, a
+// captcha, a new-device check - it leaves for the operator.
+func relogin(runner *claudecode.Runner, v *vault.Module, browserURL, browserToken string) func(context.Context, browsercheck.Site) error {
+	return func(ctx context.Context, s browsercheck.Site) error {
+		domain, err := site.Domain(s.LoginHost)
+		if err != nil {
+			return err
+		}
+		if !v.Has(ctx, domain) {
+			return fmt.Errorf("%s 에 저장된 로그인 정보가 없습니다", domain)
+		}
+		guard, err := jobs.NewBridgeGuard(browserURL, browserToken)
+		if err != nil {
+			return err
+		}
+		if err := guard.Restrict(ctx, []string{domain}, 6*time.Minute); err != nil {
+			return fmt.Errorf("브라우저를 %s 안에 묶지 못했습니다: %w", domain, err)
+		}
+		defer func() { _ = guard.Release(context.WithoutCancel(ctx)) }()
+		tools := []string{}
+		for _, t := range []string{"browser_navigate", "browser_get_state", "browser_click", "browser_fill_login", "browser_screenshot", "browser_list_tabs", "browser_switch_tab", "browser_close_tab"} {
+			tools = append(tools, "mcp__"+jobs.BrowserServer+"__"+t)
+		}
+		_, err = runner.Background(ctx, claudecode.Task{
+			Name: "재로그인 " + s.ID,
+			Prompt: fmt.Sprintf("%s(%s) 로그인이 풀렸습니다. 다시 로그인하세요.\n"+
+				"1. browser_navigate 로 %s 를 엽니다. 로그인 화면으로 넘어갑니다.\n"+
+				"2. browser_fill_login 으로 저장된 아이디·비밀번호를 넣습니다(값은 당신에게 보이지 않습니다).\n"+
+				"3. 로그인 버튼을 한 번 누르고 browser_get_state 로 로그인됐는지 봅니다.\n"+
+				"4. 연 탭을 닫고, 결과를 한 줄로 씁니다.", s.ID, domain, s.Orders),
+			System: "당신은 Jarvis의 백그라운드 재로그인입니다. 아무도 보지 않는 채로, 운영자의 계정이 로그인된 브라우저를 씁니다.\n" +
+				"- 로그인 말고는 아무것도 누르지 않습니다. 주문·결제·설정·광고는 건드리지 않습니다.\n" +
+				"- 문자·이메일 인증, 보안문자, 새 기기 확인, 비밀번호 변경 안내가 나오면 더 누르지 말고 멈춘 뒤 그 사실을 한 줄로 씁니다.\n" +
+				"- 로그인 버튼은 한 번만 누릅니다. 실패하면 다시 넣거나 다시 누르지 않습니다(계정이 잠길 수 있습니다).",
+			Extra:   []string{jobs.BrowserServer},
+			Allowed: tools,
+			Timeout: 5 * time.Minute,
+		})
+		return err
+	}
 }

@@ -33,9 +33,10 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
+import jobsites
+import login
 import pin
 import upload
-import jobsites
 
 HOST = os.environ.get("MCP_BROWSER_HOST", "0.0.0.0")
 PORT = int(os.environ.get("MCP_BROWSER_PORT", "8931"))
@@ -66,8 +67,11 @@ _upstream: ClientSession | None = None
 
 async def handle_list_tools(_ctx, _params: PaginatedRequestParams | None) -> ListToolsResult:
     tools = (await _upstream.list_tools()).tools
-    # browser-use에 없는 도구를 여기서 더한다: 파일 선택 칸 채우기, 쿠팡 결제 비밀번호 넣기.
-    return ListToolsResult(tools=[t for t in tools if t.name not in HIDDEN] + [Tool(**upload.TOOL), Tool(**pin.TOOL)])
+    # browser-use에 없는 도구를 여기서 더한다: 파일 선택 칸 채우기, 쿠팡 결제 비밀번호 넣기,
+    # 저장된 로그인 정보 넣기.
+    return ListToolsResult(
+        tools=[t for t in tools if t.name not in HIDDEN] + [Tool(**upload.TOOL), Tool(**pin.TOOL), Tool(**login.TOOL)]
+    )
 
 
 async def handle_call_tool(_ctx, params: CallToolRequestParams) -> CallToolResult:
@@ -86,6 +90,12 @@ async def handle_call_tool(_ctx, params: CallToolRequestParams) -> CallToolResul
     if params.name == pin.TOOL["name"]:
         try:
             text = await pin.enter()
+        except Exception as e:
+            return CallToolResult(content=[{"type": "text", "text": str(e)}], isError=True)
+        return CallToolResult(content=[{"type": "text", "text": text}])
+    if params.name == login.TOOL["name"]:
+        try:
+            text = await login.fill()
         except Exception as e:
             return CallToolResult(content=[{"type": "text", "text": str(e)}], isError=True)
         return CallToolResult(content=[{"type": "text", "text": text}])

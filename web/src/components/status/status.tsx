@@ -30,6 +30,7 @@ import {
 } from "@/lib/use-usage";
 import { cn } from "@/lib/utils";
 import { PhoneSetup } from "./phone-setup";
+import { SavedLogins } from "./saved-logins";
 
 /**
  * Is anything broken - answered per feature, not per container.
@@ -181,6 +182,23 @@ export function Status() {
                     onPick={reveal}
                   >
                     <PhoneSetup />
+                  </Row>
+                </ul>
+              </Group>
+
+              <Group name="로그인 정보">
+                <ul>
+                  <Row
+                    r={{
+                      id: "logins",
+                      name: "저장된 로그인",
+                      summary: "자비스가 로그인 화면에 자동으로 넣는 사이트와, 넣은 기록이에요.",
+                    }}
+                    open={open === "logins"}
+                    onToggle={() => setOpen(open === "logins" ? null : "logins")}
+                    onPick={reveal}
+                  >
+                    {open === "logins" ? <SavedLogins /> : null}
                   </Row>
                 </ul>
               </Group>

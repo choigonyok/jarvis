@@ -44,7 +44,8 @@ type Card struct {
 type Field struct {
 	Key   string `json:"key"`
 	Label string `json:"label"`
-	// Kind is "text", "textarea", "number" or "select".
+	// Kind is "text", "textarea", "number", "select" or "secret" (typed
+	// hidden, like a password).
 	Kind    string   `json:"kind"`
 	Value   string   `json:"value"`
 	Options []string `json:"options,omitempty"`
@@ -52,7 +53,14 @@ type Field struct {
 	Required bool `json:"required,omitempty"`
 	// Hint is a line under the field (a price reference, a format).
 	Hint string `json:"hint,omitempty"`
+	// Private is a value that is never kept with the card nor told to the
+	// model: at approval it goes to the module (module.SecretSink) and is
+	// dropped from the edits. A "secret" field is always private.
+	Private bool `json:"private,omitempty"`
 }
+
+// IsPrivate is whether the field's value must bypass the card's record.
+func (f Field) IsPrivate() bool { return f.Private || f.Kind == "secret" }
 
 // Spec is a module's declaration of one action it accepts.
 type Spec struct {

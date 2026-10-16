@@ -122,6 +122,11 @@ VNC 서버(x11vnc)는 브라우저 컨테이너 안에서만 듣고(`-localhost`
 맥미니 .env `JARVIS_VNC_PASSWORD`)를 묻는다. 입장권 경로가 그 비밀번호도 화면 탭에 건넨다.
 비밀번호가 없으면 원격 화면은 열리지 않는다(브라우저는 그대로 돈다).
 
+**로그인 정보 보관함(2026-10-17, vault-svc).** 맥미니 .env 에 `JARVIS_VAULT_KEY`(`openssl rand -base64 32` -
+봉인 키, DB·백업에는 없으니 따로 보관), `JARVIS_VAULT_RELEASE_TOKEN`(브라우저가 꺼낼 때만 쓰는 토큰),
+`JARVIS_DB_PASSWORD_VAULT`(`scripts/db-roles` 가 만든다). 맥미니 `JARVIS_ALLOWED_TOOLS` 에
+`mcp__mcp-browser__browser_fill_login`(자동 입력은 카드 없이)과 `mcp__vault__list_logins`.
+
 **맥미니 .env 에 더 필요한 값(2026-10-17).** `JARVIS_GUEST_API_TOKEN`(손님 agent 의 토큰 - chat·calendar·
 events·memory 가 손님 쪽만 열어 준다), `JARVIS_MIND_CONSOLE_TOKEN`(mind 콘솔 로그인, `scripts/mini console`),
 `JARVIS_VNC_PASSWORD`(8자). 앞의 둘은 `openssl rand -base64 48 | tr -d '/+='` 로 만든다.

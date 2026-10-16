@@ -14,15 +14,25 @@ export type ProposalAction = {
 export type CardField = {
   key: string;
   label: string;
-  /** multi: several options, kept comma-joined ("소음·매너,청결"). */
-  kind: "text" | "textarea" | "number" | "select" | "multi";
+  /** multi: several options, kept comma-joined ("소음·매너,청결"). secret: typed hidden (a password). */
+  kind: "text" | "textarea" | "number" | "select" | "multi" | "secret";
   value: string;
   options?: string[];
   /** Approval stays off while this is empty. */
   required?: boolean;
   /** A line under the field: a price reference, a format. */
   hint?: string;
+  /**
+   * Never kept with the card nor told to Jarvis: at approval the agent hands
+   * it to the module (a login to the vault) and drops it. A secret always is.
+   */
+  private?: boolean;
 };
+
+/** Whether a field's value bypasses the card's record (a login). */
+export function isPrivateField(f: CardField): boolean {
+  return Boolean(f.private) || f.kind === "secret";
+}
 
 export type ProposalCardBody = {
   title: string;

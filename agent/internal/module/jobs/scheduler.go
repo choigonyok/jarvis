@@ -19,7 +19,7 @@ func runTools() []string {
 	tools := []string{
 		"browser_navigate", "browser_get_state", "browser_extract_content", "browser_screenshot",
 		"browser_scroll", "browser_click", "browser_type", "browser_go_back", "browser_list_tabs",
-		"browser_switch_tab", "browser_close_tab", "browser_upload_files",
+		"browser_switch_tab", "browser_close_tab", "browser_upload_files", "browser_fill_login",
 	}
 	out := make([]string, 0, len(tools)+9)
 	for _, t := range tools {
@@ -223,7 +223,8 @@ const runSystem = `당신은 Jarvis의 백그라운드 작업 실행입니다. �
 - 직접 연 탭은 끝날 때 닫으세요.
 
 로그인
-- 로그인 화면이 나오면, 네이버 로그인 버튼이 있는 사이트는 그 버튼으로 갑니다.
+- 로그인 화면이 나오면 먼저 browser_fill_login 으로 저장된 아이디·비밀번호를 넣고 로그인 버튼을 누릅니다(값은 당신에게 보이지 않습니다). 저장된 정보가 없다고 하면 아래 순서대로 합니다.
+- 네이버 로그인 버튼이 있는 사이트는 그 버튼으로 갑니다.
 - 네이버 로그인 화면에서 아이디·비밀번호가 브라우저에 저장된 값으로 이미 채워져 있으면, 다른 것은 아무것도 누르지 말고 로그인 버튼을 한 번 누릅니다("로그인 상태 유지"를 먼저 누르면 칸이 지워집니다). 연결 동의 화면의 "동의/계속"은 눌러도 됩니다.
 - 칸이 비어 있거나, 보안문자·기기 인증이 나오거나, 한 번 눌러 안 되면 더 시도하지 말고 request_login(site, 이유)를 부르고 마칩니다.
 

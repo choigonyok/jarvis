@@ -133,3 +133,31 @@ func TestSiteOf(t *testing.T) {
 		t.Error("sameSite")
 	}
 }
+
+func TestLoggedOutIsTheLoginPage(t *testing.T) {
+	s := Site{ID: "coupang", LoginHost: "login.coupang.com"}
+	for _, c := range []struct {
+		r    Result
+		want bool
+	}{
+		{Result{URL: "https://login.coupang.com/login/login.pang?rtnUrl=x"}, true},
+		{Result{URL: "https://mc.coupang.com/ssr/desktop/order/list"}, false},
+		{Result{URL: "https://login.coupang.com/x", Busy: true}, false},
+		{Result{Error: "탭을 열지 못함"}, false},
+	} {
+		if got := LoggedOut(c.r, s); got != c.want {
+			t.Errorf("%+v: %v", c.r, got)
+		}
+	}
+}
+
+func TestReloginIsNotTriedAgainSoon(t *testing.T) {
+	c := &Checker{ReloginEvery: time.Hour}
+	c.init()
+	if !c.due("coupang") || c.due("coupang") {
+		t.Fatal("한 시간에 한 번만 시도해야 합니다")
+	}
+	if !c.due("naver") {
+		t.Fatal("사이트마다 따로 셉니다")
+	}
+}

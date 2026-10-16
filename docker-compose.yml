@@ -105,6 +105,8 @@ services:
       JARVIS_SPENDING_URL: http://spending:8095
       # 작업. 대화에서 맡긴 일을 기록하는 곳이고, 실행은 에이전트의 스케줄러가 한다.
       JARVIS_JOBS_URL: http://jobs:8098
+      # 로그인 정보 보관함(저장·목록·지우기만 - 꺼내는 것은 브라우저뿐).
+      JARVIS_VAULT_URL: http://vault:8105
       # 하나의 관문(mind-svc). 제안은 거기서 정해지고, 그 카드가 여기서 결재 카드가 된다.
       JARVIS_MIND_URL: http://mind:8102
       # 위치·현재 상태(읽기만). get_context 도구와 판단 턴의 사실.
@@ -312,6 +314,40 @@ services:
     networks:
       - default
       - data
+    restart: unless-stopped
+
+  # 로그인 정보 보관함. 운영자가 대화의 카드(비밀번호 칸)로 넣은 아이디·비밀번호를
+  # 봉인해서(AES-256-GCM) Postgres 에 두고, 브라우저가 그 사이트의 로그인 화면에 있을
+  # 때만 꺼내 준다. 키는 이 .env 에만 있다 - DB 와 백업에는 봉인된 값뿐이다.
+  # 토큰이 둘: 서비스 토큰(에이전트)은 저장·목록·지우기만, 브라우저 토큰은 꺼내기만.
+  # 공개 포트가 없고, data(Postgres)·browser(브라우저가 꺼내 감) 네트워크에만 붙는다.
+  vault:
+    build:
+      context: ./vault-svc
+      additional_contexts:
+        gocommon: ./gocommon
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      LISTEN_ADDR: ":8105"
+      DATABASE_URL: >-
+        postgres://svc_vault:${JARVIS_DB_PASSWORD_VAULT:?scripts/db-roles 를 먼저 실행하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
+      API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
+      VAULT_RELEASE_TOKEN: ${JARVIS_VAULT_RELEASE_TOKEN:?JARVIS_VAULT_RELEASE_TOKEN 을 .env 에 설정하세요}
+      VAULT_KEY: ${JARVIS_VAULT_KEY:?JARVIS_VAULT_KEY 를 .env 에 설정하세요 (openssl rand -base64 32)}
+    expose:
+      - "8105"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8105/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+    networks:
+      - data
+      - browser
     restart: unless-stopped
 
   # 가계부. 카드사가 카톡으로 보내는 결제 알림을 카톡 수집기에서 읽어 분류하고
@@ -541,6 +577,9 @@ services:
       MCP_BROWSER_TOKEN: ${JARVIS_MCP_TOKEN:-}
       # 원격 화면(VNC) 비밀번호. 웹 Worker 의 JARVIS_VNC_PASSWORD 와 같은 값(앞 8자만 쓰인다).
       VNC_PASSWORD: ${JARVIS_VNC_PASSWORD:-}
+      # browser_fill_login 이 지금 탭의 사이트 로그인을 보관함에서 꺼내 넣는다(이 토큰은 꺼내기만 연다).
+      VAULT_URL: http://vault:8105
+      VAULT_RELEASE_TOKEN: ${JARVIS_VAULT_RELEASE_TOKEN:-}
       # 쿠팡 결제 비밀번호(쿠페이). 맥미니 .env 에만 있다 - 저장소에는 절대 두지 않는다.
       # browser_enter_payment_pin 이 쿠팡 화면의 키패드에만 넣고, 모델에게는 보이지 않는다.
       COUPANG_PAY_PIN: ${JARVIS_COUPANG_PAY_PIN:-}
@@ -773,6 +812,7 @@ services:
       MEMORY_URL: http://memory:8100
       CONTEXT_URL: http://context:8103
       PHONENOTE_URL: http://phonenote:8104
+      VAULT_URL: http://vault:8105
       BROWSER_ADDR: browser:8931
       # 쿠팡·네이버페이 주문목록이 열리는지는 에이전트 브라우저 새 탭에서 직접
       # 열어 보고 판단한다(30분마다). 쿠키가 남아 있어도 로그아웃일 수 있었다.

@@ -21,3 +21,5 @@ const proxy = pathProxy(
 
 export const GET = proxy;
 export const POST = proxy;
+// Forgetting a saved login (/vault/{domain}) and removing a calendar entry.
+export const DELETE = proxy;

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import type { CardField, Decision, Proposal, ProposalState } from "@/lib/thread";
+import { isPrivateField, type CardField, type Decision, type Proposal, type ProposalState } from "@/lib/thread";
 import { photoUrl } from "@/lib/uploads";
 import { cn } from "@/lib/utils";
 
@@ -48,6 +48,8 @@ export function ProposalCard({
     const reason = await onDecide(d, form && d === "approved" ? values : undefined, because);
     setBusy(false);
     if (reason) setRefusal(reason);
+    // A typed password is not kept on screen once it has been handed over.
+    else setValues((cur) => Object.fromEntries(Object.entries(cur).map(([k, v]) => [k, fields.some((f) => f.key === k && isPrivateField(f)) ? "" : v])));
   }
   // Claude Code's own tools are shown as the literal call; a module's action
   // is shown as the change it makes.
@@ -332,11 +334,17 @@ function FormFields({
                   );
                 })}
               </div>
+            ) : f.kind === "secret" ? (
+              <SecretInput id={id} value={value} onChange={(v) => onChange(f.key, v)} />
             ) : (
               <input
                 id={id}
                 value={value}
                 onChange={(e) => onChange(f.key, e.target.value)}
+                // A login's username: no autocorrect, no capitalised first letter.
+                {...(isPrivateField(f)
+                  ? { autoComplete: "username", autoCapitalize: "none", autoCorrect: "off", spellCheck: false }
+                  : {})}
                 className={cn(input, "h-11 sm:h-9")}
               />
             )}
@@ -348,9 +356,42 @@ function FormFields({
   );
 }
 
+/**
+ * A password field, hidden as typed, with a 보기 toggle - a phone keyboard
+ * makes a typo easy and this is the only chance to see it. It goes from here
+ * to the vault and is never shown again.
+ */
+function SecretInput({ id, value, onChange }: { id: string; value: string; onChange: (v: string) => void }) {
+  const [shown, setShown] = useState(false);
+  return (
+    <div className="relative">
+      <input
+        id={id}
+        type={shown ? "text" : "password"}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        autoComplete="new-password"
+        autoCapitalize="none"
+        autoCorrect="off"
+        spellCheck={false}
+        className={cn(input, "h-11 pe-14 sm:h-9")}
+      />
+      <button
+        type="button"
+        onClick={() => setShown((s) => !s)}
+        aria-pressed={shown}
+        aria-label={shown ? "비밀번호 가리기" : "비밀번호 보기"}
+        className="absolute inset-y-0 right-1 my-auto flex h-9 items-center rounded-md px-2.5 text-[12px] text-faint outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-7"
+      >
+        {shown ? "가리기" : "보기"}
+      </button>
+    </div>
+  );
+}
+
 /** A decided form card shows what was approved, not the inputs. */
 function FormSummary({ fields }: { fields: CardField[] }) {
-  const shown = fields.filter((f) => f.value && f.kind !== "textarea").slice(0, 4);
+  const shown = fields.filter((f) => f.value && f.kind !== "textarea" && !isPrivateField(f)).slice(0, 4);
   if (shown.length === 0) return null;
   return (
     <dl className="mt-2 space-y-0.5 text-[13px]">
