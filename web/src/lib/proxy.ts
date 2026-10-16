@@ -3,7 +3,30 @@
 // The browser never talks to a service directly: the bearer token stays on
 // the server side of this, and every route using it sits behind the console
 // login (see src/middleware.ts). Responses are never cached.
-const API_TOKEN = process.env.JARVIS_EDGE_TOKEN ?? "";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
+
+const GATEWAY_TOKEN = process.env.JARVIS_EDGE_TOKEN ?? "";
+const GATEWAY_ORIGIN = "https://jarvis-be.choigonyok.com";
+
+/**
+ * fetch, but a request for the gateway goes over the GATEWAY service binding
+ * when there is one (on Cloudflare): no public hop, no DNS, no TLS. Anywhere
+ * else - next dev on a laptop - it is a plain fetch.
+ */
+function gatewayFetch(target: string, init: RequestInit): Promise<Response> {
+  if (target.startsWith(GATEWAY_ORIGIN)) {
+    try {
+      const binding = (getCloudflareContext().env as { GATEWAY?: { fetch: typeof fetch } }).GATEWAY;
+      // A binding that fails outright (not deployed, renamed) falls back to the
+      // public hostname rather than taking the console down with it. The body
+      // is bytes, so it can be sent twice.
+      if (binding) return binding.fetch(target, init).catch(() => fetch(target, init));
+    } catch {
+      // not running on Cloudflare
+    }
+  }
+  return fetch(target, init);
+}
 
 export type ProxyOptions = {
   /** Shown when the service cannot be reached: "<label>에 연결하지 못했습니다." */
@@ -28,7 +51,7 @@ export async function forward(
     const value = request.headers.get(key);
     if (value) headers.set(key, value);
   }
-  if (API_TOKEN) headers.set("authorization", `Bearer ${API_TOKEN}`);
+  if (GATEWAY_TOKEN) headers.set("authorization", `Bearer ${GATEWAY_TOKEN}`);
 
   const method = init?.method ?? request.method;
   let body = init?.body;
@@ -39,7 +62,7 @@ export async function forward(
 
   let upstream: Response;
   try {
-    upstream = await fetch(target, {
+    upstream = await gatewayFetch(target, {
       method,
       headers,
       body,

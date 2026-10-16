@@ -28,6 +28,11 @@
   ],
   "workers_dev": false,
 
+  // The gateway Worker, reached Worker to Worker instead of over the public
+  // hostname (src/lib/proxy.ts). The hostname stays for what only a browser
+  // or a phone can call: the VNC socket and OwnTracks/Shortcuts.
+  "services": [{ "binding": "GATEWAY", "service": "jarvis-be" }],
+
   // Every backend is reached through the gateway Worker (edge/), which rides a
   // Workers VPC binding into the Mac mini. The addresses are not secret - the
   // gateway refuses anything without JARVIS_EDGE_TOKEN, which is a secret here.

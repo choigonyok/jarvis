@@ -7,7 +7,7 @@
 // gateway checks the signature and the expiry, and only for /vnc/websockify.
 // It is only needed to open the socket; a session that is already open runs on.
 const GATEWAY = process.env.JARVIS_VNC_GATEWAY ?? "";
-const API_TOKEN = process.env.JARVIS_EDGE_TOKEN ?? "";
+const GATEWAY_TOKEN = process.env.JARVIS_EDGE_TOKEN ?? "";
 const TTL_SECONDS = 60;
 
 export const dynamic = "force-dynamic";
@@ -16,13 +16,13 @@ const hex = (buf: ArrayBuffer) =>
   [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 
 export async function GET() {
-  if (!GATEWAY || !API_TOKEN) {
+  if (!GATEWAY || !GATEWAY_TOKEN) {
     return Response.json({ error: "원격 화면이 설정되지 않았습니다." }, { status: 503 });
   }
   const exp = String(Math.floor(Date.now() / 1000) + TTL_SECONDS);
   const key = await crypto.subtle.importKey(
     "raw",
-    new TextEncoder().encode(API_TOKEN),
+    new TextEncoder().encode(GATEWAY_TOKEN),
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign"],
