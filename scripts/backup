@@ -1,0 +1,158 @@
+#!/usr/bin/env bash
+# 맥미니의 데이터를 매일 백업한다. 맥미니에서 돈다(scripts/mini sync 로 ~/jarvis 에 있다).
+#
+#   scripts/backup run           지금 백업 → $JARVIS_BACKUP_DIR/YYYY-MM-DD (기본 ~/jarvis-backups)
+#   scripts/backup restore-test  가장 최근 백업을 임시 컨테이너에 복원해 열리는지 본다
+#   scripts/backup install       LaunchAgent com.jarvis.backup 으로 매일 04:30 에 run
+#   scripts/backup uninstall     멈추고 지운다(백업은 남긴다)
+#   scripts/backup status        LaunchAgent 상태, 백업 목록, 마지막 로그
+#
+# 담는 것: Postgres(pg_dump -Fc), FalkorDB(RDB+AOF), 수집기 SQLite(카톡·iMessage, .backup 으로
+# 일관된 사본), 에이전트 홈·업로드, 브라우저 프로필(캐시 제외). 카톡 수집기는 지난 메시지를 다시
+# 만들 수 없으므로 이것이 유일한 사본이다. ollama 모델은 다시 받으면 되므로 뺀다.
+#
+# 백업 디렉터리는 Time Machine 대상이어야 한다(제외 목록에 넣지 않는다). Time Machine 대상 디스크
+# 설정은 사람이 한다: 시스템 설정 → 일반 → Time Machine. 14일보다 오래된 백업은 지운다.
+set -euo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.orbstack/bin:/Applications/Docker.app/Contents/Resources/bin:$PATH"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+DIR="${JARVIS_BACKUP_DIR:-$HOME/jarvis-backups}"
+KEEP_DAYS="${JARVIS_BACKUP_KEEP_DAYS:-14}"
+LABEL=com.jarvis.backup
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+LOG="$HOME/Library/Logs/jarvis-backup.log"
+P=jarvis # compose 프로젝트 이름 = 볼륨 접두사
+SQLITE_IMG=alpine:3.22
+
+dc() { (cd "$ROOT" && docker compose "$@"); }
+env_of() { grep -E "^$1=" "$ROOT/.env" | cut -d= -f2- || true; }
+log() { echo "$(date '+%F %T') $*"; }
+PGUSER_=$(env_of JARVIS_POSTGRES_USER); PGUSER_=${PGUSER_:-jarvis}
+PGDB_=$(env_of JARVIS_POSTGRES_DB); PGDB_=${PGDB_:-jarvis}
+
+# vol_sqlite 볼륨 파일 → 대상: 쓰는 중인 WAL 데이터베이스도 일관되게 뜬다.
+vol_sqlite() {
+  local vol=$1 file=$2 out=$3
+  docker run --rm -v "${P}_$vol:/v" -v "$out:/out" "$SQLITE_IMG" sh -c \
+    "apk add -q --no-cache sqlite >/dev/null && [ -f /v/$file ] && sqlite3 /v/$file \".backup /out/$file\" || true"
+}
+
+vol_tar() { # 볼륨 → out/vol.tar.gz, 추가 인자는 tar 제외 패턴
+  local vol=$1 out=$2; shift 2
+  local ex=()
+  for e in "$@"; do ex+=(--exclude="$e"); done
+  docker run --rm -v "${P}_$vol:/v:ro" -v "$out:/out" "$SQLITE_IMG" \
+    tar -czf "/out/$vol.tar.gz" ${ex[@]+"${ex[@]}"} -C /v .
+}
+
+run() {
+  local day out
+  day=$(date +%F)
+  out="$DIR/$day"
+  mkdir -p "$out"
+  chmod 700 "$DIR"
+  log "백업 시작 → $out"
+
+  dc exec -T postgres pg_dump -U "$PGUSER_" -Fc "$PGDB_" > "$out/postgres.dump.tmp"
+  mv "$out/postgres.dump.tmp" "$out/postgres.dump"
+
+  # FalkorDB: 새 스냅숏을 뜬 뒤 데이터 디렉터리 통째로(RDB + AOF).
+  local before
+  before=$(dc exec -T falkordb redis-cli LASTSAVE | tr -dc 0-9)
+  dc exec -T falkordb redis-cli BGSAVE >/dev/null
+  for _ in $(seq 60); do
+    [ "$(dc exec -T falkordb redis-cli LASTSAVE | tr -dc 0-9)" != "$before" ] && break
+    sleep 1
+  done
+  vol_tar jarvis-falkordb "$out"
+
+  for spec in jarvis-kakaotalk-data:kakaotalk.db jarvis-imessage-data:imessage.db jarvis-data:kakao.db; do
+    vol_sqlite "${spec%%:*}" "${spec#*:}" "$out"
+  done
+
+  vol_tar jarvis-home "$out"
+  vol_tar jarvis-guest-home "$out"
+  vol_tar jarvis-uploads "$out"
+  vol_tar chrome-profile "$out" '*/Cache' '*/Code Cache' '*/GPUCache' '*/Service Worker/CacheStorage' '*/DawnCache' '*/GrShaderCache'
+
+  chmod -R go-rwx "$out"
+  find "$DIR" -mindepth 1 -maxdepth 1 -type d -mtime +"$KEEP_DAYS" -exec rm -rf {} +
+  log "백업 끝: $(du -sh "$out" | cut -f1)"
+}
+
+restore_test() {
+  ok=1 # trap 이 함수 밖에서 읽으므로 전역이다
+  last=$(find "$DIR" -mindepth 1 -maxdepth 1 -type d | sort | tail -1)
+  [ -n "$last" ] || { echo "백업이 없습니다" >&2; exit 1; }
+  log "복원 시험: $last"
+  net="jarvis-restore-$$"; pg="$net-pg"; fk="$net-fk"
+  trap 'docker rm -f "$pg" "$fk" >/dev/null 2>&1; docker network rm "$net" >/dev/null 2>&1' EXIT
+  docker network create "$net" >/dev/null
+
+  docker run -d --name "$pg" --network "$net" -e POSTGRES_PASSWORD=restore -e POSTGRES_USER=jarvis \
+    -e POSTGRES_DB=jarvis pgvector/pgvector:pg17 >/dev/null
+  until docker exec "$pg" pg_isready -U jarvis >/dev/null 2>&1; do sleep 1; done
+  docker exec -i "$pg" pg_restore -U jarvis -d jarvis --no-owner < "$last/postgres.dump" 2>&1 | tail -3 || true
+  local tables live
+  tables=$(docker exec "$pg" psql -U jarvis -d jarvis -Atc "select count(*) from information_schema.tables where table_schema='public'")
+  live=$(dc exec -T postgres psql -U "$PGUSER_" -d "$PGDB_" -Atc \
+    "select count(*) from information_schema.tables where table_schema='public'" | tr -dc 0-9)
+  echo "postgres: 테이블 $tables (운영 $live)"
+  [ "$tables" = "$live" ] || ok=0
+  for t in mind_messages workout_sessions; do
+    echo "  $t: $(docker exec "$pg" psql -U jarvis -d jarvis -Atc "select count(*) from $t" 2>/dev/null || echo 없음)"
+  done
+
+  docker volume create "$fk" >/dev/null
+  docker run --rm -v "$fk:/v" -v "$last:/in:ro" "$SQLITE_IMG" tar -xzf /in/jarvis-falkordb.tar.gz -C /v
+  docker run -d --name "$fk" -v "$fk:/var/lib/falkordb/data" \
+    -e REDIS_ARGS="--appendonly yes" falkordb/falkordb:v4.22.0 >/dev/null
+  until docker exec "$fk" redis-cli PING 2>/dev/null | grep -q PONG; do sleep 1; done
+  local graphs
+  graphs=$(docker exec "$fk" redis-cli GRAPH.LIST | tr '\n' ' ')
+  echo "falkordb: 그래프 $graphs"
+  [ -n "${graphs// /}" ] || ok=0
+  docker rm -f "$fk" >/dev/null; docker volume rm "$fk" >/dev/null
+
+  for f in kakaotalk.db imessage.db kakao.db; do
+    [ -f "$last/$f" ] || continue
+    local r
+    r=$(docker run --rm -v "$last:/in:ro" "$SQLITE_IMG" sh -c "apk add -q --no-cache sqlite >/dev/null && sqlite3 'file:/in/$f?immutable=1' 'pragma integrity_check'")
+    echo "$f: $r"
+    [ "$r" = ok ] || ok=0
+  done
+  [ "$ok" = 1 ] && log "복원 시험 통과" || { log "복원 시험 실패"; exit 1; }
+}
+
+case "${1:-}" in
+  run) run ;;
+  restore-test) restore_test ;;
+  install)
+    mkdir -p "$(dirname "$PLIST")" "$(dirname "$LOG")"
+    cat > "$PLIST" <<PL
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>$LABEL</string>
+  <key>ProgramArguments</key><array><string>$ROOT/scripts/backup</string><string>run</string></array>
+  <key>StartCalendarInterval</key><dict><key>Hour</key><integer>4</integer><key>Minute</key><integer>30</integer></dict>
+  <key>StandardOutPath</key><string>$LOG</string>
+  <key>StandardErrorPath</key><string>$LOG</string>
+</dict></plist>
+PL
+    launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+    launchctl bootstrap "gui/$(id -u)" "$PLIST"
+    echo "설치했습니다: $LABEL (매일 04:30 → $DIR)"
+    ;;
+  uninstall)
+    launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+    rm -f "$PLIST"
+    echo "지웠습니다(백업은 $DIR 에 남아 있습니다)"
+    ;;
+  status)
+    launchctl print "gui/$(id -u)/$LABEL" 2>/dev/null | grep -E "state|last exit" | head -3 || echo "설치되지 않았습니다"
+    ls -1 "$DIR" 2>/dev/null | tail -5
+    tail -5 "$LOG" 2>/dev/null || true
+    ;;
+  *) sed -n '2,16p' "$0"; exit 1 ;;
+esac
