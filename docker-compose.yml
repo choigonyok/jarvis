@@ -496,6 +496,9 @@ services:
       # but a bridge that accepts anything is a bridge that will be pointed at
       # something else later.
       MCP_BROWSER_TOKEN: ${JARVIS_MCP_TOKEN:-}
+      # 쿠팡 결제 비밀번호(쿠페이). 맥미니 .env 에만 있다 - 저장소에는 절대 두지 않는다.
+      # browser_enter_payment_pin 이 쿠팡 화면의 키패드에만 넣고, 모델에게는 보이지 않는다.
+      COUPANG_PAY_PIN: ${JARVIS_COUPANG_PAY_PIN:-}
     volumes:
       # Where being logged in lives. Empty this and every site asks again.
       - chrome-profile:/profile
