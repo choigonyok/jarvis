@@ -14,6 +14,8 @@
  *   Shortcuts), which must not hold the stack's token: they pass without it,
  *   POST only, and context-svc checks their own credentials (OwnTracks' Basic
  *   auth, the signal token). Everything else on context needs the token.
+ *   /phonenote/notes is the same for the Mac that collects the phone's
+ *   notifications: phonenote-svc checks the collector's own token.
  * - For the agent, only the routes the console uses. The agent also serves
  *   /mcp (the tools Claude Code calls - unauthenticated, because they are
  *   meant to be dialled over loopback) and /intercept (the payment guard's
@@ -44,6 +46,7 @@ interface Env {
   IMMICH: Fetcher;
   NOTIFY: Fetcher;
   CONTEXT: Fetcher;
+  PHONENOTE: Fetcher;
   /** Immich's API key for the gallery. Only this gateway holds it. */
   IMMICH_API_KEY?: string;
 }
@@ -64,6 +67,8 @@ const SERVICES: Record<string, { binding: keyof Env; origin: string }> = {
   // reach notify-svc inside the compose network, not through here.
   notify: { binding: "NOTIFY", origin: "http://notify:8097" },
   context: { binding: "CONTEXT", origin: "http://context:8103" },
+  // The phone's notifications, read and applied (a collector on a Mac hands them in).
+  phonenote: { binding: "PHONENOTE", origin: "http://phonenote:8104" },
   vnc: { binding: "BROWSER", origin: "http://browser:6080" },
 };
 
@@ -126,8 +131,12 @@ export default {
       // Handed over whole, so the WebSocket upgrade goes through as one.
       return (env.BROWSER as Fetcher).fetch(new Request(`http://browser:6080/websockify${url.search}`, request));
     }
-    // The phone's own doors: their credentials are checked by context-svc.
-    const phone = name === "context" && request.method === "POST" && rest.length === 1 && (rest[0] === "owntracks" || rest[0] === "signals");
+    // The phone's own doors: their credentials are checked by the service
+    // (context-svc; phonenote-svc for the Mac that collects notifications).
+    const phone =
+      request.method === "POST" &&
+      rest.length === 1 &&
+      ((name === "context" && (rest[0] === "owntracks" || rest[0] === "signals")) || (name === "phonenote" && rest[0] === "notes"));
     if (!bearer && !phone) return json(401, "인증이 필요합니다.");
 
     const service = SERVICES[name];

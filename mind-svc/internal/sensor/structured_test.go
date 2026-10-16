@@ -2,6 +2,8 @@ package sensor
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"slices"
 	"testing"
 	"time"
@@ -98,3 +100,32 @@ func TestSyncCalendar(t *testing.T) {
 }
 
 func Meta() world.Meta { return world.Meta{Actor: "test"} }
+
+// 1: what the phone's notifications said - pay in, a parcel - arrives as
+// occurrences, observed once while it stays the same.
+func TestPhoneNotificationsAreOccurrences(t *testing.T) {
+	ctx := context.Background()
+	st := store.NewMemory()
+	now := time.Date(2026, 10, 17, 9, 0, 0, 0, seoul)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/occurrences" || r.URL.Query().Get("since") == "" || r.Header.Get("Authorization") != "Bearer t" {
+			http.Error(w, "no", http.StatusBadRequest)
+			return
+		}
+		_, _ = w.Write([]byte(`{"occurrences":[
+			{"id":"phone:7","kind":"deposit","at":"2026-10-17T08:30:00+09:00","title":"(주)회사","class":"급여","amount":3200000,"ref":"com.kbstar.kbbank"},
+			{"id":"phone:8","kind":"parcel","at":"2026-10-17T08:40:00+09:00","title":"택배 도착 예정","class":"arriving","ref":"com.cjlogistics.cjtrans"}]}`))
+	}))
+	defer srv.Close()
+	s := &Structured{Store: st, Observer: observer{st}, Loc: seoul, Token: "t", PhonenoteURL: srv.URL, HTTP: srv.Client(), Now: func() time.Time { return now }}
+	if err := s.Phone(ctx); err != nil {
+		t.Fatal(err)
+	}
+	pay, err := st.Occurrence(ctx, "phone:7")
+	if err != nil || pay.Kind != "deposit" || pay.Class != "급여" || pay.Amount != 3200000 {
+		t.Fatalf("입금: %+v %v", pay, err)
+	}
+	if _, err := st.Occurrence(ctx, "phone:8"); err != nil {
+		t.Fatalf("택배: %v", err)
+	}
+}

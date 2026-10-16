@@ -227,7 +227,7 @@ func main() {
 		structured := &sensor.Structured{Store: st, Observer: m, World: m.World, Token: token, Loc: loc, Out: log,
 			SpendingURL: os.Getenv("SPENDING_URL"), WorkoutURL: os.Getenv("WORKOUT_URL"), CalendarURL: os.Getenv("MIND_CALENDAR_READ_URL"),
 			ImmichURL: os.Getenv("IMMICH_URL"), ImmichKey: os.Getenv("IMMICH_API_KEY"), ContextURL: os.Getenv("CONTEXT_URL"),
-			AssetsURL: os.Getenv("ASSETS_URL"), JobsURL: os.Getenv("JOBS_URL")}
+			AssetsURL: os.Getenv("ASSETS_URL"), JobsURL: os.Getenv("JOBS_URL"), PhonenoteURL: os.Getenv("PHONENOTE_URL")}
 		// One reader for each source: memory remembers what is read here
 		// (memory-svc's own collectors for these sources are then off -
 		// MEMORY_SOURCES).
