@@ -841,7 +841,8 @@ services:
       IMMICH_API_KEY: ${IMMICH_MIND_API_KEY:-}
       IMMICH_PUBLIC_URL: ${IMMICH_PUBLIC_URL:-}
       MIND_ANTHROPIC_API_KEY: ${MEMORY_ANTHROPIC_API_KEY:-}
-      MIND_CONTENT_KEY: ${MIND_CONTENT_KEY:-}
+      # 메시지 본문을 봉인하는 키. 없으면 뜨지 않는다(평문으로 쌓이지 않게).
+      MIND_CONTENT_KEY: ${MIND_CONTENT_KEY:?MIND_CONTENT_KEY 를 .env 에 설정하세요 (openssl rand -base64 32)}
       # 메시지 본문의 보존 기한(일). 그때쯤이면 남길 것은 사실·계획이 되어 있다.
       MIND_MESSAGE_RETAIN_DAYS: ${MIND_MESSAGE_RETAIN_DAYS:-365}
       MIND_OWNER_NAME: ${MEMORY_OWNER_NAME:-}

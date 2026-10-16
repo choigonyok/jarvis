@@ -22,10 +22,6 @@ class State:
     async def open(self):
         self.conn = await psycopg.AsyncConnection.connect(self.dsn, autocommit=True)
 
-    async def enqueue_event(self, event: dict):
-        """Leave an event in the outbox (migration 034) for events-svc."""
-        await self.conn.execute("insert into event_outbox (payload) values (%s)", (json.dumps(event, ensure_ascii=False),))
-
     async def cursor(self, source: str) -> dict:
         row = await (await self.conn.execute("select cursor from memory_state where source = %s", (source,))).fetchone()
         return row[0] if row else {}
@@ -52,23 +48,6 @@ class State:
 
     async def mark(self, key: str):
         await self.conn.execute("insert into memory_done (key) values (%s) on conflict do nothing", (key,))
-
-    async def add_diary(self, group: str, line: str):
-        await self.conn.execute("insert into memory_diary (grp, line) values (%s, %s)", (group, line[:500]))
-
-    async def diary(self, group: str, start, end) -> list[tuple[int, str]]:
-        """Unused lines written in [start, end), oldest first."""
-        rows = await (
-            await self.conn.execute(
-                "select id, line from memory_diary where grp = %s and used_at is null and at >= %s and at < %s order by at, id",
-                (group, start, end),
-            )
-        ).fetchall()
-        return [(r[0], r[1]) for r in rows]
-
-    async def diary_used(self, ids: list[int]):
-        if ids:
-            await self.conn.execute("update memory_diary set used_at = now() where id = any(%s)", (ids,))
 
     async def add_usage(self, input_tokens: int, output_tokens: int):
         await self.conn.execute(

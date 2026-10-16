@@ -112,6 +112,12 @@ func main() {
 			log.Error("MIND_CONTENT_KEY 를 읽지 못했습니다", "err", err)
 			os.Exit(1)
 		}
+		// 스택에서는 메시지 본문을 평문으로 두지 않는다(S-10): 디스크 암호화 없이 도는 맥미니에서는
+		// 이 봉인이 대화 원문의 보호다. 버리는 로컬 스택만 MIND_ALLOW_PLAINTEXT=true 로 연다.
+		if key == nil && os.Getenv("MIND_ALLOW_PLAINTEXT") != "true" {
+			log.Error("MIND_CONTENT_KEY 가 비어 있습니다. 메시지 본문을 봉인할 키가 필요합니다 (openssl rand -base64 32)")
+			os.Exit(1)
+		}
 		st = store.NewPostgres(pool, key)
 		// Quiet: the skills and the gate run and the console shows what they
 		// would say, but no notice reaches a phone - the agent's cards still

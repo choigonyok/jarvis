@@ -11,11 +11,9 @@ exactly one group, so neither can read the other's.
 import asyncio
 import logging
 import os
-import re
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
-import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
@@ -36,13 +34,9 @@ INTERVAL = int(os.environ.get("MEMORY_INTERVAL", "300"))
 DAILY_USD = float(os.environ.get("MEMORY_DAILY_USD", "1.0"))
 HAS_KEY = bool(os.environ.get("ANTHROPIC_API_KEY"))
 VOYAGE_KEY = bool(os.environ.get("VOYAGE_API_KEY"))
-EVENTS_URL = os.environ.get("EVENTS_URL", "")
-# Which collectors run. Once mind reads the conversations, chat, kakao and
-# imessage come off this list; once mind reads the structured sources and
-# sends them to /records, calendar, spending, assets, workout, jobs and photos
-# do too (compose's default is chat,diary,topics).
-# 기본값은 운영과 같다: 구조화 기록은 mind 가 /records 로 넣고(diary 가 그것을 다시 LLM 에
-# 넣으면 같은 사실을 두 번 뽑는다), 대화는 chat 만 여기서 읽는다.
+# Which collectors run. mind reads KakaoTalk and iMessage, and reads the
+# structured sources and sends them to /records; what is left here is the
+# assistant's own conversation (chat) and the weekly topics.
 DEFAULT_SOURCES = "chat,topics"
 SOURCES = [s.strip() for s in (os.environ.get("MEMORY_SOURCES") or DEFAULT_SOURCES).split(",") if s.strip()]
 if unknown := [s for s in SOURCES if s not in sources.ALL]:
@@ -103,26 +97,6 @@ async def loop():
         wake.clear()
 
 
-async def emit(event: dict):
-    """Fire and forget: the event log is a nicety, never a reason to stop
-    remembering. The outbox first, so a restarting events-svc loses nothing;
-    straight to events-svc if that fails."""
-    try:
-        await state.enqueue_event(event)
-        return
-    except Exception as e:
-        log.warning("이벤트를 outbox 에 쓰지 못해 바로 보냅니다: %s", e)
-    if not EVENTS_URL:
-        return
-    try:
-        async with httpx.AsyncClient(timeout=10, headers={"Authorization": f"Bearer {TOKEN}"} if TOKEN else {}) as c:
-            r = await c.post(EVENTS_URL.rstrip("/") + "/events", json=event)
-            if r.status_code >= 300:
-                log.warning("이벤트를 보내지 못했습니다: %s %s", r.status_code, r.text[:200])
-    except Exception as e:
-        log.warning("이벤트를 보내지 못했습니다: %s", e)
-
-
 async def lifespan(app: FastAPI):
     global graph
     await state.open()
@@ -133,14 +107,6 @@ async def lifespan(app: FastAPI):
     graph = Graph(on_usage, state.add_voyage_usage)
     await graph.setup()
 
-    # Each direct fact also becomes a diary line, for the 6-hour episode
-    # (sources.diary) - but only news: a backfill or a re-write of something
-    # long past would turn the next diary into a history lesson.
-    async def on_fact(group: str, fact: str, valid_at):
-        if group == "owner" and (valid_at is None or valid_at >= datetime.now(timezone.utc) - timedelta(days=3)):
-            await state.add_diary(group, fact)
-
-    graph.on_fact = on_fact
     task = asyncio.create_task(loop())
     yield
     task.cancel()

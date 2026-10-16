@@ -192,7 +192,8 @@ POST /api/facts/flush                  장부에서 기다리는 사실을 지�
 | `MIND_QUIET` | `true`(스택) | 스킬·관문의 알림을 notify-svc 로 보내지 않고 콘솔에만 둔다 |
 | `MIND_ANTHROPIC_API_KEY` | | `MIND_MODEL`(claude-haiku-5-5), `MIND_DAILY_USD`(1.0) |
 | `MIND_CALENDAR` | `memory` | `http` 면 calendar-svc(`CALENDAR_URL`)에 실제로 쓴다 |
-| `MIND_CONTENT_KEY` | (없음) | base64 32바이트. 있으면 메시지 원문을 AES-GCM 으로 봉해 저장 |
+| `MIND_CONTENT_KEY` | (필수) | base64 32바이트. 메시지 원문을 AES-GCM 으로 봉해 저장. 스택에서는 없으면 뜨지 않는다 |
+| `MIND_ALLOW_PLAINTEXT` | `false` | `true` 면 키 없이도 뜬다(원문이 평문으로 남는다). 버리는 로컬 스택(docker-compose.mind.yml)만 |
 | `MIND_IDLE`, `MIND_IDLE_SELF`, `MIND_IDLE_SIM` | 3m, 45s, 4s | 방이 이만큼 조용하면 읽는다 (나와의 채팅은 짧게) |
 | `MIND_SETTLE` | 메모리 3s / 스택 1m | 변화를 묶는 시간 |
 | `MIND_EXCLUDE_ROOMS` | 카드·은행·알림·광고… | 읽지 않을 방 이름 정규식 |

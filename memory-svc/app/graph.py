@@ -10,8 +10,8 @@ Three ways in:
   graph with IDs derived from the source's own keys, so the same thing always
   lands on the same node and edge and no LLM is asked whether two of them are
   the same.
-- `episode()` - free text, Graphiti's own extraction: the 6-hour diary (which
-  keeps people's summaries current), and conversations until mind reads them.
+- `episode()` - free text, Graphiti's own extraction: the assistant's own
+  conversations (sources.chat).
 """
 
 import asyncio
@@ -164,10 +164,6 @@ class Graph:
         # arriving together must not both create that person.
         self.writing = asyncio.Lock()
         self._nodes: set[str] = set()
-        # Heard after every direct fact: the 6-hour diary (sources.diary) is
-        # made of these lines.
-        self.on_fact = None
-        self.on_extract = None
 
     async def setup(self):
         for d in self.drivers.values():
@@ -194,8 +190,6 @@ class Graph:
                 group_id=group,
                 custom_extraction_instructions=EXTRACTION_NOTE,
             )
-        if self.on_extract:
-            await self.on_extract(group, source_description, getattr(result, "edges", None) or [])
 
     async def node(self, group: str, kind: str, key: str, name: str, summary: str = "") -> str:
         nid = stable_id(group, "node", kind, key)
@@ -248,8 +242,6 @@ class Graph:
         await edge.generate_embedding(self.embedder)
         await self._drop_if_moved(group, edge)
         await edge.save(self.drivers[group])
-        if self.on_fact:
-            await self.on_fact(group, fact, valid_at)
 
     async def _drop_if_moved(self, group: str, edge: EntityEdge):
         """Saving an edge MERGEs on its endpoints too, so an edge whose source
@@ -309,8 +301,6 @@ class Graph:
             ended += await self._end(group, f.get("ends") or [], resolved, source, target)
         # The same retired fact can come back twice.
         ended = list({e.uuid: e for e in ended if e.uuid != resolved.uuid}.values())
-        if self.on_fact and resolved.uuid == edge.uuid:
-            await self.on_fact(group, resolved.fact, resolved.valid_at)
         return {
             "ref": ref,
             "edge": {"id": resolved.uuid, "fact": resolved.fact},

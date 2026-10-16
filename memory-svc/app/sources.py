@@ -432,36 +432,6 @@ async def photos(ctx: Ctx):
     return added
 
 
-async def diary(ctx: Ctx):
-    """Every six hours (KST 00, 06, 12, 18), the structured facts written in
-    the window just closed go to the LLM as one episode. The facts themselves
-    are already in the graph, exact; the episode is for linking - the café a
-    payment went to, the person on the calendar - to the same people and
-    places the conversations mention, which only LLM extraction can resolve.
-    A window waits while the day's LLM budget is spent."""
-    cur = await ctx.state.cursor("diary")
-    now = datetime.now(KST)
-    end = now.replace(hour=now.hour - now.hour % 6, minute=0, second=0, microsecond=0)
-    done = datetime.fromisoformat(cur["through"]) if cur.get("through") else end - timedelta(hours=6)
-    added = 0
-    while done < end:
-        start, stop = done, done + timedelta(hours=6)
-        lines = await ctx.state.diary("owner", start, stop)
-        if lines:
-            if not await ctx.llm_ok():
-                break
-            body = "\n".join(f"- {line}" for _, line in lines)
-            await ctx.graph.episode(
-                "owner", f"diary:{start:%Y%m%d%H}", f"{start:%m/%d %H}시~{stop:%H}시 기록",
-                body, "jarvis 의 일정·지출·자산·운동·작업·사진 기록 6시간 묶음", stop,
-            )
-            await ctx.state.diary_used([i for i, _ in lines])
-            added += 1
-        done = stop
-        await ctx.state.save("diary", {"through": done.isoformat()}, added)
-    return added
-
-
 async def topics(ctx: Ctx):
     """Once a week, the owner graph's topics are rebuilt: which people, places
     and things belong together, each with a summary. One LLM call per pair of
@@ -489,7 +459,5 @@ ALL = {
     "chat": chat,
     "kakao": lambda ctx: messenger(ctx, "kakao", "카카오톡"),
     "imessage": lambda ctx: messenger(ctx, "imessage", "iMessage"),
-    # It bundles what the structured sources above just wrote.
-    "diary": diary,
     "topics": topics,
 }

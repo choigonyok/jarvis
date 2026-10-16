@@ -60,6 +60,8 @@ services:
       API_TOKEN: mind-local-token
       MIND_UI_URL: http://localhost:8102/
       MIND_CONTENT_KEY: ${MIND_CONTENT_KEY:-}
+      # 버리는 로컬 스택이라 키 없이도 연다. 운영 스택(docker-compose.yml)은 키가 없으면 뜨지 않는다.
+      MIND_ALLOW_PLAINTEXT: "true"
       MIND_ANTHROPIC_API_KEY: ${MIND_ANTHROPIC_API_KEY:-}
       MIND_OWNER_NAME: ${MIND_OWNER_NAME:-나}
       # 시뮬레이터로 시험하기 좋게 짧게. 운영 기본값은 1분.
