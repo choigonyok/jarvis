@@ -579,6 +579,11 @@ async function kisForeignCash(token: string): Promise<{
     if (row.crcy_cd === "USD") usd += amount;
     else unpriced.push(row.crcy_cd);
   }
+  // A limit buy waiting for its price holds dollars that KIS already counts
+  // as spent (frcr_buy_amt_smtl) though nothing was bought: without this the
+  // total, the return and the deposit check all dropped by it while the
+  // order waited (a standing order, 2026-10-17).
+  usd += await kisUnfilledBuyUsd(token).catch(() => 0);
   const rate = Number(body.output1?.find((r) => r.buy_crcy_cd === "USD" && Number(r.bass_exrt) > 0)?.bass_exrt);
   return {
     usd,
@@ -588,6 +593,34 @@ async function kisForeignCash(token: string): Promise<{
       ? [`한국투자증권: 환율을 몰라 빠진 외화 예수금 ${unpriced.join(", ")}`]
       : [],
   };
+}
+
+/** Dollars held by US buy orders not yet filled (KIS 미체결, TTTS3018R): shares × limit price. */
+export async function kisUnfilledBuyUsd(token?: string): Promise<number> {
+  const t = token ?? (await kisAccessToken());
+  const { cano, prod } = kisAccount();
+  const mock = env("KIS_MOCK") === "true";
+  const q = new URLSearchParams({
+    CANO: cano,
+    ACNT_PRDT_CD: prod,
+    OVRS_EXCG_CD: "NASD", // the whole US market
+    SORT_SQN: "DS",
+    CTX_AREA_FK200: "",
+    CTX_AREA_NK200: "",
+  });
+  const body = await json<{ rt_cd?: string; msg1?: string; output?: Record<string, string>[] }>(
+    `${KIS_BASE}/uapi/overseas-stock/v1/trading/inquire-nccs?${q}`,
+    { headers: kisHeaders(t, mock ? "VTTS3018R" : "TTTS3018R") },
+  );
+  if (body.rt_cd !== "0") throw new Error((body.msg1 ?? "미체결 내역을 읽지 못했습니다").trim());
+  let usd = 0;
+  for (const o of body.output ?? []) {
+    if (o.sll_buy_dvsn_cd !== "02") continue; // 02 매수
+    const qty = Number(o.nccs_qty ?? 0);
+    const price = Number(o.ft_ord_unpr3 ?? o.ft_ord_unpr ?? o.ovrs_ord_unpr ?? 0);
+    if (qty > 0 && price > 0) usd += qty * price;
+  }
+  return usd;
 }
 
 /**
