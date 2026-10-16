@@ -28,8 +28,10 @@
 //	GET  /api/recall?q=&person=       what is known: world model + long-term memory
 //	POST /api/facts/flush             send the ledger's pending facts to memory now
 //
-// /api and the console need the token unless open: in the stack the port is
-// bound to the host's loopback, and a laptop run has nothing to protect.
+// /api and the console need a token unless open: in the stack the port is
+// bound to the host's loopback, and a laptop run has nothing to protect. The
+// services call with their token as a bearer; a person signs in to the
+// console with a token of its own (MIND_CONSOLE_TOKEN), never the services'.
 package api
 
 import (
@@ -60,13 +62,17 @@ var ui embed.FS
 type Server struct {
 	m     *mind.Mind
 	token string
-	open  bool
-	clock *clock.Clock // nil unless the clock can be moved (memory mode)
-	log   *slog.Logger
+	// consoleToken is what a person signs in to the console with, once, for
+	// a cookie. It opens the console's routes and not the services' own
+	// (/consume, /status).
+	consoleToken string
+	open         bool
+	clock        *clock.Clock // nil unless the clock can be moved (memory mode)
+	log          *slog.Logger
 }
 
-func New(m *mind.Mind, token string, open bool, c *clock.Clock, log *slog.Logger) *Server {
-	return &Server{m: m, token: token, open: open, clock: c, log: log}
+func New(m *mind.Mind, token, consoleToken string, open bool, c *clock.Clock, log *slog.Logger) *Server {
+	return &Server{m: m, token: token, consoleToken: consoleToken, open: open, clock: c, log: log}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -87,10 +93,10 @@ func (s *Server) Handler() http.Handler {
 		if s.login(w, r) {
 			return
 		}
-		if !s.open && !s.presented(r) {
+		if !s.open && !s.bearer(r) && !s.signedIn(r) {
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = w.Write([]byte("콘솔은 토큰이 필요합니다. /?token=<API_TOKEN> 으로 한 번 여세요.\n"))
+			_, _ = w.Write([]byte("콘솔은 토큰이 필요합니다. /?token=<MIND_CONSOLE_TOKEN> 으로 한 번 여세요(scripts/mini console).\n"))
 			return
 		}
 		page, _ := ui.ReadFile("ui/index.html")
@@ -191,14 +197,17 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-// auth guards a route with the token. The console's routes are let through
-// only when the server is open - a memory-mode run on a laptop, with nothing
-// to protect; /consume always needs it. A browser cannot send a bearer
-// header, so the console also takes the token as a cookie, set once by
-// opening /?token=….
-func (s *Server) auth(always bool, next http.HandlerFunc) http.HandlerFunc {
+// auth guards a route. The services' own routes (service: /consume,
+// /status) take the services' token and nothing else. The console's take it
+// too, or the console's cookie - and are let through without either only when
+// the server is open: a memory-mode run on a laptop, with nothing to protect.
+func (s *Server) auth(service bool, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if (always || !s.open) && !s.presented(r) {
+		ok := s.bearer(r)
+		if !service {
+			ok = ok || s.open || s.signedIn(r)
+		}
+		if !ok {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "인증이 필요합니다."})
 			return
 		}
@@ -208,14 +217,17 @@ func (s *Server) auth(always bool, next http.HandlerFunc) http.HandlerFunc {
 
 const tokenCookie = "mind_token"
 
-// presented is whether the request carries the token, as a bearer header or
-// as the console's cookie. With no token configured nothing passes.
-func (s *Server) presented(r *http.Request) bool {
-	if s.token == "" {
+// bearer is whether the request carries the services' token. With no token
+// configured nothing passes.
+func (s *Server) bearer(r *http.Request) bool {
+	return s.token != "" && same(r.Header.Get("Authorization"), "Bearer "+s.token)
+}
+
+// signedIn is whether the request carries a live console cookie. A browser
+// cannot send a bearer header, so the console signs in once with /?token=….
+func (s *Server) signedIn(r *http.Request) bool {
+	if s.consoleToken == "" {
 		return false
-	}
-	if same(r.Header.Get("Authorization"), "Bearer "+s.token) {
-		return true
 	}
 	c, err := r.Cookie(tokenCookie)
 	return err == nil && s.validSession(c.Value, time.Now())
@@ -224,11 +236,12 @@ func (s *Server) presented(r *http.Request) bool {
 // sessionTTL is how long the console's cookie lasts.
 const sessionTTL = 24 * time.Hour
 
-// session is the cookie value: an expiry and an HMAC of it keyed by the token.
-// The token itself never sits in the browser, and a stolen cookie dies in a day.
+// session is the cookie value: an expiry and an HMAC of it keyed by the
+// console's token. The token itself never sits in the browser, and a stolen
+// cookie dies in a day.
 func (s *Server) session(exp time.Time) string {
 	e := strconv.FormatInt(exp.Unix(), 10)
-	mac := hmac.New(sha256.New, []byte(s.token))
+	mac := hmac.New(sha256.New, []byte(s.consoleToken))
 	mac.Write([]byte("mind-console:" + e))
 	return e + "." + hex.EncodeToString(mac.Sum(nil))
 }
@@ -251,7 +264,7 @@ func same(a, b string) bool { return subtle.ConstantTimeCompare([]byte(a), []byt
 // the token does not stay in the address bar or the history.
 func (s *Server) login(w http.ResponseWriter, r *http.Request) bool {
 	t := r.URL.Query().Get("token")
-	if t == "" || s.token == "" || !same(t, s.token) {
+	if t == "" || s.consoleToken == "" || !same(t, s.consoleToken) {
 		return false
 	}
 	http.SetCookie(w, &http.Cookie{Name: tokenCookie, Value: s.session(time.Now().Add(sessionTTL)), Path: "/", HttpOnly: true,

@@ -8,6 +8,7 @@
 package api
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -26,11 +27,22 @@ type Server struct {
 	wake  func()
 	sync  func()
 	token string
-	log   *slog.Logger
+	// guestToken is the guest's agent's: it posts notifications for the
+	// guest (a card waiting on them) and nothing else.
+	guestToken string
+	log        *slog.Logger
 }
 
-func New(s *store.Store, wake, sync func(), token string, log *slog.Logger) *Server {
-	return &Server{store: s, wake: wake, sync: sync, token: token, log: log}
+func New(s *store.Store, wake, sync func(), token, guestToken string, log *slog.Logger) *Server {
+	return &Server{store: s, wake: wake, sync: sync, token: token, guestToken: guestToken, log: log}
+}
+
+type guestKey struct{}
+
+// asGuest is whether the request came with the guest's token.
+func asGuest(r *http.Request) bool {
+	v, _ := r.Context().Value(guestKey{}).(bool)
+	return v
 }
 
 func (s *Server) Handler() http.Handler {
@@ -38,23 +50,32 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
-	mux.HandleFunc("POST /events", s.auth(s.append))
-	mux.HandleFunc("PUT /subscriptions/{consumer}", s.auth(s.subscribe))
-	mux.HandleFunc("DELETE /subscriptions/{consumer}", s.auth(s.unsubscribe))
-	mux.HandleFunc("GET /subscriptions", s.auth(s.subscriptions))
-	mux.HandleFunc("GET /events", s.auth(s.list))
+	mux.HandleFunc("POST /events", s.auth(true, s.append))
+	mux.HandleFunc("PUT /subscriptions/{consumer}", s.auth(false, s.subscribe))
+	mux.HandleFunc("DELETE /subscriptions/{consumer}", s.auth(false, s.unsubscribe))
+	mux.HandleFunc("GET /subscriptions", s.auth(false, s.subscriptions))
+	mux.HandleFunc("GET /events", s.auth(false, s.list))
 	return mux
 }
 
-func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
+// auth takes the services' token everywhere and the guest's only where
+// guests is set (posting an event - see append for what it may post).
+func (s *Server) auth(guests bool, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if s.token != "" && subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+s.token)) != 1 {
+		got := r.Header.Get("Authorization")
+		switch {
+		case s.token == "" || same(got, "Bearer "+s.token):
+		case guests && s.guestToken != "" && same(got, "Bearer "+s.guestToken):
+			r = r.WithContext(context.WithValue(r.Context(), guestKey{}, true))
+		default:
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "인증이 필요합니다."})
 			return
 		}
 		next(w, r)
 	}
 }
+
+func same(a, b string) bool { return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1 }
 
 // incoming is the event as sent. Besides the event's own fields it accepts
 // the notification shape services sent before there was an event log
@@ -127,6 +148,15 @@ func (s *Server) append(w http.ResponseWriter, r *http.Request) {
 	if problem != "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": problem})
 		return
+	}
+	if asGuest(r) {
+		// The guest's agent tells the guest something, and that is all an
+		// event from it can do: a notification, to the guest's devices.
+		if e.Notify == nil {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "손님은 알림만 보낼 수 있습니다."})
+			return
+		}
+		e.Notify.Audience = "guest"
 	}
 	saved, dup, err := s.store.Append(r.Context(), e)
 	switch {

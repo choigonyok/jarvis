@@ -174,8 +174,9 @@ POST /api/facts/flush                  장부에서 기다리는 사실을 지�
 `mind_llm_usage`(045)에 쌓인다. 재시작해도 하루 예산(`MIND_DAILY_USD`)이 다시 차지 않고, `/status` 의 `usage` 를
 에이전트가 `/usage` 로 넘겨 웹 헤더의 사용량 막대에 "판단용 API (mind)" 한 줄로 보인다(오늘/상한, 이번 달, 용도별).
 
-`/api` 와 콘솔은 메모리 모드에서만 토큰 없이 열린다. 스택에서는 `Authorization: Bearer $API_TOKEN`,
-브라우저는 한 번 `/?token=$API_TOKEN` 으로 열면 HttpOnly 쿠키를 받고 주소창에서 토큰을 지운다. 맥북에서 맥미니의 콘솔은
+`/api` 와 콘솔은 메모리 모드에서만 토큰 없이 열린다. 스택에서는 서비스가 `Authorization: Bearer $API_TOKEN`,
+사람은 콘솔 전용 토큰 `MIND_CONSOLE_TOKEN` 으로 한 번 `/?token=…` 을 열면 HttpOnly 쿠키를 받고 주소창에서 토큰을 지운다.
+그 쿠키로는 콘솔 경로만 열리고, 서비스 전용 경로(`/consume`, `/status`)는 서비스 토큰만 받는다. 맥북에서 맥미니의 콘솔은
 `scripts/mini console`(ssh 터널 로컬 18102 → 맥미니 8102, 토큰은 화면에 찍지 않고 한 번 로그인). 로컬 8102 는 `scripts/mind` 가 쓴다.
 스택은 `API_TOKEN` 이 비면 뜨지 않는다(로컬 시험만 `API_TOKEN_OPTIONAL=true`).
 

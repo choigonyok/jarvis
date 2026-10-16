@@ -58,7 +58,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:         addr,
-		Handler:      api.New(st, token, tz, log).Handler(),
+		Handler:      api.New(st, token, os.Getenv("API_GUEST_TOKEN"), tz, log).Handler(),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}

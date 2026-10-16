@@ -8,6 +8,7 @@
 package api
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"log/slog"
@@ -22,12 +23,26 @@ import (
 type Server struct {
 	store *store.Store
 	token string
-	tz    string
-	log   *slog.Logger
+	// guestToken is the guest's agent's: it reads and writes the guest's
+	// thread and nothing else.
+	guestToken string
+	tz         string
+	log        *slog.Logger
 }
 
-func New(s *store.Store, token, tz string, log *slog.Logger) *Server {
-	return &Server{store: s, token: token, tz: tz, log: log}
+func New(s *store.Store, token, guestToken, tz string, log *slog.Logger) *Server {
+	return &Server{store: s, token: token, guestToken: guestToken, tz: tz, log: log}
+}
+
+// guestThread is the one thread the guest's token opens.
+const guestThread = "guest"
+
+type guestKey struct{}
+
+// asGuest is whether the request came with the guest's token.
+func asGuest(r *http.Request) bool {
+	v, _ := r.Context().Value(guestKey{}).(bool)
+	return v
 }
 
 func (s *Server) Handler() http.Handler {
@@ -40,13 +55,20 @@ func (s *Server) Handler() http.Handler {
 
 func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if s.token != "" && subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+s.token)) != 1 {
+		got := r.Header.Get("Authorization")
+		switch {
+		case s.token == "" || same(got, "Bearer "+s.token):
+		case s.guestToken != "" && same(got, "Bearer "+s.guestToken):
+			r = r.WithContext(context.WithValue(r.Context(), guestKey{}, true))
+		default:
 			writeErr(w, http.StatusUnauthorized, "인증이 필요합니다.")
 			return
 		}
 		next(w, r)
 	}
 }
+
+func same(a, b string) bool { return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.Ping(r.Context()); err != nil {
@@ -65,6 +87,10 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 	thread := r.URL.Query().Get("thread")
 	if !threadName.MatchString(thread) {
 		writeErr(w, http.StatusBadRequest, "thread 이름이 올바르지 않습니다.")
+		return
+	}
+	if asGuest(r) && thread != guestThread {
+		writeErr(w, http.StatusForbidden, "손님은 손님 대화만 읽을 수 있습니다.")
 		return
 	}
 	// since= 는 mind 처럼 새 턴만 원하는 소비자용이다. 없으면 스레드 전체.
@@ -96,6 +122,10 @@ func (s *Server) append(w http.ResponseWriter, r *http.Request) {
 	// 막아야 다른 호출자가 같은 실수를 반복하지 않는다.
 	if !threadName.MatchString(in.Thread) {
 		writeErr(w, http.StatusBadRequest, "thread 이름이 올바르지 않습니다.")
+		return
+	}
+	if asGuest(r) && in.Thread != guestThread {
+		writeErr(w, http.StatusForbidden, "손님은 손님 대화에만 쓸 수 있습니다.")
 		return
 	}
 	if in.Text == "" && len(in.Paragraphs) == 0 && in.ProposalID == "" && len(in.Images) == 0 {

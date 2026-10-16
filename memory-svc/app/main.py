@@ -30,6 +30,8 @@ TOKEN = os.environ.get("API_TOKEN", "")
 # operator - open to anything on the network. Only a local trial may run so.
 if not TOKEN and os.environ.get("API_TOKEN_OPTIONAL") != "true":
     raise SystemExit("API_TOKEN 이 비어 있습니다. 로컬 시험이라면 API_TOKEN_OPTIONAL=true")
+# The guest's agent's own token: it reads group "guest" and nothing else.
+GUEST_TOKEN = os.environ.get("API_GUEST_TOKEN", "")
 INTERVAL = int(os.environ.get("MEMORY_INTERVAL", "300"))
 DAILY_USD = float(os.environ.get("MEMORY_DAILY_USD", "1.0"))
 HAS_KEY = bool(os.environ.get("ANTHROPIC_API_KEY"))
@@ -50,9 +52,25 @@ wake = asyncio.Event()
 running = {"now": None}
 
 
-def auth(authorization: str = Header(default="")):
-    if TOKEN and not secrets.compare_digest(authorization, f"Bearer {TOKEN}"):
-        raise HTTPException(401, "인증이 필요합니다.")
+def caller(authorization: str = Header(default="")) -> str:
+    """Who is asking: "owner" for the services' token, "guest" for the guest's agent's."""
+    if not TOKEN or secrets.compare_digest(authorization, f"Bearer {TOKEN}"):
+        return "owner"
+    if GUEST_TOKEN and secrets.compare_digest(authorization, f"Bearer {GUEST_TOKEN}"):
+        return "guest"
+    raise HTTPException(401, "인증이 필요합니다.")
+
+
+def auth(who: str = Depends(caller)):
+    """The services' token only: writing, the status, a run."""
+    if who != "owner":
+        raise HTTPException(403, "손님은 손님 기억을 읽기만 할 수 있습니다.")
+
+
+def reader(group: str = Query(pattern=GROUP), who: str = Depends(caller)):
+    """A read of one group: the guest's token may name only the guest's."""
+    if who == "guest" and group != "guest":
+        raise HTTPException(403, "손님은 손님 기억만 읽을 수 있습니다.")
 
 
 async def llm_ok() -> bool:
@@ -120,7 +138,7 @@ async def health():
     return {"status": "ok"}
 
 
-@app.get("/search", dependencies=[Depends(auth)])
+@app.get("/search", dependencies=[Depends(reader)])
 async def search(
     q: str = Query(min_length=1),
     group: str = Query(pattern=GROUP),
@@ -131,12 +149,12 @@ async def search(
     return {"facts": await graph.search(q, group, max(1, min(limit, 30)), center=center, mode=mode)}
 
 
-@app.get("/nodes", dependencies=[Depends(auth)])
+@app.get("/nodes", dependencies=[Depends(reader)])
 async def find(q: str = Query(min_length=1), group: str = Query(pattern=GROUP), limit: int = 5):
     return {"nodes": await graph.find(q, group, max(1, min(limit, 20)))}
 
 
-@app.get("/nodes/{uid}", dependencies=[Depends(auth)])
+@app.get("/nodes/{uid}", dependencies=[Depends(reader)])
 async def profile(uid: str, group: str = Query(pattern=GROUP), limit: int = 30):
     p = await graph.profile(group, uid, max(1, min(limit, 100)))
     if p is None:
@@ -242,7 +260,7 @@ async def add_records(body: RecordsIn):
     return {"written": written}
 
 
-@app.get("/topics", dependencies=[Depends(auth)])
+@app.get("/topics", dependencies=[Depends(reader)])
 async def topics(group: str = Query(pattern=GROUP)):
     return {"topics": await graph.topics(group)}
 

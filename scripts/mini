@@ -141,7 +141,7 @@ case "$cmd" in
     if ! nc -z 127.0.0.1 "$port" 2>/dev/null; then
       ssh -fN -o ExitOnForwardFailure=yes -o LogLevel=ERROR -L "$port:127.0.0.1:8102" "$HOST"
     fi
-    token="$(ssh -o LogLevel=ERROR "$HOST" "grep -E '^JARVIS_API_TOKEN=' ~/$DIR/.env | cut -d= -f2- | tr -d '\"'")"
+    token="$(ssh -o LogLevel=ERROR "$HOST" "grep -E '^JARVIS_MIND_CONSOLE_TOKEN=' ~/$DIR/.env | cut -d= -f2- | tr -d '\"'")"
     # 콘솔이 토큰을 HttpOnly 쿠키로 바꾸고 주소창에서 지운다.
     open "http://127.0.0.1:$port/?token=${token}"
     echo "맥미니 mind 콘솔을 열었습니다: http://127.0.0.1:$port (터널을 끄려면 pkill -f 'L $port:127.0.0.1:8102')" ;;

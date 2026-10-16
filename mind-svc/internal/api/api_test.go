@@ -86,7 +86,7 @@ func TestConsoleEndToEnd(t *testing.T) {
 		Policy: gate.DefaultPolicy(), Mode: "memory",
 	})
 	go log.Run(context.Background(), m.Handle)
-	srv := httptest.NewServer(New(m, "secret", true, clk, quiet).Handler())
+	srv := httptest.NewServer(New(m, "secret", "console-secret", true, clk, quiet).Handler())
 	defer srv.Close()
 	c := &console{t: t, srv: srv, log: log, m: m}
 
@@ -145,15 +145,16 @@ func TestConsoleEndToEnd(t *testing.T) {
 	}
 }
 
-// In the stack the console is never open: the token comes as a bearer
-// header, or once in the address bar, traded for a cookie.
+// In the stack the console is never open: the services' token comes as a
+// bearer header; a person brings the console's own token once in the address
+// bar, traded for a cookie - which does not open the services' own routes.
 func TestClosedConsole(t *testing.T) {
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
 	m := mind.New(mind.Options{
 		Store: store.NewMemory(), Log: obs.NewMemoryLog(quiet), LLM: &llm.Script{}, Calendar: act.NewMemoryCalendar(),
 		Notifier: &act.MemoryNotifier{}, Loc: seoul, Now: time.Now, Logger: quiet, Policy: gate.DefaultPolicy(), Mode: "stack",
 	})
-	srv := httptest.NewServer(New(m, "secret", false, nil, quiet).Handler())
+	srv := httptest.NewServer(New(m, "secret", "console-secret", false, nil, quiet).Handler())
 	defer srv.Close()
 	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 
@@ -177,10 +178,14 @@ func TestClosedConsole(t *testing.T) {
 	if code := get("/?token=wrong", nil).StatusCode; code != http.StatusUnauthorized {
 		t.Fatalf("wrong token: %d", code)
 	}
+	// The services' token does not sign a person in to the console.
+	if code := get("/?token=secret", nil).StatusCode; code != http.StatusUnauthorized {
+		t.Fatalf("services' token as a console login: %d", code)
+	}
 	if code := get("/api/snapshot", func(r *http.Request) { r.Header.Set("Authorization", "Bearer secret") }).StatusCode; code != http.StatusOK {
 		t.Fatalf("bearer: %d", code)
 	}
-	login := get("/?token=secret", nil)
+	login := get("/?token=console-secret", nil)
 	if login.StatusCode != http.StatusSeeOther || len(login.Cookies()) != 1 || !login.Cookies()[0].HttpOnly {
 		t.Fatalf("login: %d %v", login.StatusCode, login.Cookies())
 	}
@@ -188,14 +193,20 @@ func TestClosedConsole(t *testing.T) {
 	if code := get("/api/snapshot", func(r *http.Request) { r.AddCookie(cookie) }).StatusCode; code != http.StatusOK {
 		t.Fatalf("cookie: %d", code)
 	}
+	if code := get("/status", func(r *http.Request) { r.AddCookie(cookie) }).StatusCode; code != http.StatusUnauthorized {
+		t.Fatalf("the console's cookie opens the services' routes: %d", code)
+	}
+	if code := get("/status", func(r *http.Request) { r.Header.Set("Authorization", "Bearer secret") }).StatusCode; code == http.StatusUnauthorized {
+		t.Fatalf("services' token on /status: %d", code)
+	}
 	if code := get("/", func(r *http.Request) { r.AddCookie(&http.Cookie{Name: tokenCookie, Value: "wrong"}) }).StatusCode; code != http.StatusUnauthorized {
 		t.Fatalf("wrong cookie: %d", code)
 	}
 	// The cookie is not the token, and an old one no longer opens anything.
-	if cookie.Value == "secret" || cookie.MaxAge > 24*3600 {
+	if cookie.Value == "secret" || cookie.Value == "console-secret" || cookie.MaxAge > 24*3600 {
 		t.Fatalf("cookie must not be the token or last past a day: %+v", cookie)
 	}
-	for _, v := range []string{"secret", "1." + strings.Repeat("0", 64)} {
+	for _, v := range []string{"secret", "console-secret", "1." + strings.Repeat("0", 64)} {
 		if code := get("/", func(r *http.Request) { r.AddCookie(&http.Cookie{Name: tokenCookie, Value: v}) }).StatusCode; code != http.StatusUnauthorized {
 			t.Fatalf("cookie %q: %d", v, code)
 		}

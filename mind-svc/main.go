@@ -262,7 +262,7 @@ func main() {
 	addr := getenv("LISTEN_ADDR", ":8102")
 	srv := &http.Server{
 		Addr:         addr,
-		Handler:      api.New(m, token, mode == "memory", movable, log).Handler(),
+		Handler:      api.New(m, token, os.Getenv("MIND_CONSOLE_TOKEN"), mode == "memory", movable, log).Handler(),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 3 * time.Minute, // a replay runs the model
 	}

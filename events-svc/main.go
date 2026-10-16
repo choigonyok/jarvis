@@ -63,7 +63,7 @@ func main() {
 	addr := getenv("LISTEN_ADDR", ":8101")
 	srv := &http.Server{
 		Addr:         addr,
-		Handler:      api.New(st, b.Notify, func() { b.Sync(ctx) }, token, log).Handler(),
+		Handler:      api.New(st, b.Notify, func() { b.Sync(ctx) }, token, os.Getenv("API_GUEST_TOKEN"), log).Handler(),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}

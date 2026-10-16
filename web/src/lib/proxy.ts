@@ -4,23 +4,25 @@
 // the server side of this, and every route using it sits behind the console
 // login (see src/middleware.ts). Responses are never cached.
 import { getCloudflareContext } from "@opennextjs/cloudflare";
+import { ROLE_HEADER } from "@/lib/role";
 
 const GATEWAY_TOKEN = process.env.JARVIS_EDGE_TOKEN ?? "";
+// The guest's own: the gateway opens only the guest's services for it, so a
+// request this proxy mis-routes still cannot carry a guest anywhere else.
+const GATEWAY_GUEST_TOKEN = process.env.JARVIS_EDGE_GUEST_TOKEN ?? "";
 const GATEWAY_ORIGIN = "https://jarvis-be.choigonyok.com";
 
 /**
  * fetch, but a request for the gateway goes over the GATEWAY service binding
- * when there is one (on Cloudflare): no public hop, no DNS, no TLS. Anywhere
+ * when there is one (on Cloudflare): the gateway's services are reached only
+ * that way - its public hostname answers just the phone's doors. Anywhere
  * else - next dev on a laptop - it is a plain fetch.
  */
 function gatewayFetch(target: string, init: RequestInit): Promise<Response> {
   if (target.startsWith(GATEWAY_ORIGIN)) {
     try {
       const binding = (getCloudflareContext().env as { GATEWAY?: { fetch: typeof fetch } }).GATEWAY;
-      // A binding that fails outright (not deployed, renamed) falls back to the
-      // public hostname rather than taking the console down with it. The body
-      // is bytes, so it can be sent twice.
-      if (binding) return binding.fetch(target, init).catch(() => fetch(target, init));
+      if (binding) return binding.fetch(target, init);
     } catch {
       // not running on Cloudflare
     }
@@ -51,7 +53,12 @@ export async function forward(
     const value = request.headers.get(key);
     if (value) headers.set(key, value);
   }
-  if (GATEWAY_TOKEN) headers.set("authorization", `Bearer ${GATEWAY_TOKEN}`);
+  const guest = request.headers.get(ROLE_HEADER) === "guest";
+  if (guest && !GATEWAY_GUEST_TOKEN) {
+    return Response.json({ error: "손님용 연결이 설정되지 않았습니다." }, { status: 503 });
+  }
+  const token = guest ? GATEWAY_GUEST_TOKEN : GATEWAY_TOKEN;
+  if (token) headers.set("authorization", `Bearer ${token}`);
 
   const method = init?.method ?? request.method;
   let body = init?.body;
@@ -87,9 +94,18 @@ export async function forward(
 type Ctx = { params: Promise<{ path: string[] }> };
 
 /**
+ * A segment that could step out of the service it is meant for once joined:
+ * Next decodes each catch-all segment, so "..%2Fstatus" arrives as
+ * "../status" - one segment holding a separator and a parent step.
+ */
+const unsafeSegment = (s: string) => s === "" || s === "." || s === ".." || /[/\\]/.test(s);
+
+/**
  * A catch-all route handler: /api/<x>/<path> → <base>/<path>?<search>.
  * base may depend on the request (the guest's own agent); returning a
  * Response from it answers instead. allow, when given, limits the paths.
+ * Every segment is encoded again, and one that is ".", ".." or holds a
+ * slash is refused rather than sent.
  */
 export function pathProxy(
   base: string | ((request: Request) => string | Response),
@@ -97,6 +113,9 @@ export function pathProxy(
 ) {
   return async (request: Request, context: Ctx): Promise<Response> => {
     const { path } = await context.params;
+    if (path.some(unsafeSegment)) {
+      return Response.json({ error: "없는 경로입니다." }, { status: 404 });
+    }
     const joined = path.map(encodeURIComponent).join("/");
     if (opts.allow && !opts.allow(path.join("/"))) {
       return Response.json({ error: "없는 경로입니다." }, { status: 404 });
