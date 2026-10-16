@@ -71,6 +71,9 @@ type Store interface {
 	// FactsOn is the facts with a relation created in [from, to), oldest
 	// first.
 	FactsOn(ctx context.Context, relation string, from, to time.Time) ([]model.Fact, error)
+	// FactsWith is every fact with one of these relations (any case), newest
+	// first, with no limit - ledgers must not lose old entries.
+	FactsWith(ctx context.Context, relations ...string) ([]model.Fact, error)
 
 	// Records sent to long-term memory: the hash of what was last sent
 	// under a key ("" when nothing was).

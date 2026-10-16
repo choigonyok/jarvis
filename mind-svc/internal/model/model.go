@@ -409,6 +409,7 @@ const (
 
 	Pending    = "pending"
 	Executed   = "executed"
+	Executing  = "executing" // claimed by an approval; never approved twice
 	Rejected   = "rejected"
 	Undone     = "undone"
 	Dropped    = "dropped"

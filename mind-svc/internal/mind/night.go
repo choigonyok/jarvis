@@ -22,8 +22,44 @@ import (
 
 const nightAt = 3 * 60 // minutes after midnight
 
-// Night runs the night's work now.
+// Night runs the night's work now. Each stage runs even if an earlier one
+// failed; the failures are returned together.
 func (m *Mind) Night(ctx context.Context) error {
+	steps := []func(context.Context) error{
+		m.nightPatterns,
+		func(ctx context.Context) error {
+			// What was predicted for yesterday is known now; what missed is
+			// looked at, and only that.
+			_, err := m.Predict.Score(ctx)
+			return err
+		},
+		func(ctx context.Context) error {
+			if _, err := m.Reflect.Night(ctx); err != nil {
+				m.Opts.Logger.Warn("성찰하지 못했습니다", "err", err)
+			}
+			return nil
+		},
+	}
+	return m.stages(ctx, "night", append(steps, m.nightly...))
+}
+
+// stages runs every step, logging and collecting failures instead of
+// stopping at the first: one broken step must not cost the rest of the day.
+func (m *Mind) stages(ctx context.Context, what string, steps []func(context.Context) error) error {
+	var errs []error
+	for i, step := range steps {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err := step(ctx); err != nil {
+			m.Opts.Logger.Warn("단계를 하지 못했습니다", "what", what, "step", i, "err", err)
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (m *Mind) nightPatterns(ctx context.Context) error {
 	now := m.Opts.Now()
 	last, err := m.Opts.Store.Cursor(ctx, "night:patterns")
 	if err != nil {
@@ -55,23 +91,7 @@ func (m *Mind) Night(ctx context.Context) error {
 	if err := m.Opts.Store.SetCursor(ctx, "night:patterns", now.UnixMilli()); err != nil {
 		return err
 	}
-	if err := m.notesFromPatterns(ctx, kinds); err != nil {
-		return err
-	}
-	// What was predicted for yesterday is known now; what missed is looked
-	// at, and only that.
-	if _, err := m.Predict.Score(ctx); err != nil {
-		return err
-	}
-	if _, err := m.Reflect.Night(ctx); err != nil {
-		m.Opts.Logger.Warn("성찰하지 못했습니다", "err", err)
-	}
-	for _, step := range m.nightly {
-		if err := step(ctx); err != nil {
-			return err
-		}
-	}
-	return nil
+	return m.notesFromPatterns(ctx, kinds)
 }
 
 // ended is the plans with a kind that ended in (since, until]: the days

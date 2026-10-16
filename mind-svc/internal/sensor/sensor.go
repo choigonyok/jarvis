@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -195,7 +196,7 @@ func (s *Chat) Poll(ctx context.Context) error {
 	if cur > 0 {
 		since = time.UnixMicro(cur)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(s.URL, "/")+"/turns?thread=", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(s.URL, "/")+"/turns?thread=&since="+url.QueryEscape(since.Format(time.RFC3339Nano)), nil)
 	if err != nil {
 		return err
 	}

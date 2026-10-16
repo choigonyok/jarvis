@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"time"
 
 	"github.com/choigonyok/jarvis/chat-svc/internal/store"
 	"github.com/choigonyok/jarvis/chat-svc/internal/turn"
@@ -66,7 +67,17 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "thread 이름이 올바르지 않습니다.")
 		return
 	}
-	turns, err := s.store.All(r.Context(), s.tz, thread)
+	// since= 는 mind 처럼 새 턴만 원하는 소비자용이다. 없으면 스레드 전체.
+	var since time.Time
+	if v := r.URL.Query().Get("since"); v != "" {
+		t, err := time.Parse(time.RFC3339Nano, v)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "since 는 RFC3339 시각이어야 합니다.")
+			return
+		}
+		since = t
+	}
+	turns, err := s.store.All(r.Context(), s.tz, thread, since)
 	if err != nil {
 		s.log.Error("스레드를 불러오지 못했습니다", "err", err)
 		writeErr(w, http.StatusInternalServerError, "스레드를 불러오지 못했습니다.")

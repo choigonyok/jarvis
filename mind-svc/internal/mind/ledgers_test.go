@@ -148,3 +148,26 @@ func TestPlacesMealsWarranty(t *testing.T) {
 		t.Fatalf("보증 알림은 한 번: %d", n)
 	}
 }
+
+// A contract said again with a later end (extended) is told by the new date,
+// not the old one.
+func TestExtendedDeadlineUsesTheNewDate(t *testing.T) {
+	seoul, _ := time.LoadLocation("Asia/Seoul")
+	now := time.Date(2026, 10, 16, 8, 0, 0, 0, seoul)
+	m, st, _ := testMind(t, now)
+	ctx := context.Background()
+	me := model.Party{Self: true}
+	_ = st.PutFact(ctx, model.Fact{ID: "mf_old", Subject: me, Relation: ExpiresOn, Object: model.Party{Name: "전세 계약"},
+		Text: "전세 계약 2026-11-01 만기", ValidAt: "2026-11-01", CreatedAt: now.AddDate(-2, 0, 0)})
+	_ = st.PutFact(ctx, model.Fact{ID: "mf_new", Subject: me, Relation: ExpiresOn, Object: model.Party{Name: "전세 계약"},
+		Text: "전세 계약 2028-11-01 만기로 연장", ValidAt: "2028-11-01", CreatedAt: now.AddDate(0, -1, 0)})
+	if err := m.deadlines(ctx); err != nil {
+		t.Fatal(err)
+	}
+	ins, _ := st.Intents(ctx, 0)
+	for _, in := range ins {
+		if strings.Contains(in.Title, "전세") {
+			t.Fatalf("연장된 계약을 옛 만기로 알렸습니다: %s", in.Title)
+		}
+	}
+}

@@ -45,10 +45,22 @@ func (m *Mind) deadlines(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// 같은 것의 만기가 다시 말해지면(연장) 나중 것만 본다. FactsOn 은 오래된
+	// 것부터이므로 뒤에 온 것이 덮는다.
+	latest := map[string]model.Fact{}
+	var order []string
 	for _, f := range facts {
 		if !f.Subject.Self || f.Status == model.FactFailed || f.ValidAt == "" {
 			continue
 		}
+		key := strings.Join(strings.Fields(strings.ToLower(firstNonEmpty(f.Object.Name, f.Text))), "")
+		if _, seen := latest[key]; !seen {
+			order = append(order, key)
+		}
+		latest[key] = f
+	}
+	for _, key := range order {
+		f := latest[key]
 		due, err := time.ParseInLocation("2006-01-02", f.ValidAt[:min(10, len(f.ValidAt))], loc)
 		if err != nil {
 			continue
@@ -316,7 +328,7 @@ func (m *Mind) moved(ctx context.Context) error {
 // ledgerWith is what went between the operator and someone (GAVE_TO,
 // RECEIVED_FROM), as said.
 func (m *Mind) ledgerWith(ctx context.Context, who string) []string {
-	facts, err := m.Opts.Store.Facts(ctx, 500)
+	facts, err := m.Opts.Store.FactsWith(ctx, GaveTo, ReceivedFrom)
 	if err != nil {
 		return nil
 	}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -892,6 +893,20 @@ func (m *Memory) Preferences(context.Context) ([]model.Preference, error) {
 		out = append(out, p)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Dimension+out[i].Scope < out[j].Dimension+out[j].Scope })
+	return out, nil
+}
+
+func (m *Memory) FactsWith(ctx context.Context, relations ...string) ([]model.Fact, error) {
+	all, _ := m.Facts(ctx, 0)
+	var out []model.Fact
+	for _, f := range all {
+		for _, r := range relations {
+			if strings.EqualFold(f.Relation, r) {
+				out = append(out, f)
+				break
+			}
+		}
+	}
 	return out, nil
 }
 

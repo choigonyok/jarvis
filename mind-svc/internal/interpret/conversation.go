@@ -75,6 +75,8 @@ type Conversation struct {
 	waiting map[string]int       // room -> messages observed since it was last read
 	others  map[string]bool      // room has someone besides me in it
 	backoff map[string]time.Time // room -> not before (after a failed read)
+	fails   map[string]int       // room -> failed reads in a row
+	shrink  map[string]int       // room -> batch cap after unreadable answers
 	reading sync.Mutex           // one read at a time
 	read    time.Time            // the last read that went through
 	failed  string               // why the last read failed, until one works
@@ -95,7 +97,7 @@ func NewConversation(cfg Config, st store.Store, w *world.World, client llm.Clie
 	}
 	return &Conversation{
 		cfg: cfg, st: st, world: w, llm: client, loc: loc, now: now, log: log,
-		due: map[string]time.Time{}, waiting: map[string]int{}, others: map[string]bool{}, backoff: map[string]time.Time{},
+		due: map[string]time.Time{}, waiting: map[string]int{}, others: map[string]bool{}, backoff: map[string]time.Time{}, fails: map[string]int{}, shrink: map[string]int{},
 	}
 }
 
@@ -211,9 +213,15 @@ func (c *Conversation) Read(ctx context.Context, room string) error {
 		return nil
 	}
 	// A long backlog is read in batches, oldest first; the rest is read next.
-	more := len(fresh) > c.cfg.MaxBatch
+	size := c.cfg.MaxBatch
+	c.mu.Lock()
+	if n := c.shrink[room]; n > 0 && n < size {
+		size = n
+	}
+	c.mu.Unlock()
+	more := len(fresh) > size
 	if more {
-		fresh = fresh[:c.cfg.MaxBatch]
+		fresh = fresh[:size]
 	}
 	last := fresh[len(fresh)-1].SentAt
 
@@ -237,6 +245,21 @@ func (c *Conversation) Read(ctx context.Context, room string) error {
 	}
 	ops, err := parse(answer)
 	if err != nil {
+		// 같은 배치는 같은 이유(대개 max_tokens 에서 잘린 JSON)로 또 실패한다.
+		// 배치를 반으로 줄이고, 한 건으로도 못 읽으면 그 메시지를 격리한다.
+		if len(fresh) == 1 && c.failCount(room) >= quarantineAfter {
+			c.log.Error("해석할 수 없는 메시지를 건너뜁니다", "room", room, "at", last, "err", err)
+			if err := c.st.MarkRoom(ctx, room, last); err != nil {
+				return err
+			}
+			c.mu.Lock()
+			c.fails[room], c.backoff[room] = 0, time.Time{}
+			c.mu.Unlock()
+			return nil
+		}
+		c.mu.Lock()
+		c.shrink[room] = max(1, len(fresh)/2)
+		c.mu.Unlock()
 		c.retryLater(room, err)
 		return fmt.Errorf("해석 결과를 읽지 못했습니다: %w", err)
 	}
@@ -255,6 +278,8 @@ func (c *Conversation) Read(ctx context.Context, room string) error {
 	}
 	c.mu.Lock()
 	c.read, c.failed = c.now(), ""
+	delete(c.fails, room)
+	delete(c.shrink, room)
 	c.mu.Unlock()
 	c.log.Info("대화를 해석했습니다", "room", room, "messages", len(fresh), "changes", applied, "proposed", len(ops))
 	if more {
@@ -273,15 +298,29 @@ func (c *Conversation) done(room string) {
 	delete(c.due, room)
 	delete(c.backoff, room)
 	delete(c.waiting, room)
+	delete(c.fails, room)
+	delete(c.shrink, room)
 }
 
-func (c *Conversation) retryLater(room string, err error) {
-	wait := time.Minute
-	if errors.Is(err, llm.ErrBudget) || errors.Is(err, llm.ErrNoKey) {
-		wait = 30 * time.Minute
-	}
+// quarantineAfter is how many failed reads in a row a single message gets
+// before it is skipped, so one unreadable message cannot spend the day's budget.
+const quarantineAfter = 4
+
+func (c *Conversation) failCount(room string) int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.fails[room]
+}
+
+// retryLater backs off exponentially: 1, 2, 4 ... minutes, capped at 6 hours.
+func (c *Conversation) retryLater(room string, err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	wait := 30 * time.Minute
+	if !errors.Is(err, llm.ErrBudget) && !errors.Is(err, llm.ErrNoKey) {
+		c.fails[room]++
+		wait = min(time.Minute<<min(c.fails[room]-1, 9), 6*time.Hour)
+	}
 	c.backoff[room] = c.now().Add(wait)
 	c.failed = err.Error()
 }

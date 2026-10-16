@@ -268,3 +268,33 @@ func TestFactEndsWhatItReplaces(t *testing.T) {
 		t.Fatalf("M2 만, 기억의 id 로: %+v", fs)
 	}
 }
+
+// An answer that cannot be read shrinks the batch, backs off longer each
+// time, and a single message that still cannot be read is skipped.
+func TestUnreadableBatchShrinksThenQuarantines(t *testing.T) {
+	ctx := context.Background()
+	c, st, _ := setup(t, `{"changes":[`)
+	c.cfg.MaxBatch = 4
+	for i, text := range []string{"하나", "둘", "셋", "넷"} {
+		say(t, st, fmt.Sprintf("sim:%d", i+1), text, false, time.Date(2026, 10, 12, 20, i, 0, 0, seoul))
+	}
+	var waits []time.Duration
+	for i := 0; i < 6; i++ {
+		_ = c.Read(ctx, "r")
+		c.mu.Lock()
+		if !c.backoff["r"].IsZero() {
+			waits = append(waits, c.backoff["r"].Sub(c.now()))
+		}
+		c.mu.Unlock()
+	}
+	if c.shrink["r"] != 1 && c.fails["r"] != 0 {
+		t.Fatalf("배치가 한 건까지 줄어야 합니다: shrink=%d", c.shrink["r"])
+	}
+	if len(waits) < 3 || waits[1] <= waits[0] || waits[2] <= waits[1] {
+		t.Fatalf("대기가 늘어나야 합니다: %v", waits)
+	}
+	marks, _ := st.Rooms(ctx)
+	if len(marks) == 0 || marks[0].Interpreted.IsZero() {
+		t.Fatal("끝내 못 읽은 메시지는 건너뛰어야 합니다")
+	}
+}

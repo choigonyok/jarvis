@@ -448,6 +448,14 @@ func (p *Postgres) DueFacts(ctx context.Context, now time.Time, limit int) ([]mo
 	return p.facts(ctx, `where status = 'pending' and next_try <= $1 order by created_at, id limit $2`, now, limit)
 }
 
+func (p *Postgres) FactsWith(ctx context.Context, relations ...string) ([]model.Fact, error) {
+	up := make([]string, len(relations))
+	for i, r := range relations {
+		up[i] = strings.ToUpper(r)
+	}
+	return p.facts(ctx, `where upper(body->>'relation') = any($1) order by created_at desc, id desc`, up)
+}
+
 func (p *Postgres) FactsOn(ctx context.Context, relation string, from, to time.Time) ([]model.Fact, error) {
 	return p.facts(ctx, `where body->>'relation' = $1 and created_at >= $2 and created_at < $3 order by created_at, id`, relation, from, to)
 }

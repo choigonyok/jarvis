@@ -257,6 +257,12 @@ func (g *Gate) approveWithLocked(ctx context.Context, id string, answers map[str
 	if !ok {
 		return in, errors.New("이 행동을 할 수 있는 곳이 없습니다")
 	}
+	// 실행보다 먼저 상태를 저장한다. 실행 뒤 저장이 실패해도 제안이 pending 으로
+	// 남아 다시 승인되면, 같은 일정·메모가 한 번 더 만들어진다.
+	in.Status = model.Executing
+	if err := g.st.PutIntent(ctx, in); err != nil {
+		return in, err
+	}
 	g.run(ctx, a, &in, "user")
 	_ = g.st.CountPolicy(ctx, in.Skill, in.ContextKey(), model.OutcomeApproved, g.now())
 	g.closeCard(ctx, in)

@@ -78,8 +78,9 @@ const selectList = `
 // that quietly stops at 200 turns would read as history having been lost. When
 // this gets slow the fix is a window the UI asks for, not a cap the service
 // imposes without saying so.
-func (s *Store) All(ctx context.Context, tz, thread string) ([]turn.Turn, error) {
-	rows, err := s.pool.Query(ctx, selectList+` where thread = $2 order by at, id`, tz, thread)
+// All is a thread's turns after since (zero = the whole thread).
+func (s *Store) All(ctx context.Context, tz, thread string, since time.Time) ([]turn.Turn, error) {
+	rows, err := s.pool.Query(ctx, selectList+` where thread = $2 and at > $3 order by at, id`, tz, thread, since)
 	if err != nil {
 		return nil, fmt.Errorf("턴 조회: %w", err)
 	}

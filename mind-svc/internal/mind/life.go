@@ -41,7 +41,7 @@ func (m *Mind) ceremony(ctx context.Context, e model.Entity) error {
 	if len(people) == 0 {
 		people = namesIn(st.Title)
 	}
-	facts, err := m.Opts.Store.Facts(ctx, 500)
+	facts, err := m.Opts.Store.FactsWith(ctx, GaveTo, ReceivedFrom)
 	if err != nil {
 		return err
 	}
@@ -98,7 +98,7 @@ func namesIn(title string) []string {
 
 // wishes is what the operator said they want to do, see or have.
 func (m *Mind) wishes(ctx context.Context, relations ...string) ([]model.Fact, error) {
-	facts, err := m.Opts.Store.Facts(ctx, 500)
+	facts, err := m.Opts.Store.FactsWith(ctx, relations...)
 	if err != nil {
 		return nil, err
 	}

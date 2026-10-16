@@ -3,6 +3,7 @@ package mind
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -22,14 +23,37 @@ import (
 
 const morningAt = 7 * 60
 
-// Morning runs the morning's predictions now.
+// Morning runs the morning's predictions now. Each stage runs even if an
+// earlier one failed.
 func (m *Mind) Morning(ctx context.Context) error {
-	if _, err := m.Predict.Score(ctx); err != nil {
-		return err
-	}
 	now := m.Opts.Now().In(m.Opts.Loc)
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, m.Opts.Loc)
+	steps := []func(context.Context) error{
+		func(ctx context.Context) error {
+			_, err := m.Predict.Score(ctx)
+			return err
+		},
+		func(ctx context.Context) error { return m.morningWorkout(ctx, today) },
+		func(ctx context.Context) error {
+			plans, err := m.Opts.Store.PlansOn(ctx, today.Format("2006-01-02"), today.AddDate(0, 0, 14).Format("2006-01-02"))
+			if err != nil {
+				return err
+			}
+			var errs []error
+			for _, p := range plans {
+				if _, err := m.Predict.Prep(ctx, p); err != nil {
+					errs = append(errs, err)
+				}
+			}
+			return errors.Join(errs...)
+		},
+	}
+	steps = append(steps, m.mornings...)
+	steps = append(steps, func(ctx context.Context) error { return m.prepCards(ctx, now) })
+	return m.stages(ctx, "morning", steps)
+}
 
+func (m *Mind) morningWorkout(ctx context.Context, today time.Time) error {
 	todayP, okToday, err := m.Predict.Workout(ctx, today)
 	if err != nil {
 		return err
@@ -51,22 +75,7 @@ func (m *Mind) Morning(ctx context.Context) error {
 			m.moveWorkout(ctx, today, todayP, tomorrow)
 		}
 	}
-
-	plans, err := m.Opts.Store.PlansOn(ctx, today.Format("2006-01-02"), today.AddDate(0, 0, 14).Format("2006-01-02"))
-	if err != nil {
-		return err
-	}
-	for _, p := range plans {
-		if _, err := m.Predict.Prep(ctx, p); err != nil {
-			return err
-		}
-	}
-	for _, step := range m.mornings {
-		if err := step(ctx); err != nil {
-			return err
-		}
-	}
-	return m.prepCards(ctx, now)
+	return nil
 }
 
 // moveWorkout: tomorrow looks unlikely for a workout that is usually done -
