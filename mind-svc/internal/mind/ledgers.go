@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/choigonyok/jarvis/mind-svc/internal/act"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
 	"github.com/choigonyok/jarvis/mind-svc/internal/prefs"
@@ -560,7 +561,12 @@ const AssetsBand = "assets.band"
 
 // portfolioBand raises one rebalance question for the whole portfolio. The
 // gate's ledger keeps it quiet after it was raised or turned down, as it does
-// any topic; the plan itself is on the assets page (assets-svc /plan).
+// any topic.
+//
+// With orders to place (assets-svc checks the plan), it is a card that
+// places exactly those orders when approved (act.RebalanceActuator) - asked
+// every time. Without (nothing tradable, the service unreachable), it stays
+// a question pointing at the 자산 screen, where the plan can be placed by hand.
 func (m *Mind) portfolioBand(ctx context.Context, o obs.Observation) error {
 	var n struct {
 		Title string `json:"title"`
@@ -568,12 +574,27 @@ func (m *Mind) portfolioBand(ctx context.Context, o obs.Observation) error {
 	}
 	_ = json.Unmarshal(o.Notify, &n)
 	title := firstNonEmpty(n.Title, "자산 비중이 목표 범위를 벗어났어요")
-	_, err := m.Gate.Submit(ctx, model.Intent{
+	in := model.Intent{
 		Skill: "assets", Kind: "info", Topic: "rebalance",
 		Title:  title + " - 리밸런싱을 검토해 보세요",
 		Body:   strings.TrimSpace(n.Body + "\n자산 탭의 목표 비중에서 매매 계획을 볼 수 있어요."),
 		Reason: "목표 비중의 허용 범위를 벗어남", Confidence: 0.8,
 		Link: "/assets?focus=allocation",
-	})
+	}
+	if m.Opts.Orders != nil {
+		if orders, err := m.Opts.Orders.Check(ctx); err == nil && len(orders) > 0 {
+			lines := make([]string, len(orders))
+			for i, x := range orders {
+				lines[i] = x.Line()
+			}
+			in.Kind = "assets.rebalance"
+			in.Title = title + " - 리밸런싱할까요?"
+			in.Body = strings.TrimSpace(n.Body + "\n" + strings.Join(lines, " · "))
+			in.Payload, _ = json.Marshal(act.RebalancePlan{PlanID: o.Key, Orders: orders})
+		} else if err != nil {
+			m.Opts.Logger.Warn("리밸런싱 주문을 확인하지 못해 질문으로만 올립니다", "err", err)
+		}
+	}
+	_, err := m.Gate.Submit(ctx, in)
 	return err
 }

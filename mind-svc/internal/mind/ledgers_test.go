@@ -217,3 +217,65 @@ func TestNightKeepsGoingPastAFailedStep(t *testing.T) {
 		t.Fatalf("아침도 마찬가지: err=%v ran=%v", err, ran)
 	}
 }
+
+// 9: with orders to place, a band breach is a card that places exactly the
+// orders it showed when approved - asked every time, never placed by itself.
+func TestRebalanceCardPlacesWhatItShowed(t *testing.T) {
+	seoul, _ := time.LoadLocation("Asia/Seoul")
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	clk := clock.New()
+	clk.Pin(time.Date(2026, 10, 16, 9, 0, 0, 0, seoul))
+	st := store.NewMemory()
+	one := 1.0
+	orders := &act.MemoryOrders{Plan: []act.Order{
+		{Venue: "upbit", Symbol: "BTC", Side: "sell", AmountKrw: 52000, Name: "비트코인"},
+		{Venue: "kis", Symbol: "KO", Side: "buy", Units: &one, AmountKrw: 126000, Name: "코카콜라"},
+	}}
+	m := New(Options{Store: st, Log: obs.NewMemoryLog(quiet), LLM: &llm.Script{}, Calendar: act.NewMemoryCalendar(), Notifier: &act.MemoryNotifier{},
+		Loc: seoul, Now: clk.Now, Logger: quiet, Interpret: interpret.Config{Owner: "나"}, Policy: gate.DefaultPolicy(), Mode: "eval", Orders: orders})
+	ctx := context.Background()
+	o := obs.Observation{Source: "assets", Type: AssetsBand, Key: "assets:band:coin:2026-10-16", Notify: []byte(`{"title":"코인 비중이 범위를 벗어났어요","body":"지금 30% · 목표 20%"}`)}
+	if err := m.Handle(ctx, o); err != nil {
+		t.Fatal(err)
+	}
+	ins, _ := st.Intents(ctx, 10)
+	var card model.Intent
+	for _, in := range ins {
+		if in.Kind == "assets.rebalance" {
+			card = in
+		}
+	}
+	if card.ID == "" || card.Decision != model.Ask || card.Status != model.Pending {
+		t.Fatalf("주문 카드로 물어야 합니다: %+v", ins)
+	}
+	if !strings.Contains(card.Body, "비트코인 ₩52,000 매도") || !strings.Contains(card.Body, "코카콜라 1주 매수") {
+		t.Fatalf("카드에 낼 주문이 보여야 합니다: %q", card.Body)
+	}
+	if len(orders.Placed) != 0 {
+		t.Fatal("승인 전에 주문이 나갔습니다")
+	}
+
+	// The plan changes before the approval: what was shown is what goes.
+	orders.Plan = nil
+	if _, err := m.Gate.Approve(ctx, card.ID); err != nil {
+		t.Fatal(err)
+	}
+	if len(orders.Placed) != 2 || orders.Placed[0].Symbol != "BTC" || orders.Placed[1].Symbol != "KO" {
+		t.Fatalf("보여 준 주문 그대로 나가야 합니다: %+v", orders.Placed)
+	}
+
+	// The same breach again is not asked twice while the card is fresh.
+	if err := m.Handle(ctx, o); err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	ins, _ = st.Intents(ctx, 100)
+	for _, in := range ins {
+		if in.Topic == "rebalance" && in.Status == model.Pending {
+			n++
+		}
+	}
+	if n != 0 {
+		t.Fatalf("방금 답한 리밸런싱을 다시 물었습니다: %d", n)
+	}
+}

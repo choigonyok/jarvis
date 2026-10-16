@@ -168,8 +168,12 @@ func main() {
 
 	// Assets: the allocation, read only.
 	var assets mind.Assets
+	// Orders: an approved rebalance card's orders go to assets-svc, the only
+	// holder of the brokerage keys.
+	var orders act.Orders
 	if url := os.Getenv("ASSETS_URL"); mode == "stack" && url != "" {
 		assets = mind.AssetsHTTP{URL: url, Token: token}
+		orders = act.AssetsOrders{URL: url, Token: token}
 	}
 	// Travel: how long the usual ways take, from the stays (context-svc).
 	var travel mind.Travel
@@ -192,7 +196,7 @@ func main() {
 		Loc: loc, Now: clk.Now, Logger: log, Interpret: cfg, Settle: settle,
 		Policy: gate.DefaultPolicy(), URL: getenv("MIND_UI_URL", "http://localhost:8102/"), Mode: mode,
 		MessageRetain: time.Duration(atoiOr(getenv("MIND_MESSAGE_RETAIN_DAYS", "365"), 365)) * 24 * time.Hour,
-		Memory:        mem, Photos: photos, Jobs: jobs, Assets: assets, Travel: travel,
+		Memory:        mem, Photos: photos, Jobs: jobs, Assets: assets, Orders: orders, Travel: travel,
 		DailyUSD: number("MIND_DAILY_USD", 1.0),
 	})
 	if !client.Ready() {

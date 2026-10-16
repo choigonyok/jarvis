@@ -62,6 +62,9 @@ type Options struct {
 	Jobs act.Jobs
 	// Assets is the allocation, read only; nil: not known.
 	Assets Assets
+	// Orders is where an approved rebalance's orders are placed (assets-svc);
+	// nil keeps them in memory.
+	Orders act.Orders
 	// Travel is how long the usual ways take, measured from the stays in
 	// regions (context-svc); nil: not known.
 	Travel Travel
@@ -135,9 +138,12 @@ func New(o Options) *Mind {
 	if jobs == nil {
 		jobs = &act.MemoryJobs{}
 	}
+	if o.Orders == nil {
+		o.Orders = &act.MemoryOrders{}
+	}
 	acts := act.NewRegistry(act.CalendarActuator{Cal: o.Calendar}, act.Note{},
 		act.SettleActuator{Drafts: drafter}, act.PhotosActuator{Photos: photos}, act.CartActuator{Jobs: jobs},
-		act.DraftActuator{Drafts: drafter}, act.ReviewActuator{})
+		act.DraftActuator{Drafts: drafter}, act.ReviewActuator{}, act.RebalanceActuator{Orders: o.Orders})
 	m.Gate = gate.New(o.Store, acts, notifier, o.Log, o.Policy, o.Loc, o.Now, o.URL, o.Logger)
 	m.Prefs = &prefs.Prefs{St: o.Store, LLM: o.LLM, Now: o.Now}
 	m.Gate.OnDecide = func(ctx context.Context, in model.Intent) {

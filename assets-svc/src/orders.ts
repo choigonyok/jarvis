@@ -39,6 +39,8 @@ export type OrderRequest = {
 };
 
 export type OrderResult = OrderRequest & {
+  /** The holding's name, for saying the order in words. */
+  name?: string;
   status: "placed" | "failed" | "manual" | "preview";
   message: string;
   brokerId?: string;
@@ -108,7 +110,7 @@ export async function placeOrders(
   for (const r of ordered) {
     const held = byKey.get(`${r.venue}:${r.symbol}`);
     const currency: "KRW" | "USD" = held?.currency ?? (r.venue === "kis" ? "USD" : "KRW");
-    const base = { ...r, units: r.units ?? null, currency };
+    const base = { ...r, units: r.units ?? null, currency, ...(held ? { name: held.name } : {}) };
     const bad = total > MAX_PLAN_KRW ? `한 번에 ${won(MAX_PLAN_KRW)}까지만 주문해요 (이번 ${won(total)})` : problem(r, held);
     if (bad) {
       results.push({ ...base, status: "failed", message: bad });
