@@ -64,9 +64,6 @@ type Config struct {
 	// server does not - so this is what stands between that port and anyone
 	// else on the same wifi. Empty means no header is sent.
 	ExtraMCPToken string
-	// VoiceToken is what the phone's voice shortcut presents at /voice - its
-	// own credential, so the phone never holds the stack's token.
-	VoiceToken string
 	// CalendarURL is where calendar-svc listens. The events used to be a file
 	// here, kept deliberately outside the workspace mount so the CLI's own
 	// Read and Write could not be a second door into them. They are in
@@ -183,7 +180,6 @@ func Load() (Config, error) {
 		ModuleMCPURLs:    map[string]string{},
 		ExtraMCPURLs:     parseMCPURLs(os.Getenv("JARVIS_EXTRA_MCP")),
 		ExtraMCPToken:    os.Getenv("JARVIS_MCP_TOKEN"),
-		VoiceToken:       os.Getenv("JARVIS_VOICE_TOKEN"),
 		InternalMCPToken: env("JARVIS_MCP_INTERNAL_TOKEN", randomToken()),
 		CalendarURL:      env("JARVIS_CALENDAR_URL", "http://localhost:8093"),
 		ChatURL:          env("JARVIS_CHAT_URL", "http://localhost:8094"),

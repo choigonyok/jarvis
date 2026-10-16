@@ -102,7 +102,6 @@ services:
       JARVIS_MIND_URL: http://mind:8102
       # 위치·현재 상태(읽기만). get_context 도구와 판단 턴의 사실.
       JARVIS_CONTEXT_URL: http://context:8103
-      JARVIS_VOICE_TOKEN: ${JARVIS_VOICE_TOKEN:-}
       JARVIS_MEMORY_URL: http://memory:8100
       # 대화에 첨부한 사진. 브라우저 컨테이너도 같은 볼륨을 읽기 전용으로 붙여
       # 작업이 웹 양식에 사진을 넣는다.
