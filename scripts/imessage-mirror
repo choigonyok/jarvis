@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# iMessage 미러를 전용 바이너리로 돌린다(imessage-client/cmd/mirror). 맥북에서 실행한다.
+#
+#   scripts/imessage-mirror install  빌드해 맥미니 ~/.local/bin/jarvis-imessage-mirror 로 보낸다
+#   scripts/imessage-mirror switch   LaunchAgent 를 바이너리로 바꾼다. 바이너리가 chat.db 를 못 읽으면
+#                                    (전체 디스크 접근 권한이 아직 없으면) 예전 SSH 방식으로 되돌린다
+#   scripts/imessage-mirror status   돌고 있는 방식과 마지막 로그
+#
+# 전체 디스크 접근 권한은 사람이 준다: 맥미니의 시스템 설정 → 개인정보 보호 및 보안 → 전체 디스크
+# 접근 권한 → + → ~/.local/bin/jarvis-imessage-mirror (Cmd+Shift+. 로 숨은 폴더를 보인다).
+# switch 가 성공하면 같은 목록에서 sshd-keygen-wrapper(원격 로그인)의 권한을 끈다 - 그것이 이 일의
+# 목적이다(S-8). 예전 방식의 키(~/.ssh/jarvis_mirror)도 authorized_keys 에서 지워도 된다.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+HOST="${MINI_HOST:-macmini}"
+LABEL=com.jarvis.imessage-mirror
+BIN='$HOME/.local/bin/jarvis-imessage-mirror'
+PLIST='$HOME/Library/LaunchAgents/com.jarvis.imessage-mirror.plist'
+LOG=/tmp/jarvis-imessage-mirror.log
+
+remote() { ssh -o LogLevel=ERROR "$HOST" "$@"; }
+
+case "${1:-}" in
+  install)
+    tmp=$(mktemp -d)
+    (cd "$ROOT/imessage-client" && GOOS=darwin GOARCH=arm64 go build -trimpath -o "$tmp/jarvis-imessage-mirror" ./cmd/mirror)
+    remote 'mkdir -p ~/.local/bin'
+    scp -q "$tmp/jarvis-imessage-mirror" "$HOST:.local/bin/jarvis-imessage-mirror"
+    rm -rf "$tmp"
+    echo "보냈습니다. 맥미니에서 전체 디스크 접근 권한을 ~/.local/bin/jarvis-imessage-mirror 에 준 뒤 'scripts/imessage-mirror switch'"
+    ;;
+  switch)
+    remote "bash -s" <<SH
+set -e
+P=$PLIST; B=$BIN
+[ -x "\$B" ] || { echo "바이너리가 없습니다. 먼저 install" >&2; exit 1; }
+# 되돌릴 곳은 SSH 방식뿐이다. 이미 바이너리판이면 백업을 덮지 않는다.
+if grep -q /usr/bin/ssh "\$P" 2>/dev/null; then cp "\$P" "\$P.ssh-backup"; fi
+[ -f "\$P.ssh-backup" ] || { echo "되돌릴 SSH 방식 plist(\$P.ssh-backup)가 없습니다" >&2; exit 1; }
+cat > "\$P" <<PL
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>$LABEL</string>
+  <key>ProgramArguments</key><array><string>\$B</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>15</integer>
+  <key>StandardErrorPath</key><string>$LOG</string>
+</dict></plist>
+PL
+: > $LOG
+launchctl bootout gui/\$(id -u)/$LABEL 2>/dev/null || true
+launchctl bootstrap gui/\$(id -u) "\$P"
+sleep 6
+if ! grep -q "probe chat.db: ok" $LOG; then
+  echo "바이너리가 chat.db 를 읽지 못합니다(전체 디스크 접근 권한 없음). 예전 방식으로 되돌립니다:" >&2
+  grep "chat.db" $LOG | tail -1 >&2
+  launchctl bootout gui/\$(id -u)/$LABEL 2>/dev/null || true
+  mv "\$P.ssh-backup" "\$P"
+  launchctl bootstrap gui/\$(id -u) "\$P"
+  exit 1
+fi
+echo "바꿨습니다: $LABEL → \$B"
+SH
+    ;;
+  status)
+    remote "grep -A1 ProgramArguments $PLIST | tail -1 | sed 's/<[^>]*>//g'; launchctl print gui/\$(id -u)/$LABEL 2>/dev/null | grep -E 'state|pid' | head -2; tail -3 $LOG 2>/dev/null"
+    ;;
+  *) sed -n '2,13p' "$0"; exit 1 ;;
+esac
