@@ -107,7 +107,16 @@ export type CalendarChange = {
   event: CalendarEvent;
 };
 
+/** A message sent while Jarvis was busy, waiting behind the running turn. */
+export type Queued = {
+  id: string;
+  text: string;
+  images?: string[];
+  at: string;
+};
+
 export type AgentEvent =
+  | { type: "queue"; queue?: Queued[] }
   | { type: "turn"; turn: Turn }
   | { type: "status"; thinking?: boolean }
   | { type: "error"; message: string }

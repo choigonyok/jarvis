@@ -14,11 +14,13 @@ import "sync"
 // imports on the packages that fill them; exactly one slot is set per event,
 // and the JSON shape is what the browser reads, so the names are contractual.
 type Event struct {
-	Type string `json:"type"` // turn | status | error | proposal | calendar
+	Type string `json:"type"` // turn | status | error | proposal | calendar | queue
 
-	Turn     any    `json:"turn,omitempty"`
-	Proposal any    `json:"proposal,omitempty"`
-	Calendar any    `json:"calendar,omitempty"`
+	Turn     any `json:"turn,omitempty"`
+	Proposal any `json:"proposal,omitempty"`
+	Calendar any `json:"calendar,omitempty"`
+	// Queue is the whole list, empty included: an empty list is news.
+	Queue    any    `json:"queue,omitempty"`
 	Thinking bool   `json:"thinking,omitempty"`
 	Message  string `json:"message,omitempty"`
 }

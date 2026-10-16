@@ -9,11 +9,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,6 +30,23 @@ import (
 
 var ErrBusy = errors.New("이미 처리 중인 요청이 있습니다")
 
+// ErrNotQueued is a steer or drop of a message no longer waiting.
+var ErrNotQueued = errors.New("대기 중인 메시지가 아닙니다")
+
+// Queued is one message waiting behind the running turn.
+type Queued struct {
+	ID     string      `json:"id"`
+	Text   string      `json:"text"`
+	Images []string    `json:"images,omitempty"`
+	Ref    *thread.Ref `json:"ref,omitempty"`
+	At     time.Time   `json:"at"`
+	// prompt is a turn nobody typed (a card's decision): not shown, and
+	// its words are the prompt as given.
+	prompt string
+}
+
+func (q *Queued) typed() bool { return q.prompt == "" }
+
 type Runner struct {
 	cfg   config.Config
 	store *thread.Store
@@ -39,9 +58,13 @@ type Runner struct {
 	nowText string
 	nowAt   time.Time
 	running bool
-	// queue holds turns nobody typed - a card's decision arriving while
-	// another turn is running. They run, in order, as soon as it ends.
-	queue []string
+	// queue is what waits behind the running turn, in order: messages the
+	// operator sent meanwhile (shown, and each can be steered into the
+	// running turn or dropped) and turns nobody typed - a card's decision.
+	queue []*Queued
+	// input is the running turn's stdin while it still takes messages (until
+	// its result): a steered message is written here.
+	input io.WriteCloser
 	// bgCancel stops the background task in flight, if any (see Background).
 	bgCancel func()
 	// usage hears every rate_limit_event, chat and background alike.
@@ -95,30 +118,118 @@ func (r *Runner) Send(text string, images []string) error {
 // is handed the quoted message ahead of what the operator wrote, so "이 제품
 // 구매해줘" knows which product.
 func (r *Runner) SendRef(text string, images []string, ref *thread.Ref) error {
+	_, err := r.Submit(text, images, ref)
+	return err
+}
+
+// Submit starts a turn for the operator's message, or - while one is
+// running - puts it in the queue, where it waits its turn unless it is
+// steered into the running one. queued says which.
+func (r *Runner) Submit(text string, images []string, ref *thread.Ref) (queued bool, err error) {
+	q := &Queued{ID: "q-" + strconv.FormatInt(time.Now().UnixNano(), 36), Text: text, Images: images, Ref: ref, At: time.Now()}
 	r.mu.Lock()
 	if r.running {
+		r.queue = append(r.queue, q)
 		r.mu.Unlock()
-		return ErrBusy
+		r.showQueue()
+		return true, nil
 	}
 	r.running = true
 	r.yieldLocked()
 	r.mu.Unlock()
+	go func() { r.loop(r.start(q)) }()
+	return false, nil
+}
 
-	if ref != nil {
-		r.store.AppendUserRef(text, ref, images...)
-	} else {
-		r.store.AppendUser(text, images...)
+// start writes a typed message into the transcript, now that it is being
+// read, and returns its prompt; a turn nobody typed is its prompt.
+func (r *Runner) start(q *Queued) string {
+	if !q.typed() {
+		return q.prompt
 	}
-	prompt := withRef(withImages(text, images, r.cfg.UploadsDir), ref)
-	go func() {
-		if r.recall != nil {
-			if known := r.recall(context.Background(), text); known != "" {
-				prompt = known + "\n" + prompt
-			}
+	if q.Ref != nil {
+		r.store.AppendUserRef(q.Text, q.Ref, q.Images...)
+	} else {
+		r.store.AppendUser(q.Text, q.Images...)
+	}
+	prompt := withRef(withImages(q.Text, q.Images, r.cfg.UploadsDir), q.Ref)
+	if r.recall != nil {
+		if known := r.recall(context.Background(), q.Text); known != "" {
+			prompt = known + "\n" + prompt
 		}
-		r.loop(prompt)
-	}()
+	}
+	return prompt
+}
+
+// Queue is the operator's messages waiting behind the running turn.
+func (r *Runner) Queue() []Queued {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := []Queued{}
+	for _, q := range r.queue {
+		if q.typed() {
+			out = append(out, *q)
+		}
+	}
+	return out
+}
+
+func (r *Runner) showQueue() { r.store.ShowQueue(r.Queue()) }
+
+// Steer takes a waiting message out of the queue and hands it to the turn
+// that is running, which reads it at its next step - the way a person
+// interrupts with "아 그리고 ...". If that turn no longer takes messages (it
+// is giving its last answer), the message goes first in line instead.
+// steered says which.
+func (r *Runner) Steer(id string) (steered bool, err error) {
+	r.mu.Lock()
+	at := slices.IndexFunc(r.queue, func(q *Queued) bool { return q.ID == id && q.typed() })
+	if at < 0 {
+		r.mu.Unlock()
+		return false, ErrNotQueued
+	}
+	q := r.queue[at]
+	r.queue = slices.Delete(r.queue, at, at+1)
+	if r.input != nil {
+		if err := writeUser(r.input, withRef(withImages(q.Text, q.Images, r.cfg.UploadsDir), q.Ref)); err == nil {
+			r.mu.Unlock()
+			if q.Ref != nil {
+				r.store.AppendUserRef(q.Text, q.Ref, q.Images...)
+			} else {
+				r.store.AppendUser(q.Text, q.Images...)
+			}
+			r.showQueue()
+			return true, nil
+		}
+	}
+	r.queue = slices.Insert(r.queue, 0, q)
+	r.mu.Unlock()
+	r.showQueue()
+	return false, nil
+}
+
+// Drop takes a waiting message out of the queue unsent.
+func (r *Runner) Drop(id string) error {
+	r.mu.Lock()
+	at := slices.IndexFunc(r.queue, func(q *Queued) bool { return q.ID == id && q.typed() })
+	if at < 0 {
+		r.mu.Unlock()
+		return ErrNotQueued
+	}
+	r.queue = slices.Delete(r.queue, at, at+1)
+	r.mu.Unlock()
+	r.showQueue()
 	return nil
+}
+
+// writeUser is one user message on a stream-json stdin.
+func writeUser(w io.Writer, text string) error {
+	line, err := json.Marshal(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": text}})
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(append(line, '\n'))
+	return err
 }
 
 // withRef puts the quoted message in front of the prompt, marked as a quote.
@@ -158,7 +269,7 @@ func withImages(text string, images []string, dir string) string {
 func (r *Runner) Enqueue(prompt string) {
 	r.mu.Lock()
 	if r.running {
-		r.queue = append(r.queue, prompt)
+		r.queue = append(r.queue, &Queued{ID: "c-" + strconv.FormatInt(time.Now().UnixNano(), 36), At: time.Now(), prompt: prompt})
 		r.mu.Unlock()
 		return
 	}
@@ -185,9 +296,13 @@ func (r *Runner) loop(prompt string) {
 			r.store.SetThinking(false)
 			return
 		}
-		prompt = r.queue[0]
+		next := r.queue[0]
 		r.queue = r.queue[1:]
 		r.mu.Unlock()
+		if next.typed() {
+			r.showQueue()
+		}
+		prompt = r.start(next)
 	}
 }
 
@@ -195,11 +310,17 @@ func (r *Runner) turn(prompt string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), r.cfg.TurnTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, r.cfg.ClaudeBin, r.args(prompt)...)
+	cmd := exec.CommandContext(ctx, r.cfg.ClaudeBin, r.args()...)
 	cmd.Dir = r.cfg.Workspace
 	cmd.Env = r.env()
 
 	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	// The prompt goes in on stdin, and stdin stays open until the result:
+	// a message steered in meanwhile is read at the turn's next step.
+	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return err
 	}
@@ -209,8 +330,17 @@ func (r *Runner) turn(prompt string) error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("claude 실행: %w", err)
 	}
+	if err := writeUser(stdin, prompt); err != nil {
+		stdin.Close()
+		_ = cmd.Wait()
+		return fmt.Errorf("claude 입력: %w", err)
+	}
+	r.mu.Lock()
+	r.input = stdin
+	r.mu.Unlock()
 
 	scanErr := r.consume(stdout)
+	r.closeInput()
 	waitErr := cmd.Wait()
 
 	if msg := strings.TrimSpace(stderr.String()); msg != "" {
@@ -227,9 +357,22 @@ func (r *Runner) turn(prompt string) error {
 	return nil
 }
 
-func (r *Runner) args(prompt string) []string {
+// closeInput ends the running turn's input: after its result nothing more
+// is read, and the CLI exits once stdin is closed.
+func (r *Runner) closeInput() {
+	r.mu.Lock()
+	in := r.input
+	r.input = nil
+	r.mu.Unlock()
+	if in != nil {
+		in.Close()
+	}
+}
+
+func (r *Runner) args() []string {
 	args := []string{
-		"-p", prompt,
+		"-p",
+		"--input-format", "stream-json",
 		"--output-format", "stream-json",
 		"--verbose",
 		"--permission-prompt-tool", permission.QualifiedToolName(),
@@ -538,6 +681,7 @@ func (r *Runner) handle(ev event) error {
 		// in it would land as two turns and stop being one block.
 		r.store.AppendAgent(paragraphsOf(ev.Message))
 	case "result":
+		r.closeInput()
 		if ev.IsError {
 			return fmt.Errorf("claude result error: %s", clamp(ev.Result, 500))
 		}

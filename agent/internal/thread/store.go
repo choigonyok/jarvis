@@ -309,6 +309,11 @@ func (s *Store) SetThinking(v bool) {
 	s.bus.Publish(bus.Event{Type: "status", Thinking: v})
 }
 
+// ShowQueue tells every client what waits behind the running turn.
+func (s *Store) ShowQueue(queue any) {
+	s.bus.Publish(bus.Event{Type: "queue", Queue: queue})
+}
+
 func (s *Store) Fail(msg string) {
 	s.bus.Publish(bus.Event{Type: "error", Message: msg})
 }

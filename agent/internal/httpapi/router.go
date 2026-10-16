@@ -74,6 +74,15 @@ type refSender interface {
 	SendRef(text string, images []string, ref *thread.Ref) error
 }
 
+// queuer takes a message while a turn runs instead of refusing it, and lets
+// the operator steer a waiting one into that turn or drop it.
+type queuer interface {
+	Submit(text string, images []string, ref *thread.Ref) (queued bool, err error)
+	Queue() []claudecode.Queued
+	Steer(id string) (steered bool, err error)
+	Drop(id string) error
+}
+
 type Deps struct {
 	// Role is "owner" or "guest": which agent this is. Every response says so
 	// (X-Jarvis-Agent), and the gateway refuses one from the wrong agent.
@@ -156,6 +165,9 @@ func (s *Server) Handler() http.Handler {
 	// /intercept and /mcp keep the separate secrets they already have.
 	mux.HandleFunc("GET /thread", s.guard(s.getThread))
 	mux.HandleFunc("POST /messages", s.guard(s.postMessage))
+	// Under /messages: the gateway passes the agent's routes by first segment.
+	mux.HandleFunc("POST /messages/{id}/steer", s.guard(s.steerMessage))
+	mux.HandleFunc("POST /messages/{id}/drop", s.guard(s.dropMessage))
 	mux.HandleFunc("POST /uploads", s.guard(s.postUpload))
 	mux.HandleFunc("GET /usage", s.guard(s.getUsage))
 	mux.HandleFunc("GET /uploads/{name}", s.guard(s.getUpload))
@@ -268,11 +280,42 @@ func (s *Server) getThread(w http.ResponseWriter, r *http.Request) {
 	}
 	// Proposals ride along: a client hydrating the thread needs the cards
 	// those turns point at, and one round trip is one less way to be stale.
-	writeJSON(w, http.StatusOK, map[string]any{
+	body := map[string]any{
 		"turns":     turns,
 		"thinking":  thinking,
 		"proposals": s.proposals.List(),
-	})
+	}
+	if q, ok := s.runner.(queuer); ok {
+		body["queue"] = q.Queue()
+	}
+	writeJSON(w, http.StatusOK, body)
+}
+
+func (s *Server) steerMessage(w http.ResponseWriter, r *http.Request) {
+	q, ok := s.runner.(queuer)
+	if !ok {
+		writeErr(w, http.StatusNotFound, "대기열이 없습니다.")
+		return
+	}
+	steered, err := q.Steer(r.PathValue("id"))
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"steered": steered})
+}
+
+func (s *Server) dropMessage(w http.ResponseWriter, r *http.Request) {
+	q, ok := s.runner.(queuer)
+	if !ok {
+		writeErr(w, http.StatusNotFound, "대기열이 없습니다.")
+		return
+	}
+	if err := q.Drop(r.PathValue("id")); err != nil {
+		writeErr(w, http.StatusNotFound, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
@@ -328,7 +371,13 @@ func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var err error
-	if rs, ok := s.runner.(refSender); ok && ref != nil {
+	if q, ok := s.runner.(queuer); ok {
+		var queued bool
+		if queued, err = q.Submit(text, body.Images, ref); err == nil {
+			writeJSON(w, http.StatusAccepted, map[string]bool{"queued": queued})
+			return
+		}
+	} else if rs, ok := s.runner.(refSender); ok && ref != nil {
 		err = rs.SendRef(text, body.Images, ref)
 	} else {
 		err = s.runner.Send(text, body.Images)

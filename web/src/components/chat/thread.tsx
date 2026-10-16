@@ -5,6 +5,7 @@ import { Reply } from "lucide-react";
 import { Composer } from "@/components/chat/composer";
 import { ModeToggle, type ChatMode } from "@/components/chat/mode-toggle";
 import { ProposalCard } from "@/components/chat/proposal-card";
+import { QueuedMessages } from "@/components/chat/queued";
 import { SwipeRow } from "@/components/chat/swipe-row";
 import { SearchBar, SearchToggle, useThreadSearch } from "@/components/chat/thread-search";
 import { onFocusProposal } from "@/lib/resume";
@@ -135,10 +136,13 @@ export function Thread() {
     proposals,
     byId,
     thinking,
+    queue,
     connection,
     error,
     hydrated,
     send,
+    steer,
+    drop,
     decide,
   } = useThread();
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -532,6 +536,7 @@ export function Thread() {
             be one padding, and the safe area (0 on most phones) would win. */}
         <div className="inset-x-safe">
           <div className={cn("mx-auto w-full max-w-[46rem] px-4 sm:px-8 sm:pb-6", typing ? "pb-2" : "pb-0")}>
+            <QueuedMessages queue={queue} onSteer={(id) => void steer(id)} onDrop={(id) => void drop(id)} />
             <Composer
               onSend={async (text, images) => {
                 const ok = await send(text, images, quoting?.id);

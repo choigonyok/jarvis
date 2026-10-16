@@ -7,6 +7,7 @@ import {
   type AgentEvent,
   type Decision,
   type Proposal,
+  type Queued,
   type Turn,
 } from "@/lib/thread";
 import { decideProposal } from "@/lib/decide";
@@ -23,6 +24,7 @@ function upsert<T extends { id: string }>(list: T[], next: T): T[] {
 // The last thread this page saw. Coming back to a tab renders it at once -
 // already scrolled to the newest turn - and the fetch then only corrects it.
 let cached: { turns: Turn[]; proposals: Proposal[]; thinking: boolean } | null = null;
+let cachedQueue: Queued[] = [];
 
 export function useThread() {
   const [turns, setTurnsState] = useState<Turn[]>(() => cached?.turns ?? []);
@@ -30,6 +32,11 @@ export function useThread() {
   const [thinking, setThinking] = useState(() => cached?.thinking ?? false);
   const [error, setError] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(() => cached !== null);
+  const [queue, setQueueState] = useState<Queued[]>(() => cachedQueue);
+  const setQueue = useCallback((next: Queued[]) => {
+    cachedQueue = next;
+    setQueueState(next);
+  }, []);
 
   const setTurns = useCallback((next: Turn[] | ((prev: Turn[]) => Turn[])) => {
     setTurnsState((prev) => {
@@ -54,16 +61,18 @@ export function useThread() {
         turns: Turn[];
         thinking: boolean;
         proposals: Proposal[];
+        queue?: Queued[];
       };
       setTurns(data.turns ?? []);
       setProposals(data.proposals ?? []);
       setThinking(Boolean(data.thinking));
+      setQueue(data.queue ?? []);
     } catch {
       setError("스레드를 불러오지 못했습니다.");
     } finally {
       setHydrated(true);
     }
-  }, [setTurns, setProposals]);
+  }, [setTurns, setProposals, setQueue]);
 
   const onEvent = useCallback((event: AgentEvent) => {
     switch (event.type) {
@@ -76,12 +85,15 @@ export function useThread() {
       case "status":
         setThinking(Boolean(event.thinking));
         break;
+      case "queue":
+        setQueue(event.queue ?? []);
+        break;
       case "error":
         setError(event.message);
         setThinking(false);
         break;
     }
-  }, [setTurns, setProposals]);
+  }, [setTurns, setProposals, setQueue]);
 
   // Hydrate first, then follow. A reconnect re-hydrates so dropped frames heal.
   useEffect(() => {
@@ -93,7 +105,7 @@ export function useThread() {
 
   const connection = useAgentStream(onEvent, () => void hydrate());
 
-  /** Resolves true once the agent took the message. */
+  /** Resolves true once the agent took the message - to answer now, or queued behind the running turn. */
   const send = useCallback(async (text: string, images?: string[], refId?: string) => {
     setError(null);
     try {
@@ -118,6 +130,24 @@ export function useThread() {
     }
   }, []);
 
+  /**
+   * Acts on a waiting message: "steer" hands it to the running turn, "drop"
+   * takes it back unsent. The queue itself arrives over the stream.
+   */
+  const onQueued = useCallback(async (id: string, action: "steer" | "drop") => {
+    setError(null);
+    try {
+      const res = await fetch(`${API}/messages/${encodeURIComponent(id)}/${action}`, { method: "POST" });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        setError(body?.error ?? "대기 중인 메시지를 바꾸지 못했습니다.");
+        void hydrate();
+      }
+    } catch {
+      setError("에이전트에 연결하지 못했습니다.");
+    }
+  }, [hydrate]);
+
   const decide = useCallback(
     async (proposalId: string, decision: Decision, edits?: Record<string, string>, reason?: string) => {
       setError(null);
@@ -133,5 +163,18 @@ export function useThread() {
 
   const byId = new Map(proposals.map((p) => [p.id, p]));
 
-  return { turns, proposals, byId, thinking, connection, error, hydrated, send, decide };
+  return {
+    turns,
+    proposals,
+    byId,
+    thinking,
+    queue,
+    connection,
+    error,
+    hydrated,
+    send,
+    steer: (id: string) => onQueued(id, "steer"),
+    drop: (id: string) => onQueued(id, "drop"),
+    decide,
+  };
 }
