@@ -219,7 +219,13 @@ func (s *Chat) Poll(ctx context.Context) error {
 	last := since
 	for _, t := range out.Turns {
 		at, err := time.Parse(time.RFC3339Nano, t.AtISO)
-		if err != nil || !at.After(since) {
+		if err != nil {
+			if s.Out != nil {
+				s.Out.Warn("chat turn time parse failed", "id", t.ID, "at", t.AtISO, "err", err)
+			}
+			continue
+		}
+		if !at.After(since) {
 			continue
 		}
 		text := strings.TrimSpace(t.Text)
