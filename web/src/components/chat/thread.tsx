@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Reply } from "lucide-react";
 import { Composer } from "@/components/chat/composer";
 import { ModeToggle, type ChatMode } from "@/components/chat/mode-toggle";
@@ -14,7 +14,7 @@ import { VoiceStage } from "@/components/chat/voice-stage";
 import { Header, TabBar } from "@/components/shell/header";
 import { useRole } from "@/components/shell/role";
 import { StandingBar } from "@/components/shell/standing-bar";
-import { isPending, plainText, quoteText, type Turn, type TurnRef } from "@/lib/thread";
+import { isPending, plainText, quoteText, type Proposal, type Turn, type TurnRef } from "@/lib/thread";
 import { photoUrl } from "@/lib/uploads";
 import { speakable, useSpeech } from "@/lib/use-speech";
 import { useThread } from "@/lib/use-thread";
@@ -129,6 +129,219 @@ function Photos({ names }: { names: string[] }) {
   );
 }
 
+type Decide = ReturnType<typeof useThread>["decide"];
+
+/**
+ * One message of the transcript, memoized on the turn itself: an update
+ * replaces only the turn it changes, so a new message renders one row, not
+ * all of them.
+ */
+const TurnRow = memo(function TurnRow({
+  turn,
+  proposal,
+  day,
+  quoteAt,
+  onQuote,
+  onJump,
+  onDecide,
+}: {
+  turn: Turn;
+  proposal?: Proposal;
+  /** Set on the first turn of a day: the divider above it. */
+  day: string | null;
+  /** When the message this one quotes was said. */
+  quoteAt: string;
+  onQuote: (ref: TurnRef) => void;
+  onJump: (id: string) => void;
+  onDecide: Decide;
+}) {
+  const time = clock(turn.atIso, turn.at);
+  // A turn that is only a card is quoted by what the card asks.
+  const quote = () =>
+    onQuote({
+      id: turn.id,
+      role: turn.role,
+      at: turnTime(turn.atIso, turn.at),
+      text: quoteText(turn) || (proposal ? `승인 카드: ${proposal.card.title}` : ""),
+    });
+  // A divider where the day changes: with it, a turn's own stamp only has to
+  // say the time, and a reply that came hours later - a suggestion overnight
+  // - is plainly not a live one.
+  const divider = day ? <DayDivider day={day} /> : null;
+
+  if (turn.role === "agent") {
+    return (
+      <>
+        {divider}
+        <li data-turn-id={turn.id} className="group/turn">
+          <SwipeRow onRef={quote}>
+            <div className={ROW}>
+              <Rail at={time} onRef={quote} />
+              <div className="min-w-0">
+                {turn.paragraphs?.length ? (
+                  // The runner split the message on blank lines; putting
+                  // them back is what makes a list or a code fence one
+                  // block again.
+                  <Markdown>{turn.paragraphs.join("\n\n")}</Markdown>
+                ) : null}
+                {proposal ? (
+                  <ProposalCard
+                    proposal={proposal}
+                    onDecide={(d, edits, reason) => onDecide(proposal.id, d, edits, reason)}
+                  />
+                ) : null}
+                {/* The rail holds the time on a wide screen; a phone
+                    has no rail, so it sits under the message. */}
+                {time ? (
+                  <p className="tnum mt-1.5 text-[11px] text-faint sm:hidden" data-search-skip>
+                    {time}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          </SwipeRow>
+        </li>
+      </>
+    );
+  }
+  return (
+    <>
+      {divider}
+      <li data-turn-id={turn.id} className="group/turn">
+        <SwipeRow onRef={quote} className="flex flex-col items-end gap-1.5">
+          {turn.ref && !turn.text ? (
+            <div className="max-w-[80%] sm:max-w-[26rem]">
+              <Quote quote={turn.ref} at={quoteAt} onJump={() => onJump(turn.ref!.id)} />
+            </div>
+          ) : null}
+          {turn.images?.length ? <Photos names={turn.images} /> : null}
+          {/* No backdrop blur: behind a bubble is only the flat page, so it
+              showed nothing, and made a phone redraw the bubble's backdrop
+              on every frame it moved. */}
+          {turn.text ? (
+            <div className="max-w-[80%] rounded-2xl border border-edge bg-glass-raised px-4 py-2.5 text-[14.5px] leading-relaxed text-foreground sm:max-w-[26rem]">
+              {turn.ref ? <Quote quote={turn.ref} at={quoteAt} onJump={() => onJump(turn.ref!.id)} /> : null}
+              <p className="break-words whitespace-pre-wrap">{turn.text}</p>
+            </div>
+          ) : null}
+          <span className="flex items-center gap-1.5 pr-1" data-search-skip>
+            <RefButton onClick={quote} />
+            <span className="tnum text-[11px] text-faint">{time}</span>
+          </span>
+        </SwipeRow>
+      </li>
+    </>
+  );
+});
+
+/**
+ * The conversation itself, apart from the screen around it: a search being
+ * typed, a quote picked or the keyboard coming up re-renders the screen, and
+ * on a long thread rebuilding every message each time is what dropped frames.
+ * This renders only when the thread does.
+ */
+const Transcript = memo(function Transcript({
+  turns,
+  proposals,
+  byId,
+  thinking,
+  error,
+  hydrated,
+  onQuote,
+  onJump,
+  onDecide,
+}: {
+  turns: Turn[];
+  proposals: Proposal[];
+  byId: Map<string, Proposal>;
+  thinking: boolean;
+  error: string | null;
+  hydrated: boolean;
+  onQuote: (ref: TurnRef) => void;
+  onJump: (id: string) => void;
+  onDecide: Decide;
+}) {
+  // A proposal nobody asked for has no turn pointing at it. Until a detector
+  // exists to raise one, this renders nothing - but it is what makes the
+  // chat able to show one the day it does.
+  const attached = new Set(turns.map((t) => t.proposalId).filter(Boolean));
+  const unattached = proposals.filter((p) => isPending(p) && !attached.has(p.id));
+  // When a quoted turn is on the page its own stamp says when; one that has
+  // scrolled out of the loaded thread falls back to the agent's.
+  const times = new Map(turns.map((t) => [t.id, turnTime(t.atIso, t.at)]));
+
+  return (
+    <>
+      {hydrated && turns.length === 0 ? (
+        <div className={ROW}>
+          <Rail />
+          <p className="max-w-[32rem] text-[14.5px] leading-[1.75] text-dim">
+            무엇을 맡길지 적어주세요. 상태를 바꾸는 일은 실행 전에 승인
+            카드로 올라옵니다.
+          </p>
+        </div>
+      ) : null}
+
+      <ol className="space-y-7">
+        {turns.map((turn, i) => {
+          const day = turnDay(turn.atIso);
+          return (
+            <TurnRow
+              key={turn.id}
+              turn={turn}
+              proposal={turn.proposalId ? byId.get(turn.proposalId) : undefined}
+              day={day && day !== turnDay(turns[i - 1]?.atIso) ? day : null}
+              quoteAt={turn.ref ? (times.get(turn.ref.id) ?? refTime(turn.ref.at)) : ""}
+              onQuote={onQuote}
+              onJump={onJump}
+              onDecide={onDecide}
+            />
+          );
+        })}
+
+        {unattached.map((proposal) => (
+          <li key={proposal.id} className={ROW}>
+            <Rail at={proposal.at} />
+            <div className="min-w-0">
+              <ProposalCard
+                proposal={proposal}
+                onDecide={(d, edits, reason) => onDecide(proposal.id, d, edits, reason)}
+              />
+            </div>
+          </li>
+        ))}
+
+        {thinking ? (
+          <li
+            className={ROW}
+            aria-live="polite"
+            aria-label="Jarvis가 작업 중입니다"
+          >
+            <Rail />
+            <span
+              aria-hidden
+              className="anim-think flex h-6 items-center gap-1"
+            >
+              <span className="size-[5px] rounded-full bg-dim" />
+              <span className="size-[5px] rounded-full bg-dim" />
+              <span className="size-[5px] rounded-full bg-dim" />
+            </span>
+          </li>
+        ) : null}
+
+        {error ? (
+          <li className={ROW} role="status">
+            <Rail />
+            <p className="max-w-[36rem] border-l-2 border-reject pl-3 text-[13.5px] leading-relaxed text-dim">
+              {error}
+            </p>
+          </li>
+        ) : null}
+      </ol>
+    </>
+  );
+});
+
 export function Thread() {
   const role = useRole();
   const {
@@ -167,14 +380,6 @@ export function Thread() {
   // The bar speaks for what you cannot see. A card sitting in the transcript
   // in front of you is already saying it.
   const [cardsVisible, setCardsVisible] = useState(false);
-
-  // A proposal nobody asked for has no turn pointing at it. Until a detector
-  // exists to raise one, this renders nothing - but it is what makes the
-  // chat able to show one the day it does.
-  const attached = new Set(turns.map((t) => t.proposalId).filter(Boolean));
-  const unattached = proposals.filter(
-    (p) => isPending(p) && !attached.has(p.id),
-  );
 
   // Opening the tab lands on the newest turn before anything is painted - no
   // scroll from the top. After that, new turns pull the view down only while
@@ -248,23 +453,13 @@ export function Thread() {
     };
   }, []);
 
-  const quote = useCallback(
-    (turn: Turn) => {
-      // A turn that is only a card is quoted by what the card asks.
-      const card = turn.proposalId ? byId.get(turn.proposalId)?.card.title : undefined;
-      const text = quoteText(turn) || (card ? `승인 카드: ${card}` : "");
-      setQuoting({ id: turn.id, role: turn.role, at: turnTime(turn.atIso, turn.at), text });
-      // In the same gesture as the swipe, so a phone raises its keyboard.
-      inputRef.current?.focus({ preventScroll: true });
-    },
-    [byId],
-  );
-  // When a quoted turn is on the page its own stamp says when; one that has
-  // scrolled out of the loaded thread falls back to the agent's.
-  const refAt = (ref: TurnRef) => {
-    const t = turns.find((x) => x.id === ref.id);
-    return t ? turnTime(t.atIso, t.at) : refTime(ref.at);
-  };
+  const quote = useCallback((ref: TurnRef) => {
+    setQuoting(ref);
+    // In the same gesture as the swipe, so a phone raises its keyboard - and
+    // lets it scroll the composer into view above the keyboard, the way a
+    // tap on the field does: with preventScroll, iOS left it underneath.
+    inputRef.current?.focus();
+  }, []);
 
   // A quote tapped in a bubble goes back to the message it quotes, and marks
   // it the way a tapped push marks a card.
@@ -397,127 +592,17 @@ export function Thread() {
         className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain"
       >
         <div className="mx-auto w-full max-w-[46rem] px-4 pt-7 pb-12 sm:px-8 sm:pt-10 sm:pb-6">
-          {hydrated && turns.length === 0 ? (
-            <div className={ROW}>
-              <Rail />
-              <p className="max-w-[32rem] text-[14.5px] leading-[1.75] text-dim">
-                무엇을 맡길지 적어주세요. 상태를 바꾸는 일은 실행 전에 승인
-                카드로 올라옵니다.
-              </p>
-            </div>
-          ) : null}
-
-          <ol className="space-y-7">
-            {turns.map((turn, i) => {
-              const proposal = turn.proposalId
-                ? byId.get(turn.proposalId)
-                : undefined;
-              // A divider where the day changes: with it, a turn's own stamp
-              // only has to say the time, and a reply that came hours later
-              // - a suggestion overnight - is plainly not a live one.
-              const day = turnDay(turn.atIso);
-              const divider = day && day !== turnDay(turns[i - 1]?.atIso) ? <DayDivider day={day} /> : null;
-              const time = clock(turn.atIso, turn.at);
-              return turn.role === "agent" ? (
-                <Fragment key={turn.id}>
-                  {divider}
-                  <li data-turn-id={turn.id} className="group/turn">
-                    <SwipeRow onRef={() => quote(turn)}>
-                      <div className={ROW}>
-                        <Rail at={time} onRef={() => quote(turn)} />
-                        <div className="min-w-0">
-                          {turn.paragraphs?.length ? (
-                            // The runner split the message on blank lines; putting
-                            // them back is what makes a list or a code fence one
-                            // block again.
-                            <Markdown>{turn.paragraphs.join("\n\n")}</Markdown>
-                          ) : null}
-                          {proposal ? (
-                            <ProposalCard
-                              proposal={proposal}
-                              onDecide={(d, edits, reason) => decide(proposal.id, d, edits, reason)}
-                            />
-                          ) : null}
-                          {/* The rail holds the time on a wide screen; a phone
-                              has no rail, so it sits under the message. */}
-                          {time ? (
-                            <p className="tnum mt-1.5 text-[11px] text-faint sm:hidden" data-search-skip>
-                              {time}
-                            </p>
-                          ) : null}
-                        </div>
-                      </div>
-                    </SwipeRow>
-                  </li>
-                </Fragment>
-              ) : (
-                <Fragment key={turn.id}>
-                  {divider}
-                  <li data-turn-id={turn.id} className="group/turn">
-                    <SwipeRow onRef={() => quote(turn)} className="flex flex-col items-end gap-1.5">
-                      {turn.ref && !turn.text ? (
-                        <div className="max-w-[80%] sm:max-w-[26rem]">
-                          <Quote quote={turn.ref} at={refAt(turn.ref)} onJump={() => jumpTo(turn.ref!.id)} />
-                        </div>
-                      ) : null}
-                      {turn.images?.length ? <Photos names={turn.images} /> : null}
-                      {turn.text ? (
-                        <div className="max-w-[80%] rounded-2xl border border-edge bg-glass-raised px-4 py-2.5 text-[14.5px] leading-relaxed text-foreground backdrop-blur-md sm:max-w-[26rem]">
-                          {turn.ref ? (
-                            <Quote quote={turn.ref} at={refAt(turn.ref)} onJump={() => jumpTo(turn.ref!.id)} />
-                          ) : null}
-                          <p className="break-words whitespace-pre-wrap">{turn.text}</p>
-                        </div>
-                      ) : null}
-                      <span className="flex items-center gap-1.5 pr-1" data-search-skip>
-                        <RefButton onClick={() => quote(turn)} />
-                        <span className="tnum text-[11px] text-faint">{time}</span>
-                      </span>
-                    </SwipeRow>
-                  </li>
-                </Fragment>
-              );
-            })}
-
-            {unattached.map((proposal) => (
-              <li key={proposal.id} className={ROW}>
-                <Rail at={proposal.at} />
-                <div className="min-w-0">
-                  <ProposalCard
-                    proposal={proposal}
-                    onDecide={(d, edits, reason) => decide(proposal.id, d, edits, reason)}
-                  />
-                </div>
-              </li>
-            ))}
-
-            {thinking ? (
-              <li
-                className={ROW}
-                aria-live="polite"
-                aria-label="Jarvis가 작업 중입니다"
-              >
-                <Rail />
-                <span
-                  aria-hidden
-                  className="anim-think flex h-6 items-center gap-1"
-                >
-                  <span className="size-[5px] rounded-full bg-dim" />
-                  <span className="size-[5px] rounded-full bg-dim" />
-                  <span className="size-[5px] rounded-full bg-dim" />
-                </span>
-              </li>
-            ) : null}
-
-            {error ? (
-              <li className={ROW} role="status">
-                <Rail />
-                <p className="max-w-[36rem] border-l-2 border-reject pl-3 text-[13.5px] leading-relaxed text-dim">
-                  {error}
-                </p>
-              </li>
-            ) : null}
-          </ol>
+          <Transcript
+            turns={turns}
+            proposals={proposals}
+            byId={byId}
+            thinking={thinking}
+            error={error}
+            hydrated={hydrated}
+            onQuote={quote}
+            onJump={jumpTo}
+            onDecide={decide}
+          />
           <div ref={bottomRef} />
         </div>
       </main>

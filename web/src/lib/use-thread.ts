@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAgentStream } from "@/lib/stream";
 import {
   API,
@@ -161,7 +161,8 @@ export function useThread() {
     [hydrate],
   );
 
-  const byId = new Map(proposals.map((p) => [p.id, p]));
+  // The same map until a card changes: the transcript is memoized on it.
+  const byId = useMemo(() => new Map(proposals.map((p) => [p.id, p])), [proposals]);
 
   return {
     turns,

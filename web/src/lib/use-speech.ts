@@ -298,21 +298,29 @@ export function useSpeech(lang = "ko-KR") {
     };
   }, []);
 
-  // One decay loop for the life of the hook rather than one per utterance.
-  useEffect(() => {
-    let frame = 0;
+  // The ring falls back between words a frame at a time - only while it has
+  // somewhere to fall. One loop for the life of the hook woke the chat screen
+  // every frame, speaking or not.
+  const level = useRef(0);
+  const frame = useRef(0);
+  const kick = useCallback((v: number) => {
+    level.current = v;
+    setPulse(v);
+    if (frame.current) return;
     const tick = () => {
-      setPulse((p) => (p > 0.01 ? p * 0.9 : 0));
-      frame = requestAnimationFrame(tick);
+      level.current = level.current > 0.01 ? level.current * 0.9 : 0;
+      setPulse(level.current);
+      frame.current = level.current > 0 ? requestAnimationFrame(tick) : 0;
     };
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
+    frame.current = requestAnimationFrame(tick);
   }, []);
+  useEffect(() => () => cancelAnimationFrame(frame.current), []);
 
   const cancel = useCallback(() => {
     window.speechSynthesis?.cancel();
     window.clearInterval(decay.current);
     setSpeaking(false);
+    level.current = 0;
     setPulse(0);
     setProgress(-1);
   }, []);
@@ -337,12 +345,13 @@ export function useSpeech(lang = "ko-KR") {
         setProgress(event.charIndex + length);
         window.clearInterval(decay.current);
         // A word landed: kick the ring. The loop above brings it back down.
-        setPulse(0.55 + Math.random() * 0.45);
+        kick(0.55 + Math.random() * 0.45);
       };
 
       const finish = () => {
         window.clearInterval(decay.current);
         setSpeaking(false);
+        level.current = 0;
         setPulse(0);
         setProgress(-1);
       };
@@ -362,10 +371,10 @@ export function useSpeech(lang = "ko-KR") {
           window.clearInterval(decay.current);
           return;
         }
-        setPulse(0.4 + Math.random() * 0.3);
+        kick(0.4 + Math.random() * 0.3);
       }, 260);
     },
-    [lang],
+    [lang, kick],
   );
 
   return { speak, cancel, speaking, pulse, progress };
