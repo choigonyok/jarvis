@@ -89,8 +89,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
-	mux.HandleFunc("POST /owntracks", s.owntracks)
-	mux.HandleFunc("POST /signals", s.signals)
+	// 폰이 부르는 두 경로는 공개 호스트에서 열려 있다. 토큰을 맞히려는 시도와
+	// 고장 난 단축어의 폭주를 둘 다 막도록 경로마다 요청 수를 제한한다.
+	mux.HandleFunc("POST /owntracks", limit(newBucket(120, 2), s.owntracks))
+	mux.HandleFunc("POST /signals", limit(newBucket(60, 1), s.signals))
 	mux.HandleFunc("GET /now", s.bearer(s.current))
 	mux.HandleFunc("GET /visits", s.bearer(s.visits))
 	mux.HandleFunc("GET /travel", s.bearer(s.travel))
@@ -847,4 +849,40 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeErr(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// bucket is a token bucket: burst requests at once, refilled at perSec.
+type bucket struct {
+	mu     sync.Mutex
+	tokens float64
+	burst  float64
+	perSec float64
+	last   time.Time
+}
+
+func newBucket(burst, perSec float64) *bucket {
+	return &bucket{tokens: burst, burst: burst, perSec: perSec, last: time.Now()}
+}
+
+func (b *bucket) take(now time.Time) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.tokens = min(b.burst, b.tokens+now.Sub(b.last).Seconds()*b.perSec)
+	b.last = now
+	if b.tokens < 1 {
+		return false
+	}
+	b.tokens--
+	return true
+}
+
+func limit(b *bucket, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !b.take(time.Now()) {
+			w.Header().Set("Retry-After", "5")
+			writeErr(w, http.StatusTooManyRequests, "요청이 너무 많습니다.")
+			return
+		}
+		next(w, r)
+	}
 }

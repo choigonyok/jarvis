@@ -31,6 +31,7 @@ import { Notifications } from "@/components/shell/notifications";
 import { useRole } from "@/components/shell/role";
 import { UsageBars } from "@/components/shell/usage-bars";
 import { GUEST_PAGES, type Role } from "@/lib/role";
+import { dropPush } from "@/lib/use-push";
 import type { Connection } from "@/lib/thread";
 import { cn } from "@/lib/utils";
 
@@ -155,6 +156,8 @@ export function Header({
   }
 
   async function signOut() {
+    // 세션이 남아 있을 때 지운다 - 로그아웃한 뒤에는 notify 에 닿지 못한다.
+    await dropPush();
     const res = await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
     const body = (await res?.json().catch(() => null)) as { next?: string } | null;
     if (body?.next && body.next !== "/login") {

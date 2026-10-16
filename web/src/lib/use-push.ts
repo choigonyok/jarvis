@@ -32,6 +32,23 @@ async function registration(): Promise<ServiceWorkerRegistration> {
   return navigator.serviceWorker.register("/sw.js", { scope: "/" });
 }
 
+/**
+ * Stop this device's notifications - on sign-out, so a shared or handed-on
+ * device does not keep receiving the operator's alerts.
+ */
+export async function dropPush(): Promise<void> {
+  if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
+  const reg = await navigator.serviceWorker.getRegistration("/").catch(() => undefined);
+  const sub = await reg?.pushManager.getSubscription().catch(() => null);
+  if (!sub) return;
+  await fetch("/api/notify/subscriptions", {
+    method: "DELETE",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ endpoint: sub.endpoint }),
+  }).catch(() => {});
+  await sub.unsubscribe().catch(() => false);
+}
+
 export function usePush() {
   const [state, setState] = useState<PushState>("loading");
   const [busy, setBusy] = useState(false);

@@ -233,22 +233,24 @@ class Guard:
             await self.send(
                 ws,
                 "Target.setAutoAttach",
-                {"autoAttach": True, "waitForDebuggerOnStart": False, "flatten": True},
+                # 새 탭은 가드가 Fetch 를 켤 때까지 멈춰 있다. False 면 탭이 뜨자마자
+                # 보내는 첫 요청이 감시가 붙기 전에 나갈 수 있다.
+                {"autoAttach": True, "waitForDebuggerOnStart": True, "flatten": True},
             )
             async for raw in ws:
                 msg = json.loads(raw)
                 method = msg.get("method")
                 if method == "Target.attachedToTarget":
                     t = msg["params"]["targetInfo"]
+                    session = msg["params"]["sessionId"]
                     if t.get("type") in ("page", "iframe"):
                         # 패턴에 걸리는 요청만 멈춘다. guard가 죽어도 일반
                         # 탐색은 영향을 받지 않는다는 뜻이다.
-                        await self.send(
-                            ws,
-                            "Fetch.enable",
-                            {"patterns": self.patterns},
-                            msg["params"]["sessionId"],
-                        )
+                        await self.send(ws, "Fetch.enable", {"patterns": self.patterns}, session)
+                    if msg["params"].get("waitingForDebugger"):
+                        # 감시를 켠 뒤에야 풀어 준다. 워커처럼 감시하지 않는
+                        # 대상도 멈춰 있으므로 반드시 풀어야 한다.
+                        await self.send(ws, "Runtime.runIfWaitingForDebugger", {}, session)
                 elif method == "Fetch.requestPaused":
                     asyncio.create_task(self.on_paused(ws, msg))
 

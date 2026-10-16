@@ -553,7 +553,8 @@ services:
       MEMORY_DAILY_USD: ${MEMORY_DAILY_USD:-1.0}
       MEMORY_BACKFILL_DAYS: ${MEMORY_BACKFILL_DAYS:-30}
       MEMORY_INTERVAL: ${MEMORY_INTERVAL:-300}
-      IMMICH_API_KEY: ${IMMICH_API_KEY:-}
+      # 소비자마다 키가 따로다(권한이 좁고, 하나만 회수할 수 있다).
+      IMMICH_API_KEY: ${IMMICH_MEMORY_API_KEY:-}
       # 검색용 Voyage 키(MongoDB Atlas 에서 만든 al-… 는 ai.mongodb.com 으로 간다).
       # 쓴 토큰을 세어 헤더·상태 탭에 금액으로 보인다.
       VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
@@ -728,7 +729,8 @@ services:
       # 영역 체류(visits)를 발생으로 읽는다: 지금 상황의 가장 확실한 위치 단서.
       CONTEXT_URL: http://context:8103
       IMMICH_URL: http://immich:2283
-      IMMICH_API_KEY: ${IMMICH_API_KEY:-}
+      # 소비자마다 키가 따로다(권한이 좁고, 하나만 회수할 수 있다).
+      IMMICH_API_KEY: ${IMMICH_MIND_API_KEY:-}
       IMMICH_PUBLIC_URL: ${IMMICH_PUBLIC_URL:-}
       MIND_ANTHROPIC_API_KEY: ${MEMORY_ANTHROPIC_API_KEY:-}
       MIND_CONTENT_KEY: ${MIND_CONTENT_KEY:-}

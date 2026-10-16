@@ -5,7 +5,7 @@
 # - immich-server 를 jarvis 네트워크에도 붙인다. 폰 앱이 들어오는 터널
 #   (immich.choigonyok.com)과 갤러리 탭이 쓰는 게이트웨이(Workers VPC)가 jarvis
 #   compose 안의 cloudflared 를 거쳐 이 이름으로 닿는다.
-# - 2283 은 집 네트워크에 연다: 폰 앱이 집 와이파이에서는 맥미니 주소로 바로
+# - 2283 은 집 네트워크(맥미니 주소)에만 연다: 폰 앱이 집 와이파이에서는 맥미니 주소로 바로
 #   올린다(Cloudflare 무료 요금제는 100MB 넘는 업로드를 막아 긴 영상은 밖에서
 #   못 올린다). 밖에서는 immich.choigonyok.com 의 Cloudflare Access 를 거친다.
 #
@@ -23,7 +23,11 @@ services:
     env_file:
       - .env
     ports:
-      - "2283:2283"
+      # 0.0.0.0 이 아니라 맥미니의 집 네트워크 주소와 루프백에만 연다. 루프백은
+      # Tailscale(userspace 모드)이 밖에서 온 연결을 넘겨주는 곳이다.
+      # IMMICH_LAN_IP 는 immich/.env 에 둔다 - 공유기에서 맥미니 주소를 고정해 두어야 한다.
+      - "${IMMICH_LAN_IP:?IMMICH_LAN_IP 를 immich/.env 에 설정하세요}:2283:2283"
+      - "127.0.0.1:2283:2283"
     networks:
       default:
       jarvis:

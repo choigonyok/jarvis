@@ -191,4 +191,13 @@ func TestClosedConsole(t *testing.T) {
 	if code := get("/", func(r *http.Request) { r.AddCookie(&http.Cookie{Name: tokenCookie, Value: "wrong"}) }).StatusCode; code != http.StatusUnauthorized {
 		t.Fatalf("wrong cookie: %d", code)
 	}
+	// The cookie is not the token, and an old one no longer opens anything.
+	if cookie.Value == "secret" || cookie.MaxAge > 24*3600 {
+		t.Fatalf("cookie must not be the token or last past a day: %+v", cookie)
+	}
+	for _, v := range []string{"secret", "1." + strings.Repeat("0", 64)} {
+		if code := get("/", func(r *http.Request) { r.AddCookie(&http.Cookie{Name: tokenCookie, Value: v}) }).StatusCode; code != http.StatusUnauthorized {
+			t.Fatalf("cookie %q: %d", v, code)
+		}
+	}
 }

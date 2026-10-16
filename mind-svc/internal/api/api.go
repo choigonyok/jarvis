@@ -33,8 +33,11 @@
 package api
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"crypto/subtle"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -215,7 +218,31 @@ func (s *Server) presented(r *http.Request) bool {
 		return true
 	}
 	c, err := r.Cookie(tokenCookie)
-	return err == nil && same(c.Value, s.token)
+	return err == nil && s.validSession(c.Value, time.Now())
+}
+
+// sessionTTL is how long the console's cookie lasts.
+const sessionTTL = 24 * time.Hour
+
+// session is the cookie value: an expiry and an HMAC of it keyed by the token.
+// The token itself never sits in the browser, and a stolen cookie dies in a day.
+func (s *Server) session(exp time.Time) string {
+	e := strconv.FormatInt(exp.Unix(), 10)
+	mac := hmac.New(sha256.New, []byte(s.token))
+	mac.Write([]byte("mind-console:" + e))
+	return e + "." + hex.EncodeToString(mac.Sum(nil))
+}
+
+func (s *Server) validSession(v string, now time.Time) bool {
+	e, _, ok := strings.Cut(v, ".")
+	if !ok {
+		return false
+	}
+	n, err := strconv.ParseInt(e, 10, 64)
+	if err != nil || now.Unix() > n {
+		return false
+	}
+	return same(v, s.session(time.Unix(n, 0)))
 }
 
 func same(a, b string) bool { return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1 }
@@ -227,8 +254,8 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) bool {
 	if t == "" || s.token == "" || !same(t, s.token) {
 		return false
 	}
-	http.SetCookie(w, &http.Cookie{Name: tokenCookie, Value: s.token, Path: "/", HttpOnly: true,
-		SameSite: http.SameSiteStrictMode, MaxAge: 30 * 24 * 3600})
+	http.SetCookie(w, &http.Cookie{Name: tokenCookie, Value: s.session(time.Now().Add(sessionTTL)), Path: "/", HttpOnly: true,
+		SameSite: http.SameSiteStrictMode, MaxAge: int(sessionTTL.Seconds())})
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 	return true
 }

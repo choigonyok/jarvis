@@ -21,6 +21,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -227,6 +228,12 @@ func (s *Server) subscribe(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "endpoint 와 keys 가 필요합니다."})
 		return
 	}
+	// 알림을 보낼 때 이 주소로 서버가 직접 요청한다. 브라우저 푸시 서비스가
+	// 아닌 곳(내부망 주소 등)을 받으면 서버가 그곳을 두드리게 된다.
+	if !pushService(body.Endpoint) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "알려진 푸시 서비스 주소가 아닙니다."})
+		return
+	}
 	ua := r.Header.Get("X-Client-User-Agent")
 	if ua == "" {
 		ua = r.UserAgent()
@@ -339,4 +346,25 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// pushHosts are the browsers' push services. An endpoint anywhere else is
+// refused.
+var pushHosts = []string{
+	"fcm.googleapis.com", "updates.push.services.mozilla.com",
+	".push.apple.com", ".notify.windows.com", "web.push.apple.com",
+}
+
+func pushService(endpoint string) bool {
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Scheme != "https" || u.User != nil || u.Port() != "" {
+		return false
+	}
+	h := strings.ToLower(u.Hostname())
+	for _, p := range pushHosts {
+		if h == p || (strings.HasPrefix(p, ".") && strings.HasSuffix(h, p)) {
+			return true
+		}
+	}
+	return false
 }

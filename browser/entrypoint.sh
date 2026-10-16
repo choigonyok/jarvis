@@ -37,6 +37,11 @@ websockify --web=/usr/share/novnc 6080 localhost:5900 &
 # 결제로 나가는 요청만 멈춰 세우는 감시자. 별도 프로세스라 여기서 죽어도
 # MCP는 계속 돈다 - 그리고 Fetch는 결제 패턴에만 걸려 있으므로, 죽더라도
 # 일반 탐색은 막히지 않는다.
-python3 /app/guard.py &
+# 죽으면 다시 띄운다. 가드가 없는 동안 새 탭은 감시 없이 뜬다.
+(while true; do
+    python3 /app/guard.py
+    echo "guard 가 끝났습니다(종료 코드 $?). 2초 뒤 다시 띄웁니다" >&2
+    sleep 2
+done) &
 
 exec python3 /app/bridge.py
