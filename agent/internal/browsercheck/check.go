@@ -45,6 +45,10 @@ type Checker struct {
 	// failing is a locked account waiting to happen.
 	Relogin      func(ctx context.Context, s Site) error
 	ReloginEvery time.Duration
+	// CanRelogin says whether a relogin is possible at all (a login is saved
+	// for the site). Without one there is nothing to try - and nothing to
+	// tell the operator every few hours beyond what the status tab shows.
+	CanRelogin func(ctx context.Context, s Site) bool
 	// StillOut hears a site that is logged out after a relogin was tried.
 	StillOut func(s Site, why string)
 
@@ -98,7 +102,7 @@ func (c *Checker) Run(ctx context.Context) {
 				continue
 			}
 			r := c.look(ctx, s)
-			if LoggedOut(r, s) && c.Relogin != nil && c.due(s.ID) {
+			if LoggedOut(r, s) && c.Relogin != nil && (c.CanRelogin == nil || c.CanRelogin(ctx, s)) && c.due(s.ID) {
 				err := c.Relogin(ctx, s)
 				if c.Log != nil {
 					c.Log.Info("로그인이 풀려 저장된 정보로 다시 로그인해 봤습니다", "site", s.ID, "err", err)

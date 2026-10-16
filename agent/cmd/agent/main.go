@@ -229,6 +229,10 @@ func main() {
 		// 풀린 로그인은 보관함의 정보로 다시 한다. 안 되면(문자 인증 등) 알린다.
 		if vaultModule != nil {
 			checker.Relogin = relogin(runner, vaultModule, u, cfg.ExtraMCPToken)
+			checker.CanRelogin = func(ctx context.Context, s browsercheck.Site) bool {
+				domain, err := site.Domain(s.LoginHost)
+				return err == nil && vaultModule.Has(ctx, domain)
+			}
 			loginNote := notify.New(cfg.NotifyURL, cfg.DatabaseURL, cfg.APIToken, log)
 			checker.StillOut = func(s browsercheck.Site, why string) {
 				loginNote.Send(notify.Event{
