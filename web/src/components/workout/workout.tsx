@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Trash2, X } from "lucide-react";
+import { Minus, Plus, Trash2, TrendingUp, X } from "lucide-react";
 import { ExerciseHistory } from "@/components/workout/exercise-history";
 import { Lifts } from "@/components/workout/lifts";
 import { LiveSession } from "@/components/workout/live-session";
@@ -24,10 +24,12 @@ import {
   kg,
   load,
   previousVolume,
+  sessionRecords,
   sessionVolume,
   setLabel,
   streak,
   volumeByGroup,
+  weeklyCounts,
   volumeOf,
   type Session,
 } from "@/lib/workout";
@@ -245,6 +247,8 @@ export function Workout() {
                       onEdit={() => setEditing(true)}
                     />
                   </section>
+
+                  {now !== null ? <Consistency past={past} now={now} /> : null}
 
                   {week ? (
                     <section aria-label="최근 7일">
@@ -511,6 +515,8 @@ function SessionLog({
   onLook: (name: string) => void;
   onRemove: () => void;
 }) {
+  // What this session beat, against the ones before it.
+  const records = sessionRecords(session, all);
   return (
     <article
       aria-label={`${dayLabel(session.date)} ${session.routineName ?? "운동"}`}
@@ -537,6 +543,17 @@ function SessionLog({
       {session.note ? (
         <p className="mb-3 text-[12.5px] leading-relaxed text-dim">
           {session.note}
+        </p>
+      ) : null}
+      {records.length ? (
+        <p className="mb-3 flex items-start gap-1.5 text-[12.5px] leading-relaxed text-foreground/90">
+          <TrendingUp aria-hidden className="mt-[3px] size-3.5 shrink-0 text-approve" />
+          <span>
+            기록 갱신{" "}
+            {records
+              .map((r) => `${r.name} ${r.kind === "무게" ? `최고 무게 ${load(r.value)}kg` : `추정 1RM ${Math.round(r.value)}kg`}`)
+              .join(" · ")}
+          </span>
         </p>
       ) : null}
 
@@ -583,5 +600,93 @@ function SessionLog({
           })}
       </ul>
     </article>
+  );
+}
+
+const GOAL_KEY = "jarvis.workout.weeklyGoal";
+
+/**
+ * The habit, before the numbers: this week against a weekly goal, and the
+ * last eight weeks as bars against the same line. The goal is this device's
+ * (the book is shared with the guest; a target is one person's).
+ */
+function Consistency({ past, now }: { past: Session[]; now: number }) {
+  const [goal, setGoal] = useState(3);
+  useEffect(() => {
+    try {
+      const saved = Number(localStorage.getItem(GOAL_KEY));
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- read once from this device
+      if (saved >= 1 && saved <= 7) setGoal(saved);
+    } catch {}
+  }, []);
+  const change = (next: number) => {
+    const v = Math.min(7, Math.max(1, next));
+    setGoal(v);
+    try {
+      localStorage.setItem(GOAL_KEY, String(v));
+    } catch {}
+  };
+  const weeks = weeklyCounts(past, 8, new Date(now));
+  const thisWeek = weeks[weeks.length - 1].count;
+  const top = Math.max(goal, ...weeks.map((w) => w.count), 1);
+  const hit = weeks.filter((w) => w.count >= goal).length;
+  return (
+    <section aria-label="이번 주 목표" className="mb-8">
+      <div className="mb-2.5 flex items-center justify-between gap-3">
+        <h2 className="text-[13px] text-dim">이번 주</h2>
+        <div className="flex items-center gap-0.5 text-[12px] text-faint">
+          <span className="me-1">목표</span>
+          <button
+            type="button"
+            onClick={() => change(goal - 1)}
+            aria-label="목표 줄이기"
+            className="flex size-8 items-center justify-center rounded-full outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+          >
+            <Minus aria-hidden className="size-3.5" />
+          </button>
+          <span className="tnum w-7 text-center text-foreground/90">{goal}회</span>
+          <button
+            type="button"
+            onClick={() => change(goal + 1)}
+            aria-label="목표 늘리기"
+            className="flex size-8 items-center justify-center rounded-full outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+          >
+            <Plus aria-hidden className="size-3.5" />
+          </button>
+        </div>
+      </div>
+      <p className="mb-3 flex items-baseline gap-2">
+        <span className="tnum text-[26px] leading-none font-semibold text-foreground">{thisWeek}</span>
+        <span className="tnum text-[13px] text-dim">/ {goal}회</span>
+        <span className="ms-auto text-[12px] text-faint">
+          {thisWeek >= goal ? "이번 주 목표를 채웠어요" : `${goal - thisWeek}번 더`}
+        </span>
+      </p>
+      <div role="img" aria-label={`최근 8주 운동 횟수 ${weeks.map((w) => w.count).join(", ")}, 목표 ${goal}회`}>
+        <div className="relative flex h-14 items-end gap-1.5">
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 border-t border-dashed border-dim/40"
+            style={{ bottom: `${(goal / top) * 100}%` }}
+          />
+          {weeks.map((w, i) => (
+            <span
+              key={w.start.toISOString()}
+              className={cn(
+                "flex-1 rounded-t-[3px]",
+                w.count === 0 ? "bg-well" : w.count >= goal ? "bg-approve/60" : "bg-dim/40",
+                i === weeks.length - 1 && "ring-1 ring-foreground/30",
+              )}
+              style={{ height: `${w.count === 0 ? 6 : (w.count / top) * 100}%` }}
+            />
+          ))}
+        </div>
+        <div className="tnum mt-1 flex justify-between text-[10.5px] text-faint">
+          <span>{`${weeks[0].start.getMonth() + 1}/${weeks[0].start.getDate()}`}</span>
+          <span>8주 중 {hit}주 목표 달성</span>
+          <span>이번 주</span>
+        </div>
+      </div>
+    </section>
   );
 }

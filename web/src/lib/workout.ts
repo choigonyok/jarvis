@@ -620,3 +620,104 @@ export function volumeByGroup(sessions: Session[]): Map<MuscleGroup, number> {
   }
   return out;
 }
+
+/** Monday 00:00 of the week `d` falls in, local. */
+function mondayOf(d: Date): Date {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
+  return x;
+}
+
+/**
+ * Finished sessions per week (Monday to Sunday), the last `weeks` weeks with
+ * this one last. Every training app leads with this, because the habit is
+ * the thing that compounds: a week missed shows as a gap before any number
+ * says so.
+ */
+export function weeklyCounts(sessions: Session[], weeks = 8, now = new Date()): { start: Date; count: number }[] {
+  const thisWeek = mondayOf(now).getTime();
+  const out = Array.from({ length: weeks }, (_, i) => ({
+    start: new Date(thisWeek - (weeks - 1 - i) * 7 * 86_400_000),
+    count: 0,
+  }));
+  for (const s of sessions) {
+    if (!s.endedAt || doneSets(s) === 0) continue;
+    const at = mondayOf(new Date(s.startedAt)).getTime();
+    const i = Math.round((at - out[0].start.getTime()) / (7 * 86_400_000));
+    if (i >= 0 && i < weeks) out[i].count += 1;
+  }
+  return out;
+}
+
+export type Records = {
+  /** The heaviest working set. */
+  heaviest: { weight: number; reps: number; date: string } | null;
+  /** The best estimated 1RM (Epley, 12 reps or fewer). */
+  oneRm: { value: number; weight: number; reps: number; date: string } | null;
+  /** The biggest single set, weight × reps. */
+  bestSet: { weight: number; reps: number; volume: number; date: string } | null;
+  /** The most reps in one working set. */
+  mostReps: { reps: number; weight: number; date: string } | null;
+  /** The biggest session's volume for this movement. */
+  bestSession: { volume: number; date: string } | null;
+};
+
+/** A movement's records, every kind people keep, from every finished session. */
+export function recordsOf(sessions: Session[], name: string): Records {
+  const out: Records = { heaviest: null, oneRm: null, bestSet: null, mostReps: null, bestSession: null };
+  for (const s of sessions) {
+    if (!s.endedAt) continue;
+    for (const exercise of s.exercises) {
+      if (!sameName(exercise.name, name)) continue;
+      let sessionVolume = 0;
+      for (const set of exercise.sets) {
+        if (!set.done || set.warmup) continue;
+        sessionVolume += set.weight * set.reps;
+        if (set.weight > 0 && (!out.heaviest || set.weight > out.heaviest.weight || (set.weight === out.heaviest.weight && set.reps > out.heaviest.reps))) {
+          out.heaviest = { weight: set.weight, reps: set.reps, date: s.date };
+        }
+        const e = estimate1RM(set.weight, set.reps);
+        if (e !== null && (!out.oneRm || e > out.oneRm.value)) out.oneRm = { value: e, weight: set.weight, reps: set.reps, date: s.date };
+        const v = set.weight * set.reps;
+        if (v > 0 && (!out.bestSet || v > out.bestSet.volume)) out.bestSet = { weight: set.weight, reps: set.reps, volume: v, date: s.date };
+        if (!out.mostReps || set.reps > out.mostReps.reps) out.mostReps = { reps: set.reps, weight: set.weight, date: s.date };
+      }
+      if (sessionVolume > 0 && (!out.bestSession || sessionVolume > out.bestSession.volume)) {
+        out.bestSession = { volume: sessionVolume, date: s.date };
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * What a best estimated 1RM says you could lift for 1, 3, 5, 8, 10 and 12
+ * reps (Epley turned around), rounded down to a load you can build - the
+ * table people use to pick a weight for a rep target.
+ */
+export function repMaxes(oneRm: number, name: string): { reps: number; weight: number }[] {
+  const step = weightStep(name);
+  return [1, 3, 5, 8, 10, 12].map((reps) => ({
+    reps,
+    weight: Math.floor(oneRm / (1 + (reps === 1 ? 0 : reps) / 30) / step) * step,
+  }));
+}
+
+/**
+ * Time to add weight? Last time every working set was at one load and every
+ * one reached 8 reps or more - the top of the usual range - so this time can
+ * start one step heavier. A suggestion on the dock, never a change by itself.
+ */
+export function overloadHint(
+  sessions: Session[],
+  name: string,
+  excludeId?: string,
+): { from: number; to: number; reps: number } | null {
+  const last = previousSets(sessions, name, excludeId)?.filter((s) => s.done && !s.warmup) ?? [];
+  if (last.length < 2) return null;
+  const weight = last[0].weight;
+  if (weight <= 0 || last.some((s) => s.weight !== weight || s.reps < 8)) return null;
+  return { from: weight, to: round2(weight + weightStep(name)), reps: Math.min(...last.map((s) => s.reps)) };
+}
+
+const round2 = (v: number) => Math.round(v * 100) / 100;

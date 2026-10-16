@@ -13,6 +13,7 @@ import {
   heaviest,
   kg,
   nextOpen,
+  overloadHint,
   previousFor,
   previousSets,
   previousVolume,
@@ -550,6 +551,12 @@ export function LiveSession({
             : null
         }
         empty={session.exercises.length === 0}
+        hint={focusExercise ? overloadHint(history, focusExercise.name, session.id) : null}
+        // One step heavier for every working set of this movement still to
+        // lift at last time's load - the ones already ticked are history.
+        onRaise={(exerciseId, from, to) =>
+          onPatchSets(exerciseId, (c) => c.map((s) => (!s.done && !s.warmup && s.weight === from ? { ...s, weight: to } : s)))
+        }
         onField={setField}
         onToggle={toggle}
         onWarmup={(ref) =>

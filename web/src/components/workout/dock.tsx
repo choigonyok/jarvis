@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, Minus, Plus, X } from "lucide-react";
+import { Check, Minus, Plus, TrendingUp, X } from "lucide-react";
 import { quietButton, saveButton } from "@/components/workout/panel";
 import { chime } from "@/lib/use-gym";
 import {
@@ -35,6 +35,8 @@ export function Dock({
   focus,
   previous,
   empty,
+  hint,
+  onRaise,
   onField,
   onToggle,
   onWarmup,
@@ -51,6 +53,9 @@ export function Dock({
   focus: SetRef | null;
   previous: WorkoutSet | null;
   empty: boolean;
+  /** Last time's working sets all reached the top of the range: one step heavier. */
+  hint?: { from: number; to: number; reps: number } | null;
+  onRaise?: (exerciseId: string, from: number, to: number) => void;
   onField: (ref: SetRef, field: "weight" | "reps", value: number) => void;
   onToggle: (ref: SetRef) => void;
   onWarmup: (ref: SetRef) => void;
@@ -130,6 +135,23 @@ export function Dock({
                 세트 삭제
               </button>
             </div>
+
+            {/* Progressive overload, offered at the moment it matters: on a
+                working set still at last time's load. A tap raises this set
+                and the ones after it; the stepper still says the last word. */}
+            {hint && onRaise && !set.done && !set.warmup && set.weight === hint.from ? (
+              <button
+                type="button"
+                onClick={() => onRaise(exercise.id, hint.from, hint.to)}
+                className="mb-2 flex w-full items-center gap-2 rounded-lg bg-glass px-3 py-2 text-left text-[12.5px] outline-none transition-colors hover:bg-glass-raised focus-visible:ring-3 focus-visible:ring-ring/50"
+              >
+                <TrendingUp aria-hidden className="size-4 shrink-0 text-approve" />
+                <span className="min-w-0 flex-1 text-dim">
+                  지난번 {load(hint.from)}kg로 모든 세트 {hint.reps}회 이상
+                </span>
+                <span className="tnum shrink-0 font-medium text-foreground">{load(hint.to)}kg 도전</span>
+              </button>
+            ) : null}
 
             <div className="grid grid-cols-2 gap-2">
               <Stepper

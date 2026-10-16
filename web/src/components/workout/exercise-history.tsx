@@ -9,6 +9,8 @@ import {
   heaviest,
   kg,
   load,
+  recordsOf,
+  repMaxes,
   setLabel,
   type Session,
 } from "@/lib/workout";
@@ -94,6 +96,8 @@ export function ExerciseHistory({
             </div>
           ) : null}
 
+          {name ? <RecordTable name={name} sessions={sessions} /> : null}
+
           <ul className="space-y-3">
             {history.map((h) => (
               <li key={h.id}>
@@ -118,5 +122,49 @@ export function ExerciseHistory({
         </>
       )}
     </Panel>
+  );
+}
+
+/**
+ * The records people keep for a lift, and what the best estimated 1RM says
+ * you could do for a rep target - the table you pick a working weight from.
+ */
+function RecordTable({ name, sessions }: { name: string; sessions: Session[] }) {
+  const r = recordsOf(sessions, name);
+  const rows: [string, string, string][] = [];
+  if (r.heaviest) rows.push(["최고 무게", `${load(r.heaviest.weight)}kg × ${r.heaviest.reps}`, r.heaviest.date]);
+  if (r.bestSet) rows.push(["최고 세트", `${load(r.bestSet.weight)}×${r.bestSet.reps} = ${kg(r.bestSet.volume)}`, r.bestSet.date]);
+  if (r.mostReps) rows.push(["최다 반복", r.mostReps.weight > 0 ? `${r.mostReps.reps}회 (${load(r.mostReps.weight)}kg)` : `${r.mostReps.reps}회`, r.mostReps.date]);
+  if (r.bestSession) rows.push(["한 번에 가장 많이", kg(r.bestSession.volume), r.bestSession.date]);
+  if (rows.length === 0) return null;
+  const maxes = r.oneRm ? repMaxes(r.oneRm.value, name) : [];
+  return (
+    <div className="mb-5 space-y-4">
+      <section aria-label="기록">
+        <p className="mb-1 text-[11.5px] text-faint">기록</p>
+        <ul className="divide-y divide-edge-soft">
+          {rows.map(([label, value, date]) => (
+            <li key={label} className="flex items-baseline gap-3 py-1.5 text-[12.5px]">
+              <span className="w-24 shrink-0 text-dim">{label}</span>
+              <span className="tnum min-w-0 flex-1 text-foreground/90">{value}</span>
+              <span className="tnum shrink-0 text-[11px] text-faint">{dayLabel(date)}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
+      {maxes.length ? (
+        <section aria-label="반복 수별 예상 무게">
+          <p className="mb-1.5 text-[11.5px] text-faint">반복 수별 예상 무게 (추정 1RM 기준)</p>
+          <ol className="grid grid-cols-6 gap-1 text-center">
+            {maxes.map((m) => (
+              <li key={m.reps} className="rounded-lg bg-glass py-1.5">
+                <span className="tnum block text-[13px] text-foreground/90">{load(m.weight)}</span>
+                <span className="tnum block text-[10.5px] text-faint">{m.reps}회</span>
+              </li>
+            ))}
+          </ol>
+        </section>
+      ) : null}
+    </div>
   );
 }
