@@ -2,6 +2,7 @@ package mind
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"slices"
@@ -192,5 +193,27 @@ func TestPortfolioBandIsOneQuestion(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("리밸런싱 질문은 하나여야 합니다: %d (%+v)", n, ins)
+	}
+}
+
+// G-M2: one step of the night failing does not cost the steps after it.
+func TestNightKeepsGoingPastAFailedStep(t *testing.T) {
+	seoul, _ := time.LoadLocation("Asia/Seoul")
+	m, _, _ := testMind(t, time.Date(2026, 10, 16, 3, 0, 0, 0, seoul))
+	ran := false
+	m.nightly = []func(context.Context) error{
+		func(context.Context) error { return errors.New("하나가 실패") },
+		func(context.Context) error { ran = true; return nil },
+	}
+	if err := m.Night(context.Background()); err == nil {
+		t.Fatal("실패는 모아서 돌려줘야 합니다")
+	}
+	if !ran {
+		t.Fatal("실패한 단계 뒤의 단계도 돌아야 합니다")
+	}
+	ran = false
+	m.mornings = m.nightly
+	if err := m.Morning(context.Background()); err == nil || !ran {
+		t.Fatalf("아침도 마찬가지: err=%v ran=%v", err, ran)
 	}
 }

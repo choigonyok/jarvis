@@ -63,7 +63,7 @@ func (s *Store) Resume(ctx context.Context) error {
 const selectList = `
 	select id, role,
 	       to_char(at at time zone $1, 'HH24:MI'),
-	       to_char(at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'),
+	       to_char(at, 'YYYY-MM-DD"T"HH24:MI:SS.USTZH:TZM'),
 	       coalesce(paragraphs, '{}'),
 	       coalesce(body, ''),
 	       coalesce(proposal_id, ''),
@@ -138,7 +138,7 @@ func (s *Store) Append(ctx context.Context, t turn.Turn, tz string) (turn.Turn, 
 		)
 		select id, role,
 		       to_char(at at time zone $1, 'HH24:MI'),
-		       to_char(at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'),
+		       to_char(at, 'YYYY-MM-DD"T"HH24:MI:SS.USTZH:TZM'),
 		       coalesce(paragraphs, '{}'),
 		       coalesce(body, ''),
 		       coalesce(proposal_id, ''),

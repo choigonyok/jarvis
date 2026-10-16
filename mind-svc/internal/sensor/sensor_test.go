@@ -70,3 +70,49 @@ func TestMessengerReadsWhatIsNew(t *testing.T) {
 		t.Fatalf("새 메시지만 한 번: %+v", seen)
 	}
 }
+
+// B-1, B-11: turns come as chat-svc writes them (RFC 3339, offset with a
+// colon, microseconds), only what is newer is asked for, and a turn in the
+// same second as the last one read is not taken for it.
+func TestChatReadsNewTurnsBySince(t *testing.T) {
+	base := time.Now().Add(-time.Hour).Truncate(time.Second)
+	at := func(us int) string { return base.Add(time.Duration(us) * time.Microsecond).Format("2006-01-02T15:04:05.000000-07:00") }
+	turns := []turn{
+		{ID: "u-1", Role: "user", AtISO: at(100), Text: "하나"},
+		{ID: "a-2", Role: "agent", AtISO: at(900000), Text: "둘"},
+	}
+	var sinces []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		since := r.URL.Query().Get("since")
+		sinces = append(sinces, since)
+		cut, _ := time.Parse(time.RFC3339Nano, since)
+		var out []turn
+		for _, tt := range turns {
+			if a, _ := time.Parse(time.RFC3339Nano, tt.AtISO); a.After(cut) {
+				out = append(out, tt)
+			}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"turns": out})
+	}))
+	defer srv.Close()
+
+	st := store.NewMemory()
+	log := obs.NewMemoryLog(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	go log.Run(context.Background(), func(context.Context, obs.Observation) error { return nil })
+	s := &Chat{URL: srv.URL, Store: st, Log: log, Backfill: 6 * time.Hour, Out: slog.New(slog.NewTextHandler(io.Discard, nil)), HTTP: srv.Client()}
+
+	turns = turns[:1]
+	if err := s.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	turns = append(turns, turn{ID: "a-2", Role: "agent", AtISO: at(900000), Text: "둘"}) // same second, later
+	if err := s.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Message(context.Background(), "chat:a-2"); err != nil {
+		t.Fatalf("같은 초에 온 다음 턴도 읽어야 합니다: %v", err)
+	}
+	if len(sinces) != 2 || sinces[1] == "" || !strings.Contains(sinces[1], ".") {
+		t.Fatalf("since 를 마이크로초까지 넘겨야 합니다: %q", sinces)
+	}
+}

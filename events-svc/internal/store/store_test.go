@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/jackc/pgx/v5"
 	"os"
 	"strings"
 	"sync"
@@ -25,9 +26,7 @@ func testStore(t *testing.T) (*Store, *pgxpool.Pool) {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	if _, err := pool.Exec(context.Background(), `truncate events, event_subscriptions, event_outbox restart identity`); err != nil {
-		t.Fatal(err)
-	}
+	resetTables(t, dsn, `truncate events, event_subscriptions, event_outbox restart identity`)
 	return New(pool), pool
 }
 
@@ -90,6 +89,42 @@ func TestPruneKeepsWhatAConsumerHasNotTaken(t *testing.T) {
 	}
 }
 
+// B-8: a consumer that has taken nothing for longer than the log is kept
+// does not hold it forever - only a live one does - and it can be removed.
+func TestStalledConsumerDoesNotHoldTheLog(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	for i := 0; i < 4; i++ {
+		if _, _, err := s.Append(ctx, Event{Source: "a", Type: "x.y"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, _ = pool.Exec(ctx, `update events set received_at = now() - interval '100 days'`)
+	if _, err := s.Subscribe(ctx, "live", "http://x", []string{"*"}, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Subscribe(ctx, "dead", "http://y", []string{"*"}, true); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Advance(ctx, "live", 3, true)
+	_, _ = pool.Exec(ctx, `update event_subscriptions set updated_at = now() - interval '100 days', last_ok_at = null where consumer = 'dead'`)
+
+	n, err := s.Prune(ctx, 90*24*time.Hour)
+	if err != nil || n != 3 {
+		t.Fatalf("pruned %d (%v); want the 3 the live consumer is past, whatever the dead one holds", n, err)
+	}
+	if ok, err := s.Unsubscribe(ctx, "dead"); err != nil || !ok {
+		t.Fatalf("unsubscribe: %v %v", ok, err)
+	}
+	if ok, _ := s.Unsubscribe(ctx, "dead"); ok {
+		t.Fatal("a second unsubscribe finds nothing")
+	}
+	subs, _ := s.Subscriptions(ctx)
+	if len(subs) != 1 || subs[0].Consumer != "live" {
+		t.Fatalf("left %+v", subs)
+	}
+}
+
 // Many appends at once still commit in id order: a reader that saw id n has
 // already seen everything below it.
 func TestConcurrentAppendsCommitInOrder(t *testing.T) {
@@ -130,5 +165,23 @@ func TestConcurrentAppendsCommitInOrder(t *testing.T) {
 	close(stop)
 	if len(bad) > 0 {
 		t.Fatalf("a reader saw a gap %d times", len(bad))
+	}
+}
+
+// resetTables empties tables as the owner when scripts/dbtest gives one
+// (JARVIS_TEST_ADMIN_DSN): the service's own role may not TRUNCATE, and the
+// code under test runs as that role.
+func resetTables(t *testing.T, dsn, sql string) {
+	t.Helper()
+	if admin := os.Getenv("JARVIS_TEST_ADMIN_DSN"); admin != "" {
+		dsn = admin
+	}
+	conn, err := pgx.Connect(context.Background(), dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(context.Background())
+	if _, err := conn.Exec(context.Background(), sql); err != nil {
+		t.Fatal(err)
 	}
 }

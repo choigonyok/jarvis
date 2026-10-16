@@ -195,3 +195,51 @@ func TestAlreadyOnCalendarIsLinked(t *testing.T) {
 		t.Fatalf("이미 있는 일정은 연결만: %+v %v", in, f.cal.All())
 	}
 }
+
+// spy runs the calendar action and records what the store said about the
+// intent while it ran.
+type spy struct {
+	act.CalendarActuator
+	st     *store.Memory
+	id     *string
+	during string
+	runs   int
+}
+
+func (s *spy) Execute(ctx context.Context, kind string, payload json.RawMessage) (json.RawMessage, json.RawMessage, error) {
+	s.runs++
+	if in, err := s.st.Intent(ctx, *s.id); err == nil {
+		s.during = in.Status
+	}
+	return s.CalendarActuator.Execute(ctx, kind, payload)
+}
+
+// B-6: an approval claims the intent before running it, so a second approval
+// - after the save that follows the run failed, or a double tap - cannot run
+// it again.
+func TestApprovalClaimsBeforeRunning(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(DefaultPolicy())
+	var id string
+	sp := &spy{CalendarActuator: act.CalendarActuator{Cal: f.cal}, st: f.st, id: &id}
+	f.g = New(f.st, act.NewRegistry(sp), f.note, f.log, DefaultPolicy(), seoul,
+		func() time.Time { f.clock = f.clock.Add(time.Second); return f.clock }, "", slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	in, err := f.g.Submit(ctx, create("plan_claim"))
+	if err != nil || !in.Card {
+		t.Fatalf("카드로 나가야 합니다: %+v %v", in, err)
+	}
+	id = in.ID
+	if _, err := f.g.Approve(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	if sp.during != model.Executing {
+		t.Fatalf("실행하는 동안 저장된 상태는 executing 이어야 합니다: %q", sp.during)
+	}
+	if _, err := f.g.Approve(ctx, id); err == nil {
+		t.Fatal("두 번째 승인은 거절돼야 합니다")
+	}
+	if sp.runs != 1 {
+		t.Fatalf("한 번만 실행돼야 합니다: %d", sp.runs)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 	"os"
 	"testing"
 	"time"
@@ -159,6 +160,18 @@ func facts(t *testing.T, st Store) {
 	}
 	if _, err := st.Fact(ctx, "mf_x"); !errors.Is(err, model.ErrNotFound) {
 		t.Fatalf("없는 사실: %v", err)
+	}
+
+	// G-M1: a ledger reads facts by relation, with no limit and in any
+	// letter case - old entries must not fall out behind newer facts.
+	for i, rel := range []string{"GAVE_TO", "received_from", "LIKES"} {
+		g := f
+		g.ID, g.Relation, g.CreatedAt = fmt.Sprintf("mf_rel_%d", i), rel, at.Add(time.Duration(i+10)*time.Minute)
+		_ = st.PutFact(ctx, g)
+	}
+	byRel, err := st.FactsWith(ctx, "GAVE_TO", "RECEIVED_FROM")
+	if err != nil || len(byRel) != 2 || byRel[0].ID != "mf_rel_1" || byRel[1].ID != "mf_rel_0" {
+		t.Fatalf("관계로 고른 사실, 최근 것부터: %+v %v", byRel, err)
 	}
 
 	_ = st.PutAlias(ctx, model.Alias{Name: "지수", Kind: "Person", Node: "n1", At: at})
@@ -394,9 +407,7 @@ func TestPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	if _, err := pool.Exec(context.Background(), `truncate mind_messages, mind_rooms, mind_entities, mind_changes, mind_timers, mind_intents, mind_cursors, mind_facts, mind_aliases, mind_policy_stats, mind_occurrences, mind_links, mind_thing_classes, mind_link_cache, mind_pattern_counts, mind_notes, mind_note_versions, mind_predictions, mind_expectations, mind_reply_examples, mind_llm_usage, mind_observations, mind_preferences restart identity cascade`); err != nil {
-		t.Fatal(err)
-	}
+	resetTables(t, dsn, `truncate mind_messages, mind_rooms, mind_entities, mind_changes, mind_timers, mind_intents, mind_cursors, mind_facts, mind_aliases, mind_policy_stats, mind_occurrences, mind_links, mind_thing_classes, mind_link_cache, mind_pattern_counts, mind_notes, mind_note_versions, mind_predictions, mind_expectations, mind_reply_examples, mind_llm_usage, mind_observations, mind_preferences restart identity cascade`)
 	key := make([]byte, 32)
 	st := NewPostgres(pool, key)
 	contract(t, st)
@@ -413,5 +424,23 @@ func TestPostgres(t *testing.T) {
 	_ = pool.QueryRow(context.Background(), `select sealed, body from mind_messages where ref = 'sim:1'`).Scan(&sealed, &body)
 	if !sealed || string(body) == "강릉 갈까?" {
 		t.Fatal("키가 있으면 원문이 봉해져야 합니다")
+	}
+}
+
+// resetTables empties tables as the owner when scripts/dbtest gives one
+// (JARVIS_TEST_ADMIN_DSN): the service's own role may not TRUNCATE, and the
+// code under test runs as that role.
+func resetTables(t *testing.T, dsn, sql string) {
+	t.Helper()
+	if admin := os.Getenv("JARVIS_TEST_ADMIN_DSN"); admin != "" {
+		dsn = admin
+	}
+	conn, err := pgx.Connect(context.Background(), dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(context.Background())
+	if _, err := conn.Exec(context.Background(), sql); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 	"io"
 	"log/slog"
 	"net/http"
@@ -32,9 +33,7 @@ func TestFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	if _, err := st.Pool().Exec(ctx, `truncate context_raw, context_regions, context_visits, context_state restart identity`); err != nil {
-		t.Fatal(err)
-	}
+	resetTables(t, dsn, `truncate context_raw, context_regions, context_visits, context_state restart identity`)
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
 	srv := httptest.NewServer(New(st, Config{Token: "api", SignalToken: "sig", User: "phone", Pass: "pw", Public: "https://gw.example/context"}, nil, quiet).Handler())
 	defer srv.Close()
@@ -161,9 +160,7 @@ func TestWaypointsAndSetup(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	if _, err := st.Pool().Exec(ctx, `truncate context_raw, context_regions, context_visits, context_state restart identity`); err != nil {
-		t.Fatal(err)
-	}
+	resetTables(t, dsn, `truncate context_raw, context_regions, context_visits, context_state restart identity`)
 	if err := st.PutRegion(ctx, place.Region{Name: "회사", Kind: "work", Lat: 1, Lon: 1, RadiusM: 100, Area: "판교"}); err != nil {
 		t.Fatal(err)
 	}
@@ -291,9 +288,7 @@ func TestHealth(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	if _, err := st.Pool().Exec(ctx, `truncate context_raw, context_regions, context_visits, context_state restart identity`); err != nil {
-		t.Fatal(err)
-	}
+	resetTables(t, dsn, `truncate context_raw, context_regions, context_visits, context_state restart identity`)
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
 	srv := httptest.NewServer(New(st, Config{Token: "api", SignalToken: "sig"}, nil, quiet).Handler())
 	defer srv.Close()
@@ -350,5 +345,85 @@ func TestDerive(t *testing.T) {
 	n.State = st
 	if s := Summary(n, now); !strings.Contains(s, "운전 중") || strings.Contains(s, "회의 중") {
 		t.Fatalf("요약: %s", s)
+	}
+}
+
+// resetTables empties tables as the owner when scripts/dbtest gives one
+// (JARVIS_TEST_ADMIN_DSN): the service's own role may not TRUNCATE, and the
+// code under test runs as that role.
+func resetTables(t *testing.T, dsn, sql string) {
+	t.Helper()
+	if admin := os.Getenv("JARVIS_TEST_ADMIN_DSN"); admin != "" {
+		dsn = admin
+	}
+	conn, err := pgx.Connect(context.Background(), dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(context.Background())
+	if _, err := conn.Exec(context.Background(), sql); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// B-9: a report that arrives late - a fix or a leave older than the visit
+// now open - says nothing about where the phone is now and closes nothing.
+func TestLateReportKeepsTheStay(t *testing.T) {
+	dsn := os.Getenv("CONTEXT_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("CONTEXT_TEST_DATABASE_URL 이 없어 건너뜁니다")
+	}
+	ctx := context.Background()
+	st, err := store.Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	resetTables(t, dsn, `truncate context_raw, context_regions, context_visits, context_state restart identity`)
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(New(st, Config{Token: "api", User: "phone", Pass: "pw"}, nil, quiet).Handler())
+	defer srv.Close()
+	post := func(path, body string, auth func(*http.Request)) int {
+		req, _ := http.NewRequest("POST", srv.URL+path, strings.NewReader(body))
+		auth(req)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	phone := func(r *http.Request) { r.SetBasicAuth("phone", "pw") }
+	req, _ := http.NewRequest("PUT", srv.URL+"/regions", strings.NewReader(`{"name":"집","kind":"home","lat":37.5559,"lon":126.9104,"radiusM":120}`))
+	req.Header.Set("Authorization", "Bearer api")
+	if resp, err := http.DefaultClient.Do(req); err != nil || resp.StatusCode != 200 {
+		t.Fatalf("영역: %v", err)
+	}
+
+	// Home at 12:00.
+	if code := post("/owntracks", `{"_type":"location","lat":37.5560,"lon":126.9105,"acc":10,"tst":1760583600}`, phone); code != 200 {
+		t.Fatalf("집: %d", code)
+	}
+	// A fix from 11:00, far away, arrives only now.
+	if code := post("/owntracks", `{"_type":"location","lat":37.4979,"lon":127.0276,"acc":10,"tst":1760580000}`, phone); code != 200 {
+		t.Fatalf("늦은 위치: %d", code)
+	}
+	// And a leave from 11:30 - before this visit began.
+	if code := post("/owntracks", `{"_type":"transition","event":"leave","desc":"집","tst":1760581800}`, phone); code != 200 {
+		t.Fatalf("늦은 나감: %d", code)
+	}
+	open, err := st.Open(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(open) != 1 || open[0].Region != "집" {
+		t.Fatalf("집 체류가 열려 있어야 합니다: %+v", open)
+	}
+	// A leave after the visit began does close it.
+	if code := post("/owntracks", `{"_type":"transition","event":"leave","desc":"집","tst":1760590800}`, phone); code != 200 {
+		t.Fatalf("나감: %d", code)
+	}
+	if open, _ := st.Open(ctx); len(open) != 0 {
+		t.Fatalf("제때 온 나감은 닫아야 합니다: %+v", open)
 	}
 }

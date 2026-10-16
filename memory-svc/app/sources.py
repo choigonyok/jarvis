@@ -81,12 +81,23 @@ async def chat(ctx: Ctx):
             break
         source = f"chat:{group}"
         cur = await ctx.state.cursor(source)
+        after = cur.get("after", "")
+        # Compared as times, not strings: chat-svc's format has changed
+        # ("+09" → "+09:00", then microseconds), and a string comparison
+        # across formats reads the same moment as newer or older.
+        after_at = datetime.fromisoformat(after) if after else None
+        params = {"thread": thread}
+        if after_at:
+            params["since"] = after_at.isoformat()  # only what is newer
         async with http() as c:
-            r = await c.get(f"{URL['chat']}/turns", params={"thread": thread})
+            r = await c.get(f"{URL['chat']}/turns", params=params)
             r.raise_for_status()
             turns = r.json().get("turns", [])
-        after = cur.get("after", "")
-        fresh = [t for t in turns if (t.get("atIso") or "") > after and (t.get("text") or t.get("paragraphs"))]
+        fresh = [
+            t for t in turns
+            if t.get("atIso") and (after_at is None or datetime.fromisoformat(t["atIso"]) > after_at)
+            and (t.get("text") or t.get("paragraphs"))
+        ]
         cutoff = datetime.now(timezone.utc) - timedelta(days=BACKFILL_DAYS)
         fresh = [t for t in fresh if datetime.fromisoformat(t["atIso"]) >= cutoff]
         # A stretch ends at a 30-minute pause or 12 turns; one still going

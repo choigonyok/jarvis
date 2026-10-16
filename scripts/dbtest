@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# 실제 Postgres 가 필요한 테스트를 돌린다. 맥북의 Docker 에서 일회용 Postgres 를 띄우고,
+# db/migrations 전부를 db-migrate 와 같은 스크립트(db/migrate.sh)로 적용한 뒤,
+# JARVIS_TEST_DSN 을 주고 go test 를 돌리고, 끝나면 컨테이너를 지운다.
+#
+#   scripts/dbtest                       기본: DB 테스트가 있는 서비스 전부
+#   scripts/dbtest spending-svc mind-svc 서비스 디렉터리 여러 개
+#   scripts/dbtest spending-svc -run Cancel   서비스 뒤의 인자는 go test 로 넘어간다
+#
+# 테스트는 운영과 같이 그 서비스의 역할(svc_<서비스>, 마이그레이션 050)로 붙는다 - 권한이
+# 모자라면 여기서 permission denied 로 드러난다. 운영 데이터베이스에는 닿지 않는다.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+NAME="jarvis-dbtest-$$"
+NET="$NAME-net"
+IMAGE=pgvector/pgvector:pg17
+
+dirs=()
+while [[ $# -gt 0 && "$1" != -* ]]; do dirs+=("$1"); shift; done
+[[ ${#dirs[@]} -gt 0 ]] || dirs=(spending-svc context-svc events-svc mind-svc calendar-svc workout-svc chat-svc)
+
+cleanup() { docker rm -f "$NAME" >/dev/null 2>&1 || true; docker network rm "$NET" >/dev/null 2>&1 || true; }
+trap cleanup EXIT
+
+docker network create "$NET" >/dev/null
+docker run -d --name "$NAME" --network "$NET" -p 127.0.0.1::5432 \
+  -e POSTGRES_USER=jarvis -e POSTGRES_PASSWORD=test -e POSTGRES_DB=jarvis -e TZ=Asia/Seoul "$IMAGE" >/dev/null
+until docker exec "$NAME" pg_isready -U jarvis >/dev/null 2>&1; do sleep 1; done
+docker run --rm --network "$NET" -v "$ROOT/db:/db:ro" -e PGHOST="$NAME" -e PGUSER=jarvis -e PGDATABASE=jarvis \
+  -e PGPASSWORD=test -e TZ=Asia/Seoul --entrypoint /bin/sh "$IMAGE" /db/migrate.sh | tail -1
+
+PORT=$(docker port "$NAME" 5432/tcp | head -1 | sed 's/.*://')
+for r in $(docker exec "$NAME" psql -U jarvis -d jarvis -Atc "select rolname from pg_roles where rolname like 'svc\_%'"); do
+  docker exec "$NAME" psql -qU jarvis -d jarvis -c "alter role $r password 'test'" >/dev/null
+done
+failed=()
+for d in "${dirs[@]}"; do
+  role="${DBTEST_ROLE:-svc_${d%-svc}}"   # DBTEST_ROLE=jarvis 면 소유자로(권한 문제인지 가릴 때)
+  docker exec "$NAME" psql -U jarvis -d jarvis -Atc "select 1 from pg_roles where rolname = '$role'" | grep -q 1 || role=jarvis
+  echo "== $d (역할 $role)"
+  dsn="postgres://$role:test@127.0.0.1:$PORT/jarvis?sslmode=disable"
+  # 서비스마다 예전부터 쓰던 이름(<서비스>_TEST_DATABASE_URL)도 같은 값으로.
+  prefix=$(echo "${d%-svc}" | tr a-z- A-Z_)
+  if ! (cd "$ROOT/$d" && env JARVIS_TEST_DSN="$dsn" "${prefix}_TEST_DATABASE_URL=$dsn" \
+        JARVIS_TEST_ADMIN_DSN="postgres://jarvis:test@127.0.0.1:$PORT/jarvis?sslmode=disable" \
+        go test -count=1 "$@" ./...); then
+    failed+=("$d")
+  fi
+done
+if [[ ${#failed[@]} -gt 0 ]]; then
+  echo "실패: ${failed[*]}" >&2
+  exit 1
+fi
+echo "모두 통과: ${dirs[*]}"
