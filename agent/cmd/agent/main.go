@@ -32,11 +32,11 @@ import (
 	mindmod "github.com/choigonyok/jarvis/agent/internal/module/mind"
 	"github.com/choigonyok/jarvis/agent/internal/module/place"
 	"github.com/choigonyok/jarvis/agent/internal/module/spending"
-	"github.com/choigonyok/jarvis/gocommon/notify"
 	"github.com/choigonyok/jarvis/agent/internal/suggest"
 	"github.com/choigonyok/jarvis/agent/internal/thread"
 	"github.com/choigonyok/jarvis/agent/internal/uploads"
 	"github.com/choigonyok/jarvis/agent/internal/usage"
+	"github.com/choigonyok/jarvis/gocommon/notify"
 )
 
 func main() {
@@ -294,6 +294,7 @@ func main() {
 			MindUsage:       mindUsage,
 			Consume:         consume,
 			BrowserChecks:   browserChecks,
+			FollowUp:        runner,
 			Log:             log,
 		}).Handler(),
 		// No WriteTimeout: /events streams and /mcp blocks on a human.

@@ -36,29 +36,28 @@ log = logging.getLogger("guard")
 AGENT_URL = os.environ.get("JARVIS_AGENT_URL", "http://agent:8080/intercept")
 TOKEN = os.environ.get("MCP_BROWSER_TOKEN", "")
 HOSTS_FILE = os.environ.get("PAYMENT_HOSTS_FILE", "/app/payment-hosts.json")
-# 사람이 카드를 보고 결정할 때까지. 에이전트 쪽 대기와 맞춰 넉넉히 잡는다.
-DECISION_TIMEOUT = int(os.environ.get("JARVIS_DECISION_TIMEOUT", "2400"))
+# 에이전트는 카드를 올리고 바로 답한다(결정을 기다리지 않는다). 이것은 그 답의 제한 시간이다.
+DECISION_TIMEOUT = int(os.environ.get("JARVIS_DECISION_TIMEOUT", "30"))
 
 # 결제 페이지가 스스로 불러오는 이미지·폰트까지 물으면 카드가 쏟아진다.
 # 판단이 필요한 것은 문서 이동과 데이터 요청뿐이다.
 SKIP_TYPES = {"Image", "Stylesheet", "Font", "Media", "Script", "Manifest"}
 
-# 열람 전용 예외는 값을 보내지 않는 요청에만 건다.
-READ_METHODS = {"GET", "HEAD"}
-
-# 차단은 값을 보내는 요청에만 건다. 주문내역을 읽는 GET까지 막으면 구경조차
-# 못 하게 되고, 그것은 이 가드가 지키려는 것과 상관이 없다.
-WRITE_METHODS = {"POST", "PUT", "PATCH"}
+# 묻는 것도 막는 것도 값을 보내는 요청에만 건다. 상품 페이지·주문내역을 읽는
+# GET 까지 멈추면 구경조차 못 하게 되고(네이버쇼핑), 그것은 이 가드가 지키려는
+# 것 - 돈이 나가는 요청 - 과 상관이 없다.
+WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
-def load_rules() -> tuple[list[str], list[str], set[tuple[str, str]]]:
-    """묻는 호스트와 막는 URL 패턴. 예전 형식(hosts)도 읽어서, 규칙 파일을
+def load_rules() -> tuple[list[str], list[str], list[str]]:
+    """묻는 호스트, 묻는 URL 패턴, 막는 URL 패턴. 예전 형식(hosts)도 읽어서, 규칙 파일을
     갈아끼우는 중에 가드가 빈손으로 뜨는 일이 없게 한다."""
     with open(HOSTS_FILE, encoding="utf-8") as f:
         data = json.load(f)
     ask = [h.strip().lower() for h in data.get("ask", data.get("hosts", [])) if h.strip()]
+    ask_patterns = [p.strip().lower() for p in data.get("ask_patterns", []) if p.strip()]
     block = [p.strip().lower() for p in data.get("block", []) if p.strip()]
-    return ask, block, parse_views(data.get("view", []))
+    return ask, ask_patterns, block
 
 
 def find_cdp_port() -> int | None:
@@ -77,49 +76,18 @@ def find_cdp_port() -> int | None:
     return None
 
 
-def parse_views(entries: list[str]) -> set[tuple[str, str]]:
-    """"host/path" 를 (host, path) 로. 비교할 때와 같은 모양으로 미리 맞춰 둔다.
-
-    "host/path/*" 는 그 경로 **아래**(path/...)를 뜻한다. path 자체나 이름이
-    비슷한 형제(pathX)는 포함하지 않는다."""
-    out = set()
-    for e in entries:
-        e = e.strip().lower()
-        if not e or "/" not in e:
-            continue
-        host, path = e.split("/", 1)
-        if path.endswith("/*"):
-            out.add((host, "/" + path[:-2].rstrip("/") + "/*"))
-        else:
-            out.add((host, "/" + path.rstrip("/")))
-    return out
-
-
-def viewable(views: set[tuple[str, str]], url: str, method: str) -> bool:
-    """열람 전용인가. GET·HEAD 이고 호스트가 같고, 경로가 정확히 같거나 "/*" 항목의 아래여야 한다."""
-    if method.upper() not in READ_METHODS:
-        return False
-    u = urlparse(url)
-    host = u.netloc.lower()
-    path = (u.path.rstrip("/") or "/").lower()
-    if (host, path) in views:
-        return True
-    for h, p in views:
-        if h == host and p.endswith("/*") and path.startswith(p[:-1]):
-            return True
-    return False
-
-
 class Guard:
-    def __init__(self, ask_hosts: list[str], block_patterns: list[str], views: set[tuple[str, str]] | None = None):
+    def __init__(self, ask_hosts: list[str], ask_patterns: list[str], block_patterns: list[str]):
         self.hosts = ask_hosts
+        self.ask_patterns = ask_patterns
         self.blocks = block_patterns
-        self.views = views or set()
-        # 멈춰 세울 대상은 두 목록의 합집합이다. 패턴에 없는 요청은 Chrome이
+        # 멈춰 세울 대상은 세 목록의 합집합이다. 패턴에 없는 요청은 Chrome이
         # 아예 멈추지 않으므로, 여기 빠진 것은 판단 대상에도 오르지 못한다.
-        self.patterns = [
-            {"urlPattern": f"*{h}*", "requestStage": "Request"} for h in ask_hosts
-        ] + [{"urlPattern": p, "requestStage": "Request"} for p in block_patterns]
+        self.patterns = (
+            [{"urlPattern": f"*{h}*", "requestStage": "Request"} for h in ask_hosts]
+            + [{"urlPattern": p, "requestStage": "Request"} for p in ask_patterns]
+            + [{"urlPattern": p, "requestStage": "Request"} for p in block_patterns]
+        )
         self._next_id = 0
         self._send_lock = asyncio.Lock()
         # 한 번 승인한 결제 흐름은 같은 호스트의 후속 요청마다 다시 묻지 않는다.
@@ -135,6 +103,16 @@ class Guard:
             return False
         url = url.lower()
         return any(fnmatch(url, p) for p in self.blocks)
+
+    def asks(self, url: str, method: str) -> bool:
+        """사람에게 물을 결제 요청인가: 값을 보내는 요청이고, 묻는 호스트로 가거나
+        묻는 패턴(허용한 자사 간편결제)에 맞는다. 보기만 하는 GET 은 묻지 않는다."""
+        if method.upper() not in WRITE_METHODS:
+            return False
+        if self.matches(urlparse(url).netloc):
+            return True
+        low = url.lower()
+        return any(fnmatch(low, p) for p in self.ask_patterns)
 
     async def send(self, ws, method, params=None, session=None):
         async with self._send_lock:
@@ -180,7 +158,7 @@ class Guard:
 
         # 막는 쪽을 먼저 본다. 정해진 결제 수단이 아닌 길은 물어볼 것이 없다.
         if self.blocked(url, method):
-            log.warning("네이버페이가 아닌 결제를 막았습니다: %s %s", method, url[:120])
+            log.warning("허용하지 않은 결제를 막았습니다: %s %s", method, url[:120])
             await self.send(
                 ws,
                 "Fetch.failRequest",
@@ -189,13 +167,8 @@ class Guard:
             )
             return
 
-        if not self.matches(host):
-            await go()
-            return
-
-        # 결제 도메인 안의 주문내역처럼, 보여 주기만 하는 페이지는 묻지 않는다.
-        if viewable(self.views, url, method):
-            log.info("열람 전용 페이지라 묻지 않고 보냈습니다: %s %s", method, url[:120])
+        # 보기만 하는 요청(GET·HEAD)과 결제와 상관없는 요청은 그대로 보낸다.
+        if not self.asks(url, method):
             await go()
             return
 
@@ -224,11 +197,11 @@ class Guard:
 
         async with websockets.connect(ws_url, max_size=None) as ws:
             log.info(
-                "CDP에 붙었습니다 (port %s), 묻는 호스트 %d개 · 막는 패턴 %d개 · 열람 전용 %d개",
+                "CDP에 붙었습니다 (port %s), 묻는 호스트 %d개 · 묻는 패턴 %d개 · 막는 패턴 %d개",
                 port,
                 len(self.hosts),
+                len(self.ask_patterns),
                 len(self.blocks),
-                len(self.views),
             )
             await self.send(
                 ws,
@@ -257,8 +230,8 @@ class Guard:
 
 async def main():
     logging.basicConfig(level=logging.INFO, format="guard: %(message)s")
-    ask, block, views = load_rules()
-    guard = Guard(ask, block, views)
+    ask, ask_patterns, block = load_rules()
+    guard = Guard(ask, ask_patterns, block)
     while True:
         port = find_cdp_port()
         if port is None:

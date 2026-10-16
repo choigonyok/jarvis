@@ -123,9 +123,9 @@ type file struct {
 //
 // A card raised in conversation stays pending across a restart: nothing is
 // blocked on it, and its decision reaches the assistant through OnDecide
-// whenever it comes. Anything else still pending is settled as rejected on the
-// way in - an intercepted payment is a held network request, and that request
-// died with the process that held it.
+// whenever it comes. So does a payment card - the request it stopped was
+// refused at once, and approving it only opens the host for a retry. Anything
+// else still pending is settled as rejected on the way in.
 func (s *Store) Persist(path string, log *slog.Logger) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -139,7 +139,7 @@ func (s *Store) Persist(path string, log *slog.Logger) error {
 	for _, p := range s.order {
 		// A suggestion waits too: approving it runs its action directly, with
 		// no turn that the restart could have cut short.
-		if p.State == Pending && p.Origin != OriginChat && p.Origin != OriginNotice && p.Origin != OriginSuggest {
+		if p.State == Pending && p.Origin != OriginChat && p.Origin != OriginNotice && p.Origin != OriginSuggest && p.Origin != OriginIntercept {
 			p.State = Rejected
 			p.Note = "에이전트가 재시작되어 만료되었습니다."
 			if p.DecidedAt == "" {
@@ -298,6 +298,18 @@ func (s *Store) OnDecide(fn func(Proposal, Decision)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onDecide = append(s.onDecide, fn)
+}
+
+// FindPendingWhere returns the first pending card match accepts.
+func (s *Store) FindPendingWhere(match func(Proposal) bool) (Proposal, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, p := range s.order {
+		if p.State == Pending && match(*p) {
+			return *p, true
+		}
+	}
+	return Proposal{}, false
 }
 
 // FindPending returns the card already waiting on the same action, if any.

@@ -50,6 +50,11 @@ type Server struct {
 	// and wrong the moment a tunnel gives the agent a public hostname.
 	apiToken     string
 	approvalWait time.Duration
+	// payments are the hosts a person approved a payment on, for a while.
+	payments paymentGrants
+	// followUp starts the turn that tells the assistant how a payment card
+	// was decided.
+	followUp interface{ Enqueue(prompt string) }
 	// uploads holds photos attached in conversation; nil turns them off.
 	uploads   *uploads.Store
 	modules   *module.Registry
@@ -99,11 +104,13 @@ type Deps struct {
 	Consume http.HandlerFunc
 	// BrowserChecks serves the browser login checks (GET) and asks for one (POST).
 	BrowserChecks http.Handler
-	Log           *slog.Logger
+	// FollowUp tells the assistant how a payment card was decided.
+	FollowUp interface{ Enqueue(prompt string) }
+	Log      *slog.Logger
 }
 
 func New(d Deps) *Server {
-	return &Server{
+	s := &Server{
 		thread:          d.Thread,
 		proposals:       d.Proposals,
 		calendar:        d.Calendar,
@@ -125,7 +132,12 @@ func New(d Deps) *Server {
 		mindUsage:       d.MindUsage,
 		consume:         d.Consume,
 		browserChecks:   d.BrowserChecks,
+		followUp:        d.FollowUp,
 	}
+	if d.Proposals != nil {
+		d.Proposals.OnDecide(s.resolvePayment)
+	}
+	return s
 }
 
 func (s *Server) Handler() http.Handler {

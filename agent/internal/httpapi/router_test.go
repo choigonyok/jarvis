@@ -9,7 +9,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/choigonyok/jarvis/agent/internal/core/action"
 	"github.com/choigonyok/jarvis/agent/internal/core/bus"
@@ -67,6 +69,81 @@ func TestInterceptRefusesDuringBackground(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &body)
 	if body["decision"] != string(proposal.Reject) {
 		t.Fatalf("결제 호스트가 통과했습니다: %q", body["decision"])
+	}
+}
+
+type followUps struct {
+	mu      sync.Mutex
+	prompts []string
+}
+
+func (f *followUps) Enqueue(p string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.prompts = append(f.prompts, p)
+}
+
+// wait returns the prompts once there are n (decision hooks run on their own
+// goroutines), or what there is after a second.
+func (f *followUps) wait(n int) []string {
+	for i := 0; i < 100; i++ {
+		f.mu.Lock()
+		got := append([]string(nil), f.prompts...)
+		f.mu.Unlock()
+		if len(got) >= n {
+			return got
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.prompts...)
+}
+
+// 11: a payment request is refused at once with a card raised - nothing waits
+// for the person. The same host asking again is the same card. Approving it
+// opens the host for a retry and tells the assistant to take the step again.
+func TestInterceptRaisesACardAndReturnsAtOnce(t *testing.T) {
+	props := proposal.NewStore(bus.New())
+	fu := &followUps{}
+	s := New(Deps{Proposals: props, Runner: bgRunner{}, InterceptToken: "tok", FollowUp: fu,
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	post := func(body string) map[string]string {
+		req := httptest.NewRequest(http.MethodPost, "/intercept", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer tok")
+		rec := httptest.NewRecorder()
+		s.postIntercept(rec, req)
+		var out map[string]string
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return out
+	}
+	pay := `{"url":"https://pay.naver.com/pcpay/order","method":"POST","host":"pay.naver.com"}`
+	first := post(pay)
+	if first["decision"] != string(proposal.Reject) || first["pending"] == "" {
+		t.Fatalf("카드를 올리고 바로 막아야 합니다: %v", first)
+	}
+	if again := post(pay); again["pending"] != first["pending"] || len(props.List()) != 1 {
+		t.Fatalf("같은 호스트는 카드 하나: %v, cards %d", again, len(props.List()))
+	}
+	if err := props.Decide(first["pending"], proposal.Approve); err != nil {
+		t.Fatal(err)
+	}
+	if got := fu.wait(1); len(got) != 1 || !strings.Contains(got[0], "결제 승인됨") {
+		t.Fatalf("승인되면 다시 진행하라고 알려야 합니다: %v", got)
+	}
+	if retry := post(pay); retry["decision"] != string(proposal.Approve) {
+		t.Fatalf("승인된 호스트의 재시도는 통과해야 합니다: %v", retry)
+	}
+	// Approval covers the site: the same payment crosses its hosts.
+	if same := post(`{"url":"https://npay.naver.com/x","method":"POST","host":"npay.naver.com"}`); same["decision"] != string(proposal.Approve) {
+		t.Fatalf("같은 사이트의 다른 호스트는 통과합니다: %v", same)
+	}
+	other := post(`{"url":"https://checkout.coupang.com/x/payment","method":"POST","host":"checkout.coupang.com"}`)
+	if other["decision"] != string(proposal.Reject) || other["pending"] == "" {
+		t.Fatalf("다른 사이트는 따로 묻습니다: %v", other)
+	}
+	if c := props.List(); c[len(c)-1].Card.Title != "쿠팡에서 쿠페이로 결제합니다" {
+		t.Fatalf("쿠팡 카드: %+v", c[len(c)-1].Card)
 	}
 }
 
@@ -192,6 +269,17 @@ func TestMCPGuard(t *testing.T) {
 		h.ServeHTTP(rec, req)
 		if rec.Code != tc.want {
 			t.Errorf("%s %q: %d, want %d", tc.path, tc.header, rec.Code, tc.want)
+		}
+	}
+}
+
+func TestSiteOf(t *testing.T) {
+	for host, want := range map[string]string{
+		"checkout.coupang.com": "coupang.com", "pay.naver.com": "naver.com", "new-m.pay.naver.com": "naver.com",
+		"shop.co.kr": "shop.co.kr", "m.shop.co.kr": "shop.co.kr", "localhost": "localhost",
+	} {
+		if got := siteOf(host); got != want {
+			t.Errorf("siteOf(%q) = %q, want %q", host, got, want)
 		}
 	}
 }
