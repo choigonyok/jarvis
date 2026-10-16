@@ -255,6 +255,30 @@ func (p *Postgres) RoomMessages(ctx context.Context, room string, after, before 
 	return out, rows.Err()
 }
 
+func (p *Postgres) RoomMessagesFrom(ctx context.Context, room string, after, before time.Time, limit int) ([]model.Message, error) {
+	var upper *time.Time
+	if !before.IsZero() {
+		upper = &before
+	}
+	rows, err := p.db.Query(ctx, `
+		select `+messageCols+` from mind_messages
+		 where room = $1 and sent_at > $2 and ($3::timestamptz is null or sent_at < $3)
+		 order by sent_at, ref limit $4`, room, after, upper, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []model.Message{}
+	for rows.Next() {
+		m, err := p.scanMessage(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
 func (p *Postgres) Rooms(ctx context.Context) ([]Room, error) {
 	rows, err := p.db.Query(ctx, `
 		select m.room, max(m.room_name), max(m.source), max(m.sent_at), coalesce(r.interpreted, 'epoch'),

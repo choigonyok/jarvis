@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -196,61 +195,54 @@ func (s *Chat) Poll(ctx context.Context) error {
 	if cur > 0 {
 		since = time.UnixMicro(cur)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(s.URL, "/")+"/turns?thread=&since="+url.QueryEscape(since.Format(time.RFC3339Nano)), nil)
+	turns, err := s.turns(ctx, since)
 	if err != nil {
-		return err
-	}
-	if s.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+s.Token)
-	}
-	resp, err := s.HTTP.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 300 {
-		return fmt.Errorf("chat-svc: %d", resp.StatusCode)
-	}
-	var out struct {
-		Turns []turn `json:"turns"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return err
 	}
 	last := since
-	for _, t := range out.Turns {
-		at, err := time.Parse(time.RFC3339Nano, t.AtISO)
-		if err != nil {
+	for _, t := range turns {
+		msg, ok := t.message()
+		if msg.SentAt.IsZero() {
 			if s.Out != nil {
-				s.Out.Warn("chat turn time parse failed", "id", t.ID, "at", t.AtISO, "err", err)
+				s.Out.Warn("chat turn time parse failed", "id", t.ID, "at", t.AtISO)
 			}
 			continue
 		}
-		if !at.After(since) {
+		if !msg.SentAt.After(since) {
 			continue
 		}
-		text := strings.TrimSpace(t.Text)
-		if text == "" {
-			text = strings.TrimSpace(strings.Join(t.Paragraphs, "\n"))
-		}
-		if text != "" {
-			msg := model.Message{
-				Ref: "chat:" + t.ID, Source: "chat", Room: "chat:owner", RoomName: "jarvis",
-				IsMine: t.Role == "user", SentAt: at, Text: text,
-			}
-			if !msg.IsMine {
-				msg.Sender = "Jarvis(비서)"
-			}
+		if ok {
 			if err := mind.Observe(ctx, s.Store, s.Log, msg); err != nil {
 				return err
 			}
 		}
-		if at.After(last) {
-			last = at
+		if msg.SentAt.After(last) {
+			last = msg.SentAt
 		}
 	}
 	if last.After(since) || cur == 0 {
 		return s.Store.SetCursor(ctx, "sensor:chat", last.UnixMicro())
 	}
 	return nil
+}
+
+// message is a turn as a message of the jarvis room; ok is false when it has
+// no text. A turn whose time does not parse has a zero SentAt.
+func (t turn) message() (model.Message, bool) {
+	at, err := time.Parse(time.RFC3339Nano, t.AtISO)
+	if err != nil {
+		return model.Message{}, false
+	}
+	text := strings.TrimSpace(t.Text)
+	if text == "" {
+		text = strings.TrimSpace(strings.Join(t.Paragraphs, "\n"))
+	}
+	msg := model.Message{
+		Ref: "chat:" + t.ID, Source: "chat", Room: "chat:owner", RoomName: "jarvis",
+		IsMine: t.Role == "user", SentAt: at, Text: text,
+	}
+	if !msg.IsMine {
+		msg.Sender = "Jarvis(비서)"
+	}
+	return msg, text != ""
 }

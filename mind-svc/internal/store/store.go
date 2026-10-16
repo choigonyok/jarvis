@@ -38,6 +38,9 @@ type Store interface {
 	// Both bounds are exclusive: "after what was already read" must not
 	// depend on how finely a database keeps time.
 	RoomMessages(ctx context.Context, room string, after, before time.Time, limit int) ([]model.Message, error)
+	// RoomMessagesFrom is the same, but at most limit of the oldest: a long
+	// past read from its start.
+	RoomMessagesFrom(ctx context.Context, room string, after, before time.Time, limit int) ([]model.Message, error)
 	Rooms(ctx context.Context) ([]Room, error)
 
 	// How far each conversation has been interpreted.

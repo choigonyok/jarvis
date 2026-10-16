@@ -198,6 +198,22 @@ func (m *Memory) RoomMessages(_ context.Context, room string, after, before time
 	return out, nil
 }
 
+func (m *Memory) RoomMessagesFrom(_ context.Context, room string, after, before time.Time, limit int) ([]model.Message, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []model.Message{}
+	for _, msg := range m.messages {
+		if msg.Room == room && msg.SentAt.After(after) && (before.IsZero() || msg.SentAt.Before(before)) {
+			out = append(out, msg)
+		}
+	}
+	sortMessages(out)
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
 func (m *Memory) Rooms(_ context.Context) ([]Room, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

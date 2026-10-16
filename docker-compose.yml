@@ -545,6 +545,9 @@ services:
       KAKAO_SCRATCH_DIR: /scratch
       # 평문 사본의 보존 기한(일). 0 이면 지우지 않는다.
       RETAIN_DAYS: ${KAKAO_RETAIN_DAYS:-730}
+      # 처음 뜨기 전에 카톡 앱 DB 에 있던 대화를 한 번 들여온다. 읽는 쪽은 모두
+      # rowid 커서 이후만 보므로 새 메시지로 읽히지 않는다.
+      KAKAO_IMPORT_HISTORY: ${KAKAO_IMPORT_HISTORY:-true}
       # Identity. Pass the account id (skips the one-time recovery scan) and the
       # machine UUID, or a pre-derived passphrase in KAKAO_SQLCIPHER_KEY.
       KAKAO_UUID: ${KAKAO_UUID:-}
@@ -854,6 +857,9 @@ services:
       # 처음 뜰 때 지난 대화를 얼마나 읽나. memory-svc 가 5분마다 이미 읽어 왔으니
       # 겹치는 만큼 같은 일정이 카드로 다시 올라오지 않게 짧게.
       MIND_BACKFILL: ${MIND_BACKFILL:-1h}
+      # 감지기가 첫 시작에 건너뛴 지난 대화를 한 번, 사실만 읽는다(일정·카드 없음).
+      # 끝나면 다시 돌지 않는다(mind_cursors history:done).
+      MIND_HISTORY: ${MIND_HISTORY:-false}
       # 스킬·관문의 알림(아침 브리핑, 일정 전 확인)은 notify-svc 로, 질문은
       # mind.card 로 에이전트에. 카드는 이 한 길로만 나간다.
       MIND_QUIET: ${MIND_QUIET:-false}

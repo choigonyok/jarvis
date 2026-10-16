@@ -208,6 +208,32 @@ func TestBacklogIsReadOn(t *testing.T) {
 	}
 }
 
+// However long the backlog, it is read from its oldest message on: none is
+// passed over between one batch and the next.
+func TestLongBacklogSkipsNothing(t *testing.T) {
+	ctx := context.Background()
+	c, st, script := setup(t, `{"changes":[]}`)
+	c.cfg.MaxBatch = 40
+	start := time.Date(2026, 10, 12, 10, 0, 0, 0, seoul)
+	for i := range 250 {
+		say(t, st, fmt.Sprintf("sim:%03d", i), fmt.Sprintf("메시지%03d", i), false, start.Add(time.Duration(i)*time.Second))
+	}
+	for range 7 {
+		if err := c.Read(ctx, "r"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seen := strings.Join(script.Prompts, "\n")
+	for i := range 250 {
+		if !strings.Contains(seen, fmt.Sprintf("메시지%03d", i)) {
+			t.Fatalf("메시지%03d 를 건너뛰었습니다", i)
+		}
+	}
+	if !strings.Contains(script.Prompts[0], "메시지000") {
+		t.Fatal("가장 오래된 것부터 읽어야 합니다")
+	}
+}
+
 // A room that never falls quiet is still read once a batch's worth waits.
 func TestBusyRoomIsReadWithoutQuiet(t *testing.T) {
 	c, _, _ := setup(t, `{"changes":[]}`)

@@ -38,6 +38,7 @@ backfill).
 | `KAKAO_CONTAINER_DIR` | standard | KakaoTalk Application Support dir. |
 | `KAKAO_PLIST_DIR` | standard | KakaoTalk Preferences dir (for id recovery). |
 | `KAKAO_SCRATCH_DIR` | tmp | Where live files are copied before reading. |
+| `KAKAO_IMPORT_HISTORY` | `true` | Once, copy the rows the source held before the store's first run (a fresh store starts at the tail). They sit below every reader's `/messages/after` cursor, so nothing reads them as new. |
 | `SqlcipherBin` (`KAKAO_*`) | `sqlcipher` | Handled internally; CLI must be on PATH. |
 
 ## API

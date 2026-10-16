@@ -26,6 +26,7 @@ type Client interface {
 // Purposes a call is made for, for the cost report.
 const (
 	Interpret = "interpret"
+	History   = "history" // interpreting the past, once
 	Judge     = "judge"
 	Reflect   = "reflect"
 	Draft     = "draft"

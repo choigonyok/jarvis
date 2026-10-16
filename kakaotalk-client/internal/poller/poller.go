@@ -17,6 +17,9 @@ type Poller struct {
 	store    *store.Store
 	interval time.Duration
 	batch    int
+	// ImportHistory copies, once, what the source held before the store's
+	// first run.
+	ImportHistory bool
 
 	mu       sync.RWMutex
 	status   Status
@@ -59,6 +62,9 @@ func (p *Poller) Run(ctx context.Context) {
 	}
 
 	p.repairTruncated()
+	if p.ImportHistory {
+		go p.importBefore(cursor)
+	}
 
 	p.setRunning(true)
 	defer p.setRunning(false)
@@ -106,6 +112,48 @@ func (p *Poller) repairTruncated() {
 		log.Printf("poller: repair: re-read %d attachment-body messages (rowid %d..%d)", n, lo, hi)
 	}
 	_ = p.store.SetFlag(repairFlag)
+}
+
+const historyFlag = "history_imported_v1"
+
+// importBefore copies, once, the history that was already in the source when
+// the store was first made - the rows below the first one stored, which a
+// fresh store skips. Their row ids are below every reader's cursor, so
+// readers that follow /messages/after see nothing new; they are there for
+// the room views and for a deliberate replay.
+func (p *Poller) importBefore(baseline int64) {
+	if done, err := p.store.Flag(historyFlag); err != nil || done {
+		return
+	}
+	lo, _, err := p.store.RowIDRange()
+	if err != nil {
+		log.Printf("poller: history: %v", err)
+		return
+	}
+	if lo == 0 {
+		lo = baseline + 1 // nothing stored yet: below the baseline is history
+	}
+	var cursor int64
+	total := 0
+	for lo > 0 {
+		msgs, err := p.reader.MessagesBetweenRowID(cursor, lo, p.batch)
+		if err != nil {
+			log.Printf("poller: history: %v", err)
+			return
+		}
+		if len(msgs) == 0 {
+			break
+		}
+		n, err := p.store.UpsertMessages(msgs, time.Now().Unix())
+		if err != nil {
+			log.Printf("poller: history: %v", err)
+			return
+		}
+		total += n
+		cursor = msgs[len(msgs)-1].RowID
+	}
+	log.Printf("poller: history: imported %d messages below rowid %d", total, lo)
+	_ = p.store.SetFlag(historyFlag)
 }
 
 // pollOnce drains all rows newer than cursor (in batches) and returns the new

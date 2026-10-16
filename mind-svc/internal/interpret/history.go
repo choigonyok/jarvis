@@ -8,11 +8,23 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/llm"
+	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 )
 
 // ErrUnreadable is an answer that was not the JSON asked for: the same batch
 // fails the same way again, so the caller reads less of it.
 var ErrUnreadable = errors.New("해석 결과를 읽지 못했습니다")
+
+// sameSecondCut is where to cut a batch of at most size from msgs (which
+// hold more): the next read starts after the last time read, so a cut
+// between two messages sent in the same second would skip the second one.
+func sameSecondCut(msgs []model.Message, size int) int {
+	cut := size
+	for cut > 1 && msgs[cut-1].SentAt.Equal(msgs[cut].SentAt) {
+		cut--
+	}
+	return cut
+}
 
 // historyNote turns the reading of the past into one for facts only. What
 // was agreed back then has happened or not: a plan from it would come back as
@@ -41,13 +53,7 @@ func (c *Conversation) ReadHistory(ctx context.Context, room, name string, after
 		return after, 0, 0, err
 	}
 	if len(fresh) > size {
-		// The next read starts after the last time read: a cut between two
-		// messages sent in the same second would skip the second one.
-		cut := size
-		for cut > 1 && fresh[cut-1].SentAt.Equal(fresh[cut].SentAt) {
-			cut--
-		}
-		fresh = fresh[:cut]
+		fresh = fresh[:sameSecondCut(fresh, size)]
 	}
 	last := fresh[len(fresh)-1].SentAt
 

@@ -206,6 +206,8 @@ func main() {
 	}
 	if mode == "stack" {
 		exclude := cfg.Noise
+		history := &sensor.History{Store: st, Reader: m.Conv, Noise: exclude, Out: log,
+			Batch: int(number("MIND_HISTORY_BATCH", 40)), Wait: 30 * time.Minute}
 		for name, url := range map[string]string{"kakao": os.Getenv("KAKAOTALK_URL"), "imessage": os.Getenv("IMESSAGE_URL")} {
 			if url == "" {
 				continue
@@ -213,6 +215,7 @@ func main() {
 			s := &sensor.Messenger{Name: name, URL: url, Token: token, Store: st, Log: logOut, Exclude: exclude,
 				Backfill: duration("MIND_BACKFILL", 6*time.Hour), Every: duration("MIND_POLL", 5*time.Second), Out: log,
 				Payments: regexp.MustCompile(getenv("MIND_PAYMENT_ROOMS", `^(카카오페이|토스)$`)), Occur: m}
+			history.Messengers = append(history.Messengers, s)
 			go s.Run(ctx)
 		}
 		// Structured sources, read by rule into occurrences: spending, workouts,
@@ -231,7 +234,23 @@ func main() {
 		if url := os.Getenv("CHAT_URL"); url != "" {
 			s := &sensor.Chat{URL: url, Token: token, Store: st, Log: logOut,
 				Backfill: duration("MIND_BACKFILL", 6*time.Hour), Every: duration("MIND_CHAT_POLL", 20*time.Second), Out: log}
+			history.Chat = s
 			go s.Run(ctx)
+		}
+		// The past the sensors skipped on their first start, read once for
+		// facts. After a minute, so a first start's sensors have drawn the
+		// line between past and present.
+		if os.Getenv("MIND_HISTORY") == "true" && client.Ready() {
+			go func() {
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(time.Minute):
+				}
+				if err := history.Run(ctx); err != nil && ctx.Err() == nil {
+					log.Warn("지난 대화를 읽지 못했습니다", "err", err)
+				}
+			}()
 		}
 	}
 	m.Run(ctx, time.Second)

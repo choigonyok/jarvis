@@ -63,6 +63,7 @@ func main() {
 	log.Printf("kakaotalk-client: source unlocked (user_id=%d), polling every %s", reader.UserID(), interval)
 
 	p := poller.New(reader, st, interval, batch)
+	p.ImportHistory = os.Getenv("KAKAO_IMPORT_HISTORY") != "false"
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

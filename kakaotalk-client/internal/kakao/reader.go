@@ -453,6 +453,26 @@ func (r *Reader) MessagesSinceRowID(cursor int64, limit int) ([]Message, error) 
 	return out, nil
 }
 
+// MessagesBetweenRowID returns text messages with from < ROWID < to,
+// ascending, capped at limit: the history before the poller's first run.
+func (r *Reader) MessagesBetweenRowID(from, to int64, limit int) ([]Message, error) {
+	q := fmt.Sprintf(`%s WHERE m.ROWID > %d AND m.ROWID < %d AND m.message IS NOT NULL AND m.message <> ''
+		ORDER BY m.ROWID ASC LIMIT %d`, messageSelect, from, to, limit)
+	raw, err := r.runSQL(q)
+	if err != nil {
+		return nil, err
+	}
+	var rows []messageRow
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		return nil, fmt.Errorf("parse messages: %w", err)
+	}
+	out := make([]Message, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, r.toMessage(row))
+	}
+	return out, nil
+}
+
 // MessagesWithAttachmentBody returns text rows in [from, to] whose attachment
 // carries a P.ME or C.TI.TD body, ascending. Used to re-read rows stored before fullText
 // existed so their truncated previews can be replaced.

@@ -204,14 +204,6 @@ func (c *Conversation) Read(ctx context.Context, room string) error {
 			through, name = r.Interpreted, r.Name
 		}
 	}
-	fresh, err := c.st.RoomMessages(ctx, room, through, time.Time{}, 200)
-	if err != nil {
-		return err
-	}
-	if len(fresh) == 0 {
-		c.done(room)
-		return nil
-	}
 	// A long backlog is read in batches, oldest first; the rest is read next.
 	size := c.cfg.MaxBatch
 	c.mu.Lock()
@@ -219,9 +211,17 @@ func (c *Conversation) Read(ctx context.Context, room string) error {
 		size = n
 	}
 	c.mu.Unlock()
+	fresh, err := c.st.RoomMessagesFrom(ctx, room, through, time.Time{}, size+1)
+	if err != nil {
+		return err
+	}
+	if len(fresh) == 0 {
+		c.done(room)
+		return nil
+	}
 	more := len(fresh) > size
 	if more {
-		fresh = fresh[:size]
+		fresh = fresh[:sameSecondCut(fresh, size)]
 	}
 	last := fresh[len(fresh)-1].SentAt
 

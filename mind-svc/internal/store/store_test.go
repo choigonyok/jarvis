@@ -75,6 +75,12 @@ func contract(t *testing.T, st Store) {
 	if len(ms) != 1 || ms[0].Text != "그러자" {
 		t.Fatalf("새 메시지: %+v", ms)
 	}
+	if ms, _ := st.RoomMessagesFrom(ctx, "r", time.Time{}, time.Time{}, 1); len(ms) != 1 || ms[0].Ref != "sim:1" {
+		t.Fatalf("가장 오래된 것부터: %+v", ms)
+	}
+	if ms, _ := st.RoomMessagesFrom(ctx, "r", time.Time{}, at.Add(time.Minute), 10); len(ms) != 1 || ms[0].Ref != "sim:1" {
+		t.Fatalf("before 는 배타적: %+v", ms)
+	}
 
 	// Timers.
 	_ = st.SetTimer(ctx, model.Timer{Skill: "schedule", EntityID: "plan_1", Name: "prep", FireAt: at.Add(time.Hour)})
