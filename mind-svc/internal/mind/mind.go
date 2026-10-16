@@ -177,6 +177,8 @@ func (m *Mind) Handle(ctx context.Context, o obs.Observation) error {
 		}
 	case obs.ActionExecuted, obs.ActionUndone:
 		return m.Actions.Handle(ctx, o)
+	case AssetsBand:
+		return m.portfolioBand(ctx, o)
 	case obs.OccurrenceObserved:
 		var ref obs.OccurrenceRef
 		if err := json.Unmarshal(o.Data, &ref); err != nil {

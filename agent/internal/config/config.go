@@ -146,14 +146,12 @@ type Config struct {
 	// what the agent reports reaches events-svc even if it is restarting.
 	DatabaseURL string
 
-	// EventsURL is events-svc: the assistant subscribes there for events
-	// worth a suggestion (internal/suggest) and reports its suggestions back.
-	// SelfURL is where events-svc reaches this agent; SuggestionsPath keeps
-	// what was suggested and how it went.
-	EventsURL       string
-	SelfURL         string
-	SuggestionsPath string
-	Debug           bool
+	// EventsURL is events-svc: the assistant subscribes there for mind's
+	// cards (internal/suggest) and reports decisions back. SelfURL is where
+	// events-svc reaches this agent.
+	EventsURL string
+	SelfURL   string
+	Debug     bool
 }
 
 func Load() (Config, error) {
@@ -210,7 +208,6 @@ func Load() (Config, error) {
 		DatabaseURL:     os.Getenv("JARVIS_DATABASE_URL"),
 		EventsURL:       os.Getenv("JARVIS_EVENTS_URL"),
 		SelfURL:         env("JARVIS_SELF_URL", "http://agent:8080"),
-		SuggestionsPath: env("JARVIS_SUGGESTIONS_PATH", "./data/suggestions.json"),
 		Debug:           envBool("JARVIS_DEBUG", false),
 	}
 

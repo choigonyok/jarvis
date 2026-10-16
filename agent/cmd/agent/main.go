@@ -213,25 +213,19 @@ func main() {
 	// A reading older than an hour is refreshed with the smallest request.
 	go runner.WatchUsage(enrichCtx, time.Hour)
 
-	// Speaking first: events-svc delivers what could be worth a suggestion,
-	// and the assistant judges it in the background (internal/suggest). The
-	// guest's agent does not suggest - it has none of the operator's data.
+	// Speaking first: mind-svc's gate decides what is worth raising (its
+	// ledger, budget and trust), and its cards become approval cards here
+	// (internal/suggest). The guest's agent does not suggest - it has none of
+	// the operator's data.
 	var suggester *suggest.Engine
 	if cfg.EventsURL != "" && !cfg.Guest {
-		ledger, err := suggest.OpenLedger(cfg.SuggestionsPath)
-		if err != nil {
-			log.Error("제안 기록을 읽지 못했습니다", "err", err)
-			os.Exit(1)
-		}
-		suggester = suggest.New(ledger, proposals, modules, runner, suggest.Config{
-			MCPBase: cfg.PublicMCPURL, EventsURL: cfg.EventsURL, Token: cfg.APIToken,
+		suggester = suggest.New(proposals, suggest.Config{
+			EventsURL: cfg.EventsURL, Token: cfg.APIToken,
 			Out:  notify.New(cfg.EventsURL, cfg.DatabaseURL, cfg.APIToken, log),
 			Say:  func(lead, id string) { transcript.Raise([]string{lead}, id) },
 			Mind: mindClient,
 		}, log)
-		mcpMounts["/mcp/"+suggest.ServerName] = suggester.Handler()
 		proposals.OnDecide(suggester.OnDecide)
-		go suggester.Run(enrichCtx)
 		go suggester.Subscribe(enrichCtx, strings.TrimRight(cfg.SelfURL, "/")+"/consume")
 	}
 	var consume http.HandlerFunc

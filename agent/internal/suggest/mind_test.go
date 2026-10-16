@@ -1,15 +1,16 @@
 package suggest
 
 import (
-	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/choigonyok/jarvis/agent/internal/core/bus"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
 	"github.com/choigonyok/jarvis/agent/internal/module/mind"
 )
@@ -42,6 +43,12 @@ func (f *fakeMind) server(t *testing.T) *mind.Client {
 	return &mind.Client{URL: srv.URL, Token: "tok"}
 }
 
+func setup(t *testing.T) (*Engine, *proposal.Store) {
+	t.Helper()
+	props := proposal.NewStore(bus.New())
+	return New(props, Config{}, slog.New(slog.NewTextHandler(io.Discard, nil))), props
+}
+
 func deliver(e *Engine, typ string, data any) {
 	raw, _ := json.Marshal(map[string]any{"type": typ, "data": data})
 	req := httptest.NewRequest(http.MethodPost, "/consume", strings.NewReader(string(raw)))
@@ -52,7 +59,7 @@ func deliver(e *Engine, typ string, data any) {
 // however often it is delivered, closed when mind says it was answered, and
 // a rejection goes back to mind.
 func TestMindCards(t *testing.T) {
-	e, bg, props, _ := setup(t)
+	e, props := setup(t)
 	fm := &fakeMind{}
 	e.cfg.Mind = fm.server(t)
 	card := map[string]any{"intentId": "int_a", "mode": "ask", "skill": "schedule", "kind": "calendar.create",
@@ -61,8 +68,8 @@ func TestMindCards(t *testing.T) {
 	deliver(e, mind.CardRaised, card)
 	deliver(e, mind.CardRaised, card)
 	list := props.List()
-	if len(list) != 1 || list[0].Action.Kind != mind.Approve || len(bg.tasks) != 0 {
-		t.Fatalf("카드 한 장, 판단 턴 없이: %+v / %d", list, len(bg.tasks))
+	if len(list) != 1 || list[0].Action.Kind != mind.Approve {
+		t.Fatalf("카드 한 장: %+v", list)
 	}
 	if !strings.Contains(list[0].Card.Body, "“그러자”") || !strings.Contains(list[0].Card.Body, "내 일정에 추가") {
 		t.Fatalf("근거와 미리보기가 카드에: %q", list[0].Card.Body)
@@ -78,23 +85,5 @@ func TestMindCards(t *testing.T) {
 	deliver(e, mind.CardClosed, map[string]string{"intentId": "int_b", "status": "superseded"})
 	if p, _ := e.findCard("int_b"); p.State != proposal.Rejected {
 		t.Fatalf("mind 에서 닫힌 카드는 닫혀야 합니다: %+v", p)
-	}
-}
-
-// With mind, what the judging turn proposes goes to mind's gate, not
-// straight to a card.
-func TestProposeGoesToMind(t *testing.T) {
-	e, bg, props, _ := setup(t)
-	fm := &fakeMind{reply: map[string]any{"id": "int_1", "decision": "drop", "why": "최근에 거절하신 주제"}}
-	e.cfg.Mind = fm.server(t)
-	bg.input = &ProposeInput{Title: "리밸런싱", Body: "금 3%p 부족", Why: "비중 이탈", Action: "none", Confidence: 0.8}
-	if err := e.judge(context.Background(), &job{ev: Event{Type: "assets.band"}, topic: "rebalance"}); err != nil || bg.err != nil {
-		t.Fatalf("%v %v", err, bg.err)
-	}
-	if len(props.List()) != 0 || !strings.Contains(bg.reply, "올리지 않았습니다") {
-		t.Fatalf("mind 가 버린 제안은 카드가 아닙니다: %v %q", props.List(), bg.reply)
-	}
-	if fm.body[0]["topic"] != "rebalance" || fm.body[0]["kind"] != "note" || fm.body[0]["skill"] != "suggest" {
-		t.Fatalf("mind 에 넘긴 의도: %v", fm.body[0])
 	}
 }

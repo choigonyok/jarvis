@@ -164,10 +164,33 @@ func TestExtendedDeadlineUsesTheNewDate(t *testing.T) {
 	if err := m.deadlines(ctx); err != nil {
 		t.Fatal(err)
 	}
-	ins, _ := st.Intents(ctx, 0)
+	ins, _ := st.Intents(ctx, 1000)
 	for _, in := range ins {
 		if strings.Contains(in.Title, "전세") {
 			t.Fatalf("연장된 계약을 옛 만기로 알렸습니다: %s", in.Title)
 		}
+	}
+}
+
+// A portfolio out of band is one rebalance question, kept quiet after that.
+func TestPortfolioBandIsOneQuestion(t *testing.T) {
+	seoul, _ := time.LoadLocation("Asia/Seoul")
+	m, st, _ := testMind(t, time.Date(2026, 10, 16, 9, 0, 0, 0, seoul))
+	ctx := context.Background()
+	for _, title := range []string{"코인 비중이 범위를 벗어났어요", "금 비중이 범위를 벗어났어요"} {
+		o := obs.Observation{Source: "assets", Type: AssetsBand, Notify: []byte(`{"title":"` + title + `","body":"지금 30% · 목표 20%"}`)}
+		if err := m.Handle(ctx, o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ins, _ := st.Intents(ctx, 1000)
+	n := 0
+	for _, in := range ins {
+		if in.Topic == "rebalance" && in.Status != model.Superseded && in.Status != model.Dropped {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("리밸런싱 질문은 하나여야 합니다: %d (%+v)", n, ins)
 	}
 }

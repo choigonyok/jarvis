@@ -2,6 +2,7 @@ package mind
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"regexp"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
 	"github.com/choigonyok/jarvis/mind-svc/internal/prefs"
 )
 
@@ -548,4 +550,29 @@ func (m *Mind) Meals(ctx context.Context, days int) ([]Meal, error) {
 		out = append(out, meal)
 	}
 	return out, nil
+}
+
+// --- portfolio out of band ------------------------------------------------------
+
+// AssetsBand is assets-svc's event: a bucket of the portfolio has left the
+// band around its target.
+const AssetsBand = "assets.band"
+
+// portfolioBand raises one rebalance question for the whole portfolio. The
+// gate's ledger keeps it quiet after it was raised or turned down, as it does
+// any topic; the plan itself is on the assets page (assets-svc /plan).
+func (m *Mind) portfolioBand(ctx context.Context, o obs.Observation) error {
+	var n struct {
+		Title string `json:"title"`
+		Body  string `json:"body"`
+	}
+	_ = json.Unmarshal(o.Notify, &n)
+	title := firstNonEmpty(n.Title, "자산 비중이 목표 범위를 벗어났어요")
+	_, err := m.Gate.Submit(ctx, model.Intent{
+		Skill: "assets", Kind: "info", Topic: "rebalance",
+		Title:  title + " - 리밸런싱을 검토해 보세요",
+		Body:   strings.TrimSpace(n.Body + "\n자산 탭의 목표 비중에서 매매 계획을 볼 수 있어요."),
+		Reason: "목표 비중의 허용 범위를 벗어남", Confidence: 0.8,
+	})
+	return err
 }

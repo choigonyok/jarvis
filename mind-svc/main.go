@@ -196,7 +196,7 @@ func main() {
 		go memLog.Run(ctx, m.Handle)
 	}
 	if events != nil {
-		go events.Subscribe(ctx, "mind", getenv("MIND_SELF_URL", "http://mind:8102/consume"), []string{obs.MessageObserved, "action.*"}, log)
+		go events.Subscribe(ctx, "mind", getenv("MIND_SELF_URL", "http://mind:8102/consume"), []string{obs.MessageObserved, "action.*", mind.AssetsBand}, log)
 	}
 	if mode == "stack" {
 		exclude := cfg.Noise
