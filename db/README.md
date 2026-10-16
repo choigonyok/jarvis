@@ -1,23 +1,25 @@
 # db
 
-이벤트 로그, 파생 테이블, 회수용 벡터가 전부 한 Postgres 안에 있습니다.
-pgvector 는 확장이라 별도 컨테이너가 아닙니다.
+서비스들의 표와 이벤트 로그가 한 Postgres 안에 있습니다. 표는 서비스별로 나뉘어 있고
+(접두사 `mind_` · `job_` · `context_` · `memory_` · `workout_` …), 각 서비스는 자기 역할로
+자기 표만 씁니다(아래 "서비스별 역할").
 
 ```
-raw_events (추가 전용)  ← 수집기가 본 것. 진실의 원천
-      │
-      ├→ commitments · workout_* · threads · routine_facts   ← 정확한 사실
-      │
-      └→ memory_chunks                                        ← 서술·벡터
+event_outbox → events (events-svc)      ← 서비스가 낸 일. 구독자에게 배달
+raw_events (추가 전용)                  ← 카드 알림 원문 (spending-svc)
+commitments · workout_* · card_* · …     ← 각 서비스의 정확한 사실
+mind_*                                   ← mind 의 세계 모델·관문·노트
 ```
 
-## 왜 하나의 데이터베이스인가
+**원문 보관(`raw_events`)은 가계부만 씁니다.** 처음에는 모든 수집기가 본 것을 여기에
+추가 전용으로 쌓는 것이 관례였지만, 실제로는 원문이 각자 자리에 있습니다 - 카톡·iMessage
+원문은 수집기의 SQLite(보존 730일), 대화 원문은 `mind_messages`(봉인, 보존 365일), 위치는
+`context_raw`(30일). `raw_events` 는 카드사 알림 원문을, 파싱에 실패한 형식까지 남겨 나중에
+다시 파싱하는 데 씁니다. 새 수집기가 원문을 남겨야 하면 자기 저장소에 두고 보존 기한을 정하세요.
 
-회수 조건이 대개 섞여 있습니다 — "이 사람 관련 + 최근 30일 + 의미 유사".
-벡터를 Qdrant 같은 별도 저장소에 두면 사람 id 와 날짜를 양쪽에 중복해서 들고
-동기화해야 하고, 조각이 수만 건인 규모에서 그 비용은 검색 성능 이득보다
-큽니다. [013_queries.sql](migrations/013_queries.sql) 의 `recall()` 이 그
-세 조건을 한 번의 조회로 처리하는 모습입니다.
+사람·사실의 회수는 memory-svc(FalkorDB 그래프)가 맡습니다. 여기에 있던 회수용 벡터
+표(`memory_chunks`)와 사람·사실 표는 049 에서 지웠습니다. 이미지가 pgvector 인 것은 새로
+설치할 때 초기 마이그레이션(001·009·013)이 vector 확장을 만들기 때문뿐입니다.
 
 ## 실행
 
@@ -77,11 +79,6 @@ alter table raw_events enable trigger raw_events_no_truncate;
 한 제품입니다. 겹침은 막을 일이 아니라 알아차려서 제안할 일이므로
 `conflicts_at()` / `conflicts_for()` 이 있습니다.
 
-**임베딩 차원은 1536 입니다** (`text-embedding-3-small`). 모델을 바꾸면
-차원이 바뀌므로, 한 테이블에 두 차원을 섞지 말고 새 마이그레이션으로
-`memory_chunks` 를 바꿔 끼운 뒤 `raw_events` 에서 조각을 다시 만드세요.
-`model` 컬럼은 섞였을 때 알아차리기 위한 것입니다.
-
 ## 룰 게이트가 부르는 것들
 
 전부 [013_queries.sql](migrations/013_queries.sql) 에 있습니다. 정의를 한 곳에
@@ -96,17 +93,10 @@ alter table raw_events enable trigger raw_events_no_truncate;
 | `workout_gap_days()` | 마지막 운동에서 며칠 지났나 |
 | `workout_routine_status` (뷰) | 어느 루틴이 가장 밀렸나 |
 | `volume_by_group(일수)` | 이번 주에 하체 했나 |
-| `fact_as_of(주제, 시각)` | 그때 루틴이 뭐였나 |
-| `assert_fact(주제, 값, 시작)` | 새 사실 주장 (이전 행을 닫음) |
-| `recall(벡터, 사람, 일수, 종류)` | 관련된 과거 맥락 |
-| `open_threads(사람)` | 아직 결론이 없는 대화 |
-| `suppressed(열쇠, 기간)` | 이 제안이 쿨다운 안인가 |
-| `proposals_today()` | 오늘 몇 건이나 말을 걸었나 |
 
-`assert_fact()` 는 같은 값을 다시 주장하면 아무것도 하지 않습니다. 수집기가
-같은 상태를 매일 보고하는 것은 정상이고, 그때마다 사실이 끊겼다 이어지면
-"언제 바뀌었나"의 답이 매일 어제가 됩니다. 반대로 과거 시각으로 주장하면
-거부합니다 — 조용히 버리면 왜 반영이 안 되는지 알아낼 방법이 없습니다.
+사실·회수·제안 쿨다운 함수(`fact_as_of` · `assert_fact` · `recall` · `open_threads` ·
+`suppressed` · `proposals_today`)는 그 표들과 함께 049 에서 지웠습니다. 제안의 쿨다운과
+하루 몫은 mind 의 관문이 맡습니다.
 
 ## 검증한 것
 
@@ -116,16 +106,11 @@ alter table raw_events enable trigger raw_events_no_truncate;
   종일 일정은 `span` 이 NULL (하루를 다 막으면 그날 모든 약속이 충돌로 잡힘)
 - `conflicts_at` 이 겹치는 것만 찾고, 여유 30분을 주면 붙어 있는 일정도 잡음.
   `conflicts_for` 에서 자기 자신은 빠짐
-- `assert_fact` 가 이전 행을 닫고, 같은 값 재주장은 같은 id 를 돌려주고,
-  역순 주장은 거부. `fact_as_of` 가 과거 시점의 값을 돌려줌
-- `recall` 이 사람 조건으로 좁혀짐 (조건 없이 2건 → 사람 걸고 1건)
-- `suppressed` 가 열쇠별·기간별로 다르게 답하고, `proposals_today` 가
-  `origin='chat'` 을 세지 않음
 - UPDATE · 중복 `ext_id` · TRUNCATE 가 모두 거부됨
 - 재실행 시 "변경 없음"
 
-아직 안 한 것: 기존 `calendar.json` · `workout.json` · `thread.json` 을
-이 테이블로 옮기는 마이그레이션. 각 기능을 서비스로 떼어낼 때 함께 합니다.
+예전 JSON 파일(`calendar.json` · `workout.json` · `thread.json`)은 각 서비스로 옮겼고,
+옮기는 데 쓴 일회성 import 서비스는 지웠습니다.
 
 ## 서비스별 역할 (050)
 

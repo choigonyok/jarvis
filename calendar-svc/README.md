@@ -98,9 +98,7 @@ INSERT 를 거부하면 캘린더 UI 가 고장납니다.
 
 ## 기존 일정 옮기기
 
-```bash
-docker compose --profile import run --rm calendar-import
-```
+(옮기기는 끝났고, 이 일회성 `calendar-import` 서비스와 스크립트는 지웠습니다. 아래는 그때의 기록입니다.)
 
 에이전트 볼륨의 `/data/calendar.json` 을 하나씩 PUT 합니다. id 를 그대로 보내므로
 여러 번 돌려도 같은 결과입니다. **원본은 지우지 않습니다.**

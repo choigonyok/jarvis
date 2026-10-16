@@ -4,38 +4,45 @@
 **Claude Code 구독으로 과금됩니다** (API 크레딧 아님).
 
 ```
-web (Next.js)    사람이 읽고 결재하는 화면. 자격증명은 서버측에만, 전부 프록시
-      │
-      ├─ /api/agent/*      → agent
-      ├─ /api/workout      → workout-svc
-      ├─ /api/portfolio    → assets-svc
-      ├─ /api/spending/*   → spending-svc
-      ├─ /api/kakaotalk/*  → kakaotalk-client
-      └─ /api/status/*     → status-svc
+web (Next.js, Cloudflare Workers)   jarvis.choigonyok.com, Cloudflare Access 뒤.
+      │  사람이 읽고 결재하는 화면. 자격증명은 서버측에만, 전부 프록시(src/lib/proxy.ts)
+      │  서비스 바인딩(GATEWAY) + JARVIS_EDGE_TOKEN
+      ▼
+edge (gateway Worker)  jarvis-be.choigonyok.com. 경로 허용 목록, 토큰을 서비스용(JARVIS_API_TOKEN)으로
+      │  바꿔 붙임. 공개 주소는 폰(OwnTracks·단축어)과 화면 탭의 VNC 소켓만 직접 씀
+      │  Workers VPC → cloudflared(tunnel)
+      ▼
+맥미니 docker compose (networks: default · data · browser)
 
-agent (Go)       결정하는 곳
+agent (Go) :8080      결정하는 곳 - 대화, 권한 게이트, 결재 카드
       ├─ core/proposal        ← 제안과 결재. 이 시스템의 심장
       ├─ MCP /mcp             ← 권한 질의를 제안으로 바꾸는 어댑터
-      ├─ MCP /mcp/calendar    ← 모듈이 모델에게 내주는 도구
+      ├─ MCP /mcp/<모듈>      ← 모듈이 모델에게 내주는 도구
       ├─ SSE /events          ← 라이브 스트림과 진행 상태 (영속되지 않음)
+      ├─ jobs 스케줄러·주문 조회·브라우저 로그인 확인 ← 대화가 없을 때만 브라우저를 씀
       └─ exec: claude -p ...  ← 구독으로 과금, 실제 실행
+agent-guest :8080     손님 계정의 agent (캘린더만, DB 에 닿지 못함)
 
-기능 서비스      각자 디렉터리 하나, 이미지 하나, 상태는 Postgres 에
+mind-svc :8102        인지 루프. 감지 → 해석 → 세계 모델 → 노트·예측·성찰 → 스킬 →
+                      하나뿐인 관문(원장·예산·신뢰도). 카드는 mind.card → agent 결재 카드
+
+기능 서비스           각자 디렉터리 하나, 이미지 하나, 상태는 Postgres 에(서비스별 역할 svc_*)
       ├─ chat-svc      :8094  대화 기록
-      ├─ calendar-svc  :8093  일정 + 충돌 검사
-      ├─ workout-svc   :8091  운동 기록
-      ├─ assets-svc    :8092  업비트·KIS (주문 가능한 키가 여기에만)
+      ├─ calendar-svc  :8093  일정 (uniple 공유 캘린더, postgres 백엔드는 롤백용)
+      ├─ workout-svc   :8091  운동 기록 (리비전·세션 단위 쓰기, 부위 판정)
+      ├─ assets-svc    :8092  업비트·KIS·금 (주문 가능한 키가 여기에만), 목표 비중·매매 계획
       ├─ spending-svc  :8095  가계부 (카드사 카톡 알림 → 분류·월 합계·예산)
-      ├─ kakaotalk-client :8090  카톡 수집
-      ├─ context-svc   :8103  위치·현재 상태 (OwnTracks·단축어 → 영역 체류·실제 이동 시간, 원본 30일)
-      └─ status-svc    :8096  상태 탭 (기능별 판정, 읽기만)
+      ├─ jobs-svc      :8098  맡긴 작업의 기록 (실행은 agent 스케줄러)
+      ├─ context-svc   :8103  위치·현재 상태 (OwnTracks·단축어·맥 수집기)
+      ├─ events-svc    :8101  이벤트 로그 + outbox + 구독 배달
+      ├─ notify-svc    :8097  알림함·웹 푸시·저녁 요약, 알림 분류 목록
+      ├─ status-svc    :8096  상태 탭 (기능별 판정, 읽기만)
+      └─ memory-svc    :8100  장기 기억 (Graphiti + FalkorDB)
+수집기                kakaotalk-client :8090 · imessage-client :8099 (평문 사본, 보존 730일)
+browser :8931         에이전트의 Chromium (browser 네트워크에만, 결제 가드 guard.py)
 
-mind-svc :8102   인지 루프. 감지 → 해석 → 세계 모델(일정·고리·발생·링크·지금 상황) →
-                 노트·예측·밤 성찰 → 스킬 → 하나뿐인 관문(카드는 mind.card → agent 결재 카드)
-                 구조화 소스(일정·지출·자산·운동·작업·사진)를 읽는 곳도 여기 하나: 같은 읽기를
-                 memory-svc(Graphiti)에 기록으로 넘긴다
-
-postgres + pgvector  이벤트 로그, 파생 테이블, 회수용 벡터
+postgres (data 네트워크)  서비스들의 표와 이벤트 로그 · falkordb (data) 기억 그래프
+gocommon/             Go 공통 코드 (이벤트 outbox, 수집기 인증·보존)
 ```
 
 각 서비스의 README 에 경계를 그은 이유와 검증한 것이 있습니다:
@@ -52,8 +59,11 @@ postgres + pgvector  이벤트 로그, 파생 테이블, 회수용 벡터
 반쪽이고, 결정이 날 때까지 반환하지 않는 핸들러와 한 몸입니다.
 
 제안(proposal)은 저장되는 객체이지 대화의 속성이 아닙니다. 그래서 **대화 없이도
-제안이 열릴 수 있습니다** — 나중에 카톡 감지기가 "캠핑 일정 추가할까요?"를 띄우는
-자리가 여기입니다. 지금은 권한 게이트가 유일한 생산자입니다.
+제안이 열립니다** — 생산자는 둘입니다: 대화 중의 권한 게이트(아래), 그리고 mind 의
+관문이 보낸 카드(`mind.card`, 카톡에서 확정된 약속을 캘린더에 넣을지, 비중이 벗어난
+포트폴리오를 리밸런싱할지 같은 것). 먼저 말을 꺼낼지의 판단과 그 원장(최근에 물었나,
+거절했나, 오늘 몫을 다 썼나)은 mind 에만 있고, agent 는 카드를 띄우고 거절을 mind 에
+알릴 뿐입니다.
 
 ## 승인 게이트가 걸리는 자리
 
@@ -136,37 +146,32 @@ CLI에 넘기는 `MCP_TIMEOUT`/`MCP_TOOL_TIMEOUT`은 **밀리초**입니다(CLI 
 
 ## 실행
 
+백엔드는 맥미니의 docker compose, 웹과 게이트웨이는 Cloudflare Workers 입니다.
+배포 절차와 비밀값 위치는 [DEPLOY.md](DEPLOY.md)에 있습니다.
+
 ```bash
 npx @anthropic-ai/claude-code setup-token    # 1년짜리 토큰 발급
 cp .env.example .env                          # CLAUDE_CODE_OAUTH_TOKEN 채우기
 openssl rand -hex 24                          # JARVIS_POSTGRES_PASSWORD 에 넣기
-docker compose up --build
-# http://localhost:3000
+scripts/db-roles                              # 서비스별 DB 역할 비밀번호(.env 에 생성)
+scripts/mini up                               # 맥미니로 보내고 docker compose up -d --build
+(cd web && npm run cf:build && npm run cf:deploy)
+(cd edge && npx wrangler deploy)
 ```
 
 `JARVIS_POSTGRES_PASSWORD` 가 없으면 compose 가 그 자리에서 멈춥니다. 기본값을
 두지 않은 것은 의도입니다 — 리포지터리에 적힌 비밀번호는 비밀번호가 아닙니다.
+서비스별 역할 비밀번호(`JARVIS_DB_PASSWORD_*`)도 마찬가지입니다.
 
 스키마는 `db-migrate` 가 부팅 때 적용하고, 나머지 서비스는 그것이 성공으로 끝난
-뒤에 뜹니다. 몇 번 돌려도 안전합니다.
-
-기존 JSON 파일에 있던 데이터를 옮기려면(한 번만):
-
-```bash
-docker compose --profile import run --rm calendar-import   # calendar.json
-docker compose --profile import run --rm workout-import    # workout.json
-docker compose --profile import run --rm chat-import       # thread.json
-```
-
-원본은 지우지 않습니다. 화면에서 확인한 뒤에 지우세요. `chat-import` 는 턴에
-자연키가 없어 **여러 번 돌리면 중복되므로**, 이미 턴이 있으면 멈춥니다.
+뒤에 뜹니다. 몇 번 돌려도 안전합니다. 백업은 `scripts/backup`(매일 04:30, 복원 시험 포함).
 
 `ANTHROPIC_API_KEY`가 환경에 있으면 **에이전트가 부팅을 거부합니다.** 조용히 API
 종량 과금으로 새는 것을 막기 위한 의도적인 동작입니다.
 
 ## 개발 중 따로 띄우기
 
-에이전트는 이제 혼자 뜨지 못합니다. 부팅할 때 `calendar-svc` 와 `chat-svc` 의
+에이전트는 혼자 뜨지 못합니다. 부팅할 때 `calendar-svc` 와 `chat-svc` 의
 `/health` 를 확인하고, 없으면 포기합니다 — 빈 대화로 시작해서 첫 턴에 기록을
 덮어쓰는 것보다 뜨지 않는 편이 낫습니다. 그래서 의존 서비스는 도커로 띄운 채
 에이전트만 로컬에서 돌리는 것이 가장 편합니다.
@@ -182,16 +187,16 @@ cd agent && CLAUDE_CODE_OAUTH_TOKEN=... JARVIS_WORKSPACE=../workspace \
   JARVIS_API_TOKEN=<.env 의 값> \
   JARVIS_DEBUG=true go run ./cmd/agent
 
-# 터미널 2 — 웹
+# 터미널 2 — 웹 (게이트웨이 없이 서비스에 바로 붙으므로, 게이트웨이 토큰 자리에 서비스 토큰을 넣는다)
 cd web && AGENT_URL=http://localhost:8080 \
   WORKOUT_URL=http://localhost:8091 \
   ASSETS_URL=http://localhost:8092 \
-  JARVIS_API_TOKEN=<.env 의 값> npm run dev
+  JARVIS_EDGE_TOKEN=<.env 의 JARVIS_API_TOKEN 값> npm run dev
 ```
 
-`JARVIS_API_TOKEN` 을 빼먹으면 서비스들이 401을 돌려줍니다. 서비스 하나만
-고칠 때는 그것만 로컬에서 돌리고 나머지는 도커에 두면 됩니다 — 각 서비스의
-README 에 단독 실행 명령이 있습니다.
+토큰을 빼먹으면 서비스들이 401을 돌려줍니다. 서비스 하나만 고칠 때는 그것만
+로컬에서 돌리고 나머지는 도커에 두면 됩니다 — 각 서비스의 README 에 단독 실행
+명령이 있습니다.
 
 로컬에 `claude` CLI가 없으면 `JARVIS_CLAUDE_BIN`으로 경로를 지정하세요.
 
@@ -204,11 +209,16 @@ README 에 단독 실행 명령이 있습니다.
 | POST | `/messages` | `{"text":"..."}` → 202, 결과는 SSE로 |
 | GET | `/proposals` | 제안 전체 |
 | POST | `/proposals/{id}/decision` | `{"decision":"approved"\|"rejected"}` |
+| GET | `/usage` | 구독 사용량 |
+| POST | `/uploads` · GET `/uploads/{name}` | 사진 첨부 |
 | GET | `/calendar?from=&to=` | 기간 조회 (양끝 포함) |
 | POST | `/calendar` | 사람이 직접 추가·수정. id 없으면 추가 |
 | DELETE | `/calendar/{id}` | 사람이 직접 삭제 |
+| POST | `/consume` | events-svc 가 mind 카드를 배달하는 곳 |
+| GET·POST | `/browser-checks` | 브라우저 로그인 확인 결과 / 다시 확인 요청 (status-svc 가 읽음) |
+| POST | `/intercept` | 브라우저 결제 가드가 묻는 곳 (가드 전용 토큰) |
 | POST | `/mcp` | Claude Code 전용 권한 질의 (사람이 쓰는 곳 아님) |
-| POST | `/mcp/calendar` | Claude Code 전용 캘린더 도구 (사람이 쓰는 곳 아님) |
+| POST | `/mcp/<모듈>` | Claude Code 전용 모듈 도구 (사람이 쓰는 곳 아님) |
 | GET | `/healthz` | 헬스체크 |
 
 `turn`과 `proposal` 이벤트는 id 기준 upsert입니다. 결재된 카드는 같은 proposal id로
@@ -232,7 +242,7 @@ Docker로 스택을 올려 확인한 것 (Claude Code 2.1.278):
   전부 그대로 보고되므로 `manual`은 `default`(전부 물어봄)의 별칭이다. 게이트 유지됨.
 - **stream-json 파싱** — `system/init`의 `session_id`,
   `assistant.message.content[].text`, `result.is_error`를 실제 출력으로 확인.
-- **이미지** — agent 417MB(Node + CLI 포함), web 229MB.
+- **이미지** — agent 417MB(Node + CLI 포함). 웹은 이미지가 아니라 Cloudflare Worker 다.
 
 제안/캘린더 분리 후 HTTP로 직접 확인한 것 (CLI 없이 `go run`):
 

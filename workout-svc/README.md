@@ -56,9 +56,7 @@ id 로 찾습니다. 서버가 그 id 를 버리고 `(session_id, ord)` 만 남�
 
 한 번만 하면 됩니다. 여러 번 돌려도 같은 결과입니다.
 
-```bash
-docker compose --profile import run --rm workout-import
-```
+(옮기기는 끝났고, 이 일회성 `workout-import` 서비스와 스크립트는 지웠습니다. 아래는 그때의 기록입니다.)
 
 볼륨의 `/data/workout.json` 을 읽어 PUT 합니다. **원본은 지우지 않습니다** —
 화면에서 기록이 제대로 보이는 것을 확인한 뒤에 지우세요.

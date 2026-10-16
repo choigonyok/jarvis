@@ -189,7 +189,6 @@ POST /api/facts/flush                  장부에서 기다리는 사실을 지�
 | `KAKAOTALK_URL`, `IMESSAGE_URL` | (없음) | 있으면 감지기가 돈다. 첫 시작은 `MIND_BACKFILL`(6h)만 읽는다 |
 | `CHAT_URL` | (없음) | 있으면 운영자와 jarvis 의 대화(chat-svc)도 대화방 하나(`chat:owner`)로 읽는다 |
 | `MIND_MEMORY_URL` | (없음) | memory-svc. 없으면 메모리 모드는 프로세스 안의 가짜 기억, 스택은 사실을 장부에만 쌓는다 |
-| `MIND_PLAN_EVENTS` | `false` | `true` 면 확정된 일정을 `memory.plan` 이벤트로 알린다(에이전트의 제안 엔진이 캘린더 카드로) |
 | `MIND_QUIET` | `true`(스택) | 스킬·관문의 알림을 notify-svc 로 보내지 않고 콘솔에만 둔다 |
 | `MIND_ANTHROPIC_API_KEY` | | `MIND_MODEL`(claude-haiku-5-5), `MIND_DAILY_USD`(1.0) |
 | `MIND_CALENDAR` | `memory` | `http` 면 calendar-svc(`CALENDAR_URL`)에 실제로 쓴다 |
@@ -231,8 +230,9 @@ POST /api/facts/flush                  장부에서 기다리는 사실을 지�
   context-svc 에 저절로 기록된다. 알림 본문(메뉴)은 알림 DB 에 있고, 읽으려면 전체 디스크 접근 권한이 필요하다(맥미니는 미러링 없음)
 - (2026-10-15 합침) 관문은 하나다. 에이전트의 제안 엔진은 더 이상 스스로 카드를 열지 않는다:
   mind 가 보낸 `mind.card` 를 결재 카드로 보여 주고(승인 → `mind.approve`, 거절 → 이유와 함께
-  `/reject`), 자산 비중 이탈 같은 판단 턴의 제안도 `POST /api/intents` 로 이 관문에 넘긴다.
-  `memory.plan` 은 아무도 구독하지 않는다
+  `/reject`). (2026-10-16) 자산 비중 이탈(`assets.band`)도 mind 가 직접 구독해 판단한다 -
+  에이전트의 판단 턴과 별도 원장은 지웠다.
+  `memory.plan` 은 지웠다(받는 쪽이 없었다)
 - (2026-10-15 합침) 구조화 데이터를 읽는 곳은 mind 하나다. 가계부·운동·캘린더·사진·자산·작업을 발생으로
   읽고, 같은 읽기를 memory-svc 에 기록으로 넘긴다(`MEMORY_SOURCES` 기본값에서 그 수집기들을 뺐다). 둘의 목적은
   여전히 다르다(발생·링크는 사건 사이의 관계, Graphiti 는 사람과 사물에 대한 사실). mind 없이 memory-svc 만
