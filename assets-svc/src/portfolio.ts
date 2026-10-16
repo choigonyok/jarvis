@@ -2,7 +2,7 @@ import { changesFor } from "./change.js";
 import * as db from "./db.js";
 import { allocationOf } from "./target.js";
 import { detectFlow, reconcile } from "./kis-flows.js";
-import { COIN_TAX_FROM, replayKis, replayUpbit, salesFrom, summarize } from "./realized.js";
+import { COIN_TAX_FROM, priceUnsettled, replayKis, replayUpbit, salesFrom, summarize } from "./realized.js";
 import type {
   Bridge,
   CashLine,
@@ -168,13 +168,15 @@ export async function buildPortfolio(): Promise<Portfolio> {
 
   // The page's dollar rate is KIS's: almost every dollar held is held there.
   const usdKrw = kis.usdKrw;
-  const settlements = kisFills ? settlementsOf(kisFills, PRINCIPAL_SINCE) : null;
+  // A fill not settled yet carries no won: priced at the page's rate.
+  const fills = kisFills ? priceUnsettled(kisFills, usdKrw) : null;
+  const settlements = fills ? settlementsOf(fills, PRINCIPAL_SINCE) : null;
 
   // KIS's sales on the won actually paid and received, and what is still held
   // at the won it cost - see replayKis. A holding whose quantity the replay
   // agrees with takes that cost; one it does not (bought before the fills
   // reach) keeps the dollar cost at today's rate.
-  const kisReplay = kisFills ? replayKis(kisFills) : null;
+  const kisReplay = fills ? replayKis(fills) : null;
   if (kisReplay) {
     problems.push(...kisReplay.problems);
     for (const h of kis.holdings) {

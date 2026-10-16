@@ -780,14 +780,22 @@ export type KisTrade = {
    * The won this fill moved, at KIS's rate on its own day: a purchase's
    * amount plus fees, a sale's minus. Buying at one rate and selling at
    * another is in the difference - which is what a won return, and the
-   * capital-gains return, are made of.
+   * capital-gains return, are made of. 0 until the fill settles (`settled`).
    */
   netKrw: number;
   /** A sale's amount before fees, in won. */
   grossKrw: number;
   /** The same fill in dollars, as the dollar balance moved. */
   netUsd: number;
+  /** The amount before fees, in dollars. */
+  grossUsd: number;
   rate: number;
+  /**
+   * False until KIS settles the fill (a US trade, the next business day):
+   * until then it has its dollars but no rate, no fees and no won - a sale
+   * made today reads as bringing in ₩0. See priceUnsettled.
+   */
+  settled: boolean;
 };
 
 type KisTrans = {
@@ -798,6 +806,7 @@ type KisTrans = {
   ovrs_item_name: string;
   ccld_qty: string;
   tr_amt: string;
+  tr_frcr_amt2: string;
   wcrc_excc_amt: string;
   frcr_excc_amt_1: string;
   erlm_exrt: string;
@@ -861,7 +870,9 @@ export async function kisTrades(since: string): Promise<KisTrade[]> {
         netKrw: Number(row.wcrc_excc_amt),
         grossKrw: Number(row.tr_amt),
         netUsd: Number(row.frcr_excc_amt_1),
+        grossUsd: Number(row.tr_frcr_amt2),
         rate: Number(row.erlm_exrt),
+        settled: Number(row.erlm_exrt) > 0,
       });
     }
     fk = body.ctx_area_fk100?.trim() ?? "";

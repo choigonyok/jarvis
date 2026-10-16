@@ -111,6 +111,31 @@ export function replayUpbit(
 }
 
 /**
+ * Fills KIS has not settled yet, valued at `rate` - the page's - so a sale
+ * made today shows what it brought in rather than ₩0, and a share bought
+ * today what it cost. The fee is what the account's settled fills have been
+ * charged, as a share of their amount. Once KIS settles a fill its own won
+ * replace these.
+ */
+export function priceUnsettled(trades: KisTrade[], rate: number): KisTrade[] {
+  if (!(rate > 0) || trades.every((t) => t.settled)) return trades;
+  let gross = 0;
+  let fees = 0;
+  for (const t of trades) {
+    if (!t.settled || !(t.grossKrw > 0)) continue;
+    gross += t.grossKrw;
+    fees += Math.abs(t.netKrw - t.grossKrw);
+  }
+  const feeRate = gross > 0 ? fees / gross : 0;
+  return trades.map((t) => {
+    if (t.settled) return t;
+    const grossKrw = t.grossUsd * rate;
+    const fee = grossKrw * feeRate;
+    return { ...t, rate, grossKrw, netKrw: t.side === "sell" ? grossKrw - fee : grossKrw + fee };
+  });
+}
+
+/**
  * KIS's own profit per sale (its period-profit report) converts the cost and
  * the proceeds both at the sale day's rate, so a won that strengthened while
  * the shares were held does not show: shares bought at 1,466 and sold at
