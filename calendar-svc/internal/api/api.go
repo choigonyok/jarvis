@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/calendar-svc/internal/event"
-	"github.com/choigonyok/jarvis/calendar-svc/internal/notify"
+	"github.com/choigonyok/jarvis/gocommon/notify"
 	"github.com/choigonyok/jarvis/calendar-svc/internal/store"
 )
 

@@ -47,7 +47,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/choigonyok/jarvis/context-svc/internal/notify"
+	"github.com/choigonyok/jarvis/gocommon/notify"
 	"github.com/choigonyok/jarvis/context-svc/internal/place"
 	"github.com/choigonyok/jarvis/context-svc/internal/store"
 )

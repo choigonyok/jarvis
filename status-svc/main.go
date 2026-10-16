@@ -25,7 +25,7 @@ import (
 
 	"github.com/choigonyok/jarvis/status-svc/internal/api"
 	"github.com/choigonyok/jarvis/status-svc/internal/check"
-	"github.com/choigonyok/jarvis/status-svc/internal/notify"
+	"github.com/choigonyok/jarvis/gocommon/notify"
 	"github.com/choigonyok/jarvis/status-svc/internal/probes"
 )
 

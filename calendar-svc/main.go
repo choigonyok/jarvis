@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/calendar-svc/internal/api"
-	"github.com/choigonyok/jarvis/calendar-svc/internal/notify"
+	"github.com/choigonyok/jarvis/gocommon/notify"
 	"github.com/choigonyok/jarvis/calendar-svc/internal/store"
 	"github.com/choigonyok/jarvis/calendar-svc/internal/uniple"
 )

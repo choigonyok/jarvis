@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/spending-svc/internal/book"
-	"github.com/choigonyok/jarvis/spending-svc/internal/notify"
+	"github.com/choigonyok/jarvis/gocommon/notify"
 	"github.com/choigonyok/jarvis/spending-svc/internal/store"
 )
 

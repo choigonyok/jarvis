@@ -29,7 +29,7 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/core/module"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
 	"github.com/choigonyok/jarvis/agent/internal/module/mind"
-	"github.com/choigonyok/jarvis/agent/internal/notify"
+	"github.com/choigonyok/jarvis/gocommon/notify"
 )
 
 // ServerName is the MCP server the judging turn proposes through.

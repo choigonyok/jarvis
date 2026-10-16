@@ -25,7 +25,7 @@ import (
 
 	"github.com/choigonyok/jarvis/spending-svc/internal/api"
 	"github.com/choigonyok/jarvis/spending-svc/internal/ingest"
-	"github.com/choigonyok/jarvis/spending-svc/internal/notify"
+	"github.com/choigonyok/jarvis/gocommon/notify"
 	"github.com/choigonyok/jarvis/spending-svc/internal/store"
 	"github.com/choigonyok/jarvis/spending-svc/internal/watch"
 )

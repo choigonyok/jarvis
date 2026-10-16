@@ -54,7 +54,10 @@ services:
     restart: "no"
 
   agent:
-    build: ./agent
+    build:
+      context: ./agent
+      additional_contexts:
+        gocommon: ./gocommon
     environment:
       # Subscription billing. Generate with: claude setup-token
       # Empty is allowed here so the image can be built without one; the agent
@@ -149,7 +152,10 @@ services:
   # (JARVIS_API_TOKEN 은 캘린더·대화 서비스 때문에 필요하다. 그래서 손님 모드의
   # 모델에게는 셸·파일 도구가 없다 - 환경변수를 읽을 길을 막는다.)
   agent-guest:
-    build: ./agent
+    build:
+      context: ./agent
+      additional_contexts:
+        gocommon: ./gocommon
     environment:
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       TZ: ${TZ:-Asia/Seoul}
@@ -223,7 +229,10 @@ services:
   # 받아 영역 체류(visits)와 현재 상태로 만든다. 폰은 스택의 토큰을 갖지 않는다: OwnTracks 는
   # 자기 Basic 인증, 단축어는 신호 토큰. 좌표 원본은 CONTEXT_RAW_DAYS(기본 30일)만 둔다.
   context:
-    build: ./context-svc
+    build:
+      context: ./context-svc
+      additional_contexts:
+        gocommon: ./gocommon
     environment:
       TZ: ${TZ:-Asia/Seoul}
       LISTEN_ADDR: ":8103"
@@ -257,7 +266,10 @@ services:
   # 수집기에 부팅 의존성을 걸지 않았다. 카톡이 꺼져 있어도 지난 내역은 보여야
   # 하고, 수집은 연결되는 대로 커서부터 이어진다.
   spending:
-    build: ./spending-svc
+    build:
+      context: ./spending-svc
+      additional_contexts:
+        gocommon: ./gocommon
     environment:
       TZ: ${TZ:-Asia/Seoul}
       LISTEN_ADDR: ":8095"
@@ -355,7 +367,10 @@ services:
   # 스키마와 카드를 우회하는 두 번째 문이 되는 것)는 이제 더 확실히 해결된다:
   # 에이전트의 파일시스템에 캘린더가 아예 없다.
   calendar:
-    build: ./calendar-svc
+    build:
+      context: ./calendar-svc
+      additional_contexts:
+        gocommon: ./gocommon
     environment:
       TZ: ${TZ:-Asia/Seoul}
       LISTEN_ADDR: ":8093"
@@ -637,7 +652,10 @@ services:
   #
   # 부팅 의존성이 없다. 감시 대상이 죽어 있는 것이 이 서비스가 보여줘야 할 상태다.
   status:
-    build: ./status-svc
+    build:
+      context: ./status-svc
+      additional_contexts:
+        gocommon: ./gocommon
     environment:
       TZ: ${TZ:-Asia/Seoul}
       LISTEN_ADDR: ":8096"

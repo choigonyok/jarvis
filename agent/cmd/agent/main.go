@@ -32,7 +32,7 @@ import (
 	mindmod "github.com/choigonyok/jarvis/agent/internal/module/mind"
 	"github.com/choigonyok/jarvis/agent/internal/module/place"
 	"github.com/choigonyok/jarvis/agent/internal/module/spending"
-	"github.com/choigonyok/jarvis/agent/internal/notify"
+	"github.com/choigonyok/jarvis/gocommon/notify"
 	"github.com/choigonyok/jarvis/agent/internal/suggest"
 	"github.com/choigonyok/jarvis/agent/internal/thread"
 	"github.com/choigonyok/jarvis/agent/internal/uploads"
