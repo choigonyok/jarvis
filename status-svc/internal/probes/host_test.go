@@ -35,6 +35,12 @@ func TestHostProbes(t *testing.T) {
 	if run(e.hostFileVault()) != check.OK || run(e.hostTimeMachine()) != check.OK || run(e.hostMirror()) != check.OK || run(e.hostBackup()) != check.Fail {
 		t.Fatal("켜짐·있음·바이너리는 정상, 오래된 백업은 이상")
 	}
+	write(`{"checkedAt":"` + now + `","filevault":"Off"}`)
+	e.FileVaultOffAccepted = true
+	if v := e.hostFileVault().Run(context.Background()); v.State != check.OK || v.Summary == "" {
+		t.Fatalf("운영자가 끄기로 했으면 결정으로 보여 줍니다: %+v", v)
+	}
+	e.FileVaultOffAccepted = false
 	write(`{"checkedAt":"2026-01-01T00:00:00Z","filevault":"On"}`)
 	if run(e.hostFileVault()) != check.Unknown {
 		t.Fatal("점검이 멈췄으면 모름")

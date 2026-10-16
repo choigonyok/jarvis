@@ -64,6 +64,10 @@ func (e *env) hostFileVault() check.Probe {
 			case "On":
 				return check.Verdict{State: check.OK, Summary: "켜져 있어요."}
 			case "Off":
+				if e.FileVaultOffAccepted {
+					return check.Verdict{State: check.OK, Summary: "꺼져 있어요 - 무인 재시작을 위해 운영자가 끄기로 했어요(받아들인 위험).",
+						Facts: []string{"평문 사본의 보호는 보존 기한(메시지 365·730일, 백업 14일)과 맥미니의 물리적 위치에 기대요."}}
+				}
 				return check.Verdict{State: check.Warn, Summary: "꺼져 있어요. 평문 사본과 백업이 암호화되지 않아요."}
 			default:
 				return check.Verdict{State: check.Warn, Summary: fmt.Sprintf("상태: %s", h.FileVault)}

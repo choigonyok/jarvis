@@ -36,7 +36,10 @@ type Config struct {
 	// Time Machine, the iMessage mirror, the last backup) - things a
 	// container cannot see for itself.
 	HostFile string
-	DB       *pgxpool.Pool
+	// FileVaultOffAccepted records the operator's decision to keep FileVault
+	// off (unattended restarts after a power cut matter more on this box).
+	FileVaultOffAccepted bool
+	DB                   *pgxpool.Pool
 }
 
 type env struct {

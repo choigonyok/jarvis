@@ -72,7 +72,9 @@ func main() {
 		ContextURL:  getenv("CONTEXT_URL", "http://localhost:8103"),
 		BrowserAddr: getenv("BROWSER_ADDR", "localhost:8931"),
 		HostFile:    getenv("HOST_FACTS", "/host/host.json"),
-		DB:          pool,
+		// 운영자의 결정(2026-10-16): 무인 재시작을 위해 FileVault 를 끈 채로 둔다.
+		FileVaultOffAccepted: os.Getenv("HOST_FILEVAULT_OFF_ACCEPTED") == "true",
+		DB:                   pool,
 	}), log)
 	// A probe going wrong is the one kind of news nobody would otherwise
 	// notice: the page looks fine while payments quietly stop arriving.

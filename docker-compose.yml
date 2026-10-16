@@ -699,6 +699,8 @@ services:
       additional_contexts:
         gocommon: ./gocommon
     environment:
+      # FileVault 를 끈 채로 두기로 한 운영자의 결정(받아들인 위험). 맥미니 .env 에서 정한다.
+      HOST_FILEVAULT_OFF_ACCEPTED: ${JARVIS_FILEVAULT_OFF_ACCEPTED:-false}
       TZ: ${TZ:-Asia/Seoul}
       LISTEN_ADDR: ":8096"
       DATABASE_URL: >-
