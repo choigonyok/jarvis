@@ -48,6 +48,7 @@ type Server struct {
 	// which is right when nothing but the compose network can reach this port
 	// and wrong the moment a tunnel gives the agent a public hostname.
 	apiToken     string
+	voiceToken   string
 	approvalWait time.Duration
 	// uploads holds photos attached in conversation; nil turns them off.
 	uploads   *uploads.Store
@@ -83,7 +84,9 @@ type Deps struct {
 	// BackgroundLogin names hosts a background task may sign in through.
 	BackgroundLogin []string
 	APIToken        string
-	ApprovalWait    time.Duration
+	// VoiceToken, when set, opens POST /voice to the phone's shortcut.
+	VoiceToken   string
+	ApprovalWait time.Duration
 	// Uploads, when set, accepts photos at /uploads and on messages.
 	Uploads *uploads.Store
 	// Modules is consulted when a decision carries edits to a card.
@@ -114,6 +117,7 @@ func New(d Deps) *Server {
 		role:            d.Role,
 		backgroundLogin: hostSet(d.BackgroundLogin),
 		apiToken:        d.APIToken,
+		voiceToken:      d.VoiceToken,
 		approvalWait:    d.ApprovalWait,
 		uploads:         d.Uploads,
 		modules:         d.Modules,
@@ -135,6 +139,7 @@ func (s *Server) Handler() http.Handler {
 	// /intercept and /mcp keep the separate secrets they already have.
 	mux.HandleFunc("GET /thread", s.guard(s.getThread))
 	mux.HandleFunc("POST /messages", s.guard(s.postMessage))
+	mux.HandleFunc("POST /voice", s.guardVoice(s.postVoice))
 	mux.HandleFunc("POST /uploads", s.guard(s.postUpload))
 	mux.HandleFunc("GET /usage", s.guard(s.getUsage))
 	mux.HandleFunc("GET /uploads/{name}", s.guard(s.getUpload))

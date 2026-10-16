@@ -14,6 +14,8 @@
  *   Shortcuts), which must not hold the stack's token: they pass without it,
  *   POST only, and context-svc checks their own credentials (OwnTracks' Basic
  *   auth, the signal token). Everything else on context needs the token.
+ * - /agent/voice faces the phone too (the voice shortcut): POST only, without
+ *   the stack's token - the agent checks the voice token.
  * - For the agent, only the routes the console uses. The agent also serves
  *   /mcp (the tools Claude Code calls - unauthenticated, because they are
  *   meant to be dialled over loopback) and /intercept (the payment guard's
@@ -66,7 +68,7 @@ const SERVICES: Record<string, { binding: keyof Env; origin: string }> = {
 const AGENT_ROLE: Record<string, string> = { agent: "owner", "agent-guest": "guest" };
 
 /** The agent routes the console drives. Anything else on the agent is internal. */
-const AGENT_ROUTES = new Set(["healthz", "thread", "messages", "events", "proposals", "calendar", "uploads", "usage"]);
+const AGENT_ROUTES = new Set(["healthz", "thread", "messages", "events", "proposals", "calendar", "uploads", "usage", "voice"]);
 
 function same(a: string, b: string): boolean {
   // Constant time: the comparison should not say how much of a guess was right.
@@ -118,7 +120,9 @@ export default {
       return (env.BROWSER as Fetcher).fetch(new Request(`http://browser:6080/websockify${url.search}`, request));
     }
     // The phone's own doors: their credentials are checked by context-svc.
-    const phone = name === "context" && request.method === "POST" && rest.length === 1 && (rest[0] === "owntracks" || rest[0] === "signals");
+    const phone =
+      request.method === "POST" && rest.length === 1 &&
+      ((name === "context" && (rest[0] === "owntracks" || rest[0] === "signals")) || (name === "agent" && rest[0] === "voice"));
     if (!bearer && !phone) return json(401, "인증이 필요합니다.");
 
     const service = SERVICES[name];

@@ -273,6 +273,7 @@ func main() {
 			InterceptToken:  cfg.ExtraMCPToken,
 			BackgroundLogin: cfg.BackgroundLogin,
 			APIToken:        cfg.APIToken,
+			VoiceToken:      cfg.VoiceToken,
 			ApprovalWait:    cfg.ApprovalWait,
 			Uploads:         photos,
 			Modules:         modules,
