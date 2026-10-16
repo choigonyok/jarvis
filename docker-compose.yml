@@ -73,7 +73,9 @@ services:
       JARVIS_MODEL: ${JARVIS_MODEL:-}
       # Tools that skip the approval card. Read-only only - calendar writes
       # are deliberately absent, so every one of them lands on a card.
-      JARVIS_ALLOWED_TOOLS: ${JARVIS_ALLOWED_TOOLS:-Read,Glob,Grep,TodoWrite,mcp__calendar__list_events,mcp__assets__get_portfolio,mcp__assets__get_allocation,mcp__assets__get_history,mcp__spending__get_spending,mcp__memory__search_memory,mcp__context__get_context,mcp__jobs__create_job,mcp__jobs__list_jobs,mcp__jobs__instruct_job}
+      # 카드 없이 쓰는 도구: 읽기만. 파일은 워크스페이스·첨부 사진 안에서만 읽고(에이전트가 경로 규칙을
+      # 붙인다), 맨 Read·Glob·Grep, 셸·편집, 작업 만들기·지시는 여기 적어도 에이전트가 뺀다.
+      JARVIS_ALLOWED_TOOLS: ${JARVIS_ALLOWED_TOOLS:-TodoWrite,mcp__calendar__list_events,mcp__assets__get_portfolio,mcp__assets__get_allocation,mcp__assets__get_history,mcp__spending__get_spending,mcp__memory__search_memory,mcp__context__get_context,mcp__jobs__list_jobs}
       # MCP servers with no module behind them, as name=url. The browser runs
       # on the host - the container has no display and no Chrome - so this
       # dials back out through host.docker.internal.
@@ -173,7 +175,9 @@ services:
       # Workers VPC 의 연결이 다른 쪽에 붙는 일이 있었다(2026-10-08).
       JARVIS_ADDR: ":8081"
       JARVIS_MCP_URL: http://127.0.0.1:8081/mcp
-      JARVIS_API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
+      # 서비스들의 토큰이 아니라 손님 것: 게이트웨이가 이것으로 부르고, 이것으로는
+      # 손님 대화·손님 기억·손님 알림·같이 쓰는 캘린더(손님 쪽으로)만 열린다.
+      JARVIS_API_TOKEN: ${JARVIS_GUEST_API_TOKEN:?JARVIS_GUEST_API_TOKEN 을 .env 에 설정하세요}
       JARVIS_ALLOWED_ORIGIN: ${JARVIS_ALLOWED_ORIGIN:-}
       JARVIS_APPROVAL_TIMEOUT: ${JARVIS_APPROVAL_TIMEOUT:-30m}
       JARVIS_TURN_TIMEOUT: ${JARVIS_TURN_TIMEOUT:-2h}
@@ -398,6 +402,8 @@ services:
       DATABASE_URL: >-
         postgres://svc_chat:${JARVIS_DB_PASSWORD_CHAT:?scripts/db-roles 를 먼저 실행하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
       API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
+      # 손님 agent 의 토큰: 손님 쪽(손님 대화·손님 기억·손님 알림)만 연다.
+      API_GUEST_TOKEN: ${JARVIS_GUEST_API_TOKEN:-}
     expose:
       - "8094"
     ports:
@@ -437,6 +443,8 @@ services:
       DATABASE_URL: >-
         postgres://svc_calendar:${JARVIS_DB_PASSWORD_CALENDAR:?scripts/db-roles 를 먼저 실행하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
       API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
+      # 손님 agent 의 토큰: 손님 쪽(손님 대화·손님 기억·손님 알림)만 연다.
+      API_GUEST_TOKEN: ${JARVIS_GUEST_API_TOKEN:-}
       NOTIFY_URL: http://events:8101
       # 일정 저장소. uniple 이면 커플 앱의 공유 캘린더를 비공식 Supabase
       # 호출로 쓴다(calendar-svc/README.md). postgres 로 되돌리면 예전 표를 쓴다.
@@ -531,6 +539,8 @@ services:
       # but a bridge that accepts anything is a bridge that will be pointed at
       # something else later.
       MCP_BROWSER_TOKEN: ${JARVIS_MCP_TOKEN:-}
+      # 원격 화면(VNC) 비밀번호. 웹 Worker 의 JARVIS_VNC_PASSWORD 와 같은 값(앞 8자만 쓰인다).
+      VNC_PASSWORD: ${JARVIS_VNC_PASSWORD:-}
       # 쿠팡 결제 비밀번호(쿠페이). 맥미니 .env 에만 있다 - 저장소에는 절대 두지 않는다.
       # browser_enter_payment_pin 이 쿠팡 화면의 키패드에만 넣고, 모델에게는 보이지 않는다.
       COUPANG_PAY_PIN: ${JARVIS_COUPANG_PAY_PIN:-}
@@ -664,6 +674,8 @@ services:
       DATABASE_URL: >-
         postgres://svc_memory:${JARVIS_DB_PASSWORD_MEMORY:?scripts/db-roles 를 먼저 실행하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}
       API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
+      # 손님 agent 의 토큰: 손님 쪽(손님 대화·손님 기억·손님 알림)만 연다.
+      API_GUEST_TOKEN: ${JARVIS_GUEST_API_TOKEN:-}
       # 없으면 글 추출만 쉬고 구조화 데이터는 계속 쌓는다.
       MEMORY_OWNER_NAME: ${MEMORY_OWNER_NAME:-}
       ANTHROPIC_API_KEY: ${MEMORY_ANTHROPIC_API_KEY:-}
@@ -832,6 +844,8 @@ services:
       DATABASE_URL: >-
         postgres://svc_events:${JARVIS_DB_PASSWORD_EVENTS:?scripts/db-roles 를 먼저 실행하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
       API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
+      # 손님 agent 의 토큰: 손님 쪽(손님 대화·손님 기억·손님 알림)만 연다.
+      API_GUEST_TOKEN: ${JARVIS_GUEST_API_TOKEN:-}
     expose:
       - "8101"
     ports:
@@ -860,6 +874,8 @@ services:
       DATABASE_URL: >-
         postgres://svc_mind:${JARVIS_DB_PASSWORD_MIND:?scripts/db-roles 를 먼저 실행하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
       API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
+      # 사람이 콘솔에 들어갈 때 쓰는 토큰(scripts/mini console). 서비스들의 토큰과 다르다.
+      MIND_CONSOLE_TOKEN: ${JARVIS_MIND_CONSOLE_TOKEN:-}
       EVENTS_URL: http://events:8101
       MIND_SELF_URL: http://mind:8102/consume
       KAKAOTALK_URL: http://kakaotalk:8090
