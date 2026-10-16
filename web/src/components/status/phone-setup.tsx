@@ -8,7 +8,6 @@ type Setup = {
   link: string;
   url: string;
   signals: { url: string; token: string; examples: { when: string; body: string }[] };
-  voice?: { url: string; token: string };
 };
 
 /**
@@ -149,33 +148,6 @@ export function PhoneSetup() {
                 ))}
               </ul>
             ) : null}
-          </Step>
-          <Step n={6}>
-            <span className="block">
-              (선택) <span className="text-foreground">AI 비서 음성 호출</span> 단축어: 액션 버튼을 누르고 말하면 jarvis가 답을 읽어 줘요.
-              먼저 음성 토큰을 복사한 뒤 단축어를 받아 추가하면, 추가할 때 토큰을 물어봐요. 다 되면 설정 → 동작 버튼 → 단축어에서
-              이 단축어를 고르세요.
-            </span>
-            {setup?.voice ? (
-              <ul className="mt-2 divide-y divide-edge-soft">
-                <CopyRow label="음성 토큰" value={setup.voice.token} shown="••••••" id="voice" copied={copied} onCopy={copy} />
-              </ul>
-            ) : (
-              <Button
-                variant="ghost"
-                className="mt-1 h-11 w-full sm:w-auto sm:px-3"
-                onClick={() => void load()}
-                disabled={busy}
-              >
-                음성 토큰 불러오기
-              </Button>
-            )}
-            <a
-              href={encodeURI("/shortcuts/AI 비서 음성 호출.shortcut")}
-              className="mt-2 inline-flex h-11 w-full items-center justify-center rounded-lg border border-border bg-background px-4 text-sm font-medium text-foreground outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 sm:w-auto"
-            >
-              단축어 받기
-            </a>
           </Step>
         </ol>
         {error ? (

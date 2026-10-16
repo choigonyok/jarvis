@@ -228,7 +228,6 @@ services:
   context:
     build: ./context-svc
     environment:
-      VOICE_TOKEN: ${JARVIS_VOICE_TOKEN:-}
       TZ: ${TZ:-Asia/Seoul}
       LISTEN_ADDR: ":8103"
       DATABASE_URL: >-

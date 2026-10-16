@@ -42,7 +42,6 @@ func main() {
 		Token: os.Getenv("API_TOKEN"), SignalToken: os.Getenv("SIGNAL_TOKEN"),
 		User: os.Getenv("OWNTRACKS_USER"), Pass: os.Getenv("OWNTRACKS_PASSWORD"),
 		Public: getenv("CONTEXT_PUBLIC_URL", "https://jarvis-be.choigonyok.com/context"),
-		Voice:  os.Getenv("VOICE_TOKEN"),
 	}
 	if cfg.User == "" || cfg.Pass == "" {
 		log.Warn("OWNTRACKS_USER/OWNTRACKS_PASSWORD 가 없어 폰의 위치를 받지 않습니다")

@@ -59,9 +59,6 @@ type Config struct {
 	// Public is where the phone reaches this service (the gateway's
 	// /context), for the setup it is given.
 	Public string
-	// Voice is the agent's voice token, handed to the phone with the setup
-	// (the voice shortcut presents it at the gateway's /agent/voice).
-	Voice string
 	// Trust: a fix less accurate than this (meters) does not move visits.
 	Trust float64
 }
@@ -659,9 +656,6 @@ func (s *Server) setup(w http.ResponseWriter, r *http.Request) {
 				{"when": "매일 아침: 어젯밤 수면 시간(시간)", "body": `{"source":"shortcut","kind":"health.sleep","state":"<값>"}`},
 			},
 		},
-	}
-	if s.cfg.Voice != "" {
-		out["voice"] = map[string]string{"url": strings.TrimSuffix(base, "/context") + "/agent/voice", "token": s.cfg.Voice}
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, out)
