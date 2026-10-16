@@ -10,15 +10,22 @@
 
 ```
 브라우저 ─▶ jarvis.choigonyok.com (web Worker, 로그인)
-              │ 서비스 바인딩 GATEWAY + Bearer JARVIS_EDGE_TOKEN
+              │ 서비스 바인딩 GATEWAY → 엔트리포인트 Internal
+              │ + Bearer JARVIS_EDGE_TOKEN (운영자) / JARVIS_EDGE_GUEST_TOKEN (손님)
               ▼
            jarvis-be (edge Worker)
-              │ 토큰 없으면 401, agent 는 콘솔이 쓰는 경로만
+              │ 토큰 없으면 401, 손님 토큰은 agent-guest·workout·notify 만,
+              │ agent 는 콘솔이 쓰는 경로만
               │ 확인 뒤 Authorization 을 JARVIS_API_TOKEN 으로 바꿔 붙인다
+              │ (agent-guest 에는 JARVIS_GUEST_API_TOKEN)
               │ Workers VPC 바인딩 (jarvis-agent 터널)
               ▼
            맥미니 compose: agent:8080 · workout:8091 · assets:8092
                            spending:8095 · kakaotalk:8090 · status:8096
+
+폰·맥 수집기 ─▶ jarvis-be.choigonyok.com (공개 주소: 기본 엔트리포인트)
+              POST /context/owntracks · /context/signals · /phonenote/notes 와
+              입장권 붙은 /vnc/websockify 만. 그 밖은 토큰이 있어도 404.
 ```
 
 맥미니에서 인터넷을 향해 열린 포트는 없다. 터널(`tunnel` 서비스, `--profile cloudflare`)은
@@ -27,9 +34,17 @@
 
 - VPC 서비스: `npx wrangler vpc service list` (jarvis-agent … jarvis-status, 터널 `5b824fd4…`)
 - 게이트웨이 배포: `cd web && npx wrangler deploy -c ../edge/wrangler.jsonc`
-- 게이트웨이 비밀: `JARVIS_API_TOKEN`(서비스가 확인하는 토큰, 게이트웨이에만)과
-  `JARVIS_EDGE_TOKEN`(콘솔이 게이트웨이에 내는 토큰, 콘솔과 게이트웨이 둘 다).
+- 게이트웨이 비밀: `JARVIS_API_TOKEN`(서비스가 확인하는 토큰, 게이트웨이에만),
+  `JARVIS_EDGE_TOKEN`(콘솔이 운영자 요청에 내는 토큰, 콘솔과 게이트웨이 둘 다, 맥북 `~/.config/jarvis/edge-token`),
+  `JARVIS_EDGE_GUEST_TOKEN`(콘솔이 손님 요청에 내는 토큰, 둘 다, 맥북 `~/.config/jarvis/edge-guest-token`),
+  `JARVIS_GUEST_API_TOKEN`(손님 agent 의 토큰, 게이트웨이와 맥미니 .env).
   `npx wrangler secret put … -c ../edge/wrangler.jsonc`. 콘솔 Worker 에는 `JARVIS_API_TOKEN` 을 두지 않는다.
+- 콘솔 비밀 `JARVIS_VNC_PASSWORD`: 화면 탭이 원격 화면에 낼 비밀번호(맥미니 .env 의 같은 이름과 같은 값, 8자).
+- 게이트웨이는 콘솔보다 먼저 배포한다. 공개 주소는 폰의 문만 열려 있어서, 콘솔이 옛 바인딩(기본
+  엔트리포인트)으로 부르는 동안 새 게이트웨이가 올라가면 콘솔이 404 를 받는다. 바인딩을 바꿀 때는
+  기본 엔트리포인트도 Internal 처럼 도는 과도기 게이트웨이 → 콘솔 → 최종 게이트웨이 순서로.
+- 맥북의 `next dev` 는 서비스 바인딩이 없어 공개 주소로 부르는데, 공개 주소는 콘솔 경로를 열지
+  않는다 - 로컬 개발은 로컬 compose(`AGENT_URL=http://localhost:8080` 등)로 한다.
 - 콘솔 배포: `cd web && npm run cf:build && npm run cf:deploy`. 백엔드 주소는
   `web/wrangler.jsonc` 의 `vars`(AGENT_URL 만 비밀).
 - 맥미니 쪽: `scripts/mini up`, `scripts/mini compose --profile cloudflare up -d tunnel`.
@@ -38,8 +53,9 @@
 **`jarvis.choigonyok.com` 앞에는 Cloudflare Access 가 있다.** Zero Trust 앱 `jarvis`
 (팀 `choigonyok.cloudflareaccess.com`, Free 플랜), 정책 `only me` 는 운영자 이메일 하나만 허용하고
 로그인은 Google(OAuth 클라이언트는 운영자의 Google Cloud 프로젝트 jarvis-access, 테스트 사용자 본인만)과 예비로 이메일 일회용 코드. 앱·팀 세션 모두 730h(약 1개월). 그 뒤에 콘솔 자체 로그인이 한 번 더 있다.
-게이트웨이(`jarvis-be`)는 Access 대상이 아니다 - 사람이 아니라 콘솔 Worker 가 부르는 곳이고,
-`JARVIS_EDGE_TOKEN` 이 그 문을 지킨다.
+게이트웨이(`jarvis-be`)는 Access 대상이 아니다 - 사람이 아니라 콘솔 Worker 가 서비스 바인딩으로
+부르는 곳이고(공개 주소로는 서비스에 닿지 않는다), 그 안에서 `JARVIS_EDGE_TOKEN`·`JARVIS_EDGE_GUEST_TOKEN` 이
+누가 무엇을 여는지 가른다.
 
 ## 맥미니의 전제 (배포 전에 갖춰 둔다)
 
@@ -102,6 +118,13 @@ Google OAuth 앱이 테스트 모드라 손님 이메일을 Google Cloud 의 테
 붙이므로, 로그인한 콘솔이 `/api/screen/ticket` 에서 1분짜리 입장권(공유 토큰으로 서명)을
 받아 주소에 붙인다. 게이트웨이는 이 경로에서만 입장권을 받는다. VPC 서비스 `jarvis-browser`
 (browser:6080). 웹 Worker 의 `JARVIS_VNC_GATEWAY` 가 비면 예전처럼 호스트에 직접 붙는다.
+VNC 서버(x11vnc)는 브라우저 컨테이너 안에서만 듣고(`-localhost`) 비밀번호(`VNC_PASSWORD` ←
+맥미니 .env `JARVIS_VNC_PASSWORD`)를 묻는다. 입장권 경로가 그 비밀번호도 화면 탭에 건넨다.
+비밀번호가 없으면 원격 화면은 열리지 않는다(브라우저는 그대로 돈다).
+
+**맥미니 .env 에 더 필요한 값(2026-10-17).** `JARVIS_GUEST_API_TOKEN`(손님 agent 의 토큰 - chat·calendar·
+events·memory 가 손님 쪽만 열어 준다), `JARVIS_MIND_CONSOLE_TOKEN`(mind 콘솔 로그인, `scripts/mini console`),
+`JARVIS_VNC_PASSWORD`(8자). 앞의 둘은 `openssl rand -base64 48 | tr -d '/+='` 로 만든다.
 
 ---
 
