@@ -606,6 +606,8 @@ services:
       STORE_PATH: /data/kakaotalk.db
       KAKAO_CONTAINER_DIR: /kakao/app-support
       KAKAO_PLIST_DIR: /kakao/preferences
+      # 복호화 전 사본을 매번 쓰는 곳. 디스크가 아니라 메모리에 둔다.
+      KAKAO_SCRATCH_DIR: /scratch
       # Identity. Pass the account id (skips the one-time recovery scan) and the
       # machine UUID, or a pre-derived passphrase in KAKAO_SQLCIPHER_KEY.
       KAKAO_UUID: ${KAKAO_UUID:-}
@@ -623,6 +625,8 @@ services:
       - "127.0.0.1:${KAKAO_PORT:-8090}:8090"
     expose:
       - "8090"
+    tmpfs:
+      - /scratch:size=256m,mode=0700
     restart: unless-stopped
 
   # iMessage·문자. kakaotalk 처럼 맥의 메시지 앱 데이터베이스(chat.db)를 앞으로만

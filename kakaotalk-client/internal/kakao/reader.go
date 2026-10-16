@@ -39,17 +39,26 @@ type Config struct {
 
 // Reader holds a resolved, verified handle to the source database.
 type Reader struct {
-	cfg        Config
-	dbPath     string
-	key        string
-	scratch    string
-	bin        string
-	userID     int64
-	uuid       string
-	mainMod    time.Time
-	mainSize   int64
-	mainCopied time.Time
+	cfg      Config
+	dbPath   string
+	key      string
+	scratch  string
+	bin      string
+	userID   int64
+	uuid     string
+	mainMod  time.Time
+	mainSize int64
+	walSalt  [8]byte
+	walMod   time.Time
+	walSize  int64
+	copied   bool // main has been copied at least once
 }
+
+// rewindRows is how far back a read starts after the main file was copied
+// again. Rows read before that came from an older main plus a newer WAL, and
+// whatever sat between the two could have been skipped; the store upserts, so
+// reading them twice costs nothing.
+const rewindRows = 200
 
 // Message is one row of NTChatMessage joined with sender/room names.
 type Message struct {
@@ -184,43 +193,71 @@ func findDBFile(dir string) (string, error) {
 	}
 }
 
-// copyLiveFiles copies main (only when its mtime changed) plus -wal into the
-// scratch dir, so the newest, still-WAL-resident messages are visible.
+// copyLiveFiles brings the scratch copy up to date and says whether the main
+// file was copied again.
+//
+// The main file is copied when its mtime or size moves, or when the WAL's salt
+// changes: a new salt means KakaoTalk checkpointed (folded the WAL into main)
+// and restarted the WAL, sometimes without main's mtime moving - after the Mac
+// slept and woke, a stale main plus a fresh WAL read as "nothing new" for over
+// an hour. The WAL is copied only when it changed.
 //
 // The -shm (the WAL index) is deliberately not copied, and any old copy is
 // removed: SQLite then rebuilds the index from the WAL itself when it opens
 // the copy. KakaoTalk updates -shm through a memory map, which never moves its
 // mtime, and a file shared into a container can be served from a cache that
 // trusts the mtime - a stale index there tells SQLite the WAL ends where it
-// ended hours ago, and every message since reads as absent. (Seen on the Mac
-// mini after it slept and woke: the WAL kept growing, nothing new was read.)
-func (r *Reader) copyLiveFiles() (string, error) {
+// ended hours ago, and every message since reads as absent.
+func (r *Reader) copyLiveFiles() (string, bool, error) {
 	dst := filepath.Join(r.scratch, "work.db")
 	fi, err := os.Stat(r.dbPath)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	// Re-copied when its mtime or size moves, and at least every 30 seconds
-	// regardless. After the Mac slept and woke, KakaoTalk folded the WAL into
-	// the main file and started a fresh WAL without the main file's mtime
-	// moving - the stale copy here plus the new WAL read as "nothing new" for
-	// over an hour, until a restart copied the main file again.
-	if !fi.ModTime().Equal(r.mainMod) || fi.Size() != r.mainSize || time.Since(r.mainCopied) > 30*time.Second {
+	src := r.dbPath + "-wal"
+	wfi, werr := os.Stat(src)
+	var salt [8]byte
+	if werr == nil {
+		salt, _ = walSalt(src)
+	}
+	recopied := false
+	if !r.copied || !fi.ModTime().Equal(r.mainMod) || fi.Size() != r.mainSize || salt != r.walSalt {
 		if err := copyFile(r.dbPath, dst); err != nil {
-			return "", err
+			return "", false, err
 		}
-		r.mainMod, r.mainSize, r.mainCopied = fi.ModTime(), fi.Size(), time.Now()
+		r.mainMod, r.mainSize, r.copied, recopied = fi.ModTime(), fi.Size(), true, true
+		r.walSize = -1 // force the WAL to follow
 	}
 	_ = os.Remove(dst + "-shm")
-	src := r.dbPath + "-wal"
-	if _, err := os.Stat(src); err != nil {
+	if werr != nil {
 		_ = os.Remove(dst + "-wal")
-		return dst, nil
+		r.walSalt, r.walSize = [8]byte{}, 0
+		return dst, recopied, nil
 	}
-	if err := copyFile(src, dst+"-wal"); err != nil {
-		return "", err
+	if salt != r.walSalt || wfi.Size() != r.walSize || !wfi.ModTime().Equal(r.walMod) {
+		if err := copyFile(src, dst+"-wal"); err != nil {
+			return "", false, err
+		}
+		r.walSalt, r.walSize, r.walMod = salt, wfi.Size(), wfi.ModTime()
 	}
-	return dst, nil
+	return dst, recopied, nil
+}
+
+// walSalt is bytes 16-23 of the WAL header, which change on every checkpoint
+// that restarts the log.
+func walSalt(path string) ([8]byte, error) {
+	var salt [8]byte
+	f, err := os.Open(path)
+	if err != nil {
+		return salt, err
+	}
+	defer f.Close()
+	var hdr [32]byte
+	if _, err := io.ReadFull(f, hdr[:]); err != nil {
+		return salt, err
+	}
+	copy(salt[:], hdr[16:24])
+	return salt, nil
 }
 
 func copyFile(src, dst string) error {
@@ -243,10 +280,14 @@ func copyFile(src, dst string) error {
 // runSQL copies the live files, runs the given SELECT through the sqlcipher CLI
 // in JSON mode, and returns the raw JSON array bytes.
 func (r *Reader) runSQL(query string) ([]byte, error) {
-	work, err := r.copyLiveFiles()
+	work, _, err := r.copyLiveFiles()
 	if err != nil {
 		return nil, fmt.Errorf("copy live files: %w", err)
 	}
+	return r.runOn(work, query)
+}
+
+func (r *Reader) runOn(work, query string) ([]byte, error) {
 	script := fmt.Sprintf("PRAGMA key='%s';\nPRAGMA cipher_compatibility=3;\n.mode json\n%s;\n",
 		r.key, strings.TrimRight(query, "; \n"))
 	cmd := exec.Command(r.bin, work)
@@ -384,10 +425,20 @@ func fullText(message, attachment string) string {
 // MessagesSinceRowID returns text messages with ROWID greater than the cursor,
 // ascending, capped at limit. ROWID is the PK B-tree so this is the indexed
 // incremental fast path for the poller.
+//
+// Right after the main file was copied again the read starts rewindRows back,
+// so rows missed while an older main was paired with a newer WAL come in.
 func (r *Reader) MessagesSinceRowID(cursor int64, limit int) ([]Message, error) {
+	work, recopied, err := r.copyLiveFiles()
+	if err != nil {
+		return nil, fmt.Errorf("copy live files: %w", err)
+	}
+	if recopied {
+		cursor = max(0, cursor-rewindRows)
+	}
 	q := fmt.Sprintf(`%s WHERE m.ROWID > %d AND m.message IS NOT NULL AND m.message <> ''
 		ORDER BY m.ROWID ASC LIMIT %d`, messageSelect, cursor, limit)
-	raw, err := r.runSQL(q)
+	raw, err := r.runOn(work, q)
 	if err != nil {
 		return nil, err
 	}
