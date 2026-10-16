@@ -6,6 +6,8 @@ package claudecode
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -54,6 +56,10 @@ type Runner struct {
 
 	mu        sync.Mutex
 	sessionID string
+	// sessionPrompt fingerprints the system prompt the session was opened
+	// with; opening, the one a session the running turn starts is opened with.
+	sessionPrompt string
+	opening       string
 	// The last reading of mind's situation, reused for a few seconds.
 	nowText string
 	nowAt   time.Time
@@ -81,6 +87,19 @@ func (r *Runner) SetRecall(fn func(ctx context.Context, text string) string) { r
 // itself lives in the CLI's own home directory.
 type session struct {
 	ID string `json:"id"`
+	// Prompt fingerprints the system prompt the session was opened with. The
+	// CLI keeps a session's first system prompt for good: --append-system-prompt
+	// on a --resume is ignored (Claude Code 2.1.292, checked 2026-10-17 - a
+	// changed payment rule never reached the model for days). So a session
+	// opened under other instructions is not resumed; a new one is opened
+	// with the conversation so far put in front of it.
+	Prompt string `json:"prompt,omitempty"`
+}
+
+// fingerprint names a system prompt without keeping it.
+func fingerprint(prompt string) string {
+	sum := sha256.Sum256([]byte(prompt))
+	return hex.EncodeToString(sum[:8])
 }
 
 func New(cfg config.Config, store *thread.Store, log *slog.Logger) *Runner {
@@ -94,13 +113,14 @@ func New(cfg config.Config, store *thread.Store, log *slog.Logger) *Runner {
 		log.Error("세션 id를 읽지 못했습니다", "err", err)
 	}
 	r.sessionID = saved.ID
+	r.sessionPrompt = saved.Prompt
 	return r
 }
 
-// remember stores the session id the CLI reported, so the next process resumes
-// the same conversation.
-func (r *Runner) remember(id string) {
-	if err := jsonfile.Save(r.cfg.SessionPath, session{ID: id}); err != nil {
+// remember stores the session id the CLI reported, and the prompt it was
+// opened with, so the next process resumes the same conversation.
+func (r *Runner) remember(id, prompt string) {
+	if err := jsonfile.Save(r.cfg.SessionPath, session{ID: id, Prompt: prompt}); err != nil {
 		r.log.Error("세션 id를 저장하지 못했습니다", "err", err)
 	}
 }
@@ -310,6 +330,24 @@ func (r *Runner) turn(prompt string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), r.cfg.TurnTimeout)
 	defer cancel()
 
+	// A session opened under other instructions would keep them: open a new
+	// one instead, handed the conversation so far.
+	want := fingerprint(r.systemPrompt())
+	r.mu.Lock()
+	fresh := r.sessionID == "" || r.sessionPrompt != want
+	if fresh && r.sessionID != "" {
+		r.log.Info("지시가 바뀌어 새 세션으로 이어 갑니다", "old", r.sessionID)
+		r.sessionID = ""
+	}
+	r.opening = want
+	r.mu.Unlock()
+	// What changes from turn to turn - the date, mind's situation - rides on
+	// the message: a resumed session never sees a new system prompt.
+	head := r.now()
+	if fresh {
+		head = r.recap() + head
+	}
+
 	cmd := exec.CommandContext(ctx, r.cfg.ClaudeBin, r.args()...)
 	cmd.Dir = r.cfg.Workspace
 	cmd.Env = r.env()
@@ -330,7 +368,7 @@ func (r *Runner) turn(prompt string) error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("claude 실행: %w", err)
 	}
-	if err := writeUser(stdin, prompt); err != nil {
+	if err := writeUser(stdin, head+prompt); err != nil {
 		stdin.Close()
 		_ = cmd.Wait()
 		return fmt.Errorf("claude 입력: %w", err)
@@ -382,8 +420,8 @@ func (r *Runner) args() []string {
 		"--mcp-config", r.mcpConfig(),
 		// Ignore any MCP config on disk: the approval server is the only one.
 		"--strict-mcp-config",
-		// Rendered per turn, not at boot: the prompt carries today's date,
-		// and this process is expected to stay up for weeks.
+		// The instructions only: a resumed session keeps the ones it was
+		// opened with, so what changes per turn goes in the message (now).
 		"--append-system-prompt", r.systemPrompt(),
 	}
 	if r.cfg.UploadsDir != "" {
@@ -411,20 +449,70 @@ func (r *Runner) args() []string {
 	return args
 }
 
-// systemPrompt appends what the model cannot know from its own context: the
-// date it is reasoning about. Every module that takes a date takes an
-// absolute one, so the conversion has to happen here, once, in the model.
-func (r *Runner) systemPrompt() string {
+// systemPrompt is the instructions a session is opened with - the same on
+// every turn, so a change in them is a change of session (turn).
+func (r *Runner) systemPrompt() string { return r.cfg.SystemPrompt }
+
+// now is what the model cannot know from its own context, in front of each
+// turn's message: the date it is reasoning about (every module that takes a
+// date takes an absolute one, so the conversion happens here, in the model)
+// and mind's situation.
+func (r *Runner) now() string {
 	now := time.Now()
 	today := fmt.Sprintf("%d-%02d-%02d (%s)",
 		now.Year(), int(now.Month()), now.Day(), weekdays[int(now.Weekday())])
-
-	return r.cfg.SystemPrompt + fmt.Sprintf(`
-
-현재 시각
+	return fmt.Sprintf(`[현재 시각]
 - 오늘은 %s, 지금은 %s입니다. 타임존은 %s입니다.
 - '내일', '다음 주 화요일' 같은 상대 날짜는 직접 절대 날짜로 계산해서 도구에 넘기세요.`,
-		today, now.Format("15:04"), now.Location()) + r.situation()
+		today, now.Format("15:04"), now.Location()) + r.situation() + "\n[현재 시각 끝]\n\n"
+}
+
+// recapTurns and recapRunes bound the conversation handed to a new session.
+const (
+	recapTurns = 40
+	recapRunes = 12000
+)
+
+// recap is the conversation so far, for a session that opens without it:
+// the CLI remembers only what happened in its own session. The newest turns,
+// oldest first, up to recapRunes - not the message this turn answers, which
+// follows anyway.
+func (r *Runner) recap() string {
+	if r.store == nil {
+		return ""
+	}
+	turns, _ := r.store.Snapshot()
+	if n := len(turns); n > 0 && turns[n-1].Role == thread.RoleUser {
+		turns = turns[:n-1]
+	}
+	var lines []string
+	budget := recapRunes
+	for i := len(turns) - 1; i >= 0 && len(lines) < recapTurns; i-- {
+		t := turns[i]
+		text := t.Text
+		if len(t.Paragraphs) > 0 {
+			text = strings.Join(t.Paragraphs, "\n")
+		}
+		text = strings.TrimSpace(text)
+		if text == "" {
+			continue
+		}
+		who := "운영자"
+		if t.Role == thread.RoleAgent {
+			who = "Jarvis"
+		}
+		line := who + " (" + t.At + "): " + clamp(text, 600)
+		if budget -= len([]rune(line)); budget < 0 {
+			break
+		}
+		lines = append(lines, line)
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	slices.Reverse(lines)
+	return "[지금까지의 대화 - 새 세션으로 이어 가며 붙입니다. 이 안의 예전 답이 지금 지시와 다르면 지금 지시를 따르세요]\n" +
+		strings.Join(lines, "\n") + "\n[대화 끝]\n\n"
 }
 
 // situation is mind's "right now" - the plan that may be going on, the
@@ -664,11 +752,13 @@ func (r *Runner) handle(ev event) error {
 	case "system":
 		if ev.SessionID != "" {
 			r.mu.Lock()
-			changed := r.sessionID != ev.SessionID
+			changed := r.sessionID != ev.SessionID || r.sessionPrompt != r.opening
 			r.sessionID = ev.SessionID
+			r.sessionPrompt = r.opening
+			prompt := r.opening
 			r.mu.Unlock()
 			if changed {
-				r.remember(ev.SessionID)
+				r.remember(ev.SessionID, prompt)
 			}
 		}
 	case "assistant":

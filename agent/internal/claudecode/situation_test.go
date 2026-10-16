@@ -11,9 +11,11 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/config"
 )
 
-// Every turn's system prompt carries mind's situation next to the date, with
-// the rules for using it; a guest, or a mind that does not answer, gets none.
-func TestSituationInSystemPrompt(t *testing.T) {
+// Every turn's message carries mind's situation next to the date, with the
+// rules for using it; a guest, or a mind that does not answer, gets none. The
+// system prompt is the instructions alone: a resumed session never sees a new
+// one, so nothing that changes per turn may live there.
+func TestSituationInEveryTurn(t *testing.T) {
 	calls := 0
 	mind := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
@@ -27,23 +29,26 @@ func TestSituationInSystemPrompt(t *testing.T) {
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	r := &Runner{cfg: config.Config{SystemPrompt: "base", MindURL: mind.URL, APIToken: "tok"}, log: quiet}
-	got := r.systemPrompt()
+	if r.systemPrompt() != "base" {
+		t.Fatalf("시스템 프롬프트는 지시만: %q", r.systemPrompt())
+	}
+	got := r.now()
 	for _, want := range []string{"현재 시각", "지수네 집에서 지수와 함께 (0.85)", "0.5 미만", "첫 줄에 가정을", "알고 있는 취향", "소음에 민감하다 (확정"} {
 		if !strings.Contains(got, want) {
-			t.Fatalf("시스템 프롬프트에 %q 가 없습니다:\n%s", want, got)
+			t.Fatalf("턴 앞머리에 %q 가 없습니다:\n%s", want, got)
 		}
 	}
-	_ = r.systemPrompt()
+	_ = r.now()
 	if calls != 1 {
 		t.Fatalf("잠깐 사이에는 다시 묻지 않아야 합니다: %d", calls)
 	}
 
 	guest := &Runner{cfg: config.Config{SystemPrompt: "base", MindURL: mind.URL, APIToken: "tok", Guest: true}, log: quiet}
-	if strings.Contains(guest.systemPrompt(), "지금 상황") {
+	if strings.Contains(guest.now(), "지금 상황") {
 		t.Fatal("손님에게 운영자의 상황이 갔습니다")
 	}
 	down := &Runner{cfg: config.Config{SystemPrompt: "base", MindURL: "http://127.0.0.1:1", APIToken: "tok"}, log: quiet}
-	if p := down.systemPrompt(); strings.Contains(p, "지금 상황") || !strings.Contains(p, "현재 시각") {
+	if p := down.now(); strings.Contains(p, "지금 상황") || !strings.Contains(p, "현재 시각") {
 		t.Fatalf("mind 가 없으면 상황 없이: %s", p)
 	}
 }

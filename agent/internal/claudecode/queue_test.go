@@ -14,14 +14,15 @@ import (
 )
 
 // A stand-in CLI on stream-json input: it answers every message it reads
-// with "got: <message>", and gives its result once a message says END - then
-// waits for stdin to close, as the real one does.
+// with "got: <message>" - past the time (and any recap) a turn's first
+// message carries in front - and gives its result once a message says END,
+// then waits for stdin to close, as the real one does.
 func echoClaude(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "claude")
 	script := `#!/bin/sh
 while IFS= read -r line; do
-  text=$(printf '%s' "$line" | sed 's/.*"content":"\([^"]*\)".*/\1/')
+  text=$(printf '%s' "$line" | sed 's/.*"content":"\([^"]*\)".*/\1/; s/.*\\n\\n//')
   printf '{"type":"assistant","message":{"content":[{"type":"text","text":"got: %s"}]}}\n' "$text"
   case "$text" in *END*) echo '{"type":"result","result":"ok"}' ;; esac
 done
