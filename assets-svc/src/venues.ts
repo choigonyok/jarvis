@@ -1233,3 +1233,59 @@ export async function kisUsOrder(o: {
   if (res.rt_cd !== "0") throw new Error(`${(res.msg1 ?? "").trim()} (${res.msg_cd ?? "?"})`);
   return { odno: res.output?.ODNO ?? "", message: (res.msg1 ?? "").trim() };
 }
+
+/**
+ * How many shares the account's dollars buy at `price`, as KIS counts it
+ * (its commission included) - the honest answer to "can I afford one".
+ */
+export async function kisUsBuyable(symbol: string, excd: string, price: number): Promise<{ qty: number; amount: number; raw: Record<string, string> }> {
+  const token = await kisAccessToken();
+  const { cano, prod } = kisAccount();
+  const mock = env("KIS_MOCK") === "true";
+  const q = new URLSearchParams({
+    CANO: cano,
+    ACNT_PRDT_CD: prod,
+    OVRS_EXCG_CD: ORDER_EXCHANGE[excd] ?? excd,
+    OVRS_ORD_UNPR: price.toFixed(2),
+    ITEM_CD: symbol,
+  });
+  const body = await json<{ rt_cd?: string; msg1?: string; output?: Record<string, string> }>(
+    `${KIS_BASE}/uapi/overseas-stock/v1/trading/inquire-psamount?${q}`,
+    { headers: kisHeaders(token, mock ? "VTTS3007R" : "TTTS3007R") },
+  );
+  if (body.rt_cd !== "0" || !body.output) throw new Error((body.msg1 ?? "매수 가능 금액을 읽지 못했습니다").trim());
+  const o = body.output;
+  return {
+    qty: Number(o.max_ord_psbl_qty ?? o.ovrs_max_ord_psbl_qty ?? o.ord_psbl_qty ?? 0),
+    amount: Number(o.ovrs_ord_psbl_amt ?? o.ord_psbl_frcr_amt ?? 0),
+    raw: o,
+  };
+}
+
+/** Cancel a resting US order (its order number from kisUsOrder). */
+export async function kisUsCancel(o: { symbol: string; excd: string; odno: string; qty: number }): Promise<string> {
+  const token = await kisAccessToken();
+  const { cano, prod } = kisAccount();
+  const mock = env("KIS_MOCK") === "true";
+  const res = await json<{ rt_cd?: string; msg_cd?: string; msg1?: string }>(
+    `${KIS_BASE}/uapi/overseas-stock/v1/trading/order-rvsecncl`,
+    {
+      method: "POST",
+      headers: kisHeaders(token, mock ? "VTTT1004U" : "TTTT1004U"),
+      body: JSON.stringify({
+        CANO: cano,
+        ACNT_PRDT_CD: prod,
+        OVRS_EXCG_CD: ORDER_EXCHANGE[o.excd] ?? o.excd,
+        PDNO: o.symbol,
+        ORGN_ODNO: o.odno,
+        RVSE_CNCL_DVSN_CD: "02",
+        ORD_QTY: String(o.qty),
+        OVRS_ORD_UNPR: "0",
+        MGCO_APTM_ODNO: "",
+        ORD_SVR_DVSN_CD: "0",
+      }),
+    },
+  );
+  if (res.rt_cd !== "0") throw new Error(`${(res.msg1 ?? "").trim()} (${res.msg_cd ?? "?"})`);
+  return (res.msg1 ?? "").trim();
+}

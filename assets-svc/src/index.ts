@@ -18,6 +18,7 @@ import type { Allocation, Holding } from "./types.js";
 import { announce } from "./notify.js";
 import { PRINCIPAL_SINCE, buildPortfolio, invalidateVenues } from "./portfolio.js";
 import { placeOrders, requestsOf, type OrderRequest } from "./orders.js";
+import { affordable, cancelStanding, nyClock, standingPass } from "./standing.js";
 import { depositPlan, rebalancePlan } from "./trade-plan.js";
 
 const PORT = Number(process.env.PORT ?? process.env.LISTEN_PORT ?? 8092);
@@ -255,9 +256,89 @@ async function orders(
   send(res, 404, { error: "그런 경로가 없습니다." });
 }
 
+/** What is held now, for a standing order's fill: the portfolio as last built. */
+async function holdingsNow(): Promise<Holding[]> {
+  return (JSON.parse(await portfolioJson()) as { holdings: Holding[] }).holdings;
+}
+
+/**
+ * GET /standing: the standing orders. POST /standing: a new one
+ * ({symbol, side, units, limitPrice | "afford", expiresOn?, reason?}) -
+ * "afford" is the highest price the dollars cover. DELETE /standing/<id>:
+ * cancel it, and today's order at the broker if it is out.
+ */
+async function standing(
+  req: import("node:http").IncomingMessage,
+  res: import("node:http").ServerResponse,
+  url: URL,
+) {
+  if (req.method === "GET") {
+    send(res, 200, { standing: await db.standingOrders(30), market: nyClock() });
+    return;
+  }
+  const match = url.pathname.match(/^\/standing\/(\d+)$/);
+  if (req.method === "DELETE" && match) {
+    const o = (await db.standingOrders(100)).find((x) => x.id === Number(match[1]));
+    if (!o || o.status !== "active") {
+      send(res, 404, { error: "진행 중인 대기 주문이 아닙니다." });
+      return;
+    }
+    send(res, 200, { ok: true, message: await cancelStanding(o) });
+    return;
+  }
+  if (req.method !== "POST" || url.pathname !== "/standing") {
+    send(res, 405, { error: "지원하지 않는 요청입니다." });
+    return;
+  }
+  const body = (await readBody(req).catch(() => null)) as {
+    symbol?: unknown; side?: unknown; units?: unknown; limitPrice?: unknown; expiresOn?: unknown; reason?: unknown;
+  } | null;
+  const symbol = String(body?.symbol ?? "").toUpperCase();
+  const side = body?.side === "sell" ? "sell" : body?.side === "buy" ? "buy" : null;
+  const units = Number(body?.units);
+  const expiresOn = typeof body?.expiresOn === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.expiresOn) ? body.expiresOn : null;
+  if (!/^[A-Z.]{1,10}$/.test(symbol) || !side || !Number.isInteger(units) || units < 1 || units > 1000) {
+    send(res, 400, { error: "종목(미국 주식), 매수·매도, 1 이상의 주 수가 필요합니다." });
+    return;
+  }
+  const p = JSON.parse(await portfolioJson(true)) as { holdings: Holding[]; usdKrw: number };
+  const held = p.holdings.find((h) => h.venue === "kis" && h.symbol === symbol)?.quantity ?? 0;
+  if (side === "sell" && units > Math.floor(held + 1e-6)) {
+    send(res, 400, { error: `${Math.floor(held + 1e-6)}주까지만 팔 수 있어요.` });
+    return;
+  }
+  let limitPrice = Number(body?.limitPrice);
+  let note = "";
+  if (body?.limitPrice === "afford") {
+    const a = await affordable(symbol, units);
+    if (a.price === null) {
+      send(res, 400, { error: `지금 달러로는 ${symbol} ${units}주를 살 수 없어요 (지금 $${a.last.toFixed(2)}).` });
+      return;
+    }
+    limitPrice = a.price;
+    note = `지금 달러로 살 수 있는 가장 높은 가격 $${a.price.toFixed(2)} (지금 $${a.last.toFixed(2)})`;
+  }
+  if (!Number.isFinite(limitPrice) || limitPrice <= 0) {
+    send(res, 400, { error: "지정가(달러)가 필요합니다." });
+    return;
+  }
+  if (units * limitPrice * (p.usdKrw || 1400) > Number(process.env.ORDER_MAX_KRW ?? 1_500_000)) {
+    send(res, 400, { error: "한 번에 주문할 수 있는 금액을 넘어요." });
+    return;
+  }
+  const made = await db.addStanding({
+    symbol, side, units, limitPrice: Math.round(limitPrice * 100) / 100, heldBefore: held,
+    reason: typeof body?.reason === "string" ? body.reason.slice(0, 60) : "", expiresOn,
+  });
+  // In a session now: out at once, not at the next pass.
+  await standingPass(holdingsNow, new Date(), made.id);
+  const now = (await db.standingOrders(100)).find((x) => x.id === made.id) ?? made;
+  send(res, 201, { standing: now, note });
+}
+
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");
-  const writes = url.pathname.startsWith("/principal") || url.pathname.startsWith("/orders");
+  const writes = url.pathname.startsWith("/principal") || url.pathname.startsWith("/orders") || url.pathname.startsWith("/standing");
 
   if (req.method !== "GET" && !writes) {
     send(res, 405, { error: "GET 만 받습니다." });
@@ -285,6 +366,14 @@ const server = createServer((req, res) => {
     void principal(req, res, url).catch((e: Error) => {
       console.error("원금 기록을 바꾸지 못했습니다:", e.message);
       send(res, 503, { error: "원금 기록을 바꾸지 못했습니다." });
+    });
+    return;
+  }
+
+  if (url.pathname.startsWith("/standing")) {
+    void standing(req, res, url).catch((e: Error) => {
+      console.error("대기 주문을 처리하지 못했습니다:", e.message);
+      send(res, 502, { error: "대기 주문을 처리하지 못했습니다: " + e.message.slice(0, 200) });
     });
     return;
   }
@@ -359,6 +448,12 @@ daily.unref();
 setTimeout(() => {
   if (builtOn !== seoulToday()) rebuild().catch(() => {});
 }, 60_000).unref();
+
+// Standing orders: every two minutes, out again in each session until filled.
+const standingTimer = setInterval(() => {
+  standingPass(holdingsNow).catch((e: Error) => console.error("대기 주문을 돌리지 못했습니다:", e.message));
+}, 2 * 60_000);
+standingTimer.unref();
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {

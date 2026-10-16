@@ -118,6 +118,14 @@ export function eventsOf(p: Portfolio, now = new Date()): Event[] {
   return out;
 }
 
+/** Sends one event of this service's own (an order filled); never throws. */
+export function tell(e: Omit<Event, "source">): void {
+  const event: Event = { source: "assets", ...e };
+  void enqueueEvents([event]).then((queued) => {
+    if (!queued) post([event]);
+  });
+}
+
 /** Sends the portfolio's events; never throws, never waits on the caller. */
 export function announce(p: Portfolio): void {
   const events = eventsOf(p);

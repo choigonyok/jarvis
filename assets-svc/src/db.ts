@@ -382,6 +382,81 @@ export async function recentOrders(limit: number): Promise<OrderRow[]> {
   }));
 }
 
+/** A standing order (migration 057): placed again each trading day until filled. */
+export type Standing = {
+  id: number;
+  createdAt: string;
+  venue: "kis";
+  symbol: string;
+  side: "buy" | "sell";
+  units: number;
+  limitPrice: number;
+  heldBefore: number;
+  reason: string;
+  status: "active" | "filled" | "cancelled" | "expired";
+  placedOn: string | null;
+  brokerId: string | null;
+  message: string;
+  expiresOn: string | null;
+  doneAt: string | null;
+};
+
+const standingCols = `id, created_at, venue, symbol, side, units, limit_price, held_before, reason, status,
+  to_char(placed_on, 'YYYY-MM-DD'), broker_id, message, to_char(expires_on, 'YYYY-MM-DD'), done_at`;
+
+function standingOf(r: unknown[]): Standing {
+  const [id, created, venue, symbol, side, units, limit, held, reason, status, placed, broker, message, expires, done] = r as [
+    string, Date, "kis", string, "buy" | "sell", number, string, string, string, Standing["status"], string | null, string | null, string, string | null, Date | null,
+  ];
+  return {
+    id: Number(id), createdAt: created.toISOString(), venue, symbol, side, units: Number(units), limitPrice: Number(limit),
+    heldBefore: Number(held), reason, status, placedOn: placed, brokerId: broker, message, expiresOn: expires,
+    doneAt: done ? done.toISOString() : null,
+  };
+}
+
+export async function addStanding(o: {
+  symbol: string; side: "buy" | "sell"; units: number; limitPrice: number; heldBefore: number; reason: string; expiresOn: string | null;
+}): Promise<Standing> {
+  if (!pool) throw new Error("데이터베이스가 연결되지 않았습니다.");
+  const { rows } = await pool.query({
+    text: `insert into standing_orders (venue, symbol, side, units, limit_price, held_before, reason, expires_on)
+           values ('kis', $1, $2, $3, $4, $5, $6, $7::date) returning ${standingCols}`,
+    values: [o.symbol, o.side, o.units, o.limitPrice, o.heldBefore, o.reason, o.expiresOn],
+    rowMode: "array",
+  });
+  return standingOf(rows[0]);
+}
+
+/** Active ones first, then the latest done. */
+export async function standingOrders(limit = 20): Promise<Standing[]> {
+  if (!pool) return [];
+  const { rows } = await pool.query({
+    text: `select ${standingCols} from standing_orders
+            order by (status = 'active') desc, created_at desc limit $1`,
+    values: [limit],
+    rowMode: "array",
+  });
+  return rows.map(standingOf);
+}
+
+export async function updateStanding(
+  id: number,
+  patch: { status?: Standing["status"]; placedOn?: string; brokerId?: string | null; message?: string },
+): Promise<void> {
+  if (!pool) return;
+  await pool.query(
+    `update standing_orders set
+        status = coalesce($2, status),
+        placed_on = coalesce($3::date, placed_on),
+        broker_id = case when $4::boolean then $5 else broker_id end,
+        message = coalesce($6, message),
+        done_at = case when $2 in ('filled', 'cancelled', 'expired') then now() else done_at end
+      where id = $1`,
+    [id, patch.status ?? null, patch.placedOn ?? null, patch.brokerId !== undefined, patch.brokerId ?? null, patch.message ?? null],
+  );
+}
+
 export async function close(): Promise<void> {
   await pool?.end();
   pool = null;
