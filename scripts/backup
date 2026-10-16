@@ -52,6 +52,9 @@ run() {
   mkdir -p "$out"
   chmod 700 "$DIR"
   log "백업 시작 → $out"
+  # 전제 점검(DEPLOY.md). 백업 자체는 하되, 빠진 전제는 로그에 남긴다.
+  fdesetup status 2>/dev/null | grep -q "FileVault is On" || log "경고: FileVault 가 꺼져 있습니다 - 평문 사본과 백업이 암호화되지 않습니다"
+  tmutil destinationinfo 2>/dev/null | grep -q "Name" || log "경고: Time Machine 대상이 없습니다 - 백업이 맥미니 밖으로 나가지 않습니다"
 
   dc exec -T postgres pg_dump -U "$PGUSER_" -Fc "$PGDB_" > "$out/postgres.dump.tmp"
   mv "$out/postgres.dump.tmp" "$out/postgres.dump"

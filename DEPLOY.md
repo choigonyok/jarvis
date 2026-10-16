@@ -10,10 +10,11 @@
 
 ```
 브라우저 ─▶ jarvis.choigonyok.com (web Worker, 로그인)
-              │ fetch + Bearer JARVIS_API_TOKEN
+              │ 서비스 바인딩 GATEWAY + Bearer JARVIS_EDGE_TOKEN
               ▼
-           jarvis-be.choigonyok.com (edge Worker)
+           jarvis-be (edge Worker)
               │ 토큰 없으면 401, agent 는 콘솔이 쓰는 경로만
+              │ 확인 뒤 Authorization 을 JARVIS_API_TOKEN 으로 바꿔 붙인다
               │ Workers VPC 바인딩 (jarvis-agent 터널)
               ▼
            맥미니 compose: agent:8080 · workout:8091 · assets:8092
@@ -26,17 +27,32 @@
 
 - VPC 서비스: `npx wrangler vpc service list` (jarvis-agent … jarvis-status, 터널 `5b824fd4…`)
 - 게이트웨이 배포: `cd web && npx wrangler deploy -c ../edge/wrangler.jsonc`
-- 게이트웨이 비밀: `npx wrangler secret put JARVIS_API_TOKEN -c ../edge/wrangler.jsonc`
+- 게이트웨이 비밀: `JARVIS_API_TOKEN`(서비스가 확인하는 토큰, 게이트웨이에만)과
+  `JARVIS_EDGE_TOKEN`(콘솔이 게이트웨이에 내는 토큰, 콘솔과 게이트웨이 둘 다).
+  `npx wrangler secret put … -c ../edge/wrangler.jsonc`. 콘솔 Worker 에는 `JARVIS_API_TOKEN` 을 두지 않는다.
 - 콘솔 배포: `cd web && npm run cf:build && npm run cf:deploy`. 백엔드 주소는
   `web/wrangler.jsonc` 의 `vars`(AGENT_URL 만 비밀).
 - 맥미니 쪽: `scripts/mini up`, `scripts/mini compose --profile cloudflare up -d tunnel`.
-  `web` 컨테이너는 `web` 프로필이라 맥미니에서는 뜨지 않는다.
+  웹은 컨테이너가 없다(Cloudflare 에서만 돈다).
 
 **`jarvis.choigonyok.com` 앞에는 Cloudflare Access 가 있다.** Zero Trust 앱 `jarvis`
 (팀 `choigonyok.cloudflareaccess.com`, Free 플랜), 정책 `only me` 는 운영자 이메일 하나만 허용하고
 로그인은 Google(OAuth 클라이언트는 운영자의 Google Cloud 프로젝트 jarvis-access, 테스트 사용자 본인만)과 예비로 이메일 일회용 코드. 앱·팀 세션 모두 730h(약 1개월). 그 뒤에 콘솔 자체 로그인이 한 번 더 있다.
 게이트웨이(`jarvis-be`)는 Access 대상이 아니다 - 사람이 아니라 콘솔 Worker 가 부르는 곳이고,
-`JARVIS_API_TOKEN` 이 그 문을 지킨다.
+`JARVIS_EDGE_TOKEN` 이 그 문을 지킨다.
+
+## 맥미니의 전제 (배포 전에 갖춰 둔다)
+
+- **FileVault 가 켜져 있어야 한다.** 카톡·iMessage 수집기의 SQLite, 미러(`~/.jarvis-mirror`),
+  백업은 평문 사본이다. 디스크 암호화가 그 사본들의 유일한 보호다. `fdesetup status` 로 확인하고,
+  꺼져 있으면 시스템 설정 → 개인정보 보호 및 보안 → FileVault 에서 켠다(복구 키는 맥미니 밖에 보관).
+  `scripts/backup run` 이 꺼져 있으면 로그에 경고를 남긴다.
+- **Time Machine 대상 디스크가 있어야 한다.** `scripts/backup` 은 매일 `~/jarvis-backups` 에
+  떠 두기만 하고, 맥미니 밖으로 옮기는 것은 Time Machine 이다. `tmutil destinationinfo` 로 확인한다.
+- **iMessage 미러는 전용 바이너리에만 전체 디스크 접근 권한을 준다.**
+  `scripts/imessage-mirror install` → 권한 부여 → `scripts/imessage-mirror switch`. 그 뒤 원격
+  로그인(sshd-keygen-wrapper)의 전체 디스크 접근 권한은 끈다.
+- **서비스별 DB 역할 비밀번호:** `scripts/db-roles` (`.env` 의 `JARVIS_DB_PASSWORD_*`).
 
 `agent.choigonyok.com` 은 2026-10-07 에 DNS 와 두 터널의 ingress 에서 모두 지웠다. 맥미니의
 예전 native cloudflared(`macmini` 터널)는 다른 프로젝트 호스트명 때문에 남아 있다.
