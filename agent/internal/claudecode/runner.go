@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/choigonyok/jarvis/agent/internal/adapter/permission"
@@ -146,7 +147,7 @@ func (r *Runner) SendRef(text string, images []string, ref *thread.Ref) error {
 // running - puts it in the queue, where it waits its turn unless it is
 // steered into the running one. queued says which.
 func (r *Runner) Submit(text string, images []string, ref *thread.Ref) (queued bool, err error) {
-	q := &Queued{ID: "q-" + strconv.FormatInt(time.Now().UnixNano(), 36), Text: text, Images: images, Ref: ref, At: time.Now()}
+	q := &Queued{ID: queueID("q"), Text: text, Images: images, Ref: ref, At: time.Now()}
 	r.mu.Lock()
 	if r.running {
 		r.queue = append(r.queue, q)
@@ -179,6 +180,14 @@ func (r *Runner) start(q *Queued) string {
 		}
 	}
 	return prompt
+}
+
+// queued numbers the queue's entries. The clock alone gave two messages
+// queued in the same microsecond one id, and dropping one dropped either.
+var queued atomic.Int64
+
+func queueID(kind string) string {
+	return kind + "-" + strconv.FormatInt(time.Now().UnixNano(), 36) + "-" + strconv.FormatInt(queued.Add(1), 36)
 }
 
 // Queue is the operator's messages waiting behind the running turn.
@@ -289,7 +298,7 @@ func withImages(text string, images []string, dir string) string {
 func (r *Runner) Enqueue(prompt string) {
 	r.mu.Lock()
 	if r.running {
-		r.queue = append(r.queue, &Queued{ID: "c-" + strconv.FormatInt(time.Now().UnixNano(), 36), At: time.Now(), prompt: prompt})
+		r.queue = append(r.queue, &Queued{ID: queueID("c"), At: time.Now(), prompt: prompt})
 		r.mu.Unlock()
 		return
 	}
