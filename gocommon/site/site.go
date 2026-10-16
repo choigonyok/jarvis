@@ -14,10 +14,15 @@ import (
 	"strings"
 )
 
-// sharedSuffixes are second-level names under which anyone registers.
+// sharedSuffixes are second-level names under which anyone registers - a
+// country's (co.kr) or a host's that hands out subdomains to anyone
+// (github.io, herokuapp.com): one app there is not the next.
 var sharedSuffixes = map[string]bool{
 	"co.kr": true, "or.kr": true, "go.kr": true, "ne.kr": true, "re.kr": true, "pe.kr": true, "ac.kr": true, "ms.kr": true,
 	"co.jp": true, "ne.jp": true, "or.jp": true, "co.uk": true, "org.uk": true, "com.au": true, "com.cn": true, "com.tw": true,
+	"github.io": true, "herokuapp.com": true, "vercel.app": true, "netlify.app": true, "pages.dev": true, "workers.dev": true,
+	"web.app": true, "firebaseapp.com": true, "appspot.com": true, "blogspot.com": true, "azurewebsites.net": true,
+	"cloudfront.net": true, "onrender.com": true, "fly.dev": true, "glitch.me": true, "repl.co": true,
 }
 
 // Host is the host of a URL or a bare host name, lower-cased, without port.

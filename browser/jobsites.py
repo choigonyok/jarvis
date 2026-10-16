@@ -19,6 +19,10 @@ LOGIN_HOSTS = [h.strip().lower() for h in os.environ.get("JOB_LOGIN_HOSTS", "nid
 SHARED_SUFFIXES = {
     "co.kr", "or.kr", "go.kr", "ne.kr", "re.kr", "pe.kr", "ac.kr", "ms.kr",
     "co.jp", "ne.jp", "or.jp", "co.uk", "org.uk", "com.au", "com.cn", "com.tw",
+    # 누구에게나 하위 주소를 나눠 주는 곳: 그 밑의 앱 하나는 옆 앱과 남이다.
+    "github.io", "herokuapp.com", "vercel.app", "netlify.app", "pages.dev", "workers.dev",
+    "web.app", "firebaseapp.com", "appspot.com", "blogspot.com", "azurewebsites.net",
+    "cloudfront.net", "onrender.com", "fly.dev", "glitch.me", "repl.co",
 }
 
 
