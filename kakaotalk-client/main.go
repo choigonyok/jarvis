@@ -67,6 +67,7 @@ func main() {
 	defer stop()
 
 	go p.Run(ctx)
+	go retain(ctx, st, envInt64("RETAIN_DAYS", 730))
 
 	srv := &http.Server{
 		Addr:         addr,
@@ -120,4 +121,26 @@ func dirOf(path string) string {
 		}
 	}
 	return "."
+}
+
+// retain deletes stored messages older than days, once a day (0 = keep all).
+// What the services needed has been read by then; the rest is a plaintext
+// copy of private conversations with no reason to stay forever.
+func retain(ctx context.Context, st *store.Store, days int64) {
+	if days <= 0 {
+		return
+	}
+	for {
+		before := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
+		if n, err := st.Prune(before); err != nil {
+			log.Printf("retain: %v", err)
+		} else if n > 0 {
+			log.Printf("retain: deleted %d messages older than %d days", n, days)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(24 * time.Hour):
+		}
+	}
 }

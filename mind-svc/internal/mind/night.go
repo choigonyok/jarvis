@@ -282,3 +282,15 @@ func (m *Mind) daily(ctx context.Context, every time.Duration, cursor string, mi
 		}
 	}
 }
+
+// pruneMessages drops message text past its retention.
+func (m *Mind) pruneMessages(ctx context.Context) error {
+	if m.Opts.MessageRetain <= 0 {
+		return nil
+	}
+	n, err := m.Opts.Store.PruneMessages(ctx, m.Opts.Now().Add(-m.Opts.MessageRetain))
+	if n > 0 {
+		m.Opts.Logger.Info("보존 기한이 지난 메시지를 지웠습니다", "count", n)
+	}
+	return err
+}

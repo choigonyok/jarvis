@@ -202,6 +202,11 @@ func (p *Postgres) PutMessage(ctx context.Context, m model.Message) error {
 	return err
 }
 
+func (p *Postgres) PruneMessages(ctx context.Context, before time.Time) (int64, error) {
+	tag, err := p.db.Exec(ctx, `delete from mind_messages where sent_at < $1`, before)
+	return tag.RowsAffected(), err
+}
+
 const messageCols = `ref, source, room, room_name, sender, is_mine, sent_at, body, sealed`
 
 func (p *Postgres) scanMessage(row pgx.Row) (model.Message, error) {

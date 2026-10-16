@@ -70,6 +70,9 @@ type Options struct {
 	Travel Travel
 	// DailyUSD is the model's daily budget, for the report.
 	DailyUSD float64
+	// MessageRetain is how long message text is kept; 0 keeps it forever.
+	// What was worth keeping has become facts and plans by then.
+	MessageRetain time.Duration
 }
 
 type Mind struct {
@@ -145,7 +148,7 @@ func New(o Options) *Mind {
 		m.answered(ctx, in)
 	}
 	m.mornings = append(m.mornings, m.people, m.gift, m.weekend, m.restock, m.deadlines, m.warranties)
-	m.nightly = append(m.nightly, m.expireQuestions, m.statedPreferences, m.deliveries, m.travelNotes, m.fixedChanges, m.moved)
+	m.nightly = append(m.nightly, m.pruneMessages, m.expireQuestions, m.statedPreferences, m.deliveries, m.travelNotes, m.fixedChanges, m.moved)
 	m.Skills = []skill.Skill{skill.Schedule{}, skill.Loops{}, skill.Brief{}, skill.After{}, skill.Protect{}}
 	m.Attn = attention.New(m.Skills, m.World, o.Store, m.Gate, o.Settle, o.Loc, o.Now, o.Logger)
 	m.Link.OnLink = m.Attn.OnLink

@@ -185,7 +185,8 @@ func main() {
 		Store: st, Log: logOut, LLM: client, Calendar: calendar, Notifier: notifier,
 		Loc: loc, Now: clk.Now, Logger: log, Interpret: cfg, Settle: settle,
 		Policy: gate.DefaultPolicy(), URL: getenv("MIND_UI_URL", "http://localhost:8102/"), Mode: mode,
-		Memory: mem, PlanEvents: os.Getenv("MIND_PLAN_EVENTS") == "true", Photos: photos, Jobs: jobs, Assets: assets, Travel: travel,
+		MessageRetain: time.Duration(atoiOr(getenv("MIND_MESSAGE_RETAIN_DAYS", "365"), 365)) * 24 * time.Hour,
+		Memory:        mem, PlanEvents: os.Getenv("MIND_PLAN_EVENTS") == "true", Photos: photos, Jobs: jobs, Assets: assets, Travel: travel,
 		DailyUSD: number("MIND_DAILY_USD", 1.0),
 	})
 	if !client.Ready() {
@@ -321,4 +322,12 @@ func number(key string, fallback float64) float64 {
 		return f
 	}
 	return fallback
+}
+
+func atoiOr(s string, fallback int) int {
+	n, err := strconv.Atoi(s)
+	if err != nil || n < 0 {
+		return fallback
+	}
+	return n
 }

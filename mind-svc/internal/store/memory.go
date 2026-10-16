@@ -150,6 +150,19 @@ func (m *Memory) Changes(_ context.Context, entityID string, limit int) ([]model
 	return out, nil
 }
 
+func (m *Memory) PruneMessages(_ context.Context, before time.Time) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var n int64
+	for k, msg := range m.messages {
+		if msg.SentAt.Before(before) {
+			delete(m.messages, k)
+			n++
+		}
+	}
+	return n, nil
+}
+
 func (m *Memory) PutMessage(_ context.Context, msg model.Message) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

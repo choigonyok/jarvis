@@ -30,6 +30,8 @@ type Store interface {
 
 	// Content: observed messages, idempotent by Ref.
 	PutMessage(ctx context.Context, m model.Message) error
+	// PruneMessages deletes messages sent before t. It returns how many.
+	PruneMessages(ctx context.Context, before time.Time) (int64, error)
 	Message(ctx context.Context, ref string) (model.Message, error)
 	// RoomMessages is a room's messages sent after `after` and before
 	// `before` (zero: no bound), oldest first, at most limit of the newest.

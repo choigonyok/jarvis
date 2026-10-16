@@ -488,6 +488,8 @@ services:
       KAKAO_PLIST_DIR: /kakao/preferences
       # 복호화 전 사본을 매번 쓰는 곳. 디스크가 아니라 메모리에 둔다.
       KAKAO_SCRATCH_DIR: /scratch
+      # 평문 사본의 보존 기한(일). 0 이면 지우지 않는다.
+      RETAIN_DAYS: ${KAKAO_RETAIN_DAYS:-730}
       # Identity. Pass the account id (skips the one-time recovery scan) and the
       # machine UUID, or a pre-derived passphrase in KAKAO_SQLCIPHER_KEY.
       KAKAO_UUID: ${KAKAO_UUID:-}
@@ -522,6 +524,8 @@ services:
       LISTEN_ADDR: ":8099"
       POLL_INTERVAL: ${IMESSAGE_POLL_INTERVAL:-2s}
       CHAT_DB: /messages/chat.db
+      # 평문 사본의 보존 기한(일). 0 이면 지우지 않는다.
+      RETAIN_DAYS: ${IMESSAGE_RETAIN_DAYS:-730}
       CONTACTS_DB: /addressbook/AddressBook-v22.abcddb
       API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
     volumes:
@@ -734,6 +738,8 @@ services:
       IMMICH_PUBLIC_URL: ${IMMICH_PUBLIC_URL:-}
       MIND_ANTHROPIC_API_KEY: ${MEMORY_ANTHROPIC_API_KEY:-}
       MIND_CONTENT_KEY: ${MIND_CONTENT_KEY:-}
+      # 메시지 본문의 보존 기한(일). 그때쯤이면 남길 것은 사실·계획이 되어 있다.
+      MIND_MESSAGE_RETAIN_DAYS: ${MIND_MESSAGE_RETAIN_DAYS:-365}
       MIND_OWNER_NAME: ${MEMORY_OWNER_NAME:-}
       # 장기 기억: 확인한 사실을 memory-svc(/facts)로 보내고 해석할 때 꺼내 읽는다.
       MIND_MEMORY_URL: http://memory:8100

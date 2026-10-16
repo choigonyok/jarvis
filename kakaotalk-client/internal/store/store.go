@@ -93,6 +93,17 @@ func (s *Store) UpsertMessages(msgs []kakao.Message, collectedAt int64) (int, er
 }
 
 // Cursor returns the persisted incremental cursor (source ROWID), or 0.
+// Prune deletes messages sent before (unix seconds). The newest row always
+// stays: a cursor read from max(rowid_src) must not fall back to zero and
+// collect everything again.
+func (s *Store) Prune(before int64) (int64, error) {
+	res, err := s.db.Exec(`DELETE FROM messages WHERE sent_at < ? AND rowid_src < (SELECT max(rowid_src) FROM messages)`, before)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 func (s *Store) Cursor() (int64, error) {
 	var v sql.NullString
 	err := s.db.QueryRow("SELECT value FROM meta WHERE key='cursor_rowid'").Scan(&v)
