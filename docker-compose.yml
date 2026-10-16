@@ -465,6 +465,12 @@ services:
     # Chromium needs more than the default 64MB of shared memory or it crashes
     # on pages of any size.
     shm_size: "1gb"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; socket.create_connection(('127.0.0.1', 8931), 3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     restart: unless-stopped
 
   # Near-real-time KakaoTalk collector. It polls the local KakaoTalk SQLCipher
@@ -509,6 +515,12 @@ services:
       - "8090"
     tmpfs:
       - /scratch:size=256m,mode=0700
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8090/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     restart: unless-stopped
 
   # iMessage·문자. kakaotalk 처럼 맥의 메시지 앱 데이터베이스(chat.db)를 앞으로만
@@ -536,6 +548,12 @@ services:
       - "127.0.0.1:${IMESSAGE_PORT:-8099}:8099"
     expose:
       - "8099"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8099/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     restart: unless-stopped
 
   # 기억. jarvis 곳곳의 데이터를 Graphiti 지식 그래프(FalkorDB)에 쌓고, 에이전트와
@@ -566,7 +584,7 @@ services:
       # 보낸다. 일정·지출·자산·운동·작업·사진도 mind 가 한 번 읽어 발생으로 쓰고 같은
       # 읽기를 /records 로 보낸다(소스마다 읽는 곳 하나). 여기서는 손님 대화, 6시간
       # 일지, 주간 주제만. mind 없이 돌릴 때는 calendar,spending,… 를 다시 켠다.
-      MEMORY_SOURCES: ${MEMORY_SOURCES:-chat,diary,topics}
+      MEMORY_SOURCES: ${MEMORY_SOURCES:-chat,topics}
       MEMORY_CHAT_GROUPS: ${MEMORY_CHAT_GROUPS:-guest}
       # Graphiti 가 한 번에 부르는 LLM 수. 기본 20 이면 주간 주제 묶음이 API 한도에
       # 걸려(429) 재시도로 버틴다.
@@ -581,6 +599,12 @@ services:
         condition: service_completed_successfully
       falkordb:
         condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     restart: unless-stopped
 
   falkordb:
@@ -594,6 +618,12 @@ services:
       - jarvis-falkordb:/var/lib/falkordb/data
     expose:
       - "6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "PING"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     restart: unless-stopped
 
   # 상태. "뭐가 고장났나"를 컨테이너가 아니라 기능 단위로 답한다 - 카톡이
@@ -759,15 +789,27 @@ services:
         condition: service_completed_successfully
       events:
         condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8102/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     restart: unless-stopped
   tunnel:
-    image: cloudflare/cloudflared:latest
+    image: cloudflare/cloudflared:2026.10.0
     profiles: ["cloudflare"]
-    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    command: tunnel --no-autoupdate --metrics 127.0.0.1:20241 run --token ${CLOUDFLARE_TUNNEL_TOKEN:-}
     # 공개 ingress 는 두지 않는다. Workers VPC 서비스(edge/)가 이 터널을 통해
     # agent·workout 등에 이름으로 닿는다 - 서비스들은 이 네트워크 안에만 있다.
     depends_on:
       - agent
+    healthcheck:
+      test: ["CMD", "cloudflared", "tunnel", "--metrics", "127.0.0.1:20241", "ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     restart: unless-stopped
 
 volumes:

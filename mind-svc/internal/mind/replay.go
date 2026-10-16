@@ -44,7 +44,7 @@ func (m *Mind) Replay(ctx context.Context, client llm.Client, after int64, limit
 	opts.Settle = 0
 	// Facts stay in the replay: a memory of its own, nothing sent to the
 	// real one, no plan announced to the agent.
-	opts.Memory, opts.PlanEvents = memory.NewFake(clk.Now), false
+	opts.Memory = memory.NewFake(clk.Now)
 	r := New(opts)
 	rctx, cancel := context.WithCancel(ctx)
 	defer cancel()

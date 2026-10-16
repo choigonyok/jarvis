@@ -186,7 +186,7 @@ func main() {
 		Loc: loc, Now: clk.Now, Logger: log, Interpret: cfg, Settle: settle,
 		Policy: gate.DefaultPolicy(), URL: getenv("MIND_UI_URL", "http://localhost:8102/"), Mode: mode,
 		MessageRetain: time.Duration(atoiOr(getenv("MIND_MESSAGE_RETAIN_DAYS", "365"), 365)) * 24 * time.Hour,
-		Memory:        mem, PlanEvents: os.Getenv("MIND_PLAN_EVENTS") == "true", Photos: photos, Jobs: jobs, Assets: assets, Travel: travel,
+		Memory:        mem, Photos: photos, Jobs: jobs, Assets: assets, Travel: travel,
 		DailyUSD: number("MIND_DAILY_USD", 1.0),
 	})
 	if !client.Ready() {

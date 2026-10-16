@@ -54,9 +54,6 @@ type Options struct {
 	// Memory is long-term memory (memory-svc); nil keeps facts in the
 	// ledger, pending.
 	Memory memory.Client
-	// PlanEvents announces confirmed plans as memory.plan events, the shape
-	// the agent's suggestion engine already turns into calendar cards.
-	PlanEvents bool
 	// Photos is where albums are made (Immich); nil keeps them in memory.
 	Photos act.Photos
 	// Drafter writes the messages the operator may send; nil: a template.
@@ -155,9 +152,6 @@ func New(o Options) *Mind {
 	m.Attn.Expect = m.onExpect
 	if o.Memory != nil {
 		m.Attn.Recall = m.recallPeople
-	}
-	if o.PlanEvents {
-		m.World.Listen(m.announcePlan)
 	}
 	return m
 }

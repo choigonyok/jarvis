@@ -2,7 +2,6 @@ package mind
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -11,8 +10,6 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/interpret"
 	"github.com/choigonyok/jarvis/mind-svc/internal/memory"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
-	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
-	"github.com/choigonyok/jarvis/mind-svc/internal/skill"
 )
 
 // Recollection is what the assistant knows that bears on a question, from
@@ -175,40 +172,4 @@ func (m *Mind) roomLabel(ctx context.Context, room string) string {
 		return fmt.Sprintf("%s '%s' 대화", app, r.Name)
 	}
 	return "대화"
-}
-
-// announcePlan tells the log about a plan that became confirmed, or a
-// confirmed one that moved, as a memory.plan event - the agent's suggestion
-// engine reads those and offers the calendar card. The key changes only with
-// what a calendar entry would, so a re-read says nothing new.
-func (m *Mind) announcePlan(e model.Entity, c model.Change) {
-	s := e.State
-	if e.Kind != model.KindPlan || s.Status != model.Confirmed || s.Date == "" {
-		return
-	}
-	if b := c.Before; b != nil && b.Status == model.Confirmed && b.Date == s.Date && b.Start == s.Start && b.Place == s.Place {
-		return
-	}
-	fact := strings.TrimSpace(s.Title + " " + skill.Day(s, m.Opts.Loc))
-	if s.Place != "" {
-		fact += " · " + s.Place
-	}
-	if len(s.People) > 0 {
-		fact += " · 함께: " + strings.Join(s.People, ", ")
-	}
-	valid := ""
-	if t, _, ok := skill.When(s, m.Opts.Loc); ok {
-		valid = t.Format(time.RFC3339)
-	}
-	key := fmt.Sprintf("memory.plan:mind:%s:%s:%s:%s", e.ID, s.Date, s.Start, s.Place)
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		data, _ := json.Marshal(map[string]string{"fact": fact + " (확정)", "validAt": valid, "source": m.roomLabel(ctx, e.Room)})
-		if err := m.Opts.Log.Append(ctx, obs.Observation{
-			Source: "mind", Type: "memory.plan", Subject: e.ID, Data: data, Key: key, OccurredAt: m.Opts.Now(),
-		}); err != nil {
-			m.Opts.Logger.Warn("확정된 일정을 알리지 못했습니다", "entity", e.ID, "err", err)
-		}
-	}()
 }

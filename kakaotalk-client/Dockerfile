@@ -8,7 +8,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/kakaotalk-client .
 
-FROM alpine:3.20
+FROM alpine:3.22
 # sqlcipher: unlocks the KakaoTalk database. ca-certificates for good measure.
 RUN apk add --no-cache sqlcipher ca-certificates tzdata
 WORKDIR /app

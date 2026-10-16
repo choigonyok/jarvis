@@ -41,7 +41,10 @@ EVENTS_URL = os.environ.get("EVENTS_URL", "")
 # imessage come off this list; once mind reads the structured sources and
 # sends them to /records, calendar, spending, assets, workout, jobs and photos
 # do too (compose's default is chat,diary,topics).
-SOURCES = [s.strip() for s in (os.environ.get("MEMORY_SOURCES") or ",".join(sources.ALL)).split(",") if s.strip()]
+# 기본값은 운영과 같다: 구조화 기록은 mind 가 /records 로 넣고(diary 가 그것을 다시 LLM 에
+# 넣으면 같은 사실을 두 번 뽑는다), 대화는 chat 만 여기서 읽는다.
+DEFAULT_SOURCES = "chat,topics"
+SOURCES = [s.strip() for s in (os.environ.get("MEMORY_SOURCES") or DEFAULT_SOURCES).split(",") if s.strip()]
 if unknown := [s for s in SOURCES if s not in sources.ALL]:
     log.warning("MEMORY_SOURCES 에 모르는 수집기가 있어 뺍니다: %s", ", ".join(unknown))
     SOURCES = [s for s in SOURCES if s in sources.ALL]
@@ -100,34 +103,6 @@ async def loop():
         wake.clear()
 
 
-# What in a conversation reads like a plan: worth telling the assistant, which
-# decides whether it becomes a suggestion (a calendar entry, say).
-# "~기로" covers 하기로, 먹기로, 가기로, 보기로...: how a plan gets settled in
-# Korean, whatever the verb. A false hit costs one judging turn; the agent
-# decides whether it is worth a card.
-PLAN_WORDS = re.compile(r"약속|만나|만날|기로|예약|일정|모임|방문|확정|식사|저녁|점심|브런치")
-
-
-async def on_extract(group: str, source: str, edges):
-    if group != "owner" or "6시간 묶음" in source:
-        return
-    since = datetime.now(timezone.utc) - timedelta(days=1)
-    for e in edges:
-        fact = (getattr(e, "fact", "") or "").strip()
-        valid_at = getattr(e, "valid_at", None)
-        if not fact or not PLAN_WORDS.search(fact):
-            continue
-        if valid_at is not None and valid_at < since:
-            continue  # already past: nothing to put on a calendar
-        await emit({
-            "source": "memory",
-            "type": "memory.plan",
-            "subject": fact[:80],
-            "key": f"memory.plan:{e.uuid}",
-            "data": {"fact": fact, "validAt": kst(valid_at), "source": source},
-        })
-
-
 async def emit(event: dict):
     """Fire and forget: the event log is a nicety, never a reason to stop
     remembering. The outbox first, so a restarting events-svc loses nothing;
@@ -166,7 +141,6 @@ async def lifespan(app: FastAPI):
             await state.add_diary(group, fact)
 
     graph.on_fact = on_fact
-    graph.on_extract = on_extract
     task = asyncio.create_task(loop())
     yield
     task.cancel()

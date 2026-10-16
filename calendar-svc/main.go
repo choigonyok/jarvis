@@ -59,11 +59,11 @@ func main() {
 		log.Warn("id 순번을 이어받지 못했습니다", "err", err)
 	}
 
-	// 일정이 어디 사는지. 기본은 Postgres, uniple 이면 커플 앱의 공유
-	// 캘린더다. Postgres 는 어느 쪽이든 필요하다 - uniple 의 회전하는 로그인
-	// 토큰을 여기에 적어 둔다.
+	// 일정이 어디 사는지. 기본은 uniple(커플 앱의 공유 캘린더)이고,
+	// CALENDAR_BACKEND=postgres 는 되돌릴 때를 위해 남겨 둔다. Postgres 는
+	// 어느 쪽이든 필요하다 - uniple 의 회전하는 로그인 토큰을 여기에 적어 둔다.
 	var backend api.Backend = st
-	if getenv("CALENDAR_BACKEND", "postgres") == "uniple" {
+	if getenv("CALENDAR_BACKEND", "uniple") == "uniple" {
 		u, err := uniple.Open(ctx, dsn, uniple.Config{
 			BaseURL:     getenv("UNIPLE_URL", "https://api.uniple.app"),
 			AnonKey:     os.Getenv("UNIPLE_ANON_KEY"),
