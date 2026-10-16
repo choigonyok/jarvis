@@ -35,6 +35,15 @@ class GuardRules(unittest.TestCase):
         self.assertTrue(self.g.asks(url, "POST"))
         self.assertFalse(self.g.blocked(url, "POST"))
 
+    def test_any_coupang_checkout_write_is_asked(self):
+        # Whatever the path of Coupang's real payment request, a write to its
+        # order and pay hosts raises a card - a pattern that misses it must not
+        # mean a purchase without asking.
+        for url in ["https://checkout.coupang.com/ssr/api/v2/order", "https://pay.coupang.com/api/approve",
+                    "https://rocketpay.coupang.com/keypad/verify", "https://payment.coupang.com/x"]:
+            self.assertTrue(self.g.asks(url, "POST"), url)
+        self.assertFalse(self.g.asks("https://www.coupang.com/vp/products/123", "POST"), "상품 페이지의 쓰기는 결제가 아님")
+
     def test_other_in_house_pay_is_still_blocked(self):
         self.assertTrue(self.g.blocked("https://pay.ssg.com/ssgpay/approve", "POST"))
         self.assertTrue(self.g.blocked("https://payment.11st.co.kr/payment/order", "POST"))
