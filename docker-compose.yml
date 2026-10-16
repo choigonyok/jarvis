@@ -32,6 +32,8 @@ services:
       timeout: 5s
       retries: 20
       start_period: 10s
+    networks:
+      - data
     restart: unless-stopped
 
   # 스키마. 한 번 돌고 끝나는 서비스이고, 나머지는 이것이 성공으로 끝난 뒤에
@@ -51,6 +53,8 @@ services:
       postgres:
         condition: service_healthy
     # 성공하면 끝이다. 재시작하면 "변경 없음"을 무한히 찍는다.
+    networks:
+      - data
     restart: "no"
 
   agent:
@@ -143,6 +147,10 @@ services:
         condition: service_healthy
       chat:
         condition: service_healthy
+    networks:
+      - default
+      - data
+      - browser
     restart: unless-stopped
 
   # 손님 계정의 jarvis. 운영자의 agent 와 같은 이미지지만 따로 돈다:
@@ -222,6 +230,9 @@ services:
     depends_on:
       db-migrate:
         condition: service_completed_successfully
+    networks:
+      - default
+      - data
     restart: unless-stopped
 
   # 위치·현재 상태. 폰의 OwnTracks(위치·영역 진입/이탈)와 iOS 단축어·맥 수집기(CarPlay,
@@ -257,6 +268,9 @@ services:
     depends_on:
       db-migrate:
         condition: service_completed_successfully
+    networks:
+      - default
+      - data
     restart: unless-stopped
 
   # 가계부. 카드사가 카톡으로 보내는 결제 알림을 카톡 수집기에서 읽어 분류하고
@@ -295,6 +309,9 @@ services:
     depends_on:
       db-migrate:
         condition: service_completed_successfully
+    networks:
+      - default
+      - data
     restart: unless-stopped
 
   # 작업: 대화에서 맡긴 일, 실행마다의 진행 기록, 작업이 지켜보는 대상, 사이트
@@ -322,6 +339,9 @@ services:
     depends_on:
       db-migrate:
         condition: service_completed_successfully
+    networks:
+      - default
+      - data
     restart: unless-stopped
 
   # 대화. 무엇을 말했는지만 여기 있다.
@@ -354,6 +374,9 @@ services:
     depends_on:
       db-migrate:
         condition: service_completed_successfully
+    networks:
+      - default
+      - data
     restart: unless-stopped
 
   # 캘린더. 일정의 저장만 여기 있다.
@@ -401,6 +424,9 @@ services:
     depends_on:
       db-migrate:
         condition: service_completed_successfully
+    networks:
+      - default
+      - data
     restart: unless-stopped
 
   # 자산. 업비트·KIS 를 읽는 유일한 자리다.
@@ -455,6 +481,9 @@ services:
     depends_on:
       db-migrate:
         condition: service_completed_successfully
+    networks:
+      - default
+      - data
     restart: unless-stopped
 
   browser:
@@ -486,6 +515,8 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+    networks:
+      - browser
     restart: unless-stopped
 
   # Near-real-time KakaoTalk collector. It polls the local KakaoTalk SQLCipher
@@ -626,6 +657,9 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+    networks:
+      - default
+      - data
     restart: unless-stopped
 
   falkordb:
@@ -645,6 +679,8 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+    networks:
+      - data
     restart: unless-stopped
 
   # 상태. "뭐가 고장났나"를 컨테이너가 아니라 기능 단위로 답한다 - 카톡이
@@ -692,6 +728,10 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    networks:
+      - default
+      - data
+      - browser
     restart: unless-stopped
 
   # The agent is a Go process driving a Chromium container and a CLI; none of
@@ -727,6 +767,9 @@ services:
     depends_on:
       db-migrate:
         condition: service_completed_successfully
+    networks:
+      - default
+      - data
     restart: unless-stopped
   # The event log every service reports to. It only keeps events and hands
   # each subscriber (notify, agent) the types it asked for, in order; what an
@@ -752,6 +795,9 @@ services:
     depends_on:
       db-migrate:
         condition: service_completed_successfully
+    networks:
+      - default
+      - data
     restart: unless-stopped
   # 인지 루프. 카톡·iMessage·jarvis 대화를 읽어 일정·열린 고리(세계 모델)와
   # 기억할 사실(근거 장부 → memory-svc)을 원문 인용으로 확인해 남긴다. 사람에게
@@ -817,6 +863,9 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+    networks:
+      - default
+      - data
     restart: unless-stopped
   tunnel:
     image: cloudflare/cloudflared:2026.10.0
@@ -832,7 +881,19 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+    networks:
+      - default
+      - browser
     restart: unless-stopped
+
+# 네트워크를 나눈다(D-2). 기본 네트워크(jarvis_default)는 서비스끼리의 HTTP 용이다.
+# - data: Postgres 와 FalkorDB. DB 를 쓰는 서비스만 붙는다 - 손님 agent, 수집기,
+#   브라우저는 DB 에 닿지 못한다.
+# - browser: 바깥 웹페이지를 여는 브라우저. agent(MCP·결제 가드), status(포트 확인),
+#   tunnel(화면 탭의 VNC)만 붙는다 - 페이지가 브라우저를 장악해도 다른 서비스에는 닿지 못한다.
+networks:
+  data:
+  browser:
 
 volumes:
   jarvis-guest-workspace:
