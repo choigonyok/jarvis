@@ -99,6 +99,22 @@ const COMPONENTS: Components = {
 
   hr: () => <hr className="border-edge-soft" />,
 
+  // An image is never loaded: a URL a reply carries - one a page the model
+  // read may have put there - would be fetched the moment the reply showed,
+  // with no click, and could carry whatever its query holds out. It shows
+  // as a link, opened only if tapped. (The CSP's img-src says the same.)
+  img: ({ src, alt }) =>
+    typeof src === "string" && src ? (
+      <a
+        href={src}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="underline decoration-dim underline-offset-[3px] transition-colors hover:decoration-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+      >
+        {alt || "이미지 링크"}
+      </a>
+    ) : null,
+
   // Tables get hairlines between rows and nothing around them. Wide
   // ones scroll inside their own box so the thread never does.
   table: ({ children }) => (
