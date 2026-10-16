@@ -84,6 +84,18 @@ func (b *Bus) sync(ctx context.Context) {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	// 지워진 구독의 일꾼은 멈춘다.
+	live := map[string]bool{}
+	for _, sub := range subs {
+		live[sub.Consumer] = true
+	}
+	for consumer, cancel := range b.running {
+		if !live[consumer] {
+			cancel()
+			delete(b.running, consumer)
+			delete(b.wake, consumer)
+		}
+	}
 	for _, sub := range subs {
 		if _, ok := b.running[sub.Consumer]; ok {
 			continue

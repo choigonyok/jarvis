@@ -160,7 +160,10 @@ func matchCancel(ctx context.Context, tx pgx.Tx, cancelID int64, a parse.Alert, 
 	if err != nil {
 		return err
 	}
-	var match int64
+	// 같은 가맹점이 먼저다. 카드 끝자리만 같은 것은 그 카드에서 그 금액의
+	// 결제가 하나뿐일 때만 짝짓는다 - 여럿이면 어느 것의 취소인지 모른다.
+	var match, byMerchant, byCard int64
+	cards := 0
 	key := category.Key(a.Merchant)
 	for rows.Next() {
 		var id int64
@@ -169,12 +172,22 @@ func matchCancel(ctx context.Context, tx pgx.Tx, cancelID int64, a parse.Alert, 
 			rows.Close()
 			return err
 		}
-		if category.Key(merchant) == key || (a.CardTail != "" && tail == a.CardTail) {
-			match = id
-			break
+		if byMerchant == 0 && category.Key(merchant) == key {
+			byMerchant = id
+		}
+		if a.CardTail != "" && tail == a.CardTail {
+			cards++
+			byCard = id
 		}
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	match = byMerchant
+	if match == 0 && cards == 1 {
+		match = byCard
+	}
 	if match == 0 {
 		return nil
 	}

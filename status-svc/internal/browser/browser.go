@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -85,7 +86,15 @@ func (c *Client) Open(ctx context.Context, target string, busyHosts []string) (L
 	for _, t := range before {
 		seen[t.ID] = true
 	}
-	var opened []tab
+	// Only the tab this check opened is watched and closed. Others that
+	// appear meanwhile belong to whatever else is driving the browser (the
+	// agent, a job) and are left alone. Ours is the first new tab, preferring
+	// one on the target's host or still blank when several appear at once.
+	host := ""
+	if u, err := url.Parse(target); err == nil {
+		host = u.Hostname()
+	}
+	var mine string
 	var landed string
 	// A freshly started browser took 18 seconds to open a tab; give the page
 	// as long again to land before calling it a failure.
@@ -95,21 +104,35 @@ func (c *Client) Open(ctx context.Context, target string, busyHosts []string) (L
 		if err != nil {
 			continue
 		}
-		opened = opened[:0]
-		for _, t := range after {
-			if !seen[t.ID] {
-				opened = append(opened, t)
+		var cur *tab
+		for k := range after {
+			t := &after[k]
+			if mine != "" {
+				if t.ID == mine {
+					cur = t
+				}
+				continue
+			}
+			if seen[t.ID] {
+				continue
+			}
+			if cur == nil || (!strings.Contains(cur.URL, host) && (strings.Contains(t.URL, host) || strings.HasPrefix(t.URL, "about:"))) {
+				cur = t
 			}
 		}
-		if len(opened) > 0 && opened[0].URL != "" && !strings.HasPrefix(opened[0].URL, "about:") {
-			landed = opened[0].URL
+		if cur == nil {
+			continue
+		}
+		mine = cur.ID
+		if cur.URL != "" && !strings.HasPrefix(cur.URL, "about:") {
+			landed = cur.URL
 			if i >= 2 { // at least three seconds, for the redirect
 				break
 			}
 		}
 	}
-	for _, t := range opened {
-		_, _ = s.call(ctx, "browser_close_tab", map[string]any{"tab_id": t.ID})
+	if mine != "" {
+		_, _ = s.call(ctx, "browser_close_tab", map[string]any{"tab_id": mine})
 	}
 	if landed == "" {
 		return Landing{}, errors.New("새 탭이 페이지를 열지 못했습니다")

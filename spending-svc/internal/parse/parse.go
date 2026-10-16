@@ -87,6 +87,11 @@ func Parse(issuer, text string, sentAt time.Time) (Alert, Outcome) {
 	foreign := foreignRe.FindStringSubmatch(text)
 	// A payment alert always says when. Adverts and notices quote won figures
 	// ("최대 10,000원 할인") but almost never a date with a clock time.
+	if when == nil && krwOK && strings.Contains(text, "승인") {
+		// 금액과 "승인"은 있는데 시각이 없다: 형식이 다른 승인 알림일 수 있다.
+		// 버리지 않고 사람이 확인하도록 대기열로 보낸다.
+		return Alert{Issuer: issuerOf(issuer, text), AmountKrw: krw}, Unreadable
+	}
 	if when == nil || (!krwOK && foreign == nil) {
 		return Alert{}, NotPayment
 	}

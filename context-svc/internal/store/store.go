@@ -155,9 +155,10 @@ func (s *Store) Enter(ctx context.Context, region string, at time.Time, source s
 }
 
 // Leave closes the open visit to region at at. It reports whether there
-// was one.
+// was one. A leave older than the visit's start belongs to an earlier visit
+// (a report that arrived late) and closes nothing.
 func (s *Store) Leave(ctx context.Context, region string, at time.Time) (bool, error) {
-	tag, err := s.pool.Exec(ctx, `update context_visits set left_at = greatest($2, entered_at) where region = $1 and left_at is null`, region, at)
+	tag, err := s.pool.Exec(ctx, `update context_visits set left_at = $2 where region = $1 and left_at is null and entered_at <= $2`, region, at)
 	return tag.RowsAffected() > 0, err
 }
 
@@ -171,13 +172,20 @@ type State struct {
 // Set writes a key of the current state, unless what is there is newer:
 // a late report does not overwrite a fresher one.
 func (s *Store) Set(ctx context.Context, key string, value any, at time.Time) error {
+	_, err := s.SetIfNewer(ctx, key, value, at)
+	return err
+}
+
+// SetIfNewer is Set, reporting whether the value was newer than the one kept
+// (a report that arrives late is kept out).
+func (s *Store) SetIfNewer(ctx context.Context, key string, value any, at time.Time) (bool, error) {
 	body, err := json.Marshal(value)
 	if err != nil {
-		return err
+		return false, err
 	}
-	_, err = s.pool.Exec(ctx, `insert into context_state (key, value, at) values ($1, $2, $3)
+	tag, err := s.pool.Exec(ctx, `insert into context_state (key, value, at) values ($1, $2, $3)
 		on conflict (key) do update set value = excluded.value, at = excluded.at where context_state.at <= excluded.at`, key, body, at)
-	return err
+	return tag.RowsAffected() > 0, err
 }
 
 // Drop removes a key of the current state.

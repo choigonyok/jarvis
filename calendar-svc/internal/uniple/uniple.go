@@ -54,6 +54,8 @@ type Client struct {
 
 	mu        sync.Mutex // guards everything below; refresh must never run twice at once
 	refresh   string
+	seed      string // the seed the stored token grew from
+	unsaved   bool   // refresh rotated but not yet written down
 	access    string
 	accessExp time.Time
 	me        string
@@ -117,9 +119,10 @@ func (c *Client) loadRefresh(ctx context.Context) error {
 	}
 
 	if c.cfg.SeedRefresh != "" && c.cfg.SeedRefresh != seed {
-		c.refresh = c.cfg.SeedRefresh
+		c.refresh, c.seed = c.cfg.SeedRefresh, c.cfg.SeedRefresh
 		return c.saveRefresh(ctx, c.refresh, c.cfg.SeedRefresh)
 	}
+	c.seed = seed
 	if stored == "" {
 		return errors.New("uniple 로그인 토큰이 없습니다. UNIPLE_REFRESH_TOKEN 을 설정하세요")
 	}
@@ -148,6 +151,13 @@ func (c *Client) saveRefresh(ctx context.Context, token, seed string) error {
 func (c *Client) token(ctx context.Context, force bool) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.unsaved {
+		// 지난번 회전한 토큰을 아직 적지 못했다. 재시작하면 쓴 토큰으로 돌아가
+		// 세션이 끊기므로, 다른 일보다 먼저 다시 적어 본다.
+		if err := c.saveRefresh(ctx, c.refresh, c.seed); err == nil {
+			c.unsaved = false
+		}
+	}
 	if !force && c.access != "" && time.Until(c.accessExp) > time.Minute {
 		return c.access, nil
 	}
@@ -182,12 +192,19 @@ func (c *Client) token(ctx context.Context, force bool) (string, error) {
 		return "", fmt.Errorf("uniple 로그인이 만료됐습니다(%s). 새 UNIPLE_REFRESH_TOKEN 이 필요합니다", res.Status)
 	}
 
-	var seed string
-	_ = c.pool.QueryRow(ctx, `select seed from uniple_session where id = 1`).Scan(&seed)
-	if err := c.saveRefresh(ctx, out.RefreshToken, seed); err != nil {
-		return "", err
-	}
+	// 옛 토큰은 이미 쓰였다. 저장이 실패해도 메모리의 토큰은 새 것으로 바꿔
+	// 둔다 - 옛 것을 다시 쓰면 그 순간 세션이 끊긴다. 저장은 요청이 취소돼도
+	// 끝까지 하고, 실패하면 다음 호출에서 다시 한다.
 	c.refresh = out.RefreshToken
+	save := context.WithoutCancel(ctx)
+	var saveErr error
+	for i := 0; i < 3; i++ {
+		if saveErr = c.saveRefresh(save, out.RefreshToken, c.seed); saveErr == nil {
+			break
+		}
+		time.Sleep(time.Duration(i+1) * 200 * time.Millisecond)
+	}
+	c.unsaved = saveErr != nil
 	c.access = out.AccessToken
 	c.accessExp = time.Now().Add(time.Duration(out.ExpiresIn) * time.Second)
 	c.me = out.User.ID

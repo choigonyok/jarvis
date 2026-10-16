@@ -145,3 +145,12 @@ func TestUnreadableIsNotDropped(t *testing.T) {
 		t.Fatalf("엔화: outcome %v, want Unreadable", out)
 	}
 }
+
+// An approval with an amount but no time is a format not seen before: it is
+// queued for a person, not dropped.
+func TestApprovalWithoutTimeIsQueued(t *testing.T) {
+	_, got := Parse("가나카드", "[가나카드] 홍*동님 12,300원 승인 테스트상점", time.Date(2026, 10, 16, 9, 0, 0, 0, time.UTC))
+	if got != Unreadable {
+		t.Fatalf("got %v, want Unreadable", got)
+	}
+}

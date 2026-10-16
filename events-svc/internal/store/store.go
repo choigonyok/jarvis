@@ -146,14 +146,24 @@ func (s *Store) Drain(ctx context.Context, limit int, parse func([]byte) (Event,
 	return moved, tx.Commit(ctx)
 }
 
-// Prune deletes events older than keep that every consumer is already past.
-// One a consumer has yet to take stays, however old.
+// Prune deletes events older than keep that every live consumer is already
+// past. One a consumer has yet to take stays, however old - unless that
+// consumer has taken nothing for longer than keep: a stopped consumer must
+// not hold the log forever. It is unsubscribed, not waited for.
 func (s *Store) Prune(ctx context.Context, keep time.Duration) (int64, error) {
 	tag, err := s.pool.Exec(ctx, `
 		delete from events
 		 where received_at < now() - make_interval(secs => $1)
-		   and id <= (select coalesce(min(cursor), 0) from event_subscriptions)`, keep.Seconds())
+		   and id <= (select coalesce(min(cursor), (select coalesce(max(id), 0) from events))
+		                from event_subscriptions
+		               where coalesce(last_ok_at, updated_at) >= now() - make_interval(secs => $1))`, keep.Seconds())
 	return tag.RowsAffected(), err
+}
+
+// Unsubscribe removes a consumer. It reports whether there was one.
+func (s *Store) Unsubscribe(ctx context.Context, consumer string) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `delete from event_subscriptions where consumer = $1`, consumer)
+	return tag.RowsAffected() > 0, err
 }
 
 // After is the next events past cursor, oldest first.

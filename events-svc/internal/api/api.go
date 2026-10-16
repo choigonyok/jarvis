@@ -40,6 +40,7 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("POST /events", s.auth(s.append))
 	mux.HandleFunc("PUT /subscriptions/{consumer}", s.auth(s.subscribe))
+	mux.HandleFunc("DELETE /subscriptions/{consumer}", s.auth(s.unsubscribe))
 	mux.HandleFunc("GET /subscriptions", s.auth(s.subscriptions))
 	mux.HandleFunc("GET /events", s.auth(s.list))
 	return mux
@@ -163,6 +164,20 @@ func (s *Server) subscribe(w http.ResponseWriter, r *http.Request) {
 	}
 	s.sync()
 	writeJSON(w, http.StatusOK, sub)
+}
+
+func (s *Server) unsubscribe(w http.ResponseWriter, r *http.Request) {
+	ok, err := s.store.Unsubscribe(r.Context(), r.PathValue("consumer"))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "구독을 지우지 못했습니다."})
+		return
+	}
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "그런 구독이 없습니다."})
+		return
+	}
+	s.sync()
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) subscriptions(w http.ResponseWriter, r *http.Request) {

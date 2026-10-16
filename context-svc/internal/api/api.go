@@ -211,8 +211,12 @@ func (s *Server) ingest(ctx context.Context, rep report, at time.Time) ([]map[st
 		}
 	case "location":
 		loc := Location{Lat: rep.Lat, Lon: rep.Lon, Acc: rep.Acc, Batt: rep.Batt, Charging: rep.BS == 2 || rep.BS == 3}
-		if err := s.st.Set(ctx, "location", loc, at); err != nil {
+		newer, err := s.st.SetIfNewer(ctx, "location", loc, at)
+		if err != nil {
 			return nil, err
+		}
+		if !newer {
+			break // a fix that arrived late says nothing about where the phone is now
 		}
 		if rep.Acc > s.cfg.Trust {
 			break // too rough to say which region

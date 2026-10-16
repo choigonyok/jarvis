@@ -162,12 +162,14 @@ func (in *Ingester) pollOnce(ctx context.Context) error {
 func (in *Ingester) handle(ctx context.Context, m message) error {
 	sentAt := time.Unix(m.SentAt, 0).In(in.loc)
 	alert, outcome := parse.Parse(m.ChatName, m.Text, sentAt)
-	if outcome == parse.NotPayment {
-		return nil
-	}
+	// 카드사 방의 메시지는 결제로 읽히지 않아도 원본을 남긴다. 형식이 바뀐
+	// 알림을 나중에 다시 파싱할 수 있는 근거는 이것뿐이다.
 	eventID, err := in.store.RawEvent(ctx, m.MessageID, m.ChatName, m.Text, sentAt)
 	if err != nil {
 		return err
+	}
+	if outcome == parse.NotPayment {
+		return nil
 	}
 	in.mu.Lock()
 	if in.status.LastAlertAt == nil || sentAt.After(*in.status.LastAlertAt) {
