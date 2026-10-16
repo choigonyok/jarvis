@@ -11,6 +11,7 @@ package main
 import (
 	"context"
 	"errors"
+	"github.com/choigonyok/jarvis/gocommon/collect"
 	"log/slog"
 	"net/http"
 	"os"
@@ -98,23 +99,10 @@ func main() {
 	}()
 
 	// 보존 기한이 지난 메시지는 하루에 한 번 지운다(0 = 모두 둔다).
-	if days, _ := strconv.Atoi(getenv("RETAIN_DAYS", "730")); days > 0 {
-		go func() {
-			for {
-				before := time.Now().AddDate(0, 0, -days).Unix()
-				if n, err := st.Prune(before); err != nil {
-					log.Warn("오래된 메시지를 지우지 못했습니다", "err", err)
-				} else if n > 0 {
-					log.Info("보존 기한이 지난 메시지를 지웠습니다", "count", n, "days", days)
-				}
-				select {
-				case <-ctx.Done():
-					return
-				case <-time.After(24 * time.Hour):
-				}
-			}
-		}()
-	}
+	days, _ := strconv.Atoi(getenv("RETAIN_DAYS", "730"))
+	go collect.Retain(ctx, days, st.Prune, func(n int64, err error) {
+		log.Info("보존 기한이 지난 메시지를 지웠습니다", "count", n, "days", days, "err", err)
+	})
 
 	srv := &http.Server{
 		Addr:              getenv("LISTEN_ADDR", ":8099"),

@@ -4,8 +4,8 @@
 package api
 
 import (
-	"crypto/subtle"
 	"encoding/json"
+	"github.com/choigonyok/jarvis/gocommon/collect"
 	"net/http"
 	"strconv"
 
@@ -35,17 +35,7 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if s.token != "" {
-			if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+s.token)) != 1 {
-				writeErr(w, http.StatusUnauthorized, "unauthorized")
-				return
-			}
-		}
-		next(w, r)
-	}
-}
+func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc { return collect.Guard(s.token, next) }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})

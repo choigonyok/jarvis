@@ -3,6 +3,8 @@
 # pure-Go modernc.org/sqlite driver, so no C toolchain is needed here.
 FROM golang:1.25-alpine AS build
 WORKDIR /src
+# go.mod 의 replace => ../gocommon 이 가리키는 곳. compose 의 additional_contexts 로 온다.
+COPY --from=gocommon . /gocommon
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .

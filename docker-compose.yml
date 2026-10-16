@@ -499,7 +499,10 @@ services:
   # read-only. For the lowest latency, running the binary on the host is more
   # reliable than the VM file-share; this service is the containerised option.
   kakaotalk:
-    build: ./kakaotalk-client
+    build:
+      context: ./kakaotalk-client
+      additional_contexts:
+        gocommon: ./gocommon
     environment:
       TZ: ${TZ:-Asia/Seoul}
       POLL_INTERVAL: ${KAKAO_POLL_INTERVAL:-1s}
@@ -545,7 +548,10 @@ services:
   # 못한다. 그래서 scripts/imessage-mirror.sh 가 SSH 권한으로 ~/.jarvis-mirror 에
   # 복사해 두고(LaunchAgent com.jarvis.imessage-mirror), 이 컨테이너는 그 복사본을 읽는다.
   imessage:
-    build: ./imessage-client
+    build:
+      context: ./imessage-client
+      additional_contexts:
+        gocommon: ./gocommon
     environment:
       TZ: ${TZ:-Asia/Seoul}
       LISTEN_ADDR: ":8099"
