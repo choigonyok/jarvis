@@ -223,8 +223,6 @@ export function Assets() {
                     detail={
                       <AllocationDetail
                         allocation={allocation}
-                        holdings={data.holdings}
-                        goldGramKrw={data.goldGramKrw}
                         tax={data.realized?.tax}
                       />
                     }

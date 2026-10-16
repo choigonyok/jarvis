@@ -24,6 +24,10 @@ export async function GET(request: Request) {
   // 무엇을 들고 있었나"라는 다른 질문이다.
   const params = new URL(request.url).searchParams;
   const days = params.get("history");
+  if (params.get("plan") === "1") {
+    const deposit = Number(params.get("deposit") ?? 0) || 0;
+    return forward(request, `${ASSETS_URL}/plan?deposit=${deposit}`, { label: "자산 서비스", requestHeaders: [] }, { method: "GET" });
+  }
   return forward(
     request,
     ASSETS_URL +

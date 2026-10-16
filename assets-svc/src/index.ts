@@ -13,8 +13,10 @@ import { timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 
 import * as db from "./db.js";
+import type { Allocation, Holding } from "./types.js";
 import { announce } from "./notify.js";
 import { PRINCIPAL_SINCE, buildPortfolio, invalidateVenues } from "./portfolio.js";
+import { depositPlan, rebalancePlan } from "./trade-plan.js";
 
 const PORT = Number(process.env.PORT ?? process.env.LISTEN_PORT ?? 8092);
 const TOKEN = process.env.API_TOKEN ?? "";
@@ -209,6 +211,26 @@ const server = createServer((req, res) => {
       .catch((e: Error) => {
         console.error("자산을 계산하지 못했습니다:", e.message);
         send(res, 502, { error: "자산을 불러오지 못했습니다." });
+      });
+    return;
+  }
+
+  // 리밸런싱·입금 매매 계획. 가격·보유는 화면이 본 것과 같은 캐시에서 온다.
+  if (url.pathname === "/plan") {
+    const deposit = Number(url.searchParams.get("deposit") ?? 0);
+    void portfolioJson()
+      .then((body) => {
+        const p = JSON.parse(body) as { holdings: Holding[]; allocation?: Allocation; goldGramKrw: number | null };
+        if (!p.allocation) return send(res, 503, { error: "목표 비중을 계산하지 못했습니다." });
+        const opts = { goldGramKrw: p.goldGramKrw };
+        send(res, 200, {
+          rebalance: rebalancePlan(p.allocation, p.holdings, opts),
+          deposit: Number.isFinite(deposit) && deposit > 0 ? depositPlan(p.allocation, p.holdings, deposit, opts) : null,
+        });
+      })
+      .catch((e: Error) => {
+        console.error("매매 계획을 세우지 못했습니다:", e.message);
+        send(res, 502, { error: "매매 계획을 세우지 못했습니다." });
       });
     return;
   }

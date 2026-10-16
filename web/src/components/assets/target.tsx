@@ -1,11 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { plannedGains } from "@/components/assets/realized";
-import { type Holding, type Realized, krw, signedKrw, taxFor } from "@/lib/portfolio";
+import { type Realized, krw, signedKrw, taxFor } from "@/lib/portfolio";
 import { cn } from "@/lib/utils";
 import type { Allocation, Bucket, Drift } from "@/lib/target";
-import { type Order, depositPlan, rebalancePlan } from "@/lib/trade-plan";
+import type { Order, Plan } from "@/lib/trade-plan";
 
 /**
  * Each bucket keeps one hue everywhere it appears. None of them is green or
@@ -103,6 +103,32 @@ export function DriftColumns({ allocation }: { allocation: Allocation }) {
   );
 }
 
+const NO_PLAN: Plan = { orders: [], cashAfterKrw: 0, cashChangeKrw: 0, buckets: [], unpicked: [] };
+
+/**
+ * The orders that would bring the pot to target, and what to buy with new
+ * cash - asked of assets-svc, which holds the prices. Asked again when the
+ * pot moves or the amount typed settles.
+ */
+function usePlan(totalKrw: number, deposit: number): { rebalance: Plan; fill: Plan | null } {
+  const [plan, setPlan] = useState<{ rebalance: Plan; deposit: Plan | null } | null>(null);
+  useEffect(() => {
+    const ctl = new AbortController();
+    const t = setTimeout(() => {
+      const q = deposit > 0 ? `&deposit=${deposit}` : "";
+      fetch(`/api/portfolio?plan=1${q}`, { cache: "no-store", signal: ctl.signal })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((b: { rebalance: Plan; deposit: Plan | null } | null) => b && setPlan(b))
+        .catch(() => {});
+    }, 300);
+    return () => {
+      clearTimeout(t);
+      ctl.abort();
+    };
+  }, [totalKrw, deposit]);
+  return { rebalance: plan?.rebalance ?? NO_PLAN, fill: deposit > 0 ? (plan?.deposit ?? null) : null };
+}
+
 /**
  * The bar explained, and what to do about it: the buckets as "now (target)",
  * the orders only when something has left its band, and a field for new
@@ -110,23 +136,15 @@ export function DriftColumns({ allocation }: { allocation: Allocation }) {
  */
 export function AllocationDetail({
   allocation,
-  holdings,
-  goldGramKrw,
   tax,
 }: {
   allocation: Allocation;
-  holdings: Holding[];
-  goldGramKrw?: number | null;
   tax?: Realized["tax"];
 }) {
   const { rows } = allocation;
   const [amount, setAmount] = useState("");
   const deposit = Number(amount.replace(/[^\d]/g, "")) || 0;
-  const rebalance = useMemo(() => rebalancePlan(allocation, holdings, { goldGramKrw }), [allocation, holdings, goldGramKrw]);
-  const fill = useMemo(
-    () => (deposit > 0 ? depositPlan(allocation, holdings, deposit, { goldGramKrw }) : null),
-    [allocation, holdings, deposit, goldGramKrw],
-  );
+  const { rebalance, fill } = usePlan(allocation.totalKrw, deposit);
   const sells = rebalance.orders.filter((o) => o.side === "sell");
   const gains = plannedGains(sells);
   const overseas = tax?.baskets.find((b) => b.kind === "overseas" && b.inForce);
