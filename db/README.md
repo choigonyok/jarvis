@@ -126,3 +126,13 @@ alter table raw_events enable trigger raw_events_no_truncate;
 
 아직 안 한 것: 기존 `calendar.json` · `workout.json` · `thread.json` 을
 이 테이블로 옮기는 마이그레이션. 각 기능을 서비스로 떼어낼 때 함께 합니다.
+
+## 서비스별 역할 (050)
+
+서비스는 소유자(`jarvis`)가 아니라 자기 역할(`svc_<서비스>`)로 붙는다. 역할은 050 이 비밀번호
+없이 만들고, `scripts/db-roles` 가 맥미니 `.env` 의 `JARVIS_DB_PASSWORD_<서비스>` 로 비밀번호를
+넣는다. 마이그레이션(db-migrate)과 백업만 소유자로 돈다.
+
+**새 표를 만드는 마이그레이션은 같은 파일에서 그 표의 권한도 준다** - 쓰는 서비스에
+`select, insert, update, delete`, 읽기만 하는 서비스에 `select`. 주지 않으면 그 서비스의 쿼리가
+`permission denied` 로 실패한다. 이벤트를 내는 서비스는 `event_outbox` 에 `insert` 만 받는다.

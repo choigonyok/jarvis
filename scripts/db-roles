@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# 서비스별 Postgres 역할(svc_*, 마이그레이션 050)에 비밀번호를 정해 넣는다. 맥북에서 실행한다.
+#
+#   scripts/db-roles   맥미니 .env 에 JARVIS_DB_PASSWORD_<서비스> 가 없으면 만들고, 역할에 적용한다
+#
+# 여러 번 돌려도 된다: 있는 비밀번호는 그대로 두고 다시 적용만 한다. 비밀번호는 맥미니 .env 에만
+# 있고 화면에 찍지 않는다. docker-compose.yml 의 각 서비스 DATABASE_URL 이 이 값을 쓴다.
+set -euo pipefail
+HOST="${MINI_HOST:-macmini}"
+SERVICES="agent assets calendar chat context events jobs memory mind notify spending status workout"
+
+ssh -o LogLevel=ERROR "$HOST" "SERVICES='$SERVICES' bash -s" <<'SH'
+set -euo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.orbstack/bin:/Applications/Docker.app/Contents/Resources/bin:$PATH"
+cd ~/jarvis
+umask 077
+# 1) 비밀번호부터 전부. compose 는 이 값이 없으면 어떤 명령도 하지 않는다.
+for s in $SERVICES; do
+  key="JARVIS_DB_PASSWORD_$(echo "$s" | tr a-z A-Z)"
+  if ! grep -q "^$key=" .env; then
+    printf '%s=%s\n' "$key" "$(openssl rand -hex 24)" >> .env
+    echo "만들었습니다: $key"
+  fi
+done
+# 2) 역할을 만드는 마이그레이션(050)까지 적용.
+docker compose up -d db-migrate >/dev/null 2>&1
+docker compose wait db-migrate >/dev/null 2>&1 || true
+# 3) 역할에 비밀번호. 표준 입력으로 넘긴다 - 명령줄에 남지 않게.
+for s in $SERVICES; do
+  key="JARVIS_DB_PASSWORD_$(echo "$s" | tr a-z A-Z)"
+  pw=$(grep "^$key=" .env | cut -d= -f2-)
+  printf "alter role svc_%s password '%s';\n" "$s" "$pw" |
+    docker compose exec -T postgres psql -qX -v ON_ERROR_STOP=1 -U jarvis -d jarvis >/dev/null
+done
+chmod 600 .env
+echo "역할 비밀번호를 적용했습니다: $SERVICES"
+SH

@@ -114,7 +114,7 @@ services:
       # 아직 아무도 읽지 않는다. 제안·스레드 저장소가 파일에서 이 데이터베이스로
       # 옮겨갈 때 쓰는 자리를 미리 잡아둔 것이다.
       JARVIS_DATABASE_URL: >-
-        postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
+        postgres://svc_agent:${JARVIS_DB_PASSWORD_AGENT:?scripts/db-roles 를 먼저 실행하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
     volumes:
       # Everything the agent may read and act on, once approved.
       - ${JARVIS_WORKSPACE_HOST:-./workspace}:/workspace
@@ -211,7 +211,7 @@ services:
       TZ: ${TZ:-Asia/Seoul}
       LISTEN_ADDR: ":8091"
       DATABASE_URL: >-
-        postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
+        postgres://svc_workout:${JARVIS_DB_PASSWORD_WORKOUT:?scripts/db-roles 를 먼저 실행하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
       # 스택의 나머지와 같은 베어러. /health 만 예외다.
       API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
     expose:
@@ -248,7 +248,7 @@ services:
       TZ: ${TZ:-Asia/Seoul}
       LISTEN_ADDR: ":8103"
       DATABASE_URL: >-
-        postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
+        postgres://svc_context:${JARVIS_DB_PASSWORD_CONTEXT:?scripts/db-roles 를 먼저 실행하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
       API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
       SIGNAL_TOKEN: ${CONTEXT_SIGNAL_TOKEN:-}
       OWNTRACKS_USER: ${OWNTRACKS_USER:-}
@@ -288,7 +288,7 @@ services:
       TZ: ${TZ:-Asia/Seoul}
       LISTEN_ADDR: ":8095"
       DATABASE_URL: >-
-        postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
+        postgres://svc_spending:${JARVIS_DB_PASSWORD_SPENDING:?scripts/db-roles 를 먼저 실행하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
       API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
       NOTIFY_URL: http://events:8101
       KAKAOTALK_URL: http://kakaotalk:8090
@@ -322,7 +322,7 @@ services:
       TZ: ${TZ:-Asia/Seoul}
       LISTEN_ADDR: ":8098"
       DATABASE_URL: >-
-        postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
+        postgres://svc_jobs:${JARVIS_DB_PASSWORD_JOBS:?scripts/db-roles 를 먼저 실행하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
       API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
       # 작업이 끝나고 이만큼 지나면 첨부 사진을 지운다.
       JOBS_PURGE_AFTER: ${JOBS_PURGE_AFTER:-720h}
@@ -359,7 +359,7 @@ services:
       TZ: ${TZ:-Asia/Seoul}
       LISTEN_ADDR: ":8094"
       DATABASE_URL: >-
-        postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
+        postgres://svc_chat:${JARVIS_DB_PASSWORD_CHAT:?scripts/db-roles 를 먼저 실행하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
       API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
     expose:
       - "8094"
@@ -398,7 +398,7 @@ services:
       TZ: ${TZ:-Asia/Seoul}
       LISTEN_ADDR: ":8093"
       DATABASE_URL: >-
-        postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
+        postgres://svc_calendar:${JARVIS_DB_PASSWORD_CALENDAR:?scripts/db-roles 를 먼저 실행하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
       API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
       NOTIFY_URL: http://events:8101
       # 일정 저장소. uniple 이면 커플 앱의 공유 캘린더를 비공식 Supabase
@@ -448,7 +448,7 @@ services:
       # 스냅샷용. 없어도 자산 조회는 된다 - 증권사가 현재 보유의 원천이고,
       # 데이터베이스가 답하는 것은 "그때 무엇을 들고 있었나"뿐이다.
       DATABASE_URL: >-
-        postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
+        postgres://svc_assets:${JARVIS_DB_PASSWORD_ASSETS:?scripts/db-roles 를 먼저 실행하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
       UPBIT_ACCESS_KEY: ${UPBIT_ACCESS_KEY:-}
       UPBIT_SECRET_KEY: ${UPBIT_SECRET_KEY:-}
       KIS_APP_KEY: ${KIS_APP_KEY:-}
@@ -619,7 +619,7 @@ services:
     environment:
       TZ: ${TZ:-Asia/Seoul}
       DATABASE_URL: >-
-        postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}
+        postgres://svc_memory:${JARVIS_DB_PASSWORD_MEMORY:?scripts/db-roles 를 먼저 실행하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}
       API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
       # 없으면 글 추출만 쉬고 구조화 데이터는 계속 쌓는다.
       MEMORY_OWNER_NAME: ${MEMORY_OWNER_NAME:-}
@@ -702,7 +702,7 @@ services:
       TZ: ${TZ:-Asia/Seoul}
       LISTEN_ADDR: ":8096"
       DATABASE_URL: >-
-        postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
+        postgres://svc_status:${JARVIS_DB_PASSWORD_STATUS:?scripts/db-roles 를 먼저 실행하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
       API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
       NOTIFY_URL: http://events:8101
       KAKAOTALK_URL: http://kakaotalk:8090
@@ -748,7 +748,7 @@ services:
       TZ: ${TZ:-Asia/Seoul}
       LISTEN_ADDR: ":8097"
       DATABASE_URL: >-
-        postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
+        postgres://svc_notify:${JARVIS_DB_PASSWORD_NOTIFY:?scripts/db-roles 를 먼저 실행하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
       API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
       VAPID_PUBLIC_KEY: ${JARVIS_VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${JARVIS_VAPID_PRIVATE_KEY:-}
@@ -780,7 +780,7 @@ services:
       TZ: ${TZ:-Asia/Seoul}
       LISTEN_ADDR: ":8101"
       DATABASE_URL: >-
-        postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
+        postgres://svc_events:${JARVIS_DB_PASSWORD_EVENTS:?scripts/db-roles 를 먼저 실행하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
       API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
     expose:
       - "8101"
@@ -808,7 +808,7 @@ services:
     environment:
       TZ: ${TZ:-Asia/Seoul}
       DATABASE_URL: >-
-        postgres://${JARVIS_POSTGRES_USER:-jarvis}:${JARVIS_POSTGRES_PASSWORD:?JARVIS_POSTGRES_PASSWORD 를 .env 에 설정하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
+        postgres://svc_mind:${JARVIS_DB_PASSWORD_MIND:?scripts/db-roles 를 먼저 실행하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
       API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
       EVENTS_URL: http://events:8101
       MIND_SELF_URL: http://mind:8102/consume
