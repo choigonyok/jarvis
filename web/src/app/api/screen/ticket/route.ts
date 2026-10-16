@@ -1,13 +1,13 @@
 // A one-minute ticket for the 화면 tab's VNC socket.
 //
-// The socket goes to the gateway (jarvis-be), which wants JARVIS_API_TOKEN -
+// The socket goes to the gateway (jarvis-be), which wants JARVIS_EDGE_TOKEN -
 // but a browser cannot put a header on a WebSocket, and the token itself must
 // never reach the browser. So this route, which sits behind the console login
 // (src/middleware.ts), signs a short-lived ticket with the token instead. The
 // gateway checks the signature and the expiry, and only for /vnc/websockify.
 // It is only needed to open the socket; a session that is already open runs on.
 const GATEWAY = process.env.JARVIS_VNC_GATEWAY ?? "";
-const API_TOKEN = process.env.JARVIS_API_TOKEN ?? "";
+const API_TOKEN = process.env.JARVIS_EDGE_TOKEN ?? "";
 const TTL_SECONDS = 60;
 
 export const dynamic = "force-dynamic";

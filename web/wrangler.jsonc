@@ -30,7 +30,7 @@
 
   // Every backend is reached through the gateway Worker (edge/), which rides a
   // Workers VPC binding into the Mac mini. The addresses are not secret - the
-  // gateway refuses anything without JARVIS_API_TOKEN, which is a secret here.
+  // gateway refuses anything without JARVIS_EDGE_TOKEN, which is a secret here.
   // AGENT_URL stays a secret only because it was created as one; its value is
   // https://jarvis-be.choigonyok.com/agent.
   "vars": {
@@ -54,7 +54,7 @@
     "AGENT_GUEST_URL": "https://jarvis-be.choigonyok.com/agent-guest"
   }
 
-  // Secrets (see DEPLOY.md): AGENT_URL, JARVIS_API_TOKEN, JARVIS_AUTH_ID,
+  // Secrets (see DEPLOY.md): AGENT_URL, JARVIS_EDGE_TOKEN, JARVIS_AUTH_ID,
   // JARVIS_AUTH_PASSWORD, JARVIS_AUTH_SECRET, and ACCESS_OWNERS / ACCESS_GUESTS
   // (who is who behind Access - email addresses, so not in this public file).
 }

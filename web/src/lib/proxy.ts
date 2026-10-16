@@ -3,7 +3,7 @@
 // The browser never talks to a service directly: the bearer token stays on
 // the server side of this, and every route using it sits behind the console
 // login (see src/middleware.ts). Responses are never cached.
-const API_TOKEN = process.env.JARVIS_API_TOKEN ?? "";
+const API_TOKEN = process.env.JARVIS_EDGE_TOKEN ?? "";
 
 export type ProxyOptions = {
   /** Shown when the service cannot be reached: "<label>에 연결하지 못했습니다." */

@@ -25,7 +25,12 @@ interface Fetcher {
 }
 
 interface Env {
+  /** What the services behind check. Only this gateway holds it. */
   JARVIS_API_TOKEN: string;
+  /** What callers of this gateway (the console Worker) present. */
+  JARVIS_EDGE_TOKEN?: string;
+  /** Transition only: also take the services' token from callers. */
+  ACCEPT_API_TOKEN?: string;
   AGENT: Fetcher;
   WORKOUT: Fetcher;
   ASSETS: Fetcher;
@@ -101,16 +106,20 @@ const json = (status: number, error: string) =>
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    if (!env.JARVIS_API_TOKEN) return json(503, "게이트웨이에 토큰이 설정되지 않았습니다.");
+    if (!env.JARVIS_API_TOKEN || !env.JARVIS_EDGE_TOKEN) return json(503, "게이트웨이에 토큰이 설정되지 않았습니다.");
     const url = new URL(request.url);
     const [, name = "", ...rest] = url.pathname.split("/");
 
+    // Callers hold the gateway's token, not the services': a leaked console
+    // secret opens this door, which can be rotated alone, and nothing behind.
     const auth = request.headers.get("authorization") ?? "";
-    const bearer = same(auth, `Bearer ${env.JARVIS_API_TOKEN}`);
+    const bearer =
+      same(auth, `Bearer ${env.JARVIS_EDGE_TOKEN}`) ||
+      (env.ACCEPT_API_TOKEN === "true" && same(auth, `Bearer ${env.JARVIS_API_TOKEN}`));
     if (name === "vnc") {
       // The socket and nothing else: noVNC's own pages are not needed.
       if (rest.join("/") !== "websockify") return json(404, "그런 경로가 없습니다.");
-      if (!bearer && !(await ticketValid(url.searchParams.get("ticket"), env.JARVIS_API_TOKEN))) {
+      if (!bearer && !(await ticketValid(url.searchParams.get("ticket"), env.JARVIS_EDGE_TOKEN))) {
         return json(401, "입장권이 없거나 만료됐습니다.");
       }
       url.searchParams.delete("ticket");
@@ -141,6 +150,8 @@ export default {
     const target = `${service.origin}/${rest.join("/")}${url.search}`;
     const headers = new Headers(request.headers);
     headers.delete("host");
+    // The services want their own token; the caller's never goes past here.
+    if (bearer) headers.set("authorization", `Bearer ${env.JARVIS_API_TOKEN}`);
     if (name === "immich") {
       // Immich would read our bearer as one of its own sessions and refuse it.
       headers.delete("authorization");

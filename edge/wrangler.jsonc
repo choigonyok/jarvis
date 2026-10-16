@@ -28,5 +28,6 @@
     { "binding": "NOTIFY", "service_id": "01a12614-1eb7-7611-9760-96ac0e54c96f" },
     { "binding": "CONTEXT", "service_id": "01a13cb3-91e1-76c2-a09b-352e50d1fb1d" }
   ]
-  // JARVIS_API_TOKEN arrives as a secret: wrangler secret put JARVIS_API_TOKEN
+  // Secrets: JARVIS_API_TOKEN (what the services check; only the gateway has it) and
+  // JARVIS_EDGE_TOKEN (what the console Worker presents here): wrangler secret put …
 }
