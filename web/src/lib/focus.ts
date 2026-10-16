@@ -51,7 +51,7 @@ const BY_KIND: [RegExp, string, string][] = [
   [/^assets\./, "/assets", "summary"],
   [/^status\./, "/status", "problems"],
   [/^calendar\./, "/calendar", "day"],
-  [/^location\./, "/status", "context"],
+  [/^location\./, "/status", "check:context.location"],
   [/^job\./, "/jobs", "waiting"],
 ];
 

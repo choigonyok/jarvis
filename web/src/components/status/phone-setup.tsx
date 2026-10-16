@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { Check, Copy } from "lucide-react";
-import { Button } from "@/components/ui/button";
 
 type Setup = {
   link: string;
@@ -20,7 +19,16 @@ type Setup = {
  * made after waiting for the fetch no longer does. So the first tap fetches,
  * and the second is a plain link to owntracks:///config?inline=…, followed by
  * the browser itself. The link can also be copied, for pasting into Safari.
+ *
+ * It is the body of one row on the 상태 screen (폰 연결), shown when the row
+ * is opened - a setup done once, not a standing panel.
  */
+/** The one action style of these steps: quiet, full width on a phone. */
+const action =
+  "inline-flex h-11 w-full items-center justify-center rounded-lg bg-glass-raised px-4 text-[13px] text-foreground outline-none transition-colors hover:bg-white/12 focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 sm:h-9 sm:w-auto";
+const quiet =
+  "inline-flex h-11 w-full items-center justify-center rounded-lg px-3 text-[13px] text-dim outline-none transition-colors hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 sm:h-9 sm:w-auto";
+
 export function PhoneSetup() {
   const [setup, setSetup] = useState<Setup | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -61,15 +69,9 @@ export function PhoneSetup() {
   }
 
   return (
-    <section className="mt-9 sm:mt-11" aria-labelledby="group-phone">
-      <h2 id="group-phone" className="mb-2.5 text-[12px] text-faint">
-        폰 연결
-      </h2>
-      <div className="rounded-xl bg-glass px-4 py-3.5">
-        <p className="text-[13px] leading-[1.6] text-dim text-pretty">
-          위치(OwnTracks)와 기기 상태(단축어)를 jarvis로 보내도록 아이폰을 설정해요. 이 화면을 아이폰에서 열고 차례로 하세요.
-        </p>
-        <ol className="mt-3 space-y-3.5 text-[13.5px] leading-[1.6]">
+    <div>
+      <p className="text-pretty text-dim">이 화면을 아이폰에서 열고 차례로 하세요.</p>
+      <ol className="mt-3 space-y-3.5 text-[13px] leading-[1.6]">
           <Step n={1}>
             OwnTracks를 설치합니다.{" "}
             <a
@@ -89,26 +91,18 @@ export function PhoneSetup() {
               줘요. Continue를 누르면 서버 주소·계정·모니터링(Significant)·원격 설정이 한 번에 들어갑니다.
             </span>
             {setup ? (
-              <span className="mt-2 flex flex-col gap-2 sm:flex-row">
-                <a
-                  href={setup.link}
-                  className="inline-flex h-11 w-full items-center justify-center rounded-lg border border-border bg-background px-4 text-sm font-medium text-foreground outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 sm:w-auto"
-                >
+              <span className="mt-2 flex flex-col gap-1 sm:flex-row">
+                <a href={setup.link} className={action}>
                   OwnTracks 열어서 설정 넣기
                 </a>
-                <Button variant="ghost" className="h-11 w-full sm:w-auto sm:px-3" onClick={() => void copy("link", setup.link)}>
+                <button type="button" className={quiet} onClick={() => void copy("link", setup.link)}>
                   {copied === "link" ? "복사했어요" : "링크 복사"}
-                </Button>
+                </button>
               </span>
             ) : (
-              <Button
-                variant="outline"
-                className="mt-2 h-11 w-full sm:w-auto sm:px-4"
-                onClick={() => void load()}
-                disabled={busy}
-              >
+              <button type="button" className={`mt-2 ${action}`} onClick={() => void load()} disabled={busy}>
                 {busy ? "불러오는 중" : "jarvis 설정 불러오기"}
-              </Button>
+              </button>
             )}
             <span className="mt-2 block text-[12px] text-faint">
               OwnTracks가 열렸는데 아무것도 바뀌지 않으면 2번 스위치가 꺼져 있는 거예요. 링크 복사 후 Safari 주소창에 붙여 넣어도 열려요.
@@ -124,14 +118,14 @@ export function PhoneSetup() {
               하나만 둡니다: 방식 POST, 헤더 Authorization, 본문 JSON. &ldquo;즉시 실행&rdquo;을 켜고 &ldquo;실행 시 알림&rdquo;은 꺼요.
             </span>
             {!showSignals ? (
-              <Button
-                variant="ghost"
-                className="mt-1 h-11 w-full sm:w-auto sm:px-3"
+              <button
+                type="button"
+                className={`mt-1 ${quiet} sm:-ms-3`}
                 onClick={() => void load().then((s) => s && setShowSignals(true))}
                 disabled={busy}
               >
                 단축어에 넣을 값 보기
-              </Button>
+              </button>
             ) : setup ? (
               <ul className="mt-2 divide-y divide-edge-soft">
                 <CopyRow label="URL" value={setup.signals.url} id="url" copied={copied} onCopy={copy} />
@@ -149,14 +143,13 @@ export function PhoneSetup() {
               </ul>
             ) : null}
           </Step>
-        </ol>
-        {error ? (
-          <p role="alert" className="mt-3 text-[12.5px] text-reject">
-            {error}
-          </p>
-        ) : null}
-      </div>
-    </section>
+      </ol>
+      {error ? (
+        <p role="alert" className="mt-3 text-[12.5px] text-reject">
+          {error}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
