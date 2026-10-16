@@ -40,6 +40,28 @@ type Event struct {
 	Key string `json:"key"`
 }
 
+// Category is one kind of notification a sender may use (the part of kind
+// before the dot), as the settings screen lists it.
+type Category struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	Hint  string `json:"hint"`
+}
+
+// Categories is the list the console shows. A new sender adds its line here,
+// next to the service that delivers it, not in the screen.
+var Categories = []Category{
+	{"approval", "결재 대기", "에이전트가 승인을 기다릴 때"},
+	{"suggestion", "AI 제안", "약속을 일정에, 비중 이탈을 리밸런싱으로 먼저 권할 때"},
+	{"mind", "비서 알림", "아침 브리핑, 일정 하루 전·두 시간 전, 기한이 다가온 일"},
+	{"location", "위치", "집·회사 같은 영역에 도착하거나 떠날 때 (알림함에만)"},
+	{"job", "작업 요청", "로그인·확인이 필요할 때"},
+	{"status", "수집·연결 이상", "카톡·카드 알림 수집이 멈췄을 때"},
+	{"calendar", "공유 일정", "상대가 일정을 추가했을 때"},
+	{"spending", "가계부", "큰 결제, 예산, 하루 지출"},
+	{"assets", "자산", "비중 이탈, 입출금 감지, 하루 자산"},
+}
+
 type Settings struct {
 	// Categories that are never pushed (still kept in the inbox).
 	Muted []string `json:"muted"`

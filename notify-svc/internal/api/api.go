@@ -58,6 +58,9 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, http.StatusOK, s.svc.Settings(r.Context()))
 	}))
 	mux.HandleFunc("PUT /settings", s.auth(s.saveSettings))
+	mux.HandleFunc("GET /categories", s.auth(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{"categories": notify.Categories})
+	}))
 	mux.HandleFunc("GET /vapid", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"publicKey": s.push.PublicKey(), "ready": s.push.Ready()})
 	}))

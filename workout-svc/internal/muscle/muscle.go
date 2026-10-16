@@ -31,6 +31,15 @@ var groups = map[string]string{
 	"행잉 레그레이즈":      "코어",
 }
 
+// Table is the whole name → group table, for clients to show the same groups.
+func Table() map[string]string {
+	out := make(map[string]string, len(groups))
+	for k, v := range groups {
+		out[k] = v
+	}
+	return out
+}
+
 func Of(name string) string {
 	if g, ok := groups[strings.TrimSpace(name)]; ok {
 		return g

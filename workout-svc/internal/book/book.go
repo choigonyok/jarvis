@@ -62,6 +62,9 @@ type Book struct {
 	// Revision counts writes. A full replace must name the revision it was
 	// built on, so two writers cannot silently undo each other.
 	Revision int64 `json:"revision"`
+	// Groups is which part each movement trains, as this service judges it -
+	// the one table the screen and the stats share.
+	Groups map[string]string `json:"groups,omitempty"`
 }
 
 // Changes is a partial write: only what changed since the client last saved.

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   carrySets,
   routinesOf,
+  setGroups,
   today,
   type Book,
   type Exercise,
@@ -61,6 +62,7 @@ export function useWorkout() {
         const res = await fetch("/api/workout", { cache: "no-store" });
         if (!res.ok) throw new Error(String(res.status));
         const data = (await res.json()) as Book;
+        setGroups(data.groups);
         setBook(data);
         latest.current = data;
         saved.current = data;

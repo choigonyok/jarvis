@@ -30,18 +30,8 @@ type Note = {
 
 type Settings = { muted: string[]; quietStart: string; quietEnd: string; digestAt: string };
 
-/** The categories a sender can use (the part of `kind` before the dot). */
-const CATEGORIES: [string, string, string][] = [
-  ["approval", "결재 대기", "에이전트가 승인을 기다릴 때"],
-  ["suggestion", "AI 제안", "약속을 일정에, 비중 이탈을 리밸런싱으로 먼저 권할 때"],
-  ["mind", "비서 알림", "아침 브리핑, 일정 하루 전·두 시간 전, 기한이 다가온 일"],
-  ["location", "위치", "집·회사 같은 영역에 도착하거나 떠날 때 (알림함에만)"],
-  ["job", "작업 요청", "로그인·확인이 필요할 때"],
-  ["status", "수집·연결 이상", "카톡·카드 알림 수집이 멈췄을 때"],
-  ["calendar", "공유 일정", "상대가 일정을 추가했을 때"],
-  ["spending", "가계부", "큰 결제, 예산, 하루 지출"],
-  ["assets", "자산", "비중 이탈, 입출금 감지, 하루 자산"],
-];
+/** A category a sender can use (the part of `kind` before the dot). notify-svc owns the list. */
+type Category = { id: string; label: string; hint: string };
 
 const ago = (iso: string) => {
   const m = Math.round((Date.now() - Date.parse(iso)) / 60_000);
@@ -212,8 +202,13 @@ function NotifySettings() {
   const push = usePush();
   const [set, setSet] = useState<Settings | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [categories, setCategories] = useState<Category[]>([]);
 
   useEffect(() => {
+    void fetch("/api/notify/categories", { cache: "no-store" })
+      .then((r) => (r.ok ? (r.json() as Promise<{ categories: Category[] }>) : null))
+      .then((b) => b && setCategories(b.categories))
+      .catch(() => {});
     void fetch("/api/notify/settings", { cache: "no-store" })
       .then((r) => (r.ok ? (r.json() as Promise<Settings>) : null))
       .then((s) => s && setSet(s))
@@ -286,7 +281,7 @@ function NotifySettings() {
           <section>
             <p className="mb-1 text-[11.5px] text-faint">받을 알림</p>
             <ul className="divide-y divide-edge-soft">
-              {CATEGORIES.map(([id, label, hint]) => {
+              {categories.map(({ id, label, hint }) => {
                 const on = !set.muted.includes(id);
                 return (
                   <li key={id}>

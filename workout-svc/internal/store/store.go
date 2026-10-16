@@ -65,6 +65,22 @@ func (s *Store) Load(ctx context.Context) (book.Book, error) {
 	if err := s.pool.QueryRow(ctx, revisionSQL).Scan(&out.Revision); err != nil {
 		return out, fmt.Errorf("리비전 조회: %w", err)
 	}
+	// 기록에 적힌 부위가 표보다 우선이다 - 그때 그렇게 셌다.
+	out.Groups = muscle.Table()
+	grows, err := s.pool.Query(ctx, `select distinct on (name) name, muscle_group from workout_exercises
+		where muscle_group is not null order by name, id desc`)
+	if err != nil {
+		return out, fmt.Errorf("부위 조회: %w", err)
+	}
+	for grows.Next() {
+		var n, g string
+		if err := grows.Scan(&n, &g); err != nil {
+			grows.Close()
+			return out, fmt.Errorf("부위 읽기: %w", err)
+		}
+		out.Groups[n] = g
+	}
+	grows.Close()
 
 	rows, err := s.pool.Query(ctx, `
 		select id, on_date, coalesce(routine_id,''), coalesce(routine_name,''),
