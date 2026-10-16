@@ -1,10 +1,8 @@
 services:
-  # 진실의 원천. 이벤트 로그와 모든 파생 테이블이 여기 있고, 회수용 벡터도
-  # 같은 데이터베이스에 있다(pgvector). 벡터를 따로 떼어 Qdrant 를 두지 않은
-  # 이유는 이 규모에서 검색 성능이 문제가 아니라 - 조각은 잘해야 수만 건이다 -
-  # 회수 조건이 대개 "이 사람 + 최근 30일 + 의미 유사"처럼 섞여 있어서,
-  # 사람 id 와 날짜를 두 저장소에 중복해서 들고 있는 값이 그 이득보다 크기
-  # 때문이다.
+  # 진실의 원천. 서비스들의 테이블과 이벤트 로그가 여기 있다. 사람·사실의
+  # 회수는 memory-svc(FalkorDB 그래프)가 맡는다 - 여기에 있던 회수용 벡터
+  # 테이블은 049 에서 지웠다. 이미지가 pgvector 인 것은 새로 설치할 때 초기
+  # 마이그레이션(001·009·013)이 vector 확장을 만들기 때문뿐이다.
   postgres:
     image: pgvector/pgvector:pg17
     environment:
@@ -346,27 +344,6 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
-  # 에이전트 볼륨의 thread.json 을 chat-svc 로 옮긴다:
-  #   docker compose --profile import run --rm chat-import
-  #
-  # 캘린더·운동과 달리 여러 번 돌리면 대화가 중복된다(턴에는 자연키가 없다).
-  # 이미 턴이 있으면 멈추고, 정말 덧붙이려면 FORCE=true 가 필요하다.
-  chat-import:
-    profiles: ["import"]
-    image: python:3.12-alpine
-    entrypoint: ["python3", "/scripts/import-thread.py"]
-    environment:
-      CHAT_URL: http://chat:8094
-      API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
-      FORCE: ${FORCE:-}
-    volumes:
-      - ./scripts:/scripts:ro
-      - jarvis-data:/data:ro
-    depends_on:
-      chat:
-        condition: service_healthy
-    restart: "no"
-
   # 캘린더. 일정의 저장만 여기 있다.
   #
   # 앞의 두 서비스와 경계가 다르다: 승인 카드·MCP 도구 스키마·되돌림 가능 여부는
@@ -465,46 +442,6 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
-  # 에이전트 볼륨의 calendar.json 을 calendar-svc 로 옮긴다:
-  #   docker compose --profile import run --rm calendar-import
-  #
-  # python 이미지인 이유: 파일은 일정의 배열이고 서비스는 하나씩 받으므로
-  # 쪼개야 하는데, curl 이미지에는 JSON 파서가 없고 python 이미지에는 curl 이
-  # 없다. 표준 라이브러리만으로 끝내는 쪽이 도구 두 개를 요구하는 것보다 낫다.
-  calendar-import:
-    profiles: ["import"]
-    image: python:3.12-alpine
-    entrypoint: ["python3", "/scripts/import-calendar.py"]
-    environment:
-      CALENDAR_URL: http://calendar:8093
-      API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
-    volumes:
-      - ./scripts:/scripts:ro
-      # 읽기 전용. 원본을 지우지 않는다.
-      - jarvis-data:/data:ro
-    depends_on:
-      calendar:
-        condition: service_healthy
-    restart: "no"
-
-  # 볼륨의 workout.json 을 workout-svc 로 옮긴다. 한 번만 돌리면 된다:
-  #   docker compose --profile import run --rm workout-import
-  workout-import:
-    profiles: ["import"]
-    image: curlimages/curl:latest
-    entrypoint: ["/bin/sh", "/scripts/import-workout.sh"]
-    environment:
-      WORKOUT_URL: http://workout:8091
-      API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
-    volumes:
-      - ./scripts:/scripts:ro
-      # 읽기 전용. 이 작업은 원본을 지우지 않는다.
-      - jarvis-web-data:/data:ro
-    depends_on:
-      workout:
-        condition: service_healthy
-    restart: "no"
-
   browser:
     build: ./browser
     environment:
@@ -528,63 +465,6 @@ services:
     # Chromium needs more than the default 64MB of shared memory or it crashes
     # on pages of any size.
     shm_size: "1gb"
-    restart: unless-stopped
-
-  web:
-    build: ./web
-    # 웹은 Cloudflare Workers(jarvis.choigonyok.com)에서 돈다. 이 컨테이너는 맥북에서
-    # 전부를 한 번에 띄울 때만 쓴다: docker compose --profile web up
-    # 맥미니에서 기본으로 뜨지 않게 한 이유: 그 맥미니의 다른 터널이 localhost:3000 을
-    # 공개 호스트명으로 내보내고 있었다(2026-10-07).
-    profiles: ["web"]
-    environment:
-      AGENT_URL: http://agent:8080
-      # The KakaoTalk collector, reachable on the compose network. The web tab
-      # proxies to it server-side; the browser never talks to it directly.
-      KAKAOTALK_URL: http://kakaotalk:8090
-      # Where the page dials for the browser's screen. Empty means "the host
-      # you are viewing this from, port 6080" - right for the usual case of
-      # opening this on the machine running the stack.
-      JARVIS_VNC_URL: ${JARVIS_VNC_URL:-}
-      # The single operator. Nothing behind the login is reachable without a
-      # session cookie, the agent proxy included.
-      JARVIS_AUTH_ID: ${JARVIS_AUTH_ID:-}
-      JARVIS_AUTH_PASSWORD: ${JARVIS_AUTH_PASSWORD:-}
-      # Signs session cookies. Left empty it is derived from the password, so
-      # sessions still work - setting it means a password change and a session
-      # purge are separate decisions.
-      JARVIS_AUTH_SECRET: ${JARVIS_AUTH_SECRET:-}
-      # The same token the agent checks. Sent server-side only; the browser
-      # never sees it.
-      JARVIS_API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
-      # 증권사 키는 더 이상 여기 없다. assets-svc 가 갖고 있고, 웹은
-      # /api/portfolio 를 그쪽으로 프록시만 한다. 키를 브라우저에 HTML 을
-      # 내주는 프로세스에서 빼는 것이 분리의 목적 중 하나다.
-      ASSETS_URL: http://assets:8092
-      # 운동 기록도 마찬가지다. workout-svc 가 갖고 있다.
-      WORKOUT_URL: http://workout:8091
-      # 가계부. spending-svc 가 갖고 있다.
-      SPENDING_URL: http://spending:8095
-      # 상태 탭. status-svc 가 판정한다.
-      STATUS_URL: http://status:8096
-    volumes:
-      # 남은 것은 workout.json 하나뿐이고, 그것도 workout-svc 로 옮긴 뒤에는
-      # 읽히지 않는다. 볼륨은 그 파일을 옮길 때까지만 유지한다.
-      #   docker compose run --rm workout-import   (scripts/import-workout.sh)
-      - jarvis-web-data:/data
-    ports:
-      # 루프백에만. 밖에서 들어오는 길은 Cloudflare Access 뒤의 터널 하나뿐이어야
-      # 한다 - 0.0.0.0 으로 열면 같은 공유기의 아무 기기나 Access 를 건너뛴다.
-      - "127.0.0.1:${JARVIS_WEB_PORT:-3000}:3000"
-    depends_on:
-      agent:
-        condition: service_healthy
-      workout:
-        condition: service_healthy
-      assets:
-        condition: service_healthy
-      spending:
-        condition: service_healthy
     restart: unless-stopped
 
   # Near-real-time KakaoTalk collector. It polls the local KakaoTalk SQLCipher
@@ -887,7 +767,6 @@ volumes:
   jarvis-guest-home:
   jarvis-guest-data:
   jarvis-postgres:
-  jarvis-web-data:
   jarvis-home:
   jarvis-data:
   jarvis-kakaotalk-data:

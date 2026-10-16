@@ -1,3 +1,5 @@
+import { forward } from "@/lib/proxy";
+
 // Server-side proxy to assets-svc.
 //
 // This route used to call the brokerages itself, which meant the Upbit and KIS
@@ -7,37 +9,13 @@
 //
 // On Cloudflare there is no compose network, so ASSETS_URL has to point at
 // whatever is published in front of the service.
-const ASSETS_URL = process.env.ASSETS_URL ?? "http://localhost:8092";
-const API_TOKEN = process.env.JARVIS_API_TOKEN ?? "";
+const ASSETS_URL = (process.env.ASSETS_URL ?? "http://localhost:8092").replace(
+  /\/$/,
+  "",
+);
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-async function forward(request: Request, path: string): Promise<Response> {
-  const headers = new Headers();
-  if (API_TOKEN) headers.set("authorization", `Bearer ${API_TOKEN}`);
-
-  let upstream: Response;
-  try {
-    upstream = await fetch(`${ASSETS_URL.replace(/\/$/, "")}${path}`, {
-      method: "GET",
-      headers,
-      cache: "no-store",
-      signal: request.signal,
-    });
-  } catch {
-    return Response.json(
-      { error: "자산 서비스에 연결하지 못했습니다." },
-      { status: 502 },
-    );
-  }
-
-  const out = new Headers();
-  const ct = upstream.headers.get("content-type");
-  if (ct) out.set("content-type", ct);
-  out.set("cache-control", "no-store");
-  return new Response(upstream.body, { status: upstream.status, headers: out });
-}
 
 export async function GET(request: Request) {
   // ?history=90 으로 기록된 일별 총액을 요청할 수 있다. 지금 화면은 쓰지
@@ -48,10 +26,13 @@ export async function GET(request: Request) {
   const days = params.get("history");
   return forward(
     request,
-    days
-      ? `/history?days=${encodeURIComponent(days)}`
-      : params.get("fresh") === "1"
-        ? "/portfolio?fresh=1"
-        : "/portfolio",
+    ASSETS_URL +
+      (days
+        ? `/history?days=${encodeURIComponent(days)}`
+        : params.get("fresh") === "1"
+          ? "/portfolio?fresh=1"
+          : "/portfolio"),
+    { label: "자산 서비스", requestHeaders: [] },
+    { method: "GET" },
   );
 }

@@ -14,12 +14,6 @@
     "directory": ".open-next/assets"
   },
 
-  // 운동 기록이 사는 곳. Workers has no filesystem, so the volume the Docker
-  // image uses has no counterpart here - lib/store.ts picks whichever exists.
-  "kv_namespaces": [
-    { "binding": "JARVIS_KV", "id": "a9ba636ca1a442ee95a099ecb1e798f4" }
-  ],
-
   "observability": {
     "enabled": true
   },
