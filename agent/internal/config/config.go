@@ -30,7 +30,10 @@ type Config struct {
 	// MemoryDir is the CLI's own memory for this workspace (MEMORY.md, loaded
 	// into every session, and the notes it points to): where the model keeps
 	// what the operator asked it to remember. Read without a card like the
-	// workspace; written only on a card, like any write. Empty for the guest.
+	// workspace - and written without one too: the CLI lets its model write
+	// its auto memory without asking, whatever the permission mode (tried in
+	// the agent container, 2026-10-17). So what a page talks the model into
+	// writing there is loaded into every later session. Empty for the guest.
 	MemoryDir    string
 	SystemPrompt string
 	// AllowedTools skip the approval card entirely. Read-only tools belong
@@ -216,7 +219,8 @@ func Load() (Config, error) {
 		// Only what the conversation uses: photos are opened with Read, the
 		// web is searched and fetched (fetching on a card), ToolSearch loads
 		// the module tools the CLI defers, and Write and Edit keep what the
-		// operator asks it to remember (MemoryDir, on a card). No shell, no
+		// operator asks it to remember (MemoryDir - those writes need no card,
+		// any other write does). No shell, no
 		// subagents - neither was used here, and each is described in every
 		// request.
 		BuiltinTools:     ptr(env("JARVIS_BUILTIN_TOOLS", "Read,Glob,Grep,TodoWrite,WebSearch,WebFetch,ToolSearch,Write,Edit")),
@@ -371,7 +375,8 @@ func safeAllowed(tools []string) (kept, dropped []string) {
 // the photos attached in conversation, and the CLI's own memory. The CLI also
 // blocks reads outside its working directories altogether (runner:
 // blockReadsOutsideWorkingDirectories, with uploads and memory added as
-// working directories). Writing anywhere still takes a card (unsafeTool).
+// working directories). Writing takes a card everywhere but the CLI's
+// memory, which the CLI itself lets its model write (see MemoryDir).
 func readRules(workspace, uploads, memory string) []string {
 	var out []string
 	if abs, err := filepath.Abs(workspace); err == nil {

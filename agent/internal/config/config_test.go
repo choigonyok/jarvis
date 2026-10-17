@@ -194,8 +194,8 @@ func TestReadsAreScopedAndUnsafeToolsDropped(t *testing.T) {
 }
 
 // The CLI's own memory - what the operator asked it to remember - is read
-// without a card like the workspace, and written only on a card: no rule
-// lets a write skip it. The guest has none.
+// without a card like the workspace. No rule of ours lets a write skip the
+// card (the CLI lets memory writes through on its own). The guest has none.
 func TestMemoryDir(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "x")
 	t.Setenv("JARVIS_API_TOKEN", "api")
