@@ -27,7 +27,11 @@ func (s Schedule) OnChange(ctx context.Context, v View, e model.Entity, changes 
 	case model.Cancelled, model.Done:
 		r.CancelTimers, r.Withdraw = true, true
 		r.Updates = closeLoops(ctx, v, e)
-		if st.Status == model.Cancelled && st.CalendarID != "" {
+		// Taking the entry off the calendar is for a plan called off in a
+		// conversation. One the calendar itself ended - the entry deleted
+		// there, or this copy of it dropped because a conversation's plan
+		// speaks for the same entry now - must not take the entry with it.
+		if st.Status == model.Cancelled && st.CalendarID != "" && !byCalendar(changes) {
 			r.Intents = append(r.Intents, s.remove(e, changes))
 		}
 		return r
@@ -97,7 +101,24 @@ func (s Schedule) OnChange(ctx context.Context, v View, e model.Entity, changes 
 		r.CancelTimers = true
 		r.Timers = timersFor(e, v)
 	}
+	if linked {
+		// On the calendar now, however it got there: an open "add it" is moot.
+		r.Withdraw = true
+	}
 	return r
+}
+
+// byCalendar is whether every change came from reading the calendar.
+func byCalendar(changes []model.Change) bool {
+	if len(changes) == 0 {
+		return false
+	}
+	for _, c := range changes {
+		if c.Actor != "sensor:calendar" {
+			return false
+		}
+	}
+	return true
 }
 
 func (s Schedule) OnTimer(ctx context.Context, v View, e model.Entity, t model.Timer) Result {

@@ -72,3 +72,34 @@ func TestAPlanAndItsCalendarEntryAreOneEvent(t *testing.T) {
 		t.Fatalf("다른 일과는 겹친다고 해야 합니다: %+v", r.Intents)
 	}
 }
+
+// The calendar's own copy dropped as a duplicate (or an entry deleted on the
+// calendar) is not "called off in conversation": the entry stays.
+func TestACopyDroppedByTheCalendarIsNotDeleted(t *testing.T) {
+	cp := model.Entity{ID: "p2", Kind: model.KindPlan, Room: "calendar", State: model.State{
+		Title: "기타 합주 (은주)", Status: model.Cancelled, Date: "2026-10-17", Start: "15:00", CalendarID: "c9"}}
+	before := cp.State
+	before.Status = model.Confirmed
+	byCal := []model.Change{{Before: &before, After: cp.State, Actor: "sensor:calendar"}}
+	if r := (Schedule{}).OnChange(context.Background(), view{plans: []model.Entity{cp}}, cp, byCal); len(r.Intents) != 0 {
+		t.Fatalf("캘린더가 정리한 복사본으로 캘린더 일정을 지우면 안 됩니다: %+v", r.Intents)
+	}
+	inTalk := []model.Change{{Before: &before, After: cp.State, Actor: "interpret"}}
+	if r := (Schedule{}).OnChange(context.Background(), view{plans: []model.Entity{cp}}, cp, inTalk); len(r.Intents) != 1 || r.Intents[0].Kind != "calendar.delete" {
+		t.Fatalf("대화에서 취소된 일정은 지우자고 해야 합니다: %+v", r.Intents)
+	}
+}
+
+// Tied to its entry, a plan's open "add it to the calendar" goes.
+func TestLinkingWithdrawsTheAddQuestion(t *testing.T) {
+	linked := model.Entity{ID: "p1", Kind: model.KindPlan, Room: "kakao:7", State: model.State{
+		Title: "은주와 합주", Status: model.Confirmed, Date: "2026-10-17", Start: "15:00", CalendarID: "c9"}}
+	before := linked.State
+	before.CalendarID = ""
+	r := (Schedule{}).OnChange(context.Background(), view{plans: []model.Entity{linked}}, linked,
+		[]model.Change{{Before: &before, After: linked.State, Actor: "sensor:calendar"}})
+	if !r.Withdraw {
+		t.Fatalf("이어졌으면 '추가할까요'를 거둬야 합니다: %+v", r)
+	}
+}
+
