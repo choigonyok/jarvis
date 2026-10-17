@@ -82,8 +82,8 @@ services:
       # 고칠 일이 없다. 파일은 워크스페이스·첨부 사진 안에서만 읽고(에이전트가 경로 규칙을 붙인다),
       # 맨 Read·Glob·Grep, 셸·편집, 작업 만들기·지시는 여기 적어도 에이전트가 뺀다.
       JARVIS_ALLOWED_TOOLS: ${JARVIS_ALLOWED_TOOLS:-}
-      # 대화에 실리는 CLI 내장 도구. 비우면 Read,Glob,Grep,TodoWrite,WebSearch,WebFetch,ToolSearch
-      # (도구 설명은 요청마다 실린다). "default" 면 CLI 의 전부.
+      # 대화에 실리는 CLI 내장 도구. 비우면 Read,Glob,Grep,TodoWrite,WebSearch,WebFetch,ToolSearch,Write,Edit
+      # (Write·Edit 는 자기 기억용, 카드를 거친다. 도구 설명은 요청마다 실린다). "default" 면 CLI 의 전부.
       JARVIS_BUILTIN_TOOLS: ${JARVIS_BUILTIN_TOOLS:-}
       # 대화의 프롬프트 캐시 수명: 5m(기본) 또는 1h. 1시간짜리는 쓰기가 입력의 2배(5분은 1.25배)라,
       # 다음 질문이 대개 5분~1시간 뒤에 올 때만 이득이다. 백그라운드는 늘 5m.

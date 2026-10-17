@@ -66,12 +66,12 @@ func TestOwnerBuiltinTools(t *testing.T) {
 		t.Fatal("대화의 내장 도구를 정하지 않았습니다")
 	}
 	tools := "," + *c.BuiltinTools + ","
-	for _, want := range []string{"Read", "WebSearch", "WebFetch", "TodoWrite", "ToolSearch"} {
+	for _, want := range []string{"Read", "WebSearch", "WebFetch", "TodoWrite", "ToolSearch", "Write", "Edit"} {
 		if !strings.Contains(tools, ","+want+",") {
 			t.Errorf("%s 가 있어야 합니다: %s", want, tools)
 		}
 	}
-	for _, gone := range []string{"Bash", "Edit", "Write", "Task", "Agent", "NotebookEdit"} {
+	for _, gone := range []string{"Bash", "Task", "Agent", "NotebookEdit"} {
 		if strings.Contains(tools, ","+gone+",") {
 			t.Errorf("%s 는 대화에 필요 없습니다: %s", gone, tools)
 		}
@@ -190,5 +190,48 @@ func TestReadsAreScopedAndUnsafeToolsDropped(t *testing.T) {
 		if unsafeTool(tool) {
 			t.Errorf("기본값에 %s", tool)
 		}
+	}
+}
+
+// The CLI's own memory - what the operator asked it to remember - is read
+// without a card like the workspace, and written only on a card: no rule
+// lets a write skip it. The guest has none.
+func TestMemoryDir(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "x")
+	t.Setenv("JARVIS_API_TOKEN", "api")
+	t.Setenv("JARVIS_ROLE", "")
+	t.Setenv("JARVIS_HOME", "/home/jarvis")
+	t.Setenv("JARVIS_WORKSPACE", "/workspace")
+	t.Setenv("JARVIS_ALLOWED_TOOLS", "TodoWrite,Write(//home/jarvis/.claude/projects/-workspace/memory/**)")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.MemoryDir != "/home/jarvis/.claude/projects/-workspace/memory" {
+		t.Fatalf("기억 폴더: %q", c.MemoryDir)
+	}
+	read := false
+	for _, tool := range c.AllowedTools {
+		if tool == "Read(//home/jarvis/.claude/projects/-workspace/memory/**)" {
+			read = true
+		}
+		if strings.HasPrefix(tool, "Write") || strings.HasPrefix(tool, "Edit") {
+			t.Fatalf("쓰기가 카드를 건너뜁니다: %s", tool)
+		}
+	}
+	if !read {
+		t.Fatalf("기억은 카드 없이 읽어야 합니다: %v", c.AllowedTools)
+	}
+	if got := memoryDir("/h", "/Users/me/my.app"); got != "/h/.claude/projects/-Users-me-my-app/memory" {
+		t.Fatalf("이름 규칙: %q", got)
+	}
+
+	t.Setenv("JARVIS_ROLE", "guest")
+	g, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.MemoryDir != "" {
+		t.Fatalf("손님에게 기억 폴더가 있습니다: %q", g.MemoryDir)
 	}
 }

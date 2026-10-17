@@ -262,3 +262,23 @@ func waitIdle(t *testing.T, r *Runner) {
 		}
 	}
 }
+
+// The CLI's memory is a working directory, so the notes MEMORY.md points to
+// can be read; the guest's runner has none.
+func TestMemoryIsAWorkingDirectory(t *testing.T) {
+	r, dir := sessionRunner(t, "규칙", session{})
+	r.cfg.MemoryDir = "/home/jarvis/.claude/projects/-workspace/memory"
+	if err := r.turn("기억해"); err != nil {
+		t.Fatal(err)
+	}
+	if args := read(t, filepath.Join(dir, "args")); !strings.Contains(args, "--add-dir\n/home/jarvis/.claude/projects/-workspace/memory\n") {
+		t.Fatalf("기억 폴더를 작업 디렉터리로:\n%s", args)
+	}
+	guest, dir := sessionRunner(t, "규칙", session{})
+	if err := guest.turn("x"); err != nil {
+		t.Fatal(err)
+	}
+	if args := read(t, filepath.Join(dir, "args")); strings.Contains(args, "memory") {
+		t.Fatalf("기억 폴더가 없으면 넘기지 않습니다:\n%s", args)
+	}
+}

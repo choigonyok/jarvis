@@ -26,7 +26,12 @@ type Config struct {
 	Workspace string
 	// Home is where the CLI keeps its own state. Kept out of the workspace
 	// so the agent's bookkeeping never lands in the user's files.
-	Home         string
+	Home string
+	// MemoryDir is the CLI's own memory for this workspace (MEMORY.md, loaded
+	// into every session, and the notes it points to): where the model keeps
+	// what the operator asked it to remember. Read without a card like the
+	// workspace; written only on a card, like any write. Empty for the guest.
+	MemoryDir    string
 	SystemPrompt string
 	// AllowedTools skip the approval card entirely. Read-only tools belong
 	// here; anything that writes does not. Files are read only inside the
@@ -209,11 +214,12 @@ func Load() (Config, error) {
 		AllowedTools: splitList(env("JARVIS_ALLOWED_TOOLS",
 			"TodoWrite,mcp__calendar__list_events,mcp__jobs__list_jobs")),
 		// Only what the conversation uses: photos are opened with Read, the
-		// web is searched and fetched (fetching on a card), and ToolSearch
-		// loads the module tools the CLI defers. No shell, no edits, no
-		// subagents - none of them was ever used here, and each is described
-		// in every request.
-		BuiltinTools:     ptr(env("JARVIS_BUILTIN_TOOLS", "Read,Glob,Grep,TodoWrite,WebSearch,WebFetch,ToolSearch")),
+		// web is searched and fetched (fetching on a card), ToolSearch loads
+		// the module tools the CLI defers, and Write and Edit keep what the
+		// operator asks it to remember (MemoryDir, on a card). No shell, no
+		// subagents - neither was used here, and each is described in every
+		// request.
+		BuiltinTools:     ptr(env("JARVIS_BUILTIN_TOOLS", "Read,Glob,Grep,TodoWrite,WebSearch,WebFetch,ToolSearch,Write,Edit")),
 		CacheTTL:         cacheTTL(os.Getenv("JARVIS_CACHE_TTL")),
 		SessionMaxTokens: envInt("JARVIS_SESSION_MAX_TOKENS", 50000),
 		SessionMinTokens: envInt("JARVIS_SESSION_MIN_TOKENS", 20000),
@@ -270,6 +276,7 @@ func Load() (Config, error) {
 		idle = time.Hour
 	}
 	c.SessionIdle = envDuration("JARVIS_SESSION_IDLE", idle)
+	c.MemoryDir = memoryDir(c.Home, c.Workspace)
 
 	if c.Guest = env("JARVIS_ROLE", "") == "guest"; c.Guest {
 		c.Thread = "guest"
@@ -284,6 +291,7 @@ func Load() (Config, error) {
 		c.Jobs = false
 		c.UploadsDir = ""
 		c.VaultURL = ""
+		c.MemoryDir = ""
 	}
 
 	if c.OAuthToken == "" {
@@ -315,7 +323,7 @@ func Load() (Config, error) {
 	}
 	c.AllowedTools, c.DroppedTools = safeAllowed(c.AllowedTools)
 	if !c.Guest {
-		c.AllowedTools = append(c.AllowedTools, readRules(c.Workspace, c.UploadsDir)...)
+		c.AllowedTools = append(c.AllowedTools, readRules(c.Workspace, c.UploadsDir, c.MemoryDir)...)
 	}
 	return c, nil
 }
@@ -360,19 +368,41 @@ func safeAllowed(tools []string) (kept, dropped []string) {
 }
 
 // readRules are the only file reading that skips the card: the workspace,
-// and the photos attached in conversation. The CLI also blocks reads outside
-// its working directories altogether (runner: blockReadsOutsideWorkingDirectories).
-func readRules(workspace, uploads string) []string {
+// the photos attached in conversation, and the CLI's own memory. The CLI also
+// blocks reads outside its working directories altogether (runner:
+// blockReadsOutsideWorkingDirectories, with uploads and memory added as
+// working directories). Writing anywhere still takes a card (unsafeTool).
+func readRules(workspace, uploads, memory string) []string {
 	var out []string
 	if abs, err := filepath.Abs(workspace); err == nil {
 		out = append(out, "Read(/"+abs+"/**)", "Grep(/"+abs+"/**)", "Glob(/"+abs+"/**)")
 	}
-	if uploads != "" {
-		if abs, err := filepath.Abs(uploads); err == nil {
+	for _, dir := range []string{uploads, memory} {
+		if dir == "" {
+			continue
+		}
+		if abs, err := filepath.Abs(dir); err == nil {
 			out = append(out, "Read(/"+abs+"/**)")
 		}
 	}
 	return out
+}
+
+// memoryDir is where the CLI keeps its memory for a workspace: under its home,
+// in the project directory it names after the workspace's absolute path with
+// every character but letters and digits made "-" (/workspace → -workspace).
+func memoryDir(home, workspace string) string {
+	abs, err := filepath.Abs(workspace)
+	if err != nil || home == "" {
+		return ""
+	}
+	project := strings.Map(func(r rune) rune {
+		if r < 128 && (r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
+			return r
+		}
+		return '-'
+	}, abs)
+	return filepath.Join(home, ".claude", "projects", project, "memory")
 }
 
 const defaultSystemPrompt = `당신은 Jarvis입니다. 한 사람의 개인 어시스턴트로, 그 사람과 1:1 스레드에서만 대화합니다.

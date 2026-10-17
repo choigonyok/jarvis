@@ -554,15 +554,20 @@ func (r *Runner) args(system string) []string {
 		// The instructions only: a resumed session keeps the ones it was
 		// opened with, so what changes per turn goes in the message (now).
 		"--append-system-prompt", system,
-		// Reads stop at the working directories - the workspace and the
-		// uploads (--add-dir). Nothing else in the container is the model's
-		// to read, with a card or without: not the CLI's credentials, not
-		// /etc, not another process's environment.
+		// Reads stop at the working directories - the workspace, the
+		// uploads and the CLI's own memory (--add-dir). Nothing else in the
+		// container is the model's to read, with a card or without: not the
+		// CLI's credentials, not /etc, not another process's environment.
 		"--settings", `{"permissions":{"blockReadsOutsideWorkingDirectories":true}}`,
 	}
 	if r.cfg.UploadsDir != "" {
 		// Attached photos live outside the workspace; Read may open them.
 		args = append(args, "--add-dir", r.cfg.UploadsDir)
+	}
+	if r.cfg.MemoryDir != "" {
+		// What it was asked to remember: MEMORY.md is loaded on its own, the
+		// notes it points to are read from here (config.MemoryDir).
+		args = append(args, "--add-dir", r.cfg.MemoryDir)
 	}
 	if r.cfg.BuiltinTools != nil {
 		// Only these built-in tools exist for the model: each one is

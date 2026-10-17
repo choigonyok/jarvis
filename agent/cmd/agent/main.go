@@ -187,6 +187,13 @@ func main() {
 	}
 	cancelStart()
 
+	// The CLI's memory is a working directory (runner args), so it has to
+	// exist before the first note is written into it.
+	if cfg.MemoryDir != "" {
+		if err := os.MkdirAll(cfg.MemoryDir, 0o755); err != nil {
+			log.Warn("기억 폴더를 만들지 못했습니다", "dir", cfg.MemoryDir, "err", err)
+		}
+	}
 	runner := claudecode.New(cfg, transcript, log)
 	// Subscription use, read off every run's stream; kept beside the proposals.
 	usageTracker := usage.New(filepath.Join(filepath.Dir(cfg.ProposalsPath), "usage.json"))
