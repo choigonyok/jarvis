@@ -2,7 +2,20 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { HeaderPanel } from "@/components/shell/panel";
-import { capPct, freeLabel, freePct, pct, PURPOSE, resetLabel, tone, usd, useUsage } from "@/lib/use-usage";
+import {
+  agoLabel,
+  ageMinutes,
+  capPct,
+  freeLabel,
+  freePct,
+  pct,
+  PURPOSE,
+  resetLabel,
+  STALE_MINUTES,
+  tone,
+  usd,
+  useUsage,
+} from "@/lib/use-usage";
 import { cn } from "@/lib/utils";
 
 /**
@@ -16,6 +29,11 @@ import { cn } from "@/lib/utils";
  * and one line under it that says when it resets or what the month came to.
  * Two groups - what the subscription allows, what the keys cost - so the eye
  * learns one shape and reads five of them.
+ *
+ * The subscription's lines are the whole account as last read, and use from
+ * claude.ai, other devices or the guest agent only shows at the next reading:
+ * an old reading is drawn faint, and a window that started over since reads
+ * "측정 전" rather than 0%.
  */
 export function UsageBars() {
   const usage = useUsage();
@@ -38,6 +56,8 @@ export function UsageBars() {
 
   const five = pct(usage?.fiveHour);
   const week = pct(usage?.sevenDay);
+  const age = ageMinutes(usage?.at);
+  const stale = age != null && age >= STALE_MINUTES;
   const api = capPct(usage?.api);
   const voyage = usage?.api?.voyage;
   const free = freePct(voyage);
@@ -46,7 +66,7 @@ export function UsageBars() {
   const label =
     five == null && week == null
       ? "Claude 사용량을 아직 읽지 못했습니다"
-      : `Claude 사용량: 5시간 ${five ?? "-"}%, 주간 ${week ?? "-"}%` +
+      : `Claude 사용량${age != null ? `(${agoLabel(age)} 측정)` : ""}: 5시간 ${five ?? "-"}%, 주간 ${week ?? "-"}%` +
         (api == null ? "" : `, 기억용 API 하루 상한의 ${api}%`) +
         (voyage ? `, 검색용 API 오늘 ${usd(voyage.todayUsd)}` : "") +
         (mindPct == null ? "" : `, 판단용 API 하루 상한의 ${mindPct}%`);
@@ -64,29 +84,40 @@ export function UsageBars() {
         onClick={() => setOpen((v) => !v)}
         className="flex h-11 w-12 flex-col justify-center gap-[3px] rounded-lg px-1.5 outline-none select-none focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-8"
       >
-        <Bar value={five} />
-        <Bar value={week} />
+        <Bar value={five} faint={stale || five == null} />
+        <Bar value={week} faint={stale || week == null} />
         {usage?.api ? <Bar value={api} /> : null}
         {voyage ? <Bar value={free} /> : null}
         {mind ? <Bar value={mindPct} /> : null}
       </button>
 
       {open ? (
-        <HeaderPanel title="사용량" aside={at ? <span className="tnum text-[11.5px] text-faint">{at} 기준</span> : null}>
+        <HeaderPanel
+          title="사용량"
+          aside={at ? <span className="tnum text-[11.5px] text-faint">{at} 기준{age != null ? ` · ${agoLabel(age)}` : ""}</span> : null}
+        >
           <div className="max-h-[min(30rem,72vh)] space-y-4 overflow-y-auto overscroll-contain px-3.5 py-3">
             <Group name="Claude 구독">
               <Meter
                 name="5시간"
-                figure={five == null ? "-" : `${five}%`}
+                figure={windowFigure(five, usage?.fiveHour?.reset)}
                 value={five}
-                note={usage?.fiveHour?.resetsAt ? `${resetLabel(usage.fiveHour.resetsAt)} 초기화` : undefined}
+                faint={stale}
+                note={windowNote(usage?.fiveHour)}
               />
               <Meter
                 name="주간"
-                figure={week == null ? "-" : `${week}%`}
+                figure={windowFigure(week, usage?.sevenDay?.reset)}
                 value={week}
-                note={usage?.sevenDay?.resetsAt ? `${resetLabel(usage.sevenDay.resetsAt)} 초기화` : undefined}
+                faint={stale}
+                note={windowNote(usage?.sevenDay)}
               />
+              {stale ? (
+                <p className="text-[11px] leading-snug text-faint">
+                  {agoLabel(age!)} 값이에요. 그 뒤에 claude.ai나 다른 기기에서 쓴 양은 다음 대화나 작업 때(쉬는 동안엔 한 시간마다)
+                  반영돼요.
+                </p>
+              ) : null}
             </Group>
 
             {paid ? (
@@ -148,9 +179,24 @@ export function UsageBars() {
   );
 }
 
-function Bar({ value }: { value: number | null }) {
+/** "37%", or "측정 전" for a window that started over since it was read. */
+function windowFigure(p: number | null, reset?: boolean): string {
+  if (reset) return "측정 전";
+  return p == null ? "-" : `${p}%`;
+}
+
+function windowNote(w?: { resetsAt: string; reset?: boolean }): string | undefined {
+  if (!w?.resetsAt) return undefined;
+  if (w.reset) return "초기화됐어요. 다음 대화나 작업 때 다시 읽어요.";
+  return `${resetLabel(w.resetsAt)} 초기화`;
+}
+
+function Bar({ value, faint }: { value: number | null; faint?: boolean }) {
   return (
-    <span aria-hidden className="block h-[3px] w-full overflow-hidden rounded-full bg-foreground/12">
+    <span
+      aria-hidden
+      className={cn("block h-[3px] w-full overflow-hidden rounded-full bg-foreground/12 transition-opacity", faint && "opacity-45")}
+    >
       <span
         className={cn("block h-full rounded-full transition-[width] duration-500", tone(value))}
         style={{ width: `${Math.min(100, Math.max(value ?? 0, value ? 3 : 0))}%` }}
@@ -175,6 +221,7 @@ function Meter({
   figure,
   value,
   note,
+  faint,
   children,
 }: {
   name: string;
@@ -183,10 +230,12 @@ function Meter({
   figure: ReactNode;
   value: number | null;
   note?: string;
+  /** An old reading: drawn quieter than a fresh one. */
+  faint?: boolean;
   children?: ReactNode;
 }) {
   return (
-    <div>
+    <div className={cn("transition-opacity", faint && "opacity-60")}>
       <div className="flex items-baseline justify-between gap-3 text-[12.5px]">
         <span className="text-dim">
           {name}

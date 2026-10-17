@@ -24,7 +24,7 @@ func TestObserveSnapshotAndPersist(t *testing.T) {
 		t.Fatal("just read must not be stale")
 	}
 	// Past the 5-hour reset the old number no longer holds.
-	if u := tr.Snapshot(time.Unix(1791430000, 0)); u.FiveHour.Utilization != 0 || u.SevenDay.Utilization != 0.12 {
+	if u := tr.Snapshot(time.Unix(1791430000, 0)); u.FiveHour.Utilization != 0 || !u.FiveHour.Reset || u.SevenDay.Reset || u.SevenDay.Utilization != 0.12 {
 		t.Fatalf("after reset: %+v %+v", u.FiveHour, u.SevenDay)
 	}
 	// Survives a restart.

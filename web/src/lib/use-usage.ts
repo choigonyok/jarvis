@@ -3,8 +3,10 @@
 import { useEffect, useState } from "react";
 import { API } from "@/lib/thread";
 
-/** The Claude subscription's use, as the agent last read it (agent/internal/usage). */
-export type UsageWindow = { utilization: number; resetsAt: string };
+/** The Claude subscription's use, as the agent last read it (agent/internal/usage).
+ *  `reset`: the window started over after that reading, so what it holds now is
+ *  not known yet - not "0% used". */
+export type UsageWindow = { utilization: number; resetsAt: string; reset?: boolean };
 /** The memory model's pay-as-you-go API spend (memory-svc), not the subscription. */
 export type ApiUsage = {
   model: string;
@@ -137,7 +139,24 @@ export function resetLabel(iso: string, now = Date.now()): string {
   return `${day} ${time}`;
 }
 
-export const pct = (w?: UsageWindow) => (w ? Math.round(w.utilization * 100) : null);
+/** The window's use as a percent; null when unread or reset since it was read. */
+export const pct = (w?: UsageWindow) => (w && !w.reset ? Math.round(w.utilization * 100) : null);
+
+/** The bars are the whole account: use from claude.ai, other devices and the
+ *  guest agent shows only when the next run (or the hourly probe) reads it.
+ *  Past this many minutes a reading is shown as old. */
+export const STALE_MINUTES = 15;
+
+/** How many minutes ago the reading was taken, or null. */
+export const ageMinutes = (at?: string, now = Date.now()) =>
+  at ? Math.max(0, Math.floor((now - new Date(at).getTime()) / 60000)) : null;
+
+/** "방금", "12분 전", "2시간 전". */
+export function agoLabel(min: number): string {
+  if (min < 1) return "방금";
+  if (min < 60) return `${min}분 전`;
+  return `${Math.floor(min / 60)}시간 전`;
+}
 
 /** Calm until it matters: the bar warms at 70% and turns red at 90%. */
 export function tone(p: number | null): string {

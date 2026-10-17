@@ -254,10 +254,11 @@ function windowRow(id: string, name: string, w: UsageWindow | undefined, status:
     id,
     name,
     state,
-    figure: p == null ? "-" : `${p}%`,
+    figure: w?.reset ? "측정 전" : p == null ? "-" : `${p}%`,
     meter: p,
-    summary:
-      p == null
+    summary: w?.reset
+      ? "초기화된 뒤로 아직 읽지 못했어요. 다음 대화나 작업 때 채워져요."
+      : p == null
         ? "아직 읽지 못했어요. 대화나 작업이 한 번 돌면 채워져요."
         : w?.resetsAt
           ? `남은 ${100 - p}% · ${resetLabel(w.resetsAt)} 초기화`

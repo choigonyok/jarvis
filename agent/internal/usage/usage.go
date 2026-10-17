@@ -21,6 +21,10 @@ type Window struct {
 	Utilization float64 `json:"utilization"`
 	// ResetsAt is when the window starts over.
 	ResetsAt time.Time `json:"resetsAt"`
+	// Reset says the window started over after the last reading: what it
+	// holds now - including use from claude.ai, other devices and the guest
+	// agent - is not known until the next run reads it. Not "0% used".
+	Reset bool `json:"reset,omitempty"`
 }
 
 type Usage struct {
@@ -98,14 +102,15 @@ func (t *Tracker) Observe(rawInfo json.RawMessage) {
 }
 
 // Snapshot is the latest reading. A window that has already reset reads as
-// empty: the old number is no longer true and nothing new was seen yet.
+// unmeasured (Reset): the old number is no longer true and nothing new was
+// seen yet.
 func (t *Tracker) Snapshot(now time.Time) Usage {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	u := t.u
 	for _, w := range []**Window{&u.FiveHour, &u.SevenDay} {
 		if *w != nil && !(*w).ResetsAt.IsZero() && now.After((*w).ResetsAt) {
-			*w = &Window{Utilization: 0, ResetsAt: (*w).ResetsAt}
+			*w = &Window{Utilization: 0, ResetsAt: (*w).ResetsAt, Reset: true}
 		}
 	}
 	return u
