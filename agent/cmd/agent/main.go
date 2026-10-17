@@ -376,6 +376,12 @@ func main() {
 		mindUsage = mindClient.Usage
 	}
 
+	// A job's run that reaches a payment raises a card for that job.
+	var jobPayments httpapi.JobPayments
+	if jobsModule != nil {
+		jobPayments = jobsModule
+	}
+
 	srv := &http.Server{
 		Addr: cfg.Addr,
 		Handler: httpapi.New(httpapi.Deps{
@@ -401,6 +407,7 @@ func main() {
 			BrowserChecks:   browserChecks,
 			Vault:           vaultConsole(vaultModule),
 			FollowUp:        runner,
+			Jobs:            jobPayments,
 			Log:             log,
 		}).Handler(),
 		// No WriteTimeout: /events streams and /mcp blocks on a human.

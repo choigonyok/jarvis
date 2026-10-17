@@ -72,6 +72,8 @@ type Module struct {
 	kick chan struct{}
 	// current is the run in flight; the run tools answer only for it.
 	current running
+	// pay is each job's payment card the browser's guard raised (intercept).
+	pay payments
 	// cut is what each job's last run did before the conversation cut it
 	// short, for the next run to pick up from. Only the scheduler touches it.
 	cut map[int64][]string

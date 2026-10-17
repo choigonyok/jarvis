@@ -57,6 +57,9 @@ type Server struct {
 	// followUp starts the turn that tells the assistant how a payment card
 	// was decided.
 	followUp interface{ Enqueue(prompt string) }
+	// jobs is where a background job's payment card goes; nil refuses every
+	// payment a background task reaches.
+	jobs JobPayments
 	// uploads holds photos attached in conversation; nil turns them off.
 	uploads   *uploads.Store
 	modules   *module.Registry
@@ -125,7 +128,10 @@ type Deps struct {
 	Vault http.Handler
 	// FollowUp tells the assistant how a payment card was decided.
 	FollowUp interface{ Enqueue(prompt string) }
-	Log      *slog.Logger
+	// Jobs, when set, lets a background job's run that reaches a payment
+	// raise a card for that job and pick it up once decided.
+	Jobs JobPayments
+	Log  *slog.Logger
 }
 
 func New(d Deps) *Server {
@@ -153,6 +159,7 @@ func New(d Deps) *Server {
 		browserChecks:   d.BrowserChecks,
 		vault:           d.Vault,
 		followUp:        d.FollowUp,
+		jobs:            d.Jobs,
 	}
 	if d.Proposals != nil {
 		d.Proposals.OnDecide(s.resolvePayment)

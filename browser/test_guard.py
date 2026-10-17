@@ -54,6 +54,78 @@ class GuardRules(unittest.TestCase):
         for p in rules["ask_patterns"] + rules["block"]:
             self.assertIn(p, watched)
 
+    def test_coupang_order_sheet_writes_that_move_no_money_pass(self):
+        # 작업 16(2026-10-17): 주문서가 결제하기 전에 보내는 쓰기 - 결제수단 고르기, 통계, 봇 감지
+        # 센서 - 까지 물어서, 주문서가 '시스템 오류: 주문중 오류'로 멈췄다.
+        for name in ["landing", "paybox", "changePayType", "deliveryAddress", "usePartialPoint"]:
+            body = json.dumps({"checkoutId": 1, "eventName": name, "eventData": {}})
+            self.assertTrue(self.g.asks(EVENTS, "POST"))
+            self.assertTrue(self.g.passes(EVENTS, body), name)
+        for url in ["https://checkout.coupang.com/api/node/checkout/metrics",
+                    "https://checkout.coupang.com/api/node/checkout/piiToken",
+                    "https://checkout.coupang.com/api/node/cart/intendedBuyWidget/add"]:
+            self.assertTrue(self.g.passes(url, '{"x":1}'), url)
+        sensor = "https://checkout.coupang.com/tRe0NJmkYwOUcZbd9ExHQgaVWsY/frimQraO/PiwcSw/IjEkF/306dHQW"
+        self.assertTrue(self.g.passes(sensor, '{"sensor_data":"3;0;1;0;3360836;..."}'))
+        self.assertFalse(self.g.passes(sensor, '{"x":1}'), "센서가 아닌 같은 경로의 쓰기는 묻는다")
+
+    def test_coupang_pay_button_is_asked(self):
+        order = json.dumps({"checkoutId": 1, "eventName": "order", "eventData": {"eventType": "createOrder"}})
+        self.assertFalse(self.g.passes(EVENTS, order))
+        self.assertEqual(self.g.event_of(EVENTS, order), "order")
+        # 모르는 이벤트, 돈이 걸린 이벤트, 읽지 못한 본문은 묻는다.
+        for body in [json.dumps({"eventName": "oneClickPurchaseLanding"}), json.dumps({"eventName": "repaymentPrepay"}),
+                     None, "", "not json", "[1]", json.dumps({"eventName": 3})]:
+            self.assertFalse(self.g.passes(EVENTS, body), body)
+        self.assertEqual(self.g.event_of(EVENTS, None), "?")
+        # 결제 호스트는 본문과 상관없이 묻는다.
+        self.assertFalse(self.g.passes("https://rocketpay.coupang.com/keypad/verify", json.dumps({"eventName": "paybox"})))
+
+    def test_body_of(self):
+        import base64
+
+        self.assertIsNone(guard.body_of({"hasPostData": True}), "있다는데 못 받은 본문")
+        self.assertEqual(guard.body_of({}), "")
+        self.assertEqual(guard.body_of({"postData": "a"}), "a")
+        parts = [{"bytes": base64.b64encode(b'{"a":').decode()}, {"bytes": base64.b64encode(b"1}").decode()}]
+        self.assertEqual(guard.body_of({"postDataEntries": parts}), '{"a":1}')
+
+
+EVENTS = "https://checkout.coupang.com/api/node/checkout/events"
+
+
+class Paused(unittest.IsolatedAsyncioTestCase):
+    """멈춘 요청에 가드가 실제로 보내는 답: 그대로 보내기(continue), 묻기, 막기(fail)."""
+
+    async def asyncSetUp(self):
+        self.g = guard.Guard(*guard.load_rules())
+        self.sent, self.asked = [], []
+
+        async def ask(url, method, host, event=""):
+            self.asked.append(event)
+            return False
+
+        self.g.ask = ask
+        sent = self.sent
+
+        class WS:
+            async def send(self, raw):
+                sent.append(json.loads(raw)["method"])
+
+        self.ws = WS()
+
+    def paused(self, url, body, method="POST"):
+        return {"sessionId": "s", "params": {"requestId": "r", "resourceType": "XHR",
+                                             "request": {"url": url, "method": method, "postData": body}}}
+
+    async def test_choosing_a_card_goes_through(self):
+        await self.g.on_paused(self.ws, self.paused(EVENTS, json.dumps({"eventName": "changePayType"})))
+        self.assertEqual((self.sent, self.asked), (["Fetch.continueRequest"], []))
+
+    async def test_the_pay_button_is_asked_and_held(self):
+        await self.g.on_paused(self.ws, self.paused(EVENTS, json.dumps({"eventName": "order"})))
+        self.assertEqual((self.sent, self.asked), (["Fetch.failRequest"], ["order"]))
+
 
 if __name__ == "__main__":
     unittest.main()

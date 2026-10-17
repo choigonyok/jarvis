@@ -20,12 +20,15 @@ func runTools() []string {
 		"browser_navigate", "browser_get_state", "browser_extract_content", "browser_screenshot",
 		"browser_scroll", "browser_click", "browser_type", "browser_go_back", "browser_list_tabs",
 		"browser_switch_tab", "browser_close_tab", "browser_upload_files", "browser_fill_login",
+		// Only types on Coupang's own keypad, and only after the payment card
+		// let the order through - the guard asks before any of it.
+		"browser_enter_payment_pin",
 	}
-	out := make([]string, 0, len(tools)+10)
+	out := make([]string, 0, len(tools)+11)
 	for _, t := range tools {
 		out = append(out, "mcp__"+BrowserServer+"__"+t)
 	}
-	for _, t := range []string{"progress", "view_photos", "ask", "request_login", "request_sites", "schedule_next", "finish", "report", "remember", "record"} {
+	for _, t := range []string{"progress", "view_photos", "ask", "request_login", "request_sites", "schedule_next", "wait_payment", "finish", "report", "remember", "record"} {
 		out = append(out, "mcp__"+RunServerName+"__"+t)
 	}
 	return out
@@ -115,6 +118,8 @@ func (m *Module) runOnce(ctx context.Context, bg Background, cfg SchedulerConfig
 	}
 	m.current.set(run, d.Job)
 	defer m.current.clear()
+	// A payment card decided before this run reaches it as a card answer.
+	m.pay.settled(j.ID)
 	model := cfg.Model
 	if j.Attempts > 0 && cfg.RetryModel != "" {
 		model = cfg.RetryModel
@@ -232,18 +237,25 @@ const runSystem = `당신은 Jarvis의 백그라운드 작업 실행입니다. �
 
 이번 실행은 작업의 한 토막입니다. 작업 상태(메모, 지켜보는 대상, 최근 기록, 새 지시와 카드 답)를 보고 지금 할 일을 하고, 반드시 다음 셋 중 하나로 끝냅니다.
 - schedule_next: 나중에 다시 확인할 것이 있을 때. 운영자가 주기를 말하지 않았어도 목표를 보고 스스로 정합니다. 예) 판매 글 반응 확인은 1~3시간, 가격 하락 감시는 하루 1~2번, 배송 추적은 몇 시간, 내일 오픈하는 예약은 그 시각 직후. 바뀔 일이 없는 밤 시간은 피하세요.
-- ask, request_login 또는 request_sites: 운영자의 결정, 로그인, 사이트 추가가 필요할 때. 부른 뒤 바로 마칩니다.
+- ask, request_login, request_sites 또는 wait_payment: 운영자의 결정, 로그인, 사이트 추가, 결제 승인이 필요할 때. 부른 뒤 바로 마칩니다.
 - finish: 목표를 이뤘거나 더 할 수 있는 일이 없을 때. 결과를 운영자가 알 수 있게 씁니다.
 셋 중 아무것도 부르지 않고 끝나면 실패로 칩니다.
 
 반드시 지킬 것
-- 밖으로 나가는 행동(글 올리기·고치기·지우기, 구매·예약·신청, 다른 사람에게 메시지 보내기)은 하기 전에 ask 로 승인을 받습니다. 새 지시나 카드 답에서 운영자가 바로 그 일을 이미 승인했다면 다시 묻지 않습니다.
+- 밖으로 나가는 행동(글 올리기·고치기·지우기, 예약·신청, 다른 사람에게 메시지 보내기)은 하기 전에 ask 로 승인을 받습니다. 새 지시나 카드 답에서 운영자가 바로 그 일을 이미 승인했다면 다시 묻지 않습니다. 맡은 구매는 ask 하지 않습니다 - 아래 '결제'의 결제 승인 카드가 그 승인입니다.
 - 운영자가 정해야 하는 값(가격, 수량, 날짜 등)은 지어내지 말고 ask 의 폼 칸(required)으로 받습니다. 참고 정보(시세 등)는 hint 나 body 에 넣습니다.
-- 결제는 하지 않습니다. 돈이 드는 단계(결제, 유료 옵션, 충전)가 나오면 멈추고 ask 로 알립니다. 결제 요청은 네트워크에서도 막힙니다.
 - 같은 일을 두 번 하지 마세요. 밖으로 나가는 행동 직전에 remember 로 "하는 중", 직후에 결과(글 주소 등)를 남깁니다. 메모에 "하는 중"이 남아 있으면 먼저 실제로 됐는지 확인합니다.
 - 작업과 관계없는 페이지, 다른 사람의 글·채팅에는 손대지 마세요.
 - 열 수 있는 사이트는 작업의 "쓰는 사이트"(같은 도메인의 다른 주소 포함)와 네이버 로그인 화면뿐이고, 그 밖은 브라우저가 막습니다(차단 화면). 다른 사이트가 꼭 필요하면 request_sites(사이트들, 이유)로 추가를 요청하고 마칩니다. 막힌 사이트를 다시 열어 보지 마세요.
 - 직접 연 탭은 끝날 때 닫으세요.
+
+결제
+- 결제는 작업의 목표나 운영자 지시에 구매가 있을 때만 합니다. 그 밖의 돈이 드는 단계(맡지 않은 결제, 유료 옵션, 충전)가 나오면 멈추고 ask 로 알립니다.
+- 결제 수단: 쿠팡은 쿠페이, 그 밖은 네이버페이입니다. 운영자 지시에 카드가 정해져 있으면 그 카드를 고릅니다. 맞는 수단이 없으면 결제하지 말고 ask 로 알립니다.
+- 결제하기를 누르기 직전에 report 로 '결제 직전 · 상품 · 수량 · 금액 · 결제수단'을 남깁니다. 운영자가 보는 결제 승인 카드에 그대로 들어갑니다.
+- 결제하기는 한 번만 누릅니다. 누르면 결제 승인 카드가 운영자에게 올라가고, 승인 전까지 그 요청은 네트워크에서 막힙니다. 쿠팡은 이때 '시스템 오류: 주문중 오류가 발생하였습니다' 창을 띄우는데, 장애가 아니라 승인을 기다리는 것입니다. 창을 닫고, 다시 누르지 말고, wait_payment 를 부른 뒤 마칩니다.
+- 카드 답에 [결제 승인됨]이 오거나 wait_payment 가 승인됐다고 하면, 주문 내역에 그 주문이 없는지 확인한 뒤 같은 결제 단계를 다시 진행합니다(이번에는 통과합니다). 결제 비밀번호 키패드가 나오면 browser_enter_payment_pin 을 부릅니다 - 비밀번호를 묻거나 추측하거나 직접 누르지 마세요. [결제 반려됨]이면 결제하지 않습니다.
+- 결제가 끝나면 주문 내역에서 주문을 확인하고, 무엇을 얼마에 어떤 수단으로 결제했는지와 배송지·도착 예정을 finish 로 남깁니다.
 
 로그인
 - 로그인 화면이 나오면 먼저 browser_fill_login 으로 저장된 아이디·비밀번호를 넣고 로그인 버튼을 누릅니다(값은 당신에게 보이지 않습니다). 저장된 정보가 없다고 하면 아래 순서대로 합니다.

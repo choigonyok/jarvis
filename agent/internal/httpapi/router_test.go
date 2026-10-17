@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -144,6 +145,194 @@ func TestInterceptRaisesACardAndReturnsAtOnce(t *testing.T) {
 	}
 	if c := props.List(); c[len(c)-1].Card.Title != "쿠팡에서 쿠페이로 결제합니다" {
 		t.Fatalf("쿠팡 카드: %+v", c[len(c)-1].Card)
+	}
+}
+
+// switchRunner is a runner whose background state a test changes.
+type switchRunner struct {
+	mu sync.Mutex
+	bg bool
+}
+
+func (r *switchRunner) Send(string, []string) error { return nil }
+func (r *switchRunner) InBackground() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.bg
+}
+func (r *switchRunner) set(bg bool) {
+	r.mu.Lock()
+	r.bg = bg
+	r.mu.Unlock()
+}
+
+// fakeJobs is the jobs module as /intercept sees it.
+type fakeJobs struct {
+	mu      sync.Mutex
+	id      int64
+	title   string
+	summary string
+	raised  []string
+	decided []string
+}
+
+func (f *fakeJobs) RunningJob() (int64, string, string, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.id, f.title, f.summary, f.id != 0
+}
+
+func (f *fakeJobs) PaymentRaised(job int64, card string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.raised = append(f.raised, fmt.Sprintf("%d %s", job, card))
+}
+
+func (f *fakeJobs) PaymentDecided(job int64, card string, approved bool, text string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.decided = append(f.decided, fmt.Sprintf("%d %s %v %s", job, card, approved, text))
+	return nil
+}
+
+func (f *fakeJobs) running(id int64) {
+	f.mu.Lock()
+	f.id = id
+	f.mu.Unlock()
+}
+
+// wait returns the decisions once there are n (hooks run on their own
+// goroutines), or what there is after a second.
+func (f *fakeJobs) wait(n int) []string {
+	for i := 0; i < 100; i++ {
+		f.mu.Lock()
+		got := append([]string(nil), f.decided...)
+		f.mu.Unlock()
+		if len(got) >= n {
+			return got
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.decided...)
+}
+
+// A job's run that reaches a payment raises a card for that job - not a
+// refusal nobody is asked about (job 16, 2026-10-17: Coupang's order sheet
+// failed with "주문중 오류" four times), and not the conversation's card.
+// Its approval opens the site to that job alone.
+func TestInterceptRaisesAJobsOwnCard(t *testing.T) {
+	props := proposal.NewStore(bus.New())
+	fu := &followUps{}
+	jobs := &fakeJobs{id: 16, title: "탁상시계 구매", summary: "결제 직전 · 블랙 1개 · 34,350원 · 하나카드"}
+	runner := &switchRunner{bg: true}
+	s := New(Deps{Proposals: props, Runner: runner, InterceptToken: "tok", FollowUp: fu, Jobs: jobs,
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	post := func(body string) map[string]string {
+		req := httptest.NewRequest(http.MethodPost, "/intercept", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer tok")
+		rec := httptest.NewRecorder()
+		s.postIntercept(rec, req)
+		var out map[string]string
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return out
+	}
+	// The job is the agent's to name: a jobId in the request is ignored.
+	order := `{"url":"https://checkout.coupang.com/api/node/checkout/events","method":"POST","host":"checkout.coupang.com","event":"order","jobId":99}`
+
+	first := post(order)
+	if first["decision"] != string(proposal.Reject) || first["pending"] == "" {
+		t.Fatalf("작업의 결제는 카드를 올리고 막아야 합니다: %v", first)
+	}
+	cards := props.List()
+	if len(cards) != 1 {
+		t.Fatalf("카드 %d 장", len(cards))
+	}
+	if pay := paymentOf(cards[0].Action.Input); pay.JobID != 16 {
+		t.Fatalf("카드는 실행 중인 작업 16 의 것이어야 합니다: %+v", pay)
+	}
+	for _, want := range []string{"탁상시계 구매", "34,350원", "결제하기(주문)"} {
+		if !strings.Contains(cards[0].Card.Body, want) {
+			t.Fatalf("카드에 %q 가 없습니다: %s", want, cards[0].Card.Body)
+		}
+	}
+	if len(jobs.raised) != 1 || jobs.raised[0] != "16 "+first["pending"] {
+		t.Fatalf("작업에 카드를 알려야 합니다: %v", jobs.raised)
+	}
+	if again := post(order); again["pending"] != first["pending"] || len(props.List()) != 1 {
+		t.Fatalf("같은 결제는 카드 하나: %v", again)
+	}
+
+	if err := props.Decide(first["pending"], proposal.Approve); err != nil {
+		t.Fatal(err)
+	}
+	if got := jobs.wait(1); len(got) != 1 || !strings.HasPrefix(got[0], "16 "+first["pending"]+" true [결제 승인됨]") {
+		t.Fatalf("승인은 작업에 가야 합니다: %v", got)
+	}
+	if got := fu.wait(1); len(got) != 0 {
+		t.Fatalf("작업의 카드를 대화에 알렸습니다: %v", got)
+	}
+	if retry := post(order); retry["decision"] != string(proposal.Approve) {
+		t.Fatalf("승인된 작업의 재시도는 통과해야 합니다: %v", retry)
+	}
+
+	// The job's approval is not the conversation's...
+	runner.set(false)
+	if conv := post(order); conv["decision"] != string(proposal.Reject) {
+		t.Fatalf("작업의 승인으로 대화의 결제가 통과했습니다: %v", conv)
+	}
+	// ...nor another job's.
+	runner.set(true)
+	jobs.running(17)
+	if other := post(order); other["decision"] != string(proposal.Reject) {
+		t.Fatalf("작업 16 의 승인으로 작업 17 의 결제가 통과했습니다: %v", other)
+	}
+}
+
+// A background task that is not a job (an order lookup, a login check) still
+// never pays and never asks.
+func TestInterceptRefusesABackgroundTaskThatIsNotAJob(t *testing.T) {
+	props := proposal.NewStore(bus.New())
+	s := New(Deps{Proposals: props, Runner: &switchRunner{bg: true}, InterceptToken: "tok", Jobs: &fakeJobs{},
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	req := httptest.NewRequest(http.MethodPost, "/intercept",
+		strings.NewReader(`{"url":"https://checkout.coupang.com/api/node/checkout/events","method":"POST","host":"checkout.coupang.com","event":"order"}`))
+	req.Header.Set("Authorization", "Bearer tok")
+	rec := httptest.NewRecorder()
+	s.postIntercept(rec, req)
+	var body map[string]string
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if body["decision"] != string(proposal.Reject) || body["pending"] != "" || len(props.List()) != 0 {
+		t.Fatalf("작업이 아닌 백그라운드는 묻지 않고 거부: %v, cards %d", body, len(props.List()))
+	}
+}
+
+// Turned down, the job is told not to pay and nothing opens.
+func TestInterceptRejectedJobCard(t *testing.T) {
+	props := proposal.NewStore(bus.New())
+	jobs := &fakeJobs{id: 16, title: "탁상시계 구매"}
+	s := New(Deps{Proposals: props, Runner: &switchRunner{bg: true}, InterceptToken: "tok", Jobs: jobs,
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	post := func() map[string]string {
+		req := httptest.NewRequest(http.MethodPost, "/intercept",
+			strings.NewReader(`{"url":"https://checkout.coupang.com/api/node/checkout/events","method":"POST","host":"checkout.coupang.com","event":"order"}`))
+		req.Header.Set("Authorization", "Bearer tok")
+		rec := httptest.NewRecorder()
+		s.postIntercept(rec, req)
+		var out map[string]string
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return out
+	}
+	first := post()
+	if err := props.DecideWhy(first["pending"], proposal.Reject, "안 살래"); err != nil {
+		t.Fatal(err)
+	}
+	if got := jobs.wait(1); len(got) != 1 || !strings.Contains(got[0], "false [결제 반려됨]") || !strings.Contains(got[0], "안 살래") {
+		t.Fatalf("반려는 작업에 이유와 함께: %v", got)
+	}
+	if again := post(); again["decision"] != string(proposal.Reject) || again["pending"] == first["pending"] {
+		t.Fatalf("반려 뒤의 결제는 새 카드로 다시 묻습니다: %v", again)
 	}
 }
 

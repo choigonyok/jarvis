@@ -43,6 +43,116 @@ func (r *running) get(run int64) (Job, bool) {
 	return r.job, run != 0 && r.run == run
 }
 
+// now is the run in flight, whichever it is.
+func (r *running) now() (int64, Job) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.run, r.job
+}
+
+// report keeps the run's job at its latest one-line status: a payment card
+// raised later in the run shows it.
+func (r *running) report(run int64, summary string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.run == run && run != 0 {
+		r.job.Summary = summary
+	}
+}
+
+// payCard is a payment card the browser's guard raised for a job's run, and
+// what became of it.
+type payCard struct {
+	id    string
+	state string // payPending, payApproved, payRejected
+}
+
+const (
+	payPending  = "pending"
+	payApproved = "approved"
+	payRejected = "rejected"
+)
+
+// payments are each job's payment card, from the moment its run was stopped
+// at a payment until a later run starts after the decision.
+type payments struct {
+	mu    sync.Mutex
+	cards map[int64]payCard
+}
+
+func (p *payments) get(job int64) (payCard, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	c, ok := p.cards[job]
+	return c, ok
+}
+
+func (p *payments) set(job int64, c payCard) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.cards == nil {
+		p.cards = map[int64]payCard{}
+	}
+	p.cards[job] = c
+}
+
+// decided records a decision on the job's card, if it is still that card.
+func (p *payments) decided(job int64, card string, approved bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if c, ok := p.cards[job]; ok && c.id == card {
+		c.state = payRejected
+		if approved {
+			c.state = payApproved
+		}
+		p.cards[job] = c
+	}
+}
+
+// settled forgets a decided card: once a run starts after the decision, the
+// decision reaches it as a card answer.
+func (p *payments) settled(job int64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if c, ok := p.cards[job]; ok && c.state != payPending {
+		delete(p.cards, job)
+	}
+}
+
+func (p *payments) forget(job int64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.cards, job)
+}
+
+// RunningJob is the job whose run holds the browser now (httpapi.JobPayments).
+func (m *Module) RunningJob() (int64, string, string, bool) {
+	run, j := m.current.now()
+	return j.ID, j.Title, j.Summary, run != 0
+}
+
+// PaymentRaised: the browser's guard stopped the job's run at a payment and
+// a card is up for it. The run learns of it through wait_payment.
+func (m *Module) PaymentRaised(job int64, card string) {
+	if c, ok := m.pay.get(job); ok && c.id == card {
+		return
+	}
+	m.pay.set(job, payCard{id: card, state: payPending})
+}
+
+// PaymentDecided hands the operator's decision on the job's payment card to
+// the job, as a card answer that wakes it if it is waiting on that card.
+func (m *Module) PaymentDecided(job int64, card string, approved bool, text string) error {
+	m.pay.decided(job, card, approved)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := m.store.Answer(ctx, job, card, text); err != nil {
+		return err
+	}
+	m.wake()
+	return nil
+}
+
 type ProgressInput struct {
 	Text string `json:"text" jsonschema:"지금 무엇을 하고 있는지 한 줄. 운영자가 작업 탭에서 본다. 예: '판매 글 양식에 사진 3장을 넣었습니다'"`
 }
@@ -132,6 +242,14 @@ func (m *Module) runServer(run int64) *mcp.Server {
 	}
 	ok := func(s string) *mcp.CallToolResult { return toolText(s, false) }
 	fail := func(err error) *mcp.CallToolResult { return toolText(err.Error(), true) }
+	// A run stopped at a payment has a card up already; another card, or a
+	// next run on its own clock, would leave that one with nobody to wake.
+	payUp := func(j Job) *mcp.CallToolResult {
+		if c, up := m.pay.get(j.ID); up && c.state == payPending {
+			return toolText("결제 승인 카드가 이미 운영자에게 올라가 있습니다. 카드를 더 올리거나 다음 실행을 잡지 말고 wait_payment 를 부른 뒤 실행을 마치세요.", true)
+		}
+		return nil
+	}
 
 	mcp.AddTool(server, &mcp.Tool{Name: "progress", Description: "지금 하는 일을 작업 탭에 한 줄 남긴다. 큰 단계마다 부른다."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in ProgressInput) (*mcp.CallToolResult, any, error) {
@@ -170,12 +288,16 @@ func (m *Module) runServer(run int64) *mcp.Server {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "ask",
-		Description: "운영자에게 카드로 묻는다: 밖으로 나가는 행동(글 올리기, 구매, 삭제, 메시지 보내기) 전의 승인, 운영자가 정해야 하는 값(가격 등)이 든 폼, 판단이 필요한 질문. " +
+		Description: "운영자에게 카드로 묻는다: 밖으로 나가는 행동(글 올리기, 삭제, 메시지 보내기, 예약·신청) 전의 승인, 운영자가 정해야 하는 값(가격 등)이 든 폼, 판단이 필요한 질문. " +
+			"맡은 구매의 결제는 묻지 않는다 - 결제하기를 누르면 결제 승인 카드가 저절로 올라간다(wait_payment). " +
 			"부른 뒤에는 바로 실행을 마친다 - 답이 오면 다음 실행에서 이어진다.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in AskToolInput) (*mcp.CallToolResult, any, error) {
 		j, bad := guard()
 		if bad != nil {
 			return bad, nil, nil
+		}
+		if up := payUp(j); up != nil {
+			return up, nil, nil
 		}
 		ask := AskInput{JobID: j.ID, JobTitle: j.Title, Question: in.Question, Body: in.Body}
 		for _, name := range in.Images {
@@ -271,8 +393,12 @@ func (m *Module) runServer(run int64) *mcp.Server {
 		Description: "이 작업을 언제 다시 실행할지 정한다. 목표상 나중에 다시 확인할 것이 있으면 반드시 부른다(최소 10분 뒤). " +
 			"얼마나 자주 볼지는 대상이 얼마나 빨리 바뀌는지로 정한다.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ScheduleInput) (*mcp.CallToolResult, any, error) {
-		if _, bad := guard(); bad != nil {
+		j, bad := guard()
+		if bad != nil {
 			return bad, nil, nil
+		}
+		if up := payUp(j); up != nil {
+			return up, nil, nil
 		}
 		at := time.Now().Add(time.Duration(in.AfterMinutes) * time.Minute)
 		if in.At != "" {
@@ -289,6 +415,46 @@ func (m *Module) runServer(run int64) *mcp.Server {
 		return ok("다음 실행: " + got.Local().Format("2006-01-02 15:04") + ". 할 일이 끝났으면 실행을 마치세요."), nil, nil
 	})
 
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "wait_payment",
+		Description: "결제하기를 눌렀는데 결제가 막혔을 때(쿠팡은 '시스템 오류: 주문중 오류' 창을 띄운다) 부른다. 막혔다면 결제 승인 카드가 운영자에게 올라가 있다. " +
+			"아직 결정 전이면 작업이 그 카드를 기다리게 하고, 이미 결정됐으면 무엇을 할지 알려 준다.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ ListInput) (*mcp.CallToolResult, any, error) {
+		j, bad := guard()
+		if bad != nil {
+			return bad, nil, nil
+		}
+		decided := func(c payCard) *mcp.CallToolResult {
+			switch c.state {
+			case payApproved:
+				return ok("결제가 이미 승인됐습니다. 주문 내역에 이 주문이 없는지 확인한 뒤 결제하기를 한 번 다시 누르세요(이번에는 통과합니다). " +
+					"결제 비밀번호 키패드가 나오면 browser_enter_payment_pin 을 부르세요.")
+			case payRejected:
+				return ok("운영자가 결제를 반려했습니다. 결제하지 말고 finish 로 마치세요.")
+			}
+			return nil
+		}
+		c, up := m.pay.get(j.ID)
+		if !up {
+			return toolText("이 작업에 올라간 결제 카드가 없습니다. 결제 요청이 막힌 것이 아니라 사이트 쪽 오류입니다 - 화면을 다시 확인하고, 계속되면 ask 로 알리세요.", true), nil, nil
+		}
+		if res := decided(c); res != nil {
+			return res, nil, nil
+		}
+		if err := m.store.Wait(ctx, run, c.id, "결제 승인 대기"); err != nil {
+			return fail(err), nil, nil
+		}
+		// Decided while the job was being parked: the answer came before the
+		// job waited on it, so nothing will wake it - put it back on a clock.
+		if now, _ := m.pay.get(j.ID); now.id == c.id && now.state != payPending {
+			if _, err := m.store.Schedule(ctx, run, time.Now(), "결제 카드 결정 뒤 이어서"); err != nil {
+				return fail(err), nil, nil
+			}
+			return decided(now), nil, nil
+		}
+		return ok("결제 승인 카드를 기다립니다. 승인되면 작업이 바로 다시 실행됩니다. 지금 실행을 마치세요."), nil, nil
+	})
+
 	mcp.AddTool(server, &mcp.Tool{Name: "finish", Description: "목표를 이뤘거나 더 할 수 있는 일이 없을 때 작업을 끝낸다."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in FinishInput) (*mcp.CallToolResult, any, error) {
 			j, bad := guard()
@@ -297,6 +463,13 @@ func (m *Module) runServer(run int64) *mcp.Server {
 			}
 			if err := m.store.Finish(ctx, run, in.Summary); err != nil {
 				return fail(err), nil, nil
+			}
+			// A job that ends does not pay: its payment card, if still up, goes.
+			if c, up := m.pay.get(j.ID); up {
+				if c.state == payPending {
+					m.proposals.Abandon(c.id, "작업이 끝나 결제하지 않습니다.")
+				}
+				m.pay.forget(j.ID)
 			}
 			if in.Notify == nil || *in.Notify {
 				m.say(j, "끝냈습니다. "+in.Summary)
@@ -313,6 +486,7 @@ func (m *Module) runServer(run int64) *mcp.Server {
 			if err := m.store.Report(ctx, run, in.Summary); err != nil {
 				return fail(err), nil, nil
 			}
+			m.current.report(run, in.Summary)
 			if in.Notify {
 				m.say(j, in.Summary)
 			}

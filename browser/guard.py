@@ -23,6 +23,7 @@ browser-use는 건드리지 않는다. 같은 Chromium에 CDP로 따로 붙은 �
 """
 
 import asyncio
+import base64
 import glob
 import json
 import logging
@@ -55,15 +56,50 @@ SKIP_TYPES = {"Image", "Stylesheet", "Font", "Media", "Script", "Manifest"}
 WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
-def load_rules() -> tuple[list[str], list[str], list[str]]:
-    """묻는 호스트, 묻는 URL 패턴, 막는 URL 패턴. 예전 형식(hosts)도 읽어서, 규칙 파일을
-    갈아끼우는 중에 가드가 빈손으로 뜨는 일이 없게 한다."""
+def load_rules() -> tuple[list[str], list[str], list[str], list[dict]]:
+    """묻는 호스트, 묻는 URL 패턴, 막는 URL 패턴, 묻는 것 중 통과시킬 규칙. 예전 형식(hosts)도
+    읽어서, 규칙 파일을 갈아끼우는 중에 가드가 빈손으로 뜨는 일이 없게 한다."""
     with open(HOSTS_FILE, encoding="utf-8") as f:
         data = json.load(f)
     ask = [h.strip().lower() for h in data.get("ask", data.get("hosts", [])) if h.strip()]
     ask_patterns = [p.strip().lower() for p in data.get("ask_patterns", []) if p.strip()]
     block = [p.strip().lower() for p in data.get("block", []) if p.strip()]
-    return ask, ask_patterns, block
+    passes = []
+    for r in data.get("pass", []):
+        if not isinstance(r, dict) or not str(r.get("url", "")).strip():
+            continue
+        rule = {"url": r["url"].strip().lower()}
+        if r.get("json_field"):
+            rule["json_field"] = r["json_field"]
+            rule["values"] = {str(v).lower() for v in r.get("values", [])}
+        if r.get("json_key"):
+            rule["json_key"] = r["json_key"]
+        passes.append(rule)
+    return ask, ask_patterns, block, passes
+
+
+def body_of(request: dict) -> str | None:
+    """멈춘 요청의 본문. 본문이 없으면 "", 있다는데 Chrome 이 넘겨주지 않았으면(너무 길 때)
+    None - 읽지 못한 본문으로는 아무것도 통과시키지 않는다."""
+    if "postData" in request:
+        return request["postData"]
+    entries = request.get("postDataEntries")
+    if entries:
+        try:
+            return b"".join(base64.b64decode(e.get("bytes", "")) for e in entries).decode("utf-8", "replace")
+        except (ValueError, TypeError, AttributeError):
+            return None
+    return None if request.get("hasPostData") else ""
+
+
+def _json_object(body: str | None) -> dict | None:
+    if not body:
+        return None
+    try:
+        value = json.loads(body)
+    except ValueError:
+        return None
+    return value if isinstance(value, dict) else None
 
 
 def find_cdp_port() -> int | None:
@@ -83,10 +119,17 @@ def find_cdp_port() -> int | None:
 
 
 class Guard:
-    def __init__(self, ask_hosts: list[str], ask_patterns: list[str], block_patterns: list[str]):
+    def __init__(
+        self,
+        ask_hosts: list[str],
+        ask_patterns: list[str],
+        block_patterns: list[str],
+        pass_rules: list[dict] | None = None,
+    ):
         self.hosts = ask_hosts
         self.ask_patterns = ask_patterns
         self.blocks = block_patterns
+        self.pass_rules = pass_rules or []
         # 멈춰 세울 대상은 세 목록의 합집합이다. 패턴에 없는 요청은 Chrome이
         # 아예 멈추지 않으므로, 여기 빠진 것은 판단 대상에도 오르지 못한다.
         self.patterns = (
@@ -136,6 +179,37 @@ class Guard:
         low = url.lower()
         return any(fnmatch(low, p) for p in self.ask_patterns)
 
+    def passes(self, url: str, body: str | None) -> bool:
+        """묻는 쓰기 요청 중에, 돈이 나가지 않는다고 확인해 둔 것인가(payment-hosts.json 의 pass).
+        쿠팡 주문서는 배송지·결제수단을 고를 때도 결제하기와 같은 주소로 쓰기를 보내서, 이것을
+        묻거나 막으면 주문서가 결제 전에 '주문중 오류'로 멈춘다. 본문을 봐야 하는 규칙은 본문을
+        읽지 못하면 통과시키지 않는다 - 모르는 것은 묻는다."""
+        low = url.lower()
+        for rule in self.pass_rules:
+            if not fnmatch(low, rule["url"]):
+                continue
+            if "json_field" in rule:
+                value = (_json_object(body) or {}).get(rule["json_field"])
+                if isinstance(value, str) and value.lower() in rule["values"]:
+                    return True
+                continue
+            if "json_key" in rule:
+                if rule["json_key"] in (_json_object(body) or {}):
+                    return True
+                continue
+            return True
+        return False
+
+    def event_of(self, url: str, body: str | None) -> str:
+        """카드에 보일 요청의 이름: 본문으로 판단하는 주소(쿠팡 주문서 이벤트)면 그 이벤트.
+        결제하기는 'order' 다."""
+        low = url.lower()
+        for rule in self.pass_rules:
+            if "json_field" in rule and fnmatch(low, rule["url"]):
+                value = (_json_object(body) or {}).get(rule["json_field"])
+                return value if isinstance(value, str) else "?"
+        return ""
+
     async def send(self, ws, method, params=None, session=None):
         async with self._send_lock:
             self._next_id += 1
@@ -144,14 +218,17 @@ class Guard:
                 msg["sessionId"] = session
             await ws.send(json.dumps(msg))
 
-    async def ask(self, url: str, method: str, host: str) -> bool:
+    async def ask(self, url: str, method: str, host: str, event: str = "") -> bool:
         headers = {"Authorization": f"Bearer {TOKEN}"}
         timeout = aiohttp.ClientTimeout(total=DECISION_TIMEOUT)
+        payload = {"url": url, "method": method, "host": host}
+        if event:
+            payload["event"] = event
         try:
             async with aiohttp.ClientSession(timeout=timeout) as s:
                 async with s.post(
                     AGENT_URL,
-                    json={"url": url, "method": method, "host": host},
+                    json=payload,
                     headers=headers,
                 ) as r:
                     body = await r.json()
@@ -204,13 +281,20 @@ class Guard:
             await go()
             return
 
+        # 결제 호스트로 가지만 돈이 나가지 않는 쓰기(주문서의 결제수단 선택, 통계, 봇 감지 센서).
+        body = body_of(req)
+        if self.passes(url, body):
+            await go()
+            return
+
         loop = asyncio.get_running_loop()
         if loop.time() < self._approved.get(host, 0):
             await go()
             return
 
-        log.info("결제 요청을 멈췄습니다: %s %s", method, url[:120])
-        if await self.ask(url, method, host):
+        event = self.event_of(url, body)
+        log.info("결제 요청을 멈췄습니다: %s %s%s", method, url[:120], f" ({event})" if event else "")
+        if await self.ask(url, method, host, event):
             # 결제 한 건은 요청 여러 개로 이뤄진다. 승인 뒤 잠깐은 같은
             # 호스트를 다시 묻지 않는다.
             self._approved[host] = loop.time() + 300
@@ -229,11 +313,12 @@ class Guard:
 
         async with websockets.connect(ws_url, max_size=None) as ws:
             log.info(
-                "CDP에 붙었습니다 (port %s), 묻는 호스트 %d개 · 묻는 패턴 %d개 · 막는 패턴 %d개",
+                "CDP에 붙었습니다 (port %s), 묻는 호스트 %d개 · 묻는 패턴 %d개 · 막는 패턴 %d개 · 통과 규칙 %d개",
                 port,
                 len(self.hosts),
                 len(self.ask_patterns),
                 len(self.blocks),
+                len(self.pass_rules),
             )
             await self.send(
                 ws,
@@ -266,8 +351,7 @@ class Guard:
 
 async def main():
     logging.basicConfig(level=logging.INFO, format="guard: %(message)s")
-    ask, ask_patterns, block = load_rules()
-    guard = Guard(ask, ask_patterns, block)
+    guard = Guard(*load_rules())
     while True:
         port = find_cdp_port()
         if port is None:
