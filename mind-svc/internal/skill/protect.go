@@ -39,7 +39,10 @@ func (p Protect) OnChange(ctx context.Context, v View, e model.Entity, _ []model
 	}
 	for _, o := range plans {
 		if o.ID == e.ID || o.State.Status != model.Confirmed || o.State.Owner == "partner" ||
-			o.State.CalendarID != "" && o.State.CalendarID == st.CalendarID {
+			o.State.CalendarID != "" && o.State.CalendarID == st.CalendarID ||
+			// The same event told twice (a conversation's plan and its
+			// calendar entry, before schedule ties them) collides with nothing.
+			model.SameEvent(st, o.State) {
 			continue
 		}
 		os, oe, ok := known(o.State, v.Loc())

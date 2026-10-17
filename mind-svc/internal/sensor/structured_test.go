@@ -129,3 +129,61 @@ func TestPhoneNotificationsAreOccurrences(t *testing.T) {
 		t.Fatalf("택배: %v", err)
 	}
 }
+
+// An entry put on the calendar another way (the assistant, in a conversation)
+// under another title is tied to the conversation's plan it is - no second
+// plan of the calendar's own to be "missing from the calendar" or to collide.
+func TestSyncCalendarTiesAConversationPlanToItsEntry(t *testing.T) {
+	ctx := context.Background()
+	st := store.NewMemory()
+	now := time.Date(2026, 10, 17, 11, 0, 0, 0, seoul)
+	w := world.New(st, func() time.Time { return now })
+	s := &Structured{Store: st, Observer: observer{st}, World: w, Loc: seoul, Now: func() time.Time { return now }}
+	talked, err := w.Create(ctx, model.KindPlan, "kakao:7", model.State{Title: "은주와 합주", Status: model.Confirmed, Date: "2026-10-17", Start: "15:00", People: []string{"은주"}}, Meta())
+	if err != nil {
+		t.Fatal(err)
+	}
+	evs := []entry{{ID: "c9", Title: "기타 합주 (은주)", Date: "2026-10-17", Start: "15:00", End: "16:00"}}
+	if err := s.SyncCalendar(ctx, evs, "2026-10-10", "2026-12-17"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := st.Entity(ctx, talked.ID)
+	if got.State.CalendarID != "c9" {
+		t.Fatalf("대화의 일정이 캘린더 일정에 이어져야 합니다: %+v", got.State)
+	}
+	if own, _ := st.Entities(ctx, model.KindPlan, CalendarRoom, true); len(own) != 0 {
+		t.Fatalf("캘린더 쪽 일정을 따로 만들면 안 됩니다: %+v", own)
+	}
+	// A different thing at the same time is not tied.
+	_ = s.SyncCalendar(ctx, append(evs, entry{ID: "c10", Title: "치과", Date: "2026-10-17", Start: "15:00"}), "2026-10-10", "2026-12-17")
+	if own, _ := st.Entities(ctx, model.KindPlan, CalendarRoom, true); len(own) != 1 || own[0].State.CalendarID != "c10" {
+		t.Fatalf("같은 때의 다른 일은 따로: %+v", own)
+	}
+}
+
+// A pair split before the fix - the entry read first as a plan of its own,
+// the conversation's plan moved onto its time after - is mended on the next
+// pass: the conversation's plan takes the entry, the calendar's copy goes.
+func TestSyncCalendarMendsASplitPair(t *testing.T) {
+	ctx := context.Background()
+	st := store.NewMemory()
+	now := time.Date(2026, 10, 17, 11, 0, 0, 0, seoul)
+	w := world.New(st, func() time.Time { return now })
+	s := &Structured{Store: st, Observer: observer{st}, World: w, Loc: seoul, Now: func() time.Time { return now }}
+	talked, _ := w.Create(ctx, model.KindPlan, "kakao:7", model.State{Title: "은주와 합주", Status: model.Confirmed, Date: "2026-10-17", Start: "16:00", People: []string{"은주"}}, Meta())
+	evs := []entry{{ID: "c9", Title: "기타 합주 (은주)", Date: "2026-10-17", Start: "15:00", End: "16:00"}}
+	_ = s.SyncCalendar(ctx, evs, "2026-10-10", "2026-12-17")
+	if own, _ := st.Entities(ctx, model.KindPlan, CalendarRoom, true); len(own) != 1 {
+		t.Fatalf("한 시간 다르면 아직 다른 일정: %+v", own)
+	}
+	_, _, _ = w.Update(ctx, talked.ID, func(s *model.State) bool { s.Start = "15:00"; return true }, Meta())
+	_ = s.SyncCalendar(ctx, evs, "2026-10-10", "2026-12-17")
+	got, _ := st.Entity(ctx, talked.ID)
+	if got.State.CalendarID != "c9" {
+		t.Fatalf("대화의 일정이 캘린더 일정을 맡아야 합니다: %+v", got.State)
+	}
+	if own, _ := st.Entities(ctx, model.KindPlan, CalendarRoom, true); len(own) != 0 {
+		t.Fatalf("캘린더 쪽 복사본은 없어져야 합니다: %+v", own)
+	}
+}
+

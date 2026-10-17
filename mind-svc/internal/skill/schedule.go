@@ -53,6 +53,21 @@ func (s Schedule) OnChange(ctx context.Context, v View, e model.Entity, changes 
 	r.Updates = append(r.Updates, closeLoopsTitled(ctx, v, e, "날짜 정하기")...)
 
 	if st.CalendarID == "" {
+		// Put on the calendar some other way - by the assistant in a
+		// conversation, by hand - under a title of its own: that entry is
+		// this plan, not a gap to fill (nor, in protect, a collision).
+		if twin, ok := calendarTwin(ctx, v, e); ok {
+			r.Withdraw = true
+			r.Updates = append(r.Updates, Update{ID: e.ID, Why: "캘린더의 같은 일정(" + twin.State.Title + ")에 이음",
+				Set: func(st *model.State) bool {
+					if st.CalendarID != "" {
+						return false
+					}
+					st.CalendarID = twin.State.CalendarID
+					return true
+				}})
+			return r
+		}
 		if in, ok := s.add(ctx, v, e, changes); ok {
 			r.Intents = append(r.Intents, in)
 		}
@@ -129,6 +144,21 @@ func withMemory(body string, lines []string) string {
 		return body
 	}
 	return body + "\n기억: " + strings.Join(lines, " · ")
+}
+
+// calendarTwin is a plan on the calendar that is this one told another way
+// (model.SameEvent).
+func calendarTwin(ctx context.Context, v View, e model.Entity) (model.Entity, bool) {
+	plans, err := v.Entities(ctx, model.KindPlan, "", true)
+	if err != nil {
+		return model.Entity{}, false
+	}
+	for _, p := range plans {
+		if p.ID != e.ID && p.State.CalendarID != "" && p.State.Status == model.Confirmed && model.SameEvent(e.State, p.State) {
+			return p, true
+		}
+	}
+	return model.Entity{}, false
 }
 
 // add is "put it on the calendar" - unless the operator already turned this

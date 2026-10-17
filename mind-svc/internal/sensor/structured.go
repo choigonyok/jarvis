@@ -507,6 +507,25 @@ func (s *Structured) syncEntry(ctx context.Context, ev entry, linked []model.Ent
 			own = &linked[i]
 		}
 	}
+	// A plan heard in a conversation that this entry is - put on the
+	// calendar some other way, under another title - is tied to it: it then
+	// speaks for the entry, as if it had put it there. That also mends a pair
+	// split before (the entry read first, the conversation's time moved onto
+	// it after).
+	if !spoken {
+		if twin, ok := s.conversationTwin(ctx, ev); ok {
+			if _, _, err := s.World.Update(ctx, twin.ID, func(st *model.State) bool {
+				if st.CalendarID != "" {
+					return false
+				}
+				st.CalendarID = ev.ID
+				return true
+			}, world.Meta{Actor: "sensor:calendar", Why: "캘린더의 같은 일정(" + ev.Title + ")"}); err != nil {
+				return err
+			}
+			spoken = true
+		}
+	}
 	if spoken {
 		if own != nil {
 			_, _, err := s.World.Update(ctx, own.ID, func(st *model.State) bool { st.Status = model.Cancelled; return true },
@@ -532,6 +551,22 @@ func (s *Structured) syncEntry(ctx context.Context, ev entry, linked []model.Ent
 		return true
 	}, meta)
 	return err
+}
+
+// conversationTwin is a live plan from a conversation, not yet on the
+// calendar, that ev is (model.SameEvent).
+func (s *Structured) conversationTwin(ctx context.Context, ev entry) (model.Entity, bool) {
+	plans, err := s.Store.PlansOn(ctx, ev.Date, ev.Date)
+	if err != nil {
+		return model.Entity{}, false
+	}
+	want := fromEntry(ev)
+	for _, p := range plans {
+		if p.Room != CalendarRoom && p.Live() && p.State.CalendarID == "" && p.State.Status == model.Confirmed && model.SameEvent(p.State, want) {
+			return p, true
+		}
+	}
+	return model.Entity{}, false
 }
 
 func keep(old, new string) string {
