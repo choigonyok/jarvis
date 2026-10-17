@@ -30,12 +30,19 @@ const MaxAttempts = 3
 // RetryAfter is the wait before a run that ended badly is tried again.
 const RetryAfter = 15 * time.Minute
 
-// YieldAfter is the wait after a run gave way to the conversation.
-const YieldAfter = time.Minute
+// YieldAfter is the wait after a run gave way to the conversation, doubled
+// for each run before it in a row that did, up to MaxYieldWait. A run cut
+// short spent its tokens for nothing, and while the person keeps talking the
+// next one would be cut short too.
+const (
+	YieldAfter   = 5 * time.Minute
+	MaxYieldWait = time.Hour
+)
 
 // MinGap is the shortest interval a run may schedule itself at. A model that
-// asks for "every 10 seconds" is polling a website, not checking on it.
-const MinGap = 5 * time.Minute
+// asks for "every 10 seconds" is polling a website, not checking on it - and
+// every run starts its model over, instructions and tools and all.
+const MinGap = 10 * time.Minute
 
 // End is what to do with a job once its run has ended.
 type End struct {
@@ -51,11 +58,12 @@ type End struct {
 
 // AfterRun decides. decided is whether the run chose its own next step
 // (schedule, wait, finish) - a run that did is left exactly as it set itself.
-func AfterRun(outcome string, decided bool, attempts int, note string) End {
+// yields is how many runs in a row just before this one gave way.
+func AfterRun(outcome string, decided bool, attempts, yields int, note string) End {
 	switch {
 	case outcome == Yielded:
 		// The person spoke; not the job's fault, not an attempt.
-		return End{Retry: true, After: YieldAfter, Attempts: attempts}
+		return End{Retry: true, After: YieldWait(yields), Attempts: attempts}
 	case outcome == OK && decided:
 		return End{Attempts: 0}
 	}
@@ -67,6 +75,16 @@ func AfterRun(outcome string, decided bool, attempts int, note string) End {
 		return End{Fail: true, Attempts: n, Note: note}
 	}
 	return End{Retry: true, After: RetryAfter, Attempts: n, Note: note}
+}
+
+// YieldWait is the wait after a run gave way, given how many runs in a row
+// before it did.
+func YieldWait(yields int) time.Duration {
+	wait := YieldAfter
+	for i := 0; i < yields && wait < MaxYieldWait; i++ {
+		wait *= 2
+	}
+	return min(wait, MaxYieldWait)
 }
 
 // ClampNext keeps a requested next run inside sane bounds.

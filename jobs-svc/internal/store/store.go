@@ -478,7 +478,32 @@ func (s *Store) EndRun(ctx context.Context, runID int64, outcome, note string) (
 		return out, tx.Commit(ctx)
 	}
 
-	end := rules.AfterRun(outcome, decided, attempts, note)
+	// How many runs in a row just before this one gave way to the
+	// conversation: each one more waits longer (rules.YieldWait).
+	yields := 0
+	if outcome == rules.Yielded {
+		rows, err := tx.Query(ctx, `select outcome from job_runs
+			where job_id = $1 and id <> $2 and ended_at is not null order by id desc limit 10`, jobID, runID)
+		if err != nil {
+			return Ended{}, err
+		}
+		for rows.Next() {
+			var o string
+			if err := rows.Scan(&o); err != nil {
+				rows.Close()
+				return Ended{}, err
+			}
+			if o != rules.Yielded {
+				break
+			}
+			yields++
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return Ended{}, err
+		}
+	}
+	end := rules.AfterRun(outcome, decided, attempts, yields, note)
 	switch {
 	case end.Fail:
 		_, err = tx.Exec(ctx, `update jobs set state = 'failed', attempts = $2, next_at = null,
@@ -497,7 +522,7 @@ func (s *Store) EndRun(ctx context.Context, runID int64, outcome, note string) (
 	kind, text := "run_end", "실행을 마쳤습니다"
 	switch {
 	case outcome == rules.Yielded:
-		text = "대화가 시작되어 잠시 멈췄습니다. 곧 다시 합니다"
+		text = fmt.Sprintf("대화가 시작되어 잠시 멈췄습니다. %s 뒤에 다시 합니다", minutes(end.After))
 	case end.Fail:
 		kind, text = "error", "세 번 연달아 실패해 멈췄습니다: "+end.Note
 	case end.Retry:
@@ -704,4 +729,12 @@ func clamp(s string, n int) string {
 		return s
 	}
 	return string(r[:n]) + "…"
+}
+
+// minutes is a wait as a job's log says it: "10분", "1시간".
+func minutes(d time.Duration) string {
+	if d >= time.Hour && d%time.Hour == 0 {
+		return fmt.Sprintf("%d시간", int(d.Hours()))
+	}
+	return fmt.Sprintf("%d분", int(d.Minutes()))
 }
