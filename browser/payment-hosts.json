@@ -16,7 +16,7 @@
     "*coupang.com/*order/*submit*",
     "*coupangpay*"
   ],
-  "_pass": "묻는 호스트·패턴에 걸리지만 돈이 나가지 않는 쓰기 요청 - 보낸다. 쿠팡 주문서(2026-10-17, assets.coupangcdn.com/front/purchase-next 스크립트로 확인)는 배송지·결제수단·쿠폰을 바꿀 때마다 /api/node/checkout/events 로 이벤트를 보내고, 결제하기도 같은 주소의 eventName 'order'(eventType createOrder)다. 이것들을 묻거나 막으면 주문서가 결제하기 전부터 '시스템 오류: 주문중 오류가 발생하였습니다'를 띄운다(작업 16, 2026-10-17 04:37~11:42 네 번). 그래서 그 주소는 eventName 이 values 에 있을 때만 보내고 'order' 와 여기 없는 이벤트(원클릭 구매, 재결제 등)는 묻는다. url 은 소문자로 맞춘 주소의 fnmatch 패턴, json_field/values 는 본문 JSON 의 그 칸이 values 중 하나일 때, json_key 는 본문 JSON 에 그 키가 있을 때 보낸다. 본문을 읽지 못한 요청은 보내지 않는다(묻는다). why 는 설명일 뿐이다.",
+  "_pass": "묻는 호스트·패턴에 걸리지만 돈이 나가지 않는 쓰기 요청 - 보낸다. 쿠팡 주문서(2026-10-17, assets.coupangcdn.com/front/purchase-next 스크립트로 확인)는 배송지·결제수단·쿠폰을 바꿀 때마다 /api/node/checkout/events 로 이벤트를 보내고, 결제하기도 같은 주소의 eventName 'order'(eventType createOrder)다. 이것들을 묻거나 막으면 주문서가 결제하기 전부터 '시스템 오류: 주문중 오류가 발생하였습니다'를 띄운다(작업 16, 2026-10-17 04:37~11:42 네 번). 그래서 그 주소는 eventName 이 values 에 있을 때만 보내고 'order' 와 여기 없는 이벤트(원클릭 구매, 재결제 등)는 묻는다. url 은 소문자로 맞춘 주소의 fnmatch 패턴, json_field/values 는 본문 JSON 의 그 칸이 values 중 하나일 때, json_key 는 본문 JSON 에 그 키가 있을 때, script_path 는 페이지가 스크립트로 받아 간 경로로 가는 쓰기일 때 보낸다. 본문을 읽지 못한 요청은 보내지 않는다(묻는다). why 는 설명일 뿐이다.",
   "pass": [
     {
       "url": "https://checkout.coupang.com/api/node/checkout/events*",
@@ -38,7 +38,8 @@
     {"url": "https://checkout.coupang.com/api/node/checkout/metrics*", "why": "주문서 화면 통계(주문서 열림·결제 시작 횟수)"},
     {"url": "https://checkout.coupang.com/api/node/checkout/piitoken*", "why": "통관번호 같은 개인정보를 가린 토큰으로 바꾼다"},
     {"url": "https://checkout.coupang.com/api/node/cart/*", "why": "주문서 안의 장바구니 위젯(담기·추천·혜택·도착일 조회)"},
-    {"url": "https://*.coupang.com/*", "json_key": "sensor_data", "why": "Akamai 봇 감지 센서. 경로가 무작위로 바뀌어(/tRe0NJ…, /aG0X6…) 본문으로 알아본다. 막으면 쿠팡이 이 브라우저를 봇으로 본다"}
+    {"url": "https://*.coupang.com/*", "json_key": "sensor_data", "why": "Akamai 봇 감지 센서. 경로가 무작위로 바뀌어(/tRe0NJ…, /aG0X6…) 본문으로 알아본다. 막으면 쿠팡이 이 브라우저를 봇으로 본다"},
+    {"url": "https://*.coupang.com/*", "script_path": true, "why": "같은 센서를 경로로 알아본다: 페이지가 스크립트로 받아 간 바로 그 경로(?v= 를 뺀)로 보내는 쓰기다. 본문을 Chrome 이 넘겨주지 않아 위 규칙이 못 잡았다(2026-10-18 01:50, 센서 요청에 결제 카드가 먼저 뜸)"}
   ],
   "block": [
     "*ssg.com/*payment*",

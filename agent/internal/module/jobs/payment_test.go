@@ -136,6 +136,32 @@ func TestPaymentCardParksTheRunAndTheDecisionWakesIt(t *testing.T) {
 	}
 }
 
+// A run that asked the operator does not end the job in the same breath:
+// the answer would have nowhere to go (job 18, 2026-10-18). Once the card is
+// decided, it may.
+func TestFinishWaitsForTheCardItsRunRaised(t *testing.T) {
+	svc := &jobsSvc{}
+	props := proposal.NewStore(bus.New())
+	m := New(NewStore(svc.serve(t).URL, ""), nil, props, nil, nil)
+	m.current.set(5, Job{ID: 18, Title: "탁상시계 구매"})
+	s := runSession(t, m, "5")
+
+	if _, isErr := callRun(t, s, "ask", map[string]any{"question": "쿠페이 비밀번호 입력이 자동으로 안 됩니다. 어떻게 할까요?"}); isErr {
+		t.Fatal("ask 실패")
+	}
+	card := props.List()[0]
+	if text, isErr := callRun(t, s, "finish", map[string]any{"summary": "멈춤", "notify": false}); !isErr || !strings.Contains(text, card.ID) {
+		t.Fatalf("카드를 올린 실행은 끝내지 못해야 합니다: %q", text)
+	}
+	if contains(svc.got(), "/runs/5/finish") {
+		t.Fatal("작업을 끝냈습니다")
+	}
+	m.decided(card, proposal.Approve)
+	if _, isErr := callRun(t, s, "finish", map[string]any{"summary": "답을 받고 끝냄", "notify": false}); isErr {
+		t.Fatal("카드가 결정된 뒤에는 끝낼 수 있어야 합니다")
+	}
+}
+
 // A job that ends does not pay: its payment card, still up, goes with it.
 func TestFinishingDropsAPendingPaymentCard(t *testing.T) {
 	svc := &jobsSvc{}

@@ -126,6 +126,40 @@ class Paused(unittest.IsolatedAsyncioTestCase):
         await self.g.on_paused(self.ws, self.paused(EVENTS, json.dumps({"eventName": "order"})))
         self.assertEqual((self.sent, self.asked), (["Fetch.failRequest"], ["order"]))
 
+    async def test_the_bot_sensor_goes_to_the_path_its_script_came_from(self):
+        # 2026-10-18 01:50: 센서 POST 의 본문을 Chrome 이 넘겨주지 않아 본문 규칙이 못 잡았고,
+        # 결제하기보다 먼저 결제 카드가 떴다. 센서는 자기 스크립트를 받아 간 경로로 보낸다.
+        sensor = "https://checkout.coupang.com/tRe0NJmkYwOUcZbd9ExHQgaVWsY/frimQraO/PiwcSw/PnZ1d/mATPxMX"
+        unread = {"sessionId": "s", "params": {"requestId": "r", "resourceType": "XHR",
+                                               "request": {"url": sensor, "method": "POST", "hasPostData": True}}}
+        await self.g.on_paused(self.ws, unread)
+        self.assertEqual(self.asked, [""], "스크립트를 보기 전에는 묻는다")
+        self.sent.clear()
+        self.asked.clear()
+        script = {"sessionId": "s", "params": {"requestId": "r2", "resourceType": "Script",
+                                               "request": {"url": sensor + "?v=aa8e79df-833d", "method": "GET"}}}
+        await self.g.on_paused(self.ws, script)
+        await self.g.on_paused(self.ws, unread)
+        self.assertEqual((self.sent, self.asked), (["Fetch.continueRequest", "Fetch.continueRequest"], []))
+        # 다른 무작위 경로, 다른 호스트의 같은 경로는 여전히 묻는다.
+        other = json.loads(json.dumps(unread))
+        other["params"]["request"]["url"] = "https://checkout.coupang.com/tRe0NJmkYwOUcZbd9ExHQgaVWsY/zzz/aaa"
+        await self.g.on_paused(self.ws, other)
+        self.assertEqual(self.asked, [""])
+        self.assertFalse(self.g.passes("https://pay.coupang.com/tRe0NJmkYwOUcZbd9ExHQgaVWsY/frimQraO/PiwcSw/PnZ1d/mATPxMX", None))
+
+    def test_scripts_kept_are_bounded(self):
+        for i in range(self.g.SCRIPTS_KEPT + 10):
+            self.g.saw_script(f"https://checkout.coupang.com/s/{i}?v=1")
+        self.assertEqual(len(self.g.scripts), self.g.SCRIPTS_KEPT)
+        self.assertNotIn("checkout.coupang.com/s/0", self.g.scripts)
+        self.assertIn(f"checkout.coupang.com/s/{self.g.SCRIPTS_KEPT + 9}", self.g.scripts)
+
+    def test_the_log_shows_a_bodys_shape_not_its_values(self):
+        self.assertEqual(guard.shape_of(None), "본문 못 읽음")
+        self.assertEqual(guard.shape_of(json.dumps({"eventName": "order", "checkoutId": 1})), "JSON eventName,checkoutId")
+        self.assertEqual(guard.shape_of("a=1&b=2"), "본문 7자")
+
 
 if __name__ == "__main__":
     unittest.main()

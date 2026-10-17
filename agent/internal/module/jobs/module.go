@@ -228,6 +228,7 @@ func (m *Module) Revise(_ context.Context, a action.Action, edits map[string]str
 func (m *Module) decided(p proposal.Proposal, d proposal.Decision) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+	m.current.unpark(p.ID)
 	switch p.Action.Kind {
 	case KindAsk:
 		var in AskInput

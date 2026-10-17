@@ -27,12 +27,42 @@ type running struct {
 	mu  sync.Mutex
 	run int64
 	job Job
+	// parked is the card this run left the job waiting on, until it is
+	// decided or the run puts the job back on a clock.
+	parked string
 }
 
 func (r *running) set(run int64, j Job) {
 	r.mu.Lock()
-	r.run, r.job = run, j
+	r.run, r.job, r.parked = run, j, ""
 	r.mu.Unlock()
+}
+
+// park records the card the run's job now waits on ("" when it no longer does).
+func (r *running) park(run int64, card string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.run == run && run != 0 {
+		r.parked = card
+	}
+}
+
+// unpark: the card was decided, so nothing waits on it any more.
+func (r *running) unpark(card string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.parked == card {
+		r.parked = ""
+	}
+}
+
+func (r *running) parkedOn(run int64) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.run != run {
+		return ""
+	}
+	return r.parked
 }
 
 func (r *running) clear() { r.set(0, Job{}) }
@@ -144,6 +174,7 @@ func (m *Module) PaymentRaised(job int64, card string) {
 // the job, as a card answer that wakes it if it is waiting on that card.
 func (m *Module) PaymentDecided(job int64, card string, approved bool, text string) error {
 	m.pay.decided(job, card, approved)
+	m.current.unpark(card)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	if err := m.store.Answer(ctx, job, card, text); err != nil {
@@ -325,6 +356,7 @@ func (m *Module) runServer(run int64) *mcp.Server {
 			m.proposals.Abandon(p.ID, "작업에 걸지 못했습니다: "+err.Error())
 			return fail(err), nil, nil
 		}
+		m.current.park(run, p.ID)
 		return ok("카드를 올렸습니다. 운영자가 결정하면 다음 실행에서 답을 받습니다. 지금 실행을 마치세요."), nil, nil
 	})
 
@@ -356,6 +388,7 @@ func (m *Module) runServer(run int64) *mcp.Server {
 			m.proposals.Abandon(p.ID, "작업에 걸지 못했습니다: "+err.Error())
 			return fail(err), nil, nil
 		}
+		m.current.park(run, p.ID)
 		return ok("사이트 추가 카드를 올렸습니다. 운영자가 결정하면 다음 실행에서 답을 받습니다. 지금 실행을 마치세요."), nil, nil
 	})
 
@@ -385,6 +418,7 @@ func (m *Module) runServer(run int64) *mcp.Server {
 		if _, err := m.store.Schedule(ctx, run, time.Now(), "로그인 뒤에 이어서"); err != nil {
 			return fail(err), nil, nil
 		}
+		m.current.park(run, "")
 		return ok("로그인 카드를 올렸습니다. 지금 실행을 마치세요."), nil, nil
 	})
 
@@ -412,6 +446,7 @@ func (m *Module) runServer(run int64) *mcp.Server {
 		if err != nil {
 			return fail(err), nil, nil
 		}
+		m.current.park(run, "")
 		return ok("다음 실행: " + got.Local().Format("2006-01-02 15:04") + ". 할 일이 끝났으면 실행을 마치세요."), nil, nil
 	})
 
@@ -444,12 +479,14 @@ func (m *Module) runServer(run int64) *mcp.Server {
 		if err := m.store.Wait(ctx, run, c.id, "결제 승인 대기"); err != nil {
 			return fail(err), nil, nil
 		}
+		m.current.park(run, c.id)
 		// Decided while the job was being parked: the answer came before the
 		// job waited on it, so nothing will wake it - put it back on a clock.
 		if now, _ := m.pay.get(j.ID); now.id == c.id && now.state != payPending {
 			if _, err := m.store.Schedule(ctx, run, time.Now(), "결제 카드 결정 뒤 이어서"); err != nil {
 				return fail(err), nil, nil
 			}
+			m.current.park(run, "")
 			return decided(now), nil, nil
 		}
 		return ok("결제 승인 카드를 기다립니다. 승인되면 작업이 바로 다시 실행됩니다. 지금 실행을 마치세요."), nil, nil
@@ -460,6 +497,13 @@ func (m *Module) runServer(run int64) *mcp.Server {
 			j, bad := guard()
 			if bad != nil {
 				return bad, nil, nil
+			}
+			// A run that just asked the operator and then ends the job leaves the
+			// card with nowhere to go: answering it wakes nothing (job 18,
+			// 2026-10-18, "어떻게 할까요?" then finish).
+			if card := m.current.parkedOn(run); card != "" {
+				return toolText("이 실행에서 올린 카드("+card+")가 운영자의 답을 기다립니다. 작업을 끝내면 그 답이 갈 곳이 없어집니다. "+
+					"finish 를 부르지 말고 지금 실행을 마치세요 - 답이 오면 다음 실행에서 이어집니다.", true), nil, nil
 			}
 			if err := m.store.Finish(ctx, run, in.Summary); err != nil {
 				return fail(err), nil, nil

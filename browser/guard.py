@@ -74,6 +74,8 @@ def load_rules() -> tuple[list[str], list[str], list[str], list[dict]]:
             rule["values"] = {str(v).lower() for v in r.get("values", [])}
         if r.get("json_key"):
             rule["json_key"] = r["json_key"]
+        if r.get("script_path"):
+            rule["script_path"] = True
         passes.append(rule)
     return ask, ask_patterns, block, passes
 
@@ -90,6 +92,16 @@ def body_of(request: dict) -> str | None:
         except (ValueError, TypeError, AttributeError):
             return None
     return None if request.get("hasPostData") else ""
+
+
+def shape_of(body: str | None) -> str:
+    """로그에 남길 본문의 모양 - 값은 빼고: 읽지 못함, 길이, JSON 이면 맨 위 키들."""
+    if body is None:
+        return "본문 못 읽음"
+    obj = _json_object(body)
+    if obj is not None:
+        return "JSON " + ",".join(list(obj)[:8])
+    return f"본문 {len(body)}자"
 
 
 def _json_object(body: str | None) -> dict | None:
@@ -147,6 +159,19 @@ class Guard:
         # 한 번 승인한 결제 흐름은 같은 호스트의 후속 요청마다 다시 묻지 않는다.
         # 결제 한 건이 카드 한 장이어야 쓸 수 있다.
         self._approved: dict[str, float] = {}
+        # 페이지가 스크립트로 받아 간 주소(호스트+경로), 최근 것부터 SCRIPTS_KEPT 개.
+        # Akamai 센서는 자기 스크립트를 받아 간 바로 그 경로로 측정값을 보낸다.
+        self.scripts: dict[str, None] = {}
+
+    SCRIPTS_KEPT = 256
+
+    def saw_script(self, url: str):
+        u = urlparse(url)
+        key = u.netloc.lower() + u.path
+        self.scripts.pop(key, None)
+        self.scripts[key] = None
+        while len(self.scripts) > self.SCRIPTS_KEPT:
+            self.scripts.pop(next(iter(self.scripts)))
 
     def leaves_job(self, session: str | None, frame_id: str | None, url: str) -> bool:
         """작업이 도는 중에, 탭의 최상위 페이지가 그 작업의 사이트 밖으로 가려는가.
@@ -195,6 +220,11 @@ class Guard:
                 continue
             if "json_key" in rule:
                 if rule["json_key"] in (_json_object(body) or {}):
+                    return True
+                continue
+            if rule.get("script_path"):
+                u = urlparse(url)
+                if u.netloc.lower() + u.path in self.scripts:
                     return True
                 continue
             return True
@@ -261,6 +291,8 @@ class Guard:
             )
             return
 
+        if p.get("resourceType") == "Script" and method.upper() == "GET":
+            self.saw_script(url)
         if p.get("resourceType") in SKIP_TYPES:
             await go()
             return
@@ -293,7 +325,7 @@ class Guard:
             return
 
         event = self.event_of(url, body)
-        log.info("결제 요청을 멈췄습니다: %s %s%s", method, url[:120], f" ({event})" if event else "")
+        log.info("결제 요청을 멈췄습니다: %s %s%s [%s]", method, url[:120], f" ({event})" if event else "", shape_of(body))
         if await self.ask(url, method, host, event):
             # 결제 한 건은 요청 여러 개로 이뤄진다. 승인 뒤 잠깐은 같은
             # 호스트를 다시 묻지 않는다.
