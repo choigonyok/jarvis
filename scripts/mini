@@ -49,8 +49,9 @@ sync() {
   #   .env       비밀 - env-push 로만, 묻고 나서 옮긴다
   #   workspace  에이전트가 일하는 디렉터리 - 맥미니의 것이 진짜다
   #   빌드 산출물·의존성  이미지 안에서 다시 만든다
+  # .git 은 끝에 / 없이: worktree(git worktree add)에서는 디렉터리가 아니라 파일이다.
   rsync -az --delete \
-    --exclude '.git/' \
+    --exclude '.git' \
     --exclude '.env' --exclude '.env.local' \
     --exclude '/workspace/' \
     --exclude 'node_modules/' --exclude '.next/' --exclude '.open-next/' --exclude '.wrangler/' \
