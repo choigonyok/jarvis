@@ -10,6 +10,7 @@ import {
   ClipboardCheck,
   Dumbbell,
   Ellipsis,
+  FileText,
   LogOut,
   type LucideIcon,
   MessageCircle,
@@ -57,6 +58,7 @@ const ICON: Record<string, LucideIcon> = {
   "/screen": MonitorPlay,
   "/kakao": MessagesSquare,
   "/status": Activity,
+  "/report": FileText,
 };
 
 /**
@@ -86,6 +88,8 @@ const secondary: Tab[] = [
   { href: "/kakao", label: "카톡" },
   // 맨 끝. 매일 여는 곳이 아니라 뭔가 이상할 때 찾아오는 곳이다.
   { href: "/status", label: "상태" },
+  // 임시: 2026-10-17 코드 검토 보고서. 다 읽으면 이 줄과 components/report 를 지운다.
+  { href: "/report", label: "보고서" },
 ];
 
 /** Reading order on a wide screen: talk, the things you keep, then the queue. */
@@ -106,7 +110,7 @@ const visible = (tabs: Tab[], role: Role) =>
  * three tabs and no 더보기.
  */
 const OWNER_BAR = ["/", "/jobs", "/assets", "/spending", "/calendar", "/workout", "/record"];
-const OWNER_MORE = ["/photos", "/screen", "/kakao", "/status"];
+const OWNER_MORE = ["/photos", "/screen", "/kakao", "/status", "/report"];
 const GUEST_BAR = ["/", "/calendar", "/workout"];
 
 /** Where a waiting decision is announced: the surface that lists them by name. */
@@ -228,15 +232,16 @@ export function Header({
       }}
     >
       <div className="mx-auto flex h-13 w-full max-w-[52rem] items-center justify-between px-4 sm:h-14 sm:px-8">
-        <div className="flex items-baseline gap-4">
+        <div className="flex min-w-0 items-baseline gap-3">
           <h1
-            className="text-[15px] font-semibold tracking-tight text-foreground select-none"
+            className="shrink-0 text-[15px] font-semibold tracking-tight text-foreground select-none"
             onClick={secretTap}
           >
             Jarvis
           </h1>
-          {/* The same links, in the bar below, on a phone. */}
-          <nav className="hidden items-baseline gap-3 sm:flex" aria-label="화면">
+          {/* The same links, in the bar below, on a phone. A row that runs
+              out of room scrolls inside itself; a label never breaks in two. */}
+          <nav className="scrollbar-none hidden min-w-0 items-baseline gap-[9px] overflow-x-auto sm:flex" aria-label="화면">
             {tabs.map((tab) => {
               const active = pathname === tab.href;
               return (
@@ -245,7 +250,7 @@ export function Header({
                   href={tab.href}
                   aria-current={active ? "page" : undefined}
                   className={cn(
-                    "rounded-sm text-[13px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+                    "shrink-0 rounded-sm text-[13px] whitespace-nowrap transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
                     active ? "text-foreground" : "text-faint hover:text-dim",
                   )}
                 >
@@ -256,7 +261,7 @@ export function Header({
           </nav>
         </div>
 
-        <div className="flex items-center gap-1 sm:gap-3">
+        <div className="flex shrink-0 items-center gap-1 sm:gap-2">
           {actions}
           {/* The guest's bars are their own agent's: the subscription only,
               never what the operator's API keys cost. */}
