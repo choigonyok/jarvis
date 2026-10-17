@@ -10,6 +10,7 @@ package store
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
@@ -41,6 +42,13 @@ type Store interface {
 	// RoomMessagesFrom is the same, but at most limit of the oldest: a long
 	// past read from its start.
 	RoomMessagesFrom(ctx context.Context, room string, after, before time.Time, limit int) ([]model.Message, error)
+	// SearchMessages is up to q.Limit messages whose text holds every one of
+	// q.Terms, newest first. Text is sealed, so it is matched here rather
+	// than in the database: at most q.Scan messages are read, newest first.
+	SearchMessages(ctx context.Context, q MessageQuery) ([]model.Message, error)
+	// MessageContext is the message ref with up to before messages ahead of
+	// it and after behind it in its room, oldest first.
+	MessageContext(ctx context.Context, ref string, before, after int) ([]model.Message, error)
 	Rooms(ctx context.Context) ([]Room, error)
 
 	// How far each conversation has been interpreted.
@@ -166,6 +174,52 @@ type Store interface {
 }
 
 // Room is a conversation as the store knows it.
+// MessageQuery is a search over message text: what the conversation asks
+// when long-term memory did not keep what it needs (a word's meaning, who
+// said exactly what).
+type MessageQuery struct {
+	// Terms must all be in the text, in any case. Plain substrings: Korean
+	// has no spaces between a word and its particle, so a word is found
+	// inside a longer one ("갓생" in "갓생이라").
+	Terms []string
+	// Room narrows to a room whose id is Room or whose name contains it.
+	Room string
+	// Since narrows to messages sent after it (zero: any time).
+	Since time.Time
+	Limit int
+	// Scan is how many messages are read at most, newest first.
+	Scan int
+}
+
+// normalized lowers and trims the terms and drops empty ones.
+func (q MessageQuery) normalized() MessageQuery {
+	terms := make([]string, 0, len(q.Terms))
+	for _, t := range q.Terms {
+		if t = strings.ToLower(strings.TrimSpace(t)); t != "" {
+			terms = append(terms, t)
+		}
+	}
+	q.Terms = terms
+	q.Room = strings.TrimSpace(q.Room)
+	return q
+}
+
+// matches is whether text holds every (normalized) term.
+func (q MessageQuery) matches(text string) bool {
+	text = strings.ToLower(text)
+	for _, t := range q.Terms {
+		if !strings.Contains(text, t) {
+			return false
+		}
+	}
+	return true
+}
+
+// inRoom is whether a message is in the room the query names, if any.
+func (q MessageQuery) inRoom(m model.Message) bool {
+	return q.Room == "" || m.Room == q.Room || strings.Contains(strings.ToLower(m.RoomName), strings.ToLower(q.Room))
+}
+
 type Room struct {
 	Room          string    `json:"room"`
 	Name          string    `json:"name"`

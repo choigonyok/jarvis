@@ -401,11 +401,20 @@ func (m *Mind) statedPreferences(ctx context.Context) error {
 }
 
 // PreferencesText is what the conversation is told of the operator's
-// preferences: confirmed ones, and estimates, each with its grounds.
+// preferences: confirmed ones, and estimates, each with its grounds. "" when
+// there are none or they could not be read; PreferencesRead says which.
 func (m *Mind) PreferencesText(ctx context.Context) string {
+	text, _ := m.PreferencesRead(ctx)
+	return text
+}
+
+// PreferencesRead is PreferencesText with the error kept: the agent keeps
+// the list in its instructions, and "none" would change them where
+// "unreadable" must not.
+func (m *Mind) PreferencesRead(ctx context.Context) (string, error) {
 	ps, err := m.Opts.Store.Preferences(ctx)
 	if err != nil {
-		return ""
+		return "", err
 	}
 	var lines []string
 	for _, p := range ps {
@@ -416,7 +425,7 @@ func (m *Mind) PreferencesText(ctx context.Context) string {
 			lines = append(lines, fmt.Sprintf("- %s (추정 %.0f%% · %s)", prefs.Text(p), p.Confidence*100, orWhy(p)))
 		}
 	}
-	return strings.Join(lines, "\n")
+	return strings.Join(lines, "\n"), nil
 }
 
 func orWhy(p model.Preference) string {

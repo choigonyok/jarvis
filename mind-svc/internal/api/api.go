@@ -6,6 +6,8 @@
 //	GET  /                            the console: simulator, world model, intents
 //	GET  /api/snapshot                everything the console shows
 //	GET  /now                         the situation right now, by rule: what the conversation is shown each turn
+//	GET  /messages/search?q=&room=&since=&limit=   messages whose text holds every word of q, newest first (token)
+//	GET  /messages/context?ref=&before=&after=     a message with the ones around it in its room (token)
 //	POST /api/simulate                {room, roomName, sender, mine, text, at?}
 //	POST /api/read                    {room?} interpret now instead of waiting for quiet
 //	POST /api/settle                  hand settling changes to the skills now
@@ -48,11 +50,14 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/clock"
 	"github.com/choigonyok/jarvis/mind-svc/internal/mind"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
+	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 	"github.com/choigonyok/jarvis/mind-svc/internal/world"
 )
 
@@ -111,12 +116,24 @@ func (s *Server) Handler() http.Handler {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
+		// Absent when it could not be read, "" when there is none: the agent
+		// keeps the list in its instructions and changes them only on an answer.
+		var prefs *string
+		if text, err := s.m.PreferencesRead(r.Context()); err == nil {
+			prefs = &text
+		} else {
+			s.log.Warn("취향을 읽지 못했습니다", "err", err)
+		}
 		writeJSON(w, http.StatusOK, struct {
 			world.Situation
 			// Prefs is what is known of the operator's taste, with grounds.
-			Prefs string `json:"prefs,omitempty"`
-		}{now, s.m.PreferencesText(r.Context())})
+			Prefs *string `json:"prefs,omitempty"`
+		}{now, prefs})
 	}))
+	// The messages themselves, for the conversation: what mind read but did
+	// not keep as a fact. The services' token only - these hand out text.
+	mux.HandleFunc("GET /messages/search", s.auth(true, s.searchMessages))
+	mux.HandleFunc("GET /messages/context", s.auth(true, s.messageContext))
 	mux.HandleFunc("POST /api/simulate", s.auth(false, s.simulate))
 	mux.HandleFunc("POST /api/read", s.auth(false, s.read))
 	mux.HandleFunc("POST /api/settle", s.auth(false, func(w http.ResponseWriter, r *http.Request) {
@@ -560,6 +577,130 @@ func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 		return false
 	}
 	return true
+}
+
+// messageScan bounds how many messages one search reads (newest first):
+// text is sealed, so every candidate is opened and matched here.
+const messageScan = 100000
+
+// messageOut is a message as the conversation's tools read it.
+type messageOut struct {
+	Ref      string    `json:"ref"`
+	Source   string    `json:"source"`
+	Room     string    `json:"room"`
+	RoomName string    `json:"roomName"`
+	Sender   string    `json:"sender"`
+	IsMine   bool      `json:"isMine"`
+	SentAt   time.Time `json:"sentAt"`
+	Text     string    `json:"text"`
+}
+
+func outMessage(m model.Message, text string) messageOut {
+	return messageOut{Ref: m.Ref, Source: m.Source, Room: m.Room, RoomName: m.RoomName, Sender: m.Sender, IsMine: m.IsMine, SentAt: m.SentAt, Text: text}
+}
+
+// searchMessages answers with a short stretch of each match around the
+// first word found: enough to pick one, little enough to keep the
+// conversation's context small. message_context shows the rest.
+func (s *Server) searchMessages(w http.ResponseWriter, r *http.Request) {
+	in := r.URL.Query()
+	q := store.MessageQuery{Terms: strings.Fields(in.Get("q")), Room: in.Get("room"), Limit: bounded(in.Get("limit"), 10, 1, 20), Scan: messageScan}
+	if len(q.Terms) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "q 가 필요합니다."})
+		return
+	}
+	if v := strings.TrimSpace(in.Get("since")); v != "" {
+		since, err := time.ParseInLocation("2006-01-02", v, s.m.Opts.Loc)
+		if err != nil {
+			if since, err = time.Parse(time.RFC3339, v); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "since 는 YYYY-MM-DD 입니다."})
+				return
+			}
+		}
+		q.Since = since
+	}
+	ms, err := s.m.Opts.Store.SearchMessages(r.Context(), q)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	out := make([]messageOut, 0, len(ms))
+	for _, m := range ms {
+		out = append(out, outMessage(m, snippet(m.Text, q.Terms, 60)))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"messages": out})
+}
+
+// messageContext answers with the message and its neighbours, each cut to a
+// few hundred characters.
+func (s *Server) messageContext(w http.ResponseWriter, r *http.Request) {
+	in := r.URL.Query()
+	ref := strings.TrimSpace(in.Get("ref"))
+	if ref == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "ref 가 필요합니다."})
+		return
+	}
+	ms, err := s.m.Opts.Store.MessageContext(r.Context(), ref, bounded(in.Get("before"), 5, 0, 20), bounded(in.Get("after"), 5, 0, 20))
+	if errors.Is(err, model.ErrNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "그런 메시지가 없습니다(보존 기간이 지났을 수 있습니다)."})
+		return
+	}
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	out := make([]messageOut, 0, len(ms))
+	for _, m := range ms {
+		out = append(out, outMessage(m, cut(m.Text, 300)))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"messages": out, "ref": ref})
+}
+
+// bounded reads a count, def when missing or unreadable, kept in [lo, hi].
+func bounded(v string, def, lo, hi int) int {
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil {
+		n = def
+	}
+	return min(max(n, lo), hi)
+}
+
+// snippet is text around the first of terms it holds, around runes each
+// side, on one line.
+func snippet(text string, terms []string, around int) string {
+	runes := []rune(strings.Join(strings.Fields(text), " "))
+	// Lowered rune by rune, so positions in it are positions in runes.
+	lower := make([]rune, len(runes))
+	for i, r := range runes {
+		lower[i] = unicode.ToLower(r)
+	}
+	at := -1
+	for _, t := range terms {
+		if i := strings.Index(string(lower), strings.Map(unicode.ToLower, t)); i >= 0 {
+			at = utf8.RuneCountInString(string(lower)[:i])
+			break
+		}
+	}
+	if at < 0 {
+		return cut(string(runes), 2*around)
+	}
+	from, to := max(0, at-around), min(len(runes), at+around)
+	out := string(runes[from:to])
+	if from > 0 {
+		out = "…" + out
+	}
+	if to < len(runes) {
+		out += "…"
+	}
+	return out
+}
+
+func cut(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

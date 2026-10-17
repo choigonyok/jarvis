@@ -214,6 +214,56 @@ func (m *Memory) RoomMessagesFrom(_ context.Context, room string, after, before 
 	return out, nil
 }
 
+func (m *Memory) SearchMessages(_ context.Context, q MessageQuery) ([]model.Message, error) {
+	q = q.normalized()
+	out := []model.Message{}
+	if len(q.Terms) == 0 || q.Limit <= 0 {
+		return out, nil
+	}
+	m.mu.Lock()
+	all := make([]model.Message, 0, len(m.messages))
+	for _, msg := range m.messages {
+		all = append(all, msg)
+	}
+	m.mu.Unlock()
+	sortMessages(all)
+	scanned := 0
+	for i := len(all) - 1; i >= 0 && scanned < q.Scan && len(out) < q.Limit; i-- {
+		msg := all[i]
+		if !msg.SentAt.After(q.Since) || !q.inRoom(msg) {
+			continue
+		}
+		scanned++
+		if q.matches(msg.Text) {
+			out = append(out, msg)
+		}
+	}
+	return out, nil
+}
+
+func (m *Memory) MessageContext(_ context.Context, ref string, before, after int) ([]model.Message, error) {
+	m.mu.Lock()
+	anchor, ok := m.messages[ref]
+	var room []model.Message
+	for _, msg := range m.messages {
+		if ok && msg.Room == anchor.Room {
+			room = append(room, msg)
+		}
+	}
+	m.mu.Unlock()
+	if !ok {
+		return nil, model.ErrNotFound
+	}
+	sortMessages(room)
+	at := 0
+	for i, msg := range room {
+		if msg.Ref == ref {
+			at = i
+		}
+	}
+	return append([]model.Message(nil), room[max(0, at-before):min(len(room), at+after+1)]...), nil
+}
+
 func (m *Memory) Rooms(_ context.Context) ([]Room, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

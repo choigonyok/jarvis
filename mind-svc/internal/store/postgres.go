@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
@@ -277,6 +278,118 @@ func (p *Postgres) RoomMessagesFrom(ctx context.Context, room string, after, bef
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+// searchBatch is how many messages one round of a search reads.
+const searchBatch = 2000
+
+func (p *Postgres) SearchMessages(ctx context.Context, q MessageQuery) ([]model.Message, error) {
+	q = q.normalized()
+	out := []model.Message{}
+	if len(q.Terms) == 0 || q.Limit <= 0 {
+		return out, nil
+	}
+	room := likeEscape(q.Room)
+	// Newest first, a batch at a time, from where the last batch stopped.
+	var at *time.Time
+	ref := ""
+	for scanned := 0; scanned < q.Scan && len(out) < q.Limit; {
+		batch := min(searchBatch, q.Scan-scanned)
+		rows, err := p.db.Query(ctx, `
+			select `+messageCols+` from mind_messages
+			 where sent_at > $1
+			   and ($2 = '' or room = $2 or room_name ilike '%' || $3 || '%')
+			   and ($4::timestamptz is null or (sent_at, ref) < ($4, $5))
+			 order by sent_at desc, ref desc limit $6`, q.Since, q.Room, room, at, ref, batch)
+		if err != nil {
+			return nil, err
+		}
+		n := 0
+		for rows.Next() {
+			m, opened, err := p.scanOpen(rows)
+			if err != nil {
+				rows.Close()
+				return nil, err
+			}
+			n++
+			sentAt := m.SentAt
+			at, ref = &sentAt, m.Ref
+			if opened && len(out) < q.Limit && q.matches(m.Text) {
+				out = append(out, m)
+			}
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		scanned += n
+		if n < batch {
+			break
+		}
+	}
+	return out, nil
+}
+
+func (p *Postgres) MessageContext(ctx context.Context, ref string, before, after int) ([]model.Message, error) {
+	anchor, err := p.Message(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	older, err := p.openedMessages(ctx, `select `+messageCols+` from mind_messages
+		 where room = $1 and (sent_at, ref) < ($2, $3) order by sent_at desc, ref desc limit $4`,
+		anchor.Room, anchor.SentAt, anchor.Ref, before)
+	if err != nil {
+		return nil, err
+	}
+	newer, err := p.openedMessages(ctx, `select `+messageCols+` from mind_messages
+		 where room = $1 and (sent_at, ref) > ($2, $3) order by sent_at, ref limit $4`,
+		anchor.Room, anchor.SentAt, anchor.Ref, after)
+	if err != nil {
+		return nil, err
+	}
+	slices.Reverse(older)
+	return append(append(older, anchor), newer...), nil
+}
+
+// scanOpen reads one message row. opened is false when its text does not
+// open (another key, damaged): such a message is skipped, not an error.
+func (p *Postgres) scanOpen(row pgx.Row) (m model.Message, opened bool, err error) {
+	var body []byte
+	var sealed bool
+	if err := row.Scan(&m.Ref, &m.Source, &m.Room, &m.RoomName, &m.Sender, &m.IsMine, &m.SentAt, &body, &sealed); err != nil {
+		return m, false, err
+	}
+	text, err := p.open(body, sealed)
+	if err != nil {
+		return m, false, nil
+	}
+	m.Text = string(text)
+	return m, true, nil
+}
+
+// openedMessages is the rows of a message query whose text opens.
+func (p *Postgres) openedMessages(ctx context.Context, sql string, args ...any) ([]model.Message, error) {
+	rows, err := p.db.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []model.Message{}
+	for rows.Next() {
+		m, opened, err := p.scanOpen(rows)
+		if err != nil {
+			return nil, err
+		}
+		if opened {
+			out = append(out, m)
+		}
+	}
+	return out, rows.Err()
+}
+
+// likeEscape makes s match itself in an ILIKE pattern.
+func likeEscape(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
 }
 
 func (p *Postgres) Rooms(ctx context.Context) ([]Room, error) {

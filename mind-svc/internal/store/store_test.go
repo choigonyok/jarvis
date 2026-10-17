@@ -188,7 +188,78 @@ func facts(t *testing.T, st Store) {
 	}
 }
 
+// messages is searching message text and reading around a message: the
+// words found anywhere in a message (a particle stuck on, any case), every
+// word required, newest first, narrowed by room and time, at most as many as
+// asked and no more read than allowed.
+func messages(t *testing.T, st Store) {
+	ctx := context.Background()
+	at := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	put := func(ref, room, roomName, sender, text string, min int) {
+		t.Helper()
+		if err := st.PutMessage(ctx, model.Message{Ref: ref, Source: "kakao", Room: room, RoomName: roomName, Sender: sender, SentAt: at.Add(time.Duration(min) * time.Minute), Text: text}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	put("srch:1", "kakao:uni", "대학 동기방", "지수", "요즘 다들 갓생 산다던데", 0)
+	put("srch:2", "kakao:uni", "대학 동기방", "민지", "갓생이 뭐야?", 1)
+	put("srch:3", "kakao:uni", "대학 동기방", "지수", "갓생은 부지런하고 생산적으로 사는 거", 2)
+	put("srch:4", "kakao:uni", "대학 동기방", "민지", "아하 Godsaeng", 3)
+	put("srch:5", "kakao:work", "회사 팀방", "팀장", "이번 주 갓생 프로젝트 회의", 4)
+
+	ids := func(ms []model.Message) string {
+		var out []string
+		for _, m := range ms {
+			out = append(out, m.Ref)
+		}
+		return fmt.Sprint(out)
+	}
+	got, err := st.SearchMessages(ctx, MessageQuery{Terms: []string{"갓생"}, Limit: 10, Scan: 1000})
+	if err != nil || ids(got) != "[srch:5 srch:3 srch:2 srch:1]" {
+		t.Fatalf("최신 먼저, 조사가 붙어도: %s %v", ids(got), err)
+	}
+	if got[0].Text != "이번 주 갓생 프로젝트 회의" || got[0].RoomName != "회사 팀방" {
+		t.Fatalf("원문과 방: %+v", got[0])
+	}
+	if got, _ := st.SearchMessages(ctx, MessageQuery{Terms: []string{"갓생", "부지런"}, Limit: 10, Scan: 1000}); ids(got) != "[srch:3]" {
+		t.Fatalf("모든 낱말: %s", ids(got))
+	}
+	if got, _ := st.SearchMessages(ctx, MessageQuery{Terms: []string{"godsaeng"}, Limit: 10, Scan: 1000}); ids(got) != "[srch:4]" {
+		t.Fatalf("대소문자 무시: %s", ids(got))
+	}
+	if got, _ := st.SearchMessages(ctx, MessageQuery{Terms: []string{"갓생"}, Room: "동기", Limit: 10, Scan: 1000}); ids(got) != "[srch:3 srch:2 srch:1]" {
+		t.Fatalf("방 이름으로 좁히기: %s", ids(got))
+	}
+	if got, _ := st.SearchMessages(ctx, MessageQuery{Terms: []string{"갓생"}, Room: "kakao:work", Limit: 10, Scan: 1000}); ids(got) != "[srch:5]" {
+		t.Fatalf("방 id 로 좁히기: %s", ids(got))
+	}
+	if got, _ := st.SearchMessages(ctx, MessageQuery{Terms: []string{"갓생"}, Since: at.Add(90 * time.Second), Limit: 10, Scan: 1000}); ids(got) != "[srch:5 srch:3]" {
+		t.Fatalf("이후만: %s", ids(got))
+	}
+	if got, _ := st.SearchMessages(ctx, MessageQuery{Terms: []string{"갓생"}, Limit: 2, Scan: 1000}); ids(got) != "[srch:5 srch:3]" {
+		t.Fatalf("개수 상한: %s", ids(got))
+	}
+	if got, _ := st.SearchMessages(ctx, MessageQuery{Terms: []string{"갓생"}, Room: "kakao:uni", Limit: 10, Scan: 2}); ids(got) != "[srch:3]" {
+		t.Fatalf("읽는 양 상한(최신 2개만 읽음): %s", ids(got))
+	}
+	if got, _ := st.SearchMessages(ctx, MessageQuery{Terms: []string{"  "}, Limit: 10, Scan: 1000}); len(got) != 0 {
+		t.Fatalf("빈 검색어: %s", ids(got))
+	}
+
+	around, err := st.MessageContext(ctx, "srch:3", 1, 5)
+	if err != nil || ids(around) != "[srch:2 srch:3 srch:4]" {
+		t.Fatalf("앞뒤(같은 방만): %s %v", ids(around), err)
+	}
+	if around, _ := st.MessageContext(ctx, "srch:1", 5, 0); ids(around) != "[srch:1]" {
+		t.Fatalf("맨 앞: %s", ids(around))
+	}
+	if _, err := st.MessageContext(ctx, "srch:none", 1, 1); !errors.Is(err, model.ErrNotFound) {
+		t.Fatalf("없는 메시지: %v", err)
+	}
+}
+
 func TestMemory(t *testing.T) {
+	messages(t, NewMemory())
 	contract(t, NewMemory())
 	facts(t, NewMemory())
 	policy(t, NewMemory())
@@ -425,6 +496,8 @@ func TestPostgres(t *testing.T) {
 	replies(t, st)
 	usage(t, st)
 	reviews(t, st)
+	// Last: its messages must not count in the others' rooms.
+	messages(t, st)
 	var sealed bool
 	var body []byte
 	_ = pool.QueryRow(context.Background(), `select sealed, body from mind_messages where ref = 'sim:1'`).Scan(&sealed, &body)

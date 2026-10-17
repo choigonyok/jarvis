@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -210,5 +212,71 @@ func TestClosedConsole(t *testing.T) {
 		if code := get("/", func(r *http.Request) { r.AddCookie(&http.Cookie{Name: tokenCookie, Value: v}) }).StatusCode; code != http.StatusUnauthorized {
 			t.Fatalf("cookie %q: %d", v, code)
 		}
+	}
+}
+
+// The conversation's way to the messages themselves: the services' token
+// only, a short stretch around the word for each match, and the messages
+// around one it picked.
+func TestMessagesForTheConversation(t *testing.T) {
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	st := store.NewMemory()
+	at := time.Date(2026, 10, 12, 21, 0, 0, 0, seoul)
+	long := strings.Repeat("가", 100) + " 갓생은 부지런히 사는 것 " + strings.Repeat("나", 100)
+	for i, text := range []string{"갓생이 뭐야?", long, "아하"} {
+		_ = st.PutMessage(context.Background(), model.Message{Ref: fmt.Sprintf("kakao:%d", i+1), Source: "kakao", Room: "kakao:uni", RoomName: "대학 동기방", Sender: "지수", SentAt: at.Add(time.Duration(i) * time.Minute), Text: text})
+	}
+	m := mind.New(mind.Options{
+		Store: st, Log: obs.NewMemoryLog(quiet), LLM: &llm.Script{}, Calendar: act.NewMemoryCalendar(),
+		Notifier: &act.MemoryNotifier{}, Loc: seoul, Now: time.Now, Logger: quiet, Policy: gate.DefaultPolicy(), Mode: "stack",
+	})
+	srv := httptest.NewServer(New(m, "secret", "console-secret", false, nil, quiet).Handler())
+	defer srv.Close()
+	get := func(path string, bearer bool, out any) int {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, srv.URL+path, nil)
+		if bearer {
+			req.Header.Set("Authorization", "Bearer secret")
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if out != nil {
+			_ = json.NewDecoder(resp.Body).Decode(out)
+		}
+		return resp.StatusCode
+	}
+	if code := get("/messages/search?q=갓생", false, nil); code != http.StatusUnauthorized {
+		t.Fatalf("토큰 없이: %d", code)
+	}
+	var found struct {
+		Messages []messageOut `json:"messages"`
+	}
+	if code := get("/messages/search?"+url.Values{"q": {"갓생"}, "room": {"동기"}, "since": {"2026-10-12"}}.Encode(), true, &found); code != http.StatusOK || len(found.Messages) != 2 {
+		t.Fatalf("검색: %d %+v", code, found)
+	}
+	snip := found.Messages[0]
+	if snip.Ref != "kakao:2" || !strings.Contains(snip.Text, "갓생은 부지런히") || len([]rune(snip.Text)) > 125 || !strings.HasPrefix(snip.Text, "…") || !strings.HasSuffix(snip.Text, "…") {
+		t.Fatalf("찾은 낱말 둘레만: %q", snip.Text)
+	}
+	if code := get("/messages/search?q=%20", true, nil); code != http.StatusBadRequest {
+		t.Fatalf("빈 검색어: %d", code)
+	}
+	if code := get("/messages/search?q=x&since=어제", true, nil); code != http.StatusBadRequest {
+		t.Fatalf("읽을 수 없는 날짜: %d", code)
+	}
+	var around struct {
+		Messages []messageOut `json:"messages"`
+	}
+	if code := get("/messages/context?ref=kakao:2&before=1&after=1", true, &around); code != http.StatusOK || len(around.Messages) != 3 || around.Messages[1].Ref != "kakao:2" {
+		t.Fatalf("앞뒤: %d %+v", code, around)
+	}
+	if n := len([]rune(around.Messages[1].Text)); n > 301 {
+		t.Fatalf("한 메시지는 짧게: %d", n)
+	}
+	if code := get("/messages/context?ref=kakao:9", true, nil); code != http.StatusNotFound {
+		t.Fatalf("없는 메시지: %d", code)
 	}
 }
