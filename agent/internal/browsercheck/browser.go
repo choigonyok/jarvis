@@ -1,6 +1,6 @@
 // Package browsercheck asks the agent's browser whether a site's order history
 // opens: it loads the page in a new tab, reads where it landed, and closes
-// the tab. Landing on a login page is the answer "logged out" - the only
+// the tab (or, when the browser reused a blank tab for it, blanks it again). Landing on a login page is the answer "logged out" - the only
 // answer that matters, and one a cookie on disk turned out not to give (a
 // profile can keep every long-lived Coupang cookie and still be logged out).
 //
@@ -82,21 +82,28 @@ func (c *Client) Open(ctx context.Context, target string, busyHosts []string) (L
 	if _, err := s.call(ctx, "browser_navigate", map[string]any{"url": target, "new_tab": true}); err != nil {
 		return Landing{}, err
 	}
-	// The new tab is the one that was not there before. Its address is the
-	// answer, read off the tab list: the "current page" the bridge reports
-	// is not reliably the tab just opened. Redirects to a login page happen
-	// after the first load, so wait for it to leave about:blank and settle.
-	seen := map[string]bool{}
+	// Our tab is the one the navigate used, and its address is the answer,
+	// read off the tab list: the "current page" the bridge reports is not
+	// reliably it. The bridge (browser-use) asked for a new tab reuses a
+	// blank one when there is one - the tab it is on, if blank, or any
+	// about:blank tab - and a browser it has just started has nothing else.
+	// So a tab that was blank before is watched like a new one. None is
+	// taken for ours until it is on the target's site or a login page: a
+	// browser starting up opens a blank tab of its own beside ours, and a new
+	// tab already on another site is someone else's (a job, the agent).
+	// Redirects to a login page happen after the first load, so the address
+	// is read until it settles.
+	seen, blank := map[string]bool{}, map[string]bool{}
 	for _, t := range before {
 		seen[t.ID] = true
+		blank[t.ID] = isBlank(t.URL)
 	}
-	// Only the tab this check opened is watched and closed. Others that
-	// appear meanwhile belong to whatever else is driving the browser (the
-	// agent, a job) and are left alone. Ours is the first new tab, preferring
-	// one on the target's host or still blank when several appear at once.
 	site := ""
 	if u, err := url.Parse(target); err == nil {
 		site = siteOf(u.Hostname())
+	}
+	ours := func(t tab) bool {
+		return (!seen[t.ID] || blank[t.ID]) && (sameSite(t.URL, site) || onHost(t.URL, busyHosts))
 	}
 	var mine string
 	var landed string
@@ -118,32 +125,16 @@ func (c *Client) Open(ctx context.Context, target string, busyHosts []string) (L
 		var cur *tab
 		for k := range after {
 			t := &after[k]
-			if mine != "" {
-				if t.ID == mine {
-					cur = t
-				}
-				continue
-			}
-			if seen[t.ID] {
-				continue
-			}
-			// A new tab already on another site is someone else's (a job
-			// opened it while this one was starting); ours is blank or on the
-			// target's site - its login page included.
-			blank := t.URL == "" || strings.HasPrefix(t.URL, "about:")
-			ours := sameSite(t.URL, site)
-			if !blank && !ours {
-				continue
-			}
-			if cur == nil || (!sameSite(cur.URL, site) && ours) {
+			if (mine != "" && t.ID == mine) || (mine == "" && ours(*t)) {
 				cur = t
+				break
 			}
 		}
 		if cur == nil {
 			continue
 		}
 		mine = cur.ID
-		if cur.URL != "" && !strings.HasPrefix(cur.URL, "about:") {
+		if !isBlank(cur.URL) {
 			landed = cur.URL
 			if i >= 2 { // at least three seconds, for the redirect
 				break
@@ -153,17 +144,26 @@ func (c *Client) Open(ctx context.Context, target string, busyHosts []string) (L
 	if mine == "" {
 		// A browser that was not running is started by the navigate itself,
 		// and the tab can show up after the wait is over. One last look, so
-		// that tab is not left behind: a new one on the target's host is ours.
+		// that tab is not left behind.
 		if after, err := s.tabs(ctx); err == nil {
 			for _, t := range after {
-				if !seen[t.ID] && sameSite(t.URL, site) {
+				if ours(t) {
 					mine = t.ID
 					break
 				}
 			}
 		}
 	}
-	if mine != "" {
+	switch {
+	case mine == "":
+	case seen[mine]:
+		// A blank tab the navigate reused is blanked again, not closed: it
+		// may be the browser's last, and left on a login page it would read
+		// as someone logging in (BusyHosts) at every later check.
+		if _, err := s.call(ctx, "browser_switch_tab", map[string]any{"tab_id": mine}); err == nil {
+			_, _ = s.call(ctx, "browser_navigate", map[string]any{"url": "about:blank"})
+		}
+	default:
 		_, _ = s.call(ctx, "browser_close_tab", map[string]any{"tab_id": mine})
 	}
 	if landed == "" {
@@ -343,6 +343,26 @@ func siteOf(host string) string {
 		return host
 	}
 	return strings.Join(labels[len(labels)-n:], ".")
+}
+
+// isBlank is a tab with no page yet: about:blank, the new-tab page, nothing.
+func isBlank(raw string) bool {
+	return raw == "" || strings.HasPrefix(raw, "about:") || strings.HasPrefix(raw, "chrome://newtab") ||
+		strings.HasPrefix(raw, "chrome://new-tab-page")
+}
+
+// onHost says whether raw is on one of hosts exactly.
+func onHost(raw string, hosts []string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	for _, h := range hosts {
+		if strings.EqualFold(u.Hostname(), h) {
+			return true
+		}
+	}
+	return false
 }
 
 // sameSite says whether raw is on site (the site itself or a subdomain).

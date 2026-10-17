@@ -22,6 +22,15 @@ type fakeBrowser struct {
 	// lists have been made (a cold browser starting up).
 	lateAfter int
 	late      bool
+	// reuse: the navigate lands in the about:blank tab already there, on
+	// landing, as browser-use does when asked for a new tab.
+	reuse   bool
+	landing string
+	// cold: the navigate starts the browser, which opens a blank tab of its
+	// own before the one asked for.
+	cold      bool
+	current   string
+	navigated []string
 }
 
 func (f *fakeBrowser) handle(w http.ResponseWriter, r *http.Request) {
@@ -60,16 +69,37 @@ func (f *fakeBrowser) handle(w http.ResponseWriter, r *http.Request) {
 		b, _ := json.Marshal(f.tabs)
 		text = string(b)
 	case "browser_navigate":
-		if f.lateAfter > 0 {
+		u, _ := msg.Params.Arguments["url"].(string)
+		f.navigated = append(f.navigated, u)
+		switch {
+		case u == "about:blank":
+			for i := range f.tabs {
+				if f.tabs[i].ID == f.current {
+					f.tabs[i].URL = u
+				}
+			}
+		case f.lateAfter > 0:
 			f.late = true
-			break
+		case f.reuse:
+			for i := range f.tabs {
+				if f.tabs[i].URL == "about:blank" {
+					f.tabs[i].URL, f.current = f.landing, f.tabs[i].ID
+					break
+				}
+			}
+		default:
+			if f.cold {
+				f.tabs = append(f.tabs, tab{ID: "t-default", URL: "about:blank"})
+			}
+			f.tabs = append(f.tabs, tab{ID: "t-mine", URL: "about:blank"})
+			f.current = "t-mine"
 		}
-		f.tabs = append(f.tabs, tab{ID: "t-mine", URL: "about:blank"})
-		text = "Opened new tab"
+		text = "Navigated"
 	case "browser_close_tab":
 		f.closed = append(f.closed, msg.Params.Arguments["tab_id"].(string))
 		text = "closed"
 	case "browser_switch_tab":
+		f.current = msg.Params.Arguments["tab_id"].(string)
 		text = "switched"
 	}
 	f.mu.Unlock()
@@ -117,6 +147,58 @@ func TestLateTabIsStillClosed(t *testing.T) {
 	defer f.mu.Unlock()
 	if len(f.closed) != 1 || f.closed[0] != "t-late" {
 		t.Fatalf("늦게 뜬 자기 탭도 닫아야 합니다: %v", f.closed)
+	}
+}
+
+// A browser just started has one blank tab, and the navigate asked for a new
+// tab lands in it (browser-use reuses blank tabs). The check follows that tab
+// to the login page and blanks it again - left there, every later check took
+// it for someone logging in and never looked again (2026-10-17).
+func TestOpenFollowsTheBlankTabItReused(t *testing.T) {
+	login := "https://login.shop.example/login?rtnUrl=orders"
+	f := &fakeBrowser{tabs: []tab{{ID: "t-blank", URL: "about:blank"}}, reuse: true, landing: login}
+	srv := httptest.NewServer(http.HandlerFunc(f.handle))
+	defer srv.Close()
+	c := New(srv.URL, "tok")
+	c.poll, c.tries = time.Millisecond, 10
+
+	l, err := c.Open(context.Background(), "https://shop.example/orders", []string{"login.shop.example"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l.URL != login || l.Busy {
+		t.Fatalf("로그인 화면에 도착했다고 답해야 합니다: %+v", l)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.closed) != 0 {
+		t.Fatalf("재사용한 탭은 닫지 않습니다(브라우저의 마지막 탭일 수 있음): %v", f.closed)
+	}
+	if f.tabs[0].URL != "about:blank" {
+		t.Fatalf("재사용한 탭을 빈 페이지로 되돌려야 합니다: %+v (navigate %v)", f.tabs, f.navigated)
+	}
+}
+
+// A browser started by the navigate opens a blank tab of its own beside the
+// one asked for. That one is not ours: ours is the one that reaches the site.
+func TestOpenDoesNotTakeTheBrowsersOwnBlankTab(t *testing.T) {
+	f := &fakeBrowser{cold: true}
+	srv := httptest.NewServer(http.HandlerFunc(f.handle))
+	defer srv.Close()
+	c := New(srv.URL, "tok")
+	c.poll, c.tries = time.Millisecond, 10
+
+	l, err := c.Open(context.Background(), "https://shop.example/orders", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l.URL != "https://shop.example/orders" {
+		t.Fatalf("도착한 주소: %q", l.URL)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.closed) != 1 || f.closed[0] != "t-mine" {
+		t.Fatalf("자기 탭만 닫아야 합니다: %v", f.closed)
 	}
 }
 
