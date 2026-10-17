@@ -12,8 +12,15 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/agent ./cmd/agent
 # Node is not optional here: the agent drives the Claude Code CLI, and that
 # CLI is what bills against the subscription.
 FROM node:22-alpine
+# Pinned: what the CLI caches and for how long (CLAUDE_CODE_PROMPT_CACHE_TTL),
+# its default model, and whether a resumed session takes a new system prompt
+# all change between versions, and every image build used to take whatever
+# was newest. 2.1.292 is what ran until this was pinned. To move it, build
+# with --build-arg CLAUDE_CODE_VERSION=… and compare the agent's "턴 사용량"
+# and "백그라운드 사용량" log lines before and after.
+ARG CLAUDE_CODE_VERSION=2.1.292
 RUN apk add --no-cache ca-certificates git ripgrep bash \
- && npm install -g @anthropic-ai/claude-code \
+ && npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
  && npm cache clean --force \
  && adduser -D -u 10001 jarvis \
  && mkdir -p /workspace /home/jarvis /data /uploads \
