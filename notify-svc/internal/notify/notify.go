@@ -66,6 +66,7 @@ var Categories = []Category{
 	{"calendar", "공유 일정", "상대가 일정을 추가했을 때"},
 	{"spending", "가계부", "큰 결제, 예산, 하루 지출"},
 	{"assets", "자산", "비중 이탈, 입출금 감지, 하루 자산"},
+	{"memory", "자비스 기억", "자비스가 기억을 새로 저장하거나 고치거나 지울 때"},
 }
 
 // GuestCategories is what the guest account is sent: their own jarvis's

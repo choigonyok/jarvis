@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -26,6 +27,7 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/core/module"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
 	"github.com/choigonyok/jarvis/agent/internal/httpapi"
+	"github.com/choigonyok/jarvis/agent/internal/memorywatch"
 	"github.com/choigonyok/jarvis/agent/internal/module/assets"
 	"github.com/choigonyok/jarvis/agent/internal/module/calendar"
 	"github.com/choigonyok/jarvis/agent/internal/module/jobs"
@@ -284,6 +286,31 @@ func main() {
 	}
 	// A reading older than an hour is refreshed with the smallest request.
 	go runner.WatchUsage(enrichCtx, time.Hour)
+
+	// The model writes its memory without a card (config.MemoryDir); every
+	// change reaches the operator instead, with the words written. What was
+	// last told is kept beside the proposals, where the model cannot write.
+	if cfg.MemoryDir != "" {
+		if memoryNote := notify.New(cfg.NotifyURL, cfg.DatabaseURL, cfg.APIToken, log); memoryNote != nil {
+			watcher := &memorywatch.Watcher{
+				Dir:      cfg.MemoryDir,
+				SeenPath: filepath.Join(filepath.Dir(cfg.ProposalsPath), "memory-seen.json"),
+				Every:    15 * time.Second,
+				Log:      log,
+				Tell: func(entries []memorywatch.Entry) {
+					title, body := memorywatch.Message(entries)
+					log.Info("자비스 기억이 바뀌어 알립니다", "files", len(entries))
+					memoryNote.Send(notify.Event{
+						Source: "agent", Kind: "memory.change", Tier: "now", Level: "info",
+						// Into the inbox, where the whole body is shown.
+						Title: title, Body: body, URL: "/?inbox=1",
+						Key: "memory:" + strconv.FormatInt(time.Now().UnixNano(), 36),
+					})
+				},
+			}
+			go watcher.Run(enrichCtx)
+		}
+	}
 
 	// Speaking first: mind-svc's gate decides what is worth raising (its
 	// ledger, budget and trust), and its cards become approval cards here

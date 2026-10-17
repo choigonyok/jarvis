@@ -189,7 +189,8 @@ scripts/mini up                               # 맥미니로 보내고 docker co
 - **도구를 줄입니다.** 대화에는 CLI 내장 도구 중 Read·Glob·Grep·TodoWrite·WebSearch·WebFetch·
   ToolSearch, 그리고 자기 기억(CLI 의 MEMORY.md)을 쓰는 Write·Edit 만 실립니다(`JARVIS_BUILTIN_TOOLS`).
   기억 폴더는 카드 없이 읽고 씁니다(쓰기는 CLI 가 자동 기억 폴더만 따로 허용합니다. 다른 곳의 쓰기는 카드).
-  그래서 대화 중 읽은 페이지가 기억에 지시를 심으면 이후 세션에도 실립니다. 주문 조회와 작업은 `sonnet`, 잘 안 끝나 다시
+  그래서 대화 중 읽은 페이지가 기억에 지시를 심으면 이후 세션에도 실립니다. 카드 대신 기억이 바뀔 때마다
+  바뀐 글을 담은 알림("자비스가 새로 기억했어요", 알림 설정의 "자비스 기억")이 갑니다. 주문 조회와 작업은 `sonnet`, 잘 안 끝나 다시
   하는 작업만 `opus` 로 돌고(`JARVIS_ENRICH_MODEL`, `JARVIS_JOBS_MODEL`, `JARVIS_JOBS_RETRY_MODEL`),
   대화가 끝나고 `JARVIS_BACKGROUND_QUIET`(5분) 동안은 시작하지 않습니다.
 - **기록합니다.** 에이전트 로그의 `턴 사용량`·`백그라운드 사용량` 줄에 요청 수, 입력·캐시 읽기·

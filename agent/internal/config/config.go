@@ -33,7 +33,9 @@ type Config struct {
 	// workspace - and written without one too: the CLI lets its model write
 	// its auto memory without asking, whatever the permission mode (tried in
 	// the agent container, 2026-10-17). So what a page talks the model into
-	// writing there is loaded into every later session. Empty for the guest.
+	// writing there is loaded into every later session - which is why every
+	// change is told to the operator, with its words (memorywatch: the
+	// operator chose being told over a card). Empty for the guest.
 	MemoryDir    string
 	SystemPrompt string
 	// AllowedTools skip the approval card entirely. Read-only tools belong
@@ -219,8 +221,8 @@ func Load() (Config, error) {
 		// Only what the conversation uses: photos are opened with Read, the
 		// web is searched and fetched (fetching on a card), ToolSearch loads
 		// the module tools the CLI defers, and Write and Edit keep what the
-		// operator asks it to remember (MemoryDir - those writes need no card,
-		// any other write does). No shell, no
+		// operator asks it to remember (MemoryDir - those writes need no card
+		// and each is told to the operator; any other write does). No shell, no
 		// subagents - neither was used here, and each is described in every
 		// request.
 		BuiltinTools:     ptr(env("JARVIS_BUILTIN_TOOLS", "Read,Glob,Grep,TodoWrite,WebSearch,WebFetch,ToolSearch,Write,Edit")),
@@ -376,7 +378,8 @@ func safeAllowed(tools []string) (kept, dropped []string) {
 // blocks reads outside its working directories altogether (runner:
 // blockReadsOutsideWorkingDirectories, with uploads and memory added as
 // working directories). Writing takes a card everywhere but the CLI's
-// memory, which the CLI itself lets its model write (see MemoryDir).
+// memory, which the CLI itself lets its model write (see MemoryDir) and the
+// operator hears of instead.
 func readRules(workspace, uploads, memory string) []string {
 	var out []string
 	if abs, err := filepath.Abs(workspace); err == nil {
