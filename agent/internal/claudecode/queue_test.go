@@ -142,3 +142,15 @@ func TestSteerAfterTheResultGoesFirst(t *testing.T) {
 		t.Fatalf("맨 앞으로: %+v", q)
 	}
 }
+
+// Queued ids never repeat, however close together the messages come.
+func TestQueueIDsAreUnique(t *testing.T) {
+	seen := map[string]bool{}
+	for range 1000 {
+		id := queueID("q")
+		if seen[id] {
+			t.Fatalf("id 가 겹쳤습니다: %s", id)
+		}
+		seen[id] = true
+	}
+}

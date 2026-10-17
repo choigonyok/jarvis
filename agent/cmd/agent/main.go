@@ -30,6 +30,7 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/module/calendar"
 	"github.com/choigonyok/jarvis/agent/internal/module/jobs"
 	"github.com/choigonyok/jarvis/agent/internal/module/memory"
+	"github.com/choigonyok/jarvis/agent/internal/module/messages"
 	mindmod "github.com/choigonyok/jarvis/agent/internal/module/mind"
 	"github.com/choigonyok/jarvis/agent/internal/module/place"
 	"github.com/choigonyok/jarvis/agent/internal/module/spending"
@@ -110,6 +111,9 @@ func main() {
 
 		mcpMounts["/mcp/"+assets.ServerName] = assetsModule.Handler()
 		mcpMounts["/mcp/"+spending.ServerName] = spendingModule.Handler()
+		// A module's lookups skip the card whatever JARVIS_ALLOWED_TOOLS says.
+		cfg.Allow(assets.Tools...)
+		cfg.Allow(spending.Tools...)
 		// Mounted but never put in the chat's MCP config: only the
 		// background order lookup is handed this server.
 		mcpMounts["/mcp/"+spending.EnrichServerName] = spendingModule.EnrichHandler()
@@ -123,6 +127,7 @@ func main() {
 			modules.Add(vaultModule)
 			mcpMounts["/mcp/"+vault.ServerName] = vaultModule.Handler()
 			cfg.ModuleMCPURLs[vault.ServerName] = cfg.PublicMCPURL + "/" + vault.ServerName
+			cfg.Allow(vault.Tools...)
 		}
 
 		// 작업. 대화에서 맡긴 일을 백그라운드에서, 작업이 정한 주기로 한다.
@@ -144,6 +149,7 @@ func main() {
 		modules.Add(memoryModule)
 		mcpMounts["/mcp/"+memory.ServerName] = memoryModule.Handler()
 		cfg.ModuleMCPURLs[memory.ServerName] = cfg.PublicMCPURL + "/" + memory.ServerName
+		cfg.Allow(memory.Tools...)
 	}
 
 	// Where the operator is (context-svc), read only. Not the guest's.
@@ -152,6 +158,7 @@ func main() {
 		modules.Add(placeModule)
 		mcpMounts["/mcp/"+place.ServerName] = placeModule.Handler()
 		cfg.ModuleMCPURLs[place.ServerName] = cfg.PublicMCPURL + "/" + place.ServerName
+		cfg.Allow(place.Tools...)
 	}
 
 	// mind-svc's gate: its cards become approval cards here, and approving
@@ -162,6 +169,14 @@ func main() {
 		modules.Add(mindModule)
 		c := mindModule.Client()
 		mindClient = &c
+
+		// The messages themselves (KakaoTalk, iMessage, this conversation), as
+		// mind keeps them: for what long-term memory did not take as a fact.
+		messagesModule := messages.New(cfg.MindURL, cfg.APIToken)
+		modules.Add(messagesModule)
+		mcpMounts["/mcp/"+messages.ServerName] = messagesModule.Handler()
+		cfg.ModuleMCPURLs[messages.ServerName] = cfg.PublicMCPURL + "/" + messages.ServerName
+		cfg.Allow(messages.Tools...)
 	}
 
 	startCtx, cancelStart := context.WithTimeout(context.Background(), 10*time.Second)
@@ -179,6 +194,17 @@ func main() {
 	if memoryModule != nil {
 		runner.SetRecall(memoryModule.Recall)
 	}
+	// A card this conversation raised - an approval asked in chat, a payment
+	// stopped while it drove the browser - is continued in the session that
+	// raised it, so a typed message does not start a new one under it. One
+	// left two hours is taken as forgotten: a chat card never expires, and
+	// one of those must not keep the session growing for good.
+	runner.SetHold(func(now time.Time) bool {
+		_, open := proposals.FindPendingWhere(func(p proposal.Proposal) bool {
+			return (p.Origin == proposal.OriginChat || p.Origin == proposal.OriginIntercept) && now.Sub(p.Opened()) < 2*time.Hour
+		})
+		return open
+	})
 
 	// 묶음 가맹점(쿠팡·네이버페이) 결제가 새로 들어왔을 때만 깨어나, 대화와
 	// 분리된 세션으로 주문목록을 읽어 상품별로 나눈다.
@@ -190,6 +216,7 @@ func main() {
 			Interval:  cfg.EnrichInterval,
 			Cooldown:  cfg.EnrichCooldown,
 			Timeout:   cfg.EnrichTimeout,
+			Model:     cfg.EnrichModel,
 		}, log)
 	} else if spendingModule != nil && cfg.Enrich {
 		log.Warn("브라우저 MCP 가 없어 묶음 결제 조회를 켜지 않습니다", "need", spending.BrowserServer)
@@ -206,6 +233,8 @@ func main() {
 				Timeout:    cfg.JobsTimeout,
 				UploadsDir: cfg.UploadsDir,
 				Guard:      guard,
+				Model:      cfg.JobsModel,
+				RetryModel: cfg.JobsRetryModel,
 			})
 		}
 	} else if jobsModule != nil {
@@ -355,7 +384,10 @@ func main() {
 			"turns", len(restored),
 			"proposals", len(proposals.List()),
 			"permission_tool", permission.QualifiedToolName(),
-			"auto_allowed", cfg.AllowedTools)
+			"auto_allowed", cfg.AllowedTools,
+			"builtin_tools", builtinTools(cfg.BuiltinTools),
+			"cache_ttl", cfg.CacheTTL,
+			"session_idle", cfg.SessionIdle.String())
 		if len(cfg.DroppedTools) > 0 {
 			log.Warn("JARVIS_ALLOWED_TOOLS 에서 카드를 건너뛰면 안 되는 도구를 뺐습니다", "dropped", cfg.DroppedTools)
 		}
@@ -427,4 +459,12 @@ func relogin(runner *claudecode.Runner, v *vault.Module, browserURL, browserToke
 		})
 		return err
 	}
+}
+
+// builtinTools is the --tools value for the log: "default" when unset.
+func builtinTools(p *string) string {
+	if p == nil {
+		return "default"
+	}
+	return *p
 }

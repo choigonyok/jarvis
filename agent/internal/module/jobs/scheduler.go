@@ -32,7 +32,9 @@ func runTools() []string {
 }
 
 type Background interface {
-	Idle() bool
+	// Quiet is when a run may start: nobody is using the assistant, and
+	// nobody did a moment ago.
+	Quiet() bool
 	Background(ctx context.Context, t claudecode.Task) (string, error)
 }
 
@@ -50,6 +52,11 @@ type SchedulerConfig struct {
 	// (no browser) nothing is held - and a run that cannot be held does not
 	// start.
 	Guard SiteGuard
+	// Model is what a run is on; RetryModel, when set, what a run after one
+	// that ended badly is on - the job's goal and sites differ every time,
+	// and the second try is where the stronger model earns its price.
+	Model      string
+	RetryModel string
 }
 
 // Run takes due jobs one at a time, whenever the person is not using the
@@ -69,7 +76,7 @@ func (m *Module) Run(ctx context.Context, bg Background, cfg SchedulerConfig) {
 		case <-m.kick:
 		}
 		m.purge(ctx)
-		if time.Since(last) < cfg.Cooldown || !bg.Idle() {
+		if time.Since(last) < cfg.Cooldown || !bg.Quiet() {
 			continue
 		}
 		j, err := m.store.Due(ctx)
@@ -108,13 +115,23 @@ func (m *Module) runOnce(ctx context.Context, bg Background, cfg SchedulerConfig
 	}
 	m.current.set(run, d.Job)
 	defer m.current.clear()
-	m.log.Info("작업을 실행합니다", "job", j.ID, "run", run, "title", j.Title)
+	model := cfg.Model
+	if j.Attempts > 0 && cfg.RetryModel != "" {
+		model = cfg.RetryModel
+	}
+	m.log.Info("작업을 실행합니다", "job", j.ID, "run", run, "title", j.Title, "model", model)
 
 	bctx := context.WithoutCancel(ctx)
+	// What this run did, step by step - handed to the next run if the
+	// conversation cuts this one short. The one before's, if it was cut.
+	var did []string
+	before := m.cut[j.ID]
+	delete(m.cut, j.ID)
 	result, err := bg.Background(ctx, claudecode.Task{
 		Name:    "작업 " + j.Title,
-		Prompt:  prompt(d, cfg.UploadsDir, time.Now()),
+		Prompt:  prompt(d, cfg.UploadsDir, time.Now(), before),
 		System:  runSystem,
+		Model:   model,
 		Servers: map[string]string{RunServerName: fmt.Sprintf("%s/%d", cfg.RunURL, run)},
 		Extra:   []string{BrowserServer},
 		Allowed: runTools(),
@@ -122,6 +139,7 @@ func (m *Module) runOnce(ctx context.Context, bg Background, cfg SchedulerConfig
 		OnStep: func(s claudecode.Step) {
 			if kind, text := describe(s); text != "" {
 				_ = m.store.Step(bctx, run, kind, text)
+				did = append(did, text)
 			}
 		},
 	})
@@ -130,6 +148,11 @@ func (m *Module) runOnce(ctx context.Context, bg Background, cfg SchedulerConfig
 	switch {
 	case errors.Is(err, claudecode.ErrYielded), errors.Is(err, claudecode.ErrBusy):
 		outcome = "yielded"
+		if len(did) > 0 {
+			m.cut[j.ID] = lastSteps(append(before, did...), cutSteps)
+		} else if len(before) > 0 {
+			m.cut[j.ID] = before
+		}
 	case err != nil:
 		outcome, note = "error", clampText(err.Error(), 200)
 	}
@@ -241,7 +264,19 @@ const runSystem = `당신은 Jarvis의 백그라운드 작업 실행입니다. �
 
 var weekdays = [...]string{"일", "월", "화", "수", "목", "금", "토"}
 
-func prompt(d Detail, uploadsDir string, now time.Time) string {
+// cutSteps bounds how much of a cut-short run is handed to the next one.
+const cutSteps = 30
+
+func lastSteps(steps []string, n int) []string {
+	if len(steps) > n {
+		return append([]string(nil), steps[len(steps)-n:]...)
+	}
+	return steps
+}
+
+// prompt is one run's message. cut is what the run before did, step by
+// step, if the conversation cut it short.
+func prompt(d Detail, uploadsDir string, now time.Time, cut []string) string {
 	j := d.Job
 	var b strings.Builder
 	fmt.Fprintf(&b, "작업 %d: %s\n지금: %s (%s)\n\n", j.ID, j.Title, now.Format("2006-01-02 15:04"), weekdays[int(now.Weekday())])
@@ -308,6 +343,12 @@ func prompt(d Detail, uploadsDir string, now time.Time) string {
 			if n++; n >= 20 {
 				break
 			}
+		}
+	}
+	if len(cut) > 0 {
+		b.WriteString("\n지난 실행은 대화가 시작되어 중간에 멈췄습니다. 그때 한 일 (오래된 것부터, 화면은 그사이 바뀌었을 수 있으니 확인하고 이어서 하세요)\n")
+		for _, s := range cut {
+			fmt.Fprintf(&b, "- %s\n", s)
 		}
 	}
 	if j.Attempts > 0 {

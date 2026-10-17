@@ -103,11 +103,24 @@ func TestPrompt(t *testing.T) {
 		Inbox:   []Inbox{{Kind: "answer", Text: "[승인] 이대로 올릴까요?", At: time.Now()}},
 		Records: []Record{{Key: "1", Title: "에어팟", Status: "판매중"}},
 	}
-	p := prompt(d, "/uploads", time.Date(2026, 10, 8, 14, 0, 0, 0, time.Local))
+	p := prompt(d, "/uploads", time.Date(2026, 10, 8, 14, 0, 0, 0, time.Local), nil)
 	for _, want := range []string{"작업 3: 에어팟 판매", "택배거래만", "/uploads/a.jpg", "[카드 답", "posted_url", "[1] 에어팟 · 판매중", "지난 1번", "schedule_next"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("prompt lacks %q:\n%s", want, p)
 		}
+	}
+	if strings.Contains(p, "중간에 멈췄습니다") {
+		t.Error("멈춘 실행이 없으면 그 이야기도 없습니다")
+	}
+	// A run the conversation cut short hands on what it did.
+	cut := prompt(d, "/uploads", time.Now(), []string{"열기: https://web.joongna.com/sell", "입력: 에어팟 프로"})
+	for _, want := range []string{"중간에 멈췄습니다", "- 열기: https://web.joongna.com/sell", "- 입력: 에어팟 프로"} {
+		if !strings.Contains(cut, want) {
+			t.Errorf("prompt lacks %q:\n%s", want, cut)
+		}
+	}
+	if got := lastSteps([]string{"a", "b", "c"}, 2); strings.Join(got, ",") != "b,c" {
+		t.Errorf("마지막 단계만: %v", got)
 	}
 }
 

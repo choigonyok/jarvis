@@ -27,10 +27,14 @@ var ErrYielded = errors.New("대화가 시작되어 백그라운드 작업을 �
 // files) are not loaded at all. Nobody is watching a background task, so
 // nothing it can do may need watching.
 type Task struct {
-	Name   string
+	Name string
+	// Prompt is the task's message; today's date and the time go in front of
+	// it. System is appended to the CLI's system prompt and should not change
+	// from run to run: requests whose instructions match share their cache.
 	Prompt string
-	// System is appended to the CLI's system prompt, after today's date.
 	System string
+	// Model is the model the task runs on; empty uses the conversation's.
+	Model string
 	// Servers are this agent's own MCP endpoints (loopback, no credential).
 	Servers map[string]string
 	// Extra names entries of JARVIS_EXTRA_MCP to include, with their token.
@@ -64,6 +68,15 @@ func (r *Runner) Idle() bool {
 	return !r.running && r.bgCancel == nil
 }
 
+// Quiet is Idle, and no conversation turn ended in the last BackgroundQuiet:
+// when a background task may start. The next message usually comes within
+// minutes of the last answer, and a task it cuts short threw its tokens away.
+func (r *Runner) Quiet() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return !r.running && r.bgCancel == nil && time.Since(r.lastAt) >= r.cfg.BackgroundQuiet
+}
+
 // Background runs a task if the assistant is idle, and gives way the moment
 // the person speaks: Send and Enqueue cancel it. The browser is one shared
 // window, and the person's own request always wins it.
@@ -91,7 +104,9 @@ func (r *Runner) Background(parent context.Context, t Task) (string, error) {
 	}
 	cmd := exec.CommandContext(ctx, r.cfg.ClaudeBin, args...)
 	cmd.Dir = r.cfg.Workspace
-	cmd.Env = r.env()
+	// Its requests come seconds apart and nothing resumes it: an hour-long
+	// cache would only make every write cost more.
+	cmd.Env = r.env("5m")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return "", err
@@ -101,12 +116,15 @@ func (r *Runner) Background(parent context.Context, t Task) (string, error) {
 	if err := cmd.Start(); err != nil {
 		return "", fmt.Errorf("claude 실행: %w", err)
 	}
-	result, scanErr := backgroundResult(stdout, t.OnStep, r.usage.Observe)
+	var used tally
+	result, scanErr := backgroundResult(stdout, t.OnStep, r.usage.Observe, &used)
 	waitErr := cmd.Wait()
 
 	r.mu.Lock()
 	gaveWay := yielded
 	r.mu.Unlock()
+	// Logged however it ended: a run cut short is tokens thrown away.
+	r.log.Info("백그라운드 사용량", append([]any{"task", t.Name, "model", r.modelOf(t), "yielded", gaveWay}, used.attrs()...)...)
 	if gaveWay {
 		return "", ErrYielded
 	}
@@ -154,12 +172,14 @@ func (r *Runner) backgroundArgs(t Task) ([]string, error) {
 		return nil, err
 	}
 
+	// The clock rides on the prompt, not the instructions: instructions that
+	// change every minute would share no cache with the run before.
 	now := time.Now()
-	system := fmt.Sprintf("오늘은 %d-%02d-%02d (%s), 지금은 %s 입니다.\n\n%s",
-		now.Year(), int(now.Month()), now.Day(), weekdays[int(now.Weekday())], now.Format("15:04"), t.System)
+	prompt := fmt.Sprintf("오늘은 %d-%02d-%02d (%s), 지금은 %s 입니다.\n\n%s",
+		now.Year(), int(now.Month()), now.Day(), weekdays[int(now.Weekday())], now.Format("15:04"), t.Prompt)
 
 	args := []string{
-		"-p", t.Prompt,
+		"-p", prompt,
 		"--output-format", "stream-json",
 		"--verbose",
 		// Anything not in --allowedTools is refused outright; there is no
@@ -173,20 +193,31 @@ func (r *Runner) backgroundArgs(t Task) ([]string, error) {
 		// Its own throwaway session: the chat's --resume session is the
 		// person's conversation, and this is not part of it.
 		"--no-session-persistence",
-		"--append-system-prompt", system,
+		"--append-system-prompt", t.System,
 	}
-	if r.cfg.Model != "" {
-		args = append(args, "--model", r.cfg.Model)
+	if model := r.modelOf(t); model != "" {
+		args = append(args, "--model", model)
 	}
 	return args, nil
 }
 
+// modelOf is the model a task runs on: its own, or the conversation's.
+func (r *Runner) modelOf(t Task) string {
+	if t.Model != "" {
+		return t.Model
+	}
+	return r.cfg.Model
+}
+
 // backgroundResult reads the stream only for its outcome: the final result
-// text (for the log) and whether the CLI reported an error.
-func backgroundResult(stdout interface{ Read([]byte) (int, error) }, onStep func(Step), onRate func(json.RawMessage)) (string, error) {
+// text (for the log), whether the CLI reported an error, and what it used.
+func backgroundResult(stdout interface{ Read([]byte) (int, error) }, onStep func(Step), onRate func(json.RawMessage), used *tally) (string, error) {
 	var result string
 	var failed error
 	err := scan(stdout, func(ev event) {
+		if used != nil {
+			used.observe(ev)
+		}
 		if ev.Type == "rate_limit_event" && onRate != nil {
 			onRate(ev.RateLimitInfo)
 		}
@@ -255,7 +286,7 @@ func (r *Runner) ProbeUsage(ctx context.Context) error {
 		"--model", "haiku", "--tools", "", "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`,
 		"--no-session-persistence", "--permission-mode", "dontAsk")
 	cmd.Dir = os.TempDir()
-	cmd.Env = r.env()
+	cmd.Env = r.env("5m")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
@@ -263,7 +294,7 @@ func (r *Runner) ProbeUsage(ctx context.Context) error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	_, _ = backgroundResult(stdout, nil, r.usage.Observe)
+	_, _ = backgroundResult(stdout, nil, r.usage.Observe, nil)
 	return cmd.Wait()
 }
 

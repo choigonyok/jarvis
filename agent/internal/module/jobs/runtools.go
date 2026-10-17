@@ -268,7 +268,7 @@ func (m *Module) runServer(run int64) *mcp.Server {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "schedule_next",
-		Description: "이 작업을 언제 다시 실행할지 정한다. 목표상 나중에 다시 확인할 것이 있으면 반드시 부른다(최소 5분 뒤). " +
+		Description: "이 작업을 언제 다시 실행할지 정한다. 목표상 나중에 다시 확인할 것이 있으면 반드시 부른다(최소 10분 뒤). " +
 			"얼마나 자주 볼지는 대상이 얼마나 빨리 바뀌는지로 정한다.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ScheduleInput) (*mcp.CallToolResult, any, error) {
 		if _, bad := guard(); bad != nil {

@@ -163,7 +163,9 @@ func toolText(s string, isErr bool) *mcp.CallToolResult {
 // --- the loop --------------------------------------------------------------
 
 type Background interface {
-	Idle() bool
+	// Quiet is when a lookup may start: nobody is using the assistant, and
+	// nobody did a moment ago.
+	Quiet() bool
 	Background(ctx context.Context, t claudecode.Task) (string, error)
 }
 
@@ -177,11 +179,15 @@ type EnrichConfig struct {
 	// clients that open order pages too often.
 	Cooldown time.Duration
 	Timeout  time.Duration
+	// Model is what the lookup runs on: a fixed site and fixed rules, not
+	// the conversation's judgement.
+	Model string
 }
 
 // RunEnricher wakes on new marketplace charges and nothing else.
 func (m *Module) RunEnricher(ctx context.Context, bg Background, cfg EnrichConfig, log *slog.Logger) {
 	var last time.Time
+	yields := 0
 	tick := time.NewTicker(cfg.Interval)
 	defer tick.Stop()
 	for {
@@ -190,7 +196,7 @@ func (m *Module) RunEnricher(ctx context.Context, bg Background, cfg EnrichConfi
 			return
 		case <-tick.C:
 		}
-		if time.Since(last) < cfg.Cooldown || !bg.Idle() {
+		if time.Since(last) < yieldWait(cfg.Cooldown, yields) || !bg.Quiet() {
 			continue
 		}
 		pending, err := m.store.Pending(ctx)
@@ -198,11 +204,28 @@ func (m *Module) RunEnricher(ctx context.Context, bg Background, cfg EnrichConfi
 			continue
 		}
 		last = time.Now()
-		m.enrichOnce(ctx, bg, cfg, pending, log)
+		if m.enrichOnce(ctx, bg, cfg, pending, log) {
+			yields++
+		} else {
+			yields = 0
+		}
 	}
 }
 
-func (m *Module) enrichOnce(ctx context.Context, bg Background, cfg EnrichConfig, pending []Pending, log *slog.Logger) {
+// yieldWait is the least time before the next lookup: the cooldown, doubled
+// for each lookup in a row the conversation cut short - each of those spent
+// tokens on pages it never finished reading - up to an hour.
+func yieldWait(cooldown time.Duration, yields int) time.Duration {
+	wait := cooldown
+	for i := 0; i < yields && wait < time.Hour; i++ {
+		wait *= 2
+	}
+	return min(wait, max(cooldown, time.Hour))
+}
+
+// enrichOnce looks the charges up once. yielded says the conversation cut it
+// short, so nothing was recorded.
+func (m *Module) enrichOnce(ctx context.Context, bg Background, cfg EnrichConfig, pending []Pending, log *slog.Logger) (yielded bool) {
 	ids := make([]string, len(pending))
 	for i, p := range pending {
 		ids[i] = fmt.Sprint(p.ID)
@@ -217,13 +240,14 @@ func (m *Module) enrichOnce(ctx context.Context, bg Background, cfg EnrichConfig
 		Extra:   []string{BrowserServer},
 		Allowed: enrichTools,
 		Timeout: cfg.Timeout,
+		Model:   cfg.Model,
 	})
 	switch {
 	case errors.Is(err, claudecode.ErrYielded), errors.Is(err, claudecode.ErrBusy):
 		// The person needed the assistant. Nothing is recorded; the same
 		// charges come up again after the cooldown.
 		log.Info("주문 조회를 미뤘습니다", "reason", err)
-		return
+		return true
 	case err != nil:
 		log.Warn("주문 조회가 실패했습니다", "err", err)
 	default:
@@ -239,7 +263,7 @@ func (m *Module) enrichOnce(ctx context.Context, bg Background, cfg EnrichConfig
 	bctx := context.WithoutCancel(ctx)
 	still, qerr := m.store.Pending(bctx)
 	if qerr != nil {
-		return
+		return false
 	}
 	asked := map[int64]bool{}
 	for _, p := range pending {
@@ -254,6 +278,7 @@ func (m *Module) enrichOnce(ctx context.Context, bg Background, cfg EnrichConfig
 			_ = m.store.report(bctx, p.ID, "failed", note)
 		}
 	}
+	return false
 }
 
 const enrichSystem = `당신은 Jarvis의 백그라운드 가계부 작업입니다. 대화 상대는 없고, 결과는 도구로만 남깁니다.

@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -72,6 +73,21 @@ type Proposal struct {
 	// Edits is every change the operator made to a form card before
 	// deciding, oldest first: what was proposed and what they wanted instead.
 	Edits []Edit `json:"edits,omitempty"`
+}
+
+// Opened is when the card was raised, read off its id (Open stamps it there;
+// At keeps only the time of day). Zero for an id of another shape.
+func (p Proposal) Opened() time.Time {
+	rest, ok := strings.CutPrefix(p.ID, "p-")
+	if !ok {
+		return time.Time{}
+	}
+	ms, _, _ := strings.Cut(rest, "-")
+	n, err := strconv.ParseInt(ms, 10, 64)
+	if err != nil {
+		return time.Time{}
+	}
+	return time.UnixMilli(n)
 }
 
 // Edit is one revision of a form card by the operator.

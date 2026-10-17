@@ -109,3 +109,16 @@ func TestReasonAndEdits(t *testing.T) {
 		t.Fatalf("이유와 수정 내역: %+v", got)
 	}
 }
+
+// When a card was raised is read off its id; an id of another shape has none.
+func TestOpened(t *testing.T) {
+	s := NewStore(bus.New())
+	before := time.Now().Add(-time.Second)
+	p, _ := s.Open(Proposal{Action: action.Action{Kind: "x"}})
+	if at := p.Opened(); at.Before(before) || at.After(time.Now().Add(time.Second)) {
+		t.Fatalf("열린 시각 %v", at)
+	}
+	if !(Proposal{ID: "local-1"}).Opened().IsZero() {
+		t.Fatal("모양이 다른 id")
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -73,5 +74,48 @@ func TestBackgroundWaitsForTheConversation(t *testing.T) {
 	r.running = true
 	if _, err := r.Background(context.Background(), Task{Timeout: time.Second}); !errors.Is(err, ErrBusy) {
 		t.Fatalf("대화 중에 시작했습니다: %v", err)
+	}
+}
+
+// A task's instructions are the same on every run - the clock rides on its
+// prompt - so two runs share their cache; and it runs on its own model.
+func TestBackgroundArgs(t *testing.T) {
+	r := runner(t, "claude")
+	r.cfg.Model = "chat-model"
+	args, err := r.backgroundArgs(Task{Name: "t", Prompt: "할 일", System: "규칙", Model: "sonnet"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(args, "\n")
+	if !strings.Contains(joined, "--append-system-prompt\n규칙\n") && !strings.HasSuffix(joined, "--append-system-prompt\n규칙") {
+		t.Fatalf("지시는 그대로:\n%s", joined)
+	}
+	if !strings.Contains(joined, "--model\nsonnet") || strings.Contains(joined, "chat-model") {
+		t.Fatalf("작업의 모델로:\n%s", joined)
+	}
+	if !strings.Contains(args[1], "오늘은 ") || !strings.HasSuffix(args[1], "할 일") {
+		t.Fatalf("시각은 프롬프트 앞에: %q", args[1])
+	}
+	args, _ = r.backgroundArgs(Task{Name: "t"})
+	if !strings.Contains(strings.Join(args, "\n"), "--model\nchat-model") {
+		t.Fatal("모델이 없으면 대화의 모델")
+	}
+}
+
+// A background task waits for the conversation to go quiet, not only idle.
+func TestQuietAfterTheConversation(t *testing.T) {
+	r := runner(t, "claude")
+	r.cfg.BackgroundQuiet = 5 * time.Minute
+	r.lastAt = time.Now().Add(-time.Minute)
+	if r.Quiet() || !r.Idle() {
+		t.Fatal("대화 직후에는 기다립니다")
+	}
+	r.lastAt = time.Now().Add(-6 * time.Minute)
+	if !r.Quiet() {
+		t.Fatal("조용해졌으면 시작합니다")
+	}
+	r.running = true
+	if r.Quiet() {
+		t.Fatal("대화 중에는 시작하지 않습니다")
 	}
 }

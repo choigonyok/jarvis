@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // The guest agent's limits are what keep the operator's money and messages out
@@ -45,8 +46,83 @@ func TestOwnerUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Guest || c.Thread != "" || c.BuiltinTools != nil {
-		t.Fatalf("운영자 설정이 바뀌었습니다: guest=%v thread=%q tools=%v", c.Guest, c.Thread, c.BuiltinTools)
+	if c.Guest || c.Thread != "" {
+		t.Fatalf("운영자 설정이 바뀌었습니다: guest=%v thread=%q", c.Guest, c.Thread)
+	}
+}
+
+// The conversation gets the built-in tools it uses - photos, the web, the
+// deferred module tools - and none of the shell, edits or subagents, each of
+// which is described in every request. "default" gives them all back.
+func TestOwnerBuiltinTools(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "x")
+	t.Setenv("JARVIS_API_TOKEN", "api")
+	t.Setenv("JARVIS_ROLE", "")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.BuiltinTools == nil {
+		t.Fatal("대화의 내장 도구를 정하지 않았습니다")
+	}
+	tools := "," + *c.BuiltinTools + ","
+	for _, want := range []string{"Read", "WebSearch", "WebFetch", "TodoWrite", "ToolSearch"} {
+		if !strings.Contains(tools, ","+want+",") {
+			t.Errorf("%s 가 있어야 합니다: %s", want, tools)
+		}
+	}
+	for _, gone := range []string{"Bash", "Edit", "Write", "Task", "Agent", "NotebookEdit"} {
+		if strings.Contains(tools, ","+gone+",") {
+			t.Errorf("%s 는 대화에 필요 없습니다: %s", gone, tools)
+		}
+	}
+	t.Setenv("JARVIS_BUILTIN_TOOLS", "default")
+	if c, _ = Load(); c.BuiltinTools == nil || *c.BuiltinTools != "default" {
+		t.Fatalf("default 는 CLI 의 전부: %v", c.BuiltinTools)
+	}
+}
+
+// The conversation's cache lifetime is 5m unless set to 1h, and the pause
+// that starts a new session follows it unless set.
+func TestCacheAndSession(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "x")
+	t.Setenv("JARVIS_API_TOKEN", "api")
+	t.Setenv("JARVIS_ROLE", "")
+	for _, c := range []struct {
+		ttl, idle string
+		want      string
+		wantIdle  time.Duration
+	}{
+		{"", "", "5m", 30 * time.Minute},
+		{"1h", "", "1h", time.Hour},
+		{"2h", "", "5m", 30 * time.Minute},
+		{"1h", "45m", "1h", 45 * time.Minute},
+	} {
+		t.Setenv("JARVIS_CACHE_TTL", c.ttl)
+		t.Setenv("JARVIS_SESSION_IDLE", c.idle)
+		cfg, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.CacheTTL != c.want || cfg.SessionIdle != c.wantIdle {
+			t.Errorf("%q/%q: ttl %q idle %v", c.ttl, c.idle, cfg.CacheTTL, cfg.SessionIdle)
+		}
+	}
+	cfg, _ := Load()
+	if cfg.SessionMaxTokens != 50000 || cfg.SessionMinTokens != 20000 || cfg.BackgroundQuiet != 5*time.Minute {
+		t.Fatalf("기본값: %d %d %v", cfg.SessionMaxTokens, cfg.SessionMinTokens, cfg.BackgroundQuiet)
+	}
+	if cfg.EnrichModel != "sonnet" || cfg.JobsModel != "sonnet" || cfg.JobsRetryModel != "opus" || cfg.Model != "" {
+		t.Fatalf("모델: %q %q %q %q", cfg.EnrichModel, cfg.JobsModel, cfg.JobsRetryModel, cfg.Model)
+	}
+}
+
+// A module's lookups are added once, and nothing unsafe gets in that way.
+func TestAllow(t *testing.T) {
+	c := Config{AllowedTools: []string{"TodoWrite"}}
+	c.Allow("mcp__context__find_nearby", "TodoWrite", "Bash", "mcp__context__find_nearby")
+	if strings.Join(c.AllowedTools, ",") != "TodoWrite,mcp__context__find_nearby" {
+		t.Fatalf("%v", c.AllowedTools)
 	}
 }
 

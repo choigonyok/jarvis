@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/choigonyok/jarvis/agent/internal/claudecode"
 )
@@ -50,7 +51,7 @@ type fakeBG struct {
 	err    error
 }
 
-func (b *fakeBG) Idle() bool { return true }
+func (b *fakeBG) Quiet() bool { return true }
 func (b *fakeBG) Background(_ context.Context, t claudecode.Task) (string, error) {
 	b.calls++
 	b.prompt, b.task = t.Prompt, t
@@ -99,5 +100,22 @@ func TestYieldRecordsNothing(t *testing.T) {
 	m.enrichOnce(context.Background(), &fakeBG{err: claudecode.ErrYielded}, EnrichConfig{}, f.pending, quiet)
 	if len(f.reported) != 0 {
 		t.Fatalf("양보했는데 기록됨: %v", f.reported)
+	}
+}
+
+// A lookup the conversation keeps cutting short waits longer each time, up
+// to an hour; one that ran resets it.
+func TestYieldWait(t *testing.T) {
+	cases := []struct {
+		yields int
+		want   time.Duration
+	}{{0, 10 * time.Minute}, {1, 20 * time.Minute}, {2, 40 * time.Minute}, {3, time.Hour}, {9, time.Hour}}
+	for _, c := range cases {
+		if got := yieldWait(10*time.Minute, c.yields); got != c.want {
+			t.Errorf("%d번 연달아 미룸: %v, 기대 %v", c.yields, got, c.want)
+		}
+	}
+	if got := yieldWait(2*time.Hour, 3); got != 2*time.Hour {
+		t.Errorf("쿨다운이 한 시간보다 길면 그대로: %v", got)
 	}
 }

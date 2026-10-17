@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -31,6 +32,8 @@ type Config struct {
 	// here; anything that writes does not. Files are read only inside the
 	// workspace and the uploads (scoped Read/Grep/Glob rules, added at load);
 	// see unsafeTool for what is taken off whatever the environment says.
+	// Each module's read-only tools are added at boot (Allow), whatever the
+	// environment says: a module that gains a lookup does not need .env edited.
 	AllowedTools []string
 	// DroppedTools are entries of JARVIS_ALLOWED_TOOLS that were refused.
 	DroppedTools []string
@@ -122,8 +125,33 @@ type Config struct {
 	// Thread is this agent's conversation in chat-svc: "" or "guest".
 	Thread string
 	// BuiltinTools, when set, is passed as --tools: the only built-in CLI
-	// tools the model gets. Nil means the CLI's default set.
+	// tools the model gets. Nil means the CLI's default set. Every one of
+	// them is described in every request, so the conversation gets only what
+	// it uses (JARVIS_BUILTIN_TOOLS, "default" for all of them).
 	BuiltinTools *string
+	// CacheTTL is the conversation's prompt cache lifetime, "5m" or "1h"
+	// (JARVIS_CACHE_TTL). A one-hour write costs 2x the input, a five-minute
+	// one 1.25x; the hour pays off only when the next message usually comes
+	// between five minutes and an hour later. Background tasks always use 5m:
+	// their requests come seconds apart and no session outlives them.
+	CacheTTL string
+	// A typed message opens a new session, handed the recent conversation,
+	// when the last turn ended SessionIdle ago or the session's history (its
+	// context less the instructions and tools) reached SessionMaxTokens - but
+	// never for a history under SessionMinTokens, which a recap would not
+	// make smaller.
+	SessionIdle      time.Duration
+	SessionMaxTokens int
+	SessionMinTokens int
+	// BackgroundQuiet is how long after a conversation turn a background task
+	// may start: the next message usually comes within minutes, and a task cut
+	// short by it threw its tokens away.
+	BackgroundQuiet time.Duration
+	// Models for the background tasks (empty: Model). A job tried again after
+	// a run that ended badly gets JobsRetryModel.
+	EnrichModel    string
+	JobsModel      string
+	JobsRetryModel string
 	// BackgroundLogin is the sign-in hosts a background task may use without
 	// asking - so the order lookup can press 로그인 on a form the browser has
 	// filled in from its saved passwords. Payment hosts are never on it.
@@ -176,12 +204,23 @@ func Load() (Config, error) {
 		// looking costs nothing and a card in front of every lookup would
 		// train the operator to approve without reading. Writes are never on
 		// this list - nor is starting or redirecting a job, which then runs on
-		// its own in the logged-in browser.
+		// its own in the logged-in browser. The other modules' lookups (assets,
+		// spending, memory, context, messages, vault) are added from the modules.
 		AllowedTools: splitList(env("JARVIS_ALLOWED_TOOLS",
-			"TodoWrite,mcp__calendar__list_events,"+
-				"mcp__assets__get_portfolio,mcp__assets__get_allocation,mcp__assets__get_history,"+
-				"mcp__spending__get_spending,mcp__memory__search_memory,mcp__context__get_context,mcp__context__find_nearby,mcp__jobs__list_jobs,"+
-				"mcp__vault__list_logins")),
+			"TodoWrite,mcp__calendar__list_events,mcp__jobs__list_jobs")),
+		// Only what the conversation uses: photos are opened with Read, the
+		// web is searched and fetched (fetching on a card), and ToolSearch
+		// loads the module tools the CLI defers. No shell, no edits, no
+		// subagents - none of them was ever used here, and each is described
+		// in every request.
+		BuiltinTools:     ptr(env("JARVIS_BUILTIN_TOOLS", "Read,Glob,Grep,TodoWrite,WebSearch,WebFetch,ToolSearch")),
+		CacheTTL:         cacheTTL(os.Getenv("JARVIS_CACHE_TTL")),
+		SessionMaxTokens: envInt("JARVIS_SESSION_MAX_TOKENS", 50000),
+		SessionMinTokens: envInt("JARVIS_SESSION_MIN_TOKENS", 20000),
+		BackgroundQuiet:  envDuration("JARVIS_BACKGROUND_QUIET", 5*time.Minute),
+		EnrichModel:      env("JARVIS_ENRICH_MODEL", "sonnet"),
+		JobsModel:        env("JARVIS_JOBS_MODEL", "sonnet"),
+		JobsRetryModel:   env("JARVIS_JOBS_RETRY_MODEL", "opus"),
 		PermissionMode:   env("JARVIS_PERMISSION_MODE", "manual"),
 		ApprovalWait:     envDuration("JARVIS_APPROVAL_TIMEOUT", 30*time.Minute),
 		TurnTimeout:      envDuration("JARVIS_TURN_TIMEOUT", 2*time.Hour),
@@ -222,6 +261,15 @@ func Load() (Config, error) {
 		SelfURL:         env("JARVIS_SELF_URL", "http://agent:8080"),
 		Debug:           envBool("JARVIS_DEBUG", false),
 	}
+	// With a five-minute cache every pause past five minutes writes the whole
+	// history again, so half an hour of silence is a good place to start
+	// over. An hour-long cache keeps the session warm through the hour: a new
+	// session sooner would throw that away.
+	idle := 30 * time.Minute
+	if c.CacheTTL == "1h" {
+		idle = time.Hour
+	}
+	c.SessionIdle = envDuration("JARVIS_SESSION_IDLE", idle)
 
 	if c.Guest = env("JARVIS_ROLE", "") == "guest"; c.Guest {
 		c.Thread = "guest"
@@ -288,6 +336,16 @@ func unsafeTool(t string) bool {
 		}
 	}
 	return false
+}
+
+// Allow adds read-only tools a module declares to AllowedTools, once each.
+// Called at boot for each module that is on.
+func (c *Config) Allow(tools ...string) {
+	for _, t := range tools {
+		if !unsafeTool(t) && !slices.Contains(c.AllowedTools, t) {
+			c.AllowedTools = append(c.AllowedTools, t)
+		}
+	}
 }
 
 func safeAllowed(tools []string) (kept, dropped []string) {
@@ -364,6 +422,10 @@ const defaultSystemPrompt = `당신은 Jarvis입니다. 한 사람의 개인 어
 - "주의"나 "읽지 못한 카드 알림"이 있으면 합계가 빠졌을 수 있다고 먼저 밝히세요.
 - 분류를 바꾸거나 예산을 정하는 건 가계부 화면에서 하도록 안내하세요.
 
+기억
+- 지난 일·사람·약속처럼 지금 대화에 없는 맥락은 먼저 search_memory 로 찾으세요.
+- 카톡·iMessage·이 대화에서 누가 정확히 뭐라고 했는지, 어떤 말이 무슨 뜻이었는지처럼 원문이 필요한데 search_memory 로 못 찾았을 때만 search_messages 로 찾고, 고른 메시지의 앞뒤는 message_context 로 보세요.
+
 작업
 - 시간이 걸리거나 나중에 다시 봐야 하는 일, 웹사이트에서 해 둘 일은 create_job 으로 작업을 만들어 맡기세요. 예: 중고나라에 팔기, 가격 내려가면 알려주기, 택배 도착 지켜보기, 예약 열리면 알려주기.
 - 대화 안에서 브라우저로 직접 하지 말고 작업으로 넘기세요. 작업은 백그라운드에서 진행되고, 필요하면 스스로 주기적으로 다시 확인하며, 운영자에게 카드로 묻거나 로그인을 요청합니다.
@@ -430,6 +492,25 @@ func splitList(s string) []string {
 		}
 	}
 	return out
+}
+
+// cacheTTL is a prompt cache lifetime the CLI accepts: "1h", or "5m" for
+// anything else.
+func cacheTTL(v string) string {
+	if strings.TrimSpace(v) == "1h" {
+		return "1h"
+	}
+	return "5m"
+}
+
+func ptr(s string) *string { return &s }
+
+func envInt(k string, def int) int {
+	n, err := strconv.Atoi(os.Getenv(k))
+	if err != nil {
+		return def
+	}
+	return n
 }
 
 func envBool(k string, def bool) bool {

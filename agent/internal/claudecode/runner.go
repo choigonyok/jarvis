@@ -64,6 +64,23 @@ type Runner struct {
 	// The last reading of mind's situation, reused for a few seconds.
 	nowText string
 	nowAt   time.Time
+	// prefs is the operator's taste as mind last gave it. It is part of the
+	// instructions, so it stays as it was while mind cannot be asked: a turn
+	// without it would be other instructions, and a new session.
+	prefs string
+	// What the session in use has shown of itself (see session): when its
+	// last turn ended, what its requests carry besides the conversation
+	// (instructions and tools, estimated from its first request), and how
+	// big its last request was.
+	lastAt  time.Time
+	base    int
+	context int
+	// shown is the situation last put in front of a message in this session;
+	// showing is this turn's, kept once the turn went through.
+	shown, showing string
+	// hold, when set, says a card this conversation raised is still open:
+	// its decision continues the work, so the session must not change under it.
+	hold    func(now time.Time) bool
 	running bool
 	// queue is what waits behind the running turn, in order: messages the
 	// operator sent meanwhile (shown, and each can be steered into the
@@ -95,6 +112,14 @@ type session struct {
 	// opened under other instructions is not resumed; a new one is opened
 	// with the conversation so far put in front of it.
 	Prompt string `json:"prompt,omitempty"`
+	// Prefs is the taste list those instructions carry, kept so a restart
+	// while mind is down resumes the session instead of dropping the list.
+	Prefs string `json:"prefs,omitempty"`
+	// LastAt, Base and Context are what deciding on a new session reads
+	// (Runner.rotateLocked); kept so a restart does not forget them.
+	LastAt  time.Time `json:"lastAt,omitzero"`
+	Base    int       `json:"base,omitempty"`
+	Context int       `json:"context,omitempty"`
 }
 
 // fingerprint names a system prompt without keeping it.
@@ -115,15 +140,67 @@ func New(cfg config.Config, store *thread.Store, log *slog.Logger) *Runner {
 	}
 	r.sessionID = saved.ID
 	r.sessionPrompt = saved.Prompt
+	r.prefs = saved.Prefs
+	r.lastAt, r.base, r.context = saved.LastAt, saved.Base, saved.Context
 	return r
 }
 
-// remember stores the session id the CLI reported, and the prompt it was
-// opened with, so the next process resumes the same conversation.
-func (r *Runner) remember(id, prompt string) {
-	if err := jsonfile.Save(r.cfg.SessionPath, session{ID: id, Prompt: prompt}); err != nil {
+// persist stores the session id the CLI reported, the prompt it was opened
+// with and what it has shown of itself, so the next process resumes the same
+// conversation and judges it the same way.
+func (r *Runner) persist() {
+	r.mu.Lock()
+	s := session{ID: r.sessionID, Prompt: r.sessionPrompt, Prefs: r.prefs, LastAt: r.lastAt, Base: r.base, Context: r.context}
+	r.mu.Unlock()
+	if r.cfg.SessionPath == "" {
+		return
+	}
+	if err := jsonfile.Save(r.cfg.SessionPath, s); err != nil {
 		r.log.Error("세션 id를 저장하지 못했습니다", "err", err)
 	}
+}
+
+// SetHold names the cards the session must not change under (rotateLocked).
+func (r *Runner) SetHold(fn func(now time.Time) bool) { r.hold = fn }
+
+// rotateLocked drops the session before a typed message when it went quiet
+// (SessionIdle since its last turn) or grew large (SessionMaxTokens), so the
+// message opens a new one handed only the recent conversation (recap). A
+// large session costs on every request - each one reads it all, and a pause
+// past the cache's lifetime writes it all again - while what carries over
+// outside it (mind's facts recalled per message, the situation, the
+// services' tools) does not depend on it. Kept: a session with little
+// history, where a recap saves nothing; and one with a card this
+// conversation raised still open (held), whose decision continues the work
+// in it. Called with r.mu held, before the turn starts and with nothing
+// queued - only typed messages get here, never a card's decision.
+func (r *Runner) rotateLocked(now time.Time, held bool) {
+	if r.sessionID == "" {
+		return
+	}
+	history := r.historyLocked()
+	idle := !r.lastAt.IsZero() && now.Sub(r.lastAt) >= r.cfg.SessionIdle
+	large := r.cfg.SessionMaxTokens > 0 && history >= r.cfg.SessionMaxTokens
+	if !idle && !large || history < r.cfg.SessionMinTokens {
+		return
+	}
+	if held {
+		r.log.Info("이 대화의 카드가 남아 있어 세션을 그대로 이어 갑니다", "history", history)
+		return
+	}
+	reason := "large"
+	if idle {
+		reason = "idle"
+	}
+	r.log.Info("새 세션으로 이어 갑니다", "old", r.sessionID, "reason", reason, "history", history,
+		"idle", now.Sub(r.lastAt).Round(time.Second).String())
+	r.sessionID = ""
+}
+
+// historyLocked is how much conversation the session carries: its last
+// request less what every request sends anyway (instructions and tools).
+func (r *Runner) historyLocked() int {
+	return max(r.context-r.base, 0)
 }
 
 // Send posts the operator's message and launches a turn. It returns once the
@@ -147,7 +224,10 @@ func (r *Runner) SendRef(text string, images []string, ref *thread.Ref) error {
 // running - puts it in the queue, where it waits its turn unless it is
 // steered into the running one. queued says which.
 func (r *Runner) Submit(text string, images []string, ref *thread.Ref) (queued bool, err error) {
-	q := &Queued{ID: queueID("q"), Text: text, Images: images, Ref: ref, At: time.Now()}
+	now := time.Now()
+	q := &Queued{ID: queueID("q"), Text: text, Images: images, Ref: ref, At: now}
+	// Asked before taking the lock: the cards have their own.
+	held := r.hold != nil && r.hold(now)
 	r.mu.Lock()
 	if r.running {
 		r.queue = append(r.queue, q)
@@ -157,6 +237,7 @@ func (r *Runner) Submit(text string, images []string, ref *thread.Ref) (queued b
 	}
 	r.running = true
 	r.yieldLocked()
+	r.rotateLocked(now, held)
 	r.mu.Unlock()
 	go func() { r.loop(r.start(q)) }()
 	return false, nil
@@ -339,27 +420,38 @@ func (r *Runner) turn(prompt string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), r.cfg.TurnTimeout)
 	defer cancel()
 
+	// Read first: the taste list mind gives with the situation is part of
+	// the instructions.
+	situation := r.situation()
+	system := r.systemPrompt()
 	// A session opened under other instructions would keep them: open a new
 	// one instead, handed the conversation so far.
-	want := fingerprint(r.systemPrompt())
+	want := fingerprint(system)
 	r.mu.Lock()
 	fresh := r.sessionID == "" || r.sessionPrompt != want
 	if fresh && r.sessionID != "" {
 		r.log.Info("지시가 바뀌어 새 세션으로 이어 갑니다", "old", r.sessionID)
 		r.sessionID = ""
 	}
+	if fresh {
+		r.shown, r.showing = "", ""
+	}
 	r.opening = want
+	var gap time.Duration
+	if !r.lastAt.IsZero() {
+		gap = time.Since(r.lastAt)
+	}
 	r.mu.Unlock()
 	// What changes from turn to turn - the date, mind's situation - rides on
 	// the message: a resumed session never sees a new system prompt.
-	head := r.now()
+	head := r.now(situation)
 	if fresh {
 		head = r.recap() + head
 	}
 
-	cmd := exec.CommandContext(ctx, r.cfg.ClaudeBin, r.args()...)
+	cmd := exec.CommandContext(ctx, r.cfg.ClaudeBin, r.args(system)...)
 	cmd.Dir = r.cfg.Workspace
-	cmd.Env = r.env()
+	cmd.Env = r.env(r.cfg.CacheTTL)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -386,7 +478,8 @@ func (r *Runner) turn(prompt string) error {
 	r.input = stdin
 	r.mu.Unlock()
 
-	scanErr := r.consume(stdout)
+	var t tally
+	scanErr := r.consume(stdout, &t)
 	r.closeInput()
 	waitErr := cmd.Wait()
 
@@ -395,13 +488,42 @@ func (r *Runner) turn(prompt string) error {
 	}
 	// The stream says why it failed; the exit code only says that it did.
 	// Preferring the exit code here would throw the diagnosis away.
-	if scanErr != nil {
-		return scanErr
+	err = scanErr
+	if err == nil && waitErr != nil {
+		err = fmt.Errorf("claude 종료: %w", waitErr)
 	}
-	if waitErr != nil {
-		return fmt.Errorf("claude 종료: %w", waitErr)
+	r.account(&t, fresh, head+prompt, gap, err == nil)
+	return err
+}
+
+// account notes what the turn's requests showed of the session and logs
+// what the turn used - the numbers the session and cache settings are
+// judged by.
+func (r *Runner) account(t *tally, fresh bool, opening string, gap time.Duration, ok bool) {
+	first, last := t.first(), t.last()
+	r.mu.Lock()
+	if t.requests() > 0 {
+		if fresh {
+			// The first request of a new session is the instructions and the
+			// tools plus its one message.
+			r.base = max(first.context()-estimateTokens(opening), 0)
+		}
+		r.context = last.context()
 	}
-	return nil
+	r.lastAt = time.Now()
+	if ok && r.showing != "" {
+		// What the session saw last; a turn that showed none leaves it.
+		r.shown = r.showing
+	}
+	base, history := r.base, r.historyLocked()
+	r.mu.Unlock()
+	r.persist()
+
+	attrs := append(t.attrs(), "fresh", fresh, "fixed", base, "history", history, "ttl", r.cfg.CacheTTL)
+	if gap > 0 {
+		attrs = append(attrs, "gap", gap.Round(time.Second).String())
+	}
+	r.log.Info("턴 사용량", attrs...)
 }
 
 // closeInput ends the running turn's input: after its result nothing more
@@ -416,7 +538,7 @@ func (r *Runner) closeInput() {
 	}
 }
 
-func (r *Runner) args() []string {
+func (r *Runner) args(system string) []string {
 	args := []string{
 		"-p",
 		"--input-format", "stream-json",
@@ -431,7 +553,7 @@ func (r *Runner) args() []string {
 		"--strict-mcp-config",
 		// The instructions only: a resumed session keeps the ones it was
 		// opened with, so what changes per turn goes in the message (now).
-		"--append-system-prompt", r.systemPrompt(),
+		"--append-system-prompt", system,
 		// Reads stop at the working directories - the workspace and the
 		// uploads (--add-dir). Nothing else in the container is the model's
 		// to read, with a card or without: not the CLI's credentials, not
@@ -443,7 +565,8 @@ func (r *Runner) args() []string {
 		args = append(args, "--add-dir", r.cfg.UploadsDir)
 	}
 	if r.cfg.BuiltinTools != nil {
-		// Only these built-in tools exist for the model (the guest agent).
+		// Only these built-in tools exist for the model: each one is
+		// described in every request (config.BuiltinTools).
 		args = append(args, "--tools", *r.cfg.BuiltinTools)
 	}
 	if tools := r.cfg.AllowedTools; len(tools) > 0 {
@@ -464,27 +587,59 @@ func (r *Runner) args() []string {
 }
 
 // systemPrompt is the instructions a session is opened with - the same on
-// every turn, so a change in them is a change of session (turn).
-func (r *Runner) systemPrompt() string { return r.cfg.SystemPrompt }
+// every turn, so a change in them is a change of session (turn). Besides the
+// configured prompt: how to read what each message carries (now), and the
+// operator's taste, which changes seldom. Values that change from turn to
+// turn never go here.
+func (r *Runner) systemPrompt() string {
+	parts := []string{r.cfg.SystemPrompt, clockRules}
+	if r.mindOn() {
+		parts = append(parts, situationRules)
+		r.mu.Lock()
+		prefs := r.prefs
+		r.mu.Unlock()
+		if prefs != "" {
+			parts = append(parts, prefsRules+"\n"+prefs)
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+// mindOn is whether the operator's situation and taste are read from mind.
+func (r *Runner) mindOn() bool { return r.cfg.MindURL != "" && !r.cfg.Guest }
 
 // now is what the model cannot know from its own context, in front of each
 // turn's message: the date it is reasoning about (every module that takes a
-// date takes an absolute one, so the conversion happens here, in the model)
-// and mind's situation.
-func (r *Runner) now() string {
+// date takes an absolute one, so the conversion happens in the model) and
+// mind's situation. Values only - the rules for them are in the
+// instructions - and a situation the session was already shown is not
+// repeated: all of it stays in the session's history.
+func (r *Runner) now(situation string) string {
 	now := time.Now()
-	today := fmt.Sprintf("%d-%02d-%02d (%s)",
-		now.Year(), int(now.Month()), now.Day(), weekdays[int(now.Weekday())])
-	return fmt.Sprintf(`[현재 시각]
-- 오늘은 %s, 지금은 %s입니다. 타임존은 %s입니다.
-- '내일', '다음 주 화요일' 같은 상대 날짜는 직접 절대 날짜로 계산해서 도구에 넘기세요.`,
-		today, now.Format("15:04"), now.Location()) + r.situation() + "\n[현재 시각 끝]\n\n"
+	var b strings.Builder
+	fmt.Fprintf(&b, "[현재 시각] %d-%02d-%02d (%s) %s · %s\n",
+		now.Year(), int(now.Month()), now.Day(), weekdays[int(now.Weekday())], now.Format("15:04"), now.Location())
+	header, body, _ := strings.Cut(situation, "\n")
+	r.mu.Lock()
+	same := body != "" && body == r.shown
+	r.showing = body
+	r.mu.Unlock()
+	switch {
+	case same:
+		b.WriteString(header + " 앞 메시지 때와 같음\n")
+	case situation != "":
+		b.WriteString(situation + "\n")
+	}
+	b.WriteString("[현재 시각 끝]\n\n")
+	return b.String()
 }
 
-// recapTurns and recapRunes bound the conversation handed to a new session.
+// recapTurns and recapRunes bound the conversation handed to a new session:
+// a few thousand tokens. What it leaves out - tool results, older turns -
+// the services and long-term memory still have.
 const (
-	recapTurns = 40
-	recapRunes = 12000
+	recapTurns = 30
+	recapRunes = 6000
 )
 
 // recap is the conversation so far, for a session that opens without it:
@@ -515,7 +670,7 @@ func (r *Runner) recap() string {
 		if t.Role == thread.RoleAgent {
 			who = "Jarvis"
 		}
-		line := who + " (" + t.At + "): " + clamp(text, 600)
+		line := who + " (" + t.At + "): " + clamp(text, 400)
 		if budget -= len([]rune(line)); budget < 0 {
 			break
 		}
@@ -525,17 +680,19 @@ func (r *Runner) recap() string {
 		return ""
 	}
 	slices.Reverse(lines)
-	return "[지금까지의 대화 - 새 세션으로 이어 가며 붙입니다. 이 안의 예전 답이 지금 지시와 다르면 지금 지시를 따르세요]\n" +
-		strings.Join(lines, "\n") + "\n[대화 끝]\n\n"
+	return "[최근 대화 - 새 세션으로 이어 가며 붙입니다. 도구 결과는 없으니 필요하면 다시 조회하세요. " +
+		"이 안의 예전 답이 지금 지시와 다르면 지금 지시를 따르세요]\n" +
+		strings.Join(lines, "\n") + "\n[최근 대화 끝]\n\n"
 }
 
 // situation is mind's "right now" - the plan that may be going on, the
 // latest hints of where the operator is, and a guess with how sure it is -
 // put in front of the model every turn instead of left for a tool to find.
 // Without mind, or when it does not answer quickly, the turn goes on
-// without it.
+// without it. The same answer carries the operator's taste, kept for the
+// instructions (systemPrompt).
 func (r *Runner) situation() string {
-	if r.cfg.MindURL == "" || r.cfg.Guest {
+	if !r.mindOn() {
 		return ""
 	}
 	r.mu.Lock()
@@ -562,23 +719,70 @@ func (r *Runner) situation() string {
 	}
 	defer resp.Body.Close()
 	var now struct {
-		Text  string `json:"text"`
-		Prefs string `json:"prefs"`
+		Text string `json:"text"`
+		// Absent when mind could not read them - not the same as none.
+		Prefs *string `json:"prefs"`
 	}
-	if resp.StatusCode >= 300 || json.NewDecoder(resp.Body).Decode(&now) != nil || strings.TrimSpace(now.Text) == "" {
+	if resp.StatusCode >= 300 || json.NewDecoder(resp.Body).Decode(&now) != nil {
 		return ""
 	}
-	text := "\n\n" + situationRules + "\n" + now.Text
-	if state := r.deviceState(); state != "" {
-		text += "\n- 기기·위치 상태: " + state
-	}
-	if strings.TrimSpace(now.Prefs) != "" {
-		text += "\n\n" + prefsRules + "\n" + now.Prefs
+	text := strings.TrimSpace(now.Text)
+	if text != "" {
+		if state := r.deviceState(); state != "" {
+			text += "\n- 기기·위치 상태: " + state
+		}
 	}
 	r.mu.Lock()
+	if now.Prefs != nil {
+		r.prefs = capPrefs(*now.Prefs, prefsMaxRunes)
+	}
 	r.nowText, r.nowAt = text, time.Now()
 	r.mu.Unlock()
 	return text
+}
+
+// prefsMaxRunes bounds the taste list in the instructions: every request
+// carries it.
+const prefsMaxRunes = 1500
+
+// capPrefs orders mind's taste lines - confirmed first, then the surer
+// estimates, mind's order otherwise - and keeps whole lines up to max runes.
+func capPrefs(text string, max int) string {
+	var lines []string
+	for _, l := range strings.Split(text, "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			lines = append(lines, l)
+		}
+	}
+	slices.SortStableFunc(lines, func(a, b string) int { return prefRank(b) - prefRank(a) })
+	var out []string
+	used := 0
+	for i, l := range lines {
+		n := len([]rune(l)) + 1
+		if used+n > max {
+			out = append(out, fmt.Sprintf("- (덜 확실한 취향 %d개는 생략)", len(lines)-i))
+			break
+		}
+		out = append(out, l)
+		used += n
+	}
+	return strings.Join(out, "\n")
+}
+
+// prefRank is how sure one of mind's taste lines is: above any estimate when
+// confirmed ("(확정 · …)"), the estimate's percentage ("(추정 70% · …)").
+func prefRank(line string) int {
+	if strings.Contains(line, "(확정") {
+		return 1000
+	}
+	if _, rest, ok := strings.Cut(line, "(추정 "); ok {
+		if pct, _, ok := strings.Cut(rest, "%"); ok {
+			if n, err := strconv.Atoi(strings.TrimSpace(pct)); err == nil {
+				return n
+			}
+		}
+	}
+	return 0
 }
 
 // deviceState is context-svc's one line (in which region, driving, in a
@@ -617,7 +821,11 @@ const prefsRules = `알고 있는 취향 (회고 카드와 운영자의 말에�
 // situationFresh is how long one reading of the situation is reused.
 const situationFresh = 30 * time.Second
 
-const situationRules = `지금 상황 (mind 세계 모델이 일정·결제·사진으로 규칙에 따라 계산한 것. 도구로 찾지 말고 이것을 쓰세요)
+const clockRules = `시각
+- 메시지마다 앞에 [현재 시각]이 붙습니다. '내일', '다음 주 화요일' 같은 상대 날짜는 그 날짜로 직접 계산해서 절대 날짜로 도구에 넘기세요.`
+
+const situationRules = `지금 상황
+- 메시지 앞의 [지금 상황 · 시각] 블록은 mind 세계 모델이 일정·결제·사진으로 규칙에 따라 계산한 것입니다. 도구로 찾지 말고 그것을 쓰세요. "앞 메시지 때와 같음"이면 가장 최근에 받은 블록이 그대로라는 뜻입니다.
 - 위치·동행이 답에 필요한데 추정의 신뢰도가 0.5 미만이거나 추정이 없으면, 추측하지 말고 먼저 짧게 물어보세요(예: "지금 지수네 집이세요?").
 - 이 추정을 답에 썼으면 답의 첫 줄에 가정을 한 줄로 밝히세요. 예: "지수네 집 기준으로 골랐어요(15:40 사진 위치)."
 - 운영자가 정정하면("벌써 집에 왔어") 그 말을 그대로 믿고 답을 고치세요. mind 가 대화를 읽어 다음 추정에 반영합니다.
@@ -666,7 +874,10 @@ func (r *Runner) internal(url string) map[string]any {
 	return entry
 }
 
-func (r *Runner) env() []string {
+// env is the CLI's environment. ttl is the prompt cache lifetime for the
+// run's own requests, "5m" or "1h" (config.CacheTTL); left to the CLI, a
+// subscription gets an hour, whose writes cost 2x the input instead of 1.25x.
+func (r *Runner) env(ttl string) []string {
 	// Narrow on purpose - nothing here can redirect billing - but a shell
 	// still needs enough of an environment to behave like one. Leaving SHELL
 	// unset makes the CLI's Bash tool fail, and leaving LANG unset mangles
@@ -695,6 +906,10 @@ func (r *Runner) env() []string {
 	if u := os.Getenv("USER"); u != "" {
 		env = append(env, "USER="+u, "LOGNAME="+u)
 	}
+	if ttl != "" {
+		// Read by the CLI since 2.1.292 at least (agent/Dockerfile pins it).
+		env = append(env, "CLAUDE_CODE_PROMPT_CACHE_TTL="+ttl)
+	}
 	return env
 }
 
@@ -714,6 +929,11 @@ type event struct {
 	// RateLimitInfo rides on "rate_limit_event": how much of the
 	// subscription's 5-hour and weekly windows is used (see package usage).
 	RateLimitInfo json.RawMessage `json:"rate_limit_info"`
+	// The result line's totals for the whole run (see tally).
+	Usage        json.RawMessage `json:"usage"`
+	ModelUsage   json.RawMessage `json:"modelUsage"`
+	TotalCostUSD float64         `json:"total_cost_usd"`
+	NumTurns     int             `json:"num_turns"`
 }
 
 type assistantMessage struct {
@@ -723,9 +943,10 @@ type assistantMessage struct {
 	} `json:"content"`
 }
 
-func (r *Runner) consume(stdout interface{ Read([]byte) (int, error) }) error {
+func (r *Runner) consume(stdout interface{ Read([]byte) (int, error) }, t *tally) error {
 	var failed error
 	err := scan(stdout, func(ev event) {
+		t.observe(ev)
 		if failed != nil {
 			return
 		}
@@ -769,10 +990,9 @@ func (r *Runner) handle(ev event) error {
 			changed := r.sessionID != ev.SessionID || r.sessionPrompt != r.opening
 			r.sessionID = ev.SessionID
 			r.sessionPrompt = r.opening
-			prompt := r.opening
 			r.mu.Unlock()
 			if changed {
-				r.remember(ev.SessionID, prompt)
+				r.persist()
 			}
 		}
 	case "assistant":

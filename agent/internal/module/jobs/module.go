@@ -72,10 +72,13 @@ type Module struct {
 	kick chan struct{}
 	// current is the run in flight; the run tools answer only for it.
 	current running
+	// cut is what each job's last run did before the conversation cut it
+	// short, for the next run to pick up from. Only the scheduler touches it.
+	cut map[int64][]string
 }
 
 func New(store *Store, up *uploads.Store, proposals *proposal.Store, notify Notifier, log *slog.Logger) *Module {
-	m := &Module{store: store, uploads: up, proposals: proposals, notify: notify, log: log, kick: make(chan struct{}, 1)}
+	m := &Module{store: store, uploads: up, proposals: proposals, notify: notify, log: log, kick: make(chan struct{}, 1), cut: map[int64][]string{}}
 	proposals.OnDecide(m.decided)
 	return m
 }

@@ -32,6 +32,10 @@ const (
 	KindForget = "vault.forget_login"
 )
 
+// Tools is what the conversation may call without a card: list_logins names
+// what is saved and never hands a secret out.
+var Tools = []string{"mcp__" + ServerName + "__list_logins"}
+
 type Module struct {
 	client *Client
 	log    *slog.Logger

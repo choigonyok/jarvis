@@ -71,11 +71,30 @@ services:
       # anyone east of Greenwich once it passes midnight locally.
       TZ: ${TZ:-Asia/Seoul}
       JARVIS_MODEL: ${JARVIS_MODEL:-}
+      # 백그라운드 모델. 비우면 에이전트 기본값: 주문 조회·작업 sonnet, 잘 안 끝난 작업의 재시도 opus.
+      JARVIS_ENRICH_MODEL: ${JARVIS_ENRICH_MODEL:-}
+      JARVIS_JOBS_MODEL: ${JARVIS_JOBS_MODEL:-}
+      JARVIS_JOBS_RETRY_MODEL: ${JARVIS_JOBS_RETRY_MODEL:-}
       # Tools that skip the approval card. Read-only only - calendar writes
       # are deliberately absent, so every one of them lands on a card.
-      # 카드 없이 쓰는 도구: 읽기만. 파일은 워크스페이스·첨부 사진 안에서만 읽고(에이전트가 경로 규칙을
-      # 붙인다), 맨 Read·Glob·Grep, 셸·편집, 작업 만들기·지시는 여기 적어도 에이전트가 뺀다.
-      JARVIS_ALLOWED_TOOLS: ${JARVIS_ALLOWED_TOOLS:-TodoWrite,mcp__calendar__list_events,mcp__assets__get_portfolio,mcp__assets__get_allocation,mcp__assets__get_history,mcp__spending__get_spending,mcp__memory__search_memory,mcp__context__get_context,mcp__jobs__list_jobs}
+      # 카드 없이 쓰는 도구: 읽기만. 비우면 에이전트 기본값(config.go)을 쓰고, 어느 쪽이든 켜진 모듈의
+      # 조회 도구(자산·가계부·기억·위치·메시지·로그인 목록)는 에이전트가 더한다 - 새 조회 도구 때문에 여기나 .env 를
+      # 고칠 일이 없다. 파일은 워크스페이스·첨부 사진 안에서만 읽고(에이전트가 경로 규칙을 붙인다),
+      # 맨 Read·Glob·Grep, 셸·편집, 작업 만들기·지시는 여기 적어도 에이전트가 뺀다.
+      JARVIS_ALLOWED_TOOLS: ${JARVIS_ALLOWED_TOOLS:-}
+      # 대화에 실리는 CLI 내장 도구. 비우면 Read,Glob,Grep,TodoWrite,WebSearch,WebFetch,ToolSearch
+      # (도구 설명은 요청마다 실린다). "default" 면 CLI 의 전부.
+      JARVIS_BUILTIN_TOOLS: ${JARVIS_BUILTIN_TOOLS:-}
+      # 대화의 프롬프트 캐시 수명: 5m(기본) 또는 1h. 1시간짜리는 쓰기가 입력의 2배(5분은 1.25배)라,
+      # 다음 질문이 대개 5분~1시간 뒤에 올 때만 이득이다. 백그라운드는 늘 5m.
+      JARVIS_CACHE_TTL: ${JARVIS_CACHE_TTL:-5m}
+      # 새 세션으로 넘어가는 기준(비우면 에이전트 기본값): 마지막 턴 뒤 쉰 시간(5m 캐시면 30m,
+      # 1h 캐시면 1h), 기록 크기 상한 50000, 그보다 작으면 넘어가지 않는 하한 20000.
+      JARVIS_SESSION_IDLE: ${JARVIS_SESSION_IDLE:-}
+      JARVIS_SESSION_MAX_TOKENS: ${JARVIS_SESSION_MAX_TOKENS:-}
+      JARVIS_SESSION_MIN_TOKENS: ${JARVIS_SESSION_MIN_TOKENS:-}
+      # 대화가 끝나고 이만큼 조용해야 백그라운드 작업을 시작한다(비우면 5m).
+      JARVIS_BACKGROUND_QUIET: ${JARVIS_BACKGROUND_QUIET:-}
       # MCP servers with no module behind them, as name=url. The browser runs
       # on the host - the container has no display and no Chrome - so this
       # dials back out through host.docker.internal.
@@ -172,6 +191,7 @@ services:
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       TZ: ${TZ:-Asia/Seoul}
       JARVIS_MODEL: ${JARVIS_MODEL:-}
+      JARVIS_CACHE_TTL: ${JARVIS_CACHE_TTL:-5m}
       JARVIS_ROLE: guest
       # 운영자의 agent(8080)와 다른 포트. 둘이 한 터널을 쓰는데, 같은 포트일 때
       # Workers VPC 의 연결이 다른 쪽에 붙는 일이 있었다(2026-10-08).
