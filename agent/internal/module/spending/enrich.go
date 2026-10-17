@@ -163,9 +163,8 @@ func toolText(s string, isErr bool) *mcp.CallToolResult {
 // --- the loop --------------------------------------------------------------
 
 type Background interface {
-	// Quiet is when a lookup may start: nobody is using the assistant, and
-	// nobody did a moment ago.
-	Quiet() bool
+	// Idle is when a lookup may start: nobody is using the assistant.
+	Idle() bool
 	Background(ctx context.Context, t claudecode.Task) (string, error)
 }
 
@@ -196,7 +195,7 @@ func (m *Module) RunEnricher(ctx context.Context, bg Background, cfg EnrichConfi
 			return
 		case <-tick.C:
 		}
-		if time.Since(last) < yieldWait(cfg.Cooldown, yields) || !bg.Quiet() {
+		if time.Since(last) < yieldWait(cfg.Cooldown, yields) || !bg.Idle() {
 			continue
 		}
 		pending, err := m.store.Pending(ctx)

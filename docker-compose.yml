@@ -95,8 +95,6 @@ services:
       JARVIS_SESSION_IDLE: ${JARVIS_SESSION_IDLE:-}
       JARVIS_SESSION_MAX_TOKENS: ${JARVIS_SESSION_MAX_TOKENS:-}
       JARVIS_SESSION_MIN_TOKENS: ${JARVIS_SESSION_MIN_TOKENS:-}
-      # 대화가 끝나고 이만큼 조용해야 백그라운드 작업을 시작한다(비우면 5m).
-      JARVIS_BACKGROUND_QUIET: ${JARVIS_BACKGROUND_QUIET:-}
       # MCP servers with no module behind them, as name=url. The browser runs
       # on the host - the container has no display and no Chrome - so this
       # dials back out through host.docker.internal.

@@ -35,9 +35,8 @@ func runTools() []string {
 }
 
 type Background interface {
-	// Quiet is when a run may start: nobody is using the assistant, and
-	// nobody did a moment ago.
-	Quiet() bool
+	// Idle is when a run may start: nobody is using the assistant.
+	Idle() bool
 	Background(ctx context.Context, t claudecode.Task) (string, error)
 }
 
@@ -79,7 +78,7 @@ func (m *Module) Run(ctx context.Context, bg Background, cfg SchedulerConfig) {
 		case <-m.kick:
 		}
 		m.purge(ctx)
-		if time.Since(last) < cfg.Cooldown || !bg.Quiet() {
+		if time.Since(last) < cfg.Cooldown || !bg.Idle() {
 			continue
 		}
 		j, err := m.store.Due(ctx)

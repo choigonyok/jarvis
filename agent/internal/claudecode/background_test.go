@@ -102,20 +102,16 @@ func TestBackgroundArgs(t *testing.T) {
 	}
 }
 
-// A background task waits for the conversation to go quiet, not only idle.
-func TestQuietAfterTheConversation(t *testing.T) {
+// A background task may start the moment the conversation is not running:
+// a job asked for a second ago does not sit on "예약됨" (2026-10-18).
+func TestIdleRightAfterTheConversation(t *testing.T) {
 	r := runner(t, "claude")
-	r.cfg.BackgroundQuiet = 5 * time.Minute
-	r.lastAt = time.Now().Add(-time.Minute)
-	if r.Quiet() || !r.Idle() {
-		t.Fatal("대화 직후에는 기다립니다")
-	}
-	r.lastAt = time.Now().Add(-6 * time.Minute)
-	if !r.Quiet() {
-		t.Fatal("조용해졌으면 시작합니다")
+	r.lastAt = time.Now()
+	if !r.Idle() {
+		t.Fatal("대화 턴이 끝났으면 바로 시작합니다")
 	}
 	r.running = true
-	if r.Quiet() {
+	if r.Idle() {
 		t.Fatal("대화 중에는 시작하지 않습니다")
 	}
 }

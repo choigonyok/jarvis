@@ -109,8 +109,8 @@ func TestCacheAndSession(t *testing.T) {
 		}
 	}
 	cfg, _ := Load()
-	if cfg.SessionMaxTokens != 50000 || cfg.SessionMinTokens != 20000 || cfg.BackgroundQuiet != 5*time.Minute {
-		t.Fatalf("기본값: %d %d %v", cfg.SessionMaxTokens, cfg.SessionMinTokens, cfg.BackgroundQuiet)
+	if cfg.SessionMaxTokens != 50000 || cfg.SessionMinTokens != 20000 {
+		t.Fatalf("기본값: %d %d", cfg.SessionMaxTokens, cfg.SessionMinTokens)
 	}
 	if cfg.EnrichModel != "sonnet" || cfg.JobsModel != "sonnet" || cfg.JobsRetryModel != "opus" || cfg.Model != "" {
 		t.Fatalf("모델: %q %q %q %q", cfg.EnrichModel, cfg.JobsModel, cfg.JobsRetryModel, cfg.Model)

@@ -51,7 +51,7 @@ type fakeBG struct {
 	err    error
 }
 
-func (b *fakeBG) Quiet() bool { return true }
+func (b *fakeBG) Idle() bool { return true }
 func (b *fakeBG) Background(_ context.Context, t claudecode.Task) (string, error) {
 	b.calls++
 	b.prompt, b.task = t.Prompt, t

@@ -153,10 +153,6 @@ type Config struct {
 	SessionIdle      time.Duration
 	SessionMaxTokens int
 	SessionMinTokens int
-	// BackgroundQuiet is how long after a conversation turn a background task
-	// may start: the next message usually comes within minutes, and a task cut
-	// short by it threw its tokens away.
-	BackgroundQuiet time.Duration
 	// Models for the background tasks (empty: Model). A job tried again after
 	// a run that ended badly gets JobsRetryModel.
 	EnrichModel    string
@@ -229,7 +225,6 @@ func Load() (Config, error) {
 		CacheTTL:         cacheTTL(os.Getenv("JARVIS_CACHE_TTL")),
 		SessionMaxTokens: envInt("JARVIS_SESSION_MAX_TOKENS", 50000),
 		SessionMinTokens: envInt("JARVIS_SESSION_MIN_TOKENS", 20000),
-		BackgroundQuiet:  envDuration("JARVIS_BACKGROUND_QUIET", 5*time.Minute),
 		EnrichModel:      env("JARVIS_ENRICH_MODEL", "sonnet"),
 		JobsModel:        env("JARVIS_JOBS_MODEL", "sonnet"),
 		JobsRetryModel:   env("JARVIS_JOBS_RETRY_MODEL", "opus"),

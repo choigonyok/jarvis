@@ -39,7 +39,7 @@ type bgFake struct {
 	err   error
 }
 
-func (b *bgFake) Quiet() bool { return true }
+func (b *bgFake) Idle() bool { return true }
 func (b *bgFake) Background(_ context.Context, t claudecode.Task) (string, error) {
 	b.mu.Lock()
 	b.tasks = append(b.tasks, t)

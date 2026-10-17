@@ -61,20 +61,15 @@ func (r *Runner) InBackground() bool {
 	return r.bgCancel != nil
 }
 
-// Idle is true when no conversation turn is running or queued.
+// Idle is true when no conversation turn is running or queued: when a
+// background task may start. It does not wait for the conversation to stay
+// quiet a while first - a job the operator just asked for waited five
+// minutes on "예약됨" for that (2026-10-18), and a run the next message cuts
+// short is picked up by the next one (yield backoff).
 func (r *Runner) Idle() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return !r.running && r.bgCancel == nil
-}
-
-// Quiet is Idle, and no conversation turn ended in the last BackgroundQuiet:
-// when a background task may start. The next message usually comes within
-// minutes of the last answer, and a task it cuts short threw its tokens away.
-func (r *Runner) Quiet() bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return !r.running && r.bgCancel == nil && time.Since(r.lastAt) >= r.cfg.BackgroundQuiet
 }
 
 // Background runs a task if the assistant is idle, and gives way the moment
