@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -290,6 +291,33 @@ func (s *Store) Instruct(ctx context.Context, id int64, text string) error {
 	}
 	s.event(ctx, id, nil, "instruction", "지시: "+text)
 	return nil
+}
+
+// AddSites lets a job open more sites: the operator approved them on a
+// card the job raised (the browser holds a running job to its sites).
+// Hosts are kept lower-cased and once each.
+func (s *Store) AddSites(ctx context.Context, id int64, sites []string) (Job, error) {
+	clean := []string{}
+	for _, site := range sites {
+		if h := rules.Host(site); h != "" {
+			clean = append(clean, h)
+		}
+	}
+	if len(clean) == 0 {
+		return Job{}, errors.New("사이트 주소가 없습니다.")
+	}
+	tag, err := s.pool.Exec(ctx, `
+		update jobs set sites = (select coalesce(array_agg(distinct x order by x), '{}') from unnest(sites || $2::text[]) as x),
+		       updated_at = now()
+		 where id = $1`, id, clean)
+	if err != nil {
+		return Job{}, err
+	}
+	if tag.RowsAffected() == 0 {
+		return Job{}, ErrNotFound
+	}
+	s.event(ctx, id, nil, "sites", "사이트 추가: "+strings.Join(clean, ", "))
+	return s.Get(ctx, id)
 }
 
 // Control is pause, resume, run (now) or cancel.

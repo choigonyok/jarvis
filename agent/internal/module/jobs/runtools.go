@@ -68,6 +68,11 @@ type AskToolInput struct {
 	Images   []string     `json:"images,omitempty" jsonschema:"카드에 보일 사진 이름"`
 }
 
+type SitesToolInput struct {
+	Sites  []string `json:"sites" jsonschema:"더 열어야 할 사이트 호스트. 예: ['ticket.melon.com']"`
+	Reason string   `json:"reason" jsonschema:"왜 필요한지 한 줄. 운영자가 카드에서 본다."`
+}
+
 type LoginToolInput struct {
 	Site   string `json:"site" jsonschema:"로그인이 필요한 사이트 호스트. 예: web.joongna.com"`
 	Reason string `json:"reason,omitempty" jsonschema:"무엇이 막았는지 한 줄. 예: '네이버 보안문자'"`
@@ -199,6 +204,37 @@ func (m *Module) runServer(run int64) *mcp.Server {
 			return fail(err), nil, nil
 		}
 		return ok("카드를 올렸습니다. 운영자가 결정하면 다음 실행에서 답을 받습니다. 지금 실행을 마치세요."), nil, nil
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "request_sites",
+		Description: "작업의 '쓰는 사이트'에 없는 사이트를 열어야 할 때 부른다(브라우저가 그 밖으로의 이동을 막는다). 운영자에게 사이트 추가 카드를 올린다. " +
+			"부른 뒤에는 바로 실행을 마친다 - 승인되면 다음 실행에서 그 사이트를 열 수 있다.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in SitesToolInput) (*mcp.CallToolResult, any, error) {
+		j, bad := guard()
+		if bad != nil {
+			return bad, nil, nil
+		}
+		req := SitesInput{JobID: j.ID, JobTitle: j.Title, Reason: in.Reason}
+		for _, s := range in.Sites {
+			if h := host(s); h != "" && !contains(req.Sites, h) && !contains(j.Sites, h) {
+				req.Sites = append(req.Sites, h)
+			}
+		}
+		if len(req.Sites) == 0 {
+			return toolText("더할 사이트가 없습니다(이미 쓰는 사이트이거나 비어 있음).", true), nil, nil
+		}
+		raw, _ := json.Marshal(req)
+		p, _ := m.proposals.Open(proposal.Proposal{
+			Origin: proposal.OriginNotice,
+			Action: action.Action{Kind: KindSites, Input: raw},
+			Card:   sitesCard(req),
+		})
+		if err := m.store.Wait(ctx, run, p.ID, "사이트 추가: "+strings.Join(req.Sites, ", ")); err != nil {
+			m.proposals.Abandon(p.ID, "작업에 걸지 못했습니다: "+err.Error())
+			return fail(err), nil, nil
+		}
+		return ok("사이트 추가 카드를 올렸습니다. 운영자가 결정하면 다음 실행에서 답을 받습니다. 지금 실행을 마치세요."), nil, nil
 	})
 
 	mcp.AddTool(server, &mcp.Tool{

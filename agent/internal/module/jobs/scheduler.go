@@ -21,11 +21,11 @@ func runTools() []string {
 		"browser_scroll", "browser_click", "browser_type", "browser_go_back", "browser_list_tabs",
 		"browser_switch_tab", "browser_close_tab", "browser_upload_files", "browser_fill_login",
 	}
-	out := make([]string, 0, len(tools)+9)
+	out := make([]string, 0, len(tools)+10)
 	for _, t := range tools {
 		out = append(out, "mcp__"+BrowserServer+"__"+t)
 	}
-	for _, t := range []string{"progress", "view_photos", "ask", "request_login", "schedule_next", "finish", "report", "remember", "record"} {
+	for _, t := range []string{"progress", "view_photos", "ask", "request_login", "request_sites", "schedule_next", "finish", "report", "remember", "record"} {
 		out = append(out, "mcp__"+RunServerName+"__"+t)
 	}
 	return out
@@ -209,7 +209,7 @@ const runSystem = `당신은 Jarvis의 백그라운드 작업 실행입니다. �
 
 이번 실행은 작업의 한 토막입니다. 작업 상태(메모, 지켜보는 대상, 최근 기록, 새 지시와 카드 답)를 보고 지금 할 일을 하고, 반드시 다음 셋 중 하나로 끝냅니다.
 - schedule_next: 나중에 다시 확인할 것이 있을 때. 운영자가 주기를 말하지 않았어도 목표를 보고 스스로 정합니다. 예) 판매 글 반응 확인은 1~3시간, 가격 하락 감시는 하루 1~2번, 배송 추적은 몇 시간, 내일 오픈하는 예약은 그 시각 직후. 바뀔 일이 없는 밤 시간은 피하세요.
-- ask 또는 request_login: 운영자의 결정이나 로그인이 필요할 때. 부른 뒤 바로 마칩니다.
+- ask, request_login 또는 request_sites: 운영자의 결정, 로그인, 사이트 추가가 필요할 때. 부른 뒤 바로 마칩니다.
 - finish: 목표를 이뤘거나 더 할 수 있는 일이 없을 때. 결과를 운영자가 알 수 있게 씁니다.
 셋 중 아무것도 부르지 않고 끝나면 실패로 칩니다.
 
@@ -219,7 +219,7 @@ const runSystem = `당신은 Jarvis의 백그라운드 작업 실행입니다. �
 - 결제는 하지 않습니다. 돈이 드는 단계(결제, 유료 옵션, 충전)가 나오면 멈추고 ask 로 알립니다. 결제 요청은 네트워크에서도 막힙니다.
 - 같은 일을 두 번 하지 마세요. 밖으로 나가는 행동 직전에 remember 로 "하는 중", 직후에 결과(글 주소 등)를 남깁니다. 메모에 "하는 중"이 남아 있으면 먼저 실제로 됐는지 확인합니다.
 - 작업과 관계없는 페이지, 다른 사람의 글·채팅에는 손대지 마세요.
-- 열 수 있는 사이트는 작업의 "쓰는 사이트"(같은 도메인의 다른 주소 포함)와 네이버 로그인 화면뿐이고, 그 밖은 브라우저가 막습니다. 다른 사이트가 꼭 필요하면 ask 로 운영자에게 알리고 마칩니다.
+- 열 수 있는 사이트는 작업의 "쓰는 사이트"(같은 도메인의 다른 주소 포함)와 네이버 로그인 화면뿐이고, 그 밖은 브라우저가 막습니다(차단 화면). 다른 사이트가 꼭 필요하면 request_sites(사이트들, 이유)로 추가를 요청하고 마칩니다. 막힌 사이트를 다시 열어 보지 마세요.
 - 직접 연 탭은 끝날 때 닫으세요.
 
 로그인

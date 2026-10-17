@@ -3,6 +3,8 @@ package jobs
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -106,5 +108,39 @@ func TestPrompt(t *testing.T) {
 		if !strings.Contains(p, want) {
 			t.Errorf("prompt lacks %q:\n%s", want, p)
 		}
+	}
+}
+
+// Approving a job's request for more sites adds them to the job and tells
+// the job; turning it down only tells it.
+func TestSitesCardAddsOnlyWhenApproved(t *testing.T) {
+	var added []string
+	var answers []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		switch r.URL.Path {
+		case "/jobs/7/sites":
+			for _, s := range body["add"].([]any) {
+				added = append(added, s.(string))
+			}
+		case "/jobs/7/answer":
+			answers = append(answers, body["text"].(string))
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	props := proposal.NewStore(bus.New())
+	m := New(NewStore(srv.URL, ""), nil, props, nil, nil)
+
+	in, _ := json.Marshal(SitesInput{JobID: 7, JobTitle: "콘서트 일정", Sites: []string{"ticket.melon.com"}, Reason: "멜론티켓 공지"})
+	p, _ := props.Open(proposal.Proposal{Origin: proposal.OriginNotice, Action: action.Action{Kind: KindSites, Input: in}, Card: sitesCard(SitesInput{JobTitle: "콘서트 일정", Sites: []string{"ticket.melon.com"}})})
+	m.decided(*p, proposal.Reject)
+	if len(added) != 0 || len(answers) != 1 || !strings.HasPrefix(answers[0], "[반려]") {
+		t.Fatalf("반려는 알리기만: %v %v", added, answers)
+	}
+	m.decided(*p, proposal.Approve)
+	if len(added) != 1 || added[0] != "ticket.melon.com" || !strings.HasPrefix(answers[1], "[승인]") {
+		t.Fatalf("승인하면 더하고 알림: %v %v", added, answers)
 	}
 }

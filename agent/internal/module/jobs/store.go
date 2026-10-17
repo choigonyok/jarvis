@@ -240,6 +240,11 @@ func (s *Store) Record(ctx context.Context, runID int64, r RecordInput) error {
 	return s.call(ctx, http.MethodPost, fmt.Sprintf("/runs/%d/record", runID), r, nil)
 }
 
+// AddSites lets a job open more sites (approved on its card).
+func (s *Store) AddSites(ctx context.Context, id int64, sites []string) error {
+	return s.call(ctx, http.MethodPost, fmt.Sprintf("/jobs/%d/sites", id), map[string]any{"add": sites}, nil)
+}
+
 func (s *Store) SetLogin(ctx context.Context, site string, required bool, note string) error {
 	return s.call(ctx, http.MethodPost, "/sites/login", map[string]any{"site": site, "required": required, "note": note}, nil)
 }

@@ -46,6 +46,10 @@ const (
 	KindAsk = "job.ask"
 	// KindLogin asks the operator to log in to a site in the 화면 tab.
 	KindLogin = "job.login"
+	// KindSites is a job asking to open sites it was not given: a running
+	// job is held to its own (the browser's guard), so a site it finds it
+	// needs is the operator's to allow.
+	KindSites = "job.sites"
 )
 
 // QualifiedToolName is how Claude Code refers to one of the chat's tools.
@@ -109,6 +113,26 @@ type AskInput struct {
 type LoginInput struct {
 	Site   string `json:"site"`
 	Reason string `json:"reason,omitempty"`
+}
+
+// SitesInput is a job's request for more sites.
+type SitesInput struct {
+	JobID    int64    `json:"jobId"`
+	JobTitle string   `json:"jobTitle"`
+	Sites    []string `json:"sites"`
+	Reason   string   `json:"reason,omitempty"`
+}
+
+func sitesCard(in SitesInput) action.Card {
+	body := "작업: " + in.JobTitle + "\n더할 사이트: " + strings.Join(in.Sites, ", ")
+	if in.Reason != "" {
+		body += "\n이유: " + in.Reason
+	}
+	return action.Card{
+		Title:       "작업이 사이트를 더 열려고 해요",
+		Body:        body,
+		Consequence: "승인하면 이 작업이 이 사이트들(같은 도메인의 다른 주소 포함)도 열 수 있습니다. 반려하면 지금 사이트만 씁니다.",
+	}
 }
 
 func askCard(in AskInput) action.Card {
@@ -213,6 +237,29 @@ func (m *Module) decided(p proposal.Proposal, d proposal.Decision) {
 			m.proposals.Settle(p.ID, proposal.Executed, "작업에 전했습니다. 작업 탭에서 이어지는 걸 볼 수 있습니다.")
 		} else {
 			m.proposals.Settle(p.ID, proposal.Rejected, "작업에 반려로 전했습니다.")
+		}
+		m.wake()
+	case KindSites:
+		var in SitesInput
+		if json.Unmarshal(p.Action.Input, &in) != nil {
+			return
+		}
+		text := "[반려] 사이트 추가: " + strings.Join(in.Sites, ", ")
+		if d == proposal.Approve {
+			if err := m.store.AddSites(ctx, in.JobID, in.Sites); err != nil {
+				m.proposals.Settle(p.ID, proposal.Failed, "사이트를 더하지 못했습니다: "+err.Error())
+				return
+			}
+			text = "[승인] 사이트 추가: " + strings.Join(in.Sites, ", ") + " - 이제 열 수 있습니다."
+		}
+		if err := m.store.Answer(ctx, in.JobID, p.ID, text); err != nil {
+			m.proposals.Settle(p.ID, proposal.Failed, "작업에 전하지 못했습니다: "+err.Error())
+			return
+		}
+		if d == proposal.Approve {
+			m.proposals.Settle(p.ID, proposal.Executed, "사이트를 더했습니다. 작업이 이어서 합니다.")
+		} else {
+			m.proposals.Settle(p.ID, proposal.Rejected, "지금 사이트만 쓰도록 작업에 전했습니다.")
 		}
 		m.wake()
 	case KindLogin:

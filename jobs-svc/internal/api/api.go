@@ -40,6 +40,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /jobs", s.auth(s.create))
 	mux.HandleFunc("GET /jobs/{id}", s.auth(s.detail))
 	mux.HandleFunc("POST /jobs/{id}/instruct", s.auth(s.instruct))
+	mux.HandleFunc("POST /jobs/{id}/sites", s.auth(s.addSites))
 	mux.HandleFunc("POST /jobs/{id}/{action}", s.auth(s.control))
 	// 에이전트: 스케줄러
 	mux.HandleFunc("GET /due", s.auth(s.due))
@@ -156,6 +157,33 @@ func (s *Server) instruct(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) addSites(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		Add []string `json:"add"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if len(in.Add) == 0 || len(in.Add) > 20 {
+		writeErr(w, http.StatusBadRequest, "더할 사이트를 1~20개 주세요.")
+		return
+	}
+	j, err := s.store.AddSites(r.Context(), id, in.Add)
+	if errors.Is(err, store.ErrNotFound) {
+		writeErr(w, http.StatusNotFound, "그런 작업이 없습니다.")
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, j)
 }
 
 func (s *Server) control(w http.ResponseWriter, r *http.Request) {
