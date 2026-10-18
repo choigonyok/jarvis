@@ -51,7 +51,9 @@
   웹은 컨테이너가 없다(Cloudflare 에서만 돈다).
 - 목소리 TTS(`tts/`)는 compose 밖, 맥미니 호스트의 LaunchAgent 다: `scripts/tts install`. 게이트웨이는
   VPC 서비스 `jarvis-tts`(호스트 `host.docker.internal`, 포트 8106, 같은 터널)로 닿는다 - 터널 컨테이너가
-  Docker 호스트 주소로 푸는 유일한 경로. 콘솔 변수 `TTS_URL`.
+  Docker 호스트 주소로 푸는 유일한 경로. 콘솔 변수 `TTS_URL`. 서버는 `~/jarvis/.env` 의
+  `JARVIS_API_TOKEN`(운영자 목소리)과 `JARVIS_GUEST_API_TOKEN`(손님 목소리)을 읽는다 - 손님 토큰이
+  없으면 손님 목소리만 꺼진다.
 
 **`jarvis.choigonyok.com` 앞에는 Cloudflare Access 가 있다.** Zero Trust 앱 `jarvis`
 (팀 `choigonyok.cloudflareaccess.com`, Free 플랜), 정책 `only me` 는 운영자 이메일 하나만 허용하고

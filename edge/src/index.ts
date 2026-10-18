@@ -9,8 +9,9 @@
  *   entrypoint "Internal"). Every service, for a caller holding one of the
  *   console's tokens: the operator's (JARVIS_EDGE_TOKEN) opens everything,
  *   the guest's (JARVIS_EDGE_GUEST_TOKEN) only the guest's own agent, the
- *   workout log and the guest's notifications - so a hole in the console's
- *   proxy still cannot carry a guest to the operator's money or messages.
+ *   workout log, the guest's notifications and the guest's own voice - so a
+ *   hole in the console's proxy still cannot carry a guest to the operator's
+ *   money, messages or voice.
  * - The public hostname, jarvis-be.choigonyok.com. Only what has to be
  *   reached from outside the console: the phone's doors - POST
  *   /context/owntracks and /context/signals (OwnTracks, iOS Shortcuts) and
@@ -79,14 +80,15 @@ const SERVICES: Record<string, { binding: keyof Env; origin: string }> = {
   context: { binding: "CONTEXT", origin: "http://context:8103" },
   // The phone's notifications, read and applied (a collector on a Mac hands them in).
   phonenote: { binding: "PHONENOTE", origin: "http://phonenote:8104" },
-  // The operator's cloned voice, a process on the Mac mini itself (tts/server.py):
-  // the tunnel reaches it at the Docker host's address. Operator only - it is their voice.
+  // Each person's cloned voice, a process on the Mac mini itself (tts/server.py):
+  // the tunnel reaches it at the Docker host's address. The token it is handed
+  // decides whose recording a request touches (see below).
   tts: { binding: "TTS", origin: "http://host.docker.internal:8106" },
   vnc: { binding: "BROWSER", origin: "http://browser:6080" },
 };
 
-/** What the guest's token opens: their own agent, the workout log, their notifications. */
-const GUEST_SERVICES = new Set(["agent-guest", "workout", "notify"]);
+/** What the guest's token opens: their own agent, the workout log, their notifications, their own voice. */
+const GUEST_SERVICES = new Set(["agent-guest", "workout", "notify", "tts"]);
 
 /** Which agent must have answered, by route. */
 const AGENT_ROLE: Record<string, string> = { agent: "owner", "agent-guest": "guest" };
@@ -200,9 +202,13 @@ async function gateway(request: Request, env: Env, internal: boolean): Promise<R
   }
   // The services want their own token; the caller's never goes past here.
   // The guest's agent has a token of its own, which opens only the guest's
-  // side of the services it calls.
+  // side of the services it calls. The voice service keeps one recording per
+  // token, so the guest's requests go on with the guest's token and nothing
+  // else: without it there is no guest voice, never the operator's.
   if (bearer) {
-    const token = name === "agent-guest" && env.JARVIS_GUEST_API_TOKEN ? env.JARVIS_GUEST_API_TOKEN : env.JARVIS_API_TOKEN;
+    if (guest && name === "tts" && !env.JARVIS_GUEST_API_TOKEN) return json(503, "손님 목소리가 설정되지 않았습니다.");
+    const own = (name === "agent-guest" || (guest && name === "tts")) && env.JARVIS_GUEST_API_TOKEN;
+    const token = own ? env.JARVIS_GUEST_API_TOKEN! : env.JARVIS_API_TOKEN;
     headers.set("authorization", `Bearer ${token}`);
   }
   if (name === "immich") {
