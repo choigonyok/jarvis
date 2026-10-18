@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/choigonyok/jarvis/spending-svc/internal/enrich"
 	"github.com/choigonyok/jarvis/spending-svc/internal/parse"
 )
 
@@ -110,5 +111,94 @@ func TestCancelPairsWithItsOwnCharge(t *testing.T) {
 	re := l.add(parse.KindCancel, "올리브영", "2222", 12000, t0.Add(time.Hour))
 	if got := l.cancelledBy(old); got != re {
 		t.Fatalf("같은 가맹점이면 카드가 달라도 짝지어야 합니다: %d, want %d", got, re)
+	}
+}
+
+// What the rules could not place is what gets asked about: a charge left in
+// 기타 by a rule, and a product put in 기타. Not one a person set - to 기타
+// too, which is how "do not ask again" is kept - nor a cancelled or excluded
+// charge, nor one before the window. Answered, it drops off the list.
+func TestUnclearIsWhatTheRulesLeftInOther(t *testing.T) {
+	s := testStore(t)
+	l := &ledger{t: t, s: s}
+	ctx := context.Background()
+	t0 := time.Now().Add(-2 * time.Hour)
+
+	unknown := l.add(parse.KindApproval, "어느극장(주)", "1234", 30000, t0)
+	l.add(parse.KindApproval, "스타벅스 강남점", "1234", 5000, t0.Add(time.Minute))
+	decided := l.add(parse.KindApproval, "어느가게", "1234", 7000, t0.Add(2*time.Minute))
+	other := "기타"
+	if _, err := s.Update(ctx, decided, Patch{Category: &other}); err != nil {
+		t.Fatal(err)
+	}
+	gone := l.add(parse.KindApproval, "이름모를곳", "1234", 9000, t0.Add(3*time.Minute))
+	yes := true
+	if _, err := s.Update(ctx, gone, Patch{Excluded: &yes}); err != nil {
+		t.Fatal(err)
+	}
+	l.add(parse.KindApproval, "취소된가게", "1234", 4000, t0.Add(4*time.Minute))
+	l.add(parse.KindCancel, "취소된가게", "1234", 4000, t0.Add(5*time.Minute))
+	l.add(parse.KindApproval, "옛날가게", "1234", 3000, t0.Add(-48*time.Hour))
+	order := l.add(parse.KindApproval, "쿠팡", "1234", 20000, t0.Add(6*time.Minute))
+	if err := s.SaveItems(ctx, order, []enrich.Item{
+		{Name: "알 수 없는 물건", Quantity: 1, ListedKrw: 12000, Category: "기타"},
+		{Name: "커피 원두", Quantity: 1, ListedKrw: 8000, Category: "카페·간식"},
+	}, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.Unclear(ctx, t0.Add(-time.Hour), 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Kind != "item" || got[0].Name != "알 수 없는 물건" || got[0].TxID != order || got[0].Merchant != "쿠팡" ||
+		got[1].Kind != "tx" || got[1].ID != unknown || got[1].AmountKrw != 30000 {
+		t.Fatalf("물을 것: %+v", got)
+	}
+
+	culture := "문화·여가"
+	if _, err := s.Update(ctx, unknown, Patch{Category: &culture, Remember: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetItemCategory(ctx, got[0].ID, "기타"); err != nil {
+		t.Fatal(err)
+	}
+	if again, err := s.Unclear(ctx, t0.Add(-time.Hour), 20); err != nil || len(again) != 0 {
+		t.Fatalf("답한 것은 다시 묻지 않아야 합니다: %+v %v", again, err)
+	}
+}
+
+// Signed in again, the book picks up what stopped at the login page - and
+// only that: a lookup that found nothing is not run again for it.
+func TestResumeIsOnlyWhatTheLoginStopped(t *testing.T) {
+	s := testStore(t)
+	l := &ledger{t: t, s: s}
+	ctx := context.Background()
+	t0 := time.Now().Add(-time.Hour)
+	stopped := l.add(parse.KindApproval, "쿠팡", "1234", 34350, t0)
+	missing := l.add(parse.KindApproval, "쿠팡", "1234", 8900, t0.Add(time.Minute))
+	// Not found three times first: a login wall stops every lookup still
+	// waiting on the site, and this one has to be done by then.
+	for i := 0; i < 3; i++ {
+		if err := s.Report(ctx, missing, "not_found", "주문목록에 없음"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Report(ctx, stopped, "login_required", "로그인 화면"); err != nil {
+		t.Fatal(err)
+	}
+	status := func(id int64) string {
+		var st string
+		if err := s.pool.QueryRow(ctx, `select enrich_status from card_transactions where id=$1`, id).Scan(&st); err != nil {
+			t.Fatal(err)
+		}
+		return st
+	}
+	if status(stopped) != "login_required" || status(missing) != "not_found" {
+		t.Fatalf("준비: %s %s", status(stopped), status(missing))
+	}
+	n, err := s.Resume(ctx, "coupang")
+	if err != nil || n != 1 || status(stopped) != "pending" || status(missing) != "not_found" {
+		t.Fatalf("로그인으로 멈춘 것만: n=%d err=%v %s %s", n, err, status(stopped), status(missing))
 	}
 }

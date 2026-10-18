@@ -41,6 +41,10 @@
 앞으로도"를 켜면 `merchant_rules` 에 남아 그 가맹점의 지난·다음 내역에 적용됩니다.
 하나씩 손으로 고친 내역(`category_source = manual`)은 일괄 변경이 덮어쓰지 않습니다.
 
+규칙도 가르친 가맹점도 못 맞혀 '기타'로 남은 결제(`category_source = rule`)와 '기타'인 상품은
+`GET /unclear` 에 나오고, 에이전트가 카드로 운영자에게 묻습니다(`agent/internal/module/spending/ask.go`).
+답은 위의 `PATCH` 로 들어옵니다. 반려하면 기타를 손으로 정한 것(`manual`)으로 남겨 다시 묻지 않습니다.
+
 ## 묶음 가맹점: 무엇을 샀나
 
 카드 알림에는 "쿠팡 8,900원"까지만 있습니다. 쿠팡 결제(쿠팡이츠 제외)는 들어올 때
@@ -77,6 +81,7 @@
 | POST | `/transactions/{id}/enrich-report` | `not_found` · `login_required` · `failed` |
 | POST | `/enrich/retry` | `{source}` 로그인 후 재개, `{id}` 한 건 다시 조회 |
 | PATCH | `/items/{id}` | 상품 분류 고치기 |
+| GET | `/unclear?days=45` | 분류를 물을 것: 규칙이 기타로 둔 결제·기타인 상품(최근 순, 취소·제외 빼고)과 고를 분류 목록 |
 
 ## 검증한 것
 

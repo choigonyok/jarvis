@@ -233,6 +233,57 @@ func TestLoggedOutIsTheLoginPage(t *testing.T) {
 	}
 }
 
+// Signed in is a landing on the site's own page - not the login page, and not
+// a check that could not tell (an error, another tab at a login screen).
+func TestLoggedInIsTheSitesOwnPage(t *testing.T) {
+	s := Site{ID: "coupang", LoginHost: "login.coupang.com"}
+	for _, c := range []struct {
+		r    Result
+		want bool
+	}{
+		{Result{URL: "https://mc.coupang.com/ssr/desktop/order/list"}, true},
+		{Result{URL: "https://login.coupang.com/login/login.pang?rtnUrl=x"}, false},
+		{Result{URL: "https://mc.coupang.com/x", Busy: true}, false},
+		{Result{Error: "탭을 열지 못함"}, false},
+		{Result{}, false},
+	} {
+		if got := LoggedIn(c.r, s); got != c.want {
+			t.Errorf("%+v: %v", c.r, got)
+		}
+	}
+}
+
+// A check that lands on the site's own page says so, and what waited on the
+// login (the book's lookups, 2026-10-18) can go on without a person.
+func TestACheckThatFindsTheSiteSignedInSaysSo(t *testing.T) {
+	f := &fakeBrowser{tabs: []tab{{ID: "t-agent", URL: "https://agent.example/working"}}}
+	srv := httptest.NewServer(http.HandlerFunc(f.handle))
+	defer srv.Close()
+	signed := make(chan string, 1)
+	c := &Checker{
+		Client: New(srv.URL, "tok"),
+		Sites:  []Site{{ID: "shop", Orders: "https://shop.example/orders", LoginHost: "login.shop.example"}},
+		Every:  time.Hour,
+		Idle:   func() bool { return true },
+		SignedIn: func(_ context.Context, s Site) {
+			signed <- s.ID
+		},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go c.Run(ctx)
+	c.init()
+	c.kick <- struct{}{}
+	select {
+	case id := <-signed:
+		if id != "shop" {
+			t.Fatalf("사이트: %q", id)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("로그인된 사이트를 알리지 않았습니다")
+	}
+}
+
 func TestReloginIsNotTriedAgainSoon(t *testing.T) {
 	c := &Checker{ReloginEvery: time.Hour}
 	c.init()

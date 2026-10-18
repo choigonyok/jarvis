@@ -1,9 +1,11 @@
 // Package spending lets the model read the household book: a month's total,
 // where it went, how it is pacing against the budget, and what repeats.
 //
-// Read-only for the same reason as assets: no Actuator, so nothing for the
-// gate to approve and no tool that writes. Recategorising and budgets are
-// done on the 가계부 screen, where the person doing it sees what changes.
+// Read-only to the model for the same reason as assets: no tool that writes.
+// Recategorising and budgets are done on the 가계부 screen, where the person
+// doing it sees what changes - and on the cards this module raises itself to
+// ask what a charge the rules could not place was for (ask.go), where the
+// only write is the operator's answer.
 package spending
 
 import (
@@ -12,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"net/http"
 	"net/url"
@@ -21,6 +24,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/choigonyok/jarvis/agent/internal/core/module"
+	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
 )
 
 var _ module.ContextSource = (*Module)(nil)
@@ -153,7 +157,12 @@ func (s *Store) Month(ctx context.Context, month string) (Book, error) {
 
 // --- module ---------------------------------------------------------------
 
-type Module struct{ store *Store }
+type Module struct {
+	store *Store
+	// proposals and log are set by Ask: where the category cards go.
+	proposals *proposal.Store
+	log       *slog.Logger
+}
 
 func New(store *Store) *Module { return &Module{store: store} }
 

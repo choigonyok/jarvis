@@ -51,11 +51,24 @@ type Checker struct {
 	CanRelogin func(ctx context.Context, s Site) bool
 	// StillOut hears a site that is logged out after a relogin was tried.
 	StillOut func(s Site, why string)
+	// SignedIn hears a site found signed in: what waited on its login (the
+	// book's order lookups) can go on without anyone pressing 다시 시도.
+	SignedIn func(ctx context.Context, s Site)
 
 	mu      sync.Mutex
 	results map[string]Result
 	kick    chan struct{}
 	tried   map[string]time.Time
+}
+
+// LoggedIn is whether a landing is the site's own page: it opened, nothing
+// else was on a login screen, and it did not end at the login page.
+func LoggedIn(r Result, s Site) bool {
+	if r.Error != "" || r.Busy || r.URL == "" || s.LoginHost == "" {
+		return false
+	}
+	u, err := url.Parse(r.URL)
+	return err == nil && u.Hostname() != "" && !strings.EqualFold(u.Hostname(), s.LoginHost)
 }
 
 // LoggedOut is whether a landing is the site's login page.
@@ -117,6 +130,9 @@ func (c *Checker) Run(ctx context.Context) {
 					}
 					c.StillOut(s, why)
 				}
+			}
+			if LoggedIn(r, s) && c.SignedIn != nil {
+				c.SignedIn(ctx, s)
 			}
 		}
 		forced = false

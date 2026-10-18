@@ -266,6 +266,54 @@ func (s *Store) ReclassifyRules(ctx context.Context) (int, error) {
 	return n, nil
 }
 
+// Unclear is a charge, or a product of a split order, that the rules could
+// not place and left in 기타 - one to ask the person about. Kind is "tx" (ID
+// is the charge) or "item" (ID is the product, TxID its charge).
+type Unclear struct {
+	Kind       string    `json:"kind"`
+	ID         int64     `json:"id"`
+	TxID       int64     `json:"txId"`
+	Merchant   string    `json:"merchant"`
+	Name       string    `json:"name,omitempty"`
+	AmountKrw  int64     `json:"amountKrw"`
+	ApprovedAt time.Time `json:"approvedAt"`
+	Issuer     string    `json:"issuer"`
+	CardTail   string    `json:"cardTail"`
+}
+
+// Unclear lists what to ask about since a time, newest first: charges the
+// keywords and the taught merchants both missed (기타 from a rule), and
+// products of a split order put in 기타. What a person already set - to 기타
+// too, which is how "ask me no more" is kept - is left out, and so are
+// cancelled and excluded charges.
+func (s *Store) Unclear(ctx context.Context, since time.Time, limit int) ([]Unclear, error) {
+	rows, err := s.pool.Query(ctx, `
+		select 'tx', t.id, t.id, t.merchant, '', t.amount_krw, t.approved_at, t.issuer, t.card_tail
+		  from card_transactions t
+		 where t.category = $3 and t.category_source = 'rule' and t.kind = 'approval'
+		   and t.cancelled_by is null and not t.excluded and t.approved_at >= $1
+		union all
+		select 'item', i.id, t.id, t.merchant, i.name, i.amount_krw, t.approved_at, t.issuer, t.card_tail
+		  from card_transaction_items i join card_transactions t on t.id = i.tx_id
+		 where i.category = $3 and i.category_source <> 'manual'
+		   and t.cancelled_by is null and not t.excluded and t.approved_at >= $1
+		 order by 7 desc, 2 desc
+		 limit $2`, since, limit, category.Other)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Unclear{}
+	for rows.Next() {
+		var u Unclear
+		if err := rows.Scan(&u.Kind, &u.ID, &u.TxID, &u.Merchant, &u.Name, &u.AmountKrw, &u.ApprovedAt, &u.Issuer, &u.CardTail); err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
 // ── 읽기 ──────────────────────────────────────────────────────────────────
 
 const txColumns = `
@@ -686,6 +734,22 @@ func (s *Store) Retry(ctx context.Context, source string, id int64) (int, error)
 			 where enrich_source=$1 and enrich_status in ('login_required', 'not_found')
 			   and approved_at > now() - interval '30 days'`, source)
 	}
+	if err != nil {
+		return 0, err
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+// Resume puts back in the queue a site's lookups that stopped at its login
+// page: the agent calls it once the browser is signed in there again, so the
+// book does not wait for someone to press 다시 시도. Only those - a lookup
+// that found nothing is not tried again just because the login came back.
+func (s *Store) Resume(ctx context.Context, source string) (int, error) {
+	tag, err := s.pool.Exec(ctx, `
+		update card_transactions set enrich_status='pending', enrich_attempts=0, enrich_next_at=now(),
+		       enrich_note='', updated_at=now()
+		 where enrich_source=$1 and enrich_status='login_required'
+		   and approved_at > now() - interval '30 days'`, source)
 	if err != nil {
 		return 0, err
 	}

@@ -6,6 +6,11 @@
 
 다른 사이트의 화면이면 보관함이 내주지 않는다(가짜 로그인 화면에 넣는 통로가 되지 않게).
 탭 안의 iframe 칸은 같은 사이트의 것일 때만 채운다.
+
+넣은 뒤 그 폼의 '자동 로그인'·'로그인 상태 유지' 칸을 켠다. 이 브라우저는 쓰고 나서 10분쯤
+지나면 꺼졌다 다시 뜨고, 쿠팡은 자동 로그인 없이 들어오면 두 시간쯤 가는 세션만 준다 - 켜지
+않은 로그인은 그날 안에 풀려, 가계부 주문 조회가 "로그인이 풀렸다"로 멈췄다(2026-10-18).
+켜고 들어오면 로그인 쿠키가 1년짜리다.
 """
 
 import json
@@ -56,6 +61,26 @@ FIELDS_JS = r"""
   const user = inputs.find(i => textLike(i) && named(i)) || null;
   return user ? [user, null] : null;
 })()
+"""
+
+
+# 로그인 칸(this)과 같은 폼에서 '로그인을 유지하는' 체크 칸을 찾아 켠다. 켰거나 이미 켜져 있으면
+# true, 그런 칸이 없으면 false. 레이블 글자로 알아본다: 쿠팡 '자동 로그인', 네이버 '로그인 상태 유지'.
+REMEMBER_FN = r"""
+function() {
+  const pat = /자동\s*로그인|로그인\s*(상태\s*)?유지|remember\s*me|keep\s*me\s*(signed|logged)\s*in|stay\s*signed\s*in/i;
+  const scope = this.form || this.closest('section, form, main') || document;
+  for (const box of scope.querySelectorAll('input[type=checkbox]')) {
+    const said = [box.getAttribute('aria-label') || '', box.name || '', box.id || ''];
+    for (const l of box.labels || []) said.push(l.innerText || '');
+    if (box.closest('label')) said.push(box.closest('label').innerText || '');
+    if (box.parentElement) said.push(box.parentElement.innerText || '');
+    if (!said.some(t => pat.test(t))) continue;
+    if (!box.checked) box.click();
+    return box.checked;
+  }
+  return false;
+}
 """
 
 
@@ -157,8 +182,19 @@ async def fill() -> str:
         if pw:
             await _type(s, pw, got["password"])
         got.clear()
+        kept = await _remember(s, pw or user)
+    keep = " 자동 로그인을 켰습니다." if kept else ""
     if pw and user:
-        return f"{name} 아이디({hint})와 비밀번호를 넣었습니다. 로그인 버튼을 누르세요."
+        return f"{name} 아이디({hint})와 비밀번호를 넣었습니다.{keep} 로그인 버튼을 누르세요."
     if pw:
-        return f"{name} 비밀번호를 넣었습니다(아이디 칸은 없었습니다). 로그인 버튼을 누르세요."
+        return f"{name} 비밀번호를 넣었습니다(아이디 칸은 없었습니다).{keep} 로그인 버튼을 누르세요."
     return f"{name} 아이디({hint})를 넣었습니다. 다음 단계에서 비밀번호 칸이 나오면 이 도구를 다시 부르세요."
+
+
+async def _remember(s: _Session, field: str) -> bool:
+    """그 폼의 자동 로그인 칸을 켠다. 켜지 못해도 로그인은 이어 간다 - 오래 가지 않을 뿐이다."""
+    try:
+        res = await s.call("Runtime.callFunctionOn", {"objectId": field, "functionDeclaration": REMEMBER_FN, "returnByValue": True})
+    except RuntimeError:
+        return False
+    return res.get("result", {}).get("value") is True

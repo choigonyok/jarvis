@@ -328,3 +328,14 @@ func clampText(s string, n int) string {
 	}
 	return string(r[:n]) + "…"
 }
+
+// Resume puts back in the queue a site's lookups that stopped at its login
+// page; the browser check calls it when it finds the site signed in again.
+// It says how many went back.
+func (m *Module) Resume(ctx context.Context, source string) (int, error) {
+	var out struct {
+		Queued int `json:"queued"`
+	}
+	err := m.store.call(ctx, http.MethodPost, "/enrich/resume", map[string]string{"source": source}, &out)
+	return out.Queued, err
+}

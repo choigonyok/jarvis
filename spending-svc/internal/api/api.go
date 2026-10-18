@@ -48,7 +48,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /transactions/{id}/items", s.auth(s.saveItems))
 	mux.HandleFunc("POST /transactions/{id}/enrich-report", s.auth(s.enrichReport))
 	mux.HandleFunc("POST /enrich/retry", s.auth(s.enrichRetry))
+	mux.HandleFunc("POST /enrich/resume", s.auth(s.enrichResume))
 	mux.HandleFunc("PATCH /items/{id}", s.auth(s.patchItem))
+	mux.HandleFunc("GET /unclear", s.auth(s.unclear))
 	return mux
 }
 
@@ -444,6 +446,26 @@ func (s *Server) enrichRetry(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]int{"queued": n})
 }
 
+// enrichResume is the agent saying a site is signed in again: what stopped
+// at its login page goes back in the queue.
+func (s *Server) enrichResume(w http.ResponseWriter, r *http.Request) {
+	var b struct {
+		Source string `json:"source"`
+	}
+	if !readJSON(w, r, &b) {
+		return
+	}
+	if b.Source != enrich.Coupang && b.Source != enrich.NaverPay {
+		writeErr(w, http.StatusBadRequest, "source 가 필요합니다.")
+		return
+	}
+	n, err := s.store.Resume(r.Context(), b.Source)
+	if s.storeErr(w, err, "조회를 다시 잇지 못했습니다.") {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"queued": n})
+}
+
 func (s *Server) patchItem(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -463,6 +485,28 @@ func (s *Server) patchItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// unclear is what to ask the person about (the agent raises a card for each):
+// charges and products the rules left in 기타 over the last days, and the
+// categories there are to choose from.
+func (s *Server) unclear(w http.ResponseWriter, r *http.Request) {
+	days, _ := strconv.Atoi(r.URL.Query().Get("days"))
+	if days <= 0 || days > 180 {
+		days = 45
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+	got, err := s.store.Unclear(r.Context(), time.Now().AddDate(0, 0, -days), limit)
+	if s.storeErr(w, err, "분류를 물을 내역을 읽지 못했습니다.") {
+		return
+	}
+	for i := range got {
+		got[i].ApprovedAt = got[i].ApprovedAt.In(time.Local)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"entries": got, "categories": category.All})
 }
 
 func (s *Server) storeErr(w http.ResponseWriter, err error, msg string) bool {
