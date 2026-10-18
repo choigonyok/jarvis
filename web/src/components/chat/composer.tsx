@@ -17,6 +17,28 @@ export type Quoting = { label: string; text: string };
 const round =
   "tap flex size-12 shrink-0 items-center justify-center rounded-full outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50";
 
+/**
+ * What was typed and not sent, kept on this device. The chat page unmounts
+ * when another tab is opened, and the field's state went with it - a message
+ * half written was gone on coming back. Storage that throws (private mode,
+ * blocked) just forgets.
+ */
+const draft = {
+  get(key: string): string {
+    try {
+      return localStorage.getItem(key) ?? "";
+    } catch {
+      return "";
+    }
+  },
+  set(key: string, text: string) {
+    try {
+      if (text.trim()) localStorage.setItem(key, text);
+      else localStorage.removeItem(key);
+    } catch {}
+  },
+};
+
 export function Composer({
   onSend,
   onVoice,
@@ -27,6 +49,7 @@ export function Composer({
   inputRef,
   queued,
   busy = false,
+  draftKey,
 }: {
   /** Resolves false when the message did not go out, so what was typed comes back. */
   onSend: (text: string, images: string[]) => Promise<boolean> | void;
@@ -43,8 +66,25 @@ export function Composer({
   queued?: ReactNode;
   /** Jarvis is working: what is sent now waits its turn, and the field says so. */
   busy?: boolean;
+  /** Where what is typed but not sent is kept, so leaving the tab does not lose it. */
+  draftKey?: string;
 }) {
   const [value, setValue] = useState("");
+  // Text only: a photo's preview is an object URL that does not outlive the page.
+  const type = (text: string) => {
+    setValue(text);
+    if (draftKey) draft.set(draftKey, text);
+  };
+
+  // Brought back after mount, not in useState's initializer: the server renders
+  // an empty field, and the first client render has to match it.
+  useEffect(() => {
+    if (!draftKey) return;
+    const kept = draft.get(draftKey);
+    // Once, from storage the server cannot see; the rule cannot tell that apart.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (kept) setValue((cur) => cur || kept);
+  }, [draftKey]);
   const [photos, setPhotos] = useState<Attachment[]>([]);
   const ownRef = useRef<HTMLTextAreaElement>(null);
   const areaRef = inputRef ?? ownRef;
@@ -103,12 +143,12 @@ export function Composer({
     if (!canSend) return;
     const text = value.trim();
     const sent = photos;
-    setValue("");
+    type("");
     setPhotos([]);
     areaRef.current?.focus();
     const ok = await onSend(text, sent.filter((p) => p.name).map((p) => p.name!));
     if (ok === false) {
-      setValue(text);
+      type(text);
       setPhotos(sent);
       return;
     }
@@ -208,7 +248,7 @@ export function Composer({
           ref={areaRef}
           rows={1}
           value={value}
-          onChange={(e) => setValue(e.target.value)}
+          onChange={(e) => type(e.target.value)}
           onFocus={() => onFocusChange?.(true)}
           onBlur={() => onFocusChange?.(false)}
           onKeyDown={(e) => {

@@ -659,6 +659,7 @@ export function Thread() {
               onCancelQuote={() => setQuoting(null)}
               inputRef={inputRef}
               busy={thinking}
+              draftKey={`jarvis:composer-draft:${role}`}
               queued={
                 <QueuedMessages queue={queue} onSteer={steer} onDrop={drop} onRestore={(text, images) => void send(text, images)} />
               }
