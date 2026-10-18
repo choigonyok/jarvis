@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, Check, Mic, Play, RotateCcw, Square } from "lucide-react";
 import { Caption, DOT, IconButton, PrimaryButton, QuietButton, Spectrum, type Tone } from "@/components/chat/voice-parts";
-import { audioContext, unlockSpeech, type VoiceInfo } from "@/lib/use-speech";
+import { unlockSpeech, type VoiceInfo } from "@/lib/use-speech";
 import { concatSamples, encodeWav, toBase64 } from "@/lib/wav";
 import { cn } from "@/lib/utils";
 
@@ -183,7 +183,7 @@ export function VoiceSetup({
   const [take, setTake] = useState<Take | null>(null);
   const [playing, setPlaying] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  const preview = useRef<AudioBufferSourceNode | null>(null);
+  const preview = useRef<HTMLAudioElement | null>(null);
 
   const finishTake = useCallback(() => {
     const t = recorder.stop();
@@ -201,10 +201,11 @@ export function VoiceSetup({
   }, [finishTake]);
 
   const stopPreview = useCallback(() => {
-    try {
-      preview.current?.stop();
-    } catch {
-      // Not playing.
+    const el = preview.current;
+    if (el) {
+      el.onended = null;
+      el.pause();
+      if (el.src.startsWith("blob:")) URL.revokeObjectURL(el.src);
     }
     preview.current = null;
     setPlaying(false);
@@ -219,28 +220,24 @@ export function VoiceSetup({
     if (await recorder.start()) setStep("recording");
   }
 
+  // Heard back as a media element, the way the answers play: inside this
+  // tap it may play, and it is not silenced by the phone's ring switch.
   function listen() {
-    const ctx = audioContext();
-    if (!ctx || !take) return;
+    if (!take) return;
     if (playing) {
       stopPreview();
       return;
     }
     unlockSpeech();
-    const buffer = ctx.createBuffer(1, take.samples.length, take.rate);
-    buffer.getChannelData(0).set(take.samples);
-    const source = ctx.createBufferSource();
-    source.buffer = buffer;
-    source.connect(ctx.destination);
-    source.onended = () => {
-      if (preview.current === source) {
-        preview.current = null;
-        setPlaying(false);
-      }
+    const url = URL.createObjectURL(new Blob([encodeWav(take.samples, take.rate)], { type: "audio/wav" }));
+    const el = new Audio(url);
+    el.setAttribute("playsinline", "");
+    el.onended = () => {
+      if (preview.current === el) stopPreview();
     };
-    preview.current = source;
+    preview.current = el;
     setPlaying(true);
-    source.start();
+    void el.play().catch(() => stopPreview());
   }
 
   async function save() {

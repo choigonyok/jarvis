@@ -205,7 +205,15 @@ export function VoiceStage({
       : speaking && preparing
         ? { text: "답을 소리로 만드는 중", tone: "thinking" }
       : speaking
-        ? { text: speaker === "server" ? "Jarvis가 내 목소리로 말하는 중" : "Jarvis가 말하는 중", tone: "speaking" }
+        ? {
+            text:
+              speaker === "server"
+                ? "Jarvis가 내 목소리로 말하는 중"
+                : ownVoice
+                  ? "Jarvis가 말하는 중 (브라우저 음성으로 대신)"
+                  : "Jarvis가 말하는 중",
+            tone: "speaking",
+          }
         : thinking
           ? { text: "생각하는 중", tone: "thinking" }
           : listening
