@@ -3,7 +3,6 @@ package jobs
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"strconv"
@@ -15,26 +14,42 @@ import (
 
 	"github.com/choigonyok/jarvis/agent/internal/core/action"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
+	"github.com/choigonyok/jarvis/agent/internal/thread"
 )
 
 // RunServerName is the MCP server a background run is given, mounted at
 // /mcp/job-run/<run id>. Never in the chat's MCP config.
 const RunServerName = "job"
 
-// running is the run in flight, if any. The run tools answer only for it: a
-// URL with any other run id gets nothing.
+// running is every run in flight, by run id. The run tools answer only for
+// one of them: a URL with any other run id gets nothing. At most one run
+// holds the shared browser; the others are jobs with no sites, running
+// beside the conversation.
 type running struct {
-	mu  sync.Mutex
-	run int64
-	job Job
+	mu   sync.Mutex
+	runs map[int64]*runEntry
+}
+
+type runEntry struct {
+	job     Job
+	browser bool
 	// parked is the card this run left the job waiting on, until it is
 	// decided or the run puts the job back on a clock.
 	parked string
 }
 
-func (r *running) set(run int64, j Job) {
+func (r *running) add(run int64, j Job, browser bool) {
 	r.mu.Lock()
-	r.run, r.job, r.parked = run, j, ""
+	if r.runs == nil {
+		r.runs = map[int64]*runEntry{}
+	}
+	r.runs[run] = &runEntry{job: j, browser: browser}
+	r.mu.Unlock()
+}
+
+func (r *running) remove(run int64) {
+	r.mu.Lock()
+	delete(r.runs, run)
 	r.mu.Unlock()
 }
 
@@ -42,8 +57,8 @@ func (r *running) set(run int64, j Job) {
 func (r *running) park(run int64, card string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.run == run && run != 0 {
-		r.parked = card
+	if e := r.runs[run]; e != nil {
+		e.parked = card
 	}
 }
 
@@ -51,33 +66,42 @@ func (r *running) park(run int64, card string) {
 func (r *running) unpark(card string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.parked == card {
-		r.parked = ""
+	for _, e := range r.runs {
+		if e.parked == card {
+			e.parked = ""
+		}
 	}
 }
 
 func (r *running) parkedOn(run int64) string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.run != run {
-		return ""
+	if e := r.runs[run]; e != nil {
+		return e.parked
 	}
-	return r.parked
+	return ""
 }
-
-func (r *running) clear() { r.set(0, Job{}) }
 
 func (r *running) get(run int64) (Job, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.job, run != 0 && r.run == run
+	if e := r.runs[run]; e != nil {
+		return e.job, true
+	}
+	return Job{}, false
 }
 
-// now is the run in flight, whichever it is.
+// now is the run that holds the browser, if one does: the one a payment the
+// browser's guard stopped belongs to.
 func (r *running) now() (int64, Job) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.run, r.job
+	for run, e := range r.runs {
+		if e.browser {
+			return run, e.job
+		}
+	}
+	return 0, Job{}
 }
 
 // report keeps the run's job at its latest one-line status: a payment card
@@ -85,8 +109,8 @@ func (r *running) now() (int64, Job) {
 func (r *running) report(run int64, summary string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.run == run && run != 0 {
-		r.job.Summary = summary
+	if e := r.runs[run]; e != nil {
+		e.job.Summary = summary
 	}
 }
 
@@ -516,7 +540,7 @@ func (m *Module) runServer(run int64) *mcp.Server {
 				m.pay.forget(j.ID)
 			}
 			if in.Notify == nil || *in.Notify {
-				m.say(j, "끝냈습니다. "+in.Summary)
+				m.say(j, run, "끝냈습니다. "+in.Summary)
 			}
 			return ok("작업을 끝냈습니다. 실행을 마치세요."), nil, nil
 		})
@@ -532,7 +556,7 @@ func (m *Module) runServer(run int64) *mcp.Server {
 			}
 			m.current.report(run, in.Summary)
 			if in.Notify {
-				m.say(j, in.Summary)
+				m.say(j, run, in.Summary)
 			}
 			return ok("갱신했습니다."), nil, nil
 		})
@@ -569,12 +593,13 @@ func (m *Module) runServer(run int64) *mcp.Server {
 	return server
 }
 
-// say puts a job's news in the conversation.
-func (m *Module) say(j Job, text string) {
+// say puts a job run's news in the conversation - as the run's card, which
+// its next word replaces. The card carries the job's title itself.
+func (m *Module) say(j Job, run int64, text string) {
 	if m.notify == nil {
 		return
 	}
-	m.notify.AppendAgent([]string{fmt.Sprintf("**작업 · %s**\n%s", j.Title, text)})
+	m.notify.JobNews(thread.Origin{Kind: thread.OriginJob, Job: j.ID, Run: run, Title: j.Title}, []string{text})
 }
 
 func mimeOf(name string) string {

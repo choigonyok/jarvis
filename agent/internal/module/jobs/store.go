@@ -188,6 +188,22 @@ func (s *Store) Due(ctx context.Context) (*Job, error) {
 	return payload.Job, err
 }
 
+// DueN is up to n jobs whose turn it is, most overdue first. An older
+// jobs-svc answers with `job` only; that one is the list then.
+func (s *Store) DueN(ctx context.Context, n int) ([]Job, error) {
+	var payload struct {
+		Job  *Job  `json:"job"`
+		Jobs []Job `json:"jobs"`
+	}
+	if err := s.call(ctx, http.MethodGet, fmt.Sprintf("/due?limit=%d", n), nil, &payload); err != nil {
+		return nil, err
+	}
+	if payload.Jobs == nil && payload.Job != nil {
+		return []Job{*payload.Job}, nil
+	}
+	return payload.Jobs, nil
+}
+
 func (s *Store) StartRun(ctx context.Context, jobID int64) (int64, error) {
 	var payload struct {
 		RunID int64 `json:"runId"`

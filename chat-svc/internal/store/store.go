@@ -4,6 +4,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -70,7 +71,8 @@ const selectList = `
 	       coalesce(proposal_id, ''),
 	       coalesce(session_id, ''),
 	       coalesce(images, '{}'),
-	       coalesce(ref::text, '')
+	       coalesce(ref::text, ''),
+	       coalesce(origin::text, '')
 	  from turns`
 
 // All returns the whole transcript, oldest first.
@@ -91,12 +93,13 @@ func (s *Store) All(ctx context.Context, tz, thread string, since time.Time) ([]
 	out := []turn.Turn{}
 	for rows.Next() {
 		var t turn.Turn
-		var ref string
+		var ref, origin string
 		if err := rows.Scan(&t.ID, &t.Role, &t.At, &t.AtISO, &t.Paragraphs,
-			&t.Text, &t.ProposalID, &t.SessionID, &t.Images, &ref); err != nil {
+			&t.Text, &t.ProposalID, &t.SessionID, &t.Images, &ref, &origin); err != nil {
 			return nil, fmt.Errorf("턴 읽기: %w", err)
 		}
 		t.Ref = readRef(ref)
+		t.Origin = readOrigin(origin)
 		out = append(out, t)
 	}
 	return out, rows.Err()
@@ -136,8 +139,8 @@ func (s *Store) Append(ctx context.Context, t turn.Turn, tz string) (turn.Turn, 
 
 	rows, err := s.pool.Query(ctx, `
 		with inserted as (
-		  insert into turns (id, role, at, paragraphs, body, proposal_id, session_id, thread, images, ref)
-		  values ($2, $3, now(), $4, nullif($5,''), nullif($6,''), nullif($7,''), $8, $9, $10::jsonb)
+		  insert into turns (id, role, at, paragraphs, body, proposal_id, session_id, thread, images, ref, origin)
+		  values ($2, $3, now(), $4, nullif($5,''), nullif($6,''), nullif($7,''), $8, $9, $10::jsonb, $11::jsonb)
 		  returning *
 		)
 		select id, role,
@@ -148,29 +151,121 @@ func (s *Store) Append(ctx context.Context, t turn.Turn, tz string) (turn.Turn, 
 		       coalesce(proposal_id, ''),
 		       coalesce(session_id, ''),
 		       coalesce(images, '{}'),
-		       coalesce(ref::text, '')
+		       coalesce(ref::text, ''),
+		       coalesce(origin::text, '')
 		  from inserted`,
-		tz, id, string(t.Role), paragraphs, t.Text, t.ProposalID, t.SessionID, t.Thread, images, refJSON(t.Ref))
+		tz, id, string(t.Role), paragraphs, t.Text, t.ProposalID, t.SessionID, t.Thread, images, refJSON(t.Ref), originJSON(t.Origin))
 	if err != nil {
 		return turn.Turn{}, fmt.Errorf("턴 저장: %w", err)
 	}
 	defer rows.Close()
-
-	if !rows.Next() {
-		if err := rows.Err(); err != nil {
-			return turn.Turn{}, fmt.Errorf("턴 저장 확인: %w", err)
-		}
-		return turn.Turn{}, fmt.Errorf("턴이 저장되지 않았습니다")
+	saved, err := scanOne(rows, "저장")
+	if err != nil {
+		return turn.Turn{}, err
 	}
-	var saved turn.Turn
-	var ref string
-	if err := rows.Scan(&saved.ID, &saved.Role, &saved.At, &saved.AtISO,
-		&saved.Paragraphs, &saved.Text, &saved.ProposalID, &saved.SessionID, &saved.Images, &ref); err != nil {
-		return turn.Turn{}, fmt.Errorf("저장된 턴 읽기: %w", err)
-	}
-	saved.Ref = readRef(ref)
 	saved.Thread = t.Thread
 	return saved, nil
+}
+
+// Update replaces what a turn says and brings it to the present: it is a
+// job's card given its newest word, and the newest word belongs at the
+// bottom of the thread, not wherever the run first spoke. Only turns with an
+// origin may be rewritten - the conversation's own words stand as said.
+// ErrNoTurn when no such turn is in this thread.
+func (s *Store) Update(ctx context.Context, thread, id string, paragraphs []string, tz string) (turn.Turn, error) {
+	var p any
+	if len(paragraphs) > 0 {
+		p = paragraphs
+	}
+	rows, err := s.pool.Query(ctx, `
+		with updated as (
+		  update turns set paragraphs = $4, at = now()
+		   where id = $2 and thread = $3 and origin is not null
+		  returning *
+		)
+		select id, role,
+		       to_char(at at time zone $1, 'HH24:MI'),
+		       to_char(at, 'YYYY-MM-DD"T"HH24:MI:SS.USTZH:TZM'),
+		       coalesce(paragraphs, '{}'),
+		       coalesce(body, ''),
+		       coalesce(proposal_id, ''),
+		       coalesce(session_id, ''),
+		       coalesce(images, '{}'),
+		       coalesce(ref::text, ''),
+		       coalesce(origin::text, '')
+		  from updated`, tz, id, thread, p)
+	if err != nil {
+		return turn.Turn{}, fmt.Errorf("턴 갱신: %w", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return turn.Turn{}, fmt.Errorf("턴 갱신 확인: %w", err)
+		}
+		return turn.Turn{}, ErrNoTurn
+	}
+	saved, err := scanRow(rows)
+	if err != nil {
+		return turn.Turn{}, fmt.Errorf("갱신된 턴 읽기: %w", err)
+	}
+	saved.Thread = thread
+	return saved, nil
+}
+
+// ErrNoTurn: no turn with that id in that thread that may be rewritten.
+var ErrNoTurn = errors.New("그런 턴이 없습니다")
+
+type scanner interface {
+	Scan(dest ...any) error
+}
+
+func scanRow(r scanner) (turn.Turn, error) {
+	var t turn.Turn
+	var ref, origin string
+	if err := r.Scan(&t.ID, &t.Role, &t.At, &t.AtISO,
+		&t.Paragraphs, &t.Text, &t.ProposalID, &t.SessionID, &t.Images, &ref, &origin); err != nil {
+		return turn.Turn{}, err
+	}
+	t.Ref = readRef(ref)
+	t.Origin = readOrigin(origin)
+	return t, nil
+}
+
+func scanOne(rows interface {
+	scanner
+	Next() bool
+	Err() error
+}, what string) (turn.Turn, error) {
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return turn.Turn{}, fmt.Errorf("턴 %s 확인: %w", what, err)
+		}
+		return turn.Turn{}, fmt.Errorf("턴이 %s되지 않았습니다", what)
+	}
+	t, err := scanRow(rows)
+	if err != nil {
+		return turn.Turn{}, fmt.Errorf("%s된 턴 읽기: %w", what, err)
+	}
+	return t, nil
+}
+
+func originJSON(o *turn.Origin) any {
+	if o == nil || o.Kind == "" {
+		return nil
+	}
+	b, _ := json.Marshal(o)
+	return string(b)
+}
+
+func readOrigin(raw string) *turn.Origin {
+	if raw == "" {
+		return nil
+	}
+	var o turn.Origin
+	if json.Unmarshal([]byte(raw), &o) != nil || o.Kind == "" {
+		return nil
+	}
+	return &o
 }
 
 // refJSON is the ref column's value: NULL when the turn quotes nothing.

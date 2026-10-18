@@ -369,18 +369,38 @@ func (s *Store) Answer(ctx context.Context, id int64, card, text string) error {
 // Due is the job most overdue whose sites are all logged in and which is not
 // already running, or nil.
 func (s *Store) Due(ctx context.Context) (*Job, error) {
-	j, err := scanJob(s.pool.QueryRow(ctx, `select `+jobCols+` from jobs j
+	jobs, err := s.DueN(ctx, 1)
+	if err != nil || len(jobs) == 0 {
+		return nil, err
+	}
+	return &jobs[0], nil
+}
+
+// DueN is up to n due jobs, most overdue first: the scheduler runs more
+// than one at a time when they do not want the browser, so it looks past
+// the first one it cannot start.
+func (s *Store) DueN(ctx context.Context, n int) ([]Job, error) {
+	if n <= 0 {
+		n = 1
+	}
+	rows, err := s.pool.Query(ctx, `select `+jobCols+` from jobs j
 		where j.state = 'active' and j.next_at <= now()
 		  and not exists (select 1 from job_sites s where s.login_required and s.site = any(j.sites))
 		  and not exists (select 1 from job_runs r where r.job_id = j.id and r.ended_at is null)
-		order by j.next_at limit 1`))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
+		order by j.next_at limit $1`, n)
 	if err != nil {
 		return nil, err
 	}
-	return &j, nil
+	defer rows.Close()
+	var out []Job
+	for rows.Next() {
+		j, err := scanJob(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, j)
+	}
+	return out, rows.Err()
 }
 
 // StartRun opens a run. Any run of this job left open by a crash is closed

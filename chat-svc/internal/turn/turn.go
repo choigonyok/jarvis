@@ -47,6 +47,21 @@ type Turn struct {
 	// Ref is the earlier message the operator pointed at when sending this
 	// one (swiped on the console).
 	Ref *Ref `json:"ref,omitempty"`
+	// Origin says the turn is not the conversation's own words but news from
+	// elsewhere - a background job's run. The console draws such a turn as a
+	// card beside the conversation, and a later word from the same run
+	// replaces it (PUT /turns/{id}) instead of adding another.
+	Origin *Origin `json:"origin,omitempty"`
+}
+
+// Origin is where a turn came from when not from the conversation.
+type Origin struct {
+	// Kind is "job" today.
+	Kind string `json:"kind"`
+	// Job and Run name the job and the run that spoke.
+	Job   int64  `json:"job,omitempty"`
+	Run   int64  `json:"run,omitempty"`
+	Title string `json:"title,omitempty"`
 }
 
 // Ref is a quoted earlier turn: which one, who said it, when, and how it began.

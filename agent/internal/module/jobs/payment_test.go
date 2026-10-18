@@ -86,7 +86,7 @@ func TestPaymentCardParksTheRunAndTheDecisionWakesIt(t *testing.T) {
 	svc := &jobsSvc{}
 	props := proposal.NewStore(bus.New())
 	m := New(NewStore(svc.serve(t).URL, ""), nil, props, nil, nil)
-	m.current.set(5, Job{ID: 16, Title: "탁상시계 구매"})
+	m.current.add(5, Job{ID: 16, Title: "탁상시계 구매"}, true)
 	s := runSession(t, m, "5")
 
 	if text, isErr := callRun(t, s, "wait_payment", nil); !isErr || !strings.Contains(text, "사이트 쪽 오류") {
@@ -143,7 +143,7 @@ func TestFinishWaitsForTheCardItsRunRaised(t *testing.T) {
 	svc := &jobsSvc{}
 	props := proposal.NewStore(bus.New())
 	m := New(NewStore(svc.serve(t).URL, ""), nil, props, nil, nil)
-	m.current.set(5, Job{ID: 18, Title: "탁상시계 구매"})
+	m.current.add(5, Job{ID: 18, Title: "탁상시계 구매"}, true)
 	s := runSession(t, m, "5")
 
 	if _, isErr := callRun(t, s, "ask", map[string]any{"question": "쿠페이 비밀번호 입력이 자동으로 안 됩니다. 어떻게 할까요?"}); isErr {
@@ -167,7 +167,7 @@ func TestFinishingDropsAPendingPaymentCard(t *testing.T) {
 	svc := &jobsSvc{}
 	props := proposal.NewStore(bus.New())
 	m := New(NewStore(svc.serve(t).URL, ""), nil, props, nil, nil)
-	m.current.set(5, Job{ID: 16, Title: "탁상시계 구매"})
+	m.current.add(5, Job{ID: 16, Title: "탁상시계 구매"}, true)
 	s := runSession(t, m, "5")
 
 	card, _ := props.Open(proposal.Proposal{Origin: proposal.OriginIntercept, Action: action.Action{Kind: "browser.payment", Input: json.RawMessage(`{}`)}})
@@ -186,7 +186,7 @@ func TestFinishingDropsAPendingPaymentCard(t *testing.T) {
 // The run is given the PIN tool and wait_payment: a job is now how a purchase
 // reaches its payment.
 func TestRunToolsCanPay(t *testing.T) {
-	tools := runTools()
+	tools := runTools(true)
 	for _, want := range []string{"mcp__" + BrowserServer + "__browser_enter_payment_pin", "mcp__" + RunServerName + "__wait_payment"} {
 		if !contains(tools, want) {
 			t.Fatalf("%s 가 없습니다: %v", want, tools)

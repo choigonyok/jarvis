@@ -3,9 +3,13 @@ package jobs
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -65,16 +69,72 @@ func TestRunToolsOnlyForTheRunInFlight(t *testing.T) {
 	if _, ok := r.get(7); ok {
 		t.Fatal("nothing is running")
 	}
-	r.set(7, Job{ID: 1})
+	r.add(7, Job{ID: 1}, true)
 	if _, ok := r.get(8); ok {
 		t.Fatal("another run id must not pass")
 	}
 	if j, ok := r.get(7); !ok || j.ID != 1 {
 		t.Fatal("the running run must pass")
 	}
-	r.clear()
+	r.remove(7)
 	if _, ok := r.get(7); ok {
 		t.Fatal("a finished run must not pass")
+	}
+}
+
+// Jobs without sites run beside the conversation, without the browser; a
+// job with sites waits for it. The scheduler looks past the one it cannot
+// start (2026-10-18: everything waited on the conversation, one at a time).
+func TestJobsWithoutSitesRunBesideTheConversation(t *testing.T) {
+	var mu sync.Mutex
+	runs := 0
+	svc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/due":
+			_ = json.NewEncoder(w).Encode(map[string]any{"jobs": []Job{
+				{ID: 1, Title: "가격 지켜보기", Sites: []string{"shop.example"}},
+				{ID: 2, Title: "주간 운동 요약"},
+			}})
+		case r.Method == http.MethodGet && r.URL.Path == "/jobs/1":
+			_ = json.NewEncoder(w).Encode(Detail{Job: Job{ID: 1, Title: "가격 지켜보기", Sites: []string{"shop.example"}}})
+		case r.Method == http.MethodGet && r.URL.Path == "/jobs/2":
+			_ = json.NewEncoder(w).Encode(Detail{Job: Job{ID: 2, Title: "주간 운동 요약"}})
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/runs"):
+			mu.Lock()
+			runs++
+			id := runs
+			mu.Unlock()
+			_, _ = w.Write([]byte(`{"runId": ` + strconv.Itoa(id) + `}`))
+		default:
+			_, _ = w.Write([]byte(`{}`))
+		}
+	}))
+	defer svc.Close()
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	m := New(NewStore(svc.URL, ""), nil, proposal.NewStore(bus.New()), nil, quiet)
+	// The conversation is running: the browser is not to be had.
+	bg := &bgFake{canStart: func(browser bool) bool { return !browser }}
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	m.Run(ctx, bg, SchedulerConfig{RunURL: "http://agent/mcp/job-run", Interval: 20 * time.Millisecond, Cooldown: time.Hour, Timeout: time.Minute})
+
+	bg.mu.Lock()
+	defer bg.mu.Unlock()
+	if len(bg.tasks) == 0 {
+		t.Fatal("사이트 없는 작업은 대화 중에도 돌아야 합니다")
+	}
+	for _, task := range bg.tasks {
+		if task.Browser || len(task.Extra) != 0 || !strings.Contains(task.Name, "주간 운동 요약") {
+			t.Fatalf("브라우저 없는 실행이어야 합니다: %+v", task)
+		}
+		for _, tool := range task.Allowed {
+			if strings.Contains(tool, "browser_") {
+				t.Fatalf("브라우저 도구가 실려 있습니다: %s", tool)
+			}
+		}
+		if !strings.Contains(task.Prompt, "이 실행에는 브라우저가 없습니다") {
+			t.Fatal("브라우저가 없다는 말이 프롬프트에 없습니다")
+		}
 	}
 }
 

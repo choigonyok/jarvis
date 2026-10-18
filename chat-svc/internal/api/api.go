@@ -11,6 +11,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"regexp"
@@ -50,6 +51,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("GET /turns", s.auth(s.list))
 	mux.HandleFunc("POST /turns", s.auth(s.append))
+	// A job's card given its newest word (see turn.Origin).
+	mux.HandleFunc("PUT /turns/{id}", s.auth(s.update))
 	return mux
 }
 
@@ -137,6 +140,41 @@ func (s *Server) append(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.log.Error("턴을 저장하지 못했습니다", "err", err)
 		writeErr(w, http.StatusInternalServerError, "턴을 저장하지 못했습니다.")
+		return
+	}
+	writeJSON(w, http.StatusOK, saved)
+}
+
+// update rewrites what a turn with an origin says and moves it to now.
+func (s *Server) update(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Thread     string   `json:"thread"`
+		Paragraphs []string `json:"paragraphs"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&in); err != nil {
+		writeErr(w, http.StatusBadRequest, "본문을 읽을 수 없습니다.")
+		return
+	}
+	if !threadName.MatchString(in.Thread) {
+		writeErr(w, http.StatusBadRequest, "thread 이름이 올바르지 않습니다.")
+		return
+	}
+	if asGuest(r) && in.Thread != guestThread {
+		writeErr(w, http.StatusForbidden, "손님은 손님 대화에만 쓸 수 있습니다.")
+		return
+	}
+	if len(in.Paragraphs) == 0 {
+		writeErr(w, http.StatusBadRequest, "내용이 없는 턴입니다.")
+		return
+	}
+	saved, err := s.store.Update(r.Context(), in.Thread, r.PathValue("id"), in.Paragraphs, s.tz)
+	if errors.Is(err, store.ErrNoTurn) {
+		writeErr(w, http.StatusNotFound, "그런 턴이 없습니다.")
+		return
+	}
+	if err != nil {
+		s.log.Error("턴을 갱신하지 못했습니다", "err", err)
+		writeErr(w, http.StatusInternalServerError, "턴을 갱신하지 못했습니다.")
 		return
 	}
 	writeJSON(w, http.StatusOK, saved)

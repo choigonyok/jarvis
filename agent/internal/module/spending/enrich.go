@@ -163,8 +163,9 @@ func toolText(s string, isErr bool) *mcp.CallToolResult {
 // --- the loop --------------------------------------------------------------
 
 type Background interface {
-	// Idle is when a lookup may start: nobody is using the assistant.
-	Idle() bool
+	// CanStart is whether a task needing the shared browser may start now:
+	// nobody is using the assistant, and no other task holds the browser.
+	CanStart(browser bool) bool
 	Background(ctx context.Context, t claudecode.Task) (string, error)
 }
 
@@ -195,7 +196,7 @@ func (m *Module) RunEnricher(ctx context.Context, bg Background, cfg EnrichConfi
 			return
 		case <-tick.C:
 		}
-		if time.Since(last) < yieldWait(cfg.Cooldown, yields) || !bg.Idle() {
+		if time.Since(last) < yieldWait(cfg.Cooldown, yields) || !bg.CanStart(true) {
 			continue
 		}
 		pending, err := m.store.Pending(ctx)
@@ -233,6 +234,7 @@ func (m *Module) enrichOnce(ctx context.Context, bg Background, cfg EnrichConfig
 
 	result, err := bg.Background(ctx, claudecode.Task{
 		Name:    "주문 조회",
+		Browser: true,
 		Prompt:  enrichPrompt(pending),
 		System:  enrichSystem,
 		Servers: map[string]string{EnrichServerName: cfg.EnrichURL},

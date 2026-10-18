@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { Reply } from "lucide-react";
 import { Composer } from "@/components/chat/composer";
 import { ModeToggle, type ChatMode } from "@/components/chat/mode-toggle";
@@ -22,6 +23,13 @@ import { cn } from "@/lib/utils";
 import { clock, dayLabel, refTime, turnDay, turnTime } from "@/lib/when";
 
 const MODE_KEY = "jarvis:chat-mode";
+
+/** An agent turn as it is read aloud; a job's card is announced as the job's. */
+function spokenText(turn: Turn): string {
+  const body = speakable(turn.paragraphs?.join("\n\n") ?? "");
+  if (!body) return "";
+  return turn.origin ? `작업 ${turn.origin.title ? `'${turn.origin.title}'` : ""} 소식. ${body}` : body;
+}
 
 /**
  * Timestamps and status live in the rail, so the body stays a clean measure.
@@ -86,6 +94,54 @@ function Quote({ quote, at, onJump }: { quote: TurnRef; at: string; onJump: () =
       </span>
       <span className="line-clamp-2 text-[13px] leading-snug text-dim">{plainText(quote.text) || "사진"}</span>
     </button>
+  );
+}
+
+/**
+ * News from a background job, beside the conversation rather than in it.
+ *
+ * A job speaks while you may be mid-thought with Jarvis, so its word is not
+ * laid out as his: a recessed card names the job and shows its latest line,
+ * folded to a few lines until tapped. One run has one card, kept at its
+ * newest word - a chatty run never fills the thread. The way to the job
+ * itself is the 작업 tab.
+ */
+function JobNews({ turn }: { turn: Turn }) {
+  const [open, setOpen] = useState(false);
+  const text = turn.paragraphs?.join("\n\n") ?? "";
+  const long = text.length > 160 || text.includes("\n");
+  return (
+    <div className="max-w-[36rem] rounded-xl bg-well px-3.5 py-2.5">
+      <div className="flex items-baseline justify-between gap-3" data-search-skip>
+        <span className="min-w-0 truncate text-[11.5px] text-faint">
+          작업 · {turn.origin?.title || "이름 없음"}
+        </span>
+        <Link
+          href="/jobs"
+          className="shrink-0 text-[11.5px] text-faint underline-offset-2 outline-none hover:text-dim hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
+        >
+          작업 탭
+        </Link>
+      </div>
+      <div
+        className={cn(
+          "mt-1 text-[14px] leading-relaxed text-dim [&_p]:my-0 [&_ul]:my-1",
+          !open && long && "line-clamp-3",
+        )}
+      >
+        <Markdown>{text}</Markdown>
+      </div>
+      {long ? (
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="tap mt-1 text-[12px] text-faint outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50"
+          data-search-skip
+        >
+          {open ? "접기" : "더 보기"}
+        </button>
+      ) : null}
+    </div>
   );
 }
 
@@ -178,7 +234,9 @@ const TurnRow = memo(function TurnRow({
             <div className={ROW}>
               <Rail at={time} onRef={quote} />
               <div className="min-w-0">
-                {turn.paragraphs?.length ? (
+                {turn.origin ? (
+                  <JobNews turn={turn} />
+                ) : turn.paragraphs?.length ? (
                   // The runner split the message on blank lines; putting
                   // them back is what makes a list or a code fence one
                   // block again.
@@ -533,6 +591,9 @@ export function Thread() {
   }, []);
 
   const last = turns.at(-1);
+  // What the newest agent line says when read aloud: a job's news is
+  // introduced as the job's, so it is not mistaken for Jarvis answering.
+  const text = last?.role === "agent" ? spokenText(last) : "";
 
   useEffect(() => {
     if (mode !== "voice") {
@@ -555,9 +616,8 @@ export function Thread() {
     if (muted) return;
     if (!last || last.role !== "agent" || last.id === spoken.current) return;
     spoken.current = last.id;
-    const text = speakable(last.paragraphs?.join("\n\n") ?? "");
     if (text) speak(text);
-  }, [mode, muted, last, hydrated, speak, cancel, refreshVoice]);
+  }, [mode, muted, last, text, hydrated, speak, cancel, refreshVoice]);
 
   function switchMode(next: ChatMode) {
     setMode(next);
@@ -581,11 +641,7 @@ export function Thread() {
         muted={muted}
         onMutedChange={setMuted}
         onExit={() => switchMode("text")}
-        lastSaid={
-          last?.role === "agent"
-            ? speakable(last.paragraphs?.join("\n\n") ?? "")
-            : undefined
-        }
+        lastSaid={text || undefined}
         thinking={thinking}
         voice={voice}
         onVoiceChanged={voice.refresh}

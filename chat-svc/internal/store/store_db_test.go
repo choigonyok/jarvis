@@ -94,3 +94,57 @@ func TestTurnKeepsItsReference(t *testing.T) {
 		t.Fatalf("다시 읽어도 참조가 남아야 합니다: %+v", got)
 	}
 }
+
+// A job's card (060): appended with its origin, read back with it, and its
+// later word replaces the earlier one and brings the card to the present -
+// while the conversation's own words cannot be rewritten.
+func TestJobCardIsOneTurnPerRun(t *testing.T) {
+	dsn := os.Getenv("JARVIS_TEST_DSN")
+	if dsn == "" {
+		t.Skip("JARVIS_TEST_DSN 이 없어 건너뜁니다 (scripts/dbtest)")
+	}
+	ctx := context.Background()
+	s, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.Close)
+	const th = "dbtest-job"
+	origin := &turn.Origin{Kind: "job", Job: 7, Run: 42, Title: "가격 지켜보기"}
+	card, err := s.Append(ctx, turn.Turn{Role: turn.RoleAgent, Paragraphs: []string{"지켜보는 중입니다."}, Origin: origin, Thread: th}, "Asia/Seoul")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if card.Origin == nil || card.Origin.Run != 42 || card.Origin.Title != "가격 지켜보기" {
+		t.Fatalf("저장한 턴이 origin 을 돌려줘야 합니다: %+v", card.Origin)
+	}
+	time.Sleep(10 * time.Millisecond)
+	later, err := s.Append(ctx, turn.Turn{Role: turn.RoleAgent, Paragraphs: []string{"그 사이의 대화 답"}, Thread: th}, "Asia/Seoul")
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(10 * time.Millisecond)
+	updated, err := s.Update(ctx, th, card.ID, []string{"가격이 내렸습니다: 16,900원"}, "Asia/Seoul")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ID != card.ID || updated.Origin == nil || updated.Paragraphs[0] != "가격이 내렸습니다: 16,900원" {
+		t.Fatalf("같은 턴이 새 말을 담아야 합니다: %+v", updated)
+	}
+	if updated.AtISO <= later.AtISO {
+		t.Fatalf("갱신된 카드는 맨 아래로 와야 합니다: %s <= %s", updated.AtISO, later.AtISO)
+	}
+	all, err := s.All(ctx, "Asia/Seoul", th, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(all); n < 2 || all[n-1].ID != card.ID || all[n-1].Origin == nil {
+		t.Fatalf("다시 읽어도 카드가 마지막이고 origin 이 남아야 합니다: %+v", all)
+	}
+	if _, err := s.Update(ctx, th, later.ID, []string{"고쳐 쓰기"}, "Asia/Seoul"); err != ErrNoTurn {
+		t.Fatalf("대화의 말은 못 바꿔야 합니다: %v", err)
+	}
+	if _, err := s.Update(ctx, "other", card.ID, []string{"x"}, "Asia/Seoul"); err != ErrNoTurn {
+		t.Fatalf("다른 스레드에서는 못 바꿔야 합니다: %v", err)
+	}
+}

@@ -12,11 +12,22 @@ import {
 } from "@/lib/thread";
 import { decideProposal } from "@/lib/decide";
 
-/** Upsert by id: an updated turn or proposal arrives the way the first did. */
-function upsert<T extends { id: string }>(list: T[], next: T): T[] {
+/**
+ * Upsert by id: an updated turn or proposal arrives the way the first did.
+ * One given a newer time (a job's card with its latest word) moves to where
+ * that time puts it - the bottom - rather than being rewritten in place.
+ */
+function upsert<T extends { id: string; atIso?: string }>(list: T[], next: T): T[] {
   const at = list.findIndex((item) => item.id === next.id);
   if (at === -1) return [...list, next];
   const copy = list.slice();
+  if (next.atIso && copy[at].atIso && next.atIso > copy[at].atIso) {
+    copy.splice(at, 1);
+    let to = copy.length;
+    while (to > 0 && (copy[to - 1].atIso ?? "") > next.atIso) to -= 1;
+    copy.splice(to, 0, next);
+    return copy;
+  }
   copy[at] = next;
   return copy;
 }

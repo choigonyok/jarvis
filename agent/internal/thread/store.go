@@ -57,7 +57,21 @@ type Turn struct {
 	// Ref is the earlier message the operator pointed at (swiped) when
 	// sending this one.
 	Ref *Ref `json:"ref,omitempty"`
+	// Origin, when set, says this is news from elsewhere - a background
+	// job's run - not the conversation's own words. See JobNews.
+	Origin *Origin `json:"origin,omitempty"`
 }
+
+// Origin is where a turn came from when not from the conversation session.
+type Origin struct {
+	Kind  string `json:"kind"`
+	Job   int64  `json:"job,omitempty"`
+	Run   int64  `json:"run,omitempty"`
+	Title string `json:"title,omitempty"`
+}
+
+// OriginJob is the one kind so far.
+const OriginJob = "job"
 
 // Ref is a quoted earlier turn: which one, who said it, when, and how it began.
 type Ref struct {
@@ -107,6 +121,11 @@ type Store struct {
 	// thread is the conversation this agent owns in chat-svc: "" for the
 	// operator, "guest" for the guest agent. It reads and writes only that.
 	thread string
+	// newsIDs is the turn each job run speaks through, by run: a run's
+	// second word replaces its first. Lost on restart, when the transcript
+	// is searched instead (JobNews).
+	newsMu  sync.Mutex
+	newsIDs map[int64]string
 
 	mu       sync.Mutex
 	thinking bool
@@ -251,6 +270,50 @@ func (s *Store) AppendAgent(paragraphs []string) *Turn {
 		return nil
 	}
 	return s.append(&Turn{Role: RoleAgent, Paragraphs: paragraphs})
+}
+
+// JobNews puts a job run's word in the conversation: one turn per run, so a
+// run that reports twice updates its card rather than stacking two. It is
+// not a model turn - nothing of the session is touched, which is the point:
+// the conversation goes on undisturbed, and the next turn is told (the
+// runner's job news). The console draws it as a card beside the thread.
+func (s *Store) JobNews(o Origin, paragraphs []string) *Turn {
+	if len(paragraphs) == 0 || o.Run == 0 {
+		return nil
+	}
+	s.newsMu.Lock()
+	id, known := s.newsIDs[o.Run]
+	s.newsMu.Unlock()
+	if !known {
+		// After a restart the map is empty; the transcript still knows.
+		turns, _ := s.Snapshot()
+		for i := len(turns) - 1; i >= 0; i-- {
+			if og := turns[i].Origin; og != nil && og.Kind == o.Kind && og.Run == o.Run {
+				id = turns[i].ID
+				break
+			}
+		}
+	}
+	if id != "" && !strings.HasPrefix(id, "local-") {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		var saved Turn
+		body := map[string]any{"thread": s.thread, "paragraphs": paragraphs}
+		if err := s.do(ctx, http.MethodPut, "/turns/"+url.PathEscape(id), body, &saved); err == nil {
+			s.bus.Publish(bus.Event{Type: "turn", Turn: saved})
+			return &saved
+		} else {
+			s.log.Warn("작업 소식을 갱신하지 못해 새로 적습니다", "run", o.Run, "err", err)
+		}
+	}
+	t := s.append(&Turn{Role: RoleAgent, Paragraphs: paragraphs, Origin: &o})
+	s.newsMu.Lock()
+	if s.newsIDs == nil {
+		s.newsIDs = map[int64]string{}
+	}
+	s.newsIDs[o.Run] = t.ID
+	s.newsMu.Unlock()
+	return t
 }
 
 // AttachProposal records in the transcript that a card was raised at this

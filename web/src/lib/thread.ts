@@ -87,6 +87,19 @@ export type Turn = {
   images?: string[];
   /** Points at a proposal; the card itself lives in the proposal store. */
   proposalId?: string;
+  /**
+   * Set when the turn is news from a background job's run rather than the
+   * conversation's own words. Drawn as a card beside the thread; a later
+   * word from the same run replaces it (same id, newer atIso).
+   */
+  origin?: TurnOrigin;
+};
+
+export type TurnOrigin = {
+  kind: "job";
+  job?: number;
+  run?: number;
+  title?: string;
 };
 
 export type CalendarEvent = {

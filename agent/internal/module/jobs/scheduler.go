@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/choigonyok/jarvis/agent/internal/claudecode"
@@ -15,18 +16,21 @@ import (
 // BrowserServer is the JARVIS_EXTRA_MCP entry for the shared browser.
 const BrowserServer = "mcp-browser"
 
-func runTools() []string {
-	tools := []string{
-		"browser_navigate", "browser_get_state", "browser_extract_content", "browser_screenshot",
-		"browser_scroll", "browser_click", "browser_type", "browser_go_back", "browser_list_tabs",
-		"browser_switch_tab", "browser_close_tab", "browser_upload_files", "browser_fill_login",
-		// Only types on Coupang's own keypad, and only after the payment card
-		// let the order through - the guard asks before any of it.
-		"browser_enter_payment_pin",
-	}
-	out := make([]string, 0, len(tools)+11)
-	for _, t := range tools {
-		out = append(out, "mcp__"+BrowserServer+"__"+t)
+// runTools is what a run may call: the browser's tools when it has the
+// browser (a job with sites), and the run's own either way.
+func runTools(browser bool) []string {
+	var out []string
+	if browser {
+		for _, t := range []string{
+			"browser_navigate", "browser_get_state", "browser_extract_content", "browser_screenshot",
+			"browser_scroll", "browser_click", "browser_type", "browser_go_back", "browser_list_tabs",
+			"browser_switch_tab", "browser_close_tab", "browser_upload_files", "browser_fill_login",
+			// Only types on Coupang's own keypad, and only after the payment card
+			// let the order through - the guard asks before any of it.
+			"browser_enter_payment_pin",
+		} {
+			out = append(out, "mcp__"+BrowserServer+"__"+t)
+		}
 	}
 	for _, t := range []string{"progress", "view_photos", "ask", "request_login", "request_sites", "schedule_next", "wait_payment", "finish", "report", "remember", "record"} {
 		out = append(out, "mcp__"+RunServerName+"__"+t)
@@ -34,11 +38,22 @@ func runTools() []string {
 	return out
 }
 
+// needsBrowser: a job with sites drives the shared browser; one without
+// works from the run's own tools and the agent's services, and may run
+// beside the conversation.
+func needsBrowser(j Job) bool { return len(j.Sites) > 0 }
+
 type Background interface {
-	// Idle is when a run may start: nobody is using the assistant.
-	Idle() bool
+	// CanStart is whether a run may begin now: with the browser, only while
+	// nobody is using the assistant and no other run holds it; without, when
+	// there is a slot.
+	CanStart(browser bool) bool
 	Background(ctx context.Context, t claudecode.Task) (string, error)
 }
+
+// dueAtOnce is how many due jobs the scheduler looks at per tick: the first
+// may want the browser while it is busy, and the next may not.
+const dueAtOnce = 4
 
 type SchedulerConfig struct {
 	// RunURL is this agent's /mcp/job-run base; the run id is appended.
@@ -61,13 +76,19 @@ type SchedulerConfig struct {
 	RetryModel string
 }
 
-// Run takes due jobs one at a time, whenever the person is not using the
-// assistant.
+// Run starts due jobs as they may start: one on the browser at a time, and
+// only while the person is not using the assistant; jobs without sites
+// beside the conversation, a couple at once. Each run goes in its own
+// goroutine, so a slow one does not hold the others back.
 func (m *Module) Run(ctx context.Context, bg Background, cfg SchedulerConfig) {
 	if err := m.store.CloseOrphans(ctx); err != nil {
 		m.log.Warn("남은 실행을 정리하지 못했습니다", "err", err)
 	}
-	var last time.Time
+	// Cooldown is for the browser: the sites it visits watch for bots. A run
+	// that never opens a page has nothing to space out.
+	var lastBrowser time.Time
+	var wg sync.WaitGroup
+	defer wg.Wait()
 	tick := time.NewTicker(cfg.Interval)
 	defer tick.Stop()
 	for {
@@ -78,18 +99,52 @@ func (m *Module) Run(ctx context.Context, bg Background, cfg SchedulerConfig) {
 		case <-m.kick:
 		}
 		m.purge(ctx)
-		if time.Since(last) < cfg.Cooldown || !bg.Idle() {
+		due, err := m.store.DueN(ctx, dueAtOnce)
+		if err != nil {
 			continue
 		}
-		j, err := m.store.Due(ctx)
-		if err != nil || j == nil {
-			continue
+		for _, j := range due {
+			browser := needsBrowser(j)
+			if browser && time.Since(lastBrowser) < cfg.Cooldown {
+				continue
+			}
+			if !bg.CanStart(browser) || !m.claim(j.ID) {
+				continue
+			}
+			if browser {
+				lastBrowser = time.Now()
+			}
+			wg.Add(1)
+			go func(j Job) {
+				defer wg.Done()
+				defer m.unclaim(j.ID)
+				m.runOnce(ctx, bg, cfg, j)
+			}(j)
 		}
-		last = time.Now()
-		m.runOnce(ctx, bg, cfg, *j)
 		// Another job may be due right away; look again on the next tick
 		// rather than sleeping a whole interval.
 	}
+}
+
+// claim marks a job as being run here; false when it already is (its run is
+// being opened, so jobs-svc does not know yet).
+func (m *Module) claim(job int64) bool {
+	m.activeMu.Lock()
+	defer m.activeMu.Unlock()
+	if _, busy := m.active[job]; busy {
+		return false
+	}
+	if m.active == nil {
+		m.active = map[int64]struct{}{}
+	}
+	m.active[job] = struct{}{}
+	return true
+}
+
+func (m *Module) unclaim(job int64) {
+	m.activeMu.Lock()
+	delete(m.active, job)
+	m.activeMu.Unlock()
 }
 
 func (m *Module) runOnce(ctx context.Context, bg Background, cfg SchedulerConfig, j Job) {
@@ -98,7 +153,8 @@ func (m *Module) runOnce(ctx context.Context, bg Background, cfg SchedulerConfig
 		m.log.Warn("작업을 읽지 못했습니다", "job", j.ID, "err", err)
 		return
 	}
-	if cfg.Guard != nil {
+	browser := needsBrowser(d.Job)
+	if browser && cfg.Guard != nil {
 		// Held a minute past the run's own limit, in case Release never comes.
 		if err := cfg.Guard.Restrict(ctx, d.Job.Sites, cfg.Timeout+time.Minute); err != nil {
 			m.log.Warn("작업을 사이트 안에 묶지 못해 이번 실행을 건너뜁니다", "job", j.ID, "err", err)
@@ -115,30 +171,40 @@ func (m *Module) runOnce(ctx context.Context, bg Background, cfg SchedulerConfig
 		m.log.Warn("실행을 시작하지 못했습니다", "job", j.ID, "err", err)
 		return
 	}
-	m.current.set(run, d.Job)
-	defer m.current.clear()
+	m.current.add(run, d.Job, browser)
+	defer m.current.remove(run)
 	// A payment card decided before this run reaches it as a card answer.
 	m.pay.settled(j.ID)
 	model := cfg.Model
 	if j.Attempts > 0 && cfg.RetryModel != "" {
 		model = cfg.RetryModel
 	}
-	m.log.Info("작업을 실행합니다", "job", j.ID, "run", run, "title", j.Title, "model", model)
+	m.log.Info("작업을 실행합니다", "job", j.ID, "run", run, "title", j.Title, "model", model, "browser", browser)
 
 	bctx := context.WithoutCancel(ctx)
 	// What this run did, step by step - handed to the next run if the
 	// conversation cuts this one short. The one before's, if it was cut.
 	var did []string
+	m.cutMu.Lock()
 	before := m.cut[j.ID]
 	delete(m.cut, j.ID)
+	m.cutMu.Unlock()
+	text := prompt(d, cfg.UploadsDir, time.Now(), before)
+	var extra []string
+	if browser {
+		extra = []string{BrowserServer}
+	} else {
+		text += noBrowserNote
+	}
 	result, err := bg.Background(ctx, claudecode.Task{
 		Name:    "작업 " + j.Title,
-		Prompt:  prompt(d, cfg.UploadsDir, time.Now(), before),
+		Prompt:  text,
 		System:  runSystem,
 		Model:   model,
 		Servers: map[string]string{RunServerName: fmt.Sprintf("%s/%d", cfg.RunURL, run)},
-		Extra:   []string{BrowserServer},
-		Allowed: runTools(),
+		Extra:   extra,
+		Allowed: runTools(browser),
+		Browser: browser,
 		Timeout: cfg.Timeout,
 		OnStep: func(s claudecode.Step) {
 			if kind, text := describe(s); text != "" {
@@ -152,11 +218,13 @@ func (m *Module) runOnce(ctx context.Context, bg Background, cfg SchedulerConfig
 	switch {
 	case errors.Is(err, claudecode.ErrYielded), errors.Is(err, claudecode.ErrBusy):
 		outcome = "yielded"
+		m.cutMu.Lock()
 		if len(did) > 0 {
 			m.cut[j.ID] = lastSteps(append(before, did...), cutSteps)
 		} else if len(before) > 0 {
 			m.cut[j.ID] = before
 		}
+		m.cutMu.Unlock()
 	case err != nil:
 		outcome, note = "error", clampText(err.Error(), 200)
 	}
@@ -167,7 +235,7 @@ func (m *Module) runOnce(ctx context.Context, bg Background, cfg SchedulerConfig
 	}
 	m.log.Info("작업 실행이 끝났습니다", "job", j.ID, "run", run, "outcome", outcome, "result", clampText(result, 200))
 	if end.Failed {
-		m.say(d.Job, "세 번 연달아 잘 끝나지 않아 멈췄습니다: "+end.Note+"\n작업 탭에서 확인하고 다시 시작할 수 있습니다.")
+		m.say(d.Job, run, "세 번 연달아 잘 끝나지 않아 멈췄습니다: "+end.Note+"\n작업 탭에서 확인하고 다시 시작할 수 있습니다.")
 	}
 }
 
@@ -231,6 +299,10 @@ func describe(s claudecode.Step) (string, string) {
 	// The job's own tools log themselves in jobs-svc (schedule, card, report).
 	return "", ""
 }
+
+// noBrowserNote goes on the prompt of a run without sites: it has no browser
+// this time, and the way to one is to ask for sites.
+const noBrowserNote = "\n\n이 실행에는 브라우저가 없습니다(작업에 사이트가 없어서). 사이트를 열어야 하는 일이면 request_sites 로 그 사이트를 요청하고 schedule_next 로 다음 실행을 잡으세요. 그 밖의 일은 지금 가진 도구로 합니다.\n"
 
 const runSystem = `당신은 Jarvis의 백그라운드 작업 실행입니다. 운영자가 대화에서 맡긴 작업 하나를, 이미 로그인된 공용 브라우저로 진행합니다. 대화 상대는 없고, 운영자는 작업 탭에서 진행을 지켜봅니다.
 

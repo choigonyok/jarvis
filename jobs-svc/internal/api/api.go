@@ -224,13 +224,29 @@ func (s *Server) answer(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// due is the jobs whose turn it is, most overdue first: `job` is the first
+// (what the scheduler read before it ran several at once), `jobs` up to
+// ?limit= of them.
 func (s *Server) due(w http.ResponseWriter, r *http.Request) {
-	j, err := s.store.Due(r.Context())
+	n := 1
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if k, err := strconv.Atoi(v); err == nil && k > 0 && k <= 20 {
+			n = k
+		}
+	}
+	jobs, err := s.store.DueN(r.Context(), n)
 	if err != nil {
 		s.fail(w, "할 작업을 읽지 못했습니다", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"job": j})
+	var first *store.Job
+	if len(jobs) > 0 {
+		first = &jobs[0]
+	}
+	if jobs == nil {
+		jobs = []store.Job{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"job": first, "jobs": jobs})
 }
 
 func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {

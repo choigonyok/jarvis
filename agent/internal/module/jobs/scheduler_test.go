@@ -33,13 +33,19 @@ func fakeRuns(t *testing.T, attempts int) *httptest.Server {
 
 // bgFake is the runner: it takes each task, plays its steps, and ends as told.
 type bgFake struct {
-	mu    sync.Mutex
-	tasks []claudecode.Task
-	steps []claudecode.Step
-	err   error
+	mu       sync.Mutex
+	tasks    []claudecode.Task
+	steps    []claudecode.Step
+	err      error
+	canStart func(browser bool) bool
 }
 
-func (b *bgFake) Idle() bool { return true }
+func (b *bgFake) CanStart(browser bool) bool {
+	if b.canStart != nil {
+		return b.canStart(browser)
+	}
+	return true
+}
 func (b *bgFake) Background(_ context.Context, t claudecode.Task) (string, error) {
 	b.mu.Lock()
 	b.tasks = append(b.tasks, t)

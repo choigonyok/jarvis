@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -57,9 +58,10 @@ func QualifiedToolName(tool string) string {
 	return fmt.Sprintf("mcp__%s__%s", ServerName, tool)
 }
 
-// Notifier puts a line in the conversation without a model turn.
+// Notifier puts a job's news in the conversation without a model turn: one
+// card per run, replaced by the run's later word (thread.Store.JobNews).
 type Notifier interface {
-	AppendAgent(paragraphs []string) *thread.Turn
+	JobNews(o thread.Origin, paragraphs []string) *thread.Turn
 }
 
 type Module struct {
@@ -75,8 +77,13 @@ type Module struct {
 	// pay is each job's payment card the browser's guard raised (intercept).
 	pay payments
 	// cut is what each job's last run did before the conversation cut it
-	// short, for the next run to pick up from. Only the scheduler touches it.
-	cut map[int64][]string
+	// short, for the next run to pick up from.
+	cutMu sync.Mutex
+	cut   map[int64][]string
+	// active is the jobs with a run in flight here, so a due job is not
+	// started twice while its run is being opened.
+	activeMu sync.Mutex
+	active   map[int64]struct{}
 }
 
 func New(store *Store, up *uploads.Store, proposals *proposal.Store, notify Notifier, log *slog.Logger) *Module {

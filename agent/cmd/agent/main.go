@@ -531,6 +531,7 @@ func relogin(runner *claudecode.Runner, v *vault.Module, browserURL, browserToke
 			Extra:   []string{jobs.BrowserServer},
 			Allowed: tools,
 			Timeout: 5 * time.Minute,
+			Browser: true,
 		})
 		if said != nil {
 			said(s.ID, result)

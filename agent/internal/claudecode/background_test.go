@@ -34,19 +34,19 @@ func runner(t *testing.T, bin string) *Runner {
 
 func TestBackgroundFinishes(t *testing.T) {
 	r := runner(t, fakeClaude(t, "0"))
-	out, err := r.Background(context.Background(), Task{Name: "t", Extra: []string{"mcp-browser"}, Timeout: 5 * time.Second})
+	out, err := r.Background(context.Background(), Task{Name: "t", Extra: []string{"mcp-browser"}, Browser: true, Timeout: 5 * time.Second})
 	if err != nil || out != "done" || !r.Idle() {
 		t.Fatalf("out %q err %v idle %v", out, err, r.Idle())
 	}
 }
 
-// The person speaking stops the task at once, and the task says it gave way
-// rather than that it failed.
+// The person speaking stops a task on the browser at once, and the task says
+// it gave way rather than that it failed.
 func TestBackgroundYieldsToTheConversation(t *testing.T) {
 	r := runner(t, fakeClaude(t, "10"))
 	done := make(chan error, 1)
 	go func() {
-		_, err := r.Background(context.Background(), Task{Name: "t", Timeout: 30 * time.Second})
+		_, err := r.Background(context.Background(), Task{Name: "t", Browser: true, Timeout: 30 * time.Second})
 		done <- err
 	}()
 	for r.Idle() {
@@ -69,11 +69,71 @@ func TestBackgroundYieldsToTheConversation(t *testing.T) {
 	}
 }
 
+// A task on the browser waits for the conversation; one without it does not
+// - it has nothing to fight the conversation over - and is not stopped when
+// the person speaks (2026-10-18: job results waited on the conversation).
 func TestBackgroundWaitsForTheConversation(t *testing.T) {
 	r := runner(t, fakeClaude(t, "0"))
 	r.running = true
+	if _, err := r.Background(context.Background(), Task{Browser: true, Timeout: time.Second}); !errors.Is(err, ErrBusy) {
+		t.Fatalf("대화 중에 브라우저 작업을 시작했습니다: %v", err)
+	}
+	if out, err := r.Background(context.Background(), Task{Timeout: 5 * time.Second}); err != nil || out != "done" {
+		t.Fatalf("브라우저 없는 작업은 대화 중에도 돌아야 합니다: %q %v", out, err)
+	}
+}
+
+func TestBackgroundWithoutBrowserRunsThroughTheConversation(t *testing.T) {
+	r := runner(t, fakeClaude(t, "2"))
+	done := make(chan error, 1)
+	go func() {
+		_, err := r.Background(context.Background(), Task{Name: "t", Timeout: 30 * time.Second})
+		done <- err
+	}()
+	for r.Idle() {
+		time.Sleep(10 * time.Millisecond)
+	}
+	r.mu.Lock()
+	r.yieldLocked()
+	if !r.canStartLocked(false) || r.canStartLocked(true) == false && r.running {
+		t.Fatal("자리가 남아 있어야 합니다")
+	}
+	r.mu.Unlock()
+	if err := <-done; err != nil {
+		t.Fatalf("대화가 시작돼도 브라우저 없는 작업은 멈추지 않습니다: %v", err)
+	}
+}
+
+// Two tasks at once at most, and only one of them on the browser.
+func TestBackgroundSlots(t *testing.T) {
+	r := runner(t, fakeClaude(t, "3"))
+	start := func(browser bool) chan error {
+		done := make(chan error, 1)
+		go func() {
+			_, err := r.Background(context.Background(), Task{Browser: browser, Timeout: 30 * time.Second})
+			done <- err
+		}()
+		return done
+	}
+	a := start(true)
+	for r.CanStart(true) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !r.CanStart(false) {
+		t.Fatal("브라우저가 잡혀 있어도 다른 자리는 남습니다")
+	}
+	b := start(false)
+	for r.CanStart(false) {
+		time.Sleep(10 * time.Millisecond)
+	}
 	if _, err := r.Background(context.Background(), Task{Timeout: time.Second}); !errors.Is(err, ErrBusy) {
-		t.Fatalf("대화 중에 시작했습니다: %v", err)
+		t.Fatalf("세 번째는 기다려야 합니다: %v", err)
+	}
+	if err := <-a; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-b; err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -107,11 +167,14 @@ func TestBackgroundArgs(t *testing.T) {
 func TestIdleRightAfterTheConversation(t *testing.T) {
 	r := runner(t, "claude")
 	r.lastAt = time.Now()
-	if !r.Idle() {
+	if !r.CanStart(true) {
 		t.Fatal("대화 턴이 끝났으면 바로 시작합니다")
 	}
 	r.running = true
-	if r.Idle() {
-		t.Fatal("대화 중에는 시작하지 않습니다")
+	if r.CanStart(true) {
+		t.Fatal("대화 중에는 브라우저 작업을 시작하지 않습니다")
+	}
+	if !r.CanStart(false) {
+		t.Fatal("대화 중에도 브라우저 없는 작업은 시작합니다")
 	}
 }

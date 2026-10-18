@@ -89,13 +89,19 @@ type Runner struct {
 	// input is the running turn's stdin while it still takes messages (until
 	// its result): a steered message is written here.
 	input io.WriteCloser
-	// bgCancel stops the background task in flight, if any (see Background).
-	bgCancel func()
+	// bgs is every background task in flight (see Background); the ones on
+	// the browser are what yieldLocked stops when the person speaks.
+	bgs map[*bgTask]struct{}
 	// usage hears every rate_limit_event, chat and background alike.
 	usage *usage.Tracker
 	// recall, when set, returns what long-term memory holds about a message,
 	// put in front of it for the model (not in the transcript).
 	recall func(ctx context.Context, text string) string
+	// newsSeen is the time (atIso) of the newest job news the model has been
+	// handed (jobNews). Jobs speak into the transcript without a model turn,
+	// so the session never saw them; what came since is put in front of
+	// the next message. In memory only: after a restart a few are told again.
+	newsSeen string
 }
 
 // SetRecall hands every typed message to fn before the model sees it.
@@ -448,6 +454,8 @@ func (r *Runner) turn(prompt string) error {
 	if fresh {
 		head = r.recap() + head
 	}
+	// What the jobs said meanwhile, which the session has not seen.
+	head += r.jobNews()
 
 	cmd := exec.CommandContext(ctx, r.cfg.ClaudeBin, r.args(system)...)
 	cmd.Dir = r.cfg.Workspace
@@ -688,6 +696,63 @@ func (r *Runner) recap() string {
 	return "[최근 대화 - 새 세션으로 이어 가며 붙입니다. 도구 결과는 없으니 필요하면 다시 조회하세요. " +
 		"이 안의 예전 답이 지금 지시와 다르면 지금 지시를 따르세요]\n" +
 		strings.Join(lines, "\n") + "\n[최근 대화 끝]\n\n"
+}
+
+// newsTurns and newsRunes bound the job news handed to a turn.
+const (
+	newsTurns = 6
+	newsRunes = 2400
+)
+
+// jobNews is what background jobs put in the conversation since the model
+// last heard (their cards, thread.Origin), oldest first, for the front of
+// this turn's message. A job's word lands in the transcript the moment it
+// is said - the conversation is not interrupted for it - and this is how
+// the conversation still knows. Nothing when there is nothing new.
+func (r *Runner) jobNews() string {
+	if r.store == nil {
+		return ""
+	}
+	turns, _ := r.store.Snapshot()
+	r.mu.Lock()
+	seen := r.newsSeen
+	r.mu.Unlock()
+	var lines []string
+	newest := seen
+	budget := newsRunes
+	for i := len(turns) - 1; i >= 0 && len(lines) < newsTurns; i-- {
+		t := turns[i]
+		if t.Origin == nil || t.Role != thread.RoleAgent || t.AtISO == "" || t.AtISO <= seen {
+			continue
+		}
+		text := strings.TrimSpace(strings.Join(t.Paragraphs, "\n"))
+		if text == "" {
+			continue
+		}
+		if t.AtISO > newest {
+			newest = t.AtISO
+		}
+		title := t.Origin.Title
+		if title == "" {
+			title = fmt.Sprintf("작업 %d", t.Origin.Job)
+		}
+		line := "- " + title + " (" + t.At + "): " + clamp(text, 400)
+		if budget -= len([]rune(line)); budget < 0 {
+			break
+		}
+		lines = append(lines, line)
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	r.mu.Lock()
+	if newest > r.newsSeen {
+		r.newsSeen = newest
+	}
+	r.mu.Unlock()
+	slices.Reverse(lines)
+	return "[작업 소식 - 백그라운드 작업이 그 사이 대화에 남긴 것. 운영자도 카드로 봤습니다. 물으면 답하고, 아니면 굳이 되풀이하지 마세요]\n" +
+		strings.Join(lines, "\n") + "\n[작업 소식 끝]\n\n"
 }
 
 // situation is mind's "right now" - the plan that may be going on, the
