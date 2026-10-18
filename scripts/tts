@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+# 목소리 복제 TTS(tts/server.py)를 맥미니에 설치하거나 돌본다. 맥북에서 실행한다.
+#
+#   scripts/tts install     코드를 보내고(scripts/mini sync), 맥미니에 uv·Python 3.12·venv(~/.jarvis-tts/venv)와
+#                           모델(Qwen3-TTS 1.7B Base 8bit, ~2GB)을 내려받아 LaunchAgent com.jarvis.tts 로 띄운다.
+#                           다시 실행하면 코드·의존성만 갱신하고 재시작한다.
+#   scripts/tts status      돌고 있는지, /health, 마지막 로그
+#   scripts/tts logs [-f]   로그
+#   scripts/tts restart     재시작 (모델을 다시 올리므로 1분쯤 걸린다)
+#   scripts/tts uninstall   멈추고 LaunchAgent·venv 를 지운다 (목소리 녹음 ~/.jarvis-tts/voice.* 와 모델 캐시는 남긴다)
+#
+# 왜 compose 가 아니라 호스트인가: MLX 는 Metal GPU 가 필요하고 컨테이너는 그것을 못 본다.
+# 게이트웨이(edge)는 터널 컨테이너에서 host.docker.internal:8106 으로 닿는다(VPC 서비스 jarvis-tts).
+# 토큰은 다른 서비스와 같은 JARVIS_API_TOKEN 을 맥미니 ~/jarvis/.env 에서 읽는다.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+HOST="${MINI_HOST:-macmini}"
+DIR="${MINI_DIR:-jarvis}"
+LABEL=com.jarvis.tts
+PORT="${TTS_PORT:-8106}"
+MODEL="${TTS_MODEL:-mlx-community/Qwen3-TTS-12Hz-1.7B-Base-8bit}"
+
+remote() { ssh -o LogLevel=ERROR "$HOST" "$@"; }
+
+case "${1:-}" in
+  install)
+    "$ROOT/scripts/mini" sync
+    remote "bash -s" <<SH
+set -euo pipefail
+export PATH="\$HOME/.local/bin:\$PATH"
+STATE=\$HOME/.jarvis-tts
+VENV=\$STATE/venv
+LOG=\$HOME/Library/Logs/jarvis-tts.log
+P=\$HOME/Library/LaunchAgents/$LABEL.plist
+mkdir -p "\$STATE" "\$HOME/Library/Logs" "\$HOME/Library/LaunchAgents"
+
+if ! command -v uv >/dev/null; then
+  echo "→ uv 설치"
+  curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null
+fi
+uv python install 3.12 >/dev/null 2>&1 || true
+[ -x "\$VENV/bin/python" ] || { echo "→ venv"; uv venv --python 3.12 "\$VENV" >/dev/null; }
+echo "→ 의존성"
+uv pip install --python "\$VENV/bin/python" -q -r "\$HOME/$DIR/tts/requirements.txt"
+
+echo "→ 모델 \$([ -d "\$HOME/.cache/huggingface/hub/models--\$(echo $MODEL | tr / -)" ] && echo '확인' || echo '내려받기 (~2GB)')"
+"\$VENV/bin/python" -I -c "from huggingface_hub import snapshot_download; snapshot_download('$MODEL')" >/dev/null
+
+cat > "\$P" <<PL
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>$LABEL</string>
+  <key>ProgramArguments</key><array>
+    <string>\$VENV/bin/python</string><string>-I</string>
+    <string>\$HOME/$DIR/tts/server.py</string>
+    <string>--port</string><string>$PORT</string>
+    <string>--model</string><string>$MODEL</string>
+    <string>--env-file</string><string>\$HOME/$DIR/.env</string>
+  </array>
+  <key>EnvironmentVariables</key><dict>
+    <!-- 모델은 install 때 받아 둔다. 부팅 때 네트워크를 기다리며 서지 않도록 오프라인으로 올린다. -->
+    <key>HF_HUB_OFFLINE</key><string>1</string>
+    <key>TTS_STATE_DIR</key><string>\$STATE</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>ProcessType</key><string>Interactive</string>
+  <key>StandardOutPath</key><string>\$LOG</string>
+  <key>StandardErrorPath</key><string>\$LOG</string>
+</dict></plist>
+PL
+launchctl bootout "gui/\$(id -u)/$LABEL" 2>/dev/null || true
+launchctl bootstrap "gui/\$(id -u)" "\$P"
+echo "→ 띄웠습니다. 모델이 올라오는 데 1분쯤 걸립니다."
+for i in \$(seq 1 60); do
+  sleep 3
+  h=\$(curl -s "http://127.0.0.1:$PORT/health" || true)
+  if echo "\$h" | grep -q '"loaded": *true'; then echo "\$h"; exit 0; fi
+  if echo "\$h" | grep -q '"error"'; then echo "\$h"; tail -20 "\$LOG"; exit 1; fi
+done
+echo "아직 올라오지 않았습니다. scripts/tts logs 로 보세요."; tail -20 "\$LOG"; exit 1
+SH
+    ;;
+  status)
+    remote "launchctl print gui/\$(id -u)/$LABEL 2>/dev/null | grep -E 'state|pid' | head -2 || echo '돌고 있지 않습니다'; curl -s http://127.0.0.1:$PORT/health; echo; tail -5 ~/Library/Logs/jarvis-tts.log 2>/dev/null"
+    ;;
+  logs)
+    shift || true
+    remote "tail ${1:--n 50} ~/Library/Logs/jarvis-tts.log"
+    ;;
+  restart)
+    remote "launchctl kickstart -k gui/\$(id -u)/$LABEL && echo 재시작했습니다"
+    ;;
+  uninstall)
+    remote "launchctl bootout gui/\$(id -u)/$LABEL 2>/dev/null || true; rm -rf ~/Library/LaunchAgents/$LABEL.plist ~/.jarvis-tts/venv; echo 지웠습니다"
+    ;;
+  *) sed -n '2,15p' "$0"; exit 1 ;;
+esac

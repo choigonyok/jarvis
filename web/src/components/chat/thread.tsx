@@ -16,7 +16,7 @@ import { useRole } from "@/components/shell/role";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { isPending, plainText, quoteText, type Proposal, type Turn, type TurnRef } from "@/lib/thread";
 import { photoUrl } from "@/lib/uploads";
-import { speakable, useSpeech } from "@/lib/use-speech";
+import { speakable, useSpeech, useVoiceStatus } from "@/lib/use-speech";
 import { useThread } from "@/lib/use-thread";
 import { cn } from "@/lib/utils";
 import { clock, dayLabel, refTime, turnDay, turnTime } from "@/lib/when";
@@ -367,7 +367,13 @@ export function Thread() {
   const [quoting, setQuoting] = useState<TurnRef | null>(null);
   const [mode, setMode] = useState<ChatMode>("text");
   const [muted, setMuted] = useState(false);
-  const { speak, cancel, speaking, pulse, progress } = useSpeech();
+  // Your own voice, when it is on file on the Mac mini; the browser's otherwise.
+  const voice = useVoiceStatus();
+  const refreshVoice = voice.refresh;
+  const { speak, cancel, speaking, preparing, speaker, pulse, progress, spectrum } = useSpeech(
+    "ko-KR",
+    voice.state === "ready",
+  );
   // The bottom bar gives up its space while the keyboard is up: it is covered
   // anyway, and the transcript needs those 44px more than the tabs do.
   const [typing, setTyping] = useState(false);
@@ -534,9 +540,16 @@ export function Thread() {
       spoken.current = null;
       return;
     }
-    // Entering voice mode marks whatever is already on screen as heard.
+    // Not before the thread has loaded: a page reopened straight into voice
+    // mode would otherwise take an empty thread as "heard" and then read the
+    // last old answer aloud the moment the real one arrived.
+    if (!hydrated) return;
+    // Entering voice mode marks whatever is already on screen as heard, and
+    // asks again whether your voice is on file - the Mac mini may have come
+    // back since the page loaded.
     if (spoken.current === null) {
       spoken.current = last?.id ?? "";
+      void refreshVoice();
       return;
     }
     if (muted) return;
@@ -544,7 +557,7 @@ export function Thread() {
     spoken.current = last.id;
     const text = speakable(last.paragraphs?.join("\n\n") ?? "");
     if (text) speak(text);
-  }, [mode, muted, last, speak, cancel]);
+  }, [mode, muted, last, hydrated, speak, cancel, refreshVoice]);
 
   function switchMode(next: ChatMode) {
     setMode(next);
@@ -559,7 +572,10 @@ export function Thread() {
       <VoiceStage
         onSend={(text) => void send(text)}
         speaking={speaking}
+        preparing={preparing}
+        speaker={speaker}
         pulse={pulse}
+        speechBins={spectrum}
         progress={progress}
         onStopSpeaking={cancel}
         muted={muted}
@@ -571,6 +587,8 @@ export function Thread() {
             : undefined
         }
         thinking={thinking}
+        voice={voice}
+        onVoiceChanged={voice.refresh}
       />
     );
   }

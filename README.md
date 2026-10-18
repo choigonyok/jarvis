@@ -39,6 +39,7 @@ mind-svc :8102        인지 루프. 감지 → 해석 → 세계 모델 → 노
       ├─ status-svc    :8096  상태 탭 (기능별 판정, 읽기만)
       └─ memory-svc    :8100  장기 기억 (Graphiti + FalkorDB)
 수집기                kakaotalk-client :8090 · imessage-client :8099 (평문 사본, 보존 730일)
+tts :8106 (맥미니 호스트) 운영자 목소리 복제 TTS (Qwen3-TTS 1.7B, MLX - GPU 가 필요해 compose 밖, LaunchAgent)
 browser :8931         에이전트의 Chromium (browser 네트워크에만, 결제 가드 guard.py)
 
 postgres (data 네트워크)  서비스들의 표와 이벤트 로그 · falkordb (data) 기억 그래프
@@ -50,7 +51,7 @@ gocommon/             Go 공통 코드 (이벤트 outbox, 수집기 인증·보�
 [workout-svc](workout-svc/README.md) · [assets-svc](assets-svc/README.md) ·
 [spending-svc](spending-svc/README.md) ·
 [status-svc](status-svc/README.md) · [context-svc](context-svc/README.md) ·
-[mind-svc](mind-svc/README.md) ·
+[mind-svc](mind-svc/README.md) · [tts](tts/README.md) ·
 [db](db/README.md)
 
 **에이전트에 남은 것과 나간 것.** 저장소는 전부 나갔고, 결정은 전부 남았습니다.

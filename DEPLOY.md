@@ -49,6 +49,9 @@
   `web/wrangler.jsonc` 의 `vars`(AGENT_URL 만 비밀).
 - 맥미니 쪽: `scripts/mini up`, `scripts/mini compose --profile cloudflare up -d tunnel`.
   웹은 컨테이너가 없다(Cloudflare 에서만 돈다).
+- 목소리 TTS(`tts/`)는 compose 밖, 맥미니 호스트의 LaunchAgent 다: `scripts/tts install`. 게이트웨이는
+  VPC 서비스 `jarvis-tts`(호스트 `host.docker.internal`, 포트 8106, 같은 터널)로 닿는다 - 터널 컨테이너가
+  Docker 호스트 주소로 푸는 유일한 경로. 콘솔 변수 `TTS_URL`.
 
 **`jarvis.choigonyok.com` 앞에는 Cloudflare Access 가 있다.** Zero Trust 앱 `jarvis`
 (팀 `choigonyok.cloudflareaccess.com`, Free 플랜), 정책 `only me` 는 운영자 이메일 하나만 허용하고

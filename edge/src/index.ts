@@ -56,6 +56,7 @@ interface Env {
   NOTIFY: Fetcher;
   CONTEXT: Fetcher;
   PHONENOTE: Fetcher;
+  TTS: Fetcher;
   /** Immich's API key for the gallery. Only this gateway holds it. */
   IMMICH_API_KEY?: string;
 }
@@ -78,6 +79,9 @@ const SERVICES: Record<string, { binding: keyof Env; origin: string }> = {
   context: { binding: "CONTEXT", origin: "http://context:8103" },
   // The phone's notifications, read and applied (a collector on a Mac hands them in).
   phonenote: { binding: "PHONENOTE", origin: "http://phonenote:8104" },
+  // The operator's cloned voice, a process on the Mac mini itself (tts/server.py):
+  // the tunnel reaches it at the Docker host's address. Operator only - it is their voice.
+  tts: { binding: "TTS", origin: "http://host.docker.internal:8106" },
   vnc: { binding: "BROWSER", origin: "http://browser:6080" },
 };
 

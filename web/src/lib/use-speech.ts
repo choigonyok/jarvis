@@ -3,11 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
- * Both halves of voice mode come from the browser: SpeechRecognition for
- * listening and speechSynthesis for speaking. Nothing is sent to a speech
- * vendor, there is no key to rotate, and a stack with no network egress past
- * the agent still talks - which is the whole reason not to reach for a hosted
- * voice here.
+ * Both halves of voice mode. Listening is the browser's SpeechRecognition.
+ * Speaking is the operator's own voice when one is on file - Qwen3-TTS on the
+ * Mac mini (tts/server.py), reached through /api/tts - and otherwise the
+ * browser's speechSynthesis, which needs no server at all. Nothing goes to a
+ * speech vendor either way, and there is no key to rotate.
  *
  * The cost is reach: recognition is Chromium and Safari only. Callers are
  * expected to check `supported` and fall back to typing.
@@ -245,44 +245,186 @@ function pickVoice(voices: SpeechSynthesisVoice[], lang: string) {
 }
 
 /**
- * iOS lets a page speak on its own only after it has spoken once inside a
- * tap. Answers arrive long after any tap, so the voice stage calls this from
- * its buttons: a silent utterance, there and then, opens the way for the rest.
+ * One AudioContext for the page: the cloned voice plays through it, the
+ * recorder that teaches it listens through it. Made on first use, so the
+ * server render never touches it.
+ */
+let shared: AudioContext | null = null;
+export function audioContext(): AudioContext | null {
+  if (typeof window === "undefined") return null;
+  if (!shared) {
+    try {
+      shared = new AudioContext();
+    } catch {
+      return null;
+    }
+  }
+  return shared;
+}
+
+/**
+ * iOS lets a page make sound on its own only after it has done so once inside
+ * a tap. Answers arrive long after any tap, so the voice stage calls this from
+ * its buttons: a silent utterance and a silent sample, there and then, open
+ * the way for both engines.
  */
 export function unlockSpeech() {
   const synth = typeof window === "undefined" ? undefined : window.speechSynthesis;
-  if (!synth) return;
-  try {
-    const u = new SpeechSynthesisUtterance(" ");
-    u.volume = 0;
-    synth.speak(u);
-    synth.resume();
-  } catch {
-    // Nothing to unlock on this engine.
+  if (synth) {
+    try {
+      const u = new SpeechSynthesisUtterance(" ");
+      u.volume = 0;
+      synth.speak(u);
+      synth.resume();
+    } catch {
+      // Nothing to unlock on this engine.
+    }
+  }
+  const ctx = audioContext();
+  if (ctx) {
+    void ctx.resume().catch(() => undefined);
+    try {
+      const source = ctx.createBufferSource();
+      source.buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
+      source.connect(ctx.destination);
+      source.start();
+    } catch {
+      // Already unlocked, or no output device: either way nothing to do.
+    }
   }
 }
 
-export function useSpeech(lang = "ko-KR") {
+/**
+ * An answer, as the pieces it is read in. The Mac mini reads a sentence in
+ * about half the time it takes to say it, so the first sentence goes out on
+ * its own and the next is made while it plays - the reply starts within a
+ * couple of seconds instead of after the whole thing. Fragments too short to
+ * be worth a round trip ride with their neighbour; a run-on sentence is cut
+ * at a comma so no single piece outruns what the server will read.
+ */
+export function sentences(text: string): string[] {
+  const flat = text.replace(/\s+/g, " ").trim();
+  if (!flat) return [];
+  const pieces = flat.split(/(?<=[.!?。！？])\s+/);
+  const merged: string[] = [];
+  for (const raw of pieces) {
+    const p = raw.trim();
+    if (!p) continue;
+    const prev = merged[merged.length - 1];
+    if (prev !== undefined && (prev.length < 16 || p.length < 8) && prev.length + p.length < 160) {
+      merged[merged.length - 1] = `${prev} ${p}`;
+    } else {
+      merged.push(p);
+    }
+  }
+  const LIMIT = 200;
+  const split = (s: string): string[] => {
+    if (s.length <= LIMIT) return [s];
+    const mid = Math.floor(s.length / 2);
+    let cut = -1;
+    for (const sep of [", ", ",", "; ", " "]) {
+      const left = s.lastIndexOf(sep, mid);
+      const right = s.indexOf(sep, mid);
+      const best = [left, right].filter((i) => i > 0).sort((a, b) => Math.abs(a - mid) - Math.abs(b - mid))[0];
+      if (best !== undefined) {
+        cut = best + sep.length;
+        break;
+      }
+    }
+    if (cut <= 0 || cut >= s.length) return [s];
+    return [...split(s.slice(0, cut).trim()), ...split(s.slice(cut).trim())];
+  };
+  return merged.flatMap(split);
+}
+
+/** What the recording on file is, as the console knows it. */
+export type VoiceState = "unknown" | "none" | "ready" | "unavailable";
+export type VoiceInfo = {
+  state: VoiceState;
+  /** The script that was read, and how long the kept recording is. */
+  text?: string;
+  seconds?: number;
+  savedAt?: string;
+  /** Why the service could not be asked, when it could not. */
+  error?: string;
+};
+
+/**
+ * Whether the operator's voice is on file. Asked once when the thread opens
+ * and again after the recording screen changes it; "unavailable" (the Mac
+ * mini's voice service cannot be reached) sends speaking to the browser's own
+ * voice without a word, the way it worked before there was a server.
+ */
+export function useVoiceStatus(): VoiceInfo & { refresh: () => Promise<void> } {
+  const [info, setInfo] = useState<VoiceInfo>({ state: "unknown" });
+  const refresh = useCallback(async () => {
+    try {
+      const res = await fetch("/api/tts/voice", { cache: "no-store" });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setInfo({ state: "unavailable", error: body.error });
+        return;
+      }
+      const data = (await res.json()) as { present?: boolean; text?: string; seconds?: number; savedAt?: string };
+      setInfo(
+        data.present
+          ? { state: "ready", text: data.text, seconds: data.seconds, savedAt: data.savedAt }
+          : { state: "none" },
+      );
+    } catch {
+      setInfo({ state: "unavailable" });
+    }
+  }, []);
+  useEffect(() => {
+    // Asking a server from an effect is the thing effects are for; the state
+    // it sets arrives with the answer, not in this tick.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void refresh();
+  }, [refresh]);
+  return { ...info, refresh };
+}
+
+/** Which engine the current utterance is on, for the status line. */
+export type Speaker = "server" | "browser" | null;
+
+/**
+ * Speaking. `server` says the operator's voice is on file: the answer is then
+ * read by the Mac mini and played here, sentence by sentence; when that
+ * cannot be done (no voice, service down, decode failure) the browser's own
+ * voice takes over for what is left, so an answer is never silently dropped.
+ */
+export function useSpeech(lang = "ko-KR", server = false) {
   const [speaking, setSpeaking] = useState(false);
+  /** True from asking for the first sentence until it starts to play. */
+  const [preparing, setPreparing] = useState(false);
+  const [speaker, setSpeaker] = useState<Speaker>(null);
   /**
-   * Rises on every spoken word and decays between them, 0..1.
+   * Rises with the sound and decays between words, 0..1.
    *
-   * The synthesizer's audio never reaches an AudioContext - browsers play it
-   * outside the graph - so there is no waveform to tap and no library that
-   * can conjure one. The word boundary is the only signal tied to what is
-   * actually being said, so that is what the ring moves on. Engines that do
-   * not fire it for Korean fall back to a steady pulse, which is honest about
-   * being a heartbeat rather than a reading.
+   * On the cloned voice it is read off the audio itself. The browser's
+   * synthesizer plays outside any AudioContext - there is no waveform to tap
+   * - so there the word boundary is the only signal tied to what is being
+   * said, and the ring moves on that. Engines that do not fire it for Korean
+   * fall back to a steady pulse, which is honest about being a heartbeat
+   * rather than a reading.
    */
   const [pulse, setPulse] = useState(0);
   /**
    * How far into the current utterance the voice has reached, in characters,
-   * or -1 when no engine has reported a boundary. The caption lights up to
-   * here, so you can read along with what you are hearing.
+   * or -1 when unknown. The caption lights up to here, so you can read along
+   * with what you are hearing.
    */
   const [progress, setProgress] = useState(-1);
+  /** The cloned voice's live frequency bins while it plays; null otherwise. The ring draws them. */
+  const spectrum = useRef<Uint8Array | null>(null);
   const voices = useRef<SpeechSynthesisVoice[]>([]);
   const decay = useRef<number>(0);
+  // Each speak() is a run; a cancel or a newer speak() retires the old one,
+  // and anything it was still fetching or playing is dropped on arrival.
+  const run = useRef(0);
+  const playing = useRef<AudioBufferSourceNode | null>(null);
+  const analyser = useRef<AnalyserNode | null>(null);
+  const meter = useRef(0);
 
   useEffect(() => {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
@@ -316,20 +458,41 @@ export function useSpeech(lang = "ko-KR") {
   }, []);
   useEffect(() => () => cancelAnimationFrame(frame.current), []);
 
-  const cancel = useCallback(() => {
-    window.speechSynthesis?.cancel();
+  const finish = useCallback(() => {
     window.clearInterval(decay.current);
     setSpeaking(false);
+    setPreparing(false);
+    setSpeaker(null);
     level.current = 0;
+    meter.current = 0;
     setPulse(0);
     setProgress(-1);
+    spectrum.current = null;
   }, []);
 
-  const speak = useCallback(
-    (text: string) => {
+  const cancel = useCallback(() => {
+    run.current += 1;
+    window.speechSynthesis?.cancel();
+    try {
+      playing.current?.stop();
+    } catch {
+      // Not started, or already ended.
+    }
+    playing.current = null;
+    analyser.current?.disconnect();
+    analyser.current = null;
+    finish();
+  }, [finish]);
+
+  /** The browser's own voice. `base` shifts progress when it reads only the tail of an answer. */
+  const speakBrowser = useCallback(
+    (text: string, base = 0) => {
       const synth =
         typeof window === "undefined" ? undefined : window.speechSynthesis;
-      if (!synth || !text.trim()) return;
+      if (!synth || !text.trim()) {
+        finish();
+        return;
+      }
       synth.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = lang;
@@ -342,25 +505,40 @@ export function useSpeech(lang = "ko-KR") {
         // fallback, read up to the next space.
         const rest = text.slice(event.charIndex);
         const length = event.charLength || rest.search(/\s|$/);
-        setProgress(event.charIndex + length);
+        setProgress(base + event.charIndex + length);
         window.clearInterval(decay.current);
         // A word landed: kick the ring. The loop above brings it back down.
         kick(0.55 + Math.random() * 0.45);
       };
-
-      const finish = () => {
-        window.clearInterval(decay.current);
-        setSpeaking(false);
-        level.current = 0;
-        setPulse(0);
-        setProgress(-1);
+      // Engines do not always say when they are done: with no voice installed
+      // nothing fires at all, and Chrome's remote voices fall silent mid-way on
+      // a long answer. Left waiting, the stage would stay "speaking" with the
+      // microphone shut. So the end is also assumed once the words should
+      // long have been said.
+      const token = ++run.current;
+      const expected = 1500 + text.length * 220;
+      const guard = window.setTimeout(() => {
+        if (run.current !== token) return;
+        console.warn("[voice] browser voice did not report its end; assuming it");
+        synth.cancel();
+        finish();
+      }, expected);
+      const done = () => {
+        window.clearTimeout(guard);
+        if (run.current === token) finish();
       };
-      utterance.onend = finish;
-      utterance.onerror = finish;
+      utterance.onend = done;
+      utterance.onerror = done;
 
       setSpeaking(true);
-      setProgress(-1);
+      setPreparing(false);
+      setSpeaker("browser");
+      spectrum.current = null;
+      setProgress(base > 0 ? base : -1);
       synth.speak(utterance);
+      // Chrome pauses a synthesis started while another was being cancelled;
+      // asking it to go on is harmless when it is already going.
+      synth.resume();
 
       // Korean voices on several engines never fire onboundary. Give it a
       // moment, and if nothing arrived, beat steadily instead of standing
@@ -374,10 +552,170 @@ export function useSpeech(lang = "ko-KR") {
         kick(0.4 + Math.random() * 0.3);
       }, 260);
     },
-    [lang, kick],
+    [lang, kick, finish],
   );
 
-  return { speak, cancel, speaking, pulse, progress };
+  /** The operator's voice from the Mac mini, a sentence at a time. */
+  const speakServer = useCallback(
+    async (text: string) => {
+      const ctx = audioContext();
+      const parts = sentences(text);
+      if (!ctx || parts.length === 0) {
+        speakBrowser(text);
+        return;
+      }
+      const id = ++run.current;
+      const alive = () => run.current === id;
+      setSpeaking(true);
+      setPreparing(true);
+      setSpeaker("server");
+      setProgress(-1);
+      // A context the page has not been allowed to run (no tap since load -
+      // say, reopened straight into voice mode) plays nothing and never ends.
+      // The browser's own voice is the better bet there; it at least reports.
+      try {
+        await ctx.resume();
+      } catch {
+        // Looked at below.
+      }
+      if (!alive()) return;
+      if (ctx.state !== "running") {
+        console.warn("[voice] audio context is", ctx.state, "- using the browser's voice");
+        speakBrowser(text);
+        return;
+      }
+
+      const node = ctx.createAnalyser();
+      node.fftSize = 1024;
+      node.smoothingTimeConstant = 0.6;
+      node.connect(ctx.destination);
+      analyser.current = node;
+      const bins = new Uint8Array(node.frequencyBinCount);
+      const wave = new Uint8Array(node.fftSize);
+
+      // Where each piece starts in the answer, so the caption lights the right words.
+      const offsets: number[] = [];
+      let cursor = 0;
+      for (const p of parts) {
+        const at = text.indexOf(p, cursor);
+        offsets.push(at);
+        if (at >= 0) cursor = at + p.length;
+      }
+
+      const fetchPiece = async (i: number): Promise<AudioBuffer> => {
+        const res = await fetch("/api/tts/speak", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ text: parts[i] }),
+          cache: "no-store",
+        });
+        if (!res.ok) {
+          const body = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(body.error ?? `목소리 서비스 ${res.status}`);
+        }
+        return ctx.decodeAudioData(await res.arrayBuffer());
+      };
+
+      const play = (buffer: AudioBuffer, i: number) =>
+        new Promise<void>((resolve) => {
+          const source = ctx.createBufferSource();
+          source.buffer = buffer;
+          source.connect(node);
+          playing.current = source;
+          spectrum.current = bins;
+          const started = ctx.currentTime;
+          let last = -1;
+          let raf = 0;
+          const tick = () => {
+            if (!alive() || playing.current !== source) return;
+            node.getByteFrequencyData(bins);
+            node.getByteTimeDomainData(wave);
+            let sum = 0;
+            for (const s of wave) {
+              const c = (s - 128) / 128;
+              sum += c * c;
+            }
+            const rms = Math.min(1, Math.sqrt(sum / wave.length) * 4);
+            meter.current = rms > meter.current ? rms : meter.current * 0.88 + rms * 0.12;
+            setPulse(meter.current);
+            if (offsets[i] >= 0) {
+              const frac = Math.min(1, (ctx.currentTime - started) / buffer.duration);
+              const at = offsets[i] + Math.round(parts[i].length * frac);
+              if (at !== last) {
+                last = at;
+                setProgress(at);
+              }
+            }
+            raf = requestAnimationFrame(tick);
+          };
+          // Should the end never be reported (a context suspended mid-play by
+          // an interruption), the piece is counted as done a little after it
+          // should have finished, and the next one is tried.
+          const guard = window.setTimeout(() => {
+            console.warn("[voice] playback did not report its end; moving on");
+            try {
+              source.stop();
+            } catch {
+              // Already stopped.
+            }
+            done();
+          }, buffer.duration * 1000 + 2500);
+          let settled = false;
+          const done = () => {
+            if (settled) return;
+            settled = true;
+            window.clearTimeout(guard);
+            cancelAnimationFrame(raf);
+            if (playing.current === source) playing.current = null;
+            resolve();
+          };
+          source.onended = done;
+          source.start();
+          raf = requestAnimationFrame(tick);
+        });
+
+      let next: Promise<AudioBuffer> = fetchPiece(0);
+      for (let i = 0; i < parts.length; i += 1) {
+        let buffer: AudioBuffer;
+        try {
+          buffer = await next;
+        } catch (err) {
+          if (!alive()) return;
+          console.warn("[voice] cloned voice unavailable, using the browser's:", err);
+          // The rest of the answer in the browser's voice, picking up where this left off.
+          node.disconnect();
+          analyser.current = null;
+          speakBrowser(parts.slice(i).join(" "), offsets[i] >= 0 ? offsets[i] : 0);
+          return;
+        }
+        if (!alive()) return;
+        if (i + 1 < parts.length) {
+          next = fetchPiece(i + 1);
+          // Looked at later; an early failure must not surface as unhandled meanwhile.
+          next.catch(() => undefined);
+        }
+        setPreparing(false);
+        await play(buffer, i);
+        if (!alive()) return;
+      }
+      node.disconnect();
+      analyser.current = null;
+      finish();
+    },
+    [speakBrowser, finish],
+  );
+
+  const speak = useCallback(
+    (text: string) => {
+      if (!text.trim()) return;
+      cancel();
+      if (server) void speakServer(text);
+      else speakBrowser(text);
+    },
+    [server, cancel, speakServer, speakBrowser],
+  );
+
+  return { speak, cancel, speaking, preparing, speaker, pulse, progress, spectrum };
 }
 
 /**
@@ -391,6 +729,7 @@ export function speakable(markdown: string): string {
     .replace(/`([^`]+)`/g, "$1")
     .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
     .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/https?:\/\/\S+/g, "링크")
     .replace(/^\s{0,3}#{1,6}\s+/gm, "")
     .replace(/^\s{0,3}>\s?/gm, "")
     .replace(/^\s*[-*+]\s+/gm, "")
@@ -398,5 +737,7 @@ export function speakable(markdown: string): string {
     .replace(/^\s*\|.*\|\s*$/gm, "")
     .replace(/\n{2,}/g, ". ")
     .replace(/\s+/g, " ")
+    // A table or a code block that came out leaves ". ." behind; one stop is enough.
+    .replace(/(?:[.。]\s*){2,}/g, ". ")
     .trim();
 }
