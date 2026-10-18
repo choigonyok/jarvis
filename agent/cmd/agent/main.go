@@ -360,6 +360,10 @@ func main() {
 	}
 	// A card does not hold a turn open; its decision starts the next one.
 	gate.SetFollowUp(runner)
+	// A job that names no site goes through without a card (jobs.CardFree).
+	if jobsModule != nil {
+		gate.SetAutoAllow(jobsModule.CardFree)
+	}
 	proposals.OnDecide(gate.Resolve)
 
 	// Every card waiting on someone reaches their phone. The guest's cards are
@@ -387,11 +391,26 @@ func main() {
 			if p.Card.Body != "" {
 				body += " - " + p.Card.Body
 			}
+			// A quiet card (mind's gate: not worth a buzz now) waits for the
+			// evening digest; the card itself is up meanwhile.
+			tier, level := "now", "warn"
+			if p.Quiet {
+				tier, level = "digest", "info"
+			}
 			notifier.Send(notify.Event{
-				Source: "agent", Kind: kind, Tier: "now", Level: "warn",
+				Source: "agent", Kind: kind, Tier: tier, Level: level,
 				// Straight to the card, not the bottom of the thread.
 				Title: title, Body: body, URL: "/?proposal=" + p.ID, Key: keyPrefix + p.ID,
 				Audience: audience,
+			})
+		})
+		// Decided, the card's notification is done with: notify-svc marks it
+		// read on this event (its key is the one the notification above carried).
+		proposals.OnDecide(func(p proposal.Proposal, d proposal.Decision) {
+			notifier.Emit(map[string]any{
+				"source": "agent", "type": "proposal.decided", "subject": p.ID,
+				"data": map[string]any{"proposalId": p.ID, "decision": string(d), "notifyKey": keyPrefix + p.ID},
+				"key":  "proposal:decided:" + p.ID,
 			})
 		})
 	}

@@ -63,10 +63,13 @@ type Proposal struct {
 	// Confidence is 0 when the proposal came from a direct instruction:
 	// there is nothing to be confident about when a person just asked.
 	Confidence float64 `json:"confidence,omitempty"`
-	State      State   `json:"state"`
-	Note       string  `json:"note,omitempty"`
-	At         string  `json:"at"`
-	DecidedAt  string  `json:"decidedAt,omitempty"`
+	// Quiet: the card is up, but it is not worth a buzz now (mind's gate
+	// said so) - its notification goes with the evening digest.
+	Quiet     bool   `json:"quiet,omitempty"`
+	State     State  `json:"state"`
+	Note      string `json:"note,omitempty"`
+	At        string `json:"at"`
+	DecidedAt string `json:"decidedAt,omitempty"`
 	// Reason is what the operator said when deciding - why a card was
 	// turned down. It is what the next judgement about the same thing reads.
 	Reason string `json:"reason,omitempty"`

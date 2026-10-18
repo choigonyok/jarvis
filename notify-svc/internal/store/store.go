@@ -112,6 +112,14 @@ func (s *Store) Supersede(ctx context.Context, key string) (bool, error) {
 	return tag.RowsAffected() > 0, err
 }
 
+// Resolve marks the notification behind a key as read - and delivered, if
+// it was still waiting: the card it pointed at has been decided, so there
+// is nothing left to look at. False when no notification carries the key.
+func (s *Store) Resolve(ctx context.Context, key string) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `update notifications set read_at = coalesce(read_at, now()), delivered_at = coalesce(delivered_at, now()) where dedupe_key = $1`, key)
+	return tag.RowsAffected() > 0, err
+}
+
 // Pending is what of one tier is still waiting to go out to one person, oldest first.
 func (s *Store) Pending(ctx context.Context, audience, tier string) ([]Notification, error) {
 	rows, err := s.pool.Query(ctx, `select `+cols+` from notifications where audience = $1 and tier = $2 and delivered_at is null order by created_at`, who(audience), tier)

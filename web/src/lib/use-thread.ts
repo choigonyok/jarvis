@@ -166,6 +166,10 @@ export function useThread() {
       if (message) {
         setError(message);
         void hydrate();
+      } else {
+        // The card's notification is marked read behind this (notify-svc on
+        // the agent's event); the inbox badge is asked to look again.
+        window.setTimeout(() => window.dispatchEvent(new Event("jarvis:decided")), 1500);
       }
       return message;
     },

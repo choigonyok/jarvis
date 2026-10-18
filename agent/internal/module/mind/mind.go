@@ -52,6 +52,9 @@ type Card struct {
 	Evidence   []Evidence `json:"evidence"`
 	Confidence float64    `json:"confidence"`
 	Reversible bool       `json:"reversible"`
+	// Quiet: mind's gate raised the card but did not find it worth a buzz
+	// now - its notification goes with the evening digest.
+	Quiet bool `json:"quiet,omitempty"`
 	// Fields make it a form: a question (a review, "맞나요?") answered on
 	// the card, the answers sent back with the approval.
 	Fields []action.Field `json:"fields,omitempty"`

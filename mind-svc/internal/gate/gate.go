@@ -201,16 +201,16 @@ func (g *Gate) Submit(ctx context.Context, in model.Intent) (model.Intent, error
 		if quiet, why := g.quietCard(ctx, in); quiet {
 			in.Tier, in.Why = "digest", why
 		}
-		if in.Tier == "now" {
-			// The one way a question reaches the operator: a card the agent
-			// shows, answered back here.
-			in.Card = true
-			g.card(ctx, in, "ask")
-			g.tellLocal(ctx, in, "확인해 주세요", in.Title+"\n"+in.Reason)
-			_ = g.st.CountPolicy(ctx, in.Skill, in.ContextKey(), model.OutcomeShown, g.now())
-		} else {
-			g.tell(ctx, in, "확인해 주세요", in.Title+"\n"+in.Reason)
-		}
+		// The one way a question reaches the operator: a card the agent
+		// shows, answered back here. A quiet one (low confidence, the day's
+		// interruptions used up, not worth a buzz) is a card all the same -
+		// it just rings with the evening digest instead of now. A notice
+		// with no card behind it read as "확인해 주세요" with nothing to
+		// confirm and no calendar change (2026-10-18).
+		in.Card = true
+		g.card(ctx, in, "ask")
+		g.tellLocal(ctx, in, "확인해 주세요", in.Title+"\n"+in.Reason)
+		_ = g.st.CountPolicy(ctx, in.Skill, in.ContextKey(), model.OutcomeShown, g.now())
 	case model.Drop:
 		in.Status = model.Dropped
 	}
@@ -571,10 +571,12 @@ func (g *Gate) overBudget(ctx context.Context) bool {
 	return n >= g.policy.DailyInterrupts
 }
 
+// cardsToday is how many questions rang today - the quiet ones, raised for
+// the digest, are not a day's worth of interruption.
 func (g *Gate) cardsToday(ctx context.Context) int {
 	n := 0
 	for _, in := range g.today(ctx) {
-		if in.Card && in.Decision == model.Ask {
+		if in.Card && in.Decision == model.Ask && in.Tier == "now" {
 			n++
 		}
 	}
@@ -607,6 +609,9 @@ type Card struct {
 	Confidence float64          `json:"confidence"`
 	Reversible bool             `json:"reversible"`
 	Fields     []model.Field    `json:"fields,omitempty"`
+	// Quiet: raise the card, but do not ring for it - it goes out with the
+	// evening digest (quietCard said why).
+	Quiet bool `json:"quiet,omitempty"`
 }
 
 // The one path a card takes to the operator, and back.
@@ -618,7 +623,7 @@ const (
 func (g *Gate) card(ctx context.Context, in model.Intent, mode string) {
 	data, _ := json.Marshal(Card{IntentID: in.ID, Mode: mode, Skill: in.Skill, Kind: in.Kind, Title: in.Title, Body: in.Body,
 		Preview: in.Preview, Reason: in.Reason, Why: in.Why, Evidence: in.Evidence, Confidence: in.Confidence, Reversible: in.Reversible,
-		Fields: in.Fields})
+		Fields: in.Fields, Quiet: in.Tier != "now"})
 	g.append(ctx, obs.Observation{Source: "mind", Type: CardRaised, Subject: in.ID, Data: data, Key: CardRaised + ":" + in.ID, OccurredAt: g.now()})
 }
 

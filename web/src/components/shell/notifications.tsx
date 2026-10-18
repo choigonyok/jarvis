@@ -74,8 +74,12 @@ export function Notifications() {
     void load();
     const id = window.setInterval(() => void load(), 60_000);
     const stop = onResume(() => void load());
+    // A card decided on this screen: its "결재 대기" was just marked read.
+    const decided = () => void load();
+    window.addEventListener("jarvis:decided", decided);
     return () => {
       window.clearInterval(id);
+      window.removeEventListener("jarvis:decided", decided);
       stop();
     };
   }, [load]);

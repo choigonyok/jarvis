@@ -146,6 +146,20 @@ func (s *Server) consume(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	if e.Type == "proposal.decided" {
+		// The card was approved or turned down: its "결재 대기" is done with,
+		// read without a tap (2026-10-19).
+		var d struct {
+			NotifyKey string `json:"notifyKey"`
+		}
+		_ = json.Unmarshal(e.Data, &d)
+		if d.NotifyKey != "" {
+			if _, err := s.store.Resolve(r.Context(), d.NotifyKey); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "알림을 정리하지 못했습니다."})
+				return
+			}
+		}
+	}
 	if e.Type == "context.state" {
 		// Driving or in a meeting: pushes wait until it ends.
 		var d struct {

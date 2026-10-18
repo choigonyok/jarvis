@@ -29,6 +29,7 @@ const signed = (v: number) => `${v > 0 ? "+" : ""}${won(v)}`;
 
 export function eventsOf(p: Portfolio, now = new Date()): Event[] {
   const today = now.toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
+  const yesterday = new Date(Date.parse(`${today}T00:00:00+09:00`) - 86_400_000).toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
   const hour = Number(now.toLocaleString("en-US", { timeZone: "Asia/Seoul", hour: "2-digit", hour12: false }));
   const out: Event[] = [];
   const add = (e: Omit<Event, "source" | "url"> & { url?: string }) => out.push({ source: "assets", url: "/assets", ...e });
@@ -51,9 +52,12 @@ export function eventsOf(p: Portfolio, now = new Date()): Event[] {
   }
 
   // Deposits found from a KIS account's cash - worth a look, since nothing
-  // but the arithmetic recorded them.
+  // but the arithmetic recorded them. Told the day after they were found:
+  // a trade the broker books a day apart from the cash reads as money out
+  // one day and back the next, and the next day's look drops such a pair
+  // (kis-flows.ts). An alert at the first look would have gone out already.
   for (const f of p.principal?.flows ?? []) {
-    if (f.source !== "auto" || f.venue === "upbit" || f.date < today) continue;
+    if (f.source !== "auto" || f.venue === "upbit" || f.date !== yesterday) continue;
     add({
       kind: "assets.flow",
       tier: "digest",

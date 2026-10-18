@@ -77,7 +77,10 @@ type Gate struct {
 	log       *slog.Logger
 	debug     bool
 
-	mu sync.Mutex
+	// autoAllow, when set, names calls that need no card although their tool
+	// is not on the allow list: a job that touches no site and no money.
+	autoAllow func(tool string, input json.RawMessage) bool
+	mu        sync.Mutex
 	// grants are approved calls the CLI runs itself (Bash, WebSearch, an
 	// outside MCP server). Keyed by tool and exact arguments, spent once: the
 	// operator approved that call, not the tool.
@@ -104,6 +107,12 @@ func NewGate(
 // SetFollowUp wires the runner in. It is created after the gate, because the
 // runner's MCP config points at the gate's handler.
 func (g *Gate) SetFollowUp(f FollowUp) { g.followUp = f }
+
+// SetAutoAllow installs the judgement of which calls go through without a
+// card though their tool as a whole may not (a reminder job: no site, no
+// browser, no money - see jobs.CardFree). Asked after the call has been
+// rendered honestly and before a card is raised.
+func (g *Gate) SetAutoAllow(f func(tool string, input json.RawMessage) bool) { g.autoAllow = f }
 
 // Handler returns an http.Handler to mount at the path the CLI is pointed at.
 func (g *Gate) Handler() http.Handler {
@@ -138,6 +147,12 @@ func (g *Gate) decide(ctx context.Context, _ *mcp.CallToolRequest, in Request) (
 	// The second half of an approval: the operator said yes, and the model
 	// is back making exactly the call that was approved.
 	if g.spend(tool, act.Input) {
+		return reply(Response{Behavior: "allow"})
+	}
+	// A call that needs no card by its own shape (a job that touches
+	// nothing outside this agent): through, and said so in the log.
+	if g.autoAllow != nil && g.autoAllow(tool, act.Input) {
+		g.log.Info("카드 없이 허용", "tool", tool)
 		return reply(Response{Behavior: "allow"})
 	}
 

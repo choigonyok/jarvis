@@ -92,6 +92,37 @@ func New(store *Store, up *uploads.Store, proposals *proposal.Store, notify Noti
 	return m
 }
 
+// CardFree says whether a job call may go through without an approval card
+// (the permission gate asks): making a job that names no site and attaches
+// no photo, or instructing one. Such a job never gets the browser (it runs
+// from the run's own tools beside the conversation, scheduler.go), so it
+// can neither spend nor act anywhere on the operator's behalf - a reminder,
+// a summary, a check of the agent's own services. A job with sites still
+// goes on a card, as does anything else.
+func (m *Module) CardFree(tool string, input json.RawMessage) bool {
+	switch tool {
+	case QualifiedToolName("create_job"):
+		var in CreateInput
+		if json.Unmarshal(input, &in) != nil {
+			return false
+		}
+		return len(in.Sites) == 0 && len(in.Photos) == 0
+	case QualifiedToolName("instruct_job"):
+		var in InstructInput
+		if json.Unmarshal(input, &in) != nil || in.ID == 0 {
+			return false
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		d, err := m.store.Detail(ctx, in.ID)
+		if err != nil {
+			return false
+		}
+		return len(d.Job.Sites) == 0 && len(d.Job.Photos) == 0
+	}
+	return false
+}
+
 func (m *Module) Name() string                { return Name }
 func (m *Module) Start(context.Context) error { return nil }
 func (m *Module) Stop(context.Context) error  { return nil }

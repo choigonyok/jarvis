@@ -40,12 +40,20 @@ const won = (v: number) => `${v < 0 ? "−" : ""}₩${Math.round(Math.abs(v)).to
 export type CashVenue = "kis" | "gold";
 const ACCOUNT: Record<CashVenue, string> = { kis: "한국투자증권", gold: "금현물 계좌" };
 
-/** Net settled money from `since` through `date`, per currency. */
+/**
+ * Net settled money from `since` through `date`, per currency.
+ *
+ * Won settles on its day (the gold account, KRX hours). Dollars settle in
+ * New York, which is the night of that Korean date and the next Korean
+ * morning: at the first look after midnight a sale with today's settlement
+ * date is in the books but not yet in the balance, and counting it read as
+ * a withdrawal of its size (2026-10-19, ₩125,721 that nobody took out). So
+ * a dollar settlement counts from the day after its date.
+ */
 export function settledThrough(settlements: Settlement[], date: string): { krw: number; usd: number } {
-  const upTo = settlements.filter((s) => s.date <= date);
   return {
-    krw: upTo.reduce((sum, s) => sum + s.krw, 0),
-    usd: upTo.reduce((sum, s) => sum + s.usd, 0),
+    krw: settlements.filter((s) => s.date <= date).reduce((sum, s) => sum + s.krw, 0),
+    usd: settlements.filter((s) => s.date < date).reduce((sum, s) => sum + s.usd, 0),
   };
 }
 

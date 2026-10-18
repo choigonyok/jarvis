@@ -217,3 +217,39 @@ func TestSitesCardAddsOnlyWhenApproved(t *testing.T) {
 		t.Fatalf("승인하면 더하고 알림: %v %v", added, answers)
 	}
 }
+
+// A job that names no site and attaches no photo is made without a card; one
+// with a site still goes on one (2026-10-19: reminders asked for approval).
+func TestReminderJobsNeedNoCard(t *testing.T) {
+	svc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/jobs/1":
+			_ = json.NewEncoder(w).Encode(Detail{Job: Job{ID: 1, Title: "개발 할 일 알림"}})
+		case "/jobs/2":
+			_ = json.NewEncoder(w).Encode(Detail{Job: Job{ID: 2, Title: "가격 지켜보기", Sites: []string{"shop.example"}}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer svc.Close()
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	m := New(NewStore(svc.URL, ""), nil, proposal.NewStore(bus.New()), nil, quiet)
+	create := QualifiedToolName("create_job")
+	instruct := QualifiedToolName("instruct_job")
+	for _, c := range []struct {
+		tool, input string
+		free        bool
+	}{
+		{create, `{"title":"매일 아침 날씨","goal":"아침 8시에 알려 준다"}`, true},
+		{create, `{"title":"판매","goal":"올린다","sites":["web.joongna.com"]}`, false},
+		{create, `{"title":"판매","goal":"올린다","photos":["a.jpg"]}`, false},
+		{instruct, `{"id":1,"text":"내용 추가"}`, true},
+		{instruct, `{"id":2,"text":"가격 내려"}`, false},
+		{instruct, `{"id":9,"text":"없는 작업"}`, false},
+		{"mcp__jobs__list_jobs", `{}`, false},
+	} {
+		if got := m.CardFree(c.tool, json.RawMessage(c.input)); got != c.free {
+			t.Errorf("%s %s: 카드 없이 %v, want %v", c.tool, c.input, got, c.free)
+		}
+	}
+}

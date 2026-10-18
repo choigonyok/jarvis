@@ -106,7 +106,7 @@ func (e *Engine) raiseCard(ev Event) {
 	input, _ := json.Marshal(in)
 	p, _ := e.proposals.Open(proposal.Proposal{
 		Origin: proposal.OriginSuggest, Action: action.Action{Kind: kind, Input: input},
-		Card: card, Confidence: c.Confidence,
+		Card: card, Confidence: c.Confidence, Quiet: c.Quiet,
 	})
 	if e.cfg.Say != nil {
 		lead := strings.TrimSpace(c.Reason)
