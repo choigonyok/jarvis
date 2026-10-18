@@ -119,3 +119,19 @@ func TestYieldWait(t *testing.T) {
 		t.Errorf("쿨다운이 한 시간보다 길면 그대로: %v", got)
 	}
 }
+
+// The lookup reads an order's date and amount from a screenshot: the element
+// list leaves plain text out, and the extraction tool needs an LLM key the
+// browser does not have (2026-10-18, every lookup ended without them).
+func TestTheLookupCanSeeThePage(t *testing.T) {
+	has := map[string]bool{}
+	for _, tool := range enrichTools {
+		has[tool] = true
+	}
+	if !has["mcp__"+BrowserServer+"__browser_screenshot"] || has["mcp__"+BrowserServer+"__browser_extract_content"] {
+		t.Fatalf("도구: %v", enrichTools)
+	}
+	if !strings.Contains(enrichSystem, "browser_screenshot") {
+		t.Fatal("지시문이 스크린샷으로 읽으라고 해야 합니다")
+	}
+}

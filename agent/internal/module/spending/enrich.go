@@ -28,10 +28,15 @@ const BrowserServer = "mcp-browser"
 // enrichTools is everything the background lookup may call. Reading and
 // clicking through order pages - no typing, so no logging in, no search
 // boxes, no checkout forms - and the two tools that write its answer.
+//
+// The screenshot is how it reads an order's date and amount: Coupang's order
+// list shows them as plain text, which browser_get_state's element list
+// leaves out, and browser_extract_content needs an LLM key the browser does
+// not have - every lookup on 2026-10-18 ended "주문일·금액이 안 보임".
 var enrichTools = []string{
 	"mcp__" + BrowserServer + "__browser_navigate",
 	"mcp__" + BrowserServer + "__browser_get_state",
-	"mcp__" + BrowserServer + "__browser_extract_content",
+	"mcp__" + BrowserServer + "__browser_screenshot",
 	"mcp__" + BrowserServer + "__browser_scroll",
 	"mcp__" + BrowserServer + "__browser_click",
 	"mcp__" + BrowserServer + "__browser_go_back",
@@ -297,6 +302,7 @@ const enrichSystem = `당신은 Jarvis의 백그라운드 가계부 작업입니
 - 작업이 끝나면 직접 연 탭은 닫으세요. 원래 있던 탭은 건드리지 마세요.
 
 주문 찾기
+- browser_get_state 는 누를 수 있는 요소만 보여 줍니다. 주문일·금액·상품 줄처럼 그냥 글자인 것은 browser_screenshot 으로 화면을 보고 읽으세요(필요하면 스크롤한 뒤 다시).
 - 결제 시각과 같은 날, 결제 시각 몇 분 이내에 주문된 건을 찾습니다. 금액은 쿠폰·쿠팡캐시·적립금 때문에 카드 금액보다 클 수 있고, 배송비 때문에 작을 수 있습니다.
 - 쿠팡 주문목록: https://mc.coupang.com/ssr/desktop/order/list
 - 네이버페이 결제내역: https://pay.naver.com/pc/history (또는 https://pay.naver.com/pcpay)
