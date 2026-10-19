@@ -7,19 +7,28 @@ import type { Settlement } from "./venues.js";
  * account and the gold account alike.
  *
  * The share account holds won and dollars (the gold account only won, and
- * settles its trades in won; the same sums hold with the dollar side at zero). Won moves when money comes in or goes
- * out, and when it is exchanged; dollars move when a trade settles (KIS says
- * by how much - settlementsOf), when they are exchanged, and with the odd
- * dividend. An exchange takes from one side what it gives the other, so at
- * one rate it nets out:
+ * settles its trades in won the same day; the same sums hold with the dollar
+ * side at zero). Won moves when money comes in or goes out, and when it is
+ * exchanged; dollars move when a trade fills (KIS says by how much -
+ * movementsOf), when they are exchanged, and with the odd dividend. An
+ * exchange takes from one side what it gives the other, so at one rate it
+ * nets out:
  *
- *   in - out ≈ Δwon + rate × (Δdollars - settled dollars)
+ *   in - out ≈ Δwon + rate × (Δdollars - traded dollars)
  *
- * Going forward that is exact to the day: the settled cash is written down
- * once a day per currency (db.recordKisCash) and each day is measured against
- * the last, at that day's rate - so dollars merely held while the rate moves
- * count as nothing. The past has no such record, so there the hand-kept ledger
- * stays and is checked instead (reconcile).
+ * The dollars are the book's (venues.ts bookCash): settled, sold and bought
+ * alike, so a fill moves them the moment it happens and its settlement does
+ * not move them at all - and the trades are counted on their trade day. Both
+ * sides then move together; nothing here has to know when KIS posts a
+ * settlement into the deposit (it is the Korean morning after New York
+ * settles, at no fixed hour: guessing it read a sale's dollars as taken out,
+ * twice - 2026-10-19 and 2026-10-20).
+ *
+ * Going forward that is exact to the day: the cash is written down once a day
+ * per currency (db.recordCash) and each day is measured against the last, at
+ * that day's rate - so dollars merely held while the rate moves count as
+ * nothing. The past has no such record, so there the hand-kept ledger stays
+ * and is checked instead (reconcile).
  */
 
 /** Smaller than this is a dividend, interest or an exchange's spread, not someone moving money. */
@@ -40,27 +49,19 @@ const won = (v: number) => `${v < 0 ? "−" : ""}₩${Math.round(Math.abs(v)).to
 export type CashVenue = "kis" | "gold";
 const ACCOUNT: Record<CashVenue, string> = { kis: "한국투자증권", gold: "금현물 계좌" };
 
-/**
- * Net settled money from `since` through `date`, per currency.
- *
- * Won settles on its day (the gold account, KRX hours). Dollars settle in
- * New York, which is the night of that Korean date and the next Korean
- * morning: at the first look after midnight a sale with today's settlement
- * date is in the books but not yet in the balance, and counting it read as
- * a withdrawal of its size (2026-10-19, ₩125,721 that nobody took out). So
- * a dollar settlement counts from the day after its date.
- */
-export function settledThrough(settlements: Settlement[], date: string): { krw: number; usd: number } {
+/** Net traded money through `date`, per currency: what the trades have moved the cash by. */
+export function movedThrough(movements: Settlement[], date: string): { krw: number; usd: number } {
+  const upTo = movements.filter((m) => m.date <= date);
   return {
-    krw: settlements.filter((s) => s.date <= date).reduce((sum, s) => sum + s.krw, 0),
-    usd: settlements.filter((s) => s.date < date).reduce((sum, s) => sum + s.usd, 0),
+    krw: upTo.reduce((sum, m) => sum + m.krw, 0),
+    usd: upTo.reduce((sum, m) => sum + m.usd, 0),
   };
 }
 
 /**
- * Write today's settled cash and turn the change since the last day into a
- * found flow, stored on today's date (source 'auto'). Recomputed on every
- * look, so the day's last look wins.
+ * Write today's cash and turn the change since the last day that the trades
+ * do not explain into a found flow, stored on today's date (source 'auto').
+ * Recomputed on every look, so the day's last look wins.
  *
  * A trade KIS books a day later than the cash shows it would read as money
  * in one day and the same money out the next. Such a pair cancels: when
@@ -70,10 +71,10 @@ export async function detectFlow(
   venue: CashVenue,
   today: string,
   cash: { krw: number; usd: number },
-  settlements: Settlement[],
+  movements: Settlement[],
   usdKrw: number,
 ): Promise<void> {
-  const settled = settledThrough(settlements, today);
+  const settled = movedThrough(movements, today);
   const prev = await db.recordCash({
     venue,
     date: today,
@@ -110,13 +111,13 @@ export async function detectFlow(
 /**
  * The KIS ledger against what the trades say.
  *
- * The recorded flows and the settled trades are replayed day by day from an
- * empty account, won and dollars apart. Exchanges are not recorded anywhere,
+ * The recorded flows and the trades are replayed day by day from an empty
+ * account, won and dollars apart. Exchanges are not recorded anywhere,
  * so they are inferred the only way they can have happened: a purchase the
  * dollars cannot cover was paid with won exchanged that day, and a
  * withdrawal the won cannot cover was paid with dollars exchanged that day,
  * at KIS's rate from the nearest trade. Two things can then be caught:
- * - a day the account runs dry: something settled or went out with too
+ * - a day the account runs dry: something was bought or went out with too
  *   little recorded in - a deposit missing, or written down too late;
  * - an end that does not match today's cash: a flow left out, or written
  *   down with the wrong amount.
@@ -132,36 +133,30 @@ export async function detectFlow(
 export function reconcile(
   venue: CashVenue,
   flows: Flow[],
-  settlements: Settlement[],
+  movements: Settlement[],
   now: { krw: number; usd: number },
   usdKrw: number,
   today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" }),
 ): { checks: LedgerCheck[]; fxKrw: number } {
-  // `now` is settled cash: a trade that settles after today is not in it yet.
-  // Counting it read every sale as money gone until its settlement day (a US
-  // share settles the next business day - 2026-10-17's test sale). Won
-  // settles on its day; dollars settle in New York, during the night of that
-  // Korean date, and are in the balance from the next morning - the same rule
-  // as settledThrough. Counting a sale's dollars on its settlement date read
-  // as "₩133,108 should be here but there is ₩0" all that day (2026-10-19,
-  // 1 KO sold 10/16, settled 10/19).
-  const wonDue = settlements.filter((s) => s.date <= today);
-  const usdDue = settlements.filter((s) => s.date < today);
+  // `now` is the book's cash (settled or not) and the trades are on their
+  // trade day, so a trade is on both sides from the moment it fills - when
+  // it settles changes neither (see the head of this file).
+  const due = movements.filter((m) => m.date <= today);
   const wonIn = new Map<string, number>();
   for (const f of flows) if (f.venue === venue) wonIn.set(f.date, (wonIn.get(f.date) ?? 0) + f.amountKrw);
-  for (const s of wonDue) wonIn.set(s.date, (wonIn.get(s.date) ?? 0) + s.krw);
-  const usdIn = new Map(usdDue.map((s) => [s.date, s.usd]));
+  for (const m of due) wonIn.set(m.date, (wonIn.get(m.date) ?? 0) + m.krw);
+  const usdIn = new Map(due.map((m) => [m.date, m.usd]));
   const days = [...new Set([...wonIn.keys(), ...usdIn.keys()])].sort();
   // KIS's rate on the nearest trading day, before or after.
   const rateOn = (date: string) => {
     let best = usdKrw;
     let gap = Infinity;
-    for (const s of settlements) {
-      if (!s.rate) continue;
-      const g = Math.abs(Date.parse(s.date) - Date.parse(date));
+    for (const m of movements) {
+      if (!m.rate) continue;
+      const g = Math.abs(Date.parse(m.date) - Date.parse(date));
       if (g < gap) {
         gap = g;
-        best = s.rate;
+        best = m.rate;
       }
     }
     return best;

@@ -115,7 +115,8 @@ export function replayUpbit(
  * made today shows what it brought in rather than ₩0, and a share bought
  * today what it cost. The fee is what the account's settled fills have been
  * charged, as a share of their amount. Once KIS settles a fill its own won
- * replace these.
+ * replace these. Its dollars, net of the same fee, too when KIS gives none:
+ * the cash checks count a fill on its trade day (movementsOf).
  */
 export function priceUnsettled(trades: KisTrade[], rate: number): KisTrade[] {
   if (!(rate > 0) || trades.every((t) => t.settled)) return trades;
@@ -131,7 +132,9 @@ export function priceUnsettled(trades: KisTrade[], rate: number): KisTrade[] {
     if (t.settled) return t;
     const grossKrw = t.grossUsd * rate;
     const fee = grossKrw * feeRate;
-    return { ...t, rate, grossKrw, netKrw: t.side === "sell" ? grossKrw - fee : grossKrw + fee };
+    const sell = t.side === "sell";
+    const netUsd = t.netUsd > 0 ? t.netUsd : t.grossUsd * (sell ? 1 - feeRate : 1 + feeRate);
+    return { ...t, rate, grossKrw, netKrw: sell ? grossKrw - fee : grossKrw + fee, netUsd };
   });
 }
 

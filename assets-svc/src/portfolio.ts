@@ -1,7 +1,7 @@
 import { changesFor } from "./change.js";
 import * as db from "./db.js";
 import { allocationOf } from "./target.js";
-import { detectFlow, reconcile } from "./kis-flows.js";
+import { type CashVenue, detectFlow, reconcile } from "./kis-flows.js";
 import { COIN_TAX_FROM, priceUnsettled, replayKis, replayUpbit, salesFrom, summarize } from "./realized.js";
 import type {
   Bridge,
@@ -20,7 +20,7 @@ import {
   kisGoldAccount,
   kisHoldings,
   kisTrades,
-  settlementsOf,
+  movementsOf,
   upbitDailyCloses,
   upbitFills,
   upbitFlows,
@@ -64,6 +64,36 @@ const upbitTradesCached = memo(() => CLOSED_TTL_MS, async () => {
   }
   return { fills, closeAtStart };
 });
+
+/** Each KIS account's cash at the last look - see reread. */
+const lastCash = new Map<CashVenue, { krw: number; usd: number }>();
+
+/**
+ * The trades an account's cash is checked against, read again when the cash
+ * moved since the last look. The cash is reread within seconds while a market
+ * is open and the trades within minutes, but a fill moves the cash the moment
+ * it happens and the checks count it on its trade day: against trades read
+ * before it, the fill would read as money in or out until they were read
+ * again. Null when that read fails, so the check sits this look out.
+ */
+async function reread<T>(
+  venue: CashVenue,
+  cash: { krw: number; usd: number } | null,
+  trades: T | null,
+  cached: { get(): Promise<T>; clear(): void },
+  problems: string[],
+  label: string,
+): Promise<T | null> {
+  if (!cash) return trades;
+  const last = lastCash.get(venue);
+  lastCash.set(venue, cash);
+  if (!trades || !last || (Math.abs(cash.krw - last.krw) < 1 && Math.abs(cash.usd - last.usd) < 0.005)) return trades;
+  cached.clear();
+  return cached.get().catch((e: Error) => {
+    problems.push(`${label}: ${e.message}`);
+    return null;
+  });
+}
 
 function dayBefore(date: string): string {
   const d = new Date(`${date}T00:00:00Z`);
@@ -128,7 +158,7 @@ export async function buildPortfolio(): Promise<Portfolio> {
   lastRate = usdtKrw;
   const problems: string[] = [];
 
-  const [upbit, kis, gold, upbitFlowsRead, kisFills, upbitTrades, goldSettled] = await Promise.all([
+  const [upbit, kis, gold, upbitFlowsRead, kisFillsRead, upbitTrades, goldSettledRead] = await Promise.all([
     upbitCached.get().catch((e: Error) => {
       problems.push(`업비트: ${e.message}`);
       return { holdings: [] as Holding[], cashKrw: 0, cash: [] as CashLine[], problems: [] as string[] };
@@ -139,7 +169,7 @@ export async function buildPortfolio(): Promise<Portfolio> {
         holdings: [] as Holding[],
         cashKrw: 0,
         cash: [] as CashLine[],
-        settledCash: null as { krw: number; usd: number } | null,
+        bookCash: null as { krw: number; usd: number } | null,
         usdKrw: usdtKrw,
         problems: [] as string[],
       };
@@ -166,11 +196,17 @@ export async function buildPortfolio(): Promise<Portfolio> {
     }),
   ]);
 
+  const goldCash = gold ? { krw: gold.cashKrw, usd: 0 } : null;
+  const [kisFills, goldSettled] = await Promise.all([
+    reread("kis", kis.bookCash, kisFillsRead, kisTradesCached, problems, "한국투자증권 거래내역"),
+    reread("gold", goldCash, goldSettledRead, goldSettlementsCached, problems, "금현물 매매 내역"),
+  ]);
+
   // The page's dollar rate is KIS's: almost every dollar held is held there.
   const usdKrw = kis.usdKrw;
   // A fill not settled yet carries no won: priced at the page's rate.
   const fills = kisFills ? priceUnsettled(kisFills, usdKrw) : null;
-  const settlements = fills ? settlementsOf(fills, PRINCIPAL_SINCE) : null;
+  const movements = fills ? movementsOf(fills, PRINCIPAL_SINCE) : null;
 
   // KIS's sales on the won actually paid and received, and what is still held
   // at the won it cost - see replayKis. A holding whose quantity the replay
@@ -195,18 +231,17 @@ export async function buildPortfolio(): Promise<Portfolio> {
     for (const h of gold.holdings) h.since = firstBuy;
   }
 
-  // Each KIS account's cash today against its last day's: what the settled
-  // trades do not explain is a deposit or withdrawal, written into the ledger
-  // before it is read below. Only with both halves - a guess from one would
-  // be stored.
+  // Each KIS account's cash today against its last day's: what the trades do
+  // not explain is a deposit or withdrawal, written into the ledger before it
+  // is read below. Only with both halves - a guess from one would be stored.
   const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
   const accounts = [
-    { venue: "kis" as const, cash: kis.settledCash, settlements, label: "한국투자증권" },
-    { venue: "gold" as const, cash: gold ? { krw: gold.cashKrw, usd: 0 } : null, settlements: goldSettled, label: "금현물" },
+    { venue: "kis" as const, cash: kis.bookCash, movements, label: "한국투자증권" },
+    { venue: "gold" as const, cash: goldCash, movements: goldSettled, label: "금현물" },
   ];
   for (const a of accounts) {
-    if (!a.cash || !a.settlements) continue;
-    await detectFlow(a.venue, today, a.cash, a.settlements, usdKrw).catch((e: Error) => {
+    if (!a.cash || !a.movements) continue;
+    await detectFlow(a.venue, today, a.cash, a.movements, usdKrw).catch((e: Error) => {
       problems.push(`${a.label} 입출금 감지: ${e.message}`);
     });
   }
@@ -301,8 +336,8 @@ export async function buildPortfolio(): Promise<Portfolio> {
       checks: [],
     };
     for (const a of accounts) {
-      if (!a.cash || !a.settlements) continue;
-      const r = reconcile(a.venue, flows, a.settlements, a.cash, usdKrw);
+      if (!a.cash || !a.movements) continue;
+      const r = reconcile(a.venue, flows, a.movements, a.cash, usdKrw);
       principal.checks.push(...r.checks);
       if (a.venue === "kis") kisFxKrw = r.fxKrw;
     }

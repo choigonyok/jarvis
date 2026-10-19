@@ -63,7 +63,7 @@ export function eventsOf(p: Portfolio, now = new Date()): Event[] {
       tier: "digest",
       url: at("principal"),
       title: `${f.venue === "gold" ? "금현물 계좌" : "한국투자증권"} ${f.amountKrw > 0 ? "입금" : "출금"} ${won(Math.abs(f.amountKrw))} 감지`,
-      body: "현금 변화에서 결제된 매매를 뺀 금액이에요. 맞는지 확인해 주세요.",
+      body: "현금 변화에서 체결된 매매를 뺀 금액이에요. 맞는지 확인해 주세요.",
       key: `assets:flow:${f.id}:${Math.round(f.amountKrw)}`,
     });
   }

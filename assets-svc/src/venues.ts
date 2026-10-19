@@ -548,7 +548,16 @@ type KisCurrency = {
  */
 async function kisForeignCash(token: string): Promise<{
   usd: number;
-  settledUsd: number;
+  /**
+   * The same dollars for the cash checks (kis-flows.ts): settled, sold and
+   * bought alike, signed, with a waiting limit buy's dollars still counted.
+   * They move when a fill happens and not when it settles - a settlement only
+   * moves dollars from "unsettled" into the deposit - so a check against the
+   * fills by trade day never has to guess when KIS posts a settlement.
+   * Null when the waiting buys could not be read: a half would read as money
+   * moved.
+   */
+  bookUsd: number | null;
   rate: number | null;
   problems: string[];
 }> {
@@ -567,14 +576,14 @@ async function kisForeignCash(token: string): Promise<{
   );
 
   let usd = 0;
-  let settledUsd = 0;
+  let bookUsd = 0;
   const unpriced: string[] = [];
   for (const row of body.output2 ?? []) {
-    if (row.crcy_cd === "USD") settledUsd += Number(row.frcr_dncl_amt_2) || 0;
     const amount =
-      Number(row.frcr_dncl_amt_2) +
-      Number(row.frcr_sll_amt_smtl) -
-      Number(row.frcr_buy_amt_smtl);
+      (Number(row.frcr_dncl_amt_2) || 0) +
+      (Number(row.frcr_sll_amt_smtl) || 0) -
+      (Number(row.frcr_buy_amt_smtl) || 0);
+    if (row.crcy_cd === "USD") bookUsd += amount;
     if (!(amount > 0)) continue;
     if (row.crcy_cd === "USD") usd += amount;
     else unpriced.push(row.crcy_cd);
@@ -583,11 +592,17 @@ async function kisForeignCash(token: string): Promise<{
   // as spent (frcr_buy_amt_smtl) though nothing was bought: without this the
   // total, the return and the deposit check all dropped by it while the
   // order waited (a standing order, 2026-10-17).
-  usd += await kisUnfilledBuyUsd(token).catch(() => 0);
+  let held: number | null = null;
+  try {
+    held = await kisUnfilledBuyUsd(token);
+  } catch {
+    // shown as if nothing waited; the checks skip this look
+  }
+  usd += held ?? 0;
   const rate = Number(body.output1?.find((r) => r.buy_crcy_cd === "USD" && Number(r.bass_exrt) > 0)?.bass_exrt);
   return {
     usd,
-    settledUsd,
+    bookUsd: held === null ? null : bookUsd + held,
     rate: rate > 0 ? rate : null,
     problems: unpriced.length
       ? [`한국투자증권: 환율을 몰라 빠진 외화 예수금 ${unpriced.join(", ")}`]
@@ -633,13 +648,13 @@ export async function kisHoldings(fallbackRate: number): Promise<{
   cashKrw: number;
   cash: CashLine[];
   /**
-   * Cash that has settled, each currency on its own - a sale settles in
-   * dollars and stays dollars until it is exchanged, so adding the two at
-   * today's rate would turn every move of the rate into money in or out.
-   * Null when the dollar side could not be read: a half would read as money
-   * gone missing.
+   * Cash as the checks count it (kis-flows.ts), each currency on its own - a
+   * sale's proceeds stay dollars until exchanged, so adding the two at today's
+   * rate would turn every move of the rate into money in or out. The dollars
+   * include what is sold or bought but not settled yet (bookUsd). Null when
+   * the dollar side could not be read: a half would read as money gone missing.
    */
-  settledCash: { krw: number; usd: number } | null;
+  bookCash: { krw: number; usd: number } | null;
   /** The rate everything dollar here was valued at. */
   usdKrw: number;
   problems: string[];
@@ -654,7 +669,7 @@ export async function kisHoldings(fallbackRate: number): Promise<{
   // not fatal - the shares still answer, at the fallback rate.
   const foreign = await kisForeignCash(token).catch((e: Error) => ({
     usd: 0,
-    settledUsd: null,
+    bookUsd: null,
     rate: null,
     problems: [`한국투자증권 외화 예수금: ${e.message}`],
   }));
@@ -754,16 +769,18 @@ export async function kisHoldings(fallbackRate: number): Promise<{
     holdings,
     cashKrw: cashKrw + foreign.usd * usdKrw,
     cash,
-    settledCash: foreign.settledUsd === null ? null : { krw: cashKrw, usd: foreign.settledUsd },
+    bookCash: foreign.bookUsd === null ? null : { krw: cashKrw, usd: foreign.bookUsd },
     usdKrw,
     problems: foreign.problems,
   };
 }
 
 /**
- * One settlement day's net money - sales +, purchases -, fees already in.
- * The share account settles in dollars, with KIS's rate that day (the nearest
- * thing to what an exchange then cost); the gold account settles in won.
+ * One day's net money from trades - sales +, purchases -, fees already in -
+ * on the day it moved the cash the checks read. The share account trades in
+ * dollars, counted on the trade day with KIS's rate that day (the nearest
+ * thing to what an exchange then cost); the gold account settles in won the
+ * same day.
  */
 export type Settlement = { date: string; krw: number; usd: number; rate: number };
 
@@ -816,7 +833,7 @@ const dashed = (d: string) => `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)
 
 /**
  * Overseas fills traded since `since` (CTOS4001R), oldest first. Both the
- * realized returns (realized.ts) and the cash checks (settlementsOf) are
+ * realized returns (realized.ts) and the cash checks (movementsOf) are
  * made from these, so they are asked once. Domestic trades are not read; the
  * domestic side is unused.
  */
@@ -883,36 +900,26 @@ export async function kisTrades(since: string): Promise<KisTrade[]> {
 }
 
 /**
- * The share account's dollars by settlement day, for fills traded on or
- * after `since`: what actually moved in the dollar balance. The account
- * settles in dollars - a sale's proceeds stay dollars until exchanged by hand.
+ * The share account's dollars by trade day, for fills traded on or after
+ * `since`: the account trades in dollars, and a sale's proceeds stay dollars
+ * until exchanged by hand.
+ *
+ * By the trade day and not the settlement day, because the cash the checks
+ * read (bookCash) moves at the fill: KIS posts a settlement into the deposit
+ * the Korean morning after New York settles, at an hour nothing here can
+ * know, and counting a sale on any guessed day read the gap as money taken
+ * out - ₩125,721 on 2026-10-19 at 00:03, ₩125,152 on 2026-10-20 at 00:02,
+ * the same $93.23 both times.
  */
-export function settlementsOf(trades: KisTrade[], since: string): Settlement[] {
+export function movementsOf(trades: KisTrade[], since: string): Settlement[] {
   const byDay = new Map<string, Settlement>();
   for (const t of trades) {
     if (t.date < since) continue;
-    const date = settlesOn(t);
-    const day = byDay.get(date) ?? { date, krw: 0, usd: 0, rate: t.rate };
+    const day = byDay.get(t.date) ?? { date: t.date, krw: 0, usd: 0, rate: t.rate };
     day.usd += t.side === "sell" ? t.netUsd : -t.netUsd;
-    byDay.set(date, day);
+    byDay.set(t.date, day);
   }
   return [...byDay.values()].sort((a, b) => a.date.localeCompare(b.date));
-}
-
-/**
- * When a fill settles: KIS's date, but never before the next US business
- * day after the trade (T+1). Right after an overnight fill KIS has shown a
- * provisional settlement date as early as the trade's own day, and the cash
- * checks then counted dollars days before they could be in the account
- * (2026-10-17 01:03, "₩134,036 should be here"). US holidays are not known
- * here; on one the check is a day early at worst.
- */
-export function settlesOn(t: Pick<KisTrade, "date" | "settleDate">): string {
-  const d = new Date(`${t.date}T00:00:00Z`);
-  do d.setUTCDate(d.getUTCDate() + 1);
-  while (d.getUTCDay() === 0 || d.getUTCDay() === 6);
-  const earliest = d.toISOString().slice(0, 10);
-  return t.settleDate && t.settleDate > earliest ? t.settleDate : earliest;
 }
 
 /**
