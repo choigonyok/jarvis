@@ -39,10 +39,9 @@
   `JARVIS_EDGE_GUEST_TOKEN`(콘솔이 손님 요청에 내는 토큰, 둘 다, 맥북 `~/.config/jarvis/edge-guest-token`),
   `JARVIS_GUEST_API_TOKEN`(손님 agent 의 토큰, 게이트웨이와 맥미니 .env).
   `npx wrangler secret put … -c ../edge/wrangler.jsonc`. 콘솔 Worker 에는 `JARVIS_API_TOKEN` 을 두지 않는다.
-- 생활 탭(mind): VPC 서비스 `jarvis-mind`(호스트 `mind`, 포트 8102, 같은 터널)를 만들어
-  `edge/wrangler.jsonc` 에 `MIND` 바인딩으로 넣는다 - `npx wrangler vpc service create jarvis-mind --type http
-  --tunnel-id <jarvis-agent 터널 id> --hostname mind --http-port 8102`. 게이트웨이는 mind 의 읽기 넷(노트·지도·물건·식사)과
-  노트 결정(`POST /mind/api/notes/{id}`)만 연다(`mindRoute`). 콘솔 변수 `MIND_URL`. 바인딩이 없으면 그 탭만 "닿지 못했습니다".
+- 생활 탭(mind): VPC 서비스 `jarvis-mind`(호스트 `mind`, 포트 8102, 같은 터널, 2026-10-19 생성)가
+  `edge/wrangler.jsonc` 의 `MIND` 바인딩이다. 게이트웨이는 mind 의 읽기 넷(노트·지도·물건·식사)과
+  노트 결정(`POST /mind/api/notes/{id}`)만 연다(`mindRoute`). 콘솔 변수 `MIND_URL`.
 - 콘솔 비밀 `JARVIS_VNC_PASSWORD`: 화면 탭이 원격 화면에 낼 비밀번호(맥미니 .env 의 같은 이름과 같은 값, 8자).
 - 게이트웨이는 콘솔보다 먼저 배포한다. 공개 주소는 폰의 문만 열려 있어서, 콘솔이 옛 바인딩(기본
   엔트리포인트)으로 부르는 동안 새 게이트웨이가 올라가면 콘솔이 404 를 받는다. 바인딩을 바꿀 때는
