@@ -422,7 +422,6 @@ export function Thread() {
     drop,
     decide,
   } = useThread();
-  const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const search = useThreadSearch(scrollRef);
@@ -455,6 +454,10 @@ export function Thread() {
   // scroll from the top. After that, new turns pull the view down only while
   // the reader is at the bottom; someone scrolled up to read is left there.
   const landed = useRef(false);
+  // The scroller it landed in. The voice stage takes this whole screen, the
+  // scroller with it, and coming back builds a fresh one at the top: a new
+  // scroller lands again, rather than opening on the oldest turns.
+  const landedIn = useRef<HTMLElement | null>(null);
   const pinned = useRef(true);
   // Up far enough that the newest turn is out of sight: the way back down is
   // offered (the button over the composer).
@@ -479,8 +482,9 @@ export function Thread() {
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el || turns.length === 0) return;
-    if (!landed.current) {
+    if (landedIn.current !== el) {
       el.scrollTop = el.scrollHeight;
+      landedIn.current = el;
       landed.current = true;
       pinned.current = true;
       return;
@@ -492,8 +496,16 @@ export function Thread() {
       return;
     }
     if (held.current) return;
-    if (pinned.current) bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [turns, proposals, thinking, error]);
+    // The very bottom, where landing put it - not an empty div after the last
+    // turn: aligning that left the thread's bottom padding (the room the last
+    // line has above the composer's fade) out of sight, so every fresh read -
+    // coming back to the tab, say - slid the view 48px up, the last line under
+    // the fade.
+    if (pinned.current) {
+      const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      el.scrollTo({ top: el.scrollHeight, behavior: still ? "auto" : "smooth" });
+    }
+  }, [turns, proposals, thinking, error, mode]);
 
   // Scrolling up near the top asks for the page above. Asked once per page:
   // the next ask waits for this one to land (loadingOlder) and be measured.
@@ -608,7 +620,8 @@ export function Thread() {
     });
     ro.observe(content);
     return () => ro.disconnect();
-  }, []);
+    // Again for the scroller the voice stage's return builds.
+  }, [mode]);
 
   // Watch the waiting cards themselves rather than guessing from scroll
   // position: the bar exists to speak for a decision you cannot see, so what
@@ -637,7 +650,7 @@ export function Thread() {
     );
     for (const card of cards) observer.observe(card);
     return () => observer.disconnect();
-  }, [pending, turns, proposals]);
+  }, [pending, turns, proposals, mode]);
 
   // The chosen mode should survive a reload; reading it in an effect keeps the
   // server render and the first client render identical.
@@ -758,7 +771,6 @@ export function Thread() {
             onJump={jumpTo}
             onDecide={decide}
           />
-          <div ref={bottomRef} />
         </div>
       </main>
 
@@ -785,7 +797,7 @@ export function Thread() {
                   onClick={toBottom}
                   aria-label={unseen ? `새 메시지 ${unseen}개, 맨 아래로` : "맨 아래로"}
                   className={cn(
-                    "liquid-glass anim-settle pointer-events-auto flex h-11 items-center justify-center gap-1.5 rounded-full text-dim transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-10",
+                    "anim-settle pointer-events-auto flex h-11 items-center justify-center gap-1.5 rounded-full bg-popover text-dim shadow-lg ring-1 ring-edge transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-10",
                     unseen ? "pr-3.5 pl-4" : "w-11 sm:w-10",
                   )}
                 >

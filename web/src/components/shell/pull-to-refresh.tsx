@@ -140,7 +140,7 @@ export function PullToRefresh() {
     >
       <span
         className={cn(
-          "flex size-9 items-center justify-center rounded-full border border-edge bg-background/90 shadow-lg backdrop-blur-md transition-colors",
+          "flex size-9 items-center justify-center rounded-full border border-edge bg-popover shadow-lg transition-colors",
           ready ? "text-foreground" : "text-faint",
         )}
       >

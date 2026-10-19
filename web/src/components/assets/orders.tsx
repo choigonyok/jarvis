@@ -277,7 +277,7 @@ export function OrderSheet({
                 disabled={s === "sell" && holding.quantity <= 0}
                 className={cn(
                   "tap rounded-md text-[13.5px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-40",
-                  side === s ? "liquid-glass-flat text-foreground" : "text-dim",
+                  side === s ? "bg-glass-raised text-foreground" : "text-dim",
                 )}
               >
                 {s === "buy" ? "매수" : "매도"}

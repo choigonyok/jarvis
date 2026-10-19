@@ -212,7 +212,7 @@ export function RemoteTouch({
               rfb.current.sendKey(0xff0d, "Enter");
               setText("");
             }}
-            className="flex gap-1.5 rounded-xl border border-edge bg-background/90 p-1.5 backdrop-blur-md"
+            className="flex gap-1.5 rounded-xl border border-edge bg-popover p-1.5"
           >
             <input
               ref={input}
@@ -251,14 +251,14 @@ export function RemoteTouch({
                 // Keep the text field focused, so the phone keyboard stays up.
                 onPointerDown={(e) => e.preventDefault()}
                 onClick={() => rfb.current?.sendKey(k.keysym, k.code)}
-                className="tnum h-9 min-w-11 shrink-0 rounded-lg border border-edge bg-background/90 px-2.5 text-[13px] text-foreground backdrop-blur-md"
+                className="tnum h-9 min-w-11 shrink-0 rounded-lg border border-edge bg-popover px-2.5 text-[13px] text-foreground"
               >
                 {k.label}
               </button>
             ))}
           </div>
         ) : null}
-        <div className="flex items-center gap-1.5 rounded-xl border border-edge bg-background/90 p-1 backdrop-blur-md">
+        <div className="flex items-center gap-1.5 rounded-xl border border-edge bg-popover p-1">
           <div role="radiogroup" aria-label="터치 방식" className="flex gap-1">
             <ModeButton on={mode === "click"} onClick={() => setMode("click")} Icon={MousePointer2} label="클릭" />
             <ModeButton on={mode === "drag"} onClick={() => setMode("drag")} Icon={Move} label="드래그" />

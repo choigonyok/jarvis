@@ -589,7 +589,7 @@ function ScreenList({
             aria-label={marked ? `${tab.label}, 결재 대기 ${pending}건` : undefined}
             className={cn(
               "flex min-h-12 items-center gap-3 rounded-xl px-3 text-[14.5px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
-              active ? "liquid-glass-flat text-foreground" : "text-dim",
+              active ? "bg-glass-raised text-foreground" : "text-dim",
             )}
           >
             <Icon aria-hidden className="size-[18px]" strokeWidth={1.8} />

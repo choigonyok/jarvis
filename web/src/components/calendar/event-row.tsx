@@ -105,7 +105,7 @@ export function GhostRow({
   const preview = ghost.op === "delete" ? null : ghost.preview;
 
   return (
-    <div className="ml-2 rounded-lg border border-dashed border-edge bg-glass/60 px-3 py-2.5 backdrop-blur-md">
+    <div className="ml-2 rounded-lg border border-dashed border-edge bg-glass/60 px-3 py-2.5">
       <div className="flex items-center gap-2 text-[11px] text-faint">
         <span aria-hidden className="anim-breathe size-[5px] rounded-full bg-dim" />
         <span>{copy.label}</span>

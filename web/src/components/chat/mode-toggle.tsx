@@ -24,7 +24,7 @@ export function ModeToggle({
     <div
       role="radiogroup"
       aria-label="대화 방식"
-      className="inline-flex items-center gap-0.5 rounded-lg border border-edge-soft bg-glass p-0.5 backdrop-blur-md"
+      className="inline-flex items-center gap-0.5 rounded-lg border border-edge-soft bg-glass p-0.5"
     >
       {modes.map((item) => {
         const active = mode === item.value;

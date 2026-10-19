@@ -23,7 +23,7 @@ export function HeaderPanel({
     <div
       role="dialog"
       aria-label={label ?? title}
-      className="absolute top-full right-0 z-50 mt-1 w-[21rem] overflow-hidden rounded-xl border border-edge bg-background/95 shadow-lg backdrop-blur-md max-sm:fixed max-sm:inset-x-3 max-sm:top-[calc(env(safe-area-inset-top)+3.5rem)] max-sm:w-auto"
+      className="absolute top-full right-0 z-50 mt-1 w-[21rem] overflow-hidden rounded-xl border border-edge bg-popover shadow-lg max-sm:fixed max-sm:inset-x-3 max-sm:top-[calc(env(safe-area-inset-top)+3.5rem)] max-sm:w-auto"
     >
       <div className="flex min-h-11 items-center justify-between gap-2 border-b border-edge-soft px-3.5 py-1.5">
         <p className="text-[13px] text-foreground">{title}</p>

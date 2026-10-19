@@ -69,7 +69,7 @@ export function UndoNotice({ label, onUndo }: { label: string; onUndo: () => voi
   return (
     <div
       role="status"
-      className="mb-2 flex items-center gap-2 rounded-xl bg-popover/95 py-1 ps-3.5 pe-1 text-[13px] shadow-lg ring-1 ring-edge"
+      className="liquid-glass mb-2 flex items-center gap-2 rounded-2xl py-1 ps-3.5 pe-1 text-[13px]"
     >
       <span className="min-w-0 flex-1 truncate text-foreground/90">{label}</span>
       <button

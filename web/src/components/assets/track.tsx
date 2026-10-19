@@ -221,7 +221,7 @@ export function Track({ points }: { points: TrackPoint[] }) {
 function Card({ point, rate }: { point: TrackPoint; rate: number }) {
   const gain = point.totalKrw - point.principalKrw;
   return (
-    <div className="tnum w-max rounded-lg border border-edge bg-background/95 px-3 py-2 text-[12px] leading-relaxed shadow-lg backdrop-blur-sm">
+    <div className="tnum w-max rounded-lg border border-edge bg-popover px-3 py-2 text-[12px] leading-relaxed shadow-lg">
       <p className="text-foreground/90">
         {Number(point.date.slice(5, 7))}월 {Number(point.date.slice(8, 10))}일
       </p>

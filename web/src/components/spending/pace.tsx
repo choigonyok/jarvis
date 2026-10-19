@@ -165,7 +165,7 @@ function DayStrip({
         {shown ? (
           <div
             aria-hidden
-            className="pointer-events-none absolute -top-12 z-10 rounded-lg border border-edge bg-background/95 px-2.5 py-1.5 whitespace-nowrap shadow-lg backdrop-blur-md"
+            className="pointer-events-none absolute -top-12 z-10 rounded-lg border border-edge bg-popover px-2.5 py-1.5 whitespace-nowrap shadow-lg"
             style={{
               left: `${((scrub! + 0.5) / n) * 100}%`,
               transform: `translateX(${scrub! < n * 0.2 ? "-15%" : scrub! > n * 0.8 ? "-85%" : "-50%"})`,

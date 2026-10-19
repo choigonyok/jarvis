@@ -124,7 +124,7 @@ export function QueuedMessages({
               aria-label={busy ? undefined : "진행 중인 작업에 지금 반영"}
               className="tap group ml-2 flex h-11 items-center rounded-full outline-none mouse:h-10"
             >
-              <span className="liquid-glass-flat flex h-8 items-center rounded-full px-3 text-[12.5px] whitespace-nowrap text-dim transition-colors group-hover:text-foreground group-focus-visible:ring-3 group-focus-visible:ring-ring/50 group-disabled:opacity-60 mouse:h-7">
+              <span className="flex h-8 items-center rounded-full bg-glass-raised px-3 text-[12.5px] whitespace-nowrap text-dim transition-colors group-hover:text-foreground group-focus-visible:ring-3 group-focus-visible:ring-ring/50 group-disabled:opacity-60 mouse:h-7">
                 {busy ? "반영하는 중" : "지금 반영"}
               </span>
             </button>

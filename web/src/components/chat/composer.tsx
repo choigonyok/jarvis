@@ -159,13 +159,14 @@ export function Composer({
     for (const p of sent) URL.revokeObjectURL(p.preview);
   }
 
-  // The tab bar's own shape and glass, so the two read as one family: a pill
-  // the bar's height (3.75rem) on a single line, round controls the size of a
-  // tab slot. It grows from there, keeping the radius, as a message gets long.
+  // The tab bar's own shape, so the two read as one family: a pill the bar's
+  // height (3.75rem) on a single line, round controls the size of a tab slot.
+  // Solid, not glass: glass is kept for what floats over the page. It grows
+  // from there, keeping the radius, as a message gets long.
   // data-lead tells what sits left of the text - the photo button or only
   // padding - so a queued line above can start where the typing starts.
   return (
-    <div className="composer group/composer liquid-glass rounded-[1.875rem] p-1.5" data-lead={allowPhotos ? "icon" : "text"}>
+    <div className="composer group/composer rounded-[1.875rem] bg-popover p-1.5 transition-shadow focus-within:ring-1 focus-within:ring-edge" data-lead={allowPhotos ? "icon" : "text"}>
       {queued}
       {quoting ? (
         <div className="flex items-start gap-2 pt-1.5 pr-1 pb-1 pl-3.5">
@@ -307,7 +308,7 @@ export function Composer({
           aria-label={uploading ? "사진을 올리는 중" : "메시지 보내기"}
           className={cn(round, "group text-dim disabled:opacity-40", onVoice && !composing && "max-sm:hidden")}
         >
-          <span className="liquid-glass-flat flex size-9 items-center justify-center rounded-full transition-colors group-enabled:group-hover:text-foreground">
+          <span className="flex size-9 items-center justify-center rounded-full bg-glass-raised transition-colors group-enabled:group-hover:text-foreground">
             <ArrowUp aria-hidden className="size-[18px]" />
           </span>
         </button>

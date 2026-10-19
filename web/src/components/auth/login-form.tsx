@@ -53,7 +53,7 @@ export function LoginForm() {
     <main className="inset-x-safe flex h-full items-start justify-center px-5 pt-[18vh] sm:items-center sm:pt-0">
       <form
         onSubmit={submit}
-        className="w-full max-w-[20rem] rounded-2xl border border-edge bg-glass p-5 backdrop-blur-xl sm:p-6"
+        className="w-full max-w-[20rem] rounded-2xl border border-edge bg-glass p-5 sm:p-6"
       >
         <h1 className="text-[15px] font-semibold tracking-tight text-foreground">
           Jarvis

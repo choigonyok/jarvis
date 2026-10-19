@@ -251,7 +251,7 @@ function RoomPicker({
                     aria-current={active ? "true" : undefined}
                     className={cn(
                       "flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50",
-                      active ? "liquid-glass-flat text-foreground" : "text-dim hover:bg-glass",
+                      active ? "bg-glass-raised text-foreground" : "text-dim hover:bg-glass",
                     )}
                   >
                     <span className="min-w-0 flex-1 truncate text-[14.5px]">{room.name}</span>
