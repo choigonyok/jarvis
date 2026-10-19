@@ -105,6 +105,48 @@ func (s *Store) All(ctx context.Context, tz, thread string, since time.Time) ([]
 	return out, rows.Err()
 }
 
+// Window is the newest `limit` turns of a thread before `before` (zero: the
+// newest of all), oldest first, and whether older ones remain. The console
+// opens on the newest page and asks for the one above as the reader scrolls
+// up - the thread is months long, and all of it at once was the page's
+// slowest part.
+func (s *Store) Window(ctx context.Context, tz, thread string, before time.Time, limit int) ([]turn.Turn, bool, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	var beforeArg any
+	if !before.IsZero() {
+		beforeArg = before
+	}
+	rows, err := s.pool.Query(ctx, selectList+` where thread = $2 and ($3::timestamptz is null or at < $3) order by at desc, id desc limit $4`, tz, thread, beforeArg, limit+1)
+	if err != nil {
+		return nil, false, fmt.Errorf("턴 조회: %w", err)
+	}
+	defer rows.Close()
+	var out []turn.Turn
+	for rows.Next() {
+		t, err := scanRow(rows)
+		if err != nil {
+			return nil, false, fmt.Errorf("턴 읽기: %w", err)
+		}
+		out = append(out, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	more := len(out) > limit
+	if more {
+		out = out[:limit]
+	}
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	if out == nil {
+		out = []turn.Turn{}
+	}
+	return out, more, nil
+}
+
 // Append stores one turn and returns it as stored, with the id and the clock
 // the service minted.
 //

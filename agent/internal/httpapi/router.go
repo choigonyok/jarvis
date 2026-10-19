@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -291,7 +292,16 @@ func (s *Server) withCORS(next http.Handler) http.Handler {
 }
 
 func (s *Server) getThread(w http.ResponseWriter, r *http.Request) {
-	turns, thinking := s.thread.Snapshot()
+	var turns []*thread.Turn
+	var thinking, hasMore bool
+	// ?limit= is the console's page (the newest turns; with before=, the
+	// ones above a time). Without it, the whole thread, as before.
+	if limit, _ := strconv.Atoi(r.URL.Query().Get("limit")); limit > 0 {
+		turns, hasMore = s.thread.Window(r.URL.Query().Get("before"), min(limit, 500))
+		_, thinking = s.thread.Snapshot()
+	} else {
+		turns, thinking = s.thread.Snapshot()
+	}
 	if turns == nil {
 		turns = []*thread.Turn{}
 	}
@@ -300,6 +310,7 @@ func (s *Server) getThread(w http.ResponseWriter, r *http.Request) {
 	body := map[string]any{
 		"turns":     turns,
 		"thinking":  thinking,
+		"hasMore":   hasMore,
 		"proposals": s.proposals.List(),
 	}
 	if q, ok := s.runner.(queuer); ok {

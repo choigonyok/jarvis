@@ -162,6 +162,9 @@ type Module struct {
 	// proposals and log are set by Ask: where the category cards go.
 	proposals *proposal.Store
 	log       *slog.Logger
+	// unsure is what the judge (ask.go) could not file, by "kind:id": asked
+	// of the operator instead, and not put to the judge again.
+	unsure map[string]bool
 }
 
 func New(store *Store) *Module { return &Module{store: store} }

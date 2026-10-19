@@ -230,10 +230,12 @@ func main() {
 	} else if spendingModule != nil && cfg.Enrich {
 		log.Warn("브라우저 MCP 가 없어 묶음 결제 조회를 켜지 않습니다", "need", spending.BrowserServer)
 	}
-	// A charge the rules left in 기타 is asked about on a card (spending/ask.go).
+	// A charge the rules left in 기타 is judged by the model first - a
+	// merchant whose trade is plain is filed without a card - and the card
+	// (spending/ask.go) is for what it could not tell either.
 	if spendingModule != nil && !cfg.Guest {
 		spendingModule.Ask(proposals, log)
-		go spendingModule.RunAsker(enrichCtx, spending.AskConfig{Every: 10 * time.Minute, MaxOpen: 3})
+		go spendingModule.RunAsker(enrichCtx, spending.AskConfig{Every: 10 * time.Minute, MaxOpen: 3, Judge: runner, Model: cfg.EnrichModel})
 	}
 	if _, ok := cfg.ExtraMCPURLs[jobs.BrowserServer]; jobsModule != nil && ok {
 		guard, err := jobs.NewBridgeGuard(cfg.ExtraMCPURLs[jobs.BrowserServer], cfg.ExtraMCPToken)
@@ -406,13 +408,16 @@ func main() {
 		})
 		// Decided, the card's notification is done with: notify-svc marks it
 		// read on this event (its key is the one the notification above carried).
-		proposals.OnDecide(func(p proposal.Proposal, d proposal.Decision) {
+		closed := func(p proposal.Proposal, decision string) {
 			notifier.Emit(map[string]any{
 				"source": "agent", "type": "proposal.decided", "subject": p.ID,
-				"data": map[string]any{"proposalId": p.ID, "decision": string(d), "notifyKey": keyPrefix + p.ID},
+				"data": map[string]any{"proposalId": p.ID, "decision": decision, "notifyKey": keyPrefix + p.ID},
 				"key":  "proposal:decided:" + p.ID,
 			})
-		})
+		}
+		proposals.OnDecide(func(p proposal.Proposal, d proposal.Decision) { closed(p, string(d)) })
+		// Put away without a decision (replaced by a corrected card): the same.
+		proposals.OnClose(func(p proposal.Proposal) { closed(p, "closed") })
 	}
 
 	// The guest is not shown what the operator's API key costs.

@@ -12,6 +12,7 @@
 package permission
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -164,21 +165,97 @@ func (g *Gate) decide(ctx context.Context, _ *mcp.CallToolRequest, in Request) (
 		})
 	}
 
+	// A card this one corrects - the same thing asked again with a changed
+	// detail - is still waiting: it is put away, so the operator decides the
+	// corrected one and not both.
+	var replaced []proposal.Proposal
+	for _, old := range g.proposals.PendingChat() {
+		if replaces(act, old.Action) {
+			replaced = append(replaced, old)
+		}
+	}
+
 	p, _ := g.proposals.Open(proposal.Proposal{
 		Origin: proposal.OriginChat,
 		Action: act,
 		Card:   card,
 	})
 	g.thread.AttachProposal(p.ID)
+	var ids []string
+	for _, old := range replaced {
+		g.proposals.Abandon(old.ID, "고친 카드 "+p.ID+" 로 바꿨어요")
+		ids = append(ids, old.ID)
+		g.log.Info("카드를 고친 카드로 바꿨습니다", "old", old.ID, "new", p.ID, "kind", act.Kind)
+	}
+	swapped := ""
+	if len(ids) > 0 {
+		swapped = fmt.Sprintf("같은 일의 이전 카드(%s)는 자동으로 반려하고 이 카드로 바꿨습니다. ", strings.Join(ids, ", "))
+	}
 
 	// Denied in the CLI's terms, pending in ours. The wording carries the
 	// difference: nothing was refused, the turn just must not wait here.
 	return reply(Response{
 		Behavior: "deny",
-		Message: fmt.Sprintf("승인 카드(%s)를 올렸습니다. 아직 실행되지 않았고, 반려된 것도 아닙니다. "+
+		Message: fmt.Sprintf("승인 카드(%s)를 올렸습니다. %s아직 실행되지 않았고, 반려된 것도 아닙니다. "+
 			"결정을 기다리지 말고, 무엇을 요청했는지 한 줄로 알린 뒤 이번 응답을 마치세요. "+
-			"운영자가 승인하거나 반려하면 그 결과가 새 메시지로 옵니다. 이 도구를 다시 호출하지 마세요.", p.ID),
+			"운영자가 승인하거나 반려하면 그 결과가 새 메시지로 옵니다. 이 도구를 다시 호출하지 마세요.", p.ID, swapped),
 	})
+}
+
+// replaces says whether a new call is a correction of a waiting one: the same
+// action about the same thing, with something changed. Two calls about
+// different things (two events on one day) are two cards; the same call
+// twice is caught before this (FindPending). "The same thing" is read off
+// the inputs' identifying fields: the same id, the same title, or the same
+// day and start.
+func replaces(next, waiting action.Action) bool {
+	if next.Kind != waiting.Kind || next.Kind == "" {
+		return false
+	}
+	if bytes.Equal(proposal.Canonical(next.Input), proposal.Canonical(waiting.Input)) {
+		return false
+	}
+	var a, b map[string]any
+	if json.Unmarshal(next.Input, &a) != nil || json.Unmarshal(waiting.Input, &b) != nil {
+		return false
+	}
+	same := func(keys ...string) bool {
+		for _, k := range keys {
+			va, oka := a[k]
+			vb, okb := b[k]
+			if !oka || !okb {
+				continue
+			}
+			sa, sb := strings.TrimSpace(fmt.Sprint(va)), strings.TrimSpace(fmt.Sprint(vb))
+			if sa != "" && sa == sb {
+				return true
+			}
+		}
+		return false
+	}
+	if same("id", "jobId", "job_id", "eventId", "event_id") {
+		return true
+	}
+	if same("title", "name", "summary", "goal") {
+		return true
+	}
+	day := func(m map[string]any) string {
+		for _, k := range []string{"date", "day"} {
+			if v, ok := m[k]; ok {
+				return strings.TrimSpace(fmt.Sprint(v))
+			}
+		}
+		return ""
+	}
+	start := func(m map[string]any) string {
+		for _, k := range []string{"start", "time", "at"} {
+			if v, ok := m[k]; ok {
+				return strings.TrimSpace(fmt.Sprint(v))
+			}
+		}
+		return ""
+	}
+	return day(a) != "" && day(a) == day(b) && start(a) != "" && start(a) == start(b)
 }
 
 // Resolve acts on a decision about a card this gate raised, and wakes the

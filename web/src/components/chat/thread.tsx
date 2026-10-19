@@ -411,6 +411,9 @@ export function Thread() {
     connection,
     error,
     hydrated,
+    hasMore,
+    loadingOlder,
+    loadOlder,
     send,
     steer,
     drop,
@@ -454,6 +457,10 @@ export function Thread() {
   // the view back to the bottom - not new turns, not photos above finishing
   // their layout - until the reader touches the thread themselves.
   const held = useRef<HTMLElement | null>(null);
+  // Set while a page of older turns is on its way: how tall the thread was
+  // and where the reader was, so once the page is in front of them the view
+  // is moved by exactly what was added and nothing seems to jump.
+  const above = useRef<{ height: number; top: number } | null>(null);
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el || turns.length === 0) return;
@@ -463,9 +470,32 @@ export function Thread() {
       pinned.current = true;
       return;
     }
+    if (above.current) {
+      const { height, top } = above.current;
+      above.current = null;
+      el.scrollTop = el.scrollHeight - height + top;
+      return;
+    }
     if (held.current) return;
     if (pinned.current) bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [turns, proposals, thinking, error]);
+
+  // Scrolling up near the top asks for the page above. Asked once per page:
+  // the next ask waits for this one to land (loadingOlder) and be measured.
+  const askOlder = useCallback(
+    (el: HTMLElement) => {
+      if (!hasMore || loadingOlder || above.current || !landed.current) return;
+      if (el.scrollTop > 320) return;
+      above.current = { height: el.scrollHeight, top: el.scrollTop };
+      void loadOlder().then(() => {
+        // Nothing came (or it failed): nothing to compensate for.
+        window.setTimeout(() => {
+          if (above.current) above.current = null;
+        }, 1500);
+      });
+    },
+    [hasMore, loadingOlder, loadOlder],
+  );
 
   // A tapped push about a card lands on that card - not the bottom of the
   // thread - and marks it for a moment. From ?proposal= when the tap opened
@@ -661,11 +691,17 @@ export function Thread() {
           if (held.current) return; // our own scroll to a card, not the reader's
           const el = e.currentTarget;
           pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+          askOlder(el);
         }}
 
         className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain"
       >
         <div className="mx-auto w-full max-w-[46rem] px-4 pt-7 pb-12 sm:px-8 sm:pt-10 sm:pb-6">
+          {turns.length > 0 && (hasMore || loadingOlder) ? (
+            <p className="mb-6 text-center text-[11.5px] text-faint" aria-live="polite">
+              {loadingOlder ? "이전 대화를 불러오는 중" : "위로 올리면 이전 대화가 이어집니다"}
+            </p>
+          ) : null}
           <Transcript
             turns={turns}
             proposals={proposals}

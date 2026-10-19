@@ -198,3 +198,38 @@ func TestRejectionWakesTheModel(t *testing.T) {
 		t.Fatalf("반려가 전달되지 않았습니다: %v", follow.prompts)
 	}
 }
+
+// A corrected call replaces the card it corrects - the same event with a
+// changed time - while a call about something else leaves it waiting
+// (2026-10-19: both cards stayed up and the operator had to turn one down).
+func TestCorrectedCallReplacesTheWaitingCard(t *testing.T) {
+	store := calendar.NewStore("http://127.0.0.1:1", "", bus.New())
+	modules := module.NewRegistry()
+	modules.Add(calendar.New(store))
+	g, proposals, _ := newTestGate(t, modules)
+	ask := func(input map[string]any) {
+		t.Helper()
+		if _, _, err := g.decide(context.Background(), nil, Request{"tool_name": "mcp__calendar__create_event", "input": input}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ask(map[string]any{"date": "2026-09-25", "start": "19:00", "title": "합주"})
+	first := proposals.List()[0]
+	ask(map[string]any{"date": "2026-09-26", "start": "19:00", "title": "치과"})
+	if n := len(proposals.PendingChat()); n != 2 {
+		t.Fatalf("다른 일정은 둘 다 기다려야 합니다: %d", n)
+	}
+	ask(map[string]any{"date": "2026-09-25", "start": "20:00", "title": "합주"})
+	got, _ := proposals.Get(first.ID)
+	if got.State != proposal.Rejected || !strings.Contains(got.Note, "바꿨") {
+		t.Fatalf("고친 카드가 앞의 카드를 바꿔야 합니다: %+v", got)
+	}
+	if n := len(proposals.PendingChat()); n != 2 {
+		t.Fatalf("치과와 고친 합주 둘이 기다려야 합니다: %d", n)
+	}
+	for _, p := range proposals.PendingChat() {
+		if p.Card.Body == first.Card.Body {
+			t.Fatalf("옛 합주 카드가 아직 기다립니다: %+v", p)
+		}
+	}
+}

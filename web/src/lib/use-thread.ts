@@ -34,11 +34,18 @@ function upsert<T extends { id: string; atIso?: string }>(list: T[], next: T): T
 
 // The last thread this page saw. Coming back to a tab renders it at once -
 // already scrolled to the newest turn - and the fetch then only corrects it.
-let cached: { turns: Turn[]; proposals: Proposal[]; thinking: boolean } | null = null;
+let cached: { turns: Turn[]; proposals: Proposal[]; thinking: boolean; hasMore?: boolean } | null = null;
 let cachedQueue: Queued[] = [];
+
+/** How many turns a page of the thread holds: the newest on opening, the ones above on scrolling up. */
+const PAGE = 60;
 
 export function useThread() {
   const [turns, setTurnsState] = useState<Turn[]>(() => cached?.turns ?? []);
+  // Whether the thread goes on above the oldest loaded turn, and whether
+  // that page is on its way.
+  const [hasMore, setHasMore] = useState(() => cached?.hasMore ?? true);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [proposals, setProposalsState] = useState<Proposal[]>(() => cached?.proposals ?? []);
   const [thinking, setThinking] = useState(() => cached?.thinking ?? false);
   const [error, setError] = useState<string | null>(null);
@@ -52,29 +59,38 @@ export function useThread() {
   const setTurns = useCallback((next: Turn[] | ((prev: Turn[]) => Turn[])) => {
     setTurnsState((prev) => {
       const value = typeof next === "function" ? next(prev) : next;
-      cached = { turns: value, proposals: cached?.proposals ?? [], thinking: cached?.thinking ?? false };
+      cached = { ...(cached ?? { proposals: [], thinking: false }), turns: value };
       return value;
     });
   }, []);
   const setProposals = useCallback((next: Proposal[] | ((prev: Proposal[]) => Proposal[])) => {
     setProposalsState((prev) => {
       const value = typeof next === "function" ? next(prev) : next;
-      cached = { turns: cached?.turns ?? [], proposals: value, thinking: cached?.thinking ?? false };
+      cached = { ...(cached ?? { turns: [], thinking: false }), proposals: value };
       return value;
     });
   }, []);
+  const setMore = useCallback((more: boolean) => {
+    cached = { ...(cached ?? { turns: [], proposals: [], thinking: false }), hasMore: more };
+    setHasMore(more);
+  }, []);
 
+  // The newest page - or, on a reconnect, as many turns as are on screen,
+  // so what the reader scrolled up to does not vanish under them.
   const hydrate = useCallback(async () => {
     try {
-      const res = await fetch(`${API}/thread`, { cache: "no-store" });
+      const limit = Math.max(PAGE, cached?.turns.length ?? 0);
+      const res = await fetch(`${API}/thread?limit=${limit}`, { cache: "no-store" });
       if (!res.ok) throw new Error(String(res.status));
       const data = (await res.json()) as {
         turns: Turn[];
         thinking: boolean;
+        hasMore?: boolean;
         proposals: Proposal[];
         queue?: Queued[];
       };
       setTurns(data.turns ?? []);
+      setMore(Boolean(data.hasMore));
       setProposals(data.proposals ?? []);
       setThinking(Boolean(data.thinking));
       setQueue(data.queue ?? []);
@@ -83,7 +99,30 @@ export function useThread() {
     } finally {
       setHydrated(true);
     }
-  }, [setTurns, setProposals, setQueue]);
+  }, [setTurns, setMore, setProposals, setQueue]);
+
+  // The page above the oldest turn on screen, put in front of it. Resolves
+  // once the turns are in (the caller keeps the view where it was).
+  const loadOlder = useCallback(async () => {
+    const oldest = cached?.turns[0];
+    if (!oldest?.atIso || loadingOlder) return;
+    setLoadingOlder(true);
+    try {
+      const res = await fetch(`${API}/thread?limit=${PAGE}&before=${encodeURIComponent(oldest.atIso)}`, { cache: "no-store" });
+      if (!res.ok) throw new Error(String(res.status));
+      const data = (await res.json()) as { turns: Turn[]; hasMore?: boolean };
+      const older = data.turns ?? [];
+      setTurns((prev) => {
+        const have = new Set(prev.map((t) => t.id));
+        return [...older.filter((t) => !have.has(t.id)), ...prev];
+      });
+      setMore(Boolean(data.hasMore));
+    } catch {
+      setError("이전 대화를 불러오지 못했습니다.");
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [loadingOlder, setTurns, setMore]);
 
   const onEvent = useCallback((event: AgentEvent) => {
     switch (event.type) {
@@ -188,6 +227,9 @@ export function useThread() {
     connection,
     error,
     hydrated,
+    hasMore,
+    loadingOlder,
+    loadOlder,
     send,
     steer: (id: string) => onQueued(id, "steer"),
     drop: (id: string) => onQueued(id, "drop"),

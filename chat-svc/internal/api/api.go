@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"strconv"
 	"time"
 
 	"github.com/choigonyok/jarvis/chat-svc/internal/store"
@@ -94,6 +95,32 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 	}
 	if asGuest(r) && thread != guestThread {
 		writeErr(w, http.StatusForbidden, "손님은 손님 대화만 읽을 수 있습니다.")
+		return
+	}
+	// limit= (with before=) is the console's page: the newest turns, and
+	// the ones above them as it scrolls up. Answered with hasMore.
+	if v := r.URL.Query().Get("limit"); v != "" {
+		limit, err := strconv.Atoi(v)
+		if err != nil || limit <= 0 || limit > 500 {
+			writeErr(w, http.StatusBadRequest, "limit 는 1~500 이어야 합니다.")
+			return
+		}
+		var before time.Time
+		if b := r.URL.Query().Get("before"); b != "" {
+			t, err := time.Parse(time.RFC3339Nano, b)
+			if err != nil {
+				writeErr(w, http.StatusBadRequest, "before 는 RFC3339 시각이어야 합니다.")
+				return
+			}
+			before = t
+		}
+		turns, more, err := s.store.Window(r.Context(), s.tz, thread, before, limit)
+		if err != nil {
+			s.log.Error("스레드를 불러오지 못했습니다", "err", err)
+			writeErr(w, http.StatusInternalServerError, "스레드를 불러오지 못했습니다.")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"turns": turns, "hasMore": more})
 		return
 	}
 	// since= 는 mind 처럼 새 턴만 원하는 소비자용이다. 없으면 스레드 전체.

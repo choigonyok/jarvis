@@ -21,6 +21,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -243,6 +244,28 @@ func (s *Store) Snapshot() ([]*Turn, bool) {
 		return nil, thinking
 	}
 	return payload.Turns, thinking
+}
+
+// Window is the newest `limit` turns before `before` (an atIso; "" for the
+// newest of all), oldest first, and whether older ones remain - the console's
+// page (chat-svc GET /turns?limit=). On failure an empty page, logged, as
+// Snapshot does.
+func (s *Store) Window(before string, limit int) ([]*Turn, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	q := url.Values{"thread": {s.thread}, "limit": {strconv.Itoa(limit)}}
+	if before != "" {
+		q.Set("before", before)
+	}
+	var payload struct {
+		Turns   []*Turn `json:"turns"`
+		HasMore bool    `json:"hasMore"`
+	}
+	if err := s.do(ctx, http.MethodGet, "/turns?"+q.Encode(), nil, &payload); err != nil {
+		s.log.Error("스레드의 한 페이지를 불러오지 못했습니다", "err", err)
+		return nil, false
+	}
+	return payload.Turns, payload.HasMore
 }
 
 func (s *Store) AppendUser(text string, images ...string) *Turn {

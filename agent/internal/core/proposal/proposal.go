@@ -130,7 +130,8 @@ type Store struct {
 	// back to whoever has to act on it.
 	onDecide []func(Proposal, Decision)
 	// onOpen hears every new card - how it reaches the phone (notify-svc).
-	onOpen []func(Proposal)
+	onOpen  []func(Proposal)
+	onClose []func(Proposal)
 }
 
 type file struct {
@@ -228,6 +229,15 @@ func (s *Store) OnOpen(fn func(Proposal)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onOpen = append(s.onOpen, fn)
+}
+
+// OnClose registers fn to hear a pending card closed without a decision -
+// abandoned by the run behind it, or replaced by a corrected card. What
+// hangs on the card (its notification) can then be put away.
+func (s *Store) OnClose(fn func(Proposal)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onClose = append(s.onClose, fn)
 }
 
 // Decide records the operator's call and releases the waiter. Approved is a
@@ -331,6 +341,19 @@ func (s *Store) FindPendingWhere(match func(Proposal) bool) (Proposal, bool) {
 	return Proposal{}, false
 }
 
+// PendingChat is every card still waiting that the conversation raised.
+func (s *Store) PendingChat() []Proposal {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []Proposal
+	for _, p := range s.order {
+		if p.State == Pending && p.Origin == OriginChat {
+			out = append(out, *p)
+		}
+	}
+	return out
+}
+
 // FindPending returns the card already waiting on the same action, if any.
 // The model asking twice for the same thing is one question, not two cards.
 func (s *Store) FindPending(a action.Action) (Proposal, bool) {
@@ -378,8 +401,9 @@ func (s *Store) Settle(id string, state State, note string) {
 	s.bus.Publish(bus.Event{Type: "proposal", Proposal: snapshot})
 }
 
-// Abandon marks a pending proposal rejected when the run behind it died, so
-// the UI never shows a card nobody is listening to.
+// Abandon marks a pending proposal rejected when the run behind it died, or
+// when a corrected card took its place, so the UI never shows a card nobody
+// is listening to. Nobody decided it, so OnDecide is not told; OnClose is.
 func (s *Store) Abandon(id, note string) {
 	s.mu.Lock()
 	p, ok := s.byID[id]
@@ -393,8 +417,12 @@ func (s *Store) Abandon(id, note string) {
 	delete(s.waiters, id)
 	s.save()
 	snapshot := *p
+	hooks := append([]func(Proposal){}, s.onClose...)
 	s.mu.Unlock()
 	s.bus.Publish(bus.Event{Type: "proposal", Proposal: snapshot})
+	for _, fn := range hooks {
+		fn(snapshot)
+	}
 }
 
 func (s *Store) Get(id string) (Proposal, bool) {

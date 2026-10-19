@@ -3,6 +3,8 @@ package spending
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"github.com/choigonyok/jarvis/agent/internal/claudecode"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -80,7 +82,7 @@ func TestAskRaisesACardPerUnclearChargeAFewAtATime(t *testing.T) {
 		{Kind: "tx", ID: 52, TxID: 52, Merchant: "어느가게", AmountKrw: 7000, ApprovedAt: at},
 		{Kind: "tx", ID: 53, TxID: 53, Merchant: "또다른곳", AmountKrw: 9000, ApprovedAt: at},
 	})
-	if err := m.askOnce(context.Background(), 3); err != nil {
+	if err := m.askOnce(context.Background(), AskConfig{MaxOpen: 3}); err != nil {
 		t.Fatal(err)
 	}
 	cards := props.List()
@@ -99,7 +101,7 @@ func TestAskRaisesACardPerUnclearChargeAFewAtATime(t *testing.T) {
 	if item := cards[1]; item.Card.Title != "이 상품은 어떤 분류인가요?" || len(item.Card.Fields) != 1 {
 		t.Fatalf("상품 카드: %+v", item.Card)
 	}
-	if err := m.askOnce(context.Background(), 3); err != nil || len(props.List()) != 3 {
+	if err := m.askOnce(context.Background(), AskConfig{MaxOpen: 3}); err != nil || len(props.List()) != 3 {
 		t.Fatalf("기다리는 카드가 있으면 더 열지 않고, 같은 것을 다시 묻지 않습니다: %d %v", len(props.List()), err)
 	}
 }
@@ -112,7 +114,7 @@ func TestAnsweringWritesTheCategory(t *testing.T) {
 		{Kind: "tx", ID: 52, TxID: 52, Merchant: "어느가게", AmountKrw: 7000, ApprovedAt: at},
 		{Kind: "item", ID: 7, TxID: 50, Merchant: "쿠팡", Name: "알 수 없는 물건", AmountKrw: 12000, ApprovedAt: at},
 	})
-	if err := m.askOnce(context.Background(), 3); err != nil {
+	if err := m.askOnce(context.Background(), AskConfig{MaxOpen: 3}); err != nil {
 		t.Fatal(err)
 	}
 	cards := props.List()
@@ -154,7 +156,7 @@ func TestAnsweringWritesTheCategory(t *testing.T) {
 
 func TestRevisePicksOnlyWhatTheCardOffers(t *testing.T) {
 	m, props, _ := asking(t, []Unclear{{Kind: "tx", ID: 51, TxID: 51, Merchant: "어느극장(주)", AmountKrw: 30000, ApprovedAt: at}})
-	if err := m.askOnce(context.Background(), 3); err != nil {
+	if err := m.askOnce(context.Background(), AskConfig{MaxOpen: 3}); err != nil {
 		t.Fatal(err)
 	}
 	a := props.List()[0].Action
@@ -171,5 +173,71 @@ func TestRevisePicksOnlyWhatTheCardOffers(t *testing.T) {
 	}
 	if _, card, err := m.Revise(context.Background(), a, map[string]string{"category": "식비", "remember": rememberNo}); err != nil || card.Fields[0].Value != "식비" {
 		t.Fatalf("고른 값: %v %+v", err, card.Fields)
+	}
+}
+
+// judgeFake is the model's judgement of unclear charges, canned.
+type judgeFake struct {
+	answer string
+	asked  int
+}
+
+func (j *judgeFake) CanStart(bool) bool { return true }
+func (j *judgeFake) Background(_ context.Context, t claudecode.Task) (string, error) {
+	j.asked++
+	if t.Browser || len(t.Allowed) != 0 {
+		return "", errors.New("분류 판단은 브라우저도 도구도 쓰지 않습니다")
+	}
+	return j.answer, nil
+}
+
+// A merchant whose trade is plain is filed by the judge with no card; one it
+// is unsure of goes on a card, and is not put to the judge again
+// (2026-10-19: "써브웨이강남역점 10,900원" asked the operator).
+func TestTheJudgeFilesThePlainOnesAndTheCardIsForTheRest(t *testing.T) {
+	m, props, b := asking(t, []Unclear{
+		{Kind: "tx", ID: 1, TxID: 1, Merchant: "써브웨이강남역점", AmountKrw: 10900, ApprovedAt: at},
+		{Kind: "tx", ID: 2, TxID: 2, Merchant: "주식회사 이노베이", AmountKrw: 52000, ApprovedAt: at},
+	})
+	judge := &judgeFake{answer: "```json\n[{\"id\":\"tx:1\",\"category\":\"식비\",\"confidence\":0.97,\"why\":\"샌드위치 프랜차이즈\"},{\"id\":\"tx:2\",\"category\":\"기타\",\"confidence\":0.3}]\n```"}
+	cfg := AskConfig{MaxOpen: 3, Judge: judge, Model: "sonnet"}
+	if err := m.askOnce(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	patches := b.wait(1)
+	if len(patches) != 1 || !strings.Contains(patches[0], "/transactions/1 ") || !strings.Contains(patches[0], `"category":"식비"`) || !strings.Contains(patches[0], `"remember":true`) {
+		t.Fatalf("분명한 가맹점은 카드 없이 적어야 합니다: %v", patches)
+	}
+	cards := props.List()
+	if len(cards) != 1 {
+		t.Fatalf("애매한 것 하나만 카드여야 합니다: %d", len(cards))
+	}
+	var in AskInput
+	_ = json.Unmarshal(cards[0].Action.Input, &in)
+	if in.Entry.ID != 2 {
+		t.Fatalf("카드는 이노베이여야 합니다: %+v", in.Entry)
+	}
+	// The next round: the unsure one is not judged again, and its card still waits.
+	b.mu.Lock()
+	b.entries = b.entries[1:]
+	b.mu.Unlock()
+	if err := m.askOnce(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if judge.asked != 1 {
+		t.Fatalf("모르겠다고 한 것을 다시 묻습니다: %d", judge.asked)
+	}
+	if len(props.List()) != 1 {
+		t.Fatalf("카드가 늘었습니다: %d", len(props.List()))
+	}
+}
+
+func TestParseJudgementsTakesTheArrayOutOfProse(t *testing.T) {
+	got := parseJudgements("물론입니다. [{\"id\":\"tx:9\",\"category\":\" 교통 \",\"confidence\":0.9}] 끝.")
+	if len(got) != 1 || got[0].ID != "tx:9" || got[0].Category != "교통" {
+		t.Fatalf("%+v", got)
+	}
+	if parseJudgements("배열이 없습니다") != nil {
+		t.Fatal("배열이 없으면 nil")
 	}
 }
