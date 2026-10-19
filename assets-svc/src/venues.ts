@@ -259,14 +259,15 @@ type UpbitTransfer = {
  * Won deposits add to principal and won withdrawals take from it, by the
  * amount that actually left - the 1,000 won fee is a cost, so it shows up as
  * a loss rather than as money taken home. Upbit's own interest on idle won
- * (`internal`) is a return, not a deposit, and is left out. A coin sent in or
+ * (`internal`) is a return, not a deposit: left out, and added up to be
+ * named (`interestKrw`). A coin sent in or
  * out is valued at that day's close; a coin with no won market cannot be,
  * and is named instead of guessed.
  */
 export async function upbitFlows(
   since: string,
-): Promise<{ flows: Flow[]; feesKrw: number; problems: string[] }> {
-  if (!env("UPBIT_ACCESS_KEY")) return { flows: [], feesKrw: 0, problems: [] };
+): Promise<{ flows: Flow[]; feesKrw: number; interestKrw: number; problems: string[] }> {
+  if (!env("UPBIT_ACCESS_KEY")) return { flows: [], feesKrw: 0, interestKrw: 0, problems: [] };
 
   const list = async (path: "deposits" | "withdraws") => {
     const out: UpbitTransfer[] = [];
@@ -299,6 +300,9 @@ export async function upbitFlows(
   const feesKrw = withdraws
     .filter((w) => w.state === "DONE" && w.currency === "KRW")
     .reduce((sum, w) => sum + (Number(w.fee) || 0), 0);
+  const interestKrw = deposits
+    .filter((d) => d.state === "ACCEPTED" && d.transaction_type === "internal" && d.currency === "KRW")
+    .reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
   for (const { row, sign } of done) {
     const date = row.created_at.slice(0, 10);
     let krw = Number(row.amount);
@@ -327,7 +331,7 @@ export async function upbitFlows(
       source: "auto",
     });
   }
-  return { flows, feesKrw, problems };
+  return { flows, feesKrw, interestKrw, problems };
 }
 
 /** One filled (or part-filled) Upbit order, as the replay in realized.ts needs it. */

@@ -2,7 +2,7 @@ import { changesFor } from "./change.js";
 import * as db from "./db.js";
 import { allocationOf } from "./target.js";
 import { type CashVenue, detectFlow, reconcile } from "./kis-flows.js";
-import { COIN_TAX_FROM, priceUnsettled, replayKis, replayUpbit, salesFrom, summarize } from "./realized.js";
+import { COIN_TAX_FROM, priceUnsettled, replayKis, replayUpbit, salesFrom, summarize, upbitHeldFees } from "./realized.js";
 import type {
   Bridge,
   CashLine,
@@ -284,8 +284,10 @@ export async function buildPortfolio(): Promise<Portfolio> {
   const total = invested + cashKrw + fixedKrw;
   const [auto, manual] = principalFlows;
   let principal: Principal | null = null;
-  // What holding dollars at KIS cost or made; null when it could not be replayed.
+  // What holding dollars at KIS cost or made, and the KIS cash no record
+  // explains (exchange costs, dividends); null when it could not be replayed.
   let kisFxKrw: number | null = null;
+  let kisUnrecordedKrw: number | null = null;
   if (auto && manual) {
     problems.push(...auto.problems);
     const flows = [...auto.flows, ...manual].sort((a, b) =>
@@ -339,7 +341,10 @@ export async function buildPortfolio(): Promise<Portfolio> {
       if (!a.cash || !a.movements) continue;
       const r = reconcile(a.venue, flows, a.movements, a.cash, usdKrw);
       principal.checks.push(...r.checks);
-      if (a.venue === "kis") kisFxKrw = r.fxKrw;
+      if (a.venue === "kis") {
+        kisFxKrw = r.fxKrw;
+        kisUnrecordedKrw = r.unrecordedKrw;
+      }
     }
   }
 
@@ -347,6 +352,8 @@ export async function buildPortfolio(): Promise<Portfolio> {
   // A venue whose balance failed has no such answer, and its replay would be
   // wrong - so it is left out, which `problems` already explains.
   let realized: Realized | null = null;
+  // The buy fees inside the coins still held, which no cost carries - see upbitHeldFees.
+  let upbitHeldFeesKrw = 0;
   if (kisReplay || upbitTrades) {
     const sales = [...(kisReplay?.sales ?? [])];
     const missing: Realized["missing"] = kisReplay ? [] : ["kis"];
@@ -360,15 +367,21 @@ export async function buildPortfolio(): Promise<Portfolio> {
       }
       sales.push(...replay.sales);
       problems.push(...replay.problems);
+      const heldAll = new Map(heldNow);
+      for (const c of upbit.cash) if (c.currency === "USD") heldAll.set(c.id.replace(/^upbit:/, ""), c.amount);
+      upbitHeldFeesKrw = upbitHeldFees(upbitTrades.fills, heldAll);
     } else missing.push("upbit");
     realized = summarize(sales, holdings, PRINCIPAL_SINCE, thisYear(), missing);
   }
 
   // The headline return, taken apart (see Bridge). "Other" is the remainder,
   // and the named parts of it are the causes that can be measured: dollars
-  // held at KIS while the rate moved, USDT's own price, fees outside any
-  // trade's cost. What is left of it is dividends, interest and the gap
-  // between KIS's booked rate and the one an exchange actually got.
+  // held at KIS while the rate moved, the KIS cash no record explains (what
+  // exchanges cost over KIS's booked rate, and dividends, which nothing here
+  // lists apart), USDT's own price, Upbit's interest on idle won, and fees
+  // outside any trade's cost - Upbit's withdrawal fees, and the buy fees of
+  // what is still held. What is left is KIS rounding each fill's won to the
+  // won (₩12 over 17 fills on 2026-10-20) and anything with no measure yet.
   let bridge: Bridge | null = null;
   if (principal && realized) {
     const unrealizedKrw = holdings.reduce((sum, h) => sum + h.valueKrw - h.costKrw, 0);
@@ -378,11 +391,16 @@ export async function buildPortfolio(): Promise<Portfolio> {
     const goldUnrealized = holdings.filter((h) => h.venue === "gold").reduce((sum, h) => sum + h.valueKrw - h.costKrw, 0);
     const named = [
       { id: "fx", label: "달러 환율(한투)", krw: kisFxKrw ?? 0 },
+      { id: "exchange", label: "환전 비용·배당(한투)", krw: kisUnrecordedKrw ?? 0 },
       { id: "usdt", label: "테더 시세", krw: "dollarCostKrw" in upbit ? dollarCoinsKrw - upbit.dollarCostKrw : 0 },
+      { id: "interest", label: "예치금 이자(업비트)", krw: upbitFlowsRead?.interestKrw ?? 0 },
       {
         id: "fees",
         label: "출금·매수 수수료",
-        krw: -(upbitFlowsRead?.feesKrw ?? 0) + (goldPart?.profitKrw != null ? goldPart.profitKrw - goldUnrealized : 0),
+        krw:
+          -(upbitFlowsRead?.feesKrw ?? 0) -
+          upbitHeldFeesKrw +
+          (goldPart?.profitKrw != null ? goldPart.profitKrw - goldUnrealized : 0),
       },
     ];
     const rest = otherKrw - named.reduce((sum, n) => sum + n.krw, 0);
@@ -390,7 +408,7 @@ export async function buildPortfolio(): Promise<Portfolio> {
       realizedKrw: realized.totalKrw,
       unrealizedKrw,
       otherKrw,
-      other: [...named, { id: "rest", label: "배당·이자·환전 차이", krw: rest }].filter((n) => Math.abs(n.krw) >= 1),
+      other: [...named, { id: "rest", label: "끝수·기타", krw: rest }].filter((n) => Math.abs(n.krw) >= 1),
     };
   }
 

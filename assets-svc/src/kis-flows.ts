@@ -129,6 +129,12 @@ export async function detectFlow(
  * dollar is carried at the won it was booked at, and when it is spent,
  * exchanged, or still held today, the rate then against that is a currency
  * gain or loss - the part of the return neither a sale nor a holding carries.
+ *
+ * What the account holds beyond what the ledger and the trades explain
+ * (`unrecordedKrw`, actual minus expected) is money that moved with no record
+ * of its own: what exchanges cost over KIS's booked rate (the spread, and the
+ * day an exchange was really made), and dividends, which no KIS API used here
+ * lists. Within the check's margin it is that; past it, the check says so.
  */
 export function reconcile(
   venue: CashVenue,
@@ -137,7 +143,7 @@ export function reconcile(
   now: { krw: number; usd: number },
   usdKrw: number,
   today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" }),
-): { checks: LedgerCheck[]; fxKrw: number } {
+): { checks: LedgerCheck[]; fxKrw: number; unrecordedKrw: number } {
   // `now` is the book's cash (settled or not) and the trades are on their
   // trade day, so a trade is on both sides from the moment it fills - when
   // it settles changes neither (see the head of this file).
@@ -231,5 +237,5 @@ export function reconcile(
           : `기록대로면 ${ACCOUNT[venue]}에 ${won(expected)}이 남아야 하는데 지금 ${won(actual)}이에요. 적지 않은 입금이나 작게 적힌 금액이 ${won(-diff)}쯤 있어요.`,
     });
   }
-  return { checks, fxKrw };
+  return { checks, fxKrw, unrecordedKrw: -diff };
 }

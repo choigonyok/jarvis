@@ -111,6 +111,44 @@ export function replayUpbit(
 }
 
 /**
+ * The buy fees still inside what is held at Upbit, dollar coins included.
+ *
+ * A holding's cost is Upbit's own average buy price, which leaves the fee
+ * out, while a sale's cost (replayUpbit) keeps it in. So the fee on a coin
+ * not sold yet was counted nowhere - it sat in the return's remainder as a
+ * few hundred won nobody could explain (2026-10-20: ₩461 on BTC, ₩227 on
+ * USDT). It is carried the way Upbit carries its average - a sale takes its
+ * share, a position sold out starts again - and named with the fees.
+ * Whatever was held before the fills start came without a fee here.
+ */
+export function upbitHeldFees(fills: UpbitFill[], heldNow: Map<string, number>): number {
+  const bySymbol = new Map<string, UpbitFill[]>();
+  for (const f of fills) bySymbol.set(f.symbol, [...(bySymbol.get(f.symbol) ?? []), f]);
+  let total = 0;
+  for (const [symbol, list] of bySymbol) {
+    const net = list.reduce((sum, f) => sum + (f.side === "bid" ? f.volume : -f.volume), 0);
+    let qty = Math.max(0, (heldNow.get(symbol) ?? 0) - net);
+    let fee = 0;
+    for (const f of list) {
+      if (f.side === "bid") {
+        qty += f.volume;
+        fee += f.feeKrw;
+        continue;
+      }
+      const covered = Math.min(f.volume, qty);
+      if (qty > EPS) fee -= fee * (covered / qty);
+      qty -= covered;
+      if (qty < EPS) {
+        qty = 0;
+        fee = 0;
+      }
+    }
+    total += fee;
+  }
+  return total;
+}
+
+/**
  * Fills KIS has not settled yet, valued at `rate` - the page's - so a sale
  * made today shows what it brought in rather than ₩0, and a share bought
  * today what it cost. The fee is what the account's settled fills have been
