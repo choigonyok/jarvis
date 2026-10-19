@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -146,5 +147,44 @@ func TestJobCardIsOneTurnPerRun(t *testing.T) {
 	}
 	if _, err := s.Update(ctx, "other", card.ID, []string{"x"}, "Asia/Seoul"); err != ErrNoTurn {
 		t.Fatalf("다른 스레드에서는 못 바꿔야 합니다: %v", err)
+	}
+}
+
+// The console's page: the newest turns, then the ones before the oldest on
+// screen, by its id - every turn once, oldest first within a page.
+func TestWindowPagesByTurnID(t *testing.T) {
+	dsn := os.Getenv("JARVIS_TEST_DSN")
+	if dsn == "" {
+		t.Skip("JARVIS_TEST_DSN 이 없어 건너뜁니다 (scripts/dbtest)")
+	}
+	ctx := context.Background()
+	s, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.Close)
+	const th = "dbtest-page"
+	var ids []string
+	for i := 0; i < 7; i++ {
+		tt, err := s.Append(ctx, turn.Turn{Role: turn.RoleUser, Text: fmt.Sprint("m", i), Thread: th}, "Asia/Seoul")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, tt.ID)
+	}
+	page, more, err := s.Window(ctx, "Asia/Seoul", th, time.Time{}, "", 3)
+	if err != nil || !more || len(page) != 3 || page[0].ID != ids[4] || page[2].ID != ids[6] {
+		t.Fatalf("최신 3개: %+v more=%v err=%v", page, more, err)
+	}
+	page, more, err = s.Window(ctx, "Asia/Seoul", th, time.Time{}, page[0].ID, 3)
+	if err != nil || !more || len(page) != 3 || page[0].ID != ids[1] || page[2].ID != ids[3] {
+		t.Fatalf("그 앞 3개: %+v more=%v err=%v", page, more, err)
+	}
+	page, more, err = s.Window(ctx, "Asia/Seoul", th, time.Time{}, page[0].ID, 3)
+	if err != nil || more || len(page) != 1 || page[0].ID != ids[0] {
+		t.Fatalf("마지막 한 개, 더 없음: %+v more=%v err=%v", page, more, err)
+	}
+	if _, _, err := s.Window(ctx, "Asia/Seoul", th, time.Time{}, "a-0-0", 3); err != nil {
+		t.Fatalf("없는 id 는 빈 페이지지 오류가 아닙니다: %v", err)
 	}
 }

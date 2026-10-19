@@ -413,7 +413,9 @@ export function Thread() {
     hydrated,
     hasMore,
     loadingOlder,
+    olderFailed,
     loadOlder,
+    resync,
     send,
     steer,
     drop,
@@ -483,9 +485,11 @@ export function Thread() {
   // Scrolling up near the top asks for the page above. Asked once per page:
   // the next ask waits for this one to land (loadingOlder) and be measured.
   const askOlder = useCallback(
-    (el: HTMLElement) => {
+    (el: HTMLElement, tapped = false) => {
       if (!hasMore || loadingOlder || above.current || !landed.current) return;
-      if (el.scrollTop > 320) return;
+      // A page that failed is asked again only on a tap, not by every scroll.
+      if (olderFailed && !tapped) return;
+      if (!tapped && el.scrollTop > 320) return;
       above.current = { height: el.scrollHeight, top: el.scrollTop };
       void loadOlder().then(() => {
         // Nothing came (or it failed): nothing to compensate for.
@@ -494,7 +498,7 @@ export function Thread() {
         }, 1500);
       });
     },
-    [hasMore, loadingOlder, loadOlder],
+    [hasMore, loadingOlder, olderFailed, loadOlder],
   );
 
   // A tapped push about a card lands on that card - not the bottom of the
@@ -660,7 +664,8 @@ export function Thread() {
   if (mode === "voice") {
     return (
       <VoiceStage
-        onSend={(text) => void send(text)}
+        onSend={(text) => send(text)}
+        onStall={resync}
         speaking={speaking}
         preparing={preparing}
         speaker={speaker}
@@ -698,9 +703,19 @@ export function Thread() {
       >
         <div className="mx-auto w-full max-w-[46rem] px-4 pt-7 pb-12 sm:px-8 sm:pt-10 sm:pb-6">
           {turns.length > 0 && (hasMore || loadingOlder) ? (
-            <p className="mb-6 text-center text-[11.5px] text-faint" aria-live="polite">
-              {loadingOlder ? "이전 대화를 불러오는 중" : "위로 올리면 이전 대화가 이어집니다"}
-            </p>
+            olderFailed && !loadingOlder ? (
+              <button
+                type="button"
+                onClick={() => scrollRef.current && askOlder(scrollRef.current, true)}
+                className="tap mx-auto mb-6 block text-center text-[11.5px] text-faint underline-offset-2 outline-none hover:text-dim hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
+              >
+                이전 대화를 불러오지 못했어요. 눌러서 다시
+              </button>
+            ) : (
+              <p className="mb-6 text-center text-[11.5px] text-faint" aria-live="polite">
+                {loadingOlder ? "이전 대화를 불러오는 중" : "위로 올리면 이전 대화가 이어집니다"}
+              </p>
+            )
           ) : null}
           <Transcript
             turns={turns}

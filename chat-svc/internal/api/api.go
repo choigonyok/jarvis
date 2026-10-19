@@ -87,6 +87,9 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 // conversation.
 var threadName = regexp.MustCompile(`^[a-z0-9-]{0,32}$`)
 
+// turnID is the shape of a stored turn's id ("a-<epoch ms>-<seq>", "u-…").
+var turnID = regexp.MustCompile(`^[a-z]+-[0-9]+-[0-9]+$`)
+
 func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 	thread := r.URL.Query().Get("thread")
 	if !threadName.MatchString(thread) {
@@ -105,16 +108,20 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, "limit 는 1~500 이어야 합니다.")
 			return
 		}
+		// before= is a turn id (the oldest on the page below) or an RFC3339 time.
 		var before time.Time
+		var beforeID string
 		if b := r.URL.Query().Get("before"); b != "" {
-			t, err := time.Parse(time.RFC3339Nano, b)
-			if err != nil {
-				writeErr(w, http.StatusBadRequest, "before 는 RFC3339 시각이어야 합니다.")
+			if turnID.MatchString(b) {
+				beforeID = b
+			} else if t, err := time.Parse(time.RFC3339Nano, b); err == nil {
+				before = t
+			} else {
+				writeErr(w, http.StatusBadRequest, "before 는 턴 id 나 RFC3339 시각이어야 합니다.")
 				return
 			}
-			before = t
 		}
-		turns, more, err := s.store.Window(r.Context(), s.tz, thread, before, limit)
+		turns, more, err := s.store.Window(r.Context(), s.tz, thread, before, beforeID, limit)
 		if err != nil {
 			s.log.Error("스레드를 불러오지 못했습니다", "err", err)
 			writeErr(w, http.StatusInternalServerError, "스레드를 불러오지 못했습니다.")

@@ -246,7 +246,9 @@ export function Spectrum({
           const raw = (data[b - 1] + data[b] * 2 + data[b + 1]) / (4 * 255);
           // Highs are naturally quieter; tilt them up so the whole ring moves.
           target = Math.min(1, Math.pow(raw, 1.6) * (1 + i / HALF) * 1.15);
-        } else if (m === "speaking") {
+        } else if (m === "speaking" || m === "listening") {
+          // No waveform to read (the cloned voice through a media element, a
+          // phone's recognizer that owns the mic): the ring moves on energy.
           const shape =
             0.5 +
             0.25 * Math.sin(i * 0.42 + t * 5.1) +

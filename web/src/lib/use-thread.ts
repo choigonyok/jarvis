@@ -11,6 +11,7 @@ import {
   type Turn,
 } from "@/lib/thread";
 import { decideProposal } from "@/lib/decide";
+import { requestResume } from "@/lib/resume";
 
 /**
  * Upsert by id: an updated turn or proposal arrives the way the first did.
@@ -46,6 +47,9 @@ export function useThread() {
   // that page is on its way.
   const [hasMore, setHasMore] = useState(() => cached?.hasMore ?? true);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  // The last page above could not be read: not asked again on its own (a
+  // scroll would only fail again), but on a tap.
+  const [olderFailed, setOlderFailed] = useState(false);
   const [proposals, setProposalsState] = useState<Proposal[]>(() => cached?.proposals ?? []);
   const [thinking, setThinking] = useState(() => cached?.thinking ?? false);
   const [error, setError] = useState<string | null>(null);
@@ -105,10 +109,12 @@ export function useThread() {
   // once the turns are in (the caller keeps the view where it was).
   const loadOlder = useCallback(async () => {
     const oldest = cached?.turns[0];
-    if (!oldest?.atIso || loadingOlder) return;
+    if (!oldest?.id || loadingOlder) return;
     setLoadingOlder(true);
     try {
-      const res = await fetch(`${API}/thread?limit=${PAGE}&before=${encodeURIComponent(oldest.atIso)}`, { cache: "no-store" });
+      // The cursor is the turn's id, not its time: a "+09:00" in the query
+      // came out as a space on the far side of the proxies (2026-10-19).
+      const res = await fetch(`${API}/thread?limit=${PAGE}&before=${encodeURIComponent(oldest.id)}`, { cache: "no-store" });
       if (!res.ok) throw new Error(String(res.status));
       const data = (await res.json()) as { turns: Turn[]; hasMore?: boolean };
       const older = data.turns ?? [];
@@ -117,8 +123,9 @@ export function useThread() {
         return [...older.filter((t) => !have.has(t.id)), ...prev];
       });
       setMore(Boolean(data.hasMore));
+      setOlderFailed(false);
     } catch {
-      setError("이전 대화를 불러오지 못했습니다.");
+      setOlderFailed(true);
     } finally {
       setLoadingOlder(false);
     }
@@ -154,6 +161,13 @@ export function useThread() {
   }, [hydrate]);
 
   const connection = useAgentStream(onEvent, () => void hydrate());
+
+  // Re-read the thread and reopen the stream - for a screen that sent and
+  // heard nothing back, which is what a quietly dead stream looks like.
+  const resync = useCallback(() => {
+    void hydrate();
+    requestResume();
+  }, [hydrate]);
 
   /** Resolves true once the agent took the message - to answer now, or queued behind the running turn. */
   const send = useCallback(async (text: string, images?: string[], refId?: string) => {
@@ -229,7 +243,9 @@ export function useThread() {
     hydrated,
     hasMore,
     loadingOlder,
+    olderFailed,
     loadOlder,
+    resync,
     send,
     steer: (id: string) => onQueued(id, "steer"),
     drop: (id: string) => onQueued(id, "drop"),

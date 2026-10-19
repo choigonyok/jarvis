@@ -110,7 +110,13 @@ func (s *Store) All(ctx context.Context, tz, thread string, since time.Time) ([]
 // opens on the newest page and asks for the one above as the reader scrolls
 // up - the thread is months long, and all of it at once was the page's
 // slowest part.
-func (s *Store) Window(ctx context.Context, tz, thread string, before time.Time, limit int) ([]turn.Turn, bool, error) {
+//
+// The cursor is the id of the oldest turn on the page below (`beforeID`):
+// the page is what comes before that turn in the thread's order. A time
+// (`before`) is taken too, for callers that have one - but an id survives a
+// trip through URLs that a timestamp's "+09:00" did not (2026-10-19: the
+// console's cursor arrived with a space for the plus).
+func (s *Store) Window(ctx context.Context, tz, thread string, before time.Time, beforeID string, limit int) ([]turn.Turn, bool, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -118,7 +124,15 @@ func (s *Store) Window(ctx context.Context, tz, thread string, before time.Time,
 	if !before.IsZero() {
 		beforeArg = before
 	}
-	rows, err := s.pool.Query(ctx, selectList+` where thread = $2 and ($3::timestamptz is null or at < $3) order by at desc, id desc limit $4`, tz, thread, beforeArg, limit+1)
+	var idArg any
+	if beforeID != "" {
+		idArg = beforeID
+	}
+	rows, err := s.pool.Query(ctx, selectList+`
+		 where thread = $2
+		   and ($3::timestamptz is null or at < $3)
+		   and ($5::text is null or (at, id) < (select o.at, o.id from turns o where o.id = $5))
+		 order by at desc, id desc limit $4`, tz, thread, beforeArg, limit+1, idArg)
 	if err != nil {
 		return nil, false, fmt.Errorf("턴 조회: %w", err)
 	}

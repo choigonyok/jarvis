@@ -38,6 +38,46 @@ function constructor() {
   return window.SpeechRecognition ?? window.webkitSpeechRecognition;
 }
 
+/** A beat after a session ends before the next is opened: the platform has to let go of the last one first. */
+const REOPEN_MS = 200;
+/** How many times a refused start is tried again, 250 ms apart, before asking for a tap. */
+const START_TRIES = 8;
+/** A start the engine took but never confirmed (no onstart) is given up on after this. */
+const OPEN_MS = 4000;
+/** An abort is expected to end the session; past this it is treated as ended anyway. */
+const END_MS = 1500;
+/** Once an engine has been seen to report its capture, a session that does not within this is deaf. */
+const AUDIO_MS = 3000;
+/** Sound began and no words came in this long: the session is deaf. */
+const WORDS_MS = 7000;
+/** Sessions given up on in a row (never started, never captured) before asking for a tap. */
+const DEAF_LIMIT = 3;
+
+/**
+ * Whether this is a phone or a tablet. There the recognizer must be the only
+ * thing capturing: an iPhone lets one audio capture run per page and mutes the
+ * one before when another starts, and Android's recognizer and a page's own
+ * capture contend for the mic. The voice stage's meter does not open its own
+ * microphone there; the ring moves on what the recognizer hears instead.
+ */
+export function capturesAlone(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent;
+  return /iPhone|iPad|iPod|Android/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+}
+
+/**
+ * Listening, one session at a time, each on a fresh engine.
+ *
+ * A session ends often - a phrase settles, the engine times out on silence,
+ * the stage closes it while Jarvis talks - and the next one is a new
+ * SpeechRecognition, not the old one started again: an engine reused after an
+ * abort can come back saying it listens while it hears nothing (2026-10-19,
+ * on an iPhone after two exchanges). Every timer and flag of a session lives
+ * in that session, so nothing stuck in one can leak into the next. "Listening"
+ * is the engine's own word (onstart), and a session that says so but never
+ * opens the mic, or hears sound but never words, is replaced.
+ */
 export function useRecognition({
   lang = "ko-KR",
   onFinal,
@@ -49,10 +89,13 @@ export function useRecognition({
   const [interim, setInterim] = useState("");
   /** The recognizer's last error code, so the screen can say what broke. */
   const [error, setError] = useState<string | null>(null);
-  const recognition = useRef<SpeechRecognition | null>(null);
+  /** Rises each time the recognizer hears something - sound began, words came. */
+  const [heard, setHeard] = useState(0);
+  const engineRef = useRef<SpeechRecognition | null>(null);
   const final = useRef(onFinal);
-  // The recognizer is built once and lives for the page, so it has to reach
-  // fresh state through a ref rather than closing over a stale callback.
+  const langRef = useRef(lang);
+  // Whether a session should be open: set by start, cleared by stop and by
+  // what cannot be fixed by trying again (a refusal, a fatal error).
   const wanted = useRef(false);
   // Whether the current session was opened by a tap. iOS Safari - and a
   // home-screen web app most of all - refuses to start recognition without
@@ -60,25 +103,50 @@ export function useRecognition({
   // on an automatic reopen, that is not a denial: it is the platform asking
   // for a tap, and the screen should ask for one rather than give up.
   const tapped = useRef(false);
-  // A start that threw is tried again shortly: the engine throws while its
-  // last session is still ending (끝내기 then 시작, or the reopen right after
-  // an answer), and a moment later it takes the call.
+  // The pending (re)open, if any.
   const retry = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // True from a start() the engine took until it says it is listening (or
-  // ends): a second start meanwhile would throw "already started" and be
-  // read as a refusal.
+  // True from a start() the engine took until it says it is listening (or ends).
   const opening = useRef(false);
-  useEffect(() => () => {
-    if (retry.current) clearTimeout(retry.current);
-  }, []);
+  // Sessions given up on in a row; reset by any words heard.
+  const deaf = useRef(0);
+  // Whether this engine has been seen to report its capture (onaudiostart).
+  // Only then is a session that never does so taken to be deaf - an engine
+  // that never reports it is not punished for that.
+  const reportsAudio = useRef(false);
+  const attemptRef = useRef<((tries: number) => void) | null>(null);
 
   useEffect(() => {
     final.current = onFinal;
+    langRef.current = lang;
   });
 
+  // Let the session in use go: its handlers fall silent, and it is told to stop.
+  const retire = useCallback(() => {
+    const e = engineRef.current;
+    engineRef.current = null;
+    opening.current = false;
+    if (!e) return;
+    e.onresult = null;
+    e.onerror = null;
+    e.onstart = null;
+    e.onend = null;
+    e.onaudiostart = null;
+    e.onsoundstart = null;
+    e.onspeechstart = null;
+    try {
+      e.abort();
+    } catch {
+      // Already gone.
+    }
+  }, []);
+
+  const schedule = useCallback((delay: number) => {
+    if (retry.current) clearTimeout(retry.current);
+    retry.current = setTimeout(() => attemptRef.current?.(0), delay);
+  }, []);
+
   useEffect(() => {
-    const Recognition = constructor();
-    if (!Recognition) {
+    if (!constructor()) {
       // Set from an effect on purpose: deciding this during render would make
       // the server (no window, so "unsupported") and the hydrating client
       // disagree about the first frame.
@@ -86,157 +154,227 @@ export function useRecognition({
       setState("unsupported");
       return;
     }
-
-    const engine = new Recognition();
-    engine.lang = lang;
-    // Continuous so a pause mid-sentence does not end the turn; interim so the
-    // words appear as they are spoken instead of all at once at the end.
-    engine.continuous = true;
-    engine.interimResults = true;
-
-    // Set between committing a settled phrase and the session it came from
-    // ending, so a late final for the same words is not sent a second time.
-    let dropping = false;
-    let settle: ReturnType<typeof setTimeout> | undefined;
-
-    engine.onresult = (event) => {
-      if (dropping) return;
-      let pending = "";
-      for (let i = event.resultIndex; i < event.results.length; i += 1) {
-        const result = event.results[i];
-        const text = result[0]?.transcript ?? "";
-        if (result.isFinal) {
-          const trimmed = text.trim();
-          if (trimmed) final.current(trimmed);
-        } else {
-          pending += text;
-        }
-      }
-      setInterim(pending);
-
-      clearTimeout(settle);
-      const heard = pending.trim();
-      if (!heard) return;
-      settle = setTimeout(() => {
-        // Abort rather than stop: stop would finalize these same words and
-        // deliver them again. onend below reopens the mic.
-        dropping = true;
-        setInterim("");
-        final.current(heard);
-        engine.abort();
-      }, SETTLE_MS);
-    };
-
-    engine.onerror = (event) => {
-      opening.current = false;
-      console.warn("[voice] recognition error:", event.error, event.message);
-      const refused =
-        event.error === "not-allowed" || event.error === "service-not-allowed";
-      // On an automatic reopen, a refusal (or the mic still held by the voice
-      // that just finished speaking) means "tap to talk", not "broken".
-      if (!tapped.current && (refused || event.error === "audio-capture")) {
-        wanted.current = false;
-        setError(event.error);
-        setState("paused");
-        return;
-      }
-      if (refused) {
-        wanted.current = false;
-        setState("denied");
-        return;
-      }
-      if (FATAL.has(event.error)) {
-        wanted.current = false;
-        setError(event.error);
-        setState("failed");
-        return;
-      }
-      // "no-speech" and "aborted" are ordinary: onend restarts below.
-      setInterim("");
-    };
-
-    // The engine's own word that it is listening. A start() that returned
-    // without throwing is not that: on an iPhone it can return while the
-    // previous session is still closing and then never open the mic.
-    engine.onstart = () => {
-      opening.current = false;
-      setError(null);
-      setState("listening");
-    };
-
-    engine.onend = () => {
-      opening.current = false;
-      dropping = false;
-      clearTimeout(settle);
-      setInterim("");
-      // Chrome stops the recognizer on its own after a stretch of silence.
-      // If the user has not asked to stop, start it again so the mic stays on.
-      if (wanted.current) {
-        tapped.current = false;
-        try {
-          engine.start();
-        } catch {
-          setState("paused");
-        }
-      } else {
-        // A fatal error has already said why it stopped; keep that on screen.
-        setState((prev) =>
-          prev === "failed" || prev === "denied" || prev === "paused" ? prev : "idle",
-        );
-      }
-    };
-
-    recognition.current = engine;
     return () => {
       wanted.current = false;
-      clearTimeout(settle);
-      engine.onend = null;
-      engine.abort();
-      recognition.current = null;
+      if (retry.current) clearTimeout(retry.current);
+      retire();
     };
-  }, [lang]);
+  }, [retire]);
 
-  /** `auto` when nobody tapped for this start - the hands-free reopen after Jarvis speaks. */
-  const start = useCallback((opts?: { auto?: boolean }) => {
-    const engine = recognition.current;
-    if (!engine) return;
-    // Already asked and waiting for the engine's word: nothing to add.
-    if (opening.current) return;
-    tapped.current = !opts?.auto;
-    wanted.current = true;
-    setError(null);
-    if (retry.current) clearTimeout(retry.current);
-    let attempts = 0;
-    const attempt = () => {
-      if (!wanted.current || recognition.current !== engine) return;
+  useEffect(() => {
+    // One attempt to open a session; a start the engine refuses (it is still
+    // letting go of the last one) is tried again shortly.
+    attemptRef.current = (tries: number) => {
+      if (!wanted.current) return;
+      const Recognition = constructor();
+      if (!Recognition) return;
+      retire();
+      const engine = new Recognition();
+      engine.lang = langRef.current;
+      // Continuous so a pause mid-sentence does not end the turn; interim so the
+      // words appear as they are spoken instead of all at once at the end.
+      engine.continuous = true;
+      engine.interimResults = true;
+      engineRef.current = engine;
+      const mine = () => engineRef.current === engine;
+
+      // This session's own state.
+      let dropping = false; // a settled phrase was taken; late results of it are not
+      let gotWords = false;
+      let captured = false; // this session reported its capture (in whatever order)
+      let settle: ReturnType<typeof setTimeout> | undefined;
+      let ending: ReturnType<typeof setTimeout> | undefined;
+      let starting: ReturnType<typeof setTimeout> | undefined;
+      let capture: ReturnType<typeof setTimeout> | undefined;
+      let words: ReturnType<typeof setTimeout> | undefined;
+      const quiet = () => {
+        clearTimeout(settle);
+        clearTimeout(ending);
+        clearTimeout(starting);
+        clearTimeout(capture);
+        clearTimeout(words);
+      };
+
+      // The session is over: open the next while one is wanted.
+      const finish = () => {
+        if (!mine()) return;
+        quiet();
+        engineRef.current = null;
+        opening.current = false;
+        setInterim("");
+        if (wanted.current) {
+          tapped.current = false;
+          schedule(REOPEN_MS);
+        } else {
+          // A fatal error has already said why it stopped; keep that on screen.
+          setState((prev) => (prev === "failed" || prev === "denied" || prev === "paused" ? prev : "idle"));
+        }
+      };
+
+      // The session is not working: a fresh one in its place - unless that
+      // has happened too many times in a row, when a tap is asked for.
+      const replace = (why: string, counts: boolean) => {
+        if (!mine()) return;
+        console.warn("[voice] recognizer", why, "- opening a fresh one");
+        quiet();
+        retire();
+        if (counts) deaf.current += 1;
+        if (deaf.current >= DEAF_LIMIT) {
+          deaf.current = 0;
+          wanted.current = false;
+          setInterim("");
+          setError("mic-silent");
+          setState("paused");
+          return;
+        }
+        if (wanted.current) schedule(REOPEN_MS);
+      };
+
+      engine.onstart = () => {
+        if (!mine()) return;
+        clearTimeout(starting);
+        opening.current = false;
+        setError(null);
+        setState("listening");
+        if (reportsAudio.current && !captured) {
+          capture = setTimeout(() => replace("never opened the microphone", true), AUDIO_MS);
+        }
+      };
+      engine.onaudiostart = () => {
+        if (!mine()) return;
+        captured = true;
+        reportsAudio.current = true;
+        clearTimeout(capture);
+      };
+      const sound = () => {
+        if (!mine()) return;
+        captured = true;
+        clearTimeout(capture);
+        setHeard((h) => h + 1);
+        if (!gotWords) {
+          clearTimeout(words);
+          words = setTimeout(() => replace("heard sound but no words", false), WORDS_MS);
+        }
+      };
+      engine.onsoundstart = sound;
+      engine.onspeechstart = sound;
+
+      engine.onresult = (event) => {
+        if (!mine() || dropping) return;
+        clearTimeout(capture);
+        clearTimeout(words);
+        gotWords = true;
+        deaf.current = 0;
+        setHeard((h) => h + 1);
+        let pending = "";
+        for (let i = event.resultIndex; i < event.results.length; i += 1) {
+          const result = event.results[i];
+          const text = result[0]?.transcript ?? "";
+          if (result.isFinal) {
+            const trimmed = text.trim();
+            if (trimmed) final.current(trimmed);
+          } else {
+            pending += text;
+          }
+        }
+        setInterim(pending);
+
+        clearTimeout(settle);
+        const heardText = pending.trim();
+        if (!heardText) return;
+        settle = setTimeout(() => {
+          if (!mine()) return;
+          // Abort rather than stop: stop would finalize these same words and
+          // deliver them again. The session's end opens the next one.
+          dropping = true;
+          setInterim("");
+          final.current(heardText);
+          try {
+            engine.abort();
+          } catch {
+            // Already ending.
+          }
+          // An engine that never says it ended is let go anyway.
+          ending = setTimeout(finish, END_MS);
+        }, SETTLE_MS);
+      };
+
+      engine.onerror = (event) => {
+        if (!mine()) return;
+        opening.current = false;
+        console.warn("[voice] recognition error:", event.error, event.message);
+        const refused = event.error === "not-allowed" || event.error === "service-not-allowed";
+        // On an automatic reopen, a refusal (or the mic still held by the voice
+        // that just finished speaking) means "tap to talk", not "broken".
+        if (!tapped.current && (refused || event.error === "audio-capture")) {
+          wanted.current = false;
+          setError(event.error);
+          setState("paused");
+        } else if (refused) {
+          wanted.current = false;
+          setState("denied");
+        } else if (FATAL.has(event.error)) {
+          wanted.current = false;
+          setError(event.error);
+          setState("failed");
+        } else {
+          // "no-speech" and "aborted" are ordinary: the session's end opens the next.
+          setInterim("");
+          return;
+        }
+        // Stopped for good: the end may or may not come; this session is done either way.
+        ending = setTimeout(finish, END_MS);
+      };
+
+      engine.onend = finish;
+
       try {
         engine.start();
         opening.current = true;
-        // Listening is announced by onstart, not here. Shown as opening
-        // meanwhile - a state that says "listening" with a closed mic is
-        // the bug this replaces (2026-10-19).
+        // Listening is announced by onstart, not here: a state that says
+        // "listening" with a closed mic is what this replaces.
         setState((prev) => (prev === "listening" ? prev : "idle"));
+        starting = setTimeout(() => replace("never started", true), OPEN_MS);
       } catch {
-        attempts += 1;
-        if (attempts < 5) {
-          retry.current = setTimeout(attempt, 250);
+        // Still letting go of the last session: try again shortly.
+        quiet();
+        retire();
+        if (tries < START_TRIES) {
+          retry.current = setTimeout(() => attemptRef.current?.(tries + 1), 250);
           return;
         }
-        // Still refused after a second: ask for a tap rather than pretend.
         wanted.current = false;
         setError("start-failed");
         setState("paused");
       }
     };
-    attempt();
+  });
+
+  /** `auto` when nobody tapped for this start - the hands-free reopen after Jarvis speaks. */
+  const start = useCallback((opts?: { auto?: boolean }) => {
+    // Already asked and waiting for the engine's word: nothing to add.
+    if (opening.current && wanted.current) return;
+    tapped.current = !opts?.auto;
+    wanted.current = true;
+    deaf.current = 0;
+    setError(null);
+    if (retry.current) clearTimeout(retry.current);
+    attemptRef.current?.(0);
   }, []);
 
   const stop = useCallback(() => {
     wanted.current = false;
-    opening.current = false;
     if (retry.current) clearTimeout(retry.current);
     setInterim("");
-    recognition.current?.stop();
+    const e = engineRef.current;
+    if (e) {
+      try {
+        e.stop();
+      } catch {
+        // Not running.
+      }
+    }
+    opening.current = false;
     setState((prev) => (prev === "listening" ? "idle" : prev));
   }, []);
 
@@ -244,6 +382,7 @@ export function useRecognition({
     state,
     interim,
     error,
+    heard,
     start,
     stop,
     supported: state !== "unsupported",

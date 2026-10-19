@@ -46,6 +46,11 @@ export function onResume(fn: () => void): () => void {
   };
 }
 
+/** Asks every screen to re-read and reopen its streams, as on coming back to the app. */
+export function requestResume() {
+  window.dispatchEvent(new Event(RESUME));
+}
+
 /** The inbox opens when a grouped push ("밤사이 알림 3건") is tapped. */
 export function onInboxRequest(fn: () => void): () => void {
   window.addEventListener(INBOX, fn);

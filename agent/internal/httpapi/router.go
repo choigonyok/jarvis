@@ -297,7 +297,14 @@ func (s *Server) getThread(w http.ResponseWriter, r *http.Request) {
 	// ?limit= is the console's page (the newest turns; with before=, the
 	// ones above a time). Without it, the whole thread, as before.
 	if limit, _ := strconv.Atoi(r.URL.Query().Get("limit")); limit > 0 {
-		turns, hasMore = s.thread.Window(r.URL.Query().Get("before"), min(limit, 500))
+		var err error
+		turns, hasMore, err = s.thread.Window(r.URL.Query().Get("before"), min(limit, 500))
+		if err != nil {
+			// Said as a failure, not handed over as an empty page with no more
+			// above it - the console would stop asking.
+			writeErr(w, http.StatusBadGateway, "이전 대화를 불러오지 못했습니다: "+err.Error())
+			return
+		}
 		_, thinking = s.thread.Snapshot()
 	} else {
 		turns, thinking = s.thread.Snapshot()

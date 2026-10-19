@@ -246,26 +246,27 @@ func (s *Store) Snapshot() ([]*Turn, bool) {
 	return payload.Turns, thinking
 }
 
-// Window is the newest `limit` turns before `before` (an atIso; "" for the
-// newest of all), oldest first, and whether older ones remain - the console's
-// page (chat-svc GET /turns?limit=). On failure an empty page, logged, as
-// Snapshot does.
-func (s *Store) Window(before string, limit int) ([]*Turn, bool) {
+// Window is the newest `limit` turns before `before` (a turn id, or an
+// atIso; "" for the newest of all), oldest first, and whether older ones
+// remain - the console's page (chat-svc GET /turns?limit=).
+func (s *Store) Window(before string, limit int) ([]*Turn, bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	q := url.Values{"thread": {s.thread}, "limit": {strconv.Itoa(limit)}}
 	if before != "" {
-		q.Set("before", before)
+		// A time cursor whose "+" became a space on the way (URL decoding
+		// along a proxy) is put back; an id cursor has no such character.
+		q.Set("before", strings.Replace(before, " ", "+", 1))
 	}
 	var payload struct {
 		Turns   []*Turn `json:"turns"`
 		HasMore bool    `json:"hasMore"`
 	}
 	if err := s.do(ctx, http.MethodGet, "/turns?"+q.Encode(), nil, &payload); err != nil {
-		s.log.Error("스레드의 한 페이지를 불러오지 못했습니다", "err", err)
-		return nil, false
+		s.log.Error("스레드의 한 페이지를 불러오지 못했습니다", "before", before, "err", err)
+		return nil, false, err
 	}
-	return payload.Turns, payload.HasMore
+	return payload.Turns, payload.HasMore, nil
 }
 
 func (s *Store) AppendUser(text string, images ...string) *Turn {
