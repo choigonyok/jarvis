@@ -1,9 +1,12 @@
 "use client";
 
-import { useLayoutEffect, useRef, useSyncExternalStore } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { ChevronDown, Search } from "lucide-react";
 import { Header, TabBar } from "@/components/shell/header";
+import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
-import { useKakao, type KakaoMessage, type Source } from "@/lib/use-kakao";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { useKakao, type KakaoMessage, type KakaoRoom, type Source } from "@/lib/use-kakao";
 import { useThread } from "@/lib/use-thread";
 import { isPending } from "@/lib/thread";
 import { cn } from "@/lib/utils";
@@ -66,7 +69,7 @@ export function Kakao() {
               aria-selected={source === key}
               onClick={() => pick(key)}
               className={cn(
-                "min-h-8 rounded-md px-3 text-[12.5px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+                "tap-y min-h-8 rounded-md px-3 text-[12.5px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
                 source === key ? "bg-glass-raised text-foreground" : "text-faint hover:text-dim",
               )}
             >
@@ -83,7 +86,7 @@ export function Kakao() {
 }
 
 function Feed({ source }: { source: Source }) {
-  const { rooms, selected, setSelected, messages, error, hydrated } = useKakao(source);
+  const { rooms, selected, setSelected, messages, error, hydrated, reload } = useKakao(source);
 
   // 방을 열면 맨 아래(최근 대화)로. 그 뒤 수집이 새로 고칠 때는, 이미 맨
   // 아래를 보고 있을 때만 따라 내려간다 - 위로 올려 읽던 사람을 몇 초마다
@@ -111,36 +114,7 @@ function Feed({ source }: { source: Source }) {
       <main className="px-gutter pb-tabbar mx-auto flex min-h-0 w-full max-w-[46rem] flex-1 flex-col overflow-x-hidden">
         {/* 방 고르기. 수집된 방만 나온다 - 목록 상태만 있고 본문이 없는 방은
             읽을 것이 없으므로 자리를 차지할 이유가 없다. */}
-        {/* Wrapped, not a sideways strip: on a phone a row that scrolls
-            sideways drags the whole tab with it. Two rows show, the rest
-            scroll up and down. */}
-        <div className="scrollbar-hairline max-h-[5.25rem] shrink-0 overflow-x-hidden overflow-y-auto overscroll-contain py-2 sm:max-h-none sm:py-3">
-          <div className="flex flex-wrap items-center gap-1.5">
-            {rooms.map((room) => {
-              const active = room.id === selected;
-              return (
-                <button
-                  key={room.id}
-                  type="button"
-                  onClick={() => setSelected(room.id)}
-                  aria-current={active ? "true" : undefined}
-                  className={cn(
-                    "flex min-h-9 max-w-full shrink-0 items-center rounded-md px-3 text-[12.5px] whitespace-nowrap transition-colors sm:min-h-0 sm:px-2.5 sm:py-1",
-                    "outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
-                    active
-                      ? "bg-glass-raised text-foreground"
-                      : "text-faint hover:text-dim",
-                  )}
-                >
-                  {room.name}
-                  <span className="ms-1.5 tabular-nums text-faint">
-                    {room.messages}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        {rooms.length > 0 ? <RoomPicker rooms={rooms} selected={selected} onSelect={setSelected} /> : null}
 
         <div
           ref={scroller}
@@ -151,7 +125,10 @@ function Feed({ source }: { source: Source }) {
           className="scrollbar-hairline min-h-0 flex-1 touch-pan-y overflow-x-hidden overflow-y-auto overscroll-contain pb-4 sm:pb-6"
         >
           {!hydrated ? null : error && source !== "imessage" ? (
-            <p className="pt-10 text-center text-[13px] text-faint">{error}</p>
+            <div className="pt-10 text-center">
+              <p className="text-[13px] text-faint">{error}</p>
+              <Retry onRetry={reload} />
+            </div>
           ) : rooms.length === 0 ? (
             <div className="grid place-items-center px-8 pt-16">
               {source === "imessage" ? (
@@ -184,6 +161,138 @@ function Feed({ source }: { source: Source }) {
       </main>
     </>
   );
+}
+
+/**
+ * Which room. Up to two hundred are collected, and a wall of chips - or a
+ * small box of them scrolling up and down - put the room you wanted below
+ * everything else. Sideways is out too: a strip that scrolls sideways drags
+ * the whole tab with it on a phone (2026-10-08).
+ *
+ * So one line: the room being read, which opens all of them with a search,
+ * and then as many of the other recent rooms as fit - a room that does not
+ * fit wraps onto a line that is never shown, so there is no half a chip.
+ */
+function RoomPicker({
+  rooms,
+  selected,
+  onSelect,
+}: {
+  rooms: KakaoRoom[];
+  selected: string | null;
+  onSelect: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const current = rooms.find((r) => r.id === selected) ?? rooms[0];
+  const others = rooms.filter((r) => r.id !== current.id);
+  const found = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? rooms.filter((r) => r.name.toLowerCase().includes(q)) : rooms;
+  }, [rooms, query]);
+
+  return (
+    <div className="flex shrink-0 items-start gap-1 py-1 sm:py-2">
+      <Sheet
+        open={open}
+        onOpenChange={(o) => {
+          setOpen(o);
+          if (!o) setQuery("");
+        }}
+      >
+        <SheetTrigger
+          aria-label={`대화방: ${current.name}. 누르면 전체 ${rooms.length}개 방에서 고릅니다`}
+          className="group flex h-11 max-w-[60%] shrink-0 items-center outline-none"
+        >
+          <span className="flex min-w-0 items-center gap-1.5 rounded-lg bg-glass-raised px-3 py-2 text-[13px] text-foreground group-focus-visible:ring-3 group-focus-visible:ring-ring/50">
+            <span className="truncate">{current.name}</span>
+            <span className="shrink-0 tabular-nums text-faint">{current.messages}</span>
+            <ChevronDown aria-hidden className="size-3.5 shrink-0 text-faint" />
+          </span>
+        </SheetTrigger>
+        <SheetContent
+          side="bottom"
+          // A finger came to scroll the recent rooms; a keyboard popping up
+          // over them would hide the list it opened. A mouse types at once.
+          onOpenAutoFocus={(e) => {
+            if (matchMedia("(pointer: coarse)").matches) e.preventDefault();
+          }}
+          className="inset-x-safe pb-safe max-h-[85dvh] gap-0 border-edge-soft bg-background sm:inset-x-auto sm:left-1/2 sm:w-[30rem] sm:-translate-x-1/2 sm:rounded-t-2xl"
+        >
+          <SheetHeader className="px-4 pt-4 pb-2">
+            <SheetTitle className="text-[14px] font-medium text-foreground">
+              대화방 <span className="tabular-nums text-faint">{rooms.length}</span>
+            </SheetTitle>
+          </SheetHeader>
+          <label className="relative mx-4 mb-2 block">
+            <Search aria-hidden className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-faint" />
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="방 이름으로 찾기"
+              aria-label="방 이름으로 찾기"
+              enterKeyHint="search"
+              className="h-11 w-full rounded-lg bg-glass ps-9 pe-3 text-[16px] text-foreground outline-none placeholder:text-faint focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-9 mouse:text-[13px]"
+            />
+          </label>
+          <ul className="scrollbar-hairline min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-4">
+            {found.map((room) => {
+              const active = room.id === current.id;
+              return (
+                <li key={room.id}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onSelect(room.id);
+                      setOpen(false);
+                      setQuery("");
+                    }}
+                    aria-current={active ? "true" : undefined}
+                    className={cn(
+                      "flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50",
+                      active ? "liquid-glass-flat text-foreground" : "text-dim hover:bg-glass",
+                    )}
+                  >
+                    <span className="min-w-0 flex-1 truncate text-[14.5px]">{room.name}</span>
+                    <span className="shrink-0 text-[11.5px] tabular-nums text-faint">{when(room)}</span>
+                    <span className="w-9 shrink-0 text-end text-[11.5px] tabular-nums text-faint">{room.messages}</span>
+                  </button>
+                </li>
+              );
+            })}
+            {found.length === 0 ? (
+              <li className="px-3 py-6 text-center text-[13px] text-faint">&lsquo;{query.trim()}&rsquo;에 맞는 방이 없어요.</li>
+            ) : null}
+          </ul>
+        </SheetContent>
+      </Sheet>
+
+      {/* The rest, newest first: one line's worth, and nothing sideways. */}
+      <div className="flex h-11 min-w-0 flex-1 flex-wrap content-start gap-x-0.5 gap-y-8 overflow-hidden">
+        {others.map((room) => (
+          <button
+            key={room.id}
+            type="button"
+            onClick={() => onSelect(room.id)}
+            className="group flex h-11 max-w-full shrink-0 items-center outline-none"
+          >
+            <span className="flex min-w-0 items-center rounded-md px-2.5 py-2 text-[12.5px] whitespace-nowrap text-faint transition-colors group-hover:text-dim group-focus-visible:ring-3 group-focus-visible:ring-ring/50">
+              <span className="truncate">{room.name}</span>
+              <span className="ms-1.5 shrink-0 tabular-nums text-faint">{room.messages}</span>
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** "23:59" for a room heard from today, "10월 18일" before that. */
+function when(room: KakaoRoom): string {
+  const today = new Intl.DateTimeFormat("ko-KR", { year: "numeric", month: "long", day: "numeric" }).format(new Date());
+  if (room.lastDate === today) return room.lastTime;
+  return /(\d+월 \d+일)/.exec(room.lastDate)?.[1] ?? room.lastDate;
 }
 
 /**

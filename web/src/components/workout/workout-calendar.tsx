@@ -67,7 +67,7 @@ export function WorkoutCalendar({
               variant="ghost"
               size="sm"
               onClick={() => setCursor(cursorOf(today))}
-              className="h-11 px-3 text-[12.5px] text-dim hover:text-foreground sm:h-7"
+              className="h-11 px-3 text-[12.5px] text-dim hover:text-foreground mouse:h-7"
             >
               이번 달
             </Button>
@@ -77,7 +77,7 @@ export function WorkoutCalendar({
             size="icon-sm"
             onClick={() => setCursor(shiftMonth(cursor, -1))}
             aria-label="이전 달"
-            className="tap text-faint hover:text-foreground sm:size-7 sm:min-h-0 sm:min-w-0"
+            className="tap text-faint hover:text-foreground mouse:size-7 mouse:min-h-0 mouse:min-w-0"
           >
             <ChevronLeft aria-hidden className="size-4" />
           </Button>
@@ -86,7 +86,7 @@ export function WorkoutCalendar({
             size="icon-sm"
             onClick={() => setCursor(shiftMonth(cursor, 1))}
             aria-label="다음 달"
-            className="tap text-faint hover:text-foreground sm:size-7 sm:min-h-0 sm:min-w-0"
+            className="tap text-faint hover:text-foreground mouse:size-7 mouse:min-h-0 mouse:min-w-0"
           >
             <ChevronRight aria-hidden className="size-4" />
           </Button>
@@ -125,7 +125,7 @@ export function WorkoutCalendar({
                 {cell.day}
               </span>
               {done ? (
-                <span className="max-w-full truncate px-0.5 text-[9px] leading-none text-approve/70">
+                <span className="max-w-full truncate px-0.5 text-[11px] leading-none text-approve/70">
                   {done[0].routineName ?? "운동"}
                 </span>
               ) : null}

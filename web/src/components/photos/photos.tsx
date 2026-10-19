@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, Download, Play, Search, X } from "lucide-react";
 import { Header, TabBar } from "@/components/shell/header";
+import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
 import {
   type Album,
@@ -17,6 +18,7 @@ import {
   thumbUrl,
   videoUrl,
 } from "@/lib/photos";
+import { onResume } from "@/lib/resume";
 import { isPending } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
 import { cn } from "@/lib/utils";
@@ -100,7 +102,7 @@ export function Photos() {
                   if (!e.target.value && view.kind === "search") setView({ kind: "library" });
                 }}
                 placeholder="바다, 강아지, 생일 케이크…"
-                className="h-9 w-full rounded-lg bg-glass ps-8 pe-2 text-[16px] text-foreground outline-none placeholder:text-faint focus-visible:ring-3 focus-visible:ring-ring/50 sm:text-[13px]"
+                className="h-9 w-full rounded-lg bg-glass ps-8 pe-2 text-[16px] text-foreground outline-none placeholder:text-faint focus-visible:ring-3 focus-visible:ring-ring/50 mouse:text-[13px]"
               />
             </form>
           </div>
@@ -129,11 +131,21 @@ function Timeline({ albumId, onOpen }: { albumId?: string; onOpen: (list: Asset[
   const [error, setError] = useState<string | null>(null);
   const q = albumId ? `&albumId=${albumId}` : "";
 
+  const readBuckets = useCallback(
+    () =>
+      get<Bucket[]>(`timeline/buckets${albumId ? `?albumId=${albumId}` : ""}`)
+        .then((b) => {
+          setBuckets(b);
+          setError(null);
+        })
+        .catch(() => setError("사진 서버에 연결하지 못했습니다.")),
+    [albumId],
+  );
   useEffect(() => {
-    get<Bucket[]>(`timeline/buckets${albumId ? `?albumId=${albumId}` : ""}`)
-      .then((b) => setBuckets(b))
-      .catch(() => setError("사진 서버에 연결하지 못했습니다."));
-  }, [albumId]);
+    void readBuckets();
+  }, [readBuckets]);
+  // Back to the app, or a pull to refresh: months backed up meanwhile.
+  useEffect(() => onResume(readBuckets), [readBuckets]);
 
   const load = useCallback(
     async (bucket: string) => {
@@ -148,7 +160,14 @@ function Timeline({ albumId, onOpen }: { albumId?: string; onOpen: (list: Asset[
     [months, q],
   );
 
-  if (error) return <p className="py-16 text-center text-[13px] text-dim">{error}</p>;
+  if (error) {
+    return (
+      <div className="py-16 text-center">
+        <p className="text-[13px] text-dim">{error}</p>
+        <Retry onRetry={readBuckets} />
+      </div>
+    );
+  }
   if (!buckets) return null;
   if (buckets.length === 0) {
     return (
@@ -248,12 +267,27 @@ function Grid({ count, assets, onOpen }: { count: number; assets?: Asset[]; onOp
 function Albums({ onPick }: { onPick: (a: Album) => void }) {
   const [albums, setAlbums] = useState<Album[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const readAlbums = useCallback(
+    () =>
+      get<Album[]>("albums")
+        .then((a) => {
+          setAlbums(a);
+          setError(null);
+        })
+        .catch(() => setError("앨범을 불러오지 못했습니다.")),
+    [],
+  );
   useEffect(() => {
-    get<Album[]>("albums")
-      .then(setAlbums)
-      .catch(() => setError("앨범을 불러오지 못했습니다."));
-  }, []);
-  if (error) return <p className="py-16 text-center text-[13px] text-dim">{error}</p>;
+    void readAlbums();
+  }, [readAlbums]);
+  if (error) {
+    return (
+      <div className="py-16 text-center">
+        <p className="text-[13px] text-dim">{error}</p>
+        <Retry onRetry={readAlbums} />
+      </div>
+    );
+  }
   if (!albums) return null;
   if (albums.length === 0) {
     return <p className="py-16 text-center text-[13px] text-dim">앨범이 없습니다. Immich 앱이나 웹에서 앨범을 만들면 여기에 나옵니다.</p>;

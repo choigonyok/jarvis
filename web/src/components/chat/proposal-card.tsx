@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Check, X } from "lucide-react";
+import { HoldBar, holdsMoney, useHold } from "@/components/chat/hold";
 import { Button } from "@/components/ui/button";
 import { isPrivateField, type CardField, type Decision, type Proposal, type ProposalState } from "@/lib/thread";
 import { isLiteral, readableBody, readableConsequence, readableTitle } from "@/lib/card-body";
@@ -52,6 +53,8 @@ export function ProposalCard({
     // A typed password is not kept on screen once it has been handed over.
     else setValues((cur) => Object.fromEntries(Object.entries(cur).map(([k, v]) => [k, fields.some((f) => f.key === k && isPrivateField(f)) ? "" : v])));
   }
+  // Money: the approval waits five seconds with 되돌리기 on the card (chat/hold.tsx).
+  const hold = useHold(() => void decide("approved"));
   // A command or a file's content the CLI would run is shown as the literal
   // call; anything else - a module's change, a job's or the browser's
   // arguments - as words (lib/card-body.ts).
@@ -137,6 +140,8 @@ export function ProposalCard({
             {proposal.note ? <span className="text-faint">· {proposal.note}</span> : null}
             {proposal.reason ? <span className="text-faint">· 이유: {proposal.reason}</span> : null}
           </p>
+        ) : hold.holding ? (
+          <HoldBar left={hold.left} onCancel={hold.cancel} />
         ) : asking ? (
           <div className="anim-settle space-y-2">
             <p className="px-1 text-[12px] text-dim">반려하는 이유가 있으면 알려 주세요. 다음 제안에 반영해요.</p>
@@ -148,7 +153,7 @@ export function ProposalCard({
                   onClick={() => setWhy(r)}
                   aria-pressed={why === r}
                   className={cn(
-                    "h-9 rounded-full border px-3 text-[12.5px] sm:h-7 sm:text-[12px]",
+                    "h-9 rounded-full border px-3 text-[12.5px] mouse:h-7 mouse:text-[12px]",
                     why === r ? "border-reject/40 bg-reject/10 text-reject" : "border-edge-soft text-dim hover:text-foreground",
                   )}
                 >
@@ -162,7 +167,7 @@ export function ProposalCard({
               placeholder="직접 적기 (비워도 돼요)"
               aria-label="반려 이유"
               maxLength={300}
-              className={cn(input, "h-11 sm:h-8")}
+              className={cn(input, "h-11 mouse:h-8")}
             />
             <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-1.5">
               <Button
@@ -170,7 +175,7 @@ export function ProposalCard({
                 size="sm"
                 onClick={() => setAsking(false)}
                 disabled={busy}
-                className="h-12 text-[13.5px] text-dim sm:h-8 sm:px-3 sm:text-[0.8rem]"
+                className="h-12 text-[13.5px] text-dim mouse:h-8 mouse:px-3 mouse:text-[0.8rem]"
               >
                 취소
               </Button>
@@ -179,7 +184,7 @@ export function ProposalCard({
                 size="sm"
                 onClick={() => void decide("rejected", why)}
                 disabled={busy}
-                className="h-12 border-edge text-[13.5px] text-reject hover:bg-reject/10 sm:h-8 sm:px-3.5 sm:text-[0.8rem]"
+                className="h-12 border-edge text-[13.5px] text-reject hover:bg-reject/10 mouse:h-8 mouse:px-3.5 mouse:text-[0.8rem]"
               >
                 반려
               </Button>
@@ -196,16 +201,16 @@ export function ProposalCard({
               size="sm"
               onClick={() => setAsking(true)}
               disabled={busy}
-              className="h-12 text-[13.5px] text-dim hover:bg-reject/10 hover:text-reject sm:h-8 sm:px-3 sm:text-[0.8rem]"
+              className="h-12 text-[13.5px] text-dim hover:bg-reject/10 hover:text-reject mouse:h-8 mouse:px-3 mouse:text-[0.8rem]"
             >
               반려
             </Button>
             <Button
               variant="outline"
               size="sm"
-              onClick={() => void decide("approved")}
+              onClick={() => (holdsMoney(proposal) ? hold.start() : void decide("approved"))}
               disabled={busy || missing.length > 0}
-              className="h-12 border-edge bg-glass-raised text-[13.5px] text-foreground hover:border-approve/35 hover:bg-approve/12 hover:text-approve sm:h-8 sm:px-3.5 sm:text-[0.8rem] dark:bg-glass-raised dark:hover:bg-approve/12"
+              className="h-12 border-edge bg-glass-raised text-[13.5px] text-foreground hover:border-approve/35 hover:bg-approve/12 hover:text-approve mouse:h-8 mouse:px-3.5 mouse:text-[0.8rem] dark:bg-glass-raised dark:hover:bg-approve/12"
             >
               승인
             </Button>
@@ -225,7 +230,7 @@ export function ProposalCard({
 const QUICK_REASONS = ["지금은 필요 없어", "이미 했어", "틀렸어", "다시 묻지 마"];
 
 const input =
-  "w-full rounded-lg border border-edge-soft bg-well px-3 text-[16px] text-foreground outline-none placeholder:text-faint focus-visible:border-edge focus-visible:ring-3 focus-visible:ring-ring/50 sm:text-[13.5px]";
+  "w-full rounded-lg border border-edge-soft bg-well px-3 text-[16px] text-foreground outline-none placeholder:text-faint focus-visible:border-edge focus-visible:ring-3 focus-visible:ring-ring/50 mouse:text-[13.5px]";
 
 /** The listing's photos as it will show them: the first one is the cover. */
 function CardPhotos({ names }: { names: string[] }) {
@@ -278,7 +283,7 @@ function FormFields({
                   value={value ? Number(value.replace(/[^\d]/g, "") || 0).toLocaleString("ko-KR") : ""}
                   onChange={(e) => onChange(f.key, e.target.value.replace(/[^\d]/g, ""))}
                   placeholder="숫자로 적기"
-                  className={cn(input, "tnum h-12 pe-9 text-[20px] font-medium sm:h-11 sm:text-[18px]")}
+                  className={cn(input, "tnum h-12 pe-9 text-[20px] font-medium mouse:h-11 mouse:text-[18px]")}
                 />
                 <span aria-hidden className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-[14px] text-faint">
                   원
@@ -306,7 +311,7 @@ function FormFields({
                         onChange(f.key, (on ? picked.filter((p) => p !== o) : [...picked, o]).join(","))
                       }
                       className={cn(
-                        "min-h-10 rounded-full border px-3 text-[13px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 sm:min-h-8 sm:text-[12.5px]",
+                        "min-h-10 rounded-full border px-3 text-[13px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 mouse:min-h-8 mouse:text-[12.5px]",
                         on ? "border-edge bg-glass-raised text-foreground" : "border-edge-soft text-dim hover:bg-glass",
                       )}
                     >
@@ -327,7 +332,7 @@ function FormFields({
                       aria-checked={on}
                       onClick={() => onChange(f.key, o)}
                       className={cn(
-                        "min-h-10 rounded-lg border px-3 text-[13px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 sm:min-h-8 sm:text-[12.5px]",
+                        "min-h-10 rounded-lg border px-3 text-[13px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 mouse:min-h-8 mouse:text-[12.5px]",
                         on ? "border-edge bg-glass-raised text-foreground" : "border-edge-soft text-dim hover:bg-glass",
                       )}
                     >
@@ -347,7 +352,7 @@ function FormFields({
                 {...(isPrivateField(f)
                   ? { autoComplete: "username", autoCapitalize: "none", autoCorrect: "off", spellCheck: false }
                   : {})}
-                className={cn(input, "h-11 sm:h-9")}
+                className={cn(input, "h-11 mouse:h-9")}
               />
             )}
             {f.hint ? <p className="mt-1.5 text-[11.5px] leading-relaxed whitespace-pre-wrap text-faint">{f.hint}</p> : null}
@@ -376,14 +381,14 @@ function SecretInput({ id, value, onChange }: { id: string; value: string; onCha
         autoCapitalize="none"
         autoCorrect="off"
         spellCheck={false}
-        className={cn(input, "h-11 pe-14 sm:h-9")}
+        className={cn(input, "h-11 pe-14 mouse:h-9")}
       />
       <button
         type="button"
         onClick={() => setShown((s) => !s)}
         aria-pressed={shown}
         aria-label={shown ? "비밀번호 가리기" : "비밀번호 보기"}
-        className="absolute inset-y-0 right-1 my-auto flex h-9 items-center rounded-md px-2.5 text-[12px] text-faint outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-7"
+        className="absolute inset-y-0 right-1 my-auto flex h-9 items-center rounded-md px-2.5 text-[12px] text-faint outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-7"
       >
         {shown ? "가리기" : "보기"}
       </button>

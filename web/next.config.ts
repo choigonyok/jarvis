@@ -3,6 +3,9 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   // Ships a self-contained server bundle so the Docker image needs no node_modules.
   output: "standalone",
+  // A name for this build, written into it: app/api/version answers with it,
+  // so a page left open can tell when a newer one has been deployed.
+  env: { JARVIS_BUILD: Date.now().toString(36) },
   async headers() {
     return [
       {

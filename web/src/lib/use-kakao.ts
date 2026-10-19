@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { onResume } from "@/lib/resume";
 
 // The collectors' read-only surfaces, behind the login proxy. The browser never
 // holds their bearer token; the proxy attaches it server-side. KakaoTalk and
@@ -140,5 +141,13 @@ export function useKakao(source: Source = "kakao") {
     return () => clearInterval(id);
   }, [selected, loadMessages]);
 
-  return { rooms, selected, setSelected, messages, error, hydrated };
+  // The rooms and the room on screen, now: on coming back to the app, a pull
+  // to refresh, or 다시 시도.
+  const reload = useCallback(
+    () => Promise.all([loadRooms(), selected ? loadMessages(selected) : null]),
+    [loadRooms, loadMessages, selected],
+  );
+  useEffect(() => onResume(reload), [reload]);
+
+  return { rooms, selected, setSelected, messages, error, hydrated, reload };
 }

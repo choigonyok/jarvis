@@ -72,7 +72,7 @@ export function LoginForm() {
               // No autoFocus on touch: it throws the keyboard up over the form
               // before anyone has decided to type.
               required
-              className="h-11 border-edge bg-well/40 sm:h-9 sm:text-[14px]"
+              className="h-11 border-edge bg-well/40 mouse:h-9 mouse:text-[14px]"
             />
           </label>
           <label className="block">
@@ -83,7 +83,7 @@ export function LoginForm() {
               onChange={(e) => setPassword(e.target.value)}
               autoComplete="current-password"
               required
-              className="h-11 border-edge bg-well/40 sm:h-9 sm:text-[14px]"
+              className="h-11 border-edge bg-well/40 mouse:h-9 mouse:text-[14px]"
             />
           </label>
         </div>
@@ -100,7 +100,7 @@ export function LoginForm() {
         <Button
           type="submit"
           disabled={busy || !id.trim() || !password}
-          className="mt-6 h-12 w-full rounded-lg text-[14px] sm:h-9 sm:text-[13.5px]"
+          className="mt-6 h-12 w-full rounded-lg text-[14px] mouse:h-9 mouse:text-[13.5px]"
         >
           {busy ? "확인 중" : "로그인"}
         </Button>

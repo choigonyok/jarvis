@@ -18,14 +18,14 @@ import {
 import { cn } from "@/lib/utils";
 
 const field =
-  "h-11 w-full rounded-lg border border-edge-soft bg-glass px-3 text-[16px] text-foreground outline-none placeholder:text-faint focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-9 sm:text-[13px]";
+  "h-11 w-full rounded-lg border border-edge-soft bg-glass px-3 text-[16px] text-foreground outline-none placeholder:text-faint focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-9 mouse:text-[13px]";
 
 const quietButton =
   "tap rounded-lg px-3 text-[13px] text-dim transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50";
 
 /** The one bright control in a sheet is the one that saves - same as the approval card. */
 const saveButton =
-  "tap min-h-11 flex-1 rounded-lg bg-glass-raised px-4 text-[14px] font-medium text-foreground transition-colors outline-none hover:bg-foreground/15 focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 sm:min-h-9 sm:text-[13px]";
+  "tap min-h-11 flex-1 rounded-lg bg-glass-raised px-4 text-[14px] font-medium text-foreground transition-colors outline-none hover:bg-foreground/15 focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 mouse:min-h-9 mouse:text-[13px]";
 
 const digits = (s: string) => Number(s.replace(/[^\d]/g, "")) || 0;
 const grouped = (s: string) => {
@@ -92,7 +92,7 @@ function CategoryPicker({
             aria-checked={on}
             onClick={() => onChange(name)}
             className={cn(
-              "min-h-11 rounded-lg border px-2 text-[13px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 sm:min-h-9 sm:text-[12.5px]",
+              "min-h-11 rounded-lg border px-2 text-[13px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 mouse:min-h-9 mouse:text-[12.5px]",
               on
                 ? "border-edge bg-glass-raised text-foreground"
                 : "border-edge-soft text-dim hover:bg-glass",
@@ -427,7 +427,7 @@ function ItemRow({
         <select
           value={category}
           onChange={(e) => void change(e.target.value)}
-          className="h-11 rounded-lg border border-edge-soft bg-background px-2 text-[16px] text-dim outline-none focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-8 sm:text-[12.5px]"
+          className="h-11 rounded-lg border border-edge-soft bg-background px-2 text-[16px] text-dim outline-none focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-8 mouse:text-[12.5px]"
         >
           {names.map((n) => (
             <option key={n} value={n}>

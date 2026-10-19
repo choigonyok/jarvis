@@ -53,7 +53,7 @@ export function Ledger() {
                   aria-checked={active}
                   onClick={() => setFilter(item.value)}
                   className={cn(
-                    "min-h-9 rounded-md px-3 text-[12.5px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 sm:min-h-0 sm:px-2.5 sm:py-1",
+                    "tap-y min-h-9 rounded-md px-3 text-[12.5px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 mouse:min-h-0 mouse:px-2.5 mouse:py-1",
                     active
                       ? "bg-glass-raised text-foreground"
                       : "text-faint hover:text-dim",

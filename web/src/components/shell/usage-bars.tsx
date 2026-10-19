@@ -82,7 +82,7 @@ export function UsageBars() {
         aria-label={label}
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="flex h-11 w-12 flex-col justify-center gap-[3px] rounded-lg px-1.5 outline-none select-none focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-8"
+        className="flex h-11 w-12 flex-col justify-center gap-[3px] rounded-lg px-1.5 outline-none select-none focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-8"
       >
         <Bar value={five} faint={stale || five == null} />
         <Bar value={week} faint={stale || week == null} />

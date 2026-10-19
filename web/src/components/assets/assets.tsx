@@ -30,6 +30,7 @@ import {
   type Portfolio,
 } from "@/lib/portfolio";
 import type { Plan } from "@/lib/trade-plan";
+import { onResume } from "@/lib/resume";
 import { isPending } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
 import { cn } from "@/lib/utils";
@@ -113,6 +114,8 @@ export function Assets() {
   useEffect(() => {
     again.current = (tries) => void load(false, tries);
   }, [load]);
+  // Back to the app, or a pull to refresh: what the service has now.
+  useEffect(() => onResume(() => load()), [load]);
 
   // A placed order changes the holdings: read them afresh, and the record.
   const placed = () => {
@@ -208,7 +211,7 @@ export function Assets() {
                 onClick={() => void load(true)}
                 disabled={loading}
                 aria-label="잔고 새로 불러오기"
-                className="tap flex shrink-0 items-center justify-center rounded-lg text-faint transition-colors outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-40 sm:size-9 sm:min-h-0 sm:min-w-0"
+                className="tap flex shrink-0 items-center justify-center rounded-lg text-faint transition-colors outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-40 mouse:size-9 mouse:min-h-0 mouse:min-w-0"
               >
                 <RefreshCw
                   aria-hidden

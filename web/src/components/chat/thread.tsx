@@ -785,7 +785,7 @@ export function Thread() {
                   onClick={toBottom}
                   aria-label={unseen ? `새 메시지 ${unseen}개, 맨 아래로` : "맨 아래로"}
                   className={cn(
-                    "liquid-glass anim-settle pointer-events-auto flex h-11 items-center justify-center gap-1.5 rounded-full text-dim transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-10",
+                    "liquid-glass anim-settle pointer-events-auto flex h-11 items-center justify-center gap-1.5 rounded-full text-dim transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-10",
                     unseen ? "pr-3.5 pl-4" : "w-11 sm:w-10",
                   )}
                 >

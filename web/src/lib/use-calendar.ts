@@ -126,15 +126,22 @@ export function useCalendar(cursor: Cursor) {
     [],
   );
 
+  /** True when the entry is gone. */
   const remove = useCallback(async (id: string) => {
     setError(null);
     try {
-      const res = await fetch(`${API}/calendar/${id}`, { method: "DELETE" });
+      // Encoded: a repeating entry's day is "<series>#<date>", and an unencoded
+      // # is where a URL's fragment starts - the request went out as the whole
+      // series. keepalive: a removal's undo window can close as the page goes.
+      const res = await fetch(`${API}/calendar/${encodeURIComponent(id)}`, { method: "DELETE", keepalive: true });
       if (!res.ok && res.status !== 204) {
         setError("일정을 지우지 못했습니다.");
+        return false;
       }
+      return true;
     } catch {
       setError("에이전트에 연결하지 못했습니다.");
+      return false;
     }
   }, []);
 

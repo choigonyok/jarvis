@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Header, TabBar } from "@/components/shell/header";
+import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { JobSheet } from "@/components/jobs/job-sheet";
 import { type BlockedSite, type Job, LIVE, stateLabel, stateTone, when } from "@/lib/jobs";
+import { onResume } from "@/lib/resume";
 import { ago } from "@/lib/spending";
 import { isPending } from "@/lib/thread";
 import { photoUrl } from "@/lib/uploads";
@@ -46,6 +48,8 @@ export function Jobs() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [load]);
+  // Back to the app, or a pull to refresh: read again at once.
+  useEffect(() => onResume(load), [load]);
 
   // While something runs, progress should move on screen without a pull.
   const running = jobs?.some((j) => j.running) ?? false;
@@ -67,7 +71,12 @@ export function Jobs() {
 
       <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
         <div className="mx-auto w-full max-w-[42rem] px-4 pt-4 pb-12 sm:px-8 sm:pt-7 sm:pb-8">
-          {error && !jobs ? <p className="py-16 text-center text-[13px] text-dim">{error}</p> : null}
+          {error && !jobs ? (
+            <div className="py-16 text-center">
+              <p className="text-[13px] text-dim">{error}</p>
+              <Retry onRetry={load} />
+            </div>
+          ) : null}
 
           {blocked.length > 0 ? (
             <section role="alert" className="mb-5 rounded-xl border border-mine/25 bg-mine/[0.06] px-4 py-3.5">
@@ -80,7 +89,7 @@ export function Jobs() {
               </p>
               <Link
                 href="/screen"
-                className="tap mt-3 inline-flex min-h-10 items-center rounded-lg border border-edge px-3 text-[13px] text-foreground outline-none hover:bg-glass focus-visible:ring-3 focus-visible:ring-ring/50 sm:min-h-8"
+                className="tap mt-3 inline-flex min-h-10 items-center rounded-lg border border-edge px-3 text-[13px] text-foreground outline-none hover:bg-glass focus-visible:ring-3 focus-visible:ring-ring/50 mouse:min-h-8"
               >
                 화면 탭 열기
               </Link>

@@ -15,7 +15,7 @@ const outcomeCopy: Record<Use["outcome"], string> = {
 };
 
 const quiet =
-  "inline-flex h-11 items-center justify-center rounded-lg px-3 text-[13px] text-dim outline-none transition-colors hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 sm:h-8";
+  "inline-flex h-11 items-center justify-center rounded-lg px-3 text-[13px] text-dim outline-none transition-colors hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 mouse:h-8";
 
 function when(iso: string) {
   const d = new Date(iso);

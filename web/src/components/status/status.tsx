@@ -12,6 +12,7 @@ import {
   roots,
   since,
 } from "@/lib/status";
+import { onResume } from "@/lib/resume";
 import { isPending } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
 import {
@@ -81,14 +82,12 @@ export function Status() {
       if (document.visibilityState === "visible") load();
     }, 30_000);
     const clock = setInterval(() => tick((n) => n + 1), 30_000);
-    const onVisible = () => {
-      if (document.visibilityState === "visible") load();
-    };
-    document.addEventListener("visibilitychange", onVisible);
+    // Back to the app, or a pull to refresh.
+    const stop = onResume(() => fetchReport("GET").then(apply));
     return () => {
       clearInterval(id);
       clearInterval(clock);
-      document.removeEventListener("visibilitychange", onVisible);
+      stop();
     };
   }, [apply]);
 

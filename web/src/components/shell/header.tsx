@@ -11,7 +11,7 @@ import {
   ClipboardCheck,
   Dumbbell,
   Ellipsis,
-  FileText,
+  LayoutGrid,
   LogOut,
   type LucideIcon,
   MessageCircle,
@@ -60,7 +60,6 @@ const ICON: Record<string, LucideIcon> = {
   "/screen": MonitorPlay,
   "/kakao": MessagesSquare,
   "/status": Activity,
-  "/report": FileText,
 };
 
 /**
@@ -92,8 +91,6 @@ const secondary: Tab[] = [
   { href: "/kakao", label: "카톡" },
   // 맨 끝. 매일 여는 곳이 아니라 뭔가 이상할 때 찾아오는 곳이다.
   { href: "/status", label: "상태" },
-  // 임시: 2026-10-17 코드 검토 보고서. 다 읽으면 이 줄과 components/report 를 지운다.
-  { href: "/report", label: "보고서" },
 ];
 
 /** Reading order on a wide screen: talk, the things you keep, then the queue. */
@@ -114,8 +111,19 @@ const visible = (tabs: Tab[], role: Role) =>
  * three tabs and no 더보기.
  */
 const OWNER_BAR = ["/", "/jobs", "/assets", "/spending", "/calendar", "/workout", "/record"];
-const OWNER_MORE = ["/life", "/photos", "/screen", "/kakao", "/status", "/report"];
+const OWNER_MORE = ["/life", "/photos", "/screen", "/kakao", "/status"];
 const GUEST_BAR = ["/", "/calendar", "/workout"];
+
+const byHref = new Map([...primary, ...secondary].map((t) => [t.href, t]));
+const pick = (hrefs: string[]) => hrefs.flatMap((h) => (byHref.has(h) ? [byHref.get(h)!] : []));
+
+/** A role's screens on a phone: the ones in the bar, and the ones behind 더보기. */
+function screensFor(role: Role) {
+  return {
+    bar: pick(role === "guest" ? GUEST_BAR : OWNER_BAR),
+    more: role === "guest" ? [] : pick(OWNER_MORE),
+  };
+}
 
 /** Where a waiting decision is announced: the surface that lists them by name. */
 const pendingHome = "/record";
@@ -244,8 +252,10 @@ export function Header({
             Jarvis
           </h1>
           {/* The same links, in the bar below, on a phone. A row that runs
-              out of room scrolls inside itself; a label never breaks in two. */}
-          <nav className="scrollbar-none hidden min-w-0 items-baseline gap-[9px] overflow-x-auto sm:flex" aria-label="화면">
+              out of room scrolls inside itself; a label never breaks in two.
+              Under a finger (an iPad, a phone on its side) a label is a 44px
+              target; with a mouse it is only the word. */}
+          <nav className="scrollbar-none hidden min-w-0 items-baseline overflow-x-auto sm:flex mouse:gap-[9px]" aria-label="화면">
             {tabs.map((tab) => {
               const active = pathname === tab.href;
               return (
@@ -254,7 +264,7 @@ export function Header({
                   href={tab.href}
                   aria-current={active ? "page" : undefined}
                   className={cn(
-                    "shrink-0 rounded-sm text-[13px] whitespace-nowrap transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+                    "inline-flex h-11 shrink-0 items-center rounded-sm px-1.5 text-[13px] whitespace-nowrap transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-auto mouse:px-0",
                     active ? "text-foreground" : "text-faint hover:text-dim",
                   )}
                 >
@@ -294,7 +304,7 @@ export function Header({
             type="button"
             onClick={() => void signOut()}
             aria-label="로그아웃"
-            className="-mr-2 flex size-11 items-center justify-center rounded-lg text-faint transition-colors outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50 sm:mr-0 sm:size-auto sm:text-[11.5px]"
+            className="-mr-2 flex h-11 min-w-11 items-center justify-center rounded-lg text-faint transition-colors outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50 sm:mr-0 sm:px-1.5 sm:text-[11.5px] mouse:h-auto mouse:min-w-0 mouse:px-0"
           >
             <LogOut aria-hidden className="size-4 sm:hidden" />
             <span className="hidden sm:inline">로그아웃</span>
@@ -330,10 +340,7 @@ export function TabBar({
 
   // Icons only, so more of them fit: everything a person opens every day is
   // one tap away, and only the rarely visited wait behind 더보기.
-  const byHref = new Map([...primary, ...secondary].map((t) => [t.href, t]));
-  const pick = (hrefs: string[]) => hrefs.flatMap((h) => (byHref.has(h) ? [byHref.get(h)!] : []));
-  const mainTabs = pick(role === "guest" ? GUEST_BAR : OWNER_BAR);
-  const moreTabs = role === "guest" ? [] : pick(OWNER_MORE);
+  const { bar: mainTabs, more: moreTabs } = screensFor(role);
   const moreSlot = moreTabs.length > 0 ? mainTabs.length : -1;
 
   const inMore = moreTabs.some((tab) => tab.href === pathname);
@@ -534,38 +541,103 @@ export function TabBar({
                     다른 화면
                   </SheetTitle>
                 </SheetHeader>
-                <div className="px-2 pb-4">
-                  {moreTabs.map((tab) => {
-                    const Icon = ICON[tab.href] ?? Ellipsis;
-                    const active = pathname === tab.href;
-                    return (
-                      <Link
-                        key={tab.href}
-                        href={tab.href}
-                        prefetch
-                        onClick={(e) => {
-                          e.preventDefault();
-                          setMore(false);
-                          setChosen(moreSlot);
-                          if (!active) startNavigation(() => router.push(tab.href));
-                        }}
-                        aria-current={active ? "page" : undefined}
-                        className={cn(
-                          "flex min-h-12 items-center gap-3 rounded-xl px-3 text-[14.5px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
-                          active ? "liquid-glass-flat text-foreground" : "text-dim",
-                        )}
-                      >
-                        <Icon aria-hidden className="size-[18px]" strokeWidth={1.8} />
-                        {tab.label}
-                      </Link>
-                    );
-                  })}
-                </div>
+                <ScreenList
+                  tabs={moreTabs}
+                  pending={pending}
+                  onPick={(tab) => {
+                    setMore(false);
+                    setChosen(moreSlot);
+                    if (tab.href !== pathname) startNavigation(() => router.push(tab.href));
+                  }}
+                />
               </SheetContent>
             </Sheet>
           ) : null}
         </div>
       </div>
     </nav>
+  );
+}
+
+/** A sheet's list of screens, one row each: 더보기's, and the menu below. */
+function ScreenList({
+  tabs,
+  pending,
+  onPick,
+}: {
+  tabs: Tab[];
+  pending: number;
+  onPick: (tab: Tab) => void;
+}) {
+  const pathname = usePathname();
+  return (
+    <div className="px-2 pb-4">
+      {tabs.map((tab) => {
+        const Icon = ICON[tab.href] ?? Ellipsis;
+        const active = pathname === tab.href;
+        const marked = pending > 0 && tab.href === pendingHome;
+        return (
+          <Link
+            key={tab.href}
+            href={tab.href}
+            prefetch
+            onClick={(e) => {
+              e.preventDefault();
+              onPick(tab);
+            }}
+            aria-current={active ? "page" : undefined}
+            aria-label={marked ? `${tab.label}, 결재 대기 ${pending}건` : undefined}
+            className={cn(
+              "flex min-h-12 items-center gap-3 rounded-xl px-3 text-[14.5px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+              active ? "liquid-glass-flat text-foreground" : "text-dim",
+            )}
+          >
+            <Icon aria-hidden className="size-[18px]" strokeWidth={1.8} />
+            {tab.label}
+            {marked ? <span aria-hidden className="anim-breathe size-[6px] rounded-full bg-foreground/80" /> : null}
+          </Link>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * The way to another screen while the tab bar is put away - a running workout
+ * puts it away, so the set being lifted has the bottom of the screen and a
+ * tap meant for 완료 cannot land on a tab. Two taps instead of one, which is
+ * the point. A phone's only: a wide screen has the links in the header.
+ */
+export function ScreenMenu({ pending }: { pending: number }) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const role = useRole();
+  const [open, setOpen] = useState(false);
+  const { bar, more } = screensFor(role);
+  return (
+    <Sheet open={open} onOpenChange={setOpen}>
+      <SheetTrigger
+        aria-label={pending > 0 ? `다른 화면, 결재 대기 ${pending}건` : "다른 화면"}
+        className="relative flex size-11 items-center justify-center rounded-lg text-faint transition-colors outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50 sm:hidden"
+      >
+        <LayoutGrid aria-hidden className="size-[18px]" strokeWidth={1.8} />
+        {pending > 0 ? (
+          <span aria-hidden className="anim-breathe absolute top-2.5 right-2 size-[6px] rounded-full bg-foreground/80" />
+        ) : null}
+      </SheetTrigger>
+      <SheetContent side="bottom" className="inset-x-safe pb-safe border-edge-soft bg-background">
+        <SheetHeader className="px-4 pt-4 pb-1">
+          <SheetTitle className="text-[14px] font-medium text-foreground">다른 화면</SheetTitle>
+        </SheetHeader>
+        <ScreenList
+          tabs={[...bar, ...more]}
+          pending={pending}
+          onPick={(tab) => {
+            setOpen(false);
+            if (tab.href !== pathname) router.push(tab.href);
+          }}
+        />
+      </SheetContent>
+    </Sheet>
   );
 }

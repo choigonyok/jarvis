@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Minus, Plus, Trash2, TrendingUp, X } from "lucide-react";
 import { ExerciseHistory } from "@/components/workout/exercise-history";
 import { Lifts } from "@/components/workout/lifts";
@@ -9,8 +9,10 @@ import { RoutineEditor } from "@/components/workout/routine-editor";
 import { RoutinePicker } from "@/components/workout/routine-picker";
 import { WorkoutCalendar } from "@/components/workout/workout-calendar";
 import { VolumeBar } from "@/components/workout/volume-bar";
-import { Header, TabBar } from "@/components/shell/header";
+import { Header, ScreenMenu, TabBar } from "@/components/shell/header";
+import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
+import { FloatingUndo, UndoNotice, useUndo } from "@/components/shell/undo";
 import { isoDate } from "@/lib/month";
 import { isPending } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
@@ -34,8 +36,6 @@ import {
   type Session,
 } from "@/lib/workout";
 import { cn } from "@/lib/utils";
-
-type Undo = { id: number; label: string; restore: () => void };
 
 /** The three things the tab is opened for when nothing is running. */
 const VIEWS = [
@@ -90,23 +90,8 @@ export function Workout() {
     );
   }
 
-  // One undo at a time, for five seconds - long enough to see what you did,
-  // short enough that it is gone before it is in the way.
-  const [undo, setUndo] = useState<Undo | null>(null);
-  const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const offerUndo = useCallback((label: string, restore: () => void) => {
-    if (undoTimer.current) clearTimeout(undoTimer.current);
-    const id = Date.now();
-    setUndo({ id, label, restore });
-    undoTimer.current = setTimeout(
-      () => setUndo((u) => (u?.id === id ? null : u)),
-      5000,
-    );
-  }, []);
-  useEffect(
-    () => () => void (undoTimer.current && clearTimeout(undoTimer.current)),
-    [],
-  );
+  // One undo at a time, for five seconds (components/shell/undo.tsx).
+  const { undo, offer: offerUndo, take: takeUndo } = useUndo();
 
   const past = useMemo(
     () =>
@@ -158,41 +143,36 @@ export function Workout() {
       );
   }
 
-  const notice = undo ? (
-    <div
-      role="status"
-      className="mb-2 flex items-center gap-2 rounded-xl bg-popover/95 py-1 ps-3.5 pe-1 text-[13px] shadow-lg ring-1 ring-edge"
-    >
-      <span className="min-w-0 flex-1 truncate text-foreground/90">
-        {undo.label}
-      </span>
-      <button
-        type="button"
-        onClick={() => {
-          undo.restore();
-          setUndo(null);
-        }}
-        className="tap shrink-0 rounded-lg px-3 font-medium text-foreground underline underline-offset-4 outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-      >
-        되돌리기
-      </button>
-    </div>
-  ) : null;
+  const notice = undo ? <UndoNotice label={undo.label} onUndo={takeUndo} /> : null;
+
+  // While a set is being lifted the screen is the gym's: the tab bar goes the
+  // way it goes for the keyboard and the waiting line keeps quiet, so the dock
+  // has the bottom and 완료 has nothing under it to land on by mistake. The
+  // other screens are a menu in the header away.
+  const lifting = Boolean(live);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <Header connection={connection} pending={waiting.length} />
-      <StandingBar pending={waiting} href="/record" />
+      <Header
+        connection={connection}
+        pending={waiting.length}
+        actions={lifting ? <ScreenMenu pending={waiting.length} /> : undefined}
+      />
+      <StandingBar pending={waiting} href="/record" muted={lifting} />
 
       <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
         <div className="mx-auto w-full max-w-[42rem] px-4 pt-5 pb-12 sm:px-8 sm:pt-7 sm:pb-8">
           {error ? (
-            <p
-              role="status"
-              className="mb-5 border-l-2 border-reject pl-3 text-[13.5px] leading-relaxed text-dim"
-            >
-              {error}
-            </p>
+            <div className="mb-5">
+              <p
+                role="status"
+                className="border-l-2 border-reject pl-3 text-[13.5px] leading-relaxed text-dim"
+              >
+                {error}
+              </p>
+              {/* Only a log that never came: one that did not save is saved again with the next change. */}
+              {book.sessions.length === 0 ? <Retry onRetry={w.reload} /> : null}
+            </div>
           ) : null}
 
           {live ? (
@@ -287,7 +267,7 @@ export function Workout() {
                               >
                                 {"일월화수목금토"[d.getDay()]}
                               </span>
-                              <span className="max-w-full truncate px-1 text-[9.5px] leading-none text-approve/80">
+                              <span className="max-w-full truncate px-1 text-[11px] leading-none text-approve/80">
                                 {done[0]?.routineName ??
                                   (done.length ? "운동" : "")}
                               </span>
@@ -418,17 +398,7 @@ export function Workout() {
           ) : null}
         </div>
 
-        {!live && notice ? (
-          <div
-            className="pointer-events-none fixed inset-x-0 z-30 mx-auto max-w-[42rem] px-4 sm:px-8"
-            style={{
-              bottom:
-                "calc(max(var(--tabbar-space), env(safe-area-inset-bottom)) + 0.75rem)",
-            }}
-          >
-            <div className="pointer-events-auto">{notice}</div>
-          </div>
-        ) : null}
+        {!live && notice ? <FloatingUndo>{notice}</FloatingUndo> : null}
       </main>
 
       <RoutineEditor
@@ -444,7 +414,7 @@ export function Workout() {
         onOpenChange={(o) => !o && setLooking(null)}
       />
 
-      <TabBar pending={waiting.length} />
+      <TabBar pending={waiting.length} hidden={lifting} />
     </div>
   );
 }
@@ -640,7 +610,7 @@ function Consistency({ past, now }: { past: Session[]; now: number }) {
             type="button"
             onClick={() => change(goal - 1)}
             aria-label="목표 줄이기"
-            className="flex size-8 items-center justify-center rounded-full outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+            className="flex size-11 items-center justify-center rounded-full outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 mouse:size-8"
           >
             <Minus aria-hidden className="size-3.5" />
           </button>
@@ -649,7 +619,7 @@ function Consistency({ past, now }: { past: Session[]; now: number }) {
             type="button"
             onClick={() => change(goal + 1)}
             aria-label="목표 늘리기"
-            className="flex size-8 items-center justify-center rounded-full outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+            className="flex size-11 items-center justify-center rounded-full outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 mouse:size-8"
           >
             <Plus aria-hidden className="size-3.5" />
           </button>
@@ -681,7 +651,7 @@ function Consistency({ past, now }: { past: Session[]; now: number }) {
             />
           ))}
         </div>
-        <div className="tnum mt-1 flex justify-between text-[10.5px] text-faint">
+        <div className="tnum mt-1 flex justify-between text-[11px] text-faint">
           <span>{`${weeks[0].start.getMonth() + 1}/${weeks[0].start.getDate()}`}</span>
           <span>8주 중 {hit}주 목표 달성</span>
           <span>이번 주</span>

@@ -54,7 +54,7 @@ export function StandingBar({
 
         <Link
           href={href}
-          className="tap flex shrink-0 items-center rounded-lg px-2 text-[12.5px] text-foreground transition-colors outline-none hover:text-foreground/80 focus-visible:ring-3 focus-visible:ring-ring/50 sm:min-h-0 sm:min-w-0 sm:py-1"
+          className="tap flex shrink-0 items-center rounded-lg px-2 text-[12.5px] text-foreground transition-colors outline-none hover:text-foreground/80 focus-visible:ring-3 focus-visible:ring-ring/50 mouse:min-h-0 mouse:min-w-0 mouse:py-1"
         >
           결재하기
         </Link>

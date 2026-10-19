@@ -103,6 +103,10 @@ export function Composer({
   const uploading = photos.some((p) => !p.name && !p.error);
   const ready = photos.filter((p) => p.name);
   const canSend = !uploading && (value.trim() !== "" || ready.length > 0);
+  // Something is on its way out: on a phone the send button takes the mic's
+  // place, as in every messenger, and the words get the width the second
+  // button held.
+  const composing = value.trim() !== "" || photos.length > 0;
 
   // Escape lets go of a quote, the way it closes anything else that is open.
   useEffect(() => {
@@ -282,9 +286,9 @@ export function Composer({
 
         {/* The mode switch lives here on a phone. Stacking a separate toggle
             under the composer would put three bars between the transcript and
-            the bottom of the screen; a mic beside the send button is the
-            grammar every messaging app already taught. */}
-        {onVoice ? (
+            the bottom of the screen; a mic in the send button's place while
+            nothing is typed is the grammar every messaging app already taught. */}
+        {onVoice && !composing ? (
           <button
             type="button"
             onClick={onVoice}
@@ -301,7 +305,7 @@ export function Composer({
           onClick={() => void send()}
           disabled={!canSend}
           aria-label={uploading ? "사진을 올리는 중" : "메시지 보내기"}
-          className={cn(round, "group text-dim disabled:opacity-40")}
+          className={cn(round, "group text-dim disabled:opacity-40", onVoice && !composing && "max-sm:hidden")}
         >
           <span className="liquid-glass-flat flex size-9 items-center justify-center rounded-full transition-colors group-enabled:group-hover:text-foreground">
             <ArrowUp aria-hidden className="size-[18px]" />

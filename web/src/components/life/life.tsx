@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Header, TabBar } from "@/components/shell/header";
+import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { Meals } from "@/components/life/meals";
 import { Notes } from "@/components/life/notes";
@@ -19,6 +20,7 @@ import {
   shortDate,
 } from "@/lib/life";
 import { krw } from "@/lib/portfolio";
+import { onResume } from "@/lib/resume";
 import { isPending } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
 import { cn } from "@/lib/utils";
@@ -46,23 +48,25 @@ export function Life() {
   const waiting = proposals.filter(isPending);
   const [book, setBook] = useState<Book | null>(null);
 
+  const load = useCallback(
+    () =>
+      Promise.all([
+        read<Note[]>("notes", "notes"),
+        read<Place[]>("places", "places"),
+        read<Thing[]>("things", "things"),
+        read<Meal[]>("meals?days=30", "meals"),
+      ]).then(([notes, places, things, meals]) => {
+        // The order is the visit's: an answered note keeps its place until next time.
+        if (notes.data) notes = { data: byAttention(notes.data) };
+        setBook({ notes, places, things, meals });
+      }),
+    [],
+  );
   useEffect(() => {
-    let live = true;
-    void Promise.all([
-      read<Note[]>("notes", "notes"),
-      read<Place[]>("places", "places"),
-      read<Thing[]>("things", "things"),
-      read<Meal[]>("meals?days=30", "meals"),
-    ]).then(([notes, places, things, meals]) => {
-      if (!live) return;
-      // The order is the visit's: an answered note keeps its place until next time.
-      if (notes.data) notes = { data: byAttention(notes.data) };
-      setBook({ notes, places, things, meals });
-    });
-    return () => {
-      live = false;
-    };
-  }, []);
+    void load();
+  }, [load]);
+  // Back to the app, or a pull to refresh.
+  useEffect(() => onResume(load), [load]);
 
   function changed(next: Note) {
     setBook((b) => (b?.notes.data ? { ...b, notes: { data: b.notes.data.map((n) => (n.id === next.id ? next : n)) } } : b));
@@ -84,8 +88,9 @@ export function Life() {
                 생활 장부를 불러오지 못했어요
               </p>
               <p role="alert" className="mt-2 max-w-[34rem] text-[13.5px] leading-[1.6] break-keep text-pretty text-dim">
-                {book.notes.error} 잠시 뒤 다시 열어 보세요. 계속 이러면 상태 탭에서 인지 루프(mind)가 응답하는지 보세요.
+                {book.notes.error} 계속 이러면 상태 탭에서 인지 루프(mind)가 응답하는지 보세요.
               </p>
+              <Retry onRetry={load} />
             </div>
           ) : (
             <>
@@ -93,7 +98,7 @@ export function Life() {
 
               <Section name="나에 대한 노트" focus="notes" tally={noteTally(book.notes.data)}>
                 {book.notes.error ? (
-                  <Trouble what="노트를">{book.notes.error}</Trouble>
+                  <Trouble what="노트를" onRetry={load}>{book.notes.error}</Trouble>
                 ) : book.notes.data!.length === 0 ? (
                   <Empty>밤마다 반복되는 일과 빗나간 예측에서 노트가 생겨요.</Empty>
                 ) : (
@@ -103,7 +108,7 @@ export function Life() {
 
               <Section name="나만의 지도" focus="places" tally={book.places.data?.length ? `${book.places.data.length}곳` : null}>
                 {book.places.error ? (
-                  <Trouble what="지도를">{book.places.error}</Trouble>
+                  <Trouble what="지도를" onRetry={load}>{book.places.error}</Trouble>
                 ) : book.places.data!.length === 0 ? (
                   <Empty>캠핑이나 처음 간 식당 뒤에 오는 회고 카드에 답하면 그곳이 여기 쌓여요.</Empty>
                 ) : (
@@ -113,7 +118,7 @@ export function Life() {
 
               <Section name="가진 물건" focus="things" tally={book.things.data?.length ? `반년 ${book.things.data.length}종` : null}>
                 {book.things.error ? (
-                  <Trouble what="물건을">{book.things.error}</Trouble>
+                  <Trouble what="물건을" onRetry={load}>{book.things.error}</Trouble>
                 ) : book.things.data!.length === 0 ? (
                   <Empty>쿠팡 주문이 상품별로 읽히면 아침마다 조금씩 종류가 나뉘어 여기 모여요.</Empty>
                 ) : (
@@ -122,7 +127,7 @@ export function Life() {
               </Section>
 
               <Section name="식사" focus="meals" tally="최근 30일">
-                {book.meals.error ? <Trouble what="식사를">{book.meals.error}</Trouble> : <Meals meals={book.meals.data!} />}
+                {book.meals.error ? <Trouble what="식사를" onRetry={load}>{book.meals.error}</Trouble> : <Meals meals={book.meals.data!} />}
               </Section>
             </>
           )}
@@ -184,11 +189,14 @@ function Empty({ children }: { children: ReactNode }) {
 }
 
 /** One part that did not come back, while the others did. */
-function Trouble({ what, children }: { what: string; children: ReactNode }) {
+function Trouble({ what, children, onRetry }: { what: string; children: ReactNode; onRetry: () => unknown }) {
   return (
-    <p role="alert" className="py-3 text-[13px] leading-[1.55] break-keep text-pretty text-dim">
-      {what} 불러오지 못했어요. {children} 잠시 뒤 다시 열어 보세요.
-    </p>
+    <div className="py-3">
+      <p role="alert" className="text-[13px] leading-[1.55] break-keep text-pretty text-dim">
+        {what} 불러오지 못했어요. {children}
+      </p>
+      <Retry onRetry={onRetry} />
+    </div>
   );
 }
 

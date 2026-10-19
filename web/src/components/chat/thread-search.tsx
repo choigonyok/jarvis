@@ -216,11 +216,11 @@ export function SearchToggle({ search }: { search: ThreadSearch }) {
       aria-label={search.open ? "검색 닫기" : "대화 검색"}
       aria-pressed={search.open}
       className={cn(
-        "flex size-11 items-center justify-center rounded-lg transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 sm:size-8",
+        "flex size-11 items-center justify-center rounded-lg transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 mouse:size-8",
         search.open ? "text-foreground" : "text-faint hover:text-dim",
       )}
     >
-      <Search aria-hidden className="size-[18px] sm:size-4" />
+      <Search aria-hidden className="size-[18px] mouse:size-4" />
     </button>
   );
 }

@@ -25,9 +25,9 @@ type Setup = {
  */
 /** The one action style of these steps: quiet, full width on a phone. */
 const action =
-  "inline-flex h-11 w-full items-center justify-center rounded-lg bg-glass-raised px-4 text-[13px] text-foreground outline-none transition-colors hover:bg-white/12 focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 sm:h-9 sm:w-auto";
+  "inline-flex h-11 w-full items-center justify-center rounded-lg bg-glass-raised px-4 text-[13px] text-foreground outline-none transition-colors hover:bg-white/12 focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 mouse:h-9 sm:w-auto";
 const quiet =
-  "inline-flex h-11 w-full items-center justify-center rounded-lg px-3 text-[13px] text-dim outline-none transition-colors hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 sm:h-9 sm:w-auto";
+  "inline-flex h-11 w-full items-center justify-center rounded-lg px-3 text-[13px] text-dim outline-none transition-colors hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 mouse:h-9 sm:w-auto";
 
 export function PhoneSetup() {
   const [setup, setSetup] = useState<Setup | null>(null);

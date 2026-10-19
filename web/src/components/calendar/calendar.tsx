@@ -8,6 +8,7 @@ import { MonthSwipe, type MonthSwipeHandle } from "@/components/calendar/month-s
 import { OWNER_LABEL, OWNERS, OwnerDot, ownerOf, type Owner } from "@/components/calendar/owner";
 import { Header, TabBar } from "@/components/shell/header";
 import { StandingBar } from "@/components/shell/standing-bar";
+import { FloatingUndo, UndoNotice, useUndo } from "@/components/shell/undo";
 import { Button } from "@/components/ui/button";
 import {
   addDays,
@@ -21,7 +22,7 @@ import {
 } from "@/lib/month";
 import { onOpenParams } from "@/lib/focus";
 import { ghostsFor, type CreateGhost, type Ghost } from "@/lib/proposed";
-import { covers } from "@/lib/thread";
+import { covers, type CalendarEvent } from "@/lib/thread";
 import { useCalendar } from "@/lib/use-calendar";
 import { cn } from "@/lib/utils";
 
@@ -52,8 +53,30 @@ export function Calendar() {
   // narrows the month to one person's days and back.
   const [hidden, setHidden] = useState<ReadonlySet<Owner>>(new Set());
 
-  const { events: allEvents, proposed, waiting, pendingCount, connection, error, remove, decide } =
+  const { events: fetched, proposed, waiting, pendingCount, connection, error, remove, decide } =
     useCalendar(cursor);
+
+  // A removal waits five seconds with 되돌리기 on screen before it is sent:
+  // the row is gone at once, and an undo means the shared calendar never
+  // heard of it (components/shell/undo.tsx).
+  const { undo, offer, take } = useUndo();
+  const [leaving, setLeaving] = useState<ReadonlySet<string>>(new Set());
+  const allEvents = useMemo(() => fetched.filter((e) => !leaving.has(e.id)), [fetched, leaving]);
+  function erase(event: CalendarEvent) {
+    const keep = (on: boolean) =>
+      setLeaving((prev) => {
+        const next = new Set(prev);
+        if (on) next.add(event.id);
+        else next.delete(event.id);
+        return next;
+      });
+    keep(true);
+    offer(
+      event.recurrence ? `${event.title} - 반복 중 이 날만 지웠어요` : `${event.title} 일정을 지웠어요`,
+      () => keep(false),
+      () => void remove(event.id).then((gone) => !gone && keep(false)),
+    );
+  }
 
   const events = useMemo(
     () => allEvents.filter((e) => !hidden.has(ownerOf(e))),
@@ -170,7 +193,7 @@ export function Calendar() {
                     variant="ghost"
                     size="sm"
                     onClick={() => setSelected(today)}
-                    className="h-10 px-3 text-[13px] text-dim hover:text-foreground sm:h-7 sm:px-2.5 sm:text-[12.5px]"
+                    className="h-10 px-3 text-[13px] text-dim hover:text-foreground mouse:h-7 mouse:px-2.5 mouse:text-[12.5px]"
                   >
                     오늘
                   </Button>
@@ -180,18 +203,18 @@ export function Calendar() {
                   size="icon-sm"
                   onClick={() => (swipe.current ? swipe.current.go(-1) : page(-1))}
                   aria-label="이전 달"
-                  className="tap text-faint hover:text-foreground sm:size-7 sm:min-h-0 sm:min-w-0"
+                  className="tap text-faint hover:text-foreground mouse:size-7 mouse:min-h-0 mouse:min-w-0"
                 >
-                  <ChevronLeft aria-hidden className="size-5 sm:size-4" />
+                  <ChevronLeft aria-hidden className="size-5 mouse:size-4" />
                 </Button>
                 <Button
                   variant="ghost"
                   size="icon-sm"
                   onClick={() => (swipe.current ? swipe.current.go(1) : page(1))}
                   aria-label="다음 달"
-                  className="tap text-faint hover:text-foreground sm:size-7 sm:min-h-0 sm:min-w-0"
+                  className="tap text-faint hover:text-foreground mouse:size-7 mouse:min-h-0 mouse:min-w-0"
                 >
-                  <ChevronRight aria-hidden className="size-5 sm:size-4" />
+                  <ChevronRight aria-hidden className="size-5 mouse:size-4" />
                 </Button>
               </div>
             </div>
@@ -219,7 +242,7 @@ export function Calendar() {
                     aria-pressed={on}
                     onClick={() => toggle(owner)}
                     className={cn(
-                      "flex h-9 items-center gap-2 rounded-full border px-3 text-[12.5px] transition-colors outline-none sm:h-7 sm:px-2.5 sm:text-[12px]",
+                      "tap-y flex h-9 items-center gap-2 rounded-full border px-3 text-[12.5px] transition-colors outline-none mouse:h-7 mouse:px-2.5 mouse:text-[12px]",
                       "focus-visible:ring-3 focus-visible:ring-ring/50",
                       on
                         ? "border-edge bg-glass text-foreground/85 hover:bg-glass-raised"
@@ -242,7 +265,7 @@ export function Calendar() {
                   variant="ghost"
                   size="xs"
                   onClick={() => setSelected(elsewhere[0].preview.date)}
-                  className="h-8 px-2.5 text-[12px] text-dim hover:text-foreground sm:h-6 sm:px-2"
+                  className="h-8 px-2.5 text-[12px] text-dim hover:text-foreground mouse:h-6 mouse:px-2"
                 >
                   보기
                 </Button>
@@ -281,7 +304,7 @@ export function Calendar() {
                     <EventRow
                       event={event}
                       pending={ghost}
-                      onDelete={() => void remove(event.id)}
+                      onDelete={() => erase(event)}
                     />
                     {ghost ? (
                       <GhostRow
@@ -312,6 +335,12 @@ export function Calendar() {
             </p>
           ) : null}
         </div>
+
+        {undo ? (
+          <FloatingUndo>
+            <UndoNotice label={undo.label} onUndo={take} />
+          </FloatingUndo>
+        ) : null}
       </main>
 
       <TabBar pending={pendingCount} />

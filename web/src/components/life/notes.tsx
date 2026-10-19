@@ -129,7 +129,7 @@ function NoteRow({
           size="sm"
           onClick={() => setMode("why")}
           disabled={busy}
-          className="h-11 text-[13.5px] text-dim hover:bg-reject/10 hover:text-reject sm:h-8 sm:px-3 sm:text-[0.8rem]"
+          className="h-11 text-[13.5px] text-dim hover:bg-reject/10 hover:text-reject mouse:h-8 mouse:px-3 mouse:text-[0.8rem]"
         >
           아니에요
         </Button>
@@ -138,7 +138,7 @@ function NoteRow({
           size="sm"
           onClick={() => void answer({ status: "confirmed" }, "맞다고 했어요. 예측과 제안에 그대로 써요.")}
           disabled={busy}
-          className="h-11 border-edge bg-glass-raised text-[13.5px] text-foreground hover:border-approve/35 hover:bg-approve/12 hover:text-approve sm:h-8 sm:px-3.5 sm:text-[0.8rem] dark:bg-glass-raised dark:hover:bg-approve/12"
+          className="h-11 border-edge bg-glass-raised text-[13.5px] text-foreground hover:border-approve/35 hover:bg-approve/12 hover:text-approve mouse:h-8 mouse:px-3.5 mouse:text-[0.8rem] dark:bg-glass-raised dark:hover:bg-approve/12"
         >
           맞아요
         </Button>
@@ -147,7 +147,7 @@ function NoteRow({
           size="sm"
           onClick={() => setMode("edit")}
           disabled={busy}
-          className="h-11 px-3 text-[13px] text-faint hover:text-foreground sm:h-8 sm:text-[0.8rem]"
+          className="h-11 px-3 text-[13px] text-faint hover:text-foreground mouse:h-8 mouse:text-[0.8rem]"
         >
           고치기
         </Button>
@@ -224,7 +224,7 @@ function NoteRow({
                 size="sm"
                 onClick={() => void answer({ status: "rejected", reason: why.trim() }, "아니라고 했어요. 다시 만들지 않아요.")}
                 disabled={busy}
-                className="h-11 border-edge text-[13.5px] text-reject hover:bg-reject/10 sm:h-8 sm:px-3.5 sm:text-[0.8rem]"
+                className="h-11 border-edge text-[13.5px] text-reject hover:bg-reject/10 mouse:h-8 mouse:px-3.5 mouse:text-[0.8rem]"
               >
                 아니에요
               </Button>
@@ -260,7 +260,7 @@ function NoteRow({
                 size="sm"
                 onClick={() => void answer({ text: text.trim(), reason: "문장을 고침" }, "고쳐 두었어요.")}
                 disabled={busy || !text.trim() || text.trim() === note.text}
-                className="h-11 border-edge bg-glass-raised text-[13.5px] text-foreground sm:h-8 sm:px-3.5 sm:text-[0.8rem] dark:bg-glass-raised"
+                className="h-11 border-edge bg-glass-raised text-[13.5px] text-foreground mouse:h-8 mouse:px-3.5 mouse:text-[0.8rem] dark:bg-glass-raised"
               >
                 저장
               </Button>
@@ -349,9 +349,9 @@ function TextButton({ onClick, disabled, children }: { onClick: () => void; disa
 }
 
 const field =
-  "h-11 w-full rounded-lg border border-edge-soft bg-well px-3 text-[16px] text-foreground outline-none placeholder:text-faint focus-visible:border-edge focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-8 sm:text-[13.5px]";
+  "h-11 w-full rounded-lg border border-edge-soft bg-well px-3 text-[16px] text-foreground outline-none placeholder:text-faint focus-visible:border-edge focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-8 mouse:text-[13.5px]";
 
-const quiet = "h-11 text-[13.5px] text-dim sm:h-8 sm:px-3 sm:text-[0.8rem]";
+const quiet = "h-11 text-[13.5px] text-dim mouse:h-8 mouse:px-3 mouse:text-[0.8rem]";
 
 const markLabel: Record<NoteStatus, string> = { hypothesis: "확인 전", confirmed: "맞음", rejected: "아님" };
 

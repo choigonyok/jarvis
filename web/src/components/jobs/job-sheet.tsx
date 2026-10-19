@@ -10,7 +10,7 @@ import { photoUrl } from "@/lib/uploads";
 import { cn } from "@/lib/utils";
 
 const quiet =
-  "tap min-h-11 rounded-lg border border-edge-soft px-3 text-[13.5px] text-dim transition-colors outline-none hover:bg-glass hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-40 sm:min-h-9 sm:text-[13px]";
+  "tap min-h-11 rounded-lg border border-edge-soft px-3 text-[13.5px] text-dim transition-colors outline-none hover:bg-glass hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-40 mouse:min-h-9 mouse:text-[13px]";
 
 export function JobSheet({
   job,
@@ -230,7 +230,7 @@ function Body({
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 placeholder={ended ? "다시 맡길 일 (예: 가격 내려서 다시 올려줘)" : "지시하기 (예: 가격 6만 원으로 내려줘)"}
-                className="h-11 w-full rounded-lg border border-edge-soft bg-glass px-3 text-[16px] text-foreground outline-none placeholder:text-faint focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-9 sm:text-[13px]"
+                className="h-11 w-full rounded-lg border border-edge-soft bg-glass px-3 text-[16px] text-foreground outline-none placeholder:text-faint focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-9 mouse:text-[13px]"
               />
             </label>
             <button type="submit" disabled={!text.trim()} aria-label="지시 보내기" className={cn(quiet, "w-11 shrink-0 px-0 sm:w-9")}>

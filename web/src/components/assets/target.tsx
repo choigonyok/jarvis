@@ -209,7 +209,7 @@ export function AllocationDetail({
             value={deposit ? deposit.toLocaleString("ko-KR") : ""}
             onChange={(e) => setAmount(e.target.value)}
             placeholder="예: 1,000,000"
-            className="tnum h-9 w-36 rounded-lg border border-edge-soft bg-glass px-2.5 pe-7 text-[16px] text-foreground outline-none placeholder:text-faint focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-8 sm:text-[13px]"
+            className="tnum h-9 w-36 rounded-lg border border-edge-soft bg-glass px-2.5 pe-7 text-[16px] text-foreground outline-none placeholder:text-faint focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-8 mouse:text-[13px]"
           />
           <span aria-hidden className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-[12px] text-faint">
             원

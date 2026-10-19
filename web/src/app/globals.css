@@ -4,6 +4,12 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* A wide screen worked with a mouse or a trackpad: the one place a control may
+   shrink to a pointer's size. Width alone (sm) used to decide it, and gave an
+   iPad, or a phone turned on its side, 32px buttons under a finger. Layout
+   still follows the width; only the size of what is pressed follows this. */
+@custom-variant mouse (@media (width >= 40rem) and (pointer: fine));
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -170,6 +176,19 @@
     min-height: 44px;
     min-width: 44px;
   }
+  /* The same for a mark that is its own box - a bordered pill, a segment:
+     growing the box would grow the pill, so an invisible band above and below
+     takes the press instead, up to 44px. */
+  .tap-y {
+    position: relative;
+  }
+  .tap-y::before {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    top: min(0px, calc((100% - 44px) / 2));
+    bottom: min(0px, calc((100% - 44px) / 2));
+  }
   /* A shared entry is both of ours, so its mark is both colors. Horizontal
      halves on a dot, vertical halves on a row's edge bar. */
   .owner-shared {
@@ -262,6 +281,21 @@
   animation-delay: 0.32s;
 }
 
+/* A held approval's 되돌리기 (components/chat/hold.tsx): the time left, as a
+   fill that empties from the right. */
+@keyframes hold-drain {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+.hold-drain {
+  transform-origin: left;
+  animation: hold-drain linear forwards;
+}
+
 /* The card a tapped push was about: an outline that says "this one", then
    goes. */
 @keyframes card-flash {
@@ -344,6 +378,7 @@
   .anim-settle,
   .anim-breathe,
   .anim-spin-slow,
+  .hold-drain,
   .anim-think > span {
     animation: none !important;
   }

@@ -67,9 +67,9 @@ export function EventRow({
         size="icon-xs"
         onClick={onDelete}
         aria-label={`${event.title} 삭제`}
-        className="tap touch-visible -my-2 shrink-0 text-faint opacity-0 transition-opacity group-hover/row:opacity-100 hover:bg-reject/10 hover:text-reject focus-visible:opacity-100 sm:my-0 sm:size-6 sm:min-h-0 sm:min-w-0"
+        className="tap touch-visible -my-2 shrink-0 text-faint opacity-0 transition-opacity group-hover/row:opacity-100 hover:bg-reject/10 hover:text-reject focus-visible:opacity-100 mouse:my-0 mouse:size-6 mouse:min-h-0 mouse:min-w-0"
       >
-        <Trash2 aria-hidden className="size-4 sm:size-3.5" />
+        <Trash2 aria-hidden className="size-4 mouse:size-3.5" />
       </Button>
       )}
     </div>
@@ -132,7 +132,7 @@ export function GhostRow({
           variant="ghost"
           size="sm"
           onClick={() => onDecide("rejected")}
-          className="h-11 text-[13px] text-dim hover:bg-reject/10 hover:text-reject sm:h-7 sm:px-2.5 sm:text-[12.5px]"
+          className="h-11 text-[13px] text-dim hover:bg-reject/10 hover:text-reject mouse:h-7 mouse:px-2.5 mouse:text-[12.5px]"
         >
           반려
         </Button>
@@ -140,7 +140,7 @@ export function GhostRow({
           variant="outline"
           size="sm"
           onClick={() => onDecide("approved")}
-          className="h-11 border-edge bg-glass-raised text-[13px] text-foreground hover:border-approve/35 hover:bg-approve/12 hover:text-approve sm:h-7 sm:px-3 sm:text-[12.5px] dark:bg-glass-raised dark:hover:bg-approve/12"
+          className="h-11 border-edge bg-glass-raised text-[13px] text-foreground hover:border-approve/35 hover:bg-approve/12 hover:text-approve mouse:h-7 mouse:px-3 mouse:text-[12.5px] dark:bg-glass-raised dark:hover:bg-approve/12"
         >
           승인
         </Button>

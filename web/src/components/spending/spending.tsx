@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, Plus, Search, X } from "lucide-react";
 import { Header, TabBar } from "@/components/shell/header";
+import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { Categories } from "@/components/spending/categories";
 import { Pace } from "@/components/spending/pace";
@@ -30,6 +31,7 @@ import {
   shiftMonth,
 } from "@/lib/spending";
 import { onOpenParams } from "@/lib/focus";
+import { onResume } from "@/lib/resume";
 import { isPending } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
 import { cn } from "@/lib/utils";
@@ -82,6 +84,8 @@ export function Spending() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load(month);
   }, [load, month]);
+  // Back to the app, or a pull to refresh: the month on screen, again.
+  useEffect(() => onResume(() => load(month)), [load, month]);
 
   // A charge made while the tab is open should appear without a pull: the
   // collector reads alerts within seconds, so a minute is the slow side.
@@ -191,7 +195,10 @@ export function Spending() {
           </div>
 
           {error && !book ? (
-            <p className="py-16 text-center text-[13px] text-dim">{error}</p>
+            <div className="py-16 text-center">
+              <p className="text-[13px] text-dim">{error}</p>
+              <Retry onRetry={() => load(month)} />
+            </div>
           ) : null}
 
           {book ? (
@@ -259,7 +266,7 @@ export function Spending() {
                       value={query}
                       onChange={(e) => setQuery(e.target.value)}
                       placeholder="찾기"
-                      className="h-10 w-full rounded-lg bg-glass ps-8 pe-2 text-[16px] text-foreground outline-none placeholder:text-faint focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-8 sm:text-[12.5px]"
+                      className="h-10 w-full rounded-lg bg-glass ps-8 pe-2 text-[16px] text-foreground outline-none placeholder:text-faint focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-8 mouse:text-[12.5px]"
                     />
                   </label>
                   <button

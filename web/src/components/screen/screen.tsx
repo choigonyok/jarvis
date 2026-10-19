@@ -156,7 +156,7 @@ export function Screen({ vncUrl, ticketed = false }: { vncUrl: string; ticketed?
             aria-pressed={controlling}
             className={cn(
               "flex shrink-0 items-center justify-center rounded-lg px-3 text-[12.5px] transition-colors outline-none",
-              "min-h-11 sm:min-h-0 sm:px-2 sm:py-1 sm:text-[12px]",
+              "min-h-11 mouse:min-h-0 mouse:px-2 mouse:py-1 mouse:text-[12px]",
               "focus-visible:ring-3 focus-visible:ring-ring/50",
               "disabled:pointer-events-none disabled:text-faint/40",
               controlling

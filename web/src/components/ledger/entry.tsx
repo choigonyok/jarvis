@@ -2,6 +2,7 @@
 
 import { Collapsible } from "radix-ui";
 import { ChevronDown } from "lucide-react";
+import { HoldBar, holdsMoney, useHold } from "@/components/chat/hold";
 import { Button } from "@/components/ui/button";
 import { isLiteral, readableBody, readableConsequence } from "@/lib/card-body";
 import { stateCopy, summarize } from "@/lib/ledger";
@@ -31,6 +32,8 @@ export function Entry({
   const waiting = proposal.state === "pending";
   const literal = isLiteral(proposal);
   const time = waiting ? proposal.at : (proposal.decidedAt ?? proposal.at);
+  // Money waits five seconds with 되돌리기, as on the chat's card (chat/hold.tsx).
+  const hold = useHold(() => onDecide("approved"));
 
   return (
     <Collapsible.Root
@@ -53,7 +56,7 @@ export function Entry({
       <Collapsible.Trigger
         className={cn(
           "flex w-full items-baseline gap-3 rounded-lg py-2.5 pr-2 pl-4 text-left outline-none",
-          "min-h-11 sm:min-h-0",
+          "min-h-11 mouse:min-h-0",
           "focus-visible:ring-3 focus-visible:ring-ring/50",
         )}
       >
@@ -102,21 +105,23 @@ export function Entry({
             <p className="mt-1.5 text-[11.5px] text-faint">{proposal.note}</p>
           ) : null}
 
-          {waiting ? (
+          {waiting && hold.holding ? (
+            <HoldBar className="mt-3" left={hold.left} onCancel={hold.cancel} />
+          ) : waiting ? (
             <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-1.5">
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => onDecide("rejected")}
-                className="h-11 text-[13px] text-dim hover:bg-reject/10 hover:text-reject sm:h-7 sm:px-2.5 sm:text-[12.5px]"
+                className="h-11 text-[13px] text-dim hover:bg-reject/10 hover:text-reject mouse:h-7 mouse:px-2.5 mouse:text-[12.5px]"
               >
                 반려
               </Button>
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => onDecide("approved")}
-                className="h-11 border-edge bg-glass-raised text-[13px] text-foreground hover:border-approve/35 hover:bg-approve/12 hover:text-approve sm:h-7 sm:px-3 sm:text-[12.5px] dark:bg-glass-raised dark:hover:bg-approve/12"
+                onClick={() => (holdsMoney(proposal) ? hold.start() : onDecide("approved"))}
+                className="h-11 border-edge bg-glass-raised text-[13px] text-foreground hover:border-approve/35 hover:bg-approve/12 hover:text-approve mouse:h-7 mouse:px-3 mouse:text-[12.5px] dark:bg-glass-raised dark:hover:bg-approve/12"
               >
                 승인
               </Button>

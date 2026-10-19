@@ -12,6 +12,7 @@ import {
   type Session,
   type WorkoutSet,
 } from "@/lib/workout";
+import { onResume } from "@/lib/resume";
 
 /**
  * The training log, loaded once and written back whenever it changes.
@@ -56,23 +57,37 @@ export function useWorkout() {
   // What the server is known to hold. Changes are measured against this.
   const saved = useRef<Book>(book);
 
-  useEffect(() => {
-    void (async () => {
-      try {
-        const res = await fetch("/api/workout", { cache: "no-store" });
-        if (!res.ok) throw new Error(String(res.status));
-        const data = (await res.json()) as Book;
-        setGroups(data.groups);
-        setBook(data);
-        latest.current = data;
-        saved.current = data;
-      } catch {
-        setError("기록을 불러오지 못했습니다.");
-      } finally {
-        setLoaded(true);
-      }
-    })();
+  const read = useCallback(async () => {
+    try {
+      const res = await fetch("/api/workout", { cache: "no-store" });
+      if (!res.ok) throw new Error(String(res.status));
+      const data = (await res.json()) as Book;
+      setGroups(data.groups);
+      setBook(data);
+      latest.current = data;
+      saved.current = data;
+      setError(null);
+    } catch {
+      setError("기록을 불러오지 못했습니다.");
+    } finally {
+      setLoaded(true);
+    }
   }, []);
+
+  useEffect(() => {
+    // read sets state only after its fetch resolves; the rule cannot see that.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void read();
+  }, [read]);
+
+  // Read again on coming back to the app or a pull to refresh - another
+  // device may have logged - unless something done here has not reached the
+  // server yet: this copy is the newer one then, and a read would undo it.
+  const reload = useCallback(
+    () => (timer.current || diff(saved.current, latest.current) ? undefined : read()),
+    [read],
+  );
+  useEffect(() => onResume(reload), [reload]);
 
   const save = useCallback(async (next: Book) => {
     const changes = diff(saved.current, next);
@@ -323,6 +338,7 @@ export function useWorkout() {
     live,
     loaded,
     error,
+    reload,
     startSession,
     startRoutine,
     saveRoutines,

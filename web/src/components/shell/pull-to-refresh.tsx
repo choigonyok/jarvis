@@ -2,14 +2,44 @@
 
 import { useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
+import { refreshAll } from "@/lib/resume";
 import { cn } from "@/lib/utils";
 
-/** How far the finger travels (after damping) before letting go reloads. */
+/** How far the finger travels (after damping) before letting go refreshes. */
 const TRIGGER = 72;
 const MAX = 110;
 
+/** The build the server is serving now (app/api/version), or null if it cannot say. */
+const serving = () =>
+  fetch("/api/version", { cache: "no-store" })
+    .then((res) => (res.ok ? (res.json() as Promise<{ build?: string }>) : null))
+    .then((body) => body?.build || null)
+    .catch(() => null);
+
+/** The build this page came up with, asked once. */
+let loadedFrom: Promise<string | null> | null = null;
+
 /**
- * Pull down from the top to reload, the way a phone browser does - which a
+ * What a pull does. Every screen re-reads what it shows, in place - the scroll,
+ * an open row and the live streams stay as they are (a full reload threw all
+ * three away). Only when a newer build has been deployed since this page came
+ * up does it load the page again: that is the one thing a re-read cannot bring.
+ */
+async function refresh() {
+  const [before, now] = await Promise.all([loadedFrom, serving()]);
+  if (before && now && before !== now) {
+    window.location.reload();
+    return new Promise<never>(() => {});
+  }
+  const started = Date.now();
+  await refreshAll();
+  // Long enough to be seen to have happened.
+  const rest = 500 - (Date.now() - started);
+  if (rest > 0) await new Promise((resolve) => setTimeout(resolve, rest));
+}
+
+/**
+ * Pull down from the top to refresh, the way a phone browser does - which a
  * home-screen app does not, and every tab here scrolls inside its own panel
  * anyway, so the browser's own gesture would never fire.
  *
@@ -19,8 +49,13 @@ const MAX = 110;
  */
 export function PullToRefresh() {
   const [pull, setPull] = useState(0);
+  const pulled = useRef(0);
   const [reloading, setReloading] = useState(false);
   const g = useRef<{ x: number; y: number; active: boolean; decided: boolean } | null>(null);
+
+  useEffect(() => {
+    loadedFrom ??= serving();
+  }, []);
 
   useEffect(() => {
     const scrollerOf = (node: Element | null): Element | null => {
@@ -58,20 +93,26 @@ export function PullToRefresh() {
       }
       if (!s.active) return;
       e.preventDefault();
-      setPull(Math.min(MAX, Math.max(0, dy * 0.5)));
+      pulled.current = Math.min(MAX, Math.max(0, dy * 0.5));
+      setPull(pulled.current);
     };
     const end = () => {
       const s = g.current;
       g.current = null;
       if (!s?.active) return;
-      setPull((p) => {
-        if (p >= TRIGGER) {
-          reloadingRef.current = true;
-          setReloading(true);
-          window.setTimeout(() => window.location.reload(), 150);
-          return TRIGGER;
-        }
-        return 0;
+      if (pulled.current < TRIGGER) {
+        pulled.current = 0;
+        setPull(0);
+        return;
+      }
+      reloadingRef.current = true;
+      setReloading(true);
+      setPull(TRIGGER);
+      void refresh().finally(() => {
+        reloadingRef.current = false;
+        pulled.current = 0;
+        setReloading(false);
+        setPull(0);
       });
     };
 

@@ -19,11 +19,11 @@ import { cn } from "@/lib/utils";
  */
 
 const field =
-  "tnum h-11 w-full rounded-lg border border-edge-soft bg-glass px-3 text-[16px] text-foreground outline-none placeholder:text-faint focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-9 sm:text-[13px]";
+  "tnum h-11 w-full rounded-lg border border-edge-soft bg-glass px-3 text-[16px] text-foreground outline-none placeholder:text-faint focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-9 mouse:text-[13px]";
 
 /** The one bright control in a sheet is the one that sends - same as the approval card. */
 const sendButton =
-  "tap min-h-11 w-full rounded-lg bg-glass-raised px-4 text-[14px] font-medium text-foreground transition-colors outline-none hover:bg-foreground/15 focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 sm:min-h-9 sm:text-[13px]";
+  "tap min-h-11 w-full rounded-lg bg-glass-raised px-4 text-[14px] font-medium text-foreground transition-colors outline-none hover:bg-foreground/15 focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 mouse:min-h-9 mouse:text-[13px]";
 
 function Panel({
   open,

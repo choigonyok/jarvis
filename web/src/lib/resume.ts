@@ -33,22 +33,44 @@ export function onPushShown(fn: (p: ShownPush) => void): () => void {
   return () => window.removeEventListener(SHOWN, handle);
 }
 
-export function onResume(fn: () => void): () => void {
+/** A re-read that answers with a promise lets a pull to refresh wait for it. */
+type Wait = (done: Promise<unknown>) => void;
+
+export function onResume(fn: () => unknown): () => void {
   const visible = () => document.visibilityState === "visible" && fn();
   const shown = (e: PageTransitionEvent) => e.persisted && fn();
+  const asked = (e: Event) => {
+    const done = fn();
+    const wait = (e as CustomEvent<{ wait?: Wait } | null>).detail?.wait;
+    if (wait && done instanceof Promise) wait(done);
+  };
   document.addEventListener("visibilitychange", visible);
   window.addEventListener("pageshow", shown);
-  window.addEventListener(RESUME, fn);
+  window.addEventListener(RESUME, asked);
   return () => {
     document.removeEventListener("visibilitychange", visible);
     window.removeEventListener("pageshow", shown);
-    window.removeEventListener(RESUME, fn);
+    window.removeEventListener(RESUME, asked);
   };
 }
 
 /** Asks every screen to re-read and reopen its streams, as on coming back to the app. */
 export function requestResume() {
   window.dispatchEvent(new Event(RESUME));
+}
+
+/**
+ * Pull to refresh: every screen re-reads, as on coming back to the app, and
+ * this resolves once what they started has come back - or after a while, so
+ * a service that hangs does not hold the spinner up.
+ */
+export function refreshAll(timeout = 8000): Promise<void> {
+  const started: Promise<unknown>[] = [];
+  window.dispatchEvent(new CustomEvent(RESUME, { detail: { wait: (done: Promise<unknown>) => started.push(done) } }));
+  return Promise.race([
+    Promise.allSettled(started).then(() => undefined),
+    new Promise<void>((resolve) => setTimeout(resolve, timeout)),
+  ]);
 }
 
 /** The inbox opens when a grouped push ("밤사이 알림 3건") is tapped. */

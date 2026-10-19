@@ -135,11 +135,14 @@ function DayStrip({
   onSelectDay: (date: string | null) => void;
 }) {
   const max = Math.max(1, ...book.daily.map((d) => d.totalKrw));
-  // The day under the finger while scrubbing, like a stock chart's
-  // crosshair: hold, then slide. A mouse scrubs by hovering.
+  // The day under the finger, like a stock chart's crosshair. A bar is 9px
+  // on a phone, so a finger is shown which day it is on the moment it rests
+  // (after a beat, so a scroll passing over the strip does not flash it),
+  // slides sideways to the day it wants, and picks that day by letting go.
+  // A mouse scrubs by hovering and picks by clicking.
   const [scrub, setScrub] = useState<number | null>(null);
   const strip = useRef<HTMLDivElement>(null);
-  const hold = useRef<{ timer: number; id: number; x: number; y: number } | null>(null);
+  const press = useRef<{ timer: number; id: number; x: number; y: number; sliding: boolean } | null>(null);
   const scrubbed = useRef(false);
   const n = book.daily.length;
 
@@ -149,9 +152,9 @@ function DayStrip({
     const i = Math.floor(((clientX - r.left) / r.width) * n);
     return Math.min(n - 1, Math.max(0, i));
   };
-  const cancelHold = () => {
-    if (hold.current) window.clearTimeout(hold.current.timer);
-    hold.current = null;
+  const letGo = () => {
+    if (press.current) window.clearTimeout(press.current.timer);
+    press.current = null;
   };
 
   const shown = scrub !== null ? book.daily[scrub] : null;
@@ -177,23 +180,19 @@ function DayStrip({
         <div
           ref={strip}
           role="group"
-          aria-label="날짜별 지출. 누르면 그날 내역만 봅니다. 누른 채로 밀면 날짜별 금액을 봅니다"
+          aria-label="날짜별 지출. 누르거나, 누른 채 옆으로 밀어 고른 날의 내역만 봅니다"
           className="relative flex h-16 touch-pan-y items-end gap-[2px] select-none [-webkit-touch-callout:none] sm:h-20 sm:gap-[3px]"
           onContextMenu={(e) => e.preventDefault()}
           onPointerDown={(e) => {
             scrubbed.current = false;
             if (e.pointerType === "mouse") return;
             const { clientX, clientY, pointerId } = e;
-            hold.current = {
+            press.current = {
               id: pointerId,
               x: clientX,
               y: clientY,
-              timer: window.setTimeout(() => {
-                scrubbed.current = true;
-                strip.current?.setPointerCapture(pointerId);
-                setScrub(at(clientX));
-                navigator.vibrate?.(8);
-              }, 280),
+              sliding: false,
+              timer: window.setTimeout(() => setScrub(at(clientX)), 120),
             };
           }}
           onPointerMove={(e) => {
@@ -201,20 +200,45 @@ function DayStrip({
               setScrub(at(e.clientX));
               return;
             }
-            const h = hold.current;
-            if (scrubbed.current) {
+            const p = press.current;
+            if (!p) return;
+            if (p.sliding) {
               setScrub(at(e.clientX));
-            } else if (h && Math.hypot(e.clientX - h.x, e.clientY - h.y) > 8) {
-              // Moved before the hold landed: a scroll or a swipe, not a scrub.
-              cancelHold();
+              return;
+            }
+            const dx = Math.abs(e.clientX - p.x);
+            const dy = Math.abs(e.clientY - p.y);
+            if (dy > 8 && dy > dx) {
+              // A scroll passing over the strip, not a pick - nor is the click
+              // a browser may still send for it.
+              letGo();
+              setScrub(null);
+              scrubbed.current = true;
+            } else if (dx > 6) {
+              // Sideways: the strip has the finger until it lets go.
+              p.sliding = true;
+              scrubbed.current = true;
+              strip.current?.setPointerCapture(p.id);
+              setScrub(at(e.clientX));
+              navigator.vibrate?.(8);
             }
           }}
-          onPointerUp={() => {
-            cancelHold();
-            if (scrubbed.current) setScrub(null);
+          onPointerUp={(e) => {
+            const p = press.current;
+            letGo();
+            if (e.pointerType === "mouse" || !p) return;
+            setScrub(null);
+            // A finger picks here, by where it let go, not by the bar's click:
+            // a bar and the 2px gap beside it are both the day that was shown.
+            // A slide picks the day it ended on; a tap picks, or unpicks.
+            const i = at(e.clientX);
+            const d = i === null ? undefined : book.daily[i];
+            if (d && d.date <= book.today) onSelectDay(p.sliding || selectedDay !== d.date ? d.date : null);
+            scrubbed.current = true;
+            window.setTimeout(() => (scrubbed.current = false), 0);
           }}
           onPointerCancel={() => {
-            cancelHold();
+            letGo();
             scrubbed.current = false;
             setScrub(null);
           }}
@@ -239,7 +263,8 @@ function DayStrip({
                 type="button"
                 disabled={future}
                 onClick={() => {
-                  // Letting go of a scrub is not a tap on the day it ended on.
+                  // A finger already picked as it let go (above); this click
+                  // is that same release. Keys and a mouse pick here.
                   if (scrubbed.current) {
                     scrubbed.current = false;
                     return;

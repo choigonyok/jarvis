@@ -73,7 +73,7 @@ export function Notifications() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- the fetch sets state when it resolves
     void load();
     const id = window.setInterval(() => void load(), 60_000);
-    const stop = onResume(() => void load());
+    const stop = onResume(load);
     // A card decided on this screen: its "결재 대기" was just marked read.
     const decided = () => void load();
     window.addEventListener("jarvis:decided", decided);
@@ -129,9 +129,9 @@ export function Notifications() {
         }}
         aria-expanded={open}
         aria-label={unread ? `알림 ${unread}개 안 읽음` : "알림"}
-        className="relative flex size-11 items-center justify-center rounded-lg text-faint transition-colors outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50 sm:size-8"
+        className="relative flex size-11 items-center justify-center rounded-lg text-faint transition-colors outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50 mouse:size-8"
       >
-        <Bell aria-hidden className="size-[18px] sm:size-4" />
+        <Bell aria-hidden className="size-[18px] mouse:size-4" />
         {unread ? (
           <span aria-hidden className="absolute top-2.5 right-2.5 size-[7px] rounded-full bg-reject ring-2 ring-background sm:top-1 sm:right-1" />
         ) : null}
@@ -334,14 +334,14 @@ function NotifySettings() {
                   type="time"
                   value={set.quietStart}
                   onChange={(e) => void save({ ...set, quietStart: e.target.value })}
-                  className="tnum h-9 rounded-lg border border-edge-soft bg-glass px-2 text-[16px] text-foreground sm:text-[12.5px]"
+                  className="tnum h-9 rounded-lg border border-edge-soft bg-glass px-2 text-[16px] text-foreground mouse:text-[12.5px]"
                 />
                 <span className="text-faint">~</span>
                 <input
                   type="time"
                   value={set.quietEnd}
                   onChange={(e) => void save({ ...set, quietEnd: e.target.value })}
-                  className="tnum h-9 rounded-lg border border-edge-soft bg-glass px-2 text-[16px] text-foreground sm:text-[12.5px]"
+                  className="tnum h-9 rounded-lg border border-edge-soft bg-glass px-2 text-[16px] text-foreground mouse:text-[12.5px]"
                 />
               </span>
             </label>
@@ -351,7 +351,7 @@ function NotifySettings() {
                 type="time"
                 value={set.digestAt}
                 onChange={(e) => void save({ ...set, digestAt: e.target.value })}
-                className="tnum h-9 rounded-lg border border-edge-soft bg-glass px-2 text-[16px] text-foreground sm:text-[12.5px]"
+                className="tnum h-9 rounded-lg border border-edge-soft bg-glass px-2 text-[16px] text-foreground mouse:text-[12.5px]"
               />
             </label>
             <p className="text-[11px] leading-relaxed text-faint">

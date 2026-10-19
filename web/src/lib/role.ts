@@ -37,7 +37,7 @@ export function roleFor(email: string): Role | null {
 /** The pages a guest can open - also the tabs a guest is shown. */
 export const GUEST_PAGES = new Set(["/", "/workout", "/calendar"]);
 /** API routes a guest may call: the route itself, or anything beneath it - never a sibling with a longer name. */
-const GUEST_API = ["/api/agent", "/api/workout", "/api/notify", "/api/tts"];
+const GUEST_API = ["/api/agent", "/api/workout", "/api/notify", "/api/tts", "/api/version"];
 
 export function guestMay(pathname: string): boolean {
   if (GUEST_PAGES.has(pathname)) return true;
