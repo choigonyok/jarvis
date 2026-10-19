@@ -5,7 +5,7 @@ import { AudioLines, Keyboard, Mic, Volume2, VolumeX, X } from "lucide-react";
 import { Caption, DOT, IconButton, PrimaryButton, QuietButton, Spectrum, type Tone } from "@/components/chat/voice-parts";
 import { VoiceSetup } from "@/components/chat/voice-setup";
 import { useMicLevel } from "@/lib/use-mic-level";
-import { capturesAlone, unlockSpeech, useRecognition, type Speaker, type VoiceInfo } from "@/lib/use-speech";
+import { capturesAlone, primePlayer, unlockSpeech, useRecognition, type Speaker, type VoiceInfo } from "@/lib/use-speech";
 import { cn } from "@/lib/utils";
 
 /**
@@ -115,7 +115,7 @@ export function VoiceStage({
     [flush],
   );
 
-  const { state, interim, error, heard, start, stop, supported } = useRecognition({
+  const { state, interim, error, heard, start, restart, stop, supported } = useRecognition({
     onFinal,
   });
   useEffect(() => {
@@ -129,6 +129,36 @@ export function VoiceStage({
   const { level: micLevel, spectrum: micBins } = useMicLevel(listening && !alone);
   const heardLevel = useHeard(heard + interim.length);
   const level = alone ? heardLevel : micLevel;
+
+  // Listening and hearing nothing at all for a long while. A session can say
+  // it listens with a mic that is not delivering (an iPhone, after the voice
+  // was cut off mid-sentence): the first time, a fresh session takes its
+  // place on its own; if that hears nothing either, a button asks for a tap,
+  // which the platform may need to open the mic again.
+  const [round, setRound] = useState(0);
+  const [quietAt, setQuietAt] = useState<string | null>(null);
+  const refreshedAt = useRef<number | null>(null);
+  useEffect(() => {
+    if (!listening) return;
+    const t = setTimeout(() => {
+      if (refreshedAt.current !== heard) {
+        refreshedAt.current = heard;
+        primePlayer();
+        restart();
+        setRound((r) => r + 1);
+      } else {
+        setQuietAt(`${heard}|${round}`);
+      }
+    }, QUIET_MS);
+    return () => clearTimeout(t);
+  }, [listening, heard, round, restart]);
+  const quietLong = listening && quietAt === `${heard}|${round}`;
+
+  function listenAgain() {
+    setQuietAt(null);
+    primePlayer();
+    restart(true);
+  }
   // One ring, two sources: your microphone while you talk, the cloned voice's
   // audio while Jarvis does. Each is refreshed in place every frame; this only
   // decides which one the ring reads, and decides it when the ring asks (the
@@ -409,6 +439,18 @@ export function VoiceStage({
               {notice}
             </p>
           ) : null}
+          {quietLong && !said && !notice ? (
+            <p className="mt-1 text-[13px] leading-relaxed text-faint">
+              말해도 반응이 없나요?{" "}
+              <button
+                type="button"
+                onClick={listenAgain}
+                className="tap text-dim underline underline-offset-2 outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+              >
+                다시 듣기
+              </button>
+            </p>
+          ) : null}
         </div>
       </main>
 
@@ -449,6 +491,9 @@ export function VoiceStage({
     </div>
   );
 }
+
+/** Hearing nothing at all this long while listening is taken for a mic that is not delivering. */
+const QUIET_MS = 12_000;
 
 /**
  * A level that jumps when `signal` changes and falls back between - the

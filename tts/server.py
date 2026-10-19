@@ -38,6 +38,8 @@ import json
 import logging
 import os
 import sys
+import select
+import socket
 import threading
 import time
 import wave
@@ -275,7 +277,7 @@ class Engine:
 
     # -- speaking
 
-    def speak(self, who: str, text: str, lang: str) -> tuple[bytes, float, float]:
+    def speak(self, who: str, text: str, lang: str, still_wanted=None) -> tuple[bytes, float, float]:
         """→ (wav bytes, audio seconds, wall seconds), in who's voice."""
         import mlx.core as mx
 
@@ -290,6 +292,10 @@ class Engine:
         if len(text) > MAX_TEXT_CHARS:
             raise ValueError(f"한 번에 {MAX_TEXT_CHARS}자까지 읽습니다.")
         with self.lock:
+            # Waited for the model behind another reading: if the one who
+            # asked has gone (an answer cut off with 끝내기), nothing is made.
+            if still_wanted is not None and not still_wanted():
+                raise ClientGone()
             t0 = time.time()
             chunks = []
             try:
@@ -314,6 +320,10 @@ class Engine:
             raise RuntimeError("소리가 만들어지지 않았습니다.")
         pcm = np.concatenate(chunks)
         return encode_wav(pcm, SAMPLE_RATE), pcm.size / SAMPLE_RATE, wall
+
+
+class ClientGone(Exception):
+    """The request's client closed its connection before its turn came."""
 
 
 # ---------------------------------------------------------------- http
@@ -363,6 +373,17 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(data, dict):
             raise ValueError("JSON 객체가 필요합니다.")
         return data
+
+    def client_alive(self) -> bool:
+        """False once the client has closed its connection. The request body
+        has been read, so anything readable on the socket now is its end."""
+        try:
+            readable, _, _ = select.select([self.connection], [], [], 0)
+            if not readable:
+                return True
+            return self.connection.recv(1, socket.MSG_PEEK) != b""
+        except OSError:
+            return False
 
     def log_message(self, fmt, *args):  # noqa: N802 - stdlib name
         log.info("%s " + fmt, self.address_string(), *args)
@@ -430,7 +451,10 @@ class Handler(BaseHTTPRequestHandler):
             data = self.body_json()
             text = str(data.get("text", ""))
             lang = str(data.get("lang") or "korean").lower()
-            wav, seconds, wall = self.engine.speak(who, text, lang)
+            wav, seconds, wall = self.engine.speak(who, text, lang, self.client_alive)
+        except ClientGone:
+            log.info("speak 건너뜀: 요청한 쪽이 이미 떠났습니다 (%d자)", len(text))
+            return
         except LookupError as e:
             return self.error(409, str(e))
         except ValueError as e:
@@ -441,14 +465,18 @@ class Handler(BaseHTTPRequestHandler):
             log.exception("생성 실패")
             return self.error(500, f"음성을 만들지 못했습니다: {e}")
         log.info("speak (%s) %d자 → %.1fs 음성, %.1fs 걸림 (RTF %.2f)", who, len(text), seconds, wall, wall / max(seconds, 0.01))
-        self.send_response(200)
-        self.send_header("Content-Type", "audio/wav")
-        self.send_header("Content-Length", str(len(wav)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-TTS-Seconds", f"{seconds:.2f}")
-        self.send_header("X-TTS-Wall", f"{wall:.2f}")
-        self.end_headers()
-        self.wfile.write(wav)
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "audio/wav")
+            self.send_header("Content-Length", str(len(wav)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-TTS-Seconds", f"{seconds:.2f}")
+            self.send_header("X-TTS-Wall", f"{wall:.2f}")
+            self.end_headers()
+            self.wfile.write(wav)
+        except (BrokenPipeError, ConnectionResetError):
+            # Read while the answer was cut off (끝내기): nobody to hand it to.
+            log.info("speak 버림: 다 만들었지만 요청한 쪽이 이미 떠났습니다 (%d자)", len(text))
 
 
 def main() -> int:

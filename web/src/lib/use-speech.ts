@@ -233,6 +233,12 @@ export function useRecognition({
       engine.onstart = () => {
         if (!mine()) return;
         clearTimeout(starting);
+        if (!wanted.current) {
+          // Stopped while it was still opening: it does not get to say "listening".
+          quiet();
+          retire();
+          return;
+        }
         opening.current = false;
         setError(null);
         setState("listening");
@@ -362,6 +368,21 @@ export function useRecognition({
     attemptRef.current?.(0);
   }, []);
 
+  /**
+   * A fresh session in place of the one listening - for a session that has
+   * heard nothing in a long while. `tap` when a person asked for it.
+   */
+  const restart = useCallback((tap = false) => {
+    if (!wanted.current && !tap) return;
+    tapped.current = tap;
+    wanted.current = true;
+    deaf.current = 0;
+    setError(null);
+    retire();
+    if (retry.current) clearTimeout(retry.current);
+    attemptRef.current?.(0);
+  }, [retire]);
+
   const stop = useCallback(() => {
     wanted.current = false;
     if (retry.current) clearTimeout(retry.current);
@@ -384,6 +405,7 @@ export function useRecognition({
     error,
     heard,
     start,
+    restart,
     stop,
     supported: state !== "unsupported",
   };
@@ -454,45 +476,70 @@ export function audioPlayer(): HTMLAudioElement | null {
 const SILENT_WAV =
   "data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQIAAAAAAA==";
 
+let synthUnlocked = false;
+
+/**
+ * The voice element played to its natural end - a muted single silent
+ * sample - so the next microphone opens after an element that finished, not
+ * one cut off mid-sentence. The paths that hear on an iPhone (the first 시작,
+ * the reopen after an answer ends) both open the mic right after the element
+ * ended; 끝내기 during an answer left it paused halfway, and the 시작 after it
+ * said "듣고 있습니다" and heard nothing (2026-10-19). Played inside a tap the
+ * first time, it also unlocks the element for the answers that come later.
+ */
+export function primePlayer() {
+  const el = audioPlayer();
+  if (!el) return;
+  // A real answer playing is not cut for this.
+  if (!el.paused && el.src.startsWith("blob:")) return;
+  try {
+    el.muted = true;
+    el.src = SILENT_WAV;
+    const p = el.play();
+    const unmute = () => {
+      el.muted = false;
+    };
+    if (p && typeof p.then === "function") {
+      p.then(() => {
+        playerUnlocked = true;
+      })
+        .catch(() => undefined)
+        .finally(unmute);
+    } else {
+      playerUnlocked = true;
+      unmute();
+    }
+  } catch {
+    el.muted = false;
+  }
+}
+
+/** Whether the voice element has been played inside a tap yet. */
+export function playerReady() {
+  return playerUnlocked;
+}
+
 /**
  * iOS lets a page make sound on its own only after it has done so once inside
  * a tap. Answers arrive long after any tap, so the voice stage calls this from
- * its buttons: a silent utterance and a silent sample, there and then, open
- * the way for both engines.
+ * its buttons. The browser's synthesizer needs it once per page - a silent
+ * utterance, never again after, so later taps do not touch it while the mic
+ * opens - and the voice element is primed every time (primePlayer).
  */
 export function unlockSpeech() {
   const synth = typeof window === "undefined" ? undefined : window.speechSynthesis;
-  if (synth) {
+  if (synth && !synthUnlocked) {
     try {
       const u = new SpeechSynthesisUtterance(" ");
       u.volume = 0;
       synth.speak(u);
       synth.resume();
+      synthUnlocked = true;
     } catch {
       // Nothing to unlock on this engine.
     }
   }
-  const el = audioPlayer();
-  if (el && !playerUnlocked) {
-    try {
-      el.muted = true;
-      el.src = SILENT_WAV;
-      const p = el.play();
-      if (p && typeof p.then === "function") {
-        p.then(() => {
-          playerUnlocked = true;
-          el.muted = false;
-        }).catch(() => {
-          el.muted = false;
-        });
-      } else {
-        playerUnlocked = true;
-        el.muted = false;
-      }
-    } catch {
-      el.muted = false;
-    }
-  }
+  primePlayer();
 }
 
 /**
@@ -631,6 +678,10 @@ export function useSpeech(lang = "ko-KR", server = false) {
   // and anything it was still fetching or playing is dropped on arrival.
   const run = useRef(0);
   const playing = useRef<HTMLAudioElement | null>(null);
+  // Settles the piece playing now (its promise resolves, its handlers come off).
+  const stopPiece = useRef<(() => void) | null>(null);
+  // Aborts the fetches of the answer being read.
+  const fetches = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
@@ -677,21 +728,25 @@ export function useSpeech(lang = "ko-KR", server = false) {
 
   const cancel = useCallback(() => {
     run.current += 1;
+    // The cut answer's pieces still being fetched are not wanted any more.
+    fetches.current?.abort();
+    fetches.current = null;
     window.speechSynthesis?.cancel();
+    // The piece playing is settled, not left pending: a pending piece's
+    // timer used to fire later and take the handlers of whatever answer was
+    // playing by then.
+    const piece = stopPiece.current;
+    stopPiece.current = null;
     const el = playing.current;
+    playing.current = null;
     if (el) {
       try {
-        el.onended = null;
-        el.onerror = null;
-        el.onplaying = null;
         el.pause();
-        el.removeAttribute("src");
-        el.load();
       } catch {
         // Not started, or already ended.
       }
     }
-    playing.current = null;
+    piece?.();
     finish();
   }, [finish]);
 
@@ -792,12 +847,15 @@ export function useSpeech(lang = "ko-KR", server = false) {
         if (at >= 0) cursor = at + p.length;
       }
 
+      const abort = new AbortController();
+      fetches.current = abort;
       const fetchPiece = async (i: number): Promise<string> => {
         const res = await fetch("/api/tts/speak", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ text: parts[i] }),
           cache: "no-store",
+          signal: abort.signal,
         });
         if (!res.ok) {
           const body = (await res.json().catch(() => ({}))) as { error?: string };
@@ -819,14 +877,20 @@ export function useSpeech(lang = "ko-KR", server = false) {
             settled = true;
             window.clearTimeout(guard);
             cancelAnimationFrame(raf);
-            window.clearInterval(decay.current);
-            el.onended = null;
-            el.onerror = null;
-            el.onplaying = null;
-            if (playing.current === el) playing.current = null;
+            // Only what is still this piece's: the element is shared, and
+            // the next answer may have it already.
+            if (stopPiece.current === stop) {
+              stopPiece.current = null;
+              playing.current = null;
+              window.clearInterval(decay.current);
+            }
+            if (el.onended === onEnded) el.onended = null;
+            if (el.onerror === onError) el.onerror = null;
+            if (el.onplaying === onPlaying) el.onplaying = null;
             URL.revokeObjectURL(url);
             resolve(ok);
           };
+          const stop = () => done(true);
           const tick = () => {
             if (!alive()) return;
             if (offsets[i] >= 0 && el.duration > 0) {
@@ -839,7 +903,7 @@ export function useSpeech(lang = "ko-KR", server = false) {
             }
             raf = requestAnimationFrame(tick);
           };
-          el.onplaying = () => {
+          const onPlaying = () => {
             // The ring moves to a steady beat: a media element gives no
             // waveform to read without an AudioContext, which this avoids.
             window.clearInterval(decay.current);
@@ -855,9 +919,14 @@ export function useSpeech(lang = "ko-KR", server = false) {
             }, expect + 2500);
             raf = requestAnimationFrame(tick);
           };
-          el.onended = () => done(true);
-          el.onerror = () => done(true);
+          const onEnded = () => done(true);
+          const onError = () => done(true);
+          el.onplaying = onPlaying;
+          el.onended = onEnded;
+          el.onerror = onError;
+          stopPiece.current = stop;
           playing.current = el;
+          el.muted = false;
           el.src = url;
           // If play never starts (metadata never comes), do not wait forever.
           guard = window.setTimeout(() => done(true), 20_000);
