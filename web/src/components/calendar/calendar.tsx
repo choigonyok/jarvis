@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { EventRow, GhostRow } from "@/components/calendar/event-row";
-import { MonthGrid, type DayMark } from "@/components/calendar/month-grid";
+import { type DayMark } from "@/components/calendar/month-grid";
+import { MonthSwipe, type MonthSwipeHandle } from "@/components/calendar/month-swipe";
 import { OWNER_LABEL, OWNERS, OwnerDot, ownerOf, type Owner } from "@/components/calendar/owner";
 import { Header, TabBar } from "@/components/shell/header";
 import { StandingBar } from "@/components/shell/standing-bar";
@@ -133,6 +134,9 @@ export function Calendar() {
   const visible = useMemo(() => new Set(monthCells(cursor).map((c) => c.date)), [cursor]);
   const elsewhere = creates.filter((g) => !visible.has(g.preview.date));
 
+  // The month's page: turned by a swipe, a trackpad, the arrows or PageUp/PageDown.
+  const swipe = useRef<MonthSwipeHandle>(null);
+
   // Paging months keeps a selection: the same weekday-ish slot, clamped.
   function page(by: number) {
     const next = shiftMonth(cursor, by);
@@ -174,7 +178,7 @@ export function Calendar() {
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  onClick={() => page(-1)}
+                  onClick={() => (swipe.current ? swipe.current.go(-1) : page(-1))}
                   aria-label="이전 달"
                   className="tap text-faint hover:text-foreground sm:size-7 sm:min-h-0 sm:min-w-0"
                 >
@@ -183,7 +187,7 @@ export function Calendar() {
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  onClick={() => page(1)}
+                  onClick={() => (swipe.current ? swipe.current.go(1) : page(1))}
                   aria-label="다음 달"
                   className="tap text-faint hover:text-foreground sm:size-7 sm:min-h-0 sm:min-w-0"
                 >
@@ -192,12 +196,14 @@ export function Calendar() {
               </div>
             </div>
 
-            <MonthGrid
+            <MonthSwipe
+              ref={swipe}
               cursor={cursor}
               selected={selected}
               today={today}
               marks={marks}
               onSelect={setSelected}
+              onPage={page}
             />
 
             {/* The legend is also the filter: the key to the colors is the

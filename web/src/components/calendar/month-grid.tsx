@@ -19,18 +19,43 @@ export type DayMark = {
  * anything true about an event, and a title chopped to four characters is
  * worse than a dot.
  */
+/** The days of the week over the grid. It stays put while the pages under it turn. */
+export function WeekdayRow() {
+  return (
+    <div className="mb-1.5 grid grid-cols-7 gap-px" aria-hidden>
+      {WEEKDAYS.map((label) => (
+        <div key={label} className="py-1 text-center text-[11px] text-faint">
+          {label}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function MonthGrid({
   cursor,
   selected,
   today,
   marks,
   onSelect,
+  onPage,
+  weekdays = true,
+  passive = false,
 }: {
   cursor: Cursor;
   selected: string;
   today: string;
   marks: Map<string, DayMark>;
   onSelect: (date: string) => void;
+  /** PageUp / PageDown: a month back or on. */
+  onPage?: (by: -1 | 1) => void;
+  /** The weekday row above the days (off when a fixed one is drawn outside). */
+  weekdays?: boolean;
+  /**
+   * A neighbouring month shown only while a page is being turned: seen, not
+   * used - no focus, no taps, not read out.
+   */
+  passive?: boolean;
 }) {
   const cells = monthCells(cursor);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -47,6 +72,12 @@ export function MonthGrid({
   }, [selected]);
 
   function onKeyDown(e: React.KeyboardEvent) {
+    if ((e.key === "PageUp" || e.key === "PageDown") && onPage) {
+      e.preventDefault();
+      moveByKey.current = true;
+      onPage(e.key === "PageUp" ? -1 : 1);
+      return;
+    }
     const steps: Record<string, number> = {
       ArrowLeft: -1,
       ArrowRight: 1,
@@ -61,22 +92,13 @@ export function MonthGrid({
   }
 
   return (
-    <div>
-      <div
-        className="mb-1.5 grid grid-cols-7 gap-px"
-        aria-hidden
-      >
-        {WEEKDAYS.map((label) => (
-          <div key={label} className="py-1 text-center text-[11px] text-faint">
-            {label}
-          </div>
-        ))}
-      </div>
+    <div inert={passive} aria-hidden={passive || undefined}>
+      {weekdays ? <WeekdayRow /> : null}
 
       <div
         ref={gridRef}
         role="grid"
-        aria-label="월 달력"
+        aria-label={`${cursor.year}년 ${cursor.month + 1}월 달력`}
         onKeyDown={onKeyDown}
         className="grid grid-cols-7 gap-px"
       >
@@ -91,7 +113,7 @@ export function MonthGrid({
               type="button"
               role="gridcell"
               data-date={cell.date}
-              tabIndex={isSelected ? 0 : -1}
+              tabIndex={isSelected && !passive ? 0 : -1}
               aria-selected={isSelected}
               aria-current={isToday ? "date" : undefined}
               aria-label={ariaLabel(cell.date, cell.day, cell.weekday, mark)}

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAgentStream } from "@/lib/stream";
-import { gridBounds, type Cursor } from "@/lib/month";
+import { gridBounds, shiftMonth, type Cursor } from "@/lib/month";
 import { decideProposal } from "@/lib/decide";
 import {
   API,
@@ -28,7 +28,12 @@ export function useCalendar(cursor: Cursor) {
 
   // The grid shows the tail of the previous month and the head of the next,
   // so the fetch covers every cell that can carry a dot - not just the month.
-  const { from, to } = useMemo(() => gridBounds(cursor), [cursor]);
+  // And the months either side whole: a swipe pulls the next page into view
+  // before it is let go, and that page should already carry its dots.
+  const { from, to } = useMemo(
+    () => ({ from: gridBounds(shiftMonth(cursor, -1)).from, to: gridBounds(shiftMonth(cursor, 1)).to }),
+    [cursor],
+  );
 
   const hydrate = useCallback(async () => {
     try {
