@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -362,10 +363,14 @@ func main() {
 	}
 	// A card does not hold a turn open; its decision starts the next one.
 	gate.SetFollowUp(runner)
-	// A job that names no site goes through without a card (jobs.CardFree).
-	if jobsModule != nil {
-		gate.SetAutoAllow(jobsModule.CardFree)
-	}
+	// A card stands only before a change or money (2026-10-20): a job made or
+	// instructed (jobs.CardFree) and the browser's own tools - reading,
+	// pressing, typing, the PIN at a keypad a payment card already let
+	// through - go by. The browser's guard stops a payment on the network and
+	// raises its card; a job asks before it posts, sends or deletes.
+	gate.SetAutoAllow(func(tool string, input json.RawMessage) bool {
+		return jobs.BrowserTool(tool) || jobsModule != nil && jobsModule.CardFree(tool, input)
+	})
 	proposals.OnDecide(gate.Resolve)
 
 	// Every card waiting on someone reaches their phone. The guest's cards are

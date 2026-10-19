@@ -196,3 +196,57 @@ func TestRunToolsCanPay(t *testing.T) {
 		t.Fatal("실행 지시문이 결제 승인 카드를 설명해야 합니다")
 	}
 }
+
+// fakeGuard keeps what the browser was held to.
+type fakeGuard struct {
+	mu    sync.Mutex
+	sites [][]string
+}
+
+func (g *fakeGuard) Restrict(_ context.Context, sites []string, _ time.Duration) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.sites = append(g.sites, append([]string(nil), sites...))
+	return nil
+}
+
+func (g *fakeGuard) Release(context.Context) error { return nil }
+
+// A site a run finds it needs goes on the job without a card (2026-10-20) -
+// in its log, where the operator sees it - and a run on the browser may open
+// it at once; one without the browser hears to come back on the next run.
+func TestSitesAreAddedWithoutACard(t *testing.T) {
+	svc := &jobsSvc{}
+	props := proposal.NewStore(bus.New())
+	m := New(NewStore(svc.serve(t).URL, ""), nil, props, nil, nil)
+	g := &fakeGuard{}
+	m.guard, m.hold = g, time.Minute
+	m.current.add(7, Job{ID: 21, Title: "캠핑 장작 구매", Sites: []string{"www.coupang.com"}}, true)
+	s := runSession(t, m, "7")
+
+	text, isErr := callRun(t, s, "request_sites", map[string]any{"sites": []string{"https://smartstore.naver.com/x", "www.coupang.com"}, "reason": "최저가 비교"})
+	if isErr || !strings.Contains(text, "지금 열 수 있습니다") {
+		t.Fatalf("바로 더해야 합니다: %q", text)
+	}
+	if n := len(props.List()); n != 0 {
+		t.Fatalf("카드가 %d 장 열렸습니다", n)
+	}
+	if got := svc.got(); !contains(got, "/jobs/21/sites") || !contains(got, "/runs/7/step") {
+		t.Fatalf("작업에 더하고 기록에 남겨야 합니다: %v", got)
+	}
+	if len(g.sites) != 1 || strings.Join(g.sites[0], ",") != "www.coupang.com,smartstore.naver.com" {
+		t.Fatalf("이번 실행의 브라우저도 넓혀야 합니다: %v", g.sites)
+	}
+	if text, isErr := callRun(t, s, "request_sites", map[string]any{"sites": []string{"smartstore.naver.com"}, "reason": "다시"}); !isErr || !strings.Contains(text, "더할 사이트가 없습니다") {
+		t.Fatalf("이미 더한 사이트는 다시 더하지 않습니다: %q", text)
+	}
+
+	m.current.add(8, Job{ID: 22, Title: "개발 할 일 알림"}, false)
+	s = runSession(t, m, "8")
+	if text, isErr := callRun(t, s, "request_sites", map[string]any{"sites": []string{"github.com"}, "reason": "이슈 보기"}); isErr || !strings.Contains(text, "schedule_next") {
+		t.Fatalf("브라우저가 없는 실행은 다음 실행을 잡으라고 해야 합니다: %q", text)
+	}
+	if len(g.sites) != 1 {
+		t.Fatalf("브라우저가 없는 실행은 가드를 건드리지 않습니다: %v", g.sites)
+	}
+}

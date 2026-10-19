@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { isPrivateField, type CardField, type Decision, type Proposal, type ProposalState } from "@/lib/thread";
+import { isLiteral, readableBody, readableConsequence, readableTitle } from "@/lib/card-body";
 import { photoUrl } from "@/lib/uploads";
 import { cn } from "@/lib/utils";
 
@@ -51,9 +52,10 @@ export function ProposalCard({
     // A typed password is not kept on screen once it has been handed over.
     else setValues((cur) => Object.fromEntries(Object.entries(cur).map(([k, v]) => [k, fields.some((f) => f.key === k && isPrivateField(f)) ? "" : v])));
   }
-  // Claude Code's own tools are shown as the literal call; a module's action
-  // is shown as the change it makes.
-  const literal = proposal.action.kind.startsWith("claude.");
+  // A command or a file's content the CLI would run is shown as the literal
+  // call; anything else - a module's change, a job's or the browser's
+  // arguments - as words (lib/card-body.ts).
+  const literal = isLiteral(proposal);
 
   return (
     <article
@@ -85,7 +87,7 @@ export function ProposalCard({
         )}
 
         <h3 className="text-[14.5px] leading-snug font-medium text-foreground">
-          {proposal.card.title}
+          {readableTitle(proposal.card.title)}
         </h3>
 
         {proposal.card.images?.length ? <CardPhotos names={proposal.card.images} /> : null}
@@ -112,12 +114,12 @@ export function ProposalCard({
               : "tnum font-sans text-[13px] whitespace-pre-wrap [&_code]:font-sans",
           )}
         >
-          <code>{proposal.card.body}</code>
+          <code>{readableBody(proposal.card.body)}</code>
         </pre>
         )}
 
         <p className="mt-2.5 text-[12px] leading-normal text-dim">
-          {proposal.card.consequence}
+          {readableConsequence(proposal.card.consequence)}
         </p>
       </div>
 

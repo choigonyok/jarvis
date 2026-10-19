@@ -3,6 +3,7 @@
 import { Collapsible } from "radix-ui";
 import { ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { isLiteral, readableBody, readableConsequence } from "@/lib/card-body";
 import { stateCopy, summarize } from "@/lib/ledger";
 import type { Decision, Proposal } from "@/lib/thread";
 import { cn } from "@/lib/utils";
@@ -28,7 +29,7 @@ export function Entry({
 }) {
   const copy = stateCopy[proposal.state];
   const waiting = proposal.state === "pending";
-  const literal = proposal.action.kind.startsWith("claude.");
+  const literal = isLiteral(proposal);
   const time = waiting ? proposal.at : (proposal.decidedAt ?? proposal.at);
 
   return (
@@ -87,14 +88,14 @@ export function Entry({
               "scrollbar-hairline rounded-md bg-well px-3 py-2.5 leading-relaxed text-dim",
               literal
                 ? "overflow-x-auto font-mono text-[12px]"
-                : "text-[12.5px] whitespace-pre-wrap",
+                : "tnum font-sans text-[12.5px] whitespace-pre-wrap [&_code]:font-sans",
             )}
           >
-            <code>{proposal.card.body}</code>
+            <code>{readableBody(proposal.card.body)}</code>
           </pre>
 
           <p className="mt-2 text-[12px] leading-normal text-dim">
-            {proposal.card.consequence}
+            {readableConsequence(proposal.card.consequence)}
           </p>
 
           {proposal.note ? (

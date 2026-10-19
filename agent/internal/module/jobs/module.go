@@ -11,7 +11,13 @@
 //
 // What every job may need is built once here, as tools a run can call
 // (runtools.go): ask the operator on a card (with a form if it needs values),
-// ask for a login on a site, record what it tracks, schedule its next look.
+// ask for a login on a site, add a site it finds it needs, record what it
+// tracks, schedule its next look.
+//
+// A card stands only where something changes: making or redirecting a job
+// takes none, nor does adding a site to it - a run asks before it posts,
+// sends, deletes or books (ask), and the payment guard's card stands before
+// money leaves.
 package jobs
 
 import (
@@ -47,9 +53,9 @@ const (
 	KindAsk = "job.ask"
 	// KindLogin asks the operator to log in to a site in the 화면 tab.
 	KindLogin = "job.login"
-	// KindSites is a job asking to open sites it was not given: a running
-	// job is held to its own (the browser's guard), so a site it finds it
-	// needs is the operator's to allow.
+	// KindSites was a job asking to open sites it was not given. Since
+	// 2026-10-20 a run adds them itself (request_sites); a card of this kind
+	// still waiting from before is decided as it was.
 	KindSites = "job.sites"
 )
 
@@ -84,6 +90,10 @@ type Module struct {
 	// started twice while its run is being opened.
 	activeMu sync.Mutex
 	active   map[int64]struct{}
+	// guard and hold are the scheduler's (Run): a site a run adds is held
+	// open for the rest of the run at once.
+	guard SiteGuard
+	hold  time.Duration
 }
 
 func New(store *Store, up *uploads.Store, proposals *proposal.Store, notify Notifier, log *slog.Logger) *Module {
@@ -93,34 +103,22 @@ func New(store *Store, up *uploads.Store, proposals *proposal.Store, notify Noti
 }
 
 // CardFree says whether a job call may go through without an approval card
-// (the permission gate asks): making a job that names no site and attaches
-// no photo, or instructing one. Such a job never gets the browser (it runs
-// from the run's own tools beside the conversation, scheduler.go), so it
-// can neither spend nor act anywhere on the operator's behalf - a reminder,
-// a summary, a check of the agent's own services. A job with sites still
-// goes on a card, as does anything else.
-func (m *Module) CardFree(tool string, input json.RawMessage) bool {
-	switch tool {
-	case QualifiedToolName("create_job"):
-		var in CreateInput
-		if json.Unmarshal(input, &in) != nil {
-			return false
-		}
-		return len(in.Sites) == 0 && len(in.Photos) == 0
-	case QualifiedToolName("instruct_job"):
-		var in InstructInput
-		if json.Unmarshal(input, &in) != nil || in.ID == 0 {
-			return false
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		d, err := m.store.Detail(ctx, in.ID)
-		if err != nil {
-			return false
-		}
-		return len(d.Job.Sites) == 0 && len(d.Job.Photos) == 0
-	}
-	return false
+// (the permission gate asks): making a job or instructing one, always. A job
+// changes nothing by being made - a run asks before it posts, sends, deletes
+// or books, and the payment guard's card stands before money - so a card at
+// the start stood only between the operator and work they had just asked for
+// (2026-10-20: "바꾸거나 결제하는 게 아니면 브라우저 작업도 카드 없이"). The
+// calls still come through the gate, which logs each.
+func (m *Module) CardFree(tool string, _ json.RawMessage) bool {
+	return tool == QualifiedToolName("create_job") || tool == QualifiedToolName("instruct_job")
+}
+
+// BrowserTool is whether a tool is the shared browser's own - reading,
+// pressing, typing, the PIN at a keypad a payment card already let through.
+// None of them takes a card: the browser's guard stops a payment on the
+// network and raises the payment card itself.
+func BrowserTool(tool string) bool {
+	return strings.HasPrefix(tool, "mcp__"+BrowserServer+"__")
 }
 
 func (m *Module) Name() string                { return Name }

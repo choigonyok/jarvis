@@ -1,3 +1,4 @@
+import { readableTitle } from "@/lib/card-body";
 import type { Proposal, ProposalState } from "@/lib/thread";
 
 /**
@@ -103,5 +104,5 @@ export function groupByDay(proposals: Proposal[], now = new Date()): Day[] {
  * the whole row, so it carries the weight alone.
  */
 export function summarize(proposal: Proposal): string {
-  return proposal.card.title.trim() || proposal.action.kind;
+  return readableTitle(proposal.card.title).trim() || proposal.action.kind;
 }

@@ -82,6 +82,26 @@ func (r *running) parkedOn(run int64) string {
 	return ""
 }
 
+// browserOf is whether the run holds the shared browser.
+func (r *running) browserOf(run int64) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	e := r.runs[run]
+	return e != nil && e.browser
+}
+
+// widen adds sites to the run's job, for the rest of the run.
+func (r *running) widen(run int64, sites []string) []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	e := r.runs[run]
+	if e == nil {
+		return nil
+	}
+	e.job.Sites = append(append([]string(nil), e.job.Sites...), sites...)
+	return append([]string(nil), e.job.Sites...)
+}
+
 func (r *running) get(run int64) (Job, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -386,34 +406,43 @@ func (m *Module) runServer(run int64) *mcp.Server {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "request_sites",
-		Description: "작업의 '쓰는 사이트'에 없는 사이트를 열어야 할 때 부른다(브라우저가 그 밖으로의 이동을 막는다). 운영자에게 사이트 추가 카드를 올린다. " +
-			"부른 뒤에는 바로 실행을 마친다 - 승인되면 다음 실행에서 그 사이트를 열 수 있다.",
+		Description: "작업의 '쓰는 사이트'에 없는 사이트가 목표에 꼭 필요할 때 부른다(브라우저가 그 밖으로의 이동을 막는다). 카드 없이 바로 작업에 더하고, " +
+			"운영자는 작업 탭의 기록에서 본다. 브라우저가 있는 실행이면 곧바로 열 수 있다.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in SitesToolInput) (*mcp.CallToolResult, any, error) {
 		j, bad := guard()
 		if bad != nil {
 			return bad, nil, nil
 		}
-		req := SitesInput{JobID: j.ID, JobTitle: j.Title, Reason: in.Reason}
+		var add []string
 		for _, s := range in.Sites {
-			if h := host(s); h != "" && !contains(req.Sites, h) && !contains(j.Sites, h) {
-				req.Sites = append(req.Sites, h)
+			if h := host(s); h != "" && !contains(add, h) && !contains(j.Sites, h) {
+				add = append(add, h)
 			}
 		}
-		if len(req.Sites) == 0 {
+		if len(add) == 0 {
 			return toolText("더할 사이트가 없습니다(이미 쓰는 사이트이거나 비어 있음).", true), nil, nil
 		}
-		raw, _ := json.Marshal(req)
-		p, _ := m.proposals.Open(proposal.Proposal{
-			Origin: proposal.OriginNotice,
-			Action: action.Action{Kind: KindSites, Input: raw},
-			Card:   sitesCard(req),
-		})
-		if err := m.store.Wait(ctx, run, p.ID, "사이트 추가: "+strings.Join(req.Sites, ", ")); err != nil {
-			m.proposals.Abandon(p.ID, "작업에 걸지 못했습니다: "+err.Error())
+		// Browsing changes nothing, so no card (2026-10-20): the site goes on
+		// the job and in its log, where the operator sees what it opened.
+		if err := m.store.AddSites(ctx, j.ID, add); err != nil {
 			return fail(err), nil, nil
 		}
-		m.current.park(run, p.ID)
-		return ok("사이트 추가 카드를 올렸습니다. 운영자가 결정하면 다음 실행에서 답을 받습니다. 지금 실행을 마치세요."), nil, nil
+		line := "사이트 추가: " + strings.Join(add, ", ")
+		if r := strings.TrimSpace(in.Reason); r != "" {
+			line += " (" + r + ")"
+		}
+		_ = m.store.Step(ctx, run, "step", line)
+		sites := m.current.widen(run, add)
+		if !m.current.browserOf(run) {
+			return ok("작업에 더했습니다: " + strings.Join(add, ", ") + ". 이번 실행에는 브라우저가 없으니 schedule_next 로 곧 다음 실행을 잡고 마치세요 - 다음 실행부터 열 수 있습니다."), nil, nil
+		}
+		if m.guard != nil {
+			if err := m.guard.Restrict(ctx, sites, m.hold); err != nil {
+				m.log.Warn("더한 사이트를 이번 실행에 열지 못했습니다", "job", j.ID, "err", err)
+				return ok("작업에 더했지만 이번 실행의 브라우저에는 아직 열리지 않았습니다. schedule_next 로 곧 다음 실행을 잡고 마치세요."), nil, nil
+			}
+		}
+		return ok("작업에 더했습니다: " + strings.Join(add, ", ") + ". 지금 열 수 있습니다."), nil, nil
 	})
 
 	mcp.AddTool(server, &mcp.Tool{

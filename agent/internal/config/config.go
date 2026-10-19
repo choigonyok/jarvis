@@ -209,9 +209,10 @@ func Load() (Config, error) {
 		// list_events is here for the same reason reading the workspace is:
 		// looking costs nothing and a card in front of every lookup would
 		// train the operator to approve without reading. Writes are never on
-		// this list - nor is starting or redirecting a job, which then runs on
-		// its own in the logged-in browser. The other modules' lookups (assets,
-		// spending, memory, context, messages, vault) are added from the modules.
+		// this list - nor is starting or redirecting a job, which goes through
+		// the gate to be logged and passes without a card (jobs.CardFree). The
+		// other modules' lookups (assets, spending, memory, context, messages,
+		// vault) are added from the modules.
 		AllowedTools: splitList(env("JARVIS_ALLOWED_TOOLS",
 			"TodoWrite,mcp__calendar__list_events,mcp__jobs__list_jobs")),
 		// Only what the conversation uses: photos are opened with Read, the
@@ -329,11 +330,12 @@ func Load() (Config, error) {
 	return c, nil
 }
 
-// unsafeTool is an allowlist entry that may never skip the card, whatever
+// unsafeTool is an allowlist entry that may never skip the gate, whatever
 // JARVIS_ALLOWED_TOOLS says. A bare file tool reads anywhere in the container
 // - the CLI's own credentials, /proc/<pid>/environ with every token - so
 // reading is allowed only by path (readRules). Shell and edits write. A job,
-// once made or redirected, runs on its own in the logged-in browser.
+// once made or redirected, runs on its own in the logged-in browser: it goes
+// through the gate, which logs it and lets it by without a card (jobs.CardFree).
 func unsafeTool(t string) bool {
 	switch t {
 	case "Read", "Glob", "Grep", "mcp__jobs__create_job", "mcp__jobs__instruct_job":
@@ -416,8 +418,9 @@ const defaultSystemPrompt = `당신은 Jarvis입니다. 한 사람의 개인 어
 - 한 일은 한 일로, 하려는 일은 하려는 일로 구분해서 말하세요. 하지 않은 일을 했다고 말하지 마세요.
 
 승인
-- 상태를 바꾸는 도구는 실행 전에 운영자의 승인을 받습니다. 도구를 부르면 승인 카드가 올라가고, 호출은 바로 "카드를 올렸다"는 답으로 끝납니다.
-- 그래서 상태를 바꾸는 일(일정 추가·수정, 작업 만들기, 저장, 주문 등)을 하면 좋겠다고 판단했으면 "할까요?", "원하시면 ~할까요?"라고 말로 묻지 말고 그 자리에서 바로 도구를 불러 카드를 올리세요. 카드가 곧 질문이고, 운영자는 카드에서 승인하거나 반려합니다. 운영자가 시키지 않은 일을 떠올렸을 때도 마찬가지입니다. 말로만 묻는 것은 운영자가 카드를 기다리게 만드는 실수입니다.
+- 승인 카드는 무언가를 바꾸는 일과 결제에만 올라갑니다: 일정 추가·수정·삭제, 로그인 정보 저장, 결제. 그런 도구를 부르면 카드가 올라가고, 호출은 바로 "카드를 올렸다"는 답으로 끝납니다.
+- 작업 만들기·지시(create_job, instruct_job)와 찾기·읽기·비교는 카드 없이 바로 됩니다. 운영자가 맡긴 일이면 묻지 말고 바로 작업으로 넘기세요. 운영자가 시키지 않았는데 떠올린 작업은 카드가 없으니 말로 한 번 물어보세요. 작업이 글을 올리거나 메시지를 보내는 등 밖의 무언가를 바꾸는 단계는 작업이 그때 따로 묻고, 결제는 결제 카드가 따로 묻습니다.
+- 카드가 필요한 일(일정 추가·수정·삭제 등)을 하면 좋겠다고 판단했으면 "할까요?", "원하시면 ~할까요?"라고 말로 묻지 말고 그 자리에서 바로 도구를 불러 카드를 올리세요. 카드가 곧 질문이고, 운영자는 카드에서 승인하거나 반려합니다. 운영자가 시키지 않은 일을 떠올렸을 때도 마찬가지입니다. 말로만 묻는 것은 운영자가 카드를 기다리게 만드는 실수입니다.
 - 카드를 올렸으면 결정을 기다리지 말고, 무엇을 요청했는지 한 줄로 알린 뒤 응답을 마치세요. 같은 도구를 다시 부르지 마세요.
 - 운영자가 결정하면 [승인됨…] 또는 [반려]로 시작하는 메시지가 옵니다. 운영자가 직접 친 말이 아니라 카드 결과이니, 그 안내대로 이어서 하세요.
 - 반려되면 이유를 캐묻지 말고, 같은 목적을 이루는 덜 위험한 방법을 제안하거나 거기서 멈추세요.

@@ -218,9 +218,11 @@ func TestSitesCardAddsOnlyWhenApproved(t *testing.T) {
 	}
 }
 
-// A job that names no site and attaches no photo is made without a card; one
-// with a site still goes on one (2026-10-19: reminders asked for approval).
-func TestReminderJobsNeedNoCard(t *testing.T) {
+// Making or instructing a job takes no card, with sites or without
+// (2026-10-20: "바꾸거나 결제하는 게 아니면 브라우저 작업도 카드 없이"); what
+// a run changes is asked at that step, and money on the payment card. Other
+// job tools are not the gate's to wave through.
+func TestJobsNeedNoCard(t *testing.T) {
 	svc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/jobs/1":
@@ -241,15 +243,28 @@ func TestReminderJobsNeedNoCard(t *testing.T) {
 		free        bool
 	}{
 		{create, `{"title":"매일 아침 날씨","goal":"아침 8시에 알려 준다"}`, true},
-		{create, `{"title":"판매","goal":"올린다","sites":["web.joongna.com"]}`, false},
-		{create, `{"title":"판매","goal":"올린다","photos":["a.jpg"]}`, false},
+		{create, `{"title":"판매","goal":"올린다","sites":["web.joongna.com"]}`, true},
+		{create, `{"title":"판매","goal":"올린다","photos":["a.jpg"]}`, true},
 		{instruct, `{"id":1,"text":"내용 추가"}`, true},
-		{instruct, `{"id":2,"text":"가격 내려"}`, false},
-		{instruct, `{"id":9,"text":"없는 작업"}`, false},
+		{instruct, `{"id":2,"text":"가격 내려"}`, true},
+		{instruct, `{"id":9,"text":"없는 작업"}`, true},
 		{"mcp__jobs__list_jobs", `{}`, false},
+		{"mcp__calendar__create_event", `{"date":"2026-10-24","title":"캠핑"}`, false},
 	} {
 		if got := m.CardFree(c.tool, json.RawMessage(c.input)); got != c.free {
 			t.Errorf("%s %s: 카드 없이 %v, want %v", c.tool, c.input, got, c.free)
+		}
+	}
+	// The browser's own tools take no card either; another server's do.
+	for tool, want := range map[string]bool{
+		"mcp__mcp-browser__browser_get_html":          true,
+		"mcp__mcp-browser__browser_upload_files":      true,
+		"mcp__mcp-browser__browser_enter_payment_pin": true,
+		"mcp__calendar__delete_event":                 false,
+		"mcp__browser-evil__browser_click":            false,
+	} {
+		if got := BrowserTool(tool); got != want {
+			t.Errorf("BrowserTool(%s) = %v, want %v", tool, got, want)
 		}
 	}
 }

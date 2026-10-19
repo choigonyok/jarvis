@@ -9,6 +9,7 @@ import { ProposalCard } from "@/components/chat/proposal-card";
 import { QueuedMessages } from "@/components/chat/queued";
 import { SwipeRow } from "@/components/chat/swipe-row";
 import { SearchBar, SearchToggle, useThreadSearch } from "@/components/chat/thread-search";
+import { readableTitle } from "@/lib/card-body";
 import { onFocusProposal } from "@/lib/resume";
 import { Markdown } from "@/components/chat/markdown";
 import { VoiceStage } from "@/components/chat/voice-stage";
@@ -218,7 +219,7 @@ const TurnRow = memo(function TurnRow({
       id: turn.id,
       role: turn.role,
       at: turnTime(turn.atIso, turn.at),
-      text: quoteText(turn) || (proposal ? `승인 카드: ${proposal.card.title}` : ""),
+      text: quoteText(turn) || (proposal ? `승인 카드: ${readableTitle(proposal.card.title)}` : ""),
     });
   // A divider where the day changes: with it, a turn's own stamp only has to
   // say the time, and a reply that came hours later - a suggestion overnight

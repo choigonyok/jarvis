@@ -403,7 +403,7 @@ func (g *Gate) describe(tool string, input any, fields map[string]any) (action.A
 		action.Card{
 			// Claude writes its own one-line description for some tools; its
 			// wording is more specific than anything generic we could supply.
-			Title:       fallback(pickString(fields, "description"), title(tool)),
+			Title:       fallback(pickString(fields, "description"), title(tool, fields)),
 			Body:        body(tool, input),
 			Consequence: consequence(tool),
 		}, nil
