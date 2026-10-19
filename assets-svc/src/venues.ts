@@ -891,11 +891,28 @@ export function settlementsOf(trades: KisTrade[], since: string): Settlement[] {
   const byDay = new Map<string, Settlement>();
   for (const t of trades) {
     if (t.date < since) continue;
-    const day = byDay.get(t.settleDate) ?? { date: t.settleDate, krw: 0, usd: 0, rate: t.rate };
+    const date = settlesOn(t);
+    const day = byDay.get(date) ?? { date, krw: 0, usd: 0, rate: t.rate };
     day.usd += t.side === "sell" ? t.netUsd : -t.netUsd;
-    byDay.set(t.settleDate, day);
+    byDay.set(date, day);
   }
   return [...byDay.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/**
+ * When a fill settles: KIS's date, but never before the next US business
+ * day after the trade (T+1). Right after an overnight fill KIS has shown a
+ * provisional settlement date as early as the trade's own day, and the cash
+ * checks then counted dollars days before they could be in the account
+ * (2026-10-17 01:03, "₩134,036 should be here"). US holidays are not known
+ * here; on one the check is a day early at worst.
+ */
+export function settlesOn(t: Pick<KisTrade, "date" | "settleDate">): string {
+  const d = new Date(`${t.date}T00:00:00Z`);
+  do d.setUTCDate(d.getUTCDate() + 1);
+  while (d.getUTCDay() === 0 || d.getUTCDay() === 6);
+  const earliest = d.toISOString().slice(0, 10);
+  return t.settleDate && t.settleDate > earliest ? t.settleDate : earliest;
 }
 
 /**

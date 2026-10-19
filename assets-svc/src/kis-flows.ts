@@ -139,12 +139,18 @@ export function reconcile(
 ): { checks: LedgerCheck[]; fxKrw: number } {
   // `now` is settled cash: a trade that settles after today is not in it yet.
   // Counting it read every sale as money gone until its settlement day (a US
-  // share settles the next business day - 2026-10-17's test sale).
-  const due = settlements.filter((s) => s.date <= today);
+  // share settles the next business day - 2026-10-17's test sale). Won
+  // settles on its day; dollars settle in New York, during the night of that
+  // Korean date, and are in the balance from the next morning - the same rule
+  // as settledThrough. Counting a sale's dollars on its settlement date read
+  // as "₩133,108 should be here but there is ₩0" all that day (2026-10-19,
+  // 1 KO sold 10/16, settled 10/19).
+  const wonDue = settlements.filter((s) => s.date <= today);
+  const usdDue = settlements.filter((s) => s.date < today);
   const wonIn = new Map<string, number>();
   for (const f of flows) if (f.venue === venue) wonIn.set(f.date, (wonIn.get(f.date) ?? 0) + f.amountKrw);
-  for (const s of due) wonIn.set(s.date, (wonIn.get(s.date) ?? 0) + s.krw);
-  const usdIn = new Map(due.map((s) => [s.date, s.usd]));
+  for (const s of wonDue) wonIn.set(s.date, (wonIn.get(s.date) ?? 0) + s.krw);
+  const usdIn = new Map(usdDue.map((s) => [s.date, s.usd]));
   const days = [...new Set([...wonIn.keys(), ...usdIn.keys()])].sort();
   // KIS's rate on the nearest trading day, before or after.
   const rateOn = (date: string) => {
