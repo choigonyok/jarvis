@@ -414,8 +414,11 @@ export function TabBar({
   const lit = held ? held.slot : chosen;
   const slotWidth = 100 / slots;
 
+  // A slot is an equal share of the bar rather than a fixed 44px: the bar's
+  // width (below) is what keeps the targets, and on a narrow phone each share
+  // gives a little instead of pushing the last one off the screen.
   const item =
-    "tap liquid-press relative z-10 flex flex-1 items-center justify-center rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50";
+    "liquid-press relative z-10 flex min-h-11 min-w-0 flex-1 items-center justify-center rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50";
 
   return (
     <nav
@@ -435,11 +438,13 @@ export function TabBar({
       }}
     >
       <div
-        className={cn(
-          "liquid-glass pointer-events-auto relative mx-auto flex h-[3.75rem] rounded-full p-1.5",
-          // A short bar for a short list: three icons do not stretch edge to edge.
-          slots <= 4 ? "max-w-[15rem]" : "max-w-[26rem]",
-        )}
+        className="liquid-glass pointer-events-auto relative mx-auto flex h-[3.75rem] w-full rounded-full p-1.5"
+        // 44px a tab and no wider - a short bar for a short list, three icons
+        // do not stretch edge to edge - and never wider than the space between
+        // the gutters. Eight tabs at a fixed 44px were 364px, more than a
+        // 390px phone has (358): the bar ran into the right gutter, and on a
+        // 360px phone cut 더보기 off.
+        style={{ maxWidth: `calc(${slots} * 2.75rem + 0.75rem)` }}
       >
         <div
           ref={track}

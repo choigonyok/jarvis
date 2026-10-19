@@ -164,8 +164,11 @@ export function Notifications() {
           }
         >
 
+          {/* Up and down only. A card's alert once carried an 86-character
+              checkout URL, and the whole list slid sideways under the thumb;
+              long words wrap now (globals.css), and nothing here pans. */}
           {view === "list" ? (
-            <ul className="max-h-[min(28rem,70vh)] overflow-y-auto overscroll-contain">
+            <ul className="max-h-[min(28rem,70vh)] overflow-x-hidden overflow-y-auto overscroll-contain">
               {failed && notes.length === 0 ? (
                 <li className="px-3.5 py-6 text-center text-[12.5px] text-dim">알림 서비스에 연결하지 못했어요.</li>
               ) : notes.length === 0 ? (
@@ -252,7 +255,7 @@ function NotifySettings() {
   };
 
   return (
-    <div className="max-h-[min(30rem,72vh)] space-y-4 overflow-y-auto overscroll-contain px-3.5 py-3 text-[12.5px]">
+    <div className="max-h-[min(30rem,72vh)] space-y-4 overflow-x-hidden overflow-y-auto overscroll-contain px-3.5 py-3 text-[12.5px]">
       <section>
         <p className="mb-1.5 text-[11.5px] text-faint">이 기기</p>
         <p className="leading-relaxed text-dim">{device[push.state]}</p>
@@ -321,9 +324,12 @@ function NotifySettings() {
 
           <section className="space-y-2">
             <p className="text-[11.5px] text-faint">시간</p>
-            <label className="flex items-center justify-between gap-3">
+            {/* Two time fields are wide where a browser draws a clock in
+                each (Chrome, 136px at 16px): on a narrow phone they go under
+                the words, to the right, rather than past the edge. */}
+            <label className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
               <span className="text-dim">방해 금지</span>
-              <span className="flex items-center gap-1.5">
+              <span className="ms-auto flex items-center gap-1.5">
                 <input
                   type="time"
                   value={set.quietStart}

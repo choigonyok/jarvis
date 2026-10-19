@@ -99,6 +99,11 @@
   body {
     @apply bg-background text-foreground;
     font-feature-settings: "ss01", "cv05";
+    /* Korean wraps between words, not inside one: "만들었/어요" reads as two
+       words. A word longer than its line - a URL, a path - still breaks
+       rather than running past the edge. */
+    word-break: keep-all;
+    overflow-wrap: break-word;
   }
   button:not(:disabled),
   [role="button"]:not(:disabled) {
