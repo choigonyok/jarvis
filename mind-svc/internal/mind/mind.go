@@ -34,6 +34,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/self"
 	"github.com/choigonyok/jarvis/mind-svc/internal/skill"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
+	"github.com/choigonyok/jarvis/mind-svc/internal/weather"
 	"github.com/choigonyok/jarvis/mind-svc/internal/world"
 )
 
@@ -68,6 +69,8 @@ type Options struct {
 	// Travel is how long the usual ways take, measured from the stays in
 	// regions (context-svc); nil: not known.
 	Travel Travel
+	// Weather is the weather at home and where plans are; nil: not known.
+	Weather *weather.Service
 	// DailyUSD is the model's daily budget, for the report.
 	DailyUSD float64
 	// MessageRetain is how long message text is kept; 0 keeps it forever.
@@ -112,6 +115,9 @@ func New(o Options) *Mind {
 	m.Link = &link.Linker{St: o.Store, World: m.World, Loc: o.Loc, Now: o.Now, Log: o.Logger, Judge: judge}
 	m.Self = &self.Self{St: o.Store, Now: o.Now}
 	m.Predict = &predict.Predictor{St: o.Store, World: m.World, Judge: judge, Loc: o.Loc, Now: o.Now}
+	if o.Weather != nil {
+		m.Predict.Weather = o.Weather.HomeDays
+	}
 	m.Reflect = &reflect.Reflector{St: o.Store, LLM: o.LLM, Predict: m.Predict, Self: m.Self, Loc: o.Loc, Now: o.Now}
 	m.Link.OnPlan = func(ctx context.Context, e model.Entity) {
 		if _, err := m.Predict.Prep(ctx, e); err != nil {
@@ -152,8 +158,11 @@ func New(o Options) *Mind {
 	}
 	m.mornings = append(m.mornings, m.people, m.gift, m.weekend, m.restock, m.deadlines, m.warranties)
 	m.nightly = append(m.nightly, m.pruneMessages, m.expireQuestions, m.statedPreferences, m.deliveries, m.travelNotes, m.fixedChanges, m.moved)
-	m.Skills = []skill.Skill{skill.Schedule{}, skill.Loops{}, skill.Brief{}, skill.After{}, skill.Protect{}}
+	m.Skills = []skill.Skill{skill.Schedule{}, skill.Loops{}, skill.Brief{}, skill.After{}, skill.Protect{}, skill.Rain{}}
 	m.Attn = attention.New(m.Skills, m.World, o.Store, m.Gate, o.Settle, o.Loc, o.Now, o.Logger)
+	if o.Weather != nil {
+		m.Attn.Weather = o.Weather.At
+	}
 	m.Link.OnLink = m.Attn.OnLink
 	m.Attn.Expect = m.onExpect
 	if o.Memory != nil {
@@ -312,6 +321,7 @@ type Status struct {
 	OldestPending *time.Time     `json:"oldestPending,omitempty"` // the oldest fact still waiting for memory
 	FactError     string         `json:"factError,omitempty"`     // why the latest waiting fact was not taken
 	Usage         *Usage         `json:"usage,omitempty"`         // what the model cost
+	Weather       *WeatherState  `json:"weather,omitempty"`       // reading the weather (absent: not connected)
 }
 
 // Usage is the model's cost: today against the budget, and this month by
@@ -396,6 +406,13 @@ func (m *Mind) Status(ctx context.Context) (Status, error) {
 	}
 	if s.Usage, err = m.Cost(ctx); err != nil {
 		return s, err
+	}
+	if w := m.Opts.Weather; w != nil {
+		at, why, home := w.State()
+		s.Weather = &WeatherState{Home: home, Error: why}
+		if !at.IsZero() {
+			s.Weather.At = &at
+		}
 	}
 	facts, err := st.Facts(ctx, 1000)
 	if err != nil {

@@ -71,7 +71,9 @@ func DefaultPolicy() Policy {
 		Levels: map[string]string{"calendar.create": AskFor, "calendar.update": AskFor, "calendar.delete": AskFor},
 		// Orders, messages and the like are asked every time, however often
 		// they were approved: nothing here pays or sends by itself.
-		Fixed:           map[string]bool{"calendar.delete": true, "cart.add": true, "message.draft": true, "settle.request": true, "review.place": true, "preference.confirm": true, "assets.rebalance": true},
+		Fixed: map[string]bool{"calendar.delete": true, "cart.add": true, "message.draft": true, "settle.request": true, "review.place": true, "preference.confirm": true, "assets.rebalance": true,
+			// A context: a trip moved for the weather (skill.Rain).
+			"rain": true},
 		Promote:         3,
 		PromoteRate:     0.8,
 		Window:          30 * 24 * time.Hour,
@@ -437,7 +439,14 @@ func (g *Gate) decide(ctx context.Context, in model.Intent) (string, string, err
 	if err != nil {
 		return "", "", err
 	}
-	level, why := g.policy.Level(in.Kind, stat)
+	// A context kept fixed is asked whatever its kind: moving a trip for
+	// the weather is a calendar update like any other, and never done
+	// without asking.
+	kind := in.Kind
+	if g.policy.Fixed[in.ContextKey()] {
+		kind = in.ContextKey()
+	}
+	level, why := g.policy.Level(kind, stat)
 	if level == Never {
 		return model.Drop, why, nil
 	}

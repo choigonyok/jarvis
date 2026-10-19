@@ -22,6 +22,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/skill"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
+	"github.com/choigonyok/jarvis/mind-svc/internal/weather"
 	"github.com/choigonyok/jarvis/mind-svc/internal/world"
 )
 
@@ -43,6 +44,9 @@ type Attention struct {
 	// and two-hours-before looks of a plan are skills' timers; these are the
 	// same thing for anything predicted.
 	Expect func(ctx context.Context, t model.Timer)
+	// Weather is the day's weather where a plan is, or at home (nil: not
+	// known).
+	Weather func(ctx context.Context, area, place, date string) (weather.Day, []weather.Hour, bool)
 
 	mu      sync.Mutex
 	pending map[string]*batch
@@ -309,6 +313,13 @@ func (v view) Recall(ctx context.Context, people []string) []string {
 		return nil
 	}
 	return v.a.Recall(ctx, people)
+}
+
+func (v view) Weather(ctx context.Context, area, place, date string) (weather.Day, []weather.Hour, bool) {
+	if v.a.Weather == nil {
+		return weather.Day{}, nil, false
+	}
+	return v.a.Weather(ctx, area, place, date)
 }
 
 func (v view) Travel(ctx context.Context, from, to model.State) (int, string, bool) {

@@ -38,6 +38,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/prefs"
 	"github.com/choigonyok/jarvis/mind-svc/internal/reflect"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
+	"github.com/choigonyok/jarvis/mind-svc/internal/weather"
 	"github.com/choigonyok/jarvis/mind-svc/internal/world"
 )
 
@@ -64,6 +65,8 @@ type Scenario struct {
 	Prefs map[string]json.RawMessage `json:"prefs,omitempty"`
 	// Drafts are the drafting answers for the scripted run, by recipient.
 	Drafts map[string]string `json:"drafts,omitempty"`
+	// Weather is the weather by place name, home under "".
+	Weather *weather.Static `json:"weather,omitempty"`
 }
 
 // Turn is one step: messages arrive and the room is read, or the person
@@ -453,7 +456,7 @@ func Run(ctx context.Context, sc Scenario, client llm.Client, loc *time.Location
 		Store: st, Log: log, LLM: client, Calendar: cal, Notifier: &act.MemoryNotifier{},
 		Loc: loc, Now: clk.Now, Logger: quiet, Interpret: interpret.Config{Owner: "나"},
 		Settle: 0, Policy: gate.DefaultPolicy(), Mode: "eval", Memory: memory.NewFake(clk.Now),
-		Assets: assets(sc.Allocation), Travel: travel(sc.Routes),
+		Assets: assets(sc.Allocation), Travel: travel(sc.Routes), Weather: sky(sc.Weather),
 	})
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -644,6 +647,13 @@ func Run(ctx context.Context, sc Scenario, client llm.Client, loc *time.Location
 	res.Brier, res.Scored, _ = m.Predict.Brier(ctx, time.Time{}, time.Date(3000, 1, 1, 0, 0, 0, 0, time.UTC))
 	interruptions(ctx, st, loc, &res)
 	return res
+}
+
+func sky(w *weather.Static) *weather.Service {
+	if w == nil {
+		return nil
+	}
+	return &weather.Service{Source: *w, Home: weather.StaticHome}
 }
 
 func travel(routes []mind.Route) mind.Travel {

@@ -25,6 +25,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/predict"
 	"github.com/choigonyok/jarvis/mind-svc/internal/self"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
+	"github.com/choigonyok/jarvis/mind-svc/internal/weather"
 )
 
 type Reflector struct {
@@ -49,7 +50,7 @@ const (
 // System is what the model is asked at night.
 const System = `너는 개인 비서의 "성찰" 단계다. 예측이 틀린 날들과 평소의 날들이 주어진다. 틀린 날들을 평소와 가르는 것이 무엇일 수 있는지 가설을 세운다. 원인이라고 단정하지 말고 관찰로 쓴다.
 text 에는 그 특징이 말하는 조건만 일반적으로 쓴다(특정 날짜·가맹점·노선 번호·횟수 같은 근거는 넣지 않는다. 근거는 따로 남는다). 각 가설은 하나의 특징만 말한다.
-가설은 반드시 주어진 특징 목록 중 하나와 그 인자로 확인할 수 있어야 한다. 확인할 수 없는 가설(기분, 날씨처럼 데이터에 없는 것)은 내지 않는다.
+가설은 반드시 주어진 특징 목록 중 하나와 그 인자로 확인할 수 있어야 한다. 확인할 수 없는 가설(기분처럼 데이터에 없는 것)은 내지 않는다. 날씨는 날마다 적힌 만큼만 안다.
 JSON 하나만: {"hypotheses":[{"text":"21시 이후 퇴근한 날은 운동을 거의 안 한다","feature":"late_leave","arg":"21:00"}]}
 최대 4개.`
 
@@ -193,6 +194,14 @@ func (r *Reflector) prompt(pool []predict.Day, surprised map[string]bool) string
 		}
 		for _, p := range d.Plans {
 			parts = append(parts, fmt.Sprintf("일정 %s %s(%s)", p.State.Start, p.State.Title, p.State.Type))
+		}
+		if w := d.Weather; w != nil {
+			// What fell, in the words the rain feature is tested by.
+			sky := weather.Sky(w.Code)
+			if w.Precip >= 0.1 {
+				sky = fmt.Sprintf("%s %.1fmm", map[bool]string{true: "눈", false: "비"}[w.Snowy()], w.Precip)
+			}
+			parts = append(parts, "날씨 "+sky)
 		}
 		w := []string{"일", "월", "화", "수", "목", "금", "토"}[d.Weekday]
 		mark := "운동함"
@@ -346,7 +355,7 @@ func (r *Reflector) explains(a, b *Hypothesis, pool []predict.Day) bool {
 // rank orders features by how directly a day's shape shows in them: when
 // two coincide entirely, the plainer account is kept.
 func rank(h *Hypothesis) int {
-	return map[string]int{"late_leave": 0, "evening": 1, "plan_type": 2, "weekday": 3, "spent_over": 4, "merchant": 5}[h.Feature]
+	return map[string]int{"late_leave": 0, "evening": 1, "plan_type": 2, "rain": 3, "weekday": 4, "spent_over": 5, "merchant": 6}[h.Feature]
 }
 
 func jaccard(a, b map[string]bool) float64 {

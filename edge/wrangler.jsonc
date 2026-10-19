@@ -31,6 +31,8 @@
     // The voice (tts/server.py) runs on the Mac mini's own macOS, not in compose - MLX
     // needs the GPU - so this one's host is host.docker.internal:8106, seen from the tunnel.
     { "binding": "TTS", "service_id": "01a14ae0-5a13-7230-9c3e-2450baea36f3" }
+    // MIND (생활 탭, mind:8102) is added here once its VPC service exists - DEPLOY.md:
+    // npx wrangler vpc service create jarvis-mind --type http --tunnel-id <jarvis-agent> --hostname mind --http-port 8102
   ]
   // Secrets: JARVIS_API_TOKEN (what the services check; only the gateway has it) and
   // JARVIS_EDGE_TOKEN (what the console Worker presents here): wrangler secret put …

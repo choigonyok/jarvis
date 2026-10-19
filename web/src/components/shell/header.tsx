@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Activity,
+  BookUser,
   CalendarDays,
   ClipboardCheck,
   Dumbbell,
@@ -54,6 +55,7 @@ const ICON: Record<string, LucideIcon> = {
   "/spending": ReceiptText,
   "/jobs": ListChecks,
   "/photos": Images,
+  "/life": BookUser,
   "/calendar": CalendarDays,
   "/screen": MonitorPlay,
   "/kakao": MessagesSquare,
@@ -84,6 +86,8 @@ const secondary: Tab[] = [
   { href: "/spending", label: "가계부" },
   { href: "/calendar", label: "캘린더" },
   { href: "/photos", label: "사진" },
+  // Jarvis 가 내 생활에서 읽어 낸 것: 나에 대한 노트, 회고한 장소, 가진 물건, 식사.
+  { href: "/life", label: "생활" },
   { href: "/screen", label: "화면" },
   { href: "/kakao", label: "카톡" },
   // 맨 끝. 매일 여는 곳이 아니라 뭔가 이상할 때 찾아오는 곳이다.
@@ -110,7 +114,7 @@ const visible = (tabs: Tab[], role: Role) =>
  * three tabs and no 더보기.
  */
 const OWNER_BAR = ["/", "/jobs", "/assets", "/spending", "/calendar", "/workout", "/record"];
-const OWNER_MORE = ["/photos", "/screen", "/kakao", "/status", "/report"];
+const OWNER_MORE = ["/life", "/photos", "/screen", "/kakao", "/status", "/report"];
 const GUEST_BAR = ["/", "/calendar", "/workout"];
 
 /** Where a waiting decision is announced: the surface that lists them by name. */

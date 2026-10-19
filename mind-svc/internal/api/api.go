@@ -17,6 +17,7 @@
 //	POST /api/intents/{id}/{approve|reject|undo}   reject takes {reason}
 //	POST /api/policy/rebuild          recount approval stats from the intents
 //	POST /api/patterns/rebuild        recount repetitions from the plans and purchases
+//	GET  /api/notes                   the notes about the operator, every status
 //	POST /api/notes/{id}              {status, text, reason} the operator on a note
 //	GET  /api/notes/{id}/versions     a note's versions, with why each
 //	POST /api/links                   {from, to, rel, state} the operator on a link
@@ -145,6 +146,19 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/intents", s.auth(false, s.submit))
 	mux.HandleFunc("POST /api/intents/{id}/{action}", s.auth(false, s.decide))
 	mux.HandleFunc("POST /api/policy/rebuild", s.auth(false, s.rebuildPolicy))
+	// The notes alone, for the console's 생활 screen: the snapshot carries
+	// message text, which that screen has no business with.
+	mux.HandleFunc("GET /api/notes", s.auth(false, func(w http.ResponseWriter, r *http.Request) {
+		notes, err := s.m.Opts.Store.Notes(r.Context())
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if notes == nil {
+			notes = []model.Note{}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"notes": notes})
+	}))
 	mux.HandleFunc("POST /api/notes/{id}", s.auth(false, s.decideNote))
 	mux.HandleFunc("GET /api/notes/{id}/versions", s.auth(false, func(w http.ResponseWriter, r *http.Request) {
 		vs, err := s.m.Opts.Store.NoteVersions(r.Context(), r.PathValue("id"))

@@ -181,8 +181,16 @@ func (c CalendarActuator) Execute(ctx context.Context, kind string, payload json
 	}
 	_ = json.Unmarshal(payload, &form)
 	if d := strings.TrimSpace(form.Answers["date"]); d != "" {
-		if _, err := time.Parse("2006-01-02", d); err != nil {
+		to, err := time.Parse("2006-01-02", d)
+		if err != nil {
 			return nil, nil, errors.New("날짜는 YYYY-MM-DD 입니다")
+		}
+		// A trip of several days moves whole: its last day goes as far as
+		// its first.
+		if from, err := time.Parse("2006-01-02", a.Event.Date); err == nil && a.Event.EndDate != "" {
+			if end, err := time.Parse("2006-01-02", a.Event.EndDate); err == nil {
+				a.Event.EndDate = end.Add(to.Sub(from)).Format("2006-01-02")
+			}
 		}
 		a.Event.Date = d
 	}

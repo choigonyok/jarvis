@@ -20,6 +20,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/self"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
+	"github.com/choigonyok/jarvis/mind-svc/internal/weather"
 	"github.com/choigonyok/jarvis/mind-svc/internal/world"
 )
 
@@ -29,6 +30,9 @@ type Predictor struct {
 	Judge *link.Judge
 	Loc   *time.Location
 	Now   func() time.Time
+	// Weather is the weather at home on the days in [from, to) (YYYY-MM-DD),
+	// as it was or as forecast; nil: not known.
+	Weather func(ctx context.Context, from, to string) (map[string]weather.Day, error)
 }
 
 // Surprise is how far off a prediction must be to be reflected on.
@@ -125,6 +129,9 @@ type Day struct {
 	Routine string
 	Occ     []model.Occurrence
 	Plans   []model.Entity
+	// Weather is the day's weather at home, as it was or as forecast; nil
+	// when it is not known.
+	Weather *weather.Day
 }
 
 // Days is the days in [from, to) with what happened in each: bounded by the
@@ -161,6 +168,17 @@ func (p *Predictor) Days(ctx context.Context, from, to time.Time) ([]Day, error)
 		}
 		if d := byDate[pl.State.Date]; d != nil {
 			d.Plans = append(d.Plans, pl)
+		}
+	}
+	if p.Weather != nil && len(order) > 0 {
+		// Without it the days are as they were: the weather is one more
+		// thing a day may be asked, never what a day needs.
+		if days, err := p.Weather(ctx, order[0], dayStart(to, p.Loc).AddDate(0, 0, 1).Format("2006-01-02")); err == nil {
+			for k, w := range days {
+				if d := byDate[k]; d != nil {
+					d.Weather = &w
+				}
+			}
 		}
 	}
 	out := make([]Day, len(order))
@@ -430,6 +448,7 @@ var Features = map[string]string{
 	"weekday":    "arg 요일(월~일)",
 	"evening":    "arg 시각(HH:MM) 이후에 시작하는 일정이 있음",
 	"spent_over": "그날 결제 합이 arg 원 이상",
+	"rain":       "그날 집 근처에 arg mm 이상 비나 눈이 옴(지난날은 내린 양, 다가올 날은 예보)",
 }
 
 // Holds is whether feature(arg) holds on day d.
@@ -483,6 +502,10 @@ func Holds(feature, arg string, d Day, loc *time.Location) bool {
 			}
 		}
 		return limit > 0 && sum >= limit
+	case "rain":
+		mm := 1.0
+		_, _ = fmt.Sscan(arg, &mm)
+		return d.Weather != nil && d.Weather.Precip >= max(mm, 0.1)
 	}
 	return false
 }

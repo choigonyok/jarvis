@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+	"github.com/choigonyok/jarvis/mind-svc/internal/weather"
 )
 
 // Loops owns open loops - what I promised, what I owe a reply on, what
@@ -126,11 +127,44 @@ func (Brief) OnTick(ctx context.Context, v View, tick string) Result {
 			lines = append(lines, "· 할 일: "+l.State.Title+" (기한 "+dueText(l.State.Due, v.Loc())+")")
 		}
 	}
-	if n+m == 0 {
+	// The weather at home, first: a wet day is worth a morning's word even
+	// with nothing on.
+	sky, hours, known := v.Weather(ctx, "", "", today)
+	wet := known && sky.Wet()
+	if n+m == 0 && !wet {
 		return Result{}
 	}
+	title := fmt.Sprintf("오늘 일정 %d개 · 챙길 일 %d개", n, m)
+	if known {
+		lines = append([]string{"· 날씨: " + weatherLine(sky, hours, now)}, lines...)
+	}
+	if wet && n+m == 0 {
+		title = "오늘 " + sky.Fall() + " · " + umbrella(sky)
+	} else if wet {
+		title += " · " + sky.Fall()
+	}
 	return Result{Intents: []model.Intent{{
-		Kind: "info", Title: fmt.Sprintf("오늘 일정 %d개 · 챙길 일 %d개", n, m), Body: strings.Join(lines, "\n"),
+		Kind: "info", Title: title, Body: strings.Join(lines, "\n"),
 		Reason: "아침 브리핑", Confidence: 1, Urgent: true,
 	}}}
+}
+
+// weatherLine is the day at home: "비 80% · 12mm (15시부터) · 11~18° - 우산
+// 챙기세요" when it is wet, "맑음 · 11~18°" when it is not.
+func weatherLine(d weather.Day, hours []weather.Hour, now time.Time) string {
+	if !d.Wet() {
+		return d.Line()
+	}
+	fall := d.Fall()
+	if at, ok := weather.From(hours, now); ok && at.Format("2006-01-02") == d.Date && at.Hour() > now.Hour() {
+		fall += fmt.Sprintf(" (%d시부터)", at.Hour())
+	}
+	return fall + " · " + d.Temps() + " - " + umbrella(d)
+}
+
+func umbrella(d weather.Day) string {
+	if d.Snowy() {
+		return "눈길 조심하세요"
+	}
+	return "우산 챙기세요"
 }

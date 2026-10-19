@@ -44,6 +44,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
 	"github.com/choigonyok/jarvis/mind-svc/internal/sensor"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
+	"github.com/choigonyok/jarvis/mind-svc/internal/weather"
 )
 
 func main() {
@@ -191,13 +192,32 @@ func main() {
 		photos = act.Immich{URL: url, Key: key, Public: os.Getenv("IMMICH_PUBLIC_URL")}
 	}
 
+	// Weather: Open-Meteo for forecasts, Nominatim for places - neither needs
+	// a key. Home is the 집 region made on the phone (context-svc), else
+	// MIND_WEATHER_HOME, else 서울.
+	var sky *weather.Service
+	if os.Getenv("MIND_WEATHER") != "false" {
+		fixed, err := mind.ParsePoint(getenv("MIND_WEATHER_HOME", seoul))
+		if err != nil {
+			log.Warn("MIND_WEATHER_HOME 을 읽지 못해 서울로 둡니다", "err", err)
+			fixed, _ = mind.ParsePoint(seoul)
+		}
+		home := &mind.Home{Fixed: fixed}
+		if url := os.Getenv("CONTEXT_URL"); mode == "stack" && url != "" {
+			home.URL, home.Token = url, token
+		}
+		sky = &weather.Service{Home: home.Point, Source: &weather.OpenMeteo{
+			Agent: "jarvis-mind/1.0 (+https://github.com/choigonyok/jarvis)", Zone: getenv("TZ", "Asia/Seoul"),
+		}}
+	}
+
 	m := mind.New(mind.Options{
 		Store: st, Log: logOut, LLM: client, Calendar: calendar, Notifier: notifier,
 		Loc: loc, Now: clk.Now, Logger: log, Interpret: cfg, Settle: settle,
 		Policy: gate.DefaultPolicy(), URL: getenv("MIND_UI_URL", "http://localhost:8102/"), Mode: mode,
 		MessageRetain: time.Duration(atoiOr(getenv("MIND_MESSAGE_RETAIN_DAYS", "365"), 365)) * 24 * time.Hour,
 		Memory:        mem, Photos: photos, Jobs: jobs, Assets: assets, Orders: orders, Travel: travel,
-		DailyUSD: number("MIND_DAILY_USD", 1.0),
+		Weather: sky, DailyUSD: number("MIND_DAILY_USD", 1.0),
 	})
 	if !client.Ready() {
 		log.Warn("LLM 키(MIND_ANTHROPIC_API_KEY)가 없어 대화를 해석하지 않습니다. 메시지는 쌓아 둡니다.")
@@ -258,6 +278,22 @@ func main() {
 		}
 	}
 	m.Run(ctx, time.Second)
+	if sky != nil {
+		// Read once at the start, so a home that cannot be found or a
+		// forecast that cannot be reached shows on the status screen now
+		// and not only at the next morning's brief.
+		go func() {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(20 * time.Second):
+			}
+			now := time.Now().In(loc)
+			if _, err := sky.HomeDays(ctx, now.Format("2006-01-02"), now.AddDate(0, 0, 1).Format("2006-01-02")); err != nil {
+				log.Warn("날씨를 읽지 못했습니다", "err", err)
+			}
+		}()
+	}
 
 	addr := getenv("LISTEN_ADDR", ":8102")
 	srv := &http.Server{
@@ -278,6 +314,9 @@ func main() {
 	defer cancel()
 	_ = srv.Shutdown(shutdown)
 }
+
+// seoul is home for the weather when nothing says otherwise: City Hall.
+const seoul = "37.5665,126.9780,서울"
 
 // runEval reads every scenario with the real model and reports.
 func runEval(ctx context.Context, client llm.Client, loc *time.Location) int {

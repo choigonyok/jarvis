@@ -92,6 +92,14 @@ func All(cfg Config) []check.Probe {
 			Run:   e.mindMemory,
 		},
 		{
+			ID: "mind.weather", Group: "수집", Name: "날씨",
+			Rule:  "mind 가 집 근처 날씨 예보(Open-Meteo)를 읽고 있으면 정상. 최근 읽기가 실패했으면 주의, 36시간 넘게 못 읽었으면 이상. 꺼 두었으면(MIND_WEATHER=false) 측정하지 않아요. 집은 폰에서 만든 '집' 영역, 없으면 MIND_WEATHER_HOME(기본 서울)이에요.",
+			Fix:   "맥미니가 api.open-meteo.com 과 nominatim.openstreetmap.org 에 닿는지 보세요. 아침 브리핑의 날씨 줄과 야외 일정의 비 소식이 이것으로 나와요.",
+			Deps:  []string{"svc.mind"},
+			Every: 10 * time.Minute,
+			Run:   e.mindWeather,
+		},
+		{
 			ID: "context.location", Group: "수집", Name: "위치 수신",
 			Rule:  "폰의 OwnTracks 가 보낸 마지막 위치가 36시간 안이면 정상, 36–72시간이면 주의, 72시간을 넘으면 이상. 한 번도 받지 않았으면 측정하지 않아요(설정 전). 크게 움직이지 않는 날은 위치가 드물게 와요.",
 			Fix:   "폰에서 OwnTracks 가 위치 권한 '항상 허용'인지, 모드가 Quiet 가 아닌지, 서버 주소·비밀번호가 맞는지 보세요. 배터리가 8% 아래면 일부러 조용히 둬요.",
@@ -309,6 +317,11 @@ type mindStatus struct {
 	Facts         map[string]int `json:"facts"`
 	OldestPending *time.Time     `json:"oldestPending"`
 	FactError     string         `json:"factError"`
+	Weather       *struct {
+		Home  string     `json:"home"`
+		At    *time.Time `json:"at"`
+		Error string     `json:"error"`
+	} `json:"weather"`
 }
 
 func (e *env) mindReading(ctx context.Context) check.Verdict {
@@ -334,6 +347,35 @@ func (e *env) mindReading(ctx context.Context) check.Verdict {
 		v.State, v.Summary = check.Warn, fmt.Sprintf("%s째 읽히지 않은 대화가 있어요.", span(behind))
 	default:
 		v.State, v.Summary = check.OK, "대화를 읽고 있어요."
+	}
+	return v
+}
+
+func (e *env) mindWeather(ctx context.Context) check.Verdict {
+	var st mindStatus
+	if err := e.get(ctx, e.client, e.MindURL+"/status", &st); err != nil {
+		return fail("mind 상태를 읽지 못했어요: " + err.Error())
+	}
+	w := st.Weather
+	if w == nil {
+		return check.Verdict{State: check.Unknown, Summary: "날씨를 꺼 두었어요(MIND_WEATHER=false)."}
+	}
+	v := check.Verdict{ObservedAt: w.At, ObservedLabel: "마지막 예보"}
+	if w.Home != "" {
+		v.Facts = append(v.Facts, w.Home+" 기준")
+	}
+	if w.Error != "" {
+		v.Facts = append(v.Facts, "최근 실패: "+clip(w.Error, 140))
+	}
+	switch {
+	case w.At == nil && w.Error == "":
+		v.State, v.Summary = check.Unknown, "아직 예보를 읽지 않았어요."
+	case w.At == nil || time.Since(*w.At) > 36*time.Hour:
+		v.State, v.Summary = check.Fail, "날씨 예보를 읽지 못하고 있어요."
+	case w.Error != "":
+		v.State, v.Summary = check.Warn, "최근 날씨를 읽다 실패했어요. 지난 예보로 말해요."
+	default:
+		v.State, v.Summary = check.OK, "날씨 예보를 읽고 있어요."
 	}
 	return v
 }

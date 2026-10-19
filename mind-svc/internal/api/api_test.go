@@ -280,3 +280,57 @@ func TestMessagesForTheConversation(t *testing.T) {
 		t.Fatalf("없는 메시지: %d", code)
 	}
 }
+
+// The 생활 screen's notes: every status, the services' token only in the
+// stack, and the operator's word on one comes back as its next version.
+func TestNotesForTheConsole(t *testing.T) {
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	st := store.NewMemory()
+	m := mind.New(mind.Options{
+		Store: st, Log: obs.NewMemoryLog(quiet), LLM: &llm.Script{}, Calendar: act.NewMemoryCalendar(),
+		Notifier: &act.MemoryNotifier{}, Loc: seoul, Now: time.Now, Logger: quiet, Policy: gate.DefaultPolicy(), Mode: "stack",
+	})
+	srv := httptest.NewServer(New(m, "secret", "", false, nil, quiet).Handler())
+	defer srv.Close()
+	call := func(method, path, body string, token bool) (int, map[string]any) {
+		req, _ := http.NewRequest(method, srv.URL+path, strings.NewReader(body))
+		if token {
+			req.Header.Set("Authorization", "Bearer secret")
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var out map[string]any
+		_ = json.NewDecoder(resp.Body).Decode(&out)
+		return resp.StatusCode, out
+	}
+	if code, out := call(http.MethodGet, "/api/notes", "", true); code != http.StatusOK || len(out["notes"].([]any)) != 0 {
+		t.Fatalf("no notes is an empty list: %d %v", code, out)
+	}
+	now := time.Now()
+	for _, n := range []model.Note{
+		{ID: "note_a", Text: "캠핑 며칠 전에 장작을 산다", Scope: "캠핑", Status: model.Hypothesis, Confidence: 0.6, Version: 1, CreatedAt: now, UpdatedAt: now},
+		{ID: "note_b", Text: "비 오는 날은 운동을 거의 안 한다", Scope: "운동", Status: model.Rejected, Confidence: 0.4, Version: 1, CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := st.PutNote(context.Background(), n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if code, _ := call(http.MethodGet, "/api/notes", "", false); code != http.StatusUnauthorized {
+		t.Fatalf("without the token: %d", code)
+	}
+	code, out := call(http.MethodGet, "/api/notes", "", true)
+	if code != http.StatusOK || len(out["notes"].([]any)) != 2 {
+		t.Fatalf("every status: %d %v", code, out)
+	}
+	code, out = call(http.MethodPost, "/api/notes/note_a", `{"status":"confirmed"}`, true)
+	if code != http.StatusOK || out["status"] != "confirmed" || out["version"].(float64) != 2 || out["confidence"].(float64) < 0.9 {
+		t.Fatalf("confirmed: %d %v", code, out)
+	}
+	code, out = call(http.MethodGet, "/api/notes/note_a/versions", "", true)
+	if code != http.StatusOK || len(out["versions"].([]any)) != 2 {
+		t.Fatalf("versions: %d %v", code, out)
+	}
+}

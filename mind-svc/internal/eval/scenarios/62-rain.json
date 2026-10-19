@@ -1,0 +1,79 @@
+{
+ "name": "날씨: 이틀 뒤 캠핑에 비 예보면 맑은 주말로 옮기기 카드(여러 날 일정은 통째로, 날짜는 폼에서), 비 오는 아침에는 일정이 없어도 우산 한 줄 - 옮긴 뒤로는 같은 일정을 다시 묻지 않는다",
+ "room": "owner",
+ "roomName": "jarvis",
+ "weather": {
+  "days": {
+   "": [
+    { "date": "2026-10-22", "code": 63, "prob": 70, "precip": 8, "min": 9, "max": 15 },
+    { "date": "2026-10-23", "code": 1, "prob": 10, "precip": 0, "min": 8, "max": 17 }
+   ],
+   "가평": [
+    { "date": "2026-10-24", "code": 63, "prob": 80, "precip": 12, "min": 7, "max": 14 },
+    { "date": "2026-10-25", "code": 2, "prob": 20, "precip": 0, "min": 5, "max": 16 },
+    { "date": "2026-10-26", "code": 1, "prob": 0, "precip": 0, "min": 4, "max": 17 },
+    { "date": "2026-10-27", "code": 1, "prob": 0, "precip": 0, "min": 4, "max": 17 },
+    { "date": "2026-10-28", "code": 3, "prob": 30, "precip": 0.2, "min": 6, "max": 15 },
+    { "date": "2026-10-29", "code": 1, "prob": 0, "precip": 0, "min": 5, "max": 16 },
+    { "date": "2026-10-30", "code": 1, "prob": 0, "precip": 0, "min": 5, "max": 16 },
+    { "date": "2026-10-31", "code": 0, "prob": 0, "precip": 0, "min": 4, "max": 18 },
+    { "date": "2026-11-01", "code": 1, "prob": 10, "precip": 0, "min": 5, "max": 17 }
+   ]
+  }
+ },
+ "turns": [
+  {
+   "messages": [
+    { "at": "2026-10-20T21:00", "me": true, "text": "24~25일 가평 자라섬 캠핑장 캠핑 확정" }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "create",
+      "kind": "plan",
+      "set": {
+       "title": "캠핑",
+       "status": "confirmed",
+       "date": "2026-10-24",
+       "endDate": "2026-10-25",
+       "place": "자라섬 캠핑장",
+       "area": "가평",
+       "placeKind": "캠핑장",
+       "type": "캠핑"
+      },
+      "evidence": [{ "line": 1, "quote": "가평 자라섬 캠핑장 캠핑 확정" }],
+      "confidence": 0.9,
+      "why": "혼자 쓴 확정 메모"
+     }
+    ]
+   },
+   "expect": { "intents": ["calendar.create"] }
+  },
+  {
+   "approve": "calendar.create",
+   "expect": { "calendarCount": 1 }
+  },
+  {
+   "at": "2026-10-22T08:00",
+   "tick": "morning",
+   "expect": {
+    "cards": ["옮길까요"],
+    "cardHas": ["10/31(토)~11/1(일)", "비 80%", "우비"],
+    "infos": ["우산"]
+   }
+  },
+  {
+   "approve": "calendar.update",
+   "answers": { "date": "2026-10-31" },
+   "expect": {
+    "calendar": [{ "titleHas": "캠핑", "date": "2026-10-31" }],
+    "calendarCount": 1
+   }
+  },
+  {
+   "at": "2026-10-23T08:00",
+   "tick": "morning",
+   "expect": { "noCards": true, "noInfoHas": ["우산"] }
+  }
+ ]
+}

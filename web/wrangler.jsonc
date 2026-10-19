@@ -52,6 +52,8 @@
     "NOTIFY_URL": "https://jarvis-be.choigonyok.com/notify",
     "STATUS_URL": "https://jarvis-be.choigonyok.com/status",
     "CONTEXT_URL": "https://jarvis-be.choigonyok.com/context",
+    // 생활 탭: mind 가 운영자에 대해 적어 둔 노트와 장부. 게이트웨이가 읽기와 노트 결정만 연다.
+    "MIND_URL": "https://jarvis-be.choigonyok.com/mind",
     // 음성 모드의 목소리(tts/server.py, 맥미니 호스트). 운영자만 - 손님은 미들웨어가 /api/tts 를 막는다.
     "TTS_URL": "https://jarvis-be.choigonyok.com/tts",
     // 화면 탭의 VNC 웹소켓. 주소에 /api/screen/ticket 이 만든 1분짜리 입장권을 붙인다.

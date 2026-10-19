@@ -6,11 +6,19 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+	"github.com/choigonyok/jarvis/mind-svc/internal/weather"
 )
 
 var seoul, _ = time.LoadLocation("Asia/Seoul")
 
-type view struct{ plans []model.Entity }
+type view struct {
+	plans []model.Entity
+	// sky is the weather by "place date" ("" for home); now, when set, the
+	// clock.
+	sky   map[string]weather.Day
+	hours []weather.Hour
+	now   time.Time
+}
 
 func (v view) Entity(_ context.Context, id string) (model.Entity, error) {
 	for _, p := range v.plans {
@@ -24,17 +32,32 @@ func (v view) Entities(context.Context, string, string, bool) ([]model.Entity, e
 	return v.plans, nil
 }
 func (view) IntentsFor(context.Context, string) ([]model.Intent, error) { return nil, nil }
-func (view) Now() time.Time                                              { return time.Date(2026, 10, 17, 11, 57, 0, 0, seoul) }
-func (view) Loc() *time.Location                                         { return seoul }
-func (view) Recall(context.Context, []string) []string                   { return nil }
-func (view) Links(context.Context, string) ([]model.Link, error)         { return nil, nil }
+func (v view) Now() time.Time {
+	if !v.now.IsZero() {
+		return v.now
+	}
+	return time.Date(2026, 10, 17, 11, 57, 0, 0, seoul)
+}
+func (view) Loc() *time.Location                                 { return seoul }
+func (view) Recall(context.Context, []string) []string           { return nil }
+func (view) Links(context.Context, string) ([]model.Link, error) { return nil, nil }
 func (view) Occurrence(context.Context, string) (model.Occurrence, error) {
 	return model.Occurrence{}, nil
 }
 func (view) Span(context.Context, model.Entity) (time.Time, time.Time, bool) {
 	return time.Time{}, time.Time{}, false
 }
-func (view) Travel(context.Context, model.State, model.State) (int, string, bool) { return 0, "", false }
+func (view) Travel(context.Context, model.State, model.State) (int, string, bool) {
+	return 0, "", false
+}
+func (v view) Weather(_ context.Context, area, place, date string) (weather.Day, []weather.Hour, bool) {
+	where := area
+	if where == "" {
+		where = place
+	}
+	d, ok := v.sky[where+" "+date]
+	return d, v.hours, ok
+}
 
 // The incident of 2026-10-17: the assistant put "기타 합주 (은주)" 15:00 on the
 // calendar while the plan heard in conversation was "은주와 합주" 15:00. That
@@ -102,4 +125,3 @@ func TestLinkingWithdrawsTheAddQuestion(t *testing.T) {
 		t.Fatalf("이어졌으면 '추가할까요'를 거둬야 합니다: %+v", r)
 	}
 }
-

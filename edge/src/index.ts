@@ -26,6 +26,11 @@
  * /mcp (the tools Claude Code calls - unauthenticated, because they are meant
  * to be dialled over loopback) and /intercept (the payment guard's line).
  * Through here, either would be a way around the approval card.
+ *
+ * For mind, only what the 생활 screen reads and the operator's word on a
+ * note (mindRoute). The rest of mind's /api replays the log, moves clocks,
+ * approves intents and reads message text - the mind console's, over an ssh
+ * tunnel, never this door's.
  */
 
 import { WorkerEntrypoint } from "cloudflare:workers";
@@ -58,6 +63,7 @@ interface Env {
   CONTEXT: Fetcher;
   PHONENOTE: Fetcher;
   TTS: Fetcher;
+  MIND: Fetcher;
   /** Immich's API key for the gallery. Only this gateway holds it. */
   IMMICH_API_KEY?: string;
 }
@@ -85,6 +91,8 @@ const SERVICES: Record<string, { binding: keyof Env; origin: string }> = {
   // decides whose recording a request touches (see below).
   tts: { binding: "TTS", origin: "http://host.docker.internal:8106" },
   vnc: { binding: "BROWSER", origin: "http://browser:6080" },
+  // The notes and ledgers mind keeps about the operator (the 생활 screen).
+  mind: { binding: "MIND", origin: "http://mind:8102" },
 };
 
 /** What the guest's token opens: their own agent, the workout log, their notifications, their own voice. */
@@ -95,6 +103,18 @@ const AGENT_ROLE: Record<string, string> = { agent: "owner", "agent-guest": "gue
 
 /** The agent routes the console drives. Anything else on the agent is internal. */
 const AGENT_ROUTES = new Set(["healthz", "thread", "messages", "events", "proposals", "calendar", "uploads", "usage", "vault"]);
+
+/**
+ * What the 생활 screen may do on mind: read the notes, the map, the things
+ * owned and the meals, read a note's versions, and say a note is so, is not,
+ * or reads otherwise.
+ */
+function mindRoute(method: string, path: string): boolean {
+  if (method === "GET") {
+    return /^api\/(notes|places|things|meals)$/.test(path) || /^api\/notes\/[A-Za-z0-9_-]+\/versions$/.test(path);
+  }
+  return method === "POST" && /^api\/notes\/[A-Za-z0-9_-]+$/.test(path);
+}
 
 function same(a: string, b: string): boolean {
   // Constant time: the comparison should not say how much of a guess was right.
@@ -177,6 +197,9 @@ async function gateway(request: Request, env: Env, internal: boolean): Promise<R
   if (!service) return json(404, "그런 서비스가 없습니다.");
   if (guest && !GUEST_SERVICES.has(name)) return json(404, "그런 서비스가 없습니다.");
   if ((name === "agent" || name === "agent-guest") && !AGENT_ROUTES.has(rest[0] ?? "")) {
+    return json(404, "그런 경로가 없습니다.");
+  }
+  if (name === "mind" && !mindRoute(request.method, rest.join("/"))) {
     return json(404, "그런 경로가 없습니다.");
   }
 

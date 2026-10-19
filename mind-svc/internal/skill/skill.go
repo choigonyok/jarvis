@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+	"github.com/choigonyok/jarvis/mind-svc/internal/weather"
 )
 
 type Skill interface {
@@ -52,6 +53,10 @@ type View interface {
 	// Travel is how long the way from one plan's place to another's
 	// usually takes, by a travel note, and the note.
 	Travel(ctx context.Context, from, to model.State) (minutes int, note string, ok bool)
+	// Weather is the weather on date (YYYY-MM-DD) where a plan is, by its
+	// neighbourhood or place - at home when both are empty - with the hours
+	// of the next day and a half. ok is false when it is not known.
+	Weather(ctx context.Context, area, place, date string) (day weather.Day, hours []weather.Hour, ok bool)
 }
 
 type Result struct {

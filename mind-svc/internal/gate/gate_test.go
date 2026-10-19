@@ -243,3 +243,22 @@ func TestApprovalClaimsBeforeRunning(t *testing.T) {
 		t.Fatalf("한 번만 실행돼야 합니다: %d", sp.runs)
 	}
 }
+
+// A trip moved for the weather is asked every time: a context kept fixed
+// is not promoted, whatever its kind and however often it was approved.
+func TestFixedContextIsAlwaysAsked(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(DefaultPolicy())
+	for i := range 4 {
+		ev, _ := f.cal.Put(ctx, model.CalendarEvent{Title: "캠핑", Date: "2026-10-24"})
+		payload, _ := json.Marshal(model.CalendarAction{EventID: ev.ID, Event: model.CalendarEvent{Title: "캠핑", Date: "2026-10-31"}})
+		in, err := f.g.Submit(ctx, model.Intent{Skill: "rain", Kind: "calendar.update", Context: "rain", EntityID: "plan_" + string(rune('a'+i)),
+			Payload: payload, Title: "옮길까요?", Confidence: 0.8, Value: 1, Reversible: true})
+		if err != nil || in.Decision != model.Ask {
+			t.Fatalf("%d번째도 물어야 합니다: %+v %v", i+1, in, err)
+		}
+		if _, err := f.g.Approve(ctx, in.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

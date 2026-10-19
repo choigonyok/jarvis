@@ -8,6 +8,7 @@ import (
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/predict"
+	"github.com/choigonyok/jarvis/mind-svc/internal/weather"
 )
 
 func TestFisher(t *testing.T) {
@@ -50,5 +51,36 @@ func TestConfounded(t *testing.T) {
 	r.test([]*Hypothesis{late, bus}, pool)
 	if !late.Kept || bus.Kept || !strings.Contains(bus.Why, "교란") {
 		t.Fatalf("늦은 퇴근은 남고 7016 은 교란: %+v / %+v", late, bus)
+	}
+}
+
+// Rainy days without a workout: the weather is a feature a hypothesis can
+// be tested by, and the night's prompt shows it day by day.
+func TestRainIsAFeature(t *testing.T) {
+	loc := time.FixedZone("KST", 9*3600)
+	var pool []predict.Day
+	day := time.Date(2026, 8, 17, 0, 0, 0, 0, loc)
+	for i := 0; len(pool) < 40; i++ {
+		d := day.AddDate(0, 0, i)
+		if d.Weekday() == time.Saturday || d.Weekday() == time.Sunday {
+			continue
+		}
+		n := len(pool)
+		rain := n%5 == 0 || n%7 == 3
+		w := weather.Day{Date: d.Format("2006-01-02"), Code: 1, Precip: 0}
+		if rain {
+			w.Code, w.Precip, w.Prob = 63, 12, 90
+		}
+		pool = append(pool, predict.Day{Date: w.Date, Weekday: d.Weekday(), Workout: !rain && n%6 != 1 || rain && n == 10, Weather: &w})
+	}
+	r := &Reflector{Loc: loc}
+	h := &Hypothesis{Text: "비 오는 날은 운동을 거의 안 한다", Feature: "rain", Arg: "1"}
+	r.test([]*Hypothesis{h}, pool)
+	if !h.Kept || h.With[0] < minSupport {
+		t.Fatalf("비 오는 날의 가설이 남아야 합니다: %+v", h)
+	}
+	prompt := r.prompt(pool, map[string]bool{pool[0].Date: true})
+	if !strings.Contains(prompt, "날씨 비 12.0mm") || !strings.Contains(prompt, "- rain:") {
+		t.Fatalf("프롬프트에 날씨와 rain 특징이 있어야 합니다:\n%s", prompt)
 	}
 }

@@ -981,6 +981,10 @@ services:
       # 스킬·관문의 알림(아침 브리핑, 일정 전 확인)은 notify-svc 로, 질문은
       # mind.card 로 에이전트에. 카드는 이 한 길로만 나간다.
       MIND_QUIET: ${MIND_QUIET:-false}
+      # 날씨(Open-Meteo 예보, Nominatim 지명 - 키 없음): 아침 브리핑의 날씨 줄, 이틀 안의 야외 일정에 비 예보면
+      # 옮기기 카드, 밤 성찰의 '비' 특징. 집은 폰의 '집' 영역, 없으면 MIND_WEATHER_HOME(위도,경도[,이름], 기본 서울).
+      MIND_WEATHER: ${MIND_WEATHER:-}
+      MIND_WEATHER_HOME: ${MIND_WEATHER_HOME:-}
     ports:
       - "127.0.0.1:${JARVIS_MIND_PORT:-8102}:8102"
     depends_on:
