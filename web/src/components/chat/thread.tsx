@@ -1,8 +1,8 @@
 "use client";
 
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Reply } from "lucide-react";
+import { ArrowDown, Reply } from "lucide-react";
 import { Composer } from "@/components/chat/composer";
 import { ModeToggle, type ChatMode } from "@/components/chat/mode-toggle";
 import { ProposalCard } from "@/components/chat/proposal-card";
@@ -455,6 +455,18 @@ export function Thread() {
   // the reader is at the bottom; someone scrolled up to read is left there.
   const landed = useRef(false);
   const pinned = useRef(true);
+  // Up far enough that the newest turn is out of sight: the way back down is
+  // offered (the button over the composer).
+  const [away, setAway] = useState(false);
+  // The newest turn when the reader was last at the bottom; what Jarvis said
+  // after it is what the button counts as new.
+  const [seenAt, setSeenAt] = useState<string | null>(null);
+  const unseen = useMemo(() => {
+    if (!away || !seenAt) return 0;
+    const at = turns.findIndex((t) => t.id === seenAt);
+    if (at === -1) return 0;
+    return turns.slice(at + 1).filter((t) => t.role === "agent").length;
+  }, [away, seenAt, turns]);
   // The card a tapped push brought the reader to. While set, nothing pulls
   // the view back to the bottom - not new turns, not photos above finishing
   // their layout - until the reader touches the thread themselves.
@@ -557,6 +569,16 @@ export function Thread() {
     // lets it scroll the composer into view above the keyboard, the way a
     // tap on the field does: with preventScroll, iOS left it underneath.
     inputRef.current?.focus();
+  }, []);
+
+  // Down to the newest turn - and staying there as more come.
+  const toBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    held.current = null;
+    pinned.current = true;
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    el.scrollTo({ top: el.scrollHeight, behavior: still ? "auto" : "smooth" });
   }, []);
 
   // A quote tapped in a bubble goes back to the message it quotes, and marks
@@ -693,9 +715,16 @@ export function Thread() {
       <main
         ref={scrollRef}
         onScroll={(e) => {
-          if (held.current) return; // our own scroll to a card, not the reader's
           const el = e.currentTarget;
-          pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+          const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+          // Where the reader is, whoever scrolled: the button is about position.
+          setAway(gap > Math.max(320, el.clientHeight * 0.6));
+          if (gap < 80) {
+            const newest = turns.at(-1)?.id ?? null;
+            setSeenAt((prev) => (prev === newest ? prev : newest));
+          }
+          if (held.current) return; // our own scroll to a card, not the reader's
+          pinned.current = gap < 80;
           askOlder(el);
         }}
 
@@ -742,6 +771,30 @@ export function Thread() {
           aria-hidden
           className="pointer-events-none absolute inset-x-0 -top-10 h-10 bg-gradient-to-b from-transparent to-background"
         />
+        {/* Back to the newest: a bead of the composer's own glass, over its
+            right edge, there only while the newest turn is out of sight. It
+            says how many replies came meanwhile, so a reply that landed while
+            you were reading back is not missed. */}
+        {away ? (
+          <div className="pointer-events-none absolute inset-x-0 bottom-full pb-3">
+            <div className="inset-x-safe">
+              <div className="mx-auto flex w-full max-w-[46rem] justify-end px-4 sm:px-8">
+                <button
+                  type="button"
+                  onClick={toBottom}
+                  aria-label={unseen ? `새 메시지 ${unseen}개, 맨 아래로` : "맨 아래로"}
+                  className={cn(
+                    "liquid-glass anim-settle pointer-events-auto flex h-11 items-center justify-center gap-1.5 rounded-full text-dim transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-10",
+                    unseen ? "pr-3.5 pl-4" : "w-11 sm:w-10",
+                  )}
+                >
+                  {unseen ? <span className="tnum text-[13px] text-foreground">새 메시지 {unseen}</span> : null}
+                  <ArrowDown aria-hidden className="size-[18px] shrink-0" strokeWidth={1.8} />
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
         {/* Two boxes: the safe-area padding and the gutter would otherwise
             be one padding, and the safe area (0 on most phones) would win. */}
         <div className="inset-x-safe">
