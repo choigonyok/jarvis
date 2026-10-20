@@ -11,6 +11,8 @@ import (
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/link"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+	"github.com/choigonyok/jarvis/mind-svc/internal/predict"
+	"github.com/choigonyok/jarvis/mind-svc/internal/self"
 	"github.com/choigonyok/jarvis/mind-svc/internal/world"
 )
 
@@ -265,8 +267,15 @@ func (m *Mind) restock(ctx context.Context) error {
 	}
 	now := m.Opts.Now().In(m.Opts.Loc)
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, m.Opts.Loc)
+	tracks := m.cachedTracks(ctx)
 	for _, t := range things {
 		if t.CycleDays == 0 {
+			continue
+		}
+		// The engine predicts the same cycle and keeps its record: once its
+		// predictions have done worse than the plain rate, the cycle is not
+		// what it looks like, and saying "살 때 됐어요" would be nagging.
+		if tr := tracks[self.ID(predict.Cycle, "purchase.item/"+t.Class)]; tr.N >= 3 && tr.Skill() < 0 {
 			continue
 		}
 		next, err := time.ParseInLocation("2006-01-02", t.Next, m.Opts.Loc)

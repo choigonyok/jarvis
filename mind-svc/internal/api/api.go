@@ -152,14 +152,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/policy/rebuild", s.auth(false, s.rebuildPolicy))
 	// The notes alone, for the console's 생활 screen: the snapshot carries
 	// message text, which that screen has no business with.
+	// Rules still being tried in silence (candidates) only with ?all=1: the
+	// screen asks the operator about what has come true, not about guesses.
 	mux.HandleFunc("GET /api/notes", s.auth(false, func(w http.ResponseWriter, r *http.Request) {
-		notes, err := s.m.Opts.Store.Notes(r.Context())
+		notes, err := s.m.Notes(r.Context(), r.URL.Query().Get("all") == "1")
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
-		}
-		if notes == nil {
-			notes = []model.Note{}
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"notes": notes})
 	}))

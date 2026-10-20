@@ -717,7 +717,14 @@ func (m *Memory) PutNote(_ context.Context, n model.Note) error {
 	defer m.mu.Unlock()
 	n.Evidence = slices.Clone(n.Evidence)
 	m.notes[n.ID] = n
-	m.versions[n.ID] = append(m.versions[n.ID], n)
+	// The same version written again (fresh numbers, nothing believed
+	// differently) replaces it, as the database's does.
+	vs := m.versions[n.ID]
+	if len(vs) > 0 && vs[len(vs)-1].Version == n.Version {
+		vs[len(vs)-1] = n
+		return nil
+	}
+	m.versions[n.ID] = append(vs, n)
 	return nil
 }
 

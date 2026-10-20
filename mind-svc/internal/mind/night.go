@@ -30,9 +30,13 @@ func (m *Mind) Night(ctx context.Context) error {
 		func(ctx context.Context) error {
 			// What was predicted for yesterday is known now; what missed is
 			// looked at, and only that.
-			_, err := m.Predict.Score(ctx)
+			prs, err := m.Predict.Score(ctx)
+			m.scored(ctx, prs...)
 			return err
 		},
+		// The rules found again and graded by how they did, before the
+		// reflection reads which of them are worth reflecting on.
+		m.engineNight,
 		func(ctx context.Context) error {
 			if _, err := m.Reflect.Night(ctx); err != nil {
 				m.Opts.Logger.Warn("성찰하지 못했습니다", "err", err)
@@ -151,6 +155,11 @@ func (m *Mind) countPlan(ctx context.Context, p model.Entity) error {
 		return nil
 	}
 	kind := p.State.Type
+	// The same plan read twice - a copy the calendar left, the same entry
+	// told in two rooms - is one plan.
+	if twin, err := m.twinBefore(ctx, p); err != nil || twin {
+		return err
+	}
 	if err := st.CountPattern(ctx, model.Pattern{KindA: kind, Rel: model.PrepFor, Total: 1, LastSeen: sp.Start}); err != nil {
 		return err
 	}
@@ -158,9 +167,27 @@ func (m *Mind) countPlan(ctx context.Context, p model.Entity) error {
 	if err != nil {
 		return err
 	}
+	// The other plans of the kind in those two weeks: a thing bought before
+	// one of them counts for that one, the nearest after it, never for
+	// every plan that follows (one purchase was "bought before" four plans
+	// in a row, and a rule rested on it, 2026-10-20).
+	var starts []time.Time
+	if others, err := st.PlansOn(ctx, sp.Start.Add(-14*24*time.Hour).In(m.Opts.Loc).Format("2006-01-02"), sp.Start.In(m.Opts.Loc).Format("2006-01-02")); err == nil {
+		for _, o := range others {
+			if o.ID == p.ID || o.State.Type != kind || (o.State.Status != model.Confirmed && o.State.Status != model.Done) {
+				continue
+			}
+			if osp, ok := m.World.Span(ctx, o, m.Opts.Now(), m.Opts.Loc); ok && osp.Start.Before(sp.Start) {
+				starts = append(starts, osp.Start)
+			}
+		}
+	}
 	counted := map[string]bool{}
 	for i := len(items) - 1; i >= 0; i-- { // nearest first: a class counts once, at its nearest
 		it := items[i]
+		if slices.ContainsFunc(starts, func(s time.Time) bool { return s.After(it.At) }) {
+			continue // bought for a plan nearer to it
+		}
 		class, err := st.ThingClass(ctx, it.Title)
 		if errors.Is(err, model.ErrNotFound) && m.Link.Judge != nil {
 			j, jerr := m.Link.Judge.Of(ctx, it.Title, kind)
@@ -179,6 +206,26 @@ func (m *Mind) countPlan(ctx context.Context, p model.Entity) error {
 		}
 	}
 	return nil
+}
+
+// twinBefore is whether another plan is this one told again and was there
+// first: the same kind, day and title, not called off.
+func (m *Mind) twinBefore(ctx context.Context, p model.Entity) (bool, error) {
+	plans, err := m.Opts.Store.PlansOn(ctx, p.State.Date, p.State.Date)
+	if err != nil {
+		return false, err
+	}
+	title := strings.Join(strings.Fields(p.State.Title), " ")
+	for _, o := range plans {
+		if o.ID == p.ID || o.State.Status == model.Cancelled || o.State.Status == model.Proposed || o.State.Type != p.State.Type ||
+			o.State.Date != p.State.Date || strings.Join(strings.Fields(o.State.Title), " ") != title {
+			continue
+		}
+		if o.CreatedAt.Before(p.CreatedAt) || o.CreatedAt.Equal(p.CreatedAt) && o.ID < p.ID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // corroborate raises a plan's prep links once it is known to have

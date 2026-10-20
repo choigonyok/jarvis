@@ -205,22 +205,29 @@ type Pattern struct {
 // and how sure. A hypothesis until the operator confirms it; every change
 // is a new version with its reason.
 type Note struct {
-	ID         string    `json:"id"`
-	Text       string    `json:"text"`
-	Scope      string    `json:"scope,omitempty"` // 캠핑, 운동, 사람:지수 …
-	Status     string    `json:"status"`          // hypothesis | confirmed | rejected
-	Confidence float64   `json:"confidence"`
-	Evidence   []string  `json:"evidence,omitempty"` // refs: occurrences, plans, days
-	Rule       *Rule     `json:"rule,omitempty"`     // the machine-readable form predictions use
-	Version    int       `json:"version"`
-	Reason     string    `json:"reason,omitempty"` // why this version
-	CreatedAt  time.Time `json:"createdAt"`
-	UpdatedAt  time.Time `json:"updatedAt"`
+	ID         string   `json:"id"`
+	Text       string   `json:"text"`
+	Scope      string   `json:"scope,omitempty"` // 캠핑, 운동, 사람:지수 …
+	Status     string   `json:"status"`          // hypothesis | confirmed | rejected
+	Confidence float64  `json:"confidence"`
+	Evidence   []string `json:"evidence,omitempty"` // refs: occurrences, plans, days
+	Rule       *Rule    `json:"rule,omitempty"`     // the machine-readable form predictions use
+	// Track is how the predictions made from it went, as of when it was
+	// read: counted from the scored predictions, never kept apart from them.
+	Track     *Track    `json:"track,omitempty"`
+	Version   int       `json:"version"`
+	Reason    string    `json:"reason,omitempty"` // why this version
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 // Note statuses.
 const (
 	Hypothesis = "hypothesis"
+	// Candidate is a rule the engine found and is still testing: it
+	// predicts, and its predictions are scored, but nobody is shown it or
+	// asked about it until they have come true often enough.
+	Candidate = "candidate"
 	// Confirmed and Rejected as for links.
 )
 
@@ -232,6 +239,16 @@ const (
 //	      on other days (Days such days seen)
 //	travel: from From to To takes about Minutes
 //	salary: once pay arrives, Plan is bought within days
+//
+// The engine's own (predict.Mine), each about Key - what is expected, as
+// predict.Keys names it:
+//
+//	daily: Key happens on a share of days that depends on the weekday
+//	       (Rates, Sunday first; Base on any day; Days days seen)
+//	cycle: Key comes round every Gap days, give or take Tol (Last the
+//	       latest; Days how many times seen)
+//	after: within Hours of Anchor, Key follows (Support of Total times,
+//	       against Base by chance)
 type Rule struct {
 	Kind     string   `json:"kind"`
 	PlanKind string   `json:"planKind,omitempty"`
@@ -252,6 +269,84 @@ type Rule struct {
 	Minutes int    `json:"minutes,omitempty"`
 	// salary: what is bought once pay arrives (a plan in words).
 	Plan string `json:"plan,omitempty"`
+
+	// The engine's rules.
+	Key    string    `json:"key,omitempty"`
+	Anchor string    `json:"anchor,omitempty"`
+	Rates  []float64 `json:"rates,omitempty"`
+	Gap    int       `json:"gap,omitempty"`
+	Tol    int       `json:"tol,omitempty"`
+	Hours  int       `json:"hours,omitempty"`
+	Last   string    `json:"last,omitempty"`  // YYYY-MM-DD
+	Usual  string    `json:"usual,omitempty"` // HH:MM it usually happens at
+	// Off: no longer predicted from - its predictions kept missing, or what
+	// it rested on is no longer there.
+	Off bool `json:"off,omitempty"`
+	// Since is when it was found, or taken up again after it was off: its
+	// track counts the predictions made since.
+	Since *time.Time `json:"since,omitempty"`
+	// Test is how the rule would have done on the days before it was found,
+	// each predicted from the days before it only: where its track starts.
+	Test *Track `json:"test,omitempty"`
+}
+
+// Track is how a rule's predictions went: how many were scored, how many
+// came true, how many it called right (50% or more and it happened, or less
+// and it did not), and its summed Brier score next to the plain rate's - what
+// would have been said knowing only how often the thing happens.
+type Track struct {
+	N     int     `json:"n"`
+	Hits  int     `json:"hits"`
+	Right int     `json:"right"`
+	Brier float64 `json:"brier"`
+	Base  float64 `json:"base"`
+}
+
+// Add is the track with one more prediction scored.
+func (t Track) Add(prob, base float64, happened bool) Track {
+	o := 0.0
+	if happened {
+		o = 1
+		t.Hits++
+	}
+	if (prob >= 0.5) == happened {
+		t.Right++
+	}
+	t.N++
+	t.Brier += (prob - o) * (prob - o)
+	t.Base += (base - o) * (base - o)
+	return t
+}
+
+// Plus is two tracks as one.
+func (t Track) Plus(o Track) Track {
+	return Track{N: t.N + o.N, Hits: t.Hits + o.Hits, Right: t.Right + o.Right, Brier: t.Brier + o.Brier, Base: t.Base + o.Base}
+}
+
+// Skill is how much smaller the rule's errors were than the plain rate's
+// (Brier skill score), pulled toward 0 while there are few: 0.3 is 30%
+// smaller, below 0 the rule did worse than knowing only how often.
+func (t Track) Skill() float64 {
+	if t.N == 0 {
+		return 0
+	}
+	var s float64
+	switch {
+	case t.Base > 0:
+		s = 1 - t.Brier/t.Base
+	case t.Brier > 0:
+		s = -1 // the plain rate was never wrong, and the rule was
+	}
+	if s < -1 {
+		s = -1
+	}
+	return s * float64(t.N) / float64(t.N+3)
+}
+
+// Accuracy is the share of calls it got right, pulled toward a coin's while
+// there are few.
+func (t Track) Accuracy() float64 {
+	return (float64(t.Right) + 1.5) / (float64(t.N) + 3)
 }
 
 // Prediction is something expected, with a probability and a time by which
@@ -259,13 +354,20 @@ type Rule struct {
 // against what happened (Brier: (prob − outcome)²); a miss is a surprise,
 // and the night reflects on surprises only.
 type Prediction struct {
-	ID        string     `json:"id"`
-	Target    string     `json:"target"` // workout:2026-10-15, buy:장작:plan_x
-	Text      string     `json:"text"`
-	Prob      float64    `json:"prob"`
-	Due       time.Time  `json:"due"`
-	Basis     []string   `json:"basis,omitempty"` // note ids
-	PlanID    string     `json:"planId,omitempty"`
+	ID     string    `json:"id"`
+	Target string    `json:"target"` // workout:2026-10-15, buy:장작:plan_x
+	Text   string    `json:"text"`
+	Prob   float64   `json:"prob"`
+	Due    time.Time `json:"due"`
+	Basis  []string  `json:"basis,omitempty"` // note ids
+	PlanID string    `json:"planId,omitempty"`
+	// Key is what it waits for (predict.Keys), and From when that starts to
+	// count; zero: the prediction's day.
+	Key  string     `json:"key,omitempty"`
+	From *time.Time `json:"from,omitempty"`
+	// Base is what knowing only how often the thing happens would have said:
+	// what the prediction's skill is measured against.
+	Base      float64    `json:"base,omitempty"`
 	Outcome   *bool      `json:"outcome,omitempty"`
 	Score     *float64   `json:"score,omitempty"`
 	Surprise  bool       `json:"surprise,omitempty"`
@@ -277,11 +379,14 @@ type Prediction struct {
 // Expectation is a prediction waiting for an occurrence, found by key: a
 // new occurrence is checked against the open expectations of its key only.
 type Expectation struct {
-	PredictionID string    `json:"predictionId"`
-	Key          string    `json:"key"` // purchase.item:장작, workout, transfer:민수
-	Due          time.Time `json:"due"`
-	State        string    `json:"state"` // open | met | missed
-	MetBy        string    `json:"metBy,omitempty"`
+	PredictionID string `json:"predictionId"`
+	Key          string `json:"key"` // purchase.item:장작, workout, transfer:민수
+	// From is when an occurrence starts to count (zero: any time before
+	// Due).
+	From  time.Time `json:"from,omitempty"`
+	Due   time.Time `json:"due"`
+	State string    `json:"state"` // open | met | missed
+	MetBy string    `json:"metBy,omitempty"`
 }
 
 // ReplySituation is a kind of moment a reply was written in - someone

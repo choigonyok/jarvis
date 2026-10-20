@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+	"github.com/choigonyok/jarvis/mind-svc/internal/predict"
 	"github.com/choigonyok/jarvis/mind-svc/internal/prefs"
 )
 
@@ -225,14 +226,7 @@ func (m *Mind) weekCandidate(ctx context.Context, today time.Time) (candidate, e
 	return c, nil
 }
 
-func delivery(merchant string) bool {
-	for _, w := range []string{"배달의민족", "배민", "우아한형제", "쿠팡이츠", "요기요", "땡겨요"} {
-		if strings.Contains(merchant, w) {
-			return true
-		}
-	}
-	return false
-}
+func delivery(merchant string) bool { return predict.IsDelivery(merchant) }
 
 func (m *Mind) reviewIntent(ctx context.Context, c candidate, now time.Time) (model.Intent, error) {
 	season := map[time.Month]string{12: "겨울", 1: "겨울", 2: "겨울", 3: "봄", 4: "봄", 5: "봄", 6: "여름", 7: "여름", 8: "여름", 9: "가을", 10: "가을", 11: "가을"}[c.at.Month()]

@@ -187,3 +187,77 @@ func TestSyncCalendarMendsASplitPair(t *testing.T) {
 	}
 }
 
+// A past entry's plan the night marked done is still that entry: read
+// again, it is not made anew (every night made one more, 2026-10-20) - and
+// the copies left from before are called off, the first one kept.
+func TestSyncCalendarKeepsADonePlan(t *testing.T) {
+	ctx := context.Background()
+	st := store.NewMemory()
+	now := time.Date(2026, 10, 19, 3, 0, 0, 0, seoul)
+	w := world.New(st, func() time.Time { return now })
+	s := &Structured{Store: st, Observer: observer{st}, World: w, Loc: seoul, Now: func() time.Time { return now }}
+	evs := []entry{{ID: "c1", Title: "데이트", Date: "2026-10-18", Start: "15:30", Place: "수원역"}}
+	if err := s.SyncCalendar(ctx, evs, "2026-10-12", "2026-12-19"); err != nil {
+		t.Fatal(err)
+	}
+	plans, _ := st.Entities(ctx, model.KindPlan, CalendarRoom, false)
+	if len(plans) != 1 {
+		t.Fatalf("캘린더 일정 하나: %+v", plans)
+	}
+	first := plans[0].ID
+	_, _, _ = w.Update(ctx, first, func(s *model.State) bool { s.Status = model.Done; return true }, world.Meta{Actor: "observer", Why: "날짜가 지남"})
+	for range 3 {
+		now = now.Add(24 * time.Hour)
+		if err := s.SyncCalendar(ctx, evs, "2026-10-12", "2026-12-19"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	plans, _ = st.Entities(ctx, model.KindPlan, CalendarRoom, false)
+	if len(plans) != 1 || plans[0].State.Status != model.Done {
+		t.Fatalf("끝난 일정은 그대로 하나여야 합니다: %+v", plans)
+	}
+
+	// Copies the old reading left behind.
+	for range 2 {
+		now = now.Add(time.Hour)
+		if _, err := w.Create(ctx, model.KindPlan, CalendarRoom, fromEntry(evs[0]), world.Meta{Actor: "sensor:calendar"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.dedupeCalendar(ctx, "2026-07-22", "2026-12-22"); err != nil {
+		t.Fatal(err)
+	}
+	plans, _ = st.Entities(ctx, model.KindPlan, CalendarRoom, false)
+	kept := 0
+	for _, p := range plans {
+		if p.State.Status != model.Cancelled {
+			kept++
+			if p.ID != first {
+				t.Fatalf("처음 읽은 일정이 남아야 합니다: %+v", p)
+			}
+		}
+	}
+	if kept != 1 || len(plans) != 3 {
+		t.Fatalf("중복은 취소: %+v", plans)
+	}
+	// Called off by the calendar's reader: nothing to take off the calendar.
+	for _, p := range plans {
+		if p.ID == first {
+			continue
+		}
+		cs, _ := st.Changes(ctx, p.ID, 1)
+		if len(cs) == 0 || cs[0].Actor != "sensor:calendar" || cs[0].Why != "같은 캘린더 항목의 중복" {
+			t.Fatalf("중복 취소의 근거: %+v", cs)
+		}
+	}
+}
+
+// Everyday titles that were 기타 before (2026-10-20).
+func TestClassifyMoreTitles(t *testing.T) {
+	for in, want := range map[string]string{"호캉스": "여행", "민지와 삼겹살": "식사", "아빠 생신": "기념일", "서연이랑 야구 보기": "공연",
+		"레코드 페어": "공연", "독감 접종": "병원", "지수와 치킨 저녁": "식사"} {
+		if got := Classify(in); got != want {
+			t.Errorf("Classify(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

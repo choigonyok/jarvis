@@ -60,6 +60,10 @@ func (p *Predictor) Put(ctx context.Context, pr model.Prediction, keys ...string
 		pr.CreatedAt = p.Now()
 	}
 	pr.Prob = math.Round(pr.Prob*100) / 100
+	pr.Base = math.Round(pr.Base*1000) / 1000 // a rare thing's chance is small, not none
+	if pr.Key == "" && len(keys) > 0 {
+		pr.Key = keys[0]
+	}
 	if err := p.St.PutPrediction(ctx, pr); err != nil {
 		return pr, err
 	}
@@ -72,9 +76,16 @@ func (p *Predictor) Put(ctx context.Context, pr model.Prediction, keys ...string
 		if met {
 			continue
 		}
-		if err := p.St.PutExpectation(ctx, model.Expectation{PredictionID: pr.ID, Key: k, Due: pr.Due, State: "open"}); err != nil {
+		e := model.Expectation{PredictionID: pr.ID, Key: k, Due: pr.Due, State: "open"}
+		if pr.From != nil {
+			e.From = *pr.From
+		}
+		if err := p.St.PutExpectation(ctx, e); err != nil {
 			return pr, err
 		}
+	}
+	if err := p.catchUp(ctx, pr, keys); err != nil {
+		return pr, err
 	}
 	for _, t := range p.timers(pr) {
 		if err := p.St.SetTimer(ctx, t); err != nil {
@@ -249,6 +260,7 @@ func (p *Predictor) Workout(ctx context.Context, day time.Time) (model.Predictio
 	return model.Prediction{
 		Target: "workout:" + day.Format("2006-01-02"), Text: fmt.Sprintf("%s 운동 %.0f%% (%s)", label(day, p.Now(), p.Loc), prob*100, why),
 		Prob: prob, Due: day.AddDate(0, 0, 1).Add(-time.Minute), Basis: basis,
+		Key: "workout", From: &day, Base: float64(sessions) / float64(len(past)),
 	}, true, nil
 }
 
@@ -281,6 +293,7 @@ func (p *Predictor) Prep(ctx context.Context, plan model.Entity) ([]model.Predic
 		return nil, err
 	}
 	var out []model.Prediction
+	now := p.Now()
 	for _, n := range notes {
 		r := n.Rule
 		if n.Status == model.Rejected || r == nil || r.Kind != "prep" || r.PlanKind != st.Type {
@@ -291,9 +304,15 @@ func (p *Predictor) Prep(ctx context.Context, plan model.Entity) ([]model.Predic
 		if len(r.Except) > 0 {
 			prob *= 0.8 // it does not always hold
 		}
+		target := "buy:" + r.Class + ":" + plan.ID
+		from := now
+		if old, err := p.St.Prediction(ctx, ID(target)); err == nil && old.From != nil {
+			from = *old.From // asked again: the window opened the first time
+		}
 		pr, err := p.Put(ctx, model.Prediction{
-			Target: "buy:" + r.Class + ":" + plan.ID, PlanID: plan.ID, Basis: []string{n.ID},
+			Target: target, PlanID: plan.ID, Basis: []string{n.ID},
 			Text: fmt.Sprintf("%d/%d까지 %s 구매 %.0f%%", int(due.Month()), due.Day(), r.Class, prob*100), Prob: prob, Due: due,
+			Key: "purchase.item:" + r.Class, From: &from, Base: p.bought(ctx, r.Class, due.Sub(from)),
 		}, "purchase.item:"+r.Class)
 		if err != nil {
 			return out, err
@@ -303,19 +322,36 @@ func (p *Predictor) Prep(ctx context.Context, plan model.Entity) ([]model.Predic
 	return out, nil
 }
 
+// bought is the chance a thing of class is bought in a window this long
+// anyway, from how often it was in the last four months: what a prep
+// prediction is measured against.
+func (p *Predictor) bought(ctx context.Context, class string, window time.Duration) float64 {
+	now := p.Now()
+	items, err := p.St.Occurrences(ctx, now.AddDate(0, 0, -120), now, "purchase.item")
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, it := range items {
+		if c, err := p.St.ThingClass(ctx, it.Title); err == nil && c == class {
+			n++
+		}
+	}
+	return 1 - math.Exp(-float64(n)/120*window.Hours()/24)
+}
+
 // --- matching and scoring ---------------------------------------------------
 
-// Match checks one occurrence against the open expectations of its key
-// only. It reports the predictions it met.
+// Match checks one occurrence against the open expectations of its keys
+// only (Keys, and a prep's "purchase.item:<class>"), within each one's
+// window. It reports the predictions it met.
 func (p *Predictor) Match(ctx context.Context, o model.Occurrence) ([]string, error) {
-	var keys []string
+	keys := Keys(o, p.thingOf(ctx))
 	switch o.Kind {
-	case "workout":
-		keys = []string{"workout"}
 	case "purchase.item":
 		class, err := p.St.ThingClass(ctx, o.Title)
 		if err == nil {
-			keys = []string{"purchase.item:" + class}
+			keys = append(keys, "purchase.item:"+class)
 			break
 		}
 		// Not classified yet: only if something is waiting on an item, ask
@@ -341,10 +377,10 @@ func (p *Predictor) Match(ctx context.Context, o model.Occurrence) ([]string, er
 			return met, err
 		}
 		for _, e := range open {
-			if o.At.After(e.Due) {
+			if o.At.After(e.Due) || !e.From.IsZero() && o.At.Before(e.From) {
 				continue
 			}
-			if strings.HasPrefix(e.Key, "workout") {
+			if e.From.IsZero() && strings.HasPrefix(e.Key, "workout") { // from before windows: the day is in the target
 				pr, err := p.St.Prediction(ctx, e.PredictionID)
 				if err != nil || pr.Target != "workout:"+o.At.In(p.Loc).Format("2006-01-02") {
 					continue

@@ -249,8 +249,8 @@ function render() {
   $("levels").innerHTML = Object.entries(s.levels || {}).map(([k, [l, why]]) => `<div><b>${KIND[k] || k}</b> ${LEVEL[l] || l} · ${esc(why)}</div>`).join("");
 
   $("situation").textContent = s.situation?.text || "";
-  $("notes").innerHTML = (s.notes || []).map((n) => `<article class="ent note ${n.status === "rejected" ? "dead" : ""}"><header><span class="kind">노트</span><h3>${esc(n.text)}</h3><span class="st">${NSTATUS[n.status] || n.status}</span></header>
-    <div class="facts"><span>신뢰 ${Math.round(n.confidence * 100)}%</span><span>v${n.version}</span>${(n.evidence || []).map((e) => `<span>${esc(e)}</span>`).join("")}</div>
+  $("notes").innerHTML = (s.notes || []).map((n) => `<article class="ent note ${n.status === "rejected" || n.rule?.off ? "dead" : ""}"><header><span class="kind">노트</span><h3>${esc(n.text)}</h3><span class="st">${NSTATUS[n.status] || n.status}</span></header>
+    <div class="facts"><span>신뢰 ${Math.round(n.confidence * 100)}%</span><span>v${n.version}</span>${n.rule?.off ? "<span>예측 멈춤</span>" : ""}${(n.evidence || []).map((e) => `<span>${esc(e)}</span>`).join("")}</div>
     ${n.reason ? `<div class="judge">${esc(n.reason)}</div>` : ""}
     <div class="acts">${n.status !== "confirmed" ? `<button class="btn ok" data-note="${n.id}" data-status="confirmed">맞아요</button>` : ""}${n.status !== "rejected" ? `<button class="btn no" data-note="${n.id}" data-status="rejected">아니에요</button>` : ""}<button class="btn" data-note="${n.id}" data-status="" data-edit="1">고치기</button></div></article>`).join("") ||
     `<div class="empty">밤마다 반복과 틀린 예측에서 노트가 생깁니다.</div>`;
@@ -260,7 +260,7 @@ function render() {
     ((s.predictions || []).slice().reverse().slice(0, 20).map((p) => `<div>${p.outcome === undefined ? "⏳" : p.outcome ? "✅" : "❌"}${p.surprise ? " 😮" : ""} ${esc(p.text || p.target)} · ${t(p.due)}${p.score !== undefined ? ` · 점수 ${p.score.toFixed(2)}` : ""}</div>`).join("") || "<div>없음</div>");
   $("patterns").innerHTML = (s.patterns || []).filter((p) => p.kindB).map((p) => `<div>${esc(p.kindA)} 전에 ${esc(p.kindB)} · ${esc(p.bucket)} · ${p.support}번</div>`).join("") || "<div>없음</div>";
 }
-const NSTATUS = { hypothesis: "가설", confirmed: "확정", rejected: "기각" };
+const NSTATUS = { candidate: "검증 중", hypothesis: "가설", confirmed: "확정", rejected: "기각" };
 const LSTATE = { estimated: "추정", confirmed: "확정", rejected: "아님" };
 const REL = { during: "중에", prep_for: "준비", used_during: "쓰려고", with: "함께" };
 

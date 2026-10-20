@@ -1056,6 +1056,11 @@ func checkSelf(ctx context.Context, st store.Store, ex Expect, seen map[string]b
 		return strings.Join(parts, " ")
 	}
 	match := func(n model.Note, w NoteMatch) bool {
+		// A candidate is a rule still being tried in silence, not a belief:
+		// only a match that asks for one sees it.
+		if n.Status == model.Candidate && w.Status != model.Candidate {
+			return false
+		}
 		if w.Feature != "" && (n.Rule == nil || n.Rule.Feature != w.Feature) {
 			return false
 		}

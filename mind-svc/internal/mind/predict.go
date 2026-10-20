@@ -30,10 +30,12 @@ func (m *Mind) Morning(ctx context.Context) error {
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, m.Opts.Loc)
 	steps := []func(context.Context) error{
 		func(ctx context.Context) error {
-			_, err := m.Predict.Score(ctx)
+			prs, err := m.Predict.Score(ctx)
+			m.scored(ctx, prs...)
 			return err
 		},
 		func(ctx context.Context) error { return m.morningWorkout(ctx, today) },
+		m.engineMorning,
 		func(ctx context.Context) error {
 			plans, err := m.Opts.Store.PlansOn(ctx, today.Format("2006-01-02"), today.AddDate(0, 0, 14).Format("2006-01-02"))
 			if err != nil {
@@ -148,10 +150,14 @@ func (m *Mind) prepCards(ctx context.Context, now time.Time) error {
 func (m *Mind) onExpect(ctx context.Context, t model.Timer) {
 	switch t.Name {
 	case predict.DueTimer:
+		before, _ := m.Opts.Store.Prediction(ctx, t.EntityID)
 		pr, err := m.Predict.ScoreOne(ctx, t.EntityID)
 		if err != nil {
 			m.Opts.Logger.Warn("예측을 채점하지 못했습니다", "err", err)
 			return
+		}
+		if before.ScoredAt == nil && pr.ScoredAt != nil {
+			m.scored(ctx, pr) // scored just now, not long ago
 		}
 		if pr.Surprise {
 			m.Opts.Logger.Info("예측이 빗나갔습니다(오늘 밤 성찰)", "prediction", pr.Text)

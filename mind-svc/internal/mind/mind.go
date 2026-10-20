@@ -106,6 +106,8 @@ type Mind struct {
 	nightly  []func(ctx context.Context) error
 	mornings []func(ctx context.Context) error
 	notifier act.Notifier
+	// tracks is the rules' records, read again every few minutes.
+	tracks tracks
 }
 
 func New(o Options) *Mind {
@@ -220,6 +222,10 @@ func (m *Mind) Handle(ctx context.Context, o obs.Observation) error {
 		}
 		if occ, err := m.Opts.Store.Occurrence(ctx, ref.ID); err == nil {
 			if _, err := m.Predict.Match(ctx, occ); err != nil {
+				return err
+			}
+			// After matching, so it does not meet what it starts itself.
+			if _, err := m.Predict.Follow(ctx, occ); err != nil {
 				return err
 			}
 			if err := m.salary(ctx, occ); err != nil {
@@ -622,6 +628,9 @@ func (m *Mind) Situation(ctx context.Context) (world.Situation, error) {
 	}
 	if lines := m.reminderLines(ctx); lines != "" {
 		s.Text += "\n" + lines
+	}
+	if line := m.expectLines(ctx); line != "" {
+		s.Text += "\n" + line
 	}
 	return s, nil
 }

@@ -48,7 +48,7 @@ func TestConfounded(t *testing.T) {
 	r := &Reflector{Loc: loc}
 	late := &Hypothesis{Text: "21시 이후 퇴근", Feature: "late_leave", Arg: "21:00"}
 	bus := &Hypothesis{Text: "7016 버스", Feature: "merchant", Arg: "7016"}
-	r.test([]*Hypothesis{late, bus}, pool)
+	r.test([]*Hypothesis{late, bus}, pool, workedOut)
 	if !late.Kept || bus.Kept || !strings.Contains(bus.Why, "교란") {
 		t.Fatalf("늦은 퇴근은 남고 7016 은 교란: %+v / %+v", late, bus)
 	}
@@ -75,12 +75,14 @@ func TestRainIsAFeature(t *testing.T) {
 	}
 	r := &Reflector{Loc: loc}
 	h := &Hypothesis{Text: "비 오는 날은 운동을 거의 안 한다", Feature: "rain", Arg: "1"}
-	r.test([]*Hypothesis{h}, pool)
+	r.test([]*Hypothesis{h}, pool, workedOut)
 	if !h.Kept || h.With[0] < minSupport {
 		t.Fatalf("비 오는 날의 가설이 남아야 합니다: %+v", h)
 	}
-	prompt := r.prompt(pool, map[string]bool{pool[0].Date: true})
+	prompt := r.prompt(target{"workout", "운동", workedOut}, pool, map[string]bool{pool[0].Date: true}, true)
 	if !strings.Contains(prompt, "날씨 비 12.0mm") || !strings.Contains(prompt, "- rain:") {
 		t.Fatalf("프롬프트에 날씨와 rain 특징이 있어야 합니다:\n%s", prompt)
 	}
 }
+
+func workedOut(d predict.Day) bool { return d.Workout }

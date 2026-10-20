@@ -1,0 +1,581 @@
+{
+ "name": "예측 엔진: 모든 기록에서 규칙을 찾아 조용히 예측해 보고, 맞아 오면 보여 준다 - 주말엔 버스를 안 타고 일요일엔 배달",
+ "room": "owner",
+ "roomName": "jarvis",
+ "turns": [
+  {
+   "at": "2026-11-22T23:00",
+   "occur": [
+    {
+     "id": "spending:1001",
+     "kind": "purchase",
+     "at": "2026-10-05T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    },
+    {
+     "id": "spending:1002",
+     "kind": "purchase",
+     "at": "2026-10-06T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    },
+    {
+     "id": "spending:1003",
+     "kind": "purchase",
+     "at": "2026-10-07T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    },
+    {
+     "id": "spending:1004",
+     "kind": "purchase",
+     "at": "2026-10-08T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    },
+    {
+     "id": "spending:1005",
+     "kind": "purchase",
+     "at": "2026-10-09T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    },
+    {
+     "id": "spending:1007",
+     "kind": "purchase",
+     "at": "2026-10-11T12:30",
+     "title": "주식회사 우아한형제",
+     "class": "식비",
+     "amount": 21000
+    },
+    {
+     "id": "spending:1008",
+     "kind": "purchase",
+     "at": "2026-10-12T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    },
+    {
+     "id": "spending:1009",
+     "kind": "purchase",
+     "at": "2026-10-13T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    },
+    {
+     "id": "spending:1010",
+     "kind": "purchase",
+     "at": "2026-10-14T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    },
+    {
+     "id": "spending:1011",
+     "kind": "purchase",
+     "at": "2026-10-15T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    },
+    {
+     "id": "spending:1012",
+     "kind": "purchase",
+     "at": "2026-10-16T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    },
+    {
+     "id": "spending:1014",
+     "kind": "purchase",
+     "at": "2026-10-18T12:30",
+     "title": "주식회사 우아한형제",
+     "class": "식비",
+     "amount": 21000
+    },
+    {
+     "id": "spending:1015",
+     "kind": "purchase",
+     "at": "2026-10-19T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    },
+    {
+     "id": "spending:1016",
+     "kind": "purchase",
+     "at": "2026-10-20T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    },
+    {
+     "id": "spending:1017",
+     "kind": "purchase",
+     "at": "2026-10-21T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    },
+    {
+     "id": "spending:1018",
+     "kind": "purchase",
+     "at": "2026-10-22T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    },
+    {
+     "id": "spending:1019",
+     "kind": "purchase",
+     "at": "2026-10-23T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    },
+    {
+     "id": "spending:1021",
+     "kind": "purchase",
+     "at": "2026-10-25T12:30",
+     "title": "주식회사 우아한형제",
+     "class": "식비",
+     "amount": 21000
+    },
+    {
+     "id": "spending:1022",
+     "kind": "purchase",
+     "at": "2026-10-26T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    },
+    {
+     "id": "spending:1023",
+     "kind": "purchase",
+     "at": "2026-10-27T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    },
+    {
+     "id": "spending:1024",
+     "kind": "purchase",
+     "at": "2026-10-28T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    },
+    {
+     "id": "spending:1025",
+     "kind": "purchase",
+     "at": "2026-10-29T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    },
+    {
+     "id": "spending:1026",
+     "kind": "purchase",
+     "at": "2026-10-30T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    },
+    {
+     "id": "spending:1028",
+     "kind": "purchase",
+     "at": "2026-11-01T12:30",
+     "title": "주식회사 우아한형제",
+     "class": "식비",
+     "amount": 21000
+    },
+    {
+     "id": "spending:1029",
+     "kind": "purchase",
+     "at": "2026-11-02T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    },
+    {
+     "id": "spending:1030",
+     "kind": "purchase",
+     "at": "2026-11-03T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    },
+    {
+     "id": "spending:1031",
+     "kind": "purchase",
+     "at": "2026-11-04T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    },
+    {
+     "id": "spending:1032",
+     "kind": "purchase",
+     "at": "2026-11-05T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    },
+    {
+     "id": "spending:1033",
+     "kind": "purchase",
+     "at": "2026-11-06T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    },
+    {
+     "id": "spending:1035",
+     "kind": "purchase",
+     "at": "2026-11-08T12:30",
+     "title": "주식회사 우아한형제",
+     "class": "식비",
+     "amount": 21000
+    },
+    {
+     "id": "spending:1036",
+     "kind": "purchase",
+     "at": "2026-11-09T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    },
+    {
+     "id": "spending:1037",
+     "kind": "purchase",
+     "at": "2026-11-10T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    },
+    {
+     "id": "spending:1038",
+     "kind": "purchase",
+     "at": "2026-11-11T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    },
+    {
+     "id": "spending:1039",
+     "kind": "purchase",
+     "at": "2026-11-12T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    },
+    {
+     "id": "spending:1040",
+     "kind": "purchase",
+     "at": "2026-11-13T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    },
+    {
+     "id": "spending:1042",
+     "kind": "purchase",
+     "at": "2026-11-15T12:30",
+     "title": "주식회사 우아한형제",
+     "class": "식비",
+     "amount": 21000
+    },
+    {
+     "id": "spending:1043",
+     "kind": "purchase",
+     "at": "2026-11-16T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    },
+    {
+     "id": "spending:1044",
+     "kind": "purchase",
+     "at": "2026-11-17T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    },
+    {
+     "id": "spending:1045",
+     "kind": "purchase",
+     "at": "2026-11-18T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    },
+    {
+     "id": "spending:1046",
+     "kind": "purchase",
+     "at": "2026-11-19T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    },
+    {
+     "id": "spending:1047",
+     "kind": "purchase",
+     "at": "2026-11-20T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    },
+    {
+     "id": "spending:1049",
+     "kind": "purchase",
+     "at": "2026-11-22T12:30",
+     "title": "주식회사 우아한형제",
+     "class": "식비",
+     "amount": 21000
+    }
+   ]
+  },
+  {
+   "at": "2026-11-23T03:00",
+   "tick": "night",
+   "expect": {
+    "notes": [
+     {
+      "textHas": "주말엔 버스 결제가 거의 없다",
+      "status": "candidate"
+     },
+     {
+      "textHas": "일요일엔 배달 주문이 있는 편이다",
+      "status": "candidate"
+     }
+    ],
+    "noNotes": [
+     {
+      "textHas": "버스 결제가 거의 없다"
+     },
+     {
+      "textHas": "배달 주문이 있는 편이다"
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-11-23T07:00",
+   "tick": "predict",
+   "expect": {
+    "predictions": [
+     {
+      "targetHas": "day:purchase/교통@버스:2026-11-23",
+      "minProb": 0.9,
+      "scored": false
+     },
+     {
+      "targetHas": "day:delivery:2026-11-23",
+      "maxProb": 0.1
+     }
+    ],
+    "now": {
+     "textNot": [
+      "평소대로라면"
+     ]
+    }
+   }
+  },
+  {
+   "at": "2026-11-23T08:31",
+   "occur": [
+    {
+     "id": "spending:bus-2026-11-23",
+     "kind": "purchase",
+     "at": "2026-11-23T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    }
+   ]
+  },
+  {
+   "at": "2026-11-24T00:04",
+   "advance": "2m",
+   "expect": {
+    "predictions": [
+     {
+      "targetHas": "day:purchase/교통@버스:2026-11-23",
+      "scored": true,
+      "outcome": true
+     },
+     {
+      "targetHas": "day:delivery:2026-11-23",
+      "scored": true,
+      "outcome": false,
+      "surprise": false
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-11-24T03:00",
+   "tick": "night"
+  },
+  {
+   "at": "2026-11-24T07:00",
+   "tick": "predict",
+   "expect": {
+    "predictions": [
+     {
+      "targetHas": "day:purchase/교통@버스:2026-11-24",
+      "minProb": 0.9,
+      "scored": false
+     },
+     {
+      "targetHas": "day:delivery:2026-11-24",
+      "maxProb": 0.1
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-11-24T08:31",
+   "occur": [
+    {
+     "id": "spending:bus-2026-11-24",
+     "kind": "purchase",
+     "at": "2026-11-24T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    }
+   ]
+  },
+  {
+   "at": "2026-11-25T00:04",
+   "advance": "2m",
+   "expect": {
+    "predictions": [
+     {
+      "targetHas": "day:purchase/교통@버스:2026-11-24",
+      "scored": true,
+      "outcome": true
+     },
+     {
+      "targetHas": "day:delivery:2026-11-24",
+      "scored": true,
+      "outcome": false,
+      "surprise": false
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-11-25T03:00",
+   "tick": "night"
+  },
+  {
+   "at": "2026-11-25T07:00",
+   "tick": "predict",
+   "expect": {
+    "predictions": [
+     {
+      "targetHas": "day:purchase/교통@버스:2026-11-25",
+      "minProb": 0.9,
+      "scored": false
+     },
+     {
+      "targetHas": "day:delivery:2026-11-25",
+      "maxProb": 0.1
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-11-25T08:31",
+   "occur": [
+    {
+     "id": "spending:bus-2026-11-25",
+     "kind": "purchase",
+     "at": "2026-11-25T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    }
+   ]
+  },
+  {
+   "at": "2026-11-26T00:04",
+   "advance": "2m",
+   "expect": {
+    "predictions": [
+     {
+      "targetHas": "day:purchase/교통@버스:2026-11-25",
+      "scored": true,
+      "outcome": true
+     },
+     {
+      "targetHas": "day:delivery:2026-11-25",
+      "scored": true,
+      "outcome": false,
+      "surprise": false
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-11-26T03:00",
+   "tick": "night",
+   "expect": {
+    "notes": [
+     {
+      "textHas": "주말엔 버스 결제가 거의 없다",
+      "status": "hypothesis",
+      "minConf": 0.8
+     },
+     {
+      "textHas": "일요일엔 배달 주문이 있는 편이다",
+      "status": "hypothesis"
+     }
+    ]
+   }
+  },
+  {
+   "at": "2026-11-26T07:00",
+   "tick": "predict",
+   "expect": {
+    "now": {
+     "textHas": [
+      "평소대로라면 오늘 있을 일",
+      "버스 결제(보통 08:30)"
+     ]
+    }
+   }
+  },
+  {
+   "at": "2026-11-26T08:31",
+   "occur": [
+    {
+     "id": "spending:bus-2026-11-26",
+     "kind": "purchase",
+     "at": "2026-11-26T08:30",
+     "title": "버스",
+     "class": "교통",
+     "amount": 1500
+    }
+   ],
+   "expect": {
+    "now": {
+     "textNot": [
+      "버스 결제"
+     ]
+    }
+   }
+  }
+ ]
+}

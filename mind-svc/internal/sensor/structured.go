@@ -230,7 +230,9 @@ func (s *Structured) Workout(ctx context.Context) error {
 	if err := s.get(ctx, s.WorkoutURL+"/workout", &book); err != nil {
 		return err
 	}
-	since := s.Now().Add(-s.back())
+	// The workout prediction reads four weeks of them: the log comes whole,
+	// so reading further back costs nothing.
+	since := s.Now().Add(-max(s.back(), workoutBack))
 	cutoff := s.Now().In(s.Loc).AddDate(-1, 0, 0).Format("2006-01-02")
 	for _, w := range book.Sessions {
 		if w.Date >= cutoff {
@@ -280,6 +282,9 @@ type set struct {
 	Done   bool    `json:"done"`
 	Warmup bool    `json:"warmup"`
 }
+
+// workoutBack is how far back workouts are read, at least.
+const workoutBack = 60 * 24 * time.Hour
 
 func (s *Structured) back() time.Duration {
 	if s.Back > 0 {
@@ -445,8 +450,47 @@ func (s *Structured) Calendar(ctx context.Context) error {
 	}
 	if wide {
 		s.wideAt = s.Now()
+		// Copies left before 2026-10-20, when every night re-made a past
+		// entry's plan: once an hour, over the last three months.
+		if err := s.dedupeCalendar(ctx, now.AddDate(0, -3, 0).Format("2006-01-02"), to); err != nil {
+			return err
+		}
 	}
 	return s.SyncCalendar(ctx, near, from, to)
+}
+
+// dedupeCalendar keeps one plan for each calendar entry between from and
+// to - the first read - and calls off the other copies. Called off by the
+// calendar's reader, a copy takes nothing off the calendar with it.
+func (s *Structured) dedupeCalendar(ctx context.Context, from, to string) error {
+	plans, err := s.Store.PlansOn(ctx, from, to)
+	if err != nil {
+		return err
+	}
+	byCal := map[string][]model.Entity{}
+	for _, p := range plans {
+		if p.Room == CalendarRoom && p.State.CalendarID != "" && p.State.Status != model.Cancelled {
+			byCal[p.State.CalendarID] = append(byCal[p.State.CalendarID], p)
+		}
+	}
+	for _, copies := range byCal {
+		if len(copies) < 2 {
+			continue
+		}
+		slices.SortFunc(copies, func(a, b model.Entity) int {
+			if c := a.CreatedAt.Compare(b.CreatedAt); c != 0 {
+				return c
+			}
+			return strings.Compare(a.ID, b.ID)
+		})
+		for _, p := range copies[1:] {
+			if _, _, err := s.World.Update(ctx, p.ID, func(st *model.State) bool { st.Status = model.Cancelled; return true },
+				world.Meta{Actor: "sensor:calendar", Why: "같은 캘린더 항목의 중복"}); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // SyncCalendar brings the world model in step with the calendar's entries
@@ -499,11 +543,17 @@ func (s *Structured) syncEntry(ctx context.Context, ev entry, linked []model.Ent
 	meta := world.Meta{Actor: "sensor:calendar", Why: "캘린더"}
 	var own *model.Entity
 	spoken := false
+	// A plan that is over still is its entry: the night marks a past plan
+	// done, and a done one not counted here was read as missing and made
+	// again, every night for as long as the entry was read (2026-10-20).
 	for i, p := range linked {
+		if p.State.Status == model.Cancelled {
+			continue
+		}
 		switch {
-		case p.Room != CalendarRoom && p.Live():
+		case p.Room != CalendarRoom:
 			spoken = true
-		case p.Room == CalendarRoom && p.Live():
+		case own == nil || p.CreatedAt.Before(own.CreatedAt):
 			own = &linked[i]
 		}
 	}
@@ -600,16 +650,16 @@ var classes = []struct {
 	words []string
 }{
 	{"캠핑", []string{"캠핑", "글램핑", "차박"}},
-	{"여행", []string{"여행", "제주", "부산", "강릉", "속초", "해외", "출국", "숙소"}},
+	{"여행", []string{"여행", "제주", "부산", "강릉", "속초", "해외", "출국", "숙소", "호캉스"}},
 	{"데이트", []string{"데이트", "💕", "❤"}},
 	{"회식", []string{"회식", "송년회", "워크샵"}},
 	{"경조사", []string{"결혼식", "돌잔치", "장례", "조문"}},
-	{"기념일", []string{"기념일", "생일", "주년", "100일", "200일", "300일", "500일", "1000일"}},
-	{"병원", []string{"병원", "치과", "진료", "검진", "의원", "약속 진료"}},
+	{"기념일", []string{"기념일", "생일", "생신", "주년", "100일", "200일", "300일", "500일", "1000일"}},
+	{"병원", []string{"병원", "치과", "진료", "검진", "의원", "약속 진료", "주사", "접종"}},
 	{"운동", []string{"PT", "헬스", "운동", "필라테스", "요가", "클라이밍", "러닝"}},
-	{"공연", []string{"영화", "공연", "콘서트", "뮤지컬", "전시"}},
+	{"공연", []string{"영화", "공연", "콘서트", "뮤지컬", "전시", "야구", "축구", "페스티벌", "페어"}},
 	{"업무", []string{"회의", "미팅", "면접", "발표", "출장"}},
-	{"식사", []string{"저녁", "점심", "브런치", "식사", "밥", "술"}},
+	{"식사", []string{"저녁", "점심", "브런치", "식사", "밥", "술", "치킨", "삼겹살", "고기"}},
 	{"모임", []string{"모임", "동창", "정모"}},
 	{"쇼핑", []string{"쇼핑", "장보기"}},
 }

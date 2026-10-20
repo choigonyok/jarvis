@@ -14,8 +14,10 @@ package reflect
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -76,38 +78,111 @@ type Result struct {
 	Notes      []model.Note  `json:"notes"`
 }
 
-// Night reflects on the surprises not reflected on yet. Without surprises
-// it asks no model.
+// Night reflects on the surprises not reflected on yet: the workout
+// predictor's, and those of the engine's daily rules that have come true
+// often enough to be shown - a candidate's misses are its own test, not a
+// puzzle. At most a few things a night, those with the most surprises.
+// Without surprises it asks no model.
 func (r *Reflector) Night(ctx context.Context) ([]Result, error) {
 	now := r.Now()
 	scored, err := r.St.Predictions(ctx, now.Add(-14*24*time.Hour), now)
 	if err != nil {
 		return nil, err
 	}
-	var surprises []model.Prediction
+	by := map[string][]model.Prediction{}
+	var order []string
 	for _, p := range scored {
-		if p.Surprise && !p.Reflected && strings.HasPrefix(p.Target, "workout:") {
-			surprises = append(surprises, p)
+		if !p.Surprise || p.Reflected {
+			continue
 		}
-	}
-	if len(surprises) == 0 {
-		return nil, nil
-	}
-	res, err := r.workout(ctx, surprises)
-	for _, p := range surprises {
-		p.Reflected = true
-		if err := r.St.PutPrediction(ctx, p); err != nil {
-			return nil, err
+		key := ""
+		switch {
+		case strings.HasPrefix(p.Target, "workout:"):
+			key = "workout"
+		case strings.HasPrefix(p.Target, "day:") && p.Key != "" && len(p.Basis) > 0:
+			if n, err := r.St.Note(ctx, p.Basis[0]); err == nil && predict.Trusted(n) {
+				key = p.Key
+			}
 		}
+		if key == "" {
+			continue
+		}
+		if by[key] == nil {
+			order = append(order, key)
+		}
+		by[key] = append(by[key], p)
 	}
-	if err != nil {
-		return nil, err
+	sort.SliceStable(order, func(i, j int) bool { return len(by[order[i]]) > len(by[order[j]]) })
+	if len(order) > maxTargets {
+		order = order[:maxTargets]
 	}
-	return []Result{res}, nil
+	var out []Result
+	var errs []error
+	for _, key := range order {
+		res, err := r.reflectOn(ctx, key, by[key])
+		for _, p := range by[key] {
+			p.Reflected = true
+			if err := r.St.PutPrediction(ctx, p); err != nil {
+				return out, err
+			}
+		}
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		out = append(out, res)
+	}
+	return out, errors.Join(errs...)
 }
 
-func (r *Reflector) workout(ctx context.Context, surprises []model.Prediction) (Result, error) {
-	res := Result{Target: "workout", Surprises: len(surprises)}
+// maxTargets is how many things a night reflects on, at most: each is a
+// model call.
+const maxTargets = 2
+
+// dayOf is the day a surprise was about.
+func (r *Reflector) dayOf(p model.Prediction) string {
+	if strings.HasPrefix(p.Target, "workout:") {
+		return strings.TrimPrefix(p.Target, "workout:")
+	}
+	if p.From != nil {
+		return p.From.In(r.Loc).Format("2006-01-02")
+	}
+	return p.Due.In(r.Loc).Format("2006-01-02")
+}
+
+// target is what a reflection is about: the thing, in words, and whether a
+// day had it.
+type target struct {
+	key, label string
+	hit        func(predict.Day) bool
+}
+
+func (r *Reflector) target(ctx context.Context, key string) target {
+	if key == "workout" {
+		return target{key, "운동", func(d predict.Day) bool { return d.Workout }}
+	}
+	seen := map[string]string{}
+	thing := func(name string) string {
+		if c, ok := seen[name]; ok {
+			return c
+		}
+		c, _ := r.St.ThingClass(ctx, name)
+		seen[name] = c
+		return c
+	}
+	return target{key, predict.Label(key), func(d predict.Day) bool {
+		for _, o := range d.Occ {
+			if slices.Contains(predict.Keys(o, thing), key) {
+				return true
+			}
+		}
+		return false
+	}}
+}
+
+func (r *Reflector) reflectOn(ctx context.Context, key string, surprises []model.Prediction) (Result, error) {
+	res := Result{Target: key, Surprises: len(surprises)}
+	tg := r.target(ctx, key)
 	end := dayStart(r.Now(), r.Loc)
 	days, err := r.Predict.Days(ctx, end.Add(-window), end)
 	if err != nil {
@@ -117,11 +192,17 @@ func (r *Reflector) workout(ctx context.Context, surprises []model.Prediction) (
 	// weekdays with weekdays.
 	surprised := map[string]bool{}
 	sortOf := map[bool]int{}
+	missed := 0 // expected and did not come, against came unexpected
 	for _, p := range surprises {
-		d := strings.TrimPrefix(p.Target, "workout:")
+		d := r.dayOf(p)
 		surprised[d] = true
 		if t, err := time.ParseInLocation("2006-01-02", d, r.Loc); err == nil {
 			sortOf[weekday(t.Weekday())]++
+		}
+		if p.Prob >= 0.5 {
+			missed++
+		} else {
+			missed--
 		}
 	}
 	wd := sortOf[true] >= sortOf[false]
@@ -134,7 +215,7 @@ func (r *Reflector) workout(ctx context.Context, surprises []model.Prediction) (
 	if r.LLM == nil || !r.LLM.Ready() {
 		return res, nil
 	}
-	answer, err := r.LLM.Complete(llm.WithPurpose(ctx, llm.Reflect), System, r.prompt(pool, surprised))
+	answer, err := r.LLM.Complete(llm.WithPurpose(ctx, llm.Reflect), System, r.prompt(tg, pool, surprised, missed >= 0))
 	if err != nil {
 		return res, err
 	}
@@ -143,15 +224,19 @@ func (r *Reflector) workout(ctx context.Context, surprises []model.Prediction) (
 		return res, err
 	}
 	res.Hypotheses = hs
-	r.test(hs, pool)
+	r.test(hs, pool, tg.hit)
+	scope := "운동"
+	if key != "workout" {
+		scope = tg.label
+	}
 	for _, h := range hs {
 		if !h.Kept {
 			continue
 		}
-		note := model.Note{ID: self.ID("rate", "workout", h.Feature, h.Arg), Text: h.Text, Scope: "운동",
+		note := model.Note{ID: self.ID("rate", key, h.Feature, h.Arg), Text: h.Text, Scope: scope,
 			Confidence: math.Round(math.Min(0.9, 1-h.P)*100) / 100,
-			Evidence:   []string{fmt.Sprintf("%s: %d일 중 %d일 운동, 다른 날 %d일 중 %d일 (p=%.3f)", h.Text, h.With[0], h.With[1], h.Without[0], h.Without[1], h.P)},
-			Rule:       &model.Rule{Kind: "rate", Target: "workout", Feature: h.Feature, Arg: h.Arg, Rate: h.Rate, Base: h.Base, Days: h.With[0]}}
+			Evidence:   []string{fmt.Sprintf("%s: %d일 중 %d일 %s, 다른 날 %d일 중 %d일 (p=%.3f)", h.Text, h.With[0], h.With[1], tg.label, h.Without[0], h.Without[1], h.P)},
+			Rule:       &model.Rule{Kind: "rate", Target: key, Feature: h.Feature, Arg: h.Arg, Rate: h.Rate, Base: h.Base, Days: h.With[0]}}
 		saved, _, err := r.Self.Hold(ctx, note, "밤 성찰: 예측이 틀린 날 "+fmt.Sprint(len(surprises))+"일")
 		if err != nil {
 			return res, err
@@ -169,10 +254,14 @@ func dayStart(t time.Time, loc *time.Location) time.Time {
 }
 
 // prompt shows the surprising days and the others, each as a line of what
-// happened - times, merchants, plans; never message text.
-func (r *Reflector) prompt(pool []predict.Day, surprised map[string]bool) string {
+// happened - times, merchants, places, plans; never message text.
+func (r *Reflector) prompt(tg target, pool []predict.Day, surprised map[string]bool, missed bool) string {
 	var b strings.Builder
-	b.WriteString("목표: 운동(그날 운동 기록이 있는지)\n\n## 특징 목록 (가설은 이 중 하나로)\n")
+	what := tg.label + "(그날 있었는지)"
+	if tg.key == "workout" {
+		what = "운동(그날 운동 기록이 있는지)"
+	}
+	b.WriteString("목표: " + what + "\n\n## 특징 목록 (가설은 이 중 하나로)\n")
 	keys := make([]string, 0, len(predict.Features))
 	for k := range predict.Features {
 		keys = append(keys, k)
@@ -190,6 +279,8 @@ func (r *Reflector) prompt(pool []predict.Day, surprised map[string]bool) string
 				parts = append(parts, fmt.Sprintf("%s %s(%s)", t, o.Title, o.Class))
 			case "workout":
 				parts = append(parts, t+" 운동 "+o.Title)
+			case "visit":
+				parts = append(parts, t+" "+o.Title+" 도착")
 			}
 		}
 		for _, p := range d.Plans {
@@ -204,13 +295,26 @@ func (r *Reflector) prompt(pool []predict.Day, surprised map[string]bool) string
 			parts = append(parts, "날씨 "+sky)
 		}
 		w := []string{"일", "월", "화", "수", "목", "금", "토"}[d.Weekday]
-		mark := "운동함"
-		if !d.Workout {
-			mark = "운동 안 함"
+		mark := tg.label + " 있음"
+		if tg.key == "workout" {
+			mark = "운동함"
+		}
+		if !tg.hit(d) {
+			mark = tg.label + " 없음"
+			if tg.key == "workout" {
+				mark = "운동 안 함"
+			}
 		}
 		return fmt.Sprintf("%s(%s) %s: %s", d.Date, w, mark, strings.Join(parts, ", "))
 	}
-	b.WriteString("\n## 예측이 틀린 날 (운동할 것으로 봤지만 안 함)\n")
+	head := "\n## 예측이 틀린 날 (있을 것으로 봤지만 없음)\n"
+	switch {
+	case tg.key == "workout":
+		head = "\n## 예측이 틀린 날 (운동할 것으로 봤지만 안 함)\n"
+	case !missed:
+		head = "\n## 예측이 틀린 날 (없을 것으로 봤지만 있었음)\n"
+	}
+	b.WriteString(head)
 	for _, d := range pool {
 		if surprised[d.Date] {
 			b.WriteString(line(d) + "\n")
@@ -249,7 +353,7 @@ func parse(answer string) ([]*Hypothesis, error) {
 
 // test checks each hypothesis against the days, then the survivors against
 // each other.
-func (r *Reflector) test(hs []*Hypothesis, pool []predict.Day) {
+func (r *Reflector) test(hs []*Hypothesis, pool []predict.Day, hit func(predict.Day) bool) {
 	for _, h := range hs {
 		h.days = map[string]bool{}
 		for _, d := range pool {
@@ -257,12 +361,12 @@ func (r *Reflector) test(hs []*Hypothesis, pool []predict.Day) {
 			if held {
 				h.days[d.Date] = true
 				h.With[0]++
-				if d.Workout {
+				if hit(d) {
 					h.With[1]++
 				}
 			} else {
 				h.Without[0]++
-				if d.Workout {
+				if hit(d) {
 					h.Without[1]++
 				}
 			}
@@ -308,7 +412,7 @@ func (r *Reflector) test(hs []*Hypothesis, pool []predict.Day) {
 			if a == b || !a.Kept || !b.Kept || jaccard(a.days, b.days) < overlap {
 				continue
 			}
-			ea, eb := r.explains(a, b, pool), r.explains(b, a, pool)
+			ea, eb := r.explains(a, b, pool, hit), r.explains(b, a, pool, hit)
 			if ea && (!eb || rank(a) < rank(b)) {
 				b.Kept, b.Why = false, fmt.Sprintf("교란: '%s'와 같은 날에 겹치고, 그것을 알면 더 설명하는 게 없음", a.Text)
 			}
@@ -319,13 +423,13 @@ func (r *Reflector) test(hs []*Hypothesis, pool []predict.Day) {
 // explains is whether a accounts for b: among the days b held, the rate
 // with a and without a differ, while among the days a held, b makes no
 // difference.
-func (r *Reflector) explains(a, b *Hypothesis, pool []predict.Day) bool {
+func (r *Reflector) explains(a, b *Hypothesis, pool []predict.Day, hit func(predict.Day) bool) bool {
 	rate := func(keep func(predict.Day) bool) (float64, int) {
 		n, k := 0, 0
 		for _, d := range pool {
 			if keep(d) {
 				n++
-				if d.Workout {
+				if hit(d) {
 					k++
 				}
 			}
@@ -378,30 +482,5 @@ func jaccard(a, b map[string]bool) float64 {
 }
 
 // Fisher is the two-sided p of Fisher's exact test on the table
-// [[a b] [c d]]: rows feature / no feature, columns target / no target.
-func Fisher(a, b, c, d int) float64 {
-	n := a + b + c + d
-	row1, col1 := a+b, a+c
-	logp := func(x int) float64 {
-		return lchoose(row1, x) + lchoose(n-row1, col1-x) - lchoose(n, col1)
-	}
-	observed := logp(a)
-	p := 0.0
-	lo, hi := max(0, col1-(n-row1)), min(row1, col1)
-	for x := lo; x <= hi; x++ {
-		if lp := logp(x); lp <= observed+1e-9 {
-			p += math.Exp(lp)
-		}
-	}
-	return math.Min(1, p)
-}
-
-func lchoose(n, k int) float64 {
-	if k < 0 || k > n {
-		return math.Inf(-1)
-	}
-	a, _ := math.Lgamma(float64(n + 1))
-	b, _ := math.Lgamma(float64(k + 1))
-	c, _ := math.Lgamma(float64(n - k + 1))
-	return a - b - c
-}
+// [[a b] [c d]] (predict.Fisher).
+func Fisher(a, b, c, d int) float64 { return predict.Fisher(a, b, c, d) }
