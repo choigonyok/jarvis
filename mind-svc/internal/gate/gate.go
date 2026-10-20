@@ -141,7 +141,7 @@ func (g *Gate) Submit(ctx context.Context, in model.Intent) (model.Intent, error
 		in.Tier, in.Why = "digest", "알려 둘 일"
 		if in.Urgent {
 			in.Decision, in.Tier, in.Why = model.Notify, "now", "지금 알 일"
-			if g.overBudget(ctx) {
+			if in.Moment == "" && g.overBudget(ctx) {
 				in.Decision, in.Tier, in.Why = model.Digest, "digest", "오늘 알림 한도를 넘어 저녁 요약으로"
 			}
 		}
@@ -417,9 +417,13 @@ func (g *Gate) tell(ctx context.Context, in model.Intent, title, body string) {
 	if in.Tier == "now" {
 		level = "warn"
 	}
+	kind := ""
+	if in.Moment != "" && in.Tier == "now" {
+		kind = "remind." + in.Moment
+	}
 	g.notify.Notify(ctx, act.Notice{
 		Title: title, Body: strings.TrimSpace(body), URL: g.link(in),
-		Tier: in.Tier, Level: level, Key: "mind:" + in.ID, At: g.now(),
+		Tier: in.Tier, Level: level, Key: "mind:" + in.ID, At: g.now(), Kind: kind,
 	})
 }
 

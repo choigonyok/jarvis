@@ -12,6 +12,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/llm"
 	"github.com/choigonyok/jarvis/mind-svc/internal/memory"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+	"github.com/choigonyok/jarvis/mind-svc/internal/moments"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 )
@@ -45,6 +46,8 @@ func (m *Mind) Replay(ctx context.Context, client llm.Client, after int64, limit
 	// Facts stay in the replay: a memory of its own, nothing sent to the
 	// real one, no plan announced to the agent.
 	opts.Memory = memory.NewFake(clk.Now)
+	// Reminders too: a replayed band or move waits in the replay's own.
+	opts.Reminders = moments.NewMemory()
 	r := New(opts)
 	rctx, cancel := context.WithCancel(ctx)
 	defer cancel()

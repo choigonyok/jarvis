@@ -41,6 +41,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/memory"
 	"github.com/choigonyok/jarvis/mind-svc/internal/mind"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+	"github.com/choigonyok/jarvis/mind-svc/internal/moments"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
 	"github.com/choigonyok/jarvis/mind-svc/internal/sensor"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
@@ -84,6 +85,8 @@ func main() {
 		mode                  = "memory"
 		settle                = duration("MIND_SETTLE", 3*time.Second)
 	)
+	// What is said at a moment waits here; in memory on a laptop.
+	var reminders moments.Store = moments.NewMemory()
 	if dsn == "" {
 		st = store.NewMemory()
 		memLog = obs.NewMemoryLog(log)
@@ -120,6 +123,7 @@ func main() {
 			os.Exit(1)
 		}
 		st = store.NewPostgres(pool, key)
+		reminders = moments.NewPostgres(pool)
 		// Quiet: the skills and the gate run and the console shows what they
 		// would say, but no notice reaches a phone - the agent's cards still
 		// do that, until the two gates are one.
@@ -176,10 +180,14 @@ func main() {
 		assets = mind.AssetsHTTP{URL: url, Token: token}
 		orders = act.AssetsOrders{URL: url, Token: token}
 	}
-	// Travel: how long the usual ways take, from the stays (context-svc).
+	// Travel: how long the usual ways take, from the stays (context-svc);
+	// here: the regions the operator is in now, for a reminder that counts
+	// being home already as arriving.
 	var travel mind.Travel
+	var here func(context.Context) ([]moments.Visit, error)
 	if url := os.Getenv("CONTEXT_URL"); mode == "stack" && url != "" {
 		travel = mind.TravelHTTP{URL: url, Token: token}
+		here = mind.HereHTTP{URL: url, Token: token}.Visits
 	}
 	// Jobs: a cart job goes to jobs-svc (the agent's browser runs it).
 	var jobs act.Jobs
@@ -217,7 +225,7 @@ func main() {
 		Policy: gate.DefaultPolicy(), URL: getenv("MIND_UI_URL", "http://localhost:8102/"), Mode: mode,
 		MessageRetain: time.Duration(atoiOr(getenv("MIND_MESSAGE_RETAIN_DAYS", "365"), 365)) * 24 * time.Hour,
 		Memory:        mem, Photos: photos, Jobs: jobs, Assets: assets, Orders: orders, Travel: travel,
-		Weather: sky, DailyUSD: number("MIND_DAILY_USD", 1.0),
+		Weather: sky, DailyUSD: number("MIND_DAILY_USD", 1.0), Reminders: reminders, Here: here,
 	})
 	if !client.Ready() {
 		log.Warn("LLM 키(MIND_ANTHROPIC_API_KEY)가 없어 대화를 해석하지 않습니다. 메시지는 쌓아 둡니다.")
@@ -226,7 +234,7 @@ func main() {
 		go memLog.Run(ctx, m.Handle)
 	}
 	if events != nil {
-		go events.Subscribe(ctx, "mind", getenv("MIND_SELF_URL", "http://mind:8102/consume"), []string{obs.MessageObserved, "action.*", mind.AssetsBand}, log)
+		go events.Subscribe(ctx, "mind", getenv("MIND_SELF_URL", "http://mind:8102/consume"), []string{obs.MessageObserved, "action.*", mind.AssetsBand, mind.LocationEnter, mind.LocationLeave}, log)
 	}
 	if mode == "stack" {
 		exclude := cfg.Noise

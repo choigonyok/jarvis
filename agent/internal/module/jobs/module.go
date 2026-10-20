@@ -371,7 +371,7 @@ func (m *Module) Handler() http.Handler {
 		Name: "create_job",
 		Description: "시간이 걸리거나 나중에 다시 봐야 하는 일, 웹사이트에서 백그라운드로 해야 하는 일을 작업으로 맡긴다. " +
 			"작업은 백그라운드에서 브라우저로 진행되고, 필요하면 스스로 주기적으로 다시 확인하며, 운영자에게 카드로 묻거나 로그인을 요청한다. " +
-			"진행 상황은 작업 탭에서 보인다.",
+			"진행 상황은 작업 탭에서 보인다. 정해진 시각이나 집 도착·출발 때 알려 주기만 하는 일은 작업이 아니라 set_reminder 로 맡긴다(작업은 폰 푸시를 못 보내고 위치를 모른다).",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in CreateInput) (*mcp.CallToolResult, any, error) {
 		for i, p := range in.Photos {
 			if j := strings.LastIndex(p, "/"); j >= 0 {

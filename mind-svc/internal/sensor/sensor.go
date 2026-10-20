@@ -238,7 +238,7 @@ func (t turn) message() (model.Message, bool) {
 		text = strings.TrimSpace(strings.Join(t.Paragraphs, "\n"))
 	}
 	msg := model.Message{
-		Ref: "chat:" + t.ID, Source: "chat", Room: "chat:owner", RoomName: "jarvis",
+		Ref: "chat:" + t.ID, Source: "chat", Room: model.OwnerRoom, RoomName: "jarvis",
 		IsMine: t.Role == "user", SentAt: at, Text: text,
 	}
 	if !msg.IsMine {

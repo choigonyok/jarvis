@@ -20,7 +20,10 @@ func (Loops) OnTick(context.Context, View, string) Result { return Result{} }
 
 func (Loops) OnChange(_ context.Context, v View, e model.Entity, _ []model.Change) Result {
 	r := Result{CancelTimers: true}
-	if !e.Live() || e.State.Due == "" {
+	// The assistant's own promise is told by the reminder or the job it
+	// became - not again, as "Jarvis가 하기로 한 것" at 09:00 on the day,
+	// knowing neither its time nor its changes (2026-10-20).
+	if !e.Live() || e.State.Due == "" || e.AssistantsPromise() {
 		return r
 	}
 	if at, ok := dueAt(e.State.Due, v.Loc()); ok {
@@ -40,7 +43,7 @@ func (Loops) OnChange(_ context.Context, v View, e model.Entity, _ []model.Chang
 }
 
 func (Loops) OnTimer(_ context.Context, v View, e model.Entity, t model.Timer) Result {
-	if t.Name != "due" || !e.Live() {
+	if t.Name != "due" || !e.Live() || e.AssistantsPromise() {
 		return Result{}
 	}
 	title := e.State.Title
@@ -122,7 +125,7 @@ func (Brief) OnTick(ctx context.Context, v View, tick string) Result {
 	loops, _ := v.Entities(ctx, model.KindLoop, "", true)
 	m := 0
 	for _, l := range loops {
-		if l.State.Due != "" && l.State.Due[:10] <= tomorrow {
+		if l.State.Due != "" && l.State.Due[:10] <= tomorrow && !l.AssistantsPromise() {
 			m++
 			lines = append(lines, "· 할 일: "+l.State.Title+" (기한 "+dueText(l.State.Due, v.Loc())+")")
 		}

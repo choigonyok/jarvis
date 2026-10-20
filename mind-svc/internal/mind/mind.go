@@ -27,6 +27,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/llm"
 	"github.com/choigonyok/jarvis/mind-svc/internal/memory"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+	"github.com/choigonyok/jarvis/mind-svc/internal/moments"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
 	"github.com/choigonyok/jarvis/mind-svc/internal/predict"
 	"github.com/choigonyok/jarvis/mind-svc/internal/prefs"
@@ -76,6 +77,12 @@ type Options struct {
 	// MessageRetain is how long message text is kept; 0 keeps it forever.
 	// What was worth keeping has become facts and plans by then.
 	MessageRetain time.Duration
+	// Reminders is where what is said at a moment waits (moments); nil:
+	// no reminders, and a portfolio out of band is raised at once.
+	Reminders moments.Store
+	// Here is the regions the operator is in now (context-svc); nil: not
+	// known, and being there already never counts as arriving.
+	Here func(ctx context.Context) ([]moments.Visit, error)
 }
 
 type Mind struct {
@@ -92,10 +99,13 @@ type Mind struct {
 	Predict  *predict.Predictor
 	Reflect  *reflect.Reflector
 	Prefs    *prefs.Prefs
+	// Moments says reminders at their moment; nil without Reminders.
+	Moments *moments.Service
 	// nightly and mornings are further steps of the night and the morning,
 	// in order.
 	nightly  []func(ctx context.Context) error
 	mornings []func(ctx context.Context) error
+	notifier act.Notifier
 }
 
 func New(o Options) *Mind {
@@ -151,6 +161,10 @@ func New(o Options) *Mind {
 		act.SettleActuator{Drafts: drafter}, act.PhotosActuator{Photos: photos}, act.CartActuator{Jobs: jobs},
 		act.DraftActuator{Drafts: drafter}, act.ReviewActuator{}, act.RebalanceActuator{Orders: o.Orders})
 	m.Gate = gate.New(o.Store, acts, notifier, o.Log, o.Policy, o.Loc, o.Now, o.URL, o.Logger)
+	m.notifier = notifier
+	if o.Reminders != nil {
+		m.Moments = &moments.Service{St: o.Reminders, Now: o.Now, Loc: o.Loc, Here: o.Here, Say: m.say, Out: o.Logger}
+	}
 	m.Prefs = &prefs.Prefs{St: o.Store, LLM: o.LLM, Now: o.Now}
 	m.Gate.OnDecide = func(ctx context.Context, in model.Intent) {
 		m.learn(ctx, in)
@@ -193,7 +207,9 @@ func (m *Mind) Handle(ctx context.Context, o obs.Observation) error {
 	case obs.ActionExecuted, obs.ActionUndone:
 		return m.Actions.Handle(ctx, o)
 	case AssetsBand:
-		return m.portfolioBand(ctx, o)
+		return m.band(ctx, o)
+	case LocationEnter, LocationLeave:
+		return m.onLocation(ctx, o)
 	case obs.OccurrenceObserved:
 		var ref obs.OccurrenceRef
 		if err := json.Unmarshal(o.Data, &ref); err != nil {
@@ -240,6 +256,9 @@ func (m *Mind) Run(ctx context.Context, every time.Duration) {
 	go m.daily(ctx, 30*time.Second, "tick:review", reviewAt, m.reviews)
 	if m.Remember != nil {
 		go m.Remember.Run(ctx, 15*time.Second)
+	}
+	if m.Moments != nil {
+		go m.Moments.Run(ctx, 30*time.Second)
 	}
 }
 
@@ -595,9 +614,16 @@ func (m *Mind) DecideLink(ctx context.Context, from, to, rel, state string) (mod
 }
 
 // Situation is the world model's "right now", which the conversation is
-// shown every turn.
+// shown every turn - with the reminders waiting.
 func (m *Mind) Situation(ctx context.Context) (world.Situation, error) {
-	return m.World.Situation(ctx, m.Opts.Now(), m.Opts.Loc)
+	s, err := m.World.Situation(ctx, m.Opts.Now(), m.Opts.Loc)
+	if err != nil {
+		return s, err
+	}
+	if lines := m.reminderLines(ctx); lines != "" {
+		s.Text += "\n" + lines
+	}
+	return s, nil
 }
 
 // noticeLog lets a notice travel through the log as an event with wording,

@@ -6,6 +6,7 @@ package model
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -48,6 +49,26 @@ func (e Entity) Live() bool {
 	switch e.State.Status {
 	case Cancelled, Done, Closed:
 		return false
+	}
+	return true
+}
+
+// OwnerRoom is the operator's own conversation with the assistant
+// (chat-svc), read as one more room.
+const OwnerRoom = "chat:owner"
+
+// AssistantsPromise is whether a loop is the assistant's own promise in its
+// conversation with the operator ("알려 드릴게요"): what it promised there is
+// a reminder or a job of its own, which tells it at its moment. Someone
+// else's promise passed on there names them.
+func (e Entity) AssistantsPromise() bool {
+	if e.Kind != KindLoop || e.Room != OwnerRoom || e.State.Owner != "them" {
+		return false
+	}
+	for _, p := range e.State.People {
+		if !strings.Contains(p, "Jarvis") && !strings.Contains(p, "자비스") && p != "비서" {
+			return false
+		}
 	}
 	return true
 }
@@ -387,6 +408,12 @@ type Intent struct {
 	// entry a reminder is about, the 자산 screen's allocation. Empty: the
 	// console's front (the gate's url).
 	Link string `json:"link,omitempty"`
+	// Moment is an urgent notice bound to a moment the operator's own
+	// movement made - leaving home with rain ahead ("rain"): it goes out
+	// as remind.<moment>, which rings then even in quiet hours (someone
+	// walking out of the door is plainly not asleep), and the day's push
+	// budget does not hold it for the evening, when it would be no use.
+	Moment string `json:"moment,omitempty"`
 
 	Decision  string `json:"decision"`            // execute | notify | ask | digest | drop
 	Why       string `json:"why,omitempty"`       // why the gate decided so

@@ -36,6 +36,7 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/module/messages"
 	mindmod "github.com/choigonyok/jarvis/agent/internal/module/mind"
 	"github.com/choigonyok/jarvis/agent/internal/module/place"
+	"github.com/choigonyok/jarvis/agent/internal/module/remind"
 	"github.com/choigonyok/jarvis/agent/internal/module/spending"
 	"github.com/choigonyok/jarvis/agent/internal/module/vault"
 	"github.com/choigonyok/jarvis/agent/internal/suggest"
@@ -180,6 +181,13 @@ func main() {
 		mcpMounts["/mcp/"+messages.ServerName] = messagesModule.Handler()
 		cfg.ModuleMCPURLs[messages.ServerName] = cfg.PublicMCPURL + "/" + messages.ServerName
 		cfg.Allow(messages.Tools...)
+
+		// 리마인드: "몇 시에 / 집에 가면 / 나갈 때 알려줘". mind 가 그때 폰으로 알린다.
+		remindModule := remind.New(cfg.MindURL, cfg.APIToken)
+		modules.Add(remindModule)
+		mcpMounts["/mcp/"+remind.ServerName] = remindModule.Handler()
+		cfg.ModuleMCPURLs[remind.ServerName] = cfg.PublicMCPURL + "/" + remind.ServerName
+		cfg.Allow(remind.Tools...)
 	}
 
 	startCtx, cancelStart := context.WithTimeout(context.Background(), 10*time.Second)

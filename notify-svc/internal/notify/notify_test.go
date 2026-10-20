@@ -162,6 +162,33 @@ func TestBusyHoldsUntilItEnds(t *testing.T) {
 	}
 }
 
+// A moment - the time asked for, the door - rings then: quiet hours and a
+// drive do not hold it, the category turned off does.
+func TestMomentRingsThroughQuietHoursAndBusy(t *testing.T) {
+	svc, st, snd, _ := setup("2026-10-10 06:00")
+	ctx := context.Background()
+	svc.Accept(ctx, ev("remind.asked", "now", "6시에 깨워 달라고 하셨어요", ""))
+	svc.Accept(ctx, ev("mind.notice", "now", "아침 브리핑", ""))
+	if len(snd.sent) != 1 || snd.sent[0].Title != "6시에 깨워 달라고 하셨어요" {
+		t.Fatalf("부탁한 시각에는 방해 금지 시간에도 울려야 합니다: %+v", snd.sent)
+	}
+	svc.Busy(true, "운전")
+	svc.Accept(ctx, ev("remind.rain", "now", "15시부터 비 · 우산 챙기세요", ""))
+	if len(snd.sent) != 2 {
+		t.Fatalf("운전 중에도 울려야 합니다: %+v", snd.sent)
+	}
+	svc.Busy(false, "")
+	set := svc.Settings(ctx, store.Owner)
+	set.Muted = []string{"remind"}
+	if _, err := svc.SaveSettings(ctx, store.Owner, set); err != nil {
+		t.Fatal(err)
+	}
+	svc.Accept(ctx, ev("remind.asked", "now", "꺼 둔 분류", ""))
+	if len(snd.sent) != 2 || st.rows[len(st.rows)-1].DeliveredAt == nil {
+		t.Fatalf("꺼 둔 분류는 알림함에만: %+v", snd.sent)
+	}
+}
+
 func TestDigestOnceAtItsTime(t *testing.T) {
 	svc, st, snd, now := setup("2026-10-10 12:00")
 	ctx := context.Background()

@@ -404,16 +404,32 @@ type Notice struct {
 	Level string    `json:"level,omitempty"`
 	Key   string    `json:"key,omitempty"`
 	At    time.Time `json:"at"`
+	// Kind is the event it goes out as, whose category notify-svc pushes
+	// by: mind.notice when empty; remind.* for what is said at its moment
+	// (what the operator asked for, the rain at the door), which rings even
+	// in quiet hours.
+	Kind string `json:"kind,omitempty"`
 }
 
 type Notifier interface {
 	Notify(ctx context.Context, n Notice)
 }
 
+// Sender is a notifier that says whether a notice went out, for whoever
+// keeps that it was said.
+type Sender interface {
+	Send(ctx context.Context, n Notice) error
+}
+
 // MemoryNotifier keeps the last notices for the console.
 type MemoryNotifier struct {
 	mu  sync.Mutex
 	all []Notice
+}
+
+func (m *MemoryNotifier) Send(ctx context.Context, n Notice) error {
+	m.Notify(ctx, n)
+	return nil
 }
 
 func (m *MemoryNotifier) Notify(_ context.Context, n Notice) {
@@ -440,7 +456,7 @@ func (m *MemoryNotifier) All() []Notice {
 }
 
 // Appender is the observation log's append, which is how a notice reaches
-// notify-svc in the stack: an event with wording, kind mind.*.
+// notify-svc in the stack: an event with wording, kind mind.* or remind.*.
 type Appender interface {
 	AppendNotice(ctx context.Context, kind string, n Notice) error
 }
@@ -452,7 +468,15 @@ type EventsNotifier struct {
 }
 
 func (e EventsNotifier) Notify(ctx context.Context, n Notice) {
-	if err := e.Log.AppendNotice(ctx, "mind.notice", n); err != nil {
+	if err := e.Send(ctx, n); err != nil {
 		e.Out.Warn("알림을 보내지 못했습니다", "err", err)
 	}
+}
+
+func (e EventsNotifier) Send(ctx context.Context, n Notice) error {
+	kind := n.Kind
+	if kind == "" {
+		kind = "mind.notice"
+	}
+	return e.Log.AppendNotice(ctx, kind, n)
 }

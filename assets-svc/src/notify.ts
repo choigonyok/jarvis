@@ -37,12 +37,15 @@ export function eventsOf(p: Portfolio, now = new Date()): Event[] {
   // web/src/lib/focus.ts).
   const at = (focus: string) => `/assets?focus=${encodeURIComponent(focus)}`;
 
+  // Out of band: kept in the inbox only. mind-svc reads the event and brings
+  // the rebalance up in the evening at home, after work (its moments) - a
+  // line in the evening's summary as well would say it twice.
   for (const r of p.allocation.rows) {
     if (r.inBand) continue;
     const pp = Math.round((r.current - r.target) * 100);
     add({
       kind: "assets.band",
-      tier: "digest",
+      tier: "log",
       level: "warn",
       url: at(`allocation:${r.id}`),
       title: `${r.label} 비중이 범위를 벗어났어요`,

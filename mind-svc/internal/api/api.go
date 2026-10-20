@@ -30,6 +30,10 @@
 //	POST /api/replay                  {after, limit} the log through a fresh loop, in memory
 //	GET  /api/recall?q=&person=       what is known: world model + long-term memory
 //	POST /api/facts/flush             send the ledger's pending facts to memory now
+//	GET  /api/reminders?all=1         the reminders waiting (all: and those said, cancelled or expired in three days)
+//	POST /api/reminders               {text, body?, at?, place?, move?, after?, until?, url?} one to say at its moment
+//	PATCH /api/reminders/{id}         {text?, body?, at?, place?, move?, after?, until?, clear?} change it; a said one waits again
+//	DELETE /api/reminders/{id}        cancel it
 //
 // /api and the console need a token unless open: in the stack the port is
 // bound to the host's loopback, and a laptop run has nothing to protect. The
@@ -225,6 +229,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/replay", s.auth(false, s.replay))
 	mux.HandleFunc("GET /api/recall", s.auth(false, s.recall))
 	mux.HandleFunc("POST /api/facts/flush", s.auth(false, s.flush))
+	mux.HandleFunc("GET /api/reminders", s.auth(false, s.listReminders))
+	mux.HandleFunc("POST /api/reminders", s.auth(false, s.setReminder))
+	mux.HandleFunc("PATCH /api/reminders/{id}", s.auth(false, s.changeReminder))
+	mux.HandleFunc("DELETE /api/reminders/{id}", s.auth(false, s.cancelReminder))
 	return mux
 }
 

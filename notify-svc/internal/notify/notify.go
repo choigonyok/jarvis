@@ -60,6 +60,7 @@ var Categories = []Category{
 	{"approval", "결재 대기", "에이전트가 승인을 기다릴 때"},
 	{"suggestion", "AI 제안", "약속을 일정에, 비중 이탈을 리밸런싱으로 먼저 권할 때"},
 	{"mind", "비서 알림", "아침 브리핑, 일정 하루 전·두 시간 전, 기한이 다가온 일"},
+	{"remind", "때 맞춘 알림", "부탁한 리마인드, 집을 나설 때 비 소식처럼 그 순간에 알릴 것 - 방해 금지·운전 중에도 울림"},
 	{"location", "위치", "집·회사 같은 영역에 도착하거나 떠날 때 (알림함에만)"},
 	{"job", "작업 요청", "로그인·확인이 필요할 때"},
 	{"status", "수집·연결 이상", "카톡·카드 알림 수집이 멈췄을 때"},
@@ -179,7 +180,7 @@ func (s *Service) Accept(ctx context.Context, e Event) (store.Notification, bool
 	switch {
 	case saved.Tier == "log", saved.Tier == "now" && muted(set, saved.Kind):
 		err = s.store.MarkDelivered(ctx, []int64{saved.ID})
-	case saved.Tier == "now" && !s.held(who, set):
+	case saved.Tier == "now" && (!s.held(who, set) || moment(saved.Kind)):
 		err = s.deliver(ctx, who, []store.Notification{saved}, "")
 	case saved.Tier == "now" && !s.quiet(set):
 		s.heldBusy = true
@@ -346,6 +347,16 @@ func (s *Service) quiet(set Settings) bool {
 		return m >= start && m < end
 	}
 	return m >= start || m < end // across midnight
+}
+
+// moment is a kind said at a moment that will not come again - a time the
+// person asked for, a door they are walking out of: held till morning or
+// till the drive ends, it would be too late, so neither holds it. Being
+// asked for, or moving, the person is plainly not asleep. Turning the
+// category off still keeps it from the phone.
+func moment(kind string) bool {
+	cat, _, _ := strings.Cut(kind, ".")
+	return cat == "remind"
 }
 
 func muted(set Settings, kind string) bool {

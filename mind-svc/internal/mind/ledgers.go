@@ -567,7 +567,9 @@ const AssetsBand = "assets.band"
 // places exactly those orders when approved (act.RebalanceActuator) - asked
 // every time. Without (nothing tradable, the service unreachable), it stays
 // a question pointing at the 자산 screen, where the plan can be placed by hand.
-func (m *Mind) portfolioBand(ctx context.Context, o obs.Observation) error {
+// now: this is the moment for it (band waited for the evening at home), so
+// that question is a push and not a line in the evening's summary.
+func (m *Mind) portfolioBand(ctx context.Context, o obs.Observation, now bool) (model.Intent, error) {
 	var n struct {
 		Title string `json:"title"`
 		Body  string `json:"body"`
@@ -579,7 +581,7 @@ func (m *Mind) portfolioBand(ctx context.Context, o obs.Observation) error {
 		Title:  title + " - 리밸런싱을 검토해 보세요",
 		Body:   strings.TrimSpace(n.Body + "\n자산 탭의 목표 비중에서 매매 계획을 볼 수 있어요."),
 		Reason: "목표 비중의 허용 범위를 벗어남", Confidence: 0.8,
-		Link: "/assets?focus=allocation",
+		Link: "/assets?focus=allocation", Urgent: now,
 	}
 	if m.Opts.Orders != nil {
 		if orders, err := m.Opts.Orders.Check(ctx); err == nil && len(orders) > 0 {
@@ -595,6 +597,5 @@ func (m *Mind) portfolioBand(ctx context.Context, o obs.Observation) error {
 			m.Opts.Logger.Warn("리밸런싱 주문을 확인하지 못해 질문으로만 올립니다", "err", err)
 		}
 	}
-	_, err := m.Gate.Submit(ctx, in)
-	return err
+	return m.Gate.Submit(ctx, in)
 }
