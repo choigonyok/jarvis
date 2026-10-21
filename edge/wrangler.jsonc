@@ -27,7 +27,6 @@
     { "binding": "AGENT_GUEST", "service_id": "01a116d3-fa8c-77f0-a52c-774130a9e043" },
     { "binding": "NOTIFY", "service_id": "01a12614-1eb7-7611-9760-96ac0e54c96f" },
     { "binding": "CONTEXT", "service_id": "01a13cb3-91e1-76c2-a09b-352e50d1fb1d" },
-    { "binding": "PHONENOTE", "service_id": "01a14584-ad4c-7940-ba23-99e7ed335022" },
     // The voice (tts/server.py) runs on the Mac mini's own macOS, not in compose - MLX
     // needs the GPU - so this one's host is host.docker.internal:8106, seen from the tunnel.
     { "binding": "TTS", "service_id": "01a14ae0-5a13-7230-9c3e-2450baea36f3" },

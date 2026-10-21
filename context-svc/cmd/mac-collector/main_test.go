@@ -24,16 +24,3 @@ func TestKindsAndPatterns(t *testing.T) {
 		t.Error("비밀번호 관리자에서 복사한 것은 보지 않아야 합니다")
 	}
 }
-
-func TestDelivery(t *testing.T) {
-	line := "2026-10-15 18:33:58.244 Df NotificationCenter[794:1da9] [com.apple.unc:application] Adding notification to storage: com.jawebs.baedal:BC9E0BFE"
-	if app, id := Delivery(line); app != "baemin" || id != "com.jawebs.baedal:BC9E0BFE" {
-		t.Fatalf("%q %q", app, id)
-	}
-	if app, _ := Delivery("… Adding notification to storage: com.linkedin.LinkedIn:47062BDE"); app != "" {
-		t.Fatalf("배달앱이 아닌 알림: %q", app)
-	}
-	if app, _ := Delivery("… Re-add com.jawebs.baedal:BC9E0BFE, com.jawebs.baedal with visibility"); app != "" {
-		t.Fatalf("다시 넣기는 새 알림이 아님: %q", app)
-	}
-}

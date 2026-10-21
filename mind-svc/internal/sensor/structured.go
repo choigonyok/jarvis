@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"regexp"
 	"slices"
 	"strconv"
@@ -48,9 +47,6 @@ type Structured struct {
 	ContextURL  string // context-svc: stays in regions
 	AssetsURL   string
 	JobsURL     string
-	// PhonenoteURL is phonenote-svc: what the phone's notifications said
-	// (money in and out, parcels, deliveries, bookings), as occurrences.
-	PhonenoteURL string
 	// Records, when set, is long-term memory: what is read here is also
 	// remembered there.
 	Records Recorder
@@ -75,7 +71,7 @@ func (s *Structured) Run(ctx context.Context, every time.Duration) {
 	for {
 		for name, poll := range map[string]func(context.Context) error{
 			"spending": s.Spending, "workout": s.Workout, "calendar": s.Calendar, "photos": s.Photos, "visits": s.Visits,
-			"assets": s.Assets, "jobs": s.Jobs, "photo-days": s.PhotoDays, "phone": s.Phone,
+			"assets": s.Assets, "jobs": s.Jobs, "photo-days": s.PhotoDays,
 		} {
 			if err := poll(ctx); err != nil && ctx.Err() == nil {
 				s.Out.Warn("구조화 소스를 읽지 못했습니다", "source", name, "err", err)
@@ -104,34 +100,6 @@ func (s *Structured) observe(ctx context.Context, o model.Occurrence) error {
 		}
 	}
 	return s.Observer.Observe(ctx, o)
-}
-
-// --- phone notifications ----------------------------------------------------
-
-// Phone reads what the phone's notifications were understood to say, already
-// as occurrences (phonenote-svc /occurrences): a deposit (pay as 급여), a
-// transfer out, a delivery order, a parcel, a booking. Payments are not among
-// them - they come from the 가계부, with the menu phonenote put there.
-func (s *Structured) Phone(ctx context.Context) error {
-	if s.PhonenoteURL == "" {
-		return nil
-	}
-	since := s.Now().Add(-14 * 24 * time.Hour).Format(time.RFC3339)
-	var out struct {
-		Occurrences []model.Occurrence `json:"occurrences"`
-	}
-	if err := s.get(ctx, strings.TrimRight(s.PhonenoteURL, "/")+"/occurrences?since="+url.QueryEscape(since), &out); err != nil {
-		return err
-	}
-	for _, o := range out.Occurrences {
-		if o.ID == "" || o.Kind == "" {
-			continue
-		}
-		if err := s.observe(ctx, o); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // --- spending ---------------------------------------------------------------

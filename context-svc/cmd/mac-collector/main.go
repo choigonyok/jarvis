@@ -10,18 +10,12 @@
 //   - mac.download, mac.screenshot  a new file of that kind appeared (the
 //     file extension only) - off unless -files, since macOS
 //     asks for permission to read those folders
-//   - mac.notification  a delivery app's notification reached this Mac
-//     (iPhone Mirroring forwards the phone's): delivery.baemin,
-//     delivery.coupangeats … - which app only, read from the
-//     unified log; the text stays on the phone and in the
-//     notification store
 //
 // A state is sent when it changes, and again every half hour, so a report
 // lost on the way is corrected by the next.
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -34,7 +28,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 )
@@ -44,7 +37,6 @@ func main() {
 	tokenFile := flag.String("token-file", os.ExpandEnv("$HOME/.config/jarvis/signal-token"), "file holding the signal token")
 	every := flag.Duration("every", 5*time.Second, "how often to look")
 	files := flag.Bool("files", false, "also report new downloads and screenshots (macOS asks for folder access)")
-	notes := flag.Bool("notifications", true, "report delivery apps' notifications forwarded from the iPhone")
 	flag.Parse()
 	token := os.Getenv("SIGNAL_TOKEN")
 	if b, err := os.ReadFile(*tokenFile); token == "" && err == nil {
@@ -61,9 +53,6 @@ func main() {
 		c.seen = map[string]bool{}
 		c.scan(true)
 	}
-	if *notes {
-		go c.watchNotifications(ctx)
-	}
 	t := time.NewTicker(*every)
 	defer t.Stop()
 	for {
@@ -76,68 +65,12 @@ func main() {
 	}
 }
 
-// deliveryApps are the delivery apps by their iPhone bundle (App Store
-// lookup, 2026-10-15).
-var deliveryApps = map[string]string{
-	"com.jawebs.baedal": "baemin", "com.coupang.coupang-eats": "coupangeats",
-	"com.yogiyo.yogiyoapp": "yogiyo", "com.shinhan.o2o": "ddangyo",
-}
-
-var stored = regexp.MustCompile(`Adding notification to storage: ([A-Za-z0-9._-]+):([0-9A-Fa-f-]+)`)
-
-// Delivery is which delivery app a notification-centre log line is about,
-// with the notification's id, if any.
-func Delivery(line string) (app, id string) {
-	m := stored.FindStringSubmatch(line)
-	if m == nil {
-		return "", ""
-	}
-	return deliveryApps[m[1]], m[1] + ":" + m[2]
-}
-
-// watchNotifications follows the notification centre's log: a delivery
-// app's notification stored here (the same one is re-added several times)
-// is reported once. The log says which app, not what it said.
-func (c *collector) watchNotifications(ctx context.Context) {
-	seen := map[string]bool{}
-	for ctx.Err() == nil {
-		cmd := exec.CommandContext(ctx, "log", "stream", "--style", "compact",
-			"--predicate", `subsystem == "com.apple.unc" AND category == "application"`)
-		out, err := cmd.StdoutPipe()
-		if err == nil {
-			err = cmd.Start()
-		}
-		if err != nil {
-			log.Printf("알림 로그를 읽지 못했습니다: %v", err)
-		} else {
-			sc := bufio.NewScanner(out)
-			for sc.Scan() {
-				app, id := Delivery(sc.Text())
-				if app == "" || seen[id] {
-					continue
-				}
-				if len(seen) > 1000 {
-					seen = map[string]bool{}
-				}
-				seen[id] = true
-				c.report("mac.notification", "delivery."+app, true)
-			}
-			_ = cmd.Wait()
-		}
-		select {
-		case <-ctx.Done():
-		case <-time.After(time.Minute):
-		}
-	}
-}
-
 type sent struct {
 	state string
 	at    time.Time
 }
 
 type collector struct {
-	mu         sync.Mutex // report is called from the loop and the log watcher
 	url, token string
 	http       *http.Client
 	last       map[string]sent
@@ -165,8 +98,6 @@ func (c *collector) step() {
 // report sends a state when it changed (or always, for events), and again
 // every half hour.
 func (c *collector) report(kind, state string, event bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	prev, ok := c.last[kind]
 	if !event && ok && prev.state == state && time.Since(prev.at) < 30*time.Minute {
 		return

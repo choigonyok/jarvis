@@ -31,8 +31,6 @@ type Config struct {
 	MindURL     string
 	MemoryURL   string
 	ContextURL  string
-	// PhonenoteURL is phonenote-svc: the phone's notifications.
-	PhonenoteURL string
 	// VaultURL is vault-svc: the saved logins. Only its health is read.
 	VaultURL    string
 	BrowserAddr string // host:port of the browser MCP bridge
@@ -106,14 +104,6 @@ func All(cfg Config) []check.Probe {
 			Deps:  []string{"svc.context"},
 			Every: 5 * time.Minute,
 			Run:   e.location,
-		},
-		{
-			ID: "phone.collector", Group: "수집", Name: "폰 알림",
-			Rule:  "맥의 폰 알림 수집기가 30분 안에 연락했고 알림 저장소를 읽을 수 있으면 정상, 30분–하루 연락이 없으면 주의(맥이 잠들었을 수 있어요), 하루를 넘거나 저장소를 읽지 못하면 이상. 수집기를 설치하기 전에는 측정하지 않아요.",
-			Fix:   "수집기를 돌리는 맥에서 scripts/phonenote-collector status 로 보세요. 권한 문제라면 시스템 설정 → 개인정보 보호 및 보안 → 전체 디스크 접근 권한에 ~/.local/bin/jarvis-phonenote-collector 를 더하세요. 폰 알림이 그 맥에 오려면 아이폰 미러링이 켜져 있어야 해요.",
-			Deps:  []string{"svc.phonenote"},
-			Every: 5 * time.Minute,
-			Run:   e.phoneCollector,
 		},
 		{
 			ID: "spending.alerts", Group: "수집", Name: "카드 결제 알림",
@@ -237,7 +227,6 @@ func All(cfg Config) []check.Probe {
 		e.service("svc.mind", "인지 루프(mind)", cfg.MindURL, []string{"postgres"}),
 		e.service("svc.memory", "기억 서비스", cfg.MemoryURL, []string{"postgres"}),
 		e.service("svc.context", "위치·현재 상태", cfg.ContextURL, []string{"postgres"}),
-		e.service("svc.phonenote", "폰 알림 해석", cfg.PhonenoteURL, []string{"postgres"}),
 		e.service("svc.vault", "로그인 정보 보관함", cfg.VaultURL, []string{"postgres"}),
 		e.hostFileVault(),
 		e.hostTimeMachine(),
@@ -403,35 +392,6 @@ func (e *env) location(ctx context.Context) check.Verdict {
 		v.State, v.Summary = check.Warn, fmt.Sprintf("%s째 위치가 오지 않아요.", span(age))
 	default:
 		v.State, v.Summary = check.OK, "위치를 받고 있어요."
-	}
-	return v
-}
-
-func (e *env) phoneCollector(ctx context.Context) check.Verdict {
-	var out struct {
-		Collectors []struct {
-			Device  string    `json:"device"`
-			SeenAt  time.Time `json:"seenAt"`
-			Problem string    `json:"problem"`
-		} `json:"collectors"`
-	}
-	if err := e.get(ctx, e.client, e.PhonenoteURL+"/collectors", &out); err != nil {
-		return fail("폰 알림 서비스를 읽지 못했어요: " + err.Error())
-	}
-	if len(out.Collectors) == 0 {
-		return check.Verdict{State: check.Unknown, Summary: "아직 수집기가 연락한 적이 없어요(설치 전)."}
-	}
-	c := out.Collectors[0] // the one heard from last
-	v := check.Verdict{ObservedAt: &c.SeenAt, ObservedLabel: "마지막 연락", Facts: []string{c.Device + "에서"}}
-	switch age := time.Since(c.SeenAt); {
-	case c.Problem != "":
-		v.State, v.Summary = check.Fail, c.Problem
-	case age > 24*time.Hour:
-		v.State, v.Summary = check.Fail, fmt.Sprintf("%s째 수집기 연락이 없어요.", span(age))
-	case age > 30*time.Minute:
-		v.State, v.Summary = check.Warn, fmt.Sprintf("%s째 수집기 연락이 없어요. 맥이 잠들었을 수 있어요.", span(age))
-	default:
-		v.State, v.Summary = check.OK, "폰 알림을 받고 있어요."
 	}
 	return v
 }

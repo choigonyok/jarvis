@@ -59,8 +59,7 @@ func Keys(o model.Occurrence, thing func(name string) string) []string {
 	return keys
 }
 
-// Delivery is food delivered, read from a delivery app's card payment or
-// from its notification (phonenote's own kind).
+// Delivery is food delivered, read from a delivery app's card payment.
 const Delivery = "delivery"
 
 // IsDelivery is whether a merchant is a food delivery app.

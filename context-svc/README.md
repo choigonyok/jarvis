@@ -102,9 +102,6 @@ notify-svc 가 이것을 듣고 **운전·회의 중에는 즉시 알림을 붙�
 - `mac.clipboard`: 방금 복사한 것의 종류(tracking 송장번호 · address 주소 · date 날짜). 내용은 보내지 않고,
   비밀번호 관리자가 앞에 있을 때는 클립보드를 보지도 않는다.
 - `mac.download`, `mac.screenshot`: 새 파일의 확장자. macOS 가 폴더 접근을 물어서 기본으로 끈다(`-files`).
-- `mac.notification`: 아이폰 미러링으로 이 맥에 들어온 **배달앱 알림**(`delivery.baemin`·`delivery.coupangeats`·`delivery.yogiyo`
-  ·`delivery.ddangyo`). 통합 로그의 알림 센터 줄(`Adding notification to storage: <번들>:<id>`)만 따라가며, 앱 종류만 보내고
-  내용은 보내지 않는다. 배달앱이 아닌 앱의 알림은 무시한다(`-notifications=false` 로 끔).
 
 카메라·마이크 사용 여부는 권한 없이 믿을 만하게 읽을 길이 없어, 회의 중은 앞에 있는 앱으로만 판단한다.
 지우려면 `scripts/mac-collector uninstall`.

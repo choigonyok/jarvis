@@ -14,9 +14,8 @@
  *   money, messages or voice.
  * - The public hostname, jarvis-be.choigonyok.com. Only what has to be
  *   reached from outside the console: the phone's doors - POST
- *   /context/owntracks and /context/signals (OwnTracks, iOS Shortcuts) and
- *   /phonenote/notes (the Mac that collects the phone's notifications) - whose
- *   own credentials the services check, and the 화면 tab's VNC socket, which
+ *   /context/owntracks and /context/signals (OwnTracks, iOS Shortcuts) -
+ *   whose own credentials the service checks, and the 화면 tab's VNC socket, which
  *   carries a 60-second ticket the console Worker signs (a browser cannot put
  *   a header on a WebSocket; see ticketValid). A console token presented
  *   here opens nothing else: it would be one leaked secret away from every
@@ -61,7 +60,6 @@ interface Env {
   IMMICH: Fetcher;
   NOTIFY: Fetcher;
   CONTEXT: Fetcher;
-  PHONENOTE: Fetcher;
   TTS: Fetcher;
   MIND: Fetcher;
   /** Immich's API key for the gallery. Only this gateway holds it. */
@@ -84,8 +82,6 @@ const SERVICES: Record<string, { binding: keyof Env; origin: string }> = {
   // reach notify-svc inside the compose network, not through here.
   notify: { binding: "NOTIFY", origin: "http://notify:8097" },
   context: { binding: "CONTEXT", origin: "http://context:8103" },
-  // The phone's notifications, read and applied (a collector on a Mac hands them in).
-  phonenote: { binding: "PHONENOTE", origin: "http://phonenote:8104" },
   // Each person's cloned voice, a process on the Mac mini itself (tts/server.py):
   // the tunnel reaches it at the Docker host's address. The token it is handed
   // decides whose recording a request touches (see below).
@@ -184,12 +180,9 @@ async function gateway(request: Request, env: Env, internal: boolean): Promise<R
     // Handed over whole, so the WebSocket upgrade goes through as one.
     return (env.BROWSER as Fetcher).fetch(new Request(`http://browser:6080/websockify${url.search}`, request));
   }
-  // The phone's own doors: their credentials are checked by the service
-  // (context-svc; phonenote-svc for the Mac that collects notifications).
+  // The phone's own doors: their credentials are checked by the service (context-svc).
   const phone =
-    request.method === "POST" &&
-    rest.length === 1 &&
-    ((name === "context" && (rest[0] === "owntracks" || rest[0] === "signals")) || (name === "phonenote" && rest[0] === "notes"));
+    request.method === "POST" && rest.length === 1 && name === "context" && (rest[0] === "owntracks" || rest[0] === "signals");
   if (!internal && !phone) return json(404, "그런 경로가 없습니다.");
   if (!bearer && !phone) return json(401, "인증이 필요합니다.");
 
