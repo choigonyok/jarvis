@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/choigonyok/jarvis/chat-svc/internal/turn"
 )
 
 // The guest's agent holds a token of its own, and it opens the guest's
@@ -35,6 +37,27 @@ func TestGuestTokenOpensTheGuestThreadOnly(t *testing.T) {
 	} {
 		if got := call(c.method, c.target, c.token, c.body); got != c.want {
 			t.Errorf("%s: %d, want %d", c.name, got, c.want)
+		}
+	}
+}
+
+// A turn with nothing to show is refused - but a checklist card is its list,
+// with or without a line above it (2026-10-21: refused, the card reached the
+// screen unsaved and was gone after the next read).
+func TestChecklistCardIsNotEmpty(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		t    turn.Turn
+		want bool
+	}{
+		{"아무것도 없음", turn.Turn{Role: turn.RoleAgent}, true},
+		{"작업 소식 칸만", turn.Turn{Role: turn.RoleAgent, Origin: &turn.Origin{Kind: "job", Run: 1}}, true},
+		{"체크리스트 카드", turn.Turn{Role: turn.RoleAgent, Origin: &turn.Origin{Kind: "checklist", Checklist: "chk_1"}}, false},
+		{"말", turn.Turn{Role: turn.RoleAgent, Paragraphs: []string{"네"}}, false},
+		{"결재 카드", turn.Turn{Role: turn.RoleAgent, ProposalID: "p-1"}, false},
+	} {
+		if got := empty(c.t); got != c.want {
+			t.Errorf("%s: empty=%v, want %v", c.name, got, c.want)
 		}
 	}
 }

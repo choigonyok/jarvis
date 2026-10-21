@@ -165,7 +165,7 @@ func (s *Server) append(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "손님은 손님 대화에만 쓸 수 있습니다.")
 		return
 	}
-	if in.Text == "" && len(in.Paragraphs) == 0 && in.ProposalID == "" && len(in.Images) == 0 {
+	if empty(in) {
 		writeErr(w, http.StatusBadRequest, "내용이 없는 턴입니다.")
 		return
 	}
@@ -177,6 +177,17 @@ func (s *Server) append(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, saved)
+}
+
+// empty is a turn with nothing to show: no words, no photos, no card. A
+// checklist card is its list (kept by mind, named in the origin) - with or
+// without a line above it. Refusing it as empty let it reach the screen
+// unsaved and vanish on the next read (2026-10-21, "다른 탭 갔다 오면 사라져").
+func empty(t turn.Turn) bool {
+	if t.Origin != nil && t.Origin.Checklist != "" {
+		return false
+	}
+	return t.Text == "" && len(t.Paragraphs) == 0 && t.ProposalID == "" && len(t.Images) == 0
 }
 
 // update rewrites what a turn with an origin says and moves it to now.
