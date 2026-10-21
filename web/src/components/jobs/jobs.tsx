@@ -24,12 +24,28 @@ import { cn } from "@/lib/utils";
 /** A list with something left on it. */
 const unfinished = (l: Checklist) => l.status === "active" && l.items.some((i) => !i.done);
 
+// The lists opened here, for as long as the app is: leaving the tab and
+// coming back finds them as they were left.
+const unfolded = new Set<string>();
+
 export function Jobs() {
   const { proposals, connection, decide, checklists, tick, dropItem, closeList, loadOpenLists } = useThread();
   const waiting = proposals.filter(isPending);
   // The lists with something left when they were read - kept on screen as
   // they are ticked off here (a list finished now says so until next time).
   const [listIds, setListIds] = useState<string[]>([]);
+  // Folded by default: a few lists to a screen, each opened when wanted.
+  const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set(unfolded));
+  const flip = useCallback((id: string) => {
+    setOpened((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      unfolded.clear();
+      for (const x of next) unfolded.add(x);
+      return next;
+    });
+  }, []);
 
   const [jobs, setJobs] = useState<Job[] | null>(null);
   const [blocked, setBlocked] = useState<BlockedSite[]>([]);
@@ -124,6 +140,7 @@ export function Jobs() {
                       onTick={(item, done) => tick(l.id, item, done)}
                       onDrop={(item) => dropItem(l.id, item)}
                       onClose={() => closeList(l.id)}
+                      fold={{ open: opened.has(l.id), onToggle: () => flip(l.id) }}
                     />
                   </li>
                 ))}

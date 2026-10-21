@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { X } from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
+import { ChevronDown, X } from "lucide-react";
 import { UNDO_MS } from "@/components/shell/undo";
 import type { Checklist, ChecklistItem } from "@/lib/thread";
 import { cn } from "@/lib/utils";
@@ -13,6 +13,9 @@ export type Drop = (itemId: string) => Promise<string | null>;
 
 /** How far a row is pulled before letting go strikes it off. */
 const STRIKE = 72;
+
+/** A list shown folded until asked: its title, how far along, what is left. */
+export type Fold = { open: boolean; onToggle: () => void };
 
 /**
  * A list to tick through - what to pack, what to do on getting home -
@@ -34,6 +37,7 @@ export function ChecklistBody({
   onTick,
   onDrop,
   onClose,
+  fold,
 }: {
   list?: Checklist;
   title?: string;
@@ -41,7 +45,10 @@ export function ChecklistBody({
   onDrop?: Drop;
   /** Set where a list may be closed from (the 작업 tab). */
   onClose?: () => Promise<string | null>;
+  /** Set where lists stand folded, a few to a screen (the 작업 tab). */
+  fold?: Fold;
 }) {
+  const itemsId = useId();
   const items = list?.items ?? [];
   // Struck off and waiting out their five seconds: still on screen, struck.
   const [striking, setStriking] = useState<ReadonlySet<string>>(() => new Set());
@@ -126,20 +133,47 @@ export function ChecklistBody({
   }
 
   const share = live.length ? (done / live.length) * 100 : 0;
+  const count = (
+    <span className={cn("tnum shrink-0 text-[12px]", all ? "text-approve" : "text-faint")} aria-live="polite">
+      {all ? "다 했어요" : `${done}/${live.length}`}
+    </span>
+  );
+  const open = !fold || fold.open;
+  const left = live.filter((i) => !i.done);
   return (
     <div data-checklist-id={list.id}>
-      <div className="flex items-baseline justify-between gap-3">
-        <h3 className="min-w-0 text-[14.5px] leading-snug font-medium text-foreground">{list.title}</h3>
-        <span className={cn("tnum shrink-0 text-[12px]", all ? "text-approve" : "text-faint")} aria-live="polite">
-          {all ? "다 했어요" : `${done}/${live.length}`}
-        </span>
-      </div>
+      {fold ? (
+        // The accordion's own pattern: the heading holds the button.
+        <h3 className="-mx-2 -mt-1.5">
+          <button
+            type="button"
+            onClick={fold.onToggle}
+            aria-expanded={fold.open}
+            aria-controls={itemsId}
+            className="flex min-h-11 w-full items-center justify-between gap-3 rounded-lg px-2 py-1.5 text-left outline-none hover:bg-glass focus-visible:ring-3 focus-visible:ring-ring/50 mouse:min-h-9"
+          >
+            <span className="min-w-0 text-[14.5px] leading-snug font-medium text-foreground">{list.title}</span>
+            <span className="flex shrink-0 items-center gap-1.5">
+              {count}
+              <ChevronDown
+                aria-hidden
+                className={cn("size-4 text-faint transition-transform duration-200 motion-reduce:transition-none", fold.open && "rotate-180")}
+              />
+            </span>
+          </button>
+        </h3>
+      ) : (
+        <div className="flex items-baseline justify-between gap-3">
+          <h3 className="min-w-0 text-[14.5px] leading-snug font-medium text-foreground">{list.title}</h3>
+          {count}
+        </div>
+      )}
       {list.note || list.status === "archived" ? (
         <p className="mt-0.5 text-[12px] leading-normal text-faint">
           {[list.note, list.status === "archived" ? "닫은 목록이에요" : ""].filter(Boolean).join(" - ")}
         </p>
       ) : null}
-      <div aria-hidden className="mt-2.5 h-[2px] overflow-hidden rounded-full bg-edge">
+      <div aria-hidden className={cn("h-[2px] overflow-hidden rounded-full bg-edge", fold ? "mt-1.5" : "mt-2.5")}>
         <div
           className={cn(
             "h-full rounded-full transition-[width,background-color] duration-300 ease-out motion-reduce:transition-none",
@@ -149,25 +183,35 @@ export function ChecklistBody({
           style={{ width: `${share}%` }}
         />
       </div>
-      <ul className="-mx-2 mt-1.5" aria-label={list.title}>
-        {items.map((item) => (
-          <Row
-            key={item.id}
-            item={item}
-            draw={fresh.has(item.id)}
-            struck={striking.has(item.id)}
-            onToggle={() => void toggle(item)}
-            onStrike={onDrop ? () => strike(item) : undefined}
-            onUnstrike={() => unstrike(item)}
-          />
-        ))}
-      </ul>
-      {refusal ? (
-        <p role="alert" className="mt-1 px-0.5 text-[12px] text-reject">
-          {refusal}
+      {open ? (
+        <div id={itemsId}>
+          <ul className="-mx-2 mt-1.5" aria-label={list.title}>
+            {items.map((item) => (
+              <Row
+                key={item.id}
+                item={item}
+                draw={fresh.has(item.id)}
+                struck={striking.has(item.id)}
+                onToggle={() => void toggle(item)}
+                onStrike={onDrop ? () => strike(item) : undefined}
+                onUnstrike={() => unstrike(item)}
+              />
+            ))}
+          </ul>
+          {refusal ? (
+            <p role="alert" className="mt-1 px-0.5 text-[12px] text-reject">
+              {refusal}
+            </p>
+          ) : null}
+          {onClose ? <CloseList onClose={onClose} /> : null}
+        </div>
+      ) : left.length > 0 ? (
+        // Folded: what is left, in a line - enough to know whether to open it.
+        <p id={itemsId} className="mt-2 truncate text-[12.5px] text-dim">
+          남은 것: {left.slice(0, 4).map((i) => i.text).join(", ")}
+          {left.length > 4 ? ` 외 ${left.length - 4}개` : ""}
         </p>
       ) : null}
-      {onClose ? <CloseList onClose={onClose} /> : null}
     </div>
   );
 }
@@ -375,16 +419,23 @@ export function ChecklistCard({
   onTick,
   onDrop,
   onClose,
+  fold,
 }: {
   list?: Checklist;
   title?: string;
   onTick: Tick;
   onDrop?: Drop;
   onClose?: () => Promise<string | null>;
+  fold?: Fold;
 }) {
   return (
-    <section className="w-full max-w-[34rem] rounded-xl bg-glass-raised px-4 pt-3.5 pb-2 sm:px-5">
-      <ChecklistBody list={list} title={title} onTick={onTick} onDrop={onDrop} onClose={onClose} />
+    <section
+      className={cn(
+        "w-full max-w-[34rem] rounded-xl bg-glass-raised px-4 pt-3.5 sm:px-5",
+        fold && !fold.open ? "pb-3.5" : "pb-2",
+      )}
+    >
+      <ChecklistBody list={list} title={title} onTick={onTick} onDrop={onDrop} onClose={onClose} fold={fold} />
     </section>
   );
 }
