@@ -417,14 +417,15 @@ func (g *Gate) tell(ctx context.Context, in model.Intent, title, body string) {
 	if in.Tier == "now" {
 		level = "warn"
 	}
-	kind := ""
-	if in.Moment != "" && in.Tier == "now" {
-		kind = "remind." + in.Moment
-	}
-	g.notify.Notify(ctx, act.Notice{
+	n := act.Notice{
 		Title: title, Body: strings.TrimSpace(body), URL: g.link(in),
-		Tier: in.Tier, Level: level, Key: "mind:" + in.ID, At: g.now(), Kind: kind,
-	})
+		Tier: in.Tier, Level: level, Key: "mind:" + in.ID, At: g.now(),
+	}
+	if in.Moment != "" && in.Tier == "now" {
+		// Said at its moment (the rain at the door): in the conversation too.
+		n.Kind, n.Card, n.Data = "remind."+in.Moment, true, map[string]any{"why": in.Reason}
+	}
+	g.notify.Notify(ctx, n)
 }
 
 // link is where a tap on a notice goes: what the intent names (a calendar

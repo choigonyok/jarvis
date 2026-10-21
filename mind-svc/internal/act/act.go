@@ -409,6 +409,12 @@ type Notice struct {
 	// (what the operator asked for, the rain at the door), which rings even
 	// in quiet hours.
 	Kind string `json:"kind,omitempty"`
+	// Card: say it in the conversation too, as a card - not only as a push
+	// and a line in the inbox (the agent draws it).
+	Card bool `json:"card,omitempty"`
+	// Data is what the card needs besides the wording: the reminder it is,
+	// the checklist it shows.
+	Data map[string]any `json:"data,omitempty"`
 }
 
 type Notifier interface {

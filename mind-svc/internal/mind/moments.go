@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/act"
+	"github.com/choigonyok/jarvis/mind-svc/internal/checklist"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/moments"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
@@ -54,11 +55,25 @@ func (m *Mind) say(ctx context.Context, r moments.Reminder) (string, error) {
 		// Down at its time (a restart, a deploy): said late, and so.
 		why = moments.Stamp(*r.At, m.Opts.Loc) + "에 알려 드렸어야 했는데 늦었어요"
 	}
+	// In the conversation too, as a card (2026-10-21: "집 가서 할 일" reached
+	// the phone and the inbox only) - with the reminder's list, if it has
+	// one, as it stands now; the push says what is left on it.
+	data := map[string]any{"reminder": r.ID, "why": why, "by": r.SentBy}
+	lines := []string{r.Body}
+	if l, ok := m.reminderList(ctx, r); ok {
+		data["checklist"] = l.ID
+		if left := l.Left(); len(left) > 0 {
+			lines = append(lines, "남은 것: "+checklist.Names(left, 5))
+		} else if len(l.Items) > 0 {
+			lines = append(lines, l.Title+": 다 했어요")
+		}
+	}
 	n := act.Notice{
-		Kind: "remind.asked", Title: r.Text, Body: strings.TrimSpace(r.Body + "\n" + why),
+		Kind: "remind.asked", Title: r.Text, Body: strings.TrimSpace(strings.Join(append(lines, why), "\n")),
 		URL: firstNonEmpty(r.URL, "/"), Tier: "now", Level: "warn", At: m.Opts.Now(),
 		// Changed and said again, it is a notice of its own.
-		Key: "remind:" + r.ID + ":" + strconv.FormatInt(r.UpdatedAt.Unix(), 10),
+		Key:  "remind:" + r.ID + ":" + strconv.FormatInt(r.UpdatedAt.Unix(), 10),
+		Card: true, Data: data,
 	}
 	if s, ok := m.notifier.(act.Sender); ok {
 		return "푸시", s.Send(ctx, n)

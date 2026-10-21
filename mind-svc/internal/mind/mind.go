@@ -20,6 +20,7 @@ import (
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/act"
 	"github.com/choigonyok/jarvis/mind-svc/internal/attention"
+	"github.com/choigonyok/jarvis/mind-svc/internal/checklist"
 	"github.com/choigonyok/jarvis/mind-svc/internal/draft"
 	"github.com/choigonyok/jarvis/mind-svc/internal/gate"
 	"github.com/choigonyok/jarvis/mind-svc/internal/interpret"
@@ -83,6 +84,8 @@ type Options struct {
 	// Here is the regions the operator is in now (context-svc); nil: not
 	// known, and being there already never counts as arriving.
 	Here func(ctx context.Context) ([]moments.Visit, error)
+	// Checklists is where the operator's lists are kept; nil: none.
+	Checklists checklist.Store
 }
 
 type Mind struct {
@@ -101,6 +104,8 @@ type Mind struct {
 	Prefs    *prefs.Prefs
 	// Moments says reminders at their moment; nil without Reminders.
 	Moments *moments.Service
+	// Lists is the operator's checklists; nil without Checklists.
+	Lists *checklist.Service
 	// nightly and mornings are further steps of the night and the morning,
 	// in order.
 	nightly  []func(ctx context.Context) error
@@ -166,6 +171,9 @@ func New(o Options) *Mind {
 	m.notifier = notifier
 	if o.Reminders != nil {
 		m.Moments = &moments.Service{St: o.Reminders, Now: o.Now, Loc: o.Loc, Here: o.Here, Say: m.say, Out: o.Logger}
+	}
+	if o.Checklists != nil {
+		m.Lists = &checklist.Service{St: o.Checklists, Now: o.Now}
 	}
 	m.Prefs = &prefs.Prefs{St: o.Store, LLM: o.LLM, Now: o.Now}
 	m.Gate.OnDecide = func(ctx context.Context, in model.Intent) {
@@ -629,6 +637,9 @@ func (m *Mind) Situation(ctx context.Context) (world.Situation, error) {
 	if lines := m.reminderLines(ctx); lines != "" {
 		s.Text += "\n" + lines
 	}
+	if line := m.checklistLine(ctx); line != "" {
+		s.Text += "\n" + line
+	}
 	if line := m.expectLines(ctx); line != "" {
 		s.Text += "\n" + line
 	}
@@ -641,8 +652,19 @@ type noticeLog struct{ log obs.Log }
 
 func (n noticeLog) AppendNotice(ctx context.Context, kind string, nt act.Notice) error {
 	wording, _ := json.Marshal(map[string]string{"tier": nt.Tier, "level": nt.Level, "title": nt.Title, "body": nt.Body, "url": nt.URL})
+	data := json.RawMessage(`{}`)
+	if nt.Card || len(nt.Data) > 0 {
+		d := map[string]any{}
+		for k, v := range nt.Data {
+			d[k] = v
+		}
+		if nt.Card {
+			d["card"] = true
+		}
+		data, _ = json.Marshal(d)
+	}
 	return n.log.Append(ctx, obs.Observation{
-		Source: "mind", Type: kind, Subject: nt.Key, Data: json.RawMessage(`{}`),
+		Source: "mind", Type: kind, Subject: nt.Key, Data: data,
 		Key: nt.Key, OccurredAt: nt.At, Notify: wording,
 	})
 }

@@ -24,6 +24,8 @@ type reminderIn struct {
 	URL    string   `json:"url"`
 	Source string   `json:"source"`
 	Clear  []string `json:"clear"`
+	// Checklist is a list to show with it (checklist id).
+	Checklist *string `json:"checklist"`
 }
 
 // reminderOut is a reminder with its moment in words, what the conversation
@@ -130,6 +132,12 @@ func (s *Server) setReminder(w http.ResponseWriter, r *http.Request) {
 	if in.Move != nil {
 		rem.Move = *in.Move
 	}
+	if in.Checklist != nil {
+		if !s.listExists(w, r, *in.Checklist) {
+			return
+		}
+		rem.Checklist = strings.TrimSpace(*in.Checklist)
+	}
 	saved, err := svc.Set(r.Context(), rem)
 	if err != nil {
 		s.reminderFail(w, err)
@@ -152,14 +160,37 @@ func (s *Server) changeReminder(w http.ResponseWriter, r *http.Request) {
 		s.reminderFail(w, err)
 		return
 	}
+	if in.Checklist != nil && !s.listExists(w, r, *in.Checklist) {
+		return
+	}
 	saved, err := svc.Change(r.Context(), r.PathValue("id"), moments.Change{
 		Text: in.Text, Body: in.Body, At: at, Place: in.Place, Move: in.Move, After: after, Until: until, Clear: in.Clear,
+		Checklist: in.Checklist,
 	})
 	if err != nil {
 		s.reminderFail(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"reminder": s.reminderOut(saved)})
+}
+
+// listExists says whether a reminder may carry this list: an empty id is
+// none, and one that is not kept here is refused, so a reminder never
+// promises a list it will not show.
+func (s *Server) listExists(w http.ResponseWriter, r *http.Request, id string) bool {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return true
+	}
+	if s.m.Lists == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "체크리스트를 둘 곳이 없습니다."})
+		return false
+	}
+	if _, err := s.m.Lists.Get(r.Context(), id); err != nil {
+		s.listFail(w, err)
+		return false
+	}
+	return true
 }
 
 func (s *Server) cancelReminder(w http.ResponseWriter, r *http.Request) {

@@ -81,6 +81,9 @@ type Reminder struct {
 	After *time.Time `json:"after,omitempty"`
 	Until *time.Time `json:"until,omitempty"`
 	URL   string     `json:"url,omitempty"` // where a tap goes
+	// Checklist is a list shown with it, as it stands then (checklist): what
+	// to pack, what to do on getting home.
+	Checklist string `json:"checklist,omitempty"`
 	// Status, and what came of saying it: "푸시", "카드", or why nothing
 	// was said.
 	Status    string     `json:"status"`
@@ -166,16 +169,17 @@ func (s *Service) Set(ctx context.Context, r Reminder) (Reminder, error) {
 }
 
 // Change is what a change gives: the fields set replace the reminder's, and
-// Clear names those to empty (at, place, after, until).
+// Clear names those to empty (at, place, after, until, checklist).
 type Change struct {
-	Text  *string    `json:"text,omitempty"`
-	Body  *string    `json:"body,omitempty"`
-	At    *time.Time `json:"at,omitempty"`
-	Place *string    `json:"place,omitempty"`
-	Move  *string    `json:"move,omitempty"`
-	After *time.Time `json:"after,omitempty"`
-	Until *time.Time `json:"until,omitempty"`
-	Clear []string   `json:"clear,omitempty"`
+	Text      *string    `json:"text,omitempty"`
+	Body      *string    `json:"body,omitempty"`
+	Checklist *string    `json:"checklist,omitempty"`
+	At        *time.Time `json:"at,omitempty"`
+	Place     *string    `json:"place,omitempty"`
+	Move      *string    `json:"move,omitempty"`
+	After     *time.Time `json:"after,omitempty"`
+	Until     *time.Time `json:"until,omitempty"`
+	Clear     []string   `json:"clear,omitempty"`
 }
 
 // Change changes a reminder. One already said or cancelled waits again, for
@@ -197,9 +201,14 @@ func (s *Service) Change(ctx context.Context, id string, c Change) (Reminder, er
 			r.After = nil
 		case "until":
 			r.Until = nil
+		case "checklist":
+			r.Checklist = ""
 		default:
-			return r, ErrInvalid(fmt.Sprintf("비울 수 없는 칸입니다: %s (at, place, after, until 만)", f))
+			return r, ErrInvalid(fmt.Sprintf("비울 수 없는 칸입니다: %s (at, place, after, until, checklist 만)", f))
 		}
+	}
+	if c.Checklist != nil {
+		r.Checklist = strings.TrimSpace(*c.Checklist)
 	}
 	if c.Text != nil {
 		r.Text = *c.Text
@@ -544,6 +553,9 @@ func (r Reminder) Why(loc *time.Location) string {
 // situation: "[rem_1a2b] 10/24(토) 08:00 · 베개 챙기기".
 func (r Reminder) Line(loc *time.Location) string {
 	s := "[" + r.ID + "] " + r.When(loc) + " · " + r.Text
+	if r.Checklist != "" {
+		s += " · 체크리스트 " + r.Checklist
+	}
 	if r.Status != Waiting {
 		s += " (" + StatusName(r.Status)
 		if r.SentAt != nil {

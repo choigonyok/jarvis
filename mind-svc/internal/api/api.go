@@ -34,6 +34,13 @@
 //	POST /api/reminders               {text, body?, at?, place?, move?, after?, until?, url?} one to say at its moment
 //	PATCH /api/reminders/{id}         {text?, body?, at?, place?, move?, after?, until?, clear?} change it; a said one waits again
 //	DELETE /api/reminders/{id}        cancel it
+//	GET  /api/checklists?all=1&ids=   the checklists open (all: and those closed in two weeks; ids: these, open or not)
+//	POST /api/checklists              {title, items, note?, topic?, source?} a new list - with an open list's topic, that one
+//	GET  /api/checklists/{id}         one list
+//	PATCH /api/checklists/{id}        {title?, note?, add?, remove?, check?, uncheck?, rename?, by?, reopen?}
+//	POST /api/checklists/{id}/items/{item}  {done, by?} a tap on the card
+//	DELETE /api/checklists/{id}       close it
+//	POST /api/checklists/{id}/show    {lead?} ask the agent to put it in the conversation now (checklist.shown)
 //
 // /api and the console need a token unless open: in the stack the port is
 // bound to the host's loopback, and a laptop run has nothing to protect. The
@@ -232,6 +239,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/reminders", s.auth(false, s.setReminder))
 	mux.HandleFunc("PATCH /api/reminders/{id}", s.auth(false, s.changeReminder))
 	mux.HandleFunc("DELETE /api/reminders/{id}", s.auth(false, s.cancelReminder))
+	mux.HandleFunc("GET /api/checklists", s.auth(false, s.listChecklists))
+	mux.HandleFunc("POST /api/checklists", s.auth(false, s.makeChecklist))
+	mux.HandleFunc("GET /api/checklists/{id}", s.auth(false, s.getChecklist))
+	mux.HandleFunc("PATCH /api/checklists/{id}", s.auth(false, s.changeChecklist))
+	mux.HandleFunc("POST /api/checklists/{id}/items/{item}", s.auth(false, s.checkItem))
+	mux.HandleFunc("DELETE /api/checklists/{id}", s.auth(false, s.closeChecklist))
+	mux.HandleFunc("POST /api/checklists/{id}/show", s.auth(false, s.showChecklist))
 	return mux
 }
 

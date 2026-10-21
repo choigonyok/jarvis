@@ -33,6 +33,7 @@ import (
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/act"
 	"github.com/choigonyok/jarvis/mind-svc/internal/api"
+	"github.com/choigonyok/jarvis/mind-svc/internal/checklist"
 	"github.com/choigonyok/jarvis/mind-svc/internal/clock"
 	"github.com/choigonyok/jarvis/mind-svc/internal/eval"
 	"github.com/choigonyok/jarvis/mind-svc/internal/gate"
@@ -85,8 +86,10 @@ func main() {
 		mode                  = "memory"
 		settle                = duration("MIND_SETTLE", 3*time.Second)
 	)
-	// What is said at a moment waits here; in memory on a laptop.
+	// What is said at a moment waits here, and the operator's checklists;
+	// in memory on a laptop.
 	var reminders moments.Store = moments.NewMemory()
+	var lists checklist.Store = checklist.NewMemory()
 	if dsn == "" {
 		st = store.NewMemory()
 		memLog = obs.NewMemoryLog(log)
@@ -124,6 +127,7 @@ func main() {
 		}
 		st = store.NewPostgres(pool, key)
 		reminders = moments.NewPostgres(pool)
+		lists = checklist.NewPostgres(pool)
 		// Quiet: the skills and the gate run and the console shows what they
 		// would say, but no notice reaches a phone - the agent's cards still
 		// do that, until the two gates are one.
@@ -225,7 +229,7 @@ func main() {
 		Policy: gate.DefaultPolicy(), URL: getenv("MIND_UI_URL", "http://localhost:8102/"), Mode: mode,
 		MessageRetain: time.Duration(atoiOr(getenv("MIND_MESSAGE_RETAIN_DAYS", "365"), 365)) * 24 * time.Hour,
 		Memory:        mem, Photos: photos, Jobs: jobs, Assets: assets, Orders: orders, Travel: travel,
-		Weather: sky, DailyUSD: number("MIND_DAILY_USD", 1.0), Reminders: reminders, Here: here,
+		Weather: sky, DailyUSD: number("MIND_DAILY_USD", 1.0), Reminders: reminders, Here: here, Checklists: lists,
 	})
 	if !client.Ready() {
 		log.Warn("LLM 키(MIND_ANTHROPIC_API_KEY)가 없어 대화를 해석하지 않습니다. 메시지는 쌓아 둡니다.")
