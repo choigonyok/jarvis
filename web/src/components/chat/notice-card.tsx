@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { BellRing } from "lucide-react";
-import { ChecklistBody, type Drop, type Tick } from "@/components/chat/checklist";
+import { ChecklistBody, type Drop, type Fold, type Tick } from "@/components/chat/checklist";
 import { Markdown } from "@/components/chat/markdown";
 import type { Checklist, Turn } from "@/lib/thread";
 import { cn } from "@/lib/utils";
@@ -16,7 +16,20 @@ import { cn } from "@/lib/utils";
  * Above its words, why now, the way the push said it. A reminder that
  * carries a list shows the list under them, ticked as it stands.
  */
-export function NoticeCard({ turn, list, onTick, onDrop }: { turn: Turn; list?: Checklist; onTick: Tick; onDrop?: Drop }) {
+export function NoticeCard({
+  turn,
+  list,
+  onTick,
+  onDrop,
+  fold,
+}: {
+  turn: Turn;
+  list?: Checklist;
+  onTick: Tick;
+  onDrop?: Drop;
+  /** The list under it folds by its title, as a checklist card does. */
+  fold?: Fold;
+}) {
   const [said, ...more] = turn.paragraphs ?? [];
   const body = more.join("\n\n");
   const [open, setOpen] = useState(false);
@@ -48,7 +61,7 @@ export function NoticeCard({ turn, list, onTick, onDrop }: { turn: Turn; list?: 
       ) : null}
       {turn.origin?.checklist ? (
         <div className="-mb-1.5 mt-3 border-t border-edge-soft pt-3">
-          <ChecklistBody list={list} onTick={onTick} onDrop={onDrop} />
+          <ChecklistBody list={list} onTick={onTick} onDrop={onDrop} fold={fold} />
         </div>
       ) : null}
     </section>

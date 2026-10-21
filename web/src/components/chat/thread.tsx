@@ -27,6 +27,11 @@ import { clock, dayLabel, refTime, turnDay, turnTime } from "@/lib/when";
 
 const MODE_KEY = "jarvis:chat-mode";
 
+// The checklist cards folded here (by turn), for as long as the app is
+// open: leaving for another tab and coming back finds them as they were.
+// A card opens unfolded - a list is shown because it is wanted now.
+const foldedTurns = new Set<string>();
+
 /**
  * An agent turn as it is read aloud: a job's card is announced as the job's,
  * a notice as what it is, a checklist by its name.
@@ -215,11 +220,16 @@ const TurnRow = memo(function TurnRow({
   onDecide,
   onTick,
   onDrop,
+  folded,
+  onFold,
 }: {
   turn: Turn;
   proposal?: Proposal;
   /** The checklist the turn's card shows, as it stands. */
   list?: Checklist;
+  /** Whether that list is folded on this card (its title row toggles it). */
+  folded: boolean;
+  onFold: (turnId: string) => void;
   /** Set on the first turn of a day: the divider above it. */
   day: string | null;
   /** When the message this one quotes was said. */
@@ -248,6 +258,7 @@ const TurnRow = memo(function TurnRow({
   const tick = (item: string, done: boolean) =>
     turn.origin?.checklist ? onTick(turn.origin.checklist, item, done) : Promise.resolve(null);
   const drop = (item: string) => (turn.origin?.checklist ? onDrop(turn.origin.checklist, item) : Promise.resolve(null));
+  const fold = { open: !folded, onToggle: () => onFold(turn.id) };
   // A divider where the day changes: with it, a turn's own stamp only has to
   // say the time, and a reply that came hours later - a suggestion overnight
   // - is plainly not a live one.
@@ -263,7 +274,7 @@ const TurnRow = memo(function TurnRow({
               <Rail at={time} onRef={quote} />
               <div className="min-w-0">
                 {turn.origin?.kind === "notice" ? (
-                  <NoticeCard turn={turn} list={list} onTick={tick} onDrop={drop} />
+                  <NoticeCard turn={turn} list={list} onTick={tick} onDrop={drop} fold={fold} />
                 ) : turn.origin?.kind === "checklist" ? (
                   <>
                     {/* The line on why now, said above the list like any word of his. */}
@@ -272,7 +283,7 @@ const TurnRow = memo(function TurnRow({
                         <Markdown>{turn.paragraphs.join("\n\n")}</Markdown>
                       </div>
                     ) : null}
-                    <ChecklistCard list={list} title={turn.origin.title} onTick={tick} onDrop={drop} />
+                    <ChecklistCard list={list} title={turn.origin.title} onTick={tick} onDrop={drop} fold={fold} />
                   </>
                 ) : turn.origin ? (
                   <JobNews turn={turn} />
@@ -352,6 +363,8 @@ const Transcript = memo(function Transcript({
   onDecide,
   onTick,
   onDrop,
+  folded,
+  onFold,
 }: {
   turns: Turn[];
   proposals: Proposal[];
@@ -367,6 +380,9 @@ const Transcript = memo(function Transcript({
   onDecide: Decide;
   onTick: TickList;
   onDrop: DropItem;
+  /** The checklist cards folded, by turn. */
+  folded: ReadonlySet<string>;
+  onFold: (turnId: string) => void;
 }) {
   // A card with no turn pointing at it - one raised before every card was
   // laid in the conversation - floats below the thread while it waits. One
@@ -406,6 +422,8 @@ const Transcript = memo(function Transcript({
               onDecide={onDecide}
               onTick={onTick}
               onDrop={onDrop}
+              folded={folded.has(turn.id)}
+              onFold={onFold}
             />
           );
         })}
@@ -484,6 +502,17 @@ export function Thread() {
   // The earlier message the next one quotes: swiped (or, with a pointer, the
   // button beside its time), shown above the composer until sent or dropped.
   const [quoting, setQuoting] = useState<TurnRef | null>(null);
+  const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set(foldedTurns));
+  const fold = useCallback((turnId: string) => {
+    setFolded((cur) => {
+      const next = new Set(cur);
+      if (next.has(turnId)) next.delete(turnId);
+      else next.add(turnId);
+      foldedTurns.clear();
+      for (const id of next) foldedTurns.add(id);
+      return next;
+    });
+  }, []);
   const [mode, setMode] = useState<ChatMode>("text");
   const [muted, setMuted] = useState(false);
   // Your own voice, when it is on file on the Mac mini; the browser's otherwise.
@@ -830,6 +859,8 @@ export function Thread() {
             onDecide={decide}
             onTick={tick}
             onDrop={dropItem}
+            folded={folded}
+            onFold={fold}
           />
         </div>
       </main>
