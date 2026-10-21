@@ -68,7 +68,7 @@ func TestListKeepsWhatIsDone(t *testing.T) {
 func TestTopicMakesOneList(t *testing.T) {
 	ctx := context.Background()
 	s, now := service(NewMemory())
-	first, err := s.Make(ctx, New{Title: "양평 캠핑", Topic: "camping-1024", Items: []string{"장갑", "베개"}})
+	first, err := s.Make(ctx, New{Title: "주말 캠핑", Topic: "camping-weekend", Items: []string{"장갑", "베개"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,11 +76,11 @@ func TestTopicMakesOneList(t *testing.T) {
 		t.Fatal(err)
 	}
 	*now = now.Add(time.Hour)
-	again, err := s.Make(ctx, New{Title: "양평 캠핑 준비물", Topic: "camping-1024", Items: []string{"베개", "장작"}})
+	again, err := s.Make(ctx, New{Title: "주말 캠핑 준비물", Topic: "camping-weekend", Items: []string{"베개", "장작"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if again.ID != first.ID || again.Title != "양평 캠핑 준비물" || len(again.Items) != 3 || !again.Items[0].Done {
+	if again.ID != first.ID || again.Title != "주말 캠핑 준비물" || len(again.Items) != 3 || !again.Items[0].Done {
 		t.Fatalf("같은 주제는 한 목록: %+v", again)
 	}
 	other, _ := s.Make(ctx, New{Title: "집에 가서 할 일", Items: []string{"빨래"}})
@@ -97,7 +97,7 @@ func TestTopicMakesOneList(t *testing.T) {
 		t.Fatalf("닫은 것까지: %+v", all)
 	}
 	// A closed list's topic is free: the next one is a list of its own.
-	fresh, _ := s.Make(ctx, New{Title: "다음 캠핑", Topic: "camping-1024", Items: []string{"장갑"}})
+	fresh, _ := s.Make(ctx, New{Title: "다음 캠핑", Topic: "camping-weekend", Items: []string{"장갑"}})
 	if fresh.ID == first.ID {
 		t.Fatal("닫은 목록에 더했습니다")
 	}
