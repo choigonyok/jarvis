@@ -63,6 +63,8 @@ type Server struct {
 	jobs JobPayments
 	// wakeJobs has the job scheduler look now (POST /jobs/wake).
 	wakeJobs func()
+	// checklists is the lists the conversation's cards show; nil: none.
+	checklists Checklists
 	// uploads holds photos attached in conversation; nil turns them off.
 	uploads   *uploads.Store
 	modules   *module.Registry
@@ -137,7 +139,20 @@ type Deps struct {
 	// WakeJobs, when set, is what jobs-svc's knock calls: a job changed on
 	// the 작업 tab (instructed, run now, resumed) is looked at at once.
 	WakeJobs func()
-	Log      *slog.Logger
+	// Checklists, when set, is the lists the conversation's cards show: read
+	// with a page of the thread, ticked on a card.
+	Checklists Checklists
+	Log        *slog.Logger
+}
+
+// Checklists is the lists behind the conversation's checklist cards (mind
+// keeps them; the checklist module reads and ticks them and tells every
+// screen of a change).
+type Checklists interface {
+	// Find is the lists of these ids, by id.
+	Find(ctx context.Context, ids []string) (map[string]any, error)
+	// Check ticks (or unticks) one item from a card, and is the list after.
+	Check(ctx context.Context, id, item string, done bool) (any, error)
 }
 
 func New(d Deps) *Server {
@@ -167,6 +182,7 @@ func New(d Deps) *Server {
 		followUp:        d.FollowUp,
 		jobs:            d.Jobs,
 		wakeJobs:        d.WakeJobs,
+		checklists:      d.Checklists,
 	}
 	if d.Proposals != nil {
 		d.Proposals.OnDecide(s.resolvePayment)
@@ -184,6 +200,10 @@ func (s *Server) Handler() http.Handler {
 	// rather than on the mux, so /healthz stays open for the healthcheck and
 	// /intercept and /mcp keep the separate secrets they already have.
 	mux.HandleFunc("GET /thread", s.guard(s.getThread))
+	// The lists the thread's cards show, under /thread: the gateway passes
+	// the agent's routes by first segment, and these are the thread's.
+	mux.HandleFunc("GET /thread/checklists", s.guard(s.getChecklists))
+	mux.HandleFunc("POST /thread/checklists/{id}/items/{item}", s.guard(s.checkItem))
 	mux.HandleFunc("POST /messages", s.guard(s.postMessage))
 	// Under /messages: the gateway passes the agent's routes by first segment.
 	mux.HandleFunc("POST /messages/{id}/steer", s.guard(s.steerMessage))
@@ -336,10 +356,85 @@ func (s *Server) getThread(w http.ResponseWriter, r *http.Request) {
 		"hasMore":   hasMore,
 		"proposals": s.proposals.List(),
 	}
+	// So do the lists their checklist cards show, as they stand now. A
+	// thread is not held up for them: without mind the cards say so.
+	if lists := s.listsOf(r.Context(), turns); lists != nil {
+		body["checklists"] = lists
+	}
 	if q, ok := s.runner.(queuer); ok {
 		body["queue"] = q.Queue()
 	}
 	writeJSON(w, http.StatusOK, body)
+}
+
+// listsOf is the lists the turns' cards show, by id; nil when there are none
+// or they could not be read.
+func (s *Server) listsOf(ctx context.Context, turns []*thread.Turn) map[string]any {
+	if s.checklists == nil {
+		return nil
+	}
+	var ids []string
+	seen := map[string]bool{}
+	for _, t := range turns {
+		if t.Origin != nil && t.Origin.Checklist != "" && !seen[t.Origin.Checklist] {
+			seen[t.Origin.Checklist] = true
+			ids = append(ids, t.Origin.Checklist)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	lists, err := s.checklists.Find(ctx, ids)
+	if err != nil {
+		if s.log != nil {
+			s.log.Warn("대화 카드의 체크리스트를 읽지 못했습니다", "err", err)
+		}
+		return nil
+	}
+	return lists
+}
+
+// getChecklists is GET /thread/checklists?ids=a,b: the lists cards show.
+func (s *Server) getChecklists(w http.ResponseWriter, r *http.Request) {
+	if s.checklists == nil {
+		writeErr(w, http.StatusNotFound, "체크리스트가 없습니다.")
+		return
+	}
+	var ids []string
+	for _, id := range strings.Split(r.URL.Query().Get("ids"), ",") {
+		if id = strings.TrimSpace(id); id != "" && len(ids) < 100 {
+			ids = append(ids, id)
+		}
+	}
+	lists, err := s.checklists.Find(r.Context(), ids)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "체크리스트를 읽지 못했습니다: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"checklists": lists})
+}
+
+// checkItem is a tap on a checklist card's item: POST {done}.
+func (s *Server) checkItem(w http.ResponseWriter, r *http.Request) {
+	if s.checklists == nil {
+		writeErr(w, http.StatusNotFound, "체크리스트가 없습니다.")
+		return
+	}
+	var body struct {
+		Done bool `json:"done"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "본문을 읽을 수 없습니다.")
+		return
+	}
+	list, err := s.checklists.Check(r.Context(), r.PathValue("id"), r.PathValue("item"), body.Done)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "체크하지 못했습니다: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"checklist": list})
 }
 
 func (s *Server) steerMessage(w http.ResponseWriter, r *http.Request) {

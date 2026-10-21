@@ -744,7 +744,9 @@ func (r *Runner) jobNews() string {
 	budget := newsRunes
 	for i := len(turns) - 1; i >= 0 && len(lines) < newsTurns; i-- {
 		t := turns[i]
-		if t.Origin == nil || t.Role != thread.RoleAgent || t.AtISO == "" || t.AtISO <= seen {
+		// A checklist card is the session's own doing (show_checklist) or
+		// mind's, and the open lists are in the situation every turn.
+		if t.Origin == nil || t.Origin.Kind == thread.OriginChecklist || t.Role != thread.RoleAgent || t.AtISO == "" || t.AtISO <= seen {
 			continue
 		}
 		text := strings.TrimSpace(strings.Join(t.Paragraphs, "\n"))
@@ -755,7 +757,17 @@ func (r *Runner) jobNews() string {
 			newest = t.AtISO
 		}
 		title := t.Origin.Title
-		if title == "" {
+		switch {
+		case t.Origin.Kind == thread.OriginNotice:
+			// What mind told the operator at its moment, and why now.
+			title = "알림"
+			if t.Origin.Title != "" {
+				title += "(" + t.Origin.Title + ")"
+			}
+			if t.Origin.Checklist != "" {
+				text += " [체크리스트 " + t.Origin.Checklist + " 카드와 함께]"
+			}
+		case title == "":
 			title = fmt.Sprintf("작업 %d", t.Origin.Job)
 		}
 		line := "- " + title + " (" + t.At + "): " + clamp(text, 400)
@@ -773,7 +785,7 @@ func (r *Runner) jobNews() string {
 	}
 	r.mu.Unlock()
 	slices.Reverse(lines)
-	return "[작업 소식 - 백그라운드 작업이 그 사이 대화에 남긴 것. 운영자도 카드로 봤습니다. 물으면 답하고, 아니면 굳이 되풀이하지 마세요]\n" +
+	return "[작업 소식 - 백그라운드 작업과 때 맞춘 알림이 그 사이 대화에 카드로 남긴 것. 운영자도 카드로 봤습니다. 물으면 답하고, 아니면 굳이 되풀이하지 마세요]\n" +
 		strings.Join(lines, "\n") + "\n[작업 소식 끝]\n\n"
 }
 

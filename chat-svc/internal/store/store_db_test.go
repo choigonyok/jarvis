@@ -148,6 +148,21 @@ func TestJobCardIsOneTurnPerRun(t *testing.T) {
 	if _, err := s.Update(ctx, "other", card.ID, []string{"x"}, "Asia/Seoul"); err != ErrNoTurn {
 		t.Fatalf("다른 스레드에서는 못 바꿔야 합니다: %v", err)
 	}
+
+	// A notice with the list it shows keeps both through the store.
+	notice, err := s.Append(ctx, turn.Turn{Role: turn.RoleAgent, Paragraphs: []string{"집에 가서 할 일"}, Thread: th,
+		Origin: &turn.Origin{Kind: "notice", Title: "집에 도착하셔서 알려 드려요", Ref: "remind:rem_1:1", Checklist: "chk_1"}}, "Asia/Seoul")
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := s.All(ctx, "Asia/Seoul", th, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := again[len(again)-1]
+	if last.ID != notice.ID || last.Origin == nil || last.Origin.Ref != "remind:rem_1:1" || last.Origin.Checklist != "chk_1" {
+		t.Fatalf("안내 카드의 ref 와 체크리스트가 남아야 합니다: %+v", last.Origin)
+	}
 }
 
 // The console's page: the newest turns, then the ones before the oldest on

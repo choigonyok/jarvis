@@ -97,25 +97,27 @@ func (m *Module) do(ctx context.Context, method, path string, in, out any) error
 }
 
 type SetInput struct {
-	Text  string `json:"text" jsonschema:"폰에 뜰 한 줄, 운영자에게 하는 말로. 예: '내일 캠핑, 장갑 챙기세요'"`
-	Body  string `json:"body,omitempty" jsonschema:"그 아래 한 줄 더 붙일 맥락(선택). 예: '장작 팰 때 쓸 작업용 장갑'"`
-	At    string `json:"at,omitempty" jsonschema:"알릴 시각 YYYY-MM-DDTHH:MM. place 와 함께 주면 '늦어도 이때는': 그때까지 도착·출발 소식이 없으면 이 시각에 대신 알린다"`
-	Place string `json:"place,omitempty" jsonschema:"장소 조건: home(집)·work(회사) 또는 등록된 영역 이름. 비우면 시각(at)만으로 알린다"`
-	Move  string `json:"move,omitempty" jsonschema:"arrive(그 장소에 도착할 때, 기본) 또는 leave(그 장소에서 나갈 때)"`
-	After string `json:"after,omitempty" jsonschema:"장소 조건을 이때부터 센다 YYYY-MM-DDTHH:MM. 이때 이미 그 장소에 있으면 그때 바로 알린다(예: '금요일 퇴근하고 집에 오면' → 그날 19:00). 비우면 지금부터 다음 도착·출발에"`
-	Until string `json:"until,omitempty" jsonschema:"at 없이 장소 조건만일 때, 이때가 지나도록 도착·출발이 없으면 알리지 않고 끝낸다(선택)"`
+	Text      string `json:"text" jsonschema:"폰에 뜰 한 줄, 운영자에게 하는 말로. 예: '내일 캠핑, 장갑 챙기세요'"`
+	Body      string `json:"body,omitempty" jsonschema:"그 아래 한 줄 더 붙일 맥락(선택). 예: '장작 팰 때 쓸 작업용 장갑'"`
+	At        string `json:"at,omitempty" jsonschema:"알릴 시각 YYYY-MM-DDTHH:MM. place 와 함께 주면 '늦어도 이때는': 그때까지 도착·출발 소식이 없으면 이 시각에 대신 알린다"`
+	Place     string `json:"place,omitempty" jsonschema:"장소 조건: home(집)·work(회사) 또는 등록된 영역 이름. 비우면 시각(at)만으로 알린다"`
+	Move      string `json:"move,omitempty" jsonschema:"arrive(그 장소에 도착할 때, 기본) 또는 leave(그 장소에서 나갈 때)"`
+	After     string `json:"after,omitempty" jsonschema:"장소 조건을 이때부터 센다 YYYY-MM-DDTHH:MM. 이때 이미 그 장소에 있으면 그때 바로 알린다(예: '금요일 퇴근하고 집에 오면' → 그날 19:00). 비우면 지금부터 다음 도착·출발에"`
+	Until     string `json:"until,omitempty" jsonschema:"at 없이 장소 조건만일 때, 이때가 지나도록 도착·출발이 없으면 알리지 않고 끝낸다(선택)"`
+	Checklist string `json:"checklist,omitempty" jsonschema:"그때 함께 띄울 체크리스트 id(chk_…, 선택). 그 순간의 체크 상태 그대로 대화에 카드로 뜨고, 푸시에는 남은 항목이 붙는다"`
 }
 
 type ChangeInput struct {
-	ID    string   `json:"id" jsonschema:"리마인드 id(rem_…). 지금 상황의 '맡아 둔 알림'이나 list_reminders 에서 확인한다"`
-	Text  string   `json:"text,omitempty" jsonschema:"새 문구. 비우면 그대로"`
-	Body  string   `json:"body,omitempty" jsonschema:"새 맥락 한 줄. 비우면 그대로"`
-	At    string   `json:"at,omitempty" jsonschema:"새 시각(또는 '늦어도') YYYY-MM-DDTHH:MM. 비우면 그대로"`
-	Place string   `json:"place,omitempty" jsonschema:"새 장소 조건 home·work·영역 이름. 비우면 그대로"`
-	Move  string   `json:"move,omitempty" jsonschema:"arrive 또는 leave. 비우면 그대로"`
-	After string   `json:"after,omitempty" jsonschema:"장소 조건을 셀 새 시작 YYYY-MM-DDTHH:MM. 비우면 그대로"`
-	Until string   `json:"until,omitempty" jsonschema:"새 기한 YYYY-MM-DDTHH:MM. 비우면 그대로"`
-	Clear []string `json:"clear,omitempty" jsonschema:"없앨 조건: at, place, after, until 중. 예: 장소 조건을 빼고 시각만 남기려면 [\"place\", \"after\"]와 함께 at"`
+	ID        string   `json:"id" jsonschema:"리마인드 id(rem_…). 지금 상황의 '맡아 둔 알림'이나 list_reminders 에서 확인한다"`
+	Text      string   `json:"text,omitempty" jsonschema:"새 문구. 비우면 그대로"`
+	Body      string   `json:"body,omitempty" jsonschema:"새 맥락 한 줄. 비우면 그대로"`
+	At        string   `json:"at,omitempty" jsonschema:"새 시각(또는 '늦어도') YYYY-MM-DDTHH:MM. 비우면 그대로"`
+	Place     string   `json:"place,omitempty" jsonschema:"새 장소 조건 home·work·영역 이름. 비우면 그대로"`
+	Move      string   `json:"move,omitempty" jsonschema:"arrive 또는 leave. 비우면 그대로"`
+	After     string   `json:"after,omitempty" jsonschema:"장소 조건을 셀 새 시작 YYYY-MM-DDTHH:MM. 비우면 그대로"`
+	Until     string   `json:"until,omitempty" jsonschema:"새 기한 YYYY-MM-DDTHH:MM. 비우면 그대로"`
+	Checklist string   `json:"checklist,omitempty" jsonschema:"함께 띄울 체크리스트 id(chk_…). 비우면 그대로"`
+	Clear     []string `json:"clear,omitempty" jsonschema:"없앨 조건: at, place, after, until, checklist 중. 예: 장소 조건을 빼고 시각만 남기려면 [\"place\", \"after\"]와 함께 at"`
 }
 
 type ListInput struct {
@@ -130,12 +132,13 @@ func (m *Module) Handler() http.Handler {
 	server := mcp.NewServer(&mcp.Implementation{Name: ServerName, Version: "1"}, nil)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "set_reminder",
-		Description: "운영자가 정해진 때에 알려 달라고 한 것을 그때 폰 푸시로 알린다(방해 금지 시간·운전 중에도 울린다). " +
+		Description: "운영자가 정해진 때에 알려 달라고 한 것을 그때 폰 푸시로 알리고, 대화에도 안내 카드로 남긴다(방해 금지 시간·운전 중에도 울린다). " +
 			"때는 시각(at), 장소에 도착·출발할 때(place, move), 둘 다(장소를 기다리되 늦어도 at 에)로 정한다. " +
+			"챙길 것·할 일이 여럿이면 make_checklist 로 목록을 만들고 checklist 에 그 id 를 넣는다 - 그때 카드가 목록을 보여 준다. " +
 			"웹을 보거나 무언가를 지켜봐야 하는 일은 이것이 아니라 작업(create_job)이다. 저장된 때와 문구를 돌려준다.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in SetInput) (*mcp.CallToolResult, any, error) {
 		body := map[string]any{"text": in.Text, "source": "chat"}
-		for k, v := range map[string]string{"body": in.Body, "at": in.At, "place": in.Place, "move": in.Move, "after": in.After, "until": in.Until} {
+		for k, v := range map[string]string{"body": in.Body, "at": in.At, "place": in.Place, "move": in.Move, "after": in.After, "until": in.Until, "checklist": in.Checklist} {
 			if strings.TrimSpace(v) != "" {
 				body[k] = v
 			}
@@ -147,7 +150,7 @@ func (m *Module) Handler() http.Handler {
 			return failed("저장하지 못했습니다", err), nil, nil
 		}
 		return toolText("저장했습니다: "+out.Reminder.Line+"\n"+
-			"그때 폰으로 푸시가 갑니다. 운영자에게는 위의 때와 문구를 그대로 말하세요. 운영자가 말하지 않은 시각을 정했으면 그 시각을 밝히세요.", false), nil, nil
+			"그때 폰으로 푸시가 가고 대화에 안내 카드가 남습니다. 운영자에게는 위의 때와 문구를 그대로 말하세요. 운영자가 말하지 않은 시각을 정했으면 그 시각을 밝히세요.", false), nil, nil
 	})
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_reminders",
@@ -171,7 +174,7 @@ func (m *Module) Handler() http.Handler {
 			"운영자가 시각·조건을 바꿔 달라고 하면 새로 만들지 말고 이것으로 고친다. 고친 뒤 저장된 때와 문구를 돌려준다.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ChangeInput) (*mcp.CallToolResult, any, error) {
 		body := map[string]any{}
-		for k, v := range map[string]string{"text": in.Text, "body": in.Body, "at": in.At, "place": in.Place, "move": in.Move, "after": in.After, "until": in.Until} {
+		for k, v := range map[string]string{"text": in.Text, "body": in.Body, "at": in.At, "place": in.Place, "move": in.Move, "after": in.After, "until": in.Until, "checklist": in.Checklist} {
 			if strings.TrimSpace(v) != "" {
 				body[k] = v
 			}

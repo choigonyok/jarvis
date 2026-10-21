@@ -69,10 +69,24 @@ type Origin struct {
 	Job   int64  `json:"job,omitempty"`
 	Run   int64  `json:"run,omitempty"`
 	Title string `json:"title,omitempty"`
+	// Ref is what a notice was sent as (its event's key), so one delivered
+	// twice is laid down once.
+	Ref string `json:"ref,omitempty"`
+	// Checklist is the list the card shows (mind's checklist id) - as it
+	// stands whenever it is drawn, its items ticked on the card itself.
+	Checklist string `json:"checklist,omitempty"`
 }
 
-// OriginJob is the one kind so far.
-const OriginJob = "job"
+// Origin kinds.
+const (
+	// OriginJob is a background job's run speaking (JobNews).
+	OriginJob = "job"
+	// OriginNotice is something told at its moment - a reminder, the rain
+	// at the door - laid in the conversation as well as pushed (Card).
+	OriginNotice = "notice"
+	// OriginChecklist is a checklist put in the conversation (Card).
+	OriginChecklist = "checklist"
+)
 
 // Ref is a quoted earlier turn: which one, who said it, when, and how it began.
 type Ref struct {
@@ -338,6 +352,33 @@ func (s *Store) JobNews(o Origin, paragraphs []string) *Turn {
 	s.newsIDs[o.Run] = t.ID
 	s.newsMu.Unlock()
 	return t
+}
+
+// Card lays a card that is no model's turn in the conversation as a turn of
+// its own - a notice told at its moment, a checklist shown - where it stays.
+// Like a job's news it is not said by the session, which is told of it
+// before the next message instead (the runner's jobNews).
+func (s *Store) Card(o Origin, paragraphs []string) *Turn {
+	return s.append(&Turn{Role: RoleAgent, Paragraphs: paragraphs, Origin: &o})
+}
+
+// Told says whether a card of this kind and ref is among the recent turns:
+// a notice delivered again (events-svc delivers at least once, and again
+// after a restart) is not laid down twice.
+func (s *Store) Told(kind, ref string) bool {
+	if ref == "" {
+		return false
+	}
+	turns, _, err := s.Window("", 120)
+	if err != nil {
+		return false
+	}
+	for _, t := range turns {
+		if t.Origin != nil && t.Origin.Kind == kind && t.Origin.Ref == ref {
+			return true
+		}
+	}
+	return false
 }
 
 // AttachProposal records in the transcript that a card was raised at this

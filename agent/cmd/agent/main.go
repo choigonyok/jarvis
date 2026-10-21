@@ -31,6 +31,7 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/memorywatch"
 	"github.com/choigonyok/jarvis/agent/internal/module/assets"
 	"github.com/choigonyok/jarvis/agent/internal/module/calendar"
+	"github.com/choigonyok/jarvis/agent/internal/module/checklist"
 	"github.com/choigonyok/jarvis/agent/internal/module/jobs"
 	"github.com/choigonyok/jarvis/agent/internal/module/memory"
 	"github.com/choigonyok/jarvis/agent/internal/module/messages"
@@ -168,6 +169,7 @@ func main() {
 	// mind-svc's gate: its cards become approval cards here, and approving
 	// one is this module asking mind to do it. The guest has no mind.
 	var mindClient *mindmod.Client
+	var checklistModule *checklist.Module
 	if cfg.MindURL != "" && !cfg.Guest {
 		mindModule := mindmod.New(mindmod.Client{URL: cfg.MindURL, Token: cfg.APIToken})
 		modules.Add(mindModule)
@@ -188,6 +190,13 @@ func main() {
 		mcpMounts["/mcp/"+remind.ServerName] = remindModule.Handler()
 		cfg.ModuleMCPURLs[remind.ServerName] = cfg.PublicMCPURL + "/" + remind.ServerName
 		cfg.Allow(remind.Tools...)
+
+		// 체크리스트: 준비물·할 일. mind 가 체크 상태를 갖고, 대화에는 체크할 수 있는 카드로.
+		checklistModule = checklist.New(cfg.MindURL, cfg.APIToken, transcript, events, log)
+		modules.Add(checklistModule)
+		mcpMounts["/mcp/"+checklist.ServerName] = checklistModule.Handler()
+		cfg.ModuleMCPURLs[checklist.ServerName] = cfg.PublicMCPURL + "/" + checklist.ServerName
+		cfg.Allow(checklist.Tools...)
 	}
 
 	startCtx, cancelStart := context.WithTimeout(context.Background(), 10*time.Second)
@@ -362,6 +371,29 @@ func main() {
 			Out:  notify.New(cfg.EventsURL, cfg.DatabaseURL, cfg.APIToken, log),
 			Say:  func(lead, id string) { transcript.Raise([]string{lead}, id) },
 			Mind: mindClient,
+			// What mind told at its moment, in the conversation as well as on
+			// the phone: the reminder's words, why now, the list it carries.
+			Notice: func(n suggest.Notice) {
+				if transcript.Told(thread.OriginNotice, n.Key) {
+					return
+				}
+				paragraphs := []string{n.Title}
+				if n.Body != "" {
+					paragraphs = append(paragraphs, n.Body)
+				}
+				transcript.Card(thread.Origin{Kind: thread.OriginNotice, Title: n.Why, Ref: n.Key, Checklist: n.Checklist}, paragraphs)
+				if n.Checklist != "" && checklistModule != nil {
+					checklistModule.Publish(context.Background(), n.Checklist)
+				}
+			},
+			Show: func(id, lead, key string) {
+				if checklistModule == nil {
+					return
+				}
+				if _, err := checklistModule.ShowAs(context.Background(), id, lead, key); err != nil {
+					log.Warn("mind 가 띄운 체크리스트를 보이지 못했습니다", "checklist", id, "err", err)
+				}
+			},
 		}, log)
 		proposals.OnDecide(suggester.OnDecide)
 		go suggester.Subscribe(enrichCtx, strings.TrimRight(cfg.SelfURL, "/")+"/consume")
@@ -483,6 +515,7 @@ func main() {
 			FollowUp:        runner,
 			Jobs:            jobPayments,
 			WakeJobs:        wakeJobs,
+			Checklists:      checklistConsole(checklistModule),
 			Log:             log,
 		}).Handler(),
 		// No WriteTimeout: /events streams and /mcp blocks on a human.
@@ -530,6 +563,15 @@ func vaultConsole(m *vault.Module) http.Handler {
 		return nil
 	}
 	return m.ConsoleHandler()
+}
+
+// checklistConsole is the lists the console's cards show and tick, or none
+// (a nil module must not become a non-nil interface).
+func checklistConsole(m *checklist.Module) httpapi.Checklists {
+	if m == nil {
+		return nil
+	}
+	return m
 }
 
 // relogin signs a logged-out site back in with the login the vault keeps: a

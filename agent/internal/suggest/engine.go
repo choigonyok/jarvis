@@ -1,4 +1,5 @@
-// Package suggest turns mind's cards into approval cards.
+// Package suggest turns mind's cards into approval cards - and lays in the
+// conversation what mind tells the operator at its moment.
 //
 // mind-svc's gate is the one place that decides what reaches the operator:
 // it keeps the ledger (what was raised, approved, turned down), the daily
@@ -7,6 +8,11 @@
 // question should ring, it sends a mind.card; this opens it as an approval
 // card in the conversation, closes it when mind answers it elsewhere, and
 // tells mind when the operator turns it down.
+//
+// What mind says at a moment - a reminder, the rain at the door - goes to
+// the phone through notify-svc; a notice that asks for a card (data.card)
+// is laid in the conversation here too, with the checklist it carries. And
+// a list mind puts in front of the operator (checklist.shown) is shown here.
 package suggest
 
 import (
@@ -15,6 +21,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,8 +31,12 @@ import (
 	"github.com/choigonyok/jarvis/gocommon/notify"
 )
 
-// Types is what the assistant subscribes to: mind's cards.
-var Types = []string{mind.CardRaised, mind.CardClosed}
+// Types is what the assistant subscribes to: mind's cards, what mind says
+// at a moment, and the lists it shows.
+var Types = []string{mind.CardRaised, mind.CardClosed, "remind.*", ChecklistShown}
+
+// ChecklistShown is mind asking for a list in the conversation now.
+const ChecklistShown = "checklist.shown"
 
 // Event is one event as events-svc delivers it.
 type Event struct {
@@ -34,8 +45,27 @@ type Event struct {
 	Type       string          `json:"type"`
 	Subject    string          `json:"subject"`
 	Data       json.RawMessage `json:"data"`
+	Notify     *Wording        `json:"notify,omitempty"`
 	Key        string          `json:"key"`
 	OccurredAt time.Time       `json:"occurredAt"`
+}
+
+// Wording is what a notice says, as it goes to the phone.
+type Wording struct {
+	Tier  string `json:"tier"`
+	Title string `json:"title"`
+	Body  string `json:"body"`
+}
+
+// Notice is what mind told at its moment, for a card in the conversation.
+type Notice struct {
+	// Key is the event's key: one notice, one card, however often delivered.
+	Key   string
+	Title string // what was said: the reminder's words
+	Body  string // its line more
+	Why   string // why now: "집에 도착하셔서 알려 드려요"
+	// Checklist is the list it shows, if it carries one.
+	Checklist string
 }
 
 type Config struct {
@@ -50,6 +80,12 @@ type Config struct {
 	Say func(lead string, proposalID string)
 	// Mind is mind-svc's API, told when a card is turned down.
 	Mind *mind.Client
+	// Notice lays a notice that asked for a card in the conversation; nil
+	// leaves notices to the phone.
+	Notice func(n Notice)
+	// Show lays a list mind put in front of the operator in the
+	// conversation, under lead; key is the event's, for redeliveries.
+	Show func(id, lead, key string)
 }
 
 type Engine struct {
@@ -74,13 +110,65 @@ func (e *Engine) Consume(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "JSON 을 읽지 못했습니다", http.StatusBadRequest)
 		return
 	}
-	switch ev.Type {
-	case mind.CardRaised:
+	switch {
+	case ev.Type == mind.CardRaised:
 		e.raiseCard(ev)
-	case mind.CardClosed:
+	case ev.Type == mind.CardClosed:
 		e.closeCard(ev)
+	case strings.HasPrefix(ev.Type, "remind."):
+		e.notice(ev)
+	case ev.Type == ChecklistShown:
+		e.showList(ev)
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// notice lays what mind told at its moment in the conversation, when the
+// notice asked for a card - the reminder's own words and line, why now, and
+// its list - instead of leaving it to the phone and the inbox alone.
+func (e *Engine) notice(ev Event) {
+	if e.cfg.Notice == nil || ev.Notify == nil || ev.Notify.Tier != "now" {
+		return
+	}
+	var d struct {
+		Card      bool    `json:"card"`
+		Why       string  `json:"why"`
+		Body      *string `json:"body"`
+		Checklist string  `json:"checklist"`
+	}
+	if json.Unmarshal(ev.Data, &d) != nil || !d.Card {
+		return
+	}
+	// The push's body carries what is left on the list and why now, both of
+	// which the card shows its own way; the reminder's line is its own.
+	body := ev.Notify.Body
+	if d.Body != nil {
+		body = *d.Body
+	}
+	key := ev.Key
+	if key == "" {
+		key = "event:" + strconv.FormatInt(ev.ID, 10)
+	}
+	e.cfg.Notice(Notice{Key: key, Title: strings.TrimSpace(ev.Notify.Title), Body: strings.TrimSpace(body), Why: strings.TrimSpace(d.Why), Checklist: d.Checklist})
+}
+
+// showList is mind putting a list in front of the operator.
+func (e *Engine) showList(ev Event) {
+	if e.cfg.Show == nil {
+		return
+	}
+	var d struct {
+		Checklist string `json:"checklist"`
+		Lead      string `json:"lead"`
+	}
+	if json.Unmarshal(ev.Data, &d) != nil || d.Checklist == "" {
+		return
+	}
+	key := ev.Key
+	if key == "" {
+		key = "event:" + strconv.FormatInt(ev.ID, 10)
+	}
+	e.cfg.Show(d.Checklist, d.Lead, key)
 }
 
 // raiseCard opens an approval card for a question mind's gate decided

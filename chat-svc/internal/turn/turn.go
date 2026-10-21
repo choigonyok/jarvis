@@ -56,12 +56,17 @@ type Turn struct {
 
 // Origin is where a turn came from when not from the conversation.
 type Origin struct {
-	// Kind is "job" today.
+	// Kind is "job" (a job's run spoke), "notice" (something told at its
+	// moment) or "checklist" (a list shown).
 	Kind string `json:"kind"`
 	// Job and Run name the job and the run that spoke.
 	Job   int64  `json:"job,omitempty"`
 	Run   int64  `json:"run,omitempty"`
 	Title string `json:"title,omitempty"`
+	// Ref is what a notice was sent as, so one delivered twice is one turn.
+	Ref string `json:"ref,omitempty"`
+	// Checklist is the list the card shows (mind's checklist id).
+	Checklist string `json:"checklist,omitempty"`
 }
 
 // Ref is a quoted earlier turn: which one, who said it, when, and how it began.

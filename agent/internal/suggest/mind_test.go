@@ -87,3 +87,49 @@ func TestMindCards(t *testing.T) {
 		t.Fatalf("mind 에서 닫힌 카드는 닫혀야 합니다: %+v", p)
 	}
 }
+
+// What mind told at its moment is laid in the conversation when the notice
+// asked for a card - with the reminder's own line rather than the push's,
+// and its list - and not otherwise; a list mind shows is shown.
+func TestNoticesBecomeCards(t *testing.T) {
+	e, _ := setup(t)
+	var notices []Notice
+	var shown []string
+	e.cfg.Notice = func(n Notice) { notices = append(notices, n) }
+	e.cfg.Show = func(id, lead, key string) { shown = append(shown, id+"|"+lead+"|"+key) }
+	send := func(ev map[string]any) {
+		raw, _ := json.Marshal(ev)
+		e.Consume(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/consume", strings.NewReader(string(raw))))
+	}
+	send(map[string]any{"type": "remind.asked", "key": "remind:rem_1:1",
+		"data":   map[string]any{"card": true, "why": "집에 도착하셔서 알려 드려요", "body": "", "checklist": "chk_1"},
+		"notify": map[string]any{"tier": "now", "title": "집에 가서 할 일", "body": "남은 것: 빨래\n집에 도착하셔서 알려 드려요"}})
+	send(map[string]any{"type": "remind.rain", "key": "mind:int_9",
+		"data":   map[string]any{"card": true, "why": "비 오는 날 집을 나섬"},
+		"notify": map[string]any{"tier": "now", "title": "15시부터 비 · 우산 챙기세요", "body": "오늘 집 날씨: 비"}})
+	// An older mind's notice (no card asked for), and a digest line.
+	send(map[string]any{"type": "remind.asked", "key": "remind:rem_2:1", "data": map[string]any{},
+		"notify": map[string]any{"tier": "now", "title": "옛 알림"}})
+	send(map[string]any{"type": "remind.asked", "key": "remind:rem_3:1", "data": map[string]any{"card": true},
+		"notify": map[string]any{"tier": "digest", "title": "저녁 요약"}})
+	send(map[string]any{"type": ChecklistShown, "key": "checklist.shown:chk_1:a", "data": map[string]any{"checklist": "chk_1", "lead": "내일 캠핑이에요"}})
+
+	if len(notices) != 2 {
+		t.Fatalf("카드를 청한 지금의 알림만: %+v", notices)
+	}
+	if n := notices[0]; n.Key != "remind:rem_1:1" || n.Title != "집에 가서 할 일" || n.Body != "" || n.Why != "집에 도착하셔서 알려 드려요" || n.Checklist != "chk_1" {
+		t.Fatalf("리마인드: %+v", n)
+	}
+	if n := notices[1]; n.Body != "오늘 집 날씨: 비" || n.Why != "비 오는 날 집을 나섬" {
+		t.Fatalf("비 알림: %+v", n)
+	}
+	if len(shown) != 1 || shown[0] != "chk_1|내일 캠핑이에요|checklist.shown:chk_1:a" {
+		t.Fatalf("mind 가 띄운 목록: %v", shown)
+	}
+	for _, typ := range Types {
+		if typ == "remind.*" {
+			return
+		}
+	}
+	t.Fatalf("구독에 remind.* 가 없습니다: %v", Types)
+}

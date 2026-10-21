@@ -58,7 +58,7 @@ func (m *Mind) say(ctx context.Context, r moments.Reminder) (string, error) {
 	// In the conversation too, as a card (2026-10-21: "집 가서 할 일" reached
 	// the phone and the inbox only) - with the reminder's list, if it has
 	// one, as it stands now; the push says what is left on it.
-	data := map[string]any{"reminder": r.ID, "why": why, "by": r.SentBy}
+	data := map[string]any{"reminder": r.ID, "why": why, "by": r.SentBy, "body": r.Body}
 	lines := []string{r.Body}
 	if l, ok := m.reminderList(ctx, r); ok {
 		data["checklist"] = l.ID
