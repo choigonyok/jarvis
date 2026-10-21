@@ -58,6 +58,20 @@ type Use struct {
 var ErrBudget = errors.New("오늘 LLM 예산을 다 썼습니다")
 var ErrNoKey = errors.New("LLM 키가 없습니다")
 
+// ErrNoAnswer is a call that ended without an answer to read: the model
+// thought until max_tokens and wrote nothing, or declined (refusal). The
+// same prompt tends to end the same way, so a reader asks about less.
+var ErrNoAnswer = errors.New("모델이 답을 쓰지 않았습니다")
+
+// maxTokens is room for the model's thinking and its answer together:
+// Haiku 5.5 thinks before it answers unless told not to, and the thinking
+// counts against max_tokens. At 2000 a long batch could think the whole of
+// it away and answer nothing - a 40-message group-chat batch thought about
+// 1,500 tokens for a 150-token answer, and the reads that failed ran out
+// (2026-10-22, "JSON 이 없습니다" on one busy room for hours). Only what is
+// used is paid for.
+const maxTokens = 8000
+
 // Anthropic calls the Messages API. Haiku 5.5 is the default: interpreting a
 // conversation is reading, not reasoning, and it is run on every one.
 type Anthropic struct {
@@ -119,7 +133,7 @@ func (a *Anthropic) Complete(ctx context.Context, system, user string) (string, 
 	}
 	body, _ := json.Marshal(map[string]any{
 		"model":      a.model,
-		"max_tokens": 2000,
+		"max_tokens": maxTokens,
 		"system":     system,
 		"messages":   []map[string]string{{"role": "user", "content": user}},
 	})
@@ -140,7 +154,8 @@ func (a *Anthropic) Complete(ctx context.Context, system, user string) (string, 
 			Type string `json:"type"`
 			Text string `json:"text"`
 		} `json:"content"`
-		Usage struct {
+		StopReason string `json:"stop_reason"`
+		Usage      struct {
 			In  int `json:"input_tokens"`
 			Out int `json:"output_tokens"`
 		} `json:"usage"`
@@ -168,6 +183,9 @@ func (a *Anthropic) Complete(ctx context.Context, system, user string) (string, 
 		if c.Type == "text" {
 			text.WriteString(c.Text)
 		}
+	}
+	if out.StopReason == "refusal" || strings.TrimSpace(text.String()) == "" {
+		return "", fmt.Errorf("%w (멈춘 이유: %s)", ErrNoAnswer, out.StopReason)
 	}
 	return text.String(), nil
 }

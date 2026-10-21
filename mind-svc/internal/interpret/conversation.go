@@ -241,13 +241,17 @@ func (c *Conversation) Read(ctx context.Context, room string) error {
 		remembered = c.cfg.Recall(ctx, room, name, fresh)
 	}
 	answer, err := c.llm.Complete(ctx, system, prompt(name, c.cfg.Owner, c.now(), c.loc, known, remembered, earlier, fresh))
-	if err != nil {
+	if err != nil && !errors.Is(err, llm.ErrNoAnswer) {
 		c.retryLater(room, err)
 		return err
 	}
-	ops, err := parse(answer)
+	var ops []op
+	if err == nil {
+		ops, err = parse(answer)
+	}
 	if err != nil {
-		// 같은 배치는 같은 이유(대개 max_tokens 에서 잘린 JSON)로 또 실패한다.
+		// 같은 배치는 같은 이유(대개 max_tokens 에서 잘린 JSON, 또는 생각하다 한도에 닿아 답이 없음)로
+		// 또 실패한다.
 		// 배치를 반으로 줄이고, 한 건으로도 못 읽으면 그 메시지를 격리한다.
 		if len(fresh) == 1 && c.failCount(room) >= quarantineAfter {
 			c.log.Error("해석할 수 없는 메시지를 건너뜁니다", "room", room, "at", last, "err", err)

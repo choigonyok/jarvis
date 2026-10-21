@@ -2,6 +2,7 @@ package interpret
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -322,6 +323,29 @@ func TestUnreadableBatchShrinksThenQuarantines(t *testing.T) {
 	marks, _ := st.Rooms(ctx)
 	if len(marks) == 0 || marks[0].Interpreted.IsZero() {
 		t.Fatal("끝내 못 읽은 메시지는 건너뛰어야 합니다")
+	}
+}
+
+// A call that ended without an answer - the model thought until max_tokens -
+// is read the way an unreadable answer is: the batch shrinks and waits, it is
+// not retried whole forever.
+func TestNoAnswerShrinksTheBatch(t *testing.T) {
+	ctx := context.Background()
+	c, st, script := setup(t, "")
+	script.Answer = func(_, _ string) (string, error) {
+		return "", fmt.Errorf("%w (멈춘 이유: max_tokens)", llm.ErrNoAnswer)
+	}
+	c.cfg.MaxBatch = 4
+	for i, text := range []string{"하나", "둘", "셋", "넷"} {
+		say(t, st, fmt.Sprintf("sim:%d", i+1), text, false, time.Date(2026, 10, 12, 20, i, 0, 0, seoul))
+	}
+	if err := c.Read(ctx, "r"); err == nil || !errors.Is(err, llm.ErrNoAnswer) {
+		t.Fatalf("답 없음은 오류로 남아야 합니다: %v", err)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.shrink["r"] != 2 || c.backoff["r"].IsZero() {
+		t.Fatalf("배치를 줄이고 기다려야 합니다: shrink=%d backoff=%v", c.shrink["r"], c.backoff["r"])
 	}
 }
 

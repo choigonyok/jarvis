@@ -66,10 +66,13 @@ func (c *Conversation) ReadHistory(ctx context.Context, room, name string, after
 		remembered = c.cfg.Recall(ctx, room, name, fresh)
 	}
 	answer, err := c.llm.Complete(llm.WithPurpose(ctx, llm.History), system, prompt(name, c.cfg.Owner, last, c.loc, nil, remembered, earlier, fresh)+historyNote)
-	if err != nil {
+	if err != nil && !errors.Is(err, llm.ErrNoAnswer) {
 		return after, 0, 0, err
 	}
-	ops, err := parse(answer)
+	var ops []op
+	if err == nil {
+		ops, err = parse(answer)
+	}
 	if err != nil {
 		return last, len(fresh), 0, fmt.Errorf("%w: %v", ErrUnreadable, err)
 	}
