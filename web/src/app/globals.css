@@ -368,7 +368,37 @@
   animation: push-rise 240ms cubic-bezier(0.4, 0, 1, 1) forwards;
 }
 
+/* A checklist item ticked: its mark draws itself in (components/chat/
+   checklist.tsx). The list finished: the progress line fills the rest of
+   the way in the approving green - the one moment a list has. */
+@keyframes tick-draw {
+  from {
+    stroke-dashoffset: 14;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+.tick-draw {
+  stroke-dasharray: 14;
+  animation: tick-draw 200ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes list-done {
+  from {
+    transform: scaleX(var(--from, 0));
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+.list-done {
+  transform-origin: left;
+  animation: list-done 520ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .tick-draw,
+  .list-done,
   .push-toast,
   .push-toast-leave,
   .card-flash,

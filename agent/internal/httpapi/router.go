@@ -506,6 +506,15 @@ func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		ref = thread.RefTo(quoted)
+		// A checklist card (or a notice showing one) says which list it is,
+		// so "이거 다 챙겼어" can be ticked on the right one.
+		if o := quoted.Origin; o != nil && o.Checklist != "" {
+			name := ""
+			if o.Kind == thread.OriginChecklist && o.Title != "" {
+				name = " · " + o.Title
+			}
+			ref.Text = strings.TrimSpace(ref.Text + "\n[체크리스트 카드 · " + o.Checklist + name + "]")
+		}
 		// A turn that is only a card says nothing itself; its card does.
 		if ref.Text == "" && quoted.ProposalID != "" {
 			if p, ok := s.proposals.Get(quoted.ProposalID); ok {

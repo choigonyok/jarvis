@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAgentStream } from "@/lib/stream";
 import {
   API,
   type AgentEvent,
+  type Checklist,
   type Decision,
   type Proposal,
   type Queued,
@@ -37,6 +38,21 @@ function upsert<T extends { id: string; atIso?: string }>(list: T[], next: T): T
 // already scrolled to the newest turn - and the fetch then only corrects it.
 let cached: { turns: Turn[]; proposals: Proposal[]; thinking: boolean; hasMore?: boolean } | null = null;
 let cachedQueue: Queued[] = [];
+// The lists the thread's checklist cards show, by id, as they stood last.
+let cachedLists: Record<string, Checklist> = {};
+// Every card that was waiting while this page was open: one decided here
+// stays on screen even when no turn points at it (thread.tsx).
+const waited = new Set<string>();
+
+/** The checklists the turns' cards show that are not known yet. */
+function missingLists(turns: Turn[], known: Record<string, Checklist>): string[] {
+  const ids = new Set<string>();
+  for (const t of turns) {
+    const id = t.origin?.checklist;
+    if (id && !known[id]) ids.add(id);
+  }
+  return [...ids];
+}
 
 /** How many turns a page of the thread holds: the newest on opening, the ones above on scrolling up. */
 const PAGE = 60;
@@ -59,6 +75,38 @@ export function useThread() {
     cachedQueue = next;
     setQueueState(next);
   }, []);
+  const [checklists, setChecklistsState] = useState<Record<string, Checklist>>(() => cachedLists);
+  const setChecklists = useCallback((next: (prev: Record<string, Checklist>) => Record<string, Checklist>) => {
+    setChecklistsState((prev) => {
+      cachedLists = next(prev);
+      return cachedLists;
+    });
+  }, []);
+  const putLists = useCallback(
+    (lists?: Record<string, Checklist> | null) => {
+      if (lists && Object.keys(lists).length > 0) setChecklists((prev) => ({ ...prev, ...lists }));
+    },
+    [setChecklists],
+  );
+  // A card whose list has not come with the page (laid while this page was
+  // open, before its list's own frame): asked for once.
+  const asking = useRef(new Set<string>());
+  const fetchLists = useCallback(
+    async (ids: string[]) => {
+      const want = ids.filter((id) => !asking.current.has(id));
+      if (want.length === 0) return;
+      for (const id of want) asking.current.add(id);
+      try {
+        const res = await fetch(`${API}/thread/checklists?ids=${encodeURIComponent(want.join(","))}`, { cache: "no-store" });
+        if (res.ok) putLists(((await res.json()) as { checklists?: Record<string, Checklist> }).checklists);
+      } catch {
+        // The card says it could not be read; a reload asks again.
+      } finally {
+        for (const id of want) asking.current.delete(id);
+      }
+    },
+    [putLists],
+  );
 
   const setTurns = useCallback((next: Turn[] | ((prev: Turn[]) => Turn[])) => {
     setTurnsState((prev) => {
@@ -71,6 +119,7 @@ export function useThread() {
     setProposalsState((prev) => {
       const value = typeof next === "function" ? next(prev) : next;
       cached = { ...(cached ?? { turns: [], thinking: false }), proposals: value };
+      for (const p of value) if (p.state === "pending") waited.add(p.id);
       return value;
     });
   }, []);
@@ -92,18 +141,20 @@ export function useThread() {
         hasMore?: boolean;
         proposals: Proposal[];
         queue?: Queued[];
+        checklists?: Record<string, Checklist>;
       };
       setTurns(data.turns ?? []);
       setMore(Boolean(data.hasMore));
       setProposals(data.proposals ?? []);
       setThinking(Boolean(data.thinking));
       setQueue(data.queue ?? []);
+      putLists(data.checklists);
     } catch {
       setError("스레드를 불러오지 못했습니다.");
     } finally {
       setHydrated(true);
     }
-  }, [setTurns, setMore, setProposals, setQueue]);
+  }, [setTurns, setMore, setProposals, setQueue, putLists]);
 
   // The page above the oldest turn on screen, put in front of it. Resolves
   // once the turns are in (the caller keeps the view where it was).
@@ -116,8 +167,9 @@ export function useThread() {
       // came out as a space on the far side of the proxies (2026-10-19).
       const res = await fetch(`${API}/thread?limit=${PAGE}&before=${encodeURIComponent(oldest.id)}`, { cache: "no-store" });
       if (!res.ok) throw new Error(String(res.status));
-      const data = (await res.json()) as { turns: Turn[]; hasMore?: boolean };
+      const data = (await res.json()) as { turns: Turn[]; hasMore?: boolean; checklists?: Record<string, Checklist> };
       const older = data.turns ?? [];
+      putLists(data.checklists);
       setTurns((prev) => {
         const have = new Set(prev.map((t) => t.id));
         return [...older.filter((t) => !have.has(t.id)), ...prev];
@@ -129,12 +181,22 @@ export function useThread() {
     } finally {
       setLoadingOlder(false);
     }
-  }, [loadingOlder, setTurns, setMore]);
+  }, [loadingOlder, setTurns, setMore, putLists]);
 
   const onEvent = useCallback((event: AgentEvent) => {
     switch (event.type) {
       case "turn":
         setTurns((prev) => upsert(prev, event.turn));
+        if (event.turn.origin?.checklist && !cachedLists[event.turn.origin.checklist]) {
+          // Its list usually follows on the stream; if not by then, ask.
+          const id = event.turn.origin.checklist;
+          window.setTimeout(() => {
+            if (!cachedLists[id]) void fetchLists([id]);
+          }, 1200);
+        }
+        break;
+      case "checklist":
+        if (event.checklist?.id) setChecklists((prev) => ({ ...prev, [event.checklist.id]: event.checklist }));
         break;
       case "proposal":
         setProposals((prev) => upsert(prev, event.proposal));
@@ -150,7 +212,15 @@ export function useThread() {
         setThinking(false);
         break;
     }
-  }, [setTurns, setProposals, setQueue]);
+  }, [setTurns, setProposals, setQueue, setChecklists, fetchLists]);
+
+  // A page of turns came with cards whose lists did not come along (mind did
+  // not answer the agent in time): asked for once more.
+  useEffect(() => {
+    if (!hydrated) return;
+    const ids = missingLists(turns, cachedLists);
+    if (ids.length > 0) void fetchLists(ids);
+  }, [hydrated, turns, fetchLists]);
 
   // Hydrate first, then follow. A reconnect re-hydrates so dropped frames heal.
   useEffect(() => {
@@ -229,6 +299,39 @@ export function useThread() {
     [hydrate],
   );
 
+  /**
+   * Ticks (or unticks) a checklist item: at once on screen, then saved. A
+   * save that fails puts it back and resolves to what to say.
+   */
+  const tick = useCallback(
+    async (listId: string, itemId: string, done: boolean): Promise<string | null> => {
+      const before = cachedLists[listId];
+      if (before) {
+        setChecklists((prev) => ({
+          ...prev,
+          [listId]: { ...before, items: before.items.map((it) => (it.id === itemId ? { ...it, done } : it)) },
+        }));
+      }
+      try {
+        const res = await fetch(`${API}/thread/checklists/${encodeURIComponent(listId)}/items/${encodeURIComponent(itemId)}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ done }),
+        });
+        if (res.ok) {
+          const body = (await res.json().catch(() => null)) as { checklist?: Checklist } | null;
+          if (body?.checklist?.id) setChecklists((prev) => ({ ...prev, [listId]: body.checklist! }));
+          return null;
+        }
+      } catch {
+        // put back below
+      }
+      if (before) setChecklists((prev) => ({ ...prev, [listId]: before }));
+      return "저장하지 못했어요. 다시 눌러 주세요.";
+    },
+    [setChecklists],
+  );
+
   // The same map until a card changes: the transcript is memoized on it.
   const byId = useMemo(() => new Map(proposals.map((p) => [p.id, p])), [proposals]);
 
@@ -236,6 +339,9 @@ export function useThread() {
     turns,
     proposals,
     byId,
+    checklists,
+    tick,
+    waited: waited as ReadonlySet<string>,
     thinking,
     queue,
     connection,

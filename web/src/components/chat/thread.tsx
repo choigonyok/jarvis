@@ -5,6 +5,8 @@ import Link from "next/link";
 import { ArrowDown, Reply } from "lucide-react";
 import { Composer } from "@/components/chat/composer";
 import { ModeToggle, type ChatMode } from "@/components/chat/mode-toggle";
+import { ChecklistCard } from "@/components/chat/checklist";
+import { NoticeCard } from "@/components/chat/notice-card";
 import { ProposalCard } from "@/components/chat/proposal-card";
 import { QueuedMessages } from "@/components/chat/queued";
 import { SwipeRow } from "@/components/chat/swipe-row";
@@ -16,7 +18,7 @@ import { VoiceStage } from "@/components/chat/voice-stage";
 import { Header, TabBar } from "@/components/shell/header";
 import { useRole } from "@/components/shell/role";
 import { StandingBar } from "@/components/shell/standing-bar";
-import { isPending, plainText, quoteText, type Proposal, type Turn, type TurnRef } from "@/lib/thread";
+import { isPending, plainText, quoteText, type Checklist, type Proposal, type Turn, type TurnRef } from "@/lib/thread";
 import { photoUrl } from "@/lib/uploads";
 import { speakable, useSpeech, useVoiceStatus } from "@/lib/use-speech";
 import { useThread } from "@/lib/use-thread";
@@ -25,11 +27,18 @@ import { clock, dayLabel, refTime, turnDay, turnTime } from "@/lib/when";
 
 const MODE_KEY = "jarvis:chat-mode";
 
-/** An agent turn as it is read aloud; a job's card is announced as the job's. */
+/**
+ * An agent turn as it is read aloud: a job's card is announced as the job's,
+ * a notice as what it is, a checklist by its name.
+ */
 function spokenText(turn: Turn): string {
   const body = speakable(turn.paragraphs?.join("\n\n") ?? "");
+  const o = turn.origin;
+  if (!o) return body;
+  const name = o.title ? `'${o.title}'` : "";
+  if (o.kind === "checklist") return `체크리스트 ${name}. ${body}`.trim();
   if (!body) return "";
-  return turn.origin ? `작업 ${turn.origin.title ? `'${turn.origin.title}'` : ""} 소식. ${body}` : body;
+  return o.kind === "notice" ? `알림. ${body}` : `작업 ${name} 소식. ${body}`;
 }
 
 /**
@@ -187,6 +196,7 @@ function Photos({ names }: { names: string[] }) {
 }
 
 type Decide = ReturnType<typeof useThread>["decide"];
+type TickList = ReturnType<typeof useThread>["tick"];
 
 /**
  * One message of the transcript, memoized on the turn itself: an update
@@ -196,14 +206,18 @@ type Decide = ReturnType<typeof useThread>["decide"];
 const TurnRow = memo(function TurnRow({
   turn,
   proposal,
+  list,
   day,
   quoteAt,
   onQuote,
   onJump,
   onDecide,
+  onTick,
 }: {
   turn: Turn;
   proposal?: Proposal;
+  /** The checklist the turn's card shows, as it stands. */
+  list?: Checklist;
   /** Set on the first turn of a day: the divider above it. */
   day: string | null;
   /** When the message this one quotes was said. */
@@ -211,16 +225,25 @@ const TurnRow = memo(function TurnRow({
   onQuote: (ref: TurnRef) => void;
   onJump: (id: string) => void;
   onDecide: Decide;
+  onTick: TickList;
 }) {
   const time = clock(turn.atIso, turn.at);
-  // A turn that is only a card is quoted by what the card asks.
+  // A turn that is only a card is quoted by what the card asks, or names.
   const quote = () =>
     onQuote({
       id: turn.id,
       role: turn.role,
       at: turnTime(turn.atIso, turn.at),
-      text: quoteText(turn) || (proposal ? `승인 카드: ${readableTitle(proposal.card.title)}` : ""),
+      text:
+        quoteText(turn) ||
+        (proposal
+          ? `승인 카드: ${readableTitle(proposal.card.title)}`
+          : turn.origin?.kind === "checklist"
+            ? `체크리스트: ${list?.title ?? turn.origin.title ?? ""}`
+            : ""),
     });
+  const tick = (item: string, done: boolean) =>
+    turn.origin?.checklist ? onTick(turn.origin.checklist, item, done) : Promise.resolve(null);
   // A divider where the day changes: with it, a turn's own stamp only has to
   // say the time, and a reply that came hours later - a suggestion overnight
   // - is plainly not a live one.
@@ -235,7 +258,19 @@ const TurnRow = memo(function TurnRow({
             <div className={ROW}>
               <Rail at={time} onRef={quote} />
               <div className="min-w-0">
-                {turn.origin ? (
+                {turn.origin?.kind === "notice" ? (
+                  <NoticeCard turn={turn} list={list} onTick={tick} />
+                ) : turn.origin?.kind === "checklist" ? (
+                  <>
+                    {/* The line on why now, said above the list like any word of his. */}
+                    {turn.paragraphs?.length ? (
+                      <div className="mb-3">
+                        <Markdown>{turn.paragraphs.join("\n\n")}</Markdown>
+                      </div>
+                    ) : null}
+                    <ChecklistCard list={list} title={turn.origin.title} onTick={tick} />
+                  </>
+                ) : turn.origin ? (
                   <JobNews turn={turn} />
                 ) : turn.paragraphs?.length ? (
                   // The runner split the message on blank lines; putting
@@ -303,28 +338,36 @@ const Transcript = memo(function Transcript({
   turns,
   proposals,
   byId,
+  checklists,
+  waited,
   thinking,
   error,
   hydrated,
   onQuote,
   onJump,
   onDecide,
+  onTick,
 }: {
   turns: Turn[];
   proposals: Proposal[];
   byId: Map<string, Proposal>;
+  checklists: Record<string, Checklist>;
+  /** Every card that waited while this page was open. */
+  waited: ReadonlySet<string>;
   thinking: boolean;
   error: string | null;
   hydrated: boolean;
   onQuote: (ref: TurnRef) => void;
   onJump: (id: string) => void;
   onDecide: Decide;
+  onTick: TickList;
 }) {
-  // A proposal nobody asked for has no turn pointing at it. Until a detector
-  // exists to raise one, this renders nothing - but it is what makes the
-  // chat able to show one the day it does.
+  // A card with no turn pointing at it - one raised before every card was
+  // laid in the conversation - floats below the thread while it waits. One
+  // that was waiting on this screen stays once decided: a card answered
+  // under your thumb and then gone reads as one that never came (2026-10-21).
   const attached = new Set(turns.map((t) => t.proposalId).filter(Boolean));
-  const unattached = proposals.filter((p) => isPending(p) && !attached.has(p.id));
+  const unattached = proposals.filter((p) => !attached.has(p.id) && (isPending(p) || waited.has(p.id)));
   // When a quoted turn is on the page its own stamp says when; one that has
   // scrolled out of the loaded thread falls back to the agent's.
   const times = new Map(turns.map((t) => [t.id, turnTime(t.atIso, t.at)]));
@@ -349,11 +392,13 @@ const Transcript = memo(function Transcript({
               key={turn.id}
               turn={turn}
               proposal={turn.proposalId ? byId.get(turn.proposalId) : undefined}
+              list={turn.origin?.checklist ? checklists[turn.origin.checklist] : undefined}
               day={day && day !== turnDay(turns[i - 1]?.atIso) ? day : null}
               quoteAt={turn.ref ? (times.get(turn.ref.id) ?? refTime(turn.ref.at)) : ""}
               onQuote={onQuote}
               onJump={onJump}
               onDecide={onDecide}
+              onTick={onTick}
             />
           );
         })}
@@ -407,6 +452,9 @@ export function Thread() {
     turns,
     proposals,
     byId,
+    checklists,
+    tick,
+    waited,
     thinking,
     queue,
     connection,
@@ -764,12 +812,15 @@ export function Thread() {
             turns={turns}
             proposals={proposals}
             byId={byId}
+            checklists={checklists}
+            waited={waited}
             thinking={thinking}
             error={error}
             hydrated={hydrated}
             onQuote={quote}
             onJump={jumpTo}
             onDecide={decide}
+            onTick={tick}
           />
         </div>
       </main>

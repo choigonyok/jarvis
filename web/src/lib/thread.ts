@@ -88,18 +88,44 @@ export type Turn = {
   /** Points at a proposal; the card itself lives in the proposal store. */
   proposalId?: string;
   /**
-   * Set when the turn is news from a background job's run rather than the
-   * conversation's own words. Drawn as a card beside the thread; a later
-   * word from the same run replaces it (same id, newer atIso).
+   * Set when the turn is not the conversation's own words: news from a
+   * background job's run (drawn beside the thread; a later word from the
+   * same run replaces it - same id, newer atIso), something told at its
+   * moment (a notice), or a checklist shown.
    */
   origin?: TurnOrigin;
 };
 
 export type TurnOrigin = {
-  kind: "job";
+  kind: "job" | "notice" | "checklist";
   job?: number;
   run?: number;
+  /** A job's name; a notice's why-now ("집에 도착하셔서 알려 드려요"); a list's name. */
   title?: string;
+  /** What a notice was sent as. */
+  ref?: string;
+  /** The checklist the card shows, by id. */
+  checklist?: string;
+};
+
+/** One line of a checklist. */
+export type ChecklistItem = {
+  id: string;
+  text: string;
+  done: boolean;
+  doneAt?: string;
+  /** Who last ticked it: "card", "chat", "mind". */
+  by?: string;
+};
+
+/** A checklist as mind keeps it: what its cards draw, checks and all. */
+export type Checklist = {
+  id: string;
+  title: string;
+  note?: string;
+  items: ChecklistItem[];
+  status: "active" | "archived";
+  updatedAt?: string;
 };
 
 export type CalendarEvent = {
@@ -144,7 +170,8 @@ export type AgentEvent =
   | { type: "status"; thinking?: boolean }
   | { type: "error"; message: string }
   | { type: "proposal"; proposal: Proposal }
-  | { type: "calendar"; calendar: CalendarChange };
+  | { type: "calendar"; calendar: CalendarChange }
+  | { type: "checklist"; checklist: Checklist };
 
 export type Connection = "connecting" | "open" | "closed";
 
