@@ -26,10 +26,24 @@ type Server struct {
 	token      string
 	purgeAfter time.Duration
 	log        *slog.Logger
+	// wake tells the agent's scheduler a job may be due now.
+	wake func()
 }
 
 func New(s *store.Store, token string, purgeAfter time.Duration, log *slog.Logger) *Server {
 	return &Server{store: s, token: token, purgeAfter: purgeAfter, log: log}
+}
+
+// SetWake names what to call when a job may have come due by someone's
+// hand - made, instructed, answered, run now, resumed, a site's login done.
+// It is the agent's scheduler, which otherwise looks only on its own long
+// clock: the 작업 tab talks to this service, not to the agent.
+func (s *Server) SetWake(fn func()) { s.wake = fn }
+
+func (s *Server) woke() {
+	if s.wake != nil {
+		go s.wake()
+	}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -112,6 +126,7 @@ func (s *Server) create(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "작업을 만들지 못했습니다", err)
 		return
 	}
+	s.woke()
 	writeJSON(w, http.StatusCreated, j)
 }
 
@@ -156,6 +171,7 @@ func (s *Server) instruct(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, err.Error())
 		return
 	}
+	s.woke()
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -202,6 +218,9 @@ func (s *Server) control(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, err.Error())
 		return
 	}
+	if action == "run" || action == "resume" {
+		s.woke()
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -221,12 +240,14 @@ func (s *Server) answer(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "답을 적지 못했습니다", err)
 		return
 	}
+	s.woke()
 	w.WriteHeader(http.StatusNoContent)
 }
 
 // due is the jobs whose turn it is, most overdue first: `job` is the first
 // (what the scheduler read before it ran several at once), `jobs` up to
-// ?limit= of them.
+// ?limit= of them, and `next` when the soonest of the rest comes due by its
+// own clock (null when none is on one) - so the scheduler sleeps until then.
 func (s *Server) due(w http.ResponseWriter, r *http.Request) {
 	n := 1
 	if v := r.URL.Query().Get("limit"); v != "" {
@@ -246,7 +267,12 @@ func (s *Server) due(w http.ResponseWriter, r *http.Request) {
 	if jobs == nil {
 		jobs = []store.Job{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"job": first, "jobs": jobs})
+	next, err := s.store.NextDue(r.Context())
+	if err != nil {
+		s.fail(w, "다음 작업 시각을 읽지 못했습니다", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"job": first, "jobs": jobs, "next": next})
 }
 
 func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
@@ -424,6 +450,9 @@ func (s *Server) siteLogin(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.SetLogin(r.Context(), in.Site, in.Required, in.Note); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if !in.Required {
+		s.woke()
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

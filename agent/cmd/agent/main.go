@@ -244,6 +244,7 @@ func main() {
 	// (spending/ask.go) is for what it could not tell either.
 	if spendingModule != nil && !cfg.Guest {
 		spendingModule.Ask(proposals, log)
+		spendingModule.Attach(transcript.AttachProposal)
 		go spendingModule.RunAsker(enrichCtx, spending.AskConfig{Every: 10 * time.Minute, MaxOpen: 3, Judge: runner, Model: cfg.EnrichModel})
 	}
 	if _, ok := cfg.ExtraMCPURLs[jobs.BrowserServer]; jobsModule != nil && ok {
@@ -446,8 +447,13 @@ func main() {
 
 	// A job's run that reaches a payment raises a card for that job.
 	var jobPayments httpapi.JobPayments
+	var wakeJobs func()
 	if jobsModule != nil {
 		jobPayments = jobsModule
+		wakeJobs = jobsModule.Wake
+		// A job waiting for the browser starts when a turn or another task
+		// gives it up, not on the scheduler's next look.
+		runner.OnFree(jobsModule.Wake)
 	}
 
 	srv := &http.Server{
@@ -476,6 +482,7 @@ func main() {
 			Vault:           vaultConsole(vaultModule),
 			FollowUp:        runner,
 			Jobs:            jobPayments,
+			WakeJobs:        wakeJobs,
 			Log:             log,
 		}).Handler(),
 		// No WriteTimeout: /events streams and /mcp blocks on a human.

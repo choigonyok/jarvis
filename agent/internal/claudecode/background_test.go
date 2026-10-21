@@ -178,3 +178,19 @@ func TestIdleRightAfterTheConversation(t *testing.T) {
 		t.Fatal("대화 중에도 브라우저 없는 작업은 시작합니다")
 	}
 }
+
+// A background task ending is a place come free: whoever waits for one (a
+// job on the browser) hears it then, not on its next clock.
+func TestBackgroundEndingFreesAPlace(t *testing.T) {
+	r := runner(t, fakeClaude(t, "0"))
+	freed := make(chan struct{}, 4)
+	r.OnFree(func() { freed <- struct{}{} })
+	if _, err := r.Background(context.Background(), Task{Name: "t", Timeout: 5 * time.Second}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-freed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("끝난 백그라운드 작업이 자리를 알리지 않았습니다")
+	}
+}

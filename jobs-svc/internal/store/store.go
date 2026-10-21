@@ -275,10 +275,12 @@ func (s *Store) event(ctx context.Context, jobID int64, runID *int64, kind, text
 // failed job comes back to life for it; a cancelled one does not.
 func (s *Store) Instruct(ctx context.Context, id int64, text string) error {
 	// A job waiting on a card still runs for a new instruction - the
-	// instruction may be the answer to what the card asked.
+	// instruction may be the answer to what the card asked. The card stays
+	// up: if the run has nothing else to do, the agent puts the job back to
+	// waiting on it, and its answer wakes the job like any other.
 	tag, err := s.pool.Exec(ctx, `
 		update jobs set state = 'active', next_at = now(), next_reason = '새 지시', attempts = 0,
-		       finished_at = null, updated_at = now()
+		       waiting_card = '', finished_at = null, updated_at = now()
 		 where id = $1 and state <> 'cancelled'`, id)
 	if err != nil {
 		return err
@@ -350,14 +352,19 @@ func (s *Store) Control(ctx context.Context, id int64, action string) error {
 }
 
 // Answer records the operator's decision on a card a job raised and wakes
-// the job if it was waiting on that card.
+// the job now, whatever it was waiting for: an answer is news, and the job
+// acts on it at once. Waking only a job waiting on that very card left an
+// answer sitting for the job's own clock - job 30 (2026-10-21) asked, then
+// scheduled itself to "check the card's answer" in 20 minutes, and an answer
+// given a minute later waited the rest of them. A paused or finished job
+// keeps the answer for when it runs again.
 func (s *Store) Answer(ctx context.Context, id int64, card, text string) error {
 	if _, err := s.pool.Exec(ctx, `insert into job_inbox (job_id, kind, text) values ($1, 'answer', $2)`, id, text); err != nil {
 		return err
 	}
 	if _, err := s.pool.Exec(ctx, `
 		update jobs set state = 'active', waiting_card = '', next_at = now(), next_reason = '카드 결정', updated_at = now()
-		 where id = $1 and state = 'waiting' and waiting_card = $2`, id, card); err != nil {
+		 where id = $1 and state in ('active', 'waiting')`, id); err != nil {
 		return err
 	}
 	s.event(ctx, id, nil, "answer", text)
@@ -401,6 +408,18 @@ func (s *Store) DueN(ctx context.Context, n int) ([]Job, error) {
 		out = append(out, j)
 	}
 	return out, rows.Err()
+}
+
+// NextDue is when the next job comes due by its own clock, or nil when none
+// is on one: the scheduler sleeps until then rather than asking every few
+// seconds. A job waiting on a card or a login has no clock - what wakes it
+// is the decision.
+func (s *Store) NextDue(ctx context.Context) (*time.Time, error) {
+	var at *time.Time
+	err := s.pool.QueryRow(ctx, `select min(j.next_at) from jobs j
+		where j.state = 'active' and j.next_at > now()
+		  and not exists (select 1 from job_sites s where s.login_required and s.site = any(j.sites))`).Scan(&at)
+	return at, err
 }
 
 // StartRun opens a run. Any run of this job left open by a crash is closed
@@ -455,6 +474,9 @@ type Ended struct {
 	Title  string `json:"title"`
 	Failed bool   `json:"failed"`
 	Note   string `json:"note,omitempty"`
+	// Again: an instruction or a card's answer came while the run was in
+	// flight, so the job is due again now.
+	Again bool `json:"again,omitempty"`
 }
 
 // EndRun closes a run and applies the rules. On a good run the instructions
@@ -539,19 +561,38 @@ func (s *Store) EndRun(ctx context.Context, runID int64, outcome, note string) (
 	if err != nil {
 		return Ended{}, err
 	}
+	// What came while the run was in flight - an instruction, a card's
+	// answer - was never in front of it, so the job goes again at once,
+	// whatever the run set for itself: a clock, or a card of its own.
+	again := false
+	if !end.Fail {
+		tag, err := tx.Exec(ctx, `
+			update jobs set state = 'active', waiting_card = '', next_at = now(), next_reason = '실행 중에 온 지시·답', updated_at = now()
+			 where id = $1 and state in ('active', 'waiting')
+			   and exists (select 1 from job_inbox i where i.job_id = $1 and i.consumed_run is null and i.at > $2)`, jobID, started)
+		if err != nil {
+			return Ended{}, err
+		}
+		again = tag.RowsAffected() > 0
+	}
 	kind, text := "run_end", "실행을 마쳤습니다"
 	switch {
+	case outcome == rules.Yielded && again:
+		text = "대화가 시작되어 잠시 멈췄습니다. 그사이 새 지시가 와서 곧 다시 합니다"
 	case outcome == rules.Yielded:
 		text = fmt.Sprintf("대화가 시작되어 잠시 멈췄습니다. %s 뒤에 다시 합니다", minutes(end.After))
 	case end.Fail:
 		kind, text = "error", "세 번 연달아 실패해 멈췄습니다: "+end.Note
 	case end.Retry:
 		kind, text = "error", "잘 끝나지 않았습니다(15분 뒤 다시): "+end.Note
+	case again:
+		text = "실행을 마쳤습니다. 실행 중에 새 지시나 카드 답이 와서 곧 다시 합니다"
 	}
 	if _, err := tx.Exec(ctx, `insert into job_events (job_id, run_id, kind, text) values ($1, $2, $3, $4)`,
 		jobID, runID, kind, clamp(text, 2000)); err != nil {
 		return Ended{}, err
 	}
+	out.Again = again
 	return out, tx.Commit(ctx)
 }
 

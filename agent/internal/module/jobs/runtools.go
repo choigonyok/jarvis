@@ -3,6 +3,7 @@ package jobs
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"strconv"
@@ -36,6 +37,9 @@ type runEntry struct {
 	// parked is the card this run left the job waiting on, until it is
 	// decided or the run puts the job back on a clock.
 	parked string
+	// decided: the run said what comes next (a clock, a card, a login, a
+	// payment to wait on, the end).
+	decided bool
 }
 
 func (r *running) add(run int64, j Job, browser bool) {
@@ -71,6 +75,22 @@ func (r *running) unpark(card string) {
 			e.parked = ""
 		}
 	}
+}
+
+// decide notes that the run said what comes next.
+func (r *running) decide(run int64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if e := r.runs[run]; e != nil {
+		e.decided = true
+	}
+}
+
+func (r *running) decidedOf(run int64) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	e := r.runs[run]
+	return e != nil && e.decided
 }
 
 func (r *running) parkedOn(run int64) string {
@@ -219,6 +239,7 @@ func (m *Module) PaymentRaised(job int64, card string) {
 func (m *Module) PaymentDecided(job int64, card string, approved bool, text string) error {
 	m.pay.decided(job, card, approved)
 	m.current.unpark(card)
+	m.hear(card)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	if err := m.store.Answer(ctx, job, card, text); err != nil {
@@ -365,7 +386,7 @@ func (m *Module) runServer(run int64) *mcp.Server {
 		Name: "ask",
 		Description: "운영자에게 카드로 묻는다: 밖으로 나가는 행동(글 올리기, 삭제, 메시지 보내기, 예약·신청) 전의 승인, 운영자가 정해야 하는 값(가격 등)이 든 폼, 판단이 필요한 질문. " +
 			"맡은 구매의 결제는 묻지 않는다 - 결제하기를 누르면 결제 승인 카드가 저절로 올라간다(wait_payment). " +
-			"부른 뒤에는 바로 실행을 마친다 - 답이 오면 다음 실행에서 이어진다.",
+			"부른 뒤에는 바로 실행을 마친다 - 운영자가 승인하거나 반려하는 즉시 작업이 다시 실행되어 그 답으로 이어 가므로, 답을 확인하러 올 시각(schedule_next)은 잡지 않는다.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in AskToolInput) (*mcp.CallToolResult, any, error) {
 		j, bad := guard()
 		if bad != nil {
@@ -401,7 +422,12 @@ func (m *Module) runServer(run int64) *mcp.Server {
 			return fail(err), nil, nil
 		}
 		m.current.park(run, p.ID)
-		return ok("카드를 올렸습니다. 운영자가 결정하면 다음 실행에서 답을 받습니다. 지금 실행을 마치세요."), nil, nil
+		m.current.decide(run)
+		// In the conversation where it was raised, so it stays there once
+		// decided instead of floating below the thread only while it waits.
+		m.attach(p.ID)
+		return ok("카드를 올렸습니다. 운영자가 승인하거나 반려하면 작업이 곧바로 다시 실행되어 그 답을 받습니다. " +
+			"답을 확인하러 다시 올 시각을 잡지 말고(schedule_next 없이) 지금 실행을 마치세요."), nil, nil
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -464,7 +490,8 @@ func (m *Module) runServer(run int64) *mcp.Server {
 		raw, _ := json.Marshal(login)
 		act := action.Action{Kind: KindLogin, Input: raw}
 		if _, open := m.proposals.FindPending(act); !open {
-			m.proposals.Open(proposal.Proposal{Origin: proposal.OriginNotice, Action: act, Card: loginCard(login)})
+			p, _ := m.proposals.Open(proposal.Proposal{Origin: proposal.OriginNotice, Action: act, Card: loginCard(login)})
+			m.attach(p.ID)
 		}
 		// Due already skips jobs on a blocked site; this only makes the run
 		// count as having decided, and comes back soon after the login.
@@ -472,13 +499,14 @@ func (m *Module) runServer(run int64) *mcp.Server {
 			return fail(err), nil, nil
 		}
 		m.current.park(run, "")
-		return ok("로그인 카드를 올렸습니다. 지금 실행을 마치세요."), nil, nil
+		m.current.decide(run)
+		return ok("로그인 카드를 올렸습니다. 운영자가 로그인하고 승인하면(또는 반려하면) 작업이 곧바로 다시 실행됩니다. 지금 실행을 마치세요."), nil, nil
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "schedule_next",
-		Description: "이 작업을 언제 다시 실행할지 정한다. 목표상 나중에 다시 확인할 것이 있으면 반드시 부른다(최소 10분 뒤). " +
-			"얼마나 자주 볼지는 대상이 얼마나 빨리 바뀌는지로 정한다.",
+		Description: "이 작업을 언제 다시 실행할지 정한다. 목표상 나중에 바깥에서 다시 확인할 것이 있으면 반드시 부른다(최소 10분 뒤). " +
+			"얼마나 자주 볼지는 대상이 얼마나 빨리 바뀌는지로 정한다. 카드의 답을 확인하러 오는 데는 쓰지 않는다 - 답이 오면 작업이 곧바로 다시 실행된다.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ScheduleInput) (*mcp.CallToolResult, any, error) {
 		j, bad := guard()
 		if bad != nil {
@@ -486,6 +514,15 @@ func (m *Module) runServer(run int64) *mcp.Server {
 		}
 		if up := payUp(j); up != nil {
 			return up, nil, nil
+		}
+		// Waiting on a card is waiting on its decision, which wakes the job
+		// the moment it is made - a clock beside it only came back to look
+		// whether it was made yet (job 30, 2026-10-21: six runs, 18:21 to
+		// 20:43, each finding "카드 답 대기 중").
+		if open := m.waitingOn(j.ID); len(open) > 0 {
+			last := open[len(open)-1]
+			return toolText(fmt.Sprintf("카드 '%s'(%s)의 답을 기다리는 중입니다. 운영자가 승인하거나 반려하면 작업이 곧바로 다시 실행되어 그 답을 받으니, "+
+				"답을 확인하러 다시 올 시각은 잡지 않습니다. schedule_next 없이 지금 실행을 마치세요 - 작업은 그 카드를 기다립니다.", last.Card.Title, last.ID), true), nil, nil
 		}
 		at := time.Now().Add(time.Duration(in.AfterMinutes) * time.Minute)
 		if in.At != "" {
@@ -500,6 +537,7 @@ func (m *Module) runServer(run int64) *mcp.Server {
 			return fail(err), nil, nil
 		}
 		m.current.park(run, "")
+		m.current.decide(run)
 		return ok("다음 실행: " + got.Local().Format("2006-01-02 15:04") + ". 할 일이 끝났으면 실행을 마치세요."), nil, nil
 	})
 
@@ -533,6 +571,7 @@ func (m *Module) runServer(run int64) *mcp.Server {
 			return fail(err), nil, nil
 		}
 		m.current.park(run, c.id)
+		m.current.decide(run)
 		// Decided while the job was being parked: the answer came before the
 		// job waited on it, so nothing will wake it - put it back on a clock.
 		if now, _ := m.pay.get(j.ID); now.id == c.id && now.state != payPending {
@@ -542,7 +581,7 @@ func (m *Module) runServer(run int64) *mcp.Server {
 			m.current.park(run, "")
 			return decided(now), nil, nil
 		}
-		return ok("결제 승인 카드를 기다립니다. 승인되면 작업이 바로 다시 실행됩니다. 지금 실행을 마치세요."), nil, nil
+		return ok("결제 승인 카드를 기다립니다. 승인하거나 반려하면 작업이 바로 다시 실행됩니다. 지금 실행을 마치세요."), nil, nil
 	})
 
 	mcp.AddTool(server, &mcp.Tool{Name: "finish", Description: "목표를 이뤘거나 더 할 수 있는 일이 없을 때 작업을 끝낸다."},
@@ -561,6 +600,7 @@ func (m *Module) runServer(run int64) *mcp.Server {
 			if err := m.store.Finish(ctx, run, in.Summary); err != nil {
 				return fail(err), nil, nil
 			}
+			m.current.decide(run)
 			// A job that ends does not pay: its payment card, if still up, goes.
 			if c, up := m.pay.get(j.ID); up {
 				if c.state == payPending {
@@ -620,6 +660,16 @@ func (m *Module) runServer(run int64) *mcp.Server {
 		return ok("남겼습니다."), nil, nil
 	})
 	return server
+}
+
+// attach puts a card a run raised in the conversation, as its own turn: it
+// stays where it was raised once decided, rather than floating below the
+// thread only while it waits (and vanishing the moment it is answered - the
+// "card that never came" of 2026-10-21 17:55).
+func (m *Module) attach(proposalID string) {
+	if m.notify != nil {
+		m.notify.AttachProposal(proposalID)
+	}
 }
 
 // say puts a job run's news in the conversation - as the run's card, which

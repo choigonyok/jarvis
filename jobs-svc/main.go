@@ -50,12 +50,18 @@ func main() {
 	}
 	defer st.Close()
 
+	jobsAPI := api.New(st, token,
+		// 작업이 끝나고 이만큼 지나면 첨부 사진 파일을 지운다.
+		duration("JOBS_PURGE_AFTER", 30*24*time.Hour),
+		log)
+	// 작업 탭에서 지시하거나 "지금 실행"을 누르면 에이전트의 스케줄러를 바로 깨운다.
+	// 없으면(또는 닿지 않으면) 스케줄러가 자기 긴 주기에 본다.
+	if url := os.Getenv("AGENT_WAKE_URL"); url != "" {
+		jobsAPI.SetWake(waker(url, token, log))
+	}
 	srv := &http.Server{
-		Addr: addr,
-		Handler: api.New(st, token,
-			// 작업이 끝나고 이만큼 지나면 첨부 사진 파일을 지운다.
-			duration("JOBS_PURGE_AFTER", 30*24*time.Hour),
-			log).Handler(),
+		Addr:         addr,
+		Handler:      jobsAPI.Handler(),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}
@@ -92,6 +98,28 @@ func openWithRetry(ctx context.Context, dsn string, tries int, wait time.Duratio
 		}
 	}
 	return nil, last
+}
+
+// waker is a knock on the agent's door: POST url with the services' token.
+// Nothing rides on it - a knock that does not land leaves the job to the
+// scheduler's own clock.
+func waker(url, token string, log *slog.Logger) func() {
+	client := &http.Client{Timeout: 5 * time.Second}
+	return func() {
+		req, err := http.NewRequest(http.MethodPost, url, nil)
+		if err != nil {
+			return
+		}
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		res, err := client.Do(req)
+		if err != nil {
+			log.Debug("에이전트를 깨우지 못했습니다", "err", err)
+			return
+		}
+		res.Body.Close()
+	}
 }
 
 func getenv(key, def string) string {

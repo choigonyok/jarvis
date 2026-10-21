@@ -96,6 +96,11 @@ func (m *Module) Ask(proposals *proposal.Store, log *slog.Logger) {
 	proposals.OnDecide(m.decided)
 }
 
+// Attach has each category card put in the conversation as it is raised,
+// so it stays there answered rather than floating below the thread only
+// while it waits.
+func (m *Module) Attach(fn func(proposalID string)) { m.attach = fn }
+
 type AskConfig struct {
 	Every time.Duration
 	// MaxOpen is how many of these cards may wait at once: a backlog comes a
@@ -171,11 +176,14 @@ func (m *Module) askOnce(ctx context.Context, cfg AskConfig) error {
 		}
 		in := AskInput{Entry: e, Fields: askFields(e, categories)}
 		raw, _ := json.Marshal(in)
-		m.proposals.Open(proposal.Proposal{
+		p, _ := m.proposals.Open(proposal.Proposal{
 			Origin: proposal.OriginNotice,
 			Action: action.Action{Kind: KindCategory, Input: raw},
 			Card:   categoryCard(in),
 		})
+		if m.attach != nil {
+			m.attach(p.ID)
+		}
 		open++
 	}
 	return nil

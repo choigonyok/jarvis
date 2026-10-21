@@ -65,9 +65,11 @@ func QualifiedToolName(tool string) string {
 }
 
 // Notifier puts a job's news in the conversation without a model turn: one
-// card per run, replaced by the run's later word (thread.Store.JobNews).
+// card per run, replaced by the run's later word (thread.Store.JobNews) -
+// and the cards a run raises, where they then stay, decided or not.
 type Notifier interface {
 	JobNews(o thread.Origin, paragraphs []string) *thread.Turn
+	AttachProposal(proposalID string)
 }
 
 type Module struct {
@@ -94,6 +96,10 @@ type Module struct {
 	// open for the rest of the run at once.
 	guard SiteGuard
 	hold  time.Duration
+	// heard is each card whose decision this process took to its job, and
+	// when: the sweep leaves those to the delivery under way.
+	heardMu sync.Mutex
+	heard   map[string]time.Time
 }
 
 func New(store *Store, up *uploads.Store, proposals *proposal.Store, notify Notifier, log *slog.Logger) *Module {
@@ -130,6 +136,29 @@ func (m *Module) wake() {
 	case m.kick <- struct{}{}:
 	default:
 	}
+}
+
+// Wake has the scheduler look now: a place came free (the runner's OnFree),
+// or a job changed where this agent does not see it (jobs-svc's knock).
+func (m *Module) Wake() { m.wake() }
+
+// hear notes that a card's decision is on its way to the job.
+func (m *Module) hear(card string) {
+	m.heardMu.Lock()
+	defer m.heardMu.Unlock()
+	if m.heard == nil {
+		m.heard = map[string]time.Time{}
+	}
+	m.heard[card] = time.Now()
+}
+
+// delivering is whether a card's decision was taken to its job a moment
+// ago - its answer may still be on the way.
+func (m *Module) delivering(card string) bool {
+	m.heardMu.Lock()
+	defer m.heardMu.Unlock()
+	at, ok := m.heard[card]
+	return ok && time.Since(at) < 2*time.Minute
 }
 
 // Specs: the two cards a job can raise. Nothing here is a tool the chat's
@@ -198,7 +227,7 @@ func loginCard(in LoginInput) action.Card {
 	return action.Card{
 		Title:       "다시 로그인해 주세요: " + in.Site,
 		Body:        body + "\n\n화면 탭에서 브라우저로 로그인한 뒤 승인을 누르세요.",
-		Consequence: "승인하면 이 사이트를 쓰는 작업을 이어서 합니다. 반려하면 계속 기다립니다.",
+		Consequence: "승인하면 이 사이트를 쓰는 작업을 바로 이어서 합니다. 반려하면 작업이 로그인 없이 할 수 있는 만큼만 하고 알려 드립니다.",
 	}
 }
 
@@ -260,11 +289,14 @@ func (m *Module) Revise(_ context.Context, a action.Action, edits map[string]str
 	return action.Action{Kind: a.Kind, Input: raw}, askCard(in), nil
 }
 
-// decided carries a card's decision back to the job that raised it.
+// decided carries a card's decision back to the job that raised it, and
+// wakes the job: approved or turned down, it goes on from the answer at once
+// rather than on a clock.
 func (m *Module) decided(p proposal.Proposal, d proposal.Decision) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	m.current.unpark(p.ID)
+	m.hear(p.ID)
 	switch p.Action.Kind {
 	case KindAsk:
 		var in AskInput
@@ -310,7 +342,17 @@ func (m *Module) decided(p proposal.Proposal, d proposal.Decision) {
 			return
 		}
 		if d != proposal.Approve {
-			m.proposals.Settle(p.ID, proposal.Rejected, "로그인을 기다리는 동안 이 사이트의 작업은 쉽니다.")
+			// Turned down: no login is coming. Waiting on it kept the site
+			// blocked and its jobs silent for good (job 27, 2026-10-20), so the
+			// site opens again and its jobs are told to go on without one.
+			if err := m.store.SetLogin(ctx, in.Site, false, ""); err != nil {
+				m.proposals.Settle(p.ID, proposal.Failed, err.Error())
+				return
+			}
+			n := m.tellSite(ctx, in.Site, p.ID, "[로그인 반려] "+in.Site+": 운영자가 로그인 요청을 반려했습니다. "+
+				"로그인 없이 할 수 있는 일만 하고, 로그인이 꼭 필요하면 다시 요청하지 말고 그렇게 finish 로 알리고 끝내세요.")
+			m.proposals.Settle(p.ID, proposal.Rejected, fmt.Sprintf("이 사이트를 쓰는 작업 %d개에 반려로 전했습니다.", n))
+			m.wake()
 			return
 		}
 		if err := m.store.SetLogin(ctx, in.Site, false, ""); err != nil {
@@ -320,6 +362,109 @@ func (m *Module) decided(p proposal.Proposal, d proposal.Decision) {
 		m.proposals.Settle(p.ID, proposal.Executed, "이 사이트의 작업을 이어서 합니다.")
 		m.wake()
 	}
+}
+
+// tellSite hands text to every live job that uses site, as an answer that
+// wakes it, and says how many there were.
+func (m *Module) tellSite(ctx context.Context, site, card, text string) int {
+	js, err := m.store.List(ctx)
+	if err != nil {
+		m.log.Warn("사이트의 작업을 찾지 못했습니다", "site", site, "err", err)
+		return 0
+	}
+	n := 0
+	for _, j := range js {
+		if (j.State != "active" && j.State != "waiting") || !contains(j.Sites, site) {
+			continue
+		}
+		if err := m.store.Answer(ctx, j.ID, card, text); err != nil {
+			m.log.Warn("작업에 전하지 못했습니다", "job", j.ID, "err", err)
+			continue
+		}
+		n++
+	}
+	return n
+}
+
+// waitingOn is the cards a job's question still waits on, oldest first: the
+// payment card its run stopped at, and the questions it asked.
+func (m *Module) waitingOn(job int64) []proposal.Proposal {
+	return m.proposals.PendingWhere(func(p proposal.Proposal) bool {
+		switch {
+		case p.Action.Kind == KindAsk:
+			var in AskInput
+			return json.Unmarshal(p.Action.Input, &in) == nil && in.JobID == job
+		case p.Origin == proposal.OriginIntercept:
+			var pay struct {
+				JobID int64 `json:"jobId"`
+			}
+			return json.Unmarshal(p.Action.Input, &pay) == nil && pay.JobID == job
+		}
+		return false
+	})
+}
+
+// cardSweep is how often the scheduler makes sure, without waking any model,
+// that no job is left waiting on a card that was decided while the job was
+// not told (a restart between the two) or that is gone - the long check
+// behind the decision events, there only for what they miss.
+const cardSweep = 30 * time.Minute
+
+// sweep gives each job still waiting on a decided or vanished card what
+// became of it, which wakes the job.
+func (m *Module) sweep(ctx context.Context) {
+	js, err := m.store.List(ctx)
+	if err != nil {
+		return
+	}
+	for _, j := range js {
+		if j.State != "waiting" || j.WaitingCard == "" || j.Running || m.delivering(j.WaitingCard) {
+			continue
+		}
+		p, ok := m.proposals.Get(j.WaitingCard)
+		if ok && p.State == proposal.Pending {
+			continue
+		}
+		text := "[카드 없음] 기다리던 카드(" + j.WaitingCard + ")가 없어졌습니다. 운영자의 답을 받지 못했으니, 필요하면 다시 물으세요."
+		if ok {
+			text = lateAnswer(p)
+		}
+		if err := m.store.Answer(ctx, j.ID, j.WaitingCard, text); err != nil {
+			m.log.Warn("결정을 작업에 늦게라도 전하지 못했습니다", "job", j.ID, "card", j.WaitingCard, "err", err)
+			continue
+		}
+		m.log.Info("작업이 듣지 못한 카드 결정을 전했습니다", "job", j.ID, "card", j.WaitingCard, "found", ok, "state", p.State)
+		m.wake()
+	}
+}
+
+// lateAnswer is a decided card's answer, told to a job that never heard it.
+func lateAnswer(p proposal.Proposal) string {
+	approved := p.State == proposal.Approved || p.State == proposal.Executed
+	if p.Action.Kind == KindAsk {
+		var in AskInput
+		if json.Unmarshal(p.Action.Input, &in) == nil {
+			d := proposal.Reject
+			if approved {
+				d = proposal.Approve
+			}
+			return answerText(in, d) + "\n(늦게 전해진 답입니다)"
+		}
+	}
+	word := "반려"
+	if approved {
+		word = "승인"
+	}
+	text := fmt.Sprintf("[카드 결정 · 늦게 전함] '%s' 카드(%s)가 %s됐습니다.", p.Card.Title, p.ID, word)
+	if p.Origin == proposal.OriginIntercept && approved {
+		text += " 결제 단계를 다시 진행하세요 - 다시 막히면 결제 카드가 새로 올라갑니다(wait_payment)."
+	} else if p.Origin == proposal.OriginIntercept {
+		text += " 결제하지 마세요."
+	}
+	if p.Note != "" {
+		text += "\n메모: " + p.Note
+	}
+	return text
 }
 
 func answerText(in AskInput, d proposal.Decision) string {

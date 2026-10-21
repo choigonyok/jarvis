@@ -162,6 +162,9 @@ type Module struct {
 	// proposals and log are set by Ask: where the category cards go.
 	proposals *proposal.Store
 	log       *slog.Logger
+	// attach, when set (Attach), puts each card in the conversation, where
+	// it stays once answered.
+	attach func(proposalID string)
 	// unsure is what the judge (ask.go) could not file, by "kind:id": asked
 	// of the operator instead, and not put to the judge again.
 	unsure map[string]bool

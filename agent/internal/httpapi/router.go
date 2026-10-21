@@ -61,6 +61,8 @@ type Server struct {
 	// jobs is where a background job's payment card goes; nil refuses every
 	// payment a background task reaches.
 	jobs JobPayments
+	// wakeJobs has the job scheduler look now (POST /jobs/wake).
+	wakeJobs func()
 	// uploads holds photos attached in conversation; nil turns them off.
 	uploads   *uploads.Store
 	modules   *module.Registry
@@ -132,7 +134,10 @@ type Deps struct {
 	// Jobs, when set, lets a background job's run that reaches a payment
 	// raise a card for that job and pick it up once decided.
 	Jobs JobPayments
-	Log  *slog.Logger
+	// WakeJobs, when set, is what jobs-svc's knock calls: a job changed on
+	// the 작업 tab (instructed, run now, resumed) is looked at at once.
+	WakeJobs func()
+	Log      *slog.Logger
 }
 
 func New(d Deps) *Server {
@@ -161,6 +166,7 @@ func New(d Deps) *Server {
 		vault:           d.Vault,
 		followUp:        d.FollowUp,
 		jobs:            d.Jobs,
+		wakeJobs:        d.WakeJobs,
 	}
 	if d.Proposals != nil {
 		d.Proposals.OnDecide(s.resolvePayment)
@@ -196,6 +202,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /calendar", s.guard(s.getCalendar))
 	mux.HandleFunc("POST /calendar", s.guard(s.postCalendar))
 	mux.HandleFunc("DELETE /calendar/{id}", s.guard(s.deleteCalendar))
+
+	// jobs-svc knocks here when a job changed by someone's hand may be due.
+	// Inside the compose network only: the gateway passes no "jobs" route to
+	// the agent.
+	if s.wakeJobs != nil {
+		mux.HandleFunc("POST /jobs/wake", s.guard(func(w http.ResponseWriter, r *http.Request) {
+			s.wakeJobs()
+			w.WriteHeader(http.StatusNoContent)
+		}))
+	}
 
 	// events-svc delivers here what the assistant subscribed to.
 	if s.consume != nil {

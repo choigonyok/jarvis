@@ -423,6 +423,8 @@ services:
       API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
       # 작업이 끝나고 이만큼 지나면 첨부 사진을 지운다.
       JOBS_PURGE_AFTER: ${JOBS_PURGE_AFTER:-720h}
+      # 작업 탭에서 지시하거나 "지금 실행"을 누르면 에이전트의 스케줄러를 바로 깨운다.
+      AGENT_WAKE_URL: http://agent:8080/jobs/wake
     expose:
       - "8098"
     ports:

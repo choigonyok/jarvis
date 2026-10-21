@@ -102,6 +102,27 @@ type Runner struct {
 	// so the session never saw them; what came since is put in front of
 	// the next message. In memory only: after a restart a few are told again.
 	newsSeen string
+	// onFree hears a place come free (OnFree).
+	onFree []func()
+}
+
+// OnFree registers fn to hear that a place for a background task came free:
+// the conversation finished its turn (and what queued behind it), or a
+// background task ended. A job waiting on the browser starts then, not on a
+// clock. fn runs on its own goroutine and must be quick.
+func (r *Runner) OnFree(fn func()) {
+	r.mu.Lock()
+	r.onFree = append(r.onFree, fn)
+	r.mu.Unlock()
+}
+
+func (r *Runner) freed() {
+	r.mu.Lock()
+	fns := slices.Clone(r.onFree)
+	r.mu.Unlock()
+	for _, fn := range fns {
+		go fn()
+	}
 }
 
 // SetRecall hands every typed message to fn before the model sees it.
@@ -410,6 +431,7 @@ func (r *Runner) loop(prompt string) {
 			r.running = false
 			r.mu.Unlock()
 			r.store.SetThinking(false)
+			r.freed()
 			return
 		}
 		next := r.queue[0]

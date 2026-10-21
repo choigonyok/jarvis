@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/agent/internal/claudecode"
+	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
 )
 
 // BrowserServer is the JARVIS_EXTRA_MCP entry for the shared browser.
@@ -57,7 +58,11 @@ const dueAtOnce = 4
 
 type SchedulerConfig struct {
 	// RunURL is this agent's /mcp/job-run base; the run id is appended.
-	RunURL   string
+	RunURL string
+	// Interval is the longest the scheduler goes without looking. It is the
+	// safety net only: a job made, instructed or answered, a place come free
+	// and a run ended wake it at once (Wake), and a job on a clock is looked
+	// at when that clock comes due.
 	Interval time.Duration
 	// Cooldown is the least time between two runs of any job. The browser
 	// is one window shared with the person, and sites watch for bots.
@@ -76,40 +81,67 @@ type SchedulerConfig struct {
 	RetryModel string
 }
 
+// legacyPoll is how often a jobs-svc that does not say when its next job
+// comes due (one from before it did) is asked, and one that did not answer.
+const legacyPoll = 30 * time.Second
+
 // Run starts due jobs as they may start: one on the browser at a time, and
 // only while the person is not using the assistant; jobs without sites
 // beside the conversation, a couple at once. Each run goes in its own
 // goroutine, so a slow one does not hold the others back.
+//
+// It does not look on a short clock. What makes a job due wakes it (Wake):
+// a job made or instructed, a card decided, a login done, a place come free
+// in the runner, a run ended, a knock from jobs-svc when the 작업 tab
+// changed a job. A job on its own clock is looked at when that comes due,
+// and Interval is only the net under all of it - with the card sweep, which
+// asks no model anything.
 func (m *Module) Run(ctx context.Context, bg Background, cfg SchedulerConfig) {
 	// Set before any run starts, so every run's tools see them.
 	m.guard, m.hold = cfg.Guard, cfg.Timeout+time.Minute
 	if err := m.store.CloseOrphans(ctx); err != nil {
 		m.log.Warn("남은 실행을 정리하지 못했습니다", "err", err)
 	}
+	safety := cfg.Interval
+	if safety <= 0 {
+		safety = 5 * time.Minute
+	}
 	// Cooldown is for the browser: the sites it visits watch for bots. A run
 	// that never opens a page has nothing to space out.
-	var lastBrowser time.Time
+	var lastBrowser, swept time.Time
 	var wg sync.WaitGroup
 	defer wg.Wait()
-	tick := time.NewTicker(cfg.Interval)
-	defer tick.Stop()
+	look := time.NewTimer(0)
+	defer look.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-tick.C:
+		case <-look.C:
 		case <-m.kick:
 		}
-		m.purge(ctx)
-		due, err := m.store.DueN(ctx, dueAtOnce)
-		if err != nil {
-			continue
+		now := time.Now()
+		if now.Sub(swept) >= cardSweep {
+			m.sweep(ctx)
+			swept = now
 		}
-		for _, j := range due {
+		m.purge(ctx)
+		next := now.Add(safety)
+		due, err := m.store.DueNext(ctx, dueAtOnce)
+		switch {
+		case err != nil || !due.Timed:
+			next = earliest(next, now.Add(legacyPoll))
+		case due.Next != nil:
+			next = earliest(next, *due.Next)
+		}
+		for _, j := range due.Jobs {
 			browser := needsBrowser(j)
 			if browser && time.Since(lastBrowser) < cfg.Cooldown {
+				next = earliest(next, lastBrowser.Add(cfg.Cooldown))
 				continue
 			}
+			// Not now - a turn or another run has what it needs: the runner
+			// says when a place comes free (OnFree), and that wakes this.
 			if !bg.CanStart(browser) || !m.claim(j.ID) {
 				continue
 			}
@@ -119,13 +151,27 @@ func (m *Module) Run(ctx context.Context, bg Background, cfg SchedulerConfig) {
 			wg.Add(1)
 			go func(j Job) {
 				defer wg.Done()
+				// Its place is free, and the job (or another) may be due again.
+				defer m.wake()
 				defer m.unclaim(j.ID)
 				m.runOnce(ctx, bg, cfg, j)
 			}(j)
 		}
-		// Another job may be due right away; look again on the next tick
-		// rather than sleeping a whole interval.
+		if !look.Stop() {
+			select {
+			case <-look.C:
+			default:
+			}
+		}
+		look.Reset(max(time.Until(next), 0))
 	}
+}
+
+func earliest(a, b time.Time) time.Time {
+	if b.Before(a) {
+		return b
+	}
+	return a
 }
 
 // claim marks a job as being run here; false when it already is (its run is
@@ -191,7 +237,8 @@ func (m *Module) runOnce(ctx context.Context, bg Background, cfg SchedulerConfig
 	before := m.cut[j.ID]
 	delete(m.cut, j.ID)
 	m.cutMu.Unlock()
-	text := prompt(d, cfg.UploadsDir, time.Now(), before)
+	waiting := m.waitingOn(j.ID)
+	text := prompt(d, cfg.UploadsDir, time.Now(), before, waiting)
 	var extra []string
 	if browser {
 		extra = []string{BrowserServer}
@@ -230,12 +277,23 @@ func (m *Module) runOnce(ctx context.Context, bg Background, cfg SchedulerConfig
 	case err != nil:
 		outcome, note = "error", clampText(err.Error(), 200)
 	}
+	// A run that said nothing of what comes next while its question is still
+	// up - a run for an instruction, say, that had nothing to ask - leaves
+	// the job waiting on that card again, not counted as having failed.
+	if outcome == "ok" && !m.current.decidedOf(run) {
+		if open := m.waitingOn(j.ID); len(open) > 0 {
+			last := open[len(open)-1]
+			if werr := m.store.Wait(bctx, run, last.ID, "카드 답 대기: "+clampText(last.Card.Title, 80)); werr != nil {
+				m.log.Warn("작업을 남은 카드에 다시 걸지 못했습니다", "job", j.ID, "card", last.ID, "err", werr)
+			}
+		}
+	}
 	end, eerr := m.store.EndRun(bctx, run, outcome, note)
 	if eerr != nil {
 		m.log.Warn("실행을 닫지 못했습니다", "run", run, "err", eerr)
 		return
 	}
-	m.log.Info("작업 실행이 끝났습니다", "job", j.ID, "run", run, "outcome", outcome, "result", clampText(result, 200))
+	m.log.Info("작업 실행이 끝났습니다", "job", j.ID, "run", run, "outcome", outcome, "again", end.Again, "result", clampText(result, 200))
 	if end.Failed {
 		m.say(d.Job, run, "세 번 연달아 잘 끝나지 않아 멈췄습니다: "+end.Note+"\n작업 탭에서 확인하고 다시 시작할 수 있습니다.")
 	}
@@ -309,10 +367,10 @@ const noBrowserNote = "\n\n이 실행에는 브라우저가 없습니다(작업�
 const runSystem = `당신은 Jarvis의 백그라운드 작업 실행입니다. 운영자가 대화에서 맡긴 작업 하나를, 이미 로그인된 공용 브라우저로 진행합니다. 대화 상대는 없고, 운영자는 작업 탭에서 진행을 지켜봅니다.
 
 이번 실행은 작업의 한 토막입니다. 작업 상태(메모, 지켜보는 대상, 최근 기록, 새 지시와 카드 답)를 보고 지금 할 일을 하고, 반드시 다음 셋 중 하나로 끝냅니다.
-- schedule_next: 나중에 다시 확인할 것이 있을 때. 운영자가 주기를 말하지 않았어도 목표를 보고 스스로 정합니다. 예) 판매 글 반응 확인은 1~3시간, 가격 하락 감시는 하루 1~2번, 배송 추적은 몇 시간, 내일 오픈하는 예약은 그 시각 직후. 바뀔 일이 없는 밤 시간은 피하세요.
-- ask, request_login 또는 wait_payment: 운영자의 결정, 로그인, 결제 승인이 필요할 때. 부른 뒤 바로 마칩니다.
+- schedule_next: 나중에 바깥에서 다시 확인할 것이 있을 때. 운영자가 주기를 말하지 않았어도 목표를 보고 스스로 정합니다. 예) 판매 글 반응 확인은 1~3시간, 가격 하락 감시는 하루 1~2번, 배송 추적은 몇 시간, 내일 오픈하는 예약은 그 시각 직후. 바뀔 일이 없는 밤 시간은 피하세요.
+- ask, request_login 또는 wait_payment: 운영자의 결정, 로그인, 결제 승인이 필요할 때. 부른 뒤 바로 마칩니다. 운영자가 승인하거나 반려하는 즉시 작업이 다시 실행되어 그 답을 받으므로, 답을 확인하러 올 시각(schedule_next)은 잡지 않습니다.
 - finish: 목표를 이뤘거나 더 할 수 있는 일이 없을 때. 결과를 운영자가 알 수 있게 씁니다.
-셋 중 아무것도 부르지 않고 끝나면 실패로 칩니다.
+셋 중 아무것도 부르지 않고 끝나면 실패로 칩니다. 다만 앞서 올린 카드가 아직 답을 기다리고 있으면(작업 상태의 '기다리는 카드'), 할 일을 하고 그대로 마쳐도 됩니다 - 작업은 그 카드의 답을 계속 기다립니다.
 
 반드시 지킬 것
 - 밖으로 나가는 행동(글 올리기·고치기·지우기, 예약·신청, 다른 사람에게 메시지 보내기)은 하기 전에 ask 로 승인을 받습니다. 새 지시나 카드 답에서 운영자가 바로 그 일을 이미 승인했다면 다시 묻지 않습니다. 맡은 구매는 ask 하지 않습니다 - 아래 '결제'의 결제 승인 카드가 그 승인입니다.
@@ -360,8 +418,9 @@ func lastSteps(steps []string, n int) []string {
 }
 
 // prompt is one run's message. cut is what the run before did, step by
-// step, if the conversation cut it short.
-func prompt(d Detail, uploadsDir string, now time.Time, cut []string) string {
+// step, if the conversation cut it short; waiting is the job's cards still
+// waiting on the operator.
+func prompt(d Detail, uploadsDir string, now time.Time, cut []string, waiting []proposal.Proposal) string {
 	j := d.Job
 	var b strings.Builder
 	fmt.Fprintf(&b, "작업 %d: %s\n지금: %s (%s)\n\n", j.ID, j.Title, now.Format("2006-01-02 15:04"), weekdays[int(now.Weekday())])
@@ -430,6 +489,12 @@ func prompt(d Detail, uploadsDir string, now time.Time, cut []string) string {
 			}
 		}
 	}
+	if len(waiting) > 0 {
+		b.WriteString("\n아직 운영자의 답을 기다리는 카드 (같은 것을 다시 묻지 마세요. 답이 오면 작업이 곧바로 다시 실행됩니다)\n")
+		for _, p := range waiting {
+			fmt.Fprintf(&b, "- %s · %s (%s에 올림)\n", p.ID, clampText(p.Card.Title, 120), p.At)
+		}
+	}
 	if len(cut) > 0 {
 		b.WriteString("\n지난 실행은 대화가 시작되어 중간에 멈췄습니다. 그때 한 일 (오래된 것부터, 화면은 그사이 바뀌었을 수 있으니 확인하고 이어서 하세요)\n")
 		for _, s := range cut {
@@ -439,7 +504,11 @@ func prompt(d Detail, uploadsDir string, now time.Time, cut []string) string {
 	if j.Attempts > 0 {
 		fmt.Fprintf(&b, "\n지난 %d번의 실행이 잘 끝나지 않았습니다. 같은 방법을 반복하지 말고, 막히면 ask 로 운영자에게 알리세요.\n", j.Attempts)
 	}
-	b.WriteString("\n지금 할 일을 하고, schedule_next·ask·request_login·finish 중 하나로 마치세요.")
+	if len(waiting) > 0 {
+		b.WriteString("\n지금 할 일을 하고, 더 할 것이 없으면 그대로 마치세요 - 작업은 위 카드의 답을 기다립니다. 새로 물을 것은 ask, 끝났으면 finish.")
+	} else {
+		b.WriteString("\n지금 할 일을 하고, schedule_next·ask·request_login·finish 중 하나로 마치세요.")
+	}
 	return b.String()
 }
 

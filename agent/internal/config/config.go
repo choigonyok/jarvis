@@ -122,7 +122,9 @@ type Config struct {
 	// state. Empty: no context tool.
 	ContextURL string
 	// Jobs turns on the scheduler. Like Enrich, it needs the browser server.
-	Jobs         bool
+	Jobs bool
+	// JobsInterval is the longest the scheduler goes without looking - a net
+	// only: what makes a job due wakes it, and a job's own clock is kept.
 	JobsInterval time.Duration
 	JobsCooldown time.Duration
 	JobsTimeout  time.Duration
@@ -250,7 +252,7 @@ func Load() (Config, error) {
 		MindURL:      os.Getenv("JARVIS_MIND_URL"),
 		ContextURL:   os.Getenv("JARVIS_CONTEXT_URL"),
 		Jobs:         envBool("JARVIS_JOBS", true),
-		JobsInterval: envDuration("JARVIS_JOBS_INTERVAL", 30*time.Second),
+		JobsInterval: envDuration("JARVIS_JOBS_INTERVAL", 5*time.Minute),
 		// Least time between two runs of any job. Sites watch for bots; a
 		// person does not click through two shops in the same minute.
 		JobsCooldown:    envDuration("JARVIS_JOBS_COOLDOWN", time.Minute),

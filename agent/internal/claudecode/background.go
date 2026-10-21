@@ -143,6 +143,7 @@ func (r *Runner) Background(parent context.Context, t Task) (string, error) {
 		r.mu.Lock()
 		delete(r.bgs, task)
 		r.mu.Unlock()
+		r.freed()
 	}()
 
 	args, err := r.backgroundArgs(t)

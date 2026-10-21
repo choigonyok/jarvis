@@ -140,9 +140,10 @@ func (s *Server) raisePayment(p Payment) string {
 		Action: action.Action{Kind: "browser.payment", Input: raw},
 		Card:   paymentCard(p),
 	})
-	// A job's card is the job's: the 작업 tab and the phone show it, and the
-	// conversation, which did not stop at a payment, does not.
-	if s.thread != nil && p.JobID == 0 {
+	// In the conversation either way - a job's too, which used to float below
+	// the thread only while it waited and was gone the moment it was
+	// answered (2026-10-21 22:03). The card names the job it is for.
+	if s.thread != nil {
 		s.thread.AttachProposal(opened.ID)
 	}
 	return opened.ID

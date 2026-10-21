@@ -91,6 +91,9 @@ type Ended struct {
 	Title  string `json:"title"`
 	Failed bool   `json:"failed"`
 	Note   string `json:"note,omitempty"`
+	// Again: an instruction or a card's answer came while the run was in
+	// flight; the job is due again now.
+	Again bool `json:"again,omitempty"`
 }
 
 type RecordInput struct {
@@ -191,17 +194,42 @@ func (s *Store) Due(ctx context.Context) (*Job, error) {
 // DueN is up to n jobs whose turn it is, most overdue first. An older
 // jobs-svc answers with `job` only; that one is the list then.
 func (s *Store) DueN(ctx context.Context, n int) ([]Job, error) {
+	d, err := s.DueNext(ctx, n)
+	return d.Jobs, err
+}
+
+// Due is what the scheduler reads each time it looks: the jobs whose turn
+// it is, and when the soonest of the rest comes due by its own clock.
+type Due struct {
+	Jobs []Job
+	// Next is that time; nil when no job is on a clock.
+	Next *time.Time
+	// Timed: jobs-svc says Next at all. One that does not (older) is looked
+	// at often instead.
+	Timed bool
+}
+
+// DueNext is DueN with when to look next.
+func (s *Store) DueNext(ctx context.Context, n int) (Due, error) {
 	var payload struct {
-		Job  *Job  `json:"job"`
-		Jobs []Job `json:"jobs"`
+		Job  *Job            `json:"job"`
+		Jobs []Job           `json:"jobs"`
+		Next json.RawMessage `json:"next"`
 	}
 	if err := s.call(ctx, http.MethodGet, fmt.Sprintf("/due?limit=%d", n), nil, &payload); err != nil {
-		return nil, err
+		return Due{}, err
 	}
-	if payload.Jobs == nil && payload.Job != nil {
-		return []Job{*payload.Job}, nil
+	d := Due{Jobs: payload.Jobs, Timed: len(payload.Next) > 0}
+	if d.Jobs == nil && payload.Job != nil {
+		d.Jobs = []Job{*payload.Job}
 	}
-	return payload.Jobs, nil
+	if d.Timed && string(payload.Next) != "null" {
+		var at time.Time
+		if json.Unmarshal(payload.Next, &at) == nil {
+			d.Next = &at
+		}
+	}
+	return d, nil
 }
 
 func (s *Store) StartRun(ctx context.Context, jobID int64) (int64, error) {

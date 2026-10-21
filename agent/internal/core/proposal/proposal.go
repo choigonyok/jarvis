@@ -341,6 +341,19 @@ func (s *Store) FindPendingWhere(match func(Proposal) bool) (Proposal, bool) {
 	return Proposal{}, false
 }
 
+// PendingWhere is every pending card match accepts, oldest first.
+func (s *Store) PendingWhere(match func(Proposal) bool) []Proposal {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []Proposal
+	for _, p := range s.order {
+		if p.State == Pending && match(*p) {
+			out = append(out, *p)
+		}
+	}
+	return out
+}
+
 // PendingChat is every card still waiting that the conversation raised.
 func (s *Store) PendingChat() []Proposal {
 	s.mu.Lock()
