@@ -256,6 +256,7 @@ func (s *Server) resolveJobPayment(p proposal.Proposal, pay Payment, d proposal.
 	}
 	err := s.jobs.PaymentDecided(pay.JobID, p.ID, approved, text)
 	if err != nil {
+		// The card keeps the decision; the jobs' sweep hands it on.
 		s.log.Warn("결제 카드 결정을 작업에 전하지 못했습니다", "job", pay.JobID, "card", p.ID, "err", err)
 	}
 	if !approved {

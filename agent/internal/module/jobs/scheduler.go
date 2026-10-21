@@ -121,7 +121,7 @@ func (m *Module) Run(ctx context.Context, bg Background, cfg SchedulerConfig) {
 		case <-m.kick:
 		}
 		now := time.Now()
-		if now.Sub(swept) >= cardSweep {
+		if m.retryDue(now) || now.Sub(swept) >= cardSweep {
 			m.sweep(ctx)
 			swept = now
 		}

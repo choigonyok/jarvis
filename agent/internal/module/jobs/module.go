@@ -97,9 +97,11 @@ type Module struct {
 	guard SiteGuard
 	hold  time.Duration
 	// heard is each card whose decision this process took to its job, and
-	// when: the sweep leaves those to the delivery under way.
+	// when: the sweep leaves those to the delivery under way. retryAt is
+	// when the sweep should look again because a delivery failed.
 	heardMu sync.Mutex
 	heard   map[string]time.Time
+	retryAt time.Time
 }
 
 func New(store *Store, up *uploads.Store, proposals *proposal.Store, notify Notifier, log *slog.Logger) *Module {
@@ -152,13 +154,38 @@ func (m *Module) hear(card string) {
 	m.heard[card] = time.Now()
 }
 
+// deliveryWindow is how long after a decision was taken to its job the
+// sweep leaves it alone: its answer may still be on the way.
+var deliveryWindow = 2 * time.Minute
+
 // delivering is whether a card's decision was taken to its job a moment
-// ago - its answer may still be on the way.
+// ago.
 func (m *Module) delivering(card string) bool {
 	m.heardMu.Lock()
 	defer m.heardMu.Unlock()
 	at, ok := m.heard[card]
-	return ok && time.Since(at) < 2*time.Minute
+	return ok && time.Since(at) < deliveryWindow
+}
+
+// retrySoon has the sweep look again just past the delivery window: a
+// decision that could not reach its job (jobs-svc down a moment) is handed
+// on then, not half an hour later.
+func (m *Module) retrySoon() {
+	m.heardMu.Lock()
+	m.retryAt = time.Now().Add(deliveryWindow + 5*time.Second)
+	m.heardMu.Unlock()
+	time.AfterFunc(deliveryWindow+5*time.Second, m.wake)
+}
+
+// retryDue is whether a retry asked for is due now; asking clears it.
+func (m *Module) retryDue(now time.Time) bool {
+	m.heardMu.Lock()
+	defer m.heardMu.Unlock()
+	if m.retryAt.IsZero() || now.Before(m.retryAt) {
+		return false
+	}
+	m.retryAt = time.Time{}
+	return true
 }
 
 // Specs: the two cards a job can raise. Nothing here is a tool the chat's
@@ -304,7 +331,14 @@ func (m *Module) decided(p proposal.Proposal, d proposal.Decision) {
 			return
 		}
 		if err := m.store.Answer(ctx, in.JobID, p.ID, answerText(in, d)); err != nil {
-			m.proposals.Settle(p.ID, proposal.Failed, "작업에 전하지 못했습니다: "+err.Error())
+			// The decision stands on the card; the sweep hands it on in a
+			// few minutes. Marked failed, it would read as no decision at all.
+			state := proposal.Approved
+			if d != proposal.Approve {
+				state = proposal.Rejected
+			}
+			m.proposals.Settle(p.ID, state, "작업에 아직 전하지 못해 곧 다시 전합니다: "+err.Error())
+			m.retrySoon()
 			return
 		}
 		if d == proposal.Approve {

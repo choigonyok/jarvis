@@ -313,3 +313,63 @@ func TestSchedulerWakesOnEventsAndClocks(t *testing.T) {
 	m.Wake() // the scheduler learns of the clock when it next looks
 	waitFor(t, "시계가 된 작업이 시작되지 않았습니다", func() bool { return started.Load() == 2 })
 }
+
+// A decision that could not reach its job (jobs-svc down a moment) stays a
+// decision on the card - not "failed", which would later be told as a
+// rejection - and is handed on by the sweep once the delivery window is past.
+func TestUndeliveredDecisionIsHandedOnSoon(t *testing.T) {
+	window := deliveryWindow
+	deliveryWindow = 50 * time.Millisecond
+	t.Cleanup(func() { deliveryWindow = window })
+
+	var mu sync.Mutex
+	down := true
+	var answers []string
+	props := proposal.NewStore(bus.New())
+	raw, _ := json.Marshal(AskInput{JobID: 40, JobTitle: "판매", Question: "올릴까요?"})
+	p, _ := props.Open(proposal.Proposal{Origin: proposal.OriginNotice, Action: action.Action{Kind: KindAsk, Input: raw}, Card: askCard(AskInput{Question: "올릴까요?"})})
+	svc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/jobs":
+			_ = json.NewEncoder(w).Encode(map[string]any{"jobs": []Job{{ID: 40, State: "waiting", WaitingCard: p.ID}}})
+		case strings.HasSuffix(r.URL.Path, "/answer"):
+			if down {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			var body map[string]string
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			answers = append(answers, body["text"])
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	defer svc.Close()
+	m := New(NewStore(svc.URL, ""), nil, props, nil, quietLog())
+
+	m.decided(*p, proposal.Approve)
+	if got, _ := props.Get(p.ID); got.State != proposal.Approved || !strings.Contains(got.Note, "곧 다시") {
+		t.Fatalf("전하지 못해도 승인은 승인으로 남아야 합니다: %+v", got)
+	}
+	m.sweep(context.Background()) // within the window: left to the delivery
+	mu.Lock()
+	down = false
+	n := len(answers)
+	mu.Unlock()
+	if n != 0 {
+		t.Fatal("전하는 중인 결정을 안전장치가 또 전했습니다")
+	}
+	time.Sleep(80 * time.Millisecond)
+	if !m.retryDue(time.Now().Add(10 * time.Second)) {
+		t.Fatal("곧 다시 보자는 표시가 없습니다")
+	}
+	m.sweep(context.Background())
+	mu.Lock()
+	defer mu.Unlock()
+	if len(answers) != 1 || !strings.HasPrefix(answers[0], "[승인] 올릴까요?") {
+		t.Fatalf("늦게라도 승인으로 전해야 합니다: %v", answers)
+	}
+}
