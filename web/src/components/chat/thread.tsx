@@ -27,10 +27,11 @@ import { clock, dayLabel, refTime, turnDay, turnTime } from "@/lib/when";
 
 const MODE_KEY = "jarvis:chat-mode";
 
-// The checklist cards folded here (by turn), for as long as the app is
+// The checklist cards opened here (by turn), for as long as the app is
 // open: leaving for another tab and coming back finds them as they were.
-// A card opens unfolded - a list is shown because it is wanted now.
-const foldedTurns = new Set<string>();
+// A card comes folded - its title, how far along, what is left - and is
+// opened by its title when wanted (2026-10-22: "접힌 게 디폴트").
+const openedTurns = new Set<string>();
 
 /**
  * An agent turn as it is read aloud: a job's card is announced as the job's,
@@ -220,15 +221,15 @@ const TurnRow = memo(function TurnRow({
   onDecide,
   onTick,
   onDrop,
-  folded,
+  opened,
   onFold,
 }: {
   turn: Turn;
   proposal?: Proposal;
   /** The checklist the turn's card shows, as it stands. */
   list?: Checklist;
-  /** Whether that list is folded on this card (its title row toggles it). */
-  folded: boolean;
+  /** Whether that list is open on this card (its title row toggles it). */
+  opened: boolean;
   onFold: (turnId: string) => void;
   /** Set on the first turn of a day: the divider above it. */
   day: string | null;
@@ -258,7 +259,7 @@ const TurnRow = memo(function TurnRow({
   const tick = (item: string, done: boolean) =>
     turn.origin?.checklist ? onTick(turn.origin.checklist, item, done) : Promise.resolve(null);
   const drop = (item: string) => (turn.origin?.checklist ? onDrop(turn.origin.checklist, item) : Promise.resolve(null));
-  const fold = { open: !folded, onToggle: () => onFold(turn.id) };
+  const fold = { open: opened, onToggle: () => onFold(turn.id) };
   // A divider where the day changes: with it, a turn's own stamp only has to
   // say the time, and a reply that came hours later - a suggestion overnight
   // - is plainly not a live one.
@@ -363,7 +364,7 @@ const Transcript = memo(function Transcript({
   onDecide,
   onTick,
   onDrop,
-  folded,
+  opened,
   onFold,
 }: {
   turns: Turn[];
@@ -380,8 +381,8 @@ const Transcript = memo(function Transcript({
   onDecide: Decide;
   onTick: TickList;
   onDrop: DropItem;
-  /** The checklist cards folded, by turn. */
-  folded: ReadonlySet<string>;
+  /** The checklist cards opened, by turn. */
+  opened: ReadonlySet<string>;
   onFold: (turnId: string) => void;
 }) {
   // A card with no turn pointing at it - one raised before every card was
@@ -422,7 +423,7 @@ const Transcript = memo(function Transcript({
               onDecide={onDecide}
               onTick={onTick}
               onDrop={onDrop}
-              folded={folded.has(turn.id)}
+              opened={opened.has(turn.id)}
               onFold={onFold}
             />
           );
@@ -502,14 +503,14 @@ export function Thread() {
   // The earlier message the next one quotes: swiped (or, with a pointer, the
   // button beside its time), shown above the composer until sent or dropped.
   const [quoting, setQuoting] = useState<TurnRef | null>(null);
-  const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set(foldedTurns));
+  const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set(openedTurns));
   const fold = useCallback((turnId: string) => {
-    setFolded((cur) => {
+    setOpened((cur) => {
       const next = new Set(cur);
       if (next.has(turnId)) next.delete(turnId);
       else next.add(turnId);
-      foldedTurns.clear();
-      for (const id of next) foldedTurns.add(id);
+      openedTurns.clear();
+      for (const id of next) openedTurns.add(id);
       return next;
     });
   }, []);
@@ -859,7 +860,7 @@ export function Thread() {
             onDecide={decide}
             onTick={tick}
             onDrop={dropItem}
-            folded={folded}
+            opened={opened}
             onFold={fold}
           />
         </div>
