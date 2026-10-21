@@ -54,7 +54,10 @@ type List struct {
 	Note string `json:"note,omitempty"`
 	// Topic: one active list per topic; making another with it changes that
 	// one (the camping list made twice is one list).
-	Topic  string `json:"topic,omitempty"`
+	Topic string `json:"topic,omitempty"`
+	// Date is the day the list is for ("2026-10-24"): mind brings what is
+	// left up the evening before, and closes the list once the day is past.
+	Date   string `json:"date,omitempty"`
 	Items  []Item `json:"items"`
 	Status string `json:"status"`
 	// Source is who made it: chat, mind, console.
@@ -82,9 +85,12 @@ func (l List) Count() string {
 }
 
 // Line is a list in one line, for the conversation's situation and a
-// tool's answer: "[chk_1a2b] 캠핑 준비물 3/7 · 남은 것: 장갑, 베개, 랜턴".
+// tool's answer: "[chk_1a2b] 캠핑 준비물 3/7 (10/24 용) · 남은 것: 장갑, 베개".
 func (l List) Line() string {
 	s := "[" + l.ID + "] " + l.Title + " " + l.Count()
+	if d, err := time.Parse("2006-01-02", l.Date); err == nil {
+		s += fmt.Sprintf(" (%d/%d 용)", int(d.Month()), d.Day())
+	}
 	if left := l.Left(); len(left) > 0 {
 		s += " · 남은 것: " + Names(left, 6)
 	} else if len(l.Items) > 0 {
@@ -143,6 +149,7 @@ type New struct {
 	Title  string   `json:"title"`
 	Note   string   `json:"note,omitempty"`
 	Topic  string   `json:"topic,omitempty"`
+	Date   string   `json:"date,omitempty"`
 	Items  []string `json:"items"`
 	Source string   `json:"source,omitempty"`
 }
@@ -158,6 +165,10 @@ func (s *Service) Make(ctx context.Context, n New) (List, error) {
 		return List{}, ErrInvalid("체크리스트 이름(title)이 필요합니다")
 	}
 	topic := clean(n.Topic)
+	date, err := day(n.Date)
+	if err != nil {
+		return List{}, err
+	}
 	if topic != "" {
 		lists, err := s.St.Lists(ctx, time.Time{})
 		if err != nil {
@@ -168,6 +179,9 @@ func (s *Service) Make(ctx context.Context, n New) (List, error) {
 				l.Title = title
 				if note := clean(n.Note); note != "" {
 					l.Note = note
+				}
+				if date != "" {
+					l.Date = date
 				}
 				if err := add(&l, n.Items); err != nil {
 					return List{}, err
@@ -181,7 +195,7 @@ func (s *Service) Make(ctx context.Context, n New) (List, error) {
 	if source == "" {
 		source = ByChat
 	}
-	l := List{ID: newID(), Title: title, Note: clean(n.Note), Topic: topic, Status: Active, Source: source,
+	l := List{ID: newID(), Title: title, Note: clean(n.Note), Topic: topic, Date: date, Status: Active, Source: source,
 		Items: []Item{}, Next: 1, CreatedAt: now, UpdatedAt: now}
 	if err := add(&l, n.Items); err != nil {
 		return List{}, err
@@ -196,6 +210,8 @@ func (s *Service) Make(ctx context.Context, n New) (List, error) {
 type Change struct {
 	Title *string `json:"title,omitempty"`
 	Note  *string `json:"note,omitempty"`
+	// Date is the list's day; "" takes it away.
+	Date *string `json:"date,omitempty"`
 	// Add puts new items at the end.
 	Add []string `json:"add,omitempty"`
 	// Remove, Check and Uncheck name items by id, or by their words.
@@ -229,6 +245,13 @@ func (s *Service) Change(ctx context.Context, id string, c Change) (List, error)
 	}
 	if c.Note != nil {
 		l.Note = clean(*c.Note)
+	}
+	if c.Date != nil {
+		d, err := day(*c.Date)
+		if err != nil {
+			return l, err
+		}
+		l.Date = d
 	}
 	for ref, text := range c.Rename {
 		i, err := find(l, ref)
@@ -334,6 +357,18 @@ func (s *Service) All(ctx context.Context, closed bool) ([]List, error) {
 		return ls[i].UpdatedAt.After(ls[j].UpdatedAt)
 	})
 	return ls, nil
+}
+
+// day reads a list's day: "2026-10-24", or "" for none.
+func day(v string) (string, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "", nil
+	}
+	if _, err := time.Parse("2006-01-02", v); err != nil {
+		return "", ErrInvalid(fmt.Sprintf("날짜(date)는 YYYY-MM-DD 입니다: %q", v))
+	}
+	return v, nil
 }
 
 func add(l *List, texts []string) error {

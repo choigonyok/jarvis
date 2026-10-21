@@ -73,15 +73,14 @@ func (s *Server) listChecklists(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) makeChecklist(w http.ResponseWriter, r *http.Request) {
-	svc, ok := s.lists(w)
-	if !ok {
+	if _, ok := s.lists(w); !ok {
 		return
 	}
 	var in checklist.New
 	if !readJSON(w, r, &in) {
 		return
 	}
-	l, err := svc.Make(r.Context(), in)
+	l, err := s.m.MakeList(r.Context(), in)
 	if err != nil {
 		s.listFail(w, err)
 		return
@@ -103,15 +102,14 @@ func (s *Server) getChecklist(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) changeChecklist(w http.ResponseWriter, r *http.Request) {
-	svc, ok := s.lists(w)
-	if !ok {
+	if _, ok := s.lists(w); !ok {
 		return
 	}
 	var in checklist.Change
 	if !readJSON(w, r, &in) {
 		return
 	}
-	l, err := svc.Change(r.Context(), r.PathValue("id"), in)
+	l, err := s.m.ChangeList(r.Context(), r.PathValue("id"), in)
 	if err != nil {
 		s.listFail(w, err)
 		return
@@ -144,11 +142,10 @@ func (s *Server) checkItem(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) closeChecklist(w http.ResponseWriter, r *http.Request) {
-	svc, ok := s.lists(w)
-	if !ok {
+	if _, ok := s.lists(w); !ok {
 		return
 	}
-	l, err := svc.Archive(r.Context(), r.PathValue("id"))
+	l, err := s.m.CloseList(r.Context(), r.PathValue("id"))
 	if err != nil {
 		s.listFail(w, err)
 		return

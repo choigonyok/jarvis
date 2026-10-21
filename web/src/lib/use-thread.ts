@@ -332,6 +332,65 @@ export function useThread() {
     [setChecklists],
   );
 
+  /**
+   * Takes an item off a list - one swiped away as not needed: off the screen
+   * at once, then off the list in mind. A failure puts it back.
+   */
+  const dropItem = useCallback(
+    async (listId: string, itemId: string): Promise<string | null> => {
+      const before = cachedLists[listId];
+      if (before) {
+        setChecklists((prev) => ({ ...prev, [listId]: { ...before, items: before.items.filter((it) => it.id !== itemId) } }));
+      }
+      try {
+        const res = await fetch(`${API}/thread/checklists/${encodeURIComponent(listId)}/items/${encodeURIComponent(itemId)}`, {
+          method: "DELETE",
+        });
+        if (res.ok) {
+          const body = (await res.json().catch(() => null)) as { checklist?: Checklist } | null;
+          if (body?.checklist?.id) setChecklists((prev) => ({ ...prev, [listId]: body.checklist! }));
+          return null;
+        }
+      } catch {
+        // put back below
+      }
+      if (before) setChecklists((prev) => ({ ...prev, [listId]: before }));
+      return "빼지 못했어요. 다시 밀어 주세요.";
+    },
+    [setChecklists],
+  );
+
+  /** Closes a list: it leaves the 작업 tab and mind's open lists. */
+  const closeList = useCallback(
+    async (listId: string): Promise<string | null> => {
+      try {
+        const res = await fetch(`${API}/thread/checklists/${encodeURIComponent(listId)}`, { method: "DELETE" });
+        if (res.ok) {
+          const body = (await res.json().catch(() => null)) as { checklist?: Checklist } | null;
+          if (body?.checklist?.id) setChecklists((prev) => ({ ...prev, [listId]: body.checklist! }));
+          return null;
+        }
+      } catch {
+        // said below
+      }
+      return "목록을 닫지 못했어요.";
+    },
+    [setChecklists],
+  );
+
+  /** The lists still open, read from mind into the map too (null when they could not be). */
+  const loadOpenLists = useCallback(async (): Promise<Checklist[] | null> => {
+    try {
+      const res = await fetch(`${API}/thread/checklists`, { cache: "no-store" });
+      if (!res.ok) return null;
+      const open = ((await res.json()) as { open?: Checklist[] }).open ?? [];
+      putLists(Object.fromEntries(open.map((l) => [l.id, l])));
+      return open;
+    } catch {
+      return null;
+    }
+  }, [putLists]);
+
   // The same map until a card changes: the transcript is memoized on it.
   const byId = useMemo(() => new Map(proposals.map((p) => [p.id, p])), [proposals]);
 
@@ -341,6 +400,9 @@ export function useThread() {
     byId,
     checklists,
     tick,
+    dropItem,
+    closeList,
+    loadOpenLists,
     waited: waited as ReadonlySet<string>,
     thinking,
     queue,

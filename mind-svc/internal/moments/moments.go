@@ -53,6 +53,7 @@ const (
 	Asked     = "chat"      // the operator, in the conversation
 	Console   = "console"   // the operator, on mind's console
 	Rebalance = "rebalance" // the assistant: a portfolio out of band, for the evening at home
+	Lists     = "checklist" // the assistant: what is left on a list, the evening before its day
 )
 
 // What brought the moment (SentBy).
@@ -253,6 +254,28 @@ func (s *Service) Cancel(ctx context.Context, id string) (Reminder, error) {
 	}
 	r.Status, r.UpdatedAt = Cancelled, s.Now()
 	return r, s.St.PutReminder(ctx, r)
+}
+
+// CancelTopic stops the reminder of this topic still waiting, if one is.
+func (s *Service) CancelTopic(ctx context.Context, topic string) error {
+	if topic == "" {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rs, err := s.St.Reminders(ctx, time.Time{})
+	if err != nil {
+		return err
+	}
+	for _, r := range rs {
+		if r.Topic == topic && r.Status == Waiting {
+			r.Status, r.UpdatedAt = Cancelled, s.Now()
+			if err := s.St.PutReminder(ctx, r); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // recent is how far back List shows the reminders no longer waiting.

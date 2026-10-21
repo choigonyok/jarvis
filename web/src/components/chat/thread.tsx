@@ -197,6 +197,7 @@ function Photos({ names }: { names: string[] }) {
 
 type Decide = ReturnType<typeof useThread>["decide"];
 type TickList = ReturnType<typeof useThread>["tick"];
+type DropItem = ReturnType<typeof useThread>["dropItem"];
 
 /**
  * One message of the transcript, memoized on the turn itself: an update
@@ -213,6 +214,7 @@ const TurnRow = memo(function TurnRow({
   onJump,
   onDecide,
   onTick,
+  onDrop,
 }: {
   turn: Turn;
   proposal?: Proposal;
@@ -226,6 +228,7 @@ const TurnRow = memo(function TurnRow({
   onJump: (id: string) => void;
   onDecide: Decide;
   onTick: TickList;
+  onDrop: DropItem;
 }) {
   const time = clock(turn.atIso, turn.at);
   // A turn that is only a card is quoted by what the card asks, or names.
@@ -244,6 +247,7 @@ const TurnRow = memo(function TurnRow({
     });
   const tick = (item: string, done: boolean) =>
     turn.origin?.checklist ? onTick(turn.origin.checklist, item, done) : Promise.resolve(null);
+  const drop = (item: string) => (turn.origin?.checklist ? onDrop(turn.origin.checklist, item) : Promise.resolve(null));
   // A divider where the day changes: with it, a turn's own stamp only has to
   // say the time, and a reply that came hours later - a suggestion overnight
   // - is plainly not a live one.
@@ -259,7 +263,7 @@ const TurnRow = memo(function TurnRow({
               <Rail at={time} onRef={quote} />
               <div className="min-w-0">
                 {turn.origin?.kind === "notice" ? (
-                  <NoticeCard turn={turn} list={list} onTick={tick} />
+                  <NoticeCard turn={turn} list={list} onTick={tick} onDrop={drop} />
                 ) : turn.origin?.kind === "checklist" ? (
                   <>
                     {/* The line on why now, said above the list like any word of his. */}
@@ -268,7 +272,7 @@ const TurnRow = memo(function TurnRow({
                         <Markdown>{turn.paragraphs.join("\n\n")}</Markdown>
                       </div>
                     ) : null}
-                    <ChecklistCard list={list} title={turn.origin.title} onTick={tick} />
+                    <ChecklistCard list={list} title={turn.origin.title} onTick={tick} onDrop={drop} />
                   </>
                 ) : turn.origin ? (
                   <JobNews turn={turn} />
@@ -347,6 +351,7 @@ const Transcript = memo(function Transcript({
   onJump,
   onDecide,
   onTick,
+  onDrop,
 }: {
   turns: Turn[];
   proposals: Proposal[];
@@ -361,6 +366,7 @@ const Transcript = memo(function Transcript({
   onJump: (id: string) => void;
   onDecide: Decide;
   onTick: TickList;
+  onDrop: DropItem;
 }) {
   // A card with no turn pointing at it - one raised before every card was
   // laid in the conversation - floats below the thread while it waits. One
@@ -399,6 +405,7 @@ const Transcript = memo(function Transcript({
               onJump={onJump}
               onDecide={onDecide}
               onTick={onTick}
+              onDrop={onDrop}
             />
           );
         })}
@@ -454,6 +461,7 @@ export function Thread() {
     byId,
     checklists,
     tick,
+    dropItem,
     waited,
     thinking,
     queue,
@@ -821,6 +829,7 @@ export function Thread() {
             onJump={jumpTo}
             onDecide={decide}
             onTick={tick}
+            onDrop={dropItem}
           />
         </div>
       </main>

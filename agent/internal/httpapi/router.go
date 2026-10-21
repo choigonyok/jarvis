@@ -151,8 +151,14 @@ type Deps struct {
 type Checklists interface {
 	// Find is the lists of these ids, by id.
 	Find(ctx context.Context, ids []string) (map[string]any, error)
+	// Open is the lists still open (the 작업 tab shows the unfinished).
+	Open(ctx context.Context) (any, error)
 	// Check ticks (or unticks) one item from a card, and is the list after.
 	Check(ctx context.Context, id, item string, done bool) (any, error)
+	// Drop takes an item off a list (swiped away), and is the list after.
+	Drop(ctx context.Context, id, item string) (any, error)
+	// Close closes a list, and is the list after.
+	Close(ctx context.Context, id string) (any, error)
 }
 
 func New(d Deps) *Server {
@@ -204,6 +210,8 @@ func (s *Server) Handler() http.Handler {
 	// the agent's routes by first segment, and these are the thread's.
 	mux.HandleFunc("GET /thread/checklists", s.guard(s.getChecklists))
 	mux.HandleFunc("POST /thread/checklists/{id}/items/{item}", s.guard(s.checkItem))
+	mux.HandleFunc("DELETE /thread/checklists/{id}/items/{item}", s.guard(s.dropItem))
+	mux.HandleFunc("DELETE /thread/checklists/{id}", s.guard(s.closeList))
 	mux.HandleFunc("POST /messages", s.guard(s.postMessage))
 	// Under /messages: the gateway passes the agent's routes by first segment.
 	mux.HandleFunc("POST /messages/{id}/steer", s.guard(s.steerMessage))
@@ -396,10 +404,20 @@ func (s *Server) listsOf(ctx context.Context, turns []*thread.Turn) map[string]a
 	return lists
 }
 
-// getChecklists is GET /thread/checklists?ids=a,b: the lists cards show.
+// getChecklists is GET /thread/checklists?ids=a,b: the lists cards show -
+// and with no ids, the lists still open (the 작업 tab).
 func (s *Server) getChecklists(w http.ResponseWriter, r *http.Request) {
 	if s.checklists == nil {
 		writeErr(w, http.StatusNotFound, "체크리스트가 없습니다.")
+		return
+	}
+	if strings.TrimSpace(r.URL.Query().Get("ids")) == "" {
+		open, err := s.checklists.Open(r.Context())
+		if err != nil {
+			writeErr(w, http.StatusBadGateway, "체크리스트를 읽지 못했습니다: "+err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"open": open})
 		return
 	}
 	var ids []string
@@ -432,6 +450,34 @@ func (s *Server) checkItem(w http.ResponseWriter, r *http.Request) {
 	list, err := s.checklists.Check(r.Context(), r.PathValue("id"), r.PathValue("item"), body.Done)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, "체크하지 못했습니다: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"checklist": list})
+}
+
+// dropItem is an item swiped off a card as not needed.
+func (s *Server) dropItem(w http.ResponseWriter, r *http.Request) {
+	if s.checklists == nil {
+		writeErr(w, http.StatusNotFound, "체크리스트가 없습니다.")
+		return
+	}
+	list, err := s.checklists.Drop(r.Context(), r.PathValue("id"), r.PathValue("item"))
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "빼지 못했습니다: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"checklist": list})
+}
+
+// closeList closes a list from the console.
+func (s *Server) closeList(w http.ResponseWriter, r *http.Request) {
+	if s.checklists == nil {
+		writeErr(w, http.StatusNotFound, "체크리스트가 없습니다.")
+		return
+	}
+	list, err := s.checklists.Close(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "닫지 못했습니다: "+err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"checklist": list})

@@ -5,11 +5,12 @@ import Link from "next/link";
 import { Header, TabBar } from "@/components/shell/header";
 import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
+import { ChecklistCard } from "@/components/chat/checklist";
 import { JobSheet } from "@/components/jobs/job-sheet";
 import { type BlockedSite, type Job, LIVE, stateLabel, stateTone, when } from "@/lib/jobs";
 import { onResume } from "@/lib/resume";
 import { ago } from "@/lib/spending";
-import { isPending } from "@/lib/thread";
+import { isPending, type Checklist } from "@/lib/thread";
 import { photoUrl } from "@/lib/uploads";
 import { useThread } from "@/lib/use-thread";
 import { cn } from "@/lib/utils";
@@ -20,9 +21,15 @@ import { cn } from "@/lib/utils";
  * work (live, step by step, while it runs), answers what it asks, and steers
  * it with a new instruction.
  */
+/** A list with something left on it. */
+const unfinished = (l: Checklist) => l.status === "active" && l.items.some((i) => !i.done);
+
 export function Jobs() {
-  const { proposals, connection, decide } = useThread();
+  const { proposals, connection, decide, checklists, tick, dropItem, closeList, loadOpenLists } = useThread();
   const waiting = proposals.filter(isPending);
+  // The lists with something left when they were read - kept on screen as
+  // they are ticked off here (a list finished now says so until next time).
+  const [listIds, setListIds] = useState<string[]>([]);
 
   const [jobs, setJobs] = useState<Job[] | null>(null);
   const [blocked, setBlocked] = useState<BlockedSite[]>([]);
@@ -31,6 +38,9 @@ export function Jobs() {
   const [showEnded, setShowEnded] = useState(false);
 
   const load = useCallback(async () => {
+    void loadOpenLists().then((open) => {
+      if (open) setListIds((cur) => [...new Set([...cur, ...open.filter(unfinished).map((l) => l.id)])]);
+    });
     try {
       const res = await fetch("/api/jobs/jobs", { cache: "no-store" });
       if (!res.ok) throw new Error(String(res.status));
@@ -41,7 +51,7 @@ export function Jobs() {
     } catch {
       setError("작업을 불러오지 못했습니다. 잠시 뒤 다시 시도하세요.");
     }
-  }, []);
+  }, [loadOpenLists]);
 
   useEffect(() => {
     // load sets state only after its fetch resolves; the rule cannot see that.
@@ -60,6 +70,13 @@ export function Jobs() {
     return () => window.clearInterval(id);
   }, [load, running]);
 
+  // What is open and not done - and a list made meanwhile (it reaches this
+  // screen on the stream) joins them.
+  const lists = [
+    ...new Set([...listIds, ...Object.values(checklists).filter(unfinished).map((l) => l.id)]),
+  ]
+    .map((id) => checklists[id])
+    .filter((l): l is Checklist => Boolean(l) && l.status === "active");
   const live = (jobs ?? []).filter((j) => LIVE.includes(j.state));
   const ended = (jobs ?? []).filter((j) => !LIVE.includes(j.state));
   const open = jobs?.find((j) => j.id === openId) ?? null;
@@ -93,6 +110,24 @@ export function Jobs() {
               >
                 화면 탭 열기
               </Link>
+            </section>
+          ) : null}
+
+          {lists.length > 0 ? (
+            <section className="mb-6" aria-label="안 끝난 체크리스트" data-focus="checklists">
+              <h2 className="mb-2 px-1 text-[12.5px] text-dim">안 끝난 체크리스트</h2>
+              <ul className="space-y-3">
+                {lists.map((l) => (
+                  <li key={l.id}>
+                    <ChecklistCard
+                      list={l}
+                      onTick={(item, done) => tick(l.id, item, done)}
+                      onDrop={(item) => dropItem(l.id, item)}
+                      onClose={() => closeList(l.id)}
+                    />
+                  </li>
+                ))}
+              </ul>
             </section>
           ) : null}
 

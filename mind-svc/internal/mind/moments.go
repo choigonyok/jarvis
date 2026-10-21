@@ -50,6 +50,19 @@ func (m *Mind) say(ctx context.Context, r moments.Reminder) (string, error) {
 		}
 		return outcome(in), nil
 	}
+	kind := "remind.asked"
+	if r.Source == moments.Lists {
+		// mind's own: what is left on a list, the evening before its day -
+		// and nothing at all when nothing is left, or the list was closed.
+		l, ok := m.reminderList(ctx, r)
+		switch {
+		case !ok || l.Status != checklist.Active:
+			return "목록이 닫혀 말하지 않음", nil
+		case len(l.Left()) == 0:
+			return "다 해서 말하지 않음", nil
+		}
+		kind = "remind.list"
+	}
 	why := r.Why(m.Opts.Loc)
 	if now := m.Opts.Now(); r.SentBy == moments.ByTime && r.At != nil && now.Sub(*r.At) > 10*time.Minute {
 		// Down at its time (a restart, a deploy): said late, and so.
@@ -69,7 +82,7 @@ func (m *Mind) say(ctx context.Context, r moments.Reminder) (string, error) {
 		}
 	}
 	n := act.Notice{
-		Kind: "remind.asked", Title: r.Text, Body: strings.TrimSpace(strings.Join(append(lines, why), "\n")),
+		Kind: kind, Title: r.Text, Body: strings.TrimSpace(strings.Join(append(lines, why), "\n")),
 		URL: firstNonEmpty(r.URL, "/"), Tier: "now", Level: "warn", At: m.Opts.Now(),
 		// Changed and said again, it is a notice of its own.
 		Key:  "remind:" + r.ID + ":" + strconv.FormatInt(r.UpdatedAt.Unix(), 10),
@@ -284,6 +297,8 @@ func (m *Mind) reminderLines(ctx context.Context) string {
 	for _, r := range rs {
 		if r.Source == moments.Asked || r.Source == moments.Console {
 			asked = append(asked, r.Line(m.Opts.Loc))
+		} else if r.Source == moments.Lists {
+			held = append(held, r.When(m.Opts.Loc)+" · "+r.Text+" (체크리스트 "+r.Checklist+" 의 남은 것)")
 		} else {
 			held = append(held, r.When(m.Opts.Loc)+" · "+r.Text)
 		}

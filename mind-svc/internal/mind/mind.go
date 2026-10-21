@@ -181,7 +181,7 @@ func New(o Options) *Mind {
 		m.answered(ctx, in)
 	}
 	m.mornings = append(m.mornings, m.people, m.gift, m.weekend, m.restock, m.deadlines, m.warranties)
-	m.nightly = append(m.nightly, m.pruneMessages, m.expireQuestions, m.statedPreferences, m.deliveries, m.travelNotes, m.fixedChanges, m.moved)
+	m.nightly = append(m.nightly, m.pruneMessages, m.expireQuestions, m.statedPreferences, m.deliveries, m.travelNotes, m.fixedChanges, m.moved, m.closeLists)
 	m.Skills = []skill.Skill{skill.Schedule{}, skill.Loops{}, skill.Brief{}, skill.After{}, skill.Protect{}, skill.Rain{}}
 	m.Attn = attention.New(m.Skills, m.World, o.Store, m.Gate, o.Settle, o.Loc, o.Now, o.Logger)
 	if o.Weather != nil {

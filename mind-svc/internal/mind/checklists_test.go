@@ -105,3 +105,96 @@ func TestShowChecklistAsksTheAgent(t *testing.T) {
 		t.Fatal("없는 목록을 보여 달라고 했습니다")
 	}
 }
+
+// A list for a day is brought up by mind itself the evening before, at
+// home: what is left, as a card - nothing at all when nothing is left. A
+// list made when that evening has begun is in front of the operator already;
+// one whose day is taken away has no moment.
+func TestDatedListComesUpTheEveningBefore(t *testing.T) {
+	seoul, _ := time.LoadLocation("Asia/Seoul")
+	f := newMomentsFixture(t, time.Date(2026, 10, 22, 10, 0, 0, 0, seoul), nil)
+	f.m.Lists = &checklist.Service{St: checklist.NewMemory(), Now: f.clk.Now}
+	ctx := context.Background()
+	camp, err := f.m.MakeList(ctx, checklist.New{Title: "캠핑 준비물", Date: "2026-10-24", Items: []string{"장갑", "베개", "랜턴"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.m.Lists.Set(ctx, camp.ID, "i3", true, checklist.ByCard)
+	done, _ := f.m.MakeList(ctx, checklist.New{Title: "장보기", Date: "2026-10-24", Items: []string{"물"}})
+	f.m.Lists.Set(ctx, done.ID, "i1", true, checklist.ByCard)
+
+	rs, _ := f.m.Moments.List(ctx, false)
+	if len(rs) != 2 {
+		t.Fatalf("목록마다 전날 저녁 알림 하나: %+v", rs)
+	}
+	for _, r := range rs {
+		if r.Source != moments.Lists || r.Place != "home" || r.After.In(seoul).Format("01-02 15:04") != "10-23 18:00" || r.At.In(seoul).Format("15:04") != "21:30" {
+			t.Fatalf("전날 18시부터 집에서, 늦어도 21:30: %+v", r)
+		}
+	}
+	if sit, _ := f.m.Situation(ctx); !strings.Contains(sit.Text, "("+"10/24 용)") || !strings.Contains(sit.Text, "체크리스트 "+camp.ID+" 의 남은 것") {
+		t.Fatalf("지금 상황에 목록의 날과 mind 가 잡은 때가 없습니다:\n%s", sit.Text)
+	}
+
+	f.clk.Pin(time.Date(2026, 10, 23, 19, 10, 0, 0, seoul))
+	f.move(t, LocationEnter, "집", "home")
+	all := f.notice.All()
+	if len(all) != 1 {
+		t.Fatalf("남은 것이 있는 목록만 말해야 합니다: %+v", all)
+	}
+	n := all[0]
+	if n.Kind != "remind.list" || !n.Card || n.Data["checklist"] != camp.ID || n.Title != "내일 캠핑 준비물" || !strings.Contains(n.Body, "남은 것: 장갑, 베개") {
+		t.Fatalf("전날 저녁의 알림: %+v", n)
+	}
+	rs, _ = f.m.Moments.List(ctx, true)
+	for _, r := range rs {
+		if r.Checklist == done.ID && !strings.Contains(r.Result, "다 해서") {
+			t.Fatalf("다 한 목록은 말하지 않고 그렇게 남깁니다: %+v", r)
+		}
+	}
+
+	// Made that evening: no moment. Its day taken away: none either.
+	late, _ := f.m.MakeList(ctx, checklist.New{Title: "늦게 만든 목록", Date: "2026-10-24", Items: []string{"하나"}})
+	later, _ := f.m.MakeList(ctx, checklist.New{Title: "다음 주 목록", Date: "2026-10-30", Items: []string{"둘"}})
+	none := ""
+	if _, err := f.m.ChangeList(ctx, later.ID, checklist.Change{Date: &none}); err != nil {
+		t.Fatal(err)
+	}
+	waiting, _ := f.m.Moments.List(ctx, false)
+	for _, r := range waiting {
+		if r.Checklist == late.ID || r.Checklist == later.ID {
+			t.Fatalf("잡지 않았어야 할 알림: %+v", r)
+		}
+	}
+}
+
+// The night closes the lists done with: every item done a while ago, or a
+// day past. One ticked off this evening, and one still in use, stay open.
+func TestNightClosesListsDoneWith(t *testing.T) {
+	seoul, _ := time.LoadLocation("Asia/Seoul")
+	f := newMomentsFixture(t, time.Date(2026, 10, 24, 9, 0, 0, 0, seoul), nil)
+	f.m.Lists = &checklist.Service{St: checklist.NewMemory(), Now: f.clk.Now}
+	ctx := context.Background()
+	old, _ := f.m.MakeList(ctx, checklist.New{Title: "다 한 목록", Items: []string{"하나"}})
+	f.m.Lists.Set(ctx, old.ID, "i1", true, checklist.ByCard)
+	past, _ := f.m.MakeList(ctx, checklist.New{Title: "어제 캠핑", Date: "2026-10-24", Items: []string{"장갑"}})
+	open, _ := f.m.MakeList(ctx, checklist.New{Title: "집에서 할 일", Items: []string{"빨래"}})
+
+	f.clk.Pin(time.Date(2026, 10, 25, 3, 0, 0, 0, seoul))
+	fresh, _ := f.m.MakeList(ctx, checklist.New{Title: "방금 끝낸 목록", Items: []string{"둘"}})
+	f.m.Lists.Set(ctx, fresh.ID, "i1", true, checklist.ByCard)
+	if err := f.m.closeLists(ctx); err != nil {
+		t.Fatal(err)
+	}
+	status := map[string]string{}
+	all, _ := f.m.Lists.All(ctx, true)
+	for _, l := range all {
+		status[l.ID] = l.Status
+	}
+	want := map[string]string{old.ID: checklist.Archived, past.ID: checklist.Archived, open.ID: checklist.Active, fresh.ID: checklist.Active}
+	for id, s := range want {
+		if status[id] != s {
+			t.Errorf("%s: %s, want %s", id, status[id], s)
+		}
+	}
+}

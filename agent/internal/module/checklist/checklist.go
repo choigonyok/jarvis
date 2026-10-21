@@ -55,6 +55,7 @@ type List struct {
 	Title     string    `json:"title"`
 	Note      string    `json:"note,omitempty"`
 	Topic     string    `json:"topic,omitempty"`
+	Date      string    `json:"date,omitempty"`
 	Items     []Item    `json:"items"`
 	Status    string    `json:"status"`
 	Line      string    `json:"line,omitempty"`
@@ -170,6 +171,31 @@ func (m *Module) Find(ctx context.Context, ids []string) (map[string]any, error)
 	return out, nil
 }
 
+// Open is the lists still open, the latest changed first: what the 작업
+// tab shows of them (the unfinished among them).
+func (m *Module) Open(ctx context.Context) (any, error) {
+	var res struct {
+		Checklists []List `json:"checklists"`
+	}
+	if err := m.do(ctx, http.MethodGet, "/api/checklists", nil, &res); err != nil {
+		return nil, err
+	}
+	if res.Checklists == nil {
+		res.Checklists = []List{}
+	}
+	return res.Checklists, nil
+}
+
+// Drop takes an item off a list - one swiped away on a card as not needed.
+func (m *Module) Drop(ctx context.Context, id, item string) (any, error) {
+	return m.one(ctx, http.MethodPatch, "/api/checklists/"+url.PathEscape(id), map[string]any{"remove": []string{item}, "by": "card"})
+}
+
+// Close closes a list from the console.
+func (m *Module) Close(ctx context.Context, id string) (any, error) {
+	return m.one(ctx, http.MethodDelete, "/api/checklists/"+url.PathEscape(id), nil)
+}
+
 // Check is a tap on a card's item.
 func (m *Module) Check(ctx context.Context, id, item string, done bool) (any, error) {
 	return m.one(ctx, http.MethodPost, "/api/checklists/"+url.PathEscape(id)+"/items/"+url.PathEscape(item),
@@ -225,6 +251,7 @@ type MakeInput struct {
 	Items []string `json:"items" jsonschema:"항목들, 하나에 한 가지씩 짧게. 예: ['장갑', '베개', '이소가스']"`
 	Note  string   `json:"note,omitempty" jsonschema:"목록 아래 한 줄(선택). 예: '토요일 아침 출발'"`
 	Topic string   `json:"topic,omitempty" jsonschema:"같은 목록을 다시 만들 때 묶는 이름(선택). 같은 topic 의 열린 목록이 있으면 새로 만들지 않고 그 목록에 더한다. 예: 'camping-weekend'"`
+	Date  string   `json:"date,omitempty" jsonschema:"이 목록이 필요한 날 YYYY-MM-DD(선택, 캠핑 가는 날 등). 주면 mind 가 전날 저녁 집에서 남은 것만 다시 띄우고, 날이 지나면 닫는다"`
 	Show  *bool    `json:"show,omitempty" jsonschema:"대화에 카드로 띄울지. 기본 true"`
 	Lead  string   `json:"lead,omitempty" jsonschema:"카드 위에 붙일 한 줄(선택)"`
 }
@@ -238,6 +265,7 @@ type ChangeInput struct {
 	ID      string   `json:"id" jsonschema:"체크리스트 id(chk_…)"`
 	Title   string   `json:"title,omitempty" jsonschema:"새 이름. 비우면 그대로"`
 	Note    string   `json:"note,omitempty" jsonschema:"새 한 줄 설명. 비우면 그대로"`
+	Date    string   `json:"date,omitempty" jsonschema:"목록이 필요한 날을 바꿀 때 YYYY-MM-DD. 비우면 그대로"`
 	Add     []string `json:"add,omitempty" jsonschema:"더할 항목"`
 	Remove  []string `json:"remove,omitempty" jsonschema:"뺄 항목(항목 id 나 이름)"`
 	Check   []string `json:"check,omitempty" jsonschema:"했다고 체크할 항목(항목 id 나 이름). 운영자가 했다고 말한 것만"`
@@ -256,14 +284,15 @@ func (m *Module) Handler() http.Handler {
 	server := mcp.NewServer(&mcp.Implementation{Name: ServerName, Version: "1"}, nil)
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "make_checklist",
-		Description: "체크리스트를 만든다 - 준비물, 할 일처럼 하나씩 챙기고 지워 갈 것. 항목마다 체크한 상태가 저장되고, 대화에 체크할 수 있는 카드로 띄운다(show 기본 true). " +
+		Description: "체크리스트를 만든다 - 준비물, 할 일처럼 하나씩 챙기고 지워 갈 것. 목록과 체크 상태는 mind 가 갖고, 대화에 체크할 수 있는 카드로 띄운다(show 기본 true). " +
 			"목록을 글로 늘어놓는 대신 이것을 쓴다. 같은 topic 의 열린 목록이 있으면 그 목록에 더한다. " +
-			"정해진 때(집에 왔을 때, 출발 전날 저녁) 다시 띄우려면 set_reminder 의 checklist 에 이 id 를 넣는다.",
+			"특정한 날을 위한 목록이면 date 를 넣는다 - mind 가 전날 저녁 집에서 남은 것만 다시 띄우고 날이 지나면 닫는다. " +
+			"그 밖의 때(집에 도착할 때, 나갈 때) 다시 띄우려면 set_reminder 의 checklist 에 이 id 를 넣는다. 안 끝난 목록은 작업 탭에도 보인다.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in MakeInput) (*mcp.CallToolResult, any, error) {
 		var out struct {
 			Checklist List `json:"checklist"`
 		}
-		if err := m.do(ctx, http.MethodPost, "/api/checklists", map[string]any{"title": in.Title, "items": in.Items, "note": in.Note, "topic": in.Topic, "source": "chat"}, &out); err != nil {
+		if err := m.do(ctx, http.MethodPost, "/api/checklists", map[string]any{"title": in.Title, "items": in.Items, "note": in.Note, "topic": in.Topic, "date": in.Date, "source": "chat"}, &out); err != nil {
 			return failed("만들지 못했습니다", err), nil, nil
 		}
 		l := out.Checklist
@@ -298,6 +327,9 @@ func (m *Module) Handler() http.Handler {
 		}
 		if strings.TrimSpace(in.Note) != "" {
 			body["note"] = in.Note
+		}
+		if strings.TrimSpace(in.Date) != "" {
+			body["date"] = in.Date
 		}
 		for k, v := range map[string][]string{"add": in.Add, "remove": in.Remove, "check": in.Check, "uncheck": in.Uncheck} {
 			if len(v) > 0 {

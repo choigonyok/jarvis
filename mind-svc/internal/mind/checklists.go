@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/checklist"
 	"github.com/choigonyok/jarvis/mind-svc/internal/moments"
@@ -51,6 +52,102 @@ func (m *Mind) ShowChecklist(ctx context.Context, id, lead string) (checklist.Li
 		Source: "mind", Type: ChecklistShown, Subject: l.ID, Data: data,
 		Key: ChecklistShown + ":" + l.ID + ":" + strconv.FormatInt(now.UnixNano(), 36), OccurredAt: now,
 	})
+}
+
+// MakeList makes a list - and a list for a day is brought up by mind
+// itself the evening before (planList).
+func (m *Mind) MakeList(ctx context.Context, n checklist.New) (checklist.List, error) {
+	l, err := m.Lists.Make(ctx, n)
+	if err == nil {
+		m.planList(ctx, l)
+	}
+	return l, err
+}
+
+// ChangeList changes a list, and its moment with its day.
+func (m *Mind) ChangeList(ctx context.Context, id string, c checklist.Change) (checklist.List, error) {
+	l, err := m.Lists.Change(ctx, id, c)
+	if err == nil && (c.Date != nil || c.Reopen) {
+		m.planList(ctx, l)
+	}
+	return l, err
+}
+
+// CloseList closes a list, and its moment with it.
+func (m *Mind) CloseList(ctx context.Context, id string) (checklist.List, error) {
+	l, err := m.Lists.Archive(ctx, id)
+	if err == nil {
+		m.planList(ctx, l)
+	}
+	return l, err
+}
+
+// The evening before a list's day: from 18:00, on coming home (being home
+// counts), at 21:30 at the latest.
+const (
+	listFrom   = 18 * time.Hour
+	listLatest = 21*time.Hour + 30*time.Minute
+)
+
+// planList keeps a list's own moment: what is left, the evening before its
+// day, at home - packing is done at home. None for a list with no day, one
+// closed, or one made when that evening has already begun (it is in front
+// of the operator already). Said only if something is left by then (say).
+func (m *Mind) planList(ctx context.Context, l checklist.List) {
+	if m.Moments == nil {
+		return
+	}
+	topic := "checklist:" + l.ID
+	cancel := func() {
+		if err := m.Moments.CancelTopic(ctx, topic); err != nil {
+			m.Opts.Logger.Warn("체크리스트의 알림을 거두지 못했습니다", "checklist", l.ID, "err", err)
+		}
+	}
+	d, err := time.ParseInLocation("2006-01-02", l.Date, m.Opts.Loc)
+	if l.Date == "" || err != nil || l.Status != checklist.Active {
+		cancel()
+		return
+	}
+	eve := d.AddDate(0, 0, -1)
+	from, latest := eve.Add(listFrom), eve.Add(listLatest)
+	if !from.After(m.Opts.Now()) {
+		cancel()
+		return
+	}
+	if _, err := m.Moments.Set(ctx, moments.Reminder{
+		Source: moments.Lists, Topic: topic, Text: "내일 " + l.Title, Checklist: l.ID,
+		Place: "home", Move: moments.Arrive, After: &from, At: &latest, URL: "/",
+	}); err != nil {
+		m.Opts.Logger.Warn("체크리스트의 알림을 잡지 못했습니다", "checklist", l.ID, "err", err)
+	}
+}
+
+// closeLists closes, at night, the lists done with: every item done a
+// while ago (a list ticked off this evening stays open till the next
+// night), or a day past. What the lists are and what is on them stays
+// mind's to keep; this is what keeps the open ones the live ones.
+func (m *Mind) closeLists(ctx context.Context) error {
+	if m.Lists == nil {
+		return nil
+	}
+	ls, err := m.Lists.All(ctx, false)
+	if err != nil {
+		return err
+	}
+	now := m.Opts.Now()
+	today := now.In(m.Opts.Loc).Format("2006-01-02")
+	for _, l := range ls {
+		finished := len(l.Items) > 0 && len(l.Left()) == 0 && now.Sub(l.UpdatedAt) >= 12*time.Hour
+		past := l.Date != "" && l.Date < today
+		if !finished && !past {
+			continue
+		}
+		if _, err := m.CloseList(ctx, l.ID); err != nil {
+			return err
+		}
+		m.Opts.Logger.Info("다 쓴 체크리스트를 닫았습니다", "checklist", l.ID, "title", l.Title, "finished", finished, "past", past)
+	}
+	return nil
 }
 
 // checklistLine is the lists open, for the conversation's situation: what

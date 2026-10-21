@@ -123,6 +123,8 @@ export type Checklist = {
   id: string;
   title: string;
   note?: string;
+  /** The day the list is for ("2026-10-24"). */
+  date?: string;
   items: ChecklistItem[];
   status: "active" | "archived";
   updatedAt?: string;

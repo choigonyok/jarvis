@@ -32,6 +32,24 @@ func (l *lists) Find(_ context.Context, ids []string) (map[string]any, error) {
 	return out, nil
 }
 
+func (l *lists) Open(context.Context) (any, error) {
+	return []map[string]any{{"id": "chk_open"}}, nil
+}
+
+func (l *lists) Drop(_ context.Context, id, item string) (any, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.ticked = append(l.ticked, id+"/"+item+"x")
+	return map[string]any{"id": id}, nil
+}
+
+func (l *lists) Close(_ context.Context, id string) (any, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.ticked = append(l.ticked, id+" closed")
+	return map[string]any{"id": id, "status": "archived"}, nil
+}
+
 func (l *lists) Check(_ context.Context, id, item string, done bool) (any, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -94,6 +112,20 @@ func TestThreadCarriesItsChecklists(t *testing.T) {
 	rec = do(http.MethodGet, "/thread/checklists?ids=chk_9,%20chk_8", "")
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "chk_8") {
 		t.Fatalf("목록 읽기: %d %s", rec.Code, rec.Body)
+	}
+	// The 작업 tab: the lists still open; an item swiped away; a list closed.
+	rec = do(http.MethodGet, "/thread/checklists", "")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"open":[{"id":"chk_open"}]`) {
+		t.Fatalf("열린 목록: %d %s", rec.Code, rec.Body)
+	}
+	if rec := do(http.MethodDelete, "/thread/checklists/chk_1/items/i3", ""); rec.Code != http.StatusOK {
+		t.Fatalf("빼기: %d %s", rec.Code, rec.Body)
+	}
+	if rec := do(http.MethodDelete, "/thread/checklists/chk_1", ""); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "archived") {
+		t.Fatalf("닫기: %d %s", rec.Code, rec.Body)
+	}
+	if got := strings.Join(l.ticked, ","); got != "chk_1/i2+,chk_1/i3x,chk_1 closed" {
+		t.Fatalf("체크·빼기·닫기: %s", got)
 	}
 
 	if rec := do(http.MethodPost, "/jobs/wake", ""); rec.Code != http.StatusNoContent || woke != 1 {

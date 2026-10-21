@@ -34,7 +34,8 @@ func (f *fakeMind) serve(t *testing.T) string {
 		f.calls = append(f.calls, r.Method+" "+r.URL.RequestURI())
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/checklists":
-			f.list = List{ID: "chk_1", Title: body["title"].(string), Status: "active"}
+			date, _ := body["date"].(string)
+			f.list = List{ID: "chk_1", Title: body["title"].(string), Status: "active", Date: date}
 			for i, it := range body["items"].([]any) {
 				f.list.Items = append(f.list.Items, Item{ID: "i" + string(rune('1'+i)), Text: it.(string)})
 			}
@@ -170,5 +171,40 @@ func TestChecklistIsACardInTheConversation(t *testing.T) {
 	found, err := m.Find(context.Background(), []string{"chk_1"})
 	if err != nil || found["chk_1"].(List).Title != "캠핑 준비물" {
 		t.Fatalf("찾기: %+v %v", found, err)
+	}
+}
+
+// From the console: an item swiped away is taken off the list in mind, a
+// list is closed there, and the 작업 tab reads the lists still open - each
+// change going out to every screen.
+func TestConsoleDropsAndCloses(t *testing.T) {
+	mind := &fakeMind{}
+	b := bus.New()
+	events, stop := b.Subscribe()
+	defer stop()
+	m := New(mind.serve(t), "tok", &conversation{}, b, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctx := context.Background()
+	s := session(t, m)
+	if _, isErr := call(t, s, "make_checklist", map[string]any{"title": "캠핑 준비물", "items": []string{"장갑", "베개"}, "date": "2026-10-24", "show": false}); isErr {
+		t.Fatal("만들기 실패")
+	}
+	published(t, events)
+	if _, err := m.Drop(ctx, "chk_1", "i2"); err != nil {
+		t.Fatal(err)
+	}
+	published(t, events)
+	if _, err := m.Close(ctx, "chk_1"); err != nil {
+		t.Fatal(err)
+	}
+	published(t, events)
+	open, err := m.Open(ctx)
+	if err != nil || len(open.([]List)) != 1 {
+		t.Fatalf("열린 목록: %+v %v", open, err)
+	}
+	mind.mu.Lock()
+	defer mind.mu.Unlock()
+	want := []string{"POST /api/checklists", "PATCH /api/checklists/chk_1", "DELETE /api/checklists/chk_1", "GET /api/checklists"}
+	if strings.Join(mind.calls, " | ") != strings.Join(want, " | ") {
+		t.Fatalf("mind 로 간 것: %v", mind.calls)
 	}
 }
