@@ -82,6 +82,10 @@
   방식으로 대신 돌고 5분마다 다시 확인한다). 시스템 설정 → 개인정보 보호 및 보안 → 전체 디스크 접근
   권한에 `~/.local/bin/jarvis-imessage-mirror` 를 추가하면 5분 안에 저절로 직접 복사로 바뀐다. 그 뒤
   원격 로그인(sshd-keygen-wrapper)의 권한을 끄고 authorized_keys 의 jarvis-imessage-mirror 줄을 지운다.
+- **폰 알림 수집기는 맥미니에서 돈다.** `scripts/phonenote-collector install`(맥북에서 실행)이 빌드해
+  맥미니 LaunchAgent 로 올린다. 맥미니에 아이폰 미러링을 켜고(iPhone 미러링 앱을 한 번 열어 아이폰으로
+  승인), 전체 디스크 접근 권한에 `~/.local/bin/jarvis-phonenote-collector` 를 더한다. 상태 탭의
+  "폰 알림"이 그 결과를 보여 준다.
 - **서비스별 DB 역할 비밀번호:** `scripts/db-roles` (`.env` 의 `JARVIS_DB_PASSWORD_*`).
 
 **root 로 돌던 이미지에서 올릴 때 한 번(2026-10-16):** 수집기와 브라우저가 이제 root 가 아니다.
