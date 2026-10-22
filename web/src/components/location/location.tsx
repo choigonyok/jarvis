@@ -7,6 +7,7 @@ import { Header, TabBar } from "@/components/shell/header";
 import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { DayMap } from "@/components/location/day-map";
+import { useRole } from "@/components/shell/role";
 import { Strip } from "@/components/location/strip";
 import { onResume } from "@/lib/resume";
 import { isPending } from "@/lib/thread";
@@ -313,6 +314,7 @@ function Arrow({ label, disabled, onClick, children }: { label: string; disabled
 
 /** Over the map when there is nothing on it: why, and what to do about it. */
 function Empty({ day }: { day: Day }) {
+  const role = useRole();
   if (day.nodes.length > 0) return null;
   const never = !day.since;
   return (
@@ -322,7 +324,9 @@ function Empty({ day }: { day: Day }) {
           {never ? "아직 폰 위치가 들어온 적이 없어요" : day.today ? "오늘은 아직 위치 기록이 없어요" : "이날은 위치 기록이 없어요"}
         </p>
         <p className="mt-1 text-[12.5px] leading-[1.55] break-keep text-pretty text-dim">
-          {never ? (
+          {never && role === "guest" ? (
+            "폰이 위치를 보내기 시작하면 여기 그려져요."
+          ) : never ? (
             <>
               아이폰의 OwnTracks 가 위치를 보내야 여기 그려져요.{" "}
               <Link href="/status?focus=check:phone" className="underline decoration-edge underline-offset-[3px] hover:text-foreground">

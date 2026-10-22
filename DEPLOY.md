@@ -14,7 +14,7 @@
               │ + Bearer JARVIS_EDGE_TOKEN (운영자) / JARVIS_EDGE_GUEST_TOKEN (손님)
               ▼
            jarvis-be (edge Worker)
-              │ 토큰 없으면 401, 손님 토큰은 agent-guest·workout·notify 만,
+              │ 토큰 없으면 401, 손님 토큰은 agent-guest·workout·notify·tts 와 context 의 GET track 만,
               │ agent 는 콘솔이 쓰는 경로만
               │ 확인 뒤 Authorization 을 JARVIS_API_TOKEN 으로 바꿔 붙인다
               │ (agent-guest 에는 JARVIS_GUEST_API_TOKEN)
@@ -117,7 +117,7 @@ DB 가 필요한 테스트는 `scripts/dbtest` 로 돌린다(맥북 Docker 에 �
 
 **손님 계정.** Access 정책은 운영자와 손님 두 이메일을 허용한다. 콘솔은 Access 가
 서명한 이메일로 역할을 정하고(`web/src/lib/role.ts`, Worker 비밀값 `ACCESS_OWNERS`/`ACCESS_GUESTS` - 이메일이라 공개 저장소에 두지 않는다), 손님은
-대화·운동·캘린더·편집 페이지와 `/api/agent`·`/api/workout` 등 손님 몫 API, PhotoCraft 파일(`/photocraft/`)만 미들웨어에서 통과한다 - 나머지는 403
+대화·운동·캘린더·편집·위치(운영자가 다닌 길, 읽기만) 페이지와 `/api/agent`·`/api/workout`·`/api/context/track`·`/api/map` 등 손님 몫 API, PhotoCraft 파일(`/photocraft/`)만 미들웨어에서 통과한다 - 나머지는 403
 이거나 첫 화면으로 돌려보낸다. 손님의 대화는 별도 컨테이너 `agent-guest`(`JARVIS_ROLE=guest`)가
 받는다: chat-svc 의 thread `guest`, 별도 CLI 홈·승인 카드, 캘린더 모듈만, 내장 도구는 웹 검색뿐,
 브라우저 토큰·자산·가계부 주소 없음. 게이트웨이 경로 `/agent-guest/…`(VPC `jarvis-agent-guest`, 포트 8081).

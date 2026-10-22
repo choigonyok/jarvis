@@ -116,11 +116,11 @@ const visible = (tabs: Tab[], role: Role) =>
 /**
  * The phone's bar, icons only. The operator's daily surfaces - the
  * conversation, money in and money out - always sit in it; the guest has
- * four tabs and no 더보기.
+ * five tabs and no 더보기.
  */
 const OWNER_BAR = ["/", "/jobs", "/assets", "/spending", "/calendar", "/workout", "/record"];
 const OWNER_MORE = ["/life", "/location", "/photos", "/edit", "/screen", "/kakao", "/status"];
-const GUEST_BAR = ["/", "/calendar", "/workout", "/edit"];
+const GUEST_BAR = ["/", "/calendar", "/location", "/workout", "/edit"];
 
 const byHref = new Map([...primary, ...secondary].map((t) => [t.href, t]));
 const pick = (hrefs: string[]) => hrefs.flatMap((h) => (byHref.has(h) ? [byHref.get(h)!] : []));

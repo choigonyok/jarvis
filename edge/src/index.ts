@@ -9,9 +9,10 @@
  *   entrypoint "Internal"). Every service, for a caller holding one of the
  *   console's tokens: the operator's (JARVIS_EDGE_TOKEN) opens everything,
  *   the guest's (JARVIS_EDGE_GUEST_TOKEN) only the guest's own agent, the
- *   workout log, the guest's notifications and the guest's own voice - so a
- *   hole in the console's proxy still cannot carry a guest to the operator's
- *   money, messages or voice.
+ *   workout log, the guest's notifications, the guest's own voice and - the
+ *   operator's choice - a read of the operator's day (context's GET track,
+ *   nothing else of context) - so a hole in the console's proxy still cannot
+ *   carry a guest to the operator's money, messages, voice or phone setup.
  * - The public hostname, jarvis-be.choigonyok.com. Only what has to be
  *   reached from outside the console: the phone's doors - POST
  *   /context/owntracks and /context/signals (OwnTracks, iOS Shortcuts) -
@@ -91,8 +92,22 @@ const SERVICES: Record<string, { binding: keyof Env; origin: string }> = {
   mind: { binding: "MIND", origin: "http://mind:8102" },
 };
 
-/** What the guest's token opens: their own agent, the workout log, their notifications, their own voice. */
-const GUEST_SERVICES = new Set(["agent-guest", "workout", "notify", "tts"]);
+/**
+ * What the guest's token opens: their own agent, the workout log, their
+ * notifications, their own voice, and of context-svc the operator's day alone
+ * (guestContextRoute).
+ */
+const GUEST_SERVICES = new Set(["agent-guest", "workout", "notify", "tts", "context"]);
+
+/**
+ * What the guest may do on context-svc: read a day of where the operator
+ * went (the 위치 screen, shared by the operator's choice). Not the phone's
+ * setup - it holds the phone's credentials - nor the regions, the devices'
+ * state, or the phone's mode.
+ */
+function guestContextRoute(method: string, path: string): boolean {
+  return method === "GET" && path === "track";
+}
 
 /** Which agent must have answered, by route. */
 const AGENT_ROLE: Record<string, string> = { agent: "owner", "agent-guest": "guest" };
@@ -189,6 +204,9 @@ async function gateway(request: Request, env: Env, internal: boolean): Promise<R
   const service = SERVICES[name];
   if (!service) return json(404, "그런 서비스가 없습니다.");
   if (guest && !GUEST_SERVICES.has(name)) return json(404, "그런 서비스가 없습니다.");
+  if (guest && name === "context" && !guestContextRoute(request.method, rest.join("/"))) {
+    return json(404, "그런 경로가 없습니다.");
+  }
   if ((name === "agent" || name === "agent-guest") && !AGENT_ROUTES.has(rest[0] ?? "")) {
     return json(404, "그런 경로가 없습니다.");
   }
