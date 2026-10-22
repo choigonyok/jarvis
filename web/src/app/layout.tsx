@@ -1,3 +1,4 @@
+import { PhotoCraft } from "@/components/edit/photocraft";
 import { PushBridge } from "@/components/shell/push-toast";
 import type { Metadata, Viewport } from "next";
 import { Barlow_Condensed, Instrument_Sans, JetBrains_Mono } from "next/font/google";
@@ -75,6 +76,8 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
       <body className="overflow-hidden">
         <RoleProvider role={role}>
           {children}
+          {/* The 편집 tab's editor: here rather than in the tab, so it outlives a visit to another one. */}
+          <PhotoCraft />
           <PushBridge />
         </RoleProvider>
         <ViewportProbe />

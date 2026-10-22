@@ -50,6 +50,9 @@
   않는다 - 로컬 개발은 로컬 compose(`AGENT_URL=http://localhost:8080` 등)로 한다.
 - 콘솔 배포: `cd web && npm run cf:build && npm run cf:deploy`. 백엔드 주소는
   `web/wrangler.jsonc` 의 `vars`(AGENT_URL 만 비밀).
+- 편집 탭의 PhotoCraft(브라우저에서만 도는 이미지 편집기)는 콘솔의 정적 파일로 같이 올라간다. 빌드 전
+  `prebuild` 가 `web/scripts/photocraft.mjs` 로 버전·SHA-256 을 고정한 릴리스를 `web/public/photocraft/`
+  (깃 밖)에 받는다. 버전을 올릴 때는 그 스크립트의 버전과 해시(릴리스의 SHA256SUMS.txt)만 바꾼다.
 - 맥미니 쪽: `scripts/mini up`, `scripts/mini compose --profile cloudflare up -d tunnel`.
   웹은 컨테이너가 없다(Cloudflare 에서만 돈다).
 - 목소리 TTS(`tts/`)는 compose 밖, 맥미니 호스트의 LaunchAgent 다: `scripts/tts install`. 게이트웨이는
@@ -114,7 +117,7 @@ DB 가 필요한 테스트는 `scripts/dbtest` 로 돌린다(맥북 Docker 에 �
 
 **손님 계정.** Access 정책은 운영자와 손님 두 이메일을 허용한다. 콘솔은 Access 가
 서명한 이메일로 역할을 정하고(`web/src/lib/role.ts`, Worker 비밀값 `ACCESS_OWNERS`/`ACCESS_GUESTS` - 이메일이라 공개 저장소에 두지 않는다), 손님은
-대화·운동·캘린더 페이지와 `/api/agent`·`/api/workout` 만 미들웨어에서 통과한다 - 나머지는 403
+대화·운동·캘린더·편집 페이지와 `/api/agent`·`/api/workout` 등 손님 몫 API, PhotoCraft 파일(`/photocraft/`)만 미들웨어에서 통과한다 - 나머지는 403
 이거나 첫 화면으로 돌려보낸다. 손님의 대화는 별도 컨테이너 `agent-guest`(`JARVIS_ROLE=guest`)가
 받는다: chat-svc 의 thread `guest`, 별도 CLI 홈·승인 카드, 캘린더 모듈만, 내장 도구는 웹 검색뿐,
 브라우저 토큰·자산·가계부 주소 없음. 게이트웨이 경로 `/agent-guest/…`(VPC `jarvis-agent-guest`, 포트 8081).

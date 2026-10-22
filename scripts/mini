@@ -55,6 +55,7 @@ sync() {
     --exclude '.env' --exclude '.env.local' \
     --exclude '/workspace/' \
     --exclude 'node_modules/' --exclude '.next/' --exclude '.open-next/' --exclude '.wrangler/' \
+    --exclude '/web/public/photocraft/' \
     --exclude 'dist/' --exclude 'agent/data/' --exclude 'kakaotalk-client/data/' \
     --exclude '.DS_Store' --exclude '*.pprof' \
     "$ROOT/" "$HOST:$DIR/"

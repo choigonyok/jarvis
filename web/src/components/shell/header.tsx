@@ -7,6 +7,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   Activity,
   BookUser,
+  Brush,
   CalendarDays,
   ClipboardCheck,
   Dumbbell,
@@ -55,6 +56,7 @@ const ICON: Record<string, LucideIcon> = {
   "/spending": ReceiptText,
   "/jobs": ListChecks,
   "/photos": Images,
+  "/edit": Brush,
   "/life": BookUser,
   "/calendar": CalendarDays,
   "/screen": MonitorPlay,
@@ -85,6 +87,8 @@ const secondary: Tab[] = [
   { href: "/spending", label: "가계부" },
   { href: "/calendar", label: "캘린더" },
   { href: "/photos", label: "사진" },
+  // 사진 다음에 그림을 고치는 곳. PhotoCraft 가 보는 사람의 브라우저 안에서 돈다.
+  { href: "/edit", label: "편집" },
   // Jarvis 가 내 생활에서 읽어 낸 것: 나에 대한 노트, 회고한 장소, 가진 물건, 식사.
   { href: "/life", label: "생활" },
   { href: "/screen", label: "화면" },
@@ -108,11 +112,11 @@ const visible = (tabs: Tab[], role: Role) =>
 /**
  * The phone's bar, icons only. The operator's daily surfaces - the
  * conversation, money in and money out - always sit in it; the guest has
- * three tabs and no 더보기.
+ * four tabs and no 더보기.
  */
 const OWNER_BAR = ["/", "/jobs", "/assets", "/spending", "/calendar", "/workout", "/record"];
-const OWNER_MORE = ["/life", "/photos", "/screen", "/kakao", "/status"];
-const GUEST_BAR = ["/", "/calendar", "/workout"];
+const OWNER_MORE = ["/life", "/photos", "/edit", "/screen", "/kakao", "/status"];
+const GUEST_BAR = ["/", "/calendar", "/workout", "/edit"];
 
 const byHref = new Map([...primary, ...secondary].map((t) => [t.href, t]));
 const pick = (hrefs: string[]) => hrefs.flatMap((h) => (byHref.has(h) ? [byHref.get(h)!] : []));

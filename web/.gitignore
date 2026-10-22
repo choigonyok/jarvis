@@ -43,3 +43,6 @@ next-env.d.ts
 # Cloudflare / OpenNext build output
 .open-next/
 .wrangler/
+
+# PhotoCraft's web build, fetched by scripts/photocraft.mjs before a build
+/public/photocraft/

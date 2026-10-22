@@ -4,9 +4,11 @@
  * Two people sign in through Cloudflare Access. The operator sees everything.
  * The guest gets the conversation (their own - a separate agent), the workout
  * log, the shared calendar, their own notifications (notify-svc keeps each
- * person's apart) and their own voice for 음성 mode (tts keeps each person's
- * recording apart, by token), and nothing that is the operator's alone:
- * assets, spending, KakaoTalk, the agent's browser, the approval ledger.
+ * person's apart), their own voice for 음성 mode (tts keeps each person's
+ * recording apart, by token) and the image editor (PhotoCraft, which runs in
+ * their own browser and keeps nothing here), and nothing that is the
+ * operator's alone: assets, spending, KakaoTalk, the agent's browser, the
+ * approval ledger.
  *
  * The role comes from the email Access signed (see lib/access.ts), matched
  * against ACCESS_OWNERS and ACCESS_GUESTS. An Access-verified email on neither
@@ -35,11 +37,14 @@ export function roleFor(email: string): Role | null {
 }
 
 /** The pages a guest can open - also the tabs a guest is shown. */
-export const GUEST_PAGES = new Set(["/", "/workout", "/calendar"]);
+export const GUEST_PAGES = new Set(["/", "/workout", "/calendar", "/edit"]);
 /** API routes a guest may call: the route itself, or anything beneath it - never a sibling with a longer name. */
 const GUEST_API = ["/api/agent", "/api/workout", "/api/notify", "/api/tts", "/api/version"];
+/** Static files a guest may load: the editor the 편집 tab frames (scripts/photocraft.mjs). */
+const GUEST_FILES = ["/photocraft/"];
 
 export function guestMay(pathname: string): boolean {
   if (GUEST_PAGES.has(pathname)) return true;
+  if (GUEST_FILES.some((p) => pathname.startsWith(p))) return true;
   return GUEST_API.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }

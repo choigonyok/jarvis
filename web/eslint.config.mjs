@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // PhotoCraft's generated loader (scripts/photocraft.mjs puts it there).
+    "public/photocraft/**",
   ]),
 ]);
 
