@@ -169,9 +169,10 @@ func safeToConfirm(d dialog, formUp bool) bool {
 	return false
 }
 
-// verifyWords are what a screen asking for the phone says: no program can
-// answer it, so the attempts stop and a person is told.
-var verifyWords = []string{"인증", "휴대폰", "본인 확인", "확인 요청", "보안 문자"}
+// verifyWords are what a screen asking for the phone, or an account Kakao
+// has locked, says: no program can answer it, so the attempts stop and a
+// person is told.
+var verifyWords = []string{"인증", "휴대폰", "본인 확인", "확인 요청", "보안 문자", "보호조치", "잠금", "잠겼"}
 
 func needsPerson(text string) bool {
 	for _, w := range verifyWords {
@@ -182,29 +183,41 @@ func needsPerson(text string) bool {
 	return false
 }
 
-// policy is how often a login is tried: one at a time, longer apart after
-// each failure, and not again after maxFails in a row - a wrong password
-// tried on and on gets the account locked.
+// wrongPassword is a notice that the password was refused. Trying it again
+// only brings the account closer to being locked, so it stops at the first.
+func wrongPassword(text string) bool {
+	if !strings.Contains(text, "비밀번호") {
+		return false
+	}
+	for _, w := range []string{"일치", "틀", "잘못", "올바르지", "확인해"} {
+		if strings.Contains(text, w) {
+			return true
+		}
+	}
+	return false
+}
+
+// policy is how soon a login is tried again. Almost every failure is the
+// network not quite back yet, so it is tried again soon - 10 s, then a
+// little longer each time, never more than 5 minutes apart. What cannot be
+// fixed by trying again (a refused password, the phone) stops it: GaveUp.
 type policy struct {
 	Fails  int
 	Next   time.Time
 	GaveUp bool
 }
 
-const maxFails = 3
-
-var backoff = []time.Duration{2 * time.Minute, 10 * time.Minute, 30 * time.Minute}
+var backoff = []time.Duration{10 * time.Second, 30 * time.Second, time.Minute, 2 * time.Minute, 5 * time.Minute}
 
 func (p *policy) due(now time.Time) bool { return !p.GaveUp && !now.Before(p.Next) }
 
 func (p *policy) failed(now time.Time) {
 	p.Fails++
-	if p.Fails >= maxFails {
-		p.GaveUp = true
-		return
-	}
 	p.Next = now.Add(backoff[min(p.Fails-1, len(backoff)-1)])
 }
+
+// stop is a failure no retry can fix.
+func (p *policy) stop() { p.Fails++; p.GaveUp = true }
 
 // reset starts over: a login that worked, a person logging in, a new password.
 func (p *policy) reset() { *p = policy{} }

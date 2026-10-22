@@ -167,7 +167,7 @@ func axTrusted(prompt bool) bool {
 }
 
 // look is one reading of an app's windows. Every handle it took is let go
-// by close: the program reads every half minute for as long as it runs.
+// by close: the program reads every five seconds for as long as it runs.
 type look struct {
 	pid     int
 	app     axRef
@@ -175,10 +175,12 @@ type look struct {
 	held    []axRef
 }
 
-// limits on one look, so a logged-in window full of chats is not walked whole.
+// limits on one look, every five seconds: the login window and a notice sit
+// near the top of their window, and a logged-in window full of chats needs no
+// more than enough to see there is no login form in it.
 const (
-	maxDepth = 14
-	maxNodes = 800
+	maxDepth = 8
+	maxNodes = 300
 )
 
 func readApp(pid int) (*look, error) {

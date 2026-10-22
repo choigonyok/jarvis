@@ -85,7 +85,8 @@
 - **카톡 자동 로그인은 전용 바이너리에만 손쉬운 사용 권한을 준다.** 카톡은 인터넷이 오래 끊겼다 돌아오면
   로그아웃되고, 그동안 카톡 수집이 조용히 멈춘다. `scripts/kakaotalk-relogin install`(맥북에서)이 LaunchAgent 로
   올리고, 처음 뜰 때 macOS 가 묻는 손쉬운 사용을 시스템 설정 → 개인정보 보호 및 보안 → 손쉬운 사용에서
-  `jarvis-kakaotalk-relogin` 에 켠다. 비밀번호는 `scripts/kakaotalk-relogin password` 로 맥미니 키체인에 넣는다
+  "Jarvis 카톡 자동 로그인"(`/Applications/JarvisKakaoRelogin.app`)에 켠다. 맥북의 Apple Development 인증서로 서명해
+  다시 설치해도 허락이 남는다. 비밀번호는 `scripts/kakaotalk-relogin password` 로 맥미니 키체인에 넣는다
   (사람이 직접 입력). 상태 탭의 "카톡 로그인"이 결과를 보여 준다.
 - **서비스별 DB 역할 비밀번호:** `scripts/db-roles` (`.env` 의 `JARVIS_DB_PASSWORD_*`).
 

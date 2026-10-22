@@ -143,7 +143,7 @@ func (e *env) hostFalkorAOF() check.Probe {
 
 // kakaoLoginFacts is what the Mac mini's KakaoTalk relogin program last saw
 // (kakaotalk-client/cmd/relogin, ~/.jarvis-host/kakaotalk-login.json beside
-// host.json). It writes on every look, every half minute or so.
+// host.json). It writes on every look, every few seconds.
 type kakaoLoginFacts struct {
 	CheckedAt  time.Time  `json:"checkedAt"`
 	State      string     `json:"state"`
@@ -179,11 +179,11 @@ func (e *env) kakaoLogin(context.Context) check.Verdict {
 	case "offline":
 		v.State, v.Summary = check.Warn, "로그아웃돼 있어요. 인터넷이 돌아오면 다시 로그인해요."
 	case "waiting", "failed":
-		v.State, v.Summary = check.Warn, fmt.Sprintf("로그아웃돼 있어요. 로그인을 %d번 실패해 다음 차례를 기다려요.", k.Fails)
+		v.State, v.Summary = check.Warn, fmt.Sprintf("로그아웃돼 있어요. 로그인을 %d번 실패해 곧 다시 해 봐요.", k.Fails)
 	case "notice", "starting":
 		v.State, v.Summary = check.Warn, "로그아웃돼서 다시 로그인하는 중이에요."
-	case "gave-up":
-		v.State, v.Summary = check.Fail, "로그인을 세 번 실패해 멈췄어요. 맥미니에서 직접 로그인해 주세요."
+	case "wrong-password", "gave-up":
+		v.State, v.Summary = check.Fail, "비밀번호가 맞지 않아 멈췄어요. scripts/kakaotalk-relogin password 로 다시 넣어 주세요."
 	case "needs-person":
 		v.State, v.Summary = check.Fail, "휴대폰 확인처럼 사람이 해야 하는 화면이 떠서 멈췄어요."
 	case "no-access":

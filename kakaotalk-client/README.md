@@ -90,25 +90,29 @@ logged-out KakaoTalk writes nothing: every message stops without an error.
 LaunchAgent on the Mac mini (it cannot run in a container - the app's
 windows are only reachable from the logged-in session):
 
-- every half minute it reads KakaoTalk's windows; a notice about the logout
+- every five seconds it reads KakaoTalk's windows; a notice about the logout
   gets its 확인 (only such a notice, or any while the login window is up),
 - the login window gets the password kept in the login keychain and its
-  로그인 - only once Kakao's servers answer again, one try at a time, again
-  after 2 and 10 minutes, and not after three failures in a row (a wrong
-  password tried on and on locks the account). A screen asking for the phone
-  stops it too; KakaoTalk's own 자동 로그인 is ticked while the window is open,
+  로그인 - the moment Kakao's servers answer again, and again 10 s after a
+  failure, a little longer each time but never more than 5 minutes apart. A
+  refused password stops it at once (tried on and on, it locks the account),
+  and so does a screen asking for the phone; KakaoTalk's own 자동 로그인 is
+  ticked while the window is open,
 - what it saw and did goes to `~/.jarvis-host/kakaotalk-login.json`, which the
   상태 tab reads as "카톡 로그인".
 
 ```bash
-scripts/kakaotalk-relogin install    # from the MacBook: build, sign, LaunchAgent on the Mac mini
+scripts/kakaotalk-relogin install    # from the MacBook: build, wrap as an app, sign, LaunchAgent on the Mac mini
 scripts/kakaotalk-relogin password   # type the Kakao account and password here; it goes to the Mac mini's keychain
 scripts/kakaotalk-relogin status     # state and the last lines of the log
 scripts/kakaotalk-relogin inspect    # the shape of KakaoTalk's windows, for when its login window changes
 ```
 
-Once, at the Mac mini: allow it under System Settings → Privacy & Security →
-Accessibility (macOS asks when it first starts). The binary is ad-hoc signed,
-so a rebuild is a new program to macOS: that permission, and the keychain
-item, may have to be given again.
+It is installed as `/Applications/JarvisKakaoRelogin.app` ("Jarvis 카톡 자동
+로그인") and signed with this Mac's Apple Development certificate
+(`JARVIS_CODESIGN_IDENTITY` overrides), so a rebuild is the same program to
+macOS. Once, at the Mac mini: allow it under System Settings → Privacy &
+Security → Accessibility (macOS asks when it first starts; otherwise + →
+Applications). Ad-hoc signed (no certificate), every install needs that
+permission and the password again.
 

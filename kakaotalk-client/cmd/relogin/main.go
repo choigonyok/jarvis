@@ -6,12 +6,12 @@
 // back). kakaotalk-client reads KakaoTalk's database, so a logged-out
 // KakaoTalk silently stops every message.
 //
-// It looks at KakaoTalk every half minute through the accessibility API. A
+// It looks at KakaoTalk every five seconds through the accessibility API. A
 // notice about the logout gets its 확인; the login window gets the password
-// kept in the login keychain and its 로그인 - once the internet answers again,
-// one try at a time, further apart after each failure, and none after three
-// in a row (a wrong password tried on and on locks the account). A screen
-// asking for the phone stops it as well. What it sees and did goes to
+// kept in the login keychain and its 로그인 - the moment the internet answers
+// again, and again 10 s after a failure, a little longer each time but never
+// more than 5 minutes apart. A refused password stops it at once (tried on
+// and on, it locks the account), and so does a screen asking for the phone. What it sees and did goes to
 // ~/.jarvis-host/kakaotalk-login.json, which the 상태 tab reads.
 //
 // It runs as the LaunchAgent com.jarvis.kakaotalk-relogin
@@ -35,11 +35,15 @@ import (
 
 const bundleID = "com.kakao.KakaoTalkMac"
 
+// poll is how often KakaoTalk is looked at: a logout is seen within it, and
+// so is the internet coming back.
+const poll = 5 * time.Second
+
 // status is what the 상태 tab reads. Nothing in it is secret.
 type status struct {
 	CheckedAt time.Time `json:"checkedAt"`
-	// logged-in | no-window | relogged | notice | starting | offline |
-	// waiting | failed | gave-up | needs-person | no-access | no-password | unknown
+	// logged-in | no-window | relogged | notice | starting | offline | waiting |
+	// failed | wrong-password | needs-person | no-access | no-password | unknown
 	State      string     `json:"state"`
 	Detail     string     `json:"detail,omitempty"`
 	Access     bool       `json:"access"`
@@ -142,12 +146,12 @@ func (d *daemon) tick() time.Duration {
 	if pid == 0 {
 		_ = exec.Command("/usr/bin/open", "-g", "-b", bundleID).Run()
 		d.set("starting", "카톡이 꺼져 있어 켰어요")
-		return 15 * time.Second
+		return 10 * time.Second
 	}
 	l, err := readApp(pid)
 	if err != nil {
 		d.set("unknown", err.Error())
-		return 30 * time.Second
+		return 10 * time.Second
 	}
 	defer l.close()
 	d.inspect(l)
@@ -165,15 +169,22 @@ func (d *daemon) tick() time.Duration {
 		} else {
 			d.set("logged-in", "")
 		}
-		return 30 * time.Second
+		return poll
 	}
 	d.wasOut = true
 
 	for _, dg := range v.Dialogs {
 		if needsPerson(dg.Text) {
-			d.pol.GaveUp = true
+			d.pol.stop()
 			d.set("needs-person", clip(dg.Text))
-			return time.Minute
+			return 30 * time.Second
+		}
+		if wrongPassword(dg.Text) && v.Form != nil {
+			_ = press(dg.OK)
+			d.pol.stop()
+			d.st.LastResult = clip(dg.Text)
+			d.set("wrong-password", clip(dg.Text))
+			return 30 * time.Second
 		}
 		if safeToConfirm(dg, v.Form != nil) {
 			log.Printf("안내창을 닫습니다: %q", clip(dg.Text))
@@ -181,7 +192,7 @@ func (d *daemon) tick() time.Duration {
 				log.Printf("확인을 누르지 못했습니다: %v", err)
 			}
 			d.set("notice", clip(dg.Text))
-			return 3 * time.Second
+			return 2 * time.Second
 		}
 	}
 
@@ -191,19 +202,20 @@ func (d *daemon) tick() time.Duration {
 			d.writeDump(l, "알 수 없는 화면")
 		}
 		d.set("unknown", "로그인 화면도 아니고 아는 안내창도 아니에요")
-		return 30 * time.Second
+		return 10 * time.Second
 	}
 
 	switch {
 	case d.pol.GaveUp:
-		d.set("gave-up", d.st.LastResult)
-		return time.Minute
+		// Kept as it was stopped (wrong-password, needs-person) until a person
+		// logs in or a new password arrives.
+		return 30 * time.Second
 	case !d.pol.due(now):
 		d.set("waiting", d.st.LastResult)
-		return 30 * time.Second
+		return poll
 	case !online():
 		d.set("offline", "인터넷이 아직 돌아오지 않았어요")
-		return 20 * time.Second
+		return poll
 	}
 	account, password, err := getPassword()
 	if err != nil {
@@ -213,7 +225,7 @@ func (d *daemon) tick() time.Duration {
 			d.st.Password = "unreadable"
 		}
 		d.set("no-password", err.Error())
-		return time.Minute
+		return 30 * time.Second
 	}
 	d.st.Password = "stored"
 
@@ -230,20 +242,21 @@ func (d *daemon) tick() time.Duration {
 		d.set("relogged", "")
 	case person:
 		log.Printf("사람이 해야 하는 화면이 떠서 멈춥니다: %q", detail)
-		d.pol.GaveUp = true
+		d.pol.stop()
 		d.st.LastResult = detail
 		d.set("needs-person", detail)
+	case wrongPassword(detail):
+		log.Printf("비밀번호가 맞지 않아 멈춥니다: %q", detail)
+		d.pol.stop()
+		d.st.LastResult = detail
+		d.set("wrong-password", detail)
 	default:
 		d.pol.failed(t)
-		log.Printf("로그인하지 못했습니다(%d번째): %s", d.pol.Fails, detail)
+		log.Printf("로그인하지 못했습니다(%d번째, 다음은 %s 뒤): %s", d.pol.Fails, d.pol.Next.Sub(t).Round(time.Second), detail)
 		d.st.LastResult = detail
-		if d.pol.GaveUp {
-			d.set("gave-up", detail)
-		} else {
-			d.set("failed", detail)
-		}
+		d.set("failed", detail)
 	}
-	return 10 * time.Second
+	return poll
 }
 
 // attempt fills the login window and presses 로그인, then watches what follows.

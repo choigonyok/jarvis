@@ -75,8 +75,8 @@ func All(cfg Config) []check.Probe {
 		},
 		{
 			ID: "kakao.login", Group: "수집", Name: "카톡 로그인",
-			Rule:  "맥미니 카톡이 로그인돼 있으면 정상 - 로그아웃돼도 자동 로그인 프로그램이 다시 로그인해요. 인터넷이 돌아오길 기다리거나 다시 시도할 차례를 기다리면 주의, 세 번 실패해 멈췄거나 휴대폰 확인이 필요하거나 권한·비밀번호가 없으면 이상. 프로그램을 설치하기 전에는 측정하지 않아요.",
-			Fix:   "scripts/kakaotalk-relogin status 로 상태와 로그를 보세요. 권한이 없으면 맥미니의 시스템 설정 → 개인정보 보호 및 보안 → 손쉬운 사용에서 jarvis-kakaotalk-relogin 을 켜고, 비밀번호가 없으면 scripts/kakaotalk-relogin password. 멈췄으면 맥미니에서 직접 로그인하면 다시 지켜봐요.",
+			Rule:  "맥미니 카톡이 로그인돼 있으면 정상 - 로그아웃돼도 자동 로그인 프로그램이 5초 안에 알아보고 인터넷이 돌아오는 대로 다시 로그인해요. 인터넷을 기다리거나 다시 시도하는 중이면 주의, 비밀번호가 맞지 않거나 휴대폰 확인이 필요하거나 권한·비밀번호가 없으면 이상. 프로그램을 설치하기 전에는 측정하지 않아요.",
+			Fix:   "scripts/kakaotalk-relogin status 로 상태와 로그를 보세요. 권한이 없으면 맥미니의 시스템 설정 → 개인정보 보호 및 보안 → 손쉬운 사용에서 'Jarvis 카톡 자동 로그인'을 켜고, 비밀번호가 없거나 틀렸으면 scripts/kakaotalk-relogin password. 휴대폰 확인으로 멈췄으면 맥미니에서 직접 로그인하면 다시 지켜봐요.",
 			Every: 30 * time.Second,
 			Run:   e.kakaoLogin,
 		},

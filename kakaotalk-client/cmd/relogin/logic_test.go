@@ -79,23 +79,37 @@ func TestPhoneVerificationStopsIt(t *testing.T) {
 	}
 }
 
-func TestPolicyBacksOffThenGivesUp(t *testing.T) {
+func TestWrongPasswordStopsAtOnce(t *testing.T) {
+	if !wrongPassword("비밀번호가 일치하지 않습니다. 다시 입력해 주세요.") || !wrongPassword("계정 또는 비밀번호를 확인해 주세요") {
+		t.Fatal("틀린 비밀번호 안내를 알아봐야 합니다")
+	}
+	if wrongPassword("네트워크 연결을 확인해 주세요") {
+		t.Fatal("네트워크 안내는 틀린 비밀번호가 아닙니다")
+	}
+	if !needsPerson("계정이 보호조치되었습니다") {
+		t.Fatal("잠긴 계정은 사람이 해야 합니다")
+	}
+}
+
+func TestPolicyRetriesSoonAndKeepsTrying(t *testing.T) {
 	var p policy
 	now := time.Date(2026, 10, 22, 14, 6, 0, 0, time.UTC)
 	if !p.due(now) {
-		t.Fatal("처음에는 바로 시도합니다")
+		t.Fatal("로그아웃을 보면 바로 시도합니다")
 	}
 	p.failed(now)
-	if p.due(now.Add(time.Minute)) || !p.due(now.Add(2*time.Minute)) {
-		t.Fatalf("첫 실패 뒤 2분 기다립니다: %+v", p)
+	if p.due(now.Add(9*time.Second)) || !p.due(now.Add(10*time.Second)) {
+		t.Fatalf("첫 실패 뒤 10초면 다시 시도합니다: %+v", p)
 	}
-	p.failed(now)
-	if p.due(now.Add(9*time.Minute)) || !p.due(now.Add(10*time.Minute)) {
-		t.Fatalf("두 번째 실패 뒤 10분 기다립니다: %+v", p)
+	for i := 0; i < 10; i++ {
+		p.failed(now)
 	}
-	p.failed(now)
+	if p.GaveUp || !p.due(now.Add(5*time.Minute)) {
+		t.Fatalf("인터넷 탓 실패는 멈추지 않고 5분보다 길게 기다리지 않습니다: %+v", p)
+	}
+	p.stop()
 	if !p.GaveUp || p.due(now.Add(24*time.Hour)) {
-		t.Fatalf("세 번 연속 실패하면 멈춥니다 (계정 잠김을 막으려고): %+v", p)
+		t.Fatalf("틀린 비밀번호·휴대폰 확인은 멈춥니다: %+v", p)
 	}
 	p.reset()
 	if !p.due(now) || p.Fails != 0 {

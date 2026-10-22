@@ -75,7 +75,10 @@ import (
 
 // The keychain item the password is kept in (the login keychain).
 const (
-	kcService = "jarvis-kakaotalk-login"
+	// An item belongs to the program that made it: the app signed with a
+	// lasting identity (scripts/kakaotalk-relogin) keeps it across rebuilds,
+	// the first ad-hoc build's item ("jarvis-kakaotalk-login") it cannot read.
+	kcService = "jarvis-kakaotalk-relogin"
 	kcLabel   = "jarvis 카톡 자동 로그인"
 )
 
