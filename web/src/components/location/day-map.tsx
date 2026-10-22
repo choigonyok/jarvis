@@ -206,10 +206,10 @@ export function DayMap({ scene, t, live, follow }: { scene: Scene; t: number; li
     }
     const points: ({ x: number; y: number } | null)[] = positions.map(({ position }) => (position ? at(position) : null));
     const [a, b] = points;
-    if (a && b && Math.hypot(a.x - b.x, a.y - b.y) < 30) {
+    if (a && b && Math.hypot(a.x - b.x, a.y - b.y) < 24) {
       const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-      points[0] = { x: mid.x - 16, y: mid.y };
-      points[1] = { x: mid.x + 16, y: mid.y };
+      points[0] = { x: mid.x - 13, y: mid.y };
+      points[1] = { x: mid.x + 13, y: mid.y };
     }
     positions.forEach(({ person }, i) => {
       let el = l.marks.get(person.who);
@@ -222,7 +222,7 @@ export function DayMap({ scene, t, live, follow }: { scene: Scene; t: number; li
       el.style.display = p ? "" : "none";
       if (!p) return;
       marked.push(p);
-      el.style.transform = `translate(${p.x - 26}px, ${p.y - 26}px)`;
+      el.style.transform = `translate(${p.x - 21}px, ${p.y - 21}px)`;
       const halo = el.firstElementChild as HTMLElement | null;
       if (halo) {
         halo.style.background = `radial-gradient(circle, rgba(${toneOf(person)}, 0.5) 0%, rgba(${toneOf(person)}, 0.16) 45%, transparent 70%)`;
@@ -342,14 +342,14 @@ const FACE: Record<Who, string> = { owner: "/icons/location-cat.png", guest: "/i
  */
 function mark(who: Who): HTMLDivElement {
   const el = document.createElement("div");
-  el.className = "pointer-events-none absolute top-0 left-0 size-13";
+  el.className = "pointer-events-none absolute top-0 left-0 size-[42px]";
   const halo = document.createElement("span");
   halo.className = "absolute inset-0 rounded-full";
   const face = document.createElement("img");
   face.src = FACE[who];
   face.alt = "";
   face.draggable = false;
-  face.className = "absolute top-1/2 left-1/2 size-9 -translate-1/2 select-none";
+  face.className = "absolute top-1/2 left-1/2 size-[29px] -translate-1/2 select-none";
   el.replaceChildren(halo, face);
   return el;
 }
@@ -443,7 +443,7 @@ function name(
     const p = at(place.node);
     const y = p.y - n.h / 2;
     // Where a mark is, the name stands clear of it.
-    const gap = marks.some((q) => Math.hypot(q.x - p.x, q.y - p.y) < 34) ? (marks.length > 1 ? 42 : 26) : 12;
+    const gap = marks.some((q) => Math.hypot(q.x - p.x, q.y - p.y) < 28) ? (marks.length > 1 ? 34 : 21) : 12;
     const free = (x: number) =>
       x >= 4 &&
       x + n.w <= w - 4 &&
