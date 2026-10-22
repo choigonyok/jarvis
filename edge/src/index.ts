@@ -233,24 +233,30 @@ async function gateway(request: Request, env: Env, internal: boolean): Promise<R
     headers.set("x-api-key", env.IMMICH_API_KEY!);
   }
   const hasBody = request.method !== "GET" && request.method !== "HEAD";
+  // Both agents ride one tunnel, and a pooled connection has been seen to
+  // land on the other one. Each agent names itself on every response; one
+  // from the wrong agent is dropped here, never passed on - the guest must
+  // not be handed the operator's conversation, nor the other way round.
+  // (The wrong agent also refuses the other's token, so nothing was done.)
+  // A read is asked again: a 502 handed to the console's event stream closed
+  // it for good, and the thread then showed nothing sent until the app was
+  // restarted (2026-10-22). A request with a body cannot be sent twice.
+  const expect = AGENT_ROLE[name];
+  const tries = expect && !hasBody ? 3 : 1;
   try {
-    // The response is handed back as it arrives - /agent/events is a stream.
-    const res = await (env[service.binding] as Fetcher).fetch(target, {
-      method: request.method,
-      headers,
-      body: hasBody ? request.body : undefined,
-      redirect: "manual",
-    });
-    // Both agents ride one tunnel, and a pooled connection has been seen to
-    // land on the other one. Each agent names itself on every response; one
-    // from the wrong agent is dropped here, never passed on - the guest must
-    // not be handed the operator's conversation, nor the other way round.
-    const expect = AGENT_ROLE[name];
-    if (expect && res.headers.get("x-jarvis-agent") !== expect) {
+    for (let attempt = 1; ; attempt++) {
+      // The response is handed back as it arrives - /agent/events is a stream.
+      const res = await (env[service.binding] as Fetcher).fetch(target, {
+        method: request.method,
+        headers,
+        body: hasBody ? request.body : undefined,
+        redirect: "manual",
+      });
+      if (!expect || res.headers.get("x-jarvis-agent") === expect) return res;
       await res.body?.cancel();
-      return json(502, "다른 jarvis 가 응답했습니다. 잠시 뒤 다시 시도하세요.");
+      console.warn("다른 jarvis 가 응답했습니다", { service: name, path: rest.join("/"), attempt, of: tries });
+      if (attempt >= tries) return json(502, "다른 jarvis 가 응답했습니다. 잠시 뒤 다시 시도하세요.");
     }
-    return res;
   } catch {
     return json(502, `${name} 서비스에 닿지 못했습니다. 맥미니와 터널을 확인하세요.`);
   }

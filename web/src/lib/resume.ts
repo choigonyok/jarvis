@@ -128,6 +128,9 @@ export function useLiveNotifications(enabled: boolean) {
     let source: EventSource | null = null;
     let ping: number | undefined;
     let endpoint = "";
+    // A refused reconnect, opened again by hand (see onerror), and how long the next waits.
+    let again: number | undefined;
+    let wait = 0;
     const presence = (visible: boolean) => {
       if (!endpoint) return;
       const body = JSON.stringify({ endpoint, visible });
@@ -151,11 +154,27 @@ export function useLiveNotifications(enabled: boolean) {
       // Only a device whose stream is open may say it is looking: one that
       // said so with a broken stream would get neither a push nor a banner.
       const say = () => source?.readyState === EventSource.OPEN && presence(true);
-      source.onopen = say;
+      source.onopen = () => {
+        wait = 0;
+        say();
+      };
+      // A reconnect answered with anything but a stream closes it for good:
+      // the page stops saying it is looking, and notify-svc goes back to
+      // phone pushes - banners over the open app - until it is next hidden
+      // and shown. Opened again here instead, while the page is on screen.
+      source.onerror = () => {
+        if (source?.readyState !== EventSource.CLOSED) return;
+        window.clearInterval(ping);
+        source = null;
+        wait = Math.min(wait ? wait * 2 : 1000, 15_000);
+        window.clearTimeout(again);
+        again = window.setTimeout(() => document.visibilityState === "visible" && start(), wait);
+      };
       ping = window.setInterval(say, 10_000);
     };
     const stop = () => {
       window.clearInterval(ping);
+      window.clearTimeout(again);
       source?.close();
       source = null;
       presence(false);

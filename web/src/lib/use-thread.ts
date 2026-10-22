@@ -57,6 +57,9 @@ function missingLists(turns: Turn[], known: Record<string, Checklist>): string[]
 /** How many turns a page of the thread holds: the newest on opening, the ones above on scrolling up. */
 const PAGE = 60;
 
+/** How long a sent message may take to come back over the stream before the thread is re-read. */
+const SEND_ECHO_MS = 4000;
+
 export function useThread() {
   const [turns, setTurnsState] = useState<Turn[]>(() => cached?.turns ?? []);
   // Whether the thread goes on above the oldest loaded turn, and whether
@@ -183,7 +186,11 @@ export function useThread() {
     }
   }, [loadingOlder, setTurns, setMore, putLists]);
 
+  // When the stream last carried anything at all - see send.
+  const heardAt = useRef(0);
+
   const onEvent = useCallback((event: AgentEvent) => {
+    heardAt.current = Date.now();
     switch (event.type) {
       case "turn":
         setTurns((prev) => upsert(prev, event.turn));
@@ -257,12 +264,20 @@ export function useThread() {
         setError(body?.error ?? "메시지를 보내지 못했습니다.");
         return false;
       }
+      // What was sent comes back over the stream within a moment - as a turn,
+      // or in the queue. Nothing at all back means the stream is dead without
+      // having said so, and the message would not show until the app was
+      // restarted: read the thread now and open a fresh stream.
+      const asked = Date.now();
+      setTimeout(() => {
+        if (heardAt.current < asked) resync();
+      }, SEND_ECHO_MS);
       return true;
     } catch {
       setError("에이전트에 연결하지 못했습니다.");
       return false;
     }
-  }, []);
+  }, [resync]);
 
   /**
    * Acts on a waiting message: "steer" hands it to the running turn, "drop"
