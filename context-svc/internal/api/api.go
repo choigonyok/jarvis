@@ -22,7 +22,8 @@
 //	                         version and state - is it hearing commands?)
 //	PUT    /owntracks/mode   {mode: -1|0|1|2} tell the phone to watch this way
 //	                         with the reply to its next report (the server
-//	                         cannot wake it) - "follow closely now"
+//	                         cannot wake it), and keep it so for an hour -
+//	                         "follow closely now"
 //	GET    /owntracks/setup  the phone's setup: an OwnTracks configuration
 //	                         (owntracks:///config?inline=…) and what the
 //	                         shortcuts post - for the console, behind its login
@@ -237,6 +238,9 @@ func (s *Server) ingest(ctx context.Context, rep report, at time.Time) ([]map[st
 	}
 	type move struct{ event, region string }
 	var moves []move
+	// Whether the report says where the phone is now, and if so whether it
+	// is settled there: a late or rough fix says neither.
+	judged, settled := false, false
 	switch rep.Type {
 	case "transition":
 		if rep.Desc == "" || (rep.Event != "enter" && rep.Event != "leave") {
@@ -254,6 +258,12 @@ func (s *Server) ingest(ctx context.Context, rep report, at time.Time) ([]map[st
 		if changed {
 			moves = append(moves, move{rep.Event, rep.Desc})
 		}
+		// In a region, or out of one and in none: on the way.
+		open, err := s.st.Open(ctx)
+		if err != nil {
+			return nil, err
+		}
+		judged, settled = true, rep.Event == "enter" || len(open) > 0
 	case "location":
 		loc := Location{Lat: rep.Lat, Lon: rep.Lon, Acc: rep.Acc, Batt: rep.Batt, Charging: rep.BS == 2 || rep.BS == 3}
 		newer, err := s.st.SetIfNewer(ctx, "location", loc, at)
@@ -295,6 +305,10 @@ func (s *Server) ingest(ctx context.Context, rep report, at time.Time) ([]map[st
 				moves = append(moves, move{"enter", n})
 			}
 		}
+		if settled, err = s.settledAt(ctx, ownerPhone, rep, at, len(in) > 0); err != nil {
+			return nil, err
+		}
+		judged = true
 	case "waypoints", "waypoint":
 		// Regions made on the phone come here as they are: kept by name, a
 		// kind guessed from it unless one was set here.
@@ -345,8 +359,8 @@ func (s *Server) ingest(ctx context.Context, rep report, at time.Time) ([]map[st
 		extra = append(extra, map[string]any{"_type": "cmd", "action": ask.Action})
 		s.log.Info("폰에 명령을 보냅니다", "action", ask.Action)
 	}
-	want := current.Mode
-	// Asked for by hand (PUT /owntracks/mode): said with this reply, once.
+	// Asked for by hand (PUT /owntracks/mode): said with this reply, and kept
+	// for an hour - the rule below would otherwise undo it at the next report.
 	var asked struct {
 		Mode *int `json:"mode"`
 	}
@@ -357,6 +371,9 @@ func (s *Server) ingest(ctx context.Context, rep report, at time.Time) ([]map[st
 		if err := s.st.Set(ctx, "owntracks.mode", map[string]int{"mode": *asked.Mode}, s.now()); err != nil {
 			return nil, err
 		}
+		if err := s.st.Set(ctx, "owntracks.hold", hold{Mode: *asked.Mode, Until: s.now().Add(time.Hour)}, s.now()); err != nil {
+			return nil, err
+		}
 		s.log.Info("폰의 위치 모드를 바꿉니다(요청)", "from", current.Mode, "to", *asked.Mode)
 		for _, m := range moves {
 			s.announce(m.event, m.region, kindOf[m.region], at)
@@ -365,10 +382,24 @@ func (s *Server) ingest(ctx context.Context, rep report, at time.Time) ([]map[st
 	}
 	for _, m := range moves {
 		s.announce(m.event, m.region, kindOf[m.region], at)
-		want = place.Mode(want, m.event, kindOf[m.region], rep.Batt, rep.BS == 2 || rep.BS == 3)
 	}
-	if len(moves) == 0 {
-		want = place.Mode(want, "", "", rep.Batt, rep.BS == 2 || rep.BS == 3)
+	// Settled where it is - in a region, or still for a while - it watches
+	// lightly; out and moving, closely. A mode asked for by hand holds for its
+	// hour, and the battery has the last word either way.
+	charging := rep.BS == 2 || rep.BS == 3
+	var held hold
+	_, err = s.st.Get(ctx, "owntracks.hold", &held)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return nil, err
+	}
+	var want int
+	switch {
+	case err == nil && s.now().Before(held.Until):
+		want = place.Battery(held.Mode, rep.Batt, charging)
+	case judged:
+		want = place.Watch(settled, rep.Batt, charging)
+	default:
+		want = place.Battery(current.Mode, rep.Batt, charging)
 	}
 	if want == current.Mode {
 		if extra == nil {
@@ -389,13 +420,42 @@ const (
 	stillRadius = 150.0
 )
 
+// hold is a mode asked for by hand (PUT /owntracks/mode), kept until when.
+type hold struct {
+	Mode  int       `json:"mode"`
+	Until time.Time `json:"until"`
+}
+
+// settledAt is whether a phone is settled where this fix puts it: inside a
+// region (in) or, outside them and not in a car, still in one spot for a
+// while - in a car it is moving, however long the jam. source is the phone.
+func (s *Server) settledAt(ctx context.Context, source string, rep report, at time.Time, in bool) (bool, error) {
+	if in {
+		return true, nil
+	}
+	if place.Activity(rep.Motion) == "automotive" {
+		return false, nil
+	}
+	fixes, err := s.st.Fixes(ctx, source, at.Add(-6*time.Hour), at.Add(time.Second))
+	if err != nil {
+		return false, err
+	}
+	spots := make([]place.Spot, 0, len(fixes))
+	for _, f := range fixes {
+		if f.Acc <= s.cfg.Trust {
+			spots = append(spots, place.Spot{Lat: f.Lat, Lon: f.Lon, At: f.At})
+		}
+	}
+	return place.Still(spots, rep.Lat, rep.Lon, at, stillRadius, stillFor), nil
+}
+
 // guestWatch is how the guest's phone should watch, said with the reply to
-// its report: lightly (Significant) while it is settled - inside a region,
-// one it set itself (the phone's own inregions) or one kept here, or still in
-// one spot for a while - and closely (Move) once it is out and moving, so its
-// way is drawn in detail. In a car it is moving, however long the jam. Like
-// the operator's, the phone's own word on the mode it is in is what a change
-// is judged against, and a low battery keeps it from Move.
+// its report - the operator's rule (ingest): lightly (Significant) while it is
+// settled - inside a region, one it set itself (the phone's own inregions) or
+// one kept here, or still in one spot for a while - and closely (Move) once it
+// is out and moving, so its way is drawn in detail. The phone's own word on
+// the mode it is in is what a change is judged against, and a low battery
+// keeps it from Move.
 func (s *Server) guestWatch(ctx context.Context, rep report, at time.Time) ([]map[string]any, error) {
 	none := []map[string]any{}
 	if rep.Type != "location" || rep.Acc > s.cfg.Trust {
@@ -416,19 +476,10 @@ func (s *Server) guestWatch(ctx context.Context, rep report, at time.Time) ([]ma
 	if err != nil {
 		return nil, err
 	}
-	settled := len(rep.InRegions) > 0 || len(place.Inside(regions, rep.Lat, rep.Lon, rep.Acc)) > 0
-	if !settled && place.Activity(rep.Motion) != "automotive" {
-		fixes, err := s.st.Fixes(ctx, guestPhone, at.Add(-6*time.Hour), at.Add(time.Second))
-		if err != nil {
-			return nil, err
-		}
-		spots := make([]place.Spot, 0, len(fixes))
-		for _, f := range fixes {
-			if f.Acc <= s.cfg.Trust {
-				spots = append(spots, place.Spot{Lat: f.Lat, Lon: f.Lon, At: f.At})
-			}
-		}
-		settled = place.Still(spots, rep.Lat, rep.Lon, at, stillRadius, stillFor)
+	in := len(rep.InRegions) > 0 || len(place.Inside(regions, rep.Lat, rep.Lon, rep.Acc)) > 0
+	settled, err := s.settledAt(ctx, guestPhone, rep, at, in)
+	if err != nil {
+		return nil, err
 	}
 	want := place.Watch(settled, rep.Batt, rep.BS == 2 || rep.BS == 3)
 	if want == current {

@@ -250,8 +250,8 @@ func TestWaypointsAndSetup(t *testing.T) {
 	if r := reply(); r != "[]\n" {
 		t.Fatalf("한 번만: %s", r)
 	}
-	// The phone says it is still in Significant (it did not take the
-	// command): the rule's Move is sent again on the way out of a region.
+	// The asked mode holds for its hour: at home, the rule would say
+	// Significant, but Move stays.
 	if err := st.PutRegion(ctx, place.Region{Name: "집", Kind: "home", Lat: 37.1, Lon: 127.1, RadiusM: 100}); err != nil {
 		t.Fatal(err)
 	}
@@ -266,12 +266,55 @@ func TestWaypointsAndSetup(t *testing.T) {
 		b, _ := io.ReadAll(resp.Body)
 		return string(b)
 	}
-	say(`{"_type":"location","lat":37.1,"lon":127.1,"acc":10,"tst":1760600100,"m":1}`)
-	if r := say(`{"_type":"location","lat":37.3,"lon":127.3,"acc":10,"tst":1760600200,"m":1}`); !strings.Contains(r, `"monitoring":2`) {
-		t.Fatalf("집을 나섬 → Move: %s", r)
+	if r := say(`{"_type":"location","lat":37.1,"lon":127.1,"acc":10,"tst":1760600100,"m":2}`); r != "[]\n" {
+		t.Fatalf("요청한 Move 는 한 시간 그대로: %s", r)
 	}
-	if r := say(`{"_type":"location","lat":37.31,"lon":127.31,"acc":10,"tst":1760600300,"m":1}`); r != "[]\n" {
-		t.Fatalf("모드 변화가 없으면 규칙으로는 다시 보내지 않음: %s", r)
+	// The hour over: at home, Significant.
+	if err := st.Drop(ctx, "owntracks.hold"); err != nil {
+		t.Fatal(err)
+	}
+	if r := say(`{"_type":"location","lat":37.1,"lon":127.1,"acc":10,"tst":1760600150,"m":2}`); !strings.Contains(r, `"monitoring":1`) {
+		t.Fatalf("영역 안 → Significant: %s", r)
+	}
+	// Out and moving: Move - and again while the phone says it did not take it.
+	if r := say(`{"_type":"location","lat":37.3,"lon":127.3,"acc":10,"tst":1760600200,"m":1}`); !strings.Contains(r, `"monitoring":2`) {
+		t.Fatalf("나가서 움직임 → Move: %s", r)
+	}
+	if r := say(`{"_type":"location","lat":37.31,"lon":127.31,"acc":10,"tst":1760600300,"m":1}`); !strings.Contains(r, `"monitoring":2`) {
+		t.Fatalf("폰이 받지 않은 명령은 다시: %s", r)
+	}
+	if r := say(`{"_type":"location","lat":37.31,"lon":127.31,"acc":10,"tst":1760600400,"m":2}`); r != "[]\n" {
+		t.Fatalf("받았으면 다시 보내지 않음: %s", r)
+	}
+	// Still in one spot nobody registered for a quarter of an hour: Significant.
+	if r := say(`{"_type":"location","lat":37.3101,"lon":127.3101,"acc":10,"tst":1760601000,"m":2,"motionactivities":["stationary"]}`); r != "[]\n" {
+		t.Fatalf("10분째는 그대로: %s", r)
+	}
+	if r := say(`{"_type":"location","lat":37.3102,"lon":127.31,"acc":10,"tst":1760601400,"m":2,"motionactivities":["stationary"]}`); !strings.Contains(r, `"monitoring":1`) {
+		t.Fatalf("한자리에 15분 → Significant: %s", r)
+	}
+	// In a car it is moving, however long the jam.
+	if r := say(`{"_type":"location","lat":37.4,"lon":127.4,"acc":10,"tst":1760602000,"m":2,"motionactivities":["automotive"]}`); r != "[]\n" {
+		t.Fatalf("차 안: %s", r)
+	}
+	if r := say(`{"_type":"location","lat":37.4001,"lon":127.4,"acc":10,"tst":1760603000,"m":2,"motionactivities":["automotive"]}`); r != "[]\n" {
+		t.Fatalf("막혀 서 있어도 차 안이면 Move 그대로: %s", r)
+	}
+	// Leaving one region while still in another: settled still.
+	if err := st.PutRegion(ctx, place.Region{Name: "동네", Kind: "other", Lat: 37.5, Lon: 127.5, RadiusM: 2000}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.PutRegion(ctx, place.Region{Name: "카페", Kind: "food", Lat: 37.5, Lon: 127.5, RadiusM: 50}); err != nil {
+		t.Fatal(err)
+	}
+	if r := say(`{"_type":"location","lat":37.5,"lon":127.5,"acc":10,"tst":1760604000,"m":2}`); !strings.Contains(r, `"monitoring":1`) {
+		t.Fatalf("카페(동네 안) 도착 → Significant: %s", r)
+	}
+	if r := say(`{"_type":"transition","event":"leave","desc":"카페","tst":1760605000,"m":1}`); r != "[]\n" {
+		t.Fatalf("카페를 나와도 동네 안: %s", r)
+	}
+	if r := say(`{"_type":"transition","event":"leave","desc":"동네","tst":1760606000,"m":1}`); !strings.Contains(r, `"monitoring":2`) {
+		t.Fatalf("어느 영역에도 없음 → Move: %s", r)
 	}
 }
 

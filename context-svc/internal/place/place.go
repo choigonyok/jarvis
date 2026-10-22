@@ -91,36 +91,22 @@ const (
 	Move        = 2
 )
 
-// Mode is how the phone should watch now, and whether that is a change.
-// Leaving home or work, follow closely (Move) - that is when where-am-I
-// questions come; arriving anywhere known, back to Significant, which costs
-// little battery. A low battery overrides both.
-func Mode(current int, event, regionKind string, batt int, charging bool) int {
-	want := current
-	switch {
-	case event == "leave" && (regionKind == "home" || regionKind == "work"):
-		want = Move
-	case event == "enter":
-		want = Significant
-	}
-	if batt > 0 && batt < 20 && !charging && want == Move {
-		want = Significant
-	}
-	if batt > 0 && batt < 8 && !charging {
-		want = Quiet
-	}
-	return want
-}
-
 // Watch is how a phone should watch by where it is rather than by what it
 // just did: settled - inside a region, or still in one spot for a while - it
 // watches lightly (Significant); out and moving, closely (Move), so its way
-// is drawn in detail. A low battery overrides both, as in Mode.
+// is drawn in detail. The battery has the last word (Battery).
 func Watch(settled bool, batt int, charging bool) int {
 	want := Move
 	if settled {
 		want = Significant
 	}
+	return Battery(want, batt, charging)
+}
+
+// Battery is a mode as the battery allows it: below 20% and not charging, no
+// Move (Significant instead); below 8%, Quiet. A battery the phone did not
+// report is not held against it.
+func Battery(want, batt int, charging bool) int {
 	if batt > 0 && batt < 20 && !charging && want == Move {
 		want = Significant
 	}

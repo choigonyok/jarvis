@@ -34,9 +34,13 @@ POST /signals     {source, kind, state, at?} (Bearer 신호 토큰). kind 는 de
 (폰의 `inregions` 와 여기 저장된 원) 열린 체류를 닫고 새로 연다. 신호도 "바뀜"이 아니라 "상태"를 보내므로 하나를
 놓쳐도 다음 것이 고친다.
 
-모드 전환(응답 명령): 집·회사를 떠나면 Move(자세히), 어딘가 도착하면 Significant(아낌), 배터리 20% 미만이면
-Move 를 하지 않고, 8% 미만이면 Quiet. 서버가 먼저 폰을 깨울 수 없어서, 바꾸는 계기는 늘 폰이 보낸 보고다.
-OwnTracks 에서 원격 설정(Remote configuration)을 켜야 적용된다.
+모드 전환(응답 명령): 폰이 지금 있는 자리로 정한다(2026-10-23, 그 전에는 '집·회사를 떠나면 Move, 어딘가 도착하면
+Significant'). 영역 안(여기 등록된 영역이나 폰이 스스로 등록한 영역 - 보고의 `inregions`)이거나 150m 안에 15분 넘게
+있었으면 Significant(아낌), 그 밖에서 움직이면 Move(자세히). 차 안(`automotive`)은 막혀 서 있어도 움직이는 중이다. 영역
+진입·이탈 보고는 들어가면 Significant, 나와서 어느 영역에도 없으면 Move. 늦게 온 위치나 거친 위치는 판단하지 않는다.
+Move 의 타이머 보고(`t: t`)가 멈춰 있는 동안에도 와서, 15분이 지나면 판단이 내려진다. 배터리 20% 미만이면 Move 를 하지
+않고, 8% 미만이면 Quiet. 손으로 건 모드(`PUT /owntracks/mode`)는 한 시간 동안 이 규칙보다 앞선다. 서버가 먼저 폰을 깨울 수
+없어서, 바꾸는 계기는 늘 폰이 보낸 보고다. OwnTracks 에서 원격 설정(Remote configuration)을 켜야 적용된다.
 
 필드 이름은 OwnTracks 문서(owntracks.org/booklet, 2026-10-15 확인)와 맞췄다: `configuration.monitoring` 은 -1 Quiet,
 0 Manual, 1 Significant, 2 Move. `bs`(배터리 상태)는 0 모름, 1 빠짐, 2 충전 중, 3 가득. HTTP 문서의 응답 예시에는
@@ -88,10 +92,7 @@ jarvis 웹의 **상태 → 폰 연결**을 아이폰에서 열고 차례로 누�
 운영자의 체류·현재 상태·`context.state`·영역(상대 폰이 보내는 waypoints)은 움직이지 않는다 - 이것들은 운영자 한 사람의 것이고,
 mind·notify 가 그렇게 읽는다. 상대는 콘솔 위치 탭의 '내 폰 연결'에서 `GET /owntracks/setup/guest` 의 링크로 설정을 넣는다.
 
-상대 폰에도 모드를 응답으로 바꿔 준다(`guestWatch`). 운영자 폰은 사건으로 바꾸지만(집·회사를 나서면 Move, 영역에 들면
-Significant), 상대 폰은 지금 있는 자리로 정한다: 영역 안(여기 등록된 영역이나 폰이 스스로 등록한 영역 - 보고의 `inregions`)이거나
-150m 안에 15분 넘게 있었으면 Significant, 그 밖에서 움직이면 Move. 차 안(`automotive`)은 막혀 서 있어도 움직이는 중으로 본다.
-Move 의 타이머 보고(`t: t`)가 멈춰 있는 동안에도 와서, 15분이 지나면 이 판단이 내려진다. 배터리 규칙은 운영자 폰과 같다.
+상대 폰의 모드도 운영자 폰과 같은 규칙으로 응답에서 바꾼다(`guestWatch`, 위의 모드 전환) - 손으로 거는 모드만 없다.
 
 ## 현재 상태 한 장
 
