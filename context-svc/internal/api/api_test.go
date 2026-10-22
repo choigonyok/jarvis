@@ -12,12 +12,15 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/choigonyok/jarvis/context-svc/internal/place"
 	"github.com/choigonyok/jarvis/context-svc/internal/store"
+	"github.com/choigonyok/jarvis/gocommon/notify"
 )
 
 // Against a throwaway Postgres with migration 046:
@@ -634,8 +637,9 @@ func TestGuestPhone(t *testing.T) {
 		}
 		return reply
 	}
-	// At home (a region kept here), already Significant: nothing to say.
-	if r := say(fmt.Sprintf(`{"_type":"location","lat":37.5560,"lon":126.9105,"acc":10,"tst":%d,"m":1,"batt":80}`, at("08:00"))); r != "[]\n" {
+	// At home (a region kept here), already Significant: nothing to say but
+	// the first ask for its regions.
+	if r := say(fmt.Sprintf(`{"_type":"location","lat":37.5560,"lon":126.9105,"acc":10,"tst":%d,"m":1,"batt":80}`, at("08:00"))); r != `[{"_type":"cmd","action":"waypoints"}]`+"\n" {
 		t.Fatalf("집, Significant 그대로: %s", r)
 	}
 	// Out on the road in a car: Move.
@@ -704,5 +708,157 @@ func TestGuestPhone(t *testing.T) {
 	_ = json.Unmarshal(raw, &cfg)
 	if cfg["username"] != "guest-phone" || cfg["password"] != "gpw" || cfg["deviceId"] != "guest-iphone" || cfg["cmd"] != true || cfg["remoteConfiguration"] != true || cfg["url"] != "https://gw.example/context/owntracks" {
 		t.Fatalf("상대 설정 내용: %s", raw)
+	}
+}
+
+// The guest's regions are its own - kept apart from the operator's, renamed
+// by id, refreshed by the whole list once a day - and its arrivals and
+// departures at them go to its own inbox, never as the operator's.
+func TestGuestRegions(t *testing.T) {
+	dsn := os.Getenv("CONTEXT_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("CONTEXT_TEST_DATABASE_URL 이 없어 건너뜁니다")
+	}
+	ctx := context.Background()
+	st, err := store.Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	resetTables(t, dsn, `truncate context_raw, context_regions, context_visits, context_state restart identity`)
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	seoul, _ := time.LoadLocation("Asia/Seoul")
+	// What reaches events-svc.
+	got := make(chan map[string]any, 32)
+	sink := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var e map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&e)
+		got <- e
+	}))
+	defer sink.Close()
+	server := New(st, Config{Token: "api", User: "phone", Pass: "pw", GuestUser: "guest-phone", GuestPass: "gpw"}, notify.New(sink.URL, "", "", quiet), quiet)
+	var today atomic.Value
+	today.Store(time.Date(2026, 10, 23, 13, 0, 0, 0, seoul))
+	server.now = func() time.Time { return today.Load().(time.Time) }
+	srv := httptest.NewServer(server.Handler())
+	defer srv.Close()
+	do := func(method, path, body string, set func(*http.Request)) (int, string) {
+		req, _ := http.NewRequest(method, srv.URL+path, strings.NewReader(body))
+		set(req)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	api := func(r *http.Request) { r.Header.Set("Authorization", "Bearer api") }
+	at := func(day, hm string) int64 {
+		tm, _ := time.ParseInLocation("2006-01-02 15:04", "2026-10-"+day+" "+hm, seoul)
+		return tm.Unix()
+	}
+	say := func(body string) string {
+		code, reply := do("POST", "/owntracks", body, func(r *http.Request) { r.SetBasicAuth("guest-phone", "gpw") })
+		if code != 200 {
+			t.Fatalf("상대 폰: %d %s", code, reply)
+		}
+		return reply
+	}
+	// The guest's home and work, the road between; the operator's home is elsewhere.
+	const home, work, road = `"lat":37.6000,"lon":127.0000`, `"lat":37.5001,"lon":127.1001`, `"lat":37.5500,"lon":127.0500`
+	fix := func(day, hm, where, extra string) string {
+		return say(fmt.Sprintf(`{"_type":"location",%s,"acc":20,"tst":%d,"m":1,"batt":80%s}`, where, at(day, hm), extra))
+	}
+	if code, _ := do("PUT", "/regions", `{"name":"집","kind":"home","lat":37.5559,"lon":126.9104,"radiusM":120}`, api); code != 200 {
+		t.Fatalf("운영자 영역: %d", code)
+	}
+
+	// The first report asks for the phone's regions; the next ones, that day, do not.
+	if r := fix("23", "07:00", home, ""); !strings.Contains(r, `{"_type":"cmd","action":"waypoints"}`) {
+		t.Fatalf("첫 보고에 영역 목록 요청: %s", r)
+	}
+	// "+" on the phone: a point named Here-..., not a region yet. Named and
+	// given a radius, the same id is a region - made where the phone is, so
+	// no arrival.
+	say(fmt.Sprintf(`{"_type":"waypoint","rid":"r1","desc":"Here-r1",%s,"rad":0,"tst":%d}`, home, at("23", "07:05")))
+	say(fmt.Sprintf(`{"_type":"waypoint","rid":"r1","desc":"집",%s,"rad":100,"tst":%d}`, home, at("23", "07:06")))
+	if r := fix("23", "07:10", home, `,"inregions":["집"]`); strings.Contains(r, `"waypoints"`) {
+		t.Fatalf("같은 날 두 번 묻지 않음: %s", r)
+	}
+	say(fmt.Sprintf(`{"_type":"transition","event":"leave","desc":"집",%s,"tst":%d}`, home, at("23", "08:00")))
+	fix("23", "08:10", road, "")
+	// The whole list: one more, at work. Arriving there, before the phone
+	// notices, the circle says so.
+	say(fmt.Sprintf(`{"_type":"waypoints","waypoints":[{"_type":"waypoint","rid":"r1","desc":"집",%s,"rad":100},{"_type":"waypoint","rid":"r2","desc":"회사",%s,"rad":150}]}`, home, work))
+	fix("23", "09:00", work, "")
+	fix("23", "08:55", home, "") // late: changes nothing
+	// Renamed at work: the same region, no departure nor arrival. A name the
+	// phone says but that is not kept here is not one.
+	say(fmt.Sprintf(`{"_type":"waypoint","rid":"r2","desc":"직장",%s,"rad":150,"tst":%d}`, work, at("23", "12:00")))
+	fix("23", "12:30", work, `,"inregions":["직장","옛 영역"]`)
+	fix("23", "18:00", road, "")
+	say(fmt.Sprintf(`{"_type":"transition","event":"enter","desc":"집",%s,"tst":%d}`, home, at("23", "18:40")))
+
+	var events []string
+	for len(events) < 4 {
+		select {
+		case e := <-got:
+			n, _ := e["notify"].(map[string]any)
+			d, _ := e["data"].(map[string]any)
+			events = append(events, fmt.Sprintf("%v %v %v %v %v %v %v", e["type"], d["region"], d["kind"], d["who"], n["title"], n["body"], n["audience"]))
+		case <-time.After(3 * time.Second):
+			t.Fatalf("도착·출발 알림이 모자람: %q", events)
+		}
+	}
+	slices.Sort(events)
+	want := []string{
+		"location.guest.enter 집 home guest 집 도착 18:40 guest",
+		"location.guest.enter 회사 work guest 회사 도착 09:00 guest",
+		"location.guest.leave 직장 work guest 직장에서 출발 18:00 guest",
+		"location.guest.leave 집 home guest 집에서 출발 08:00 guest",
+	}
+	slices.Sort(want)
+	if !slices.Equal(events, want) {
+		t.Fatalf("상대의 도착·출발:\n%s", strings.Join(events, "\n"))
+	}
+
+	// Nothing of the operator's moved.
+	regions, _ := st.Regions(ctx)
+	if len(regions) != 1 || regions[0].Lat != 37.5559 {
+		t.Fatalf("운영자의 영역은 그대로: %+v", regions)
+	}
+	if open, _ := st.Open(ctx); len(open) != 0 {
+		t.Fatalf("운영자 체류는 열리지 않음: %+v", open)
+	}
+	// The guest's day is named by its own regions first, the operator's after.
+	var tr struct {
+		Regions      []place.Region
+		OtherRegions []place.Region
+	}
+	code, body := do("GET", "/track?date=2026-10-23&who=guest", "", api)
+	if err := json.Unmarshal([]byte(body), &tr); err != nil || code != 200 || len(tr.Regions) != 2 || tr.Regions[0].Name != "직장" || tr.Regions[1].Name != "집" ||
+		tr.Regions[1].Lat != 37.6 || tr.Regions[1].RadiusM != 100 || len(tr.OtherRegions) != 1 || tr.OtherRegions[0].Lat != 37.5559 {
+		t.Fatalf("상대의 영역: %d %s", code, body)
+	}
+	if code, body := do("GET", "/track?date=2026-10-23", "", api); code != 200 || strings.Contains(body, "otherRegions") || !strings.Contains(body, `"lat":37.5559`) || strings.Contains(body, "직장") {
+		t.Fatalf("운영자의 하루는 운영자의 영역으로: %d %s", code, body)
+	}
+
+	// A day on, it asks again; deleted on the phone, a region is gone with the
+	// whole list - and with it, no departure.
+	today.Store(time.Date(2026, 10, 24, 13, 1, 0, 0, seoul))
+	if r := fix("24", "08:00", home, `,"inregions":["집"]`); !strings.Contains(r, `"waypoints"`) {
+		t.Fatalf("하루 지나 다시 묻기: %s", r)
+	}
+	say(`{"_type":"waypoints","waypoints":[]}`)
+	fix("24", "08:10", home, `,"inregions":["집"]`)
+	select {
+	case e := <-got:
+		t.Fatalf("지운 영역에서 알림: %v", e)
+	case <-time.After(300 * time.Millisecond):
+	}
+	if code, body := do("GET", "/track?date=2026-10-24&who=guest", "", api); code != 200 || !strings.Contains(body, `"regions":[]`) {
+		t.Fatalf("지운 영역: %d %s", code, body)
 	}
 }

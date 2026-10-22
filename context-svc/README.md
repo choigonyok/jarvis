@@ -61,7 +61,8 @@ GET    /track?date=YYYY-MM-DD&who=owner|guest
                             그날(서울 기준)의 위치: fixes(시각·좌표·정확도·속도·움직임 - 와이파이 같은 나머지는
                             빼고, 거친 위치도 그대로), 그 전의 마지막 믿을 만한 위치(before, 하루가 시작된 곳), 겹치는 체류,
                             영역, 원본을 두는 날수(keepDays)와 남은 가장 오래된 위치의 날(since). 웹의 위치 탭이 이것으로
-                            하루를 그리고 되감는다. who=guest 는 상대 폰의 것(체류는 없음)
+                            하루를 그리고 되감는다. who=guest 는 상대 폰의 것: 체류는 없고, regions 는 상대 폰의
+                            영역, otherRegions 는 운영자의 영역(상대가 영역을 두지 않은 곳의 이름)
 GET    /owntracks/setup/guest  상대 폰의 OwnTracks 설정 링크: 상대 계정만 담고 운영자의 것(신호 토큰·단축어)은 없다
 GET    /regions             PUT /regions {name, kind(home|work|camp|shop|food|other), lat, lon, radiusM, area}
 DELETE /regions/{name}
@@ -89,10 +90,20 @@ jarvis 웹의 **상태 → 폰 연결**을 아이폰에서 열고 차례로 누�
 
 손님 계정의 아이폰도 OwnTracks 로 위치를 보낼 수 있다. 자격은 따로다(`OWNTRACKS_GUEST_USER`/`OWNTRACKS_GUEST_PASSWORD`,
 맥미니 `.env`). 같은 `POST /owntracks` 로 오지만 자격으로 갈라, 원본은 `context_raw` 에 `source = owntracks-guest` 로만 남는다:
-운영자의 체류·현재 상태·`context.state`·영역(상대 폰이 보내는 waypoints)은 움직이지 않는다 - 이것들은 운영자 한 사람의 것이고,
+운영자의 체류·현재 상태·`context.state`·영역은 움직이지 않는다 - 이것들은 운영자 한 사람의 것이고,
 mind·notify 가 그렇게 읽는다. 상대는 콘솔 위치 탭의 '내 폰 연결'에서 `GET /owntracks/setup/guest` 의 링크로 설정을 넣는다.
 
-상대 폰의 모드도 운영자 폰과 같은 규칙으로 응답에서 바꾼다(`guestWatch`, 위의 모드 전환) - 손으로 거는 모드만 없다.
+상대 폰에서 만든 영역은 상대 것으로 따로 둔다(`context_state` 의 `guest.regions`, 운영자의 `context_regions` 와 섞지 않음).
+앱은 영역 하나를 저장할 때마다 `waypoint`(앱의 id `rid` 와 함께)를 보내므로 이름을 바꿔도 같은 영역으로 바뀌고, 반경 0 인 점
+(앱의 "+" 가 처음 만드는 Here-…)은 영역이 아니다. 지운 영역은 앱이 알리지 않아서, 하루에 한 번 응답에 `{"_type":"cmd",
+"action":"waypoints"}` 를 실어 영역 목록 전체를 다시 받는다(`guest.waypoints.asked`).
+상대가 자기 영역에 들고 나면(전환 메시지, 또는 위치가 든 원·앱의 `inregions`) `location.guest.enter|leave` 이벤트를 낸다 -
+알림은 운영자의 위치 알림과 같은 모양(`log`, 알림함에만)이고 받는 사람은 손님(`audience: guest`)이다. 운영자의
+`location.enter|leave` 와 이름이 달라 mind 의 생활 판단에는 들어가지 않는다. 지금 든 영역은 `guest.inside` 에 두고, 늦게 온
+보고는 무시하며, 첫 보고와 영역을 새로 만들거나 이름을 바꾸는 순간은 도착·출발로 치지 않는다.
+
+상대 폰의 모드도 운영자 폰과 같은 규칙으로 응답에서 바꾼다(`guestWatch`, 위의 모드 전환, 상대 영역 안도 자리 잡은 것) -
+손으로 거는 모드만 없다.
 
 ## 현재 상태 한 장
 

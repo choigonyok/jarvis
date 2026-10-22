@@ -40,7 +40,10 @@ export type Track = {
   /** The last good fix before the day: where it began. */
   before: Fix | null;
   visits: Visit[];
+  /** The regions set on this phone: the guest's own, apart from the operator's. */
   regions: Region[];
+  /** For the guest, the operator's regions: a place it named none of goes by these. */
+  otherRegions?: Region[];
   /** How many days of fixes are kept, and the day of the oldest one. */
   keepDays: number;
   since?: string;
@@ -276,7 +279,7 @@ export function buildDay(track: Track, now: number): Day {
 
   for (const n of nodes) {
     if (!n.stay) continue;
-    const region = regionOf(n, track.regions);
+    const region = regionOf(n, track.regions) ?? regionOf(n, track.otherRegions ?? []);
     // Outside every circle kept here, the phone may still have said it was
     // in one of its regions then - for most of the stay, not at its edge.
     const visit = region

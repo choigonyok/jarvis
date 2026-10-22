@@ -5,7 +5,7 @@ import type { Map as MapLibre } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { Maximize2 } from "lucide-react";
 import { baseStyle } from "@/components/location/map-style";
-import { type Day, type Mode, type Node, type Person, type Scene, type Stay, type Who, headAt, hm } from "@/lib/track";
+import { type Day, type Mode, type Node, type Person, type Scene, type Stay, type Who, headAt, hm, meters } from "@/lib/track";
 
 /** What is laid over the map, inside it: the light, the places' names, the people's marks. */
 type Layer = {
@@ -356,26 +356,38 @@ function mark(who: Who): HTMLDivElement {
 
 type Place = { key: string; node: Node; name?: string; stays: Stay[] };
 
+/** Stays of one name within this are one place; farther apart, two - each phone's own 집. */
+const ONE_PLACE = 300;
+
+/** One place: of one name and near, or nameless at the same spot. */
+function samePlace(a: Place, b: Place): boolean {
+  return a.name ? a.name === b.name && meters(a.node, b.node) <= ONE_PLACE : !b.name && a.key === b.key;
+}
+
 const placesCache = new WeakMap<Day, Place[]>();
 
 /**
- * A day's stays by place - by name, or for a nameless place by where it is -
- * in the order their names give way: named before nameless, then the longest
- * stayed.
+ * A day's stays by place - by name where they are near, or for a nameless
+ * place by where it is - in the order their names give way: named before
+ * nameless, then the longest stayed.
  */
 function placesOf(day: Day): Place[] {
   const cached = placesCache.get(day);
   if (cached) return cached;
-  const by = new Map<string, Place>();
+  const found: Place[] = [];
   for (const it of day.items) {
     if (it.type !== "stay") continue;
-    const key = it.node.name ?? `${it.node.lat.toFixed(3)},${it.node.lon.toFixed(3)}`;
-    const place = by.get(key) ?? { key, node: it.node, name: it.node.name, stays: [] };
+    const at = `${it.node.lat.toFixed(3)},${it.node.lon.toFixed(3)}`;
+    const here: Place = { key: it.node.name ?? at, node: it.node, name: it.node.name, stays: [] };
+    let place = found.find((p) => samePlace(p, here));
+    if (!place) {
+      if (found.some((p) => p.key === here.key)) here.key = `${here.key}@${at}`;
+      found.push((place = here));
+    }
     place.stays.push(it);
-    by.set(key, place);
   }
   const stayed = (p: Place) => p.stays.reduce((s, x) => s + (x.end - x.start), 0);
-  const out = [...by.values()].sort((a, b) => Number(!a.name) - Number(!b.name) || stayed(b) - stayed(a));
+  const out = found.sort((a, b) => Number(!a.name) - Number(!b.name) || stayed(b) - stayed(a));
   placesCache.set(day, out);
   return out;
 }
@@ -397,13 +409,14 @@ function name(
   marks: { x: number; y: number }[],
 ) {
   const single = scene.people.length === 1;
+  // Both at one place: one name. One name for places apart: one each.
   const places = new Map<string, { place: Place; day: Day; seen: Stay[] }>();
   for (const person of scene.people) {
     for (const place of placesOf(person.day)) {
       const seen = place.stays.filter((s) => s.start <= t);
-      const had = places.get(place.key);
-      if (!had) places.set(place.key, { place, day: person.day, seen });
-      else if (!had.seen.length && seen.length) places.set(place.key, { place, day: person.day, seen });
+      const had = [...places].find(([, o]) => samePlace(o.place, place));
+      if (!had) places.set(places.has(place.key) ? `${person.who}:${place.key}` : place.key, { place, day: person.day, seen });
+      else if (!had[1].seen.length && seen.length) places.set(had[0], { place, day: person.day, seen });
     }
   }
   for (const [key, n] of l.names) {
@@ -412,14 +425,14 @@ function name(
     l.names.delete(key);
   }
   const taken: { x: number; y: number; w: number; h: number }[] = [];
-  for (const { place, day, seen } of places.values()) {
-    let n = l.names.get(place.key);
+  for (const [key, { place, day, seen }] of places) {
+    let n = l.names.get(key);
     if (!n) {
       const el = document.createElement("div");
       el.className = "pointer-events-none absolute top-0 left-0 flex flex-col font-sans leading-[1.25] whitespace-nowrap [text-shadow:0_0_6px_#0c0d0f,0_0_2px_#0c0d0f]";
       l.root.insertBefore(el, l.marks.values().next().value ?? null);
       n = { el, text: "", w: 0, h: 0 };
-      l.names.set(place.key, n);
+      l.names.set(key, n);
     }
     const hours = single ? seen.map((s) => range(day, s, t)).filter(Boolean).join(" · ") : "";
     const text = seen.length ? `${place.name ?? ""}|${hours}` : "";

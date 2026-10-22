@@ -4,8 +4,9 @@
 //	POST   /owntracks        the phone's OwnTracks app (HTTP Basic). The reply
 //	                         may carry a command that changes how it watches.
 //	                         The guest's phone has credentials of its own: its
-//	                         fixes are kept apart and move none of the
-//	                         operator's visits, state or events.
+//	                         fixes and its regions are kept apart and move none
+//	                         of the operator's visits, state, regions or
+//	                         events; its arrivals go to the guest's own inbox.
 //	POST   /signals          {source, kind, state, at?} iOS Shortcuts, the Mac
 //	                         collector, Home Assistant (bearer: the signal token)
 //	GET    /now              where and in what state, now (bearer: API token)
@@ -14,7 +15,9 @@
 //	                         and how long each way usually takes
 //	GET    /track?date=&who= one day's fixes, where it began and its stays -
 //	                         the 위치 screen draws and replays the day from it
-//	                         (who: owner, the default, or guest)
+//	                         (who: owner, the default, or guest - whose
+//	                         regions name its places first, the operator's
+//	                         after: otherRegions)
 //	GET    /regions          PUT /regions {name, kind, lat, lon, radiusM, area}
 //	DELETE /regions/{name}
 //	PUT    /owntracks/cmd    {action: status|reportLocation} ask the phone, with
@@ -87,6 +90,9 @@ type Server struct {
 	now    func() time.Time
 	loc    *time.Location
 	mu     sync.Mutex // one state check at a time
+	// One guest report at a time: its regions and where it is are read,
+	// changed and written back.
+	guestMu sync.Mutex
 }
 
 func New(st *store.Store, cfg Config, events *notify.Client, log *slog.Logger) *Server {
@@ -153,6 +159,7 @@ type report struct {
 	Event     string   `json:"event"` // enter | leave
 	Desc      string   `json:"desc"`  // the region's name
 	Rad       int      `json:"rad"`   // a waypoint's radius
+	Rid       string   `json:"rid"`   // a waypoint's id in the app: a rename keeps it
 	M         *int     `json:"m"`     // the monitoring mode the phone is in
 	Motion    []string `json:"motionactivities"`
 	// Waypoints: the regions set on the phone, sent when they change.
@@ -208,7 +215,7 @@ func (s *Server) owntracks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if source == guestPhone {
-		cmds, err := s.guestWatch(ctx, rep, at)
+		cmds, err := s.guestReport(ctx, rep, at)
 		if err != nil {
 			s.fail(w, "상대 폰의 위치를 반영하지 못했습니다", err)
 			return
@@ -456,7 +463,7 @@ func (s *Server) settledAt(ctx context.Context, source string, rep report, at ti
 // is out and moving, so its way is drawn in detail. The phone's own word on
 // the mode it is in is what a change is judged against, and a low battery
 // keeps it from Move.
-func (s *Server) guestWatch(ctx context.Context, rep report, at time.Time) ([]map[string]any, error) {
+func (s *Server) guestWatch(ctx context.Context, rep report, at time.Time, own []place.Region) ([]map[string]any, error) {
 	none := []map[string]any{}
 	if rep.Type != "location" || rep.Acc > s.cfg.Trust {
 		return none, nil
@@ -476,7 +483,8 @@ func (s *Server) guestWatch(ctx context.Context, rep report, at time.Time) ([]ma
 	if err != nil {
 		return nil, err
 	}
-	in := len(rep.InRegions) > 0 || len(place.Inside(regions, rep.Lat, rep.Lon, rep.Acc)) > 0
+	in := len(rep.InRegions) > 0 || len(place.Inside(regions, rep.Lat, rep.Lon, rep.Acc)) > 0 ||
+		len(place.Inside(own, rep.Lat, rep.Lon, rep.Acc)) > 0
 	settled, err := s.settledAt(ctx, guestPhone, rep, at, in)
 	if err != nil {
 		return nil, err
@@ -490,6 +498,215 @@ func (s *Server) guestWatch(ctx context.Context, rep report, at time.Time) ([]ma
 	}
 	s.log.Info("상대 폰의 위치 모드를 바꿉니다", "from", current, "to", want)
 	return place.Command(want), nil
+}
+
+// guestReport is one report from the guest's phone, after its raw copy: the
+// regions set on it are kept (its own, apart from the operator's), its
+// arrivals and departures go to the guest's inbox, and the reply says how it
+// should watch - and, once a day, asks for its whole list of regions, since
+// one deleted on the phone is never sent.
+func (s *Server) guestReport(ctx context.Context, rep report, at time.Time) ([]map[string]any, error) {
+	s.guestMu.Lock()
+	defer s.guestMu.Unlock()
+	if rep.Type == "waypoints" || rep.Type == "waypoint" {
+		return []map[string]any{}, s.keepGuestRegions(ctx, rep)
+	}
+	own, err := s.guestRegions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.guestMoves(ctx, rep, at, own); err != nil {
+		return nil, err
+	}
+	cmds, err := s.guestWatch(ctx, rep, at, own)
+	if err != nil || rep.Type != "location" {
+		return cmds, err
+	}
+	asked, err := s.st.Get(ctx, "guest.waypoints.asked", &struct{}{})
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return nil, err
+	}
+	if err != nil || s.now().Sub(asked) > 24*time.Hour {
+		if err := s.st.Set(ctx, "guest.waypoints.asked", struct{}{}, s.now()); err != nil {
+			return nil, err
+		}
+		cmds = append(cmds, map[string]any{"_type": "cmd", "action": "waypoints"})
+	}
+	return cmds, nil
+}
+
+// guestRegion is a region set on the guest's phone, by the id the app gives
+// it: renamed, it is the same region.
+type guestRegion struct {
+	Rid string `json:"rid,omitempty"`
+	place.Region
+}
+
+// guestPlace is where the guest's phone was last judged to be: which of its
+// own regions it is in, and the fix that said so.
+type guestPlace struct {
+	Regions []string `json:"regions"`
+	Lat     float64  `json:"lat,omitempty"`
+	Lon     float64  `json:"lon,omitempty"`
+	Acc     float64  `json:"acc,omitempty"`
+}
+
+// guestRegions is the regions set on the guest's phone, as last sent.
+func (s *Server) guestRegions(ctx context.Context) ([]place.Region, error) {
+	kept, err := s.keptGuestRegions(ctx)
+	out := make([]place.Region, len(kept))
+	for i, g := range kept {
+		out[i] = g.Region
+	}
+	return out, err
+}
+
+func (s *Server) keptGuestRegions(ctx context.Context) ([]guestRegion, error) {
+	var kept []guestRegion
+	if _, err := s.st.Get(ctx, "guest.regions", &kept); err != nil && !errors.Is(err, store.ErrNotFound) {
+		return nil, err
+	}
+	return kept, nil
+}
+
+// keepGuestRegions takes the guest's regions as the phone sends them: the
+// whole list (waypoints) stands for all of them; one (waypoint) is added or
+// replaced by its id, or by its name without one. Only circles count, as on
+// the phone - a region of radius 0 is a point it does not watch. The
+// operator's regions are not touched.
+func (s *Server) keepGuestRegions(ctx context.Context, rep report) error {
+	before, err := s.keptGuestRegions(ctx)
+	if err != nil {
+		return err
+	}
+	kept, wps := []guestRegion{}, rep.Waypoints
+	if rep.Type == "waypoint" {
+		wps = []report{rep}
+		for _, g := range before {
+			if (rep.Rid != "" && g.Rid != rep.Rid) || (rep.Rid == "" && g.Name != strings.TrimSpace(rep.Desc)) {
+				kept = append(kept, g)
+			}
+		}
+	}
+	for _, wp := range wps {
+		name := strings.TrimSpace(wp.Desc)
+		if name == "" || wp.Rad <= 0 || (wp.Lat == 0 && wp.Lon == 0) {
+			continue
+		}
+		kept = append(kept, guestRegion{Rid: wp.Rid, Region: place.Region{Name: name, Kind: place.KindOf(name), Lat: wp.Lat, Lon: wp.Lon, RadiusM: max(wp.Rad, 50)}})
+	}
+	slices.SortFunc(kept, func(a, b guestRegion) int { return strings.Compare(a.Name, b.Name) })
+	if err := s.st.Set(ctx, "guest.regions", kept, s.now()); err != nil {
+		return err
+	}
+	// A region just made where the phone is is no arrival, nor one renamed or
+	// deleted a departure: where it is is set again quietly, by the fix it
+	// was last judged by.
+	var where guestPlace
+	at, err := s.st.Get(ctx, "guest.inside", &where)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	named := func(rs []guestRegion, name string) bool {
+		return slices.ContainsFunc(rs, func(g guestRegion) bool { return g.Name == name })
+	}
+	now := slices.DeleteFunc(slices.Clone(where.Regions), func(n string) bool { return !named(kept, n) })
+	for _, g := range kept {
+		if !named(before, g.Name) && (where.Lat != 0 || where.Lon != 0) &&
+			len(place.Inside([]place.Region{g.Region}, where.Lat, where.Lon, where.Acc)) > 0 {
+			now = append(now, g.Name)
+		}
+	}
+	slices.Sort(now)
+	if now = slices.Compact(now); slices.Equal(now, where.Regions) {
+		return nil
+	}
+	where.Regions = append([]string{}, now...)
+	return s.st.Set(ctx, "guest.inside", where, at)
+}
+
+// guestMoves follows which of its own regions, as kept here, the guest's
+// phone is in - by its transitions, and by the regions a fix falls in (the
+// phone's own inregions, and the circles) - and says each arrival and
+// departure in the guest's own inbox, as the operator's are said in theirs.
+// A late report changes nothing, and the first one only sets where the phone
+// is.
+func (s *Server) guestMoves(ctx context.Context, rep report, at time.Time, own []place.Region) error {
+	var where guestPlace
+	last, err := s.st.Get(ctx, "guest.inside", &where)
+	first := errors.Is(err, store.ErrNotFound)
+	if err != nil && !first {
+		return err
+	}
+	if !first && at.Before(last) {
+		return nil
+	}
+	known := func(n string) bool {
+		return slices.ContainsFunc(own, func(r place.Region) bool { return r.Name == n })
+	}
+	was := where.Regions
+	var now []string
+	switch rep.Type {
+	case "transition":
+		name := strings.TrimSpace(rep.Desc)
+		if !known(name) || (rep.Event != "enter" && rep.Event != "leave") {
+			return nil
+		}
+		now = slices.DeleteFunc(slices.Clone(was), func(n string) bool { return n == name })
+		if rep.Event == "enter" {
+			now = append(now, name)
+		}
+	case "location":
+		if rep.Acc > s.cfg.Trust {
+			return nil
+		}
+		now = place.Inside(own, rep.Lat, rep.Lon, rep.Acc)
+		for _, n := range rep.InRegions {
+			if known(n) {
+				now = append(now, n)
+			}
+		}
+		where.Lat, where.Lon, where.Acc = rep.Lat, rep.Lon, rep.Acc
+	default:
+		return nil
+	}
+	slices.Sort(now)
+	now = slices.Compact(now)
+	if !first {
+		for _, n := range was {
+			if !slices.Contains(now, n) {
+				s.announceGuest("leave", n, at)
+			}
+		}
+		for _, n := range now {
+			if !slices.Contains(was, n) {
+				s.announceGuest("enter", n, at)
+			}
+		}
+	}
+	where.Regions = append([]string{}, now...)
+	return s.st.Set(ctx, "guest.inside", where, at)
+}
+
+// announceGuest says the guest's arrival or departure in the guest's own
+// inbox. Its type is location.guest.*, never location.enter/leave: those are
+// the operator's, and mind reads them as the operator's day.
+func (s *Server) announceGuest(event, region string, at time.Time) {
+	title := region + " 도착"
+	if event == "leave" {
+		title = region + "에서 출발"
+	}
+	local := at.In(s.loc)
+	s.events.Emit(map[string]any{
+		"source": "context", "type": "location.guest." + event, "subject": region,
+		"data":       map[string]string{"region": region, "kind": place.KindOf(region), "who": "guest"},
+		"key":        fmt.Sprintf("location:guest:%s:%s:%s:%d", event, region, local.Format("2006-01-02"), at.Unix()),
+		"occurredAt": at,
+		"notify":     map[string]string{"tier": "log", "title": title, "body": local.Format("15:04"), "audience": "guest"},
+	})
 }
 
 // announce reports an arrival or a departure as an event: to the inbox,
@@ -925,6 +1142,19 @@ func (s *Server) track(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "영역을 읽지 못했습니다", err)
 		return
 	}
+	// The guest's places are named by the guest's own regions first, and by
+	// the operator's where it set none (a home they share).
+	var others []place.Region
+	if who == "guest" {
+		others = regions
+		if regions, err = s.guestRegions(ctx); err != nil {
+			s.fail(w, "영역을 읽지 못했습니다", err)
+			return
+		}
+		if regions == nil {
+			regions = []place.Region{}
+		}
+	}
 	first, err := s.st.FirstFix(ctx, source)
 	if err != nil {
 		s.fail(w, "위치를 읽지 못했습니다", err)
@@ -937,6 +1167,9 @@ func (s *Server) track(w http.ResponseWriter, r *http.Request) {
 	}
 	if first != nil {
 		out["since"] = first.In(s.loc).Format("2006-01-02")
+	}
+	if others != nil {
+		out["otherRegions"] = others
 	}
 	writeJSON(w, http.StatusOK, out)
 }
