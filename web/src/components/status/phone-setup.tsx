@@ -6,7 +6,8 @@ import { Check, Copy } from "lucide-react";
 type Setup = {
   link: string;
   url: string;
-  signals: { url: string; token: string; examples: { when: string; body: string }[] };
+  /** The operator's only: the guest's phone sends its place, nothing else. */
+  signals?: { url: string; token: string; examples: { when: string; body: string }[] };
 };
 
 /**
@@ -21,7 +22,9 @@ type Setup = {
  * the browser itself. The link can also be copied, for pasting into Safari.
  *
  * It is the body of one row on the 상태 screen (폰 연결), shown when the row
- * is opened - a setup done once, not a standing panel.
+ * is opened - a setup done once, not a standing panel. The guest's phone has
+ * its own (who="guest", from the 위치 screen's 내 폰 연결): its own account,
+ * and no shortcuts - it sends where it is and nothing else.
  */
 /** The one action style of these steps: quiet, full width on a phone. */
 const action =
@@ -29,7 +32,8 @@ const action =
 const quiet =
   "inline-flex h-11 w-full items-center justify-center rounded-lg px-3 text-[13px] text-dim outline-none transition-colors hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 mouse:h-9 sm:w-auto";
 
-export function PhoneSetup() {
+export function PhoneSetup({ who = "owner" }: { who?: "owner" | "guest" }) {
+  const guest = who === "guest";
   const [setup, setSetup] = useState<Setup | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -40,7 +44,7 @@ export function PhoneSetup() {
     if (setup) return setup;
     setBusy(true);
     try {
-      const res = await fetch("/api/context/owntracks/setup", { cache: "no-store" });
+      const res = await fetch(guest ? "/api/context/owntracks/setup/guest" : "/api/context/owntracks/setup", { cache: "no-store" });
       const body = await res.json();
       if (!res.ok) {
         setError(body.error ?? "설정을 불러오지 못했어요.");
@@ -108,10 +112,21 @@ export function PhoneSetup() {
               OwnTracks가 열렸는데 아무것도 바뀌지 않으면 2번 스위치가 꺼져 있는 거예요. 링크 복사 후 Safari 주소창에 붙여 넣어도 열려요.
             </span>
           </Step>
-          <Step n={4}>
-            위치 권한을 <span className="text-foreground">항상 허용</span>으로 둡니다. 집·회사 같은 영역은 OwnTracks에서
-            만들면 jarvis에도 그대로 들어와요.
-          </Step>
+          {guest ? (
+            <Step n={4}>
+              설정 → 개인정보 보호 및 보안 → 위치 서비스 → OwnTracks에서 <span className="text-foreground">항상</span>과 정확한
+              위치를 켜고, 동작 및 피트니스와 백그라운드 앱 새로 고침도 켭니다. 자주 머무는 곳을 OwnTracks에서 영역으로 만들어
+              두면 그 안에서는 배터리를 아껴요.
+            </Step>
+          ) : (
+            <Step n={4}>
+              위치 권한을 <span className="text-foreground">항상 허용</span>으로 둡니다. 집·회사 같은 영역은 OwnTracks에서
+              만들면 jarvis에도 그대로 들어와요.
+            </Step>
+          )}
+          {guest ? (
+            <Step n={5}>OwnTracks에서 Send location now를 한 번 누르면 위치 탭에 내 고양이가 나타나요.</Step>
+          ) : (
           <Step n={5}>
             <span className="block">
               (선택) 단축어 → 자동화에서 CarPlay·집중 모드·충전기를 계기로 고르고, 동작은 <span className="text-foreground">URL 내용 가져오기</span>{" "}
@@ -126,7 +141,7 @@ export function PhoneSetup() {
               >
                 단축어에 넣을 값 보기
               </button>
-            ) : setup ? (
+            ) : setup?.signals ? (
               <ul className="mt-2 divide-y divide-edge-soft">
                 <CopyRow label="URL" value={setup.signals.url} id="url" copied={copied} onCopy={copy} />
                 <CopyRow
@@ -143,6 +158,7 @@ export function PhoneSetup() {
               </ul>
             ) : null}
           </Step>
+          )}
       </ol>
       {error ? (
         <p role="alert" className="mt-3 text-[12.5px] text-reject">

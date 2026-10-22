@@ -1,16 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
-import { type Day, type Mode, hm } from "@/lib/track";
+import { type Day, type Mode, type Scene, hm } from "@/lib/track";
 import { cn } from "@/lib/utils";
 
-/** A way's mark on the strip, as bright as its light on the map. */
-const MARK: Record<Mode, string> = {
-  drive: "bg-foreground/85",
-  move: "bg-foreground/70",
-  walk: "bg-foreground/55",
-  gap: "bg-foreground/25",
+/** A way's mark on the strip, in its person's color and as bright as its light on the map. */
+const MARK: Record<"mine" | "partner", Record<Mode, string>> = {
+  mine: { drive: "bg-mine/85", move: "bg-mine/70", walk: "bg-mine/55", gap: "bg-mine/25" },
+  partner: { drive: "bg-partner/85", move: "bg-partner/70", walk: "bg-partner/55", gap: "bg-partner/25" },
 };
+
+/** A stay's block: plain for one person, faintly in their color beside the other's. */
+const STAY = { one: "bg-glass-raised", mine: "bg-mine/15", partner: "bg-partner/15" } as const;
 
 /**
  * The day as one strip, midnight to midnight: the stays as blocks with their
@@ -18,15 +19,16 @@ const MARK: Record<Mode, string> = {
  * glance and the replay's scrubber at once - the part not yet replayed is
  * dimmed, and a press or a drag anywhere on it goes to that moment (the
  * calendar's legend and the ledger's rows are their filters the same way:
- * what explains a thing is where you work it).
+ * what explains a thing is where you work it). Both people: a row each, the
+ * viewer's on top, and one hand for the two.
  */
 export function Strip({
-  day,
+  scene: day,
   t,
   onSeek,
   onHold,
 }: {
-  day: Day;
+  scene: Scene;
   t: number;
   onSeek: (t: number) => void;
   /** A finger is on it: the replay waits. */
@@ -108,31 +110,17 @@ export function Strip({
         className="relative h-11 cursor-pointer touch-none rounded-lg outline-none select-none focus-visible:ring-3 focus-visible:ring-ring/50"
       >
         <div className="absolute inset-x-0 top-2 bottom-2 overflow-hidden rounded-[7px] bg-glass">
-          {day.items.map((it) => {
-            const left = at(it.start);
-            const width = at(it.end) - left;
-            if (it.type === "move") {
-              return (
-                <span
-                  key={`m${it.start}`}
-                  className={cn("absolute inset-y-0 min-w-[2px] rounded-[1.5px]", MARK[it.mode])}
-                  style={{ left: `${left}%`, width: `${width}%` }}
-                />
-              );
-            }
-            const room = (width / 100) * px;
-            return (
-              <span
-                key={`s${it.start}`}
-                className="absolute inset-y-0 flex items-center overflow-hidden border-x border-background bg-glass-raised"
-                style={{ left: `${left}%`, width: `${width}%` }}
-              >
-                {it.node.name && room >= 30 ? (
-                  <span className="truncate px-1.5 text-[10.5px] text-dim">{it.node.name}</span>
-                ) : null}
-              </span>
-            );
-          })}
+          {day.people.map((person, row) => (
+            <Row
+              key={person.who}
+              day={person.day}
+              tone={person.me ? "mine" : "partner"}
+              single={day.people.length === 1}
+              row={row}
+              at={at}
+              px={px}
+            />
+          ))}
           {/* What the replay has not reached yet. */}
           <span className="absolute inset-y-0 right-0 bg-background/55" style={{ left: `${at(t)}%` }} />
           {/* Today, the hours still to come. */}
@@ -149,8 +137,60 @@ export function Strip({
   );
 }
 
+/** One person's row: the stays as blocks (named where there is room), the ways as marks. */
+function Row({
+  day,
+  tone,
+  single,
+  row,
+  at,
+  px,
+}: {
+  day: Day;
+  tone: "mine" | "partner";
+  single: boolean;
+  row: number;
+  at: (x: number) => number;
+  px: number;
+}) {
+  // Two rows split the height, with a hairline between.
+  const band = single ? { top: "0%", height: "100%" } : { top: row === 0 ? "0%" : "54%", height: "46%" };
+  return (
+    <div className="absolute inset-x-0" style={band}>
+      {day.items.map((it) => {
+        const left = at(it.start);
+        const width = at(it.end) - left;
+        if (it.type === "move") {
+          return (
+            <span
+              key={`m${it.start}`}
+              className={cn("absolute inset-y-0 min-w-[2px] rounded-[1.5px]", MARK[tone][it.mode])}
+              style={{ left: `${left}%`, width: `${width}%` }}
+            />
+          );
+        }
+        const room = (width / 100) * px;
+        return (
+          <span
+            key={`s${it.start}`}
+            className={cn(
+              "absolute inset-y-0 flex items-center overflow-hidden border-x border-background",
+              single ? STAY.one : STAY[tone],
+            )}
+            style={{ left: `${left}%`, width: `${width}%` }}
+          >
+            {single && it.node.name && room >= 30 ? (
+              <span className="truncate px-1.5 text-[10.5px] text-dim">{it.node.name}</span>
+            ) : null}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 /** Under the strip: the hours of the day, and today, where now is. */
-function Hours({ day }: { day: Day }) {
+function Hours({ day }: { day: Scene }) {
   const nowAt = ((day.end - day.start) / (day.dayEnd - day.start)) * 100;
   return (
     <div aria-hidden className="tnum relative mt-0.5 h-4 text-[10.5px] text-faint">

@@ -5,15 +5,20 @@ import Link from "next/link";
 import { ChevronLeft, ChevronRight, Pause, Play } from "lucide-react";
 import { Header, TabBar } from "@/components/shell/header";
 import { Retry } from "@/components/shell/retry";
-import { StandingBar } from "@/components/shell/standing-bar";
-import { DayMap } from "@/components/location/day-map";
 import { useRole } from "@/components/shell/role";
+import { StandingBar } from "@/components/shell/standing-bar";
+import { PhoneSetup } from "@/components/status/phone-setup";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { DayMap } from "@/components/location/day-map";
 import { Strip } from "@/components/location/strip";
 import { onResume } from "@/lib/resume";
 import { isPending } from "@/lib/thread";
 import {
   type Day,
+  type Person,
+  type Scene,
   type Track,
+  type Who,
   MODE_WORD,
   ago,
   buildDay,
@@ -23,6 +28,7 @@ import {
   hm,
   itemAt,
   readTrack,
+  sceneOf,
   shiftDay,
   span,
   todayOf,
@@ -31,30 +37,83 @@ import {
 import { useThread } from "@/lib/use-thread";
 import { cn } from "@/lib/utils";
 
-type Read = { date: string; track?: Track; error?: string; at: number };
+/** Whose day is on the screen: the viewer's, both, or the other's - the calendar's 나 · 함께 · 상대. */
+type View = "me" | "both" | "partner";
+
+const VIEWS: { view: View; label: string; dot: string }[] = [
+  { view: "me", label: "나", dot: "bg-mine" },
+  { view: "both", label: "함께", dot: "owner-shared" },
+  { view: "partner", label: "상대", dot: "bg-partner" },
+];
+
+/** The view a person left the screen on, kept in their own browser. */
+const VIEW_KEY = "jarvis:location-view";
+
+type Read = {
+  date: string;
+  at: number;
+  tracks: Partial<Record<Who, Track>>;
+  errors: Partial<Record<Who, string>>;
+};
 
 /**
- * Where the operator went in a day, replayed (context-svc's fixes from the
- * phone's OwnTracks). It opens on now: the whole of today as light on the
- * map, and where they are. ▶ replays the day from midnight - slowly where
- * they moved, quickly where they stayed - and lands back on now. Other days
- * are a tap back, as far as the fixes are kept.
+ * Where the operator and the guest went in a day, replayed (context-svc's
+ * fixes from each one's OwnTracks). It opens on now: the whole of today as
+ * light on the map, and where they are. ▶ replays the day from midnight -
+ * slowly where they moved, quickly where they stayed - and lands back on now.
+ * Each person's day can be seen alone, or both together on one map in the
+ * shared calendar's colors. Other days are a tap back, as far as the fixes
+ * are kept.
  */
 export function Location() {
   const { proposals, connection } = useThread();
   const waiting = proposals.filter(isPending);
+  const role = useRole();
+  const me: Who = role === "guest" ? "guest" : "owner";
+  const partner: Who = me === "owner" ? "guest" : "owner";
   const [today, setToday] = useState(() => todayOf(Date.now()));
   const [date, setDate] = useState(today);
+  const [view, setView] = useState<View>(() => {
+    // Where this person left it; the guest first sees the operator's day.
+    const fallback: View = role === "guest" ? "partner" : "me";
+    if (typeof window === "undefined") return fallback;
+    try {
+      const kept = localStorage.getItem(VIEW_KEY);
+      return kept === "me" || kept === "both" || kept === "partner" ? kept : fallback;
+    } catch {
+      return fallback;
+    }
+  });
   const [read, setRead] = useState<Read | null>(null);
 
+  function choose(next: View) {
+    setView(next);
+    try {
+      localStorage.setItem(VIEW_KEY, next);
+    } catch {}
+  }
+
+  // Both days, always: switching between 나 · 함께 · 상대 has nothing to wait for.
   const load = useCallback(
     () =>
-      readTrack(date).then(
-        (track) => setRead({ date, track, at: Date.now() }),
-        (e: Error) =>
-          // A read that fails keeps what was shown of the same day.
-          setRead((r) => ({ date, error: e.message, at: Date.now(), track: r?.date === date ? r.track : undefined })),
-      ),
+      Promise.allSettled([readTrack(date, "owner"), readTrack(date, "guest")]).then((results) => {
+        const at = Date.now();
+        setRead((r) => {
+          const tracks: Read["tracks"] = {};
+          const errors: Read["errors"] = {};
+          (["owner", "guest"] as const).forEach((who, i) => {
+            const res = results[i];
+            if (res.status === "fulfilled") {
+              tracks[who] = res.value;
+              return;
+            }
+            errors[who] = res.reason instanceof Error ? res.reason.message : "위치를 읽지 못했어요.";
+            // A read that fails keeps what was shown of the same day.
+            if (r?.date === date && r.tracks[who]) tracks[who] = r.tracks[who];
+          });
+          return { date, at, tracks, errors };
+        });
+      }),
     [date],
   );
   useEffect(() => {
@@ -80,31 +139,70 @@ export function Location() {
     return () => window.clearInterval(id);
   }, [date, load]);
 
-  const day = useMemo(() => (read?.track ? buildDay(read.track, read.at) : null), [read]);
+  const days = useMemo(() => {
+    const out: Partial<Record<Who, Day>> = {};
+    if (!read) return out;
+    for (const who of ["owner", "guest"] as const) {
+      const track = read.tracks[who];
+      if (track) out[who] = buildDay(track, read.at);
+    }
+    return out;
+  }, [read]);
+
+  const scene = useMemo(() => {
+    const pick = (who: Who): Person[] => {
+      const day = days[who];
+      return day ? [{ who, me: who === me, day }] : [];
+    };
+    const people = view === "me" ? pick(me) : view === "partner" ? pick(partner) : [...pick(me), ...pick(partner)];
+    return people.length ? sceneOf(people) : null;
+  }, [days, view, me, partner]);
+
+  const shown: Who[] = view === "me" ? [me] : view === "partner" ? [partner] : [me, partner];
+  const error = shown.map((who) => read?.errors[who]).find(Boolean);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <Header connection={connection} pending={waiting.length} />
       <StandingBar pending={waiting} href="/record" />
-      {day ? (
-        <Viewer day={day} date={date} today={today} onDate={setDate} loading={read?.date !== date} />
+      {scene ? (
+        <Viewer
+          scene={scene}
+          date={date}
+          today={today}
+          onDate={setDate}
+          loading={read?.date !== date}
+          view={view}
+          onView={choose}
+        />
       ) : (
-        <Waiting read={read} date={date} onRetry={load} />
+        <Waiting error={read?.date === date ? error : undefined} onRetry={load} view={view} onView={choose} />
       )}
       <TabBar pending={waiting.length} />
     </div>
   );
 }
 
-/** Before the first day has come back: the first read, or why it did not come. */
-function Waiting({ read, date, onRetry }: { read: Read | null; date: string; onRetry: () => unknown }) {
+/** Before a day has come back: the first read, or why it did not come. */
+function Waiting({
+  error,
+  onRetry,
+  view,
+  onView,
+}: {
+  error?: string;
+  onRetry: () => unknown;
+  view: View;
+  onView: (v: View) => void;
+}) {
   return (
-    <main className="inset-x-safe flex min-h-0 flex-1 flex-col items-center justify-center px-8 pb-tabbar text-center">
-      {read?.error && read.date === date ? (
+    <main className="inset-x-safe relative flex min-h-0 flex-1 flex-col items-center justify-center px-8 pb-tabbar text-center">
+      <ViewSwitch view={view} onView={onView} />
+      {error ? (
         <div>
           <p className="text-[20px] leading-[1.3] font-medium text-foreground">위치를 불러오지 못했어요</p>
           <p role="alert" className="mt-2 max-w-[30rem] text-[13.5px] leading-[1.6] break-keep text-pretty text-dim">
-            {read.error} 계속 이러면 상태 탭에서 위치 서비스(context)가 응답하는지 보세요.
+            {error} 계속 이러면 상태 탭에서 위치 서비스(context)가 응답하는지 보세요.
           </p>
           <Retry onRetry={onRetry} />
         </div>
@@ -116,15 +214,15 @@ function Waiting({ read, date, onRetry }: { read: Read | null; date: string; onR
 }
 
 /** The replay: where the moment shown is, and how it moves. */
-function usePlayback(day: Day) {
-  const [t, setT] = useState(day.end);
+function usePlayback(scene: Scene) {
+  const [t, setT] = useState(scene.end);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
   const frame = useRef(0);
   // What the frame loop reads, so it is not set up again sixty times a second.
-  const current = useRef({ day, t, speed });
+  const current = useRef({ scene, t, speed });
   useEffect(() => {
-    current.current = { day, t, speed };
+    current.current = { scene, t, speed };
   });
 
   const pause = useCallback(() => {
@@ -133,25 +231,33 @@ function usePlayback(day: Day) {
   }, []);
 
   const play = useCallback(() => {
-    const { day, t } = current.current;
-    if (day.clock.length <= 0) return;
+    const { scene, t } = current.current;
+    if (scene.clock.length <= 0) return;
     cancelAnimationFrame(frame.current);
     // From the start again once at the end.
-    let pos = t >= day.end ? 0 : day.clock.replayAt(t);
+    let clock = scene.clock;
+    let shown = t >= scene.end ? scene.start : t;
+    let pos = clock.replayAt(shown);
     let last = performance.now();
     setPlaying(true);
-    if (t >= day.end) setT(day.start);
+    if (t >= scene.end) setT(scene.start);
     const tick = (now: number) => {
-      const { day, speed } = current.current;
+      const { scene, speed } = current.current;
+      // Another clock - a person shown or put away mid-replay: on from the moment shown.
+      if (scene.clock !== clock) {
+        clock = scene.clock;
+        pos = clock.replayAt(shown);
+      }
       // A frame held back (the app in the background) does not jump the day forward.
       pos += Math.min(100, now - last) * speed;
       last = now;
-      if (pos >= day.clock.length) {
-        setT(day.end);
+      if (pos >= clock.length) {
+        setT(scene.end);
         setPlaying(false);
         return;
       }
-      setT(day.clock.realAt(pos));
+      shown = clock.realAt(pos);
+      setT(shown);
       frame.current = requestAnimationFrame(tick);
     };
     frame.current = requestAnimationFrame(tick);
@@ -165,21 +271,21 @@ function usePlayback(day: Day) {
     [pause],
   );
 
-  // Another day opens on its end; today read again keeps the moment shown,
-  // and at the end it follows the end - now - as it moves on.
-  const was = useRef(day);
+  // Another day opens on its end; the same day read again keeps the moment
+  // shown, and at the end it follows the end - now - as it moves on.
+  const was = useRef(scene);
   useEffect(() => {
     const before = was.current;
-    was.current = day;
-    if (before === day) return;
-    if (before.date !== day.date) {
+    was.current = scene;
+    if (before === scene) return;
+    if (before.date !== scene.date) {
       cancelAnimationFrame(frame.current);
       setPlaying(false);
-      setT(day.end);
+      setT(scene.end);
       return;
     }
-    setT((cur) => (cur >= before.end ? day.end : Math.min(cur, day.end)));
-  }, [day]);
+    setT((cur) => (cur >= before.end ? scene.end : Math.min(cur, scene.end)));
+  }, [scene]);
 
   useEffect(() => () => cancelAnimationFrame(frame.current), []);
 
@@ -187,28 +293,36 @@ function usePlayback(day: Day) {
 }
 
 function Viewer({
-  day,
+  scene,
   date,
   today,
   onDate,
   loading,
+  view,
+  onView,
 }: {
-  day: Day;
+  scene: Scene;
   date: string;
   today: string;
   onDate: (d: string) => void;
   loading: boolean;
+  view: View;
+  onView: (v: View) => void;
 }) {
-  const { t, playing, speed, setSpeed, play, pause, seek } = usePlayback(day);
-  const atEnd = t >= day.end;
-  const live = day.today && atEnd && !playing;
-  const first = earliest(day, today);
+  const { t, playing, speed, setSpeed, play, pause, seek } = usePlayback(scene);
+  const [connecting, setConnecting] = useState(false);
+  const atEnd = t >= scene.end;
+  const live = scene.today && atEnd && !playing;
+  const first = earliest(scene, today);
+  const both = scene.people.length > 1;
+  const still = scene.people.every((p) => p.day.nodes.length === 0);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col sm:landscape:flex-row">
       <div className="relative min-h-0 flex-1">
-        <DayMap day={day} t={t} live={live} follow={playing} />
-        <Empty day={day} />
+        <DayMap scene={scene} t={t} live={live} follow={playing} />
+        <ViewSwitch view={view} onView={onView} />
+        <Empty scene={scene} onConnect={() => setConnecting(true)} />
       </div>
       <aside className="inset-x-safe flex shrink-0 flex-col border-t border-edge-soft bg-background pb-tabbar sm:landscape:w-[22rem] sm:landscape:border-t-0 sm:landscape:border-l sm:landscape:pl-0 lg:landscape:w-[25rem]">
         <div className="mx-auto w-full max-w-[42rem] px-4 pt-2 pb-3 sm:px-8 sm:landscape:px-5 sm:landscape:pt-4">
@@ -250,7 +364,7 @@ function Viewer({
 
           <div className="mt-0.5 flex items-center justify-between gap-4">
             <p className="tnum text-[40px] leading-none font-medium tracking-[-0.025em] text-foreground">
-              {live ? "지금" : hm(t, day.dayEnd)}
+              {live ? "지금" : hm(t, scene.dayEnd)}
             </p>
             <div className="flex shrink-0 items-center gap-1">
               <button
@@ -264,7 +378,7 @@ function Viewer({
               <button
                 type="button"
                 onClick={playing ? pause : play}
-                disabled={day.clock.length <= 0 || day.nodes.length === 0}
+                disabled={scene.clock.length <= 0 || still}
                 aria-label={playing ? "멈춤" : atEnd ? "하루 처음부터 보기" : "이어서 보기"}
                 className="flex size-12 items-center justify-center rounded-full bg-glass-raised text-foreground transition-colors outline-none hover:bg-foreground/15 focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-40"
               >
@@ -277,25 +391,74 @@ function Viewer({
             </div>
           </div>
           {/* The whole width: the line runs long while a way is being gone. */}
-          <p aria-live={playing ? "off" : "polite"} className="mt-1.5 truncate text-[13.5px] text-dim">
-            {sentence(day, t, live)}
-          </p>
+          {both ? (
+            <div aria-live={playing ? "off" : "polite"} className="mt-1.5 space-y-0.5">
+              {scene.people.map((p) => (
+                <p key={p.who} className="flex min-w-0 items-center gap-2 text-[13.5px] text-dim">
+                  <span aria-hidden className={cn("size-[6px] shrink-0 rounded-full", p.me ? "bg-mine" : "bg-partner")} />
+                  <span className="sr-only">{p.me ? "나" : "상대"}: </span>
+                  <span className="truncate">{sentence(p.day, t, live)}</span>
+                </p>
+              ))}
+            </div>
+          ) : (
+            <p aria-live={playing ? "off" : "polite"} className="mt-1.5 truncate text-[13.5px] text-dim">
+              {sentence(scene.people[0].day, t, live)}
+            </p>
+          )}
 
           <div className="mt-3">
-            <Strip day={day} t={t} onSeek={seek} onHold={(held) => held && pause()} />
+            <Strip scene={scene} t={t} onSeek={seek} onHold={(held) => held && pause()} />
           </div>
         </div>
-        <DayList day={day} t={t} onSeek={seek} />
+        <DayList scene={scene} t={t} onSeek={seek} />
       </aside>
+
+      <Sheet open={connecting} onOpenChange={setConnecting}>
+        <SheetContent side="bottom" className="inset-x-safe pb-safe max-h-[88dvh] overflow-y-auto border-edge-soft bg-background">
+          <SheetHeader className="px-4 pt-4 pb-1">
+            <SheetTitle className="text-[14px] font-medium text-foreground">내 폰 연결</SheetTitle>
+          </SheetHeader>
+          <div className="px-4 pb-6 text-[13px]">
+            <PhoneSetup who="guest" />
+          </div>
+        </SheetContent>
+      </Sheet>
+    </div>
+  );
+}
+
+/** 나 · 함께 · 상대, over the map's top left: the calendar's own words and dots for the two people. */
+function ViewSwitch({ view, onView }: { view: View; onView: (v: View) => void }) {
+  return (
+    <div
+      role="group"
+      aria-label="누구의 하루"
+      className="absolute top-3 left-3 z-10 flex rounded-full bg-popover p-1 shadow-[0_6px_16px_-6px_oklch(0_0_0/70%)]"
+    >
+      {VIEWS.map((v) => (
+        <button
+          key={v.view}
+          type="button"
+          aria-pressed={view === v.view}
+          onClick={() => onView(v.view)}
+          className={cn(
+            "flex h-9 items-center gap-1.5 rounded-full px-3 text-[12.5px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-7 mouse:px-2.5",
+            view === v.view ? "bg-glass-raised text-foreground" : "text-dim hover:text-foreground",
+          )}
+        >
+          <span aria-hidden className={cn("size-[6px] rounded-full", v.dot)} />
+          {v.label}
+        </button>
+      ))}
     </div>
   );
 }
 
 /** How far back a day can be opened: the oldest day with fixes still kept. */
-function earliest(day: Day, today: string): string {
-  const since = day.since;
-  const keep = shiftDay(today, -(day.keepDays - 1));
-  return since && since > keep ? since : keep;
+function earliest(scene: Scene, today: string): string {
+  const keep = shiftDay(today, -(scene.keepDays - 1));
+  return scene.since && scene.since > keep ? scene.since : keep;
 }
 
 function Arrow({ label, disabled, onClick, children }: { label: string; disabled: boolean; onClick: () => void; children: ReactNode }) {
@@ -312,32 +475,55 @@ function Arrow({ label, disabled, onClick, children }: { label: string; disabled
   );
 }
 
-/** Over the map when there is nothing on it: why, and what to do about it. */
-function Empty({ day }: { day: Day }) {
+/**
+ * Over the map when there is nothing on it: why, and what to do about it -
+ * for the guest's own phone, the way to connect it.
+ */
+function Empty({ scene, onConnect }: { scene: Scene; onConnect: () => void }) {
   const role = useRole();
-  if (day.nodes.length > 0) return null;
-  const never = !day.since;
+  if (scene.people.some((p) => p.day.nodes.length > 0)) return null;
+  const p = scene.people[0];
+  const never = !p.day.since;
+  const when = p.day.today ? "오늘은 아직" : "이날은";
+  let title: string;
+  let body: ReactNode;
+  if (p.me && role === "guest" && (never || p.day.today)) {
+    title = "내 폰 위치가 아직 없어요";
+    body = (
+      <>
+        아이폰의 OwnTracks 가 위치를 보내면 여기 내 고양이가 그려져요.
+        <button
+          type="button"
+          onClick={onConnect}
+          className="tap mt-3 flex w-full items-center justify-center rounded-lg bg-glass-raised px-4 text-[13px] text-foreground transition-colors outline-none hover:bg-foreground/15 focus-visible:ring-3 focus-visible:ring-ring/50 mouse:min-h-9"
+        >
+          내 폰 연결
+        </button>
+      </>
+    );
+  } else if (p.me && never) {
+    title = "아직 폰 위치가 들어온 적이 없어요";
+    body = (
+      <>
+        아이폰의 OwnTracks 가 위치를 보내야 여기 그려져요.{" "}
+        <Link href="/status?focus=check:phone" className="underline decoration-edge underline-offset-[3px] hover:text-foreground">
+          상태 탭의 폰 연결
+        </Link>
+        에서 설정하세요.
+      </>
+    );
+  } else if (!p.me && never && role !== "guest") {
+    title = "상대 폰이 아직 위치를 보내지 않았어요";
+    body = "상대가 jarvis 위치 탭의 '내 폰 연결'로 OwnTracks 를 설정하면 여기 그려져요.";
+  } else {
+    title = `${when} ${p.me ? "" : "상대 "}위치 기록이 없어요`;
+    body = `위치는 ${p.day.keepDays}일 동안만 남겨요.`;
+  }
   return (
     <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-8">
       <div className="pointer-events-auto max-w-[22rem] rounded-xl bg-popover px-5 py-4 text-center shadow-[0_10px_30px_-12px_oklch(0_0_0/80%)]">
-        <p className="text-[14.5px] text-foreground/90">
-          {never ? "아직 폰 위치가 들어온 적이 없어요" : day.today ? "오늘은 아직 위치 기록이 없어요" : "이날은 위치 기록이 없어요"}
-        </p>
-        <p className="mt-1 text-[12.5px] leading-[1.55] break-keep text-pretty text-dim">
-          {never && role === "guest" ? (
-            "폰이 위치를 보내기 시작하면 여기 그려져요."
-          ) : never ? (
-            <>
-              아이폰의 OwnTracks 가 위치를 보내야 여기 그려져요.{" "}
-              <Link href="/status?focus=check:phone" className="underline decoration-edge underline-offset-[3px] hover:text-foreground">
-                상태 탭의 폰 연결
-              </Link>
-              에서 설정하세요.
-            </>
-          ) : (
-            `위치는 ${day.keepDays}일 동안만 남겨요.`
-          )}
-        </p>
+        <p className="text-[14.5px] text-foreground/90">{title}</p>
+        <div className="mt-1 text-[12.5px] leading-[1.55] break-keep text-pretty text-dim">{body}</div>
       </div>
     </div>
   );
@@ -385,11 +571,16 @@ function sentence(day: Day, t: number, live: boolean): string {
 
 /**
  * On a wide screen, the day as a list beside the strip: each stay and each
- * way, with its hours; a row goes to its moment.
+ * way, with its hours; a row goes to its moment. Both people: one list in
+ * time, each row with its person's dot.
  */
-function DayList({ day, t, onSeek }: { day: Day; t: number; onSeek: (t: number) => void }) {
-  if (day.items.length === 0) return null;
-  const moves = day.items.filter((it) => it.type === "move");
+function DayList({ scene, t, onSeek }: { scene: Scene; t: number; onSeek: (t: number) => void }) {
+  const both = scene.people.length > 1;
+  const rows = scene.people
+    .flatMap((p) => p.day.items.map((it) => ({ it, p })))
+    .sort((a, b) => a.it.start - b.it.start);
+  if (rows.length === 0) return null;
+  const moves = scene.people.length === 1 ? scene.people[0].day.items.filter((it) => it.type === "move") : [];
   const moved = moves.reduce((s, it) => s + (it.type === "move" ? it.meters : 0), 0);
   const time = moves.reduce((s, it) => s + (it.end - it.start), 0);
   return (
@@ -405,12 +596,13 @@ function DayList({ day, t, onSeek }: { day: Day; t: number; onSeek: (t: number) 
         ) : null}
       </div>
       <ol className="scrollbar-hairline min-h-0 flex-1 overflow-y-auto px-2 pb-6">
-        {day.items.map((it) => {
+        {rows.map(({ it, p }) => {
+          const day = p.day;
           const active = it.start <= t && t <= it.end;
           const from = it.start <= day.start ? "00:00" : hm(it.start);
           const to = it.type === "stay" && it.ongoing ? "지금" : hm(it.end, day.dayEnd);
           return (
-            <li key={`${it.type}${it.start}`}>
+            <li key={`${p.who}${it.type}${it.start}`}>
               <button
                 type="button"
                 onClick={() => onSeek(Math.max(it.start, day.start))}
@@ -420,6 +612,12 @@ function DayList({ day, t, onSeek }: { day: Day; t: number; onSeek: (t: number) 
                   active ? "bg-glass-raised" : "hover:bg-glass",
                 )}
               >
+                {both ? (
+                  <span
+                    aria-label={p.me ? "나" : "상대"}
+                    className={cn("size-[6px] shrink-0 -translate-y-px self-center rounded-full", p.me ? "bg-mine" : "bg-partner")}
+                  />
+                ) : null}
                 <span className="tnum w-[6.25rem] shrink-0 text-[12px] text-faint">
                   {from}–{to}
                 </span>

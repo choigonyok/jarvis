@@ -10,9 +10,10 @@
  *   console's tokens: the operator's (JARVIS_EDGE_TOKEN) opens everything,
  *   the guest's (JARVIS_EDGE_GUEST_TOKEN) only the guest's own agent, the
  *   workout log, the guest's notifications, the guest's own voice and - the
- *   operator's choice - a read of the operator's day (context's GET track,
- *   nothing else of context) - so a hole in the console's proxy still cannot
- *   carry a guest to the operator's money, messages, voice or phone setup.
+ *   operator's choice - the two of them's days and the guest's own phone's
+ *   setup (context's GET track and GET owntracks/setup/guest, nothing else of
+ *   context) - so a hole in the console's proxy still cannot carry a guest to
+ *   the operator's money, messages, voice or phone setup.
  * - The public hostname, jarvis-be.choigonyok.com. Only what has to be
  *   reached from outside the console: the phone's doors - POST
  *   /context/owntracks and /context/signals (OwnTracks, iOS Shortcuts) -
@@ -100,13 +101,13 @@ const SERVICES: Record<string, { binding: keyof Env; origin: string }> = {
 const GUEST_SERVICES = new Set(["agent-guest", "workout", "notify", "tts", "context"]);
 
 /**
- * What the guest may do on context-svc: read a day of where the operator
- * went (the 위치 screen, shared by the operator's choice). Not the phone's
- * setup - it holds the phone's credentials - nor the regions, the devices'
- * state, or the phone's mode.
+ * What the guest may do on context-svc: read a day of where either of them
+ * went (the 위치 screen, shared by the operator's choice), and fetch their own
+ * phone's setup. Not the operator's phone setup - it holds that phone's
+ * credentials - nor the regions, the devices' state, or the phones' mode.
  */
 function guestContextRoute(method: string, path: string): boolean {
-  return method === "GET" && path === "track";
+  return method === "GET" && (path === "track" || path === "owntracks/setup/guest");
 }
 
 /** Which agent must have answered, by route. */

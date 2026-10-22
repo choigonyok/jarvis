@@ -5,15 +5,24 @@ import type { Map as MapLibre } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { Maximize2 } from "lucide-react";
 import { baseStyle } from "@/components/location/map-style";
-import { type Day, type Mode, type Node, type Stay, headAt, hm } from "@/lib/track";
+import { type Day, type Mode, type Node, type Person, type Scene, type Stay, type Who, headAt, hm } from "@/lib/track";
 
-/** What is laid over the map, inside it: the light, the places' names, the operator's mark. */
+/** What is laid over the map, inside it: the light, the places' names, the people's marks. */
 type Layer = {
   canvas: HTMLCanvasElement;
-  dot: HTMLDivElement;
+  marks: Map<Who, HTMLDivElement>;
   names: Map<string, { el: HTMLDivElement; text: string; w: number; h: number }>;
   root: HTMLElement;
 };
+
+/**
+ * Each person's light, in the shared calendar's colors: the viewer's own is
+ * mine (violet), the other's partner (amber) - the tokens in globals.css,
+ * worked out to rgb for the canvas. Where both went the same way, the two add
+ * up towards white.
+ */
+const TONE = { mine: "194, 167, 244", partner: "246, 187, 112" } as const;
+const toneOf = (p: Person) => TONE[p.me ? "mine" : "partner"];
 
 /**
  * The day on a map, as light: the way gone so far up to the moment shown,
@@ -21,25 +30,29 @@ type Layer = {
  * and what is hours old has dimmed; a road gone twice is brighter than one
  * gone once, because light adds up. A walk is a line of dots, a way the phone
  * said nothing about a faint dash. The places stayed at are rings with their
- * names and hours, and where the operator was at the moment shown is their
- * own mark - a cat's face they chose - in a soft glow that breathes at the
- * end of today, because that one is now.
+ * names, and where each person was at the moment shown is their mark - a
+ * cat's face each chose, grey for the operator and cream for the guest - in a
+ * soft glow that breathes at the end of today, because that one is now.
+ *
+ * One person or both: both share the map, each in their own color, and the
+ * names then say only the place (whose hours are whose is the strip's and the
+ * list's to say).
  *
  * The base map is MapLibre's (vector tiles through /api/map). The light, the
- * names and the mark are this component's own, inside the map over its
+ * names and the marks are this component's own, inside the map over its
  * canvas, placed again with every frame the map draws and every frame of the
  * replay.
  */
-export function DayMap({ day, t, live, follow }: { day: Day; t: number; live: boolean; follow: boolean }) {
+export function DayMap({ scene, t, live, follow }: { scene: Scene; t: number; live: boolean; follow: boolean }) {
   const box = useRef<HTMLDivElement>(null);
   const map = useRef<MapLibre | null>(null);
   const layer = useRef<Layer | null>(null);
   const [ready, setReady] = useState(false);
   const [broken, setBroken] = useState<string | null>(null);
   // What a draw reads: the map's own events call it outside React.
-  const now = useRef({ day, t, live, follow });
+  const now = useRef({ scene, t, live, follow });
   useLayoutEffect(() => {
-    now.current = { day, t, live, follow };
+    now.current = { scene, t, live, follow };
   });
 
   useEffect(() => {
@@ -49,7 +62,7 @@ export function DayMap({ day, t, live, follow }: { day: Day; t: number; live: bo
       .then((maplibre) => {
         if (gone || !box.current) return;
         maplibre.setWorkerUrl(new URL("maplibre-gl/dist/maplibre-gl-worker.mjs", import.meta.url).href);
-        const { bounds } = now.current.day;
+        const { bounds } = now.current.scene;
         made = new maplibre.Map({
           container: box.current,
           style: baseStyle(`${location.origin}/api/map/planet`, consoleFonts()),
@@ -72,14 +85,13 @@ export function DayMap({ day, t, live, follow }: { day: Day; t: number; live: bo
         });
         made.touchZoomRotate.disableRotation();
         made.keyboard.disableRotation();
-        // Over the map's own canvas, in this order: the light, the names, the mark.
+        // Over the map's own canvas, in this order: the light, the names, the marks.
         const root = made.getCanvasContainer();
         const canvas = document.createElement("canvas");
         canvas.setAttribute("aria-hidden", "true");
         canvas.className = "pointer-events-none absolute top-0 left-0";
-        const dot = mark();
-        root.append(canvas, dot);
-        layer.current = { canvas, dot, names: new Map(), root };
+        root.append(canvas);
+        layer.current = { canvas, marks: new Map(), names: new Map(), root };
         let loaded = false;
         made.on("render", draw);
         made.on("load", () => {
@@ -103,15 +115,16 @@ export function DayMap({ day, t, live, follow }: { day: Day; t: number; live: bo
     // Made once; everything after reads `now`.
   }, []);
 
-  // Another day opens on its own view; the same day read again keeps the view.
-  const shown = useRef(day.date);
+  // Another day, or other people, open on their own view; the same read
+  // again keeps the view.
+  const shown = useRef(viewKey(scene));
   useEffect(() => {
-    if (shown.current !== day.date) {
-      shown.current = day.date;
+    if (shown.current !== viewKey(scene)) {
+      shown.current = viewKey(scene);
       fit(false);
     }
     draw();
-  }, [day, ready]);
+  }, [scene, ready]);
 
   // Drawn before the frame is painted, with the clock beside it.
   useLayoutEffect(() => {
@@ -121,17 +134,17 @@ export function DayMap({ day, t, live, follow }: { day: Day; t: number; live: bo
 
   function fit(animate: boolean) {
     const m = map.current;
-    const b = now.current.day.bounds;
+    const b = now.current.scene.bounds;
     if (!m || !b) return;
     m.fitBounds(b, { padding: padding(m.getContainer()), maxZoom: 15, duration: animate && !reducedMotion() ? 600 : 0 });
   }
 
-  /** While the day replays, the map follows the mark when it nears an edge. */
+  /** While one person's day replays, the map follows their mark when it nears an edge. */
   function keepInView() {
     const m = map.current;
-    const { day, t, follow } = now.current;
-    if (!m || !follow || m.isMoving()) return;
-    const h = headAt(day, t);
+    const { scene, t, follow } = now.current;
+    if (!m || !follow || scene.people.length !== 1 || m.isMoving()) return;
+    const h = headAt(scene.people[0].day, t);
     if (!h) return;
     const p = m.project([h.lon, h.lat]);
     const { clientWidth: w, clientHeight: hgt } = m.getContainer();
@@ -145,7 +158,7 @@ export function DayMap({ day, t, live, follow }: { day: Day; t: number; live: bo
     const m = map.current;
     const l = layer.current;
     if (!m || !l) return;
-    const { day, t, live } = now.current;
+    const { scene, t, live } = now.current;
     const { clientWidth: w, clientHeight: h } = m.getContainer();
     const { canvas } = l;
     const dpr = Math.min(window.devicePixelRatio || 1, 3);
@@ -161,69 +174,63 @@ export function DayMap({ day, t, live, follow }: { day: Day; t: number; live: bo
     ctx.clearRect(0, 0, w, h);
     const at = (p: { lat: number; lon: number }) => m.project([p.lon, p.lat]);
 
-    // The way so far, as light that adds up where it crosses itself. Each
-    // stretch of one mode and one brightness is a single line: drawn fix by
-    // fix, the overlapping ends of the pieces would add up into beads.
+    // The ways so far, as light that adds up where it crosses itself - and
+    // where the two went together.
     ctx.globalCompositeOperation = "lighter";
     ctx.lineJoin = "round";
-    const position = headAt(day, t);
-    type Run = { mode: Mode; level: number; points: { x: number; y: number }[]; offset: number };
-    const runs: Run[] = [];
-    let along = 0; // how far along one mode, so a dotted walk does not restart its dots
-    for (const s of day.steps) {
-      if (s.t0 >= t) break;
-      const a = at(s.a);
-      const b = s.t1 <= t || !position ? at(s.b) : at(position);
-      const level = Math.round(brightness(Math.min(s.t1, t), t) * 24) / 24;
-      const last = runs.at(-1);
-      if (!last || last.mode !== s.mode || last.level !== level) {
-        if (last?.mode !== s.mode) along = 0;
-        runs.push({ mode: s.mode, level, points: [a], offset: along });
-      }
-      runs.at(-1)!.points.push(b);
-      along += Math.hypot(b.x - a.x, b.y - a.y);
-    }
-    for (const r of runs) {
-      if (r.points.length < 2) continue;
-      const style = STROKE[r.mode];
-      ctx.setLineDash(style.dash);
-      ctx.lineDashOffset = -r.offset;
-      // Dots need round ends; a line ends square, so two stretches meet without a bead.
-      ctx.lineCap = style.dash.length ? "round" : "butt";
-      ctx.beginPath();
-      ctx.moveTo(r.points[0].x, r.points[0].y);
-      for (const q of r.points.slice(1)) ctx.lineTo(q.x, q.y);
-      // A soft spread under the line, then the line.
-      ctx.strokeStyle = `rgba(236, 237, 238, ${r.level * style.alpha * 0.11})`;
-      ctx.lineWidth = style.width * 3.2;
-      ctx.stroke();
-      ctx.strokeStyle = `rgba(236, 237, 238, ${r.level * style.alpha})`;
-      ctx.lineWidth = style.width;
-      ctx.stroke();
-    }
+    for (const person of scene.people) light(ctx, person, t, at);
     ctx.setLineDash([]);
 
     // The places stayed at, once reached: a ring cut out of the light.
     ctx.globalCompositeOperation = "source-over";
-    for (const n of day.nodes) {
-      if (!n.stay || n.start > t) continue;
-      const p = at(n);
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 5.5, 0, Math.PI * 2);
-      ctx.fillStyle = "#0c0d0f";
-      ctx.fill();
-      ctx.lineWidth = 1.5;
-      ctx.strokeStyle = `rgba(236, 237, 238, ${position?.node === n ? 0.95 : 0.5})`;
-      ctx.stroke();
+    const positions = scene.people.map((person) => ({ person, position: headAt(person.day, t) }));
+    for (const { person, position } of positions) {
+      for (const n of person.day.nodes) {
+        if (!n.stay || n.start > t) continue;
+        const p = at(n);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 5.5, 0, Math.PI * 2);
+        ctx.fillStyle = "#0c0d0f";
+        ctx.fill();
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = `rgba(${toneOf(person)}, ${position?.node === n ? 0.95 : 0.55})`;
+        ctx.stroke();
+      }
     }
 
-    // The mark: where the operator was at t.
-    const p = position ? at(position) : null;
-    l.dot.style.display = p ? "" : "none";
-    if (p) l.dot.style.transform = `translate(${p.x - 26}px, ${p.y - 26}px)`;
-    l.dot.firstElementChild?.classList.toggle("anim-breathe", live);
+    // Each person's mark: where they were at t. Two at the same place stand
+    // side by side, so neither face hides the other.
+    const marked: { x: number; y: number }[] = [];
+    for (const [who, el] of l.marks) {
+      if (!scene.people.some((p) => p.who === who)) el.style.display = "none";
+    }
+    const points: ({ x: number; y: number } | null)[] = positions.map(({ position }) => (position ? at(position) : null));
+    const [a, b] = points;
+    if (a && b && Math.hypot(a.x - b.x, a.y - b.y) < 30) {
+      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      points[0] = { x: mid.x - 16, y: mid.y };
+      points[1] = { x: mid.x + 16, y: mid.y };
+    }
+    positions.forEach(({ person }, i) => {
+      let el = l.marks.get(person.who);
+      if (!el) {
+        el = mark(person.who);
+        l.root.append(el);
+        l.marks.set(person.who, el);
+      }
+      const p = points[i];
+      el.style.display = p ? "" : "none";
+      if (!p) return;
+      marked.push(p);
+      el.style.transform = `translate(${p.x - 26}px, ${p.y - 26}px)`;
+      const halo = el.firstElementChild as HTMLElement | null;
+      if (halo) {
+        halo.style.background = `radial-gradient(circle, rgba(${toneOf(person)}, 0.5) 0%, rgba(${toneOf(person)}, 0.16) 45%, transparent 70%)`;
+        halo.classList.toggle("anim-breathe", live);
+      }
+    });
 
-    name(l, day, t, at, w, p);
+    name(l, scene, t, at, w, marked);
   }
 
   return (
@@ -235,7 +242,7 @@ export function DayMap({ day, t, live, follow }: { day: Day; t: number; live: bo
           {broken}
         </p>
       ) : null}
-      {day.bounds ? (
+      {scene.bounds ? (
         <button
           type="button"
           onClick={() => fit(true)}
@@ -259,6 +266,9 @@ export function DayMap({ day, t, live, follow }: { day: Day; t: number; live: bo
   );
 }
 
+/** Which day and which people: what, when it changes, the map fits to anew. */
+const viewKey = (scene: Scene) => `${scene.date}:${scene.people.map((p) => p.who).join("+")}`;
+
 /** How each way is drawn: line width (px), dashes, and its strength against a drive. */
 const STROKE: Record<Mode, { width: number; dash: number[]; alpha: number }> = {
   drive: { width: 2.4, dash: [], alpha: 1 },
@@ -274,18 +284,69 @@ function brightness(when: number, t: number): number {
 }
 
 /**
- * The operator's mark: the cat's face they chose, over a soft glow that
- * breathes when it is now. The glow is what keeps the face's dark outline
- * from sinking into the dark map.
+ * One person's way so far, in their color. Each stretch of one mode and one
+ * brightness is a single line: drawn fix by fix, the overlapping ends of the
+ * pieces would add up into beads.
  */
-function mark(): HTMLDivElement {
+function light(
+  ctx: CanvasRenderingContext2D,
+  person: Person,
+  t: number,
+  at: (p: { lat: number; lon: number }) => { x: number; y: number },
+) {
+  const position = headAt(person.day, t);
+  type Run = { mode: Mode; level: number; points: { x: number; y: number }[]; offset: number };
+  const runs: Run[] = [];
+  let along = 0; // how far along one mode, so a dotted walk does not restart its dots
+  for (const s of person.day.steps) {
+    if (s.t0 >= t) break;
+    const a = at(s.a);
+    const b = s.t1 <= t || !position ? at(s.b) : at(position);
+    const level = Math.round(brightness(Math.min(s.t1, t), t) * 24) / 24;
+    const last = runs.at(-1);
+    if (!last || last.mode !== s.mode || last.level !== level) {
+      if (last?.mode !== s.mode) along = 0;
+      runs.push({ mode: s.mode, level, points: [a], offset: along });
+    }
+    runs.at(-1)!.points.push(b);
+    along += Math.hypot(b.x - a.x, b.y - a.y);
+  }
+  const tone = toneOf(person);
+  for (const r of runs) {
+    if (r.points.length < 2) continue;
+    const style = STROKE[r.mode];
+    ctx.setLineDash(style.dash);
+    ctx.lineDashOffset = -r.offset;
+    // Dots need round ends; a line ends square, so two stretches meet without a bead.
+    ctx.lineCap = style.dash.length ? "round" : "butt";
+    ctx.beginPath();
+    ctx.moveTo(r.points[0].x, r.points[0].y);
+    for (const q of r.points.slice(1)) ctx.lineTo(q.x, q.y);
+    // A soft spread under the line, then the line.
+    ctx.strokeStyle = `rgba(${tone}, ${r.level * style.alpha * 0.11})`;
+    ctx.lineWidth = style.width * 3.2;
+    ctx.stroke();
+    ctx.strokeStyle = `rgba(${tone}, ${r.level * style.alpha})`;
+    ctx.lineWidth = style.width;
+    ctx.stroke();
+  }
+}
+
+/** Each person's own face on the map, as they chose it: the operator's grey cat, the guest's cream one. */
+const FACE: Record<Who, string> = { owner: "/icons/location-cat.png", guest: "/icons/location-cat-guest.png" };
+
+/**
+ * A person's mark: their cat's face over a soft glow in their color, which
+ * breathes when it is now. The glow keeps the face's dark outline from
+ * sinking into the dark map.
+ */
+function mark(who: Who): HTMLDivElement {
   const el = document.createElement("div");
   el.className = "pointer-events-none absolute top-0 left-0 size-13";
   const halo = document.createElement("span");
   halo.className = "absolute inset-0 rounded-full";
-  halo.style.background = "radial-gradient(circle, rgba(236,237,238,0.5) 0%, rgba(236,237,238,0.16) 45%, transparent 70%)";
   const face = document.createElement("img");
-  face.src = "/icons/location-cat.png";
+  face.src = FACE[who];
   face.alt = "";
   face.draggable = false;
   face.className = "absolute top-1/2 left-1/2 size-9 -translate-1/2 select-none";
@@ -298,9 +359,9 @@ type Place = { key: string; node: Node; name?: string; stays: Stay[] };
 const placesCache = new WeakMap<Day, Place[]>();
 
 /**
- * The day's stays by place - by name, or for a nameless place by where it is
- * - in the order their names give way: named before nameless, then the
- * longest stayed.
+ * A day's stays by place - by name, or for a nameless place by where it is -
+ * in the order their names give way: named before nameless, then the longest
+ * stayed.
  */
 function placesOf(day: Day): Place[] {
   const cached = placesCache.get(day);
@@ -320,39 +381,47 @@ function placesOf(day: Day): Place[] {
 }
 
 /**
- * The places' names, from the moment each is first reached, with its hours
- * so far. A name sits to the right of its ring (clear of the mark, where the
- * mark is), or to the left where the right runs off the map or into another
- * name; where neither side is free it waits until the map is zoomed in far
- * enough.
+ * The places' names, from the moment each is first reached. With one person,
+ * each with its hours so far; with both, the place alone, once however many
+ * of them were there. A name sits to the right of its ring (clear of a mark,
+ * where one is), or to the left where the right runs off the map or into
+ * another name; where neither side is free it waits until the map is zoomed
+ * in far enough.
  */
 function name(
   l: Layer,
-  day: Day,
+  scene: Scene,
   t: number,
   at: (p: Node) => { x: number; y: number },
   w: number,
-  mark: { x: number; y: number } | null,
+  marks: { x: number; y: number }[],
 ) {
-  const places = placesOf(day);
-  const keep = new Set(places.map((p) => p.key));
+  const single = scene.people.length === 1;
+  const places = new Map<string, { place: Place; day: Day; seen: Stay[] }>();
+  for (const person of scene.people) {
+    for (const place of placesOf(person.day)) {
+      const seen = place.stays.filter((s) => s.start <= t);
+      const had = places.get(place.key);
+      if (!had) places.set(place.key, { place, day: person.day, seen });
+      else if (!had.seen.length && seen.length) places.set(place.key, { place, day: person.day, seen });
+    }
+  }
   for (const [key, n] of l.names) {
-    if (keep.has(key)) continue;
+    if (places.has(key)) continue;
     n.el.remove();
     l.names.delete(key);
   }
   const taken: { x: number; y: number; w: number; h: number }[] = [];
-  for (const place of places) {
+  for (const { place, day, seen } of places.values()) {
     let n = l.names.get(place.key);
     if (!n) {
       const el = document.createElement("div");
       el.className = "pointer-events-none absolute top-0 left-0 flex flex-col font-sans leading-[1.25] whitespace-nowrap [text-shadow:0_0_6px_#0c0d0f,0_0_2px_#0c0d0f]";
-      l.root.insertBefore(el, l.dot);
+      l.root.insertBefore(el, l.marks.values().next().value ?? null);
       n = { el, text: "", w: 0, h: 0 };
       l.names.set(place.key, n);
     }
-    const seen = place.stays.filter((s) => s.start <= t);
-    const hours = seen.map((s) => range(day, s, t)).filter(Boolean).join(" · ");
+    const hours = single ? seen.map((s) => range(day, s, t)).filter(Boolean).join(" · ") : "";
     const text = seen.length ? `${place.name ?? ""}|${hours}` : "";
     if (text !== n.text) {
       n.text = text;
@@ -373,8 +442,8 @@ function name(
     }
     const p = at(place.node);
     const y = p.y - n.h / 2;
-    // Where the mark is, the name stands clear of the cat's face.
-    const gap = mark && Math.hypot(mark.x - p.x, mark.y - p.y) < 26 ? 26 : 12;
+    // Where a mark is, the name stands clear of it.
+    const gap = marks.some((q) => Math.hypot(q.x - p.x, q.y - p.y) < 34) ? (marks.length > 1 ? 42 : 26) : 12;
     const free = (x: number) =>
       x >= 4 &&
       x + n.w <= w - 4 &&
@@ -417,10 +486,10 @@ function consoleFonts() {
   return own ? { regular: [own, ...korean], medium: [`${own} Medium`, own, ...korean] } : { regular: korean, medium: korean };
 }
 
-/** Room around the day: more where the map's own button sits (top right). */
+/** Room around the day: more where the map's own controls sit (the top). */
 function padding(el: HTMLElement) {
   const p = Math.round(Math.min(el.clientWidth, el.clientHeight) * 0.1);
-  return { top: Math.max(p, 60), bottom: Math.max(p, 28), left: Math.max(p, 28), right: Math.max(p, 60) };
+  return { top: Math.max(p, 64), bottom: Math.max(p, 28), left: Math.max(p, 28), right: Math.max(p, 60) };
 }
 
 const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;

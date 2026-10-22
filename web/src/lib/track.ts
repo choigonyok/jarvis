@@ -27,7 +27,11 @@ export type Visit = { region: string; kind?: string; enteredAt: string; leftAt?:
 
 export type Region = { name: string; kind: string; lat: number; lon: number; radiusM: number; area?: string };
 
+/** Whose phone: the operator's, or the guest's (the partner on the shared calendar). */
+export type Who = "owner" | "guest";
+
 export type Track = {
+  who?: Who;
   date: string;
   /** The day's midnight and the next, in Seoul. */
   from: string;
@@ -322,7 +326,7 @@ export function buildDay(track: Track, now: number): Day {
     lastReport: reports.length ? Math.max(...reports) : undefined,
     keepDays: track.keepDays,
     since: track.since,
-    clock: clockFor(items, start, end),
+    clock: clockFor(movesOf(items), start, end),
   };
 }
 
@@ -335,20 +339,34 @@ function moveOf(steps: Step[], from: Node | undefined, to: Node | undefined): Mo
   return { type: "move", start: steps[0].t0, end: steps.at(-1)!.t1, meters: total, mode, from, to, steps };
 }
 
+/** The stretches a day moved, [from, to]. */
+const movesOf = (items: Item[]): [number, number][] =>
+  items.filter((it) => it.type === "move").map((it) => [it.start, it.end]);
+
 /**
  * The replay's clock. What moved takes most of the replay, in proportion to
  * how long it took; what stood still takes the rest by the square root of
  * its length - a short stop is seen, a night is not sat through. A day with
- * an hour on the road replays in about 13 seconds, a still one in 4.
+ * an hour on the road replays in about 13 seconds, a still one in 4. With two
+ * people, a stretch either of them moved counts as moving.
  */
-function clockFor(items: Item[], start: number, end: number): Clock {
+function clockFor(stretches: [number, number][], start: number, end: number): Clock {
+  const runs = stretches
+    .map(([a, b]): [number, number] => [Math.max(a, start), Math.min(b, end)])
+    .filter(([a, b]) => b > a)
+    .sort((x, y) => x[0] - y[0]);
+  const merged: [number, number][] = [];
+  for (const [a, b] of runs) {
+    const last = merged.at(-1);
+    if (last && a <= last[1]) last[1] = Math.max(last[1], b);
+    else merged.push([a, b]);
+  }
   const pieces: { t0: number; t1: number; moving: boolean }[] = [];
   let t = start;
-  for (const it of items) {
-    if (it.start > t) pieces.push({ t0: t, t1: it.start, moving: false });
-    const t0 = Math.max(t, it.start);
-    if (it.end > t0) pieces.push({ t0, t1: it.end, moving: it.type === "move" });
-    t = Math.max(t, it.end);
+  for (const [a, b] of merged) {
+    if (a > t) pieces.push({ t0: t, t1: a, moving: false });
+    pieces.push({ t0: a, t1: b, moving: true });
+    t = b;
   }
   if (end > t) pieces.push({ t0: t, t1: end, moving: false });
 
@@ -412,6 +430,54 @@ export function headAt(day: Day, t: number): Head | null {
 /** What was happening at t. */
 export function itemAt(day: Day, t: number): Item | undefined {
   return day.items.find((it) => it.start <= t && t <= it.end);
+}
+
+/** A person on the screen: whose day it is, and whether it is the viewer's own. */
+export type Person = { who: Who; me: boolean; day: Day };
+
+/**
+ * What the 위치 screen shows at once: one person's day, or both - the
+ * viewer's first - on one map, one strip and one clock.
+ */
+export type Scene = {
+  date: string;
+  start: number;
+  end: number;
+  dayEnd: number;
+  today: boolean;
+  people: Person[];
+  clock: Clock;
+  bounds: Day["bounds"];
+  keepDays: number;
+  since?: string;
+};
+
+export function sceneOf(people: Person[]): Scene {
+  const days = people.map((p) => p.day);
+  const first = days[0];
+  const end = Math.max(...days.map((d) => d.end));
+  let bounds: Day["bounds"] = null;
+  for (const d of days) {
+    if (!d.bounds) continue;
+    bounds = bounds
+      ? [
+          [Math.min(bounds[0][0], d.bounds[0][0]), Math.min(bounds[0][1], d.bounds[0][1])],
+          [Math.max(bounds[1][0], d.bounds[1][0]), Math.max(bounds[1][1], d.bounds[1][1])],
+        ]
+      : d.bounds;
+  }
+  return {
+    date: first.date,
+    start: first.start,
+    end,
+    dayEnd: first.dayEnd,
+    today: first.today,
+    people,
+    clock: days.length === 1 ? first.clock : clockFor(days.flatMap((d) => movesOf(d.items)), first.start, end),
+    bounds,
+    keepDays: first.keepDays,
+    since: days.map((d) => d.since).filter(Boolean).sort()[0],
+  };
 }
 
 // --- words ----------------------------------------------------------------
@@ -479,8 +545,8 @@ export function shiftDay(date: string, by: number): string {
   return new Date(Date.UTC(y, m - 1, d + by)).toISOString().slice(0, 10);
 }
 
-export async function readTrack(date: string): Promise<Track> {
-  const res = await fetch(`/api/context/track?date=${encodeURIComponent(date)}`, { cache: "no-store" });
+export async function readTrack(date: string, who: Who): Promise<Track> {
+  const res = await fetch(`/api/context/track?date=${encodeURIComponent(date)}&who=${who}`, { cache: "no-store" });
   const body = (await res.json().catch(() => null)) as (Track & { error?: string }) | null;
   if (!res.ok || !body) throw new Error(body?.error ?? `위치 서비스가 ${res.status}로 답했어요.`);
   return body;

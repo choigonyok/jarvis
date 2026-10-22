@@ -7,10 +7,10 @@
  * person's apart), their own voice for 음성 mode (tts keeps each person's
  * recording apart, by token), the image editor (PhotoCraft, which runs in
  * their own browser and keeps nothing here) and, by the operator's choice,
- * where the operator went (the 위치 screen, read only - not the phone's
- * setup, which holds its credentials), and nothing that is the operator's
- * alone: assets, spending, KakaoTalk, the agent's browser, the approval
- * ledger.
+ * where the two of them went (the 위치 screen: the operator's day read only,
+ * and the guest's own phone's setup - never the operator's phone setup, which
+ * holds its credentials), and nothing that is the operator's alone: assets,
+ * spending, KakaoTalk, the agent's browser, the approval ledger.
  *
  * The role comes from the email Access signed (see lib/access.ts), matched
  * against ACCESS_OWNERS and ACCESS_GUESTS. An Access-verified email on neither
@@ -41,7 +41,16 @@ export function roleFor(email: string): Role | null {
 /** The pages a guest can open - also the tabs a guest is shown. */
 export const GUEST_PAGES = new Set(["/", "/workout", "/calendar", "/edit", "/location"]);
 /** API routes a guest may call: the route itself, or anything beneath it - never a sibling with a longer name. */
-const GUEST_API = ["/api/agent", "/api/workout", "/api/notify", "/api/tts", "/api/version", "/api/context/track", "/api/map"];
+const GUEST_API = [
+  "/api/agent",
+  "/api/workout",
+  "/api/notify",
+  "/api/tts",
+  "/api/version",
+  "/api/context/track",
+  "/api/context/owntracks/setup/guest",
+  "/api/map",
+];
 /** Static files a guest may load: the editor the 편집 tab frames (scripts/photocraft.mjs). */
 const GUEST_FILES = ["/photocraft/"];
 
