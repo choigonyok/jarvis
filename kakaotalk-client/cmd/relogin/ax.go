@@ -145,6 +145,7 @@ import "C"
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"unicode/utf16"
 	"unsafe"
 )
@@ -194,6 +195,27 @@ func readApp(pid int) (*look, error) {
 		l.windows = append(l.windows, l.walk(w, 0, &budget))
 	}
 	return l, nil
+}
+
+// glance is a cheap look at an app's windows - their kinds, titles and what
+// sits right inside them - to tell whether anything changed since a full
+// read, which takes seconds. A logout opens the login window: it changes.
+func glance(pid int) (string, error) {
+	app := C.ax_app(C.pid_t(pid))
+	if C.ax_isnull(app) != 0 {
+		return "", errors.New("앱에 닿지 못했습니다")
+	}
+	l := &look{pid: pid, app: app}
+	defer l.close()
+	var b strings.Builder
+	for _, w := range l.list(app, "AXWindows", 20) {
+		fmt.Fprintf(&b, "%s/%s %q:", axString(w, "AXRole"), axString(w, "AXSubrole"), axString(w, "AXTitle"))
+		for _, k := range l.list(w, "AXChildren", 200) {
+			b.WriteString(" " + axString(k, "AXRole"))
+		}
+		b.WriteString("\n")
+	}
+	return b.String(), nil
 }
 
 func (l *look) close() {

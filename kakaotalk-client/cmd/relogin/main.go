@@ -65,7 +65,14 @@ type daemon struct {
 	wasOut bool
 	// A view nothing here knows was written down once, for a person to read.
 	dumped bool
+	// The glance of the last full read that saw it logged in, and when: the
+	// same glance within calmFor needs no full read.
+	calm   string
+	calmAt time.Time
 }
+
+// calmFor is how long an unchanged glance stands for a full read.
+const calmFor = time.Minute
 
 func main() {
 	log.SetFlags(log.LstdFlags)
@@ -148,6 +155,12 @@ func (d *daemon) tick() time.Duration {
 		d.set("starting", "카톡이 꺼져 있어 켰어요")
 		return 10 * time.Second
 	}
+	sig, _ := glance(pid)
+	if sig != "" && sig == d.calm && time.Since(d.calmAt) < calmFor && !d.inspectWanted() {
+		d.set("logged-in", "")
+		return poll
+	}
+	d.calm = ""
 	l, err := readApp(pid)
 	if err != nil {
 		d.set("unknown", err.Error())
@@ -167,6 +180,7 @@ func (d *daemon) tick() time.Duration {
 		if v.Windows == 0 {
 			d.set("no-window", "")
 		} else {
+			d.calm, d.calmAt = sig, now
 			d.set("logged-in", "")
 		}
 		return poll
@@ -415,8 +429,13 @@ func (d *daemon) write() {
 // inspect writes KakaoTalk's windows down when asked (scripts/kakaotalk-relogin
 // inspect touches the trigger): over SSH this program's access does not
 // apply, so it is asked through a file.
+func (d *daemon) inspectWanted() bool {
+	_, err := os.Stat(d.inspectTrigger)
+	return err == nil
+}
+
 func (d *daemon) inspect(l *look) {
-	if _, err := os.Stat(d.inspectTrigger); err != nil {
+	if !d.inspectWanted() {
 		return
 	}
 	_ = os.Remove(d.inspectTrigger)
