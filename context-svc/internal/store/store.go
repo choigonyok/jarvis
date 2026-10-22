@@ -81,15 +81,16 @@ type Fix struct {
 	Act string    `json:"act,omitempty"` // automotive, cycling, running, walking or stationary
 }
 
-// Fixes is the location reports in [from, to), oldest first.
-func (s *Store) Fixes(ctx context.Context, from, to time.Time) ([]Fix, error) {
-	return s.fixes(ctx, `and at >= $1 and at < $2 order by at`, from, to)
+// Fixes is one phone's location reports in [from, to), oldest first: the
+// phone is the raw report's source (owntracks, owntracks-guest).
+func (s *Store) Fixes(ctx context.Context, source string, from, to time.Time) ([]Fix, error) {
+	return s.fixes(ctx, source, `and at >= $2 and at < $3 order by at`, from, to)
 }
 
-// FixBefore is the last report before at no rougher than acc meters: where
-// a day began. Nil when none is kept.
-func (s *Store) FixBefore(ctx context.Context, at time.Time, acc float64) (*Fix, error) {
-	fs, err := s.fixes(ctx, `and at < $1 order by at desc limit 200`, at)
+// FixBefore is a phone's last report before at no rougher than acc meters:
+// where a day began. Nil when none is kept.
+func (s *Store) FixBefore(ctx context.Context, source string, at time.Time, acc float64) (*Fix, error) {
+	fs, err := s.fixes(ctx, source, `and at < $2 order by at desc limit 200`, at)
 	if err != nil {
 		return nil, err
 	}
@@ -101,16 +102,16 @@ func (s *Store) FixBefore(ctx context.Context, at time.Time, acc float64) (*Fix,
 	return nil, nil
 }
 
-// FirstFix is when the oldest location report still kept was made: how far
-// back a day can be drawn. Nil when there is none.
-func (s *Store) FirstFix(ctx context.Context) (*time.Time, error) {
+// FirstFix is when a phone's oldest location report still kept was made:
+// how far back its days can be drawn. Nil when there is none.
+func (s *Store) FirstFix(ctx context.Context, source string) (*time.Time, error) {
 	var at *time.Time
-	err := s.pool.QueryRow(ctx, `select min(at) from context_raw where kind = 'location'`).Scan(&at)
+	err := s.pool.QueryRow(ctx, `select min(at) from context_raw where kind = 'location' and source = $1`, source).Scan(&at)
 	return at, err
 }
 
-func (s *Store) fixes(ctx context.Context, q string, args ...any) ([]Fix, error) {
-	rows, err := s.pool.Query(ctx, `select at, body from context_raw where kind = 'location' `+q, args...)
+func (s *Store) fixes(ctx context.Context, source, q string, args ...any) ([]Fix, error) {
+	rows, err := s.pool.Query(ctx, `select at, body from context_raw where kind = 'location' and source = $1 `+q, append([]any{source}, args...)...)
 	if err != nil {
 		return nil, err
 	}

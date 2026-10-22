@@ -3,14 +3,18 @@
 //	GET    /health
 //	POST   /owntracks        the phone's OwnTracks app (HTTP Basic). The reply
 //	                         may carry a command that changes how it watches.
+//	                         The guest's phone has credentials of its own: its
+//	                         fixes are kept apart and move none of the
+//	                         operator's visits, state or events.
 //	POST   /signals          {source, kind, state, at?} iOS Shortcuts, the Mac
 //	                         collector, Home Assistant (bearer: the signal token)
 //	GET    /now              where and in what state, now (bearer: API token)
 //	GET    /visits?from=&to= stays in regions
 //	GET    /travel?days=60   the journeys between regions, from the stays,
 //	                         and how long each way usually takes
-//	GET    /track?date=      one day's fixes, where it began and its stays -
+//	GET    /track?date=&who= one day's fixes, where it began and its stays -
 //	                         the 위치 screen draws and replays the day from it
+//	                         (who: owner, the default, or guest)
 //	GET    /regions          PUT /regions {name, kind, lat, lon, radiusM, area}
 //	DELETE /regions/{name}
 //	PUT    /owntracks/cmd    {action: status|reportLocation} ask the phone, with
@@ -22,6 +26,8 @@
 //	GET    /owntracks/setup  the phone's setup: an OwnTracks configuration
 //	                         (owntracks:///config?inline=…) and what the
 //	                         shortcuts post - for the console, behind its login
+//	GET    /owntracks/setup/guest  the guest's phone's: its own credentials,
+//	                         nothing of the operator's
 //
 // Only /owntracks and /signals face the phone, through the gateway; each
 // has its own credential, so the phone never holds the stack's token.
@@ -58,6 +64,10 @@ type Config struct {
 	Token       string // the stack's API token: reads and regions
 	SignalToken string // what shortcuts and collectors present on /signals
 	User, Pass  string // OwnTracks' HTTP Basic credentials
+	// The guest's phone's own credentials. Its fixes are kept (as
+	// owntracks-guest) for the 위치 screen and for how it is told to watch,
+	// and nothing else.
+	GuestUser, GuestPass string
 	// Public is where the phone reaches this service (the gateway's
 	// /context), for the setup it is given.
 	Public string
@@ -109,6 +119,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /regions", s.bearer(s.putRegion))
 	mux.HandleFunc("DELETE /regions/{name}", s.bearer(s.deleteRegion))
 	mux.HandleFunc("GET /owntracks/setup", s.bearer(s.setup))
+	mux.HandleFunc("GET /owntracks/setup/guest", s.bearer(s.setupGuest))
 	mux.HandleFunc("PUT /owntracks/mode", s.bearer(s.putMode))
 	mux.HandleFunc("PUT /owntracks/cmd", s.bearer(s.putCmd))
 	return mux
@@ -142,6 +153,7 @@ type report struct {
 	Desc      string   `json:"desc"`  // the region's name
 	Rad       int      `json:"rad"`   // a waypoint's radius
 	M         *int     `json:"m"`     // the monitoring mode the phone is in
+	Motion    []string `json:"motionactivities"`
 	// Waypoints: the regions set on the phone, sent when they change.
 	Waypoints []report `json:"waypoints"`
 }
@@ -155,9 +167,22 @@ type Location struct {
 	Charging bool    `json:"charging,omitempty"`
 }
 
+// The phones, as the raw reports name them.
+const (
+	ownerPhone = "owntracks"
+	guestPhone = "owntracks-guest"
+)
+
 func (s *Server) owntracks(w http.ResponseWriter, r *http.Request) {
 	user, pass, ok := r.BasicAuth()
-	if s.cfg.User == "" || !ok || !same(user, s.cfg.User) || !same(pass, s.cfg.Pass) {
+	source := ""
+	switch {
+	case ok && s.cfg.User != "" && same(user, s.cfg.User) && same(pass, s.cfg.Pass):
+		source = ownerPhone
+	case ok && s.cfg.GuestUser != "" && same(user, s.cfg.GuestUser) && same(pass, s.cfg.GuestPass):
+		source = guestPhone
+	}
+	if source == "" {
 		w.Header().Set("WWW-Authenticate", `Basic realm="jarvis"`)
 		writeErr(w, http.StatusUnauthorized, "인증이 필요합니다.")
 		return
@@ -177,8 +202,17 @@ func (s *Server) owntracks(w http.ResponseWriter, r *http.Request) {
 		at = s.now()
 	}
 	ctx := r.Context()
-	if err := s.st.Raw(ctx, "owntracks", orDefault(rep.Type, "unknown"), at, raw); err != nil {
+	if err := s.st.Raw(ctx, source, orDefault(rep.Type, "unknown"), at, raw); err != nil {
 		s.fail(w, "원본을 남기지 못했습니다", err)
+		return
+	}
+	if source == guestPhone {
+		cmds, err := s.guestWatch(ctx, rep, at)
+		if err != nil {
+			s.fail(w, "상대 폰의 위치를 반영하지 못했습니다", err)
+			return
+		}
+		writeJSON(w, http.StatusOK, cmds)
 		return
 	}
 	cmds, err := s.ingest(ctx, rep, at)
@@ -347,6 +381,64 @@ func (s *Server) ingest(ctx context.Context, rep report, at time.Time) ([]map[st
 	}
 	s.log.Info("폰의 위치 모드를 바꿉니다", "from", current.Mode, "to", want)
 	return append(place.Command(want), extra...), nil
+}
+
+// How long in one spot, and how small a spot, counts as staying put.
+const (
+	stillFor    = 15 * time.Minute
+	stillRadius = 150.0
+)
+
+// guestWatch is how the guest's phone should watch, said with the reply to
+// its report: lightly (Significant) while it is settled - inside a region,
+// one it set itself (the phone's own inregions) or one kept here, or still in
+// one spot for a while - and closely (Move) once it is out and moving, so its
+// way is drawn in detail. In a car it is moving, however long the jam. Like
+// the operator's, the phone's own word on the mode it is in is what a change
+// is judged against, and a low battery keeps it from Move.
+func (s *Server) guestWatch(ctx context.Context, rep report, at time.Time) ([]map[string]any, error) {
+	none := []map[string]any{}
+	if rep.Type != "location" || rep.Acc > s.cfg.Trust {
+		return none, nil
+	}
+	var kept struct {
+		Mode int `json:"mode"`
+	}
+	kept.Mode = place.Significant
+	if _, err := s.st.Get(ctx, "owntracks.mode.guest", &kept); err != nil && !errors.Is(err, store.ErrNotFound) {
+		return nil, err
+	}
+	current := kept.Mode
+	if rep.M != nil && *rep.M >= place.Quiet && *rep.M <= place.Move {
+		current = *rep.M
+	}
+	regions, err := s.st.Regions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	settled := len(rep.InRegions) > 0 || len(place.Inside(regions, rep.Lat, rep.Lon, rep.Acc)) > 0
+	if !settled && place.Activity(rep.Motion) != "automotive" {
+		fixes, err := s.st.Fixes(ctx, guestPhone, at.Add(-6*time.Hour), at.Add(time.Second))
+		if err != nil {
+			return nil, err
+		}
+		spots := make([]place.Spot, 0, len(fixes))
+		for _, f := range fixes {
+			if f.Acc <= s.cfg.Trust {
+				spots = append(spots, place.Spot{Lat: f.Lat, Lon: f.Lon, At: f.At})
+			}
+		}
+		settled = place.Still(spots, rep.Lat, rep.Lon, at, stillRadius, stillFor)
+	}
+	want := place.Watch(settled, rep.Batt, rep.BS == 2 || rep.BS == 3)
+	if want == current {
+		return none, nil
+	}
+	if err := s.st.Set(ctx, "owntracks.mode.guest", map[string]int{"mode": want}, s.now()); err != nil {
+		return nil, err
+	}
+	s.log.Info("상대 폰의 위치 모드를 바꿉니다", "from", current, "to", want)
+	return place.Command(want), nil
 }
 
 // announce reports an arrival or a departure as an event: to the inbox,
@@ -647,15 +739,8 @@ func (s *Server) setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	base := strings.TrimRight(s.cfg.Public, "/")
-	cfg := map[string]any{
-		"_type": "configuration", "mode": 3, "url": base + "/owntracks",
-		"auth": true, "username": s.cfg.User, "password": s.cfg.Pass,
-		"deviceId": "iphone", "tid": "me",
-		"monitoring": place.Significant, "cmd": true, "remoteConfiguration": true,
-	}
-	body, _ := json.Marshal(cfg)
 	out := map[string]any{
-		"link": "owntracks:///config?inline=" + url.QueryEscape(base64.StdEncoding.EncodeToString(body)),
+		"link": s.configLink(s.cfg.User, s.cfg.Pass, "iphone", "me"),
 		"url":  base + "/owntracks",
 		"signals": map[string]any{
 			"url": base + "/signals", "token": s.cfg.SignalToken,
@@ -674,6 +759,36 @@ func (s *Server) setup(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, out)
+}
+
+// setupGuest is the guest's phone's setup, for the guest's own console to
+// hand over: the guest's credentials and nothing of the operator's - no
+// signal token, no shortcuts. Commands and remote configuration are on, so
+// the reply to a report can switch how it watches (guestWatch).
+func (s *Server) setupGuest(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.GuestUser == "" || s.cfg.GuestPass == "" || s.cfg.Public == "" {
+		writeErr(w, http.StatusServiceUnavailable, "OWNTRACKS_GUEST_USER/OWNTRACKS_GUEST_PASSWORD 와 CONTEXT_PUBLIC_URL 이 있어야 합니다.")
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]any{
+		"link": s.configLink(s.cfg.GuestUser, s.cfg.GuestPass, "guest-iphone", "gs"),
+		"url":  strings.TrimRight(s.cfg.Public, "/") + "/owntracks",
+	})
+}
+
+// configLink is a whole OwnTracks configuration as the link the app imports:
+// HTTP mode to the gateway, Basic auth, Significant to begin with, commands
+// and remote configuration on so the reply can switch modes.
+func (s *Server) configLink(user, pass, device, tid string) string {
+	cfg := map[string]any{
+		"_type": "configuration", "mode": 3, "url": strings.TrimRight(s.cfg.Public, "/") + "/owntracks",
+		"auth": true, "username": user, "password": pass,
+		"deviceId": device, "tid": tid,
+		"monitoring": place.Significant, "cmd": true, "remoteConfiguration": true,
+	}
+	body, _ := json.Marshal(cfg)
+	return "owntracks:///config?inline=" + url.QueryEscape(base64.StdEncoding.EncodeToString(body))
 }
 
 // travel is the journeys between regions over the last days, and how long
@@ -708,13 +823,23 @@ func (s *Server) travel(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"trips": trips, "routes": routes})
 }
 
-// track is one day's way about (the operator's day, in Seoul), for the 위치
-// screen to draw and replay: every fix of the day, the last trustworthy one
-// before it - where the day began - the stays that overlap it, the regions
-// to name places by, and how far back fixes go (the screen goes no further).
-// The fixes are as the phone sent them, rough ones too: what to smooth or
-// leave out is the drawing's call.
+// track is one day's way about (a day in Seoul), for the 위치 screen to draw
+// and replay: every fix of the day, the last trustworthy one before it -
+// where the day began - the stays that overlap it, the regions to name places
+// by, and how far back fixes go (the screen goes no further). The fixes are
+// as the phone sent them, rough ones too: what to smooth or leave out is the
+// drawing's call. who picks the phone: the operator's (owner, the default)
+// or the guest's, which has no stays here - only its fixes.
 func (s *Server) track(w http.ResponseWriter, r *http.Request) {
+	who, source := "owner", ownerPhone
+	switch r.URL.Query().Get("who") {
+	case "", "owner":
+	case "guest":
+		who, source = "guest", guestPhone
+	default:
+		writeErr(w, http.StatusBadRequest, "who 는 owner 나 guest 입니다.")
+		return
+	}
 	now := s.now().In(s.loc)
 	day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, s.loc)
 	if v := r.URL.Query().Get("date"); v != "" {
@@ -727,33 +852,35 @@ func (s *Server) track(w http.ResponseWriter, r *http.Request) {
 	}
 	end := day.AddDate(0, 0, 1)
 	ctx := r.Context()
-	fixes, err := s.st.Fixes(ctx, day, end)
+	fixes, err := s.st.Fixes(ctx, source, day, end)
 	if err != nil {
 		s.fail(w, "위치를 읽지 못했습니다", err)
 		return
 	}
-	before, err := s.st.FixBefore(ctx, day, s.cfg.Trust)
+	before, err := s.st.FixBefore(ctx, source, day, s.cfg.Trust)
 	if err != nil {
 		s.fail(w, "위치를 읽지 못했습니다", err)
 		return
 	}
-	visits, err := s.st.Visits(ctx, day, end)
-	if err != nil {
-		s.fail(w, "체류를 읽지 못했습니다", err)
-		return
+	visits := []store.Visit{}
+	if who == "owner" {
+		if visits, err = s.st.Visits(ctx, day, end); err != nil {
+			s.fail(w, "체류를 읽지 못했습니다", err)
+			return
+		}
 	}
 	regions, err := s.st.Regions(ctx)
 	if err != nil {
 		s.fail(w, "영역을 읽지 못했습니다", err)
 		return
 	}
-	first, err := s.st.FirstFix(ctx)
+	first, err := s.st.FirstFix(ctx, source)
 	if err != nil {
 		s.fail(w, "위치를 읽지 못했습니다", err)
 		return
 	}
 	out := map[string]any{
-		"date": day.Format("2006-01-02"), "from": day, "to": end,
+		"who": who, "date": day.Format("2006-01-02"), "from": day, "to": end,
 		"fixes": fixes, "before": before, "visits": visits, "regions": regions,
 		"keepDays": s.cfg.RawDays,
 	}

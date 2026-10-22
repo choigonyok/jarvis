@@ -7,6 +7,7 @@ import (
 	"math"
 	"slices"
 	"strings"
+	"time"
 )
 
 // Region is a named circle: home, work, a campsite.
@@ -109,6 +110,50 @@ func Mode(current int, event, regionKind string, batt int, charging bool) int {
 		want = Quiet
 	}
 	return want
+}
+
+// Watch is how a phone should watch by where it is rather than by what it
+// just did: settled - inside a region, or still in one spot for a while - it
+// watches lightly (Significant); out and moving, closely (Move), so its way
+// is drawn in detail. A low battery overrides both, as in Mode.
+func Watch(settled bool, batt int, charging bool) int {
+	want := Move
+	if settled {
+		want = Significant
+	}
+	if batt > 0 && batt < 20 && !charging && want == Move {
+		want = Significant
+	}
+	if batt > 0 && batt < 8 && !charging {
+		want = Quiet
+	}
+	return want
+}
+
+// Spot is a fix, for Still.
+type Spot struct {
+	Lat, Lon float64
+	At       time.Time
+}
+
+// Still is whether a phone has kept within radius meters of where it is now
+// for at least long: going back from at through the fixes before it (oldest
+// first), none strays farther, and one is at least that old. A still phone
+// says little, so the one before may be hours old - and still count.
+func Still(fixes []Spot, lat, lon float64, at time.Time, radius float64, long time.Duration) bool {
+	for i := len(fixes) - 1; i >= 0; i-- {
+		f := fixes[i]
+		if f.At.After(at) {
+			continue
+		}
+		if Meters(f.Lat, f.Lon, lat, lon) > radius {
+			return false
+		}
+		if at.Sub(f.At) >= long {
+			return true
+		}
+	}
+	return false
 }
 
 // Command is the reply that sets the phone's monitoring mode.

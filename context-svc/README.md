@@ -53,10 +53,12 @@ GET    /visits?from=&to=    체류 (RFC 3339 또는 YYYY-MM-DD)
 GET    /travel?days=60      체류에서 잰 이동: trips(나선 곳·시각 → 든 곳·시각, 분)와 routes(길마다 횟수, 걸린 시간의
                             중앙값, 보통 나서는 시각). 곳의 이름은 영역의 동네(area), 없으면 영역 이름. 3시간 넘게
                             어느 영역에도 없던 사이는 이동으로 치지 않고, 안에 든 영역(건물 ⊂ 동네)도 이동이 아니다
-GET    /track?date=YYYY-MM-DD  그날(서울 기준)의 위치: fixes(시각·좌표·정확도·속도·움직임 - 와이파이 같은 나머지는
+GET    /track?date=YYYY-MM-DD&who=owner|guest
+                            그날(서울 기준)의 위치: fixes(시각·좌표·정확도·속도·움직임 - 와이파이 같은 나머지는
                             빼고, 거친 위치도 그대로), 그 전의 마지막 믿을 만한 위치(before, 하루가 시작된 곳), 겹치는 체류,
                             영역, 원본을 두는 날수(keepDays)와 남은 가장 오래된 위치의 날(since). 웹의 위치 탭이 이것으로
-                            하루를 그리고 되감는다
+                            하루를 그리고 되감는다. who=guest 는 상대 폰의 것(체류는 없음)
+GET    /owntracks/setup/guest  상대 폰의 OwnTracks 설정 링크: 상대 계정만 담고 운영자의 것(신호 토큰·단축어)은 없다
 GET    /regions             PUT /regions {name, kind(home|work|camp|shop|food|other), lat, lon, radiusM, area}
 DELETE /regions/{name}
 ```
@@ -78,6 +80,18 @@ jarvis 웹의 **상태 → 폰 연결**을 아이폰에서 열고 차례로 누�
    동작은 "URL 내용 가져오기" 하나 - POST `https://jarvis-be.choigonyok.com/context/signals`, 헤더
    `Authorization: Bearer <CONTEXT_SIGNAL_TOKEN>`, JSON `{"source":"shortcut","kind":"device.carplay","state":"connected"}`.
    첫 실행 때 도메인 연결을 "항상 허용".
+
+## 상대(손님) 폰
+
+손님 계정의 아이폰도 OwnTracks 로 위치를 보낼 수 있다. 자격은 따로다(`OWNTRACKS_GUEST_USER`/`OWNTRACKS_GUEST_PASSWORD`,
+맥미니 `.env`). 같은 `POST /owntracks` 로 오지만 자격으로 갈라, 원본은 `context_raw` 에 `source = owntracks-guest` 로만 남는다:
+운영자의 체류·현재 상태·`context.state`·영역(상대 폰이 보내는 waypoints)은 움직이지 않는다 - 이것들은 운영자 한 사람의 것이고,
+mind·notify 가 그렇게 읽는다. 상대는 콘솔 위치 탭의 '내 폰 연결'에서 `GET /owntracks/setup/guest` 의 링크로 설정을 넣는다.
+
+상대 폰에도 모드를 응답으로 바꿔 준다(`guestWatch`). 운영자 폰은 사건으로 바꾸지만(집·회사를 나서면 Move, 영역에 들면
+Significant), 상대 폰은 지금 있는 자리로 정한다: 영역 안(여기 등록된 영역이나 폰이 스스로 등록한 영역 - 보고의 `inregions`)이거나
+150m 안에 15분 넘게 있었으면 Significant, 그 밖에서 움직이면 Move. 차 안(`automotive`)은 막혀 서 있어도 움직이는 중으로 본다.
+Move 의 타이머 보고(`t: t`)가 멈춰 있는 동안에도 와서, 15분이 지나면 이 판단이 내려진다. 배터리 규칙은 운영자 폰과 같다.
 
 ## 현재 상태 한 장
 

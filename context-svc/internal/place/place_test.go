@@ -115,3 +115,45 @@ func TestBaseline(t *testing.T) {
 		t.Fatalf("%+v %v %q", h, ok, h.Line())
 	}
 }
+
+func TestWatch(t *testing.T) {
+	for _, c := range []struct {
+		settled  bool
+		batt     int
+		charging bool
+		want     int
+	}{
+		{true, 80, false, Significant},
+		{false, 80, false, Move},
+		{false, 15, false, Significant},
+		{false, 15, true, Move},
+		{true, 5, false, Quiet},
+		{false, 0, false, Move}, // 배터리를 모르면 막지 않음
+	} {
+		if got := Watch(c.settled, c.batt, c.charging); got != c.want {
+			t.Errorf("Watch(%v, %d, %v) = %d, 기대 %d", c.settled, c.batt, c.charging, got, c.want)
+		}
+	}
+}
+
+func TestStill(t *testing.T) {
+	at := time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
+	here := Spot{Lat: 37.5559, Lon: 126.9104, At: at}
+	near := func(ago time.Duration) Spot { return Spot{Lat: 37.5563, Lon: 126.9108, At: at.Add(-ago)} }
+	far := func(ago time.Duration) Spot { return Spot{Lat: 37.5600, Lon: 126.9200, At: at.Add(-ago)} }
+	if !Still([]Spot{near(20 * time.Minute), near(5 * time.Minute), here}, here.Lat, here.Lon, at, 150, 15*time.Minute) {
+		t.Fatal("20분 전부터 150m 안: 제자리")
+	}
+	if Still([]Spot{near(10 * time.Minute), here}, here.Lat, here.Lon, at, 150, 15*time.Minute) {
+		t.Fatal("10분밖에 안 됨")
+	}
+	if Still([]Spot{near(30 * time.Minute), far(8 * time.Minute), here}, here.Lat, here.Lon, at, 150, 15*time.Minute) {
+		t.Fatal("8분 전에 다른 곳: 막 도착함")
+	}
+	if !Still([]Spot{near(3 * time.Hour), here}, here.Lat, here.Lon, at, 150, 15*time.Minute) {
+		t.Fatal("조용한 폰의 세 시간 전 위치도 같은 자리면 제자리")
+	}
+	if Still([]Spot{here}, here.Lat, here.Lon, at, 150, 15*time.Minute) {
+		t.Fatal("처음 보고만으로는 모름")
+	}
+}

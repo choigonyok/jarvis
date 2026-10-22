@@ -538,3 +538,128 @@ func TestTrack(t *testing.T) {
 		t.Fatalf("남은 기록이 없는 날: %d %s", code, body)
 	}
 }
+
+// The guest's phone has credentials of its own. Its fixes are kept apart -
+// the operator's visits, state and regions do not move with them - and the
+// reply tells it how to watch: Significant inside a region (one kept here or
+// its own) or after a while in one spot, Move once out and moving.
+func TestGuestPhone(t *testing.T) {
+	dsn := os.Getenv("CONTEXT_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("CONTEXT_TEST_DATABASE_URL 이 없어 건너뜁니다")
+	}
+	ctx := context.Background()
+	st, err := store.Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	resetTables(t, dsn, `truncate context_raw, context_regions, context_visits, context_state restart identity`)
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	seoul, _ := time.LoadLocation("Asia/Seoul")
+	server := New(st, Config{Token: "api", User: "phone", Pass: "pw", GuestUser: "guest-phone", GuestPass: "gpw", Public: "https://gw.example/context"}, nil, quiet)
+	server.now = func() time.Time { return time.Date(2026, 10, 23, 13, 0, 0, 0, seoul) }
+	srv := httptest.NewServer(server.Handler())
+	defer srv.Close()
+	do := func(method, path, body string, set func(*http.Request)) (int, string) {
+		req, _ := http.NewRequest(method, srv.URL+path, strings.NewReader(body))
+		set(req)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	api := func(r *http.Request) { r.Header.Set("Authorization", "Bearer api") }
+	guest := func(r *http.Request) { r.SetBasicAuth("guest-phone", "gpw") }
+	at := func(hm string) int64 {
+		tm, _ := time.ParseInLocation("2006-01-02 15:04", "2026-10-23 "+hm, seoul)
+		return tm.Unix()
+	}
+	if code, _ := do("PUT", "/regions", `{"name":"집","kind":"home","lat":37.5559,"lon":126.9104,"radiusM":120}`, api); code != 200 {
+		t.Fatalf("영역: %d", code)
+	}
+	if code, _ := do("POST", "/owntracks", `{"_type":"location","lat":37.5,"lon":127.0,"acc":10,"tst":1}`, func(r *http.Request) { r.SetBasicAuth("guest-phone", "nope") }); code != 401 {
+		t.Fatalf("틀린 비밀번호: %d", code)
+	}
+	say := func(body string) string {
+		code, reply := do("POST", "/owntracks", body, guest)
+		if code != 200 {
+			t.Fatalf("상대 폰: %d %s", code, reply)
+		}
+		return reply
+	}
+	// At home (a region kept here), already Significant: nothing to say.
+	if r := say(fmt.Sprintf(`{"_type":"location","lat":37.5560,"lon":126.9105,"acc":10,"tst":%d,"m":1,"batt":80}`, at("08:00"))); r != "[]\n" {
+		t.Fatalf("집, Significant 그대로: %s", r)
+	}
+	// Out on the road in a car: Move.
+	if r := say(fmt.Sprintf(`{"_type":"location","lat":37.53,"lon":126.97,"acc":10,"tst":%d,"m":1,"batt":80,"motionactivities":["automotive"]}`, at("08:20"))); !strings.Contains(r, `"monitoring":2`) {
+		t.Fatalf("나가서 움직임 → Move: %s", r)
+	}
+	// At a café nobody registered: still Move ten minutes in, Significant after fifteen.
+	cafe := func(hm, extra string) string {
+		return say(fmt.Sprintf(`{"_type":"location","lat":37.5216,"lon":126.9243,"acc":15,"tst":%d,"m":2,"batt":70,"motionactivities":["stationary"]%s}`, at(hm), extra))
+	}
+	cafe("09:00", "")
+	if r := cafe("09:10", ""); r != "[]\n" {
+		t.Fatalf("10분째는 그대로 Move: %s", r)
+	}
+	if r := cafe("09:16", ""); !strings.Contains(r, `"monitoring":1`) {
+		t.Fatalf("한자리에 15분 → Significant: %s", r)
+	}
+	// A region of its own (the phone says it is in it): Significant at once.
+	if r := say(fmt.Sprintf(`{"_type":"location","lat":37.48,"lon":127.05,"acc":10,"tst":%d,"m":2,"batt":70,"inregions":["상대 회사"]}`, at("10:00"))); !strings.Contains(r, `"monitoring":1`) {
+		t.Fatalf("자기 영역 → Significant: %s", r)
+	}
+	// Its waypoints and transitions change nothing of the operator's.
+	say(`{"_type":"waypoints","waypoints":[{"_type":"waypoint","desc":"집","lat":37.48,"lon":127.05,"rad":100,"tst":1}]}`)
+	say(fmt.Sprintf(`{"_type":"transition","event":"enter","desc":"집","tst":%d}`, at("11:00")))
+	regions, _ := st.Regions(ctx)
+	if len(regions) != 1 || regions[0].Lat != 37.5559 {
+		t.Fatalf("운영자의 영역은 그대로: %+v", regions)
+	}
+	if open, _ := st.Open(ctx); len(open) != 0 {
+		t.Fatalf("체류는 열리지 않음: %+v", open)
+	}
+	code, body := do("GET", "/now", "", api)
+	if code != 200 || strings.Contains(body, `"location"`) {
+		t.Fatalf("운영자의 지금 위치는 없음 그대로: %d %s", code, body)
+	}
+	// The day, by phone.
+	code, body = do("GET", "/track?date=2026-10-23&who=guest", "", api)
+	var tr struct {
+		Who    string
+		Fixes  []store.Fix
+		Visits []store.Visit
+		Since  string
+	}
+	if err := json.Unmarshal([]byte(body), &tr); err != nil || code != 200 || tr.Who != "guest" || len(tr.Fixes) != 6 || len(tr.Visits) != 0 || tr.Since != "2026-10-23" {
+		t.Fatalf("상대의 하루: %d %s", code, body)
+	}
+	if code, body := do("GET", "/track?date=2026-10-23", "", api); code != 200 || !strings.Contains(body, `"fixes":[]`) || !strings.Contains(body, `"who":"owner"`) {
+		t.Fatalf("운영자의 하루에는 상대 위치가 없음: %d %s", code, body)
+	}
+	if code, _ := do("GET", "/track?who=someone", "", api); code != 400 {
+		t.Fatalf("없는 사람: %d", code)
+	}
+	// The guest's setup: its own credentials, nothing of the operator's.
+	if code, _ := do("GET", "/owntracks/setup/guest", "", func(*http.Request) {}); code != 401 {
+		t.Fatalf("토큰 없는 설정: %d", code)
+	}
+	code, body = do("GET", "/owntracks/setup/guest", "", api)
+	var out struct{ Link, URL string }
+	_ = json.Unmarshal([]byte(body), &out)
+	u, err := url.Parse(out.Link)
+	if err != nil || code != 200 || strings.Contains(body, "signals") {
+		t.Fatalf("상대 설정: %d %s", code, body)
+	}
+	raw, _ := base64.StdEncoding.DecodeString(u.Query().Get("inline"))
+	var cfg map[string]any
+	_ = json.Unmarshal(raw, &cfg)
+	if cfg["username"] != "guest-phone" || cfg["password"] != "gpw" || cfg["deviceId"] != "guest-iphone" || cfg["cmd"] != true || cfg["remoteConfiguration"] != true || cfg["url"] != "https://gw.example/context/owntracks" {
+		t.Fatalf("상대 설정 내용: %s", raw)
+	}
+}
