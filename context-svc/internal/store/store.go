@@ -69,6 +69,77 @@ func (s *Store) Readings(ctx context.Context, kind string, since time.Time) ([]p
 	return out, rows.Err()
 }
 
+// Fix is one location report as a map draws it: when, where, how sure, how
+// fast, and what the phone took the body to be doing. Nothing else of the
+// report (the Wi-Fi it was on, its battery) goes out with it.
+type Fix struct {
+	At  time.Time `json:"at"`
+	Lat float64   `json:"lat"`
+	Lon float64   `json:"lon"`
+	Acc float64   `json:"acc"`
+	Vel *float64  `json:"vel,omitempty"` // km/h, as the phone measured it
+	Act string    `json:"act,omitempty"` // automotive, cycling, running, walking or stationary
+}
+
+// Fixes is the location reports in [from, to), oldest first.
+func (s *Store) Fixes(ctx context.Context, from, to time.Time) ([]Fix, error) {
+	return s.fixes(ctx, `and at >= $1 and at < $2 order by at`, from, to)
+}
+
+// FixBefore is the last report before at no rougher than acc meters: where
+// a day began. Nil when none is kept.
+func (s *Store) FixBefore(ctx context.Context, at time.Time, acc float64) (*Fix, error) {
+	fs, err := s.fixes(ctx, `and at < $1 order by at desc limit 200`, at)
+	if err != nil {
+		return nil, err
+	}
+	for _, f := range fs {
+		if f.Acc <= acc {
+			return &f, nil
+		}
+	}
+	return nil, nil
+}
+
+// FirstFix is when the oldest location report still kept was made: how far
+// back a day can be drawn. Nil when there is none.
+func (s *Store) FirstFix(ctx context.Context) (*time.Time, error) {
+	var at *time.Time
+	err := s.pool.QueryRow(ctx, `select min(at) from context_raw where kind = 'location'`).Scan(&at)
+	return at, err
+}
+
+func (s *Store) fixes(ctx context.Context, q string, args ...any) ([]Fix, error) {
+	rows, err := s.pool.Query(ctx, `select at, body from context_raw where kind = 'location' `+q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Fix{}
+	for rows.Next() {
+		var at time.Time
+		var body []byte
+		if err := rows.Scan(&at, &body); err != nil {
+			return nil, err
+		}
+		var r struct {
+			Lat, Lon *float64
+			Acc      float64
+			Vel      *float64
+			Motion   []string `json:"motionactivities"`
+		}
+		if json.Unmarshal(body, &r) != nil || r.Lat == nil || r.Lon == nil {
+			continue
+		}
+		f := Fix{At: at, Lat: *r.Lat, Lon: *r.Lon, Acc: r.Acc, Act: place.Activity(r.Motion)}
+		if r.Vel != nil && *r.Vel >= 0 { // -1: the phone did not know
+			f.Vel = r.Vel
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
 // Purge drops raw reports older than before.
 func (s *Store) Purge(ctx context.Context, before time.Time) (int64, error) {
 	tag, err := s.pool.Exec(ctx, `delete from context_raw where at < $1`, before)

@@ -6,6 +6,23 @@ import (
 	"time"
 )
 
+func TestActivity(t *testing.T) {
+	for _, c := range []struct {
+		says []string
+		want string
+	}{
+		{[]string{"stationary", "automotive"}, "automotive"},
+		{[]string{"walking"}, "walking"},
+		{[]string{"stationary"}, "stationary"},
+		{[]string{"unknown"}, ""},
+		{nil, ""},
+	} {
+		if got := Activity(c.says); got != c.want {
+			t.Errorf("%v → %q, 기대 %q", c.says, got, c.want)
+		}
+	}
+}
+
 func TestInsideAndMode(t *testing.T) {
 	home := Region{Name: "집", Kind: "home", Lat: 37.5559, Lon: 126.9104, RadiusM: 120}
 	work := Region{Name: "회사", Kind: "work", Lat: 37.3947, Lon: 127.1112, RadiusM: 200}

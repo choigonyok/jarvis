@@ -9,6 +9,8 @@
 //	GET    /visits?from=&to= stays in regions
 //	GET    /travel?days=60   the journeys between regions, from the stays,
 //	                         and how long each way usually takes
+//	GET    /track?date=      one day's fixes, where it began and its stays -
+//	                         the 위치 screen draws and replays the day from it
 //	GET    /regions          PUT /regions {name, kind, lat, lon, radiusM, area}
 //	DELETE /regions/{name}
 //	PUT    /owntracks/cmd    {action: status|reportLocation} ask the phone, with
@@ -61,6 +63,9 @@ type Config struct {
 	Public string
 	// Trust: a fix less accurate than this (meters) does not move visits.
 	Trust float64
+	// RawDays is how long the raw reports are kept (CONTEXT_RAW_DAYS): a
+	// day further back has no fixes left to draw.
+	RawDays int
 }
 
 type Server struct {
@@ -76,6 +81,9 @@ type Server struct {
 func New(st *store.Store, cfg Config, events *notify.Client, log *slog.Logger) *Server {
 	if cfg.Trust == 0 {
 		cfg.Trust = 300
+	}
+	if cfg.RawDays == 0 {
+		cfg.RawDays = 30
 	}
 	loc, err := time.LoadLocation("Asia/Seoul")
 	if err != nil {
@@ -96,6 +104,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /now", s.bearer(s.current))
 	mux.HandleFunc("GET /visits", s.bearer(s.visits))
 	mux.HandleFunc("GET /travel", s.bearer(s.travel))
+	mux.HandleFunc("GET /track", s.bearer(s.track))
 	mux.HandleFunc("GET /regions", s.bearer(s.regions))
 	mux.HandleFunc("PUT /regions", s.bearer(s.putRegion))
 	mux.HandleFunc("DELETE /regions/{name}", s.bearer(s.deleteRegion))
@@ -697,6 +706,61 @@ func (s *Server) travel(w http.ResponseWriter, r *http.Request) {
 		routes = []place.Route{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"trips": trips, "routes": routes})
+}
+
+// track is one day's way about (the operator's day, in Seoul), for the 위치
+// screen to draw and replay: every fix of the day, the last trustworthy one
+// before it - where the day began - the stays that overlap it, the regions
+// to name places by, and how far back fixes go (the screen goes no further).
+// The fixes are as the phone sent them, rough ones too: what to smooth or
+// leave out is the drawing's call.
+func (s *Server) track(w http.ResponseWriter, r *http.Request) {
+	now := s.now().In(s.loc)
+	day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, s.loc)
+	if v := r.URL.Query().Get("date"); v != "" {
+		d, err := time.ParseInLocation("2006-01-02", v, s.loc)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "date 는 YYYY-MM-DD 입니다.")
+			return
+		}
+		day = d
+	}
+	end := day.AddDate(0, 0, 1)
+	ctx := r.Context()
+	fixes, err := s.st.Fixes(ctx, day, end)
+	if err != nil {
+		s.fail(w, "위치를 읽지 못했습니다", err)
+		return
+	}
+	before, err := s.st.FixBefore(ctx, day, s.cfg.Trust)
+	if err != nil {
+		s.fail(w, "위치를 읽지 못했습니다", err)
+		return
+	}
+	visits, err := s.st.Visits(ctx, day, end)
+	if err != nil {
+		s.fail(w, "체류를 읽지 못했습니다", err)
+		return
+	}
+	regions, err := s.st.Regions(ctx)
+	if err != nil {
+		s.fail(w, "영역을 읽지 못했습니다", err)
+		return
+	}
+	first, err := s.st.FirstFix(ctx)
+	if err != nil {
+		s.fail(w, "위치를 읽지 못했습니다", err)
+		return
+	}
+	out := map[string]any{
+		"date": day.Format("2006-01-02"), "from": day, "to": end,
+		"fixes": fixes, "before": before, "visits": visits, "regions": regions,
+		"keepDays": s.cfg.RawDays,
+	}
+	if first != nil {
+		out["since"] = first.In(s.loc).Format("2006-01-02")
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // Summary is the state in a line: where (since when), what the devices

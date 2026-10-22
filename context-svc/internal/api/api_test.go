@@ -427,3 +427,114 @@ func TestLateReportKeepsTheStay(t *testing.T) {
 		t.Fatalf("제때 온 나감은 닫아야 합니다: %+v", open)
 	}
 }
+
+// One day's way about comes back as the 위치 screen draws it: that day's
+// fixes in order, with nothing else of the reports, the last good fix
+// before it, its stays, and how far back the fixes go.
+func TestTrack(t *testing.T) {
+	dsn := os.Getenv("CONTEXT_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("CONTEXT_TEST_DATABASE_URL 이 없어 건너뜁니다")
+	}
+	ctx := context.Background()
+	st, err := store.Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	resetTables(t, dsn, `truncate context_raw, context_regions, context_visits, context_state restart identity`)
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	seoul, _ := time.LoadLocation("Asia/Seoul")
+	server := New(st, Config{Token: "api", User: "phone", Pass: "pw", RawDays: 30}, nil, quiet)
+	server.now = func() time.Time { return time.Date(2026, 10, 23, 9, 0, 0, 0, seoul) }
+	srv := httptest.NewServer(server.Handler())
+	defer srv.Close()
+	do := func(method, path, body string, set func(*http.Request)) (int, string) {
+		req, _ := http.NewRequest(method, srv.URL+path, strings.NewReader(body))
+		set(req)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	api := func(r *http.Request) { r.Header.Set("Authorization", "Bearer api") }
+	phone := func(r *http.Request) { r.SetBasicAuth("phone", "pw") }
+	at := func(s string) int64 {
+		tm, err := time.ParseInLocation("2006-01-02 15:04", s, seoul)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tm.Unix()
+	}
+	if code, _ := do("PUT", "/regions", `{"name":"집","kind":"home","lat":37.5559,"lon":126.9104,"radiusM":120}`, api); code != 200 {
+		t.Fatalf("영역: %d", code)
+	}
+	for _, b := range []string{
+		// The evening before: home, then a fix from a cell tower.
+		fmt.Sprintf(`{"_type":"location","lat":37.5560,"lon":126.9105,"acc":12,"tst":%d}`, at("2026-10-21 22:00")),
+		fmt.Sprintf(`{"_type":"location","lat":37.60,"lon":126.95,"acc":2500,"tst":%d}`, at("2026-10-21 23:30")),
+		// The day: at home on the Wi-Fi, on the road in a car, there.
+		fmt.Sprintf(`{"_type":"location","lat":37.5561,"lon":126.9106,"acc":9,"tst":%d,"vel":0,"motionactivities":["stationary"],"ssid":"home-wifi","bssid":"aa:bb:cc"}`, at("2026-10-22 08:00")),
+		fmt.Sprintf(`{"_type":"transition","event":"leave","desc":"집","tst":%d}`, at("2026-10-22 08:05")),
+		fmt.Sprintf(`{"_type":"location","lat":37.53,"lon":126.97,"acc":15,"tst":%d,"vel":48,"motionactivities":["stationary","automotive"]}`, at("2026-10-22 08:20")),
+		fmt.Sprintf(`{"_type":"location","lat":37.4979,"lon":127.0276,"acc":20,"tst":%d,"vel":-1}`, at("2026-10-22 08:45")),
+		// Past midnight: the next day's.
+		fmt.Sprintf(`{"_type":"location","lat":37.5560,"lon":126.9105,"acc":12,"tst":%d}`, at("2026-10-23 00:10")),
+	} {
+		if code, body := do("POST", "/owntracks", b, phone); code != 200 {
+			t.Fatalf("보고: %d %s", code, body)
+		}
+	}
+	if code, _ := do("GET", "/track?date=2026-10-22", "", func(*http.Request) {}); code != 401 {
+		t.Fatalf("토큰 없이: %d", code)
+	}
+	if code, _ := do("GET", "/track?date=2026-13-01", "", api); code != 400 {
+		t.Fatalf("없는 날: %d", code)
+	}
+	code, body := do("GET", "/track?date=2026-10-22", "", api)
+	var tr struct {
+		Date     string
+		From, To time.Time
+		Fixes    []store.Fix
+		Before   *store.Fix
+		Visits   []store.Visit
+		KeepDays int
+		Since    string
+	}
+	if err := json.Unmarshal([]byte(body), &tr); err != nil || code != 200 {
+		t.Fatalf("하루: %d %s", code, body)
+	}
+	if tr.Date != "2026-10-22" || tr.From.Unix() != at("2026-10-22 00:00") || tr.To.Unix() != at("2026-10-23 00:00") {
+		t.Fatalf("하루의 경계: %+v", tr)
+	}
+	if len(tr.Fixes) != 3 || tr.Fixes[0].At.Unix() != at("2026-10-22 08:00") || tr.Fixes[0].Act != "stationary" ||
+		tr.Fixes[1].Act != "automotive" || tr.Fixes[1].Vel == nil || *tr.Fixes[1].Vel != 48 || tr.Fixes[2].Vel != nil {
+		t.Fatalf("그날의 위치 셋, 차례대로: %s", body)
+	}
+	if strings.Contains(body, "home-wifi") || strings.Contains(body, "aa:bb") {
+		t.Fatalf("와이파이는 나가지 않음: %s", body)
+	}
+	if tr.Before == nil || tr.Before.Acc != 12 || tr.Before.At.Unix() != at("2026-10-21 22:00") {
+		t.Fatalf("시작은 기지국 위치가 아니라 그 전 집: %+v", tr.Before)
+	}
+	if len(tr.Visits) != 1 || tr.Visits[0].Region != "집" || tr.Visits[0].LeftAt == nil {
+		t.Fatalf("집에서 나선 체류: %+v", tr.Visits)
+	}
+	if tr.KeepDays != 30 || tr.Since != "2026-10-21" {
+		t.Fatalf("어디까지 거슬러 갈 수 있나: %d %s", tr.KeepDays, tr.Since)
+	}
+	// Without a date, today: the one fix past midnight, begun where the
+	// day before ended.
+	code, body = do("GET", "/track", "", api)
+	tr.Fixes, tr.Before = nil, nil
+	if err := json.Unmarshal([]byte(body), &tr); err != nil || code != 200 || tr.Date != "2026-10-23" || len(tr.Fixes) != 1 ||
+		tr.Before == nil || tr.Before.At.Unix() != at("2026-10-22 08:45") {
+		t.Fatalf("오늘: %d %s", code, body)
+	}
+	if code, body := do("GET", "/track?date=2026-09-01", "", api); code != 200 || !strings.Contains(body, `"fixes":[]`) || !strings.Contains(body, `"before":null`) {
+		t.Fatalf("남은 기록이 없는 날: %d %s", code, body)
+	}
+}

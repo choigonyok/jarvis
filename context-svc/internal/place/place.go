@@ -46,6 +46,19 @@ func KindOf(name string) string {
 	return "other"
 }
 
+// Activity is the one thing the phone took the body to be doing, of the
+// several iOS may say at once: in a car outranks standing still (stopped at
+// a light), and any way of moving outranks not moving. Empty when it said
+// nothing it knows.
+func Activity(says []string) string {
+	for _, a := range []string{"automotive", "cycling", "running", "walking", "stationary"} {
+		if slices.Contains(says, a) {
+			return a
+		}
+	}
+	return ""
+}
+
 // Meters between two points (haversine).
 func Meters(lat1, lon1, lat2, lon2 float64) float64 {
 	const r = 6371000.0
