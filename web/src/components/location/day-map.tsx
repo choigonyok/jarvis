@@ -7,7 +7,7 @@ import { Maximize2 } from "lucide-react";
 import { baseStyle } from "@/components/location/map-style";
 import { type Day, type Mode, type Node, type Stay, headAt, hm } from "@/lib/track";
 
-/** What is laid over the map, inside it: the light, the places' names, the point of light. */
+/** What is laid over the map, inside it: the light, the places' names, the operator's mark. */
 type Layer = {
   canvas: HTMLCanvasElement;
   dot: HTMLDivElement;
@@ -21,11 +21,12 @@ type Layer = {
  * and what is hours old has dimmed; a road gone twice is brighter than one
  * gone once, because light adds up. A walk is a line of dots, a way the phone
  * said nothing about a faint dash. The places stayed at are rings with their
- * names and hours, and the moment shown is a point of light - breathing at
- * the end of today, because that one is now.
+ * names and hours, and where the operator was at the moment shown is their
+ * own mark - a cat's face they chose - in a soft glow that breathes at the
+ * end of today, because that one is now.
  *
  * The base map is MapLibre's (vector tiles through /api/map). The light, the
- * names and the point are this component's own, inside the map over its
+ * names and the mark are this component's own, inside the map over its
  * canvas, placed again with every frame the map draws and every frame of the
  * replay.
  */
@@ -71,12 +72,12 @@ export function DayMap({ day, t, live, follow }: { day: Day; t: number; live: bo
         });
         made.touchZoomRotate.disableRotation();
         made.keyboard.disableRotation();
-        // Over the map's own canvas, in this order: the light, the names, the point.
+        // Over the map's own canvas, in this order: the light, the names, the mark.
         const root = made.getCanvasContainer();
         const canvas = document.createElement("canvas");
         canvas.setAttribute("aria-hidden", "true");
         canvas.className = "pointer-events-none absolute top-0 left-0";
-        const dot = pointOfLight();
+        const dot = mark();
         root.append(canvas, dot);
         layer.current = { canvas, dot, names: new Map(), root };
         let loaded = false;
@@ -125,7 +126,7 @@ export function DayMap({ day, t, live, follow }: { day: Day; t: number; live: bo
     m.fitBounds(b, { padding: padding(m.getContainer()), maxZoom: 15, duration: animate && !reducedMotion() ? 600 : 0 });
   }
 
-  /** While the day replays, the map follows the point of light when it nears an edge. */
+  /** While the day replays, the map follows the mark when it nears an edge. */
   function keepInView() {
     const m = map.current;
     const { day, t, follow } = now.current;
@@ -216,13 +217,13 @@ export function DayMap({ day, t, live, follow }: { day: Day; t: number; live: bo
       ctx.stroke();
     }
 
-    // The point of light: where the operator was at t.
+    // The mark: where the operator was at t.
     const p = position ? at(position) : null;
     l.dot.style.display = p ? "" : "none";
-    if (p) l.dot.style.transform = `translate(${p.x - 22}px, ${p.y - 22}px)`;
+    if (p) l.dot.style.transform = `translate(${p.x - 26}px, ${p.y - 26}px)`;
     l.dot.firstElementChild?.classList.toggle("anim-breathe", live);
 
-    name(l, day, t, at, w);
+    name(l, day, t, at, w, p);
   }
 
   return (
@@ -272,17 +273,23 @@ function brightness(when: number, t: number): number {
   return floor + (1 - floor) * Math.exp(-Math.max(0, t - when) / (75 * 60_000));
 }
 
-/** The point of light: a soft glow (which breathes when it is now) and the dot. */
-function pointOfLight(): HTMLDivElement {
+/**
+ * The operator's mark: the cat's face they chose, over a soft glow that
+ * breathes when it is now. The glow is what keeps the face's dark outline
+ * from sinking into the dark map.
+ */
+function mark(): HTMLDivElement {
   const el = document.createElement("div");
-  el.className = "pointer-events-none absolute top-0 left-0 size-11";
+  el.className = "pointer-events-none absolute top-0 left-0 size-13";
   const halo = document.createElement("span");
   halo.className = "absolute inset-0 rounded-full";
-  halo.style.background = "radial-gradient(circle, rgba(236,237,238,0.42) 0%, rgba(236,237,238,0.12) 42%, transparent 70%)";
-  const dot = document.createElement("span");
-  dot.className = "absolute top-1/2 left-1/2 size-[11px] -translate-1/2 rounded-full bg-foreground";
-  dot.style.boxShadow = "0 0 0 3px rgba(12,13,15,0.7)";
-  el.replaceChildren(halo, dot);
+  halo.style.background = "radial-gradient(circle, rgba(236,237,238,0.5) 0%, rgba(236,237,238,0.16) 45%, transparent 70%)";
+  const face = document.createElement("img");
+  face.src = "/icons/location-cat.png";
+  face.alt = "";
+  face.draggable = false;
+  face.className = "absolute top-1/2 left-1/2 size-9 -translate-1/2 select-none";
+  el.replaceChildren(halo, face);
   return el;
 }
 
@@ -314,11 +321,19 @@ function placesOf(day: Day): Place[] {
 
 /**
  * The places' names, from the moment each is first reached, with its hours
- * so far. A name sits to the right of its ring, or to the left where the
- * right runs off the map or into another name; where neither side is free it
- * waits until the map is zoomed in far enough.
+ * so far. A name sits to the right of its ring (clear of the mark, where the
+ * mark is), or to the left where the right runs off the map or into another
+ * name; where neither side is free it waits until the map is zoomed in far
+ * enough.
  */
-function name(l: Layer, day: Day, t: number, at: (p: Node) => { x: number; y: number }, w: number) {
+function name(
+  l: Layer,
+  day: Day,
+  t: number,
+  at: (p: Node) => { x: number; y: number },
+  w: number,
+  mark: { x: number; y: number } | null,
+) {
   const places = placesOf(day);
   const keep = new Set(places.map((p) => p.key));
   for (const [key, n] of l.names) {
@@ -358,12 +373,14 @@ function name(l: Layer, day: Day, t: number, at: (p: Node) => { x: number; y: nu
     }
     const p = at(place.node);
     const y = p.y - n.h / 2;
+    // Where the mark is, the name stands clear of the cat's face.
+    const gap = mark && Math.hypot(mark.x - p.x, mark.y - p.y) < 26 ? 26 : 12;
     const free = (x: number) =>
       x >= 4 &&
       x + n.w <= w - 4 &&
       !taken.some((b) => x < b.x + b.w + 6 && x + n.w + 6 > b.x && y < b.y + b.h && y + n.h > b.y);
-    const right = p.x + 12;
-    const left = p.x - 12 - n.w;
+    const right = p.x + gap;
+    const left = p.x - gap - n.w;
     const x = free(right) ? right : free(left) ? left : null;
     if (x === null) {
       n.el.style.display = "none";
