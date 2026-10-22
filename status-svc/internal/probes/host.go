@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/choigonyok/jarvis/status-svc/internal/check"
@@ -138,4 +139,59 @@ func (e *env) hostFalkorAOF() check.Probe {
 				return check.Verdict{State: check.Fail, Summary: "꺼져 있어요. 마지막 스냅숏 뒤의 쓰기가 비정상 종료에 사라져요."}
 			}
 		})
+}
+
+// kakaoLoginFacts is what the Mac mini's KakaoTalk relogin program last saw
+// (kakaotalk-client/cmd/relogin, ~/.jarvis-host/kakaotalk-login.json beside
+// host.json). It writes on every look, every half minute or so.
+type kakaoLoginFacts struct {
+	CheckedAt  time.Time  `json:"checkedAt"`
+	State      string     `json:"state"`
+	Detail     string     `json:"detail"`
+	Fails      int        `json:"fails"`
+	ReloggedAt *time.Time `json:"reloggedAt"`
+}
+
+func (e *env) kakaoLogin(context.Context) check.Verdict {
+	raw, err := os.ReadFile(filepath.Join(filepath.Dir(e.HostFile), "kakaotalk-login.json"))
+	if err != nil {
+		return check.Verdict{State: check.Unknown, Summary: "자동 로그인 프로그램이 설치되지 않았어요(scripts/kakaotalk-relogin install)."}
+	}
+	var k kakaoLoginFacts
+	if json.Unmarshal(raw, &k) != nil {
+		return check.Verdict{State: check.Unknown, Summary: "자동 로그인 기록을 읽지 못했어요."}
+	}
+	at := k.CheckedAt
+	v := check.Verdict{ObservedAt: &at, ObservedLabel: "맥미니에서 확인"}
+	if k.ReloggedAt != nil && time.Since(*k.ReloggedAt) < 24*time.Hour {
+		v.Facts = append(v.Facts, fmt.Sprintf("%s 에 로그아웃돼 있던 것을 저절로 다시 로그인했어요", k.ReloggedAt.Local().Format("01-02 15:04")))
+	}
+	if k.Detail != "" {
+		v.Facts = append(v.Facts, k.Detail)
+	}
+	if time.Since(k.CheckedAt) > 5*time.Minute {
+		v.State, v.Summary = check.Fail, "자동 로그인 프로그램이 5분 넘게 응답하지 않아요."
+		return v
+	}
+	switch k.State {
+	case "logged-in", "no-window", "relogged":
+		v.State, v.Summary = check.OK, "카톡이 로그인돼 있어요."
+	case "offline":
+		v.State, v.Summary = check.Warn, "로그아웃돼 있어요. 인터넷이 돌아오면 다시 로그인해요."
+	case "waiting", "failed":
+		v.State, v.Summary = check.Warn, fmt.Sprintf("로그아웃돼 있어요. 로그인을 %d번 실패해 다음 차례를 기다려요.", k.Fails)
+	case "notice", "starting":
+		v.State, v.Summary = check.Warn, "로그아웃돼서 다시 로그인하는 중이에요."
+	case "gave-up":
+		v.State, v.Summary = check.Fail, "로그인을 세 번 실패해 멈췄어요. 맥미니에서 직접 로그인해 주세요."
+	case "needs-person":
+		v.State, v.Summary = check.Fail, "휴대폰 확인처럼 사람이 해야 하는 화면이 떠서 멈췄어요."
+	case "no-access":
+		v.State, v.Summary = check.Fail, "자동 로그인 프로그램에 손쉬운 사용 권한이 없어요."
+	case "no-password":
+		v.State, v.Summary = check.Fail, "자동 로그인에 쓸 비밀번호가 저장돼 있지 않아요."
+	default:
+		v.State, v.Summary = check.Warn, "카톡 화면을 알아보지 못했어요."
+	}
+	return v
 }

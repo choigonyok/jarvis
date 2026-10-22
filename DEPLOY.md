@@ -82,6 +82,11 @@
   방식으로 대신 돌고 5분마다 다시 확인한다). 시스템 설정 → 개인정보 보호 및 보안 → 전체 디스크 접근
   권한에 `~/.local/bin/jarvis-imessage-mirror` 를 추가하면 5분 안에 저절로 직접 복사로 바뀐다. 그 뒤
   원격 로그인(sshd-keygen-wrapper)의 권한을 끄고 authorized_keys 의 jarvis-imessage-mirror 줄을 지운다.
+- **카톡 자동 로그인은 전용 바이너리에만 손쉬운 사용 권한을 준다.** 카톡은 인터넷이 오래 끊겼다 돌아오면
+  로그아웃되고, 그동안 카톡 수집이 조용히 멈춘다. `scripts/kakaotalk-relogin install`(맥북에서)이 LaunchAgent 로
+  올리고, 처음 뜰 때 macOS 가 묻는 손쉬운 사용을 시스템 설정 → 개인정보 보호 및 보안 → 손쉬운 사용에서
+  `jarvis-kakaotalk-relogin` 에 켠다. 비밀번호는 `scripts/kakaotalk-relogin password` 로 맥미니 키체인에 넣는다
+  (사람이 직접 입력). 상태 탭의 "카톡 로그인"이 결과를 보여 준다.
 - **서비스별 DB 역할 비밀번호:** `scripts/db-roles` (`.env` 의 `JARVIS_DB_PASSWORD_*`).
 
 **root 로 돌던 이미지에서 올릴 때 한 번(2026-10-16):** 수집기와 브라우저가 이제 root 가 아니다.

@@ -80,3 +80,35 @@ reaches it at `http://kakaotalk:8090` and proxies through `/api/kakaotalk/*`.
 > incoming messages while the app is connected are written immediately (no need
 > to open the room), but history from while it was closed only syncs when you
 > open that chat.
+
+## Logged back in after a logout (`cmd/relogin`)
+
+KakaoTalk on the Mac mini logs itself out when the network comes back after a
+long drop (twelve minutes offline on 2026-10-19 and 2026-10-22), and a
+logged-out KakaoTalk writes nothing: every message stops without an error.
+`cmd/relogin` watches KakaoTalk through the macOS accessibility API from a
+LaunchAgent on the Mac mini (it cannot run in a container - the app's
+windows are only reachable from the logged-in session):
+
+- every half minute it reads KakaoTalk's windows; a notice about the logout
+  gets its 확인 (only such a notice, or any while the login window is up),
+- the login window gets the password kept in the login keychain and its
+  로그인 - only once Kakao's servers answer again, one try at a time, again
+  after 2 and 10 minutes, and not after three failures in a row (a wrong
+  password tried on and on locks the account). A screen asking for the phone
+  stops it too; KakaoTalk's own 자동 로그인 is ticked while the window is open,
+- what it saw and did goes to `~/.jarvis-host/kakaotalk-login.json`, which the
+  상태 tab reads as "카톡 로그인".
+
+```bash
+scripts/kakaotalk-relogin install    # from the MacBook: build, sign, LaunchAgent on the Mac mini
+scripts/kakaotalk-relogin password   # type the Kakao account and password here; it goes to the Mac mini's keychain
+scripts/kakaotalk-relogin status     # state and the last lines of the log
+scripts/kakaotalk-relogin inspect    # the shape of KakaoTalk's windows, for when its login window changes
+```
+
+Once, at the Mac mini: allow it under System Settings → Privacy & Security →
+Accessibility (macOS asks when it first starts). The binary is ad-hoc signed,
+so a rebuild is a new program to macOS: that permission, and the keychain
+item, may have to be given again.
+

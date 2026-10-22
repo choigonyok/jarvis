@@ -74,6 +74,13 @@ func All(cfg Config) []check.Probe {
 			Run:   e.kakaoMessages,
 		},
 		{
+			ID: "kakao.login", Group: "수집", Name: "카톡 로그인",
+			Rule:  "맥미니 카톡이 로그인돼 있으면 정상 - 로그아웃돼도 자동 로그인 프로그램이 다시 로그인해요. 인터넷이 돌아오길 기다리거나 다시 시도할 차례를 기다리면 주의, 세 번 실패해 멈췄거나 휴대폰 확인이 필요하거나 권한·비밀번호가 없으면 이상. 프로그램을 설치하기 전에는 측정하지 않아요.",
+			Fix:   "scripts/kakaotalk-relogin status 로 상태와 로그를 보세요. 권한이 없으면 맥미니의 시스템 설정 → 개인정보 보호 및 보안 → 손쉬운 사용에서 jarvis-kakaotalk-relogin 을 켜고, 비밀번호가 없으면 scripts/kakaotalk-relogin password. 멈췄으면 맥미니에서 직접 로그인하면 다시 지켜봐요.",
+			Every: 30 * time.Second,
+			Run:   e.kakaoLogin,
+		},
+		{
 			ID: "mind.reading", Group: "수집", Name: "대화 해석",
 			Rule:  "mind 가 카톡·iMessage·jarvis 대화를 읽고 있으면 정상. 읽히지 않은 메시지가 30분 넘게 밀리면 주의, 2시간을 넘거나 LLM 키가 없으면 이상. 방이 3분 조용해지면(나와의 채팅은 45초) 읽는 게 보통이에요.",
 			Fix:   "mind 콘솔(맥미니 127.0.0.1:8102)에서 밀린 방을 보세요. 해석이 실패하고 있다면 오늘 LLM 예산(MIND_DAILY_USD)이나 키를 확인하세요.",
