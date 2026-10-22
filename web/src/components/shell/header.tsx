@@ -15,6 +15,7 @@ import {
   LayoutGrid,
   LogOut,
   type LucideIcon,
+  MapPin,
   MessageCircle,
   MessagesSquare,
   MonitorPlay,
@@ -58,6 +59,7 @@ const ICON: Record<string, LucideIcon> = {
   "/photos": Images,
   "/edit": Brush,
   "/life": BookUser,
+  "/location": MapPin,
   "/calendar": CalendarDays,
   "/screen": MonitorPlay,
   "/kakao": MessagesSquare,
@@ -91,6 +93,8 @@ const secondary: Tab[] = [
   { href: "/edit", label: "편집" },
   // Jarvis 가 내 생활에서 읽어 낸 것: 나에 대한 노트, 회고한 장소, 가진 물건, 식사.
   { href: "/life", label: "생활" },
+  // 하루 동안 어디를 다녔는지: 폰이 보낸 위치를 지도 위에 되감아 보고, 끝은 지금.
+  { href: "/location", label: "위치" },
   { href: "/screen", label: "화면" },
   { href: "/kakao", label: "카톡" },
   // 맨 끝. 매일 여는 곳이 아니라 뭔가 이상할 때 찾아오는 곳이다.
@@ -115,7 +119,7 @@ const visible = (tabs: Tab[], role: Role) =>
  * four tabs and no 더보기.
  */
 const OWNER_BAR = ["/", "/jobs", "/assets", "/spending", "/calendar", "/workout", "/record"];
-const OWNER_MORE = ["/life", "/photos", "/edit", "/screen", "/kakao", "/status"];
+const OWNER_MORE = ["/life", "/location", "/photos", "/edit", "/screen", "/kakao", "/status"];
 const GUEST_BAR = ["/", "/calendar", "/workout", "/edit"];
 
 const byHref = new Map([...primary, ...secondary].map((t) => [t.href, t]));
