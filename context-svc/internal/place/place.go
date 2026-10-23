@@ -103,17 +103,45 @@ func Watch(settled bool, batt int, charging bool) int {
 	return Battery(want, batt, charging)
 }
 
-// Battery is a mode as the battery allows it: below 20% and not charging, no
-// Move (Significant instead); below 8%, Quiet. A battery the phone did not
-// report is not held against it.
+// Low is the battery below which a phone does not use Move: OwnTracks' own
+// downgrade, set to the same (Daily), so the phone and the rules here agree.
+const Low = 20
+
+// Battery is a mode as the battery allows it: below Low and not charging, no
+// Move (Significant instead) until it is charged or back over Low. Never
+// Quiet: a quiet phone says nothing, and with no report to answer the server
+// could not wake it again. A battery the phone did not report is not held
+// against it.
 func Battery(want, batt int, charging bool) int {
-	if batt > 0 && batt < 20 && !charging && want == Move {
-		want = Significant
-	}
-	if batt > 0 && batt < 8 && !charging {
-		want = Quiet
+	if Downgraded(want, batt, charging) {
+		return Significant
 	}
 	return want
+}
+
+// Downgraded is whether the battery keeps a phone that should be in Move
+// out of it.
+func Downgraded(want, batt int, charging bool) bool {
+	return want == Move && batt > 0 && batt < Low && !charging
+}
+
+// RegionRadius is every region's radius, here and on the phones: each is put
+// back to it once a day, whatever was set by hand.
+const RegionRadius = 50
+
+// Daily is the settings each phone is put back to once a day, whatever was
+// changed on it by hand (setConfiguration changes only what it names):
+// extended data on - the mode and the motion the rules here read come with
+// it -, Move given up below Low battery (downgrade), fixes rougher than 100 m
+// ignored, and in Move a fix every minute or every 50 m.
+func Daily() map[string]any {
+	return map[string]any{
+		"_type": "cmd", "action": "setConfiguration",
+		"configuration": map[string]any{
+			"_type": "configuration", "extendedData": true, "downgrade": Low,
+			"ignoreInaccurateLocations": 100, "locatorInterval": 60, "locatorDisplacement": 50,
+		},
+	}
 }
 
 // Spot is a fix, for Still.

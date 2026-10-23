@@ -26,6 +26,7 @@ POST /owntracks   OwnTracks HTTP 모드 (Basic). {"_type":"location", lat, lon, 
                   또는 {"_type":"transition", event: enter|leave, desc: 영역 이름, tst}
                   응답: [] 또는 모드를 바꾸는 명령
                   [{"_type":"cmd","action":"setConfiguration","configuration":{"_type":"configuration","monitoring":2}}]
+                  - 하루 첫 위치 보고에는 매일 되돌리는 설정과 영역 목록 요청도(아래 '매일 되돌리는 것')
 POST /signals     {source, kind, state, at?} (Bearer 신호 토큰). kind 는 device.carplay, device.focus,
                   device.charging, mac.app 처럼 소문자 점 표기, state 는 짧은 값
 ```
@@ -37,10 +38,32 @@ POST /signals     {source, kind, state, at?} (Bearer 신호 토큰). kind 는 de
 모드 전환(응답 명령): 폰이 지금 있는 자리로 정한다(2026-10-23, 그 전에는 '집·회사를 떠나면 Move, 어딘가 도착하면
 Significant'). 영역 안(여기 등록된 영역이나 폰이 스스로 등록한 영역 - 보고의 `inregions`)이거나 150m 안에 15분 넘게
 있었으면 Significant(아낌), 그 밖에서 움직이면 Move(자세히). 차 안(`automotive`)은 막혀 서 있어도 움직이는 중이다. 영역
-진입·이탈 보고는 들어가면 Significant, 나와서 어느 영역에도 없으면 Move. 늦게 온 위치나 거친 위치는 판단하지 않는다.
-Move 의 타이머 보고(`t: t`)가 멈춰 있는 동안에도 와서, 15분이 지나면 판단이 내려진다. 배터리 20% 미만이면 Move 를 하지
-않고, 8% 미만이면 Quiet. 손으로 건 모드(`PUT /owntracks/mode`)는 한 시간 동안 이 규칙보다 앞선다. 서버가 먼저 폰을 깨울 수
-없어서, 바꾸는 계기는 늘 폰이 보낸 보고다. OwnTracks 에서 원격 설정(Remote configuration)을 켜야 적용된다.
+진입·이탈 보고는 들어가면 Significant, 나와서 어느 영역에도 없으면 바로 Move - 두 폰 모두. '15분 넘게 한자리'는 마지막으로
+영역을 나선 때(이탈 보고나 체류 종료)와 마지막으로 원 안에 있던 위치 뒤부터 센다: 집에 있던 몇 시간이 집을 막 나선 위치를
+'한자리'로 만들어 다시 Significant 로 되돌리지 않게(2026-10-23 고침). 늦게 온 위치나 거친 위치는 판단하지 않는다.
+Move 의 타이머 보고(`t: t`)가 멈춰 있는 동안에도 와서, 15분이 지나면 판단이 내려진다. 배터리 20% 미만이고 충전 중이
+아니면 Move 대신 Significant(OwnTracks 의 다운그레이드와 같은 기준) - Quiet 으로는 보내지 않는다: 조용한 폰은 보고가 없어
+서버가 다시 깨울 수 없다. 전환 메시지에는 배터리가 없어 마지막 위치의 배터리를 쓴다. 손으로 건 모드(`PUT
+/owntracks/mode`)는 한 시간 동안 이 규칙보다 앞선다. 서버가 먼저 폰을 깨울 수 없어서, 바꾸는 계기는 늘 폰이 보낸 보고다.
+OwnTracks 에서 원격 설정(Remote configuration)을 켜야 적용된다. 판단과 그 이유(`region|still|car|moving|left|held`,
+배터리, `downgraded`)는 폰마다 `owntracks.watch(.guest)` 에 두고 `/track` 이 `watch` 로 내준다 - 위치 탭이 모드와 배터리
+때문에 Move 를 쉬는 것을 보여 준다.
+
+매일 되돌리는 것(`phones.go`): 폰마다 서울 기준 하루의 첫 위치 보고에 답하면서 OwnTracks 설정을 되돌린다 -
+`extendedData` 켬(모드 `m` 과 움직임이 이것과 함께 온다), `downgrade` 20, `ignoreInaccurateLocations` 100,
+`locatorInterval` 60, `locatorDisplacement` 50(`setConfiguration` 은 적은 키만 바꾼다, iOS 소스 `Settings fromDictionary`).
+같은 답에 `{"_type":"cmd","action":"waypoints"}` 로 영역 목록 전체를 받고, 반경이 50m 가 아닌 영역은 그 답에
+`setWaypoints` 로 50m 로 돌려놓는다 - 앱은 영역을 `rid` 로 찾아 바꾸므로 폰이 보낸 `rid`·`tst` 를 그대로 쓴다(없으면
+새로 추가돼 둘이 된다). 여기 둔 영역(`context_regions`, 상대는 `guest.regions`)도 그날 50m 가 된다. 이름만 붙인 점(반경
+0)은 받는 즉시 50m 영역으로 바꿔 보낸다(앱은 반경 0 을 감시하지 않는다). 손으로 바꾼 반경은 다음 날까지 둔다. 폰의 목록과
+id 는 운영자 `owntracks.regions`, 상대 `guest.regions` 에 둔다.
+
+위치 등록(`POST /owntracks/regions`, 상대는 `/owntracks/regions/guest`, `{name, lat, lon}`): 콘솔 위치 탭에서 지금 있는
+곳을 그 사람 폰의 50m 영역으로 만든다. 여기에는 바로 넣고(있는 곳이면 도착 알림 없이 체류로), 폰에는 다음 보고의 답에
+`setWaypoints` 와 목록 요청을 실어 보낸다 - 폰의 목록에 보일 때까지 10분마다, 일주일까지(`owntracks.push(.guest)`). 같은
+이름이 있으면 그 영역을 옮긴다(같은 `rid`). 폰의 목록을 아직 받은 적이 없으면(`owntracks.listed(.guest)` 없음) 목록부터
+받아 같은 이름이 있는지 보고 보낸다. 목록을 알면 답에 `owntracks:///config?inline=` 링크도 실어, 폰에서 눌러 바로 넣을 수
+있다(앱이 바뀌는 내용을 보여 주고 묻는다). `/track` 의 `pending` 이 아직 폰에 가는 중인 이름이다.
 
 필드 이름은 OwnTracks 문서(owntracks.org/booklet, 2026-10-15 확인)와 맞췄다: `configuration.monitoring` 은 -1 Quiet,
 0 Manual, 1 Significant, 2 Move. `bs`(배터리 상태)는 0 모름, 1 빠짐, 2 충전 중, 3 가득. HTTP 문서의 응답 예시에는
@@ -64,6 +87,7 @@ GET    /track?date=YYYY-MM-DD&who=owner|guest
                             하루를 그리고 되감는다. who=guest 는 상대 폰의 것: 체류는 없고, regions 는 상대 폰의
                             영역, otherRegions 는 운영자의 영역(상대가 영역을 두지 않은 곳의 이름)
 GET    /owntracks/setup/guest  상대 폰의 OwnTracks 설정 링크: 상대 계정만 담고 운영자의 것(신호 토큰·단축어)은 없다
+POST   /owntracks/regions   {name, lat, lon} 위치 등록 - 운영자 폰의 50m 영역(위 '위치 등록'). 상대 것은 /owntracks/regions/guest
 GET    /regions             PUT /regions {name, kind(home|work|camp|shop|food|other), lat, lon, radiusM, area}
 DELETE /regions/{name}
 ```
@@ -94,16 +118,16 @@ jarvis 웹의 **상태 → 폰 연결**을 아이폰에서 열고 차례로 누�
 mind·notify 가 그렇게 읽는다. 상대는 콘솔 위치 탭의 '내 폰 연결'에서 `GET /owntracks/setup/guest` 의 링크로 설정을 넣는다.
 
 상대 폰에서 만든 영역은 상대 것으로 따로 둔다(`context_state` 의 `guest.regions`, 운영자의 `context_regions` 와 섞지 않음).
-앱은 영역 하나를 저장할 때마다 `waypoint`(앱의 id `rid` 와 함께)를 보내므로 이름을 바꿔도 같은 영역으로 바뀌고, 반경 0 인 점
-(앱의 "+" 가 처음 만드는 Here-…)은 영역이 아니다. 지운 영역은 앱이 알리지 않아서, 하루에 한 번 응답에 `{"_type":"cmd",
-"action":"waypoints"}` 를 실어 영역 목록 전체를 다시 받는다(`guest.waypoints.asked`).
+앱은 영역 하나를 저장할 때마다 `waypoint`(앱의 id `rid` 와 함께)를 보내므로 이름을 바꿔도 같은 영역으로 바뀌고, 이름을
+붙이기 전의 점(앱의 "+" 가 처음 만드는 Here-…)은 영역이 아니다. 지운 영역은 앱이 알리지 않아서, 매일 첫 보고 때 받는 영역
+목록 전체로 맞춘다(위 '매일 되돌리는 것').
 상대가 자기 영역에 들고 나면(전환 메시지, 또는 위치가 든 원·앱의 `inregions`) `location.guest.enter|leave` 이벤트를 낸다 -
 알림은 운영자의 위치 알림과 같은 모양(`log`, 알림함에만)이고 받는 사람은 손님(`audience: guest`)이다. 운영자의
 `location.enter|leave` 와 이름이 달라 mind 의 생활 판단에는 들어가지 않는다. 지금 든 영역은 `guest.inside` 에 두고, 늦게 온
 보고는 무시하며, 첫 보고와 영역을 새로 만들거나 이름을 바꾸는 순간은 도착·출발로 치지 않는다.
 
-상대 폰의 모드도 운영자 폰과 같은 규칙으로 응답에서 바꾼다(`guestWatch`, 위의 모드 전환, 상대 영역 안도 자리 잡은 것) -
-손으로 거는 모드만 없다.
+상대 폰의 모드도 운영자 폰과 같은 규칙으로 응답에서 바꾼다(`guestWatch`, 위의 모드 전환, 상대 영역 안도 자리 잡은 것.
+자기 영역을 나서는 전환 메시지에도 바로 Move) - 손으로 거는 모드만 없다.
 
 ## 현재 상태 한 장
 
@@ -160,5 +184,12 @@ notify-svc 가 이것을 듣고 **운전·회의 중에는 즉시 알림을 붙�
   Basic 인증 통과). `PUT /owntracks/cmd {"action":"status"}` 에 폰이 상태 메시지로 답했고, `PUT /owntracks/mode {"mode":2}` 를 걸자
   다음 보고의 응답으로 setConfiguration 이 나가 그 뒤 보고가 `m=2`(Move)로 왔다. 처음 한 번은 원격 설정 스위치가 꺼져 있어 적용되지
   않았는데, 그때 서버가 보낸 것을 바뀐 것으로 쳐서 다시 보내지 않던 것을 고쳤다: 이제 보고의 `m` 이 기준이다.
-- 폰 설정 링크(Postgres 흐름 테스트): 토큰 없이 401, inline 을 풀면 HTTP 모드·URL·계정·Significant·cmd·remoteConfiguration.
+- 두 폰의 관리(`phones_test.go`, 2026-10-23): 집을 나서는 전환 메시지에 바로 Move, 같은 자리의 위치가 Significant 로
+  되돌리지 않고(예전 판정으로 돌리면 이 테스트가 실패하는 것까지 확인), 나와서 한자리에 15분이면 Significant - 운영자·상대 둘
+  다. 배터리 15% 면 Move 대신 Significant 에 `downgraded`, 충전 중이면 Move. 하루 첫 보고에 설정 다섯 개와 목록 요청, 같은
+  날 두 번은 아님, 여기 영역은 바로 50m, 이름 붙인 점은 바로 50m 영역으로, Here-… 는 무시, 손으로 바꾼 반경은 다음 날 목록에서
+  `rid` 그대로 50m 로. 위치 등록: 토큰·이름·좌표 검사, 목록을 모르면 목록부터 묻고 폰의 같은 이름 영역을 그 `rid` 로 옮기며,
+  목록에 보이면 끝, 목록을 알면 바로 넣는 링크, 있는 곳에 만든 상대 영역은 도착 알림 없이 출발만.
+- 폰 설정 링크(Postgres 흐름 테스트): 토큰 없이 401, inline 을 풀면 HTTP 모드·URL·계정·Significant·cmd·remoteConfiguration
+  과 매일 되돌리는 설정 다섯 개.
   waypoints 로 영역이 들어오고 여기서 정한 종류·동네는 남는다. 수집기의 배달앱 알림 줄 읽기(다시 넣기·다른 앱은 무시).

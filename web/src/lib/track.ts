@@ -47,6 +47,30 @@ export type Track = {
   /** How many days of fixes are kept, and the day of the oldest one. */
   keepDays: number;
   since?: string;
+  /** How the phone was last told to watch, and why (context-svc's judgment). */
+  watch?: Watch;
+  /** Regions made in the console still on their way to the phone. */
+  pending?: string[];
+};
+
+/** OwnTracks' monitoring modes, as context-svc says them. */
+export const SIGNIFICANT = 1;
+export const MOVE = 2;
+
+/**
+ * How a phone watches now, and why: in a region, still in one spot outside
+ * them, in a car, moving, just out of a region, or a mode asked for by hand.
+ * downgraded: it would be in Move but for its battery (below 20%, not
+ * charging), so its way is drawn sparsely until it is charged.
+ */
+export type Watch = {
+  at: string;
+  mode: number;
+  why: "region" | "still" | "car" | "moving" | "left" | "held";
+  region?: string;
+  batt?: number;
+  charging?: boolean;
+  downgraded?: boolean;
 };
 
 export type LatLon = { lat: number; lon: number };
@@ -523,6 +547,13 @@ export function toward(word: string): string {
   return tail === 0 || tail === 8 ? `${word}로` : `${word}으로`;
 }
 
+/** A word as the object of a sentence: 집을, 회사를. */
+export function object(word: string): string {
+  const code = word.charCodeAt(word.length - 1) - 0xac00;
+  if (code < 0 || code > 11171) return `${word}을(를)`;
+  return code % 28 === 0 ? `${word}를` : `${word}을`;
+}
+
 export const MODE_WORD: Record<Mode, string> = {
   drive: "차로 이동",
   walk: "걸어서 이동",
@@ -546,6 +577,21 @@ export function todayOf(now: number): string {
 export function shiftDay(date: string, by: number): string {
   const [y, m, d] = date.split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, d + by)).toISOString().slice(0, 10);
+}
+
+/** What a region made in the console comes back as: the region, and - when the phone's list is known - a link that puts it on the phone at once. */
+export type Registered = { region: Region; link?: string };
+
+/** Make where the viewer's phone is now one of its regions (50 m). */
+export async function registerRegion(who: Who, name: string, at: LatLon): Promise<Registered> {
+  const res = await fetch(`/api/context/owntracks/regions${who === "guest" ? "/guest" : ""}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name, lat: at.lat, lon: at.lon }),
+  });
+  const body = (await res.json().catch(() => null)) as (Registered & { error?: string }) | null;
+  if (!res.ok || !body) throw new Error(body?.error ?? `위치 서비스가 ${res.status}로 답했어요.`);
+  return body;
 }
 
 export async function readTrack(date: string, who: Who): Promise<Track> {

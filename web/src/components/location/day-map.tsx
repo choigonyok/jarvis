@@ -25,6 +25,13 @@ const TONE = { mine: "194, 167, 244", partner: "246, 187, 112" } as const;
 const toneOf = (p: Person) => TONE[p.me ? "mine" : "partner"];
 
 /**
+ * A place being made one of a phone's regions (위치 등록): its circle on the
+ * map, dashed while it is being named and drawn whole once it is made - so
+ * how far 50 m reaches is seen, not imagined.
+ */
+export type Spot = { lat: number; lon: number; radius: number; name: string; tone: keyof typeof TONE; made?: boolean };
+
+/**
  * The day on a map, as light: the way gone so far up to the moment shown,
  * drawn the way a long exposure records headlights. What is recent is bright
  * and what is hours old has dimmed; a road gone twice is brighter than one
@@ -43,16 +50,28 @@ const toneOf = (p: Person) => TONE[p.me ? "mine" : "partner"];
  * canvas, placed again with every frame the map draws and every frame of the
  * replay.
  */
-export function DayMap({ scene, t, live, follow }: { scene: Scene; t: number; live: boolean; follow: boolean }) {
+export function DayMap({
+  scene,
+  t,
+  live,
+  follow,
+  spot = null,
+}: {
+  scene: Scene;
+  t: number;
+  live: boolean;
+  follow: boolean;
+  spot?: Spot | null;
+}) {
   const box = useRef<HTMLDivElement>(null);
   const map = useRef<MapLibre | null>(null);
   const layer = useRef<Layer | null>(null);
   const [ready, setReady] = useState(false);
   const [broken, setBroken] = useState<string | null>(null);
   // What a draw reads: the map's own events call it outside React.
-  const now = useRef({ scene, t, live, follow });
+  const now = useRef({ scene, t, live, follow, spot });
   useLayoutEffect(() => {
-    now.current = { scene, t, live, follow };
+    now.current = { scene, t, live, follow, spot };
   });
 
   useEffect(() => {
@@ -132,6 +151,26 @@ export function DayMap({ scene, t, live, follow }: { scene: Scene; t: number; li
     keepInView();
   }, [t, live]);
 
+  // A place being made a region: the map goes to it, close enough to see its
+  // circle; done with, back to the whole day.
+  const spotAt = spot ? `${spot.lat.toFixed(6)},${spot.lon.toFixed(6)}` : "";
+  const spotted = useRef(false);
+  useEffect(() => {
+    const m = map.current;
+    const s = now.current.spot;
+    if (!m || !ready) return;
+    if (s) {
+      spotted.current = true;
+      m.easeTo({ center: [s.lon, s.lat], zoom: Math.max(m.getZoom(), 16.6), duration: reducedMotion() ? 0 : 700 });
+    } else if (spotted.current) {
+      spotted.current = false;
+      fit(true);
+    }
+  }, [spotAt, ready]);
+  useLayoutEffect(() => {
+    draw();
+  }, [spot]);
+
   function fit(animate: boolean) {
     const m = map.current;
     const b = now.current.scene.bounds;
@@ -197,6 +236,8 @@ export function DayMap({ scene, t, live, follow }: { scene: Scene; t: number; li
         ctx.stroke();
       }
     }
+
+    if (now.current.spot) circle(ctx, now.current.spot, at, w, getComputedStyle(m.getContainer()).fontFamily);
 
     // Each person's mark: where they were at t. Two at the same place stand
     // side by side, so neither face hides the other.
@@ -330,6 +371,54 @@ function light(
     ctx.lineWidth = style.width;
     ctx.stroke();
   }
+}
+
+/**
+ * The circle of a place being made a region: its true size at this zoom, a
+ * soft fill, a dashed edge until it is made (then whole), and beside it what
+ * it is to be called and how wide it is - on the right, or on the left where
+ * the right runs off the map.
+ */
+function circle(
+  ctx: CanvasRenderingContext2D,
+  spot: Spot,
+  at: (p: { lat: number; lon: number }) => { x: number; y: number },
+  w: number,
+  font: string,
+) {
+  const c = at(spot);
+  const r = Math.max(4, Math.abs(at({ lat: spot.lat + spot.radius / 111_320, lon: spot.lon }).y - c.y));
+  const tone = TONE[spot.tone];
+  ctx.beginPath();
+  ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
+  ctx.fillStyle = `rgba(${tone}, ${spot.made ? 0.16 : 0.09})`;
+  ctx.fill();
+  ctx.setLineDash(spot.made ? [] : [5, 5]);
+  ctx.lineWidth = 1.6;
+  ctx.strokeStyle = `rgba(${tone}, 0.92)`;
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  const title = spot.name || "이름을 정해 주세요";
+  const size = `반경 ${spot.radius}m`;
+  ctx.save();
+  ctx.shadowColor = "#0c0d0f";
+  ctx.shadowBlur = 6;
+  ctx.textBaseline = "middle";
+  ctx.font = `500 12.5px ${font}`;
+  const titleWidth = ctx.measureText(title).width;
+  ctx.font = `400 11px ${font}`;
+  const width = Math.max(titleWidth, ctx.measureText(size).width);
+  const left = c.x + r + 10 + width > w - 4;
+  ctx.textAlign = left ? "right" : "left";
+  const x = left ? c.x - r - 10 : c.x + r + 10;
+  ctx.font = `500 12.5px ${font}`;
+  ctx.fillStyle = spot.name ? "rgba(241, 241, 243, 0.94)" : "rgba(241, 241, 243, 0.6)";
+  ctx.fillText(title, x, c.y - 8);
+  ctx.font = `400 11px ${font}`;
+  ctx.fillStyle = "rgba(166, 167, 172, 0.95)";
+  ctx.fillText(size, x, c.y + 8);
+  ctx.restore();
 }
 
 /** Each person's own face on the map, as they chose it: the operator's grey cat, the guest's cream one. */

@@ -41,8 +41,11 @@ func TestInsideAndMode(t *testing.T) {
 	if m := Battery(Move, 15, true); m != Move {
 		t.Fatalf("충전 중이면 그대로: %d", m)
 	}
-	if m := Battery(Significant, 5, false); m != Quiet {
-		t.Fatalf("배터리가 거의 없으면 조용히: %d", m)
+	if m := Battery(Move, 5, false); m != Significant {
+		t.Fatalf("배터리가 거의 없어도 Quiet 은 아님 - 조용한 폰은 다시 깨울 수 없음: %d", m)
+	}
+	if !Downgraded(Move, 19, false) || Downgraded(Significant, 19, false) || Downgraded(Move, 20, false) || Downgraded(Move, 0, false) {
+		t.Fatal("다운그레이드는 Move 를 원할 때, 20% 아래, 충전 중이 아닐 때만")
 	}
 }
 
@@ -124,7 +127,7 @@ func TestWatch(t *testing.T) {
 		{false, 80, false, Move},
 		{false, 15, false, Significant},
 		{false, 15, true, Move},
-		{true, 5, false, Quiet},
+		{true, 5, false, Significant},
 		{false, 0, false, Move}, // 배터리를 모르면 막지 않음
 	} {
 		if got := Watch(c.settled, c.batt, c.charging); got != c.want {

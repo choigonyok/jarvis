@@ -2,14 +2,16 @@
 
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, Pause, Play } from "lucide-react";
+import { ChevronLeft, ChevronRight, Info, LocateFixed, Pause, Play } from "lucide-react";
 import { Header, TabBar } from "@/components/shell/header";
 import { Retry } from "@/components/shell/retry";
 import { useRole } from "@/components/shell/role";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { PhoneSetup } from "@/components/status/phone-setup";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { DayMap } from "@/components/location/day-map";
+import { DayMap, type Spot } from "@/components/location/day-map";
+import { ModeTag, ModesSheet } from "@/components/location/phone-mode";
+import { type Here, RegisterPanel } from "@/components/location/register";
 import { Strip } from "@/components/location/strip";
 import { onResume } from "@/lib/resume";
 import { isPending } from "@/lib/thread";
@@ -174,6 +176,10 @@ export function Location() {
           loading={read?.date !== date}
           view={view}
           onView={choose}
+          me={me}
+          tracks={read?.tracks ?? {}}
+          readAt={read?.at ?? 0}
+          onReload={load}
         />
       ) : (
         <Waiting error={read?.date === date ? error : undefined} onRetry={load} view={view} onView={choose} />
@@ -300,6 +306,10 @@ function Viewer({
   loading,
   view,
   onView,
+  me,
+  tracks,
+  readAt,
+  onReload,
 }: {
   scene: Scene;
   date: string;
@@ -308,24 +318,70 @@ function Viewer({
   loading: boolean;
   view: View;
   onView: (v: View) => void;
+  me: Who;
+  tracks: Partial<Record<Who, Track>>;
+  readAt: number;
+  onReload: () => Promise<void>;
 }) {
   const { t, playing, speed, setSpeed, play, pause, seek } = usePlayback(scene);
   const [connecting, setConnecting] = useState(false);
+  // 위치 등록: the panel under the map asks the name while the map shows the
+  // circle; ⓘ says what it does and how each phone watches now.
+  const [registering, setRegistering] = useState(false);
+  const [spot, setSpot] = useState<Spot | null>(null);
+  const [explaining, setExplaining] = useState(false);
   const atEnd = t >= scene.end;
   const live = scene.today && atEnd && !playing;
   const first = earliest(scene, today);
   const both = scene.people.length > 1;
   const still = scene.people.every((p) => p.day.nodes.length === 0);
+  const mine = tracks[me];
+  // How each phone watches is now's to say: on today's screen, at now.
+  const watchOf = (p: Person) => (live ? tracks[p.who]?.watch : undefined);
+
+  function register() {
+    setExplaining(false);
+    pause();
+    if (scene.today) seek(scene.end);
+    setRegistering(true);
+  }
+  function stopRegistering() {
+    setRegistering(false);
+    setSpot(null);
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col sm:landscape:flex-row">
       <div className="relative min-h-0 flex-1">
-        <DayMap scene={scene} t={t} live={live} follow={playing} />
+        <DayMap scene={scene} t={t} live={live} follow={playing} spot={spot} />
         <ViewSwitch view={view} onView={onView} />
-        <Empty scene={scene} onConnect={() => setConnecting(true)} />
+        {registering ? null : (
+          <>
+            <Empty scene={scene} onConnect={() => setConnecting(true)} />
+            <PlaceButtons onExplain={() => setExplaining(true)} onRegister={register} />
+          </>
+        )}
       </div>
       <aside className="inset-x-safe flex shrink-0 flex-col border-t border-edge-soft bg-background pb-tabbar sm:landscape:w-[22rem] sm:landscape:border-t-0 sm:landscape:border-l sm:landscape:pl-0 lg:landscape:w-[25rem]">
-        <div className="mx-auto w-full max-w-[42rem] px-4 pt-2 pb-3 sm:px-8 sm:landscape:px-5 sm:landscape:pt-4">
+        {registering ? (
+          <div className="mx-auto w-full max-w-[42rem] px-4 pt-3 pb-4 sm:px-8 sm:landscape:px-5 sm:landscape:pt-4">
+            <RegisterPanel
+              who={me}
+              names={(mine?.regions ?? []).map((r) => r.name)}
+              fallback={lastFix(mine)}
+              readAt={readAt}
+              onSpot={setSpot}
+              onClose={stopRegistering}
+              onMade={() => void onReload()}
+            />
+          </div>
+        ) : null}
+        <div
+          className={cn(
+            "mx-auto w-full max-w-[42rem] px-4 pt-2 pb-3 sm:px-8 sm:landscape:px-5 sm:landscape:pt-4",
+            registering && "hidden",
+          )}
+        >
           <div className="flex items-center justify-between gap-2">
             <div className="-ml-3 flex min-w-0 items-center">
               <Arrow label="전날" disabled={date <= first} onClick={() => onDate(shiftDay(date, -1))}>
@@ -398,12 +454,14 @@ function Viewer({
                   <span aria-hidden className={cn("size-[6px] shrink-0 rounded-full", p.me ? "bg-mine" : "bg-partner")} />
                   <span className="sr-only">{p.me ? "나" : "상대"}: </span>
                   <span className="truncate">{sentence(p.day, t, live)}</span>
+                  <ModeTag watch={watchOf(p)} onOpen={() => setExplaining(true)} />
                 </p>
               ))}
             </div>
           ) : (
-            <p aria-live={playing ? "off" : "polite"} className="mt-1.5 truncate text-[13.5px] text-dim">
-              {sentence(scene.people[0].day, t, live)}
+            <p aria-live={playing ? "off" : "polite"} className="mt-1.5 flex min-w-0 items-center gap-2 text-[13.5px] text-dim">
+              <span className="truncate">{sentence(scene.people[0].day, t, live)}</span>
+              <ModeTag watch={watchOf(scene.people[0])} onOpen={() => setExplaining(true)} />
             </p>
           )}
 
@@ -411,8 +469,17 @@ function Viewer({
             <Strip scene={scene} t={t} onSeek={seek} onHold={(held) => held && pause()} />
           </div>
         </div>
-        <DayList scene={scene} t={t} onSeek={seek} />
+        {registering ? null : <DayList scene={scene} t={t} onSeek={seek} />}
       </aside>
+
+      <ModesSheet
+        open={explaining}
+        onOpenChange={setExplaining}
+        phones={([me, me === "owner" ? "guest" : "owner"] as Who[]).map((who) => ({ who, me: who === me, track: tracks[who] }))}
+        today={scene.today}
+        readAt={readAt}
+        onRegister={register}
+      />
 
       <Sheet open={connecting} onOpenChange={setConnecting}>
         <SheetContent side="bottom" className="inset-x-safe pb-safe max-h-[88dvh] overflow-y-auto border-edge-soft bg-background">
@@ -426,6 +493,41 @@ function Viewer({
       </Sheet>
     </div>
   );
+}
+
+/**
+ * ⓘ and 위치 등록, over the map's bottom right: register where the viewer's own
+ * phone is now as one of its regions, or read what that does and how the
+ * phones watch.
+ */
+function PlaceButtons({ onExplain, onRegister }: { onExplain: () => void; onRegister: () => void }) {
+  return (
+    <div className="absolute right-3 bottom-3 z-10 flex items-center gap-0.5 rounded-full bg-popover p-1 shadow-[0_6px_16px_-6px_oklch(0_0_0/70%)]">
+      <button
+        type="button"
+        onClick={onExplain}
+        aria-label="위치 등록과 모드 설명"
+        title="위치 등록과 모드"
+        className="flex size-9 items-center justify-center rounded-full text-dim transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 mouse:size-7"
+      >
+        <Info aria-hidden className="size-[17px]" strokeWidth={1.8} />
+      </button>
+      <button
+        type="button"
+        onClick={onRegister}
+        className="flex h-9 items-center gap-1.5 rounded-full bg-glass-raised pr-3.5 pl-3 text-[12.5px] text-foreground transition-colors outline-none hover:bg-foreground/15 focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-7"
+      >
+        <LocateFixed aria-hidden className="size-4 text-mine" strokeWidth={1.8} />
+        위치 등록
+      </button>
+    </div>
+  );
+}
+
+/** The phone's last trusted fix (100 m or better), for 위치 등록 when the browser gives none. */
+function lastFix(track: Track | undefined): Here | null {
+  const f = [...(track?.fixes ?? [])].reverse().find((x) => x.acc <= 100) ?? track?.before;
+  return f ? { lat: f.lat, lon: f.lon, acc: Math.round(f.acc), at: Date.parse(f.at), from: "phone" } : null;
 }
 
 /** 나 · 함께 · 상대, over the map's top left: the calendar's own words and dots for the two people. */

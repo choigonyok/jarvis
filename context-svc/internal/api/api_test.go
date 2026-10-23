@@ -66,9 +66,12 @@ func TestFlow(t *testing.T) {
 	if code, _ := do("POST", "/owntracks", `{"_type":"location","lat":37.5559,"lon":126.9104,"acc":10,"tst":1760500000}`, func(r *http.Request) { r.SetBasicAuth("phone", "nope") }); code != 401 {
 		t.Fatalf("틀린 비밀번호: %d", code)
 	}
-	// At home: a visit opens from the fix alone.
+	// At home: a visit opens from the fix alone. The day's first fix is
+	// answered with the day's upkeep: the settings put back, the regions
+	// asked for - and no change of mode.
 	code, body := do("POST", "/owntracks", `{"_type":"location","lat":37.5560,"lon":126.9105,"acc":10,"tst":1760500000,"batt":80}`, phone)
-	if code != 200 || body != "[]\n" {
+	if code != 200 || !strings.Contains(body, `"downgrade":20`) || !strings.Contains(body, `"locatorInterval":60`) ||
+		!strings.Contains(body, `{"_type":"cmd","action":"waypoints"}`) || strings.Contains(body, "monitoring") {
 		t.Fatalf("집 위치: %d %s", code, body)
 	}
 	// Leaving home (the transition): the phone is told to watch closely.
@@ -170,26 +173,39 @@ func TestWaypointsAndSetup(t *testing.T) {
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
 	srv := httptest.NewServer(New(st, Config{Token: "api", SignalToken: "sig", User: "phone", Pass: "pw", Public: "https://gw.example/context"}, nil, quiet).Handler())
 	defer srv.Close()
-	post := func(body string) int {
+	post := func(body string) (int, string) {
 		req, _ := http.NewRequest("POST", srv.URL+"/owntracks", strings.NewReader(body))
 		req.SetBasicAuth("phone", "pw")
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)
 		}
-		resp.Body.Close()
-		return resp.StatusCode
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
 	}
-	if code := post(`{"_type":"waypoints","waypoints":[{"_type":"waypoint","desc":"집","lat":37.55,"lon":126.91,"rad":120,"tst":1},
-		{"_type":"waypoint","desc":"회사","lat":37.40,"lon":127.11,"rad":200,"tst":1},{"_type":"waypoint","desc":"지수네 집","lat":37.56,"lon":126.92,"rad":30,"tst":1}]}`); code != 200 {
-		t.Fatalf("waypoints: %d", code)
+	// The whole list: every region kept, and put back to 50 m - here, and on
+	// the phone by the reply (each by its id). The 50 m one is left be.
+	code, body := post(`{"_type":"waypoints","waypoints":[{"_type":"waypoint","desc":"집","lat":37.55,"lon":126.91,"rad":120,"tst":1,"rid":"h1"},
+		{"_type":"waypoint","desc":"회사","lat":37.40,"lon":127.11,"rad":200,"tst":2,"rid":"w1"},{"_type":"waypoint","desc":"지수네 집","lat":37.56,"lon":126.92,"rad":50,"tst":3,"rid":"j1"}]}`)
+	var cmds []struct {
+		Action    string
+		Waypoints struct{ Waypoints []map[string]any }
+	}
+	if err := json.Unmarshal([]byte(body), &cmds); err != nil || code != 200 || len(cmds) != 1 || cmds[0].Action != "setWaypoints" || len(cmds[0].Waypoints.Waypoints) != 2 {
+		t.Fatalf("waypoints: %d %s", code, body)
+	}
+	for _, wp := range cmds[0].Waypoints.Waypoints {
+		if wp["rad"] != 50.0 || (wp["rid"] != "h1" && wp["rid"] != "w1") || wp["tst"] == 0.0 {
+			t.Fatalf("50m 로, 같은 id 로: %s", body)
+		}
 	}
 	regions, _ := st.Regions(ctx)
 	got := map[string]place.Region{}
 	for _, r := range regions {
 		got[r.Name] = r
 	}
-	if got["집"].Kind != "home" || got["집"].RadiusM != 120 || got["회사"].Area != "판교" || got["회사"].Lat != 37.40 || got["지수네 집"].Kind != "other" || got["지수네 집"].RadiusM != 50 {
+	if got["집"].Kind != "home" || got["집"].RadiusM != 50 || got["회사"].Area != "판교" || got["회사"].Lat != 37.40 || got["회사"].RadiusM != 50 || got["지수네 집"].Kind != "other" || got["지수네 집"].RadiusM != 50 {
 		t.Fatalf("영역: %+v", got)
 	}
 
@@ -221,7 +237,8 @@ func TestWaypointsAndSetup(t *testing.T) {
 	var cfg map[string]any
 	_ = json.Unmarshal(raw, &cfg)
 	if cfg["_type"] != "configuration" || cfg["mode"] != 3.0 || cfg["url"] != "https://gw.example/context/owntracks" || cfg["username"] != "phone" ||
-		cfg["password"] != "pw" || cfg["cmd"] != true || cfg["remoteConfiguration"] != true || cfg["monitoring"] != 1.0 {
+		cfg["password"] != "pw" || cfg["cmd"] != true || cfg["remoteConfiguration"] != true || cfg["monitoring"] != 1.0 ||
+		cfg["extendedData"] != true || cfg["downgrade"] != 20.0 || cfg["ignoreInaccurateLocations"] != 100.0 || cfg["locatorInterval"] != 60.0 || cfg["locatorDisplacement"] != 50.0 {
 		t.Fatalf("설정: %s", raw)
 	}
 	if out.Signals.URL != "https://gw.example/context/signals" || out.Signals.Token != "sig" {
@@ -637,9 +654,10 @@ func TestGuestPhone(t *testing.T) {
 		}
 		return reply
 	}
-	// At home (a region kept here), already Significant: nothing to say but
-	// the first ask for its regions.
-	if r := say(fmt.Sprintf(`{"_type":"location","lat":37.5560,"lon":126.9105,"acc":10,"tst":%d,"m":1,"batt":80}`, at("08:00"))); r != `[{"_type":"cmd","action":"waypoints"}]`+"\n" {
+	// At home (a region kept here), already Significant: no change of mode -
+	// only the day's upkeep (its settings, and the ask for its regions).
+	if r := say(fmt.Sprintf(`{"_type":"location","lat":37.5560,"lon":126.9105,"acc":10,"tst":%d,"m":1,"batt":80}`, at("08:00"))); strings.Contains(r, "monitoring") ||
+		!strings.Contains(r, `"extendedData":true`) || !strings.Contains(r, `{"_type":"cmd","action":"waypoints"}`) {
 		t.Fatalf("집, Significant 그대로: %s", r)
 	}
 	// Out on the road in a car: Move.
@@ -838,7 +856,7 @@ func TestGuestRegions(t *testing.T) {
 	}
 	code, body := do("GET", "/track?date=2026-10-23&who=guest", "", api)
 	if err := json.Unmarshal([]byte(body), &tr); err != nil || code != 200 || len(tr.Regions) != 2 || tr.Regions[0].Name != "직장" || tr.Regions[1].Name != "집" ||
-		tr.Regions[1].Lat != 37.6 || tr.Regions[1].RadiusM != 100 || len(tr.OtherRegions) != 1 || tr.OtherRegions[0].Lat != 37.5559 {
+		tr.Regions[1].Lat != 37.6 || tr.Regions[1].RadiusM != 50 || len(tr.OtherRegions) != 1 || tr.OtherRegions[0].Lat != 37.5559 {
 		t.Fatalf("상대의 영역: %d %s", code, body)
 	}
 	if code, body := do("GET", "/track?date=2026-10-23", "", api); code != 200 || strings.Contains(body, "otherRegions") || !strings.Contains(body, `"lat":37.5559`) || strings.Contains(body, "직장") {

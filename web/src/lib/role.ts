@@ -49,6 +49,7 @@ const GUEST_API = [
   "/api/version",
   "/api/context/track",
   "/api/context/owntracks/setup/guest",
+  "/api/context/owntracks/regions/guest",
   "/api/map",
 ];
 /** Static files a guest may load: the editor the 편집 tab frames (scripts/photocraft.mjs). */

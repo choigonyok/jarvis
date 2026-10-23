@@ -171,6 +171,12 @@ func (s *Store) PutRegion(ctx context.Context, r place.Region) error {
 	return err
 }
 
+// SetRadius puts every region's radius to m.
+func (s *Store) SetRadius(ctx context.Context, m int) error {
+	_, err := s.pool.Exec(ctx, `update context_regions set radius_m = $1 where radius_m <> $1`, m)
+	return err
+}
+
 func (s *Store) DeleteRegion(ctx context.Context, name string) error {
 	tag, err := s.pool.Exec(ctx, `delete from context_regions where name = $1`, name)
 	if err == nil && tag.RowsAffected() == 0 {
@@ -216,6 +222,16 @@ func (s *Store) visits(ctx context.Context, q string, args ...any) ([]Visit, err
 		out = append(out, v)
 	}
 	return out, rows.Err()
+}
+
+// LastLeave is when the phone last left a region, zero if never.
+func (s *Store) LastLeave(ctx context.Context) (time.Time, error) {
+	var at *time.Time
+	err := s.pool.QueryRow(ctx, `select max(left_at) from context_visits`).Scan(&at)
+	if err != nil || at == nil {
+		return time.Time{}, err
+	}
+	return *at, nil
 }
 
 // Enter opens a visit to region at at, unless one is open. It reports
