@@ -16,6 +16,7 @@ import (
 type fakeFeed struct {
 	arrivals map[string][]transit.Arrival // by stop id
 	err      error
+	missed   error // beside the stops near
 	asked    int
 }
 
@@ -30,7 +31,7 @@ func (f *fakeFeed) Lines(_ context.Context, s transit.Stop) ([]transit.Line, err
 	return []transit.Line{{ID: "7770", Name: "7770", Toward: "강남역 방면"}}, nil
 }
 func (f *fakeFeed) Near(_ context.Context, lat, lon float64) ([]transit.Stop, error) {
-	return []transit.Stop{{Kind: transit.Bus, Region: transit.Gyeonggi, ID: "200", Name: "성균관대역", Lat: lat + 0.001, Lon: lon}}, nil
+	return []transit.Stop{{Kind: transit.Bus, Region: transit.Gyeonggi, ID: "200", Name: "성균관대역", Lat: lat + 0.001, Lon: lon}}, f.missed
 }
 func (f *fakeFeed) Search(_ context.Context, q string) ([]transit.Stop, error) {
 	return []transit.Stop{{Kind: transit.Subway, ID: q, Name: q + "역"}}, nil
@@ -92,6 +93,11 @@ func TestTransitRoutes(t *testing.T) {
 	if code, body := p.do("GET", "/transit/guest/stops?near=me", "", bearerAPI); code != 200 || !strings.Contains(body, "성균관대역") || !strings.Contains(body, `"dist":`) {
 		t.Fatalf("손님 근처: %d %s", code, body)
 	}
+	feed.missed = &transit.Partial{What: "역", Err: &transit.FeedError{Msg: "근처 역을 찾지 못했어요"}}
+	if code, body := p.do("GET", "/transit/guest/stops?near=me", "", bearerAPI); code != 200 || !strings.Contains(body, "성균관대역") || !strings.Contains(body, `"missed":"역은 빠졌어요: 근처 역을 찾지 못했어요"`) {
+		t.Fatalf("일부 피드만 답함: %d %s", code, body)
+	}
+	feed.missed = nil
 	if code, _ := p.do("GET", "/transit/stops?near=me", "", bearerAPI); code != 404 {
 		t.Fatalf("운영자 폰 위치가 없으면: %d", code)
 	}

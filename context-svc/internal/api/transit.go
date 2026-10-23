@@ -237,8 +237,12 @@ func (s *Server) transitStops(source string) http.HandlerFunc {
 	}
 }
 
+// answerStops is the stops found. Some feeds failing while others found stops
+// is said beside them (missed) - bus stops missing for a key not yet
+// registered should not read as none there.
 func (s *Server) answerStops(w http.ResponseWriter, stops []transit.Stop, err error, from ...float64) {
-	if err != nil {
+	var partial *transit.Partial
+	if err != nil && !errors.As(err, &partial) {
 		writeErr(w, http.StatusBadGateway, err.Error())
 		return
 	}
@@ -246,6 +250,9 @@ func (s *Server) answerStops(w http.ResponseWriter, stops []transit.Stop, err er
 		stops = []transit.Stop{}
 	}
 	out := map[string]any{"stops": stops}
+	if partial != nil {
+		out["missed"] = partial.Error()
+	}
 	if len(from) == 2 {
 		out["from"] = map[string]float64{"lat": from[0], "lon": from[1]}
 	}

@@ -177,51 +177,29 @@ func (f *Feeds) Lines(ctx context.Context, s Stop) ([]Line, error) {
 func (f *Feeds) Near(ctx context.Context, lat, lon float64) ([]Stop, error) {
 	key := fmt.Sprintf("near:%.3f,%.3f", lat, lon)
 	v, err := f.remember(key, 5*time.Minute, func() (any, error) {
-		var (
-			wg      sync.WaitGroup
-			mu      sync.Mutex
-			out     []Stop
-			lastErr error
+		out, err := gather(
+			lookup{"버스 정류장", func() ([]Stop, error) { return f.gyeonggiNear(ctx, lat, lon) }},
+			lookup{"버스 정류장", func() ([]Stop, error) { return f.seoulNear(ctx, lat, lon) }},
+			// Stations stay where they are: a neighbourhood's (about 100 m) are
+			// kept a week - OpenStreetMap's mirrors take a quarter of a minute.
+			lookup{"역", func() ([]Stop, error) {
+				v, err := f.remember(fmt.Sprintf("stations:%.3f,%.3f", lat, lon), 7*24*time.Hour, func() (any, error) { return f.stations(ctx, lat, lon, 1500) })
+				if err != nil {
+					return nil, err
+				}
+				return slices.Clone(v.([]Stop)), nil
+			}},
 		)
-		look := func(get func() ([]Stop, error)) {
-			defer wg.Done()
-			stops, err := get()
-			mu.Lock()
-			defer mu.Unlock()
-			if err != nil {
-				lastErr = err
-				return
-			}
-			out = append(out, stops...)
-		}
-		wg.Add(3)
-		go look(func() ([]Stop, error) { return f.gyeonggiNear(ctx, lat, lon) })
-		go look(func() ([]Stop, error) { return f.seoulNear(ctx, lat, lon) })
-		// Stations stay where they are: a neighbourhood's (about 100 m) are
-		// kept a week - OpenStreetMap's mirrors take a quarter of a minute.
-		go look(func() ([]Stop, error) {
-			v, err := f.remember(fmt.Sprintf("stations:%.3f,%.3f", lat, lon), 7*24*time.Hour, func() (any, error) { return f.stations(ctx, lat, lon, 1500) })
-			if err != nil {
-				return nil, err
-			}
-			return slices.Clone(v.([]Stop)), nil
-		})
-		wg.Wait()
 		for i := range out {
 			if out[i].Lat != 0 || out[i].Lon != 0 {
 				out[i].Dist = int(Meters(lat, lon, out[i].Lat, out[i].Lon))
 			}
 		}
 		slices.SortStableFunc(out, func(a, b Stop) int { return a.Dist - b.Dist })
-		if len(out) == 0 && lastErr != nil {
-			return nil, lastErr
-		}
-		return out, nil
+		return out, err
 	})
-	if err != nil {
-		return nil, err
-	}
-	return v.([]Stop), nil
+	stops, _ := v.([]Stop)
+	return stops, err
 }
 
 // Search is stops by name or stop number: bus stops in both bus feeds, and a
@@ -229,28 +207,11 @@ func (f *Feeds) Near(ctx context.Context, lat, lon float64) ([]Stop, error) {
 func (f *Feeds) Search(ctx context.Context, q string) ([]Stop, error) {
 	q = strings.TrimSpace(q)
 	v, err := f.remember("search:"+q, 10*time.Minute, func() (any, error) {
-		var (
-			wg      sync.WaitGroup
-			mu      sync.Mutex
-			out     []Stop
-			lastErr error
+		out, err := gather(
+			lookup{"버스 정류장", func() ([]Stop, error) { return f.gyeonggiSearch(ctx, q) }},
+			lookup{"버스 정류장", func() ([]Stop, error) { return f.seoulSearch(ctx, q) }},
+			lookup{"역", func() ([]Stop, error) { return f.station(ctx, q) }},
 		)
-		look := func(get func() ([]Stop, error)) {
-			defer wg.Done()
-			stops, err := get()
-			mu.Lock()
-			defer mu.Unlock()
-			if err != nil {
-				lastErr = err
-				return
-			}
-			out = append(out, stops...)
-		}
-		wg.Add(3)
-		go look(func() ([]Stop, error) { return f.gyeonggiSearch(ctx, q) })
-		go look(func() ([]Stop, error) { return f.seoulSearch(ctx, q) })
-		go look(func() ([]Stop, error) { return f.station(ctx, q) })
-		wg.Wait()
 		// The station first, then bus stops by name.
 		slices.SortStableFunc(out, func(a, b Stop) int {
 			if (a.Kind == Subway) != (b.Kind == Subway) {
@@ -261,15 +222,55 @@ func (f *Feeds) Search(ctx context.Context, q string) ([]Stop, error) {
 			}
 			return 0
 		})
-		if len(out) == 0 && lastErr != nil {
-			return nil, lastErr
-		}
-		return out, nil
+		return out, err
 	})
-	if err != nil {
-		return nil, err
+	stops, _ := v.([]Stop)
+	return stops, err
+}
+
+// Partial is stops found while some of the feeds asked for them failed:
+// what is missing, and why.
+type Partial struct {
+	What string
+	Err  error
+}
+
+func (p *Partial) Error() string { return p.What + "은 빠졌어요: " + p.Err.Error() }
+func (p *Partial) Unwrap() error { return p.Err }
+
+// lookup is one feed's stops among several asked at once, and what they are
+// - "버스 정류장" or "역" - for saying they are missing.
+type lookup struct {
+	what string
+	get  func() ([]Stop, error)
+}
+
+// gather asks the lookups at once. When none finds any, the first failure is
+// the answer; when some do, what they found comes with a *Partial naming the
+// first that failed.
+func gather(lookups ...lookup) ([]Stop, error) {
+	found := make([][]Stop, len(lookups))
+	failed := make([]error, len(lookups))
+	var wg sync.WaitGroup
+	for i, l := range lookups {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			found[i], failed[i] = l.get()
+		}()
 	}
-	return v.([]Stop), nil
+	wg.Wait()
+	out := slices.Concat(found...)
+	for i, err := range failed {
+		if err == nil {
+			continue
+		}
+		if len(out) == 0 {
+			return nil, err
+		}
+		return out, &Partial{What: lookups[i].what, Err: err}
+	}
+	return out, nil
 }
 
 // --- the feeds ---------------------------------------------------------------
@@ -291,13 +292,25 @@ func (f *Feeds) get(ctx context.Context, u string) ([]byte, error) {
 	if resp.StatusCode >= 500 {
 		return nil, &FeedError{fmt.Sprintf("실시간 정보 서버가 %d 로 답했어요", resp.StatusCode)}
 	}
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		if err := keyTrouble(body, f.service(u)); err != nil {
+			return nil, err
+		}
+		return nil, &FeedError{"실시간 정보 서버가 키를 받아 주지 않았어요"}
+	}
 	return body, nil
 }
 
 // keyTrouble is data.go.kr's word on the key, when a call is refused for it.
-func keyTrouble(body []byte) error {
+// service is the listing the call is under there - the one to apply for
+// (활용신청) when the key is not registered for it - or "" if not known.
+func keyTrouble(body []byte, service string) error {
 	switch t := string(body); {
-	case strings.Contains(t, "SERVICE_KEY_IS_NOT_REGISTERED") || strings.Contains(t, "SERVICE KEY IS NOT REGISTERED"):
+	// 서울's bus feed says it in Korean, with a 401: "유효하지 않은 서비스키입니다: 등록되지 않은 서비스키".
+	case strings.Contains(t, "SERVICE_KEY_IS_NOT_REGISTERED") || strings.Contains(t, "SERVICE KEY IS NOT REGISTERED") || strings.Contains(t, "등록되지 않은 서비스키"):
+		if service != "" {
+			return &FeedError{"공공데이터포털 키가 아직 ‘" + service + "’에 등록되지 않았어요 - 활용신청하면 한 시간쯤 뒤부터 돼요"}
+		}
 		return &FeedError{"공공데이터포털 키가 이 정보에 아직 등록되지 않았어요 - 활용신청이 승인되고 한 시간쯤 걸려요"}
 	case strings.Contains(t, "LIMITED_NUMBER_OF_SERVICE_REQUESTS"):
 		return &FeedError{"오늘 쓸 수 있는 실시간 정보 호출을 다 썼어요"}
@@ -305,6 +318,20 @@ func keyTrouble(body []byte) error {
 		return &FeedError{"공공데이터포털이 이 서버의 요청을 막았어요"}
 	}
 	return nil
+}
+
+// service is the data.go.kr listing a call to u is under, by its name there.
+func (f *Feeds) service(u string) string {
+	for _, s := range []struct{ base, name string }{
+		{f.GyeonggiArrivals, "경기도_버스도착정보 조회"},
+		{f.GyeonggiStations, "경기도_정류소 조회"},
+		{f.SeoulStations, "서울특별시_정류소정보조회 서비스"},
+	} {
+		if s.base != "" && strings.HasPrefix(u, s.base) {
+			return s.name
+		}
+	}
+	return ""
 }
 
 // gbis asks 경기's bus feed: op under base, with params, for the list named
@@ -320,7 +347,7 @@ func (f *Feeds) gbis(ctx context.Context, base, op string, params url.Values, li
 	if err != nil {
 		return nil, err
 	}
-	if err := keyTrouble(body); err != nil {
+	if err := keyTrouble(body, f.service(base)); err != nil {
 		return nil, err
 	}
 	var env struct {
@@ -496,7 +523,7 @@ func (f *Feeds) seoulBus(ctx context.Context, op string, params url.Values) ([]m
 	if err != nil {
 		return nil, err
 	}
-	if err := keyTrouble(body); err != nil {
+	if err := keyTrouble(body, f.service(f.SeoulStations)); err != nil {
 		return nil, err
 	}
 	var code, msg string

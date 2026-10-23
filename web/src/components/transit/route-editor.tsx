@@ -68,12 +68,16 @@ function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null;
   const [lines, setLines] = useState<Line[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [missed, setMissed] = useState<string | null>(null);
 
   async function look(by: Parameters<typeof findStops>[1]) {
     setBusy("stops");
     setError(null);
+    setMissed(null);
     try {
-      setStops((await findStops(who, by)).stops);
+      const found = await findStops(who, by);
+      setStops(found.stops);
+      setMissed(found.missed ?? null);
     } catch (e) {
       const why = e instanceof Error ? e.message : "정류장을 찾지 못했어요.";
       // No fix from the phone yet: the browser's own place, then.
@@ -171,6 +175,7 @@ function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null;
                 <p className="mt-3 text-dim">찾은 정류장이 없어요. 다른 이름으로 찾아 보세요.</p>
               )
             ) : null}
+            {missed ? <p className="mt-2 text-[12px] leading-[1.55] break-keep text-dim">{missed}</p> : null}
           </>
         )}
       </Step>

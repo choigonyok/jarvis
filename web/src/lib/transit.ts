@@ -86,11 +86,15 @@ export async function saveRoutes(who: Who, routes: Route[]): Promise<Route[]> {
   return (await read<{ routes: Route[] }>(res)).routes;
 }
 
-/** Stops near where one's phone last was (near "me"), near a point, or by name. */
+/**
+ * Stops near where one's phone last was (near "me"), near a point, or by name.
+ * When some feeds failed while others found stops, `missed` says what is
+ * missing and why - bus stops for a key not yet registered, say.
+ */
 export async function findStops(
   who: Who,
   by: { near: "me" | { lat: number; lon: number } } | { q: string },
-): Promise<{ stops: Stop[]; from?: { lat: number; lon: number } }> {
+): Promise<{ stops: Stop[]; from?: { lat: number; lon: number }; missed?: string }> {
   const q =
     "q" in by
       ? `q=${encodeURIComponent(by.q)}`

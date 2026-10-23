@@ -2,6 +2,7 @@ package transit
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -125,7 +126,7 @@ func TestGyeonggi(t *testing.T) {
 	if arr, err := f.Arrivals(ctx, Stop{Kind: Bus, Region: Gyeonggi, ID: "none"}); err != nil || len(arr) != 0 {
 		t.Fatalf("결과 없음: %+v %v", arr, err)
 	}
-	if _, err := f.Arrivals(ctx, Stop{Kind: Bus, Region: Gyeonggi, ID: "x"}); err == nil || !strings.Contains(err.Error(), "등록되지 않았어요") {
+	if _, err := f.Arrivals(ctx, Stop{Kind: Bus, Region: Gyeonggi, ID: "x"}); err == nil || !strings.Contains(err.Error(), "‘경기도_버스도착정보 조회’에 등록되지 않았어요") {
 		t.Fatalf("키 미등록: %v", err)
 	}
 	nokey := New("", "")
@@ -157,6 +158,14 @@ func TestSeoulBus(t *testing.T) {
 	lines, err := f.Lines(ctx, stop)
 	if err != nil || len(lines) != 2 || lines[0].Name != "402" || lines[1].Name != "740" {
 		t.Fatalf("노선(운행 끝난 것도): %+v %v", lines, err)
+	}
+	// The key not yet registered for this feed: said, not taken for "nothing here".
+	refused := feeds(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error":"Unauthorized","message":"유효하지 않은 서비스키입니다: 등록되지 않은 서비스키","status":401}`))
+	})
+	if _, err := refused.Lines(ctx, stop); err == nil || !strings.Contains(err.Error(), "‘서울특별시_정류소정보조회 서비스’에 등록되지 않았어요") {
+		t.Fatalf("서울 버스 키 미등록(401): %v", err)
 	}
 	xmlAnswer = true
 	arr, err = f.Arrivals(ctx, Stop{Kind: Bus, Region: Seoul, ID: "other"})
@@ -226,8 +235,15 @@ func TestNear(t *testing.T) {
 				{"lat":37.4979,"lon":127.0277,"tags":{"name":"강남","railway":"station","station":"train"}}]}`))
 		}
 	})
+	// 서울's bus feed failing: what the others found, saying bus stops may be missing.
 	stops, err := f.Near(context.Background(), 37.4979, 127.0276)
-	if err != nil || len(stops) != 3 || stops[0].ID != "강남" || stops[0].Kind != Subway || stops[1].Region != Gyeonggi || stops[1].No != "22009" || stops[2].ID != "역삼" {
+	var partial *Partial
+	if !errors.As(err, &partial) || partial.What != "버스 정류장" || len(stops) != 3 || stops[0].ID != "강남" || stops[0].Kind != Subway || stops[1].Region != Gyeonggi || stops[1].No != "22009" || stops[2].ID != "역삼" {
 		t.Fatalf("근처: %+v %v", stops, err)
+	}
+	// Nothing found anywhere: the failure itself.
+	none := feeds(t, func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusBadGateway) })
+	if stops, err := none.Near(context.Background(), 37.4979, 127.0276); len(stops) != 0 || err == nil || errors.As(err, &partial) {
+		t.Fatalf("모두 실패: %+v %v", stops, err)
 	}
 }
