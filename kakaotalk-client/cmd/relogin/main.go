@@ -14,9 +14,10 @@
 // little longer each time but never more than 5 minutes apart. A refused
 // password stops it at once (tried on and on, it locks the account), and so
 // does a screen asking for the phone. While the Mac's screen is locked macOS
-// hides every window, so nothing is tried then and that is what it says
-// (2026-10-23: locked since the night before, a logout went unseen for
-// eleven hours). What it sees and did goes to
+// hides every window (2026-10-23: locked since the night before, a logout
+// went unseen for eleven hours), and it counts as locked whenever the display
+// sleeps; with no password on the lock, a logout wakes the display, which
+// unlocks it. A lock that keeps a password is said, not opened. What it sees and did goes to
 // ~/.jarvis-host/kakaotalk-login.json, which the 상태 tab reads.
 //
 // It runs as the LaunchAgent com.jarvis.kakaotalk-relogin
@@ -49,7 +50,8 @@ type status struct {
 	CheckedAt time.Time `json:"checkedAt"`
 	// logged-in | no-window | relogged | notice | starting | offline | waiting |
 	// failed | wrong-password | needs-person | no-access | no-password |
-	// locked | locked-in | locked-unknown | unreadable | unreadable-out | unknown
+	// waking | locked | locked-in | locked-unknown | unreadable | unreadable-out |
+	// unknown
 	State      string     `json:"state"`
 	Detail     string     `json:"detail,omitempty"`
 	Access     bool       `json:"access"`
@@ -73,6 +75,14 @@ type daemon struct {
 	dumped bool
 	// When a logged-out KakaoTalk with no window was last opened again.
 	reopenedAt time.Time
+	// When the display was last woken to look at a logout behind the lock,
+	// and whether that was in vain (a password is wanted) - not again until
+	// the screen is seen open.
+	wokeAt      time.Time
+	wakeUseless bool
+	// Whether the lock asks for a password, and when that was last asked.
+	lockPassword bool
+	lockAskedAt  time.Time
 }
 
 func main() {
@@ -163,6 +173,7 @@ func (d *daemon) tick() time.Duration {
 	if screenLocked() {
 		return d.locked(menu)
 	}
+	d.wakeUseless = false
 	if menu == menuIn && !d.inspectWanted() {
 		d.in()
 		return poll
@@ -314,10 +325,31 @@ func (d *daemon) in() {
 }
 
 // locked is a look while the Mac's screen is locked. Every window is hidden
-// then, so only the menu is read and nothing is tried: a logout waits for a
-// person to unlock the screen. With the Mac mini's lock screen off (System
-// Settings → Lock Screen) this does not come.
+// then, so only the menu is read and nothing is typed. The screen counts as
+// locked whenever the display sleeps; with the Mac mini's lock screen off
+// (System Settings → Lock Screen) waking the display unlocks it, so a logout
+// seen in the menu wakes it (whileLocked). With a password on the lock, a
+// logout waits for a person.
 func (d *daemon) locked(menu menuState) time.Duration {
+	switch whileLocked(menu, d.lockNeedsPassword(), d.wakeUseless, time.Since(d.wokeAt)) {
+	case "in":
+		// Only the display is asleep.
+		d.in()
+		return poll
+	case "wake":
+		d.wokeAt = time.Now()
+		d.wasOut = true
+		log.Printf("카톡이 로그아웃된 것 같아 꺼진 화면을 깨웁니다")
+		wakeDisplay()
+		d.set("waking", "로그인 창을 보려고 화면을 깨웠어요")
+		return 3 * time.Second
+	case "waking":
+		d.set("waking", "로그인 창을 보려고 화면을 깨웠어요")
+		return 3 * time.Second
+	case "stays-locked":
+		log.Printf("화면을 깨웠는데도 잠겨 있어요 - 잠금에 비밀번호가 걸려 있는 것 같아 다시 깨우지 않습니다")
+		d.wakeUseless = true
+	}
 	state, detail := lockedState(menu)
 	if state != d.st.State {
 		log.Printf("화면이 잠겨 있어요(로그아웃 메뉴 %s): %s", menu, detail)
@@ -339,6 +371,30 @@ func (d *daemon) locked(menu menuState) time.Duration {
 		_ = os.WriteFile(d.inspectOut, []byte(dump), 0o600)
 	}
 	return poll
+}
+
+// lockNeedsPassword is whether the Mac's lock asks for a password
+// (sysadminctl -screenLock status: "screenLock is off" when it does not),
+// asked every ten minutes. Not knowing counts as yes: nothing is promised.
+func (d *daemon) lockNeedsPassword() bool {
+	if !d.lockAskedAt.IsZero() && time.Since(d.lockAskedAt) < 10*time.Minute {
+		return d.lockPassword
+	}
+	d.lockAskedAt = time.Now()
+	out, _ := exec.Command("/usr/sbin/sysadminctl", "-screenLock", "status").CombinedOutput()
+	d.lockPassword = !strings.Contains(string(out), "screenLock is off")
+	return d.lockPassword
+}
+
+// wakeDisplay wakes the display as a touch of the keyboard would (ten
+// seconds of user activity); it sleeps again on its own timer after that.
+func wakeDisplay() {
+	cmd := exec.Command("/usr/bin/caffeinate", "-u", "-t", "10")
+	if err := cmd.Start(); err != nil {
+		log.Printf("화면을 깨우지 못했습니다: %v", err)
+		return
+	}
+	go func() { _ = cmd.Wait() }()
 }
 
 // attempt fills the login window and presses 로그인, then watches what follows.

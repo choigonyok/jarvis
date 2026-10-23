@@ -121,6 +121,33 @@ func TestLockedScreenSaysWhatItCannotDo(t *testing.T) {
 	}
 }
 
+// The Mac says its screen is locked whenever the display sleeps, password or
+// not: a sleeping display behind a lock without one is woken for a logout,
+// once, and not again if it stays locked.
+func TestSleepingDisplayIsWokenForALogout(t *testing.T) {
+	never := time.Since(time.Time{})
+	for _, c := range []struct {
+		m             menuState
+		password      bool
+		useless       bool
+		sinceWake     time.Duration
+		want, because string
+	}{
+		{menuIn, false, false, never, "in", "로그인돼 있고 잠금에 비밀번호가 없으면 화면이 꺼져 있을 뿐입니다"},
+		{menuIn, true, false, never, "locked-in", "비밀번호 잠금 뒤의 로그인은 로그아웃되면 기다려야 합니다"},
+		{menuOut, false, false, never, "wake", "로그아웃이면 화면을 깨웁니다"},
+		{menuOut, true, false, never, "wake", "비밀번호가 있다고 해도 한 번은 깨워 봅니다"},
+		{menuOut, false, false, 5 * time.Second, "waking", "깨운 직후에는 잠금이 풀리기를 기다립니다"},
+		{menuOut, false, false, time.Minute, "stays-locked", "깨웠는데도 잠겨 있으면 비밀번호가 걸린 것입니다"},
+		{menuOut, false, true, never, "locked", "깨워도 소용없었으면 다시 깨우지 않습니다"},
+		{menuUnknown, false, false, never, "locked-unknown", "메뉴를 모르면 깨우지 않습니다"},
+	} {
+		if got := whileLocked(c.m, c.password, c.useless, c.sinceWake); got != c.want {
+			t.Fatalf("%s: %s 여야 하는데 %s", c.because, c.want, got)
+		}
+	}
+}
+
 func TestPhoneVerificationStopsIt(t *testing.T) {
 	if !needsPerson("휴대폰에서 카카오톡 PC 로그인을 확인해 주세요") || !needsPerson("본인 확인이 필요합니다") {
 		t.Fatal("휴대폰 확인 화면은 사람이 해야 합니다")

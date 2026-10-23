@@ -104,17 +104,21 @@ windows are only reachable from the logged-in session):
 - what it saw and did goes to `~/.jarvis-host/kakaotalk-login.json`, which the
   상태 tab reads as "카톡 로그인".
 
-**The Mac mini's screen must not lock.** While it is locked, macOS hands an
-accessibility client the app itself in place of every window - KakaoTalk's,
-Terminal's, Safari's alike - so no login window can be read and nothing is
-tried; only the menus still answer. 2026-10-23 the screen had locked the night
-before, KakaoTalk was logged out by a 13-minute drop at 14:38, and it read as
-logged in until the screen was unlocked at 02:10. So the lock screen is off on
-the Mac mini (System Settings → Lock Screen → require password after the
-screen saver or display: never; it logs in by itself at boot and FileVault is
-off, so this opens nothing new). Should it lock anyway, the record says
-`locked` (logged out: the 상태 tab fails and pushes) or `locked-in` (logged in,
-but a logout would wait: a warning).
+**The Mac mini's lock screen wants no password.** While the screen is locked,
+macOS hands an accessibility client the app itself in place of every window -
+KakaoTalk's, Terminal's, Safari's alike - so no login window can be read and
+nothing is typed; only the menus still answer. 2026-10-23 the screen had
+locked the night before, KakaoTalk was logged out by a 13-minute drop at
+14:38, and it read as logged in until the screen was unlocked at 02:10. So the
+lock screen is off on the Mac mini (System Settings → Lock Screen → require
+password after the screen saver or display: never; it logs in by itself at
+boot and FileVault is off, so this opens nothing new). The Mac still calls its
+screen locked whenever the display sleeps (ten idle minutes): logged in, that
+is fine; a logout seen in the menu wakes the display (as a key press would),
+which then unlocks by itself and the login goes on (`waking`). If it stays
+locked a password is on the lock after all: the record says `locked` (the
+상태 tab fails and pushes) and the display is not woken again until the
+screen has been seen open; logged in behind such a lock, `locked-in` warns.
 
 ```bash
 scripts/kakaotalk-relogin install    # from the MacBook: build, wrap as an app, sign, LaunchAgent on the Mac mini

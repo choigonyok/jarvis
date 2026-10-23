@@ -147,6 +147,43 @@ func menuFrom(items []*elem) menuState {
 	return menuUnknown
 }
 
+// A display that is only asleep is woken at most once in wakeEvery to look at
+// a logout behind it, and given wakeSettle to let go of its lock.
+const (
+	wakeEvery  = 10 * time.Minute
+	wakeSettle = 15 * time.Second
+)
+
+// whileLocked is what a look while the screen is locked comes to. The Mac
+// says its screen is locked whenever its display sleeps, password or not
+// (2026-10-24, with the lock screen off). Behind a lock that wants no
+// password the display is only asleep: logged in, that is fine ("in");
+// logged out, the display is woken ("wake") - it unlocks by itself and the
+// windows come back - and given a moment ("waking"). Still locked after that,
+// a password is wanted after all ("stays-locked"): it is not woken again
+// until the screen has been seen open, so the display does not keep lighting
+// up. Anything else is a state to write down (lockedState).
+func whileLocked(m menuState, needsPassword, wakeUseless bool, sinceWake time.Duration) string {
+	switch m {
+	case menuIn:
+		if needsPassword {
+			return "locked-in"
+		}
+		return "in"
+	case menuOut:
+		switch {
+		case wakeUseless:
+			return "locked"
+		case sinceWake >= wakeEvery:
+			return "wake"
+		case sinceWake < wakeSettle:
+			return "waking"
+		}
+		return "stays-locked"
+	}
+	return "locked-unknown"
+}
+
 // lockedState is what is said while the screen is locked, when only the
 // menu can be read and nothing is tried.
 func lockedState(m menuState) (state, detail string) {

@@ -63,7 +63,7 @@ func TestKakaoLoginLockedScreen(t *testing.T) {
 	e := &env{Config: Config{HostFile: filepath.Join(dir, "host.json")}}
 	now := time.Now().Format(time.RFC3339)
 	for state, want := range map[string]check.State{
-		"logged-in": check.OK, "locked": check.Fail, "locked-in": check.Warn,
+		"logged-in": check.OK, "waking": check.Warn, "locked": check.Fail, "locked-in": check.Warn,
 		"locked-unknown": check.Warn, "unreadable": check.Warn, "unreadable-out": check.Fail,
 	} {
 		body := `{"checkedAt":"` + now + `","state":"` + state + `"}`
