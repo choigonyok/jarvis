@@ -84,11 +84,12 @@ func (f *Feeds) Configured() (buses, subway bool) {
 	return f.DataKey != "", f.SubwayKey != ""
 }
 
-// remember asks get once per key while ttl lasts - a failure too, so a
-// failing feed is not asked again at once.
+// remember asks get once per key while ttl lasts - a failure for half a
+// minute at most, so a failing feed is not asked again at once nor kept
+// failing for long.
 func (f *Feeds) remember(key string, ttl time.Duration, get func() (any, error)) (any, error) {
 	f.mu.Lock()
-	if c, ok := f.cache[key]; ok && f.Now().Sub(c.at) < ttl {
+	if c, ok := f.cache[key]; ok && f.Now().Sub(c.at) < ttl && (c.err == nil || f.Now().Sub(c.at) < 30*time.Second) {
 		f.mu.Unlock()
 		return c.val, c.err
 	}
@@ -196,7 +197,15 @@ func (f *Feeds) Near(ctx context.Context, lat, lon float64) ([]Stop, error) {
 		wg.Add(3)
 		go look(func() ([]Stop, error) { return f.gyeonggiNear(ctx, lat, lon) })
 		go look(func() ([]Stop, error) { return f.seoulNear(ctx, lat, lon) })
-		go look(func() ([]Stop, error) { return f.stations(ctx, lat, lon, 1500) })
+		// Stations stay where they are: a neighbourhood's (about 100 m) are
+		// kept a week - OpenStreetMap's mirrors take a quarter of a minute.
+		go look(func() ([]Stop, error) {
+			v, err := f.remember(fmt.Sprintf("stations:%.3f,%.3f", lat, lon), 7*24*time.Hour, func() (any, error) { return f.stations(ctx, lat, lon, 1500) })
+			if err != nil {
+				return nil, err
+			}
+			return slices.Clone(v.([]Stop)), nil
+		})
 		wg.Wait()
 		for i := range out {
 			if out[i].Lat != 0 || out[i].Lon != 0 {
@@ -827,8 +836,14 @@ func (f *Feeds) stations(ctx context.Context, lat, lon float64, radius int) ([]S
 	query := fmt.Sprintf(`[out:json][timeout:10];(node(around:%d,%f,%f)[railway=station][station=subway];node(around:%d,%f,%f)[railway=station][subway=yes];);out;`,
 		radius, lat, lon, radius, lat, lon)
 	var lastErr error
+	// Not the feeds' client: its few seconds are far too short for the
+	// mirrors, which take ten to thirty - but all of them within the
+	// half-minute an answer may take.
+	slow := &http.Client{Transport: f.HTTP.Transport}
+	ctx, cancelAll := context.WithTimeout(ctx, 28*time.Second)
+	defer cancelAll()
 	for _, mirror := range f.Overpass {
-		ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, mirror, strings.NewReader(url.Values{"data": {query}}.Encode()))
 		if err != nil {
 			cancel()
@@ -836,7 +851,7 @@ func (f *Feeds) stations(ctx context.Context, lat, lon float64, radius int) ([]S
 		}
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.Header.Set("User-Agent", "jarvis-context/1 (personal)")
-		resp, err := f.HTTP.Do(req)
+		resp, err := slow.Do(req)
 		if err != nil {
 			cancel()
 			lastErr = err
