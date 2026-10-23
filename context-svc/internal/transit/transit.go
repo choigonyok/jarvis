@@ -42,8 +42,8 @@ type Stop struct {
 
 // Line is what stops there: a bus route, or a subway line in one direction.
 type Line struct {
-	// ID: a bus route's id in its feed; a subway line's id and direction
-	// (1002|외선).
+	// ID: a bus route's id in its feed; a subway line's id and the station
+	// it stops at after this one, which way it goes (1002>역삼).
 	ID     string `json:"id"`
 	Name   string `json:"name"`             // 7770, 2호선
 	Toward string `json:"toward,omitempty"` // 강남역 방면, 성수행 - 역삼방면
@@ -59,6 +59,9 @@ type Arrival struct {
 	Note    string `json:"note,omitempty"` // 급행, 막차, 3번째 전
 	// Rough: guessed from how far away it is, not a time the feed gave.
 	Rough bool `json:"rough,omitempty"`
+	// Way: a train's direction as the feed says it (상행, 내선), for one
+	// whose next stop is not a station known here.
+	Way string `json:"-"`
 }
 
 // Route is a way one usually goes: from a stop, by a line, after a walk to it
@@ -107,12 +110,7 @@ type Plan struct {
 // to spare, or at most two minutes late, hurrying.
 func Make(r Route, arrivals []Arrival, now time.Time) Plan {
 	p := Plan{Route: r.ID, Now: now, Next: []Arrival{}}
-	var mine []Arrival
-	for _, a := range arrivals {
-		if a.Line.ID == r.Line.ID {
-			mine = append(mine, a)
-		}
-	}
+	mine := takes(r, arrivals)
 	slices.SortFunc(mine, func(a, b Arrival) int { return a.At.Compare(b.At) })
 	ahead := time.Duration(max(r.Walk, 0)+max(r.Spare, 0)) * time.Minute
 	for i, a := range mine {
@@ -213,7 +211,7 @@ var lineNames = map[string]string{
 	"1006": "6호선", "1007": "7호선", "1008": "8호선", "1009": "9호선",
 	"1061": "중앙선", "1063": "경의중앙선", "1065": "공항철도", "1067": "경춘선",
 	"1075": "수인분당선", "1077": "신분당선", "1092": "우이신설선", "1093": "서해선",
-	"1081": "경강선", "1032": "GTX-A",
+	"1081": "경강선", "1032": "GTX-A", "1094": "신림선",
 }
 
 // LineName is a subway line's name from the feed's id.

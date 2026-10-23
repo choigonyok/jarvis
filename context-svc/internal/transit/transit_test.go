@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -84,7 +85,6 @@ func feeds(t *testing.T, handler http.HandlerFunc) *Feeds {
 	t.Cleanup(srv.Close)
 	f := New("key%2Bwith%2Fslash%3D%3D", "subway-key")
 	f.GyeonggiArrivals, f.GyeonggiStations, f.SeoulStations, f.SubwayBase = srv.URL+"/ga", srv.URL+"/gs", srv.URL+"/seoul", srv.URL+"/subway"
-	f.Overpass = []string{srv.URL + "/overpass"}
 	f.Now = func() time.Time { return at("18:00") }
 	return f
 }
@@ -194,7 +194,7 @@ func TestSubway(t *testing.T) {
 	if err != nil || len(arr) != 3 {
 		t.Fatalf("도착(떠난 열차 빼고 셋): %+v %v", arr, err)
 	}
-	if a := arr[0]; a.Line.ID != "1002|외선" || a.Line.Name != "2호선" || !a.At.Equal(at("17:59").Add(150*time.Second)) || a.Rough {
+	if a := arr[0]; a.Line.ID != "1002>역삼" || a.Way != "외선" || a.Line.Name != "2호선" || !a.At.Equal(at("17:59").Add(150*time.Second)) || a.Rough {
 		t.Fatalf("받은 시각 + 초: %+v", a)
 	}
 	if a := arr[1]; !a.Rough || !a.At.Equal(at("17:59").Add(50*time.Second+240*time.Second)) {
@@ -203,16 +203,25 @@ func TestSubway(t *testing.T) {
 	if a := arr[2]; a.Line.Name != "신분당선" || a.Note != "급행 막차" || !a.At.Equal(at("17:59").Add(50*time.Second+120*time.Second)) {
 		t.Fatalf("전역 도착: %+v", a)
 	}
+	// Each line toward each station next to it, from the list - the trains
+	// coming now add none it has.
 	lines, err := f.Lines(ctx, Stop{Kind: Subway, ID: "강남"})
-	if err != nil || len(lines) != 3 {
+	if err != nil || len(lines) != 4 || lines[0].ID != "1002>교대" || lines[1].ID != "1002>역삼" || lines[1].Toward != "역삼 방면" || lines[1].Name != "2호선" || lines[3].ID != "1077>양재" {
 		t.Fatalf("노선·방향: %+v %v", lines, err)
 	}
-	if _, err := f.Lines(ctx, Stop{Kind: Subway, ID: "수원"}); err == nil || !strings.Contains(err.Error(), "서울 밖") {
-		t.Fatalf("서울 밖 역: %v", err)
+	// No train running (the feed: no data) - the list still gives the ways.
+	if lines, err := f.Lines(ctx, Stop{Kind: Subway, ID: "수원"}); err != nil || len(lines) != 4 || lines[0].ID != "1001>세류" || lines[3].ID != "1075>매교" {
+		t.Fatalf("열차 없는 밤의 수원: %+v %v", lines, err)
+	}
+	if _, err := f.Lines(ctx, Stop{Kind: Subway, ID: "없는역이름"}); err == nil || !strings.Contains(err.Error(), "서울 밖") {
+		t.Fatalf("목록에도 피드에도 없는 역: %v", err)
 	}
 	stops, err := f.Search(ctx, "강남역")
 	if err != nil || len(stops) == 0 || stops[0].Kind != Subway || stops[0].ID != "강남" || stops[0].Name != "강남역" {
 		t.Fatalf("역 이름으로 찾기: %+v %v", stops, err)
+	}
+	if stops, _ := f.Search(ctx, "성균관대"); len(stops) == 0 || stops[0].ID != "성균관대" {
+		t.Fatalf("열차 없는 밤에도 이름으로: %+v", stops)
 	}
 	if stationName("서울역") != "서울" || stationName("총신대입구(이수)") != "총신대입구" || stationName("역삼") != "역삼" {
 		t.Fatal("역 이름")
@@ -229,21 +238,59 @@ func TestNear(t *testing.T) {
 				{"stationId":200000078,"stationName":"강남역","mobileNo":22009,"x":127.0281,"y":37.4985,"distance":70,"regionName":"서울"}]}}}`))
 		case strings.HasPrefix(r.URL.Path, "/seoul/getStationByPos"):
 			w.WriteHeader(http.StatusInternalServerError)
-		case r.URL.Path == "/overpass":
-			w.Write([]byte(`{"elements":[{"lat":37.4979,"lon":127.0276,"tags":{"name":"강남","railway":"station","subway":"yes"}},
-				{"lat":37.5006,"lon":127.0364,"tags":{"name":"역삼","railway":"station","station":"subway"}},
-				{"lat":37.4979,"lon":127.0277,"tags":{"name":"강남","railway":"station","station":"train"}}]}`))
 		}
 	})
-	// 서울's bus feed failing: what the others found, saying bus stops may be missing.
+	// 서울's bus feed failing: what the others found, saying bus stops may be
+	// missing; the stations from the list, at once.
 	stops, err := f.Near(context.Background(), 37.4979, 127.0276)
 	var partial *Partial
-	if !errors.As(err, &partial) || partial.What != "버스 정류장" || len(stops) != 3 || stops[0].ID != "강남" || stops[0].Kind != Subway || stops[1].Region != Gyeonggi || stops[1].No != "22009" || stops[2].ID != "역삼" {
+	if !errors.As(err, &partial) || partial.What != "버스 정류장" || len(stops) < 3 || stops[0].ID != "강남" || stops[0].Kind != Subway || stops[1].Region != Gyeonggi || stops[1].No != "22009" {
 		t.Fatalf("근처: %+v %v", stops, err)
 	}
-	// Nothing found anywhere: the failure itself.
+	if !slices.ContainsFunc(stops, func(s Stop) bool { return s.ID == "역삼" && s.Kind == Subway && s.Dist > 500 && s.Dist < 1500 }) {
+		t.Fatalf("근처 역삼: %+v", stops)
+	}
+	// Nothing found anywhere - no station near, the bus feeds failing: the failure.
 	none := feeds(t, func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusBadGateway) })
-	if stops, err := none.Near(context.Background(), 37.4979, 127.0276); len(stops) != 0 || err == nil || errors.As(err, &partial) {
+	if stops, err := none.Near(context.Background(), 37.0, 127.5); len(stops) != 0 || err == nil || errors.As(err, &partial) {
 		t.Fatalf("모두 실패: %+v %v", stops, err)
+	}
+}
+
+// The station list: found by name and nearness, its ways - and a train goes a
+// route's way when it stops next at the station the route names or beyond it,
+// as an express does; not the other way, nor onto another branch.
+func TestStations(t *testing.T) {
+	if s := stations()["강남"]; !slices.Equal(s.Lines["1002"], []string{"교대", "역삼"}) || !slices.Equal(s.Lines["1077"], []string{"신논현", "양재"}) {
+		t.Fatalf("강남: %+v", s)
+	}
+	if got := stationsNamed("서울역"); len(got) == 0 || got[0].ID != "서울" || got[0].Name != "서울역" {
+		t.Fatalf("서울역: %+v", got)
+	}
+	if got := stationsNear(37.300277, 126.972222, 300); len(got) != 1 || got[0].ID != "성균관대" {
+		t.Fatalf("성균관대 근처: %+v", got)
+	}
+	if nextStation("성수행 - 역삼방면") != "역삼" || nextStation("광교행 - 양재방면 (급행)") != "양재" || nextStation("") != "" {
+		t.Fatal("다음 역")
+	}
+	train := func(id, way string) Arrival { return Arrival{Line: Line{ID: id}, Way: way} }
+	cases := []struct {
+		station, line string
+		trains        []Arrival
+		want          int
+	}{
+		// 가양, 9호선 toward 증미: the local, the express stopping next at 염창,
+		// and one whose next stop is unknown going the same way.
+		{"가양", "1009>증미", []Arrival{train("1009>증미", "하행"), train("1009>염창", "하행"), train("1009>양천향교", "상행"), train("1009>어딘가", "하행"), train("1009>다른곳", "상행"), train("1002>증미", "하행")}, 3},
+		// 강동, 5호선 toward 둔촌동 (마천 branch): not the trains for 길동.
+		{"강동", "1005>둔촌동", []Arrival{train("1005>둔촌동", "하행"), train("1005>올림픽공원", "하행"), train("1005>길동", "하행"), train("1005>천호", "상행")}, 2},
+		// 강남, 2호선 toward 역삼: the loop's other way is far around.
+		{"강남", "1002>역삼", []Arrival{train("1002>역삼", "외선"), train("1002>교대", "내선")}, 1},
+	}
+	for _, c := range cases {
+		r := Route{Stop: Stop{Kind: Subway, ID: c.station}, Line: Line{ID: c.line}}
+		if got := takes(r, c.trains); len(got) != c.want {
+			t.Errorf("%s %s: %+v", c.station, c.line, got)
+		}
 	}
 }

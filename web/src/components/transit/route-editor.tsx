@@ -185,7 +185,7 @@ function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null;
           {line ? (
             <Picked onChange={() => setLine(null)}>
               <span className="shrink-0 text-[14px] font-medium text-foreground">{line.name}</span>
-              <span className="min-w-0 truncate text-dim">{subwayDirection(line) ?? line.toward}</span>
+              <span className="min-w-0 truncate text-dim">{line.toward}</span>
             </Picked>
           ) : busy === "lines" ? (
             <p className="text-faint">노선을 불러오는 중…</p>
@@ -195,7 +195,7 @@ function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null;
                 <li key={l.id}>
                   <button type="button" onClick={() => setLine(l)} className="flex w-full items-baseline gap-2 py-2.5 text-left outline-none hover:bg-glass focus-visible:ring-3 focus-visible:ring-ring/50">
                     <span className="shrink-0 text-[14px] font-medium text-foreground">{l.name}</span>
-                    <span className="min-w-0 truncate text-dim">{subwayDirection(l) ?? l.toward}</span>
+                    <span className="min-w-0 truncate text-dim">{l.toward}</span>
                   </button>
                 </li>
               ))}
@@ -298,11 +298,6 @@ function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null;
 }
 
 /** A subway line's direction as riders say it: "외선 · 성수행 - 역삼방면". */
-function subwayDirection(l: Line): string | null {
-  const [, dir] = l.id.split("|");
-  return dir ? [dir, l.toward].filter(Boolean).join(" · ") : null;
-}
-
 function Step({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section>

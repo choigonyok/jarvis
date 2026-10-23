@@ -29,8 +29,8 @@ func (e *FeedError) Error() string { return e.Msg }
 // Feeds reads the live feeds: data.go.kr's key (DataKey) opens 경기's and
 // 서울's buses, data.seoul.go.kr's real-time subway key (SubwayKey) 서울's
 // subway - only stations inside 서울; 코레일's stations outside it have no
-// public real-time feed. Stations near a point come from OpenStreetMap.
-// What a feed said is kept a little while, so the screen and the nudges
+// public real-time feed. Stations are found in the list kept with the binary
+// (stations.go), so also while no train runs. What a feed said is kept a little while, so the screen and the nudges
 // asking at once ask it once - the keys have a daily allowance.
 type Feeds struct {
 	DataKey, SubwayKey string
@@ -39,7 +39,6 @@ type Feeds struct {
 	Now                func() time.Time
 	// Endpoints, replaceable in tests.
 	GyeonggiArrivals, GyeonggiStations, SeoulStations, SubwayBase string
-	Overpass                                                      []string
 
 	mu    sync.Mutex
 	cache map[string]kept
@@ -71,11 +70,6 @@ func New(dataKey, subwayKey string) *Feeds {
 		GyeonggiStations: "https://apis.data.go.kr/6410000/busstationservice/v2",
 		SeoulStations:    "http://ws.bus.go.kr/api/rest/stationinfo",
 		SubwayBase:       "http://swopenAPI.seoul.go.kr/api/subway",
-		Overpass: []string{
-			"https://maps.mail.ru/osm/tools/overpass/api/interpreter",
-			"https://overpass-api.de/api/interpreter",
-			"https://overpass.private.coffee/api/interpreter",
-		},
 	}
 }
 
@@ -137,24 +131,30 @@ func (f *Feeds) Arrivals(ctx context.Context, s Stop) ([]Arrival, error) {
 }
 
 // Lines is what stops at a stop: at a bus stop every route, running now or
-// not; at a station each line, in each direction, with trains coming now.
+// not; at a station each line toward each station next to it - from the list
+// kept here, any time, and from the trains coming now when it has none.
 func (f *Feeds) Lines(ctx context.Context, s Stop) ([]Line, error) {
 	switch {
 	case s.Kind == Subway:
+		lines := stationLines(s.ID)
 		arrivals, err := f.Arrivals(ctx, s)
-		if err != nil {
+		if err != nil && len(lines) == 0 {
 			return nil, err
 		}
-		if len(arrivals) == 0 {
+		for _, a := range arrivals {
+			line, next, _ := strings.Cut(a.Line.ID, ">")
+			if next == "" || slices.ContainsFunc(lines, func(l Line) bool {
+				on, via, _ := strings.Cut(l.ID, ">")
+				return on == line && heading(s.ID, line, via, next)
+			}) {
+				continue
+			}
+			lines = append(lines, Line{ID: a.Line.ID, Name: a.Line.Name, Toward: next + " 방면"})
+		}
+		if len(lines) == 0 {
 			return nil, &FeedError{"이 역은 지금 실시간 정보가 없어요 - 서울 밖의 역이거나, 지금 다니는 열차가 없어요"}
 		}
-		var lines []Line
-		for _, a := range arrivals {
-			if !slices.ContainsFunc(lines, func(l Line) bool { return l.ID == a.Line.ID }) {
-				lines = append(lines, a.Line)
-			}
-		}
-		slices.SortFunc(lines, func(a, b Line) int { return strings.Compare(a.ID, b.ID) })
+		slices.SortStableFunc(lines, func(a, b Line) int { return strings.Compare(a.ID, b.ID) })
 		return lines, nil
 	case s.Region == Gyeonggi:
 		v, err := f.remember("gyeonggi-lines:"+s.ID, time.Hour, func() (any, error) { return f.gyeonggiLines(ctx, s.ID) })
@@ -173,22 +173,14 @@ func (f *Feeds) Lines(ctx context.Context, s Stop) ([]Line, error) {
 }
 
 // Near is the stops around a point: bus stops from both bus feeds (500 m),
-// and stations from OpenStreetMap (1.5 km) - nearest first.
+// and stations (1.5 km) - nearest first.
 func (f *Feeds) Near(ctx context.Context, lat, lon float64) ([]Stop, error) {
 	key := fmt.Sprintf("near:%.3f,%.3f", lat, lon)
 	v, err := f.remember(key, 5*time.Minute, func() (any, error) {
 		out, err := gather(
 			lookup{"버스 정류장", func() ([]Stop, error) { return f.gyeonggiNear(ctx, lat, lon) }},
 			lookup{"버스 정류장", func() ([]Stop, error) { return f.seoulNear(ctx, lat, lon) }},
-			// Stations stay where they are: a neighbourhood's (about 100 m) are
-			// kept a week - OpenStreetMap's mirrors take a quarter of a minute.
-			lookup{"역", func() ([]Stop, error) {
-				v, err := f.remember(fmt.Sprintf("stations:%.3f,%.3f", lat, lon), 7*24*time.Hour, func() (any, error) { return f.stations(ctx, lat, lon, 1500) })
-				if err != nil {
-					return nil, err
-				}
-				return slices.Clone(v.([]Stop)), nil
-			}},
+			lookup{"역", func() ([]Stop, error) { return stationsNear(lat, lon, 1500), nil }},
 		)
 		for i := range out {
 			if out[i].Lat != 0 || out[i].Lon != 0 {
@@ -210,7 +202,12 @@ func (f *Feeds) Search(ctx context.Context, q string) ([]Stop, error) {
 		out, err := gather(
 			lookup{"버스 정류장", func() ([]Stop, error) { return f.gyeonggiSearch(ctx, q) }},
 			lookup{"버스 정류장", func() ([]Stop, error) { return f.seoulSearch(ctx, q) }},
-			lookup{"역", func() ([]Stop, error) { return f.station(ctx, q) }},
+			lookup{"역", func() ([]Stop, error) {
+				if found := stationsNamed(q); len(found) > 0 {
+					return found, nil
+				}
+				return f.station(ctx, q) // one the list does not have, if the feed knows it now
+			}},
 		)
 		// The station first, then bus stops by name.
 		slices.SortStableFunc(out, func(a, b Stop) int {
@@ -767,8 +764,7 @@ func (f *Feeds) subway(ctx context.Context, name string) ([]Arrival, error) {
 			continue // left this station already
 		}
 		id := text(it["subwayId"])
-		dir := text(it["updnLine"])
-		line := Line{ID: id + "|" + dir, Name: LineName(id), Toward: text(it["trainLineNm"])}
+		line := Line{ID: id + ">" + nextStation(text(it["trainLineNm"])), Name: LineName(id), Toward: text(it["trainLineNm"])}
 		base := now
 		if t, err := time.ParseInLocation("2006-01-02 15:04:05", text(it["recptnDt"]), f.Loc); err == nil && t.Before(now) && now.Sub(t) < 10*time.Minute {
 			base = t
@@ -782,7 +778,7 @@ func (f *Feeds) subway(ctx context.Context, name string) ([]Arrival, error) {
 			}
 			sec, rough = float64(s), guessed
 		}
-		a := Arrival{Line: line, At: base.Add(time.Duration(sec) * time.Second), Vehicle: text(it["btrainNo"]), Rough: rough}
+		a := Arrival{Line: line, At: base.Add(time.Duration(sec) * time.Second), Vehicle: text(it["btrainNo"]), Rough: rough, Way: text(it["updnLine"])}
 		if kind := text(it["btrainSttus"]); kind != "" && kind != "일반" {
 			a.Note = kind
 		}
@@ -855,67 +851,6 @@ func stationName(q string) string {
 		q = "서울"
 	}
 	return q
-}
-
-// stations is the subway stations within radius meters, from OpenStreetMap -
-// named as the subway feed names them (OpenStreetMap writes 강남, not 강남역).
-func (f *Feeds) stations(ctx context.Context, lat, lon float64, radius int) ([]Stop, error) {
-	query := fmt.Sprintf(`[out:json][timeout:10];(node(around:%d,%f,%f)[railway=station][station=subway];node(around:%d,%f,%f)[railway=station][subway=yes];);out;`,
-		radius, lat, lon, radius, lat, lon)
-	var lastErr error
-	// Not the feeds' client: its few seconds are far too short for the
-	// mirrors, which take ten to thirty - but all of them within the
-	// half-minute an answer may take.
-	slow := &http.Client{Transport: f.HTTP.Transport}
-	ctx, cancelAll := context.WithTimeout(ctx, 28*time.Second)
-	defer cancelAll()
-	for _, mirror := range f.Overpass {
-		ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, mirror, strings.NewReader(url.Values{"data": {query}}.Encode()))
-		if err != nil {
-			cancel()
-			return nil, err
-		}
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		req.Header.Set("User-Agent", "jarvis-context/1 (personal)")
-		resp, err := slow.Do(req)
-		if err != nil {
-			cancel()
-			lastErr = err
-			continue
-		}
-		var out struct {
-			Elements []struct {
-				Lat  float64           `json:"lat"`
-				Lon  float64           `json:"lon"`
-				Tags map[string]string `json:"tags"`
-			} `json:"elements"`
-		}
-		err = json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&out)
-		resp.Body.Close()
-		cancel()
-		if err != nil || resp.StatusCode != http.StatusOK {
-			lastErr = fmt.Errorf("overpass %s: %d %v", mirror, resp.StatusCode, err)
-			continue
-		}
-		stops := []Stop{}
-		for _, e := range out.Elements {
-			name := e.Tags["name:ko"]
-			if name == "" {
-				name = e.Tags["name"]
-			}
-			id := stationName(name)
-			if id == "" || slices.ContainsFunc(stops, func(s Stop) bool { return s.ID == id }) {
-				continue
-			}
-			stops = append(stops, Stop{Kind: Subway, ID: id, Name: id + "역", Lat: e.Lat, Lon: e.Lon})
-		}
-		return stops, nil
-	}
-	if lastErr == nil {
-		lastErr = errors.New("no overpass mirror")
-	}
-	return nil, &FeedError{"근처 역을 찾지 못했어요"}
 }
 
 // toward is a destination said as a direction: "강남역" → "강남역 방면".
