@@ -82,8 +82,10 @@ type Options struct {
 	// no reminders, and a portfolio out of band is raised at once.
 	Reminders moments.Store
 	// Here is the regions the operator is in now (context-svc); nil: not
-	// known, and being there already never counts as arriving.
-	Here func(ctx context.Context) ([]moments.Visit, error)
+	// known, and being there already never counts as arriving. GuestHere is
+	// the guest's own regions their phone is in.
+	Here      func(ctx context.Context) ([]moments.Visit, error)
+	GuestHere func(ctx context.Context) ([]moments.Visit, error)
 	// Checklists is where the operator's lists are kept; nil: none.
 	Checklists checklist.Store
 }
@@ -170,7 +172,7 @@ func New(o Options) *Mind {
 	m.Gate = gate.New(o.Store, acts, notifier, o.Log, o.Policy, o.Loc, o.Now, o.URL, o.Logger)
 	m.notifier = notifier
 	if o.Reminders != nil {
-		m.Moments = &moments.Service{St: o.Reminders, Now: o.Now, Loc: o.Loc, Here: o.Here, Say: m.say, Out: o.Logger}
+		m.Moments = &moments.Service{St: o.Reminders, Now: o.Now, Loc: o.Loc, Here: o.Here, GuestHere: o.GuestHere, Say: m.say, Out: o.Logger}
 	}
 	if o.Checklists != nil {
 		m.Lists = &checklist.Service{St: o.Checklists, Now: o.Now}
@@ -218,7 +220,7 @@ func (m *Mind) Handle(ctx context.Context, o obs.Observation) error {
 		return m.Actions.Handle(ctx, o)
 	case AssetsBand:
 		return m.band(ctx, o)
-	case LocationEnter, LocationLeave:
+	case LocationEnter, LocationLeave, LocationGuestEnter, LocationGuestLeave:
 		return m.onLocation(ctx, o)
 	case obs.OccurrenceObserved:
 		var ref obs.OccurrenceRef
@@ -651,7 +653,11 @@ func (m *Mind) Situation(ctx context.Context) (world.Situation, error) {
 type noticeLog struct{ log obs.Log }
 
 func (n noticeLog) AppendNotice(ctx context.Context, kind string, nt act.Notice) error {
-	wording, _ := json.Marshal(map[string]string{"tier": nt.Tier, "level": nt.Level, "title": nt.Title, "body": nt.Body, "url": nt.URL})
+	words := map[string]string{"tier": nt.Tier, "level": nt.Level, "title": nt.Title, "body": nt.Body, "url": nt.URL}
+	if nt.Audience != "" {
+		words["audience"] = nt.Audience
+	}
+	wording, _ := json.Marshal(words)
 	data := json.RawMessage(`{}`)
 	if nt.Card || len(nt.Data) > 0 {
 		d := map[string]any{}

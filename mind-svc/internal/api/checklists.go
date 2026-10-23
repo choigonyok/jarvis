@@ -19,6 +19,24 @@ type checklistOut struct {
 
 func out(l checklist.List) checklistOut { return checklistOut{List: l, Line: l.Line()} }
 
+// ownList is whether the list of the path is the caller's own; another's is
+// answered as not found.
+func (s *Server) ownList(w http.ResponseWriter, r *http.Request) bool {
+	svc, ok := s.lists(w)
+	if !ok {
+		return false
+	}
+	l, err := svc.Get(r.Context(), r.PathValue("id"))
+	if err == nil && l.Person() != whoOf(r) {
+		err = checklist.ErrNotFound
+	}
+	if err != nil {
+		s.listFail(w, err)
+		return false
+	}
+	return true
+}
+
 func (s *Server) lists(w http.ResponseWriter) (*checklist.Service, bool) {
 	if s.m.Lists == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "체크리스트를 둘 곳이 없습니다."})
@@ -52,7 +70,9 @@ func (s *Server) listChecklists(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 			if l, err := svc.Get(r.Context(), strings.TrimSpace(id)); err == nil {
-				res = append(res, out(l))
+				if l.Person() == whoOf(r) {
+					res = append(res, out(l))
+				}
 			} else if !errors.Is(err, checklist.ErrNotFound) {
 				s.listFail(w, err)
 				return
@@ -61,7 +81,7 @@ func (s *Server) listChecklists(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"checklists": res})
 		return
 	}
-	ls, err := svc.All(r.Context(), r.URL.Query().Get("all") != "")
+	ls, err := svc.AllOf(r.Context(), whoOf(r), r.URL.Query().Get("all") != "")
 	if err != nil {
 		s.listFail(w, err)
 		return
@@ -80,6 +100,7 @@ func (s *Server) makeChecklist(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &in) {
 		return
 	}
+	in.Who = whoOf(r)
 	l, err := s.m.MakeList(r.Context(), in)
 	if err != nil {
 		s.listFail(w, err)
@@ -90,7 +111,7 @@ func (s *Server) makeChecklist(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) getChecklist(w http.ResponseWriter, r *http.Request) {
 	svc, ok := s.lists(w)
-	if !ok {
+	if !ok || !s.ownList(w, r) {
 		return
 	}
 	l, err := svc.Get(r.Context(), r.PathValue("id"))
@@ -102,7 +123,7 @@ func (s *Server) getChecklist(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) changeChecklist(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.lists(w); !ok {
+	if !s.ownList(w, r) {
 		return
 	}
 	var in checklist.Change
@@ -119,7 +140,7 @@ func (s *Server) changeChecklist(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) checkItem(w http.ResponseWriter, r *http.Request) {
 	svc, ok := s.lists(w)
-	if !ok {
+	if !ok || !s.ownList(w, r) {
 		return
 	}
 	var in struct {
@@ -142,7 +163,7 @@ func (s *Server) checkItem(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) closeChecklist(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.lists(w); !ok {
+	if !s.ownList(w, r) {
 		return
 	}
 	l, err := s.m.CloseList(r.Context(), r.PathValue("id"))
@@ -154,7 +175,7 @@ func (s *Server) closeChecklist(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) showChecklist(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.lists(w); !ok {
+	if !s.ownList(w, r) {
 		return
 	}
 	var in struct {

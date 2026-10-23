@@ -28,6 +28,13 @@ const (
 	Archived = "archived"
 )
 
+// Whose a list is: the operator's or the guest's. Each sees and changes only
+// their own.
+const (
+	Owner = "owner"
+	Guest = "guest"
+)
+
 // Who changed an item.
 const (
 	ByCard  = "card"  // a tap on the card
@@ -63,9 +70,19 @@ type List struct {
 	// Source is who made it: chat, mind, console.
 	Source string `json:"source,omitempty"`
 	// Next numbers the next item, so an item's id is never reused.
-	Next      int       `json:"next"`
+	Next int `json:"next"`
+	// Who is whose it is: "" or owner, the operator's; guest, the guest's.
+	Who       string    `json:"who,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// Person is whose the list is: Owner or Guest.
+func (l List) Person() string {
+	if l.Who == Guest {
+		return Guest
+	}
+	return Owner
 }
 
 // Left is the items not done yet.
@@ -152,6 +169,8 @@ type New struct {
 	Date   string   `json:"date,omitempty"`
 	Items  []string `json:"items"`
 	Source string   `json:"source,omitempty"`
+	// Who is whose it is (the caller's token, never the body).
+	Who string `json:"-"`
 }
 
 // Make stores a new list - or, given the topic of a list still active, puts
@@ -175,7 +194,7 @@ func (s *Service) Make(ctx context.Context, n New) (List, error) {
 			return List{}, err
 		}
 		for _, l := range lists {
-			if l.Topic == topic && l.Status == Active {
+			if l.Topic == topic && l.Status == Active && l.Person() == n.person() {
 				l.Title = title
 				if note := clean(n.Note); note != "" {
 					l.Note = note
@@ -197,6 +216,9 @@ func (s *Service) Make(ctx context.Context, n New) (List, error) {
 	}
 	l := List{ID: newID(), Title: title, Note: clean(n.Note), Topic: topic, Date: date, Status: Active, Source: source,
 		Items: []Item{}, Next: 1, CreatedAt: now, UpdatedAt: now}
+	if n.person() == Guest {
+		l.Who = Guest
+	}
 	if err := add(&l, n.Items); err != nil {
 		return List{}, err
 	}
@@ -204,6 +226,13 @@ func (s *Service) Make(ctx context.Context, n New) (List, error) {
 		return List{}, ErrInvalid("항목(items)이 하나는 있어야 합니다")
 	}
 	return l, s.St.PutList(ctx, l)
+}
+
+func (n New) person() string {
+	if n.Who == Guest {
+		return Guest
+	}
+	return Owner
 }
 
 // Change is what a change gives: every field is optional.
@@ -339,9 +368,14 @@ func (s *Service) Get(ctx context.Context, id string) (List, error) { return s.S
 // recent is how far back All shows the lists closed.
 const recent = 14 * 24 * time.Hour
 
-// All is the lists active, the latest changed first - and with closed,
-// those closed in the last two weeks after them.
+// All is the operator's lists active, the latest changed first - and with
+// closed, those closed in the last two weeks after them.
 func (s *Service) All(ctx context.Context, closed bool) ([]List, error) {
+	return s.AllOf(ctx, Owner, closed)
+}
+
+// AllOf is All of who's lists - everyone's when who is empty.
+func (s *Service) AllOf(ctx context.Context, who string, closed bool) ([]List, error) {
 	since := time.Time{}
 	if closed {
 		since = s.Now().Add(-recent)
@@ -349,6 +383,9 @@ func (s *Service) All(ctx context.Context, closed bool) ([]List, error) {
 	ls, err := s.St.Lists(ctx, since)
 	if err != nil {
 		return nil, err
+	}
+	if who != "" {
+		ls = slices.DeleteFunc(ls, func(l List) bool { return l.Person() != who })
 	}
 	sort.SliceStable(ls, func(i, j int) bool {
 		if (ls[i].Status == Active) != (ls[j].Status == Active) {

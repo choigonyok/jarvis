@@ -96,6 +96,9 @@ type Module struct {
 	// open for the rest of the run at once.
 	guard SiteGuard
 	hold  time.Duration
+	// noBrowser: this agent's jobs open no website (the guest's: the
+	// browser is the operator's, signed in as them).
+	noBrowser bool
 	// heard is each card whose decision this process took to its job, and
 	// when: the sweep leaves those to the delivery under way. retryAt is
 	// when the sweep should look again because a delivery failed.
@@ -109,6 +112,10 @@ func New(store *Store, up *uploads.Store, proposals *proposal.Store, notify Noti
 	proposals.OnDecide(m.decided)
 	return m
 }
+
+// NoBrowser makes this agent's jobs ones that open no website and take no
+// photo - the guest's, whose agent has neither.
+func (m *Module) NoBrowser() { m.noBrowser = true }
 
 // CardFree says whether a job call may go through without an approval card
 // (the permission gate asks): making a job or instructing one, always. A job
@@ -552,6 +559,9 @@ func (m *Module) Handler() http.Handler {
 			"작업은 백그라운드에서 브라우저로 진행되고, 필요하면 스스로 주기적으로 다시 확인하며, 운영자에게 카드로 묻거나 로그인을 요청한다. " +
 			"진행 상황은 작업 탭에서 보인다. 정해진 시각이나 집 도착·출발 때 알려 주기만 하는 일은 작업이 아니라 set_reminder 로 맡긴다(작업은 폰 푸시를 못 보내고 위치를 모른다).",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in CreateInput) (*mcp.CallToolResult, any, error) {
+		if m.noBrowser && (len(in.Sites) > 0 || len(in.Photos) > 0) {
+			return toolText("이 계정의 작업은 웹사이트를 열거나 사진을 쓸 수 없습니다(브라우저는 운영자 계정이에요). sites·photos 없이 검색·정리로 되는 일만 맡길 수 있습니다.", true), nil, nil
+		}
 		for i, p := range in.Photos {
 			if j := strings.LastIndex(p, "/"); j >= 0 {
 				in.Photos[i] = p[j+1:]

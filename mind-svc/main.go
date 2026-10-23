@@ -188,10 +188,11 @@ func main() {
 	// here: the regions the operator is in now, for a reminder that counts
 	// being home already as arriving.
 	var travel mind.Travel
-	var here func(context.Context) ([]moments.Visit, error)
+	var here, guestHere func(context.Context) ([]moments.Visit, error)
 	if url := os.Getenv("CONTEXT_URL"); mode == "stack" && url != "" {
 		travel = mind.TravelHTTP{URL: url, Token: token}
 		here = mind.HereHTTP{URL: url, Token: token}.Visits
+		guestHere = mind.HereHTTP{URL: url, Token: token}.GuestVisits
 	}
 	// Jobs: a cart job goes to jobs-svc (the agent's browser runs it).
 	var jobs act.Jobs
@@ -229,7 +230,7 @@ func main() {
 		Policy: gate.DefaultPolicy(), URL: getenv("MIND_UI_URL", "http://localhost:8102/"), Mode: mode,
 		MessageRetain: time.Duration(atoiOr(getenv("MIND_MESSAGE_RETAIN_DAYS", "365"), 365)) * 24 * time.Hour,
 		Memory:        mem, Photos: photos, Jobs: jobs, Assets: assets, Orders: orders, Travel: travel,
-		Weather: sky, DailyUSD: number("MIND_DAILY_USD", 1.0), Reminders: reminders, Here: here, Checklists: lists,
+		Weather: sky, DailyUSD: number("MIND_DAILY_USD", 1.0), Reminders: reminders, Here: here, GuestHere: guestHere, Checklists: lists,
 	})
 	if !client.Ready() {
 		log.Warn("LLM 키(MIND_ANTHROPIC_API_KEY)가 없어 대화를 해석하지 않습니다. 메시지는 쌓아 둡니다.")
@@ -238,7 +239,7 @@ func main() {
 		go memLog.Run(ctx, m.Handle)
 	}
 	if events != nil {
-		go events.Subscribe(ctx, "mind", getenv("MIND_SELF_URL", "http://mind:8102/consume"), []string{obs.MessageObserved, "action.*", mind.AssetsBand, mind.LocationEnter, mind.LocationLeave}, log)
+		go events.Subscribe(ctx, "mind", getenv("MIND_SELF_URL", "http://mind:8102/consume"), []string{obs.MessageObserved, "action.*", mind.AssetsBand, mind.LocationEnter, mind.LocationLeave, mind.LocationGuestEnter, mind.LocationGuestLeave}, log)
 	}
 	if mode == "stack" {
 		exclude := cfg.Noise
@@ -308,9 +309,12 @@ func main() {
 	}
 
 	addr := getenv("LISTEN_ADDR", ":8102")
+	mindAPI := api.New(m, token, os.Getenv("MIND_CONSOLE_TOKEN"), mode == "memory", movable, log)
+	// 손님 에이전트의 토큰: 손님 자신의 리마인드·체크리스트만 연다.
+	mindAPI.SetGuestToken(os.Getenv("API_GUEST_TOKEN"))
 	srv := &http.Server{
 		Addr:         addr,
-		Handler:      api.New(m, token, os.Getenv("MIND_CONSOLE_TOKEN"), mode == "memory", movable, log).Handler(),
+		Handler:      mindAPI.Handler(),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 3 * time.Minute, // a replay runs the model
 	}

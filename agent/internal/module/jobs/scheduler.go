@@ -301,6 +301,9 @@ func (m *Module) runOnce(ctx context.Context, bg Background, cfg SchedulerConfig
 
 // purge deletes the photos of jobs that ended long enough ago.
 func (m *Module) purge(ctx context.Context) {
+	if m.uploads == nil {
+		return // no photos here to delete
+	}
 	due, err := m.store.PurgeDue(ctx)
 	if err != nil {
 		return

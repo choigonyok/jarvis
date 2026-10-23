@@ -15,12 +15,14 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/act"
+	"github.com/choigonyok/jarvis/mind-svc/internal/checklist"
 	"github.com/choigonyok/jarvis/mind-svc/internal/clock"
 	"github.com/choigonyok/jarvis/mind-svc/internal/gate"
 	"github.com/choigonyok/jarvis/mind-svc/internal/interpret"
 	"github.com/choigonyok/jarvis/mind-svc/internal/llm"
 	"github.com/choigonyok/jarvis/mind-svc/internal/mind"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+	"github.com/choigonyok/jarvis/mind-svc/internal/moments"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 )
@@ -332,5 +334,99 @@ func TestNotesForTheConsole(t *testing.T) {
 	code, out = call(http.MethodGet, "/api/notes/note_a/versions", "", true)
 	if code != http.StatusOK || len(out["versions"].([]any)) != 2 {
 		t.Fatalf("versions: %d %v", code, out)
+	}
+}
+
+// The guest's token opens the guest's own reminders and checklists and
+// nothing else of mind; each sees and changes only their own - another's is
+// not found.
+func TestGuestOwnRemindersAndLists(t *testing.T) {
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	m := mind.New(mind.Options{
+		Store: store.NewMemory(), Log: obs.NewMemoryLog(quiet), LLM: &llm.Script{}, Calendar: act.NewMemoryCalendar(),
+		Notifier: &act.MemoryNotifier{}, Loc: seoul, Now: time.Now, Logger: quiet, Policy: gate.DefaultPolicy(), Mode: "stack",
+		Reminders: moments.NewMemory(), Checklists: checklist.NewMemory(),
+	})
+	api := New(m, "secret", "", false, nil, quiet)
+	api.SetGuestToken("guest-secret")
+	srv := httptest.NewServer(api.Handler())
+	defer srv.Close()
+	do := func(token, method, path, body string) (int, string) {
+		req, _ := http.NewRequest(method, srv.URL+path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	id := func(body, kind string) string {
+		var v map[string]map[string]any
+		if json.Unmarshal([]byte(body), &v) != nil {
+			t.Fatalf("%s: %s", kind, body)
+		}
+		s, _ := v[kind]["id"].(string)
+		return s
+	}
+	at := time.Now().Add(2 * time.Hour).In(seoul).Format("2006-01-02T15:04")
+
+	code, body := do("guest-secret", "POST", "/api/reminders", `{"text":"학원 가방 챙기기","at":"`+at+`"}`)
+	if code != 200 || !strings.Contains(body, `"who":"guest"`) {
+		t.Fatalf("손님 알림 만들기: %d %s", code, body)
+	}
+	guestRem := id(body, "reminder")
+	_, body = do("secret", "POST", "/api/reminders", `{"text":"우산 말리기","at":"`+at+`"}`)
+	ownerRem := id(body, "reminder")
+	if _, body := do("guest-secret", "GET", "/api/reminders", ""); !strings.Contains(body, "학원 가방") || strings.Contains(body, "우산 말리기") {
+		t.Fatalf("손님 목록: %s", body)
+	}
+	if _, body := do("secret", "GET", "/api/reminders", ""); strings.Contains(body, "학원 가방") || !strings.Contains(body, "우산 말리기") {
+		t.Fatalf("운영자 목록: %s", body)
+	}
+	for _, c := range []struct{ token, method, path string }{
+		{"guest-secret", "PATCH", "/api/reminders/" + ownerRem},
+		{"guest-secret", "DELETE", "/api/reminders/" + ownerRem},
+		{"secret", "DELETE", "/api/reminders/" + guestRem},
+	} {
+		if code, _ := do(c.token, c.method, c.path, `{"text":"바꿈"}`); code != http.StatusNotFound {
+			t.Fatalf("남의 알림 %s %s: %d", c.method, c.path, code)
+		}
+	}
+
+	code, body = do("guest-secret", "POST", "/api/checklists", `{"title":"학원 준비물","items":["필통","교재"]}`)
+	if code != 200 || !strings.Contains(body, `"who":"guest"`) {
+		t.Fatalf("손님 체크리스트: %d %s", code, body)
+	}
+	guestList := id(body, "checklist")
+	_, body = do("secret", "POST", "/api/checklists", `{"title":"캠핑 준비물","items":["장갑"]}`)
+	ownerList := id(body, "checklist")
+	if _, body := do("secret", "GET", "/api/checklists", ""); strings.Contains(body, "학원 준비물") || !strings.Contains(body, "캠핑 준비물") {
+		t.Fatalf("운영자 체크리스트 목록: %s", body)
+	}
+	if _, body := do("guest-secret", "GET", "/api/checklists?ids="+ownerList+","+guestList, ""); strings.Contains(body, "캠핑") || !strings.Contains(body, "학원 준비물") {
+		t.Fatalf("손님이 카드로 읽는 목록: %s", body)
+	}
+	for _, c := range []struct{ token, method, path string }{
+		{"secret", "GET", "/api/checklists/" + guestList},
+		{"guest-secret", "POST", "/api/checklists/" + ownerList + "/items/i1"},
+		{"guest-secret", "DELETE", "/api/checklists/" + ownerList},
+	} {
+		if code, _ := do(c.token, c.method, c.path, `{"done":true}`); code != http.StatusNotFound {
+			t.Fatalf("남의 체크리스트 %s %s: %d", c.method, c.path, code)
+		}
+	}
+	if code, _ := do("guest-secret", "POST", "/api/reminders", `{"text":"남의 목록으로","at":"`+at+`","checklist":"`+ownerList+`"}`); code != http.StatusNotFound {
+		t.Fatalf("손님 알림에 운영자 목록: %d", code)
+	}
+	if code, _ := do("guest-secret", "POST", "/api/checklists/"+guestList+"/items/i1", `{"done":true}`); code != 200 {
+		t.Fatalf("손님이 자기 목록 체크: %d", code)
+	}
+	// Nothing else of mind opens to the guest's token.
+	for _, path := range []string{"/api/snapshot", "/status", "/api/recall?q=x"} {
+		if code, _ := do("guest-secret", "GET", path, ""); code != http.StatusUnauthorized {
+			t.Fatalf("손님 토큰으로 %s: %d", path, code)
+		}
 	}
 }

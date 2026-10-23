@@ -370,6 +370,9 @@ func (m *Module) runServer(run int64) *mcp.Server {
 				if !contains(j.Photos, name) {
 					return toolText(name+" 은 이 작업의 사진이 아닙니다.", true), nil, nil
 				}
+				if m.uploads == nil {
+					return toolText(name+" 은 이 에이전트에서 볼 수 없습니다.", true), nil, nil
+				}
 				p, err := m.uploads.Path(name)
 				if err != nil {
 					return toolText(name+" 은 이미 지워졌습니다.", true), nil, nil

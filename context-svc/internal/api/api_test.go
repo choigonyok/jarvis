@@ -840,6 +840,10 @@ func TestGuestRegions(t *testing.T) {
 	if !slices.Equal(events, want) {
 		t.Fatalf("상대의 도착·출발:\n%s", strings.Join(events, "\n"))
 	}
+	// Where the guest is now, for mind's reminders that count being there.
+	if code, body := do("GET", "/now/guest", "", api); code != 200 || body != `{"visits":[{"kind":"home","region":"집"}]}`+"\n" {
+		t.Fatalf("상대가 지금 있는 곳: %d %q", code, body)
+	}
 
 	// Nothing of the operator's moved.
 	regions, _ := st.Regions(ctx)

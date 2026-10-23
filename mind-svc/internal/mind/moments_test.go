@@ -270,3 +270,61 @@ func TestBandWithoutMomentsIsRaisedNow(t *testing.T) {
 		t.Fatalf("예전처럼 바로(저녁 요약): %+v", ins)
 	}
 }
+
+// The guest's reminders are the guest's: said on the guest's phone's moves
+// and the guest's being there, to the guest's devices - never on the
+// operator's moves, and never in the operator's conversation or situation.
+func TestGuestReminders(t *testing.T) {
+	seoul, _ := time.LoadLocation("Asia/Seoul")
+	f := newMomentsFixture(t, time.Date(2026, 10, 24, 17, 0, 0, 0, seoul), nil)
+	var guestHere []moments.Visit
+	f.m.Moments.GuestHere = func(context.Context) ([]moments.Visit, error) { return guestHere, nil }
+	ctx := context.Background()
+	guest, err := f.m.Moments.Set(ctx, moments.Reminder{Who: moments.Guest, Text: "학원 가방 챙기기", Place: "home", Move: moments.Arrive})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.m.Moments.Set(ctx, moments.Reminder{Text: "우산 말리기", Place: "home", Move: moments.Arrive}); err != nil {
+		t.Fatal(err)
+	}
+	if sit, _ := f.m.Situation(ctx); strings.Contains(sit.Text, "학원 가방") || !strings.Contains(sit.Text, "우산 말리기") {
+		t.Fatalf("운영자의 지금 상황에는 운영자의 알림만:\n%s", sit.Text)
+	}
+
+	f.clk.Pin(f.at(18, 0))
+	f.move(t, LocationEnter, "집", "home")
+	if ns := f.notice.All(); len(ns) != 1 || ns[0].Title != "우산 말리기" || ns[0].Audience != "" {
+		t.Fatalf("운영자가 집에 오면 운영자의 것만: %+v", ns)
+	}
+	f.clk.Pin(f.at(18, 30))
+	f.move(t, LocationGuestEnter, "집", "home")
+	ns := f.notice.All()
+	if len(ns) != 2 || ns[1].Title != "학원 가방 챙기기" || ns[1].Audience != "guest" || ns[1].Data["who"] != "guest" {
+		t.Fatalf("손님이 집에 오면 손님의 것이 손님에게: %+v", ns)
+	}
+	if r, _ := f.m.Moments.Get(ctx, guest.ID); r.Status != moments.Sent {
+		t.Fatalf("손님 알림은 보냄: %+v", r)
+	}
+
+	// Being there already: the guest's own whereabouts count for the
+	// guest's, the operator's for the operator's.
+	from := f.at(19, 0)
+	if _, err := f.m.Moments.Set(ctx, moments.Reminder{Who: moments.Guest, Text: "숙제 사진 보내기", Place: "home", Move: moments.Arrive, After: &from}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.m.Moments.Set(ctx, moments.Reminder{Text: "택배 뜯기", Place: "home", Move: moments.Arrive, After: &from}); err != nil {
+		t.Fatal(err)
+	}
+	guestHere, f.here = []moments.Visit{{Region: "집", Kind: "home"}}, nil
+	f.clk.Pin(from)
+	f.tick(t)
+	if ns := f.notice.All(); len(ns) != 3 || ns[2].Title != "숙제 사진 보내기" || ns[2].Audience != "guest" {
+		t.Fatalf("집에 있는 손님에게만: %+v", ns)
+	}
+	if mine, _ := f.m.Moments.ListOf(ctx, moments.Guest, false); len(mine) != 0 {
+		t.Fatalf("손님의 기다리는 알림은 다 보냄: %+v", mine)
+	}
+	if theirs, _ := f.m.Moments.List(ctx, false); len(theirs) != 1 || theirs[0].Text != "택배 뜯기" {
+		t.Fatalf("운영자의 것은 운영자가 집에 와야: %+v", theirs)
+	}
+}

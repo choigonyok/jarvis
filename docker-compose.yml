@@ -208,6 +208,10 @@ services:
       JARVIS_CHAT_URL: http://chat:8094
       # 손님의 결재 카드는 손님 기기로(audience guest). 운영자에게는 가지 않는다.
       JARVIS_NOTIFY_URL: http://events:8101
+      # 손님 자신의 작업·리마인드·체크리스트. jobs·mind 는 이 손님 토큰으로 손님 것만 연다.
+      # 손님 작업은 웹사이트를 열지 않는다(브라우저는 운영자 계정으로 로그인돼 있다).
+      JARVIS_JOBS_URL: http://jobs:8098
+      JARVIS_MIND_URL: http://mind:8102
     volumes:
       - jarvis-guest-workspace:/workspace
       - jarvis-guest-home:/home/jarvis
@@ -395,8 +399,11 @@ services:
       API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
       # 작업이 끝나고 이만큼 지나면 첨부 사진을 지운다.
       JOBS_PURGE_AFTER: ${JOBS_PURGE_AFTER:-720h}
-      # 작업 탭에서 지시하거나 "지금 실행"을 누르면 에이전트의 스케줄러를 바로 깨운다.
+      # 작업 탭에서 지시하거나 "지금 실행"을 누르면 그 작업 주인의 에이전트 스케줄러를 바로 깨운다.
       AGENT_WAKE_URL: http://agent:8080/jobs/wake
+      # 손님 토큰(손님 에이전트, 손님 작업 탭의 게이트웨이)으로는 손님 작업만.
+      API_GUEST_TOKEN: ${JARVIS_GUEST_API_TOKEN:-}
+      AGENT_GUEST_WAKE_URL: http://agent-guest:8081/jobs/wake
     expose:
       - "8098"
     ports:
@@ -909,6 +916,8 @@ services:
       API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
       # 사람이 콘솔에 들어갈 때 쓰는 토큰(scripts/mini console). 서비스들의 토큰과 다르다.
       MIND_CONSOLE_TOKEN: ${JARVIS_MIND_CONSOLE_TOKEN:-}
+      # 손님 에이전트의 토큰: 손님 자신의 리마인드·체크리스트만 열린다(mind 의 다른 것은 아니다).
+      API_GUEST_TOKEN: ${JARVIS_GUEST_API_TOKEN:-}
       EVENTS_URL: http://events:8101
       MIND_SELF_URL: http://mind:8102/consume
       KAKAOTALK_URL: http://kakaotalk:8090

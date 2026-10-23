@@ -135,15 +135,21 @@ func main() {
 			cfg.Allow(vault.Tools...)
 		}
 
-		// 작업. 대화에서 맡긴 일을 백그라운드에서, 작업이 정한 주기로 한다.
-		if photos != nil && cfg.Jobs {
-			jobsModule = jobs.New(jobs.NewStore(cfg.JobsURL, cfg.APIToken), photos, proposals, transcript, log)
-			modules.Add(jobsModule)
-			mcpMounts["/mcp/"+jobs.ServerName] = jobsModule.Handler()
-			// Background only: /mcp/job-run/<run id>, never in the chat's config.
-			mcpMounts["/mcp/job-run"] = jobsModule.RunHandler()
-			cfg.ModuleMCPURLs[jobs.ServerName] = cfg.PublicMCPURL + "/" + jobs.ServerName
+	}
+
+	// 작업. 대화에서 맡긴 일을 백그라운드에서, 작업이 정한 주기로 한다. 손님의 것은
+	// 손님 작업(jobs-svc 가 손님 토큰으로 묶는다)이고, 웹사이트도 사진도 없다.
+	if cfg.Jobs && (photos != nil || cfg.Guest) {
+		jobsModule = jobs.New(jobs.NewStore(cfg.JobsURL, cfg.APIToken), photos, proposals, transcript, log)
+		if cfg.Guest {
+			jobsModule.NoBrowser()
+			cfg.Allow(jobs.QualifiedToolName("list_jobs"))
 		}
+		modules.Add(jobsModule)
+		mcpMounts["/mcp/"+jobs.ServerName] = jobsModule.Handler()
+		// Background only: /mcp/job-run/<run id>, never in the chat's config.
+		mcpMounts["/mcp/job-run"] = jobsModule.RunHandler()
+		cfg.ModuleMCPURLs[jobs.ServerName] = cfg.PublicMCPURL + "/" + jobs.ServerName
 	}
 
 	// 장기 기억. 주인은 "owner", 손님은 "guest" 그룹만 읽는다.
@@ -167,7 +173,9 @@ func main() {
 	}
 
 	// mind-svc's gate: its cards become approval cards here, and approving
-	// one is this module asking mind to do it. The guest has no mind.
+	// one is this module asking mind to do it. The guest has no mind - only
+	// their own reminders and checklists, which mind keeps by the guest's
+	// token apart from the operator's.
 	var mindClient *mindmod.Client
 	var checklistModule *checklist.Module
 	if cfg.MindURL != "" && !cfg.Guest {
@@ -183,7 +191,8 @@ func main() {
 		mcpMounts["/mcp/"+messages.ServerName] = messagesModule.Handler()
 		cfg.ModuleMCPURLs[messages.ServerName] = cfg.PublicMCPURL + "/" + messages.ServerName
 		cfg.Allow(messages.Tools...)
-
+	}
+	if cfg.MindURL != "" {
 		// 리마인드: "몇 시에 / 집에 가면 / 나갈 때 알려줘". mind 가 그때 폰으로 알린다.
 		remindModule := remind.New(cfg.MindURL, cfg.APIToken)
 		modules.Add(remindModule)
@@ -256,7 +265,17 @@ func main() {
 		spendingModule.Attach(transcript.AttachProposal)
 		go spendingModule.RunAsker(enrichCtx, spending.AskConfig{Every: 10 * time.Minute, MaxOpen: 3, Judge: runner, Model: cfg.EnrichModel})
 	}
-	if _, ok := cfg.ExtraMCPURLs[jobs.BrowserServer]; jobsModule != nil && ok {
+	if jobsModule != nil && cfg.Guest {
+		// The guest's jobs open no website: nothing to hold them to.
+		go jobsModule.Run(enrichCtx, runner, jobs.SchedulerConfig{
+			RunURL:     cfg.PublicMCPURL + "/job-run",
+			Interval:   cfg.JobsInterval,
+			Cooldown:   cfg.JobsCooldown,
+			Timeout:    cfg.JobsTimeout,
+			Model:      cfg.JobsModel,
+			RetryModel: cfg.JobsRetryModel,
+		})
+	} else if _, ok := cfg.ExtraMCPURLs[jobs.BrowserServer]; jobsModule != nil && ok {
 		guard, err := jobs.NewBridgeGuard(cfg.ExtraMCPURLs[jobs.BrowserServer], cfg.ExtraMCPToken)
 		if err != nil {
 			log.Error("작업을 사이트 안에 묶을 수 없어 작업을 실행하지 않습니다", "err", err)

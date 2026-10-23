@@ -49,6 +49,7 @@
 package api
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -68,6 +69,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/clock"
 	"github.com/choigonyok/jarvis/mind-svc/internal/mind"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+	"github.com/choigonyok/jarvis/mind-svc/internal/moments"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 	"github.com/choigonyok/jarvis/mind-svc/internal/world"
@@ -86,7 +88,14 @@ type Server struct {
 	open         bool
 	clock        *clock.Clock // nil unless the clock can be moved (memory mode)
 	log          *slog.Logger
+	// guestToken is the guest's agent's: it opens the guest's own reminders
+	// and checklists, and nothing else of mind.
+	guestToken string
 }
+
+// SetGuestToken lets the guest's agent keep the guest's own reminders and
+// checklists here (person).
+func (s *Server) SetGuestToken(t string) { s.guestToken = t }
 
 func New(m *mind.Mind, token, consoleToken string, open bool, c *clock.Clock, log *slog.Logger) *Server {
 	return &Server{m: m, token: token, consoleToken: consoleToken, open: open, clock: c, log: log}
@@ -235,18 +244,43 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/replay", s.auth(false, s.replay))
 	mux.HandleFunc("GET /api/recall", s.auth(false, s.recall))
 	mux.HandleFunc("POST /api/facts/flush", s.auth(false, s.flush))
-	mux.HandleFunc("GET /api/reminders", s.auth(false, s.listReminders))
-	mux.HandleFunc("POST /api/reminders", s.auth(false, s.setReminder))
-	mux.HandleFunc("PATCH /api/reminders/{id}", s.auth(false, s.changeReminder))
-	mux.HandleFunc("DELETE /api/reminders/{id}", s.auth(false, s.cancelReminder))
-	mux.HandleFunc("GET /api/checklists", s.auth(false, s.listChecklists))
-	mux.HandleFunc("POST /api/checklists", s.auth(false, s.makeChecklist))
-	mux.HandleFunc("GET /api/checklists/{id}", s.auth(false, s.getChecklist))
-	mux.HandleFunc("PATCH /api/checklists/{id}", s.auth(false, s.changeChecklist))
-	mux.HandleFunc("POST /api/checklists/{id}/items/{item}", s.auth(false, s.checkItem))
-	mux.HandleFunc("DELETE /api/checklists/{id}", s.auth(false, s.closeChecklist))
-	mux.HandleFunc("POST /api/checklists/{id}/show", s.auth(false, s.showChecklist))
+	mux.HandleFunc("GET /api/reminders", s.person(s.listReminders))
+	mux.HandleFunc("POST /api/reminders", s.person(s.setReminder))
+	mux.HandleFunc("PATCH /api/reminders/{id}", s.person(s.changeReminder))
+	mux.HandleFunc("DELETE /api/reminders/{id}", s.person(s.cancelReminder))
+	mux.HandleFunc("GET /api/checklists", s.person(s.listChecklists))
+	mux.HandleFunc("POST /api/checklists", s.person(s.makeChecklist))
+	mux.HandleFunc("GET /api/checklists/{id}", s.person(s.getChecklist))
+	mux.HandleFunc("PATCH /api/checklists/{id}", s.person(s.changeChecklist))
+	mux.HandleFunc("POST /api/checklists/{id}/items/{item}", s.person(s.checkItem))
+	mux.HandleFunc("DELETE /api/checklists/{id}", s.person(s.closeChecklist))
+	mux.HandleFunc("POST /api/checklists/{id}/show", s.person(s.showChecklist))
 	return mux
+}
+
+type caller struct{}
+
+// person guards a route on someone's own reminders and checklists: what
+// auth lets through is the operator's, and the guest's token the guest's -
+// another's is not found.
+func (s *Server) person(next http.HandlerFunc) http.HandlerFunc {
+	owner := s.auth(false, next)
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.guestToken != "" && same(r.Header.Get("Authorization"), "Bearer "+s.guestToken) {
+			next(w, r.WithContext(context.WithValue(r.Context(), caller{}, moments.Guest)))
+			return
+		}
+		owner(w, r)
+	}
+}
+
+// whoOf is whose the request is: moments.Owner or moments.Guest (the same
+// words as checklist's).
+func whoOf(r *http.Request) string {
+	if w, ok := r.Context().Value(caller{}).(string); ok {
+		return w
+	}
+	return moments.Owner
 }
 
 // auth guards a route. The services' own routes (service: /consume,

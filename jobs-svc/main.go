@@ -50,15 +50,26 @@ func main() {
 	}
 	defer st.Close()
 
-	jobsAPI := api.New(st, token,
+	// 손님의 토큰(손님 에이전트와, 손님 작업 탭에서 게이트웨이가 쓰는 것)으로는 손님 작업만.
+	guestToken := os.Getenv("API_GUEST_TOKEN")
+	jobsAPI := api.New(st, token, guestToken,
 		// 작업이 끝나고 이만큼 지나면 첨부 사진 파일을 지운다.
 		duration("JOBS_PURGE_AFTER", 30*24*time.Hour),
 		log)
-	// 작업 탭에서 지시하거나 "지금 실행"을 누르면 에이전트의 스케줄러를 바로 깨운다.
-	// 없으면(또는 닿지 않으면) 스케줄러가 자기 긴 주기에 본다.
+	// 작업 탭에서 지시하거나 "지금 실행"을 누르면 그 작업 주인의 에이전트 스케줄러를
+	// 바로 깨운다. 없으면(또는 닿지 않으면) 스케줄러가 자기 긴 주기에 본다.
+	wakes := map[string]func(){}
 	if url := os.Getenv("AGENT_WAKE_URL"); url != "" {
-		jobsAPI.SetWake(waker(url, token, log))
+		wakes[store.Owner] = waker(url, token, log)
 	}
+	if url := os.Getenv("AGENT_GUEST_WAKE_URL"); url != "" && guestToken != "" {
+		wakes[store.Guest] = waker(url, guestToken, log)
+	}
+	jobsAPI.SetWake(func(who string) {
+		if wake := wakes[who]; wake != nil {
+			wake()
+		}
+	})
 	srv := &http.Server{
 		Addr:         addr,
 		Handler:      jobsAPI.Handler(),

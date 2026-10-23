@@ -5,9 +5,16 @@
 // pauses, resumes, runs or cancels it. The agent creates jobs from
 // conversation, takes the next due one, and - through the tools a background
 // run calls - logs progress and decides what the job does next.
+//
+// Two people. The services' token is the operator's, the guest's token
+// (the guest's agent's, and the gateway's for the guest's 작업 tab) the
+// guest's: each sees, changes and runs only their own jobs - another's job
+// is not found. A guest's job opens no website and takes no photo: the
+// browser is the operator's, signed in as them.
 package api
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -24,27 +31,32 @@ import (
 type Server struct {
 	store      *store.Store
 	token      string
+	guestToken string
 	purgeAfter time.Duration
 	log        *slog.Logger
-	// wake tells the agent's scheduler a job may be due now.
-	wake func()
+	// wake tells whose agent's scheduler a job may be due now.
+	wake func(who string)
 }
 
-func New(s *store.Store, token string, purgeAfter time.Duration, log *slog.Logger) *Server {
-	return &Server{store: s, token: token, purgeAfter: purgeAfter, log: log}
+func New(s *store.Store, token, guestToken string, purgeAfter time.Duration, log *slog.Logger) *Server {
+	return &Server{store: s, token: token, guestToken: guestToken, purgeAfter: purgeAfter, log: log}
 }
 
 // SetWake names what to call when a job may have come due by someone's
 // hand - made, instructed, answered, run now, resumed, a site's login done.
-// It is the agent's scheduler, which otherwise looks only on its own long
-// clock: the 작업 tab talks to this service, not to the agent.
-func (s *Server) SetWake(fn func()) { s.wake = fn }
+// It is the agent's scheduler - the job's own person's agent - which
+// otherwise looks only on its own long clock: the 작업 tab talks to this
+// service, not to the agent.
+func (s *Server) SetWake(fn func(who string)) { s.wake = fn }
 
-func (s *Server) woke() {
+func (s *Server) woke(r *http.Request) {
 	if s.wake != nil {
-		go s.wake()
+		go s.wake(who(r))
 	}
 }
+
+// noBrowser is why a guest's job may not name a website or a photo.
+const noBrowser = "손님 작업은 웹사이트를 열거나 사진을 쓸 수 없어요 - 브라우저가 운영자 계정으로 로그인돼 있어서요."
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -52,41 +64,92 @@ func (s *Server) Handler() http.Handler {
 	// 탭과 대화
 	mux.HandleFunc("GET /jobs", s.auth(s.list))
 	mux.HandleFunc("POST /jobs", s.auth(s.create))
-	mux.HandleFunc("GET /jobs/{id}", s.auth(s.detail))
-	mux.HandleFunc("POST /jobs/{id}/instruct", s.auth(s.instruct))
-	mux.HandleFunc("POST /jobs/{id}/sites", s.auth(s.addSites))
-	mux.HandleFunc("POST /jobs/{id}/{action}", s.auth(s.control))
+	mux.HandleFunc("GET /jobs/{id}", s.job(s.detail))
+	mux.HandleFunc("POST /jobs/{id}/instruct", s.job(s.instruct))
+	mux.HandleFunc("POST /jobs/{id}/sites", s.job(s.addSites))
+	mux.HandleFunc("POST /jobs/{id}/{action}", s.job(s.control))
 	// 에이전트: 스케줄러
 	mux.HandleFunc("GET /due", s.auth(s.due))
-	mux.HandleFunc("POST /jobs/{id}/runs", s.auth(s.startRun))
+	mux.HandleFunc("POST /jobs/{id}/runs", s.job(s.startRun))
 	mux.HandleFunc("POST /runs/orphans", s.auth(s.orphans))
-	mux.HandleFunc("POST /runs/{id}/end", s.auth(s.endRun))
-	mux.HandleFunc("POST /jobs/{id}/answer", s.auth(s.answer))
+	mux.HandleFunc("POST /runs/{id}/end", s.run(s.endRun))
+	mux.HandleFunc("POST /jobs/{id}/answer", s.job(s.answer))
 	// 에이전트: 실행 중인 작업의 도구
-	mux.HandleFunc("POST /runs/{id}/step", s.auth(s.step))
-	mux.HandleFunc("POST /runs/{id}/schedule", s.auth(s.schedule))
-	mux.HandleFunc("POST /runs/{id}/wait", s.auth(s.wait))
-	mux.HandleFunc("POST /runs/{id}/finish", s.auth(s.finish))
-	mux.HandleFunc("POST /runs/{id}/report", s.auth(s.report))
-	mux.HandleFunc("POST /runs/{id}/memory", s.auth(s.memory))
-	mux.HandleFunc("POST /runs/{id}/record", s.auth(s.record))
+	mux.HandleFunc("POST /runs/{id}/step", s.run(s.step))
+	mux.HandleFunc("POST /runs/{id}/schedule", s.run(s.schedule))
+	mux.HandleFunc("POST /runs/{id}/wait", s.run(s.wait))
+	mux.HandleFunc("POST /runs/{id}/finish", s.run(s.finish))
+	mux.HandleFunc("POST /runs/{id}/report", s.run(s.report))
+	mux.HandleFunc("POST /runs/{id}/memory", s.run(s.memory))
+	mux.HandleFunc("POST /runs/{id}/record", s.run(s.record))
 	// 사이트 로그인, 사진 정리
 	mux.HandleFunc("GET /sites", s.auth(s.sites))
 	mux.HandleFunc("POST /sites/login", s.auth(s.siteLogin))
 	mux.HandleFunc("GET /purge/due", s.auth(s.purgeDue))
-	mux.HandleFunc("POST /jobs/{id}/purged", s.auth(s.purged))
+	mux.HandleFunc("POST /jobs/{id}/purged", s.job(s.purged))
 	return mux
+}
+
+type caller struct{}
+
+// who is whose the request is: the operator's (the services' token) or the
+// guest's.
+func who(r *http.Request) string {
+	if w, ok := r.Context().Value(caller{}).(string); ok {
+		return w
+	}
+	return store.Owner
 }
 
 func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if s.token != "" && subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+s.token)) != 1 {
+		got, as := r.Header.Get("Authorization"), store.Owner
+		switch {
+		case s.guestToken != "" && same(got, "Bearer "+s.guestToken):
+			as = store.Guest
+		case s.token != "" && !same(got, "Bearer "+s.token):
 			writeErr(w, http.StatusUnauthorized, "인증이 필요합니다.")
 			return
 		}
+		next(w, r.WithContext(context.WithValue(r.Context(), caller{}, as)))
+	}
+}
+
+// job is a route on one job, the caller's own; another's is not found.
+func (s *Server) job(next http.HandlerFunc) http.HandlerFunc {
+	return s.auth(func(w http.ResponseWriter, r *http.Request) {
+		id, ok := pathID(w, r)
+		if !ok {
+			return
+		}
+		s.mine(w, r, next, func(ctx context.Context) (string, error) { return s.store.WhoOf(ctx, id) }, "그런 작업이 없습니다.")
+	})
+}
+
+// run is a route on one run, of one of the caller's own jobs.
+func (s *Server) run(next http.HandlerFunc) http.HandlerFunc {
+	return s.auth(func(w http.ResponseWriter, r *http.Request) {
+		id, ok := pathID(w, r)
+		if !ok {
+			return
+		}
+		s.mine(w, r, next, func(ctx context.Context) (string, error) { return s.store.WhoOfRun(ctx, id) }, "그런 실행이 없습니다.")
+	})
+}
+
+func (s *Server) mine(w http.ResponseWriter, r *http.Request, next http.HandlerFunc, whose func(context.Context) (string, error), missing string) {
+	owner, err := whose(r.Context())
+	switch {
+	case errors.Is(err, store.ErrNotFound) || err == nil && owner != who(r):
+		writeErr(w, http.StatusNotFound, missing)
+	case err != nil:
+		s.fail(w, "작업을 읽지 못했습니다", err)
+	default:
 		next(w, r)
 	}
 }
+
+func same(a, b string) bool { return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.Ping(r.Context()); err != nil {
@@ -97,15 +160,17 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) list(w http.ResponseWriter, r *http.Request) {
-	jobs, err := s.store.List(r.Context())
+	jobs, err := s.store.List(r.Context(), who(r))
 	if err != nil {
 		s.fail(w, "작업 목록을 읽지 못했습니다", err)
 		return
 	}
-	sites, err := s.store.Sites(r.Context())
-	if err != nil {
-		s.fail(w, "사이트 상태를 읽지 못했습니다", err)
-		return
+	sites := []store.Site{}
+	if who(r) == store.Owner {
+		if sites, err = s.store.Sites(r.Context()); err != nil {
+			s.fail(w, "사이트 상태를 읽지 못했습니다", err)
+			return
+		}
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, map[string]any{"jobs": jobs, "blockedSites": sites})
@@ -121,12 +186,17 @@ func (s *Server) create(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "제목과 목표가 필요합니다.")
 		return
 	}
+	in.Who = who(r)
+	if in.Who == store.Guest && (len(in.Sites) > 0 || len(in.Photos) > 0) {
+		writeErr(w, http.StatusBadRequest, noBrowser)
+		return
+	}
 	j, err := s.store.Create(r.Context(), in)
 	if err != nil {
 		s.fail(w, "작업을 만들지 못했습니다", err)
 		return
 	}
-	s.woke()
+	s.woke(r)
 	writeJSON(w, http.StatusCreated, j)
 }
 
@@ -171,7 +241,7 @@ func (s *Server) instruct(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, err.Error())
 		return
 	}
-	s.woke()
+	s.woke(r)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -188,6 +258,10 @@ func (s *Server) addSites(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(in.Add) == 0 || len(in.Add) > 20 {
 		writeErr(w, http.StatusBadRequest, "더할 사이트를 1~20개 주세요.")
+		return
+	}
+	if who(r) == store.Guest {
+		writeErr(w, http.StatusForbidden, noBrowser)
 		return
 	}
 	j, err := s.store.AddSites(r.Context(), id, in.Add)
@@ -219,7 +293,7 @@ func (s *Server) control(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if action == "run" || action == "resume" {
-		s.woke()
+		s.woke(r)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -240,7 +314,7 @@ func (s *Server) answer(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "답을 적지 못했습니다", err)
 		return
 	}
-	s.woke()
+	s.woke(r)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -255,7 +329,7 @@ func (s *Server) due(w http.ResponseWriter, r *http.Request) {
 			n = k
 		}
 	}
-	jobs, err := s.store.DueN(r.Context(), n)
+	jobs, err := s.store.DueN(r.Context(), who(r), n)
 	if err != nil {
 		s.fail(w, "할 작업을 읽지 못했습니다", err)
 		return
@@ -267,7 +341,7 @@ func (s *Server) due(w http.ResponseWriter, r *http.Request) {
 	if jobs == nil {
 		jobs = []store.Job{}
 	}
-	next, err := s.store.NextDue(r.Context())
+	next, err := s.store.NextDue(r.Context(), who(r))
 	if err != nil {
 		s.fail(w, "다음 작업 시각을 읽지 못했습니다", err)
 		return
@@ -289,7 +363,7 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) orphans(w http.ResponseWriter, r *http.Request) {
-	if err := s.store.CloseOrphans(r.Context()); err != nil {
+	if err := s.store.CloseOrphans(r.Context(), who(r)); err != nil {
 		s.fail(w, "남은 실행을 정리하지 못했습니다", err)
 		return
 	}
@@ -430,6 +504,10 @@ func (s *Server) record(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) sites(w http.ResponseWriter, r *http.Request) {
+	if who(r) == store.Guest {
+		writeJSON(w, http.StatusOK, map[string]any{"sites": []store.Site{}})
+		return
+	}
 	sites, err := s.store.Sites(r.Context())
 	if err != nil {
 		s.fail(w, "사이트 상태를 읽지 못했습니다", err)
@@ -439,6 +517,10 @@ func (s *Server) sites(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) siteLogin(w http.ResponseWriter, r *http.Request) {
+	if who(r) == store.Guest {
+		writeErr(w, http.StatusForbidden, noBrowser)
+		return
+	}
 	var in struct {
 		Site     string `json:"site"`
 		Required bool   `json:"required"`
@@ -452,13 +534,13 @@ func (s *Server) siteLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !in.Required {
-		s.woke()
+		s.woke(r)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) purgeDue(w http.ResponseWriter, r *http.Request) {
-	ps, err := s.store.PurgeDue(r.Context(), s.purgeAfter)
+	ps, err := s.store.PurgeDue(r.Context(), who(r), s.purgeAfter)
 	if err != nil {
 		s.fail(w, "정리 대상을 읽지 못했습니다", err)
 		return

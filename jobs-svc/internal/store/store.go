@@ -68,7 +68,16 @@ type Job struct {
 	// BlockedSites are this job's sites that are waiting on a login.
 	BlockedSites []string `json:"blockedSites,omitempty"`
 	Records      int      `json:"records"`
+	// Who: whose job it is - owner, or guest. Each sees, changes and runs
+	// only their own.
+	Who string `json:"who"`
 }
+
+// Whose a job is.
+const (
+	Owner = "owner"
+	Guest = "guest"
+)
 
 const jobCols = `j.id, j.title, j.goal, j.instructions, j.sites, j.photos, j.state, j.next_at,
 	j.next_reason, j.waiting_card, j.summary, j.attempts, j.last_run_at, j.finished_at,
@@ -76,13 +85,13 @@ const jobCols = `j.id, j.title, j.goal, j.instructions, j.sites, j.photos, j.sta
 	exists (select 1 from job_runs r where r.job_id = j.id and r.ended_at is null),
 	coalesce((select e.text from job_events e where e.job_id = j.id order by e.id desc limit 1), ''),
 	coalesce((select array_agg(s.site) from job_sites s where s.login_required and s.site = any(j.sites)), '{}'),
-	(select count(*) from job_records r where r.job_id = j.id)`
+	(select count(*) from job_records r where r.job_id = j.id), j.who`
 
 func scanJob(row pgx.Row) (Job, error) {
 	var j Job
 	err := row.Scan(&j.ID, &j.Title, &j.Goal, &j.Instructions, &j.Sites, &j.Photos, &j.State,
 		&j.NextAt, &j.NextReason, &j.WaitingCard, &j.Summary, &j.Attempts, &j.LastRunAt,
-		&j.FinishedAt, &j.PhotosGone, &j.CreatedAt, &j.Running, &j.CurrentStep, &j.BlockedSites, &j.Records)
+		&j.FinishedAt, &j.PhotosGone, &j.CreatedAt, &j.Running, &j.CurrentStep, &j.BlockedSites, &j.Records, &j.Who)
 	if j.Sites == nil {
 		j.Sites = []string{}
 	}
@@ -101,6 +110,9 @@ type NewJob struct {
 	Instructions string   `json:"instructions"`
 	Sites        []string `json:"sites"`
 	Photos       []string `json:"photos"`
+	// Who is whose it is (the caller's token, never the body): owner when
+	// empty.
+	Who string `json:"-"`
 }
 
 // Create stores a job due now: the first run is what works out the plan,
@@ -115,11 +127,14 @@ func (s *Store) Create(ctx context.Context, n NewJob) (Job, error) {
 	if n.Photos == nil {
 		n.Photos = []string{}
 	}
+	if n.Who == "" {
+		n.Who = Owner
+	}
 	var id int64
 	err := s.pool.QueryRow(ctx, `
-		insert into jobs (title, goal, instructions, sites, photos, next_at, next_reason)
-		values ($1, $2, $3, $4, $5, now(), '첫 실행')
-		returning id`, n.Title, n.Goal, n.Instructions, sites, n.Photos).Scan(&id)
+		insert into jobs (title, goal, instructions, sites, photos, next_at, next_reason, who)
+		values ($1, $2, $3, $4, $5, now(), '첫 실행', $6)
+		returning id`, n.Title, n.Goal, n.Instructions, sites, n.Photos, n.Who).Scan(&id)
 	if err != nil {
 		return Job{}, err
 	}
@@ -135,12 +150,32 @@ func (s *Store) Get(ctx context.Context, id int64) (Job, error) {
 	return j, err
 }
 
-// List returns live jobs first (running, waiting on a person, scheduled),
-// then finished ones, newest first within each.
-func (s *Store) List(ctx context.Context) ([]Job, error) {
-	rows, err := s.pool.Query(ctx, `select `+jobCols+` from jobs j
+// WhoOf is whose job id is.
+func (s *Store) WhoOf(ctx context.Context, id int64) (string, error) {
+	var who string
+	err := s.pool.QueryRow(ctx, `select who from jobs where id = $1`, id).Scan(&who)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return who, err
+}
+
+// WhoOfRun is whose job the run is of.
+func (s *Store) WhoOfRun(ctx context.Context, runID int64) (string, error) {
+	var who string
+	err := s.pool.QueryRow(ctx, `select j.who from job_runs r join jobs j on j.id = r.job_id where r.id = $1`, runID).Scan(&who)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return who, err
+}
+
+// List returns who's live jobs first (running, waiting on a person,
+// scheduled), then finished ones, newest first within each.
+func (s *Store) List(ctx context.Context, who string) ([]Job, error) {
+	rows, err := s.pool.Query(ctx, `select `+jobCols+` from jobs j where j.who = $1
 		order by case j.state when 'waiting' then 0 when 'active' then 1 when 'paused' then 2 else 3 end,
-		         j.created_at desc`)
+		         j.created_at desc`, who)
 	if err != nil {
 		return nil, err
 	}
@@ -375,8 +410,8 @@ func (s *Store) Answer(ctx context.Context, id int64, card, text string) error {
 
 // Due is the job most overdue whose sites are all logged in and which is not
 // already running, or nil.
-func (s *Store) Due(ctx context.Context) (*Job, error) {
-	jobs, err := s.DueN(ctx, 1)
+func (s *Store) Due(ctx context.Context, who string) (*Job, error) {
+	jobs, err := s.DueN(ctx, who, 1)
 	if err != nil || len(jobs) == 0 {
 		return nil, err
 	}
@@ -386,15 +421,15 @@ func (s *Store) Due(ctx context.Context) (*Job, error) {
 // DueN is up to n due jobs, most overdue first: the scheduler runs more
 // than one at a time when they do not want the browser, so it looks past
 // the first one it cannot start.
-func (s *Store) DueN(ctx context.Context, n int) ([]Job, error) {
+func (s *Store) DueN(ctx context.Context, who string, n int) ([]Job, error) {
 	if n <= 0 {
 		n = 1
 	}
 	rows, err := s.pool.Query(ctx, `select `+jobCols+` from jobs j
-		where j.state = 'active' and j.next_at <= now()
+		where j.who = $2 and j.state = 'active' and j.next_at <= now()
 		  and not exists (select 1 from job_sites s where s.login_required and s.site = any(j.sites))
 		  and not exists (select 1 from job_runs r where r.job_id = j.id and r.ended_at is null)
-		order by j.next_at limit $1`, n)
+		order by j.next_at limit $1`, n, who)
 	if err != nil {
 		return nil, err
 	}
@@ -414,11 +449,11 @@ func (s *Store) DueN(ctx context.Context, n int) ([]Job, error) {
 // is on one: the scheduler sleeps until then rather than asking every few
 // seconds. A job waiting on a card or a login has no clock - what wakes it
 // is the decision.
-func (s *Store) NextDue(ctx context.Context) (*time.Time, error) {
+func (s *Store) NextDue(ctx context.Context, who string) (*time.Time, error) {
 	var at *time.Time
 	err := s.pool.QueryRow(ctx, `select min(j.next_at) from jobs j
-		where j.state = 'active' and j.next_at > now()
-		  and not exists (select 1 from job_sites s where s.login_required and s.site = any(j.sites))`).Scan(&at)
+		where j.who = $1 and j.state = 'active' and j.next_at > now()
+		  and not exists (select 1 from job_sites s where s.login_required and s.site = any(j.sites))`, who).Scan(&at)
 	return at, err
 }
 
@@ -438,10 +473,11 @@ func (s *Store) StartRun(ctx context.Context, jobID int64) (int64, error) {
 	return id, err
 }
 
-// CloseOrphans ends runs a previous agent process left open.
-func (s *Store) CloseOrphans(ctx context.Context) error {
+// CloseOrphans ends the runs of who's jobs a previous agent process left
+// open - its own agent's, never the other one's.
+func (s *Store) CloseOrphans(ctx context.Context, who string) error {
 	_, err := s.pool.Exec(ctx, `update job_runs set ended_at = now(), outcome = 'yielded', note = '에이전트가 재시작됨'
-		where ended_at is null`)
+		where ended_at is null and job_id in (select id from jobs where who = $1)`, who)
 	return err
 }
 
@@ -759,11 +795,11 @@ type Purge struct {
 }
 
 // PurgeDue lists jobs that ended more than after ago and still have photos.
-func (s *Store) PurgeDue(ctx context.Context, after time.Duration) ([]Purge, error) {
+func (s *Store) PurgeDue(ctx context.Context, who string, after time.Duration) ([]Purge, error) {
 	rows, err := s.pool.Query(ctx, `select id, photos from jobs
-		where photos_purged_at is null and cardinality(photos) > 0
+		where who = $2 and photos_purged_at is null and cardinality(photos) > 0
 		  and state in ('done', 'cancelled', 'failed')
-		  and coalesce(finished_at, updated_at) < $1`, time.Now().Add(-after))
+		  and coalesce(finished_at, updated_at) < $1`, time.Now().Add(-after), who)
 	if err != nil {
 		return nil, err
 	}

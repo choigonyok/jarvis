@@ -95,10 +95,22 @@ const SERVICES: Record<string, { binding: keyof Env; origin: string }> = {
 
 /**
  * What the guest's token opens: their own agent, the workout log, their
- * notifications, their own voice, and of context-svc the operator's day alone
- * (guestContextRoute).
+ * notifications, their own voice, of context-svc the operator's day alone
+ * (guestContextRoute), and their own jobs (guestJobsRoute).
  */
-const GUEST_SERVICES = new Set(["agent-guest", "workout", "notify", "tts", "context"]);
+const GUEST_SERVICES = new Set(["agent-guest", "workout", "notify", "tts", "context", "jobs"]);
+
+/**
+ * What the guest may do on jobs-svc - what the 작업 tab does: list their
+ * jobs, read one, and instruct, run, pause, resume or cancel it. The guest's
+ * token goes on with it, so jobs-svc shows and changes the guest's own jobs
+ * and finds no other. Not making one (the conversation does that), nor the
+ * scheduler's routes, the sites' logins or the photo clean-up.
+ */
+function guestJobsRoute(method: string, path: string): boolean {
+  if (method === "GET") return path === "jobs" || /^jobs\/\d+$/.test(path);
+  return method === "POST" && /^jobs\/\d+\/(instruct|run|pause|resume|cancel)$/.test(path);
+}
 
 /**
  * What the guest may do on context-svc: read a day of where either of them
@@ -216,6 +228,9 @@ async function gateway(request: Request, env: Env, internal: boolean): Promise<R
   if (guest && name === "context" && !guestContextRoute(request.method, rest.join("/"))) {
     return json(404, "그런 경로가 없습니다.");
   }
+  if (guest && name === "jobs" && !guestJobsRoute(request.method, rest.join("/"))) {
+    return json(404, "그런 경로가 없습니다.");
+  }
   if ((name === "agent" || name === "agent-guest") && !AGENT_ROUTES.has(rest[0] ?? "")) {
     return json(404, "그런 경로가 없습니다.");
   }
@@ -246,11 +261,13 @@ async function gateway(request: Request, env: Env, internal: boolean): Promise<R
   // The services want their own token; the caller's never goes past here.
   // The guest's agent has a token of its own, which opens only the guest's
   // side of the services it calls. The voice service keeps one recording per
-  // token, so the guest's requests go on with the guest's token and nothing
-  // else: without it there is no guest voice, never the operator's.
+  // token, and jobs-svc keeps each one's jobs by it, so the guest's requests
+  // go on with the guest's token and nothing else: without it there is no
+  // guest voice and no guest job, never the operator's.
   if (bearer) {
     if (guest && name === "tts" && !env.JARVIS_GUEST_API_TOKEN) return json(503, "손님 목소리가 설정되지 않았습니다.");
-    const own = (name === "agent-guest" || (guest && name === "tts")) && env.JARVIS_GUEST_API_TOKEN;
+    if (guest && name === "jobs" && !env.JARVIS_GUEST_API_TOKEN) return json(503, "손님 작업이 설정되지 않았습니다.");
+    const own = (name === "agent-guest" || (guest && (name === "tts" || name === "jobs"))) && env.JARVIS_GUEST_API_TOKEN;
     const token = own ? env.JARVIS_GUEST_API_TOKEN! : env.JARVIS_API_TOKEN;
     headers.set("authorization", `Bearer ${token}`);
   }

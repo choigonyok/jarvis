@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/choigonyok/jarvis/mind-svc/internal/checklist"
 	"github.com/choigonyok/jarvis/mind-svc/internal/moments"
 )
 
@@ -84,7 +85,7 @@ func (s *Server) listReminders(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rs, err := svc.List(r.Context(), r.URL.Query().Get("all") != "")
+	rs, err := svc.ListOf(r.Context(), whoOf(r), r.URL.Query().Get("all") != "")
 	if err != nil {
 		s.reminderFail(w, err)
 		return
@@ -120,6 +121,9 @@ func (s *Server) setReminder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rem := moments.Reminder{Source: source, At: at, After: after, Until: until, URL: in.URL}
+	if whoOf(r) == moments.Guest {
+		rem.Who = moments.Guest
+	}
 	if in.Text != nil {
 		rem.Text = *in.Text
 	}
@@ -163,6 +167,9 @@ func (s *Server) changeReminder(w http.ResponseWriter, r *http.Request) {
 	if in.Checklist != nil && !s.listExists(w, r, *in.Checklist) {
 		return
 	}
+	if !s.ownReminder(w, r, svc) {
+		return
+	}
 	saved, err := svc.Change(r.Context(), r.PathValue("id"), moments.Change{
 		Text: in.Text, Body: in.Body, At: at, Place: in.Place, Move: in.Move, After: after, Until: until, Clear: in.Clear,
 		Checklist: in.Checklist,
@@ -186,8 +193,26 @@ func (s *Server) listExists(w http.ResponseWriter, r *http.Request, id string) b
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "체크리스트를 둘 곳이 없습니다."})
 		return false
 	}
-	if _, err := s.m.Lists.Get(r.Context(), id); err != nil {
+	l, err := s.m.Lists.Get(r.Context(), id)
+	if err == nil && l.Person() != whoOf(r) {
+		err = checklist.ErrNotFound
+	}
+	if err != nil {
 		s.listFail(w, err)
+		return false
+	}
+	return true
+}
+
+// ownReminder is whether the reminder of the path is the caller's own;
+// another's is answered as not found.
+func (s *Server) ownReminder(w http.ResponseWriter, r *http.Request, svc *moments.Service) bool {
+	rem, err := svc.Get(r.Context(), r.PathValue("id"))
+	if err == nil && rem.Person() != whoOf(r) {
+		err = moments.ErrNotFound
+	}
+	if err != nil {
+		s.reminderFail(w, err)
 		return false
 	}
 	return true
@@ -195,7 +220,7 @@ func (s *Server) listExists(w http.ResponseWriter, r *http.Request, id string) b
 
 func (s *Server) cancelReminder(w http.ResponseWriter, r *http.Request) {
 	svc, ok := s.moments(w)
-	if !ok {
+	if !ok || !s.ownReminder(w, r, svc) {
 		return
 	}
 	saved, err := svc.Cancel(r.Context(), r.PathValue("id"))

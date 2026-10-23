@@ -415,6 +415,9 @@ type Notice struct {
 	// Data is what the card needs besides the wording: the reminder it is,
 	// the checklist it shows.
 	Data map[string]any `json:"data,omitempty"`
+	// Audience is who it is for: "" the operator, "guest" the guest - whose
+	// devices it rings, and whose inbox it is in.
+	Audience string `json:"audience,omitempty"`
 }
 
 type Notifier interface {

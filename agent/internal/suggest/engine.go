@@ -135,8 +135,11 @@ func (e *Engine) notice(ev Event) {
 		Why       string  `json:"why"`
 		Body      *string `json:"body"`
 		Checklist string  `json:"checklist"`
+		Who       string  `json:"who"`
 	}
-	if json.Unmarshal(ev.Data, &d) != nil || !d.Card {
+	// The guest's reminders are the guest's: their phone, never the
+	// operator's conversation.
+	if json.Unmarshal(ev.Data, &d) != nil || !d.Card || d.Who == "guest" {
 		return
 	}
 	// The push's body carries what is left on the list and why now, both of
@@ -160,8 +163,9 @@ func (e *Engine) showList(ev Event) {
 	var d struct {
 		Checklist string `json:"checklist"`
 		Lead      string `json:"lead"`
+		Who       string `json:"who"`
 	}
-	if json.Unmarshal(ev.Data, &d) != nil || d.Checklist == "" {
+	if json.Unmarshal(ev.Data, &d) != nil || d.Checklist == "" || d.Who == "guest" {
 		return
 	}
 	key := ev.Key

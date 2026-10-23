@@ -22,10 +22,12 @@ import (
 // once - a rebalance for the evening at home, the rain at the door.
 
 // Location events (context-svc), as the operator arrives at a region or
-// leaves it.
+// leaves it - and as the guest's phone does at the guest's own regions.
 const (
-	LocationEnter = "location.enter"
-	LocationLeave = "location.leave"
+	LocationEnter      = "location.enter"
+	LocationLeave      = "location.leave"
+	LocationGuestEnter = "location.guest.enter"
+	LocationGuestLeave = "location.guest.leave"
 )
 
 // HereHTTP is where the operator is now: context-svc's open visits.
@@ -36,6 +38,14 @@ func (h HereHTTP) Visits(ctx context.Context) ([]moments.Visit, error) {
 		Visits []moments.Visit `json:"visits"`
 	}
 	return out.Visits, getJSON(ctx, strings.TrimRight(h.URL, "/")+"/now", h.Token, &out)
+}
+
+// GuestVisits is where the guest's phone is now: the guest's own regions.
+func (h HereHTTP) GuestVisits(ctx context.Context) ([]moments.Visit, error) {
+	var out struct {
+		Visits []moments.Visit `json:"visits"`
+	}
+	return out.Visits, getJSON(ctx, strings.TrimRight(h.URL, "/")+"/now/guest", h.Token, &out)
 }
 
 // say is a reminder's moment come. The operator's own go out in their words
@@ -88,6 +98,11 @@ func (m *Mind) say(ctx context.Context, r moments.Reminder) (string, error) {
 		Key:  "remind:" + r.ID + ":" + strconv.FormatInt(r.UpdatedAt.Unix(), 10),
 		Card: true, Data: data,
 	}
+	if r.Person() == moments.Guest {
+		// The guest's own: their devices and inbox, and not a card in the
+		// operator's conversation.
+		n.Audience, data["who"] = moments.Guest, moments.Guest
+	}
 	if s, ok := m.notifier.(act.Sender); ok {
 		return "푸시", s.Send(ctx, n)
 	}
@@ -112,7 +127,9 @@ func outcome(in model.Intent) string {
 	return "저녁 요약으로"
 }
 
-// onLocation is the operator arriving at a region or leaving it.
+// onLocation is the operator arriving at a region or leaving it - or the
+// guest's phone at one of the guest's regions, which moves only the guest's
+// own reminders.
 func (m *Mind) onLocation(ctx context.Context, o obs.Observation) error {
 	var d struct {
 		Region string `json:"region"`
@@ -122,12 +139,18 @@ func (m *Mind) onLocation(ctx context.Context, o obs.Observation) error {
 		return nil
 	}
 	move := moments.Arrive
-	if o.Type == LocationLeave {
+	if o.Type == LocationLeave || o.Type == LocationGuestLeave {
 		move = moments.Leave
 	}
 	at := o.OccurredAt
 	if at.IsZero() {
 		at = m.Opts.Now()
+	}
+	if o.Type == LocationGuestEnter || o.Type == LocationGuestLeave {
+		if m.Moments == nil {
+			return nil
+		}
+		return m.Moments.MovedAs(ctx, moments.Guest, move, d.Region, d.Kind, at)
 	}
 	if m.Moments != nil {
 		if err := m.Moments.Moved(ctx, move, d.Region, d.Kind, at); err != nil {

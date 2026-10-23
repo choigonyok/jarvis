@@ -218,7 +218,7 @@ func TestAnswersAndInstructionsWakeAtOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	end(r)
-	next, err := s.NextDue(ctx)
+	next, err := s.NextDue(ctx, Owner)
 	if err != nil || next == nil || next.After(at.Add(time.Second)) {
 		t.Fatalf("다음 시각 %v (잡은 시각 %v): %v", next, at, err)
 	}

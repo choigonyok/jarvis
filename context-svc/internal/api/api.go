@@ -138,6 +138,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /owntracks", limit(newBucket(120, 2), s.owntracks))
 	mux.HandleFunc("POST /signals", limit(newBucket(60, 1), s.signals))
 	mux.HandleFunc("GET /now", s.bearer(s.current))
+	mux.HandleFunc("GET /now/guest", s.bearer(s.guestNow))
 	mux.HandleFunc("GET /visits", s.bearer(s.visits))
 	mux.HandleFunc("GET /travel", s.bearer(s.travel))
 	mux.HandleFunc("GET /track", s.bearer(s.track))
@@ -714,6 +715,23 @@ func (s *Server) guestMoves(ctx context.Context, rep report, at time.Time, own [
 	}
 	where.Regions = append([]string{}, now...)
 	return where, s.st.Set(ctx, "guest.inside", where, at)
+}
+
+// guestNow is the guest's own regions the guest's phone is in now, as their
+// last reports put it - what mind asks when a reminder of the guest's counts
+// being there already ("19시 넘어 집에 있으면"): {visits: [{region, kind}]}.
+func (s *Server) guestNow(w http.ResponseWriter, r *http.Request) {
+	var where guestPlace
+	_, err := s.st.Get(r.Context(), "guest.inside", &where)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		s.fail(w, "손님 위치를 읽지 못했습니다", err)
+		return
+	}
+	visits := []map[string]string{}
+	for _, n := range where.Regions {
+		visits = append(visits, map[string]string{"region": n, "kind": place.KindOf(n)})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"visits": visits})
 }
 
 // announceGuest says the guest's arrival or departure in the guest's own

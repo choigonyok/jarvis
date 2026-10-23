@@ -18,6 +18,10 @@
 //
 // What is stored is what is said, and the conversation answers from what is
 // stored - never from what it meant to store.
+//
+// Reminders are the operator's or the guest's (Who): each is said to its own
+// person, by that person's moves and that person's being there - the guest's
+// phone's arrivals and its regions, never the operator's.
 package moments
 
 import (
@@ -46,6 +50,12 @@ const (
 	Sent      = "sent"
 	Cancelled = "cancelled"
 	Expired   = "expired"
+)
+
+// Whose a reminder is.
+const (
+	Owner = "owner"
+	Guest = "guest"
 )
 
 // Sources: who wanted it said.
@@ -85,6 +95,8 @@ type Reminder struct {
 	// Checklist is a list shown with it, as it stands then (checklist): what
 	// to pack, what to do on getting home.
 	Checklist string `json:"checklist,omitempty"`
+	// Who is whose it is: "" or owner, the operator's; guest, the guest's.
+	Who string `json:"who,omitempty"`
 	// Status, and what came of saying it: "푸시", "카드", or why nothing
 	// was said.
 	Status    string     `json:"status"`
@@ -93,6 +105,14 @@ type Reminder struct {
 	Result    string     `json:"result,omitempty"`
 	CreatedAt time.Time  `json:"createdAt"`
 	UpdatedAt time.Time  `json:"updatedAt"`
+}
+
+// Person is whose the reminder is: Owner or Guest.
+func (r Reminder) Person() string {
+	if r.Who == Guest {
+		return Guest
+	}
+	return Owner
 }
 
 // Visit is a region the operator is in now (context-svc's open visits).
@@ -123,8 +143,9 @@ type Service struct {
 	Now func() time.Time
 	Loc *time.Location
 	// Here is the regions the operator is in now; nil or an error: not
-	// known, and nobody is taken to be anywhere.
-	Here func(ctx context.Context) ([]Visit, error)
+	// known, and nobody is taken to be anywhere. GuestHere is the guest's.
+	Here      func(ctx context.Context) ([]Visit, error)
+	GuestHere func(ctx context.Context) ([]Visit, error)
 	// Say says a reminder whose moment came, and what came of it ("푸시");
 	// an error leaves it waiting, to be tried again.
 	Say func(ctx context.Context, r Reminder) (string, error)
@@ -154,7 +175,7 @@ func (s *Service) Set(ctx context.Context, r Reminder) (Reminder, error) {
 			return r, err
 		}
 		for _, w := range waiting {
-			if w.Topic == r.Topic && w.Status == Waiting {
+			if w.Topic == r.Topic && w.Status == Waiting && w.Person() == r.Person() {
 				r.ID, r.CreatedAt = w.ID, w.CreatedAt
 			}
 		}
@@ -167,6 +188,11 @@ func (s *Service) Set(ctx context.Context, r Reminder) (Reminder, error) {
 	}
 	delete(s.looked, r.ID)
 	return r, s.St.PutReminder(ctx, r)
+}
+
+// Get is one reminder.
+func (s *Service) Get(ctx context.Context, id string) (Reminder, error) {
+	return s.St.Reminder(ctx, id)
 }
 
 // Change is what a change gives: the fields set replace the reminder's, and
@@ -281,9 +307,15 @@ func (s *Service) CancelTopic(ctx context.Context, topic string) error {
 // recent is how far back List shows the reminders no longer waiting.
 const recent = 3 * 24 * time.Hour
 
-// List is the reminders waiting, soonest first - and, with all, those said,
-// cancelled or expired in the last three days after them, newest first.
+// List is the operator's reminders waiting, soonest first - and, with all,
+// those said, cancelled or expired in the last three days after them, newest
+// first.
 func (s *Service) List(ctx context.Context, all bool) ([]Reminder, error) {
+	return s.ListOf(ctx, Owner, all)
+}
+
+// ListOf is List of who's reminders.
+func (s *Service) ListOf(ctx context.Context, who string, all bool) ([]Reminder, error) {
 	since := time.Time{}
 	if all {
 		since = s.Now().Add(-recent)
@@ -292,6 +324,7 @@ func (s *Service) List(ctx context.Context, all bool) ([]Reminder, error) {
 	if err != nil {
 		return nil, err
 	}
+	rs = slices.DeleteFunc(rs, func(r Reminder) bool { return r.Person() != who })
 	sort.SliceStable(rs, func(i, j int) bool {
 		a, b := rs[i], rs[j]
 		if (a.Status == Waiting) != (b.Status == Waiting) {
@@ -322,6 +355,12 @@ const stale = 30 * time.Minute
 // Moved is the operator arriving at a region or leaving it: the reminders
 // waiting for that move are said.
 func (s *Service) Moved(ctx context.Context, move, region, kind string, at time.Time) error {
+	return s.MovedAs(ctx, Owner, move, region, kind, at)
+}
+
+// MovedAs is who arriving at one of their regions or leaving it: their own
+// reminders waiting for that move are said.
+func (s *Service) MovedAs(ctx context.Context, who, move, region, kind string, at time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.Now().Sub(at) > stale {
@@ -332,7 +371,7 @@ func (s *Service) Moved(ctx context.Context, move, region, kind string, at time.
 		return err
 	}
 	for _, r := range rs {
-		if r.Status != Waiting || r.Place == "" || r.Move != move || !matches(r.Place, region, kind) {
+		if r.Status != Waiting || r.Person() != who || r.Place == "" || r.Move != move || !matches(r.Place, region, kind) {
 			continue
 		}
 		// A move before it counts, or before it was set as it is.
@@ -355,8 +394,7 @@ func (s *Service) Tick(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	var here []Visit
-	known, asked := false, false
+	here, known, asked := map[string][]Visit{}, map[string]bool{}, map[string]bool{}
 	for _, r := range rs {
 		if r.Status != Waiting {
 			continue
@@ -372,18 +410,19 @@ func (s *Service) Tick(ctx context.Context) error {
 				return err
 			}
 		case r.Place != "" && r.Move == Arrive && r.After != nil && !r.After.After(now) && !s.looked[r.ID]:
-			if !asked {
-				here, known = s.where(ctx)
-				asked = true
+			who := r.Person()
+			if !asked[who] {
+				here[who], known[who] = s.where(ctx, who)
+				asked[who] = true
 			}
-			if !known {
+			if !known[who] {
 				continue // looked at again on the next tick
 			}
 			if s.looked == nil {
 				s.looked = map[string]bool{}
 			}
 			s.looked[r.ID] = true
-			for _, v := range here {
+			for _, v := range here[who] {
 				if matches(r.Place, v.Region, v.Kind) {
 					s.say(ctx, r, ByThere)
 					break
@@ -394,12 +433,16 @@ func (s *Service) Tick(ctx context.Context) error {
 	return nil
 }
 
-// where is the regions the operator is in now, and whether that is known.
-func (s *Service) where(ctx context.Context) ([]Visit, bool) {
-	if s.Here == nil {
+// where is the regions who is in now, and whether that is known.
+func (s *Service) where(ctx context.Context, who string) ([]Visit, bool) {
+	here := s.Here
+	if who == Guest {
+		here = s.GuestHere
+	}
+	if here == nil {
 		return nil, false
 	}
-	vs, err := s.Here(ctx)
+	vs, err := here(ctx)
 	if err != nil {
 		if s.Out != nil {
 			s.Out.Warn("지금 있는 곳을 읽지 못했습니다", "err", err)

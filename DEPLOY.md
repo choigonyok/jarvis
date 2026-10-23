@@ -15,7 +15,8 @@
               ▼
            jarvis-be (edge Worker)
               │ 토큰 없으면 401, 손님 토큰은 agent-guest·workout·notify·tts 와 context 의 GET track·owntracks/setup/guest,
-              │ POST owntracks/regions/guest, 손님 자기 출발 경로(transit/guest…·transit/lines)만,
+              │ POST owntracks/regions/guest, 손님 자기 출발 경로(transit/guest…·transit/lines)와
+              │ jobs 의 작업 탭 경로(목록·하나·지시·실행·멈춤·다시·그만, 손님 토큰으로 - 손님 작업만)만,
               │ agent 는 콘솔이 쓰는 경로만
               │ 확인 뒤 Authorization 을 JARVIS_API_TOKEN 으로 바꿔 붙인다
               │ (agent-guest 에는 JARVIS_GUEST_API_TOKEN)
@@ -119,10 +120,13 @@ DB 가 필요한 테스트는 `scripts/dbtest` 로 돌린다(맥북 Docker 에 �
 **손님 계정.** Access 정책은 운영자와 손님 두 이메일을 허용한다. 콘솔은 Access 가
 서명한 이메일로 역할을 정하고(`web/src/lib/role.ts`, Worker 비밀값 `ACCESS_OWNERS`/`ACCESS_GUESTS` - 이메일이라 공개 저장소에 두지 않는다), 손님은
 대화·운동·캘린더·편집·위치(둘이 다닌 길, 읽기만 - 손님 폰 연결은 `OWNTRACKS_GUEST_USER`/`OWNTRACKS_GUEST_PASSWORD`, 맥미니 `.env`)·출발(자기 경로만 -
-실시간 버스·지하철 키는 `DATA_GO_KR_KEY`/`SEOUL_SUBWAY_KEY`, 맥미니 `.env`) 페이지와 `/api/agent`·`/api/workout`·`/api/context/track`·`/api/context/owntracks/setup/guest`·`/api/map` 등 손님 몫 API, PhotoCraft 파일(`/photocraft/`)만 미들웨어에서 통과한다 - 나머지는 403
+실시간 버스·지하철 키는 `DATA_GO_KR_KEY`/`SEOUL_SUBWAY_KEY`, 맥미니 `.env`)·작업(자기 작업·체크리스트만) 페이지와 `/api/agent`·`/api/jobs`·`/api/workout`·`/api/context/track`·`/api/context/owntracks/setup/guest`·`/api/map` 등 손님 몫 API, PhotoCraft 파일(`/photocraft/`)만 미들웨어에서 통과한다 - 나머지는 403
 이거나 첫 화면으로 돌려보낸다. 손님의 대화는 별도 컨테이너 `agent-guest`(`JARVIS_ROLE=guest`)가
-받는다: chat-svc 의 thread `guest`, 별도 CLI 홈·승인 카드, 캘린더 모듈만, 내장 도구는 웹 검색뿐,
-브라우저 토큰·자산·가계부 주소 없음. 게이트웨이 경로 `/agent-guest/…`(VPC `jarvis-agent-guest`, 포트 8081).
+받는다: chat-svc 의 thread `guest`, 별도 CLI 홈·승인 카드, 캘린더·리마인드·체크리스트·작업 모듈,
+내장 도구는 웹 검색뿐, 브라우저 토큰·자산·가계부 주소 없음. 리마인드·체크리스트(mind)와 작업(jobs)은
+`JARVIS_GUEST_API_TOKEN` 으로 손님 것만 열리고(서로의 것은 '없음'), 손님 작업은 웹사이트를 못 연다(브라우저가
+운영자 계정이라 jobs-svc 가 sites 를 거절) - 손님 에이전트의 스케줄러가 브라우저 없이 돌린다. 손님 리마인드는
+손님 폰의 도착·출발(`location.guest.*`)과 `context` 의 `GET /now/guest` 로 울리고, 손님 기기로만 간다(대화 카드는 아직 없음). 게이트웨이 경로 `/agent-guest/…`(VPC `jarvis-agent-guest`, 포트 8081).
 두 에이전트는 응답마다 `X-Jarvis-Agent: owner|guest` 를 붙이고, 게이트웨이는 경로와 맞지 않는
 응답을 버리고 502 를 돌려준다. 같은 터널·같은 포트(8080)였을 때 Workers VPC 의 연결이 다른
 에이전트에 붙는 일이 실제로 있었다(2026-10-08) - 그래서 포트도 나눴다.

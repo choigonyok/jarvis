@@ -47,7 +47,11 @@ func (m *Mind) ShowChecklist(ctx context.Context, id, lead string) (checklist.Li
 		return l, err
 	}
 	now := m.Opts.Now()
-	data, _ := json.Marshal(map[string]string{"checklist": l.ID, "title": l.Title, "lead": strings.TrimSpace(lead)})
+	shown := map[string]string{"checklist": l.ID, "title": l.Title, "lead": strings.TrimSpace(lead)}
+	if l.Person() == checklist.Guest {
+		shown["who"] = checklist.Guest // not the operator's conversation's
+	}
+	data, _ := json.Marshal(shown)
 	return l, m.Opts.Log.Append(ctx, obs.Observation{
 		Source: "mind", Type: ChecklistShown, Subject: l.ID, Data: data,
 		Key: ChecklistShown + ":" + l.ID + ":" + strconv.FormatInt(now.UnixNano(), 36), OccurredAt: now,
@@ -117,6 +121,7 @@ func (m *Mind) planList(ctx context.Context, l checklist.List) {
 	if _, err := m.Moments.Set(ctx, moments.Reminder{
 		Source: moments.Lists, Topic: topic, Text: "내일 " + l.Title, Checklist: l.ID,
 		Place: "home", Move: moments.Arrive, After: &from, At: &latest, URL: "/",
+		Who: l.Who, // the guest's list, at the guest's home
 	}); err != nil {
 		m.Opts.Logger.Warn("체크리스트의 알림을 잡지 못했습니다", "checklist", l.ID, "err", err)
 	}
@@ -130,7 +135,7 @@ func (m *Mind) closeLists(ctx context.Context) error {
 	if m.Lists == nil {
 		return nil
 	}
-	ls, err := m.Lists.All(ctx, false)
+	ls, err := m.Lists.AllOf(ctx, "", false) // the guest's too
 	if err != nil {
 		return err
 	}

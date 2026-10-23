@@ -39,10 +39,13 @@ export function roleFor(email: string): Role | null {
 }
 
 /** The pages a guest can open - also the tabs a guest is shown. */
-export const GUEST_PAGES = new Set(["/", "/workout", "/calendar", "/edit", "/location", "/transit"]);
+export const GUEST_PAGES = new Set(["/", "/jobs", "/workout", "/calendar", "/edit", "/location", "/transit"]);
 /** API routes a guest may call: the route itself, or anything beneath it - never a sibling with a longer name. */
 const GUEST_API = [
   "/api/agent",
+  // The guest's own jobs: the gateway opens only the 작업 tab's routes on them,
+  // with the guest's token, so jobs-svc finds no other.
+  "/api/jobs",
   "/api/workout",
   "/api/notify",
   "/api/tts",
