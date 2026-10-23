@@ -62,6 +62,7 @@ var Categories = []Category{
 	{"mind", "비서 알림", "아침 브리핑, 일정 하루 전·두 시간 전, 기한이 다가온 일"},
 	{"remind", "때 맞춘 알림", "부탁한 리마인드, 집을 나설 때 비 소식처럼 그 순간에 알릴 것 - 방해 금지·운전 중에도 울림"},
 	{"location", "위치", "집·회사 같은 영역에 도착하거나 떠날 때 (알림함에만)"},
+	{"transit", "출발", "등록한 경로의 시간대에 '슬슬 짐 싸야 해요'·'지금 나가요' - 방해 금지·운전 중에도 울림"},
 	{"job", "작업 요청", "로그인·확인이 필요할 때"},
 	{"status", "수집·연결 이상", "카톡·카드 알림 수집이 멈췄을 때"},
 	{"calendar", "공유 일정", "상대가 일정을 추가했을 때"},
@@ -71,10 +72,12 @@ var Categories = []Category{
 }
 
 // GuestCategories is what the guest account is sent: their own jarvis's
-// cards, and the shared calendar as the operator's side changes it.
+// cards, the shared calendar as the operator's side changes it, and when to
+// leave on their own routes.
 var GuestCategories = []Category{
 	{"approval", "결재 대기", "내 jarvis 가 승인을 기다릴 때"},
 	{"calendar", "공유 일정", "상대가 일정을 추가했을 때"},
+	{"transit", "출발", "등록한 경로의 시간대에 '슬슬 짐 싸야 해요'·'지금 나가요' - 방해 금지 시간에도 울림"},
 }
 
 // CategoriesFor is the settings list one person is shown.
@@ -356,7 +359,9 @@ func (s *Service) quiet(set Settings) bool {
 // category off still keeps it from the phone.
 func moment(kind string) bool {
 	cat, _, _ := strings.Cut(kind, ".")
-	return cat == "remind"
+	// A reminder asked for, and when to leave on a route whose hours one
+	// set: both are about their minute, and late is useless.
+	return cat == "remind" || cat == "transit"
 }
 
 func muted(set Settings, kind string) bool {

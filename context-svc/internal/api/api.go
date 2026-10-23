@@ -40,6 +40,10 @@
 //	                         now through the link answered (when the phone's
 //	                         list is known)
 //	POST   /owntracks/regions/guest  the same for the guest's phone
+//	GET    /transit, /transit/guest …   each person's routes and when to
+//	                         leave for them now, from the live bus and subway
+//	                         feeds - and nudges while a route's hours last
+//	                         (transit.go)
 //
 // Only /owntracks and /signals face the phone, through the gateway; each
 // has its own credential, so the phone never holds the stack's token.
@@ -70,6 +74,7 @@ import (
 	"github.com/choigonyok/jarvis/gocommon/notify"
 	"github.com/choigonyok/jarvis/context-svc/internal/place"
 	"github.com/choigonyok/jarvis/context-svc/internal/store"
+	"github.com/choigonyok/jarvis/context-svc/internal/transit"
 )
 
 type Config struct {
@@ -88,6 +93,9 @@ type Config struct {
 	// RawDays is how long the raw reports are kept (CONTEXT_RAW_DAYS): a
 	// day further back has no fixes left to draw.
 	RawDays int
+	// The real-time transit feeds' keys (transit.go): data.go.kr's for 경기's
+	// and 서울's buses, data.seoul.go.kr's for 서울's subway.
+	DataKey, SubwayKey string
 }
 
 type Server struct {
@@ -101,6 +109,9 @@ type Server struct {
 	// One report (or region made in the console) at a time for each phone:
 	// its regions and what it was told are read, changed and written back.
 	ownerMu, guestMu sync.Mutex
+	// The live transit feeds, and the departure nudges said already.
+	feed        transitFeed
+	transitSaid nudged
 }
 
 func New(st *store.Store, cfg Config, events *notify.Client, log *slog.Logger) *Server {
@@ -114,7 +125,7 @@ func New(st *store.Store, cfg Config, events *notify.Client, log *slog.Logger) *
 	if err != nil {
 		loc = time.Local
 	}
-	return &Server{st: st, cfg: cfg, events: events, log: log, now: time.Now, loc: loc}
+	return &Server{st: st, cfg: cfg, events: events, log: log, now: time.Now, loc: loc, feed: transit.New(cfg.DataKey, cfg.SubwayKey)}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -139,6 +150,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /owntracks/cmd", s.bearer(s.putCmd))
 	mux.HandleFunc("POST /owntracks/regions", s.bearer(s.registerRegion(ownerPhone)))
 	mux.HandleFunc("POST /owntracks/regions/guest", s.bearer(s.registerRegion(guestPhone)))
+	mux.HandleFunc("GET /transit", s.bearer(s.transitNow(ownerPhone)))
+	mux.HandleFunc("GET /transit/guest", s.bearer(s.transitNow(guestPhone)))
+	mux.HandleFunc("PUT /transit/routes", s.bearer(s.putRoutes(ownerPhone)))
+	mux.HandleFunc("PUT /transit/guest/routes", s.bearer(s.putRoutes(guestPhone)))
+	mux.HandleFunc("GET /transit/stops", s.bearer(s.transitStops(ownerPhone)))
+	mux.HandleFunc("GET /transit/guest/stops", s.bearer(s.transitStops(guestPhone)))
+	mux.HandleFunc("GET /transit/lines", s.bearer(s.transitLines))
 	return mux
 }
 
@@ -945,6 +963,7 @@ func (s *Server) Watch(ctx context.Context, every time.Duration) {
 			return
 		case <-t.C:
 			s.Check(ctx)
+			s.nudge(ctx)
 		}
 	}
 }

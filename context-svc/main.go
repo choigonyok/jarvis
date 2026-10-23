@@ -21,8 +21,8 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/context-svc/internal/api"
-	"github.com/choigonyok/jarvis/gocommon/notify"
 	"github.com/choigonyok/jarvis/context-svc/internal/store"
+	"github.com/choigonyok/jarvis/gocommon/notify"
 )
 
 func main() {
@@ -42,10 +42,14 @@ func main() {
 		Token: os.Getenv("API_TOKEN"), SignalToken: os.Getenv("SIGNAL_TOKEN"),
 		User: os.Getenv("OWNTRACKS_USER"), Pass: os.Getenv("OWNTRACKS_PASSWORD"),
 		GuestUser: os.Getenv("OWNTRACKS_GUEST_USER"), GuestPass: os.Getenv("OWNTRACKS_GUEST_PASSWORD"),
-		Public: getenv("CONTEXT_PUBLIC_URL", "https://jarvis-be.choigonyok.com/context"),
+		Public:  getenv("CONTEXT_PUBLIC_URL", "https://jarvis-be.choigonyok.com/context"),
+		DataKey: os.Getenv("DATA_GO_KR_KEY"), SubwayKey: os.Getenv("SEOUL_SUBWAY_KEY"),
 	}
 	if cfg.User == "" || cfg.Pass == "" {
 		log.Warn("OWNTRACKS_USER/OWNTRACKS_PASSWORD 가 없어 폰의 위치를 받지 않습니다")
+	}
+	if cfg.DataKey == "" || cfg.SubwayKey == "" {
+		log.Warn("DATA_GO_KR_KEY/SEOUL_SUBWAY_KEY 가 비어 출발 탭의 실시간 버스·지하철 정보가 일부 없습니다")
 	}
 	days := 30
 	if n, err := strconv.Atoi(os.Getenv("CONTEXT_RAW_DAYS")); err == nil && n > 0 {

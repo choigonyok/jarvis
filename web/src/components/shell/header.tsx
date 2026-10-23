@@ -22,6 +22,7 @@ import {
   ReceiptText,
   ListChecks,
   Images,
+  TrainFront,
   Wallet,
 } from "lucide-react";
 import {
@@ -60,6 +61,7 @@ const ICON: Record<string, LucideIcon> = {
   "/edit": Brush,
   "/life": BookUser,
   "/location": MapPin,
+  "/transit": TrainFront,
   "/calendar": CalendarDays,
   "/screen": MonitorPlay,
   "/kakao": MessagesSquare,
@@ -95,6 +97,8 @@ const secondary: Tab[] = [
   { href: "/life", label: "생활" },
   // 하루 동안 어디를 다녔는지: 폰이 보낸 위치를 지도 위에 되감아 보고, 끝은 지금.
   { href: "/location", label: "위치" },
+  // 자주 타는 버스·지하철로 언제 나가야 하는지: 실시간 도착을 세는 곳.
+  { href: "/transit", label: "출발" },
   { href: "/screen", label: "화면" },
   { href: "/kakao", label: "카톡" },
   // 맨 끝. 매일 여는 곳이 아니라 뭔가 이상할 때 찾아오는 곳이다.
@@ -119,8 +123,8 @@ const visible = (tabs: Tab[], role: Role) =>
  * five tabs and no 더보기.
  */
 const OWNER_BAR = ["/", "/jobs", "/assets", "/spending", "/calendar", "/workout", "/record"];
-const OWNER_MORE = ["/life", "/location", "/photos", "/edit", "/screen", "/kakao", "/status"];
-const GUEST_BAR = ["/", "/calendar", "/location", "/workout", "/edit"];
+const OWNER_MORE = ["/life", "/location", "/transit", "/photos", "/edit", "/screen", "/kakao", "/status"];
+const GUEST_BAR = ["/", "/calendar", "/location", "/transit", "/workout", "/edit"];
 
 const byHref = new Map([...primary, ...secondary].map((t) => [t.href, t]));
 const pick = (hrefs: string[]) => hrefs.flatMap((h) => (byHref.has(h) ? [byHref.get(h)!] : []));

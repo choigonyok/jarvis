@@ -39,7 +39,7 @@ export function roleFor(email: string): Role | null {
 }
 
 /** The pages a guest can open - also the tabs a guest is shown. */
-export const GUEST_PAGES = new Set(["/", "/workout", "/calendar", "/edit", "/location"]);
+export const GUEST_PAGES = new Set(["/", "/workout", "/calendar", "/edit", "/location", "/transit"]);
 /** API routes a guest may call: the route itself, or anything beneath it - never a sibling with a longer name. */
 const GUEST_API = [
   "/api/agent",
@@ -50,6 +50,8 @@ const GUEST_API = [
   "/api/context/track",
   "/api/context/owntracks/setup/guest",
   "/api/context/owntracks/regions/guest",
+  "/api/context/transit/guest",
+  "/api/context/transit/lines",
   "/api/map",
 ];
 /** Static files a guest may load: the editor the 편집 tab frames (scripts/photocraft.mjs). */

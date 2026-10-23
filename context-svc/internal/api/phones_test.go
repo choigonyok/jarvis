@@ -25,6 +25,7 @@ import (
 type phoneTest struct {
 	t      *testing.T
 	st     *store.Store
+	server *Server
 	srv    *httptest.Server
 	seoul  *time.Location
 	today  atomic.Value
@@ -54,6 +55,7 @@ func newPhoneTest(t *testing.T) *phoneTest {
 	server := New(st, Config{Token: "api", User: "phone", Pass: "pw", GuestUser: "guest-phone", GuestPass: "gpw"}, notify.New(sink.URL, "", "", quiet), quiet)
 	p.today.Store(time.Date(2026, 10, 23, 20, 0, 0, 0, p.seoul))
 	server.now = func() time.Time { return p.today.Load().(time.Time) }
+	p.server = server
 	p.srv = httptest.NewServer(server.Handler())
 	t.Cleanup(p.srv.Close)
 	return p

@@ -129,6 +129,39 @@ mind·notify 가 그렇게 읽는다. 상대는 콘솔 위치 탭의 '내 폰 �
 상대 폰의 모드도 운영자 폰과 같은 규칙으로 응답에서 바꾼다(`guestWatch`, 위의 모드 전환, 상대 영역 안도 자리 잡은 것.
 자기 영역을 나서는 전환 메시지에도 바로 Move) - 손으로 거는 모드만 없다.
 
+## 출발 (실시간 버스·지하철)
+
+콘솔 출발 탭의 것(`internal/api/transit.go`, `internal/transit`). 사람마다(운영자 `transit.routes`, 손님
+`transit.routes.guest`, `context_state`) 자주 타는 경로 - 탈 정류장·역, 노선(지하철은 노선과 방향), 걸어가는 분,
+일찍 도착할 분, 요일·시간대·알림 - 를 두고, 지금 오는 차 중 나가서 탈 수 있는 첫 차와 나갈 때를 센다(`transit.Make`:
+걸음+여유만큼 앞, 2분까지 늦은 것은 '뛰면 탈 수 있어요'). 말은 남은 시간으로: 20분 넘게 '여유 있어요', 20분 안
+'슬슬 짐 싸야 해요', 10분 안 '곧 나가야 해요', 3분 안 '지금 나가요!'.
+
+```
+GET /transit                 운영자의 경로와 지금의 계획(plans), 키가 있는 피드(feeds)
+GET /transit/guest           손님의 것
+PUT /transit/routes          운영자의 경로 전체 {routes}, PUT /transit/guest/routes 는 손님의 것
+GET /transit/stops?near=위도,경도|me&q=이름   정류장·역 찾기(me: 그 사람 폰의 마지막 위치), /transit/guest/stops
+GET /transit/lines?kind=bus|subway&region=gyeonggi|seoul&id=   그 정류장의 노선
+```
+
+피드(키는 맥미니 `.env`, compose 가 넘김):
+- 경기 버스 - 공공데이터포털 `DATA_GO_KR_KEY`(일반 인증키, 인코딩된 키든 아니든): `busarrivalservice/v2/getBusArrivalListv2`
+  (`predictTimeSec1/2`), `busstationservice/v2`(주변 500m·이름/번호 검색·경유 노선).
+- 서울 버스 - 같은 키로 `ws.bus.go.kr/api/rest/stationinfo`(`getStationByUid` 의 `arrmsg1/2` "5분12초후[3번째 전]",
+  `getStationByPos` 반경 500m, `getStationByName`). `resultType=json` 이 안 먹으면 기본 XML 을 읽는다.
+- 서울 지하철 - 서울 열린데이터광장 실시간 지하철 키 `SEOUL_SUBWAY_KEY`: `realtimeStationArrival`(`barvlDt` 초를 `recptnDt`
+  부터, 0 이면 "[2]번째 전역" 같은 문구로 짐작 - `rough`). **서울 안의 역만** 나온다: 코레일 구간의 경기도 역(수원·성균관대·
+  병점 등)은 공개 실시간 API가 없어(2026-10-24 확인) 그 역은 '실시간 정보가 없는 역'이다.
+- 근처 지하철역 - OpenStreetMap Overpass(키 없음, agent 의 find_nearby 와 같은 미러). OSM 역 이름이 피드 이름과 같다(강남).
+
+같은 정류장은 25초 동안 한 번만 묻는다(키의 하루 호출 한도). 키가 없으면 그 경로는 `stage: off` 에 이유를 실어 보내고
+화면은 그대로 쓴다.
+
+알림(`nudge`, 매분): 알림을 켠 경로가 그 요일·시간대 안이면 나가기 15분 안에 '슬슬 짐 싸야 해요', 2분 안(1분 늦음까지)
+'지금 나가요'를 그 사람에게(`transit.pack|go`, `audience` 운영자·손님, `tier now`) - 차 한 대(차량 번호)와 단계마다 한
+번. 시간대 밖에는 피드도 묻지 않는다. notify-svc 는 이 종류를 리마인드처럼 방해 금지에도 울린다.
+
 ## 현재 상태 한 장
 
 `/now` 의 `state` 는 체류와 신호에서 만든 파생값이다: 운전 중(CarPlay 연결 4시간 안, 또는 운전 집중 모드), 회의 중
@@ -190,6 +223,11 @@ notify-svc 가 이것을 듣고 **운전·회의 중에는 즉시 알림을 붙�
   날 두 번은 아님, 여기 영역은 바로 50m, 이름 붙인 점은 바로 50m 영역으로, Here-… 는 무시, 손으로 바꾼 반경은 다음 날 목록에서
   `rid` 그대로 50m 로. 위치 등록: 토큰·이름·좌표 검사, 목록을 모르면 목록부터 묻고 폰의 같은 이름 영역을 그 `rid` 로 옮기며,
   목록에 보이면 끝, 목록을 알면 바로 넣는 링크, 있는 곳에 만든 상대 영역은 도착 알림 없이 출발만.
+- 출발(`internal/transit`·`transit_test.go`): 나갈 때와 말(여유~지금 나가요, 2분 늦음까지 뛰기, 3분 늦으면 다음 차),
+  요일·시간대(자정 넘김 포함), 공식 문서 모양대로의 가짜 응답으로 경기 버스(초 단위, 하나만 온 목록, 결과 없음, 키 미등록,
+  이스케이프된 키를 한 번만), 서울 버스(JSON·XML, "곧 도착"·"n분m초후"), 서울 지하철(받은 시각+초, 문구로 짐작, 떠난
+  열차 빼기, 서울 밖 역), 근처(세 피드 합치기, 하나가 실패해도). API: 사람별 경로·검사·손님 분리·피드 실패 표시·근처(me)·
+  이름·노선, 시간대 안에서만 단계마다 한 번 알림(손님에게).
 - 폰 설정 링크(Postgres 흐름 테스트): 토큰 없이 401, inline 을 풀면 HTTP 모드·URL·계정·Significant·cmd·remoteConfiguration
   과 매일 되돌리는 설정 다섯 개.
   waypoints 로 영역이 들어오고 여기서 정한 종류·동네는 남는다. 수집기의 배달앱 알림 줄 읽기(다시 넣기·다른 앱은 무시).

@@ -3,6 +3,7 @@ package notify
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -186,6 +187,26 @@ func TestMomentRingsThroughQuietHoursAndBusy(t *testing.T) {
 	svc.Accept(ctx, ev("remind.asked", "now", "꺼 둔 분류", ""))
 	if len(snd.sent) != 2 || st.rows[len(st.rows)-1].DeliveredAt == nil {
 		t.Fatalf("꺼 둔 분류는 알림함에만: %+v", snd.sent)
+	}
+}
+
+// When to leave on a route is a moment too - for the guest as well, whose
+// settings list the kind so it can be turned off.
+func TestTransitRingsAtItsMinute(t *testing.T) {
+	svc, _, snd, _ := setup("2026-10-10 07:10")
+	ctx := context.Background()
+	svc.Accept(ctx, ev("transit.pack", "now", "슬슬 짐 싸야 해요", ""))
+	if len(snd.sent) != 1 || snd.sent[0].Title != "슬슬 짐 싸야 해요" {
+		t.Fatalf("출발 알림은 방해 금지 시간에도 울려야 합니다: %+v", snd.sent)
+	}
+	guest := ev("transit.go", "now", "지금 나가요", "")
+	guest.Audience = store.Guest
+	svc.Accept(ctx, guest)
+	if len(snd.guest) != 1 || snd.guest[0].Title != "지금 나가요" {
+		t.Fatalf("손님의 출발 알림: %+v", snd.guest)
+	}
+	if !slices.ContainsFunc(CategoriesFor(store.Guest), func(c Category) bool { return c.ID == "transit" }) {
+		t.Fatal("손님 설정에도 출발 분류가 있어야 끌 수 있습니다")
 	}
 }
 

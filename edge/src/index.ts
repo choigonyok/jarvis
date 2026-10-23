@@ -103,13 +103,19 @@ const GUEST_SERVICES = new Set(["agent-guest", "workout", "notify", "tts", "cont
 /**
  * What the guest may do on context-svc: read a day of where either of them
  * went (the 위치 screen, shared by the operator's choice), fetch their own
- * phone's setup, and make where their own phone is one of its regions (위치
- * 등록). Not the operator's phone setup - it holds that phone's credentials -
- * nor the operator's regions, the devices' state, or the phones' mode.
+ * phone's setup, make where their own phone is one of its regions (위치
+ * 등록), and keep and read their own routes on the 출발 screen - with stops
+ * near their own phone and the lines at a stop. Not the operator's phone
+ * setup - it holds that phone's credentials - nor the operator's regions or
+ * routes, the devices' state, or the phones' mode.
  */
 function guestContextRoute(method: string, path: string): boolean {
   if (method === "POST") return path === "owntracks/regions/guest";
-  return method === "GET" && (path === "track" || path === "owntracks/setup/guest");
+  if (method === "PUT") return path === "transit/guest/routes";
+  return (
+    method === "GET" &&
+    ["track", "owntracks/setup/guest", "transit/guest", "transit/guest/stops", "transit/lines"].includes(path)
+  );
 }
 
 /** Which agent must have answered, by route. */

@@ -11,7 +11,17 @@ import { pathProxy } from "@/lib/proxy";
 // state of the devices, the phones' mode and commands - is not reachable this
 // way.
 const CONTEXT_URL = process.env.CONTEXT_URL ?? "http://localhost:8103";
-const allowed = new Set(["owntracks/setup", "owntracks/setup/guest", "track"]);
+const allowed = new Set([
+  "owntracks/setup",
+  "owntracks/setup/guest",
+  "track",
+  // 출발: each person's routes and when to leave for them, stops, lines.
+  "transit",
+  "transit/guest",
+  "transit/stops",
+  "transit/guest/stops",
+  "transit/lines",
+]);
 // 위치 등록: where the viewer's phone is now, made its region - the operator's
 // own, or the guest's own (lib/role.ts and the gateway let the guest reach
 // only theirs).
@@ -22,3 +32,6 @@ export const dynamic = "force-dynamic";
 
 export const GET = pathProxy(CONTEXT_URL, { label: "위치 서비스", requestHeaders: [], allow: (p) => allowed.has(p) });
 export const POST = pathProxy(CONTEXT_URL, { label: "위치 서비스", requestHeaders: ["content-type"], allow: (p) => posts.has(p) });
+// 출발: a person's routes, the whole list.
+const puts = new Set(["transit/routes", "transit/guest/routes"]);
+export const PUT = pathProxy(CONTEXT_URL, { label: "위치 서비스", requestHeaders: ["content-type"], allow: (p) => puts.has(p) });
