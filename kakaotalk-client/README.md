@@ -90,8 +90,11 @@ logged-out KakaoTalk writes nothing: every message stops without an error.
 LaunchAgent on the Mac mini (it cannot run in a container - the app's
 windows are only reachable from the logged-in session):
 
-- every five seconds it reads KakaoTalk's windows; a notice about the logout
-  gets its 확인 (only such a notice, or any while the login window is up),
+- every five seconds it reads KakaoTalk's own app menu: its 로그아웃 can be
+  chosen only while KakaoTalk is logged in (the Apple menu's "<user>
+  로그아웃…" is never looked at). Not logged in, it reads the windows; a
+  notice about the logout gets its 확인 (only such a notice, or any while the
+  login window is up),
 - the login window gets the password kept in the login keychain and its
   로그인 - the moment Kakao's servers answer again, and again 10 s after a
   failure, a little longer each time but never more than 5 minutes apart. A
@@ -100,6 +103,18 @@ windows are only reachable from the logged-in session):
   ticked while the window is open,
 - what it saw and did goes to `~/.jarvis-host/kakaotalk-login.json`, which the
   상태 tab reads as "카톡 로그인".
+
+**The Mac mini's screen must not lock.** While it is locked, macOS hands an
+accessibility client the app itself in place of every window - KakaoTalk's,
+Terminal's, Safari's alike - so no login window can be read and nothing is
+tried; only the menus still answer. 2026-10-23 the screen had locked the night
+before, KakaoTalk was logged out by a 13-minute drop at 14:38, and it read as
+logged in until the screen was unlocked at 02:10. So the lock screen is off on
+the Mac mini (System Settings → Lock Screen → require password after the
+screen saver or display: never; it logs in by itself at boot and FileVault is
+off, so this opens nothing new). Should it lock anyway, the record says
+`locked` (logged out: the 상태 tab fails and pushes) or `locked-in` (logged in,
+but a logout would wait: a warning).
 
 ```bash
 scripts/kakaotalk-relogin install    # from the MacBook: build, wrap as an app, sign, LaunchAgent on the Mac mini

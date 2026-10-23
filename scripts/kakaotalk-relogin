@@ -19,6 +19,10 @@
 # 키체인의 비밀번호로 로그인한다. 실패하면 10초 뒤, 조금씩 늘려 최대 5분 간격으로 계속 다시 해 보고,
 # 비밀번호가 맞지 않다는 안내나 휴대폰 확인 화면이 뜨면 바로 멈춘다(틀린 비밀번호를 계속 넣으면 계정이
 # 잠긴다). 상태는 ~/.jarvis-host/kakaotalk-login.json 에 적고, 상태 탭의 '카톡 로그인' 줄이 보여 준다.
+#
+# 맥미니 화면이 잠겨 있으면 macOS 가 모든 앱의 창을 감춰서 아무것도 하지 못한다(메뉴만 읽혀 로그아웃됐는지만 안다).
+# 그래서 맥미니는 잠금 화면을 꺼 둔다: 시스템 설정 → 잠금 화면 → 화면 보호기가 시작되거나 디스플레이가 꺼진 후
+# 암호 요구 → 안 함. 잠기면 상태 탭에 locked(로그아웃, 이상) / locked-in(로그인, 주의)으로 보인다.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HOST="${MINI_HOST:-macmini}"
@@ -121,7 +125,7 @@ SH
     exit 1
     ;;
   status)
-    remote "launchctl print gui/\$(id -u)/$LABEL 2>/dev/null | grep -E 'state|pid' | head -2 || echo '돌고 있지 않습니다'; echo; cat $STATUS 2>/dev/null; echo; tail -8 $LOG 2>/dev/null"
+    remote "launchctl print gui/\$(id -u)/$LABEL 2>/dev/null | grep -E 'state|pid' | head -2 || echo '돌고 있지 않습니다'; ioreg -n Root -d1 -a 2>/dev/null | grep -A1 CGSSessionScreenIsLocked | grep -q true && echo '화면: 잠김 - 이대로면 다시 로그인하지 못해요' || echo '화면: 잠기지 않음'; echo; cat $STATUS 2>/dev/null; echo; tail -8 $LOG 2>/dev/null"
     ;;
   inspect)
     # 프로그램이 다음 차례에 카톡 창 구조를 적는다(SSH 로는 손쉬운 사용 권한이 따라오지 않아서 파일로 부탁한다).

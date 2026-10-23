@@ -186,6 +186,16 @@ func (e *env) kakaoLogin(context.Context) check.Verdict {
 		v.State, v.Summary = check.Fail, "비밀번호가 맞지 않아 멈췄어요. scripts/kakaotalk-relogin password 로 다시 넣어 주세요."
 	case "needs-person":
 		v.State, v.Summary = check.Fail, "휴대폰 확인처럼 사람이 해야 하는 화면이 떠서 멈췄어요."
+	case "locked":
+		// While the Mac's screen is locked no app's window can be read, so a
+		// logout stays until a person unlocks it (2026-10-23: eleven hours).
+		v.State, v.Summary = check.Fail, "카톡이 로그아웃됐는데 맥미니 화면이 잠겨 있어 다시 로그인하지 못해요. 화면 잠금을 풀어 주세요."
+	case "locked-in":
+		v.State, v.Summary = check.Warn, "카톡은 로그인돼 있지만 맥미니 화면이 잠겨 있어요. 이대로 로그아웃되면 저절로 다시 로그인하지 못해요(시스템 설정 → 잠금 화면)."
+	case "locked-unknown":
+		v.State, v.Summary = check.Warn, "맥미니 화면이 잠겨 있어 카톡 로그인 상태를 볼 수 없어요."
+	case "unreadable":
+		v.State, v.Summary = check.Warn, "카톡 창을 읽지 못해요. 로그아웃되면 저절로 다시 로그인하지 못할 수 있어요."
 	case "no-access":
 		v.State, v.Summary = check.Fail, "자동 로그인 프로그램에 손쉬운 사용 권한이 없어요."
 	case "no-password":

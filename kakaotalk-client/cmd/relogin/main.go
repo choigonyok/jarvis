@@ -6,12 +6,17 @@
 // back). kakaotalk-client reads KakaoTalk's database, so a logged-out
 // KakaoTalk silently stops every message.
 //
-// It looks at KakaoTalk every five seconds through the accessibility API. A
-// notice about the logout gets its 확인; the login window gets the password
-// kept in the login keychain and its 로그인 - the moment the internet answers
-// again, and again 10 s after a failure, a little longer each time but never
-// more than 5 minutes apart. A refused password stops it at once (tried on
-// and on, it locks the account), and so does a screen asking for the phone. What it sees and did goes to
+// It looks at KakaoTalk every five seconds through the accessibility API.
+// Whether it is logged in is read from its own app menu, whose 로그아웃 can be
+// chosen only then. Logged out, a notice about the logout gets its 확인; the
+// login window gets the password kept in the login keychain and its 로그인 -
+// the moment the internet answers again, and again 10 s after a failure, a
+// little longer each time but never more than 5 minutes apart. A refused
+// password stops it at once (tried on and on, it locks the account), and so
+// does a screen asking for the phone. While the Mac's screen is locked macOS
+// hides every window, so nothing is tried then and that is what it says
+// (2026-10-23: locked since the night before, a logout went unseen for
+// eleven hours). What it sees and did goes to
 // ~/.jarvis-host/kakaotalk-login.json, which the 상태 tab reads.
 //
 // It runs as the LaunchAgent com.jarvis.kakaotalk-relogin
@@ -43,7 +48,8 @@ const poll = 5 * time.Second
 type status struct {
 	CheckedAt time.Time `json:"checkedAt"`
 	// logged-in | no-window | relogged | notice | starting | offline | waiting |
-	// failed | wrong-password | needs-person | no-access | no-password | unknown
+	// failed | wrong-password | needs-person | no-access | no-password |
+	// locked | locked-in | locked-unknown | unreadable | unknown
 	State      string     `json:"state"`
 	Detail     string     `json:"detail,omitempty"`
 	Access     bool       `json:"access"`
@@ -65,14 +71,9 @@ type daemon struct {
 	wasOut bool
 	// A view nothing here knows was written down once, for a person to read.
 	dumped bool
-	// The glance of the last full read that saw it logged in, and when: the
-	// same glance within calmFor needs no full read.
-	calm   string
-	calmAt time.Time
+	// When a logged-out KakaoTalk with no window was last opened again.
+	reopenedAt time.Time
 }
-
-// calmFor is how long an unchanged glance stands for a full read.
-const calmFor = time.Minute
 
 func main() {
 	log.SetFlags(log.LstdFlags)
@@ -155,34 +156,55 @@ func (d *daemon) tick() time.Duration {
 		d.set("starting", "카톡이 꺼져 있어 켰어요")
 		return 10 * time.Second
 	}
-	sig, _ := glance(pid)
-	if sig != "" && sig == d.calm && time.Since(d.calmAt) < calmFor && !d.inspectWanted() {
-		d.set("logged-in", "")
+	// The menu first: it says whether KakaoTalk is logged in in a dozen items
+	// where the windows take seconds, and it says so while the screen is
+	// locked, when the windows say nothing at all.
+	menu := readMenu(pid)
+	if screenLocked() {
+		return d.locked(menu)
+	}
+	if menu == menuIn && !d.inspectWanted() {
+		d.in()
 		return poll
 	}
-	d.calm = ""
 	l, err := readApp(pid)
 	if err != nil {
 		d.set("unknown", err.Error())
 		return 10 * time.Second
 	}
 	defer l.close()
-	d.inspect(l)
+	d.inspect(l, menu)
 	v := classify(l.windows)
+	v.Blind = l.blind
 
-	if v.loggedIn() || v.Windows == 0 {
-		if d.wasOut {
-			// Someone logged in by hand (a login of ours says so where it happens).
-			log.Printf("카톡이 다시 로그인돼 있어요")
+	switch {
+	case menu == menuIn || menu == menuUnknown && v.loggedIn():
+		d.in()
+		return poll
+	case v.Blind:
+		// The app in place of its windows, as while the screen is locked, but
+		// it is not: there is nothing to read, so nothing is tried.
+		if !d.dumped {
+			d.dumped = true
+			d.writeDump(l, menu, "창을 읽지 못함")
 		}
+		d.set("unreadable", "카톡 창이 손쉬운 사용에 보이지 않아요")
+		return 10 * time.Second
+	case v.Windows == 0 && menu == menuUnknown:
 		d.wasOut = false
 		d.pol.reset()
-		if v.Windows == 0 {
-			d.set("no-window", "")
-		} else {
-			d.calm, d.calmAt = sig, now
-			d.set("logged-in", "")
+		d.set("no-window", "")
+		return poll
+	case v.Windows == 0:
+		// Logged out with no window open: opened again, KakaoTalk shows its
+		// login window.
+		d.wasOut = true
+		if now.Sub(d.reopenedAt) > 30*time.Second {
+			d.reopenedAt = now
+			log.Printf("로그아웃된 카톡에 창이 없어 다시 엽니다")
+			_ = exec.Command("/usr/bin/open", "-b", bundleID).Run()
 		}
+		d.set("starting", "로그인 창을 띄우는 중이에요")
 		return poll
 	}
 	d.wasOut = true
@@ -213,7 +235,7 @@ func (d *daemon) tick() time.Duration {
 	if v.Form == nil {
 		if !d.dumped {
 			d.dumped = true
-			d.writeDump(l, "알 수 없는 화면")
+			d.writeDump(l, menu, "알 수 없는 화면")
 		}
 		d.set("unknown", "로그인 화면도 아니고 아는 안내창도 아니에요")
 		return 10 * time.Second
@@ -273,8 +295,51 @@ func (d *daemon) tick() time.Duration {
 	return poll
 }
 
+// in is KakaoTalk seen logged in.
+func (d *daemon) in() {
+	if d.wasOut {
+		// Someone logged in by hand (a login of ours says so where it happens).
+		log.Printf("카톡이 다시 로그인돼 있어요")
+	}
+	d.wasOut = false
+	d.pol.reset()
+	d.set("logged-in", "")
+}
+
+// locked is a look while the Mac's screen is locked. Every window is hidden
+// then, so only the menu is read and nothing is tried: a logout waits for a
+// person to unlock the screen. With the Mac mini's lock screen off (System
+// Settings → Lock Screen) this does not come.
+func (d *daemon) locked(menu menuState) time.Duration {
+	state, detail := lockedState(menu)
+	if state != d.st.State {
+		log.Printf("화면이 잠겨 있어요(로그아웃 메뉴 %s): %s", menu, detail)
+	}
+	switch menu {
+	case menuIn:
+		if d.wasOut {
+			log.Printf("카톡이 다시 로그인돼 있어요")
+		}
+		d.wasOut = false
+		d.pol.reset()
+	case menuOut:
+		d.wasOut = true
+	}
+	d.set(state, detail)
+	if d.inspectWanted() {
+		_ = os.Remove(d.inspectTrigger)
+		dump := fmt.Sprintf("# %s 요청 · 화면 잠김 · 로그아웃 메뉴 %s\n화면이 잠겨 있어 창은 읽을 수 없어요.\n", time.Now().Format(time.RFC3339), menu)
+		_ = os.WriteFile(d.inspectOut, []byte(dump), 0o600)
+	}
+	return poll
+}
+
 // attempt fills the login window and presses 로그인, then watches what follows.
 func (d *daemon) attempt(l *look, f *form, account, password string) (ok bool, detail string, person bool) {
+	if screenLocked() {
+		// Locked since the window was read: what is typed must not go anywhere.
+		return false, "화면이 잠겨 있어요", false
+	}
 	_ = setBool(l.app, "AXFrontmost", true)
 	_ = raise(f.Window)
 	if f.Account != nil && strings.TrimSpace(f.Account.Value) == "" {
@@ -434,19 +499,22 @@ func (d *daemon) inspectWanted() bool {
 	return err == nil
 }
 
-func (d *daemon) inspect(l *look) {
+func (d *daemon) inspect(l *look, menu menuState) {
 	if !d.inspectWanted() {
 		return
 	}
 	_ = os.Remove(d.inspectTrigger)
-	d.writeDump(l, "요청")
+	d.writeDump(l, menu, "요청")
 }
 
 // writeDump writes the windows' shape: roles, labels, and the words of a
 // login window or a notice - never what a chat says, never a secure field.
-func (d *daemon) writeDump(l *look, why string) {
+func (d *daemon) writeDump(l *look, menu menuState, why string) {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# %s %s\n", time.Now().Format(time.RFC3339), why)
+	fmt.Fprintf(&b, "# %s %s · 로그아웃 메뉴 %s\n", time.Now().Format(time.RFC3339), why, menu)
+	if l.blind {
+		b.WriteString("# 창 대신 앱 자신이 왔어요(화면이 잠겼을 때처럼) - 그 창은 읽지 않았어요\n")
+	}
 	for _, w := range l.windows {
 		words := findForm(w) != nil || isDialog(w)
 		dump(&b, w, 0, words)

@@ -4,7 +4,7 @@ package main
 
 /*
 #cgo CFLAGS: -Wno-deprecated-declarations
-#cgo LDFLAGS: -framework ApplicationServices -framework CoreFoundation
+#cgo LDFLAGS: -framework ApplicationServices -framework CoreFoundation -framework CoreGraphics
 #include <ApplicationServices/ApplicationServices.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -89,6 +89,31 @@ static AXUIElementRef *ax_list(AXUIElementRef el, const char *name, int max, int
 
 static AXUIElementRef ax_at(AXUIElementRef *list, int i) { return list[i]; }
 
+// An element attribute (AXMenuBar), retained for the caller, or NULL.
+static AXUIElementRef ax_elem(AXUIElementRef el, const char *name) {
+	CFStringRef attr = cfstr(name);
+	CFTypeRef v = NULL;
+	AXError err = AXUIElementCopyAttributeValue(el, attr, &v);
+	CFRelease(attr);
+	if (err != kAXErrorSuccess || v == NULL) return NULL;
+	if (CFGetTypeID(v) != AXUIElementGetTypeID()) { CFRelease(v); return NULL; }
+	return (AXUIElementRef)v;
+}
+
+static int ax_same(AXUIElementRef a, AXUIElementRef b) { return CFEqual(a, b) ? 1 : 0; }
+
+// Whether this session's screen is locked: 1, 0, or -1 when there is no
+// session to ask.
+static int screen_locked(void) {
+	CFDictionaryRef d = CGSessionCopyCurrentDictionary();
+	if (d == NULL) return -1;
+	int out = 0;
+	CFTypeRef v = CFDictionaryGetValue(d, CFSTR("CGSSessionScreenIsLocked"));
+	if (v != NULL && CFGetTypeID(v) == CFBooleanGetTypeID() && CFBooleanGetValue((CFBooleanRef)v)) out = 1;
+	CFRelease(d);
+	return out;
+}
+
 static int ax_action(AXUIElementRef el, const char *name) {
 	CFStringRef a = cfstr(name);
 	AXError err = AXUIElementPerformAction(el, a);
@@ -145,7 +170,6 @@ import "C"
 import (
 	"errors"
 	"fmt"
-	"strings"
 	"unicode/utf16"
 	"unsafe"
 )
@@ -174,6 +198,8 @@ type look struct {
 	app     axRef
 	windows []*elem
 	held    []axRef
+	// blind is a window that came back as the app itself (see view.Blind).
+	blind bool
 }
 
 // limits on one look, every five seconds: the login window and a notice sit
@@ -192,30 +218,57 @@ func readApp(pid int) (*look, error) {
 	l := &look{pid: pid, app: app}
 	budget := maxNodes
 	for _, w := range l.list(app, "AXWindows", 20) {
+		if C.ax_same(w, app) != 0 {
+			// The app in place of a window: that is how macOS hides windows
+			// while the screen is locked. Its children are the app again, endlessly.
+			l.blind = true
+			continue
+		}
 		l.windows = append(l.windows, l.walk(w, 0, &budget))
 	}
 	return l, nil
 }
 
-// glance is a cheap look at an app's windows - their kinds, titles and what
-// sits right inside them - to tell whether anything changed since a full
-// read, which takes seconds. A logout opens the login window: it changes.
-func glance(pid int) (string, error) {
+// readMenu is what KakaoTalk's own app menu says of the login - its menu bar
+// item 카카오톡, never the Apple menu. Menus are read even while the screen
+// is locked and every window is hidden, and cheaply: a dozen items.
+func readMenu(pid int) menuState {
 	app := C.ax_app(C.pid_t(pid))
 	if C.ax_isnull(app) != 0 {
-		return "", errors.New("앱에 닿지 못했습니다")
+		return menuUnknown
 	}
 	l := &look{pid: pid, app: app}
 	defer l.close()
-	var b strings.Builder
-	for _, w := range l.list(app, "AXWindows", 20) {
-		fmt.Fprintf(&b, "%s/%s %q:", axString(w, "AXRole"), axString(w, "AXSubrole"), axString(w, "AXTitle"))
-		for _, k := range l.list(w, "AXChildren", 200) {
-			b.WriteString(" " + axString(k, "AXRole"))
-		}
-		b.WriteString("\n")
+	bar, ok := l.elem(app, "AXMenuBar")
+	if !ok {
+		return menuUnknown
 	}
-	return b.String(), nil
+	var items []*elem
+	for _, it := range l.list(bar, "AXChildren", 20) {
+		if !isAppMenu(axString(it, "AXTitle")) {
+			continue
+		}
+		budget := 80
+		items = append(items, l.walk(it, 0, &budget))
+	}
+	return menuFrom(items)
+}
+
+// screenLocked is whether the Mac's screen is locked. While it is, macOS
+// hands this program the app itself for every window of every app, so no
+// login window can be read, and nothing is typed.
+func screenLocked() bool { return C.screen_locked() == 1 }
+
+// elem is an element attribute of el, held until close.
+func (l *look) elem(el axRef, name string) (axRef, bool) {
+	cn := C.CString(name)
+	defer C.free(unsafe.Pointer(cn))
+	r := C.ax_elem(el, cn)
+	if C.ax_isnull(r) != 0 {
+		return r, false
+	}
+	l.held = append(l.held, r)
+	return r, true
 }
 
 func (l *look) close() {

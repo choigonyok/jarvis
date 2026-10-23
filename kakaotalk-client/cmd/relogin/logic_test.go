@@ -70,6 +70,57 @@ func TestClassifyLoggedIn(t *testing.T) {
 	}
 }
 
+// While the screen is locked every window comes back as the app itself and is
+// left out: that is no window that could be logged in (2026-10-23 it read as
+// logged in for eleven hours while KakaoTalk was logged out).
+func TestBlindWindowsAreNotLoggedIn(t *testing.T) {
+	for _, v := range []view{{Blind: true}, {Blind: true, Windows: 1}} {
+		if v.loggedIn() {
+			t.Fatalf("창을 읽지 못했으면 로그인된 게 아닙니다: %+v", v)
+		}
+	}
+}
+
+func menuItem(title string, enabled int) *elem {
+	return &elem{Role: "AXMenuItem", Title: title, Enabled: enabled}
+}
+
+// The menu bar as KakaoTalk shows it: the Apple menu first, whose "<user>
+// 로그아웃…" logs the Mac's user out, then its own app menu.
+func menuBar(logout int) []*elem {
+	return []*elem{
+		n("AXMenuBarItem", "", "Apple", n("AXMenu", "", "", menuItem("홍길동 로그아웃…", 1), menuItem("홍길동 로그아웃", 1))),
+		n("AXMenuBarItem", "", "카카오톡", n("AXMenu", "", "",
+			menuItem("KakaoTalk 정보", 1), menuItem("환경설정...", logout), menuItem("로그아웃", logout), menuItem("KakaoTalk 종료", 1))),
+		n("AXMenuBarItem", "", "창", n("AXMenu", "", "", menuItem("친구", logout))),
+	}
+}
+
+func TestMenuTellsTheLogin(t *testing.T) {
+	if got := menuFrom(menuBar(1)); got != menuIn {
+		t.Fatalf("로그아웃을 고를 수 있으면 로그인돼 있습니다: %v", got)
+	}
+	if got := menuFrom(menuBar(0)); got != menuOut {
+		t.Fatalf("로그아웃이 꺼져 있으면 로그인돼 있지 않습니다(애플 메뉴의 사용자 로그아웃은 보지 않음): %v", got)
+	}
+	noApp := menuBar(1)[:1]
+	if got := menuFrom(noApp); got != menuUnknown {
+		t.Fatalf("카카오톡 메뉴가 없으면 모릅니다: %v", got)
+	}
+	noItem := []*elem{n("AXMenuBarItem", "", "카카오톡", n("AXMenu", "", "", menuItem("KakaoTalk 정보", 1)))}
+	if got := menuFrom(noItem); got != menuUnknown {
+		t.Fatalf("로그아웃 항목이 없으면 모릅니다: %v", got)
+	}
+}
+
+func TestLockedScreenSaysWhatItCannotDo(t *testing.T) {
+	for m, want := range map[menuState]string{menuIn: "locked-in", menuOut: "locked", menuUnknown: "locked-unknown"} {
+		if got, detail := lockedState(m); got != want || detail == "" {
+			t.Fatalf("잠긴 화면에서 로그아웃 메뉴 %v 는 %s 여야 합니다: %s %q", m, want, got, detail)
+		}
+	}
+}
+
 func TestPhoneVerificationStopsIt(t *testing.T) {
 	if !needsPerson("휴대폰에서 카카오톡 PC 로그인을 확인해 주세요") || !needsPerson("본인 확인이 필요합니다") {
 		t.Fatal("휴대폰 확인 화면은 사람이 해야 합니다")

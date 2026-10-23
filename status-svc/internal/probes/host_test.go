@@ -54,3 +54,24 @@ func TestHostProbes(t *testing.T) {
 		t.Fatal("점검이 멈췄으면 모름")
 	}
 }
+
+// The KakaoTalk relogin program's record beside host.json: a logout behind a
+// locked screen cannot be fixed by it and is pushed; a login behind one is
+// only waiting to become that.
+func TestKakaoLoginLockedScreen(t *testing.T) {
+	dir := t.TempDir()
+	e := &env{Config: Config{HostFile: filepath.Join(dir, "host.json")}}
+	now := time.Now().Format(time.RFC3339)
+	for state, want := range map[string]check.State{
+		"logged-in": check.OK, "locked": check.Fail, "locked-in": check.Warn,
+		"locked-unknown": check.Warn, "unreadable": check.Warn,
+	} {
+		body := `{"checkedAt":"` + now + `","state":"` + state + `"}`
+		if err := os.WriteFile(filepath.Join(dir, "kakaotalk-login.json"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if v := e.kakaoLogin(context.Background()); v.State != want || v.Summary == "" {
+			t.Fatalf("%s 는 %v 여야 합니다: %+v", state, want, v)
+		}
+	}
+}

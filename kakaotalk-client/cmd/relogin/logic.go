@@ -71,9 +71,93 @@ type view struct {
 	Dialogs []dialog
 	// Windows is how many windows it has open at all.
 	Windows int
+	// Blind is a window that came back as the app itself: macOS hides every
+	// window from an accessibility client that way while the screen is
+	// locked. Nothing about the login can be read from the windows then.
+	Blind bool
 }
 
-func (v view) loggedIn() bool { return v.Form == nil && len(v.Dialogs) == 0 && v.Windows > 0 }
+func (v view) loggedIn() bool {
+	return !v.Blind && v.Form == nil && len(v.Dialogs) == 0 && v.Windows > 0
+}
+
+// menuState is what KakaoTalk's own app menu says of the login: its 로그아웃
+// can be chosen only while it is logged in. A notice it waits on greys the
+// menu out too, so out means "not plainly in" and the windows tell which.
+type menuState int
+
+const (
+	menuUnknown menuState = iota // no 로그아웃 in the app menu to read
+	menuIn
+	menuOut
+)
+
+func (m menuState) String() string {
+	switch m {
+	case menuIn:
+		return "켜짐"
+	case menuOut:
+		return "꺼짐"
+	}
+	return "모름"
+}
+
+// appMenus are the titles of KakaoTalk's app menu in the menu bar - never
+// the Apple menu, whose "<user> 로그아웃…" logs the Mac's user out.
+var appMenus = []string{"카카오톡", "KakaoTalk"}
+
+// logoutItems are the app menu's 로그아웃, by the whole title.
+var logoutItems = []string{"로그아웃", "Log Out", "Logout"}
+
+func isAppMenu(title string) bool {
+	for _, t := range appMenus {
+		if strings.TrimSpace(title) == t {
+			return true
+		}
+	}
+	return false
+}
+
+// menuFrom is what the menu bar items say of the login: the app menu's
+// 로그아웃, and nothing else in the bar.
+func menuFrom(items []*elem) menuState {
+	for _, it := range items {
+		if !isAppMenu(it.Title) {
+			continue
+		}
+		state := menuUnknown
+		it.each(func(x *elem) {
+			if state != menuUnknown || x.Role != "AXMenuItem" {
+				return
+			}
+			for _, name := range logoutItems {
+				if strings.TrimSpace(x.Title) != name {
+					continue
+				}
+				switch x.Enabled {
+				case 1:
+					state = menuIn
+				case 0:
+					state = menuOut
+				}
+			}
+		})
+		return state
+	}
+	return menuUnknown
+}
+
+// lockedState is what is said while the screen is locked, when only the
+// menu can be read and nothing is tried.
+func lockedState(m menuState) (state, detail string) {
+	switch m {
+	case menuIn:
+		return "locked-in", "맥미니 화면이 잠겨 있어요 - 로그아웃되면 잠금이 풀릴 때까지 다시 로그인하지 못해요"
+	case menuOut:
+		return "locked", "카톡이 로그아웃된 것 같은데 맥미니 화면이 잠겨 있어 로그인 창을 읽지 못해요"
+	}
+	return "locked-unknown", "맥미니 화면이 잠겨 있어 카톡을 볼 수 없어요"
+}
 
 // classify reads what KakaoTalk is showing from its windows.
 func classify(windows []*elem) view {
