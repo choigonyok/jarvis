@@ -18,6 +18,63 @@ const chip = (on: boolean) =>
   );
 
 /**
+ * Stops of one name close together - the two sides of a road, or one stop as
+ * both bus feeds list it - chosen as one place, and told apart by what one
+ * takes there: "27 · 수원여자대학교정문 방면" is one side, "27 · 일성아파트
+ * 방면" the other.
+ */
+type Place = { key: string; name: string; stops: Stop[]; dist?: number };
+
+/** A line at one of a place's stops. */
+type Choice = { stop: Stop; line: Line };
+
+function apart(a: Stop, b: Stop): number {
+  if (a.no && a.no === b.no) return 0;
+  if (!a.lat || !a.lon || !b.lat || !b.lon) return Infinity;
+  const rad = Math.PI / 180;
+  const x = (b.lon - a.lon) * rad * Math.cos(((a.lat + b.lat) / 2) * rad);
+  const y = (b.lat - a.lat) * rad;
+  return Math.hypot(x, y) * 6_371_000;
+}
+
+function places(stops: Stop[]): Place[] {
+  const out: Place[] = [];
+  for (const s of stops) {
+    const same = out.find((p) => p.stops[0].kind === s.kind && p.name === s.name && p.stops.every((o) => apart(o, s) < 400));
+    if (!same) {
+      out.push({ key: `${s.kind}:${s.region ?? ""}:${s.id}`, name: s.name, stops: [s], dist: s.dist });
+      continue;
+    }
+    same.stops.push(s);
+    if (s.dist != null && (same.dist == null || s.dist < same.dist)) same.dist = s.dist;
+  }
+  return out;
+}
+
+/** How many stops a place really is: one stop listed by both feeds is one. */
+function sides(p: Place): number {
+  return new Set(p.stops.map((s) => s.no || `${s.region}:${s.id}`)).size;
+}
+
+/**
+ * A place's lines, one row each: a route listed for one stop by both feeds
+ * once - 경기's, whose arrivals come to the second - and by number.
+ */
+function choicesOf(rows: Choice[]): Choice[] {
+  const kept = new Map<string, Choice>();
+  for (const c of rows) {
+    const k = c.stop.no ? `${c.stop.no}|${c.line.name}` : `${c.stop.region}:${c.stop.id}|${c.line.id}`;
+    const had = kept.get(k);
+    if (!had || (had.stop.region !== "gyeonggi" && c.stop.region === "gyeonggi")) kept.set(k, c);
+  }
+  const out = [...kept.values()];
+  if (out[0]?.stop.kind === "bus") {
+    out.sort((a, b) => a.line.name.localeCompare(b.line.name, "ko", { numeric: true }) || (a.line.toward ?? "").localeCompare(b.line.toward ?? "", "ko"));
+  }
+  return out;
+}
+
+/**
  * Adding or changing a route, in the order one would say it: where one gets
  * on (stops near where one's phone last was, or by name), what one takes
  * there, how long the walk is (from the distance, to be corrected), and its
@@ -53,6 +110,7 @@ export function RouteEditor({
 }
 
 function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null; onSave: (r: Route) => Promise<void>; onDelete?: () => Promise<void> }) {
+  const [place, setPlace] = useState<Place | null>(route ? places([route.stop])[0] : null);
   const [stop, setStop] = useState<Stop | null>(route?.stop ?? null);
   const [line, setLine] = useState<Line | null>(route?.line ?? null);
   const [walk, setWalk] = useState(route?.walk ?? 5);
@@ -65,7 +123,7 @@ function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null;
 
   const [stops, setStops] = useState<Stop[] | null>(null);
   const [q, setQ] = useState("");
-  const [lines, setLines] = useState<Line[] | null>(null);
+  const [choices, setChoices] = useState<Choice[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [missed, setMissed] = useState<string | null>(null);
@@ -97,19 +155,32 @@ function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null;
     setBusy(null);
   }
 
-  async function pick(s: Stop) {
-    setStop(s);
+  async function pick(p: Place) {
+    setPlace(p);
+    setStop(p.stops.length === 1 ? p.stops[0] : null);
     setLine(null);
-    setLines(null);
-    if (s.dist) setWalk(walkMinutes(s.dist));
+    if (p.dist) setWalk(walkMinutes(p.dist));
+    await loadChoices(p);
+  }
+
+  async function loadChoices(p: Place) {
+    setChoices(null);
     setBusy("lines");
     setError(null);
-    try {
-      setLines(await findLines(s));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "노선을 불러오지 못했어요.");
+    const got = await Promise.allSettled(p.stops.map((s) => findLines(s).then((ls) => ls.map((l) => ({ stop: s, line: l })))));
+    const rows = got.flatMap((g) => (g.status === "fulfilled" ? g.value : []));
+    if (!rows.length) {
+      const failed = got.find((g): g is PromiseRejectedResult => g.status === "rejected");
+      setError(failed?.reason instanceof Error ? failed.reason.message : "노선을 불러오지 못했어요.");
     }
+    setChoices(choicesOf(rows));
     setBusy(null);
+  }
+
+  function choose(c: Choice) {
+    setStop(c.stop);
+    setLine(c.line);
+    if (c.stop.dist) setWalk(walkMinutes(c.stop.dist));
   }
 
   async function save() {
@@ -128,9 +199,9 @@ function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null;
   return (
     <div className="mx-auto w-full max-w-[40rem] space-y-6 px-4 pb-8 text-[13px] sm:px-6">
       <Step title="어디서 타요">
-        {stop ? (
-          <Picked onChange={() => { setStop(null); setLines(null); setLine(null); }}>
-            <StopLabel stop={stop} />
+        {place ? (
+          <Picked onChange={() => { setPlace(null); setStop(null); setChoices(null); setLine(null); }}>
+            {stop ? <StopLabel stop={stop} /> : <PlaceLabel place={place} />}
           </Picked>
         ) : (
           <>
@@ -163,10 +234,10 @@ function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null;
             {stops ? (
               stops.length ? (
                 <ul className="mt-2 divide-y divide-edge-soft">
-                  {stops.slice(0, 14).map((s) => (
-                    <li key={`${s.kind}:${s.region}:${s.id}`}>
-                      <button type="button" onClick={() => void pick(s)} className="flex w-full items-center gap-3 py-2.5 text-left outline-none hover:bg-glass focus-visible:ring-3 focus-visible:ring-ring/50">
-                        <StopLabel stop={s} />
+                  {places(stops).slice(0, 14).map((p) => (
+                    <li key={p.key}>
+                      <button type="button" onClick={() => void pick(p)} className="flex w-full items-center gap-3 py-2.5 text-left outline-none hover:bg-glass focus-visible:ring-3 focus-visible:ring-ring/50">
+                        {p.stops.length === 1 ? <StopLabel stop={p.stops[0]} /> : <PlaceLabel place={p} />}
                       </button>
                     </li>
                   ))}
@@ -180,26 +251,39 @@ function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null;
         )}
       </Step>
 
-      {stop ? (
+      {place ? (
         <Step title="무엇을 타요">
-          {line ? (
-            <Picked onChange={() => setLine(null)}>
+          {stop && line ? (
+            <Picked
+              onChange={() => {
+                setLine(null);
+                if (!choices) void loadChoices(place);
+              }}
+            >
               <span className="shrink-0 text-[14px] font-medium text-foreground">{line.name}</span>
               <span className="min-w-0 truncate text-dim">{line.toward}</span>
             </Picked>
           ) : busy === "lines" ? (
             <p className="text-faint">노선을 불러오는 중…</p>
-          ) : lines && lines.length ? (
-            <ul className="divide-y divide-edge-soft">
-              {lines.map((l) => (
-                <li key={l.id}>
-                  <button type="button" onClick={() => setLine(l)} className="flex w-full items-baseline gap-2 py-2.5 text-left outline-none hover:bg-glass focus-visible:ring-3 focus-visible:ring-ring/50">
-                    <span className="shrink-0 text-[14px] font-medium text-foreground">{l.name}</span>
-                    <span className="min-w-0 truncate text-dim">{l.toward}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+          ) : choices && choices.length ? (
+            <>
+              {sides(place) > 1 ? (
+                <p className="mb-1 text-[12px] leading-[1.55] break-keep text-faint">
+                  이름이 같은 정류장 {sides(place)}곳의 노선이에요. 타는 방향을 고르면 그쪽 정류장으로 정해져요 - 끝의 번호는 정류장 표지판의 번호예요.
+                </p>
+              ) : null}
+              <ul className="divide-y divide-edge-soft">
+                {choices.map((c) => (
+                  <li key={`${c.stop.region ?? ""}:${c.stop.id}:${c.line.id}`}>
+                    <button type="button" onClick={() => choose(c)} className="flex w-full items-baseline gap-2 py-2.5 text-left outline-none hover:bg-glass focus-visible:ring-3 focus-visible:ring-ring/50">
+                      <span className="shrink-0 text-[14px] font-medium text-foreground">{c.line.name}</span>
+                      <span className="min-w-0 flex-1 truncate text-dim">{c.line.toward}</span>
+                      {sides(place) > 1 && c.stop.no ? <span className="tnum shrink-0 text-[12px] text-faint">{c.stop.no}</span> : null}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
           ) : (
             <p className="text-dim">이 정류장의 노선을 받지 못했어요.</p>
           )}
@@ -297,7 +381,6 @@ function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null;
   );
 }
 
-/** A subway line's direction as riders say it: "외선 · 성수행 - 역삼방면". */
 function Step({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section>
@@ -315,6 +398,24 @@ function Picked({ children, onChange }: { children: ReactNode; onChange: () => v
         바꾸기
       </button>
     </div>
+  );
+}
+
+/** A place of several stops: its name, and that the way one goes chooses among them. */
+function PlaceLabel({ place }: { place: Place }) {
+  const n = sides(place);
+  const region = place.stops.every((s) => s.region === "seoul") ? "서울" : place.stops.every((s) => s.region === "gyeonggi") ? "경기" : "서울·경기";
+  return (
+    <>
+      <BusFront aria-hidden className="size-[18px] shrink-0 text-dim" strokeWidth={1.7} />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[14px] text-foreground">{place.name}</span>
+        <span className="block text-[12px] text-faint">
+          {n > 1 ? `${region} 버스 · 정류장 ${n}곳, 타는 방향으로 골라요` : `${region} 버스${place.stops[0].no ? ` · ${place.stops[0].no}` : ""}`}
+        </span>
+      </span>
+      {place.dist ? <span className="tnum shrink-0 text-[12px] text-faint">{place.dist >= 1000 ? `${(place.dist / 1000).toFixed(1)}km` : `${place.dist}m`}</span> : null}
+    </>
   );
 }
 
