@@ -49,7 +49,7 @@ type status struct {
 	CheckedAt time.Time `json:"checkedAt"`
 	// logged-in | no-window | relogged | notice | starting | offline | waiting |
 	// failed | wrong-password | needs-person | no-access | no-password |
-	// locked | locked-in | locked-unknown | unreadable | unknown
+	// locked | locked-in | locked-unknown | unreadable | unreadable-out | unknown
 	State      string     `json:"state"`
 	Detail     string     `json:"detail,omitempty"`
 	Access     bool       `json:"access"`
@@ -188,7 +188,14 @@ func (d *daemon) tick() time.Duration {
 			d.dumped = true
 			d.writeDump(l, menu, "창을 읽지 못함")
 		}
-		d.set("unreadable", "카톡 창이 손쉬운 사용에 보이지 않아요")
+		if menu == menuOut {
+			// Logged out by the menu and no window to log in with: as bad
+			// as a locked screen, and said as loudly.
+			d.wasOut = true
+			d.set("unreadable-out", "카톡이 로그아웃된 것 같은데 창을 읽지 못해요")
+		} else {
+			d.set("unreadable", "카톡 창이 손쉬운 사용에 보이지 않아요")
+		}
 		return 10 * time.Second
 	case v.Windows == 0 && menu == menuUnknown:
 		d.wasOut = false

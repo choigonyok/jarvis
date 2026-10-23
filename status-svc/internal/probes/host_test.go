@@ -64,7 +64,7 @@ func TestKakaoLoginLockedScreen(t *testing.T) {
 	now := time.Now().Format(time.RFC3339)
 	for state, want := range map[string]check.State{
 		"logged-in": check.OK, "locked": check.Fail, "locked-in": check.Warn,
-		"locked-unknown": check.Warn, "unreadable": check.Warn,
+		"locked-unknown": check.Warn, "unreadable": check.Warn, "unreadable-out": check.Fail,
 	} {
 		body := `{"checkedAt":"` + now + `","state":"` + state + `"}`
 		if err := os.WriteFile(filepath.Join(dir, "kakaotalk-login.json"), []byte(body), 0o600); err != nil {

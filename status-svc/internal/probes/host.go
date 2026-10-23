@@ -196,6 +196,8 @@ func (e *env) kakaoLogin(context.Context) check.Verdict {
 		v.State, v.Summary = check.Warn, "맥미니 화면이 잠겨 있어 카톡 로그인 상태를 볼 수 없어요."
 	case "unreadable":
 		v.State, v.Summary = check.Warn, "카톡 창을 읽지 못해요. 로그아웃되면 저절로 다시 로그인하지 못할 수 있어요."
+	case "unreadable-out":
+		v.State, v.Summary = check.Fail, "카톡이 로그아웃됐는데 창을 읽지 못해 다시 로그인하지 못해요. 맥미니 화면을 한 번 깨워 주세요."
 	case "no-access":
 		v.State, v.Summary = check.Fail, "자동 로그인 프로그램에 손쉬운 사용 권한이 없어요."
 	case "no-password":
