@@ -561,6 +561,16 @@ export function Thread() {
   // the view back to the bottom - not new turns, not photos above finishing
   // their layout - until the reader touches the thread themselves.
   const held = useRef<HTMLElement | null>(null);
+  // Whether a finger is on the thread, and the wait for scrolling to settle:
+  // the page above is asked for only once the reader has stopped near the
+  // top - finger lifted, fling over. On an iPhone the view's position is the
+  // system's while a finger or a fling moves it, so the page's height put
+  // back mid-fling was overwritten: the view fell into the page just added,
+  // was near the top again, asked for the next one - one flick up ran
+  // through page after page (2026-10-24).
+  const touching = useRef(false);
+  const settle = useRef<number | undefined>(undefined);
+
   // Set while a page of older turns is on its way: how tall the thread was
   // and where the reader was, so once the page is in front of them the view
   // is moved by exactly what was added and nothing seems to jump.
@@ -578,7 +588,13 @@ export function Thread() {
     if (above.current) {
       const { height, top } = above.current;
       above.current = null;
-      el.scrollTop = el.scrollHeight - height + top;
+      const target = el.scrollHeight - height + top;
+      el.scrollTop = target;
+      // iOS can still be finishing a fling it owns and put its own position
+      // back over this one: look again on the next frame.
+      requestAnimationFrame(() => {
+        if (!touching.current && Math.abs(el.scrollTop - target) > 2) el.scrollTop = target;
+      });
       return;
     }
     if (held.current) return;
@@ -825,7 +841,21 @@ export function Thread() {
           }
           if (held.current) return; // our own scroll to a card, not the reader's
           pinned.current = gap < 80;
-          askOlder(el);
+          window.clearTimeout(settle.current);
+          const ask = () => {
+            if (touching.current) settle.current = window.setTimeout(ask, 120);
+            else askOlder(el);
+          };
+          settle.current = window.setTimeout(ask, 180);
+        }}
+        onTouchStart={() => {
+          touching.current = true;
+        }}
+        onTouchEnd={() => {
+          touching.current = false;
+        }}
+        onTouchCancel={() => {
+          touching.current = false;
         }}
 
         className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain"
