@@ -46,6 +46,13 @@ WIKI_NAMES = {
     "4.19 민주묘지": ["4.19민주묘지", "4·19민주묘지"], "뚝섬유원지": ["자양"], "세종왕릉": ["세종대왕릉"], "신길온천": ["능길"],
 }
 
+# In service, but too rarely coming in for a few snapshots to catch: the
+# shuttles to 광명 and 서동탄, and 4호선 past 불암산 (진접선).
+EXTRA = {
+    "1001": [("금천구청", "광명"), ("병점", "서동탄")],
+    "1004": [("불암산", "별내별가람"), ("별내별가람", "오남"), ("오남", "진접")],
+}
+
 FIELDS = ("statnNm", "statnId", "statnFid", "statnTid", "subwayId", "updnLine", "trainLineNm", "btrainSttus")
 
 
@@ -139,6 +146,11 @@ def main():
     for line, ids in adj.items():
         for x, ys in ids.items():
             stations[name[x]][line].update(name[y] for y in ys)
+
+    for line, pairs in EXTRA.items():
+        for x, y in pairs:
+            stations[x][line].add(y)
+            stations[y][line].add(x)
 
     # Where each is: the Wikidata station of the same name on one of its lines.
     places = collections.defaultdict(list)  # name -> [(lines, point)]
