@@ -10,13 +10,15 @@ import (
 	"sync"
 )
 
-// The subway stations the real-time feed may know, kept with the binary
-// (stations.py builds stations.json from Wikidata): each by the name the feed
-// knows it by, where it is, and on each line - the feed's subwayId - the
-// stations next to it. With them a station is found by name or nearness, and
-// its directions offered, while no train runs for the feed to tell of; and a
-// train is known to go a route's way when the station it stops at next is
-// the one the route names, or lies beyond it.
+// The subway stations the real-time feed knows, kept with the binary
+// (stations.py builds stations.json from the feed's own every-station
+// answer, and Wikidata for where each is): each by the exact name the feed
+// knows it by - 천호(풍납토성), not 천호 - and on each line (the feed's
+// subwayId) the stations next to it, as the feed's trains run. With them a
+// station is found by name or nearness, and its directions offered, while no
+// train runs for the feed to tell of; and a train is known to go a route's
+// way when the station it stops at next is the one the route names, or lies
+// beyond it.
 //
 //go:embed stations.json
 var stationsJSON []byte
@@ -24,8 +26,31 @@ var stationsJSON []byte
 // Station is one of them.
 type Station struct {
 	Name  string              `json:"n"`
-	Point [2]float64          `json:"p"` // latitude, longitude
+	Point [2]float64          `json:"p"` // latitude, longitude; zero when not known
 	Lines map[string][]string `json:"l"`
+}
+
+// stationKeys is the words a station is found by: its name without the
+// bracketed part or a closing 역 (천호 for 천호(풍납토성), 서울 for 서울역),
+// and the bracketed part itself (이수 for 총신대입구(이수)).
+func stationKeys(n string) []string {
+	keys := []string{stationName(n)}
+	if i := strings.Index(n, "("); i > 0 && strings.HasSuffix(n, ")") {
+		if alias := strings.TrimSpace(n[i+1 : len(n)-1]); alias != "" {
+			keys = append(keys, alias)
+		}
+	}
+	return keys
+}
+
+// displayName is a station as a rider reads it: "천호역 (풍납토성)",
+// "신촌역 (경의중앙선)", "강남역".
+func displayName(n string) string {
+	s := stationName(n) + "역"
+	if keys := stationKeys(n); len(keys) > 1 {
+		s += " (" + keys[1] + ")"
+	}
+	return s
 }
 
 var stations = sync.OnceValue(func() map[string]Station {
@@ -41,13 +66,16 @@ var stations = sync.OnceValue(func() map[string]Station {
 })
 
 func (s Station) stop() Stop {
-	return Stop{Kind: Subway, ID: s.Name, Name: s.Name + "역", Lat: s.Point[0], Lon: s.Point[1]}
+	return Stop{Kind: Subway, ID: s.Name, Name: displayName(s.Name), Lat: s.Point[0], Lon: s.Point[1]}
 }
 
 // stationsNear is the stations within radius meters of a point, nearest first.
 func stationsNear(lat, lon, radius float64) []Stop {
 	var out []Stop
 	for _, s := range stations() {
+		if s.Point == [2]float64{} {
+			continue
+		}
 		if d := Meters(lat, lon, s.Point[0], s.Point[1]); d <= radius {
 			st := s.stop()
 			st.Dist = int(d)
@@ -58,28 +86,32 @@ func stationsNear(lat, lon, radius float64) []Stop {
 	return out
 }
 
-// stationsNamed is the station named q (강남역 or 강남), then a few whose
-// names begin with it (강남구청).
+// stationsNamed is the stations named q - 강남역 or 강남, 천호 for
+// 천호(풍납토성), 이수 for 총신대입구(이수) - then a few whose names begin
+// with it (강남구청).
 func stationsNamed(q string) []Stop {
 	name := stationName(q)
 	if name == "" {
 		return nil
 	}
 	var out, more []Stop
-	if s, ok := stations()[name]; ok {
-		out = append(out, s.stop())
-	}
 	for _, s := range stations() {
-		if s.Name != name && strings.HasPrefix(s.Name, name) {
+		keys := stationKeys(s.Name)
+		switch {
+		case slices.Contains(keys, name):
+			out = append(out, s.stop())
+		case slices.ContainsFunc(keys, func(k string) bool { return strings.HasPrefix(k, name) }):
 			more = append(more, s.stop())
 		}
 	}
-	slices.SortFunc(more, func(a, b Stop) int { return strings.Compare(a.Name, b.Name) })
+	byID := func(a, b Stop) int { return strings.Compare(a.ID, b.ID) }
+	slices.SortFunc(out, byID)
+	slices.SortFunc(more, byID)
 	return append(out, more[:min(len(more), 4)]...)
 }
 
 // stationLines is the ways from a station: on each of its lines, toward each
-// station next to it - 2호선, 역삼 방면.
+// station next to it - 2호선, 역삼 방면; 5호선, 천호 방면 for 천호(풍납토성).
 func stationLines(name string) []Line {
 	s, ok := stations()[name]
 	if !ok {
@@ -88,7 +120,7 @@ func stationLines(name string) []Line {
 	var out []Line
 	for _, id := range slices.Sorted(maps.Keys(s.Lines)) {
 		for _, next := range s.Lines[id] {
-			out = append(out, Line{ID: id + ">" + next, Name: LineName(id), Toward: next + " 방면"})
+			out = append(out, Line{ID: id + ">" + next, Name: LineName(id), Toward: stationName(next) + " 방면"})
 		}
 	}
 	return out
@@ -97,8 +129,12 @@ func stationLines(name string) []Line {
 // heading is whether a train on line at station, stopping next at next, goes
 // by via - the station after this one on a route: next is via, or lies a few
 // stations beyond it, as for an express that passes via without stopping. A
-// train the other way, or onto another branch, does not.
+// train the other way, onto another branch, or ending here (its next stop
+// this station itself: "광교행 - 광교방면" at 광교) does not.
 func heading(station, line, via, next string) bool {
+	if next == station {
+		return false
+	}
 	if next == via {
 		return true
 	}
@@ -108,13 +144,14 @@ func heading(station, line, via, next string) bool {
 		var further []string
 		for _, s := range frontier {
 			for _, n := range stations()[s].Lines[line] {
+				if seen[n] {
+					continue
+				}
 				if n == next {
 					return true
 				}
-				if !seen[n] {
-					seen[n] = true
-					further = append(further, n)
-				}
+				seen[n] = true
+				further = append(further, n)
 			}
 		}
 		frontier = further
@@ -168,11 +205,12 @@ func takes(r Route, arrivals []Arrival) []Arrival {
 // station it stops at next.
 var bound = regexp.MustCompile(`-\s*(.+?)\s*방면`)
 
-// nextStation is the station a train stops at next, from its trainLineNm, or
-// "" if it does not say.
+// nextStation is the station a train stops at next, from its trainLineNm -
+// by the feed's own name, as the stations here are kept - or "" if it does
+// not say.
 func nextStation(trainLine string) string {
 	if m := bound.FindStringSubmatch(trainLine); m != nil {
-		return stationName(m[1])
+		return strings.TrimSpace(m[1])
 	}
 	return ""
 }

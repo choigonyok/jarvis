@@ -213,7 +213,7 @@ func TestSubway(t *testing.T) {
 	if lines, err := f.Lines(ctx, Stop{Kind: Subway, ID: "수원"}); err != nil || len(lines) != 4 || lines[0].ID != "1001>세류" || lines[3].ID != "1075>매교" {
 		t.Fatalf("열차 없는 밤의 수원: %+v %v", lines, err)
 	}
-	if _, err := f.Lines(ctx, Stop{Kind: Subway, ID: "없는역이름"}); err == nil || !strings.Contains(err.Error(), "서울 밖") {
+	if _, err := f.Lines(ctx, Stop{Kind: Subway, ID: "없는역이름"}); err == nil || !strings.Contains(err.Error(), "피드가 모르는 역") {
 		t.Fatalf("목록에도 피드에도 없는 역: %v", err)
 	}
 	stops, err := f.Search(ctx, "강남역")
@@ -270,8 +270,25 @@ func TestStations(t *testing.T) {
 	if got := stationsNear(37.300277, 126.972222, 300); len(got) != 1 || got[0].ID != "성균관대" {
 		t.Fatalf("성균관대 근처: %+v", got)
 	}
-	if nextStation("성수행 - 역삼방면") != "역삼" || nextStation("광교행 - 양재방면 (급행)") != "양재" || nextStation("") != "" {
+	if nextStation("성수행 - 역삼방면") != "역삼" || nextStation("광교행 - 양재방면 (급행)") != "양재" || nextStation("") != "" ||
+		nextStation("방화행 - 천호(풍납토성)방면") != "천호(풍납토성)" {
 		t.Fatal("다음 역")
+	}
+	// The feed's own names: found by the name riders use, or the one in the
+	// brackets, and said as riders read them.
+	for q, want := range map[string]string{"천호": "천호(풍납토성)", "이수역": "총신대입구(이수)", "총신대입구": "총신대입구(이수)"} {
+		if got := stationsNamed(q); len(got) == 0 || got[0].ID != want {
+			t.Fatalf("%s 로 찾기: %+v", q, got)
+		}
+	}
+	if got := stationsNamed("이수"); got[0].Name != "총신대입구역 (이수)" {
+		t.Fatalf("보이는 이름: %+v", got[0])
+	}
+	if got := stationsNamed("신촌"); len(got) < 2 || got[0].ID != "신촌" || got[1].ID != "신촌(경의중앙선)" || got[1].Name != "신촌역 (경의중앙선)" {
+		t.Fatalf("이름이 같은 두 신촌: %+v", got)
+	}
+	if lines := stationLines("강동"); !slices.ContainsFunc(lines, func(l Line) bool { return l.ID == "1005>천호(풍납토성)" && l.Toward == "천호 방면" }) {
+		t.Fatalf("강동의 방향: %+v", lines)
 	}
 	train := func(id, way string) Arrival { return Arrival{Line: Line{ID: id}, Way: way} }
 	cases := []struct {
@@ -283,9 +300,11 @@ func TestStations(t *testing.T) {
 		// and one whose next stop is unknown going the same way.
 		{"가양", "1009>증미", []Arrival{train("1009>증미", "하행"), train("1009>염창", "하행"), train("1009>양천향교", "상행"), train("1009>어딘가", "하행"), train("1009>다른곳", "상행"), train("1002>증미", "하행")}, 3},
 		// 강동, 5호선 toward 둔촌동 (마천 branch): not the trains for 길동.
-		{"강동", "1005>둔촌동", []Arrival{train("1005>둔촌동", "하행"), train("1005>올림픽공원", "하행"), train("1005>길동", "하행"), train("1005>천호", "상행")}, 2},
+		{"강동", "1005>둔촌동", []Arrival{train("1005>둔촌동", "하행"), train("1005>올림픽공원(한국체대)", "하행"), train("1005>길동", "하행"), train("1005>천호(풍납토성)", "상행")}, 2},
 		// 강남, 2호선 toward 역삼: the loop's other way is far around.
 		{"강남", "1002>역삼", []Arrival{train("1002>역삼", "외선"), train("1002>교대", "내선")}, 1},
+		// 광교, the end of 신분당선: a train coming in to end here goes nowhere.
+		{"광교", "1077>광교중앙", []Arrival{train("1077>광교중앙", "상행"), train("1077>광교", "하행")}, 1},
 	}
 	for _, c := range cases {
 		r := Route{Stop: Stop{Kind: Subway, ID: c.station}, Line: Line{ID: c.line}}

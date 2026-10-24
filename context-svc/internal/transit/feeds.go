@@ -27,11 +27,11 @@ type FeedError struct{ Msg string }
 func (e *FeedError) Error() string { return e.Msg }
 
 // Feeds reads the live feeds: data.go.kr's key (DataKey) opens 경기's and
-// 서울's buses, data.seoul.go.kr's real-time subway key (SubwayKey) 서울's
-// subway - only stations inside 서울; 코레일's stations outside it have no
-// public real-time feed. Stations are found in the list kept with the binary
-// (stations.go), so also while no train runs. What a feed said is kept a little while, so the screen and the nudges
-// asking at once ask it once - the keys have a daily allowance.
+// 서울's buses, data.seoul.go.kr's real-time subway key (SubwayKey) the
+// capital area's subway - 코레일's stations in 경기 too, while trains run.
+// Stations are found in the list kept with the binary (stations.go), so also
+// while none runs. What a feed said is kept a little while, so the screen and
+// the nudges asking at once ask it once - the keys have a daily allowance.
 type Feeds struct {
 	DataKey, SubwayKey string
 	HTTP               *http.Client
@@ -143,16 +143,16 @@ func (f *Feeds) Lines(ctx context.Context, s Stop) ([]Line, error) {
 		}
 		for _, a := range arrivals {
 			line, next, _ := strings.Cut(a.Line.ID, ">")
-			if next == "" || slices.ContainsFunc(lines, func(l Line) bool {
+			if next == "" || next == s.ID || slices.ContainsFunc(lines, func(l Line) bool {
 				on, via, _ := strings.Cut(l.ID, ">")
 				return on == line && heading(s.ID, line, via, next)
 			}) {
 				continue
 			}
-			lines = append(lines, Line{ID: a.Line.ID, Name: a.Line.Name, Toward: next + " 방면"})
+			lines = append(lines, Line{ID: a.Line.ID, Name: a.Line.Name, Toward: stationName(next) + " 방면"})
 		}
 		if len(lines) == 0 {
-			return nil, &FeedError{"이 역은 지금 실시간 정보가 없어요 - 서울 밖의 역이거나, 지금 다니는 열차가 없어요"}
+			return nil, &FeedError{"이 역은 지금 실시간 정보가 없어요 - 지하철 피드가 모르는 역이거나, 지금 다니는 열차가 없어요"}
 		}
 		slices.SortStableFunc(lines, func(a, b Line) int { return strings.Compare(a.ID, b.ID) })
 		return lines, nil
