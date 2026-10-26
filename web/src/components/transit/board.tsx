@@ -5,7 +5,7 @@ import { type Plan, type Route, clockOf, countdown, stageOf } from "@/lib/transi
 import { cn } from "@/lib/utils";
 
 /** Each person's own face, as on the 위치 map. */
-const FACE: Record<Who, string> = { owner: "/icons/location-cat.v2.png", guest: "/icons/location-cat-guest.v2.png" };
+const FACE: Record<Who, string> = { owner: "/icons/location-cat.v3.png", guest: "/icons/location-cat-guest.v3.png" };
 
 /**
  * Pixel drawings, a cell to a character: the little screen this board is
@@ -70,7 +70,7 @@ function Rail({ who, plan, route, now }: { who: Who; plan: Plan; route: Route; n
         alt=""
         draggable={false}
         className={cn(
-          "pointer-events-none absolute size-[26px] -translate-x-1/2 select-none",
+          "pointer-events-none absolute h-[26px] w-auto -translate-x-1/2 select-none",
           plan.stage === "relax" && "opacity-70",
           plan.stage === "go" && "anim-breathe",
         )}
@@ -104,7 +104,7 @@ export function Board({ who, route, plan, now }: { who: Who; route: Route; plan?
     <section aria-label={`${route.name} 출발`} className="pt-1">
       <div className="flex items-start gap-3">
         {/* eslint-disable-next-line @next/next/no-img-element -- a 40px icon from public/, nothing to optimise */}
-        <img src={FACE[who]} alt="" draggable={false} className="mt-1 size-10 shrink-0 select-none" />
+        <img src={FACE[who]} alt="" draggable={false} className="mt-1 h-10 w-auto shrink-0 select-none" />
         <p
           aria-live="polite"
           className={cn(

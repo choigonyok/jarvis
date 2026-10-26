@@ -249,8 +249,8 @@ export function DayMap({
     const [a, b] = points;
     if (a && b && Math.hypot(a.x - b.x, a.y - b.y) < 24) {
       const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-      points[0] = { x: mid.x - 13, y: mid.y };
-      points[1] = { x: mid.x + 13, y: mid.y };
+      points[0] = { x: mid.x - 16, y: mid.y };
+      points[1] = { x: mid.x + 16, y: mid.y };
     }
     positions.forEach(({ person }, i) => {
       let el = l.marks.get(person.who);
@@ -421,13 +421,17 @@ function circle(
   ctx.restore();
 }
 
-/** Each person's own face on the map, as they chose it: the operator's grey cat, the guest's cream one. */
-const FACE: Record<Who, string> = { owner: "/icons/location-cat.v2.png", guest: "/icons/location-cat-guest.v2.png" };
+/**
+ * Each person's own cat on the map, as they chose it: the operator's grey cat,
+ * the guest's cream one. Both drawn to one height, each as wide as its drawing
+ * (the cream one lies long), so neither looks the smaller.
+ */
+const FACE: Record<Who, string> = { owner: "/icons/location-cat.v3.png", guest: "/icons/location-cat-guest.v3.png" };
 
 /**
- * A person's mark: their cat's face over a soft glow in their color, which
- * breathes when it is now. The glow keeps the face's dark outline from
- * sinking into the dark map.
+ * A person's mark: their cat over a soft glow in their color, which breathes
+ * when it is now. The glow keeps the cat's dark outline from sinking into the
+ * dark map.
  */
 function mark(who: Who): HTMLDivElement {
   const el = document.createElement("div");
@@ -438,7 +442,7 @@ function mark(who: Who): HTMLDivElement {
   face.src = FACE[who];
   face.alt = "";
   face.draggable = false;
-  face.className = "absolute top-1/2 left-1/2 size-[29px] -translate-1/2 select-none";
+  face.className = "absolute top-1/2 left-1/2 h-[29px] w-auto -translate-1/2 select-none";
   el.replaceChildren(halo, face);
   return el;
 }
@@ -544,8 +548,9 @@ function name(
     }
     const p = at(place.node);
     const y = p.y - n.h / 2;
-    // Where a mark is, the name stands clear of it.
-    const gap = marks.some((q) => Math.hypot(q.x - p.x, q.y - p.y) < 28) ? (marks.length > 1 ? 34 : 21) : 12;
+    // Where a mark is, the name stands clear of it - of the cream cat too,
+    // the wider (19px each side of its middle; two marks stand 16px out).
+    const gap = marks.some((q) => Math.hypot(q.x - p.x, q.y - p.y) < 28) ? (marks.length > 1 ? 40 : 24) : 12;
     const free = (x: number) =>
       x >= 4 &&
       x + n.w <= w - 4 &&
