@@ -123,6 +123,12 @@ type Config struct {
 	// ContextURL is context-svc: where the operator is, and the devices'
 	// state. Empty: no context tool.
 	ContextURL string
+	// SearchURL is search-svc - Naver's search, pages read with what their
+	// pictures say, Naver's map - and SearchToken the token it alone takes.
+	// Both set (SearchOn): the web module's search and read, find_nearby on
+	// Naver first, and read in place of the CLI's WebFetch.
+	SearchURL   string
+	SearchToken string
 	// Jobs turns on the scheduler. Like Enrich, it needs the browser server.
 	Jobs bool
 	// JobsInterval is the longest the scheduler goes without looking - a net
@@ -256,6 +262,8 @@ func Load() (Config, error) {
 		MemoryURL:    os.Getenv("JARVIS_MEMORY_URL"),
 		MindURL:      os.Getenv("JARVIS_MIND_URL"),
 		ContextURL:   os.Getenv("JARVIS_CONTEXT_URL"),
+		SearchURL:    os.Getenv("JARVIS_SEARCH_URL"),
+		SearchToken:  os.Getenv("JARVIS_SEARCH_TOKEN"),
 		Jobs:         envBool("JARVIS_JOBS", true),
 		JobsInterval: envDuration("JARVIS_JOBS_INTERVAL", 5*time.Minute),
 		// Least time between two runs of any job. Sites watch for bots; a
@@ -308,6 +316,14 @@ func Load() (Config, error) {
 		c.VaultURL = ""
 	}
 
+	// With search-svc, read is how a page is opened: it reads Korean pages
+	// and their pictures, and opens only addresses that were seen - WebFetch
+	// opens any, so a page could have the model send what it knows out in
+	// one. An explicit JARVIS_BUILTIN_TOOLS is left as it is.
+	if c.SearchOn() && os.Getenv("JARVIS_BUILTIN_TOOLS") == "" && c.BuiltinTools != nil {
+		c.BuiltinTools = ptr(withoutTool(*c.BuiltinTools, "WebFetch"))
+	}
+
 	if c.OAuthToken == "" {
 		return c, fmt.Errorf("CLAUDE_CODE_OAUTH_TOKEN is not set (run: claude setup-token)")
 	}
@@ -342,6 +358,20 @@ func Load() (Config, error) {
 	}
 	c.AllowedTools = append(c.AllowedTools, readRules(workspace, c.UploadsDir, c.MemoryDir)...)
 	return c, nil
+}
+
+// SearchOn is whether search-svc is set up for this agent.
+func (c Config) SearchOn() bool { return c.SearchURL != "" && c.SearchToken != "" }
+
+// withoutTool is a comma list less one tool.
+func withoutTool(list, tool string) string {
+	var out []string
+	for _, t := range splitList(list) {
+		if t != tool {
+			out = append(out, t)
+		}
+	}
+	return strings.Join(out, ",")
 }
 
 // unsafeTool is an allowlist entry that may never skip the gate, whatever

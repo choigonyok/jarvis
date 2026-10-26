@@ -62,6 +62,12 @@
   Docker 호스트 주소로 푸는 유일한 경로. 콘솔 변수 `TTS_URL`. 서버는 `~/jarvis/.env` 의
   `JARVIS_API_TOKEN`(운영자 목소리)과 `JARVIS_GUEST_API_TOKEN`(손님 목소리)을 읽는다 - 손님 토큰이
   없으면 손님 목소리만 꺼진다.
+- 웹 찾기(`search-svc`)는 compose 의 `search` 서비스이고, 그림 속 글자를 읽는 OCR(`ocr/`)만 맥미니 호스트의
+  LaunchAgent 다: `scripts/ocr install`(애플 Vision 이라 컨테이너 밖). search-svc 는 `host.docker.internal:8107`
+  로 닿는다 - 게이트웨이는 이 둘을 모른다(agent 만 부른다). `.env` 에 `NAVER_API_HUB_ID`·`NAVER_API_HUB_SECRET`
+  (NCP 콘솔 > NAVER API HUB > Application > 인증 정보)과 `JARVIS_SEARCH_TOKEN`(`openssl rand -hex 24`, search-svc 와
+  OCR 이 같이 쓴다)을 넣고 `scripts/mini compose up -d --build search agent agent-guest`. 토큰이 비어 있으면
+  agent 는 예전대로(WebFetch, find_nearby 는 OpenStreetMap) 돈다. 자세한 것은 [search-svc/README.md](search-svc/README.md).
 
 **`jarvis.choigonyok.com` 앞에는 Cloudflare Access 가 있다.** Zero Trust 앱 `jarvis`
 (팀 `choigonyok.cloudflareaccess.com`, Free 플랜), 정책 `only me` 는 운영자 이메일 하나만 허용하고

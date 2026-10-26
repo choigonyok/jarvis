@@ -40,6 +40,7 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/module/remind"
 	"github.com/choigonyok/jarvis/agent/internal/module/spending"
 	"github.com/choigonyok/jarvis/agent/internal/module/vault"
+	"github.com/choigonyok/jarvis/agent/internal/module/web"
 	"github.com/choigonyok/jarvis/agent/internal/suggest"
 	"github.com/choigonyok/jarvis/agent/internal/thread"
 	"github.com/choigonyok/jarvis/agent/internal/uploads"
@@ -169,9 +170,24 @@ func main() {
 		cfg.Allow(memory.Tools...)
 	}
 
+	// 웹 찾기: 네이버 검색, 페이지 읽기(그림 속 글자까지), 네이버 지도. 찾고 읽는 것은
+	// search-svc 가 하고, 여기에는 도구와 '본 주소' 장부가 있다. 손님에게도 - 운영자의 것은
+	// 아무것도 열지 않는다.
+	var webModule *web.Module
+	if cfg.SearchOn() {
+		webModule = web.New(web.NewClient(cfg.SearchURL, cfg.SearchToken))
+		modules.Add(webModule)
+		mcpMounts["/mcp/"+web.ServerName] = webModule.Handler()
+		cfg.ModuleMCPURLs[web.ServerName] = cfg.PublicMCPURL + "/" + web.ServerName
+		cfg.Allow(web.Tools...)
+	}
+
 	// Where the operator is (context-svc), read only. Not the guest's.
 	if cfg.ContextURL != "" && !cfg.Guest {
 		placeModule := place.New(cfg.ContextURL, cfg.APIToken)
+		if webModule != nil {
+			placeModule.UseNaver(webModule.Client())
+		}
 		modules.Add(placeModule)
 		mcpMounts["/mcp/"+place.ServerName] = placeModule.Handler()
 		cfg.ModuleMCPURLs[place.ServerName] = cfg.PublicMCPURL + "/" + place.ServerName
@@ -233,6 +249,11 @@ func main() {
 	// Subscription use, read off every run's stream; kept beside the proposals.
 	usageTracker := usage.New(filepath.Join(filepath.Dir(cfg.ProposalsPath), "usage.json"))
 	runner.SetUsage(usageTracker)
+	if webModule != nil {
+		// What went past - the operator's words, every tool's result - is
+		// what read may open.
+		runner.OnSeen(webModule.Saw)
+	}
 	if memoryModule != nil {
 		runner.SetRecall(memoryModule.Recall)
 	}
@@ -279,6 +300,12 @@ func main() {
 		assetsModule.Attach(transcript.AttachProposal)
 		go assetsModule.RunAsker(enrichCtx, assets.AskConfig{Every: 10 * time.Minute, MaxOpen: 12, Categories: spendingModule.Categories})
 	}
+	// A job finds and reads the web with the conversation's own tools - no
+	// browser, no site to add.
+	var jobsWeb *jobs.WebTools
+	if webModule != nil {
+		jobsWeb = &jobs.WebTools{Name: web.ServerName, URL: cfg.PublicMCPURL + "/" + web.ServerName, Tools: web.Tools}
+	}
 	if jobsModule != nil && cfg.Guest {
 		// The guest's jobs open no website: nothing to hold them to.
 		go jobsModule.Run(enrichCtx, runner, jobs.SchedulerConfig{
@@ -288,6 +315,7 @@ func main() {
 			Timeout:    cfg.JobsTimeout,
 			Model:      cfg.JobsModel,
 			RetryModel: cfg.JobsRetryModel,
+			Web:        jobsWeb,
 		})
 	} else if _, ok := cfg.ExtraMCPURLs[jobs.BrowserServer]; jobsModule != nil && ok {
 		guard, err := jobs.NewBridgeGuard(cfg.ExtraMCPURLs[jobs.BrowserServer], cfg.ExtraMCPToken)
@@ -303,6 +331,7 @@ func main() {
 				Guard:      guard,
 				Model:      cfg.JobsModel,
 				RetryModel: cfg.JobsRetryModel,
+				Web:        jobsWeb,
 			})
 		}
 	} else if jobsModule != nil {

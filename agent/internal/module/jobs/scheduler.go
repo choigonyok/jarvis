@@ -79,6 +79,17 @@ type SchedulerConfig struct {
 	// and the second try is where the stronger model earns its price.
 	Model      string
 	RetryModel string
+	// Web, when set, is the conversation's web module handed to every run:
+	// Naver's search and pages read with what their pictures say - finding
+	// things out without the browser, beside the conversation.
+	Web *WebTools
+}
+
+// WebTools is an MCP server of this agent's that a run may use, and its tools.
+type WebTools struct {
+	Name  string
+	URL   string
+	Tools []string
 }
 
 // legacyPoll is how often a jobs-svc that does not say when its next job
@@ -244,15 +255,25 @@ func (m *Module) runOnce(ctx context.Context, bg Background, cfg SchedulerConfig
 		extra = []string{BrowserServer}
 	} else {
 		text += noBrowserNote
+		if cfg.Web != nil {
+			text += noBrowserWebNote
+		}
+	}
+	servers := map[string]string{RunServerName: fmt.Sprintf("%s/%d", cfg.RunURL, run)}
+	allowed, system := runTools(browser), runSystem
+	if cfg.Web != nil {
+		servers[cfg.Web.Name] = cfg.Web.URL
+		allowed = append(allowed, cfg.Web.Tools...)
+		system += webRunRules
 	}
 	result, err := bg.Background(ctx, claudecode.Task{
 		Name:    "작업 " + j.Title,
 		Prompt:  text,
-		System:  runSystem,
+		System:  system,
 		Model:   model,
-		Servers: map[string]string{RunServerName: fmt.Sprintf("%s/%d", cfg.RunURL, run)},
+		Servers: servers,
 		Extra:   extra,
-		Allowed: runTools(browser),
+		Allowed: allowed,
 		Browser: browser,
 		Timeout: cfg.Timeout,
 		OnStep: func(s claudecode.Step) {
@@ -358,6 +379,10 @@ func describe(s claudecode.Step) (string, string) {
 		return "step", fmt.Sprintf("사진 %d장 넣기", n)
 	case "view_photos":
 		return "step", "사진 보기"
+	case "search":
+		return "step", "검색: " + clampText(str("query"), 80)
+	case "read":
+		return "step", "읽기: " + clampText(str("url"), 120)
 	}
 	// The job's own tools log themselves in jobs-svc (schedule, card, report).
 	return "", ""
@@ -366,6 +391,17 @@ func describe(s claudecode.Step) (string, string) {
 // noBrowserNote goes on the prompt of a run without sites: it has no browser
 // this time, and the way to one is to add sites.
 const noBrowserNote = "\n\n이 실행에는 브라우저가 없습니다(작업에 사이트가 없어서). 사이트를 열어야 하는 일이면 request_sites 로 그 사이트를 더하고 schedule_next 로 곧 다음 실행을 잡으세요 - 다음 실행부터 브라우저가 붙습니다. 그 밖의 일은 지금 가진 도구로 합니다.\n"
+
+// noBrowserWebNote follows noBrowserNote when the run has the web tools.
+const noBrowserWebNote = "정보를 찾고 읽기만 하는 일(검색, 페이지와 그림 속 글자 읽기)은 web 도구로 브라우저 없이 됩니다 - 그런 일에는 사이트를 더하지 마세요.\n"
+
+// webRunRules go after runSystem when the run has the web tools.
+const webRunRules = `
+
+찾아보기
+- 정보를 찾을 때는 web 의 search(네이버 블로그·뉴스·카페·웹문서)와 read(원문과 그 안의 그림 속 글자)를 먼저 씁니다. 브라우저보다 빠르고 사이트를 더할 필요가 없습니다. 로그인·장바구니·주문·글쓰기처럼 사이트 안에서 해야 하는 일만 브라우저로 합니다.
+- read 는 검색 결과, 읽은 페이지의 링크, 작업 지시에 적힌 주소만 엽니다. 주소를 짐작해 만들지 마세요.
+- 가격·일정·조건은 원문(read)에서 확인하고, 어디서 확인했는지 결과에 주소를 남깁니다.`
 
 const runSystem = `당신은 Jarvis의 백그라운드 작업 실행입니다. 운영자가 대화에서 맡긴 작업 하나를, 이미 로그인된 공용 브라우저로 진행합니다. 대화 상대는 없고, 운영자는 작업 탭에서 진행을 지켜봅니다.
 

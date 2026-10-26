@@ -104,6 +104,21 @@ type Runner struct {
 	newsSeen string
 	// onFree hears a place come free (OnFree).
 	onFree []func()
+	// seen hears all text the model is shown: what it is sent and what
+	// every tool gives back (OnSeen).
+	seen func(string)
+}
+
+// OnSeen hands fn all text the model is shown - each message sent to it,
+// each tool's result, the CLI's own WebSearch included, in the conversation
+// and in background tasks. The web module keeps the addresses in it: the
+// only ones its read will open.
+func (r *Runner) OnSeen(fn func(string)) { r.seen = fn }
+
+func (r *Runner) saw(text string) {
+	if r.seen != nil && text != "" {
+		r.seen(text)
+	}
 }
 
 // OnFree registers fn to hear that a place for a background task came free:
@@ -328,6 +343,7 @@ func (r *Runner) Steer(id string) (steered bool, err error) {
 	q := r.queue[at]
 	r.queue = slices.Delete(r.queue, at, at+1)
 	if r.input != nil {
+		r.saw(q.Text)
 		if err := writeUser(r.input, withRef(withImages(q.Text, q.Images, r.cfg.UploadsDir), q.Ref, r.person())); err == nil {
 			r.mu.Unlock()
 			if q.Ref != nil {
@@ -500,6 +516,7 @@ func (r *Runner) turn(prompt string) error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("claude 실행: %w", err)
 	}
+	r.saw(head + prompt)
 	if err := writeUser(stdin, head+prompt); err != nil {
 		stdin.Close()
 		_ = cmd.Wait()
@@ -629,10 +646,16 @@ func (r *Runner) args(system string) []string {
 // turn never go here.
 func (r *Runner) systemPrompt() string {
 	parts := []string{r.cfg.SystemPrompt, clockRules}
+	if r.cfg.SearchOn() {
+		parts = append(parts, searchRules)
+	}
 	if r.mindOn() {
 		situation, taste := situationRules, prefsRules
 		if r.cfg.Guest {
 			situation, taste = guestSituationRules, guestPrefsRules
+		}
+		if r.cfg.SearchOn() {
+			situation = strings.Replace(situation, nearbyOSM, nearbyNaver, 1)
 		}
 		parts = append(parts, situation)
 		r.mu.Lock()
@@ -954,12 +977,28 @@ const guestPrefsRules = `알고 있는 취향 (이 사용자가 지난 대화에
 const clockRules = `시각
 - 메시지마다 앞에 [현재 시각]이 붙습니다. '내일', '다음 주 화요일' 같은 상대 날짜는 그 날짜로 직접 계산해서 절대 날짜로 도구에 넘기세요.`
 
+// nearbyOSM is how find_nearby is told of without search-svc; nearbyNaver
+// takes its place in situationRules when search-svc is set up.
+const nearbyOSM = `- 근처 가게(배달·식당·카페)는 mcp__context__find_nearby 로 지금 상황의 장소 근처에서 찾으세요(읽기 전용, OpenStreetMap). 후보 3개 정도와 근거(거리·종류, 아는 취향)를 들고, 답에 어디 기준인지와 출처를 밝히세요. 지도에 빠진 가게가 있을 수 있습니다.`
+
+const nearbyNaver = `- 근처 가게·장소(식당·술집·카페·마트·약국·병원)는 mcp__context__find_nearby 로 지금 상황의 장소 근처에서 찾으세요(읽기 전용, 네이버 지도). what 에는 업종이나 물건 낱말 하나(술집, 수산물, 약국)를 넣고, 지금 열린 곳이 필요하면 open 을 켜세요. 후보 3개 정도와 근거(거리·영업 상태·별점, 아는 취향)를 들고, 답에 어디 기준인지 밝히세요. 네이버를 읽지 못해 OpenStreetMap 으로 찾았다고 나오면 그렇다고 말하세요.`
+
+// searchRules are how to find things out, when search-svc is set up.
+const searchRules = `찾기
+- 가격·사양·일정·이벤트·영업시간·공지처럼 바뀌거나 확인할 수 있는 사실은 기억으로 답하지 말고 찾아서 답하세요. 기억으로만 답했다면 그렇다고 밝히세요.
+- 한국의 일(국내 이벤트·공지·상품·가게·후기)은 mcp__web__search(네이버 블로그·뉴스·카페·웹문서)로 먼저 찾고, 해외·영어 자료는 WebSearch 로 찾으세요. 최근 일이면 since(7d, 2w 같은)를 거세요.
+- 찾은 글은 mcp__web__read 로 원문을 읽고 답하세요. 검색 결과의 요약만 보고 답하지 마세요. 공지·상세페이지는 정보가 그림에 있는 경우가 많은데, read 가 그림 속 글자를 그 자리에 넣어 줍니다. 표·도면·치수처럼 글자만으로 모호하면 look 으로 그림을 직접 보세요.
+- 운영자가 "인스타에서 봤대", "유튜브에 나왔어"처럼 출처를 말하면, 누가 말했는지 묻는 것이 아니라 그런 소식이 있다는 힌트입니다. 인스타그램은 직접 볼 수 없으니 같은 소식을 다룬 블로그·뉴스·카페를 찾으세요.
+- 못 찾으면 띄어쓰기·오타·다른 이름(롤체=롤토체스=전략적 팀 전투=TFT 처럼)으로 다시 찾고, 그래도 없으면 어디를 어떤 말로 찾아봤는지 밝히세요.
+- 답에는 확인한 원문의 주소를 한두 개 붙이세요. 블로그·카페 글이 공식 발표를 옮긴 것이면 그렇다고 밝히세요.
+- mcp__web__read 는 검색 결과, 읽은 페이지의 링크, 도구 결과, 운영자가 준 주소만 엽니다. 주소를 짐작해 만들지 말고 먼저 찾으세요.`
+
 const situationRules = `지금 상황
 - 메시지 앞의 [지금 상황 · 시각] 블록은 mind 세계 모델이 일정·결제·사진으로 규칙에 따라 계산한 것입니다. 도구로 찾지 말고 그것을 쓰세요. "앞 메시지 때와 같음"이면 가장 최근에 받은 블록이 그대로라는 뜻입니다.
 - 위치·동행이 답에 필요한데 추정의 신뢰도가 0.5 미만이거나 추정이 없으면, 추측하지 말고 먼저 짧게 물어보세요(예: "지금 지수네 집이세요?").
 - 이 추정을 답에 썼으면 답의 첫 줄에 가정을 한 줄로 밝히세요. 예: "지수네 집 기준으로 골랐어요(15:40 사진 위치)."
 - 운영자가 정정하면("벌써 집에 왔어") 그 말을 그대로 믿고 답을 고치세요. mind 가 대화를 읽어 다음 추정에 반영합니다.
-- 근처 가게(배달·식당·카페)는 mcp__context__find_nearby 로 지금 상황의 장소 근처에서 찾으세요(읽기 전용, OpenStreetMap). 후보 3개 정도와 근거(거리·종류, 아는 취향)를 들고, 답에 어디 기준인지와 출처를 밝히세요. 지도에 빠진 가게가 있을 수 있습니다.
+` + nearbyOSM + `
 - 배달·택배 주소가 필요하면 먼저 기억(mcp__memory__search_memory, 예: "지수네 집 주소")에서 이 장소로 배달한 기록을 찾으세요. 없으면 한 번만 묻고, 받은 주소는 mind 가 이 대화에서 읽어 기억에 남깁니다(다음에는 묻지 않음).
 - 주문·결제·메시지 발송은 확신과 상관없이 항상 먼저 묻습니다.`
 
@@ -1142,6 +1181,9 @@ func (r *Runner) handle(ev event) error {
 		// fine as plain text, but a fenced code block with a blank line
 		// in it would land as two turns and stop being one block.
 		r.store.AppendAgent(paragraphsOf(ev.Message))
+	case "user":
+		// The tools' results come back to the model as its "user" turns.
+		r.saw(toolResults(ev.Message))
 	case "result":
 		r.closeInput()
 		if ev.IsError {
@@ -1149,6 +1191,44 @@ func (r *Runner) handle(ev event) error {
 		}
 	}
 	return nil
+}
+
+// toolResults is the text of the tool results in one of the stream's
+// "user" messages: a result's content is a string, or blocks of which the
+// text ones count.
+func toolResults(raw json.RawMessage) string {
+	var msg struct {
+		Content []struct {
+			Type    string          `json:"type"`
+			Content json.RawMessage `json:"content"`
+		} `json:"content"`
+	}
+	if len(raw) == 0 || json.Unmarshal(raw, &msg) != nil {
+		return ""
+	}
+	var parts []string
+	for _, b := range msg.Content {
+		if b.Type != "tool_result" || len(b.Content) == 0 {
+			continue
+		}
+		var s string
+		if json.Unmarshal(b.Content, &s) == nil {
+			parts = append(parts, s)
+			continue
+		}
+		var blocks []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}
+		if json.Unmarshal(b.Content, &blocks) == nil {
+			for _, x := range blocks {
+				if x.Type == "text" {
+					parts = append(parts, x.Text)
+				}
+			}
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 func paragraphsOf(raw json.RawMessage) []string {

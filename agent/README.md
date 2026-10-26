@@ -46,6 +46,8 @@ mind-svc :8102        인지 루프. 감지 → 해석 → 세계 모델 → 노
 수집기                kakaotalk-client :8090 · imessage-client :8099 (평문 사본, 보존 730일)
 tts :8106 (맥미니 호스트) 운영자·손님 각자의 목소리 복제 TTS (Qwen3-TTS 1.7B, MLX - GPU 가 필요해 compose 밖, LaunchAgent)
 browser :8931         에이전트의 Chromium (browser 네트워크에만, 결제 가드 guard.py)
+search-svc :8104      웹 찾기·읽기 - 네이버 검색, 페이지와 그림 속 글자, 네이버 지도 (search 네트워크에만)
+ocr :8107 (맥미니 호스트) 그림 속 글자 (애플 Vision - compose 밖, LaunchAgent)
 
 postgres (data 네트워크)  서비스들의 표와 이벤트 로그 · falkordb (data) 기억 그래프
 gocommon/             Go 공통 코드 (이벤트 outbox, 수집기 인증·보존)
@@ -56,7 +58,7 @@ gocommon/             Go 공통 코드 (이벤트 outbox, 수집기 인증·보�
 [workout-svc](../workout-svc/README.md) · [assets-svc](../assets-svc/README.md) ·
 [spending-svc](../spending-svc/README.md) ·
 [status-svc](../status-svc/README.md) · [context-svc](../context-svc/README.md) ·
-[mind-svc](../mind-svc/README.md) · [tts](../tts/README.md) ·
+[mind-svc](../mind-svc/README.md) · [tts](../tts/README.md) · [search-svc](../search-svc/README.md) ·
 [db](../db/README.md)
 
 **에이전트에 남은 것과 나간 것.** 저장소는 전부 나갔고, 결정은 전부 남았습니다.
@@ -175,6 +177,23 @@ CLI에 넘기는 `MCP_TIMEOUT`/`MCP_TOOL_TIMEOUT`은 **밀리초**입니다(CLI 
   `browser_enter_payment_pin` 이 넣습니다. 쿠팡 주문서는 결제수단 선택도 결제하기와 같은 주소로 보내므로,
   가드는 본문의 이벤트(`order` 만 결제)로 가릅니다(`browser/payment-hosts.json` 의 `pass`).
 
+### 웹 찾기
+
+- search-svc 를 부르는 모듈 `web` 이고, 도구 둘 다 읽기만 하며 카드가 없습니다: `search`(네이버 블로그·뉴스·카페·
+  지식iN·웹문서·백과·업체를 한 번에, 기간으로 거르기, 출처마다 몇 건 중 몇 건을 봤는지)와 `read`(페이지 하나 - 본문에
+  그림 속 글자가 그 자리에 들어가고, 길면 focus 로 관련 부분만, look 이면 그림 조각을 이미지로). `JARVIS_SEARCH_URL`·
+  `JARVIS_SEARCH_TOKEN` 이 둘 다 있을 때만 켜지고, 손님 대화에도 같이 붙습니다(운영자의 것은 아무것도 열지 않습니다).
+- **read 는 본 주소만 엽니다.** 검색 결과, 읽은 페이지의 링크, 도구 결과(CLI 의 WebSearch 포함), 운영자의 메시지에 7일
+  안에 나온 주소입니다. 실행기가 모델에게 보낸 글과 도구 결과를 전부 `OnSeen` 으로 넘기고, 모듈이 그 안의 주소를
+  장부에 적습니다. 페이지가 모델을 꾀어 아는 것을 주소에 실어 보내게 하는 길이 막힙니다. 그래서 이 모듈이 켜지면
+  CLI 의 WebFetch(아무 주소나 여는)는 내장 도구에서 빠집니다(`JARVIS_BUILTIN_TOOLS` 를 직접 정했으면 그대로).
+- 지시에는 찾기 규칙이 붙습니다: 바뀌는 사실은 기억으로 답하지 않고 찾는다, 한국 일은 `search` 먼저(해외는 WebSearch),
+  원문은 `read` 로, "인스타에서 봤대"는 출처 힌트다, 못 찾으면 다른 이름으로 다시 찾고 어디를 봤는지 밝힌다.
+- `find_nearby`(위치 모듈)는 네이버 지도(플레이스)를 먼저 묻습니다 - 영업 중인지와 마감 시각, 별점, 리뷰 수. 읽지
+  못하면 OpenStreetMap 으로 찾고 그렇다고 말합니다. 좌표는 소수 셋째 자리(약 100m)로 반올림해 보냅니다.
+- 작업도 같은 도구를 받습니다(`jobs.SchedulerConfig.Web`). 찾아보기만 하는 작업은 사이트도 브라우저도 없이 대화와
+  나란히 돕니다.
+
 ## 실행
 
 백엔드는 맥미니의 docker compose, 웹과 게이트웨이는 Cloudflare Workers 입니다.
@@ -215,7 +234,7 @@ scripts/mini up                               # 맥미니로 보내고 docker co
   작거나, 최근 두 시간 안에 이 대화가 올린 카드(대화·결제)가 떠 있으면 그대로 둡니다.
 - **캐시 수명**은 `JARVIS_CACHE_TTL`(대화, 기본 `5m`, 또는 `1h`)이고 백그라운드는 늘 5분입니다.
   다음 질문이 대개 5분~1시간 뒤에 오면 `1h` 가 쌉니다.
-- **도구를 줄입니다.** 대화에는 CLI 내장 도구 중 Read·Glob·Grep·TodoWrite·WebSearch·WebFetch·
+- **도구를 줄입니다.** 대화에는 CLI 내장 도구 중 Read·Glob·Grep·TodoWrite·WebSearch·WebFetch(웹 찾기가 켜지면 빠짐)·
   ToolSearch, 그리고 자기 기억(CLI 의 MEMORY.md)을 쓰는 Write·Edit 만 실립니다(`JARVIS_BUILTIN_TOOLS`).
   기억 폴더는 카드 없이 읽고 씁니다(쓰기는 CLI 가 자동 기억 폴더만 따로 허용합니다. 다른 곳의 쓰기는 카드).
   그래서 대화 중 읽은 페이지가 기억에 지시를 심으면 이후 세션에도 실립니다. 카드 대신 기억이 바뀔 때마다

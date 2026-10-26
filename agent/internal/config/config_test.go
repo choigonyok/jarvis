@@ -285,3 +285,56 @@ func TestMemoryDir(t *testing.T) {
 		t.Fatalf("손님의 기억 폴더: %q", g.MemoryDir)
 	}
 }
+
+// With search-svc, read opens pages and WebFetch is not loaded - for the
+// operator and the guest alike. An explicit tool list is left alone, and
+// without both the address and the token nothing changes.
+func TestSearchReplacesWebFetch(t *testing.T) {
+	base := func(t *testing.T) {
+		t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "x")
+		t.Setenv("JARVIS_API_TOKEN", "api")
+	}
+	t.Run("운영자", func(t *testing.T) {
+		base(t)
+		t.Setenv("JARVIS_SEARCH_URL", "http://search:8104")
+		t.Setenv("JARVIS_SEARCH_TOKEN", "s")
+		c, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !c.SearchOn() || strings.Contains(*c.BuiltinTools, "WebFetch") || !strings.Contains(*c.BuiltinTools, "WebSearch") {
+			t.Fatalf("WebFetch 는 빠지고 WebSearch 는 남아야 합니다: %s", *c.BuiltinTools)
+		}
+	})
+	t.Run("손님", func(t *testing.T) {
+		base(t)
+		t.Setenv("JARVIS_ROLE", "guest")
+		t.Setenv("JARVIS_SEARCH_URL", "http://search:8104")
+		t.Setenv("JARVIS_SEARCH_TOKEN", "s")
+		c, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(*c.BuiltinTools, "WebFetch") || !strings.Contains(*c.BuiltinTools, "WebSearch") {
+			t.Fatalf("손님도 WebFetch 는 빠지고 WebSearch 는 남아야 합니다: %s", *c.BuiltinTools)
+		}
+	})
+	t.Run("직접 정한 목록", func(t *testing.T) {
+		base(t)
+		t.Setenv("JARVIS_SEARCH_URL", "http://search:8104")
+		t.Setenv("JARVIS_SEARCH_TOKEN", "s")
+		t.Setenv("JARVIS_BUILTIN_TOOLS", "WebSearch,WebFetch")
+		c, _ := Load()
+		if *c.BuiltinTools != "WebSearch,WebFetch" {
+			t.Fatalf("정해 준 목록을 바꿨습니다: %s", *c.BuiltinTools)
+		}
+	})
+	t.Run("토큰 없음", func(t *testing.T) {
+		base(t)
+		t.Setenv("JARVIS_SEARCH_URL", "http://search:8104")
+		c, _ := Load()
+		if c.SearchOn() || !strings.Contains(*c.BuiltinTools, "WebFetch") {
+			t.Fatalf("토큰이 없으면 그대로여야 합니다: %v %s", c.SearchOn(), *c.BuiltinTools)
+		}
+	})
+}

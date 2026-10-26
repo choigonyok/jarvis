@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -371,5 +372,40 @@ func TestUndeliveredDecisionIsHandedOnSoon(t *testing.T) {
 	defer mu.Unlock()
 	if len(answers) != 1 || !strings.HasPrefix(answers[0], "[승인] 올릴까요?") {
 		t.Fatalf("늦게라도 승인으로 전해야 합니다: %v", answers)
+	}
+}
+
+// With the web module, every run - with a browser or not - can search and
+// read without adding a site, and is told so.
+func TestRunsGetTheWebTools(t *testing.T) {
+	svc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/runs") {
+			_, _ = w.Write([]byte(`{"runId": 9}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer svc.Close()
+	m := New(NewStore(svc.URL, ""), nil, proposal.NewStore(bus.New()), nil, quietLog())
+	bg := &bgFake{}
+	web := &WebTools{Name: "web", URL: "http://agent/mcp/web", Tools: []string{"mcp__web__search", "mcp__web__read"}}
+	m.runOnce(context.Background(), bg, SchedulerConfig{RunURL: "http://agent/mcp/job-run", Web: web}, Job{ID: 31, Title: "서레페 정보 조사"})
+
+	if len(bg.tasks) != 1 {
+		t.Fatalf("실행 %d번", len(bg.tasks))
+	}
+	task := bg.tasks[0]
+	if task.Servers["web"] != "http://agent/mcp/web" || !slices.Contains(task.Allowed, "mcp__web__read") {
+		t.Fatalf("web 서버·도구가 없습니다: %v %v", task.Servers, task.Allowed)
+	}
+	if !strings.Contains(task.System, "찾아보기") || !strings.Contains(task.Prompt, "web 도구로 브라우저 없이") {
+		t.Fatalf("지시에 web 도구 안내가 없습니다:\n%s\n---\n%s", task.System, task.Prompt)
+	}
+
+	// Without it, as before.
+	bg2 := &bgFake{}
+	m.runOnce(context.Background(), bg2, SchedulerConfig{RunURL: "http://agent/mcp/job-run"}, Job{ID: 32, Title: "x"})
+	if _, ok := bg2.tasks[0].Servers["web"]; ok || strings.Contains(bg2.tasks[0].System, "찾아보기") {
+		t.Fatalf("web 이 없는데 붙었습니다: %v", bg2.tasks[0].Servers)
 	}
 }

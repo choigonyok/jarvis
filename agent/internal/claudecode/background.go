@@ -165,7 +165,8 @@ func (r *Runner) Background(parent context.Context, t Task) (string, error) {
 		return "", fmt.Errorf("claude 실행: %w", err)
 	}
 	var used tally
-	result, scanErr := backgroundResult(stdout, t.OnStep, r.usage.Observe, &used)
+	r.saw(t.Prompt)
+	result, scanErr := backgroundResult(stdout, t.OnStep, r.usage.Observe, &used, r.saw)
 	waitErr := cmd.Wait()
 
 	r.mu.Lock()
@@ -260,13 +261,17 @@ func (r *Runner) modelOf(t Task) string {
 }
 
 // backgroundResult reads the stream only for its outcome: the final result
-// text (for the log), whether the CLI reported an error, and what it used.
-func backgroundResult(stdout interface{ Read([]byte) (int, error) }, onStep func(Step), onRate func(json.RawMessage), used *tally) (string, error) {
+// text (for the log), whether the CLI reported an error, and what it used -
+// and hands what the tools gave back to onSeen.
+func backgroundResult(stdout interface{ Read([]byte) (int, error) }, onStep func(Step), onRate func(json.RawMessage), used *tally, onSeen func(string)) (string, error) {
 	var result string
 	var failed error
 	err := scan(stdout, func(ev event) {
 		if used != nil {
 			used.observe(ev)
+		}
+		if onSeen != nil && ev.Type == "user" {
+			onSeen(toolResults(ev.Message))
 		}
 		if ev.Type == "rate_limit_event" && onRate != nil {
 			onRate(ev.RateLimitInfo)
@@ -344,7 +349,7 @@ func (r *Runner) ProbeUsage(ctx context.Context) error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	_, _ = backgroundResult(stdout, nil, r.usage.Observe, nil)
+	_, _ = backgroundResult(stdout, nil, r.usage.Observe, nil, nil)
 	return cmd.Wait()
 }
 

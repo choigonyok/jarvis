@@ -19,6 +19,7 @@
 | 가계부 | 카드사 카카오톡 알림을 읽어 자동으로 기록합니다. 분류를 모르는 결제만 카드로 묻고, 쿠팡 결제는 브라우저로 주문 목록을 읽어 상품별로 나눕니다 |
 | 자산 | 업비트·한국투자증권·금 조회. 목표 비중에서 벗어나면 리밸런싱 카드를 올립니다 |
 | 브라우저 심부름 | 맡긴 일을 백그라운드 작업으로 돌립니다. 결제 직전에 카드를 올리고, 승인하면 보안 키패드 비밀번호까지 넣어 결제를 끝냅니다 |
+| 찾아보기 | 네이버 블로그·뉴스·카페·웹을 함께 찾고, 페이지 속 그림(이벤트 카드·높이 2만 픽셀의 상품 상세 이미지)에 쓰인 글자까지 읽어 답합니다. 근처 가게는 네이버 지도의 영업 상태·마감 시각·별점으로 찾습니다 |
 | 먼저 말 걸기 | 결제·운동·사진·위치·대화에서 생활 패턴을 찾아 제안합니다 - "11/15 캠핑. 지난번엔 3일 전에 장작을 샀어요. 담아둘까요?" 야외 일정에 비 예보가 있으면 맑은 날로 옮기자고 묻습니다 |
 | 그 밖에 | 장기 기억(지식 그래프), 운동 기록, 사진(Immich), 웹 푸시 알림, 목소리 복제 TTS, 캘린더만 쓰는 손님 계정 |
 
@@ -43,6 +44,8 @@ flowchart TB
     mind["mind-svc (Go)<br/>인지 루프 · 예측"]
     memory["memory-svc (Python)<br/>Graphiti 장기 기억"]
     browser["browser<br/>Chromium · 결제 가드"]
+    search["search-svc<br/>네이버 검색 · 페이지 읽기<br/>네이버 지도"]
+    ocr["OCR (호스트)<br/>애플 Vision"]
     collect["수집기<br/>카카오톡 · iMessage"]
     pg[("Postgres")]
     fk[("FalkorDB")]
@@ -58,6 +61,8 @@ flowchart TB
   cli -- "MCP 권한 질의 · 도구" --> agent
   agent --> svc
   agent --> browser
+  agent --> search
+  search --> ocr
   svc --> events
   collect --> mind
   events --> mind
@@ -177,6 +182,8 @@ browser/            에이전트의 Chromium - 결제 가드 · 키패드 · 로
 kakaotalk-client/   카카오톡 수집기 (맥 앱 DB 읽기 전용)
 imessage-client/    iMessage 수집기
 tts/                목소리 복제 TTS (Qwen3-TTS, MLX, 맥미니 호스트)
+search-svc/         웹 찾기 - 네이버 검색 · 페이지와 그림 속 글자 · 네이버 지도 (Go)
+ocr/                그림 속 글자 읽기 (Swift, 애플 Vision, 맥미니 호스트)
 db/                 마이그레이션과 서비스별 역할
 gocommon/           Go 공통 코드 (outbox, 수집기 인증·보존)
 scripts/            맥미니 배포 · 백업 · DB 테스트
@@ -187,6 +194,7 @@ scripts/            맥미니 배포 · 백업 · DB 테스트
 - [agent/README.md](agent/README.md) - 결재 게이트와 모듈의 세부, 구독 사용량 설계, 에이전트 API, 로컬 실행
 - [mind-svc/README.md](mind-svc/README.md) - 인지 루프의 층별 설계와 평가 시나리오
 - [vault-svc/README.md](vault-svc/README.md) - 모델이 보지 못하는 로그인 보관함
+- [search-svc/README.md](search-svc/README.md) - 한국 웹을 찾고, 그림 속 글자까지 읽는 법
 - [web/DESIGN.md](web/DESIGN.md) - 화면의 색·타이포·레이아웃 근거
 - [DEPLOY.md](DEPLOY.md) - Cloudflare 와 맥미니 배포
 - [db/README.md](db/README.md) - 스키마와 서비스별 DB 역할

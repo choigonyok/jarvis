@@ -57,7 +57,7 @@ var toolTitles = map[string]string{
 // serverNames say whose tool an unknown one is.
 var serverNames = map[string]string{
 	"browser": "브라우저", "jobs": "작업", "calendar": "캘린더", "memory": "기억", "mind": "판단",
-	"vault": "로그인 보관함", "place": "위치", "messages": "메시지", "spending": "가계부", "assets": "자산",
+	"vault": "로그인 보관함", "place": "위치", "web": "웹 찾기", "messages": "메시지", "spending": "가계부", "assets": "자산",
 }
 
 // title turns a tool call into the one line the operator reads. Claude Code
