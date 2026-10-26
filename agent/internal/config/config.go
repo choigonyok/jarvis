@@ -35,7 +35,8 @@ type Config struct {
 	// the agent container, 2026-10-17). So what a page talks the model into
 	// writing there is loaded into every later session - which is why every
 	// change is told to the operator, with its words (memorywatch: the
-	// operator chose being told over a card). Empty for the guest.
+	// operator chose being told over a card). The guest's agent has its own,
+	// in its own home volume, and its changes are told to the guest.
 	MemoryDir    string
 	SystemPrompt string
 	// AllowedTools skip the approval card entirely. Read-only tools belong
@@ -105,7 +106,8 @@ type Config struct {
 	// ExtraMCPURLs; without it the loop does not start.
 	Enrich bool
 	// UploadsDir is where photos attached in conversation are kept. Empty
-	// turns attachments off (the guest agent).
+	// turns attachments off. The guest's agent keeps the guest's in a volume
+	// of its own.
 	UploadsDir string
 	// JobsURL is where jobs-svc listens: work handed over in conversation,
 	// run in the background on whatever cadence each job decides.
@@ -129,10 +131,13 @@ type Config struct {
 	JobsCooldown time.Duration
 	JobsTimeout  time.Duration
 	// Guest is the second agent, for the guest account (JARVIS_ROLE=guest).
-	// It has its own conversation (Thread), its own CLI home and session, only
-	// the calendar module, no browser, and no built-in tools beyond web search -
-	// the shell and file tools could read this process's environment, and with
-	// it the token every service accepts.
+	// It has its own conversation (Thread), its own CLI home, session, memory
+	// and photos, the guest's own calendar side, jobs, reminders and lists,
+	// and none of the operator's money, messages, logins or browser. Of the
+	// built-in tools it has the web and the file tools for its photos and its
+	// memory alone - reads stop at those folders and any other file call is
+	// refused without a card: a file tool let loose could read this process's
+	// environment, and with it the guest's token. No shell.
 	Guest bool
 	// Thread is this agent's conversation in chat-svc: "" or "guest".
 	Thread string
@@ -286,17 +291,21 @@ func Load() (Config, error) {
 		c.Thread = "guest"
 		c.SystemPrompt = env("JARVIS_SYSTEM_PROMPT", guestSystemPrompt)
 		c.AllowedTools = splitList(env("JARVIS_ALLOWED_TOOLS", "TodoWrite,WebSearch,WebFetch,mcp__calendar__list_events,mcp__memory__search_memory"))
-		builtins := "WebSearch,WebFetch,TodoWrite"
+		// Read opens the photos the guest attaches and the notes of its own
+		// memory, Write and Edit keep that memory - and nothing else: reads stop
+		// at those folders (runner, readRules), and any file call past them is
+		// refused without a card (the gate's refusal, set in main). No shell.
+		builtins := "Read,Write,Edit,WebSearch,WebFetch,TodoWrite,ToolSearch"
 		c.BuiltinTools = &builtins
 		// No browser: it is logged in to the operator's shops and pay. No
 		// background lookups: those belong to the operator's spending. Jobs,
 		// yes - the guest's own, which open no website (jobs-svc refuses
-		// one) - and no photos to attach them to.
+		// one) - with no photos (the jobs module is given none). The photos
+		// attached in conversation and the CLI's memory are the guest's own:
+		// this agent's volumes, apart from the operator's.
 		c.ExtraMCPURLs = map[string]string{}
 		c.Enrich = false
-		c.UploadsDir = ""
 		c.VaultURL = ""
-		c.MemoryDir = ""
 	}
 
 	if c.OAuthToken == "" {
@@ -327,9 +336,11 @@ func Load() (Config, error) {
 		return c, fmt.Errorf("ANTHROPIC_API_KEY is set alongside CLAUDE_CODE_OAUTH_TOKEN; unset it so usage bills to the subscription")
 	}
 	c.AllowedTools, c.DroppedTools = safeAllowed(c.AllowedTools)
-	if !c.Guest {
-		c.AllowedTools = append(c.AllowedTools, readRules(c.Workspace, c.UploadsDir, c.MemoryDir)...)
+	workspace := c.Workspace
+	if c.Guest {
+		workspace = "" // the guest's photos and memory only
 	}
+	c.AllowedTools = append(c.AllowedTools, readRules(workspace, c.UploadsDir, c.MemoryDir)...)
 	return c, nil
 }
 
@@ -373,8 +384,9 @@ func safeAllowed(tools []string) (kept, dropped []string) {
 	return kept, dropped
 }
 
-// readRules are the only file reading that skips the card: the workspace,
-// the photos attached in conversation, and the CLI's own memory. The CLI also
+// readRules are the only file reading that skips the card: the workspace
+// (the operator's agent only), the photos attached in conversation, and the
+// CLI's own memory. The CLI also
 // blocks reads outside its working directories altogether (runner:
 // blockReadsOutsideWorkingDirectories, with uploads and memory added as
 // working directories). Writing takes a card everywhere but the CLI's
@@ -382,8 +394,10 @@ func safeAllowed(tools []string) (kept, dropped []string) {
 // operator hears of instead.
 func readRules(workspace, uploads, memory string) []string {
 	var out []string
-	if abs, err := filepath.Abs(workspace); err == nil {
-		out = append(out, "Read(/"+abs+"/**)", "Grep(/"+abs+"/**)", "Glob(/"+abs+"/**)")
+	if workspace != "" { // none for the guest
+		if abs, err := filepath.Abs(workspace); err == nil {
+			out = append(out, "Read(/"+abs+"/**)", "Grep(/"+abs+"/**)", "Glob(/"+abs+"/**)")
+		}
 	}
 	for _, dir := range []string{uploads, memory} {
 		if dir == "" {
@@ -501,14 +515,23 @@ const guestSystemPrompt = `당신은 Jarvis입니다. 지금 대화 상대는 �
 
 말투와 분량
 - 한국어로, 담백하게. 인사말과 사족 없이 본론부터.
+- 이 사용자가 정한 말투·호칭·이모티콘이 있으면(알고 있는 취향, 자비스 기억) 그것을 따르세요. 위의 기본 말투보다 먼저입니다. 분량 규칙은 그대로입니다.
 - 한 번에 두세 문단을 넘기지 마세요. 목록이 꼭 필요할 때만 목록을 쓰세요.
 - 한 일은 한 일로, 하려는 일은 하려는 일로 구분해서 말하세요. 하지 않은 일을 했다고 말하지 마세요.
 
 할 수 있는 것과 없는 것
 - 함께 쓰는 캘린더 조회·수정, 웹 검색, 일반적인 질문에 답할 수 있습니다.
 - 이 사용자 자신의 리마인드(정한 때 폰으로 알림), 체크리스트, 작업(백그라운드로 맡기는 일)을 맡을 수 있습니다. 모두 이 사용자 것만 보이고, 운영자와 나누지 않습니다.
-- 운영자의 자산·투자·지출·카드 내역·카카오톡 메시지·쇼핑 계정에는 접근할 수 없습니다. 그런 것을 물으면 이 계정에서는 볼 수 없다고 짧게 답하세요. 추측해서 말하지 마세요.
-- 운영자와 나눈 다른 대화, 운영자의 리마인드·체크리스트·작업은 볼 수 없습니다.
+- 메시지마다 이 사용자의 지금 상황(이 사용자 폰의 위치, 이 사용자의 일정과 함께하는 일정, 맡아 둔 알림·체크리스트)이 붙습니다. 이 사용자가 첨부한 사진을 볼 수 있고, 기억해 달라는 것을 자비스 기억에 적어 둘 수 있습니다. 모두 이 사용자만의 것입니다.
+- 운영자의 자산·투자·지출·카드 내역·카카오톡 메시지·쇼핑 계정·위치에는 접근할 수 없습니다. 그런 것을 물으면 이 계정에서는 볼 수 없다고 짧게 답하세요. 추측해서 말하지 마세요.
+- 운영자와 나눈 다른 대화, 운영자의 리마인드·체크리스트·작업·기억은 볼 수 없습니다.
+
+사진
+- 사진이 첨부되면 Read 로 먼저 열어 보고 답하세요. 첨부한 사진 말고 다른 파일은 열 수 없습니다. 이 계정의 작업에는 사진을 넣을 수 없습니다.
+
+기억
+- 지난 일·약속·사람처럼 지금 대화에 없는 맥락은 먼저 search_memory 로 찾으세요. 이 사용자와 나눈 대화에서 뽑은 기억만 있습니다.
+- 사용자가 기억해 달라고 하거나 말투·호칭·이모티콘처럼 앞으로 계속 지킬 것을 정하면, 자비스 기억(메모리 폴더)에 적어 두세요. 새 세션에서도 이어집니다. 적거나 고친 내용은 사용자에게 알림으로 갑니다.
 
 승인
 - 일정을 추가·수정·삭제하는 도구는 실행 전에 이 대화의 사용자에게 승인을 받습니다. 도구를 부르면 승인 카드가 올라가고, 호출은 바로 "카드를 올렸다"는 답으로 끝납니다.

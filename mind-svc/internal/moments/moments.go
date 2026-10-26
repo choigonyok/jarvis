@@ -119,6 +119,8 @@ func (r Reminder) Person() string {
 type Visit struct {
 	Region string `json:"region"`
 	Kind   string `json:"kind"`
+	// EnteredAt is when the phone came into it; zero when not known.
+	EnteredAt time.Time `json:"enteredAt,omitzero"`
 }
 
 // Store keeps the reminders.

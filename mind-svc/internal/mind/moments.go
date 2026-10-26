@@ -308,10 +308,15 @@ func evening(now time.Time, loc *time.Location) (from, latest time.Time) {
 // reminderLines is the reminders waiting, for the conversation's situation:
 // it answers from what is stored, not from what it meant to store.
 func (m *Mind) reminderLines(ctx context.Context) string {
+	return m.reminderLinesOf(ctx, moments.Owner)
+}
+
+// reminderLinesOf is reminderLines of who's reminders.
+func (m *Mind) reminderLinesOf(ctx context.Context, who string) string {
 	if m.Moments == nil {
 		return ""
 	}
-	rs, err := m.Moments.List(ctx, false)
+	rs, err := m.Moments.ListOf(ctx, who, false)
 	if err != nil {
 		m.Opts.Logger.Warn("기다리는 알림을 읽지 못했습니다", "err", err)
 		return ""

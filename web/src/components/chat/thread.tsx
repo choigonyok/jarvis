@@ -940,7 +940,9 @@ export function Thread() {
                 if (ok) setQuoting(null);
                 return ok;
               }}
-              allowPhotos={role === "owner"}
+              allowPhotos
+              // The guest's jobs open no website: no selling for them.
+              photoHint={role === "guest" ? "사진에 대해 한마디" : undefined}
               onVoice={() => switchMode("voice")}
               onFocusChange={setTyping}
               quoting={

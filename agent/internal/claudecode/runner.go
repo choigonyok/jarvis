@@ -281,7 +281,7 @@ func (r *Runner) start(q *Queued) string {
 	} else {
 		r.store.AppendUser(q.Text, q.Images...)
 	}
-	prompt := withRef(withImages(q.Text, q.Images, r.cfg.UploadsDir), q.Ref)
+	prompt := withRef(withImages(q.Text, q.Images, r.cfg.UploadsDir), q.Ref, r.person())
 	if r.recall != nil {
 		if known := r.recall(context.Background(), q.Text); known != "" {
 			prompt = known + "\n" + prompt
@@ -328,7 +328,7 @@ func (r *Runner) Steer(id string) (steered bool, err error) {
 	q := r.queue[at]
 	r.queue = slices.Delete(r.queue, at, at+1)
 	if r.input != nil {
-		if err := writeUser(r.input, withRef(withImages(q.Text, q.Images, r.cfg.UploadsDir), q.Ref)); err == nil {
+		if err := writeUser(r.input, withRef(withImages(q.Text, q.Images, r.cfg.UploadsDir), q.Ref, r.person())); err == nil {
 			r.mu.Unlock()
 			if q.Ref != nil {
 				r.store.AppendUserRef(q.Text, q.Ref, q.Images...)
@@ -370,15 +370,16 @@ func writeUser(w io.Writer, text string) error {
 }
 
 // withRef puts the quoted message in front of the prompt, marked as a quote.
-func withRef(prompt string, ref *thread.Ref) string {
+// person is who is on the other side of this conversation (Runner.person).
+func withRef(prompt string, ref *thread.Ref, person string) string {
 	if ref == nil {
 		return prompt
 	}
-	who := "운영자"
+	who := person
 	if ref.Role == thread.RoleAgent {
 		who = "Jarvis(당신)"
 	}
-	return fmt.Sprintf("[운영자가 참조한 이전 메시지 · %s · %s]\n%s\n[참조 끝]\n\n%s", who, ref.At, ref.Text, prompt)
+	return fmt.Sprintf("[%s가 참조한 이전 메시지 · %s · %s]\n%s\n[참조 끝]\n\n%s", person, who, ref.At, ref.Text, prompt)
 }
 
 func withImages(text string, images []string, dir string) string {
@@ -629,19 +630,33 @@ func (r *Runner) args(system string) []string {
 func (r *Runner) systemPrompt() string {
 	parts := []string{r.cfg.SystemPrompt, clockRules}
 	if r.mindOn() {
-		parts = append(parts, situationRules)
+		situation, taste := situationRules, prefsRules
+		if r.cfg.Guest {
+			situation, taste = guestSituationRules, guestPrefsRules
+		}
+		parts = append(parts, situation)
 		r.mu.Lock()
 		prefs := r.prefs
 		r.mu.Unlock()
 		if prefs != "" {
-			parts = append(parts, prefsRules+"\n"+prefs)
+			parts = append(parts, taste+"\n"+prefs)
 		}
 	}
 	return strings.Join(parts, "\n\n")
 }
 
-// mindOn is whether the operator's situation and taste are read from mind.
-func (r *Runner) mindOn() bool { return r.cfg.MindURL != "" && !r.cfg.Guest }
+// mindOn is whether the situation and taste are read from mind: the
+// operator's, or - mind answering the guest's token with the guest's - the
+// guest's own.
+func (r *Runner) mindOn() bool { return r.cfg.MindURL != "" }
+
+// person is who this conversation is with, as the model is told of them.
+func (r *Runner) person() string {
+	if r.cfg.Guest {
+		return "사용자"
+	}
+	return "운영자"
+}
 
 // now is what the model cannot know from its own context, in front of each
 // turn's message: the date it is reasoning about (every module that takes a
@@ -701,7 +716,7 @@ func (r *Runner) recap() string {
 		if text == "" {
 			continue
 		}
-		who := "운영자"
+		who := r.person()
 		if t.Role == thread.RoleAgent {
 			who = "Jarvis"
 		}
@@ -785,7 +800,7 @@ func (r *Runner) jobNews() string {
 	}
 	r.mu.Unlock()
 	slices.Reverse(lines)
-	return "[작업 소식 - 백그라운드 작업과 때 맞춘 알림이 그 사이 대화에 카드로 남긴 것. 운영자도 카드로 봤습니다. 물으면 답하고, 아니면 굳이 되풀이하지 마세요]\n" +
+	return "[작업 소식 - 백그라운드 작업과 때 맞춘 알림이 그 사이 대화에 카드로 남긴 것. " + r.person() + "도 카드로 봤습니다. 물으면 답하고, 아니면 굳이 되풀이하지 마세요]\n" +
 		strings.Join(lines, "\n") + "\n[작업 소식 끝]\n\n"
 }
 
@@ -794,7 +809,8 @@ func (r *Runner) jobNews() string {
 // put in front of the model every turn instead of left for a tool to find.
 // Without mind, or when it does not answer quickly, the turn goes on
 // without it. The same answer carries the operator's taste, kept for the
-// instructions (systemPrompt).
+// instructions (systemPrompt). The guest's agent asks with the guest's token
+// and is answered the guest's: their plans, their phone, their taste.
 func (r *Runner) situation() string {
 	if !r.mindOn() {
 		return ""
@@ -890,14 +906,19 @@ func prefRank(line string) int {
 }
 
 // deviceState is context-svc's one line (in which region, driving, in a
-// meeting, how old the last fix), or nothing without it.
+// meeting, how old the last fix), or nothing without it. The guest's agent
+// reads the guest's phone's - which its token opens, and nothing else there.
 func (r *Runner) deviceState() string {
 	if r.cfg.ContextURL == "" {
 		return ""
 	}
+	path := "/now"
+	if r.cfg.Guest {
+		path = "/now/guest"
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(r.cfg.ContextURL, "/")+"/now", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(r.cfg.ContextURL, "/")+path, nil)
 	if err != nil {
 		return ""
 	}
@@ -925,6 +946,11 @@ const prefsRules = `알고 있는 취향 (회고 카드와 운영자의 말에�
 // situationFresh is how long one reading of the situation is reused.
 const situationFresh = 30 * time.Second
 
+const guestPrefsRules = `알고 있는 취향 (이 사용자가 지난 대화에서 직접 말하거나 정한 것. 이 사용자의 장기 기억에서 뽑았습니다)
+- 말투·호칭·이모티콘처럼 대하는 방식을 정한 것은 매번 지키세요.
+- 좋아하는 것·싫어하는 것은 고르거나 추천할 때 쓰고, 썼으면 근거를 짧게 밝히세요.
+- 기억에서 뽑은 것이라 틀리거나 지난 것일 수 있습니다. 사용자가 고쳐 말하면 그 말을 따르세요.`
+
 const clockRules = `시각
 - 메시지마다 앞에 [현재 시각]이 붙습니다. '내일', '다음 주 화요일' 같은 상대 날짜는 그 날짜로 직접 계산해서 절대 날짜로 도구에 넘기세요.`
 
@@ -936,6 +962,14 @@ const situationRules = `지금 상황
 - 근처 가게(배달·식당·카페)는 mcp__context__find_nearby 로 지금 상황의 장소 근처에서 찾으세요(읽기 전용, OpenStreetMap). 후보 3개 정도와 근거(거리·종류, 아는 취향)를 들고, 답에 어디 기준인지와 출처를 밝히세요. 지도에 빠진 가게가 있을 수 있습니다.
 - 배달·택배 주소가 필요하면 먼저 기억(mcp__memory__search_memory, 예: "지수네 집 주소")에서 이 장소로 배달한 기록을 찾으세요. 없으면 한 번만 묻고, 받은 주소는 mind 가 이 대화에서 읽어 기억에 남깁니다(다음에는 묻지 않음).
 - 주문·결제·메시지 발송은 확신과 상관없이 항상 먼저 묻습니다.`
+
+const guestSituationRules = `지금 상황
+- 메시지 앞의 [지금 상황 · 시각] 블록은 이 사용자의 일정(이 사용자 것과 함께하는 것)·이 사용자 폰의 위치·맡아 둔 알림·체크리스트로 규칙에 따라 계산한 것입니다. 도구로 찾지 말고 그것을 쓰세요. "앞 메시지 때와 같음"이면 가장 최근에 받은 블록이 그대로라는 뜻입니다.
+- 위치는 이 사용자 폰(OwnTracks)이 보낸 것입니다. '기기·위치 상태'의 마지막 위치가 오래됐으면 지금도 그곳이라고 단정하지 마세요.
+- 위치·동행이 답에 필요한데 추정의 신뢰도가 0.5 미만이거나 추정이 없으면, 추측하지 말고 먼저 짧게 물어보세요.
+- 이 추정을 답에 썼으면 답의 첫 줄에 가정을 한 줄로 밝히세요. 예: "집 기준으로 골랐어요(21:03부터 집)."
+- 사용자가 정정하면("나 벌써 나왔어") 그 말을 그대로 믿고 답을 고치세요.
+- 이 블록에는 운영자 혼자의 일정도, 운영자의 위치도 없습니다. 운영자가 지금 어디 있는지는 이 계정에서 알 수 없습니다.`
 
 var weekdays = [...]string{"일", "월", "화", "수", "목", "금", "토"}
 

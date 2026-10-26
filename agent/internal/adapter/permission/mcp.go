@@ -81,7 +81,11 @@ type Gate struct {
 	// autoAllow, when set, names calls that need no card although their tool
 	// is not on the allow list: a job that touches no site and no money.
 	autoAllow func(tool string, input json.RawMessage) bool
-	mu        sync.Mutex
+	// refuse, when set, names calls that are refused outright, with why: no
+	// card, nothing for anyone to approve (the guest's file tools outside
+	// their folders).
+	refuse func(tool string, input json.RawMessage) string
+	mu     sync.Mutex
 	// grants are approved calls the CLI runs itself (Bash, WebSearch, an
 	// outside MCP server). Keyed by tool and exact arguments, spent once: the
 	// operator approved that call, not the tool.
@@ -115,6 +119,11 @@ func (g *Gate) SetFollowUp(f FollowUp) { g.followUp = f }
 // rendered honestly and before a card is raised.
 func (g *Gate) SetAutoAllow(f func(tool string, input json.RawMessage) bool) { g.autoAllow = f }
 
+// SetRefuse installs the judgement of which calls are refused outright: a
+// reason refuses the call, with the reason for the model; "" lets it on to
+// the rest of the gate. Asked before anything else.
+func (g *Gate) SetRefuse(f func(tool string, input json.RawMessage) string) { g.refuse = f }
+
 // Handler returns an http.Handler to mount at the path the CLI is pointed at.
 func (g *Gate) Handler() http.Handler {
 	server := mcp.NewServer(&mcp.Implementation{Name: ServerName, Version: "1"}, nil)
@@ -137,6 +146,14 @@ func (g *Gate) decide(ctx context.Context, _ *mcp.CallToolRequest, in Request) (
 	tool := pickString(in, "tool_name", "toolName", "tool", "name")
 	input := pickAny(in, "input", "tool_input", "toolInput", "arguments", "args")
 	fields, _ := input.(map[string]any)
+
+	if g.refuse != nil {
+		raw, _ := json.Marshal(input)
+		if why := g.refuse(tool, raw); why != "" {
+			g.log.Info("카드 없이 거절", "tool", tool)
+			return reply(Response{Behavior: "deny", Message: why})
+		}
+	}
 
 	act, card, err := g.describe(tool, input, fields)
 	if err != nil {

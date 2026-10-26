@@ -211,11 +211,18 @@ services:
       # 손님 자신의 작업·리마인드·체크리스트. jobs·mind 는 이 손님 토큰으로 손님 것만 연다.
       # 손님 작업은 웹사이트를 열지 않는다(브라우저는 운영자 계정으로 로그인돼 있다).
       JARVIS_JOBS_URL: http://jobs:8098
+      # 손님의 지금 상황·취향: mind 는 이 손님 토큰에 손님 것만 답한다(손님 일정·폰·
+      # 리마인드·체크리스트, 손님 기억에서 뽑은 취향). context 는 손님 폰 한 줄만.
       JARVIS_MIND_URL: http://mind:8102
+      JARVIS_CONTEXT_URL: http://context:8103
+      # 손님이 대화에 첨부한 사진. 운영자 것(jarvis-uploads)과 다른 볼륨이고, 브라우저
+      # 컨테이너에는 붙이지 않는다. 자비스 기억(CLI 의 MEMORY.md)은 손님 home 볼륨 안.
+      JARVIS_UPLOADS_DIR: /uploads
     volumes:
       - jarvis-guest-workspace:/workspace
       - jarvis-guest-home:/home/jarvis
       - jarvis-guest-data:/data
+      - jarvis-guest-uploads:/uploads
     expose:
       - "8081"
     healthcheck:
@@ -288,6 +295,8 @@ services:
       # 손님(상대) 폰의 OwnTracks 계정. 비어 있으면 상대 폰을 받지 않는다.
       OWNTRACKS_GUEST_USER: ${OWNTRACKS_GUEST_USER:-}
       OWNTRACKS_GUEST_PASSWORD: ${OWNTRACKS_GUEST_PASSWORD:-}
+      # 손님 agent 의 토큰: 손님 폰이 지금 어디인지(GET /now/guest)만 연다.
+      API_GUEST_TOKEN: ${JARVIS_GUEST_API_TOKEN:-}
       # 출발 탭의 실시간 버스(공공데이터포털 일반 인증키)·지하철(서울 열린데이터광장
       # 실시간 지하철 인증키). 비어 있으면 그 정보만 없다.
       DATA_GO_KR_KEY: ${DATA_GO_KR_KEY:-}
@@ -1017,6 +1026,7 @@ volumes:
   jarvis-guest-workspace:
   jarvis-guest-home:
   jarvis-guest-data:
+  jarvis-guest-uploads:
   jarvis-postgres:
   jarvis-home:
   jarvis-data:

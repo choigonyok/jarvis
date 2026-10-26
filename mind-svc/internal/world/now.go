@@ -23,8 +23,9 @@ type Situation struct {
 	// at any particular moment.
 	Today []Ongoing `json:"today,omitempty"`
 	Clues []Clue    `json:"clues"`
-	// Here is the region the phone says the operator is in (context-svc),
-	// if any: the surest clue there is.
+	// Here is the region the phone says the operator - or, in the guest's
+	// situation, the guest - is in (context-svc), if any: the surest clue
+	// there is.
 	Here  *Clue  `json:"here,omitempty"`
 	Guess *Guess `json:"guess,omitempty"`
 	Text  string `json:"text"`
@@ -94,8 +95,26 @@ type lengths struct {
 	n   map[string]int
 }
 
-// Situation works out the situation at now.
+// calendarRoom is the room plans read from the calendar live in
+// (sensor.CalendarRoom).
+const calendarRoom = "calendar"
+
+// Situation works out the operator's situation at now.
 func (w *World) Situation(ctx context.Context, now time.Time, loc *time.Location) (Situation, error) {
+	return w.situation(ctx, now, loc, false, nil)
+}
+
+// GuestSituation works out the guest's: the plans that are theirs (the
+// partner's entries on the shared calendar) or both of theirs, and where
+// their own phone says they are (here, read by the caller; nil when not
+// known). Nothing that is only the operator's is in it - not their own
+// plans, nor their payments and photos, nor the people a plan read from the
+// operator's own conversations names.
+func (w *World) GuestSituation(ctx context.Context, now time.Time, loc *time.Location, here *Clue) (Situation, error) {
+	return w.situation(ctx, now, loc, true, here)
+}
+
+func (w *World) situation(ctx context.Context, now time.Time, loc *time.Location, guest bool, here *Clue) (Situation, error) {
 	now = now.In(loc)
 	s := Situation{At: now, Plans: []Ongoing{}, Clues: []Clue{}}
 	plans, err := w.st.Entities(ctx, model.KindPlan, "", true)
@@ -106,12 +125,21 @@ func (w *World) Situation(ctx context.Context, now time.Time, loc *time.Location
 	today := now.Format("2006-01-02")
 	for _, p := range plans {
 		st := p.State
-		if st.Status != model.Confirmed || st.Date == "" || st.Owner == "partner" { // someone else's day is not where I am
+		if st.Status != model.Confirmed || st.Date == "" {
+			continue
+		}
+		// Someone else's day is not where one is: the partner's own entries
+		// are the guest's, the rest the operator's, and shared ones both's.
+		theirs := st.Owner == "partner"
+		if guest && !theirs && !st.Shared || !guest && theirs {
 			continue
 		}
 		o, ok := span(p, loc, avg, n)
 		if !ok {
 			continue
+		}
+		if guest && p.Room != calendarRoom {
+			o.People = nil
 		}
 		if st.Start == "" && st.EndDate == "" {
 			if st.Date == today {
@@ -129,6 +157,13 @@ func (w *World) Situation(ctx context.Context, now time.Time, loc *time.Location
 	}
 	sort.Slice(s.Plans, func(i, j int) bool { return s.Plans[i].Start.After(s.Plans[j].Start) })
 
+	if guest {
+		// The guest's payments and photos are not here: their phone is all.
+		s.Here = here
+		s.Guess = guess(s)
+		s.Text = s.text()
+		return s, nil
+	}
 	occ, err := w.st.Occurrences(ctx, now.Add(-clueWindow), now.Add(time.Minute), "purchase", "photo")
 	if err != nil {
 		return s, err
@@ -250,7 +285,7 @@ func (w *World) lengths(ctx context.Context, now time.Time, loc *time.Location) 
 // says only where the operator was.
 func guess(s Situation) *Guess {
 	if h := s.Here; h != nil {
-		g := &Guess{Place: h.Place, Area: h.Area, Confidence: 0.85, Basis: []string{h.At.Format("15:04") + "부터 " + h.Place + "(위치)"}}
+		g := &Guess{Place: h.Place, Area: h.Area, Confidence: 0.85, Basis: []string{h.since(s.At) + h.Place + "(위치)"}}
 		if len(s.Plans) > 0 && SamePlace(h.Area, h.Place, s.Plans[0].Area, s.Plans[0].Place) {
 			p := s.Plans[0]
 			g.Place, g.PlaceKind, g.With, g.PlanID, g.Confidence = p.Place, p.PlaceKind, p.People, p.ID, 0.95
@@ -312,6 +347,19 @@ func clamp(f float64) float64 {
 	return min(max(f, 0.05), 0.95)
 }
 
+// since is "15:40부터 " - with the date when it is not now's day - or ""
+// when when it began is not known.
+func (c Clue) since(now time.Time) string {
+	if c.At.IsZero() {
+		return ""
+	}
+	at := c.At.In(now.Location())
+	if y, m, d := at.Date(); y == now.Year() && m == now.Month() && d == now.Day() {
+		return at.Format("15:04") + "부터 "
+	}
+	return at.Format("1/2 15:04") + "부터 "
+}
+
 func (c Clue) line() string {
 	what := map[string]string{"purchase": "결제", "photo": "사진", "visit": "도착"}[c.Kind]
 	where := c.Area
@@ -365,7 +413,7 @@ func (s Situation) text() string {
 		b.WriteString("\n")
 	}
 	if s.Here != nil {
-		b.WriteString("- 위치: " + s.Here.At.Format("15:04") + "부터 " + s.Here.Place + "\n")
+		b.WriteString("- 위치: " + s.Here.since(s.At) + s.Here.Place + "\n")
 	}
 	if len(s.Clues) > 0 {
 		var parts []string

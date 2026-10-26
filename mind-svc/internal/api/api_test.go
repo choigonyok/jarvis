@@ -20,11 +20,13 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/gate"
 	"github.com/choigonyok/jarvis/mind-svc/internal/interpret"
 	"github.com/choigonyok/jarvis/mind-svc/internal/llm"
+	"github.com/choigonyok/jarvis/mind-svc/internal/memory"
 	"github.com/choigonyok/jarvis/mind-svc/internal/mind"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/moments"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
+	"github.com/choigonyok/jarvis/mind-svc/internal/world"
 )
 
 var seoul, _ = time.LoadLocation("Asia/Seoul")
@@ -334,6 +336,132 @@ func TestNotesForTheConsole(t *testing.T) {
 	code, out = call(http.MethodGet, "/api/notes/note_a/versions", "", true)
 	if code != http.StatusOK || len(out["versions"].([]any)) != 2 {
 		t.Fatalf("versions: %d %v", code, out)
+	}
+}
+
+// guestGraph is the guest's memory as memory-svc would answer it.
+type guestGraph struct{ searches int }
+
+func (g *guestGraph) Put(context.Context, []model.Fact) ([]memory.Result, error) { return nil, nil }
+func (g *guestGraph) Profile(context.Context, string) (memory.Profile, error) {
+	return memory.Profile{}, nil
+}
+func (g *guestGraph) Find(_ context.Context, name string, _ int) ([]memory.Node, error) {
+	return []memory.Node{{ID: "n-other", Name: "손님"}, {ID: "n-self", Name: name}}, nil
+}
+func (g *guestGraph) Search(_ context.Context, _, center string, _ int) ([]memory.Hit, error) {
+	g.searches++
+	self := model.MemoryNode{ID: center, Name: "손님(나)"}
+	jarvis := model.MemoryNode{ID: "n-jarvis", Name: "Jarvis(비서)"}
+	return []memory.Hit{
+		{Fact: "손님(나)은 Jarvis에게 답에서 이모티콘을 빼 달라고 요청했다.", ValidAt: "2026-10-08T15:30:17+09:00", Source: self, Target: jarvis},
+		{Fact: "손님(나)은 Jarvis에게 답을 영어로 해 달라고 요청했다.", ValidAt: "2026-10-08T11:54:58+09:00", InvalidAt: "2026-10-09T00:00:00+09:00", Source: self, Target: jarvis},
+		{Fact: "지수는 Jarvis의 답이 길다고 느꼈다.", ValidAt: "2026-10-08T15:30:17+09:00", Source: model.MemoryNode{ID: "n-op", Name: "지수"}, Target: jarvis},
+		{Fact: "Jarvis(비서)는 손님(나)을 '민지 님'이라고 부르기로 했다.", ValidAt: "2026-10-26T01:00:00+09:00", Source: jarvis, Target: self},
+	}, nil
+}
+
+// The guest's token reads the guest's own situation and taste at /now -
+// their plans, their phone, their reminders and lists, what they said of
+// themselves - and nothing of the operator's; the operator's is as it was.
+func TestGuestNow(t *testing.T) {
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	now := time.Date(2026, 10, 26, 21, 30, 0, 0, seoul)
+	graph := &guestGraph{}
+	m := mind.New(mind.Options{
+		Store: store.NewMemory(), Log: obs.NewMemoryLog(quiet), LLM: &llm.Script{}, Calendar: act.NewMemoryCalendar(),
+		Notifier: &act.MemoryNotifier{}, Loc: seoul, Now: func() time.Time { return now }, Logger: quiet, Policy: gate.DefaultPolicy(), Mode: "stack",
+		Reminders: moments.NewMemory(), Checklists: checklist.NewMemory(), GuestMemory: graph,
+		Here: func(context.Context) ([]moments.Visit, error) { return []moments.Visit{{Region: "회사", Kind: "work"}}, nil },
+		GuestHere: func(context.Context) ([]moments.Visit, error) {
+			return []moments.Visit{{Region: "집", Kind: "home", EnteredAt: time.Date(2026, 10, 26, 21, 3, 0, 0, seoul)}}, nil
+		},
+	})
+	ctx := context.Background()
+	for _, p := range []model.State{
+		{Title: "운영자 회식", Start: "19:00", End: "23:00", Place: "성수"},
+		{Title: "상대 합주", Start: "20:00", End: "23:00", Place: "합정 연습실", Owner: "partner"},
+	} {
+		p.Status, p.Date = model.Confirmed, "2026-10-26"
+		if _, err := m.World.Create(ctx, model.KindPlan, "calendar", p, world.Meta{Actor: "t"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	api := New(m, "secret", "", false, nil, quiet)
+	api.SetGuestToken("guest-secret")
+	srv := httptest.NewServer(api.Handler())
+	defer srv.Close()
+	do := func(token, method, path, body string) (int, string) {
+		req, _ := http.NewRequest(method, srv.URL+path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	at := now.Add(2 * time.Hour).Format("2006-01-02T15:04")
+	do("guest-secret", "POST", "/api/reminders", `{"text":"학원 가방 챙기기","at":"`+at+`"}`)
+	do("guest-secret", "POST", "/api/checklists", `{"title":"학원 준비물","items":["필통"]}`)
+	do("secret", "POST", "/api/reminders", `{"text":"우산 말리기","at":"`+at+`"}`)
+	do("secret", "POST", "/api/checklists", `{"title":"캠핑 준비물","items":["장갑"]}`)
+
+	type situation struct {
+		Text  string
+		Prefs *string
+	}
+	read := func(token string) situation {
+		code, body := do(token, "GET", "/now", "")
+		var s situation
+		if err := json.Unmarshal([]byte(body), &s); err != nil || code != 200 {
+			t.Fatalf("/now (%s): %d %s", token, code, body)
+		}
+		return s
+	}
+	// The taste is read in the background: there by the next turn.
+	var g situation
+	for deadline := time.Now().Add(3 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		if g = read("guest-secret"); g.Prefs != nil || time.Now().After(deadline) {
+			break
+		}
+	}
+	for _, want := range []string{"상대 합주", "- 위치: 21:03부터 집", "학원 가방 챙기기", "학원 준비물"} {
+		if !strings.Contains(g.Text, want) {
+			t.Fatalf("손님 상황에 %q 없음:\n%s", want, g.Text)
+		}
+	}
+	for _, not := range []string{"운영자 회식", "우산 말리기", "캠핑 준비물", "회사"} {
+		if strings.Contains(g.Text, not) {
+			t.Fatalf("손님 상황에 운영자의 %q:\n%s", not, g.Text)
+		}
+	}
+	wantTaste := "- 손님(나)은 Jarvis에게 답에서 이모티콘을 빼 달라고 요청했다. (확정 · 대화 10/8)\n" +
+		"- Jarvis(비서)는 손님(나)을 '민지 님'이라고 부르기로 했다. (확정 · 대화 10/26)"
+	if g.Prefs == nil || *g.Prefs != wantTaste {
+		t.Fatalf("손님 취향: %v", g.Prefs)
+	}
+	// Read again within the half hour: no new search.
+	searches := graph.searches
+	read("guest-secret")
+	if graph.searches != searches {
+		t.Fatalf("30분 안에 다시 검색함: %d → %d", searches, graph.searches)
+	}
+
+	o := read("secret")
+	for _, want := range []string{"운영자 회식", "우산 말리기", "캠핑 준비물"} {
+		if !strings.Contains(o.Text, want) {
+			t.Fatalf("운영자 상황에 %q 없음:\n%s", want, o.Text)
+		}
+	}
+	for _, not := range []string{"상대 합주", "학원", "이모티콘"} {
+		if strings.Contains(o.Text, not) || o.Prefs != nil && strings.Contains(*o.Prefs, not) {
+			t.Fatalf("운영자 상황에 손님의 %q: %+v", not, o)
+		}
+	}
+	if code, _ := do("nope", "GET", "/now", ""); code != http.StatusUnauthorized {
+		t.Fatalf("토큰 없이 /now: %d", code)
 	}
 }
 

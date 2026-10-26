@@ -42,6 +42,7 @@ func main() {
 		Token: os.Getenv("API_TOKEN"), SignalToken: os.Getenv("SIGNAL_TOKEN"),
 		User: os.Getenv("OWNTRACKS_USER"), Pass: os.Getenv("OWNTRACKS_PASSWORD"),
 		GuestUser: os.Getenv("OWNTRACKS_GUEST_USER"), GuestPass: os.Getenv("OWNTRACKS_GUEST_PASSWORD"),
+		GuestToken: os.Getenv("API_GUEST_TOKEN"),
 		Public:  getenv("CONTEXT_PUBLIC_URL", "https://jarvis-be.choigonyok.com/context"),
 		DataKey: os.Getenv("DATA_GO_KR_KEY"), SubwayKey: os.Getenv("SEOUL_SUBWAY_KEY"),
 	}

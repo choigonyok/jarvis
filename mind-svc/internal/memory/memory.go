@@ -103,6 +103,13 @@ func NewHTTP(base, token string) *HTTP {
 	return &HTTP{URL: strings.TrimRight(base, "/"), Token: token, Group: "owner", Client: &http.Client{Timeout: 3 * time.Minute}}
 }
 
+// For is the same memory-svc, reading and writing group instead.
+func (c *HTTP) For(group string) *HTTP {
+	o := *c
+	o.Group = group
+	return &o
+}
+
 type party struct {
 	ID   string `json:"id,omitempty"`
 	Name string `json:"name,omitempty"`

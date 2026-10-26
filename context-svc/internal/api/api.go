@@ -86,6 +86,9 @@ type Config struct {
 	// owntracks-guest) for the 위치 screen and for how it is told to watch,
 	// and nothing else.
 	GuestUser, GuestPass string
+	// GuestToken is the guest's agent's own: it reads where the guest's phone
+	// is now (GET /now/guest) and nothing else here.
+	GuestToken string
 	// Public is where the phone reaches this service (the gateway's
 	// /context), for the setup it is given.
 	Public string
@@ -139,7 +142,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /owntracks", limit(newBucket(120, 2), s.owntracks))
 	mux.HandleFunc("POST /signals", limit(newBucket(60, 1), s.signals))
 	mux.HandleFunc("GET /now", s.bearer(s.current))
-	mux.HandleFunc("GET /now/guest", s.bearer(s.guestNow))
+	mux.HandleFunc("GET /now/guest", s.bearerOrGuest(s.guestNow))
 	mux.HandleFunc("GET /visits", s.bearer(s.visits))
 	mux.HandleFunc("GET /travel", s.bearer(s.travel))
 	mux.HandleFunc("GET /track", s.bearer(s.track))
@@ -171,6 +174,20 @@ func (s *Server) bearer(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		next(w, r)
+	}
+}
+
+// bearerOrGuest is bearer, and lets the guest's agent's own token through as
+// well (GuestToken): where the guest's phone is, and nothing else here, is
+// the guest's to read.
+func (s *Server) bearerOrGuest(next http.HandlerFunc) http.HandlerFunc {
+	owner := s.bearer(next)
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.cfg.GuestToken != "" && same(r.Header.Get("Authorization"), "Bearer "+s.cfg.GuestToken) {
+			next(w, r)
+			return
+		}
+		owner(w, r)
 	}
 }
 
@@ -601,13 +618,35 @@ func (s *Server) guestReport(ctx context.Context, rep report, at time.Time) ([]m
 }
 
 // guestPlace is where the guest's phone was last judged to be: which of its
-// own regions it is in, the fix that said so, and when it last left one.
+// own regions it is in and since when, the fix that said so, and when it last
+// left one.
 type guestPlace struct {
-	Regions []string  `json:"regions"`
-	Lat     float64   `json:"lat,omitempty"`
-	Lon     float64   `json:"lon,omitempty"`
-	Acc     float64   `json:"acc,omitempty"`
-	Left    time.Time `json:"left,omitzero"`
+	Regions []string `json:"regions"`
+	// Since is when the phone came into each region it is in, by the report
+	// that put it there. A region it was in before this was kept, or at its
+	// first report of all, or made where it already was, has none: how long
+	// it had been there is not known.
+	Since map[string]time.Time `json:"since,omitempty"`
+	Lat   float64              `json:"lat,omitempty"`
+	Lon   float64              `json:"lon,omitempty"`
+	Acc   float64              `json:"acc,omitempty"`
+	Left  time.Time            `json:"left,omitzero"`
+}
+
+// entered is when the phone came into each region it is in now: the time
+// kept for one it was in already, at for one it has just come into, none for
+// one it was in from before any time was kept.
+func entered(was []string, since map[string]time.Time, now []string, at time.Time) map[string]time.Time {
+	out := map[string]time.Time{}
+	for _, n := range now {
+		switch t, ok := since[n]; {
+		case ok:
+			out[n] = t
+		case !slices.Contains(was, n):
+			out[n] = at
+		}
+	}
+	return out
 }
 
 // guestRegions is the regions of the guest's phone: as it last sent them, and
@@ -633,6 +672,21 @@ func (s *Server) guestRegionsMoved(ctx context.Context, before, kept []keptRegio
 	if err != nil {
 		return err
 	}
+	// A region renamed on the phone (the same id) keeps when it was come into.
+	since := map[string]time.Time{}
+	for n, t := range where.Since {
+		since[n] = t
+		for _, b := range before {
+			if b.Name != n || b.Rid == "" {
+				continue
+			}
+			for _, g := range kept {
+				if g.Rid == b.Rid && g.Name != n {
+					since[g.Name] = t
+				}
+			}
+		}
+	}
 	now := slices.DeleteFunc(slices.Clone(where.Regions), func(n string) bool {
 		return !slices.ContainsFunc(kept, func(g keptRegion) bool { return g.Name == n })
 	})
@@ -652,6 +706,14 @@ func (s *Server) guestRegionsMoved(ctx context.Context, before, kept []keptRegio
 	slices.Sort(now)
 	if now = slices.Compact(now); slices.Equal(now, where.Regions) {
 		return nil
+	}
+	// A region made or moved where the phone is was not come into now: it
+	// keeps a renamed one's time, and has none otherwise.
+	where.Since = map[string]time.Time{}
+	for _, n := range now {
+		if t, ok := since[n]; ok {
+			where.Since[n] = t
+		}
 	}
 	where.Regions = append([]string{}, now...)
 	return s.st.Set(ctx, "guest.inside", where, at)
@@ -717,25 +779,92 @@ func (s *Server) guestMoves(ctx context.Context, rep report, at time.Time, own [
 			}
 		}
 	}
+	if first {
+		where.Since = nil // how long it had been there is not known
+	} else {
+		where.Since = entered(was, where.Since, now, at)
+	}
 	where.Regions = append([]string{}, now...)
 	return where, s.st.Set(ctx, "guest.inside", where, at)
 }
 
-// guestNow is the guest's own regions the guest's phone is in now, as their
-// last reports put it - what mind asks when a reminder of the guest's counts
-// being there already ("19시 넘어 집에 있으면"): {visits: [{region, kind}]}.
+// guestNow is where the guest's phone is now, as its last reports put it: the
+// guest's own regions it is in and since when - what mind asks when a
+// reminder of the guest's counts being there already ("19시 넘어 집에 있으면"),
+// and the guest's situation - and the whole in a line (summary), as the
+// guest's conversation is told it: {visits: [{region, kind, enteredAt?}],
+// fixAt?, summary}.
 func (s *Server) guestNow(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	var where guestPlace
-	_, err := s.st.Get(r.Context(), "guest.inside", &where)
+	fixAt, err := s.st.Get(ctx, "guest.inside", &where)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		s.fail(w, "손님 위치를 읽지 못했습니다", err)
 		return
 	}
-	visits := []map[string]string{}
-	for _, n := range where.Regions {
-		visits = append(visits, map[string]string{"region": n, "kind": place.KindOf(n)})
+	watch, err := s.lastWatching(ctx, guestPhone)
+	if err != nil {
+		s.fail(w, "손님 폰 상태를 읽지 못했습니다", err)
+		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"visits": visits})
+	visits := []map[string]any{}
+	for _, n := range where.Regions {
+		v := map[string]any{"region": n, "kind": place.KindOf(n)}
+		if t, ok := where.Since[n]; ok {
+			v["enteredAt"] = t
+		}
+		visits = append(visits, v)
+	}
+	out := map[string]any{"visits": visits, "summary": guestSummary(where, fixAt, watch, s.now().In(s.loc))}
+	if !fixAt.IsZero() {
+		out["fixAt"] = fixAt
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// guestSummary is the guest's phone in a line, as Summary is the operator's:
+// where (since when), how it moves while that is fresh, a low battery, and
+// how old the last fix is.
+func guestSummary(where guestPlace, fixAt time.Time, w watching, now time.Time) string {
+	var parts []string
+	for _, n := range where.Regions {
+		if t, ok := where.Since[n]; ok {
+			parts = append(parts, fmt.Sprintf("지금 %s (%s부터)", n, clockOn(t, now)))
+		} else {
+			parts = append(parts, "지금 "+n)
+		}
+	}
+	if len(where.Regions) == 0 && !fixAt.IsZero() {
+		parts = append(parts, "등록된 영역 밖")
+		if !w.At.IsZero() && now.Sub(w.At) < 30*time.Minute {
+			switch w.Why {
+			case "car":
+				parts = append(parts, "차로 이동 중")
+			case "moving", "left":
+				parts = append(parts, "이동 중")
+			case "still":
+				parts = append(parts, "한곳에 머무는 중")
+			}
+		}
+	}
+	if w.Batt > 0 && w.Batt < place.Low && !w.Charging {
+		parts = append(parts, fmt.Sprintf("배터리 %d%%", w.Batt))
+	}
+	if fixAt.IsZero() {
+		parts = append(parts, "위치를 받은 적 없음")
+	} else {
+		parts = append(parts, fmt.Sprintf("마지막 위치 %s 전", ago(now.Sub(fixAt))))
+	}
+	return strings.Join(parts, " · ")
+}
+
+// clockOn is a time of day, with the date when it is not today's.
+func clockOn(t, now time.Time) string {
+	t = t.In(now.Location())
+	if y, m, d := t.Date(); y == now.Year() && m == now.Month() && d == now.Day() {
+		return t.Format("15:04")
+	}
+	return t.Format("1/2 15:04")
 }
 
 // announceGuest says the guest's arrival or departure in the guest's own

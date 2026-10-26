@@ -123,10 +123,17 @@ DB 가 필요한 테스트는 `scripts/dbtest` 로 돌린다(맥북 Docker 에 �
 실시간 버스·지하철 키는 `DATA_GO_KR_KEY`/`SEOUL_SUBWAY_KEY`, 맥미니 `.env`)·작업(자기 작업·체크리스트만) 페이지와 `/api/agent`·`/api/jobs`·`/api/workout`·`/api/context/track`·`/api/context/owntracks/setup/guest`·`/api/map` 등 손님 몫 API, PhotoCraft 파일(`/photocraft/`)만 미들웨어에서 통과한다 - 나머지는 403
 이거나 첫 화면으로 돌려보낸다. 손님의 대화는 별도 컨테이너 `agent-guest`(`JARVIS_ROLE=guest`)가
 받는다: chat-svc 의 thread `guest`, 별도 CLI 홈·승인 카드, 캘린더·리마인드·체크리스트·작업 모듈,
-내장 도구는 웹 검색뿐, 브라우저 토큰·자산·가계부 주소 없음. 리마인드·체크리스트(mind)와 작업(jobs)은
-`JARVIS_GUEST_API_TOKEN` 으로 손님 것만 열리고(서로의 것은 '없음'), 손님 작업은 웹사이트를 못 연다(브라우저가
+브라우저 토큰·자산·가계부 주소 없음. 내장 도구는 웹과, 손님 사진·자비스 기억 폴더만 닿는 Read·Write·Edit(그
+밖의 파일 호출은 카드 없이 거절 - `permission.Folders`), 셸 없음. 리마인드·체크리스트(mind)와 작업(jobs)은
+`JARVIS_GUEST_API_TOKEN` 으로 손님 것만 열리고(서로의 것은 '없음'), 손님 작업은 웹사이트도 사진도 못 쓴다(브라우저가
 운영자 계정이라 jobs-svc 가 sites 를 거절) - 손님 에이전트의 스케줄러가 브라우저 없이 돌린다. 손님 리마인드는
 손님 폰의 도착·출발(`location.guest.*`)과 `context` 의 `GET /now/guest` 로 울리고, 손님 기기로만 간다(대화 카드는 아직 없음). 게이트웨이 경로 `/agent-guest/…`(VPC `jarvis-agent-guest`, 포트 8081).
+손님 대화도 운영자 대화처럼 턴마다 지금 상황을 받는다(2026-10-26): mind `GET /now` 는 손님 토큰에 손님 것만 답하고
+(손님 일정과 함께하는 일정·손님 폰 위치·손님 리마인드·체크리스트 - 운영자 일정·결제·사진·예측은 없음), 취향은
+memory-svc 의 손님 그래프(group guest)에서 손님 자신에 관한 사실을 검색해 30분마다 다시 읽는다(`mind/guest.go`).
+기기·위치 한 줄은 context `GET /now/guest`(손님 토큰은 이 경로만 연다 - `API_GUEST_TOKEN`). 자비스 기억(CLI 의
+MEMORY.md)은 손님 home 볼륨 안이고 바뀌면 손님 알림함으로(`memory.change`, audience guest), 대화에 첨부한
+사진은 `jarvis-guest-uploads` 볼륨(운영자 `jarvis-uploads` 와 따로, 브라우저에 붙이지 않음).
 두 에이전트는 응답마다 `X-Jarvis-Agent: owner|guest` 를 붙이고, 게이트웨이는 경로와 맞지 않는
 응답을 버리고 502 를 돌려준다. 같은 터널·같은 포트(8080)였을 때 Workers VPC 의 연결이 다른
 에이전트에 붙는 일이 실제로 있었다(2026-10-08) - 그래서 포트도 나눴다.

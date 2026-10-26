@@ -139,9 +139,14 @@ func main() {
 	}
 
 	// 작업. 대화에서 맡긴 일을 백그라운드에서, 작업이 정한 주기로 한다. 손님의 것은
-	// 손님 작업(jobs-svc 가 손님 토큰으로 묶는다)이고, 웹사이트도 사진도 없다.
+	// 손님 작업(jobs-svc 가 손님 토큰으로 묶는다)이고, 웹사이트도 사진도 없다 - 대화에
+	// 첨부한 손님 사진도 작업에는 넘기지 않는다(jobs-svc 가 손님 작업의 사진을 받지 않는다).
 	if cfg.Jobs && (photos != nil || cfg.Guest) {
-		jobsModule = jobs.New(jobs.NewStore(cfg.JobsURL, cfg.APIToken), photos, proposals, transcript, log)
+		jobPhotos := photos
+		if cfg.Guest {
+			jobPhotos = nil
+		}
+		jobsModule = jobs.New(jobs.NewStore(cfg.JobsURL, cfg.APIToken), jobPhotos, proposals, transcript, log)
 		if cfg.Guest {
 			jobsModule.NoBrowser()
 			cfg.Allow(jobs.QualifiedToolName("list_jobs"))
@@ -364,9 +369,14 @@ func main() {
 	go runner.WatchUsage(enrichCtx, time.Hour)
 
 	// The model writes its memory without a card (config.MemoryDir); every
-	// change reaches the operator instead, with the words written. What was
-	// last told is kept beside the proposals, where the model cannot write.
+	// change reaches the operator instead, with the words written - the
+	// guest's agent's, the guest. What was last told is kept beside the
+	// proposals, where the model cannot write.
 	if cfg.MemoryDir != "" {
+		audience, keyPrefix := "", "memory:"
+		if cfg.Guest {
+			audience, keyPrefix = "guest", "guest-memory:"
+		}
 		if memoryNote := notify.New(cfg.NotifyURL, cfg.DatabaseURL, cfg.APIToken, log); memoryNote != nil {
 			watcher := &memorywatch.Watcher{
 				Dir:      cfg.MemoryDir,
@@ -380,7 +390,8 @@ func main() {
 						Source: "agent", Kind: "memory.change", Tier: "now", Level: "info",
 						// Into the inbox, where the whole body is shown.
 						Title: title, Body: body, URL: "/?inbox=1",
-						Key: "memory:" + strconv.FormatInt(time.Now().UnixNano(), 36),
+						Key:      keyPrefix + strconv.FormatInt(time.Now().UnixNano(), 36),
+						Audience: audience,
 					})
 				},
 			}
@@ -432,12 +443,30 @@ func main() {
 	}
 	// A card does not hold a turn open; its decision starts the next one.
 	gate.SetFollowUp(runner)
+	// The guest's file tools reach its own photos and memory and nothing else:
+	// a call inside them goes by (the CLI's memory writes need no card of
+	// their own anyway), and one anywhere else is refused, never asked.
+	var guestFolders permission.Folders
+	if cfg.Guest {
+		guestFolders = permission.Folders{cfg.UploadsDir, cfg.MemoryDir}
+		gate.SetRefuse(func(tool string, input json.RawMessage) string {
+			if file, inside := guestFolders.Judge(tool, input); file && !inside {
+				return "이 계정에서는 첨부한 사진과 자비스 기억 밖의 파일을 열거나 쓸 수 없습니다. 다시 시도하지 마세요."
+			}
+			return ""
+		})
+	}
 	// A card stands only before a change or money (2026-10-20): a job made or
 	// instructed (jobs.CardFree) and the browser's own tools - reading,
 	// pressing, typing, the PIN at a keypad a payment card already let
 	// through - go by. The browser's guard stops a payment on the network and
 	// raises its card; a job asks before it posts, sends or deletes.
 	gate.SetAutoAllow(func(tool string, input json.RawMessage) bool {
+		if cfg.Guest {
+			if file, inside := guestFolders.Judge(tool, input); file {
+				return inside
+			}
+		}
 		return jobs.BrowserTool(tool) || jobsModule != nil && jobsModule.CardFree(tool, input)
 	})
 	proposals.OnDecide(gate.Resolve)

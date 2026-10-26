@@ -61,12 +61,19 @@ SELF_NAME = {"owner": OWNER, "guest": "손님(나)"}
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "voyage-4-large")
 RERANK_MODEL = os.environ.get("RERANK_MODEL", "rerank-3")
 
-EXTRACTION_NOTE = (
-    f"이 기록은 한국어 개인 비서의 기억이다. '나', '운영자', '{OWNER}'는 모두 같은 사람(이 비서의 주인)이다. "
+_EXTRACTION_RULES = (
     "사람·장소·가게·물건 이름은 원문 그대로 쓰고 번역하지 않는다. 인사말·이모티콘·의미 없는 잡담에서는 사실을 만들지 않는다. "
     "약속·계획·선호·관계·구매·건강처럼 나중에 다시 물어볼 만한 사실만 뽑는다. "
     "사실(fact) 문장과 요약은 반드시 한국어로 쓴다."
 )
+# Who "나" is, by partition: in the guest's graph, the guest - never the
+# operator, whose name a guest's conversation may well use.
+EXTRACTION_NOTE = {
+    "owner": f"이 기록은 한국어 개인 비서의 기억이다. '나', '운영자', '{OWNER}'는 모두 같은 사람(이 비서의 주인)이다. "
+    + _EXTRACTION_RULES,
+    "guest": "이 기록은 한국어 개인 비서의 기억이다. '나'와 '손님(나)'는 같은 사람(비서의 주인이 초대한 손님, 이 대화의 사용자)이다. "
+    "'운영자'는 비서의 주인으로, 손님과 다른 사람이다. " + _EXTRACTION_RULES,
+}
 
 # Edge range indices that hide facts on FalkorDB 4.22 (see patches): no longer
 # created, and dropped where an older start left them.
@@ -188,7 +195,7 @@ class Graph:
                 reference_time=when,
                 source=EpisodeType.message,
                 group_id=group,
-                custom_extraction_instructions=EXTRACTION_NOTE,
+                custom_extraction_instructions=EXTRACTION_NOTE[group],
             )
 
     async def node(self, group: str, kind: str, key: str, name: str, summary: str = "") -> str:

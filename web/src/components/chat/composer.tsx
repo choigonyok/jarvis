@@ -44,6 +44,7 @@ export function Composer({
   onVoice,
   onFocusChange,
   allowPhotos = false,
+  photoHint = "사진에 대해 한마디 (예: 중고나라에 올려줘)",
   quoting,
   onCancelQuote,
   inputRef,
@@ -57,6 +58,8 @@ export function Composer({
   onVoice?: () => void;
   onFocusChange?: (focused: boolean) => void;
   allowPhotos?: boolean;
+  /** What the field says once a photo is attached. */
+  photoHint?: string;
   /** Set while a swiped message waits to be quoted by the next one. */
   quoting?: Quoting | null;
   onCancelQuote?: () => void;
@@ -273,7 +276,7 @@ export function Composer({
             quoting
               ? "이걸로 무엇을 할까요?"
               : photos.length
-                ? "사진에 대해 한마디 (예: 중고나라에 올려줘)"
+                ? photoHint
                 : busy
                   ? "끝나면 이어서 보낼 말"
                   : "Jarvis에게 메시지"

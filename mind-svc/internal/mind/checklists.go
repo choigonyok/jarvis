@@ -158,10 +158,15 @@ func (m *Mind) closeLists(ctx context.Context) error {
 // checklistLine is the lists open, for the conversation's situation: what
 // it answers "뭐 남았지?" from, and the ids its tools take.
 func (m *Mind) checklistLine(ctx context.Context) string {
+	return m.checklistLineOf(ctx, checklist.Owner)
+}
+
+// checklistLineOf is checklistLine of who's lists.
+func (m *Mind) checklistLineOf(ctx context.Context, who string) string {
 	if m.Lists == nil {
 		return ""
 	}
-	ls, err := m.Lists.All(ctx, false)
+	ls, err := m.Lists.AllOf(ctx, who, false)
 	if err != nil {
 		m.Opts.Logger.Warn("체크리스트를 읽지 못했습니다", "err", err)
 		return ""

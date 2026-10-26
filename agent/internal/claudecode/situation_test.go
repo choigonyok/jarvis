@@ -16,7 +16,7 @@ import (
 // Every turn's message carries mind's situation next to the date - values
 // only. How to use them, and the operator's taste, are in the instructions:
 // they change seldom, and every request carries the instructions anyway. A
-// guest, or a mind that does not answer, gets no situation.
+// mind that does not answer gives no situation.
 func TestSituationInEveryTurn(t *testing.T) {
 	var calls atomic.Int32
 	mind := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -59,13 +59,54 @@ func TestSituationInEveryTurn(t *testing.T) {
 		t.Fatalf("같은 상황은 다시 붙이지 않습니다:\n%s", again)
 	}
 
-	guest := &Runner{cfg: config.Config{SystemPrompt: "base", MindURL: mind.URL, APIToken: "tok", Guest: true}, log: quiet}
-	if strings.Contains(guest.now(guest.situation()), "지금 상황") || strings.Contains(guest.systemPrompt(), "취향") {
-		t.Fatal("손님에게 운영자의 상황이 갔습니다")
-	}
 	down := &Runner{cfg: config.Config{SystemPrompt: "base", MindURL: "http://127.0.0.1:1", APIToken: "tok"}, log: quiet}
 	if p := down.now(down.situation()); strings.Contains(p, "지금 상황") || !strings.Contains(p, "현재 시각") {
 		t.Fatalf("mind 가 없으면 상황 없이: %s", p)
+	}
+}
+
+// The guest's agent asks mind and context with the guest's own token - mind
+// answers it with the guest's situation and taste, context with the guest's
+// phone - and is given the guest's rules for them, which say nothing of the
+// operator's tools or of the operator as the one being talked to.
+func TestGuestSituation(t *testing.T) {
+	mind := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/now" || r.Header.Get("Authorization") != "Bearer guest-tok" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_, _ = w.Write([]byte(`{"text":"[지금 상황 · 21:30]\n- 위치: 21:03부터 집","prefs":"- 손님(나)은 답에 이모티콘을 빼 달라고 했다. (확정 · 대화 10/8)"}`))
+	}))
+	defer mind.Close()
+	phone := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/now/guest" || r.Header.Get("Authorization") != "Bearer guest-tok" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_, _ = w.Write([]byte(`{"visits":[{"region":"집","kind":"home"}],"summary":"지금 집 (21:03부터) · 마지막 위치 2분 전"}`))
+	}))
+	defer phone.Close()
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	guest := &Runner{cfg: config.Config{SystemPrompt: "base", MindURL: mind.URL, ContextURL: phone.URL, APIToken: "guest-tok", Guest: true}, log: quiet}
+	head := guest.now(guest.situation())
+	for _, want := range []string{"21:03부터 집", "- 기기·위치 상태: 지금 집 (21:03부터) · 마지막 위치 2분 전"} {
+		if !strings.Contains(head, want) {
+			t.Fatalf("손님 턴 앞머리에 %q 가 없습니다:\n%s", want, head)
+		}
+	}
+	system := guest.systemPrompt()
+	for _, want := range []string{"이 사용자 폰(OwnTracks)", "직접 말하거나 정한 것", "이모티콘을 빼 달라고"} {
+		if !strings.Contains(system, want) {
+			t.Fatalf("손님 지시에 %q 가 없습니다:\n%s", want, system)
+		}
+	}
+	for _, not := range []string{"find_nearby", "회고 카드", "운영자가 정정하면"} {
+		if strings.Contains(system, not) {
+			t.Fatalf("손님 지시에 운영자의 규칙 %q:\n%s", not, system)
+		}
+	}
+	if guest.person() != "사용자" {
+		t.Fatalf("손님 대화의 상대: %q", guest.person())
 	}
 }
 

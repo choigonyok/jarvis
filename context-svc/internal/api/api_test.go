@@ -731,6 +731,35 @@ func TestGuestPhone(t *testing.T) {
 	}
 }
 
+// The guest's phone in a line, as the guest's conversation is told it.
+func TestGuestSummary(t *testing.T) {
+	seoul, _ := time.LoadLocation("Asia/Seoul")
+	now := time.Date(2026, 10, 26, 22, 0, 0, 0, seoul)
+	ago := func(d time.Duration) time.Time { return now.Add(-d) }
+	for _, c := range []struct {
+		name  string
+		where guestPlace
+		fixAt time.Time
+		w     watching
+		want  string
+	}{
+		{"never", guestPlace{}, time.Time{}, watching{}, "위치를 받은 적 없음"},
+		{"home since tonight", guestPlace{Regions: []string{"집"}, Since: map[string]time.Time{"집": ago(2 * time.Hour)}}, ago(3 * time.Minute),
+			watching{At: ago(3 * time.Minute), Why: "region", Batt: 60}, "지금 집 (20:00부터) · 마지막 위치 3분 전"},
+		{"home since yesterday", guestPlace{Regions: []string{"집"}, Since: map[string]time.Time{"집": ago(26 * time.Hour)}}, ago(time.Hour),
+			watching{}, "지금 집 (10/25 20:00부터) · 마지막 위치 1시간 전"},
+		{"home, not known since when", guestPlace{Regions: []string{"집"}}, ago(10 * time.Minute), watching{}, "지금 집 · 마지막 위치 10분 전"},
+		{"driving", guestPlace{}, ago(time.Minute), watching{At: ago(time.Minute), Why: "car", Batt: 15}, "등록된 영역 밖 · 차로 이동 중 · 배터리 15% · 마지막 위치 1분 전"},
+		{"charging is no low battery", guestPlace{}, ago(time.Minute), watching{At: ago(time.Minute), Why: "moving", Batt: 15, Charging: true}, "등록된 영역 밖 · 이동 중 · 마지막 위치 1분 전"},
+		{"settled somewhere", guestPlace{}, ago(5 * time.Minute), watching{At: ago(5 * time.Minute), Why: "still"}, "등록된 영역 밖 · 한곳에 머무는 중 · 마지막 위치 5분 전"},
+		{"how it moved, long ago", guestPlace{}, ago(2 * time.Hour), watching{At: ago(2 * time.Hour), Why: "car"}, "등록된 영역 밖 · 마지막 위치 2시간 전"},
+	} {
+		if got := guestSummary(c.where, c.fixAt, c.w, now); got != c.want {
+			t.Errorf("%s: %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
 // The guest's regions are its own - kept apart from the operator's, renamed
 // by id, refreshed by the whole list once a day - and its arrivals and
 // departures at them go to its own inbox, never as the operator's.
@@ -756,7 +785,7 @@ func TestGuestRegions(t *testing.T) {
 		got <- e
 	}))
 	defer sink.Close()
-	server := New(st, Config{Token: "api", User: "phone", Pass: "pw", GuestUser: "guest-phone", GuestPass: "gpw"}, notify.New(sink.URL, "", "", quiet), quiet)
+	server := New(st, Config{Token: "api", User: "phone", Pass: "pw", GuestUser: "guest-phone", GuestPass: "gpw", GuestToken: "guest-api"}, notify.New(sink.URL, "", "", quiet), quiet)
 	var today atomic.Value
 	today.Store(time.Date(2026, 10, 23, 13, 0, 0, 0, seoul))
 	server.now = func() time.Time { return today.Load().(time.Time) }
@@ -817,6 +846,12 @@ func TestGuestRegions(t *testing.T) {
 	// phone says but that is not kept here is not one.
 	say(fmt.Sprintf(`{"_type":"waypoint","rid":"r2","desc":"직장",%s,"rad":150,"tst":%d}`, work, at("23", "12:00")))
 	fix("23", "12:30", work, `,"inregions":["직장","옛 영역"]`)
+	// Renamed, it keeps when it was come into: 09:00, at 회사.
+	var inside guestPlace
+	if _, err := st.Get(ctx, "guest.inside", &inside); err != nil || !slices.Equal(inside.Regions, []string{"직장"}) ||
+		!inside.Since["직장"].Equal(time.Unix(at("23", "09:00"), 0)) || len(inside.Since) != 1 {
+		t.Fatalf("이름을 바꾼 영역의 들어온 시각: %v %+v", err, inside)
+	}
 	fix("23", "18:00", road, "")
 	say(fmt.Sprintf(`{"_type":"transition","event":"enter","desc":"집",%s,"tst":%d}`, home, at("23", "18:40")))
 
@@ -842,9 +877,34 @@ func TestGuestRegions(t *testing.T) {
 	if !slices.Equal(events, want) {
 		t.Fatalf("상대의 도착·출발:\n%s", strings.Join(events, "\n"))
 	}
-	// Where the guest is now, for mind's reminders that count being there.
-	if code, body := do("GET", "/now/guest", "", api); code != 200 || body != `{"visits":[{"kind":"home","region":"집"}]}`+"\n" {
-		t.Fatalf("상대가 지금 있는 곳: %d %q", code, body)
+	// Where the guest is now, for mind's reminders that count being there and
+	// for the guest's own conversation - which reads it with its own token,
+	// and nothing else of context with that token.
+	today.Store(time.Date(2026, 10, 23, 18, 45, 0, 0, seoul))
+	guestAPI := func(r *http.Request) { r.Header.Set("Authorization", "Bearer guest-api") }
+	for _, as := range []func(*http.Request){api, guestAPI} {
+		code, body := do("GET", "/now/guest", "", as)
+		var now struct {
+			Visits []struct {
+				Region, Kind string
+				EnteredAt    time.Time
+			}
+			FixAt   time.Time
+			Summary string
+		}
+		if err := json.Unmarshal([]byte(body), &now); err != nil || code != 200 || len(now.Visits) != 1 ||
+			now.Visits[0].Region != "집" || now.Visits[0].Kind != "home" || !now.Visits[0].EnteredAt.Equal(time.Unix(at("23", "18:40"), 0)) ||
+			!now.FixAt.Equal(time.Unix(at("23", "18:40"), 0)) || now.Summary != "지금 집 (18:40부터) · 마지막 위치 5분 전" {
+			t.Fatalf("상대가 지금 있는 곳: %d %s", code, body)
+		}
+	}
+	for _, path := range []string{"/now", "/track?who=guest", "/regions", "/owntracks/setup/guest", "/visits"} {
+		if code, _ := do("GET", path, "", guestAPI); code != 401 {
+			t.Fatalf("손님 에이전트 토큰으로 %s: %d", path, code)
+		}
+	}
+	if code, _ := do("GET", "/now/guest", "", func(*http.Request) {}); code != 401 {
+		t.Fatalf("토큰 없이 /now/guest: %d", code)
 	}
 
 	// Nothing of the operator's moved.

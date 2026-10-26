@@ -72,14 +72,15 @@ var Categories = []Category{
 }
 
 // GuestCategories is what the guest account is sent: their own jarvis's
-// cards and jobs, their own reminders, the shared calendar as the operator's
-// side changes it, and when to leave on their own routes.
+// cards, jobs and memory, their own reminders, the shared calendar as the
+// operator's side changes it, and when to leave on their own routes.
 var GuestCategories = []Category{
 	{"approval", "결재 대기", "내 jarvis 가 승인을 기다릴 때"},
 	{"remind", "때 맞춘 알림", "부탁한 리마인드, 체크리스트의 남은 것 - 방해 금지 시간에도 울림"},
 	{"job", "작업 요청", "내 작업이 확인을 기다릴 때"},
 	{"calendar", "공유 일정", "상대가 일정을 추가했을 때"},
 	{"transit", "출발", "등록한 경로의 시간대에 '슬슬 짐 싸야 해요'·'지금 나가요' - 방해 금지 시간에도 울림"},
+	{"memory", "자비스 기억", "내 jarvis 가 기억을 새로 저장하거나 고치거나 지울 때"},
 }
 
 // CategoriesFor is the settings list one person is shown.

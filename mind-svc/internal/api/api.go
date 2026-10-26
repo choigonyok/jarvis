@@ -6,6 +6,7 @@
 //	GET  /                            the console: simulator, world model, intents
 //	GET  /api/snapshot                everything the console shows
 //	GET  /now                         the situation right now, by rule: what the conversation is shown each turn
+//	                                  (the guest's token: the guest's own, with the guest's taste)
 //	GET  /messages/search?q=&room=&since=&limit=   messages whose text holds every word of q, newest first (token)
 //	GET  /messages/context?ref=&before=&after=     a message with the ones around it in its room (token)
 //	POST /api/simulate                {room, roomName, sender, mine, text, at?}
@@ -88,13 +89,13 @@ type Server struct {
 	open         bool
 	clock        *clock.Clock // nil unless the clock can be moved (memory mode)
 	log          *slog.Logger
-	// guestToken is the guest's agent's: it opens the guest's own reminders
-	// and checklists, and nothing else of mind.
+	// guestToken is the guest's agent's: it opens the guest's own reminders,
+	// checklists and situation, and nothing else of mind.
 	guestToken string
 }
 
 // SetGuestToken lets the guest's agent keep the guest's own reminders and
-// checklists here (person).
+// checklists here, and read the guest's situation (person).
 func (s *Server) SetGuestToken(t string) { s.guestToken = t }
 
 func New(m *mind.Mind, token, consoleToken string, open bool, c *clock.Clock, log *slog.Logger) *Server {
@@ -131,26 +132,7 @@ func (s *Server) Handler() http.Handler {
 		_, _ = w.Write(page)
 	})
 	mux.HandleFunc("GET /api/snapshot", s.auth(false, s.snapshot))
-	mux.HandleFunc("GET /now", s.auth(false, func(w http.ResponseWriter, r *http.Request) {
-		now, err := s.m.Situation(r.Context())
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		// Absent when it could not be read, "" when there is none: the agent
-		// keeps the list in its instructions and changes them only on an answer.
-		var prefs *string
-		if text, err := s.m.PreferencesRead(r.Context()); err == nil {
-			prefs = &text
-		} else {
-			s.log.Warn("취향을 읽지 못했습니다", "err", err)
-		}
-		writeJSON(w, http.StatusOK, struct {
-			world.Situation
-			// Prefs is what is known of the operator's taste, with grounds.
-			Prefs *string `json:"prefs,omitempty"`
-		}{now, prefs})
-	}))
+	mux.HandleFunc("GET /now", s.person(s.now))
 	// The messages themselves, for the conversation: what mind read but did
 	// not keep as a fact. The services' token only - these hand out text.
 	mux.HandleFunc("GET /messages/search", s.auth(true, s.searchMessages))
@@ -258,11 +240,44 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
+// now is the situation of whoever asks, with their taste: the operator's, or
+// - with the guest's token - the guest's, which holds nothing of the
+// operator's.
+func (s *Server) now(w http.ResponseWriter, r *http.Request) {
+	guest := whoOf(r) == moments.Guest
+	situation := s.m.Situation
+	if guest {
+		situation = s.m.GuestSituation
+	}
+	now, err := situation(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	// Absent when it could not be read, "" when there is none: the agent
+	// keeps the list in its instructions and changes them only on an answer.
+	var prefs *string
+	if guest {
+		if text, ok := s.m.GuestPreferences(); ok {
+			prefs = &text
+		}
+	} else if text, err := s.m.PreferencesRead(r.Context()); err == nil {
+		prefs = &text
+	} else {
+		s.log.Warn("취향을 읽지 못했습니다", "err", err)
+	}
+	writeJSON(w, http.StatusOK, struct {
+		world.Situation
+		// Prefs is what is known of the asker's taste, with grounds.
+		Prefs *string `json:"prefs,omitempty"`
+	}{now, prefs})
+}
+
 type caller struct{}
 
-// person guards a route on someone's own reminders and checklists: what
-// auth lets through is the operator's, and the guest's token the guest's -
-// another's is not found.
+// person guards a route on someone's own: their reminders and checklists,
+// and their situation. What auth lets through is the operator's, and the
+// guest's token the guest's - another's is not found.
 func (s *Server) person(next http.HandlerFunc) http.HandlerFunc {
 	owner := s.auth(false, next)
 	return func(w http.ResponseWriter, r *http.Request) {

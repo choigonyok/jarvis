@@ -57,6 +57,9 @@ type Options struct {
 	// Memory is long-term memory (memory-svc); nil keeps facts in the
 	// ledger, pending.
 	Memory memory.Client
+	// GuestMemory is the guest's own long-term memory (memory-svc, group
+	// guest), read for the guest's taste and nothing else; nil: not known.
+	GuestMemory memory.Client
 	// Photos is where albums are made (Immich); nil keeps them in memory.
 	Photos act.Photos
 	// Drafter writes the messages the operator may send; nil: a template.
@@ -115,6 +118,8 @@ type Mind struct {
 	notifier act.Notifier
 	// tracks is the rules' records, read again every few minutes.
 	tracks tracks
+	// taste is the guest's taste as last read from their memory.
+	taste guestTaste
 }
 
 func New(o Options) *Mind {
@@ -643,6 +648,37 @@ func (m *Mind) Situation(ctx context.Context) (world.Situation, error) {
 		s.Text += "\n" + line
 	}
 	if line := m.expectLines(ctx); line != "" {
+		s.Text += "\n" + line
+	}
+	return s, nil
+}
+
+// GuestSituation is the guest's, as the guest's conversation is shown it:
+// their own plans and the shared ones, where their phone is, and their own
+// reminders and lists - nothing of the operator's, and no habits (those are
+// learnt from the operator's days alone).
+func (m *Mind) GuestSituation(ctx context.Context) (world.Situation, error) {
+	var here *world.Clue
+	if m.Opts.GuestHere != nil {
+		vs, err := m.Opts.GuestHere(ctx)
+		if err != nil {
+			m.Opts.Logger.Warn("손님 위치를 읽지 못했습니다", "err", err)
+		}
+		for _, v := range vs {
+			// The latest come into, when it is in two.
+			if here == nil || v.EnteredAt.After(here.At) {
+				here = &world.Clue{At: v.EnteredAt, Kind: "visit", Title: v.Region, Place: v.Region}
+			}
+		}
+	}
+	s, err := m.World.GuestSituation(ctx, m.Opts.Now(), m.Opts.Loc, here)
+	if err != nil {
+		return s, err
+	}
+	if lines := m.reminderLinesOf(ctx, moments.Guest); lines != "" {
+		s.Text += "\n" + lines
+	}
+	if line := m.checklistLineOf(ctx, checklist.Guest); line != "" {
 		s.Text += "\n" + line
 	}
 	return s, nil

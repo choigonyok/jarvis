@@ -142,6 +142,35 @@ func TestCardDoesNotBlockAndIsNotRaisedTwice(t *testing.T) {
 	}
 }
 
+// The guest's agent: a file call outside its folders is refused with no card
+// to approve, one inside them goes by, and the rest of the gate is as it was.
+func TestRefusedOutrightRaisesNoCard(t *testing.T) {
+	g, store, _ := newTestGate(t, module.NewRegistry())
+	folders := Folders{"/uploads"}
+	g.SetRefuse(func(tool string, input json.RawMessage) string {
+		if file, inside := folders.Judge(tool, input); file && !inside {
+			return "밖의 파일은 안 됩니다"
+		}
+		return ""
+	})
+	g.SetAutoAllow(func(tool string, input json.RawMessage) bool {
+		file, inside := folders.Judge(tool, input)
+		return file && inside
+	})
+	res, _, _ := g.decide(context.Background(), nil, Request{"tool_name": "Read", "input": map[string]any{"file_path": "/proc/self/environ"}})
+	if r := behavior(t, res); r.Behavior != "deny" || r.Message != "밖의 파일은 안 됩니다" || store.PendingCount() != 0 {
+		t.Fatalf("밖의 파일: %+v, 카드 %d", r, store.PendingCount())
+	}
+	res, _, _ = g.decide(context.Background(), nil, Request{"tool_name": "Read", "input": map[string]any{"file_path": "/uploads/a.jpg"}})
+	if r := behavior(t, res); r.Behavior != "allow" || store.PendingCount() != 0 {
+		t.Fatalf("사진: %+v", r)
+	}
+	g.decide(context.Background(), nil, Request{"tool_name": "WebFetch", "input": map[string]any{"url": "https://example.com"}})
+	if store.PendingCount() != 1 {
+		t.Fatalf("파일이 아닌 도구는 그대로 카드: %d", store.PendingCount())
+	}
+}
+
 // Approving a CLI tool wakes the model with a one-time grant for exactly
 // that call: it passes once, and a second identical call is a new card.
 func TestApprovalGrantsTheExactCallOnce(t *testing.T) {

@@ -22,8 +22,21 @@ func TestGuestRole(t *testing.T) {
 	if !c.Guest || c.Thread != "guest" {
 		t.Fatalf("guest=%v thread=%q", c.Guest, c.Thread)
 	}
-	if c.BuiltinTools == nil || strings.Contains(*c.BuiltinTools, "Bash") || strings.Contains(*c.BuiltinTools, "Read") {
-		t.Fatalf("내장 도구가 제한되지 않았습니다: %v", c.BuiltinTools)
+	// The web, and the file tools for its photos and memory - no shell, no
+	// searching the disk, no subagents.
+	if c.BuiltinTools == nil {
+		t.Fatal("손님의 내장 도구를 정하지 않았습니다")
+	}
+	tools := "," + *c.BuiltinTools + ","
+	for _, gone := range []string{"Bash", "Glob", "Grep", "Task", "Agent", "NotebookEdit"} {
+		if strings.Contains(tools, ","+gone+",") {
+			t.Fatalf("손님에게 %s: %s", gone, tools)
+		}
+	}
+	for _, want := range []string{"Read", "Write", "Edit", "WebSearch", "ToolSearch"} {
+		if !strings.Contains(tools, ","+want+",") {
+			t.Fatalf("손님에게 %s 가 있어야 합니다: %s", want, tools)
+		}
 	}
 	if len(c.ExtraMCPURLs) != 0 || c.Enrich {
 		t.Fatalf("브라우저나 백그라운드 조회가 켜져 있습니다: %v %v", c.ExtraMCPURLs, c.Enrich)
@@ -35,6 +48,42 @@ func TestGuestRole(t *testing.T) {
 	}
 	if strings.Contains(c.SystemPrompt, "get_portfolio") || strings.Contains(c.SystemPrompt, "get_spending") {
 		t.Fatal("손님 지시문에 자산·가계부 도구가 있습니다")
+	}
+}
+
+// The guest's photos and memory are read without a card - those folders and
+// nothing else: not the workspace, not the CLI's home, not the disk. Writing
+// skips no card either (the CLI's memory writes need none of their own).
+func TestGuestFiles(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "x")
+	t.Setenv("JARVIS_API_TOKEN", "api")
+	t.Setenv("JARVIS_ROLE", "guest")
+	t.Setenv("JARVIS_HOME", "/home/jarvis")
+	t.Setenv("JARVIS_WORKSPACE", "/workspace")
+	t.Setenv("JARVIS_UPLOADS_DIR", "/uploads")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.UploadsDir != "/uploads" || c.MemoryDir != "/home/jarvis/.claude/projects/-workspace/memory" {
+		t.Fatalf("손님의 사진·기억 폴더: %q %q", c.UploadsDir, c.MemoryDir)
+	}
+	var reads []string
+	for _, tool := range c.AllowedTools {
+		switch {
+		case strings.HasPrefix(tool, "Read(") || strings.HasPrefix(tool, "Grep(") || strings.HasPrefix(tool, "Glob("):
+			reads = append(reads, tool)
+		case strings.HasPrefix(tool, "Write") || strings.HasPrefix(tool, "Edit") || tool == "Read" || tool == "Bash":
+			t.Fatalf("손님 파일 도구가 카드를 건너뜁니다: %s", tool)
+		}
+	}
+	want := []string{"Read(//uploads/**)", "Read(//home/jarvis/.claude/projects/-workspace/memory/**)"}
+	if strings.Join(reads, " ") != strings.Join(want, " ") {
+		t.Fatalf("손님이 카드 없이 읽는 곳: %v", reads)
+	}
+	t.Setenv("JARVIS_UPLOADS_DIR", "")
+	if c, _ = Load(); c.UploadsDir != "" || strings.Contains(strings.Join(c.AllowedTools, ","), "uploads") {
+		t.Fatalf("사진 폴더 없이: %q %v", c.UploadsDir, c.AllowedTools)
 	}
 }
 
@@ -226,12 +275,13 @@ func TestMemoryDir(t *testing.T) {
 		t.Fatalf("이름 규칙: %q", got)
 	}
 
+	// The guest's agent has its own: the same path, in its own home volume.
 	t.Setenv("JARVIS_ROLE", "guest")
 	g, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if g.MemoryDir != "" {
-		t.Fatalf("손님에게 기억 폴더가 있습니다: %q", g.MemoryDir)
+	if g.MemoryDir != c.MemoryDir {
+		t.Fatalf("손님의 기억 폴더: %q", g.MemoryDir)
 	}
 }

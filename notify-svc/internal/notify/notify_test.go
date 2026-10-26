@@ -340,10 +340,15 @@ func TestGuestIsTheirOwnPerson(t *testing.T) {
 }
 
 func TestGuestSeesOnlyTheirCategories(t *testing.T) {
+	memory := false
 	for _, c := range CategoriesFor(store.Guest) {
 		if c.ID == "location" || c.ID == "assets" || c.ID == "spending" {
 			t.Fatalf("운영자 전용 분류가 손님에게 보입니다: %s", c.ID)
 		}
+		memory = memory || c.ID == "memory"
+	}
+	if !memory {
+		t.Fatal("손님 자비스의 기억 알림을 끌 수 있어야 합니다")
 	}
 	if len(CategoriesFor(store.Owner)) != len(Categories) {
 		t.Fatal("운영자 분류가 줄었습니다")

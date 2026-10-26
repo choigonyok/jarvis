@@ -167,8 +167,11 @@ func main() {
 	// one, a stand-in in this process so the console still shows facts going
 	// in and coming back judged.
 	var mem memory.Client
+	// The guest's own graph, read for the guest's taste only.
+	var guestMem memory.Client
 	if url := os.Getenv("MIND_MEMORY_URL"); url != "" {
-		mem = memory.NewHTTP(url, token)
+		owner := memory.NewHTTP(url, token)
+		mem, guestMem = owner, owner.For("guest")
 	} else if mode == "memory" {
 		mem = memory.NewFake(clk.Now)
 	} else {
@@ -229,12 +232,14 @@ func main() {
 		Loc: loc, Now: clk.Now, Logger: log, Interpret: cfg, Settle: settle,
 		Policy: gate.DefaultPolicy(), URL: getenv("MIND_UI_URL", "http://localhost:8102/"), Mode: mode,
 		MessageRetain: time.Duration(atoiOr(getenv("MIND_MESSAGE_RETAIN_DAYS", "365"), 365)) * 24 * time.Hour,
-		Memory:        mem, Photos: photos, Jobs: jobs, Assets: assets, Orders: orders, Travel: travel,
+		Memory:        mem, GuestMemory: guestMem, Photos: photos, Jobs: jobs, Assets: assets, Orders: orders, Travel: travel,
 		Weather: sky, DailyUSD: number("MIND_DAILY_USD", 1.0), Reminders: reminders, Here: here, GuestHere: guestHere, Checklists: lists,
 	})
 	if !client.Ready() {
 		log.Warn("LLM 키(MIND_ANTHROPIC_API_KEY)가 없어 대화를 해석하지 않습니다. 메시지는 쌓아 둡니다.")
 	}
+	// The guest's taste, read once now so the guest's first turn has it.
+	m.GuestPreferences()
 	if memLog != nil {
 		go memLog.Run(ctx, m.Handle)
 	}
