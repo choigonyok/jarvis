@@ -240,7 +240,8 @@ export function DayMap({
     if (now.current.spot) circle(ctx, now.current.spot, at, w, getComputedStyle(m.getContainer()).fontFamily);
 
     // Each person's mark: where they were at t. Two at the same place stand
-    // side by side, so neither face hides the other.
+    // side by side as the pair is drawn: the cream cat (the guest's) on the
+    // left whoever is looking, close enough that the drawings just meet.
     const marked: { x: number; y: number }[] = [];
     for (const [who, el] of l.marks) {
       if (!scene.people.some((p) => p.who === who)) el.style.display = "none";
@@ -249,8 +250,9 @@ export function DayMap({
     const [a, b] = points;
     if (a && b && Math.hypot(a.x - b.x, a.y - b.y) < 24) {
       const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-      points[0] = { x: mid.x - 16, y: mid.y };
-      points[1] = { x: mid.x + 16, y: mid.y };
+      positions.forEach(({ person }, i) => {
+        points[i] = { x: mid.x + (person.who === "guest" ? -PAIR : PAIR), y: mid.y };
+      });
     }
     positions.forEach(({ person }, i) => {
       let el = l.marks.get(person.who);
@@ -429,6 +431,14 @@ function circle(
 const FACE: Record<Who, string> = { owner: "/icons/location-cat.v4.png", guest: "/icons/location-cat-guest.v4.png" };
 
 /**
+ * How far each of two marks at one place stands from their middle: the cream
+ * cat's drawing reaches 15.4px right of its middle and the grey cat's 13.7px
+ * left of its own (29px tall), so at this they just meet - as in the user's
+ * drawing of the two side by side.
+ */
+const PAIR = 14.5;
+
+/**
  * A person's mark: their cat over a soft glow in their color, which breathes
  * when it is now. The glow keeps the cat's dark outline from sinking into the
  * dark map.
@@ -549,8 +559,8 @@ function name(
     const p = at(place.node);
     const y = p.y - n.h / 2;
     // Where a mark is, the name stands clear of it - of the cream cat too,
-    // the wider (17px each side of its middle; two marks stand 16px out).
-    const gap = marks.some((q) => Math.hypot(q.x - p.x, q.y - p.y) < 28) ? (marks.length > 1 ? 40 : 24) : 12;
+    // the wider (17px each side of its middle; two marks stand PAIR out).
+    const gap = marks.some((q) => Math.hypot(q.x - p.x, q.y - p.y) < 28) ? (marks.length > 1 ? 37 : 24) : 12;
     const free = (x: number) =>
       x >= 4 &&
       x + n.w <= w - 4 &&
