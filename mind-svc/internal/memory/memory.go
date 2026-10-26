@@ -212,6 +212,9 @@ func (c *HTTP) do(ctx context.Context, method, path string, in, out any) error {
 	if resp.StatusCode == http.StatusNotFound {
 		return model.ErrNotFound
 	}
+	if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnprocessableEntity {
+		return fmt.Errorf("%w: memory-svc %s %s: %d", model.ErrRefused, method, strings.SplitN(path, "?", 2)[0], resp.StatusCode)
+	}
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("memory-svc %s %s: %d", method, strings.SplitN(path, "?", 2)[0], resp.StatusCode)
 	}

@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 )
@@ -24,10 +26,26 @@ type Recorder interface {
 	Records(ctx context.Context, recs []model.Record) error
 }
 
+// What memory-svc takes of a record, in characters (RecordIn in
+// memory-svc/app/main.py).
+const (
+	maxFact = 2000
+	maxName = 300
+)
+
 // record queues r unless memory already has it as it is.
 func (s *Structured) record(ctx context.Context, r model.Record) error {
 	if s.Records == nil {
 		return nil
+	}
+	// Longer than memory takes is cut to fit here rather than turned down
+	// there: a job's summary ran its fact to 2,170 characters (2026-10-23).
+	r.Fact = clip(r.Fact, maxFact)
+	r.Target.Name = clip(r.Target.Name, maxName)
+	if r.Source != nil {
+		src := *r.Source
+		src.Name = clip(src.Name, maxName)
+		r.Source = &src
 	}
 	sum := sha256.Sum256([]byte(r.Relation + "\x00" + r.Fact + "\x00" + r.ValidAt + "\x00" + r.Target.Key))
 	h := hex.EncodeToString(sum[:8])
@@ -45,7 +63,10 @@ type queued struct {
 }
 
 // flush sends what is queued; what memory did not take stays queued for
-// the next round.
+// the next round. A batch memory turns down as it is goes again a record at
+// a time, so that the one record it will not take does not hold back the
+// rest - one job's fact kept every record out of memory for three days
+// (2026-10-23~26).
 func (s *Structured) flush(ctx context.Context) error {
 	for len(s.queued) > 0 {
 		n := min(len(s.queued), 100)
@@ -53,21 +74,64 @@ func (s *Structured) flush(ctx context.Context) error {
 		for i, q := range s.queued[:n] {
 			batch[i] = q.rec
 		}
-		if err := s.Records.Records(ctx, batch); err != nil {
+		err := s.Records.Records(ctx, batch)
+		if errors.Is(err, model.ErrRefused) {
+			for range n {
+				if err := s.flushOne(ctx); err != nil {
+					return err
+				}
+			}
+			continue
+		}
+		if err != nil {
 			if len(s.queued) > 2000 {
 				s.queued = s.queued[len(s.queued)-2000:] // the hashes bring the rest back
 			}
 			return fmt.Errorf("기억으로 보내지 못했습니다: %w", err)
 		}
-		now := s.Now()
-		for _, q := range s.queued[:n] {
-			if err := s.Store.PutRecordHash(ctx, q.rec.Key, q.hash, now); err != nil {
-				return err
-			}
+		if err := s.sent(ctx, s.queued[:n]); err != nil {
+			return err
 		}
 		s.queued = s.queued[n:]
 	}
 	return nil
+}
+
+// flushOne sends the first record queued on its own. One memory turns down
+// is let go: marked as sent, it is offered again only once it changes.
+func (s *Structured) flushOne(ctx context.Context) error {
+	q := s.queued[0]
+	if err := s.Records.Records(ctx, []model.Record{q.rec}); errors.Is(err, model.ErrRefused) {
+		if s.Out != nil {
+			s.Out.Warn("기억이 받지 않는 기록을 건너뜁니다", "key", q.rec.Key, "err", err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("기억으로 보내지 못했습니다: %w", err)
+	}
+	if err := s.sent(ctx, s.queued[:1]); err != nil {
+		return err
+	}
+	s.queued = s.queued[1:]
+	return nil
+}
+
+// sent notes that memory has these records as they are.
+func (s *Structured) sent(ctx context.Context, qs []queued) error {
+	now := s.Now()
+	for _, q := range qs {
+		if err := s.Store.PutRecordHash(ctx, q.rec.Key, q.hash, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// clip is s cut to at most n characters, the cut marked.
+func clip(s string, n int) string {
+	if utf8.RuneCountInString(s) <= n {
+		return s
+	}
+	return string([]rune(s)[:n-1]) + "…"
 }
 
 // day is a date's midnight in Seoul, as a record's validAt.

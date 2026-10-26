@@ -2,11 +2,14 @@ package sensor
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
@@ -88,6 +91,77 @@ type recorder struct{ got []model.Record }
 func (r *recorder) Records(_ context.Context, recs []model.Record) error {
 	r.got = append(r.got, recs...)
 	return nil
+}
+
+// refuser is memory-svc's check on a record: one it will not take turns the
+// whole request down (422). down is memory not answering at all.
+type refuser struct {
+	bad  string
+	down bool
+	got  []model.Record
+}
+
+func (r *refuser) Records(_ context.Context, recs []model.Record) error {
+	if r.down {
+		return errors.New("memory-svc POST /records: 502")
+	}
+	for _, x := range recs {
+		if x.Key == r.bad || utf8.RuneCountInString(x.Fact) > maxFact || utf8.RuneCountInString(x.Target.Name) > maxName {
+			return fmt.Errorf("%w: memory-svc POST /records: 422", model.ErrRefused)
+		}
+	}
+	r.got = append(r.got, recs...)
+	return nil
+}
+
+// A record longer than memory takes is cut to fit, and one memory still
+// turns down does not hold back the rest: it is let go, not offered again
+// until it changes, and the rest go in. A failure that may pass keeps
+// everything queued (2026-10-23~26: one job's 2,170-character fact kept
+// every record out for three days).
+func TestFlushLetsARefusedRecordGo(t *testing.T) {
+	ctx := context.Background()
+	rec := &refuser{bad: "job:2"}
+	s := &Structured{Store: store.NewMemory(), Loc: seoul, Now: func() time.Time { return time.Date(2026, 10, 26, 23, 0, 0, 0, seoul) }, Records: rec}
+	long := s.JobRecord(job{ID: 1, Title: "캠핑 의자 비교", Goal: "추천", State: "done", CreatedAt: "2026-10-23T09:00:00+09:00", Summary: strings.Repeat("가", 2500)})
+	bad := model.Record{Key: "job:2", Relation: "맡긴 작업", Target: model.Node{Kind: "Job", Key: "2", Name: "받지 않을 것"}, Fact: "받지 않을 것"}
+	fine := model.Record{Key: "job:3", Relation: "맡긴 작업", Target: model.Node{Kind: "Job", Key: "3", Name: strings.Repeat("이", 400)}, Fact: "괜찮은 것"}
+	for _, r := range []model.Record{long, bad, fine} {
+		if err := s.record(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.flush(ctx); err != nil {
+		t.Fatalf("one refused record failed the flush: %v", err)
+	}
+	got := map[string]model.Record{}
+	for _, r := range rec.got {
+		got[r.Key] = r
+	}
+	if f := got["job:1"].Fact; utf8.RuneCountInString(f) != maxFact || !strings.HasSuffix(f, "…") || !strings.HasPrefix(f, "2026-10-23에 맡긴 작업") {
+		t.Errorf("a long fact should be cut to %d characters: %d %q", maxFact, utf8.RuneCountInString(f), f[:40])
+	}
+	if n := utf8.RuneCountInString(got["job:3"].Target.Name); n != maxName {
+		t.Errorf("a long name should be cut to %d characters: %d", maxName, n)
+	}
+	if _, ok := got["job:2"]; ok || len(s.queued) != 0 {
+		t.Fatalf("the refused record should be let go: got %v, queued %d", ok, len(s.queued))
+	}
+	if err := s.record(ctx, bad); err != nil || len(s.queued) != 0 {
+		t.Fatalf("a refused record should not be offered again unchanged: queued %d %v", len(s.queued), err)
+	}
+	changed := bad
+	changed.Key, changed.Fact = "job:2b", "고친 것"
+	_ = s.record(ctx, changed)
+
+	rec.down = true
+	if err := s.flush(ctx); err == nil || len(s.queued) != 1 {
+		t.Fatalf("memory down should keep the queue: queued %d %v", len(s.queued), err)
+	}
+	rec.down = false
+	if err := s.flush(ctx); err != nil || len(s.queued) != 0 {
+		t.Fatalf("memory back should take what waited: queued %d %v", len(s.queued), err)
+	}
 }
 
 // Assets: holdings, flows and sales become occurrences and records; a

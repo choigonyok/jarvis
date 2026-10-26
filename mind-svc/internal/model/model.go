@@ -12,6 +12,10 @@ import (
 
 var ErrNotFound = errors.New("not found")
 
+// ErrRefused is a request a service turned down as it was (400, 422): sent
+// again unchanged, it is turned down again.
+var ErrRefused = errors.New("refused")
+
 // ErrConflict is an entity written by someone else since it was read: read
 // it again and re-decide.
 var ErrConflict = errors.New("conflict")
