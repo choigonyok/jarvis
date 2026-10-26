@@ -37,6 +37,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
 	"github.com/choigonyok/jarvis/mind-svc/internal/prefs"
 	"github.com/choigonyok/jarvis/mind-svc/internal/reflect"
+	"github.com/choigonyok/jarvis/mind-svc/internal/sensor"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 	"github.com/choigonyok/jarvis/mind-svc/internal/weather"
 	"github.com/choigonyok/jarvis/mind-svc/internal/world"
@@ -88,6 +89,9 @@ type Turn struct {
 	At string `json:"at,omitempty"`
 	// Occur is things that happened, as a sensor would record them.
 	Occur []Occur `json:"occur,omitempty"`
+	// Entries are put on the calendar before the turn runs, by hand as it
+	// were, and read the way the calendar's reader reads them.
+	Entries []model.CalendarEvent `json:"entries,omitempty"`
 	// Note is a note the operator wrote (confirmed), before the turn runs.
 	Note *model.Note `json:"note,omitempty"`
 	// Script is what the model should answer to this turn's reading, for the
@@ -454,7 +458,7 @@ func Run(ctx context.Context, sc Scenario, client llm.Client, loc *time.Location
 	cal := act.NewMemoryCalendar()
 	m := mind.New(mind.Options{
 		Store: st, Log: log, LLM: client, Calendar: cal, Notifier: &act.MemoryNotifier{},
-		Loc: loc, Now: clk.Now, Logger: quiet, Interpret: interpret.Config{Owner: "나"},
+		Loc: loc, Now: clk.Now, Logger: quiet, Interpret: interpret.Config{Owner: "나", Search: 2},
 		Settle: 0, Policy: gate.DefaultPolicy(), Mode: "eval", Memory: memory.NewFake(clk.Now),
 		Assets: assets(sc.Allocation), Travel: travel(sc.Routes), Weather: sky(sc.Weather),
 	})
@@ -503,6 +507,16 @@ func Run(ctx context.Context, sc Scenario, client llm.Client, loc *time.Location
 			if err := m.Observe(ctx, o); err != nil {
 				fail(i, "%v", err)
 			}
+		}
+		if len(t.Entries) > 0 {
+			for _, e := range t.Entries {
+				_, _ = cal.Put(ctx, e)
+			}
+			reader := &sensor.Structured{Store: st, Observer: m, World: m.World, Loc: loc, Out: quiet, Now: clk.Now}
+			if err := reader.SyncEvents(ctx, cal.All()); err != nil {
+				fail(i, "캘린더 읽기: %v", err)
+			}
+			quiesce()
 		}
 		before, _ := st.Intents(ctx, 10000)
 		seen := map[string]bool{}

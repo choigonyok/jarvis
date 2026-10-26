@@ -42,6 +42,10 @@ type Config struct {
 	MaxBatch int           // read at once past this many waiting messages
 	Context  int           // earlier messages given as context
 	MinConf  float64       // changes below this are not applied
+	// Search is how many web searches a read may make (0: none), offered only
+	// when a calendar plan shown has no place - to know where the office in
+	// its title is.
+	Search int
 	// Noise is rooms not worth reading at all: alerts, ads, banks.
 	Noise *regexp.Regexp
 	// Recall is what long-term memory already holds about a room's people,
@@ -240,7 +244,11 @@ func (c *Conversation) Read(ctx context.Context, room string) error {
 	if c.cfg.Recall != nil {
 		remembered = c.cfg.Recall(ctx, room, name, fresh)
 	}
-	answer, err := c.llm.Complete(ctx, system, prompt(name, c.cfg.Owner, c.now(), c.loc, known, remembered, earlier, fresh))
+	ask := ctx
+	if c.cfg.Search > 0 && placeless(known) {
+		ask = llm.WithSearch(ctx, c.cfg.Search)
+	}
+	answer, err := c.llm.Complete(ask, system, prompt(name, c.cfg.Owner, c.now(), c.loc, known, remembered, earlier, fresh))
 	if err != nil && !errors.Is(err, llm.ErrNoAnswer) {
 		c.retryLater(room, err)
 		return err
@@ -363,15 +371,16 @@ func (c *Conversation) known(ctx context.Context, room string) ([]view, error) {
 			out = append(out, view{ref: fmt.Sprintf("L%d", nl), entity: e})
 		}
 	}
+	today := c.now().In(c.loc).Format("2006-01-02")
+	plans, err := c.world.Entities(ctx, model.KindPlan, "", true)
+	if err != nil {
+		return nil, err
+	}
+	shown := map[string]bool{}
 	if OwnerRoom(room) {
 		// What the operator tells the assistant is often about a plan made
 		// elsewhere ("방금 집 왔어" ends the date agreed in 지수's room):
 		// today's confirmed plans from every room are shown here too.
-		today := c.now().In(c.loc).Format("2006-01-02")
-		plans, err := c.world.Entities(ctx, model.KindPlan, "", true)
-		if err != nil {
-			return nil, err
-		}
 		for _, e := range plans {
 			st := e.State
 			if e.Room == room || st.Status != model.Confirmed || st.Date == "" ||
@@ -379,10 +388,51 @@ func (c *Conversation) known(ctx context.Context, room string) ([]view, error) {
 				continue
 			}
 			np++
+			shown[e.ID] = true
 			out = append(out, view{ref: fmt.Sprintf("P%d", np), entity: e})
 		}
 	}
+	// The calendar is the operator's wherever its entries were made, and a
+	// conversation anywhere may call one off - "11월에 판교 안 간대" ends
+	// the office day put on the calendar by hand (2026-10-26). Its coming
+	// plans are shown in every room, nearest first. The partner's own
+	// entries are theirs, not the operator's to change.
+	until := c.now().In(c.loc).AddDate(0, 0, calendarDays).Format("2006-01-02")
+	var cal []model.Entity
+	for _, e := range plans {
+		st := e.State
+		if e.Room == room || shown[e.ID] || st.CalendarID == "" || st.Status != model.Confirmed || st.Owner == "partner" ||
+			st.Date == "" || max(st.Date, st.EndDate) < today || st.Date > until {
+			continue
+		}
+		cal = append(cal, e)
+	}
+	slices.SortFunc(cal, func(a, b model.Entity) int {
+		return strings.Compare(a.State.Date+" "+a.State.Start, b.State.Date+" "+b.State.Start)
+	})
+	for _, e := range cal[:min(len(cal), calendarMax)] {
+		np++
+		out = append(out, view{ref: fmt.Sprintf("P%d", np), entity: e, elsewhere: true})
+	}
 	return out, nil
+}
+
+// calendarDays is how far ahead the calendar's plans are shown - as far as
+// the calendar is read (two months) - and calendarMax how many at most.
+const (
+	calendarDays = 61
+	calendarMax  = 40
+)
+
+// placeless is whether a calendar plan shown has no place: whether what is
+// said elsewhere is about it may turn on where the office in its title is.
+func placeless(known []view) bool {
+	for _, v := range known {
+		if v.elsewhere && v.entity.State.Place == "" {
+			return true
+		}
+	}
+	return false
 }
 
 // OwnerRoom is the operator's own conversation with the assistant, where
@@ -443,8 +493,10 @@ func (c *Conversation) apply(ctx context.Context, room string, o op, fresh []mod
 		return skip("모르는 종류 " + kind)
 	}
 	refs := map[string]string{}
+	elsewhere := map[string]bool{}
 	for _, v := range known {
 		refs[v.ref] = v.entity.ID
+		elsewhere[v.entity.ID] = v.elsewhere
 	}
 	meta := world.Meta{Actor: "interpreter", Evidence: evidence, Confidence: o.Confidence, Why: o.Why}
 
@@ -472,6 +524,11 @@ func (c *Conversation) apply(ctx context.Context, room string, o op, fresh []mod
 		id := refs[strings.TrimSpace(o.Ref)]
 		if id == "" {
 			return skip("없는 ref " + o.Ref)
+		}
+		if elsewhere[id] {
+			// A calendar plan is named as the calendar names it: a room can
+			// move it or call it off, not retitle it.
+			delete(o.Set, "title")
 		}
 		_, changed, err := c.world.Update(ctx, id, func(cur *model.State) bool {
 			setAll(cur, kind, o.Set, refs)
@@ -615,11 +672,13 @@ func randomHex(n int) string {
 }
 
 // same finds a live entity this create is really about: a plan with the
-// same title, or on the same day at the same place.
+// same title, or on the same day at the same place. Not a calendar plan from
+// elsewhere: titles repeat there ("출근" every day), and one heard here first
+// is tied to its entry by the schedule skill (calendarTwin).
 func (c *Conversation) same(kind string, s model.State, known []view) string {
 	for _, v := range known {
 		e := v.entity
-		if e.Kind != kind || !e.Live() {
+		if v.elsewhere || e.Kind != kind || !e.Live() {
 			continue
 		}
 		if norm(e.State.Title) == norm(s.Title) {

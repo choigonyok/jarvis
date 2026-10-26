@@ -70,6 +70,7 @@ func main() {
 		IdleSelf: duration("MIND_IDLE_SELF", 45*time.Second),
 		IdleSim:  duration("MIND_IDLE_SIM", 4*time.Second),
 		Noise:    regexp.MustCompile(getenv("MIND_EXCLUDE_ROOMS", `카드|은행|뱅크|페이|증권|알림|광고|쿠폰|배송|택배|채널`)),
+		Search:   atoiOr(os.Getenv("MIND_WEB_SEARCH"), 2),
 	}
 	token := os.Getenv("API_TOKEN")
 	dsn := os.Getenv("DATABASE_URL")

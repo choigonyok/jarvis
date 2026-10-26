@@ -959,6 +959,7 @@ services:
       # 메시지 본문의 보존 기한(일). 그때쯤이면 남길 것은 사실·계획이 되어 있다.
       MIND_MESSAGE_RETAIN_DAYS: ${MIND_MESSAGE_RETAIN_DAYS:-365}
       MIND_OWNER_NAME: ${MEMORY_OWNER_NAME:-}
+      MIND_WEB_SEARCH: ${MIND_WEB_SEARCH:-2}
       # 장기 기억: 확인한 사실을 memory-svc(/facts)로 보내고 해석할 때 꺼내 읽는다.
       MIND_MEMORY_URL: http://memory:8100
       # 운영자와 jarvis 의 대화도 대화방 하나로 읽는다.

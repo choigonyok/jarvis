@@ -83,6 +83,79 @@ func TestKnownPlansAndSamePlan(t *testing.T) {
 	}
 }
 
+// The calendar's coming plans are shown in every room, apart from the room's
+// own and nearest first - not the partner's, not the past, not past two
+// months - and a room can call one off but not retitle it. A plan there with
+// no place lets the read search where the office in its title is.
+func TestCalendarPlansAreShownEverywhere(t *testing.T) {
+	ctx := context.Background()
+	c, st, script := setup(t, `{"changes":[
+		{"op":"cancel","kind":"plan","ref":"P4","set":{"title":"바뀐 제목"},"evidence":[{"line":1,"quote":"11월에 판교 안 간대"}],"confidence":0.6,"why":"가나전자 본사는 판교 - 검색"},
+		{"op":"create","kind":"plan","set":{"title":"PT","status":"confirmed","date":"2026-10-14"},"evidence":[{"line":1,"quote":"안 간대"}],"confidence":0.9}
+	]}`)
+	c.cfg.Search = 3
+	for _, p := range []struct {
+		room string
+		s    model.State
+	}{
+		{"r", model.State{Title: "지수와 강릉 여행", Status: model.Confirmed, Date: "2026-10-17", CalendarID: "c7"}},
+		{"calendar", model.State{Title: "가나전자 본사 출근", Status: model.Confirmed, Date: "2026-11-02", CalendarID: "c1"}},
+		{"calendar", model.State{Title: "PT", Status: model.Confirmed, Date: "2026-10-14", Start: "19:00", Place: "헬스장", CalendarID: "c2"}},
+		{"calendar", model.State{Title: "미용실", Status: model.Confirmed, Date: "2026-10-15", Owner: "partner", CalendarID: "c3"}},
+		{"calendar", model.State{Title: "지난 일", Status: model.Confirmed, Date: "2026-10-01", CalendarID: "c4"}},
+		{"calendar", model.State{Title: "먼 일", Status: model.Confirmed, Date: "2027-01-20", CalendarID: "c5"}},
+		{"q", model.State{Title: "민수와 저녁", Status: model.Confirmed, Date: "2026-10-20", CalendarID: "c6"}},
+		{"q", model.State{Title: "민수와 영화", Status: model.Proposed, Date: "2026-10-21"}},
+	} {
+		if _, err := c.world.Create(ctx, model.KindPlan, p.room, p.s, world.Meta{Actor: "sensor:calendar"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	say(t, st, "sim:1", "아 그리고 11월에 판교 안 간대!", true, time.Date(2026, 10, 12, 20, 1, 0, 0, seoul))
+	if err := c.Read(ctx, "r"); err != nil {
+		t.Fatal(err)
+	}
+	p := script.Prompts[0]
+	for _, want := range []string{"P1 [plan] 지수와 강릉 여행", "## 캘린더에 있는 다가오는 일정", "P2 [plan] PT", "P3 [plan] 민수와 저녁", "P4 [plan] 가나전자 본사 출근"} {
+		if !strings.Contains(p, want) {
+			t.Fatalf("프롬프트에 %q 가 없습니다:\n%s", want, p)
+		}
+	}
+	for _, not := range []string{"미용실", "지난 일", "먼 일", "민수와 영화"} {
+		if strings.Contains(p, not) {
+			t.Fatalf("프롬프트에 %q 가 없어야 합니다:\n%s", not, p)
+		}
+	}
+	if strings.Count(p, "지수와 강릉 여행") != 1 {
+		t.Fatalf("이 방의 일정은 한 번만 보여야 합니다:\n%s", p)
+	}
+	if script.Searches[0] != 3 {
+		t.Fatalf("장소 없는 캘린더 일정이 있으면 검색을 허락해야 합니다: %v", script.Searches)
+	}
+	plans, _ := st.Entities(ctx, model.KindPlan, "", false)
+	pts := 0
+	for _, e := range plans {
+		switch e.State.Title {
+		case "가나전자 본사 출근":
+			if e.State.Status != model.Cancelled {
+				t.Fatalf("다른 방의 말로 캘린더 일정이 취소돼야 합니다: %+v", e.State)
+			}
+		case "바뀐 제목":
+			t.Fatalf("캘린더 일정의 제목은 바꾸지 않아야 합니다: %+v", e)
+		case "PT":
+			pts++
+		}
+	}
+	if pts != 2 {
+		t.Fatalf("같은 제목이라도 캘린더 일정은 새로 만든 일정에 덮이지 않아야 합니다(이어 주는 건 일정 스킬): PT %d개", pts)
+	}
+
+	// Every calendar plan with its place: nothing to search for.
+	if placeless([]view{{elsewhere: true, entity: model.Entity{State: model.State{Place: "헬스장"}}}, {entity: model.Entity{}}}) {
+		t.Fatal("장소가 다 있으면 검색할 것이 없습니다")
+	}
+}
+
 // Nothing new, nothing read; the room is not read twice.
 func TestReadOnlyWhatIsNew(t *testing.T) {
 	c, st, script := setup(t, `{"changes":[]}`)

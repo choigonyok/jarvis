@@ -47,6 +47,8 @@ const system = `너는 개인 비서의 "해석기"다. 운영자의 메신저 �
 20. 호칭·애칭("여보", "자기", "우리 애", "아들")으로 관계를 추정하지 않는다. 연인끼리 "여보"라 불러도 결혼(MARRIED_TO)이 아니고, "우리 애"는 아이(PARENT_OF)가 아니다. 결혼·자녀·임신·이혼·사망 같은 큰 사실은 그 사람이 직접 진지하게 분명히 말한 것만 쓴다. 장난·과장·역할극·놀리는 말·밈은 fact 가 아니다.
 21. 주어가 생략된 말은 누구의 일인지 먼저 따진다. 상대에게 하는 말("또 담타...", "또 연초 피운다", "밥은 먹었어?", "또 늦게 자네")은 말한 사람이 아니라 듣는 사람의 일이다. 누구의 일인지 확실하지 않으면 쓰지 않는다.
 22. 이미 적었거나 "이미 기억하는 것"에 있는 사실은 표현만 바꿔 다시 쓰지 않는다(연인 사이라는 사실은 한 번이면 된다). 관계 이름은 정해진 것을 쓴다: 연인 PARTNER_OF, 결혼 MARRIED_TO, 자녀 PARENT_OF, 흡연 SMOKES / 비흡연 DOES_NOT_SMOKE(object 는 "담배"), 음주 DRINKS / DOES_NOT_DRINK(object "술"). 반대되는 사실은 같은 object 를 쓴다.
+23. "캘린더에 있는 다가오는 일정"은 이 대화방 밖에서 정한 운영자의 일정이다. 새 메시지가 그 일정이 없어졌거나 바뀌었다고 말하면 새로 만들지 말고 그 ref 를 cancel / update 한다. 운영자가 전해 들은 말("안 간대", "미뤄졌대")도 운영자 일정에 관한 것이면 근거가 된다. 다른 사람의 일정 이야기는 운영자 일정이 아니다. 그 일정의 제목은 바꾸지 않는다.
+24. 새 메시지가 말하는 곳(동네·건물)과 캘린더 일정이 같은 일인지가 그 일정 제목에 있는 회사·기관·가게의 위치에 달려 있는데 그 일정에 장소가 없으면, web_search 도구가 있을 때 그 위치를 찾아 판단한다. 예: "11월에 판교 안 간대"와 장소 없는 "가나전자 본사 출근" 일정 - 가나전자 본사가 판교에 있으면 같은 일이다. 검색어에는 회사·기관·가게 이름과 "위치"만 넣고, 대화 내용이나 사람 이름은 넣지 않는다. 그 밖에는 검색하지 않는다. 검색으로 이었으면 why 에 찾은 위치를 적는다("가나전자 본사는 판교 - 검색").
 
 출력은 JSON 하나만, 설명 없이:
 {"changes":[
@@ -67,6 +69,9 @@ title 은 캘린더에 그대로 쓸 짧은 한국어다("민지와 저녁", "�
 type view struct {
 	ref    string
 	entity model.Entity
+	// elsewhere: a calendar plan not made in this room, shown so the room
+	// can call it off or move it.
+	elsewhere bool
 }
 
 func prompt(roomName, owner string, now time.Time, loc *time.Location, known []view, remembered []Memory, context, fresh []model.Message) string {
@@ -79,11 +84,25 @@ func prompt(roomName, owner string, now time.Time, loc *time.Location, known []v
 	b.WriteString(dateTable(last, loc))
 
 	b.WriteString("## 이 대화방에서 이미 아는 것\n")
-	if len(known) == 0 {
+	var here, cal []view
+	for _, v := range known {
+		if v.elsewhere {
+			cal = append(cal, v)
+		} else {
+			here = append(here, v)
+		}
+	}
+	if len(here) == 0 {
 		b.WriteString("없음\n")
 	}
-	for _, v := range known {
+	for _, v := range here {
 		b.WriteString(v.ref + " " + describe(v.entity) + "\n")
+	}
+	if len(cal) > 0 {
+		b.WriteString("\n## 캘린더에 있는 다가오는 일정 (이 대화방 밖에서 정함)\n")
+		for _, v := range cal {
+			b.WriteString(v.ref + " " + describe(v.entity) + "\n")
+		}
 	}
 
 	if len(remembered) > 0 {

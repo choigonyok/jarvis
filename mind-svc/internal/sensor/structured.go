@@ -461,6 +461,18 @@ func (s *Structured) dedupeCalendar(ctx context.Context, from, to string) error 
 	return nil
 }
 
+// SyncEvents is a read of the calendar over entries already in hand - the
+// eval's calendar - across the window a read covers.
+func (s *Structured) SyncEvents(ctx context.Context, events []model.CalendarEvent) error {
+	now := s.Now().In(s.Loc)
+	entries := make([]entry, 0, len(events))
+	for _, e := range events {
+		entries = append(entries, entry{ID: e.ID, Title: e.Title, Date: e.Date, EndDate: e.EndDate, Start: e.Start, End: e.End,
+			Place: e.Place, Owner: e.Owner, Source: e.Source, Memo: e.Memo})
+	}
+	return s.SyncCalendar(ctx, entries, now.AddDate(0, 0, -7).Format("2006-01-02"), now.AddDate(0, 2, 0).Format("2006-01-02"))
+}
+
 // SyncCalendar brings the world model in step with the calendar's entries
 // between from and to.
 func (s *Structured) SyncCalendar(ctx context.Context, events []entry, from, to string) error {

@@ -1,0 +1,36 @@
+{
+ "name": "캘린더 일정은 어느 방에서든: 손으로 넣은 '카카오본사출근'을 다른 방의 '11월에 판교 안 간대'가 취소해 삭제 카드(본사 위치로 이음) - 상대 일정은 보이지 않고, 상대가 자기 운동 못 간다는 말은 운영자 PT 를 건드리지 않는다",
+ "room": "jisu",
+ "roomName": "지수",
+ "turns": [
+  {
+   "at": "2026-10-26T21:40",
+   "entries": [
+    { "id": "cal-office", "title": "카카오본사출근", "date": "2026-11-02", "owner": "me" },
+    { "id": "cal-pt", "title": "PT", "date": "2026-10-28", "start": "19:00", "end": "20:00", "place": "헬스장", "owner": "me" },
+    { "id": "cal-hair", "title": "미용실", "date": "2026-10-30", "start": "14:00", "owner": "partner" }
+   ],
+   "messages": [
+    { "at": "2026-10-26T21:49", "me": true, "text": "아 그리고 11월에 판교 안 간대!" },
+    { "at": "2026-10-26T21:50", "from": "지수", "text": "오 진짜? 잘됐다 ㅎㅎ" }
+   ],
+   "script": {"changes":[{"op":"cancel","kind":"plan","ref":"P2","evidence":[{"line":1,"quote":"11월에 판교 안 간대"}],"confidence":0.6,"why":"카카오 본사는 판교 - 검색"}]},
+   "expect": {
+    "intents": ["calendar.delete"],
+    "cards": ["카카오본사출근"],
+    "plans": [{ "titleHas": "카카오본사출근", "status": "cancelled" }, { "titleHas": "PT", "status": "confirmed" }, { "titleHas": "미용실", "status": "confirmed" }]
+   }
+  },
+  {
+   "approve": "calendar.delete",
+   "expect": { "calendarCount": 2 }
+  },
+  {
+   "messages": [
+    { "at": "2026-10-26T22:10", "from": "지수", "text": "나 28일에 운동 못 가겠다 야근이래" }
+   ],
+   "script": {"changes":[]},
+   "expect": { "noActions": true, "plans": [{ "titleHas": "PT", "status": "confirmed" }] }
+  }
+ ]
+}

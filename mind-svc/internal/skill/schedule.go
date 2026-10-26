@@ -230,10 +230,22 @@ func (s Schedule) remove(e model.Entity, changes []model.Change) model.Intent {
 	payload, _ := json.Marshal(model.CalendarAction{EventID: e.State.CalendarID, Event: event(e.State, nil)})
 	return model.Intent{
 		Kind: "calendar.delete", EntityID: e.ID, Payload: payload,
-		Title:  "캘린더에서 삭제: " + e.State.Title,
+		Title: "캘린더에서 삭제: " + e.State.Title, Body: readWhy(changes),
 		Reason: "대화에서 취소됐어요", Confidence: confidence(changes),
 		Evidence: evidence(changes), Reversible: true,
 	}
+}
+
+// readWhy is how the conversation was read, latest last - what ties the
+// words to this plan when they do not name it ("본사는 판교 - 검색").
+func readWhy(changes []model.Change) string {
+	why := ""
+	for _, c := range changes {
+		if c.Actor == "interpreter" && c.Why != "" {
+			why = c.Why
+		}
+	}
+	return why
 }
 
 // timersFor looks again a day before (an evening before an all-day plan)
