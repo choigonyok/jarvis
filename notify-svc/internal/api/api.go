@@ -199,18 +199,24 @@ func (s *Server) consume(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// list is a page of the inbox: ?limit= (default 50, at most 200) after
+// ?offset= rows, with the unread and total counts the console's pages need.
 func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	items, unread, err := s.store.List(r.Context(), audience(r), limit)
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	if offset < 0 {
+		offset = 0
+	}
+	inbox, err := s.store.List(r.Context(), audience(r), limit, offset)
 	if err != nil {
 		s.log.Error("알림함을 읽지 못했습니다", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "알림함을 읽지 못했습니다."})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "unread": unread})
+	writeJSON(w, http.StatusOK, map[string]any{"items": inbox.Items, "unread": inbox.Unread, "total": inbox.Total})
 }
 
 func (s *Server) read(w http.ResponseWriter, r *http.Request) {

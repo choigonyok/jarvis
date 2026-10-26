@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { Pager } from "@/components/ui/pager";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { usePaged } from "@/lib/paging";
 import { krw } from "@/lib/portfolio";
 import {
   type Book,
@@ -660,6 +662,8 @@ export function UnparsedSheet({
   onDismissed: (note: string) => void;
 }) {
   const [error, setError] = useState<string | null>(null);
+  // Each is the whole alert: ten a page.
+  const paged = usePaged(items, { size: 10 });
   const dismiss = async (u: Unparsed) => {
     const err = await send(`unparsed/${encodeURIComponent(u.messageId)}/dismiss`, "POST");
     if (err) setError(err);
@@ -672,8 +676,9 @@ export function UnparsedSheet({
       title="읽지 못한 카드 알림"
       description="결제처럼 보이지만 사용처나 금액을 찾지 못했어요. 합계에는 아직 없어요."
     >
+      <div id={paged.anchor} className="scroll-mt-4" />
       <ul className="space-y-3">
-        {items.map((u) => (
+        {paged.items.map((u) => (
           <li key={u.messageId} className="rounded-xl bg-glass p-3">
             <p className="mb-2 text-[11.5px] text-faint">
               {u.chatName} · {dayLabel(dayKey(u.sentAt))} {clock(u.sentAt)}
@@ -690,6 +695,7 @@ export function UnparsedSheet({
           </li>
         ))}
       </ul>
+      <Pager {...paged} />
       {error ? <p className="mt-3 text-[12.5px] text-reject">{error}</p> : null}
     </Panel>
   );

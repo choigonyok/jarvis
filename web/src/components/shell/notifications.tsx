@@ -6,6 +6,7 @@ import { openTarget, targetOf } from "@/lib/focus";
 import { onInboxRequest, onResume } from "@/lib/resume";
 import { Bell, Settings2 } from "lucide-react";
 import { HeaderPanel } from "@/components/shell/panel";
+import { Pager } from "@/components/ui/pager";
 import { usePush } from "@/lib/use-push";
 import { cn } from "@/lib/utils";
 
@@ -45,35 +46,53 @@ const ago = (iso: string) => {
   return d < 7 ? `${d}일 전` : new Date(iso).toLocaleDateString("ko-KR", { month: "numeric", day: "numeric" });
 };
 
+/** How many the inbox shows a page: notify-svc counts them all and sends one page. */
+const INBOX_PAGE = 20;
+
 export function Notifications() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<"list" | "settings">("list");
   const [notes, setNotes] = useState<Note[]>([]);
   const [unread, setUnread] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
   const [failed, setFailed] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
+  const list = useRef<HTMLUListElement>(null);
+  // The page the timer and a return to the app read again.
+  const shownPage = useRef(1);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (at?: number) => {
+    const p = at ?? shownPage.current;
     try {
-      const res = await fetch("/api/notify/notifications?limit=50", { cache: "no-store" });
+      const res = await fetch(`/api/notify/notifications?limit=${INBOX_PAGE}&offset=${(p - 1) * INBOX_PAGE}`, {
+        cache: "no-store",
+      });
       if (!res.ok) throw new Error(String(res.status));
-      const body = (await res.json()) as { items: Note[]; unread: number };
+      const body = (await res.json()) as { items: Note[]; unread: number; total?: number };
       setNotes(body.items);
       setUnread(body.unread);
+      setTotal(body.total ?? body.items.length);
       setFailed(false);
     } catch {
       setFailed(true);
     }
   }, []);
 
+  const turn = (p: number) => {
+    shownPage.current = p;
+    setPage(p);
+    void load(p);
+    list.current?.scrollTo({ top: 0 });
+  };
+
   // The badge stays current while the console is open; a push arriving means
   // the next look already has it.
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- the fetch sets state when it resolves
     void load();
     const id = window.setInterval(() => void load(), 60_000);
-    const stop = onResume(load);
+    const stop = onResume(() => load());
     // A card decided on this screen: its "결재 대기" was just marked read.
     const decided = () => void load();
     window.addEventListener("jarvis:decided", decided);
@@ -125,7 +144,10 @@ export function Notifications() {
         onClick={() => {
           setOpen((v) => !v);
           setView("list");
-          void load();
+          // Opened, the inbox starts at its newest page.
+          shownPage.current = 1;
+          setPage(1);
+          void load(1);
         }}
         aria-expanded={open}
         aria-label={unread ? `알림 ${unread}개 안 읽음` : "알림"}
@@ -168,7 +190,8 @@ export function Notifications() {
               checkout URL, and the whole list slid sideways under the thumb;
               long words wrap now (globals.css), and nothing here pans. */}
           {view === "list" ? (
-            <ul className="max-h-[min(28rem,70vh)] overflow-x-hidden overflow-y-auto overscroll-contain">
+            <>
+            <ul ref={list} className="max-h-[min(28rem,70vh)] overflow-x-hidden overflow-y-auto overscroll-contain">
               {failed && notes.length === 0 ? (
                 <li className="px-3.5 py-6 text-center text-[12.5px] text-dim">알림 서비스에 연결하지 못했어요.</li>
               ) : notes.length === 0 ? (
@@ -205,6 +228,16 @@ export function Notifications() {
                 ))
               )}
             </ul>
+            <Pager
+              page={page}
+              pageCount={Math.max(1, Math.ceil(total / INBOX_PAGE))}
+              total={total}
+              from={(page - 1) * INBOX_PAGE + 1}
+              to={(page - 1) * INBOX_PAGE + notes.length}
+              go={turn}
+              className="mt-0 border-t border-edge-soft px-3.5 py-1.5"
+            />
+            </>
           ) : (
             <NotifySettings />
           )}

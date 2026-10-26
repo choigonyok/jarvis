@@ -129,19 +129,30 @@ func (s *Store) Pending(ctx context.Context, audience, tier string) ([]Notificat
 	return collect(rows)
 }
 
-// List is one person's inbox: newest first, and how many are unread in all.
-func (s *Store) List(ctx context.Context, audience string, limit int) ([]Notification, int, error) {
-	rows, err := s.pool.Query(ctx, `select `+cols+` from notifications where audience = $1 order by created_at desc limit $2`, who(audience), limit)
+// Inbox is a page of one person's inbox and what it is a page of.
+type Inbox struct {
+	Items []Notification
+	// Unread is how many are unread in all, not on this page.
+	Unread int
+	// Total is how many there are in all - the console's pages are counted from it.
+	Total int
+}
+
+// List is a page of one person's inbox, newest first: `limit` of them after
+// skipping `offset`. The id breaks a tie in time, so two pages never share a
+// row nor skip one.
+func (s *Store) List(ctx context.Context, audience string, limit, offset int) (Inbox, error) {
+	rows, err := s.pool.Query(ctx, `select `+cols+` from notifications where audience = $1 order by created_at desc, id desc limit $2 offset $3`, who(audience), limit, offset)
 	if err != nil {
-		return nil, 0, err
+		return Inbox{}, err
 	}
 	items, err := collect(rows)
 	if err != nil {
-		return nil, 0, err
+		return Inbox{}, err
 	}
-	var unread int
-	err = s.pool.QueryRow(ctx, `select count(*) from notifications where audience = $1 and read_at is null`, who(audience)).Scan(&unread)
-	return items, unread, err
+	out := Inbox{Items: items}
+	err = s.pool.QueryRow(ctx, `select count(*) filter (where read_at is null), count(*) from notifications where audience = $1`, who(audience)).Scan(&out.Unread, &out.Total)
+	return out, err
 }
 
 // MarkRead marks the given ids of one person's read, or every unread one of

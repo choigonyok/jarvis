@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { X } from "lucide-react";
+import { Pager } from "@/components/ui/pager";
+import { usePaged } from "@/lib/paging";
 import { krw } from "@/lib/portfolio";
 import { type Meal, type MealWay, type Slot, SLOTS, WAYS, moment, wayOf } from "@/lib/life";
 import { cn } from "@/lib/utils";
@@ -13,8 +15,6 @@ const shade: Record<MealWay, string> = {
   out: "bg-foreground/16",
 };
 
-const SHOWN = 8;
-
 /**
  * The last month's meals as the card saw them. The four meals of the day
  * are columns, each split by how it was had; tapping one - or a way in the
@@ -24,7 +24,6 @@ const SHOWN = 8;
 export function Meals({ meals }: { meals: Meal[] }) {
   const [slot, setSlot] = useState<Slot | null>(null);
   const [way, setWay] = useState<MealWay | null>(null);
-  const [more, setMore] = useState(false);
 
   const counts = useMemo(() => {
     const out = Object.fromEntries(SLOTS.map((s) => [s, { delivery: 0, home: 0, out: 0, all: 0 }])) as Record<
@@ -48,6 +47,8 @@ export function Meals({ meals }: { meals: Meal[] }) {
         .sort((a, b) => b.at.localeCompare(a.at)),
     [meals, slot, way],
   );
+  // Twenty a page; another meal or way starts at the first.
+  const paged = usePaged(shown, { reset: `${slot ?? ""}|${way ?? ""}` });
   const total = shown.reduce((s, m) => s + m.amount, 0);
   const delivered = meals.filter((m) => m.delivery);
 
@@ -143,8 +144,9 @@ export function Meals({ meals }: { meals: Meal[] }) {
       {shown.length === 0 ? (
         <p className="py-6 text-center text-[13px] text-faint">이 조건의 끼니가 없어요.</p>
       ) : (
+        <div id={paged.anchor} className="scroll-mt-4">
         <ul className="mt-2 space-y-px">
-          {(more ? shown : shown.slice(0, SHOWN)).map((m) => (
+          {paged.items.map((m) => (
             <li key={m.at + m.merchant} className="flex items-center gap-3 py-2">
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[13.5px] text-foreground/90">{m.merchant}</span>
@@ -156,16 +158,9 @@ export function Meals({ meals }: { meals: Meal[] }) {
             </li>
           ))}
         </ul>
+        <Pager {...paged} unit="번" />
+        </div>
       )}
-      {!more && shown.length > SHOWN ? (
-        <button
-          type="button"
-          onClick={() => setMore(true)}
-          className="tap mt-1 text-[12.5px] text-dim outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
-        >
-          {shown.length - SHOWN}번 더 보기
-        </button>
-      ) : null}
     </div>
   );
 }

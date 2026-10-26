@@ -1,5 +1,8 @@
 "use client";
 
+import { useMemo } from "react";
+import { Pager } from "@/components/ui/pager";
+import { usePaged } from "@/lib/paging";
 import { krw } from "@/lib/portfolio";
 import { type Tx, cardLabel, clock, dayLabel, groupByDay } from "@/lib/spending";
 import { cn } from "@/lib/utils";
@@ -13,25 +16,32 @@ import { cn } from "@/lib/utils";
  * the list should match the alerts on the phone, and a charge that silently
  * vanished would read as a lost alert.
  */
-export function Transactions({ txs, onOpen }: { txs: Tx[]; onOpen: (t: Tx) => void }) {
-  const days = groupByDay(txs);
+export function Transactions({ txs, onOpen, reset }: { txs: Tx[]; onOpen: (t: Tx) => void; reset: string }) {
+  // Twenty a page (lib/paging.ts). A day split across two pages heads both
+  // with the whole day's total, not with the part on the page.
+  const totals = useMemo(() => new Map(groupByDay(txs).map((g) => [g.date, g.totalKrw])), [txs]);
+  const paged = usePaged(txs, { reset, focusKey: (t) => `tx:${t.id}` });
+  const days = groupByDay(paged.items);
   return (
-    <div className="space-y-5">
-      {days.map((g) => (
-        <section key={g.date} aria-label={dayLabel(g.date)}>
-          <div className="mb-1 flex items-baseline justify-between px-2">
-            <h3 className="text-[12px] text-dim">{dayLabel(g.date)}</h3>
-            <span className="tnum text-[11.5px] text-faint">{krw(g.totalKrw)}</span>
-          </div>
-          <ul className="space-y-px">
-            {g.txs.map((t) => (
-              <li key={t.id} data-focus={`tx:${t.id}`}>
-                <Row t={t} onOpen={() => onOpen(t)} />
-              </li>
-            ))}
-          </ul>
-        </section>
-      ))}
+    <div id={paged.anchor} className="scroll-mt-4">
+      <div className="space-y-5">
+        {days.map((g) => (
+          <section key={g.date} aria-label={dayLabel(g.date)}>
+            <div className="mb-1 flex items-baseline justify-between px-2">
+              <h3 className="text-[12px] text-dim">{dayLabel(g.date)}</h3>
+              <span className="tnum text-[11.5px] text-faint">{krw(totals.get(g.date) ?? g.totalKrw)}</span>
+            </div>
+            <ul className="space-y-px">
+              {g.txs.map((t) => (
+                <li key={t.id} data-focus={`tx:${t.id}`}>
+                  <Row t={t} onOpen={() => onOpen(t)} />
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
+      </div>
+      <Pager {...paged} className="px-2" />
     </div>
   );
 }

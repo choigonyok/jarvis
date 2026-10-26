@@ -293,7 +293,7 @@ export function Spending() {
                 ) : null}
 
                 {shown.length > 0 ? (
-                  <Transactions txs={shown} onOpen={setOpen} />
+                  <Transactions txs={shown} onOpen={setOpen} reset={`${month}|${day ?? ""}|${category ?? ""}|${query.trim()}`} />
                 ) : (
                   <p className="px-2 py-8 text-center text-[13px] text-faint">
                     {filtered

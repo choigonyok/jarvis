@@ -84,11 +84,32 @@ export function openTarget(url: string, push: (path: string) => void) {
 }
 
 /**
+ * What is being looked for right now, while focusSection waits for it. A list
+ * split into pages (lib/paging.ts) has most of its rows off screen: it reads
+ * this, and hears it change, to open the page the row is on.
+ */
+let wanted: string | null = null;
+const WANTED = "jarvis:focus-wanted";
+
+export function wantedFocus(): string | null {
+  return wanted;
+}
+
+export function onFocusWanted(fn: (id: string) => void): () => void {
+  const handle = (e: Event) => fn((e as CustomEvent<string>).detail);
+  window.addEventListener(WANTED, handle);
+  return () => window.removeEventListener(WANTED, handle);
+}
+
+/**
  * Brings [data-focus=id] to the middle of its scroller and lights it. Waits
  * up to ten seconds for it to appear (the screen is still loading, a month
- * still being fetched); returns a function that stops waiting.
+ * still being fetched, a page of rows being opened); returns a function that
+ * stops waiting.
  */
 export function focusSection(id: string): () => void {
+  wanted = id;
+  window.dispatchEvent(new CustomEvent<string>(WANTED, { detail: id }));
   let stopped = false;
   const find = () => {
     const el = document.querySelector<HTMLElement>(`[data-focus="${CSS.escape(id)}"]`);
@@ -102,7 +123,10 @@ export function focusSection(id: string): () => void {
     el.classList.add("focus-flash");
     return true;
   };
-  if (find()) return () => {};
+  if (find()) {
+    wanted = null;
+    return () => {};
+  }
   const mo = new MutationObserver(() => {
     if (!stopped && find()) stop();
   });
@@ -112,6 +136,7 @@ export function focusSection(id: string): () => void {
   const timer = window.setTimeout(stop, 10_000);
   function stop() {
     stopped = true;
+    if (wanted === id) wanted = null;
     mo.disconnect();
     window.clearTimeout(timer);
   }

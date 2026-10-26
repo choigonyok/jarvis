@@ -9,6 +9,8 @@ import {
   signedKrw,
   taxFor,
 } from "@/lib/portfolio";
+import { Pager } from "@/components/ui/pager";
+import { usePaged } from "@/lib/paging";
 import type { Order } from "@/lib/trade-plan";
 import { cn } from "@/lib/utils";
 
@@ -23,6 +25,7 @@ import { cn } from "@/lib/utils";
  */
 export function RealizedSection({ realized }: { realized: Realized }) {
   const { lines, totalKrw, tax, since, missing } = realized;
+  const paged = usePaged(lines);
   const up = totalKrw >= 0;
   const [, m, d] = since.split("-").map(Number);
 
@@ -47,8 +50,9 @@ export function RealizedSection({ realized }: { realized: Realized }) {
       ) : null}
 
       {lines.length > 0 ? (
+        <div id={paged.anchor} className="scroll-mt-4">
         <ul className="mt-3 space-y-0.5">
-          {lines.map((l) => {
+          {paged.items.map((l) => {
             const gain = l.profitKrw >= 0;
             const rate = l.costKrw > 0 ? l.profitKrw / l.costKrw : 0;
             return (
@@ -74,6 +78,8 @@ export function RealizedSection({ realized }: { realized: Realized }) {
             );
           })}
         </ul>
+        <Pager {...paged} className="px-2" />
+        </div>
       ) : null}
 
       <div className="mt-5 space-y-5">

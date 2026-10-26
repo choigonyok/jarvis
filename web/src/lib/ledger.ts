@@ -83,9 +83,7 @@ export type Day = { key: string; label: string; entries: Proposal[] };
  * places across a midnight.
  */
 export function groupByDay(proposals: Proposal[], now = new Date()): Day[] {
-  const sorted = proposals
-    .slice()
-    .sort((a, b) => (raisedAt(b)?.getTime() ?? 0) - (raisedAt(a)?.getTime() ?? 0));
+  const sorted = newestFirst(proposals);
 
   const days: Day[] = [];
   for (const proposal of sorted) {
@@ -96,6 +94,11 @@ export function groupByDay(proposals: Proposal[], now = new Date()): Day[] {
     else days.push({ key, label: dayLabel(date, now), entries: [proposal] });
   }
   return days;
+}
+
+/** The order the record shows them in - and pages them in (lib/paging.ts). */
+export function newestFirst(proposals: Proposal[]): Proposal[] {
+  return proposals.slice().sort((a, b) => (raisedAt(b)?.getTime() ?? 0) - (raisedAt(a)?.getTime() ?? 0));
 }
 
 /**

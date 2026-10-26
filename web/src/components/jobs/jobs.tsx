@@ -1,13 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Header, TabBar } from "@/components/shell/header";
 import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { ChecklistCard } from "@/components/chat/checklist";
 import { JobSheet } from "@/components/jobs/job-sheet";
+import { Pager } from "@/components/ui/pager";
 import { type BlockedSite, type Job, LIVE, stateLabel, stateTone, when } from "@/lib/jobs";
+import { usePaged } from "@/lib/paging";
 import { onResume } from "@/lib/resume";
 import { ago } from "@/lib/spending";
 import { isPending, type Checklist } from "@/lib/thread";
@@ -93,8 +95,11 @@ export function Jobs() {
   ]
     .map((id) => checklists[id])
     .filter((l): l is Checklist => Boolean(l) && l.status === "active");
-  const live = (jobs ?? []).filter((j) => LIVE.includes(j.state));
-  const ended = (jobs ?? []).filter((j) => !LIVE.includes(j.state));
+  const live = useMemo(() => (jobs ?? []).filter((j) => LIVE.includes(j.state)), [jobs]);
+  const ended = useMemo(() => (jobs ?? []).filter((j) => !LIVE.includes(j.state)), [jobs]);
+  // Twenty a page, each list its own; a job a notification names opens its page.
+  const livePaged = usePaged(live, { focusKey: (j) => `job:${j.id}` });
+  const endedPaged = usePaged(ended);
   const open = jobs?.find((j) => j.id === openId) ?? null;
 
   return (
@@ -150,13 +155,16 @@ export function Jobs() {
 
           {jobs ? (
             live.length > 0 ? (
-              <ul className="space-y-1" data-focus="waiting">
-                {live.map((j) => (
-                  <li key={j.id} data-focus={`job:${j.id}`}>
-                    <Row job={j} onOpen={() => setOpenId(j.id)} />
-                  </li>
-                ))}
-              </ul>
+              <div id={livePaged.anchor} className="scroll-mt-4">
+                <ul className="space-y-1" data-focus="waiting">
+                  {livePaged.items.map((j) => (
+                    <li key={j.id} data-focus={`job:${j.id}`}>
+                      <Row job={j} onOpen={() => setOpenId(j.id)} />
+                    </li>
+                  ))}
+                </ul>
+                <Pager {...livePaged} className="px-2" />
+              </div>
             ) : (
               <div className="py-14 text-center">
                 <p className="text-[14px] text-foreground/90">맡긴 작업이 없습니다.</p>
@@ -186,13 +194,16 @@ export function Jobs() {
                 <span className="tnum text-[12px] text-faint">{ended.length}</span>
               </button>
               {showEnded ? (
-                <ul className="mt-2 space-y-1">
-                  {ended.map((j) => (
-                    <li key={j.id}>
-                      <Row job={j} onOpen={() => setOpenId(j.id)} />
-                    </li>
-                  ))}
-                </ul>
+                <div id={endedPaged.anchor} className="scroll-mt-4">
+                  <ul className="mt-2 space-y-1">
+                    {endedPaged.items.map((j) => (
+                      <li key={j.id}>
+                        <Row job={j} onOpen={() => setOpenId(j.id)} />
+                      </li>
+                    ))}
+                  </ul>
+                  <Pager {...endedPaged} className="px-2" />
+                </div>
               ) : null}
             </section>
           ) : null}

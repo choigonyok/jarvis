@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Pager } from "@/components/ui/pager";
+import { usePaged } from "@/lib/paging";
 import { API } from "@/lib/thread";
 import { cn } from "@/lib/utils";
 
@@ -36,6 +38,11 @@ export function SavedLogins() {
   const [error, setError] = useState<string | null>(null);
   const [forgetting, setForgetting] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<string | null>(null);
+  // The sites twenty a page, what was done with them ten.
+  const logins = useMemo(() => data?.logins ?? [], [data]);
+  const uses = useMemo(() => data?.uses ?? [], [data]);
+  const loginsPaged = usePaged(logins);
+  const usesPaged = usePaged(uses, { size: 10 });
 
   async function load() {
     try {
@@ -88,8 +95,9 @@ export function SavedLogins() {
       {data.logins.length === 0 ? (
         <p className="text-[13px] text-faint">저장된 로그인 정보가 없어요.</p>
       ) : (
+        <div id={loginsPaged.anchor} className="scroll-mt-4">
         <ul className="divide-y divide-edge-soft">
-          {data.logins.map((l) => (
+          {loginsPaged.items.map((l) => (
             <li key={l.domain} className="flex items-center gap-3 py-2.5">
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[13.5px] text-foreground/90">
@@ -116,12 +124,14 @@ export function SavedLogins() {
             </li>
           ))}
         </ul>
+        <Pager {...loginsPaged} unit="곳" />
+        </div>
       )}
       {data.uses.length > 0 ? (
-        <div>
+        <div id={usesPaged.anchor} className="scroll-mt-4">
           <p className="mb-1.5 text-[12px] text-faint">최근에 쓴 기록</p>
           <ul className="space-y-1">
-            {data.uses.slice(0, 8).map((u, i) => (
+            {usesPaged.items.map((u, i) => (
               <li key={`${u.at}-${i}`} className="tnum flex gap-2 text-[12px] text-dim">
                 <span className="shrink-0 text-faint">{when(u.at)}</span>
                 <span className="min-w-0 truncate">
@@ -130,6 +140,7 @@ export function SavedLogins() {
               </li>
             ))}
           </ul>
+          <Pager {...usesPaged} unit="번" />
         </div>
       ) : null}
     </div>

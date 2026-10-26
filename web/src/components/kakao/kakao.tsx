@@ -5,7 +5,9 @@ import { ChevronDown, Search } from "lucide-react";
 import { Header, TabBar } from "@/components/shell/header";
 import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
+import { Pager } from "@/components/ui/pager";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { usePaged } from "@/lib/paging";
 import { useKakao, type KakaoMessage, type KakaoRoom, type Source } from "@/lib/use-kakao";
 import { useThread } from "@/lib/use-thread";
 import { isPending } from "@/lib/thread";
@@ -190,6 +192,14 @@ function RoomPicker({
     const q = query.trim().toLowerCase();
     return q ? rooms.filter((r) => r.name.toLowerCase().includes(q)) : rooms;
   }, [rooms, query]);
+  // Twenty rooms a page. The list scrolls on its own inside the sheet, so a
+  // page turned takes it back to its top.
+  const paged = usePaged(found, { reset: query.trim() });
+  const list = useRef<HTMLUListElement>(null);
+  const turn = (page: number) => {
+    paged.go(page);
+    list.current?.scrollTo({ top: 0 });
+  };
 
   return (
     <div className="flex shrink-0 items-start gap-1 py-1 sm:py-2">
@@ -236,8 +246,8 @@ function RoomPicker({
               className="h-11 w-full rounded-lg bg-glass ps-9 pe-3 text-[16px] text-foreground outline-none placeholder:text-faint focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-9 mouse:text-[13px]"
             />
           </label>
-          <ul className="scrollbar-hairline min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-4">
-            {found.map((room) => {
+          <ul ref={list} className="scrollbar-hairline min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-4">
+            {paged.items.map((room) => {
               const active = room.id === current.id;
               return (
                 <li key={room.id}>
@@ -265,6 +275,7 @@ function RoomPicker({
               <li className="px-3 py-6 text-center text-[13px] text-faint">&lsquo;{query.trim()}&rsquo;에 맞는 방이 없어요.</li>
             ) : null}
           </ul>
+          <Pager {...paged} go={turn} unit="개" className="mx-4 mt-0 mb-3" />
         </SheetContent>
       </Sheet>
 

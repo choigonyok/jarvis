@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Check, ChevronDown, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Pager } from "@/components/ui/pager";
 import {
   type Note,
   type NoteStatus,
@@ -12,6 +13,7 @@ import {
   scopeLabel,
   versions as readVersions,
 } from "@/lib/life";
+import { usePaged } from "@/lib/paging";
 import { cn } from "@/lib/utils";
 
 /**
@@ -32,11 +34,18 @@ export function Notes({ notes, onChange }: { notes: Note[]; onChange: (n: Note) 
   const [answered, setAnswered] = useState<Set<string>>(new Set());
   const tucked = notes.filter((n) => n.status === "rejected" && !answered.has(n.id) && n.id !== open);
   const fold = tucked.length > 0 && !showRejected;
-  const visible = fold ? notes.filter((n) => !tucked.includes(n)) : notes;
+  const visible = useMemo(
+    () => (fold ? notes.filter((n) => !(n.status === "rejected" && !answered.has(n.id) && n.id !== open)) : notes),
+    [notes, fold, answered, open],
+  );
+  // Twenty a page; a note a notification names opens its page. The folded
+  // ones wait under the last page, where the list ends.
+  const paged = usePaged(visible, { focusKey: (n) => `note:${n.id}` });
 
   return (
+    <div id={paged.anchor} className="scroll-mt-4">
     <ul className="divide-y divide-edge-soft">
-      {visible.map((n) => (
+      {paged.items.map((n) => (
         <NoteRow
           key={n.id}
           note={n}
@@ -48,7 +57,7 @@ export function Notes({ notes, onChange }: { notes: Note[]; onChange: (n: Note) 
           }}
         />
       ))}
-      {fold ? (
+      {fold && paged.page === paged.pageCount ? (
         <li>
           <button
             type="button"
@@ -65,6 +74,8 @@ export function Notes({ notes, onChange }: { notes: Note[]; onChange: (n: Note) 
         </li>
       ) : null}
     </ul>
+    <Pager {...paged} unit="개" />
+    </div>
   );
 }
 

@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { Pager } from "@/components/ui/pager";
+import { usePaged } from "@/lib/paging";
 import { krw, VENUE_LABEL, type Outflow, type OutflowPart } from "@/lib/portfolio";
 
 /**
@@ -74,17 +76,20 @@ function partLine(p: OutflowPart, whole: number): string {
 
 /** Every withdrawal since the principal's start, newest first, and where it went. */
 export function OutflowList({ outflows, onChanged }: { outflows: Outflow[]; onChanged: () => void }) {
+  const newest = useMemo(() => [...outflows].reverse(), [outflows]);
+  const paged = usePaged(newest);
   if (outflows.length === 0) return <p className="text-[12.5px] text-faint">아직 뺀 돈이 없어요.</p>;
   return (
-    <div>
+    <div id={paged.anchor} className="scroll-mt-4">
       <p className="mb-2 text-[12px] leading-relaxed text-faint">
         다른 투자 계좌로 다시 들어온 돈은 옮긴 것으로 보고, 아니면 대화에서 카드로 물어요. 지출로 답한 돈은 가계부에 들어가요.
       </p>
       <ul className="divide-y divide-edge-soft">
-        {[...outflows].reverse().map((o) => (
+        {paged.items.map((o) => (
           <OutflowRow key={o.key} outflow={o} onChanged={onChanged} />
         ))}
       </ul>
+      <Pager {...paged} />
     </div>
   );
 }

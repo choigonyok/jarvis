@@ -69,7 +69,8 @@ export function Assets() {
   const [record, setRecord] = useState<PlacedOrder[]>([]);
   const [standing, setStanding] = useState<Standing[]>([]);
   const reloadRecord = useCallback(() => {
-    void recentOrders().then(setRecord);
+    // As far back as assets-svc keeps on one page; the record pages them (orders.tsx).
+    void recentOrders(100).then(setRecord);
     void standingOrders().then(setStanding);
   }, []);
   useEffect(() => {

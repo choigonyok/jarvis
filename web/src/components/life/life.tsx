@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Header, TabBar } from "@/components/shell/header";
 import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { Meals } from "@/components/life/meals";
 import { Notes } from "@/components/life/notes";
+import { Pager } from "@/components/ui/pager";
 import {
   type Loaded,
   type Meal,
@@ -19,6 +20,7 @@ import {
   read,
   shortDate,
 } from "@/lib/life";
+import { usePaged } from "@/lib/paging";
 import { krw } from "@/lib/portfolio";
 import { onResume } from "@/lib/resume";
 import { isPending } from "@/lib/thread";
@@ -202,9 +204,11 @@ function Trouble({ what, children, onRetry }: { what: string; children: ReactNod
 
 /** The places reviewed, best first: how they scored, how often, what they cost, what they are known for. */
 function Places({ places }: { places: Place[] }) {
+  const paged = usePaged(places);
   return (
+    <div id={paged.anchor} className="scroll-mt-4">
     <ul className="divide-y divide-edge-soft">
-      {places.map((p) => {
+      {paged.items.map((p) => {
         const said = [
           p.type,
           p.visits > 0 && `${p.visits}번 다녀감`,
@@ -244,10 +248,10 @@ function Places({ places }: { places: Place[] }) {
         );
       })}
     </ul>
+    <Pager {...paged} unit="곳" />
+    </div>
   );
 }
-
-const OTHERS_SHOWN = 6;
 
 /**
  * What was bought in the last half year, by kind. What keeps coming round
@@ -255,10 +259,12 @@ const OTHERS_SHOWN = 6;
  * said come first of all - the line wanted when buying the next pair.
  */
 function Things({ things }: { things: Thing[] }) {
-  const [more, setMore] = useState(false);
-  const ordered = byNeed(things);
-  const cycling = ordered.filter((t) => t.next);
-  const others = ordered.filter((t) => !t.next);
+  // What comes round first, then the rest - twenty a page across both.
+  const ordered = useMemo(() => {
+    const all = byNeed(things);
+    return [...all.filter((t) => t.next), ...all.filter((t) => !t.next)];
+  }, [things]);
+  const paged = usePaged(ordered);
   const sizes = things.filter((t) => t.sizes?.length);
 
   return (
@@ -275,9 +281,24 @@ function Things({ things }: { things: Thing[] }) {
         </p>
       ) : null}
 
+      <div id={paged.anchor} className="scroll-mt-4" />
       <ul className="divide-y divide-edge-soft">
-        {cycling.map((t) => {
-          const left = daysUntil(t.next!);
+        {paged.items.map((t) => {
+          if (!t.next) {
+            return (
+              <li key={t.class} className="py-3">
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="min-w-0 truncate text-[14.5px] text-foreground/80">{t.class}</span>
+                  <span className="tnum shrink-0 text-[11.5px] text-faint">
+                    {shortDate(t.bought[t.bought.length - 1] ?? t.last)}
+                    {t.bought.length > 1 ? ` · ${t.bought.length}번` : ""}
+                  </span>
+                </div>
+                <p className="mt-0.5 truncate text-[12.5px] text-faint">{t.items.join(", ")}</p>
+              </li>
+            );
+          }
+          const left = daysUntil(t.next);
           return (
             <li key={t.class} className="py-3">
               <div className="flex items-baseline justify-between gap-3">
@@ -293,28 +314,8 @@ function Things({ things }: { things: Thing[] }) {
             </li>
           );
         })}
-        {(more ? others : others.slice(0, OTHERS_SHOWN)).map((t) => (
-          <li key={t.class} className="py-3">
-            <div className="flex items-baseline justify-between gap-3">
-              <span className="min-w-0 truncate text-[14.5px] text-foreground/80">{t.class}</span>
-              <span className="tnum shrink-0 text-[11.5px] text-faint">
-                {shortDate(t.bought[t.bought.length - 1] ?? t.last)}
-                {t.bought.length > 1 ? ` · ${t.bought.length}번` : ""}
-              </span>
-            </div>
-            <p className="mt-0.5 truncate text-[12.5px] text-faint">{t.items.join(", ")}</p>
-          </li>
-        ))}
       </ul>
-      {!more && others.length > OTHERS_SHOWN ? (
-        <button
-          type="button"
-          onClick={() => setMore(true)}
-          className="tap mt-1 text-[12.5px] text-dim outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
-        >
-          {others.length - OTHERS_SHOWN}종 더 보기
-        </button>
-      ) : null}
+      <Pager {...paged} unit="종" />
     </div>
   );
 }

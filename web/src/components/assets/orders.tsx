@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { Check, X } from "lucide-react";
+import { Pager } from "@/components/ui/pager";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { type OrderRequest, type OrderResult, type PlacedOrder, type Standing, cancelStanding, sendOrders } from "@/lib/orders";
+import { usePaged } from "@/lib/paging";
 import { type Holding, krw, quantity } from "@/lib/portfolio";
 import { cn } from "@/lib/utils";
 
@@ -404,12 +406,14 @@ export function OrderRecord({
   onChanged?: () => void;
 }) {
   const names = new Map(holdings.map((h) => [`${h.venue}:${h.symbol}`, h.name]));
+  const paged = usePaged(orders);
   if (orders.length === 0 && standing.length === 0) return <p className="text-[12.5px] text-faint">아직 낸 주문이 없어요.</p>;
   return (
     <>
     <Waiting standing={standing} names={names} onChanged={onChanged} />
+    <div id={paged.anchor} className="scroll-mt-4" />
     <ul className="divide-y divide-edge-soft">
-      {orders.map((o) => (
+      {paged.items.map((o) => (
         <li key={o.id} className="flex items-baseline gap-3 py-2 text-[12.5px]">
           <span className="tnum w-[5.5rem] shrink-0 text-faint">{when(o.createdAt)}</span>
           <span className="min-w-0 flex-1">
@@ -426,6 +430,7 @@ export function OrderRecord({
         </li>
       ))}
     </ul>
+    <Pager {...paged} />
     </>
   );
 }

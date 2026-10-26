@@ -1,6 +1,9 @@
 "use client";
 
+import { useMemo } from "react";
+import { Pager } from "@/components/ui/pager";
 import { Panel } from "@/components/workout/panel";
+import { usePaged } from "@/lib/paging";
 import {
   bestSet,
   dayLabel,
@@ -33,7 +36,9 @@ export function ExerciseHistory({
   sessions: Session[];
   onOpenChange: (open: boolean) => void;
 }) {
-  const history = name ? exerciseHistory(sessions, name) : [];
+  const history = useMemo(() => (name ? exerciseHistory(sessions, name) : []), [sessions, name]);
+  // Ten sessions a page; another exercise starts at its first.
+  const paged = usePaged(history, { size: 10, reset: name ?? "" });
   const best = name ? bestSet(sessions, name) : null;
   const top = name ? heaviest(sessions, name) : 0;
   const trend = history.filter((h) => h.oneRm !== null).slice(0, 12).reverse();
@@ -98,8 +103,9 @@ export function ExerciseHistory({
 
           {name ? <RecordTable name={name} sessions={sessions} /> : null}
 
+          <div id={paged.anchor} className="scroll-mt-4" />
           <ul className="space-y-3">
-            {history.map((h) => (
+            {paged.items.map((h) => (
               <li key={h.id}>
                 <div className="flex items-baseline justify-between gap-3">
                   <span className="text-[12.5px] text-dim">{dayLabel(h.date)}</span>
@@ -119,6 +125,7 @@ export function ExerciseHistory({
               </li>
             ))}
           </ul>
+          <Pager {...paged} unit="번" />
         </>
       )}
     </Panel>

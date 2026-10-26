@@ -13,7 +13,9 @@ import { Header, ScreenMenu, TabBar } from "@/components/shell/header";
 import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { FloatingUndo, UndoNotice, useUndo } from "@/components/shell/undo";
+import { Pager } from "@/components/ui/pager";
 import { isoDate } from "@/lib/month";
+import { usePaged } from "@/lib/paging";
 import { isPending } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
 import { useWorkout } from "@/lib/use-workout";
@@ -66,7 +68,6 @@ export function Workout() {
   const [editing, setEditing] = useState(false);
   const [looking, setLooking] = useState<string | null>(null);
   const [day, setDay] = useState<string | null>(null);
-  const [shown, setShown] = useState(PAGE);
   const [view, setView] = useState<View>("today");
 
   // The view lives in the URL hash, so 기록 or 종목 can be bookmarked and the
@@ -133,7 +134,10 @@ export function Workout() {
     };
   }, [past, now]);
 
-  const log = day ? past.filter((s) => s.date === day) : past.slice(0, shown);
+  // Ten sessions a page (lib/paging.ts); a day picked on the calendar is its own list.
+  const dayLog = useMemo(() => (day ? past.filter((s) => s.date === day) : past), [past, day]);
+  const paged = usePaged(dayLog, { size: PAGE, reset: day ?? "" });
+  const log = paged.items;
 
   function removeSession(session: Session) {
     const removed = w.removeSession(session.id);
@@ -361,25 +365,19 @@ export function Workout() {
                       붙어요.
                     </p>
                   ) : (
-                    <div className="mt-6 space-y-8">
-                      {log.map((session) => (
-                        <SessionLog
-                          key={session.id}
-                          session={session}
-                          all={book.sessions}
-                          onLook={setLooking}
-                          onRemove={() => removeSession(session)}
-                        />
-                      ))}
-                      {!day && past.length > shown ? (
-                        <button
-                          type="button"
-                          onClick={() => setShown((n) => n + PAGE)}
-                          className="tap w-full rounded-lg text-[13px] text-dim outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
-                        >
-                          이전 기록 더 보기
-                        </button>
-                      ) : null}
+                    <div id={paged.anchor} className="mt-6 scroll-mt-4">
+                      <div className="space-y-8">
+                        {log.map((session) => (
+                          <SessionLog
+                            key={session.id}
+                            session={session}
+                            all={book.sessions}
+                            onLook={setLooking}
+                            onRemove={() => removeSession(session)}
+                          />
+                        ))}
+                      </div>
+                      <Pager {...paged} unit="번" className="mt-6" />
                     </div>
                   )}
                 </section>

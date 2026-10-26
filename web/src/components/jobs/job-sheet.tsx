@@ -3,8 +3,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowUp, ExternalLink } from "lucide-react";
 import { ProposalCard } from "@/components/chat/proposal-card";
+import { Pager } from "@/components/ui/pager";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { type Job, type JobDetail, type JobEvent, LIVE, send, stateLabel, stateTone, when } from "@/lib/jobs";
+import { usePaged } from "@/lib/paging";
 import type { Decision, Proposal } from "@/lib/thread";
 import { photoUrl } from "@/lib/uploads";
 import { cn } from "@/lib/utils";
@@ -98,6 +100,10 @@ function Body({
   };
 
   const runs = useMemo(() => group(detail?.events ?? []), [detail]);
+  // Ten a page: a run is a block of lines, a record a row with its photo.
+  const records = useMemo(() => detail?.records ?? [], [detail]);
+  const recordsPaged = usePaged(records, { size: 10 });
+  const runsPaged = usePaged(runs, { size: 10 });
   const ended = !LIVE.includes(j.state);
 
   return (
@@ -131,10 +137,10 @@ function Body({
           />
         ))}
 
-        {detail?.records.length ? (
-          <section className="mt-5" aria-label="지켜보는 대상">
+        {records.length ? (
+          <section id={recordsPaged.anchor} className="mt-5 scroll-mt-4" aria-label="지켜보는 대상">
             <ul className="space-y-1.5">
-              {detail.records.map((r) => (
+              {recordsPaged.items.map((r) => (
                 <li key={r.key} className="flex gap-3 rounded-xl bg-glass p-2.5">
                   {r.image && !j.photosGone ? (
                     // eslint-disable-next-line @next/next/no-img-element -- served by the agent behind the proxy
@@ -176,6 +182,7 @@ function Body({
                 </li>
               ))}
             </ul>
+            <Pager {...recordsPaged} unit="개" />
           </section>
         ) : null}
 
@@ -197,17 +204,24 @@ function Body({
           ) : null}
         </details>
 
-        <section className="mt-6" aria-label="진행 기록">
+        <section id={runsPaged.anchor} className="mt-6 scroll-mt-4" aria-label="진행 기록">
           <h3 className="mb-2 text-[12.5px] text-dim">진행</h3>
           {runs.length === 0 ? (
             <p className="text-[12.5px] text-faint">아직 기록이 없습니다.</p>
           ) : (
             <ol className="space-y-4">
-              {runs.map((g, i) => (
-                <Run key={g.key} group={g} live={i === 0 && j.running} open={i < 2} />
+              {/* The newest runs are on the first page: the one going now, and two open. */}
+              {runsPaged.items.map((g, i) => (
+                <Run
+                  key={g.key}
+                  group={g}
+                  live={runsPaged.page === 1 && i === 0 && j.running}
+                  open={runsPaged.page === 1 && i < 2}
+                />
               ))}
             </ol>
           )}
+          <Pager {...runsPaged} unit="번" />
         </section>
       </div>
 

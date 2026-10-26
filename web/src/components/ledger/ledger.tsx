@@ -4,7 +4,9 @@ import { useMemo, useState } from "react";
 import { Entry } from "@/components/ledger/entry";
 import { Header, TabBar } from "@/components/shell/header";
 import { StandingBar } from "@/components/shell/standing-bar";
-import { filters, groupByDay, matches, type Filter } from "@/lib/ledger";
+import { Pager } from "@/components/ui/pager";
+import { filters, groupByDay, matches, newestFirst, type Filter } from "@/lib/ledger";
+import { usePaged } from "@/lib/paging";
 import { isPending } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
 import { cn } from "@/lib/utils";
@@ -22,12 +24,13 @@ export function Ledger() {
   const [filter, setFilter] = useState<Filter>("all");
 
   const pending = proposals.filter(isPending);
-  const days = useMemo(
-    () => groupByDay(proposals.filter((p) => matches(p, filter))),
-    [proposals, filter],
-  );
+  const shown = useMemo(() => newestFirst(proposals.filter((p) => matches(p, filter))), [proposals, filter]);
+  // Twenty a page; a day split across pages still counts all of its own.
+  const counts = useMemo(() => new Map(groupByDay(shown).map((d) => [d.key, d.entries.length])), [shown]);
+  const paged = usePaged(shown, { reset: filter });
+  const days = groupByDay(paged.items);
 
-  const empty = hydrated && days.length === 0;
+  const empty = hydrated && shown.length === 0;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -73,7 +76,7 @@ export function Ledger() {
             </p>
           ) : null}
 
-          <div className="space-y-6">
+          <div id={paged.anchor} className="scroll-mt-4 space-y-6">
             {days.map((day) => (
               <section key={day.key}>
                 {/* The day is a rule with a name on it, not a card header:
@@ -82,7 +85,7 @@ export function Ledger() {
                   <h2 className="text-[12px] text-faint">{day.label}</h2>
                   <span aria-hidden className="h-px flex-1 bg-edge-soft" />
                   <span className="tnum text-[11.5px] text-faint">
-                    {day.entries.length}건
+                    {counts.get(day.key) ?? day.entries.length}건
                   </span>
                 </div>
 
@@ -98,6 +101,7 @@ export function Ledger() {
               </section>
             ))}
           </div>
+          <Pager {...paged} unit="장" />
 
           {error ? (
             <p
