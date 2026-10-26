@@ -5,7 +5,7 @@ import { type Plan, type Route, clockOf, countdown, stageOf } from "@/lib/transi
 import { cn } from "@/lib/utils";
 
 /** Each person's own face, as on the 위치 map. */
-const FACE: Record<Who, string> = { owner: "/icons/location-cat.v3.png", guest: "/icons/location-cat-guest.v3.png" };
+const FACE: Record<Who, string> = { owner: "/icons/location-cat.v4.png", guest: "/icons/location-cat-guest.v4.png" };
 
 /**
  * Pixel drawings, a cell to a character: the little screen this board is

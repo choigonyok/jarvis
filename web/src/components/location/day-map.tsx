@@ -423,10 +423,10 @@ function circle(
 
 /**
  * Each person's own cat on the map, as they chose it: the operator's grey cat,
- * the guest's cream one. Both drawn to one height, each as wide as its drawing
- * (the cream one lies long), so neither looks the smaller.
+ * the guest's cream one. Both shrunk by one ratio and standing on one line, as
+ * the drawings have them side by side - the cream one lies lower and longer.
  */
-const FACE: Record<Who, string> = { owner: "/icons/location-cat.v3.png", guest: "/icons/location-cat-guest.v3.png" };
+const FACE: Record<Who, string> = { owner: "/icons/location-cat.v4.png", guest: "/icons/location-cat-guest.v4.png" };
 
 /**
  * A person's mark: their cat over a soft glow in their color, which breathes
@@ -549,7 +549,7 @@ function name(
     const p = at(place.node);
     const y = p.y - n.h / 2;
     // Where a mark is, the name stands clear of it - of the cream cat too,
-    // the wider (19px each side of its middle; two marks stand 16px out).
+    // the wider (17px each side of its middle; two marks stand 16px out).
     const gap = marks.some((q) => Math.hypot(q.x - p.x, q.y - p.y) < 28) ? (marks.length > 1 ? 40 : 24) : 12;
     const free = (x: number) =>
       x >= 4 &&
