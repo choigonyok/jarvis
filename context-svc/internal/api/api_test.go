@@ -238,7 +238,8 @@ func TestWaypointsAndSetup(t *testing.T) {
 	_ = json.Unmarshal(raw, &cfg)
 	if cfg["_type"] != "configuration" || cfg["mode"] != 3.0 || cfg["url"] != "https://gw.example/context/owntracks" || cfg["username"] != "phone" ||
 		cfg["password"] != "pw" || cfg["cmd"] != true || cfg["remoteConfiguration"] != true || cfg["monitoring"] != 1.0 ||
-		cfg["extendedData"] != true || cfg["downgrade"] != 20.0 || cfg["ignoreInaccurateLocations"] != 100.0 || cfg["locatorInterval"] != 60.0 || cfg["locatorDisplacement"] != 50.0 {
+		cfg["extendedData"] != true || cfg["downgrade"] != 20.0 || cfg["ignoreInaccurateLocations"] != 100.0 || cfg["locatorInterval"] != 60.0 || cfg["locatorDisplacement"] != 50.0 ||
+		cfg["allowRemoteLocation"] != true {
 		t.Fatalf("설정: %s", raw)
 	}
 	if out.Signals.URL != "https://gw.example/context/signals" || out.Signals.Token != "sig" {
@@ -296,12 +297,13 @@ func TestWaypointsAndSetup(t *testing.T) {
 	if r := say(`{"_type":"location","lat":37.1,"lon":127.1,"acc":10,"tst":1760600150,"m":2}`); !strings.Contains(r, `"monitoring":1`) {
 		t.Fatalf("영역 안 → Significant: %s", r)
 	}
-	// Out and moving: Move - and again while the phone says it did not take it.
-	if r := say(`{"_type":"location","lat":37.3,"lon":127.3,"acc":10,"tst":1760600200,"m":1}`); !strings.Contains(r, `"monitoring":2`) {
-		t.Fatalf("나가서 움직임 → Move: %s", r)
+	// Out and moving: Move, and where it is now - and Move again while the
+	// phone says it did not take it, without asking again.
+	if r := say(`{"_type":"location","lat":37.3,"lon":127.3,"acc":10,"tst":1760600200,"m":1}`); !strings.Contains(r, `"monitoring":2`) || !strings.Contains(r, `"action":"reportLocation"`) {
+		t.Fatalf("나가서 움직임 → Move 와 지금 위치: %s", r)
 	}
-	if r := say(`{"_type":"location","lat":37.31,"lon":127.31,"acc":10,"tst":1760600300,"m":1}`); !strings.Contains(r, `"monitoring":2`) {
-		t.Fatalf("폰이 받지 않은 명령은 다시: %s", r)
+	if r := say(`{"_type":"location","lat":37.31,"lon":127.31,"acc":10,"tst":1760600300,"m":1}`); !strings.Contains(r, `"monitoring":2`) || strings.Contains(r, "reportLocation") {
+		t.Fatalf("폰이 받지 않은 명령은 다시(위치는 다시 묻지 않음): %s", r)
 	}
 	if r := say(`{"_type":"location","lat":37.31,"lon":127.31,"acc":10,"tst":1760600400,"m":2}`); r != "[]\n" {
 		t.Fatalf("받았으면 다시 보내지 않음: %s", r)

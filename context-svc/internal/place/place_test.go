@@ -116,6 +116,20 @@ func TestBaseline(t *testing.T) {
 	}
 }
 
+// The first Move asks the phone where it is now; Move sent again, or any
+// other mode, does not.
+func TestTell(t *testing.T) {
+	asks := func(cmds []map[string]any) bool {
+		return slices.ContainsFunc(cmds, func(c map[string]any) bool { return c["action"] == "reportLocation" })
+	}
+	if cmds := Tell(Move, Significant); len(cmds) != 2 || cmds[0]["action"] != "setConfiguration" || !asks(cmds) {
+		t.Fatalf("처음 Move: 모드를 바꾸고 나서 지금 위치: %v", cmds)
+	}
+	if asks(Tell(Move, Move)) || asks(Tell(Significant, Move)) || asks(Tell(Significant, Significant)) {
+		t.Fatal("다시 보내는 Move 나 다른 모드는 묻지 않음")
+	}
+}
+
 func TestWatch(t *testing.T) {
 	for _, c := range []struct {
 		settled  bool

@@ -4,7 +4,8 @@
 //	POST   /owntracks        the phone's OwnTracks app (HTTP Basic). The reply
 //	                         may carry a command that changes how it watches -
 //	                         and, once a day, its settings and its regions (all
-//	                         50 m) put back (phones.go).
+//	                         50 m) put back, and a region that follows it
+//	                         (+follow) given it if it has none (phones.go).
 //	                         The guest's phone has credentials of its own: its
 //	                         fixes and its regions are kept apart and move none
 //	                         of the operator's visits, state, regions or
@@ -288,7 +289,7 @@ func (s *Server) ingest(ctx context.Context, rep report, at time.Time) ([]map[st
 	var judged *watching
 	switch rep.Type {
 	case "transition":
-		if rep.Desc == "" || (rep.Event != "enter" && rep.Event != "leave") {
+		if rep.Desc == "" || following(rep) || (rep.Event != "enter" && rep.Event != "leave") {
 			return []map[string]any{}, nil
 		}
 		changed := false
@@ -379,6 +380,7 @@ func (s *Server) ingest(ctx context.Context, rep report, at time.Time) ([]map[st
 	}
 	current.Mode = place.Significant
 	_, _ = s.st.Get(ctx, "owntracks.mode", &current)
+	told := current.Mode
 	// The phone says which mode it is in: that, not what was last sent,
 	// is what a change is judged against - a command it did not take is
 	// sent again.
@@ -436,7 +438,7 @@ func (s *Server) ingest(ctx context.Context, rep report, at time.Time) ([]map[st
 		if err := s.saveWatching(ctx, ownerPhone, w); err != nil {
 			return nil, err
 		}
-		return append(place.Command(*asked.Mode), extra...), nil
+		return append(place.Tell(*asked.Mode, told), extra...), nil
 	}
 	for _, m := range moves {
 		s.announce(m.event, m.region, kindOf[m.region], at)
@@ -475,7 +477,7 @@ func (s *Server) ingest(ctx context.Context, rep report, at time.Time) ([]map[st
 		return nil, err
 	}
 	s.log.Info("폰의 위치 모드를 바꿉니다", "from", current.Mode, "to", want)
-	return append(place.Command(want), extra...), nil
+	return append(place.Tell(want, told), extra...), nil
 }
 
 // How long in one spot, and how small a spot, counts as staying put.
@@ -511,6 +513,8 @@ func (s *Server) guestWatch(ctx context.Context, rep report, at time.Time, own [
 	switch rep.Type {
 	case "transition":
 		switch {
+		case following(rep):
+			return none, nil
 		case rep.Event == "enter":
 			w = watching{Why: "region", Region: strings.TrimSpace(rep.Desc)}
 		case rep.Event != "leave":
@@ -560,7 +564,7 @@ func (s *Server) guestWatch(ctx context.Context, rep report, at time.Time, own [
 		return nil, err
 	}
 	s.log.Info("상대 폰의 위치 모드를 바꿉니다", "from", current, "to", want, "why", w.Why)
-	return place.Command(want), nil
+	return place.Tell(want, kept.Mode), nil
 }
 
 // guestReport is one report from the guest's phone, after its raw copy: the

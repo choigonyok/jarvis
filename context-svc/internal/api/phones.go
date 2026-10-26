@@ -2,9 +2,9 @@ package api
 
 // The two phones' upkeep, the same for each: how it is told to watch and why
 // (kept for the 위치 screen), its own list of regions by the ids the app gives
-// them, once a day its settings and every region put back (place.Daily, 50 m),
-// and a region made in the console sent to it with its replies until its own
-// list has it.
+// them, once a day its settings and every region put back (place.Daily, 50 m)
+// and the region that follows it (followName), and a region made in the
+// console sent to it with its replies until its own list has it.
 
 import (
 	"context"
@@ -115,11 +115,11 @@ type keptRegion struct {
 
 // phoneRegion is a region as a phone sends it, if it is a place: named (the
 // app calls a new point Here-… until it is named), not a beacon
-// (name:uuid…), somewhere. A point (radius 0) is a place too: it is made a
-// region (phoneRegions).
+// (name:uuid…) nor the region that follows the phone (+…), somewhere. A point
+// (radius 0) is a place too: it is made a region (phoneRegions).
 func phoneRegion(wp report) (keptRegion, bool) {
 	name := strings.TrimSpace(wp.Desc)
-	if name == "" || strings.HasPrefix(name, "Here-") || strings.Contains(name, ":") || wp.Rad < 0 || (wp.Lat == 0 && wp.Lon == 0) {
+	if name == "" || strings.HasPrefix(name, "Here-") || strings.Contains(name, ":") || following(wp) || wp.Rad < 0 || (wp.Lat == 0 && wp.Lon == 0) {
 		return keptRegion{}, false
 	}
 	return keptRegion{Rid: wp.Rid, Tst: wp.Tst, Region: place.Region{
@@ -157,7 +157,8 @@ func (s *Server) savePhoneList(ctx context.Context, source string, kept []keptRe
 // (waypoint), or all it has, asked for once a day (waypoints) - and says back
 // what it should change: a point (radius 0) becomes a 50 m region at once, so
 // the phone watches it; with the whole list every region goes back to 50 m,
-// and one made in the console goes to it - again if the list lacks it.
+// one made in the console goes to it - again if the list lacks it - and so
+// does the region that follows it, if it has none.
 func (s *Server) phoneRegions(ctx context.Context, source string, rep report) ([]map[string]any, error) {
 	whole := rep.Type == "waypoints"
 	wps := rep.Waypoints
@@ -225,11 +226,60 @@ func (s *Server) phoneRegions(ctx context.Context, source string, rep report) ([
 	if err != nil {
 		return nil, err
 	}
+	send = append(fix, send...)
+	if whole && !slices.ContainsFunc(wps, following) {
+		f, ok, err := s.followRegion(ctx, source)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			send = append(send, f)
+		}
+	}
 	cmds := []map[string]any{}
-	if send = append(fix, send...); len(send) > 0 {
+	if len(send) > 0 {
 		cmds = append(cmds, setWaypoints(send))
 	}
 	return cmds, nil
+}
+
+// The region that follows a phone about. OwnTracks moves a region whose name
+// begins with + to wherever the phone last reported (its radius by the speed
+// then, 50 m at least), and once the phone is out of it, it reports - even
+// watching lightly. So leaving a spot that is none of its regions, where it
+// was settled (still), is heard a hundred meters or so on, not when iOS next
+// notices a significant change, half a kilometer and more later. It is no
+// place: the app leaves it out of inregions and sends no transition for it,
+// and here it is none of the phone's regions (phoneRegion).
+const (
+	followName = "+follow"
+	followRid  = "follow"
+)
+
+// following is whether a region a phone sends, or a transition, is of one
+// that follows it - as the app tells them, by the +.
+func following(wp report) bool { return strings.HasPrefix(wp.Desc, "+") }
+
+// followRegion is the region that follows a phone, put where the phone last
+// was - none while that is not known.
+func (s *Server) followRegion(ctx context.Context, source string) (keptRegion, bool, error) {
+	key := "location"
+	if source == guestPhone {
+		key = "guest.inside"
+	}
+	var last struct {
+		Lat float64 `json:"lat"`
+		Lon float64 `json:"lon"`
+	}
+	if _, err := s.st.Get(ctx, key, &last); err != nil && !errors.Is(err, store.ErrNotFound) {
+		return keptRegion{}, false, err
+	}
+	if last.Lat == 0 && last.Lon == 0 {
+		return keptRegion{}, false, nil
+	}
+	return keptRegion{Rid: followRid, Region: place.Region{
+		Name: followName, Lat: last.Lat, Lon: last.Lon, RadiusM: place.RegionRadius,
+	}}, true, nil
 }
 
 // ownerRegions keeps regions the operator's phone has in context_regions:
@@ -361,18 +411,25 @@ func (s *Server) pushes(ctx context.Context, source string) ([]map[string]any, e
 	return append(cmds, map[string]any{"_type": "cmd", "action": "waypoints"}), nil
 }
 
+// dailyRev is what the day's upkeep does, as a number: a phone put back
+// before it last changed is put back again, once, so what was added reaches
+// it that day. 2: the region that follows it.
+const dailyRev = 2
+
 // daily is what a phone's first report of a day (in Seoul) is answered with:
 // its settings put back (place.Daily) and a question for all its regions,
-// which phoneRegions puts back to 50 m. The regions kept here go to 50 m now.
+// which phoneRegions puts back to 50 m - and gives the region that follows it,
+// if it has none. The regions kept here go to 50 m now.
 func (s *Server) daily(ctx context.Context, source string) ([]map[string]any, error) {
 	var last struct {
 		Day string `json:"day"`
+		Rev int    `json:"rev"`
 	}
 	if _, err := s.st.Get(ctx, stateKey(source, "owntracks.daily"), &last); err != nil && !errors.Is(err, store.ErrNotFound) {
 		return nil, err
 	}
 	today := s.now().In(s.loc).Format("2006-01-02")
-	if last.Day == today {
+	if last.Day == today && last.Rev >= dailyRev {
 		return nil, nil
 	}
 	kept, err := s.phoneList(ctx, source)
@@ -390,7 +447,7 @@ func (s *Server) daily(ctx context.Context, source string) ([]map[string]any, er
 			return nil, err
 		}
 	}
-	if err := s.st.Set(ctx, stateKey(source, "owntracks.daily"), map[string]string{"day": today}, s.now()); err != nil {
+	if err := s.st.Set(ctx, stateKey(source, "owntracks.daily"), map[string]any{"day": today, "rev": dailyRev}, s.now()); err != nil {
 		return nil, err
 	}
 	s.log.Info("폰의 설정과 영역 반경을 되돌립니다", "phone", source)
@@ -451,8 +508,9 @@ func (s *Server) registerRegion(source string) http.HandlerFunc {
 		case name == "" || utf8.RuneCountInString(name) > 30:
 			writeErr(w, http.StatusBadRequest, "이름은 1~30자입니다.")
 			return
-		case strings.ContainsAny(name, ":|") || strings.HasPrefix(name, "Here-"):
-			writeErr(w, http.StatusBadRequest, "이름에 : 나 | 는 쓸 수 없습니다.")
+		case strings.ContainsAny(name, ":|") || strings.HasPrefix(name, "Here-") || strings.HasPrefix(name, "+"):
+			// + would make it a region that follows the phone (followName).
+			writeErr(w, http.StatusBadRequest, "이름에 : 나 | 는 쓸 수 없고, + 로 시작할 수 없습니다.")
 			return
 		case in.Lat < -90 || in.Lat > 90 || in.Lon < -180 || in.Lon > 180 || (in.Lat == 0 && in.Lon == 0):
 			writeErr(w, http.StatusBadRequest, "위치가 올바르지 않습니다.")

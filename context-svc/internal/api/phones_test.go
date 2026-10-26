@@ -125,8 +125,8 @@ func TestLeavingHome(t *testing.T) {
 		if r := p.say(guest, fmt.Sprintf(`{"_type":"location",%s,"acc":10,"tst":%d,"m":1,"batt":80,"inregions":["집"]}`, home, p.at("08:30"))); strings.Contains(r, "monitoring") {
 			t.Fatalf("%s: 집 안은 Significant 그대로: %s", who, r)
 		}
-		if r := p.say(guest, fmt.Sprintf(`{"_type":"transition","event":"leave","desc":"집",%s,"acc":10,"tst":%d}`, out, p.at("09:00"))); !strings.Contains(r, `"monitoring":2`) {
-			t.Fatalf("%s: 집을 나서면 바로 Move: %s", who, r)
+		if r := p.say(guest, fmt.Sprintf(`{"_type":"transition","event":"leave","desc":"집",%s,"acc":10,"tst":%d}`, out, p.at("09:00"))); !strings.Contains(r, `"monitoring":2`) || !strings.Contains(r, `"action":"reportLocation"`) {
+			t.Fatalf("%s: 집을 나서면 바로 Move, 지금 위치도: %s", who, r)
 		}
 		if w, _ := p.track(map[bool]string{false: "owner", true: "guest"}[guest]); w.Why != "left" || w.Mode != 2 {
 			t.Fatalf("%s: 나선 이유: %+v", who, w)
@@ -188,7 +188,7 @@ func TestDailyUpkeep(t *testing.T) {
 	}
 	for _, guest := range []bool{false, true} {
 		r := fix(guest, "10:00")
-		for _, want := range []string{`"extendedData":true`, `"downgrade":20`, `"ignoreInaccurateLocations":100`, `"locatorInterval":60`, `"locatorDisplacement":50`, `{"_type":"cmd","action":"waypoints"}`} {
+		for _, want := range []string{`"extendedData":true`, `"downgrade":20`, `"ignoreInaccurateLocations":100`, `"locatorInterval":60`, `"locatorDisplacement":50`, `"allowRemoteLocation":true`, `{"_type":"cmd","action":"waypoints"}`} {
 			if !strings.Contains(r, want) {
 				t.Fatalf("하루 첫 보고에 %s: %s", want, r)
 			}
@@ -236,6 +236,81 @@ func TestDailyUpkeep(t *testing.T) {
 	}
 }
 
+// The region that follows a phone (+follow): a whole list without one gets it,
+// where that phone last was (none before its first fix), 50 m, by an id of its
+// own. A list with one - any name the app takes for it, beginning with + -
+// changes nothing: it is no place here, neither kept nor put back to 50 m, and
+// its transitions move nothing. A phone put back the same day before the
+// upkeep gave it is put back again, once. Both phones.
+func TestFollowRegion(t *testing.T) {
+	p := newPhoneTest(t)
+	ctx := context.Background()
+	const list = `{"_type":"waypoints","waypoints":[{"_type":"waypoint","rid":"h1","desc":"집","lat":37.5559,"lon":126.9104,"rad":50,"tst":7}%s]}`
+	const own = `,{"_type":"waypoint","rid":"f9","desc":"+30","lat":37.6,"lon":127.1,"rad":420,"tst":8}`
+	follow := func(r string) map[string]any {
+		var cmds []struct {
+			Waypoints struct{ Waypoints []map[string]any }
+		}
+		if err := json.Unmarshal([]byte(r), &cmds); err != nil {
+			t.Fatalf("답: %s", r)
+		}
+		for _, c := range cmds {
+			for _, wp := range c.Waypoints.Waypoints {
+				if wp["desc"] == "+follow" {
+					return wp
+				}
+			}
+		}
+		return nil
+	}
+	for _, guest := range []bool{false, true} {
+		who, source := "운영자", ownerPhone
+		if guest {
+			who, source = "상대", guestPhone
+		}
+		if r := p.say(guest, fmt.Sprintf(list, "")); follow(r) != nil {
+			t.Fatalf("%s: 어디 있는지 모르면 아직: %s", who, r)
+		}
+		p.say(guest, fmt.Sprintf(`{"_type":"location","lat":37.4,"lon":127.2,"acc":10,"tst":%d,"m":1,"batt":80}`, p.at("10:00")))
+		r := p.say(guest, fmt.Sprintf(list, ""))
+		if wp := follow(r); wp == nil || wp["rid"] != "follow" || wp["lat"] != 37.4 || wp["lon"] != 127.2 || wp["rad"] != 50.0 || strings.Contains(r, `"rid":"h1"`) {
+			t.Fatalf("%s: 목록에 없으면 마지막 위치에 50m 로: %s", who, r)
+		}
+		if r := p.say(guest, fmt.Sprintf(list, own)); r != "[]\n" {
+			t.Fatalf("%s: 있으면 그대로, 50m 로 되돌리지도 않음: %s", who, r)
+		}
+		if r := p.say(guest, `{"_type":"waypoint","rid":"f9","desc":"+30","lat":37.61,"lon":127.1,"rad":300,"tst":8}`); r != "[]\n" {
+			t.Fatalf("%s: 하나만 와도: %s", who, r)
+		}
+		if r := p.say(guest, fmt.Sprintf(`{"_type":"transition","event":"enter","desc":"+30","lat":37.4,"lon":127.2,"acc":10,"tst":%d}`, p.at("10:05"))); r != "[]\n" {
+			t.Fatalf("%s: 그 진입은 아무것도 바꾸지 않음: %s", who, r)
+		}
+		kept, err := p.server.phoneList(ctx, source)
+		if err != nil || len(kept) != 1 || kept[0].Name != "집" {
+			t.Fatalf("%s: 폰의 영역은 장소만: %+v %v", who, kept, err)
+		}
+	}
+	if regions, _ := p.st.Regions(ctx); len(regions) != 1 || regions[0].Name != "집" {
+		t.Fatalf("여기 영역에도 없음: %+v", regions)
+	}
+	if open, _ := p.st.Open(ctx); len(open) != 0 {
+		t.Fatalf("체류도 없음: %+v", open)
+	}
+	// Put back today by the upkeep before it gave the region: again, once.
+	if err := p.st.Set(ctx, "owntracks.daily", map[string]string{"day": "2026-10-23"}, p.today.Load().(time.Time)); err != nil {
+		t.Fatal(err)
+	}
+	fix := func(hm string) string {
+		return p.say(false, fmt.Sprintf(`{"_type":"location","lat":37.4,"lon":127.2,"acc":10,"tst":%d,"m":1,"batt":80}`, p.at(hm)))
+	}
+	if r := fix("10:10"); !strings.Contains(r, `"downgrade":20`) || !strings.Contains(r, `{"_type":"cmd","action":"waypoints"}`) {
+		t.Fatalf("그날 한 번 더: %s", r)
+	}
+	if r := fix("10:20"); strings.Contains(r, "setConfiguration") || strings.Contains(r, "waypoints") {
+		t.Fatalf("한 번만: %s", r)
+	}
+}
+
 // 위치 등록: where a person is now becomes their phone's region (50 m) - here
 // at once, without an arrival, and on the phone with its next reply. Until the
 // phone's list has been heard, its list comes first: a region of the same name
@@ -253,7 +328,7 @@ func TestRegisterRegion(t *testing.T) {
 	if code, _ := p.do("POST", "/owntracks/regions", `{"name":"집","lat":37.5559,"lon":126.9104}`, func(*http.Request) {}); code != 401 {
 		t.Fatalf("토큰 없이: %d", code)
 	}
-	for _, bad := range []string{`{"name":"","lat":37.5,"lon":127}`, `{"name":"집:1","lat":37.5,"lon":127}`, `{"name":"집|1|2","lat":37.5,"lon":127}`, `{"name":"집","lat":0,"lon":0}`, `{"name":"집","lat":91,"lon":127}`} {
+	for _, bad := range []string{`{"name":"","lat":37.5,"lon":127}`, `{"name":"집:1","lat":37.5,"lon":127}`, `{"name":"집|1|2","lat":37.5,"lon":127}`, `{"name":"+집","lat":37.5,"lon":127}`, `{"name":"집","lat":0,"lon":0}`, `{"name":"집","lat":91,"lon":127}`} {
 		if code, _ := register(false, bad); code != 400 {
 			t.Fatalf("%s: %d", bad, code)
 		}
@@ -270,11 +345,12 @@ func TestRegisterRegion(t *testing.T) {
 	if _, pending := p.track("owner"); len(pending) != 1 || pending[0] != "집" {
 		t.Fatalf("폰에 가는 중: %v", pending)
 	}
-	// Its list first - then the phone's own 집 moves here, by its id.
+	// Its list first - then the phone's own 집 moves here, by its id. (It
+	// has the region that follows it: TestFollowRegion.)
 	if r := p.say(false, fmt.Sprintf(`{"_type":"location",%s,"acc":10,"tst":%d,"m":1,"batt":80}`, home, p.at("12:05"))); !strings.Contains(r, `{"_type":"cmd","action":"waypoints"}`) || strings.Contains(r, "setWaypoints") {
 		t.Fatalf("목록부터 물음: %s", r)
 	}
-	r := p.say(false, `{"_type":"waypoints","waypoints":[{"_type":"waypoint","rid":"old","desc":"집","lat":37.56,"lon":126.92,"rad":100,"tst":3}]}`)
+	r := p.say(false, `{"_type":"waypoints","waypoints":[{"_type":"waypoint","rid":"old","desc":"집","lat":37.56,"lon":126.92,"rad":100,"tst":3},{"_type":"waypoint","rid":"follow","desc":"+follow","lat":37.5559,"lon":126.9104,"rad":50,"tst":4}]}`)
 	var cmds []struct {
 		Action    string
 		Waypoints struct{ Waypoints []map[string]any }

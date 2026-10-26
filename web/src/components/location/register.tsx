@@ -112,8 +112,9 @@ export function RegisterPanel({
   async function submit() {
     const n = name.trim();
     if (!here || !n || busy) return;
-    if (/[:|]/.test(n)) {
-      setError("이름에 : 나 | 는 쓸 수 없어요.");
+    if (/[:|]/.test(n) || n.startsWith("+")) {
+      // + would make it the region that follows the phone (OwnTracks' +follow).
+      setError("이름에 : 나 | 는 쓸 수 없고, + 로 시작할 수 없어요.");
       return;
     }
     setBusy(true);

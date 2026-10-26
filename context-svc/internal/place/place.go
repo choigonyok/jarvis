@@ -133,13 +133,15 @@ const RegionRadius = 50
 // changed on it by hand (setConfiguration changes only what it names):
 // extended data on - the mode and the motion the rules here read come with
 // it -, Move given up below Low battery (downgrade), fixes rougher than 100 m
-// ignored, and in Move a fix every minute or every 50 m.
+// ignored, in Move a fix every minute or every 50 m, and reportLocation
+// answered (Tell asks it).
 func Daily() map[string]any {
 	return map[string]any{
 		"_type": "cmd", "action": "setConfiguration",
 		"configuration": map[string]any{
 			"_type": "configuration", "extendedData": true, "downgrade": Low,
 			"ignoreInaccurateLocations": 100, "locatorInterval": 60, "locatorDisplacement": 50,
+			"allowRemoteLocation": true,
 		},
 	}
 }
@@ -176,4 +178,19 @@ func Command(mode int) []map[string]any {
 		"_type": "cmd", "action": "setConfiguration",
 		"configuration": map[string]any{"_type": "configuration", "monitoring": mode},
 	}}
+}
+
+// Tell is the reply that sets a phone's mode to want, when it was last told
+// told - and with the first Move, a question for where it is now
+// (reportLocation). The app answers it with the newest location it has, and
+// once it has switched to Move that is a fresh fix (tried with the real app:
+// a second after the switch, where the report that moved it was a minute
+// old). So the way out begins there, not at Move's first fix of its own, 50 m
+// or a minute on. Move sent again, not yet taken, asks nothing more.
+func Tell(want, told int) []map[string]any {
+	cmds := Command(want)
+	if want == Move && told != Move {
+		cmds = append(cmds, map[string]any{"_type": "cmd", "action": "reportLocation"})
+	}
+	return cmds
 }
