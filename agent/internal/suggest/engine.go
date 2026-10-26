@@ -177,7 +177,9 @@ func (e *Engine) showList(ev Event) {
 
 // raiseCard opens an approval card for a question mind's gate decided
 // should reach the operator. A card mind sent before (a redelivery) is not
-// opened twice.
+// opened twice, and one the conversation already asks - the assistant's
+// own card for the same calendar change waiting (calendar.go) - not at all,
+// once mind knows; if mind cannot be told, it opens as before.
 func (e *Engine) raiseCard(ev Event) {
 	var c mind.Card
 	if json.Unmarshal(ev.Data, &c) != nil || c.IntentID == "" {
@@ -186,12 +188,22 @@ func (e *Engine) raiseCard(ev Event) {
 	if _, ok := e.findCard(c.IntentID); ok {
 		return
 	}
+	if c.Mode == "ask" {
+		if chat, ok := e.chatCard(c.Kind, c.Calendar); ok {
+			err := e.cover(c.IntentID, chat.ID)
+			if err == nil {
+				e.log.Info("대화에 같은 일정 카드가 있어 mind 카드를 열지 않았습니다", "intent", c.IntentID, "card", chat.ID)
+				return
+			}
+			e.log.Warn("mind 에 대화의 카드가 있다고 알리지 못해 카드를 엽니다", "intent", c.IntentID, "card", chat.ID, "err", err)
+		}
+	}
 	kind := mind.Approve
 	if c.Mode == "undo" {
 		kind = mind.Undo
 	}
 	card := mind.CardText(c)
-	in := mind.Input{IntentID: c.IntentID}
+	in := mind.Input{IntentID: c.IntentID, Kind: c.Kind, Calendar: c.Calendar}
 	if len(card.Fields) > 0 {
 		in.Card = &card // a form: redrawn with the answers on approval
 	}

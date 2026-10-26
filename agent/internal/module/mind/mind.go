@@ -58,6 +58,9 @@ type Card struct {
 	// Fields make it a form: a question (a review, "맞나요?") answered on
 	// the card, the answers sent back with the approval.
 	Fields []action.Field `json:"fields,omitempty"`
+	// Calendar is a calendar card's change: what tells it from the same
+	// change asked in the conversation.
+	Calendar *Calendar `json:"calendar,omitempty"`
 }
 
 type Evidence struct {
@@ -65,12 +68,32 @@ type Evidence struct {
 	Quote string `json:"quote"`
 }
 
+// Calendar is the change a calendar card asks for (mind-svc
+// model.CalendarAction): the entry it is about, if it is about one, and the
+// entry to be.
+type Calendar struct {
+	EventID string `json:"eventId,omitempty"`
+	Event   Event  `json:"event"`
+}
+
+// Event is an entry as mind says it.
+type Event struct {
+	Title string `json:"title"`
+	Date  string `json:"date"`
+	Start string `json:"start,omitempty"`
+	End   string `json:"end,omitempty"`
+}
+
 // Input is what an approval card carries to mind. A form card also keeps
 // its own card, to redraw it with the operator's answers, and the answers.
+// A calendar card keeps its change, to be told from the same change raised
+// in the conversation after it.
 type Input struct {
 	IntentID string            `json:"intentId"`
 	Card     *action.Card      `json:"card,omitempty"`
 	Answers  map[string]string `json:"answers,omitempty"`
+	Kind     string            `json:"kind,omitempty"`
+	Calendar *Calendar         `json:"calendar,omitempty"`
 }
 
 // Client talks to mind-svc's API.
@@ -145,9 +168,10 @@ func (m *Module) Execute(ctx context.Context, a action.Action) (action.Result, e
 		op = "undo"
 	}
 	var out struct {
-		Status  string `json:"status"`
-		Preview string `json:"preview"`
-		Error   string `json:"error"`
+		Status  string          `json:"status"`
+		Preview string          `json:"preview"`
+		Error   string          `json:"error"`
+		Result  json.RawMessage `json:"result"`
 	}
 	var body any
 	if len(in.Answers) > 0 {
@@ -161,6 +185,15 @@ func (m *Module) Execute(ctx context.Context, a action.Action) (action.Result, e
 	}
 	if op == "undo" {
 		return action.Result{Note: "되돌렸습니다."}, nil
+	}
+	// The entry went on the calendar while the card waited (the
+	// conversation's own card for it, approved first): mind tied the two
+	// rather than put it there twice.
+	var res struct {
+		Linked bool `json:"linked"`
+	}
+	if json.Unmarshal(out.Result, &res) == nil && res.Linked {
+		return action.Result{Note: strings.TrimSpace("캘린더에 이미 있어서 연결만 했어요. " + out.Preview)}, nil
 	}
 	return action.Result{Note: strings.TrimSpace("했습니다. " + out.Preview)}, nil
 }
@@ -184,6 +217,13 @@ func (c Client) Usage(ctx context.Context) (any, error) {
 // Reject tells mind the operator turned a question down.
 func (c Client) Reject(ctx context.Context, intentID, reason string) error {
 	return c.Do(ctx, http.MethodPost, "/api/intents/"+intentID+"/reject", map[string]string{"reason": reason}, nil)
+}
+
+// Covered tells mind its card is not shown: the conversation asks the same
+// already, on the assistant's own card (by). Nobody answered it - mind
+// learns nothing from it and does not ask it again.
+func (c Client) Covered(ctx context.Context, intentID, by string) error {
+	return c.Do(ctx, http.MethodPost, "/api/intents/"+intentID+"/covered", map[string]string{"by": by}, nil)
 }
 
 // Submit hands mind's gate an intent from the agent's judging turn; mind

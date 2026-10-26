@@ -125,3 +125,66 @@ func TestLinkingWithdrawsTheAddQuestion(t *testing.T) {
 		t.Fatalf("이어졌으면 '추가할까요'를 거둬야 합니다: %+v", r)
 	}
 }
+
+// 2026-10-26: "전날에 플랜 바꾸게 일정 추가해 줘" in the conversation with the
+// assistant was read as an all-day plan while the assistant's own card put
+// the same title at 20:00. Once that entry is on the calendar, the plan is
+// it - tied, with the entry's time - and not "missing from the calendar".
+func TestAPlanToldWithoutATimeIsItsEntry(t *testing.T) {
+	talked := model.Entity{ID: "p1", Kind: model.KindPlan, Room: model.OwnerRoom, State: model.State{
+		Title: "Netflix 플랜 변경·해지", Status: model.Confirmed, Date: "2026-11-15"}}
+	entry := model.Entity{ID: "p2", Kind: model.KindPlan, Room: "calendar", State: model.State{
+		Title: "Netflix 플랜 변경·해지", Status: model.Confirmed, Date: "2026-11-15", Start: "20:00", End: "20:30", CalendarID: "c7"}}
+	v := view{plans: []model.Entity{talked, entry}}
+	changes := []model.Change{{After: talked.State, Actor: "interpreter"}}
+
+	r := Schedule{}.OnChange(context.Background(), v, talked, changes)
+	if len(r.Intents) != 0 || len(r.Updates) != 1 || !r.Withdraw {
+		t.Fatalf("캘린더의 같은 일정에 이어야 합니다: %+v", r)
+	}
+	st := talked.State
+	if !r.Updates[0].Set(&st) || st.CalendarID != "c7" || st.Start != "20:00" || st.End != "20:30" {
+		t.Fatalf("이은 결과(시각은 캘린더 것): %+v", st)
+	}
+}
+
+// intents is a view that remembers what was asked about its plans.
+type intents struct {
+	view
+	asked []model.Intent
+}
+
+func (v intents) IntentsFor(context.Context, string) ([]model.Intent, error) { return v.asked, nil }
+
+// Asked in the conversation already - the assistant's own card was up, so
+// this one was not shown - is asked no more than turned down: the same
+// entry is not asked about again when the plan changes in another way.
+func TestNotAskedAgainAfterTheConversationAsked(t *testing.T) {
+	plan := model.Entity{ID: "p1", Kind: model.KindPlan, Room: model.OwnerRoom, State: model.State{
+		Title: "Netflix 플랜 변경·해지", Status: model.Confirmed, Date: "2026-11-15"}}
+	changes := []model.Change{{After: plan.State, Actor: "interpreter"}}
+	first := Schedule{}.OnChange(context.Background(), view{plans: []model.Entity{plan}}, plan, changes)
+	if len(first.Intents) != 1 || first.Intents[0].Kind != "calendar.create" {
+		t.Fatalf("캘린더에 없으면 넣자고 해야 합니다: %+v", first.Intents)
+	}
+	covered := first.Intents[0]
+	covered.Status, covered.DecidedBy = model.Superseded, model.ByConversation
+	v := intents{view: view{plans: []model.Entity{plan}}, asked: []model.Intent{covered}}
+
+	plan.State.People = []string{"지수"}
+	if r := (Schedule{}).OnChange(context.Background(), v, plan, changes); len(r.Intents) != 0 {
+		t.Fatalf("대화에서 이미 물은 것을 또 물으면 안 됩니다: %+v", r.Intents)
+	}
+	// Superseded by a newer judgement is not the same: asked again.
+	covered.DecidedBy = ""
+	v.asked = []model.Intent{covered}
+	if r := (Schedule{}).OnChange(context.Background(), v, plan, changes); len(r.Intents) != 1 {
+		t.Fatalf("다른 이유로 거둔 것은 다시 물어야 합니다: %+v", r.Intents)
+	}
+	// A plan that now differs is a new question.
+	plan.State.Date = "2026-11-14"
+	v.asked = []model.Intent{{Kind: covered.Kind, Payload: covered.Payload, Status: model.Superseded, DecidedBy: model.ByConversation}}
+	if r := (Schedule{}).OnChange(context.Background(), v, plan, changes); len(r.Intents) != 1 {
+		t.Fatalf("날짜가 바뀌면 새 질문입니다: %+v", r.Intents)
+	}
+}

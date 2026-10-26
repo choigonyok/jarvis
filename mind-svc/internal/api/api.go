@@ -611,8 +611,16 @@ func (s *Server) decide(w http.ResponseWriter, r *http.Request) {
 		in, err = s.m.Gate.RejectWhy(r.Context(), id, strings.TrimSpace(body.Reason))
 	case "undo":
 		in, err = s.m.Gate.Undo(r.Context(), id)
+	case "covered":
+		// The agent did not show the card: its conversation asks the same
+		// already, on the assistant's own card (by).
+		var body struct {
+			By string `json:"by"`
+		}
+		_ = json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&body)
+		in, err = s.m.Gate.Covered(r.Context(), id, strings.TrimSpace(body.By))
 	default:
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "approve, reject, undo 중 하나입니다."})
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "approve, reject, undo, covered 중 하나입니다."})
 		return
 	}
 	switch {

@@ -68,6 +68,7 @@ func (s Schedule) OnChange(ctx context.Context, v View, e model.Entity, changes 
 						return false
 					}
 					st.CalendarID = twin.State.CalendarID
+					model.TakeTime(st, twin.State)
 					return true
 				}})
 			return r
@@ -183,13 +184,14 @@ func calendarTwin(ctx context.Context, v View, e model.Entity) (model.Entity, bo
 }
 
 // add is "put it on the calendar" - unless the operator already turned this
-// exact entry down or took it back, which is not asked twice.
+// exact entry down or took it back, or was asked it in the conversation by
+// the assistant's own card: none is asked twice.
 func (s Schedule) add(ctx context.Context, v View, e model.Entity, changes []model.Change) (model.Intent, bool) {
 	ev := event(e.State, changes)
 	payload, _ := json.Marshal(model.CalendarAction{Event: ev})
 	past, _ := v.IntentsFor(ctx, e.ID)
 	for _, p := range past {
-		if p.Kind == "calendar.create" && (p.Status == model.Rejected || p.Status == model.Undone) && samePayload(p.Payload, payload) {
+		if p.Kind == "calendar.create" && (p.Status == model.Rejected || p.Status == model.Undone || p.Covered()) && samePayload(p.Payload, payload) {
 			return model.Intent{}, false
 		}
 	}

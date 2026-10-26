@@ -533,6 +533,14 @@ func (s *Structured) syncEntry(ctx context.Context, ev entry, linked []model.Ent
 		switch {
 		case p.Room != CalendarRoom:
 			spoken = true
+			// Tied while it had no time (linked to an entry already there):
+			// the entry says when.
+			if p.Live() && p.State.Start == "" && ev.Start != "" {
+				if _, _, err := s.World.Update(ctx, p.ID, func(st *model.State) bool { return model.TakeTime(st, fromEntry(ev)) },
+					world.Meta{Actor: "sensor:calendar", Why: "캘린더 일정의 시각"}); err != nil {
+					return err
+				}
+			}
 		case own == nil || p.CreatedAt.Before(own.CreatedAt):
 			own = &linked[i]
 		}
@@ -549,6 +557,7 @@ func (s *Structured) syncEntry(ctx context.Context, ev entry, linked []model.Ent
 					return false
 				}
 				st.CalendarID = ev.ID
+				model.TakeTime(st, fromEntry(ev))
 				return true
 			}, world.Meta{Actor: "sensor:calendar", Why: "캘린더의 같은 일정(" + ev.Title + ")"}); err != nil {
 				return err

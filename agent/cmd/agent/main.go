@@ -464,6 +464,9 @@ func main() {
 			},
 		}, log)
 		proposals.OnDecide(suggester.OnDecide)
+		// A calendar card the conversation raises takes the place of mind's
+		// waiting card for the same change.
+		proposals.OnOpen(suggester.OnOpen)
 		go suggester.Subscribe(enrichCtx, strings.TrimRight(cfg.SelfURL, "/")+"/consume")
 	}
 	var consume http.HandlerFunc

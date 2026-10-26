@@ -130,6 +130,47 @@ func TestSyncCalendarTiesAConversationPlanToItsEntry(t *testing.T) {
 	}
 }
 
+// 2026-10-26: the conversation with the assistant was read as an all-day
+// plan, and the assistant's card put the same title on the calendar at
+// 20:00. Read from the calendar, that entry is the plan - tied, with the
+// entry's time - and no plan of the calendar's own is made beside it. A
+// plan tied before it had a time (linked when its card found the entry
+// there) takes the entry's time the same way.
+func TestSyncCalendarTiesAPlanToldWithoutATime(t *testing.T) {
+	ctx := context.Background()
+	st := store.NewMemory()
+	now := time.Date(2026, 10, 26, 23, 40, 0, 0, seoul)
+	w := world.New(st, func() time.Time { return now })
+	s := &Structured{Store: st, Observer: observer{st}, World: w, Loc: seoul, Now: func() time.Time { return now }}
+	talked, _ := w.Create(ctx, model.KindPlan, model.OwnerRoom, model.State{Title: "Netflix 플랜 변경·해지", Status: model.Confirmed, Date: "2026-11-15"}, Meta())
+	linked, _ := w.Create(ctx, model.KindPlan, model.OwnerRoom, model.State{Title: "치과", Status: model.Confirmed, Date: "2026-11-16", CalendarID: "c8"}, Meta())
+	evs := []entry{
+		{ID: "c7", Title: "Netflix 플랜 변경·해지", Date: "2026-11-15", Start: "20:00", End: "20:30"},
+		{ID: "c8", Title: "치과 진료", Date: "2026-11-16", Start: "10:00", End: "11:00"},
+	}
+	if err := s.SyncCalendar(ctx, evs, "2026-10-19", "2026-12-26"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := st.Entity(ctx, talked.ID)
+	if got.State.CalendarID != "c7" || got.State.Start != "20:00" || got.State.End != "20:30" {
+		t.Fatalf("캘린더 일정에 이어지고 시각을 받아야 합니다: %+v", got.State)
+	}
+	if own, _ := st.Entities(ctx, model.KindPlan, CalendarRoom, true); len(own) != 0 {
+		t.Fatalf("캘린더 쪽 일정을 따로 만들면 안 됩니다: %+v", own)
+	}
+	got, _ = st.Entity(ctx, linked.ID)
+	if got.State.Start != "10:00" || got.State.End != "11:00" || got.State.Title != "치과" {
+		t.Fatalf("이미 이어진 일정도 시각을 받아야 합니다(제목은 그대로): %+v", got.State)
+	}
+	// Read again, nothing more changes.
+	before, _ := st.Changes(ctx, talked.ID, 100)
+	_ = s.SyncCalendar(ctx, evs, "2026-10-19", "2026-12-26")
+	after, _ := st.Changes(ctx, talked.ID, 100)
+	if len(after) != len(before) {
+		t.Fatalf("다시 읽어도 그대로: %d → %d", len(before), len(after))
+	}
+}
+
 // A pair split before the fix - the entry read first as a plan of its own,
 // the conversation's plan moved onto its time after - is mended on the next
 // pass: the conversation's plan takes the entry, the calendar's copy goes.

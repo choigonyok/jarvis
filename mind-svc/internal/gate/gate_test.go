@@ -262,3 +262,93 @@ func TestFixedContextIsAlwaysAsked(t *testing.T) {
 		}
 	}
 }
+
+// 2026-10-26: the card waited while the assistant's own card for the same
+// entry was approved. Approving it then links to that entry - it does not
+// put the entry on the calendar a second time.
+func TestApprovalLinksWhatWentOnMeanwhile(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(DefaultPolicy())
+	in, err := f.g.Submit(ctx, create("plan_z"))
+	if err != nil || in.Status != model.Pending || !in.Card {
+		t.Fatalf("카드로 물어야 합니다: %+v %v", in, err)
+	}
+	there, _ := f.cal.Put(ctx, model.CalendarEvent{Title: "저녁 plan_z", Date: "2026-10-17", Start: "20:00", End: "20:30"})
+	got, err := f.g.Approve(ctx, in.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.cal.All()) != 1 {
+		t.Fatalf("같은 일정을 또 넣으면 안 됩니다: %v", f.cal.All())
+	}
+	var res struct {
+		CalendarID string `json:"calendarId"`
+		Linked     bool   `json:"linked"`
+	}
+	_ = json.Unmarshal(got.Result, &res)
+	if got.Status != model.Executed || res.CalendarID != there.ID || !res.Linked || len(got.Undo) != 0 {
+		t.Fatalf("이미 있는 일정에 이어야 합니다: %+v", got)
+	}
+	if got.Preview != "2026-10-17 20:00 저녁 plan_z" || !strings.HasPrefix(got.Why, "이미 있어서 연결만") {
+		t.Fatalf("무엇에 이었는지: %q / %q", got.Preview, got.Why)
+	}
+	if _, err := f.g.Undo(ctx, got.ID); err == nil {
+		t.Fatal("이어 붙이기만 한 것은 되돌릴 게 없습니다")
+	}
+	stat, _ := f.st.Policy(ctx, "schedule", "calendar.create")
+	if stat.Approved != 1 {
+		t.Fatalf("승인은 승인으로 셉니다: %+v", stat)
+	}
+}
+
+// A card the agent did not show - the conversation asks the same already -
+// is put aside: not answerable, not one of the day's cards, nothing learned
+// from it. Its card goes out carrying the change, which is how the agent
+// told it from the conversation's.
+func TestCoveredStandsAside(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(DefaultPolicy())
+	in, _ := f.g.Submit(ctx, create("plan_c"))
+	if f.g.cardsToday(ctx) != 1 {
+		t.Fatalf("울린 카드 하나: %d", f.g.cardsToday(ctx))
+	}
+	got, err := f.g.Covered(ctx, in.ID, "p-1793-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Covered() || got.Error != "대화에서 같은 카드를 먼저 올렸어요 (p-1793-1)" {
+		t.Fatalf("대화의 카드에 맡긴 것: %+v", got)
+	}
+	if n := f.g.cardsToday(ctx); n != 0 {
+		t.Fatalf("보이지 않은 카드는 오늘의 카드가 아닙니다: %d", n)
+	}
+	if _, err := f.g.Approve(ctx, in.ID); err == nil {
+		t.Fatal("맡긴 제안은 승인할 수 없어야 합니다")
+	}
+	if _, err := f.g.Covered(ctx, in.ID, "p-1793-1"); err == nil {
+		t.Fatal("두 번 맡길 수 없습니다")
+	}
+	stat, _ := f.st.Policy(ctx, "schedule", "calendar.create")
+	if stat.Approved+stat.Rejected+stat.Undone != 0 || stat.Last != "" {
+		t.Fatalf("배울 답이 없습니다: %+v", stat)
+	}
+
+	f.log.Drain()
+	all, _ := f.log.Read(ctx, 0, 100)
+	var raised Card
+	var closed bool
+	for _, o := range all {
+		switch o.Type {
+		case CardRaised:
+			_ = json.Unmarshal(o.Data, &raised)
+		case CardClosed:
+			closed = o.Subject == in.ID
+		}
+	}
+	if raised.Calendar == nil || raised.Calendar.Event.Title != "저녁 plan_c" || raised.Calendar.Event.Date != "2026-10-17" {
+		t.Fatalf("카드에 바꿀 일정이 실려야 합니다: %+v", raised)
+	}
+	if !closed {
+		t.Fatalf("닫혔다고 알려야 합니다: %+v", all)
+	}
+}

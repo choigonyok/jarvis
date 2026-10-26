@@ -528,7 +528,7 @@ type Intent struct {
 	Why       string `json:"why,omitempty"`       // why the gate decided so
 	Tier      string `json:"tier,omitempty"`      // the notification it raised: now | digest
 	Status    string `json:"status"`              // pending | executed | rejected | undone | dropped | superseded | failed
-	DecidedBy string `json:"decidedBy,omitempty"` // policy | user
+	DecidedBy string `json:"decidedBy,omitempty"` // policy | user | conversation
 
 	Result json.RawMessage `json:"result,omitempty"`
 	Undo   json.RawMessage `json:"undo,omitempty"`
@@ -556,6 +556,15 @@ const (
 	Superseded = "superseded"
 	Failed     = "failed"
 )
+
+// ByConversation decides an intent the conversation asked already: the
+// assistant's own card for the same change was up when mind's came, and
+// mind's was not shown (the agent's suggest engine).
+const ByConversation = "conversation"
+
+// Covered is whether the intent stood aside for the same question asked in
+// the conversation.
+func (in Intent) Covered() bool { return in.Status == Superseded && in.DecidedBy == ByConversation }
 
 // Field is one question on a form card.
 type Field struct {

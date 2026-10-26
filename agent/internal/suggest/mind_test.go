@@ -21,6 +21,8 @@ type fakeMind struct {
 	calls []string
 	body  []map[string]any
 	reply map[string]any
+	// down makes every call fail, as an unreachable mind would.
+	down bool
 }
 
 func (f *fakeMind) server(t *testing.T) *mind.Client {
@@ -31,8 +33,12 @@ func (f *fakeMind) server(t *testing.T) *mind.Client {
 		f.mu.Lock()
 		f.calls = append(f.calls, r.Method+" "+r.URL.Path+" "+r.Header.Get("Authorization"))
 		f.body = append(f.body, m)
+		down, out := f.down, f.reply
 		f.mu.Unlock()
-		out := f.reply
+		if down {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
 		if out == nil {
 			out = map[string]any{"id": "int_1", "status": "pending", "decision": "ask", "card": true}
 		}

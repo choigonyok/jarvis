@@ -96,14 +96,25 @@ type calendarUndo struct {
 	Event model.CalendarEvent `json:"event"`
 }
 
-// Already is an action whose result is already there: the gate records it
-// as done, with ID as its result, and asks nobody.
+// Already is an action whose result is already there, found before it was
+// asked (Preview) or when it ran (Execute): the gate records it as done,
+// with ID as its result, and asks nobody.
 type Already struct {
 	ID   string
 	Line string
 }
 
 func (a *Already) Error() string { return "이미 있습니다: " + a.Line }
+
+// entryLine is an entry as one line: its day, its time if it has one, its
+// title.
+func entryLine(e model.CalendarEvent) string {
+	line := e.Date
+	if e.Start != "" {
+		line += " " + e.Start
+	}
+	return line + " " + e.Title
+}
 
 // existing is an entry on the same day whose title is the event's, or holds
 // it, or is held by it.
@@ -144,7 +155,7 @@ func (c CalendarActuator) Preview(ctx context.Context, kind string, payload json
 		// Put there already - by hand, or before this loop was the one that
 		// asked: link to it rather than ask to add it twice.
 		if same, ok := c.existing(ctx, a.Event); ok {
-			return "", &Already{ID: same.ID, Line: same.Date + " " + same.Title}
+			return "", &Already{ID: same.ID, Line: entryLine(same)}
 		}
 	}
 	line := a.Event.Date
@@ -208,6 +219,12 @@ func (c CalendarActuator) Execute(ctx context.Context, kind string, payload json
 	}
 	switch kind {
 	case "calendar.create":
+		// Looked at again when it runs, not only when it was asked: a card
+		// waits, and the same entry may have gone on the calendar meanwhile
+		// - the assistant's own card for it approved first (2026-10-26).
+		if same, ok := c.existing(ctx, a.Event); ok {
+			return nil, nil, &Already{ID: same.ID, Line: entryLine(same)}
+		}
 		saved, err := c.Cal.Put(ctx, a.Event)
 		if err != nil {
 			return nil, nil, err

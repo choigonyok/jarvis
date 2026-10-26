@@ -12,9 +12,17 @@ import (
 // "기타 합주 (은주)", both 15:00 on the 17th). Same day, starts within half an
 // hour, and the titles share a word or a person. Two things at one time that
 // share nothing are a collision, which is not this.
+//
+// A plan told without a time has no time to agree on: it is the entry of
+// its day under the same title. "전날에 플랜 바꾸게 일정 추가해 줘" was read as
+// an all-day "Netflix 플랜 변경·해지" while the assistant put the same
+// title at 20:00, and the two were never tied (2026-10-26).
 func SameEvent(a, b State) bool {
-	if a.Date == "" || a.Date != b.Date || a.Start == "" || b.Start == "" {
+	if a.Date == "" || a.Date != b.Date {
 		return false
+	}
+	if a.Start == "" || b.Start == "" {
+		return sameTitle(a.Title, b.Title)
 	}
 	ta, errA := time.Parse("15:04", a.Start)
 	tb, errB := time.Parse("15:04", b.Start)
@@ -45,6 +53,40 @@ func titlesMeet(a, b State) bool {
 		}
 	}
 	return false
+}
+
+// TakeTime gives a plan told without a time the time of the entry it is:
+// tied by title alone, the entry is what says when - and a time said later
+// in the conversation then reads as the entry's own, not as a move to ask
+// about. It reports whether it changed anything.
+func TakeTime(st *State, entry State) bool {
+	if st.Start != "" || entry.Start == "" || st.Date != entry.Date {
+		return false
+	}
+	st.Start, st.End = entry.Start, entry.End
+	return true
+}
+
+// sameTitle is whether two titles name one thing: the same letters, or one
+// holding the other ("재택" and "재택근무"), spaces and marks aside. A single
+// letter held is no title.
+func sameTitle(a, b string) bool {
+	ra, rb := []rune(bare(a)), []rune(bare(b))
+	if len(ra) > len(rb) {
+		ra, rb = rb, ra
+	}
+	return len(ra) >= 2 && strings.Contains(string(rb), string(ra))
+}
+
+// bare is a title's letters and digits, lowercased.
+func bare(title string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(title) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // words are what two titles can share: two-letter pieces of Hangul - a Korean

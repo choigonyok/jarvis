@@ -167,11 +167,8 @@ func (g *Gate) Submit(ctx context.Context, in model.Intent) (model.Intent, error
 	preview, err := a.Preview(ctx, in.Kind, in.Payload)
 	if already := (*act.Already)(nil); errors.As(err, &already) {
 		// Nothing to do but know it: linked, not asked.
-		at := g.now()
-		in.Decision, in.Status, in.DecidedBy, in.DecidedAt, in.ExecutedAt = model.Execute, model.Executed, "policy", &at, &at
-		in.Why, in.Preview = "이미 있어서 연결만 했어요: "+already.Line, already.Line
-		in.Result = json.RawMessage(fmt.Sprintf(`{"calendarId":%q}`, already.ID))
-		g.observe(ctx, obs.ActionExecuted, in, in.Result)
+		in.Decision = model.Execute
+		g.linkOnly(ctx, &in, "policy", already)
 		return in, g.st.PutIntent(ctx, in)
 	}
 	if err != nil {
@@ -188,7 +185,8 @@ func (g *Gate) Submit(ctx context.Context, in model.Intent) (model.Intent, error
 	switch decision {
 	case model.Execute, model.Notify:
 		g.run(ctx, a, &in, "policy")
-		if decision == model.Notify && in.Status == model.Executed {
+		// Linked only (the entry put there meanwhile): nothing to take back.
+		if decision == model.Notify && in.Status == model.Executed && len(in.Undo) > 0 {
 			in.Tier = "now"
 			if g.overBudget(ctx) {
 				in.Tier = "digest"
@@ -374,6 +372,32 @@ func (g *Gate) withdraw(ctx context.Context, entityID, skill, why string) error 
 	return nil
 }
 
+// Covered stands an asked intent aside for the same question asked in the
+// conversation: the assistant's own card for the change (by) was up when
+// this one's card came, so the agent did not show it - the operator was
+// asked twice for one entry (2026-10-26). Nobody answered it, so there is
+// nothing to learn from, and it rang nothing, so it is none of the day's
+// cards.
+func (g *Gate) Covered(ctx context.Context, id, by string) (model.Intent, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	in, err := g.pending(ctx, id)
+	if err != nil {
+		return in, err
+	}
+	at := g.now()
+	in.Status, in.DecidedBy, in.DecidedAt, in.Tier = model.Superseded, model.ByConversation, &at, ""
+	in.Error = "대화에서 같은 카드를 먼저 올렸어요"
+	if by != "" {
+		in.Error += " (" + by + ")"
+	}
+	if err := g.st.PutIntent(ctx, in); err != nil {
+		return in, err
+	}
+	g.closeCard(ctx, in)
+	return in, nil
+}
+
 func (g *Gate) pending(ctx context.Context, id string) (model.Intent, error) {
 	in, err := g.st.Intent(ctx, id)
 	if err != nil {
@@ -389,6 +413,12 @@ func (g *Gate) run(ctx context.Context, a act.Actuator, in *model.Intent, by str
 	at := g.now()
 	in.DecidedBy, in.DecidedAt = by, &at
 	res, undo, err := a.Execute(ctx, in.Kind, in.Payload)
+	if already := (*act.Already)(nil); errors.As(err, &already) {
+		// Put there while the card waited - the assistant's own card for
+		// the same entry approved first: linked, not made twice.
+		g.linkOnly(ctx, in, by, already)
+		return
+	}
 	if err != nil {
 		in.Status, in.Error = model.Failed, err.Error()
 		g.out.Warn("행동을 하지 못했습니다", "kind", in.Kind, "err", err)
@@ -396,6 +426,17 @@ func (g *Gate) run(ctx context.Context, a act.Actuator, in *model.Intent, by str
 	}
 	in.Status, in.Result, in.Undo, in.ExecutedAt = model.Executed, res, undo, &at
 	g.observe(ctx, obs.ActionExecuted, *in, res)
+}
+
+// linkOnly records an action whose result was there already: done, with
+// the entry found as its result (linked, for whoever reads it) and nothing
+// to take back.
+func (g *Gate) linkOnly(ctx context.Context, in *model.Intent, by string, already *act.Already) {
+	at := g.now()
+	in.Status, in.DecidedBy, in.DecidedAt, in.ExecutedAt = model.Executed, by, &at, &at
+	in.Why, in.Preview = "이미 있어서 연결만 했어요: "+already.Line, already.Line
+	in.Result, _ = json.Marshal(map[string]any{"calendarId": already.ID, "linked": true})
+	g.observe(ctx, obs.ActionExecuted, *in, in.Result)
 }
 
 func (g *Gate) observe(ctx context.Context, typ string, in model.Intent, res json.RawMessage) {
@@ -626,6 +667,10 @@ type Card struct {
 	// Quiet: raise the card, but do not ring for it - it goes out with the
 	// evening digest (quietCard said why).
 	Quiet bool `json:"quiet,omitempty"`
+	// Calendar is a calendar card's change - the entry it is about and the
+	// entry to be - for the agent to tell it from the same change asked in
+	// the conversation (Covered).
+	Calendar *model.CalendarAction `json:"calendar,omitempty"`
 }
 
 // The one path a card takes to the operator, and back.
@@ -635,9 +680,16 @@ const (
 )
 
 func (g *Gate) card(ctx context.Context, in model.Intent, mode string) {
-	data, _ := json.Marshal(Card{IntentID: in.ID, Mode: mode, Skill: in.Skill, Kind: in.Kind, Title: in.Title, Body: in.Body,
+	c := Card{IntentID: in.ID, Mode: mode, Skill: in.Skill, Kind: in.Kind, Title: in.Title, Body: in.Body,
 		Preview: in.Preview, Reason: in.Reason, Why: in.Why, Evidence: in.Evidence, Confidence: in.Confidence, Reversible: in.Reversible,
-		Fields: in.Fields, Quiet: in.Tier != "now"})
+		Fields: in.Fields, Quiet: in.Tier != "now"}
+	if strings.HasPrefix(in.Kind, "calendar.") {
+		var a model.CalendarAction
+		if json.Unmarshal(in.Payload, &a) == nil {
+			c.Calendar = &a
+		}
+	}
+	data, _ := json.Marshal(c)
 	g.append(ctx, obs.Observation{Source: "mind", Type: CardRaised, Subject: in.ID, Data: data, Key: CardRaised + ":" + in.ID, OccurredAt: g.now()})
 }
 

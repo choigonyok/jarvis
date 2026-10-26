@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/choigonyok/jarvis/agent/internal/core/action"
@@ -43,5 +44,32 @@ func TestFormCard(t *testing.T) {
 	}
 	if !strings.HasPrefix(got, "/api/intents/int_r/approve ") || !strings.Contains(got, `"score":"2"`) || !strings.Contains(got, "소음·매너,청결") {
 		t.Fatalf("mind 에 보낸 답: %s", got)
+	}
+}
+
+// Approved after the same entry went on the calendar (the conversation's
+// own card first), mind ties the two instead of adding it again - and the
+// card says so rather than "했습니다". A result of another shape is not read.
+func TestLinkedApprovalSaysSo(t *testing.T) {
+	var mu sync.Mutex
+	reply := `{"status":"executed","preview":"2026-11-15 20:00 Netflix 플랜 변경·해지","result":{"calendarId":"c7","linked":true}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		_, _ = w.Write([]byte(reply))
+	}))
+	defer srv.Close()
+	m := New(Client{URL: srv.URL})
+	input, _ := json.Marshal(Input{IntentID: "int_l"})
+	res, err := m.Execute(context.Background(), action.Action{Kind: Approve, Input: input})
+	if err != nil || res.Note != "캘린더에 이미 있어서 연결만 했어요. 2026-11-15 20:00 Netflix 플랜 변경·해지" {
+		t.Fatalf("연결만 했다고 해야 합니다: %q %v", res.Note, err)
+	}
+	mu.Lock()
+	reply = `{"status":"executed","preview":"내 일정에 추가: 2026-11-16 치과","result":"c8"}`
+	mu.Unlock()
+	res, err = m.Execute(context.Background(), action.Action{Kind: Approve, Input: input})
+	if err != nil || res.Note != "했습니다. 내 일정에 추가: 2026-11-16 치과" {
+		t.Fatalf("한 일: %q %v", res.Note, err)
 	}
 }
