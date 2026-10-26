@@ -422,7 +422,7 @@ function circle(
 }
 
 /** Each person's own face on the map, as they chose it: the operator's grey cat, the guest's cream one. */
-const FACE: Record<Who, string> = { owner: "/icons/location-cat.png", guest: "/icons/location-cat-guest.png" };
+const FACE: Record<Who, string> = { owner: "/icons/location-cat.v2.png", guest: "/icons/location-cat-guest.v2.png" };
 
 /**
  * A person's mark: their cat's face over a soft glow in their color, which
