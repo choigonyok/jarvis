@@ -4,7 +4,8 @@ export type TxStatus = "ok" | "cancelled" | "cancel" | "refund" | "excluded";
 
 export type Tx = {
   id: number;
-  source: "kakao" | "manual";
+  /** kakao: a card alert. manual: written by hand. asset: taken out of an investment account and said to be spent (자산 카드). */
+  source: "kakao" | "manual" | "asset";
   issuer: string;
   cardTail: string;
   kind: "approval" | "cancel";
@@ -159,6 +160,7 @@ export function ago(iso: string, now = Date.now()): string {
 /** Card and issuer, short: "하나 5*2*". */
 export function cardLabel(t: Tx): string {
   if (t.source === "manual") return "직접 적음";
+  if (t.source === "asset") return `투자금 ${t.issuer.replace(/증권$/, "")}`;
   const issuer = t.issuer.replace(/카드$/, "");
   return t.cardTail ? `${issuer} ${t.cardTail}` : t.issuer;
 }

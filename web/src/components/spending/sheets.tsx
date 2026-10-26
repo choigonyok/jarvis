@@ -167,7 +167,8 @@ export function TxSheet({
       title={tx?.merchant ?? ""}
       description={
         tx
-          ? `${dayLabel(dayKey(tx.approvedAt))} ${clock(tx.approvedAt)} · ${cardLabel(tx)}`
+          ? // Money taken out of an investment account has a day, not an hour.
+            `${dayLabel(dayKey(tx.approvedAt))}${tx.source === "asset" ? "" : ` ${clock(tx.approvedAt)}`} · ${cardLabel(tx)}`
           : undefined
       }
     >
@@ -256,6 +257,11 @@ function TxForm({
         <p className="text-[12.5px] text-dim">위 결제를 취소한 알림이에요. 짝이 되는 결제와 함께 합계에서 빠졌어요.</p>
       ) : tx.status === "refund" ? (
         <p className="text-[12.5px] text-dim">짝이 되는 결제를 못 찾은 취소라서, 돌려받은 돈으로 합계에서 뺐어요.</p>
+      ) : null}
+      {tx.source === "asset" ? (
+        <p className="text-[12.5px] leading-relaxed text-dim">
+          {tx.issuer}에서 뺀 돈을 지출로 답한 내역이에요. 금액이나 용도를 바꾸려면 자산 탭 원금에서 다시 물어 주세요.
+        </p>
       ) : null}
 
       {tx.enrichSource ? <OrderSection tx={tx} names={names} onSaved={onSaved} /> : null}

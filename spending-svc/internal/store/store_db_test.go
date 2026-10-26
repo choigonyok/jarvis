@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"testing"
@@ -200,5 +201,60 @@ func TestResumeIsOnlyWhatTheLoginStopped(t *testing.T) {
 	n, err := s.Resume(ctx, "coupang")
 	if err != nil || n != 1 || status(stopped) != "pending" || status(missing) != "not_found" {
 		t.Fatalf("로그인으로 멈춘 것만: n=%d err=%v %s %s", n, err, status(stopped), status(missing))
+	}
+}
+
+// The book's asset rows follow the answers on the assets screen: a new answer
+// comes in, a changed or withdrawn one leaves. What was changed here in the
+// meantime - the category, the total - stays while its answer does. They are
+// not deleted here: the answer would put them back.
+func TestAssetSpendsFollowTheAnswers(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	day := time.Date(2026, 3, 9, 12, 0, 0, 0, time.FixedZone("KST", 9*3600))
+	rent := AssetSpend{Ref: "asset:upbit:a@2026-03-13T01:00:00.000Z", ApprovedAt: day, Issuer: "업비트", Merchant: "관리비", AmountKrw: 30000, Category: "생활·통신"}
+	cash := AssetSpend{Ref: "asset:manual:9@2026-03-13T01:00:00.000Z", ApprovedAt: day, Issuer: "한국투자증권", Merchant: "한국투자증권 출금", AmountKrw: 10000, Category: "없는 분류"}
+
+	added, removed, err := s.SyncAssetSpends(ctx, []AssetSpend{rent, cash})
+	if err != nil || added != 2 || removed != 0 {
+		t.Fatalf("처음: added=%d removed=%d err=%v", added, removed, err)
+	}
+	var id int64
+	var src, cat, catSrc, issuer string
+	if err := s.pool.QueryRow(ctx, `select id, source, category, category_source, issuer from card_transactions where source_ref = $1`, rent.Ref).
+		Scan(&id, &src, &cat, &catSrc, &issuer); err != nil {
+		t.Fatal(err)
+	}
+	if src != "asset" || cat != "생활·통신" || catSrc != "manual" || issuer != "업비트" {
+		t.Fatalf("들어간 줄: %s %s %s %s", src, cat, catSrc, issuer)
+	}
+	if err := s.pool.QueryRow(ctx, `select category from card_transactions where source_ref = $1`, cash.Ref).Scan(&cat); err != nil || cat != "기타" {
+		t.Fatalf("모르는 분류는 기타로: %q %v", cat, err)
+	}
+
+	food := "식비"
+	if _, err := s.Update(ctx, id, Patch{Category: &food}); err != nil {
+		t.Fatal(err)
+	}
+	if added, removed, err := s.SyncAssetSpends(ctx, []AssetSpend{rent, cash}); err != nil || added != 0 || removed != 0 {
+		t.Fatalf("그대로면 아무것도 안 바뀝니다: %d %d %v", added, removed, err)
+	}
+	if err := s.pool.QueryRow(ctx, `select category from card_transactions where id = $1`, id).Scan(&cat); err != nil || cat != "식비" {
+		t.Fatalf("가계부에서 고친 분류는 남습니다: %q %v", cat, err)
+	}
+	var kept KeptError
+	if err := s.Delete(ctx, id); !errors.As(err, &kept) {
+		t.Fatalf("투자금 줄은 여기서 지우지 않습니다: %v", err)
+	}
+
+	again := rent
+	again.Ref = "asset:upbit:a@2026-03-20T01:00:00.000Z"
+	again.AmountKrw = 25000
+	if added, removed, err := s.SyncAssetSpends(ctx, []AssetSpend{again}); err != nil || added != 1 || removed != 2 {
+		t.Fatalf("다시 답한 것은 새 줄, 사라진 답의 줄은 빠집니다: %d %d %v", added, removed, err)
+	}
+	var n int
+	if err := s.pool.QueryRow(ctx, `select count(*) from card_transactions where source = 'asset'`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("남은 투자금 줄: %d %v", n, err)
 	}
 }

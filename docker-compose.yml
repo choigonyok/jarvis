@@ -369,6 +369,8 @@ services:
       # 카카오페이 같은 간편결제는 기본으로 빼 두었다 - 카드로 충전·결제되면
       # 카드 알림과 두 번 잡힌다.
       SPENDING_EXTRA_CHANNELS: ${SPENDING_EXTRA_CHANNELS:-}
+      # 투자 계좌에서 뺀 돈 중 "지출"로 답한 것(자산 카드)을 읽어 투자금 줄로 넣는다.
+      ASSETS_URL: http://assets:8092
     expose:
       - "8095"
     ports:

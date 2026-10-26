@@ -2,6 +2,7 @@ import { changesFor } from "./change.js";
 import * as db from "./db.js";
 import { allocationOf } from "./target.js";
 import { type CashVenue, detectFlow, reconcile } from "./kis-flows.js";
+import { outflowsOf } from "./outflows.js";
 import { COIN_TAX_FROM, priceUnsettled, replayKis, replayUpbit, salesFrom, summarize, upbitHeldFees } from "./realized.js";
 import type {
   Bridge,
@@ -346,6 +347,14 @@ export async function buildPortfolio(): Promise<Portfolio> {
         kisUnrecordedKrw = r.unrecordedKrw;
       }
     }
+
+    // Where each withdrawal went: back into an account here (found), or what
+    // a person said (outflows.ts). A label only - no figure above moves.
+    const answers = await db.outflowAnswers().catch((e: Error) => {
+      problems.push(`출금 용도 기록: ${e.message}`);
+      return null;
+    });
+    if (answers) principal.outflows = outflowsOf(flows, answers, today);
   }
 
   // Upbit's sales need what is held now to know what was held at the start.

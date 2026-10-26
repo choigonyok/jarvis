@@ -122,6 +122,72 @@ export type Principal = {
   flows: Flow[];
   /** Empty when the ledger agrees with the trades, or they could not be read. */
   checks: LedgerCheck[];
+  /**
+   * Every withdrawal and where it went (outflows.ts). Absent when the answers
+   * could not be read: asking again what was answered is worse than not
+   * asking for a while.
+   */
+  outflows?: Outflow[];
+};
+
+/**
+ * Where part of a withdrawal went. transfer: into an account here again.
+ * spend: paid out by transfer or in cash - the 가계부 takes it. card: paid a
+ * card bill, whose charges the 가계부 already has. saved: put somewhere else
+ * (a deposit, a subscription account). parked: still in the bank, to be put
+ * back.
+ */
+export type OutflowUse = "transfer" | "spend" | "card" | "saved" | "parked";
+
+/** A deposit into an account here: what a withdrawal went into, or may have. */
+export type FlowRef = { key: string; date: string; venue: Venue; amountKrw: number };
+
+export type OutflowPart = {
+  use: OutflowUse;
+  amountKrw: number;
+  /** The deposit it went into: a transfer found, or parked money come back. */
+  to?: FlowRef;
+  /** spend: the 가계부 category picked. */
+  category?: string;
+  /** What the person said it was for ("월세"). */
+  memo?: string;
+  /** When a person answered (ISO). Absent for what was found. */
+  decidedAt?: string;
+};
+
+/** One withdrawal from the pot and where it went - see outflows.ts. */
+export type Outflow = {
+  /** The same on every look: "upbit:<uuid>", "manual:<id>", "auto:kis:2026-10-20". */
+  key: string;
+  date: string;
+  venue: Venue;
+  /** What left, in won (positive). */
+  amountKrw: number;
+  memo: string;
+  /**
+   * transfer: all of it came back into an account here. answered: a person
+   * said where (the rest) went. waiting: too fresh to ask - the deposit it is
+   * on its way to may not show yet. ask: `askKrw` of it is accounted for by
+   * nothing, and nobody has said.
+   */
+  status: "transfer" | "answered" | "waiting" | "ask";
+  parts: OutflowPart[];
+  /** What no part accounts for - what the card asks about. */
+  askKrw: number;
+  /** Deposits here soon after that no withdrawal took: what it may have become. */
+  candidates: FlowRef[];
+};
+
+/** A person's answer about one withdrawal, as stored (outflow_uses). */
+export type OutflowAnswer = {
+  key: string;
+  /** The withdrawal's amount when answered: if it changes, the answer is stale. */
+  flowKrw: number;
+  use: OutflowUse;
+  amountKrw: number;
+  category: string | null;
+  memo: string;
+  decidedAt: string;
 };
 
 /** The allocation buckets. Brokerages know coin and stock; the rest is ours - see target.ts. */

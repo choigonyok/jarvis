@@ -1,6 +1,6 @@
 import { Pool } from "pg";
 
-import type { Flow, Portfolio } from "./types.js";
+import type { Flow, OutflowAnswer, OutflowUse, Portfolio } from "./types.js";
 
 /**
  * Daily snapshots.
@@ -175,6 +175,87 @@ export async function deleteFlow(id: number): Promise<boolean> {
   // Only what was written by hand: a found deposit would come back on the next look anyway.
   const { rowCount } = await pool.query("delete from principal_flows where id = $1 and source = 'manual'", [id]);
   return (rowCount ?? 0) > 0;
+}
+
+/**
+ * Every answer about where a withdrawal went (outflow_uses). Null without a
+ * database: then nothing can be told answered from unanswered, and nothing
+ * should be asked.
+ */
+export async function outflowAnswers(): Promise<OutflowAnswer[] | null> {
+  if (!pool) return null;
+  const { rows } = await pool.query<{
+    flow_key: string; flow_krw: string; use: OutflowUse; amount_krw: string; category: string | null; memo: string; decided_at: Date;
+  }>(`select flow_key, flow_krw, use, amount_krw, category, memo, decided_at from outflow_uses order by decided_at, flow_key, use`);
+  return rows.map((r) => ({
+    key: r.flow_key,
+    flowKrw: Number(r.flow_krw),
+    use: r.use,
+    amountKrw: Number(r.amount_krw),
+    category: r.category,
+    memo: r.memo,
+    decidedAt: r.decided_at.toISOString(),
+  }));
+}
+
+/**
+ * Add an answer about part of a withdrawal: `amountKrw` of it went to `use`.
+ * The same use again adds to it - the card asks about what is left, part by
+ * part. Answers about another amount (the withdrawal changed since) and money
+ * parked past `parkedDays` are cleared first: this answer is what replaces
+ * them. More answered than `maxKrw` is refused.
+ */
+export async function answerOutflow(a: {
+  key: string;
+  flowKrw: number;
+  use: OutflowUse;
+  amountKrw: number;
+  category: string | null;
+  memo: string;
+  maxKrw: number;
+  parkedDays: number;
+}): Promise<void> {
+  if (!pool) throw new Error("데이터베이스가 연결되지 않았습니다.");
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    await client.query(
+      `delete from outflow_uses
+        where flow_key = $1
+          and (flow_krw <> $2 or (use = 'parked' and decided_at < now() - make_interval(days => $3)))`,
+      [a.key, a.flowKrw, a.parkedDays],
+    );
+    const { rows } = await client.query<{ total: string | null }>(
+      `select sum(amount_krw) as total from outflow_uses where flow_key = $1`,
+      [a.key],
+    );
+    if (Number(rows[0]?.total ?? 0) + a.amountKrw > a.maxKrw) {
+      throw new Error("답한 금액을 합치면 출금액보다 커요.");
+    }
+    await client.query(
+      `insert into outflow_uses (flow_key, flow_krw, use, amount_krw, category, memo)
+       values ($1, $2, $3, $4, $5, $6)
+       on conflict (flow_key, use) do update
+         set amount_krw = outflow_uses.amount_krw + excluded.amount_krw,
+             category   = coalesce(excluded.category, outflow_uses.category),
+             memo       = case when excluded.memo = '' then outflow_uses.memo else excluded.memo end,
+             decided_at = now()`,
+      [a.key, a.flowKrw, a.use, a.amountKrw, a.category, a.memo],
+    );
+    await client.query("commit");
+  } catch (e) {
+    await client.query("rollback").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+/** Forget every answer about a withdrawal, so it is asked about again. */
+export async function clearOutflow(key: string): Promise<number> {
+  if (!pool) throw new Error("데이터베이스가 연결되지 않았습니다.");
+  const { rowCount } = await pool.query(`delete from outflow_uses where flow_key = $1`, [key]);
+  return rowCount ?? 0;
 }
 
 /** One account's settled cash on one day, per currency, and the net settled trades up to it. */

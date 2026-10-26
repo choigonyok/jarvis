@@ -74,6 +74,13 @@ func (s *Store) Unclear(ctx context.Context) ([]Unclear, []string, error) {
 	return payload.Entries, payload.Categories, err
 }
 
+// Categories is the book's list of categories, for a card elsewhere that
+// files something into it (assets/ask.go).
+func (m *Module) Categories(ctx context.Context) ([]string, error) {
+	_, categories, err := m.store.Unclear(ctx)
+	return categories, err
+}
+
 // SetCategory sets a charge's category; with remember, its merchant's too.
 // It says how many charges changed.
 func (s *Store) SetCategory(ctx context.Context, id int64, category string, remember bool) (int, error) {

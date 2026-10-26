@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { OrderRecord, OrderSheet, PlanSheet } from "@/components/assets/orders";
+import { OutflowList, OutflowSummary } from "@/components/assets/outflows";
 import { RealizedSection } from "@/components/assets/realized";
 import { ProfitLines, ProfitOther, Row } from "@/components/assets/summary";
 import { AllocationDetail, DriftColumns } from "@/components/assets/target";
@@ -35,7 +36,7 @@ import { isPending } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
 import { cn } from "@/lib/utils";
 
-type Fold = "bridge" | "alloc" | "orders";
+type Fold = "bridge" | "alloc" | "orders" | "principal";
 
 /** A confirm sheet for several orders: what it is called, why, and how its orders are checked. */
 type PlanAsk = { title: string; reason: string; load: () => Promise<{ results: OrderResult[]; planId?: string | null }> };
@@ -61,7 +62,7 @@ export function Assets() {
   const [data, setData] = useState<Portfolio | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [open, setOpen] = useState<Record<Fold, boolean>>({ bridge: false, alloc: false, orders: false });
+  const [open, setOpen] = useState<Record<Fold, boolean>>({ bridge: false, alloc: false, orders: false, principal: false });
   const toggle = (k: Fold) => setOpen((o) => ({ ...o, [k]: !o[k] }));
   const [ordering, setOrdering] = useState<Holding | null>(null);
   const [asking, setAsking] = useState<PlanAsk | null>(null);
@@ -82,6 +83,7 @@ export function Assets() {
       const id = (e.target as HTMLElement).dataset.focus ?? "";
       if (id.startsWith("allocation")) setOpen((o) => ({ ...o, alloc: true }));
       if (id === "tax") setOpen((o) => ({ ...o, bridge: true }));
+      if (id === "principal") setOpen((o) => ({ ...o, principal: true }));
     };
     document.addEventListener("jarvis:focused", opened);
     return () => document.removeEventListener("jarvis:focused", opened);
@@ -310,7 +312,19 @@ export function Assets() {
                 ) : null}
 
                 {principal ? (
-                  <Row id="assets-principal" title="원금" focus="principal">
+                  <Row
+                    id="assets-principal"
+                    title="원금"
+                    focus="principal"
+                    open={open.principal}
+                    // Folds open on where the money taken out went - once there is any.
+                    onToggle={principal.outflows?.length ? () => toggle("principal") : undefined}
+                    detail={
+                      principal.outflows?.length ? (
+                        <OutflowList outflows={principal.outflows} onChanged={() => void load(true)} />
+                      ) : undefined
+                    }
+                  >
                     <p className="tnum text-[13px] text-foreground/90">
                       {krw(principal.principalKrw)}
                       <span className="ms-2 text-faint">{since}부터 넣은 돈</span>
@@ -322,6 +336,7 @@ export function Assets() {
                         {c.message}
                       </p>
                     ))}
+                    {principal.outflows ? <OutflowSummary outflows={principal.outflows} /> : null}
                   </Row>
                 ) : null}
 

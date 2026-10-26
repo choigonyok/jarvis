@@ -98,6 +98,7 @@ func main() {
 	// The operator's money: assets and spending. The guest agent is built
 	// without them - no module, no MCP server, no tool - so there is nothing
 	// for its model to call, whatever it is asked.
+	var assetsModule *assets.Module
 	var spendingModule *spending.Module
 	var jobsModule *jobs.Module
 	var vaultModule *vault.Module
@@ -109,7 +110,7 @@ func main() {
 		}
 	}
 	if !cfg.Guest {
-		assetsModule := assets.New(assets.NewStore(cfg.AssetsURL, cfg.APIToken))
+		assetsModule = assets.New(assets.NewStore(cfg.AssetsURL, cfg.APIToken))
 		modules.Add(assetsModule)
 		spendingModule = spending.New(spending.NewStore(cfg.SpendingURL, cfg.APIToken))
 		modules.Add(spendingModule)
@@ -264,6 +265,14 @@ func main() {
 		spendingModule.Ask(proposals, log)
 		spendingModule.Attach(transcript.AttachProposal)
 		go spendingModule.RunAsker(enrichCtx, spending.AskConfig{Every: 10 * time.Minute, MaxOpen: 3, Judge: runner, Model: cfg.EnrichModel})
+	}
+	// Money taken out of an investment account that no deposit here explains
+	// is asked about, one card per withdrawal (assets/ask.go); what was spent
+	// reaches the 가계부 through assets-svc.
+	if assetsModule != nil && spendingModule != nil && !cfg.Guest {
+		assetsModule.Ask(proposals, log)
+		assetsModule.Attach(transcript.AttachProposal)
+		go assetsModule.RunAsker(enrichCtx, assets.AskConfig{Every: 10 * time.Minute, MaxOpen: 12, Categories: spendingModule.Categories})
 	}
 	if jobsModule != nil && cfg.Guest {
 		// The guest's jobs open no website: nothing to hold them to.
@@ -453,6 +462,10 @@ func main() {
 			if p.Action.Kind == spending.KindCategory {
 				// The book asking what a charge was for: muted with the rest of 가계부.
 				kind, title = "spending.ask", "가계부"
+			}
+			if p.Action.Kind == assets.KindOutflow {
+				// Where a withdrawal went: muted with the rest of 자산.
+				kind, title = "assets.ask", "자산"
 			}
 			body := p.Card.Title
 			if p.Card.Body != "" {

@@ -515,7 +515,7 @@ func (s *Server) storeErr(w http.ResponseWriter, err error, msg string) bool {
 		return false
 	case errors.Is(err, store.ErrNotFound):
 		writeErr(w, http.StatusNotFound, err.Error())
-	case strings.HasPrefix(err.Error(), "카드 알림"):
+	case errors.As(err, new(store.KeptError)):
 		writeErr(w, http.StatusBadRequest, err.Error())
 	default:
 		s.log.Error(msg, "err", err)

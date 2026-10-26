@@ -14,8 +14,9 @@ import { timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 
 import * as db from "./db.js";
-import type { Allocation, Holding } from "./types.js";
+import type { Allocation, Holding, Outflow, OutflowUse, Portfolio } from "./types.js";
 import { announce } from "./notify.js";
+import { PARKED_DAYS, tolerance } from "./outflows.js";
 import { PRINCIPAL_SINCE, buildPortfolio, invalidateVenues } from "./portfolio.js";
 import { placeOrders, requestsOf, type OrderRequest } from "./orders.js";
 import { affordable, cancelStanding, nyClock, standingPass } from "./standing.js";
@@ -68,6 +69,17 @@ async function portfolioJson(force = false): Promise<string> {
     rebuild().catch((e: Error) => console.error("자산을 다시 계산하지 못했습니다:", e.message));
     return `{"stale":true,${cached.body.slice(1)}`;
   }
+  return rebuild();
+}
+
+/**
+ * The portfolio as of at most `maxAgeMs` ago, built afresh when the one held
+ * is older. For what asks on a timer (the outflow card, the 가계부's feed):
+ * the brokerages are not read again for each of them, and an answer clears
+ * the cache, so what follows it is fresh.
+ */
+async function portfolioWithin(maxAgeMs: number): Promise<string> {
+  if (cached && Date.now() - cached.at < maxAgeMs) return cached.body;
   return rebuild();
 }
 
@@ -173,6 +185,115 @@ async function principal(
   }
 
   send(res, 405, { error: "지원하지 않는 요청입니다." });
+}
+
+const OUTFLOW_USES: readonly OutflowUse[] = ["spend", "card", "saved", "parked", "transfer"];
+/** How old a portfolio the outflow routes may answer from. */
+const OUTFLOWS_MAX_AGE_MS = 10 * 60_000;
+
+/** Every withdrawal and where it went, as of the portfolio; null when that could not be read. */
+async function currentOutflows(): Promise<Outflow[] | null> {
+  const p = JSON.parse(await portfolioWithin(OUTFLOWS_MAX_AGE_MS)) as Portfolio;
+  return p.principal?.outflows ?? null;
+}
+
+/**
+ * Where withdrawals went (outflows.ts). GET /outflows lists them all; POST
+ * /outflows/answer says where part of one went ({key, flowKrw, use,
+ * amountKrw, category?, memo?} - the card's answer); DELETE
+ * /outflows/answer?key= forgets what was said about one, so it is asked
+ * again. An answer changes no figure, but the next look must show it.
+ */
+async function outflows(
+  req: import("node:http").IncomingMessage,
+  res: import("node:http").ServerResponse,
+  url: URL,
+) {
+  if (req.method === "GET" && url.pathname === "/outflows") {
+    const list = await currentOutflows();
+    if (!list) {
+      send(res, 503, { error: "입출금 기록이나 출금 용도 기록을 읽지 못했습니다." });
+      return;
+    }
+    send(res, 200, { since: PRINCIPAL_SINCE, outflows: list });
+    return;
+  }
+  if (url.pathname !== "/outflows/answer") {
+    send(res, 404, { error: "그런 경로가 없습니다." });
+    return;
+  }
+  if (req.method === "DELETE") {
+    const key = url.searchParams.get("key") ?? "";
+    if (!key) {
+      send(res, 400, { error: "어느 출금인지(key) 알려 주세요." });
+      return;
+    }
+    const removed = await db.clearOutflow(key);
+    cached = null;
+    generation += 1;
+    send(res, 200, { ok: true, removed });
+    return;
+  }
+  if (req.method !== "POST") {
+    send(res, 405, { error: "지원하지 않는 요청입니다." });
+    return;
+  }
+
+  const body = (await readBody(req).catch(() => null)) as Record<string, unknown> | null;
+  const key = typeof body?.key === "string" ? body.key : "";
+  const use = body?.use as OutflowUse;
+  const flowKrw = Number(body?.flowKrw);
+  const amountKrw = Math.round(Number(body?.amountKrw));
+  const category = typeof body?.category === "string" ? body.category.trim() : "";
+  const memo = typeof body?.memo === "string" ? body.memo.trim() : "";
+  if (!key || !OUTFLOW_USES.includes(use) || !Number.isFinite(flowKrw) || !Number.isFinite(amountKrw) || amountKrw <= 0) {
+    send(res, 400, { error: "출금(key), 출금액(flowKrw), 용도, 0보다 큰 금액이 필요합니다." });
+    return;
+  }
+  if (use === "spend" && !category) {
+    send(res, 400, { error: "지출이면 가계부 분류를 골라 주세요." });
+    return;
+  }
+  if ([...category].length > 20 || [...memo].length > 40) {
+    send(res, 400, { error: "분류는 20자, 어디에 썼는지는 40자까지예요." });
+    return;
+  }
+  const list = await currentOutflows();
+  if (!list) {
+    send(res, 503, { error: "입출금 기록을 읽지 못해 답을 적지 못했습니다." });
+    return;
+  }
+  const out = list.find((o) => o.key === key);
+  if (!out) {
+    send(res, 404, { error: "그런 출금이 없습니다." });
+    return;
+  }
+  if (Math.abs(out.amountKrw - flowKrw) >= 1) {
+    send(res, 409, { error: `출금액이 ₩${out.amountKrw.toLocaleString("ko-KR")}(으)로 바뀌었어요. 다시 물을게요.` });
+    return;
+  }
+  try {
+    await db.answerOutflow({
+      key,
+      flowKrw: out.amountKrw,
+      use,
+      amountKrw,
+      category: use === "spend" ? category : null,
+      memo,
+      maxKrw: out.amountKrw + tolerance(out.amountKrw),
+      parkedDays: PARKED_DAYS,
+    });
+  } catch (e) {
+    const message = (e as Error).message;
+    if (message.startsWith("답한 금액")) {
+      send(res, 400, { error: message });
+      return;
+    }
+    throw e;
+  }
+  cached = null;
+  generation += 1;
+  send(res, 200, { ok: true });
 }
 
 /** What a request may ask to have placed - only the fields an order has. */
@@ -338,7 +459,11 @@ async function standing(
 
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");
-  const writes = url.pathname.startsWith("/principal") || url.pathname.startsWith("/orders") || url.pathname.startsWith("/standing");
+  const writes =
+    url.pathname.startsWith("/principal") ||
+    url.pathname.startsWith("/orders") ||
+    url.pathname.startsWith("/standing") ||
+    url.pathname.startsWith("/outflows");
 
   if (req.method !== "GET" && !writes) {
     send(res, 405, { error: "GET 만 받습니다." });
@@ -366,6 +491,14 @@ const server = createServer((req, res) => {
     void principal(req, res, url).catch((e: Error) => {
       console.error("원금 기록을 바꾸지 못했습니다:", e.message);
       send(res, 503, { error: "원금 기록을 바꾸지 못했습니다." });
+    });
+    return;
+  }
+
+  if (url.pathname.startsWith("/outflows")) {
+    void outflows(req, res, url).catch((e: Error) => {
+      console.error("출금 용도를 처리하지 못했습니다:", e.message);
+      send(res, 503, { error: "출금 용도를 처리하지 못했습니다." });
     });
     return;
   }

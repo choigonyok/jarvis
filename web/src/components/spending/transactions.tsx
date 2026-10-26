@@ -61,7 +61,8 @@ function Row({ t, onOpen }: { t: Tx; onOpen: () => void }) {
       onClick={onOpen}
       className="flex w-full items-start gap-3 rounded-lg px-2 py-2.5 text-left transition-colors outline-none hover:bg-glass focus-visible:ring-3 focus-visible:ring-ring/50"
     >
-      <span className="tnum w-9 shrink-0 pt-[3px] text-[11px] text-faint">{clock(t.approvedAt)}</span>
+      {/* Money taken out of an investment account has a day, not an hour. */}
+      <span className="tnum w-9 shrink-0 pt-[3px] text-[11px] text-faint">{t.source === "asset" ? "" : clock(t.approvedAt)}</span>
       <span className="min-w-0 flex-1">
         <span
           className={cn(

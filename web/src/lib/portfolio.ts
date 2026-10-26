@@ -95,6 +95,44 @@ export type Principal = {
   flows: Flow[];
   /** Absent from an older assets-svc. */
   checks?: LedgerCheck[];
+  /** Every withdrawal and where it went. Absent when the answers could not be read, or from an older assets-svc. */
+  outflows?: Outflow[];
+};
+
+/**
+ * Where part of a withdrawal went (assets-svc outflows.ts): back into an
+ * account here, spent, a card bill, kept elsewhere, or still in the bank.
+ */
+export type OutflowUse = "transfer" | "spend" | "card" | "saved" | "parked";
+
+/** A deposit into an account here. */
+export type FlowRef = { key: string; date: string; venue: Venue; amountKrw: number };
+
+export type OutflowPart = {
+  use: OutflowUse;
+  amountKrw: number;
+  to?: FlowRef;
+  category?: string;
+  memo?: string;
+  /** Set when a person answered; absent for a transfer that was found. */
+  decidedAt?: string;
+};
+
+/**
+ * One withdrawal. transfer: all of it came back into an account here.
+ * answered: someone said where (the rest) went. waiting: too fresh to ask.
+ * ask: `askKrw` of it is accounted for by nothing - a card is asking.
+ */
+export type Outflow = {
+  key: string;
+  date: string;
+  venue: Venue;
+  amountKrw: number;
+  memo: string;
+  status: "transfer" | "answered" | "waiting" | "ask";
+  parts: OutflowPart[];
+  askKrw: number;
+  candidates: FlowRef[];
 };
 
 export const VENUE_LABEL: Record<Venue, string> = {

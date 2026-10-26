@@ -562,9 +562,16 @@ func (s *Store) Update(ctx context.Context, id int64, p Patch) (int, error) {
 	return touched, tx.Commit(ctx)
 }
 
+// KeptError is a row another record keeps: deleted here, it would come back.
+// Its text says where it is changed instead.
+type KeptError struct{ Why string }
+
+func (e KeptError) Error() string { return e.Why }
+
 // Delete removes a hand-written entry. Ones read from an alert cannot be
 // deleted - the alert would still be there, and the next replay would put it
-// back. Excluding is how those leave the total.
+// back. Excluding is how those leave the total. Ones from the assets
+// screen's answers come back the same way; the answer is changed there.
 func (s *Store) Delete(ctx context.Context, id int64) error {
 	var source string
 	if err := s.pool.QueryRow(ctx, `select source from card_transactions where id=$1`, id).Scan(&source); err != nil {
@@ -573,11 +580,94 @@ func (s *Store) Delete(ctx context.Context, id int64) error {
 		}
 		return err
 	}
-	if source != "manual" {
-		return errors.New("카드 알림에서 온 내역은 지울 수 없어요. 합계에서 빼기를 쓰세요.")
+	switch source {
+	case "manual":
+	case "asset":
+		return KeptError{"투자 계좌 출금에서 온 내역은 여기서 지울 수 없어요. 자산 탭에서 다시 물어 주세요."}
+	default:
+		return KeptError{"카드 알림에서 온 내역은 지울 수 없어요. 합계에서 빼기를 쓰세요."}
 	}
 	_, err := s.pool.Exec(ctx, `delete from card_transactions where id=$1`, id)
 	return err
+}
+
+// ── 투자 계좌에서 쓴 돈 ───────────────────────────────────────────────────
+
+// AssetSpend is money taken out of an investment account that the operator
+// said was spent (assets-svc's outflow answers). Ref names the answer, not
+// only the withdrawal: a new answer is a new row.
+type AssetSpend struct {
+	Ref        string
+	ApprovedAt time.Time
+	// Issuer is the account it left: 업비트, 한국투자증권, 금현물 계좌.
+	Issuer    string
+	Merchant  string
+	AmountKrw int64
+	Category  string
+}
+
+// SyncAssetSpends makes the book's asset rows the list given: a row whose
+// answer is gone (changed, or asked again) leaves, one not there yet comes
+// in. What is already there is left as it is - a category changed on the
+// 가계부 screen, or the row taken out of the total, stays. The list must be
+// complete: what is missing from it is deleted.
+func (s *Store) SyncAssetSpends(ctx context.Context, want []AssetSpend) (added, removed int, err error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer tx.Rollback(ctx)
+
+	keep := map[string]bool{}
+	for _, w := range want {
+		keep[w.Ref] = true
+	}
+	rows, err := tx.Query(ctx, `select id, source_ref from card_transactions where source = 'asset'`)
+	if err != nil {
+		return 0, 0, err
+	}
+	have := map[string]bool{}
+	var gone []int64
+	for rows.Next() {
+		var id int64
+		var ref string
+		if err := rows.Scan(&id, &ref); err != nil {
+			rows.Close()
+			return 0, 0, err
+		}
+		have[ref] = true
+		if !keep[ref] {
+			gone = append(gone, id)
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, 0, err
+	}
+	if len(gone) > 0 {
+		if _, err := tx.Exec(ctx, `delete from card_transactions where id = any($1)`, gone); err != nil {
+			return 0, 0, err
+		}
+	}
+	for _, w := range want {
+		if have[w.Ref] {
+			continue
+		}
+		cat := w.Category
+		if !category.Valid(cat) {
+			cat = category.Other
+		}
+		if _, err := tx.Exec(ctx, `
+			insert into card_transactions
+			  (source, source_ref, issuer, amount_krw, merchant, category, category_source, approved_at)
+			values ('asset', $1, $2, $3, $4, $5, 'manual', $6)
+			on conflict (source_ref) do nothing`,
+			w.Ref, w.Issuer, w.AmountKrw, w.Merchant, cat, w.ApprovedAt); err != nil {
+			return 0, 0, err
+		}
+		added++
+	}
+	return added, len(gone), tx.Commit(ctx)
 }
 
 func (s *Store) SetBudget(ctx context.Context, cat string, amount int64) error {

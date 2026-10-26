@@ -3,21 +3,36 @@ package assets
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/choigonyok/jarvis/agent/internal/core/module"
+	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
 )
 
-// Read-only by construction: a ContextSource and nothing else. Were this ever
-// to implement Actuator, that assertion would belong here too - and so would
-// a card for every order.
-var _ module.ContextSource = (*Module)(nil)
+// A ContextSource for the model, and an Editor for one card only: the one
+// this module raises itself to ask where a withdrawal went (ask.go). No tool
+// writes, and no action kind reaches an order.
+var (
+	_ module.ContextSource = (*Module)(nil)
+	_ module.Editor        = (*Module)(nil)
+)
 
 const Name = "assets"
 
 type Module struct {
 	store *Store
+
+	// The outflow card (ask.go): where cards go, and who hears them decided.
+	proposals *proposal.Store
+	log       *slog.Logger
+	attach    func(proposalID string)
+	// snoozed is when a withdrawal's card was last turned down.
+	mu      sync.Mutex
+	snoozed map[string]time.Time
 }
 
 func New(store *Store) *Module { return &Module{store: store} }
@@ -73,6 +88,28 @@ func renderSummary(p Portfolio) string {
 		// The principal is only as right as the ledger under it.
 		for _, c := range pr.Checks {
 			b.WriteString("원금 기록 불일치: " + c.Message + "\n")
+		}
+		// Taken out and spent - by transfer or in cash, which no card alert
+		// sees - and what nobody has said yet.
+		var spent, open float64
+		asked := 0
+		for _, o := range pr.Outflows {
+			for _, part := range o.Parts {
+				if part.Use == "spend" {
+					spent += part.AmountKrw
+				}
+			}
+			if o.Status == "ask" {
+				open += o.AskKrw
+				asked++
+			}
+		}
+		if spent > 0 || asked > 0 {
+			line := fmt.Sprintf("투자 계좌에서 꺼내 쓴 돈(지출로 답한 것) %s", krw(spent))
+			if asked > 0 {
+				line += fmt.Sprintf(" · 어디로 갔는지 모르는 출금 %d건 %s(카드로 물어봄)", asked, krw(open))
+			}
+			b.WriteString(line + "\n")
 		}
 	}
 	var changes []string

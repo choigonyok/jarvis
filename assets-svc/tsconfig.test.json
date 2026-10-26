@@ -1,0 +1,11 @@
+{
+  // 테스트는 src 와 함께 .test/ 로 따로 컴파일한다. 이미지는 src 만 빌드하므로
+  // 테스트가 dist 나 이미지에 섞이지 않는다.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": ".test",
+    "sourceMap": false
+  },
+  "include": ["src", "test"]
+}

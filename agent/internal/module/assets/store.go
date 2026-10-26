@@ -1,13 +1,15 @@
 // Package assets lets the model read the portfolio: holdings, return against
 // principal, drift from the target allocation, and the daily snapshots.
 //
-// It is read-only, and not by convention: the module implements no Actuator,
-// so there is no action kind for the gate to approve and no tool that writes.
-// The keys that can place orders stay in assets-svc; this package only ever
-// holds the bearer token for that service's GET routes.
+// It is read-only to the model, and not by convention: no tool here writes.
+// The one write is the operator's own answer to a card this module raises
+// by itself - where money taken out of an account went (ask.go) - and it
+// goes to assets-svc's /outflows/answer, which changes no figure. The keys
+// that can place orders stay in assets-svc; nothing here reaches /orders.
 package assets
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -64,6 +66,50 @@ type Principal struct {
 	Rate         float64         `json:"rate"`
 	Parts        []PrincipalPart `json:"parts"`
 	Checks       []LedgerCheck   `json:"checks"`
+	Outflows     []Outflow       `json:"outflows"`
+}
+
+// FlowRef is a deposit into an account here: what a withdrawal went into, or may have.
+type FlowRef struct {
+	Key       string  `json:"key"`
+	Date      string  `json:"date"`
+	Venue     string  `json:"venue"`
+	AmountKrw float64 `json:"amountKrw"`
+}
+
+// OutflowPart is where part of a withdrawal went: transfer (back into an
+// account here), spend, card (a card bill), saved, parked (still in the bank).
+type OutflowPart struct {
+	Use       string   `json:"use"`
+	AmountKrw float64  `json:"amountKrw"`
+	To        *FlowRef `json:"to,omitempty"`
+	Category  string   `json:"category,omitempty"`
+	Memo      string   `json:"memo,omitempty"`
+	DecidedAt string   `json:"decidedAt,omitempty"`
+}
+
+// Outflow is one withdrawal from the pot and where it went (assets-svc
+// outflows.ts). Status "ask": AskKrw of it is accounted for by nothing yet.
+type Outflow struct {
+	Key        string        `json:"key"`
+	Date       string        `json:"date"`
+	Venue      string        `json:"venue"`
+	AmountKrw  float64       `json:"amountKrw"`
+	Memo       string        `json:"memo"`
+	Status     string        `json:"status"` // transfer | answered | waiting | ask
+	Parts      []OutflowPart `json:"parts"`
+	AskKrw     float64       `json:"askKrw"`
+	Candidates []FlowRef     `json:"candidates"`
+}
+
+// OutflowAnswer is the operator's word on part of a withdrawal.
+type OutflowAnswer struct {
+	Key       string  `json:"key"`
+	FlowKrw   float64 `json:"flowKrw"`
+	Use       string  `json:"use"`
+	AmountKrw int64   `json:"amountKrw"`
+	Category  string  `json:"category,omitempty"`
+	Memo      string  `json:"memo,omitempty"`
 }
 
 type FixedAsset struct {
@@ -179,9 +225,24 @@ func NewStore(baseURL, token string) *Store {
 }
 
 func (s *Store) get(ctx context.Context, path string, out any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.base+path, nil)
+	return s.call(ctx, http.MethodGet, path, nil, out)
+}
+
+func (s *Store) call(ctx context.Context, method, path string, body, out any) error {
+	var payload io.Reader
+	if body != nil {
+		raw, err := json.Marshal(body)
+		if err != nil {
+			return err
+		}
+		payload = bytes.NewReader(raw)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, s.base+path, payload)
 	if err != nil {
 		return err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
 	}
 	if s.token != "" {
 		req.Header.Set("Authorization", "Bearer "+s.token)
@@ -202,7 +263,24 @@ func (s *Store) get(ctx context.Context, path string, out any) error {
 		}
 		return fmt.Errorf("자산 서비스가 거부했습니다: %s", res.Status)
 	}
+	if out == nil {
+		return nil
+	}
 	return json.NewDecoder(res.Body).Decode(out)
+}
+
+// Outflows is every withdrawal since the principal's start and where it went.
+func (s *Store) Outflows(ctx context.Context) ([]Outflow, error) {
+	var payload struct {
+		Outflows []Outflow `json:"outflows"`
+	}
+	err := s.get(ctx, "/outflows", &payload)
+	return payload.Outflows, err
+}
+
+// AnswerOutflow writes where part of a withdrawal went.
+func (s *Store) AnswerOutflow(ctx context.Context, a OutflowAnswer) error {
+	return s.call(ctx, http.MethodPost, "/outflows/answer", a, nil)
 }
 
 func (s *Store) Portfolio(ctx context.Context) (Portfolio, error) {

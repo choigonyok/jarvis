@@ -24,6 +24,7 @@ import (
 	_ "time/tzdata"
 
 	"github.com/choigonyok/jarvis/spending-svc/internal/api"
+	"github.com/choigonyok/jarvis/spending-svc/internal/assets"
 	"github.com/choigonyok/jarvis/spending-svc/internal/ingest"
 	"github.com/choigonyok/jarvis/gocommon/notify"
 	"github.com/choigonyok/jarvis/spending-svc/internal/store"
@@ -76,6 +77,12 @@ func main() {
 		log,
 	)
 	go in.Run(ctx)
+	// What was paid out of the investment accounts, by transfer or in cash -
+	// no card alert sees it. assets-svc asks where a withdrawal went; what was
+	// spent is read from there. Off without ASSETS_URL.
+	if base := os.Getenv("ASSETS_URL"); base != "" {
+		go assets.New(base, token, st, duration("SPENDING_ASSETS_INTERVAL", 5*time.Minute), log).Run(ctx)
+	}
 	// What the ledger has to say goes to notify-svc; nothing without NOTIFY_URL.
 	go watch.New(st, notify.New(os.Getenv("NOTIFY_URL"), dsn, token, log), log).Run(ctx)
 
