@@ -105,6 +105,9 @@ type Msg struct {
 	From string `json:"from,omitempty"`
 	Me   bool   `json:"me,omitempty"`
 	Text string `json:"text"`
+	// Notice: the assistant posted it on its own (a job's news, a reminder
+	// at its moment) - shown to the interpreter as context, never evidence.
+	Notice bool `json:"notice,omitempty"`
 	// Room puts the message in another conversation (history the scenario
 	// needs), not read by the interpreter.
 	Room     string `json:"room,omitempty"`
@@ -537,7 +540,12 @@ func Run(ctx context.Context, sc Scenario, client llm.Client, loc *time.Location
 				if msg.Room != "" {
 					to, name = "sim:"+msg.Room, msg.RoomName
 				}
-				if _, err := m.Simulate(ctx, to, name, msg.From, msg.Me, msg.Text, at); err != nil {
+				sender := msg.From
+				if msg.Notice {
+					sender = model.NoticeSender
+				}
+				if _, err := m.SimulateMessage(ctx, model.Message{Room: to, RoomName: name, Sender: sender, IsMine: msg.Me,
+					SentAt: at, Text: msg.Text, Notice: msg.Notice}); err != nil {
 					fail(i, "%v", err)
 					return res
 				}

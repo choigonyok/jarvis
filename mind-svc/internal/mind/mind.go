@@ -286,6 +286,12 @@ func (m *Mind) Run(ctx context.Context, every time.Duration) {
 // Simulate is a message from the console's simulator: stored and logged
 // exactly as a sensor would.
 func (m *Mind) Simulate(ctx context.Context, room, roomName, sender string, mine bool, text string, at time.Time) (model.Message, error) {
+	return m.SimulateMessage(ctx, model.Message{Room: room, RoomName: roomName, Sender: sender, IsMine: mine, SentAt: at, Text: text})
+}
+
+// SimulateMessage is Simulate for a message spelled out - a notice, say - under
+// the next sim ref.
+func (m *Mind) SimulateMessage(ctx context.Context, msg model.Message) (model.Message, error) {
 	n, err := m.Opts.Store.Cursor(ctx, "sim")
 	if err != nil {
 		return model.Message{}, err
@@ -294,13 +300,10 @@ func (m *Mind) Simulate(ctx context.Context, room, roomName, sender string, mine
 	if err := m.Opts.Store.SetCursor(ctx, "sim", n); err != nil {
 		return model.Message{}, err
 	}
-	if at.IsZero() {
-		at = m.Opts.Now()
+	if msg.SentAt.IsZero() {
+		msg.SentAt = m.Opts.Now()
 	}
-	msg := model.Message{
-		Ref: fmt.Sprintf("sim:%d", n), Source: "sim", Room: room, RoomName: roomName,
-		Sender: sender, IsMine: mine, SentAt: at, Text: text,
-	}
+	msg.Ref, msg.Source = fmt.Sprintf("sim:%d", n), "sim"
 	return msg, Observe(ctx, m.Opts.Store, m.Opts.Log, msg)
 }
 

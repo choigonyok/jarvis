@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 )
@@ -114,5 +115,43 @@ func TestChatReadsNewTurnsBySince(t *testing.T) {
 	}
 	if len(sinces) != 2 || sinces[1] == "" || !strings.Contains(sinces[1], ".") {
 		t.Fatalf("since 를 마이크로초까지 넘겨야 합니다: %q", sinces)
+	}
+}
+
+// A turn with an origin is mind's own output come back - a job's news, a
+// reminder rung, a checklist shown. It is kept as a notice, under its own
+// name, never as something the assistant said in the conversation.
+func TestChatKeepsTheAssistantsOwnCardsAsNotices(t *testing.T) {
+	at := time.Now().Add(-time.Hour).Truncate(time.Second).Format("2006-01-02T15:04:05.000000-07:00")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"turns":[
+			{"id":"u-1","role":"user","atIso":"` + at + `","text":"그거 취소됐어"},
+			{"id":"a-2","role":"agent","atIso":"` + at + `","text":"알겠어요."},
+			{"id":"j-3","role":"agent","atIso":"` + at + `","paragraphs":["탁상시계 주문을 마쳤어요"],"origin":{"kind":"job","job":16,"run":40}},
+			{"id":"n-4","role":"agent","atIso":"` + at + `","text":"치과 예약 확인하기","origin":{"kind":"notice","ref":"moment:7"}}
+		]}`))
+	}))
+	defer srv.Close()
+	st := store.NewMemory()
+	log := obs.NewMemoryLog(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	go log.Run(context.Background(), func(context.Context, obs.Observation) error { return nil })
+	s := &Chat{URL: srv.URL, Store: st, Log: log, Backfill: 6 * time.Hour, Out: slog.New(slog.NewTextHandler(io.Discard, nil)), HTTP: srv.Client()}
+	if err := s.Poll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for ref, want := range map[string]struct {
+		notice bool
+		sender string
+		mine   bool
+	}{
+		"chat:u-1": {false, "", true},
+		"chat:a-2": {false, "Jarvis(비서)", false},
+		"chat:j-3": {true, model.NoticeSender, false},
+		"chat:n-4": {true, model.NoticeSender, false},
+	} {
+		m, err := st.Message(context.Background(), ref)
+		if err != nil || m.Notice != want.notice || m.Sender != want.sender || m.IsMine != want.mine {
+			t.Fatalf("%s: %+v %v", ref, m, err)
+		}
 	}
 }

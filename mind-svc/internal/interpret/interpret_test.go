@@ -441,3 +441,97 @@ func TestHearsayAboutTheOperatorIsKeptLow(t *testing.T) {
 		t.Fatalf("낮은 확신도의 들은 말로 남아야 합니다: %+v", fs[0])
 	}
 }
+
+func notice(t *testing.T, st *store.Memory, ref, text string, at time.Time) {
+	t.Helper()
+	if err := st.PutMessage(context.Background(), model.Message{Ref: ref, Source: "chat", Room: "r", RoomName: "jarvis",
+		Sender: model.NoticeSender, SentAt: at, Text: text, Notice: true}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A notice - a reminder mind rang, a job's news, a checklist shown - is mind's
+// own output come back. The interpreter sees it, named as one, as context for
+// what the operator says to it; a change resting on it alone is not believed,
+// and the operator's answer to it is.
+func TestANoticeIsContextNotEvidence(t *testing.T) {
+	ctx := context.Background()
+	c, st, script := setup(t, `{"changes":[
+		{"op":"create","kind":"loop","set":{"title":"치과 예약 확인하기","owner":"me"},"evidence":[{"line":1,"quote":"치과 예약 확인하기"}],"confidence":0.9},
+		{"op":"remember","kind":"fact","set":{"subject":"나","relation":"BOUGHT","object":"탁상시계","objectKind":"Thing","text":"나는 탁상시계를 샀다"},"evidence":[{"line":2,"quote":"탁상시계 주문을 마쳤어요"}],"confidence":0.9},
+		{"op":"cancel","kind":"plan","ref":"P1","evidence":[{"line":3,"quote":"그거 취소됐어"}],"confidence":0.9,"why":"알림에 답함"}
+	]}`)
+	if _, err := c.world.Create(ctx, model.KindPlan, "r", model.State{Title: "치과", Status: model.Confirmed, Date: "2026-10-13", Start: "10:00"}, world.Meta{Actor: "interpreter"}); err != nil {
+		t.Fatal(err)
+	}
+	notice(t, st, "chat:n1", "리마인드 · 내일 10시 치과 예약 확인하기", time.Date(2026, 10, 12, 20, 1, 0, 0, seoul))
+	notice(t, st, "chat:n2", "작업 소식 · 탁상시계 주문을 마쳤어요", time.Date(2026, 10, 12, 20, 2, 0, 0, seoul))
+	say(t, st, "chat:u3", "그거 취소됐어. 병원에서 연락 왔어", true, time.Date(2026, 10, 12, 20, 3, 0, 0, seoul))
+	if err := c.Read(ctx, "r"); err != nil {
+		t.Fatal(err)
+	}
+	p := script.Prompts[0]
+	for _, want := range []string{"[1] 10/12(월) 20:01 Jarvis(알림): 리마인드", "[3] 10/12(월) 20:03 윤(나): 그거 취소됐어"} {
+		if !strings.Contains(p, want) {
+			t.Fatalf("프롬프트에 %q 가 없습니다:\n%s", want, p)
+		}
+	}
+	if !strings.Contains(system, `"Jarvis(알림)"인 줄은 비서가 스스로 보낸 알림`) {
+		t.Fatal("해석기 규칙에 알림이 있어야 합니다")
+	}
+	plans, _ := st.Entities(ctx, model.KindPlan, "", false)
+	if len(plans) != 1 || plans[0].State.Status != model.Cancelled {
+		t.Fatalf("운영자가 알림에 답한 말은 해석합니다: %+v", plans)
+	}
+	if loops, _ := st.Entities(ctx, model.KindLoop, "", false); len(loops) != 0 {
+		t.Fatalf("알림만으로 고리를 만들지 않습니다: %+v", loops)
+	}
+	if facts, _ := st.Facts(ctx, 10); len(facts) != 0 {
+		t.Fatalf("알림만으로 사실을 남기지 않습니다: %+v", facts)
+	}
+}
+
+// Nothing but notices is nothing said: the room is marked read without
+// asking the model, and the notices are there as context for the next read.
+func TestNoticesAloneAreNotRead(t *testing.T) {
+	ctx := context.Background()
+	c, st, script := setup(t, `{"changes":[]}`)
+	notice(t, st, "chat:n1", "리마인드 · 장갑 챙기기", time.Date(2026, 10, 12, 20, 1, 0, 0, seoul))
+	if err := c.Read(ctx, "r"); err != nil {
+		t.Fatal(err)
+	}
+	if len(script.Prompts) != 0 {
+		t.Fatal("알림만 있으면 모델을 부르지 않습니다")
+	}
+	rooms, _ := st.Rooms(ctx)
+	if len(rooms) != 1 || rooms[0].Uninterpreted != 0 {
+		t.Fatalf("읽은 것으로 표시해야 합니다: %+v", rooms)
+	}
+	say(t, st, "chat:u2", "다 챙겼어", true, time.Date(2026, 10, 12, 20, 4, 0, 0, seoul))
+	if err := c.Read(ctx, "r"); err != nil {
+		t.Fatal(err)
+	}
+	if len(script.Prompts) != 1 || !strings.Contains(script.Prompts[0], "Jarvis(알림): 리마인드 · 장갑 챙기기") || !strings.Contains(script.Prompts[0], "[1] 10/12(월) 20:04 윤(나): 다 챙겼어") {
+		t.Fatalf("다음 읽기에 알림이 앞선 대화로 보여야 합니다: %v", script.Prompts)
+	}
+}
+
+// A notice coming after what was said does not put its reading off; alone,
+// it is only read (marked) after the usual quiet.
+func TestANoticeDoesNotPutOffARead(t *testing.T) {
+	st := store.NewMemory()
+	clock := time.Date(2026, 10, 12, 20, 0, 0, 0, seoul)
+	now := func() time.Time { return clock }
+	c := NewConversation(Config{Owner: "윤", Idle: 3 * time.Minute}, st, world.New(st, now), &llm.Script{}, seoul, now, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	c.Observe(model.Message{Ref: "chat:u1", Source: "chat", Room: "r", Sender: "지수", SentAt: clock, Text: "그럼 토요일에 봐"})
+	want := c.Pending()["r"]
+	clock = clock.Add(2 * time.Minute)
+	c.Observe(model.Message{Ref: "chat:n2", Source: "chat", Room: "r", Sender: model.NoticeSender, Notice: true, SentAt: clock, Text: "작업 소식"})
+	if got := c.Pending()["r"]; !got.Equal(want) {
+		t.Fatalf("알림이 읽기를 미뤘습니다: %v, 원래 %v", got, want)
+	}
+	c.Observe(model.Message{Ref: "chat:n3", Source: "chat", Room: "q", Sender: model.NoticeSender, Notice: true, SentAt: clock, Text: "리마인드"})
+	if _, ok := c.Pending()["q"]; !ok {
+		t.Fatal("알림뿐인 방도 읽음 표시를 위해 한 번은 돕니다")
+	}
+}

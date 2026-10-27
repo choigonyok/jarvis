@@ -197,9 +197,9 @@ func (p *Postgres) PutMessage(ctx context.Context, m model.Message) error {
 		return err
 	}
 	_, err = p.db.Exec(ctx, `
-		insert into mind_messages (ref, source, room, room_name, sender, is_mine, sent_at, body, sealed)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9) on conflict (ref) do nothing`,
-		m.Ref, m.Source, m.Room, m.RoomName, m.Sender, m.IsMine, m.SentAt, body, sealed)
+		insert into mind_messages (ref, source, room, room_name, sender, is_mine, sent_at, body, sealed, notice)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) on conflict (ref) do nothing`,
+		m.Ref, m.Source, m.Room, m.RoomName, m.Sender, m.IsMine, m.SentAt, body, sealed, m.Notice)
 	return err
 }
 
@@ -208,13 +208,13 @@ func (p *Postgres) PruneMessages(ctx context.Context, before time.Time) (int64, 
 	return tag.RowsAffected(), err
 }
 
-const messageCols = `ref, source, room, room_name, sender, is_mine, sent_at, body, sealed`
+const messageCols = `ref, source, room, room_name, sender, is_mine, sent_at, body, sealed, notice`
 
 func (p *Postgres) scanMessage(row pgx.Row) (model.Message, error) {
 	var m model.Message
 	var body []byte
 	var sealed bool
-	if err := row.Scan(&m.Ref, &m.Source, &m.Room, &m.RoomName, &m.Sender, &m.IsMine, &m.SentAt, &body, &sealed); err != nil {
+	if err := row.Scan(&m.Ref, &m.Source, &m.Room, &m.RoomName, &m.Sender, &m.IsMine, &m.SentAt, &body, &sealed, &m.Notice); err != nil {
 		return m, err
 	}
 	text, err := p.open(body, sealed)
@@ -356,7 +356,7 @@ func (p *Postgres) MessageContext(ctx context.Context, ref string, before, after
 func (p *Postgres) scanOpen(row pgx.Row) (m model.Message, opened bool, err error) {
 	var body []byte
 	var sealed bool
-	if err := row.Scan(&m.Ref, &m.Source, &m.Room, &m.RoomName, &m.Sender, &m.IsMine, &m.SentAt, &body, &sealed); err != nil {
+	if err := row.Scan(&m.Ref, &m.Source, &m.Room, &m.RoomName, &m.Sender, &m.IsMine, &m.SentAt, &body, &sealed, &m.Notice); err != nil {
 		return m, false, err
 	}
 	text, err := p.open(body, sealed)

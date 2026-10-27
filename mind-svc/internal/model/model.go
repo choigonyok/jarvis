@@ -634,7 +634,16 @@ type Message struct {
 	IsMine   bool      `json:"isMine"`
 	SentAt   time.Time `json:"sentAt"`
 	Text     string    `json:"text"`
+	// Notice is a line the assistant sent on its own in the operator's room -
+	// a job's news, a reminder at its moment, a checklist shown - not words
+	// said in the conversation. It is context for what is said around it,
+	// never evidence: mind wrote it.
+	Notice bool `json:"notice,omitempty"`
 }
+
+// NoticeSender is who a notice is shown as, to the interpreter and the
+// console.
+const NoticeSender = "Jarvis(알림)"
 
 // CalendarEvent is an entry as the calendar actions carry it.
 type CalendarEvent struct {

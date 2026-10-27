@@ -1,0 +1,34 @@
+{
+ "name": "비서가 스스로 보낸 알림(울린 리마인드, 작업 소식)은 맥락일 뿐 근거가 아니다 - 운영자가 알림에 '그거 취소됐어'라고 답하면 알림을 맥락 삼아 그 일정을 취소하고, 작업 소식에 적힌 구매는 사실로 남기지 않으며, 알림만 온 때는 읽지 않는다",
+ "room": "owner",
+ "roomName": "jarvis",
+ "turns": [
+  {
+   "messages": [
+    { "at": "2026-10-26T21:00", "me": true, "text": "내일 오전 10시 치과 예약했어" }
+   ],
+   "script": {"changes":[{"op":"create","kind":"plan","set":{"title":"치과","status":"confirmed","date":"2026-10-27","start":"10:00","type":"병원"},"evidence":[{"line":1,"quote":"내일 오전 10시 치과 예약했어"}],"confidence":0.9,"why":"운영자가 예약을 알림"}]},
+   "expect": { "plans": [{ "titleHas": "치과", "status": "confirmed", "date": "2026-10-27" }] }
+  },
+  {
+   "messages": [
+    { "at": "2026-10-27T08:00", "notice": true, "text": "알림 · 오늘 10:00 치과 예약이 있어요. 늦지 않게 출발하세요." },
+    { "at": "2026-10-27T08:01", "notice": true, "text": "작업 소식 · 탁상시계 구매: 쿠팡에서 주문을 마쳤어요. 34,350원, 10/29(목) 도착 예정" },
+    { "at": "2026-10-27T08:20", "me": true, "text": "그거 취소됐어. 병원에서 연락 왔어" }
+   ],
+   "script": {"changes":[
+    {"op":"cancel","kind":"plan","ref":"P1","evidence":[{"line":3,"quote":"그거 취소됐어"}],"confidence":0.85,"why":"운영자가 치과 알림에 답해 취소를 알림"},
+    {"op":"remember","kind":"fact","set":{"subject":"나","subjectKind":"Person","relation":"BOUGHT","object":"탁상시계","objectKind":"Thing","text":"나는 탁상시계를 샀다"},"evidence":[{"line":2,"quote":"주문을 마쳤어요"}],"confidence":0.9,"why":"작업 소식"},
+    {"op":"create","kind":"loop","set":{"title":"탁상시계 도착 확인","owner":"me","due":"2026-10-29"},"evidence":[{"line":2,"quote":"10/29(목) 도착 예정"}],"confidence":0.7,"why":"작업 소식"}
+   ]},
+   "expect": { "plans": [{ "titleHas": "치과", "status": "cancelled" }], "planCount": 1, "noLoops": true, "noFactHas": ["탁상시계"] }
+  },
+  {
+   "messages": [
+    { "at": "2026-10-27T09:00", "notice": true, "text": "체크리스트 · 오늘 챙길 것: 우산, 이어폰" }
+   ],
+   "script": {"changes":[{"op":"create","kind":"loop","set":{"title":"우산 챙기기","owner":"me"},"evidence":[{"line":1,"quote":"우산"}],"confidence":0.8}]},
+   "expect": { "noLoops": true, "planCount": 1, "noCards": true }
+  }
+ ]
+}

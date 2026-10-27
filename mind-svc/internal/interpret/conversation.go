@@ -126,14 +126,16 @@ func (c *Conversation) Resume(ctx context.Context) error {
 
 // Observe notes a new message: its room is read once it has been quiet long
 // enough - or now, once a batch's worth is waiting: a busy group chat may
-// never fall quiet.
+// never fall quiet. A notice (mind's own output come back) is no reason to
+// read sooner or later: it only makes sure the room is marked read before
+// long, and waits as context for whatever is said next.
 func (c *Conversation) Observe(m model.Message) {
 	if c.cfg.Noise != nil && c.cfg.Noise.MatchString(m.RoomName) {
 		return
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if !m.IsMine {
+	if !m.IsMine && !m.Notice {
 		c.others[m.Room] = true
 	}
 	idle := c.cfg.Idle
@@ -142,6 +144,12 @@ func (c *Conversation) Observe(m model.Message) {
 		idle = c.cfg.IdleSim
 	case !c.others[m.Room]:
 		idle = c.cfg.IdleSelf
+	}
+	if m.Notice {
+		if _, due := c.due[m.Room]; !due {
+			c.due[m.Room] = c.now().Add(idle)
+		}
+		return
 	}
 	c.waiting[m.Room]++
 	if c.waiting[m.Room] >= c.cfg.MaxBatch {
@@ -230,6 +238,21 @@ func (c *Conversation) Read(ctx context.Context, room string) error {
 		fresh = fresh[:sameSecondCut(fresh, size)]
 	}
 	last := fresh[len(fresh)-1].SentAt
+	// Nothing but notices: nothing was said to read. They are marked read
+	// without asking the model, and stay as context for the next read.
+	if !slices.ContainsFunc(fresh, func(m model.Message) bool { return !m.Notice }) {
+		if err := c.st.MarkRoom(ctx, room, last); err != nil {
+			return err
+		}
+		if more {
+			c.mu.Lock()
+			c.due[room] = c.now()
+			c.mu.Unlock()
+			return nil
+		}
+		c.done(room)
+		return nil
+	}
 
 	earlier, err := c.st.RoomMessages(ctx, room, time.Time{}, fresh[0].SentAt, c.cfg.Context)
 	if err != nil {
@@ -691,8 +714,9 @@ func (c *Conversation) same(kind string, s model.State, known []view) string {
 	return ""
 }
 
-// verify keeps the evidence that holds: a line among the new messages, and a
-// quote that is in it.
+// verify keeps the evidence that holds: a line among the new messages, not a
+// notice - mind's own output is never its evidence - and a quote that is in
+// it.
 func verify(cites []cite, fresh []model.Message) []model.Evidence {
 	var out []model.Evidence
 	for _, ci := range cites {
@@ -700,6 +724,9 @@ func verify(cites []cite, fresh []model.Message) []model.Evidence {
 			continue
 		}
 		m := fresh[ci.Line-1]
+		if m.Notice {
+			continue
+		}
 		q := strings.TrimSpace(ci.Quote)
 		if q == "" || !strings.Contains(norm(m.Text), norm(q)) {
 			continue

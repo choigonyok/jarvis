@@ -164,6 +164,12 @@ type turn struct {
 	AtISO      string   `json:"atIso"`
 	Text       string   `json:"text"`
 	Paragraphs []string `json:"paragraphs"`
+	// Origin is set on a turn the assistant posted on its own - a job's
+	// news, a reminder at its moment, a checklist shown (chat-svc's
+	// turns.origin) - rather than said in the conversation.
+	Origin *struct {
+		Kind string `json:"kind"`
+	} `json:"origin"`
 }
 
 func (s *Chat) Run(ctx context.Context) {
@@ -227,7 +233,10 @@ func (s *Chat) Poll(ctx context.Context) error {
 }
 
 // message is a turn as a message of the jarvis room; ok is false when it has
-// no text. A turn whose time does not parse has a zero SentAt.
+// no text. A turn whose time does not parse has a zero SentAt. A turn with an
+// origin is mind's own output come back - a reminder it rang, a checklist it
+// showed, a job's news - and is kept as a notice: context for what the
+// operator says to it, never read as something said.
 func (t turn) message() (model.Message, bool) {
 	at, err := time.Parse(time.RFC3339Nano, t.AtISO)
 	if err != nil {
@@ -241,7 +250,10 @@ func (t turn) message() (model.Message, bool) {
 		Ref: "chat:" + t.ID, Source: "chat", Room: model.OwnerRoom, RoomName: "jarvis",
 		IsMine: t.Role == "user", SentAt: at, Text: text,
 	}
-	if !msg.IsMine {
+	switch {
+	case t.Origin != nil:
+		msg.IsMine, msg.Sender, msg.Notice = false, model.NoticeSender, true
+	case !msg.IsMine:
 		msg.Sender = "Jarvis(비서)"
 	}
 	return msg, text != ""

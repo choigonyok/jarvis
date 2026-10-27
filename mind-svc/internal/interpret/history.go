@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/llm"
@@ -56,6 +57,10 @@ func (c *Conversation) ReadHistory(ctx context.Context, room, name string, after
 		fresh = fresh[:sameSecondCut(fresh, size)]
 	}
 	last := fresh[len(fresh)-1].SentAt
+	// As live: nothing but notices is nothing said, read without the model.
+	if !slices.ContainsFunc(fresh, func(m model.Message) bool { return !m.Notice }) {
+		return last, len(fresh), 0, nil
+	}
 
 	earlier, err := c.st.RoomMessages(ctx, room, time.Time{}, fresh[0].SentAt, c.cfg.Context)
 	if err != nil {

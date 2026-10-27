@@ -213,6 +213,17 @@ func messages(t *testing.T, st Store) {
 			t.Fatal(err)
 		}
 	}
+	// A notice keeps being one: mind's own output, read back as context only.
+	if err := st.PutMessage(ctx, model.Message{Ref: "chat:n1", Source: "chat", Room: "chat:owner", RoomName: "jarvis",
+		Sender: model.NoticeSender, SentAt: at, Text: "리마인드 · 장갑 챙기기", Notice: true}); err != nil {
+		t.Fatal(err)
+	}
+	if m, err := st.Message(ctx, "chat:n1"); err != nil || !m.Notice || m.Sender != model.NoticeSender {
+		t.Fatalf("알림 표시가 남아야 합니다: %+v %v", m, err)
+	}
+	if ms, _ := st.RoomMessages(ctx, "chat:owner", time.Time{}, time.Time{}, 10); len(ms) != 1 || !ms[0].Notice {
+		t.Fatalf("방의 메시지로 읽어도 알림입니다: %+v", ms)
+	}
 	put("srch:1", "kakao:uni", "대학 동기방", "지수", "요즘 다들 갓생 산다던데", 0)
 	put("srch:2", "kakao:uni", "대학 동기방", "민지", "갓생이 뭐야?", 1)
 	put("srch:3", "kakao:uni", "대학 동기방", "지수", "갓생은 부지런하고 생산적으로 사는 거", 2)

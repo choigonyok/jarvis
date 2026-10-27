@@ -61,3 +61,23 @@ func TestHistoryBatchKeepsTheSameSecondTogether(t *testing.T) {
 		t.Fatalf("같은 초의 둘을 함께 읽어야 합니다: %d", read)
 	}
 }
+
+// The past's notices are read as the live ones: alone in a batch, without the
+// model; next to what was said, as lines no fact rests on.
+func TestHistoryReadsNoticesAsLive(t *testing.T) {
+	ctx := context.Background()
+	c, st, script := setup(t, `{"changes":[
+		{"op":"remember","kind":"fact","set":{"subject":"나","subjectKind":"Person","relation":"BOUGHT","object":"탁상시계","objectKind":"Thing","text":"나는 탁상시계를 샀다"},"evidence":[{"line":1,"quote":"주문을 마쳤어요"}],"confidence":0.9}
+	]}`)
+	at := time.Date(2026, 10, 1, 20, 0, 0, 0, seoul)
+	notice(t, st, "chat:n1", "작업 소식 · 탁상시계 주문을 마쳤어요", at)
+	through, read, _, err := c.ReadHistory(ctx, "r", "jarvis", time.Time{}, time.Time{}, 1)
+	if err != nil || read != 1 || !through.Equal(at) || len(script.Prompts) != 0 {
+		t.Fatalf("알림만 있는 묶음은 모델 없이 지나갑니다: read=%d through=%v prompts=%d err=%v", read, through, len(script.Prompts), err)
+	}
+	notice(t, st, "chat:n2", "작업 소식 · 탁상시계 주문을 마쳤어요", at.Add(time.Minute))
+	say(t, st, "chat:u3", "고마워", true, at.Add(2*time.Minute))
+	if _, _, facts, err := c.ReadHistory(ctx, "r", "jarvis", through, time.Time{}, 40); err != nil || facts != 0 || len(script.Prompts) != 1 {
+		t.Fatalf("알림을 근거로 한 사실은 남지 않습니다: facts=%d prompts=%d err=%v", facts, len(script.Prompts), err)
+	}
+}

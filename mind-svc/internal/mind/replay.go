@@ -93,14 +93,17 @@ func (m *Mind) Replay(ctx context.Context, client llm.Client, after int64, limit
 		}
 		readQuiet(msg.SentAt, false)
 		clk.Pin(msg.SentAt)
-		if !msg.IsMine {
+		if !msg.IsMine && !msg.Notice {
 			others[msg.Room] = true
 		}
 		if err := Observe(rctx, st, log, msg); err != nil {
 			return rep, err
 		}
 		log.Drain()
-		last[msg.Room] = msg.SentAt
+		// As live: a notice does not put off a read already waiting.
+		if _, waiting := last[msg.Room]; !waiting || !msg.Notice {
+			last[msg.Room] = msg.SentAt
+		}
 		rep.Messages++
 	}
 	readQuiet(clk.Now(), true)
