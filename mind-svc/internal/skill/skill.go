@@ -39,6 +39,10 @@ type View interface {
 	Entity(ctx context.Context, id string) (model.Entity, error)
 	Entities(ctx context.Context, kind, room string, liveOnly bool) ([]model.Entity, error)
 	IntentsFor(ctx context.Context, entityID string) ([]model.Intent, error)
+	// IntentsSince is every intent raised since t, newest first: what was
+	// asked lately about anything, for a skill that must not ask the like
+	// of what was turned down.
+	IntentsSince(ctx context.Context, t time.Time) ([]model.Intent, error)
 	Now() time.Time
 	Loc() *time.Location
 	// Recall is a few things long-term memory holds about these people -

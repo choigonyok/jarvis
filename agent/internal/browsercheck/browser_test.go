@@ -31,9 +31,19 @@ type fakeBrowser struct {
 	cold      bool
 	current   string
 	navigated []string
+	// alive is what GET /alive answers: whether a browser is running.
+	alive bool
 }
 
 func (f *fakeBrowser) handle(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/alive" {
+		f.mu.Lock()
+		alive := f.alive
+		f.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]bool{"alive": alive})
+		return
+	}
 	var msg struct {
 		ID     *int   `json:"id"`
 		Method string `json:"method"`
@@ -281,6 +291,57 @@ func TestACheckThatFindsTheSiteSignedInSaysSo(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("로그인된 사이트를 알리지 않았습니다")
+	}
+}
+
+// While the browser is down, a look would start it for the look alone: the
+// check waits WhenDown instead, and looks at once when something else has
+// the browser up (48 starts a day for the looks alone, 2026-10-27).
+func TestALookDoesNotStartTheBrowser(t *testing.T) {
+	f := &fakeBrowser{tabs: []tab{{ID: "t-agent", URL: "https://agent.example/working"}}}
+	srv := httptest.NewServer(http.HandlerFunc(f.handle))
+	defer srv.Close()
+	c := &Checker{
+		Client:   New(srv.URL, "tok"),
+		Sites:    []Site{{ID: "shop", Orders: "https://shop.example/orders", LoginHost: "login.shop.example"}},
+		Every:    30 * time.Minute,
+		WhenDown: 6 * time.Hour,
+		Idle:     func() bool { return true },
+	}
+	c.Client.poll, c.Client.tries = time.Millisecond, 3
+	c.init()
+	c.results["shop"] = Result{At: time.Now().Add(-time.Hour)} // due by Every, not by WhenDown
+	ctx := context.Background()
+
+	c.pass(ctx, false)
+	f.mu.Lock()
+	n := len(f.navigated)
+	f.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("브라우저가 꺼져 있으면 열지 않아야 합니다: %v", f.navigated)
+	}
+
+	f.mu.Lock()
+	f.alive = true
+	f.mu.Unlock()
+	c.pass(ctx, false)
+	f.mu.Lock()
+	n = len(f.navigated)
+	f.mu.Unlock()
+	if n == 0 {
+		t.Fatal("브라우저가 떠 있으면 바로 열어 봐야 합니다")
+	}
+
+	f.mu.Lock()
+	f.alive, f.navigated = false, nil
+	f.mu.Unlock()
+	c.results["shop"] = Result{At: time.Now().Add(-7 * time.Hour)} // past WhenDown
+	c.pass(ctx, false)
+	f.mu.Lock()
+	n = len(f.navigated)
+	f.mu.Unlock()
+	if n == 0 {
+		t.Fatal("여섯 시간이 지나면 꺼져 있어도 열어 봅니다")
 	}
 }
 

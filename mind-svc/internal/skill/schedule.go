@@ -195,6 +195,21 @@ func (s Schedule) add(ctx context.Context, v View, e model.Entity, changes []mod
 			return model.Intent{}, false
 		}
 	}
+	// Nor the like of an entry turned down lately - the same title on
+	// another day, or what the reason named: "롤체 약속은 캘린더에 추가하지마"
+	// was about the kind of thing, and "은주와 롤체" was asked again the next
+	// day (2026-10-25~26).
+	if recent, err := v.IntentsSince(ctx, v.Now().Add(-turnedDownFor)); err == nil {
+		for _, p := range recent {
+			if p.Kind != "calendar.create" || (p.Status != model.Rejected && p.Status != model.Undone) {
+				continue
+			}
+			var a model.CalendarAction
+			if json.Unmarshal(p.Payload, &a) == nil && alike(a.Event.Title, p.Error, ev.Title) {
+				return model.Intent{}, false
+			}
+		}
+	}
 	return model.Intent{
 		Kind: "calendar.create", EntityID: e.ID, Payload: payload,
 		Title:  "캘린더에 추가: " + Day(e.State, v.Loc()) + " " + e.State.Title,
@@ -329,6 +344,51 @@ func confidence(changes []model.Change) float64 {
 		}
 	}
 	return conf
+}
+
+// turnedDownFor is how long an entry turned down keeps its like from being
+// asked.
+const turnedDownFor = 30 * 24 * time.Hour
+
+// alike is whether a new entry's title is the one turned down, or carries a
+// word the reason for turning it down shared with that title - the word the
+// no was about.
+func alike(rejected, reason, title string) bool {
+	r, t := squeeze(rejected), squeeze(title)
+	if r == "" || t == "" {
+		return false
+	}
+	if r == t {
+		return true
+	}
+	for _, w := range words(reason) {
+		if len([]rune(w)) >= 2 && strings.Contains(r, w) && strings.Contains(t, w) {
+			return true
+		}
+	}
+	return false
+}
+
+// squeeze is a title with its spaces and case gone.
+func squeeze(s string) string { return strings.ToLower(strings.Join(strings.Fields(s), "")) }
+
+// words is a sentence's words, lowercased, with the particle that clings to
+// each cut off ("약속은" → "약속").
+func words(s string) []string {
+	var out []string
+	for _, w := range strings.Fields(strings.ToLower(s)) {
+		w = strings.TrimRight(w, ".,!?~…")
+		for _, p := range []string{"으로", "에서", "한테", "에게", "은", "는", "이", "가", "을", "를", "에", "의", "과", "와", "도", "로"} {
+			if strings.HasSuffix(w, p) && len([]rune(w)) > len([]rune(p))+1 {
+				w = strings.TrimSuffix(w, p)
+				break
+			}
+		}
+		if w != "" {
+			out = append(out, w)
+		}
+	}
+	return out
 }
 
 func samePayload(a, b json.RawMessage) bool {

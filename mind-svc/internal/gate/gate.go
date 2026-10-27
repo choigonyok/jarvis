@@ -87,6 +87,10 @@ func DefaultPolicy() Policy {
 	}
 }
 
+// BriefSkill is the morning brief's skill (skill.Brief): the one notice the
+// day's push budget never holds back.
+const BriefSkill = "brief"
+
 type Gate struct {
 	st     store.Store
 	acts   *act.Registry
@@ -141,7 +145,11 @@ func (g *Gate) Submit(ctx context.Context, in model.Intent) (model.Intent, error
 		in.Tier, in.Why = "digest", "알려 둘 일"
 		if in.Urgent {
 			in.Decision, in.Tier, in.Why = model.Notify, "now", "지금 알 일"
-			if in.Moment == "" && g.overBudget(ctx) {
+			// The morning brief is the day's first word and is not held
+			// for the evening by what rang before it: nine loops with one
+			// friend at 07:00 once sent the 08:00 brief to the evening
+			// digest (2026-10-25).
+			if in.Moment == "" && in.Skill != BriefSkill && g.overBudget(ctx) {
 				in.Decision, in.Tier, in.Why = model.Digest, "digest", "오늘 알림 한도를 넘어 저녁 요약으로"
 			}
 		}

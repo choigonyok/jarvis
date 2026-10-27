@@ -151,12 +151,18 @@ func (m *Mind) reviews(ctx context.Context) error {
 	asked := 0
 	seen := map[string]bool{}
 	for _, c := range cands {
-		key := c.subjectType + ":" + c.subject
+		key := c.subjectType + ":" + placeKey(c.subject)
 		if seen[key] || asked >= questionsADay {
 			continue
 		}
 		seen[key] = true
 		if never, _ := st.Cursor(ctx, "review:never:"+neverKey(c.subjectType, c.subject)); never > 0 {
+			continue
+		}
+		// One trip, one question: the calendar's place, the region stayed
+		// at and the trip's town are the same nights, not three
+		// (2026-10-24~26: 양평, 메리지아레캠핑장, 메리지아레 캠핑장 (양평)).
+		if stay(c.subjectType) && m.tripAsked(ctx, c.at.In(loc)) {
 			continue
 		}
 		intent, err := m.reviewIntent(ctx, c, now)
@@ -172,9 +178,40 @@ func (m *Mind) reviews(ctx context.Context) error {
 			if c.subjectType == "운동" {
 				_ = st.SetCursor(ctx, "review:last:운동", now.UnixMilli())
 			}
+			if stay(c.subjectType) {
+				_ = st.SetCursor(ctx, "review:trip:"+c.at.In(loc).Format("2006-01-02"), 1)
+			}
 		}
 	}
 	return nil
+}
+
+// stay is a subject type that is somewhere slept: a campsite, a lodging.
+func stay(subjectType string) bool { return subjectType == "캠핑장" || subjectType == "숙소" }
+
+// tripAsked is whether a stay starting the day before, on, or after day was
+// already asked about.
+func (m *Mind) tripAsked(ctx context.Context, day time.Time) bool {
+	for d := -1; d <= 1; d++ {
+		if n, _ := m.Opts.Store.Cursor(ctx, "review:trip:"+day.AddDate(0, 0, d).Format("2006-01-02")); n > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// placeKey is a place's name as the ledger keys it: the calendar's
+// "메리지아레 캠핑장 (양평)" and the region's "메리지아레캠핑장" are one place.
+func placeKey(subject string) string {
+	s := strings.TrimSpace(subject)
+	for {
+		i := strings.LastIndex(s, "(")
+		if i <= 0 || !strings.HasSuffix(s, ")") {
+			break
+		}
+		s = strings.TrimSpace(s[:i])
+	}
+	return strings.ToLower(strings.Join(strings.Fields(s), ""))
 }
 
 // Decided is the relation a big decision is remembered by (with the
@@ -187,7 +224,7 @@ func neverKey(subjectType, subject string) string {
 	if subjectType == "주" || subjectType == "운동" {
 		return subjectType
 	}
-	return subjectType + ":" + subject
+	return subjectType + ":" + placeKey(subject)
 }
 
 // weekCandidate is the week ending today, with what it held.
@@ -237,7 +274,7 @@ func (m *Mind) reviewIntent(ctx context.Context, c candidate, now time.Time) (mo
 	payload, _ := json.Marshal(prefs.Review{SubjectType: c.subjectType, Subject: c.subject, Context: ctxt, PlanID: c.planID})
 	when := fmt.Sprintf("%d/%d", int(c.at.Month()), c.at.Day())
 	in := model.Intent{
-		Skill: "review", Kind: "review.place", EntityID: c.planID, Topic: "review:" + c.subjectType + ":" + c.subject, Context: "review",
+		Skill: "review", Kind: "review.place", EntityID: c.planID, Topic: "review:" + c.subjectType + ":" + placeKey(c.subject), Context: "review",
 		Payload: payload, Title: fmt.Sprintf("%s (%s) 어땠어요?", c.subject, when),
 		Body:   "한두 번 누르면 돼요. 이 장소의 특징과 내 취향을 따로 배워서 다음에 고를 때 써요.",
 		Reason: "다녀온 곳 회고", Confidence: 0.9, Value: 1, Reversible: true, Evidence: c.evidence,

@@ -156,6 +156,19 @@ func (r *Runner) Refresh(ctx context.Context) {
 	wg.Wait()
 }
 
+// Confirm runs one probe again, now, and returns its state: for a notice
+// that must rest on a fresh look, not on a verdict minutes old. A probe
+// already mid-run is not run twice; its last state answers.
+func (r *Runner) Confirm(ctx context.Context, id string) State {
+	for _, p := range r.probes {
+		if p.ID == id {
+			r.runOne(ctx, p)
+			break
+		}
+	}
+	return r.State(id)
+}
+
 func (r *Runner) runOne(ctx context.Context, p Probe) {
 	r.mu.Lock()
 	if r.running[p.ID] {

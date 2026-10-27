@@ -40,6 +40,31 @@ func create(entity string) model.Intent {
 	return model.Intent{Skill: "schedule", Kind: "calendar.create", EntityID: entity, Payload: payload, Title: "캘린더에 추가", Confidence: 0.9, Reversible: true}
 }
 
+// The day's push budget holds other notices for the evening, never the
+// morning brief: loops told at 07:00 must not send the 08:00 brief to the
+// digest (2026-10-25: nine loops with one person did).
+func TestBriefIsNotHeldByTheDaysBudget(t *testing.T) {
+	ctx := context.Background()
+	p := DefaultPolicy()
+	p.DailyInterrupts = 2
+	f := newFixture(p)
+	for i := range 3 {
+		in, err := f.g.Submit(ctx, model.Intent{Skill: "people", Kind: "info", Title: "고리 " + string(rune('a'+i)), Confidence: 1, Urgent: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := "now"; i == 2 {
+			want = "digest"
+		} else if in.Tier != want {
+			t.Fatalf("%d번째 알림은 %s 여야 합니다: %+v", i+1, want, in)
+		}
+	}
+	brief, err := f.g.Submit(ctx, model.Intent{Skill: BriefSkill, Kind: "info", Title: "오늘 일정 1개 · 챙길 일 2개", Confidence: 1, Urgent: true})
+	if err != nil || brief.Tier != "now" || brief.Decision != model.Notify {
+		t.Fatalf("브리핑은 한도에 밀리지 않아야 합니다: %+v %v", brief, err)
+	}
+}
+
 // Asked first; after enough approvals in a row, done and told; one undo and
 // it is asked again.
 func TestTrustIsLearned(t *testing.T) {

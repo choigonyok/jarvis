@@ -39,6 +39,37 @@ func New(url, token string) *Client {
 	return &Client{URL: strings.TrimRight(url, "/") + "/", Token: token, http: &http.Client{Timeout: 90 * time.Second}}
 }
 
+// Alive is whether the browser is running now, asked of the bridge itself
+// (GET /alive) and not through a tool: a tool call starts the browser, and
+// a check that only wants to know must not be what brings it up. A bridge
+// without the route answers true - as before, the check goes on.
+func (c *Client) Alive(ctx context.Context) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.URL+"alive", nil)
+	if err != nil {
+		return true, err
+	}
+	if c.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Token)
+	}
+	res, err := c.http.Do(req)
+	if err != nil {
+		return true, err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return true, nil
+	}
+	var out struct {
+		Alive bool `json:"alive"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		return true, err
+	}
+	return out.Alive, nil
+}
+
 // Landing is where a page ended up.
 type Landing struct {
 	URL string

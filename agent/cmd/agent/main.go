@@ -349,6 +349,7 @@ func main() {
 			// 다른 탭이 로그인 화면이면(누가 비밀번호를 치는 중일 수 있다) 열지 않는다.
 			BusyHosts: []string{"login.coupang.com", "nid.naver.com", "pay.naver.com"},
 			Every:     30 * time.Minute,
+			WhenDown:  6 * time.Hour,
 			Idle:      runner.Idle,
 			Log:       log,
 		}

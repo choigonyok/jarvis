@@ -292,6 +292,10 @@ func (v view) Entities(ctx context.Context, kind, room string, liveOnly bool) ([
 func (v view) IntentsFor(ctx context.Context, id string) ([]model.Intent, error) {
 	return v.a.st.IntentsFor(ctx, id)
 }
+
+func (v view) IntentsSince(ctx context.Context, t time.Time) ([]model.Intent, error) {
+	return v.a.st.IntentsSince(ctx, t)
+}
 func (v view) Now() time.Time      { return v.a.now() }
 func (v view) Loc() *time.Location { return v.a.loc }
 

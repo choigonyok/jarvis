@@ -26,7 +26,7 @@ func (Loops) OnChange(_ context.Context, v View, e model.Entity, _ []model.Chang
 	if !e.Live() || e.State.Due == "" || e.AssistantsPromise() {
 		return r
 	}
-	if at, ok := dueAt(e.State.Due, v.Loc()); ok {
+	if at, ok := DueAt(e.State.Due, v.Loc()); ok {
 		remind := at.Add(-3 * time.Hour)
 		if !strings.Contains(e.State.Due, "T") {
 			remind = at.Add(-9 * time.Hour) // 09:00 on the day
@@ -68,8 +68,8 @@ func (Loops) OnTimer(_ context.Context, v View, e model.Entity, t model.Timer) R
 	}}}
 }
 
-// dueAt is a due date's end: midnight after a date, or the time given.
-func dueAt(due string, loc *time.Location) (time.Time, bool) {
+// DueAt is a due date's end: 18:00 on a date, or the time given.
+func DueAt(due string, loc *time.Location) (time.Time, bool) {
 	if t, err := time.ParseInLocation("2006-01-02T15:04", due, loc); err == nil {
 		return t, true
 	}
@@ -80,7 +80,7 @@ func dueAt(due string, loc *time.Location) (time.Time, bool) {
 }
 
 func dueText(due string, loc *time.Location) string {
-	if t, ok := dueAt(due, loc); ok {
+	if t, ok := DueAt(due, loc); ok {
 		s := fmt.Sprintf("%d/%d(%s)", int(t.Month()), t.Day(), weekdays[t.Weekday()])
 		if strings.Contains(due, "T") {
 			s += " " + t.Format("15:04")
@@ -92,6 +92,10 @@ func dueText(due string, loc *time.Location) string {
 
 // Brief is the morning: what is on today, and what is still open and due.
 type Brief struct{}
+
+// briefOverdueDays is how many days past its deadline a loop is still named
+// in the brief.
+const briefOverdueDays = 3
 
 func (Brief) Name() string                                                        { return "brief" }
 func (Brief) Wants(model.Entity) bool                                             { return false }
@@ -110,6 +114,11 @@ func (Brief) OnTick(ctx context.Context, v View, tick string) Result {
 	var lines []string
 	n := 0
 	for _, p := range plans {
+		// The partner's own entries are theirs, not the operator's day
+		// (the sensor marks them so, and protect and rain leave them be).
+		if p.State.Owner == "partner" {
+			continue
+		}
 		if p.State.Status == model.Confirmed && (p.State.Date == today || (p.State.Date < today && p.State.EndDate >= today)) {
 			n++
 			line := "· " + p.State.Title
@@ -123,12 +132,27 @@ func (Brief) OnTick(ctx context.Context, v View, tick string) Result {
 		}
 	}
 	loops, _ := v.Entities(ctx, model.KindLoop, "", true)
-	m := 0
+	m, older := 0, 0
+	// A loop is listed from a day before it is due until three days after.
+	// Older than that it is counted, not named: one from the 13th was read
+	// out every morning for a fortnight (2026-10-27), burying the day's.
+	since := now.AddDate(0, 0, -briefOverdueDays).Format("2006-01-02")
 	for _, l := range loops {
-		if l.State.Due != "" && l.State.Due[:10] <= tomorrow && !l.AssistantsPromise() {
+		if len(l.State.Due) < 10 || l.AssistantsPromise() {
+			continue
+		}
+		due := l.State.Due[:10]
+		switch {
+		case due > tomorrow:
+		case due < since:
+			older++
+		default:
 			m++
 			lines = append(lines, "· 할 일: "+l.State.Title+" (기한 "+dueText(l.State.Due, v.Loc())+")")
 		}
+	}
+	if older > 0 {
+		lines = append(lines, fmt.Sprintf("· 기한 지난 할 일 %d개 더 (2주가 지나면 접어요)", older))
 	}
 	// The weather at home, first: a wet day is worth a morning's word even
 	// with nothing on.

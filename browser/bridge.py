@@ -135,6 +135,31 @@ async def job_sites(request):
     return JSONResponse({"ok": True, "sites": sites})
 
 
+def chromium_alive() -> bool:
+    """Whether a Chromium is running in this container. browser-use starts one
+    on the first tool call and it goes down on its own when idle, so whoever
+    only wants to know must not ask through a tool - that would start it
+    (the agent's login check did, every 30 minutes, 2026-10-27)."""
+    try:
+        for pid in os.listdir("/proc"):
+            if not pid.isdigit():
+                continue
+            try:
+                with open(f"/proc/{pid}/cmdline", "rb") as f:
+                    argv0 = f.read().split(b"\0", 1)[0]
+            except OSError:
+                continue
+            if b"chrom" in argv0.lower():
+                return True
+    except OSError:
+        pass
+    return False
+
+
+async def alive(_request):
+    return JSONResponse({"alive": chromium_alive()})
+
+
 def build_app() -> Starlette:
     manager = StreamableHTTPSessionManager(app=app, stateless=True)
 
@@ -158,7 +183,11 @@ def build_app() -> Starlette:
     # "/"에 문다. "/mcp"에 물리면 Starlette이 "/mcp/"로 307을 보내고,
     # POST 리다이렉트는 클라이언트마다 따라가는 방식이 다르다.
     return Starlette(
-        routes=[Route("/job-sites", job_sites, methods=["POST", "DELETE"]), Mount("/", app=handle)],
+        routes=[
+            Route("/job-sites", job_sites, methods=["POST", "DELETE"]),
+            Route("/alive", alive, methods=["GET"]),
+            Mount("/", app=handle),
+        ],
         middleware=[Middleware(RequireToken)] if TOKEN else [],
         lifespan=lifespan,
     )

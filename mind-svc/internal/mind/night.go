@@ -12,6 +12,7 @@ import (
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/link"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+	"github.com/choigonyok/jarvis/mind-svc/internal/skill"
 	"github.com/choigonyok/jarvis/mind-svc/internal/world"
 )
 
@@ -37,6 +38,7 @@ func (m *Mind) Night(ctx context.Context) error {
 		// The rules found again and graded by how they did, before the
 		// reflection reads which of them are worth reflecting on.
 		m.engineNight,
+		m.lapseLoops,
 		func(ctx context.Context) error {
 			if _, err := m.Reflect.Night(ctx); err != nil {
 				m.Opts.Logger.Warn("성찰하지 못했습니다", "err", err)
@@ -118,6 +120,44 @@ func (m *Mind) ended(ctx context.Context, since, until time.Time) ([]model.Entit
 		}
 	}
 	return out, nil
+}
+
+// lapsedAfter is how long past its deadline an open loop is folded: a to-do
+// a fortnight overdue is not coming, and read out every morning until it
+// does it only buries the day's (8 of 34 open loops were, 2026-10-27).
+const lapsedAfter = 14 * 24 * time.Hour
+
+// lapseLoops folds the loops long past their deadline and says so once, for
+// the evening: the operator can still take one up from the record.
+func (m *Mind) lapseLoops(ctx context.Context) error {
+	now := m.Opts.Now()
+	loops, err := m.Opts.Store.Entities(ctx, model.KindLoop, "", true)
+	if err != nil {
+		return err
+	}
+	var folded []string
+	for _, l := range loops {
+		at, ok := skill.DueAt(l.State.Due, m.Opts.Loc)
+		if !ok || now.Sub(at) < lapsedAfter {
+			continue
+		}
+		_, changed, err := m.World.Update(ctx, l.ID, func(s *model.State) bool { s.Status = model.Closed; return true },
+			world.Meta{Actor: "observer", Why: "기한(" + l.State.Due + ")이 2주 넘게 지나 접음"})
+		if err != nil {
+			return err
+		}
+		if changed {
+			folded = append(folded, l.State.Title)
+		}
+	}
+	if len(folded) == 0 {
+		return nil
+	}
+	_, err = m.Gate.Submit(ctx, model.Intent{Skill: "loops", Kind: "info", Topic: "lapsed:" + now.In(m.Opts.Loc).Format("2006-01-02"),
+		Title:  fmt.Sprintf("기한이 2주 넘게 지난 할 일 %d개를 접었어요", len(folded)),
+		Body:   "· " + strings.Join(folded, "\n· ") + "\n아직 할 일이면 말씀해 주세요.",
+		Reason: "밤 정리", Confidence: 1})
+	return err
 }
 
 // closePast marks done the confirmed plans that are over: a trip last month

@@ -1,3 +1,10 @@
+# 바깥 이름은 공유기 DNS 를 거치지 않는다(2026-10-27: 공유기가 간헐적으로
+# SERVFAIL·NXDOMAIN 을 돌려 uniple·anthropic·Voyage 호출이 끊겼다). 그 길로는
+# host.docker.internal 이 풀리지 않아 extra_hosts 로 박는다.
+x-outside: &outside
+  dns: ["1.1.1.1", "8.8.8.8"]
+  extra_hosts: ["host.docker.internal:host-gateway"]
+
 services:
   # 진실의 원천. 서비스들의 테이블과 이벤트 로그가 여기 있다. 사람·사실의
   # 회수는 memory-svc(FalkorDB 그래프)가 맡는다 - 여기에 있던 회수용 벡터
@@ -58,6 +65,7 @@ services:
     restart: "no"
 
   agent:
+    <<: *outside
     build:
       context: ./agent
       additional_contexts:
@@ -188,6 +196,7 @@ services:
   # (JARVIS_API_TOKEN 은 캘린더·대화 서비스 때문에 필요하다. 그래서 손님 모드의
   # 모델에게는 셸·파일 도구가 없다 - 환경변수를 읽을 길을 막는다.)
   agent-guest:
+    <<: *outside
     build:
       context: ./agent
       additional_contexts:
@@ -294,6 +303,7 @@ services:
   # 받아 영역 체류(visits)와 현재 상태로 만든다. 폰은 스택의 토큰을 갖지 않는다: OwnTracks 는
   # 자기 Basic 인증, 단축어는 신호 토큰. 좌표 원본은 CONTEXT_RAW_DAYS(기본 30일)만 둔다.
   context:
+    <<: *outside
     build:
       context: ./context-svc
       additional_contexts:
@@ -343,6 +353,7 @@ services:
   # 토큰은 이것만의 JARVIS_SEARCH_TOKEN(모든 서비스가 받는 JARVIS_API_TOKEN 은 여기 없다).
   # 비어 있으면 /health 만 답하고 꺼져 있다 - 다시 뜨기를 반복하지 않는다.
   search:
+    <<: *outside
     build: ./search-svc
     environment:
       TZ: ${TZ:-Asia/Seoul}
@@ -529,6 +540,7 @@ services:
   # 스키마와 카드를 우회하는 두 번째 문이 되는 것)는 이제 더 확실히 해결된다:
   # 에이전트의 파일시스템에 캘린더가 아예 없다.
   calendar:
+    <<: *outside
     build:
       context: ./calendar-svc
       additional_contexts:
@@ -580,6 +592,7 @@ services:
   # TypeScript 로 돌고 있었고, 그 코드에는 어렵게 얻은 예외 처리가 주석까지
   # 남아 있다. 다시 쓰는 것은 잘 돌던 연동을 깨뜨릴 위험만 산다.
   assets:
+    <<: *outside
     build: ./assets-svc
     environment:
       TZ: ${TZ:-Asia/Seoul}
@@ -628,6 +641,7 @@ services:
     restart: unless-stopped
 
   browser:
+    <<: *outside
     build: ./browser
     environment:
       TZ: ${TZ:-Asia/Seoul}
@@ -767,6 +781,7 @@ services:
   # Voyage(voyage-4-large, rerank-3) - 둘 다 API 키, 사용량 과금.
   # 손님 대화는 group "guest" 로 따로 쌓여 운영자 기억과 섞이지 않는다.
   memory:
+    <<: *outside
     build: ./memory-svc
     environment:
       TZ: ${TZ:-Asia/Seoul}
@@ -881,6 +896,8 @@ services:
       SEARCH_URL: http://search:8104
       AGENT_GUEST_URL: http://agent-guest:8081
       IMMICH_URL: http://immich:2283
+      # 사진 유입 probe 가 가장 최근 사진의 시각을 읽는다(mind 의 읽기 키를 같이 쓴다).
+      IMMICH_API_KEY: ${IMMICH_MIND_API_KEY:-}
       FALKORDB_ADDR: falkordb:6379
       # 맥미니 호스트에서 도는 것(LaunchAgent): 목소리와 그림 속 글자 읽기.
       TTS_URL: ${JARVIS_TTS_URL:-http://host.docker.internal:8106}
@@ -920,6 +937,7 @@ services:
   # 제거·방해 금지·저녁 요약을 거쳐 웹 푸시로 폰에 보낸다. 알림함도 여기서 읽는다.
   # VAPID 키는 .env 에만 둔다(공개 저장소).
   notify:
+    <<: *outside
     build:
       context: ./notify-svc
       additional_contexts:
@@ -989,6 +1007,7 @@ services:
   # 닿는 유일한 관문이기도 하다: 질문은 mind.card 로 에이전트에. 콘솔은 맥미니의
   # 127.0.0.1:8102 이고 토큰이 필요하다: 한 번 /?token=<JARVIS_API_TOKEN> 으로 연다.
   mind:
+    <<: *outside
     build:
       context: ./mind-svc
       additional_contexts:
@@ -1069,9 +1088,10 @@ services:
       - data
     restart: unless-stopped
   tunnel:
+    <<: *outside
     image: cloudflare/cloudflared:2026.10.0
     profiles: ["cloudflare"]
-    command: tunnel --no-autoupdate --metrics 127.0.0.1:20241 run --token ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    command: tunnel --no-autoupdate --protocol http2 --metrics 127.0.0.1:20241 run --token ${CLOUDFLARE_TUNNEL_TOKEN:-}
     # 공개 ingress 는 두지 않는다. Workers VPC 서비스(edge/)가 이 터널을 통해
     # agent·workout 등에 이름으로 닿는다 - 서비스들은 이 네트워크 안에만 있다.
     depends_on:

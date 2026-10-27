@@ -245,7 +245,12 @@ func main() {
 		go memLog.Run(ctx, m.Handle)
 	}
 	if events != nil {
-		go events.Subscribe(ctx, "mind", getenv("MIND_SELF_URL", "http://mind:8102/consume"), []string{obs.MessageObserved, "action.*", mind.AssetsBand, mind.LocationEnter, mind.LocationLeave, mind.LocationGuestEnter, mind.LocationGuestLeave}, log)
+		// Occurrences too: the structured sensor writes them to this log
+		// and the loop reads them back here (links, expectations, what
+		// follows what). Left out of the subscription, every live match
+		// was missed and a payment never met the day's expectation of it
+		// (2026-10-21~27: 2 met of 27, both at registration).
+		go events.Subscribe(ctx, "mind", getenv("MIND_SELF_URL", "http://mind:8102/consume"), []string{obs.MessageObserved, obs.OccurrenceObserved, "action.*", mind.AssetsBand, mind.LocationEnter, mind.LocationLeave, mind.LocationGuestEnter, mind.LocationGuestLeave}, log)
 	}
 	if mode == "stack" {
 		exclude := cfg.Noise

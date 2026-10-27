@@ -43,6 +43,9 @@ type Config struct {
 	SearchURL     string
 	AgentGuestURL string
 	ImmichURL     string
+	// ImmichKey reads the newest photo's time (the phone's uploads); empty,
+	// photo freshness is not measured.
+	ImmichKey string
 	// TTSURL and OCRURL run on the Mac mini itself (LaunchAgents), reached
 	// at host.docker.internal.
 	TTSURL string
@@ -131,6 +134,14 @@ func All(cfg Config) []check.Probe {
 			Run:   e.location,
 		},
 		{
+			ID: "photos.fresh", Group: "수집", Name: "사진 유입",
+			Rule:  "사진 서버(Immich)에 들어온 가장 최근 사진이 3일 안이면 정상, 3~10일이면 주의, 10일을 넘으면 이상. 폰이 사진을 올리지 않으면 사진으로 아는 것(지금 상황·앨범·회고)이 멈춰요. 키가 없으면 측정하지 않아요.",
+			Fix:   "폰의 Immich 앱에서 백업이 켜져 있고 맥미니(Tailscale)에 닿는지 보세요. 사진을 안 찍은 날이 이어졌다면 정상이에요.",
+			Deps:  []string{"svc.immich"},
+			Every: 10 * time.Minute,
+			Run:   e.photosFresh,
+		},
+		{
 			ID: "spending.alerts", Group: "수집", Name: "카드 결제 알림",
 			Rule:  "가계부가 수집기를 읽을 수 있고 마지막 카드 알림이 3일 안이면 정상, 3–7일이면 주의, 7일을 넘거나 읽기에 실패하면 이상.",
 			Fix:   "카드를 안 쓴 날이 이어졌다면 정상이에요. 아니라면 카톡 수집과 spending 컨테이너 로그를 보세요.",
@@ -150,7 +161,7 @@ func All(cfg Config) []check.Probe {
 		// ── 가계부 상품 상세 ──────────────────────────────────────────────
 		{
 			ID: "enrich.coupang", Group: "가계부 상품 상세", Name: "쿠팡 주문 내역",
-			Rule:  "에이전트가 대화·작업이 없을 때 30분마다 브라우저 새 탭에서 쿠팡 주문목록을 열어 봐요. 열리면 정상, 로그인 화면으로 넘어가면 이상. 여기서는 그 결과를 읽어요.",
+			Rule:  "에이전트가 대화·작업이 없을 때 브라우저 새 탭에서 쿠팡 주문목록을 열어 봐요 - 브라우저가 떠 있으면 30분마다, 꺼져 있으면 6시간마다(확인하려고 띄우지는 않아요). 열리면 정상, 로그인 화면으로 넘어가면 이상. 여기서는 그 결과를 읽어요.",
 			Fix:   "화면 탭에서 에이전트 브라우저로 coupang.com에 로그인하세요. 로그인이 끝나면 멈춰 있던 상품 상세 조회도 다시 시도해야 해요.",
 			Deps:  []string{"browser"},
 			Every: 30 * time.Minute, MinGap: time.Minute,
@@ -796,11 +807,75 @@ func (e *env) calendar(ctx context.Context) check.Verdict {
 		}
 	}
 	if err != nil {
-		return check.Verdict{State: check.Fail, Summary: "일정을 읽지 못했어요. uniple 로그인이 끊겼을 수 있어요.",
+		// Most failures are the home network, not the login: a DNS
+		// lookup or a dial that timed out (185 in a week, 2026-10-27).
+		summary := "일정을 읽지 못했어요. uniple 로그인이 끊겼을 수 있어요."
+		if networkish(err.Error()) {
+			summary = "uniple 에 닿지 못했어요 - 네트워크나 DNS 가 흔들린 것이고, 로그인 문제는 아니에요."
+		}
+		return check.Verdict{State: check.Fail, Summary: summary,
 			Facts: append(facts, clip(err.Error(), 160)), ObservedAt: refreshed, ObservedLabel: "마지막 토큰 갱신"}
 	}
 	return check.Verdict{State: check.OK, Summary: fmt.Sprintf("일정을 읽고 있어요. 오늘 일정 %d개.", len(body.Events)),
 		Facts: facts, ObservedAt: refreshed, ObservedLabel: "마지막 토큰 갱신"}
+}
+
+// networkish is whether an error is the network's - a name that would not
+// resolve, a dial or a read that timed out - rather than the service's.
+func networkish(err string) bool {
+	for _, mark := range []string{"lookup ", "no such host", "server misbehaving", "dial tcp", "deadline exceeded", "timeout", "connection refused", "connection reset", "연결하지 못했습니다"} {
+		if strings.Contains(err, mark) {
+			return true
+		}
+	}
+	return false
+}
+
+// photosFresh is how long ago the newest photo reached Immich: the phone's
+// backup, which stops without a word (no photo of a two-day camping trip
+// arrived, 2026-10-21~27).
+func (e *env) photosFresh(ctx context.Context) check.Verdict {
+	if e.ImmichKey == "" {
+		return check.Verdict{State: check.Unknown, Summary: "Immich API 키가 없어 측정하지 않아요."}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.ImmichURL+"/api/search/metadata", strings.NewReader(`{"size":1,"order":"desc"}`))
+	if err != nil {
+		return fail(err.Error())
+	}
+	req.Header.Set("x-api-key", e.ImmichKey)
+	req.Header.Set("Content-Type", "application/json")
+	res, err := e.client.Do(req)
+	if err != nil {
+		return fail("사진 서버에 연결하지 못했어요.")
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return fail(fmt.Sprintf("사진 서버가 %d 로 답했어요.", res.StatusCode))
+	}
+	var out struct {
+		Assets struct {
+			Items []struct {
+				FileCreatedAt time.Time `json:"fileCreatedAt"`
+			} `json:"items"`
+		} `json:"assets"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		return fail("사진 목록을 읽지 못했어요: " + clip(err.Error(), 100))
+	}
+	if len(out.Assets.Items) == 0 {
+		return check.Verdict{State: check.Unknown, Summary: "아직 사진이 없어요."}
+	}
+	at := out.Assets.Items[0].FileCreatedAt
+	v := check.Verdict{ObservedAt: &at, ObservedLabel: "마지막 사진"}
+	switch age := time.Since(at); {
+	case age > 10*24*time.Hour:
+		v.State, v.Summary = check.Fail, fmt.Sprintf("%s째 새 사진이 없어요. 폰 백업이 멈췄을 수 있어요.", span(age))
+	case age > 3*24*time.Hour:
+		v.State, v.Summary = check.Warn, fmt.Sprintf("%s째 새 사진이 없어요.", span(age))
+	default:
+		v.State, v.Summary = check.OK, "사진이 들어오고 있어요."
+	}
+	return v
 }
 
 // ── 기반 ───────────────────────────────────────────────────────────────

@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -80,6 +81,7 @@ func main() {
 		SearchURL:     getenv("SEARCH_URL", "http://localhost:8104"),
 		AgentGuestURL: getenv("AGENT_GUEST_URL", "http://localhost:8081"),
 		ImmichURL:     getenv("IMMICH_URL", "http://localhost:2283"),
+		ImmichKey:     os.Getenv("IMMICH_API_KEY"),
 		TTSURL:        getenv("TTS_URL", "http://localhost:8106"),
 		OCRURL:        getenv("OCR_URL", "http://localhost:8107"),
 		FalkorAddr:    getenv("FALKORDB_ADDR", "localhost:6379"),
@@ -95,25 +97,47 @@ func main() {
 	// recovering is only noted. A first verdict that is broken counts too, but
 	// once a day at most - a restart is not news.
 	if notifier := notify.New(os.Getenv("NOTIFY_URL"), os.Getenv("DATABASE_URL"), token, log); notifier != nil {
+		// told is which probes the operator was told are broken: only those
+		// are told mended. A blip that never rang is not news either way -
+		// a fortnight of "다시 정상" lines in the inbox said nothing
+		// (2026-10-27: 149 of them).
+		var mu sync.Mutex
+		told := map[string]bool{}
 		runner.OnChange(func(p check.Probe, prev check.State, v check.Verdict) {
 			day := time.Now().Format("2006-01-02")
 			// A tap opens the check itself, not the top of the page.
 			at := "/status?focus=" + url.QueryEscape("check:"+p.ID)
 			switch {
 			case v.State == check.Fail:
-				// Only if it stays broken: a deploy restarts every service and
-				// trips the probes for a minute, which is not news.
+				// Only if it stays broken, on a fresh look: a deploy restarts
+				// every service and trips the probes for a minute, and the
+				// home network drops out for a few - neither is news. The
+				// verdict of five minutes ago is not asked; the probe is.
 				ev := notify.Event{Source: "status", Kind: "status.fail", Tier: "now", Level: "alert",
 					Title: p.Name + " 이상", Body: v.Summary, URL: at, Key: "status:" + p.ID + ":fail:" + day}
 				time.AfterFunc(failHold, func() {
-					if runner.State(p.ID) == check.Fail {
-						notifier.Send(ev)
+					if runner.Confirm(ctx, p.ID) != check.Fail {
+						return
 					}
+					mu.Lock()
+					told[p.ID] = true
+					mu.Unlock()
+					notifier.Send(ev)
 				})
 			case v.State == check.Warn && prev != check.Unknown:
+				mu.Lock()
+				told[p.ID] = true
+				mu.Unlock()
 				notifier.Send(notify.Event{Source: "status", Kind: "status.warn", Tier: "digest", Level: "warn",
 					Title: p.Name + " 주의", Body: v.Summary, URL: at, Key: "status:" + p.ID + ":warn:" + day})
 			case v.State == check.OK && (prev == check.Fail || prev == check.Warn):
+				mu.Lock()
+				was := told[p.ID]
+				delete(told, p.ID)
+				mu.Unlock()
+				if !was {
+					return
+				}
 				notifier.Send(notify.Event{Source: "status", Kind: "status.ok", Tier: "log",
 					Title: p.Name + " 다시 정상", Body: v.Summary, URL: at})
 			}

@@ -27,6 +27,16 @@ type Event = {
 const won = (v: number) => `${v < 0 ? "−" : ""}₩${Math.round(Math.abs(v)).toLocaleString("ko-KR")}`;
 const signed = (v: number) => `${v > 0 ? "+" : ""}${won(v)}`;
 
+/**
+ * Whether an account the allocation rests on could not be read. A bucket's
+ * share is only known with every account in; with one missing, every share
+ * is wrong and a plan made from them would sell what is there to buy what is
+ * only unread.
+ */
+export function halfRead(problems: readonly string[] | undefined): boolean {
+  return (problems ?? []).some((m) => m.startsWith("업비트:") || m.startsWith("한국투자증권:") || m.startsWith("금현물:"));
+}
+
 export function eventsOf(p: Portfolio, now = new Date()): Event[] {
   const today = now.toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
   const yesterday = new Date(Date.parse(`${today}T00:00:00+09:00`) - 86_400_000).toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
@@ -39,8 +49,10 @@ export function eventsOf(p: Portfolio, now = new Date()): Event[] {
 
   // Out of band: kept in the inbox only. mind-svc reads the event and brings
   // the rebalance up in the evening at home, after work (its moments) - a
-  // line in the evening's summary as well would say it twice.
-  for (const r of p.allocation.rows) {
+  // line in the evening's summary as well would say it twice. Not from a
+  // portfolio half read: with a broker timed out, "유망주 0%" is a gap, not
+  // a bucket out of band (2026-10-24~27: three such days).
+  for (const r of halfRead(p.problems) ? [] : p.allocation.rows) {
     if (r.inBand) continue;
     const pp = Math.round((r.current - r.target) * 100);
     add({

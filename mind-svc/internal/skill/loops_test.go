@@ -36,3 +36,34 @@ func TestAssistantsPromiseIsNotToldAgain(t *testing.T) {
 		t.Fatalf("아침 목록에는 운영자 쪽 일만: %+v", brief.Intents)
 	}
 }
+
+// The brief is the operator's day: the partner's own entries are not in it,
+// and a loop long past its deadline is counted, not read out again - the
+// 13th's to-do was in every brief for a fortnight (2026-10-27).
+func TestBriefIsTheOperatorsDay(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 10, 27, 8, 0, 0, 0, seoul)
+	mine := model.Entity{ID: "plan_a", Kind: model.KindPlan, State: model.State{Title: "승전과 톤 세팅", Status: model.Confirmed, Date: "2026-10-27", Start: "19:00"}}
+	theirs := model.Entity{ID: "plan_b", Kind: model.KindPlan, State: model.State{Title: "독서모임", Status: model.Confirmed, Date: "2026-10-27", Start: "21:00", Owner: "partner"}}
+	fresh := model.Entity{ID: "loop_a", Kind: model.KindLoop, State: model.State{Title: "은주에게 연락하기", Status: model.Open, Owner: "me", Due: "2026-10-26"}}
+	stale := model.Entity{ID: "loop_b", Kind: model.KindLoop, State: model.State{Title: "재택근무 신청", Status: model.Open, Owner: "me", Due: "2026-10-13"}}
+	later := model.Entity{ID: "loop_c", Kind: model.KindLoop, State: model.State{Title: "선물 고르기", Status: model.Open, Owner: "me", Due: "2026-11-02"}}
+	v := view{plans: []model.Entity{mine, theirs, fresh, stale, later}, now: now}
+
+	r := (Brief{}).OnTick(ctx, v, "morning")
+	if len(r.Intents) != 1 {
+		t.Fatalf("브리핑은 하나: %+v", r.Intents)
+	}
+	in := r.Intents[0]
+	if !strings.HasPrefix(in.Title, "오늘 일정 1개 · 챙길 일 1개") {
+		t.Fatalf("상대의 일정과 오래된 할 일은 세지 않아야 합니다: %q", in.Title)
+	}
+	for _, word := range []string{"독서모임", "재택근무 신청", "선물 고르기"} {
+		if strings.Contains(in.Body, word) {
+			t.Fatalf("%q 는 브리핑에 없어야 합니다: %s", word, in.Body)
+		}
+	}
+	if !strings.Contains(in.Body, "은주에게 연락하기") || !strings.Contains(in.Body, "기한 지난 할 일 1개 더") {
+		t.Fatalf("사흘 안의 할 일은 이름으로, 더 오래된 것은 수로: %s", in.Body)
+	}
+}

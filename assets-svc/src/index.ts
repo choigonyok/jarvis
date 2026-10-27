@@ -15,7 +15,7 @@ import { createServer } from "node:http";
 
 import * as db from "./db.js";
 import type { Allocation, Holding, Outflow, OutflowUse, Portfolio } from "./types.js";
-import { announce } from "./notify.js";
+import { announce, halfRead } from "./notify.js";
 import { PARKED_DAYS, tolerance } from "./outflows.js";
 import { PRINCIPAL_SINCE, buildPortfolio, invalidateVenues } from "./portfolio.js";
 import { placeOrders, requestsOf, type OrderRequest } from "./orders.js";
@@ -334,7 +334,7 @@ async function orders(
   } | null;
   const dryRun = body?.dryRun === true;
   const p = JSON.parse(await portfolioJson(!dryRun)) as {
-    holdings: Holding[]; allocation?: Allocation; goldGramKrw: number | null;
+    holdings: Holding[]; allocation?: Allocation; goldGramKrw: number | null; problems?: string[];
   };
   const placed = () => {
     if (dryRun) return;
@@ -362,6 +362,12 @@ async function orders(
   if (url.pathname === "/orders/rebalance") {
     if (!p.allocation) {
       send(res, 503, { error: "목표 비중을 계산하지 못했습니다." });
+      return;
+    }
+    // A plan from half the accounts would sell what is held to buy what is
+    // only unread.
+    if (halfRead(p.problems)) {
+      send(res, 503, { error: "잔고를 다 읽지 못해 리밸런싱 계획을 세우지 않습니다: " + p.problems!.join(" · ") });
       return;
     }
     const plan = rebalancePlan(p.allocation, p.holdings, { goldGramKrw: p.goldGramKrw });
@@ -534,8 +540,9 @@ const server = createServer((req, res) => {
     const deposit = Number(url.searchParams.get("deposit") ?? 0);
     void portfolioJson()
       .then((body) => {
-        const p = JSON.parse(body) as { holdings: Holding[]; allocation?: Allocation; goldGramKrw: number | null };
+        const p = JSON.parse(body) as { holdings: Holding[]; allocation?: Allocation; goldGramKrw: number | null; problems?: string[] };
         if (!p.allocation) return send(res, 503, { error: "목표 비중을 계산하지 못했습니다." });
+        if (halfRead(p.problems)) return send(res, 503, { error: "잔고를 다 읽지 못해 매매 계획을 세우지 않습니다: " + p.problems!.join(" · ") });
         const opts = { goldGramKrw: p.goldGramKrw };
         send(res, 200, {
           rebalance: rebalancePlan(p.allocation, p.holdings, opts),

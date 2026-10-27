@@ -18,6 +18,18 @@ type view struct {
 	sky   map[string]weather.Day
 	hours []weather.Hour
 	now   time.Time
+	// intents is what was asked lately (IntentsSince), newest first.
+	intents []model.Intent
+}
+
+func (v view) IntentsSince(_ context.Context, t time.Time) ([]model.Intent, error) {
+	var out []model.Intent
+	for _, in := range v.intents {
+		if !in.CreatedAt.Before(t) {
+			out = append(out, in)
+		}
+	}
+	return out, nil
 }
 
 func (v view) Entity(_ context.Context, id string) (model.Entity, error) {

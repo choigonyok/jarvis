@@ -37,8 +37,14 @@ type Checker struct {
 	Sites     []Site
 	BusyHosts []string
 	Every     time.Duration
-	Idle      func() bool
-	Log       *slog.Logger
+	// WhenDown, when set, is how often a site is looked at while the
+	// browser is not running: opening it then starts the browser for the
+	// look alone, which the idle browser did every half hour, all day
+	// (48 starts a day, 2026-10-27). A check that something else brought
+	// the browser up for is cheap and stays at Every.
+	WhenDown time.Duration
+	Idle     func() bool
+	Log      *slog.Logger
 	// Relogin, when set, signs a logged-out site back in (with the login the
 	// vault keeps - see main), and the site is looked at again right after.
 	// It is tried at most once per ReloginEvery a site: a login that keeps
@@ -107,35 +113,50 @@ func (c *Checker) Run(ctx context.Context) {
 		if c.Idle != nil && !c.Idle() {
 			continue
 		}
-		for _, s := range c.Sites {
-			c.mu.Lock()
-			last := c.results[s.ID].At
-			c.mu.Unlock()
-			if !forced && time.Since(last) < c.Every {
+		c.pass(ctx, forced)
+		forced = false
+	}
+}
+
+// pass looks at every site that is due - all of them when forced.
+func (c *Checker) pass(ctx context.Context, forced bool) {
+	up, asked := true, false
+	for _, s := range c.Sites {
+		c.mu.Lock()
+		last := c.results[s.ID].At
+		c.mu.Unlock()
+		if !forced && time.Since(last) < c.Every {
+			continue
+		}
+		if !forced && c.WhenDown > 0 && time.Since(last) < c.WhenDown {
+			if !asked {
+				up, _ = c.Client.Alive(ctx)
+				asked = true
+			}
+			if !up {
 				continue
 			}
-			r := c.look(ctx, s)
-			if LoggedOut(r, s) && c.Relogin != nil && (c.CanRelogin == nil || c.CanRelogin(ctx, s)) && c.due(s.ID) {
-				err := c.Relogin(ctx, s)
-				if c.Log != nil {
-					c.Log.Info("로그인이 풀려 저장된 정보로 다시 로그인해 봤습니다", "site", s.ID, "err", err)
-				}
-				if err == nil {
-					r = c.look(ctx, s)
-				}
-				if LoggedOut(r, s) && c.StillOut != nil {
-					why := "로그인 뒤에도 로그인 화면으로 돌아왔습니다(문자 인증·보안문자일 수 있습니다)"
-					if err != nil {
-						why = err.Error()
-					}
-					c.StillOut(s, why)
-				}
+		}
+		r := c.look(ctx, s)
+		if LoggedOut(r, s) && c.Relogin != nil && (c.CanRelogin == nil || c.CanRelogin(ctx, s)) && c.due(s.ID) {
+			err := c.Relogin(ctx, s)
+			if c.Log != nil {
+				c.Log.Info("로그인이 풀려 저장된 정보로 다시 로그인해 봤습니다", "site", s.ID, "err", err)
 			}
-			if LoggedIn(r, s) && c.SignedIn != nil {
-				c.SignedIn(ctx, s)
+			if err == nil {
+				r = c.look(ctx, s)
+			}
+			if LoggedOut(r, s) && c.StillOut != nil {
+				why := "로그인 뒤에도 로그인 화면으로 돌아왔습니다(문자 인증·보안문자일 수 있습니다)"
+				if err != nil {
+					why = err.Error()
+				}
+				c.StillOut(s, why)
 			}
 		}
-		forced = false
+		if LoggedIn(r, s) && c.SignedIn != nil {
+			c.SignedIn(ctx, s)
+		}
 	}
 }
 

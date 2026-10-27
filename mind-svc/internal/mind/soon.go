@@ -74,10 +74,20 @@ func (m *Mind) people(ctx context.Context) error {
 		}
 		return nil
 	}
+	// One notice a person, with everything open with them. One a loop was
+	// nine pushes at 07:00 for one friend, and they spent the day's budget
+	// before the 08:00 brief (2026-10-25).
+	type open struct {
+		id   string
+		line string
+		ev   []model.Evidence
+	}
 	for _, p := range plans {
 		if p.State.Status != model.Confirmed || p.State.Date != today {
 			continue
 		}
+		byWho := map[string][]open{}
+		var order []string
 		for _, l := range loops {
 			if l.State.PlanID == p.ID || l.State.Type == "정산" {
 				continue
@@ -99,12 +109,32 @@ func (m *Mind) people(ctx context.Context) error {
 				first := cs[len(cs)-1]
 				ev, said = first.Evidence, first.At.In(loc)
 			}
-			title := fmt.Sprintf("오늘 %s 만나는 날. %s에 「%s」 하기로 하셨어요.", who, md(said), l.State.Title)
+			line := fmt.Sprintf("%s에 「%s」 하기로 하셨어요.", md(said), l.State.Title)
 			if l.State.Owner == "them" {
-				title = fmt.Sprintf("오늘 %s 만나는 날. %s에 %s가 「%s」 하기로 했어요.", who, md(said), who, l.State.Title)
+				line = fmt.Sprintf("%s에 %s가 「%s」 하기로 했어요.", md(said), who, l.State.Title)
 			}
-			if _, err := m.Gate.Submit(ctx, model.Intent{Skill: "people", Kind: "info", EntityID: l.ID, Topic: "meet:" + p.ID + ":" + l.ID,
-				Title: title, Body: p.State.Title, Reason: "만나는 사람에게 걸린 열린 고리", Confidence: 1, Urgent: true, Evidence: ev}); err != nil {
+			if _, ok := byWho[who]; !ok {
+				order = append(order, who)
+			}
+			byWho[who] = append(byWho[who], open{id: l.ID, line: line, ev: ev})
+		}
+		for _, who := range order {
+			opens := byWho[who]
+			in := model.Intent{Skill: "people", Kind: "info", Topic: "meet:" + p.ID + ":" + who,
+				Reason: "만나는 사람에게 걸린 열린 고리", Confidence: 1, Urgent: true}
+			if len(opens) == 1 {
+				in.EntityID, in.Evidence = opens[0].id, opens[0].ev
+				in.Title, in.Body = "오늘 "+who+" 만나는 날. "+opens[0].line, p.State.Title
+			} else {
+				in.Title = fmt.Sprintf("오늘 %s 만나는 날. 하기로 한 것 %d가지", who, len(opens))
+				lines := []string{p.State.Title}
+				for _, o := range opens {
+					lines = append(lines, "· "+o.line)
+					in.Evidence = append(in.Evidence, o.ev...)
+				}
+				in.Body = strings.Join(lines, "\n")
+			}
+			if _, err := m.Gate.Submit(ctx, in); err != nil {
 				return err
 			}
 		}
@@ -330,9 +360,17 @@ func (a AssetsHTTP) Allocation(ctx context.Context) ([]Drift, error) {
 		Allocation *struct {
 			Rows []Drift `json:"rows"`
 		} `json:"allocation"`
+		Problems []string `json:"problems"`
 	}
 	if err := getJSON(ctx, strings.TrimRight(a.URL, "/")+"/portfolio", a.Token, &out); err != nil {
 		return nil, err
+	}
+	// Half the accounts is no allocation: a broker that timed out reads as
+	// "유망주 0%", and a plan from that would be wrong by exactly that much.
+	for _, p := range out.Problems {
+		if strings.HasPrefix(p, "업비트:") || strings.HasPrefix(p, "한국투자증권:") || strings.HasPrefix(p, "금현물:") {
+			return nil, fmt.Errorf("잔고를 다 읽지 못했습니다: %s", p)
+		}
 	}
 	if out.Allocation == nil {
 		return nil, nil
