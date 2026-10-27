@@ -107,6 +107,11 @@ type Runner struct {
 	// seen hears all text the model is shown: what it is sent and what
 	// every tool gives back (OnSeen).
 	seen func(string)
+	// live is the draft of the text block the model is writing, and that
+	// block's index in its message; "" between blocks. Only the turn's
+	// reading of its stream touches it.
+	live      string
+	liveBlock int
 }
 
 // OnSeen hands fn all text the model is shown - each message sent to it,
@@ -528,6 +533,10 @@ func (r *Runner) turn(prompt string) error {
 
 	var t tally
 	scanErr := r.consume(stdout, &t)
+	// A message cut off mid-sentence (the CLI died, the turn timed out) is
+	// not left on screen as if it were said.
+	r.live = ""
+	r.store.DropDraft()
 	r.closeInput()
 	waitErr := cmd.Wait()
 
@@ -592,6 +601,9 @@ func (r *Runner) args(system string) []string {
 		"--input-format", "stream-json",
 		"--output-format", "stream-json",
 		"--verbose",
+		// The answer as it is written, not only once each message is done:
+		// the console shows it growing (handle, thread.Draft).
+		"--include-partial-messages",
 		"--permission-prompt-tool", permission.QualifiedToolName(),
 		// Routes prompts to the tool above rather than denying them outright.
 		"--permission-prompts", "host",
@@ -1099,6 +1111,11 @@ type event struct {
 	Message   json.RawMessage `json:"message"`
 	Result    string          `json:"result"`
 	IsError   bool            `json:"is_error"`
+	// Event is a stream_event's API event: a piece of the message being
+	// written (--include-partial-messages).
+	Event json.RawMessage `json:"event"`
+	// ParentToolUseID is set on what a subagent says, inside a tool call.
+	ParentToolUseID string `json:"parent_tool_use_id"`
 	// The CLI reports its own failures as assistant text. Those are not
 	// Jarvis speaking, so they must not land in the thread as a reply.
 	IsAPIErrorMessage bool   `json:"is_api_error_message"`
@@ -1113,11 +1130,27 @@ type event struct {
 	NumTurns     int             `json:"num_turns"`
 }
 
-type assistantMessage struct {
-	Content []struct {
+// streamEvent is the part of an API streaming event the drafts read: a
+// block starting, and text added to it.
+type streamEvent struct {
+	Type         string `json:"type"`
+	Index        int    `json:"index"`
+	ContentBlock struct {
+		Type string `json:"type"`
+	} `json:"content_block"`
+	Delta struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
-	} `json:"content"`
+	} `json:"delta"`
+}
+
+type contentBlock struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+type assistantMessage struct {
+	Content []contentBlock `json:"content"`
 }
 
 func (r *Runner) consume(stdout interface{ Read([]byte) (int, error) }, t *tally) error {
@@ -1172,15 +1205,27 @@ func (r *Runner) handle(ev event) error {
 				r.persist()
 			}
 		}
+	case "stream_event":
+		r.write(ev)
 	case "assistant":
 		if ev.IsAPIErrorMessage {
+			r.live = ""
+			r.store.DropDraft()
 			return fmt.Errorf("claude api error: %s: %s",
 				ev.Error, clamp(strings.Join(paragraphsOf(ev.Message), " "), 300))
 		}
 		// One message, one turn. Splitting it per paragraph used to read
 		// fine as plain text, but a fenced code block with a blank line
 		// in it would land as two turns and stop being one block.
-		r.store.AppendAgent(paragraphsOf(ev.Message))
+		paragraphs := paragraphsOf(ev.Message)
+		// The CLI sends a block's whole text right after its last piece:
+		// the turn takes the draft's place.
+		if r.live != "" && ev.ParentToolUseID == "" && hasText(ev.Message) {
+			r.store.SettleDraft(r.live, paragraphs)
+			r.live = ""
+			break
+		}
+		r.store.AppendAgent(paragraphs)
 	case "user":
 		// The tools' results come back to the model as its "user" turns.
 		r.saw(toolResults(ev.Message))
@@ -1191,6 +1236,38 @@ func (r *Runner) handle(ev event) error {
 		}
 	}
 	return nil
+}
+
+// write follows the text the model is writing into a draft: a text block
+// starting opens one, its pieces are added to it. Only the conversation's
+// own words - a subagent's are not its answer.
+func (r *Runner) write(ev event) {
+	if ev.ParentToolUseID != "" || len(ev.Event) == 0 {
+		return
+	}
+	var se streamEvent
+	if json.Unmarshal(ev.Event, &se) != nil {
+		return
+	}
+	switch se.Type {
+	case "content_block_start":
+		if se.ContentBlock.Type == "text" {
+			r.live, r.liveBlock = r.store.StartDraft(), se.Index
+		}
+	case "content_block_delta":
+		if r.live != "" && se.Index == r.liveBlock && se.Delta.Type == "text_delta" {
+			r.store.WriteDraft(r.live, se.Delta.Text)
+		}
+	}
+}
+
+// hasText says whether an assistant line carries a text block.
+func hasText(raw json.RawMessage) bool {
+	var msg assistantMessage
+	if json.Unmarshal(raw, &msg) != nil {
+		return false
+	}
+	return slices.ContainsFunc(msg.Content, func(b contentBlock) bool { return b.Type == "text" })
 }
 
 // toolResults is the text of the tool results in one of the stream's

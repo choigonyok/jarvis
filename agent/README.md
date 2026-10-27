@@ -294,7 +294,7 @@ cd web && AGENT_URL=http://localhost:8080 \
 | 메서드 | 경로 | 하는 일 |
 |---|---|---|
 | GET | `/thread` | 스레드 + 진행 여부 + 제안 전체 (최초 로딩) |
-| GET | `/events` | SSE. `turn` / `status` / `error` / `proposal` / `calendar` |
+| GET | `/events` | SSE. `turn` / `draft` / `status` / `queue` / `error` / `proposal` / `calendar` / `checklist` |
 | POST | `/messages` | `{"text":"..."}` → 202, 결과는 SSE로 |
 | GET | `/proposals` | 제안 전체 |
 | POST | `/proposals/{id}/decision` | `{"decision":"approved"\|"rejected"}` |
@@ -313,6 +313,13 @@ cd web && AGENT_URL=http://localhost:8080 \
 `turn`과 `proposal` 이벤트는 id 기준 upsert입니다. 결재된 카드는 같은 proposal id로
 다시 옵니다. 느린 구독자는 프레임을 잃을 수 있으므로, 모든 화면은 재연결 때 위의
 조회 API로 다시 채웁니다.
+
+답은 쓰이는 대로 `draft` 프레임으로 옵니다(CLI `--include-partial-messages`). `{id, at, text}`
+는 지금까지 쓴 글의 `at`(UTF-16 단위, 브라우저 문자열 길이) 자리부터 `text` 를 놓으라는 뜻이고,
+`at` 0 은 글 전체입니다. 조각은 50ms 마다 묶어 보내고, 스트림에 새로 붙은 화면에는 쓰던 글 전체를
+첫 프레임으로 보냅니다. 텍스트 블록이 끝나면 저장된 턴이 `replaces: <draft id>` 를 달고 와서 그
+자리를 대신하고, 턴이 되지 못한 글(빈 말, 도중에 끊긴 턴)은 `{"id", "gone": true}` 로 거둡니다.
+쓰는 중인 글은 어디에도 저장되지 않습니다.
 
 사람이 캘린더에 직접 쓰는 경로는 결재를 거치지 않습니다. 자기가 친 것을 자기가
 승인하는 건 연극입니다.

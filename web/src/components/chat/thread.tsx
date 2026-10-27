@@ -19,7 +19,16 @@ import { VoiceStage } from "@/components/chat/voice-stage";
 import { Header, TabBar } from "@/components/shell/header";
 import { useRole } from "@/components/shell/role";
 import { StandingBar } from "@/components/shell/standing-bar";
-import { isPending, plainText, quoteText, type Checklist, type Proposal, type Turn, type TurnRef } from "@/lib/thread";
+import {
+  isPending,
+  plainText,
+  quoteText,
+  type Checklist,
+  type Draft,
+  type Proposal,
+  type Turn,
+  type TurnRef,
+} from "@/lib/thread";
 import { photoUrl } from "@/lib/uploads";
 import { speakable, useSpeech, useVoiceStatus } from "@/lib/use-speech";
 import { useThread } from "@/lib/use-thread";
@@ -358,6 +367,7 @@ const Transcript = memo(function Transcript({
   checklists,
   waited,
   thinking,
+  draft,
   error,
   hydrated,
   onQuote,
@@ -375,6 +385,8 @@ const Transcript = memo(function Transcript({
   /** Every card that waited while this page was open. */
   waited: ReadonlySet<string>;
   thinking: boolean;
+  /** The answer being written. */
+  draft: Draft | null;
   error: string | null;
   hydrated: boolean;
   onQuote: (ref: TurnRef) => void;
@@ -395,6 +407,15 @@ const Transcript = memo(function Transcript({
   // When a quoted turn is on the page its own stamp says when; one that has
   // scrolled out of the loaded thread falls back to the agent's.
   const times = new Map(turns.map((t) => [t.id, turnTime(t.atIso, t.at)]));
+  // Laid out as the runner will store it - split on blank lines, each part
+  // trimmed - so the turn that replaces it reads the same and nothing jumps.
+  const writing = draft
+    ? draft.text
+        .split("\n\n")
+        .map((p) => p.trim())
+        .filter(Boolean)
+        .join("\n\n")
+    : "";
 
   return (
     <>
@@ -442,7 +463,16 @@ const Transcript = memo(function Transcript({
           </li>
         ))}
 
-        {thinking ? (
+        {/* The answer as it is written: where its turn will be, in its words.
+            While it grows the dots have nothing to say. */}
+        {writing ? (
+          <li className={ROW} aria-busy="true">
+            <Rail />
+            <div className="min-w-0">
+              <Markdown>{writing}</Markdown>
+            </div>
+          </li>
+        ) : thinking ? (
           <li
             className={ROW}
             aria-live="polite"
@@ -484,6 +514,7 @@ export function Thread() {
     dropItem,
     waited,
     thinking,
+    draft,
     queue,
     connection,
     error,
@@ -542,14 +573,22 @@ export function Thread() {
   const [cardsVisible, setCardsVisible] = useState(false);
 
   // Opening the tab lands on the newest turn before anything is painted - no
-  // scroll from the top. After that, new turns pull the view down only while
-  // the reader is at the bottom; someone scrolled up to read is left there.
+  // scroll from the top. After that the view follows the bottom (pinned) -
+  // the dots, a message queued above the composer, an answer as it is
+  // written - from a message sent at the bottom, or the reader coming back
+  // down to it, until the reader scrolls up themselves. Following is decided
+  // by what the reader did, not by where the view happens to be: when being
+  // within 80px of the bottom counted as following, a reader who had scrolled
+  // a line up to read was pulled back down by the next turn.
   const landed = useRef(false);
   // The scroller it landed in. The voice stage takes this whole screen, the
   // scroller with it, and coming back builds a fresh one at the top: a new
   // scroller lands again, rather than opening on the oldest turns.
   const landedIn = useRef<HTMLElement | null>(null);
   const pinned = useRef(true);
+  // Where the last scroll left the view: a scroll up from there is the
+  // reader's - the view only ever goes down on its own.
+  const lastTop = useRef(0);
   // Up far enough that the newest turn is out of sight: the way back down is
   // offered (the button over the composer).
   const [away, setAway] = useState(false);
@@ -608,7 +647,7 @@ export function Thread() {
     // line has above the composer's fade) out of sight, so every fresh read -
     // coming back to the tab, say - slid the view 48px up, the last line under
     // the fade.
-    if (pinned.current) {
+    if (pinned.current && !touching.current) {
       const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       el.scrollTo({ top: el.scrollHeight, behavior: still ? "auto" : "smooth" });
     }
@@ -691,6 +730,18 @@ export function Thread() {
     inputRef.current?.focus();
   }, []);
 
+  // A message sent from the bottom follows what comes back: the dots, the
+  // answer as it is written, the turns after it. One sent from further up
+  // leaves the reader where they are.
+  const followFromHere = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 80) {
+      held.current = null;
+      pinned.current = true;
+    }
+  }, []);
+
   // Down to the newest turn - and staying there as more come.
   const toBottom = useCallback(() => {
     const el = scrollRef.current;
@@ -714,8 +765,11 @@ export function Thread() {
     row.classList.add("turn-flash");
   }, []);
 
-  // Photos and long markdown finish laying out after the first paint; while
-  // the reader is pinned to the bottom, keep them there as the page grows.
+  // Photos and long markdown finish laying out after the first paint, and an
+  // answer grows as it is written; while the reader is pinned to the bottom,
+  // keep them there as the page grows. The view itself shrinks too - a
+  // message queued above the composer, the keyboard - and the bottom stays
+  // in sight then as well. Not under a finger: the reader is moving it.
   useEffect(() => {
     const el = scrollRef.current;
     const content = el?.firstElementChild;
@@ -723,9 +777,10 @@ export function Thread() {
     const ro = new ResizeObserver(() => {
       // Photos above a held card push it down as they load: keep it centred.
       if (held.current) held.current.scrollIntoView({ block: "center" });
-      else if (pinned.current) el.scrollTop = el.scrollHeight;
+      else if (pinned.current && !touching.current) el.scrollTop = el.scrollHeight;
     });
     ro.observe(content);
+    ro.observe(el);
     return () => ro.disconnect();
     // Again for the scroller the voice stage's return builds.
   }, [mode]);
@@ -854,8 +909,15 @@ export function Thread() {
             const newest = turns.at(-1)?.id ?? null;
             setSeenAt((prev) => (prev === newest ? prev : newest));
           }
+          const rose = el.scrollTop < lastTop.current - 1;
+          lastTop.current = el.scrollTop;
           if (held.current) return; // our own scroll to a card, not the reader's
-          pinned.current = gap < 80;
+          // Up is the reader taking the view: following stops, even a line
+          // above the bottom. Back at the very bottom it starts again.
+          // (Content shrinking under a pinned view also moves it up - to the
+          // bottom, which is not away from it.)
+          if (rose && gap > 1) pinned.current = false;
+          else if (gap < 8) pinned.current = true;
           window.clearTimeout(settle.current);
           const ask = () => {
             if (touching.current) settle.current = window.setTimeout(ask, 120);
@@ -866,8 +928,10 @@ export function Thread() {
         onTouchStart={() => {
           touching.current = true;
         }}
-        onTouchEnd={() => {
+        onTouchEnd={(e) => {
           touching.current = false;
+          // What came while a finger rested on the thread, without scrolling it.
+          if (pinned.current && !held.current) e.currentTarget.scrollTop = e.currentTarget.scrollHeight;
         }}
         onTouchCancel={() => {
           touching.current = false;
@@ -898,6 +962,7 @@ export function Thread() {
             checklists={checklists}
             waited={waited}
             thinking={thinking}
+            draft={draft}
             error={error}
             hydrated={hydrated}
             onQuote={quote}
@@ -951,6 +1016,7 @@ export function Thread() {
           <div className={cn("mx-auto w-full max-w-[46rem] px-4 sm:px-8 sm:pb-6", typing ? "pb-2" : "pb-0")}>
             <Composer
               onSend={async (text, images) => {
+                followFromHere();
                 const ok = await send(text, images, quoting?.id);
                 if (ok) setQuoting(null);
                 return ok;
@@ -973,7 +1039,15 @@ export function Thread() {
               busy={thinking}
               draftKey={`jarvis:composer-draft:${role}`}
               queued={
-                <QueuedMessages queue={queue} onSteer={steer} onDrop={drop} onRestore={(text, images) => void send(text, images)} />
+                <QueuedMessages
+                  queue={queue}
+                  onSteer={steer}
+                  onDrop={drop}
+                  onRestore={(text, images) => {
+                    followFromHere();
+                    void send(text, images);
+                  }}
+                />
               }
             />
             {/* On a phone this switch is the mic inside the composer; spending a

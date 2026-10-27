@@ -145,6 +145,9 @@ type Store struct {
 	mu       sync.Mutex
 	thinking bool
 	log      *slog.Logger
+
+	// drafts is the message being written, sent on as it grows (draft.go).
+	drafts drafts
 }
 
 // ForThread scopes the store to one conversation.
@@ -404,7 +407,11 @@ func (s *Store) Raise(paragraphs []string, proposalID string) {
 // to show it because it could not be written would lose it twice. It is still
 // published so the screen shows what was said; it will be missing after a
 // reload, which is the same trade the file-backed store made.
-func (s *Store) append(t *Turn) *Turn {
+func (s *Store) append(t *Turn) *Turn { return s.appendAs(t, "") }
+
+// appendAs is append for the finished form of a draft: its frame says which
+// one it replaces, so the screen swaps one for the other in a single step.
+func (s *Store) appendAs(t *Turn, draft string) *Turn {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -418,11 +425,11 @@ func (s *Store) append(t *Turn) *Turn {
 		local := *t
 		local.ID = fmt.Sprintf("local-%d", time.Now().UnixNano())
 		local.At = time.Now().Format("15:04")
-		s.bus.Publish(bus.Event{Type: "turn", Turn: local})
+		s.bus.Publish(bus.Event{Type: "turn", Turn: local, Replaces: draft})
 		return &local
 	}
 
-	s.bus.Publish(bus.Event{Type: "turn", Turn: saved})
+	s.bus.Publish(bus.Event{Type: "turn", Turn: saved, Replaces: draft})
 	return &saved
 }
 

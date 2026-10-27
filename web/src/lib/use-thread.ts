@@ -4,8 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAgentStream } from "@/lib/stream";
 import {
   API,
+  applyDraft,
   type AgentEvent,
   type Checklist,
+  type Draft,
   type Decision,
   type Proposal,
   type Queued,
@@ -71,6 +73,9 @@ export function useThread() {
   const [olderFailed, setOlderFailed] = useState(false);
   const [proposals, setProposalsState] = useState<Proposal[]>(() => cached?.proposals ?? []);
   const [thinking, setThinking] = useState(() => cached?.thinking ?? false);
+  // The answer being written, shown as it grows until its turn takes its
+  // place. Not cached: a stream that opens mid-answer is sent it whole first.
+  const [draft, setDraft] = useState<Draft | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(() => cached !== null);
   const [queue, setQueueState] = useState<Queued[]>(() => cachedQueue);
@@ -194,6 +199,8 @@ export function useThread() {
     switch (event.type) {
       case "turn":
         setTurns((prev) => upsert(prev, event.turn));
+        // In the same render as the turn, so the words never show twice.
+        if (event.replaces) setDraft((cur) => (cur?.id === event.replaces ? null : cur));
         if (event.turn.origin?.checklist && !cachedLists[event.turn.origin.checklist]) {
           // Its list usually follows on the stream; if not by then, ask.
           const id = event.turn.origin.checklist;
@@ -208,8 +215,13 @@ export function useThread() {
       case "proposal":
         setProposals((prev) => upsert(prev, event.proposal));
         break;
+      case "draft":
+        setDraft((cur) => applyDraft(cur, event.draft));
+        break;
       case "status":
         setThinking(Boolean(event.thinking));
+        // A run that is over is writing nothing.
+        if (!event.thinking) setDraft(null);
         break;
       case "queue":
         setQueue(event.queue ?? []);
@@ -217,6 +229,7 @@ export function useThread() {
       case "error":
         setError(event.message);
         setThinking(false);
+        setDraft(null);
         break;
     }
   }, [setTurns, setProposals, setQueue, setChecklists, fetchLists]);
@@ -237,7 +250,12 @@ export function useThread() {
     void hydrate();
   }, [hydrate]);
 
-  const connection = useAgentStream(onEvent, () => void hydrate());
+  // A reopened stream sends the answer being written whole as its first
+  // frame (after the open); what was on screen may be one since finished.
+  const connection = useAgentStream(onEvent, () => {
+    setDraft(null);
+    void hydrate();
+  });
 
   // Re-read the thread and reopen the stream - for a screen that sent and
   // heard nothing back, which is what a quietly dead stream looks like.
@@ -420,6 +438,7 @@ export function useThread() {
     loadOpenLists,
     waited: waited as ReadonlySet<string>,
     thinking,
+    draft,
     queue,
     connection,
     error,

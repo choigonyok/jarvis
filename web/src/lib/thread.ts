@@ -166,9 +166,37 @@ export type Queued = {
   at: string;
 };
 
+/**
+ * One frame of an answer still being written: `text` goes at `at` (a string
+ * index) of what it says so far, `at` 0 being the whole of it. `gone` says it
+ * will not become a turn. The turn it becomes arrives with `replaces` set.
+ */
+export type DraftFrame = {
+  id: string;
+  at: number;
+  text?: string;
+  gone?: boolean;
+};
+
+/** An answer as far as it has been written. */
+export type Draft = { id: string; text: string };
+
+/**
+ * A frame applied to what is on screen. One that does not follow on - it
+ * starts past the end, a frame having been missed - leaves the draft as it
+ * is until a whole one (`at` 0) or the turn comes.
+ */
+export function applyDraft(cur: Draft | null, f: DraftFrame): Draft | null {
+  if (f.gone) return cur?.id === f.id ? null : cur;
+  if (f.at === 0) return { id: f.id, text: f.text ?? "" };
+  if (cur?.id !== f.id || f.at > cur.text.length) return cur;
+  return { id: f.id, text: cur.text.slice(0, f.at) + (f.text ?? "") };
+}
+
 export type AgentEvent =
   | { type: "queue"; queue?: Queued[] }
-  | { type: "turn"; turn: Turn }
+  | { type: "turn"; turn: Turn; replaces?: string }
+  | { type: "draft"; draft: DraftFrame }
   | { type: "status"; thinking?: boolean }
   | { type: "error"; message: string }
   | { type: "proposal"; proposal: Proposal }

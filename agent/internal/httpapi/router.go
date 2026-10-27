@@ -823,6 +823,16 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	defer unsubscribe()
 
 	fmt.Fprint(w, ": connected\n\n")
+	// An answer being written when the client (re)connects is shown whole
+	// at once; its next pieces follow on the stream, which was subscribed to
+	// first so none fall in between.
+	if s.thread != nil {
+		if d := s.thread.CurrentDraft(); d != nil {
+			if payload, err := json.Marshal(bus.Event{Type: "draft", Draft: d}); err == nil {
+				fmt.Fprintf(w, "data: %s\n\n", payload)
+			}
+		}
+	}
 	flusher.Flush()
 
 	keepalive := time.NewTicker(25 * time.Second)
