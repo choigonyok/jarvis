@@ -357,40 +357,57 @@ const TurnRow = memo(function TurnRow({
 });
 
 /** How long words that came at once take to come out: about the gap until the next ones. */
-const SPREAD_MS = 500;
-/** The slowest they come out, in characters a millisecond (40 a second). */
-const MIN_RATE = 0.04;
+const SPREAD_MS = 600;
+/**
+ * The slowest they come out, in characters a millisecond (80 a second): the
+ * last few words of an answer, after its stream has ended, must not crawl.
+ */
+const MIN_RATE = 0.08;
+/**
+ * The fastest, short of falling behind (180 a second): a whole answer that
+ * lands in one piece - 458 characters in one frame on the phone, 2026-10-27 -
+ * spread over SPREAD_MS came out a sentence a redraw, not a few characters.
+ * Opus writes about 150 a second, so this keeps up with it.
+ */
+const MAX_RATE = 0.18;
+/**
+ * Behind by this much, the ceiling is lifted: better a jump than a lag. Well
+ * above a whole answer landing in one piece (458 on the phone), which the
+ * ceiling is for - this is for a stream that has run away from the screen.
+ */
+const BACKLOG = 1200;
 /** The least time between redraws: each one parses the markdown again. */
 const FRAME_MS = 33;
-/**
- * A draft first seen this long was joined midway - the stream reopened, the
- * page came back - and what it already says is shown at once. A new one
- * starts with a few characters: the agent sends its first piece alone.
- */
-const JOINED = 60;
+/** How far each draft has come out, by id: a row built again goes on from there. */
+const progress = new Map<string, number>();
 
 /**
  * The words of an answer let out at an even pace. They reach the screen in
  * bursts - from the Mac mini a few dozen characters every half second or so
  * (2026-10-27) - and drawn as they landed they jumped a line at a time. What
  * waits is spread over about the time the next burst takes to come, so it
- * reads as typing, and a burst that lands early speeds it up. A draft met
- * already finished (back from another tab, the voice stage) or joined midway
- * (JOINED) is shown as far as it has come, and with reduced motion
- * everything is shown as it lands.
+ * reads as typing, and a burst that lands early speeds it up. One joined
+ * midway (Draft.joined: the stream opened to an answer under way) is shown
+ * as far as it has come. A row built again for a draft already under way
+ * (back from the voice stage) goes on from where it was (progress), not from
+ * the start. With reduced motion everything is shown as it lands.
  */
-function useTyped(text: string, settled: boolean): string {
+function useTyped(id: string, text: string, atOnce: boolean): string {
   const [still] = useState(
     () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches,
   );
-  const [shown, setShown] = useState(() => (settled || text.length >= JOINED ? text.length : 0));
+  const [shown, setShown] = useState(() => (atOnce ? text.length : (progress.get(id) ?? 0)));
   const pos = useRef(shown);
   const goal = useRef(shown);
   const rate = useRef(MIN_RATE);
 
   useEffect(() => {
     if (still) return;
-    if (text.length > goal.current) rate.current = Math.max(MIN_RATE, (text.length - pos.current) / SPREAD_MS);
+    if (text.length > goal.current) {
+      const behind = text.length - pos.current;
+      rate.current =
+        behind > BACKLOG ? behind / (SPREAD_MS / 2) : Math.min(MAX_RATE, Math.max(MIN_RATE, behind / SPREAD_MS));
+    }
     goal.current = text.length;
     if (pos.current >= text.length) return;
     let raf = 0;
@@ -402,13 +419,14 @@ function useTyped(text: string, settled: boolean): string {
       const out = pos.current >= text.length;
       if (out || now - drawn >= FRAME_MS) {
         drawn = now;
+        progress.set(id, pos.current);
         setShown(Math.floor(pos.current));
       }
       if (!out) raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [text, still]);
+  }, [id, text, still]);
 
   if (still) return text;
   let end = Math.min(shown, text.length);
@@ -424,10 +442,13 @@ function useTyped(text: string, settled: boolean): string {
  * come and the last word is out, the turn takes its place (onShown).
  */
 const DraftRow = memo(function DraftRow({ draft, onShown }: { draft: Draft; onShown: (id: string) => void }) {
-  const typed = useTyped(draft.text, Boolean(draft.turn));
+  const typed = useTyped(draft.id, draft.text, Boolean(draft.joined));
   const out = typed.length >= draft.text.length;
   useEffect(() => {
-    if (out && draft.turn) onShown(draft.id);
+    if (out && draft.turn) {
+      progress.delete(draft.id);
+      onShown(draft.id);
+    }
   }, [out, draft.turn, draft.id, onShown]);
   const text = storedForm(typed);
   return (
@@ -663,6 +684,11 @@ export function Thread() {
   // Where the last scroll left the view: a scroll up from there is the
   // reader's - the view only ever goes down on its own.
   const lastTop = useRef(0);
+  // Until when a send holds the view at the bottom (toNewest): one scrollTop
+  // did not stick on the phone - iOS put the view back where it had been
+  // within 120ms as the keyboard and the layout moved, and that read as the
+  // reader scrolling up (2026-10-27 23:56). A finger on the thread ends it.
+  const holdUntil = useRef(0);
   // Up far enough that the newest turn is out of sight: the way back down is
   // offered (the button over the composer).
   const [away, setAway] = useState(false);
@@ -784,7 +810,10 @@ export function Thread() {
   // The reader taking over - a touch, a wheel, typing, anywhere on the page
   // (the composer is outside the thread) - lets go of a held card.
   useEffect(() => {
-    const release = () => (held.current = null);
+    const release = () => {
+      held.current = null;
+      holdUntil.current = 0;
+    };
     const opts = { capture: true, passive: true } as const;
     document.addEventListener("pointerdown", release, opts);
     document.addEventListener("wheel", release, opts);
@@ -816,6 +845,15 @@ export function Thread() {
     held.current = null;
     pinned.current = true;
     el.scrollTop = el.scrollHeight;
+    // Held there frame by frame while the keyboard and the layout settle.
+    holdUntil.current = performance.now() + 600;
+    const hold = () => {
+      const now = scrollRef.current;
+      if (!now || performance.now() >= holdUntil.current || touching.current) return;
+      now.scrollTop = now.scrollHeight;
+      requestAnimationFrame(hold);
+    };
+    requestAnimationFrame(hold);
     // Temporary (lib/diag.ts): where the view went on the phone after a send.
     const after = viewOf(el);
     const t0 = performance.now();
@@ -1040,7 +1078,8 @@ export function Thread() {
           // above the bottom. Back at the very bottom it starts again.
           // (Content shrinking under a pinned view also moves it up - to the
           // bottom, which is not away from it.)
-          if (rose && gap > 1) pinned.current = false;
+          if (performance.now() < holdUntil.current && !touching.current) pinned.current = true;
+          else if (rose && gap > 1) pinned.current = false;
           else if (gap < 8) pinned.current = true;
           diagScroll(el.scrollTop, gap, rose, pinned.current);
           window.clearTimeout(settle.current);
@@ -1052,6 +1091,7 @@ export function Thread() {
         }}
         onTouchStart={() => {
           touching.current = true;
+          holdUntil.current = 0;
         }}
         onTouchEnd={(e) => {
           touching.current = false;

@@ -179,11 +179,13 @@ export type DraftFrame = {
 };
 
 /**
- * An answer as far as it has been written. `turn` is the turn it became,
+ * An answer as far as it has been written. `joined` says this screen came to
+ * it midway - the stream (re)opened and was sent what there was so far - so
+ * that is shown at once rather than typed out. `turn` is the turn it became,
  * once that has come: the screen lets out the last of its words before the
  * turn takes its place.
  */
-export type Draft = { id: string; text: string; turn?: string };
+export type Draft = { id: string; text: string; joined?: boolean; turn?: string };
 
 /**
  * Words as the runner stores them - split on blank lines, each part trimmed -
@@ -204,9 +206,15 @@ export function storedForm(text: string): string {
  */
 export function applyDraft(cur: Draft | null, f: DraftFrame): Draft | null {
   if (f.gone) return cur?.id === f.id ? null : cur;
-  if (f.at === 0) return { id: f.id, text: f.text ?? "" };
+  // A whole: the first words of a new answer (a few characters), or - for a
+  // draft this screen has not seen - what a stream opened midway was sent.
+  // Judged by the frame, not by how long the text is when first drawn: two
+  // frames landing together are drawn as one, and that read as joined.
+  if (f.at === 0) return { id: f.id, text: f.text ?? "", joined: cur?.id !== f.id && (f.text?.length ?? 0) >= 60 };
   if (cur?.id !== f.id || f.at > cur.text.length) return cur;
-  return { id: f.id, text: cur.text.slice(0, f.at) + (f.text ?? "") };
+  // What was known of it stays (joined, turn): frames landing before a
+  // render are applied together, and the first render must still see them.
+  return { ...cur, text: cur.text.slice(0, f.at) + (f.text ?? "") };
 }
 
 export type AgentEvent =
