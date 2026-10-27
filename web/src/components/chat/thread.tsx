@@ -6,6 +6,7 @@ import { ArrowDown, Reply } from "lucide-react";
 import { Composer } from "@/components/chat/composer";
 import { ModeToggle, type ChatMode } from "@/components/chat/mode-toggle";
 import { ChecklistCard } from "@/components/chat/checklist";
+import { GuideSheet, GuideToggle } from "@/components/chat/guide";
 import { NoticeCard } from "@/components/chat/notice-card";
 import { ProposalCard } from "@/components/chat/proposal-card";
 import { QueuedMessages } from "@/components/chat/queued";
@@ -500,6 +501,10 @@ export function Thread() {
   const scrollRef = useRef<HTMLElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const search = useThreadSearch(scrollRef);
+  // What can be asked of Jarvis in words (ⓘ, left of search). Its sheet is
+  // drawn outside the header: a tap on the backdrop would otherwise reach the
+  // header's own tap, which scrolls the thread to the top and loads older turns.
+  const [guide, setGuide] = useState(false);
   // The earlier message the next one quotes: swiped (or, with a pointer, the
   // button beside its time), shown above the composer until sent or dropped.
   const [quoting, setQuoting] = useState<TurnRef | null>(null);
@@ -824,7 +829,17 @@ export function Thread() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <Header connection={connection} pending={pending} actions={<SearchToggle search={search} />} />
+      <Header
+        connection={connection}
+        pending={pending}
+        actions={
+          <>
+            <GuideToggle open={guide} onOpen={() => setGuide(true)} />
+            <SearchToggle search={search} />
+          </>
+        }
+      />
+      <GuideSheet open={guide} onOpenChange={setGuide} role={role} />
       <SearchBar search={search} />
       <StandingBar pending={waiting} href="/record" muted={cardsVisible} />
 
