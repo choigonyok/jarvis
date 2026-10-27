@@ -472,3 +472,77 @@ func TestSiteOf(t *testing.T) {
 		}
 	}
 }
+
+// One approval is one payment, whoever the payer: its window opens when the
+// payer is back at the payment (a job may start long after the card was
+// answered), runs paymentWindow from there, and lets one 결제하기 through - a
+// second payment on the same site gets a card of its own. The browser's
+// guard keeps no window of its own, so this is the whole of it.
+func TestAnApprovalIsOnePayment(t *testing.T) {
+	now := time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
+	g := &paymentGrants{now: func() time.Time { return now }}
+	g.grant("coupang.com", 16)
+
+	now = now.Add(40 * time.Minute) // the job starts when the conversation is idle
+	if !g.allow("coupang.com", 16, "order") {
+		t.Fatal("돌아온 결제자의 결제하기는 통과합니다")
+	}
+	if !g.allow("coupang.com", 16, "") {
+		t.Fatal("같은 결제의 비밀번호 단계는 통과합니다")
+	}
+	if g.allow("coupang.com", 16, "order") {
+		t.Fatal("두 번째 결제하기는 새 카드를 올려야 합니다")
+	}
+	if g.allow("coupang.com", 0, "") || g.allow("coupang.com", 17, "") {
+		t.Fatal("다른 결제자에게는 열리지 않습니다")
+	}
+	now = now.Add(paymentWindow + time.Second)
+	if g.allow("coupang.com", 16, "") {
+		t.Fatal("돌아온 때부터 창이 지나면 닫힙니다")
+	}
+
+	g.grant("naver.com", 0)
+	now = now.Add(paymentWait + time.Second)
+	if g.allow("naver.com", 0, "") {
+		t.Fatal("돌아오지 않은 승인은 기다림이 지나면 닫힙니다")
+	}
+}
+
+// Through /intercept: after one approved 결제하기, the next one on the site
+// raises a new card instead of going through.
+func TestASecondPaymentRaisesItsOwnCard(t *testing.T) {
+	props := proposal.NewStore(bus.New())
+	fu := &followUps{}
+	s := New(Deps{Proposals: props, Runner: bgRunner{}, InterceptToken: "tok", FollowUp: fu,
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	post := func(body string) map[string]string {
+		req := httptest.NewRequest(http.MethodPost, "/intercept", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer tok")
+		rec := httptest.NewRecorder()
+		s.postIntercept(rec, req)
+		var out map[string]string
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return out
+	}
+	order := `{"url":"https://checkout.coupang.com/api/node/checkout/events","method":"POST","host":"checkout.coupang.com","event":"order"}`
+	first := post(order)
+	if err := props.Decide(first["pending"], proposal.Approve); err != nil {
+		t.Fatal(err)
+	}
+	if got := fu.wait(1); len(got) != 1 || !strings.Contains(got[0], "결제 한 건") || strings.Contains(got[0], "다시 묻지 않습니다") {
+		t.Fatalf("승인이 무엇을 여는지 그대로 말해야 합니다: %v", got)
+	}
+	if p := post(order); p["decision"] != string(proposal.Approve) {
+		t.Fatalf("승인한 결제하기: %v", p)
+	}
+	if pin := post(`{"url":"https://rocketpay.coupang.com/rocketpay/pay/authentication","method":"POST","host":"rocketpay.coupang.com"}`); pin["decision"] != string(proposal.Approve) {
+		t.Fatalf("같은 결제의 키패드: %v", pin)
+	}
+	second := post(order)
+	if second["decision"] != string(proposal.Reject) || second["pending"] == "" || second["pending"] == first["pending"] {
+		t.Fatalf("두 번째 결제는 새 카드: %v", second)
+	}
+	if c := props.List(); !strings.Contains(c[len(c)-1].Card.Consequence, "결제 한 건") {
+		t.Fatalf("카드의 결과 문구: %q", c[len(c)-1].Card.Consequence)
+	}
+}

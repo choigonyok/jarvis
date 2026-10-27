@@ -156,9 +156,10 @@ class Guard:
         self.pages: dict[str, str] = {}
         self._next_id = 0
         self._send_lock = asyncio.Lock()
-        # 한 번 승인한 결제 흐름은 같은 호스트의 후속 요청마다 다시 묻지 않는다.
-        # 결제 한 건이 카드 한 장이어야 쓸 수 있다.
-        self._approved: dict[str, float] = {}
+        # 승인은 여기 두지 않는다. 멈춘 요청은 매번 에이전트에 묻고, 에이전트가 승인 한 건(그 결제자·그
+        # 사이트의 결제 한 건, 결제자가 돌아온 때부터 10분, 결제하기 한 번)으로 답한다 - 승인 창이 한
+        # 곳에만 있어야 가장 느슨한 창이 실제 기준이 되는 일이 없다. 결제 한 건의 요청 여럿은 그 승인으로
+        # 지나가므로 카드는 한 장이다.
         # 페이지가 스크립트로 받아 간 주소(호스트+경로), 최근 것부터 SCRIPTS_KEPT 개.
         # Akamai 센서는 자기 스크립트를 받아 간 바로 그 경로로 측정값을 보낸다.
         self.scripts: dict[str, None] = {}
@@ -319,17 +320,9 @@ class Guard:
             await go()
             return
 
-        loop = asyncio.get_running_loop()
-        if loop.time() < self._approved.get(host, 0):
-            await go()
-            return
-
         event = self.event_of(url, body)
         log.info("결제 요청을 멈췄습니다: %s %s%s [%s]", method, url[:120], f" ({event})" if event else "", shape_of(body))
         if await self.ask(url, method, host, event):
-            # 결제 한 건은 요청 여러 개로 이뤄진다. 승인 뒤 잠깐은 같은
-            # 호스트를 다시 묻지 않는다.
-            self._approved[host] = loop.time() + 300
             await go()
         else:
             await self.send(

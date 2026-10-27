@@ -19,9 +19,12 @@ import (
 // Nothing waits here for a person. Holding the request until a decision held
 // the browser, and the turn driving it, for as long as the card sat unread
 // (up to 40 minutes). Instead the request is refused at once with a card
-// raised, as the CLI's permission gate does: approving it grants the host for
-// a few minutes and tells the assistant to take the step again; rejecting it
-// tells the assistant not to.
+// raised, as the CLI's permission gate does: approving it lets that one
+// payment through (paymentGrants) and tells the payer to take the step
+// again; rejecting it tells the payer not to.
+//
+// This is the only place a payment is let through. The browser's guard
+// keeps no approval of its own: it asks here for every request it stops.
 //
 // Nothing about this path trusts the browser's own tool boundary. The agent
 // may click whatever it likes; money leaves over the network, and that is the
@@ -99,7 +102,7 @@ func (s *Server) postIntercept(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusOK, map[string]string{"decision": string(proposal.Reject)})
 			return
 		}
-		if s.payments.granted(siteOf(host), p.JobID) {
+		if s.payments.allow(siteOf(host), p.JobID, p.Event) {
 			s.log.Info("작업에 승인된 결제 흐름의 요청을 통과시켰습니다", "job", p.JobID, "host", host, "method", p.Method, "event", p.Event)
 			writeJSON(w, http.StatusOK, map[string]string{"decision": string(proposal.Approve)})
 			return
@@ -114,7 +117,7 @@ func (s *Server) postIntercept(w http.ResponseWriter, r *http.Request) {
 	// The second half of an approval: the operator said yes, and the browser
 	// is back making the payment. Approval covers the site: one payment can
 	// cross several of its hosts (checkout, then pay.coupang.com for the PIN).
-	if s.payments.granted(siteOf(host), 0) {
+	if s.payments.allow(siteOf(host), 0, p.Event) {
 		s.log.Info("승인된 결제 흐름의 요청을 통과시켰습니다", "host", host, "method", p.Method)
 		writeJSON(w, http.StatusOK, map[string]string{"decision": string(proposal.Approve)})
 		return
@@ -149,21 +152,34 @@ func (s *Server) raisePayment(p Payment) string {
 	return opened.ID
 }
 
-// paymentGrantTTL is how long an approved payment host stays open: the time
-// it takes the assistant to come back and take the step again.
-const paymentGrantTTL = 10 * time.Minute
+// One approval is one payment - for whoever raised the card (the
+// conversation, or one job) on one site - and these are its bounds, the same
+// for every payer:
+const (
+	// paymentWindow is how long the approved payment stays open, counted
+	// from the payer's first request after the approval: the payer is back
+	// at the payment. A job may start a while after its card was answered
+	// (it waits for the conversation to be idle), so the clock starts when
+	// it is back, not at the answer.
+	paymentWindow = 10 * time.Minute
+	// paymentWait is how long an approval waits for its payer to come back.
+	paymentWait = time.Hour
+)
 
-// jobPaymentGrantTTL is the same for a job, which comes back on its own
-// schedule: the scheduler starts it only once the conversation has been
-// quiet for a while, and the run has to open the order sheet again.
-const jobPaymentGrantTTL = 30 * time.Minute
+// commits says whether a request the guard stopped is the one that charges:
+// Coupang's 결제하기 (the order sheet's "order" event). An approval lets one
+// through; a second is a second payment, and gets a card of its own. What
+// comes after it in the same payment - the PIN pad - goes through in the
+// window.
+func commits(event string) bool { return event == "order" }
 
-// paymentGrants are the sites a person approved a payment on, for whom (a
-// job, or the conversation as job 0), until when. One's approval is not
-// another's: a job's card does not open the site to the conversation.
+// paymentGrants are the payments a person approved: for whom (a job, or the
+// conversation as job 0), on which site. One's approval is not another's: a
+// job's card does not open the site to the conversation.
 type paymentGrants struct {
 	mu    sync.Mutex
-	sites map[grantKey]time.Time
+	sites map[grantKey]*grant
+	now   func() time.Time
 }
 
 type grantKey struct {
@@ -171,25 +187,57 @@ type grantKey struct {
 	job  int64
 }
 
-func (g *paymentGrants) grant(site string, job int64, ttl time.Duration) {
+type grant struct {
+	approved time.Time
+	opened   time.Time // the payer's first request after approval; zero until then
+	charged  bool      // the one 결제하기 has gone through
+}
+
+func (g *paymentGrants) clock() time.Time {
+	if g.now != nil {
+		return g.now()
+	}
+	return time.Now()
+}
+
+func (g *paymentGrants) grant(site string, job int64) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.sites == nil {
-		g.sites = map[grantKey]time.Time{}
+		g.sites = map[grantKey]*grant{}
 	}
-	g.sites[grantKey{strings.ToLower(site), job}] = time.Now().Add(ttl)
+	g.sites[grantKey{strings.ToLower(site), job}] = &grant{approved: g.clock()}
 }
 
-func (g *paymentGrants) granted(site string, job int64) bool {
+// allow says whether a stopped request of this payer's on this site is part
+// of the payment approved for it.
+func (g *paymentGrants) allow(site string, job int64, event string) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	k := grantKey{strings.ToLower(site), job}
-	until, ok := g.sites[k]
-	if ok && time.Now().After(until) {
+	gr := g.sites[k]
+	if gr == nil {
+		return false
+	}
+	now := g.clock()
+	if gr.opened.IsZero() {
+		if now.After(gr.approved.Add(paymentWait)) {
+			delete(g.sites, k)
+			return false
+		}
+		gr.opened = now
+	}
+	if now.After(gr.opened.Add(paymentWindow)) {
 		delete(g.sites, k)
 		return false
 	}
-	return ok
+	if commits(event) {
+		if gr.charged {
+			return false
+		}
+		gr.charged = true
+	}
+	return true
 }
 
 func paymentOf(raw json.RawMessage) Payment {
@@ -214,12 +262,11 @@ func (s *Server) resolvePayment(p proposal.Proposal, d proposal.Decision) {
 		return
 	}
 	if d == proposal.Approve {
-		s.payments.grant(siteOf(pay.Host), 0, paymentGrantTTL)
+		s.payments.grant(siteOf(pay.Host), 0)
 		s.proposals.Settle(p.ID, proposal.Executed, "승인했습니다. 결제를 다시 진행합니다.")
 		s.followUp.Enqueue(fmt.Sprintf("[결제 승인됨] 운영자가 결제 카드 %s(%s)를 승인했습니다. 막혔던 결제 요청은 아직 보내지지 않았습니다.\n"+
-			"지금 브라우저에서 같은 결제 단계를 다시 진행하세요(같은 결제 버튼을 다시 누르는 것). %d분 동안 %s 의 결제 요청은 다시 묻지 않습니다. "+
-			"결제 비밀번호 키패드가 나오면 browser_enter_payment_pin 을 부르세요. 결제가 끝나면 무엇을 얼마에 결제했는지 짧게 알리세요.",
-			p.ID, pay.Host, int(paymentGrantTTL.Minutes()), siteOf(pay.Host)))
+			"지금 브라우저에서 같은 결제 단계를 다시 진행하세요(같은 결제 버튼을 다시 누르는 것). %s",
+			p.ID, pay.Host, approvedScope(siteOf(pay.Host))))
 		return
 	}
 	why := ""
@@ -239,11 +286,10 @@ func (s *Server) resolveJobPayment(p proposal.Proposal, pay Payment, d proposal.
 	approved := d == proposal.Approve
 	var text string
 	if approved {
-		s.payments.grant(site, pay.JobID, jobPaymentGrantTTL)
+		s.payments.grant(site, pay.JobID)
 		text = fmt.Sprintf("[결제 승인됨] 운영자가 결제 카드 %s(%s)를 승인했습니다. 막혔던 결제 요청은 아직 보내지지 않았습니다.\n"+
-			"주문 내역에 이 주문이 아직 없는지 먼저 확인한 뒤, 같은 결제 단계를 다시 진행하세요(결제하기를 한 번 누르면 이번에는 통과합니다). "+
-			"%d분 동안 이 작업의 %s 결제는 다시 묻지 않습니다. 결제 비밀번호 키패드가 나오면 browser_enter_payment_pin 을 부르세요.",
-			p.ID, pay.Host, int(jobPaymentGrantTTL.Minutes()), site)
+			"주문 내역에 이 주문이 아직 없는지 먼저 확인한 뒤, 같은 결제 단계를 다시 진행하세요(결제하기를 한 번 누르면 이번에는 통과합니다). %s",
+			p.ID, pay.Host, approvedScope(site))
 	} else {
 		text = fmt.Sprintf("[결제 반려됨] 운영자가 결제 카드 %s(%s)를 반려했습니다.", p.ID, pay.Host)
 		if p.Reason != "" {
@@ -262,11 +308,19 @@ func (s *Server) resolveJobPayment(p proposal.Proposal, pay Payment, d proposal.
 	if !approved {
 		return
 	}
-	note := fmt.Sprintf("승인했습니다. 작업이 결제를 이어서 합니다(%d분 동안 열려 있습니다).", int(jobPaymentGrantTTL.Minutes()))
+	note := fmt.Sprintf("승인했습니다. 작업이 이 결제 한 건을 이어서 합니다(다시 진행한 때부터 %d분).", int(paymentWindow.Minutes()))
 	if err != nil {
 		note = "승인했지만 작업을 깨우지 못했습니다: " + err.Error()
 	}
 	s.proposals.Settle(p.ID, proposal.Executed, note)
+}
+
+// approvedScope is what an approval lets through, told to the payer the
+// way paymentGrants holds it.
+func approvedScope(site string) string {
+	return fmt.Sprintf("이 승인은 %s 의 결제 한 건입니다: 다시 진행을 시작한 때부터 %d분 안에, 결제하기는 한 번 통과합니다. "+
+		"그 뒤의 다른 결제는 다시 카드를 올립니다. 결제 비밀번호 키패드가 나오면 browser_enter_payment_pin 을 부르세요. "+
+		"결제가 끝나면 무엇을 얼마에 결제했는지 짧게 알리세요.", site, int(paymentWindow.Minutes()))
 }
 
 // paymentCard says what is being asked. The login host is on the ask list
@@ -291,10 +345,11 @@ func paymentCard(p Payment) action.Card {
 		body = job + "\n\n" + body
 	}
 	if site := siteOf(p.Host); site == "coupang.com" {
-		consequence := "결제가 청구됩니다 · 되돌릴 수 없습니다 · 승인하면 10분 동안 쿠팡 결제는 다시 묻지 않습니다"
+		consequence := fmt.Sprintf("결제가 청구됩니다 · 되돌릴 수 없습니다 · 승인하면 이 결제 한 건이 진행됩니다(다시 진행한 때부터 %d분 안에, 결제하기 한 번)",
+			int(paymentWindow.Minutes()))
 		if p.JobID != 0 {
-			consequence = fmt.Sprintf("결제가 청구됩니다 · 되돌릴 수 없습니다 · 승인하면 이 작업이 결제를 다시 진행하고, %d분 동안 이 작업의 쿠팡 결제는 다시 묻지 않습니다",
-				int(jobPaymentGrantTTL.Minutes()))
+			consequence = fmt.Sprintf("결제가 청구됩니다 · 되돌릴 수 없습니다 · 승인하면 이 작업이 결제 한 건을 다시 진행합니다(진행한 때부터 %d분 안에, 결제하기 한 번)",
+				int(paymentWindow.Minutes()))
 		}
 		return action.Card{
 			Title:       "쿠팡에서 쿠페이로 결제합니다",
@@ -309,9 +364,9 @@ func paymentCard(p Payment) action.Card {
 			Consequence: "로그인만 진행됩니다 · 결제는 따로 묻습니다",
 		}
 	}
-	consequence := "결제가 청구됩니다 · 되돌릴 수 없습니다"
+	consequence := fmt.Sprintf("결제가 청구됩니다 · 되돌릴 수 없습니다 · 승인하면 이 결제 한 건이 진행됩니다(다시 진행한 때부터 %d분 안에)", int(paymentWindow.Minutes()))
 	if p.JobID != 0 {
-		consequence += " · 승인하면 이 작업이 결제를 다시 진행합니다"
+		consequence = fmt.Sprintf("결제가 청구됩니다 · 되돌릴 수 없습니다 · 승인하면 이 작업이 결제 한 건을 다시 진행합니다(진행한 때부터 %d분 안에)", int(paymentWindow.Minutes()))
 	}
 	return action.Card{
 		Title:       "결제를 진행합니다",

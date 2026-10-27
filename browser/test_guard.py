@@ -126,6 +126,22 @@ class Paused(unittest.IsolatedAsyncioTestCase):
         await self.g.on_paused(self.ws, self.paused(EVENTS, json.dumps({"eventName": "order"})))
         self.assertEqual((self.sent, self.asked), (["Fetch.failRequest"], ["order"]))
 
+    async def test_an_approval_opens_no_window_here(self):
+        # 승인 창은 에이전트에만 있다: 승인 받은 바로 뒤의 같은 호스트 요청도 다시 묻는다(예전에는 5분 동안
+        # 묻지 않아, 에이전트가 결제자·결제 한 건을 따지기 전에 지나갔다).
+        async def yes(url, method, host, event=""):
+            self.asked.append(event)
+            return True
+
+        self.g.ask = yes
+        order = json.dumps({"eventName": "order"})
+        await self.g.on_paused(self.ws, self.paused(EVENTS, order))
+        await self.g.on_paused(self.ws, self.paused(EVENTS, order))
+        await self.g.on_paused(self.ws, self.paused("https://rocketpay.coupang.com/rocketpay/pay/authentication", "{}"))
+        self.assertEqual(self.asked, ["order", "order", ""])
+        self.assertEqual(self.sent, ["Fetch.continueRequest"] * 3)
+        self.assertFalse(hasattr(self.g, "_approved"))
+
     async def test_the_bot_sensor_goes_to_the_path_its_script_came_from(self):
         # 2026-10-18 01:50: 센서 POST 의 본문을 Chrome 이 넘겨주지 않아 본문 규칙이 못 잡았고,
         # 결제하기보다 먼저 결제 카드가 떴다. 센서는 자기 스크립트를 받아 간 경로로 보낸다.
