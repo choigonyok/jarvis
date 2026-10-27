@@ -680,7 +680,7 @@ type Fact struct {
 	// says is no longer so ("요즘은 매운 것도 먹어" ends "매운 걸 못 먹는다").
 	Ends []Ended `json:"ends,omitempty"`
 
-	Status  string    `json:"status"` // pending | stored | duplicate | failed
+	Status  string    `json:"status"` // pending | stored | duplicate | held | dropped
 	Tries   int       `json:"tries"`
 	NextTry time.Time `json:"nextTry"`
 	Error   string    `json:"error,omitempty"`
@@ -697,7 +697,12 @@ const (
 	FactPending   = "pending"   // waiting to go to memory (or to go again)
 	FactStored    = "stored"    // memory has it as a new fact
 	FactDuplicate = "duplicate" // memory already knew it
-	FactFailed    = "failed"    // given up after too many tries
+	// FactHeld is set aside after failing on its own (gocommon/health): kept,
+	// counted on the status tab, sent again when memory comes back or a
+	// person releases it.
+	FactHeld = "held"
+	// FactDropped is a held fact a person decided not to keep.
+	FactDropped = "dropped"
 )
 
 // Party is one end of a fact: the operator, or someone or something by name -

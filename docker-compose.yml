@@ -442,7 +442,10 @@ services:
   # 작업: 대화에서 맡긴 일, 실행마다의 진행 기록, 작업이 지켜보는 대상, 사이트
   # 로그인 상태. 기록만 한다 - 실행은 에이전트의 스케줄러가 브라우저로 한다.
   jobs:
-    build: ./jobs-svc
+    build:
+      context: ./jobs-svc
+      additional_contexts:
+        gocommon: ./gocommon
     environment:
       TZ: ${TZ:-Asia/Seoul}
       LISTEN_ADDR: ":8098"
@@ -865,6 +868,19 @@ services:
       MEMORY_URL: http://memory:8100
       CONTEXT_URL: http://context:8103
       VAULT_URL: http://vault:8105
+      # 이 아래는 /health 의 계약(gocommon/health: 반복 작업의 진행, 격리함)이나 상태만 읽는다.
+      # 이벤트 로그와 구독자마다의 전달, 알림, 작업, iMessage 수집기, 웹 찾기, 손님 에이전트, 사진.
+      EVENTS_URL: http://events:8101
+      NOTIFY_SVC_URL: http://notify:8097
+      JOBS_URL: http://jobs:8098
+      IMESSAGE_URL: http://imessage:8099
+      SEARCH_URL: http://search:8104
+      AGENT_GUEST_URL: http://agent-guest:8081
+      IMMICH_URL: http://immich:2283
+      FALKORDB_ADDR: falkordb:6379
+      # 맥미니 호스트에서 도는 것(LaunchAgent): 목소리와 그림 속 글자 읽기.
+      TTS_URL: ${JARVIS_TTS_URL:-http://host.docker.internal:8106}
+      OCR_URL: ${JARVIS_OCR_URL:-http://host.docker.internal:8107}
       BROWSER_ADDR: browser:8931
       # 쿠팡·네이버페이 주문목록이 열리는지는 에이전트 브라우저 새 탭에서 직접
       # 열어 보고 판단한다(30분마다). 쿠키가 남아 있어도 로그아웃일 수 있었다.
@@ -882,10 +898,13 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    # search 에는 search-svc 의 /health 를 읽으러만 붙는다(검색 토큰은 받지 않는다). 그쪽에서
+    # 닿는 것은 토큰 없이 열린 이 서비스의 /health 뿐이다.
     networks:
       - default
       - data
       - browser
+      - search
     restart: unless-stopped
 
   # The agent is a Go process driving a Chromium container and a CLI; none of
@@ -897,7 +916,10 @@ services:
   # 제거·방해 금지·저녁 요약을 거쳐 웹 푸시로 폰에 보낸다. 알림함도 여기서 읽는다.
   # VAPID 키는 .env 에만 둔다(공개 저장소).
   notify:
-    build: ./notify-svc
+    build:
+      context: ./notify-svc
+      additional_contexts:
+        gocommon: ./gocommon
     environment:
       TZ: ${TZ:-Asia/Seoul}
       LISTEN_ADDR: ":8097"
@@ -929,7 +951,10 @@ services:
   # each subscriber (notify, agent) the types it asked for, in order; what an
   # event means is the subscriber's to decide.
   events:
-    build: ./events-svc
+    build:
+      context: ./events-svc
+      additional_contexts:
+        gocommon: ./gocommon
     environment:
       TZ: ${TZ:-Asia/Seoul}
       LISTEN_ADDR: ":8101"
@@ -960,7 +985,10 @@ services:
   # 닿는 유일한 관문이기도 하다: 질문은 mind.card 로 에이전트에. 콘솔은 맥미니의
   # 127.0.0.1:8102 이고 토큰이 필요하다: 한 번 /?token=<JARVIS_API_TOKEN> 으로 연다.
   mind:
-    build: ./mind-svc
+    build:
+      context: ./mind-svc
+      additional_contexts:
+        gocommon: ./gocommon
     environment:
       TZ: ${TZ:-Asia/Seoul}
       DATABASE_URL: >-
@@ -1060,7 +1088,8 @@ services:
 #   브라우저는 DB 에 닿지 못한다.
 # - browser: 바깥 웹페이지를 여는 브라우저. agent(MCP·결제 가드), status(포트 확인),
 #   tunnel(화면 탭의 VNC)만 붙는다 - 페이지가 브라우저를 장악해도 다른 서비스에는 닿지 못한다.
-# - search: 바깥 웹페이지를 받아 읽는 search-svc 와 그것을 부르는 agent·agent-guest 만.
+# - search: 바깥 웹페이지를 받아 읽는 search-svc 와 그것을 부르는 agent·agent-guest, 그리고 그
+#   /health 만 읽는 status.
 networks:
   data:
   browser:

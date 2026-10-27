@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/notify-svc/internal/live"
 	"github.com/choigonyok/jarvis/notify-svc/internal/notify"
 	"github.com/choigonyok/jarvis/notify-svc/internal/push"
@@ -43,17 +44,49 @@ type Server struct {
 	live  *live.Hub
 	token string
 	log   *slog.Logger
+	loops *health.Loops
 }
 
 func New(svc *notify.Service, st *store.Store, p *push.Pusher, hub *live.Hub, token string, log *slog.Logger) *Server {
 	return &Server{svc: svc, store: st, push: p, live: hub, token: token, log: log}
 }
 
+// Loops are the background loops /health reports (the minute tick).
+func (s *Server) WithLoops(l *health.Loops) *Server {
+	s.loops = l
+	return s
+}
+
+// health answers in the stack's contract (gocommon/health): the minute tick
+// that sends what waited (the digest, quiet hours), and whether the
+// operator's phones take pushes - a push that reaches no phone is the one
+// failure nobody would be told of.
+func (s *Server) health(w http.ResponseWriter, r *http.Request) {
+	rep := health.Report{Loops: s.loops.List()}
+	now := time.Now()
+	push := health.Loop{Name: "push", Label: "폰으로 푸시", StartedAt: now}
+	n, fewest, lastOK, err := s.store.Devices(r.Context())
+	if err != nil {
+		health.Write(w, http.StatusServiceUnavailable, rep)
+		return
+	}
+	push.LastOK = lastOK
+	switch {
+	// Not set up at all reads as failing, so the status tab warns.
+	case !s.push.Ready():
+		push.LastError, push.Failing = "VAPID 키가 없어 푸시를 보내지 않고 알림함에만 쌓습니다", 3
+	case n == 0:
+		push.LastError, push.Failing = "푸시를 받도록 등록한 폰이 없습니다", 3
+	case fewest > 0:
+		push.LastError, push.Failing = fmt.Sprintf("폰 %d대 모두 최근 푸시를 받지 못했습니다", n), fewest
+	}
+	rep.Loops = append(rep.Loops, push)
+	health.Write(w, http.StatusOK, rep)
+}
+
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "push": s.push.Ready()})
-	})
+	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("POST /events", s.auth(s.event))
 	mux.HandleFunc("POST /consume", s.auth(s.consume))
 	mux.HandleFunc("GET /notifications", s.auth(s.list))

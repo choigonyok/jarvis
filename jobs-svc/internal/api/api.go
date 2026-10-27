@@ -18,6 +18,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -25,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/jobs-svc/internal/store"
 )
 
@@ -151,12 +153,52 @@ func (s *Server) mine(w http.ResponseWriter, r *http.Request, next http.HandlerF
 
 func same(a, b string) bool { return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1 }
 
+// overdueAfter is how long a job may wait past its time before the agents'
+// schedulers count as not taking it. They start a job only between turns of
+// the conversation, so a busy hour holds it up without anything being wrong.
+const overdueAfter = 2 * time.Hour
+
+// health answers in the stack's contract (gocommon/health): whether the
+// agents' schedulers are taking what is due, and the operator's jobs that
+// stopped after failing too often - the held box of the jobs.
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
-	if err := s.store.Ping(r.Context()); err != nil {
-		writeErr(w, http.StatusServiceUnavailable, "데이터베이스에 연결할 수 없습니다.")
+	ctx := r.Context()
+	if err := s.store.Ping(ctx); err != nil {
+		health.Write(w, http.StatusServiceUnavailable, health.Report{})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	now := time.Now()
+	sched := health.Loop{Name: "scheduler", Label: "작업 실행(에이전트의 스케줄러)", StaleSec: int(overdueAfter.Seconds()), StartedAt: now, LastOK: &now}
+	n, oldest, err := s.store.Overdue(ctx)
+	if err != nil {
+		health.Write(w, http.StatusServiceUnavailable, health.Report{})
+		return
+	}
+	if n > 0 && oldest != nil {
+		// It was keeping up until the oldest of them came due.
+		sched.Behind, sched.LastOK = oldest, oldest
+		sched.LastError = fmt.Sprintf("때가 지난 작업 %d개가 실행되지 않고 있습니다", n)
+	}
+	rep := health.Report{Loops: []health.Loop{sched}}
+	stopped, err := s.store.StoppedJobs(ctx)
+	if err != nil {
+		health.Write(w, http.StatusServiceUnavailable, rep)
+		return
+	}
+	if len(stopped) > 0 {
+		box := &health.Held{Count: len(stopped), Where: "작업 탭에서 확인하고 다시 시작하거나 그만두세요."}
+		for i, j := range stopped {
+			if box.Oldest == nil || j.At.Before(*box.Oldest) {
+				at := j.At
+				box.Oldest = &at
+			}
+			if i < health.ShownItems {
+				box.Items = append(box.Items, health.Item{What: j.Title, Why: strings.TrimPrefix(j.Summary, "실패: "), At: j.At})
+			}
+		}
+		rep.Held = box
+	}
+	health.Write(w, http.StatusOK, rep)
 }
 
 func (s *Server) list(w http.ResponseWriter, r *http.Request) {

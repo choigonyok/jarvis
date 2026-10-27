@@ -223,3 +223,87 @@ func TestAnswersAndInstructionsWakeAtOnce(t *testing.T) {
 		t.Fatalf("다음 시각 %v (잡은 시각 %v): %v", next, at, err)
 	}
 }
+
+// Against a throwaway Postgres, as svc_jobs (scripts/dbtest): a run that
+// left its job waiting on a card and then ended badly is counted, but it is
+// the answer that wakes the job - no retry time is set and the log does not
+// promise one. Three bad runs in a row stop the job, and it is in the held
+// box /health shows (StoppedJobs) until it is resumed; one past its time with
+// nothing running counts as overdue.
+func TestABadRunWaitingOnACardWaitsForTheAnswer(t *testing.T) {
+	dsn := os.Getenv("JARVIS_TEST_DSN")
+	if dsn == "" {
+		t.Skip("JARVIS_TEST_DSN 이 없어 건너뜁니다 (scripts/dbtest)")
+	}
+	ctx := context.Background()
+	s, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.Close)
+	j, err := s.Create(ctx, NewJob{Title: "dbtest 카드 대기", Goal: "답 기다리기", Sites: []string{"shop.example"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := s.StartRun(ctx, j.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Wait(ctx, run, "p-1", "카드 답 대기: 가격"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EndRun(ctx, run, rules.Error, "브라우저가 닫혔습니다"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get(ctx, j.ID)
+	if err != nil || got.State != rules.Waiting || got.NextAt != nil || got.Attempts != 1 {
+		t.Fatalf("카드를 기다리는 채로, 다시 시도할 시각 없이: %+v %v", got, err)
+	}
+	d, _ := s.Detail(ctx, j.ID, 5, true)
+	if len(d.Events) == 0 || !strings.Contains(d.Events[0].Text, "카드에 답이 오면 다시") || strings.Contains(d.Events[0].Text, "15분") {
+		t.Fatalf("기록: %+v", d.Events)
+	}
+
+	k, err := s.Create(ctx, NewJob{Title: "dbtest 멈춤", Goal: "실패하기", Sites: []string{"shop.example"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < rules.MaxAttempts; i++ {
+		run, err := s.StartRun(ctx, k.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.EndRun(ctx, run, rules.Error, "주문서가 열리지 않습니다"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stopped, err := s.StoppedJobs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, sj := range stopped {
+		found = found || (sj.ID == k.ID && strings.Contains(sj.Summary, "주문서가 열리지 않습니다"))
+	}
+	if !found {
+		t.Fatalf("세 번 실패해 멈춘 작업이 격리함에 있어야 합니다: %+v", stopped)
+	}
+	if err := s.Control(ctx, k.ID, "resume"); err != nil {
+		t.Fatal(err)
+	}
+	stopped, _ = s.StoppedJobs(ctx)
+	for _, sj := range stopped {
+		if sj.ID == k.ID {
+			t.Fatal("다시 시작한 작업은 격리함에서 나갑니다")
+		}
+	}
+
+	if _, err := s.pool.Exec(ctx, `update jobs set next_at = now() - interval '3 hours' where id = $1`, k.ID); err != nil {
+		t.Fatal(err)
+	}
+	n, oldest, err := s.Overdue(ctx)
+	if err != nil || n < 1 || oldest == nil || time.Since(*oldest) < 2*time.Hour {
+		t.Fatalf("때가 지난 작업: %d %v %v", n, oldest, err)
+	}
+	_ = s.Control(ctx, k.ID, "cancel")
+}

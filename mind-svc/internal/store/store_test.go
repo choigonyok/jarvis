@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/jackc/pgx/v5"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
@@ -167,6 +168,17 @@ func facts(t *testing.T, st Store) {
 	if _, err := st.Fact(ctx, "mf_x"); !errors.Is(err, model.ErrNotFound) {
 		t.Fatalf("없는 사실: %v", err)
 	}
+	held := later
+	held.ID, held.Status, held.Tries = "mf_held", model.FactHeld, 5
+	_ = st.PutFact(ctx, held)
+	if hs, err := st.HeldFacts(ctx); err != nil || len(hs) != 1 || hs[0].ID != "mf_held" {
+		t.Fatalf("보류한 것만: %+v %v", hs, err)
+	}
+	if due, _ := st.DueFacts(ctx, at.Add(48*time.Hour), 10); len(due) != 1 || due[0].ID != "mf_2" {
+		t.Fatalf("보류한 것은 저절로 다시 나오지 않습니다: %+v", due)
+	}
+	held.Status = model.FactDropped
+	_ = st.PutFact(ctx, held)
 
 	// G-M1: a ledger reads facts by relation, with no limit and in any
 	// letter case - old entries must not fall out behind newer facts.
@@ -496,6 +508,27 @@ func TestPostgres(t *testing.T) {
 	replies(t, st)
 	usage(t, st)
 	reviews(t, st)
+	// 068 brings a fact given up on back as pending; the body it writes must
+	// read back here.
+	ctx := context.Background()
+	gave := model.Fact{ID: "mf_gaveup", Room: "r", Subject: model.Party{Name: "나", Self: true}, Relation: "LIKES",
+		Object: model.Party{Name: "뿌링클"}, Text: "뿌링클을 좋아한다", Status: "failed", Tries: 12, Error: "끊김",
+		NextTry: time.Now().Add(time.Hour), CreatedAt: time.Now()}
+	if err := st.PutFact(ctx, gave); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `update mind_facts set status = 'pending', next_try = now(),
+		body = jsonb_set(jsonb_set(jsonb_set(body, '{status}', '"pending"'), '{tries}', '0'), '{nextTry}', to_jsonb(now()))
+		where status = 'failed'`); err != nil {
+		t.Fatal(err)
+	}
+	back, err := st.Fact(ctx, "mf_gaveup")
+	if err != nil || back.Status != model.FactPending || back.Tries != 0 || back.NextTry.After(time.Now()) {
+		t.Fatalf("068 의 되살림: %+v %v", back, err)
+	}
+	if due, _ := st.DueFacts(ctx, time.Now(), 50); !slices.ContainsFunc(due, func(f model.Fact) bool { return f.ID == "mf_gaveup" }) {
+		t.Fatalf("되살린 사실은 바로 다시 보냅니다: %+v", due)
+	}
 	// Last: its messages must not count in the others' rooms.
 	messages(t, st)
 	var sealed bool

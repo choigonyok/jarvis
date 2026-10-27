@@ -175,7 +175,7 @@ func (m *Mind) gift(ctx context.Context) error {
 
 // wish is a fact that someone wants something.
 func wish(f model.Fact) bool {
-	if f.Status == model.FactFailed || f.Object.Name == "" {
+	if f.Status == model.FactDropped || f.Object.Name == "" {
 		return false
 	}
 	r := strings.ToUpper(f.Relation)

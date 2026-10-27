@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/spending-svc/internal/store"
 )
 
@@ -91,6 +92,8 @@ type Feed struct {
 	client   *http.Client
 	log      *slog.Logger
 	loc      *time.Location
+	// Loops, when set, hears each sync for /health ("assets").
+	Loops *health.Loops
 }
 
 func New(base, token string, st *store.Store, interval time.Duration, log *slog.Logger) *Feed {
@@ -114,6 +117,9 @@ func (f *Feed) Run(ctx context.Context) {
 	for {
 		if err := f.Sync(ctx); err != nil && ctx.Err() == nil {
 			f.log.Warn("투자 계좌에서 쓴 돈을 읽지 못했습니다", "err", err)
+			f.Loops.Fail("assets", err)
+		} else if err == nil {
+			f.Loops.OK("assets")
 		}
 		select {
 		case <-ctx.Done():

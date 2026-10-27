@@ -41,7 +41,10 @@ services:
     restart: "no"
 
   events:
-    build: ./events-svc
+    build:
+      context: ./events-svc
+      additional_contexts:
+        gocommon: ./gocommon
     environment:
       TZ: Asia/Seoul
       DATABASE_URL: postgres://jarvis:mind-local@postgres:5432/jarvis?sslmode=disable
@@ -51,7 +54,10 @@ services:
         condition: service_completed_successfully
 
   mind:
-    build: ./mind-svc
+    build:
+      context: ./mind-svc
+      additional_contexts:
+        gocommon: ./gocommon
     environment:
       TZ: Asia/Seoul
       DATABASE_URL: postgres://jarvis:mind-local@postgres:5432/jarvis?sslmode=disable

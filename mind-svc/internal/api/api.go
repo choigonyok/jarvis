@@ -1,6 +1,6 @@
 // Package api is mind-svc's HTTP surface.
 //
-//	GET  /health
+//	GET  /health                      the stack's contract (gocommon/health): the facts held for a person
 //	GET  /status                      reading and remembering in a few numbers (token)
 //	POST /consume                     events-svc delivers an observation (token)
 //	GET  /                            the console: simulator, world model, intents
@@ -31,6 +31,8 @@
 //	POST /api/replay                  {after, limit} the log through a fresh loop, in memory
 //	GET  /api/recall?q=&person=       what is known: world model + long-term memory
 //	POST /api/facts/flush             send the ledger's pending facts to memory now
+//	POST /api/facts/{id}/release      send a held fact again
+//	POST /api/facts/{id}/drop         a person deciding a held fact is not to be kept
 //	GET  /api/reminders?all=1         the reminders waiting (all: and those said, cancelled or expired in three days)
 //	POST /api/reminders               {text, body?, at?, place?, move?, after?, until?, url?} one to say at its moment
 //	PATCH /api/reminders/{id}         {text?, body?, at?, place?, move?, after?, until?, clear?} change it; a said one waits again
@@ -67,6 +69,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/mind-svc/internal/clock"
 	"github.com/choigonyok/jarvis/mind-svc/internal/mind"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
@@ -104,9 +107,7 @@ func New(m *mind.Mind, token, consoleToken string, open bool, c *clock.Clock, lo
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "mode": s.m.Opts.Mode, "llm": s.m.Opts.LLM.Ready()})
-	})
+	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("POST /consume", s.auth(true, s.consume))
 	mux.HandleFunc("GET /status", s.auth(true, func(w http.ResponseWriter, r *http.Request) {
 		st, err := s.m.Status(r.Context())
@@ -226,6 +227,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/replay", s.auth(false, s.replay))
 	mux.HandleFunc("GET /api/recall", s.auth(false, s.recall))
 	mux.HandleFunc("POST /api/facts/flush", s.auth(false, s.flush))
+	mux.HandleFunc("POST /api/facts/{id}/release", s.auth(false, s.releaseFact))
+	mux.HandleFunc("POST /api/facts/{id}/drop", s.auth(false, s.dropFact))
 	mux.HandleFunc("GET /api/reminders", s.person(s.listReminders))
 	mux.HandleFunc("POST /api/reminders", s.person(s.setReminder))
 	mux.HandleFunc("PATCH /api/reminders/{id}", s.person(s.changeReminder))
@@ -415,6 +418,74 @@ func (s *Server) flush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]int{"sent": n})
+}
+
+// health answers in the stack's contract (gocommon/health): the facts held
+// after failing on their own. How reading and remembering are going is the
+// status tab's own rows (mind.reading, mind.memory, from /status).
+func (s *Server) health(w http.ResponseWriter, r *http.Request) {
+	held, err := s.m.Opts.Store.HeldFacts(r.Context())
+	if err != nil {
+		health.Write(w, http.StatusServiceUnavailable, health.Report{})
+		return
+	}
+	rep := health.Report{}
+	if len(held) > 0 {
+		box := &health.Held{Count: len(held), Where: "mind 콘솔(scripts/mini console)의 기억할 사실에서 다시 보내거나 버리세요. 기억이 다시 받기 시작하면 저절로 한 번 더 보냅니다."}
+		for i := len(held) - 1; i >= 0; i-- {
+			f := held[i]
+			if box.Oldest == nil || f.CreatedAt.Before(*box.Oldest) {
+				at := f.CreatedAt
+				box.Oldest = &at
+			}
+			if len(box.Items) < health.ShownItems {
+				// The relation and who it is about, not what was said.
+				box.Items = append(box.Items, health.Item{What: f.Relation + " · " + factEnd(f.Subject), Why: f.Error, At: f.CreatedAt})
+			}
+		}
+		rep.Held = box
+	}
+	health.Write(w, http.StatusOK, rep)
+}
+
+func factEnd(p model.Party) string {
+	if p.Self {
+		return "나"
+	}
+	return p.Name
+}
+
+func (s *Server) releaseFact(w http.ResponseWriter, r *http.Request) {
+	if s.m.Remember == nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "장기 기억이 연결되어 있지 않습니다."})
+		return
+	}
+	n, err := s.m.Remember.Release(r.Context(), r.PathValue("id"))
+	switch {
+	case err != nil:
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	case n == 0:
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "보류한 사실이 아닙니다."})
+	default:
+		writeJSON(w, http.StatusOK, map[string]int{"released": n})
+	}
+}
+
+func (s *Server) dropFact(w http.ResponseWriter, r *http.Request) {
+	if s.m.Remember == nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "장기 기억이 연결되어 있지 않습니다."})
+		return
+	}
+	switch err := s.m.Remember.Drop(r.Context(), r.PathValue("id")); {
+	case errors.Is(err, model.ErrNotFound):
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "그런 사실이 없습니다."})
+	case errors.Is(err, model.ErrConflict):
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "보류한 사실만 버릴 수 있습니다."})
+	case err != nil:
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	default:
+		w.WriteHeader(http.StatusNoContent)
+	}
 }
 
 func (s *Server) snapshot(w http.ResponseWriter, r *http.Request) {

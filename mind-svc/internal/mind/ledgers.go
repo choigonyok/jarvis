@@ -53,7 +53,7 @@ func (m *Mind) deadlines(ctx context.Context) error {
 	latest := map[string]model.Fact{}
 	var order []string
 	for _, f := range facts {
-		if !f.Subject.Self || f.Status == model.FactFailed || f.ValidAt == "" {
+		if !f.Subject.Self || f.Status == model.FactDropped || f.ValidAt == "" {
 			continue
 		}
 		key := strings.Join(strings.Fields(strings.ToLower(firstNonEmpty(f.Object.Name, f.Text))), "")
@@ -309,7 +309,7 @@ func (m *Mind) moved(ctx context.Context) error {
 		return err
 	}
 	for _, f := range facts {
-		if f.Subject.Self || len(f.Ends) == 0 || f.Status == model.FactFailed {
+		if f.Subject.Self || len(f.Ends) == 0 || f.Status == model.FactDropped {
 			continue
 		}
 		who := f.Subject.Name
@@ -367,7 +367,7 @@ func (m *Mind) chore(ctx context.Context, o model.Occurrence) error {
 		return err
 	}
 	for _, f := range facts {
-		if !f.Subject.Self || f.Status == model.FactFailed {
+		if !f.Subject.Self || f.Status == model.FactDropped {
 			continue
 		}
 		days := weekdayRE.FindAllStringSubmatch(f.Text+" "+f.Object.Name, -1)
@@ -404,7 +404,7 @@ func (m *Mind) investMemo(ctx context.Context, o model.Occurrence) error {
 	}
 	names := append([]string{o.Title}, o.Things...)
 	for _, f := range facts {
-		if !f.Subject.Self || f.Status == model.FactFailed {
+		if !f.Subject.Self || f.Status == model.FactDropped {
 			continue
 		}
 		match := false

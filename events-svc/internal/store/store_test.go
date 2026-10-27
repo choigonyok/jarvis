@@ -26,7 +26,7 @@ func testStore(t *testing.T) (*Store, *pgxpool.Pool) {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	resetTables(t, dsn, `truncate events, event_subscriptions, event_outbox restart identity`)
+	resetTables(t, dsn, `truncate events, event_subscriptions, event_outbox, event_held restart identity`)
 	return New(pool), pool
 }
 
@@ -165,6 +165,80 @@ func TestConcurrentAppendsCommitInOrder(t *testing.T) {
 	close(stop)
 	if len(bad) > 0 {
 		t.Fatalf("a reader saw a gap %d times", len(bad))
+	}
+}
+
+// The held box (066): an event failing on its own is counted against it,
+// held and stepped past; it survives pruning, goes again when the consumer
+// registers again, and leaves the box once delivered or dropped.
+func TestHeldEventsAreSetAsideAndKept(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	for i := 0; i < 3; i++ {
+		if _, _, err := s.Append(ctx, Event{Source: "a", Type: "x.y"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.Subscribe(ctx, "c", "http://c/consume", []string{"*"}, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Failed(ctx, "c", "닿지 못함"); err != nil {
+		t.Fatal(err)
+	}
+	for want := 1; want <= 3; want++ {
+		if tries, err := s.ItemFailed(ctx, "c", 1, "500"); err != nil || tries != want {
+			t.Fatalf("tries %d (%v), want %d", tries, err, want)
+		}
+	}
+	if tries, _ := s.ItemFailed(ctx, "c", 2, "500"); tries != 1 {
+		t.Fatalf("다른 이벤트는 처음부터 셉니다: %d", tries)
+	}
+	subs, _ := s.Subscriptions(ctx)
+	if subs[0].FailingSince == nil || subs[0].Failures != 5 {
+		t.Fatalf("%+v", subs[0])
+	}
+	waiting, err := s.Waiting(ctx)
+	if err != nil || waiting["c"].IsZero() {
+		t.Fatalf("커서 뒤에서 기다리는 이벤트: %v %v", waiting, err)
+	}
+
+	if err := s.Hold(ctx, "c", 1, 5, "500"); err != nil {
+		t.Fatal(err)
+	}
+	subs, _ = s.Subscriptions(ctx)
+	if subs[0].Cursor != 1 || subs[0].Failures != 0 || subs[0].FailingSince != nil || subs[0].Held != 1 {
+		t.Fatalf("격리하면 넘어가고 실패가 지워집니다: %+v", subs[0])
+	}
+	_ = s.Advance(ctx, "c", 3, true)
+	_, _ = pool.Exec(ctx, `update events set received_at = now() - interval '100 days'`)
+	if n, err := s.Prune(ctx, 90*24*time.Hour); err != nil || n != 2 {
+		t.Fatalf("격리된 이벤트는 지우지 않습니다: %d %v", n, err)
+	}
+	if due, _ := s.DueHeld(ctx, "c", 10); len(due) != 0 {
+		t.Fatalf("계기 전에는 다시 보내지 않습니다: %+v", due)
+	}
+	if _, err := s.Subscribe(ctx, "c", "http://c/consume", []string{"*"}, false); err != nil {
+		t.Fatal(err)
+	}
+	due, err := s.DueHeld(ctx, "c", 10)
+	if err != nil || len(due) != 1 || due[0].Event.ID != 1 || due[0].Tries != 5 {
+		t.Fatalf("다시 구독하면 한 번 더: %+v %v", due, err)
+	}
+	if err := s.HeldFailed(ctx, "c", 1, "또 500"); err != nil {
+		t.Fatal(err)
+	}
+	held, _ := s.Held(ctx, 10)
+	if len(held) != 1 || held[0].Tries != 6 || held[0].NextTry != nil || held[0].LastError != "또 500" {
+		t.Fatalf("%+v", held)
+	}
+	if ok, _ := s.RetryHeld(ctx, "c", 1); !ok {
+		t.Fatal("사람이 다시 보내기")
+	}
+	if err := s.HeldDelivered(ctx, "c", 1); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := s.DropHeld(ctx, "c", 1); ok {
+		t.Fatal("전해진 것은 격리함에 없습니다")
 	}
 }
 

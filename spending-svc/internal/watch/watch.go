@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/gocommon/notify"
 	"github.com/choigonyok/jarvis/spending-svc/internal/book"
 	"github.com/choigonyok/jarvis/spending-svc/internal/store"
@@ -25,6 +26,8 @@ type Watcher struct {
 	notify *notify.Client
 	log    *slog.Logger
 	now    func() time.Time
+	// Loops, when set, hears each check for /health ("watch").
+	Loops *health.Loops
 }
 
 func New(s *store.Store, n *notify.Client, log *slog.Logger) *Watcher {
@@ -40,6 +43,9 @@ func (w *Watcher) Run(ctx context.Context) {
 	for {
 		if err := w.check(ctx); err != nil {
 			w.log.Warn("가계부 알림을 확인하지 못했습니다", "err", err)
+			w.Loops.Fail("watch", err)
+		} else {
+			w.Loops.OK("watch")
 		}
 		select {
 		case <-ctx.Done():

@@ -6,8 +6,8 @@
 #   scripts/host-check install    LaunchAgent com.jarvis.host-check 로 10분마다
 #   scripts/host-check uninstall
 #
-# 적는 것: FileVault 상태, Time Machine 대상 유무, iMessage 미러 방식(binary | ssh), 마지막 백업 날짜,
-# FalkorDB 의 AOF(appendonly) 설정.
+# 적는 것: FileVault 상태, Time Machine 대상 유무, iMessage 미러 방식(binary | ssh), 마지막 백업 날짜와
+# 그 백업에서 빠진 것(그날의 manifest.json, 없으면 null), FalkorDB 의 AOF(appendonly) 설정.
 set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.orbstack/bin:/Applications/Docker.app/Contents/Resources/bin:$PATH"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -26,8 +26,11 @@ run() {
   mirror=$(cut -d' ' -f1 "$HOME/.jarvis-mirror/mode" 2>/dev/null || true)
   last=$(find "$BACKUPS" -mindepth 1 -maxdepth 1 -type d -name '20*' 2>/dev/null | sort | tail -1 | xargs -n1 basename 2>/dev/null || true)
   aof=$(cd "$ROOT" && docker compose exec -T falkordb redis-cli CONFIG GET appendonly 2>/dev/null | tail -1 | tr -d '\r' || true)
-  printf '{"checkedAt":"%s","filevault":"%s","timemachine":%s,"mirror":"%s","lastBackup":"%s","falkordbAOF":"%s"}\n' \
-    "$(date +%Y-%m-%dT%H:%M:%S%z | sed 's/\(..\)$/:\1/')" "${fv:-unknown}" "$tm" "$mirror" "$last" "$aof" > "$OUT/host.json.tmp"
+  # 마지막 백업에서 빠진 것: manifest 의 missing 배열을 그대로(한 줄 JSON). manifest 가 없으면 null.
+  local missing=""
+  [ -n "$last" ] && missing=$(sed -n 's/.*"missing":\(\[[^]]*\]\).*/\1/p' "$BACKUPS/$last/manifest.json" 2>/dev/null || true)
+  printf '{"checkedAt":"%s","filevault":"%s","timemachine":%s,"mirror":"%s","lastBackup":"%s","backupMissing":%s,"falkordbAOF":"%s"}\n' \
+    "$(date +%Y-%m-%dT%H:%M:%S%z | sed 's/\(..\)$/:\1/')" "${fv:-unknown}" "$tm" "$mirror" "$last" "${missing:-null}" "$aof" > "$OUT/host.json.tmp"
   mv "$OUT/host.json.tmp" "$OUT/host.json"
   chmod 644 "$OUT/host.json"
 }

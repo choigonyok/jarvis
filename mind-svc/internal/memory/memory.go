@@ -36,7 +36,10 @@ type Client interface {
 type Result struct {
 	Ref   string `json:"ref"`
 	Later string `json:"later,omitempty"`
-	Edge  struct {
+	// Outage marks a Later that is memory's, not the fact's: its day's
+	// budget is spent, or what it stands on is down. No try is counted.
+	Outage bool `json:"outage,omitempty"`
+	Edge   struct {
 		ID   string `json:"id"`
 		Fact string `json:"fact"`
 	} `json:"edge"`

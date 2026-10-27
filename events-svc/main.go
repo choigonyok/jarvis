@@ -27,6 +27,7 @@ import (
 	"github.com/choigonyok/jarvis/events-svc/internal/api"
 	"github.com/choigonyok/jarvis/events-svc/internal/bus"
 	"github.com/choigonyok/jarvis/events-svc/internal/store"
+	"github.com/choigonyok/jarvis/gocommon/health"
 )
 
 func main() {
@@ -56,14 +57,16 @@ func main() {
 	token := os.Getenv("API_TOKEN")
 	st := store.New(pool)
 	b := bus.New(st, token, log)
+	loops := health.NewLoops()
+	loops.Add("drain", "outbox 를 이벤트로", 5*time.Minute)
 	go b.Run(ctx)
-	go drain(ctx, st, b.Notify, log)
+	go drain(ctx, st, b.Notify, loops, log)
 	go prune(ctx, st, time.Duration(atoi(getenv("EVENTS_RETAIN_DAYS", "90")))*24*time.Hour, log)
 
 	addr := getenv("LISTEN_ADDR", ":8101")
 	srv := &http.Server{
 		Addr:         addr,
-		Handler:      api.New(st, b.Notify, func() { b.Sync(ctx) }, token, os.Getenv("API_GUEST_TOKEN"), log).Handler(),
+		Handler:      api.New(st, b.Notify, func() { b.Sync(ctx) }, token, os.Getenv("API_GUEST_TOKEN"), loops, log).Handler(),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}
@@ -83,7 +86,7 @@ func main() {
 
 // drain keeps the outbox empty: what services wrote there becomes events.
 // A second is as late as an event gets when events-svc is up.
-func drain(ctx context.Context, st *store.Store, wake func(), log *slog.Logger) {
+func drain(ctx context.Context, st *store.Store, wake func(), loops *health.Loops, log *slog.Logger) {
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
 	for {
@@ -93,7 +96,11 @@ func drain(ctx context.Context, st *store.Store, wake func(), log *slog.Logger) 
 		switch {
 		case err != nil && ctx.Err() == nil:
 			log.Warn("outbox 를 비우지 못했습니다", "err", err)
-		case n > 0:
+			loops.Fail("drain", err)
+		case err == nil:
+			loops.OK("drain")
+		}
+		if n > 0 {
 			wake()
 			continue // there may be more
 		}

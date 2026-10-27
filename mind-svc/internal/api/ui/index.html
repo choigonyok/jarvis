@@ -82,7 +82,8 @@ section.col:last-child { border-right: 0; }
 .cal { color: var(--ok); }
 .st.stored { color: var(--loop); border-color: color-mix(in srgb, var(--loop) 45%, transparent); }
 .st.pending { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
-.st.failed { color: var(--no); border-color: color-mix(in srgb, var(--no) 45%, transparent); }
+.st.held { color: var(--no); border-color: color-mix(in srgb, var(--no) 45%, transparent); }
+.st.dropped { color: var(--faint); }
 .st.duplicate { color: var(--faint); }
 .triple { font: 11.5px var(--mono); color: var(--faint); overflow-wrap: anywhere; }
 .judge { font-size: 12.5px; color: var(--dim); margin-top: 4px; }
@@ -179,7 +180,7 @@ const DECISION = { execute: "바로 실행", notify: "실행 후 알림", ask: "
 const ISTATUS = { pending: "대기", executed: "완료", rejected: "거절됨", undone: "되돌림", dropped: "버림", superseded: "대체됨", failed: "실패" };
 const KIND = { "calendar.create": "캘린더 추가", "calendar.update": "캘린더 수정", "calendar.delete": "캘린더 삭제", info: "알림" };
 const LEVEL = { auto: "알아서", notify: "하고 알림", ask: "먼저 묻기", never: "안 함" };
-const FSTATUS = { pending: "보내는 중", stored: "기억함", duplicate: "이미 앎", failed: "포기" };
+const FSTATUS = { pending: "보내는 중", stored: "기억함", duplicate: "이미 앎", held: "보류", dropped: "버림" };
 let room = null, open = new Set(), snap = null;
 
 async function call(path, body) {
@@ -274,12 +275,13 @@ function fact(f) {
     m.expired && "더 나중 사실이 있어 지난 것으로 기억",
     ...(m.ended || []).map((x) => `끝낸 사실: <s>${esc(x.fact)}</s>`),
     f.status === "pending" && f.error && `다시 보낼 예정 (${f.tries}번째): ${esc(f.error)}`,
-    f.status === "failed" && `보내지 못함: ${esc(f.error)}`,
+    f.status === "held" && `${f.tries}번 넣지 못해 보류: ${esc(f.error)} · 기억이 다시 받기 시작하면 한 번 더 보내요`,
   ].filter(Boolean);
+  const acts = f.status === "held" ? `<div class="acts"><button class="btn ok" data-fact="release" data-id="${esc(f.id)}">다시 보내기</button><button class="btn no" data-fact="drop" data-id="${esc(f.id)}">버리기</button></div>` : "";
   const end = (p) => esc(p.self ? "나" : p.name);
   return `<article class="ent"><header><span class="kind">사실</span><h3>${esc(f.text)}</h3><span class="st ${f.status}">${FSTATUS[f.status] || f.status}</span></header>
     <div class="triple">${end(f.subject)} —${esc(f.relation)}→ ${end(f.object)}${f.validAt ? " · " + esc(f.validAt) + "부터" : ""}</div>
-    ${ev ? `<div class="judge">근거 ${ev}</div>` : ""}${judge.map((j) => `<div class="judge">${j}</div>`).join("")}</article>`;
+    ${ev ? `<div class="judge">근거 ${ev}</div>` : ""}${judge.map((j) => `<div class="judge">${j}</div>`).join("")}${acts}</article>`;
 }
 
 function change(c) {
@@ -291,8 +293,12 @@ function change(c) {
 }
 
 document.addEventListener("click", async (ev) => {
-  const el = ev.target.closest("[data-room],[data-ent],[data-act],[data-col],[data-advance],[data-note],[data-link]");
+  const el = ev.target.closest("[data-room],[data-ent],[data-act],[data-col],[data-advance],[data-note],[data-link],[data-fact]");
   if (!el) return;
+  if (el.dataset.fact) {
+    if (el.dataset.fact === "drop" && !confirm("이 사실을 기억하지 않을까요? 생활 장부에서도 빠집니다.")) return;
+    await call(`/api/facts/${el.dataset.id}/${el.dataset.fact}`, {}); refresh(); return;
+  }
   if (el.dataset.room) { room = el.dataset.room; const r = snap.rooms.find((x) => x.room === room); if (r) $("roomName").value = r.name; render(); }
   else if (el.dataset.ent) {
     const id = el.dataset.ent;

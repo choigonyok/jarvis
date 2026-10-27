@@ -80,6 +80,9 @@ export type Unparsed = {
   chatName: string;
   body: string;
   sentAt: string;
+  /** Why an alert that could not even be recorded was set aside; absent
+   *  for one whose format was not understood. */
+  reason?: string;
 };
 
 export type Collector = {

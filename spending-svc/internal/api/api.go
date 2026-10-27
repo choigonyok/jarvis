@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/spending-svc/internal/book"
 	"github.com/choigonyok/jarvis/spending-svc/internal/category"
 	"github.com/choigonyok/jarvis/spending-svc/internal/enrich"
@@ -27,6 +28,8 @@ type Server struct {
 	token  string
 	log    *slog.Logger
 	now    func() time.Time
+	// Loops are the background loops /health reports (ingest, watch, assets).
+	Loops *health.Loops
 }
 
 func New(s *store.Store, in *ingest.Ingester, token string, log *slog.Logger) *Server {
@@ -64,12 +67,31 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// health answers in the stack's contract (gocommon/health): the loops, and
+// the alerts set aside for a person - the ones whose format was not
+// understood and the ones that could not be recorded at all.
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
-	if err := s.store.Ping(r.Context()); err != nil {
-		writeErr(w, http.StatusServiceUnavailable, "데이터베이스에 연결할 수 없습니다.")
+	rep := health.Report{Loops: s.Loops.List()}
+	ctx := r.Context()
+	if err := s.store.Ping(ctx); err != nil {
+		health.Write(w, http.StatusServiceUnavailable, rep)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	n, oldest, err := s.store.UnparsedCount(ctx)
+	if err == nil && n > 0 {
+		box := &health.Held{Count: n, Oldest: oldest, Where: "가계부 탭의 '읽지 못한 알림'에서 직접 적거나 버리세요."}
+		if us, err := s.store.Unparsed(ctx); err == nil {
+			for _, u := range us[:min(len(us), health.ShownItems)] {
+				why := "형식을 읽지 못했습니다"
+				if u.Reason != "" {
+					why = u.Reason
+				}
+				box.Items = append(box.Items, health.Item{What: u.ChatName, Why: why, At: u.SentAt})
+			}
+		}
+		rep.Held = box
+	}
+	health.Write(w, http.StatusOK, rep)
 }
 
 // Response is one month, plus what is not about any one month: the

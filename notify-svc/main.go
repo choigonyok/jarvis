@@ -24,6 +24,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/notify-svc/internal/api"
 	"github.com/choigonyok/jarvis/notify-svc/internal/live"
 	"github.com/choigonyok/jarvis/notify-svc/internal/notify"
@@ -71,6 +72,8 @@ func main() {
 		log.Warn("VAPID 키가 없어 푸시는 보내지 않고 알림함에만 쌓습니다")
 	}
 	svc := notify.New(st, pusher, loc)
+	loops := health.NewLoops()
+	loops.Add("tick", "미뤄 둔 알림·저녁 요약 보내기", 10*time.Minute)
 
 	// Held pushes go out when quiet hours end; the digest at its time.
 	go func() {
@@ -83,6 +86,9 @@ func main() {
 			case <-t.C:
 				if err := svc.Tick(ctx); err != nil {
 					log.Error("예약 알림을 보내지 못했습니다", "err", err)
+					loops.Fail("tick", err)
+				} else {
+					loops.OK("tick")
 				}
 			}
 		}
@@ -97,7 +103,7 @@ func main() {
 	addr := getenv("LISTEN_ADDR", ":8097")
 	srv := &http.Server{
 		Addr:         addr,
-		Handler:      api.New(svc, st, pusher, hub, os.Getenv("API_TOKEN"), log).Handler(),
+		Handler:      api.New(svc, st, pusher, hub, os.Getenv("API_TOKEN"), log).WithLoops(loops).Handler(),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 60 * time.Second,
 	}

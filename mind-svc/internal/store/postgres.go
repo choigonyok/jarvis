@@ -586,6 +586,10 @@ func (p *Postgres) Facts(ctx context.Context, limit int) ([]model.Fact, error) {
 	return p.facts(ctx, `order by created_at desc, id desc limit $1`, limit)
 }
 
+func (p *Postgres) HeldFacts(ctx context.Context) ([]model.Fact, error) {
+	return p.facts(ctx, `where status = 'held' order by created_at, id`)
+}
+
 func (p *Postgres) DueFacts(ctx context.Context, now time.Time, limit int) ([]model.Fact, error) {
 	return p.facts(ctx, `where status = 'pending' and next_try <= $1 order by created_at, id limit $2`, now, limit)
 }

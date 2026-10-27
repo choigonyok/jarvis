@@ -674,7 +674,7 @@ export function UnparsedSheet({
       open={open}
       onOpenChange={(o) => !o && onClose()}
       title="읽지 못한 카드 알림"
-      description="결제처럼 보이지만 사용처나 금액을 찾지 못했어요. 합계에는 아직 없어요."
+      description="결제처럼 보이지만 사용처나 금액을 찾지 못했거나, 기록하다 거듭 실패해 따로 둔 알림이에요. 합계에는 아직 없어요."
     >
       <div id={paged.anchor} className="scroll-mt-4" />
       <ul className="space-y-3">
@@ -683,6 +683,7 @@ export function UnparsedSheet({
             <p className="mb-2 text-[11.5px] text-faint">
               {u.chatName} · {dayLabel(dayKey(u.sentAt))} {clock(u.sentAt)}
             </p>
+            {u.reason ? <p className="mb-2 text-[11.5px] break-words text-faint">{u.reason}</p> : null}
             <pre className="font-sans text-[12.5px] leading-relaxed whitespace-pre-wrap text-dim">{u.body}</pre>
             <div className="mt-3 flex gap-2">
               <button type="button" onClick={() => void dismiss(u)} className={quietButton}>

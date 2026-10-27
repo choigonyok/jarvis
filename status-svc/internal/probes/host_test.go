@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,6 +35,16 @@ func TestHostProbes(t *testing.T) {
 	write(`{"checkedAt":"` + now + `","filevault":"On","timemachine":true,"mirror":"binary","lastBackup":"2026-01-01"}`)
 	if run(e.hostFileVault()) != check.OK || run(e.hostTimeMachine()) != check.OK || run(e.hostMirror()) != check.OK || run(e.hostBackup()) != check.Fail {
 		t.Fatal("켜짐·있음·바이너리는 정상, 오래된 백업은 이상")
+	}
+	// What the newest backup lacks (its manifest, through host-check): the
+	// approval ledger missing is a warning, not a date that looks fine.
+	write(`{"checkedAt":"` + now + `","lastBackup":"` + today + `","backupMissing":["jarvis-data.tar.gz:proposals.json"]}`)
+	if v := e.hostBackup().Run(context.Background()); v.State != check.Warn || !strings.Contains(v.Summary, "proposals.json") {
+		t.Fatalf("빠진 것이 있는 백업은 주의: %+v", v)
+	}
+	write(`{"checkedAt":"` + now + `","lastBackup":"` + today + `","backupMissing":[]}`)
+	if v := e.hostBackup().Run(context.Background()); v.State != check.OK || !strings.Contains(v.Summary, "다 들었어요") {
+		t.Fatalf("다 든 백업: %+v", v)
 	}
 	write(`{"checkedAt":"` + now + `","falkordbAOF":"no"}`)
 	if run(e.hostFalkorAOF()) != check.Fail {

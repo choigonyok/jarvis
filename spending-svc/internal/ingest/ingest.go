@@ -3,6 +3,13 @@
 // It reads the collector's feed by source ROWID, keeps its own cursor, and
 // only looks at rooms that are card companies. Every alert is recorded raw
 // before it is read, so a better parser later can replay what came in.
+//
+// A message it cannot record is tried again before the cursor moves - a
+// charge must not be skipped - under the stack's rule (gocommon/health): a
+// database that does not answer costs the message nothing and collection
+// waits, but one message failing on its own health.MaxTries times is set aside
+// as an unread alert, with why, and collection goes on. It used to retry that
+// one message every three seconds for good, and every alert behind it waited.
 package ingest
 
 import (
@@ -17,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/spending-svc/internal/parse"
 	"github.com/choigonyok/jarvis/spending-svc/internal/store"
 )
@@ -60,6 +68,21 @@ type Ingester struct {
 	status Status
 
 	rate rateCache
+
+	// Loops, when set, hears each poll for /health ("ingest").
+	Loops *health.Loops
+	now   func() time.Time
+	// stuck is the message collection stopped at, and how it went there.
+	stuck stuck
+}
+
+// stuck is a message that failed on its own: how often, and not before when
+// it is tried again.
+type stuck struct {
+	id    string
+	tries int
+	next  time.Time
+	err   string
 }
 
 func New(base, token string, extraChannels []string, st *store.Store, interval, staleIn time.Duration, log *slog.Logger) *Ingester {
@@ -73,6 +96,7 @@ func New(base, token string, extraChannels []string, st *store.Store, interval, 
 		client:   &http.Client{Timeout: 15 * time.Second},
 		log:      log,
 		loc:      time.Local,
+		now:      time.Now,
 	}
 }
 
@@ -133,12 +157,19 @@ func (in *Ingester) pollOnce(ctx context.Context) error {
 		if err := in.get(ctx, "/messages/after?"+q.Encode(), &payload); err != nil {
 			return in.fail(err)
 		}
+		from := cursor
 		for _, m := range payload.Messages {
 			if in.IsCardChannel(m) {
-				if err := in.handle(ctx, m); err != nil {
+				if err := in.take(ctx, m); err != nil {
 					// Stop here and keep the cursor before this message: the
 					// next tick tries it again rather than skipping a charge.
-					return in.fail(fmt.Errorf("메시지 %s: %w", m.MessageID, err))
+					// What came before it is kept.
+					if cursor != from {
+						_ = in.store.SetCursor(ctx, cursor)
+					}
+					at := time.Unix(m.SentAt, 0)
+					in.Loops.Waiting("ingest", &at)
+					return in.fail(err)
 				}
 			}
 			cursor = m.RowID
@@ -156,6 +187,45 @@ func (in *Ingester) pollOnce(ctx context.Context) error {
 	in.status.LastPollAt = time.Now()
 	in.status.LastError = ""
 	in.mu.Unlock()
+	in.Loops.Waiting("ingest", nil)
+	in.Loops.OK("ingest")
+	return nil
+}
+
+// take records one card message, or holds it once it has failed on its own
+// health.MaxTries times. An error means stop here: the cursor stays before m.
+func (in *Ingester) take(ctx context.Context, m message) error {
+	now := in.now()
+	if in.stuck.id == m.MessageID && now.Before(in.stuck.next) {
+		return fmt.Errorf("메시지 %s: %s (%d번째 실패, 잠시 뒤 다시)", m.MessageID, in.stuck.err, in.stuck.tries)
+	}
+	err := in.handle(ctx, m)
+	if err == nil {
+		if in.stuck.id == m.MessageID {
+			in.stuck = stuck{}
+		}
+		return nil
+	}
+	// A database that does not answer is an outage, not this message: it
+	// costs no try, and collection waits where it is.
+	if perr := in.store.Ping(ctx); perr != nil {
+		return fmt.Errorf("메시지 %s: %w", m.MessageID, err)
+	}
+	if in.stuck.id != m.MessageID {
+		in.stuck = stuck{id: m.MessageID}
+	}
+	in.stuck.tries++
+	in.stuck.err = err.Error()
+	in.stuck.next = now.Add(health.Backoff(in.stuck.tries, 3*time.Second, time.Minute))
+	if in.stuck.tries < health.MaxTries {
+		return fmt.Errorf("메시지 %s: %w", m.MessageID, err)
+	}
+	sentAt := time.Unix(m.SentAt, 0).In(in.loc)
+	if herr := in.store.Hold(ctx, m.MessageID, m.ChatName, m.Text, sentAt, "기록하지 못했습니다: "+err.Error()); herr != nil {
+		return fmt.Errorf("메시지 %s 를 따로 두지 못했습니다: %w", m.MessageID, herr)
+	}
+	in.log.Warn("기록하지 못하는 카드 알림을 읽지 못한 알림으로 빼고 넘어갑니다", "chat", m.ChatName, "tries", in.stuck.tries, "err", err)
+	in.stuck = stuck{}
 	return nil
 }
 
@@ -228,6 +298,7 @@ func (in *Ingester) fail(err error) error {
 	in.status.LastPollAt = time.Now()
 	in.status.LastError = err.Error()
 	in.mu.Unlock()
+	in.Loops.Fail("ingest", err)
 	return err
 }
 

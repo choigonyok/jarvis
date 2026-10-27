@@ -32,7 +32,23 @@ type Config struct {
 	MemoryURL   string
 	ContextURL  string
 	// VaultURL is vault-svc: the saved logins. Only its health is read.
-	VaultURL    string
+	VaultURL string
+	// The rest are read only through their /health (gocommon/health) or
+	// their status: the event log and its deliveries, notifications, jobs,
+	// the iMessage collector, web search, the guest's agent, photos.
+	EventsURL     string
+	NotifyURL     string
+	JobsURL       string
+	IMessageURL   string
+	SearchURL     string
+	AgentGuestURL string
+	ImmichURL     string
+	// TTSURL and OCRURL run on the Mac mini itself (LaunchAgents), reached
+	// at host.docker.internal.
+	TTSURL string
+	OCRURL string
+	// FalkorAddr is the graph memory's host:port (a Redis protocol PING).
+	FalkorAddr  string
 	BrowserAddr string // host:port of the browser MCP bridge
 	// HostFile is what scripts/host-check writes on the Mac mini (FileVault,
 	// Time Machine, the iMessage mirror, the last backup) - things a
@@ -49,7 +65,9 @@ type env struct {
 	client *http.Client
 }
 
-var Groups = []string{"수집", "가계부 상품 상세", "외부 계정", "기반"}
+// Groups in screen order. 격리함 is what services set aside after trying
+// too often - the rule in gocommon/health - each row one service's box.
+var Groups = []string{"수집", "가계부 상품 상세", "외부 계정", "격리함", "기반"}
 
 func All(cfg Config) []check.Probe {
 	e := &env{Config: cfg, client: &http.Client{Timeout: 15 * time.Second}}
@@ -121,12 +139,12 @@ func All(cfg Config) []check.Probe {
 			Run:   e.spendingAlerts,
 		},
 		{
-			ID: "spending.unparsed", Group: "수집", Name: "읽지 못한 카드 알림",
-			Rule:  "카드사 알림 중 금액·가맹점을 읽지 못해 합계에서 빠진 건이 없으면 정상, 있으면 주의.",
-			Fix:   "가계부 탭에서 직접 적거나 버리세요.",
-			Deps:  []string{"svc.spending"},
+			ID: "imessage.collector", Group: "수집", Name: "iMessage 수집기",
+			Rule:  "수집기가 몇 초마다 맥미니 메시지 앱의 DB 사본을 읽고 있으면 정상, 읽다 실패하거나 5분 넘게 읽지 않았으면 이상.",
+			Fix:   "imessage 컨테이너 로그와 맥미니의 iMessage 미러(scripts/imessage-mirror)를 보세요. 메시지 앱에 로그인돼 있지 않으면 들어오는 것이 없어요.",
+			Deps:  []string{"svc.imessage", "host.mirror"},
 			Every: time.Minute,
-			Run:   e.spendingUnparsed,
+			Run:   e.imessageCollector,
 		},
 
 		// ── 가계부 상품 상세 ──────────────────────────────────────────────
@@ -196,6 +214,20 @@ func All(cfg Config) []check.Probe {
 			Run: e.calendar,
 		},
 
+		// ── 격리함 ─────────────────────────────────────────────────────
+		e.heldBox("spending.unparsed", "가계부 · 읽지 못한 카드 알림", cfg.SpendingURL,
+			"카드사 알림 중 금액·가맹점을 읽지 못했거나, 다섯 번 기록하지 못해 따로 둔 것이 없으면 정상, 있으면 주의. 따로 둔 알림은 합계에서 빠져 있어요.",
+			"가계부 탭의 '읽지 못한 알림'에서 직접 적거나 버리세요.", []string{"svc.spending"}),
+		e.heldBox("events.held", "이벤트 · 전하지 못한 이벤트", cfg.EventsURL,
+			"받는 쪽(알림·에이전트·mind)이 살아 있는데 다섯 번 받지 못한 이벤트가 없으면 정상, 있으면 주의. 그 이벤트 하나 때문에 뒤의 알림·카드가 멈추지 않도록 따로 두고 넘어갔어요.",
+			"받는 쪽을 고쳐 다시 띄우면 저절로 한 번 더 보내요. 버리려면 events-svc 의 DELETE /held/{소비자}/{id}.", []string{"svc.events"}),
+		e.heldBox("mind.held", "기억 · 넣지 못한 사실", cfg.MindURL,
+			"대화에서 확인한 사실 중 기억 서비스가 다섯 번 받지 못해(또는 받지 않겠다고 해서) 보류한 것이 없으면 정상, 있으면 주의. 보류한 사실도 생활 장부에는 남아요.",
+			"기억이 꺼졌다 돌아오면 저절로 한 번 더 보내요. mind 콘솔(scripts/mini console)의 기억할 사실에서 다시 보내거나 버릴 수 있어요.", []string{"svc.mind", "svc.memory"}),
+		e.heldBox("jobs.held", "작업 · 멈춘 작업", cfg.JobsURL,
+			"세 번 연달아 잘 끝나지 않아 멈춘 작업이 없으면 정상, 있으면 주의. 작업 하나의 시도는 모델 실행 한 번이라 다른 것(다섯 번)보다 일찍 멈춰요.",
+			"작업 탭에서 무엇이 막혔는지 보고 다시 시작하거나 그만두세요.", []string{"svc.jobs"}),
+
 		// ── 기반 ──────────────────────────────────────────────────────
 		{
 			ID: "agent", Group: "기반", Name: "에이전트",
@@ -225,16 +257,57 @@ func All(cfg Config) []check.Probe {
 			Every: 30 * time.Second,
 			Run:   e.postgres,
 		},
+		{
+			ID: "agent-guest", Group: "기반", Name: "손님 에이전트",
+			Rule: "손님 계정의 에이전트가 응답하면 정상.", Fix: "agent-guest 컨테이너 로그를 보세요.",
+			Every: 30 * time.Second,
+			Run:   e.httpOK(cfg.AgentGuestURL + "/healthz"),
+		},
+		e.service("svc.events", "이벤트 로그", cfg.EventsURL, []string{"postgres"}, "drain"),
+		e.delivery("notify", "이벤트 → 알림", []string{"svc.notify"}),
+		e.delivery("agent", "이벤트 → 에이전트", []string{"agent"}),
+		e.delivery("mind", "이벤트 → mind", []string{"svc.mind"}),
+		e.service("svc.notify", "알림 서비스", cfg.NotifyURL, []string{"postgres"}),
+		e.service("svc.jobs", "작업 서비스", cfg.JobsURL, []string{"postgres", "agent"}),
 		e.service("svc.kakaotalk", "카톡 수집 서비스", cfg.KakaoURL, nil),
-		e.service("svc.spending", "가계부 서비스", cfg.SpendingURL, []string{"postgres"}),
+		e.service("svc.imessage", "iMessage 수집 서비스", cfg.IMessageURL, nil),
+		// Its loops read the KakaoTalk collector and assets-svc: when one of
+		// them is down, that is the cause.
+		e.service("svc.spending", "가계부 서비스", cfg.SpendingURL, []string{"postgres", "svc.kakaotalk", "svc.assets"}),
 		e.service("svc.assets", "자산 서비스", cfg.AssetsURL, nil),
 		e.service("svc.calendar", "캘린더 서비스", cfg.CalendarURL, []string{"postgres"}),
 		e.service("svc.chat", "대화 기록 서비스", cfg.ChatURL, []string{"postgres"}),
 		e.service("svc.workout", "운동 기록 서비스", cfg.WorkoutURL, []string{"postgres"}),
 		e.service("svc.mind", "인지 루프(mind)", cfg.MindURL, []string{"postgres"}),
-		e.service("svc.memory", "기억 서비스", cfg.MemoryURL, []string{"postgres"}),
+		e.service("svc.memory", "기억 서비스", cfg.MemoryURL, []string{"postgres", "falkordb"}),
+		{
+			ID: "falkordb", Group: "기반", Name: "기억 그래프(FalkorDB)",
+			Rule: "기억 그래프 데이터베이스가 PING 에 답하면 정상.", Fix: "falkordb 컨테이너와 디스크 용량을 보세요. 저장은 아래 'AOF' 항목에서 봐요.",
+			Every: 30 * time.Second,
+			Run:   e.redisPing(cfg.FalkorAddr),
+		},
 		e.service("svc.context", "위치·현재 상태", cfg.ContextURL, []string{"postgres"}),
 		e.service("svc.vault", "로그인 정보 보관함", cfg.VaultURL, []string{"postgres"}),
+		e.service("svc.search", "웹 찾기", cfg.SearchURL, nil),
+		e.hostService("host.ocr", "그림 속 글자 읽기(OCR)", cfg.OCRURL+"/health",
+			"맥미니의 OCR 서버(LaunchAgent com.jarvis.ocr)가 응답하면 정상. 웹 찾기가 페이지의 그림 속 글자를 읽을 때 써요.",
+			"맥미니에서 scripts/ocr status 로 보세요. 다시 띄우려면 scripts/ocr restart.",
+			func(map[string]any) check.Verdict { return check.Verdict{State: check.OK} }),
+		e.hostService("host.tts", "목소리(TTS)", cfg.TTSURL+"/health",
+			"맥미니의 목소리 서버(LaunchAgent com.jarvis.tts)가 응답하고 모델을 올렸으면 정상, 응답하지만 모델이 아직이면 주의.",
+			"맥미니에서 scripts/tts status 로 보세요. 모델을 받는 중이면 기다리면 돼요.",
+			func(b map[string]any) check.Verdict {
+				if loaded, _ := b["loaded"].(bool); !loaded {
+					return check.Verdict{State: check.Warn, Summary: "응답하지만 모델을 아직 올리지 못했어요. 음성 모드는 브라우저 음성으로 말해요."}
+				}
+				return check.Verdict{State: check.OK}
+			}),
+		{
+			ID: "svc.immich", Group: "기반", Name: "사진(Immich)",
+			Rule: "사진 서버가 ping 에 답하면 정상.", Fix: "scripts/mini compose -f immich/docker-compose.yml ps 로 보세요.",
+			Every: time.Minute,
+			Run:   e.httpOK(cfg.ImmichURL + "/api/server/ping"),
+		},
 		e.hostFileVault(),
 		e.hostTimeMachine(),
 		e.hostMirror(),
@@ -410,10 +483,9 @@ func (e *env) mindMemory(ctx context.Context) check.Verdict {
 	}
 	f := st.Facts
 	facts := []string{fmt.Sprintf("기억함 %d · 이미 알던 것 %d · 기다림 %d", f["stored"], f["duplicate"], f["pending"])}
-	if f["failed"] > 0 {
-		// Shown, not alarmed on: a fact given up on stays given up on, and a
-		// row that warned forever would push every day.
-		facts = append(facts, fmt.Sprintf("여러 번 실패해 포기한 사실 %d개 (mind 콘솔에서 볼 수 있어요)", f["failed"]))
+	if f["held"] > 0 {
+		// Its own row says so: 격리함 · 기억.
+		facts = append(facts, fmt.Sprintf("보류한 사실 %d개 (격리함)", f["held"]))
 	}
 	if st.FactError != "" {
 		facts = append(facts, "기다리는 이유: "+clip(st.FactError, 140))
@@ -444,10 +516,6 @@ type spendingView struct {
 		LatestMessageAt *time.Time `json:"latestMessageAt"`
 		LastAlertAt     *time.Time `json:"lastAlertAt"`
 	} `json:"collector"`
-	Unparsed []struct {
-		ChatName string    `json:"chatName"`
-		SentAt   time.Time `json:"sentAt"`
-	} `json:"unparsed"`
 }
 
 func (e *env) spending(ctx context.Context) (spendingView, error) {
@@ -463,7 +531,7 @@ func (e *env) spendingAlerts(ctx context.Context) check.Verdict {
 	}
 	c := s.Collector
 	if c.LastError != "" {
-		return fail("가계부가 카톡 수집기를 읽지 못하고 있어요: " + clip(c.LastError, 140))
+		return fail("가계부가 카드 알림을 읽다 멈췄어요: " + clip(c.LastError, 140))
 	}
 	if c.LastAlertAt == nil {
 		return check.Verdict{State: check.Unknown, Summary: "아직 받은 카드 알림이 없어요."}
@@ -479,29 +547,6 @@ func (e *env) spendingAlerts(ctx context.Context) check.Verdict {
 		v.State, v.Summary = check.OK, "카드 알림이 가계부에 들어오고 있어요."
 	}
 	return v
-}
-
-func (e *env) spendingUnparsed(ctx context.Context) check.Verdict {
-	s, err := e.spending(ctx)
-	if err != nil {
-		return fail("가계부 서비스를 읽지 못했어요: " + err.Error())
-	}
-	if n := len(s.Unparsed); n > 0 {
-		latest := s.Unparsed[0].SentAt
-		var facts []string
-		for i, u := range s.Unparsed {
-			if u.SentAt.After(latest) {
-				latest = u.SentAt
-			}
-			if i < 5 {
-				facts = append(facts, u.ChatName+" · "+u.SentAt.Format("1월 2일 15:04"))
-			}
-		}
-		return check.Verdict{State: check.Warn,
-			Summary:    fmt.Sprintf("%d건이 합계에서 빠져 있어요.", n),
-			ObservedAt: &latest, ObservedLabel: "가장 최근", Facts: facts}
-	}
-	return check.Verdict{State: check.OK, Summary: "모든 카드 알림을 읽었어요."}
 }
 
 // ── 가계부 상품 상세 ──────────────────────────────────────────────────────
@@ -757,15 +802,6 @@ func (e *env) calendar(ctx context.Context) check.Verdict {
 }
 
 // ── 기반 ───────────────────────────────────────────────────────────────
-
-func (e *env) service(id, name, base string, deps []string) check.Probe {
-	return check.Probe{
-		ID: id, Group: "기반", Name: name,
-		Rule: "서비스의 /health가 200이면 정상.", Fix: "docker compose ps로 컨테이너 상태와 로그를 보세요.",
-		Deps: deps, Every: 30 * time.Second,
-		Run: e.httpOK(base + "/health"),
-	}
-}
 
 func (e *env) httpOK(u string) func(context.Context) check.Verdict {
 	return func(ctx context.Context) check.Verdict {

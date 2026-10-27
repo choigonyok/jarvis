@@ -81,6 +81,9 @@ type Store interface {
 	Facts(ctx context.Context, limit int) ([]model.Fact, error) // newest first
 	// DueFacts is pending facts whose next try has come, oldest first.
 	DueFacts(ctx context.Context, now time.Time, limit int) ([]model.Fact, error)
+	// HeldFacts is every fact set aside after failing on its own, oldest
+	// first.
+	HeldFacts(ctx context.Context) ([]model.Fact, error)
 	// FactsOn is the facts with a relation created in [from, to), oldest
 	// first.
 	FactsOn(ctx context.Context, relation string, from, to time.Time) ([]model.Fact, error)

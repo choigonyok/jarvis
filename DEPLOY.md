@@ -115,7 +115,9 @@ docker run --rm -v jarvis_chrome-profile:/p alpine:3.22 chown -R 10002:10002 /p
 
 위 전제는 `scripts/host-check`(LaunchAgent com.jarvis.host-check, 10분마다)가 점검해
 `~/.jarvis-host/host.json` 에 적고, 상태 탭 "기반"의 맥미니 디스크 암호화 · 백업의 바깥 사본 ·
-iMessage 미러 권한 · 매일 백업 항목이 그것을 보여 준다.
+iMessage 미러 권한 · 매일 백업 항목이 그것을 보여 준다. 매일 백업은 날짜뿐 아니라 그날 담은 것
+(`manifest.json` - 데이터베이스·기억 그래프·수집기·에이전트와 손님의 데이터, 승인 장부까지)에 빠진 것이
+있는지도 본다. 복원되는지는 `scripts/backup restore-test` 로 시험한다.
 
 DB 가 필요한 테스트는 `scripts/dbtest` 로 돌린다(맥북 Docker 에 일회용 Postgres, 마이그레이션 전부,
 각 서비스의 역할로).

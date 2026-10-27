@@ -189,12 +189,26 @@ class FactsIn(BaseModel):
     facts: list[FactIn] = Field(max_length=50)
 
 
+# What a failure inside add_triplet is called when it is the services under
+# it, not the fact: the graph database or the model API being away, slow or
+# rationing. Such a `later` is marked `outage`, and mind counts no try for it
+# (gocommon/health's rule).
+OUTAGE_NAMES = ("Connection", "Timeout", "RateLimit", "Overloaded", "ServiceUnavailable", "InternalServer", "APIStatus")
+
+
+def outage(e: BaseException) -> bool:
+    if isinstance(e, (ConnectionError, TimeoutError, asyncio.TimeoutError)):
+        return True
+    return any(n in type(e).__name__ for n in OUTAGE_NAMES)
+
+
 @app.post("/facts", dependencies=[Depends(auth)])
 async def add_facts(body: FactsIn):
     """Facts mind has checked against their source, one add_triplet each. A
     ref seen before is answered from memory_facts without asking Graphiti
-    again; one that cannot go in now (the day's LLM budget, an error) comes
-    back with `later`, for mind to send again."""
+    again; one that cannot go in now comes back with `later`, for mind to send
+    again - with `outage` when the reason is not the fact but this service
+    (the day's LLM budget spent, the graph or the model API away)."""
     for f in body.facts:
         if not all(e.id or e.name.strip() or e.self_ for e in (f.source, f.target)):
             raise HTTPException(422, f"{f.ref}: 사실의 양 끝에는 id, 이름, self 중 하나가 있어야 합니다.")
@@ -204,13 +218,13 @@ async def add_facts(body: FactsIn):
             out.append(done)
             continue
         if not await llm_ok():
-            out.append({"ref": f.ref, "later": "오늘 LLM 예산을 다 써서 내일 넣습니다."})
+            out.append({"ref": f.ref, "later": "오늘 LLM 예산을 다 써서 내일 넣습니다.", "outage": True})
             continue
         try:
             r = await graph.triplet(body.group, f.ref, f.model_dump(by_alias=True))
         except Exception as e:
             log.warning("사실을 넣지 못했습니다 (%s): %s", f.ref, e)
-            out.append({"ref": f.ref, "later": f"{type(e).__name__}: {e}"[:300]})
+            out.append({"ref": f.ref, "later": f"{type(e).__name__}: {e}"[:300], "outage": outage(e)})
             continue
         await state.save_fact(f.ref, body.group, r)
         out.append(r)

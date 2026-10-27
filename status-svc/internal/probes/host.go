@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/choigonyok/jarvis/status-svc/internal/check"
@@ -19,7 +20,10 @@ type hostFacts struct {
 	TimeMachine bool      `json:"timemachine"` // a destination is set
 	Mirror      string    `json:"mirror"`      // binary | ssh | ""
 	LastBackup  string    `json:"lastBackup"`  // YYYY-MM-DD of the newest backup, "" = none
-	FalkorAOF   string    `json:"falkordbAOF"` // CONFIG GET appendonly: yes | no | "" (not reached)
+	// BackupMissing is what the newest backup lacks of what it must hold
+	// (its manifest.json); nil when that backup has no manifest.
+	BackupMissing *[]string `json:"backupMissing"`
+	FalkorAOF     string    `json:"falkordbAOF"` // CONFIG GET appendonly: yes | no | "" (not reached)
 }
 
 // readHost returns the facts, or the verdict to show when there are none to
@@ -107,8 +111,8 @@ func (e *env) hostMirror() check.Probe {
 
 func (e *env) hostBackup() check.Probe {
 	return e.hostProbe("host.backup", "매일 백업",
-		"오늘이나 어제 백업이 있으면 정상(매일 04:30).",
-		"맥미니에서 scripts/backup status 로 LaunchAgent 와 로그를 보세요. 지금 뜨려면 scripts/backup run.",
+		"오늘이나 어제 백업이 있고, 담아야 할 것(데이터베이스·기억 그래프·수집기·에이전트와 손님의 데이터 - 승인 장부까지 - ·브라우저 프로필)이 다 들었으면 정상(매일 04:30). 빠진 것이 있으면 주의, 이틀 넘게 백업이 없으면 이상.",
+		"맥미니에서 scripts/backup status 로 LaunchAgent 와 로그를 보세요. 지금 뜨려면 scripts/backup run, 복원되는지는 scripts/backup restore-test.",
 		func(h hostFacts) check.Verdict {
 			if h.LastBackup == "" {
 				return check.Verdict{State: check.Fail, Summary: "백업이 없어요."}
@@ -118,10 +122,18 @@ func (e *env) hostBackup() check.Probe {
 				return check.Verdict{State: check.Unknown, Summary: "백업 날짜를 읽지 못했어요."}
 			}
 			age := int(time.Since(day).Hours() / 24)
-			if age <= 1 {
-				return check.Verdict{State: check.OK, Summary: fmt.Sprintf("마지막 백업 %s.", h.LastBackup)}
+			if age > 1 {
+				return check.Verdict{State: check.Fail, Summary: fmt.Sprintf("마지막 백업이 %d일 전(%s)이에요.", age, h.LastBackup)}
 			}
-			return check.Verdict{State: check.Fail, Summary: fmt.Sprintf("마지막 백업이 %d일 전(%s)이에요.", age, h.LastBackup)}
+			switch {
+			case h.BackupMissing == nil:
+				return check.Verdict{State: check.OK, Summary: fmt.Sprintf("마지막 백업 %s.", h.LastBackup),
+					Facts: []string{"이 백업에는 담은 것의 목록(manifest)이 없어서 날짜만 봤어요. 다음 백업부터 내용도 봐요."}}
+			case len(*h.BackupMissing) > 0:
+				return check.Verdict{State: check.Warn, Summary: fmt.Sprintf("마지막 백업(%s)에 빠진 것이 있어요: %s", h.LastBackup, strings.Join(*h.BackupMissing, ", ")),
+					Facts: []string{"빠진 것은 그날의 사본이 없어요. 맥미니의 ~/Library/Logs/jarvis-backup.log 에 그 부분의 오류가 있어요."}}
+			}
+			return check.Verdict{State: check.OK, Summary: fmt.Sprintf("마지막 백업 %s. 담아야 할 것이 다 들었어요.", h.LastBackup)}
 		})
 }
 

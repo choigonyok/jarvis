@@ -52,7 +52,7 @@ func (m *Mind) ceremony(ctx context.Context, e model.Entity) error {
 	who := ""
 	for _, f := range facts {
 		r := strings.ToUpper(f.Relation)
-		if (r != GaveTo && r != ReceivedFrom) || f.Status == model.FactFailed || !f.Subject.Self {
+		if (r != GaveTo && r != ReceivedFrom) || f.Status == model.FactDropped || !f.Subject.Self {
 			continue
 		}
 		for _, p := range people {
@@ -106,7 +106,7 @@ func (m *Mind) wishes(ctx context.Context, relations ...string) ([]model.Fact, e
 	}
 	var out []model.Fact
 	for _, f := range facts {
-		if f.Subject.Self && f.Status != model.FactFailed && slices.Contains(relations, strings.ToUpper(f.Relation)) && f.Object.Name != "" {
+		if f.Subject.Self && f.Status != model.FactDropped && slices.Contains(relations, strings.ToUpper(f.Relation)) && f.Object.Name != "" {
 			out = append(out, f)
 		}
 	}

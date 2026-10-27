@@ -454,6 +454,24 @@ func (m *Memory) Facts(_ context.Context, limit int) ([]model.Fact, error) {
 	return out, nil
 }
 
+func (m *Memory) HeldFacts(_ context.Context) ([]model.Fact, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []model.Fact{}
+	for _, f := range m.facts {
+		if f.Status == model.FactHeld {
+			out = append(out, f)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].CreatedAt.Before(out[j].CreatedAt)
+	})
+	return out, nil
+}
+
 func (m *Memory) DueFacts(_ context.Context, now time.Time, limit int) ([]model.Fact, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

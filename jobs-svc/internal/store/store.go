@@ -44,6 +44,47 @@ func (s *Store) Close() { s.pool.Close() }
 
 func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 
+// Overdue is how many jobs are past their time with no run in flight, and
+// the oldest of those times - a scheduler that is not taking them.
+func (s *Store) Overdue(ctx context.Context) (int, *time.Time, error) {
+	var n int
+	var oldest *time.Time
+	err := s.pool.QueryRow(ctx, `
+		select count(*), min(j.next_at) from jobs j
+		 where j.state = 'active' and j.next_at < now()
+		   and not exists (select 1 from job_runs r where r.job_id = j.id and r.ended_at is null)`).Scan(&n, &oldest)
+	return n, oldest, err
+}
+
+// Stopped is a job that stopped after failing too often in a row: the held
+// box of the jobs (gocommon/health), resumed or cancelled from the 작업 tab.
+type Stopped struct {
+	ID      int64     `json:"id"`
+	Title   string    `json:"title"`
+	Summary string    `json:"summary"`
+	At      time.Time `json:"at"`
+}
+
+// StoppedJobs is the operator's failed jobs, newest first. The guest's are
+// the guest's to see.
+func (s *Store) StoppedJobs(ctx context.Context) ([]Stopped, error) {
+	rows, err := s.pool.Query(ctx, `select id, title, summary, updated_at from jobs
+		where state = 'failed' and who = 'owner' order by updated_at desc limit 50`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Stopped{}
+	for rows.Next() {
+		var j Stopped
+		if err := rows.Scan(&j.ID, &j.Title, &j.Summary, &j.At); err != nil {
+			return nil, err
+		}
+		out = append(out, j)
+	}
+	return out, rows.Err()
+}
+
 type Job struct {
 	ID           int64      `json:"id"`
 	Title        string     `json:"title"`
@@ -582,11 +623,17 @@ func (s *Store) EndRun(ctx context.Context, runID int64, outcome, note string) (
 		}
 	}
 	end := rules.AfterRun(outcome, decided, attempts, yields, note)
+	// A job left waiting on a card is woken by the answer, not by a clock:
+	// a retry time set on it would never come, and saying "15분 뒤 다시"
+	// would not be true.
+	carded := state == rules.Waiting
 	switch {
 	case end.Fail:
 		_, err = tx.Exec(ctx, `update jobs set state = 'failed', attempts = $2, next_at = null,
 			summary = $3, updated_at = now() where id = $1`, jobID, end.Attempts, "실패: "+end.Note)
 		out.Failed, out.Note = true, end.Note
+	case end.Retry && carded:
+		_, err = tx.Exec(ctx, `update jobs set attempts = $2, updated_at = now() where id = $1`, jobID, end.Attempts)
 	case end.Retry:
 		_, err = tx.Exec(ctx, `update jobs set attempts = $2, next_at = $3,
 			next_reason = $4, updated_at = now() where id = $1`,
@@ -615,12 +662,18 @@ func (s *Store) EndRun(ctx context.Context, runID int64, outcome, note string) (
 	switch {
 	case outcome == rules.Yielded && again:
 		text = "대화가 시작되어 잠시 멈췄습니다. 그사이 새 지시가 와서 곧 다시 합니다"
+	case outcome == rules.Yielded && carded:
+		text = "대화가 시작되어 잠시 멈췄습니다. 카드에 답이 오면 이어서 합니다"
 	case outcome == rules.Yielded:
 		text = fmt.Sprintf("대화가 시작되어 잠시 멈췄습니다. %s 뒤에 다시 합니다", minutes(end.After))
 	case end.Fail:
-		kind, text = "error", "세 번 연달아 실패해 멈췄습니다: "+end.Note
+		kind, text = "error", fmt.Sprintf("%d번 연달아 실패해 멈췄습니다: %s", rules.MaxAttempts, end.Note)
+	case end.Retry && carded && !again:
+		kind, text = "error", "잘 끝나지 않았습니다(카드에 답이 오면 다시): "+end.Note
+	case end.Retry && !again:
+		kind, text = "error", fmt.Sprintf("잘 끝나지 않았습니다(%s 뒤 다시): %s", minutes(end.After), end.Note)
 	case end.Retry:
-		kind, text = "error", "잘 끝나지 않았습니다(15분 뒤 다시): "+end.Note
+		kind, text = "error", "잘 끝나지 않았습니다. 그사이 새 지시나 카드 답이 와서 곧 다시 합니다: "+end.Note
 	case again:
 		text = "실행을 마쳤습니다. 실행 중에 새 지시나 카드 답이 와서 곧 다시 합니다"
 	}

@@ -23,10 +23,11 @@ import (
 	// put a night's spending in the wrong month, so the binary carries it.
 	_ "time/tzdata"
 
+	"github.com/choigonyok/jarvis/gocommon/health"
+	"github.com/choigonyok/jarvis/gocommon/notify"
 	"github.com/choigonyok/jarvis/spending-svc/internal/api"
 	"github.com/choigonyok/jarvis/spending-svc/internal/assets"
 	"github.com/choigonyok/jarvis/spending-svc/internal/ingest"
-	"github.com/choigonyok/jarvis/gocommon/notify"
 	"github.com/choigonyok/jarvis/spending-svc/internal/store"
 	"github.com/choigonyok/jarvis/spending-svc/internal/watch"
 )
@@ -76,19 +77,32 @@ func main() {
 		duration("SPENDING_STALE_AFTER", 12*time.Hour),
 		log,
 	)
+	// What /health reports of the background work (gocommon/health).
+	loops := health.NewLoops()
+	loops.Add("ingest", "카드 알림 수집", 10*time.Minute)
+	in.Loops = loops
 	go in.Run(ctx)
 	// What was paid out of the investment accounts, by transfer or in cash -
 	// no card alert sees it. assets-svc asks where a withdrawal went; what was
 	// spent is read from there. Off without ASSETS_URL.
 	if base := os.Getenv("ASSETS_URL"); base != "" {
-		go assets.New(base, token, st, duration("SPENDING_ASSETS_INTERVAL", 5*time.Minute), log).Run(ctx)
+		every := duration("SPENDING_ASSETS_INTERVAL", 5*time.Minute)
+		loops.Add("assets", "투자 계좌에서 쓴 돈 읽기", 6*every)
+		feed := assets.New(base, token, st, every, log)
+		feed.Loops = loops
+		go feed.Run(ctx)
 	}
 	// What the ledger has to say goes to notify-svc; nothing without NOTIFY_URL.
-	go watch.New(st, notify.New(os.Getenv("NOTIFY_URL"), dsn, token, log), log).Run(ctx)
+	if n := notify.New(os.Getenv("NOTIFY_URL"), dsn, token, log); n != nil {
+		loops.Add("watch", "예산·큰 결제 알림", 30*time.Minute)
+		w := watch.New(st, n, log)
+		w.Loops = loops
+		go w.Run(ctx)
+	}
 
 	srv := &http.Server{
 		Addr:         addr,
-		Handler:      api.New(st, in, token, log).Handler(),
+		Handler:      server(api.New(st, in, token, log), loops),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}
@@ -105,6 +119,11 @@ func main() {
 	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(shutdown)
+}
+
+func server(s *api.Server, loops *health.Loops) http.Handler {
+	s.Loops = loops
+	return s.Handler()
 }
 
 func openWithRetry(ctx context.Context, dsn string, tries int, wait time.Duration, log *slog.Logger) (*store.Store, error) {

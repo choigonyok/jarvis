@@ -1,10 +1,14 @@
 // Package api is events-svc's HTTP surface. Same bearer scheme as the rest
 // of the stack: everything but /health needs the token.
 //
-//	POST /events                      a service reports something
-//	PUT  /subscriptions/{consumer}    a consumer registers {url, types, fromStart}
-//	GET  /subscriptions               who is subscribed and how far along
-//	GET  /events?after=&limit=        the log, for looking back
+//	GET  /health                       the contract (gocommon/health): each consumer's delivery, the held box
+//	POST /events                       a service reports something
+//	PUT  /subscriptions/{consumer}     a consumer registers {url, types, fromStart}
+//	GET  /subscriptions                who is subscribed and how far along
+//	GET  /events?after=&limit=         the log, for looking back
+//	GET  /held                         events set aside after failing on their own
+//	POST /held/{consumer}/{id}/retry   send a held event again now
+//	DELETE /held/{consumer}/{id}       give up on a held event
 package api
 
 import (
@@ -12,6 +16,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -20,6 +25,7 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/events-svc/internal/store"
+	"github.com/choigonyok/jarvis/gocommon/health"
 )
 
 type Server struct {
@@ -30,11 +36,14 @@ type Server struct {
 	// guestToken is the guest's agent's: it posts notifications for the
 	// guest (a card waiting on them) and nothing else.
 	guestToken string
-	log        *slog.Logger
+	// loops are this process's own (the outbox drain); each consumer's
+	// delivery is read from its subscription.
+	loops *health.Loops
+	log   *slog.Logger
 }
 
-func New(s *store.Store, wake, sync func(), token, guestToken string, log *slog.Logger) *Server {
-	return &Server{store: s, wake: wake, sync: sync, token: token, guestToken: guestToken, log: log}
+func New(s *store.Store, wake, sync func(), token, guestToken string, loops *health.Loops, log *slog.Logger) *Server {
+	return &Server{store: s, wake: wake, sync: sync, token: token, guestToken: guestToken, loops: loops, log: log}
 }
 
 type guestKey struct{}
@@ -47,15 +56,123 @@ func asGuest(r *http.Request) bool {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-	})
+	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("POST /events", s.auth(true, s.append))
 	mux.HandleFunc("PUT /subscriptions/{consumer}", s.auth(false, s.subscribe))
 	mux.HandleFunc("DELETE /subscriptions/{consumer}", s.auth(false, s.unsubscribe))
 	mux.HandleFunc("GET /subscriptions", s.auth(false, s.subscriptions))
 	mux.HandleFunc("GET /events", s.auth(false, s.list))
+	mux.HandleFunc("GET /held", s.auth(false, s.held))
+	mux.HandleFunc("POST /held/{consumer}/{id}/retry", s.auth(false, s.retryHeld))
+	mux.HandleFunc("DELETE /held/{consumer}/{id}", s.auth(false, s.dropHeld))
 	return mux
+}
+
+// stuckAfter is how long a consumer may go without getting past an event
+// before the status tab calls its delivery stopped.
+const stuckAfter = 15 * time.Minute
+
+// health answers in the stack's contract: a loop per consumer - since when
+// it has not got past an event, and why - and the held box. The names of
+// what is held are event types and consumers, nothing from inside them.
+func (s *Server) health(w http.ResponseWriter, r *http.Request) {
+	rep := health.Report{Loops: s.loops.List()}
+	ctx := r.Context()
+	subs, err := s.store.Subscriptions(ctx)
+	if err != nil {
+		health.Write(w, http.StatusServiceUnavailable, rep)
+		return
+	}
+	waiting, err := s.store.Waiting(ctx)
+	if err != nil {
+		health.Write(w, http.StatusServiceUnavailable, rep)
+		return
+	}
+	now := time.Now()
+	for _, sub := range subs {
+		l := health.Loop{Name: "deliver:" + sub.Consumer, Label: sub.Consumer + " 에게 전달",
+			StaleSec: int(stuckAfter.Seconds()), StartedAt: now, LastError: sub.LastError, Failing: sub.Failures}
+		// It got through until the failures began, or until the oldest
+		// event it has not got past came in - one that sat there while
+		// nothing failed is a worker that is not running.
+		through := now
+		if sub.FailingSince != nil {
+			through = *sub.FailingSince
+		}
+		if at, ok := waiting[sub.Consumer]; ok {
+			l.Behind = &at
+			if at.Before(through) {
+				through = at
+			}
+		}
+		l.LastOK = &through
+		rep.Loops = append(rep.Loops, l)
+	}
+	held, err := s.store.Held(ctx, 200)
+	if err != nil {
+		health.Write(w, http.StatusServiceUnavailable, rep)
+		return
+	}
+	if len(held) > 0 {
+		box := &health.Held{Count: len(held), Where: "소비자를 고쳐 다시 띄우면 저절로 다시 보냅니다. 버리려면 events-svc DELETE /held/{소비자}/{id}"}
+		for i, h := range held {
+			if box.Oldest == nil || h.HeldAt.Before(*box.Oldest) {
+				at := h.HeldAt
+				box.Oldest = &at
+			}
+			if i < health.ShownItems {
+				box.Items = append(box.Items, health.Item{What: fmt.Sprintf("%s · %s #%d", h.Consumer, h.Event.Type, h.Event.ID),
+					Why: h.LastError, At: h.HeldAt})
+			}
+		}
+		rep.Held = box
+	}
+	health.Write(w, http.StatusOK, rep)
+}
+
+func (s *Server) held(w http.ResponseWriter, r *http.Request) {
+	held, err := s.store.Held(r.Context(), 200)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "격리함을 읽지 못했습니다."})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"held": held})
+}
+
+func (s *Server) retryHeld(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id 는 숫자입니다."})
+		return
+	}
+	ok, err := s.store.RetryHeld(r.Context(), r.PathValue("consumer"), id)
+	switch {
+	case err != nil:
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "다시 보내지 못했습니다."})
+	case !ok:
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "격리함에 그런 이벤트가 없습니다."})
+	default:
+		s.wake()
+		w.WriteHeader(http.StatusAccepted)
+	}
+}
+
+func (s *Server) dropHeld(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id 는 숫자입니다."})
+		return
+	}
+	ok, err := s.store.DropHeld(r.Context(), r.PathValue("consumer"), id)
+	switch {
+	case err != nil:
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "버리지 못했습니다."})
+	case !ok:
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "격리함에 그런 이벤트가 없습니다."})
+	default:
+		s.log.Info("격리함의 이벤트를 버렸습니다", "consumer", r.PathValue("consumer"), "id", id)
+		w.WriteHeader(http.StatusNoContent)
+	}
 }
 
 // auth takes the services' token everywhere and the guest's only where

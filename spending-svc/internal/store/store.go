@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -199,6 +200,22 @@ func (s *Store) AddUnparsed(ctx context.Context, messageID, chat, text string, s
 	_, err := s.pool.Exec(ctx, `
 		insert into spending_unparsed (message_id, chat_name, body, sent_at)
 		values ($1, $2, $3, $4) on conflict do nothing`, messageID, chat, text, sentAt)
+	return err
+}
+
+// Hold sets aside a card message that could not be recorded at all, with
+// why, beside the alerts whose format was not understood - the same place a
+// person writes them in or throws them away. Its text is kept as near as
+// Postgres allows: what made the insert fail may be in it (a NUL byte).
+func (s *Store) Hold(ctx context.Context, messageID, chat, text string, sentAt time.Time, reason string) error {
+	clean := func(v string) string { return strings.ReplaceAll(strings.ToValidUTF8(v, "\uFFFD"), "\x00", "") }
+	if len([]rune(reason)) > 300 {
+		reason = string([]rune(reason)[:300])
+	}
+	_, err := s.pool.Exec(ctx, `
+		insert into spending_unparsed (message_id, chat_name, body, sent_at, reason)
+		values ($1, $2, $3, $4, $5) on conflict (message_id) do update set reason = excluded.reason, resolved = false`,
+		clean(messageID), clean(chat), clean(text), sentAt, clean(reason))
 	return err
 }
 
@@ -428,11 +445,14 @@ type Unparsed struct {
 	ChatName  string    `json:"chatName"`
 	Body      string    `json:"body"`
 	SentAt    time.Time `json:"sentAt"`
+	// Reason is why a message that could not even be recorded was set
+	// aside (067); empty for one whose format was not understood.
+	Reason string `json:"reason,omitempty"`
 }
 
 func (s *Store) Unparsed(ctx context.Context) ([]Unparsed, error) {
 	rows, err := s.pool.Query(ctx, `
-		select message_id, chat_name, body, sent_at from spending_unparsed
+		select message_id, chat_name, body, sent_at, reason from spending_unparsed
 		 where not resolved order by sent_at desc limit 50`)
 	if err != nil {
 		return nil, err
@@ -441,12 +461,20 @@ func (s *Store) Unparsed(ctx context.Context) ([]Unparsed, error) {
 	out := []Unparsed{}
 	for rows.Next() {
 		var u Unparsed
-		if err := rows.Scan(&u.MessageID, &u.ChatName, &u.Body, &u.SentAt); err != nil {
+		if err := rows.Scan(&u.MessageID, &u.ChatName, &u.Body, &u.SentAt, &u.Reason); err != nil {
 			return nil, err
 		}
 		out = append(out, u)
 	}
 	return out, rows.Err()
+}
+
+// UnparsedCount is how many unread alerts wait for a person, and since when.
+func (s *Store) UnparsedCount(ctx context.Context) (int, *time.Time, error) {
+	var n int
+	var oldest *time.Time
+	err := s.pool.QueryRow(ctx, `select count(*), min(created_at) from spending_unparsed where not resolved`).Scan(&n, &oldest)
+	return n, oldest, err
 }
 
 // LastAlertAt is when the newest card alert arrived, whether or not it was

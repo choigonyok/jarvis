@@ -203,6 +203,15 @@ func (s *Store) Unsubscribe(ctx context.Context, endpoint string) error {
 // PushResult records how one delivery to one device went. A device that keeps
 // failing is dropped after enough tries; one the push service says is gone
 // (404/410) is dropped at once by the caller through Unsubscribe.
+// Devices is how the operator's phones are taking pushes: how many are
+// registered, the fewest failures in a row among them, and the last push
+// any of them took.
+func (s *Store) Devices(ctx context.Context) (n, fewest int, lastOK *time.Time, err error) {
+	err = s.pool.QueryRow(ctx, `select count(*), coalesce(min(failures), 0), max(last_ok_at)
+		from push_subscriptions where audience = 'owner'`).Scan(&n, &fewest, &lastOK)
+	return
+}
+
 func (s *Store) PushResult(ctx context.Context, endpoint string, ok bool) error {
 	if ok {
 		_, err := s.pool.Exec(ctx, `update push_subscriptions set last_ok_at = now(), failures = 0 where endpoint = $1`, endpoint)
