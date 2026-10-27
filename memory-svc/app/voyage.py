@@ -40,6 +40,16 @@ def base_url(key: str) -> str:
     return "https://ai.mongodb.com/v1" if key.startswith("al-") else "https://api.voyageai.com/v1"
 
 
+class VoyageError(RuntimeError):
+    """Voyage turned a call down (a status of 300 or more)."""
+
+
+# What a call to Voyage fails with when Voyage is out of reach or refuses:
+# the network's errors (a name that will not resolve, a connect that timed
+# out) and its own.
+UNREACHABLE = (httpx.HTTPError, VoyageError)
+
+
 class Voyage:
     def __init__(self, key: str, on_usage: typing.Callable[[str, int], typing.Awaitable[None]] | None = None):
         self.base = base_url(key)
@@ -49,7 +59,7 @@ class Voyage:
     async def _post(self, path: str, body: dict) -> dict:
         r = await self.http.post(self.base + path, json=body)
         if r.status_code >= 300:
-            raise RuntimeError(f"Voyage {path} {r.status_code}: {r.text[:200]}")
+            raise VoyageError(f"Voyage {path} {r.status_code}: {r.text[:200]}")
         out = r.json()
         if self.on_usage:
             await self.on_usage(body["model"], int((out.get("usage") or {}).get("total_tokens") or 0))

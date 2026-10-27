@@ -33,7 +33,7 @@ export async function middleware(request: NextRequest) {
   }
 
   if (role) {
-    if (role === "guest" && !guestMay(request.nextUrl.pathname)) {
+    if (role === "guest" && !guestMay(request.nextUrl.pathname, request.method)) {
       return isApi
         ? NextResponse.json({ error: "이 계정에서는 열 수 없습니다." }, { status: 403 })
         : NextResponse.redirect(new URL("/", request.url));

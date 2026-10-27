@@ -7,6 +7,8 @@ Nothing leaves the machine: the embedder is a stand-in, and the paths tested
 import os
 import unittest
 
+import httpx
+
 from graphiti_core.embedder.client import EmbedderClient
 from graphiti_core.nodes import EntityNode
 
@@ -46,6 +48,22 @@ class GraphTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await restarted.node("guest", "Person", "k1", "테스트 사람"), nid)
         node = await EntityNode.get_by_uuid(restarted.drivers["guest"], nid)
         self.assertEqual(node.summary, "쌓인 요약")
+
+    async def test_without_voyage_facts_are_found_by_their_words(self):
+        """Voyage out of reach - the embedding and the reranker both - and the
+        facts and names still come, by their words: not a 500 and a
+        traceback (2026-10-27)."""
+        await self.g.fact("guest", "k-words", "LIKES", ("Place", "p9", "망원 카페"), "나는 망원 카페를 좋아한다")
+
+        async def unreachable(*args, **kwargs):
+            raise httpx.ConnectTimeout("no route to Voyage")
+
+        self.g.voyage.embed = unreachable
+        self.g.voyage.rerank = unreachable
+        facts = await self.g.search("망원", "guest", 5)
+        self.assertTrue(any("망원" in f["fact"] for f in facts), facts)
+        nodes = await self.g.find("망원", "guest", 5)
+        self.assertTrue(any("망원" in n["name"] for n in nodes), nodes)
 
     async def test_an_edge_that_moves_is_still_one_edge(self):
         """G-D2: the same fact key written again with another target moves the

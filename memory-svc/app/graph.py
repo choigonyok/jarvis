@@ -15,6 +15,7 @@ Three ways in:
 """
 
 import asyncio
+import logging
 import os
 import uuid
 from datetime import datetime, timezone
@@ -45,8 +46,9 @@ from graphiti_core.utils.maintenance.edge_operations import resolve_extracted_ed
 from graphiti_core.utils.maintenance.node_operations import resolve_extracted_nodes
 
 from .llm import HaikuClient
-from .voyage import Voyage
+from .voyage import UNREACHABLE, Voyage
 
+log = logging.getLogger("memory")
 KST = ZoneInfo("Asia/Seoul")
 NS = uuid.UUID("6f1d3c52-8a3e-4c1b-9a63-6b9e3b8f2a11")
 
@@ -443,8 +445,22 @@ class Graph:
     async def search(self, query: str, group: str, limit: int = 10, center: str | None = None, mode: str = "rerank") -> list[dict]:
         """Facts for a question: keyword and vector candidates (and, around a
         person, the facts within two steps of them), ordered by the reranker -
-        or by MMR when the answer should cover ground rather than repeat."""
-        methods = [EdgeSearchMethod.bm25, EdgeSearchMethod.cosine_similarity]
+        or by MMR when the answer should cover ground rather than repeat.
+
+        With Voyage out of reach (the embedding or the reranker), by the
+        words alone, ranked without a model: an answer short of its best
+        rather than none - it was a 500 and a traceback (2026-10-27)."""
+        try:
+            edges = await self._search_edges(query, group, limit, center, mode, vectors=True)
+        except UNREACHABLE as e:
+            log.warning("검색 모델(Voyage)에 닿지 못해 낱말로만 찾습니다: %s", e)
+            edges = await self._search_edges(query, group, limit, center, "rrf", vectors=False)
+        return await self._facts(group, edges)
+
+    async def _search_edges(self, query: str, group: str, limit: int, center: str | None, mode: str, vectors: bool):
+        methods = [EdgeSearchMethod.bm25]
+        if vectors:
+            methods.append(EdgeSearchMethod.cosine_similarity)
         if center:
             methods.append(EdgeSearchMethod.bfs)
         config = SearchConfig(
@@ -459,10 +475,13 @@ class Graph:
             SearchFilters(),
             center_node_uuid=center,
             bfs_origin_node_uuids=[center] if center else None,
-            query_vector=await self.query_vector(query),
+            # Without the vector method and with RRF, Graphiti embeds nothing.
+            query_vector=await self.query_vector(query) if vectors else None,
             driver=self.drivers[group],
         )
-        edges = results.edges
+        return results.edges
+
+    async def _facts(self, group: str, edges) -> list[dict]:
         names = await self.names(group, {u for e in edges for u in (e.source_node_uuid, e.target_node_uuid)})
         return [
             {
@@ -482,22 +501,28 @@ class Graph:
     async def find(self, query: str, group: str, limit: int = 5) -> list[dict]:
         """People, places and things by name - how mind ties "지수" in a
         conversation to the node it already has."""
-        config = SearchConfig(
-            node_config=NodeSearchConfig(
-                search_methods=[NodeSearchMethod.bm25, NodeSearchMethod.cosine_similarity],
-                reranker=NodeReranker.rrf,
-                sim_min_score=0.0,
-            ),
-            limit=limit,
-        )
-        results = await graph_search(
-            self.g.clients, query, [group], config, SearchFilters(),
-            query_vector=await self.query_vector(query), driver=self.drivers[group],
-        )
+        try:
+            results = await self._find_nodes(query, group, limit, vectors=True)
+        except UNREACHABLE as e:
+            log.warning("검색 모델(Voyage)에 닿지 못해 이름의 낱말로만 찾습니다: %s", e)
+            results = await self._find_nodes(query, group, limit, vectors=False)
         return [
             {"id": n.uuid, "name": n.name, "kinds": [l for l in n.labels if l != "Entity"], "summary": n.summary}
             for n in results.nodes
         ]
+
+    async def _find_nodes(self, query: str, group: str, limit: int, vectors: bool):
+        methods = [NodeSearchMethod.bm25]
+        if vectors:
+            methods.append(NodeSearchMethod.cosine_similarity)
+        config = SearchConfig(
+            node_config=NodeSearchConfig(search_methods=methods, reranker=NodeReranker.rrf, sim_min_score=0.0),
+            limit=limit,
+        )
+        return await graph_search(
+            self.g.clients, query, [group], config, SearchFilters(),
+            query_vector=await self.query_vector(query) if vectors else None, driver=self.drivers[group],
+        )
 
     async def profile(self, group: str, uid: str, limit: int = 30) -> dict | None:
         """One node with its summary and latest facts, the ones still true first."""

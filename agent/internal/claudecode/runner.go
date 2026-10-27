@@ -444,9 +444,25 @@ func (r *Runner) Enqueue(prompt string) {
 func (r *Runner) loop(prompt string) {
 	r.store.SetThinking(true)
 	for {
-		if err := r.turn(prompt); err != nil {
+		err := r.turn(prompt)
+		limited, until := r.limitedUntil(err, time.Now())
+		if err != nil {
 			r.log.Error("turn failed", "err", err)
-			r.store.Fail(userFacingError(err))
+			msg := userFacingError(err)
+			if limited {
+				msg = fmt.Sprintf("구독 사용 한도에 걸려 이 메시지에는 답하지 못했습니다. %s 에 풀리면 그사이 보낸 메시지에 차례로 답합니다.",
+					until.Format("15:04"))
+			}
+			r.store.Fail(msg)
+		}
+		if limited {
+			// Out of the allowance, any turn would only fail the same way. The
+			// runner stays busy until the window starts over - what is sent
+			// meanwhile queues behind it - and then goes on with that.
+			r.log.Info("구독 한도가 풀릴 때까지 기다립니다", "until", until)
+			r.store.SetThinking(false)
+			time.Sleep(time.Until(until.Add(limitSlack)))
+			r.store.SetThinking(true)
 		}
 		r.mu.Lock()
 		if len(r.queue) == 0 {
@@ -464,6 +480,41 @@ func (r *Runner) loop(prompt string) {
 		}
 		prompt = r.start(next)
 	}
+}
+
+// limitSlack is how long past a usage window's reset the queue waits before
+// it goes on: the reset is the server's clock, and a turn started a moment
+// early would fail again.
+var limitSlack = 30 * time.Second
+
+// maxLimitWait is the longest a usage limit is waited out: the five hours'
+// window. A week's limit is not - nothing would be answered for days.
+const maxLimitWait = 5*time.Hour + 10*time.Minute
+
+// limitedUntil is whether err is a turn running out of the subscription's
+// allowance - the stream said the limit rejected it - and when the allowance
+// comes back, if that is soon enough to wait for.
+func (r *Runner) limitedUntil(err error, now time.Time) (bool, time.Time) {
+	if err == nil || r.usage == nil {
+		return false, time.Time{}
+	}
+	u := r.usage.Snapshot(now)
+	if u.Status != "rejected" {
+		return false, time.Time{}
+	}
+	var until time.Time
+	for _, w := range []*usage.Window{u.FiveHour, u.SevenDay} {
+		if w != nil && !w.Reset && w.Utilization >= 1 && w.ResetsAt.After(until) {
+			until = w.ResetsAt
+		}
+	}
+	if until.IsZero() && u.FiveHour != nil && !u.FiveHour.Reset {
+		until = u.FiveHour.ResetsAt // rejected, no window full: the five hours'
+	}
+	if !until.After(now) || until.Sub(now) > maxLimitWait {
+		return false, time.Time{}
+	}
+	return true, until
 }
 
 func (r *Runner) turn(prompt string) error {
@@ -1158,12 +1209,23 @@ func (r *Runner) consume(stdout interface{ Read([]byte) (int, error) }, t *tally
 	err := scan(stdout, func(ev event) {
 		t.observe(ev)
 		if failed != nil {
+			// What the allowance says still counts once the turn is lost.
+			if ev.Type == "rate_limit_event" {
+				r.usage.Observe(ev.RateLimitInfo)
+			}
 			return
 		}
 		if r.cfg.Debug {
 			r.log.Info("stream event", "type", ev.Type, "subtype", ev.Subtype)
 		}
-		failed = r.handle(ev)
+		if failed = r.handle(ev); failed != nil {
+			// The turn is lost: its input ends, and the CLI with it. Left
+			// open, the CLI waited on stdin for the turn's whole timeout - two
+			// hours past a usage limit - and a message steered into it was
+			// answered into a turn nobody read any more (2026-10-27
+			// 00:47~02:47). Closed, a message sent now waits its own turn.
+			r.closeInput()
+		}
 	})
 	if failed != nil {
 		return failed

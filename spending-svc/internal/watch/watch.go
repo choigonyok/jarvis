@@ -1,8 +1,8 @@
 // Package watch turns the ledger into news for notify-svc: a big payment, one
 // abroad, money coming back, a budget being crossed, and in the evening what
 // today came to. It reads the same month the console shows (book.Summarize)
-// every few minutes and says what changed; notify-svc's dedupe keys make
-// saying it again harmless.
+// every few minutes and says what is new since it last looked (unsaid) -
+// each payment, budget line or alert once.
 package watch
 
 import (
@@ -28,6 +28,9 @@ type Watcher struct {
 	now    func() time.Time
 	// Loops, when set, hears each check for /health ("watch").
 	Loops *health.Loops
+	// said is the keys already sent, and when (unsaid). Only the Run loop
+	// touches it.
+	said map[string]time.Time
 }
 
 func New(s *store.Store, n *notify.Client, log *slog.Logger) *Watcher {
@@ -70,21 +73,54 @@ func (w *Watcher) check(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	for _, e := range Events(book.Summarize(month, txs, prev, budgets, now), now) {
-		w.notify.Send(e)
-	}
+	events := Events(book.Summarize(month, txs, prev, budgets, now), now)
 	unparsed, err := w.store.Unparsed(ctx)
 	if err != nil {
 		return err
 	}
 	for _, u := range unparsed {
-		w.notify.Send(notify.Event{
+		events = append(events, notify.Event{
 			Source: "spending", Kind: "spending.unparsed", Tier: "digest", Level: "warn",
 			Title: "읽지 못한 카드 알림", Body: u.ChatName + ": 합계에서 빠져 있어요", URL: "/spending?focus=unparsed",
 			Key: "spending:unparsed:" + u.MessageID,
 		})
 	}
+	for _, e := range w.unsaid(events, now) {
+		w.notify.Send(e)
+	}
 	return nil
+}
+
+// saidFor is how long a sent key is remembered: past the 72 hours a payment
+// is told for and the month a budget line is keyed by.
+const saidFor = 40 * 24 * time.Hour
+
+// unsaid is what of events was not sent yet. The check says what the month
+// says now, every five minutes, and every payment, budget line and alert in
+// it went out again each time - dropped by events-svc's dedupe, but an
+// outbox row, a delivery and a refused insert apiece, every five minutes
+// (2026-10-27). A restart forgets, and says each once more; events-svc drops
+// that.
+func (w *Watcher) unsaid(events []notify.Event, now time.Time) []notify.Event {
+	if w.said == nil {
+		w.said = map[string]time.Time{}
+	}
+	for k, at := range w.said {
+		if now.Sub(at) > saidFor {
+			delete(w.said, k)
+		}
+	}
+	var out []notify.Event
+	for _, e := range events {
+		if e.Key != "" {
+			if _, ok := w.said[e.Key]; ok {
+				continue
+			}
+			w.said[e.Key] = now
+		}
+		out = append(out, e)
+	}
+	return out
 }
 
 // Events is what this month says right now. Only recent rows count, so the

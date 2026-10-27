@@ -94,9 +94,10 @@ const SERVICES: Record<string, { binding: keyof Env; origin: string }> = {
 };
 
 /**
- * What the guest's token opens: their own agent, the workout log, their
- * notifications, their own voice, of context-svc the operator's day alone
- * (guestContextRoute), and their own jobs (guestJobsRoute).
+ * What the guest's token opens: their own agent, the workout log (read it
+ * and save what changed - guestWorkoutRoute), their notifications, their own
+ * voice, of context-svc the operator's day alone (guestContextRoute), and
+ * their own jobs (guestJobsRoute).
  */
 const GUEST_SERVICES = new Set(["agent-guest", "workout", "notify", "tts", "context", "jobs"]);
 
@@ -110,6 +111,17 @@ const GUEST_SERVICES = new Set(["agent-guest", "workout", "notify", "tts", "cont
 function guestJobsRoute(method: string, path: string): boolean {
   if (method === "GET") return path === "jobs" || /^jobs\/\d+$/.test(path);
   return method === "POST" && /^jobs\/\d+\/(instruct|run|pause|resume|cancel)$/.test(path);
+}
+
+/**
+ * What the guest may do on workout-svc - what the 운동 tab does: read the
+ * log, and save what changed in it (sessions by id). Not the whole-log
+ * replace (PUT), which overwrites every session the operator logged with
+ * whatever the guest's screen holds, nor a session's own write or delete -
+ * the tab uses neither.
+ */
+function guestWorkoutRoute(method: string, path: string): boolean {
+  return (method === "GET" && path === "workout") || (method === "POST" && path === "workout/changes");
 }
 
 /**
@@ -229,6 +241,9 @@ async function gateway(request: Request, env: Env, internal: boolean): Promise<R
     return json(404, "그런 경로가 없습니다.");
   }
   if (guest && name === "jobs" && !guestJobsRoute(request.method, rest.join("/"))) {
+    return json(404, "그런 경로가 없습니다.");
+  }
+  if (guest && name === "workout" && !guestWorkoutRoute(request.method, rest.join("/"))) {
     return json(404, "그런 경로가 없습니다.");
   }
   if ((name === "agent" || name === "agent-guest") && !AGENT_ROUTES.has(rest[0] ?? "")) {

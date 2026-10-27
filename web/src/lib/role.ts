@@ -60,7 +60,19 @@ const GUEST_API = [
 /** Static files a guest may load: the editor the 편집 tab frames (scripts/photocraft.mjs). */
 const GUEST_FILES = ["/photocraft/"];
 
-export function guestMay(pathname: string): boolean {
+/**
+ * A route a guest may call but not every way: the 운동 tab reads the log and
+ * saves what changed (POST, beneath /api/workout too), never the whole-log
+ * replace (PUT /api/workout) - that would overwrite every session the
+ * operator logged with what the guest's screen holds. The gateway refuses it
+ * as well (edge guestWorkoutRoute).
+ */
+function guestRefused(pathname: string, method: string): boolean {
+  return pathname === "/api/workout" && method !== "GET" && method !== "HEAD" && method !== "POST";
+}
+
+export function guestMay(pathname: string, method = "GET"): boolean {
+  if (guestRefused(pathname, method.toUpperCase())) return false;
   if (GUEST_PAGES.has(pathname)) return true;
   if (GUEST_FILES.some((p) => pathname.startsWith(p))) return true;
   return GUEST_API.some((p) => pathname === p || pathname.startsWith(`${p}/`));
