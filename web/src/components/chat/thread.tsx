@@ -575,8 +575,8 @@ export function Thread() {
   // Opening the tab lands on the newest turn before anything is painted - no
   // scroll from the top. After that the view follows the bottom (pinned) -
   // the dots, a message queued above the composer, an answer as it is
-  // written - from a message sent at the bottom, or the reader coming back
-  // down to it, until the reader scrolls up themselves. Following is decided
+  // written - from a message you send (which takes the view down first), or
+  // the reader coming back down to it, until the reader scrolls up themselves. Following is decided
   // by what the reader did, not by where the view happens to be: when being
   // within 80px of the bottom counted as following, a reader who had scrolled
   // a line up to read was pulled back down by the next turn.
@@ -730,16 +730,17 @@ export function Thread() {
     inputRef.current?.focus();
   }, []);
 
-  // A message sent from the bottom follows what comes back: the dots, the
-  // answer as it is written, the turns after it. One sent from further up
-  // leaves the reader where they are.
-  const followFromHere = useCallback(() => {
+  // A message of yours - typed and sent, a waiting one put into the running
+  // turn, one taken back - takes the view to the newest turn, wherever you
+  // were reading, and from there it follows what comes back: the dots, the
+  // answer as it is written, the turns after it. At once, not smooth: from far
+  // up a smooth ride is long, and the message is already on its way.
+  const toNewest = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
-    if (el.scrollHeight - el.scrollTop - el.clientHeight < 80) {
-      held.current = null;
-      pinned.current = true;
-    }
+    held.current = null;
+    pinned.current = true;
+    el.scrollTop = el.scrollHeight;
   }, []);
 
   // Down to the newest turn - and staying there as more come.
@@ -986,14 +987,14 @@ export function Thread() {
           aria-hidden
           className="pointer-events-none absolute inset-x-0 -top-10 h-10 bg-gradient-to-b from-transparent to-background"
         />
-        {/* Back to the newest: a bead of the composer's own glass, over its
-            right edge, there only while the newest turn is out of sight. It
+        {/* Back to the newest: a bead of the composer's own glass, centred
+            over it, there only while the newest turn is out of sight. It
             says how many replies came meanwhile, so a reply that landed while
             you were reading back is not missed. */}
         {away ? (
           <div className="pointer-events-none absolute inset-x-0 bottom-full pb-3">
             <div className="inset-x-safe">
-              <div className="mx-auto flex w-full max-w-[46rem] justify-end px-4 sm:px-8">
+              <div className="mx-auto flex w-full max-w-[46rem] justify-center px-4 sm:px-8">
                 <button
                   type="button"
                   onClick={toBottom}
@@ -1016,7 +1017,7 @@ export function Thread() {
           <div className={cn("mx-auto w-full max-w-[46rem] px-4 sm:px-8 sm:pb-6", typing ? "pb-2" : "pb-0")}>
             <Composer
               onSend={async (text, images) => {
-                followFromHere();
+                toNewest();
                 const ok = await send(text, images, quoting?.id);
                 if (ok) setQuoting(null);
                 return ok;
@@ -1041,10 +1042,13 @@ export function Thread() {
               queued={
                 <QueuedMessages
                   queue={queue}
-                  onSteer={steer}
+                  onSteer={(id) => {
+                    toNewest();
+                    return steer(id);
+                  }}
                   onDrop={drop}
                   onRestore={(text, images) => {
-                    followFromHere();
+                    toNewest();
                     void send(text, images);
                   }}
                 />
