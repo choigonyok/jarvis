@@ -3,6 +3,9 @@
 import { memo } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+// remark-parse is what gives a processor's data its micromark extensions.
+import type {} from "remark-parse";
+import type { Processor } from "unified";
 
 /**
  * The agent's reply, rendered as the document it already is.
@@ -27,7 +30,16 @@ export const Markdown = memo(function Markdown({ children }: { children: string 
 // render made React rebuild every element of every message whenever the thread
 // re-rendered - a cost on a long thread, and it broke anything that holds on
 // to the text (search marks).
-const PLUGINS = [remarkGfm];
+const PLUGINS = [remarkGfm, noStrikethrough];
+
+// A tilde is never a strike. In Korean it is a range - "3시~5시", "10~20개" -
+// or a tone - "좋아요~~" - and GFM struck out everything between two of them,
+// one tilde or two. The parser skips the construct, so every "~" stays the
+// character it is, and the rest of GFM (tables, links, task lists) stays too.
+function noStrikethrough(this: Processor) {
+  const data = this.data();
+  (data.micromarkExtensions ??= []).push({ disable: { null: ["strikethrough"] } });
+}
 
 const COMPONENTS: Components = {
   p: ({ children }) => <p>{children}</p>,
