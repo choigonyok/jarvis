@@ -160,9 +160,12 @@ export async function upbitHoldings(): Promise<{
     accounts.find((a) => a.currency === "KRW")?.balance ?? 0,
   );
   const problems: string[] = [];
-  const cash: CashLine[] = cashKrw > 0
-    ? [{ id: "upbit:KRW", venue: "upbit", currency: "KRW", label: "업비트 원화", amount: cashKrw, valueKrw: cashKrw }]
-    : [];
+  // The won account is listed even when it is empty: the 자산 tab names each
+  // account's cash, and Upbit's won read as missing beside the others
+  // (2026-10-28, ₩0.23 left after buying USDT).
+  const cash: CashLine[] = [
+    { id: "upbit:KRW", venue: "upbit", currency: "KRW", label: "업비트 원화", amount: cashKrw, valueKrw: cashKrw },
+  ];
   if (coins.length === 0) return { holdings: [], cashKrw, cash, dollarCostKrw: 0, problems };
 
   const listed = await upbitKrwMarkets().catch(() => {

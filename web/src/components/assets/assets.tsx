@@ -424,9 +424,10 @@ export function Assets() {
 
 
                   {/* Cash and the fixed amounts are held too: one list, each
-                      with its share of the total. */}
+                      with its share of the total. A coin's dust under ₩1 is
+                      not a line; an account's won is, even near empty. */}
                   {(data.cash ?? [])
-                    .filter((c) => c.valueKrw >= 1)
+                    .filter((c) => c.valueKrw >= 1 || c.currency === "KRW")
                     .map((c) => (
                       <div key={c.id} className="flex items-baseline gap-3 rounded-lg px-2 py-2.5">
                         <div className="min-w-0 flex-1">
