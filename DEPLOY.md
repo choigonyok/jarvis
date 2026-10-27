@@ -1,6 +1,6 @@
 # Cloudflare 배포
 
-## 무엇이 어디에 올라가는가 (2026-10-07부터)
+## 무엇이 어디에 올라가는가
 
 | 조각 | 어디서 도는가 | 주소 |
 | --- | --- | --- |
@@ -41,7 +41,7 @@
   `JARVIS_EDGE_GUEST_TOKEN`(콘솔이 손님 요청에 내는 토큰, 둘 다, 맥북 `~/.config/jarvis/edge-guest-token`),
   `JARVIS_GUEST_API_TOKEN`(손님 agent 의 토큰, 게이트웨이와 맥미니 .env).
   `npx wrangler secret put … -c ../edge/wrangler.jsonc`. 콘솔 Worker 에는 `JARVIS_API_TOKEN` 을 두지 않는다.
-- 생활 탭(mind): VPC 서비스 `jarvis-mind`(호스트 `mind`, 포트 8102, 같은 터널, 2026-10-19 생성)가
+- 생활 탭(mind): VPC 서비스 `jarvis-mind`(호스트 `mind`, 포트 8102, 같은 터널)가
   `edge/wrangler.jsonc` 의 `MIND` 바인딩이다. 게이트웨이는 mind 의 읽기 넷(노트·지도·물건·식사)과
   노트 결정(`POST /mind/api/notes/{id}`)만 연다(`mindRoute`). 콘솔 변수 `MIND_URL`.
 - 콘솔 비밀 `JARVIS_VNC_PASSWORD`: 화면 탭이 원격 화면에 낼 비밀번호(맥미니 .env 의 같은 이름과 같은 값, 8자).
@@ -82,7 +82,7 @@
   백업은 평문 사본이다. 디스크 암호화가 그 사본들의 유일한 보호다. `fdesetup status` 로 확인하고,
   꺼져 있으면 시스템 설정 → 개인정보 보호 및 보안 → FileVault 에서 켠다(복구 키는 맥미니 밖에 보관).
   `scripts/backup run` 이 꺼져 있으면 로그에 경고를 남긴다.
-  **현재 결정(2026-10-16): 끈 채로 둔다.** 이 맥미니는 정전 뒤 사람 없이 다시 떠야 하고, FileVault 를
+  **현재 결정: 끈 채로 둔다.** 이 맥미니는 정전 뒤 사람 없이 다시 떠야 하고, FileVault 를
   켜면 재부팅 때 맥미니 앞에서 암호를 넣기 전까지 서비스가 뜨지 않는다. 받아들인 위험으로 맥미니 `.env`
   의 `JARVIS_FILEVAULT_OFF_ACCEPTED=true` 에 적혀 있고, 상태 탭은 이를 경고 대신 결정으로 보여 준다.
   대신 평문 사본에는 보존 기한이 있다(메시지 365·730일, 백업 14일). 켜기로 바꾸면 그 줄을 지운다.
@@ -101,17 +101,9 @@
   (사람이 직접 입력). 상태 탭의 "카톡 로그인"이 결과를 보여 준다.
 - **서비스별 DB 역할 비밀번호:** `scripts/db-roles` (`.env` 의 `JARVIS_DB_PASSWORD_*`).
 
-**root 로 돌던 이미지에서 올릴 때 한 번(2026-10-16):** 수집기와 브라우저가 이제 root 가 아니다.
-예전 볼륨의 소유자를 바꾼다 - 새로 만드는 볼륨은 이미지가 처음부터 맞는 소유자로 만든다.
-
-```bash
-docker run --rm -v jarvis_jarvis-kakaotalk-data:/d alpine:3.22 chown -R 65532:65532 /d
-docker run --rm -v jarvis_jarvis-imessage-data:/d alpine:3.22 chown -R 65532:65532 /d
-docker run --rm -v jarvis_chrome-profile:/p alpine:3.22 chown -R 10002:10002 /p
-```
-
-브라우저 컨테이너를 다시 띄우면 쿠팡 로그인이 풀린다(네이버는 '로그인 상태 유지'로 남는다).
-상태 탭의 "쿠팡 주문 내역"이 이상으로 바뀌면 화면 탭에서 쿠팡에 다시 로그인한다.
+수집기와 브라우저는 root 로 돌지 않는다(수집기 65532, 브라우저 10002). 볼륨은 이미지가 처음부터 맞는
+소유자로 만든다. 브라우저 컨테이너를 다시 띄우면 쿠팡 로그인이 풀린다(네이버는 '로그인 상태 유지'로
+남는다). 상태 탭의 "쿠팡 주문 내역"이 이상으로 바뀌면 화면 탭에서 쿠팡에 다시 로그인한다.
 
 위 전제는 `scripts/host-check`(LaunchAgent com.jarvis.host-check, 10분마다)가 점검해
 `~/.jarvis-host/host.json` 에 적고, 상태 탭 "기반"의 맥미니 디스크 암호화 · 백업의 바깥 사본 ·
@@ -122,8 +114,8 @@ iMessage 미러 권한 · 매일 백업 항목이 그것을 보여 준다. 매�
 DB 가 필요한 테스트는 `scripts/dbtest` 로 돌린다(맥북 Docker 에 일회용 Postgres, 마이그레이션 전부,
 각 서비스의 역할로).
 
-`agent.choigonyok.com` 은 2026-10-07 에 DNS 와 두 터널의 ingress 에서 모두 지웠다. 맥미니의
-예전 native cloudflared(`macmini` 터널)는 다른 프로젝트 호스트명 때문에 남아 있다.
+`agent.choigonyok.com` 은 쓰지 않는다(DNS 도 두 터널의 ingress 도 없다). 맥미니의 예전 native
+cloudflared(`macmini` 터널)는 다른 프로젝트 호스트명 때문에 남아 있다.
 
 **손님 계정.** Access 정책은 운영자와 손님 두 이메일을 허용한다. 콘솔은 Access 가
 서명한 이메일로 역할을 정하고(`web/src/lib/role.ts`, Worker 비밀값 `ACCESS_OWNERS`/`ACCESS_GUESTS` - 이메일이라 공개 저장소에 두지 않는다), 손님은
@@ -136,7 +128,7 @@ DB 가 필요한 테스트는 `scripts/dbtest` 로 돌린다(맥북 Docker 에 �
 `JARVIS_GUEST_API_TOKEN` 으로 손님 것만 열리고(서로의 것은 '없음'), 손님 작업은 웹사이트도 사진도 못 쓴다(브라우저가
 운영자 계정이라 jobs-svc 가 sites 를 거절) - 손님 에이전트의 스케줄러가 브라우저 없이 돌린다. 손님 리마인드는
 손님 폰의 도착·출발(`location.guest.*`)과 `context` 의 `GET /now/guest` 로 울리고, 손님 기기로만 간다(대화 카드는 아직 없음). 게이트웨이 경로 `/agent-guest/…`(VPC `jarvis-agent-guest`, 포트 8081).
-손님 대화도 운영자 대화처럼 턴마다 지금 상황을 받는다(2026-10-26): mind `GET /now` 는 손님 토큰에 손님 것만 답하고
+손님 대화도 운영자 대화처럼 턴마다 지금 상황을 받는다: mind `GET /now` 는 손님 토큰에 손님 것만 답하고
 (손님 일정과 함께하는 일정·손님 폰 위치·손님 리마인드·체크리스트 - 운영자 일정·결제·사진·예측은 없음), 취향은
 memory-svc 의 손님 그래프(group guest)에서 손님 자신에 관한 사실을 검색해 30분마다 다시 읽는다(`mind/guest.go`).
 기기·위치 한 줄은 context `GET /now/guest`(손님 토큰은 이 경로만 연다 - `API_GUEST_TOKEN`). 자비스 기억(CLI 의
@@ -160,86 +152,19 @@ VNC 서버(x11vnc)는 브라우저 컨테이너 안에서만 듣고(`-localhost`
 맥미니 .env `JARVIS_VNC_PASSWORD`)를 묻는다. 입장권 경로가 그 비밀번호도 화면 탭에 건넨다.
 비밀번호가 없으면 원격 화면은 열리지 않는다(브라우저는 그대로 돈다).
 
-**로그인 정보 보관함(2026-10-17, vault-svc).** 맥미니 .env 에 `JARVIS_VAULT_KEY`(`openssl rand -base64 32` -
+**로그인 정보 보관함(vault-svc).** 맥미니 .env 에 `JARVIS_VAULT_KEY`(`openssl rand -base64 32` -
 봉인 키, DB·백업에는 없으니 따로 보관), `JARVIS_VAULT_RELEASE_TOKEN`(브라우저가 꺼낼 때만 쓰는 토큰),
 `JARVIS_DB_PASSWORD_VAULT`(`scripts/db-roles` 가 만든다). 맥미니 `JARVIS_ALLOWED_TOOLS` 에
 `mcp__mcp-browser__browser_fill_login`(자동 입력은 카드 없이)과 `mcp__vault__list_logins`.
 
-**맥미니 .env 에 더 필요한 값(2026-10-17).** `JARVIS_GUEST_API_TOKEN`(손님 agent 의 토큰 - chat·calendar·
+**맥미니 .env 에 더 필요한 값.** `JARVIS_GUEST_API_TOKEN`(손님 agent 의 토큰 - chat·calendar·
 events·memory 가 손님 쪽만 열어 준다), `JARVIS_MIND_CONSOLE_TOKEN`(mind 콘솔 로그인, `scripts/mini console`),
 `JARVIS_VNC_PASSWORD`(8자). 앞의 둘은 `openssl rand -base64 48 | tr -d '/+='` 로 만든다.
 
----
-
-이하는 2026-10-06 까지의 구성(에이전트를 터널 호스트명으로 공개)이다. 참고로 남긴다.
-
-## 1. 두 개의 비밀을 먼저 만든다
-
-```sh
-openssl rand -hex 32   # JARVIS_API_TOKEN   - Worker와 agent가 나눠 갖는다
-openssl rand -hex 32   # JARVIS_AUTH_SECRET - 세션 쿠키 서명 키
-```
-
-## 2. 서버 쪽: 터널을 붙여 agent를 내보낸다
-
-Zero Trust 대시보드에서 터널을 만들고, public hostname 하나를
-`http://agent:8080`으로 보낸다. 그 호스트명이 아래 `AGENT_URL`이 된다.
-
-`jarvis/.env`:
-
-```sh
-CLAUDE_CODE_OAUTH_TOKEN=...
-JARVIS_API_TOKEN=<1번에서 만든 첫 번째 값>
-JARVIS_ALLOWED_ORIGIN=https://jarvis.choigonyok.com
-CLOUDFLARE_TUNNEL_TOKEN=<Zero Trust가 준 터널 토큰>
-```
-
-```sh
-docker compose --profile cloudflare up -d --build
-```
-
-`JARVIS_ALLOWED_ORIGIN`을 설정하면 agent는 `JARVIS_API_TOKEN` 없이는 아예 뜨지
-않는다. 터널 호스트명은 공개 주소이므로, 토큰이 없으면 그 주소를 아는 사람은
-로그인을 건너뛰고 어시스턴트를 그대로 쓸 수 있다.
-
-`JARVIS_API_TOKEN` 은 이제 언제나 필요하다(2026-10-15). compose 가 빈 값을 거부하고, 서비스도
-빈 `API_TOKEN` 으로는 뜨지 않는다 - 공개하지 않아도 compose 네트워크의 모든 컨테이너가 서로의
-포트에 닿기 때문이다. 토큰 비교는 상수 시간이다. 로컬 시험만 `API_TOKEN_OPTIONAL=true`
-(agent 는 `JARVIS_ALLOW_OPEN=true`). agent 의 `/mcp/*` 는 기동할 때 만든 내부 토큰을 CLI 의
-MCP 설정에만 실어 보내므로, 다른 컨테이너에서는 401 이다.
-
-## 3. Worker 쪽
-
-```sh
-cd web
-npx wrangler login          # 한 번만. 브라우저가 열린다
-```
-
-비밀 네 개를 넣는다 (값은 프롬프트에 붙여넣는다):
-
-```sh
-npx wrangler secret put AGENT_URL             # https://<터널 호스트명>
-npx wrangler secret put JARVIS_API_TOKEN      # 1번의 첫 번째 값
-npx wrangler secret put JARVIS_AUTH_SECRET    # 1번의 두 번째 값
-npx wrangler secret put JARVIS_AUTH_ID        # 로그인 아이디
-npx wrangler secret put JARVIS_AUTH_PASSWORD  # 로그인 비밀번호
-```
-
-```sh
-npm run cf:deploy
-```
-
-`wrangler.jsonc`의 `routes`가 `jarvis.choigonyok.com`을 custom domain으로 잡고
-있으므로, 존이 같은 계정에 있으면 DNS 레코드와 인증서는 첫 배포에서 함께 만들어진다.
-`workers_dev`는 꺼져 있다 — 이 콘솔은 로그인된 브라우저를 조종하므로 뒷문이 될
-두 번째 공개 호스트명을 두지 않는다.
-
-## 확인
-
-```sh
-curl -si https://jarvis.choigonyok.com/ | head -1          # 307 → /login
-curl -si https://jarvis.choigonyok.com/api/agent/thread    # 401
-```
+**토큰은 언제나 필요하다.** compose 가 빈 `JARVIS_API_TOKEN` 을 거부하고, 서비스도 빈 `API_TOKEN` 으로는
+뜨지 않는다 - 공개하지 않아도 compose 네트워크의 모든 컨테이너가 서로의 포트에 닿기 때문이다. 토큰 비교는
+상수 시간이다. 로컬 시험만 `API_TOKEN_OPTIONAL=true`(agent 는 `JARVIS_ALLOW_OPEN=true`). agent 의 `/mcp/*` 는
+기동할 때 만든 내부 토큰을 CLI 의 MCP 설정에만 실어 보내므로, 다른 컨테이너에서는 401 이다.
 
 ## 로컬에서 Worker 런타임 그대로 돌려보기
 
@@ -251,5 +176,5 @@ cd web && npm run cf:preview
 
 - 음성 인식은 브라우저의 Web Speech API다. Chrome과 Safari에서 동작하고
   Firefox에서는 안 된다. 그 경우 음성 탭이 안내를 띄우고 채팅으로 돌아가면 된다.
-- `/screen` 탭의 noVNC는 여전히 서버의 6080 포트를 직접 본다. 원격에서 쓰려면
-  그 포트에도 터널 호스트명을 하나 더 주고 `JARVIS_VNC_URL`을 그리로 맞춰야 한다.
+
+예전 구성(에이전트를 터널 호스트명으로 공개하던 2026-10-06 까지의 배포)과 바뀐 이력은 [CHANGELOG.md](CHANGELOG.md) 에 있다.

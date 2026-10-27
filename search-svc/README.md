@@ -4,7 +4,7 @@
 네이버 지도(플레이스)의 근처 목록. 대화·손님 대화·작업이 같은 도구(agent 의 `web` 모듈 `search`·`read`,
 `place` 모듈 `find_nearby`)로 씁니다.
 
-## 왜 (2026-10-26)
+## 왜
 
 대화의 웹 도구는 Claude Code CLI 의 WebSearch·WebFetch 였습니다.
 

@@ -780,13 +780,9 @@ func (s *Server) postCalendar(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "새 일정은 대화에서 요청해 승인 카드를 거쳐 추가합니다.")
 		return
 	}
-	// An edit keeps whoever created it; only a new entry is stamped as mine.
-	if in.ID != "" {
-		if existing, ok := s.calendar.Get(in.ID); ok {
-			in.Source = existing.Source
-		}
-	} else {
-		in.Source = calendar.SourceHuman
+	// An edit keeps whoever created it.
+	if existing, ok := s.calendar.Get(in.ID); ok {
+		in.Source = existing.Source
 	}
 
 	saved, err := s.calendar.Put(in)

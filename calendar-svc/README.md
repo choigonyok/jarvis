@@ -3,9 +3,9 @@
 일정의 **저장만** 여기 있습니다. 승인 카드·MCP 도구 스키마·되돌림 가능 여부는
 agent 에 남아 있습니다.
 
-## 저장소: uniple (2026-10-06부터)
+## 저장소: uniple
 
-일정은 이제 **uniple**(커플 앱)의 공유 캘린더에 있습니다. `CALENDAR_BACKEND=uniple`
+일정은 **uniple**(커플 앱)의 공유 캘린더에 있습니다. `CALENDAR_BACKEND=uniple`
 일 때 이 서비스는 Postgres 표 대신 uniple 의 Supabase(`api.uniple.app`)를
 로그인한 사용자 자격으로 호출합니다. API 계약은 그대로라 agent 와 웹은 바뀐
 것을 모릅니다. `postgres` 로 되돌리면 예전 표(`commitments`, 기존 6개 그대로)를

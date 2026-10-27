@@ -37,7 +37,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /workout/sessions/{id}", s.auth(s.putSession))
 	mux.HandleFunc("DELETE /workout/sessions/{id}", s.auth(s.deleteSession))
 	// 룰 게이트가 쓰는 경로. 제안을 열지 말지 판단하는 데 필요한 것만.
-	mux.HandleFunc("GET /stats", s.auth(s.stats))
 	return mux
 }
 
@@ -156,17 +155,6 @@ func (s *Server) put(w http.ResponseWriter, r *http.Request) {
 	}
 	rev, err := s.store.Save(r.Context(), b, expect)
 	s.written(w, rev, err)
-}
-
-func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
-	st, err := s.store.Stats(r.Context())
-	if err != nil {
-		s.log.Error("통계를 계산하지 못했습니다", "err", err)
-		writeErr(w, http.StatusInternalServerError, "통계를 계산하지 못했습니다.")
-		return
-	}
-	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, st)
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

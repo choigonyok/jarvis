@@ -79,24 +79,12 @@ alter table raw_events enable trigger raw_events_no_truncate;
 한 제품입니다. 겹침은 막을 일이 아니라 알아차려서 제안할 일이므로
 `conflicts_at()` / `conflicts_for()` 이 있습니다.
 
-## 룰 게이트가 부르는 것들
+## 일정 충돌
 
-전부 [013_queries.sql](migrations/013_queries.sql) 에 있습니다. 정의를 한 곳에
-묶은 이유는 재사용이 아니라, "충돌"이 무엇이고 "공백"이 며칠부터인지를
-서비스마다 각자 정하면 제안하는 쪽과 화면에 보여주는 쪽이 다른 답을 내기
-때문입니다.
-
-| 함수 | 답하는 질문 |
-|---|---|
-| `conflicts_at(span, 제외id, 여유)` | 이 시간대에 겹치는 약속이 있나 |
-| `conflicts_for(id, 여유)` | 이 약속이 다른 무엇과 겹치나 |
-| `workout_gap_days()` | 마지막 운동에서 며칠 지났나 |
-| `workout_routine_status` (뷰) | 어느 루틴이 가장 밀렸나 |
-| `volume_by_group(일수)` | 이번 주에 하체 했나 |
-
-사실·회수·제안 쿨다운 함수(`fact_as_of` · `assert_fact` · `recall` · `open_threads` ·
-`suppressed` · `proposals_today`)는 그 표들과 함께 049 에서 지웠습니다. 제안의 쿨다운과
-하루 몫은 mind 의 관문이 맡습니다.
+[013_queries.sql](migrations/013_queries.sql) 의 `conflicts_at(span, 제외id, 여유)` 는 이 시간대에 겹치는
+약속을, `conflicts_for(id, 여유)` 는 이 약속이 다른 무엇과 겹치는지를 답합니다. 정의를 한 곳에 둔 이유는
+"충돌"이 무엇인지를 서비스마다 각자 정하면 제안하는 쪽과 화면에 보여주는 쪽이 다른 답을 내기 때문입니다.
+calendar-svc 가 씁니다.
 
 ## 검증한 것
 

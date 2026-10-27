@@ -97,9 +97,4 @@ func TestTwoWritersDoNotWipeEachOther(t *testing.T) {
 		t.Fatalf("지운 세션만 빠져야 합니다: %+v", b.Sessions)
 	}
 
-	// The rule gate's numbers come from SQL functions and views, which run
-	// with this role's rights.
-	if _, err := s.Stats(ctx); err != nil {
-		t.Fatalf("통계: %v", err)
-	}
 }
