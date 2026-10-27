@@ -605,3 +605,37 @@ func (s *Server) ownerRegistered(ctx context.Context, rg place.Region) error {
 func (s *Server) saveWatching(ctx context.Context, source string, w watching) error {
 	return s.st.Set(ctx, stateKey(source, "owntracks.watch"), w, w.At)
 }
+
+// commandSettle is how long after the report a mode command answered the
+// phone's next reports may still have been made before it heard the command.
+// A region's transition and the fixes made with it go out one after another,
+// and each still said the old mode: three in three seconds, all fixes of
+// 13:58:13, each answered with the same command again (2026-10-27).
+const commandSettle = time.Minute
+
+// sentMode is the mode last commanded to a phone, and the fix of the report
+// the command answered.
+type sentMode struct {
+	Mode int       `json:"mode"`
+	Fix  time.Time `json:"fix"`
+}
+
+// sentLately is whether mode was commanded with a report made less than
+// commandSettle before at. A report that close was on its way before the
+// phone heard the command, and says nothing of whether it took it; one made
+// later that still says the old mode is a command not taken, sent again.
+func (s *Server) sentLately(ctx context.Context, source string, mode int, at time.Time) (bool, error) {
+	var last sentMode
+	if _, err := s.st.Get(ctx, stateKey(source, "owntracks.sent"), &last); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return last.Mode == mode && at.Sub(last.Fix) < commandSettle, nil
+}
+
+// markSent keeps the mode a reply commanded, with the report it answered.
+func (s *Server) markSent(ctx context.Context, source string, mode int, at time.Time) error {
+	return s.st.Set(ctx, stateKey(source, "owntracks.sent"), sentMode{Mode: mode, Fix: at}, at)
+}

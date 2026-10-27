@@ -315,6 +315,12 @@ func (m *Module) runOnce(ctx context.Context, bg Background, cfg SchedulerConfig
 		return
 	}
 	m.log.Info("작업 실행이 끝났습니다", "job", j.ID, "run", run, "outcome", outcome, "again", end.Again, "result", clampText(result, 200))
+	if end.Over {
+		// Done or called off: what it still asks has nobody to answer.
+		if n := m.withdrawCards(j.ID); n > 0 {
+			m.log.Info("끝난 작업의 카드를 내렸습니다", "job", j.ID, "cards", n)
+		}
+	}
 	if end.Failed {
 		m.say(d.Job, run, "세 번 연달아 잘 끝나지 않아 멈췄습니다: "+end.Note+"\n작업 탭에서 확인하고 다시 시작할 수 있습니다.")
 	}

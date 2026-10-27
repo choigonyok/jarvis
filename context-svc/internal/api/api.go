@@ -447,6 +447,9 @@ func (s *Server) ingest(ctx context.Context, rep report, at time.Time) ([]map[st
 		if err := s.st.Set(ctx, "owntracks.hold", hold{Mode: *asked.Mode, Until: s.now().Add(time.Hour)}, s.now()); err != nil {
 			return nil, err
 		}
+		if err := s.markSent(ctx, ownerPhone, *asked.Mode, at); err != nil {
+			return nil, err
+		}
 		s.log.Info("폰의 위치 모드를 바꿉니다(요청)", "from", current.Mode, "to", *asked.Mode)
 		for _, m := range moves {
 			s.announce(m.event, m.region, kindOf[m.region], at)
@@ -484,13 +487,23 @@ func (s *Server) ingest(ctx context.Context, rep report, at time.Time) ([]map[st
 			return nil, err
 		}
 	}
+	if extra == nil {
+		extra = []map[string]any{}
+	}
 	if want == current.Mode {
-		if extra == nil {
-			extra = []map[string]any{}
-		}
+		return extra, nil
+	}
+	// The command went out with a report made a moment before this one:
+	// this report was on its way before the phone heard it (sentLately).
+	if lately, err := s.sentLately(ctx, ownerPhone, want, at); err != nil {
+		return nil, err
+	} else if lately {
 		return extra, nil
 	}
 	if err := s.st.Set(ctx, "owntracks.mode", map[string]int{"mode": want}, s.now()); err != nil {
+		return nil, err
+	}
+	if err := s.markSent(ctx, ownerPhone, want, at); err != nil {
 		return nil, err
 	}
 	s.log.Info("폰의 위치 모드를 바꿉니다", "from", current.Mode, "to", want)
@@ -577,7 +590,15 @@ func (s *Server) guestWatch(ctx context.Context, rep report, at time.Time, own [
 	if want == current {
 		return none, nil
 	}
+	if lately, err := s.sentLately(ctx, guestPhone, want, at); err != nil {
+		return nil, err
+	} else if lately {
+		return none, nil
+	}
 	if err := s.st.Set(ctx, "owntracks.mode.guest", map[string]int{"mode": want}, s.now()); err != nil {
+		return nil, err
+	}
+	if err := s.markSent(ctx, guestPhone, want, at); err != nil {
 		return nil, err
 	}
 	s.log.Info("상대 폰의 위치 모드를 바꿉니다", "from", current, "to", want, "why", w.Why)

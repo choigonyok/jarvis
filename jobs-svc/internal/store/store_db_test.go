@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"os"
 	"slices"
 	"strings"
@@ -306,4 +307,117 @@ func TestABadRunWaitingOnACardWaitsForTheAnswer(t *testing.T) {
 		t.Fatalf("때가 지난 작업: %d %v %v", n, oldest, err)
 	}
 	_ = s.Control(ctx, k.ID, "cancel")
+}
+
+// A job that is over keeps nothing unread, and an answer to it goes into its
+// history only (job 6: an answer before it was called off; job 18: one to a
+// card it raised and then finished without waiting for, 2026-10-08/18). An
+// instruction that came while it was finishing brings it back.
+func TestAJobThatIsOverKeepsNothingUnread(t *testing.T) {
+	dsn := os.Getenv("JARVIS_TEST_DSN")
+	if dsn == "" {
+		t.Skip("JARVIS_TEST_DSN 이 없어 건너뜁니다 (scripts/dbtest jobs-svc)")
+	}
+	ctx := context.Background()
+	s, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.Close)
+	unread := func(id int64) int {
+		t.Helper()
+		var n int
+		if err := s.pool.QueryRow(ctx, `select count(*) from job_inbox where job_id = $1 and consumed_run is null`, id).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	// Called off with an answer and an instruction unread: both go, the card too.
+	a, err := s.Create(ctx, NewJob{Title: "dbtest 취소", Goal: "돗자리 예약"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, _ := s.StartRun(ctx, a.ID)
+	if err := s.Wait(ctx, run, "p-over-1", "이 곳으로 진행할까요?"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EndRun(ctx, run, rules.OK, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Answer(ctx, a.ID, "p-over-1", "[반려] 이 곳으로 진행할까요?"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Instruct(ctx, a.ID, "평점 좋은 곳만"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Control(ctx, a.ID, "cancel"); err != nil {
+		t.Fatal(err)
+	}
+	if n := unread(a.ID); n != 0 {
+		t.Fatalf("그만둔 작업에 읽지 않은 것 %d개", n)
+	}
+	if got, _ := s.Get(ctx, a.ID); got.WaitingCard != "" || got.State != rules.Cancelled {
+		t.Fatalf("그만둔 작업은 카드를 기다리지 않습니다: %+v", got)
+	}
+	if err := s.Answer(ctx, a.ID, "p-over-1", "[승인] 늦은 답"); !errors.Is(err, ErrEnded) {
+		t.Fatalf("그만둔 작업의 답은 ErrEnded: %v", err)
+	}
+	if n := unread(a.ID); n != 0 {
+		t.Fatalf("그만둔 작업의 답은 쌓이지 않습니다: %d", n)
+	}
+
+	// Asked and finished in one run: over, its card's answer goes nowhere.
+	b, err := s.Create(ctx, NewJob{Title: "dbtest 끝냄", Goal: "탁상시계 결제"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, _ = s.StartRun(ctx, b.ID)
+	if err := s.Wait(ctx, run, "p-over-2", "어떻게 할까요?"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Finish(ctx, run, "주문 미완료, 재시도 여부 문의"); err != nil {
+		t.Fatal(err)
+	}
+	out, err := s.EndRun(ctx, run, rules.OK, "")
+	if err != nil || !out.Over {
+		t.Fatalf("끝낸 작업은 Over: %+v %v", out, err)
+	}
+	if got, _ := s.Get(ctx, b.ID); got.WaitingCard != "" || got.State != rules.Done {
+		t.Fatalf("끝낸 작업은 카드를 기다리지 않습니다: %+v", got)
+	}
+	if err := s.Answer(ctx, b.ID, "p-over-2", "[반려] 어떻게 할까요?"); !errors.Is(err, ErrEnded) {
+		t.Fatalf("끝낸 작업의 답은 ErrEnded: %v", err)
+	}
+	if n := unread(b.ID); n != 0 {
+		t.Fatalf("끝낸 작업에 읽지 않은 것 %d개", n)
+	}
+	d, _ := s.Detail(ctx, b.ID, 10, true)
+	if !slices.ContainsFunc(d.Events, func(e Event) bool { return e.Kind == "answer" && strings.Contains(e.Text, "전하지 않았습니다") }) {
+		t.Fatalf("늦은 답은 이력에 남습니다: %+v", d.Events)
+	}
+
+	// An instruction while the last run was finishing: back it comes for it.
+	c, err := s.Create(ctx, NewJob{Title: "dbtest 끝내는 중 지시", Goal: "가격 알아보기"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, _ = s.StartRun(ctx, c.ID)
+	if err := s.Instruct(ctx, c.ID, "배송비도 봐 줘"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Finish(ctx, run, "가격 정리"); err != nil {
+		t.Fatal(err)
+	}
+	out, err = s.EndRun(ctx, run, rules.OK, "")
+	if err != nil || out.Over || !out.Again {
+		t.Fatalf("끝내는 중에 온 지시로 다시: %+v %v", out, err)
+	}
+	if got, _ := s.Get(ctx, c.ID); got.State != rules.Active || got.NextReason != "끝내는 중에 온 지시" {
+		t.Fatalf("다시 깨어나야 합니다: %+v", got)
+	}
+	if n := unread(c.ID); n != 1 {
+		t.Fatalf("지시는 다음 실행 앞에 남습니다: %d", n)
+	}
+	_ = s.Control(ctx, c.ID, "cancel")
 }

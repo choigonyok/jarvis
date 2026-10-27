@@ -338,6 +338,10 @@ func (m *Module) decided(p proposal.Proposal, d proposal.Decision) {
 			return
 		}
 		if err := m.store.Answer(ctx, in.JobID, p.ID, answerText(in, d)); err != nil {
+			if JobEnded(err) {
+				m.endedAnswer(p.ID, d)
+				return
+			}
 			// The decision stands on the card; the sweep hands it on in a
 			// few minutes. Marked failed, it would read as no decision at all.
 			state := proposal.Approved
@@ -368,6 +372,10 @@ func (m *Module) decided(p proposal.Proposal, d proposal.Decision) {
 			text = "[승인] 사이트 추가: " + strings.Join(in.Sites, ", ") + " - 이제 열 수 있습니다."
 		}
 		if err := m.store.Answer(ctx, in.JobID, p.ID, text); err != nil {
+			if JobEnded(err) {
+				m.endedAnswer(p.ID, d)
+				return
+			}
 			m.proposals.Settle(p.ID, proposal.Failed, "작업에 전하지 못했습니다: "+err.Error())
 			return
 		}
@@ -403,6 +411,32 @@ func (m *Module) decided(p proposal.Proposal, d proposal.Decision) {
 		m.proposals.Settle(p.ID, proposal.Executed, "이 사이트의 작업을 이어서 합니다.")
 		m.wake()
 	}
+}
+
+// endedNote is what a card of a job that is over says.
+const endedNote = "작업이 이미 끝나 답을 전하지 않았습니다. 이어서 하려면 작업 탭에서 지시하세요."
+
+// endedAnswer settles a card answered after its job was over: the decision
+// went nowhere, and the card says so rather than "작업에 전했습니다".
+func (m *Module) endedAnswer(id string, d proposal.Decision) {
+	state := proposal.Rejected
+	if d == proposal.Approve {
+		state = proposal.Failed
+	}
+	m.proposals.Settle(id, state, endedNote)
+}
+
+// withdrawCards takes down the cards a job still waits on once it is over -
+// done, or called off - and says how many. Job 18 asked and finished in the
+// same run (2026-10-18); its card stayed up and was answered forty minutes
+// later, into a job that would never read it.
+func (m *Module) withdrawCards(job int64) int {
+	n := 0
+	for _, p := range m.waitingOn(job) {
+		m.proposals.Abandon(p.ID, "작업이 끝나 내렸습니다. 이어서 하려면 작업 탭에서 지시하세요.")
+		n++
+	}
+	return n
 }
 
 // tellSite hands text to every live job that uses site, as an answer that
@@ -459,6 +493,14 @@ func (m *Module) sweep(ctx context.Context) {
 		return
 	}
 	for _, j := range js {
+		// Over - called off from the 작업 tab, say, which the agent does not
+		// hear at once: its questions come down.
+		if j.State == "done" || j.State == "cancelled" {
+			if n := m.withdrawCards(j.ID); n > 0 {
+				m.log.Info("끝난 작업의 카드를 내렸습니다", "job", j.ID, "cards", n)
+			}
+			continue
+		}
 		if j.State != "waiting" || j.WaitingCard == "" || j.Running || m.delivering(j.WaitingCard) {
 			continue
 		}

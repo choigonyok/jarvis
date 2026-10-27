@@ -243,7 +243,9 @@ func (m *Module) PaymentDecided(job int64, card string, approved bool, text stri
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	if err := m.store.Answer(ctx, job, card, text); err != nil {
-		m.retrySoon()
+		if !JobEnded(err) { // over: nothing to hand it on to later
+			m.retrySoon()
+		}
 		return err
 	}
 	m.wake()

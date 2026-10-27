@@ -94,6 +94,25 @@ type Ended struct {
 	// Again: an instruction or a card's answer came while the run was in
 	// flight; the job is due again now.
 	Again bool `json:"again,omitempty"`
+	// Over: the job is done or cancelled after the run - what it still asks
+	// has nobody to answer (withdrawCards).
+	Over bool `json:"over,omitempty"`
+}
+
+// StatusError is jobs-svc turning a request down: its status and what it
+// said. Its text is what it said, as before.
+type StatusError struct {
+	Status int
+	Msg    string
+}
+
+func (e *StatusError) Error() string { return e.Msg }
+
+// JobEnded is jobs-svc saying an answer went nowhere: the job is done or
+// cancelled (410), and nothing runs it for a card any more.
+func JobEnded(err error) bool {
+	var se *StatusError
+	return errors.As(err, &se) && se.Status == http.StatusGone
 }
 
 type RecordInput struct {
@@ -143,9 +162,9 @@ func (s *Store) call(ctx context.Context, method, path string, body, out any) er
 		}
 		raw, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
 		if json.Unmarshal(raw, &payload) == nil && payload.Error != "" {
-			return errors.New(payload.Error)
+			return &StatusError{Status: res.StatusCode, Msg: payload.Error}
 		}
-		return fmt.Errorf("작업 서비스가 거부했습니다: %s", res.Status)
+		return &StatusError{Status: res.StatusCode, Msg: "작업 서비스가 거부했습니다: " + res.Status}
 	}
 	if out == nil {
 		return nil

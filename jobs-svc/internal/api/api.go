@@ -353,7 +353,15 @@ func (s *Server) answer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.Answer(r.Context(), id, in.Card, in.Text); err != nil {
-		s.fail(w, "답을 적지 못했습니다", err)
+		switch {
+		case errors.Is(err, store.ErrEnded):
+			// Gone: the agent tells the card so, and does not try again.
+			writeErr(w, http.StatusGone, err.Error())
+		case errors.Is(err, store.ErrNotFound):
+			writeErr(w, http.StatusNotFound, err.Error())
+		default:
+			s.fail(w, "답을 적지 못했습니다", err)
+		}
 		return
 	}
 	s.woke(r)

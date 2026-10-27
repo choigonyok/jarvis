@@ -302,6 +302,12 @@ func TestWaypointsAndSetup(t *testing.T) {
 	if r := say(`{"_type":"location","lat":37.3,"lon":127.3,"acc":10,"tst":1760600200,"m":1}`); !strings.Contains(r, `"monitoring":2`) || !strings.Contains(r, `"action":"reportLocation"`) {
 		t.Fatalf("나가서 움직임 → Move 와 지금 위치: %s", r)
 	}
+	// A fix made with that one, sent right after it, was on its way before
+	// the command: not answered with it again (2026-10-27: three in three
+	// seconds).
+	if r := say(`{"_type":"location","lat":37.3,"lon":127.3,"acc":10,"tst":1760600201,"m":1}`); r != "[]\n" {
+		t.Fatalf("명령보다 먼저 만들어진 보고에는 같은 명령을 다시 보내지 않음: %s", r)
+	}
 	if r := say(`{"_type":"location","lat":37.31,"lon":127.31,"acc":10,"tst":1760600300,"m":1}`); !strings.Contains(r, `"monitoring":2`) || strings.Contains(r, "reportLocation") {
 		t.Fatalf("폰이 받지 않은 명령은 다시(위치는 다시 묻지 않음): %s", r)
 	}
@@ -666,6 +672,11 @@ func TestGuestPhone(t *testing.T) {
 	if r := say(fmt.Sprintf(`{"_type":"location","lat":37.53,"lon":126.97,"acc":10,"tst":%d,"m":1,"batt":80,"motionactivities":["automotive"]}`, at("08:20"))); !strings.Contains(r, `"monitoring":2`) {
 		t.Fatalf("나가서 움직임 → Move: %s", r)
 	}
+	// The fixes made with it come right after, still in the old mode: the
+	// command was not in front of the phone yet, and is not said again.
+	if r := say(fmt.Sprintf(`{"_type":"location","lat":37.53,"lon":126.97,"acc":10,"tst":%d,"m":1,"batt":80,"motionactivities":["automotive"]}`, at("08:20"))); strings.Contains(r, "monitoring") {
+		t.Fatalf("명령보다 먼저 만들어진 보고에는 같은 명령을 다시 보내지 않음: %s", r)
+	}
 	// At a café nobody registered: still Move ten minutes in, Significant after fifteen.
 	cafe := func(hm, extra string) string {
 		return say(fmt.Sprintf(`{"_type":"location","lat":37.5216,"lon":126.9243,"acc":15,"tst":%d,"m":2,"batt":70,"motionactivities":["stationary"]%s}`, at(hm), extra))
@@ -703,7 +714,7 @@ func TestGuestPhone(t *testing.T) {
 		Visits []store.Visit
 		Since  string
 	}
-	if err := json.Unmarshal([]byte(body), &tr); err != nil || code != 200 || tr.Who != "guest" || len(tr.Fixes) != 6 || len(tr.Visits) != 0 || tr.Since != "2026-10-23" {
+	if err := json.Unmarshal([]byte(body), &tr); err != nil || code != 200 || tr.Who != "guest" || len(tr.Fixes) != 7 || len(tr.Visits) != 0 || tr.Since != "2026-10-23" {
 		t.Fatalf("상대의 하루: %d %s", code, body)
 	}
 	if code, body := do("GET", "/track?date=2026-10-23", "", api); code != 200 || !strings.Contains(body, `"fixes":[]`) || !strings.Contains(body, `"who":"owner"`) {

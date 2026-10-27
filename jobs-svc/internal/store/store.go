@@ -18,6 +18,10 @@ import (
 
 var ErrNotFound = errors.New("그런 작업이 없습니다.")
 
+// ErrEnded is an answer to a job that is done or cancelled: nothing runs it
+// for a card any more, so the answer is kept in its history only.
+var ErrEnded = errors.New("끝난 작업이라 답을 전하지 않았습니다. 이어서 하려면 작업 탭에서 지시하세요.")
+
 type Store struct {
 	pool *pgxpool.Pool
 }
@@ -400,6 +404,9 @@ func (s *Store) AddSites(ctx context.Context, id int64, sites []string) (Job, er
 
 // Control is pause, resume, run (now) or cancel.
 func (s *Store) Control(ctx context.Context, id int64, action string) error {
+	if action == "cancel" {
+		return s.cancel(ctx, id)
+	}
 	var q, note string
 	switch action {
 	case "pause":
@@ -410,9 +417,6 @@ func (s *Store) Control(ctx context.Context, id int64, action string) error {
 	case "run":
 		q, note = `update jobs set state = 'active', next_at = now(), next_reason = '지금 실행', updated_at = now()
 			where id = $1 and state in ('active', 'paused')`, "지금 실행합니다"
-	case "cancel":
-		q, note = `update jobs set state = 'cancelled', next_at = null, finished_at = now(), updated_at = now()
-			where id = $1 and state not in ('done', 'cancelled')`, "그만뒀습니다"
 	default:
 		return fmt.Errorf("모르는 조작입니다: %s", action)
 	}
@@ -427,14 +431,61 @@ func (s *Store) Control(ctx context.Context, id int64, action string) error {
 	return nil
 }
 
+// cancel ends a job for good. What it had not read - an instruction, a card's
+// answer - goes with it, since nothing runs it any more; its history keeps
+// every one. Job 6 kept an answer that came a quarter of an hour before it
+// was called off, unread for good (2026-10-08).
+func (s *Store) cancel(ctx context.Context, id int64) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	tag, err := tx.Exec(ctx, `update jobs set state = 'cancelled', next_at = null, waiting_card = '', finished_at = now(), updated_at = now()
+		where id = $1 and state not in ('done', 'cancelled')`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return errors.New("지금 상태에서는 할 수 없습니다.")
+	}
+	dropped, err := tx.Exec(ctx, `delete from job_inbox where job_id = $1 and consumed_run is null`, id)
+	if err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	note := "그만뒀습니다"
+	if n := dropped.RowsAffected(); n > 0 {
+		note += fmt.Sprintf(" · 읽지 않은 지시·답 %d개는 버렸습니다", n)
+	}
+	s.event(ctx, id, nil, "control", note)
+	return nil
+}
+
 // Answer records the operator's decision on a card a job raised and wakes
 // the job now, whatever it was waiting for: an answer is news, and the job
 // acts on it at once. Waking only a job waiting on that very card left an
 // answer sitting for the job's own clock - job 30 (2026-10-21) asked, then
 // scheduled itself to "check the card's answer" in 20 minutes, and an answer
-// given a minute later waited the rest of them. A paused or finished job
-// keeps the answer for when it runs again.
+// given a minute later waited the rest of them. A paused or failed job keeps
+// the answer for when it runs again. A job done or cancelled does not run for
+// a card any more: the answer goes into its history and nowhere else
+// (ErrEnded) - one given to a job that had already finished sat in its inbox
+// for good (job 18, 2026-10-18). A new instruction is what brings a done job
+// back.
 func (s *Store) Answer(ctx context.Context, id int64, card, text string) error {
+	var state string
+	if err := s.pool.QueryRow(ctx, `select state from jobs where id = $1`, id).Scan(&state); errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	if state == rules.Done || state == rules.Cancelled {
+		s.event(ctx, id, nil, "answer", text+"\n(끝난 작업이라 전하지 않았습니다)")
+		return ErrEnded
+	}
 	if _, err := s.pool.Exec(ctx, `insert into job_inbox (job_id, kind, text) values ($1, 'answer', $2)`, id, text); err != nil {
 		return err
 	}
@@ -554,6 +605,9 @@ type Ended struct {
 	// Again: an instruction or a card's answer came while the run was in
 	// flight, so the job is due again now.
 	Again bool `json:"again,omitempty"`
+	// Over: the job is done or cancelled after the run and will not run for
+	// a card any more - what it still asks has nobody to answer.
+	Over bool `json:"over,omitempty"`
 }
 
 // EndRun closes a run and applies the rules. On a good run the instructions
@@ -594,6 +648,7 @@ func (s *Store) EndRun(ctx context.Context, runID int64, outcome, note string) (
 
 	// A person paused or cancelled it during the run: their call stands.
 	if state == rules.Paused || state == rules.Cancelled {
+		out.Over = state == rules.Cancelled
 		return out, tx.Commit(ctx)
 	}
 
@@ -658,6 +713,29 @@ func (s *Store) EndRun(ctx context.Context, runID int64, outcome, note string) (
 		}
 		again = tag.RowsAffected() > 0
 	}
+	// A job this run finished keeps nothing unread. An instruction that came
+	// while it was finishing was never in front of it, and brings it back;
+	// what is left - the answer to a card it raised and then finished without
+	// waiting for (job 18, 2026-10-18) - has no run to go to, and the history
+	// keeps it.
+	revived := false
+	if state == rules.Done && !end.Fail {
+		tag, err := tx.Exec(ctx, `
+			update jobs set state = 'active', next_at = now(), next_reason = '끝내는 중에 온 지시', finished_at = null, updated_at = now()
+			 where id = $1 and state = 'done'
+			   and exists (select 1 from job_inbox i where i.job_id = $1 and i.consumed_run is null
+			                 and i.kind = 'instruction' and i.at > $2)`, jobID, started)
+		if err != nil {
+			return Ended{}, err
+		}
+		if revived = tag.RowsAffected() > 0; !revived {
+			if _, err := tx.Exec(ctx, `delete from job_inbox where job_id = $1 and consumed_run is null`, jobID); err != nil {
+				return Ended{}, err
+			}
+			out.Over = true
+		}
+		again = again || revived
+	}
 	kind, text := "run_end", "실행을 마쳤습니다"
 	switch {
 	case outcome == rules.Yielded && again:
@@ -674,6 +752,8 @@ func (s *Store) EndRun(ctx context.Context, runID int64, outcome, note string) (
 		kind, text = "error", fmt.Sprintf("잘 끝나지 않았습니다(%s 뒤 다시): %s", minutes(end.After), end.Note)
 	case end.Retry:
 		kind, text = "error", "잘 끝나지 않았습니다. 그사이 새 지시나 카드 답이 와서 곧 다시 합니다: "+end.Note
+	case revived:
+		text = "끝냈지만, 끝내는 중에 새 지시가 와서 곧 다시 합니다"
 	case again:
 		text = "실행을 마쳤습니다. 실행 중에 새 지시나 카드 답이 와서 곧 다시 합니다"
 	}
@@ -732,7 +812,9 @@ func (s *Store) Wait(ctx context.Context, runID int64, card, what string) error 
 
 // Finish ends the job.
 func (s *Store) Finish(ctx context.Context, runID int64, summary string) error {
-	jobID, err := s.decide(ctx, runID, `update jobs set state = 'done', next_at = null, summary = $2,
+	// A done job waits on nothing: the card it may have just raised is taken
+	// down by the agent when the run ends (Ended.Over).
+	jobID, err := s.decide(ctx, runID, `update jobs set state = 'done', next_at = null, waiting_card = '', summary = $2,
 		finished_at = now(), updated_at = now() where id = $1 and state in ('active', 'waiting')`, summary)
 	if err == nil {
 		s.event(ctx, jobID, &runID, "finish", "끝냈습니다: "+summary)

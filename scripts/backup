@@ -105,13 +105,13 @@ run() {
   done
   vol_tar jarvis-falkordb "$out"
 
-  for spec in jarvis-kakaotalk-data:kakaotalk.db jarvis-imessage-data:imessage.db jarvis-data:kakao.db; do
+  for spec in jarvis-kakaotalk-data:kakaotalk.db jarvis-imessage-data:imessage.db; do
     vol_sqlite "${spec%%:*}" "${spec#*:}" "$out"
   done
 
   # 에이전트 데이터: 승인 장부(proposals.json), 대화 세션, 구독 사용량, 기억 알림 기록. 파일마다 임시 파일에
-  # 쓰고 이름을 바꿔 넣으므로 tar 로 떠도 반쯤 쓴 파일이 없다(.tmp 는 뺀다). kakao.db 는 위에서 .backup 으로 떴다.
-  vol_tar jarvis-data "$out" '*.tmp' './kakao.db' './kakao.db-wal' './kakao.db-shm'
+  # 쓰고 이름을 바꿔 넣으므로 tar 로 떠도 반쯤 쓴 파일이 없다(.tmp 는 뺀다).
+  vol_tar jarvis-data "$out" '*.tmp'
   vol_tar jarvis-home "$out"
   vol_tar jarvis-uploads "$out"
   # 손님 계정: 승인 장부·세션(data), CLI 기억(home), 첨부 사진(uploads), 작업 폴더(workspace).
@@ -160,7 +160,7 @@ restore_test() {
   [ -n "${graphs// /}" ] || ok=0
   docker rm -f "$fk" >/dev/null; docker volume rm "$fk" >/dev/null
 
-  for f in kakaotalk.db imessage.db kakao.db; do
+  for f in kakaotalk.db imessage.db; do
     [ -f "$last/$f" ] || continue
     local r
     r=$(docker run --rm -v "$last:/in:ro" "$SQLITE_IMG" sh -c "apk add -q --no-cache sqlite >/dev/null && sqlite3 'file:/in/$f?immutable=1' 'pragma integrity_check'")
