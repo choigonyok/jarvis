@@ -271,7 +271,8 @@ function modeOf(a: Node, b: Node, kmh: number): Mode {
   if ((said.includes("walking") || said.includes("running")) && kmh < 15) return "walk";
   if (said.includes("cycling")) return "move";
   if (kmh >= 25) return "drive";
-  return kmh < 7 ? "walk" : "move";
+  // Under 12 km/h is on foot - a brisk walk or a run (it was 7, 2026-10-27).
+  return kmh < 12 ? "walk" : "move";
 }
 
 /** The region a place lies in, the smallest that holds it. */
