@@ -30,6 +30,7 @@ import {
   type Turn,
   type TurnRef,
 } from "@/lib/thread";
+import { diag, diagScroll, takeFrames, takeScrolls, viewOf, watchScrolls } from "@/lib/diag";
 import { photoUrl } from "@/lib/uploads";
 import { speakable, useSpeech, useVoiceStatus } from "@/lib/use-speech";
 import { useThread } from "@/lib/use-thread";
@@ -811,9 +812,20 @@ export function Thread() {
   const toNewest = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
+    const before = { ...viewOf(el), pinned: pinned.current, held: Boolean(held.current), touching: touching.current };
     held.current = null;
     pinned.current = true;
     el.scrollTop = el.scrollHeight;
+    // Temporary (lib/diag.ts): where the view went on the phone after a send.
+    const after = viewOf(el);
+    const t0 = performance.now();
+    const samples: unknown[] = [];
+    const take = () =>
+      samples.push({ dt: Math.round(performance.now() - t0), ...viewOf(scrollRef.current), pinned: pinned.current, touching: touching.current });
+    watchScrolls(3000);
+    requestAnimationFrame(take);
+    for (const ms of [100, 300, 700, 1500, 3000]) window.setTimeout(take, ms);
+    window.setTimeout(() => diag("send", { before, after, samples, scrolls: takeScrolls() }), 3100);
   }, []);
 
   // Down to the newest turn - and staying there as more come.
@@ -858,6 +870,44 @@ export function Thread() {
     return () => ro.disconnect();
     // Again for the scroller the voice stage's return builds.
   }, [mode]);
+
+  // Temporary (lib/diag.ts): while an answer is written, how far it has come
+  // out and where the view is, every 0.1s; and once per load, the device.
+  const drafting = Boolean(draft);
+  useEffect(() => {
+    if (!drafting) return;
+    const t0 = performance.now();
+    const samples: number[][] = [];
+    const id = window.setInterval(() => {
+      const el = scrollRef.current;
+      const row = el?.querySelector("li[aria-busy=true]");
+      if (samples.length < 600)
+        samples.push([
+          Math.round(performance.now() - t0),
+          row?.textContent?.length ?? -1,
+          el ? Math.round(el.scrollHeight - el.scrollTop - el.clientHeight) : -1,
+          pinned.current ? 1 : 0,
+          touching.current ? 1 : 0,
+        ]);
+    }, 100);
+    return () => {
+      window.clearInterval(id);
+      diag("answer", { samples, ...takeFrames() });
+    };
+  }, [drafting]);
+  useEffect(() => {
+    const id = window.setTimeout(
+      () =>
+        diag("load", {
+          ua: navigator.userAgent,
+          standalone: matchMedia("(display-mode: standalone)").matches,
+          motion: matchMedia("(prefers-reduced-motion: reduce)").matches ? "reduce" : "full",
+          view: viewOf(scrollRef.current),
+        }),
+      1500,
+    );
+    return () => window.clearTimeout(id);
+  }, []);
 
   // Watch the waiting cards themselves rather than guessing from scroll
   // position: the bar exists to speak for a decision you cannot see, so what
@@ -992,6 +1042,7 @@ export function Thread() {
           // bottom, which is not away from it.)
           if (rose && gap > 1) pinned.current = false;
           else if (gap < 8) pinned.current = true;
+          diagScroll(el.scrollTop, gap, rose, pinned.current);
           window.clearTimeout(settle.current);
           const ask = () => {
             if (touching.current) settle.current = window.setTimeout(ask, 120);

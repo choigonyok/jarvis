@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
-import { refreshAll } from "@/lib/resume";
+import { onResume, refreshAll } from "@/lib/resume";
 import { cn } from "@/lib/utils";
 
 /** How far the finger travels (after damping) before letting go refreshes. */
@@ -19,6 +19,12 @@ const serving = () =>
 /** The build this page came up with, asked once. */
 let loadedFrom: Promise<string | null> | null = null;
 
+/** Whether a newer build has been deployed since this page came up. */
+async function newerBuild(): Promise<boolean> {
+  const [before, now] = await Promise.all([loadedFrom, serving()]);
+  return Boolean(before && now && before !== now);
+}
+
 /**
  * What a pull does. Every screen re-reads what it shows, in place - the scroll,
  * an open row and the live streams stay as they are (a full reload threw all
@@ -26,8 +32,7 @@ let loadedFrom: Promise<string | null> | null = null;
  * up does it load the page again: that is the one thing a re-read cannot bring.
  */
 async function refresh() {
-  const [before, now] = await Promise.all([loadedFrom, serving()]);
-  if (before && now && before !== now) {
+  if (await newerBuild()) {
     window.location.reload();
     return new Promise<never>(() => {});
   }
@@ -56,6 +61,22 @@ export function PullToRefresh() {
   useEffect(() => {
     loadedFrom ??= serving();
   }, []);
+
+  // A home-screen app lives on in the background for days and never asks for
+  // a newer build on its own; a pull cannot reach the top of a long thread to
+  // ask either. So coming back to the app asks, and a newer build is loaded
+  // then - unless something would be lost: the editor's work, a message
+  // being typed (its draft is kept, the keyboard would drop).
+  useEffect(
+    () =>
+      onResume(async () => {
+        if (!(await newerBuild())) return;
+        if (window.location.pathname.startsWith("/edit")) return;
+        if (document.activeElement?.matches("input, textarea, [contenteditable='true']")) return;
+        window.location.reload();
+      }),
+    [],
+  );
 
   useEffect(() => {
     const scrollerOf = (node: Element | null): Element | null => {

@@ -15,6 +15,7 @@ import {
   type Turn,
 } from "@/lib/thread";
 import { decideProposal } from "@/lib/decide";
+import { diagFrame } from "@/lib/diag";
 import { requestResume } from "@/lib/resume";
 
 /**
@@ -226,6 +227,7 @@ export function useThread() {
         setProposals((prev) => upsert(prev, event.proposal));
         break;
       case "draft":
+        if (!event.draft.gone) diagFrame(event.draft.at, event.draft.text?.length ?? 0);
         setDraft((cur) => applyDraft(cur, event.draft));
         break;
       case "status":
