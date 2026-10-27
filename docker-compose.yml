@@ -1091,7 +1091,7 @@ services:
     <<: *outside
     image: cloudflare/cloudflared:2026.10.0
     profiles: ["cloudflare"]
-    command: tunnel --no-autoupdate --protocol http2 --metrics 127.0.0.1:20241 run --token ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    command: tunnel --no-autoupdate --metrics 127.0.0.1:20241 run --token ${CLOUDFLARE_TUNNEL_TOKEN:-}
     # 공개 ingress 는 두지 않는다. Workers VPC 서비스(edge/)가 이 터널을 통해
     # agent·workout 등에 이름으로 닿는다 - 서비스들은 이 네트워크 안에만 있다.
     depends_on:
