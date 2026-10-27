@@ -16,13 +16,17 @@ const serving = () =>
     .then((body) => body?.build || null)
     .catch(() => null);
 
-/** The build this page came up with, asked once. */
-let loadedFrom: Promise<string | null> | null = null;
+/**
+ * The build this code was compiled in - the same stamp /api/version serves
+ * (next.config). Not asked of the server at load: a page and a deploy that
+ * cross would read the new stamp and never see its own code as old.
+ */
+const RUNNING = process.env.JARVIS_BUILD ?? "";
 
-/** Whether a newer build has been deployed since this page came up. */
+/** Whether a newer build has been deployed than the one running here. */
 async function newerBuild(): Promise<boolean> {
-  const [before, now] = await Promise.all([loadedFrom, serving()]);
-  return Boolean(before && now && before !== now);
+  const now = await serving();
+  return Boolean(RUNNING && now && now !== RUNNING);
 }
 
 /**
@@ -58,21 +62,21 @@ export function PullToRefresh() {
   const [reloading, setReloading] = useState(false);
   const g = useRef<{ x: number; y: number; active: boolean; decided: boolean } | null>(null);
 
-  useEffect(() => {
-    loadedFrom ??= serving();
-  }, []);
-
   // A home-screen app lives on in the background for days and never asks for
   // a newer build on its own; a pull cannot reach the top of a long thread to
   // ask either. So coming back to the app asks, and a newer build is loaded
-  // then - unless something would be lost: the editor's work, a message
-  // being typed (its draft is kept, the keyboard would drop).
+  // then - unless something would be lost: the editor's work, or words in a
+  // field that does not keep them. The chat's composer keeps its draft, so
+  // its focus does not hold the reload back: skipping on any focused field
+  // left the phone on an old build for an evening (2026-10-27 - a figure
+  // typed on the 자산 tab was still focused on every return).
   useEffect(
     () =>
       onResume(async () => {
         if (!(await newerBuild())) return;
         if (window.location.pathname.startsWith("/edit")) return;
-        if (document.activeElement?.matches("input, textarea, [contenteditable='true']")) return;
+        const focused = document.activeElement;
+        if (focused?.matches("input, textarea, [contenteditable='true']") && !focused.matches("[data-keeps-draft]")) return;
         window.location.reload();
       }),
     [],

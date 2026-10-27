@@ -378,6 +378,9 @@ const MAX_RATE = 0.18;
 const BACKLOG = 1200;
 /** The least time between redraws: each one parses the markdown again. */
 const FRAME_MS = 33;
+/** How long a send holds the view at the bottom, at least, and at most. */
+const HOLD_MS = 800;
+const HOLD_MAX_MS = 3000;
 /** How far each draft has come out, by id: a row built again goes on from there. */
 const progress = new Map<string, number>();
 
@@ -689,6 +692,9 @@ export function Thread() {
   // within 120ms as the keyboard and the layout moved, and that read as the
   // reader scrolling up (2026-10-27 23:56). A finger on the thread ends it.
   const holdUntil = useRef(0);
+  // When that send was: the hold is stretched while the view is still moving
+  // (iOS momentum, the keyboard) but never past HOLD_MAX_MS from it.
+  const holdFrom = useRef(0);
   // Up far enough that the newest turn is out of sight: the way back down is
   // offered (the button over the composer).
   const [away, setAway] = useState(false);
@@ -713,6 +719,12 @@ export function Thread() {
   // was near the top again, asked for the next one - one flick up ran
   // through page after page (2026-10-24).
   const touching = useRef(false);
+  // When the finger last moved, or came down. A touch whose end never came -
+  // the row under it replaced as it was touched (a draft turning into its
+  // turn), its touchend dispatched to a node no longer in the page - would
+  // otherwise read as a finger forever, and nothing would follow again.
+  const touchAt = useRef(0);
+  const finger = useCallback(() => touching.current && performance.now() - touchAt.current < 1500, []);
   const settle = useRef<number | undefined>(undefined);
 
   // Set while a page of older turns is on its way: how tall the thread was
@@ -737,7 +749,7 @@ export function Thread() {
       // iOS can still be finishing a fling it owns and put its own position
       // back over this one: look again on the next frame.
       requestAnimationFrame(() => {
-        if (!touching.current && Math.abs(el.scrollTop - target) > 2) el.scrollTop = target;
+        if (!finger() && Math.abs(el.scrollTop - target) > 2) el.scrollTop = target;
       });
       return;
     }
@@ -747,11 +759,14 @@ export function Thread() {
     // line has above the composer's fade) out of sight, so every fresh read -
     // coming back to the tab, say - slid the view 48px up, the last line under
     // the fade.
-    if (pinned.current && !touching.current) {
+    if (pinned.current && !finger()) {
       const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      el.scrollTo({ top: el.scrollHeight, behavior: still ? "auto" : "smooth" });
+      // While a send holds the bottom, at once: a smooth ride is overtaken by
+      // the next frame's hold, and on iOS it put the view back up.
+      const now = performance.now() < holdUntil.current;
+      el.scrollTo({ top: el.scrollHeight, behavior: still || now ? "auto" : "smooth" });
     }
-  }, [turns, proposals, thinking, error, mode]);
+  }, [turns, proposals, thinking, error, mode, finger]);
 
   // Scrolling up near the top asks for the page above. Asked once per page:
   // the next ask waits for this one to land (loadingOlder) and be measured.
@@ -841,16 +856,18 @@ export function Thread() {
   const toNewest = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const before = { ...viewOf(el), pinned: pinned.current, held: Boolean(held.current), touching: touching.current };
+    const before = { ...viewOf(el), pinned: pinned.current, held: Boolean(held.current), touching: touching.current, finger: finger() };
     held.current = null;
     pinned.current = true;
     el.scrollTop = el.scrollHeight;
-    // Held there frame by frame while the keyboard and the layout settle.
-    holdUntil.current = performance.now() + 600;
+    // Held there frame by frame while the keyboard and the layout settle, and
+    // while the view still moves on its own (onScroll stretches it).
+    holdFrom.current = performance.now();
+    holdUntil.current = holdFrom.current + HOLD_MS;
     const hold = () => {
       const now = scrollRef.current;
-      if (!now || performance.now() >= holdUntil.current || touching.current) return;
-      now.scrollTop = now.scrollHeight;
+      if (!now || performance.now() >= holdUntil.current || finger()) return;
+      if (now.scrollHeight - now.scrollTop - now.clientHeight > 1) now.scrollTop = now.scrollHeight;
       requestAnimationFrame(hold);
     };
     requestAnimationFrame(hold);
@@ -859,12 +876,12 @@ export function Thread() {
     const t0 = performance.now();
     const samples: unknown[] = [];
     const take = () =>
-      samples.push({ dt: Math.round(performance.now() - t0), ...viewOf(scrollRef.current), pinned: pinned.current, touching: touching.current });
+      samples.push({ dt: Math.round(performance.now() - t0), ...viewOf(scrollRef.current), pinned: pinned.current, touching: touching.current, finger: finger() });
     watchScrolls(3000);
     requestAnimationFrame(take);
     for (const ms of [100, 300, 700, 1500, 3000]) window.setTimeout(take, ms);
     window.setTimeout(() => diag("send", { before, after, samples, scrolls: takeScrolls() }), 3100);
-  }, []);
+  }, [finger]);
 
   // Down to the newest turn - and staying there as more come.
   const toBottom = useCallback(() => {
@@ -901,13 +918,13 @@ export function Thread() {
     const ro = new ResizeObserver(() => {
       // Photos above a held card push it down as they load: keep it centred.
       if (held.current) held.current.scrollIntoView({ block: "center" });
-      else if (pinned.current && !touching.current) el.scrollTop = el.scrollHeight;
+      else if (pinned.current && !finger()) el.scrollTop = el.scrollHeight;
     });
     ro.observe(content);
     ro.observe(el);
     return () => ro.disconnect();
     // Again for the scroller the voice stage's return builds.
-  }, [mode]);
+  }, [mode, finger]);
 
   // Temporary (lib/diag.ts): while an answer is written, how far it has come
   // out and where the view is, every 0.1s; and once per load, the device.
@@ -926,13 +943,14 @@ export function Thread() {
           el ? Math.round(el.scrollHeight - el.scrollTop - el.clientHeight) : -1,
           pinned.current ? 1 : 0,
           touching.current ? 1 : 0,
+          finger() ? 1 : 0,
         ]);
     }, 100);
     return () => {
       window.clearInterval(id);
       diag("answer", { samples, ...takeFrames() });
     };
-  }, [drafting]);
+  }, [drafting, finger]);
   useEffect(() => {
     const id = window.setTimeout(
       () =>
@@ -1078,20 +1096,29 @@ export function Thread() {
           // above the bottom. Back at the very bottom it starts again.
           // (Content shrinking under a pinned view also moves it up - to the
           // bottom, which is not away from it.)
-          if (performance.now() < holdUntil.current && !touching.current) pinned.current = true;
-          else if (rose && gap > 1) pinned.current = false;
+          const now = performance.now();
+          if (now < holdUntil.current && !finger()) {
+            pinned.current = true;
+            // Still moving without a finger - iOS momentum, the keyboard -
+            // so the hold lasts until it has stopped.
+            if (gap > 1) holdUntil.current = Math.min(holdFrom.current + HOLD_MAX_MS, Math.max(holdUntil.current, now + 300));
+          } else if (rose && gap > 1) pinned.current = false;
           else if (gap < 8) pinned.current = true;
           diagScroll(el.scrollTop, gap, rose, pinned.current);
           window.clearTimeout(settle.current);
           const ask = () => {
-            if (touching.current) settle.current = window.setTimeout(ask, 120);
+            if (finger()) settle.current = window.setTimeout(ask, 120);
             else askOlder(el);
           };
           settle.current = window.setTimeout(ask, 180);
         }}
         onTouchStart={() => {
           touching.current = true;
+          touchAt.current = performance.now();
           holdUntil.current = 0;
+        }}
+        onTouchMove={() => {
+          touchAt.current = performance.now();
         }}
         onTouchEnd={(e) => {
           touching.current = false;

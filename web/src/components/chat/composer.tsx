@@ -282,6 +282,8 @@ export function Composer({
                   : "Jarvis에게 메시지"
           }
           aria-label="Jarvis에게 보낼 메시지"
+          // What is typed here is kept (draftKey): the page may be reloaded under it.
+          data-keeps-draft={draftKey ? "" : undefined}
           className={cn(
             "scrollbar-hairline max-h-28 min-h-12 flex-1 resize-none bg-transparent py-3 text-[14.5px] leading-relaxed text-foreground outline-none placeholder:text-faint sm:max-h-[168px]",
             allowPhotos ? "px-1" : "pl-3.5 pr-1",
