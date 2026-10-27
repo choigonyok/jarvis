@@ -213,6 +213,10 @@ services:
       JARVIS_CHAT_URL: http://chat:8094
       # 손님의 결재 카드는 손님 기기로(audience guest). 운영자에게는 가지 않는다.
       JARVIS_NOTIFY_URL: http://events:8101
+      # 손님 리마인드가 울리면 손님 대화에도 안내 카드로 남는다. events 는 이 손님 구독
+      # (agent-guest, 손님 토큰으로 등록)에 손님에게 가는 것만, 손님 토큰을 달아 보낸다.
+      JARVIS_EVENTS_URL: http://events:8101
+      JARVIS_SELF_URL: http://agent-guest:8081
       # 손님 자신의 작업·리마인드·체크리스트. jobs·mind 는 이 손님 토큰으로 손님 것만 연다.
       # 손님 작업은 웹사이트를 열지 않는다(브라우저는 운영자 계정으로 로그인돼 있다).
       JARVIS_JOBS_URL: http://jobs:8098

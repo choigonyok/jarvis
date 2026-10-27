@@ -37,9 +37,12 @@ type Event struct {
 }
 
 type Subscription struct {
-	Consumer  string     `json:"consumer"`
-	URL       string     `json:"url"`
-	Types     []string   `json:"types"`
+	Consumer string   `json:"consumer"`
+	URL      string   `json:"url"`
+	Types    []string `json:"types"`
+	// Guest is the guest's side (migration 071): registered with the guest's
+	// token, it is sent only what is for the guest, with the guest's token.
+	Guest     bool       `json:"guest,omitempty"`
 	Cursor    int64      `json:"cursor"`
 	Failures  int        `json:"failures"`
 	LastError string     `json:"lastError"`
@@ -209,11 +212,17 @@ func (s *Store) Latest(ctx context.Context) (int64, error) {
 	return id, err
 }
 
+// ErrOtherSide is registering a consumer that is the other side's: the
+// guest's token at an operator's subscription, or the other way round.
+var ErrOtherSide = errors.New("다른 쪽의 구독입니다")
+
 // Subscribe registers (or updates) a consumer. A new consumer starts at the
 // newest event unless fromStart: it was not around for what came before.
 // An existing one keeps its place - and, back from a restart, gets its held
-// events once more: a consumer is restarted when it was fixed.
-func (s *Store) Subscribe(ctx context.Context, consumer, url string, types []string, fromStart bool) (Subscription, error) {
+// events once more: a consumer is restarted when it was fixed. guest is the
+// side registering it, and an existing consumer stays on its own side
+// (ErrOtherSide).
+func (s *Store) Subscribe(ctx context.Context, consumer, url string, types []string, fromStart, guest bool) (Subscription, error) {
 	start := int64(0)
 	if !fromStart {
 		var err error
@@ -221,12 +230,16 @@ func (s *Store) Subscribe(ctx context.Context, consumer, url string, types []str
 			return Subscription{}, err
 		}
 	}
-	_, err := s.pool.Exec(ctx, `
-		insert into event_subscriptions (consumer, url, types, cursor) values ($1, $2, $3, $4)
-		on conflict (consumer) do update set url = excluded.url, types = excluded.types, updated_at = now()`,
-		consumer, url, types, start)
+	tag, err := s.pool.Exec(ctx, `
+		insert into event_subscriptions (consumer, url, types, cursor, guest) values ($1, $2, $3, $4, $5)
+		on conflict (consumer) do update set url = excluded.url, types = excluded.types, updated_at = now()
+		 where event_subscriptions.guest = excluded.guest`,
+		consumer, url, types, start, guest)
 	if err != nil {
 		return Subscription{}, err
+	}
+	if tag.RowsAffected() == 0 {
+		return Subscription{}, ErrOtherSide
 	}
 	if err := s.ReleaseHeld(ctx, consumer); err != nil {
 		return Subscription{}, err
@@ -242,7 +255,7 @@ func (s *Store) Subscribe(ctx context.Context, consumer, url string, types []str
 
 func (s *Store) Subscriptions(ctx context.Context) ([]Subscription, error) {
 	rows, err := s.pool.Query(ctx, `
-		select consumer, url, types, cursor, failures, last_error, last_ok_at, failing_since, head_tries,
+		select consumer, url, types, guest, cursor, failures, last_error, last_ok_at, failing_since, head_tries,
 		       (select count(*) from event_held h where h.consumer = s.consumer)
 		  from event_subscriptions s order by consumer`)
 	if err != nil {
@@ -252,7 +265,7 @@ func (s *Store) Subscriptions(ctx context.Context) ([]Subscription, error) {
 	out := []Subscription{}
 	for rows.Next() {
 		var sub Subscription
-		if err := rows.Scan(&sub.Consumer, &sub.URL, &sub.Types, &sub.Cursor, &sub.Failures, &sub.LastError, &sub.LastOKAt,
+		if err := rows.Scan(&sub.Consumer, &sub.URL, &sub.Types, &sub.Guest, &sub.Cursor, &sub.Failures, &sub.LastError, &sub.LastOKAt,
 			&sub.FailingSince, &sub.HeadTries, &sub.Held); err != nil {
 			return nil, err
 		}

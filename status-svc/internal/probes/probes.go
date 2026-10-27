@@ -266,6 +266,8 @@ func All(cfg Config) []check.Probe {
 		e.service("svc.events", "이벤트 로그", cfg.EventsURL, []string{"postgres"}, "drain"),
 		e.delivery("notify", "이벤트 → 알림", []string{"svc.notify"}),
 		e.delivery("agent", "이벤트 → 에이전트", []string{"agent"}),
+		// The guest's reminders, to the guest's conversation.
+		e.delivery("agent-guest", "이벤트 → 손님 에이전트", []string{"agent-guest"}),
 		e.delivery("mind", "이벤트 → mind", []string{"svc.mind"}),
 		e.service("svc.notify", "알림 서비스", cfg.NotifyURL, []string{"postgres"}),
 		e.service("svc.jobs", "작업 서비스", cfg.JobsURL, []string{"postgres", "agent"}),

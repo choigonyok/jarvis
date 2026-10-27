@@ -3,7 +3,7 @@
 //
 //	GET  /health                       the contract (gocommon/health): each consumer's delivery, the held box
 //	POST /events                       a service reports something
-//	PUT  /subscriptions/{consumer}     a consumer registers {url, types, fromStart}
+//	PUT  /subscriptions/{consumer}     a consumer registers {url, types, fromStart} - the guest's token, a guest's (-guest)
 //	GET  /subscriptions                who is subscribed and how far along
 //	GET  /events?after=&limit=         the log, for looking back
 //	GET  /held                         events set aside after failing on their own
@@ -34,7 +34,8 @@ type Server struct {
 	sync  func()
 	token string
 	// guestToken is the guest's agent's: it posts notifications for the
-	// guest (a card waiting on them) and nothing else.
+	// guest (a card waiting on them) and registers the guest's own
+	// subscription, which is sent only what is for the guest (bus.Reaches).
 	guestToken string
 	// loops are this process's own (the outbox drain); each consumer's
 	// delivery is read from its subscription.
@@ -58,7 +59,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("POST /events", s.auth(true, s.append))
-	mux.HandleFunc("PUT /subscriptions/{consumer}", s.auth(false, s.subscribe))
+	mux.HandleFunc("PUT /subscriptions/{consumer}", s.auth(true, s.subscribe))
 	mux.HandleFunc("DELETE /subscriptions/{consumer}", s.auth(false, s.unsubscribe))
 	mux.HandleFunc("GET /subscriptions", s.auth(false, s.subscriptions))
 	mux.HandleFunc("GET /events", s.auth(false, s.list))
@@ -176,7 +177,8 @@ func (s *Server) dropHeld(w http.ResponseWriter, r *http.Request) {
 }
 
 // auth takes the services' token everywhere and the guest's only where
-// guests is set (posting an event - see append for what it may post).
+// guests is set: posting an event (see append for what it may post) and
+// registering the guest's subscription (see subscribe).
 func (s *Server) auth(guests bool, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		got := r.Header.Get("Authorization")
@@ -288,6 +290,12 @@ func (s *Server) append(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// GuestSuffix ends the name of every subscription the guest's token
+// registers (the guest's agent is agent-guest).
+const GuestSuffix = "-guest"
+
+// subscribe registers a consumer. One registered with the guest's token is
+// the guest's: it is sent only what is for the guest, with the guest's token.
 func (s *Server) subscribe(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		URL       string   `json:"url"`
@@ -302,10 +310,21 @@ func (s *Server) subscribe(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "consumer 와 http 주소가 필요합니다."})
 		return
 	}
+	guest := asGuest(r)
+	if guest && !strings.HasSuffix(consumer, GuestSuffix) {
+		// The guest's token names only the guest's side: it cannot take a
+		// services' consumer's name, before that one registers or after.
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "손님 토큰으로는 손님 쪽 구독(이름이 " + GuestSuffix + " 로 끝남)만 등록할 수 있습니다."})
+		return
+	}
 	if len(body.Types) == 0 {
 		body.Types = []string{"*"}
 	}
-	sub, err := s.store.Subscribe(r.Context(), consumer, body.URL, body.Types, body.FromStart)
+	sub, err := s.store.Subscribe(r.Context(), consumer, body.URL, body.Types, body.FromStart, guest)
+	if errors.Is(err, store.ErrOtherSide) {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": consumer + " 는 다른 쪽의 구독이라 이 토큰으로 바꿀 수 없습니다."})
+		return
+	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "구독을 저장하지 못했습니다."})
 		return

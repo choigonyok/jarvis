@@ -76,7 +76,7 @@ func TestPruneKeepsWhatAConsumerHasNotTaken(t *testing.T) {
 		}
 	}
 	_, _ = pool.Exec(ctx, `update events set received_at = now() - interval '100 days'`)
-	if _, err := s.Subscribe(ctx, "slow", "http://x", []string{"*"}, true); err != nil {
+	if _, err := s.Subscribe(ctx, "slow", "http://x", []string{"*"}, true, false); err != nil {
 		t.Fatal(err)
 	}
 	_ = s.Advance(ctx, "slow", 2, true)
@@ -100,10 +100,10 @@ func TestStalledConsumerDoesNotHoldTheLog(t *testing.T) {
 		}
 	}
 	_, _ = pool.Exec(ctx, `update events set received_at = now() - interval '100 days'`)
-	if _, err := s.Subscribe(ctx, "live", "http://x", []string{"*"}, true); err != nil {
+	if _, err := s.Subscribe(ctx, "live", "http://x", []string{"*"}, true, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Subscribe(ctx, "dead", "http://y", []string{"*"}, true); err != nil {
+	if _, err := s.Subscribe(ctx, "dead", "http://y", []string{"*"}, true, false); err != nil {
 		t.Fatal(err)
 	}
 	_ = s.Advance(ctx, "live", 3, true)
@@ -179,7 +179,7 @@ func TestHeldEventsAreSetAsideAndKept(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := s.Subscribe(ctx, "c", "http://c/consume", []string{"*"}, true); err != nil {
+	if _, err := s.Subscribe(ctx, "c", "http://c/consume", []string{"*"}, true, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Failed(ctx, "c", "닿지 못함"); err != nil {
@@ -217,7 +217,7 @@ func TestHeldEventsAreSetAsideAndKept(t *testing.T) {
 	if due, _ := s.DueHeld(ctx, "c", 10); len(due) != 0 {
 		t.Fatalf("계기 전에는 다시 보내지 않습니다: %+v", due)
 	}
-	if _, err := s.Subscribe(ctx, "c", "http://c/consume", []string{"*"}, false); err != nil {
+	if _, err := s.Subscribe(ctx, "c", "http://c/consume", []string{"*"}, false, false); err != nil {
 		t.Fatal(err)
 	}
 	due, err := s.DueHeld(ctx, "c", 10)
@@ -257,5 +257,45 @@ func resetTables(t *testing.T, dsn, sql string) {
 	defer conn.Close(context.Background())
 	if _, err := conn.Exec(context.Background(), sql); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A guest's subscription (071) is registered as the guest's and stays so:
+// registering it again with the other side's token changes nothing and
+// says so, and the same goes for a services' subscription.
+func TestASubscriptionStaysOnItsSide(t *testing.T) {
+	s, _ := testStore(t)
+	ctx := context.Background()
+	if _, err := s.Subscribe(ctx, "agent", "http://agent:8080/consume", []string{"*"}, false, false); err != nil {
+		t.Fatal(err)
+	}
+	sub, err := s.Subscribe(ctx, "agent-guest", "http://agent-guest:8081/consume", []string{"remind.*"}, false, true)
+	if err != nil || !sub.Guest || sub.URL != "http://agent-guest:8081/consume" {
+		t.Fatalf("손님 구독: %+v %v", sub, err)
+	}
+	if sub, err := s.Subscribe(ctx, "agent-guest", "http://agent-guest:8081/consume", []string{"remind.*", "checklist.shown"}, false, true); err != nil || !sub.Guest || len(sub.Types) != 2 {
+		t.Fatalf("손님이 다시 등록: %+v %v", sub, err)
+	}
+	if _, err := s.Subscribe(ctx, "agent", "http://evil/consume", []string{"*"}, false, true); !errors.Is(err, ErrOtherSide) {
+		t.Fatalf("손님 쪽으로 서비스 구독을 바꾸면: %v", err)
+	}
+	if _, err := s.Subscribe(ctx, "agent-guest", "http://agent:8080/consume", []string{"*"}, false, false); !errors.Is(err, ErrOtherSide) {
+		t.Fatalf("서비스 쪽으로 손님 구독을 바꾸면: %v", err)
+	}
+	subs, err := s.Subscriptions(ctx)
+	if err != nil || len(subs) != 2 {
+		t.Fatalf("%+v %v", subs, err)
+	}
+	for _, sub := range subs {
+		switch sub.Consumer {
+		case "agent":
+			if sub.Guest || sub.URL != "http://agent:8080/consume" {
+				t.Fatalf("서비스 구독이 바뀌었습니다: %+v", sub)
+			}
+		case "agent-guest":
+			if !sub.Guest || sub.URL != "http://agent-guest:8081/consume" || len(sub.Types) != 2 {
+				t.Fatalf("손님 구독이 바뀌었습니다: %+v", sub)
+			}
+		}
 	}
 }

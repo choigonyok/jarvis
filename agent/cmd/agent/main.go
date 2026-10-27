@@ -428,32 +428,41 @@ func main() {
 		}
 	}
 
+	// What mind told at its moment, in the conversation as well as on the
+	// phone: the reminder's words, why now, the list it carries.
+	layNotice := func(n suggest.Notice) {
+		if transcript.Told(thread.OriginNotice, n.Key) {
+			return
+		}
+		paragraphs := []string{n.Title}
+		if n.Body != "" {
+			paragraphs = append(paragraphs, n.Body)
+		}
+		transcript.Card(thread.Origin{Kind: thread.OriginNotice, Title: n.Why, Ref: n.Key, Checklist: n.Checklist}, paragraphs)
+		if n.Checklist != "" && checklistModule != nil {
+			checklistModule.Publish(context.Background(), n.Checklist)
+		}
+	}
 	// Speaking first: mind-svc's gate decides what is worth raising (its
 	// ledger, budget and trust), and its cards become approval cards here
 	// (internal/suggest). The guest's agent does not suggest - it has none of
-	// the operator's data.
+	// the operator's data - but the guest's own reminders lay their card in
+	// the guest's conversation, as the operator's do in theirs. events-svc
+	// sends its subscription (agent-guest) only what is for the guest.
 	var suggester *suggest.Engine
+	if cfg.EventsURL != "" && cfg.Guest {
+		suggester = suggest.New(proposals, suggest.Config{
+			EventsURL: cfg.EventsURL, Token: cfg.APIToken, Guest: true, Notice: layNotice,
+		}, log)
+		go suggester.Subscribe(enrichCtx, strings.TrimRight(cfg.SelfURL, "/")+"/consume")
+	}
 	if cfg.EventsURL != "" && !cfg.Guest {
 		suggester = suggest.New(proposals, suggest.Config{
 			EventsURL: cfg.EventsURL, Token: cfg.APIToken,
-			Out:  notify.New(cfg.EventsURL, cfg.DatabaseURL, cfg.APIToken, log),
-			Say:  func(lead, id string) { transcript.Raise([]string{lead}, id) },
-			Mind: mindClient,
-			// What mind told at its moment, in the conversation as well as on
-			// the phone: the reminder's words, why now, the list it carries.
-			Notice: func(n suggest.Notice) {
-				if transcript.Told(thread.OriginNotice, n.Key) {
-					return
-				}
-				paragraphs := []string{n.Title}
-				if n.Body != "" {
-					paragraphs = append(paragraphs, n.Body)
-				}
-				transcript.Card(thread.Origin{Kind: thread.OriginNotice, Title: n.Why, Ref: n.Key, Checklist: n.Checklist}, paragraphs)
-				if n.Checklist != "" && checklistModule != nil {
-					checklistModule.Publish(context.Background(), n.Checklist)
-				}
-			},
+			Out:    notify.New(cfg.EventsURL, cfg.DatabaseURL, cfg.APIToken, log),
+			Say:    func(lead, id string) { transcript.Raise([]string{lead}, id) },
+			Mind:   mindClient,
+			Notice: layNotice,
 			Show: func(id, lead, key string) {
 				if checklistModule == nil {
 					return

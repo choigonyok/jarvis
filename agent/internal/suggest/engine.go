@@ -13,6 +13,12 @@
 // the phone through notify-svc; a notice that asks for a card (data.card)
 // is laid in the conversation here too, with the checklist it carries. And
 // a list mind puts in front of the operator (checklist.shown) is shown here.
+//
+// The guest's agent runs this for the guest's notices alone (Config.Guest):
+// a reminder of the guest's lays its card in the guest's conversation, as
+// the operator's do in theirs. It raises no card of mind's - it has none of
+// the operator's data - and events-svc sends its subscription (agent-guest)
+// only what is for the guest.
 package suggest
 
 import (
@@ -35,6 +41,10 @@ import (
 // at a moment, and the lists it shows.
 var Types = []string{mind.CardRaised, mind.CardClosed, "remind.*", ChecklistShown}
 
+// GuestTypes is what the guest's agent subscribes to: what mind says to the
+// guest at a moment.
+var GuestTypes = []string{"remind.*"}
+
 // ChecklistShown is mind asking for a list in the conversation now.
 const ChecklistShown = "checklist.shown"
 
@@ -55,6 +65,9 @@ type Wording struct {
 	Tier  string `json:"tier"`
 	Title string `json:"title"`
 	Body  string `json:"body"`
+	// Audience is whose phone: "guest" the guest's. events-svc sets it on
+	// everything the guest's token posts.
+	Audience string `json:"audience,omitempty"`
 }
 
 // Notice is what mind told at its moment, for a card in the conversation.
@@ -71,6 +84,9 @@ type Notice struct {
 type Config struct {
 	EventsURL string
 	Token     string
+	// Guest is the guest's agent: only the guest's notices are laid, it
+	// subscribes as agent-guest for GuestTypes, and nothing else is done.
+	Guest bool
 	// Out is where decisions are reported (the events outbox). Nil posts
 	// straight to EventsURL.
 	Out *notify.Client
@@ -111,6 +127,11 @@ func (e *Engine) Consume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch {
+	case e.cfg.Guest:
+		// The guest's: what mind tells the guest at its moment, and no more.
+		if strings.HasPrefix(ev.Type, "remind.") {
+			e.notice(ev)
+		}
 	case ev.Type == mind.CardRaised:
 		e.raiseCard(ev)
 	case ev.Type == mind.CardClosed:
@@ -137,9 +158,13 @@ func (e *Engine) notice(ev Event) {
 		Checklist string  `json:"checklist"`
 		Who       string  `json:"who"`
 	}
-	// The guest's reminders are the guest's: their phone, never the
-	// operator's conversation.
-	if json.Unmarshal(ev.Data, &d) != nil || !d.Card || d.Who == "guest" {
+	if json.Unmarshal(ev.Data, &d) != nil || !d.Card {
+		return
+	}
+	// Each side's reminders are its own: the guest's reach the guest's
+	// phone and conversation, never the operator's - and the other way round.
+	// What goes to the guest's phone is the guest's, whoever the data names.
+	if guests := ev.Notify.Audience == "guest" || d.Who == "guest"; guests != e.cfg.Guest {
 		return
 	}
 	// The push's body carries what is left on the list and why now, both of
@@ -294,15 +319,19 @@ func (e *Engine) OnDecide(p proposal.Proposal, d proposal.Decision) {
 
 func (e *Engine) emit(ev map[string]any) { e.cfg.Out.Emit(ev) }
 
-// Subscribe registers this agent with events-svc for Types, retrying until
-// events-svc answers.
+// Subscribe registers this agent with events-svc for Types - the guest's for
+// GuestTypes, as agent-guest - retrying until events-svc answers.
 func (e *Engine) Subscribe(ctx context.Context, self string) {
 	if e.cfg.EventsURL == "" {
 		return
 	}
-	body, _ := json.Marshal(map[string]any{"url": self, "types": Types})
+	consumer, types := "agent", Types
+	if e.cfg.Guest {
+		consumer, types = "agent-guest", GuestTypes
+	}
+	body, _ := json.Marshal(map[string]any{"url": self, "types": types})
 	for wait := time.Second; ; wait = min(wait*2, time.Minute) {
-		req, _ := http.NewRequestWithContext(ctx, http.MethodPut, strings.TrimRight(e.cfg.EventsURL, "/")+"/subscriptions/agent", bytes.NewReader(body))
+		req, _ := http.NewRequestWithContext(ctx, http.MethodPut, strings.TrimRight(e.cfg.EventsURL, "/")+"/subscriptions/"+consumer, bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		if e.cfg.Token != "" {
 			req.Header.Set("Authorization", "Bearer "+e.cfg.Token)
@@ -310,7 +339,7 @@ func (e *Engine) Subscribe(ctx context.Context, self string) {
 		if resp, err := e.http.Do(req); err == nil {
 			resp.Body.Close()
 			if resp.StatusCode < 300 {
-				e.log.Info("events-svc 에 제안용으로 구독했습니다", "types", Types)
+				e.log.Info("events-svc 에 구독했습니다", "consumer", consumer, "types", types)
 				return
 			}
 		}

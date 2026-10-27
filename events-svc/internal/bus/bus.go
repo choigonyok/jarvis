@@ -2,6 +2,10 @@
 // once. It decides nothing about an event beyond whether its type matches a
 // pattern the subscriber asked for; what to do with it is the subscriber's.
 //
+// A guest's subscription (store.Subscription.Guest) is the one exception: it
+// is sent only what is for the guest (notify.audience "guest"), with the
+// guest's token - never the operator's events, never the services' token.
+//
 // What it does when a delivery fails is the stack's one rule
 // (gocommon/health): a consumer that is down costs its events nothing and is
 // waited for, in order; an event the consumer is up for but keeps failing on
@@ -45,17 +49,20 @@ type Store interface {
 type Bus struct {
 	store Store
 	token string
-	http  *http.Client
-	log   *slog.Logger
+	// guestToken is what a guest's subscription is sent with: the guest's
+	// agent knows that one, and only that one.
+	guestToken string
+	http       *http.Client
+	log        *slog.Logger
 
 	mu      sync.Mutex
 	wake    map[string]chan struct{}
 	running map[string]context.CancelFunc
 }
 
-func New(s Store, token string, log *slog.Logger) *Bus {
+func New(s Store, token, guestToken string, log *slog.Logger) *Bus {
 	return &Bus{
-		store: s, token: token, log: log,
+		store: s, token: token, guestToken: guestToken, log: log,
 		http:    &http.Client{Timeout: 30 * time.Second},
 		wake:    map[string]chan struct{}{},
 		running: map[string]context.CancelFunc{},
@@ -230,13 +237,13 @@ func (b *Bus) pass(ctx context.Context, consumer string) (int, time.Duration, er
 	recovering := sub.Failures > 0
 	n := 0
 	for _, e := range events {
-		if !Matches(sub.Types, e.Type) {
+		if !Matches(sub.Types, e.Type) || !Reaches(*sub, e) {
 			if err := b.store.Advance(ctx, consumer, e.ID, false); err != nil {
 				return n, 0, err
 			}
 			continue
 		}
-		status, err := b.post(ctx, sub.URL, e)
+		status, err := b.post(ctx, *sub, e)
 		switch judge(status, err) {
 		case refused:
 			b.log.Warn("소비자가 이벤트를 거절해 건너뜁니다", "consumer", consumer, "id", e.ID, "type", e.Type, "status", status)
@@ -287,7 +294,15 @@ func (b *Bus) retryHeld(ctx context.Context, sub *store.Subscription) error {
 		return err
 	}
 	for _, h := range due {
-		status, err := b.post(ctx, sub.URL, h.Event)
+		if !Reaches(*sub, h.Event) {
+			// Never sent to it, so never held for it; should one be there,
+			// it still does not go.
+			if err := b.store.HeldDelivered(ctx, sub.Consumer, h.Event.ID); err != nil {
+				return err
+			}
+			continue
+		}
+		status, err := b.post(ctx, *sub, h.Event)
 		switch judge(status, err) {
 		case delivered, refused:
 			if err := b.store.HeldDelivered(ctx, sub.Consumer, h.Event.ID); err != nil {
@@ -334,15 +349,19 @@ func (b *Bus) up(ctx context.Context, consumerURL string) bool {
 	return false
 }
 
-func (b *Bus) post(ctx context.Context, to string, e store.Event) (int, error) {
+func (b *Bus) post(ctx context.Context, sub store.Subscription, e store.Event) (int, error) {
 	body, _ := json.Marshal(e)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, to, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, sub.URL, bytes.NewReader(body))
 	if err != nil {
 		return 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if b.token != "" {
-		req.Header.Set("Authorization", "Bearer "+b.token)
+	token := b.token
+	if sub.Guest {
+		token = b.guestToken
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	resp, err := b.http.Do(req)
 	if err != nil {
@@ -351,6 +370,12 @@ func (b *Bus) post(ctx context.Context, to string, e store.Event) (int, error) {
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 	return resp.StatusCode, nil
+}
+
+// Reaches is whether an event may go to a subscription at all: everything
+// may go to the services', only what is for the guest to the guest's.
+func Reaches(sub store.Subscription, e store.Event) bool {
+	return !sub.Guest || (e.Notify != nil && e.Notify.Audience == "guest")
 }
 
 // Matches reads a subscription's patterns: "*", an exact type, or "x.*" for

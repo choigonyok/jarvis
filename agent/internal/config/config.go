@@ -202,7 +202,8 @@ type Config struct {
 	DatabaseURL string
 
 	// EventsURL is events-svc: the assistant subscribes there for mind's
-	// cards (internal/suggest) and reports decisions back. SelfURL is where
+	// cards (internal/suggest) and reports decisions back; the guest's agent
+	// for the guest's own reminders, and nothing else. SelfURL is where
 	// events-svc reaches this agent.
 	EventsURL string
 	SelfURL   string
@@ -314,6 +315,9 @@ func Load() (Config, error) {
 		c.ExtraMCPURLs = map[string]string{}
 		c.Enrich = false
 		c.VaultURL = ""
+		// events-svc brings the guest's reminders here, not to the
+		// operator's agent.
+		c.SelfURL = env("JARVIS_SELF_URL", "http://agent-guest:8081")
 	}
 
 	// With search-svc, read is how a page is opened: it reads Korean pages

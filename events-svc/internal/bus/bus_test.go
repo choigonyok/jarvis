@@ -167,7 +167,7 @@ func TestPassDeliversInOrderSkipsRefusedStopsOnFailure(t *testing.T) {
 		},
 		sub: store.Subscription{Consumer: "c", URL: srv.URL, Types: []string{"spending.*", "assets.*"}},
 	}
-	b := New(st, "", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	b := New(st, "", "", slog.New(slog.NewTextHandler(io.Discard, nil)))
 	ctx := context.Background()
 
 	n, _, err := b.pass(ctx, "c")
@@ -258,7 +258,7 @@ func heldAndOn(t *testing.T, healthPath string) {
 		events: []store.Event{{ID: 1, Type: "assets.band"}, {ID: 2, Type: "spending.big"}},
 		sub:    store.Subscription{Consumer: "c", URL: srv.URL + "/consume", Types: []string{"*"}},
 	}
-	b := New(st, "", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	b := New(st, "", "", slog.New(slog.NewTextHandler(io.Discard, nil)))
 	ctx := context.Background()
 	for i := 1; i < health.MaxTries; i++ {
 		n, wait, err := b.pass(ctx, "c")
@@ -298,7 +298,7 @@ func TestAnOutageWaitsWithoutCountingOrSkipping(t *testing.T) {
 			events: []store.Event{{ID: 1, Type: "x.y"}, {ID: 2, Type: "x.z"}},
 			sub:    store.Subscription{Consumer: "c", URL: srv.URL + "/consume", Types: []string{"*"}},
 		}
-		b := New(st, "", slog.New(slog.NewTextHandler(io.Discard, nil)))
+		b := New(st, "", "", slog.New(slog.NewTextHandler(io.Discard, nil)))
 		for i := 0; i < health.MaxTries+2; i++ {
 			n, wait, err := b.pass(context.Background(), "c")
 			if err == nil || n != 0 || wait != 0 {
@@ -318,7 +318,7 @@ func TestAnOutageWaitsWithoutCountingOrSkipping(t *testing.T) {
 		events: []store.Event{{ID: 1, Type: "x.y"}},
 		sub:    store.Subscription{Consumer: "c", URL: srv.URL + "/consume", Types: []string{"*"}},
 	}
-	b := New(st, "", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	b := New(st, "", "", slog.New(slog.NewTextHandler(io.Discard, nil)))
 	for i := 0; i < health.MaxTries+2; i++ {
 		_, _, _ = b.pass(context.Background(), "c")
 	}
@@ -337,7 +337,7 @@ func TestHeldEventsGoAgainWhenTheConsumerRecovers(t *testing.T) {
 		sub:    store.Subscription{Consumer: "c", URL: srv.URL + "/consume", Types: []string{"*"}, Cursor: 1},
 		held:   map[int64]*store.HeldEvent{1: {Event: store.Event{ID: 1, Type: "a.old"}, Tries: health.MaxTries}},
 	}
-	b := New(st, "", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	b := New(st, "", "", slog.New(slog.NewTextHandler(io.Discard, nil)))
 	ctx := context.Background()
 	_, _, _ = b.pass(ctx, "c") // down: a failure on record
 	c.mu.Lock()
@@ -356,5 +356,71 @@ func TestHeldEventsGoAgainWhenTheConsumerRecovers(t *testing.T) {
 	}
 	if _, _, err := b.pass(ctx, "c"); err != nil || st.held[1].Tries != health.MaxTries+1 {
 		t.Fatalf("계기 없이 다시 보내지 않습니다: %+v", st.held[1])
+	}
+}
+
+// A guest's subscription is sent what is for the guest and nothing else -
+// not the operator's reminder of the same type, not an event without a
+// notification - and with the guest's token, never the services'. The
+// services' subscriptions get everything with theirs.
+func TestAGuestSubscriptionGetsOnlyTheGuestsWithTheGuestsToken(t *testing.T) {
+	type got struct{ id, auth string }
+	var mu sync.Mutex
+	var seen []got
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var e store.Event
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &e)
+		name := e.Type
+		if e.Notify != nil {
+			name = e.Notify.Title
+		}
+		mu.Lock()
+		seen = append(seen, got{name, r.Header.Get("Authorization")})
+		mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	events := []store.Event{
+		{ID: 1, Type: "remind.asked", Notify: &store.Notify{Tier: "now", Title: "운영자 리마인드"}},
+		{ID: 2, Type: "remind.asked", Notify: &store.Notify{Tier: "now", Title: "손님 리마인드", Audience: "guest"}},
+		{ID: 3, Type: "remind.list"}, // no notification: whose it is is not said
+		{ID: 4, Type: "approval.waiting", Notify: &store.Notify{Tier: "now", Title: "손님 결재", Audience: "guest"}}, // not subscribed
+		{ID: 5, Type: "remind.list", Notify: &store.Notify{Tier: "now", Title: "손님 목록", Audience: "guest"}},
+	}
+	ctx := context.Background()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	st := &fakeStore{events: events, sub: store.Subscription{Consumer: "agent-guest", URL: srv.URL, Types: []string{"remind.*"}, Guest: true}}
+	if _, _, err := New(st, "owner-token", "guest-token", log).pass(ctx, "agent-guest"); err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) != 2 || seen[0] != (got{"손님 리마인드", "Bearer guest-token"}) || seen[1] != (got{"손님 목록", "Bearer guest-token"}) {
+		t.Fatalf("손님 구독에 간 것: %+v", seen)
+	}
+	if st.sub.Cursor != 5 {
+		t.Fatalf("손님 것이 아닌 것도 지나가야 합니다: cursor %d", st.sub.Cursor)
+	}
+
+	seen = nil
+	st = &fakeStore{events: events, sub: store.Subscription{Consumer: "agent", URL: srv.URL, Types: []string{"remind.*"}}}
+	if _, _, err := New(st, "owner-token", "guest-token", log).pass(ctx, "agent"); err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) != 4 || seen[0].auth != "Bearer owner-token" || seen[1].id != "손님 리마인드" || seen[2].id != "remind.list" {
+		t.Fatalf("서비스 쪽 구독에 간 것: %+v", seen)
+	}
+
+	// Something in a guest's held box that is not the guest's does not go
+	// either.
+	seen = nil
+	st = &fakeStore{events: events, sub: store.Subscription{Consumer: "agent-guest", URL: srv.URL, Types: []string{"*"}, Guest: true, Cursor: 5},
+		held: map[int64]*store.HeldEvent{1: {Event: events[0]}, 2: {Event: events[1]}}}
+	_ = st.ReleaseHeld(ctx, "agent-guest")
+	if _, _, err := New(st, "owner-token", "guest-token", log).pass(ctx, "agent-guest"); err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) != 1 || seen[0] != (got{"손님 리마인드", "Bearer guest-token"}) || len(st.held) != 0 {
+		t.Fatalf("격리함에서 손님 구독에 간 것: %+v, 남은 것 %d", seen, len(st.held))
 	}
 }

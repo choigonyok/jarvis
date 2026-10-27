@@ -26,6 +26,7 @@ agent (Go) :8080      결정하는 곳 - 대화, 권한 게이트, 결재 카드
       └─ exec: claude -p ...  ← 구독으로 과금, 실제 실행
 agent-guest :8081     손님 계정의 agent - 손님 대화·캘린더(손님 쪽)·리마인드·체크리스트·작업,
                       손님의 지금 상황·취향(mind, 손님 토큰)·폰 한 줄(context)·자비스 기억·첨부 사진.
+                      손님 리마인드가 울리면 손님 대화에 안내 카드(events 의 손님 구독 agent-guest).
                       운영자의 돈·메시지·브라우저·위치에는 닿지 못함, DB 에도 닿지 못함
 
 mind-svc :8102        인지 루프. 감지 → 해석 → 세계 모델 → 노트·예측·성찰 → 스킬 →
@@ -302,7 +303,7 @@ cd web && AGENT_URL=http://localhost:8080 \
 | GET | `/calendar?from=&to=` | 기간 조회 (양끝 포함) |
 | POST | `/calendar` | 사람이 직접 추가·수정. id 없으면 추가 |
 | DELETE | `/calendar/{id}` | 사람이 직접 삭제 |
-| POST | `/consume` | events-svc 가 mind 카드를 배달하는 곳 |
+| POST | `/consume` | events-svc 가 배달하는 곳: mind 카드·리마인드 안내 카드·체크리스트. 손님 agent 에는 손님 리마인드만 |
 | GET·POST | `/browser-checks` | 브라우저 로그인 확인 결과 / 다시 확인 요청 (status-svc 가 읽음) |
 | POST | `/intercept` | 브라우저 결제 가드가 묻는 곳 (가드 전용 토큰) |
 | POST | `/mcp` | Claude Code 전용 권한 질의 (사람이 쓰는 곳 아님) |

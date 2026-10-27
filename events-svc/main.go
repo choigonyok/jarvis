@@ -54,9 +54,9 @@ func main() {
 	}
 	defer pool.Close()
 
-	token := os.Getenv("API_TOKEN")
+	token, guestToken := os.Getenv("API_TOKEN"), os.Getenv("API_GUEST_TOKEN")
 	st := store.New(pool)
-	b := bus.New(st, token, log)
+	b := bus.New(st, token, guestToken, log)
 	loops := health.NewLoops()
 	loops.Add("drain", "outbox 를 이벤트로", 5*time.Minute)
 	go b.Run(ctx)
@@ -66,7 +66,7 @@ func main() {
 	addr := getenv("LISTEN_ADDR", ":8101")
 	srv := &http.Server{
 		Addr:         addr,
-		Handler:      api.New(st, b.Notify, func() { b.Sync(ctx) }, token, os.Getenv("API_GUEST_TOKEN"), loops, log).Handler(),
+		Handler:      api.New(st, b.Notify, func() { b.Sync(ctx) }, token, guestToken, loops, log).Handler(),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}

@@ -127,7 +127,9 @@ cloudflared(`macmini` 터널)는 다른 프로젝트 호스트명 때문에 남�
 밖의 파일 호출은 카드 없이 거절 - `permission.Folders`), 셸 없음. 리마인드·체크리스트(mind)와 작업(jobs)은
 `JARVIS_GUEST_API_TOKEN` 으로 손님 것만 열리고(서로의 것은 '없음'), 손님 작업은 웹사이트도 사진도 못 쓴다(브라우저가
 운영자 계정이라 jobs-svc 가 sites 를 거절) - 손님 에이전트의 스케줄러가 브라우저 없이 돌린다. 손님 리마인드는
-손님 폰의 도착·출발(`location.guest.*`)과 `context` 의 `GET /now/guest` 로 울리고, 손님 기기로만 간다(대화 카드는 아직 없음). 게이트웨이 경로 `/agent-guest/…`(VPC `jarvis-agent-guest`, 포트 8081).
+손님 폰의 도착·출발(`location.guest.*`)과 `context` 의 `GET /now/guest` 로 울리고, 손님 기기와 손님 대화의 안내 카드로만 간다:
+events-svc 의 손님 구독 `agent-guest`(손님 토큰으로 등록, 이름은 `-guest` 로 끝나야 함)에는 손님에게 가는 이벤트(`notify.audience` guest)만
+손님 토큰을 달아 보낸다. 게이트웨이 경로 `/agent-guest/…`(VPC `jarvis-agent-guest`, 포트 8081).
 손님 대화도 운영자 대화처럼 턴마다 지금 상황을 받는다: mind `GET /now` 는 손님 토큰에 손님 것만 답하고
 (손님 일정과 함께하는 일정·손님 폰 위치·손님 리마인드·체크리스트 - 운영자 일정·결제·사진·예측은 없음), 취향은
 memory-svc 의 손님 그래프(group guest)에서 손님 자신에 관한 사실을 검색해 30분마다 다시 읽는다(`mind/guest.go`).
@@ -158,7 +160,7 @@ VNC 서버(x11vnc)는 브라우저 컨테이너 안에서만 듣고(`-localhost`
 `mcp__mcp-browser__browser_fill_login`(자동 입력은 카드 없이)과 `mcp__vault__list_logins`.
 
 **맥미니 .env 에 더 필요한 값.** `JARVIS_GUEST_API_TOKEN`(손님 agent 의 토큰 - chat·calendar·
-events·memory 가 손님 쪽만 열어 준다), `JARVIS_MIND_CONSOLE_TOKEN`(mind 콘솔 로그인, `scripts/mini console`),
+events·memory 가 손님 쪽만 열어 준다. events 는 손님 구독에 이것을 달아 보낸다), `JARVIS_MIND_CONSOLE_TOKEN`(mind 콘솔 로그인, `scripts/mini console`),
 `JARVIS_VNC_PASSWORD`(8자). 앞의 둘은 `openssl rand -base64 48 | tr -d '/+='` 로 만든다.
 
 **토큰은 언제나 필요하다.** compose 가 빈 `JARVIS_API_TOKEN` 을 거부하고, 서비스도 빈 `API_TOKEN` 으로는
