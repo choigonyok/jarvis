@@ -27,8 +27,13 @@ import type { Settlement } from "./venues.js";
  * Going forward that is exact to the day: the cash is written down once a day
  * per currency (db.recordCash) and each day is measured against the last, at
  * that day's rate - so dollars merely held while the rate moves count as
- * nothing. The past has no such record, so there the hand-kept ledger stays
- * and is checked instead (reconcile).
+ * nothing. An exchange seen between two looks the same day is taken out of
+ * the day's sum (exchangeBetween): money put in and changed into dollars that
+ * night is the won put in, not the dollars at the day's rate, which left the
+ * exchange's spread off the deposit (2026-10-28). Put in and changed between
+ * two looks, it cannot be told apart, and the rate stands. The past has no
+ * such record, so there the hand-kept ledger stays and is checked instead
+ * (reconcile).
  */
 
 /** Smaller than this is a dividend, interest or an exchange's spread, not someone moving money. */
@@ -37,6 +42,10 @@ export const FLOW_MIN_KRW = 5_000;
 const CHECK_MIN_KRW = 10_000;
 /** How far a guessed exchange rate may be off: KIS's rate on a nearby day, and the spread. */
 const RATE_SLACK = 0.005;
+/** The least a change between two looks is to be read as an exchange. */
+const EXCHANGE_MIN_KRW = 1_000;
+/** How far an exchange's own rate may sit from KIS's: its spread, and the rate moving meanwhile. */
+const EXCHANGE_RATE_SLACK = 0.05;
 
 const nextDay = (date: string) => {
   const d = new Date(`${date}T00:00:00Z`);
@@ -59,6 +68,49 @@ export function movedThrough(movements: Settlement[], date: string): { krw: numb
 }
 
 /**
+ * The money put in (+) or taken out (-) since the last day that neither the
+ * trades nor the day's exchanges explain, at today's rate - and the least it
+ * must be to count as someone moving money (`min`).
+ */
+export function dayFlow(
+  prev: Pick<db.CashDay, "cashKrw" | "cashUsd" | "settledKrw" | "settledUsd">,
+  cash: { krw: number; usd: number },
+  settled: { krw: number; usd: number },
+  exch: { krw: number; usd: number },
+  usdKrw: number,
+): { flow: number; min: number } {
+  // What was only exchanged today is neither put in nor taken out: the won
+  // it took is added back, the dollars it made are not counted as come in.
+  const wonSide = cash.krw - prev.cashKrw - (settled.krw - prev.settledKrw) + exch.krw;
+  const dollarSide = usdKrw * (cash.usd - prev.cashUsd - (settled.usd - prev.settledUsd) - exch.usd);
+  // When the two sides still moved opposite ways, that much was exchanged
+  // between two looks, and the exchange's own rate and spread leave a
+  // remainder that is nobody's money.
+  const exchanged = Math.sign(wonSide) !== Math.sign(dollarSide) ? Math.min(Math.abs(wonSide), Math.abs(dollarSide)) : 0;
+  return { flow: wonSide + dollarSide, min: FLOW_MIN_KRW + exchanged * RATE_SLACK };
+}
+
+/**
+ * An exchange between two looks the same day: won out and dollars in, or the
+ * other way, at about KIS's rate (its spread, and the rate moving meanwhile).
+ * The won that went into dollars (negative when dollars went into won) and
+ * the dollars it made; null when the change was something else - money in or
+ * out, a dividend, nothing.
+ */
+export function exchangeBetween(
+  earlier: Pick<db.CashDay, "cashKrw" | "cashUsd" | "settledKrw" | "settledUsd">,
+  cash: { krw: number; usd: number },
+  settled: { krw: number; usd: number },
+  usdKrw: number,
+): { krw: number; usd: number } | null {
+  const won = cash.krw - earlier.cashKrw - (settled.krw - earlier.settledKrw);
+  const usd = cash.usd - earlier.cashUsd - (settled.usd - earlier.settledUsd);
+  if (Math.abs(won) < EXCHANGE_MIN_KRW || Math.abs(usd) < 0.01 || Math.sign(won) === Math.sign(usd)) return null;
+  if (usdKrw <= 0 || Math.abs(-won / usd / usdKrw - 1) > EXCHANGE_RATE_SLACK) return null;
+  return { krw: -won, usd };
+}
+
+/**
  * Write today's cash and turn the change since the last day that the trades
  * do not explain into a found flow, stored on today's date (source 'auto').
  * Recomputed on every look, so the day's last look wins.
@@ -75,23 +127,27 @@ export async function detectFlow(
   usdKrw: number,
 ): Promise<void> {
   const settled = movedThrough(movements, today);
-  const prev = await db.recordCash({
+  const { earlier, prev } = await db.cashDays(venue, today);
+  // The day's exchanges so far, and one made since the last look.
+  const exch = { krw: earlier?.exchKrw ?? 0, usd: earlier?.exchUsd ?? 0 };
+  const made = earlier ? exchangeBetween(earlier, cash, settled, usdKrw) : null;
+  if (made) {
+    exch.krw += made.krw;
+    exch.usd += made.usd;
+  }
+  await db.recordCash({
     venue,
     date: today,
     cashKrw: cash.krw,
     cashUsd: cash.usd,
     settledKrw: settled.krw,
     settledUsd: settled.usd,
+    exchKrw: exch.krw,
+    exchUsd: exch.usd,
   });
   if (!prev) return; // the first day written: nothing to measure against yet
 
-  const wonSide = cash.krw - prev.cashKrw - (settled.krw - prev.settledKrw);
-  const dollarSide = usdKrw * (cash.usd - prev.cashUsd - (settled.usd - prev.settledUsd));
-  const flow = wonSide + dollarSide;
-  // When the two sides moved opposite ways, that much was exchanged, and the
-  // exchange's own rate and spread leave a remainder that is nobody's money.
-  const exchanged = Math.sign(wonSide) !== Math.sign(dollarSide) ? Math.min(Math.abs(wonSide), Math.abs(dollarSide)) : 0;
-  const min = FLOW_MIN_KRW + exchanged * RATE_SLACK;
+  const { flow, min } = dayFlow(prev, cash, settled, exch, usdKrw);
   const before = await db.autoFlow(venue, prev.date);
   if (before !== null && Math.abs(before + flow) < min) {
     await db.setAutoFlow(venue, prev.date, null, "");
@@ -169,6 +225,11 @@ export function reconcile(
   };
 
   const checks: LedgerCheck[] = [];
+  // Won the ledger says was put in, by day: what may end a day short.
+  const putIn = new Map<string, number>();
+  for (const f of flows) if (f.venue === venue && f.amountKrw > 0) putIn.set(f.date, (putIn.get(f.date) ?? 0) + f.amountKrw);
+  // A stretch short, told once it is known how it ended.
+  let short: LedgerCheck | null = null;
   let krw = 0;
   let usd = 0;
   // The won the dollars held were booked at, all together.
@@ -210,16 +271,26 @@ export function reconcile(
     // Once per stretch below zero: the day it started is the one to look at.
     const below = krw <= -CHECK_MIN_KRW;
     if (below && !dry) {
-      checks.push({
+      short = {
         venue,
         kind: "short",
         date,
         amountKrw: -krw,
         message: `${md(date)} 기록상 ${ACCOUNT[venue]} 현금이 ${won(-krw)} 모자라요. 그 전 입금이 빠졌거나 날짜가 늦게 적혔어요.`,
-      });
+      };
+    }
+    if (!below && dry && short) {
+      // Ended the next day by money put in: the trade's day against the
+      // deposit's. KIS dates a fill by New York's day, and a deposit found
+      // from the day's cash takes Seoul's - won put in after midnight for that
+      // night's purchase read as a day short (2026-10-27).
+      const nextDayIn = date <= nextDay(short.date ?? date) && (putIn.get(date) ?? 0) > 0;
+      if (!nextDayIn) checks.push(short);
+      short = null;
     }
     dry = below;
   }
+  if (short) checks.push(short);
 
   // Dollars still held, at today's rate against what they were booked at.
   if (usd > 0) fxKrw += usd * usdKrw - usdCost;

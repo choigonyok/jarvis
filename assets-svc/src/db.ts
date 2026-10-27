@@ -266,40 +266,55 @@ export type CashDay = {
   cashUsd: number;
   settledKrw: number;
   settledUsd: number;
+  /** The exchanges seen between looks so far that day (won into dollars +), and the dollars they made (072). */
+  exchKrw: number;
+  exchUsd: number;
 };
 
+type CashRow = {
+  on_date: string; cash_krw: string; cash_usd: string; settled_krw: string; settled_usd: string;
+  exch_krw: string; exch_usd: string;
+};
+
+const cashDay = (venue: CashDay["venue"], r: CashRow): CashDay => ({
+  venue,
+  date: r.on_date,
+  cashKrw: Number(r.cash_krw),
+  cashUsd: Number(r.cash_usd),
+  settledKrw: Number(r.settled_krw),
+  settledUsd: Number(r.settled_usd),
+  exchKrw: Number(r.exch_krw),
+  exchUsd: Number(r.exch_usd),
+});
+
 /**
- * Write today's cash for an account (replacing an earlier look today) and
- * hand back its last day before, which is what today is measured against.
+ * An account's cash as last seen today (`earlier`, before this look writes
+ * over it) and on its last day before (`prev`, what today is measured
+ * against). Either is null when there is none.
  */
-export async function recordCash(day: CashDay): Promise<CashDay | null> {
-  if (!pool) return null;
+export async function cashDays(venue: CashDay["venue"], today: string): Promise<{ earlier: CashDay | null; prev: CashDay | null }> {
+  if (!pool) return { earlier: null, prev: null };
+  const { rows } = await pool.query<CashRow>(
+    `select to_char(on_date, 'YYYY-MM-DD') as on_date, cash_krw, cash_usd, settled_krw, settled_usd, exch_krw, exch_usd
+       from kis_cash_daily where venue = $1 and on_date <= $2::date order by on_date desc limit 2`,
+    [venue, today],
+  );
+  const days = rows.map((r) => cashDay(venue, r));
+  return days[0]?.date === today ? { earlier: days[0], prev: days[1] ?? null } : { earlier: null, prev: days[0] ?? null };
+}
+
+/** Write today's cash for an account, replacing an earlier look today. */
+export async function recordCash(day: CashDay): Promise<void> {
+  if (!pool) return;
   await pool.query(
-    `insert into kis_cash_daily (venue, on_date, cash_krw, cash_usd, settled_krw, settled_usd)
-     values ($1, $2::date, $3, $4, $5, $6)
+    `insert into kis_cash_daily (venue, on_date, cash_krw, cash_usd, settled_krw, settled_usd, exch_krw, exch_usd)
+     values ($1, $2::date, $3, $4, $5, $6, $7, $8)
      on conflict (venue, on_date) do update
        set cash_krw = excluded.cash_krw, cash_usd = excluded.cash_usd,
-           settled_krw = excluded.settled_krw, settled_usd = excluded.settled_usd, observed_at = now()`,
-    [day.venue, day.date, day.cashKrw, day.cashUsd, day.settledKrw, day.settledUsd],
+           settled_krw = excluded.settled_krw, settled_usd = excluded.settled_usd,
+           exch_krw = excluded.exch_krw, exch_usd = excluded.exch_usd, observed_at = now()`,
+    [day.venue, day.date, day.cashKrw, day.cashUsd, day.settledKrw, day.settledUsd, day.exchKrw, day.exchUsd],
   );
-  const { rows } = await pool.query<{
-    on_date: string; cash_krw: string; cash_usd: string; settled_krw: string; settled_usd: string;
-  }>(
-    `select to_char(on_date, 'YYYY-MM-DD') as on_date, cash_krw, cash_usd, settled_krw, settled_usd
-       from kis_cash_daily where venue = $1 and on_date < $2::date order by on_date desc limit 1`,
-    [day.venue, day.date],
-  );
-  const r = rows[0];
-  return r
-    ? {
-        venue: day.venue,
-        date: r.on_date,
-        cashKrw: Number(r.cash_krw),
-        cashUsd: Number(r.cash_usd),
-        settledKrw: Number(r.settled_krw),
-        settledUsd: Number(r.settled_usd),
-      }
-    : null;
 }
 
 /** The found flow for an account on `date`, if any. */
