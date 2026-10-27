@@ -5,6 +5,7 @@ import { useAgentStream } from "@/lib/stream";
 import {
   API,
   applyDraft,
+  storedForm,
   type AgentEvent,
   type Checklist,
   type Draft,
@@ -74,7 +75,8 @@ export function useThread() {
   const [proposals, setProposalsState] = useState<Proposal[]>(() => cached?.proposals ?? []);
   const [thinking, setThinking] = useState(() => cached?.thinking ?? false);
   // The answer being written, shown as it grows until its turn takes its
-  // place. Not cached: a stream that opens mid-answer is sent it whole first.
+  // place (draftShown). Not cached: a stream that opens mid-answer is sent
+  // it whole first.
   const [draft, setDraft] = useState<Draft | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(() => cached !== null);
@@ -199,8 +201,16 @@ export function useThread() {
     switch (event.type) {
       case "turn":
         setTurns((prev) => upsert(prev, event.turn));
-        // In the same render as the turn, so the words never show twice.
-        if (event.replaces) setDraft((cur) => (cur?.id === event.replaces ? null : cur));
+        if (event.replaces) {
+          const { replaces, turn } = event;
+          // In the same render as the turn, so the words never show twice:
+          // the draft holds its place while the screen lets out its last
+          // words - unless it missed some, when the turn shows at once.
+          setDraft((cur) => {
+            if (!cur || cur.id !== replaces) return cur;
+            return storedForm(cur.text) === storedForm(turn.paragraphs?.join("\n\n") ?? "") ? { ...cur, turn: turn.id } : null;
+          });
+        }
         if (event.turn.origin?.checklist && !cachedLists[event.turn.origin.checklist]) {
           // Its list usually follows on the stream; if not by then, ask.
           const id = event.turn.origin.checklist;
@@ -220,8 +230,9 @@ export function useThread() {
         break;
       case "status":
         setThinking(Boolean(event.thinking));
-        // A run that is over is writing nothing.
-        if (!event.thinking) setDraft(null);
+        // A run that is over is writing nothing - but a finished answer may
+        // still be coming out on screen.
+        if (!event.thinking) setDraft((cur) => (cur?.turn ? cur : null));
         break;
       case "queue":
         setQueue(event.queue ?? []);
@@ -256,6 +267,9 @@ export function useThread() {
     setDraft(null);
     void hydrate();
   });
+
+  // The screen has let out a finished draft's last word: its turn shows.
+  const draftShown = useCallback((id: string) => setDraft((cur) => (cur?.id === id ? null : cur)), []);
 
   // Re-read the thread and reopen the stream - for a screen that sent and
   // heard nothing back, which is what a quietly dead stream looks like.
@@ -439,6 +453,7 @@ export function useThread() {
     waited: waited as ReadonlySet<string>,
     thinking,
     draft,
+    draftShown,
     queue,
     connection,
     error,

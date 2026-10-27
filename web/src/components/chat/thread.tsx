@@ -23,6 +23,7 @@ import {
   isPending,
   plainText,
   quoteText,
+  storedForm,
   type Checklist,
   type Draft,
   type Proposal,
@@ -354,6 +355,88 @@ const TurnRow = memo(function TurnRow({
   );
 });
 
+/** How long words that came at once take to come out: about the gap until the next ones. */
+const SPREAD_MS = 500;
+/** The slowest they come out, in characters a millisecond (40 a second). */
+const MIN_RATE = 0.04;
+/** The least time between redraws: each one parses the markdown again. */
+const FRAME_MS = 33;
+/**
+ * A draft first seen this long was joined midway - the stream reopened, the
+ * page came back - and what it already says is shown at once. A new one
+ * starts with a few characters: the agent sends its first piece alone.
+ */
+const JOINED = 60;
+
+/**
+ * The words of an answer let out at an even pace. They reach the screen in
+ * bursts - from the Mac mini a few dozen characters every half second or so
+ * (2026-10-27) - and drawn as they landed they jumped a line at a time. What
+ * waits is spread over about the time the next burst takes to come, so it
+ * reads as typing, and a burst that lands early speeds it up. A draft met
+ * already finished (back from another tab, the voice stage) or joined midway
+ * (JOINED) is shown as far as it has come, and with reduced motion
+ * everything is shown as it lands.
+ */
+function useTyped(text: string, settled: boolean): string {
+  const [still] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+  );
+  const [shown, setShown] = useState(() => (settled || text.length >= JOINED ? text.length : 0));
+  const pos = useRef(shown);
+  const goal = useRef(shown);
+  const rate = useRef(MIN_RATE);
+
+  useEffect(() => {
+    if (still) return;
+    if (text.length > goal.current) rate.current = Math.max(MIN_RATE, (text.length - pos.current) / SPREAD_MS);
+    goal.current = text.length;
+    if (pos.current >= text.length) return;
+    let raf = 0;
+    let last = performance.now();
+    let drawn = 0;
+    const tick = (now: number) => {
+      pos.current = Math.min(text.length, pos.current + rate.current * Math.max(0, now - last));
+      last = now;
+      const out = pos.current >= text.length;
+      if (out || now - drawn >= FRAME_MS) {
+        drawn = now;
+        setShown(Math.floor(pos.current));
+      }
+      if (!out) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [text, still]);
+
+  if (still) return text;
+  let end = Math.min(shown, text.length);
+  // Never half of a character written as two (an emoji).
+  const code = text.charCodeAt(end - 1);
+  if (code >= 0xd800 && code <= 0xdbff) end += 1;
+  return text.slice(0, end);
+}
+
+/**
+ * The answer while it is written: where its turn will be, in its words, laid
+ * out as the runner stores them so the turn reads the same. Once its turn has
+ * come and the last word is out, the turn takes its place (onShown).
+ */
+const DraftRow = memo(function DraftRow({ draft, onShown }: { draft: Draft; onShown: (id: string) => void }) {
+  const typed = useTyped(draft.text, Boolean(draft.turn));
+  const out = typed.length >= draft.text.length;
+  useEffect(() => {
+    if (out && draft.turn) onShown(draft.id);
+  }, [out, draft.turn, draft.id, onShown]);
+  const text = storedForm(typed);
+  return (
+    <li className={ROW} aria-busy="true">
+      <Rail />
+      <div className="min-w-0">{text ? <Markdown>{text}</Markdown> : null}</div>
+    </li>
+  );
+});
+
 /**
  * The conversation itself, apart from the screen around it: a search being
  * typed, a quote picked or the keyboard coming up re-renders the screen, and
@@ -368,6 +451,7 @@ const Transcript = memo(function Transcript({
   waited,
   thinking,
   draft,
+  onDraftShown,
   error,
   hydrated,
   onQuote,
@@ -387,6 +471,7 @@ const Transcript = memo(function Transcript({
   thinking: boolean;
   /** The answer being written. */
   draft: Draft | null;
+  onDraftShown: (id: string) => void;
   error: string | null;
   hydrated: boolean;
   onQuote: (ref: TurnRef) => void;
@@ -407,15 +492,6 @@ const Transcript = memo(function Transcript({
   // When a quoted turn is on the page its own stamp says when; one that has
   // scrolled out of the loaded thread falls back to the agent's.
   const times = new Map(turns.map((t) => [t.id, turnTime(t.atIso, t.at)]));
-  // Laid out as the runner will store it - split on blank lines, each part
-  // trimmed - so the turn that replaces it reads the same and nothing jumps.
-  const writing = draft
-    ? draft.text
-        .split("\n\n")
-        .map((p) => p.trim())
-        .filter(Boolean)
-        .join("\n\n")
-    : "";
 
   return (
     <>
@@ -431,6 +507,8 @@ const Transcript = memo(function Transcript({
 
       <ol className="space-y-7">
         {turns.map((turn, i) => {
+          // A finished answer still coming out holds this place (DraftRow).
+          if (turn.id === draft?.turn) return null;
           const day = turnDay(turn.atIso);
           return (
             <TurnRow
@@ -463,15 +541,9 @@ const Transcript = memo(function Transcript({
           </li>
         ))}
 
-        {/* The answer as it is written: where its turn will be, in its words.
-            While it grows the dots have nothing to say. */}
-        {writing ? (
-          <li className={ROW} aria-busy="true">
-            <Rail />
-            <div className="min-w-0">
-              <Markdown>{writing}</Markdown>
-            </div>
-          </li>
+        {/* While the answer grows the dots have nothing to say. */}
+        {draft && draft.text.trim() ? (
+          <DraftRow key={draft.id} draft={draft} onShown={onDraftShown} />
         ) : thinking ? (
           <li
             className={ROW}
@@ -515,6 +587,7 @@ export function Thread() {
     waited,
     thinking,
     draft,
+    draftShown,
     queue,
     connection,
     error,
@@ -964,6 +1037,7 @@ export function Thread() {
             waited={waited}
             thinking={thinking}
             draft={draft}
+            onDraftShown={draftShown}
             error={error}
             hydrated={hydrated}
             onQuote={quote}

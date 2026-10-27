@@ -178,8 +178,24 @@ export type DraftFrame = {
   gone?: boolean;
 };
 
-/** An answer as far as it has been written. */
-export type Draft = { id: string; text: string };
+/**
+ * An answer as far as it has been written. `turn` is the turn it became,
+ * once that has come: the screen lets out the last of its words before the
+ * turn takes its place.
+ */
+export type Draft = { id: string; text: string; turn?: string };
+
+/**
+ * Words as the runner stores them - split on blank lines, each part trimmed -
+ * so a draft drawn this way reads the same as the turn that replaces it.
+ */
+export function storedForm(text: string): string {
+  return text
+    .split("\n\n")
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .join("\n\n");
+}
 
 /**
  * A frame applied to what is on screen. One that does not follow on - it
