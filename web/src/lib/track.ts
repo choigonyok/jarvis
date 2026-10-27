@@ -145,6 +145,14 @@ const SILENCE = 10 * 60_000;
 const GAP_METERS = 300;
 /** Two stays this close are the same place. */
 const SAME_PLACE = 180;
+/**
+ * Shorter than this, a way is too brief for its distance over its time: a
+ * stay's last fixes may have been on the way out already, and 100 m "in 19
+ * seconds" out of one was drawn as a ride while the phone said 3 km/h
+ * (2026-10-27). The phone's own measure of the speed, if it gave one, says
+ * then how the way was gone.
+ */
+const BRIEF = 60_000;
 
 export function meters(a: LatLon, b: LatLon): number {
   const r = 6_371_000;
@@ -255,7 +263,8 @@ function stepsOf(nodes: Node[]): Step[] {
     const b = nodes[k + 1];
     const d = meters(a, b);
     const kmh = (d / Math.max(1, (b.start - a.leave) / 1000)) * 3.6;
-    steps.push({ a, b, t0: a.leave, t1: b.start, meters: d, kmh, mode: a.unseen ? "gap" : modeOf(a, b, kmh) });
+    const pace = b.start - a.leave < BRIEF && b.vel !== undefined ? b.vel : kmh;
+    steps.push({ a, b, t0: a.leave, t1: b.start, meters: d, kmh, mode: a.unseen ? "gap" : modeOf(a, b, pace) });
   }
   return steps;
 }
