@@ -397,21 +397,34 @@ func unsafeTool(t string) bool {
 	return false
 }
 
+// gatedTool is an allowlist entry that takes no card but must still pass the
+// gate: the shared browser's own tools (the mcp-browser server, jobs.
+// BrowserServer). The gate lets them by without a card and, as it does, gives
+// the browser to the conversation - a job on it stops then, and only then
+// (Runner.TakeBrowser). Skipping the gate, the conversation would drive the
+// browser while a job is on it.
+func gatedTool(t string) bool { return strings.HasPrefix(t, "mcp__mcp-browser__") }
+
 // Allow adds read-only tools a module declares to AllowedTools, once each.
 // Called at boot for each module that is on.
 func (c *Config) Allow(tools ...string) {
 	for _, t := range tools {
-		if !unsafeTool(t) && !slices.Contains(c.AllowedTools, t) {
+		if !unsafeTool(t) && !gatedTool(t) && !slices.Contains(c.AllowedTools, t) {
 			c.AllowedTools = append(c.AllowedTools, t)
 		}
 	}
 }
 
+// safeAllowed is JARVIS_ALLOWED_TOOLS less what may not skip the gate: the
+// unsafe (dropped, and said so at boot) and the browser's tools (left to the
+// gate, which passes them without a card).
 func safeAllowed(tools []string) (kept, dropped []string) {
 	for _, t := range tools {
-		if unsafeTool(t) {
+		switch {
+		case unsafeTool(t):
 			dropped = append(dropped, t)
-		} else {
+		case gatedTool(t):
+		default:
 			kept = append(kept, t)
 		}
 	}

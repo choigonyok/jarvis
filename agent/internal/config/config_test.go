@@ -1,6 +1,7 @@
 package config
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -341,4 +342,31 @@ func TestSearchReplacesWebFetch(t *testing.T) {
 			t.Fatalf("토큰이 없으면 그대로여야 합니다: %v %s", c.SearchOn(), *c.BuiltinTools)
 		}
 	})
+}
+
+// The browser's tools never skip the gate, whatever JARVIS_ALLOWED_TOOLS or a
+// module says: the gate passes them without a card and gives the browser to
+// the conversation as it does (2026-10-28). They are not "dropped" - nothing
+// unsafe was asked for.
+func TestBrowserToolsGoThroughTheGate(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "x")
+	t.Setenv("JARVIS_API_TOKEN", "api")
+	t.Setenv("JARVIS_ROLE", "")
+	t.Setenv("JARVIS_ALLOWED_TOOLS", "TodoWrite,mcp__mcp-browser__browser_navigate,mcp__mcp-browser__browser_click,mcp__calendar__list_events")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Allow("mcp__mcp-browser__browser_type", "mcp__web__search")
+	for _, tool := range c.AllowedTools {
+		if strings.HasPrefix(tool, "mcp__mcp-browser__") {
+			t.Fatalf("브라우저 도구가 관문을 건너뜁니다: %v", c.AllowedTools)
+		}
+	}
+	if !slices.Contains(c.AllowedTools, "mcp__calendar__list_events") || !slices.Contains(c.AllowedTools, "mcp__web__search") {
+		t.Fatalf("다른 도구는 그대로: %v", c.AllowedTools)
+	}
+	if len(c.DroppedTools) != 0 {
+		t.Fatalf("뺀(위험한) 도구로 치지 않습니다: %v", c.DroppedTools)
+	}
 }
