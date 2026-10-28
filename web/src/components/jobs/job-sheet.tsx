@@ -80,12 +80,14 @@ function Body({
 
   const j = detail?.job ?? job;
   const card = j.waitingCard ? proposals.find((p) => p.id === j.waitingCard && p.state === "pending") : undefined;
-  // A job may also be waiting on a login card; show any pending card it raised.
+  // A job may also be waiting on a login card, or be asked whether it should
+  // go before the job on the browser (job.first); show any pending card it raised.
   const cards = useMemo(() => {
     const own = proposals.filter(
       (p) =>
         p.state === "pending" &&
-        ((p.action.kind === "job.ask" && (p.action.input as { jobId?: number }).jobId === j.id) ||
+        (((p.action.kind === "job.ask" || p.action.kind === "job.first") &&
+          (p.action.input as { jobId?: number }).jobId === j.id) ||
           (p.action.kind === "job.login" && j.sites.includes(String((p.action.input as { site?: string }).site)))),
     );
     return card && !own.includes(card) ? [card, ...own] : own;
