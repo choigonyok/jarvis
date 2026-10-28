@@ -402,7 +402,8 @@ func (s *Store) AddSites(ctx context.Context, id int64, sites []string) (Job, er
 	return s.Get(ctx, id)
 }
 
-// Control is pause, resume, run (now) or cancel.
+// Control is pause, resume, run (now), first (ahead of the line for the
+// browser) or cancel.
 func (s *Store) Control(ctx context.Context, id int64, action string) error {
 	if action == "cancel" {
 		return s.cancel(ctx, id)
@@ -417,6 +418,17 @@ func (s *Store) Control(ctx context.Context, id int64, action string) error {
 	case "run":
 		q, note = `update jobs set state = 'active', next_at = now(), next_reason = '지금 실행', updated_at = now()
 			where id = $1 and state in ('active', 'paused')`, "지금 실행합니다"
+	case "first":
+		// The operator put it ahead of the line for the browser (the agent's
+		// 먼저 card): due a moment before every job due now and every run in
+		// flight, so it is the next to get the browser - and the run it stops
+		// goes on after it in its own place (rules.Deferred).
+		q, note = `update jobs set next_at = least(
+				(select min(o.next_at) from jobs o where o.who = jobs.who and o.state = 'active' and o.next_at is not null),
+				(select min(r.started_at) from job_runs r join jobs o on o.id = r.job_id where o.who = jobs.who and r.ended_at is null),
+				now()) - interval '1 second',
+			next_reason = '먼저 하기로 함', updated_at = now()
+			where id = $1 and state = 'active'`, "운영자가 먼저 하기로 했습니다"
 	default:
 		return fmt.Errorf("모르는 조작입니다: %s", action)
 	}
@@ -687,8 +699,15 @@ func (s *Store) EndRun(ctx context.Context, runID int64, outcome, note string) (
 		_, err = tx.Exec(ctx, `update jobs set state = 'failed', attempts = $2, next_at = null,
 			summary = $3, updated_at = now() where id = $1`, jobID, end.Attempts, "실패: "+end.Note)
 		out.Failed, out.Note = true, end.Note
-	case end.Retry && carded:
+	case (end.Retry || end.Keep) && carded:
 		_, err = tx.Exec(ctx, `update jobs set attempts = $2, updated_at = now() where id = $1`, jobID, end.Attempts)
+	case end.Keep:
+		// Back to the place it had: as due as when this run got the browser,
+		// so it goes on right after the job put first - ahead of the jobs
+		// asked for while it ran.
+		_, err = tx.Exec(ctx, `update jobs set attempts = $2, next_at = $3,
+			next_reason = '먼저 한 작업 다음에 이어서', updated_at = now() where id = $1`,
+			jobID, end.Attempts, started)
 	case end.Retry:
 		_, err = tx.Exec(ctx, `update jobs set attempts = $2, next_at = $3,
 			next_reason = $4, updated_at = now() where id = $1`,
@@ -737,13 +756,23 @@ func (s *Store) EndRun(ctx context.Context, runID int64, outcome, note string) (
 		again = again || revived
 	}
 	kind, text := "run_end", "실행을 마쳤습니다"
+	first := "다른 작업"
+	if outcome == rules.Deferred && strings.TrimSpace(note) != "" {
+		first = "'" + clamp(note, 80) + "' 작업"
+	}
 	switch {
 	case outcome == rules.Yielded && again:
-		text = "대화가 시작되어 잠시 멈췄습니다. 그사이 새 지시가 와서 곧 다시 합니다"
+		text = "대화가 브라우저를 쓰느라 잠시 멈췄습니다. 그사이 새 지시가 와서 곧 다시 합니다"
 	case outcome == rules.Yielded && carded:
-		text = "대화가 시작되어 잠시 멈췄습니다. 카드에 답이 오면 이어서 합니다"
+		text = "대화가 브라우저를 쓰느라 잠시 멈췄습니다. 카드에 답이 오면 이어서 합니다"
 	case outcome == rules.Yielded:
-		text = fmt.Sprintf("대화가 시작되어 잠시 멈췄습니다. %s 뒤에 다시 합니다", minutes(end.After))
+		text = fmt.Sprintf("대화가 브라우저를 쓰느라 잠시 멈췄습니다. %s 뒤에 다시 합니다", minutes(end.After))
+	case outcome == rules.Deferred && again:
+		text = "운영자가 " + first + "을 먼저 하기로 해서 잠시 멈췄습니다. 그사이 새 지시가 와서 곧 다시 합니다"
+	case outcome == rules.Deferred && carded:
+		text = "운영자가 " + first + "을 먼저 하기로 해서 잠시 멈췄습니다. 카드에 답이 오면 이어서 합니다"
+	case outcome == rules.Deferred:
+		text = "운영자가 " + first + "을 먼저 하기로 해서 잠시 멈췄습니다. 그 작업이 끝나면 이어서 합니다"
 	case end.Fail:
 		kind, text = "error", fmt.Sprintf("%d번 연달아 실패해 멈췄습니다: %s", rules.MaxAttempts, end.Note)
 	case end.Retry && carded && !again:
@@ -767,7 +796,7 @@ func (s *Store) EndRun(ctx context.Context, runID int64, outcome, note string) (
 
 func retryReason(outcome, note string) string {
 	if outcome == rules.Yielded {
-		return "대화 뒤에 이어서"
+		return "대화가 브라우저를 다 쓴 뒤에 이어서"
 	}
 	return "다시 시도: " + clamp(note, 100)
 }

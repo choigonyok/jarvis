@@ -109,7 +109,7 @@ func TestSearchThenReadWhatWasFound(t *testing.T) {
 		t.Fatal(text(r))
 	}
 	page := text(r)
-	for _, want := range []string{"20판 보상 · 2026-10-25 20:22 · https://m.blog.naver.com/a/1", "이어 읽기: offset 2500", "그림 1장 중 1장을 읽었고 1장에 글자가", "무작위 신화급 전설이", "- 원문 기사 https://news.example.com/1", "그림 1 · 조각 1"} {
+	for _, want := range []string{"20판 보상 · 2026-10-25 20:22 · https://m.blog.naver.com/a/1", "이어 읽기: offset 2500", "그림 1장 중 1장을 읽었고 1장에 글자가", "무작위 신화급 전설이", "- 원문 기사 https://news.example.com/1", "그림 1 · 조각 1", "- 그림 1 https://img.example/a.png"} {
 		if !strings.Contains(page, want) {
 			t.Errorf("read output lacks %q:\n%s", want, page)
 		}
@@ -126,6 +126,10 @@ func TestSearchThenReadWhatWasFound(t *testing.T) {
 	// A link of the page read may be read next.
 	if !m.seen.Has("https://news.example.com/1") || !m.seen.Has("https://m.blog.naver.com/a/1") {
 		t.Error("the page's links and final address should be readable now")
+	}
+	// And its pictures may be shown (module show asks Seen).
+	if !m.Seen("https://img.example/a.png") || m.Seen("https://img.example/b.png") {
+		t.Error("the page's pictures, and only they, should be showable now")
 	}
 }
 

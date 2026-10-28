@@ -513,6 +513,21 @@ func TestGuestOwnRemindersAndLists(t *testing.T) {
 	if _, body := do("secret", "GET", "/api/reminders", ""); strings.Contains(body, "학원 가방") || !strings.Contains(body, "우산 말리기") {
 		t.Fatalf("운영자 목록: %s", body)
 	}
+	// The 작업 tab's history: a cancelled one is in the last days' list, and
+	// only there - still each person's own.
+	_, body = do("secret", "POST", "/api/reminders", `{"text":"택배 받기","at":"`+at+`"}`)
+	if code, _ := do("secret", "DELETE", "/api/reminders/"+id(body, "reminder"), ""); code != 200 {
+		t.Fatalf("알림 취소: %d", code)
+	}
+	if _, body := do("secret", "GET", "/api/reminders", ""); strings.Contains(body, "택배 받기") {
+		t.Fatalf("기다리는 목록에 취소한 알림: %s", body)
+	}
+	if _, body := do("secret", "GET", "/api/reminders?days=30", ""); !strings.Contains(body, "택배 받기") || !strings.Contains(body, `"status":"cancelled"`) || strings.Contains(body, "학원 가방") {
+		t.Fatalf("내역: %s", body)
+	}
+	if _, body := do("guest-secret", "GET", "/api/reminders?days=30", ""); strings.Contains(body, "택배 받기") || !strings.Contains(body, "학원 가방") {
+		t.Fatalf("손님 내역: %s", body)
+	}
 	for _, c := range []struct{ token, method, path string }{
 		{"guest-secret", "PATCH", "/api/reminders/" + ownerRem},
 		{"guest-secret", "DELETE", "/api/reminders/" + ownerRem},

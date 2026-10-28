@@ -146,7 +146,7 @@ function guestContextRoute(method: string, path: string): boolean {
 const AGENT_ROLE: Record<string, string> = { agent: "owner", "agent-guest": "guest" };
 
 /** The agent routes the console drives. Anything else on the agent is internal. */
-const AGENT_ROUTES = new Set(["healthz", "thread", "messages", "events", "proposals", "calendar", "uploads", "usage", "vault"]);
+const AGENT_ROUTES = new Set(["healthz", "thread", "messages", "events", "proposals", "calendar", "uploads", "usage", "vault", "reminders"]);
 
 /**
  * What the 생활 screen may do on mind: read the notes, the map, the things

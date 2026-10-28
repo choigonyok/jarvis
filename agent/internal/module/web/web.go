@@ -357,6 +357,10 @@ func (m *Module) Client() *Client { return m.client }
 // tools' results.
 func (m *Module) Saw(text string) { m.seen.Saw(text) }
 
+// Seen is whether an address went past in the last week: what another module
+// may open on the conversation's behalf (show's pictures).
+func (m *Module) Seen(raw string) bool { return m.seen.Has(raw) }
+
 func (m *Module) Handler() http.Handler {
 	server := mcp.NewServer(&mcp.Implementation{Name: ServerName, Version: "1"}, nil)
 	mcp.AddTool(server, &mcp.Tool{
@@ -404,6 +408,10 @@ func (m *Module) read(ctx context.Context, in ReadInput) *mcp.CallToolResult {
 	for _, l := range page.Links {
 		m.seen.add(l.URL)
 	}
+	// Its pictures too: what show_image may put in front of the operator.
+	for _, pic := range page.Pictures {
+		m.seen.add(pic.URL)
+	}
 	content := []mcp.Content{&mcp.TextContent{Text: renderPage(in, page)}}
 	for _, l := range page.Looks {
 		content = append(content,
@@ -416,6 +424,9 @@ func (m *Module) read(ctx context.Context, in ReadInput) *mcp.CallToolResult {
 func fail(err error) *mcp.CallToolResult {
 	return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}}}
 }
+
+// maxPictureLinks is how many of a page's picture addresses its reading lists.
+const maxPictureLinks = 8
 
 // --- words --------------------------------------------------------------------
 
@@ -548,6 +559,17 @@ func renderPage(in ReadInput, p Page) string {
 	}
 	if len(links) > 0 {
 		b.WriteString("\n링크:\n" + strings.Join(links, "\n") + "\n")
+	}
+	// The pictures' addresses, for show_image: the product's photo shown
+	// rather than described.
+	var pics []string
+	for _, pic := range p.Pictures {
+		if strings.HasPrefix(pic.URL, "https://") && len(pics) < maxPictureLinks {
+			pics = append(pics, fmt.Sprintf("- 그림 %d %s", pic.N, pic.URL))
+		}
+	}
+	if len(pics) > 0 {
+		b.WriteString("\n그림 주소(show_image 로 띄울 수 있음):\n" + strings.Join(pics, "\n") + "\n")
 	}
 	if in.Look && len(p.Looks) == 0 {
 		b.WriteString("\n(볼 그림 조각이 없습니다)\n")

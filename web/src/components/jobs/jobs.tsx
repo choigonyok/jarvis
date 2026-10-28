@@ -7,6 +7,7 @@ import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { ChecklistCard } from "@/components/chat/checklist";
 import { JobSheet } from "@/components/jobs/job-sheet";
+import { PastReminders, useReminders, WaitingReminders } from "@/components/jobs/reminders";
 import { Pager } from "@/components/ui/pager";
 import { type BlockedSite, type Job, LIVE, stateLabel, stateTone, when } from "@/lib/jobs";
 import { usePaged } from "@/lib/paging";
@@ -101,6 +102,7 @@ export function Jobs() {
   const livePaged = usePaged(live, { focusKey: (j) => `job:${j.id}` });
   const endedPaged = usePaged(ended);
   const open = jobs?.find((j) => j.id === openId) ?? null;
+  const reminders = useReminders();
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -182,6 +184,8 @@ export function Jobs() {
             )
           ) : null}
 
+          {reminders ? <WaitingReminders reminders={reminders} /> : null}
+
           {ended.length > 0 ? (
             <section className="mt-8 border-t border-edge-soft pt-4">
               <button
@@ -207,6 +211,8 @@ export function Jobs() {
               ) : null}
             </section>
           ) : null}
+
+          {reminders ? <PastReminders reminders={reminders} /> : null}
         </div>
       </main>
 

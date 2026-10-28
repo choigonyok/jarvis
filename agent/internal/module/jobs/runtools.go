@@ -40,6 +40,13 @@ type runEntry struct {
 	// decided: the run said what comes next (a clock, a card, a login, a
 	// payment to wait on, the end).
 	decided bool
+	// finished is what the run's finish said, once it was called: the job
+	// is done (the phone hears it when the run ends).
+	finished    string
+	hasFinished bool
+	// firstFor is the job the operator put ahead of this run (the 먼저
+	// card): the run gave the browser to it, and keeps its place in line.
+	firstFor string
 }
 
 func (r *running) add(run int64, j Job, browser bool) {
@@ -84,6 +91,44 @@ func (r *running) decide(run int64) {
 	if e := r.runs[run]; e != nil {
 		e.decided = true
 	}
+}
+
+// finish notes what the run's finish said.
+func (r *running) finish(run int64, summary string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if e := r.runs[run]; e != nil {
+		e.finished, e.hasFinished = summary, true
+	}
+}
+
+// finishedOf is what the run's finish said, and whether it was called.
+func (r *running) finishedOf(run int64) (string, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if e := r.runs[run]; e != nil {
+		return e.finished, e.hasFinished
+	}
+	return "", false
+}
+
+// putBehind notes that the run gives the browser to the job titled first.
+func (r *running) putBehind(run int64, first string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if e := r.runs[run]; e != nil {
+		e.firstFor = first
+	}
+}
+
+// behind is the job the run gave the browser to, "" when none.
+func (r *running) behind(run int64) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if e := r.runs[run]; e != nil {
+		return e.firstFor
+	}
+	return ""
 }
 
 func (r *running) decidedOf(run int64) bool {
@@ -293,9 +338,11 @@ type ScheduleInput struct {
 	Reason       string `json:"reason" jsonschema:"그때 무엇을 볼지 한 줄. 운영자가 작업 탭에서 본다."`
 }
 
+// FinishInput is the end of a job. Every end is told - in the conversation
+// and on the phone - whatever the run thinks of it (2026-10-28: "무슨
+// 작업이든 작업이 끝나면 알리기"); there is no quiet finish any more.
 type FinishInput struct {
-	Summary string `json:"summary" jsonschema:"결과 한두 줄"`
-	Notify  *bool  `json:"notify,omitempty" jsonschema:"대화에 알릴지. 기본 true"`
+	Summary string `json:"summary" jsonschema:"결과 한두 줄. 운영자에게 그대로 알림으로 갑니다."`
 }
 
 type ReportInput struct {
@@ -607,6 +654,7 @@ func (m *Module) runServer(run int64) *mcp.Server {
 				return fail(err), nil, nil
 			}
 			m.current.decide(run)
+			m.current.finish(run, in.Summary)
 			// A job that ends does not pay: its payment card, if still up, goes.
 			if c, up := m.pay.get(j.ID); up {
 				if c.state == payPending {
@@ -614,10 +662,8 @@ func (m *Module) runServer(run int64) *mcp.Server {
 				}
 				m.pay.forget(j.ID)
 			}
-			if in.Notify == nil || *in.Notify {
-				m.say(j, run, "끝냈습니다. "+in.Summary)
-			}
-			return ok("작업을 끝냈습니다. 실행을 마치세요."), nil, nil
+			m.say(j, run, "끝냈습니다. "+in.Summary)
+			return ok("작업을 끝냈습니다. 운영자에게 알렸습니다. 실행을 마치세요."), nil, nil
 		})
 
 	mcp.AddTool(server, &mcp.Tool{Name: "report", Description: "작업의 지금 현황을 한 줄로 갱신한다. 알릴 만한 변화면 notify=true 로 대화에도 남긴다."},

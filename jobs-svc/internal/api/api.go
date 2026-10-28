@@ -325,7 +325,7 @@ func (s *Server) control(w http.ResponseWriter, r *http.Request) {
 	}
 	action := r.PathValue("action")
 	switch action {
-	case "pause", "resume", "run", "cancel":
+	case "pause", "resume", "run", "first", "cancel":
 	default:
 		writeErr(w, http.StatusNotFound, "그런 경로가 없습니다.")
 		return
@@ -334,7 +334,7 @@ func (s *Server) control(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, err.Error())
 		return
 	}
-	if action == "run" || action == "resume" {
+	if action == "run" || action == "resume" || action == "first" {
 		s.woke(r)
 	}
 	w.WriteHeader(http.StatusNoContent)

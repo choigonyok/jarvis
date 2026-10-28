@@ -13,9 +13,14 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/usage"
 )
 
-// ErrYielded is what a background task returns when a person started a turn
-// while it ran. It is not a failure of the task; it is asked again later.
-var ErrYielded = errors.New("대화가 시작되어 백그라운드 작업을 멈췄습니다")
+// ErrYielded is what a background task returns when it gave the browser
+// up while it ran - the conversation went to use it, or the operator put
+// another job first. It is not a failure of the task; it is asked again
+// later.
+var ErrYielded = errors.New("브라우저를 내주느라 백그라운드 작업을 멈췄습니다")
+
+// ErrHold is a task whose Hold failed: it never started.
+var ErrHold = errors.New("백그라운드 작업을 브라우저에 묶지 못했습니다")
 
 // Task is work the assistant does on its own, outside the conversation.
 //
@@ -42,18 +47,33 @@ type Task struct {
 	Allowed []string
 	Timeout time.Duration
 	// Browser says the task drives the shared browser window. One such task
-	// at a time, never while a conversation turn runs (the conversation has
-	// the browser too), and the person speaking stops it. A task without it
-	// runs beside the conversation, up to MaxBackground tasks at once.
+	// at a time, and none while the conversation is using the browser: a
+	// turn that calls a browser tool takes it (TakeBrowser) and stops the
+	// task. A turn that does not use it leaves the task running. A task
+	// without the browser runs beside everything, up to MaxPlain at once.
 	Browser bool
+	// Hold, when set, runs once the task has its place - the browser its
+	// own - and before its process starts: where a site guard goes on, so it
+	// is never on while someone else has the browser. An error ends the task
+	// there (ErrHold).
+	Hold func(ctx context.Context) error
+	// Done, when set, runs once the task's process has ended (or Hold
+	// failed) and before the browser counts as free again - where the site
+	// guard is released, so whoever takes the browser next is not held to
+	// the task's sites.
+	Done func()
 	// OnStep, when set, hears each tool call and each bit of text the model
 	// writes while the task runs - how a person watching sees progress.
 	OnStep func(Step)
 }
 
-// MaxBackground is how many background tasks may run at once. Two: the Mac
-// mini runs the conversation, the services and the voice beside them.
-const MaxBackground = 2
+// MaxPlain is how many background tasks without the browser may run at
+// once, beside the one on the browser. Each is a CLI process of a few
+// hundred MB; the Mac mini (16GB) runs the conversation, the services and
+// the voice beside them. It was two for all of them, browser included,
+// until 2026-10-28 - a job on the browser and one checking a price filled
+// it, and a third waited for no reason.
+const MaxPlain = 4
 
 // bgTask is one background task in flight.
 type bgTask struct {
@@ -87,13 +107,24 @@ func (r *Runner) browserHeldLocked() bool {
 	return false
 }
 
+// plainLocked is how many tasks without the browser are in flight.
+func (r *Runner) plainLocked() int {
+	n := 0
+	for t := range r.bgs {
+		if !t.browser {
+			n++
+		}
+	}
+	return n
+}
+
 // CanStart is whether a background task may begin now. One that wants the
-// browser waits for the conversation to be out of a turn and for no other
-// task to hold the browser; one that does not needs only a free slot. It
-// does not wait for the conversation to stay quiet a while first - a job the
-// operator just asked for waited five minutes on "예약됨" for that
-// (2026-10-18), and a run the next message cuts short is picked up by the
-// next one (yield backoff).
+// browser waits for no other task to hold it and for the conversation not to
+// be using it (TakeBrowser) - a turn that only talks leaves it be; one that
+// does not want it needs only one of the MaxPlain places. It does not wait
+// for the conversation to stay quiet a while first - a job the operator just
+// asked for waited five minutes on "예약됨" for that (2026-10-18), and a run
+// the conversation cuts short is picked up by the next one (yield backoff).
 func (r *Runner) CanStart(browser bool) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -101,13 +132,53 @@ func (r *Runner) CanStart(browser bool) bool {
 }
 
 func (r *Runner) canStartLocked(browser bool) bool {
-	if len(r.bgs) >= MaxBackground {
-		return false
+	if browser {
+		return !r.chatBrowser && !r.browserHeldLocked()
 	}
-	if !browser {
-		return true
+	return r.plainLocked() < MaxPlain
+}
+
+// TakeBrowser gives the browser to the conversation, which is about to call
+// one of its tools: a background task on it is stopped (it is asked again
+// later), and no other starts on it until the conversation is out of its
+// turns. It waits, up to wait, for the task to let go - its process ended
+// and its site guard released (Task.Done) - so the call finds the browser
+// the conversation's own; false when the task had not let go by then.
+//
+// Before 2026-10-28 every turn did this as it started, whatever it was
+// about: "안녕" stopped a listing half typed on 중고나라.
+func (r *Runner) TakeBrowser(wait time.Duration) bool {
+	r.mu.Lock()
+	// Out of a turn nothing of the conversation is calling: a call that
+	// arrives then must not keep the browser from the jobs for good.
+	if r.running {
+		r.chatBrowser = true
 	}
-	return !r.running && !r.browserHeldLocked()
+	r.stopBrowserLocked("대화가 브라우저를 씁니다")
+	r.mu.Unlock()
+	deadline := time.Now().Add(wait)
+	for {
+		r.mu.Lock()
+		held := r.browserHeldLocked()
+		r.mu.Unlock()
+		if !held {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// YieldBrowser stops the background task on the browser, if one is there,
+// for another task to go first - the operator put a waiting job ahead of
+// the one running (the jobs module's 먼저 card). It says whether one was
+// stopped; the place comes free when it has let go (OnFree).
+func (r *Runner) YieldBrowser(why string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.stopBrowserLocked(why) > 0
 }
 
 // Idle is true when nothing runs here at all: no conversation turn, no
@@ -119,10 +190,11 @@ func (r *Runner) Idle() bool {
 }
 
 // Background runs a task when it may start (CanStart), and - when the task
-// drives the browser - gives way the moment the person speaks: Send and
-// Enqueue cancel it. The browser is one shared window, and the person's own
-// request always wins it. A task without the browser runs on through the
-// conversation; the two have nothing to fight over.
+// drives the browser - gives way the moment the conversation goes to use it
+// (TakeBrowser) or another task is put first (YieldBrowser). The browser is
+// one shared window, and the person's own request always wins it. A task
+// without the browser runs on through everything; it has nothing to fight
+// over.
 func (r *Runner) Background(parent context.Context, t Task) (string, error) {
 	ctx, cancel := context.WithTimeout(parent, t.Timeout)
 	defer cancel()
@@ -140,11 +212,30 @@ func (r *Runner) Background(parent context.Context, t Task) (string, error) {
 	r.bgs[task] = struct{}{}
 	r.mu.Unlock()
 	defer func() {
+		// Released before the place is: whoever is waiting for the browser
+		// (TakeBrowser) must find it out of the task's guard.
+		if t.Done != nil {
+			t.Done()
+		}
 		r.mu.Lock()
 		delete(r.bgs, task)
 		r.mu.Unlock()
 		r.freed()
 	}()
+
+	if t.Hold != nil {
+		herr := t.Hold(ctx)
+		r.mu.Lock()
+		taken := task.yielded
+		r.mu.Unlock()
+		switch {
+		case taken:
+			// The browser was taken while the task was being held to it.
+			return "", ErrYielded
+		case herr != nil:
+			return "", fmt.Errorf("%w: %v", ErrHold, herr)
+		}
+	}
 
 	args, err := r.backgroundArgs(t)
 	if err != nil {
@@ -192,14 +283,18 @@ func (r *Runner) Background(parent context.Context, t Task) (string, error) {
 	return result, nil
 }
 
-// yield stops a running background task. Called with r.mu held.
-func (r *Runner) yieldLocked() {
+// stopBrowserLocked stops the background task on the browser and says how
+// many it stopped (one at most). Called with r.mu held.
+func (r *Runner) stopBrowserLocked(why string) int {
+	n := 0
 	for t := range r.bgs {
-		if t.browser {
-			r.log.Info("대화가 시작되어 브라우저를 쓰는 백그라운드 작업을 멈춥니다", "task", t.name)
+		if t.browser && !t.yielded {
+			r.log.Info("브라우저를 쓰는 백그라운드 작업을 멈춥니다", "task", t.name, "why", why)
 			t.cancel()
+			n++
 		}
 	}
+	return n
 }
 
 func (r *Runner) backgroundArgs(t Task) ([]string, error) {

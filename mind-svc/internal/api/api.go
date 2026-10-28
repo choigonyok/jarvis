@@ -34,6 +34,7 @@
 //	POST /api/facts/{id}/release      send a held fact again
 //	POST /api/facts/{id}/drop         a person deciding a held fact is not to be kept
 //	GET  /api/reminders?all=1         the reminders waiting (all: and those said, cancelled or expired in three days)
+//	GET  /api/reminders?days=30       the same, with those of the last days instead (the 작업 tab's history, a year at most)
 //	POST /api/reminders               {text, body?, at?, place?, move?, after?, until?, url?} one to say at its moment
 //	PATCH /api/reminders/{id}         {text?, body?, at?, place?, move?, after?, until?, clear?} change it; a said one waits again
 //	DELETE /api/reminders/{id}        cancel it

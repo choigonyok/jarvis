@@ -178,16 +178,18 @@ const ROW =
   "grid grid-cols-[minmax(0,1fr)] sm:grid-cols-[3.5rem_minmax(0,1fr)]";
 
 /**
- * Photos sent with a message, above its bubble. One photo is shown whole-ish;
- * several become a square grid, the way a messenger stacks an album. A photo
- * deleted after its listing ended shows as an empty tile, not a broken icon.
+ * Photos sent with a message, above its bubble - or shown by the assistant
+ * (show_image), on its side. One photo is shown whole-ish; several become a
+ * square grid, the way a messenger stacks an album. A photo deleted after its
+ * listing ended shows as an empty tile, not a broken icon.
  */
-function Photos({ names }: { names: string[] }) {
+function Photos({ names, alt = "보낸 사진" }: { names: string[]; alt?: string }) {
   const single = names.length === 1;
   return (
     <div
       className={cn(
-        "grid max-w-[80%] gap-1 sm:max-w-[26rem]",
+        // As wide as the photos: the assistant's sit in a full-width column.
+        "grid w-fit max-w-[80%] gap-1 sm:max-w-[26rem]",
         single ? "grid-cols-1" : names.length === 2 || names.length === 4 ? "grid-cols-2" : "grid-cols-3",
       )}
     >
@@ -202,7 +204,7 @@ function Photos({ names }: { names: string[] }) {
           {/* eslint-disable-next-line @next/next/no-img-element -- served by the agent behind the proxy */}
           <img
             src={photoUrl(name)}
-            alt="보낸 사진"
+            alt={alt}
             loading="lazy"
             onError={(e) => (e.currentTarget.style.visibility = "hidden")}
             className={cn("block object-cover", single ? "max-h-72 w-auto max-w-full" : "aspect-square w-24 sm:w-28")}
@@ -300,6 +302,17 @@ const TurnRow = memo(function TurnRow({
                   </>
                 ) : turn.origin ? (
                   <JobNews turn={turn} />
+                ) : turn.images?.length ? (
+                  // Pictures the assistant shows (show_image): the photos, and
+                  // its line about them under, as a messenger sends a photo.
+                  <>
+                    <Photos names={turn.images} alt={turn.paragraphs?.[0] || "자비스가 보여 준 사진"} />
+                    {turn.paragraphs?.length ? (
+                      <div className="mt-2">
+                        <Markdown>{turn.paragraphs.join("\n\n")}</Markdown>
+                      </div>
+                    ) : null}
+                  </>
                 ) : turn.paragraphs?.length ? (
                   // The runner split the message on blank lines; putting
                   // them back is what makes a list or a code fence one

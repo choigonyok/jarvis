@@ -96,6 +96,33 @@ func (m *Module) do(ctx context.Context, method, path string, in, out any) error
 	return json.Unmarshal(raw, out)
 }
 
+// HistoryDays is how far back the 작업 tab's list of reminders goes.
+const HistoryDays = 30
+
+// ConsoleHandler serves the console's list of reminders: GET /reminders is
+// this person's waiting ones and those of the last HistoryDays days - said,
+// cancelled or expired - as mind keeps them (each agent's token is its own
+// person's: the guest's agent reads the guest's).
+func (m *Module) ConsoleHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			http.Error(w, "GET 만 됩니다", http.StatusMethodNotAllowed)
+			return
+		}
+		var out json.RawMessage
+		if err := m.do(r.Context(), http.MethodGet, fmt.Sprintf("/api/reminders?days=%d", HistoryDays), nil, &out); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadGateway)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "리마인드를 불러오지 못했습니다: " + err.Error()})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write(out)
+	})
+}
+
 type SetInput struct {
 	Text      string `json:"text" jsonschema:"폰에 뜰 한 줄, 운영자에게 하는 말로. 예: '내일 캠핑, 장갑 챙기세요'"`
 	Body      string `json:"body,omitempty" jsonschema:"그 아래 한 줄 더 붙일 맥락(선택). 예: '장작 팰 때 쓸 작업용 장갑'"`

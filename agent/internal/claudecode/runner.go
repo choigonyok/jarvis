@@ -89,9 +89,14 @@ type Runner struct {
 	// input is the running turn's stdin while it still takes messages (until
 	// its result): a steered message is written here.
 	input io.WriteCloser
-	// bgs is every background task in flight (see Background); the ones on
-	// the browser are what yieldLocked stops when the person speaks.
+	// bgs is every background task in flight (see Background); the one on
+	// the browser is what TakeBrowser stops when the conversation goes to
+	// use it.
 	bgs map[*bgTask]struct{}
+	// chatBrowser: a turn of this conversation called a browser tool
+	// (TakeBrowser). No background task gets the browser until the turns
+	// run out (loop) - the next message is likely about the same page.
+	chatBrowser bool
 	// usage hears every rate_limit_event, chat and background alike.
 	usage *usage.Tracker
 	// recall, when set, returns what long-term memory holds about a message,
@@ -283,7 +288,6 @@ func (r *Runner) Submit(text string, images []string, ref *thread.Ref) (queued b
 		return true, nil
 	}
 	r.running = true
-	r.yieldLocked()
 	r.rotateLocked(now, held)
 	r.mu.Unlock()
 	go func() { r.loop(r.start(q)) }()
@@ -433,7 +437,6 @@ func (r *Runner) Enqueue(prompt string) {
 		return
 	}
 	r.running = true
-	r.yieldLocked()
 	r.mu.Unlock()
 	go r.loop(prompt)
 }
@@ -467,6 +470,8 @@ func (r *Runner) loop(prompt string) {
 		r.mu.Lock()
 		if len(r.queue) == 0 {
 			r.running = false
+			// Out of its turns, the conversation gives the browser back.
+			r.chatBrowser = false
 			r.mu.Unlock()
 			r.store.SetThinking(false)
 			r.freed()

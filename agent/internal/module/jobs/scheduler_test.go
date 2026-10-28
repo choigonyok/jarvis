@@ -31,13 +31,24 @@ func fakeRuns(t *testing.T, attempts int) *httptest.Server {
 	}))
 }
 
-// bgFake is the runner: it takes each task, plays its steps, and ends as told.
+// bgFake is the runner: it takes each task, holds it (Hold), plays its
+// steps, lets go (Done), and ends as told.
 type bgFake struct {
 	mu       sync.Mutex
 	tasks    []claudecode.Task
 	steps    []claudecode.Step
 	err      error
 	canStart func(browser bool) bool
+	yields   []string
+	// during runs while the task is in flight: what happens meanwhile.
+	during func()
+}
+
+func (b *bgFake) YieldBrowser(why string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.yields = append(b.yields, why)
+	return true
 }
 
 func (b *bgFake) CanStart(browser bool) bool {
@@ -46,12 +57,23 @@ func (b *bgFake) CanStart(browser bool) bool {
 	}
 	return true
 }
-func (b *bgFake) Background(_ context.Context, t claudecode.Task) (string, error) {
+func (b *bgFake) Background(ctx context.Context, t claudecode.Task) (string, error) {
 	b.mu.Lock()
 	b.tasks = append(b.tasks, t)
 	b.mu.Unlock()
+	if t.Done != nil {
+		defer t.Done()
+	}
+	if t.Hold != nil {
+		if err := t.Hold(ctx); err != nil {
+			return "", claudecode.ErrHold
+		}
+	}
 	for _, s := range b.steps {
 		t.OnStep(s)
+	}
+	if b.during != nil {
+		b.during()
 	}
 	return "", b.err
 }

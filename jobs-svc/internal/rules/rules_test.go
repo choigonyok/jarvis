@@ -18,6 +18,10 @@ func TestAfterRun(t *testing.T) {
 			t.Fatalf("yield after %d: %+v, want %v", yields, e, want)
 		}
 	}
+	// Put behind a job the operator chose to go first: its place, no attempt.
+	if e := AfterRun(Deferred, false, 2, 3, ""); !e.Keep || e.Retry || e.Fail || e.Attempts != 2 {
+		t.Fatalf("deferred: %+v", e)
+	}
 	if e := AfterRun(OK, false, 0, 0, ""); !e.Retry || e.Attempts != 1 || e.Note == "" {
 		t.Fatalf("undecided: %+v", e)
 	}

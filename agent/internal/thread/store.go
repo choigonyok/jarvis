@@ -47,7 +47,8 @@ type Turn struct {
 	AtISO      string   `json:"atIso,omitempty"`
 	Paragraphs []string `json:"paragraphs,omitempty"`
 	Text       string   `json:"text,omitempty"`
-	// Images are photos the operator attached, by upload name.
+	// Images are photos by upload name: the operator's, attached to a
+	// message, or the assistant's, shown (AppendAgentImages).
 	Images []string `json:"images,omitempty"`
 	// ProposalID points at core/proposal. The transcript records that a card
 	// was raised here; what the card says, and what became of it, is the
@@ -311,6 +312,19 @@ func (s *Store) AppendAgent(paragraphs []string) *Turn {
 		return nil
 	}
 	return s.append(&Turn{Role: RoleAgent, Paragraphs: paragraphs})
+}
+
+// AppendAgentImages puts pictures the assistant shows in the conversation, as
+// a message of their own (module show): the photos, and a line about them.
+func (s *Store) AppendAgentImages(images []string, caption string) *Turn {
+	if len(images) == 0 {
+		return nil
+	}
+	t := &Turn{Role: RoleAgent, Images: images}
+	if caption != "" {
+		t.Paragraphs = []string{caption}
+	}
+	return s.append(t)
 }
 
 // JobNews puts a job run's word in the conversation: one turn per run, so a

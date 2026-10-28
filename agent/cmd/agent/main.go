@@ -38,6 +38,7 @@ import (
 	mindmod "github.com/choigonyok/jarvis/agent/internal/module/mind"
 	"github.com/choigonyok/jarvis/agent/internal/module/place"
 	"github.com/choigonyok/jarvis/agent/internal/module/remind"
+	"github.com/choigonyok/jarvis/agent/internal/module/show"
 	"github.com/choigonyok/jarvis/agent/internal/module/spending"
 	"github.com/choigonyok/jarvis/agent/internal/module/vault"
 	"github.com/choigonyok/jarvis/agent/internal/module/web"
@@ -182,6 +183,20 @@ func main() {
 		cfg.Allow(web.Tools...)
 	}
 
+	// 사진 보여 주기: 읽은 페이지의 그림, 운영자가 보낸 사진·작업 사진을 대화에 띄운다.
+	// 웹 그림은 '본 주소' 장부에 있는 https 주소만 가져온다. 손님에게도 - 손님의 사진 폴더로.
+	if photos != nil {
+		var seen func(string) bool
+		if webModule != nil {
+			seen = webModule.Seen
+		}
+		showModule := show.New(photos, transcript, seen, log)
+		modules.Add(showModule)
+		mcpMounts["/mcp/"+show.ServerName] = showModule.Handler()
+		cfg.ModuleMCPURLs[show.ServerName] = cfg.PublicMCPURL + "/" + show.ServerName
+		cfg.Allow(show.Tools...)
+	}
+
 	// Where the operator is (context-svc), read only. Not the guest's.
 	if cfg.ContextURL != "" && !cfg.Guest {
 		placeModule := place.New(cfg.ContextURL, cfg.APIToken)
@@ -214,9 +229,12 @@ func main() {
 		cfg.ModuleMCPURLs[messages.ServerName] = cfg.PublicMCPURL + "/" + messages.ServerName
 		cfg.Allow(messages.Tools...)
 	}
+	// The 작업 tab's list of reminders, when mind is there.
+	var reminderConsole http.Handler
 	if cfg.MindURL != "" {
 		// 리마인드: "몇 시에 / 집에 가면 / 나갈 때 알려줘". mind 가 그때 폰으로 알린다.
 		remindModule := remind.New(cfg.MindURL, cfg.APIToken)
+		reminderConsole = remindModule.ConsoleHandler()
 		modules.Add(remindModule)
 		mcpMounts["/mcp/"+remind.ServerName] = remindModule.Handler()
 		cfg.ModuleMCPURLs[remind.ServerName] = cfg.PublicMCPURL + "/" + remind.ServerName
@@ -509,7 +527,16 @@ func main() {
 				return inside
 			}
 		}
-		return jobs.BrowserTool(tool) || jobsModule != nil && jobsModule.CardFree(tool, input)
+		if jobs.BrowserTool(tool) {
+			// The conversation is about to drive the browser: a job on it gives
+			// way now, and only now - a turn that only talks leaves it be
+			// (2026-10-28: "대화턴은 실제 브라우저 도구를 쓸 때만 양도").
+			if !runner.TakeBrowser(browserHandover) {
+				log.Warn("브라우저를 쓰던 백그라운드 작업이 제때 비켜 주지 않았습니다", "tool", tool)
+			}
+			return true
+		}
+		return jobsModule != nil && jobsModule.CardFree(tool, input)
 	})
 	proposals.OnDecide(gate.Resolve)
 
@@ -555,6 +582,31 @@ func main() {
 				Audience: audience,
 			})
 		})
+		// Every job that is over reaches the phone - done, or stopped for
+		// failing - whatever the conversation is doing; the thread has its
+		// card too. A tap opens it in the 작업 tab.
+		if jobsModule != nil {
+			endKey := "job-end:"
+			if cfg.Guest {
+				endKey = "guest-job-end:"
+			}
+			jobsModule.OnEnd(func(e jobs.EndNote) {
+				kind, title, level := "job.done", "작업을 끝냈어요", "info"
+				if !e.Done {
+					kind, title, level = "job.failed", "작업이 멈췄어요", "warn"
+				}
+				body := e.Job.Title
+				if t := strings.TrimSpace(e.Text); t != "" {
+					body += " - " + t
+				}
+				notifier.Send(notify.Event{
+					Source: "agent", Kind: kind, Tier: "now", Level: level,
+					Title: title, Body: clip(body, 300),
+					URL: fmt.Sprintf("/jobs?focus=job:%d", e.Job.ID), Key: fmt.Sprintf("%s%d", endKey, e.Run),
+					Audience: audience,
+				})
+			})
+		}
 		// Decided, the card's notification is done with: notify-svc marks it
 		// read on this event (its key is the one the notification above carried).
 		closed := func(p proposal.Proposal, decision string) {
@@ -615,6 +667,7 @@ func main() {
 			Consume:         consume,
 			BrowserChecks:   browserChecks,
 			Vault:           vaultConsole(vaultModule),
+			Reminders:       reminderConsole,
 			FollowUp:        runner,
 			Jobs:            jobPayments,
 			WakeJobs:        wakeJobs,
@@ -697,10 +750,6 @@ func relogin(runner *claudecode.Runner, v *vault.Module, browserURL, browserToke
 		if err != nil {
 			return err
 		}
-		if err := guard.Restrict(ctx, []string{domain}, 6*time.Minute); err != nil {
-			return fmt.Errorf("브라우저를 %s 안에 묶지 못했습니다: %w", domain, err)
-		}
-		defer func() { _ = guard.Release(context.WithoutCancel(ctx)) }()
 		tools := []string{}
 		for _, t := range []string{"browser_navigate", "browser_get_state", "browser_click", "browser_fill_login", "browser_screenshot", "browser_list_tabs", "browser_switch_tab", "browser_close_tab"} {
 			tools = append(tools, "mcp__"+jobs.BrowserServer+"__"+t)
@@ -721,6 +770,15 @@ func relogin(runner *claudecode.Runner, v *vault.Module, browserURL, browserToke
 			Allowed: tools,
 			Timeout: 5 * time.Minute,
 			Browser: true,
+			// Held to the site only while the task has the browser, and let go
+			// before anyone else gets it.
+			Hold: func(hctx context.Context) error {
+				if err := guard.Restrict(hctx, []string{domain}, 6*time.Minute); err != nil {
+					return fmt.Errorf("브라우저를 %s 안에 묶지 못했습니다: %w", domain, err)
+				}
+				return nil
+			},
+			Done: func() { _ = guard.Release(context.WithoutCancel(ctx)) },
 		})
 		if said != nil {
 			said(s.ID, result)
@@ -728,6 +786,11 @@ func relogin(runner *claudecode.Runner, v *vault.Module, browserURL, browserToke
 		return err
 	}
 }
+
+// browserHandover is how long the conversation's first browser call waits
+// for a background task on the browser to let go: its process to end and its
+// site guard to come off. Seconds, as a rule.
+const browserHandover = 20 * time.Second
 
 // clip shortens s to n runes for a log line or a notice.
 func clip(s string, n int) string {

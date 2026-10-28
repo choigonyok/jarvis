@@ -150,14 +150,14 @@ func TestFinishWaitsForTheCardItsRunRaised(t *testing.T) {
 		t.Fatal("ask 실패")
 	}
 	card := props.List()[0]
-	if text, isErr := callRun(t, s, "finish", map[string]any{"summary": "멈춤", "notify": false}); !isErr || !strings.Contains(text, card.ID) {
+	if text, isErr := callRun(t, s, "finish", map[string]any{"summary": "멈춤"}); !isErr || !strings.Contains(text, card.ID) {
 		t.Fatalf("카드를 올린 실행은 끝내지 못해야 합니다: %q", text)
 	}
 	if contains(svc.got(), "/runs/5/finish") {
 		t.Fatal("작업을 끝냈습니다")
 	}
 	m.decided(card, proposal.Approve)
-	if _, isErr := callRun(t, s, "finish", map[string]any{"summary": "답을 받고 끝냄", "notify": false}); isErr {
+	if _, isErr := callRun(t, s, "finish", map[string]any{"summary": "답을 받고 끝냄"}); isErr {
 		t.Fatal("카드가 결정된 뒤에는 끝낼 수 있어야 합니다")
 	}
 }
@@ -172,7 +172,7 @@ func TestFinishingDropsAPendingPaymentCard(t *testing.T) {
 
 	card, _ := props.Open(proposal.Proposal{Origin: proposal.OriginIntercept, Action: action.Action{Kind: "browser.payment", Input: json.RawMessage(`{}`)}})
 	m.PaymentRaised(16, card.ID)
-	if _, isErr := callRun(t, s, "finish", map[string]any{"summary": "사지 않기로 했습니다", "notify": false}); isErr {
+	if _, isErr := callRun(t, s, "finish", map[string]any{"summary": "사지 않기로 했습니다"}); isErr {
 		t.Fatal("finish 실패")
 	}
 	if p, _ := props.Get(card.ID); p.State != proposal.Rejected {
@@ -197,10 +197,11 @@ func TestRunToolsCanPay(t *testing.T) {
 	}
 }
 
-// fakeGuard keeps what the browser was held to.
+// fakeGuard keeps what the browser was held to, and how often it was let go.
 type fakeGuard struct {
-	mu    sync.Mutex
-	sites [][]string
+	mu       sync.Mutex
+	sites    [][]string
+	released int
 }
 
 func (g *fakeGuard) Restrict(_ context.Context, sites []string, _ time.Duration) error {
@@ -210,7 +211,12 @@ func (g *fakeGuard) Restrict(_ context.Context, sites []string, _ time.Duration)
 	return nil
 }
 
-func (g *fakeGuard) Release(context.Context) error { return nil }
+func (g *fakeGuard) Release(context.Context) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.released++
+	return nil
+}
 
 // A site a run finds it needs goes on the job without a card (2026-10-20) -
 // in its log, where the operator sees it - and a run on the browser may open

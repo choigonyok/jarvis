@@ -57,6 +57,10 @@ const (
 	// 2026-10-20 a run adds them itself (request_sites); a card of this kind
 	// still waiting from before is decided as it was.
 	KindSites = "job.sites"
+	// KindFirst asks whether a job the operator just asked for should go
+	// ahead of the one on the browser: browser jobs go in the order they
+	// were asked for, and this is the way to the front (2026-10-28).
+	KindFirst = "job.first"
 )
 
 // QualifiedToolName is how Claude Code refers to one of the chat's tools.
@@ -105,6 +109,36 @@ type Module struct {
 	heardMu sync.Mutex
 	heard   map[string]time.Time
 	retryAt time.Time
+	// bg is the scheduler's runner (Run): a job put first stops the run on
+	// the browser through it.
+	bg Background
+	// offered is each job's 먼저 card, raised while it waits for the
+	// browser behind another job - one per wait, answered or not.
+	offerMu sync.Mutex
+	offered map[int64]string
+	// onEnd hears each job that is over: done, or stopped after failing.
+	onEnd func(EndNote)
+}
+
+// EndNote is a job that is over, for the phone: done (Text is what its
+// finish said) or stopped after failing (Text is why).
+type EndNote struct {
+	Job  Job
+	Run  int64
+	Done bool
+	Text string
+}
+
+// OnEnd has fn hear every job that is over - done, or stopped for failing -
+// whatever the conversation is doing (2026-10-28: "무슨 작업이든 작업이
+// 끝나면 대화 진행 여부와 무관하게 알리기"). A job the operator called off is
+// not told back to them.
+func (m *Module) OnEnd(fn func(EndNote)) { m.onEnd = fn }
+
+func (m *Module) ended(n EndNote) {
+	if m.onEnd != nil {
+		m.onEnd(n)
+	}
 }
 
 func New(store *Store, up *uploads.Store, proposals *proposal.Store, notify Notifier, log *slog.Logger) *Module {
@@ -201,6 +235,24 @@ func (m *Module) Specs() []action.Spec {
 	return []action.Spec{
 		{Kind: KindAsk, Summary: "작업이 운영자에게 묻거나 승인을 받습니다."},
 		{Kind: KindLogin, Summary: "작업이 사이트 로그인을 요청합니다."},
+		{Kind: KindFirst, Summary: "브라우저를 기다리는 작업을 먼저 할지 묻습니다."},
+	}
+}
+
+// FirstInput is the 먼저 card: a job the operator asked for, waiting for the
+// browser behind another job's run.
+type FirstInput struct {
+	JobID    int64  `json:"jobId"`
+	JobTitle string `json:"jobTitle"`
+	// Holder is the job on the browser when it was asked.
+	Holder string `json:"holder"`
+}
+
+func firstCard(in FirstInput) action.Card {
+	return action.Card{
+		Title:       "'" + in.JobTitle + "' 먼저 할까요?",
+		Body:        "기다리는 작업: " + in.JobTitle + "\n지금 하는 작업: " + in.Holder,
+		Consequence: "승인하면 지금 하는 작업을 잠시 멈추고 이 작업을 먼저 한 뒤, 멈춘 작업을 이어서 합니다. 반려하면 요청한 순서대로 합니다.",
 	}
 }
 
@@ -279,6 +331,12 @@ func (m *Module) Preview(_ context.Context, a action.Action) (action.Card, error
 			return action.Card{}, err
 		}
 		return loginCard(in), nil
+	case KindFirst:
+		var in FirstInput
+		if err := json.Unmarshal(a.Input, &in); err != nil {
+			return action.Card{}, err
+		}
+		return firstCard(in), nil
 	}
 	return action.Card{}, fmt.Errorf("모르는 동작입니다: %s", a.Kind)
 }
@@ -385,6 +443,12 @@ func (m *Module) decided(p proposal.Proposal, d proposal.Decision) {
 			m.proposals.Settle(p.ID, proposal.Rejected, "지금 사이트만 쓰도록 작업에 전했습니다.")
 		}
 		m.wake()
+	case KindFirst:
+		var in FirstInput
+		if json.Unmarshal(p.Action.Input, &in) != nil {
+			return
+		}
+		m.putFirst(ctx, p, in, d)
 	case KindLogin:
 		var in LoginInput
 		if json.Unmarshal(p.Action.Input, &in) != nil {

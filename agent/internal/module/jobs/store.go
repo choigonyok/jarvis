@@ -198,6 +198,12 @@ func (s *Store) Instruct(ctx context.Context, id int64, text string) error {
 	return s.call(ctx, http.MethodPost, fmt.Sprintf("/jobs/%d/instruct", id), map[string]string{"text": text}, nil)
 }
 
+// First puts a job ahead of the line for the browser: next after the run
+// in flight, which goes on after it in its own place (outcome "deferred").
+func (s *Store) First(ctx context.Context, id int64) error {
+	return s.call(ctx, http.MethodPost, fmt.Sprintf("/jobs/%d/first", id), map[string]string{}, nil)
+}
+
 func (s *Store) Answer(ctx context.Context, id int64, card, text string) error {
 	return s.call(ctx, http.MethodPost, fmt.Sprintf("/jobs/%d/answer", id), map[string]string{"card": card, "text": text}, nil)
 }

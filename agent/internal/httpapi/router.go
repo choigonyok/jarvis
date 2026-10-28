@@ -31,6 +31,7 @@ type Server struct {
 	consume       http.HandlerFunc
 	browserChecks http.Handler
 	vault         http.Handler
+	reminders     http.Handler
 	thread        *thread.Store
 	proposals     *proposal.Store
 	calendar      *calendar.Store
@@ -131,6 +132,9 @@ type Deps struct {
 	// Vault, when set, serves the saved logins to the console: the list and
 	// its uses (GET /vault) and forgetting one (DELETE /vault/{domain}).
 	Vault http.Handler
+	// Reminders, when set, serves the console's list of reminders (GET
+	// /reminders): the 작업 tab shows them beside the jobs.
+	Reminders http.Handler
 	// FollowUp tells the assistant how a payment card was decided.
 	FollowUp interface{ Enqueue(prompt string) }
 	// Jobs, when set, lets a background job's run that reaches a payment
@@ -185,6 +189,7 @@ func New(d Deps) *Server {
 		consume:         d.Consume,
 		browserChecks:   d.BrowserChecks,
 		vault:           d.Vault,
+		reminders:       d.Reminders,
 		followUp:        d.FollowUp,
 		jobs:            d.Jobs,
 		wakeJobs:        d.WakeJobs,
@@ -251,6 +256,9 @@ func (s *Server) Handler() http.Handler {
 	if s.vault != nil {
 		mux.HandleFunc("/vault", s.guard(s.vault.ServeHTTP))
 		mux.HandleFunc("/vault/", s.guard(s.vault.ServeHTTP))
+	}
+	if s.reminders != nil {
+		mux.HandleFunc("GET /reminders", s.guard(s.reminders.ServeHTTP))
 	}
 
 	// Claude Code dials these. The permission gate sits at /mcp; module

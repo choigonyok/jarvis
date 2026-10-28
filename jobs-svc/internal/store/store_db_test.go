@@ -421,3 +421,76 @@ func TestAJobThatIsOverKeepsNothingUnread(t *testing.T) {
 	}
 	_ = s.Control(ctx, c.ID, "cancel")
 }
+
+// Against a throwaway Postgres, as svc_jobs (scripts/dbtest): a job the
+// operator puts first (the agent's 먼저 card) goes ahead of every due job
+// and of the run in flight; the run it stops goes on right after it, ahead of
+// the job asked for while it ran - and that is no attempt (2026-10-28).
+func TestAJobPutFirstAndTheRunItStops(t *testing.T) {
+	dsn := os.Getenv("JARVIS_TEST_DSN")
+	if dsn == "" {
+		t.Skip("JARVIS_TEST_DSN 이 없어 건너뜁니다 (scripts/dbtest)")
+	}
+	ctx := context.Background()
+	s, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.Close)
+	create := func(title string) Job {
+		t.Helper()
+		j, err := s.Create(ctx, NewJob{Title: title, Goal: "차례 지키기", Sites: []string{"shop.example"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return j
+	}
+	a := create("dbtest 먼저 A")
+	run, err := s.StartRun(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(20 * time.Millisecond)
+	b := create("dbtest 먼저 B")
+	c := create("dbtest 먼저 C")
+	if err := s.Control(ctx, b.ID, "first"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EndRun(ctx, run, rules.Deferred, b.Title); err != nil {
+		t.Fatal(err)
+	}
+	due, err := s.DueN(ctx, Owner, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var order []int64
+	for _, j := range due {
+		if j.ID == a.ID || j.ID == b.ID || j.ID == c.ID {
+			order = append(order, j.ID)
+		}
+	}
+	if !slices.Equal(order, []int64{b.ID, a.ID, c.ID}) {
+		t.Fatalf("차례: %v, 기대 B %d · A %d · C %d", order, b.ID, a.ID, c.ID)
+	}
+	got, err := s.Get(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Attempts != 0 || got.State != rules.Active || got.NextReason != "먼저 한 작업 다음에 이어서" {
+		t.Fatalf("양보한 작업: %+v", got)
+	}
+	d, err := s.Detail(ctx, a.ID, 5, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Events) == 0 || !strings.Contains(d.Events[0].Text, "'dbtest 먼저 B' 작업을 먼저 하기로") {
+		t.Fatalf("기록: %+v", d.Events)
+	}
+	// Only a job in line can be put first.
+	if err := s.Control(ctx, c.ID, "pause"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Control(ctx, c.ID, "first"); err == nil {
+		t.Fatal("멈춘 작업은 먼저 할 수 없습니다")
+	}
+}

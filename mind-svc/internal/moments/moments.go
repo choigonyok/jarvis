@@ -322,6 +322,17 @@ func (s *Service) ListOf(ctx context.Context, who string, all bool) ([]Reminder,
 	if all {
 		since = s.Now().Add(-recent)
 	}
+	return s.ListSince(ctx, who, since)
+}
+
+// MaxHistory is the furthest back ListSince is asked to look: the 작업 tab's
+// history of reminders.
+const MaxHistory = 365 * 24 * time.Hour
+
+// ListSince is who's reminders waiting, and those said, cancelled or expired
+// since then (zero: none of those), the waiting first - soonest first - and
+// the rest newest first.
+func (s *Service) ListSince(ctx context.Context, who string, since time.Time) ([]Reminder, error) {
 	rs, err := s.St.Reminders(ctx, since)
 	if err != nil {
 		return nil, err

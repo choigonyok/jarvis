@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -85,7 +86,15 @@ func (s *Server) listReminders(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rs, err := svc.ListOf(r.Context(), whoOf(r), r.URL.Query().Get("all") != "")
+	var rs []moments.Reminder
+	var err error
+	if days, derr := strconv.Atoi(r.URL.Query().Get("days")); derr == nil && days > 0 {
+		// The history the 작업 tab shows: that many days of them, at most a year.
+		back := min(time.Duration(days)*24*time.Hour, moments.MaxHistory)
+		rs, err = svc.ListSince(r.Context(), whoOf(r), time.Now().Add(-back))
+	} else {
+		rs, err = svc.ListOf(r.Context(), whoOf(r), r.URL.Query().Get("all") != "")
+	}
 	if err != nil {
 		s.reminderFail(w, err)
 		return

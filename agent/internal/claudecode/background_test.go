@@ -40,13 +40,17 @@ func TestBackgroundFinishes(t *testing.T) {
 	}
 }
 
-// The person speaking stops a task on the browser at once, and the task says
-// it gave way rather than that it failed.
-func TestBackgroundYieldsToTheConversation(t *testing.T) {
+// The conversation going to use the browser stops a task on it at once, and
+// the task says it gave way rather than that it failed. TakeBrowser comes
+// back once the task has let go - its Done (the site guard's release) run
+// first - and no task gets the browser again until the turns run out.
+func TestTakeBrowserStopsTheTaskOnIt(t *testing.T) {
 	r := runner(t, fakeClaude(t, "10"))
 	done := make(chan error, 1)
+	released := make(chan struct{})
 	go func() {
-		_, err := r.Background(context.Background(), Task{Name: "t", Browser: true, Timeout: 30 * time.Second})
+		_, err := r.Background(context.Background(), Task{Name: "t", Browser: true, Timeout: 30 * time.Second,
+			Done: func() { time.Sleep(100 * time.Millisecond); close(released) }})
 		done <- err
 	}()
 	for r.Idle() {
@@ -54,29 +58,45 @@ func TestBackgroundYieldsToTheConversation(t *testing.T) {
 	}
 	start := time.Now()
 	r.mu.Lock()
-	r.yieldLocked() // what Send and Enqueue do
+	r.running = true // a turn is calling
 	r.mu.Unlock()
+	if !r.TakeBrowser(5 * time.Second) {
+		t.Fatal("작업이 브라우저를 놓지 않았습니다")
+	}
 	select {
-	case err := <-done:
-		if !errors.Is(err, ErrYielded) {
-			t.Fatalf("err %v", err)
-		}
-		if time.Since(start) > 3*time.Second {
-			t.Fatal("양보가 늦습니다")
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("멈추지 않았습니다")
+	case <-released:
+	default:
+		t.Fatal("작업의 사이트 제한이 풀리기 전에 브라우저를 넘겼습니다")
+	}
+	if time.Since(start) > 3*time.Second {
+		t.Fatal("양보가 늦습니다")
+	}
+	if err := <-done; !errors.Is(err, ErrYielded) {
+		t.Fatalf("err %v", err)
+	}
+	if r.CanStart(true) {
+		t.Fatal("대화가 브라우저를 쓰는 동안 다른 작업이 브라우저를 잡으면 안 됩니다")
+	}
+	if !r.CanStart(false) {
+		t.Fatal("브라우저 없는 작업은 대화가 브라우저를 써도 시작합니다")
 	}
 }
 
-// A task on the browser waits for the conversation; one without it does not
-// - it has nothing to fight the conversation over - and is not stopped when
-// the person speaks (2026-10-18: job results waited on the conversation).
-func TestBackgroundWaitsForTheConversation(t *testing.T) {
+// A turn that does not use the browser leaves it to the background: a task
+// on it starts during the turn and is not stopped by it (2026-10-28: "대화턴은
+// 실제 브라우저 도구를 쓸 때만 양도"). Only a turn that took it (TakeBrowser)
+// keeps it from them.
+func TestBrowserTaskRunsBesideATalkingTurn(t *testing.T) {
 	r := runner(t, fakeClaude(t, "0"))
 	r.running = true
+	if out, err := r.Background(context.Background(), Task{Browser: true, Timeout: 5 * time.Second}); err != nil || out != "done" {
+		t.Fatalf("말만 하는 대화 중에도 브라우저 작업은 돌아야 합니다: %q %v", out, err)
+	}
+	r.mu.Lock()
+	r.chatBrowser = true
+	r.mu.Unlock()
 	if _, err := r.Background(context.Background(), Task{Browser: true, Timeout: time.Second}); !errors.Is(err, ErrBusy) {
-		t.Fatalf("대화 중에 브라우저 작업을 시작했습니다: %v", err)
+		t.Fatalf("대화가 브라우저를 쓰는 중에 브라우저 작업을 시작했습니다: %v", err)
 	}
 	if out, err := r.Background(context.Background(), Task{Timeout: 5 * time.Second}); err != nil || out != "done" {
 		t.Fatalf("브라우저 없는 작업은 대화 중에도 돌아야 합니다: %q %v", out, err)
@@ -93,18 +113,19 @@ func TestBackgroundWithoutBrowserRunsThroughTheConversation(t *testing.T) {
 	for r.Idle() {
 		time.Sleep(10 * time.Millisecond)
 	}
-	r.mu.Lock()
-	r.yieldLocked()
-	if !r.canStartLocked(false) || r.canStartLocked(true) == false && r.running {
+	if !r.TakeBrowser(time.Second) {
+		t.Fatal("브라우저를 쓰는 작업이 없으니 바로 넘어와야 합니다")
+	}
+	if !r.CanStart(false) {
 		t.Fatal("자리가 남아 있어야 합니다")
 	}
-	r.mu.Unlock()
 	if err := <-done; err != nil {
-		t.Fatalf("대화가 시작돼도 브라우저 없는 작업은 멈추지 않습니다: %v", err)
+		t.Fatalf("대화가 브라우저를 써도 브라우저 없는 작업은 멈추지 않습니다: %v", err)
 	}
 }
 
-// Two tasks at once at most, and only one of them on the browser.
+// MaxPlain tasks without the browser at once, and the browser's one beside
+// them, counted apart.
 func TestBackgroundSlots(t *testing.T) {
 	r := runner(t, fakeClaude(t, "3"))
 	start := func(browser bool) chan error {
@@ -115,25 +136,103 @@ func TestBackgroundSlots(t *testing.T) {
 		}()
 		return done
 	}
-	a := start(true)
-	for r.CanStart(true) {
-		time.Sleep(10 * time.Millisecond)
+	var runs []chan error
+	for i := 0; i < MaxPlain; i++ {
+		runs = append(runs, start(false))
 	}
-	if !r.CanStart(false) {
-		t.Fatal("브라우저가 잡혀 있어도 다른 자리는 남습니다")
-	}
-	b := start(false)
 	for r.CanStart(false) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	if _, err := r.Background(context.Background(), Task{Timeout: time.Second}); !errors.Is(err, ErrBusy) {
-		t.Fatalf("세 번째는 기다려야 합니다: %v", err)
+		t.Fatalf("자리를 넘는 작업은 기다려야 합니다: %v", err)
 	}
-	if err := <-a; err != nil {
-		t.Fatal(err)
+	if !r.CanStart(true) {
+		t.Fatal("브라우저 자리는 따로 남습니다")
 	}
-	if err := <-b; err != nil {
-		t.Fatal(err)
+	runs = append(runs, start(true))
+	for r.CanStart(true) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := r.Background(context.Background(), Task{Browser: true, Timeout: time.Second}); !errors.Is(err, ErrBusy) {
+		t.Fatalf("브라우저는 한 번에 하나입니다: %v", err)
+	}
+	for _, done := range runs {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// The conversation keeps the browser through the turns queued behind the one
+// that took it, and gives it back once they have run out.
+func TestTheBrowserComesBackAfterTheTurns(t *testing.T) {
+	r, _ := failingRunner(t)
+	r.mu.Lock()
+	r.running = true // what Submit does before the loop starts
+	r.mu.Unlock()
+	r.TakeBrowser(0)
+	if r.CanStart(true) {
+		t.Fatal("턴이 브라우저를 쓰는 동안에는 작업이 잡지 못합니다")
+	}
+	r.loop("hello")
+	if !r.CanStart(true) {
+		t.Fatal("턴이 끝나면 브라우저를 작업에 돌려줍니다")
+	}
+	// A call out of any turn takes nothing.
+	r.TakeBrowser(0)
+	if !r.CanStart(true) {
+		t.Fatal("턴 밖에서 온 호출이 브라우저를 붙잡으면 안 됩니다")
+	}
+}
+
+// A task is held to its sites only once it has the browser, and a Hold that
+// fails stops it before it starts - Done still runs, and the place is free.
+func TestHoldRunsOnceTheBrowserIsTheTasks(t *testing.T) {
+	r := runner(t, fakeClaude(t, "0"))
+	var order []string
+	_, err := r.Background(context.Background(), Task{Browser: true, Timeout: 5 * time.Second,
+		Hold: func(context.Context) error {
+			if r.CanStart(true) {
+				order = append(order, "브라우저가 비어 있음")
+			}
+			order = append(order, "hold")
+			return nil
+		},
+		Done: func() { order = append(order, "done") }})
+	if err != nil || strings.Join(order, ",") != "hold,done" {
+		t.Fatalf("err %v order %v", err, order)
+	}
+	_, err = r.Background(context.Background(), Task{Browser: true, Timeout: 5 * time.Second,
+		Hold: func(context.Context) error { return errors.New("bridge down") },
+		Done: func() { order = append(order, "done again") }})
+	if !errors.Is(err, ErrHold) || order[len(order)-1] != "done again" || !r.CanStart(true) {
+		t.Fatalf("err %v order %v", err, order)
+	}
+}
+
+// YieldBrowser stops the task on the browser for another to go first; with
+// nothing there it stops nothing.
+func TestYieldBrowser(t *testing.T) {
+	r := runner(t, fakeClaude(t, "10"))
+	if r.YieldBrowser("먼저") {
+		t.Fatal("브라우저에 아무것도 없는데 멈췄다고 합니다")
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := r.Background(context.Background(), Task{Name: "t", Browser: true, Timeout: 30 * time.Second})
+		done <- err
+	}()
+	for r.Idle() {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !r.YieldBrowser("먼저") {
+		t.Fatal("브라우저의 작업을 멈추지 않았습니다")
+	}
+	if err := <-done; !errors.Is(err, ErrYielded) {
+		t.Fatalf("err %v", err)
+	}
+	if !r.CanStart(true) {
+		t.Fatal("양보한 뒤에는 다른 작업이 브라우저를 잡을 수 있어야 합니다")
 	}
 }
 
@@ -171,8 +270,12 @@ func TestIdleRightAfterTheConversation(t *testing.T) {
 		t.Fatal("대화 턴이 끝났으면 바로 시작합니다")
 	}
 	r.running = true
+	if !r.CanStart(true) {
+		t.Fatal("브라우저를 쓰지 않는 대화 중에는 브라우저 작업도 시작합니다")
+	}
+	r.chatBrowser = true
 	if r.CanStart(true) {
-		t.Fatal("대화 중에는 브라우저 작업을 시작하지 않습니다")
+		t.Fatal("대화가 브라우저를 쓰는 중에는 브라우저 작업을 시작하지 않습니다")
 	}
 	if !r.CanStart(false) {
 		t.Fatal("대화 중에도 브라우저 없는 작업은 시작합니다")

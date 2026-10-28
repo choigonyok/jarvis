@@ -46,15 +46,19 @@ func needsBrowser(j Job) bool { return len(j.Sites) > 0 }
 
 type Background interface {
 	// CanStart is whether a run may begin now: with the browser, only while
-	// nobody is using the assistant and no other run holds it; without, when
-	// there is a slot.
+	// the conversation is not using it and no other run holds it; without,
+	// when there is a slot.
 	CanStart(browser bool) bool
 	Background(ctx context.Context, t claudecode.Task) (string, error)
+	// YieldBrowser stops the run on the browser for a job put first, and
+	// says whether there was one.
+	YieldBrowser(why string) bool
 }
 
 // dueAtOnce is how many due jobs the scheduler looks at per tick: the first
-// may want the browser while it is busy, and the next may not.
-const dueAtOnce = 4
+// may want the browser while it is busy, and the next may not - and the
+// whole line for the browser is in it, for the 먼저 cards.
+const dueAtOnce = 12
 
 type SchedulerConfig struct {
 	// RunURL is this agent's /mcp/job-run base; the run id is appended.
@@ -96,10 +100,12 @@ type WebTools struct {
 // comes due (one from before it did) is asked, and one that did not answer.
 const legacyPoll = 30 * time.Second
 
-// Run starts due jobs as they may start: one on the browser at a time, and
-// only while the person is not using the assistant; jobs without sites
-// beside the conversation, a couple at once. Each run goes in its own
-// goroutine, so a slow one does not hold the others back.
+// Run starts due jobs as they may start: one on the browser at a time, in
+// the order they were asked for (jobs-svc's line), and only while the
+// conversation is not using it; jobs without sites beside everything, a few
+// at once. A job the operator asks for while another job has the browser
+// waits its turn, and its 먼저 card asks whether it should go first. Each run
+// goes in its own goroutine, so a slow one does not hold the others back.
 //
 // It does not look on a short clock. What makes a job due wakes it (Wake):
 // a job made or instructed, a card decided, a login done, a place come free
@@ -109,7 +115,7 @@ const legacyPoll = 30 * time.Second
 // asks no model anything.
 func (m *Module) Run(ctx context.Context, bg Background, cfg SchedulerConfig) {
 	// Set before any run starts, so every run's tools see them.
-	m.guard, m.hold = cfg.Guard, cfg.Timeout+time.Minute
+	m.guard, m.hold, m.bg = cfg.Guard, cfg.Timeout+time.Minute, bg
 	if err := m.store.CloseOrphans(ctx); err != nil {
 		m.log.Warn("남은 실행을 정리하지 못했습니다", "err", err)
 	}
@@ -147,12 +153,23 @@ func (m *Module) Run(ctx context.Context, bg Background, cfg SchedulerConfig) {
 		}
 		for _, j := range due.Jobs {
 			browser := needsBrowser(j)
-			if browser && time.Since(lastBrowser) < cfg.Cooldown {
-				next = earliest(next, lastBrowser.Add(cfg.Cooldown))
-				continue
+			if browser {
+				// Another job's run has the browser: this one waits its turn,
+				// and one the operator just asked for is offered the front.
+				if run, holder := m.current.now(); run != 0 {
+					if holder.ID != j.ID {
+						m.offerFirst(j, holder)
+					}
+					continue
+				}
+				if time.Since(lastBrowser) < cfg.Cooldown {
+					next = earliest(next, lastBrowser.Add(cfg.Cooldown))
+					continue
+				}
 			}
-			// Not now - a turn or another run has what it needs: the runner
-			// says when a place comes free (OnFree), and that wakes this.
+			// Not now - the conversation or another run has what it needs:
+			// the runner says when a place comes free (OnFree), and that
+			// wakes this.
 			if !bg.CanStart(browser) || !m.claim(j.ID) {
 				continue
 			}
@@ -167,6 +184,11 @@ func (m *Module) Run(ctx context.Context, bg Background, cfg SchedulerConfig) {
 				defer m.unclaim(j.ID)
 				m.runOnce(ctx, bg, cfg, j)
 			}(j)
+		}
+		if err == nil && len(due.Jobs) < dueAtOnce {
+			// The whole line was in front of us: a 먼저 card whose job left
+			// it (called off, paused, on a login) comes down.
+			m.dropOffers(due.Jobs)
 		}
 		if !look.Stop() {
 			select {
@@ -207,23 +229,29 @@ func (m *Module) unclaim(job int64) {
 }
 
 func (m *Module) runOnce(ctx context.Context, bg Background, cfg SchedulerConfig, j Job) {
+	// Its turn came: a 먼저 card it raised while it waited has done its part.
+	m.closeOffer(j.ID, "차례가 와서 시작했습니다.")
 	d, err := m.store.Detail(ctx, j.ID)
 	if err != nil {
 		m.log.Warn("작업을 읽지 못했습니다", "job", j.ID, "err", err)
 		return
 	}
 	browser := needsBrowser(d.Job)
+	// The browser is held to the job's sites only while the run has it
+	// (claudecode.Task.Hold), and let go before anyone else gets it (Done):
+	// the conversation taking it over must not find itself held to them.
+	var hold func(context.Context) error
+	var release func()
 	if browser && cfg.Guard != nil {
-		// Held a minute past the run's own limit, in case Release never comes.
-		if err := cfg.Guard.Restrict(ctx, d.Job.Sites, cfg.Timeout+time.Minute); err != nil {
-			m.log.Warn("작업을 사이트 안에 묶지 못해 이번 실행을 건너뜁니다", "job", j.ID, "err", err)
-			return
+		hold = func(hctx context.Context) error {
+			// Held a minute past the run's own limit, in case Release never comes.
+			return cfg.Guard.Restrict(hctx, d.Job.Sites, cfg.Timeout+time.Minute)
 		}
-		defer func() {
+		release = func() {
 			if err := cfg.Guard.Release(context.WithoutCancel(ctx)); err != nil {
 				m.log.Warn("작업의 사이트 제한을 풀지 못했습니다(시간이 지나면 풀립니다)", "job", j.ID, "err", err)
 			}
-		}()
+		}
 	}
 	run, err := m.store.StartRun(ctx, j.ID)
 	if err != nil {
@@ -276,6 +304,8 @@ func (m *Module) runOnce(ctx context.Context, bg Background, cfg SchedulerConfig
 		Allowed: allowed,
 		Browser: browser,
 		Timeout: cfg.Timeout,
+		Hold:    hold,
+		Done:    release,
 		OnStep: func(s claudecode.Step) {
 			if kind, text := describe(s); text != "" {
 				_ = m.store.Step(bctx, run, kind, text)
@@ -288,6 +318,11 @@ func (m *Module) runOnce(ctx context.Context, bg Background, cfg SchedulerConfig
 	switch {
 	case errors.Is(err, claudecode.ErrYielded), errors.Is(err, claudecode.ErrBusy):
 		outcome = "yielded"
+		// It gave the browser to a job the operator put first: it keeps its
+		// place in line, right after that one.
+		if first := m.current.behind(run); first != "" {
+			outcome, note = "deferred", first
+		}
 		m.cutMu.Lock()
 		if len(did) > 0 {
 			m.cut[j.ID] = lastSteps(append(before, did...), cutSteps)
@@ -295,6 +330,9 @@ func (m *Module) runOnce(ctx context.Context, bg Background, cfg SchedulerConfig
 			m.cut[j.ID] = before
 		}
 		m.cutMu.Unlock()
+	case errors.Is(err, claudecode.ErrHold):
+		m.log.Warn("작업을 사이트 안에 묶지 못해 실행하지 못했습니다", "job", j.ID, "err", err)
+		outcome, note = "error", clampText(err.Error(), 200)
 	case err != nil:
 		outcome, note = "error", clampText(err.Error(), 200)
 	}
@@ -320,9 +358,15 @@ func (m *Module) runOnce(ctx context.Context, bg Background, cfg SchedulerConfig
 		if n := m.withdrawCards(j.ID); n > 0 {
 			m.log.Info("끝난 작업의 카드를 내렸습니다", "job", j.ID, "cards", n)
 		}
+		// Done by its run (not called off from the 작업 tab): the phone
+		// hears it, whatever the conversation is doing.
+		if summary, done := m.current.finishedOf(run); done {
+			m.ended(EndNote{Job: d.Job, Run: run, Done: true, Text: summary})
+		}
 	}
 	if end.Failed {
 		m.say(d.Job, run, "세 번 연달아 잘 끝나지 않아 멈췄습니다: "+end.Note+"\n작업 탭에서 확인하고 다시 시작할 수 있습니다.")
+		m.ended(EndNote{Job: d.Job, Run: run, Text: end.Note})
 	}
 }
 
