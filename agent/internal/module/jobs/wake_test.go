@@ -135,7 +135,7 @@ func TestUndecidedRunWaitsOnItsCardAgain(t *testing.T) {
 	card, _ := props.Open(proposal.Proposal{Origin: proposal.OriginNotice, Action: action.Action{Kind: KindAsk, Input: raw}, Card: askCard(AskInput{Question: "밀키트 후보 중 어떤 걸로 할까요?"})})
 	m := New(NewStore(svc.URL, ""), nil, props, nil, quietLog())
 	bg := &bgFake{}
-	m.runOnce(context.Background(), bg, SchedulerConfig{RunURL: "http://agent/mcp/job-run"}, Job{ID: 30, Title: "캠핑 소모품 구매"})
+	m.runOnce(context.Background(), bg, SchedulerConfig{RunURL: "http://agent/mcp/job-run"}, Job{ID: 30, Title: "캠핑 소모품 구매"}, fakePlace{})
 
 	if len(bg.tasks) != 1 || !strings.Contains(bg.tasks[0].Prompt, "아직 운영자의 답을 기다리는 카드") || !strings.Contains(bg.tasks[0].Prompt, card.ID) {
 		t.Fatalf("기다리는 카드가 프롬프트에 없습니다:\n%s", bg.tasks[0].Prompt)
@@ -389,7 +389,7 @@ func TestRunsGetTheWebTools(t *testing.T) {
 	m := New(NewStore(svc.URL, ""), nil, proposal.NewStore(bus.New()), nil, quietLog())
 	bg := &bgFake{}
 	web := &WebTools{Name: "web", URL: "http://agent/mcp/web", Tools: []string{"mcp__web__search", "mcp__web__read"}}
-	m.runOnce(context.Background(), bg, SchedulerConfig{RunURL: "http://agent/mcp/job-run", Web: web}, Job{ID: 31, Title: "서레페 정보 조사"})
+	m.runOnce(context.Background(), bg, SchedulerConfig{RunURL: "http://agent/mcp/job-run", Web: web}, Job{ID: 31, Title: "서레페 정보 조사"}, fakePlace{})
 
 	if len(bg.tasks) != 1 {
 		t.Fatalf("실행 %d번", len(bg.tasks))
@@ -404,7 +404,7 @@ func TestRunsGetTheWebTools(t *testing.T) {
 
 	// Without it, as before.
 	bg2 := &bgFake{}
-	m.runOnce(context.Background(), bg2, SchedulerConfig{RunURL: "http://agent/mcp/job-run"}, Job{ID: 32, Title: "x"})
+	m.runOnce(context.Background(), bg2, SchedulerConfig{RunURL: "http://agent/mcp/job-run"}, Job{ID: 32, Title: "x"}, fakePlace{})
 	if _, ok := bg2.tasks[0].Servers["web"]; ok || strings.Contains(bg2.tasks[0].System, "찾아보기") {
 		t.Fatalf("web 이 없는데 붙었습니다: %v", bg2.tasks[0].Servers)
 	}

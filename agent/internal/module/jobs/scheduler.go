@@ -45,10 +45,11 @@ func runTools(browser bool) []string {
 func needsBrowser(j Job) bool { return len(j.Sites) > 0 }
 
 type Background interface {
-	// CanStart is whether a run may begin now: with the browser, only while
-	// the conversation is not using it and no other run holds it; without,
-	// when there is a slot.
-	CanStart(browser bool) bool
+	// Reserve takes a place for a run about to begin, or says none is free:
+	// with the browser, only while the conversation is not using it and no
+	// other run holds it; without, while one of the places is free. The run
+	// carries it (Task.Place), and it goes back if the run never begins.
+	Reserve(browser bool) (claudecode.Place, bool)
 	Background(ctx context.Context, t claudecode.Task) (string, error)
 	// YieldBrowser stops the run on the browser for a job put first, and
 	// says whether there was one.
@@ -169,21 +170,29 @@ func (m *Module) Run(ctx context.Context, bg Background, cfg SchedulerConfig) {
 			}
 			// Not now - the conversation or another run has what it needs:
 			// the runner says when a place comes free (OnFree), and that
-			// wakes this.
-			if !bg.CanStart(browser) || !m.claim(j.ID) {
+			// wakes this. The place is taken here, not when the run gets
+			// going: the next job in this loop must not count it as free.
+			place, ok := bg.Reserve(browser)
+			if !ok {
+				continue
+			}
+			if !m.claim(j.ID) {
+				place.Release()
 				continue
 			}
 			if browser {
 				lastBrowser = time.Now()
 			}
 			wg.Add(1)
-			go func(j Job) {
+			go func(j Job, place claudecode.Place) {
 				defer wg.Done()
 				// Its place is free, and the job (or another) may be due again.
 				defer m.wake()
 				defer m.unclaim(j.ID)
-				m.runOnce(ctx, bg, cfg, j)
-			}(j)
+				// Unused if the run never began (nothing to read, no run opened).
+				defer place.Release()
+				m.runOnce(ctx, bg, cfg, j, place)
+			}(j, place)
 		}
 		if err == nil && len(due.Jobs) < dueAtOnce {
 			// The whole line was in front of us: a 먼저 card whose job left
@@ -228,7 +237,7 @@ func (m *Module) unclaim(job int64) {
 	m.activeMu.Unlock()
 }
 
-func (m *Module) runOnce(ctx context.Context, bg Background, cfg SchedulerConfig, j Job) {
+func (m *Module) runOnce(ctx context.Context, bg Background, cfg SchedulerConfig, j Job, place claudecode.Place) {
 	// Its turn came: a 먼저 card it raised while it waited has done its part.
 	m.closeOffer(j.ID, "차례가 와서 시작했습니다.")
 	d, err := m.store.Detail(ctx, j.ID)
@@ -304,6 +313,7 @@ func (m *Module) runOnce(ctx context.Context, bg Background, cfg SchedulerConfig
 		Allowed: allowed,
 		Browser: browser,
 		Timeout: cfg.Timeout,
+		Place:   place,
 		Hold:    hold,
 		Done:    release,
 		OnStep: func(s claudecode.Step) {

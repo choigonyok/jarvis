@@ -51,11 +51,16 @@ func (b *bgFake) YieldBrowser(why string) bool {
 	return true
 }
 
-func (b *bgFake) CanStart(browser bool) bool {
-	if b.canStart != nil {
-		return b.canStart(browser)
+// fakePlace is a place the fake runner hands out; it keeps nothing.
+type fakePlace struct{}
+
+func (fakePlace) Release() {}
+
+func (b *bgFake) Reserve(browser bool) (claudecode.Place, bool) {
+	if b.canStart != nil && !b.canStart(browser) {
+		return nil, false
 	}
-	return true
+	return fakePlace{}, true
 }
 func (b *bgFake) Background(ctx context.Context, t claudecode.Task) (string, error) {
 	b.mu.Lock()
@@ -93,10 +98,10 @@ func TestCutShortRunIsPickedUp(t *testing.T) {
 		return claudecode.Step{Tool: "mcp__mcp-browser__browser_navigate", Input: raw}
 	}
 	bg := &bgFake{steps: []claudecode.Step{step("https://shop.example/item/1")}, err: claudecode.ErrYielded}
-	m.runOnce(context.Background(), bg, cfg, j)
+	m.runOnce(context.Background(), bg, cfg, j, fakePlace{})
 	bg.steps, bg.err = nil, nil
-	m.runOnce(context.Background(), bg, cfg, j)
-	m.runOnce(context.Background(), bg, cfg, j)
+	m.runOnce(context.Background(), bg, cfg, j, fakePlace{})
+	m.runOnce(context.Background(), bg, cfg, j, fakePlace{})
 
 	if len(bg.tasks) != 3 {
 		t.Fatalf("실행 %d번", len(bg.tasks))
@@ -112,7 +117,7 @@ func TestCutShortRunIsPickedUp(t *testing.T) {
 	}
 
 	j.Attempts = 1
-	m.runOnce(context.Background(), bg, cfg, j)
+	m.runOnce(context.Background(), bg, cfg, j, fakePlace{})
 	if got := bg.tasks[3].Model; got != "opus" {
 		t.Fatalf("다시 하는 실행은 재시도 모델: %s", got)
 	}

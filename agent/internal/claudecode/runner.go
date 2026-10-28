@@ -93,6 +93,9 @@ type Runner struct {
 	// the browser is what TakeBrowser stops when the conversation goes to
 	// use it.
 	bgs map[*bgTask]struct{}
+	// places are the places reserved for background tasks about to start
+	// (Reserve), counted as taken until those tasks start or give them back.
+	places map[*place]struct{}
 	// chatBrowser: a turn of this conversation called a browser tool
 	// (TakeBrowser). No background task gets the browser until the turns
 	// run out (loop) - the next message is likely about the same page.

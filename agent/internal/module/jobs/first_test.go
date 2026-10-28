@@ -3,6 +3,7 @@ package jobs
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -159,7 +160,7 @@ func TestADeferredRunKeepsItsPlace(t *testing.T) {
 	m := New(NewStore(svc.serve(t).URL, ""), nil, proposal.NewStore(bus.New()), &transcript{}, quietLog())
 	g := &fakeGuard{}
 	bg := &bgFake{err: claudecode.ErrYielded, during: func() { m.current.putBehind(9, "쿠팡 장작 주문") }}
-	m.runOnce(context.Background(), bg, SchedulerConfig{RunURL: "http://agent/mcp/job-run", Guard: g, Timeout: time.Minute}, Job{ID: 5})
+	m.runOnce(context.Background(), bg, SchedulerConfig{RunURL: "http://agent/mcp/job-run", Guard: g, Timeout: time.Minute}, Job{ID: 5}, fakePlace{})
 	svc.mu.Lock()
 	ended := svc.ended
 	svc.mu.Unlock()
@@ -198,7 +199,7 @@ func TestEveryEndIsTold(t *testing.T) {
 					m.current.finish(9, "장작 두 묶음을 주문했습니다")
 				}
 			}}
-			m.runOnce(context.Background(), bg, SchedulerConfig{RunURL: "http://agent/mcp/job-run", Timeout: time.Minute}, Job{ID: 5})
+			m.runOnce(context.Background(), bg, SchedulerConfig{RunURL: "http://agent/mcp/job-run", Timeout: time.Minute}, Job{ID: 5}, fakePlace{})
 			if c.want == nil {
 				if len(got) != 0 {
 					t.Fatalf("알리지 않아야 합니다: %+v", got)
@@ -252,6 +253,125 @@ func TestTheSchedulerOffersTheFrontWhileTheBrowserIsBusy(t *testing.T) {
 	for _, task := range bg.tasks {
 		if task.Browser {
 			t.Fatalf("브라우저가 다른 작업의 것인데 시작했습니다: %+v", task.Name)
+		}
+	}
+}
+
+// capRunner is a runner with a few places that counts what ran at once.
+type capRunner struct {
+	mu            sync.Mutex
+	free          int
+	running, peak int
+	ran           []string
+	busy          int
+}
+
+type capPlace struct {
+	c    *capRunner
+	done bool
+}
+
+func (p *capPlace) Release() {
+	p.c.mu.Lock()
+	defer p.c.mu.Unlock()
+	if !p.done {
+		p.done = true
+		p.c.free++
+	}
+}
+
+func (c *capRunner) Reserve(bool) (claudecode.Place, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.free == 0 {
+		return nil, false
+	}
+	c.free--
+	return &capPlace{c: c}, true
+}
+
+func (c *capRunner) Background(_ context.Context, t claudecode.Task) (string, error) {
+	p, _ := t.Place.(*capPlace)
+	c.mu.Lock()
+	if p == nil || p.done {
+		c.busy++
+		c.mu.Unlock()
+		return "", claudecode.ErrBusy
+	}
+	p.done = true // the place is the run's now; it comes back when the run ends
+	c.running++
+	c.peak = max(c.peak, c.running)
+	c.ran = append(c.ran, t.Name)
+	c.mu.Unlock()
+	time.Sleep(80 * time.Millisecond)
+	c.mu.Lock()
+	c.running--
+	c.free++
+	c.mu.Unlock()
+	return "", nil
+}
+
+func (c *capRunner) YieldBrowser(string) bool { return false }
+
+// More jobs due than places: as many start as there are places, the rest
+// start as places come free, and none is turned away to wait out a backoff
+// (2026-10-28: the fifth of five plain jobs gave way at once into a
+// five-minute wait).
+func TestMoreDueJobsThanPlacesWaitForAPlace(t *testing.T) {
+	var mu sync.Mutex
+	done := map[int64]bool{}
+	var outcomes []string
+	svc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/due":
+			var due []Job
+			for id := int64(1); id <= 6; id++ {
+				if !done[id] {
+					due = append(due, Job{ID: id, Title: fmt.Sprintf("요약 %d", id)})
+				}
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"jobs": due})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/jobs/"):
+			var id int64
+			fmt.Sscanf(strings.TrimPrefix(r.URL.Path, "/jobs/"), "%d", &id)
+			_ = json.NewEncoder(w).Encode(Detail{Job: Job{ID: id, Title: fmt.Sprintf("요약 %d", id)}})
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/runs"):
+			var id int64
+			fmt.Sscanf(strings.TrimPrefix(r.URL.Path, "/jobs/"), "%d", &id)
+			_, _ = fmt.Fprintf(w, `{"runId": %d}`, 100+id)
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/end"):
+			var body struct {
+				Outcome string `json:"outcome"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			outcomes = append(outcomes, body.Outcome)
+			var run int64
+			fmt.Sscanf(strings.TrimPrefix(r.URL.Path, "/runs/"), "%d", &run)
+			done[run-100] = true
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			_, _ = w.Write([]byte(`{}`))
+		}
+	}))
+	defer svc.Close()
+	m := New(NewStore(svc.URL, ""), nil, proposal.NewStore(bus.New()), &transcript{}, quietLog())
+	bg := &capRunner{free: 4}
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+	m.Run(ctx, bg, SchedulerConfig{RunURL: "http://agent/mcp/job-run", Interval: 20 * time.Millisecond, Timeout: time.Minute})
+
+	bg.mu.Lock()
+	defer bg.mu.Unlock()
+	mu.Lock()
+	defer mu.Unlock()
+	if bg.busy != 0 || bg.peak != 4 || len(bg.ran) != 6 {
+		t.Fatalf("자리 넷에 여섯: 거절 %d, 동시 최대 %d, 돈 것 %v", bg.busy, bg.peak, bg.ran)
+	}
+	for _, o := range outcomes {
+		if o != "ok" {
+			t.Fatalf("양보로 끝난 실행이 있습니다: %v", outcomes)
 		}
 	}
 }

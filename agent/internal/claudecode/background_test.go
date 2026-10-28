@@ -210,6 +210,74 @@ func TestHoldRunsOnceTheBrowserIsTheTasks(t *testing.T) {
 	}
 }
 
+// A place reserved counts as taken at once - a scheduler starting several
+// tasks cannot take more places than there are - and the task carrying it
+// starts in it; one never used goes back on Release, once (2026-10-28: five
+// jobs started into four places, and the fifth gave way at once).
+func TestReservedPlaces(t *testing.T) {
+	r := runner(t, fakeClaude(t, "0"))
+	var places []Place
+	for i := 0; i < MaxPlain; i++ {
+		p, ok := r.Reserve(false)
+		if !ok {
+			t.Fatalf("%d번째 자리를 잡지 못했습니다", i+1)
+		}
+		places = append(places, p)
+	}
+	if _, ok := r.Reserve(false); ok || r.CanStart(false) {
+		t.Fatal("자리를 넘겨 잡았습니다")
+	}
+	if !r.CanStart(true) {
+		t.Fatal("브라우저 자리는 따로입니다")
+	}
+	// The task carrying a place starts in it, full as the runner is.
+	if out, err := r.Background(context.Background(), Task{Place: places[0], Timeout: 5 * time.Second}); err != nil || out != "done" {
+		t.Fatalf("예약한 자리로 시작해야 합니다: %q %v", out, err)
+	}
+	places[0].Release() // used: nothing to give back
+	if _, ok := r.Reserve(false); !ok {
+		t.Fatal("끝난 작업의 자리는 돌아와야 합니다")
+	}
+	places[1].Release()
+	places[1].Release()
+	if _, ok := r.Reserve(false); !ok {
+		t.Fatal("돌려준 자리를 다시 잡을 수 있어야 합니다")
+	}
+	if _, ok := r.Reserve(false); ok {
+		t.Fatal("두 번 돌려줘도 한 자리입니다")
+	}
+}
+
+// A place reserved on the browser keeps it from the others, and the
+// conversation taking the browser waits for it: the task finds the browser
+// taken when it starts, gives its place back, and is never held to its sites.
+func TestTakingTheBrowserFromAReservedPlace(t *testing.T) {
+	r := runner(t, fakeClaude(t, "0"))
+	p, ok := r.Reserve(true)
+	if !ok || r.CanStart(true) {
+		t.Fatalf("브라우저 자리 예약: ok=%v", ok)
+	}
+	r.mu.Lock()
+	r.running = true
+	r.mu.Unlock()
+	taken := make(chan bool, 1)
+	go func() { taken <- r.TakeBrowser(5 * time.Second) }()
+	select {
+	case <-taken:
+		t.Fatal("예약된 자리를 두고 바로 넘겨받았습니다")
+	case <-time.After(150 * time.Millisecond):
+	}
+	held := false
+	_, err := r.Background(context.Background(), Task{Browser: true, Place: p, Timeout: 5 * time.Second,
+		Hold: func(context.Context) error { held = true; return nil }})
+	if !errors.Is(err, ErrBusy) || held {
+		t.Fatalf("대화가 가져간 브라우저로 시작했습니다: err=%v held=%v", err, held)
+	}
+	if !<-taken {
+		t.Fatal("자리가 돌아온 뒤에는 넘겨받아야 합니다")
+	}
+}
+
 // YieldBrowser stops the task on the browser for another to go first; with
 // nothing there it stops nothing.
 func TestYieldBrowser(t *testing.T) {

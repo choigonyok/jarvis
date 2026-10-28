@@ -52,6 +52,9 @@ type Task struct {
 	// task. A turn that does not use it leaves the task running. A task
 	// without the browser runs beside everything, up to MaxPlain at once.
 	Browser bool
+	// Place, when set, is the place Reserve took for this task: it is used
+	// instead of looking for a free one now.
+	Place Place
 	// Hold, when set, runs once the task has its place - the browser its
 	// own - and before its process starts: where a site guard goes on, so it
 	// is never on while someone else has the browser. An error ends the task
@@ -74,6 +77,50 @@ type Task struct {
 // until 2026-10-28 - a job on the browser and one checking a price filled
 // it, and a third waited for no reason.
 const MaxPlain = 4
+
+// Place is a place for a background task, taken before the task starts
+// (Reserve) and used by the Background call that carries it (Task.Place).
+// Release gives it back if that call never comes; after it, Release does
+// nothing.
+type Place interface{ Release() }
+
+type place struct {
+	r       *Runner
+	browser bool
+}
+
+// Reserve takes a place for a task about to start - the check and the taking
+// in one step - or says none is free. Between a scheduler deciding a task may
+// start and the task starting there are calls to other services; counted
+// only once the task started, a scheduler looking at five due jobs started
+// all five into four places, and the fifth gave way at once and waited five
+// minutes for no reason (2026-10-28). Taken here, the place counts from now:
+// the browser's is the task's before any guard goes on, and the conversation
+// taking the browser (TakeBrowser) waits for it to start or go.
+func (r *Runner) Reserve(browser bool) (Place, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.canStartLocked(browser) {
+		return nil, false
+	}
+	p := &place{r: r, browser: browser}
+	if r.places == nil {
+		r.places = map[*place]struct{}{}
+	}
+	r.places[p] = struct{}{}
+	return p, true
+}
+
+// Release gives the place back unused.
+func (p *place) Release() {
+	p.r.mu.Lock()
+	_, held := p.r.places[p]
+	delete(p.r.places, p)
+	p.r.mu.Unlock()
+	if held {
+		p.r.freed()
+	}
+}
 
 // bgTask is one background task in flight.
 type bgTask struct {
@@ -107,11 +154,31 @@ func (r *Runner) browserHeldLocked() bool {
 	return false
 }
 
-// plainLocked is how many tasks without the browser are in flight.
+// browserBusyLocked: a task holds the browser, or its place is taken for
+// one about to start.
+func (r *Runner) browserBusyLocked() bool {
+	if r.browserHeldLocked() {
+		return true
+	}
+	for p := range r.places {
+		if p.browser {
+			return true
+		}
+	}
+	return false
+}
+
+// plainLocked is how many places without the browser are taken: tasks in
+// flight and places reserved for ones about to start.
 func (r *Runner) plainLocked() int {
 	n := 0
 	for t := range r.bgs {
 		if !t.browser {
+			n++
+		}
+	}
+	for p := range r.places {
+		if !p.browser {
 			n++
 		}
 	}
@@ -133,7 +200,7 @@ func (r *Runner) CanStart(browser bool) bool {
 
 func (r *Runner) canStartLocked(browser bool) bool {
 	if browser {
-		return !r.chatBrowser && !r.browserHeldLocked()
+		return !r.chatBrowser && !r.browserBusyLocked()
 	}
 	return r.plainLocked() < MaxPlain
 }
@@ -159,7 +226,9 @@ func (r *Runner) TakeBrowser(wait time.Duration) bool {
 	deadline := time.Now().Add(wait)
 	for {
 		r.mu.Lock()
-		held := r.browserHeldLocked()
+		// A place reserved on it is waited for too: the task it is for
+		// finds the browser taken when it starts, and gives it back.
+		held := r.browserBusyLocked()
 		r.mu.Unlock()
 		if !held {
 			return true
@@ -200,7 +269,19 @@ func (r *Runner) Background(parent context.Context, t Task) (string, error) {
 	defer cancel()
 
 	r.mu.Lock()
-	if !r.canStartLocked(t.Browser) {
+	reserved := false
+	if p, ok := t.Place.(*place); ok && p.r == r {
+		_, reserved = r.places[p]
+		delete(r.places, p)
+	}
+	switch {
+	case reserved && t.Browser && r.chatBrowser:
+		// The conversation took the browser while the task was being got
+		// ready: its place goes back, and nothing was held to its sites.
+		r.mu.Unlock()
+		r.freed()
+		return "", ErrBusy
+	case !reserved && !r.canStartLocked(t.Browser):
 		r.mu.Unlock()
 		return "", ErrBusy
 	}
