@@ -56,7 +56,9 @@ class GuardRules(unittest.TestCase):
         # POST 를 block 이 막아 창이 빈 화면으로 떴다. 그 창 안의 간편결제로 네이버페이를 고를 수 있다.
         for url in ["https://stdpay.inicis.com/payMain/pay", "https://mobile.inicis.com/smart/payment/",
                     "https://pay.kcp.co.kr/plugin/payplus_web.jsp", "https://web.nicepay.co.kr/v3/v3Payment.jsp",
-                    "https://service.iamport.kr/inicis_payments/prepare"]:
+                    "https://service.iamport.kr/inicis_payments/prepare",
+                    # 결제창에 간편결제가 없으면 카드사 중 하나카드를 골라 그 안의 간편결제를 본다(2026-10-29 운영자 규칙).
+                    "https://pg.hanacard.co.kr/auth/start"]:
             self.assertTrue(self.g.is_window(url), url)
             self.assertTrue(self.g.asks(url, "POST"), url)
             self.assertFalse(self.g.blocked(url, "POST"), url)
@@ -121,6 +123,7 @@ class GuardRules(unittest.TestCase):
         self.assertEqual(guard.window_order(form), {"amount": "64000", "item": "장범준 2집 LP"})
         euckr = "goodname=" + quote("장범준 3집 LP".encode("cp949")) + "&price=54%2C000&charset=EUC-KR"
         self.assertEqual(guard.window_order(euckr), {"amount": "54000", "item": "장범준 3집 LP"})
+        self.assertEqual(guard.window_order("amt=000113000&goodsname=LP"), {"amount": "113000", "item": "LP"}, "0 이 앞에 붙은 금액")
         toss = json.dumps({"amount": 64000, "orderName": "장범준 2집 LP", "customerName": "x"})
         self.assertEqual(guard.window_order(toss), {"amount": "64000", "item": "장범준 2집 LP"})
         for body in [None, "", "not a form", json.dumps({"price": True}), json.dumps({"amount": "0"}), "[1]"]:
@@ -281,7 +284,7 @@ class JobSites(unittest.TestCase):
         # 결제창을 새 창으로 띄우는 PG 가 있다. 작업 1(2026-10-29)은 결제창 호스트를 짐작해 사이트에 더했지만
         # (fcmobile.inicis.com) 실제 창은 stdpay.inicis.com 이었다 - 결제창은 작업의 사이트가 아니어도 열린다.
         self.hold(["shampoomusicent.com"])
-        for url in ["https://stdpay.inicis.com/payMain/pay", "https://pay.kcp.co.kr/x",
+        for url in ["https://stdpay.inicis.com/payMain/pay", "https://pay.kcp.co.kr/x", "https://pg.hanacard.co.kr/auth",
                     "https://pay.naver.com/payments/abc", "https://orders.pay.naver.com/order/sheet/1"]:
             self.assertFalse(self.g.leaves_job("s-page", "T1", url), url)
         self.assertTrue(self.g.leaves_job("s-page", "T1", "https://evil.example/pay"))

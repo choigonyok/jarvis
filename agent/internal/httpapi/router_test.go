@@ -598,7 +598,8 @@ func TestAPaymentWindowIsOneCard(t *testing.T) {
 	if err := props.Decide(first["pending"], proposal.Approve); err != nil {
 		t.Fatal(err)
 	}
-	if got := jobs.wait(1); len(got) != 1 || !strings.Contains(got[0], "결제창이 열립니다") || !strings.Contains(got[0], "네이버페이만") {
+	if got := jobs.wait(1); len(got) != 1 || !strings.Contains(got[0], "결제창이 열립니다") || !strings.Contains(got[0], "네이버페이만") ||
+		!strings.Contains(got[0], "하나카드를 골라") || !strings.Contains(got[0], "다른 카드사") {
 		t.Fatalf("승인은 결제창을 다시 열고 네이버페이만 고르라고 작업에 가야 합니다: %v", got)
 	}
 	if open := post(window); open["decision"] != string(proposal.Approve) {

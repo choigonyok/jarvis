@@ -133,7 +133,7 @@ def window_order(body: str | None) -> dict:
     for key in ORDER_AMOUNT:
         value = re.sub(r"[,\s원]", "", str(fields.get(key, "")))
         if value.isdigit() and int(value) > 0:
-            out["amount"] = value
+            out["amount"] = str(int(value))  # 000113000 도 113000 - 같은 금액은 같은 글자로
             break
     for key in ORDER_ITEM:
         value = " ".join(str(fields.get(key, "")).split())
