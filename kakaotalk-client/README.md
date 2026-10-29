@@ -116,9 +116,14 @@ boot and FileVault is off, so this opens nothing new). The Mac still calls its
 screen locked whenever the display sleeps (ten idle minutes): logged in, that
 is fine; a logout seen in the menu wakes the display (as a key press would),
 which then unlocks by itself and the login goes on (`waking`). If it stays
-locked a password is on the lock after all: the record says `locked` (the
-상태 tab fails and pushes) and the display is not woken again until the
-screen has been seen open; logged in behind such a lock, `locked-in` warns.
+locked while `sysadminctl -screenLock status` says the lock wants no password,
+the wake just did not take: the record says `locked` and the display is woken
+again every ten minutes (2026-10-28 17:56 one wake that did not take stopped
+it until 10/30 02:40, KakaoTalk and the card alerts with it; a wake from a
+shell then opened the screen at once). If a password is on the lock after
+all, the record says `locked` (the 상태 tab fails and pushes) and the display
+is not woken again until the screen has been seen open; logged in behind such
+a lock, `locked-in` warns.
 
 ```bash
 scripts/kakaotalk-relogin install    # from the MacBook: build, wrap as an app, sign, LaunchAgent on the Mac mini

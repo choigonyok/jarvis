@@ -80,6 +80,9 @@ type daemon struct {
 	// the screen is seen open.
 	wokeAt      time.Time
 	wakeUseless bool
+	// retryTold: the log has said once that a wake did not take and the
+	// next comes in wakeEvery.
+	retryTold bool
 	// Whether the lock asks for a password, and when that was last asked.
 	lockPassword bool
 	lockAskedAt  time.Time
@@ -338,6 +341,7 @@ func (d *daemon) locked(menu menuState) time.Duration {
 		return poll
 	case "wake":
 		d.wokeAt = time.Now()
+		d.retryTold = false
 		d.wasOut = true
 		log.Printf("카톡이 로그아웃된 것 같아 꺼진 화면을 깨웁니다")
 		wakeDisplay()
@@ -349,6 +353,15 @@ func (d *daemon) locked(menu menuState) time.Duration {
 	case "stays-locked":
 		log.Printf("화면을 깨웠는데도 잠겨 있어요 - 잠금에 비밀번호가 걸려 있는 것 같아 다시 깨우지 않습니다")
 		d.wakeUseless = true
+	case "retry":
+		// The lock wants no password: the wake did not take this time.
+		if !d.retryTold {
+			log.Printf("화면을 깨웠는데도 잠겨 있어요 - 잠금에 비밀번호는 없으니 %s 뒤에 다시 깨웁니다", wakeEvery)
+			d.retryTold = true
+		}
+		d.wasOut = true
+		d.set("locked", fmt.Sprintf("카톡이 로그아웃된 것 같아 화면을 깨웠는데 아직 잠겨 있어요 - %s마다 다시 깨웁니다", wakeEvery))
+		return poll
 	}
 	state, detail := lockedState(menu)
 	if state != d.st.State {

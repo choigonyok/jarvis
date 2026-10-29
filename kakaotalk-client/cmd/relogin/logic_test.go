@@ -122,8 +122,10 @@ func TestLockedScreenSaysWhatItCannotDo(t *testing.T) {
 }
 
 // The Mac says its screen is locked whenever the display sleeps, password or
-// not: a sleeping display behind a lock without one is woken for a logout,
-// once, and not again if it stays locked.
+// not: a sleeping display is woken for a logout. Behind a lock that wants a
+// password it is not woken again if it stays locked; behind one that wants
+// none it is woken again every wakeEvery - one wake that did not take once
+// stopped it for 33 hours (10/28 17:56 to 10/30 02:40).
 func TestSleepingDisplayIsWokenForALogout(t *testing.T) {
 	never := time.Since(time.Time{})
 	for _, c := range []struct {
@@ -138,7 +140,9 @@ func TestSleepingDisplayIsWokenForALogout(t *testing.T) {
 		{menuOut, false, false, never, "wake", "로그아웃이면 화면을 깨웁니다"},
 		{menuOut, true, false, never, "wake", "비밀번호가 있다고 해도 한 번은 깨워 봅니다"},
 		{menuOut, false, false, 5 * time.Second, "waking", "깨운 직후에는 잠금이 풀리기를 기다립니다"},
-		{menuOut, false, false, time.Minute, "stays-locked", "깨웠는데도 잠겨 있으면 비밀번호가 걸린 것입니다"},
+		{menuOut, true, false, time.Minute, "stays-locked", "비밀번호 잠금이 깨운 뒤에도 잠겨 있으면 다시 깨우지 않습니다"},
+		{menuOut, false, false, time.Minute, "retry", "비밀번호 없는 잠금이 깨운 뒤에도 잠겨 있으면 그만두지 않고 기다립니다"},
+		{menuOut, false, false, wakeEvery, "wake", "비밀번호 없는 잠금은 wakeEvery 가 지나면 다시 깨웁니다"},
 		{menuOut, false, true, never, "locked", "깨워도 소용없었으면 다시 깨우지 않습니다"},
 		{menuUnknown, false, false, never, "locked-unknown", "메뉴를 모르면 깨우지 않습니다"},
 	} {

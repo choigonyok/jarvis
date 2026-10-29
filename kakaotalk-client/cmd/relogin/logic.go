@@ -159,10 +159,14 @@ const (
 // (2026-10-24, with the lock screen off). Behind a lock that wants no
 // password the display is only asleep: logged in, that is fine ("in");
 // logged out, the display is woken ("wake") - it unlocks by itself and the
-// windows come back - and given a moment ("waking"). Still locked after that,
-// a password is wanted after all ("stays-locked"): it is not woken again
-// until the screen has been seen open, so the display does not keep lighting
-// up. Anything else is a state to write down (lockedState).
+// windows come back - and given a moment ("waking"). Still locked after that
+// behind a lock that wants a password, it is not woken again until the
+// screen has been seen open ("stays-locked"), so the display does not keep
+// lighting up. Behind one that wants none, it is woken again in wakeEvery
+// ("retry"): one wake that did not take once stopped it for 33 hours
+// (10/28 17:56 to 10/30 02:40, the card alerts with it), and a wake from a
+// shell then opened the screen at once. Anything else is a state to write
+// down (lockedState).
 func whileLocked(m menuState, needsPassword, wakeUseless bool, sinceWake time.Duration) string {
 	switch m {
 	case menuIn:
@@ -178,8 +182,10 @@ func whileLocked(m menuState, needsPassword, wakeUseless bool, sinceWake time.Du
 			return "wake"
 		case sinceWake < wakeSettle:
 			return "waking"
+		case needsPassword:
+			return "stays-locked"
 		}
-		return "stays-locked"
+		return "retry"
 	}
 	return "locked-unknown"
 }
