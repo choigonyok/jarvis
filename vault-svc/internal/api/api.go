@@ -7,10 +7,15 @@
 //	DELETE /logins/{domain}   the services' token: forget one
 //	GET    /uses              the services' token: every release, newest first
 //	POST   /release           the browser's token only: {host, purpose} → the login for that host's domain
+//	GET    /pins              the services' token: which payment passwords are saved (no digit)
+//	PUT    /pins/{site}       the services' token: save one {name, pin} - site is a payment host (PinSites)
+//	DELETE /pins/{site}       the services' token: forget one
+//	POST   /release-pin       the browser's token only: {site, host, purpose} → the pin, for a keypad on that site
 //
 // The agent saves and lists but can never read a secret back; the browser
 // reads one only for the page it is on, and only the login of that page's
-// own domain. Nothing here logs a body.
+// own domain - or the payment password of the payment host its keypad is on.
+// Nothing here logs a body.
 package api
 
 import (
@@ -38,6 +43,21 @@ type Store interface {
 	Used(ctx context.Context, domain string) error
 	Record(ctx context.Context, u store.Use) error
 	Uses(ctx context.Context, limit int) ([]store.Use, error)
+	PutPin(ctx context.Context, p store.Pin) error
+	GetPin(ctx context.Context, site string) (store.Pin, error)
+	ListPins(ctx context.Context) ([]store.PinMeta, error)
+	DeletePin(ctx context.Context, site string) (bool, error)
+	UsedPin(ctx context.Context, site string) error
+}
+
+// PinSites are the payment hosts a payment password may be saved for, each
+// the host its keypad is on (and the hosts under it). Not a registrable
+// domain like a login's: naver.com is the login's, pay.naver.com the
+// password's - a page elsewhere on naver.com (a blog, a cafe, anyone's) never
+// gets it.
+var PinSites = map[string]string{
+	"pay.naver.com": "네이버페이",
+	"coupang.com":   "쿠팡(쿠페이)",
 }
 
 type Server struct {
@@ -65,6 +85,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /logins/{domain}", s.with(s.Token, s.forget))
 	mux.HandleFunc("GET /uses", s.with(s.Token, s.uses))
 	mux.HandleFunc("POST /release", s.with(s.ReleaseToken, s.release))
+	mux.HandleFunc("GET /pins", s.with(s.Token, s.listPins))
+	mux.HandleFunc("PUT /pins/{site}", s.with(s.Token, s.putPin))
+	mux.HandleFunc("DELETE /pins/{site}", s.with(s.Token, s.forgetPin))
+	mux.HandleFunc("POST /release-pin", s.with(s.ReleaseToken, s.releasePin))
 	return mux
 }
 
@@ -224,6 +248,154 @@ func (s *Server) release(w http.ResponseWriter, r *http.Request) {
 	record(domain, "released", "")
 	s.Log.Info("로그인 정보를 내주었습니다", "domain", domain, "host", host, "purpose", purpose)
 	writeJSON(w, http.StatusOK, map[string]string{"domain": domain, "name": l.Name, "username": sec.U, "password": sec.P, "hint": l.Hint})
+}
+
+// pinSite is a path's payment host, if a payment password may be kept for it.
+func pinSite(raw string) (string, bool) {
+	h := site.Host(raw)
+	_, ok := PinSites[h]
+	return h, ok
+}
+
+// pinSeal is what a payment password is sealed under: never a login's domain.
+func pinSeal(site string) string { return "pin:" + site }
+
+func (s *Server) listPins(w http.ResponseWriter, r *http.Request) {
+	pins, err := s.Store.ListPins(r.Context())
+	if err != nil {
+		s.Log.Error("결제 비밀번호 목록을 읽지 못했습니다", "err", err)
+		writeErr(w, http.StatusInternalServerError, "목록을 읽지 못했습니다.")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"pins": pins})
+}
+
+func (s *Server) putPin(w http.ResponseWriter, r *http.Request) {
+	where, ok := pinSite(r.PathValue("site"))
+	if !ok {
+		writeErr(w, http.StatusBadRequest, "결제 비밀번호를 둘 수 있는 곳이 아닙니다(네이버페이 pay.naver.com, 쿠팡 coupang.com).")
+		return
+	}
+	var in struct {
+		Name string `json:"name"`
+		Pin  string `json:"pin"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&in); err != nil {
+		writeErr(w, http.StatusBadRequest, "본문을 읽을 수 없습니다.")
+		return
+	}
+	if !sixDigits(in.Pin) {
+		writeErr(w, http.StatusBadRequest, "결제 비밀번호는 숫자 6자리입니다.")
+		return
+	}
+	name := clamp(strings.TrimSpace(in.Name), 60)
+	if name == "" {
+		name = PinSites[where]
+	}
+	plain, _ := json.Marshal(map[string]string{"pin": in.Pin})
+	nonce, sealed, err := s.Sealer.Seal(pinSeal(where), plain)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "봉인하지 못했습니다.")
+		return
+	}
+	if err := s.Store.PutPin(r.Context(), store.Pin{Site: where, Name: name, Nonce: nonce, Sealed: sealed, KeyID: s.Sealer.ID()}); err != nil {
+		s.Log.Error("결제 비밀번호를 저장하지 못했습니다", "site", where, "err", err)
+		writeErr(w, http.StatusInternalServerError, "저장하지 못했습니다.")
+		return
+	}
+	s.Log.Info("결제 비밀번호를 저장했습니다", "site", where)
+	writeJSON(w, http.StatusOK, map[string]string{"site": where, "name": name})
+}
+
+func (s *Server) forgetPin(w http.ResponseWriter, r *http.Request) {
+	where, ok := pinSite(r.PathValue("site"))
+	if !ok {
+		writeErr(w, http.StatusBadRequest, "결제 비밀번호를 둘 수 있는 곳이 아닙니다.")
+		return
+	}
+	gone, err := s.Store.DeletePin(r.Context(), where)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "지우지 못했습니다.")
+		return
+	}
+	if !gone {
+		writeErr(w, http.StatusNotFound, "저장된 결제 비밀번호가 없습니다.")
+		return
+	}
+	s.Log.Info("결제 비밀번호를 지웠습니다", "site", where)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// releasePin hands a payment password to the browser for a keypad on that
+// payment's own host. host is the frame the keypad is in - the browser reads
+// it from the page, not from anything the model said - and it must be the
+// site or under it.
+func (s *Server) releasePin(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Site    string `json:"site"`
+		Host    string `json:"host"`
+		Purpose string `json:"purpose"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&in); err != nil {
+		writeErr(w, http.StatusBadRequest, "본문을 읽을 수 없습니다.")
+		return
+	}
+	host := site.Host(in.Host)
+	purpose := clamp(strings.TrimSpace(in.Purpose), 80)
+	where, ok := pinSite(in.Site)
+	record := func(outcome, note string) {
+		if err := s.Store.Record(r.Context(), store.Use{Domain: pinSeal(where), Host: host, Purpose: purpose, Outcome: outcome, Note: note}); err != nil {
+			s.Log.Warn("사용 기록을 남기지 못했습니다", "err", err)
+		}
+	}
+	if !ok || (host != where && !strings.HasSuffix(host, "."+where)) {
+		record("refused", "그 결제의 화면이 아님")
+		writeErr(w, http.StatusForbidden, "그 결제의 화면이 아니라서 결제 비밀번호를 내주지 않습니다.")
+		return
+	}
+	p, err := s.Store.GetPin(r.Context(), where)
+	if errors.Is(err, store.ErrNotFound) {
+		record("none", "")
+		writeErr(w, http.StatusNotFound, PinSites[where]+" 결제 비밀번호가 보관함에 없습니다.")
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "읽지 못했습니다.")
+		return
+	}
+	if p.KeyID != s.Sealer.ID() {
+		record("failed", "다른 키로 봉인됨")
+		writeErr(w, http.StatusConflict, "다른 키로 저장된 결제 비밀번호라 열 수 없습니다. 다시 저장해 주세요.")
+		return
+	}
+	plain, err := s.Sealer.Open(pinSeal(where), p.Nonce, p.Sealed)
+	var got struct {
+		Pin string `json:"pin"`
+	}
+	if err == nil {
+		err = json.Unmarshal(plain, &got)
+	}
+	if err != nil || !sixDigits(got.Pin) {
+		record("failed", "봉인을 열지 못함")
+		writeErr(w, http.StatusInternalServerError, "저장된 결제 비밀번호를 열지 못했습니다.")
+		return
+	}
+	_ = s.Store.UsedPin(r.Context(), where)
+	record("released", "")
+	s.Log.Info("결제 비밀번호를 내주었습니다", "site", where, "host", host, "purpose", purpose)
+	writeJSON(w, http.StatusOK, map[string]string{"site": where, "pin": got.Pin})
+}
+
+func sixDigits(v string) bool {
+	if len(v) != 6 {
+		return false
+	}
+	for _, c := range v {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // Hint shows enough of a username to tell two apart: ab***, ab***@g***.

@@ -14,14 +14,24 @@
   → 브라우저 브리지가 지금 탭 주소를 직접 읽어 POST /release {host}
   → 그 주소의 도메인(coupang.com)에 저장된 것만 받아 칸에 바로 넣고 버린다
   → 모델은 "넣었습니다"만 받는다
+
+결제 비밀번호(네이버페이·쿠페이 숫자 6자리)도 같은 길로, 로그인과 따로 둔다(vault_pins, 073):
+  → 자비스가 save_payment_pin {pay: 네이버페이} → 승인 카드(비밀 칸 하나) → PUT /pins/pay.naver.com
+  → 결제 비밀번호 키패드 앞에서 browser_enter_payment_pin 이 키패드 프레임의 호스트를 읽어
+    POST /release-pin {site: pay.naver.com, host}
+  → host 가 그 결제 호스트(와 그 아래)일 때만 내준다 - 같은 naver.com 이어도 블로그·카페는 아니다
 ```
+
+결제 비밀번호를 로그인과 따로 두는 것은, 로그인은 등록 도메인마다 하나(naver.com)라서 네이버 로그인과
+네이버페이 결제 비밀번호가 한 칸을 두고 다투기 때문이다. 둘 곳은 `PinSites`(pay.naver.com, coupang.com)뿐이고,
+봉인의 AAD 는 `pin:` + 결제 호스트라 로그인 봉인과 섞이지 않는다.
 
 ## 토큰 둘
 
 | 토큰 | 누가 | 열리는 것 |
 |---|---|---|
-| `API_TOKEN` (서비스 토큰) | 에이전트 | `GET /logins`(비밀 없음), `PUT /logins/{domain}`, `DELETE /logins/{domain}`, `GET /uses` |
-| `VAULT_RELEASE_TOKEN` | 브라우저 컨테이너 | `POST /release` 하나 |
+| `API_TOKEN` (서비스 토큰) | 에이전트 | `GET /logins`(비밀 없음), `PUT /logins/{domain}`, `DELETE /logins/{domain}`, `GET /uses`, `GET /pins`(숫자 없음), `PUT /pins/{site}`, `DELETE /pins/{site}` |
+| `VAULT_RELEASE_TOKEN` | 브라우저 컨테이너 | `POST /release`, `POST /release-pin` 둘 |
 
 서비스 토큰으로는 비밀번호를 꺼낼 수 없고, 브라우저 토큰으로는 저장·목록·지우기를 못 한다.
 둘이 같으면 서비스가 뜨지 않는다.

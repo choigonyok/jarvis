@@ -33,6 +33,16 @@ type Use struct {
 	Note    string    `json:"note"`
 }
 
+// Pin is a saved payment password as vault-svc lists it: never the digits.
+type Pin struct {
+	Site       string     `json:"site"`
+	Name       string     `json:"name"`
+	CreatedAt  time.Time  `json:"createdAt"`
+	UpdatedAt  time.Time  `json:"updatedAt"`
+	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
+	Uses       int        `json:"uses"`
+}
+
 // Client is vault-svc with the services' token: it saves, lists and forgets.
 // It cannot read a secret back - only the browser's token can.
 type Client struct {
@@ -62,6 +72,24 @@ func (c *Client) List(ctx context.Context) ([]Login, error) {
 
 func (c *Client) Forget(ctx context.Context, domain string) error {
 	return c.do(ctx, http.MethodDelete, "/logins/"+url.PathEscape(domain), nil, nil)
+}
+
+// SavePin keeps a payment password for the payment host its keypad is on.
+func (c *Client) SavePin(ctx context.Context, site, name, pin string) error {
+	body, _ := json.Marshal(map[string]string{"name": name, "pin": pin})
+	return c.do(ctx, http.MethodPut, "/pins/"+url.PathEscape(site), body, nil)
+}
+
+func (c *Client) Pins(ctx context.Context) ([]Pin, error) {
+	var out struct {
+		Pins []Pin `json:"pins"`
+	}
+	err := c.do(ctx, http.MethodGet, "/pins", nil, &out)
+	return out.Pins, err
+}
+
+func (c *Client) ForgetPin(ctx context.Context, site string) error {
+	return c.do(ctx, http.MethodDelete, "/pins/"+url.PathEscape(site), nil, nil)
 }
 
 func (c *Client) Uses(ctx context.Context, limit int) ([]Use, error) {

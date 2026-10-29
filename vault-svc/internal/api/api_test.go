@@ -18,6 +18,7 @@ import (
 
 type fake struct {
 	logins map[string]store.Login
+	pins   map[string]store.Pin
 	uses   []store.Use
 }
 
@@ -51,6 +52,30 @@ func (f *fake) Record(_ context.Context, u store.Use) error {
 	return nil
 }
 func (f *fake) Uses(context.Context, int) ([]store.Use, error) { return f.uses, nil }
+func (f *fake) PutPin(_ context.Context, p store.Pin) error {
+	f.pins[p.Site] = p
+	return nil
+}
+func (f *fake) GetPin(_ context.Context, site string) (store.Pin, error) {
+	p, ok := f.pins[site]
+	if !ok {
+		return p, store.ErrNotFound
+	}
+	return p, nil
+}
+func (f *fake) ListPins(context.Context) ([]store.PinMeta, error) {
+	out := []store.PinMeta{}
+	for _, p := range f.pins {
+		out = append(out, store.PinMeta{Site: p.Site, Name: p.Name})
+	}
+	return out, nil
+}
+func (f *fake) DeletePin(_ context.Context, site string) (bool, error) {
+	_, ok := f.pins[site]
+	delete(f.pins, site)
+	return ok, nil
+}
+func (f *fake) UsedPin(context.Context, string) error { return nil }
 
 func server(t *testing.T) (http.Handler, *fake) {
 	t.Helper()
@@ -60,7 +85,7 @@ func server(t *testing.T) (http.Handler, *fake) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &fake{logins: map[string]store.Login{}}
+	f := &fake{logins: map[string]store.Login{}, pins: map[string]store.Pin{}}
 	return (&Server{Store: f, Sealer: s, Token: "svc", ReleaseToken: "browser", Log: slog.New(slog.NewTextHandler(io.Discard, nil))}).Handler(), f
 }
 
@@ -151,5 +176,79 @@ func TestHint(t *testing.T) {
 		if got := Hint(in); got != want {
 			t.Errorf("Hint(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// A payment password is saved by the agent and read back by the browser only
+// for a keypad on that payment's own host - pay.naver.com and under it, not
+// the rest of naver.com - and it is kept apart from the naver.com login.
+func TestAPaymentPasswordIsForItsKeypadOnly(t *testing.T) {
+	h, f := server(t)
+	if code, _ := call(h, http.MethodPut, "/logins/nid.naver.com", "svc", `{"name":"네이버","username":"abcdef","password":"login-pw"}`); code != http.StatusOK {
+		t.Fatalf("네이버 로그인 저장: %d", code)
+	}
+	if code, body := call(h, http.MethodPut, "/pins/pay.naver.com", "svc", `{"pin":"135790"}`); code != http.StatusOK || !strings.Contains(body, "네이버페이") {
+		t.Fatalf("결제 비밀번호 저장: %d %s", code, body)
+	}
+	if p := f.pins["pay.naver.com"]; bytes.Contains(p.Sealed, []byte("135790")) || p.Name != "네이버페이" {
+		t.Fatalf("봉인해서 저장해야 합니다: %+v", p)
+	}
+	for _, c := range []struct{ path, body string }{
+		{"/pins/naver.com", `{"pin":"135790"}`}, {"/pins/blog.naver.com", `{"pin":"135790"}`},
+		{"/pins/pay.naver.com", `{"pin":"12345"}`}, {"/pins/pay.naver.com", `{"pin":"12a456"}`}, {"/pins/pay.naver.com", `{}`},
+	} {
+		if code, _ := call(h, http.MethodPut, c.path, "svc", c.body); code != http.StatusBadRequest {
+			t.Errorf("저장하면 안 됩니다 %s %s: %d", c.path, c.body, code)
+		}
+	}
+	if code, body := call(h, http.MethodGet, "/pins", "svc", ""); code != http.StatusOK || strings.Contains(body, "135790") || !strings.Contains(body, "pay.naver.com") {
+		t.Fatalf("목록에 숫자가 보이면 안 됩니다: %d %s", code, body)
+	}
+
+	if code, _ := call(h, http.MethodPost, "/release-pin", "svc", `{"site":"pay.naver.com","host":"pay.naver.com"}`); code != http.StatusUnauthorized {
+		t.Fatalf("서비스 토큰으로 꺼내기: %d", code)
+	}
+	for _, host := range []string{"pay.naver.com", "https://new-m.pay.naver.com/x", "orders.pay.naver.com"} {
+		code, body := call(h, http.MethodPost, "/release-pin", "browser", `{"site":"pay.naver.com","host":"`+host+`","purpose":"결제 비밀번호"}`)
+		var got map[string]string
+		_ = json.Unmarshal([]byte(body), &got)
+		if code != http.StatusOK || got["pin"] != "135790" {
+			t.Fatalf("%s 의 키패드에는 내줍니다: %d %s", host, code, body)
+		}
+	}
+	for _, c := range []string{
+		`{"site":"pay.naver.com","host":"blog.naver.com"}`, `{"site":"pay.naver.com","host":"pay.naver.com.evil.com"}`,
+		`{"site":"naver.com","host":"pay.naver.com"}`, `{"site":"pay.naver.com","host":"nid.naver.com"}`,
+	} {
+		if code, body := call(h, http.MethodPost, "/release-pin", "browser", c); code != http.StatusForbidden || strings.Contains(body, "135790") {
+			t.Errorf("그 결제의 화면이 아니면 내주지 않습니다 %s: %d %s", c, code, body)
+		}
+	}
+	// The login of naver.com is its own: saving the password did not touch it.
+	code, body := call(h, http.MethodPost, "/release", "browser", `{"host":"nid.naver.com"}`)
+	if code != http.StatusOK || !strings.Contains(body, "login-pw") || strings.Contains(body, "135790") {
+		t.Fatalf("네이버 로그인은 그대로여야 합니다: %d %s", code, body)
+	}
+	for _, c := range []struct{ method, path, body string }{
+		{http.MethodGet, "/pins", ""}, {http.MethodPut, "/pins/pay.naver.com", `{"pin":"000000"}`}, {http.MethodDelete, "/pins/pay.naver.com", ""},
+	} {
+		if code, _ := call(h, c.method, c.path, "browser", c.body); code != http.StatusUnauthorized {
+			t.Errorf("브라우저 토큰으로 %s %s: %d", c.method, c.path, code)
+		}
+	}
+	if code, _ := call(h, http.MethodDelete, "/pins/pay.naver.com", "svc", ""); code != http.StatusNoContent {
+		t.Fatalf("지우기: %d", code)
+	}
+	if code, _ := call(h, http.MethodPost, "/release-pin", "browser", `{"site":"pay.naver.com","host":"pay.naver.com"}`); code != http.StatusNotFound {
+		t.Fatalf("지운 뒤 꺼내기: %d", code)
+	}
+	outcomes := map[string]int{}
+	for _, u := range f.uses {
+		if strings.HasPrefix(u.Domain, "pin:") {
+			outcomes[u.Outcome]++
+		}
+	}
+	if outcomes["released"] != 3 || outcomes["refused"] != 4 || outcomes["none"] != 1 {
+		t.Fatalf("결제 비밀번호를 내준 것·거절한 것·없던 것이 기록돼야 합니다: %v", outcomes)
 	}
 }

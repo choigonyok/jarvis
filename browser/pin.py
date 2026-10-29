@@ -1,7 +1,9 @@
 """결제 비밀번호(쿠팡 쿠페이, 네이버페이)를 화면 키패드로 넣는다.
 
-비밀번호는 이 컨테이너의 환경변수(COUPANG_PAY_PIN·NAVER_PAY_PIN, 맥미니 .env 에만 있다)에만
-있고 모델에게는 보이지 않는다. 모델은 키패드가 떴을 때 이 도구를 부르기만 한다.
+비밀번호는 보관함(vault-svc 의 결제 비밀번호 - 운영자가 대화의 save_payment_pin 카드 비밀 칸으로
+넣는다)이나 이 컨테이너의 환경변수(COUPANG_PAY_PIN·NAVER_PAY_PIN, 맥미니 .env)에만 있고 모델에게는
+보이지 않는다. 보관함은 키패드가 있는 프레임의 호스트가 그 결제의 것일 때만 내준다. 모델은 키패드가
+떴을 때 이 도구를 부르기만 한다.
 
 키패드는 숫자 배치가 매번 섞이는 경우가 많아서, 숫자 0~9 가 모두 들어 있는 가장 작은 영역을
 키패드로 보고 각 숫자의 실제 화면 위치를 누른다(마우스 이벤트를 CDP 로 보낸다 - 스크립트의
@@ -14,9 +16,13 @@ click() 은 보안 키패드가 무시한다). 누를 때마다 배치를 다시
 칸마다 잘라 숫자를 읽는다(read_sprite). 하나라도 확실하지 않으면 넣지 않는다 - 틀린 숫자를
 누르면 비밀번호 오류가 쌓여 쿠페이가 잠긴다. 네이버페이는 다섯 번 연속 틀리면 결제가 잠긴다.
 
-네이버페이 키패드는 아직 실제로 보지 못했다(2026-10-29). 숫자가 글자·alt·aria-label 로 적힌
-키패드면 읽어서 넣고, 그림이라 읽지 못하면 누르지 않고 키패드의 모양(요소·그림·화면)을
-CAPTURE_DIR 에 남긴다 - 쿠페이 그림 키패드도 그렇게 남은 모양으로 읽는 법을 만들었다.
+네이버페이 키패드(pay.naver.com/authentication/pw/check 새 창, 2026-10-30 확인)도 그림이다.
+키 열 개(span.SecureKeyboard_number__*)가 한 장의 스프라이트(data: PNG 120×200, 흰 숫자, 3칸×4줄,
+칸 40×50 - 화면에는 background-size 60×100 으로 반만 그려 칸 20×25)를 나눠 쓰고, 키 R-C 는 그림의
+R-C 칸을 보여 주며 그림 속 숫자 배치가 매번 섞인다(빈 칸 둘). 쿠페이와 같은 방법으로 칸을 잘라
+네이버페이 글꼴의 견본(12×16)으로 읽는다. 숫자가 글자·alt·aria-label 로 적힌 키패드면 그대로 읽고,
+어느 것으로도 읽지 못하면 누르지 않고 키패드의 모양(요소·그림·화면)을 CAPTURE_DIR 에 남긴다 -
+두 그림 키패드 모두 그렇게 남은 모양으로 읽는 법을 만들었다.
 
 넣는 곳은 키패드가 그 결제의 화면에 있을 때뿐이다: 키패드가 있는 프레임의 출처가 쿠팡이면
 coupang.com, 네이버페이면 pay.naver.com 아래여야 한다(SITES). 탭 주소가 아니라 프레임을 보는
@@ -36,6 +42,7 @@ import re
 import shutil
 import sys
 import time
+import urllib.error
 import urllib.request
 from urllib.parse import urlparse
 
@@ -51,6 +58,10 @@ SITES = (
     {"host": "coupang.com", "env": "COUPANG_PAY_PIN", "setting": "JARVIS_COUPANG_PAY_PIN", "name": "쿠팡 결제 비밀번호(쿠페이)", "text": ""},
     {"host": "pay.naver.com", "env": "NAVER_PAY_PIN", "setting": "JARVIS_NAVER_PAY_PIN", "name": "네이버페이 결제 비밀번호", "text": "비밀번호"},
 )
+
+# 보관함: 이 컨테이너의 토큰은 꺼내기만 연다(login.py 와 같은 것).
+VAULT_URL = os.environ.get("VAULT_URL", "http://vault:8105").rstrip("/")
+VAULT_TOKEN = os.environ.get("VAULT_RELEASE_TOKEN", "")
 
 # 읽지 못한 키패드의 모양을 남기는 곳(최근 것 몇 개만). 화면 사진에는 결제 화면이 담기므로
 # 이 컨테이너 밖으로 보내지 않는다.
@@ -174,6 +185,25 @@ SPRITE_JS = r"""
 })()
 """
 
+# 네이버페이 그림 키패드: 키마다 스프라이트 주소, 그 키가 보여 주는 칸(배경 위치·크기), 그림을 그린 크기
+# (background-size - 그림을 반으로 줄여 그린다). key 는 키의 차례(querySelectorAll 순서).
+NAVER_SPRITE_JS = r"""
+(() => {
+  const keys = Array.from(document.querySelectorAll('[class*="SecureKeyboard_number"]'));
+  if (keys.length !== 10) return null;
+  const out = [];
+  for (let i = 0; i < keys.length; i++) {
+    const cs = getComputedStyle(keys[i]);
+    const m = /url\("?(data:image\/png;base64,[^")]+)"?\)/.exec(cs.backgroundImage);
+    if (!m) return null;
+    const [x, y] = cs.backgroundPosition.split(' ').map(parseFloat);
+    const [bw, bh] = cs.backgroundSize.split(' ').map(parseFloat);
+    out.push({key: String(i), src: m[1], x: -x, y: -y, w: keys[i].offsetWidth, h: keys[i].offsetHeight, bw, bh});
+  }
+  return JSON.stringify(out);
+})()
+"""
+
 # 쿠페이 키패드의 숫자 모양(2026-10-18 스프라이트에서 뽑음): 글자가 차지한 범위만 잘라
 # GLYPH_W×GLYPH_H 로 맞춘 흑백(1=글자). 서로 140칸 중 최소 32칸 다르다.
 GLYPH_W, GLYPH_H = 10, 14
@@ -194,16 +224,36 @@ HOLES = {0: 1, 1: 0, 2: 0, 3: 0, 4: 1, 5: 0, 6: 1, 7: 0, 8: 2, 9: 1}
 # 견본과 이만큼까지 달라도 같은 숫자로 보고, 두 번째로 가까운 견본과는 이만큼 더 떨어져야 한다.
 MAX_MISS, MIN_MARGIN = 24, 10
 
+# 네이버페이 키패드의 숫자 모양(2026-10-30 스프라이트에서 뽑음). 글씨가 가늘어 10×14 로는 5 와 6 이
+# 19칸 차이라 12×16 으로 본다 - 서로 192칸 중 최소 24칸(3·8) 다르고, 구멍 수가 한 번 더 가른다.
+NAVER_TEMPLATES = {
+    0: "000111111000001111111100011100001110011100000111111000000111111000000111111000000011111000000011111000000011111000000011111000000111011000000111011100000110001110011110001111111100000011111000",
+    1: "000000011111000011111111001111111111111111001111111000001111000000001111000000001111000000001111000000001111000000001111000000001111000000001111000000001111000000001111000000001111000000001111",
+    2: "001111111000011111111100111100001110111000000111110000000111000000000110000000001110000000011100000000111000000001110000000011100000000111000000001110000000011100000000111111111111111111111111",
+    3: "000111111000011111111100011100001110111000000110000000000110000000001110000000011100000011111000000011111110000000000111000000000111110000000111111000000111111100001110011111111100000111111000",
+    4: "000000111100000000111100000001111100000011101100000011001100000111001100001110001100001100001100011100001100011000001100111000001100111111111111111111111111000000001100000000001100000000001100",
+    5: "011111111110011111111110011000000000011000000000011000000000111000100000111111111100111110111110111000000111000000000111000000000111110000000111111000000111011100011110001111111100000111111000",
+    6: "000111111000001111111100011100001110011100000110111000000000111000110000111011111100111111111110111100000111111000000111111000000111011000000111011100000111001110001110001111111100000011111000",
+    7: "111111111111111111111111000000000111000000000111000000001110000000001100000000011100000000011000000000111000000001110000000001110000000011100000000011100000000111000000000110000000001110000000",
+    8: "000111111000001111111100011100001110011000000110011000000110011100001110001111111100000111111000001111111110011000000110111000000111111000000111111000000111011100001110001111111100000111111000",
+    9: "000011110000001111111000011110011100111000001110111000000110111000000111111000000111111000001111011111111111001111110111000000000111000000000110011000001110011100011100001111111100000111110000",
+}
+NAVER_HOLES = {0: 1, 1: 0, 2: 0, 3: 0, 4: 1, 5: 0, 6: 1, 7: 0, 8: 2, 9: 1}
 
-def _bits(cell) -> str | None:
-    """칸(알파 채널 그림)의 글자 모양. 글자가 없으면 None."""
+# 그림 키패드마다의 글꼴: 이름, 견본 크기, 견본, 구멍 수, 허용 차이·간격.
+COUPAY = {"name": "쿠페이", "w": GLYPH_W, "h": GLYPH_H, "templates": TEMPLATES, "holes": HOLES, "max_miss": MAX_MISS, "min_margin": MIN_MARGIN}
+NAVERPAY = {"name": "네이버페이", "w": 12, "h": 16, "templates": NAVER_TEMPLATES, "holes": NAVER_HOLES, "max_miss": 32, "min_margin": 12}
+
+
+def _bits(cell, w: int = GLYPH_W, h: int = GLYPH_H) -> str | None:
+    """칸(알파 채널 그림)의 글자 모양(w×h). 글자가 없으면 None."""
     from PIL import Image
 
     box = cell.point(lambda v: 255 if v >= 128 else 0).getbbox()
     if box is None:
         return None
-    g = cell.crop(box).resize((GLYPH_W, GLYPH_H), Image.BILINEAR).point(lambda v: 1 if v >= 128 else 0)
-    return "".join(str(g.getpixel((x, y))) for y in range(GLYPH_H) for x in range(GLYPH_W))
+    g = cell.crop(box).resize((w, h), Image.BILINEAR).point(lambda v: 1 if v >= 128 else 0)
+    return "".join(str(g.getpixel((x, y))) for y in range(h) for x in range(w))
 
 
 def _holes(cell) -> int:
@@ -229,12 +279,14 @@ def _holes(cell) -> int:
     return n
 
 
-def read_sprite(cells: list[dict]) -> dict[str, int]:
-    """그림 키패드의 키(data-key) → 그 키에 그려진 숫자. 열 칸이 모두 확실하고 0~9 가 한 번씩
-    나와야 돌려준다. 아니면 RuntimeError - 이때는 아무것도 누르지 않는다."""
+def read_sprite(cells: list[dict], glyphs: dict = COUPAY) -> dict[str, int]:
+    """그림 키패드의 키 → 그 키에 그려진 숫자. 열 칸이 모두 확실하고 0~9 가 한 번씩 나와야 돌려준다.
+    아니면 RuntimeError - 이때는 아무것도 누르지 않는다. 칸의 위치·크기는 화면에 그린 크기 기준이고,
+    그림을 줄여 그렸으면(bw·bh, background-size) 그림의 실제 크기로 늘려 자른다."""
     from PIL import Image
 
-    unsure = RuntimeError("쿠페이 키패드의 숫자를 확실히 읽지 못해 비밀번호를 넣지 않았습니다(틀리면 쿠페이가 잠길 수 있습니다)")
+    unsure = RuntimeError(f"{glyphs['name']} 키패드의 숫자를 확실히 읽지 못해 비밀번호를 넣지 않았습니다"
+                          f"(틀리면 {glyphs['name']} 결제가 잠길 수 있습니다)")
     sheets = {}
     out = {}
     for c in cells:
@@ -242,14 +294,18 @@ def read_sprite(cells: list[dict]) -> dict[str, int]:
         if src not in sheets:
             png = base64.b64decode(src.split(",", 1)[1])
             sheets[src] = Image.open(io.BytesIO(png)).convert("RGBA").split()[3]
-        x, y = round(c["x"]), round(c["y"])
-        cell = sheets[src].crop((x, y, x + round(c["w"]), y + round(c["h"])))
-        bits = _bits(cell)
+        sheet = sheets[src]
+        bw, bh = c.get("bw"), c.get("bh")
+        sx = sheet.width / bw if isinstance(bw, (int, float)) and bw > 0 else 1.0
+        sy = sheet.height / bh if isinstance(bh, (int, float)) and bh > 0 else 1.0
+        x, y = round(c["x"] * sx), round(c["y"] * sy)
+        cell = sheet.crop((x, y, x + round(c["w"] * sx), y + round(c["h"] * sy)))
+        bits = _bits(cell, glyphs["w"], glyphs["h"])
         if bits is None:
             raise unsure
-        scored = sorted((sum(a != b for a, b in zip(bits, t)), d) for d, t in TEMPLATES.items())
+        scored = sorted((sum(a != b for a, b in zip(bits, t)), d) for d, t in glyphs["templates"].items())
         (miss, digit), (next_miss, _) = scored[0], scored[1]
-        if miss > MAX_MISS or next_miss - miss < MIN_MARGIN or _holes(cell) != HOLES[digit]:
+        if miss > glyphs["max_miss"] or next_miss - miss < glyphs["min_margin"] or _holes(cell) != glyphs["holes"][digit]:
             raise unsure
         out[str(c["key"])] = digit
     if sorted(out.values()) != list(range(10)):
@@ -302,8 +358,8 @@ async def _says(s: _Session, ctx: int, text: str) -> bool:
     return res.get("result", {}).get("value") is True
 
 
-async def _keypad(s: _Session) -> tuple[dict, list[str]] | None:
-    """이 탭에서 비밀번호를 넣을 수 있는 키패드: (그곳, 숫자 요소 열 개의 objectId - 0~9 순서).
+async def _keypad(s: _Session) -> tuple[dict, list[str], str] | None:
+    """이 탭에서 비밀번호를 넣을 수 있는 키패드: (그곳, 숫자 요소 열 개의 objectId - 0~9 순서, 그 프레임의 호스트).
     넣을 수 있는 출처(SITES)의 프레임에서만 찾는다 - 쿠팡이면 쿠페이 그림 키패드를 먼저, 그다음 숫자가
     글자로 적힌 키패드. 그곳의 text 가 그 프레임에도 탭의 맨 위 프레임에도 없으면 키패드로 보지 않는다.
     쿠페이 그림을 확실히 읽지 못하면 RuntimeError."""
@@ -316,19 +372,20 @@ async def _keypad(s: _Session) -> tuple[dict, list[str]] | None:
         if ctx is None:
             continue
         ids = None
-        if site["host"] == "coupang.com":
-            sprite = await s.call("Runtime.evaluate", {"expression": SPRITE_JS, "contextId": ctx, "returnByValue": True})
-            cells = sprite.get("result", {}).get("value")
-            if cells:
-                digits = read_sprite(json.loads(cells))
-                by_digit = json.dumps([k for k, _ in sorted(digits.items(), key=lambda kv: kv[1])])
-                res = await s.call("Runtime.evaluate", {
-                    "expression": f"""{by_digit}.map(k => document.querySelector('a.pad-key[data-key="' + k + '"]'))""",
-                    "contextId": ctx,
-                })
-                ids = await _objects(s, res)
-                if not ids:
-                    continue
+        # 그림 키패드: 쿠페이는 a.pad-key[data-key] 로, 네이버페이는 키의 차례로 그 키를 다시 찾는다.
+        sprite_js, glyphs, pick = {
+            "coupang.com": (SPRITE_JS, COUPAY, """document.querySelector('a.pad-key[data-key="' + k + '"]')"""),
+            "pay.naver.com": (NAVER_SPRITE_JS, NAVERPAY, """document.querySelectorAll('[class*="SecureKeyboard_number"]')[Number(k)]"""),
+        }[site["host"]]
+        sprite = await s.call("Runtime.evaluate", {"expression": sprite_js, "contextId": ctx, "returnByValue": True})
+        cells = sprite.get("result", {}).get("value")
+        if cells:
+            digits = read_sprite(json.loads(cells), glyphs)
+            by_digit = json.dumps([k for k, _ in sorted(digits.items(), key=lambda kv: kv[1])])
+            res = await s.call("Runtime.evaluate", {"expression": f"{by_digit}.map(k => {pick})", "contextId": ctx})
+            ids = await _objects(s, res)
+            if not ids:
+                continue
         if ids is None:
             ids = await _objects(s, await s.call("Runtime.evaluate", {"expression": KEYPAD_JS, "contextId": ctx}))
         if not ids:
@@ -337,8 +394,33 @@ async def _keypad(s: _Session) -> tuple[dict, list[str]] | None:
             top = await _world(s, frames[0]["id"])
             if top is None or not await _says(s, top, site["text"]):
                 continue
-        return site, ids
+        return site, ids, (urlparse(frame["origin"] or frame["url"]).hostname or "").lower()
     return None
+
+
+def _vault_pin(site: dict, host: str) -> str:
+    """보관함에 저장된 그 결제의 비밀번호. host 는 키패드가 있는 프레임의 호스트 - 보관함이 그 결제의
+    호스트(와 그 아래)인지 다시 보고 내준다. 저장된 것이 없으면 ""."""
+    if not VAULT_TOKEN:
+        return ""
+    req = urllib.request.Request(
+        f"{VAULT_URL}/release-pin",
+        data=json.dumps({"site": site["host"], "host": host, "purpose": "결제 비밀번호 키패드"}).encode(),
+        method="POST",
+        headers={"Authorization": f"Bearer {VAULT_TOKEN}", "Content-Type": "application/json"},
+    )
+    try:
+        return str(json.load(urllib.request.urlopen(req, timeout=10)).get("pin", ""))
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return ""
+        try:
+            msg = json.load(e).get("error", "")
+        except Exception:  # noqa: BLE001
+            msg = ""
+        raise RuntimeError(msg or f"보관함이 {e.code} 로 답했습니다") from None
+    except OSError as e:
+        raise RuntimeError(f"보관함에 닿지 못했습니다: {e}") from None
 
 
 async def _hits(s: _Session, object_id: str) -> bool:
@@ -467,10 +549,11 @@ async def enter(pin: str | None = None, port: int | None = None) -> str:
                 raise
             if found is None:
                 continue
-            site, keys = found
-            code = pin if pin is not None else os.environ.get(site["env"], "")
+            site, keys, host = found
+            code = pin if pin is not None else (os.environ.get(site["env"], "") or _vault_pin(site, host))
             if not re.fullmatch(r"[0-9]{6}", code or ""):
-                raise RuntimeError(f"{site['name']}가 설정되어 있지 않습니다(맥미니 .env 의 {site['setting']})")
+                raise RuntimeError(f"{site['name']}가 저장되어 있지 않아 넣지 않았습니다. 키패드를 누르지 말고, "
+                                   "대화에서 결제 비밀번호 저장 카드(save_payment_pin)로 넣어 달라고 알리세요")
             entered = 0
             try:
                 for ch in code:

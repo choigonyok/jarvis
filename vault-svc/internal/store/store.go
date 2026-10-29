@@ -120,3 +120,70 @@ func (s *Store) Uses(ctx context.Context, limit int) ([]Use, error) {
 	}
 	return out, rows.Err()
 }
+
+// Pin is one saved payment password (쿠페이, 네이버페이), sealed. Site is the
+// payment host its keypad is on; the six digits are inside Sealed.
+type Pin struct {
+	Site   string
+	Name   string
+	Nonce  []byte
+	Sealed []byte
+	KeyID  string
+}
+
+// PinMeta is a saved payment password as it may be shown: no digit in it.
+type PinMeta struct {
+	Site       string     `json:"site"`
+	Name       string     `json:"name"`
+	CreatedAt  time.Time  `json:"createdAt"`
+	UpdatedAt  time.Time  `json:"updatedAt"`
+	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
+	Uses       int        `json:"uses"`
+}
+
+func (s *Store) PutPin(ctx context.Context, p Pin) error {
+	_, err := s.pool.Exec(ctx, `insert into vault_pins (site, name, nonce, sealed, key_id)
+		values ($1, $2, $3, $4, $5)
+		on conflict (site) do update set name = excluded.name, nonce = excluded.nonce,
+		  sealed = excluded.sealed, key_id = excluded.key_id, updated_at = now()`,
+		p.Site, p.Name, p.Nonce, p.Sealed, p.KeyID)
+	return err
+}
+
+func (s *Store) GetPin(ctx context.Context, site string) (Pin, error) {
+	var p Pin
+	err := s.pool.QueryRow(ctx, `select site, name, nonce, sealed, key_id from vault_pins where site = $1`, site).
+		Scan(&p.Site, &p.Name, &p.Nonce, &p.Sealed, &p.KeyID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return p, ErrNotFound
+	}
+	return p, err
+}
+
+func (s *Store) ListPins(ctx context.Context) ([]PinMeta, error) {
+	rows, err := s.pool.Query(ctx, `select site, name, created_at, updated_at, last_used_at, uses from vault_pins order by site`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []PinMeta{}
+	for rows.Next() {
+		var m PinMeta
+		if err := rows.Scan(&m.Site, &m.Name, &m.CreatedAt, &m.UpdatedAt, &m.LastUsedAt, &m.Uses); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) DeletePin(ctx context.Context, site string) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `delete from vault_pins where site = $1`, site)
+	return tag.RowsAffected() > 0, err
+}
+
+// UsedPin counts a release against the payment password.
+func (s *Store) UsedPin(ctx context.Context, site string) error {
+	_, err := s.pool.Exec(ctx, `update vault_pins set last_used_at = now(), uses = uses + 1 where site = $1`, site)
+	return err
+}

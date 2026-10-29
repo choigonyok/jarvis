@@ -53,4 +53,30 @@ func TestStoreAsItsRole(t *testing.T) {
 	if _, err := s.Get(ctx, "dbtest.example"); err != ErrNotFound {
 		t.Fatalf("지운 뒤: %v", err)
 	}
+
+	// 결제 비밀번호: 로그인과 따로, 같은 역할로.
+	p := Pin{Site: "pay.dbtest.example", Name: "시험페이", Nonce: []byte("123456789012"), Sealed: []byte("sealed-pin"), KeyID: "k1"}
+	if err := s.PutPin(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	p.Sealed = []byte("sealed-pin-2")
+	if err := s.PutPin(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.GetPin(ctx, "pay.dbtest.example"); err != nil || string(got.Sealed) != "sealed-pin-2" {
+		t.Fatalf("결제 비밀번호를 다시 저장하면 덮어써야 합니다: %+v %v", got, err)
+	}
+	if err := s.UsedPin(ctx, "pay.dbtest.example"); err != nil {
+		t.Fatal(err)
+	}
+	pins, err := s.ListPins(ctx)
+	if err != nil || len(pins) != 1 || pins[0].Uses != 1 || pins[0].LastUsedAt == nil {
+		t.Fatalf("결제 비밀번호 목록: %+v %v", pins, err)
+	}
+	if gone, err := s.DeletePin(ctx, "pay.dbtest.example"); err != nil || !gone {
+		t.Fatalf("결제 비밀번호 지우기: %v %v", gone, err)
+	}
+	if _, err := s.GetPin(ctx, "pay.dbtest.example"); err != ErrNotFound {
+		t.Fatalf("지운 뒤: %v", err)
+	}
 }
