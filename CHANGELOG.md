@@ -65,7 +65,7 @@ jarvis 의 동작이 언제 어떻게 바뀌었는지는 여기에만 적는다.
 | 10-18 | agent | 백그라운드 작업이 대화가 끝나고 5분 기다리던 규칙을 뺐다 - 방금 맡긴 작업이 '예약됨'으로 5분씩 멈춰 있었다. 작업은 대화와 나란히 돈다(자리 둘, 브라우저는 그중 하나). |
 | 10-17 | 결제 | 쿠팡 쿠페이 결제를 허용했다(그 전에는 쿠팡 결제가 막혀 있었고 네이버페이만 됐다). 작업의 결제는 그 작업의 카드로 묻는다. |
 | 10-17 | vault-svc | 로그인 정보 보관함. 맥미니 .env 에 `JARVIS_VAULT_KEY`·`JARVIS_VAULT_RELEASE_TOKEN`, 그리고 `JARVIS_GUEST_API_TOKEN`·`JARVIS_MIND_CONSOLE_TOKEN`·`JARVIS_VNC_PASSWORD` 가 필요해졌다. |
-| 10-16 | 맥미니 | FileVault 를 끈 채로 두기로 했다(받아들인 위험, `JARVIS_FILEVAULT_OFF_ACCEPTED=true`). |
+| 10-16 | 맥미니 | 디스크 암호화(FileVault)를 끄기로 결정한 경우를 맥미니 `.env` 의 `JARVIS_FILEVAULT_OFF_ACCEPTED=true` 로 적는다 - `scripts/backup` 과 상태 탭이 경고 대신 결정으로 보여 준다. |
 | 10-16 | 이미지 | 수집기와 브라우저가 root 로 돌지 않는다. root 이미지에서 올릴 때 예전 볼륨의 소유자를 한 번 바꿨다: `docker run --rm -v jarvis_jarvis-kakaotalk-data:/d alpine:3.22 chown -R 65532:65532 /d`(iMessage 도 같게), `docker run --rm -v jarvis_chrome-profile:/p alpine:3.22 chown -R 10002:10002 /p`. |
 | 10-16 | mind · agent | 자산 비중 이탈(`assets.band`)도 mind 가 직접 구독해 판단한다 - 에이전트의 판단 턴과 별도 원장, `memory.plan` 을 지웠다. 서비스마다 Postgres 역할(050). 쓰지 않는 표와 그 함수(사실·회수·제안 쿨다운: `fact_as_of`·`assert_fact`·`recall`·`open_threads`·`suppressed`·`proposals_today`)를 지웠다(049). |
 | 10-15 | mind · agent | 관문을 하나로 합쳤다: 에이전트의 제안 엔진은 스스로 카드를 열지 않고 mind 의 `mind.card` 를 보여 준다. 구조화 데이터(가계부·운동·캘린더·사진·자산·작업)를 읽는 곳을 mind 하나로 했다(`MEMORY_SOURCES` 기본값에서 그 수집기를 뺐다). 위치 체류(`visit`)를 발생으로 읽고, 근처 가게 검색(`find_nearby`, OpenStreetMap)을 더했다. |
