@@ -1,21 +1,29 @@
-"""쿠팡 결제 비밀번호(쿠페이)를 화면 키패드로 넣는다.
+"""결제 비밀번호(쿠팡 쿠페이, 네이버페이)를 화면 키패드로 넣는다.
 
-비밀번호는 이 컨테이너의 환경변수(COUPANG_PAY_PIN, 맥미니 .env 에만 있다)에만 있고
-모델에게는 보이지 않는다. 모델은 키패드가 떴을 때 이 도구를 부르기만 한다.
+비밀번호는 이 컨테이너의 환경변수(COUPANG_PAY_PIN·NAVER_PAY_PIN, 맥미니 .env 에만 있다)에만
+있고 모델에게는 보이지 않는다. 모델은 키패드가 떴을 때 이 도구를 부르기만 한다.
 
-키패드는 숫자 배치가 매번 섞이는 경우가 많아서, 지금 보이는 탭에서 숫자 0~9 가 모두
-들어 있는 가장 작은 영역을 키패드로 보고 각 숫자의 실제 화면 위치를 누른다(마우스
-이벤트를 CDP 로 보낸다 - 스크립트의 click() 은 보안 키패드가 무시한다).
+키패드는 숫자 배치가 매번 섞이는 경우가 많아서, 숫자 0~9 가 모두 들어 있는 가장 작은 영역을
+키패드로 보고 각 숫자의 실제 화면 위치를 누른다(마우스 이벤트를 CDP 로 보낸다 - 스크립트의
+click() 은 보안 키패드가 무시한다). 누를 때마다 배치를 다시 읽는다 - 누를 때마다 숫자를 다시
+섞는 키패드가 있다. 누르기 전에 그 자리에 그 키가 있는지(다른 것이 덮고 있지 않은지) 본다.
 
 쿠팡 쿠페이 키패드(rocketpay.coupang.com, 2026-10-18 확인)는 숫자가 글자가 아니라 그림이다.
 키 열 개(a.pad-key[data-key])가 한 장의 스프라이트(data: PNG, 흰 숫자)를 나눠 쓰고, 키 N 은
 그림의 N 번째 칸을 배경 위치로 보여 주며, 그림 속 숫자 배치가 매번 섞인다. 그래서 그 그림을
 칸마다 잘라 숫자를 읽는다(read_sprite). 하나라도 확실하지 않으면 넣지 않는다 - 틀린 숫자를
-누르면 비밀번호 오류가 쌓여 쿠페이가 잠긴다.
+누르면 비밀번호 오류가 쌓여 쿠페이가 잠긴다. 네이버페이는 다섯 번 연속 틀리면 결제가 잠긴다.
 
-넣는 곳은 쿠팡뿐이다. 다른 사이트의 화면이면 넣지 않는다 - 비밀번호를 받아 가는
-가짜 키패드에 넣는 통로가 되지 않게. 넣은 뒤 결제가 진행되는 요청은 결제 가드가
-따로 판정한다(승인 카드).
+네이버페이 키패드는 아직 실제로 보지 못했다(2026-10-29). 숫자가 글자·alt·aria-label 로 적힌
+키패드면 읽어서 넣고, 그림이라 읽지 못하면 누르지 않고 키패드의 모양(요소·그림·화면)을
+CAPTURE_DIR 에 남긴다 - 쿠페이 그림 키패드도 그렇게 남은 모양으로 읽는 법을 만들었다.
+
+넣는 곳은 키패드가 그 결제의 화면에 있을 때뿐이다: 키패드가 있는 프레임의 출처가 쿠팡이면
+coupang.com, 네이버페이면 pay.naver.com 아래여야 한다(SITES). 탭 주소가 아니라 프레임을 보는
+것은, 키패드가 쇼핑몰 화면 위의 결제 창 안에 있을 수 있어서다. naver.com 전체가 아니라
+pay.naver.com 인 것은, 같은 naver.com 의 블로그·카페는 누구나 글을 올리는 곳이라 키패드처럼
+보이는 것을 둘 수 있어서다. 다른 곳이면 넣지 않는다 - 비밀번호를 받아 가는 가짜 키패드에
+넣는 통로가 되지 않게. 넣은 뒤 결제가 진행되는 요청은 결제 가드가 따로 판정한다(승인 카드).
 """
 
 import asyncio
@@ -25,6 +33,9 @@ import json
 import os
 import random
 import re
+import shutil
+import sys
+import time
 import urllib.request
 from urllib.parse import urlparse
 
@@ -33,14 +44,31 @@ import websockets
 from guard import find_cdp_port
 from upload import _Session, _visible
 
-SITE = "coupang.com"
+# 키패드가 있는 프레임의 출처(host 와 그 아래) → 그곳의 비밀번호(환경변수, 맥미니 .env 의 이름).
+# text 는 키패드가 뜬 화면에 있어야 하는 글자다 - 네이버페이 화면에는 결제 비밀번호 말고도 숫자
+# 0~9 가 늘어선 것(달력 등)이 있을 수 있다. 쿠페이 키패드에는 쓰지 않는다(이미 쓰는 그대로).
+SITES = (
+    {"host": "coupang.com", "env": "COUPANG_PAY_PIN", "setting": "JARVIS_COUPANG_PAY_PIN", "name": "쿠팡 결제 비밀번호(쿠페이)", "text": ""},
+    {"host": "pay.naver.com", "env": "NAVER_PAY_PIN", "setting": "JARVIS_NAVER_PAY_PIN", "name": "네이버페이 결제 비밀번호", "text": "비밀번호"},
+)
+
+# 읽지 못한 키패드의 모양을 남기는 곳(최근 것 몇 개만). 화면 사진에는 결제 화면이 담기므로
+# 이 컨테이너 밖으로 보내지 않는다.
+CAPTURE_DIR = os.environ.get("PIN_CAPTURE_DIR", "/tmp/jarvis-pin")
+CAPTURES_KEPT = 5
+
+# 넣다가 멈추면(키패드가 바뀌거나 사라져서) 키패드에 숫자 몇 자리가 남는다. 그 위에 다시 처음부터
+# 넣으면 틀린 비밀번호가 되므로, 그 뒤 얼마 동안은 다시 넣지 않는다.
+HALT_SECONDS = 600
+_halted_until = 0.0
 
 TOOL = {
     "name": "browser_enter_payment_pin",
     "description": (
-        "쿠팡 결제 비밀번호(쿠페이) 키패드가 화면에 떠 있을 때 비밀번호를 넣는다. "
+        "결제 비밀번호 키패드(쿠팡 쿠페이, 네이버페이)가 화면에 떠 있을 때 비밀번호를 넣는다. "
         "비밀번호는 이 도구가 갖고 있으니 묻거나 추측하지 말고 이 도구만 부른다. 인자는 없다. "
-        "쿠팡 화면에서만 동작한다. 넣은 뒤 browser_get_state 로 결제가 진행됐는지 확인한다."
+        "쿠팡·네이버페이의 결제 화면에서만 동작한다. 넣은 뒤 browser_get_state 로 결제가 진행됐는지 확인한다. "
+        "넣지 못했다고 하면 키패드를 직접 누르지 말고, 다시 부르지도 말고 알린다."
     ),
     "inputSchema": {"type": "object", "properties": {}},
 }
@@ -69,6 +97,8 @@ KEYPAD_JS = r"""
     }
   }
   if (!pad) return null;
+  const pr = pad.getBoundingClientRect();
+  if (pr.width > 800 || pr.height > 800) return null;
   const best = {};
   for (const [d, el] of keys) {
     if (!pad.contains(el)) continue;
@@ -76,6 +106,53 @@ KEYPAD_JS = r"""
     if (!best[d] || area < best[d][1]) best[d] = [el, area];
   }
   return [0,1,2,3,4,5,6,7,8,9].map(d => best[String(d)][0]);
+})()
+"""
+
+# 키의 한가운데를 누르면 그 키가 눌리는가: 그 자리의 맨 위 요소가 키 자신이거나 키 안의 것(또는 키를
+# 품은 것)이어야 한다. 키 위를 다른 것이 덮고 있으면 누른 숫자가 그 키로 가지 않는다.
+HIT_JS = r"""
+function () {
+  const r = this.getBoundingClientRect();
+  const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  return !!hit && (hit === this || this.contains(hit) || hit.contains(this));
+}
+"""
+
+# 읽지 못한 키패드의 모양: 키가 될 만한 작은 요소들의 태그·이름·글자·속성·그림. 값을 넣을 칸은 없다.
+OUTLINE_JS = r"""
+(() => {
+  const cut = (v, n) => (v === null || v === undefined ? null : String(v).slice(0, n));
+  const out = {
+    title: document.title,
+    pinText: !!document.body && document.body.innerText.includes('비밀번호'),
+    canvases: document.querySelectorAll('canvas').length,
+    keys: [], images: {},
+  };
+  const sel = 'button, a, [role=button], td, li, span, div, i, em, strong, img, input, canvas';
+  for (const el of document.querySelectorAll(sel)) {
+    const r = el.getBoundingClientRect();
+    if (r.width < 8 || r.height < 8 || r.width > 200 || r.height > 200) continue;
+    const cs = getComputedStyle(el);
+    if (cs.visibility === 'hidden' || cs.display === 'none') continue;
+    const data = {};
+    for (const a of el.attributes) if (a.name.startsWith('data-')) data[a.name] = cut(a.value, 40);
+    const bg = cs.backgroundImage && cs.backgroundImage !== 'none' ? cs.backgroundImage : null;
+    const src = el.tagName === 'IMG' ? (el.currentSrc || el.src) : null;
+    for (const u of [bg, src]) {
+      const m = u && /(data:image\/[a-z+]+;base64,[^")]+)/.exec(u);
+      if (m && Object.keys(out.images).length < 20) out.images['i' + Object.keys(out.images).length] = m[1];
+    }
+    out.keys.push({
+      tag: el.tagName, id: cut(el.id, 40), cls: cut(typeof el.className === 'string' ? el.className : '', 80),
+      role: el.getAttribute('role'), aria: cut(el.getAttribute('aria-label'), 40), alt: cut(el.getAttribute('alt'), 40),
+      title: cut(el.getAttribute('title'), 40), text: el.children.length ? null : cut((el.innerText || el.textContent || '').trim(), 6),
+      data, bg: bg ? cut(bg, 120) : null, bgpos: bg ? cs.backgroundPosition : null, src: cut(src, 120),
+      rect: [r.x, r.y, r.width, r.height].map(Math.round),
+    });
+    if (out.keys.length >= 300) break;
+  }
+  return JSON.stringify(out);
 })()
 """
 
@@ -190,41 +267,145 @@ async def _objects(s: _Session, res: dict) -> list[str] | None:
     return [ids[str(i)] for i in range(10)] if len(ids) == 10 else None
 
 
-async def _frames(s: _Session) -> list[str]:
+def site_of(origin: str) -> dict | None:
+    """프레임의 출처(https://rocketpay.coupang.com - 주소여도 된다)가 비밀번호를 넣을 수 있는 곳이면 그곳."""
+    host = (urlparse(origin or "").hostname or "").lower()
+    for site in SITES:
+        if host == site["host"] or host.endswith("." + site["host"]):
+            return site
+    return None
+
+
+async def _frames(s: _Session) -> list[dict]:
+    """탭의 프레임들(맨 위 프레임부터): id, 주소, 출처. 다른 사이트의 프레임은 다른 프로세스라서
+    여기서 평가되지 않는다 - 그런 키패드는 찾지 못하고 모양만 남긴다."""
     tree = (await s.call("Page.getFrameTree"))["frameTree"]
-    out, stack = [], [tree]
-    while stack:
-        node = stack.pop()
-        out.append(node["frame"]["id"])
-        stack.extend(node.get("childFrames", []))
+    out, queue = [], [tree]
+    while queue:
+        node = queue.pop(0)
+        frame = node["frame"]
+        out.append({"id": frame["id"], "url": frame.get("url", ""), "origin": frame.get("securityOrigin", "")})
+        queue.extend(node.get("childFrames", []))
     return out
 
 
-async def _keypad(s: _Session) -> list[str] | None:
-    """키패드 숫자 요소 열 개의 objectId (0~9 순서). 프레임마다 찾아 본다 - 쿠페이 그림
-    키패드를 먼저, 그다음 숫자가 글자로 적힌 키패드."""
-    for frame in await _frames(s):
-        try:
-            ctx = (await s.call("Page.createIsolatedWorld", {"frameId": frame, "worldName": "jarvis-pin"}))["executionContextId"]
-        except RuntimeError:
+async def _world(s: _Session, frame_id: str) -> int | None:
+    try:
+        return (await s.call("Page.createIsolatedWorld", {"frameId": frame_id, "worldName": "jarvis-pin"}))["executionContextId"]
+    except RuntimeError:
+        return None
+
+
+async def _says(s: _Session, ctx: int, text: str) -> bool:
+    expr = f"!!document.body && document.body.innerText.includes({json.dumps(text)})"
+    res = await s.call("Runtime.evaluate", {"expression": expr, "contextId": ctx, "returnByValue": True})
+    return res.get("result", {}).get("value") is True
+
+
+async def _keypad(s: _Session) -> tuple[dict, list[str]] | None:
+    """이 탭에서 비밀번호를 넣을 수 있는 키패드: (그곳, 숫자 요소 열 개의 objectId - 0~9 순서).
+    넣을 수 있는 출처(SITES)의 프레임에서만 찾는다 - 쿠팡이면 쿠페이 그림 키패드를 먼저, 그다음 숫자가
+    글자로 적힌 키패드. 그곳의 text 가 그 프레임에도 탭의 맨 위 프레임에도 없으면 키패드로 보지 않는다.
+    쿠페이 그림을 확실히 읽지 못하면 RuntimeError."""
+    frames = await _frames(s)
+    for frame in frames:
+        site = site_of(frame["origin"] or frame["url"])
+        if site is None:
             continue
-        sprite = await s.call("Runtime.evaluate", {"expression": SPRITE_JS, "contextId": ctx, "returnByValue": True})
-        cells = sprite.get("result", {}).get("value")
-        if cells:
-            digits = read_sprite(json.loads(cells))
-            by_digit = json.dumps([k for k, _ in sorted(digits.items(), key=lambda kv: kv[1])])
-            res = await s.call("Runtime.evaluate", {
-                "expression": f"""{by_digit}.map(k => document.querySelector('a.pad-key[data-key="' + k + '"]'))""",
-                "contextId": ctx,
-            })
-            ids = await _objects(s, res)
-            if ids:
-                return ids
+        ctx = await _world(s, frame["id"])
+        if ctx is None:
             continue
-        ids = await _objects(s, await s.call("Runtime.evaluate", {"expression": KEYPAD_JS, "contextId": ctx}))
-        if ids:
-            return ids
+        ids = None
+        if site["host"] == "coupang.com":
+            sprite = await s.call("Runtime.evaluate", {"expression": SPRITE_JS, "contextId": ctx, "returnByValue": True})
+            cells = sprite.get("result", {}).get("value")
+            if cells:
+                digits = read_sprite(json.loads(cells))
+                by_digit = json.dumps([k for k, _ in sorted(digits.items(), key=lambda kv: kv[1])])
+                res = await s.call("Runtime.evaluate", {
+                    "expression": f"""{by_digit}.map(k => document.querySelector('a.pad-key[data-key="' + k + '"]'))""",
+                    "contextId": ctx,
+                })
+                ids = await _objects(s, res)
+                if not ids:
+                    continue
+        if ids is None:
+            ids = await _objects(s, await s.call("Runtime.evaluate", {"expression": KEYPAD_JS, "contextId": ctx}))
+        if not ids:
+            continue
+        if site["text"] and not await _says(s, ctx, site["text"]):
+            top = await _world(s, frames[0]["id"])
+            if top is None or not await _says(s, top, site["text"]):
+                continue
+        return site, ids
     return None
+
+
+async def _hits(s: _Session, object_id: str) -> bool:
+    res = await s.call("Runtime.callFunctionOn", {"objectId": object_id, "functionDeclaration": HIT_JS, "returnByValue": True})
+    return res.get("result", {}).get("value") is True
+
+
+def _bare(url: str) -> str:
+    """기록에 남길 주소 - ? 와 # 뒤(주문·인증 값이 실리는 곳)는 뺀다."""
+    return re.split(r"[?#]", url or "", maxsplit=1)[0]
+
+
+async def _capture(targets: list[dict], why: str) -> str | None:
+    """키패드를 넣지 못한 때의 화면을 CAPTURE_DIR 아래 새 폴더에 남긴다: 탭·프레임 목록, 결제 출처
+    프레임(없으면 맨 위 프레임)의 키가 될 만한 요소들과 그 그림, 화면 사진. 남긴 폴더를 돌려주고,
+    남기다 실패해도 원래 오류를 가리지 않게 조용히 None."""
+    try:
+        where = os.path.join(CAPTURE_DIR, time.strftime("%Y%m%d-%H%M%S"))
+        os.makedirs(where, exist_ok=True)
+        with open(os.path.join(where, "why.txt"), "w", encoding="utf-8") as f:
+            f.write(why + "\n")
+        listing = [{"type": t.get("type"), "url": _bare(t.get("url", ""))} for t in targets]
+        # 탭들과, 다른 사이트 화면 속에 따로 떠 있는 결제 출처의 프레임(그 키패드는 아직 넣지 못한다).
+        pages = [t for t in targets if t.get("webSocketDebuggerUrl") and
+                 (t.get("type") == "page" or (t.get("type") == "iframe" and site_of(t.get("url", ""))))][:6]
+        for i, t in enumerate(pages):
+            try:
+                await asyncio.wait_for(_capture_page(t, i, where, listing), 15)
+            except Exception as e:  # noqa: BLE001 - 한 탭이 안 되면 다음 탭
+                listing.append({"page": i, "error": str(e)[:200]})
+        with open(os.path.join(where, "targets.json"), "w", encoding="utf-8") as f:
+            json.dump(listing, f, ensure_ascii=False, indent=1)
+        for old in sorted(os.listdir(CAPTURE_DIR))[:-CAPTURES_KEPT]:
+            shutil.rmtree(os.path.join(CAPTURE_DIR, old), ignore_errors=True)
+        print(f"pin: 키패드를 넣지 못해 화면을 남겼습니다({why}): {where}", file=sys.stderr, flush=True)
+        return where
+    except Exception as e:  # noqa: BLE001 - 남기는 것은 덤이다
+        print(f"pin: 화면을 남기지 못했습니다: {e}", file=sys.stderr, flush=True)
+        return None
+
+
+async def _capture_page(t: dict, i: int, where: str, listing: list):
+    """탭(또는 따로 뜬 결제 프레임) 하나의 프레임 목록과 요소 모양, 앞에 보이는 탭이면 화면 사진(뒤에 가린 탭은
+    그리지 않아 기다리기만 한다)."""
+    async with websockets.connect(t["webSocketDebuggerUrl"], max_size=None) as ws:
+        s = _Session(ws)
+        await s.call("Page.enable")
+        frames = await _frames(s)
+        listing.append({"page": i, "frames": [{"url": _bare(fr["url"]), "origin": fr["origin"]} for fr in frames]})
+        looked = [fr for fr in frames if site_of(fr["origin"] or fr["url"])] or frames[:1]
+        for j, fr in enumerate(looked):
+            ctx = await _world(s, fr["id"])
+            if ctx is None:
+                continue
+            res = await s.call("Runtime.evaluate", {"expression": OUTLINE_JS, "contextId": ctx, "returnByValue": True})
+            outline = json.loads(res.get("result", {}).get("value") or "{}")
+            for name, uri in (outline.pop("images", None) or {}).items():
+                with open(os.path.join(where, f"page{i}-frame{j}-{name}.png"), "wb") as f:
+                    f.write(base64.b64decode(uri.split(",", 1)[1]))
+            outline["url"], outline["origin"] = _bare(fr["url"]), fr["origin"]
+            with open(os.path.join(where, f"page{i}-frame{j}.json"), "w", encoding="utf-8") as f:
+                json.dump(outline, f, ensure_ascii=False, indent=1)
+        shown = await s.call("Runtime.evaluate", {"expression": "document.visibilityState", "returnByValue": True})
+        if t.get("type") == "page" and shown.get("result", {}).get("value") == "visible":
+            shot = await s.call("Page.captureScreenshot", {"format": "png"})
+            with open(os.path.join(where, f"page{i}.png"), "wb") as f:
+                f.write(base64.b64decode(shot["data"]))
 
 
 async def _center(s: _Session, object_id: str) -> tuple[float, float]:
@@ -242,36 +423,87 @@ async def _press(s: _Session, x: float, y: float):
     await s.call("Input.dispatchMouseEvent", {"type": "mouseReleased", "x": x, "y": y, "button": "left", "clickCount": 1})
 
 
-async def enter(pin: str | None = None) -> str:
-    pin = pin if pin is not None else os.environ.get("COUPANG_PAY_PIN", "")
-    if not re.fullmatch(r"[0-9]{6}", pin or ""):
-        raise RuntimeError("쿠팡 결제 비밀번호가 설정되어 있지 않습니다(맥미니 .env 의 JARVIS_COUPANG_PAY_PIN)")
-    port = find_cdp_port()
+async def enter(pin: str | None = None, port: int | None = None) -> str:
+    """보이는 탭부터 넣을 수 있는 키패드를 찾아 그곳의 비밀번호를 넣는다. pin·port 는 시험용(없으면
+    그곳의 환경변수, 이 컨테이너의 브라우저)."""
+    global _halted_until
+    if time.time() < _halted_until:
+        raise RuntimeError("조금 전에 비밀번호를 넣다가 멈춘 키패드가 있어 넣지 않았습니다 - 키패드에 숫자가 남아 있을 수 있습니다. "
+                           "키패드를 누르지 말고 알리세요")
+    port = port or find_cdp_port()
     if port is None:
         raise RuntimeError("브라우저가 떠 있지 않습니다")
     targets = json.load(urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=5))
     pages = [t for t in targets if t.get("type") == "page" and t.get("webSocketDebuggerUrl")]
-    page = None
-    for t in pages:
-        if await _visible(t["webSocketDebuggerUrl"]):
-            page = t
-            break
-    if page is None:
+    if not pages:
         raise RuntimeError("열린 탭이 없습니다")
-    host = urlparse(page.get("url", "")).hostname or ""
-    if host != SITE and not host.endswith("." + SITE):
-        raise RuntimeError(f"쿠팡 화면이 아니라서 넣지 않았습니다({host})")
+    # 사람이 보는(앞에 나온) 탭부터, 그다음 나머지 - 결제 창은 새 창으로 뜨기도 한다.
+    shown = [t for t in pages if await _visible(t["webSocketDebuggerUrl"])]
+    # 다른 사이트 화면 안에 떠 있는 결제 출처의 프레임(쇼핑몰 위 결제창 안의 결제 화면)은 다른 프로세스라
+    # 탭에서는 보이지 않는다. 그 프레임에 직접 붙어 읽고 누른다 - 누르는 좌표도 그 프레임 안의 것으로,
+    # 그 프레임에 보낸다. 앞에 보이는 탭에 속한 것부터.
+    by_id = {t.get("id"): t for t in targets}
 
-    async with websockets.connect(page["webSocketDebuggerUrl"], max_size=None) as ws:
-        s = _Session(ws)
-        await s.call("Page.enable")
-        await s.call("DOM.enable")
-        keys = await _keypad(s)
-        if keys is None:
-            raise RuntimeError("화면에서 숫자 키패드(0~9)를 찾지 못했습니다. 결제 비밀번호 화면이 떠 있는지 확인하세요")
-        centers = [await _center(s, k) for k in keys]
-        for ch in pin:
-            x, y = centers[int(ch)]
-            await _press(s, x, y)
-            await asyncio.sleep(random.uniform(0.12, 0.25))
-    return "결제 비밀번호를 넣었습니다"
+    def tab_of(t: dict) -> dict | None:
+        for _ in range(10):
+            if t is None or t.get("type") != "iframe":
+                return t
+            t = by_id.get(t.get("parentId"))
+        return None
+
+    frames = [t for t in targets if t.get("type") == "iframe" and t.get("webSocketDebuggerUrl") and site_of(t.get("url", ""))]
+    frames.sort(key=lambda t: tab_of(t) not in shown)
+    order = shown + frames + [t for t in pages if t not in shown]
+
+    for t in order:
+        async with websockets.connect(t["webSocketDebuggerUrl"], max_size=None) as ws:
+            s = _Session(ws)
+            await s.call("Page.enable")
+            await s.call("DOM.enable")
+            try:
+                found = await _keypad(s)
+            except RuntimeError as e:
+                await _capture(targets, str(e))
+                raise
+            if found is None:
+                continue
+            site, keys = found
+            code = pin if pin is not None else os.environ.get(site["env"], "")
+            if not re.fullmatch(r"[0-9]{6}", code or ""):
+                raise RuntimeError(f"{site['name']}가 설정되어 있지 않습니다(맥미니 .env 의 {site['setting']})")
+            entered = 0
+            try:
+                for ch in code:
+                    if entered:
+                        # 누를 때마다 숫자를 다시 섞는 키패드가 있다: 다음 숫자는 지금 배치에서 찾는다. 누른 직후
+                        # 잠깐 다시 그리는 키패드도 있어 몇 번 더 본다.
+                        again = None
+                        for wait in (0, 0.3, 0.6):
+                            await asyncio.sleep(wait)
+                            try:
+                                again = await _keypad(s)
+                            except RuntimeError:
+                                again = None
+                            if again is not None:
+                                break
+                        if again is None or again[0] is not site:
+                            raise RuntimeError(f"넣는 중에 키패드가 바뀌거나 사라져 {entered}자리에서 멈췄습니다. "
+                                               "키패드에 숫자가 남아 있을 수 있으니 누르지 말고 알리세요")
+                        keys = again[1]
+                    key = keys[int(ch)]
+                    if not await _hits(s, key):
+                        raise RuntimeError("키패드 위를 다른 것이 덮고 있어 " +
+                                           (f"{entered}자리에서 멈췄습니다. 키패드를 누르지 말고 알리세요" if entered else "넣지 않았습니다"))
+                    x, y = await _center(s, key)
+                    await _press(s, x, y)
+                    entered += 1
+                    await asyncio.sleep(random.uniform(0.12, 0.25))
+            except Exception:
+                if entered:
+                    _halted_until = time.time() + HALT_SECONDS
+                raise
+            return f"{site['name']}를 넣었습니다"
+
+    await _capture(targets, "넣을 수 있는 키패드를 찾지 못함")
+    raise RuntimeError("화면에서 결제 비밀번호 키패드(0~9)를 찾지 못했거나 숫자를 확실히 읽지 못해 넣지 않았습니다(쿠팡·네이버페이 결제 화면에서만 넣습니다). "
+                       "키패드를 직접 누르지 말고 알리세요")

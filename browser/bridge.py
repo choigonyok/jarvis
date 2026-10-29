@@ -67,7 +67,7 @@ _upstream: ClientSession | None = None
 
 async def handle_list_tools(_ctx, _params: PaginatedRequestParams | None) -> ListToolsResult:
     tools = (await _upstream.list_tools()).tools
-    # browser-use에 없는 도구를 여기서 더한다: 파일 선택 칸 채우기, 쿠팡 결제 비밀번호 넣기,
+    # browser-use에 없는 도구를 여기서 더한다: 파일 선택 칸 채우기, 결제 비밀번호(쿠페이·네이버페이) 넣기,
     # 저장된 로그인 정보 넣기.
     return ListToolsResult(
         tools=[t for t in tools if t.name not in HIDDEN] + [Tool(**upload.TOOL), Tool(**pin.TOOL), Tool(**login.TOOL)]

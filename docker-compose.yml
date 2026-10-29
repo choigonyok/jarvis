@@ -654,9 +654,11 @@ services:
       # browser_fill_login 이 지금 탭의 사이트 로그인을 보관함에서 꺼내 넣는다(이 토큰은 꺼내기만 연다).
       VAULT_URL: http://vault:8105
       VAULT_RELEASE_TOKEN: ${JARVIS_VAULT_RELEASE_TOKEN:-}
-      # 쿠팡 결제 비밀번호(쿠페이). 맥미니 .env 에만 있다 - 저장소에는 절대 두지 않는다.
-      # browser_enter_payment_pin 이 쿠팡 화면의 키패드에만 넣고, 모델에게는 보이지 않는다.
+      # 결제 비밀번호(쿠팡 쿠페이, 네이버페이). 맥미니 .env 에만 있다 - 저장소에는 절대 두지 않는다.
+      # browser_enter_payment_pin 이 그 결제 화면(coupang.com, pay.naver.com 아래 프레임)의 키패드에만
+      # 넣고, 모델에게는 보이지 않는다.
       COUPANG_PAY_PIN: ${JARVIS_COUPANG_PAY_PIN:-}
+      NAVER_PAY_PIN: ${JARVIS_NAVER_PAY_PIN:-}
     volumes:
       # Where being logged in lives. Empty this and every site asks again.
       - chrome-profile:/profile
