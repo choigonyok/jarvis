@@ -598,9 +598,13 @@ func TestAPaymentWindowIsOneCard(t *testing.T) {
 	if err := props.Decide(first["pending"], proposal.Approve); err != nil {
 		t.Fatal(err)
 	}
+	// 2026-10-30: the job pressed the card company's 결제완료 four seconds
+	// after 네이버페이 accepted the PIN, twice, and got only '네이버페이
+	// 인증을 완료하여 주십시오' - the approval tells it to wait first.
 	if got := jobs.wait(1); len(got) != 1 || !strings.Contains(got[0], "결제창이 열립니다") || !strings.Contains(got[0], "신용카드") ||
-		!strings.Contains(got[0], "하나카드") || !strings.Contains(got[0], "카드사 앱 결제") || !strings.Contains(got[0], "다른 간편결제") {
-		t.Fatalf("승인은 결제창을 다시 열고 네이버페이만 고르라고 작업에 가야 합니다: %v", got)
+		!strings.Contains(got[0], "하나카드") || !strings.Contains(got[0], "카드사 앱 결제") || !strings.Contains(got[0], "다른 간편결제") ||
+		!strings.Contains(got[0], "카드사 창에서는 간편결제의 네이버페이") || !strings.Contains(got[0], "30초가 지나도 그대로일 때만") {
+		t.Fatalf("승인은 결제창을 다시 열고, 카드사 창에서는 네이버페이로, 인증 뒤에는 기다리라고 작업에 가야 합니다: %v", got)
 	}
 	if open := post(window); open["decision"] != string(proposal.Approve) {
 		t.Fatalf("승인된 결제창이 열려야 합니다: %v", open)
