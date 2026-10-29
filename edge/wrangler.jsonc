@@ -32,7 +32,11 @@
     { "binding": "TTS", "service_id": "01a14ae0-5a13-7230-9c3e-2450baea36f3" },
     // The 생활 tab's notes and ledgers (mind:8102); the gateway opens only mindRoute's paths.
     { "binding": "MIND", "service_id": "01a1548d-7069-7610-9e56-2f62e44e9892" }
-  ]
+  ],
+  // The phone's doors on the public hostname: one Durable Object per address
+  // (src/index.ts PhoneDoor) counts its minute, 503 past PHONE_DOOR_LIMIT.
+  "durable_objects": { "bindings": [{ "name": "PHONE_DOOR", "class_name": "PhoneDoor" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PhoneDoor"] }]
   // Secrets: JARVIS_API_TOKEN (what the services check; only the gateway has it) and
   // JARVIS_EDGE_TOKEN (what the console Worker presents here): wrangler secret put …
 }

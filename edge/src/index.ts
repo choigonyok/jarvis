@@ -21,7 +21,10 @@
  *   carries a 60-second ticket the console Worker signs (a browser cannot put
  *   a header on a WebSocket; see ticketValid). A console token presented
  *   here opens nothing else: it would be one leaked secret away from every
- *   service, from anywhere on the internet.
+ *   service, from anywhere on the internet. The phone's doors are counted
+ *   per address (PHONE_DOOR): a guess at the phone's password is a request
+ *   like any other, and past so many a minute the address is refused before
+ *   anything reaches the Mac mini.
  *
  * For the agent, only the routes the console uses. The agent also serves
  * /mcp (the tools Claude Code calls - unauthenticated, because they are meant
@@ -34,10 +37,37 @@
  * tunnel, never this door's.
  */
 
-import { WorkerEntrypoint } from "cloudflare:workers";
+import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 
 interface Fetcher {
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
+}
+
+/** What one address may send to the phone's doors in a minute (PhoneDoor). */
+const PHONE_DOOR_LIMIT = 120;
+
+/**
+ * One address's count at the phone's doors: a Durable Object per address, so
+ * the count is one number wherever on Cloudflare the requests land. (The
+ * Workers rate-limit binding keeps a count per machine instead, and let one
+ * address through 190 times in half a minute - a ceiling for a crowd, none
+ * for one guesser; 2026-10-29.) The count lives in memory: an object idle
+ * long enough to be put away starts over, and an address that has gone quiet
+ * may.
+ */
+export class PhoneDoor extends DurableObject {
+  private windowStart = 0;
+  private count = 0;
+
+  /** Counts one request in the current minute; false once the address is past the limit. */
+  async hit(limit: number, now = Date.now()): Promise<boolean> {
+    if (now - this.windowStart >= 60_000) {
+      this.windowStart = now;
+      this.count = 0;
+    }
+    this.count += 1;
+    return this.count <= limit;
+  }
 }
 
 interface Env {
@@ -66,6 +96,16 @@ interface Env {
   MIND: Fetcher;
   /** Immich's API key for the gallery. Only this gateway holds it. */
   IMMICH_API_KEY?: string;
+  /**
+   * The phone's doors on the public hostname, counted per address
+   * (PHONE_DOOR_LIMIT a minute). Two phones and the Mac's collector send a
+   * few a minute; a phone flushing the queue it kept while offline sends one
+   * report at a time and can reach the ceiling, and is then slowed, not
+   * robbed (see the 503 below). Behind it, context-svc keeps a bucket for the
+   * whole door (120 at once, two a second); this one is per address, so a
+   * guesser fills their own and not the phones'.
+   */
+  PHONE_DOOR: DurableObjectNamespace<PhoneDoor>;
 }
 
 const SERVICES: Record<string, { binding: keyof Env; origin: string }> = {
@@ -173,6 +213,21 @@ const hex = (buf: ArrayBuffer) =>
   [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 
 /**
+ * The address a phone-door request came from, for its count. An IPv6 one by
+ * its /64: a home or a phone line is handed that whole block, so moving
+ * within it does not start the count over.
+ */
+function address(request: Request): string {
+  const ip = request.headers.get("cf-connecting-ip") ?? "";
+  if (!ip.includes(":")) return ip;
+  const [head = "", tail = ""] = ip.split("::");
+  const h = head ? head.split(":") : [];
+  const t = tail ? tail.split(":") : [];
+  const groups = [...h, ...Array<string>(Math.max(0, 8 - h.length - t.length)).fill("0"), ...t];
+  return groups.slice(0, 4).map((g) => g.padStart(4, "0")).join(":") + "::/64";
+}
+
+/**
  * "<expiry epoch seconds>.<hex HMAC-SHA256(token, 'vnc:' + expiry)>". The
  * console Worker mints it (web/src/app/api/screen/ticket); it only opens the
  * VNC socket, and only until it expires.
@@ -232,6 +287,27 @@ async function gateway(request: Request, env: Env, internal: boolean): Promise<R
   const phone =
     request.method === "POST" && rest.length === 1 && name === "context" && (rest[0] === "owntracks" || rest[0] === "signals");
   if (!internal && !phone) return json(404, "그런 경로가 없습니다.");
+  if (!internal && phone) {
+    // Over the limit, the address is refused here. A limiter that fails says
+    // nothing about the address, and the door stays open: the phone's reports
+    // matter more than what a guess costs.
+    let over = false;
+    try {
+      const door = env.PHONE_DOOR.get(env.PHONE_DOOR.idFromName(address(request)));
+      over = !(await door.hit(PHONE_DOOR_LIMIT));
+    } catch (err) {
+      console.warn("폰 문의 요청을 세지 못했습니다", { err: String(err) });
+    }
+    if (over) {
+      // A 503, not a 429: OwnTracks (ios, Connection.m) drops a report answered
+      // with any 4xx and shows the phone an error, but keeps one answered with
+      // a 5xx and sends it again after a pause. A guesser reads either the same.
+      return Response.json(
+        { error: "잠시 뒤 다시 시도하세요." },
+        { status: 503, headers: { "cache-control": "no-store", "retry-after": "60" } },
+      );
+    }
+  }
   if (!bearer && !phone) return json(401, "인증이 필요합니다.");
 
   const service = SERVICES[name];

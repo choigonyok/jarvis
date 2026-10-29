@@ -28,6 +28,8 @@
 폰·맥 수집기 ─▶ jarvis-be.choigonyok.com (공개 주소: 기본 엔트리포인트)
               POST /context/owntracks · /context/signals 와
               입장권 붙은 /vnc/websockify 만. 그 밖은 토큰이 있어도 404.
+              폰의 문은 주소(IPv6 은 /64)마다 1분에 120번까지, 그 뒤는 503
+              (주소마다 Durable Object `PhoneDoor` 하나가 세어 어디로 와도 한 숫자).
 ```
 
 맥미니에서 인터넷을 향해 열린 포트는 없다. 터널(`tunnel` 서비스, `--profile cloudflare`)은
