@@ -18,8 +18,11 @@ class GuardRules(unittest.TestCase):
 
     def test_reads_are_never_stopped(self):
         # 네이버쇼핑 상품 페이지가 뒤에서 네이버페이를 읽는 것(2026-10-17).
+        # 스마트스토어 '구매하기'가 여는 네이버페이 주문서도(2026-10-16 작업 11: 그때는 GET 까지 물었고, 에이전트가
+        # 백그라운드의 결제 호스트를 카드 없이 거부해 ERR_BLOCKED_BY_CLIENT 로 열리지 않았다).
         for url in ["https://pay.naver.com/web-api/benefit?x=1", "https://new-m.pay.naver.com/pcpay",
-                    "https://checkout.coupang.com/ssr/desktop/checkout", "https://nid.naver.com/user2/api/route"]:
+                    "https://checkout.coupang.com/ssr/desktop/checkout", "https://nid.naver.com/user2/api/route",
+                    "https://orders.pay.naver.com/order/sheet/123", "https://stdpay.inicis.com/stdjs/INIStdPay.js"]:
             self.assertFalse(self.g.asks(url, "GET"), url)
             self.assertFalse(self.g.blocked(url, "GET"), url)
 
@@ -48,11 +51,32 @@ class GuardRules(unittest.TestCase):
         self.assertTrue(self.g.blocked("https://pay.ssg.com/ssgpay/approve", "POST"))
         self.assertTrue(self.g.blocked("https://payment.11st.co.kr/payment/order", "POST"))
 
+    def test_a_card_payment_window_is_asked_not_blocked(self):
+        # 2026-10-29 장범준 LP: 공식몰의 결제수단은 '신용카드' 하나이고, 결제하기가 이니시스 결제창을 여는
+        # POST 를 block 이 막아 창이 빈 화면으로 떴다. 그 창 안의 간편결제로 네이버페이를 고를 수 있다.
+        for url in ["https://stdpay.inicis.com/payMain/pay", "https://mobile.inicis.com/smart/payment/",
+                    "https://pay.kcp.co.kr/plugin/payplus_web.jsp", "https://web.nicepay.co.kr/v3/v3Payment.jsp",
+                    "https://service.iamport.kr/inicis_payments/prepare"]:
+            self.assertTrue(self.g.is_window(url), url)
+            self.assertTrue(self.g.asks(url, "POST"), url)
+            self.assertFalse(self.g.blocked(url, "POST"), url)
+        self.assertFalse(self.g.is_window("https://notinicis.com/pay"), "이름 끝이 같을 뿐인 남의 호스트")
+        self.assertFalse(self.g.is_window("https://pay.naver.com/x"))
+
+    def test_other_ways_out_of_a_window_stay_blocked(self):
+        # 결제창 안에서 고를 수 있어도 네이버페이가 아닌 간편결제·휴대폰 결제는 승인과 상관없이 막는다
+        # (block 을 묻기보다 먼저 본다). 휴대폰 문자는 맥미니로 넘어와 자비스가 읽을 수 있다.
+        for url in ["https://online-pay.kakaopay.com/pay/x", "https://id.payco.com/oauth2.0/authorize",
+                    "https://ui.danal.co.kr/webpay/x", "https://mup.mobilians.co.kr/MUP/goCashMain.mcash"]:
+            self.assertTrue(self.g.blocked(url, "POST"), url)
+
     def test_every_rule_is_watched(self):
         watched = {p["urlPattern"] for p in self.g.patterns}
         rules = json.load(open(os.environ["PAYMENT_HOSTS_FILE"]))
         for p in rules["ask_patterns"] + rules["block"]:
             self.assertIn(p, watched)
+        for h in rules["ask"] + rules["window"]:
+            self.assertIn(f"*{h}*", watched)
 
     def test_coupang_order_sheet_writes_that_move_no_money_pass(self):
         # 작업 16(2026-10-17): 주문서가 결제하기 전에 보내는 쓰기 - 결제수단 고르기, 통계, 봇 감지
@@ -90,6 +114,18 @@ class GuardRules(unittest.TestCase):
         parts = [{"bytes": base64.b64encode(b'{"a":').decode()}, {"bytes": base64.b64encode(b"1}").decode()}]
         self.assertEqual(guard.body_of({"postDataEntries": parts}), '{"a":1}')
 
+    def test_what_a_window_is_handed(self):
+        from urllib.parse import quote
+
+        form = "version=1.0&mid=x&goodname=" + quote("장범준 2집 LP") + "&price=64000&buyername=" + quote("홍길동") + "&charset=UTF-8"
+        self.assertEqual(guard.window_order(form), {"amount": "64000", "item": "장범준 2집 LP"})
+        euckr = "goodname=" + quote("장범준 3집 LP".encode("cp949")) + "&price=54%2C000&charset=EUC-KR"
+        self.assertEqual(guard.window_order(euckr), {"amount": "54000", "item": "장범준 3집 LP"})
+        toss = json.dumps({"amount": 64000, "orderName": "장범준 2집 LP", "customerName": "x"})
+        self.assertEqual(guard.window_order(toss), {"amount": "64000", "item": "장범준 2집 LP"})
+        for body in [None, "", "not a form", json.dumps({"price": True}), json.dumps({"amount": "0"}), "[1]"]:
+            self.assertEqual(guard.window_order(body), {}, body)
+
 
 EVENTS = "https://checkout.coupang.com/api/node/checkout/events"
 
@@ -101,7 +137,7 @@ class Paused(unittest.IsolatedAsyncioTestCase):
         self.g = guard.Guard(*guard.load_rules())
         self.sent, self.asked = [], []
 
-        async def ask(url, method, host, event=""):
+        async def ask(url, method, host, event="", **_):
             self.asked.append(event)
             return False
 
@@ -126,10 +162,34 @@ class Paused(unittest.IsolatedAsyncioTestCase):
         await self.g.on_paused(self.ws, self.paused(EVENTS, json.dumps({"eventName": "order"})))
         self.assertEqual((self.sent, self.asked), (["Fetch.failRequest"], ["order"]))
 
+    async def test_opening_a_payment_window_is_asked_with_what_it_was_handed(self):
+        # 2026-10-29 18:31·18:35 가드 로그: '허용하지 않은 결제를 막았습니다: POST stdpay.inicis.com/payMain/pay'.
+        # 이제는 막지 않고 묻는다 - 결제창이라고, 결제창이 받은 금액·상품과 함께. 결정 전에는 보내지 않는다.
+        from urllib.parse import quote
+
+        asked = []
+
+        async def ask(url, method, host, event="", window=False, order=None):
+            asked.append((host, window, order))
+            return False
+
+        self.g.ask = ask
+        form = "version=1.0&mid=x&goodname=" + quote("장범준 2집 LP") + "&price=64000&charset=UTF-8"
+        opening = {"sessionId": "s", "frameId": "F2", "params": {
+            "requestId": "r", "resourceType": "Document", "frameId": "F2",
+            "request": {"url": "https://stdpay.inicis.com/payMain/pay", "method": "POST", "postData": form}}}
+        await self.g.on_paused(self.ws, opening)
+        self.assertEqual(self.sent, ["Fetch.failRequest"])
+        self.assertEqual(asked, [("stdpay.inicis.com", True, {"amount": "64000", "item": "장범준 2집 LP"})])
+
+        asked.clear()
+        await self.g.on_paused(self.ws, self.paused("https://pay.naver.com/pcpay/order/confirm", "{}"))
+        self.assertEqual(asked, [("pay.naver.com", False, {})], "네이버페이는 결제창이 아니다")
+
     async def test_an_approval_opens_no_window_here(self):
         # 승인 창은 에이전트에만 있다: 승인 받은 바로 뒤의 같은 호스트 요청도 다시 묻는다(예전에는 5분 동안
         # 묻지 않아, 에이전트가 결제자·결제 한 건을 따지기 전에 지나갔다).
-        async def yes(url, method, host, event=""):
+        async def yes(url, method, host, event="", **_):
             self.asked.append(event)
             return True
 
@@ -216,6 +276,15 @@ class JobSites(unittest.TestCase):
         self.hold(["www.coupang.com"])
         self.assertFalse(self.g.leaves_job("s-page", "F9", "https://ads.example/"))
         self.assertFalse(self.g.leaves_job("s-iframe", None, "https://ads.example/"))
+
+    def test_payment_windows_open_for_any_job(self):
+        # 결제창을 새 창으로 띄우는 PG 가 있다. 작업 1(2026-10-29)은 결제창 호스트를 짐작해 사이트에 더했지만
+        # (fcmobile.inicis.com) 실제 창은 stdpay.inicis.com 이었다 - 결제창은 작업의 사이트가 아니어도 열린다.
+        self.hold(["shampoomusicent.com"])
+        for url in ["https://stdpay.inicis.com/payMain/pay", "https://pay.kcp.co.kr/x",
+                    "https://pay.naver.com/payments/abc", "https://orders.pay.naver.com/order/sheet/1"]:
+            self.assertFalse(self.g.leaves_job("s-page", "T1", url), url)
+        self.assertTrue(self.g.leaves_job("s-page", "T1", "https://evil.example/pay"))
 
     def test_a_job_without_sites_opens_none(self):
         self.hold([])

@@ -1,6 +1,6 @@
 {
-  "_comment": "결제로 향하는 요청을 세 갈래로 나눈다. 판단은 값을 보내는 요청(POST/PUT/PATCH/DELETE)에만 한다 - 페이지를 보거나 목록을 불러오는 GET 은 돈을 움직이지 않으므로, 네이버쇼핑 상품 페이지가 뒤에서 pay.naver.com 을 읽는다고 막히지 않는다(2026-10-17). ask 는 그 호스트로 가는 쓰기 요청을 사람에게 묻는다(네이버페이). ask_patterns 는 쇼핑몰이 자기 도메인 안에서 끝내는 간편결제 중 허용한 것의 쓰기 요청을 묻는다(쿠팡 쿠페이 - 비밀번호는 browser_enter_payment_pin 이 넣는다). block 은 묻지 않고 막는다 - 허용하지 않은 자사 간편결제와 PG 다. 묻는 것은 카드를 올리고 바로 막으며, 승인되면 그 결제 한 건이 통과한다 - 승인을 기억하는 것은 에이전트 /intercept 하나이고, 가드는 멈춘 요청마다 묻는다. 쿠팡은 주문서·결제 호스트(checkout·pay·rocketpay·payment.coupang.com)로 가는 쓰기 요청을 모두 묻는다 - 실제 결제 요청의 경로를 다 알 수 없어서, 패턴이 놓쳐 카드 없이 결제되는 일이 없게(2026-10-17). 그중 돈이 나가지 않는다고 확인한 것만 pass 로 보낸다.",
-  "_limit": "block 은 '아는 것만 막기'다. 여기 없는 쇼핑몰의 자사 간편결제는 여전히 통과한다. 실질적인 방어선은 프로필에 허용한 것 외의 결제수단을 등록해두지 않는 것이고, 이 목록은 거기까지 가지 않게 하는 안내다.",
+  "_comment": "결제로 향하는 요청을 세 갈래로 나눈다. 판단은 값을 보내는 요청(POST/PUT/PATCH/DELETE)에만 한다 - 페이지를 보거나 목록을 불러오는 GET 은 돈을 움직이지 않으므로, 네이버쇼핑 상품 페이지가 뒤에서 pay.naver.com 을 읽는다고 막히지 않는다(2026-10-17). ask 는 그 호스트로 가는 쓰기 요청을 사람에게 묻는다(네이버페이). ask_patterns 는 쇼핑몰이 자기 도메인 안에서 끝내는 간편결제 중 허용한 것의 쓰기 요청을 묻는다(쿠팡 쿠페이 - 비밀번호는 browser_enter_payment_pin 이 넣는다). window 는 PG 결제창(이니시스·KCP 등)으로 가는 쓰기 요청을 묻는다(아래 _window). block 은 묻지 않고 막는다 - 허용하지 않은 간편결제·휴대폰 결제와 해외 PG 다. 묻는 것은 카드를 올리고 바로 막으며, 승인되면 그 결제 한 건이 통과한다 - 승인을 기억하는 것은 에이전트 /intercept 하나이고, 가드는 멈춘 요청마다 묻는다. 쿠팡은 주문서·결제 호스트(checkout·pay·rocketpay·payment.coupang.com)로 가는 쓰기 요청을 모두 묻는다 - 실제 결제 요청의 경로를 다 알 수 없어서, 패턴이 놓쳐 카드 없이 결제되는 일이 없게(2026-10-17). 그중 돈이 나가지 않는다고 확인한 것만 pass 로 보낸다.",
+  "_limit": "block 은 '아는 것만 막기'다. 여기 없는 쇼핑몰의 자사 간편결제는 여전히 통과한다. 실질적인 방어선은 프로필에 허용한 것 외의 결제수단을 등록해두지 않는 것이고, 이 목록은 거기까지 가지 않게 하는 안내다. 결제창(window)을 막지 않고 묻는 것도 이 한계 때문이다 - 결제창 안에서 어느 길로 돈이 나가는지는 주소로 가릴 수 없다.",
   "ask": [
     "pay.naver.com",
     "npay.naver.com",
@@ -15,6 +15,19 @@
     "*coupang.com/*checkout*",
     "*coupang.com/*order/*submit*",
     "*coupangpay*"
+  ],
+  "_window": "PG 결제창 - 쇼핑몰의 결제수단이 '신용카드'뿐일 때 뜨는 이니시스·KCP·토스페이먼츠 같은 창. 그 안의 간편결제에서 네이버페이를 고를 수 있어서 막지 않고 묻는다(2026-10-29, 장범준 LP: 공식몰의 결제하기가 보낸 POST stdpay.inicis.com/payMain/pay 를 block 이 막아 결제창이 빈 화면으로 떴다). 묻는 것은 결제창으로 가는 첫 쓰기(창을 여는 요청)이고, 승인 하나가 그 결제 한 건의 결제창(어느 PG 든)과 그 안에서 고른 네이버페이를 함께 연다 - 결제창을 다시 연 때부터 10분, 카드에 보인 금액만(금액이 다른 주문은 새 카드, 에이전트 /intercept). 통과시키지 않고 묻는 까닭: 결제창 안에서 앱카드·휴대폰 결제·계좌이체 중 어느 길로 돈이 나가는지는 주소로 가릴 수 없고, 휴대폰 문자가 맥미니 메시지로 넘어와 자비스가 읽을 수 있어서 '사람만 할 수 있는 인증'을 방어선으로 믿을 수 없다. 다른 간편결제·휴대폰 결제로 가는 쓰기는 승인 뒤에도 block 이 막는다. 카드에는 결제창이 받은 금액·상품 이름이 보인다(본문의 price·goodname 등, 판단에는 쓰지 않음). 작업 중에는 작업의 사이트가 아니어도 열린다 - 결제창을 새 창으로 띄우는 PG 가 있다. 호스트는 그 아래 주소를 모두 뜻한다(inicis.com 은 stdpay.inicis.com 도).",
+  "window": [
+    "inicis.com",
+    "kcp.co.kr",
+    "tosspayments.com",
+    "lgdacom.net",
+    "nicepay.co.kr",
+    "nicepayments.co.kr",
+    "settlebank.co.kr",
+    "easypay.co.kr",
+    "iamport.kr",
+    "portone.io"
   ],
   "_pass": "묻는 호스트·패턴에 걸리지만 돈이 나가지 않는 쓰기 요청 - 보낸다. 쿠팡 주문서(2026-10-17, assets.coupangcdn.com/front/purchase-next 스크립트로 확인)는 배송지·결제수단·쿠폰을 바꿀 때마다 /api/node/checkout/events 로 이벤트를 보내고, 결제하기도 같은 주소의 eventName 'order'(eventType createOrder)다. 이것들을 묻거나 막으면 주문서가 결제하기 전부터 '시스템 오류: 주문중 오류가 발생하였습니다'를 띄운다(작업 16, 2026-10-17 04:37~11:42 네 번). 그래서 그 주소는 eventName 이 values 에 있을 때만 보내고 'order' 와 여기 없는 이벤트(원클릭 구매, 재결제 등)는 묻는다. url 은 소문자로 맞춘 주소의 fnmatch 패턴, json_field/values 는 본문 JSON 의 그 칸이 values 중 하나일 때, json_key 는 본문 JSON 에 그 키가 있을 때, script_path 는 페이지가 스크립트로 받아 간 경로로 가는 쓰기일 때 보낸다. 본문을 읽지 못한 요청은 보내지 않는다(묻는다). why 는 설명일 뿐이다.",
   "pass": [
@@ -58,13 +71,8 @@
     "*tmon.co.kr/*payment*",
     "*aliexpress.com/*payment*",
     "*amazon.*/*checkout*",
-    "*inicis.com*",
-    "*kcp.co.kr*",
-    "*tosspayments.com*",
-    "*nicepay.co.kr*",
-    "*nicepayments.co.kr*",
-    "*settlebank.co.kr*",
     "*danal.co.kr*",
+    "*mobilians.co.kr*",
     "*payple.kr*",
     "*kakaopay.com*",
     "*payco.com*",

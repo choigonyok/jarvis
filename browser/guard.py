@@ -9,6 +9,10 @@
 길로 가려는 것은 사람이 판단할 문제가 아니라 애초에 일어나면 안 되는 일이고,
 카드로 올리면 "승인"이 있는 이상 언젠가 눌리게 된다.
 
+PG 결제창(이니시스·KCP 같은, 쇼핑몰의 '신용카드'가 여는 창)은 막지 않고 묻는다.
+그 안의 간편결제에서 네이버페이를 고를 수 있어서다. 결제창 안에서 어느 길로 돈이
+나가는지는 주소로 가릴 수 없으므로, 창을 여는 요청에서 카드를 올린다.
+
 도구 층에서는 이 판단을 할 수 없다. browser_click은 조회 버튼이든 결제
 버튼이든 같은 호출이다. 그래서 여기서는 도구를 보지 않고 **브라우저가 실제로
 보내려는 요청**을 본다. CDP의 Fetch가 요청을 내보내기 직전에 멈춰 세우므로,
@@ -31,7 +35,7 @@ import os
 import re
 import urllib.request
 from fnmatch import fnmatch
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlparse
 
 import aiohttp
 import websockets
@@ -56,9 +60,9 @@ SKIP_TYPES = {"Image", "Stylesheet", "Font", "Media", "Script", "Manifest"}
 WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
-def load_rules() -> tuple[list[str], list[str], list[str], list[dict]]:
-    """묻는 호스트, 묻는 URL 패턴, 막는 URL 패턴, 묻는 것 중 통과시킬 규칙. 예전 형식(hosts)도
-    읽어서, 규칙 파일을 갈아끼우는 중에 가드가 빈손으로 뜨는 일이 없게 한다."""
+def load_rules() -> tuple[list[str], list[str], list[str], list[dict], list[str]]:
+    """묻는 호스트, 묻는 URL 패턴, 막는 URL 패턴, 묻는 것 중 통과시킬 규칙, 결제창(PG) 호스트.
+    예전 형식(hosts)도 읽어서, 규칙 파일을 갈아끼우는 중에 가드가 빈손으로 뜨는 일이 없게 한다."""
     with open(HOSTS_FILE, encoding="utf-8") as f:
         data = json.load(f)
     ask = [h.strip().lower() for h in data.get("ask", data.get("hosts", [])) if h.strip()]
@@ -77,7 +81,8 @@ def load_rules() -> tuple[list[str], list[str], list[str], list[dict]]:
         if r.get("script_path"):
             rule["script_path"] = True
         passes.append(rule)
-    return ask, ask_patterns, block, passes
+    windows = [h.strip().lower() for h in data.get("window", []) if h.strip()]
+    return ask, ask_patterns, block, passes, windows
 
 
 def body_of(request: dict) -> str | None:
@@ -114,6 +119,42 @@ def _json_object(body: str | None) -> dict | None:
     return value if isinstance(value, dict) else None
 
 
+# 결제창을 여는 요청이 PG 에 넘기는 금액과 상품 이름의 칸. PG 마다 이름이 다르다:
+# 이니시스 price·goodname, KCP good_mny·good_name, 나이스 Amt·GoodsName, 토스페이먼츠·포트원 amount·orderName·name.
+ORDER_AMOUNT = ("price", "good_mny", "amt", "amount", "totalamount")
+ORDER_ITEM = ("goodname", "good_name", "goodsname", "ordername", "productname", "name")
+
+
+def window_order(body: str | None) -> dict:
+    """결제창으로 가는 쓰기의 본문에서 금액(숫자만)과 상품 이름 - 읽히는 것만. 카드에 '결제창이
+    받은 금액'으로 보이기만 하고, 통과시킬지는 이것으로 정하지 않는다."""
+    fields = _fields(body)
+    out = {}
+    for key in ORDER_AMOUNT:
+        value = re.sub(r"[,\s원]", "", str(fields.get(key, "")))
+        if value.isdigit() and int(value) > 0:
+            out["amount"] = value
+            break
+    for key in ORDER_ITEM:
+        value = " ".join(str(fields.get(key, "")).split())
+        if value:
+            out["item"] = value[:60]
+            break
+    return out
+
+
+def _fields(body: str | None) -> dict:
+    """본문의 맨 위 칸들(이름은 소문자) - JSON 객체거나 폼(a=1&b=2). 둘 다 아니면 비어 있다.
+    폼이 charset=EUC-KR 이라고 하면(이니시스) 그 글자로 푼다."""
+    obj = _json_object(body)
+    if obj is not None:
+        return {str(k).lower(): v for k, v in obj.items() if isinstance(v, (str, int, float)) and not isinstance(v, bool)}
+    if not body or "=" not in body:
+        return {}
+    encoding = "cp949" if re.search(r"(?:^|&)charset=euc-kr(?:&|$)", body, re.I) else "utf-8"
+    return {k.lower(): v for k, v in parse_qsl(body, encoding=encoding, errors="replace")}
+
+
 def find_cdp_port() -> int | None:
     """Chromium은 실행마다 포트가 바뀌고 DevToolsActivePort를 남기지 않는다.
     같은 컨테이너 안이므로 프로세스의 인자에서 직접 읽는다."""
@@ -137,16 +178,19 @@ class Guard:
         ask_patterns: list[str],
         block_patterns: list[str],
         pass_rules: list[dict] | None = None,
+        window_hosts: list[str] | None = None,
     ):
         self.hosts = ask_hosts
         self.ask_patterns = ask_patterns
         self.blocks = block_patterns
         self.pass_rules = pass_rules or []
-        # 멈춰 세울 대상은 세 목록의 합집합이다. 패턴에 없는 요청은 Chrome이
+        self.windows = window_hosts or []
+        # 멈춰 세울 대상은 네 목록의 합집합이다. 패턴에 없는 요청은 Chrome이
         # 아예 멈추지 않으므로, 여기 빠진 것은 판단 대상에도 오르지 못한다.
         self.patterns = (
             [{"urlPattern": f"*{h}*", "requestStage": "Request"} for h in ask_hosts]
             + [{"urlPattern": p, "requestStage": "Request"} for p in ask_patterns]
+            + [{"urlPattern": f"*{h}*", "requestStage": "Request"} for h in self.windows]
             + [{"urlPattern": p, "requestStage": "Request"} for p in block_patterns]
             # 페이지 이동은 전부 멈춰 본다: 작업이 도는 동안 그 사이트 밖으로
             # 가는지(leaves_job). 작업이 없으면 바로 보낸다.
@@ -183,11 +227,20 @@ class Guard:
         page = self.pages.get(session or "")
         if page is None or (frame_id and frame_id != page):
             return False
+        # 결제가 지나가는 곳(결제창, 네이버페이·쿠팡 결제 호스트)은 작업의 사이트가 아니어도 연다 -
+        # 결제창을 새 창으로 띄우는 PG 가 있고, 거기서 돈이 나가는 쓰기는 이 가드가 따로 묻는다.
+        if self.is_window(url) or self.matches(urlparse(url).netloc):
+            return False
         return not jobsites.allowed(url, sites)
 
     def matches(self, host: str) -> bool:
         host = host.lower()
         return any(host == h or host.endswith("." + h) for h in self.hosts)
+
+    def is_window(self, url: str) -> bool:
+        """PG 결제창(이니시스·KCP…)으로 가는 요청인가 - payment-hosts.json 의 window."""
+        host = (urlparse(url).hostname or "").lower()
+        return any(host == h or host.endswith("." + h) for h in self.windows)
 
     def blocked(self, url: str, method: str) -> bool:
         if method.upper() not in WRITE_METHODS:
@@ -196,11 +249,11 @@ class Guard:
         return any(fnmatch(url, p) for p in self.blocks)
 
     def asks(self, url: str, method: str) -> bool:
-        """사람에게 물을 결제 요청인가: 값을 보내는 요청이고, 묻는 호스트로 가거나
+        """사람에게 물을 결제 요청인가: 값을 보내는 요청이고, 묻는 호스트나 결제창으로 가거나
         묻는 패턴(허용한 자사 간편결제)에 맞는다. 보기만 하는 GET 은 묻지 않는다."""
         if method.upper() not in WRITE_METHODS:
             return False
-        if self.matches(urlparse(url).netloc):
+        if self.matches(urlparse(url).netloc) or self.is_window(url):
             return True
         low = url.lower()
         return any(fnmatch(low, p) for p in self.ask_patterns)
@@ -249,12 +302,18 @@ class Guard:
                 msg["sessionId"] = session
             await ws.send(json.dumps(msg))
 
-    async def ask(self, url: str, method: str, host: str, event: str = "") -> bool:
+    async def ask(
+        self, url: str, method: str, host: str, event: str = "", window: bool = False, order: dict | None = None
+    ) -> bool:
         headers = {"Authorization": f"Bearer {TOKEN}"}
         timeout = aiohttp.ClientTimeout(total=DECISION_TIMEOUT)
         payload = {"url": url, "method": method, "host": host}
         if event:
             payload["event"] = event
+        if window:
+            # 에이전트는 결제창의 승인 하나로 그 결제 한 건의 결제창 전부와 그 안의 네이버페이를 연다.
+            payload["window"] = True
+            payload.update({k: v for k, v in (order or {}).items() if k in ("amount", "item")})
         try:
             async with aiohttp.ClientSession(timeout=timeout) as s:
                 async with s.post(
@@ -321,8 +380,17 @@ class Guard:
             return
 
         event = self.event_of(url, body)
-        log.info("결제 요청을 멈췄습니다: %s %s%s [%s]", method, url[:120], f" ({event})" if event else "", shape_of(body))
-        if await self.ask(url, method, host, event):
+        window = self.is_window(url)
+        order = window_order(body) if window else {}
+        log.info(
+            "결제 요청을 멈췄습니다: %s %s%s%s [%s]",
+            method,
+            url[:120],
+            f" ({event})" if event else "",
+            f" (결제창, 금액 {'읽음' if 'amount' in order else '못 읽음'})" if window else "",
+            shape_of(body),
+        )
+        if await self.ask(url, method, host, event, window=window, order=order):
             await go()
         else:
             await self.send(
@@ -338,10 +406,11 @@ class Guard:
 
         async with websockets.connect(ws_url, max_size=None) as ws:
             log.info(
-                "CDP에 붙었습니다 (port %s), 묻는 호스트 %d개 · 묻는 패턴 %d개 · 막는 패턴 %d개 · 통과 규칙 %d개",
+                "CDP에 붙었습니다 (port %s), 묻는 호스트 %d개 · 묻는 패턴 %d개 · 결제창 %d개 · 막는 패턴 %d개 · 통과 규칙 %d개",
                 port,
                 len(self.hosts),
                 len(self.ask_patterns),
+                len(self.windows),
                 len(self.blocks),
                 len(self.pass_rules),
             )

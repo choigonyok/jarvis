@@ -481,29 +481,29 @@ func TestSiteOf(t *testing.T) {
 func TestAnApprovalIsOnePayment(t *testing.T) {
 	now := time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
 	g := &paymentGrants{now: func() time.Time { return now }}
-	g.grant("coupang.com", 16)
+	g.grant("coupang.com", 16, "")
 
 	now = now.Add(40 * time.Minute) // the job starts when the conversation is idle
-	if !g.allow("coupang.com", 16, "order") {
+	if !g.allow("coupang.com", 16, "order", "") {
 		t.Fatal("돌아온 결제자의 결제하기는 통과합니다")
 	}
-	if !g.allow("coupang.com", 16, "") {
+	if !g.allow("coupang.com", 16, "", "") {
 		t.Fatal("같은 결제의 비밀번호 단계는 통과합니다")
 	}
-	if g.allow("coupang.com", 16, "order") {
+	if g.allow("coupang.com", 16, "order", "") {
 		t.Fatal("두 번째 결제하기는 새 카드를 올려야 합니다")
 	}
-	if g.allow("coupang.com", 0, "") || g.allow("coupang.com", 17, "") {
+	if g.allow("coupang.com", 0, "", "") || g.allow("coupang.com", 17, "", "") {
 		t.Fatal("다른 결제자에게는 열리지 않습니다")
 	}
 	now = now.Add(paymentWindow + time.Second)
-	if g.allow("coupang.com", 16, "") {
+	if g.allow("coupang.com", 16, "", "") {
 		t.Fatal("돌아온 때부터 창이 지나면 닫힙니다")
 	}
 
-	g.grant("naver.com", 0)
+	g.grant("naver.com", 0, "")
 	now = now.Add(paymentWait + time.Second)
-	if g.allow("naver.com", 0, "") {
+	if g.allow("naver.com", 0, "", "") {
 		t.Fatal("돌아오지 않은 승인은 기다림이 지나면 닫힙니다")
 	}
 }
@@ -544,5 +544,117 @@ func TestASecondPaymentRaisesItsOwnCard(t *testing.T) {
 	}
 	if c := props.List(); !strings.Contains(c[len(c)-1].Card.Consequence, "결제 한 건") {
 		t.Fatalf("카드의 결과 문구: %q", c[len(c)-1].Card.Consequence)
+	}
+}
+
+// A mall whose only method is 신용카드 opens a PG's payment window, and the
+// 네이버페이 is picked inside it (장범준 LP, 2026-10-29: the guard blocked
+// POST stdpay.inicis.com/payMain/pay and the window came up blank). One card
+// stands before the window opens and shows what the window was handed; its
+// approval covers the window, whichever PG's host, and the 네이버페이 inside
+// it - only while the window is open, and only for that payer.
+func TestAPaymentWindowIsOneCard(t *testing.T) {
+	props := proposal.NewStore(bus.New())
+	jobs := &fakeJobs{id: 1, title: "장범준 2집·3집 LP 재발매 구매", summary: "결제 직전 · 2집 LP · 1 · 64,000원 · 네이버페이(결제창)"}
+	runner := &switchRunner{bg: true}
+	s := New(Deps{Proposals: props, Runner: runner, InterceptToken: "tok", FollowUp: &followUps{}, Jobs: jobs,
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	now := time.Date(2026, 10, 29, 9, 31, 0, 0, time.UTC)
+	s.payments.now = func() time.Time { return now }
+	post := func(body string) map[string]string {
+		req := httptest.NewRequest(http.MethodPost, "/intercept", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer tok")
+		rec := httptest.NewRecorder()
+		s.postIntercept(rec, req)
+		var out map[string]string
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return out
+	}
+	window := `{"url":"https://stdpay.inicis.com/payMain/pay","method":"POST","host":"stdpay.inicis.com","window":true,"amount":"64000","item":"장범준 2집 LP"}`
+	naverPay := `{"url":"https://pay.naver.com/payments/abc","method":"POST","host":"pay.naver.com"}`
+
+	first := post(window)
+	if first["decision"] != string(proposal.Reject) || first["pending"] == "" {
+		t.Fatalf("결제창을 여는 요청은 카드를 올리고 막아야 합니다: %v", first)
+	}
+	cards := props.List()
+	if len(cards) != 1 || cards[0].Card.Title != "결제창에서 결제합니다" {
+		t.Fatalf("결제창 카드: %+v", cards)
+	}
+	for _, want := range []string{"결제창이 받은 금액: 64,000원", "결제창이 받은 상품: 장범준 2집 LP", "stdpay.inicis.com", "작업: 장범준"} {
+		if !strings.Contains(cards[0].Card.Body, want) {
+			t.Fatalf("카드에 %q 가 없습니다: %s", want, cards[0].Card.Body)
+		}
+	}
+	if c := cards[0].Card.Consequence; !strings.Contains(c, "결제 한 건(64,000원)") || !strings.Contains(c, "네이버페이만") {
+		t.Fatalf("카드의 결과 문구: %q", c)
+	}
+	// The same payment passing through another PG's host is the same card.
+	again := post(`{"url":"https://service.iamport.kr/inicis_payments/prepare","method":"POST","host":"service.iamport.kr","window":true}`)
+	if again["pending"] != first["pending"] || len(props.List()) != 1 {
+		t.Fatalf("같은 결제의 다른 결제창 호스트는 같은 카드: %v, cards %d", again, len(props.List()))
+	}
+
+	if err := props.Decide(first["pending"], proposal.Approve); err != nil {
+		t.Fatal(err)
+	}
+	if got := jobs.wait(1); len(got) != 1 || !strings.Contains(got[0], "결제창이 열립니다") || !strings.Contains(got[0], "네이버페이만") {
+		t.Fatalf("승인은 결제창을 다시 열고 네이버페이만 고르라고 작업에 가야 합니다: %v", got)
+	}
+	if open := post(window); open["decision"] != string(proposal.Approve) {
+		t.Fatalf("승인된 결제창이 열려야 합니다: %v", open)
+	}
+	now = now.Add(2 * time.Minute)
+	if inside := post(`{"url":"https://stdux.inicis.com/x","method":"POST","host":"stdux.inicis.com","window":true}`); inside["decision"] != string(proposal.Approve) {
+		t.Fatalf("결제창 안의 다른 요청: %v", inside)
+	}
+	if pay := post(naverPay); pay["decision"] != string(proposal.Approve) {
+		t.Fatalf("결제창 안에서 고른 네이버페이는 같은 카드로 통과합니다: %v", pay)
+	}
+	// Another order opening the window in the same minutes (3집, another
+	// amount) is another payment: a card of its own.
+	third := post(`{"url":"https://stdpay.inicis.com/payMain/pay","method":"POST","host":"stdpay.inicis.com","window":true,"amount":"54000","item":"장범준 3집 LP"}`)
+	if third["decision"] != string(proposal.Reject) || third["pending"] == "" || third["pending"] == first["pending"] {
+		t.Fatalf("금액이 다른 주문의 결제창은 새 카드: %v", third)
+	}
+	if coupang := post(`{"url":"https://checkout.coupang.com/api/node/checkout/events","method":"POST","host":"checkout.coupang.com","event":"order"}`); coupang["decision"] != string(proposal.Reject) {
+		t.Fatalf("결제창의 승인으로 다른 사이트의 결제가 통과했습니다: %v", coupang)
+	}
+	runner.set(false)
+	if conv := post(naverPay); conv["decision"] != string(proposal.Reject) {
+		t.Fatalf("작업의 결제창 승인으로 대화의 네이버페이가 통과했습니다: %v", conv)
+	}
+	runner.set(true)
+	now = now.Add(paymentWindow)
+	if late := post(naverPay); late["decision"] != string(proposal.Reject) {
+		t.Fatalf("결제창의 시간이 지나면 네이버페이도 닫힙니다: %v", late)
+	}
+}
+
+// The 네이버페이 inside a window goes through while that window is under
+// way: not before the payer is back at it (an approval waiting for a job to
+// start opens nothing), and not after its time.
+func TestAWindowIsOpenOnlyWhileItsPaymentIs(t *testing.T) {
+	now := time.Date(2026, 10, 29, 9, 31, 0, 0, time.UTC)
+	g := &paymentGrants{now: func() time.Time { return now }}
+	g.grant(windowSite, 1, "64000")
+	if g.isOpen(windowSite, 1) {
+		t.Fatal("결제자가 결제창으로 돌아오기 전에는 열려 있지 않습니다")
+	}
+	if g.allow(windowSite, 1, "", "54000") || g.isOpen(windowSite, 1) {
+		t.Fatal("다른 금액의 결제창은 승인을 쓰지도 열지도 않습니다")
+	}
+	if !g.allow(windowSite, 1, "", "64000") || !g.allow(windowSite, 1, "", "") {
+		t.Fatal("돌아온 결제자의 그 금액 결제창과, 금액이 없는 결제창 안의 요청은 통과합니다")
+	}
+	if !g.isOpen(windowSite, 1) || g.isOpen(windowSite, 0) || g.isOpen(windowSite, 2) {
+		t.Fatal("열린 결제창은 그 결제자의 것입니다")
+	}
+	now = now.Add(paymentWindow + time.Second)
+	if g.isOpen(windowSite, 1) {
+		t.Fatal("시간이 지난 결제창은 닫혀 있습니다")
+	}
+	if won("64000") != "64,000원" || won("900") != "900원" || won("1234567") != "1,234,567원" {
+		t.Fatalf("금액 표기: %s %s %s", won("64000"), won("900"), won("1234567"))
 	}
 }

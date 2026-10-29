@@ -596,7 +596,7 @@ func (m *Module) runServer(run int64) *mcp.Server {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "wait_payment",
-		Description: "결제하기를 눌렀는데 결제가 막혔을 때(쿠팡은 '시스템 오류: 주문중 오류' 창을 띄운다) 부른다. 막혔다면 결제 승인 카드가 운영자에게 올라가 있다. " +
+		Description: "결제하기를 눌렀는데 결제가 막혔을 때(쿠팡은 '시스템 오류: 주문중 오류' 창을 띄우고, 결제창(PG)은 빈 화면이나 차단 화면으로 뜬다) 부른다. 막혔다면 결제 승인 카드가 운영자에게 올라가 있다. " +
 			"아직 결정 전이면 작업이 그 카드를 기다리게 하고, 이미 결정됐으면 무엇을 할지 알려 준다.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ ListInput) (*mcp.CallToolResult, any, error) {
 		j, bad := guard()
