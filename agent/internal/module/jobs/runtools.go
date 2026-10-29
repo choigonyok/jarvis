@@ -297,6 +297,16 @@ func (m *Module) PaymentDecided(job int64, card string, approved bool, text stri
 	return nil
 }
 
+// WaitInput is a short pause in a run, for a page that changes on its own.
+type WaitInput struct {
+	Seconds int    `json:"seconds" jsonschema:"기다릴 초(5~60)"`
+	Reason  string `json:"reason,omitempty" jsonschema:"무엇을 기다리는지 한 줄. 예: '카드사 앱 승인'"`
+}
+
+// waitBounds keeps a pause short: a run that has to wait longer ends with
+// schedule_next or ask instead.
+const waitMin, waitMax = 5, 60
+
 type ProgressInput struct {
 	Text string `json:"text" jsonschema:"지금 무엇을 하고 있는지 한 줄. 운영자가 작업 탭에서 본다. 예: '판매 글 양식에 사진 3장을 넣었습니다'"`
 }
@@ -406,6 +416,30 @@ func (m *Module) runServer(run int64) *mcp.Server {
 				return fail(err), nil, nil
 			}
 			return ok("남겼습니다."), nil, nil
+		})
+
+	// A card company's app approval (a push to the operator's phone, a QR)
+	// finishes on its own while the page waits. The run must still hold the
+	// browser when it does: the page then sends the payment on, and a request
+	// sent while no job runs is the conversation's - its card is not this
+	// job's, and it is stopped (2026-10-30). So the run waits here, a minute
+	// at a time, instead of ending.
+	mcp.AddTool(server, &mcp.Tool{Name: "wait", Description: "화면이 저절로 바뀌기를 기다려야 할 때(카드사 앱 승인처럼 운영자가 폰에서 하는 일) 잠깐 기다린다. " +
+		"5~60초. 기다린 뒤 화면을 다시 본다. 그보다 오래 기다릴 일은 schedule_next 나 ask 로 마친다."},
+		func(ctx context.Context, _ *mcp.CallToolRequest, in WaitInput) (*mcp.CallToolResult, any, error) {
+			if _, bad := guard(); bad != nil {
+				return bad, nil, nil
+			}
+			secs := min(max(in.Seconds, waitMin), waitMax)
+			if r := strings.TrimSpace(in.Reason); r != "" {
+				_ = m.store.Step(ctx, run, "step", fmt.Sprintf("기다리기 %d초: %s", secs, r))
+			}
+			select {
+			case <-time.After(time.Duration(secs) * time.Second):
+			case <-ctx.Done():
+				return fail(ctx.Err()), nil, nil
+			}
+			return ok(fmt.Sprintf("%d초 기다렸습니다. 화면을 다시 보세요.", secs)), nil, nil
 		})
 
 	mcp.AddTool(server, &mcp.Tool{Name: "view_photos", Description: "작업에 첨부된 사진을 본다."},

@@ -386,11 +386,12 @@ func approvedScope(p Payment) string {
 	if p.Window {
 		// The window's ways out that are not 네이버페이 the guard blocks only as
 		// far as it knows them; the payer is told which one to take.
-		return fmt.Sprintf("이 승인은 결제창(%s)에서 하는 결제 한 건%s입니다: 결제창을 다시 연 때부터 %d분 동안 결제창과, 그 안에서 고른 네이버페이가 통과합니다. "+
+		return fmt.Sprintf("이 승인은 결제창(%s)에서 하는 결제 한 건%s입니다: 결제창을 다시 연 때부터 %d분 동안 결제창·카드사 창과, 그 안에서 고른 네이버페이가 통과합니다. "+
 			"금액이 다른 주문의 결제창은 다시 카드를 올립니다. "+
-			"결제창 안에서는 네이버페이만 쓰세요: 간편결제에 네이버페이가 있으면 그것을, 없으면 카드사 중 하나카드를 골라 하나카드 창 안의 간편결제에 네이버페이가 있는지 보세요 - "+
-			"다른 카드사, 카드번호 입력, 앱카드·QR·휴대폰 인증, 계좌이체, 가상계좌와 다른 간편결제는 고르지 않습니다. 하나카드 창에도 네이버페이가 없으면 결제하지 말고 알리세요. "+
+			"결제창에서는 네이버페이나 신용카드(운영자 지시의 카드, 없으면 하나카드)로 결제하세요 - 카드사 창 안의 간편결제에 네이버페이가 있으면 그것이 먼저입니다(비밀번호를 도구가 넣습니다). "+
+			"다른 간편결제, 휴대폰 결제, 계좌이체, 가상계좌, 카드번호 직접 입력은 하지 않습니다. "+
 			"네이버페이 결제 비밀번호 키패드가 나오면 browser_enter_payment_pin 을 부르세요 - 넣지 못했다고 하면 다시 부르지도 누르지도 말고 알리세요. "+
+			"카드사 앱 인증(폰 푸시·QR)이 나오면 운영자가 폰에서 승인해야 합니다: 알리고, 그 화면을 그대로 두고 기다리세요. "+
 			"결제가 끝나면 무엇을 얼마에 결제했는지 짧게 알리세요.", p.Host, amountNote(p), int(paymentWindow.Minutes()))
 	}
 	return fmt.Sprintf("이 승인은 %s 의 결제 한 건입니다: 다시 진행을 시작한 때부터 %d분 안에, 결제하기는 한 번 통과합니다. "+
@@ -424,10 +425,10 @@ func paymentCard(p Payment) action.Card {
 		body = job + "\n\n" + body
 	}
 	if p.Window {
-		consequence := fmt.Sprintf("결제가 청구됩니다 · 되돌릴 수 없습니다 · 승인하면 결제창을 다시 연 때부터 %d분 동안 결제 한 건%s이 진행됩니다(결제창 안에서는 네이버페이만)",
+		consequence := fmt.Sprintf("결제가 청구됩니다 · 되돌릴 수 없습니다 · 승인하면 결제창을 다시 연 때부터 %d분 동안 결제 한 건%s이 진행됩니다(결제창 안에서는 네이버페이·신용카드)",
 			int(paymentWindow.Minutes()), amountNote(p))
 		if p.JobID != 0 {
-			consequence = fmt.Sprintf("결제가 청구됩니다 · 되돌릴 수 없습니다 · 승인하면 이 작업이 결제창을 다시 열어 결제 한 건%s을 진행합니다(연 때부터 %d분, 결제창 안에서는 네이버페이만)",
+			consequence = fmt.Sprintf("결제가 청구됩니다 · 되돌릴 수 없습니다 · 승인하면 이 작업이 결제창을 다시 열어 결제 한 건%s을 진행합니다(연 때부터 %d분, 결제창 안에서는 네이버페이·신용카드)",
 				amountNote(p), int(paymentWindow.Minutes()))
 		}
 		return action.Card{

@@ -48,8 +48,17 @@ class GuardRules(unittest.TestCase):
         self.assertFalse(self.g.asks("https://www.coupang.com/vp/products/123", "POST"), "상품 페이지의 쓰기는 결제가 아님")
 
     def test_other_in_house_pay_is_still_blocked(self):
+        # 쇼핑몰 자체 간편결제(SSG페이·11페이)는 그대로 막는다.
         self.assertTrue(self.g.blocked("https://pay.ssg.com/ssgpay/approve", "POST"))
-        self.assertTrue(self.g.blocked("https://payment.11st.co.kr/payment/order", "POST"))
+        self.assertTrue(self.g.blocked("https://pay.11st.co.kr/11pay/approve", "POST"))
+
+    def test_card_payments_at_big_malls_are_asked(self):
+        # 2026-10-30 신용카드 결제를 허용: 큰 쇼핑몰의 결제 경로는 막지 않고 결제 카드로 묻는다 - 카드로 낼지
+        # 자체 간편결제로 낼지 주소로 가릴 수 없어서, 어느 쪽이든 승인 카드를 거친다.
+        for url in ["https://payment.11st.co.kr/payment/order", "https://www.musinsa.com/order/payment/request",
+                    "https://www.amazon.com/gp/buy/spc/handlers/checkout"]:
+            self.assertFalse(self.g.blocked(url, "POST"), url)
+            self.assertTrue(self.g.asks(url, "POST"), url)
 
     def test_a_card_payment_window_is_asked_not_blocked(self):
         # 2026-10-29 장범준 LP: 공식몰의 결제수단은 '신용카드' 하나이고, 결제하기가 이니시스 결제창을 여는
@@ -68,9 +77,19 @@ class GuardRules(unittest.TestCase):
     def test_other_ways_out_of_a_window_stay_blocked(self):
         # 결제창 안에서 고를 수 있어도 네이버페이가 아닌 간편결제·휴대폰 결제는 승인과 상관없이 막는다
         # (block 을 묻기보다 먼저 본다). 휴대폰 문자는 맥미니로 넘어와 자비스가 읽을 수 있다.
+        # 신용카드는 허용한다(카드사 창은 결제창 - 아래 test_card_company_windows_are_windows).
         for url in ["https://online-pay.kakaopay.com/pay/x", "https://id.payco.com/oauth2.0/authorize",
                     "https://ui.danal.co.kr/webpay/x", "https://mup.mobilians.co.kr/MUP/goCashMain.mcash"]:
             self.assertTrue(self.g.blocked(url, "POST"), url)
+
+    def test_card_company_windows_are_windows(self):
+        # 결제창에서 카드를 고르면 이어지는 카드사 창: 같은 결제창 승인으로 지나가도록 결제창이다.
+        for url in ["https://acs.hanacard.co.kr/payapp/C000000000VPQC.web", "https://pay.shinhancard.com/x", "https://ansim.kbcard.com/x",
+                    "https://card.nonghyup.com/acs/x", "https://api.stripe.com/v1/payment_intents/pi_1/confirm"]:
+            self.assertTrue(self.g.is_window(url), url)
+            self.assertTrue(self.g.asks(url, "POST"), url)
+            self.assertFalse(self.g.blocked(url, "POST"), url)
+        self.assertFalse(self.g.is_window("https://banking.nonghyup.com/x"), "NH 은행은 카드사 창이 아니다")
 
     def test_every_rule_is_watched(self):
         watched = {p["urlPattern"] for p in self.g.patterns}
