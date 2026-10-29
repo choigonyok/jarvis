@@ -665,6 +665,10 @@ services:
       # Photos attached in conversation, for browser_upload_files. Read-only:
       # the browser puts them into forms and never writes here.
       - jarvis-uploads:/uploads:ro
+      # The guard's log (guard.log, five of 5MB): payment decisions and the
+      # path a payment took. Kept past a recreated container - the deploy of
+      # 2026-10-30 01:32 took the log of the two failed payments with it.
+      - browser-logs:/logs
     ports:
       # noVNC, for the first login and for watching what it is doing. Bound to
       # loopback: this view drives a logged-in browser and has no password.
@@ -1131,6 +1135,7 @@ volumes:
   jarvis-data:
   jarvis-kakaotalk-data:
   chrome-profile:
+  browser-logs:
   jarvis-uploads:
   jarvis-imessage-data:
   jarvis-falkordb:

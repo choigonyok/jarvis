@@ -3,6 +3,7 @@
     python -m unittest test_guard   (aiohttp·websockets 가 있는 곳 - 브라우저 이미지)
 """
 
+import base64
 import json
 import os
 import unittest
@@ -165,12 +166,19 @@ class Paused(unittest.IsolatedAsyncioTestCase):
 
         self.g.ask = ask
         sent = self.sent
+        self.params = params = []
 
         class WS:
             async def send(self, raw):
-                sent.append(json.loads(raw)["method"])
+                msg = json.loads(raw)
+                sent.append(msg["method"])
+                params.append(msg.get("params", {}))
 
         self.ws = WS()
+
+    def page_of(self, i=-1):
+        """채운 안내 화면의 HTML."""
+        return base64.b64decode(self.params[i]["body"]).decode("utf-8")
 
     def paused(self, url, body, method="POST"):
         return {"sessionId": "s", "params": {"requestId": "r", "resourceType": "XHR",
@@ -201,7 +209,9 @@ class Paused(unittest.IsolatedAsyncioTestCase):
             "requestId": "r", "resourceType": "Document", "frameId": "F2",
             "request": {"url": "https://stdpay.inicis.com/payMain/pay", "method": "POST", "postData": form}}}
         await self.g.on_paused(self.ws, opening)
-        self.assertEqual(self.sent, ["Fetch.failRequest"])
+        # 막은 결제창 자리는 Chrome 의 오류 화면이 아니라 자비스의 안내 화면이다(사람에게는 '404'로 보였다).
+        self.assertEqual(self.sent, ["Fetch.fulfillRequest"])
+        self.assertIn("자비스 · 결제를 보내지 않았습니다", self.page_of())
         self.assertEqual(asked, [("stdpay.inicis.com", True, {"amount": "64000", "item": "장범준 2집 LP"})])
 
         asked.clear()
@@ -319,3 +329,133 @@ class JobSites(unittest.TestCase):
 
     def test_every_navigation_is_watched(self):
         self.assertIn({"urlPattern": "*", "resourceType": "Document", "requestStage": "Request"}, self.g.patterns)
+
+
+class InfoPagesAndWindows(unittest.IsolatedAsyncioTestCase):
+    """막은 페이지 이동의 안내 화면, 결제창이 연 창의 네이버페이, 결제 흐름의 길(로그)."""
+
+    async def asyncSetUp(self):
+        self.g = guard.Guard(*guard.load_rules())
+        self.sent, self.params, self.asked = [], [], []
+        sent, params = self.sent, self.params
+
+        class WS:
+            async def send(self, raw):
+                msg = json.loads(raw)
+                sent.append(msg["method"])
+                params.append(msg.get("params", {}))
+
+        self.ws = WS()
+
+    def doc(self, url, session="s-pop", frame="P1", method="POST", body="a=1"):
+        return {"sessionId": session, "params": {"requestId": "r", "resourceType": "Document", "frameId": frame,
+                                                 "request": {"url": url, "method": method, "postData": body}}}
+
+    async def test_a_pending_card_fills_the_page_with_its_wait(self):
+        async def ask(url, method, host, event="", **_):
+            return guard.Answer(False, "p-1")
+
+        self.g.ask = ask
+        await self.g.on_paused(self.ws, self.doc("https://stdpay.inicis.com/payMain/pay"))
+        self.assertEqual(self.sent, ["Fetch.fulfillRequest"])
+        page = base64.b64decode(self.params[0]["body"]).decode("utf-8")
+        self.assertIn("<title>자비스 · 결제 승인 대기</title>", page)
+        self.assertIn("wait_payment", page)
+        headers = {h["name"]: h["value"] for h in self.params[0]["responseHeaders"]}
+        self.assertEqual(headers["Content-Type"], "text/html; charset=utf-8")
+
+    async def test_a_refused_xhr_is_still_failed(self):
+        async def ask(url, method, host, event="", **_):
+            return guard.Answer(False, "p-1")
+
+        self.g.ask = ask
+        xhr = self.doc("https://pay.naver.com/orderApi/payment/partners/register")
+        xhr["params"]["resourceType"] = "XHR"
+        await self.g.on_paused(self.ws, xhr)
+        self.assertEqual(self.sent, ["Fetch.failRequest"])
+
+    async def test_the_hana_app_card_is_blocked_and_said_so(self):
+        # 2026-10-30 01:36: 결제창 승인 안에서 하나Pay 앱카드(M003121110MCAC)가 그대로 나가 폰 승인을 5분 기다렸다.
+        # 운영자 '하나pay 같은 거 사용하지 말고' - 이제 가드가 막는다. 하나카드 창 안 네이버페이(NVP...)는 그대로.
+        self.assertTrue(self.g.blocked("https://acs.hanacard.co.kr/payapp/M003121110MCAC.web;PAY_JSESSIONID=x", "POST"))
+        self.assertTrue(self.g.blocked("https://acs.hanacard.co.kr/payapp/M003121510HCAAC.web", "POST"))
+        for path in ["NVP001001WPC.web", "C000000000VPQC.web"]:
+            self.assertFalse(self.g.blocked("https://acs.hanacard.co.kr/payapp/" + path, "POST"), path)
+        await self.g.on_paused(self.ws, self.doc("https://acs.hanacard.co.kr/payapp/M003121110MCAC.web"))
+        self.assertEqual(self.sent, ["Fetch.fulfillRequest"])
+        self.assertIn("허용하지 않은 결제 수단", base64.b64decode(self.params[0]["body"]).decode("utf-8"))
+
+    async def test_leaving_the_jobs_sites_is_said_on_the_page(self):
+        import tempfile
+        import time
+
+        import jobsites
+
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        jobsites.FILE = os.path.join(d.name, "job-sites.json")
+        jobsites._cache.update(mtime=None, value=None)
+        json.dump({"sites": ["shampoomusicent.com"], "until": time.time() + 600}, open(jobsites.FILE, "w"))
+        self.g.pages["s-tab"] = "T1"
+        await self.g.on_paused(self.ws, self.doc("https://evil.example/x", session="s-tab", frame="T1", method="GET", body=""))
+        self.assertEqual(self.sent, ["Fetch.fulfillRequest"])
+        page = base64.b64decode(self.params[0]["body"]).decode("utf-8")
+        self.assertIn("작업의 사이트 밖", page)
+        self.assertIn("evil.example", page)
+
+    async def test_naver_pay_from_the_card_companys_popup_says_so(self):
+        # 카드사 창(acs.hanacard.co.kr)이 연 네이버페이 팝업의 요청만 '결제창이 연 창'이다 - 에이전트는 그것만
+        # 결제창의 승인으로 지나가게 한다. 따로 연 탭의 네이버페이는 아니다.
+        got = []
+
+        async def ask(url, method, host, event="", window=False, order=None, from_window=False):
+            got.append((host, window, from_window))
+            return guard.Answer(True)
+
+        self.g.ask = ask
+        # 쇼핑몰 탭(T0) 안의 이니시스 iframe(F-ini) 이 카드사 창(T-hana)을 열고, 그 창이 네이버페이 팝업(T-np)을 연다.
+        self.g.pages.update({"s-shop": "T0", "s-hana": "T-hana", "s-np": "T-np", "s-tab": "T-tab"})
+        self.g.frames.update({"T0": "https://shampoomusicent.com/x", "F-ini": "https://stdpay.inicis.com/payMain/pay",
+                              "T-hana": "https://acs.hanacard.co.kr/payapp/NVP001001WPC.web"})
+        self.g.openers.update({"T-hana": ("T0", "F-ini"), "T-np": ("T-hana", "T-hana")})
+        self.assertTrue(self.g.opened_by_window("s-np"))
+        self.assertTrue(self.g.opened_by_window("s-hana"))
+        self.assertFalse(self.g.opened_by_window("s-tab"))
+        self.assertFalse(self.g.opened_by_window("s-shop"))
+        xhr = self.doc("https://pay.naver.com/orderApi/payment/partners/apply", session="s-np")
+        xhr["params"]["resourceType"] = "XHR"
+        await self.g.on_paused(self.ws, xhr)
+        own = self.doc("https://orders.pay.naver.com/order/pay", session="s-tab")
+        own["params"]["resourceType"] = "XHR"
+        await self.g.on_paused(self.ws, own)
+        self.assertEqual(got, [("pay.naver.com", False, True), ("orders.pay.naver.com", False, False)])
+
+    def test_a_shape_keeps_no_value(self):
+        shape = guard.url_shape("https://acs.hanacard.co.kr/payapp/NVP001002WPC.web;PAY_JSESSIONID=abc?resultCode=Success&reserveId=R1&paymentId=NP9")
+        self.assertEqual(shape, "acs.hanacard.co.kr/payapp/NVP001002WPC.web;…?resultCode=Success&reserveId&paymentId")
+        self.assertNotIn("abc", shape)
+        self.assertNotIn("NP9", shape)
+
+    def test_the_log_is_also_kept_in_the_volume(self):
+        import logging
+        import tempfile
+
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        old = guard.LOG_DIR
+        guard.LOG_DIR = d.name
+        root = logging.getLogger()
+        before = list(root.handlers)
+        try:
+            guard.setup_logging()
+            guard.log.info("결제 흐름 이동: 시험")
+            for h in root.handlers:
+                h.flush()
+            self.assertIn("결제 흐름 이동: 시험", open(os.path.join(d.name, "guard.log"), encoding="utf-8").read())
+        finally:
+            for h in root.handlers[:]:
+                if h not in before:
+                    root.removeHandler(h)
+                    h.close()
+            guard.LOG_DIR = old
+

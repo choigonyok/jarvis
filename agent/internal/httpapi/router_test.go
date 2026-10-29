@@ -109,6 +109,7 @@ func TestInterceptRaisesACardAndReturnsAtOnce(t *testing.T) {
 	fu := &followUps{}
 	s := New(Deps{Proposals: props, Runner: bgRunner{}, InterceptToken: "tok", FollowUp: fu,
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	s.holdDur = 0
 	post := func(body string) map[string]string {
 		req := httptest.NewRequest(http.MethodPost, "/intercept", strings.NewReader(body))
 		req.Header.Set("Authorization", "Bearer tok")
@@ -182,13 +183,13 @@ func (f *fakeJobs) RunningJob() (int64, string, string, bool) {
 	return f.id, f.title, f.summary, f.id != 0
 }
 
-func (f *fakeJobs) PaymentRaised(job int64, card string) {
+func (f *fakeJobs) PaymentRaised(job int64, card string, _ time.Time) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.raised = append(f.raised, fmt.Sprintf("%d %s", job, card))
 }
 
-func (f *fakeJobs) PaymentDecided(job int64, card string, approved bool, text string) error {
+func (f *fakeJobs) PaymentDecided(job int64, card string, approved, _ bool, text string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.decided = append(f.decided, fmt.Sprintf("%d %s %v %s", job, card, approved, text))
@@ -229,6 +230,7 @@ func TestInterceptRaisesAJobsOwnCard(t *testing.T) {
 	runner := &switchRunner{bg: true}
 	s := New(Deps{Proposals: props, Runner: runner, InterceptToken: "tok", FollowUp: fu, Jobs: jobs,
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	s.holdDur = 0
 	post := func(body string) map[string]string {
 		req := httptest.NewRequest(http.MethodPost, "/intercept", strings.NewReader(body))
 		req.Header.Set("Authorization", "Bearer tok")
@@ -296,6 +298,7 @@ func TestInterceptRefusesABackgroundTaskThatIsNotAJob(t *testing.T) {
 	props := proposal.NewStore(bus.New())
 	s := New(Deps{Proposals: props, Runner: &switchRunner{bg: true}, InterceptToken: "tok", Jobs: &fakeJobs{},
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	s.holdDur = 0
 	req := httptest.NewRequest(http.MethodPost, "/intercept",
 		strings.NewReader(`{"url":"https://checkout.coupang.com/api/node/checkout/events","method":"POST","host":"checkout.coupang.com","event":"order"}`))
 	req.Header.Set("Authorization", "Bearer tok")
@@ -314,6 +317,7 @@ func TestInterceptRejectedJobCard(t *testing.T) {
 	jobs := &fakeJobs{id: 16, title: "탁상시계 구매"}
 	s := New(Deps{Proposals: props, Runner: &switchRunner{bg: true}, InterceptToken: "tok", Jobs: jobs,
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	s.holdDur = 0
 	post := func() map[string]string {
 		req := httptest.NewRequest(http.MethodPost, "/intercept",
 			strings.NewReader(`{"url":"https://checkout.coupang.com/api/node/checkout/events","method":"POST","host":"checkout.coupang.com","event":"order"}`))
@@ -439,6 +443,7 @@ func TestDecisionWithEdits(t *testing.T) {
 func TestMCPGuard(t *testing.T) {
 	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
 	s := New(Deps{MCP: map[string]http.Handler{"/mcp": ok, "/mcp/suggest": ok}, MCPToken: "inner", APIToken: "outer"})
+	s.holdDur = 0
 	h := s.Handler()
 	for _, tc := range []struct {
 		path, header string
@@ -515,6 +520,7 @@ func TestASecondPaymentRaisesItsOwnCard(t *testing.T) {
 	fu := &followUps{}
 	s := New(Deps{Proposals: props, Runner: bgRunner{}, InterceptToken: "tok", FollowUp: fu,
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	s.holdDur = 0
 	post := func(body string) map[string]string {
 		req := httptest.NewRequest(http.MethodPost, "/intercept", strings.NewReader(body))
 		req.Header.Set("Authorization", "Bearer tok")
@@ -559,6 +565,7 @@ func TestAPaymentWindowIsOneCard(t *testing.T) {
 	runner := &switchRunner{bg: true}
 	s := New(Deps{Proposals: props, Runner: runner, InterceptToken: "tok", FollowUp: &followUps{}, Jobs: jobs,
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	s.holdDur = 0
 	now := time.Date(2026, 10, 29, 9, 31, 0, 0, time.UTC)
 	s.payments.now = func() time.Time { return now }
 	post := func(body string) map[string]string {
@@ -571,7 +578,10 @@ func TestAPaymentWindowIsOneCard(t *testing.T) {
 		return out
 	}
 	window := `{"url":"https://stdpay.inicis.com/payMain/pay","method":"POST","host":"stdpay.inicis.com","window":true,"amount":"64000","item":"장범준 2집 LP"}`
-	naverPay := `{"url":"https://pay.naver.com/payments/abc","method":"POST","host":"pay.naver.com"}`
+	// 네이버페이 from the popup the card company's window opened (the guard
+	// says fromWindow), and 네이버페이 in a tab of its own.
+	naverPay := `{"url":"https://pay.naver.com/payments/abc","method":"POST","host":"pay.naver.com","fromWindow":true}`
+	ownTab := `{"url":"https://orders.pay.naver.com/order/pay","method":"POST","host":"orders.pay.naver.com"}`
 
 	first := post(window)
 	if first["decision"] != string(proposal.Reject) || first["pending"] == "" {
@@ -616,6 +626,11 @@ func TestAPaymentWindowIsOneCard(t *testing.T) {
 	}
 	if pay := post(naverPay); pay["decision"] != string(proposal.Approve) {
 		t.Fatalf("결제창 안에서 고른 네이버페이는 같은 카드로 통과합니다: %v", pay)
+	}
+	// A 네이버페이 order of a tab of its own in the same minutes is another
+	// payment: the window's approval does not cover it.
+	if tab := post(ownTab); tab["decision"] != string(proposal.Reject) || tab["pending"] == "" || tab["pending"] == first["pending"] {
+		t.Fatalf("결제창이 열지 않은 네이버페이는 따로 카드를 올립니다: %v", tab)
 	}
 	// Another order opening the window in the same minutes (3집, another
 	// amount) is another payment: a card of its own.
@@ -662,5 +677,137 @@ func TestAWindowIsOpenOnlyWhileItsPaymentIs(t *testing.T) {
 	}
 	if won("64000") != "64,000원" || won("900") != "900원" || won("1234567") != "1,234,567원" {
 		t.Fatalf("금액 표기: %s %s %s", won("64000"), won("900"), won("1234567"))
+	}
+}
+
+// A stopped payment request waits for its card a little: approved in time,
+// it goes on as it was and the job is told not to take the step again - the
+// guest order sheet typed again from the top after every approval is where a
+// wrong phone number and a wrong building number got in (2026-10-30). Not
+// decided in time, it is refused, and a later approval sends the job back
+// to the step as before.
+func TestAHeldPaymentGoesOnWhenApprovedInTime(t *testing.T) {
+	props := proposal.NewStore(bus.New())
+	jobs := &fakeJobs{id: 1, title: "장범준 LP", summary: "결제 직전 · 113,000원"}
+	s := New(Deps{Proposals: props, Runner: &switchRunner{bg: true}, InterceptToken: "tok", FollowUp: &followUps{}, Jobs: jobs,
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	s.holdDur = 3 * time.Second
+	post := func(body string) map[string]string {
+		req := httptest.NewRequest(http.MethodPost, "/intercept", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer tok")
+		rec := httptest.NewRecorder()
+		s.postIntercept(rec, req)
+		var out map[string]string
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return out
+	}
+	window := `{"url":"https://stdpay.inicis.com/payMain/pay","method":"POST","host":"stdpay.inicis.com","window":true,"amount":"113000"}`
+
+	got := make(chan map[string]string, 1)
+	go func() { got <- post(window) }()
+	var card string
+	for i := 0; i < 100 && card == ""; i++ {
+		if list := props.List(); len(list) == 1 {
+			card = list[0].ID
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if card == "" {
+		t.Fatal("카드가 올라가야 합니다")
+	}
+	select {
+	case early := <-got:
+		t.Fatalf("결정 전에는 요청이 기다려야 합니다: %v", early)
+	case <-time.After(200 * time.Millisecond):
+	}
+	if err := props.Decide(card, proposal.Approve); err != nil {
+		t.Fatal(err)
+	}
+	if res := <-got; res["decision"] != string(proposal.Approve) {
+		t.Fatalf("기다리는 동안 승인되면 그 요청이 그대로 나가야 합니다: %v", res)
+	}
+	if d := jobs.wait(1); len(d) != 1 || !strings.Contains(d[0], "그대로 나갔습니다") || strings.Contains(d[0], "다시 누르면") {
+		t.Fatalf("작업에는 결제하기를 다시 누르지 말라고 가야 합니다: %v", d)
+	}
+
+	// Not decided in time: refused with the card, and a later approval is
+	// the old way round.
+	s.holdDur = 50 * time.Millisecond
+	other := post(`{"url":"https://stdpay.inicis.com/payMain/pay","method":"POST","host":"stdpay.inicis.com","window":true,"amount":"54000"}`)
+	if other["decision"] != string(proposal.Reject) || other["pending"] == "" || other["pending"] == card {
+		t.Fatalf("시간 안에 결정이 없으면 카드와 함께 막아야 합니다: %v", other)
+	}
+	if err := props.Decide(other["pending"], proposal.Approve); err != nil {
+		t.Fatal(err)
+	}
+	if d := jobs.wait(2); len(d) != 2 || !strings.Contains(d[1], "아직 보내지지 않았습니다") {
+		t.Fatalf("늦은 승인은 결제 단계를 다시 하라고 가야 합니다: %v", d)
+	}
+}
+
+// A held request goes on only while the job's run still holds the browser:
+// with no run, the window it would open is nobody's, and its next requests
+// would be the conversation's.
+func TestAHeldPaymentWaitsForItsRun(t *testing.T) {
+	props := proposal.NewStore(bus.New())
+	jobs := &fakeJobs{id: 1, title: "장범준 LP"}
+	s := New(Deps{Proposals: props, Runner: &switchRunner{bg: true}, InterceptToken: "tok", FollowUp: &followUps{}, Jobs: jobs,
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	s.holdDur = 3 * time.Second
+	got := make(chan map[string]string, 1)
+	go func() {
+		req := httptest.NewRequest(http.MethodPost, "/intercept", strings.NewReader(`{"url":"https://checkout.coupang.com/api/node/checkout/events","method":"POST","host":"checkout.coupang.com","event":"order"}`))
+		req.Header.Set("Authorization", "Bearer tok")
+		rec := httptest.NewRecorder()
+		s.postIntercept(rec, req)
+		var out map[string]string
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		got <- out
+	}()
+	var card string
+	for i := 0; i < 100 && card == ""; i++ {
+		if list := props.List(); len(list) == 1 {
+			card = list[0].ID
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	jobs.running(0) // the run ended (wait_payment, then over) before the decision
+	if err := props.Decide(card, proposal.Approve); err != nil {
+		t.Fatal(err)
+	}
+	if res := <-got; res["decision"] != string(proposal.Reject) {
+		t.Fatalf("실행이 없으면 멈춘 요청을 보내지 않아야 합니다: %v", res)
+	}
+	if d := jobs.wait(1); len(d) != 1 || !strings.Contains(d[0], "아직 보내지지 않았습니다") {
+		t.Fatalf("다음 실행이 결제 단계를 다시 하라고 가야 합니다: %v", d)
+	}
+}
+
+// The payment card shows the shipping address the vault keeps, and says so
+// first when the job's report names another (2026-10-30: four order sheets
+// went out with a building number one digit short).
+func TestAPaymentCardShowsTheSavedAddress(t *testing.T) {
+	saved := &SavedAddress{Recipient: "홍길동", Address: "서울 중구 세종대로 110", Detail: "101동 1001호"}
+	right := Payment{Host: "stdpay.inicis.com", Window: true, JobID: 1, JobTitle: "LP",
+		JobSummary: "결제 직전 · LP · 113,000원 · 배송지 세종대로 110 101동 1001호"}
+	card := paymentCard(right, saved)
+	if !strings.Contains(card.Body, "저장된 배송지: 서울 중구 세종대로 110 101동 1001호 (홍길동)") || strings.Contains(card.Body, "⚠") {
+		t.Fatalf("저장된 배송지를 보여 주고, 같으면 경고하지 않습니다: %s", card.Body)
+	}
+	wrong := right
+	wrong.JobSummary = "결제 직전 · LP · 113,000원 · 배송지 04524 서울 중구 세종대로 11 101-1001"
+	if card := paymentCard(wrong, saved); !strings.HasPrefix(card.Body, "⚠ 작업이 남긴 배송지가 저장된 배송지와 다릅니다") {
+		t.Fatalf("다른 배송지면 맨 앞에 경고합니다: %s", card.Body)
+	}
+	noAddress := right
+	noAddress.JobSummary = "결제 직전 · 쿠팡 · 34,350원"
+	if card := paymentCard(noAddress, saved); strings.Contains(card.Body, "⚠") {
+		t.Fatalf("배송지를 남기지 않은 현황에는 경고하지 않습니다: %s", card.Body)
+	}
+	if card := paymentCard(right, nil); strings.Contains(card.Body, "저장된 배송지") {
+		t.Fatalf("저장된 배송지가 없으면 그 줄도 없습니다: %s", card.Body)
+	}
+	if roadKey("서울 중구 세종대로 110 (태평로1가)") != "세종대로110" {
+		t.Fatalf("괄호를 뺀 도로명+건물번호: %q", roadKey("서울 중구 세종대로 110 (태평로1가)"))
 	}
 }

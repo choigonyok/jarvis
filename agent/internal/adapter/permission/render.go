@@ -37,6 +37,8 @@ func mcpName(tool string) (server, name string, ok bool) {
 // own name.
 var toolTitles = map[string]string{
 	"list_jobs":                 "작업 목록을 봅니다",
+	"get_job":                   "작업을 자세히 봅니다",
+	"get_shipping_address":      "저장된 배송지를 읽습니다",
 	"browser_navigate":          "브라우저로 주소를 엽니다",
 	"browser_click":             "브라우저에서 누릅니다",
 	"browser_type":              "브라우저에 입력합니다",

@@ -32,13 +32,16 @@ ENV DISPLAY=:99 \
 # --no-sandbox 로 뜨므로(browser-use), 페이지가 렌더러를 장악하면 이 사용자의 권한이 전부다.
 # /tmp/.X11-unix 는 Xvfb 가 root 없이 만들 수 없어 미리 둔다.
 RUN useradd --create-home --uid 10002 browser \
-    && mkdir -p /profile /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix \
-    && chown -R browser:browser /profile /config
+    && mkdir -p /profile /logs /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix \
+    && chown -R browser:browser /profile /logs /config
 USER browser
 
 # 로그인 상태가 사는 곳. 이 볼륨이 비면 처음부터 다시 로그인해야 한다.
 # (root 로 돌던 때의 볼륨은 DEPLOY.md 의 소유자 변경을 한 번 한다.)
 VOLUME ["/profile"]
+
+# 가드 로그(guard.log). 컨테이너를 다시 만들어도 남게 볼륨으로 둔다(docker-compose 의 browser-logs).
+VOLUME ["/logs"]
 
 EXPOSE 8931 6080
 ENTRYPOINT ["/app/entrypoint.sh"]

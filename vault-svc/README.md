@@ -20,6 +20,12 @@
   → 결제 비밀번호 키패드 앞에서 browser_enter_payment_pin 이 키패드 프레임의 호스트를 읽어
     POST /release-pin {site: pay.naver.com, host}
   → host 가 그 결제 호스트(와 그 아래)일 때만 내준다 - 같은 naver.com 이어도 블로그·카페는 아니다
+
+주문자·배송지(받는 분·연락처·이메일·우편번호·주소·상세주소)도 카드로 받아 봉인해 둔다(vault_profiles, 074):
+  → 자비스가 save_shipping_address(대화) 또는 request_shipping_address(작업) → 승인 카드(칸 여섯, 값은 카드 기록에 안 남음)
+  → PUT /profiles/기본 - 주소는 도로명과 건물번호까지가 아니면 거절한다(주문서의 주소 검색이 그것으로 찾는다)
+  → 주문서를 채울 때 get_shipping_address / shipping_address 가 GET /profiles 로 통째로 읽는다
+    (비밀번호와 달리 모델이 읽는다 - 주문서에 치려면 알아야 한다. 그래도 개인정보라 봉인)
 ```
 
 결제 비밀번호를 로그인과 따로 두는 것은, 로그인은 등록 도메인마다 하나(naver.com)라서 네이버 로그인과
@@ -30,7 +36,7 @@
 
 | 토큰 | 누가 | 열리는 것 |
 |---|---|---|
-| `API_TOKEN` (서비스 토큰) | 에이전트 | `GET /logins`(비밀 없음), `PUT /logins/{domain}`, `DELETE /logins/{domain}`, `GET /uses`, `GET /pins`(숫자 없음), `PUT /pins/{site}`, `DELETE /pins/{site}` |
+| `API_TOKEN` (서비스 토큰) | 에이전트 | `GET /logins`(비밀 없음), `PUT /logins/{domain}`, `DELETE /logins/{domain}`, `GET /uses`, `GET /pins`(숫자 없음), `PUT /pins/{site}`, `DELETE /pins/{site}`, `GET /profiles`(배송지 통째로), `PUT /profiles/{name}`, `DELETE /profiles/{name}` |
 | `VAULT_RELEASE_TOKEN` | 브라우저 컨테이너 | `POST /release`, `POST /release-pin` 둘 |
 
 서비스 토큰으로는 비밀번호를 꺼낼 수 없고, 브라우저 토큰으로는 저장·목록·지우기를 못 한다.

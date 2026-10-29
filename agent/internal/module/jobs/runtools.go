@@ -204,6 +204,11 @@ func (r *running) report(run int64, summary string) {
 type payCard struct {
 	id    string
 	state string // payPending, payApproved, payRejected
+	// until is how long the stopped request is held at the guard while the
+	// card waits: approved before then, it goes on as it was, and the run
+	// does not take the step again (passed).
+	until  time.Time
+	passed bool
 }
 
 const (
@@ -236,7 +241,7 @@ func (p *payments) set(job int64, c payCard) {
 }
 
 // decided records a decision on the job's card, if it is still that card.
-func (p *payments) decided(job int64, card string, approved bool) {
+func (p *payments) decided(job int64, card string, approved, passed bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if c, ok := p.cards[job]; ok && c.id == card {
@@ -244,6 +249,7 @@ func (p *payments) decided(job int64, card string, approved bool) {
 		if approved {
 			c.state = payApproved
 		}
+		c.passed = approved && passed
 		p.cards[job] = c
 	}
 }
@@ -271,22 +277,32 @@ func (m *Module) RunningJob() (int64, string, string, bool) {
 }
 
 // PaymentRaised: the browser's guard stopped the job's run at a payment and
-// a card is up for it. The run learns of it through wait_payment.
-func (m *Module) PaymentRaised(job int64, card string) {
+// a card is up for it, the request held until until. The run learns of it
+// through wait_payment.
+func (m *Module) PaymentRaised(job int64, card string, until time.Time) {
 	if c, ok := m.pay.get(job); ok && c.id == card {
 		return
 	}
-	m.pay.set(job, payCard{id: card, state: payPending})
+	m.pay.set(job, payCard{id: card, state: payPending, until: until})
 }
 
 // PaymentDecided hands the operator's decision on the job's payment card to
 // the job, as a card answer that wakes it if it is waiting on that card.
-func (m *Module) PaymentDecided(job int64, card string, approved bool, text string) error {
-	m.pay.decided(job, card, approved)
+// passed: the stopped request was still held and went on with the approval,
+// in the run that is still going - that run hears it from wait_payment, and
+// the answer is only written down, not queued for another run that would
+// take the step a second time.
+func (m *Module) PaymentDecided(job int64, card string, approved, passed bool, text string) error {
+	m.pay.decided(job, card, approved, passed)
 	m.current.unpark(card)
 	m.hear(card)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+	if passed {
+		if run, j := m.current.now(); run != 0 && j.ID == job {
+			return m.store.Step(ctx, run, "answer", text)
+		}
+	}
 	if err := m.store.Answer(ctx, job, card, text); err != nil {
 		if !JobEnded(err) { // over: nothing to hand it on to later
 			m.retrySoon()
@@ -306,6 +322,10 @@ type WaitInput struct {
 // waitBounds keeps a pause short: a run that has to wait longer ends with
 // schedule_next or ask instead.
 const waitMin, waitMax = 5, 60
+
+// payAppear is how long wait_payment looks for the payment card of a page
+// that is still waiting on the guard: the card goes up as the guard asks.
+var payAppear = 10 * time.Second
 
 type ProgressInput struct {
 	Text string `json:"text" jsonschema:"지금 무엇을 하고 있는지 한 줄. 운영자가 작업 탭에서 본다. 예: '판매 글 양식에 사진 3장을 넣었습니다'"`
@@ -630,26 +650,53 @@ func (m *Module) runServer(run int64) *mcp.Server {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "wait_payment",
-		Description: "결제하기를 눌렀는데 결제가 막혔을 때(쿠팡은 '시스템 오류: 주문중 오류' 창을 띄우고, 결제창(PG)은 빈 화면이나 차단 화면으로 뜬다) 부른다. 막혔다면 결제 승인 카드가 운영자에게 올라가 있다. " +
-			"아직 결정 전이면 작업이 그 카드를 기다리게 하고, 이미 결정됐으면 무엇을 할지 알려 준다.",
+		Description: "결제하기를 눌렀는데 결제가 멈췄을 때(결제창이 '자비스 · 결제 승인 대기' 화면이나 빈 화면으로 뜨거나 로딩에 멈춤, 쿠팡은 '시스템 오류: 주문중 오류' 창) 부른다. 그때 결제 승인 카드가 운영자에게 올라가 있다. " +
+			"멈춘 결제 요청은 카드가 올라간 뒤 2분 동안 그대로 기다리므로, 그 사이 승인되면 이 도구가 그렇게 알려 주고 실행은 결제하기를 다시 누르지 않고 이어 간다. " +
+			"그때까지 결정이 없으면 작업이 그 카드를 기다리게 하고 실행을 마친다.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ ListInput) (*mcp.CallToolResult, any, error) {
 		j, bad := guard()
 		if bad != nil {
 			return bad, nil, nil
 		}
 		decided := func(c payCard) *mcp.CallToolResult {
-			switch c.state {
-			case payApproved:
+			switch {
+			case c.state == payApproved && c.passed:
+				return ok("결제가 승인됐고, 멈춰 있던 결제 요청이 그대로 나갔습니다. 결제하기를 다시 누르지 말고(결제창을 다시 열지도 말고) 화면을 보며 이어 가세요 - 결제창이 열리고 있습니다. " +
+					"결제 비밀번호 키패드가 나오면 browser_enter_payment_pin 을 부르세요.")
+			case c.state == payApproved:
 				return ok("결제가 이미 승인됐습니다. 주문 내역에 이 주문이 없는지 확인한 뒤 결제하기를 한 번 다시 누르세요(이번에는 통과합니다). " +
 					"결제 비밀번호 키패드가 나오면 browser_enter_payment_pin 을 부르세요.")
-			case payRejected:
+			case c.state == payRejected:
 				return ok("운영자가 결제를 반려했습니다. 결제하지 말고 finish 로 마치세요.")
 			}
 			return nil
 		}
+		// The page may still be waiting on the guard, whose card is about to
+		// go up: the stopped request is held now, not refused at once.
 		c, up := m.pay.get(j.ID)
+		for wait := time.Now().Add(payAppear); !up && time.Now().Before(wait); c, up = m.pay.get(j.ID) {
+			select {
+			case <-time.After(500 * time.Millisecond):
+			case <-ctx.Done():
+				return fail(ctx.Err()), nil, nil
+			}
+		}
 		if !up {
 			return toolText("이 작업에 올라간 결제 카드가 없습니다. 결제 요청이 막힌 것이 아니라 사이트 쪽 오류입니다 - 화면을 다시 확인하고, 계속되면 ask 로 알리세요.", true), nil, nil
+		}
+		// Held: a decision while the request still waits at the guard lets it
+		// go on as it was, and this run carries on from there.
+		for c.state == payPending && time.Now().Before(c.until) {
+			select {
+			case <-time.After(time.Second):
+			case <-ctx.Done():
+				return fail(ctx.Err()), nil, nil
+			}
+			now, still := m.pay.get(j.ID)
+			if !still || now.id != c.id {
+				break
+			}
+			c = now
 		}
 		if res := decided(c); res != nil {
 			return res, nil, nil
@@ -670,6 +717,8 @@ func (m *Module) runServer(run int64) *mcp.Server {
 		}
 		return ok("결제 승인 카드를 기다립니다. 승인하거나 반려하면 작업이 바로 다시 실행됩니다. 지금 실행을 마치세요."), nil, nil
 	})
+
+	m.addOrderTools(server, run, guard, payUp)
 
 	mcp.AddTool(server, &mcp.Tool{Name: "finish", Description: "목표를 이뤘거나 더 할 수 있는 일이 없을 때 작업을 끝낸다."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in FinishInput) (*mcp.CallToolResult, any, error) {

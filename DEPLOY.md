@@ -103,6 +103,8 @@
 수집기와 브라우저는 root 로 돌지 않는다(수집기 65532, 브라우저 10002). 볼륨은 이미지가 처음부터 맞는
 소유자로 만든다. 브라우저 컨테이너를 다시 띄우면 쿠팡 로그인이 풀린다(네이버는 '로그인 상태 유지'로
 남는다). 상태 탭의 "쿠팡 주문 내역"이 이상으로 바뀌면 화면 탭에서 쿠팡에 다시 로그인한다.
+브라우저 가드의 로그(결제 결정, 결제 흐름의 이동·새 창)는 `browser-logs` 볼륨의 `guard.log`(5MB 다섯 개)에도
+남아, 컨테이너를 다시 만들어도 지난 결제를 볼 수 있다: `docker compose exec browser tail -n 200 /logs/guard.log`.
 
 위 전제는 `scripts/host-check`(LaunchAgent com.jarvis.host-check, 10분마다)가 점검해
 `~/.jarvis-host/host.json` 에 적고, 상태 탭 "기반"의 맥미니 디스크 암호화 · 백업의 바깥 사본 ·

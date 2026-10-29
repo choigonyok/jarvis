@@ -83,6 +83,8 @@ func callRun(t *testing.T, s *mcp.ClientSession, tool string, args map[string]an
 // wait_payment and waits on it; the decision reaches the job as a card answer
 // (job 16, 2026-10-17: the payment was refused with no card, four times).
 func TestPaymentCardParksTheRunAndTheDecisionWakesIt(t *testing.T) {
+	defer func(d time.Duration) { payAppear = d }(payAppear)
+	payAppear = 50 * time.Millisecond
 	svc := &jobsSvc{}
 	props := proposal.NewStore(bus.New())
 	m := New(NewStore(svc.serve(t).URL, ""), nil, props, nil, nil)
@@ -99,7 +101,7 @@ func TestPaymentCardParksTheRunAndTheDecisionWakesIt(t *testing.T) {
 		t.Fatalf("실행 중인 작업: %d %q %q %v", id, title, summary, ok)
 	}
 
-	m.PaymentRaised(16, "p-1")
+	m.PaymentRaised(16, "p-1", time.Now())
 	// Another card, or a run on its own clock, would leave the payment card
 	// with nobody to wake.
 	if text, isErr := callRun(t, s, "ask", map[string]any{"question": "주문중 오류가 났습니다. 어떻게 할까요?"}); !isErr || !strings.Contains(text, "wait_payment") {
@@ -119,7 +121,7 @@ func TestPaymentCardParksTheRunAndTheDecisionWakesIt(t *testing.T) {
 		t.Fatalf("작업을 결제 카드에 걸어야 합니다: %v", got)
 	}
 
-	if err := m.PaymentDecided(16, "p-1", true, "[결제 승인됨] 운영자가 승인했습니다."); err != nil {
+	if err := m.PaymentDecided(16, "p-1", true, false, "[결제 승인됨] 운영자가 승인했습니다."); err != nil {
 		t.Fatal(err)
 	}
 	if got := svc.got(); !contains(got, "/jobs/16/answer p-1") {
@@ -171,7 +173,7 @@ func TestFinishingDropsAPendingPaymentCard(t *testing.T) {
 	s := runSession(t, m, "5")
 
 	card, _ := props.Open(proposal.Proposal{Origin: proposal.OriginIntercept, Action: action.Action{Kind: "browser.payment", Input: json.RawMessage(`{}`)}})
-	m.PaymentRaised(16, card.ID)
+	m.PaymentRaised(16, card.ID, time.Now())
 	if _, isErr := callRun(t, s, "finish", map[string]any{"summary": "사지 않기로 했습니다"}); isErr {
 		t.Fatal("finish 실패")
 	}

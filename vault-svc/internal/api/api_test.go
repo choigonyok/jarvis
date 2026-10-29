@@ -17,9 +17,10 @@ import (
 )
 
 type fake struct {
-	logins map[string]store.Login
-	pins   map[string]store.Pin
-	uses   []store.Use
+	logins   map[string]store.Login
+	pins     map[string]store.Pin
+	profiles map[string]store.Profile
+	uses     []store.Use
 }
 
 func (f *fake) Ping(context.Context) error { return nil }
@@ -76,6 +77,22 @@ func (f *fake) DeletePin(_ context.Context, site string) (bool, error) {
 	return ok, nil
 }
 func (f *fake) UsedPin(context.Context, string) error { return nil }
+func (f *fake) PutProfile(_ context.Context, p store.Profile) error {
+	f.profiles[p.Name] = p
+	return nil
+}
+func (f *fake) Profiles(context.Context) ([]store.Profile, error) {
+	out := []store.Profile{}
+	for _, p := range f.profiles {
+		out = append(out, p)
+	}
+	return out, nil
+}
+func (f *fake) DeleteProfile(_ context.Context, name string) (bool, error) {
+	_, ok := f.profiles[name]
+	delete(f.profiles, name)
+	return ok, nil
+}
 
 func server(t *testing.T) (http.Handler, *fake) {
 	t.Helper()
@@ -85,7 +102,7 @@ func server(t *testing.T) (http.Handler, *fake) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &fake{logins: map[string]store.Login{}, pins: map[string]store.Pin{}}
+	f := &fake{logins: map[string]store.Login{}, pins: map[string]store.Pin{}, profiles: map[string]store.Profile{}}
 	return (&Server{Store: f, Sealer: s, Token: "svc", ReleaseToken: "browser", Log: slog.New(slog.NewTextHandler(io.Discard, nil))}).Handler(), f
 }
 
@@ -250,5 +267,58 @@ func TestAPaymentPasswordIsForItsKeypadOnly(t *testing.T) {
 	}
 	if outcomes["released"] != 3 || outcomes["refused"] != 4 || outcomes["none"] != 1 {
 		t.Fatalf("결제 비밀번호를 내준 것·거절한 것·없던 것이 기록돼야 합니다: %v", outcomes)
+	}
+}
+
+// A shipping profile is saved sealed and read back whole with the services'
+// token - an order sheet is typed from it - and only with that token. An
+// address without its building number is refused: the address search of an
+// order sheet finds a road by it, and a run once picked a building number
+// one digit short (2026-10-30).
+func TestAShippingProfileIsReadWholeAndNeedsItsBuildingNumber(t *testing.T) {
+	h, f := server(t)
+	good := `{"recipient":"홍길동","phone":"010-1234-5678","email":"a@example.com","zip":"04524","address":"서울 중구 세종대로 110","detail":"101동 1001호"}`
+	for _, bad := range []struct{ body, want string }{
+		{strings.Replace(good, "세종대로 110", "세종대로", 1), "건물번호"},
+		{strings.Replace(good, "010-1234-5678", "02-123-4567", 1), "휴대폰"},
+		{strings.Replace(good, `"04524"`, `"1641"`, 1), "우편번호"},
+		{strings.Replace(good, "101동 1001호", "", 1), "상세주소"},
+	} {
+		if code, body := call(h, http.MethodPut, "/profiles/기본", "svc", bad.body); code != http.StatusBadRequest || !strings.Contains(body, bad.want) {
+			t.Errorf("%s 이 틀린 배송지는 거절해야 합니다: %d %s", bad.want, code, body)
+		}
+	}
+	if code, body := call(h, http.MethodPut, "/profiles/기본", "svc", good); code != http.StatusOK || !strings.Contains(body, `"phone":"01012345678"`) {
+		t.Fatalf("저장: %d %s", code, body)
+	}
+	if p := f.profiles["기본"]; bytes.Contains(p.Sealed, []byte("세종대로")) || bytes.Contains(p.Sealed, []byte("01012345678")) {
+		t.Fatalf("배송지는 봉인해서 저장해야 합니다")
+	}
+	code, body := call(h, http.MethodGet, "/profiles", "svc", "")
+	var got struct {
+		Profiles []Shipping `json:"profiles"`
+	}
+	if code != http.StatusOK || json.Unmarshal([]byte(body), &got) != nil || len(got.Profiles) != 1 {
+		t.Fatalf("목록: %d %s", code, body)
+	}
+	if p := got.Profiles[0]; p.Name != "기본" || p.Address != "서울 중구 세종대로 110" || p.Detail != "101동 1001호" || p.Zip != "04524" || p.Recipient != "홍길동" {
+		t.Fatalf("배송지를 그대로 돌려줘야 합니다: %+v", p)
+	}
+	// A parenthesized dong after the number is still a building number.
+	if code, _ := call(h, http.MethodPut, "/profiles/회사", "svc", strings.Replace(good, "세종대로 110", "테헤란로 152 (역삼동)", 1)); code != http.StatusOK {
+		t.Fatalf("괄호의 동 이름 앞에 건물번호가 있으면 받아야 합니다: %d", code)
+	}
+	for _, c := range []struct{ method, path, body string }{
+		{http.MethodGet, "/profiles", ""}, {http.MethodPut, "/profiles/기본", good}, {http.MethodDelete, "/profiles/기본", ""},
+	} {
+		if code, _ := call(h, c.method, c.path, "browser", c.body); code != http.StatusUnauthorized {
+			t.Errorf("브라우저 토큰으로 %s %s: %d", c.method, c.path, code)
+		}
+	}
+	if code, _ := call(h, http.MethodDelete, "/profiles/기본", "svc", ""); code != http.StatusNoContent {
+		t.Fatalf("지우기: %d", code)
+	}
+	if code, _ := call(h, http.MethodDelete, "/profiles/기본", "svc", ""); code != http.StatusNotFound {
+		t.Fatalf("없는 배송지 지우기: %d", code)
 	}
 }

@@ -92,6 +92,38 @@ func (c *Client) ForgetPin(ctx context.Context, site string) error {
 	return c.do(ctx, http.MethodDelete, "/pins/"+url.PathEscape(site), nil, nil)
 }
 
+// Shipping is a saved orderer and shipping address, read whole: an order
+// sheet is typed from it.
+type Shipping struct {
+	Name      string `json:"name"`
+	Recipient string `json:"recipient"`
+	Phone     string `json:"phone"`
+	Email     string `json:"email,omitempty"`
+	Zip       string `json:"zip"`
+	Address   string `json:"address"`
+	Detail    string `json:"detail"`
+	UpdatedAt string `json:"updatedAt,omitempty"`
+}
+
+// SaveProfile keeps a shipping profile under name ('기본'); vault-svc checks
+// it (a road address up to its building number, a mobile number).
+func (c *Client) SaveProfile(ctx context.Context, name string, s Shipping) error {
+	body, _ := json.Marshal(s)
+	return c.do(ctx, http.MethodPut, "/profiles/"+url.PathEscape(name), body, nil)
+}
+
+func (c *Client) Profiles(ctx context.Context) ([]Shipping, error) {
+	var out struct {
+		Profiles []Shipping `json:"profiles"`
+	}
+	err := c.do(ctx, http.MethodGet, "/profiles", nil, &out)
+	return out.Profiles, err
+}
+
+func (c *Client) ForgetProfile(ctx context.Context, name string) error {
+	return c.do(ctx, http.MethodDelete, "/profiles/"+url.PathEscape(name), nil, nil)
+}
+
 func (c *Client) Uses(ctx context.Context, limit int) ([]Use, error) {
 	var out struct {
 		Uses []Use `json:"uses"`

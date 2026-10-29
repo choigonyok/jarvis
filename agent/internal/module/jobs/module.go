@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -36,6 +37,7 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/core/action"
 	"github.com/choigonyok/jarvis/agent/internal/core/module"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
+	"github.com/choigonyok/jarvis/agent/internal/module/vault"
 	"github.com/choigonyok/jarvis/agent/internal/thread"
 	"github.com/choigonyok/jarvis/agent/internal/uploads"
 )
@@ -118,6 +120,10 @@ type Module struct {
 	offered map[int64]string
 	// onEnd hears each job that is over: done, or stopped after failing.
 	onEnd func(EndNote)
+	// vault and charges are what a run that buys needs (order.go): the
+	// saved shipping address and the vault's cards, and the card alerts.
+	vault   VaultCards
+	charges ChargeLog
 }
 
 // EndNote is a job that is over, for the phone: done (Text is what its
@@ -390,6 +396,10 @@ func (m *Module) decided(p proposal.Proposal, d proposal.Decision) {
 	m.current.unpark(p.ID)
 	m.hear(p.ID)
 	switch p.Action.Kind {
+	case vault.KindSavePin, vault.KindSaveShipping:
+		// A job's own (request_payment_pin, request_shipping_address); the
+		// conversation's go through the permission gate.
+		m.decidedVault(ctx, p, d)
 	case KindAsk:
 		var in AskInput
 		if json.Unmarshal(p.Action.Input, &in) != nil {
@@ -533,6 +543,8 @@ func (m *Module) waitingOn(job int64) []proposal.Proposal {
 		case p.Action.Kind == KindAsk:
 			var in AskInput
 			return json.Unmarshal(p.Action.Input, &in) == nil && in.JobID == job
+		case vaultKind(p.Action.Kind):
+			return vaultJob(p) == job
 		case p.Origin == proposal.OriginIntercept:
 			var pay struct {
 				JobID int64 `json:"jobId"`
@@ -634,7 +646,7 @@ func (m *Module) Facts(ctx context.Context, _ string) ([]module.Fact, error) {
 	var out []module.Fact
 	for _, j := range js {
 		if j.State == "active" || j.State == "waiting" {
-			out = append(out, module.Fact{Source: Name, Text: line(j)})
+			out = append(out, module.Fact{Source: Name, Text: m.describe(j)})
 		}
 	}
 	return out, nil
@@ -686,14 +698,26 @@ func (m *Module) Handler() http.Handler {
 			"운영자에게 물어볼 것이나 알려야 할 다른 사실이 있을 때만 그것을 말하고, 없으면 '맡겼습니다.' 한마디로 끝내세요.", j.ID, j.Title), false), nil, nil
 	})
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "list_jobs",
-		Description: "맡긴 작업들의 현황: 상태, 한 줄 요약, 다음 확인 시각, 기다리는 카드. 읽기만 한다.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ ListInput) (*mcp.CallToolResult, any, error) {
+		Name: "list_jobs",
+		Description: "맡긴 작업들의 현황: 진행 중인 작업마다 상태, 한 줄 요약, 다음 확인 시각, 기다리는 카드. 끝난 작업은 개수와 최근 몇 개만(all=true 면 전부 짧게). " +
+			"작업 하나의 최근 기록까지 보려면 get_job. 읽기만 한다.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ListJobsInput) (*mcp.CallToolResult, any, error) {
 		js, err := m.store.List(ctx)
 		if err != nil {
 			return toolText(err.Error(), true), nil, nil
 		}
-		return toolText(renderList(js), false), nil, nil
+		return toolText(m.renderList(js, in.All), false), nil, nil
+	})
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "get_job",
+		Description: "작업 하나의 자세한 현황: 목표, 지시, 쓰는 사이트, 기다리는 카드, 최근 기록(진행·카드·답·보고). " +
+			"작업이 지금 무엇을 하고 있는지, 결제가 어디까지 갔는지 운영자에게 답하기 전에 본다. 읽기만 한다.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in GetJobInput) (*mcp.CallToolResult, any, error) {
+		d, err := m.store.Detail(ctx, in.ID)
+		if err != nil {
+			return toolText(err.Error(), true), nil, nil
+		}
+		return toolText(m.renderDetail(d), false), nil, nil
 	})
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "instruct_job",
@@ -708,15 +732,40 @@ func (m *Module) Handler() http.Handler {
 	return mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
 }
 
+// ListJobsInput: all lists the finished jobs too, one short line each.
+type ListJobsInput struct {
+	All bool `json:"all,omitempty" jsonschema:"끝난 작업까지 모두 볼지(짧게). 기본은 진행 중인 것만."`
+}
+
+type GetJobInput struct {
+	ID int64 `json:"id" jsonschema:"작업 id. list_jobs 로 확인한다."`
+}
+
+// "waiting" is waiting on a card - any card, a question as much as a
+// payment: "승인 대기" read as "the payment waits for approval" when the card
+// was "결제는 성공했는데 주문 반영이 안 보여요" (2026-10-30 01:12).
 var stateLabel = map[string]string{
-	"active": "진행 중", "waiting": "승인 대기", "paused": "멈춤",
+	"active": "진행 중", "waiting": "카드 대기", "paused": "멈춤",
 	"done": "끝남", "cancelled": "그만둠", "failed": "실패",
+}
+
+// summaryShown is how much of a job's one-line status a list shows: a run's
+// report can run long, and a list of every job came to 55,000 characters
+// (2026-10-29), too much for the conversation to read at once.
+const summaryShown = 160
+
+func clampRunes(s string, n int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if r := []rune(s); len(r) > n {
+		return string(r[:n]) + "…"
+	}
+	return s
 }
 
 func line(j Job) string {
 	s := fmt.Sprintf("[%d · %s] %s", j.ID, stateLabel[j.State], j.Title)
 	if j.Summary != "" {
-		s += " — " + j.Summary
+		s += " — " + clampRunes(j.Summary, summaryShown)
 	}
 	if len(j.BlockedSites) > 0 {
 		s += " (로그인 대기: " + strings.Join(j.BlockedSites, ", ") + ")"
@@ -726,13 +775,113 @@ func line(j Job) string {
 	return s
 }
 
-func renderList(js []Job) string {
+// describe is line with the card a waiting job waits on, by its title.
+func (m *Module) describe(j Job) string {
+	s := line(j)
+	if j.State == "waiting" && j.WaitingCard != "" && m.proposals != nil {
+		if p, ok := m.proposals.Get(j.WaitingCard); ok {
+			s += " · 기다리는 카드: '" + clampRunes(p.Card.Title, 60) + "'"
+		}
+	}
+	return s
+}
+
+func finished(j Job) bool {
+	return j.State == "done" || j.State == "cancelled" || j.State == "failed"
+}
+
+// renderList is the jobs under way in full and the finished ones counted,
+// with the latest few named - or, with all, every finished one in short.
+func (m *Module) renderList(js []Job, all bool) string {
 	if len(js) == 0 {
 		return "맡긴 작업이 없습니다."
 	}
 	var b strings.Builder
+	var over []Job
 	for _, j := range js {
-		b.WriteString("- " + line(j) + "\n")
+		if finished(j) {
+			over = append(over, j)
+			continue
+		}
+		b.WriteString("- " + m.describe(j) + "\n")
+	}
+	if b.Len() == 0 {
+		b.WriteString("진행 중인 작업이 없습니다.\n")
+	}
+	if len(over) == 0 {
+		return b.String()
+	}
+	sort.SliceStable(over, func(i, k int) bool { return lastTouched(over[i]).After(lastTouched(over[k])) })
+	if !all {
+		fmt.Fprintf(&b, "끝난 작업 %d개", len(over))
+		var recent []string
+		for _, j := range over[:min(3, len(over))] {
+			recent = append(recent, fmt.Sprintf("[%d] %s", j.ID, j.Title))
+		}
+		fmt.Fprintf(&b, "(최근: %s) - 모두 보려면 all=true, 하나를 자세히는 get_job.\n", strings.Join(recent, ", "))
+		return b.String()
+	}
+	b.WriteString("끝난 작업:\n")
+	for _, j := range over[:min(100, len(over))] {
+		fmt.Fprintf(&b, "- [%d · %s] %s\n", j.ID, stateLabel[j.State], j.Title)
+	}
+	return b.String()
+}
+
+func lastTouched(j Job) time.Time {
+	if j.LastRunAt != nil {
+		return *j.LastRunAt
+	}
+	return j.CreatedAt
+}
+
+// eventsShown is how many of a job's latest log lines get_job shows.
+const eventsShown = 15
+
+// renderDetail is one job as get_job tells it: what it is for, what it waits
+// on, and its latest log, newest last. What it remembers is named, not shown
+// (an order's phone number and address are in it).
+func (m *Module) renderDetail(d Detail) string {
+	j := d.Job
+	var b strings.Builder
+	b.WriteString(m.describe(j) + "\n")
+	if g := clampRunes(j.Goal, 300); g != "" {
+		b.WriteString("목표: " + g + "\n")
+	}
+	if in := clampRunes(j.Instructions, 400); in != "" {
+		b.WriteString("지시: " + in + "\n")
+	}
+	if len(j.Sites) > 0 {
+		b.WriteString("쓰는 사이트: " + strings.Join(j.Sites, ", ") + "\n")
+	}
+	if len(d.Memory) > 0 {
+		keys := make([]string, 0, len(d.Memory))
+		for k := range d.Memory {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		b.WriteString("기억(키만): " + strings.Join(keys, ", ") + "\n")
+	}
+	if len(d.Records) > 0 {
+		fmt.Fprintf(&b, "추적 중인 대상 %d개\n", len(d.Records))
+	}
+	ev := d.Events
+	sort.SliceStable(ev, func(i, k int) bool { return ev[i].At.Before(ev[k].At) })
+	var kept []Event
+	for _, e := range ev {
+		if e.Kind == "step" {
+			continue // a press, a look: the progress and the cards say what happened
+		}
+		kept = append(kept, e)
+	}
+	if len(kept) > eventsShown {
+		kept = kept[len(kept)-eventsShown:]
+	}
+	if len(kept) > 0 {
+		b.WriteString("최근 기록:\n")
+		for _, e := range kept {
+			fmt.Fprintf(&b, "- %s %s: %s\n", e.At.Local().Format("1/2 15:04"), e.Kind, clampRunes(e.Text, 200))
+		}
 	}
 	return b.String()
 }

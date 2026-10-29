@@ -76,9 +76,12 @@ _halted_until = 0.0
 TOOL = {
     "name": "browser_enter_payment_pin",
     "description": (
-        "결제 비밀번호 키패드(쿠팡 쿠페이, 네이버페이)가 화면에 떠 있을 때 비밀번호를 넣는다. "
-        "비밀번호는 이 도구가 갖고 있으니 묻거나 추측하지 말고 이 도구만 부른다. 인자는 없다. "
-        "쿠팡·네이버페이의 결제 화면에서만 동작한다. 넣은 뒤 browser_get_state 로 결제가 진행됐는지 확인한다. "
+        "결제 비밀번호 키패드(쿠팡 쿠페이, 네이버페이)가 화면에 떠 있을 때 비밀번호를 넣는다. 인자는 없다. "
+        "비밀번호는 운영자가 결제 비밀번호 저장 카드로 보관함에 넣었거나 맥미니 설정에 있을 때만 넣을 수 있고, 당신에게는 보이지 않는다 - "
+        "묻거나 추측하거나 키패드를 직접 누르지 말고 이 도구만 부른다. 저장돼 있지 않으면 넣지 않고 그렇다고 답한다 "
+        "(그때 작업은 request_payment_pin, 대화는 save_payment_pin 으로 저장 카드를 올린다). "
+        "쿠팡·네이버페이의 결제 화면(그 결제 호스트의 키패드)에서만 동작한다. 넣은 뒤에는 그 창의 다음 화면을 본다 - "
+        "카드사 창 안의 네이버페이는 인증 결과 화면의 확인을 눌러야 카드사 창으로 넘어간다. "
         "넣지 못했다고 하면 키패드를 직접 누르지 말고, 다시 부르지도 말고 알린다."
     ),
     "inputSchema": {"type": "object", "properties": {}},
@@ -552,8 +555,8 @@ async def enter(pin: str | None = None, port: int | None = None) -> str:
             site, keys, host = found
             code = pin if pin is not None else (os.environ.get(site["env"], "") or _vault_pin(site, host))
             if not re.fullmatch(r"[0-9]{6}", code or ""):
-                raise RuntimeError(f"{site['name']}가 저장되어 있지 않아 넣지 않았습니다. 키패드를 누르지 말고, "
-                                   "대화에서 결제 비밀번호 저장 카드(save_payment_pin)로 넣어 달라고 알리세요")
+                raise RuntimeError(f"{site['name']}가 저장되어 있지 않아 넣지 않았습니다. 키패드를 누르지 말고 저장 카드를 올리세요 - "
+                                   "작업은 request_payment_pin, 대화는 save_payment_pin(운영자가 카드의 비밀 칸에 넣습니다)")
             entered = 0
             try:
                 for ch in code:

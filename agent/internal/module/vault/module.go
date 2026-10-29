@@ -14,6 +14,14 @@
 // browser_enter_payment_pin reads it from vault-svc only for a keypad on that
 // payment's own host. It is not a login: naver.com's login and 네이버페이's
 // password are two things, so it has a place of its own.
+//
+// The orderer and shipping address (save_shipping_address) are typed into
+// the card the same way - not into the conversation, and not kept in the
+// card's record - but they are no secret from the model: an order sheet is
+// typed from them, so get_shipping_address reads them back whole. Saved once,
+// an order no longer asks for them (2026-10-29~30: six cards asked, and the
+// answers that came back put a wrong phone number and a wrong building
+// number on four order sheets).
 package vault
 
 import (
@@ -38,7 +46,67 @@ const (
 	KindForget    = "vault.forget_login"
 	KindSavePin   = "vault.save_payment_pin"
 	KindForgetPin = "vault.forget_payment_pin"
+	// KindSaveShipping saves the orderer and shipping address; a card whose
+	// fields go straight to vault-svc.
+	KindSaveShipping   = "vault.save_shipping_address"
+	KindForgetShipping = "vault.forget_shipping_address"
 )
+
+// DefaultShipping is the shipping profile an order uses.
+const DefaultShipping = "기본"
+
+// ShippingInput names a shipping profile.
+type ShippingInput struct {
+	Name string `json:"name,omitempty" jsonschema:"배송지 이름. 비우면 '기본'"`
+}
+
+func shippingName(raw json.RawMessage) string {
+	var in ShippingInput
+	_ = json.Unmarshal(raw, &in)
+	if n := strings.TrimSpace(in.Name); n != "" {
+		return n
+	}
+	return DefaultShipping
+}
+
+// Shipping is the saved shipping profile an order uses ('기본', or the only
+// one), if there is one.
+func (m *Module) Shipping(ctx context.Context) (Shipping, bool, error) {
+	all, err := m.client.Profiles(ctx)
+	if err != nil {
+		return Shipping{}, false, err
+	}
+	for _, s := range all {
+		if s.Name == DefaultShipping {
+			return s, true, nil
+		}
+	}
+	if len(all) == 1 {
+		return all[0], true, nil
+	}
+	return Shipping{}, false, nil
+}
+
+// ShippingText is a profile as an order sheet is filled from it.
+func ShippingText(s Shipping) string {
+	email := s.Email
+	if email == "" {
+		email = "(없음 - 이메일 칸이 꼭 필요하면 묻는다)"
+	}
+	return fmt.Sprintf("- 주문자·받는 분: %s\n- 연락처: %s\n- 이메일: %s\n- 우편번호: %s\n- 주소: %s\n- 상세주소: %s",
+		s.Recipient, Phone(s.Phone), email, s.Zip, s.Address, s.Detail)
+}
+
+// Phone writes a mobile number as forms want it: 010-1234-5678.
+func Phone(digits string) string {
+	switch len(digits) {
+	case 11:
+		return digits[:3] + "-" + digits[3:7] + "-" + digits[7:]
+	case 10:
+		return digits[:3] + "-" + digits[3:6] + "-" + digits[6:]
+	}
+	return digits
+}
 
 // PinInput names whose payment password it is.
 type PinInput struct {
@@ -75,8 +143,9 @@ func (m *Module) pinSaved(ctx context.Context, site string) (Pin, bool) {
 }
 
 // Tools is what the conversation may call without a card: list_logins names
-// what is saved and never hands a secret out.
-var Tools = []string{"mcp__" + ServerName + "__list_logins"}
+// what is saved and never hands a secret out; get_shipping_address reads the
+// address an order sheet is filled with.
+var Tools = []string{"mcp__" + ServerName + "__list_logins", "mcp__" + ServerName + "__get_shipping_address"}
 
 type Module struct {
 	client *Client
@@ -101,6 +170,8 @@ func (m *Module) Specs() []action.Spec {
 		{Kind: KindForget, Summary: "저장된 로그인 정보를 지운다.", Reversible: false},
 		{Kind: KindSavePin, Summary: "결제 비밀번호(네이버페이·쿠페이 숫자 6자리)를 운영자에게 카드로 받아 보관함에 저장한다.", Reversible: true},
 		{Kind: KindForgetPin, Summary: "저장된 결제 비밀번호를 지운다.", Reversible: false},
+		{Kind: KindSaveShipping, Summary: "주문자·배송지(받는 분·연락처·이메일·주소)를 운영자에게 카드로 받아 보관함에 저장한다.", Reversible: true},
+		{Kind: KindForgetShipping, Summary: "저장된 배송지를 지운다.", Reversible: false},
 	}
 }
 
@@ -138,6 +209,8 @@ func (m *Module) Preview(ctx context.Context, a action.Action) (action.Card, err
 	switch a.Kind {
 	case KindSavePin, KindForgetPin:
 		return m.previewPin(ctx, a)
+	case KindSaveShipping, KindForgetShipping:
+		return m.previewShipping(ctx, a)
 	}
 	in, domain, err := parse(a)
 	if err != nil {
@@ -197,10 +270,58 @@ func (m *Module) previewPin(ctx context.Context, a action.Action) (action.Card, 
 	}, nil
 }
 
+// previewShipping is the shipping profile's card: six fields typed by the
+// operator, which go to vault-svc at approval and are not kept on the card.
+func (m *Module) previewShipping(ctx context.Context, a action.Action) (action.Card, error) {
+	name := shippingName(a.Input)
+	var old *Shipping
+	if all, err := m.client.Profiles(ctx); err == nil {
+		for _, s := range all {
+			if s.Name == name {
+				old = &s
+			}
+		}
+	}
+	if a.Kind == KindForgetShipping {
+		return action.Card{Title: "배송지 지우기: " + name, Body: "저장된 배송지(" + name + ")를 지웁니다.",
+			Consequence: "지우면 주문할 때 배송지를 다시 묻습니다."}, nil
+	}
+	body := "주문서의 주문자·받는 분·연락처·이메일·배송지 칸에 이 정보를 그대로 넣습니다. 한 번 저장하면 주문할 때마다 묻지 않습니다.\n" +
+		"주소는 도로명과 건물번호까지(예: 서울 중구 세종대로 110) - 주문서의 주소 검색이 이것으로 찾습니다.\n" +
+		"보관함에 암호화해 두고, 자비스가 주문서를 채울 때 읽습니다."
+	if old != nil {
+		body += "\n지금 저장된 배송지(" + old.Address + " " + old.Detail + ")를 새로 바꿉니다."
+	}
+	return action.Card{
+		Title:       "배송지 저장: " + name,
+		Body:        body,
+		Consequence: "승인하면 작업과 대화가 주문서를 이 정보로 채웁니다.",
+		Fields: []action.Field{
+			{Key: "recipient", Label: "받는 분(주문자) 이름", Kind: "text", Required: true, Private: true},
+			{Key: "phone", Label: "연락처(휴대폰)", Kind: "text", Required: true, Private: true, Hint: "예: 010-1234-5678"},
+			{Key: "email", Label: "이메일(선택)", Kind: "text", Private: true},
+			{Key: "zip", Label: "우편번호(5자리)", Kind: "text", Required: true, Private: true},
+			{Key: "address", Label: "주소(도로명 + 건물번호)", Kind: "text", Required: true, Private: true, Hint: "예: 서울 중구 세종대로 110"},
+			{Key: "detail", Label: "상세주소(동·호수)", Kind: "text", Required: true, Private: true, Hint: "예: 101동 1001호"},
+		},
+	}, nil
+}
+
 // AcceptSecrets takes the card's Private fields at approval and saves them.
 // It is the only place a password passes through in this process, and it
 // keeps nothing.
 func (m *Module) AcceptSecrets(ctx context.Context, a action.Action, secrets map[string]string) error {
+	if a.Kind == KindSaveShipping {
+		s := Shipping{
+			Recipient: secrets["recipient"], Phone: secrets["phone"], Email: secrets["email"],
+			Zip: secrets["zip"], Address: secrets["address"], Detail: secrets["detail"],
+		}
+		if err := m.client.SaveProfile(ctx, shippingName(a.Input), s); err != nil {
+			return fmt.Errorf("저장하지 못했습니다: %w", err)
+		}
+		m.log.Info("배송지를 보관함에 넣었습니다", "name", shippingName(a.Input))
+		return nil
+	}
 	if a.Kind == KindSavePin {
 		site, name, err := payOf(a.Input)
 		if err != nil {
@@ -236,6 +357,24 @@ func (m *Module) AcceptSecrets(ctx context.Context, a action.Action, secrets map
 
 func (m *Module) Execute(ctx context.Context, a action.Action) (action.Result, error) {
 	switch a.Kind {
+	case KindSaveShipping:
+		name := shippingName(a.Input)
+		all, err := m.client.Profiles(ctx)
+		if err != nil {
+			return action.Result{}, err
+		}
+		for _, s := range all {
+			if s.Name == name {
+				return action.Result{Note: fmt.Sprintf("배송지(%s)를 저장했습니다: %s %s. 주문서는 get_shipping_address 의 값을 그대로 넣습니다.", name, s.Address, s.Detail)}, nil
+			}
+		}
+		return action.Result{}, fmt.Errorf("배송지(%s)가 보관함에 없습니다", name)
+	case KindForgetShipping:
+		name := shippingName(a.Input)
+		if err := m.client.ForgetProfile(ctx, name); err != nil {
+			return action.Result{}, err
+		}
+		return action.Result{Note: "배송지(" + name + ")를 지웠습니다."}, nil
 	case KindSavePin:
 		site, name, err := payOf(a.Input)
 		if err != nil {
@@ -290,8 +429,9 @@ func (m *Module) Handler() http.Handler {
 			return text(err.Error(), true), nil, nil
 		}
 		pins, _ := m.client.Pins(ctx)
-		if len(logins) == 0 && len(pins) == 0 {
-			return text("저장된 로그인 정보도 결제 비밀번호도 없습니다.", false), nil, nil
+		profiles, _ := m.client.Profiles(ctx)
+		if len(logins) == 0 && len(pins) == 0 && len(profiles) == 0 {
+			return text("저장된 로그인 정보도 결제 비밀번호도 배송지도 없습니다.", false), nil, nil
 		}
 		var b strings.Builder
 		for _, l := range logins {
@@ -300,8 +440,46 @@ func (m *Module) Handler() http.Handler {
 		for _, p := range pins {
 			fmt.Fprintf(&b, "- 결제 비밀번호 %s (%s): 저장됨, %s\n", p.Name, p.Site, lastUsed(p.LastUsedAt))
 		}
+		for _, s := range profiles {
+			fmt.Fprintf(&b, "- 배송지 %s: %s %s (값은 get_shipping_address)\n", s.Name, s.Address, s.Detail)
+		}
 		return text(b.String(), false), nil, nil
 	})
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "get_shipping_address",
+		Description: "주문서를 채울 주문자·받는 분·연락처·이메일·배송지를 보관함에서 읽는다. 주문서에는 이 값을 그대로 넣는다(주소 검색은 도로명+건물번호로 하고 우편번호가 같은 결과를 고른다). " +
+			"저장된 배송지가 없으면 save_shipping_address 로 카드를 올린다 - 대화로 주소를 묻지 않는다.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
+		s, ok, err := m.Shipping(ctx)
+		if err != nil {
+			return text(err.Error(), true), nil, nil
+		}
+		if !ok {
+			return text("저장된 배송지가 없습니다. save_shipping_address 로 배송지 저장 카드를 올리세요(운영자가 카드 칸에 넣습니다).", false), nil, nil
+		}
+		return text("저장된 배송지("+s.Name+"):\n"+ShippingText(s), false), nil, nil
+	})
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "save_shipping_address",
+		Description: "주문자·배송지(받는 분·연락처·이메일·우편번호·주소·상세주소)를 저장하도록 운영자에게 카드를 올린다. 운영자가 카드 칸에 넣는다 - 대화로 묻지 않는다. " +
+			"저장된 배송지가 없거나 운영자가 배송지를 바꾸겠다고 하면 부른다.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ShippingInput) (*mcp.CallToolResult, any, error) {
+		raw, _ := json.Marshal(in)
+		res, err := m.Execute(ctx, action.Action{Kind: KindSaveShipping, Input: raw})
+		if err != nil {
+			return text(err.Error(), true), nil, nil
+		}
+		return text(res.Note, false), nil, nil
+	})
+	mcp.AddTool(server, &mcp.Tool{Name: "forget_shipping_address", Description: "저장된 배송지를 지운다."},
+		func(ctx context.Context, _ *mcp.CallToolRequest, in ShippingInput) (*mcp.CallToolResult, any, error) {
+			raw, _ := json.Marshal(in)
+			res, err := m.Execute(ctx, action.Action{Kind: KindForgetShipping, Input: raw})
+			if err != nil {
+				return text(err.Error(), true), nil, nil
+			}
+			return text(res.Note, false), nil, nil
+		})
 	addWrite(server, m, "save_login", KindSave, "사이트의 로그인 정보를 저장하도록 운영자에게 카드를 올린다. 운영자가 카드의 칸에 아이디·비밀번호를 넣는다 - "+
 		"대화로 비밀번호를 묻거나 받지 않는다. 저장되면 그 사이트 로그인 화면에서 browser_fill_login 이 넣는다.")
 	addWrite(server, m, "forget_login", KindForget, "저장된 로그인 정보를 지운다.")

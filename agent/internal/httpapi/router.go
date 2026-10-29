@@ -56,6 +56,13 @@ type Server struct {
 	approvalWait time.Duration
 	// payments are the hosts a person approved a payment on, for a while.
 	payments paymentGrants
+	// holds are the stopped payment requests held while their card waits,
+	// for holdDur at most (paymentHold; a test sets it to none).
+	holds   paymentHolds
+	holdDur time.Duration
+	// savedAddress is the shipping address the vault keeps, for the payment
+	// card; nil shows none.
+	savedAddress func(ctx context.Context) (SavedAddress, bool)
 	// followUp starts the turn that tells the assistant how a payment card
 	// was decided.
 	followUp interface{ Enqueue(prompt string) }
@@ -140,6 +147,9 @@ type Deps struct {
 	// Jobs, when set, lets a background job's run that reaches a payment
 	// raise a card for that job and pick it up once decided.
 	Jobs JobPayments
+	// SavedAddress, when set, is the shipping address the vault keeps: the
+	// payment card shows it beside the one the job reported.
+	SavedAddress func(ctx context.Context) (SavedAddress, bool)
 	// WakeJobs, when set, is what jobs-svc's knock calls: a job changed on
 	// the 작업 tab (instructed, run now, resumed) is looked at at once.
 	WakeJobs func()
@@ -192,6 +202,8 @@ func New(d Deps) *Server {
 		reminders:       d.Reminders,
 		followUp:        d.FollowUp,
 		jobs:            d.Jobs,
+		savedAddress:    d.SavedAddress,
+		holdDur:         paymentHold,
 		wakeJobs:        d.WakeJobs,
 		checklists:      d.Checklists,
 	}

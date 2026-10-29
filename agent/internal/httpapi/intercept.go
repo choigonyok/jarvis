@@ -1,10 +1,12 @@
 package httpapi
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,12 +19,16 @@ import (
 // Payment is a request the browser container stopped on its way out, because
 // it was headed for a payment provider.
 //
-// Nothing waits here for a person. Holding the request until a decision held
-// the browser, and the turn driving it, for as long as the card sat unread
-// (up to 40 minutes). Instead the request is refused at once with a card
-// raised, as the CLI's permission gate does: approving it lets that one
-// payment through (paymentGrants) and tells the payer to take the step
-// again; rejecting it tells the payer not to.
+// A person is waited for only a little. Holding the request until a decision
+// held the browser, and the turn driving it, for as long as the card sat
+// unread (up to 40 minutes); refusing it at once sent the payer back over
+// the whole order sheet after every approval - a guest order sheet typed
+// again from the top, which is where a wrong phone number and a wrong
+// building number got in (2026-10-30). So the request is held for
+// paymentHold while its card waits: approved in that time, it goes on as it
+// was; otherwise it is refused, and approving later lets that one payment
+// through (paymentGrants) and tells the payer to take the step again.
+// Rejecting it tells the payer not to.
 //
 // This is the only place a payment is let through. The browser's guard
 // keeps no approval of its own: it asks here for every request it stops.
@@ -49,6 +55,11 @@ type Payment struct {
 	// decided on.
 	Amount string `json:"amount,omitempty"`
 	Item   string `json:"item,omitempty"`
+	// FromWindow is the guard's word that the request comes from a page a
+	// payment window opened (the 네이버페이 popup of a card company's window):
+	// what an approved window lets 네이버페이 through for. A 네이버페이 payment
+	// of a tab of its own is its own payment, with its own card.
+	FromWindow bool `json:"fromWindow,omitempty"`
 	// JobID is the background job whose run reached the payment; zero is the
 	// conversation. Set here from the run holding the browser, never taken
 	// from the request.
@@ -80,10 +91,12 @@ type JobPayments interface {
 	// RunningJob is the job whose run holds the browser now, with its
 	// latest one-line status.
 	RunningJob() (id int64, title, summary string, ok bool)
-	// PaymentRaised tells the job a payment card is waiting for it.
-	PaymentRaised(job int64, card string)
-	// PaymentDecided hands the decision to the job and wakes it.
-	PaymentDecided(job int64, card string, approved bool, text string) error
+	// PaymentRaised tells the job a payment card is waiting for it, its
+	// request held until until.
+	PaymentRaised(job int64, card string, until time.Time)
+	// PaymentDecided hands the decision to the job and wakes it. passed: the
+	// held request went on with the approval, in the run still going.
+	PaymentDecided(job int64, card string, approved, passed bool, text string) error
 }
 
 func (s *Server) postIntercept(w http.ResponseWriter, r *http.Request) {
@@ -137,9 +150,15 @@ func (s *Server) postIntercept(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusOK, map[string]string{"decision": string(proposal.Approve)})
 			return
 		}
-		card := s.raisePayment(p)
-		s.jobs.PaymentRaised(p.JobID, card)
-		s.log.Info("작업의 결제 요청을 막고 카드를 올렸습니다", "job", p.JobID, "card", card, "host", host, "event", p.Event)
+		card := s.raisePayment(r.Context(), p)
+		until := time.Now().Add(s.holdDur)
+		s.jobs.PaymentRaised(p.JobID, card, until)
+		s.log.Info("작업의 결제 요청을 멈추고 카드를 올렸습니다", "job", p.JobID, "card", card, "host", host, "event", p.Event)
+		if s.holdFor(r.Context(), card, until) && s.payments.allow(p.grantSite(), p.JobID, p.Event, p.Amount) {
+			s.log.Info("기다리는 동안 승인돼 멈춘 결제 요청을 그대로 보냈습니다", "job", p.JobID, "card", card, "host", host)
+			writeJSON(w, http.StatusOK, map[string]string{"decision": string(proposal.Approve)})
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]string{"decision": string(proposal.Reject), "pending": card})
 		return
 	}
@@ -152,16 +171,100 @@ func (s *Server) postIntercept(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"decision": string(proposal.Approve)})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"decision": string(proposal.Reject), "pending": s.raisePayment(p)})
+	card := s.raisePayment(r.Context(), p)
+	if s.holdFor(r.Context(), card, time.Now().Add(s.holdDur)) && s.payments.allow(p.grantSite(), 0, p.Event, p.Amount) {
+		s.log.Info("기다리는 동안 승인돼 멈춘 결제 요청을 그대로 보냈습니다", "card", card, "host", host)
+		writeJSON(w, http.StatusOK, map[string]string{"decision": string(proposal.Approve)})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"decision": string(proposal.Reject), "pending": card})
 }
 
 // insideWindow is a 네이버페이 request of a payer whose approved payment
-// window is open: the easy payment picked inside the window, which its card
-// already covers. Only while that window is open - not before the payer is
-// back at it, nor after its time - so an approval at a PG does not open
-// 네이버페이 for anything else.
+// window is open, from a page that window opened: the easy payment picked
+// inside the window, which its card already covers. Only while that window
+// is open - not before the payer is back at it, nor after its time - and
+// only from the window's own popup, so an approval at a PG does not open
+// 네이버페이 for anything else - a 네이버페이 order in a tab of its own is
+// another payment, even within the ten minutes.
 func (s *Server) insideWindow(p Payment) bool {
-	return !p.Window && siteOf(p.Host) == naverPaySite && s.payments.isOpen(windowSite, p.JobID)
+	return !p.Window && p.FromWindow && siteOf(p.Host) == naverPaySite && s.payments.isOpen(windowSite, p.JobID)
+}
+
+// paymentHold is how long a stopped payment request waits for its card
+// before it is refused: long enough for an operator who has the phone in
+// hand, short enough that a page and a run are not left hanging. The guard
+// waits for the answer a little longer than this (JARVIS_DECISION_TIMEOUT).
+const paymentHold = 2 * time.Minute
+
+// paymentHolds are the stopped requests held while their card waits, by
+// card: one payment can stop more than one request (two PG hosts).
+type paymentHolds struct {
+	mu    sync.Mutex
+	cards map[string]*held
+}
+
+type held struct {
+	done     chan struct{}
+	waiting  int
+	released bool
+	passes   bool
+}
+
+func (h *paymentHolds) join(card string) *held {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.cards == nil {
+		h.cards = map[string]*held{}
+	}
+	w := h.cards[card]
+	if w == nil {
+		w = &held{done: make(chan struct{})}
+		h.cards[card] = w
+	}
+	w.waiting++
+	return w
+}
+
+// leave is a held request done waiting, and whether it goes on: it does if
+// the card was decided while it waited and the decision lets it.
+func (h *paymentHolds) leave(card string, w *held) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	w.waiting--
+	if w.waiting <= 0 && h.cards[card] == w {
+		delete(h.cards, card)
+	}
+	return w.released && w.passes
+}
+
+// release hands a card's decision to the requests held on it, and says
+// whether there were any: if not, the payer takes the step again.
+func (h *paymentHolds) release(card string, passes bool) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	w := h.cards[card]
+	if w == nil || w.released {
+		return false
+	}
+	w.released, w.passes = true, passes
+	delete(h.cards, card)
+	close(w.done)
+	return true
+}
+
+// holdFor holds a stopped request until its card is decided or until, and
+// says whether it goes on.
+func (s *Server) holdFor(ctx context.Context, card string, until time.Time) bool {
+	w := s.holds.join(card)
+	t := time.NewTimer(time.Until(until))
+	defer t.Stop()
+	select {
+	case <-w.done:
+	case <-t.C:
+	case <-ctx.Done():
+	}
+	return s.holds.leave(card, w)
 }
 
 // raisePayment answers a stopped payment with a card, and says which: the
@@ -169,18 +272,26 @@ func (s *Server) insideWindow(p Payment) bool {
 // job) - a flow sends several requests, and the page retrying is the same
 // question - or a new one. Another payer's card is not this one's: its
 // decision goes to whoever raised it.
-func (s *Server) raisePayment(p Payment) string {
+func (s *Server) raisePayment(ctx context.Context, p Payment) string {
 	if waiting, ok := s.proposals.FindPendingWhere(func(q proposal.Proposal) bool {
 		w := paymentOf(q.Action.Input)
 		return q.Origin == proposal.OriginIntercept && w.grantSite() == p.grantSite() && w.JobID == p.JobID
 	}); ok {
 		return waiting.ID
 	}
+	var addr *SavedAddress
+	if s.savedAddress != nil {
+		actx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		if a, ok := s.savedAddress(actx); ok {
+			addr = &a
+		}
+		cancel()
+	}
 	raw, _ := json.Marshal(p)
 	opened, _ := s.proposals.Open(proposal.Proposal{
 		Origin: proposal.OriginIntercept,
 		Action: action.Action{Kind: "browser.payment", Input: raw},
-		Card:   paymentCard(p),
+		Card:   paymentCard(p, addr),
 	})
 	// In the conversation either way - a job's too, which used to float below
 	// the thread only while it waited and was gone the moment it was
@@ -316,11 +427,21 @@ func (s *Server) resolvePayment(p proposal.Proposal, d proposal.Decision) {
 		s.resolveJobPayment(p, pay, d)
 		return
 	}
+	if d == proposal.Approve {
+		// The grant first: a held request that goes on asks it next.
+		s.payments.grant(pay.grantSite(), 0, pay.Amount)
+	}
+	passed := s.holds.release(p.ID, d == proposal.Approve) && d == proposal.Approve
 	if s.followUp == nil {
 		return
 	}
 	if d == proposal.Approve {
-		s.payments.grant(pay.grantSite(), 0, pay.Amount)
+		if passed {
+			s.proposals.Settle(p.ID, proposal.Executed, "승인했습니다. 멈춰 있던 결제 요청이 그대로 나갔습니다.")
+			s.followUp.Enqueue(fmt.Sprintf("[결제 승인됨] 운영자가 결제 카드 %s(%s)를 승인했고, 멈춰 있던 결제 요청이 승인과 함께 그대로 나갔습니다.\n"+
+				"결제하기를 다시 누르지 말고(결제창을 다시 열지도 말고) 브라우저 화면을 보며 이어 가세요. %s", p.ID, pay.Host, approvedScope(pay)))
+			return
+		}
 		s.proposals.Settle(p.ID, proposal.Executed, "승인했습니다. 결제를 다시 진행합니다.")
 		step := "같은 결제 버튼을 다시 누르는 것"
 		if pay.Window {
@@ -345,9 +466,21 @@ func (s *Server) resolvePayment(p proposal.Proposal, d proposal.Decision) {
 // not the conversation.
 func (s *Server) resolveJobPayment(p proposal.Proposal, pay Payment, d proposal.Decision) {
 	approved := d == proposal.Approve
-	var text string
 	if approved {
+		// The grant first: a held request that goes on asks it next.
 		s.payments.grant(pay.grantSite(), pay.JobID, pay.Amount)
+	}
+	// A held request goes on only while the job's run still holds the
+	// browser: the window it opens is that run's to carry on, and with no run
+	// its next requests would be the conversation's.
+	passes := approved && s.jobs != nil && s.jobHolds(pay.JobID)
+	passed := s.holds.release(p.ID, passes) && passes
+	var text string
+	switch {
+	case passed:
+		text = fmt.Sprintf("[결제 승인됨] 운영자가 결제 카드 %s(%s)를 승인했고, 멈춰 있던 결제 요청이 승인과 함께 그대로 나갔습니다.\n"+
+			"결제하기를 다시 누르지 말고(결제창을 다시 열지도 말고) 화면을 보며 이어 가세요. %s", p.ID, pay.Host, approvedScope(pay))
+	case approved:
 		step := "결제하기를 한 번 누르면 이번에는 통과합니다"
 		if pay.Window {
 			step = "주문서에서 결제하기를 다시 누르면 이번에는 결제창이 열립니다"
@@ -355,7 +488,7 @@ func (s *Server) resolveJobPayment(p proposal.Proposal, pay Payment, d proposal.
 		text = fmt.Sprintf("[결제 승인됨] 운영자가 결제 카드 %s(%s)를 승인했습니다. 막혔던 결제 요청은 아직 보내지지 않았습니다.\n"+
 			"주문 내역에 이 주문이 아직 없는지 먼저 확인한 뒤, 같은 결제 단계를 다시 진행하세요(%s). %s",
 			p.ID, pay.Host, step, approvedScope(pay))
-	} else {
+	default:
 		text = fmt.Sprintf("[결제 반려됨] 운영자가 결제 카드 %s(%s)를 반려했습니다.", p.ID, pay.Host)
 		if p.Reason != "" {
 			text += "\n반려 이유: " + p.Reason
@@ -365,7 +498,7 @@ func (s *Server) resolveJobPayment(p proposal.Proposal, pay Payment, d proposal.
 	if s.jobs == nil {
 		return
 	}
-	err := s.jobs.PaymentDecided(pay.JobID, p.ID, approved, text)
+	err := s.jobs.PaymentDecided(pay.JobID, p.ID, approved, passed, text)
 	if err != nil {
 		// The card keeps the decision; the jobs' sweep hands it on.
 		s.log.Warn("결제 카드 결정을 작업에 전하지 못했습니다", "job", pay.JobID, "card", p.ID, "err", err)
@@ -374,10 +507,19 @@ func (s *Server) resolveJobPayment(p proposal.Proposal, pay Payment, d proposal.
 		return
 	}
 	note := fmt.Sprintf("승인했습니다. 작업이 이 결제 한 건을 이어서 합니다(다시 진행한 때부터 %d분).", int(paymentWindow.Minutes()))
+	if passed {
+		note = "승인했습니다. 멈춰 있던 결제 요청이 그대로 나갔고, 작업이 이어서 합니다."
+	}
 	if err != nil {
 		note = "승인했지만 작업을 깨우지 못했습니다: " + err.Error()
 	}
 	s.proposals.Settle(p.ID, proposal.Executed, note)
+}
+
+// jobHolds is whether job's run holds the browser now.
+func (s *Server) jobHolds(job int64) bool {
+	id, _, _, ok := s.jobs.RunningJob()
+	return ok && id == job
 }
 
 // approvedScope is what an approval lets through, told to the payer the
@@ -400,11 +542,51 @@ func approvedScope(p Payment) string {
 		"결제가 끝나면 무엇을 얼마에 결제했는지 짧게 알리세요.", siteOf(p.Host), int(paymentWindow.Minutes()))
 }
 
+// SavedAddress is the shipping address the vault keeps, as a payment card
+// shows it.
+type SavedAddress struct {
+	Recipient string
+	Address   string
+	Detail    string
+}
+
+// trailingParens is what a person may add after a road address's building
+// number: (태평로1가).
+var trailingParens = regexp.MustCompile(`\s*\([^()]*\)\s*$`)
+
+// roadKey is a road address's road and building number with no space -
+// "세종대로110" - the part an order sheet's address search goes by, and
+// the part a wrong one differs in (2026-10-30: a building number one digit short).
+func roadKey(address string) string {
+	f := strings.Fields(trailingParens.ReplaceAllString(address, ""))
+	if len(f) < 2 {
+		return strings.Join(f, "")
+	}
+	return f[len(f)-2] + f[len(f)-1]
+}
+
+// addressLines is what a payment card says of where the order goes: the
+// saved address, and a warning first when the job's report names another.
+func addressLines(p Payment, addr *SavedAddress) (warn, saved string) {
+	if addr == nil || addr.Address == "" {
+		return "", ""
+	}
+	saved = "저장된 배송지: " + strings.TrimSpace(addr.Address+" "+addr.Detail)
+	if addr.Recipient != "" {
+		saved += " (" + addr.Recipient + ")"
+	}
+	summary := strings.Join(strings.Fields(p.JobSummary), "")
+	if key := roadKey(addr.Address); key != "" && strings.Contains(summary, "배송지") && !strings.Contains(summary, key) {
+		warn = "⚠ 작업이 남긴 배송지가 저장된 배송지와 다릅니다 - 승인하기 전에 주문서의 주소를 확인하세요."
+	}
+	return warn, saved
+}
+
 // paymentCard says what is being asked. The login host is on the ask list
 // because a session there is what lets a payment go through - but opening
 // its sign-in page charges nothing, and a card that says "결제가 청구됩니다"
 // for it teaches a person that the card's words are not to be believed.
-func paymentCard(p Payment) action.Card {
+func paymentCard(p Payment, addr *SavedAddress) action.Card {
 	// The host is the part a person can actually judge; the path is there
 	// for the case where two flows share a provider.
 	where := p.Host
@@ -415,6 +597,10 @@ func paymentCard(p Payment) action.Card {
 	if order := windowOrder(p); order != "" {
 		body = order + "\n" + body
 	}
+	warn, saved := addressLines(p, addr)
+	if saved != "" {
+		body = saved + "\n" + body
+	}
 	if p.JobID != 0 {
 		// What is being bought is the job's to say: the request carries no
 		// amount (but a payment window's), and the job's last report is what
@@ -424,6 +610,9 @@ func paymentCard(p Payment) action.Card {
 			job += "\n작업이 남긴 현황: " + s
 		}
 		body = job + "\n\n" + body
+	}
+	if warn != "" {
+		body = warn + "\n\n" + body
 	}
 	if p.Window {
 		consequence := fmt.Sprintf("결제가 청구됩니다 · 되돌릴 수 없습니다 · 승인하면 결제창을 다시 연 때부터 %d분 동안 결제 한 건%s이 진행됩니다(결제창 안에서는 네이버페이·신용카드)",

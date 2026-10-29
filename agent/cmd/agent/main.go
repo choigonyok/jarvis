@@ -154,6 +154,16 @@ func main() {
 			cfg.Allow(jobs.QualifiedToolName("list_jobs"))
 		}
 		modules.Add(jobsModule)
+		// A run that buys reads the saved shipping address and raises the
+		// vault's cards itself, and reads the card alerts to tell whether a
+		// payment went through.
+		if vaultModule != nil {
+			jobsModule.SetVault(vaultModule)
+		}
+		if !cfg.Guest && cfg.SpendingURL != "" {
+			jobsModule.SetCharges(chargeLog{store: spending.NewStore(cfg.SpendingURL, cfg.APIToken)})
+		}
+		cfg.Allow(jobs.QualifiedToolName("get_job"))
 		mcpMounts["/mcp/"+jobs.ServerName] = jobsModule.Handler()
 		// Background only: /mcp/job-run/<run id>, never in the chat's config.
 		mcpMounts["/mcp/job-run"] = jobsModule.RunHandler()
@@ -670,6 +680,7 @@ func main() {
 			Reminders:       reminderConsole,
 			FollowUp:        runner,
 			Jobs:            jobPayments,
+			SavedAddress:    savedAddress(vaultModule),
 			WakeJobs:        wakeJobs,
 			Checklists:      checklistConsole(checklistModule),
 			Log:             log,

@@ -187,3 +187,46 @@ func (s *Store) UsedPin(ctx context.Context, site string) error {
 	_, err := s.pool.Exec(ctx, `update vault_pins set last_used_at = now(), uses = uses + 1 where site = $1`, site)
 	return err
 }
+
+// Profile is one saved orderer and shipping address (받는 분·연락처·이메일·
+// 주소), sealed. Name is the profile's own ("기본"); the fields are inside
+// Sealed.
+type Profile struct {
+	Name      string
+	Nonce     []byte
+	Sealed    []byte
+	KeyID     string
+	UpdatedAt time.Time
+}
+
+func (s *Store) PutProfile(ctx context.Context, p Profile) error {
+	_, err := s.pool.Exec(ctx, `insert into vault_profiles (name, nonce, sealed, key_id)
+		values ($1, $2, $3, $4)
+		on conflict (name) do update set nonce = excluded.nonce, sealed = excluded.sealed,
+		  key_id = excluded.key_id, updated_at = now()`,
+		p.Name, p.Nonce, p.Sealed, p.KeyID)
+	return err
+}
+
+// Profiles is every saved profile, sealed, by name.
+func (s *Store) Profiles(ctx context.Context) ([]Profile, error) {
+	rows, err := s.pool.Query(ctx, `select name, nonce, sealed, key_id, updated_at from vault_profiles order by name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Profile{}
+	for rows.Next() {
+		var p Profile
+		if err := rows.Scan(&p.Name, &p.Nonce, &p.Sealed, &p.KeyID, &p.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) DeleteProfile(ctx context.Context, name string) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `delete from vault_profiles where name = $1`, name)
+	return tag.RowsAffected() > 0, err
+}
