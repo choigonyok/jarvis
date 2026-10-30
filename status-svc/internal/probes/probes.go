@@ -129,6 +129,7 @@ func All(cfg Config) []check.Probe {
 		e.delivery("output-calls", "승인된 쓰기 → 출구", []string{"svc.output", "svc.mind"}),
 		e.delivery("mind-results", "쓰기 결과 → mind", []string{"svc.mind"}),
 		e.delivery("agent", "효과 → 에이전트", []string{"agent", "svc.mind"}),
+		e.delivery("agent-chat", "대화 메시지 → 에이전트", []string{"agent"}),
 		// The guest's side: where the guest's phone is, what is said to the
 		// guest, and reminders in the guest's conversation.
 		e.delivery("mind-guest", "손님 기록 → mind", []string{"svc.mind"}),
@@ -136,6 +137,7 @@ func All(cfg Config) []check.Probe {
 		e.delivery("mind-relay-guest", "손님 기록 → 알림 문구 넘기기", []string{"svc.mind"}),
 		e.delivery("output-guest", "손님 효과 → 출구", []string{"svc.output", "svc.mind"}),
 		e.delivery("agent-guest", "손님 효과 → 손님 에이전트", []string{"agent-guest", "svc.mind"}),
+		e.delivery("agent-chat-guest", "손님 대화 메시지 → 손님 에이전트", []string{"agent-guest"}),
 		e.service("svc.output", "출구(알림)", cfg.NotifyURL, []string{"postgres"}),
 		e.service("svc.jobs", "작업", cfg.JobsURL, []string{"postgres", "svc.mind", "agent"}),
 		e.service("svc.photos", "사진 어댑터", cfg.PhotosURL, []string{"svc.immich"}),

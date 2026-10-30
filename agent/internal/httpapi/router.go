@@ -26,6 +26,7 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/uploads"
 	"github.com/choigonyok/jarvis/agent/internal/usage"
 	"github.com/choigonyok/jarvis/gocommon/health"
+	"github.com/choigonyok/jarvis/gocommon/queue"
 	"github.com/choigonyok/jarvis/gocommon/record"
 )
 
@@ -218,8 +219,9 @@ func (s *Server) Handler() http.Handler {
 	// rather than on the mux, so /healthz stays open for the healthcheck and
 	// /intercept and /mcp keep the separate secrets they already have.
 	mux.HandleFunc("GET /thread", s.guard(s.getThread))
-	mux.HandleFunc("POST /messages", s.guard(s.postMessage))
-	// Under /messages: the gateway passes the agent's routes by first segment.
+	// What was said comes from the queue (TakeMessage); what waits behind the
+	// running turn is the agent's own, under /messages: the gateway passes the
+	// agent's routes by first segment.
 	mux.HandleFunc("POST /messages/{id}/steer", s.guard(s.steerMessage))
 	mux.HandleFunc("POST /messages/{id}/drop", s.guard(s.dropMessage))
 	mux.HandleFunc("POST /uploads", s.guard(s.postUpload))
@@ -419,46 +421,41 @@ func (s *Server) dropMessage(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Text   string   `json:"text"`
-		Images []string `json:"images"`
-		// Ref names an earlier turn the operator swiped to quote.
-		Ref *struct {
-			ID string `json:"id"`
-		} `json:"ref"`
+// TakeMessage takes one thing said at the way in from the queue and starts its
+// turn, or puts it behind the running one. What cannot be taken is said on the
+// screen and not tried again; words that could not be read yet are.
+func (s *Server) TakeMessage(ctx context.Context, m queue.Message) error {
+	said, err := s.thread.Said(ctx, m.SourceKey)
+	if err != nil {
+		return err
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil {
-		writeErr(w, http.StatusBadRequest, "본문을 읽을 수 없습니다.")
-		return
+	if why := s.accept(said); why != "" {
+		s.bus.Publish(bus.Event{Type: "error", Message: why})
 	}
-	text := strings.TrimSpace(body.Text)
-	if text == "" && len(body.Images) == 0 {
-		writeErr(w, http.StatusBadRequest, "메시지가 비어 있습니다.")
-		return
+	return nil
+}
+
+// accept starts what was said, or says why it could not.
+func (s *Server) accept(said thread.Said) string {
+	text := strings.TrimSpace(said.Text)
+	if text == "" && len(said.Images) == 0 {
+		return "메시지가 비어 있습니다."
 	}
-	if len(body.Images) > 0 {
+	if len(said.Images) > 0 {
 		if s.uploads == nil {
-			writeErr(w, http.StatusBadRequest, "이 대화에서는 사진을 보낼 수 없습니다.")
-			return
+			return "이 대화에서는 사진을 보낼 수 없습니다."
 		}
-		if len(body.Images) > 12 {
-			writeErr(w, http.StatusBadRequest, "사진은 한 번에 12장까지입니다.")
-			return
-		}
-		for _, name := range body.Images {
+		for _, name := range said.Images {
 			if _, err := s.uploads.Path(name); err != nil {
-				writeErr(w, http.StatusBadRequest, "올린 사진을 찾을 수 없습니다. 다시 첨부해 주세요.")
-				return
+				return "올린 사진을 찾을 수 없습니다. 다시 첨부해 주세요."
 			}
 		}
 	}
 	var ref *thread.Ref
-	if body.Ref != nil && body.Ref.ID != "" && s.thread != nil {
-		quoted := s.thread.Find(body.Ref.ID)
+	if said.Ref != nil && said.Ref.ID != "" && s.thread != nil {
+		quoted := s.thread.Find(said.Ref.ID)
 		if quoted == nil {
-			writeErr(w, http.StatusBadRequest, "참조한 메시지를 찾을 수 없습니다.")
-			return
+			return "참조한 메시지를 찾을 수 없습니다."
 		}
 		ref = thread.RefTo(quoted)
 		// A checklist card (or a notice showing one) says which list it is,
@@ -482,25 +479,19 @@ func (s *Server) postMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	var err error
 	if q, ok := s.runner.(queuer); ok {
-		var queued bool
-		if queued, err = q.Submit(text, body.Images, ref); err == nil {
-			writeJSON(w, http.StatusAccepted, map[string]bool{"queued": queued})
-			return
-		}
+		_, err = q.Submit(text, said.Images, ref)
 	} else if rs, ok := s.runner.(refSender); ok && ref != nil {
-		err = rs.SendRef(text, body.Images, ref)
+		err = rs.SendRef(text, said.Images, ref)
 	} else {
-		err = s.runner.Send(text, body.Images)
+		err = s.runner.Send(text, said.Images)
+	}
+	if errors.Is(err, claudecode.ErrBusy) {
+		return err.Error()
 	}
 	if err != nil {
-		if errors.Is(err, claudecode.ErrBusy) {
-			writeErr(w, http.StatusConflict, err.Error())
-			return
-		}
-		writeErr(w, http.StatusInternalServerError, "요청을 시작하지 못했습니다.")
-		return
+		return "요청을 시작하지 못했습니다."
 	}
-	w.WriteHeader(http.StatusAccepted)
+	return ""
 }
 
 func (s *Server) getProposals(w http.ResponseWriter, r *http.Request) {

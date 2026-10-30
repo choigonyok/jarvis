@@ -441,6 +441,10 @@ const KindSpendingWrite = "spending.write"
 // KindJobsWrite is a change to a job, which mind keeps.
 const KindJobsWrite = "jobs.write"
 
+// KindMessage is what a person said in the conversation: the agent takes it
+// from the queue.
+const KindMessage = "chat.message"
+
 // KindManualEdit is what a person changed by hand on a screen.
 const KindManualEdit = "manual.edit"
 

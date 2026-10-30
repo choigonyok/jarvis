@@ -297,6 +297,22 @@ func (s *Store) AppendUserRef(text string, ref *Ref, images ...string) *Turn {
 }
 
 // Find is the turn with this id, from the stored transcript.
+// Said is what someone said at the way in.
+type Said struct {
+	Text   string   `json:"text"`
+	Images []string `json:"images"`
+	Ref    *struct {
+		ID string `json:"id"`
+	} `json:"ref"`
+}
+
+// Said reads what was said, by its record's key: the words are sealed in the
+// record, and the way in opens them for the one who said them.
+func (s *Store) Said(ctx context.Context, key string) (Said, error) {
+	var out Said
+	return out, s.do(ctx, http.MethodGet, "/chat/messages/"+url.PathEscape(key), nil, &out)
+}
+
 func (s *Store) Find(id string) *Turn {
 	turns, _ := s.Snapshot()
 	for _, t := range turns {

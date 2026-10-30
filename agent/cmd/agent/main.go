@@ -27,7 +27,6 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/claudecode"
 	"github.com/choigonyok/jarvis/agent/internal/config"
 	"github.com/choigonyok/jarvis/agent/internal/core/bus"
-	"github.com/choigonyok/jarvis/gocommon/checks"
 	"github.com/choigonyok/jarvis/agent/internal/core/module"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
 	"github.com/choigonyok/jarvis/agent/internal/httpapi"
@@ -53,8 +52,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/choigonyok/jarvis/agent/internal/mindcmd"
+	"github.com/choigonyok/jarvis/gocommon/checks"
 	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/gocommon/notify"
+	"github.com/choigonyok/jarvis/gocommon/queue"
 	"github.com/choigonyok/jarvis/gocommon/record"
 	"github.com/choigonyok/jarvis/gocommon/site"
 )
@@ -514,6 +515,7 @@ func main() {
 	}
 	entryChanged := func(change json.RawMessage) { events.Publish(bus.Event{Type: "calendar", Calendar: change}) }
 	var suggester *suggest.Engine
+	var queuePool *pgxpool.Pool
 	if cfg.QueueURL != "" && cfg.Guest {
 		suggester = suggest.New(proposals, suggest.Config{Guest: true, Notice: layNotice, Redraw: redrawList, Entry: entryChanged, WakeJobs: wakeJobs}, log)
 	}
@@ -548,6 +550,7 @@ func main() {
 		}
 		defer pool.Close()
 		go suggester.Consumer(pool).Run(enrichCtx)
+		queuePool = pool
 	}
 	// A card does not hold a turn open; its decision starts the next one.
 	gate.SetFollowUp(runner)
@@ -731,6 +734,14 @@ func main() {
 		Log:             log,
 	})
 	gate.SetRefuse(api.Refuse)
+	// What is said comes in at the way in and waits there for this agent.
+	if queuePool != nil {
+		talk := &queue.Consumer{Pool: queuePool, Topic: queue.Records, Name: "agent-chat", Kinds: []string{record.KindMessage}, Handle: api.TakeMessage, Log: log}
+		if cfg.Guest {
+			talk.Topic, talk.Name = queue.Guest, "agent-chat-guest"
+		}
+		go talk.Run(enrichCtx)
+	}
 	// A saved address is good until a move: mind knows of one, the vault
 	// holds the address and neither sees the other's half.
 	if vaultModule != nil && mindClient != nil {

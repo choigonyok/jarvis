@@ -288,7 +288,7 @@ export function useThread() {
   const send = useCallback(async (text: string, images?: string[], refId?: string) => {
     setError(null);
     try {
-      const res = await fetch(`${API}/messages`, {
+      const res = await fetch("/api/chat/messages", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({

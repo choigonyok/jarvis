@@ -5,6 +5,8 @@
 //	POST /records                      a record, from a process with no database
 //	POST /mind/{path}                  what a screen changes in mind: a record, and what came of it (also PUT, PATCH, DELETE)
 //	GET  /last                         when each source last had news, and the latest of each check (the status tab)
+//	POST /chat/messages                {text, images?, ref?} what a person said: a record, which the agent takes from the queue
+//	GET  /chat/messages/{key}          the words of one, for the agent that took it
 //	GET  /turns?thread=&since=&limit=&before=   the conversation: a thread, or a page of it
 //	POST /turns                        a turn said: its record, and the turn
 //	PUT  /turns/{id}                   a turn with an origin given its newest word
@@ -86,6 +88,8 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc(method+" /mind/{path...}", s.auth(true, s.command))
 	}
 	mux.HandleFunc("GET /last", s.auth(false, s.last))
+	mux.HandleFunc("POST /chat/messages", s.auth(true, s.postMessage))
+	mux.HandleFunc("GET /chat/messages/{key}", s.auth(true, s.getMessage))
 	mux.HandleFunc("GET /workout", s.auth(true, s.readWorkout))
 	mux.HandleFunc("POST /workout/changes", s.auth(true, s.changeWorkout))
 	mux.HandleFunc("GET /held", s.auth(false, s.held))

@@ -49,6 +49,7 @@ const GUEST_API = [
   "/api/mind/reminders",
   "/api/mind/checklists",
   "/api/calendar",
+  "/api/chat",
   "/api/workout",
   "/api/notify",
   "/api/tts",

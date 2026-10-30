@@ -8,6 +8,7 @@
 | `input.outbox` | 서비스가 INSERT 만 하는 받은편지함. 비우면서 봉투를 확인하고 기록+배달을 한 트랜잭션에 쓴다 |
 | `POST /records` | 데이터베이스가 없는 프로세스(손님 에이전트, 수집기)의 입구 |
 | `POST /mind/{경로}` (PUT·PATCH·DELETE) | 화면의 쓰기. 기록을 남기고 mind 의 결정적 레인이 한 결과를 읽어 답한다. mind 가 내려가 있으면 202 로 답하고 기록은 남는다 |
+| `POST /chat/messages` | 대화에서 한 말. 기록(`chat.message`, 글은 봉인)이 되고 에이전트가 큐에서 집는다. `GET /chat/messages/{키}` 로 글을 읽는다 |
 | `/last` | 소스별로 새 소식이 마지막으로 온 때와 점검(`check.result`)의 최신 값. 상태 탭이 읽는다 |
 | `/held` | 다섯 번 실패해 따로 둔 메시지 |
 | `/turns`, `/workout` | 대화와 운동의 투영 |

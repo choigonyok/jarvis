@@ -107,6 +107,14 @@ func (e *env) service(id, name, base string, deps []string, only ...string) chec
 func (e *env) loop(id, group, name, base, loop string, deps []string, rule, fix string) check.Probe {
 	p := e.service(id, name, base, deps, loop)
 	p.Group, p.Rule, p.Fix = group, rule, fix
+	run := p.Run
+	p.Run = func(ctx context.Context) check.Verdict {
+		v := run(ctx)
+		if v.State == check.OK {
+			v.Summary = "읽고 있어요."
+		}
+		return v
+	}
 	return p
 }
 

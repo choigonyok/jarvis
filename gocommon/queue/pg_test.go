@@ -572,13 +572,19 @@ func TestTheGuestsRoleSeesOnlyItsOwn(t *testing.T) {
 		t.Fatal("남의 이름으로 등록할 수 없어야 합니다")
 	}
 	for _, q := range []string{
-		`select count(*) from input.records`, `select count(*) from input.guest_records`, `select count(*) from input.deliveries`,
+		`select count(*) from input.records`, `select count(*) from input.deliveries`,
 		`select count(*) from input.outbox`, `select count(*) from mind.effects`, `select count(*) from mind.effect_deliveries`,
 		`select count(*) from mind_intents`, `select count(*) from output.notifications`,
 	} {
 		if err := guest.QueryRow(ctx, q).Scan(new(int)); err == nil {
 			t.Fatalf("%s 를 읽을 수 없어야 합니다", q)
 		}
+	}
+	// Of the guest's records only what was said, sealed: where the guest's phone
+	// is comes through mind or not at all.
+	var other int
+	if err := guest.QueryRow(ctx, `select count(*) from input.guest_records where kind <> 'chat.message'`).Scan(&other); err != nil || other != 0 {
+		t.Fatalf("손님 기록의 다른 종류가 보입니다: %d %v", other, err)
 	}
 	if _, err := guest.Exec(ctx, `insert into input.outbox (payload) values ('{}')`); err == nil {
 		t.Fatal("손님은 outbox 에 쓸 수 없습니다")

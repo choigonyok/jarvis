@@ -57,6 +57,7 @@
     "spending.*": {"lane": "relay"},
     "status.*": {"lane": "relay"},
     "check.result": {"lane": "relay"},
+    "chat.message": {"lane": "relay"},
     "suggestion.*": {"lane": "relay"}
   },
   "action": {

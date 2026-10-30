@@ -156,13 +156,14 @@ function jobsRoute(method: string, path: string): boolean {
 
 /**
  * What the screens may do at the way in: what the 운동 tab does - read the log,
- * and save what changed in it (sessions by id) - and what they change in mind,
- * which comes here as a record whatever mind is doing (mindRoute says which).
- * Records and the conversation are for the services.
+ * and save what changed in it (sessions by id) - what is said in the
+ * conversation, and what they change in mind, which comes here as a record
+ * whatever mind is doing (mindRoute says which). Reading records is for the
+ * services.
  */
 function inputRoute(method: string, path: string): boolean {
   if (path.startsWith("mind/")) return method !== "GET" && method !== "HEAD" && mindRoute(method, path.slice("mind/".length));
-  return (method === "GET" && path === "workout") || (method === "POST" && path === "workout/changes");
+  return (method === "GET" && path === "workout") || (method === "POST" && ["workout/changes", "chat/messages"].includes(path));
 }
 
 /**

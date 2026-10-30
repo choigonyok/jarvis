@@ -586,3 +586,59 @@ func TestTheLastOfEachSource(t *testing.T) {
 		t.Fatalf("손님 토큰으로: %d", code)
 	}
 }
+
+// What is said is a record before anything reads it, with its words sealed, and
+// the agent reads them back by the record's key - only the one who said it.
+func TestWhatIsSaidWaitsAtTheWayIn(t *testing.T) {
+	srv, owner := setup(t)
+	code, out := call(t, http.MethodPost, srv.URL+"/chat/messages", token, `{"text":"  비밀 이야기 ","images":["a.jpg"],"ref":{"id":"u-1-1"}}`)
+	if code != http.StatusAccepted {
+		t.Fatalf("%d %s", code, out)
+	}
+	var made struct{ Key string }
+	if err := json.Unmarshal(out, &made); err != nil || made.Key == "" {
+		t.Fatalf("%s %v", out, err)
+	}
+	var payload, subject, actor string
+	if err := owner.QueryRow(context.Background(), `select payload::text, subject, actor from input.records where kind = 'chat.message' and source_key = $1`, made.Key).Scan(&payload, &subject, &actor); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(payload, "비밀") || subject != "chat:" || actor != "operator" {
+		t.Fatalf("봉인: %s %s %s", payload, subject, actor)
+	}
+	code, out = call(t, http.MethodGet, srv.URL+"/chat/messages/"+made.Key, token, "")
+	if code != http.StatusOK {
+		t.Fatalf("%d %s", code, out)
+	}
+	var said struct {
+		Text   string
+		Images []string
+		Ref    struct{ ID string }
+	}
+	if err := json.Unmarshal(out, &said); err != nil {
+		t.Fatal(err)
+	}
+	if said.Text != "비밀 이야기" || len(said.Images) != 1 || said.Ref.ID != "u-1-1" {
+		t.Fatalf("%+v", said)
+	}
+	if code, _ := call(t, http.MethodGet, srv.URL+"/chat/messages/"+made.Key, guestToken, ""); code != http.StatusNotFound {
+		t.Fatalf("손님은 운영자의 말을 못 읽습니다: %d", code)
+	}
+
+	code, out = call(t, http.MethodPost, srv.URL+"/chat/messages", guestToken, `{"text":"손님 말"}`)
+	if code != http.StatusAccepted {
+		t.Fatalf("%d %s", code, out)
+	}
+	if err := json.Unmarshal(out, &made); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.QueryRow(context.Background(), `select subject, actor from input.guest_records where source_key = $1`, made.Key).Scan(&subject, &actor); err != nil {
+		t.Fatal(err)
+	}
+	if subject != "chat:guest" || actor != "guest" {
+		t.Fatalf("%s %s", subject, actor)
+	}
+	if code, _ := call(t, http.MethodPost, srv.URL+"/chat/messages", token, `{"text":"  "}`); code != http.StatusBadRequest {
+		t.Fatalf("빈 말: %d", code)
+	}
+}
