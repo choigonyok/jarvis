@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/jackc/pgx/v5"
@@ -336,6 +337,31 @@ func ledger(t *testing.T, st Store) {
 	facts, err := st.FactRows(ctx)
 	if err != nil || len(facts) != 2 || facts[0].To == nil || !facts[0].To.Equal(end) || facts[1].To != nil || !facts[1].Single {
 		t.Fatalf("사실: %+v %v", facts, err)
+	}
+
+	// The table the graph is made from: records and what was adopted stay
+	// through a rebuild of the checked rows, and come first, oldest kind first.
+	if err := st.PutFactRow(ctx, model.FactRow{ID: "record:a", Subject: "self", Predicate: "결제", Object: "m1", Text: "결제", From: at, P: 1,
+		Origin: model.FactRecord, Body: json.RawMessage(`{"id":"record:a"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.PutFactRow(ctx, model.FactRow{ID: "edge:z", Subject: "나", Predicate: "VISITED", Object: "강릉", Text: "옛 사실", From: at, To: &end, P: 1,
+		Origin: model.FactLegacy, Body: json.RawMessage(`{"id":"edge:z"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ReplaceFactRows(ctx, []model.FactRow{{ID: "f3", Subject: "self", Predicate: "LIKES", Object: "커피", From: at, P: 0.8,
+		Origin: model.FactChecked, Body: json.RawMessage(`{"id":"f3"}`)}, {ID: "f4", Subject: "self", Predicate: "LIKES", Object: "차", From: at, P: 0.8}}); err != nil {
+		t.Fatal(err)
+	}
+	index, err := st.IndexRows(ctx, 0, 10)
+	if err != nil || len(index) != 3 || index[0].ID != "edge:z" || index[1].ID != "record:a" || index[2].ID != "f3" || index[0].Origin != model.FactLegacy {
+		t.Fatalf("색인: %+v %v", index, err)
+	}
+	if page, err := st.IndexRows(ctx, 2, 10); err != nil || len(page) != 1 || page[0].ID != "f3" {
+		t.Fatalf("다음 쪽: %+v %v", page, err)
+	}
+	if facts, err := st.FactRows(ctx); err != nil || len(facts) != 2 {
+		t.Fatalf("확인한 사실만: %+v %v", facts, err)
 	}
 }
 

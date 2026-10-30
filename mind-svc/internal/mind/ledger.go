@@ -2,10 +2,14 @@ package mind
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/engine"
 	"github.com/choigonyok/jarvis/mind-svc/internal/ledger"
+	"github.com/choigonyok/jarvis/mind-svc/internal/memory"
+	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/slot"
 )
 
@@ -57,6 +61,72 @@ func (m *Mind) RebuildLedger(ctx context.Context) (outcomes, facts int, err erro
 func (m *Mind) rebuildLedger(ctx context.Context) error {
 	_, _, err := m.RebuildLedger(ctx)
 	return err
+}
+
+// adoptPage is how many edges are read from memory at a time.
+const adoptPage = 500
+
+// AdoptFacts copies into the facts table what memory's graph holds and the
+// table does not: what went in before the table was the source. Done once, and
+// safe to do again. After it the graph can be made from the table.
+func (m *Mind) AdoptFacts(ctx context.Context) (int, error) {
+	from, ok := m.Opts.Memory.(memory.Exporter)
+	if !ok {
+		return 0, errors.New("기억을 읽을 수 없습니다")
+	}
+	st := m.Opts.Store
+	all, err := st.Facts(ctx, ledgerLimit)
+	if err != nil {
+		return 0, err
+	}
+	known := map[string]bool{}
+	for _, f := range all {
+		if f.Memory != nil {
+			known[f.Memory.Edge] = true
+		}
+	}
+	after, n := "", 0
+	for {
+		edges, err := from.Export(ctx, after, adoptPage)
+		if err != nil {
+			return n, err
+		}
+		for _, e := range edges {
+			if known[e.ID] {
+				continue
+			}
+			if err := st.PutFactRow(ctx, legacyRow(e, m.Opts.Now())); err != nil {
+				return n, err
+			}
+			n++
+		}
+		if len(edges) < adoptPage {
+			return n, nil
+		}
+		after = edges[len(edges)-1].ID
+	}
+}
+
+// legacyRow is an edge as a row of the facts table.
+func legacyRow(e memory.Edge, now time.Time) model.FactRow {
+	row := model.FactRow{ID: "edge:" + e.ID, Subject: e.Source.Name, Predicate: e.Relation, Object: e.Target.Name, Text: e.Fact,
+		From: now, P: 1, Origin: model.FactLegacy}
+	if at, err := time.Parse(time.RFC3339, e.ValidAt); err == nil {
+		row.From = at
+	}
+	if at, err := time.Parse(time.RFC3339, e.InvalidAt); err == nil && at.After(row.From) {
+		row.To = &at
+	}
+	body, err := json.Marshal(struct {
+		memory.Edge
+		ID     string `json:"id"`
+		Origin string `json:"origin"`
+		EdgeID string `json:"edge"`
+	}{e, row.ID, model.FactLegacy, e.ID})
+	if err == nil {
+		row.Body = body
+	}
+	return row
 }
 
 // SlotReading is a slot as things stand: whether a value saved at saved still

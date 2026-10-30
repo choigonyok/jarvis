@@ -16,6 +16,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/interpret"
 	"github.com/choigonyok/jarvis/mind-svc/internal/ledger"
 	"github.com/choigonyok/jarvis/mind-svc/internal/llm"
+	"github.com/choigonyok/jarvis/mind-svc/internal/memory"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
 	"github.com/choigonyok/jarvis/mind-svc/internal/slot"
@@ -351,5 +352,61 @@ func TestNotBoughtAgainIsNotOffered(t *testing.T) {
 	all, _ := st.Intents(ctx, 10)
 	if len(all) != 1 || all[0].Kind != "info" || !strings.Contains(all[0].Body, "다시 안 산다") {
 		t.Fatalf("%+v", all)
+	}
+}
+
+// exportingMemory holds a few edges, read two at a time by the caller's page.
+type exportingMemory struct {
+	memory.Client
+	edges []memory.Edge
+}
+
+func (e exportingMemory) Export(_ context.Context, after string, limit int) ([]memory.Edge, error) {
+	var out []memory.Edge
+	for _, x := range e.edges {
+		if x.ID > after && len(out) < limit {
+			out = append(out, x)
+		}
+	}
+	return out, nil
+}
+
+// What memory held before the facts table was the source comes into the table,
+// and what the ledger already speaks for does not.
+func TestAdoptFacts(t *testing.T) {
+	m, st, _ := chargeMind(t, "")
+	ctx := context.Background()
+	if err := st.PutFact(ctx, model.Fact{ID: "f1", Relation: "LIKES", Text: "커피", Status: model.FactStored,
+		Memory: &model.Stored{Edge: "e1"}}); err != nil {
+		t.Fatal(err)
+	}
+	m.Opts.Memory = exportingMemory{edges: []memory.Edge{
+		{ID: "e1", Relation: "LIKES", Fact: "커피"},
+		{ID: "e2", Relation: "VISITED", Fact: "옛 대화에서 나온 사실", ValidAt: "2026-05-01T09:00:00+09:00", InvalidAt: "2026-06-01T09:00:00+09:00",
+			Source: memory.EdgeEnd{ID: "n1", Name: "나"}, Target: memory.EdgeEnd{ID: "n2", Name: "강릉", Kind: "Place", Summary: "바다"}},
+	}}
+	n, err := m.AdoptFacts(ctx)
+	if err != nil || n != 1 {
+		t.Fatalf("%d %v", n, err)
+	}
+	rows, err := st.IndexRows(ctx, 0, 10)
+	if err != nil || len(rows) != 1 || rows[0].ID != "edge:e2" || rows[0].Origin != model.FactLegacy {
+		t.Fatalf("%+v %v", rows, err)
+	}
+	var body struct {
+		ID, Origin, Edge, Fact, InvalidAt string
+		Target                            memory.EdgeEnd
+	}
+	if err := json.Unmarshal(rows[0].Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.ID != "edge:e2" || body.Edge != "e2" || body.Origin != model.FactLegacy || body.Target.Summary != "바다" || body.InvalidAt == "" {
+		t.Fatalf("%s", rows[0].Body)
+	}
+	if n, err := m.AdoptFacts(ctx); err != nil || n != 1 {
+		t.Fatalf("다시 해도 같은 줄입니다: %d %v", n, err)
+	}
+	if rows, _ := st.IndexRows(ctx, 0, 10); len(rows) != 1 {
+		t.Fatalf("%+v", rows)
 	}
 }

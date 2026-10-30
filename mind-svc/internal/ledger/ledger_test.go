@@ -297,3 +297,42 @@ func TestValidAtSaysWhenItBegan(t *testing.T) {
 		t.Fatalf("%+v", rows)
 	}
 }
+
+// A row says how it goes into memory's graph: on the edge and the nodes memory
+// put it on, and ended where it ended. A fact memory turned down stays a fact
+// and stays out of the graph.
+func TestARowSaysHowItGoesIntoTheGraph(t *testing.T) {
+	a := fact("f1", "LIVES_IN", "망원동", day)
+	a.Status = model.FactStored
+	a.Memory = &model.Stored{Edge: "edge-1", EdgeFact: "나는 망원동에 산다",
+		Source: model.MemoryNode{ID: "n-me", Name: "나"}, Target: model.MemoryNode{ID: "n-1", Name: "망원동"}}
+	a.Subject = model.Party{Self: true}
+	b := fact("f2", "LIVES_IN", "합정동", day.AddDate(0, 1, 0))
+	b.Subject = model.Party{Self: true}
+	held := fact("f3", "LIKES", "커피", day)
+	held.Status = model.FactHeld
+	rows := Intervals([]model.Fact{a, b, held}, seoul)
+	if len(rows) != 3 {
+		t.Fatalf("%+v", rows)
+	}
+	var got struct {
+		Origin, Edge, Fact, InvalidAt string
+		Source                        struct {
+			ID   string
+			Self bool
+		}
+		Target struct{ ID, Name string }
+	}
+	if err := json.Unmarshal(rows[0].Body, &got); err != nil {
+		t.Fatalf("%s %v", rows[0].Body, err)
+	}
+	if got.Origin != model.FactChecked || got.Edge != "edge-1" || got.Fact != "나는 망원동에 산다" || !got.Source.Self ||
+		got.Target.ID != "n-1" || got.InvalidAt == "" {
+		t.Fatalf("%s", rows[0].Body)
+	}
+	for _, r := range rows {
+		if r.ID == "f3" && len(r.Body) != 0 {
+			t.Fatalf("기억이 받지 않은 사실은 그래프에 넣지 않습니다: %s", r.Body)
+		}
+	}
+}

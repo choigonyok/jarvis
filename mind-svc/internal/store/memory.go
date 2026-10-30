@@ -1,6 +1,7 @@
 package store
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -36,17 +37,19 @@ type Memory struct {
 	versions map[string][]model.Note
 	outcomes []model.Outcome
 	factRows []model.FactRow
-	classes  map[string]model.Class
-	commands map[string]model.Command
-	latest   map[string]latestRead
-	preds    map[string]model.Prediction
-	expects  map[[2]string]model.Expectation
-	replies  []model.ReplySituation
-	usage    map[[2]string]model.Usage
-	obs      []model.Observation
-	prefs    map[string]model.Preference
-	records  map[string]string
-	seq      int64
+	// indexRows are the rows of the facts table not read from the ledger.
+	indexRows map[string]model.FactRow
+	classes   map[string]model.Class
+	commands  map[string]model.Command
+	latest    map[string]latestRead
+	preds     map[string]model.Prediction
+	expects   map[[2]string]model.Expectation
+	replies   []model.ReplySituation
+	usage     map[[2]string]model.Usage
+	obs       []model.Observation
+	prefs     map[string]model.Preference
+	records   map[string]string
+	seq       int64
 }
 
 func NewMemory() *Memory {
@@ -890,6 +893,39 @@ func (m *Memory) FactRows(context.Context) ([]model.FactRow, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return slices.Clone(m.factRows), nil
+}
+
+func (m *Memory) PutFactRow(_ context.Context, f model.FactRow) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.indexRows == nil {
+		m.indexRows = map[string]model.FactRow{}
+	}
+	m.indexRows[f.ID] = f
+	return nil
+}
+
+func (m *Memory) IndexRows(_ context.Context, offset, limit int) ([]model.FactRow, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	rank := map[string]int{model.FactLegacy: 0, model.FactRecord: 1, model.FactChecked: 2}
+	var all []model.FactRow
+	for _, f := range m.factRows {
+		if len(f.Body) > 0 {
+			all = append(all, f)
+		}
+	}
+	for _, f := range m.indexRows {
+		all = append(all, f)
+	}
+	slices.SortFunc(all, func(a, b model.FactRow) int {
+		return cmp.Or(cmp.Compare(rank[a.Origin], rank[b.Origin]), cmp.Compare(a.ID, b.ID))
+	})
+	out := []model.FactRow{}
+	for i := offset; i < len(all) && len(out) < limit; i++ {
+		out = append(out, all[i])
+	}
+	return out, nil
 }
 
 func (m *Memory) PutPrediction(_ context.Context, p model.Prediction) error {

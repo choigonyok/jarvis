@@ -400,6 +400,103 @@ class Graph:
             ended.append(e)
         return ended
 
+    # --- the graph as a whole ----------------------------------------------------
+
+    async def export(self, group: str, after: str, limit: int) -> list[dict]:
+        """A page of the edges as they stand, with both ends: what mind copies
+        into the facts table, so that the graph can be made from there."""
+        rows, _, _ = await self.drivers[group].execute_query(
+            """MATCH (a:Entity)-[e:RELATES_TO]->(b:Entity) WHERE e.uuid > $after
+               RETURN e.uuid AS id, e.name AS relation, e.fact AS fact, e.valid_at AS valid_at, e.invalid_at AS invalid_at,
+                      a.uuid AS a_id, a.name AS a_name, labels(a) AS a_labels, a.summary AS a_summary,
+                      b.uuid AS b_id, b.name AS b_name, labels(b) AS b_labels, b.summary AS b_summary
+               ORDER BY e.uuid LIMIT $limit""",
+            after=after,
+            limit=limit,
+        )
+
+        def end(r, p):
+            kinds = [x for x in (r[f"{p}_labels"] or []) if x != "Entity"]
+            return {"id": r[f"{p}_id"], "name": r[f"{p}_name"], "kind": kinds[0] if kinds else "", "summary": r[f"{p}_summary"] or ""}
+
+        return [
+            {
+                "id": r["id"],
+                "relation": r["relation"],
+                "fact": r["fact"] or "",
+                "validAt": kst(r["valid_at"]),
+                "invalidAt": kst(r["invalid_at"]),
+                "source": end(r, "a"),
+                "target": end(r, "b"),
+            }
+            for r in rows
+        ]
+
+    async def _place(self, group: str, spec: dict) -> str:
+        """The node of one end of a row: "나", the node memory had it on, or a
+        node of its name."""
+        if spec.get("self"):
+            return await self.me(group)
+        if not spec.get("id"):
+            return await self.node(group, spec.get("kind") or "Thing", spec["name"], spec["name"])
+        if spec["id"] in self._nodes:
+            return spec["id"]
+        try:
+            await EntityNode.get_by_uuid(self.drivers[group], spec["id"])
+        except NodeNotFoundError:
+            labels = ["Entity", spec["kind"]] if spec.get("kind") else ["Entity"]
+            n = EntityNode(uuid=spec["id"], name=spec.get("name") or "", group_id=group, labels=labels,
+                           summary=spec.get("summary") or "", created_at=now())
+            await n.generate_name_embedding(self.embedder)
+            await n.save(self.drivers[group])
+        self._nodes.add(spec["id"])
+        return spec["id"]
+
+    async def put_row(self, group: str, r: dict):
+        """One row of the facts table on the graph, with no model asked: the
+        model judged it when it first went in, and the table kept the answer."""
+        if r["origin"] == "record":
+            target = r["target"]
+            source = r.get("source")
+            await self.fact(
+                group, r["key"], r["relation"], (target["kind"], target["key"], target["name"]), r["fact"],
+                valid_at=when(r.get("validAt")),
+                source=(source["kind"], source["key"], source["name"]) if source else None,
+            )
+            return
+        invalid = when(r.get("invalidAt"))
+        edge = EntityEdge(
+            uuid=r.get("edge") or stable_id(group, "fact", r["id"]),
+            group_id=group,
+            source_node_uuid=await self._place(group, r["source"]),
+            target_node_uuid=await self._place(group, r["target"]),
+            name=r["relation"],
+            fact=r["fact"],
+            created_at=now(),
+            valid_at=when(r.get("validAt")),
+            invalid_at=invalid,
+            expired_at=invalid,
+            episodes=[],
+        )
+        await edge.generate_embedding(self.embedder)
+        await self._drop_if_moved(group, edge)
+        await edge.save(self.drivers[group])
+
+    async def rebuild(self, group: str, pages) -> int:
+        """The graph made again from the facts table: what is there goes, and
+        each page of rows comes back in. It is an index of the table, so doing
+        this loses nothing that is on the table. Topics are made again by their
+        own round."""
+        async with self.writing:
+            await self.drivers[group].execute_query("MATCH (n) DETACH DELETE n")
+            self._nodes.clear()
+            n = 0
+            async for rows in pages:
+                for r in rows:
+                    await self.put_row(group, r)
+                    n += 1
+        return n
+
     async def communities(self, group: str) -> int:
         """Topics: clusters of related people, places and things, each with an
         LLM summary. Rebuilt whole each time."""

@@ -1035,14 +1035,14 @@ func (p *Postgres) ReplaceFactRows(ctx context.Context, rows []model.FactRow) er
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `delete from mind.facts`); err != nil {
+	if _, err := tx.Exec(ctx, `delete from mind.facts where origin = 'checked'`); err != nil {
 		return err
 	}
 	b := &pgx.Batch{}
 	for _, f := range rows {
-		b.Queue(`insert into mind.facts (id, subject, predicate, object, text, valid, p, single)
-			values ($1, $2, $3, $4, $5, tstzrange($6, $7, '[)'), $8, $9)`,
-			f.ID, f.Subject, f.Predicate, f.Object, f.Text, f.From, f.To, f.P, f.Single)
+		b.Queue(`insert into mind.facts (id, subject, predicate, object, text, valid, p, single, origin, body)
+			values ($1, $2, $3, $4, $5, tstzrange($6, $7, '[)'), $8, $9, 'checked', $10::jsonb)`,
+			f.ID, f.Subject, f.Predicate, f.Object, f.Text, f.From, f.To, f.P, f.Single, bodyOf(f))
 	}
 	if err := tx.SendBatch(ctx, b).Close(); err != nil {
 		return err
@@ -1050,9 +1050,45 @@ func (p *Postgres) ReplaceFactRows(ctx context.Context, rows []model.FactRow) er
 	return tx.Commit(ctx)
 }
 
+func bodyOf(f model.FactRow) string {
+	if len(f.Body) == 0 {
+		return "{}"
+	}
+	return string(f.Body)
+}
+
+func (p *Postgres) PutFactRow(ctx context.Context, f model.FactRow) error {
+	_, err := p.db.Exec(ctx, `insert into mind.facts (id, subject, predicate, object, text, valid, p, single, origin, body)
+		values ($1, $2, $3, $4, $5, tstzrange($6, $7, '[)'), $8, false, $9, $10::jsonb)
+		on conflict (id) do update set subject = excluded.subject, predicate = excluded.predicate, object = excluded.object,
+		  text = excluded.text, valid = excluded.valid, p = excluded.p, body = excluded.body`,
+		f.ID, f.Subject, f.Predicate, f.Object, f.Text, f.From, f.To, f.P, f.Origin, bodyOf(f))
+	return err
+}
+
+func (p *Postgres) IndexRows(ctx context.Context, offset, limit int) ([]model.FactRow, error) {
+	rows, err := p.db.Query(ctx, `select id, origin, body from mind.facts where body <> '{}'
+		order by case origin when 'legacy' then 0 when 'record' then 1 else 2 end, id offset $1 limit $2`, offset, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []model.FactRow{}
+	for rows.Next() {
+		var f model.FactRow
+		var body []byte
+		if err := rows.Scan(&f.ID, &f.Origin, &body); err != nil {
+			return nil, err
+		}
+		f.Body = body
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
 func (p *Postgres) FactRows(ctx context.Context) ([]model.FactRow, error) {
 	rows, err := p.db.Query(ctx, `select id, subject, predicate, object, text, lower(valid), upper(valid), p, single
-		from mind.facts order by lower(valid), id`)
+		from mind.facts where origin = 'checked' order by lower(valid), id`)
 	if err != nil {
 		return nil, err
 	}

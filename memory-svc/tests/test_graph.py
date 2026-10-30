@@ -76,6 +76,50 @@ class GraphTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual([r["target"] for r in rows], ["카페 나"])
 
+    async def test_the_graph_comes_back_from_its_rows(self):
+        """4f: the graph is an index of mind's facts table. What is exported
+        comes back on the same edges and nodes when the graph is made again
+        from the rows, with no model asked; a fact that ended stays ended."""
+        ended = "2026-10-01T00:00:00+09:00"
+        await self.g.fact("guest", "k-a", "LIKES", ("Place", "p1", "망원 카페"), "나는 망원 카페를 좋아한다")
+        await self.g.fact("guest", "k-b", "LIVES_IN", ("Place", "p2", "옛 동네"), "나는 옛 동네에 살았다",
+                          invalid_at=G.when(ended))
+        edges = await self.g.export("guest", "", 100)
+        self.assertEqual(len(edges), 2)
+        place = next(e for e in edges if e["relation"] == "LIKES")["target"]
+        self.assertEqual((place["name"], place["kind"]), ("망원 카페", "Place"))
+
+        rows = [{**e, "id": "edge:" + e["id"], "edge": e["id"], "origin": "legacy"} for e in edges]
+        rows.append({"id": "record:spending:1", "origin": "record", "key": "spending:1", "relation": "결제",
+                     "target": {"kind": "Place", "key": "m1", "name": "육전식당"}, "fact": "육전식당에서 결제"})
+        rows.append({"id": "mf_1", "origin": "checked", "relation": "FRIEND_OF", "fact": "지수는 친구다",
+                     "source": {"self": True}, "target": {"name": "지수", "kind": "Person"}})
+
+        async def pages():
+            yield rows[:2]
+            yield rows[2:]
+
+        self.assertEqual(await self.g.rebuild("guest", pages()), 4)
+        back = await self.g.export("guest", "", 100)
+        self.assertEqual({e["fact"] for e in back},
+                         {"나는 망원 카페를 좋아한다", "나는 옛 동네에 살았다", "육전식당에서 결제", "지수는 친구다"})
+        self.assertEqual({e["id"] for e in edges} - {e["id"] for e in back}, set())
+        gone = next(e for e in back if e["relation"] == "LIVES_IN")
+        self.assertTrue(gone["invalidAt"].startswith("2026-10-01"))
+        keep = next(e for e in back if e["relation"] == "LIKES")
+        self.assertEqual(keep["target"]["id"], place["id"])
+        me = await self.g.me("guest")
+        self.assertEqual(next(e for e in back if e["relation"] == "FRIEND_OF")["source"]["id"], me)
+
+    async def test_export_comes_in_pages(self):
+        for i in range(3):
+            await self.g.fact("guest", f"k-{i}", "LIKES", ("Place", f"p{i}", f"곳 {i}"), f"사실 {i}")
+        first = await self.g.export("guest", "", 2)
+        rest = await self.g.export("guest", first[-1]["id"], 2)
+        self.assertEqual(len(first), 2)
+        self.assertEqual(len(rest), 1)
+        self.assertEqual(len({e["id"] for e in first + rest}), 3)
+
 
 if __name__ == "__main__":
     unittest.main()

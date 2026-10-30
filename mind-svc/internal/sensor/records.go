@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -127,8 +128,34 @@ func (s *Structured) sent(ctx context.Context, qs []queued) error {
 		if err := s.Store.PutRecordHash(ctx, q.rec.Key, q.hash, now); err != nil {
 			return err
 		}
+		if err := s.Store.PutFactRow(ctx, recordRow(q.rec, now)); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+// recordRow is a record as a row of the facts table: memory's graph can be
+// made again from there.
+func recordRow(r model.Record, now time.Time) model.FactRow {
+	subject := "self"
+	if r.Source != nil {
+		subject = r.Source.Key
+	}
+	row := model.FactRow{ID: "record:" + r.Key, Subject: subject, Predicate: r.Relation, Object: r.Target.Key, Text: r.Fact,
+		From: now, P: 1, Origin: model.FactRecord}
+	if at, err := time.Parse(time.RFC3339, r.ValidAt); err == nil {
+		row.From = at
+	}
+	body, err := json.Marshal(struct {
+		ID     string `json:"id"`
+		Origin string `json:"origin"`
+		model.Record
+	}{row.ID, model.FactRecord, r})
+	if err == nil {
+		row.Body = body
+	}
+	return row
 }
 
 // clip is s cut to at most n characters, the cut marked.

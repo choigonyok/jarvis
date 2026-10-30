@@ -784,7 +784,20 @@ type FactRow struct {
 	To        *time.Time `json:"to,omitempty"` // nil: still true
 	P         float64    `json:"p"`
 	Single    bool       `json:"single,omitempty"`
+	// Origin is where the row came from: a checked fact, a structured record,
+	// or an edge memory held before the table did.
+	Origin string `json:"origin,omitempty"`
+	// Body is how the row goes into memory's graph, which is made from this
+	// table: nothing when it does not (a fact memory turned down).
+	Body json.RawMessage `json:"body,omitempty"`
 }
+
+// Where a row of the facts table came from.
+const (
+	FactChecked = "checked"
+	FactRecord  = "record"
+	FactLegacy  = "legacy"
+)
 
 // Fact is something worth remembering that is neither a plan nor a loop: what
 // someone likes or cannot eat, who is whose friend, a job changed, a thing

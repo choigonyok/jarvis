@@ -66,5 +66,28 @@ class FactsLaterTest(unittest.TestCase):
         self.assertTrue(got["bad"]["outage"])
 
 
+class RebuildGuardTest(unittest.TestCase):
+    """Making the graph again empties it first: it asks to be named twice, and
+    only the operator's has a table to come back from."""
+
+    def setUp(self):
+        main.TOKEN = "owner-token"
+        main.GUEST_TOKEN = "guest-token"
+        self.client = TestClient(main.app)
+
+    def post(self, path, token="owner-token"):
+        return self.client.post(path, headers={"Authorization": f"Bearer {token}"}).status_code
+
+    def test_it_asks_twice(self):
+        self.assertEqual(self.post("/rebuild?group=owner"), 422)
+        self.assertEqual(self.post("/rebuild?group=owner&confirm=guest"), 422)
+
+    def test_the_guest_has_no_table(self):
+        self.assertEqual(self.post("/rebuild?group=guest&confirm=guest"), 422)
+
+    def test_the_guest_token_is_not_for_it(self):
+        self.assertEqual(self.post("/rebuild?group=owner&confirm=owner", "guest-token"), 403)
+
+
 if __name__ == "__main__":
     unittest.main()

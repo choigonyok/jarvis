@@ -2,6 +2,7 @@ package ledger
 
 import (
 	"cmp"
+	"encoding/json"
 	"slices"
 	"time"
 
@@ -17,6 +18,64 @@ var singleFacts = map[string]bool{
 	"WORKS_AT":    true,
 	"STUDIES_AT":  true,
 	"BIRTHDAY_ON": true,
+}
+
+// indexEnd is one end of a row in memory's graph.
+type indexEnd struct {
+	ID   string `json:"id,omitempty"`
+	Name string `json:"name,omitempty"`
+	Kind string `json:"kind,omitempty"`
+	Self bool   `json:"self,omitempty"`
+}
+
+// indexRow is how a checked fact goes into memory's graph, which is made from
+// this table: on the edge and the nodes memory put it on, when it has.
+type indexRow struct {
+	ID        string   `json:"id"`
+	Origin    string   `json:"origin"`
+	Edge      string   `json:"edge,omitempty"`
+	Relation  string   `json:"relation"`
+	Fact      string   `json:"fact"`
+	ValidAt   string   `json:"validAt,omitempty"`
+	InvalidAt string   `json:"invalidAt,omitempty"`
+	Source    indexEnd `json:"source"`
+	Target    indexEnd `json:"target"`
+}
+
+func indexEndOf(p model.Party, placed model.MemoryNode) indexEnd {
+	if p.Self {
+		return indexEnd{Self: true}
+	}
+	e := indexEnd{ID: p.Node, Name: p.Name, Kind: p.Kind}
+	if placed.ID != "" {
+		e.ID, e.Name = placed.ID, placed.Name
+	}
+	return e
+}
+
+// bodyOf is a row as its fact goes into memory's graph. A fact memory turned
+// down stays a fact and stays out of the graph.
+func bodyOf(r model.FactRow, f model.Fact) json.RawMessage {
+	if f.Status == model.FactHeld {
+		return nil
+	}
+	in := indexRow{ID: r.ID, Origin: model.FactChecked, Relation: f.Relation, Fact: f.Text, ValidAt: r.From.Format(time.RFC3339)}
+	if r.To != nil {
+		in.InvalidAt = r.To.Format(time.RFC3339)
+	}
+	var source, target model.MemoryNode
+	if f.Memory != nil {
+		in.Edge, source, target = f.Memory.Edge, f.Memory.Source, f.Memory.Target
+		if f.Memory.EdgeFact != "" {
+			in.Fact = f.Memory.EdgeFact
+		}
+	}
+	in.Source, in.Target = indexEndOf(f.Subject, source), indexEndOf(f.Object, target)
+	raw, err := json.Marshal(in)
+	if err != nil {
+		return nil
+	}
+	return raw
 }
 
 // party is one end of a fact as a key: memory's node once it has placed the
@@ -53,6 +112,8 @@ func Intervals(facts []model.Fact, loc *time.Location) []model.FactRow {
 		return cmp.Or(validFrom(a, loc).Compare(validFrom(b, loc)), a.CreatedAt.Compare(b.CreatedAt), cmp.Compare(a.ID, b.ID))
 	})
 	var rows []model.FactRow
+	// The fact each row stands on.
+	stands := map[int]model.Fact{}
 	// The row now standing for a (subject, predicate, object); for a single
 	// fact, the one for its (subject, predicate).
 	open := map[string]int{}
@@ -83,6 +144,7 @@ func Intervals(facts []model.Fact, loc *time.Location) []model.FactRow {
 			rows = append(rows, row)
 			i = len(rows) - 1
 			open[key] = i
+			stands[i] = f
 		}
 		if f.Memory != nil && f.Memory.Edge != "" {
 			edges[f.Memory.Edge] = i
@@ -112,6 +174,7 @@ func Intervals(facts []model.Fact, loc *time.Location) []model.FactRow {
 			}
 			r.To = &at
 		}
+		r.Origin, r.Body = model.FactChecked, bodyOf(r, stands[i])
 		out = append(out, r)
 	}
 	return out

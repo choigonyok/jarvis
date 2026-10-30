@@ -1,11 +1,13 @@
-"""memory-svc: jarvis' long-term memory, a Graphiti knowledge graph.
+"""memory-svc: jarvis' long-term memory, a Graphiti knowledge graph, and an
+index: the facts themselves are in mind's facts table, and the operator's graph
+can be made again from there (/rebuild).
 
-Every MEMORY_INTERVAL it collects what is new across jarvis (sources.py) into
-the graph, mind puts in the facts it has checked (/facts) and the structured
-records it read (/records); agents and mind
-ask it with /search, /nodes and /topics. The operator's data lives in group
-"owner", the guest's conversation in group "guest" - and every call names
-exactly one group, so neither can read the other's.
+mind puts in the facts it has checked (/facts) and the structured records it
+read (/records); every MEMORY_INTERVAL the collectors left here (sources.py)
+add the guest's conversation and the weekly topics. Agents and mind ask it with
+/search, /nodes and /topics. The operator's data lives in group "owner", the
+guest's conversation in group "guest" - and every call names exactly one group,
+so neither can read the other's.
 """
 
 import asyncio
@@ -45,6 +47,8 @@ if unknown := [s for s in SOURCES if s not in sources.ALL]:
     log.warning("MEMORY_SOURCES 에 모르는 수집기가 있어 뺍니다: %s", ", ".join(unknown))
     SOURCES = [s for s in SOURCES if s in sources.ALL]
 GROUP = "^(owner|guest)$"
+# mind keeps the facts table the graph is an index of.
+MIND_URL = os.environ.get("MIND_URL", "http://mind:8102")
 
 state = State()
 graph: Graph | None = None
@@ -272,6 +276,42 @@ async def add_records(body: RecordsIn):
     if written:
         log.info("mind 가 보낸 기록 %d개를 넣었습니다", written)
     return {"written": written}
+
+
+@app.get("/export", dependencies=[Depends(reader)])
+async def export(group: str = Query(pattern=GROUP), after: str = "", limit: int = Query(default=500, ge=1, le=1000)):
+    """A page of the graph's edges, for mind's facts table (POST /api/facts/adopt)."""
+    return {"edges": await graph.export(group, after, limit)}
+
+
+async def fact_pages():
+    """The facts table, a page at a time, as mind serves it."""
+    offset = 0
+    async with sources.http() as c:
+        while True:
+            r = await c.get(f"{MIND_URL}/api/facts/index", params={"offset": offset, "limit": 200})
+            r.raise_for_status()
+            rows = r.json()["rows"]
+            if not rows:
+                return
+            yield rows
+            offset += len(rows)
+
+
+@app.post("/rebuild", dependencies=[Depends(auth)])
+async def rebuild(group: str = Query(pattern="^owner$"), confirm: str = Query(default="")):
+    """Make the graph again from mind's facts table: the graph is an index of
+    it. This empties the graph first, so it asks to be named twice. The guest's
+    graph is made from the guest's conversation, and has no table."""
+    if confirm != group:
+        raise HTTPException(422, "confirm 에 그래프 이름을 한 번 더 적어야 합니다.")
+    running["now"] = "rebuild"
+    try:
+        n = await graph.rebuild(group, fact_pages())
+    finally:
+        running["now"] = None
+    log.info("%s 그래프를 사실 표에서 다시 만들었습니다: %d줄", group, n)
+    return {"rows": n}
 
 
 @app.get("/topics", dependencies=[Depends(reader)])

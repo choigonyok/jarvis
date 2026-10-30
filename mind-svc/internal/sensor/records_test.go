@@ -254,3 +254,35 @@ func TestAssetsAndJobs(t *testing.T) {
 		t.Errorf("sold holding: %+v", o)
 	}
 }
+
+// What memory took is a row of the facts table, so the graph can be made
+// again from there; when it holds is when the record says.
+func TestARecordSentIsARowOfTheFacts(t *testing.T) {
+	st := store.NewMemory()
+	rec := &recorder{}
+	now := time.Date(2026, 10, 15, 10, 0, 0, 0, seoul)
+	s := &Structured{Store: st, Loc: seoul, Now: func() time.Time { return now }, Records: rec}
+	ctx := context.Background()
+	r := model.Record{Key: "spending:7", Relation: "결제", Fact: "육전식당에서 32,000원 결제", ValidAt: "2026-10-14T19:05:00+09:00",
+		Target: model.Node{Kind: "Place", Key: "m1", Name: "육전식당"}}
+	if err := s.record(ctx, r); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := st.IndexRows(ctx, 0, 10)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("%+v %v", rows, err)
+	}
+	var body struct {
+		ID, Origin, Key, Fact string
+		Target                model.Node
+	}
+	if err := json.Unmarshal(rows[0].Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	if rows[0].Origin != model.FactRecord || body.ID != "record:spending:7" || body.Key != "spending:7" || body.Target.Key != "m1" || body.Fact != r.Fact {
+		t.Fatalf("%s", rows[0].Body)
+	}
+}

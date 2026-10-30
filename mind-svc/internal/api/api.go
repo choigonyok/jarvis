@@ -17,6 +17,8 @@
 //	POST /api/policy/rebuild          recount approval stats from the intents
 //	POST /api/patterns/rebuild        recount repetitions from the plans and purchases
 //	POST /api/ledger/rebuild          make the result ledger and the facts table again
+//	POST /api/facts/adopt             copy into the facts table what memory's graph holds and it does not
+//	GET  /api/facts/index?offset=&limit=  what memory's graph is made from (memory-svc POST /rebuild reads it)
 //	GET  /api/slots/{name}?saved=     whether a slot's value saved then still holds
 //	GET  /api/commands/{key}          what came of a command sent through the stream (commands.go)
 //	GET  /api/weather/places          where the plans of the next two weeks are (context-svc reads their forecast)
@@ -157,6 +159,28 @@ func (s *Server) Handler() http.Handler {
 			func(pattern string, h http.HandlerFunc) { mux.HandleFunc(pattern, s.person(h)) },
 			func(pattern string, h http.HandlerFunc) { write(pattern, s.person, h) })
 	}
+	mux.HandleFunc("POST /api/facts/adopt", s.auth(true, func(w http.ResponseWriter, r *http.Request) {
+		n, err := s.m.AdoptFacts(r.Context())
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error(), "adopted": n})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]int{"adopted": n})
+	}))
+	mux.HandleFunc("GET /api/facts/index", s.auth(true, func(w http.ResponseWriter, r *http.Request) {
+		offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		rows, err := s.m.Opts.Store.IndexRows(r.Context(), max(offset, 0), max(1, min(limit, 500)))
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		out := make([]json.RawMessage, 0, len(rows))
+		for _, f := range rows {
+			out = append(out, f.Body)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"rows": out})
+	}))
 	mux.HandleFunc("GET /status", s.auth(true, func(w http.ResponseWriter, r *http.Request) {
 		st, err := s.m.Status(r.Context())
 		if err != nil {

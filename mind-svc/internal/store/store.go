@@ -176,8 +176,16 @@ type Store interface {
 	// rebuild replaces them.
 	ReplaceOutcomes(ctx context.Context, rows []model.Outcome) error
 	Outcomes(ctx context.Context) ([]model.Outcome, error)
+	// ReplaceFactRows makes the checked rows these; records and what was
+	// adopted from memory stay.
 	ReplaceFactRows(ctx context.Context, rows []model.FactRow) error
+	// FactRows is the checked rows.
 	FactRows(ctx context.Context) ([]model.FactRow, error)
+	// PutFactRow keeps one row that is not read from the ledger of facts.
+	PutFactRow(ctx context.Context, row model.FactRow) error
+	// IndexRows is a page of what memory's graph is made from: the oldest
+	// kind first, so that what is said later lands on top.
+	IndexRows(ctx context.Context, offset, limit int) ([]model.FactRow, error)
 
 	// The latest of what an adapter left, by kind. ErrNotFound: nothing yet.
 	PutLatest(ctx context.Context, kind string, payload json.RawMessage, at time.Time) error

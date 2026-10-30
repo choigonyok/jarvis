@@ -32,6 +32,30 @@ type Client interface {
 	Profile(ctx context.Context, id string) (Profile, error)
 }
 
+// Exporter reads what memory's graph holds, a page at a time.
+type Exporter interface {
+	Export(ctx context.Context, after string, limit int) ([]Edge, error)
+}
+
+// EdgeEnd is one end of an edge of the graph.
+type EdgeEnd struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Kind    string `json:"kind,omitempty"`
+	Summary string `json:"summary,omitempty"`
+}
+
+// Edge is one fact of the graph as it stands (GET /export).
+type Edge struct {
+	ID        string  `json:"id"`
+	Relation  string  `json:"relation"`
+	Fact      string  `json:"fact"`
+	ValidAt   string  `json:"validAt,omitempty"`
+	InvalidAt string  `json:"invalidAt,omitempty"`
+	Source    EdgeEnd `json:"source"`
+	Target    EdgeEnd `json:"target"`
+}
+
 // Result is memory-svc's answer for one fact (POST /facts).
 type Result struct {
 	Ref   string `json:"ref"`
@@ -152,6 +176,15 @@ func (c *HTTP) Put(ctx context.Context, facts []model.Fact) ([]Result, error) {
 		Results []Result `json:"results"`
 	}
 	return out.Results, c.do(ctx, http.MethodPost, "/facts", body, &out)
+}
+
+// Export reads a page of the graph's edges, after the id given.
+func (c *HTTP) Export(ctx context.Context, after string, limit int) ([]Edge, error) {
+	v := url.Values{"group": {c.Group}, "after": {after}, "limit": {fmt.Sprint(limit)}}
+	var out struct {
+		Edges []Edge `json:"edges"`
+	}
+	return out.Edges, c.do(ctx, http.MethodGet, "/export?"+v.Encode(), nil, &out)
 }
 
 // Records sends structured records (POST /records): written straight to
