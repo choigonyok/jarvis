@@ -336,3 +336,36 @@ func TestARowSaysHowItGoesIntoTheGraph(t *testing.T) {
 		}
 	}
 }
+
+// What memory ended is ended here too: by a later fact, or by its own word.
+func TestWhatMemoryEndedIsEnded(t *testing.T) {
+	a := fact("f1", "WANTS", "자전거", day)
+	a.Memory = &model.Stored{Edge: "edge-1"}
+	b := fact("f2", "BOUGHT", "자전거", day.AddDate(0, 1, 0))
+	b.Memory = &model.Stored{Edge: "edge-2", Ended: []model.Ended{{ID: "edge-1", InvalidAt: "2026-11-20"}}}
+	c := fact("f3", "GOAL", "완주", day)
+	c.Memory = &model.Stored{Edge: "edge-3", InvalidAt: "2026-12-31T00:00:00+09:00"}
+	byID := map[string]model.FactRow{}
+	for _, r := range Intervals([]model.Fact{a, b, c}, seoul) {
+		byID[r.ID] = r
+	}
+	if r := byID["f1"]; r.To == nil || r.To.In(seoul).Format("2006-01-02") != "2026-11-20" {
+		t.Fatalf("%+v", r)
+	}
+	if r := byID["f3"]; r.To == nil || r.To.In(seoul).Format("2006-01-02") != "2026-12-31" {
+		t.Fatalf("%+v", r)
+	}
+	if r := byID["f2"]; r.To != nil {
+		t.Fatalf("%+v", r)
+	}
+}
+
+// A fact whose edge left the graph stays a fact and does not go back in.
+func TestAFactGoneFromTheGraphStaysOut(t *testing.T) {
+	a := fact("f1", "LIKES", "커피", day)
+	a.Memory = &model.Stored{Edge: "edge-1", Gone: true}
+	rows := Intervals([]model.Fact{a}, seoul)
+	if len(rows) != 1 || len(rows[0].Body) != 0 {
+		t.Fatalf("%+v", rows)
+	}
+}

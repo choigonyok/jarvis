@@ -864,6 +864,11 @@ type Stored struct {
 	Source    MemoryNode `json:"source"`
 	Target    MemoryNode `json:"target"`
 	Ended     []Ended    `json:"ended,omitempty"`
+	// InvalidAt is when memory says the fact stopped being so, when it does.
+	InvalidAt string `json:"invalidAt,omitempty"`
+	// Gone is an edge that is no longer in memory's graph: the fact stays on
+	// the ledger and does not come back when the graph is made again.
+	Gone bool `json:"gone,omitempty"`
 }
 
 type MemoryNode struct {

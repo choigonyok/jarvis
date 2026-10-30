@@ -69,6 +69,7 @@ type Result struct {
 	} `json:"edge"`
 	Duplicate bool             `json:"duplicate"`
 	Expired   bool             `json:"expired"`
+	InvalidAt string           `json:"invalidAt,omitempty"`
 	Source    model.MemoryNode `json:"source"`
 	Target    model.MemoryNode `json:"target"`
 	Ended     []model.Ended    `json:"ended"`
@@ -77,7 +78,7 @@ type Result struct {
 func (r Result) Stored() *model.Stored {
 	return &model.Stored{
 		Edge: r.Edge.ID, EdgeFact: r.Edge.Fact, Duplicate: r.Duplicate, Expired: r.Expired,
-		Source: r.Source, Target: r.Target, Ended: r.Ended,
+		Source: r.Source, Target: r.Target, Ended: r.Ended, InvalidAt: r.InvalidAt,
 	}
 }
 

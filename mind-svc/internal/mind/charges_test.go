@@ -371,26 +371,35 @@ func (e exportingMemory) Export(_ context.Context, after string, limit int) ([]m
 	return out, nil
 }
 
-// What memory held before the facts table was the source comes into the table,
-// and what the ledger already speaks for does not.
+// The table comes to speak for the whole graph: what it has no row for comes in
+// as it stands, what the graph ended is noted, and a fact whose edge is gone
+// stays out of the graph.
 func TestAdoptFacts(t *testing.T) {
 	m, st, _ := chargeMind(t, "")
 	ctx := context.Background()
-	if err := st.PutFact(ctx, model.Fact{ID: "f1", Relation: "LIKES", Text: "커피", Status: model.FactStored,
-		Memory: &model.Stored{Edge: "e1"}}); err != nil {
-		t.Fatal(err)
+	at := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	put := func(id, object, edge string) {
+		t.Helper()
+		if err := st.PutFact(ctx, model.Fact{ID: id, Subject: model.Party{Self: true}, Object: model.Party{Name: object}, Relation: "LIKES", Text: object,
+			Status: model.FactStored, CreatedAt: at, Memory: &model.Stored{Edge: edge}}); err != nil {
+			t.Fatal(err)
+		}
 	}
+	put("f1", "커피", "e1")
+	put("f2", "차", "e-gone")
+	put("f3", "맥주", "e3")
 	m.Opts.Memory = exportingMemory{edges: []memory.Edge{
 		{ID: "e1", Relation: "LIKES", Fact: "커피"},
 		{ID: "e2", Relation: "VISITED", Fact: "옛 대화에서 나온 사실", ValidAt: "2026-05-01T09:00:00+09:00", InvalidAt: "2026-06-01T09:00:00+09:00",
 			Source: memory.EdgeEnd{ID: "n1", Name: "나"}, Target: memory.EdgeEnd{ID: "n2", Name: "강릉", Kind: "Place", Summary: "바다"}},
+		{ID: "e3", Relation: "LIKES", Fact: "맥주", InvalidAt: "2026-10-20T09:00:00+09:00"},
 	}}
 	n, err := m.AdoptFacts(ctx)
 	if err != nil || n != 1 {
 		t.Fatalf("%d %v", n, err)
 	}
 	rows, err := st.IndexRows(ctx, 0, 10)
-	if err != nil || len(rows) != 1 || rows[0].ID != "edge:e2" || rows[0].Origin != model.FactLegacy {
+	if err != nil || len(rows) != 3 || rows[0].ID != "edge:e2" || rows[0].Origin != model.FactLegacy {
 		t.Fatalf("%+v %v", rows, err)
 	}
 	var body struct {
@@ -403,10 +412,26 @@ func TestAdoptFacts(t *testing.T) {
 	if body.ID != "edge:e2" || body.Edge != "e2" || body.Origin != model.FactLegacy || body.Target.Summary != "바다" || body.InvalidAt == "" {
 		t.Fatalf("%s", rows[0].Body)
 	}
+	for _, r := range rows {
+		if r.ID == "f2" {
+			t.Fatalf("그래프에서 빠진 사실은 되살리지 않습니다: %s", r.Body)
+		}
+	}
+	got := map[string]string{}
+	for _, r := range rows[1:] {
+		var one struct{ InvalidAt string }
+		if err := json.Unmarshal(r.Body, &one); err != nil {
+			t.Fatal(err)
+		}
+		got[r.ID] = one.InvalidAt
+	}
+	if !strings.HasPrefix(got["f3"], "2026-10-20") || got["f1"] != "" {
+		t.Fatalf("그래프가 끝낸 사실은 끝난 채로: %v", got)
+	}
 	if n, err := m.AdoptFacts(ctx); err != nil || n != 1 {
 		t.Fatalf("다시 해도 같은 줄입니다: %d %v", n, err)
 	}
-	if rows, _ := st.IndexRows(ctx, 0, 10); len(rows) != 1 {
+	if rows, _ := st.IndexRows(ctx, 0, 10); len(rows) != 3 {
 		t.Fatalf("%+v", rows)
 	}
 }

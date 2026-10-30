@@ -1087,7 +1087,7 @@ func (p *Postgres) IndexRows(ctx context.Context, offset, limit int) ([]model.Fa
 }
 
 func (p *Postgres) FactRows(ctx context.Context) ([]model.FactRow, error) {
-	rows, err := p.db.Query(ctx, `select id, subject, predicate, object, text, lower(valid), upper(valid), p, single
+	rows, err := p.db.Query(ctx, `select id, subject, predicate, object, text, lower(valid), upper(valid), p, single, origin, body
 		from mind.facts where origin = 'checked' order by lower(valid), id`)
 	if err != nil {
 		return nil, err
@@ -1096,9 +1096,11 @@ func (p *Postgres) FactRows(ctx context.Context) ([]model.FactRow, error) {
 	var out []model.FactRow
 	for rows.Next() {
 		var f model.FactRow
-		if err := rows.Scan(&f.ID, &f.Subject, &f.Predicate, &f.Object, &f.Text, &f.From, &f.To, &f.P, &f.Single); err != nil {
+		var body []byte
+		if err := rows.Scan(&f.ID, &f.Subject, &f.Predicate, &f.Object, &f.Text, &f.From, &f.To, &f.P, &f.Single, &f.Origin, &body); err != nil {
 			return nil, err
 		}
+		f.Body = body
 		out = append(out, f)
 	}
 	return out, rows.Err()

@@ -66,45 +66,75 @@ func (m *Mind) rebuildLedger(ctx context.Context) error {
 // adoptPage is how many edges are read from memory at a time.
 const adoptPage = 500
 
-// AdoptFacts copies into the facts table what memory's graph holds and the
-// table does not: what went in before the table was the source. Done once, and
-// safe to do again. After it the graph can be made from the table.
+// AdoptFacts makes the facts table speak for all of memory's graph: an edge the
+// table has no row for comes in as it stands, what the graph ended is noted on
+// the fact, and a fact whose edge is no longer there stays out of the graph
+// when it is made again. Done once, and safe to do again. After it the graph
+// can be made from the table.
 func (m *Mind) AdoptFacts(ctx context.Context) (int, error) {
 	from, ok := m.Opts.Memory.(memory.Exporter)
 	if !ok {
 		return 0, errors.New("기억을 읽을 수 없습니다")
 	}
 	st := m.Opts.Store
+	live := map[string]memory.Edge{}
+	for after := ""; ; {
+		edges, err := from.Export(ctx, after, adoptPage)
+		if err != nil {
+			return 0, err
+		}
+		for _, e := range edges {
+			live[e.ID] = e
+		}
+		if len(edges) < adoptPage {
+			break
+		}
+		after = edges[len(edges)-1].ID
+	}
 	all, err := st.Facts(ctx, ledgerLimit)
 	if err != nil {
 		return 0, err
 	}
-	known := map[string]bool{}
 	for _, f := range all {
-		if f.Memory != nil {
-			known[f.Memory.Edge] = true
+		if f.Memory == nil || f.Memory.Edge == "" {
+			continue
+		}
+		e, there := live[f.Memory.Edge]
+		if f.Memory.Gone == !there && f.Memory.InvalidAt == e.InvalidAt {
+			continue
+		}
+		f.Memory.Gone, f.Memory.InvalidAt = !there, e.InvalidAt
+		if err := st.PutFact(ctx, f); err != nil {
+			return 0, err
 		}
 	}
-	after, n := "", 0
-	for {
-		edges, err := from.Export(ctx, after, adoptPage)
-		if err != nil {
+	if err := m.rebuildLedger(ctx); err != nil {
+		return 0, err
+	}
+	rows, err := st.FactRows(ctx)
+	if err != nil {
+		return 0, err
+	}
+	spoken := map[string]bool{}
+	for _, r := range rows {
+		var body struct {
+			Edge string `json:"edge"`
+		}
+		if json.Unmarshal(r.Body, &body) == nil {
+			spoken[body.Edge] = true
+		}
+	}
+	n := 0
+	for id, e := range live {
+		if spoken[id] {
+			continue
+		}
+		if err := st.PutFactRow(ctx, legacyRow(e, m.Opts.Now())); err != nil {
 			return n, err
 		}
-		for _, e := range edges {
-			if known[e.ID] {
-				continue
-			}
-			if err := st.PutFactRow(ctx, legacyRow(e, m.Opts.Now())); err != nil {
-				return n, err
-			}
-			n++
-		}
-		if len(edges) < adoptPage {
-			return n, nil
-		}
-		after = edges[len(edges)-1].ID
+		n++
 	}
+	return n, nil
 }
 
 // legacyRow is an edge as a row of the facts table.

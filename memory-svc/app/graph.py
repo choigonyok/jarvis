@@ -320,6 +320,7 @@ class Graph:
             "duplicate": resolved.uuid != edge.uuid,
             # Graphiti read the new fact as already superseded by a later one.
             "expired": resolved.expired_at is not None,
+            "invalidAt": kst(resolved.invalid_at),
             "source": {"id": source.uuid, "name": source.name},
             "target": {"id": target.uuid, "name": target.name},
             "ended": [{"id": e.uuid, "fact": e.fact, "invalidAt": kst(e.invalid_at)} for e in ended],

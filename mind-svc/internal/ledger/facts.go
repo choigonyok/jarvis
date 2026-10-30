@@ -54,9 +54,9 @@ func indexEndOf(p model.Party, placed model.MemoryNode) indexEnd {
 }
 
 // bodyOf is a row as its fact goes into memory's graph. A fact memory turned
-// down stays a fact and stays out of the graph.
+// down, or one no longer in the graph, stays a fact and stays out of it.
 func bodyOf(r model.FactRow, f model.Fact) json.RawMessage {
-	if f.Status == model.FactHeld {
+	if f.Status == model.FactHeld || (f.Memory != nil && f.Memory.Gone) {
 		return nil
 	}
 	in := indexRow{ID: r.ID, Origin: model.FactChecked, Relation: f.Relation, Fact: f.Text, ValidAt: r.From.Format(time.RFC3339)}
@@ -88,6 +88,15 @@ func party(p model.Party) string {
 		return "node:" + p.Node
 	}
 	return p.Name
+}
+
+// endOf reads when something ended: a day, or a time as memory says it.
+func endOf(v string, loc *time.Location) (time.Time, bool) {
+	if t, err := time.Parse(time.RFC3339, v); err == nil {
+		return t, true
+	}
+	t, err := time.ParseInLocation("2006-01-02", v, loc)
+	return t, err == nil
 }
 
 func validFrom(f model.Fact, loc *time.Location) time.Time {
@@ -149,16 +158,21 @@ func Intervals(facts []model.Fact, loc *time.Location) []model.FactRow {
 		if f.Memory != nil && f.Memory.Edge != "" {
 			edges[f.Memory.Edge] = i
 		}
-		for _, e := range f.Ends {
+		retired := f.Ends
+		if f.Memory != nil {
+			retired = append(slices.Clone(retired), f.Memory.Ended...)
+			if at, ok := endOf(f.Memory.InvalidAt, loc); ok {
+				ended[i] = at
+			}
+		}
+		for _, e := range retired {
 			j, ok := edges[e.ID]
 			if !ok {
 				continue
 			}
 			at := row.From
-			if e.InvalidAt != "" {
-				if t, err := time.ParseInLocation("2006-01-02", e.InvalidAt, loc); err == nil {
-					at = t
-				}
+			if t, ok := endOf(e.InvalidAt, loc); ok {
+				at = t
 			}
 			ended[j] = at
 		}
