@@ -27,7 +27,7 @@ const (
 )
 
 // Kinds is what the structured lane reads.
-var Kinds = []string{KindCalendarNear, KindCalendarYear, KindVisits, KindHoldings, KindNow, KindNowGuest, KindRegions, KindTravel}
+var Kinds = []string{KindCalendarNear, KindCalendarYear, KindVisits, KindHoldings, KindNow, KindNowGuest, KindRegions, KindTravel, KindMessage}
 
 // calendarRead is one read of the calendar.
 type calendarRead struct {

@@ -4,12 +4,13 @@ package api
 
 import (
 	"encoding/json"
-	"github.com/choigonyok/jarvis/gocommon/collect"
 	"net/http"
 	"strconv"
 	"sync"
 	"time"
 
+	"github.com/choigonyok/jarvis/gocommon/collect"
+	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/imessage-client/internal/store"
 )
 
@@ -37,16 +38,17 @@ type Server struct {
 	store  *store.Store
 	status *Status
 	token  string
+	loops  *health.Loops
 }
 
-func New(s *store.Store, st *Status, token string) *Server {
-	return &Server{store: s, status: st, token: token}
+func New(s *store.Store, st *Status, token string, loops *health.Loops) *Server {
+	return &Server{store: s, status: st, token: token, loops: loops}
 }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		health.Write(w, http.StatusOK, health.Report{Loops: s.loops.List()})
 	})
 	mux.HandleFunc("/status", s.auth(func(w http.ResponseWriter, r *http.Request) {
 		s.status.mu.Lock()

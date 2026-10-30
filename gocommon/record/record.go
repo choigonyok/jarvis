@@ -148,6 +148,22 @@ func New(dsn string, loops *health.Loops, log *slog.Logger) *Writer {
 	return w
 }
 
+// Post is the way to hand one record to input-svc at url and know that it was
+// taken: for those who keep their own cursor and must not move it otherwise.
+func Post(url, token string, log *slog.Logger) func(ctx context.Context, r Record) error {
+	s := httpSink{url: strings.TrimRight(url, "/"), token: token, http: &http.Client{Timeout: tryFor}, log: log}
+	return func(ctx context.Context, r Record) error {
+		if r.SchemaVersion == 0 {
+			r.SchemaVersion = 1
+		}
+		payload, err := json.Marshal(r.Payload)
+		if err != nil {
+			return err
+		}
+		return s.append(ctx, r, payload)
+	}
+}
+
 // NewHTTP is a Writer that hands records to input-svc at url: for a process
 // with no way to the outbox (the guest's agent). Run must be running.
 func NewHTTP(url, token string, loops *health.Loops, log *slog.Logger) *Writer {

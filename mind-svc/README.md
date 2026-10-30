@@ -209,7 +209,6 @@ POST /api/facts/flush                  장부에서 기다리는 사실을 지�
 | `INPUT_URL` | (없음) | 스택의 기록 스트림(input-svc). 없으면 프로세스 안의 로그 |
 | `KAKAOTALK_URL`, `IMESSAGE_URL` | (없음) | 있으면 감지기가 돈다. 첫 시작은 `MIND_BACKFILL`(6h)만 읽는다 |
 | `CHAT_URL` | (없음) | 있으면 운영자와 jarvis 의 대화(chat-svc)도 대화방 하나(`chat:owner`)로 읽는다 |
-| `MIND_HISTORY` | `false` | `true` 면 시작 1분 뒤 한 번, 감지기가 첫 시작에 건너뛴 지난 대화(카톡·iMessage·jarvis 대화)를 들여와 **사실만** 해석한다(일정·고리·카드 없음, `ends` 없음, 날짜 없는 사실은 근거 메시지 날짜). 경계는 그때 가장 이른 메시지(`mind_cursors` 의 `history:before`), 방마다 `history:room:<방>` 에 이어 읽고, 끝나면 `history:done`. 예산이 떨어지면 30분 쉬고 잇는다. 비용은 `mind_llm_usage` 의 `history`. `MIND_HISTORY_BATCH`(40) |
 | `MIND_MEMORY_URL` | (없음) | memory-svc. 없으면 메모리 모드는 프로세스 안의 가짜 기억, 스택은 사실을 장부에만 쌓는다 |
 | `MIND_QUIET` | `true`(스택) | 스킬·관문의 알림을 output-svc 로 보내지 않고 콘솔에만 둔다 |
 | `MIND_ANTHROPIC_API_KEY` | | `MIND_MODEL`(claude-haiku-5-5), `MIND_DAILY_USD`(1.0) |

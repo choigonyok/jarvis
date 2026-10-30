@@ -2,9 +2,6 @@ package store
 
 import (
 	"context"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"slices"
@@ -15,6 +12,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/choigonyok/jarvis/gocommon/seal"
+
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 )
 
@@ -22,16 +21,14 @@ import (
 // with AES-GCM when a key is given: a database dump alone does not hand
 // over anyone's conversations.
 type Postgres struct {
-	db   *pgxpool.Pool
-	aead cipher.AEAD
+	db     *pgxpool.Pool
+	sealer *seal.Sealer
 }
 
 func NewPostgres(db *pgxpool.Pool, key []byte) *Postgres {
 	p := &Postgres{db: db}
 	if len(key) == 32 {
-		if block, err := aes.NewCipher(key); err == nil {
-			p.aead, _ = cipher.NewGCM(block)
-		}
+		p.sealer, _ = seal.New(key)
 	}
 	return p
 }
@@ -690,28 +687,21 @@ func (p *Postgres) Aliases(ctx context.Context) ([]model.Alias, error) {
 }
 
 func (p *Postgres) seal(plain []byte) ([]byte, bool, error) {
-	if p.aead == nil {
+	if p.sealer == nil {
 		return plain, false, nil
 	}
-	nonce := make([]byte, p.aead.NonceSize())
-	if _, err := rand.Read(nonce); err != nil {
-		return nil, false, err
-	}
-	return p.aead.Seal(nonce, nonce, plain, nil), true, nil
+	body, err := p.sealer.Seal(plain)
+	return body, true, err
 }
 
 func (p *Postgres) open(body []byte, sealed bool) ([]byte, error) {
 	if !sealed {
 		return body, nil
 	}
-	if p.aead == nil {
+	if p.sealer == nil {
 		return nil, errors.New("봉해진 메시지인데 MIND_CONTENT_KEY 가 없습니다")
 	}
-	n := p.aead.NonceSize()
-	if len(body) < n {
-		return nil, errors.New("봉해진 메시지가 잘렸습니다")
-	}
-	return p.aead.Open(nil, body[:n], body[n:], nil)
+	return p.sealer.Open(body)
 }
 
 func (p *Postgres) policies(ctx context.Context, q string, args ...any) ([]model.PolicyStat, error) {

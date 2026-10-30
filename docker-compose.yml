@@ -726,6 +726,9 @@ services:
       # Same bearer scheme as the rest of the stack; guards every route but
       # /health.
       API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
+      # 들어온 메시지를 봉인해서 입구로 넘긴다. mind 가 봉인을 푸는 키와 같다.
+      INPUT_URL: http://input:8101
+      MESSAGE_KEY: ${MIND_CONTENT_KEY:?MIND_CONTENT_KEY 를 .env 에 설정하세요}
     volumes:
       - jarvis-kakaotalk-data:/data
       # The live encrypted database and its -wal/-shm siblings, read-only.
@@ -765,6 +768,8 @@ services:
       RETAIN_DAYS: ${IMESSAGE_RETAIN_DAYS:-730}
       CONTACTS_DB: /addressbook/AddressBook-v22.abcddb
       API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
+      INPUT_URL: http://input:8101
+      MESSAGE_KEY: ${MIND_CONTENT_KEY:?MIND_CONTENT_KEY 를 .env 에 설정하세요}
     volumes:
       - jarvis-imessage-data:/data
       - ${IMESSAGE_MIRROR:-${HOME}/.jarvis-mirror}/messages:/messages:ro
@@ -1028,8 +1033,6 @@ services:
       # 손님 에이전트의 토큰: 손님 자신의 리마인드·체크리스트만 열린다(mind 의 다른 것은 아니다).
       API_GUEST_TOKEN: ${JARVIS_GUEST_API_TOKEN:-}
       INPUT_URL: http://input:8101
-      KAKAOTALK_URL: http://kakaotalk:8090
-      IMESSAGE_URL: http://imessage:8099
       CALENDAR_URL: http://calendar:8093
       # 관문이 하나로 합쳐져(2026-10-15) mind 의 카드가 에이전트의 결재 카드로 나간다.
       # 승인하면 mind 가 calendar-svc 에 실제로 쓴다.
@@ -1063,9 +1066,6 @@ services:
       # 처음 뜰 때 지난 대화를 얼마나 읽나. memory-svc 가 5분마다 이미 읽어 왔으니
       # 겹치는 만큼 같은 일정이 카드로 다시 올라오지 않게 짧게.
       MIND_BACKFILL: ${MIND_BACKFILL:-1h}
-      # 감지기가 첫 시작에 건너뛴 지난 대화를 한 번, 사실만 읽는다(일정·카드 없음).
-      # 끝나면 다시 돌지 않는다(mind_cursors history:done).
-      MIND_HISTORY: ${MIND_HISTORY:-false}
       # 스킬·관문의 알림(아침 브리핑, 일정 전 확인)은 효과로 output-svc 에, 질문은
       # mind.card 로 에이전트에. 카드는 이 한 길로만 나간다.
       MIND_QUIET: ${MIND_QUIET:-false}

@@ -11,7 +11,6 @@ package main
 import (
 	"context"
 	"errors"
-	"github.com/choigonyok/jarvis/gocommon/collect"
 	"log/slog"
 	"net/http"
 	"os"
@@ -23,6 +22,10 @@ import (
 
 	_ "time/tzdata"
 
+	"github.com/choigonyok/jarvis/gocommon/collect"
+	"github.com/choigonyok/jarvis/gocommon/health"
+	"github.com/choigonyok/jarvis/gocommon/record"
+	"github.com/choigonyok/jarvis/gocommon/seal"
 	"github.com/choigonyok/jarvis/imessage-client/internal/api"
 	"github.com/choigonyok/jarvis/imessage-client/internal/imsg"
 	"github.com/choigonyok/jarvis/imessage-client/internal/store"
@@ -98,6 +101,33 @@ func main() {
 		}
 	}()
 
+	// 들어온 메시지는 봉인해서 입구로 넘긴다. mind 는 이제 수집기를 읽으러 오지 않는다.
+	loops := health.NewLoops()
+	if url, key := os.Getenv("INPUT_URL"), os.Getenv("MESSAGE_KEY"); url != "" && key != "" {
+		sealer, err := seal.FromBase64(key)
+		if err != nil {
+			log.Error("MESSAGE_KEY 를 읽지 못했습니다", "err", err)
+			os.Exit(1)
+		}
+		pub := &collect.Publisher{
+			Source: "imessage", CursorPath: storePath + ".published", Seal: sealer, Every: interval, Loops: loops, Log: log,
+			Send:   record.Post(url, os.Getenv("API_TOKEN"), log),
+			Latest: st.Cursor,
+			After: func(rowid int64, limit int) ([]collect.Item, error) {
+				msgs, err := st.After(rowid, limit)
+				if err != nil {
+					return nil, err
+				}
+				out := make([]collect.Item, len(msgs))
+				for i, m := range msgs {
+					out[i] = collect.Item{RowID: m.RowID, ChatID: m.ChatID, SentAt: m.SentAt, Body: m}
+				}
+				return out, nil
+			},
+		}
+		go pub.Run(ctx)
+	}
+
 	// 보존 기한이 지난 메시지는 하루에 한 번 지운다(0 = 모두 둔다).
 	days, _ := strconv.Atoi(getenv("RETAIN_DAYS", "730"))
 	go collect.Retain(ctx, days, st.Prune, func(n int64, err error) {
@@ -106,7 +136,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              getenv("LISTEN_ADDR", ":8099"),
-		Handler:           api.New(st, status, os.Getenv("API_TOKEN")).Handler(),
+		Handler:           api.New(st, status, os.Getenv("API_TOKEN"), loops).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {

@@ -10,8 +10,8 @@ package main
 
 import (
 	"context"
-	"github.com/choigonyok/jarvis/gocommon/collect"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -19,6 +19,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/choigonyok/jarvis/gocommon/collect"
+	"github.com/choigonyok/jarvis/gocommon/health"
+	"github.com/choigonyok/jarvis/gocommon/record"
+	"github.com/choigonyok/jarvis/gocommon/seal"
 	"github.com/choigonyok/jarvis/kakaotalk-client/internal/api"
 	"github.com/choigonyok/jarvis/kakaotalk-client/internal/kakao"
 	"github.com/choigonyok/jarvis/kakaotalk-client/internal/poller"
@@ -69,6 +73,32 @@ func main() {
 	defer stop()
 
 	go p.Run(ctx)
+	// 들어온 메시지는 봉인해서 입구로 넘긴다. mind 는 이제 수집기를 읽으러 오지 않는다.
+	loops := health.NewLoops()
+	if url, key := os.Getenv("INPUT_URL"), os.Getenv("MESSAGE_KEY"); url != "" && key != "" {
+		sealer, err := seal.FromBase64(key)
+		if err != nil {
+			log.Fatalf("MESSAGE_KEY: %v", err)
+		}
+		logger := slog.Default()
+		pub := &collect.Publisher{
+			Source: "kakao", CursorPath: storePath + ".published", Seal: sealer, Every: interval, Loops: loops, Log: logger,
+			Send:   record.Post(url, token, logger),
+			Latest: func() (int64, error) { _, top, err := st.RowIDRange(); return top, err },
+			After: func(rowid int64, limit int) ([]collect.Item, error) {
+				msgs, err := st.MessagesAfter(rowid, limit)
+				if err != nil {
+					return nil, err
+				}
+				out := make([]collect.Item, len(msgs))
+				for i, m := range msgs {
+					out[i] = collect.Item{RowID: m.RowID, ChatID: m.ChatID, SentAt: m.SentAt, Body: m}
+				}
+				return out, nil
+			},
+		}
+		go pub.Run(ctx)
+	}
 	// 평문 사본의 보존 기한(일). 0 이면 지우지 않는다.
 	go collect.Retain(ctx, int(envInt64("RETAIN_DAYS", 730)), st.Prune, func(n int64, err error) {
 		log.Printf("retain: deleted=%d err=%v", n, err)
@@ -76,7 +106,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:         addr,
-		Handler:      api.New(st, p, token).Handler(),
+		Handler:      api.New(st, p, token, loops).Handler(),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}

@@ -5,10 +5,11 @@ package api
 
 import (
 	"encoding/json"
-	"github.com/choigonyok/jarvis/gocommon/collect"
 	"net/http"
 	"strconv"
 
+	"github.com/choigonyok/jarvis/gocommon/collect"
+	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/kakaotalk-client/internal/poller"
 	"github.com/choigonyok/jarvis/kakaotalk-client/internal/store"
 )
@@ -17,10 +18,11 @@ type Server struct {
 	store  *store.Store
 	poller *poller.Poller
 	token  string
+	loops  *health.Loops
 }
 
-func New(s *store.Store, p *poller.Poller, token string) *Server {
-	return &Server{store: s, poller: p, token: token}
+func New(s *store.Store, p *poller.Poller, token string, loops *health.Loops) *Server {
+	return &Server{store: s, poller: p, token: token, loops: loops}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -38,7 +40,7 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc { return collect.Guard(s.token, next) }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	health.Write(w, http.StatusOK, health.Report{Loops: s.loops.List()})
 }
 
 func (s *Server) status(w http.ResponseWriter, r *http.Request) {

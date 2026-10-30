@@ -35,6 +35,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/choigonyok/jarvis/gocommon/queue"
+	"github.com/choigonyok/jarvis/gocommon/seal"
 	"github.com/choigonyok/jarvis/mind-svc/internal/act"
 	"github.com/choigonyok/jarvis/mind-svc/internal/api"
 	"github.com/choigonyok/jarvis/mind-svc/internal/backtest"
@@ -278,19 +279,21 @@ func main() {
 	}
 	handler := mindAPI.Handler()
 	var structured *sensor.Structured
+	var messages *sensor.Messages
 	if mode == "stack" {
-		exclude := cfg.Noise
-		history := &sensor.History{Store: st, Reader: m.Conv, Noise: exclude, Out: log,
-			Batch: int(number("MIND_HISTORY_BATCH", 40)), Wait: 30 * time.Minute}
-		for name, url := range map[string]string{"kakao": os.Getenv("KAKAOTALK_URL"), "imessage": os.Getenv("IMESSAGE_URL")} {
-			if url == "" {
-				continue
+		key, err := contentKey()
+		if err != nil {
+			log.Error("MIND_CONTENT_KEY 를 읽지 못했습니다", "err", err)
+			os.Exit(1)
+		}
+		if key != nil {
+			sealer, err := seal.New(key)
+			if err != nil {
+				log.Error("MIND_CONTENT_KEY 를 쓰지 못했습니다", "err", err)
+				os.Exit(1)
 			}
-			s := &sensor.Messenger{Name: name, URL: url, Token: token, Store: st, Log: logOut, Exclude: exclude,
-				Backfill: duration("MIND_BACKFILL", 6*time.Hour), Every: duration("MIND_POLL", 5*time.Second), Out: log,
+			messages = &sensor.Messages{Store: st, Log: logOut, Seal: sealer, Exclude: cfg.Noise,
 				Payments: regexp.MustCompile(getenv("MIND_PAYMENT_ROOMS", `^(카카오페이|토스)$`)), Occur: m}
-			history.Messengers = append(history.Messengers, s)
-			go s.Run(ctx)
 		}
 		// Structured sources, read by rule into occurrences: spending, workouts,
 		// photos, jobs. The calendar (whose entries also become plans), the
@@ -308,23 +311,7 @@ func main() {
 		if url := os.Getenv("CHAT_URL"); url != "" {
 			s := &sensor.Chat{URL: url, Token: token, Store: st, Log: logOut,
 				Backfill: duration("MIND_BACKFILL", 6*time.Hour), Every: duration("MIND_CHAT_POLL", 20*time.Second), Out: log}
-			history.Chat = s
 			go s.Run(ctx)
-		}
-		// The past the sensors skipped on their first start, read once for
-		// facts. After a minute, so a first start's sensors have drawn the
-		// line between past and present.
-		if os.Getenv("MIND_HISTORY") == "true" && client.Ready() {
-			go func() {
-				select {
-				case <-ctx.Done():
-					return
-				case <-time.After(time.Minute):
-				}
-				if err := history.Run(ctx); err != nil && ctx.Err() == nil {
-					log.Warn("지난 대화를 읽지 못했습니다", "err", err)
-				}
-			}()
 		}
 	}
 	if stream != nil {
@@ -353,6 +340,15 @@ func main() {
 			}
 			return nil
 		}
+		adapters := func(ctx context.Context, msg queue.Message) error {
+			if msg.Kind != sensor.KindMessage {
+				return structured.Take(ctx, msg)
+			}
+			if messages == nil {
+				return fmt.Errorf("%w: 봉인을 열 키가 없습니다", queue.ErrOutage)
+			}
+			return messages.Take(ctx, msg)
+		}
 		// Their own connections: reads for the screens never wait on them.
 		lanes, err := pgxpool.New(ctx, dsn)
 		if err != nil {
@@ -364,7 +360,7 @@ func main() {
 			{Pool: lanes, Topic: queue.Records, Name: "mind", Kinds: mind.Kinds, Handle: take, Log: log},
 			{Pool: lanes, Topic: queue.Guest, Name: "mind-guest", Kinds: mind.GuestKinds, Handle: take, Log: log},
 			{Pool: lanes, Topic: queue.Records, Name: "mind-commands", Kinds: mind.CommandKinds, Handle: command, Log: log},
-			{Pool: lanes, Topic: queue.Records, Name: "mind-structured", Kinds: sensor.Kinds, Handle: structured.Take, Log: log},
+			{Pool: lanes, Topic: queue.Records, Name: "mind-structured", Kinds: sensor.Kinds, Handle: adapters, Log: log},
 			{Pool: lanes, Topic: queue.Guest, Name: "mind-commands-guest", Kinds: mind.GuestCommandKinds, Handle: command, Log: log},
 			{Pool: lanes, Topic: queue.Records, Name: "mind-relay", Kinds: []string{"*"}, Handle: stream.Relay(queue.Effects), Log: log},
 			{Pool: lanes, Topic: queue.Guest, Name: "mind-relay-guest", Kinds: []string{"*"}, Handle: stream.Relay(queue.GuestEffects), Log: log},

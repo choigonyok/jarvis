@@ -5,41 +5,40 @@ package sensor
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
 
+	"github.com/choigonyok/jarvis/gocommon/collect"
+	"github.com/choigonyok/jarvis/gocommon/queue"
+	"github.com/choigonyok/jarvis/gocommon/seal"
 	"github.com/choigonyok/jarvis/mind-svc/internal/mind"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 )
 
-// Messenger reads a chat collector (kakaotalk-client, imessage-client) by
-// row id, from where it left off.
-type Messenger struct {
-	Name    string // kakao | imessage
-	URL     string
-	Token   string
+// KindMessage is a message a collector handed on (gocommon/collect), sealed.
+const KindMessage = collect.KindMessage
+
+// Messages takes what the chat collectors (kakaotalk-client, imessage-client)
+// hand on. Every message comes; which are worth reading is said here.
+type Messages struct {
 	Store   store.Store
 	Log     obs.Log
+	Seal    *seal.Sealer
 	Exclude *regexp.Regexp // rooms that are alerts, ads, banks
 	// Payments are the payment apps' rooms ("카카오페이"): not read as
 	// conversation, but a notice of money received in them is a transfer
 	// (Occur records it).
 	Payments *regexp.Regexp
 	Occur    Observer
-	// Backfill is how far back a first start reads. A first start does not
-	// read the years before it: that is a backlog to replay deliberately,
-	// not to interpret on the way in.
-	Backfill time.Duration
-	Every    time.Duration
-	Out      *slog.Logger
-	HTTP     *http.Client
 }
 
 type collected struct {
@@ -52,96 +51,55 @@ type collected struct {
 	SentAt   int64  `json:"sent_at"`
 }
 
-func (s *Messenger) Run(ctx context.Context) {
-	if s.HTTP == nil {
-		s.HTTP = &http.Client{Timeout: 30 * time.Second}
-	}
-	t := time.NewTicker(s.Every)
-	defer t.Stop()
-	for {
-		if err := s.Poll(ctx); err != nil && ctx.Err() == nil {
-			s.Out.Warn("메시지를 읽지 못했습니다", "sensor", s.Name, "err", err)
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-		}
-	}
-}
-
-// Poll reads what is new and observes it.
-func (s *Messenger) Poll(ctx context.Context) error {
-	key := "sensor:" + s.Name
-	cur, err := s.Store.Cursor(ctx, key)
+// Take is one message of a collector's.
+func (s *Messages) Take(ctx context.Context, q queue.Message) error {
+	m, err := s.open(q)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %s: %v", queue.ErrRefused, q.SourceKey, err)
 	}
-	first := cur == 0
-	since := time.Now().Add(-s.Backfill)
-	for range 50 {
-		batch, err := s.fetch(ctx, cur)
-		if err != nil {
-			return err
-		}
-		for _, m := range batch {
-			sent := time.Unix(m.SentAt, 0)
-			if s.Payments != nil && s.Occur != nil && s.Payments.MatchString(m.ChatName) && (!first || sent.After(since)) {
-				if o, ok := Transfer(fmt.Sprintf("%s-pay:%d", s.Name, m.RowID), sent, m.Text); ok {
-					if err := s.Occur.Observe(ctx, o); err != nil {
-						return err
-					}
-				}
+	name, sent := q.Source, time.Unix(m.SentAt, 0)
+	if s.Payments != nil && s.Occur != nil && s.Payments.MatchString(m.ChatName) {
+		if o, ok := Transfer(fmt.Sprintf("%s-pay:%d", name, m.RowID), sent, m.Text); ok {
+			if err := s.Occur.Observe(ctx, o); err != nil {
+				return err
 			}
-			if (!first || sent.After(since)) && s.worth(m) {
-				msg := model.Message{
-					Ref: fmt.Sprintf("%s:%d", s.Name, m.RowID), Source: s.Name,
-					Room: fmt.Sprintf("%s:%d", s.Name, m.ChatID), RoomName: m.ChatName,
-					Sender: m.Author, IsMine: m.IsMine, SentAt: sent, Text: m.Text,
-				}
-				if err := mind.Observe(ctx, s.Store, s.Log, msg); err != nil {
-					return err
-				}
-			}
-			cur = m.RowID
-		}
-		if err := s.Store.SetCursor(ctx, key, cur); err != nil {
-			return err
-		}
-		if len(batch) < 500 {
-			return nil
 		}
 	}
-	return nil
+	if !s.worth(m) {
+		return nil
+	}
+	return mind.Observe(ctx, s.Store, s.Log, model.Message{
+		Ref: fmt.Sprintf("%s:%d", name, m.RowID), Source: name,
+		Room: fmt.Sprintf("%s:%d", name, m.ChatID), RoomName: m.ChatName,
+		Sender: m.Author, IsMine: m.IsMine, SentAt: sent, Text: m.Text,
+	})
 }
 
-func (s *Messenger) worth(m collected) bool {
+// open is the message as the collector kept it.
+func (s *Messages) open(q queue.Message) (collected, error) {
+	var m collected
+	var p struct {
+		Sealed string `json:"sealed"`
+	}
+	if err := json.Unmarshal(q.Payload, &p); err != nil {
+		return m, err
+	}
+	body, err := base64.StdEncoding.DecodeString(p.Sealed)
+	if err != nil {
+		return m, err
+	}
+	plain, err := s.Seal.Open(body)
+	if err != nil {
+		return m, err
+	}
+	return m, json.Unmarshal(plain, &m)
+}
+
+func (s *Messages) worth(m collected) bool {
 	if strings.TrimSpace(m.Text) == "" {
 		return false
 	}
 	return s.Exclude == nil || !s.Exclude.MatchString(m.ChatName)
-}
-
-func (s *Messenger) fetch(ctx context.Context, after int64) ([]collected, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/messages/after?rowid=%d&limit=500", strings.TrimRight(s.URL, "/"), after), nil)
-	if err != nil {
-		return nil, err
-	}
-	if s.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+s.Token)
-	}
-	resp, err := s.HTTP.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("%s: %d", s.Name, resp.StatusCode)
-	}
-	var out struct {
-		Messages []collected `json:"messages"`
-	}
-	return out.Messages, json.NewDecoder(resp.Body).Decode(&out)
 }
 
 // Chat reads the operator's conversation with jarvis (chat-svc) as one more
@@ -230,6 +188,31 @@ func (s *Chat) Poll(ctx context.Context) error {
 		return s.Store.SetCursor(ctx, "sensor:chat", last.UnixMicro())
 	}
 	return nil
+}
+
+func (s *Chat) turns(ctx context.Context, since time.Time) ([]turn, error) {
+	if s.HTTP == nil {
+		s.HTTP = &http.Client{Timeout: 30 * time.Second}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(s.URL, "/")+"/turns?thread=&since="+url.QueryEscape(since.Format(time.RFC3339Nano)), nil)
+	if err != nil {
+		return nil, err
+	}
+	if s.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+s.Token)
+	}
+	resp, err := s.HTTP.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("chat-svc: %d", resp.StatusCode)
+	}
+	var out struct {
+		Turns []turn `json:"turns"`
+	}
+	return out.Turns, json.NewDecoder(resp.Body).Decode(&out)
 }
 
 // message is a turn as a message of the jarvis room; ok is false when it has
