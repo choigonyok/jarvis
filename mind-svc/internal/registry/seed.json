@@ -56,6 +56,7 @@
     "remind.*": {"lane": "relay"},
     "spending.*": {"lane": "relay"},
     "status.*": {"lane": "relay"},
+    "check.result": {"lane": "relay"},
     "suggestion.*": {"lane": "relay"}
   },
   "action": {
@@ -89,5 +90,52 @@
   "policy": {
     "gate": {"window": "720h", "dailyInterrupts": 8, "dailyCards": 5, "minConfidence": 0.7, "interruptCost": 0.25,
       "quietRaised": "72h", "quietApproved": "168h", "quietRejected": "336h"}
+  },
+  "source": {
+    "kakao.messages": {
+      "kind": "message.received", "from": "kakao", "warn": "12h", "fail": "48h",
+      "group": "수집", "name": "카톡 새 메시지", "label": "마지막 메시지",
+      "ok": "새 메시지가 들어오고 있어요.", "late": "%s째 새 카톡이 없어요. 카카오톡이 꺼졌을 수 있어요.",
+      "gone": "%s째 새 카톡이 없어요. 맥의 카카오톡이 꺼졌거나 로그아웃된 것으로 보여요.",
+      "rule": "마지막 카톡이 12시간 안이면 정상, 12–48시간이면 주의, 48시간을 넘으면 이상으로 추정.",
+      "fix": "맥에서 카카오톡이 켜져 있고 로그인돼 있는지 확인하세요. 꺼져 있던 동안의 메시지는 켜면 다시 들어와요.",
+      "deps": ["svc.kakaotalk"]
+    },
+    "spending.alerts": {
+      "kind": "occurrence.observed", "from": "spending", "warn": "72h", "fail": "168h",
+      "group": "수집", "name": "카드 결제 알림", "label": "마지막 카드 알림",
+      "ok": "카드 알림이 가계부에 들어오고 있어요.", "late": "%s째 카드 알림이 없어요.",
+      "gone": "%s째 카드 알림이 없어요. 결제가 가계부에 빠지고 있을 수 있어요.",
+      "rule": "마지막 카드 알림이 3일 안이면 정상, 3–7일이면 주의, 7일을 넘으면 이상.",
+      "fix": "카드를 안 쓴 날이 이어졌다면 정상이에요. 아니라면 카톡 수집과 mind 컨테이너 로그를 보세요.",
+      "deps": ["kakao.messages", "svc.mind"]
+    },
+    "photos.fresh": {
+      "kind": "photos.recent", "from": "photos", "warn": "72h", "fail": "240h",
+      "group": "수집", "name": "사진 유입", "label": "마지막 사진",
+      "ok": "사진이 들어오고 있어요.", "late": "%s째 새 사진이 없어요.",
+      "gone": "%s째 새 사진이 없어요. 폰 백업이 멈췄을 수 있어요.",
+      "rule": "새 사진이 사진 어댑터에 보인 지 3일 안이면 정상, 3~10일이면 주의, 10일을 넘으면 이상. 폰이 사진을 올리지 않으면 사진으로 아는 것(지금 상황·앨범·회고)이 멈춰요.",
+      "fix": "폰의 Immich 앱에서 백업이 켜져 있고 맥미니(Tailscale)에 닿는지 보세요. 사진을 안 찍은 날이 이어졌다면 정상이에요.",
+      "deps": ["svc.photos"]
+    },
+    "mind.weather": {
+      "kind": "weather.forecast", "from": "context", "warn": "24h", "fail": "36h",
+      "group": "수집", "name": "날씨", "label": "마지막 예보",
+      "ok": "날씨 예보를 읽고 있어요.", "late": "%s째 새 예보가 없어요. 지난 예보로 말해요.",
+      "gone": "%s째 날씨 예보를 읽지 못하고 있어요.",
+      "rule": "새 예보가 24시간 안이면 정상, 36시간 안이면 주의, 그보다 오래되면 이상.",
+      "fix": "맥미니가 api.open-meteo.com 과 nominatim.openstreetmap.org 에 닿는지 보세요. 아침 브리핑의 날씨 줄과 야외 일정의 비 소식이 이것으로 나와요.",
+      "deps": ["svc.context"]
+    },
+    "assets.snapshot": {
+      "kind": "assets.daily", "from": "assets", "warn": "36h", "fail": "96h",
+      "group": "외부 계정", "name": "자산 일별 기록", "label": "마지막 기록",
+      "ok": "매일 기록되고 있어요.", "late": "%s째 자산이 기록되지 않았어요.",
+      "gone": "%s째 자산이 기록되지 않았어요. 자산 곡선에 빈 구간이 생겨요.",
+      "rule": "마지막 일별 기록이 36시간 안이면 정상, 4일 안이면 주의, 그보다 오래되면 이상.",
+      "fix": "자산 서비스 로그를 보세요. 기록은 매일 저녁에 남아요.",
+      "deps": ["svc.assets"]
+    }
   }
 }

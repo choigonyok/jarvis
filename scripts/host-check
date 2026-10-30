@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 맥미니의 전제(DEPLOY.md)를 점검해 ~/.jarvis-host/host.json 에 적는다. 맥미니에서 돈다.
-# status-svc 가 그 파일을 읽어 상태 탭의 "기반"에 보여 준다 - 컨테이너는 이것들을 직접 볼 수 없다.
+# context-svc 가 그 파일을 읽어 판정을 기록(check.result)으로 남기고 상태 탭의 "기반"이 그것을 보여 준다
+# - 컨테이너는 이것들을 직접 볼 수 없다.
 #
 #   scripts/host-check run        지금 한 번
 #   scripts/host-check install    LaunchAgent com.jarvis.host-check 로 10분마다
@@ -43,7 +44,7 @@ disk_history() {
 
 run() {
   mkdir -p "$OUT"
-  chmod 755 "$OUT" # the status container reads it (read-only mount); nothing secret is in it
+  chmod 755 "$OUT" # the context container reads it (read-only mount); nothing secret is in it
   local fv tm mirror last aof
   fv=$(fdesetup status 2>/dev/null | sed -n 's/^FileVault is \([A-Za-z]*\).*/\1/p' | head -1)
   tm=false

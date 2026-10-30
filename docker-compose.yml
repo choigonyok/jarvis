@@ -295,6 +295,11 @@ services:
       WEATHER: ${MIND_WEATHER:-}
       WEATHER_HOME: ${MIND_WEATHER_HOME:-}
       CONTEXT_RAW_DAYS: ${CONTEXT_RAW_DAYS:-30}
+      HOST_FILEVAULT_OFF_ACCEPTED: ${JARVIS_FILEVAULT_OFF_ACCEPTED:-false}
+    volumes:
+      # scripts/host-check 가 10분마다 적는 맥미니의 전제. 컨테이너는 이것들을 직접 볼 수 없다. 읽기만 하고,
+      # 점검 결과를 기록(check.result)으로 낸다.
+      - ${HOME}/.jarvis-host:/host:ro
     expose:
       - "8103"
     ports:
@@ -727,8 +732,6 @@ services:
       additional_contexts:
         gocommon: ./gocommon
     environment:
-      # FileVault 를 끈 채로 두기로 한 운영자의 결정(받아들인 위험). 맥미니 .env 에서 정한다.
-      HOST_FILEVAULT_OFF_ACCEPTED: ${JARVIS_FILEVAULT_OFF_ACCEPTED:-false}
       TZ: ${TZ:-Asia/Seoul}
       LISTEN_ADDR: ":8096"
       DATABASE_URL: >-
@@ -744,8 +747,8 @@ services:
       MEMORY_URL: http://memory:8100
       CONTEXT_URL: http://context:8103
       VAULT_URL: http://vault:8105
-      # 이 아래는 /health 의 계약(gocommon/health: 반복 작업의 진행, 격리함)이나 상태만 읽는다.
-      # 입구와 소비자마다의 전달, 알림, 작업, iMessage 수집기, 웹 찾기, 손님 에이전트, 사진.
+      # 상태 탭은 기능별 코드 없이 읽기만 한다: /health 의 계약(gocommon/health), 입구의 /last
+      # (소스별 마지막 기록과 서비스가 남긴 점검), mind 레지스트리의 소스별 기대 주기.
       INPUT_URL: http://input:8101
       NOTIFY_SVC_URL: http://output:8097
       PHOTOS_URL: http://photos:8107
@@ -754,23 +757,15 @@ services:
       SEARCH_URL: http://search:8104
       AGENT_GUEST_URL: http://agent-guest:8081
       IMMICH_URL: http://immich:2283
-      # 사진 유입 probe 가 가장 최근 사진의 시각을 읽는다(mind 의 읽기 키를 같이 쓴다).
-      IMMICH_API_KEY: ${IMMICH_MIND_API_KEY:-}
       FALKORDB_ADDR: falkordb:6379
       # 맥미니 호스트에서 도는 것(LaunchAgent): 목소리와 그림 속 글자 읽기.
       TTS_URL: ${JARVIS_TTS_URL:-http://host.docker.internal:8106}
       OCR_URL: ${JARVIS_OCR_URL:-http://host.docker.internal:8107}
       BROWSER_ADDR: browser:8931
-      # 쿠팡·네이버페이 주문목록이 열리는지는 에이전트 브라우저 새 탭에서 직접
-      # 열어 보고 판단한다(30분마다). 쿠키가 남아 있어도 로그아웃일 수 있었다.
     expose:
       - "8096"
     ports:
       - "127.0.0.1:${JARVIS_STATUS_PORT:-8096}:8096"
-    volumes:
-      # 맥미니의 전제(FileVault·Time Machine·iMessage 미러·백업)를 scripts/host-check 가
-      # 10분마다 적는 곳. 컨테이너는 이것들을 직접 볼 수 없다. 읽기만 한다.
-      - ${HOME}/.jarvis-host:/host:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8096/health || exit 1"]
       interval: 15s

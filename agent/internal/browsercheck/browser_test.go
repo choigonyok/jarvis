@@ -281,9 +281,8 @@ func TestACheckThatFindsTheSiteSignedInSaysSo(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go c.Run(ctx)
 	c.init()
-	c.kick <- struct{}{}
+	go c.pass(ctx)
 	select {
 	case id := <-signed:
 		if id != "shop" {
@@ -313,7 +312,7 @@ func TestALookDoesNotStartTheBrowser(t *testing.T) {
 	c.results["shop"] = Result{At: time.Now().Add(-time.Hour)} // due by Every, not by WhenDown
 	ctx := context.Background()
 
-	c.pass(ctx, false)
+	c.pass(ctx)
 	f.mu.Lock()
 	n := len(f.navigated)
 	f.mu.Unlock()
@@ -324,7 +323,7 @@ func TestALookDoesNotStartTheBrowser(t *testing.T) {
 	f.mu.Lock()
 	f.alive = true
 	f.mu.Unlock()
-	c.pass(ctx, false)
+	c.pass(ctx)
 	f.mu.Lock()
 	n = len(f.navigated)
 	f.mu.Unlock()
@@ -336,7 +335,7 @@ func TestALookDoesNotStartTheBrowser(t *testing.T) {
 	f.alive, f.navigated = false, nil
 	f.mu.Unlock()
 	c.results["shop"] = Result{At: time.Now().Add(-7 * time.Hour)} // past WhenDown
-	c.pass(ctx, false)
+	c.pass(ctx)
 	f.mu.Lock()
 	n = len(f.navigated)
 	f.mu.Unlock()

@@ -5,11 +5,15 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/choigonyok/jarvis/gocommon/checks"
 	"github.com/choigonyok/jarvis/gocommon/queue"
 	"github.com/choigonyok/jarvis/input-svc/internal/envelope"
 )
@@ -73,7 +77,32 @@ func (b *batch) put(ctx context.Context, e envelope.Envelope) (int64, bool, erro
 		return 0, false, err
 	}
 	b.touched[t.Name] = t
+	if !e.IsGuest() {
+		if err := b.seen(ctx, e, *at); err != nil {
+			return 0, false, err
+		}
+	}
 	return *id, false, nil
+}
+
+// seen keeps what the status tab reads: when each source last had something
+// new to say, and the latest of each check. The same words said again are no
+// news: an adapter says its first read once more after a restart.
+func (b *batch) seen(ctx context.Context, e envelope.Envelope, at time.Time) error {
+	sum := sha256.Sum256(e.Payload)
+	if _, err := b.tx.Exec(ctx, `
+		insert into input.last_seen (kind, source, at, sum) values ($1, $2, $3, $4)
+		on conflict (kind, source) do update set at = excluded.at, sum = excluded.sum
+		where input.last_seen.sum <> excluded.sum`, e.Kind, e.Source, at, hex.EncodeToString(sum[:])); err != nil {
+		return err
+	}
+	if e.Kind != checks.Kind || e.Subject == "" {
+		return nil
+	}
+	_, err := b.tx.Exec(ctx, `
+		insert into input.checks (id, at, body) values ($1, $2, $3::jsonb)
+		on conflict (id) do update set at = excluded.at, body = excluded.body`, e.Subject, at, string(e.Payload))
+	return err
 }
 
 func (b *batch) wake(ctx context.Context) error {
@@ -83,6 +112,48 @@ func (b *batch) wake(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// Seen is when one source last had something new to say.
+type Seen struct {
+	Kind   string    `json:"kind"`
+	Source string    `json:"source"`
+	At     time.Time `json:"at"`
+}
+
+// Check is the latest a service said of one check.
+type Check struct {
+	ID   string          `json:"id"`
+	At   time.Time       `json:"at"`
+	Body json.RawMessage `json:"body"`
+}
+
+// Last is what the status tab reads: every source and every check as it stands.
+func (s *Store) Last(ctx context.Context) ([]Seen, []Check, error) {
+	rows, err := s.pool.Query(ctx, `select kind, source, at from input.last_seen order by kind, source`)
+	if err != nil {
+		return nil, nil, err
+	}
+	seen, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (Seen, error) {
+		var x Seen
+		err := r.Scan(&x.Kind, &x.Source, &x.At)
+		return x, err
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	rows, err = s.pool.Query(ctx, `select id, at, body::text from input.checks order by id`)
+	if err != nil {
+		return nil, nil, err
+	}
+	list, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (Check, error) {
+		var x Check
+		var body string
+		err := r.Scan(&x.ID, &x.At, &body)
+		x.Body = json.RawMessage(body)
+		return x, err
+	})
+	return seen, list, err
 }
 
 // Drain moves up to limit rows from the outbox into the records, oldest

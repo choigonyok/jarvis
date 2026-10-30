@@ -13,6 +13,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 
+import { venueChecks, worthSaying } from "./checks.js";
 import * as db from "./db.js";
 import type { Allocation, Holding, Outflow, OutflowUse, Portfolio } from "./types.js";
 import { announce, halfRead } from "./notify.js";
@@ -622,6 +623,7 @@ async function watchHoldings(): Promise<void> {
     principal: { flows: (p.principal?.flows ?? []).map(({ id, venue, amountKrw, date, memo }) => ({ id, venue, amountKrw, date, memo })) },
     realized: { sales: p.realized?.sales ?? [] },
   };
+  await db.enqueueEvents(worthSaying(venueChecks(p.problems ?? [], new Date()), Date.now()));
   const raw = JSON.stringify(body);
   if (raw === lastHoldings) return;
   if (await db.enqueueEvents([recordOf("assets.holdings", body)])) lastHoldings = raw;

@@ -100,3 +100,33 @@ func TestLiveIsReplacedWhole(t *testing.T) {
 		t.Fatal("읽는 쪽이 보던 표는 그대로입니다")
 	}
 }
+
+// What ships says who should be heard from, and a row that makes no sense is
+// refused: a warning later than the fault, a row with nothing to look at.
+func TestSourcesShipAndAreChecked(t *testing.T) {
+	var found int
+	for _, r := range Seed() {
+		if r.Section != SectionSource {
+			continue
+		}
+		found++
+		if err := Check(r.Section, r.Key, r.Body); err != nil {
+			t.Errorf("%s: %v", r.Key, err)
+		}
+	}
+	if found == 0 {
+		t.Fatal("씨앗에 소스가 없습니다")
+	}
+	for _, body := range []string{
+		`{"kind":"a","from":"b","name":"c","warn":"2h","fail":"1h"}`,
+		`{"from":"b","name":"c","warn":"1h","fail":"2h"}`,
+		`{"kind":"a","from":"b","name":"c","warn":"나중","fail":"2h"}`,
+	} {
+		if Check(SectionSource, "x", json.RawMessage(body)) == nil {
+			t.Errorf("거절해야 합니다: %s", body)
+		}
+	}
+	if err := Check(SectionSource, "x", json.RawMessage(`{"kind":"a","from":"b","name":"c","warn":"1h","fail":"2h"}`)); err != nil {
+		t.Fatal(err)
+	}
+}

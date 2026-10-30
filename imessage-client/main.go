@@ -62,6 +62,16 @@ func main() {
 		Scratch:    getenv("SCRATCH_DIR", "/tmp/imessage-scratch"),
 	}
 
+	loops := health.NewLoops()
+	loops.Add("read", "메시지 DB 읽기", 5*time.Minute)
+	read := func(err error) {
+		if err != nil {
+			loops.Fail("read", err)
+			return
+		}
+		loops.OK("read")
+	}
+
 	// The reader is opened in the loop: until Full Disk Access is granted the
 	// file is not there, and the service should serve /status saying so rather
 	// than exit and restart forever.
@@ -75,6 +85,7 @@ func main() {
 				if err != nil {
 					total, _ := st.Total()
 					status.Set(0, total, err)
+					read(err)
 				} else {
 					reader = r
 					log.Info("메시지 데이터베이스를 읽기 시작합니다", "path", cfg.ChatDB)
@@ -89,6 +100,7 @@ func main() {
 				}
 				total, _ := st.Total()
 				status.Set(cursor, total, err)
+				read(err)
 				if err != nil {
 					log.Warn("메시지를 읽지 못했습니다", "err", err)
 				}
@@ -102,7 +114,6 @@ func main() {
 	}()
 
 	// 들어온 메시지는 봉인해서 입구로 넘긴다. mind 는 이제 수집기를 읽으러 오지 않는다.
-	loops := health.NewLoops()
 	if url, key := os.Getenv("INPUT_URL"), os.Getenv("MESSAGE_KEY"); url != "" && key != "" {
 		sealer, err := seal.FromBase64(key)
 		if err != nil {

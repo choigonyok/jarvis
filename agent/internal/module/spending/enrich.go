@@ -9,11 +9,13 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/choigonyok/jarvis/agent/internal/browsercheck"
 	"github.com/choigonyok/jarvis/agent/internal/claudecode"
 )
 
@@ -338,6 +340,12 @@ func clampText(s string, n int) string {
 		return s
 	}
 	return string(r[:n]) + "…"
+}
+
+// Lookups is how a site's order lookups stand in the book.
+func (m *Module) Lookups(ctx context.Context, source string) (browsercheck.Lookups, error) {
+	var out browsercheck.Lookups
+	return out, m.store.call(ctx, http.MethodGet, "/enrich/stats?source="+url.QueryEscape(source), nil, &out)
 }
 
 // Resume puts back in the queue a site's lookups that stopped at its login

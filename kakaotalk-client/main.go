@@ -72,9 +72,11 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	loops := health.NewLoops()
+	loops.Add(poller.LoopRead, "카카오톡 DB 읽기", time.Minute)
+	p.Loops = loops
 	go p.Run(ctx)
 	// 들어온 메시지는 봉인해서 입구로 넘긴다. mind 는 이제 수집기를 읽으러 오지 않는다.
-	loops := health.NewLoops()
 	if url, key := os.Getenv("INPUT_URL"), os.Getenv("MESSAGE_KEY"); url != "" && key != "" {
 		sealer, err := seal.FromBase64(key)
 		if err != nil {

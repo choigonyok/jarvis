@@ -1,4 +1,4 @@
-package probes
+package host
 
 import (
 	"context"
@@ -9,17 +9,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/choigonyok/jarvis/status-svc/internal/check"
+	"github.com/choigonyok/jarvis/gocommon/checks"
 )
 
 // The Mac mini's prerequisites, as scripts/host-check writes them.
 func TestHostProbes(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "host.json")
-	e := &env{Config: Config{HostFile: file}}
-	run := func(p check.Probe) check.State { return p.Run(context.Background()).State }
+	e := &Watch{File: file}
+	run := func(r row) string { return r.run(context.Background()).State }
 
-	if run(e.hostFileVault()) != check.Unknown {
+	if run(e.hostFileVault()) != checks.Unknown {
 		t.Fatal("기록이 없으면 모름")
 	}
 	write := func(body string) {
@@ -30,39 +30,39 @@ func TestHostProbes(t *testing.T) {
 	now := time.Now().Format(time.RFC3339)
 	today := time.Now().Format("2006-01-02")
 	write(`{"checkedAt":"` + now + `","filevault":"Off","timemachine":false,"mirror":"ssh","lastBackup":"` + today + `"}`)
-	if run(e.hostFileVault()) != check.Warn || run(e.hostTimeMachine()) != check.Warn || run(e.hostMirror()) != check.Warn || run(e.hostBackup()) != check.OK {
+	if run(e.hostFileVault()) != checks.Warn || run(e.hostTimeMachine()) != checks.Warn || run(e.hostMirror()) != checks.Warn || run(e.hostBackup()) != checks.OK {
 		t.Fatal("꺼짐·없음·SSH 는 경고, 오늘 백업은 정상")
 	}
 	write(`{"checkedAt":"` + now + `","filevault":"On","timemachine":true,"mirror":"binary","lastBackup":"2026-01-01"}`)
-	if run(e.hostFileVault()) != check.OK || run(e.hostTimeMachine()) != check.OK || run(e.hostMirror()) != check.OK || run(e.hostBackup()) != check.Fail {
+	if run(e.hostFileVault()) != checks.OK || run(e.hostTimeMachine()) != checks.OK || run(e.hostMirror()) != checks.OK || run(e.hostBackup()) != checks.Fail {
 		t.Fatal("켜짐·있음·바이너리는 정상, 오래된 백업은 이상")
 	}
 	// What the newest backup lacks (its manifest, through host-check): the
 	// approval ledger missing is a warning, not a date that looks fine.
 	write(`{"checkedAt":"` + now + `","lastBackup":"` + today + `","backupMissing":["jarvis-data.tar.gz:proposals.json"]}`)
-	if v := e.hostBackup().Run(context.Background()); v.State != check.Warn || !strings.Contains(v.Summary, "proposals.json") {
+	if v := e.hostBackup().run(context.Background()); v.State != checks.Warn || !strings.Contains(v.Summary, "proposals.json") {
 		t.Fatalf("빠진 것이 있는 백업은 주의: %+v", v)
 	}
 	write(`{"checkedAt":"` + now + `","lastBackup":"` + today + `","backupMissing":[]}`)
-	if v := e.hostBackup().Run(context.Background()); v.State != check.OK || !strings.Contains(v.Summary, "다 들었어요") {
+	if v := e.hostBackup().run(context.Background()); v.State != checks.OK || !strings.Contains(v.Summary, "다 들었어요") {
 		t.Fatalf("다 든 백업: %+v", v)
 	}
 	write(`{"checkedAt":"` + now + `","falkordbAOF":"no"}`)
-	if run(e.hostFalkorAOF()) != check.Fail {
+	if run(e.hostFalkorAOF()) != checks.Fail {
 		t.Fatal("AOF 가 꺼졌으면 이상")
 	}
 	write(`{"checkedAt":"` + now + `","falkordbAOF":"yes"}`)
-	if run(e.hostFalkorAOF()) != check.OK {
+	if run(e.hostFalkorAOF()) != checks.OK {
 		t.Fatal("AOF 가 켜져 있으면 정상")
 	}
 	write(`{"checkedAt":"` + now + `","filevault":"Off"}`)
 	e.FileVaultOffAccepted = true
-	if v := e.hostFileVault().Run(context.Background()); v.State != check.OK || v.Summary == "" {
+	if v := e.hostFileVault().run(context.Background()); v.State != checks.OK || v.Summary == "" {
 		t.Fatalf("운영자가 끄기로 했으면 결정으로 보여 줍니다: %+v", v)
 	}
 	e.FileVaultOffAccepted = false
 	write(`{"checkedAt":"2026-01-01T00:00:00Z","filevault":"On"}`)
-	if run(e.hostFileVault()) != check.Unknown {
+	if run(e.hostFileVault()) != checks.Unknown {
 		t.Fatal("점검이 멈췄으면 모름")
 	}
 }
@@ -72,7 +72,7 @@ func TestHostProbes(t *testing.T) {
 func TestHostDisk(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "host.json")
-	e := &env{Config: Config{HostFile: file}}
+	e := &Watch{File: file}
 	now := time.Now()
 	write := func(disk string) {
 		body := `{"checkedAt":"` + now.Format(time.RFC3339) + `","disk":` + disk + `}`
@@ -80,13 +80,13 @@ func TestHostDisk(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	run := func() check.Verdict { return e.hostDisk().Run(context.Background()) }
+	run := func() checks.Result { return e.hostDisk().run(context.Background()) }
 
-	if v := run(); v.State != check.Unknown {
+	if v := run(); v.State != checks.Unknown {
 		t.Fatalf("기록이 없으면 모름: %+v", v)
 	}
 	write(`null`)
-	if v := run(); v.State != check.Unknown || v.Meter != nil {
+	if v := run(); v.State != checks.Unknown || v.Meter != nil {
 		t.Fatalf("옛 host-check: %+v", v)
 	}
 
@@ -96,7 +96,7 @@ func TestHostDisk(t *testing.T) {
 		{"type":"Local Volumes","size":"12.74GB","reclaimable":"3.402GB (26%)"},{"type":"Build Cache","size":"33.48GB","reclaimable":"21.44GB"}]}`
 	write(fine)
 	v := run()
-	if v.State != check.OK || v.Figure != "143 / 245GB" || v.Meter == nil || *v.Meter != 58 || v.Summary != "102GB 남았어요." {
+	if v.State != checks.OK || v.Figure != "143 / 245GB" || v.Meter == nil || *v.Meter != 58 || v.Summary != "102GB 남았어요." {
 		t.Fatalf("정상: %+v", v)
 	}
 	want := []string{"도커 72.3GB: 이미지 29GB, 빌드 캐시 33GB, 볼륨 13GB", "빌드 캐시 중 21GB는 지워도 돼요", "사진 17.8GB", "매일 백업 0.5GB", "시스템과 그 밖의 파일 52.2GB"}
@@ -138,8 +138,8 @@ func TestHostDisk(t *testing.T) {
 	// The two lines it is judged by; the docker table missing still measures.
 	for _, c := range []struct {
 		free  int64
-		state check.State
-	}{{35_000_000, check.Warn}, {12_000_000, check.Fail}, {38_000_000, check.OK}} {
+		state string
+	}{{35_000_000, checks.Warn}, {12_000_000, checks.Fail}, {38_000_000, checks.OK}} {
 		write(fmt.Sprintf(`{"totalKB":239362496,"freeKB":%d,"docker":[]}`, c.free))
 		if v := run(); v.State != c.state {
 			t.Fatalf("남은 %d: %+v", c.free, v)
@@ -152,18 +152,38 @@ func TestHostDisk(t *testing.T) {
 // only waiting to become that.
 func TestKakaoLoginLockedScreen(t *testing.T) {
 	dir := t.TempDir()
-	e := &env{Config: Config{HostFile: filepath.Join(dir, "host.json")}}
+	e := &Watch{File: filepath.Join(dir, "host.json")}
 	now := time.Now().Format(time.RFC3339)
-	for state, want := range map[string]check.State{
-		"logged-in": check.OK, "waking": check.Warn, "locked": check.Fail, "locked-in": check.Warn,
-		"locked-unknown": check.Warn, "unreadable": check.Warn, "unreadable-out": check.Fail,
+	for state, want := range map[string]string{
+		"logged-in": checks.OK, "waking": checks.Warn, "locked": checks.Fail, "locked-in": checks.Warn,
+		"locked-unknown": checks.Warn, "unreadable": checks.Warn, "unreadable-out": checks.Fail,
 	} {
 		body := `{"checkedAt":"` + now + `","state":"` + state + `"}`
 		if err := os.WriteFile(filepath.Join(dir, "kakaotalk-login.json"), []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if v := e.kakaoLogin(context.Background()); v.State != want || v.Summary == "" {
+		if v := e.judgeLogin(); v.State != want || v.Summary == "" {
 			t.Fatalf("%s 는 %v 여야 합니다: %+v", state, want, v)
+		}
+	}
+}
+
+// The phone's last report: nothing yet is not a fault, a long silence is.
+func TestThePhoneReporting(t *testing.T) {
+	var at *time.Time
+	w := &Watch{Location: func(context.Context) (*time.Time, string, error) { return at, "집", nil }}
+	state := func() string { return w.location().run(context.Background()).State }
+	if state() != checks.Unknown {
+		t.Fatal("받은 적 없으면 모름")
+	}
+	for _, c := range []struct {
+		ago  time.Duration
+		want string
+	}{{time.Hour, checks.OK}, {40 * time.Hour, checks.Warn}, {80 * time.Hour, checks.Fail}} {
+		then := time.Now().Add(-c.ago)
+		at = &then
+		if got := state(); got != c.want {
+			t.Fatalf("%v: %s", c.ago, got)
 		}
 	}
 }

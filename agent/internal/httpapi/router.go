@@ -30,7 +30,6 @@ import (
 )
 
 type Server struct {
-	browserChecks http.Handler
 	vault         http.Handler
 	thread        *thread.Store
 	proposals     *proposal.Store
@@ -135,8 +134,6 @@ type Deps struct {
 	APIUsage func(ctx context.Context) (any, error)
 	// MindUsage, when set, adds mind's model spend (by purpose) to /usage.
 	MindUsage func(ctx context.Context) (any, error)
-	// BrowserChecks serves the browser login checks (GET) and asks for one (POST).
-	BrowserChecks http.Handler
 	// Vault, when set, serves the saved logins to the console: the list and
 	// its uses (GET /vault) and forgetting one (DELETE /vault/{domain}).
 	Vault http.Handler
@@ -189,7 +186,6 @@ func New(d Deps) *Server {
 		usage:           d.Usage,
 		apiUsage:        d.APIUsage,
 		mindUsage:       d.MindUsage,
-		browserChecks:   d.BrowserChecks,
 		vault:           d.Vault,
 		followUp:        d.FollowUp,
 		jobs:            d.Jobs,
@@ -240,9 +236,6 @@ func (s *Server) Handler() http.Handler {
 	// The CLI's PreToolUse hook, from inside this container (policy.RunHook).
 	mux.Handle("POST /policy/check", s.guardMCP(http.HandlerFunc(s.postPolicyCheck)))
 
-	if s.browserChecks != nil {
-		mux.HandleFunc("/browser-checks", s.guard(s.browserChecks.ServeHTTP))
-	}
 	if s.vault != nil {
 		mux.HandleFunc("/vault", s.guard(s.vault.ServeHTTP))
 		mux.HandleFunc("/vault/", s.guard(s.vault.ServeHTTP))

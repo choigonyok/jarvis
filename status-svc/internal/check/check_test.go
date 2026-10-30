@@ -44,3 +44,23 @@ func TestSinceKeepsFirstTimeOfState(t *testing.T) {
 		t.Errorf("since moved from %v to %v while state stayed the same", first, again)
 	}
 }
+
+// Rows that came from the stack run like the others, and one no longer said
+// leaves the screen.
+func TestRowsComeAndGo(t *testing.T) {
+	r := NewRunner(nil, []Probe{probe("fixed", OK)}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	r.Sync([]Probe{probe("came", Fail), probe("gone", Warn)})
+	r.Refresh(context.Background())
+	if got := len(r.Snapshot().Results); got != 3 {
+		t.Fatalf("%d", got)
+	}
+	r.Sync([]Probe{probe("came", OK)})
+	r.Refresh(context.Background())
+	got := r.Snapshot().Results
+	if len(got) != 2 || got[0].ID != "came" || got[0].State != OK || got[1].ID != "fixed" {
+		t.Fatalf("%+v", got)
+	}
+	if r.Confirm(context.Background(), "came") != OK {
+		t.Fatal("다시 묻기")
+	}
+}

@@ -4,6 +4,7 @@
 //	GET  /health                       the contract (gocommon/health): each consumer's delivery, the held box
 //	POST /records                      a record, from a process with no database
 //	POST /mind/{path}                  what a screen changes in mind: a record, and what came of it (also PUT, PATCH, DELETE)
+//	GET  /last                         when each source last had news, and the latest of each check (the status tab)
 //	GET  /turns?thread=&since=&limit=&before=   the conversation: a thread, or a page of it
 //	POST /turns                        a turn said: its record, and the turn
 //	PUT  /turns/{id}                   a turn with an origin given its newest word
@@ -84,6 +85,7 @@ func (s *Server) Handler() http.Handler {
 	for _, method := range []string{"POST", "PUT", "PATCH", "DELETE"} {
 		mux.HandleFunc(method+" /mind/{path...}", s.auth(true, s.command))
 	}
+	mux.HandleFunc("GET /last", s.auth(false, s.last))
 	mux.HandleFunc("GET /workout", s.auth(true, s.readWorkout))
 	mux.HandleFunc("POST /workout/changes", s.auth(true, s.changeWorkout))
 	mux.HandleFunc("GET /held", s.auth(false, s.held))
@@ -197,6 +199,16 @@ func (s *Server) post(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, http.StatusCreated, map[string]any{"id": id})
 	}
+}
+
+func (s *Server) last(w http.ResponseWriter, r *http.Request) {
+	seen, list, err := s.store.Last(r.Context())
+	if err != nil {
+		s.log.Error("마지막 기록을 읽지 못했습니다", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "기록을 읽지 못했습니다."})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"sources": seen, "checks": list})
 }
 
 func (s *Server) held(w http.ResponseWriter, r *http.Request) {

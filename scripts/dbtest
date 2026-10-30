@@ -60,7 +60,7 @@ for d in "${dirs[@]}"; do
   prefix=$(echo "${d%-svc}" | tr a-z- A-Z_)
   if ! (cd "$ROOT/$d" && env JARVIS_TEST_DSN="$dsn" "${prefix}_TEST_DATABASE_URL=$dsn" \
         JARVIS_TEST_ADMIN_DSN="postgres://jarvis:test@127.0.0.1:$PORT/jarvis?sslmode=disable" \
-        go test -count=1 "$@" ./...); then
+        go test -p 1 -count=1 "$@" ./...); then
     failed+=("$d")
   fi
 done

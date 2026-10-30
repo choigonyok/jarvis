@@ -2,9 +2,7 @@ package browsercheck
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
-	"net/http"
 	"net/url"
 	"strings"
 	"sync"
@@ -13,17 +11,18 @@ import (
 
 // Site is an order history whose login is checked by opening it.
 type Site struct {
-	ID        string `json:"id"`
-	Orders    string `json:"orders"`
-	LoginHost string `json:"loginHost"`
+	ID        string
+	Name      string
+	Orders    string
+	LoginHost string
 }
 
 // Result is the last check of one site.
 type Result struct {
-	URL   string    `json:"url,omitempty"` // where the page landed
-	Busy  bool      `json:"busy,omitempty"`
-	Error string    `json:"error,omitempty"`
-	At    time.Time `json:"at"`
+	URL   string // where the page landed
+	Busy  bool
+	Error string
+	At    time.Time
 }
 
 // Checker opens each site now and then, only while the assistant is idle.
@@ -31,7 +30,8 @@ type Result struct {
 // It lives in the agent because the agent is the browser's one user: the
 // conversation, the jobs and the order lookups all drive it, and only the
 // agent knows when none of them is. status-svc used to open tabs on its own
-// clock and could land in the middle of a job; now it reads the results here.
+// clock and could land in the middle of a job; now it reads what is said here
+// (Say).
 type Checker struct {
 	Client    *Client
 	Sites     []Site
@@ -63,7 +63,6 @@ type Checker struct {
 
 	mu      sync.Mutex
 	results map[string]Result
-	kick    chan struct{}
 	tried   map[string]time.Time
 }
 
@@ -91,7 +90,6 @@ func (c *Checker) init() {
 	defer c.mu.Unlock()
 	if c.results == nil {
 		c.results = map[string]Result{}
-		c.kick = make(chan struct{}, 1)
 		c.tried = map[string]time.Time{}
 	}
 }
@@ -101,34 +99,30 @@ func (c *Checker) Run(ctx context.Context) {
 	c.init()
 	tick := time.NewTicker(time.Minute)
 	defer tick.Stop()
-	forced := false
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
-		case <-c.kick:
-			forced = true
 		}
 		if c.Idle != nil && !c.Idle() {
 			continue
 		}
-		c.pass(ctx, forced)
-		forced = false
+		c.pass(ctx)
 	}
 }
 
-// pass looks at every site that is due - all of them when forced.
-func (c *Checker) pass(ctx context.Context, forced bool) {
+// pass looks at every site that is due.
+func (c *Checker) pass(ctx context.Context) {
 	up, asked := true, false
 	for _, s := range c.Sites {
 		c.mu.Lock()
 		last := c.results[s.ID].At
 		c.mu.Unlock()
-		if !forced && time.Since(last) < c.Every {
+		if time.Since(last) < c.Every {
 			continue
 		}
-		if !forced && c.WhenDown > 0 && time.Since(last) < c.WhenDown {
+		if c.WhenDown > 0 && time.Since(last) < c.WhenDown {
 			if !asked {
 				up, _ = c.Client.Alive(ctx)
 				asked = true
@@ -191,25 +185,4 @@ func (c *Checker) due(id string) bool {
 	}
 	c.tried[id] = time.Now()
 	return true
-}
-
-// Handler serves GET (the latest results) and POST (check again soon).
-func (c *Checker) Handler() http.Handler {
-	c.init()
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost {
-			select {
-			case c.kick <- struct{}{}:
-			default:
-			}
-			w.WriteHeader(http.StatusAccepted)
-			return
-		}
-		c.mu.Lock()
-		out := map[string]any{"sites": c.Sites, "results": c.results, "every": c.Every.String()}
-		body, _ := json.Marshal(out)
-		c.mu.Unlock()
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		_, _ = w.Write(body)
-	})
 }

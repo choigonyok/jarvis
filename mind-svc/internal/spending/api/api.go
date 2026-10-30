@@ -53,6 +53,7 @@ func (s *Server) Mount(read, write func(pattern string, h http.HandlerFunc)) {
 	write("POST "+Prefix+"/unparsed/{id}/resolve", s.resolve)
 	// 묶음 가맹점 조회. 에이전트가 백그라운드에서 쓴다.
 	read("GET "+Prefix+"/enrich/pending", s.enrichPending)
+	read("GET "+Prefix+"/enrich/stats", s.enrichStats)
 	write("POST "+Prefix+"/transactions/{id}/items", s.saveItems)
 	write("POST "+Prefix+"/transactions/{id}/enrich-report", s.enrichReport)
 	write("POST "+Prefix+"/enrich/retry", s.enrichRetry)
@@ -345,6 +346,15 @@ type Pending struct {
 	Issuer      string    `json:"issuer"`
 	CardTail    string    `json:"cardTail"`
 	Note        string    `json:"note"`
+}
+
+// enrichStats is how a site's order lookups stand, for the agent's check of it.
+func (s *Server) enrichStats(w http.ResponseWriter, r *http.Request) {
+	stats, err := s.store.EnrichStats(r.Context(), r.URL.Query().Get("source"))
+	if s.storeErr(w, err, "조회 기록을 읽지 못했습니다.") {
+		return
+	}
+	writeJSON(w, http.StatusOK, stats)
 }
 
 func (s *Server) enrichPending(w http.ResponseWriter, r *http.Request) {

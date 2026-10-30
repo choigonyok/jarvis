@@ -714,6 +714,27 @@ func (s *Store) ResolveUnparsed(ctx context.Context, messageID string) error {
 
 // ── 묶음 가맹점 조회 ──────────────────────────────────────────────────────
 
+// EnrichStats is how a site's order lookups stand.
+type EnrichStats struct {
+	LoginRequired int        `json:"loginRequired"`
+	Stale         int        `json:"stale"`
+	Pending       int        `json:"pending"`
+	LastDone      *time.Time `json:"lastDone,omitempty"`
+}
+
+// EnrichStats counts a site's lookups: waiting on a login, a day late, waiting.
+func (s *Store) EnrichStats(ctx context.Context, source string) (EnrichStats, error) {
+	var st EnrichStats
+	err := s.pool.QueryRow(ctx, `
+		select count(*) filter (where enrich_status = 'login_required'),
+		       count(*) filter (where enrich_status = 'pending' and enrich_next_at < now() - interval '1 day'),
+		       count(*) filter (where enrich_status = 'pending'),
+		       max(updated_at) filter (where enrich_status = 'done')
+		  from mind.card_transactions where enrich_source = $1`, source).
+		Scan(&st.LoginRequired, &st.Stale, &st.Pending, &st.LastDone)
+	return st, err
+}
+
 // Pending is what the background lookup should open next: charges whose turn
 // has come, from sites that are not waiting on a fresh login. Blocked names
 // the sites that are.

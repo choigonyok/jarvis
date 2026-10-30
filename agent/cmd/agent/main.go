@@ -27,6 +27,7 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/claudecode"
 	"github.com/choigonyok/jarvis/agent/internal/config"
 	"github.com/choigonyok/jarvis/agent/internal/core/bus"
+	"github.com/choigonyok/jarvis/gocommon/checks"
 	"github.com/choigonyok/jarvis/agent/internal/core/module"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
 	"github.com/choigonyok/jarvis/agent/internal/httpapi"
@@ -383,13 +384,12 @@ func main() {
 		log.Warn("브라우저 MCP 가 없어 작업을 실행하지 않습니다", "need", jobs.BrowserServer)
 	}
 	// 쇼핑몰 로그인 확인. 브라우저를 쓰는 것은 에이전트뿐이므로, 대화·작업이 없을
-	// 때 여기서 연다. status-svc 는 결과만 읽는다(/browser-checks).
-	var browserChecks http.Handler
+	// 때 여기서 연다. 결과는 기록으로 남기고 상태 탭이 그것을 읽는다.
 	if u, ok := cfg.ExtraMCPURLs[spending.BrowserServer]; ok && !cfg.Guest {
 		checker := &browsercheck.Checker{
 			Client: browsercheck.New(u, cfg.ExtraMCPToken),
 			Sites: []browsercheck.Site{
-				{ID: "coupang", Orders: "https://mc.coupang.com/ssr/desktop/order/list", LoginHost: "login.coupang.com"},
+				{ID: "coupang", Name: "쿠팡 주문 내역", Orders: "https://mc.coupang.com/ssr/desktop/order/list", LoginHost: "login.coupang.com"},
 			},
 			// 다른 탭이 로그인 화면이면(누가 비밀번호를 치는 중일 수 있다) 열지 않는다.
 			BusyHosts: []string{"login.coupang.com", "nid.naver.com", "pay.naver.com"},
@@ -437,8 +437,15 @@ func main() {
 				}
 			}
 		}
-		browserChecks = checker.Handler()
 		go checker.Run(enrichCtx)
+		if spendingModule != nil {
+			// 네이버페이 주문 내역은 자동으로 열어 보지 않는다(로그인 확인은 쿠팡만 한다).
+			go checker.Say(enrichCtx, []browsercheck.Quiet{{
+				ID: "naverpay", Name: "네이버페이 주문 내역",
+				Rule: "네이버페이 주문 내역은 자동으로 열어 보지 않아요(로그인 확인은 쿠팡만 해요). 상품 상세 조회가 로그인을 요구받았다고 기록하면 이상, 아니면 측정하지 않아요.",
+				Fix:  "화면 탭에서 에이전트 브라우저로 naver.com에 로그인하세요. '로그인 상태 유지'를 켜야 재시작 뒤에도 남아요.",
+			}}, spendingModule.Lookups, &checks.Reporter{Source: "agent", Records: records})
+		}
 	}
 	// A reading older than an hour is refreshed with the smallest request.
 	go runner.WatchUsage(enrichCtx, time.Hour)
@@ -713,7 +720,6 @@ func main() {
 		Usage:           usageTracker,
 		APIUsage:        apiUsage,
 		MindUsage:       mindUsage,
-		BrowserChecks:   browserChecks,
 		Vault:           vaultConsole(vaultModule),
 		FollowUp:        runner,
 		Jobs:            jobPayments,

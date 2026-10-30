@@ -28,6 +28,7 @@ const (
 	SectionSlot   = "slot"
 	SectionFact   = "fact"
 	SectionPolicy = "policy"
+	SectionSource = "source"
 )
 
 // Who wrote a row.
@@ -88,6 +89,31 @@ type Slot struct {
 type Fact struct {
 	// Single: one answer at a time. A move ends the old address.
 	Single bool `json:"single"`
+}
+
+// Source is something that should be heard from, and how long a silence is
+// worth a word. The status tab reads these and has no code of its own for any
+// of them; the row's key is the row's id there.
+type Source struct {
+	// Kind and From are the records that count: From is their source.
+	Kind string `json:"kind"`
+	From string `json:"from"`
+	// Warn and Fail are how long a silence may last.
+	Warn Duration `json:"warn"`
+	Fail Duration `json:"fail"`
+	// How the row reads.
+	Group string `json:"group"`
+	Name  string `json:"name"`
+	// OK, Late and Gone are its sentence in each state; Late and Gone may hold
+	// a %s for how long it has been.
+	OK   string `json:"ok"`
+	Late string `json:"late"`
+	Gone string `json:"gone"`
+	// Label names what the age on the row is the age of.
+	Label string   `json:"label"`
+	Rule  string   `json:"rule"`
+	Fix   string   `json:"fix"`
+	Deps  []string `json:"deps,omitempty"`
 }
 
 // Duration is a time span written as "72h".
@@ -169,6 +195,9 @@ func Parse(rows []Row) (*Snapshot, error) {
 			if r.Key == "gate" {
 				err = json.Unmarshal(r.Body, &s.gate)
 			}
+		case SectionSource:
+			var v Source
+			err = json.Unmarshal(r.Body, &v)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("레지스트리 %s/%s: %w", r.Section, r.Key, err)
@@ -225,6 +254,17 @@ func Check(section, key string, body json.RawMessage) error {
 		}
 		var v Gate
 		return dec(&v)
+	case SectionSource:
+		var v Source
+		if err := dec(&v); err != nil {
+			return err
+		}
+		if v.Kind == "" || v.From == "" || v.Name == "" {
+			return errors.New("소스에는 kind, from, name 이 있어야 합니다")
+		}
+		if v.Warn <= 0 || v.Fail <= v.Warn {
+			return errors.New("소스의 fail 은 warn 보다 길어야 합니다")
+		}
 	default:
 		return fmt.Errorf("없는 구역입니다: %s", section)
 	}

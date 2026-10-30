@@ -1,12 +1,7 @@
-// Command status-svc answers "is anything broken?" for the whole stack, per
-// feature rather than per container: are KakaoTalk messages arriving, can the
-// agent's browser still open Coupang's order history, does uniple still let
-// the calendar in.
-//
-// It only reads. Verdicts rest on signals that already exist - a service's own
-// status endpoint, a timestamp in Postgres - except where the only honest
-// answer is to try: whether an order page opens is asked of the agent's
-// browser, in a tab it closes again.
+// Command status-svc answers "is anything broken?" for the whole stack. It only
+// reads, and has no code of its own for any feature: each service's /health, how
+// far each consumer has read, when each source last had news against what the
+// registry expects of it, and what a service said of something only it can see.
 package main
 
 import (
@@ -60,10 +55,10 @@ func main() {
 	}
 
 	token := os.Getenv("API_TOKEN")
-	runner := check.NewRunner(probes.Groups, probes.All(probes.Config{
+	cfg := probes.Config{
 		Token:       token,
 		KakaoURL:    getenv("KAKAOTALK_URL", "http://localhost:8090"),
-		SpendingURL: getenv("SPENDING_URL", "http://localhost:8095"),
+		SpendingURL: getenv("SPENDING_URL", "http://localhost:8102/api/spending"),
 		AssetsURL:   getenv("ASSETS_URL", "http://localhost:8092"),
 		CalendarURL: getenv("CALENDAR_URL", "http://localhost:8093"),
 		AgentURL:    getenv("AGENT_URL", "http://localhost:8080"),
@@ -75,21 +70,33 @@ func main() {
 		// NOTIFY_URL is where this service's own alerts go (input-svc).
 		NotifyURL:     getenv("NOTIFY_SVC_URL", "http://localhost:8097"),
 		PhotosURL:     getenv("PHOTOS_URL", "http://localhost:8107"),
-		JobsURL:       getenv("JOBS_URL", "http://localhost:8098"),
+		JobsURL:       getenv("JOBS_URL", "http://localhost:8102/api/jobs"),
 		IMessageURL:   getenv("IMESSAGE_URL", "http://localhost:8099"),
 		SearchURL:     getenv("SEARCH_URL", "http://localhost:8104"),
 		AgentGuestURL: getenv("AGENT_GUEST_URL", "http://localhost:8081"),
 		ImmichURL:     getenv("IMMICH_URL", "http://localhost:2283"),
-		ImmichKey:     os.Getenv("IMMICH_API_KEY"),
 		TTSURL:        getenv("TTS_URL", "http://localhost:8106"),
 		OCRURL:        getenv("OCR_URL", "http://localhost:8107"),
 		FalkorAddr:    getenv("FALKORDB_ADDR", "localhost:6379"),
 		BrowserAddr:   getenv("BROWSER_ADDR", "localhost:8931"),
-		HostFile:      getenv("HOST_FACTS", "/host/host.json"),
-		// 운영자의 결정(2026-10-16): 무인 재시작을 위해 FileVault 를 끈 채로 둔다.
-		FileVaultOffAccepted: os.Getenv("HOST_FILEVAULT_OFF_ACCEPTED") == "true",
-		DB:                   pool,
-	}), log)
+		DB:            pool,
+	}
+	runner := check.NewRunner(probes.Groups, probes.All(cfg), log)
+	stack := probes.NewStack(cfg)
+	go func() {
+		t := time.NewTicker(30 * time.Second)
+		defer t.Stop()
+		for {
+			if rows, ok := stack.Rows(ctx); ok {
+				runner.Sync(rows)
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+			}
+		}
+	}()
 	// A probe going wrong is the one kind of news nobody would otherwise
 	// notice: the page looks fine while payments quietly stop arriving.
 	// Broken now is a push, a warning waits for the evening digest, and

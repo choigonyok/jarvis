@@ -164,7 +164,7 @@ func TestTheGuestsGoToTheGuestsTables(t *testing.T) {
 	if n := count(t, owner, `select count(*) from input.guest_deliveries where consumer = $1 and id = $2`, reads, id); n != 1 {
 		t.Fatalf("손님 배달 %d 건", n)
 	}
-	if n := count(t, owner, `select count(*) from input.deliveries where consumer = $1`, operators); n != 0 {
+	if n := count(t, owner, `select count(*) from input.deliveries where consumer = $1 and id = $2`, operators, id); n != 0 {
 		t.Fatalf("운영자 쪽 배달 %d 건", n)
 	}
 }

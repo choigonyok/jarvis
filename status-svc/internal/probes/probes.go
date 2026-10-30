@@ -1,5 +1,8 @@
-// Package probes is the list of things the status screen answers, and how
-// each one is decided. Adding a check is one entry in All.
+// Package probes is the list of things the status screen answers. It has no
+// code of its own for any feature: a service answers its /health (its loops and
+// what it set aside), the way in says how far each consumer has read, a source
+// is as fresh as its last record against what the registry expects of it, and
+// what only a service can see it says itself, as a check on the stream.
 package probes
 
 import (
@@ -9,11 +12,9 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/choigonyok/jarvis/status-svc/internal/check"
@@ -29,22 +30,16 @@ type Config struct {
 	MindURL     string
 	MemoryURL   string
 	ContextURL  string
-	// VaultURL is vault-svc: the saved logins. Only its health is read.
-	VaultURL string
-	// The rest are read only through their /health (gocommon/health) or
-	// their status: the event log and its deliveries, notifications, jobs,
-	// the iMessage collector, web search, the guest's agent, photos.
-	InputURL      string
-	NotifyURL     string
-	PhotosURL     string
-	JobsURL       string
-	IMessageURL   string
-	SearchURL     string
+	VaultURL    string
+	InputURL    string
+	NotifyURL   string
+	PhotosURL   string
+	JobsURL     string
+	IMessageURL string
+	SearchURL   string
+	// AgentGuestURL and ImmichURL are only asked whether they answer.
 	AgentGuestURL string
 	ImmichURL     string
-	// ImmichKey reads the newest photo's time (the phone's uploads); empty,
-	// photo freshness is not measured.
-	ImmichKey string
 	// TTSURL and OCRURL run on the Mac mini itself (LaunchAgents), reached
 	// at host.docker.internal.
 	TTSURL string
@@ -52,14 +47,7 @@ type Config struct {
 	// FalkorAddr is the graph memory's host:port (a Redis protocol PING).
 	FalkorAddr  string
 	BrowserAddr string // host:port of the browser MCP bridge
-	// HostFile is what scripts/host-check writes on the Mac mini (FileVault,
-	// Time Machine, the iMessage mirror, the last backup) - things a
-	// container cannot see for itself.
-	HostFile string
-	// FileVaultOffAccepted records the operator's decision to keep FileVault
-	// off (unattended restarts after a power cut matter more on this box).
-	FileVaultOffAccepted bool
-	DB                   *pgxpool.Pool
+	DB          *pgxpool.Pool
 }
 
 type env struct {
@@ -71,158 +59,23 @@ type env struct {
 // too often - the rule in gocommon/health - each row one service's box.
 var Groups = []string{"수집", "가계부 상품 상세", "외부 계정", "격리함", "기반"}
 
+// All is the rows that are always there.
 func All(cfg Config) []check.Probe {
 	e := &env{Config: cfg, client: &http.Client{Timeout: 15 * time.Second}}
-	slow := &http.Client{Timeout: 50 * time.Second}
 
 	return []check.Probe{
 		// ── 수집 ───────────────────────────────────────────────────────
-		{
-			ID: "kakao.collector", Group: "수집", Name: "카톡 수집기",
-			Rule:  "수집기가 1초마다 카카오톡 DB를 읽고 있으면 정상, 읽다 실패하거나 1분 넘게 읽지 않았으면 이상.",
-			Fix:   "kakaotalk 컨테이너 로그를 보세요. 복호화 실패라면 맥의 카카오톡 계정이 바뀌었을 수 있어요.",
-			Deps:  []string{"svc.kakaotalk"},
-			Every: 30 * time.Second,
-			Run:   e.kakaoCollector,
-		},
-		{
-			ID: "kakao.messages", Group: "수집", Name: "카톡 새 메시지",
-			Rule:  "마지막 카톡이 12시간 안이면 정상, 12–48시간이면 주의, 48시간을 넘으면 이상으로 추정.",
-			Fix:   "맥에서 카카오톡이 켜져 있고 로그인돼 있는지 확인하세요. 꺼져 있던 동안의 메시지는 켜면 다시 들어와요.",
-			Deps:  []string{"kakao.collector"},
-			Every: 30 * time.Second,
-			Run:   e.kakaoMessages,
-		},
-		{
-			ID: "kakao.login", Group: "수집", Name: "카톡 로그인",
-			Rule:  "맥미니 카톡이 로그인돼 있으면 정상 - 로그아웃돼도 자동 로그인 프로그램이 5초 안에 알아보고 인터넷이 돌아오는 대로 다시 로그인해요. 인터넷을 기다리거나 다시 시도하는 중이면 주의, 비밀번호가 맞지 않거나 휴대폰 확인이 필요하거나 권한·비밀번호가 없으면 이상. 프로그램을 설치하기 전에는 측정하지 않아요.",
-			Fix:   "scripts/kakaotalk-relogin status 로 상태와 로그를 보세요. 권한이 없으면 맥미니의 시스템 설정 → 개인정보 보호 및 보안 → 손쉬운 사용에서 'Jarvis 카톡 자동 로그인'을 켜고, 비밀번호가 없거나 틀렸으면 scripts/kakaotalk-relogin password. 휴대폰 확인으로 멈췄으면 맥미니에서 직접 로그인하면 다시 지켜봐요.",
-			Every: 30 * time.Second,
-			Run:   e.kakaoLogin,
-		},
-		{
-			ID: "mind.reading", Group: "수집", Name: "대화 해석",
-			Rule:  "mind 가 카톡·iMessage·jarvis 대화를 읽고 있으면 정상. 읽히지 않은 메시지가 30분 넘게 밀리면 주의, 2시간을 넘거나 LLM 키가 없으면 이상. 방이 3분 조용해지면(나와의 채팅은 45초) 읽는 게 보통이에요.",
-			Fix:   "mind 콘솔(맥미니 127.0.0.1:8102)에서 밀린 방을 보세요. 해석이 실패하고 있다면 오늘 LLM 예산(MIND_DAILY_USD)이나 키를 확인하세요.",
-			Deps:  []string{"svc.mind", "kakao.messages"},
-			Every: time.Minute,
-			Run:   e.mindReading,
-		},
-		{
-			ID: "mind.memory", Group: "수집", Name: "기억으로 보내기",
-			Rule:  "해석에서 나온 기억할 사실이 기억 서비스에 들어가고 있으면 정상. 1시간 넘게 기다리는 사실이 있으면 주의, 6시간을 넘으면 이상.",
-			Fix:   "기억 서비스가 응답하는지, 오늘 LLM 예산(MEMORY_DAILY_USD)이 남았는지 보세요. 기다리던 사실은 다시 보내져요.",
-			Deps:  []string{"svc.memory", "mind.reading"},
-			Every: time.Minute,
-			Run:   e.mindMemory,
-		},
-		{
-			ID: "mind.weather", Group: "수집", Name: "날씨",
-			Rule:  "mind 가 집 근처 날씨 예보(Open-Meteo)를 읽고 있으면 정상. 최근 읽기가 실패했으면 주의, 36시간 넘게 못 읽었으면 이상. 꺼 두었으면(MIND_WEATHER=false) 측정하지 않아요. 집은 폰에서 만든 '집' 영역, 없으면 MIND_WEATHER_HOME(기본 서울)이에요.",
-			Fix:   "맥미니가 api.open-meteo.com 과 nominatim.openstreetmap.org 에 닿는지 보세요. 아침 브리핑의 날씨 줄과 야외 일정의 비 소식이 이것으로 나와요.",
-			Deps:  []string{"svc.mind"},
-			Every: 10 * time.Minute,
-			Run:   e.mindWeather,
-		},
-		{
-			ID: "context.location", Group: "수집", Name: "위치 수신",
-			Rule:  "폰의 OwnTracks 가 보낸 마지막 위치가 36시간 안이면 정상, 36–72시간이면 주의, 72시간을 넘으면 이상. 한 번도 받지 않았으면 측정하지 않아요(설정 전). 크게 움직이지 않는 날은 위치가 드물게 와요.",
-			Fix:   "폰에서 OwnTracks 가 위치 권한 '항상 허용'인지, 모드가 Quiet 가 아닌지, 서버 주소·비밀번호가 맞는지 보세요. 배터리가 8% 아래면 일부러 조용히 둬요.",
-			Deps:  []string{"svc.context"},
-			Every: 5 * time.Minute,
-			Run:   e.location,
-		},
-		{
-			ID: "photos.fresh", Group: "수집", Name: "사진 유입",
-			Rule:  "사진 서버(Immich)에 들어온 가장 최근 사진이 3일 안이면 정상, 3~10일이면 주의, 10일을 넘으면 이상. 폰이 사진을 올리지 않으면 사진으로 아는 것(지금 상황·앨범·회고)이 멈춰요. 키가 없으면 측정하지 않아요.",
-			Fix:   "폰의 Immich 앱에서 백업이 켜져 있고 맥미니(Tailscale)에 닿는지 보세요. 사진을 안 찍은 날이 이어졌다면 정상이에요.",
-			Deps:  []string{"svc.immich"},
-			Every: 10 * time.Minute,
-			Run:   e.photosFresh,
-		},
-		{
-			ID: "spending.alerts", Group: "수집", Name: "카드 결제 알림",
-			Rule:  "가계부가 수집기를 읽을 수 있고 마지막 카드 알림이 3일 안이면 정상, 3–7일이면 주의, 7일을 넘거나 읽기에 실패하면 이상.",
-			Fix:   "카드를 안 쓴 날이 이어졌다면 정상이에요. 아니라면 카톡 수집과 mind 컨테이너 로그를 보세요.",
-			Deps:  []string{"kakao.messages", "svc.spending"},
-			Every: time.Minute,
-			Run:   e.spendingAlerts,
-		},
-		{
-			ID: "imessage.collector", Group: "수집", Name: "iMessage 수집기",
-			Rule:  "수집기가 몇 초마다 맥미니 메시지 앱의 DB 사본을 읽고 있으면 정상, 읽다 실패하거나 5분 넘게 읽지 않았으면 이상.",
-			Fix:   "imessage 컨테이너 로그와 맥미니의 iMessage 미러(scripts/imessage-mirror)를 보세요. 메시지 앱에 로그인돼 있지 않으면 들어오는 것이 없어요.",
-			Deps:  []string{"svc.imessage", "host.mirror"},
-			Every: time.Minute,
-			Run:   e.imessageCollector,
-		},
-
-		// ── 가계부 상품 상세 ──────────────────────────────────────────────
-		{
-			ID: "enrich.coupang", Group: "가계부 상품 상세", Name: "쿠팡 주문 내역",
-			Rule:  "에이전트가 대화·작업이 없을 때 브라우저 새 탭에서 쿠팡 주문목록을 열어 봐요 - 브라우저가 떠 있으면 30분마다, 꺼져 있으면 6시간마다(확인하려고 띄우지는 않아요). 열리면 정상, 로그인 화면으로 넘어가면 이상. 여기서는 그 결과를 읽어요.",
-			Fix:   "화면 탭에서 에이전트 브라우저로 coupang.com에 로그인하세요. 로그인이 끝나면 멈춰 있던 상품 상세 조회도 다시 시도해야 해요.",
-			Deps:  []string{"browser"},
-			Every: 30 * time.Minute, MinGap: time.Minute,
-			Run: e.enrich(coupang),
-		},
-		{
-			ID: "enrich.naverpay", Group: "가계부 상품 상세", Name: "네이버페이 주문 내역",
-			Rule:  "네이버페이 주문 내역은 자동으로 열어 보지 않아요(결제 감시는 이제 값을 보내는 요청만 묻지만, 로그인 확인은 쿠팡만 해요). 상품 상세 조회가 로그인을 요구받았다고 기록하면 이상, 아니면 측정하지 않아요.",
-			Fix:   "화면 탭에서 에이전트 브라우저로 naver.com에 로그인하세요. '로그인 상태 유지'를 켜야 재시작 뒤에도 남아요.",
-			Every: 5 * time.Minute,
-			Run:   e.recordOnly(naverpay),
-		},
+		e.loop("kakao.collector", "수집", "카톡 수집기", cfg.KakaoURL, "read", []string{"svc.kakaotalk"},
+			"수집기가 1초마다 카카오톡 DB를 읽고 있으면 정상, 읽다 실패하거나 1분 넘게 읽지 않았으면 이상.",
+			"kakaotalk 컨테이너 로그를 보세요. 복호화 실패라면 맥의 카카오톡 계정이 바뀌었을 수 있어요."),
+		e.loop("imessage.collector", "수집", "iMessage 수집기", cfg.IMessageURL, "read", []string{"svc.imessage"},
+			"수집기가 몇 초마다 맥미니 메시지 앱의 DB 사본을 읽고 있으면 정상, 읽다 실패하거나 5분 넘게 읽지 않았으면 이상.",
+			"imessage 컨테이너 로그와 맥미니의 iMessage 미러(scripts/imessage-mirror)를 보세요. 메시지 앱에 로그인돼 있지 않으면 들어오는 것이 없어요."),
 
 		// ── 외부 계정 ──────────────────────────────────────────────────
-		{
-			ID: "assets.upbit", Group: "외부 계정", Name: "업비트 잔고",
-			Rule:  "자산 서비스가 업비트 잔고를 읽으면 정상, 오류를 돌려주면 이상. 10분마다 확인해요.",
-			Fix:   "업비트 API 키의 허용 IP와 만료일을 확인하세요.",
-			Deps:  []string{"svc.assets"},
-			Every: 10 * time.Minute, MinGap: time.Minute,
-			Run: e.portfolioVenue(slow, "업비트:"),
-		},
-		{
-			ID: "assets.kis", Group: "외부 계정", Name: "한국투자증권 잔고",
-			Rule:  "자산 서비스가 주식 계좌 잔고를 읽으면 정상, 오류를 돌려주면 이상. 10분마다 확인해요.",
-			Fix:   "KIS 앱키 만료(1년)와 계좌번호를 확인하세요. 토큰은 1분에 한 번만 발급되니 서비스 재시작 직후 1분은 실패할 수 있어요.",
-			Deps:  []string{"svc.assets"},
-			Every: 10 * time.Minute, MinGap: time.Minute,
-			Run: e.portfolioVenue(slow, "한국투자증권:"),
-		},
-		{
-			ID: "assets.gold", Group: "외부 계정", Name: "금현물 계좌",
-			Rule:  "자산 서비스가 금현물 계좌를 읽으면 정상, 오류를 돌려주면 이상.",
-			Fix:   "금현물 계좌용 KIS 앱키(주식 계좌와 별도)를 확인하세요.",
-			Deps:  []string{"svc.assets"},
-			Every: 10 * time.Minute, MinGap: time.Minute,
-			Run: e.portfolioVenue(slow, "금현물:"),
-		},
-		{
-			ID: "assets.flows", Group: "외부 계정", Name: "원금 기록",
-			Rule:  "업비트 입출금 내역과 직접 적은 원금 기록을 읽으면 정상, 어느 쪽이든 실패하면 주의(수익률이 틀려져요).",
-			Fix:   "업비트 키에 입출금 조회 권한이 있는지 확인하세요.",
-			Deps:  []string{"svc.assets"},
-			Every: 10 * time.Minute, MinGap: time.Minute,
-			Run: e.portfolioVenue(slow, "업비트 입출금 내역:", "원금 기록:"),
-		},
-		{
-			ID: "assets.snapshot", Group: "외부 계정", Name: "자산 일별 기록",
-			Rule:  "마지막 자산 스냅샷이 36시간 안이면 정상, 4일 안이면 주의, 그보다 오래되면 이상.",
-			Fix:   "스냅샷은 자산 탭이나 에이전트가 자산을 조회할 때 쌓여요.",
-			Deps:  []string{"postgres"},
-			Every: 5 * time.Minute,
-			Run:   e.assetSnapshot,
-		},
-		{
-			ID: "calendar.uniple", Group: "외부 계정", Name: "커플 캘린더",
-			Rule:  "캘린더 서비스가 오늘 일정을 읽으면 정상, 실패하면 이상. 5분마다 확인해요.",
-			Fix:   "uniple 토큰이 끊겼다면 새 시크릿 창에서 로그인해 refresh_token을 뽑고, 로그아웃하지 말고 창만 닫은 뒤 .env의 UNIPLE_REFRESH_TOKEN을 바꿔 calendar를 재시작하세요.",
-			Deps:  []string{"svc.calendar"},
-			Every: 5 * time.Minute, MinGap: 30 * time.Second,
-			Run: e.calendar,
-		},
+		e.loop("calendar.uniple", "외부 계정", "커플 캘린더", cfg.CalendarURL, "watch:calendar.near", []string{"svc.calendar"},
+			"캘린더 서비스가 가까운 일정을 읽고 있으면 정상, 읽기가 멈추면 이상.",
+			"uniple 토큰이 끊겼다면 새 시크릿 창에서 로그인해 refresh_token을 뽑고, 로그아웃하지 말고 창만 닫은 뒤 .env의 UNIPLE_REFRESH_TOKEN을 바꿔 calendar를 재시작하세요."),
 
 		// ── 격리함 ─────────────────────────────────────────────────────
 		e.heldBox("spending.unparsed", "가계부 · 읽지 못한 카드 알림", cfg.SpendingURL,
@@ -244,16 +97,6 @@ func All(cfg Config) []check.Probe {
 			Rule: "에이전트가 응답하면 정상.", Fix: "agent 컨테이너 로그를 보세요.",
 			Every: 30 * time.Second,
 			Run:   e.httpOK(cfg.AgentURL + "/healthz"),
-		},
-		{
-			ID: "claude", Group: "기반", Name: "Claude Code 구독",
-			Rule:  "에이전트가 실행 실패를 저장하지 않아 여기서는 확인하지 않아요. 인증 실패는 대화 화면에 오류로 떠요.",
-			Fix:   "대화에서 인증 오류가 나면 claude setup-token으로 CLAUDE_CODE_OAUTH_TOKEN을 새로 받으세요.",
-			Deps:  []string{"agent"},
-			Every: time.Hour,
-			Run: func(context.Context) check.Verdict {
-				return check.Verdict{State: check.Unknown, Summary: "확인하지 않는 항목이에요."}
-			},
 		},
 		{
 			ID: "browser", Group: "기반", Name: "에이전트 브라우저",
@@ -333,557 +176,7 @@ func All(cfg Config) []check.Probe {
 			Every: time.Minute,
 			Run:   e.httpOK(cfg.ImmichURL + "/api/server/ping"),
 		},
-		e.hostDisk(),
-		e.hostFileVault(),
-		e.hostTimeMachine(),
-		e.hostMirror(),
-		e.hostBackup(),
-		e.hostFalkorAOF(),
 	}
-}
-
-// ── 수집 ───────────────────────────────────────────────────────────────
-
-func (e *env) kakaoCollector(ctx context.Context) check.Verdict {
-	var st struct {
-		Running    bool      `json:"running"`
-		LastPollAt time.Time `json:"last_poll_at"`
-		LastError  string    `json:"last_error"`
-		Total      int64     `json:"total_stored"`
-		Latency    int64     `json:"last_latency_ms"`
-	}
-	if err := e.get(ctx, e.client, e.KakaoURL+"/status", &st); err != nil {
-		return fail("수집기 상태를 읽지 못했어요: " + err.Error())
-	}
-	facts := []string{fmt.Sprintf("저장된 메시지 %d건", st.Total), fmt.Sprintf("마지막 읽기 %dms", st.Latency)}
-	v := check.Verdict{ObservedAt: ptr(st.LastPollAt), ObservedLabel: "마지막 읽기", Facts: facts}
-	switch {
-	case !st.Running:
-		v.State, v.Summary = check.Fail, "수집 루프가 멈춰 있어요."
-	case st.LastError != "":
-		v.State, v.Summary = check.Fail, "카카오톡 DB를 읽다 실패했어요: "+clip(st.LastError, 140)
-	case time.Since(st.LastPollAt) > time.Minute:
-		v.State, v.Summary = check.Fail, "1분 넘게 DB를 읽지 않았어요."
-	default:
-		v.State, v.Summary = check.OK, "1초마다 카카오톡 DB를 읽고 있어요."
-	}
-	return v
-}
-
-func (e *env) kakaoMessages(ctx context.Context) check.Verdict {
-	var p struct {
-		Messages []struct {
-			SentAt   int64  `json:"sent_at"`
-			ChatName string `json:"chat_name"`
-		} `json:"messages"`
-	}
-	if err := e.get(ctx, e.client, e.KakaoURL+"/messages/recent?limit=1", &p); err != nil {
-		return fail("최근 메시지를 읽지 못했어요: " + err.Error())
-	}
-	if len(p.Messages) == 0 {
-		return check.Verdict{State: check.Unknown, Summary: "아직 수집된 메시지가 없어요."}
-	}
-	at := time.Unix(p.Messages[0].SentAt, 0)
-	age := time.Since(at)
-	v := check.Verdict{ObservedAt: &at, ObservedLabel: "마지막 메시지",
-		Facts: []string{"마지막 메시지가 온 방: " + p.Messages[0].ChatName}}
-	switch {
-	case age > 48*time.Hour:
-		v.State, v.Summary = check.Fail, fmt.Sprintf("%s째 새 카톡이 없어요. 맥의 카카오톡이 꺼졌거나 로그아웃된 것으로 보여요.", span(age))
-	case age > 12*time.Hour:
-		v.State, v.Summary = check.Warn, fmt.Sprintf("%s째 새 카톡이 없어요. 카카오톡이 꺼졌을 수 있어요.", span(age))
-	default:
-		v.State, v.Summary = check.OK, "새 메시지가 들어오고 있어요."
-	}
-	return v
-}
-
-type mindStatus struct {
-	LLM struct {
-		Ready bool    `json:"ready"`
-		Spent float64 `json:"spentUsd"`
-	} `json:"llm"`
-	Rooms         int            `json:"rooms"`
-	Unread        int            `json:"unread"`
-	OldestUnread  *time.Time     `json:"oldestUnread"`
-	LastRead      *time.Time     `json:"lastRead"`
-	ReadError     string         `json:"readError"`
-	Memory        bool           `json:"memory"`
-	Facts         map[string]int `json:"facts"`
-	OldestPending *time.Time     `json:"oldestPending"`
-	FactError     string         `json:"factError"`
-	Weather       *struct {
-		Home  string     `json:"home"`
-		At    *time.Time `json:"at"`
-		Error string     `json:"error"`
-	} `json:"weather"`
-}
-
-func (e *env) mindReading(ctx context.Context) check.Verdict {
-	var st mindStatus
-	if err := e.get(ctx, e.client, e.MindURL+"/status", &st); err != nil {
-		return fail("mind 상태를 읽지 못했어요: " + err.Error())
-	}
-	facts := []string{fmt.Sprintf("대화방 %d개 · 아직 안 읽은 메시지 %d개", st.Rooms, st.Unread), fmt.Sprintf("오늘 해석 비용 $%.4f", st.LLM.Spent)}
-	if st.ReadError != "" {
-		facts = append(facts, "최근 해석 실패: "+clip(st.ReadError, 140))
-	}
-	v := check.Verdict{ObservedAt: st.LastRead, ObservedLabel: "마지막 해석", Facts: facts}
-	var behind time.Duration
-	if st.OldestUnread != nil {
-		behind = time.Since(*st.OldestUnread)
-	}
-	switch {
-	case !st.LLM.Ready:
-		v.State, v.Summary = check.Fail, "LLM 키가 없어 대화를 쌓기만 하고 읽지 못해요."
-	case behind > 2*time.Hour:
-		v.State, v.Summary = check.Fail, fmt.Sprintf("%s째 읽히지 않은 대화가 있어요.", span(behind))
-	case behind > 30*time.Minute:
-		v.State, v.Summary = check.Warn, fmt.Sprintf("%s째 읽히지 않은 대화가 있어요.", span(behind))
-	default:
-		v.State, v.Summary = check.OK, "대화를 읽고 있어요."
-	}
-	return v
-}
-
-func (e *env) mindWeather(ctx context.Context) check.Verdict {
-	var st mindStatus
-	if err := e.get(ctx, e.client, e.MindURL+"/status", &st); err != nil {
-		return fail("mind 상태를 읽지 못했어요: " + err.Error())
-	}
-	w := st.Weather
-	if w == nil {
-		return check.Verdict{State: check.Unknown, Summary: "날씨를 꺼 두었어요(MIND_WEATHER=false)."}
-	}
-	v := check.Verdict{ObservedAt: w.At, ObservedLabel: "마지막 예보"}
-	if w.Home != "" {
-		v.Facts = append(v.Facts, w.Home+" 기준")
-	}
-	if w.Error != "" {
-		v.Facts = append(v.Facts, "최근 실패: "+clip(w.Error, 140))
-	}
-	switch {
-	case w.At == nil && w.Error == "":
-		v.State, v.Summary = check.Unknown, "아직 예보를 읽지 않았어요."
-	case w.At == nil || time.Since(*w.At) > 36*time.Hour:
-		v.State, v.Summary = check.Fail, "날씨 예보를 읽지 못하고 있어요."
-	case w.Error != "":
-		v.State, v.Summary = check.Warn, "최근 날씨를 읽다 실패했어요. 지난 예보로 말해요."
-	default:
-		v.State, v.Summary = check.OK, "날씨 예보를 읽고 있어요."
-	}
-	return v
-}
-
-func (e *env) location(ctx context.Context) check.Verdict {
-	var now struct {
-		FixAt   *time.Time `json:"fixAt"`
-		Summary string     `json:"summary"`
-		Visits  []struct {
-			Region string `json:"region"`
-		} `json:"visits"`
-	}
-	if err := e.get(ctx, e.client, e.ContextURL+"/now", &now); err != nil {
-		return fail("위치 상태를 읽지 못했어요: " + err.Error())
-	}
-	v := check.Verdict{ObservedAt: now.FixAt, ObservedLabel: "마지막 위치", Facts: []string{now.Summary}}
-	if now.FixAt == nil {
-		v.State, v.Summary = check.Unknown, "아직 위치를 받은 적이 없어요(OwnTracks 설정 전)."
-		return v
-	}
-	switch age := time.Since(*now.FixAt); {
-	case age > 72*time.Hour:
-		v.State, v.Summary = check.Fail, fmt.Sprintf("%s째 위치가 오지 않아요.", span(age))
-	case age > 36*time.Hour:
-		v.State, v.Summary = check.Warn, fmt.Sprintf("%s째 위치가 오지 않아요.", span(age))
-	default:
-		v.State, v.Summary = check.OK, "위치를 받고 있어요."
-	}
-	return v
-}
-
-func (e *env) mindMemory(ctx context.Context) check.Verdict {
-	var st mindStatus
-	if err := e.get(ctx, e.client, e.MindURL+"/status", &st); err != nil {
-		return fail("mind 상태를 읽지 못했어요: " + err.Error())
-	}
-	f := st.Facts
-	facts := []string{fmt.Sprintf("기억함 %d · 이미 알던 것 %d · 기다림 %d", f["stored"], f["duplicate"], f["pending"])}
-	if f["held"] > 0 {
-		// Its own row says so: 격리함 · 기억.
-		facts = append(facts, fmt.Sprintf("보류한 사실 %d개 (격리함)", f["held"]))
-	}
-	if st.FactError != "" {
-		facts = append(facts, "기다리는 이유: "+clip(st.FactError, 140))
-	}
-	v := check.Verdict{ObservedAt: st.OldestPending, ObservedLabel: "가장 오래 기다린 사실", Facts: facts}
-	var waiting time.Duration
-	if st.OldestPending != nil {
-		waiting = time.Since(*st.OldestPending)
-	}
-	switch {
-	case !st.Memory:
-		v.State, v.Summary = check.Fail, "장기 기억이 연결되어 있지 않아 사실이 장부에만 쌓여요."
-	case waiting > 6*time.Hour:
-		v.State, v.Summary = check.Fail, fmt.Sprintf("%s째 기억에 넣지 못한 사실이 있어요.", span(waiting))
-	case waiting > time.Hour:
-		v.State, v.Summary = check.Warn, fmt.Sprintf("%s째 기억에 넣지 못한 사실이 있어요.", span(waiting))
-	default:
-		v.State, v.Summary = check.OK, "기억할 사실이 기억 서비스에 들어가고 있어요."
-		v.ObservedAt = nil
-	}
-	return v
-}
-
-type spendingView struct {
-	Collector struct {
-		LatestMessageAt *time.Time `json:"latestMessageAt"`
-		LastAlertAt     *time.Time `json:"lastAlertAt"`
-	} `json:"collector"`
-}
-
-func (e *env) spending(ctx context.Context) (spendingView, error) {
-	var v spendingView
-	err := e.get(ctx, e.client, e.SpendingURL+"/spending", &v)
-	return v, err
-}
-
-func (e *env) spendingAlerts(ctx context.Context) check.Verdict {
-	s, err := e.spending(ctx)
-	if err != nil {
-		return fail("가계부를 읽지 못했어요: " + err.Error())
-	}
-	c := s.Collector
-	if c.LastAlertAt == nil {
-		return check.Verdict{State: check.Unknown, Summary: "아직 받은 카드 알림이 없어요."}
-	}
-	age := time.Since(*c.LastAlertAt)
-	v := check.Verdict{ObservedAt: c.LastAlertAt, ObservedLabel: "마지막 카드 알림"}
-	switch {
-	case age > 7*24*time.Hour:
-		v.State, v.Summary = check.Fail, fmt.Sprintf("%s째 카드 알림이 없어요. 결제가 가계부에 빠지고 있을 수 있어요.", span(age))
-	case age > 3*24*time.Hour:
-		v.State, v.Summary = check.Warn, fmt.Sprintf("%s째 카드 알림이 없어요.", span(age))
-	default:
-		v.State, v.Summary = check.OK, "카드 알림이 가계부에 들어오고 있어요."
-	}
-	return v
-}
-
-// ── 가계부 상품 상세 ──────────────────────────────────────────────────────
-
-// site is a marketplace whose order history the agent reads.
-type site struct {
-	source    string // card_transactions.enrich_source
-	orders    string // the order history page
-	loginHost string // where a logged-out visit is sent
-}
-
-var (
-	coupang = site{"coupang", "https://mc.coupang.com/ssr/desktop/order/list", "login.coupang.com"}
-	// Never opened by a probe: the browser's payment guard holds every
-	// request to pay.naver.com and nid.naver.com for a human decision, GETs
-	// included, so a check would raise a "결제를 진행합니다" card each time.
-	naverpay = site{"naverpay", "", "nid.naver.com"}
-)
-
-// recordOnly judges a site from what the enrichment job recorded, without
-// opening anything.
-func (e *env) recordOnly(st site) func(context.Context) check.Verdict {
-	return func(ctx context.Context) check.Verdict {
-		job := e.enrichJob(ctx, st.source)
-		v := check.Verdict{Facts: job.facts}
-		switch {
-		case job.loginRequired > 0:
-			v.State = check.Fail
-			v.Summary = fmt.Sprintf("주문 내역을 읽다 로그인을 요구받았어요. 상품 상세 %d건이 로그인을 기다리고 있어요.", job.loginRequired)
-		case job.stale > 0:
-			v.State = check.Warn
-			v.Summary = fmt.Sprintf("하루 넘게 밀린 조회가 %d건 있어요.", job.stale)
-		case job.lastDone != nil:
-			v.State, v.Summary = check.OK, "주문 내역을 읽고 있어요."
-			v.ObservedAt, v.ObservedLabel = job.lastDone, "마지막으로 읽은 주문"
-		default:
-			v.State = check.Unknown
-			v.Summary = "결제 감시 때문에 자동으로 열어 보지 않아요. 조회 기록이 생기면 그걸로 판단해요."
-		}
-		return v
-	}
-}
-
-// enrich judges by where the order history landed when the agent last opened
-// it in its browser (agent /browser-checks). A cookie on disk is not
-// evidence: the profile kept every long-lived Coupang cookie while the order
-// page sent it to login. The agent opens it, not this service: it is the
-// browser's one user and knows when nothing else is driving it.
-func (e *env) enrich(st site) func(context.Context) check.Verdict {
-	return func(ctx context.Context) check.Verdict {
-		job := e.enrichJob(ctx, st.source)
-		now := time.Now()
-		v := check.Verdict{Facts: job.facts, ObservedAt: &now, ObservedLabel: "브라우저로 확인"}
-
-		var out struct {
-			Results map[string]struct {
-				URL   string    `json:"url"`
-				Busy  bool      `json:"busy"`
-				Error string    `json:"error"`
-				At    time.Time `json:"at"`
-			} `json:"results"`
-		}
-		if err := e.get(ctx, e.client, e.AgentURL+"/browser-checks", &out); err != nil {
-			v.State, v.Summary, v.ObservedAt = check.Unknown, "에이전트에서 확인 결과를 읽지 못했어요: "+clip(err.Error(), 120), nil
-			return v
-		}
-		res, ok := out.Results[st.source]
-		if !ok {
-			v.State, v.ObservedAt = check.Unknown, nil
-			v.Summary = "에이전트가 아직 열어 보지 않았어요. 대화·작업이 없을 때 열어 봐요."
-			return v
-		}
-		v.ObservedAt = &res.At
-		if res.Error != "" {
-			v.State, v.Summary = check.Unknown, "브라우저로 열어 보지 못했어요: "+clip(res.Error, 120)
-			return v
-		}
-		landing := res
-		if landing.Busy {
-			// Someone may be typing a password there; a new tab would take
-			// the focus away. This site's own login page is itself the
-			// answer; another site's only means this check waits.
-			if strings.Contains(landing.URL, st.loginHost) {
-				v.State = check.Fail
-				v.Summary = "브라우저에 로그인 화면이 열려 있어요. 로그인을 마치면 다음 확인 때 정상으로 바뀌어요."
-			} else {
-				v.State, v.ObservedAt = check.Unknown, nil
-				v.Summary = "다른 사이트의 로그인 화면이 열려 있어서 이번에는 열어 보지 않았어요."
-			}
-			return v
-		}
-		v.Facts = append([]string{"도착한 주소: " + clip(landing.URL, 100)}, v.Facts...)
-		if strings.Contains(landing.URL, st.loginHost) {
-			v.State = check.Fail
-			v.Summary = "주문목록을 열면 로그인 화면으로 넘어가요."
-			if job.loginRequired > 0 {
-				v.Summary += fmt.Sprintf(" 상품 상세 %d건이 로그인을 기다리고 있어요.", job.loginRequired)
-			}
-			return v
-		}
-		if job.stale > 0 {
-			v.State = check.Warn
-			v.Summary = fmt.Sprintf("주문목록은 열리지만 하루 넘게 밀린 조회가 %d건 있어요.", job.stale)
-			return v
-		}
-		v.State, v.Summary = check.OK, "주문목록이 열려요."
-		return v
-	}
-}
-
-type enrichJob struct {
-	loginRequired, stale int
-	lastDone             *time.Time
-	facts                []string
-}
-
-func (e *env) enrichJob(ctx context.Context, source string) enrichJob {
-	var j enrichJob
-	if e.DB == nil {
-		return j
-	}
-	var pending int
-	err := e.DB.QueryRow(ctx, `
-		select count(*) filter (where enrich_status = 'login_required'),
-		       count(*) filter (where enrich_status = 'pending' and enrich_next_at < now() - interval '1 day'),
-		       count(*) filter (where enrich_status = 'pending'),
-		       max(updated_at) filter (where enrich_status = 'done')
-		  from card_transactions where enrich_source = $1`, source).
-		Scan(&j.loginRequired, &j.stale, &pending, &j.lastDone)
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == "42703" {
-		j.facts = append(j.facts, "상품 상세 조회 기능이 아직 적용되지 않았어요.")
-		return j
-	}
-	if err != nil {
-		j.facts = append(j.facts, "조회 기록을 읽지 못했어요: "+clip(err.Error(), 100))
-		return j
-	}
-	j.facts = append(j.facts, fmt.Sprintf("조회 대기 %d건, 로그인 대기 %d건", pending, j.loginRequired))
-	if j.lastDone != nil {
-		j.facts = append(j.facts, "마지막으로 읽은 주문: "+j.lastDone.Local().Format("1월 2일 15:04"))
-	} else {
-		j.facts = append(j.facts, "아직 읽은 주문이 없어요.")
-	}
-	return j
-}
-
-// ── 외부 계정 ───────────────────────────────────────────────────────────
-
-// portfolio is fetched once per ten-minute window and shared by the four
-// venue probes, so one round of checks is one call to the brokerages.
-type portfolioCache struct {
-	at       time.Time
-	problems []string
-	err      error
-	asOf     time.Time
-}
-
-var pf struct {
-	cache portfolioCache
-	ch    chan struct{}
-}
-
-func init() { pf.ch = make(chan struct{}, 1) }
-
-func (e *env) portfolio(ctx context.Context, client *http.Client) portfolioCache {
-	pf.ch <- struct{}{}
-	defer func() { <-pf.ch }()
-	if time.Since(pf.cache.at) < 50*time.Second {
-		return pf.cache
-	}
-	var body struct {
-		Problems []string  `json:"problems"`
-		At       time.Time `json:"at"`
-	}
-	err := e.get(ctx, client, e.AssetsURL+"/portfolio", &body)
-	pf.cache = portfolioCache{at: time.Now(), problems: body.Problems, err: err, asOf: body.At}
-	return pf.cache
-}
-
-func (e *env) portfolioVenue(client *http.Client, prefixes ...string) func(context.Context) check.Verdict {
-	return func(ctx context.Context) check.Verdict {
-		p := e.portfolio(ctx, client)
-		if p.err != nil {
-			return fail("자산 서비스가 답하지 않았어요: " + p.err.Error())
-		}
-		for _, msg := range p.problems {
-			for _, pre := range prefixes {
-				if !strings.HasPrefix(msg, pre) {
-					continue
-				}
-				detail := strings.TrimSpace(strings.TrimPrefix(msg, pre))
-				if strings.Contains(detail, "설정되지 않았습니다") {
-					return check.Verdict{State: check.Unknown, Summary: "키가 설정되지 않아 연결하지 않았어요."}
-				}
-				state := check.Fail
-				if pre == "업비트 입출금 내역:" || pre == "원금 기록:" {
-					state = check.Warn
-				}
-				return check.Verdict{State: state, Summary: clip(detail, 160)}
-			}
-		}
-		at := p.asOf
-		return check.Verdict{State: check.OK, Summary: "읽고 있어요.", ObservedAt: &at, ObservedLabel: "마지막 조회"}
-	}
-}
-
-func (e *env) assetSnapshot(ctx context.Context) check.Verdict {
-	if e.DB == nil {
-		return check.Verdict{State: check.Unknown, Summary: "데이터베이스가 연결되지 않았어요."}
-	}
-	var at *time.Time
-	if err := e.DB.QueryRow(ctx, `select max(taken_at) from portfolio_snapshots`).Scan(&at); err != nil {
-		return fail("스냅샷을 읽지 못했어요: " + clip(err.Error(), 100))
-	}
-	if at == nil {
-		return check.Verdict{State: check.Unknown, Summary: "아직 쌓인 스냅샷이 없어요."}
-	}
-	age := time.Since(*at)
-	v := check.Verdict{ObservedAt: at, ObservedLabel: "마지막 기록"}
-	switch {
-	case age > 4*24*time.Hour:
-		v.State, v.Summary = check.Fail, fmt.Sprintf("%s째 자산이 기록되지 않았어요. 자산 곡선에 빈 구간이 생겨요.", span(age))
-	case age > 36*time.Hour:
-		v.State, v.Summary = check.Warn, fmt.Sprintf("%s째 자산이 기록되지 않았어요.", span(age))
-	default:
-		v.State, v.Summary = check.OK, "매일 기록되고 있어요."
-	}
-	return v
-}
-
-func (e *env) calendar(ctx context.Context) check.Verdict {
-	today := time.Now().Format("2006-01-02")
-	q := url.Values{"from": {today}, "to": {today}}
-	var body struct {
-		Events []json.RawMessage `json:"events"`
-	}
-	err := e.get(ctx, e.client, e.CalendarURL+"/events?"+q.Encode(), &body)
-
-	var facts []string
-	var refreshed *time.Time
-	if e.DB != nil {
-		if e.DB.QueryRow(ctx, `select updated_at from uniple_session where id = 1`).Scan(&refreshed) == nil && refreshed != nil {
-			facts = append(facts, "uniple 토큰을 마지막으로 갱신한 때: "+refreshed.Local().Format("1월 2일 15:04"))
-		}
-	}
-	if err != nil {
-		// Most failures are the home network, not the login: a DNS
-		// lookup or a dial that timed out (185 in a week, 2026-10-27).
-		summary := "일정을 읽지 못했어요. uniple 로그인이 끊겼을 수 있어요."
-		if networkish(err.Error()) {
-			summary = "uniple 에 닿지 못했어요 - 네트워크나 DNS 가 흔들린 것이고, 로그인 문제는 아니에요."
-		}
-		return check.Verdict{State: check.Fail, Summary: summary,
-			Facts: append(facts, clip(err.Error(), 160)), ObservedAt: refreshed, ObservedLabel: "마지막 토큰 갱신"}
-	}
-	return check.Verdict{State: check.OK, Summary: fmt.Sprintf("일정을 읽고 있어요. 오늘 일정 %d개.", len(body.Events)),
-		Facts: facts, ObservedAt: refreshed, ObservedLabel: "마지막 토큰 갱신"}
-}
-
-// networkish is whether an error is the network's - a name that would not
-// resolve, a dial or a read that timed out - rather than the service's.
-func networkish(err string) bool {
-	for _, mark := range []string{"lookup ", "no such host", "server misbehaving", "dial tcp", "deadline exceeded", "timeout", "connection refused", "connection reset", "연결하지 못했습니다"} {
-		if strings.Contains(err, mark) {
-			return true
-		}
-	}
-	return false
-}
-
-// photosFresh is how long ago the newest photo reached Immich: the phone's
-// backup, which stops without a word (no photo of a two-day camping trip
-// arrived, 2026-10-21~27).
-func (e *env) photosFresh(ctx context.Context) check.Verdict {
-	if e.ImmichKey == "" {
-		return check.Verdict{State: check.Unknown, Summary: "Immich API 키가 없어 측정하지 않아요."}
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.ImmichURL+"/api/search/metadata", strings.NewReader(`{"size":1,"order":"desc"}`))
-	if err != nil {
-		return fail(err.Error())
-	}
-	req.Header.Set("x-api-key", e.ImmichKey)
-	req.Header.Set("Content-Type", "application/json")
-	res, err := e.client.Do(req)
-	if err != nil {
-		return fail("사진 서버에 연결하지 못했어요.")
-	}
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		return fail(fmt.Sprintf("사진 서버가 %d 로 답했어요.", res.StatusCode))
-	}
-	var out struct {
-		Assets struct {
-			Items []struct {
-				FileCreatedAt time.Time `json:"fileCreatedAt"`
-			} `json:"items"`
-		} `json:"assets"`
-	}
-	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
-		return fail("사진 목록을 읽지 못했어요: " + clip(err.Error(), 100))
-	}
-	if len(out.Assets.Items) == 0 {
-		return check.Verdict{State: check.Unknown, Summary: "아직 사진이 없어요."}
-	}
-	at := out.Assets.Items[0].FileCreatedAt
-	v := check.Verdict{ObservedAt: &at, ObservedLabel: "마지막 사진"}
-	switch age := time.Since(at); {
-	case age > 10*24*time.Hour:
-		v.State, v.Summary = check.Fail, fmt.Sprintf("%s째 새 사진이 없어요. 폰 백업이 멈췄을 수 있어요.", span(age))
-	case age > 3*24*time.Hour:
-		v.State, v.Summary = check.Warn, fmt.Sprintf("%s째 새 사진이 없어요.", span(age))
-	default:
-		v.State, v.Summary = check.OK, "사진이 들어오고 있어요."
-	}
-	return v
 }
 
 // ── 기반 ───────────────────────────────────────────────────────────────

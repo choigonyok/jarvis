@@ -510,3 +510,79 @@ func TestAGuestsCommandIsTheGuests(t *testing.T) {
 		t.Fatalf("가계부: %d", code)
 	}
 }
+
+// What the status tab reads: when a source last had something new to say, and
+// the latest of each check. Saying the same again is no news.
+func TestTheLastOfEachSource(t *testing.T) {
+	srv, _ := setup(t)
+	source := unique("src")
+	post := func(kind, subject, payload string) {
+		t.Helper()
+		body := fmt.Sprintf(`{"kind":%q,"source":%q,"source_key":%q,"actor":"t","subject":%q,"occurred_at":"2026-10-31T02:00:00Z","tier":"raw","payload":%s}`,
+			kind, source, unique("k"), subject, payload)
+		if code, out := call(t, http.MethodPost, srv.URL+"/records", token, body); code != http.StatusCreated {
+			t.Fatalf("%d %s", code, out)
+		}
+	}
+	type last struct {
+		Sources []struct {
+			Kind, Source string
+			At           time.Time
+		}
+		Checks []struct {
+			ID   string
+			Body json.RawMessage
+		}
+	}
+	read := func() last {
+		t.Helper()
+		code, out := call(t, http.MethodGet, srv.URL+"/last", token, "")
+		if code != http.StatusOK {
+			t.Fatalf("%d %s", code, out)
+		}
+		var l last
+		if err := json.Unmarshal(out, &l); err != nil {
+			t.Fatal(err)
+		}
+		return l
+	}
+	at := func(kind string) time.Time {
+		t.Helper()
+		for _, s := range read().Sources {
+			if s.Kind == kind && s.Source == source {
+				return s.At
+			}
+		}
+		t.Fatalf("%s 가 없습니다", kind)
+		return time.Time{}
+	}
+	post("a.b", "x", `{"n":1}`)
+	first := at("a.b")
+	post("a.b", "x", `{"n":1}`)
+	if got := at("a.b"); !got.Equal(first) {
+		t.Fatalf("같은 말은 소식이 아닙니다: %v %v", first, got)
+	}
+	post("a.b", "x", `{"n":2}`)
+	if got := at("a.b"); !got.After(first) {
+		t.Fatalf("새 말: %v %v", first, got)
+	}
+
+	id := unique("check")
+	post("check.result", id, `{"id":"`+id+`","state":"warn","summary":"처음"}`)
+	post("check.result", id, `{"id":"`+id+`","state":"ok","summary":"나중"}`)
+	found := 0
+	for _, c := range read().Checks {
+		if c.ID == id {
+			found++
+			if !strings.Contains(string(c.Body), "나중") {
+				t.Fatalf("%s", c.Body)
+			}
+		}
+	}
+	if found != 1 {
+		t.Fatalf("점검 하나에 한 줄: %d", found)
+	}
+	if code, _ := call(t, http.MethodGet, srv.URL+"/last", guestToken, ""); code != http.StatusUnauthorized {
+		t.Fatalf("손님 토큰으로: %d", code)
+	}
+}

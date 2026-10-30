@@ -102,6 +102,14 @@ func (e *env) service(id, name, base string, deps []string, only ...string) chec
 	}
 }
 
+// loop is one of a service's loops as a row of its own, where it is the thing
+// a person asks about: are the messages being read, does the calendar answer.
+func (e *env) loop(id, group, name, base, loop string, deps []string, rule, fix string) check.Probe {
+	p := e.service(id, name, base, deps, loop)
+	p.Group, p.Rule, p.Fix = group, rule, fix
+	return p
+}
+
 // judgeLoops is the verdict on a service that answered: its loops, worst
 // first.
 func judgeLoops(f fetched, only []string, now time.Time) check.Verdict {
@@ -220,35 +228,6 @@ func (e *env) delivery(consumer, name string, deps []string) check.Probe {
 			return check.Verdict{State: check.Unknown, Summary: "아직 등록하지 않았어요(" + consumer + ")."}
 		},
 	}
-}
-
-// collector is a message collector's own /status (the iMessage one): it
-// reads its database every few seconds.
-func (e *env) imessageCollector(ctx context.Context) check.Verdict {
-	var st struct {
-		LastPollAt int64  `json:"last_poll_at"`
-		LastError  string `json:"last_error"`
-		Total      int64  `json:"total"`
-	}
-	if err := e.get(ctx, e.client, e.IMessageURL+"/status", &st); err != nil {
-		return fail("수집기 상태를 읽지 못했어요: " + err.Error())
-	}
-	v := check.Verdict{Facts: []string{fmt.Sprintf("저장된 메시지 %d건", st.Total)}}
-	if st.LastPollAt == 0 {
-		v.State, v.Summary = check.Fail, "아직 한 번도 메시지 DB 를 읽지 못했어요."
-		return v
-	}
-	at := time.Unix(st.LastPollAt, 0)
-	v.ObservedAt, v.ObservedLabel = &at, "마지막 읽기"
-	switch {
-	case st.LastError != "":
-		v.State, v.Summary = check.Fail, "메시지 DB 를 읽다 실패했어요: "+clip(st.LastError, 140)
-	case time.Since(at) > 5*time.Minute:
-		v.State, v.Summary = check.Fail, fmt.Sprintf("%s째 메시지 DB 를 읽지 않았어요.", span(time.Since(at)))
-	default:
-		v.State, v.Summary = check.OK, "메시지 DB 를 읽고 있어요."
-	}
-	return v
 }
 
 // hostService is a service that runs on the Mac mini itself rather than in

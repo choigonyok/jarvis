@@ -11,6 +11,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -21,8 +22,10 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/context-svc/internal/api"
+	"github.com/choigonyok/jarvis/context-svc/internal/host"
 	"github.com/choigonyok/jarvis/context-svc/internal/sky"
 	"github.com/choigonyok/jarvis/context-svc/internal/store"
+	"github.com/choigonyok/jarvis/gocommon/checks"
 	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/gocommon/notify"
 	"github.com/choigonyok/jarvis/gocommon/record"
@@ -102,6 +105,23 @@ func main() {
 	server.SetLoops(loops)
 	records := record.New(dsn, loops, log)
 	go records.Run(ctx)
+	now := watch.Local(handler, cfg.Token, "/now")
+	go (&host.Watch{File: getenv("HOST_FACTS", "/host/host.json"), FileVaultOffAccepted: os.Getenv("HOST_FILEVAULT_OFF_ACCEPTED") == "true",
+		Location: func(ctx context.Context) (*time.Time, string, error) {
+			raw, err := now(ctx)
+			if err != nil {
+				return nil, "", err
+			}
+			body, err := json.Marshal(raw)
+			if err != nil {
+				return nil, "", err
+			}
+			var s struct {
+				FixAt   *time.Time `json:"fixAt"`
+				Summary string     `json:"summary"`
+			}
+			return s.FixAt, s.Summary, json.Unmarshal(body, &s)
+		}}).Run(ctx, &checks.Reporter{Source: "context", Records: records}, loops)
 	(&watch.Watcher{Service: "context", Records: records, Loops: loops, Log: log}).Run(ctx,
 		watch.Source{Kind: "context.now", Label: "운영자 폰이 있는 곳", Every: 30 * time.Second, Read: watch.Local(handler, cfg.Token, "/now", "visits")},
 		watch.Source{Kind: "context.now.guest", Label: "손님 폰이 있는 곳", Every: 30 * time.Second, Read: watch.Local(handler, cfg.Token, "/now/guest", "visits")},

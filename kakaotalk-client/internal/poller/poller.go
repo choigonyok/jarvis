@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/kakaotalk-client/internal/kakao"
 	"github.com/choigonyok/jarvis/kakaotalk-client/internal/store"
 )
@@ -20,10 +21,15 @@ type Poller struct {
 	// ImportHistory copies, once, what the source held before the store's
 	// first run.
 	ImportHistory bool
+	// Loops, when set, shows the reading on /health.
+	Loops *health.Loops
 
-	mu       sync.RWMutex
-	status   Status
+	mu     sync.RWMutex
+	status Status
 }
+
+// LoopRead is the reading on /health.
+const LoopRead = "read"
 
 type Status struct {
 	Running       bool      `json:"running"`
@@ -191,6 +197,7 @@ func (p *Poller) pollOnce(cursor int64) int64 {
 }
 
 func (p *Poller) recordSuccess(cursor int64, inserted int, start time.Time) {
+	p.Loops.OK(LoopRead)
 	stored, _ := p.store.TotalMessages()
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -207,6 +214,7 @@ func (p *Poller) recordSuccess(cursor int64, inserted int, start time.Time) {
 }
 
 func (p *Poller) recordError(err error, start time.Time) {
+	p.Loops.Fail(LoopRead, err)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.status.LastPollAt = time.Now()

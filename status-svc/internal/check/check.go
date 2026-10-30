@@ -1,11 +1,10 @@
 // Package check runs the probes and keeps the latest verdict of each.
 //
-// A probe answers one question a person would ask ("are KakaoTalk messages
-// still arriving?"), not "is container X up". Probes only read signals that
-// already exist - a service's own status, a timestamp in Postgres, a cookie
-// on disk. None of them spends a rate-limited resource: the uniple refresh
-// token rotates on use and KIS issues one token a minute, so a health check
-// that exercised either would be the thing that broke them.
+// A probe only reads a signal that already exists: a service's /health, when a
+// source last said something, what a service said of a check. None of them
+// spends a rate-limited resource: the uniple refresh token rotates on use and
+// KIS issues one token a minute, so a health check that exercised either would
+// be the thing that broke them.
 package check
 
 import (
@@ -86,13 +85,15 @@ type Result struct {
 }
 
 type Runner struct {
-	probes []Probe
 	groups []string
 	log    *slog.Logger
 
-	mu      sync.RWMutex
-	results map[string]*Result
-	running map[string]bool
+	mu sync.RWMutex
+	// came are the rows that come from what the stack says (Sync), fixed the
+	// ones that are always there.
+	came, fixed []Probe
+	results     map[string]*Result
+	running     map[string]bool
 
 	// onChange hears a probe's verdict whenever its state differs from the
 	// last one - and its first verdict, with prev Unknown.
@@ -111,7 +112,7 @@ func (r *Runner) OnChange(fn func(p Probe, prev State, v Verdict)) { r.onChange 
 
 func NewRunner(groups []string, probes []Probe, log *slog.Logger) *Runner {
 	return &Runner{
-		probes:  probes,
+		fixed:   probes,
 		groups:  groups,
 		log:     log,
 		results: map[string]*Result{},
@@ -119,34 +120,58 @@ func NewRunner(groups []string, probes []Probe, log *slog.Logger) *Runner {
 	}
 }
 
-// Run starts one loop per probe and blocks until ctx ends.
-func (r *Runner) Run(ctx context.Context) {
-	var wg sync.WaitGroup
-	for _, p := range r.probes {
-		wg.Add(1)
-		go func(p Probe) {
-			defer wg.Done()
-			r.runOne(ctx, p)
-			t := time.NewTicker(p.Every)
-			defer t.Stop()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-t.C:
-					r.runOne(ctx, p)
-				}
-			}
-		}(p)
+// Sync replaces the rows that come from what the stack says. A row no longer
+// said leaves the screen.
+func (r *Runner) Sync(rows []Probe) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	kept := map[string]bool{}
+	for _, p := range rows {
+		kept[p.ID] = true
 	}
-	wg.Wait()
+	for _, p := range r.came {
+		if !kept[p.ID] {
+			delete(r.results, p.ID)
+		}
+	}
+	r.came = rows
+}
+
+// list is every probe, those that came first: they are what the rows of 수집
+// and 외부 계정 are made of.
+func (r *Runner) list() []Probe {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return append(append(make([]Probe, 0, len(r.came)+len(r.fixed)), r.came...), r.fixed...)
+}
+
+// Run runs each probe on its own clock and blocks until ctx ends.
+func (r *Runner) Run(ctx context.Context) {
+	next := map[string]time.Time{}
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+	for {
+		now := time.Now()
+		for _, p := range r.list() {
+			if now.Before(next[p.ID]) {
+				continue
+			}
+			next[p.ID] = now.Add(p.Every)
+			go r.runOne(ctx, p)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
 }
 
 // Refresh runs every probe now, except those that ran within their MinGap,
 // and waits for them.
 func (r *Runner) Refresh(ctx context.Context) {
 	var wg sync.WaitGroup
-	for _, p := range r.probes {
+	for _, p := range r.list() {
 		r.mu.RLock()
 		last := r.results[p.ID]
 		r.mu.RUnlock()
@@ -166,7 +191,7 @@ func (r *Runner) Refresh(ctx context.Context) {
 // that must rest on a fresh look, not on a verdict minutes old. A probe
 // already mid-run is not run twice; its last state answers.
 func (r *Runner) Confirm(ctx context.Context, id string) State {
-	for _, p := range r.probes {
+	for _, p := range r.list() {
 		if p.ID == id {
 			r.runOne(ctx, p)
 			break
@@ -237,14 +262,15 @@ type Snapshot struct {
 }
 
 func (r *Runner) Snapshot() Snapshot {
+	all := r.list()
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	byID := map[string]Probe{}
-	for _, p := range r.probes {
+	for _, p := range all {
 		byID[p.ID] = p
 	}
-	out := make([]*Result, 0, len(r.probes))
-	for _, p := range r.probes {
+	out := make([]*Result, 0, len(all))
+	for _, p := range all {
 		res, ok := r.results[p.ID]
 		if !ok {
 			continue

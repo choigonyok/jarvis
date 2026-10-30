@@ -2,7 +2,6 @@ package probes
 
 import (
 	"context"
-	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -150,22 +149,5 @@ func TestRedisPing(t *testing.T) {
 	}
 	if v := freshEnv().redisPing("127.0.0.1:1")(context.Background()); v.State != check.Fail {
 		t.Fatalf("닫힌 포트: %+v", v)
-	}
-}
-
-func TestIMessageCollector(t *testing.T) {
-	st := map[string]any{"last_poll_at": time.Now().Unix(), "last_error": "", "total": 12}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(st)
-	}))
-	defer srv.Close()
-	e := freshEnv()
-	e.IMessageURL = srv.URL
-	if v := e.imessageCollector(context.Background()); v.State != check.OK {
-		t.Fatalf("%+v", v)
-	}
-	st["last_poll_at"] = time.Now().Add(-time.Hour).Unix()
-	if v := e.imessageCollector(context.Background()); v.State != check.Fail {
-		t.Fatalf("한 시간 동안 읽지 않음: %+v", v)
 	}
 }

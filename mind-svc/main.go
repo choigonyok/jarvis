@@ -34,9 +34,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/choigonyok/jarvis/gocommon/checks"
 	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/gocommon/notify"
 	"github.com/choigonyok/jarvis/gocommon/queue"
+	"github.com/choigonyok/jarvis/gocommon/record"
 	"github.com/choigonyok/jarvis/gocommon/seal"
 	"github.com/choigonyok/jarvis/mind-svc/internal/act"
 	"github.com/choigonyok/jarvis/mind-svc/internal/api"
@@ -462,6 +464,29 @@ func main() {
 				return handle(ctx, msg)
 			}
 		}
+		// How reading and remembering stand, said on the stream: the status tab
+		// has no code of its own for them.
+		go func() {
+			records := record.New(dsn, nil, log)
+			go records.Run(ctx)
+			report := &checks.Reporter{Source: "mind", Records: records}
+			t := time.NewTicker(time.Minute)
+			defer t.Stop()
+			for {
+				if list, err := m.Checks(ctx); err != nil {
+					log.Warn("읽기·기억 상태를 내지 못했습니다", "err", err)
+				} else {
+					for _, r := range list {
+						report.Report(r)
+					}
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+				}
+			}
+		}()
 		for _, c := range []*queue.Consumer{
 			{Pool: lanes, Topic: queue.Records, Name: "mind", Kinds: reg.Kinds(registry.Interpret, false), Handle: take, Log: log},
 			{Pool: lanes, Topic: queue.Guest, Name: "mind-guest", Kinds: reg.Kinds(registry.Interpret, true), Handle: take, Log: log},
