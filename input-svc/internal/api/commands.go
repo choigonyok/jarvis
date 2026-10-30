@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -38,7 +39,9 @@ func (s *Server) command(w http.ResponseWriter, r *http.Request) {
 	if !json.Valid(body) {
 		body = nil
 	}
-	path := "/" + r.PathValue("path")
+	// As it came: an id can hold what would mean something else unescaped
+	// (a repeating entry's day is "<series>#<date>").
+	path := strings.TrimPrefix(r.URL.EscapedPath(), "/mind")
 	kind := record.CommandKind(r.Method, path)
 	if kind == "command" {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "그런 경로가 없습니다."})

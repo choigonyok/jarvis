@@ -51,6 +51,8 @@
 //	POST /api/checklists/{id}/items/{item}  {done, by?} a tap on the card
 //	DELETE /api/checklists/{id}       close it
 //	POST /api/checklists/{id}/show    {lead?} ask the agent to put it in the conversation now (checklist.shown)
+//	PATCH /api/calendar/{id}          an entry as a person left it on the screen (calendar.go)
+//	DELETE /api/calendar/{id}         an entry a person took off the screen
 //
 // /api and the console need a token unless open: in the stack the port is
 // bound to the host's loopback, and a laptop run has nothing to protect. The
@@ -109,7 +111,9 @@ type Server struct {
 	// stream takes what would change mind's state; nil (a laptop) does it at
 	// once.
 	stream Commands
-	writes *http.ServeMux
+	// calendar is the calendar's fixed API, for what a screen changes on it.
+	calendar *CalendarDoor
+	writes   *http.ServeMux
 }
 
 // Commands is the stream as far as this door needs it.
@@ -117,6 +121,8 @@ type Commands interface {
 	Command(ctx context.Context, key, kind, actor, method, path string, body json.RawMessage) error
 	// ListChanged tells the person's screens a list changed.
 	ListChanged(ctx context.Context, guest bool, id string) error
+	// CalendarChanged tells the person's screens what an entry became.
+	CalendarChanged(ctx context.Context, guest bool, op string, event json.RawMessage) error
 }
 
 // SetStream sends what changes mind through the stream.
@@ -334,6 +340,8 @@ func (s *Server) Handler() http.Handler {
 	write("POST /api/checklists/{id}/items/{item}", s.person, s.checkItem)
 	write("DELETE /api/checklists/{id}", s.person, s.closeChecklist)
 	write("POST /api/checklists/{id}/show", s.person, s.showChecklist)
+	write("PATCH /api/calendar/{id}", s.person, s.editEntry)
+	write("DELETE /api/calendar/{id}", s.person, s.removeEntry)
 	mux.HandleFunc("GET /api/commands/{key}", s.person(s.commandResult))
 	return mux
 }

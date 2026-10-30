@@ -13,6 +13,9 @@ import {
   type Proposal,
 } from "@/lib/thread";
 
+/** The calendar: read at its adapter, changed at the way in (the route says which). */
+const CALENDAR = "/api/calendar";
+
 function byStart(a: CalendarEvent, b: CalendarEvent): number {
   if (a.date !== b.date) return a.date < b.date ? -1 : 1;
   // 시각 없는 종일 일정이 그날의 맨 위에 온다.
@@ -38,7 +41,7 @@ export function useCalendar(cursor: Cursor) {
   const hydrate = useCallback(async () => {
     try {
       const [calendar, pending] = await Promise.all([
-        fetch(`${API}/calendar?from=${from}&to=${to}`, { cache: "no-store" }),
+        fetch(`${CALENDAR}/events?from=${from}&to=${to}`, { cache: "no-store" }),
         fetch(`${API}/proposals`, { cache: "no-store" }),
       ]);
       if (!calendar.ok || !pending.ok) throw new Error("bad status");
@@ -107,8 +110,10 @@ export function useCalendar(cursor: Cursor) {
     async (event: Partial<CalendarEvent>) => {
       setError(null);
       try {
-        const res = await fetch(`${API}/calendar`, {
-          method: "POST",
+        // Only what is already on the calendar: a new entry comes through the
+        // conversation and its card. Encoded: see remove.
+        const res = await fetch(`${CALENDAR}/${encodeURIComponent(event.id ?? "")}`, {
+          method: "PATCH",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(event),
         });
@@ -133,7 +138,7 @@ export function useCalendar(cursor: Cursor) {
       // Encoded: a repeating entry's day is "<series>#<date>", and an unencoded
       // # is where a URL's fragment starts - the request went out as the whole
       // series. keepalive: a removal's undo window can close as the page goes.
-      const res = await fetch(`${API}/calendar/${encodeURIComponent(id)}`, { method: "DELETE", keepalive: true });
+      const res = await fetch(`${CALENDAR}/${encodeURIComponent(id)}`, { method: "DELETE", keepalive: true });
       if (!res.ok && res.status !== 204) {
         setError("일정을 지우지 못했습니다.");
         return false;

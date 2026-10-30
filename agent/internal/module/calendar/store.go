@@ -80,10 +80,6 @@ type Store struct {
 	token  string
 	client *http.Client
 	bus    *bus.Bus
-	// partnerSide flips "me" and "partner" both ways: the guest console is the
-	// partner's, and to them their own entries are "나". The calendar service
-	// (and uniple) only ever see the operator's side.
-	partnerSide bool
 }
 
 func NewStore(baseURL, token string, b *bus.Bus) *Store {
@@ -96,40 +92,6 @@ func NewStore(baseURL, token string, b *bus.Bus) *Store {
 		client: &http.Client{Timeout: 10 * time.Second},
 		bus:    b,
 	}
-}
-
-// FromPartnerSide is the guest agent's view of the same calendar.
-func (s *Store) FromPartnerSide() *Store {
-	s.partnerSide = true
-	return s
-}
-
-// view turns an entry to this store's side. Swapping is its own inverse, so
-// the same call takes an entry from this side back to the service's.
-func (s *Store) view(e Event) Event {
-	if !s.partnerSide {
-		return e
-	}
-	switch e.Owner {
-	case OwnerMe:
-		e.Owner = OwnerPartner
-	case OwnerPartner:
-		e.Owner = OwnerMe
-	}
-	switch e.Source {
-	case SourceHuman:
-		e.Source = SourcePartner
-	case SourcePartner:
-		e.Source = SourceHuman
-	}
-	return e
-}
-
-func (s *Store) views(events []Event) []Event {
-	for i := range events {
-		events[i] = s.view(events[i])
-	}
-	return events
 }
 
 // Load is the health check at boot. It used to read the file; now it confirms
@@ -177,9 +139,6 @@ func (s *Store) do(ctx context.Context, method, path string, body any, out any) 
 	// Who is writing: the service only ever sees the operator's side of the
 	// entry, so this is how it knows the guest's jarvis made a change - and
 	// that it is the operator, not the guest, to tell about it.
-	if s.partnerSide {
-		req.Header.Set("X-Jarvis-Side", "partner")
-	}
 
 	res, err := s.client.Do(req)
 	if err != nil {
@@ -229,7 +188,7 @@ func (s *Store) Range(from, to string) []Event {
 		// 둘 다 화면에 비어 보이는 것으로 드러난다.
 		return nil
 	}
-	return s.views(payload.Events)
+	return payload.Events
 }
 
 func (s *Store) Get(id string) (Event, bool) {
@@ -240,7 +199,7 @@ func (s *Store) Get(id string) (Event, bool) {
 	if err := s.do(ctx, http.MethodGet, "/events/"+url.PathEscape(id), nil, &e); err != nil {
 		return Event{}, false
 	}
-	return s.view(e), true
+	return e, true
 }
 
 // Put inserts or replaces. An empty ID means insert.
@@ -263,10 +222,9 @@ func (s *Store) Put(e Event) (Event, error) {
 	}
 
 	var saved Event
-	if err := s.do(ctx, http.MethodPut, "/events", s.view(e), &saved); err != nil {
+	if err := s.do(ctx, http.MethodPut, "/events", e, &saved); err != nil {
 		return Event{}, err
 	}
-	saved = s.view(saved)
 
 	s.bus.Publish(bus.Event{Type: "calendar", Calendar: Change{Op: "upsert", Event: saved}})
 	return saved, nil
@@ -280,7 +238,6 @@ func (s *Store) Delete(id string) (Event, error) {
 	if err := s.do(ctx, http.MethodDelete, "/events/"+url.PathEscape(id), nil, &gone); err != nil {
 		return Event{}, err
 	}
-	gone = s.view(gone)
 
 	s.bus.Publish(bus.Event{Type: "calendar", Calendar: Change{Op: "delete", Event: gone}})
 	return gone, nil
@@ -303,5 +260,5 @@ func (s *Store) Conflicts(id string, buffer time.Duration) ([]Event, error) {
 	if err := s.do(ctx, http.MethodGet, path, nil, &payload); err != nil {
 		return nil, err
 	}
-	return s.views(payload.Conflicts), nil
+	return payload.Conflicts, nil
 }

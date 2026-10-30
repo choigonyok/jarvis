@@ -43,6 +43,7 @@
   // https://jarvis-be.choigonyok.com/agent.
   "vars": {
     "INPUT_URL": "https://jarvis-be.choigonyok.com/input",
+    "CALENDAR_URL": "https://jarvis-be.choigonyok.com/calendar",
     "ASSETS_URL": "https://jarvis-be.choigonyok.com/assets",
     "KAKAOTALK_URL": "https://jarvis-be.choigonyok.com/kakaotalk",
     "IMESSAGE_URL": "https://jarvis-be.choigonyok.com/imessage",

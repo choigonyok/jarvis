@@ -472,6 +472,16 @@ func TestACommandIsARecord(t *testing.T) {
 		t.Fatalf("%d %s", code, out)
 	}
 
+	// An id keeps what it held: mind reads the path as it came.
+	path = "/api/calendar/" + unique("s") + "%232026-10-31"
+	kind = answers(t, owner, "records", path, http.StatusOK, `{"id":"e1"}`)
+	if code, out := call(t, http.MethodPatch, srv.URL+"/mind"+path, token, `{"title":"옮김"}`); code != http.StatusOK {
+		t.Fatalf("%d %s", code, out)
+	}
+	if got := <-kind; got != "manual.edit" {
+		t.Fatalf("종류: %q", got)
+	}
+
 	// A path no command has is not a record, nor a read one.
 	if code, _ := call(t, http.MethodPost, srv.URL+"/mind/api/replay", token, "{}"); code != http.StatusNotFound {
 		t.Fatalf("없는 명령: %d", code)

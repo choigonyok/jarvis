@@ -2,7 +2,7 @@
   "kind": {
     "intent.answer": {"lane": "deterministic"},
     "execute.result": {"lane": "deterministic", "consumer": "mind-results"},
-    "manual.edit": {"lane": "deterministic"},
+    "manual.edit": {"lane": "deterministic", "guest": true},
     "payment.requested": {"lane": "deterministic"},
     "timer.fired": {"lane": "deterministic"},
     "registry.changed": {"lane": "deterministic"},

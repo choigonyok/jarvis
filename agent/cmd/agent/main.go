@@ -111,10 +111,6 @@ func main() {
 	// Adding a feature is one Add call. Removing one is deleting the line -
 	// nothing below this block names a specific module.
 	calendarStore := calendar.NewStore(cfg.CalendarURL, cfg.APIToken, events)
-	if cfg.Guest {
-		// The guest is the calendar's other person: their entries are "나" here.
-		calendarStore.FromPartnerSide()
-	}
 	calendarModule := calendar.New(calendarStore)
 	modules.Add(calendarModule)
 
@@ -509,9 +505,10 @@ func main() {
 			checklistModule.Publish(context.Background(), id)
 		}
 	}
+	entryChanged := func(change json.RawMessage) { events.Publish(bus.Event{Type: "calendar", Calendar: change}) }
 	var suggester *suggest.Engine
 	if cfg.QueueURL != "" && cfg.Guest {
-		suggester = suggest.New(proposals, suggest.Config{Guest: true, Notice: layNotice, Redraw: redrawList, WakeJobs: wakeJobs}, log)
+		suggester = suggest.New(proposals, suggest.Config{Guest: true, Notice: layNotice, Redraw: redrawList, Entry: entryChanged, WakeJobs: wakeJobs}, log)
 	}
 	if cfg.QueueURL != "" && !cfg.Guest {
 		suggester = suggest.New(proposals, suggest.Config{
@@ -520,6 +517,7 @@ func main() {
 			Mind:     mindClient,
 			Notice:   layNotice,
 			Redraw:   redrawList,
+			Entry:    entryChanged,
 			WakeJobs: wakeJobs,
 			Show: func(id, lead, key string) {
 				if checklistModule == nil {
@@ -701,7 +699,6 @@ func main() {
 		Role:            map[bool]string{true: "guest", false: "owner"}[cfg.Guest],
 		Thread:          transcript,
 		Proposals:       proposals,
-		Calendar:        calendarStore,
 		Runner:          runner,
 		Bus:             events,
 		MCP:             mcpMounts,

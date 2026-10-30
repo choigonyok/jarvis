@@ -441,6 +441,9 @@ const KindSpendingWrite = "spending.write"
 // KindJobsWrite is a change to a job, which mind keeps.
 const KindJobsWrite = "jobs.write"
 
+// KindManualEdit is what a person changed by hand on a screen.
+const KindManualEdit = "manual.edit"
+
 // KindRegistryWrite is a change to a row of mind's registry.
 const KindRegistryWrite = "registry.write"
 
@@ -466,6 +469,8 @@ func CommandKind(method, path string) string {
 		return KindJobsWrite
 	case "registry":
 		return KindRegistryWrite
+	case "calendar":
+		return KindManualEdit
 	case "reminders":
 		switch method {
 		case "POST":

@@ -21,7 +21,6 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/core/bus"
 	"github.com/choigonyok/jarvis/agent/internal/core/module"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
-	"github.com/choigonyok/jarvis/agent/internal/module/calendar"
 	"github.com/choigonyok/jarvis/agent/internal/policy"
 	"github.com/choigonyok/jarvis/agent/internal/thread"
 	"github.com/choigonyok/jarvis/agent/internal/uploads"
@@ -35,7 +34,6 @@ type Server struct {
 	vault         http.Handler
 	thread        *thread.Store
 	proposals     *proposal.Store
-	calendar      *calendar.Store
 	runner        Sender
 	bus           *bus.Bus
 	mcp           map[string]http.Handler
@@ -113,7 +111,6 @@ type Deps struct {
 	Role      string
 	Thread    *thread.Store
 	Proposals *proposal.Store
-	Calendar  *calendar.Store
 	Runner    Sender
 	Bus       *bus.Bus
 	// MCP maps a mount path to its server: the permission gate at /mcp, one
@@ -176,7 +173,6 @@ func New(d Deps) *Server {
 	s := &Server{
 		thread:          d.Thread,
 		proposals:       d.Proposals,
-		calendar:        d.Calendar,
 		runner:          d.Runner,
 		bus:             d.Bus,
 		mcp:             d.MCP,
@@ -243,10 +239,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /intercept/records", s.postGuardRecords)
 	// The CLI's PreToolUse hook, from inside this container (policy.RunHook).
 	mux.Handle("POST /policy/check", s.guardMCP(http.HandlerFunc(s.postPolicyCheck)))
-
-	mux.HandleFunc("GET /calendar", s.guard(s.getCalendar))
-	mux.HandleFunc("POST /calendar", s.guard(s.postCalendar))
-	mux.HandleFunc("DELETE /calendar/{id}", s.guard(s.deleteCalendar))
 
 	if s.browserChecks != nil {
 		mux.HandleFunc("/browser-checks", s.guard(s.browserChecks.ServeHTTP))
@@ -681,52 +673,6 @@ func (s *Server) getUpload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	http.ServeFile(w, r, path)
-}
-
-func (s *Server) getCalendar(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	writeJSON(w, http.StatusOK, map[string]any{
-		"events": s.calendar.Range(q.Get("from"), q.Get("to")),
-	})
-}
-
-// postCalendar is the operator editing an existing entry by hand, which needs
-// no card. A new entry does: the calendar is shared with a partner since it
-// moved to uniple, and the operator asked that every addition be approved.
-// New entries come in through the calendar tools and their approval card.
-func (s *Server) postCalendar(w http.ResponseWriter, r *http.Request) {
-	var in calendar.Event
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&in); err != nil {
-		writeErr(w, http.StatusBadRequest, "본문을 읽을 수 없습니다.")
-		return
-	}
-	if in.ID == "" {
-		writeErr(w, http.StatusForbidden, "새 일정은 대화에서 요청해 승인 카드를 거쳐 추가합니다.")
-		return
-	}
-	// An edit keeps whoever created it.
-	if existing, ok := s.calendar.Get(in.ID); ok {
-		in.Source = existing.Source
-	}
-
-	saved, err := s.calendar.Put(in)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, saved)
-}
-
-func (s *Server) deleteCalendar(w http.ResponseWriter, r *http.Request) {
-	if _, err := s.calendar.Delete(r.PathValue("id")); err != nil {
-		if errors.Is(err, calendar.ErrNotFound) {
-			writeErr(w, http.StatusNotFound, err.Error())
-			return
-		}
-		writeErr(w, http.StatusInternalServerError, "삭제하지 못했습니다.")
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {

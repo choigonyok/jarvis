@@ -287,6 +287,28 @@ func (l *Stream) ListChanged(ctx context.Context, guest bool, id string) error {
 	return err
 }
 
+// KindCalendarChanged says what an entry became: the screens showing it redraw.
+const KindCalendarChanged = "calendar.changed"
+
+// CalendarChanged tells a person's agent what a screen did to an entry.
+func (l *Stream) CalendarChanged(ctx context.Context, guest bool, op string, event json.RawMessage) error {
+	raw := make([]byte, 12)
+	if _, err := rand.Read(raw); err != nil {
+		return err
+	}
+	payload, err := json.Marshal(map[string]any{"op": op, "event": event})
+	if err != nil {
+		return err
+	}
+	topic := queue.Effects
+	if guest {
+		topic = queue.GuestEffects
+	}
+	_, _, err = queue.Publish(ctx, l.db, topic, queue.Message{Kind: KindCalendarChanged, Source: mindSource,
+		SourceKey: "cal-" + hex.EncodeToString(raw), Actor: mindSource, Subject: "calendar", Payload: payload})
+	return err
+}
+
 // Effect sends something decided that is not an observation: a write for the
 // hand to carry out.
 func (l *Stream) Effect(ctx context.Context, m queue.Message) error {

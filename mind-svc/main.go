@@ -106,16 +106,17 @@ func main() {
 	dsn := os.Getenv("DATABASE_URL")
 
 	var (
-		st       store.Store
-		logOut   obs.Log
-		memLog   *obs.MemoryLog
-		stream   *obs.Stream
-		calendar act.Calendar = act.NewMemoryCalendar()
-		notifier act.Notifier = &act.MemoryNotifier{}
-		clk                   = clock.New()
-		movable               = clk
-		mode                  = "memory"
-		settle                = duration("MIND_SETTLE", 3*time.Second)
+		st           store.Store
+		logOut       obs.Log
+		memLog       *obs.MemoryLog
+		stream       *obs.Stream
+		calendar     act.Calendar = act.NewMemoryCalendar()
+		calendarDoor *api.CalendarDoor
+		notifier     act.Notifier = &act.MemoryNotifier{}
+		clk                       = clock.New()
+		movable                   = clk
+		mode                      = "memory"
+		settle                    = duration("MIND_SETTLE", 3*time.Second)
 	)
 	// What is said at a moment waits here, and the operator's checklists;
 	// in memory on a laptop.
@@ -175,6 +176,7 @@ func main() {
 		}
 		if getenv("MIND_CALENDAR", "memory") == "http" {
 			calendar = act.HTTPCalendar{URL: getenv("CALENDAR_URL", "http://calendar:8093"), Token: token, HTTP: handed(stream, st)}
+			calendarDoor = &api.CalendarDoor{URL: getenv("CALENDAR_URL", "http://calendar:8093"), Token: token, HTTP: handed(stream, st)}
 			log.Warn("실제 캘린더(calendar-svc)에 씁니다")
 		}
 	}
@@ -336,6 +338,9 @@ func main() {
 		go memLog.Run(ctx, m.Handle)
 	}
 	mindAPI := api.New(m, token, os.Getenv("MIND_CONSOLE_TOKEN"), mode == "memory", movable, log)
+	if calendarDoor != nil {
+		mindAPI.SetCalendar(*calendarDoor)
+	}
 	// 손님 에이전트의 토큰: 손님 자신의 리마인드·체크리스트만 연다.
 	mindAPI.SetGuestToken(os.Getenv("API_GUEST_TOKEN"))
 	if stream != nil {

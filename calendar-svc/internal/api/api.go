@@ -66,6 +66,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /events/{id}", s.auth(s.get))
 	// id 없이 PUT 하면 추가, 있으면 수정. 파일 저장소의 Put 과 같은 계약이다.
 	mux.HandleFunc("PUT /events", s.auth(s.put))
+	// 사람이 화면에서 고친 일정. 있는 일정만, 만든 이는 그대로다.
+	mux.HandleFunc("PATCH /events/{id}", s.auth(s.edit))
 	mux.HandleFunc("DELETE /events/{id}", s.auth(s.remove))
 	// 겹치는 일정. 막지 않고 알려주는 것이 이 경로의 존재 이유다.
 	mux.HandleFunc("GET /events/{id}/conflicts", s.auth(s.conflicts))
@@ -105,7 +107,33 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "일정을 불러오지 못했습니다.")
 		return
 	}
+	for i := range events {
+		events[i] = seen(r, events[i])
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"events": events})
+}
+
+// seen turns an entry to the asker's side: to the guest, whose calendar this is
+// too, their own entries are "me". The service and uniple only ever hold the
+// operator's side. Swapping is its own inverse, so the same call takes what the
+// guest sent back to the service's side.
+func seen(r *http.Request, e event.Event) event.Event {
+	if r.Header.Get("X-Jarvis-Side") != "partner" {
+		return e
+	}
+	switch e.Owner {
+	case event.OwnerMe:
+		e.Owner = event.OwnerPartner
+	case event.OwnerPartner:
+		e.Owner = event.OwnerMe
+	}
+	switch e.Source {
+	case event.SourceHuman:
+		e.Source = event.SourcePartner
+	case event.SourcePartner:
+		e.Source = event.SourceHuman
+	}
+	return e
 }
 
 func (s *Server) get(w http.ResponseWriter, r *http.Request) {
@@ -119,7 +147,7 @@ func (s *Server) get(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "일정을 불러오지 못했습니다.")
 		return
 	}
-	writeJSON(w, http.StatusOK, e)
+	writeJSON(w, http.StatusOK, seen(r, e))
 }
 
 func (s *Server) put(w http.ResponseWriter, r *http.Request) {
@@ -128,18 +156,8 @@ func (s *Server) put(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "본문을 읽을 수 없습니다.")
 		return
 	}
-
-	saved, err := s.store.Put(r.Context(), in)
-	if err != nil {
-		// 검증 실패는 사람이 읽을 메시지 그대로 400 으로 돌려준다. 모델이
-		// 상대 날짜를 보냈을 때 왜 거부됐는지 알아야 고칠 수 있다.
-		var invalid event.ValidationError
-		if errors.As(err, &invalid) {
-			writeErr(w, http.StatusBadRequest, invalid.Error())
-			return
-		}
-		s.log.Error("일정 저장에 실패했습니다", "err", err)
-		writeErr(w, http.StatusInternalServerError, "일정을 저장하지 못했습니다.")
+	saved, ok := s.save(w, r, seen(r, in))
+	if !ok {
 		return
 	}
 	// A new entry is worth telling the other person about: one the guest's
@@ -150,7 +168,50 @@ func (s *Server) put(w http.ResponseWriter, r *http.Request) {
 	if in.ID == "" {
 		s.notify.Send(added(saved, r.Header.Get("X-Jarvis-Side") == "partner"))
 	}
-	writeJSON(w, http.StatusOK, saved)
+	writeJSON(w, http.StatusOK, seen(r, saved))
+}
+
+// edit is a person's change to an entry on the screen. An edit keeps whoever
+// created it.
+func (s *Server) edit(w http.ResponseWriter, r *http.Request) {
+	var in event.Event
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<18)).Decode(&in); err != nil {
+		writeErr(w, http.StatusBadRequest, "본문을 읽을 수 없습니다.")
+		return
+	}
+	existing, err := s.store.Get(r.Context(), r.PathValue("id"))
+	if errors.Is(err, event.ErrNotFound) {
+		writeErr(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if err != nil {
+		s.log.Error("일정 조회에 실패했습니다", "err", err)
+		writeErr(w, http.StatusInternalServerError, "일정을 불러오지 못했습니다.")
+		return
+	}
+	in = seen(r, in)
+	in.ID, in.Source = existing.ID, existing.Source
+	if saved, ok := s.save(w, r, in); ok {
+		writeJSON(w, http.StatusOK, seen(r, saved))
+	}
+}
+
+// save stores an entry, or answers why it could not.
+func (s *Server) save(w http.ResponseWriter, r *http.Request, in event.Event) (event.Event, bool) {
+	saved, err := s.store.Put(r.Context(), in)
+	if err != nil {
+		// 검증 실패는 사람이 읽을 메시지 그대로 400 으로 돌려준다. 모델이
+		// 상대 날짜를 보냈을 때 왜 거부됐는지 알아야 고칠 수 있다.
+		var invalid event.ValidationError
+		if errors.As(err, &invalid) {
+			writeErr(w, http.StatusBadRequest, invalid.Error())
+			return saved, false
+		}
+		s.log.Error("일정 저장에 실패했습니다", "err", err)
+		writeErr(w, http.StatusInternalServerError, "일정을 저장하지 못했습니다.")
+		return saved, false
+	}
+	return saved, true
 }
 
 func (s *Server) remove(w http.ResponseWriter, r *http.Request) {
@@ -164,7 +225,7 @@ func (s *Server) remove(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "일정을 삭제하지 못했습니다.")
 		return
 	}
-	writeJSON(w, http.StatusOK, gone)
+	writeJSON(w, http.StatusOK, seen(r, gone))
 }
 
 func (s *Server) conflicts(w http.ResponseWriter, r *http.Request) {
@@ -183,6 +244,9 @@ func (s *Server) conflicts(w http.ResponseWriter, r *http.Request) {
 		s.log.Error("충돌 조회에 실패했습니다", "err", err)
 		writeErr(w, http.StatusInternalServerError, "충돌을 확인하지 못했습니다.")
 		return
+	}
+	for i := range found {
+		found[i] = seen(r, found[i])
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"conflicts": found})
 }

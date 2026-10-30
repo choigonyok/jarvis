@@ -27,6 +27,8 @@ func TestTheListIsWhatMayBeWritten(t *testing.T) {
 	}{
 		{"calendar", "PUT", "/events", true},
 		{"calendar", "DELETE", "/events/abc", true},
+		{"calendar", "PATCH", "/events/abc%232026-10-31", true},
+		{"calendar", "PATCH", "/events", false},
 		{"calendar", "POST", "/events", false},
 		{"assets", "POST", "/orders", true},
 		{"assets", "POST", "/orders/rebalance", true},
@@ -179,5 +181,27 @@ func TestAnAdapterAwayIsAnAnswer(t *testing.T) {
 	}
 	if status, _ := result(t, mem, m.SourceKey); status != http.StatusBadGateway {
 		t.Fatalf("%d", status)
+	}
+}
+
+// Whose side of the calendar a person's change is from goes with it.
+func TestASideGoesWithTheCall(t *testing.T) {
+	var side atomic.Value
+	h, _, _ := setup(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		side.Store(r.Header.Get("X-Jarvis-Side"))
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	m := message("/orders", time.Now().Add(time.Minute))
+	var c map[string]any
+	if err := json.Unmarshal(m.Payload, &c); err != nil {
+		t.Fatal(err)
+	}
+	c["side"] = "partner"
+	m.Payload, _ = json.Marshal(c)
+	if err := h.Take(context.Background(), m); err != nil {
+		t.Fatal(err)
+	}
+	if side.Load() != "partner" {
+		t.Fatalf("%v", side.Load())
 	}
 }

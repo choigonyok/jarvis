@@ -81,6 +81,7 @@ interface Env {
   JARVIS_GUEST_API_TOKEN?: string;
   AGENT: Fetcher;
   INPUT: Fetcher;
+  CALENDAR: Fetcher;
   ASSETS: Fetcher;
   KAKAOTALK: Fetcher;
   IMESSAGE: Fetcher;
@@ -112,6 +113,8 @@ const SERVICES: Record<string, { binding: keyof Env; origin: string }> = {
   "agent-guest": { binding: "AGENT_GUEST", origin: "http://agent-guest:8081" },
   // The conversation and the training log are kept at the way in.
   input: { binding: "INPUT", origin: "http://input:8101" },
+  // The couple's calendar as it stands (calendarRoute).
+  calendar: { binding: "CALENDAR", origin: "http://calendar:8093" },
   assets: { binding: "ASSETS", origin: "http://assets:8092" },
   kakaotalk: { binding: "KAKAOTALK", origin: "http://kakaotalk:8090" },
   imessage: { binding: "IMESSAGE", origin: "http://imessage:8099" },
@@ -134,10 +137,10 @@ const SERVICES: Record<string, { binding: keyof Env; origin: string }> = {
 /**
  * What the guest's token opens: their own agent, the workout log (read it
  * and save what changed - inputRoute), their notifications, their own voice,
- * of context-svc the operator's day alone (guestContextRoute), and of mind
- * their own jobs (jobsRoute).
+ * of context-svc the operator's day alone (guestContextRoute), of mind their
+ * own jobs (jobsRoute), and the calendar, which is the two of theirs.
  */
-const GUEST_SERVICES = new Set(["agent-guest", "input", "notify", "tts", "context", "mind"]);
+const GUEST_SERVICES = new Set(["agent-guest", "input", "notify", "tts", "context", "mind", "calendar"]);
 
 /**
  * What the 작업 tab does with the jobs mind keeps: list them, read one, and
@@ -184,14 +187,15 @@ function guestContextRoute(method: string, path: string): boolean {
 const AGENT_ROLE: Record<string, string> = { agent: "owner", "agent-guest": "guest" };
 
 /** The agent routes the console drives. Anything else on the agent is internal. */
-const AGENT_ROUTES = new Set(["healthz", "thread", "messages", "events", "proposals", "calendar", "uploads", "usage", "vault"]);
+const AGENT_ROUTES = new Set(["healthz", "thread", "messages", "events", "proposals", "uploads", "usage", "vault"]);
 
 /**
  * What the screens may do with mind. The 생활 screen: read the notes, the map,
  * the things owned and the meals, read a note's versions, and say a note is
  * so, is not, or reads otherwise. The 작업 tab: jobsRoute, the reminders and the
  * checklists (a tick, an item swiped off, a list closed). The 가계부 screen:
- * spendingRoute. Reads go to mind; a change goes in at the way in (inputRoute).
+ * spendingRoute. The 캘린더 tab's edits to an entry. Reads go to mind; a change
+ * goes in at the way in (inputRoute).
  */
 function mindRoute(method: string, path: string): boolean {
   if (path.startsWith("api/jobs/")) return jobsRoute(method, path.slice("api/jobs/".length));
@@ -205,7 +209,13 @@ function mindRoute(method: string, path: string): boolean {
   if (method === "POST") {
     return /^api\/notes\/[A-Za-z0-9_-]+$/.test(path) || /^api\/checklists\/[A-Za-z0-9_-]+\/items\/[A-Za-z0-9_-]+$/.test(path);
   }
-  return (method === "PATCH" || method === "DELETE") && /^api\/checklists\/[A-Za-z0-9_-]+$/.test(path);
+  if (method !== "PATCH" && method !== "DELETE") return false;
+  return /^api\/checklists\/[A-Za-z0-9_-]+$/.test(path) || /^api\/calendar\/[^/]+$/.test(path);
+}
+
+/** What the 캘린더 tab reads from the adapter. A change goes in at the way in like any other (mindRoute). */
+function calendarRoute(method: string, path: string): boolean {
+  return method === "GET" && path === "events";
 }
 
 /**
@@ -350,7 +360,10 @@ async function gateway(request: Request, env: Env, internal: boolean): Promise<R
   if (guest && name === "mind" && !/^api\/(jobs\/|reminders$|checklists(\/|$))/.test(rest.join("/"))) {
     return json(404, "그런 경로가 없습니다.");
   }
-  if (guest && name === "input" && rest[0] === "mind" && !/^mind\/api\/(jobs|checklists)\//.test(rest.join("/"))) {
+  if (guest && name === "input" && rest[0] === "mind" && !/^mind\/api\/(jobs|checklists|calendar)\//.test(rest.join("/"))) {
+    return json(404, "그런 경로가 없습니다.");
+  }
+  if (name === "calendar" && !calendarRoute(request.method, rest.join("/"))) {
     return json(404, "그런 경로가 없습니다.");
   }
   if (name === "input" && !inputRoute(request.method, rest.join("/"))) {
@@ -394,8 +407,9 @@ async function gateway(request: Request, env: Env, internal: boolean): Promise<R
     if (guest && name === "tts" && !env.JARVIS_GUEST_API_TOKEN) return json(503, "손님 목소리가 설정되지 않았습니다.");
     if (guest && name === "mind" && !env.JARVIS_GUEST_API_TOKEN) return json(503, "손님 작업이 설정되지 않았습니다.");
     if (guest && name === "input" && !env.JARVIS_GUEST_API_TOKEN) return json(503, "손님 기록이 설정되지 않았습니다.");
+    if (guest && name === "calendar" && !env.JARVIS_GUEST_API_TOKEN) return json(503, "손님 캘린더가 설정되지 않았습니다.");
     const own =
-      (name === "agent-guest" || (guest && (name === "tts" || name === "mind" || name === "input"))) &&
+      (name === "agent-guest" || (guest && (name === "tts" || name === "mind" || name === "input" || name === "calendar"))) &&
       env.JARVIS_GUEST_API_TOKEN;
     const token = own ? env.JARVIS_GUEST_API_TOKEN! : env.JARVIS_API_TOKEN;
     headers.set("authorization", `Bearer ${token}`);

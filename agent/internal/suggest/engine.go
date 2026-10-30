@@ -41,11 +41,11 @@ import (
 
 // Types is what the assistant subscribes to: mind's cards, what mind says
 // at a moment, and the lists it shows.
-var Types = []string{mind.CardRaised, mind.CardClosed, "remind.*", ChecklistShown, ListChanged, JobsWake}
+var Types = []string{mind.CardRaised, mind.CardClosed, "remind.*", ChecklistShown, ListChanged, CalendarChanged, JobsWake}
 
 // GuestTypes is what the guest's agent subscribes to: what mind says to the
 // guest at a moment.
-var GuestTypes = []string{"remind.*", ListChanged, JobsWake}
+var GuestTypes = []string{"remind.*", ListChanged, CalendarChanged, JobsWake}
 
 // JobsWake says a job may be due now: changed on the 작업 tab, answered, made.
 const JobsWake = "jobs.wake"
@@ -56,6 +56,9 @@ const ChecklistShown = "checklist.shown"
 // ListChanged says a list changed, from whichever screen or tool: the cards
 // showing it redraw.
 const ListChanged = "checklist.changed"
+
+// CalendarChanged says what a screen did to an entry: the screens redraw it.
+const CalendarChanged = "calendar.changed"
 
 // Event is one record of the stream, as an event.
 type Event struct {
@@ -110,6 +113,8 @@ type Config struct {
 	Show func(id, lead, key string)
 	// Redraw sends a list as it stands to the screens; nil: none.
 	Redraw func(id string)
+	// Entry sends the screens what became of a calendar entry; nil: none.
+	Entry func(change json.RawMessage)
 	// WakeJobs has the job scheduler look now.
 	WakeJobs func()
 }
@@ -155,6 +160,10 @@ func (e *Engine) handle(ev Event) {
 		}
 	case ev.Type == ListChanged:
 		e.listChanged(ev)
+	case ev.Type == CalendarChanged:
+		if e.cfg.Entry != nil {
+			e.cfg.Entry(ev.Data)
+		}
 	case e.cfg.Guest:
 		// The guest's: what mind tells the guest at its moment, and no more.
 		if strings.HasPrefix(ev.Type, "remind.") {

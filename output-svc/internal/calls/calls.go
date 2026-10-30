@@ -45,7 +45,7 @@ type route struct {
 // routes is the fixed API: what may be written, by service. A write that is
 // not here is refused, whoever sent it (입구는 관대, 출구는 보수).
 var routes = map[string][]route{
-	"calendar": {{http.MethodPut, regexp.MustCompile(`^/events$`)}, {http.MethodDelete, regexp.MustCompile(`^/events/[^/?]+$`)}},
+	"calendar": {{http.MethodPut, regexp.MustCompile(`^/events$`)}, {http.MethodPatch, regexp.MustCompile(`^/events/[^/?]+$`)}, {http.MethodDelete, regexp.MustCompile(`^/events/[^/?]+$`)}},
 	"assets":   {{http.MethodPost, regexp.MustCompile(`^/orders$`)}, {http.MethodPost, regexp.MustCompile(`^/orders/rebalance$`)}},
 	"immich":   {{http.MethodPost, regexp.MustCompile(`^/api/albums$`)}, {http.MethodDelete, regexp.MustCompile(`^/api/albums/[^/?]+$`)}},
 }
@@ -76,6 +76,8 @@ type call struct {
 	Path     string          `json:"path"`
 	Body     json.RawMessage `json:"body"`
 	Deadline time.Time       `json:"deadline"`
+	// Side is passed on: whose side of the shared calendar a person's change is from.
+	Side string `json:"side"`
 }
 
 // Take carries out one call. The ledger row goes in before the call does: a
@@ -171,6 +173,9 @@ func (h *Hand) call(ctx context.Context, c call) (int, []byte) {
 		return http.StatusBadGateway, mustJSON(map[string]string{"error": err.Error()})
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if c.Side != "" {
+		req.Header.Set("X-Jarvis-Side", c.Side)
+	}
 	if s.Auth != nil {
 		s.Auth(req)
 	}

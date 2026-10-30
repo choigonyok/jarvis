@@ -139,11 +139,19 @@ func TestARecordWithNoPathIsNotACommand(t *testing.T) {
 // fakeStream is the stream from the door's side: what it is given, the lane
 // does at once.
 type fakeStream struct {
-	mu    sync.Mutex
-	got   []string
-	lists []string
-	s     *Server
-	done  bool
+	mu      sync.Mutex
+	got     []string
+	lists   []string
+	entries []string
+	s       *Server
+	done    bool
+}
+
+func (f *fakeStream) CalendarChanged(_ context.Context, guest bool, op string, event json.RawMessage) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.entries = append(f.entries, fmt.Sprintf("%s:%v:%s", op, guest, event))
+	return nil
 }
 
 func (f *fakeStream) ListChanged(_ context.Context, guest bool, id string) error {
@@ -264,5 +272,59 @@ func TestAChangedListTellsTheScreens(t *testing.T) {
 	do("tok", http.MethodDelete, "/api/checklists/"+id, "")
 	if want := id + ":false"; strings.Join(stream.lists, " ") != want+" "+want+" "+want {
 		t.Fatalf("%v", stream.lists)
+	}
+}
+
+type carried func(*http.Request) (*http.Response, error)
+
+func (c carried) RoundTrip(r *http.Request) (*http.Response, error) { return c(r) }
+
+// What a person changes on the calendar goes to the adapter's fixed API as they
+// left it, from their side, and the screens hear what it became.
+func TestAScreenEditGoesByTheHand(t *testing.T) {
+	s, h, _ := commandServer(t)
+	s.SetGuestToken("guest")
+	stream := &fakeStream{s: s, done: true}
+	s.SetStream(stream)
+	var asked []string
+	s.SetCalendar(CalendarDoor{URL: "http://calendar:8093", Token: "cal", HTTP: &http.Client{Transport: carried(func(r *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(r.Body)
+		asked = append(asked, strings.TrimSpace(r.Method+" "+r.URL.RequestURI()+" "+r.Header.Get("X-Jarvis-Side")+" "+r.Header.Get("Authorization")+" "+string(body)))
+		status := http.StatusOK
+		if strings.Contains(r.URL.Path, "none") {
+			status = http.StatusNotFound
+		}
+		return &http.Response{StatusCode: status, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"id":"e1","title":"옮김"}`))}, nil
+	})}})
+	do := func(token, method, path, body string) int {
+		t.Helper()
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if code := do("tok", http.MethodPatch, "/api/calendar/s1%232026-10-31", `{"title":"옮김"}`); code != http.StatusOK {
+		t.Fatal(code)
+	}
+	if code := do("guest", http.MethodDelete, "/api/calendar/e2", ""); code != http.StatusOK {
+		t.Fatal(code)
+	}
+	if code := do("tok", http.MethodPatch, "/api/calendar/none", `{}`); code != http.StatusNotFound {
+		t.Fatal(code)
+	}
+	want := []string{
+		`PATCH /events/s1%232026-10-31  Bearer cal {"title":"옮김"}`,
+		`DELETE /events/e2 partner Bearer cal`,
+		`PATCH /events/none  Bearer cal {}`,
+	}
+	if strings.Join(asked, "|") != strings.Join(want, "|") {
+		t.Fatalf("%q", asked)
+	}
+	if len(stream.got) != 3 || !strings.HasPrefix(stream.got[0], "manual.edit operator PATCH") || !strings.HasPrefix(stream.got[1], "manual.edit guest DELETE") {
+		t.Fatalf("%v", stream.got)
+	}
+	if len(stream.entries) != 2 || !strings.HasPrefix(stream.entries[0], "upsert:false:") || !strings.HasPrefix(stream.entries[1], "delete:true:") {
+		t.Fatalf("화면에 알린 것: %v", stream.entries)
 	}
 }

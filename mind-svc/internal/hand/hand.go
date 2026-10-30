@@ -44,6 +44,9 @@ type Call struct {
 	Path     string          `json:"path"`
 	Body     json.RawMessage `json:"body,omitempty"`
 	Deadline time.Time       `json:"deadline"`
+	// Side is whose side of a shared thing the write is from, as the adapter
+	// is told it: partner, or empty for the operator's.
+	Side string `json:"side,omitempty"`
 }
 
 // Transport carries an actuator's writes as effects. Reads go by Reads.
@@ -85,7 +88,8 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return nil, err
 	}
 	key := "call-" + hex.EncodeToString(raw)
-	call := Call{Service: req.URL.Hostname(), Method: req.Method, Path: req.URL.RequestURI(), Deadline: now().Add(wait)}
+	call := Call{Service: req.URL.Hostname(), Method: req.Method, Path: req.URL.RequestURI(), Deadline: now().Add(wait),
+		Side: req.Header.Get("X-Jarvis-Side")}
 	if len(bytes.TrimSpace(body)) > 0 {
 		call.Body = bytes.TrimSpace(body)
 	}
