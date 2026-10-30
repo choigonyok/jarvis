@@ -849,25 +849,28 @@ func (p *Postgres) LinksSince(ctx context.Context, t time.Time) ([]model.Link, e
 	return p.links(ctx, `where updated_at >= $1 order by updated_at, from_id, to_id, rel`, t)
 }
 
+// The cache's kinds for what is read here: a product's class, and whether a
+// class of thing goes with a kind of plan.
+const (
+	classThing = "thing.class"
+	classLink  = "link.judge"
+)
+
 func (p *Postgres) ThingClass(ctx context.Context, name string) (string, error) {
-	var c string
-	err := p.db.QueryRow(ctx, `select class from mind_thing_classes where name = $1`, name).Scan(&c)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", model.ErrNotFound
-	}
-	return c, err
+	c, err := p.Class(ctx, classThing, name)
+	return c.Value, err
 }
 
 func (p *Postgres) PutThingClass(ctx context.Context, name, class string) error {
-	_, err := p.db.Exec(ctx, `insert into mind_thing_classes (name, class) values ($1, $2)
-		on conflict (name) do update set class = excluded.class, at = now()`, name, class)
-	return err
+	return p.PutClass(ctx, model.Class{Kind: classThing, Key: name, Value: class, P: 0.8, By: model.ClassByLLM, At: time.Now()})
 }
+
+func linkKey(class, planKind string) string { return class + "\x1f" + planKind }
 
 func (p *Postgres) LinkCache(ctx context.Context, class, planKind string) (model.Judgement, error) {
 	j := model.Judgement{Class: class}
-	err := p.db.QueryRow(ctx, `select rel, plausibility, why from mind_link_cache where thing_class = $1 and plan_kind = $2`,
-		class, planKind).Scan(&j.Rel, &j.Plausibility, &j.Why)
+	err := p.db.QueryRow(ctx, `select value, p, coalesce(detail->>'why', '') from mind.classes where kind = $1 and key = $2`,
+		classLink, linkKey(class, planKind)).Scan(&j.Rel, &j.Plausibility, &j.Why)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return model.Judgement{}, model.ErrNotFound
 	}
@@ -875,9 +878,10 @@ func (p *Postgres) LinkCache(ctx context.Context, class, planKind string) (model
 }
 
 func (p *Postgres) PutLinkCache(ctx context.Context, planKind string, j model.Judgement) error {
-	_, err := p.db.Exec(ctx, `insert into mind_link_cache (thing_class, plan_kind, rel, plausibility, why) values ($1, $2, $3, $4, $5)
-		on conflict (thing_class, plan_kind) do update set rel = excluded.rel, plausibility = excluded.plausibility, why = excluded.why, at = now()`,
-		j.Class, planKind, j.Rel, j.Plausibility, j.Why)
+	_, err := p.db.Exec(ctx, `insert into mind.classes (kind, key, value, p, by_who, detail)
+		values ($1, $2, $3, $4, 'llm', jsonb_build_object('why', $5::text))
+		on conflict (kind, key) do update set value = excluded.value, p = excluded.p, detail = excluded.detail, at = now()
+		where mind.classes.by_who <> 'operator'`, classLink, linkKey(j.Class, planKind), j.Rel, j.Plausibility, j.Why)
 	return err
 }
 

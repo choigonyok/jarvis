@@ -121,7 +121,7 @@ case "$cmd" in
     readonly_sql "select body from mind_predictions order by due" > "$dir/predictions.jsonl"
     readonly_sql "select body from mind_occurrences order by at" > "$dir/occurrences.jsonl"
     readonly_sql "select body from mind_facts order by created_at" > "$dir/facts.jsonl"
-    readonly_sql "select json_build_object('name', name, 'class', class) from mind_thing_classes" > "$dir/things.jsonl"
+    readonly_sql "select json_build_object('name', key, 'class', value) from mind.classes where kind = 'thing.class'" > "$dir/things.jsonl"
     wc -l "$dir"/*.jsonl | tail -6 ;;
   measure)
     [[ $# -ge 1 ]] || { echo "사용: scripts/harness measure 폴더 [--at 0.6,0.7]" >&2; exit 2; }

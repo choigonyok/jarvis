@@ -43,7 +43,7 @@ mind 의 창구(`/api/spending/...`), 고치는 일은 명령(`spending.write`)�
 ## 분류
 
 키워드 규칙(`category`)이 처음 분류를 하고, 화면에서 고칠 때 "이 가맹점은
-앞으로도"를 켜면 `merchant_rules` 에 남아 그 가맹점의 지난·다음 내역에 적용됩니다.
+앞으로도"를 켜면 분류 캐시(`mind.classes`, `merchant.rule`)에 운영자의 값으로 남아 그 가맹점의 지난·다음 내역에 적용됩니다.
 하나씩 손으로 고친 내역(`category_source = manual`)은 일괄 변경이 덮어쓰지 않습니다.
 
 규칙도 가르친 가맹점도 못 맞혀 '기타'로 남은 결제(`category_source = rule`)와 '기타'인 상품은

@@ -615,7 +615,7 @@ func TestPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	resetTables(t, dsn, `truncate mind_messages, mind_rooms, mind_entities, mind_changes, mind_timers, mind_intents, mind_cursors, mind_facts, mind_aliases, mind_policy_stats, mind_occurrences, mind_links, mind_thing_classes, mind_link_cache, mind_pattern_counts, mind_notes, mind_note_versions, mind_predictions, mind_expectations, mind_reply_examples, mind_llm_usage, mind_observations, mind_preferences, mind.outcomes, mind.facts, mind.classes restart identity cascade`)
+	resetTables(t, dsn, `truncate mind_messages, mind_rooms, mind_entities, mind_changes, mind_timers, mind_intents, mind_cursors, mind_facts, mind_aliases, mind_policy_stats, mind_occurrences, mind_links, mind_pattern_counts, mind_notes, mind_note_versions, mind_predictions, mind_expectations, mind_reply_examples, mind_llm_usage, mind_observations, mind_preferences, mind.outcomes, mind.facts, mind.classes restart identity cascade`)
 	key := make([]byte, 32)
 	st := NewPostgres(pool, key)
 	contract(t, st)

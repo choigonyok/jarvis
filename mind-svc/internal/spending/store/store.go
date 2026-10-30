@@ -165,9 +165,9 @@ func (s *Store) AddUnparsed(ctx context.Context, messageID, chat, text string, s
 func (s *Store) Classify(ctx context.Context, merchant string) (string, string, error) {
 	var cat string
 	err := s.pool.QueryRow(ctx, `
-		select category from mind.merchant_rules
-		 where $1 like merchant_key || '%' and length(merchant_key) >= 2
-		 order by length(merchant_key) desc limit 1`, category.Key(merchant)).Scan(&cat)
+		select value from mind.classes
+		 where kind = 'merchant.rule' and $1 like key || '%' and length(key) >= 2
+		 order by length(key) desc limit 1`, category.Key(merchant)).Scan(&cat)
 	if err == nil {
 		return cat, "learned", nil
 	}
@@ -551,8 +551,8 @@ func (s *Store) Update(ctx context.Context, id int64, p Patch) (int, error) {
 			src = "learned"
 			key := category.Key(merchant)
 			if _, err := tx.Exec(ctx, `
-				insert into mind.merchant_rules (merchant_key, category) values ($1, $2)
-				on conflict (merchant_key) do update set category=excluded.category, updated_at=now()`,
+				insert into mind.classes (kind, key, value, p, by_who) values ('merchant.rule', $1, $2, 1, 'operator')
+				on conflict (kind, key) do update set value=excluded.value, at=now()`,
 				key, *p.Category); err != nil {
 				return 0, err
 			}

@@ -13,9 +13,10 @@ output.notifications · push_subscriptions · settings ← 알림함과 기기 (
 raw_events (추가 전용)                  ← 카드 알림의 옛 원문. 새 알림은 기록(input.records)에 봉인돼 있다
 commitments · workout_* · …              ← 각 서비스의 정확한 사실
 mind_*                                   ← mind 의 세계 모델·관문·노트
-mind.card_* · mind.spending_* · mind.merchant_rules ← 가계부 (옛 내역은 이 표가 원본, 새 내역은 기록에서 다시 만들 수 있다)
+mind.card_* · mind.spending_*            ← 가계부 (옛 내역은 이 표가 원본, 새 내역은 기록에서 다시 만들 수 있다)
 mind.outcomes · mind.facts               ← 결과 장부와 기간이 붙은 사실 (원본에서 다시 만듦)
-mind.classes                             ← 분류 캐시 (모델의 답은 캐시, 운영자의 답은 값)
+mind.classes                             ← 분류 캐시: 가맹점 분류·가맹점 규칙·상품 분류·상식 판정 (모델의 답은 캐시, 운영자의 답은 값)
+mind.registry                            ← 레지스트리: 종류·레인, 행동, 슬롯, 관계, 관문 숫자 (씨앗 줄은 코드를 따라가고, 사람이 고친 줄은 남는다)
 ```
 
 **원문 보관(`raw_events`)은 가계부만 씁니다.** 처음에는 모든 수집기가 본 것을 여기에
