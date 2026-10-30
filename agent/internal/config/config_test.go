@@ -50,10 +50,6 @@ func TestGuestRole(t *testing.T) {
 	if strings.Contains(c.SystemPrompt, "get_portfolio") || strings.Contains(c.SystemPrompt, "get_spending") {
 		t.Fatal("손님 지시문에 자산·가계부 도구가 있습니다")
 	}
-	// events-svc reaches the guest's own agent with the guest's reminders.
-	if c.SelfURL != "http://agent-guest:8081" {
-		t.Fatalf("손님 agent 의 주소: %q", c.SelfURL)
-	}
 }
 
 // The guest's photos and memory are read without a card - those folders and
@@ -100,8 +96,8 @@ func TestOwnerUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Guest || c.Thread != "" || c.SelfURL != "http://agent:8080" {
-		t.Fatalf("운영자 설정이 바뀌었습니다: guest=%v thread=%q self=%q", c.Guest, c.Thread, c.SelfURL)
+	if c.Guest || c.Thread != "" {
+		t.Fatalf("운영자 설정이 바뀌었습니다: guest=%v thread=%q", c.Guest, c.Thread)
 	}
 }
 

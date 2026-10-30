@@ -49,6 +49,8 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/thread"
 	"github.com/choigonyok/jarvis/agent/internal/uploads"
 	"github.com/choigonyok/jarvis/agent/internal/usage"
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/gocommon/notify"
 	"github.com/choigonyok/jarvis/gocommon/record"
@@ -479,19 +481,15 @@ func main() {
 	// ledger, budget and trust), and its cards become approval cards here
 	// (internal/suggest). The guest's agent does not suggest - it has none of
 	// the operator's data - but the guest's own reminders lay their card in
-	// the guest's conversation, as the operator's do in theirs. events-svc
-	// sends its subscription (agent-guest) only what is for the guest.
+	// the guest's conversation, as the operator's do in theirs. It reads the
+	// guest's stream, which is all its database role can see.
 	var suggester *suggest.Engine
-	if cfg.EventsURL != "" && cfg.Guest {
-		suggester = suggest.New(proposals, suggest.Config{
-			EventsURL: cfg.EventsURL, Token: cfg.APIToken, Guest: true, Notice: layNotice,
-		}, log)
-		go suggester.Subscribe(enrichCtx, strings.TrimRight(cfg.SelfURL, "/")+"/consume")
+	if cfg.QueueURL != "" && cfg.Guest {
+		suggester = suggest.New(proposals, suggest.Config{Guest: true, Notice: layNotice}, log)
 	}
-	if cfg.EventsURL != "" && !cfg.Guest {
+	if cfg.QueueURL != "" && !cfg.Guest {
 		suggester = suggest.New(proposals, suggest.Config{
-			EventsURL: cfg.EventsURL, Token: cfg.APIToken,
-			Out:    notify.New(cfg.EventsURL, cfg.DatabaseURL, cfg.APIToken, log),
+			Out:    notify.New(cfg.NotifyURL, cfg.DatabaseURL, cfg.APIToken, log),
 			Say:    func(lead, id string) { transcript.Raise([]string{lead}, id) },
 			Mind:   mindClient,
 			Notice: layNotice,
@@ -508,11 +506,15 @@ func main() {
 		// A calendar card the conversation raises takes the place of mind's
 		// waiting card for the same change.
 		proposals.OnOpen(suggester.OnOpen)
-		go suggester.Subscribe(enrichCtx, strings.TrimRight(cfg.SelfURL, "/")+"/consume")
 	}
-	var consume http.HandlerFunc
 	if suggester != nil {
-		consume = suggester.Consume
+		pool, err := pgxpool.New(enrichCtx, cfg.QueueURL)
+		if err != nil {
+			log.Error("스트림을 읽을 데이터베이스 풀을 만들지 못했습니다", "err", err)
+			os.Exit(1)
+		}
+		defer pool.Close()
+		go suggester.Consumer(pool).Run(enrichCtx)
 	}
 	// A card does not hold a turn open; its decision starts the next one.
 	gate.SetFollowUp(runner)
@@ -692,7 +694,6 @@ func main() {
 		Usage:           usageTracker,
 		APIUsage:        apiUsage,
 		MindUsage:       mindUsage,
-		Consume:         consume,
 		BrowserChecks:   browserChecks,
 		Vault:           vaultConsole(vaultModule),
 		Reminders:       reminderConsole,

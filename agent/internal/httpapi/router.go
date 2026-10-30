@@ -31,7 +31,6 @@ import (
 )
 
 type Server struct {
-	consume       http.HandlerFunc
 	browserChecks http.Handler
 	vault         http.Handler
 	reminders     http.Handler
@@ -142,8 +141,6 @@ type Deps struct {
 	APIUsage func(ctx context.Context) (any, error)
 	// MindUsage, when set, adds mind's model spend (by purpose) to /usage.
 	MindUsage func(ctx context.Context) (any, error)
-	// Consume, when set, takes events from events-svc (internal/suggest).
-	Consume http.HandlerFunc
 	// BrowserChecks serves the browser login checks (GET) and asks for one (POST).
 	BrowserChecks http.Handler
 	// Vault, when set, serves the saved logins to the console: the list and
@@ -213,7 +210,6 @@ func New(d Deps) *Server {
 		usage:           d.Usage,
 		apiUsage:        d.APIUsage,
 		mindUsage:       d.MindUsage,
-		consume:         d.Consume,
 		browserChecks:   d.BrowserChecks,
 		vault:           d.Vault,
 		reminders:       d.Reminders,
@@ -287,10 +283,6 @@ func (s *Server) Handler() http.Handler {
 		}))
 	}
 
-	// events-svc delivers here what the assistant subscribed to.
-	if s.consume != nil {
-		mux.HandleFunc("POST /consume", s.guard(s.consume))
-	}
 	if s.browserChecks != nil {
 		mux.HandleFunc("/browser-checks", s.guard(s.browserChecks.ServeHTTP))
 	}

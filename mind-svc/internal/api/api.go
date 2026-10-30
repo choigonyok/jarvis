@@ -2,7 +2,6 @@
 //
 //	GET  /health                      the stack's contract (gocommon/health): the facts held for a person
 //	GET  /status                      reading and remembering in a few numbers (token)
-//	POST /consume                     events-svc delivers an observation (token)
 //	GET  /                            the console: simulator, world model, intents
 //	GET  /api/snapshot                everything the console shows
 //	GET  /now                         the situation right now, by rule: what the conversation is shown each turn
@@ -77,7 +76,6 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/mind"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/moments"
-	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
 	"github.com/choigonyok/jarvis/mind-svc/internal/slot"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 	"github.com/choigonyok/jarvis/mind-svc/internal/world"
@@ -91,7 +89,7 @@ type Server struct {
 	token string
 	// consoleToken is what a person signs in to the console with, once, for
 	// a cookie. It opens the console's routes and not the services' own
-	// (/consume, /status).
+	// (/status).
 	consoleToken string
 	open         bool
 	clock        *clock.Clock // nil unless the clock can be moved (memory mode)
@@ -112,7 +110,6 @@ func New(m *mind.Mind, token, consoleToken string, open bool, c *clock.Clock, lo
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.health)
-	mux.HandleFunc("POST /consume", s.auth(true, s.consume))
 	mux.HandleFunc("GET /status", s.auth(true, func(w http.ResponseWriter, r *http.Request) {
 		st, err := s.m.Status(r.Context())
 		if err != nil {
@@ -314,7 +311,7 @@ func whoOf(r *http.Request) string {
 	return moments.Owner
 }
 
-// auth guards a route. The services' own routes (service: /consume,
+// auth guards a route. The services' own routes (service:
 // /status) take the services' token and nothing else. The console's take it
 // too, or the console's cookie - and are let through without either only when
 // the server is open: a memory-mode run on a laptop, with nothing to protect.
@@ -409,21 +406,6 @@ func (s *Server) slot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, got)
-}
-
-// consume takes one observation from events-svc. A failure is a 500, so
-// events-svc tries it again; what can never be handled is skipped.
-func (s *Server) consume(w http.ResponseWriter, r *http.Request) {
-	var o obs.Observation
-	if !readJSON(w, r, &o) {
-		return
-	}
-	if err := s.m.Handle(r.Context(), o); err != nil {
-		s.log.Warn("관측을 처리하지 못했습니다", "type", o.Type, "id", o.ID, "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) recall(w http.ResponseWriter, r *http.Request) {

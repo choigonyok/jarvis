@@ -394,16 +394,15 @@ export async function saveCloses(key: string, closes: Map<string, number>): Prom
 }
 
 /**
- * Leave events in the outbox (migration 034) for events-svc to pick up - so
- * one sent while events-svc is restarting arrives late instead of never.
- * False when there is no database or the write failed; the caller then
- * posts them directly.
+ * Leave events in input.outbox for input-svc to pick up - so one sent while
+ * input-svc is restarting arrives late instead of never. False when there is
+ * no database or the write failed; the caller then posts them directly.
  */
 export async function enqueueEvents(events: unknown[]): Promise<boolean> {
   if (!pool || events.length === 0) return false;
   try {
     await pool.query(
-      "insert into event_outbox (payload) select * from unnest($1::jsonb[])",
+      "insert into input.outbox (payload) select * from unnest($1::jsonb[])",
       [events.map((e) => JSON.stringify(e))],
     );
     return true;

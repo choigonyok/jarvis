@@ -85,6 +85,6 @@ func TestEachIsSaidOnce(t *testing.T) {
 		t.Fatalf("새것만: %+v", got)
 	}
 	if got := w.unsaid(month, now.Add(41*24*time.Hour)); len(got) != 2 {
-		t.Fatalf("오래 지나 잊은 것은 다시(events-svc 가 거름): %+v", got)
+		t.Fatalf("오래 지나 잊은 것은 다시(input-svc 가 거름): %+v", got)
 	}
 }

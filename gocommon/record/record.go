@@ -9,8 +9,8 @@
 // queues, and one goroutine writes in order. A database that is away is
 // waited for, in order, and the loop says so on /health.
 //
-// The Writer is the one thing that changes when input-svc comes: it will
-// post to the outbox instead of calling input.append.
+// It writes to input.outbox, the same as everything else that happens:
+// input-svc alone stores a record.
 package record
 
 import (
@@ -295,10 +295,32 @@ func (w *Writer) flush() {
 
 type pgSink struct{ pool *pgxpool.Pool }
 
+// envelope is a Record as it lies in the outbox.
+type envelope struct {
+	Kind          string          `json:"kind"`
+	Source        string          `json:"source"`
+	SourceKey     string          `json:"source_key"`
+	Actor         string          `json:"actor"`
+	Channel       string          `json:"channel"`
+	Subject       string          `json:"subject"`
+	OccurredAt    time.Time       `json:"occurred_at"`
+	Tier          string          `json:"tier"`
+	SchemaVersion int             `json:"schema_version"`
+	TraceID       string          `json:"trace_id"`
+	CausationID   string          `json:"causation_id"`
+	Payload       json.RawMessage `json:"payload"`
+}
+
 func (s pgSink) append(ctx context.Context, r Record, payload []byte) error {
-	_, err := s.pool.Exec(ctx, `select input.append($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb)`,
-		r.Kind, r.Source, r.SourceKey, r.Actor, r.Channel, r.Subject, r.OccurredAt, r.Tier, r.SchemaVersion,
-		r.TraceID, r.CausationID, string(payload))
+	body, err := json.Marshal(envelope{
+		Kind: r.Kind, Source: r.Source, SourceKey: r.SourceKey, Actor: r.Actor, Channel: r.Channel, Subject: r.Subject,
+		OccurredAt: r.OccurredAt, Tier: r.Tier, SchemaVersion: r.SchemaVersion, TraceID: r.TraceID, CausationID: r.CausationID,
+		Payload: payload,
+	})
+	if err != nil {
+		return err
+	}
+	_, err = s.pool.Exec(ctx, `insert into input.outbox (payload) values ($1)`, body)
 	return err
 }
 

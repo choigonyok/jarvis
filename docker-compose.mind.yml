@@ -5,7 +5,7 @@
 #   open http://localhost:8102
 #   scripts/mind down       # 내리기 (-v 로 데이터까지)
 #
-# Postgres 와 events-svc 는 이 네트워크 안에만 있다. 바깥에 열리는 것은
+# Postgres 와 input-svc 는 이 네트워크 안에만 있다. 바깥에 열리는 것은
 # 루프백의 mind 콘솔 하나라서, 버리는 로컬 DB 의 비밀번호를 여기 적어 둔다.
 name: jarvis-mind
 
@@ -40,9 +40,9 @@ services:
         condition: service_healthy
     restart: "no"
 
-  events:
+  input:
     build:
-      context: ./events-svc
+      context: ./input-svc
       additional_contexts:
         gocommon: ./gocommon
     environment:
@@ -61,8 +61,7 @@ services:
     environment:
       TZ: Asia/Seoul
       DATABASE_URL: postgres://jarvis:mind-local@postgres:5432/jarvis?sslmode=disable
-      EVENTS_URL: http://events:8101
-      MIND_SELF_URL: http://mind:8102/consume
+      INPUT_URL: http://input:8101
       API_TOKEN: mind-local-token
       MIND_UI_URL: http://localhost:8102/
       MIND_CONTENT_KEY: ${MIND_CONTENT_KEY:-}
@@ -77,7 +76,7 @@ services:
     depends_on:
       db-migrate:
         condition: service_completed_successfully
-      events:
+      input:
         condition: service_started
 
 volumes:

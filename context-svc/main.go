@@ -43,8 +43,8 @@ func main() {
 		User: os.Getenv("OWNTRACKS_USER"), Pass: os.Getenv("OWNTRACKS_PASSWORD"),
 		GuestUser: os.Getenv("OWNTRACKS_GUEST_USER"), GuestPass: os.Getenv("OWNTRACKS_GUEST_PASSWORD"),
 		GuestToken: os.Getenv("API_GUEST_TOKEN"),
-		Public:  getenv("CONTEXT_PUBLIC_URL", "https://jarvis-be.choigonyok.com/context"),
-		DataKey: os.Getenv("DATA_GO_KR_KEY"), SubwayKey: os.Getenv("SEOUL_SUBWAY_KEY"),
+		Public:     getenv("CONTEXT_PUBLIC_URL", "https://jarvis-be.choigonyok.com/context"),
+		DataKey:    os.Getenv("DATA_GO_KR_KEY"), SubwayKey: os.Getenv("SEOUL_SUBWAY_KEY"),
 	}
 	if cfg.User == "" || cfg.Pass == "" {
 		log.Warn("OWNTRACKS_USER/OWNTRACKS_PASSWORD 가 없어 폰의 위치를 받지 않습니다")
@@ -66,7 +66,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer st.Close()
-	events := notify.New(os.Getenv("EVENTS_URL"), dsn, cfg.Token, log)
+	events := notify.New(os.Getenv("INPUT_URL"), dsn, cfg.Token, log)
 
 	// Raw coordinates are kept for days, not forever: the visits made from
 	// them are what lasts.

@@ -1,6 +1,6 @@
-// Command notify-svc is where every service's news goes: one structured event
-// format in (POST /events), and out of it the console's inbox, a push to the
-// phone when someone has to act, and an evening digest of the rest.
+// Command notify-svc is where every service's news goes: it reads both record
+// streams, and out of them come the console's inbox, a push to the phone when
+// someone has to act, and an evening digest of the rest.
 //
 // The services only say what happened and how much it matters; whether that
 // becomes a push now, a push after quiet hours, a line in tonight's digest or
@@ -8,15 +8,12 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -25,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/choigonyok/jarvis/gocommon/health"
+	"github.com/choigonyok/jarvis/gocommon/queue"
 	"github.com/choigonyok/jarvis/notify-svc/internal/api"
 	"github.com/choigonyok/jarvis/notify-svc/internal/live"
 	"github.com/choigonyok/jarvis/notify-svc/internal/notify"
@@ -48,7 +46,7 @@ func main() {
 		log.Error("DATABASE_URL 을 해석하지 못했습니다", "err", err)
 		os.Exit(1)
 	}
-	cfg.MaxConns = 4
+	cfg.MaxConns = 6
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		log.Error("데이터베이스 풀을 만들지 못했습니다", "err", err)
@@ -94,16 +92,19 @@ func main() {
 		}
 	}()
 
-	// Take events from the event log rather than (only) directly: register
-	// with events-svc and keep at it until it answers - it may come up later.
-	if eventsURL := os.Getenv("EVENTS_URL"); eventsURL != "" {
-		go subscribe(ctx, eventsURL, getenv("NOTIFY_SELF_URL", "http://notify:8097/consume"), os.Getenv("API_TOKEN"), log)
+	server := api.New(svc, st, pusher, hub, os.Getenv("API_TOKEN"), log).WithLoops(loops)
+	// Every record of both streams: those without wording it passes over.
+	for _, c := range []*queue.Consumer{
+		{Pool: pool, Topic: queue.Records, Name: "notify", Kinds: []string{"*"}, Handle: server.Take, Log: log},
+		{Pool: pool, Topic: queue.Guest, Name: "notify-guest", Kinds: []string{"*"}, Handle: server.Take, Log: log},
+	} {
+		go c.Run(ctx)
 	}
 
 	addr := getenv("LISTEN_ADDR", ":8097")
 	srv := &http.Server{
 		Addr:         addr,
-		Handler:      api.New(svc, st, pusher, hub, os.Getenv("API_TOKEN"), log).WithLoops(loops).Handler(),
+		Handler:      server.Handler(),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 60 * time.Second,
 	}
@@ -119,32 +120,6 @@ func main() {
 	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(shutdown)
-}
-
-// subscribe registers this service with events-svc for every event type; it
-// ignores the ones that carry no wording.
-func subscribe(ctx context.Context, eventsURL, self, token string, log *slog.Logger) {
-	body, _ := json.Marshal(map[string]any{"url": self, "types": []string{"*"}})
-	for wait := time.Second; ; wait = min(wait*2, time.Minute) {
-		req, _ := http.NewRequestWithContext(ctx, http.MethodPut, strings.TrimRight(eventsURL, "/")+"/subscriptions/notify", bytes.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		if token != "" {
-			req.Header.Set("Authorization", "Bearer "+token)
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err == nil {
-			resp.Body.Close()
-			if resp.StatusCode < 300 {
-				log.Info("events-svc 에 구독했습니다")
-				return
-			}
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(wait):
-		}
-	}
 }
 
 func getenv(key, fallback string) string {

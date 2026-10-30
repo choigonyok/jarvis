@@ -226,7 +226,7 @@ GET /transit/lines?kind=bus|subway&region=gyeonggi|seoul&id=   그 정류장의 
 `{state, changed: ["운전 시작", "집 끝"], summary}`. 마지막으로 알린 상태는 `context_state` 의 `derived` 키에 둔다.
 notify-svc 가 이것을 듣고 **운전·회의 중에는 즉시 알림을 붙잡았다가** 끝나면 "운전·회의 중 알림 N건"으로 한 번에
 보낸다(방해 금지 시간과 같은 방식, 끝을 못 들어도 4시간 뒤 풀림). agent 의 Source 인터페이스(`module.Source`)는
-실행 경로가 없어서(레지스트리가 모으기만 한다) 쓰지 않았다: 에이전트는 이벤트를 events-svc 구독(`/consume`)으로 받고,
+실행 경로가 없어서(레지스트리가 모으기만 한다) 쓰지 않았다: 에이전트는 기록 스트림(`gocommon/queue`)으로 받고,
 상태는 매 턴 읽는다.
 
 ## 맥 수집기

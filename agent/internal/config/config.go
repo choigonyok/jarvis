@@ -203,17 +203,16 @@ type Config struct {
 	// operator's phone. Empty sends nothing.
 	NotifyURL string
 
-	// DatabaseURL is Postgres. Today only the events outbox writes to it:
-	// what the agent reports reaches events-svc even if it is restarting.
+	// DatabaseURL is Postgres. What the agent reports goes to input.outbox
+	// there, so it reaches input-svc even if that is restarting.
 	DatabaseURL string
 
-	// EventsURL is events-svc: the assistant subscribes there for mind's
-	// cards (internal/suggest) and reports decisions back; the guest's agent
-	// for the guest's own reminders, and nothing else. SelfURL is where
-	// events-svc reaches this agent.
-	EventsURL string
-	SelfURL   string
-	Debug     bool
+	// QueueURL is where the agent reads the stream: mind's cards
+	// (internal/suggest), and for the guest's agent the guest's own reminders
+	// and nothing else - under a role that sees only the guest's tables. It
+	// is DatabaseURL unless JARVIS_QUEUE_DATABASE_URL says otherwise.
+	QueueURL string
+	Debug    bool
 }
 
 func Load() (Config, error) {
@@ -288,8 +287,7 @@ func Load() (Config, error) {
 		APIToken:        os.Getenv("JARVIS_API_TOKEN"),
 		NotifyURL:       os.Getenv("JARVIS_NOTIFY_URL"),
 		DatabaseURL:     os.Getenv("JARVIS_DATABASE_URL"),
-		EventsURL:       os.Getenv("JARVIS_EVENTS_URL"),
-		SelfURL:         env("JARVIS_SELF_URL", "http://agent:8080"),
+		QueueURL:        env("JARVIS_QUEUE_DATABASE_URL", os.Getenv("JARVIS_DATABASE_URL")),
 		Debug:           envBool("JARVIS_DEBUG", false),
 	}
 	// With a five-minute cache every pause past five minutes writes the whole
@@ -322,9 +320,6 @@ func Load() (Config, error) {
 		c.ExtraMCPURLs = map[string]string{}
 		c.Enrich = false
 		c.VaultURL = ""
-		// events-svc brings the guest's reminders here, not to the
-		// operator's agent.
-		c.SelfURL = env("JARVIS_SELF_URL", "http://agent-guest:8081")
 	}
 
 	// With search-svc, read is how a page is opened: it reads Korean pages

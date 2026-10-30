@@ -41,6 +41,8 @@ services:
       start_period: 10s
     networks:
       - data
+      # 손님 에이전트가 닿는 곳은 여기까지. data 망의 다른 것(FalkorDB 등)에는 닿지 않는다.
+      - guest-data
     restart: unless-stopped
 
   # 스키마. 한 번 돌고 끝나는 서비스이고, 나머지는 이것이 성공으로 끝난 뒤에
@@ -113,8 +115,7 @@ services:
       # Guards the routes the console drives. Required once the agent is
       # published (JARVIS_ALLOWED_ORIGIN set, or a tunnel in front of it).
       JARVIS_API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
-      JARVIS_NOTIFY_URL: http://events:8101
-      JARVIS_EVENTS_URL: http://events:8101
+      JARVIS_NOTIFY_URL: http://input:8101
       JARVIS_ALLOWED_ORIGIN: ${JARVIS_ALLOWED_ORIGIN:-}
       JARVIS_APPROVAL_TIMEOUT: ${JARVIS_APPROVAL_TIMEOUT:-30m}
       JARVIS_TURN_TIMEOUT: ${JARVIS_TURN_TIMEOUT:-2h}
@@ -146,8 +147,7 @@ services:
       # 대화에 첨부한 사진. 브라우저 컨테이너도 같은 볼륨을 읽기 전용으로 붙여
       # 작업이 웹 양식에 사진을 넣는다.
       JARVIS_UPLOADS_DIR: /uploads
-      # 아직 아무도 읽지 않는다. 제안·스레드 저장소가 파일에서 이 데이터베이스로
-      # 옮겨갈 때 쓰는 자리를 미리 잡아둔 것이다.
+      # 내는 일은 input.outbox 로, 읽는 일은 기록 스트림에서(gocommon/queue).
       JARVIS_DATABASE_URL: >-
         postgres://svc_agent:${JARVIS_DB_PASSWORD_AGENT:?scripts/db-roles 를 먼저 실행하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
     volumes:
@@ -221,11 +221,11 @@ services:
       JARVIS_CALENDAR_URL: http://calendar:8093
       JARVIS_CHAT_URL: http://chat:8094
       # 손님의 결재 카드는 손님 기기로(audience guest). 운영자에게는 가지 않는다.
-      JARVIS_NOTIFY_URL: http://events:8101
-      # 손님 리마인드가 울리면 손님 대화에도 안내 카드로 남는다. events 는 이 손님 구독
-      # (agent-guest, 손님 토큰으로 등록)에 손님에게 가는 것만, 손님 토큰을 달아 보낸다.
-      JARVIS_EVENTS_URL: http://events:8101
-      JARVIS_SELF_URL: http://agent-guest:8081
+      JARVIS_NOTIFY_URL: http://input:8101
+      # 손님 리마인드가 울리면 손님 대화에도 안내 카드로 남는다. 손님 스트림을 직접 읽는다.
+      # 이 역할은 손님 기록 표와 자기 배달 행만 볼 수 있다(078).
+      JARVIS_QUEUE_DATABASE_URL: >-
+        postgres://svc_guest:${JARVIS_DB_PASSWORD_GUEST:?scripts/db-roles 를 먼저 실행하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
       # 손님 자신의 작업·리마인드·체크리스트. jobs·mind 는 이 손님 토큰으로 손님 것만 연다.
       # 손님 작업은 웹사이트를 열지 않는다(브라우저는 운영자 계정으로 로그인돼 있다).
       JARVIS_JOBS_URL: http://jobs:8098
@@ -261,6 +261,7 @@ services:
     networks:
       - default
       - search
+      - guest-data
     restart: unless-stopped
 
   # 운동 기록. 웹의 라우트 핸들러 + 볼륨의 JSON 파일이었던 것이 서비스가 됐다.
@@ -326,7 +327,7 @@ services:
       # 실시간 지하철 인증키). 비어 있으면 그 정보만 없다.
       DATA_GO_KR_KEY: ${DATA_GO_KR_KEY:-}
       SEOUL_SUBWAY_KEY: ${SEOUL_SUBWAY_KEY:-}
-      EVENTS_URL: http://events:8101
+      INPUT_URL: http://input:8101
       CONTEXT_RAW_DAYS: ${CONTEXT_RAW_DAYS:-30}
     expose:
       - "8103"
@@ -428,7 +429,7 @@ services:
       DATABASE_URL: >-
         postgres://svc_spending:${JARVIS_DB_PASSWORD_SPENDING:?scripts/db-roles 를 먼저 실행하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
       API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
-      NOTIFY_URL: http://events:8101
+      NOTIFY_URL: http://input:8101
       KAKAOTALK_URL: http://kakaotalk:8090
       # 이름에 "카드"가 없는 결제 알림 채널(예: 카카오뱅크)을 쉼표로 더한다.
       # 카카오페이 같은 간편결제는 기본으로 빼 두었다 - 카드로 충전·결제되면
@@ -553,7 +554,7 @@ services:
       API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
       # 손님 agent 의 토큰: 손님 쪽(손님 대화·손님 기억·손님 알림)만 연다.
       API_GUEST_TOKEN: ${JARVIS_GUEST_API_TOKEN:-}
-      NOTIFY_URL: http://events:8101
+      NOTIFY_URL: http://input:8101
       # 일정 저장소. uniple 이면 커플 앱의 공유 캘린더를 비공식 Supabase
       # 호출로 쓴다(calendar-svc/README.md). postgres 로 되돌리면 예전 표를 쓴다.
       CALENDAR_BACKEND: ${CALENDAR_BACKEND:-uniple}
@@ -598,7 +599,7 @@ services:
       TZ: ${TZ:-Asia/Seoul}
       PORT: "8092"
       API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
-      NOTIFY_URL: http://events:8101
+      NOTIFY_URL: http://input:8101
       # 스냅샷용. 없어도 자산 조회는 된다 - 증권사가 현재 보유의 원천이고,
       # 데이터베이스가 답하는 것은 "그때 무엇을 들고 있었나"뿐이다.
       DATABASE_URL: >-
@@ -816,7 +817,6 @@ services:
       # Graphiti 가 한 번에 부르는 LLM 수. 기본 20 이면 주간 주제 묶음이 API 한도에
       # 걸려(429) 재시도로 버틴다.
       SEMAPHORE_LIMIT: "6"
-      EVENTS_URL: http://events:8101
     expose:
       - "8100"
     ports:
@@ -881,7 +881,7 @@ services:
       DATABASE_URL: >-
         postgres://svc_status:${JARVIS_DB_PASSWORD_STATUS:?scripts/db-roles 를 먼저 실행하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
       API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
-      NOTIFY_URL: http://events:8101
+      NOTIFY_URL: http://input:8101
       KAKAOTALK_URL: http://kakaotalk:8090
       SPENDING_URL: http://spending:8095
       ASSETS_URL: http://assets:8092
@@ -894,8 +894,8 @@ services:
       CONTEXT_URL: http://context:8103
       VAULT_URL: http://vault:8105
       # 이 아래는 /health 의 계약(gocommon/health: 반복 작업의 진행, 격리함)이나 상태만 읽는다.
-      # 이벤트 로그와 구독자마다의 전달, 알림, 작업, iMessage 수집기, 웹 찾기, 손님 에이전트, 사진.
-      EVENTS_URL: http://events:8101
+      # 입구와 소비자마다의 전달, 알림, 작업, iMessage 수집기, 웹 찾기, 손님 에이전트, 사진.
+      INPUT_URL: http://input:8101
       NOTIFY_SVC_URL: http://notify:8097
       JOBS_URL: http://jobs:8098
       IMESSAGE_URL: http://imessage:8099
@@ -939,8 +939,8 @@ services:
   # how the Worker reaches back to it - outbound only, no port opened on the
   # host. Opt in with: docker compose --profile cloudflare up -d
 
-  # 알림. 여러 서비스가 정해진 모양의 이벤트(POST /events)를 보내면, 저장·중복
-  # 제거·방해 금지·저녁 요약을 거쳐 웹 푸시로 폰에 보낸다. 알림함도 여기서 읽는다.
+  # 알림. 기록 스트림에서 문구가 붙은 것을 읽어 저장·중복 제거·방해 금지·저녁 요약을
+  # 거쳐 웹 푸시로 폰에 보낸다. 알림함도 여기서 읽는다.
   # VAPID 키는 .env 에만 둔다(공개 저장소).
   notify:
     <<: *outside
@@ -957,7 +957,6 @@ services:
       VAPID_PUBLIC_KEY: ${JARVIS_VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${JARVIS_VAPID_PRIVATE_KEY:-}
       VAPID_SUBJECT: ${JARVIS_VAPID_SUBJECT:-https://jarvis.choigonyok.com}
-      EVENTS_URL: http://events:8101
     expose:
       - "8097"
     ports:
@@ -978,23 +977,25 @@ services:
   # The event log every service reports to. It only keeps events and hands
   # each subscriber (notify, agent) the types it asked for, in order; what an
   # event means is the subscriber's to decide.
-  events:
+  # 입구 하나. 서비스들은 input.outbox 에 쓰고, 이것만 꺼내서 봉투를 검증해 기록과 소비자별 배달을
+  # 남긴다. 소비자는 표를 직접 읽는다(gocommon/queue) - 이 프로세스가 꺼져도 이미 있는 배달은 간다.
+  input:
     build:
-      context: ./events-svc
+      context: ./input-svc
       additional_contexts:
         gocommon: ./gocommon
     environment:
       TZ: ${TZ:-Asia/Seoul}
       LISTEN_ADDR: ":8101"
       DATABASE_URL: >-
-        postgres://svc_events:${JARVIS_DB_PASSWORD_EVENTS:?scripts/db-roles 를 먼저 실행하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
+        postgres://svc_input:${JARVIS_DB_PASSWORD_INPUT:?scripts/db-roles 를 먼저 실행하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
       API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
-      # 손님 agent 의 토큰: 손님 쪽(손님 대화·손님 기억·손님 알림)만 연다.
       API_GUEST_TOKEN: ${JARVIS_GUEST_API_TOKEN:-}
+      INPUT_RAW_RETAIN_DAYS: ${INPUT_RAW_RETAIN_DAYS:-90}
     expose:
       - "8101"
     ports:
-      - "127.0.0.1:${JARVIS_EVENTS_PORT:-8101}:8101"
+      - "127.0.0.1:${JARVIS_INPUT_PORT:-8101}:8101"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8101/health || exit 1"]
       interval: 15s
@@ -1008,10 +1009,6 @@ services:
       - default
       - data
     restart: unless-stopped
-  # 인지 루프. 카톡·iMessage·jarvis 대화를 읽어 일정·열린 고리(세계 모델)와
-  # 기억할 사실(근거 장부 → memory-svc)을 원문 인용으로 확인해 남긴다. 사람에게
-  # 닿는 유일한 관문이기도 하다: 질문은 mind.card 로 에이전트에. 콘솔은 맥미니의
-  # 127.0.0.1:8102 이고 토큰이 필요하다: 한 번 /?token=<JARVIS_API_TOKEN> 으로 연다.
   mind:
     <<: *outside
     build:
@@ -1027,8 +1024,7 @@ services:
       MIND_CONSOLE_TOKEN: ${JARVIS_MIND_CONSOLE_TOKEN:-}
       # 손님 에이전트의 토큰: 손님 자신의 리마인드·체크리스트만 열린다(mind 의 다른 것은 아니다).
       API_GUEST_TOKEN: ${JARVIS_GUEST_API_TOKEN:-}
-      EVENTS_URL: http://events:8101
-      MIND_SELF_URL: http://mind:8102/consume
+      INPUT_URL: http://input:8101
       KAKAOTALK_URL: http://kakaotalk:8090
       IMESSAGE_URL: http://imessage:8099
       CALENDAR_URL: http://calendar:8093
@@ -1081,7 +1077,7 @@ services:
     depends_on:
       db-migrate:
         condition: service_completed_successfully
-      events:
+      input:
         condition: service_started
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8102/health"]
@@ -1124,6 +1120,8 @@ networks:
   data:
   browser:
   search:
+  guest-data:
+    internal: true
 
 volumes:
   jarvis-guest-workspace:

@@ -21,7 +21,7 @@ import (
 )
 
 // phoneTest is a server with both phones, a clock that can be moved, and what
-// reaches events-svc.
+// reaches input-svc.
 type phoneTest struct {
 	t      *testing.T
 	st     *store.Store

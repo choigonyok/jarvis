@@ -144,10 +144,10 @@ func TestConsoleEndToEnd(t *testing.T) {
 		t.Fatalf("clock: %d %v", code, out)
 	}
 
-	// /consume always needs the token.
-	resp, _ := http.Post(srv.URL+"/consume", "application/json", strings.NewReader(`{}`))
+	// /status always needs the token.
+	resp, _ := http.Get(srv.URL + "/status")
 	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("consume without token: %d", resp.StatusCode)
+		t.Fatalf("status without token: %d", resp.StatusCode)
 	}
 }
 
@@ -372,7 +372,9 @@ func TestGuestNow(t *testing.T) {
 		Store: store.NewMemory(), Log: obs.NewMemoryLog(quiet), LLM: &llm.Script{}, Calendar: act.NewMemoryCalendar(),
 		Notifier: &act.MemoryNotifier{}, Loc: seoul, Now: func() time.Time { return now }, Logger: quiet, Policy: gate.DefaultPolicy(), Mode: "stack",
 		Reminders: moments.NewMemory(), Checklists: checklist.NewMemory(), GuestMemory: graph,
-		Here: func(context.Context) ([]moments.Visit, error) { return []moments.Visit{{Region: "회사", Kind: "work"}}, nil },
+		Here: func(context.Context) ([]moments.Visit, error) {
+			return []moments.Visit{{Region: "회사", Kind: "work"}}, nil
+		},
 		GuestHere: func(context.Context) ([]moments.Visit, error) {
 			return []moments.Visit{{Region: "집", Kind: "home", EnteredAt: time.Date(2026, 10, 26, 21, 3, 0, 0, seoul)}}, nil
 		},

@@ -380,7 +380,7 @@ func (s *Store) Card(o Origin, paragraphs []string) *Turn {
 }
 
 // Told says whether a card of this kind and ref is among the recent turns:
-// a notice delivered again (events-svc delivers at least once, and again
+// a notice delivered again (the stream delivers at least once, and again
 // after a restart) is not laid down twice.
 func (s *Store) Told(kind, ref string) bool {
 	if ref == "" {

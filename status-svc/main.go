@@ -73,8 +73,8 @@ func main() {
 		MemoryURL:   getenv("MEMORY_URL", "http://localhost:8100"),
 		ContextURL:  getenv("CONTEXT_URL", "http://localhost:8103"),
 		VaultURL:    getenv("VAULT_URL", "http://localhost:8105"),
-		EventsURL:   getenv("EVENTS_URL", "http://localhost:8101"),
-		// NOTIFY_URL is where this service's own alerts go (the event log).
+		InputURL:    getenv("INPUT_URL", "http://localhost:8101"),
+		// NOTIFY_URL is where this service's own alerts go (input-svc).
 		NotifyURL:     getenv("NOTIFY_SVC_URL", "http://localhost:8097"),
 		JobsURL:       getenv("JOBS_URL", "http://localhost:8098"),
 		IMessageURL:   getenv("IMESSAGE_URL", "http://localhost:8099"),

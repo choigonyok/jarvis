@@ -12,7 +12,7 @@ jarvis 를 **인지 루프** 하나로 다시 짠 실험 서비스. 기능마다
 | 층 | 패키지 | 하는 일 |
 |---|---|---|
 | 감지 | `internal/sensor` | 카톡·iMessage 수집기를 rowid 로 읽어 관측으로 남긴다. 판단하지 않는다. 원문은 content 저장소, 로그엔 ref 만. **구조화 소스**(`structured.go`)는 규칙으로 발생을 만든다: 가계부의 결제와 그 안의 상품(쿠팡), 운동 세션, Immich 사진(시각·도시·찍힌 사람·즐겨찾기), 캘린더(일정으로도 동기화: 대화의 일정이 이미 그 항목이면 그쪽이 말하고, 지워지면 취소. 상대의 개인 항목은 `owner: partner` 로 표시해 내 하루로 치지 않음), 자산(보유·입출금·매도, 시세는 읽지 않음, 5분마다), 맡긴 작업(jobs-svc), context-svc 영역 체류. 카카오페이·토스 방의 "받았어요" 알림은 송금 발생. 소스마다 고정 구간만 읽고 바뀐 것만 관측한다. **소스마다 읽는 곳은 하나**(`records.go`): 같은 읽기를 memory-svc 에 구조화 기록(`POST /records`, 모델 없이 그래프에 바로)으로 넘겨, memory-svc 는 이 소스들을 다시 읽지 않는다. 문구와 엣지 키는 예전 수집기 그대로라 그래프가 이어진다. 보낸 내용의 해시만 `mind_records`(048)에 두어 바뀐 것만 다시 보낸다 |
-| 관측 로그 | `internal/obs` | 스택에선 events-svc(outbox → `POST /consume`), 로컬에선 프로세스 안의 로그. 다시 재생할 수 있다 |
+| 관측 로그 | `internal/obs` | 스택에선 기록 스트림(`input.outbox` 에 쓰고 `gocommon/queue` 로 읽는다), 로컬에선 프로세스 안의 로그. 다시 재생할 수 있다 |
 | 해석 | `internal/interpret` | 대화를 **덩어리로**(방이 조용해지면) 읽고, 그 방의 일정·고리, 캘린더의 다가오는 일정(어느 방에서든 - 두 달 안, 상대 개인 일정 제외, 다른 방은 취소·변경만 하고 제목은 못 바꿈), 장기 기억이 그 사람에 대해 아는 것을 함께 LLM 에 준다. 장소 없는 캘린더 일정이 있으면 웹 검색 도구도 줘서 일정 제목의 회사·기관 위치를 찾아 이을 수 있다(`MIND_WEB_SEARCH`). 변경과 기억할 사실마다 원문 줄 번호와 인용을 받고, 인용이 그 줄에 실제로 있어야 믿는다. 단어 목록이 없다. jarvis 대화에서 비서가 스스로 올린 카드(작업 소식, 울린 리마인드, 띄운 체크리스트 - chat-svc 의 `origin` 이 있는 턴)는 **알림**(`Jarvis(알림)`, `mind_messages.notice`)으로 들어온다: 운영자가 그 알림에 답한 말의 맥락으로만 보이고 근거로 인용하면 버려지며, 알림만 온 때는 모델을 부르지 않고 읽음으로 표시한다 - mind 가 자기 출력을 되읽지 않게 |
 | 세계 모델 | `internal/world`, `internal/store` | 일정(plan)과 열린 고리(loop). 모든 변경은 누가·무엇에서 무엇으로·어떤 근거로를 남긴다. 바뀌면 주의 층에 알린다. 일정에는 종류(데이트·캠핑·회식…)·장소 종류·동네가 붙는다 |
 | 지금 상황 | `internal/world/now.go` | 진행 중일 수 있는 일정(끝 시각이 없으면 같은 종류의 평균 길이, 없으면 보통 길이), 최근 3시간의 위치 단서(결제·사진), 그리고 "어디서 누구와"의 추정과 신뢰도를 **규칙으로** 계산한다(LLM 없음). 같은 동네·장소의 단서는 올리고 다른 곳의 단서는 내린다. `GET /now` 로 에이전트가 **매 턴 메시지 앞**에 붙이고(직전과 같으면 "같음"으로만, 쓰는 규칙은 지시에 한 번), 0.5 미만이면 추측하지 말고 묻게 한다. 운영자가 jarvis 에게 "집에 왔어"라고 하면 해석기가 그 일정을 끝내 추정이 고쳐진다 |
@@ -47,7 +47,7 @@ mind 는 유일한 추출기이고, 사람 묶기·모순 정리·요약·검색
 
 ```sh
 scripts/mind dev      # 메모리 모드: DB·Docker 없이. http://localhost:8102
-scripts/mind stack    # Postgres + events-svc + mind (docker-compose.mind.yml)
+scripts/mind stack    # Postgres + input-svc + mind (docker-compose.mind.yml)
 scripts/mind down -v  # stack 내리고 데이터까지 지우기
 scripts/mind test     # go test ./... (모델 없이, 결정적)
 scripts/mind eval     # 평가 시나리오를 실제 모델로
@@ -164,7 +164,6 @@ LLM 키는 `MIND_ANTHROPIC_API_KEY` 가 환경에 있으면 그것을, 없으면
 
 ```
 GET  /health
-POST /consume                          events-svc 가 관측을 전달 (토큰 필요)
 GET  /                                 콘솔
 GET  /api/snapshot                     콘솔이 보는 전부
 GET  /now                              지금 상황(규칙으로 계산한 요약과 추정, 에이전트가 매 턴 읽는다)
@@ -196,7 +195,7 @@ POST /api/facts/flush                  장부에서 기다리는 사실을 지�
 
 `/api` 와 콘솔은 메모리 모드에서만 토큰 없이 열린다. 스택에서는 서비스가 `Authorization: Bearer $API_TOKEN`,
 사람은 콘솔 전용 토큰 `MIND_CONSOLE_TOKEN` 으로 한 번 `/?token=…` 을 열면 HttpOnly 쿠키를 받고 주소창에서 토큰을 지운다.
-그 쿠키로는 콘솔 경로만 열리고, 서비스 전용 경로(`/consume`, `/status`)는 서비스 토큰만 받는다. 맥북에서 맥미니의 콘솔은
+그 쿠키로는 콘솔 경로만 열리고, 서비스 전용 경로(`/status`)는 서비스 토큰만 받는다. 맥북에서 맥미니의 콘솔은
 `scripts/mini console`(ssh 터널 로컬 18102 → 맥미니 8102, 토큰은 화면에 찍지 않고 한 번 로그인). 로컬 8102 는 `scripts/mind` 가 쓴다.
 스택은 `API_TOKEN` 이 비면 뜨지 않는다(로컬 시험만 `API_TOKEN_OPTIONAL=true`).
 
@@ -205,8 +204,7 @@ POST /api/facts/flush                  장부에서 기다리는 사실을 지�
 | 변수 | 기본값 | |
 |---|---|---|
 | `DATABASE_URL` | (없음) | 없으면 메모리 모드 |
-| `EVENTS_URL` | (없음) | 스택의 관측 로그. 없으면 프로세스 안의 로그 |
-| `MIND_SELF_URL` | `http://mind:8102/consume` | events-svc 가 전달할 곳 |
+| `INPUT_URL` | (없음) | 스택의 기록 스트림(input-svc). 없으면 프로세스 안의 로그 |
 | `KAKAOTALK_URL`, `IMESSAGE_URL` | (없음) | 있으면 감지기가 돈다. 첫 시작은 `MIND_BACKFILL`(6h)만 읽는다 |
 | `CHAT_URL` | (없음) | 있으면 운영자와 jarvis 의 대화(chat-svc)도 대화방 하나(`chat:owner`)로 읽는다 |
 | `MIND_HISTORY` | `false` | `true` 면 시작 1분 뒤 한 번, 감지기가 첫 시작에 건너뛴 지난 대화(카톡·iMessage·jarvis 대화)를 들여와 **사실만** 해석한다(일정·고리·카드 없음, `ends` 없음, 날짜 없는 사실은 근거 메시지 날짜). 경계는 그때 가장 이른 메시지(`mind_cursors` 의 `history:before`), 방마다 `history:room:<방>` 에 이어 읽고, 끝나면 `history:done`. 예산이 떨어지면 30분 쉬고 잇는다. 비용은 `mind_llm_usage` 의 `history`. `MIND_HISTORY_BATCH`(40) |

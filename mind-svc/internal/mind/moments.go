@@ -23,6 +23,16 @@ import (
 
 // Location events (context-svc), as the operator arrives at a region or
 // leaves it - and as the guest's phone does at the guest's own regions.
+// Kinds is what the loop reads of the operator's stream. Occurrences too: the
+// structured sensor writes them to this log and the loop reads them back
+// (links, expectations, what follows what). Left out, every live match was
+// missed and a payment never met the day's expectation of it (2026-10-21~27:
+// 2 met of 27, both at registration).
+var Kinds = []string{obs.MessageObserved, obs.OccurrenceObserved, "action.*", AssetsBand, LocationEnter, LocationLeave, LocationGuestEnter, LocationGuestLeave}
+
+// GuestKinds is what it reads of the guest's stream: where the guest's phone is.
+var GuestKinds = []string{LocationGuestEnter, LocationGuestLeave}
+
 const (
 	LocationEnter      = "location.enter"
 	LocationLeave      = "location.leave"

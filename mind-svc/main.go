@@ -5,7 +5,7 @@
 //
 //	go run .                 everything in memory: a console at :8102 with a
 //	                         chat simulator, no database, no real calendar
-//	DATABASE_URL=... go run  the stack: Postgres (migration 035), events-svc
+//	DATABASE_URL=... go run  the stack: Postgres (migration 035), the record stream
 //	                         as the log, the chat collectors as sensors
 //
 // and one way to check the model's reading against written-down scenarios:
@@ -34,6 +34,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/choigonyok/jarvis/gocommon/queue"
 	"github.com/choigonyok/jarvis/mind-svc/internal/act"
 	"github.com/choigonyok/jarvis/mind-svc/internal/api"
 	"github.com/choigonyok/jarvis/mind-svc/internal/backtest"
@@ -88,7 +89,8 @@ func main() {
 		st       store.Store
 		logOut   obs.Log
 		memLog   *obs.MemoryLog
-		events   *obs.EventsLog
+		stream   *obs.Stream
+		db       *pgxpool.Pool
 		calendar act.Calendar = act.NewMemoryCalendar()
 		notifier act.Notifier = &act.MemoryNotifier{}
 		clk                   = clock.New()
@@ -117,13 +119,14 @@ func main() {
 			log.Error("DATABASE_URL 을 해석하지 못했습니다", "err", err)
 			os.Exit(1)
 		}
-		pcfg.MaxConns = 6
+		pcfg.MaxConns = 8
 		pool, err := pgxpool.NewWithConfig(ctx, pcfg)
 		if err != nil {
 			log.Error("데이터베이스 풀을 만들지 못했습니다", "err", err)
 			os.Exit(1)
 		}
 		defer pool.Close()
+		db = pool
 		key, err := contentKey()
 		if err != nil {
 			log.Error("MIND_CONTENT_KEY 를 읽지 못했습니다", "err", err)
@@ -142,9 +145,9 @@ func main() {
 		// would say, but no notice reaches a phone - the agent's cards still
 		// do that, until the two gates are one.
 		quiet := os.Getenv("MIND_QUIET") != "false"
-		if url := os.Getenv("EVENTS_URL"); url != "" {
-			events = obs.NewEventsLog(url, token, pool)
-			logOut = events
+		if url := os.Getenv("INPUT_URL"); url != "" {
+			stream = obs.NewStream(url, token, pool, append(append([]string{}, mind.Kinds...), mind.GuestKinds...))
+			logOut = stream
 			if !quiet {
 				notifier = nil // through the log, to notify-svc
 			}
@@ -257,13 +260,20 @@ func main() {
 	if memLog != nil {
 		go memLog.Run(ctx, m.Handle)
 	}
-	if events != nil {
-		// Occurrences too: the structured sensor writes them to this log
-		// and the loop reads them back here (links, expectations, what
-		// follows what). Left out of the subscription, every live match
-		// was missed and a payment never met the day's expectation of it
-		// (2026-10-21~27: 2 met of 27, both at registration).
-		go events.Subscribe(ctx, "mind", getenv("MIND_SELF_URL", "http://mind:8102/consume"), []string{obs.MessageObserved, obs.OccurrenceObserved, "action.*", mind.AssetsBand, mind.LocationEnter, mind.LocationLeave, mind.LocationGuestEnter, mind.LocationGuestLeave}, log)
+	if stream != nil {
+		take := func(ctx context.Context, msg queue.Message) error {
+			o, err := obs.FromMessage(msg)
+			if err != nil {
+				return fmt.Errorf("%w: %v", queue.ErrRefused, err)
+			}
+			return m.Handle(ctx, o)
+		}
+		for _, c := range []*queue.Consumer{
+			{Pool: db, Topic: queue.Records, Name: "mind", Kinds: mind.Kinds, Handle: take, Log: log},
+			{Pool: db, Topic: queue.Guest, Name: "mind-guest", Kinds: mind.GuestKinds, Handle: take, Log: log},
+		} {
+			go c.Run(ctx)
+		}
 	}
 	if mode == "stack" {
 		exclude := cfg.Noise

@@ -17,24 +17,26 @@
 // The guest's agent runs this for the guest's notices alone (Config.Guest):
 // a reminder of the guest's lays its card in the guest's conversation, as
 // the operator's do in theirs. It raises no card of mind's - it has none of
-// the operator's data - and events-svc sends its subscription (agent-guest)
-// only what is for the guest.
+// the operator's data - and reads the guest's stream, under a role that sees
+// nothing else.
 package suggest
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
-	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/choigonyok/jarvis/agent/internal/core/action"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
 	"github.com/choigonyok/jarvis/agent/internal/module/mind"
 	"github.com/choigonyok/jarvis/gocommon/notify"
+	"github.com/choigonyok/jarvis/gocommon/queue"
 )
 
 // Types is what the assistant subscribes to: mind's cards, what mind says
@@ -48,7 +50,7 @@ var GuestTypes = []string{"remind.*"}
 // ChecklistShown is mind asking for a list in the conversation now.
 const ChecklistShown = "checklist.shown"
 
-// Event is one event as events-svc delivers it.
+// Event is one record of the stream, as an event.
 type Event struct {
 	ID         int64           `json:"id"`
 	Source     string          `json:"source"`
@@ -65,7 +67,7 @@ type Wording struct {
 	Tier  string `json:"tier"`
 	Title string `json:"title"`
 	Body  string `json:"body"`
-	// Audience is whose phone: "guest" the guest's. events-svc sets it on
+	// Audience is whose phone: "guest" the guest's. input-svc sets it on
 	// everything the guest's token posts.
 	Audience string `json:"audience,omitempty"`
 }
@@ -82,13 +84,10 @@ type Notice struct {
 }
 
 type Config struct {
-	EventsURL string
-	Token     string
 	// Guest is the guest's agent: only the guest's notices are laid, it
-	// subscribes as agent-guest for GuestTypes, and nothing else is done.
+	// reads the guest's stream for GuestTypes, and nothing else is done.
 	Guest bool
-	// Out is where decisions are reported (the events outbox). Nil posts
-	// straight to EventsURL.
+	// Out is where decisions are reported (the outbox). Nil reports nothing.
 	Out *notify.Client
 	// Say puts a raised card in the conversation, under the line on why:
 	// there it stays, approved or rejected, instead of floating below the
@@ -108,24 +107,36 @@ type Engine struct {
 	proposals *proposal.Store
 	cfg       Config
 	log       *slog.Logger
-	http      *http.Client
 }
 
 func New(p *proposal.Store, cfg Config, log *slog.Logger) *Engine {
-	e := &Engine{proposals: p, cfg: cfg, log: log, http: &http.Client{Timeout: 10 * time.Second}}
-	if e.cfg.Out == nil {
-		e.cfg.Out = notify.New(cfg.EventsURL, "", cfg.Token, log)
-	}
-	return e
+	return &Engine{proposals: p, cfg: cfg, log: log}
 }
 
-// Consume is POST /consume: events-svc delivering.
-func (e *Engine) Consume(w http.ResponseWriter, r *http.Request) {
-	var ev Event
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10)).Decode(&ev); err != nil {
-		http.Error(w, "JSON 을 읽지 못했습니다", http.StatusBadRequest)
-		return
+// Consumer is this engine's place on the stream: the guest's agent on the
+// guest's, under its own name.
+func (e *Engine) Consumer(pool *pgxpool.Pool) *queue.Consumer {
+	if e.cfg.Guest {
+		return &queue.Consumer{Pool: pool, Topic: queue.Guest, Name: "agent-guest", Kinds: GuestTypes, Handle: e.Take, Log: e.log}
 	}
+	return &queue.Consumer{Pool: pool, Topic: queue.Records, Name: "agent", Kinds: Types, Handle: e.Take, Log: e.log}
+}
+
+// Take takes one record of the stream.
+func (e *Engine) Take(_ context.Context, m queue.Message) error {
+	raw, err := m.Event()
+	if err != nil {
+		return fmt.Errorf("%w: %v", queue.ErrRefused, err)
+	}
+	var ev Event
+	if err := json.Unmarshal(raw, &ev); err != nil {
+		return fmt.Errorf("%w: %v", queue.ErrRefused, err)
+	}
+	e.handle(ev)
+	return nil
+}
+
+func (e *Engine) handle(ev Event) {
 	switch {
 	case e.cfg.Guest:
 		// The guest's: what mind tells the guest at its moment, and no more.
@@ -141,7 +152,6 @@ func (e *Engine) Consume(w http.ResponseWriter, r *http.Request) {
 	case ev.Type == ChecklistShown:
 		e.showList(ev)
 	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 // notice lays what mind told at its moment in the conversation, when the
@@ -318,35 +328,3 @@ func (e *Engine) OnDecide(p proposal.Proposal, d proposal.Decision) {
 }
 
 func (e *Engine) emit(ev map[string]any) { e.cfg.Out.Emit(ev) }
-
-// Subscribe registers this agent with events-svc for Types - the guest's for
-// GuestTypes, as agent-guest - retrying until events-svc answers.
-func (e *Engine) Subscribe(ctx context.Context, self string) {
-	if e.cfg.EventsURL == "" {
-		return
-	}
-	consumer, types := "agent", Types
-	if e.cfg.Guest {
-		consumer, types = "agent-guest", GuestTypes
-	}
-	body, _ := json.Marshal(map[string]any{"url": self, "types": types})
-	for wait := time.Second; ; wait = min(wait*2, time.Minute) {
-		req, _ := http.NewRequestWithContext(ctx, http.MethodPut, strings.TrimRight(e.cfg.EventsURL, "/")+"/subscriptions/"+consumer, bytes.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		if e.cfg.Token != "" {
-			req.Header.Set("Authorization", "Bearer "+e.cfg.Token)
-		}
-		if resp, err := e.http.Do(req); err == nil {
-			resp.Body.Close()
-			if resp.StatusCode < 300 {
-				e.log.Info("events-svc 에 구독했습니다", "consumer", consumer, "types", types)
-				return
-			}
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(wait):
-		}
-	}
-}

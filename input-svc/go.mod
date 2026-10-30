@@ -1,4 +1,4 @@
-module github.com/choigonyok/jarvis/events-svc
+module github.com/choigonyok/jarvis/input-svc
 
 go 1.25.0
 

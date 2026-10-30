@@ -1,18 +1,16 @@
 package suggest
 
 import (
-	"encoding/json"
+	"context"
 	"io"
 	"log/slog"
-	"net/http"
-	"net/http/httptest"
-	"strings"
-	"sync"
+	"slices"
 	"testing"
 
 	"github.com/choigonyok/jarvis/agent/internal/core/bus"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
 	"github.com/choigonyok/jarvis/agent/internal/module/mind"
+	"github.com/choigonyok/jarvis/gocommon/queue"
 )
 
 // Each side's reminders lay their card in that side's conversation only: the
@@ -30,11 +28,8 @@ func TestEachSideLaysItsOwnReminders(t *testing.T) {
 	guest.cfg.Show = func(id, lead, key string) { guestShown = append(guestShown, id) }
 	owner.cfg.Notice = func(n Notice) { ownerSaw = append(ownerSaw, n) }
 	send := func(e *Engine, ev map[string]any) {
-		raw, _ := json.Marshal(ev)
-		rec := httptest.NewRecorder()
-		e.Consume(rec, httptest.NewRequest(http.MethodPost, "/consume", strings.NewReader(string(raw))))
-		if rec.Code != http.StatusNoContent {
-			t.Fatalf("%v: %d", ev["type"], rec.Code)
+		if err := e.Take(context.Background(), message(ev)); err != nil {
+			t.Fatalf("%v: %v", ev["type"], err)
 		}
 	}
 	events := []map[string]any{
@@ -77,33 +72,17 @@ func TestEachSideLaysItsOwnReminders(t *testing.T) {
 	}
 }
 
-// The guest's agent registers as agent-guest, for the guest's reminders,
-// with its own token; the operator's as agent, for everything it takes.
-func TestEachSideSubscribesAsItself(t *testing.T) {
-	var mu sync.Mutex
-	got := map[string]string{}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body struct {
-			URL   string   `json:"url"`
-			Types []string `json:"types"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		mu.Lock()
-		got[r.URL.Path] = r.Method + " " + r.Header.Get("Authorization") + " " + body.URL + " " + strings.Join(body.Types, ",")
-		mu.Unlock()
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer srv.Close()
+// Each side reads its own stream under its own name: the guest's agent the
+// guest's, for the guest's reminders; the operator's everything it takes.
+func TestEachSideReadsItsOwnStream(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	ctx := t.Context()
-	New(proposal.NewStore(bus.New()), Config{EventsURL: srv.URL, Token: "guest-token", Guest: true}, log).
-		Subscribe(ctx, "http://agent-guest:8081/consume")
-	New(proposal.NewStore(bus.New()), Config{EventsURL: srv.URL, Token: "owner-token"}, log).
-		Subscribe(ctx, "http://agent:8080/consume")
-	if g := got["/subscriptions/agent-guest"]; g != "PUT Bearer guest-token http://agent-guest:8081/consume remind.*" {
-		t.Fatalf("손님 agent 의 구독: %q", g)
+	guest := New(proposal.NewStore(bus.New()), Config{Guest: true}, log).Consumer(nil)
+	if guest.Name != "agent-guest" || guest.Topic != queue.Guest || !slices.Equal(guest.Kinds, GuestTypes) {
+		t.Fatalf("손님: %s %s %v", guest.Name, guest.Topic.Name, guest.Kinds)
 	}
-	if o := got["/subscriptions/agent"]; o != "PUT Bearer owner-token http://agent:8080/consume "+strings.Join(Types, ",") {
-		t.Fatalf("운영자 agent 의 구독: %q", o)
+	owner, _ := setup(t)
+	c := owner.Consumer(nil)
+	if c.Name != "agent" || c.Topic != queue.Records || !slices.Equal(c.Kinds, Types) {
+		t.Fatalf("운영자: %s %s %v", c.Name, c.Topic.Name, c.Kinds)
 	}
 }

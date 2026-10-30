@@ -2,7 +2,7 @@
 # mind-svc 를 맥북에서 돌려 본다.
 #
 #   scripts/mind dev      메모리 모드로 go run (DB·Docker 없이). http://localhost:8102
-#   scripts/mind stack    Postgres + events-svc + mind 를 docker compose 로 (docker-compose.mind.yml)
+#   scripts/mind stack    Postgres + input-svc + mind 를 docker compose 로 (docker-compose.mind.yml)
 #   scripts/mind down     stack 내리기. 데이터까지 지우려면 scripts/mind down -v
 #   scripts/mind eval     평가 시나리오를 실제 모델로
 #   scripts/mind test     go test (모델 없이, 결정적으로)

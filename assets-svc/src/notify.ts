@@ -156,7 +156,7 @@ export function announce(p: Portfolio): void {
 function post(events: Event[]): void {
   if (!URL) return;
   for (const e of events) {
-    void fetch(`${URL.replace(/\/$/, "")}/events`, {
+    void fetch(`${URL.replace(/\/$/, "")}/records`, {
       method: "POST",
       headers: { "content-type": "application/json", ...(TOKEN ? { authorization: `Bearer ${TOKEN}` } : {}) },
       body: JSON.stringify(e),

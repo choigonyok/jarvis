@@ -788,7 +788,7 @@ func TestGuestRegions(t *testing.T) {
 	resetTables(t, dsn, `truncate context_raw, context_regions, context_visits, context_state restart identity`)
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
 	seoul, _ := time.LoadLocation("Asia/Seoul")
-	// What reaches events-svc.
+	// What reaches input-svc.
 	got := make(chan map[string]any, 32)
 	sink := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var e map[string]any

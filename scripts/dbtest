@@ -17,7 +17,7 @@ IMAGE=pgvector/pgvector:pg17@sha256:ac08538c6f8b9904c33c8224c5e5706dbe760aca29db
 
 dirs=()
 while [[ $# -gt 0 && "$1" != -* ]]; do dirs+=("$1"); shift; done
-[[ ${#dirs[@]} -gt 0 ]] || dirs=(gocommon spending-svc context-svc events-svc mind-svc calendar-svc workout-svc chat-svc notify-svc vault-svc jobs-svc memory-svc)
+[[ ${#dirs[@]} -gt 0 ]] || dirs=(gocommon spending-svc context-svc input-svc mind-svc calendar-svc workout-svc chat-svc notify-svc vault-svc jobs-svc memory-svc)
 
 cleanup() { docker rm -f "$NAME" >/dev/null 2>&1 || true; docker network rm "$NET" >/dev/null 2>&1 || true; }
 trap cleanup EXIT

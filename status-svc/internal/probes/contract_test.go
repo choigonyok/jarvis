@@ -108,21 +108,21 @@ func TestADeliveryRowReadsItsConsumer(t *testing.T) {
 		}}
 	})
 	e := freshEnv()
-	e.EventsURL = srv.URL
-	notify := e.delivery("notify", "이벤트 → 알림", []string{"svc.notify"})
+	e.InputURL = srv.URL
+	notify := e.delivery("notify", "기록 → 알림", []string{"svc.notify"})
 	if v := notify.Run(context.Background()); v.State != check.Fail || !strings.Contains(v.Summary, "401") || v.ObservedAt == nil {
 		t.Fatalf("15분 넘게 막힌 전달은 이상: %+v", v)
 	}
-	if v := e.delivery("agent", "이벤트 → 에이전트", nil).Run(context.Background()); v.State != check.OK {
+	if v := e.delivery("agent", "기록 → 에이전트", nil).Run(context.Background()); v.State != check.OK {
 		t.Fatalf("%+v", v)
 	}
-	if v := e.delivery("mind", "이벤트 → mind", nil).Run(context.Background()); v.State != check.Unknown {
+	if v := e.delivery("mind", "기록 → mind", nil).Run(context.Background()); v.State != check.Unknown {
 		t.Fatalf("구독 전: %+v", v)
 	}
-	if v := e.service("svc.events", "이벤트 로그", srv.URL, nil, "drain").Run(context.Background()); v.State != check.OK {
-		t.Fatalf("이벤트 로그 자신은 outbox 만 봅니다: %+v", v)
+	if v := e.service("svc.input", "입구(기록)", srv.URL, nil, "drain").Run(context.Background()); v.State != check.OK {
+		t.Fatalf("입구 자신은 outbox 만 봅니다: %+v", v)
 	}
-	if notify.Deps[0] != "svc.events" || notify.Deps[1] != "svc.notify" {
+	if notify.Deps[0] != "svc.input" || notify.Deps[1] != "svc.notify" {
 		t.Fatalf("원인 연결: %v", notify.Deps)
 	}
 }

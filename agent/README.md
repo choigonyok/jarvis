@@ -40,7 +40,7 @@ mind-svc :8102        인지 루프. 감지 → 해석 → 세계 모델 → 노
       ├─ spending-svc  :8095  가계부 (카드사 카톡 알림 → 분류·월 합계·예산)
       ├─ jobs-svc      :8098  맡긴 작업의 기록 (실행은 agent 스케줄러)
       ├─ context-svc   :8103  위치·현재 상태 (OwnTracks·단축어·맥 수집기)
-      ├─ events-svc    :8101  이벤트 로그 + outbox + 구독 배달
+      ├─ input-svc     :8101  입구: outbox 를 꺼내 기록 + 소비자별 배달 (소비자는 gocommon/queue 로 직접 읽음)
       ├─ notify-svc    :8097  알림함·웹 푸시·저녁 요약, 알림 분류 목록
       ├─ status-svc    :8096  상태 탭 (기능별 판정, 읽기만)
       └─ memory-svc    :8100  장기 기억 (Graphiti + FalkorDB)
@@ -355,7 +355,6 @@ cd web && AGENT_URL=http://localhost:8080 \
 | GET | `/calendar?from=&to=` | 기간 조회 (양끝 포함) |
 | POST | `/calendar` | 사람이 직접 추가·수정. id 없으면 추가 |
 | DELETE | `/calendar/{id}` | 사람이 직접 삭제 |
-| POST | `/consume` | events-svc 가 배달하는 곳: mind 카드·리마인드 안내 카드·체크리스트. 손님 agent 에는 손님 리마인드만 |
 | GET | `/reminders` | 작업 탭의 리마인드: 기다리는 것과 지난 30일 것(mind `GET /api/reminders?days=30`, 그 에이전트의 사람 것만) |
 | GET·POST | `/browser-checks` | 브라우저 로그인 확인 결과 / 다시 확인 요청 (status-svc 가 읽음) |
 | POST | `/intercept` | 브라우저 결제 가드가 묻는 곳 (가드 전용 토큰). 질의와 답은 기록으로 남는다(`internal/httpapi/records.go`) |

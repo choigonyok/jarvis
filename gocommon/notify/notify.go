@@ -1,11 +1,10 @@
-// Package notify reports events to events-svc, from which notify-svc decides
+// Package notify reports events to the stream, from which notify-svc decides
 // whether they become a push, a line in the evening digest, or only an inbox
 // entry - and the agent whether they are worth a suggestion.
 //
-// An event is written to the outbox table (event_outbox) first: events-svc
-// moves it into the log from there, so one sent while events-svc is down or
-// restarting is late rather than lost. Without a database it is posted
-// directly, as before.
+// An event is written to input.outbox: input-svc stores it from there, so one
+// sent while input-svc is down or restarting is late rather than lost. Without
+// a database it is posted to input-svc directly.
 //
 // Fire and forget: a notification that cannot be delivered must never hold up
 // the work it is about.
@@ -23,7 +22,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Event is the notification shape events-svc accepts on POST /events.
+// Event is the notification shape input-svc accepts: in the outbox, or on
+// POST /records.
 type Event struct {
 	Source string `json:"source"`
 	Kind   string `json:"kind"`
@@ -67,7 +67,7 @@ func New(url, dsn, token string, log *slog.Logger) *Client {
 // Send reports a notification-shaped event.
 func (c *Client) Send(e Event) { c.Emit(e) }
 
-// Emit reports any event events-svc accepts (the event shape or the
+// Emit reports any event input-svc accepts (the event shape or the
 // notification shape).
 func (c *Client) Emit(v any) {
 	if c == nil {
@@ -81,7 +81,7 @@ func (c *Client) Emit(v any) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if c.db != nil {
-			_, err := c.db.Exec(ctx, `insert into event_outbox (payload) values ($1)`, body)
+			_, err := c.db.Exec(ctx, `insert into input.outbox (payload) values ($1)`, body)
 			if err == nil {
 				return
 			}
@@ -95,7 +95,7 @@ func (c *Client) post(ctx context.Context, body []byte) {
 	if c.url == "" {
 		return
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url+"/events", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url+"/records", bytes.NewReader(body))
 	if err != nil {
 		return
 	}
@@ -110,6 +110,6 @@ func (c *Client) post(ctx context.Context, body []byte) {
 	}
 	resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		c.log.Warn("이벤트 서비스가 거절했습니다", "status", resp.StatusCode)
+		c.log.Warn("입구가 거절했습니다", "status", resp.StatusCode)
 	}
 }

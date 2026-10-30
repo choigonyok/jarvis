@@ -1,6 +1,7 @@
 package suggest
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -13,6 +14,7 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/core/bus"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
 	"github.com/choigonyok/jarvis/agent/internal/module/mind"
+	"github.com/choigonyok/jarvis/gocommon/queue"
 )
 
 // fakeMind is mind-svc's API: it records what it was asked.
@@ -56,9 +58,22 @@ func setup(t *testing.T) (*Engine, *proposal.Store) {
 }
 
 func deliver(e *Engine, typ string, data any) {
-	raw, _ := json.Marshal(map[string]any{"type": typ, "data": data})
-	req := httptest.NewRequest(http.MethodPost, "/consume", strings.NewReader(string(raw)))
-	e.Consume(httptest.NewRecorder(), req)
+	_ = e.Take(context.Background(), message(map[string]any{"type": typ, "data": data}))
+}
+
+// message is an event as the stream hands it over: the data in the payload,
+// the wording beside it.
+func message(ev map[string]any) queue.Message {
+	raw, _ := json.Marshal(ev["data"])
+	payload := map[string]any{}
+	_ = json.Unmarshal(raw, &payload)
+	if n, ok := ev["notify"]; ok {
+		payload["notify"] = n
+	}
+	body, _ := json.Marshal(payload)
+	kind, _ := ev["type"].(string)
+	key, _ := ev["key"].(string)
+	return queue.Message{Kind: kind, SourceKey: key, Payload: body}
 }
 
 // A mind card is an approval card at once - no judging turn - opened once
@@ -104,8 +119,9 @@ func TestNoticesBecomeCards(t *testing.T) {
 	e.cfg.Notice = func(n Notice) { notices = append(notices, n) }
 	e.cfg.Show = func(id, lead, key string) { shown = append(shown, id+"|"+lead+"|"+key) }
 	send := func(ev map[string]any) {
-		raw, _ := json.Marshal(ev)
-		e.Consume(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/consume", strings.NewReader(string(raw))))
+		if err := e.Take(context.Background(), message(ev)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	send(map[string]any{"type": "remind.asked", "key": "remind:rem_1:1",
 		"data":   map[string]any{"card": true, "why": "집에 도착하셔서 알려 드려요", "body": "", "checklist": "chk_1"},

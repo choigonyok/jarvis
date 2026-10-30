@@ -5,9 +5,10 @@
 자기 표만 씁니다(아래 "서비스별 역할").
 
 ```
-event_outbox → events (events-svc)      ← 서비스가 낸 일. 구독자에게 배달
+input.outbox → input.records (input-svc) ← 서비스가 낸 일. 기록으로 남기고 소비자별 배달 행을 만든다
+input.deliveries · input.consumers       ← 스트림. 소비자가 gocommon/queue 로 직접 읽는다
+input.guest_*                            ← 손님 것은 전용 표로 (역할 svc_guest)
 raw_events (추가 전용)                  ← 카드 알림 원문 (spending-svc)
-input.records                           ← 일어난 일의 기록. 재생이 읽는 것 (아래)
 commitments · workout_* · card_* · …     ← 각 서비스의 정확한 사실
 mind_*                                   ← mind 의 세계 모델·관문·노트
 mind.outcomes · mind.facts               ← 결과 장부와 기간이 붙은 사실 (원본에서 다시 만듦)
@@ -133,4 +134,4 @@ calendar-svc 가 씁니다.
 
 **새 표를 만드는 마이그레이션은 같은 파일에서 그 표의 권한도 준다** - 쓰는 서비스에
 `select, insert, update, delete`, 읽기만 하는 서비스에 `select`. 주지 않으면 그 서비스의 쿼리가
-`permission denied` 로 실패한다. 이벤트를 내는 서비스는 `event_outbox` 에 `insert` 만 받는다.
+`permission denied` 로 실패한다. 일어난 일을 내는 서비스는 `input.outbox` 에 `insert` 만 받고, 기록을 남기는 `input.append` 는 `svc_input` 만 부른다.

@@ -36,7 +36,7 @@ type Config struct {
 	// The rest are read only through their /health (gocommon/health) or
 	// their status: the event log and its deliveries, notifications, jobs,
 	// the iMessage collector, web search, the guest's agent, photos.
-	EventsURL     string
+	InputURL      string
 	NotifyURL     string
 	JobsURL       string
 	IMessageURL   string
@@ -229,9 +229,9 @@ func All(cfg Config) []check.Probe {
 		e.heldBox("spending.unparsed", "가계부 · 읽지 못한 카드 알림", cfg.SpendingURL,
 			"카드사 알림 중 금액·가맹점을 읽지 못했거나, 다섯 번 기록하지 못해 따로 둔 것이 없으면 정상, 있으면 주의. 따로 둔 알림은 합계에서 빠져 있어요.",
 			"가계부 탭의 '읽지 못한 알림'에서 직접 적거나 버리세요.", []string{"svc.spending"}),
-		e.heldBox("events.held", "이벤트 · 전하지 못한 이벤트", cfg.EventsURL,
-			"받는 쪽(알림·에이전트·mind)이 살아 있는데 다섯 번 받지 못한 이벤트가 없으면 정상, 있으면 주의. 그 이벤트 하나 때문에 뒤의 알림·카드가 멈추지 않도록 따로 두고 넘어갔어요.",
-			"받는 쪽을 고쳐 다시 띄우면 저절로 한 번 더 보내요. 버리려면 events-svc 의 DELETE /held/{소비자}/{id}.", []string{"svc.events"}),
+		e.heldBox("input.held", "기록 · 처리하지 못한 기록", cfg.InputURL,
+			"받는 쪽(알림·에이전트·mind)이 살아 있는데 다섯 번 처리하지 못한 기록이나 봉투가 잘못된 기록이 없으면 정상, 있으면 주의. 그 하나 때문에 뒤의 알림·카드가 멈추지 않도록 따로 두고 넘어갔어요.",
+			"받는 쪽을 고쳐 다시 띄우면 저절로 한 번 더 처리해요. 버리려면 input-svc 의 DELETE /held/{소비자}/{id}.", []string{"svc.input"}),
 		e.heldBox("mind.held", "기억 · 넣지 못한 사실", cfg.MindURL,
 			"대화에서 확인한 사실 중 기억 서비스가 다섯 번 받지 못해(또는 받지 않겠다고 해서) 보류한 것이 없으면 정상, 있으면 주의. 보류한 사실도 생활 장부에는 남아요.",
 			"기억이 꺼졌다 돌아오면 저절로 한 번 더 보내요. mind 콘솔(scripts/mini console)의 기억할 사실에서 다시 보내거나 버릴 수 있어요.", []string{"svc.mind", "svc.memory"}),
@@ -277,12 +277,15 @@ func All(cfg Config) []check.Probe {
 		// Its loop writes the payment path as records; the process itself is
 		// the "agent" probe above.
 		e.service("svc.agent", "에이전트의 기록", cfg.AgentURL, []string{"agent", "postgres"}, "records"),
-		e.service("svc.events", "이벤트 로그", cfg.EventsURL, []string{"postgres"}, "drain"),
-		e.delivery("notify", "이벤트 → 알림", []string{"svc.notify"}),
-		e.delivery("agent", "이벤트 → 에이전트", []string{"agent"}),
-		// The guest's reminders, to the guest's conversation.
-		e.delivery("agent-guest", "이벤트 → 손님 에이전트", []string{"agent-guest"}),
-		e.delivery("mind", "이벤트 → mind", []string{"svc.mind"}),
+		e.service("svc.input", "입구(기록)", cfg.InputURL, []string{"postgres"}, "drain", "keep"),
+		e.delivery("notify", "기록 → 알림", []string{"svc.notify"}),
+		e.delivery("agent", "기록 → 에이전트", []string{"agent"}),
+		e.delivery("mind", "기록 → mind", []string{"svc.mind"}),
+		// The guest's stream: the guest's phones, reminders in the guest's
+		// conversation, and where the guest's phone is.
+		e.delivery("notify-guest", "손님 기록 → 알림", []string{"svc.notify"}),
+		e.delivery("agent-guest", "손님 기록 → 손님 에이전트", []string{"agent-guest"}),
+		e.delivery("mind-guest", "손님 기록 → mind", []string{"svc.mind"}),
 		e.service("svc.notify", "알림 서비스", cfg.NotifyURL, []string{"postgres"}),
 		e.service("svc.jobs", "작업 서비스", cfg.JobsURL, []string{"postgres", "agent"}),
 		e.service("svc.kakaotalk", "카톡 수집 서비스", cfg.KakaoURL, nil),

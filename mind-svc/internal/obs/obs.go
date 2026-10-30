@@ -3,26 +3,31 @@
 // never from a sensor directly - so a day can be replayed through a changed
 // interpreter and the two results compared.
 //
-// In the stack the log is events-svc (an append goes through the outbox, and
-// events-svc delivers to POST /consume). On a laptop it is MemoryLog, which
-// keeps the same contract inside the process.
+// In the stack the log is the record stream: an append goes through
+// input.outbox, and the loop reads it with gocommon/queue. On a laptop it is
+// MemoryLog, which keeps the same contract inside the process.
 package obs
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/choigonyok/jarvis/gocommon/queue"
 )
 
-// Observation is one thing that happened. Its shape is events-svc's event.
+// Observation is one thing that happened, as the event log delivered it.
 type Observation struct {
 	ID         int64           `json:"id"`
 	Source     string          `json:"source"`
@@ -31,7 +36,7 @@ type Observation struct {
 	Data       json.RawMessage `json:"data"`
 	Key        string          `json:"key,omitempty"`
 	OccurredAt time.Time       `json:"occurredAt"`
-	// Notify is wording for a person (events-svc hands it to notify-svc).
+	// Notify is wording for a person (notify-svc reads it).
 	Notify json.RawMessage `json:"notify,omitempty"`
 }
 
@@ -75,7 +80,7 @@ type Log interface {
 type Handler func(ctx context.Context, o Observation) error
 
 // MemoryLog delivers each observation to the handler on one goroutine, in
-// order, as events-svc would.
+// order, as the stream does.
 type MemoryLog struct {
 	mu      sync.Mutex
 	all     []Observation
@@ -141,60 +146,96 @@ func (l *MemoryLog) Read(_ context.Context, after int64, limit int) ([]Observati
 	return out, nil
 }
 
-// EventsLog is events-svc. Appends go to the outbox table when there is a
-// database - late rather than lost if events-svc is restarting - and are
-// posted directly otherwise.
-type EventsLog struct {
+// Stream is the record stream. Appends go to input.outbox when there is a
+// database - late rather than lost if input-svc is restarting - and are posted
+// to input-svc otherwise. What the loop reads comes through gocommon/queue;
+// Read here is the record tables, for a replay.
+type Stream struct {
 	url   string
 	token string
 	db    *pgxpool.Pool
 	http  *http.Client
+	// kinds is what Read reads: job progress and the guard's questions are
+	// in the same tables, and are not the loop's to replay.
+	kinds []string
 }
 
-func NewEventsLog(url, token string, db *pgxpool.Pool) *EventsLog {
-	return &EventsLog{url: strings.TrimRight(url, "/"), token: token, db: db, http: &http.Client{Timeout: 10 * time.Second}}
+// NewStream is the stream at input-svc's url and the database, read for kinds.
+func NewStream(url, token string, db *pgxpool.Pool, kinds []string) *Stream {
+	return &Stream{url: strings.TrimRight(url, "/"), token: token, db: db, http: &http.Client{Timeout: 10 * time.Second}, kinds: kinds}
 }
 
-func (l *EventsLog) Append(ctx context.Context, o Observation) error {
+func (l *Stream) Append(ctx context.Context, o Observation) error {
 	body, err := json.Marshal(o)
 	if err != nil {
 		return err
 	}
 	if l.db != nil {
-		if _, err := l.db.Exec(ctx, `insert into event_outbox (payload) values ($1)`, body); err == nil {
+		if _, err := l.db.Exec(ctx, `insert into input.outbox (payload) values ($1)`, body); err == nil {
 			return nil
 		}
 	}
-	return l.do(ctx, http.MethodPost, "/events", body, nil)
+	return l.post(ctx, body)
 }
 
-func (l *EventsLog) Read(ctx context.Context, after int64, limit int) ([]Observation, error) {
-	var out struct {
-		Events []Observation `json:"events"`
+// Read is the records the loop reads past an id, oldest first.
+func (l *Stream) Read(ctx context.Context, after int64, limit int) ([]Observation, error) {
+	if l.db == nil {
+		return nil, errors.New("기록을 읽을 데이터베이스가 없습니다")
 	}
-	err := l.do(ctx, http.MethodGet, fmt.Sprintf("/events?after=%d&limit=%d", after, limit), nil, &out)
-	return out.Events, err
-}
-
-// Subscribe registers this service with events-svc, retrying until it
-// answers: deliveries of types come to self.
-func (l *EventsLog) Subscribe(ctx context.Context, consumer, self string, types []string, log *slog.Logger) {
-	body, _ := json.Marshal(map[string]any{"url": self, "types": types})
-	for wait := time.Second; ; wait = min(wait*2, time.Minute) {
-		if err := l.do(ctx, http.MethodPut, "/subscriptions/"+consumer, body, nil); err == nil {
-			log.Info("events-svc 에 구독했습니다", "types", types)
-			return
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(wait):
-		}
+	rows, err := l.db.Query(ctx, `
+		select id, received_at, kind, source, source_key, subject, occurred_at, payload from (
+		  select * from input.records where id > $1 and kind like any($3)
+		  union all
+		  select * from input.guest_records where id > $1 and kind like any($3)
+		) r order by id limit $2`, after, limit, likes(l.kinds))
+	if err != nil {
+		return nil, err
 	}
+	msgs, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (queue.Message, error) {
+		var m queue.Message
+		err := r.Scan(&m.ID, &m.At, &m.Kind, &m.Source, &m.SourceKey, &m.Subject, &m.OccurredAt, &m.Payload)
+		return m, err
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Observation, 0, len(msgs))
+	for _, m := range msgs {
+		o, err := FromMessage(m)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, o)
+	}
+	return out, nil
 }
 
-func (l *EventsLog) do(ctx context.Context, method, path string, body []byte, out any) error {
-	req, err := http.NewRequestWithContext(ctx, method, l.url+path, bytes.NewReader(body))
+// likes turns stream patterns into LIKE patterns.
+func likes(patterns []string) []string {
+	out := make([]string, len(patterns))
+	for i, p := range patterns {
+		out[i] = strings.ReplaceAll(p, "*", "%")
+	}
+	return out
+}
+
+// FromMessage is a message of the stream as an observation.
+func FromMessage(m queue.Message) (Observation, error) {
+	raw, err := m.Event()
+	if err != nil {
+		return Observation{}, err
+	}
+	var o Observation
+	err = json.Unmarshal(raw, &o)
+	return o, err
+}
+
+func (l *Stream) post(ctx context.Context, body []byte) error {
+	if l.url == "" {
+		return errors.New("input-svc 주소가 없습니다")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, l.url+"/records", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -208,10 +249,8 @@ func (l *EventsLog) do(ctx context.Context, method, path string, body []byte, ou
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("events-svc %s %s: %d", method, path, resp.StatusCode)
-	}
-	if out != nil {
-		return json.NewDecoder(resp.Body).Decode(out)
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("input-svc %d: %s", resp.StatusCode, strings.TrimSpace(string(msg)))
 	}
 	return nil
 }

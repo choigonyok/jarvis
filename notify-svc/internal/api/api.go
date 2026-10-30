@@ -18,6 +18,7 @@
 package api
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -31,6 +32,7 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/gocommon/health"
+	"github.com/choigonyok/jarvis/gocommon/queue"
 	"github.com/choigonyok/jarvis/notify-svc/internal/live"
 	"github.com/choigonyok/jarvis/notify-svc/internal/notify"
 	"github.com/choigonyok/jarvis/notify-svc/internal/push"
@@ -88,7 +90,6 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("POST /events", s.auth(s.event))
-	mux.HandleFunc("POST /consume", s.auth(s.consume))
 	mux.HandleFunc("GET /notifications", s.auth(s.list))
 	mux.HandleFunc("POST /notifications/read", s.auth(s.read))
 	mux.HandleFunc("GET /settings", s.auth(func(w http.ResponseWriter, r *http.Request) {
@@ -146,7 +147,7 @@ func (s *Server) event(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// consumed is an event as events-svc delivers it.
+// consumed is a record of the stream, as an event.
 type consumed struct {
 	ID     int64           `json:"id"`
 	Source string          `json:"source"`
@@ -158,14 +159,18 @@ type consumed struct {
 	} `json:"notify"`
 }
 
-// consume takes events from events-svc. An event with wording becomes a
+// Take takes one record of the stream. One with wording becomes a
 // notification by its tier; one without is not for a person to read and is
 // taken without a word. A suggestion raised about something already waiting
 // in tonight's digest takes that line's place.
-func (s *Server) consume(w http.ResponseWriter, r *http.Request) {
+func (s *Server) Take(ctx context.Context, m queue.Message) error {
+	raw, err := m.Event()
+	if err != nil {
+		return fmt.Errorf("%w: %v", queue.ErrRefused, err)
+	}
 	var e consumed
-	if !readJSON(w, r, &e) {
-		return
+	if err := json.Unmarshal(raw, &e); err != nil {
+		return fmt.Errorf("%w: %v", queue.ErrRefused, err)
 	}
 	if e.Type == "suggestion.raised" {
 		var d struct {
@@ -173,9 +178,8 @@ func (s *Server) consume(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = json.Unmarshal(e.Data, &d)
 		for _, key := range d.Supersedes {
-			if _, err := s.store.Supersede(r.Context(), key); err != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "알림을 정리하지 못했습니다."})
-				return
+			if _, err := s.store.Supersede(ctx, key); err != nil {
+				return fmt.Errorf("알림을 정리하지 못했습니다: %w", err)
 			}
 		}
 	}
@@ -187,9 +191,8 @@ func (s *Server) consume(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = json.Unmarshal(e.Data, &d)
 		if d.NotifyKey != "" {
-			if _, err := s.store.Resolve(r.Context(), d.NotifyKey); err != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "알림을 정리하지 못했습니다."})
-				return
+			if _, err := s.store.Resolve(ctx, d.NotifyKey); err != nil {
+				return fmt.Errorf("알림을 정리하지 못했습니다: %w", err)
 			}
 		}
 	}
@@ -209,27 +212,25 @@ func (s *Server) consume(w http.ResponseWriter, r *http.Request) {
 		s.svc.Busy(d.State.Driving || d.State.Meeting, why)
 	}
 	if e.Notify == nil {
-		writeJSON(w, http.StatusOK, map[string]bool{"ignored": true})
-		return
+		return nil
 	}
 	key := e.Key
 	if key == "" {
 		key = fmt.Sprintf("event:%d", e.ID)
 	}
-	_, _, err := s.svc.Accept(r.Context(), notify.Event{
+	_, _, err = s.svc.Accept(ctx, notify.Event{
 		Source: e.Source, Kind: e.Type, Tier: e.Notify.Tier, Level: e.Notify.Level,
 		Title: e.Notify.Title, Body: e.Notify.Body, URL: e.Notify.URL, Key: key,
 		Audience: e.Notify.Audience,
 	})
 	switch {
 	case errors.Is(err, notify.ErrInvalid):
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+		return fmt.Errorf("%w: %v", queue.ErrRefused, err)
 	case err != nil:
 		s.log.Error("알림을 처리하지 못했습니다", "err", err, "type", e.Type)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "알림을 처리하지 못했습니다."})
-	default:
-		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+		return fmt.Errorf("알림을 처리하지 못했습니다: %w", err)
 	}
+	return nil
 }
 
 // list is a page of the inbox: ?limit= (default 50, at most 200) after

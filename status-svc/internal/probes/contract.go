@@ -193,22 +193,16 @@ func judgeHeld(h *health.Held, now time.Time) check.Verdict {
 // notification, card and observation takes. When the consumer is down the
 // row says so through Deps.
 func (e *env) delivery(consumer, name string, deps []string) check.Probe {
-	// A guest's subscription is sent with the guest's token, not the
-	// services' (compose gives both sides JARVIS_GUEST_API_TOKEN).
-	token := "두 서비스의 JARVIS_API_TOKEN"
-	if strings.HasSuffix(consumer, "-guest") {
-		token = "두 서비스의 JARVIS_GUEST_API_TOKEN"
-	}
 	return check.Probe{
-		ID: "events." + consumer, Group: "기반", Name: name,
-		Rule: "이벤트 로그가 " + consumer + " 에게 이벤트를 차례로 전하고 있으면 정상. 받지 못하는 채로 15분이 넘으면 이상, 세 번 넘게 연달아 실패하는 중이면 주의. " +
-			"받는 쪽이 꺼졌으면 이벤트는 그 자리에서 기다렸다가 차례로 가고, 받는 쪽이 살아 있는데 한 이벤트만 다섯 번 받지 못하면 그 이벤트는 격리함으로 가요.",
-		Fix:  consumer + " 컨테이너 로그를 보세요. 토큰이 바뀌었으면(401) " + token + " 을 맞추세요.",
-		Deps: append([]string{"svc.events"}, deps...), Every: 30 * time.Second,
+		ID: "stream." + consumer, Group: "기반", Name: name,
+		Rule: consumer + " 이(가) 기록 스트림을 차례로 읽고 있으면 정상. 처리하지 못하는 채로 15분이 넘으면 이상, 세 번 넘게 연달아 실패하는 중이면 주의. " +
+			"읽는 쪽이 꺼졌으면 기록은 그 자리에서 기다렸다가 차례로 가고, 읽는 쪽이 살아 있는데 한 기록만 다섯 번 처리하지 못하면 그 기록은 격리함으로 가요.",
+		Fix:  consumer + " 컨테이너 로그를 보세요. 권한 오류면 그 서비스의 데이터베이스 역할을 확인하세요.",
+		Deps: append([]string{"svc.input"}, deps...), Every: 30 * time.Second,
 		Run: func(ctx context.Context) check.Verdict {
-			f := e.contract(ctx, e.EventsURL+"/health")
+			f := e.contract(ctx, e.InputURL+"/health")
 			if f.err != nil || f.code != http.StatusOK {
-				return fail("이벤트 로그의 상태를 읽지 못했어요.")
+				return fail("입구의 상태를 읽지 못했어요.")
 			}
 			for _, l := range f.report.Loops {
 				if l.Name != "deliver:"+consumer {
@@ -216,14 +210,14 @@ func (e *env) delivery(consumer, name string, deps []string) check.Probe {
 				}
 				v := judgeLoops(fetched{report: health.Report{Loops: []health.Loop{l}}, took: f.took}, nil, time.Now())
 				if v.State == check.OK {
-					v.Summary = "차례로 전하고 있어요."
+					v.Summary = "차례로 읽고 있어요."
 				}
 				if l.Behind != nil {
-					v.ObservedAt, v.ObservedLabel = l.Behind, "기다리는 가장 오래된 이벤트"
+					v.ObservedAt, v.ObservedLabel = l.Behind, "기다리는 가장 오래된 기록"
 				}
 				return v
 			}
-			return check.Verdict{State: check.Unknown, Summary: "아직 구독하지 않았어요(" + consumer + ")."}
+			return check.Verdict{State: check.Unknown, Summary: "아직 등록하지 않았어요(" + consumer + ")."}
 		},
 	}
 }
