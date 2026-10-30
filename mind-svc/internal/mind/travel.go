@@ -2,11 +2,12 @@ package mind
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/self"
+	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 )
 
 // How long the way between two places takes is not looked up on a map: it
@@ -28,16 +29,18 @@ type Travel interface {
 	Routes(ctx context.Context) ([]Route, error)
 }
 
-// TravelHTTP is context-svc.
-type TravelHTTP struct {
-	URL, Token string
-}
+// TravelLatest is the ways taken, from what context-svc last said.
+type TravelLatest struct{ Store store.Store }
 
-func (t TravelHTTP) Routes(ctx context.Context) ([]Route, error) {
+func (t TravelLatest) Routes(ctx context.Context) ([]Route, error) {
+	raw, _, err := t.Store.Latest(ctx, sensorTravel)
+	if err != nil {
+		return nil, err
+	}
 	var out struct {
 		Routes []Route `json:"routes"`
 	}
-	return out.Routes, getJSON(ctx, strings.TrimRight(t.URL, "/")+"/travel?days=60", t.Token, &out)
+	return out.Routes, json.Unmarshal(raw, &out)
 }
 
 // StaticTravel is fixed routes (evaluation).

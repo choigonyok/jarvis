@@ -208,13 +208,13 @@ func main() {
 	}
 	// Travel: how long the usual ways take, from the stays (context-svc);
 	// here: the regions the operator is in now, for a reminder that counts
-	// being home already as arriving.
+	// being home already as arriving. Both as context-svc last said.
 	var travel mind.Travel
 	var here, guestHere func(context.Context) ([]moments.Visit, error)
-	if url := os.Getenv("CONTEXT_URL"); mode == "stack" && url != "" {
-		travel = mind.TravelHTTP{URL: url, Token: token}
-		here = mind.HereHTTP{URL: url, Token: token}.Visits
-		guestHere = mind.HereHTTP{URL: url, Token: token}.GuestVisits
+	if mode == "stack" {
+		travel = mind.TravelLatest{Store: st}
+		latest := mind.HereLatest{Store: st}
+		here, guestHere = latest.Visits, latest.GuestVisits
 	}
 	// Jobs: a cart job goes to jobs-svc (the agent's browser runs it).
 	var jobs act.Jobs
@@ -238,8 +238,8 @@ func main() {
 			fixed, _ = mind.ParsePoint(seoul)
 		}
 		home := &mind.Home{Fixed: fixed}
-		if url := os.Getenv("CONTEXT_URL"); mode == "stack" && url != "" {
-			home.URL, home.Token = url, token
+		if mode == "stack" {
+			home.Store = st
 		}
 		sky = &weather.Service{Home: home.Point, Source: &weather.OpenMeteo{
 			Agent: "jarvis-mind/1.0 (+https://github.com/choigonyok/jarvis)", Zone: getenv("TZ", "Asia/Seoul"),
@@ -277,6 +277,56 @@ func main() {
 		mindAPI.SetStream(stream)
 	}
 	handler := mindAPI.Handler()
+	var structured *sensor.Structured
+	if mode == "stack" {
+		exclude := cfg.Noise
+		history := &sensor.History{Store: st, Reader: m.Conv, Noise: exclude, Out: log,
+			Batch: int(number("MIND_HISTORY_BATCH", 40)), Wait: 30 * time.Minute}
+		for name, url := range map[string]string{"kakao": os.Getenv("KAKAOTALK_URL"), "imessage": os.Getenv("IMESSAGE_URL")} {
+			if url == "" {
+				continue
+			}
+			s := &sensor.Messenger{Name: name, URL: url, Token: token, Store: st, Log: logOut, Exclude: exclude,
+				Backfill: duration("MIND_BACKFILL", 6*time.Hour), Every: duration("MIND_POLL", 5*time.Second), Out: log,
+				Payments: regexp.MustCompile(getenv("MIND_PAYMENT_ROOMS", `^(카카오페이|토스)$`)), Occur: m}
+			history.Messengers = append(history.Messengers, s)
+			go s.Run(ctx)
+		}
+		// Structured sources, read by rule into occurrences: spending, workouts,
+		// photos, jobs. The calendar (whose entries also become plans), the
+		// phones and the accounts come to the lane below as records.
+		structured = &sensor.Structured{Store: st, Observer: m, World: m.World, Token: token, Loc: loc, Out: log, Now: time.Now,
+			SpendingURL: os.Getenv("SPENDING_URL"), WorkoutURL: os.Getenv("WORKOUT_URL"),
+			ImmichURL: os.Getenv("IMMICH_URL"), ImmichKey: os.Getenv("IMMICH_API_KEY"), JobsURL: os.Getenv("JOBS_URL")}
+		// One reader for each source: memory remembers what is read here
+		// (memory-svc's own collectors for these sources are then off -
+		// MEMORY_SOURCES).
+		if h, ok := mem.(*memory.HTTP); ok && os.Getenv("MIND_RECORDS") != "false" {
+			structured.Records = h
+		}
+		go structured.Run(ctx, duration("MIND_STRUCTURED_POLL", 2*time.Minute))
+		if url := os.Getenv("CHAT_URL"); url != "" {
+			s := &sensor.Chat{URL: url, Token: token, Store: st, Log: logOut,
+				Backfill: duration("MIND_BACKFILL", 6*time.Hour), Every: duration("MIND_CHAT_POLL", 20*time.Second), Out: log}
+			history.Chat = s
+			go s.Run(ctx)
+		}
+		// The past the sensors skipped on their first start, read once for
+		// facts. After a minute, so a first start's sensors have drawn the
+		// line between past and present.
+		if os.Getenv("MIND_HISTORY") == "true" && client.Ready() {
+			go func() {
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(time.Minute):
+				}
+				if err := history.Run(ctx); err != nil && ctx.Err() == nil {
+					log.Warn("지난 대화를 읽지 못했습니다", "err", err)
+				}
+			}()
+		}
+	}
 	if stream != nil {
 		take := func(ctx context.Context, msg queue.Message) error {
 			o, err := obs.FromMessage(msg)
@@ -314,6 +364,7 @@ func main() {
 			{Pool: lanes, Topic: queue.Records, Name: "mind", Kinds: mind.Kinds, Handle: take, Log: log},
 			{Pool: lanes, Topic: queue.Guest, Name: "mind-guest", Kinds: mind.GuestKinds, Handle: take, Log: log},
 			{Pool: lanes, Topic: queue.Records, Name: "mind-commands", Kinds: mind.CommandKinds, Handle: command, Log: log},
+			{Pool: lanes, Topic: queue.Records, Name: "mind-structured", Kinds: sensor.Kinds, Handle: structured.Take, Log: log},
 			{Pool: lanes, Topic: queue.Guest, Name: "mind-commands-guest", Kinds: mind.GuestCommandKinds, Handle: command, Log: log},
 			{Pool: lanes, Topic: queue.Records, Name: "mind-relay", Kinds: []string{"*"}, Handle: stream.Relay(queue.Effects), Log: log},
 			{Pool: lanes, Topic: queue.Guest, Name: "mind-relay-guest", Kinds: []string{"*"}, Handle: stream.Relay(queue.GuestEffects), Log: log},
@@ -337,55 +388,6 @@ func main() {
 				}
 			}
 		}()
-	}
-	if mode == "stack" {
-		exclude := cfg.Noise
-		history := &sensor.History{Store: st, Reader: m.Conv, Noise: exclude, Out: log,
-			Batch: int(number("MIND_HISTORY_BATCH", 40)), Wait: 30 * time.Minute}
-		for name, url := range map[string]string{"kakao": os.Getenv("KAKAOTALK_URL"), "imessage": os.Getenv("IMESSAGE_URL")} {
-			if url == "" {
-				continue
-			}
-			s := &sensor.Messenger{Name: name, URL: url, Token: token, Store: st, Log: logOut, Exclude: exclude,
-				Backfill: duration("MIND_BACKFILL", 6*time.Hour), Every: duration("MIND_POLL", 5*time.Second), Out: log,
-				Payments: regexp.MustCompile(getenv("MIND_PAYMENT_ROOMS", `^(카카오페이|토스)$`)), Occur: m}
-			history.Messengers = append(history.Messengers, s)
-			go s.Run(ctx)
-		}
-		// Structured sources, read by rule into occurrences: spending, workouts,
-		// the calendar (whose entries also become plans), photos, assets, jobs.
-		structured := &sensor.Structured{Store: st, Observer: m, World: m.World, Token: token, Loc: loc, Out: log,
-			SpendingURL: os.Getenv("SPENDING_URL"), WorkoutURL: os.Getenv("WORKOUT_URL"), CalendarURL: os.Getenv("MIND_CALENDAR_READ_URL"),
-			ImmichURL: os.Getenv("IMMICH_URL"), ImmichKey: os.Getenv("IMMICH_API_KEY"), ContextURL: os.Getenv("CONTEXT_URL"),
-			AssetsURL: os.Getenv("ASSETS_URL"), JobsURL: os.Getenv("JOBS_URL")}
-		// One reader for each source: memory remembers what is read here
-		// (memory-svc's own collectors for these sources are then off -
-		// MEMORY_SOURCES).
-		if h, ok := mem.(*memory.HTTP); ok && os.Getenv("MIND_RECORDS") != "false" {
-			structured.Records = h
-		}
-		go structured.Run(ctx, duration("MIND_STRUCTURED_POLL", 2*time.Minute))
-		if url := os.Getenv("CHAT_URL"); url != "" {
-			s := &sensor.Chat{URL: url, Token: token, Store: st, Log: logOut,
-				Backfill: duration("MIND_BACKFILL", 6*time.Hour), Every: duration("MIND_CHAT_POLL", 20*time.Second), Out: log}
-			history.Chat = s
-			go s.Run(ctx)
-		}
-		// The past the sensors skipped on their first start, read once for
-		// facts. After a minute, so a first start's sensors have drawn the
-		// line between past and present.
-		if os.Getenv("MIND_HISTORY") == "true" && client.Ready() {
-			go func() {
-				select {
-				case <-ctx.Done():
-					return
-				case <-time.After(time.Minute):
-				}
-				if err := history.Run(ctx); err != nil && ctx.Err() == nil {
-					log.Warn("지난 대화를 읽지 못했습니다", "err", err)
-				}
-			}()
-		}
 	}
 	m.Run(ctx, time.Second)
 	if sky != nil {

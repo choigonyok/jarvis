@@ -21,9 +21,12 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/calendar-svc/internal/api"
-	"github.com/choigonyok/jarvis/gocommon/notify"
 	"github.com/choigonyok/jarvis/calendar-svc/internal/store"
 	"github.com/choigonyok/jarvis/calendar-svc/internal/uniple"
+	"github.com/choigonyok/jarvis/gocommon/health"
+	"github.com/choigonyok/jarvis/gocommon/notify"
+	"github.com/choigonyok/jarvis/gocommon/record"
+	"github.com/choigonyok/jarvis/gocommon/watch"
 )
 
 func main() {
@@ -79,9 +82,19 @@ func main() {
 		log.Info("일정 저장소: uniple")
 	}
 
+	// What is on the calendar goes out when it changes: the next weeks
+	// often, a year each way (what long-term memory keeps) less so.
+	loops := health.NewLoops()
+	records := record.New(dsn, loops, log)
+	go records.Run(ctx)
+	(&watch.Watcher{Service: "calendar", Records: records, Loops: loops, Log: log}).Run(ctx,
+		watch.Source{Kind: "calendar.near", Label: "가까운 일정 읽기", Every: 2 * time.Minute, Read: span(backend, 0, 7, 2)},
+		watch.Source{Kind: "calendar.year", Label: "앞뒤 1년 일정 읽기", Every: time.Hour, Read: span(backend, 1, 0, 12)},
+	)
+
 	srv := &http.Server{
 		Addr:         addr,
-		Handler:      api.New(backend, token, os.Getenv("API_GUEST_TOKEN"), log, notify.New(os.Getenv("NOTIFY_URL"), dsn, token, log)).Handler(),
+		Handler:      api.New(backend, token, os.Getenv("API_GUEST_TOKEN"), log, notify.New(os.Getenv("NOTIFY_URL"), dsn, token, log)).WithLoops(loops).Handler(),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}
@@ -99,6 +112,19 @@ func main() {
 	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(shutdown)
+}
+
+// span reads the calendar from years and days back to months ahead.
+func span(b api.Backend, years, days, months int) func(context.Context) (any, error) {
+	return func(ctx context.Context) (any, error) {
+		now := time.Now()
+		from, to := now.AddDate(-years, 0, -days).Format("2006-01-02"), now.AddDate(0, months, 0).Format("2006-01-02")
+		events, err := b.Range(ctx, from, to)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"from": from, "to": to, "events": events}, nil
+	}
 }
 
 func openWithRetry(

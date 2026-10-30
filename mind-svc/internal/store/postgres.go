@@ -480,6 +480,25 @@ func (p *Postgres) PutIntent(ctx context.Context, in model.Intent) error {
 	return err
 }
 
+// PutLatest keeps the latest of a kind; an older one arriving late does not
+// take its place.
+func (p *Postgres) PutLatest(ctx context.Context, kind string, payload json.RawMessage, at time.Time) error {
+	_, err := p.db.Exec(ctx, `insert into mind.latest (kind, payload, at) values ($1, $2, $3)
+		on conflict (kind) do update set payload = excluded.payload, at = excluded.at where mind.latest.at <= excluded.at`,
+		kind, string(payload), at)
+	return err
+}
+
+func (p *Postgres) Latest(ctx context.Context, kind string) (json.RawMessage, time.Time, error) {
+	var payload json.RawMessage
+	var at time.Time
+	err := p.db.QueryRow(ctx, `select payload, at from mind.latest where kind = $1`, kind).Scan(&payload, &at)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, at, model.ErrNotFound
+	}
+	return payload, at, err
+}
+
 // PutCommand keeps what came of a command. The first answer stays: a record
 // delivered twice is not asked twice.
 func (p *Postgres) PutCommand(ctx context.Context, c model.Command) error {

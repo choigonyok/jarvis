@@ -2,6 +2,7 @@ package mind
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -9,14 +10,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 	"github.com/choigonyok/jarvis/mind-svc/internal/weather"
 )
 
 // Home is where the operator lives, for the weather: the region they made
 // for home on the phone (context-svc, kind "home"), else a fixed point.
 type Home struct {
-	URL, Token string        // context-svc; empty: the fixed point only
-	Fixed      weather.Point // MIND_WEATHER_HOME, 서울 when not set
+	Store store.Store   // what context-svc last said; nil: the fixed point only
+	Fixed weather.Point // MIND_WEATHER_HOME, 서울 when not set
 
 	mu    sync.Mutex
 	p     weather.Point
@@ -42,7 +44,7 @@ func (h *Home) Point(ctx context.Context) (weather.Point, error) {
 	}
 	h.mu.Unlock()
 	p, ttl := h.Fixed, homeTTL
-	if h.URL != "" {
+	if h.Store != nil {
 		var out struct {
 			Regions []struct {
 				Kind string  `json:"kind"`
@@ -50,9 +52,10 @@ func (h *Home) Point(ctx context.Context) (weather.Point, error) {
 				Lon  float64 `json:"lon"`
 			} `json:"regions"`
 		}
-		ask, cancel := context.WithTimeout(ctx, 5*time.Second)
-		err := getJSON(ask, strings.TrimRight(h.URL, "/")+"/regions", h.Token, &out)
-		cancel()
+		raw, _, err := h.Store.Latest(ctx, sensorRegions)
+		if err == nil {
+			err = json.Unmarshal(raw, &out)
+		}
 		if err != nil {
 			ttl = homeRetry
 		}

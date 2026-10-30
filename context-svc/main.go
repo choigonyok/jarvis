@@ -22,7 +22,10 @@ import (
 
 	"github.com/choigonyok/jarvis/context-svc/internal/api"
 	"github.com/choigonyok/jarvis/context-svc/internal/store"
+	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/gocommon/notify"
+	"github.com/choigonyok/jarvis/gocommon/record"
+	"github.com/choigonyok/jarvis/gocommon/watch"
 )
 
 func main() {
@@ -90,7 +93,23 @@ func main() {
 	addr := getenv("LISTEN_ADDR", ":8103")
 	server := api.New(st, cfg, events, log)
 	go server.Watch(ctx, time.Minute)
-	srv := &http.Server{Addr: addr, Handler: server.Handler(), ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second}
+	handler := server.Handler()
+	// Where the phones are, the regions and the ways taken: what mind knows
+	// of them comes from here. It is the same as these routes answer.
+	loops := health.NewLoops()
+	server.SetLoops(loops)
+	records := record.New(dsn, loops, log)
+	go records.Run(ctx)
+	(&watch.Watcher{Service: "context", Records: records, Loops: loops, Log: log}).Run(ctx,
+		watch.Source{Kind: "context.now", Label: "운영자 폰이 있는 곳", Every: 30 * time.Second, Read: watch.Local(handler, cfg.Token, "/now", "visits")},
+		watch.Source{Kind: "context.now.guest", Label: "손님 폰이 있는 곳", Every: 30 * time.Second, Read: watch.Local(handler, cfg.Token, "/now/guest", "visits")},
+		watch.Source{Kind: "context.visits", Label: "체류", Every: time.Minute, Read: func(ctx context.Context) (any, error) {
+			return watch.Local(handler, cfg.Token, "/visits?from="+time.Now().Add(-48*time.Hour).UTC().Format(time.RFC3339), "visits")(ctx)
+		}},
+		watch.Source{Kind: "context.regions", Label: "영역", Every: 5 * time.Minute, Read: watch.Local(handler, cfg.Token, "/regions", "regions")},
+		watch.Source{Kind: "context.travel", Label: "다닌 길", Every: time.Hour, Read: watch.Local(handler, cfg.Token, "/travel?days=60", "routes")},
+	)
+	srv := &http.Server{Addr: addr, Handler: handler, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second}
 	go func() {
 		log.Info("context-svc 가 듣기 시작했습니다", "addr", addr)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {

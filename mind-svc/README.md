@@ -221,7 +221,7 @@ POST /api/facts/flush                  장부에서 기다리는 사실을 지�
 | `MIND_EXCLUDE_ROOMS` | 카드·은행·알림·광고… | 읽지 않을 방 이름 정규식 |
 | `MIND_OWNER_NAME` | 나 | 프롬프트의 "나" |
 | `MIND_WEB_SEARCH` | 2 | 대화 해석 한 번에 웹 검색을 몇 번까지 허락할지(0 이면 끔). 장소 없는 캘린더 일정이 보일 때만 도구를 주고, 모델이 일정 제목의 회사·기관 위치가 필요할 때만 검색한다("11월에 판교 안 간대" ↔ 장소 없는 "가나전자본사출근"). 검색 한 번은 $0.01 + 입력 약 1.5만 토큰, `mind_llm_usage` 비용에 들어간다 |
-| `SPENDING_URL`, `WORKOUT_URL`, `MIND_CALENDAR_READ_URL`, `IMMICH_URL`/`IMMICH_API_KEY`, `ASSETS_URL`, `JOBS_URL`, `CONTEXT_URL` | (없음) | 구조화 소스(스택). `CONTEXT_URL` 은 영역 체류와 이동 시간(`/travel`) |
+| `SPENDING_URL`, `WORKOUT_URL`, `IMMICH_URL`/`IMMICH_API_KEY`, `JOBS_URL` | (없음) | 아직 읽으러 가는 구조화 소스(스택). 일정·위치·자산은 어댑터가 기록으로 보낸다(`sensor/take.go`) |
 | `MIND_WEATHER` | (켜짐) | `false` 면 날씨를 읽지 않는다(브리핑의 날씨 줄, 비 카드, 성찰의 `rain` 이 함께 꺼진다) |
 | `MIND_WEATHER_HOME` | `37.5665,126.9780,서울` | 폰에 '집' 영역이 없을 때 집으로 칠 곳: `위도,경도[,이름]` |
 | `MIND_RECORDS` | (켜짐) | `false` 면 구조화 기록을 memory-svc 로 보내지 않는다(그때는 memory-svc 의 수집기를 다시 켠다) |

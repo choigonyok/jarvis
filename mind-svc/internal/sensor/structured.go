@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
@@ -41,11 +42,8 @@ type Structured struct {
 
 	SpendingURL string
 	WorkoutURL  string
-	CalendarURL string
 	ImmichURL   string
 	ImmichKey   string
-	ContextURL  string // context-svc: stays in regions
-	AssetsURL   string
 	JobsURL     string
 	// Records, when set, is long-term memory: what is read here is also
 	// remembered there.
@@ -53,9 +51,11 @@ type Structured struct {
 	// Back is how far back a first start reads.
 	Back time.Duration
 
+	// incoming is what the lane read for memory, on its way to queued, which
+	// only flush touches.
+	inMu     sync.Mutex
+	incoming []queued
 	queued   []queued
-	assetsAt time.Time // the portfolio's last read
-	wideAt   time.Time // the calendar's last read of a year each way
 }
 
 // Run polls every source every so often until ctx ends.
@@ -70,8 +70,7 @@ func (s *Structured) Run(ctx context.Context, every time.Duration) {
 	defer t.Stop()
 	for {
 		for name, poll := range map[string]func(context.Context) error{
-			"spending": s.Spending, "workout": s.Workout, "calendar": s.Calendar, "photos": s.Photos, "visits": s.Visits,
-			"assets": s.Assets, "jobs": s.Jobs, "photo-days": s.PhotoDays,
+			"spending": s.Spending, "workout": s.Workout, "photos": s.Photos, "jobs": s.Jobs, "photo-days": s.PhotoDays,
 		} {
 			if err := poll(ctx); err != nil && ctx.Err() == nil {
 				s.Out.Warn("구조화 소스를 읽지 못했습니다", "source", name, "err", err)
@@ -383,48 +382,39 @@ type entry struct {
 // CalendarRoom is the room plans read from the calendar live in.
 const CalendarRoom = "calendar"
 
-// Calendar reads the calendar from a week back to two months ahead. Each
-// entry is an occurrence, and - unless a plan from a conversation already
-// is it - a plan in the world model, kept in step with the entry: moved
-// when it moves, cancelled when it goes. Memory remembers a year each way,
-// so once an hour the read reaches that far for its records.
-func (s *Structured) Calendar(ctx context.Context) error {
-	if s.CalendarURL == "" || s.World == nil {
+// takeCalendar is what is on the calendar from a week back to two months ahead,
+// as the calendar's adapter read it. Each entry is an occurrence, and - unless
+// a plan from a conversation already is it - a plan in the world model, kept
+// in step with the entry: moved when it moves, cancelled when it goes.
+func (s *Structured) takeCalendar(ctx context.Context, c calendarRead) error {
+	if s.World == nil {
 		return nil
 	}
-	now := s.Now().In(s.Loc)
-	from, to := now.AddDate(0, 0, -7).Format("2006-01-02"), now.AddDate(0, 2, 0).Format("2006-01-02")
-	wide := s.Records != nil && s.Now().Sub(s.wideAt) >= time.Hour
-	readFrom, readTo := from, to
-	if wide {
-		readFrom, readTo = now.AddDate(-1, 0, 0).Format("2006-01-02"), now.AddDate(1, 0, 0).Format("2006-01-02")
-	}
-	var out struct {
-		Events []entry `json:"events"`
-	}
-	if err := s.get(ctx, s.CalendarURL+"/events?from="+readFrom+"&to="+readTo, &out); err != nil {
-		return err
-	}
-	var near []entry
-	for _, ev := range out.Events {
+	for _, ev := range c.Events {
 		for _, r := range s.CalendarRecords(ev) {
 			if err := s.record(ctx, r); err != nil {
 				return err
 			}
 		}
-		if ev.Date <= to && max(ev.Date, ev.EndDate) >= from {
-			near = append(near, ev)
+	}
+	return s.SyncCalendar(ctx, c.Events, c.From, c.To)
+}
+
+// takeCalendarYear is a year each way, which memory remembers. Copies left
+// before 2026-10-20, when every night re-made a past entry's plan, go here too.
+func (s *Structured) takeCalendarYear(ctx context.Context, c calendarRead) error {
+	if s.World == nil {
+		return nil
+	}
+	for _, ev := range c.Events {
+		for _, r := range s.CalendarRecords(ev) {
+			if err := s.record(ctx, r); err != nil {
+				return err
+			}
 		}
 	}
-	if wide {
-		s.wideAt = s.Now()
-		// Copies left before 2026-10-20, when every night re-made a past
-		// entry's plan: once an hour, over the last three months.
-		if err := s.dedupeCalendar(ctx, now.AddDate(0, -3, 0).Format("2006-01-02"), to); err != nil {
-			return err
-		}
-	}
-	return s.SyncCalendar(ctx, near, from, to)
+	now := s.Now().In(s.Loc)
+	return s.dedupeCalendar(ctx, now.AddDate(0, -3, 0).Format("2006-01-02"), now.AddDate(0, 2, 0).Format("2006-01-02"))
 }
 
 // dedupeCalendar keeps one plan for each calendar entry between from and
@@ -688,25 +678,9 @@ func People(title string) []string {
 
 // Visits reads the stays in regions of the last two days (context-svc): an
 // arrival is a visit, its departure fills its end.
-func (s *Structured) Visits(ctx context.Context) error {
-	if s.ContextURL == "" {
-		return nil
-	}
-	from := s.Now().Add(-48 * time.Hour).UTC().Format(time.RFC3339)
-	var out struct {
-		Visits []struct {
-			ID        int64      `json:"id"`
-			Region    string     `json:"region"`
-			Kind      string     `json:"kind"`
-			Area      string     `json:"area"`
-			EnteredAt time.Time  `json:"enteredAt"`
-			LeftAt    *time.Time `json:"leftAt"`
-		} `json:"visits"`
-	}
-	if err := s.get(ctx, s.ContextURL+"/visits?from="+from, &out); err != nil {
-		return err
-	}
-	for _, v := range out.Visits {
+// takeVisits is the stays of the last two days, as context-svc keeps them.
+func (s *Structured) takeVisits(ctx context.Context, vs []visit) error {
+	for _, v := range vs {
 		area := v.Area
 		if area == "" {
 			area = v.Region

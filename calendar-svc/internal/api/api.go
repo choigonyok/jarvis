@@ -17,8 +17,9 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/calendar-svc/internal/event"
-	"github.com/choigonyok/jarvis/gocommon/notify"
 	"github.com/choigonyok/jarvis/calendar-svc/internal/store"
+	"github.com/choigonyok/jarvis/gocommon/health"
+	"github.com/choigonyok/jarvis/gocommon/notify"
 )
 
 // Backend is where events live. The Postgres store was the only one; uniple
@@ -44,6 +45,13 @@ type Server struct {
 	guestToken string
 	log        *slog.Logger
 	notify     *notify.Client
+	loops      *health.Loops
+}
+
+// WithLoops shows the service's background reads on /health.
+func (s *Server) WithLoops(l *health.Loops) *Server {
+	s.loops = l
+	return s
 }
 
 // New serves the calendar. notifier may be nil: then nothing is announced.
@@ -86,7 +94,7 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "데이터베이스에 연결할 수 없습니다.")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	health.Write(w, http.StatusOK, health.Report{Loops: s.loops.List()})
 }
 
 func (s *Server) list(w http.ResponseWriter, r *http.Request) {

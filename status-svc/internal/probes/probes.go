@@ -280,6 +280,7 @@ func All(cfg Config) []check.Probe {
 		e.service("svc.input", "입구(기록)", cfg.InputURL, []string{"postgres"}, "drain", "keep"),
 		e.delivery("mind", "기록 → mind", []string{"svc.mind"}),
 		e.delivery("mind-commands", "답·리마인드·타이머 → mind", []string{"svc.mind"}),
+		e.delivery("mind-structured", "어댑터 기록 → mind", []string{"svc.mind"}),
 		e.delivery("mind-relay", "기록 → 알림 문구 넘기기", []string{"svc.mind"}),
 		e.delivery("output-status", "상태·결재 알림 → 출구", []string{"svc.output"}),
 		e.delivery("output", "효과 → 출구", []string{"svc.output", "svc.mind"}),

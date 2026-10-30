@@ -53,7 +53,9 @@ func (s *Structured) record(ctx context.Context, r model.Record) error {
 	if err != nil || old == h {
 		return err
 	}
-	s.queued = append(s.queued, queued{r, h})
+	s.inMu.Lock()
+	defer s.inMu.Unlock()
+	s.incoming = append(s.incoming, queued{r, h})
 	return nil
 }
 
@@ -68,6 +70,9 @@ type queued struct {
 // rest - one job's fact kept every record out of memory for three days
 // (2026-10-23~26).
 func (s *Structured) flush(ctx context.Context) error {
+	s.inMu.Lock()
+	s.queued, s.incoming = append(s.queued, s.incoming...), nil
+	s.inMu.Unlock()
 	for len(s.queued) > 0 {
 		n := min(len(s.queued), 100)
 		batch := make([]model.Record, n)

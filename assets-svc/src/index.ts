@@ -605,3 +605,35 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     setTimeout(() => process.exit(0), 5_000).unref();
   });
 }
+
+// 보유·입출금·매도가 바뀌면 기록을 남긴다(mind 는 자산을 읽으러 오지 않는다). 시세는 넣지 않는다 - 매번 달라서
+// 전부 변화가 되고, 지금 값은 물을 때 읽으면 된다.
+let lastHoldings = "";
+async function watchHoldings(): Promise<void> {
+  const p = JSON.parse(await portfolioJson()) as {
+    holdings?: { id: string; kind: string; name: string; symbol: string; quantity: number; since?: string }[];
+    problems?: string[];
+    principal?: { flows?: { id: string; venue: string; amountKrw: number; date: string; memo?: string }[] };
+    realized?: { sales?: { id: string; date: string; kind: string; name: string; symbol: string; quantity: number; profitKrw: number }[] };
+  };
+  const body = {
+    holdings: (p.holdings ?? []).map(({ id, kind, name, symbol, quantity, since }) => ({ id, kind, name, symbol, quantity, since })),
+    problems: p.problems ?? [],
+    principal: { flows: (p.principal?.flows ?? []).map(({ id, venue, amountKrw, date, memo }) => ({ id, venue, amountKrw, date, memo })) },
+    realized: { sales: p.realized?.sales ?? [] },
+  };
+  const raw = JSON.stringify(body);
+  if (raw === lastHoldings) return;
+  const now = new Date();
+  const left = await db.enqueueEvents([{
+    kind: "assets.holdings", source: "assets", source_key: `assets.holdings:${now.getTime()}`, actor: "assets",
+    subject: "assets.holdings", occurred_at: now.toISOString(), tier: "raw", schema_version: 1, payload: body,
+  }]);
+  if (left) lastHoldings = raw;
+}
+setInterval(() => {
+  watchHoldings().catch((e: Error) => console.error("보유를 기록하지 못했습니다:", e.message));
+}, 5 * 60_000).unref();
+setTimeout(() => {
+  watchHoldings().catch((e: Error) => console.error("보유를 기록하지 못했습니다:", e.message));
+}, 30_000).unref();

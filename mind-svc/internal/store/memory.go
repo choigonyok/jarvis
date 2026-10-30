@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"sort"
@@ -37,6 +38,7 @@ type Memory struct {
 	factRows []model.FactRow
 	classes  map[string]model.Class
 	commands map[string]model.Command
+	latest   map[string]latestRead
 	preds    map[string]model.Prediction
 	expects  map[[2]string]model.Expectation
 	replies  []model.ReplySituation
@@ -777,6 +779,33 @@ func (m *Memory) NoteVersions(_ context.Context, id string) ([]model.Note, error
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return slices.Clone(m.versions[id]), nil
+}
+
+func (m *Memory) PutLatest(_ context.Context, kind string, payload json.RawMessage, at time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.latest == nil {
+		m.latest = map[string]latestRead{}
+	}
+	if old, ok := m.latest[kind]; !ok || !old.at.After(at) {
+		m.latest[kind] = latestRead{payload, at}
+	}
+	return nil
+}
+
+func (m *Memory) Latest(_ context.Context, kind string) (json.RawMessage, time.Time, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	l, ok := m.latest[kind]
+	if !ok {
+		return nil, time.Time{}, model.ErrNotFound
+	}
+	return l.payload, l.at, nil
+}
+
+type latestRead struct {
+	payload json.RawMessage
+	at      time.Time
 }
 
 func (m *Memory) PutCommand(_ context.Context, c model.Command) error {

@@ -13,6 +13,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/moments"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
+	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 	"github.com/choigonyok/jarvis/mind-svc/internal/weather"
 )
 
@@ -40,23 +41,38 @@ const (
 	LocationGuestLeave = "location.guest.leave"
 )
 
-// HereHTTP is where the operator is now: context-svc's open visits.
-type HereHTTP struct{ URL, Token string }
+// HereLatest is where the phones are, from what context-svc last said.
+type HereLatest struct{ Store store.Store }
 
-func (h HereHTTP) Visits(ctx context.Context) ([]moments.Visit, error) {
+func (h HereLatest) read(ctx context.Context, kind string) ([]moments.Visit, error) {
+	raw, _, err := h.Store.Latest(ctx, kind)
+	if err != nil {
+		return nil, err
+	}
 	var out struct {
 		Visits []moments.Visit `json:"visits"`
 	}
-	return out.Visits, getJSON(ctx, strings.TrimRight(h.URL, "/")+"/now", h.Token, &out)
+	return out.Visits, json.Unmarshal(raw, &out)
+}
+
+// Visits is where the operator is now: the open visits.
+func (h HereLatest) Visits(ctx context.Context) ([]moments.Visit, error) {
+	return h.read(ctx, sensorNow)
 }
 
 // GuestVisits is where the guest's phone is now: the guest's own regions.
-func (h HereHTTP) GuestVisits(ctx context.Context) ([]moments.Visit, error) {
-	var out struct {
-		Visits []moments.Visit `json:"visits"`
-	}
-	return out.Visits, getJSON(ctx, strings.TrimRight(h.URL, "/")+"/now/guest", h.Token, &out)
+func (h HereLatest) GuestVisits(ctx context.Context) ([]moments.Visit, error) {
+	return h.read(ctx, sensorNowGuest)
 }
+
+// The adapters' records this package reads the latest of (sensor imports
+// this package, so the names are repeated here).
+const (
+	sensorNow      = "context.now"
+	sensorNowGuest = "context.now.guest"
+	sensorRegions  = "context.regions"
+	sensorTravel   = "context.travel"
+)
 
 // say is a reminder's moment come. The operator's own go out in their words
 // as remind.asked, which rings even in quiet hours: they asked for this

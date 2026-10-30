@@ -45,23 +45,11 @@ type portfolio struct {
 
 var venues = map[string]string{"upbit": "업비트", "kis": "한국투자증권", "gold": "금현물 계좌"}
 
-// assetsEvery: the portfolio asks the exchanges, so it is read less often
-// than the rest.
-const assetsEvery = 5 * time.Minute
-
-// Assets reads what is held (and since when), money moved in and out, and
+// takeAssets is what is held (and since when), money moved in and out, and
 // sales - not prices, which change every minute and are read live. A
-// holding gone from the answer is sold only when every venue answered: a
+// holding gone from the record is sold only when every venue answered: a
 // venue that failed to load leaves its holdings out.
-func (s *Structured) Assets(ctx context.Context) error {
-	if s.AssetsURL == "" || s.Now().Sub(s.assetsAt) < assetsEvery {
-		return nil
-	}
-	var p portfolio
-	if err := s.get(ctx, s.AssetsURL+"/portfolio", &p); err != nil {
-		return err
-	}
-	s.assetsAt = s.Now()
+func (s *Structured) takeAssets(ctx context.Context, p portfolio) error {
 	now := s.Now().In(s.Loc)
 	held, err := s.Store.Occurrences(ctx, time.Time{}, now.Add(time.Minute), "asset")
 	if err != nil {

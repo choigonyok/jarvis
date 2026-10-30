@@ -2,6 +2,7 @@ package sensor
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/choigonyok/jarvis/gocommon/queue"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 )
@@ -175,8 +177,6 @@ func TestAssetsAndJobs(t *testing.T) {
 	               "realized":{"sales":[{"id":"s1","date":"2026-10-02","kind":"stock","name":"금 ETF","symbol":"GLD","quantity":1,"profitKrw":-1200.4}]}}`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/portfolio":
-			w.Write([]byte(portfolio))
 		case "/jobs":
 			w.Write([]byte(`{"jobs":[{"id":3,"title":"장작 담기","goal":"장작","state":"active","createdAt":"2026-10-12T09:00:00+09:00"}]}`))
 		}
@@ -185,8 +185,11 @@ func TestAssetsAndJobs(t *testing.T) {
 	st := store.NewMemory()
 	rec := &recorder{}
 	now := time.Date(2026, 10, 15, 10, 0, 0, 0, seoul)
-	s := &Structured{Store: st, Observer: observer{st}, Loc: seoul, Now: func() time.Time { return now }, AssetsURL: srv.URL, JobsURL: srv.URL, Records: rec}
-	if err := s.Assets(ctx); err != nil {
+	s := &Structured{Store: st, Observer: observer{st}, Loc: seoul, Now: func() time.Time { return now }, JobsURL: srv.URL, Records: rec}
+	assets := func() error {
+		return s.Take(ctx, queue.Message{Kind: KindHoldings, Payload: json.RawMessage(portfolio), OccurredAt: now})
+	}
+	if err := assets(); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Jobs(ctx); err != nil {
@@ -220,7 +223,7 @@ func TestAssetsAndJobs(t *testing.T) {
 	// Nothing changed: nothing is sent again.
 	rec.got = nil
 	now = now.Add(10 * time.Minute)
-	if err := s.Assets(ctx); err != nil {
+	if err := assets(); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.flush(ctx); err != nil || len(rec.got) != 0 {
@@ -232,7 +235,7 @@ func TestAssetsAndJobs(t *testing.T) {
 	portfolio = strings.Replace(portfolio, `,
 	                           {"id":"upbit:BTC","kind":"crypto","name":"비트코인","symbol":"BTC","quantity":0.01234567}`, "", 1)
 	now = now.Add(10 * time.Minute)
-	if err := s.Assets(ctx); err != nil {
+	if err := assets(); err != nil {
 		t.Fatal(err)
 	}
 	_ = s.flush(ctx)
@@ -244,7 +247,7 @@ func TestAssetsAndJobs(t *testing.T) {
 	// Every venue answered: now it is.
 	portfolio = strings.Replace(portfolio, `"problems":["upbit"]`, `"problems":[]`, 1)
 	now = now.Add(10 * time.Minute)
-	if err := s.Assets(ctx); err != nil {
+	if err := assets(); err != nil {
 		t.Fatal(err)
 	}
 	_ = s.flush(ctx)

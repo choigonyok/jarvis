@@ -2,10 +2,11 @@ package mind
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
-	"sync/atomic"
+	"encoding/json"
 	"testing"
+	"time"
+
+	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 )
 
 func TestParsePoint(t *testing.T) {
@@ -23,45 +24,26 @@ func TestParsePoint(t *testing.T) {
 	}
 }
 
-// Home is the 집 region made on the phone; without one - or without
-// context-svc - the fixed point, and a context-svc that did not answer is
-// not asked again at once.
+// Home is the 집 region made on the phone; without one - or before context-svc
+// has said - the fixed point.
 func TestHome(t *testing.T) {
-	var calls atomic.Int32
-	answer := `{"regions":[{"name":"회사","kind":"work","lat":37.49,"lon":127.02},{"name":"집","kind":"home","lat":37.556,"lon":126.901}]}`
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
-		if r.URL.Path != "/regions" || r.Header.Get("Authorization") != "Bearer t" {
-			t.Errorf("%s %q", r.URL.Path, r.Header.Get("Authorization"))
-		}
-		if answer == "" {
-			http.Error(w, "down", http.StatusServiceUnavailable)
-			return
-		}
-		_, _ = w.Write([]byte(answer))
-	}))
-	defer srv.Close()
+	st := store.NewMemory()
 	seoul, _ := ParsePoint("37.5665,126.9780,서울")
 	ctx := context.Background()
 
-	h := &Home{URL: srv.URL, Token: "t", Fixed: seoul}
+	// Nothing said yet: the fixed point stands in.
+	h := &Home{Store: st, Fixed: seoul}
+	if p, err := h.Point(ctx); err != nil || p.Name != "서울" {
+		t.Fatalf("context-svc has not said: %+v %v", p, err)
+	}
+
+	answer := `{"regions":[{"name":"회사","kind":"work","lat":37.49,"lon":127.02},{"name":"집","kind":"home","lat":37.556,"lon":126.901}]}`
+	if err := st.PutLatest(ctx, sensorRegions, json.RawMessage(answer), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	h = &Home{Store: st, Fixed: seoul}
 	p, err := h.Point(ctx)
 	if err != nil || p.Name != "집" || p.Lat != 37.556 {
 		t.Fatalf("the 집 region: %+v %v", p, err)
-	}
-	_, _ = h.Point(ctx)
-	if calls.Load() != 1 {
-		t.Fatalf("home is kept a while: %d calls", calls.Load())
-	}
-
-	answer = ""
-	h = &Home{URL: srv.URL, Token: "t", Fixed: seoul}
-	for range 3 {
-		if p, err := h.Point(ctx); err != nil || p.Name != "서울" {
-			t.Fatalf("context-svc down: %+v %v", p, err)
-		}
-	}
-	if calls.Load() != 2 {
-		t.Fatalf("a context-svc that did not answer is asked once a while: %d calls", calls.Load())
 	}
 }

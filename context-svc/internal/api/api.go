@@ -75,6 +75,7 @@ import (
 	"github.com/choigonyok/jarvis/context-svc/internal/place"
 	"github.com/choigonyok/jarvis/context-svc/internal/store"
 	"github.com/choigonyok/jarvis/context-svc/internal/transit"
+	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/gocommon/notify"
 )
 
@@ -102,7 +103,11 @@ type Config struct {
 	DataKey, SubwayKey string
 }
 
+// SetLoops shows the service's background reads on /health.
+func (s *Server) SetLoops(l *health.Loops) { s.loops = l }
+
 type Server struct {
+	loops  *health.Loops
 	st     *store.Store
 	cfg    Config
 	events *notify.Client
@@ -135,7 +140,7 @@ func New(st *store.Store, cfg Config, events *notify.Client, log *slog.Logger) *
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		health.Write(w, http.StatusOK, health.Report{Loops: s.loops.List()})
 	})
 	// 폰이 부르는 두 경로는 공개 호스트에서 열려 있다. 토큰을 맞히려는 시도와
 	// 고장 난 단축어의 폭주를 둘 다 막도록 경로마다 요청 수를 제한한다.
