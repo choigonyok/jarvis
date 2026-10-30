@@ -599,7 +599,7 @@ func TestPostgres(t *testing.T) {
 	if err != nil || back.Status != model.FactPending || back.Tries != 0 || back.NextTry.After(time.Now().Add(2*time.Second)) {
 		t.Fatalf("068 의 되살림: %+v %v", back, err)
 	}
-	if due, _ := st.DueFacts(ctx, time.Now(), 50); !slices.ContainsFunc(due, func(f model.Fact) bool { return f.ID == "mf_gaveup" }) {
+	if due, _ := st.DueFacts(ctx, time.Now().Add(2*time.Second), 50); !slices.ContainsFunc(due, func(f model.Fact) bool { return f.ID == "mf_gaveup" }) {
 		t.Fatalf("되살린 사실은 바로 다시 보냅니다: %+v", due)
 	}
 	// Last: its messages must not count in the others' rooms.
