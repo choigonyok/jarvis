@@ -30,10 +30,15 @@ const (
 	// The last two days' photos, and the days that are over.
 	KindPhotos    = "photos.recent"
 	KindPhotoDays = "photos.days"
+	// KindFX is the dollar's rate, only kept: a card alert in dollars is
+	// estimated in won with it.
+	KindFX = "assets.fx"
+	// KindOutflows is what left the investment accounts and what became of it.
+	KindOutflows = "assets.outflows"
 )
 
 // Kinds is what the structured lane reads.
-var Kinds = []string{KindCalendarNear, KindCalendarYear, KindVisits, KindHoldings, KindNow, KindNowGuest, KindRegions, KindTravel, KindForecast, KindPhotos, KindPhotoDays, KindMessage}
+var Kinds = []string{KindCalendarNear, KindCalendarYear, KindVisits, KindHoldings, KindNow, KindNowGuest, KindRegions, KindTravel, KindForecast, KindPhotos, KindPhotoDays, KindMessage, KindFX, KindOutflows}
 
 // calendarRead is one read of the calendar.
 type calendarRead struct {
@@ -95,6 +100,10 @@ func (s *Structured) Take(ctx context.Context, m queue.Message) error {
 		}
 		if err = json.Unmarshal(m.Payload, &p); err == nil {
 			return s.takePhotoDays(ctx, p.Days)
+		}
+	case KindOutflows:
+		if s.Outflows != nil {
+			return s.Outflows(ctx, m.Payload)
 		}
 	case KindForecast:
 		var f struct {

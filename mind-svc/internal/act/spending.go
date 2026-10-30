@@ -1,14 +1,10 @@
 package act
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"net/http"
 	"strings"
-	"time"
 )
 
 // KindCategory files a charge under a category.
@@ -23,11 +19,22 @@ const (
 // other is the book's catch-all: where a charge goes back to.
 const other = "기타"
 
-// Spending is the book's API: what the rules could not place, and filing it.
+// Book is the household book, which mind keeps: what the rules could not
+// place, and filing it.
+type Book interface {
+	// Unclear decodes what the rules left unfiled lately, and the categories
+	// there are, into into.
+	Unclear(ctx context.Context, into any) error
+	// FileCharge files a charge; with remember, its merchant goes the same way
+	// from now on.
+	FileCharge(ctx context.Context, id int64, category string, remember bool) error
+	// FileItem files one product of a split order.
+	FileItem(ctx context.Context, id int64, category string) error
+}
+
+// Spending files charges in the book.
 type Spending struct {
-	URL   string
-	Token string
-	HTTP  *http.Client
+	Book Book
 }
 
 func (Spending) Kinds() []string { return []string{KindCategory} }
@@ -101,45 +108,12 @@ func (s Spending) Settle(ctx context.Context, payload json.RawMessage) error {
 
 func (s Spending) file(ctx context.Context, p CategoryPayload, category string, remember bool) error {
 	if p.Kind == "item" {
-		return s.do(ctx, http.MethodPatch, fmt.Sprintf("/items/%d", p.ID), map[string]string{"category": category}, nil)
+		return s.Book.FileItem(ctx, p.ID, category)
 	}
-	return s.do(ctx, http.MethodPatch, fmt.Sprintf("/transactions/%d", p.ID), map[string]any{"category": category, "remember": remember}, nil)
+	return s.Book.FileCharge(ctx, p.ID, category, remember)
 }
 
 // Unclear is what the rules left unfiled lately, and the categories there are.
 func (s Spending) Unclear(ctx context.Context, into any) error {
-	return s.do(ctx, http.MethodGet, "/unclear", nil, into)
-}
-
-func (s Spending) do(ctx context.Context, method, path string, in, out any) error {
-	var body bytes.Buffer
-	if in != nil {
-		if err := json.NewEncoder(&body).Encode(in); err != nil {
-			return err
-		}
-	}
-	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(s.URL, "/")+path, &body)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if s.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+s.Token)
-	}
-	client := s.HTTP
-	if client == nil {
-		client = &http.Client{Timeout: 15 * time.Second}
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 300 {
-		return fmt.Errorf("가계부 %s: 응답 %d", path, resp.StatusCode)
-	}
-	if out == nil {
-		return nil
-	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	return s.Book.Unclear(ctx, into)
 }

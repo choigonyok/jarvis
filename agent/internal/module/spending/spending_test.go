@@ -30,7 +30,7 @@ const bookJSON = `{
 
 func TestGetSpending(t *testing.T) {
 	svc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/spending" || r.Header.Get("Authorization") != "Bearer tok" {
+		if r.URL.Path != Prefix+"/spending" || r.Header.Get("Authorization") != "Bearer tok" {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
@@ -38,7 +38,7 @@ func TestGetSpending(t *testing.T) {
 	}))
 	defer svc.Close()
 
-	mcpSrv := httptest.NewServer(New(NewStore(svc.URL, "tok")).Handler())
+	mcpSrv := httptest.NewServer(New(NewStore(svc.URL, "tok", nil)).Handler())
 	defer mcpSrv.Close()
 	client := mcp.NewClient(&mcp.Implementation{Name: "t", Version: "1"}, nil)
 	session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{Endpoint: mcpSrv.URL}, nil)

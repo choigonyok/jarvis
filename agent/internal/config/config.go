@@ -105,8 +105,6 @@ type Config struct {
 	// token opens there are lookups plus the principal ledger, which no tool
 	// here calls.
 	AssetsURL string
-	// SpendingURL is where spending-svc listens. Read-only, like assets.
-	SpendingURL string
 	// Enrich turns on the background lookup of marketplace orders (what a
 	// "쿠팡 8,900원" charge actually bought). It needs the browser server in
 	// ExtraMCPURLs; without it the loop does not start.
@@ -260,7 +258,6 @@ func Load() (Config, error) {
 		CalendarURL:      env("JARVIS_CALENDAR_URL", "http://localhost:8093"),
 		ChatURL:          env("JARVIS_CHAT_URL", "http://localhost:8094"),
 		AssetsURL:        env("JARVIS_ASSETS_URL", "http://localhost:8092"),
-		SpendingURL:      env("JARVIS_SPENDING_URL", "http://localhost:8095"),
 		Enrich:           envBool("JARVIS_ENRICH", true),
 		UploadsDir:       env("JARVIS_UPLOADS_DIR", ""),
 		JobsURL:          env("JARVIS_JOBS_URL", "http://localhost:8098"),

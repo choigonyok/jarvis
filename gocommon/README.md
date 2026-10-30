@@ -3,7 +3,7 @@
 Go code more than one service shares, kept in one place instead of copied.
 
 - `notify` - reporting events to the stream through `input.outbox`
-  (used by agent, calendar-svc, context-svc, spending-svc, status-svc).
+  (used by agent, calendar-svc, context-svc, mind-svc, status-svc).
 - `queue` - the stream: `Consumer` reads a topic with SKIP LOCKED, keeps order
   per subject and the cursor at the low-water mark, and applies the `health`
   rule to what fails. input-svc publishes with `Deliver` and `Wake`. There is
@@ -21,7 +21,7 @@ Go code more than one service shares, kept in one place instead of copied.
   `MaxTries` (5) times, it is held - set aside with why, the cursor moves on,
   /health counts it so the status tab shows it, and it goes again once when
   the other side works again or a person asks. Used by `queue`, input-svc,
-  spending-svc, mind-svc, jobs-svc, output-svc; status-svc reads it.
+  mind-svc, jobs-svc, output-svc; status-svc reads it.
 
 Each service's `go.mod` points at it with `replace ... => ../gocommon`, and its
 Docker build receives it as the extra build context `gocommon`

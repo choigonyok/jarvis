@@ -3,21 +3,18 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/choigonyok/jarvis/spending-svc/internal/book"
-	"github.com/choigonyok/jarvis/spending-svc/internal/category"
-	"github.com/choigonyok/jarvis/spending-svc/internal/enrich"
-	"github.com/choigonyok/jarvis/spending-svc/internal/parse"
+	"github.com/choigonyok/jarvis/mind-svc/internal/spending/book"
+	"github.com/choigonyok/jarvis/mind-svc/internal/spending/category"
+	"github.com/choigonyok/jarvis/mind-svc/internal/spending/enrich"
+	"github.com/choigonyok/jarvis/mind-svc/internal/spending/parse"
 )
 
 var ErrNotFound = errors.New("그런 내역이 없습니다.")
@@ -48,54 +45,12 @@ func (s *Store) Close() { s.pool.Close() }
 
 func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 
-// ── 수집 커서 ─────────────────────────────────────────────────────────────
-
-const cursorScope, cursorKey = "spending", "kakao_cursor"
-
-func (s *Store) Cursor(ctx context.Context) (int64, error) {
-	var raw []byte
-	err := s.pool.QueryRow(ctx, `select value from settings where scope=$1 and key=$2`,
-		cursorScope, cursorKey).Scan(&raw)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, nil
-	}
-	if err != nil {
-		return 0, err
-	}
-	var n int64
-	err = json.Unmarshal(raw, &n)
-	return n, err
-}
-
-func (s *Store) SetCursor(ctx context.Context, rowid int64) error {
-	_, err := s.pool.Exec(ctx, `select set_setting($1, $2, $3::jsonb)`,
-		cursorScope, cursorKey, strconv.FormatInt(rowid, 10))
-	return err
-}
-
 // ── 쓰기: 알림 ────────────────────────────────────────────────────────────
-
-// RawEvent records the alert exactly as received, before any reading of it.
-// The same message twice is one row (source, ext_id is unique).
-func (s *Store) RawEvent(ctx context.Context, messageID, chat, text string, sentAt time.Time) (int64, error) {
-	data, _ := json.Marshal(map[string]string{"chat_name": chat, "text": text})
-	var id int64
-	err := s.pool.QueryRow(ctx, `
-		insert into raw_events (source, type, subject, ext_id, occurred_at, data)
-		values ('kakaotalk', 'card.alert', $1, $2, $3, $4)
-		on conflict (source, ext_id) where ext_id is not null do nothing
-		returning id`, chat, messageID, sentAt, data).Scan(&id)
-	if errors.Is(err, pgx.ErrNoRows) {
-		err = s.pool.QueryRow(ctx,
-			`select id from raw_events where source='kakaotalk' and ext_id=$1`, messageID).Scan(&id)
-	}
-	return id, err
-}
 
 // AddAlert stores a parsed alert. It returns false when the message was
 // already recorded - collection resumes from a cursor, and a replay must not
 // count a charge twice.
-func (s *Store) AddAlert(ctx context.Context, messageID string, eventID int64, a parse.Alert, amountKrw int64, estimated bool) (bool, error) {
+func (s *Store) AddAlert(ctx context.Context, messageID string, a parse.Alert, amountKrw int64, estimated bool) (bool, error) {
 	cat, src, err := s.Classify(ctx, a.Merchant)
 	if err != nil {
 		return false, err
@@ -123,15 +78,15 @@ func (s *Store) AddAlert(ctx context.Context, messageID string, eventID int64, a
 
 	var id int64
 	err = tx.QueryRow(ctx, `
-		insert into card_transactions
-		  (source, source_ref, source_event_id, issuer, card_tail, kind, amount_krw, currency,
+		insert into mind.card_transactions
+		  (source, source_ref, issuer, card_tail, kind, amount_krw, currency,
 		   foreign_amount, estimated, installment, merchant, category, category_source, approved_at,
 		   enrich_source, enrich_status, enrich_next_at)
-		values ('kakao', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-		        case when $16::text is null then null else now() end)
+		values ('kakao', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+		        case when $15::text is null then null else now() end)
 		on conflict (source_ref) do nothing
 		returning id`,
-		messageID, eventID, a.Issuer, a.CardTail, a.Kind, amountKrw, a.Currency,
+		messageID, a.Issuer, a.CardTail, a.Kind, amountKrw, a.Currency,
 		foreign, estimated, a.Installment, a.Merchant, cat, src, a.ApprovedAt,
 		enrichSource, enrichStatus).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -154,7 +109,7 @@ func (s *Store) AddAlert(ctx context.Context, messageID string, eventID int64, a
 // amount, finds nothing, and stays as money back.
 func matchCancel(ctx context.Context, tx pgx.Tx, cancelID int64, a parse.Alert, amountKrw int64) error {
 	rows, err := tx.Query(ctx, `
-		select id, merchant, card_tail from card_transactions
+		select id, merchant, card_tail from mind.card_transactions
 		 where kind='approval' and cancelled_by is null and amount_krw=$1
 		   and approved_at <= $2 and approved_at > $2 - interval '90 days'
 		 order by approved_at desc`, amountKrw, a.ApprovedAt.Add(time.Minute))
@@ -192,30 +147,14 @@ func matchCancel(ctx context.Context, tx pgx.Tx, cancelID int64, a parse.Alert, 
 	if match == 0 {
 		return nil
 	}
-	_, err = tx.Exec(ctx, `update card_transactions set cancelled_by=$1, updated_at=now() where id=$2`, cancelID, match)
+	_, err = tx.Exec(ctx, `update mind.card_transactions set cancelled_by=$1, updated_at=now() where id=$2`, cancelID, match)
 	return err
 }
 
 func (s *Store) AddUnparsed(ctx context.Context, messageID, chat, text string, sentAt time.Time) error {
 	_, err := s.pool.Exec(ctx, `
-		insert into spending_unparsed (message_id, chat_name, body, sent_at)
+		insert into mind.spending_unparsed (message_id, chat_name, body, sent_at)
 		values ($1, $2, $3, $4) on conflict do nothing`, messageID, chat, text, sentAt)
-	return err
-}
-
-// Hold sets aside a card message that could not be recorded at all, with
-// why, beside the alerts whose format was not understood - the same place a
-// person writes them in or throws them away. Its text is kept as near as
-// Postgres allows: what made the insert fail may be in it (a NUL byte).
-func (s *Store) Hold(ctx context.Context, messageID, chat, text string, sentAt time.Time, reason string) error {
-	clean := func(v string) string { return strings.ReplaceAll(strings.ToValidUTF8(v, "\uFFFD"), "\x00", "") }
-	if len([]rune(reason)) > 300 {
-		reason = string([]rune(reason)[:300])
-	}
-	_, err := s.pool.Exec(ctx, `
-		insert into spending_unparsed (message_id, chat_name, body, sent_at, reason)
-		values ($1, $2, $3, $4, $5) on conflict (message_id) do update set reason = excluded.reason, resolved = false`,
-		clean(messageID), clean(chat), clean(text), sentAt, clean(reason))
 	return err
 }
 
@@ -226,7 +165,7 @@ func (s *Store) Hold(ctx context.Context, messageID, chat, text string, sentAt t
 func (s *Store) Classify(ctx context.Context, merchant string) (string, string, error) {
 	var cat string
 	err := s.pool.QueryRow(ctx, `
-		select category from merchant_rules
+		select category from mind.merchant_rules
 		 where $1 like merchant_key || '%' and length(merchant_key) >= 2
 		 order by length(merchant_key) desc limit 1`, category.Key(merchant)).Scan(&cat)
 	if err == nil {
@@ -242,7 +181,7 @@ func (s *Store) Classify(ctx context.Context, merchant string) (string, string, 
 // a guess, so a better keyword list fixes the past too. Ones a person set -
 // by hand or by teaching a merchant rule - are left as they are.
 func (s *Store) ReclassifyRules(ctx context.Context) (int, error) {
-	rows, err := s.pool.Query(ctx, `select id, merchant, category from card_transactions where category_source='rule'`)
+	rows, err := s.pool.Query(ctx, `select id, merchant, category from mind.card_transactions where category_source='rule'`)
 	if err != nil {
 		return 0, err
 	}
@@ -274,7 +213,7 @@ func (s *Store) ReclassifyRules(ctx context.Context) (int, error) {
 			continue
 		}
 		if _, err := s.pool.Exec(ctx, `
-			update card_transactions set category=$2, category_source=$3, updated_at=now()
+			update mind.card_transactions set category=$2, category_source=$3, updated_at=now()
 			 where id=$1 and category_source='rule'`, c.id, cat, src); err != nil {
 			return n, err
 		}
@@ -306,12 +245,12 @@ type Unclear struct {
 func (s *Store) Unclear(ctx context.Context, since time.Time, limit int) ([]Unclear, error) {
 	rows, err := s.pool.Query(ctx, `
 		select 'tx', t.id, t.id, t.merchant, '', t.amount_krw, t.approved_at, t.issuer, t.card_tail
-		  from card_transactions t
+		  from mind.card_transactions t
 		 where t.category = $3 and t.category_source = 'rule' and t.kind = 'approval'
 		   and t.cancelled_by is null and not t.excluded and t.approved_at >= $1
 		union all
 		select 'item', i.id, t.id, t.merchant, i.name, i.amount_krw, t.approved_at, t.issuer, t.card_tail
-		  from card_transaction_items i join card_transactions t on t.id = i.tx_id
+		  from mind.card_transaction_items i join mind.card_transactions t on t.id = i.tx_id
 		 where i.category = $3 and i.category_source <> 'manual'
 		   and t.cancelled_by is null and not t.excluded and t.approved_at >= $1
 		 order by 7 desc, 2 desc
@@ -337,7 +276,7 @@ const txColumns = `
 	t.id, t.source, t.issuer, t.card_tail, t.kind, t.amount_krw, t.currency,
 	t.foreign_amount::float8, t.estimated, t.installment, t.merchant, t.category, t.category_source,
 	t.approved_at, t.memo, t.excluded, t.cancelled_by,
-	exists (select 1 from card_transactions o where o.cancelled_by = t.id),
+	exists (select 1 from mind.card_transactions o where o.cancelled_by = t.id),
 	t.enrich_source, t.enrich_status, t.enrich_note`
 
 func scanTxs(rows pgx.Rows) ([]book.Tx, error) {
@@ -358,7 +297,7 @@ func scanTxs(rows pgx.Rows) ([]book.Tx, error) {
 
 // Range returns charges approved in [from, to).
 func (s *Store) Range(ctx context.Context, from, to time.Time) ([]book.Tx, error) {
-	rows, err := s.pool.Query(ctx, `select `+txColumns+` from card_transactions t
+	rows, err := s.pool.Query(ctx, `select `+txColumns+` from mind.card_transactions t
 		 where t.approved_at >= $1 and t.approved_at < $2 order by t.approved_at desc`, from, to)
 	if err != nil {
 		return nil, err
@@ -389,7 +328,7 @@ func (s *Store) attachItems(ctx context.Context, txs []book.Tx) error {
 	}
 	rows, err := s.pool.Query(ctx, `
 		select id, tx_id, name, quantity, listed_krw, amount_krw, category, category_source
-		  from card_transaction_items where tx_id = any($1) order by tx_id, amount_krw desc, id`, ids)
+		  from mind.card_transaction_items where tx_id = any($1) order by tx_id, amount_krw desc, id`, ids)
 	if err != nil {
 		return err
 	}
@@ -408,7 +347,7 @@ func (s *Store) attachItems(ctx context.Context, txs []book.Tx) error {
 }
 
 func (s *Store) Get(ctx context.Context, id int64) (book.Tx, error) {
-	rows, err := s.pool.Query(ctx, `select `+txColumns+` from card_transactions t where t.id=$1`, id)
+	rows, err := s.pool.Query(ctx, `select `+txColumns+` from mind.card_transactions t where t.id=$1`, id)
 	if err != nil {
 		return book.Tx{}, err
 	}
@@ -423,7 +362,7 @@ func (s *Store) Get(ctx context.Context, id int64) (book.Tx, error) {
 }
 
 func (s *Store) Budgets(ctx context.Context) (map[string]int64, error) {
-	rows, err := s.pool.Query(ctx, `select category, amount_krw from spending_budgets`)
+	rows, err := s.pool.Query(ctx, `select category, amount_krw from mind.spending_budgets`)
 	if err != nil {
 		return nil, err
 	}
@@ -452,7 +391,7 @@ type Unparsed struct {
 
 func (s *Store) Unparsed(ctx context.Context) ([]Unparsed, error) {
 	rows, err := s.pool.Query(ctx, `
-		select message_id, chat_name, body, sent_at, reason from spending_unparsed
+		select message_id, chat_name, body, sent_at, reason from mind.spending_unparsed
 		 where not resolved order by sent_at desc limit 50`)
 	if err != nil {
 		return nil, err
@@ -473,17 +412,73 @@ func (s *Store) Unparsed(ctx context.Context) ([]Unparsed, error) {
 func (s *Store) UnparsedCount(ctx context.Context) (int, *time.Time, error) {
 	var n int
 	var oldest *time.Time
-	err := s.pool.QueryRow(ctx, `select count(*), min(created_at) from spending_unparsed where not resolved`).Scan(&n, &oldest)
+	err := s.pool.QueryRow(ctx, `select count(*), min(created_at) from mind.spending_unparsed where not resolved`).Scan(&n, &oldest)
 	return n, oldest, err
 }
 
-// LastAlertAt is when the newest card alert arrived, whether or not it was
-// readable - the question is whether alerts are reaching us at all.
-func (s *Store) LastAlertAt(ctx context.Context) (*time.Time, error) {
-	var t *time.Time
-	err := s.pool.QueryRow(ctx, `
-		select max(occurred_at) from raw_events where source='kakaotalk' and type='card.alert'`).Scan(&t)
-	return t, err
+// Seen is when the newest message of any kind and the newest card alert came
+// through. Each is a row of mind.latest, with nothing in it but the time.
+type Seen struct {
+	Message *time.Time
+	Alert   *time.Time
+}
+
+const (
+	seenMessage = "spending.message"
+	seenAlert   = "spending.alert"
+)
+
+// Saw notes a message going by, and whether it was a card alert, readable or
+// not: the question is whether alerts are reaching us at all.
+func (s *Store) Saw(ctx context.Context, at time.Time, alert bool) error {
+	kinds := []string{seenMessage}
+	if alert {
+		kinds = append(kinds, seenAlert)
+	}
+	_, err := s.pool.Exec(ctx, `
+		insert into mind.latest (kind, payload, at) select k, '{}', $2 from unnest($1::text[]) k
+		on conflict (kind) do update set at = greatest(mind.latest.at, excluded.at)`, kinds, at)
+	return err
+}
+
+// Seen reads what Saw kept.
+func (s *Store) Seen(ctx context.Context) (Seen, error) {
+	rows, err := s.pool.Query(ctx, `select kind, at from mind.latest where kind = any($1)`, []string{seenMessage, seenAlert})
+	if err != nil {
+		return Seen{}, err
+	}
+	defer rows.Close()
+	var out Seen
+	for rows.Next() {
+		var kind string
+		var at time.Time
+		if err := rows.Scan(&kind, &at); err != nil {
+			return Seen{}, err
+		}
+		if kind == seenAlert {
+			out.Alert = &at
+		} else {
+			out.Message = &at
+		}
+	}
+	return out, rows.Err()
+}
+
+// rateFor is how old a dollar rate may be and still anchor an estimate.
+const rateFor = 24 * time.Hour
+
+// USDKrw is the rate assets-svc last said (assets.fx), if it is recent enough.
+func (s *Store) USDKrw(ctx context.Context) (float64, bool, error) {
+	var rate float64
+	err := s.pool.QueryRow(ctx, `select coalesce((payload->>'usdKrw')::float8, 0) from mind.latest where kind = 'assets.fx' and at > $1`,
+		time.Now().Add(-rateFor)).Scan(&rate)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return rate, rate > 0, nil
 }
 
 // ── 쓰기: 사람 ────────────────────────────────────────────────────────────
@@ -512,7 +507,7 @@ func (s *Store) AddManual(ctx context.Context, m Manual) (int64, error) {
 	}
 	var id int64
 	err := s.pool.QueryRow(ctx, `
-		insert into card_transactions
+		insert into mind.card_transactions
 		  (source, source_ref, amount_krw, merchant, category, category_source, approved_at, memo)
 		values ('manual', $1, $2, $3, $4, $5, $6, $7) returning id`,
 		ref, m.AmountKrw, m.Merchant, cat, src, m.ApprovedAt, m.Memo).Scan(&id)
@@ -539,7 +534,7 @@ func (s *Store) Update(ctx context.Context, id int64, p Patch) (int, error) {
 	defer tx.Rollback(ctx)
 
 	var merchant string
-	if err := tx.QueryRow(ctx, `select merchant from card_transactions where id=$1 for update`, id).Scan(&merchant); err != nil {
+	if err := tx.QueryRow(ctx, `select merchant from mind.card_transactions where id=$1 for update`, id).Scan(&merchant); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return 0, ErrNotFound
 		}
@@ -556,13 +551,13 @@ func (s *Store) Update(ctx context.Context, id int64, p Patch) (int, error) {
 			src = "learned"
 			key := category.Key(merchant)
 			if _, err := tx.Exec(ctx, `
-				insert into merchant_rules (merchant_key, category) values ($1, $2)
+				insert into mind.merchant_rules (merchant_key, category) values ($1, $2)
 				on conflict (merchant_key) do update set category=excluded.category, updated_at=now()`,
 				key, *p.Category); err != nil {
 				return 0, err
 			}
 			tag, err := tx.Exec(ctx, `
-				update card_transactions set category=$1, category_source='learned', updated_at=now()
+				update mind.card_transactions set category=$1, category_source='learned', updated_at=now()
 				 where id<>$2 and category_source<>'manual'
 				   and upper(regexp_replace(merchant, '[\s().\-_*]', '', 'g')) like $3 || '%'`,
 				*p.Category, id, key)
@@ -571,13 +566,13 @@ func (s *Store) Update(ctx context.Context, id int64, p Patch) (int, error) {
 			}
 			touched += int(tag.RowsAffected())
 		}
-		if _, err := tx.Exec(ctx, `update card_transactions set category=$1, category_source=$2 where id=$3`,
+		if _, err := tx.Exec(ctx, `update mind.card_transactions set category=$1, category_source=$2 where id=$3`,
 			*p.Category, src, id); err != nil {
 			return 0, err
 		}
 	}
 	if _, err := tx.Exec(ctx, `
-		update card_transactions set
+		update mind.card_transactions set
 		  memo       = coalesce($2, memo),
 		  excluded   = coalesce($3, excluded),
 		  merchant   = coalesce($4, merchant),
@@ -602,7 +597,7 @@ func (e KeptError) Error() string { return e.Why }
 // screen's answers come back the same way; the answer is changed there.
 func (s *Store) Delete(ctx context.Context, id int64) error {
 	var source string
-	if err := s.pool.QueryRow(ctx, `select source from card_transactions where id=$1`, id).Scan(&source); err != nil {
+	if err := s.pool.QueryRow(ctx, `select source from mind.card_transactions where id=$1`, id).Scan(&source); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -615,7 +610,7 @@ func (s *Store) Delete(ctx context.Context, id int64) error {
 	default:
 		return KeptError{"카드 알림에서 온 내역은 지울 수 없어요. 합계에서 빼기를 쓰세요."}
 	}
-	_, err := s.pool.Exec(ctx, `delete from card_transactions where id=$1`, id)
+	_, err := s.pool.Exec(ctx, `delete from mind.card_transactions where id=$1`, id)
 	return err
 }
 
@@ -650,7 +645,7 @@ func (s *Store) SyncAssetSpends(ctx context.Context, want []AssetSpend) (added, 
 	for _, w := range want {
 		keep[w.Ref] = true
 	}
-	rows, err := tx.Query(ctx, `select id, source_ref from card_transactions where source = 'asset'`)
+	rows, err := tx.Query(ctx, `select id, source_ref from mind.card_transactions where source = 'asset'`)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -673,7 +668,7 @@ func (s *Store) SyncAssetSpends(ctx context.Context, want []AssetSpend) (added, 
 		return 0, 0, err
 	}
 	if len(gone) > 0 {
-		if _, err := tx.Exec(ctx, `delete from card_transactions where id = any($1)`, gone); err != nil {
+		if _, err := tx.Exec(ctx, `delete from mind.card_transactions where id = any($1)`, gone); err != nil {
 			return 0, 0, err
 		}
 	}
@@ -686,7 +681,7 @@ func (s *Store) SyncAssetSpends(ctx context.Context, want []AssetSpend) (added, 
 			cat = category.Other
 		}
 		if _, err := tx.Exec(ctx, `
-			insert into card_transactions
+			insert into mind.card_transactions
 			  (source, source_ref, issuer, amount_krw, merchant, category, category_source, approved_at)
 			values ('asset', $1, $2, $3, $4, $5, 'manual', $6)
 			on conflict (source_ref) do nothing`,
@@ -700,17 +695,17 @@ func (s *Store) SyncAssetSpends(ctx context.Context, want []AssetSpend) (added, 
 
 func (s *Store) SetBudget(ctx context.Context, cat string, amount int64) error {
 	if amount <= 0 {
-		_, err := s.pool.Exec(ctx, `delete from spending_budgets where category=$1`, cat)
+		_, err := s.pool.Exec(ctx, `delete from mind.spending_budgets where category=$1`, cat)
 		return err
 	}
 	_, err := s.pool.Exec(ctx, `
-		insert into spending_budgets (category, amount_krw) values ($1, $2)
+		insert into mind.spending_budgets (category, amount_krw) values ($1, $2)
 		on conflict (category) do update set amount_krw=excluded.amount_krw, updated_at=now()`, cat, amount)
 	return err
 }
 
 func (s *Store) ResolveUnparsed(ctx context.Context, messageID string) error {
-	tag, err := s.pool.Exec(ctx, `update spending_unparsed set resolved=true where message_id=$1`, messageID)
+	tag, err := s.pool.Exec(ctx, `update mind.spending_unparsed set resolved=true where message_id=$1`, messageID)
 	if err == nil && tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
@@ -725,7 +720,7 @@ func (s *Store) ResolveUnparsed(ctx context.Context, messageID string) error {
 func (s *Store) Pending(ctx context.Context, limit int) ([]book.Tx, []string, error) {
 	var blocked []string
 	rows, err := s.pool.Query(ctx, `
-		select distinct enrich_source from card_transactions
+		select distinct enrich_source from mind.card_transactions
 		 where enrich_status = 'login_required' and enrich_source is not null`)
 	if err != nil {
 		return nil, nil, err
@@ -743,7 +738,7 @@ func (s *Store) Pending(ctx context.Context, limit int) ([]book.Tx, []string, er
 		blocked = []string{}
 	}
 
-	rows, err = s.pool.Query(ctx, `select `+txColumns+` from card_transactions t
+	rows, err = s.pool.Query(ctx, `select `+txColumns+` from mind.card_transactions t
 		 where t.enrich_status = 'pending' and t.enrich_next_at <= now()
 		   and not (t.enrich_source = any($1))
 		 order by t.approved_at limit $2`, blocked, limit)
@@ -772,19 +767,19 @@ func (s *Store) SaveItems(ctx context.Context, id int64, items []enrich.Item, no
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `delete from card_transaction_items where tx_id=$1`, id); err != nil {
+	if _, err := tx.Exec(ctx, `delete from mind.card_transaction_items where tx_id=$1`, id); err != nil {
 		return err
 	}
 	for _, it := range allocated {
 		if _, err := tx.Exec(ctx, `
-			insert into card_transaction_items (tx_id, name, quantity, listed_krw, amount_krw, category)
+			insert into mind.card_transaction_items (tx_id, name, quantity, listed_krw, amount_krw, category)
 			values ($1, $2, $3, $4, $5, $6)`,
 			id, it.Name, max(1, it.Quantity), it.ListedKrw, it.AmountKrw, it.Category); err != nil {
 			return err
 		}
 	}
 	if _, err := tx.Exec(ctx, `
-		update card_transactions set enrich_status='done', enrich_note=$2, enrich_next_at=null, updated_at=now()
+		update mind.card_transactions set enrich_status='done', enrich_note=$2, enrich_next_at=null, updated_at=now()
 		 where id=$1`, id, note); err != nil {
 		return err
 	}
@@ -799,16 +794,16 @@ func (s *Store) Report(ctx context.Context, id int64, outcome, note string) erro
 	switch outcome {
 	case "login_required":
 		tag, err := s.pool.Exec(ctx, `
-			update card_transactions set enrich_status='login_required', enrich_note=$2, updated_at=now()
+			update mind.card_transactions set enrich_status='login_required', enrich_note=$2, updated_at=now()
 			 where enrich_status='pending'
-			   and enrich_source = (select enrich_source from card_transactions where id=$1)`, id, note)
+			   and enrich_source = (select enrich_source from mind.card_transactions where id=$1)`, id, note)
 		if err != nil || tag.RowsAffected() > 0 {
 			return err
 		}
 		// Reporting the same wall twice is not an error: the first report
 		// already stopped every charge on that site, this one included.
 		var status *string
-		if err := s.pool.QueryRow(ctx, `select enrich_status from card_transactions where id=$1`, id).Scan(&status); err != nil {
+		if err := s.pool.QueryRow(ctx, `select enrich_status from mind.card_transactions where id=$1`, id).Scan(&status); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrNotFound
 			}
@@ -820,7 +815,7 @@ func (s *Store) Report(ctx context.Context, id int64, outcome, note string) erro
 		return ErrNotFound
 	case "not_found", "failed":
 		tag, err := s.pool.Exec(ctx, `
-			update card_transactions set
+			update mind.card_transactions set
 			  enrich_attempts = enrich_attempts + 1,
 			  enrich_note = $2,
 			  enrich_status = case when enrich_attempts + 1 >= 3 then 'not_found' else 'pending' end,
@@ -842,12 +837,12 @@ func (s *Store) Retry(ctx context.Context, source string, id int64) (int, error)
 	var err error
 	if id > 0 {
 		tag, err = s.pool.Exec(ctx, `
-			update card_transactions set enrich_status='pending', enrich_attempts=0, enrich_next_at=now(),
+			update mind.card_transactions set enrich_status='pending', enrich_attempts=0, enrich_next_at=now(),
 			       enrich_note='', updated_at=now()
 			 where id=$1 and enrich_source is not null`, id)
 	} else {
 		tag, err = s.pool.Exec(ctx, `
-			update card_transactions set enrich_status='pending', enrich_attempts=0, enrich_next_at=now(),
+			update mind.card_transactions set enrich_status='pending', enrich_attempts=0, enrich_next_at=now(),
 			       enrich_note='', updated_at=now()
 			 where enrich_source=$1 and enrich_status in ('login_required', 'not_found')
 			   and approved_at > now() - interval '30 days'`, source)
@@ -864,7 +859,7 @@ func (s *Store) Retry(ctx context.Context, source string, id int64) (int, error)
 // that found nothing is not tried again just because the login came back.
 func (s *Store) Resume(ctx context.Context, source string) (int, error) {
 	tag, err := s.pool.Exec(ctx, `
-		update card_transactions set enrich_status='pending', enrich_attempts=0, enrich_next_at=now(),
+		update mind.card_transactions set enrich_status='pending', enrich_attempts=0, enrich_next_at=now(),
 		       enrich_note='', updated_at=now()
 		 where enrich_source=$1 and enrich_status='login_required'
 		   and approved_at > now() - interval '30 days'`, source)
@@ -876,7 +871,7 @@ func (s *Store) Resume(ctx context.Context, source string) (int, error) {
 
 func (s *Store) SetItemCategory(ctx context.Context, itemID int64, cat string) error {
 	tag, err := s.pool.Exec(ctx, `
-		update card_transaction_items set category=$2, category_source='manual' where id=$1`, itemID, cat)
+		update mind.card_transaction_items set category=$2, category_source='manual' where id=$1`, itemID, cat)
 	if err == nil && tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}

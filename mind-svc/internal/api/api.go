@@ -78,6 +78,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/moments"
 	"github.com/choigonyok/jarvis/mind-svc/internal/slot"
+	spending "github.com/choigonyok/jarvis/mind-svc/internal/spending/api"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 	"github.com/choigonyok/jarvis/mind-svc/internal/world"
 )
@@ -86,6 +87,7 @@ import (
 var ui embed.FS
 
 type Server struct {
+	book  *spending.Server
 	m     *mind.Mind
 	token string
 	// consoleToken is what a person signs in to the console with, once, for
@@ -112,6 +114,9 @@ type Commands interface {
 // SetStream sends what changes mind through the stream.
 func (s *Server) SetStream(c Commands) { s.stream = c }
 
+// SetBook puts the household book on the API.
+func (s *Server) SetBook(b *spending.Server) { s.book = b }
+
 // SetGuestToken lets the guest's agent keep the guest's own reminders and
 // checklists here, and read the guest's situation (person).
 func (s *Server) SetGuestToken(t string) { s.guestToken = t }
@@ -132,6 +137,12 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc(pattern, guard(s.written(h)))
 	}
 	mux.HandleFunc("GET /health", s.health)
+	if s.book != nil {
+		mux.HandleFunc("GET "+spending.Prefix+"/health", s.book.Health())
+		s.book.Mount(
+			func(pattern string, h http.HandlerFunc) { mux.HandleFunc(pattern, owner(h)) },
+			func(pattern string, h http.HandlerFunc) { write(pattern, owner, h) })
+	}
 	mux.HandleFunc("GET /status", s.auth(true, func(w http.ResponseWriter, r *http.Request) {
 		st, err := s.m.Status(r.Context())
 		if err != nil {

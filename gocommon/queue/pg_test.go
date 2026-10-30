@@ -592,7 +592,7 @@ func TestTheGuestsRoleSeesOnlyItsOwn(t *testing.T) {
 // that is all.
 func TestProducersOnlyLeaveItInTheOutbox(t *testing.T) {
 	ctx := context.Background()
-	for _, role := range []string{"svc_agent", "svc_assets", "svc_calendar", "svc_context", "svc_mind", "svc_output", "svc_spending", "svc_status"} {
+	for _, role := range []string{"svc_agent", "svc_assets", "svc_calendar", "svc_context", "svc_mind", "svc_output", "svc_status"} {
 		t.Run(role, func(t *testing.T) {
 			pool := as(t, role)
 			if _, err := pool.Exec(ctx, `insert into input.outbox (payload) values ('{"test":true}')`); err != nil {

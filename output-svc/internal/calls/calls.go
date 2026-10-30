@@ -46,7 +46,6 @@ type route struct {
 // not here is refused, whoever sent it (입구는 관대, 출구는 보수).
 var routes = map[string][]route{
 	"calendar": {{http.MethodPut, regexp.MustCompile(`^/events$`)}, {http.MethodDelete, regexp.MustCompile(`^/events/[^/?]+$`)}},
-	"spending": {{http.MethodPatch, regexp.MustCompile(`^/transactions/\d+$`)}, {http.MethodPatch, regexp.MustCompile(`^/items/\d+$`)}},
 	"jobs":     {{http.MethodPost, regexp.MustCompile(`^/jobs$`)}, {http.MethodPost, regexp.MustCompile(`^/jobs/\d+/cancel$`)}},
 	"assets":   {{http.MethodPost, regexp.MustCompile(`^/orders$`)}, {http.MethodPost, regexp.MustCompile(`^/orders/rebalance$`)}},
 	"immich":   {{http.MethodPost, regexp.MustCompile(`^/api/albums$`)}, {http.MethodDelete, regexp.MustCompile(`^/api/albums/[^/?]+$`)}},

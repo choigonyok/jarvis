@@ -37,7 +37,6 @@ mind-svc :8102        인지 루프. 감지 → 해석 → 세계 모델 → 노
       ├─ calendar-svc  :8093  일정 (uniple 공유 캘린더, postgres 백엔드는 롤백용)
       ├─ workout-svc   :8091  운동 기록 (리비전·세션 단위 쓰기, 부위 판정)
       ├─ assets-svc    :8092  업비트·KIS·금 (주문 가능한 키가 여기에만), 목표 비중·매매 계획
-      ├─ spending-svc  :8095  가계부 (카드사 카톡 알림 → 분류·월 합계·예산)
       ├─ jobs-svc      :8098  맡긴 작업의 기록 (실행은 agent 스케줄러)
       ├─ context-svc   :8103  위치·현재 상태 (OwnTracks·단축어·맥 수집기)
       ├─ input-svc     :8101  입구: outbox 를 꺼내 기록 + 소비자별 배달 (소비자는 gocommon/queue 로 직접 읽음)
@@ -58,7 +57,7 @@ gocommon/             Go 공통 코드 (이벤트 outbox, 수집기 인증·보�
 각 서비스의 README 에 경계를 그은 이유와 검증한 것이 있습니다:
 [chat-svc](../chat-svc/README.md) · [calendar-svc](../calendar-svc/README.md) ·
 [workout-svc](../workout-svc/README.md) · [assets-svc](../assets-svc/README.md) ·
-[spending-svc](../spending-svc/README.md) ·
+[가계부](../mind-svc/internal/spending/README.md) ·
 [status-svc](../status-svc/README.md) · [context-svc](../context-svc/README.md) ·
 [mind-svc](../mind-svc/README.md) · [tts](../tts/README.md) · [search-svc](../search-svc/README.md) ·
 [db](../db/README.md)

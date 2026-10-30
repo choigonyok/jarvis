@@ -145,7 +145,7 @@ func All(cfg Config) []check.Probe {
 		{
 			ID: "spending.alerts", Group: "수집", Name: "카드 결제 알림",
 			Rule:  "가계부가 수집기를 읽을 수 있고 마지막 카드 알림이 3일 안이면 정상, 3–7일이면 주의, 7일을 넘거나 읽기에 실패하면 이상.",
-			Fix:   "카드를 안 쓴 날이 이어졌다면 정상이에요. 아니라면 카톡 수집과 spending 컨테이너 로그를 보세요.",
+			Fix:   "카드를 안 쓴 날이 이어졌다면 정상이에요. 아니라면 카톡 수집과 mind 컨테이너 로그를 보세요.",
 			Deps:  []string{"kakao.messages", "svc.spending"},
 			Every: time.Minute,
 			Run:   e.spendingAlerts,
@@ -302,7 +302,7 @@ func All(cfg Config) []check.Probe {
 		e.service("svc.imessage", "iMessage 수집 서비스", cfg.IMessageURL, nil),
 		// Its loops read the KakaoTalk collector and assets-svc: when one of
 		// them is down, that is the cause.
-		e.service("svc.spending", "가계부 서비스", cfg.SpendingURL, []string{"postgres", "svc.kakaotalk", "svc.assets"}),
+		e.service("svc.spending", "가계부", cfg.SpendingURL, []string{"postgres", "svc.mind"}),
 		e.service("svc.assets", "자산 서비스", cfg.AssetsURL, nil),
 		e.service("svc.calendar", "캘린더 서비스", cfg.CalendarURL, []string{"postgres"}),
 		e.service("svc.chat", "대화 기록 서비스", cfg.ChatURL, []string{"postgres"}),
@@ -541,8 +541,6 @@ func (e *env) mindMemory(ctx context.Context) check.Verdict {
 
 type spendingView struct {
 	Collector struct {
-		LastPollAt      time.Time  `json:"lastPollAt"`
-		LastError       string     `json:"lastError"`
 		LatestMessageAt *time.Time `json:"latestMessageAt"`
 		LastAlertAt     *time.Time `json:"lastAlertAt"`
 	} `json:"collector"`
@@ -557,12 +555,9 @@ func (e *env) spending(ctx context.Context) (spendingView, error) {
 func (e *env) spendingAlerts(ctx context.Context) check.Verdict {
 	s, err := e.spending(ctx)
 	if err != nil {
-		return fail("가계부 서비스를 읽지 못했어요: " + err.Error())
+		return fail("가계부를 읽지 못했어요: " + err.Error())
 	}
 	c := s.Collector
-	if c.LastError != "" {
-		return fail("가계부가 카드 알림을 읽다 멈췄어요: " + clip(c.LastError, 140))
-	}
 	if c.LastAlertAt == nil {
 		return check.Verdict{State: check.Unknown, Summary: "아직 받은 카드 알림이 없어요."}
 	}

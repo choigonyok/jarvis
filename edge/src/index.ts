@@ -82,7 +82,6 @@ interface Env {
   AGENT: Fetcher;
   WORKOUT: Fetcher;
   ASSETS: Fetcher;
-  SPENDING: Fetcher;
   JOBS: Fetcher;
   KAKAOTALK: Fetcher;
   IMESSAGE: Fetcher;
@@ -114,7 +113,6 @@ const SERVICES: Record<string, { binding: keyof Env; origin: string }> = {
   "agent-guest": { binding: "AGENT_GUEST", origin: "http://agent-guest:8081" },
   workout: { binding: "WORKOUT", origin: "http://workout:8091" },
   assets: { binding: "ASSETS", origin: "http://assets:8092" },
-  spending: { binding: "SPENDING", origin: "http://spending:8095" },
   jobs: { binding: "JOBS", origin: "http://jobs:8098" },
   kakaotalk: { binding: "KAKAOTALK", origin: "http://kakaotalk:8090" },
   imessage: { binding: "IMESSAGE", origin: "http://imessage:8099" },
@@ -129,7 +127,8 @@ const SERVICES: Record<string, { binding: keyof Env; origin: string }> = {
   // decides whose recording a request touches (see below).
   tts: { binding: "TTS", origin: "http://host.docker.internal:8106" },
   vnc: { binding: "BROWSER", origin: "http://browser:6080" },
-  // The notes and ledgers mind keeps about the operator (the 생활 screen).
+  // The notes and ledgers mind keeps about the operator (the 생활 screen), and
+  // the household book.
   mind: { binding: "MIND", origin: "http://mind:8102" },
 };
 
@@ -189,15 +188,38 @@ const AGENT_ROLE: Record<string, string> = { agent: "owner", "agent-guest": "gue
 const AGENT_ROUTES = new Set(["healthz", "thread", "messages", "events", "proposals", "calendar", "uploads", "usage", "vault", "reminders"]);
 
 /**
- * What the 생활 screen may do on mind: read the notes, the map, the things
- * owned and the meals, read a note's versions, and say a note is so, is not,
- * or reads otherwise.
+ * What the screens may do on mind. The 생활 screen: read the notes, the map,
+ * the things owned and the meals, read a note's versions, and say a note is
+ * so, is not, or reads otherwise. The 가계부 screen: spendingRoute.
  */
 function mindRoute(method: string, path: string): boolean {
+  if (path.startsWith("api/spending/")) return spendingRoute(method, path.slice("api/spending/".length));
   if (method === "GET") {
     return /^api\/(notes|places|things|meals)$/.test(path) || /^api\/notes\/[A-Za-z0-9_-]+\/versions$/.test(path);
   }
   return method === "POST" && /^api\/notes\/[A-Za-z0-9_-]+$/.test(path);
+}
+
+/**
+ * What the 가계부 screen may do with the book mind keeps: read a month, write a
+ * charge in and correct or remove one, set a budget, deal with an alert that
+ * could not be read, and start an order lookup again. The agent's routes for
+ * the lookup are not this door's.
+ */
+function spendingRoute(method: string, path: string): boolean {
+  switch (method) {
+    case "GET":
+      return path === "spending";
+    case "POST":
+      return path === "transactions" || path === "enrich/retry" || /^unparsed\/[^/]+\/(dismiss|resolve)$/.test(path);
+    case "PATCH":
+      return /^transactions\/\d+$/.test(path) || /^items\/\d+$/.test(path);
+    case "DELETE":
+      return /^transactions\/\d+$/.test(path);
+    case "PUT":
+      return path === "budgets";
+  }
+  return false;
 }
 
 function same(a: string, b: string): boolean {

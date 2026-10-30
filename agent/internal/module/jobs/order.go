@@ -54,7 +54,7 @@ type Charges struct {
 	Stale       bool
 }
 
-// ChargeLog is where the card alerts are (spending-svc's book).
+// ChargeLog is where the card alerts are (the book mind keeps).
 type ChargeLog interface {
 	Charges(ctx context.Context, since time.Time) (Charges, error)
 }

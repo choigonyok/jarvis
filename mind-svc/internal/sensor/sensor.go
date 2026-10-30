@@ -21,6 +21,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/mind"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
+	"github.com/choigonyok/jarvis/mind-svc/internal/spending/ingest"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 )
 
@@ -39,16 +40,16 @@ type Messages struct {
 	// (Occur records it).
 	Payments *regexp.Regexp
 	Occur    Observer
+	// Cards, when set, hands the book each KakaoTalk message: the card
+	// companies' alerts are read from them.
+	Cards func(ctx context.Context, m ingest.Message) error
 }
 
 type collected struct {
-	RowID    int64  `json:"rowid"`
-	ChatID   int64  `json:"chat_id"`
-	ChatName string `json:"chat_name"`
-	Author   string `json:"author"`
-	IsMine   bool   `json:"is_mine"`
-	Text     string `json:"text"`
-	SentAt   int64  `json:"sent_at"`
+	ingest.Message
+	RowID  int64  `json:"rowid"`
+	ChatID int64  `json:"chat_id"`
+	Author string `json:"author"`
 }
 
 // Take is one message of a collector's.
@@ -58,6 +59,11 @@ func (s *Messages) Take(ctx context.Context, q queue.Message) error {
 		return fmt.Errorf("%w: %s: %v", queue.ErrRefused, q.SourceKey, err)
 	}
 	name, sent := q.Source, time.Unix(m.SentAt, 0)
+	if s.Cards != nil && name == "kakao" {
+		if err := s.Cards(ctx, m.Message); err != nil {
+			return err
+		}
+	}
 	if s.Payments != nil && s.Occur != nil && s.Payments.MatchString(m.ChatName) {
 		if o, ok := Transfer(fmt.Sprintf("%s-pay:%d", name, m.RowID), sent, m.Text); ok {
 			if err := s.Occur.Observe(ctx, o); err != nil {

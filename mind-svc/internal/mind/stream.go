@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/choigonyok/jarvis/gocommon/queue"
+	"github.com/choigonyok/jarvis/gocommon/record"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
 )
@@ -18,7 +19,7 @@ import (
 // CommandKinds is what the lane reads of the operator's stream. An answer
 // (intent.answer) is here for the cards of mind's own, which the agent asks
 // of it; the cards the agent asked itself it carries on with (HeldCard).
-var CommandKinds = []string{"intent.answer", "payment.requested", "reminder.*", "checklist.*", "note.*", "link.*", obs.TimerFired}
+var CommandKinds = []string{"intent.answer", "payment.requested", "reminder.*", "checklist.*", "note.*", "link.*", record.KindSpendingWrite, obs.TimerFired}
 
 // GuestCommandKinds is what the lane reads of the guest's: their reminders
 // and lists, and nothing that decides anything of the operator's.

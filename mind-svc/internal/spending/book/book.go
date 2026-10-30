@@ -10,7 +10,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/choigonyok/jarvis/spending-svc/internal/category"
+	"github.com/choigonyok/jarvis/mind-svc/internal/spending/category"
 )
 
 // Tx is one charge as stored.

@@ -34,6 +34,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/choigonyok/jarvis/gocommon/health"
+	"github.com/choigonyok/jarvis/gocommon/notify"
 	"github.com/choigonyok/jarvis/gocommon/queue"
 	"github.com/choigonyok/jarvis/gocommon/seal"
 	"github.com/choigonyok/jarvis/mind-svc/internal/act"
@@ -54,6 +56,11 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/moments"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
 	"github.com/choigonyok/jarvis/mind-svc/internal/sensor"
+	spendingapi "github.com/choigonyok/jarvis/mind-svc/internal/spending/api"
+	spendingassets "github.com/choigonyok/jarvis/mind-svc/internal/spending/assets"
+	"github.com/choigonyok/jarvis/mind-svc/internal/spending/ingest"
+	spendingstore "github.com/choigonyok/jarvis/mind-svc/internal/spending/store"
+	"github.com/choigonyok/jarvis/mind-svc/internal/spending/watch"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 	"github.com/choigonyok/jarvis/mind-svc/internal/weather"
 )
@@ -245,9 +252,43 @@ func main() {
 		sky = &weather.Service{Home: home.Point, Source: mind.LatestWeather{Store: st}}
 	}
 
-	var book *act.Spending
-	if url := os.Getenv("SPENDING_URL"); url != "" && mode == "stack" {
-		book = &act.Spending{URL: url, Token: token, HTTP: handed(stream, st)}
+	// The household book. It is kept here: charges are read from the messages
+	// going by, what a person changes comes as a command like the rest.
+	var (
+		bookAPI  *spendingapi.Server
+		cards    *ingest.Ingester
+		book     *act.Spending
+		ledgerDB *spendingstore.Store
+		loops    = health.NewLoops()
+	)
+	if mode == "stack" {
+		ledgerDB, err = spendingstore.Open(ctx, dsn)
+		if err != nil {
+			log.Error("가계부를 열지 못했습니다", "err", err)
+			os.Exit(1)
+		}
+		defer ledgerDB.Close()
+		// 카톡은 하루에 몇 번은 뭔가 온다. 그보다 오래 아무것도 없으면 맥의
+		// 카카오톡이 꺼졌을 가능성이 높고, 그동안의 결제 알림도 들어오지 않는다.
+		cards = ingest.New(strings.Split(os.Getenv("SPENDING_EXTRA_CHANNELS"), ","), ledgerDB, duration("SPENDING_STALE_AFTER", 12*time.Hour), log)
+		bookAPI = spendingapi.New(ledgerDB, cards, log)
+		bookAPI.Loops = loops
+		book = &act.Spending{Book: bookAPI}
+		// 키워드를 고치면 지난 내역에도 적용되도록, 추측으로 정한 분류는 시작할 때 다시 매긴다.
+		go func() {
+			if n, err := ledgerDB.ReclassifyRules(ctx); err != nil {
+				log.Warn("분류를 다시 매기지 못했습니다", "err", err)
+			} else if n > 0 {
+				log.Info("분류를 다시 매겼습니다", "changed", n)
+			}
+		}()
+		// What the ledger has to say goes the way everything does.
+		if n := notify.New(os.Getenv("INPUT_URL"), "", token, log); n != nil {
+			loops.Add("watch", "예산·큰 결제 알림", 30*time.Minute)
+			w := watch.New(ledgerDB, n, log)
+			w.Loops = loops
+			go w.Run(ctx)
+		}
 	}
 	var emitTimer func(context.Context, model.Timer) error
 	if stream != nil {
@@ -275,6 +316,9 @@ func main() {
 	if stream != nil {
 		mindAPI.SetStream(stream)
 	}
+	if bookAPI != nil {
+		mindAPI.SetBook(bookAPI)
+	}
 	handler := mindAPI.Handler()
 	var structured *sensor.Structured
 	var messages *sensor.Messages
@@ -291,14 +335,16 @@ func main() {
 				os.Exit(1)
 			}
 			messages = &sensor.Messages{Store: st, Log: logOut, Seal: sealer, Exclude: cfg.Noise,
-				Payments: regexp.MustCompile(getenv("MIND_PAYMENT_ROOMS", `^(카카오페이|토스)$`)), Occur: m}
+				Payments: regexp.MustCompile(getenv("MIND_PAYMENT_ROOMS", `^(카카오페이|토스)$`)), Occur: m, Cards: cards.Take}
 		}
-		// Structured sources, read by rule into occurrences: spending, workouts,
+		// Structured sources, read by rule into occurrences: the book, workouts,
 		// photos, jobs. The calendar (whose entries also become plans), the
 		// phones and the accounts come to the lane below as records.
 		structured = &sensor.Structured{Store: st, Observer: m, World: m.World, Token: token, Loc: loc, Out: log, Now: time.Now,
-			SpendingURL: os.Getenv("SPENDING_URL"), WorkoutURL: os.Getenv("WORKOUT_URL"),
-			JobsURL: os.Getenv("JOBS_URL")}
+			Book: bookAPI.Month, WorkoutURL: os.Getenv("WORKOUT_URL"), JobsURL: os.Getenv("JOBS_URL"),
+			Outflows: func(ctx context.Context, payload []byte) error {
+				return spendingassets.Take(ctx, ledgerDB, time.Local, log, payload)
+			}}
 		// One reader for each source: memory remembers what is read here
 		// (memory-svc's own collectors for these sources are then off -
 		// MEMORY_SOURCES).

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+	"github.com/choigonyok/jarvis/mind-svc/internal/spending/book"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 	"github.com/choigonyok/jarvis/mind-svc/internal/world"
 )
@@ -24,8 +25,8 @@ type Observer interface {
 	Observe(ctx context.Context, o model.Occurrence) error
 }
 
-// Structured reads the services that keep structured records - spending,
-// photos, workouts, the calendar, assets, jobs - into occurrences, by rule,
+// Structured reads what keeps structured records - the book, photos, workouts,
+// the calendar, assets, jobs - into occurrences, by rule,
 // and hands long-term memory the same reading as records (records.go): one
 // reader for each source. Each source is read over a fixed window around
 // now, and an occurrence is observed (a record sent) again only when it
@@ -40,9 +41,12 @@ type Structured struct {
 	HTTP     *http.Client
 	Now      func() time.Time
 
-	SpendingURL string
-	WorkoutURL  string
-	JobsURL     string
+	// Book reads a month of the household book, every row settled.
+	Book func(ctx context.Context, month time.Time) ([]book.Tx, error)
+	// Outflows takes assets-svc's list of what left the accounts into the book.
+	Outflows   func(ctx context.Context, payload []byte) error
+	WorkoutURL string
+	JobsURL    string
 	// Records, when set, is long-term memory: what is read here is also
 	// remembered there.
 	Records Recorder
@@ -101,40 +105,22 @@ func (s *Structured) observe(ctx context.Context, o model.Occurrence) error {
 
 // --- spending ---------------------------------------------------------------
 
-type tx struct {
-	ID         int64     `json:"id"`
-	Kind       string    `json:"kind"`
-	AmountKrw  int64     `json:"amountKrw"`
-	Merchant   string    `json:"merchant"`
-	Category   string    `json:"category"`
-	ApprovedAt time.Time `json:"approvedAt"`
-	Status     string    `json:"status"`
-	Memo       string    `json:"memo"`
-	Excluded   bool      `json:"excluded"`
-	Items      []struct {
-		ID        int64  `json:"id"`
-		Name      string `json:"name"`
-		Quantity  int    `json:"quantity"`
-		AmountKrw int64  `json:"amountKrw"`
-		Category  string `json:"category"`
-	} `json:"items"`
-}
+type tx = book.Tx
 
 // Spending reads this month's and last month's charges: a payment, and
 // each item in it when the marketplace order was read.
 func (s *Structured) Spending(ctx context.Context) error {
-	if s.SpendingURL == "" {
+	if s.Book == nil {
 		return nil
 	}
 	now := s.Now().In(s.Loc)
-	for _, m := range []time.Time{now.AddDate(0, -1, 0), now} {
-		var out struct {
-			Transactions []tx `json:"transactions"`
-		}
-		if err := s.get(ctx, s.SpendingURL+"/spending?month="+m.Format("2006-01"), &out); err != nil {
+	first := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, s.Loc)
+	for _, m := range []time.Time{first.AddDate(0, -1, 0), first} {
+		txs, err := s.Book(ctx, m)
+		if err != nil {
 			return err
 		}
-		for _, t := range out.Transactions {
+		for _, t := range txs {
 			if !t.Excluded {
 				if err := s.record(ctx, s.SpendingRecord(t)); err != nil {
 					return err

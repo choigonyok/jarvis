@@ -624,13 +624,45 @@ async function watchHoldings(): Promise<void> {
   };
   const raw = JSON.stringify(body);
   if (raw === lastHoldings) return;
-  const now = new Date();
-  const left = await db.enqueueEvents([{
-    kind: "assets.holdings", source: "assets", source_key: `assets.holdings:${now.getTime()}`, actor: "assets",
-    subject: "assets.holdings", occurred_at: now.toISOString(), tier: "raw", schema_version: 1, payload: body,
-  }]);
-  if (left) lastHoldings = raw;
+  if (await db.enqueueEvents([recordOf("assets.holdings", body)])) lastHoldings = raw;
 }
+
+const recordOf = (kind: string, payload: unknown) => {
+  const now = new Date();
+  return {
+    kind, source: "assets", source_key: `${kind}:${now.getTime()}`, actor: "assets", subject: kind,
+    occurred_at: now.toISOString(), tier: "raw", schema_version: 1, payload,
+  };
+};
+
+// 가계부가 읽는 것: 투자 계좌에서 쓴 돈이라고 답한 몫, 그리고 달러 결제 알림을 원화로 어림할 환율(시간마다 한 번이면 된다).
+// 쓴 돈 목록은 늘 전부 보낸다. 가계부는 받은 목록에 맞춰 줄을 맞추므로 일부만 보내면 나머지가 지워진다.
+const FX_EVERY_MS = 60 * 60_000;
+let lastSpends = "";
+let fxAt = 0;
+async function watchBook(): Promise<void> {
+  const list = await currentOutflows();
+  if (list) {
+    const outflows = list
+      .map(({ key, date, venue, parts }) => ({
+        key, date, venue,
+        parts: parts.filter((p) => p.use === "spend" && p.decidedAt)
+          .map(({ use, amountKrw, category, memo, decidedAt }) => ({ use, amountKrw, category, memo, decidedAt })),
+      }))
+      .filter((o) => o.parts.length > 0);
+    const raw = JSON.stringify(outflows);
+    if (raw !== lastSpends && (await db.enqueueEvents([recordOf("assets.outflows", { outflows })]))) lastSpends = raw;
+  }
+  if (Date.now() - fxAt < FX_EVERY_MS) return;
+  const { usdKrw } = JSON.parse(await portfolioJson()) as { usdKrw?: number };
+  if (usdKrw && (await db.enqueueEvents([recordOf("assets.fx", { usdKrw })]))) fxAt = Date.now();
+}
+setInterval(() => {
+  watchBook().catch((e: Error) => console.error("가계부 기록을 남기지 못했습니다:", e.message));
+}, 5 * 60_000).unref();
+setTimeout(() => {
+  watchBook().catch((e: Error) => console.error("가계부 기록을 남기지 못했습니다:", e.message));
+}, 40_000).unref();
 setInterval(() => {
   watchHoldings().catch((e: Error) => console.error("보유를 기록하지 못했습니다:", e.message));
 }, 5 * 60_000).unref();

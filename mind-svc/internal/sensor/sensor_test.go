@@ -19,6 +19,7 @@ import (
 	"github.com/choigonyok/jarvis/gocommon/seal"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
+	"github.com/choigonyok/jarvis/mind-svc/internal/spending/ingest"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 )
 
@@ -49,9 +50,9 @@ func TestMessagesTakesWhatIsWorthReading(t *testing.T) {
 	s := &Messages{Store: st, Log: log, Seal: sealer, Exclude: regexp.MustCompile(`카드`)}
 	ctx := context.Background()
 	for _, m := range []collected{
-		{RowID: 2, ChatID: 7, ChatName: "지수", Author: "지수", Text: "이번 주말에 강릉 갈까?", SentAt: recent},
-		{RowID: 3, ChatID: 9, ChatName: "신한카드", Text: "승인 12,000원", SentAt: recent},
-		{RowID: 4, ChatID: 7, ChatName: "지수", IsMine: true, Text: " ", SentAt: recent},
+		{RowID: 2, ChatID: 7, Author: "지수", Message: ingest.Message{ChatName: "지수", Text: "이번 주말에 강릉 갈까?", SentAt: recent}},
+		{RowID: 3, ChatID: 9, Message: ingest.Message{ChatName: "신한카드", Text: "승인 12,000원", SentAt: recent}},
+		{RowID: 4, ChatID: 7, Message: ingest.Message{ChatName: "지수", IsMine: true, Text: " ", SentAt: recent}},
 	} {
 		if err := s.Take(ctx, sealed(t, sealer, "kakao", m)); err != nil {
 			t.Fatal(err)
@@ -70,6 +71,42 @@ func TestMessagesTakesWhatIsWorthReading(t *testing.T) {
 	}
 }
 
+// The book gets every KakaoTalk message, and only those: what is worth reading
+// as conversation is another question.
+func TestMessagesGoToTheBook(t *testing.T) {
+	sealer, _ := seal.New(make([]byte, 32))
+	log := obs.NewMemoryLog(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	go log.Run(context.Background(), func(context.Context, obs.Observation) error { return nil })
+	var got []string
+	s := &Messages{Store: store.NewMemory(), Log: log, Seal: sealer, Exclude: regexp.MustCompile(`카드`),
+		Cards: func(_ context.Context, m ingest.Message) error {
+			got = append(got, m.MessageID+" "+m.ChatType+" "+m.ChatName)
+			return nil
+		}}
+	ctx := context.Background()
+	m := collected{RowID: 3, ChatID: 9, Message: ingest.Message{MessageID: "m-3", ChatType: "direct", ChatName: "신한카드", Text: "승인 12,000원", SentAt: time.Now().Unix()}}
+	if err := s.Take(ctx, sealed(t, sealer, "kakao", m)); err != nil {
+		t.Fatal(err)
+	}
+	m.MessageID, m.RowID = "m-4", 4
+	if err := s.Take(ctx, sealed(t, sealer, "imessage", m)); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != "m-3 direct 신한카드" {
+		t.Fatalf("%v", got)
+	}
+}
+
+// A book that cannot take a message holds the message: the stream retries it.
+func TestABookThatCannotTakeItHoldsTheMessage(t *testing.T) {
+	sealer, _ := seal.New(make([]byte, 32))
+	s := &Messages{Seal: sealer, Cards: func(context.Context, ingest.Message) error { return errors.New("안 됩니다") }}
+	m := collected{RowID: 3, Message: ingest.Message{ChatName: "신한카드", Text: "승인", SentAt: time.Now().Unix()}}
+	if err := s.Take(context.Background(), sealed(t, sealer, "kakao", m)); err == nil {
+		t.Fatal("다시 시도하도록 오류여야 합니다")
+	}
+}
+
 // A payment app's room is not read as conversation, but money received in it
 // is a transfer.
 func TestMessagesFindsATransfer(t *testing.T) {
@@ -79,7 +116,7 @@ func TestMessagesFindsATransfer(t *testing.T) {
 	go log.Run(context.Background(), func(context.Context, obs.Observation) error { return nil })
 	s := &Messages{Store: st, Log: log, Seal: sealer, Exclude: regexp.MustCompile(`페이`), Payments: regexp.MustCompile(`^(카카오페이|토스)$`), Occur: observer{st}}
 	ctx := context.Background()
-	m := collected{RowID: 8, ChatID: 3, ChatName: "카카오페이", Text: "김민수님이 32,000원을 보냈어요", SentAt: time.Now().Unix()}
+	m := collected{RowID: 8, ChatID: 3, Message: ingest.Message{ChatName: "카카오페이", Text: "김민수님이 32,000원을 보냈어요", SentAt: time.Now().Unix()}}
 	if err := s.Take(ctx, sealed(t, sealer, "kakao", m)); err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +134,7 @@ func TestMessagesRefusesWhatItCannotOpen(t *testing.T) {
 	sealer, _ := seal.New(make([]byte, 32))
 	other, _ := seal.New([]byte("0123456789abcdef0123456789abcdef"))
 	s := &Messages{Seal: sealer}
-	err := s.Take(context.Background(), sealed(t, other, "kakao", collected{RowID: 1, Text: "x"}))
+	err := s.Take(context.Background(), sealed(t, other, "kakao", collected{RowID: 1, Message: ingest.Message{Text: "x"}}))
 	if !errors.Is(err, queue.ErrRefused) {
 		t.Fatalf("%v", err)
 	}
@@ -108,7 +145,9 @@ func TestMessagesRefusesWhatItCannotOpen(t *testing.T) {
 // same second as the last one read is not taken for it.
 func TestChatReadsNewTurnsBySince(t *testing.T) {
 	base := time.Now().Add(-time.Hour).Truncate(time.Second)
-	at := func(us int) string { return base.Add(time.Duration(us) * time.Microsecond).Format("2006-01-02T15:04:05.000000-07:00") }
+	at := func(us int) string {
+		return base.Add(time.Duration(us) * time.Microsecond).Format("2006-01-02T15:04:05.000000-07:00")
+	}
 	turns := []turn{
 		{ID: "u-1", Role: "user", AtISO: at(100), Text: "하나"},
 		{ID: "a-2", Role: "agent", AtISO: at(900000), Text: "둘"},

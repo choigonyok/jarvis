@@ -9,7 +9,7 @@
 | 신호 | 어디서 |
 | --- | --- |
 | 수집기 루프, 마지막 메시지 시각 | kakaotalk `/status`, `/messages/recent` |
-| 카드 알림 수신, 읽지 못한 알림 | spending `/spending` 의 `collector`, `unparsed` |
+| 카드 알림 수신, 읽지 못한 알림 | mind `/api/spending/spending` 의 `collector`, `unparsed` |
 | 증권사별 실패 | assets `/portfolio` 의 `problems` (10분에 한 번, 네 항목이 공유) |
 | uniple 접근 | calendar `/events?from=오늘&to=오늘` (5분에 한 번) |
 | 쿠팡 주문목록 접근 | 에이전트 브라우저 새 탭에서 직접 열어 보고, 로그인 화면으로 넘어가는지 (30분마다) |

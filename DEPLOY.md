@@ -23,7 +23,7 @@
               │ Workers VPC 바인딩 (jarvis-agent 터널)
               ▼
            맥미니 compose: agent:8080 · workout:8091 · assets:8092
-                           spending:8095 · kakaotalk:8090 · status:8096
+                           mind:8102 · kakaotalk:8090 · status:8096
 
 폰·맥 수집기 ─▶ jarvis-be.choigonyok.com (공개 주소: 기본 엔트리포인트)
               POST /context/owntracks · /context/signals 와

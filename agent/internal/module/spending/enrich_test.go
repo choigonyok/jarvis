@@ -23,12 +23,12 @@ type fakeSvc struct {
 
 func (f *fakeSvc) server(t *testing.T) *httptest.Server {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /enrich/pending", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET "+Prefix+"/enrich/pending", func(w http.ResponseWriter, _ *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		_ = json.NewEncoder(w).Encode(map[string]any{"transactions": f.pending})
 	})
-	mux.HandleFunc("POST /transactions/{id}/enrich-report", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST "+Prefix+"/transactions/{id}/enrich-report", func(w http.ResponseWriter, r *http.Request) {
 		var b struct{ Outcome string }
 		_ = json.NewDecoder(r.Body).Decode(&b)
 		f.mu.Lock()
@@ -66,7 +66,7 @@ var quiet = slog.New(slog.NewTextHandler(io.Discard, nil))
 func TestEnrichOnceReportsOnlyTheUnanswered(t *testing.T) {
 	f := &fakeSvc{reported: map[int64]string{},
 		pending: []Pending{{ID: 1, SourceLabel: "쿠팡", Merchant: "쿠팡", AmountKrw: 8900}, {ID: 2, SourceLabel: "쿠팡", Merchant: "쿠팡(쿠페이)", AmountKrw: 2970}}}
-	m := New(NewStore(f.server(t).URL, ""))
+	m := New(NewStore(f.server(t).URL, "", nil))
 	bg := &fakeBG{run: func() {
 		// The model answered #1 (it leaves the due list) and said nothing about #2.
 		f.mu.Lock()
@@ -96,7 +96,7 @@ func TestEnrichOnceReportsOnlyTheUnanswered(t *testing.T) {
 // the same charges come up again later, with no attempt counted.
 func TestYieldRecordsNothing(t *testing.T) {
 	f := &fakeSvc{reported: map[int64]string{}, pending: []Pending{{ID: 1, Merchant: "쿠팡", AmountKrw: 8900}}}
-	m := New(NewStore(f.server(t).URL, ""))
+	m := New(NewStore(f.server(t).URL, "", nil))
 	m.enrichOnce(context.Background(), &fakeBG{err: claudecode.ErrYielded}, EnrichConfig{}, f.pending, quiet)
 	if len(f.reported) != 0 {
 		t.Fatalf("양보했는데 기록됨: %v", f.reported)
@@ -133,5 +133,24 @@ func TestTheLookupCanSeeThePage(t *testing.T) {
 	}
 	if !strings.Contains(enrichSystem, "browser_screenshot") {
 		t.Fatal("지시문이 스크린샷으로 읽으라고 해야 합니다")
+	}
+}
+
+type sent struct{ method, path string }
+
+func (s *sent) Do(_ context.Context, method, path string, _, _ any) error {
+	s.method, s.path = method, path
+	return nil
+}
+
+// Reading goes to the window; a write goes by the stream, to mind's path.
+func TestAWriteGoesByTheStream(t *testing.T) {
+	s := &sent{}
+	st := NewStore("http://127.0.0.1:1", "", s)
+	if err := st.report(context.Background(), 7, "not_found", "없음"); err != nil {
+		t.Fatal(err)
+	}
+	if s.method != http.MethodPost || s.path != "/api/spending/transactions/7/enrich-report" {
+		t.Fatalf("%+v", s)
 	}
 }

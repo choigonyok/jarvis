@@ -1,10 +1,10 @@
-// Package api serves the spending book. Same bearer scheme as the rest of the
-// stack: everything but /health needs the token.
+// Package api is the spending book's part of mind's HTTP surface: reads at the
+// window, and writes that reach here the way all of mind's do, by the stream
+// (mind's api.Command). Who may come is said by mind's own routes.
 package api
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"io"
@@ -15,56 +15,50 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/gocommon/health"
-	"github.com/choigonyok/jarvis/spending-svc/internal/book"
-	"github.com/choigonyok/jarvis/spending-svc/internal/category"
-	"github.com/choigonyok/jarvis/spending-svc/internal/enrich"
-	"github.com/choigonyok/jarvis/spending-svc/internal/ingest"
-	"github.com/choigonyok/jarvis/spending-svc/internal/store"
+	"github.com/choigonyok/jarvis/mind-svc/internal/spending/book"
+	"github.com/choigonyok/jarvis/mind-svc/internal/spending/category"
+	"github.com/choigonyok/jarvis/mind-svc/internal/spending/enrich"
+	"github.com/choigonyok/jarvis/mind-svc/internal/spending/ingest"
+	"github.com/choigonyok/jarvis/mind-svc/internal/spending/store"
 )
+
+// Prefix is where the book is on mind's API.
+const Prefix = "/api/spending"
 
 type Server struct {
 	store  *store.Store
 	ingest *ingest.Ingester
-	token  string
 	log    *slog.Logger
 	now    func() time.Time
-	// Loops are the background loops /health reports (ingest, watch, assets).
+	// Loops are the background loops /health reports (watch).
 	Loops *health.Loops
 }
 
-func New(s *store.Store, in *ingest.Ingester, token string, log *slog.Logger) *Server {
-	return &Server{store: s, ingest: in, token: token, log: log, now: time.Now}
+func New(s *store.Store, in *ingest.Ingester, log *slog.Logger) *Server {
+	return &Server{store: s, ingest: in, log: log, now: time.Now}
 }
 
-func (s *Server) Handler() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", s.health)
-	mux.HandleFunc("GET /spending", s.auth(s.month))
-	mux.HandleFunc("POST /transactions", s.auth(s.add))
-	mux.HandleFunc("PATCH /transactions/{id}", s.auth(s.patch))
-	mux.HandleFunc("DELETE /transactions/{id}", s.auth(s.remove))
-	mux.HandleFunc("PUT /budgets", s.auth(s.budget))
-	mux.HandleFunc("POST /unparsed/{id}/dismiss", s.auth(s.dismiss))
-	mux.HandleFunc("POST /unparsed/{id}/resolve", s.auth(s.resolve))
+// Health is the book's own /health, open like the service's was.
+func (s *Server) Health() http.HandlerFunc { return s.health }
+
+// Mount puts the routes on mind's mux: read for what only looks, write for
+// what changes the book.
+func (s *Server) Mount(read, write func(pattern string, h http.HandlerFunc)) {
+	read("GET "+Prefix+"/spending", s.month)
+	write("POST "+Prefix+"/transactions", s.add)
+	write("PATCH "+Prefix+"/transactions/{id}", s.patch)
+	write("DELETE "+Prefix+"/transactions/{id}", s.remove)
+	write("PUT "+Prefix+"/budgets", s.budget)
+	write("POST "+Prefix+"/unparsed/{id}/dismiss", s.dismiss)
+	write("POST "+Prefix+"/unparsed/{id}/resolve", s.resolve)
 	// 묶음 가맹점 조회. 에이전트가 백그라운드에서 쓴다.
-	mux.HandleFunc("GET /enrich/pending", s.auth(s.enrichPending))
-	mux.HandleFunc("POST /transactions/{id}/items", s.auth(s.saveItems))
-	mux.HandleFunc("POST /transactions/{id}/enrich-report", s.auth(s.enrichReport))
-	mux.HandleFunc("POST /enrich/retry", s.auth(s.enrichRetry))
-	mux.HandleFunc("POST /enrich/resume", s.auth(s.enrichResume))
-	mux.HandleFunc("PATCH /items/{id}", s.auth(s.patchItem))
-	mux.HandleFunc("GET /unclear", s.auth(s.unclear))
-	return mux
-}
-
-func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if s.token != "" && subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+s.token)) != 1 {
-			writeErr(w, http.StatusUnauthorized, "인증이 필요합니다.")
-			return
-		}
-		next(w, r)
-	}
+	read("GET "+Prefix+"/enrich/pending", s.enrichPending)
+	write("POST "+Prefix+"/transactions/{id}/items", s.saveItems)
+	write("POST "+Prefix+"/transactions/{id}/enrich-report", s.enrichReport)
+	write("POST "+Prefix+"/enrich/retry", s.enrichRetry)
+	write("POST "+Prefix+"/enrich/resume", s.enrichResume)
+	write("PATCH "+Prefix+"/items/{id}", s.patchItem)
+	read("GET "+Prefix+"/unclear", s.unclear)
 }
 
 // health answers in the stack's contract (gocommon/health): the loops, and
@@ -162,6 +156,10 @@ func (s *Server) build(ctx context.Context, month, now time.Time) (Response, err
 	if err != nil {
 		return Response{}, err
 	}
+	collector, err := s.ingest.Status(ctx)
+	if err != nil {
+		return Response{}, err
+	}
 	sites := []Site{}
 	for _, src := range blocked {
 		sites = append(sites, Site{Source: src, Label: enrich.Label(src)})
@@ -171,7 +169,7 @@ func (s *Server) build(ctx context.Context, month, now time.Time) (Response, err
 		CategoryNames: category.All,
 		Recurring:     book.FindRecurring(recent, now),
 		Unparsed:      unparsed,
-		Collector:     s.ingest.Status(),
+		Collector:     collector,
 		Budgets:       budgets,
 		EnrichBlocked: sites,
 	}, nil
@@ -514,21 +512,73 @@ func (s *Server) patchItem(w http.ResponseWriter, r *http.Request) {
 // categories there are to choose from.
 func (s *Server) unclear(w http.ResponseWriter, r *http.Request) {
 	days, _ := strconv.Atoi(r.URL.Query().Get("days"))
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	got, err := s.list(r.Context(), days, limit)
+	if s.storeErr(w, err, "분류를 물을 내역을 읽지 못했습니다.") {
+		return
+	}
+	writeJSON(w, http.StatusOK, got)
+}
+
+// Unclear decodes the list into into, for mind's own card round (act.Book).
+func (s *Server) Unclear(ctx context.Context, into any) error {
+	list, err := s.list(ctx, 0, 0)
+	if err != nil {
+		return err
+	}
+	raw, err := json.Marshal(list)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(raw, into)
+}
+
+// FileCharge files a charge (act.Book).
+func (s *Server) FileCharge(ctx context.Context, id int64, cat string, remember bool) error {
+	_, err := s.store.Update(ctx, id, store.Patch{Category: &cat, Remember: remember})
+	return err
+}
+
+// FileItem files one product of a split order (act.Book).
+func (s *Server) FileItem(ctx context.Context, id int64, cat string) error {
+	return s.store.SetItemCategory(ctx, id, cat)
+}
+
+// Month is a month's rows, each settled.
+func (s *Server) Month(ctx context.Context, month time.Time) ([]book.Tx, error) {
+	first := time.Date(month.Year(), month.Month(), 1, 0, 0, 0, 0, time.Local)
+	txs, err := s.store.Range(ctx, first, first.AddDate(0, 1, 0))
+	if err != nil {
+		return nil, err
+	}
+	for i := range txs {
+		book.Settle(&txs[i])
+	}
+	return txs, nil
+}
+
+// list is what to ask about, the rules' leavings since days ago.
+func (s *Server) list(ctx context.Context, days, limit int) (UnclearList, error) {
 	if days <= 0 || days > 180 {
 		days = 45
 	}
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	if limit <= 0 || limit > 50 {
 		limit = 20
 	}
-	got, err := s.store.Unclear(r.Context(), time.Now().AddDate(0, 0, -days), limit)
-	if s.storeErr(w, err, "분류를 물을 내역을 읽지 못했습니다.") {
-		return
+	got, err := s.store.Unclear(ctx, s.now().AddDate(0, 0, -days), limit)
+	if err != nil {
+		return UnclearList{}, err
 	}
 	for i := range got {
 		got[i].ApprovedAt = got[i].ApprovedAt.In(time.Local)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"entries": got, "categories": category.All})
+	return UnclearList{Entries: got, Categories: category.All}, nil
+}
+
+// UnclearList is what to ask about, and the categories to pick from.
+type UnclearList struct {
+	Entries    []store.Unclear `json:"entries"`
+	Categories []string        `json:"categories"`
 }
 
 func (s *Server) storeErr(w http.ResponseWriter, err error, msg string) bool {

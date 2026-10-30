@@ -45,7 +45,7 @@ assets-svc 의 `src/notify.ts` 는 기다리지 않고 보낸다). 같은 일을
 | `job` | agent | 작업이 로그인·확인을 기다림 (now) |
 | `status` | status-svc | 검사가 이상으로 바뀜 (now), 주의 (digest), 다시 정상 (log) |
 | `calendar` | calendar-svc | 상대(손님 에이전트)가 공유 일정 추가 (now) |
-| `spending` | spending-svc | 큰 결제·해외 결제·취소·환불·예산 80% (digest), 예산 100% (now), 하루 지출 (digest) |
+| `spending` | mind(가계부) | 큰 결제·해외 결제·취소·환불·예산 80% (digest), 예산 100% (now), 하루 지출 (digest) |
 | `assets` | assets-svc | 비중 이탈·입출금 감지·공제 임박·원금 기록 불일치·하루 자산 (digest) |
 
 새 분류를 쓰면 콘솔 알림 설정(`web/src/components/shell/notifications.tsx` 의

@@ -28,8 +28,6 @@ func TestTheListIsWhatMayBeWritten(t *testing.T) {
 		{"calendar", "PUT", "/events", true},
 		{"calendar", "DELETE", "/events/abc", true},
 		{"calendar", "POST", "/events", false},
-		{"spending", "PATCH", "/transactions/12", true},
-		{"spending", "DELETE", "/transactions/12", false},
 		{"assets", "POST", "/orders", true},
 		{"assets", "POST", "/orders/rebalance", true},
 		{"assets", "DELETE", "/orders", false},

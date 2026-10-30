@@ -435,6 +435,9 @@ func NewMemory(log *slog.Logger) (*Writer, *Memory) {
 	return newWriter(m, nil, log), m
 }
 
+// KindSpendingWrite is a change to the household book, which mind keeps.
+const KindSpendingWrite = "spending.write"
+
 // CommandKind names a request for mind as the record it travels as: what the
 // agent asks of mind and what mind's door takes both come as these, and only
 // these change its state.
@@ -451,6 +454,8 @@ func CommandKind(method, path string) string {
 		return "note.decided"
 	case "links":
 		return "link.decided"
+	case "spending":
+		return KindSpendingWrite
 	case "reminders":
 		switch method {
 		case "POST":

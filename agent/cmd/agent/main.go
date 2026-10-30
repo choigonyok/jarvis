@@ -142,7 +142,7 @@ func main() {
 	if !cfg.Guest {
 		assetsModule = assets.New(assets.NewStore(cfg.AssetsURL, cfg.APIToken))
 		modules.Add(assetsModule)
-		spendingModule = spending.New(spending.NewStore(cfg.SpendingURL, cfg.APIToken))
+		spendingModule = spending.New(spending.NewStore(cfg.MindURL, cfg.APIToken, commands))
 		modules.Add(spendingModule)
 
 		mcpMounts["/mcp/"+assets.ServerName] = assetsModule.Handler()
@@ -188,8 +188,8 @@ func main() {
 		if vaultModule != nil {
 			jobsModule.SetVault(vaultModule)
 		}
-		if !cfg.Guest && cfg.SpendingURL != "" {
-			jobsModule.SetCharges(chargeLog{store: spending.NewStore(cfg.SpendingURL, cfg.APIToken)})
+		if !cfg.Guest {
+			jobsModule.SetCharges(chargeLog{store: spending.NewStore(cfg.MindURL, cfg.APIToken, commands)})
 		}
 		cfg.Allow(jobs.QualifiedToolName("get_job"))
 		mcpMounts["/mcp/"+jobs.ServerName] = jobsModule.Handler()

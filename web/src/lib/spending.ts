@@ -1,4 +1,4 @@
-/** The wire shape of spending-svc GET /spending, and what the screen derives from it. */
+/** The wire shape of the book (mind GET /api/spending/spending), and what the screen derives from it. */
 
 export type TxStatus = "ok" | "cancelled" | "cancel" | "refund" | "excluded";
 
@@ -43,7 +43,7 @@ export type Item = {
 
 export const SITE_LABEL: Record<string, string> = { coupang: "쿠팡", naverpay: "네이버페이" };
 
-/** An opened-up order counts by its items, as spending-svc's category totals do. */
+/** An opened-up order counts by its items, as the book's category totals do. */
 const byItems = (t: Tx) => t.status === "ok" && (t.items?.length ?? 0) > 0;
 
 export const inCategory = (t: Tx, category: string) =>
@@ -86,8 +86,6 @@ export type Unparsed = {
 };
 
 export type Collector = {
-  lastPollAt: string;
-  lastError?: string;
   latestMessageAt: string | null;
   lastAlertAt: string | null;
   stale: boolean;

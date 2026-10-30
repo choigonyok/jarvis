@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+	"github.com/choigonyok/jarvis/mind-svc/internal/spending/book"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 	"github.com/choigonyok/jarvis/mind-svc/internal/world"
 )
@@ -38,13 +39,7 @@ func TestRules(t *testing.T) {
 		t.Error("결제 알림을 송금으로 읽었습니다")
 	}
 	ps := Purchase(tx{ID: 7, Kind: "approval", AmountKrw: 23000, Merchant: "쿠팡", Category: "쇼핑", Status: "ok",
-		Items: []struct {
-			ID        int64  `json:"id"`
-			Name      string `json:"name"`
-			Quantity  int    `json:"quantity"`
-			AmountKrw int64  `json:"amountKrw"`
-			Category  string `json:"category"`
-		}{{ID: 1, Name: "참나무 장작 10kg", Quantity: 1, AmountKrw: 20000, Category: "생활"}}})
+		Items: []book.Item{{ID: 1, Name: "참나무 장작 10kg", Quantity: 1, AmountKrw: 20000, Category: "생활"}}})
 	if len(ps) != 2 || ps[1].ID != "spending:7#1" || ps[1].Kind != "purchase.item" || !slices.Contains(ps[0].Things, "참나무 장작 10kg") {
 		t.Errorf("Purchase: %+v", ps)
 	}

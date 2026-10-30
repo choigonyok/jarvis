@@ -39,7 +39,7 @@ func QualifiedToolName(tool string) string {
 // Tools is every tool this server has; all of them read.
 var Tools = []string{QualifiedToolName("get_spending")}
 
-// --- wire shape (spending-svc GET /spending) --------------------------------
+// --- wire shape (mind GET /api/spending/spending) ---------------------------
 
 type Tx struct {
 	Merchant      string    `json:"merchant"`
@@ -105,20 +105,30 @@ type Book struct {
 		LatestMessageAt *time.Time `json:"latestMessageAt"`
 		LastAlertAt     *time.Time `json:"lastAlertAt"`
 		Stale           bool       `json:"stale"`
-		LastError       string     `json:"lastError"`
 	} `json:"collector"`
 }
 
 // --- client ---------------------------------------------------------------
 
+// Sender sends what would change the book through the stream (mindcmd).
+type Sender interface {
+	Do(ctx context.Context, method, path string, in, out any) error
+}
+
+// Prefix is where the book is on mind's API.
+const Prefix = "/api/spending"
+
+// Store reads the book at mind's window; a write goes by the stream.
 type Store struct {
 	base   string
 	token  string
+	send   Sender
 	client *http.Client
 }
 
-func NewStore(baseURL, token string) *Store {
-	return &Store{base: strings.TrimRight(baseURL, "/"), token: token,
+// NewStore makes a Store on mind at baseURL.
+func NewStore(baseURL, token string, send Sender) *Store {
+	return &Store{base: strings.TrimRight(baseURL, "/") + Prefix, token: token, send: send,
 		client: &http.Client{Timeout: 15 * time.Second}}
 }
 
@@ -136,7 +146,7 @@ func (s *Store) Month(ctx context.Context, month string) (Book, error) {
 	}
 	res, err := s.client.Do(req)
 	if err != nil {
-		return Book{}, fmt.Errorf("가계부 서비스에 연결하지 못했습니다: %w", err)
+		return Book{}, fmt.Errorf("가계부에 연결하지 못했습니다: %w", err)
 	}
 	defer res.Body.Close()
 	if res.StatusCode >= 300 {
@@ -147,7 +157,7 @@ func (s *Store) Month(ctx context.Context, month string) (Book, error) {
 		if json.Unmarshal(raw, &payload) == nil && payload.Error != "" {
 			return Book{}, errors.New(payload.Error)
 		}
-		return Book{}, fmt.Errorf("가계부 서비스가 거부했습니다: %s", res.Status)
+		return Book{}, fmt.Errorf("가계부가 거부했습니다: %s", res.Status)
 	}
 	var b Book
 	return b, json.NewDecoder(res.Body).Decode(&b)
@@ -221,11 +231,7 @@ func renderHead(b Book) string {
 			fmt.Fprintf(&s, "이 속도면 월말 %s (단순 추정)\n", krw(projected))
 		}
 	}
-	c := b.Collector
-	switch {
-	case c.LastError != "":
-		s.WriteString("주의: 카톡 수집기에 연결되지 않아 최근 결제가 빠졌을 수 있음 (" + c.LastError + ")\n")
-	case c.Stale:
+	if b.Collector.Stale {
 		s.WriteString("주의: 카톡 메시지가 한동안 들어오지 않음. 맥의 카카오톡이 꺼져 있으면 그동안의 결제가 빠짐\n")
 	}
 	if n := len(b.Unparsed); n > 0 {

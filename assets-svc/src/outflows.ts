@@ -9,8 +9,8 @@ import type { Flow, FlowRef, Outflow, OutflowAnswer, OutflowPart } from "./types
  * What does not come back was spent, kept somewhere else, or is still in the
  * bank; nothing here can see a bank, so that part is asked about (the agent's
  * card, agent/internal/module/assets/ask.go) and the answer is kept
- * (outflow_uses). What was spent goes into the 가계부 from there: spending-svc
- * reads GET /outflows.
+ * (outflow_uses). What was spent goes into the 가계부 from there, in the record
+ * this service leaves when the list changes (assets.outflows).
  *
  * None of it changes a number on the assets screen: a withdrawal left the
  * principal whatever it was for. The use is a label on it.

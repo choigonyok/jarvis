@@ -3,8 +3,7 @@ package mind
 import (
 	"context"
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -25,23 +24,35 @@ import (
 	"log/slog"
 )
 
-// bookServer is spending-svc: what is unfiled, and what was filed.
-type bookServer struct {
+// fakeBook is the book: what is unfiled, and what was filed.
+type fakeBook struct {
 	mu      sync.Mutex
 	entries []slot.Charge
 	patches []string
 }
 
-func (b *bookServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (b *fakeBook) Unclear(_ context.Context, into any) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if r.Method == http.MethodGet {
-		_ = json.NewEncoder(w).Encode(map[string]any{"entries": b.entries, "categories": []string{"식비", "교통", "기타"}})
-		return
+	raw, err := json.Marshal(map[string]any{"entries": b.entries, "categories": []string{"식비", "교통", "기타"}})
+	if err != nil {
+		return err
 	}
-	body, _ := io.ReadAll(r.Body)
-	b.patches = append(b.patches, r.URL.Path+" "+string(body))
-	_, _ = w.Write([]byte(`{}`))
+	return json.Unmarshal(raw, into)
+}
+
+func (b *fakeBook) FileCharge(_ context.Context, id int64, category string, remember bool) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.patches = append(b.patches, fmt.Sprintf(`/transactions/%d {"category":%q,"remember":%v}`, id, category, remember))
+	return nil
+}
+
+func (b *fakeBook) FileItem(_ context.Context, id int64, category string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.patches = append(b.patches, fmt.Sprintf(`/items/%d {"category":%q}`, id, category))
+	return nil
 }
 
 type answerLLM struct{ text string }
@@ -53,19 +64,17 @@ func (a answerLLM) Spent() float64                                           { r
 
 var _ llm.Client = answerLLM{}
 
-func chargeMind(t *testing.T, answer string, entries ...slot.Charge) (*Mind, *store.Memory, *bookServer) {
+func chargeMind(t *testing.T, answer string, entries ...slot.Charge) (*Mind, *store.Memory, *fakeBook) {
 	t.Helper()
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
 	clk := clock.New()
 	clk.Pin(time.Date(2026, 10, 31, 9, 0, 0, 0, seoul))
 	st := store.NewMemory()
-	book := &bookServer{entries: entries}
-	srv := httptest.NewServer(book)
-	t.Cleanup(srv.Close)
+	book := &fakeBook{entries: entries}
 	m := New(Options{Store: st, Log: obs.NewMemoryLog(quiet), LLM: answerLLM{text: answer}, Calendar: act.NewMemoryCalendar(), Notifier: &act.MemoryNotifier{},
 		Loc: seoul, Now: clk.Now, Logger: quiet, Interpret: interpret.Config{Owner: "나"}, Policy: gate.DefaultPolicy(), Mode: "eval",
-		Spending: &act.Spending{URL: srv.URL}})
+		Spending: &act.Spending{Book: book}})
 	return m, st, book
 }
 

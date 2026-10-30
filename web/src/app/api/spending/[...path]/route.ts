@@ -1,13 +1,13 @@
 import { pathProxy } from "@/lib/proxy";
 
-// spending-svc. Its routes are the book's own - nothing here reaches the
-// KakaoTalk collector behind it.
-const SPENDING_URL = process.env.SPENDING_URL ?? "http://localhost:8095";
+// The household book, which mind keeps. The gateway lets through only what the
+// 가계부 screen does (spendingRoute).
+const MIND_URL = process.env.MIND_URL ?? "http://localhost:8102";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const proxy = pathProxy(SPENDING_URL, { label: "가계부 서비스" });
+const proxy = pathProxy(`${MIND_URL.replace(/\/$/, "")}/api/spending`, { label: "가계부" });
 
 export const GET = proxy;
 export const POST = proxy;

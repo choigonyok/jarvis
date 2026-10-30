@@ -130,7 +130,6 @@ services:
       # 대화까지 막을 이유가 없고, 조회 실패는 도구 오류로 모델에게 간다.
       JARVIS_ASSETS_URL: http://assets:8092
       # 가계부도 읽기만 한다.
-      JARVIS_SPENDING_URL: http://spending:8095
       # 작업. 대화에서 맡긴 일을 기록하는 곳이고, 실행은 에이전트의 스케줄러가 한다.
       JARVIS_JOBS_URL: http://jobs:8098
       # 로그인 정보 보관함(저장·목록·지우기만 - 꺼내는 것은 브라우저뿐).
@@ -414,49 +413,6 @@ services:
     networks:
       - data
       - browser
-    restart: unless-stopped
-
-  # 가계부. 카드사가 카톡으로 보내는 결제 알림을 카톡 수집기에서 읽어 분류하고
-  # 월별로 더한다. 카톡 DB 를 직접 열지 않고 수집기의 API 로 읽는다 - 암호화된
-  # 파일을 만지는 프로세스는 이 맥에 하나면 된다.
-  #
-  # 수집기에 부팅 의존성을 걸지 않았다. 카톡이 꺼져 있어도 지난 내역은 보여야
-  # 하고, 수집은 연결되는 대로 커서부터 이어진다.
-  spending:
-    build:
-      context: ./spending-svc
-      additional_contexts:
-        gocommon: ./gocommon
-    environment:
-      TZ: ${TZ:-Asia/Seoul}
-      LISTEN_ADDR: ":8095"
-      DATABASE_URL: >-
-        postgres://svc_spending:${JARVIS_DB_PASSWORD_SPENDING:?scripts/db-roles 를 먼저 실행하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
-      API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
-      NOTIFY_URL: http://input:8101
-      KAKAOTALK_URL: http://kakaotalk:8090
-      # 이름에 "카드"가 없는 결제 알림 채널(예: 카카오뱅크)을 쉼표로 더한다.
-      # 카카오페이 같은 간편결제는 기본으로 빼 두었다 - 카드로 충전·결제되면
-      # 카드 알림과 두 번 잡힌다.
-      SPENDING_EXTRA_CHANNELS: ${SPENDING_EXTRA_CHANNELS:-}
-      # 투자 계좌에서 뺀 돈 중 "지출"로 답한 것(자산 카드)을 읽어 투자금 줄로 넣는다.
-      ASSETS_URL: http://assets:8092
-    expose:
-      - "8095"
-    ports:
-      - "127.0.0.1:${JARVIS_SPENDING_PORT:-8095}:8095"
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8095/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    depends_on:
-      db-migrate:
-        condition: service_completed_successfully
-    networks:
-      - default
-      - data
     restart: unless-stopped
 
   # 작업: 대화에서 맡긴 일, 실행마다의 진행 기록, 작업이 지켜보는 대상, 사이트
@@ -892,7 +848,7 @@ services:
       API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
       NOTIFY_URL: http://input:8101
       KAKAOTALK_URL: http://kakaotalk:8090
-      SPENDING_URL: http://spending:8095
+      SPENDING_URL: http://mind:8102/api/spending
       ASSETS_URL: http://assets:8092
       CALENDAR_URL: http://calendar:8093
       CHAT_URL: http://chat:8094
@@ -969,7 +925,6 @@ services:
       VAPID_SUBJECT: ${JARVIS_VAPID_SUBJECT:-https://jarvis.choigonyok.com}
       # 승인된 쓰기를 대신 하는 손. 정해진 API 만 부른다(output-svc internal/calls).
       CALENDAR_URL: http://calendar:8093
-      SPENDING_URL: http://spending:8095
       JOBS_URL: http://jobs:8098
       ASSETS_URL: http://assets:8092
       IMMICH_URL: http://immich:2283
@@ -1076,8 +1031,11 @@ services:
       MIND_UI_URL: /
       # 구조화 소스(가계부·운동·캘린더·사진)를 규칙으로 발생(occurrence)으로 읽는다. 캘린더의
       # 일정은 세계 모델의 일정이 되고, 일정 시간·장소 안의 결제·사진은 during 으로 이어진다.
-      SPENDING_URL: http://spending:8095
       WORKOUT_URL: http://workout:8091
+      # 가계부. 카드사 방의 메시지를 읽어 넣는다. 이름에 "카드"가 없는 결제 알림 채널(예: 카카오뱅크)은
+      # 쉼표로 더한다. 카카오페이 같은 간편결제는 기본으로 빼 두었다 - 카드로 충전·결제되면 카드 알림과
+      # 두 번 잡힌다.
+      SPENDING_EXTRA_CHANNELS: ${SPENDING_EXTRA_CHANNELS:-}
       # 준비물 카드를 승인하면 장바구니에 담기만 하는 작업을 jobs-svc 에 만든다(결제는 안 함).
       JOBS_URL: http://jobs:8098
       # 월급 카드에 비중 차이를 적으려고 자산 배분을 읽기만 한다.

@@ -14,8 +14,8 @@ import (
 
 	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/gocommon/notify"
-	"github.com/choigonyok/jarvis/spending-svc/internal/book"
-	"github.com/choigonyok/jarvis/spending-svc/internal/store"
+	"github.com/choigonyok/jarvis/mind-svc/internal/spending/book"
+	"github.com/choigonyok/jarvis/mind-svc/internal/spending/store"
 )
 
 // BigKrw is a payment worth a line in tonight's digest.

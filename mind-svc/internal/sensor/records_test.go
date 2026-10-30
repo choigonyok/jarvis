@@ -14,6 +14,7 @@ import (
 
 	"github.com/choigonyok/jarvis/gocommon/queue"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+	"github.com/choigonyok/jarvis/mind-svc/internal/spending/book"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 )
 
@@ -23,13 +24,7 @@ func TestRecordsWording(t *testing.T) {
 	s := &Structured{Loc: seoul}
 	at := time.Date(2026, 10, 14, 19, 5, 0, 0, seoul)
 	r := s.SpendingRecord(tx{ID: 812, Kind: "approval", AmountKrw: 32000, Merchant: "육전식당 강남점", Category: "식비", ApprovedAt: at, Memo: "회식",
-		Items: []struct {
-			ID        int64  `json:"id"`
-			Name      string `json:"name"`
-			Quantity  int    `json:"quantity"`
-			AmountKrw int64  `json:"amountKrw"`
-			Category  string `json:"category"`
-		}{{ID: 1, Name: "육전", Quantity: 2}}})
+		Items: []book.Item{{ID: 1, Name: "육전", Quantity: 2}}})
 	if r.Key != "spending:812" || r.Relation != "결제" || r.Fact != "2026-10-14 19:05 육전식당 강남점에서 32,000원 결제 (식비): 육전×2. 메모: 회식" {
 		t.Errorf("spending: %+v", r)
 	}

@@ -10,9 +10,10 @@ input.deliveries · input.consumers       ← 스트림. 소비자가 gocommon/q
 input.guest_*                            ← 손님 것은 전용 표로
 mind.effects (+ 배달·소비자)              ← mind 가 낸 것: 카드·알림. output·에이전트가 읽는다. mind.guest_effects 는 손님 것 (역할 svc_guest)
 output.notifications · push_subscriptions · settings ← 알림함과 기기 (output-svc)
-raw_events (추가 전용)                  ← 카드 알림 원문 (spending-svc)
-commitments · workout_* · card_* · …     ← 각 서비스의 정확한 사실
+raw_events (추가 전용)                  ← 카드 알림의 옛 원문. 새 알림은 기록(input.records)에 봉인돼 있다
+commitments · workout_* · …              ← 각 서비스의 정확한 사실
 mind_*                                   ← mind 의 세계 모델·관문·노트
+mind.card_* · mind.spending_* · mind.merchant_rules ← 가계부 (옛 내역은 이 표가 원본, 새 내역은 기록에서 다시 만들 수 있다)
 mind.outcomes · mind.facts               ← 결과 장부와 기간이 붙은 사실 (원본에서 다시 만듦)
 mind.classes                             ← 분류 캐시 (모델의 답은 캐시, 운영자의 답은 값)
 ```

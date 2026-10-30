@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/choigonyok/jarvis/spending-svc/internal/enrich"
-	"github.com/choigonyok/jarvis/spending-svc/internal/parse"
+	"github.com/choigonyok/jarvis/mind-svc/internal/spending/enrich"
+	"github.com/choigonyok/jarvis/mind-svc/internal/spending/parse"
 )
 
 // These run against a real Postgres with every migration applied
@@ -25,10 +25,9 @@ func testStore(t *testing.T) *Store {
 		t.Fatal(err)
 	}
 	t.Cleanup(s.Close)
-	// raw_events is append-only; every row here has an id of its own instead,
-	// and only the ledger is emptied - with DELETE, which the service's own
-	// role (svc_spending) is allowed, unlike TRUNCATE.
-	for _, q := range []string{`delete from card_transaction_items`, `delete from card_transactions`} {
+	// Only the ledger is emptied - with DELETE, which mind's own role is
+	// allowed, unlike TRUNCATE.
+	for _, q := range []string{`delete from mind.card_transaction_items`, `delete from mind.card_transactions`} {
 		if _, err := s.pool.Exec(context.Background(), q); err != nil {
 			t.Fatal(err)
 		}
@@ -42,22 +41,18 @@ type ledger struct {
 	seq int
 }
 
-// add records one alert the way ingest does: the raw message, then the alert.
+// add records one alert the way ingest does.
 func (l *ledger) add(kind, merchant, tail string, amount int64, at time.Time) int64 {
 	l.t.Helper()
 	ctx := context.Background()
 	l.seq++
 	ref := fmt.Sprintf("%s-%d-%d", l.t.Name(), time.Now().UnixNano(), l.seq)
-	ev, err := l.s.RawEvent(ctx, ref, "테스트카드", merchant, at)
-	if err != nil {
-		l.t.Fatal(err)
-	}
 	a := parse.Alert{Issuer: "테스트카드", CardTail: tail, Kind: kind, AmountKrw: amount, Currency: "KRW", Merchant: merchant, ApprovedAt: at}
-	if _, err := l.s.AddAlert(ctx, ref, ev, a, amount, false); err != nil {
+	if _, err := l.s.AddAlert(ctx, ref, a, amount, false); err != nil {
 		l.t.Fatal(err)
 	}
 	var id int64
-	if err := l.s.pool.QueryRow(ctx, `select id from card_transactions where source_ref = $1`, ref).Scan(&id); err != nil {
+	if err := l.s.pool.QueryRow(ctx, `select id from mind.card_transactions where source_ref = $1`, ref).Scan(&id); err != nil {
 		l.t.Fatal(err)
 	}
 	return id
@@ -66,7 +61,7 @@ func (l *ledger) add(kind, merchant, tail string, amount int64, at time.Time) in
 func (l *ledger) cancelledBy(id int64) int64 {
 	l.t.Helper()
 	var by *int64
-	if err := l.s.pool.QueryRow(context.Background(), `select cancelled_by from card_transactions where id = $1`, id).Scan(&by); err != nil {
+	if err := l.s.pool.QueryRow(context.Background(), `select cancelled_by from mind.card_transactions where id = $1`, id).Scan(&by); err != nil {
 		l.t.Fatal(err)
 	}
 	if by == nil {
@@ -190,7 +185,7 @@ func TestResumeIsOnlyWhatTheLoginStopped(t *testing.T) {
 	}
 	status := func(id int64) string {
 		var st string
-		if err := s.pool.QueryRow(ctx, `select enrich_status from card_transactions where id=$1`, id).Scan(&st); err != nil {
+		if err := s.pool.QueryRow(ctx, `select enrich_status from mind.card_transactions where id=$1`, id).Scan(&st); err != nil {
 			t.Fatal(err)
 		}
 		return st
@@ -221,14 +216,14 @@ func TestAssetSpendsFollowTheAnswers(t *testing.T) {
 	}
 	var id int64
 	var src, cat, catSrc, issuer string
-	if err := s.pool.QueryRow(ctx, `select id, source, category, category_source, issuer from card_transactions where source_ref = $1`, rent.Ref).
+	if err := s.pool.QueryRow(ctx, `select id, source, category, category_source, issuer from mind.card_transactions where source_ref = $1`, rent.Ref).
 		Scan(&id, &src, &cat, &catSrc, &issuer); err != nil {
 		t.Fatal(err)
 	}
 	if src != "asset" || cat != "생활·통신" || catSrc != "manual" || issuer != "업비트" {
 		t.Fatalf("들어간 줄: %s %s %s %s", src, cat, catSrc, issuer)
 	}
-	if err := s.pool.QueryRow(ctx, `select category from card_transactions where source_ref = $1`, cash.Ref).Scan(&cat); err != nil || cat != "기타" {
+	if err := s.pool.QueryRow(ctx, `select category from mind.card_transactions where source_ref = $1`, cash.Ref).Scan(&cat); err != nil || cat != "기타" {
 		t.Fatalf("모르는 분류는 기타로: %q %v", cat, err)
 	}
 
@@ -239,7 +234,7 @@ func TestAssetSpendsFollowTheAnswers(t *testing.T) {
 	if added, removed, err := s.SyncAssetSpends(ctx, []AssetSpend{rent, cash}); err != nil || added != 0 || removed != 0 {
 		t.Fatalf("그대로면 아무것도 안 바뀝니다: %d %d %v", added, removed, err)
 	}
-	if err := s.pool.QueryRow(ctx, `select category from card_transactions where id = $1`, id).Scan(&cat); err != nil || cat != "식비" {
+	if err := s.pool.QueryRow(ctx, `select category from mind.card_transactions where id = $1`, id).Scan(&cat); err != nil || cat != "식비" {
 		t.Fatalf("가계부에서 고친 분류는 남습니다: %q %v", cat, err)
 	}
 	var kept KeptError
@@ -254,7 +249,7 @@ func TestAssetSpendsFollowTheAnswers(t *testing.T) {
 		t.Fatalf("다시 답한 것은 새 줄, 사라진 답의 줄은 빠집니다: %d %d %v", added, removed, err)
 	}
 	var n int
-	if err := s.pool.QueryRow(ctx, `select count(*) from card_transactions where source = 'asset'`).Scan(&n); err != nil || n != 1 {
+	if err := s.pool.QueryRow(ctx, `select count(*) from mind.card_transactions where source = 'asset'`).Scan(&n); err != nil || n != 1 {
 		t.Fatalf("남은 투자금 줄: %d %v", n, err)
 	}
 }

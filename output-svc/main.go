@@ -117,7 +117,6 @@ func main() {
 	bearer := func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+token) }
 	hand := &calls.Hand{Pool: pool, Records: sent, Log: log, HTTP: &http.Client{}, Services: map[string]calls.Service{
 		"calendar": {URL: os.Getenv("CALENDAR_URL"), Auth: bearer},
-		"spending": {URL: os.Getenv("SPENDING_URL"), Auth: bearer},
 		"jobs":     {URL: os.Getenv("JOBS_URL"), Auth: bearer},
 		"assets":   {URL: os.Getenv("ASSETS_URL"), Auth: bearer},
 		"immich":   {URL: os.Getenv("IMMICH_URL"), Auth: func(r *http.Request) { r.Header.Set("x-api-key", os.Getenv("IMMICH_API_KEY")) }},

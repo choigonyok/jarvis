@@ -4,8 +4,8 @@
 # JARVIS_TEST_DSN 을 주고 go test 를 돌리고, 끝나면 컨테이너를 지운다.
 #
 #   scripts/dbtest                       기본: DB 테스트가 있는 서비스 전부(memory-svc 는 FalkorDB)
-#   scripts/dbtest spending-svc mind-svc 서비스 디렉터리 여러 개
-#   scripts/dbtest spending-svc -run Cancel   서비스 뒤의 인자는 go test 로 넘어간다
+#   scripts/dbtest input-svc mind-svc 서비스 디렉터리 여러 개
+#   scripts/dbtest mind-svc -run Cancel   서비스 뒤의 인자는 go test 로 넘어간다
 #
 # 테스트는 운영과 같이 그 서비스의 역할(svc_<서비스>, 마이그레이션 050)로 붙는다 - 권한이
 # 모자라면 여기서 permission denied 로 드러난다. 운영 데이터베이스에는 닿지 않는다.
@@ -17,7 +17,7 @@ IMAGE=pgvector/pgvector:pg17@sha256:ac08538c6f8b9904c33c8224c5e5706dbe760aca29db
 
 dirs=()
 while [[ $# -gt 0 && "$1" != -* ]]; do dirs+=("$1"); shift; done
-[[ ${#dirs[@]} -gt 0 ]] || dirs=(gocommon spending-svc context-svc input-svc mind-svc calendar-svc workout-svc chat-svc output-svc vault-svc jobs-svc memory-svc)
+[[ ${#dirs[@]} -gt 0 ]] || dirs=(gocommon context-svc input-svc mind-svc calendar-svc workout-svc chat-svc output-svc vault-svc jobs-svc memory-svc)
 
 cleanup() { docker rm -f "$NAME" >/dev/null 2>&1 || true; docker network rm "$NET" >/dev/null 2>&1 || true; }
 trap cleanup EXIT

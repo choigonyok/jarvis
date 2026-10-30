@@ -2,10 +2,13 @@ package assets
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
+	"errors"
+	"io"
+	"log/slog"
 	"testing"
 	"time"
+
+	"github.com/choigonyok/jarvis/gocommon/queue"
 )
 
 var kst = time.FixedZone("KST", 9*3600)
@@ -40,28 +43,14 @@ func TestSpendsAreTheAnsweredSpendParts(t *testing.T) {
 	}
 }
 
-// A list that did not come back whole changes nothing: the rows are only
-// matched to an answer that is there.
-func TestSyncStopsAtAFailedRead(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer tok" || r.URL.Path != "/outflows" {
-			t.Errorf("토큰을 붙여 /outflows 를 물어야 합니다: %s", r.URL.Path)
+// A list that did not come whole changes nothing: the rows are only matched
+// to an answer that is there. No store: reaching it would panic, which is the
+// point.
+func TestTakeStopsAtAPartList(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	for _, body := range []string{`{"since":"2026-05-01"}`, `not json`} {
+		if err := Take(context.Background(), nil, kst, log, []byte(body)); !errors.Is(err, queue.ErrRefused) {
+			t.Fatalf("%s: %v", body, err)
 		}
-		http.Error(w, `{"error":"입출금 기록을 읽지 못했습니다."}`, http.StatusServiceUnavailable)
-	}))
-	defer srv.Close()
-	// No store: reaching it would panic, which is the point - a failed read
-	// must stop before the rows.
-	f := New(srv.URL, "tok", nil, time.Minute, nil)
-	if err := f.Sync(context.Background()); err == nil {
-		t.Fatal("503 은 오류여야 합니다")
-	}
-
-	empty := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"since":"2026-05-01"}`))
-	}))
-	defer empty.Close()
-	if err := New(empty.URL, "tok", nil, time.Minute, nil).Sync(context.Background()); err == nil {
-		t.Fatal("목록이 없는 답은 빈 목록이 아니라 오류입니다")
 	}
 }

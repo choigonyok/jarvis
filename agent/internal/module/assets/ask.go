@@ -65,7 +65,7 @@ type AskConfig struct {
 	// pace: every withdrawal is asked about now (the operator's choice,
 	// 2026-10-26), and this only stops a wall of cards if something breaks.
 	MaxOpen int
-	// Categories is the 가계부's list, for the card's 분류 (spending-svc).
+	// Categories is the 가계부's list, for the card's 분류.
 	Categories func(ctx context.Context) ([]string, error)
 }
 

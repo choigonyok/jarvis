@@ -47,7 +47,7 @@ var enrichTools = []string{
 	"mcp__" + EnrichServerName + "__report_lookup",
 }
 
-// --- spending-svc calls ----------------------------------------------------
+// --- the book's calls ------------------------------------------------------
 
 type Pending struct {
 	ID          int64     `json:"id"`
@@ -62,6 +62,9 @@ type Pending struct {
 }
 
 func (s *Store) call(ctx context.Context, method, path string, body, out any) error {
+	if method != http.MethodGet && s.send != nil {
+		return s.send.Do(ctx, method, Prefix+path, body, out)
+	}
 	var reader io.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)
@@ -82,7 +85,7 @@ func (s *Store) call(ctx context.Context, method, path string, body, out any) er
 	}
 	res, err := s.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("가계부 서비스에 연결하지 못했습니다: %w", err)
+		return fmt.Errorf("가계부에 연결하지 못했습니다: %w", err)
 	}
 	defer res.Body.Close()
 	if res.StatusCode >= 300 {
@@ -93,7 +96,7 @@ func (s *Store) call(ctx context.Context, method, path string, body, out any) er
 		if json.Unmarshal(raw, &payload) == nil && payload.Error != "" {
 			return errors.New(payload.Error)
 		}
-		return fmt.Errorf("가계부 서비스가 거부했습니다: %s", res.Status)
+		return fmt.Errorf("가계부가 거부했습니다: %s", res.Status)
 	}
 	if out == nil {
 		return nil

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/gocommon/notify"
-	"github.com/choigonyok/jarvis/spending-svc/internal/book"
+	"github.com/choigonyok/jarvis/mind-svc/internal/spending/book"
 )
 
 func TestEvents(t *testing.T) {

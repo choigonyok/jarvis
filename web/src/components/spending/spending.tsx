@@ -402,7 +402,7 @@ function Status({
   onRetried: (note: string) => void;
 }) {
   const c = book.collector;
-  const trouble = Boolean(c.lastError) || c.stale;
+  const trouble = c.stale;
   return (
     <div className="mt-3 space-y-1.5">
       <p className="flex items-start gap-1.5 text-[11.5px] leading-[1.5] text-faint">
@@ -410,13 +410,11 @@ function Status({
           aria-hidden
           className={cn("mt-[6px] size-[5px] shrink-0 rounded-full", trouble ? "bg-faint" : "bg-online")}
         />
-        {c.lastError
-          ? "카톡 수집기에 연결되지 않아요. 그동안의 결제는 연결되면 들어와요."
-          : c.stale
-            ? `카톡이 ${c.latestMessageAt ? ago(c.latestMessageAt) : "한동안"} 이후로 조용해요. 맥에서 카카오톡이 켜져 있는지 확인하세요.`
-            : c.lastAlertAt
-              ? `마지막 카드 알림 ${ago(c.lastAlertAt)}`
-              : "카드 알림을 기다리는 중"}
+        {c.stale
+          ? `카톡이 ${c.latestMessageAt ? ago(c.latestMessageAt) : "한동안"} 이후로 조용해요. 맥에서 카카오톡이 켜져 있는지 확인하세요.`
+          : c.lastAlertAt
+            ? `마지막 카드 알림 ${ago(c.lastAlertAt)}`
+            : "카드 알림을 기다리는 중"}
       </p>
       {book.enrichBlocked.map((site) => (
         <Blocked key={site.source} source={site.source} label={site.label} onRetried={onRetried} />
