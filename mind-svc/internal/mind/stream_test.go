@@ -72,6 +72,23 @@ func TestAReminderGoesByTheStream(t *testing.T) {
 	}
 }
 
+// A moment that passed while mind was down is not lost: the first look after it
+// comes back rings it, however late.
+func TestATimerMissedWhileDownRingsAtOnce(t *testing.T) {
+	now := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+	m, sent, _ := streamed(t, &now)
+	ctx := context.Background()
+	at := now.Add(time.Hour)
+	if _, err := m.Moments.Set(ctx, moments.Reminder{Text: "약", Source: moments.Asked, At: &at}); err != nil {
+		t.Fatal(err)
+	}
+	now = at.Add(9 * time.Hour)
+	m.Attn.Settle(ctx)
+	if len(*sent) != 1 {
+		t.Fatalf("밀린 타이머: %+v", *sent)
+	}
+}
+
 // Changing it moves the timer, cancelling it takes the timer away, and one
 // waiting from before gets its timer at the start.
 func TestTimersFollowTheReminder(t *testing.T) {

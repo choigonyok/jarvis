@@ -535,3 +535,87 @@ func TestANoticeDoesNotPutOffARead(t *testing.T) {
 		t.Fatal("알림뿐인 방도 읽음 표시를 위해 한 번은 돕니다")
 	}
 }
+
+// The check of the to-be structure: a read that ends twenty seconds after it
+// began does not undo what a person did three seconds ago. The room is read
+// again as it stands, and what the model then says of it is what counts.
+func TestALateReadDoesNotUndoAPerson(t *testing.T) {
+	ctx := context.Background()
+	c, st, script := setup(t, "")
+	e, err := c.world.Create(ctx, model.KindPlan, "r", model.State{Title: "지수와 강릉 여행", Status: model.Proposed, Date: "2026-10-17"}, world.Meta{Actor: "interpreter"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	say(t, st, "sim:1", "강릉 말고 속초 가자", false, time.Date(2026, 10, 12, 20, 2, 0, 0, seoul))
+	reads := 0
+	script.Answer = func(_, _ string) (string, error) {
+		reads++
+		if reads == 1 {
+			// While the model thinks, the operator says the plan is off.
+			if _, _, err := c.world.Update(ctx, e.ID, func(s *model.State) bool { s.Status = model.Cancelled; return true }, world.Meta{Actor: "operator"}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return `{"changes":[{"op":"update","kind":"plan","ref":"P1","set":{"status":"confirmed","title":"지수와 속초 여행"},"evidence":[{"line":1,"quote":"속초 가자"}],"confidence":0.9}]}`, nil
+	}
+	if err := c.Read(ctx, "r"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := st.Entity(ctx, e.ID)
+	if got.State.Status != model.Cancelled || got.State.Title != "지수와 강릉 여행" {
+		t.Fatalf("운영자가 한 일을 덮었습니다: %+v", got.State)
+	}
+	if due := c.Pending(); due["r"].IsZero() {
+		t.Fatalf("다시 읽어야 합니다: %v", due)
+	}
+	marks, _ := st.Rooms(ctx)
+	for _, m := range marks {
+		if m.Room == "r" && !m.Interpreted.IsZero() {
+			t.Fatalf("아직 읽은 것으로 치면 안 됩니다: %+v", m)
+		}
+	}
+	// Read again as it stands: nothing moves under it now, so what it says holds.
+	if err := c.Read(ctx, "r"); err != nil {
+		t.Fatal(err)
+	}
+	if reads != 2 {
+		t.Fatalf("다시 읽기: %d", reads)
+	}
+	got, _ = st.Entity(ctx, e.ID)
+	if got.State.Title != "지수와 속초 여행" {
+		t.Fatalf("다시 읽은 것은 지금 상태 위에 적습니다: %+v", got.State)
+	}
+}
+
+// Moved again under the second read: what moved is left, and the room is not
+// read a third time.
+func TestAReadIsRepeatedOnce(t *testing.T) {
+	ctx := context.Background()
+	c, st, script := setup(t, "")
+	e, err := c.world.Create(ctx, model.KindPlan, "r", model.State{Title: "지수와 강릉 여행", Status: model.Proposed, Date: "2026-10-17"}, world.Meta{Actor: "interpreter"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	say(t, st, "sim:1", "속초 가자", false, time.Date(2026, 10, 12, 20, 2, 0, 0, seoul))
+	reads := 0
+	script.Answer = func(_, _ string) (string, error) {
+		reads++
+		title := fmt.Sprintf("운영자가 고친 제목 %d", reads)
+		if _, _, err := c.world.Update(ctx, e.ID, func(s *model.State) bool { s.Title = title; return true }, world.Meta{Actor: "operator"}); err != nil {
+			t.Fatal(err)
+		}
+		return `{"changes":[{"op":"update","kind":"plan","ref":"P1","set":{"title":"지수와 속초 여행"},"evidence":[{"line":1,"quote":"속초 가자"}],"confidence":0.9}]}`, nil
+	}
+	for range 2 {
+		if err := c.Read(ctx, "r"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, _ := st.Entity(ctx, e.ID)
+	if got.State.Title != "운영자가 고친 제목 2" {
+		t.Fatalf("%+v", got.State)
+	}
+	if _, due := c.Pending()["r"]; due {
+		t.Fatalf("세 번 읽지 않습니다: %v", c.Pending())
+	}
+}

@@ -27,6 +27,10 @@ type Meta struct {
 	Confidence    float64
 	ObservationID int64
 	Why           string
+	// At, when set, is the version the writer last saw: a model reading takes
+	// many seconds, and what it read may have moved under it. If the entity is
+	// no longer at it the write is not made.
+	At int
 }
 
 // Listener hears every committed change, in order.
@@ -81,6 +85,9 @@ func (w *World) Update(ctx context.Context, id string, mutate func(*model.State)
 		e, err := w.st.Entity(ctx, id)
 		if err != nil {
 			return model.Entity{}, false, err
+		}
+		if meta.At != 0 && e.Version != meta.At {
+			return e, false, nil
 		}
 		before := e.State
 		before.People = slices.Clone(before.People)

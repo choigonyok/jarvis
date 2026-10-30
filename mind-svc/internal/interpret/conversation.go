@@ -83,6 +83,7 @@ type Conversation struct {
 	backoff map[string]time.Time // room -> not before (after a failed read)
 	fails   map[string]int       // room -> failed reads in a row
 	shrink  map[string]int       // room -> batch cap after unreadable answers
+	reread  map[string]bool      // room -> read again already because what it read moved
 	reading sync.Mutex           // one read at a time
 	read    time.Time            // the last read that went through
 	failed  string               // why the last read failed, until one works
@@ -103,7 +104,8 @@ func NewConversation(cfg Config, st store.Store, w *world.World, client llm.Clie
 	}
 	return &Conversation{
 		cfg: cfg, st: st, world: w, llm: client, loc: loc, now: now, log: log,
-		due: map[string]time.Time{}, waiting: map[string]int{}, others: map[string]bool{}, backoff: map[string]time.Time{}, fails: map[string]int{}, shrink: map[string]int{},
+		reread: map[string]bool{},
+		due:    map[string]time.Time{}, waiting: map[string]int{}, others: map[string]bool{}, backoff: map[string]time.Time{}, fails: map[string]int{}, shrink: map[string]int{},
 	}
 }
 
@@ -300,6 +302,25 @@ func (c *Conversation) Read(ctx context.Context, room string) error {
 		c.retryLater(room, err)
 		return fmt.Errorf("해석 결과를 읽지 못했습니다: %w", err)
 	}
+	// A read takes many seconds, and a person may answer in them. What the
+	// model read is then out of date: its changes are not written over what
+	// was done since. The room is read once more, as it stands; if it has moved
+	// again, what moved is left and the rest is written.
+	if moved, err := c.moved(ctx, ops, known); err != nil {
+		return err
+	} else if moved {
+		c.mu.Lock()
+		again := !c.reread[room]
+		if again {
+			c.reread[room] = true
+			c.due[room] = c.now()
+		}
+		c.mu.Unlock()
+		if again {
+			c.log.Info("읽는 사이 바뀌어 다시 읽습니다", "room", room)
+			return nil
+		}
+	}
 	applied := 0
 	for _, o := range ops {
 		ok, err := c.apply(ctx, room, o, fresh, known, remembered)
@@ -317,6 +338,7 @@ func (c *Conversation) Read(ctx context.Context, room string) error {
 	c.read, c.failed = c.now(), ""
 	delete(c.fails, room)
 	delete(c.shrink, room)
+	delete(c.reread, room)
 	c.mu.Unlock()
 	c.log.Info("대화를 해석했습니다", "room", room, "messages", len(fresh), "changes", applied, "proposed", len(ops))
 	if more {
@@ -337,6 +359,28 @@ func (c *Conversation) done(room string) {
 	delete(c.waiting, room)
 	delete(c.fails, room)
 	delete(c.shrink, room)
+}
+
+// moved is whether a change names something no longer as the model saw it.
+func (c *Conversation) moved(ctx context.Context, ops []op, known []view) (bool, error) {
+	seen := map[string]model.Entity{}
+	for _, v := range known {
+		seen[v.ref] = v.entity
+	}
+	for _, o := range ops {
+		e, ok := seen[strings.TrimSpace(o.Ref)]
+		if !ok {
+			continue
+		}
+		now, err := c.world.Entity(ctx, e.ID)
+		if err != nil {
+			return false, err
+		}
+		if now.Version != e.Version {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // quarantineAfter is how many failed reads in a row a single message gets
@@ -517,11 +561,18 @@ func (c *Conversation) apply(ctx context.Context, room string, o op, fresh []mod
 	}
 	refs := map[string]string{}
 	elsewhere := map[string]bool{}
+	versions := map[string]int{}
 	for _, v := range known {
 		refs[v.ref] = v.entity.ID
 		elsewhere[v.entity.ID] = v.elsewhere
+		versions[v.entity.ID] = v.entity.Version
 	}
 	meta := world.Meta{Actor: "interpreter", Evidence: evidence, Confidence: o.Confidence, Why: o.Why}
+	at := func(id string) world.Meta {
+		m := meta
+		m.At = versions[id]
+		return m
+	}
 
 	switch o.Op {
 	case "create":
@@ -537,7 +588,7 @@ func (c *Conversation) apply(ctx context.Context, room string, o op, fresh []mod
 		}
 		// The same plan named again is that plan, not a second one.
 		if id := c.same(kind, s, known); id != "" {
-			_, _, err := c.world.Update(ctx, id, func(cur *model.State) bool { setAll(cur, kind, o.Set, refs); return true }, meta)
+			_, _, err := c.world.Update(ctx, id, func(cur *model.State) bool { setAll(cur, kind, o.Set, refs); return true }, at(id))
 			return err == nil, err
 		}
 		_, err := c.world.Create(ctx, kind, room, s, meta)
@@ -562,7 +613,7 @@ func (c *Conversation) apply(ctx context.Context, room string, o op, fresh []mod
 				cur.Status = model.Closed
 			}
 			return true
-		}, meta)
+		}, at(id))
 		return changed, err
 	}
 	return skip("모르는 op " + o.Op)
