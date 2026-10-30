@@ -594,6 +594,35 @@ func TestTheGuestsRoleSeesOnlyItsOwn(t *testing.T) {
 	}
 }
 
+// What is said reaches each agent through the queue, under its own role: the
+// operator's on the records, the guest's on the guest's. An agent that cannot
+// subscribe hears nothing, and says so only in its log.
+func TestTheAgentsTakeWhatIsSaid(t *testing.T) {
+	for _, c := range []struct {
+		role, name string
+		topic      Topic
+	}{{"svc_agent", "agent-chat", Records}, {"svc_guest", "agent-chat-guest", Guest}} {
+		t.Run(c.name, func(t *testing.T) {
+			role := as(t, c.role)
+			w := newWorld(t, c.topic)
+			w2 := &world{t: t, admin: w.admin, topic: c.topic, name: c.name}
+			seen := &log{}
+			kinds := []string{"chat.message"}
+			start(t, &Consumer{Pool: role, Topic: c.topic, Name: c.name, Kinds: kinds, Handle: func(_ context.Context, m Message) error {
+				seen.add(m.ID)
+				return nil
+			}, Poll: 20 * time.Millisecond})
+			eventually(t, "등록", func() bool {
+				var n int
+				err := w.admin.QueryRow(context.Background(), `select count(*) from `+c.topic.Consumers+` where name = $1`, c.name).Scan(&n)
+				return err == nil && n == 1
+			})
+			id := w2.publish("chat.message", "chat:")
+			eventually(t, "받게", func() bool { return slices.Contains(seen.list(), id) })
+		})
+	}
+}
+
 // Only input-svc stores a record: a producer can leave one in the outbox and
 // that is all.
 func TestProducersOnlyLeaveItInTheOutbox(t *testing.T) {
