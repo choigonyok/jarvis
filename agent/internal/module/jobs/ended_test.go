@@ -15,8 +15,8 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
 )
 
-// endedSvc is jobs-svc with one job over (18, done) and one still waiting
-// (19): an answer to the first is turned away as 410, as jobs-svc does.
+// endedSvc is mind with one job over (18, done) and one still waiting
+// (19): an answer to the first is turned away as 410, as mind does.
 type endedSvc struct {
 	mu      sync.Mutex
 	answers []string

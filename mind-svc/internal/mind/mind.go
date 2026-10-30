@@ -69,7 +69,7 @@ type Options struct {
 	Photos act.Photos
 	// Drafter writes the messages the operator may send; nil: a template.
 	Drafter act.Drafter
-	// Jobs is where browser jobs are made (jobs-svc); nil keeps them in memory.
+	// Jobs is where browser jobs are made; nil keeps them in memory.
 	Jobs act.Jobs
 	// Assets is the allocation, read only; nil: not known.
 	Assets Assets

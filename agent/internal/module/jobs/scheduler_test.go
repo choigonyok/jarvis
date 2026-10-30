@@ -16,7 +16,7 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
 )
 
-// fakeRuns is jobs-svc as far as one run needs it.
+// fakeRuns is mind as far as one run needs it.
 func fakeRuns(t *testing.T, attempts int) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

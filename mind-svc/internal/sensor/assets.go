@@ -172,16 +172,14 @@ type job struct {
 // Jobs reads the work handed to the background browser: each job an
 // occurrence from when it was given to when it finished.
 func (s *Structured) Jobs(ctx context.Context) error {
-	if s.JobsURL == "" {
+	if s.ReadJobs == nil {
 		return nil
 	}
-	var out struct {
-		Jobs []job `json:"jobs"`
-	}
-	if err := s.get(ctx, s.JobsURL+"/jobs", &out); err != nil {
+	var jobs []job
+	if err := s.ReadJobs(ctx, &jobs); err != nil {
 		return err
 	}
-	for _, j := range out.Jobs {
+	for _, j := range jobs {
 		at, err := time.Parse(time.RFC3339, j.CreatedAt)
 		if err != nil {
 			continue

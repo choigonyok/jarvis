@@ -17,7 +17,7 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
 )
 
-// jobsSvc stands in for jobs-svc: it keeps what the run tools sent.
+// jobsSvc stands in for mind: it keeps what the run tools sent.
 type jobsSvc struct {
 	mu    sync.Mutex
 	calls []string

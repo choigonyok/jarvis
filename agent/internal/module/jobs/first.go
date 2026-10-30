@@ -10,11 +10,11 @@ import (
 )
 
 // The browser is one window, and its jobs go in the order they were asked
-// for: jobs-svc's line (next_at). A job the operator asks for while another
+// for: mind's line (next_at). A job the operator asks for while another
 // job's run has the browser is put in that line, and a card asks whether it
 // should go first instead (2026-10-28: "브라우저 작업은 요청 순대로 처리하고
 // 큐에 넣은 뒤에 먼저 인터셉트하고 처리할지 묻는 카드"). Approved, the job goes
-// to the front (jobs-svc's "first") and the run on the browser stops; that
+// to the front (mind's "first") and the run on the browser stops; that
 // run's job goes on right after it, in its own place (outcome "deferred").
 
 // askedFor is whether the operator is waiting on a job right now: one they

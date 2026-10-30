@@ -11,6 +11,8 @@ package obs
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -240,6 +242,26 @@ func (l *Stream) publish(ctx context.Context, o Observation) error {
 	})
 	return err
 }
+
+// Wake tells an agent's scheduler a job may be due now: the operator's, or the
+// guest's on the guest's topic.
+func (l *Stream) Wake(ctx context.Context, guest bool) error {
+	raw := make([]byte, 12)
+	if _, err := rand.Read(raw); err != nil {
+		return err
+	}
+	topic := queue.Effects
+	if guest {
+		topic = queue.GuestEffects
+	}
+	_, _, err := queue.Publish(ctx, l.db, topic, queue.Message{Kind: KindJobsWake, Source: mindSource,
+		SourceKey: "wake-" + hex.EncodeToString(raw), Actor: mindSource, Subject: "jobs"})
+	return err
+}
+
+// KindJobsWake says a job may be due: the scheduler looks now rather than on
+// its own long clock.
+const KindJobsWake = "jobs.wake"
 
 // Effect sends something decided that is not an observation: a write for the
 // hand to carry out.

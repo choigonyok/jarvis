@@ -6,7 +6,7 @@
 // on the scheduler (scheduler.go) runs it in the background with the shared
 // browser, and each run decides for itself what comes next - check again at
 // a time it picks, wait for the operator on a card, or finish. Between runs
-// the job lives in jobs-svc: what it remembers, what it is tracking, and a
+// the job lives in mind: what it remembers, what it is tracking, and a
 // log the 작업 tab shows as progress.
 //
 // What every job may need is built once here, as tools a run can call
@@ -188,7 +188,7 @@ func (m *Module) wake() {
 }
 
 // Wake has the scheduler look now: a place came free (the runner's OnFree),
-// or a job changed where this agent does not see it (jobs-svc's knock).
+// or a job changed where this agent does not see it (mind's word).
 func (m *Module) Wake() { m.wake() }
 
 // hear notes that a card's decision is on its way to the job.
@@ -215,7 +215,7 @@ func (m *Module) delivering(card string) bool {
 }
 
 // retrySoon has the sweep look again just past the delivery window: a
-// decision that could not reach its job (jobs-svc down a moment) is handed
+// decision that could not reach its job (mind down a moment) is handed
 // on then, not half an hour later.
 func (m *Module) retrySoon() {
 	m.heardMu.Lock()

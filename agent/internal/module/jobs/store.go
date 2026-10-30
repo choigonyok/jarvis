@@ -10,13 +10,31 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/choigonyok/jarvis/agent/internal/mindcmd"
 )
 
-// Store is the client to jobs-svc.
+// Prefix is where the jobs are on mind's API.
+const Prefix = "/api/jobs"
+
+// Sender sends what would change a job through the stream (mindcmd).
+type Sender interface {
+	Do(ctx context.Context, method, path string, in, out any) error
+	Leave(method, path string, in any) error
+}
+
+// Store reads the jobs at mind's window; a write goes by the stream.
 type Store struct {
 	base   string
 	token  string
+	send   Sender
 	client *http.Client
+}
+
+// Via sends the store's writes through the stream.
+func (s *Store) Via(send Sender) *Store {
+	s.send = send
+	return s
 }
 
 func NewStore(baseURL, token string) *Store {
@@ -99,8 +117,8 @@ type Ended struct {
 	Over bool `json:"over,omitempty"`
 }
 
-// StatusError is jobs-svc turning a request down: its status and what it
-// said. Its text is what it said, as before.
+// StatusError is the jobs turning a request down: its status and what they
+// said. Its text is what they said.
 type StatusError struct {
 	Status int
 	Msg    string
@@ -108,7 +126,7 @@ type StatusError struct {
 
 func (e *StatusError) Error() string { return e.Msg }
 
-// JobEnded is jobs-svc saying an answer went nowhere: the job is done or
+// JobEnded is the jobs saying an answer went nowhere: the job is done or
 // cancelled (410), and nothing runs it for a card any more.
 func JobEnded(err error) bool {
 	var se *StatusError
@@ -133,6 +151,14 @@ type Purge struct {
 }
 
 func (s *Store) call(ctx context.Context, method, path string, body, out any) error {
+	if method != http.MethodGet && s.send != nil {
+		err := s.send.Do(ctx, method, Prefix+path, body, out)
+		var refused *mindcmd.Refused
+		if errors.As(err, &refused) {
+			return &StatusError{Status: refused.Status, Msg: refused.Msg}
+		}
+		return err
+	}
 	var reader io.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)
@@ -153,7 +179,7 @@ func (s *Store) call(ctx context.Context, method, path string, body, out any) er
 	}
 	res, err := s.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("작업 서비스에 연결하지 못했습니다: %w", err)
+		return fmt.Errorf("작업에 연결하지 못했습니다: %w", err)
 	}
 	defer res.Body.Close()
 	if res.StatusCode >= 300 {
@@ -164,7 +190,7 @@ func (s *Store) call(ctx context.Context, method, path string, body, out any) er
 		if json.Unmarshal(raw, &payload) == nil && payload.Error != "" {
 			return &StatusError{Status: res.StatusCode, Msg: payload.Error}
 		}
-		return &StatusError{Status: res.StatusCode, Msg: "작업 서비스가 거부했습니다: " + res.Status}
+		return &StatusError{Status: res.StatusCode, Msg: "작업이 거부했습니다: " + res.Status}
 	}
 	if out == nil {
 		return nil
@@ -217,7 +243,7 @@ func (s *Store) Due(ctx context.Context) (*Job, error) {
 }
 
 // DueN is up to n jobs whose turn it is, most overdue first. An older
-// jobs-svc answers with `job` only; that one is the list then.
+// mind answers with `job` only; that one is the list then.
 func (s *Store) DueN(ctx context.Context, n int) ([]Job, error) {
 	d, err := s.DueNext(ctx, n)
 	return d.Jobs, err
@@ -229,7 +255,7 @@ type Due struct {
 	Jobs []Job
 	// Next is that time; nil when no job is on a clock.
 	Next *time.Time
-	// Timed: jobs-svc says Next at all. One that does not (older) is looked
+	// Timed: mind says Next at all. One that does not (older) is looked
 	// at often instead.
 	Timed bool
 }
@@ -276,8 +302,14 @@ func (s *Store) EndRun(ctx context.Context, runID int64, outcome, note string) (
 	return out, err
 }
 
+// Step is a line of progress. Nobody waits on it: a browser tool's call should
+// not.
 func (s *Store) Step(ctx context.Context, runID int64, kind, text string) error {
-	return s.call(ctx, http.MethodPost, fmt.Sprintf("/runs/%d/step", runID), map[string]string{"kind": kind, "text": text}, nil)
+	path, body := fmt.Sprintf("/runs/%d/step", runID), map[string]string{"kind": kind, "text": text}
+	if s.send != nil {
+		return s.send.Leave(http.MethodPost, Prefix+path, body)
+	}
+	return s.call(ctx, http.MethodPost, path, body, nil)
 }
 
 func (s *Store) Schedule(ctx context.Context, runID int64, at time.Time, reason string) (time.Time, error) {

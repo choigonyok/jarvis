@@ -69,7 +69,7 @@ func TestARequestedJobIsOfferedTheFront(t *testing.T) {
 	}
 }
 
-// Approved, the job goes to the front of jobs-svc's line and the run on the
+// Approved, the job goes to the front of mind's line and the run on the
 // browser is stopped for it, marked to keep its place; turned down, nothing
 // moves.
 func TestPuttingAJobFirst(t *testing.T) {
@@ -86,7 +86,7 @@ func TestPuttingAJobFirst(t *testing.T) {
 	if err := props.Decide(card, proposal.Approve); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, "먼저 하기가 jobs-svc 에 가지 않았습니다", func() bool { return contains(svc.got(), "/jobs/2/first") })
+	waitFor(t, "먼저 하기가 mind 에 가지 않았습니다", func() bool { return contains(svc.got(), "/jobs/2/first") })
 	waitFor(t, "카드가 처리되지 않았습니다", func() bool {
 		p, _ := props.Get(card)
 		return p.State == proposal.Executed
@@ -118,7 +118,7 @@ func TestPuttingAJobFirst(t *testing.T) {
 	}
 }
 
-// endSvc is jobs-svc for one run of job 5 (run 9): it keeps what the run was
+// endSvc is mind for one run of job 5 (run 9): it keeps what the run was
 // ended with, and answers the end as told.
 type endSvc struct {
 	mu    sync.Mutex

@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -170,17 +168,13 @@ func TestAssetsAndJobs(t *testing.T) {
 	                           {"id":"upbit:BTC","kind":"crypto","name":"비트코인","symbol":"BTC","quantity":0.01234567}],
 	               "problems":[],"principal":{"flows":[{"id":"f1","venue":"kis","amountKrw":-300000,"date":"2026-10-01","memo":"생활비"}]},
 	               "realized":{"sales":[{"id":"s1","date":"2026-10-02","kind":"stock","name":"금 ETF","symbol":"GLD","quantity":1,"profitKrw":-1200.4}]}}`
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/jobs":
-			w.Write([]byte(`{"jobs":[{"id":3,"title":"장작 담기","goal":"장작","state":"active","createdAt":"2026-10-12T09:00:00+09:00"}]}`))
-		}
-	}))
-	defer srv.Close()
+	readJobs := func(_ context.Context, into any) error {
+		return json.Unmarshal([]byte(`[{"id":3,"title":"장작 담기","goal":"장작","state":"active","createdAt":"2026-10-12T09:00:00+09:00"}]`), into)
+	}
 	st := store.NewMemory()
 	rec := &recorder{}
 	now := time.Date(2026, 10, 15, 10, 0, 0, 0, seoul)
-	s := &Structured{Store: st, Observer: observer{st}, Loc: seoul, Now: func() time.Time { return now }, JobsURL: srv.URL, Records: rec}
+	s := &Structured{Store: st, Observer: observer{st}, Loc: seoul, Now: func() time.Time { return now }, ReadJobs: readJobs, Records: rec}
 	assets := func() error {
 		return s.Take(ctx, queue.Message{Kind: KindHoldings, Payload: json.RawMessage(portfolio), OccurredAt: now})
 	}

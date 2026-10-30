@@ -74,6 +74,7 @@ import (
 
 	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/mind-svc/internal/clock"
+	jobs "github.com/choigonyok/jarvis/mind-svc/internal/jobs/api"
 	"github.com/choigonyok/jarvis/mind-svc/internal/mind"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/moments"
@@ -88,6 +89,7 @@ var ui embed.FS
 
 type Server struct {
 	book  *spending.Server
+	jobs  *jobs.Server
 	m     *mind.Mind
 	token string
 	// consoleToken is what a person signs in to the console with, once, for
@@ -117,6 +119,12 @@ func (s *Server) SetStream(c Commands) { s.stream = c }
 // SetBook puts the household book on the API.
 func (s *Server) SetBook(b *spending.Server) { s.book = b }
 
+// SetJobs puts the jobs on the API, each person's their own.
+func (s *Server) SetJobs(j *jobs.Server) {
+	j.SetWho(whoOf)
+	s.jobs = j
+}
+
 // SetGuestToken lets the guest's agent keep the guest's own reminders and
 // checklists here, and read the guest's situation (person).
 func (s *Server) SetGuestToken(t string) { s.guestToken = t }
@@ -142,6 +150,12 @@ func (s *Server) Handler() http.Handler {
 		s.book.Mount(
 			func(pattern string, h http.HandlerFunc) { mux.HandleFunc(pattern, owner(h)) },
 			func(pattern string, h http.HandlerFunc) { write(pattern, owner, h) })
+	}
+	if s.jobs != nil {
+		mux.HandleFunc("GET "+jobs.Prefix+"/health", s.jobs.Health())
+		s.jobs.Mount(
+			func(pattern string, h http.HandlerFunc) { mux.HandleFunc(pattern, s.person(h)) },
+			func(pattern string, h http.HandlerFunc) { write(pattern, s.person, h) })
 	}
 	mux.HandleFunc("GET /status", s.auth(true, func(w http.ResponseWriter, r *http.Request) {
 		st, err := s.m.Status(r.Context())

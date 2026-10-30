@@ -315,7 +315,7 @@ func TestSchedulerWakesOnEventsAndClocks(t *testing.T) {
 	waitFor(t, "시계가 된 작업이 시작되지 않았습니다", func() bool { return started.Load() == 2 })
 }
 
-// A decision that could not reach its job (jobs-svc down a moment) stays a
+// A decision that could not reach its job (mind down a moment) stays a
 // decision on the card - not "failed", which would later be told as a
 // rejection - and is handed on by the sweep once the delivery window is past.
 func TestUndeliveredDecisionIsHandedOnSoon(t *testing.T) {

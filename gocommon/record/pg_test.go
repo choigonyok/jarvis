@@ -117,10 +117,10 @@ func TestJobEventsBecomeRecords(t *testing.T) {
 	db := admin(t)
 	ctx := context.Background()
 	var owner, guest int64
-	if err := db.QueryRow(ctx, `insert into jobs (title, goal, who) values ('기록 시험', '목표', 'owner') returning id`).Scan(&owner); err != nil {
+	if err := db.QueryRow(ctx, `insert into mind.jobs (title, goal, who) values ('기록 시험', '목표', 'owner') returning id`).Scan(&owner); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.QueryRow(ctx, `insert into jobs (title, goal, who) values ('손님 시험', '목표', 'guest') returning id`).Scan(&guest); err != nil {
+	if err := db.QueryRow(ctx, `insert into mind.jobs (title, goal, who) values ('손님 시험', '목표', 'guest') returning id`).Scan(&guest); err != nil {
 		t.Fatal(err)
 	}
 	insert := func(job int64, text string) int64 {
@@ -129,12 +129,12 @@ func TestJobEventsBecomeRecords(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer tx.Rollback(ctx)
-		// As the service does it: svc_jobs has no rights on the input schema.
-		if _, err := tx.Exec(ctx, `set local role svc_jobs`); err != nil {
+		// As the service does it: svc_mind has no rights on the input schema.
+		if _, err := tx.Exec(ctx, `set local role svc_mind`); err != nil {
 			t.Fatal(err)
 		}
 		var id int64
-		if err := tx.QueryRow(ctx, `insert into job_events (job_id, kind, text) values ($1, 'step', $2) returning id`, job, text).Scan(&id); err != nil {
+		if err := tx.QueryRow(ctx, `insert into mind.job_events (job_id, kind, text) values ($1, 'step', $2) returning id`, job, text).Scan(&id); err != nil {
 			t.Fatal(err)
 		}
 		if err := tx.Commit(ctx); err != nil {

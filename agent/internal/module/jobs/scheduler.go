@@ -98,12 +98,12 @@ type WebTools struct {
 	Tools []string
 }
 
-// legacyPoll is how often a jobs-svc that does not say when its next job
+// legacyPoll is how often a mind that does not say when its next job
 // comes due (one from before it did) is asked, and one that did not answer.
 const legacyPoll = 30 * time.Second
 
 // Run starts due jobs as they may start: one on the browser at a time, in
-// the order they were asked for (jobs-svc's line), and only while the
+// the order they were asked for (mind's line), and only while the
 // conversation is not using it; jobs without sites beside everything, a few
 // at once. A job the operator asks for while another job has the browser
 // waits its turn, and its 먼저 card asks whether it should go first. Each run
@@ -111,7 +111,7 @@ const legacyPoll = 30 * time.Second
 //
 // It does not look on a short clock. What makes a job due wakes it (Wake):
 // a job made or instructed, a card decided, a login done, a place come free
-// in the runner, a run ended, a knock from jobs-svc when the 작업 tab
+// in the runner, a run ended, a word from mind when the 작업 tab
 // changed a job. A job on its own clock is looked at when that comes due,
 // and Interval is only the net under all of it - with the card sweep, which
 // asks no model anything.
@@ -218,7 +218,7 @@ func earliest(a, b time.Time) time.Time {
 }
 
 // claim marks a job as being run here; false when it already is (its run is
-// being opened, so jobs-svc does not know yet).
+// being opened, so mind does not know yet).
 func (m *Module) claim(job int64) bool {
 	m.activeMu.Lock()
 	defer m.activeMu.Unlock()
@@ -445,7 +445,7 @@ func describe(s claudecode.Step) (string, string) {
 	case "read":
 		return "step", "읽기: " + clampText(str("url"), 120)
 	}
-	// The job's own tools log themselves in jobs-svc (schedule, card, report).
+	// The job's own tools log themselves in mind (schedule, card, report).
 	return "", ""
 }
 

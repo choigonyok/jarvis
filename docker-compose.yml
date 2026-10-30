@@ -131,7 +131,6 @@ services:
       JARVIS_ASSETS_URL: http://assets:8092
       # 가계부도 읽기만 한다.
       # 작업. 대화에서 맡긴 일을 기록하는 곳이고, 실행은 에이전트의 스케줄러가 한다.
-      JARVIS_JOBS_URL: http://jobs:8098
       # 로그인 정보 보관함(저장·목록·지우기만 - 꺼내는 것은 브라우저뿐).
       JARVIS_VAULT_URL: http://vault:8105
       # 하나의 관문(mind-svc). 제안은 거기서 정해지고, 그 카드가 여기서 결재 카드가 된다.
@@ -227,7 +226,6 @@ services:
         postgres://svc_guest:${JARVIS_DB_PASSWORD_GUEST:?scripts/db-roles 를 먼저 실행하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
       # 손님 자신의 작업·리마인드·체크리스트. jobs·mind 는 이 손님 토큰으로 손님 것만 연다.
       # 손님 작업은 웹사이트를 열지 않는다(브라우저는 운영자 계정으로 로그인돼 있다).
-      JARVIS_JOBS_URL: http://jobs:8098
       # 손님의 지금 상황·취향: mind 는 이 손님 토큰에 손님 것만 답한다(손님 일정·폰·
       # 리마인드·체크리스트, 손님 기억에서 뽑은 취향). context 는 손님 폰 한 줄만.
       JARVIS_MIND_URL: http://mind:8102
@@ -261,6 +259,123 @@ services:
       - default
       - search
       - guest-data
+    restart: unless-stopped
+
+  # 위치·현재 상태. 폰의 OwnTracks(위치·영역 진입/이탈)와 iOS 단축어·맥 수집기(CarPlay,
+  # 집중 모드, 앞에 있는 앱)가 게이트웨이(/context/owntracks, /context/signals)로 보낸 것을
+  # 받아 영역 체류(visits)와 현재 상태로 만든다. 폰은 스택의 토큰을 갖지 않는다: OwnTracks 는
+  # 자기 Basic 인증, 단축어는 신호 토큰. 좌표 원본은 CONTEXT_RAW_DAYS(기본 30일)만 둔다.
+  context:
+    <<: *outside
+    build:
+      context: ./context-svc
+      additional_contexts:
+        gocommon: ./gocommon
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      LISTEN_ADDR: ":8103"
+      DATABASE_URL: >-
+        postgres://svc_context:${JARVIS_DB_PASSWORD_CONTEXT:?scripts/db-roles 를 먼저 실행하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
+      API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
+      SIGNAL_TOKEN: ${CONTEXT_SIGNAL_TOKEN:-}
+      OWNTRACKS_USER: ${OWNTRACKS_USER:-}
+      OWNTRACKS_PASSWORD: ${OWNTRACKS_PASSWORD:-}
+      # 손님(상대) 폰의 OwnTracks 계정. 비어 있으면 상대 폰을 받지 않는다.
+      OWNTRACKS_GUEST_USER: ${OWNTRACKS_GUEST_USER:-}
+      OWNTRACKS_GUEST_PASSWORD: ${OWNTRACKS_GUEST_PASSWORD:-}
+      # 손님 agent 의 토큰: 손님 폰이 지금 어디인지(GET /now/guest)만 연다.
+      API_GUEST_TOKEN: ${JARVIS_GUEST_API_TOKEN:-}
+      # 출발 탭의 실시간 버스(공공데이터포털 일반 인증키)·지하철(서울 열린데이터광장
+      # 실시간 지하철 인증키). 비어 있으면 그 정보만 없다.
+      DATA_GO_KR_KEY: ${DATA_GO_KR_KEY:-}
+      SEOUL_SUBWAY_KEY: ${SEOUL_SUBWAY_KEY:-}
+      INPUT_URL: http://input:8101
+      # 날씨를 읽는 곳은 여기 하나다. 어디의 예보가 필요한지는 mind 에 묻는다.
+      MIND_URL: http://mind:8102
+      WEATHER: ${MIND_WEATHER:-}
+      WEATHER_HOME: ${MIND_WEATHER_HOME:-}
+      CONTEXT_RAW_DAYS: ${CONTEXT_RAW_DAYS:-30}
+    expose:
+      - "8103"
+    ports:
+      - "127.0.0.1:${JARVIS_CONTEXT_PORT:-8103}:8103"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8103/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+    networks:
+      - default
+      - data
+    restart: unless-stopped
+
+  # 웹 찾기·읽기. 네이버 검색(NAVER API HUB), 페이지 읽기와 그 안의 그림 속 글자(맥미니 호스트의
+  # OCR - ocr/, scripts/ocr), 네이버 지도(플레이스)의 근처 목록. 상태가 없다(캐시는 메모리).
+  # 바깥 페이지를 받아 파싱하는 곳이라 search 네트워크(이것과 agent 들)에만 붙는다 - 페이지가 이
+  # 프로세스를 장악해도 다른 서비스에는 닿지 못하고, 받는 쪽(fetch)도 사설 주소를 열지 않는다.
+  # 토큰은 이것만의 JARVIS_SEARCH_TOKEN(모든 서비스가 받는 JARVIS_API_TOKEN 은 여기 없다).
+  # 비어 있으면 /health 만 답하고 꺼져 있다 - 다시 뜨기를 반복하지 않는다.
+  search:
+    <<: *outside
+    build: ./search-svc
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      LISTEN_ADDR: ":8104"
+      API_TOKEN: ${JARVIS_SEARCH_TOKEN:-}
+      # NCP 콘솔 > NAVER API HUB > Application 의 인증 정보(Client ID·Secret). 비어 있으면 네이버
+      # 검색만 꺼진다(읽기·네이버 지도는 된다).
+      NAVER_API_HUB_ID: ${NAVER_API_HUB_ID:-}
+      NAVER_API_HUB_SECRET: ${NAVER_API_HUB_SECRET:-}
+      # 그림 속 글자: 맥미니 호스트의 OCR(scripts/ocr install). 토큰은 위와 같은 것.
+      OCR_URL: ${JARVIS_OCR_URL:-http://host.docker.internal:8107}
+    expose:
+      - "8104"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8104/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - search
+    restart: unless-stopped
+
+  # 로그인 정보 보관함. 운영자가 대화의 카드(비밀번호 칸)로 넣은 아이디·비밀번호를
+  # 봉인해서(AES-256-GCM) Postgres 에 두고, 브라우저가 그 사이트의 로그인 화면에 있을
+  # 때만 꺼내 준다. 키는 이 .env 에만 있다 - DB 와 백업에는 봉인된 값뿐이다.
+  # 토큰이 둘: 서비스 토큰(에이전트)은 저장·목록·지우기만, 브라우저 토큰은 꺼내기만.
+  # 공개 포트가 없고, data(Postgres)·browser(브라우저가 꺼내 감) 네트워크에만 붙는다.
+  vault:
+    build:
+      context: ./vault-svc
+      additional_contexts:
+        gocommon: ./gocommon
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      LISTEN_ADDR: ":8105"
+      DATABASE_URL: >-
+        postgres://svc_vault:${JARVIS_DB_PASSWORD_VAULT:?scripts/db-roles 를 먼저 실행하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
+      API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
+      VAULT_RELEASE_TOKEN: ${JARVIS_VAULT_RELEASE_TOKEN:?JARVIS_VAULT_RELEASE_TOKEN 을 .env 에 설정하세요}
+      VAULT_KEY: ${JARVIS_VAULT_KEY:?JARVIS_VAULT_KEY 를 .env 에 설정하세요 (openssl rand -base64 32)}
+    expose:
+      - "8105"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8105/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+    networks:
+      - data
+      - browser
     restart: unless-stopped
 
   # 캘린더. 일정의 저장만 여기 있다.
@@ -634,7 +749,7 @@ services:
       INPUT_URL: http://input:8101
       NOTIFY_SVC_URL: http://output:8097
       PHOTOS_URL: http://photos:8107
-      JOBS_URL: http://jobs:8098
+      JOBS_URL: http://mind:8102/api/jobs
       IMESSAGE_URL: http://imessage:8099
       SEARCH_URL: http://search:8104
       AGENT_GUEST_URL: http://agent-guest:8081
@@ -696,7 +811,6 @@ services:
       VAPID_SUBJECT: ${JARVIS_VAPID_SUBJECT:-https://jarvis.choigonyok.com}
       # 승인된 쓰기를 대신 하는 손. 정해진 API 만 부른다(output-svc internal/calls).
       CALENDAR_URL: http://calendar:8093
-      JOBS_URL: http://jobs:8098
       ASSETS_URL: http://assets:8092
       IMMICH_URL: http://immich:2283
       IMMICH_API_KEY: ${IMMICH_MIND_API_KEY:-}
@@ -808,8 +922,6 @@ services:
       # 쉼표로 더한다. 카카오페이 같은 간편결제는 기본으로 빼 두었다 - 카드로 충전·결제되면 카드 알림과
       # 두 번 잡힌다.
       SPENDING_EXTRA_CHANNELS: ${SPENDING_EXTRA_CHANNELS:-}
-      # 준비물 카드를 승인하면 장바구니에 담기만 하는 작업을 jobs-svc 에 만든다(결제는 안 함).
-      JOBS_URL: http://jobs:8098
       # 월급 카드에 비중 차이를 적으려고 자산 배분을 읽기만 한다.
       ASSETS_URL: http://assets:8092
       # 영역 체류(visits)를 발생으로 읽는다: 지금 상황의 가장 확실한 위치 단서.

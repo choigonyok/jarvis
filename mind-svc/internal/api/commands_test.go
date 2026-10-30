@@ -16,6 +16,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/act"
 	"github.com/choigonyok/jarvis/mind-svc/internal/checklist"
 	"github.com/choigonyok/jarvis/mind-svc/internal/gate"
+	jobs "github.com/choigonyok/jarvis/mind-svc/internal/jobs/api"
 	"github.com/choigonyok/jarvis/mind-svc/internal/llm"
 	"github.com/choigonyok/jarvis/mind-svc/internal/mind"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
@@ -195,5 +196,27 @@ func TestAnAnswerRunsTheCard(t *testing.T) {
 	got, _ := m.Opts.Store.Intent(ctx, in.ID)
 	if got.Status != model.Rejected {
 		t.Fatalf("%s", got.Status)
+	}
+}
+
+// The jobs are for those who hold a token; the guest's opens their side.
+func TestTheJobsWantAToken(t *testing.T) {
+	m := mind.New(mind.Options{Store: store.NewMemory(), Log: obs.NewMemoryLog(slog.New(slog.NewTextHandler(io.Discard, nil))),
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: time.Now, Loc: time.UTC})
+	s := New(m, "svc", "", false, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	s.SetGuestToken("guest")
+	s.SetJobs(jobs.New(nil, time.Hour, slog.New(slog.NewTextHandler(io.Discard, nil))))
+	h := s.Handler()
+	for path, want := range map[string]int{"/api/jobs/jobs": http.StatusUnauthorized, "/api/jobs/due": http.StatusUnauthorized} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != want {
+			t.Fatalf("%s: %d", path, rec.Code)
+		}
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/jobs/jobs", strings.NewReader(`{}`)))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("쓰기: %d", rec.Code)
 	}
 }

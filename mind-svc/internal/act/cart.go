@@ -1,18 +1,15 @@
 package act
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 	"sync"
-	"time"
 )
 
-// Jobs is where a browser job is made: jobs-svc in the stack, run by the
+// Jobs is where a browser job is made: the ledger in the stack, run by the
 // agent's scheduler with its browser.
 type Jobs interface {
 	Create(ctx context.Context, title, goal, instructions string, sites []string) (int64, error)
@@ -106,49 +103,17 @@ func (m *MemoryJobs) Cancel(_ context.Context, id int64) error {
 	return nil
 }
 
-// JobsSvc is jobs-svc (POST /jobs, POST /jobs/{id}/cancel).
-type JobsSvc struct {
-	URL   string
-	Token string
-	HTTP  *http.Client
+// Ledger is the jobs mind keeps.
+type Ledger interface {
+	CreateJob(ctx context.Context, title, goal, instructions string, sites []string) (int64, error)
+	CancelJob(ctx context.Context, id int64) error
 }
 
-func (j JobsSvc) Create(ctx context.Context, title, goal, instructions string, sites []string) (int64, error) {
-	var out struct {
-		ID int64 `json:"id"`
-	}
-	err := j.do(ctx, "/jobs", map[string]any{"title": title, "goal": goal, "instructions": instructions, "sites": sites}, &out)
-	return out.ID, err
+// JobsBook makes jobs in that ledger.
+type JobsBook struct{ Ledger Ledger }
+
+func (j JobsBook) Create(ctx context.Context, title, goal, instructions string, sites []string) (int64, error) {
+	return j.Ledger.CreateJob(ctx, title, goal, instructions, sites)
 }
 
-func (j JobsSvc) Cancel(ctx context.Context, id int64) error {
-	return j.do(ctx, fmt.Sprintf("/jobs/%d/cancel", id), map[string]any{}, nil)
-}
-
-func (j JobsSvc) do(ctx context.Context, path string, in, out any) error {
-	body, _ := json.Marshal(in)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(j.URL, "/")+path, bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if j.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+j.Token)
-	}
-	client := j.HTTP
-	if client == nil {
-		client = &http.Client{Timeout: 20 * time.Second}
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 300 {
-		return fmt.Errorf("jobs-svc %s: %d", path, resp.StatusCode)
-	}
-	if out != nil {
-		return json.NewDecoder(resp.Body).Decode(out)
-	}
-	return nil
-}
+func (j JobsBook) Cancel(ctx context.Context, id int64) error { return j.Ledger.CancelJob(ctx, id) }

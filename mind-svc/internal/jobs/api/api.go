@@ -1,5 +1,6 @@
-// Package api serves jobs. Same bearer scheme as the rest of the stack:
-// everything but /health needs the token.
+// Package api is the jobs' part of mind's HTTP surface: reads at the window, and
+// writes that reach here the way all of mind's do, by the stream (mind's
+// api.Command).
 //
 // Two callers. The console's 작업 tab lists jobs, shows one, and instructs,
 // pauses, resumes, runs or cancels it. The agent creates jobs from
@@ -15,7 +16,6 @@ package api
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,122 +27,104 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/gocommon/health"
-	"github.com/choigonyok/jarvis/jobs-svc/internal/store"
+	"github.com/choigonyok/jarvis/mind-svc/internal/jobs/store"
 )
+
+// Prefix is where the jobs are on mind's API.
+const Prefix = "/api/jobs"
 
 type Server struct {
 	store      *store.Store
-	token      string
-	guestToken string
 	purgeAfter time.Duration
 	log        *slog.Logger
+	// who is whose a request is, as mind's API says.
+	who func(*http.Request) string
 	// wake tells whose agent's scheduler a job may be due now.
 	wake func(who string)
 }
 
-func New(s *store.Store, token, guestToken string, purgeAfter time.Duration, log *slog.Logger) *Server {
-	return &Server{store: s, token: token, guestToken: guestToken, purgeAfter: purgeAfter, log: log}
+func New(s *store.Store, purgeAfter time.Duration, log *slog.Logger) *Server {
+	return &Server{store: s, purgeAfter: purgeAfter, log: log, who: func(*http.Request) string { return store.Owner }}
 }
+
+// SetWho says how to tell whose a request is.
+func (s *Server) SetWho(fn func(*http.Request) string) { s.who = fn }
 
 // SetWake names what to call when a job may have come due by someone's
 // hand - made, instructed, answered, run now, resumed, a site's login done.
-// It is the agent's scheduler - the job's own person's agent - which
-// otherwise looks only on its own long clock: the 작업 tab talks to this
-// service, not to the agent.
+// It reaches the agent's scheduler - the job's own person's agent - which
+// otherwise looks only on its own long clock: the 작업 tab does not talk to it.
 func (s *Server) SetWake(fn func(who string)) { s.wake = fn }
 
 func (s *Server) woke(r *http.Request) {
 	if s.wake != nil {
-		go s.wake(who(r))
+		s.wake(s.who(r))
 	}
 }
 
 // noBrowser is why a guest's job may not name a website or a photo.
 const noBrowser = "손님 작업은 웹사이트를 열거나 사진을 쓸 수 없어요 - 브라우저가 운영자 계정으로 로그인돼 있어서요."
 
-func (s *Server) Handler() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", s.health)
+// Health is the jobs' own /health, open like the service's was.
+func (s *Server) Health() http.HandlerFunc { return s.health }
+
+// Mount puts the routes on mind's mux: read for what only looks, write for
+// what changes a job.
+func (s *Server) Mount(read, write func(pattern string, h http.HandlerFunc)) {
 	// 탭과 대화
-	mux.HandleFunc("GET /jobs", s.auth(s.list))
-	mux.HandleFunc("POST /jobs", s.auth(s.create))
-	mux.HandleFunc("GET /jobs/{id}", s.job(s.detail))
-	mux.HandleFunc("POST /jobs/{id}/instruct", s.job(s.instruct))
-	mux.HandleFunc("POST /jobs/{id}/sites", s.job(s.addSites))
-	mux.HandleFunc("POST /jobs/{id}/{action}", s.job(s.control))
+	read("GET "+Prefix+"/jobs", s.list)
+	write("POST "+Prefix+"/jobs", s.create)
+	read("GET "+Prefix+"/jobs/{id}", s.job(s.detail))
+	write("POST "+Prefix+"/jobs/{id}/instruct", s.job(s.instruct))
+	write("POST "+Prefix+"/jobs/{id}/sites", s.job(s.addSites))
+	write("POST "+Prefix+"/jobs/{id}/{action}", s.job(s.control))
 	// 에이전트: 스케줄러
-	mux.HandleFunc("GET /due", s.auth(s.due))
-	mux.HandleFunc("POST /jobs/{id}/runs", s.job(s.startRun))
-	mux.HandleFunc("POST /runs/orphans", s.auth(s.orphans))
-	mux.HandleFunc("POST /runs/{id}/end", s.run(s.endRun))
-	mux.HandleFunc("POST /jobs/{id}/answer", s.job(s.answer))
+	read("GET "+Prefix+"/due", s.due)
+	write("POST "+Prefix+"/jobs/{id}/runs", s.job(s.startRun))
+	write("POST "+Prefix+"/runs/orphans", s.orphans)
+	write("POST "+Prefix+"/runs/{id}/end", s.run(s.endRun))
+	write("POST "+Prefix+"/jobs/{id}/answer", s.job(s.answer))
 	// 에이전트: 실행 중인 작업의 도구
-	mux.HandleFunc("POST /runs/{id}/step", s.run(s.step))
-	mux.HandleFunc("POST /runs/{id}/schedule", s.run(s.schedule))
-	mux.HandleFunc("POST /runs/{id}/wait", s.run(s.wait))
-	mux.HandleFunc("POST /runs/{id}/finish", s.run(s.finish))
-	mux.HandleFunc("POST /runs/{id}/report", s.run(s.report))
-	mux.HandleFunc("POST /runs/{id}/memory", s.run(s.memory))
-	mux.HandleFunc("POST /runs/{id}/record", s.run(s.record))
+	write("POST "+Prefix+"/runs/{id}/step", s.run(s.step))
+	write("POST "+Prefix+"/runs/{id}/schedule", s.run(s.schedule))
+	write("POST "+Prefix+"/runs/{id}/wait", s.run(s.wait))
+	write("POST "+Prefix+"/runs/{id}/finish", s.run(s.finish))
+	write("POST "+Prefix+"/runs/{id}/report", s.run(s.report))
+	write("POST "+Prefix+"/runs/{id}/memory", s.run(s.memory))
+	write("POST "+Prefix+"/runs/{id}/record", s.run(s.record))
 	// 사이트 로그인, 사진 정리
-	mux.HandleFunc("GET /sites", s.auth(s.sites))
-	mux.HandleFunc("POST /sites/login", s.auth(s.siteLogin))
-	mux.HandleFunc("GET /purge/due", s.auth(s.purgeDue))
-	mux.HandleFunc("POST /jobs/{id}/purged", s.job(s.purged))
-	return mux
-}
-
-type caller struct{}
-
-// who is whose the request is: the operator's (the services' token) or the
-// guest's.
-func who(r *http.Request) string {
-	if w, ok := r.Context().Value(caller{}).(string); ok {
-		return w
-	}
-	return store.Owner
-}
-
-func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		got, as := r.Header.Get("Authorization"), store.Owner
-		switch {
-		case s.guestToken != "" && same(got, "Bearer "+s.guestToken):
-			as = store.Guest
-		case s.token != "" && !same(got, "Bearer "+s.token):
-			writeErr(w, http.StatusUnauthorized, "인증이 필요합니다.")
-			return
-		}
-		next(w, r.WithContext(context.WithValue(r.Context(), caller{}, as)))
-	}
+	read("GET "+Prefix+"/sites", s.sites)
+	write("POST "+Prefix+"/sites/login", s.siteLogin)
+	read("GET "+Prefix+"/purge/due", s.purgeDue)
+	write("POST "+Prefix+"/jobs/{id}/purged", s.job(s.purged))
 }
 
 // job is a route on one job, the caller's own; another's is not found.
 func (s *Server) job(next http.HandlerFunc) http.HandlerFunc {
-	return s.auth(func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
 		id, ok := pathID(w, r)
 		if !ok {
 			return
 		}
 		s.mine(w, r, next, func(ctx context.Context) (string, error) { return s.store.WhoOf(ctx, id) }, "그런 작업이 없습니다.")
-	})
+	}
 }
 
 // run is a route on one run, of one of the caller's own jobs.
 func (s *Server) run(next http.HandlerFunc) http.HandlerFunc {
-	return s.auth(func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
 		id, ok := pathID(w, r)
 		if !ok {
 			return
 		}
 		s.mine(w, r, next, func(ctx context.Context) (string, error) { return s.store.WhoOfRun(ctx, id) }, "그런 실행이 없습니다.")
-	})
+	}
 }
 
 func (s *Server) mine(w http.ResponseWriter, r *http.Request, next http.HandlerFunc, whose func(context.Context) (string, error), missing string) {
 	owner, err := whose(r.Context())
 	switch {
-	case errors.Is(err, store.ErrNotFound) || err == nil && owner != who(r):
+	case errors.Is(err, store.ErrNotFound) || err == nil && owner != s.who(r):
 		writeErr(w, http.StatusNotFound, missing)
 	case err != nil:
 		s.fail(w, "작업을 읽지 못했습니다", err)
@@ -150,8 +132,6 @@ func (s *Server) mine(w http.ResponseWriter, r *http.Request, next http.HandlerF
 		next(w, r)
 	}
 }
-
-func same(a, b string) bool { return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1 }
 
 // overdueAfter is how long a job may wait past its time before the agents'
 // schedulers count as not taking it. They start a job only between turns of
@@ -202,13 +182,13 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) list(w http.ResponseWriter, r *http.Request) {
-	jobs, err := s.store.List(r.Context(), who(r))
+	jobs, err := s.store.List(r.Context(), s.who(r))
 	if err != nil {
 		s.fail(w, "작업 목록을 읽지 못했습니다", err)
 		return
 	}
 	sites := []store.Site{}
-	if who(r) == store.Owner {
+	if s.who(r) == store.Owner {
 		if sites, err = s.store.Sites(r.Context()); err != nil {
 			s.fail(w, "사이트 상태를 읽지 못했습니다", err)
 			return
@@ -228,7 +208,7 @@ func (s *Server) create(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "제목과 목표가 필요합니다.")
 		return
 	}
-	in.Who = who(r)
+	in.Who = s.who(r)
 	if in.Who == store.Guest && (len(in.Sites) > 0 || len(in.Photos) > 0) {
 		writeErr(w, http.StatusBadRequest, noBrowser)
 		return
@@ -302,7 +282,7 @@ func (s *Server) addSites(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "더할 사이트를 1~20개 주세요.")
 		return
 	}
-	if who(r) == store.Guest {
+	if s.who(r) == store.Guest {
 		writeErr(w, http.StatusForbidden, noBrowser)
 		return
 	}
@@ -368,6 +348,33 @@ func (s *Server) answer(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// CreateJob makes a job of the operator's (act.Jobs).
+func (s *Server) CreateJob(ctx context.Context, title, goal, instructions string, sites []string) (int64, error) {
+	j, err := s.store.Create(ctx, store.NewJob{Title: title, Goal: goal, Instructions: instructions, Sites: sites})
+	if err == nil && s.wake != nil {
+		s.wake(store.Owner)
+	}
+	return j.ID, err
+}
+
+// CancelJob ends one (act.Jobs).
+func (s *Server) CancelJob(ctx context.Context, id int64) error {
+	return s.store.Control(ctx, id, "cancel")
+}
+
+// ReadJobs decodes the operator's jobs into into, for the structured lane.
+func (s *Server) ReadJobs(ctx context.Context, into any) error {
+	jobs, err := s.store.List(ctx, store.Owner)
+	if err != nil {
+		return err
+	}
+	raw, err := json.Marshal(jobs)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(raw, into)
+}
+
 // due is the jobs whose turn it is, most overdue first: `job` is the first
 // (what the scheduler read before it ran several at once), `jobs` up to
 // ?limit= of them, and `next` when the soonest of the rest comes due by its
@@ -379,7 +386,7 @@ func (s *Server) due(w http.ResponseWriter, r *http.Request) {
 			n = k
 		}
 	}
-	jobs, err := s.store.DueN(r.Context(), who(r), n)
+	jobs, err := s.store.DueN(r.Context(), s.who(r), n)
 	if err != nil {
 		s.fail(w, "할 작업을 읽지 못했습니다", err)
 		return
@@ -391,7 +398,7 @@ func (s *Server) due(w http.ResponseWriter, r *http.Request) {
 	if jobs == nil {
 		jobs = []store.Job{}
 	}
-	next, err := s.store.NextDue(r.Context(), who(r))
+	next, err := s.store.NextDue(r.Context(), s.who(r))
 	if err != nil {
 		s.fail(w, "다음 작업 시각을 읽지 못했습니다", err)
 		return
@@ -413,7 +420,7 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) orphans(w http.ResponseWriter, r *http.Request) {
-	if err := s.store.CloseOrphans(r.Context(), who(r)); err != nil {
+	if err := s.store.CloseOrphans(r.Context(), s.who(r)); err != nil {
 		s.fail(w, "남은 실행을 정리하지 못했습니다", err)
 		return
 	}
@@ -554,7 +561,7 @@ func (s *Server) record(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) sites(w http.ResponseWriter, r *http.Request) {
-	if who(r) == store.Guest {
+	if s.who(r) == store.Guest {
 		writeJSON(w, http.StatusOK, map[string]any{"sites": []store.Site{}})
 		return
 	}
@@ -567,7 +574,7 @@ func (s *Server) sites(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) siteLogin(w http.ResponseWriter, r *http.Request) {
-	if who(r) == store.Guest {
+	if s.who(r) == store.Guest {
 		writeErr(w, http.StatusForbidden, noBrowser)
 		return
 	}
@@ -590,7 +597,7 @@ func (s *Server) siteLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) purgeDue(w http.ResponseWriter, r *http.Request) {
-	ps, err := s.store.PurgeDue(r.Context(), who(r), s.purgeAfter)
+	ps, err := s.store.PurgeDue(r.Context(), s.who(r), s.purgeAfter)
 	if err != nil {
 		s.fail(w, "정리 대상을 읽지 못했습니다", err)
 		return

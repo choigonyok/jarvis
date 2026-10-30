@@ -45,7 +45,8 @@ type Structured struct {
 	Book func(ctx context.Context, month time.Time) ([]book.Tx, error)
 	// Outflows takes assets-svc's list of what left the accounts into the book.
 	Outflows func(ctx context.Context, payload []byte) error
-	JobsURL  string
+	// ReadJobs decodes the operator's jobs into into.
+	ReadJobs func(ctx context.Context, into any) error
 	// Records, when set, is long-term memory: what is read here is also
 	// remembered there.
 	Records Recorder

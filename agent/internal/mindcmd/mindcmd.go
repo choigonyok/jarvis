@@ -36,6 +36,14 @@ const (
 // was asked will still happen.
 var ErrWaiting = errors.New("기록은 남겼지만 mind 가 아직 답하지 않았습니다. 곧 처리됩니다")
 
+// Refused is mind saying it could not be done: its status, and its words.
+type Refused struct {
+	Status int
+	Msg    string
+}
+
+func (e *Refused) Error() string { return e.Msg }
+
 // Client sends commands.
 type Client struct {
 	URL   string
@@ -49,20 +57,34 @@ type Client struct {
 }
 
 // Do sends what would have been method on path with in, and decodes the answer
-// into out. An answer that says it could not be done is an error with
+// into out. An answer that says it could not be done is a Refused with
 // mind's words.
 func (c *Client) Do(ctx context.Context, method, path string, in, out any) error {
+	key, err := c.send(method, path, in)
+	if err != nil {
+		return err
+	}
+	return c.answer(ctx, key, out)
+}
+
+// Leave sends the same and does not wait: a line of progress nobody waits on.
+func (c *Client) Leave(method, path string, in any) error {
+	_, err := c.send(method, path, in)
+	return err
+}
+
+func (c *Client) send(method, path string, in any) (string, error) {
 	if c == nil || c.Records == nil {
-		return errors.New("기록을 남길 곳이 없습니다")
+		return "", errors.New("기록을 남길 곳이 없습니다")
 	}
 	key, err := newKey()
 	if err != nil {
-		return err
+		return "", err
 	}
 	var body json.RawMessage
 	if in != nil {
 		if body, err = json.Marshal(in); err != nil {
-			return err
+			return "", err
 		}
 	}
 	subject, _, _ := strings.Cut(path, "?")
@@ -71,7 +93,7 @@ func (c *Client) Do(ctx context.Context, method, path string, in, out any) error
 		Subject: subject, Tier: record.Raw,
 		Payload: map[string]any{"method": method, "path": path, "body": body},
 	})
-	return c.answer(ctx, key, out)
+	return key, nil
 }
 
 func (c *Client) actor() string {
@@ -145,9 +167,9 @@ func (c *Client) look(ctx context.Context, client *http.Client, key string, out 
 			Error string `json:"error"`
 		}
 		if json.Unmarshal(got.Body, &e) == nil && e.Error != "" {
-			return true, errors.New(e.Error)
+			return true, &Refused{Status: got.Status, Msg: e.Error}
 		}
-		return true, fmt.Errorf("mind 가 %d 로 응답했습니다", got.Status)
+		return true, &Refused{Status: got.Status, Msg: fmt.Sprintf("mind 가 %d 로 응답했습니다", got.Status)}
 	}
 	if out == nil || len(bytes.TrimSpace(got.Body)) == 0 {
 		return true, nil

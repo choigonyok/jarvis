@@ -128,7 +128,7 @@ cloudflared(`macmini` 터널)는 다른 프로젝트 호스트명 때문에 남�
 브라우저 토큰·자산·가계부 주소 없음. 내장 도구는 웹과, 손님 사진·자비스 기억 폴더만 닿는 Read·Write·Edit(그
 밖의 파일 호출은 카드 없이 거절 - `permission.Folders`), 셸 없음. 리마인드·체크리스트(mind)와 작업(jobs)은
 `JARVIS_GUEST_API_TOKEN` 으로 손님 것만 열리고(서로의 것은 '없음'), 손님 작업은 웹사이트도 사진도 못 쓴다(브라우저가
-운영자 계정이라 jobs-svc 가 sites 를 거절) - 손님 에이전트의 스케줄러가 브라우저 없이 돌린다. 손님 리마인드는
+운영자 계정이라 mind 가 sites 를 거절) - 손님 에이전트의 스케줄러가 브라우저 없이 돌린다. 손님 리마인드는
 손님 폰의 도착·출발(`location.guest.*`)과 `context` 의 `GET /now/guest` 로 울리고, 손님 기기와 손님 대화의 안내 카드로만 간다:
 손님에게 가는 기록(`notify.audience` guest)은 손님 전용 표(`input.guest_records`)로 가고, 손님 에이전트는 그 표와 자기 배달 행만 보는
 역할 `svc_guest` 로 직접 읽는다(`JARVIS_DB_PASSWORD_GUEST`, Postgres 만 닿는 망 `guest-data`). 게이트웨이 경로 `/agent-guest/…`(VPC `jarvis-agent-guest`, 포트 8081).

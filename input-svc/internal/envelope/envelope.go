@@ -96,9 +96,9 @@ func Parse(raw []byte) (Envelope, error) {
 }
 
 // guestCommands are the kinds the guest's agent writes: the guest's own
-// reminders and lists, which mind keeps apart by whose record it is, and how
-// the guest's cards were answered and what the guest's tools were refused.
-var guestCommands = []string{"reminder.", "checklist.", "intent.", "policy."}
+// reminders, lists and jobs, which mind keeps apart by whose record it is, and
+// how the guest's cards were answered and what the guest's tools were refused.
+var guestCommands = []string{"reminder.", "checklist.", "intent.", "policy.", "jobs."}
 
 // ForGuest is what a record from the guest's token may be: the guest's own
 // reminders and lists, or a notification to the guest. Whatever it said about

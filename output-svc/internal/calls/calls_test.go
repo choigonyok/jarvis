@@ -31,7 +31,6 @@ func TestTheListIsWhatMayBeWritten(t *testing.T) {
 		{"assets", "POST", "/orders", true},
 		{"assets", "POST", "/orders/rebalance", true},
 		{"assets", "DELETE", "/orders", false},
-		{"jobs", "POST", "/jobs/4/cancel", true},
 		{"immich", "POST", "/api/albums", true},
 		{"vault", "POST", "/secrets", false},
 		{"browser", "POST", "/anything", false},

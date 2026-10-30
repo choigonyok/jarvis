@@ -10,21 +10,20 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
-	"github.com/choigonyok/jarvis/jobs-svc/internal/store"
+	"github.com/choigonyok/jarvis/mind-svc/internal/jobs/store"
 )
 
-// Against a throwaway Postgres, as svc_jobs (scripts/dbtest jobs-svc): the
+// Against a throwaway Postgres, as svc_mind (scripts/dbtest mind-svc): the
 // operator and the guest each see, change and run only their own jobs -
 // another's is not found - a guest's job opens no website, and a job made
 // wakes its own person's agent.
 func TestEachSeesOnlyTheirOwnJobs(t *testing.T) {
 	dsn := os.Getenv("JARVIS_TEST_DSN")
 	if dsn == "" {
-		t.Skip("JARVIS_TEST_DSN 이 없어 건너뜁니다 (scripts/dbtest jobs-svc)")
+		t.Skip("JARVIS_TEST_DSN 이 없어 건너뜁니다 (scripts/dbtest mind-svc)")
 	}
 	ctx := context.Background()
 	st, err := store.Open(ctx, dsn)
@@ -32,17 +31,20 @@ func TestEachSeesOnlyTheirOwnJobs(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(st.Close)
-	srv := New(st, "owner-token", "guest-token", time.Hour, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	var mu sync.Mutex
+	srv := New(st, time.Hour, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	var woke []string
-	srv.SetWake(func(who string) {
-		mu.Lock()
-		defer mu.Unlock()
-		woke = append(woke, who)
+	srv.SetWake(func(who string) { woke = append(woke, who) })
+	srv.SetWho(func(r *http.Request) string {
+		if r.Header.Get("Authorization") == "Bearer guest-token" {
+			return store.Guest
+		}
+		return store.Owner
 	})
-	h := srv.Handler()
+	h := http.NewServeMux()
+	route := func(pattern string, f http.HandlerFunc) { h.HandleFunc(pattern, f) }
+	srv.Mount(route, route)
 	do := func(token, method, path, body string) (int, string) {
-		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req := httptest.NewRequest(method, Prefix+path, strings.NewReader(body))
 		if token != "" {
 			req.Header.Set("Authorization", "Bearer "+token)
 		}
@@ -63,17 +65,9 @@ func TestEachSeesOnlyTheirOwnJobs(t *testing.T) {
 		t.Fatalf("손님 작업이 사이트를 열려 함: %d %s", code, body)
 	}
 	guest, owner := made("guest-token", "dbtest 손님 일"), made("owner-token", "dbtest 운영자 일")
-	mu.Lock()
-	if len(woke) < 2 || !strings.Contains(strings.Join(woke, ","), "guest") || !strings.Contains(strings.Join(woke, ","), "owner") {
-		// the knocks run on their own goroutine; give them a moment
-		mu.Unlock()
-		time.Sleep(100 * time.Millisecond)
-		mu.Lock()
-	}
 	if got := strings.Join(woke, ","); !strings.Contains(got, "guest") || !strings.Contains(got, "owner") {
 		t.Fatalf("깨운 에이전트: %s", got)
 	}
-	mu.Unlock()
 
 	g, o := strconv.FormatInt(guest, 10), strconv.FormatInt(owner, 10)
 	if _, body := do("guest-token", "GET", "/jobs", ""); !strings.Contains(body, "dbtest 손님 일") || strings.Contains(body, "dbtest 운영자 일") || !strings.Contains(body, `"who":"guest"`) {
@@ -125,8 +119,5 @@ func TestEachSeesOnlyTheirOwnJobs(t *testing.T) {
 	}
 	if code, _ := do("guest-token", "POST", "/runs/"+r+"/finish", `{"summary":"끝"}`); code != http.StatusNoContent {
 		t.Fatalf("손님 실행 끝내기: %d", code)
-	}
-	if code, _ := do("someone", "GET", "/jobs", ""); code != http.StatusUnauthorized {
-		t.Fatalf("모르는 토큰: %d", code)
 	}
 }

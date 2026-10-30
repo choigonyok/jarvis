@@ -1,15 +1,13 @@
 import { pathProxy } from "@/lib/proxy";
 
-// jobs-svc. It only records; the agent's scheduler is what runs a job.
-const JOBS_URL = process.env.JOBS_URL ?? "http://localhost:8098";
+// The jobs, which mind keeps; the agent's scheduler is what runs one. The
+// gateway lets through only what the 작업 tab does (jobsRoute).
+const MIND_URL = process.env.MIND_URL ?? "http://localhost:8102";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const proxy = pathProxy(JOBS_URL, { label: "작업 서비스" });
+const proxy = pathProxy(`${MIND_URL.replace(/\/$/, "")}/api/jobs`, { label: "작업" });
 
 export const GET = proxy;
 export const POST = proxy;
-export const PATCH = proxy;
-export const PUT = proxy;
-export const DELETE = proxy;

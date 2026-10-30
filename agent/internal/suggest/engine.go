@@ -41,11 +41,14 @@ import (
 
 // Types is what the assistant subscribes to: mind's cards, what mind says
 // at a moment, and the lists it shows.
-var Types = []string{mind.CardRaised, mind.CardClosed, "remind.*", ChecklistShown}
+var Types = []string{mind.CardRaised, mind.CardClosed, "remind.*", ChecklistShown, JobsWake}
 
 // GuestTypes is what the guest's agent subscribes to: what mind says to the
 // guest at a moment.
-var GuestTypes = []string{"remind.*"}
+var GuestTypes = []string{"remind.*", JobsWake}
+
+// JobsWake says a job may be due now: changed on the 작업 tab, answered, made.
+const JobsWake = "jobs.wake"
 
 // ChecklistShown is mind asking for a list in the conversation now.
 const ChecklistShown = "checklist.shown"
@@ -101,6 +104,8 @@ type Config struct {
 	// Show lays a list mind put in front of the operator in the
 	// conversation, under lead; key is the event's, for redeliveries.
 	Show func(id, lead, key string)
+	// WakeJobs has the job scheduler look now.
+	WakeJobs func()
 }
 
 type Engine struct {
@@ -138,6 +143,10 @@ func (e *Engine) Take(_ context.Context, m queue.Message) error {
 
 func (e *Engine) handle(ev Event) {
 	switch {
+	case ev.Type == JobsWake:
+		if e.cfg.WakeJobs != nil {
+			e.cfg.WakeJobs()
+		}
 	case e.cfg.Guest:
 		// The guest's: what mind tells the guest at its moment, and no more.
 		if strings.HasPrefix(ev.Type, "remind.") {

@@ -71,8 +71,6 @@ type Server struct {
 	// jobs is where a background job's payment card goes; nil refuses every
 	// payment a background task reaches.
 	jobs JobPayments
-	// wakeJobs has the job scheduler look now (POST /jobs/wake).
-	wakeJobs func()
 	// checklists is the lists the conversation's cards show; nil: none.
 	checklists Checklists
 	// records writes what the payment path did as Records; nil writes none.
@@ -157,9 +155,6 @@ type Deps struct {
 	// SavedAddress, when set, is the shipping address the vault keeps: the
 	// payment card shows it beside the one the job reported.
 	SavedAddress func(ctx context.Context) (SavedAddress, bool)
-	// WakeJobs, when set, is what jobs-svc's knock calls: a job changed on
-	// the 작업 tab (instructed, run now, resumed) is looked at at once.
-	WakeJobs func()
 	// Checklists, when set, is the lists the conversation's cards show: read
 	// with a page of the thread, ticked on a card.
 	Checklists Checklists
@@ -217,7 +212,6 @@ func New(d Deps) *Server {
 		jobs:            d.Jobs,
 		savedAddress:    d.SavedAddress,
 		holdDur:         paymentHold,
-		wakeJobs:        d.WakeJobs,
 		checklists:      d.Checklists,
 		records:         d.Records,
 		loops:           d.Loops,
@@ -272,16 +266,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /calendar", s.guard(s.getCalendar))
 	mux.HandleFunc("POST /calendar", s.guard(s.postCalendar))
 	mux.HandleFunc("DELETE /calendar/{id}", s.guard(s.deleteCalendar))
-
-	// jobs-svc knocks here when a job changed by someone's hand may be due.
-	// Inside the compose network only: the gateway passes no "jobs" route to
-	// the agent.
-	if s.wakeJobs != nil {
-		mux.HandleFunc("POST /jobs/wake", s.guard(func(w http.ResponseWriter, r *http.Request) {
-			s.wakeJobs()
-			w.WriteHeader(http.StatusNoContent)
-		}))
-	}
 
 	if s.browserChecks != nil {
 		mux.HandleFunc("/browser-checks", s.guard(s.browserChecks.ServeHTTP))

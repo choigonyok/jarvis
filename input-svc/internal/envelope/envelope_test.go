@@ -116,7 +116,7 @@ func TestTheGuestCanOnlyNotifyTheGuest(t *testing.T) {
 // The guest's own reminders and lists come this way too, whoever they claim
 // to be from, and they are the guest's.
 func TestTheGuestAsksForTheirOwn(t *testing.T) {
-	for _, kind := range []string{"reminder.set", "checklist.make", "intent.answer", "policy.denied"} {
+	for _, kind := range []string{"reminder.set", "checklist.make", "intent.answer", "policy.denied", "jobs.write"} {
 		raw, _ := json.Marshal(map[string]any{"kind": kind, "source": "agent", "source_key": "k", "actor": "operator", "occurred_at": now, "tier": "raw"})
 		e, err := Parse(raw)
 		if err != nil {

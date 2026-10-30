@@ -9,14 +9,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/choigonyok/jarvis/jobs-svc/internal/rules"
+	"github.com/choigonyok/jarvis/mind-svc/internal/jobs/rules"
 )
 
-// Runs against a throwaway database as svc_jobs (scripts/dbtest jobs-svc).
+// Runs against a throwaway database as svc_mind (scripts/dbtest mind-svc).
 func TestAddSitesKeepsEachOnce(t *testing.T) {
 	dsn := os.Getenv("JARVIS_TEST_DSN")
 	if dsn == "" {
-		t.Skip("JARVIS_TEST_DSN 이 없어 건너뜁니다 (scripts/dbtest jobs-svc)")
+		t.Skip("JARVIS_TEST_DSN 이 없어 건너뜁니다 (scripts/dbtest mind-svc)")
 	}
 	ctx := context.Background()
 	s, err := Open(ctx, dsn)
@@ -299,7 +299,7 @@ func TestABadRunWaitingOnACardWaitsForTheAnswer(t *testing.T) {
 		}
 	}
 
-	if _, err := s.pool.Exec(ctx, `update jobs set next_at = now() - interval '3 hours' where id = $1`, k.ID); err != nil {
+	if _, err := s.pool.Exec(ctx, `update mind.jobs set next_at = now() - interval '3 hours' where id = $1`, k.ID); err != nil {
 		t.Fatal(err)
 	}
 	n, oldest, err := s.Overdue(ctx)
@@ -316,7 +316,7 @@ func TestABadRunWaitingOnACardWaitsForTheAnswer(t *testing.T) {
 func TestAJobThatIsOverKeepsNothingUnread(t *testing.T) {
 	dsn := os.Getenv("JARVIS_TEST_DSN")
 	if dsn == "" {
-		t.Skip("JARVIS_TEST_DSN 이 없어 건너뜁니다 (scripts/dbtest jobs-svc)")
+		t.Skip("JARVIS_TEST_DSN 이 없어 건너뜁니다 (scripts/dbtest mind-svc)")
 	}
 	ctx := context.Background()
 	s, err := Open(ctx, dsn)
@@ -327,7 +327,7 @@ func TestAJobThatIsOverKeepsNothingUnread(t *testing.T) {
 	unread := func(id int64) int {
 		t.Helper()
 		var n int
-		if err := s.pool.QueryRow(ctx, `select count(*) from job_inbox where job_id = $1 and consumed_run is null`, id).Scan(&n); err != nil {
+		if err := s.pool.QueryRow(ctx, `select count(*) from mind.job_inbox where job_id = $1 and consumed_run is null`, id).Scan(&n); err != nil {
 			t.Fatal(err)
 		}
 		return n

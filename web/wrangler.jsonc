@@ -44,7 +44,6 @@
   "vars": {
     "WORKOUT_URL": "https://jarvis-be.choigonyok.com/input",
     "ASSETS_URL": "https://jarvis-be.choigonyok.com/assets",
-    "JOBS_URL": "https://jarvis-be.choigonyok.com/jobs",
     "KAKAOTALK_URL": "https://jarvis-be.choigonyok.com/kakaotalk",
     "IMESSAGE_URL": "https://jarvis-be.choigonyok.com/imessage",
     "PHOTOS_URL": "https://jarvis-be.choigonyok.com/immich",

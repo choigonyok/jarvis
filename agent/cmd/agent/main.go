@@ -169,14 +169,14 @@ func main() {
 	}
 
 	// 작업. 대화에서 맡긴 일을 백그라운드에서, 작업이 정한 주기로 한다. 손님의 것은
-	// 손님 작업(jobs-svc 가 손님 토큰으로 묶는다)이고, 웹사이트도 사진도 없다 - 대화에
-	// 첨부한 손님 사진도 작업에는 넘기지 않는다(jobs-svc 가 손님 작업의 사진을 받지 않는다).
+	// 손님 작업(mind 가 손님 토큰으로 묶는다)이고, 웹사이트도 사진도 없다 - 대화에
+	// 첨부한 손님 사진도 작업에는 넘기지 않는다(mind 가 손님 작업의 사진을 받지 않는다).
 	if cfg.Jobs && (photos != nil || cfg.Guest) {
 		jobPhotos := photos
 		if cfg.Guest {
 			jobPhotos = nil
 		}
-		jobsModule = jobs.New(jobs.NewStore(cfg.JobsURL, cfg.APIToken), jobPhotos, proposals, transcript, log)
+		jobsModule = jobs.New(jobs.NewStore(cfg.MindURL+jobs.Prefix, cfg.APIToken).Via(commands), jobPhotos, proposals, transcript, log)
 		if cfg.Guest {
 			jobsModule.NoBrowser()
 			cfg.Allow(jobs.QualifiedToolName("list_jobs"))
@@ -502,16 +502,22 @@ func main() {
 	// the operator's data - but the guest's own reminders lay their card in
 	// the guest's conversation, as the operator's do in theirs. It reads the
 	// guest's effects, which is all its database role can see.
+	wakeJobs := func() {
+		if jobsModule != nil {
+			jobsModule.Wake()
+		}
+	}
 	var suggester *suggest.Engine
 	if cfg.QueueURL != "" && cfg.Guest {
-		suggester = suggest.New(proposals, suggest.Config{Guest: true, Notice: layNotice}, log)
+		suggester = suggest.New(proposals, suggest.Config{Guest: true, Notice: layNotice, WakeJobs: wakeJobs}, log)
 	}
 	if cfg.QueueURL != "" && !cfg.Guest {
 		suggester = suggest.New(proposals, suggest.Config{
-			Out:    notify.New(cfg.NotifyURL, cfg.DatabaseURL, cfg.APIToken, log),
-			Say:    func(lead, id string) { transcript.Raise([]string{lead}, id) },
-			Mind:   mindClient,
-			Notice: layNotice,
+			Out:      notify.New(cfg.NotifyURL, cfg.DatabaseURL, cfg.APIToken, log),
+			Say:      func(lead, id string) { transcript.Raise([]string{lead}, id) },
+			Mind:     mindClient,
+			Notice:   layNotice,
+			WakeJobs: wakeJobs,
 			Show: func(id, lead, key string) {
 				if checklistModule == nil {
 					return
@@ -662,10 +668,8 @@ func main() {
 
 	// A job's run that reaches a payment raises a card for that job.
 	var jobPayments httpapi.JobPayments
-	var wakeJobs func()
 	if jobsModule != nil {
 		jobPayments = jobsModule
-		wakeJobs = jobsModule.Wake
 		// A job waiting for the browser starts when a turn or another task
 		// gives it up, not on the scheduler's next look.
 		runner.OnFree(jobsModule.Wake)
@@ -715,7 +719,6 @@ func main() {
 		FollowUp:        runner,
 		Jobs:            jobPayments,
 		SavedAddress:    savedAddress(vaultModule),
-		WakeJobs:        wakeJobs,
 		Checklists:      checklistConsole(checklistModule),
 		Records:         records,
 		Loops:           loops,

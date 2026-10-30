@@ -74,13 +74,10 @@ func chatSvc(t *testing.T) *thread.Store {
 }
 
 // A page of the thread comes with the lists its cards show, each once; a
-// tap on an item goes to the list; jobs-svc's knock wakes the scheduler,
-// with the services' token only.
+// tap on an item goes to the list.
 func TestThreadCarriesItsChecklists(t *testing.T) {
 	l := &lists{}
-	woke := 0
-	s := New(Deps{Thread: chatSvc(t), Proposals: proposal.NewStore(bus.New()), Runner: bgRunner{}, Checklists: l,
-		WakeJobs: func() { woke++ }, APIToken: "svc"})
+	s := New(Deps{Thread: chatSvc(t), Proposals: proposal.NewStore(bus.New()), Runner: bgRunner{}, Checklists: l, APIToken: "svc"})
 	h := s.Handler()
 	do := func(method, path, body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
@@ -126,15 +123,5 @@ func TestThreadCarriesItsChecklists(t *testing.T) {
 	}
 	if got := strings.Join(l.ticked, ","); got != "chk_1/i2+,chk_1/i3x,chk_1 closed" {
 		t.Fatalf("체크·빼기·닫기: %s", got)
-	}
-
-	if rec := do(http.MethodPost, "/jobs/wake", ""); rec.Code != http.StatusNoContent || woke != 1 {
-		t.Fatalf("깨우기: %d %d", rec.Code, woke)
-	}
-	req := httptest.NewRequest(http.MethodPost, "/jobs/wake", nil)
-	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized || woke != 1 {
-		t.Fatalf("토큰 없는 깨우기는 막아야 합니다: %d", rec.Code)
 	}
 }

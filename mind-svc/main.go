@@ -48,6 +48,8 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/gate"
 	"github.com/choigonyok/jarvis/mind-svc/internal/hand"
 	"github.com/choigonyok/jarvis/mind-svc/internal/interpret"
+	jobsapi "github.com/choigonyok/jarvis/mind-svc/internal/jobs/api"
+	jobsstore "github.com/choigonyok/jarvis/mind-svc/internal/jobs/store"
 	"github.com/choigonyok/jarvis/mind-svc/internal/ledger"
 	"github.com/choigonyok/jarvis/mind-svc/internal/llm"
 	"github.com/choigonyok/jarvis/mind-svc/internal/memory"
@@ -225,10 +227,29 @@ func main() {
 		latest := mind.HereLatest{Store: st}
 		here, guestHere = latest.Visits, latest.GuestVisits
 	}
-	// Jobs: a cart job goes to jobs-svc (the agent's browser runs it).
-	var jobs act.Jobs
-	if url := os.Getenv("JOBS_URL"); mode == "stack" && url != "" {
-		jobs = act.JobsSvc{URL: url, Token: token, HTTP: handed(stream, st)}
+	// Jobs: what is handed over to be done in the background is kept here, and
+	// the agent's scheduler runs it. A cart job is made in the same ledger.
+	var (
+		jobs    act.Jobs
+		jobsAPI *jobsapi.Server
+	)
+	if mode == "stack" {
+		jobsDB, err := jobsstore.Open(ctx, dsn)
+		if err != nil {
+			log.Error("작업을 열지 못했습니다", "err", err)
+			os.Exit(1)
+		}
+		defer jobsDB.Close()
+		// 작업이 끝나고 이만큼 지나면 첨부 사진 파일을 지운다.
+		jobsAPI = jobsapi.New(jobsDB, duration("JOBS_PURGE_AFTER", 30*24*time.Hour), log)
+		if stream != nil {
+			jobsAPI.SetWake(func(who string) {
+				if err := stream.Wake(context.Background(), who == jobsstore.Guest); err != nil {
+					log.Warn("작업 스케줄러를 깨우지 못했습니다", "err", err)
+				}
+			})
+		}
+		jobs = act.JobsBook{Ledger: jobsAPI}
 	}
 	// Photos: albums go to Immich when it is there.
 	var photos act.Photos
@@ -319,6 +340,9 @@ func main() {
 	if bookAPI != nil {
 		mindAPI.SetBook(bookAPI)
 	}
+	if jobsAPI != nil {
+		mindAPI.SetJobs(jobsAPI)
+	}
 	handler := mindAPI.Handler()
 	var structured *sensor.Structured
 	var messages *sensor.Messages
@@ -341,7 +365,7 @@ func main() {
 		// The calendar (whose entries also become plans), the phones, the
 		// accounts, photos and workouts come to the lane below as records.
 		structured = &sensor.Structured{Store: st, Observer: m, World: m.World, Token: token, Loc: loc, Out: log, Now: time.Now,
-			Book: bookAPI.Month, JobsURL: os.Getenv("JOBS_URL"),
+			Book: bookAPI.Month, ReadJobs: jobsAPI.ReadJobs,
 			Outflows: func(ctx context.Context, payload []byte) error {
 				return spendingassets.Take(ctx, ledgerDB, time.Local, log, payload)
 			}}

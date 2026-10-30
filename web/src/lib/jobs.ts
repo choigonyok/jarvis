@@ -1,4 +1,4 @@
-// Shapes of jobs-svc's JSON. The service is the source of truth.
+// Shapes of the jobs' JSON (mind). Mind is the source of truth.
 
 export type JobState = "active" | "waiting" | "paused" | "done" | "cancelled" | "failed";
 

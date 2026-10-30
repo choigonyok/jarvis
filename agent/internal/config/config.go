@@ -113,9 +113,6 @@ type Config struct {
 	// turns attachments off. The guest's agent keeps the guest's in a volume
 	// of its own.
 	UploadsDir string
-	// JobsURL is where jobs-svc listens: work handed over in conversation,
-	// run in the background on whatever cadence each job decides.
-	JobsURL string
 	// VaultURL is vault-svc: the operator's saved logins. Empty leaves the
 	// vault module out (the guest, a laptop run).
 	VaultURL string
@@ -260,7 +257,6 @@ func Load() (Config, error) {
 		AssetsURL:        env("JARVIS_ASSETS_URL", "http://localhost:8092"),
 		Enrich:           envBool("JARVIS_ENRICH", true),
 		UploadsDir:       env("JARVIS_UPLOADS_DIR", ""),
-		JobsURL:          env("JARVIS_JOBS_URL", "http://localhost:8098"),
 		VaultURL:         os.Getenv("JARVIS_VAULT_URL"),
 		// Empty turns long-term memory off: no tool, nothing recalled.
 		MemoryURL:    os.Getenv("JARVIS_MEMORY_URL"),
@@ -310,7 +306,7 @@ func Load() (Config, error) {
 		c.BuiltinTools = &builtins
 		// No browser: it is logged in to the operator's shops and pay. No
 		// background lookups: those belong to the operator's spending. Jobs,
-		// yes - the guest's own, which open no website (jobs-svc refuses
+		// yes - the guest's own, which open no website (mind refuses
 		// one) - with no photos (the jobs module is given none). The photos
 		// attached in conversation and the CLI's memory are the guest's own:
 		// this agent's volumes, apart from the operator's.

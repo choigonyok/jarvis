@@ -44,7 +44,7 @@ export const GUEST_PAGES = new Set(["/", "/jobs", "/workout", "/calendar", "/edi
 const GUEST_API = [
   "/api/agent",
   // The guest's own jobs: the gateway opens only the 작업 tab's routes on them,
-  // with the guest's token, so jobs-svc finds no other.
+  // with the guest's token, so mind finds no other.
   "/api/jobs",
   "/api/workout",
   "/api/notify",
@@ -60,7 +60,7 @@ const GUEST_API = [
 /** Static files a guest may load: the editor the 편집 tab frames (scripts/photocraft.mjs). */
 const GUEST_FILES = ["/photocraft/"];
 
-export function guestMay(pathname: string, method = "GET"): boolean {
+export function guestMay(pathname: string): boolean {
   if (GUEST_PAGES.has(pathname)) return true;
   if (GUEST_FILES.some((p) => pathname.startsWith(p))) return true;
   return GUEST_API.some((p) => pathname === p || pathname.startsWith(`${p}/`));

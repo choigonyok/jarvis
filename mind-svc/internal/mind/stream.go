@@ -19,11 +19,11 @@ import (
 // CommandKinds is what the lane reads of the operator's stream. An answer
 // (intent.answer) is here for the cards of mind's own, which the agent asks
 // of it; the cards the agent asked itself it carries on with (HeldCard).
-var CommandKinds = []string{"intent.answer", "payment.requested", "reminder.*", "checklist.*", "note.*", "link.*", record.KindSpendingWrite, obs.TimerFired}
+var CommandKinds = []string{"intent.answer", "payment.requested", "reminder.*", "checklist.*", "note.*", "link.*", record.KindSpendingWrite, record.KindJobsWrite, obs.TimerFired}
 
-// GuestCommandKinds is what the lane reads of the guest's: their reminders
-// and lists, and nothing that decides anything of the operator's.
-var GuestCommandKinds = []string{"reminder.*", "checklist.*"}
+// GuestCommandKinds is what the lane reads of the guest's: their reminders,
+// lists and jobs, and nothing that decides anything of the operator's.
+var GuestCommandKinds = []string{"reminder.*", "checklist.*", record.KindJobsWrite}
 
 // EmitTimer sends a due timer into the stream.
 func EmitTimer(l obs.Log) func(ctx context.Context, t model.Timer) error {

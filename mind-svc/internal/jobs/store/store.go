@@ -13,7 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/choigonyok/jarvis/jobs-svc/internal/rules"
+	"github.com/choigonyok/jarvis/mind-svc/internal/jobs/rules"
 )
 
 var ErrNotFound = errors.New("그런 작업이 없습니다.")
@@ -26,6 +26,7 @@ type Store struct {
 	pool *pgxpool.Pool
 }
 
+// Open connects to the jobs' tables.
 func Open(ctx context.Context, dsn string) (*Store, error) {
 	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
@@ -54,9 +55,9 @@ func (s *Store) Overdue(ctx context.Context) (int, *time.Time, error) {
 	var n int
 	var oldest *time.Time
 	err := s.pool.QueryRow(ctx, `
-		select count(*), min(j.next_at) from jobs j
+		select count(*), min(j.next_at) from mind.jobs j
 		 where j.state = 'active' and j.next_at < now()
-		   and not exists (select 1 from job_runs r where r.job_id = j.id and r.ended_at is null)`).Scan(&n, &oldest)
+		   and not exists (select 1 from mind.job_runs r where r.job_id = j.id and r.ended_at is null)`).Scan(&n, &oldest)
 	return n, oldest, err
 }
 
@@ -72,7 +73,7 @@ type Stopped struct {
 // StoppedJobs is the operator's failed jobs, newest first. The guest's are
 // the guest's to see.
 func (s *Store) StoppedJobs(ctx context.Context) ([]Stopped, error) {
-	rows, err := s.pool.Query(ctx, `select id, title, summary, updated_at from jobs
+	rows, err := s.pool.Query(ctx, `select id, title, summary, updated_at from mind.jobs
 		where state = 'failed' and who = 'owner' order by updated_at desc limit 50`)
 	if err != nil {
 		return nil, err
@@ -127,10 +128,10 @@ const (
 const jobCols = `j.id, j.title, j.goal, j.instructions, j.sites, j.photos, j.state, j.next_at,
 	j.next_reason, j.waiting_card, j.summary, j.attempts, j.last_run_at, j.finished_at,
 	j.photos_purged_at is not null, j.created_at,
-	exists (select 1 from job_runs r where r.job_id = j.id and r.ended_at is null),
-	coalesce((select e.text from job_events e where e.job_id = j.id order by e.id desc limit 1), ''),
-	coalesce((select array_agg(s.site) from job_sites s where s.login_required and s.site = any(j.sites)), '{}'),
-	(select count(*) from job_records r where r.job_id = j.id), j.who`
+	exists (select 1 from mind.job_runs r where r.job_id = j.id and r.ended_at is null),
+	coalesce((select e.text from mind.job_events e where e.job_id = j.id order by e.id desc limit 1), ''),
+	coalesce((select array_agg(s.site) from mind.job_sites s where s.login_required and s.site = any(j.sites)), '{}'),
+	(select count(*) from mind.job_records r where r.job_id = j.id), j.who`
 
 func scanJob(row pgx.Row) (Job, error) {
 	var j Job
@@ -177,7 +178,7 @@ func (s *Store) Create(ctx context.Context, n NewJob) (Job, error) {
 	}
 	var id int64
 	err := s.pool.QueryRow(ctx, `
-		insert into jobs (title, goal, instructions, sites, photos, next_at, next_reason, who)
+		insert into mind.jobs (title, goal, instructions, sites, photos, next_at, next_reason, who)
 		values ($1, $2, $3, $4, $5, now(), '첫 실행', $6)
 		returning id`, n.Title, n.Goal, n.Instructions, sites, n.Photos, n.Who).Scan(&id)
 	if err != nil {
@@ -188,7 +189,7 @@ func (s *Store) Create(ctx context.Context, n NewJob) (Job, error) {
 }
 
 func (s *Store) Get(ctx context.Context, id int64) (Job, error) {
-	j, err := scanJob(s.pool.QueryRow(ctx, `select `+jobCols+` from jobs j where j.id = $1`, id))
+	j, err := scanJob(s.pool.QueryRow(ctx, `select `+jobCols+` from mind.jobs j where j.id = $1`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Job{}, ErrNotFound
 	}
@@ -198,7 +199,7 @@ func (s *Store) Get(ctx context.Context, id int64) (Job, error) {
 // WhoOf is whose job id is.
 func (s *Store) WhoOf(ctx context.Context, id int64) (string, error) {
 	var who string
-	err := s.pool.QueryRow(ctx, `select who from jobs where id = $1`, id).Scan(&who)
+	err := s.pool.QueryRow(ctx, `select who from mind.jobs where id = $1`, id).Scan(&who)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrNotFound
 	}
@@ -208,7 +209,7 @@ func (s *Store) WhoOf(ctx context.Context, id int64) (string, error) {
 // WhoOfRun is whose job the run is of.
 func (s *Store) WhoOfRun(ctx context.Context, runID int64) (string, error) {
 	var who string
-	err := s.pool.QueryRow(ctx, `select j.who from job_runs r join jobs j on j.id = r.job_id where r.id = $1`, runID).Scan(&who)
+	err := s.pool.QueryRow(ctx, `select j.who from mind.job_runs r join mind.jobs j on j.id = r.job_id where r.id = $1`, runID).Scan(&who)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrNotFound
 	}
@@ -218,7 +219,7 @@ func (s *Store) WhoOfRun(ctx context.Context, runID int64) (string, error) {
 // List returns who's live jobs first (running, waiting on a person,
 // scheduled), then finished ones, newest first within each.
 func (s *Store) List(ctx context.Context, who string) ([]Job, error) {
-	rows, err := s.pool.Query(ctx, `select `+jobCols+` from jobs j where j.who = $1
+	rows, err := s.pool.Query(ctx, `select `+jobCols+` from mind.jobs j where j.who = $1
 		order by case j.state when 'waiting' then 0 when 'active' then 1 when 'paused' then 2 else 3 end,
 		         j.created_at desc`, who)
 	if err != nil {
@@ -284,7 +285,7 @@ func (s *Store) Detail(ctx context.Context, id int64, events int, skipSteps bool
 	if skipSteps {
 		filter = " and kind <> 'step'"
 	}
-	rows, err := s.pool.Query(ctx, `select id, run_id, kind, text, at from job_events
+	rows, err := s.pool.Query(ctx, `select id, run_id, kind, text, at from mind.job_events
 		where job_id = $1`+filter+` order by id desc limit $2`, id, events)
 	if err != nil {
 		return d, err
@@ -300,7 +301,7 @@ func (s *Store) Detail(ctx context.Context, id int64, events int, skipSteps bool
 	rows.Close()
 
 	rows, err = s.pool.Query(ctx, `select key, title, status, amount, metrics, image, url, note, updated_at
-		from job_records where job_id = $1 order by updated_at desc`, id)
+		from mind.job_records where job_id = $1 order by updated_at desc`, id)
 	if err != nil {
 		return d, err
 	}
@@ -314,7 +315,7 @@ func (s *Store) Detail(ctx context.Context, id int64, events int, skipSteps bool
 	}
 	rows.Close()
 
-	rows, err = s.pool.Query(ctx, `select key, value from job_memory where job_id = $1 order by key`, id)
+	rows, err = s.pool.Query(ctx, `select key, value from mind.job_memory where job_id = $1 order by key`, id)
 	if err != nil {
 		return d, err
 	}
@@ -328,7 +329,7 @@ func (s *Store) Detail(ctx context.Context, id int64, events int, skipSteps bool
 	}
 	rows.Close()
 
-	rows, err = s.pool.Query(ctx, `select id, kind, text, at from job_inbox
+	rows, err = s.pool.Query(ctx, `select id, kind, text, at from mind.job_inbox
 		where job_id = $1 and consumed_run is null order by id`, id)
 	if err != nil {
 		return d, err
@@ -345,7 +346,7 @@ func (s *Store) Detail(ctx context.Context, id int64, events int, skipSteps bool
 }
 
 func (s *Store) event(ctx context.Context, jobID int64, runID *int64, kind, text string) {
-	_, _ = s.pool.Exec(ctx, `insert into job_events (job_id, run_id, kind, text) values ($1, $2, $3, $4)`,
+	_, _ = s.pool.Exec(ctx, `insert into mind.job_events (job_id, run_id, kind, text) values ($1, $2, $3, $4)`,
 		jobID, runID, kind, clamp(text, 2000))
 }
 
@@ -359,7 +360,7 @@ func (s *Store) Instruct(ctx context.Context, id int64, text string) error {
 	// up: if the run has nothing else to do, the agent puts the job back to
 	// waiting on it, and its answer wakes the job like any other.
 	tag, err := s.pool.Exec(ctx, `
-		update jobs set state = 'active', next_at = now(), next_reason = '새 지시', attempts = 0,
+		update mind.jobs set state = 'active', next_at = now(), next_reason = '새 지시', attempts = 0,
 		       waiting_card = '', finished_at = null, updated_at = now()
 		 where id = $1 and state <> 'cancelled'`, id)
 	if err != nil {
@@ -368,7 +369,7 @@ func (s *Store) Instruct(ctx context.Context, id int64, text string) error {
 	if tag.RowsAffected() == 0 {
 		return errors.New("그만둔 작업에는 지시할 수 없습니다.")
 	}
-	if _, err := s.pool.Exec(ctx, `insert into job_inbox (job_id, kind, text) values ($1, 'instruction', $2)`, id, text); err != nil {
+	if _, err := s.pool.Exec(ctx, `insert into mind.job_inbox (job_id, kind, text) values ($1, 'instruction', $2)`, id, text); err != nil {
 		return err
 	}
 	s.event(ctx, id, nil, "instruction", "지시: "+text)
@@ -389,7 +390,7 @@ func (s *Store) AddSites(ctx context.Context, id int64, sites []string) (Job, er
 		return Job{}, errors.New("사이트 주소가 없습니다.")
 	}
 	tag, err := s.pool.Exec(ctx, `
-		update jobs set sites = (select coalesce(array_agg(distinct x order by x), '{}') from unnest(sites || $2::text[]) as x),
+		update mind.jobs set sites = (select coalesce(array_agg(distinct x order by x), '{}') from unnest(sites || $2::text[]) as x),
 		       updated_at = now()
 		 where id = $1`, id, clean)
 	if err != nil {
@@ -411,21 +412,21 @@ func (s *Store) Control(ctx context.Context, id int64, action string) error {
 	var q, note string
 	switch action {
 	case "pause":
-		q, note = `update jobs set state = 'paused', updated_at = now() where id = $1 and state in ('active', 'waiting')`, "멈췄습니다"
+		q, note = `update mind.jobs set state = 'paused', updated_at = now() where id = $1 and state in ('active', 'waiting')`, "멈췄습니다"
 	case "resume":
-		q, note = `update jobs set state = 'active', next_at = now(), next_reason = '다시 시작', attempts = 0, updated_at = now()
+		q, note = `update mind.jobs set state = 'active', next_at = now(), next_reason = '다시 시작', attempts = 0, updated_at = now()
 			where id = $1 and state in ('paused', 'failed')`, "다시 시작했습니다"
 	case "run":
-		q, note = `update jobs set state = 'active', next_at = now(), next_reason = '지금 실행', updated_at = now()
+		q, note = `update mind.jobs set state = 'active', next_at = now(), next_reason = '지금 실행', updated_at = now()
 			where id = $1 and state in ('active', 'paused')`, "지금 실행합니다"
 	case "first":
 		// The operator put it ahead of the line for the browser (the agent's
 		// 먼저 card): due a moment before every job due now and every run in
 		// flight, so it is the next to get the browser - and the run it stops
 		// goes on after it in its own place (rules.Deferred).
-		q, note = `update jobs set next_at = least(
-				(select min(o.next_at) from jobs o where o.who = jobs.who and o.state = 'active' and o.next_at is not null),
-				(select min(r.started_at) from job_runs r join jobs o on o.id = r.job_id where o.who = jobs.who and r.ended_at is null),
+		q, note = `update mind.jobs set next_at = least(
+				(select min(o.next_at) from mind.jobs o where o.who = jobs.who and o.state = 'active' and o.next_at is not null),
+				(select min(r.started_at) from mind.job_runs r join mind.jobs o on o.id = r.job_id where o.who = jobs.who and r.ended_at is null),
 				now()) - interval '1 second',
 			next_reason = '먼저 하기로 함', updated_at = now()
 			where id = $1 and state = 'active'`, "운영자가 먼저 하기로 했습니다"
@@ -453,7 +454,7 @@ func (s *Store) cancel(ctx context.Context, id int64) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	tag, err := tx.Exec(ctx, `update jobs set state = 'cancelled', next_at = null, waiting_card = '', finished_at = now(), updated_at = now()
+	tag, err := tx.Exec(ctx, `update mind.jobs set state = 'cancelled', next_at = null, waiting_card = '', finished_at = now(), updated_at = now()
 		where id = $1 and state not in ('done', 'cancelled')`, id)
 	if err != nil {
 		return err
@@ -461,7 +462,7 @@ func (s *Store) cancel(ctx context.Context, id int64) error {
 	if tag.RowsAffected() == 0 {
 		return errors.New("지금 상태에서는 할 수 없습니다.")
 	}
-	dropped, err := tx.Exec(ctx, `delete from job_inbox where job_id = $1 and consumed_run is null`, id)
+	dropped, err := tx.Exec(ctx, `delete from mind.job_inbox where job_id = $1 and consumed_run is null`, id)
 	if err != nil {
 		return err
 	}
@@ -489,7 +490,7 @@ func (s *Store) cancel(ctx context.Context, id int64) error {
 // back.
 func (s *Store) Answer(ctx context.Context, id int64, card, text string) error {
 	var state string
-	if err := s.pool.QueryRow(ctx, `select state from jobs where id = $1`, id).Scan(&state); errors.Is(err, pgx.ErrNoRows) {
+	if err := s.pool.QueryRow(ctx, `select state from mind.jobs where id = $1`, id).Scan(&state); errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	} else if err != nil {
 		return err
@@ -498,11 +499,11 @@ func (s *Store) Answer(ctx context.Context, id int64, card, text string) error {
 		s.event(ctx, id, nil, "answer", text+"\n(끝난 작업이라 전하지 않았습니다)")
 		return ErrEnded
 	}
-	if _, err := s.pool.Exec(ctx, `insert into job_inbox (job_id, kind, text) values ($1, 'answer', $2)`, id, text); err != nil {
+	if _, err := s.pool.Exec(ctx, `insert into mind.job_inbox (job_id, kind, text) values ($1, 'answer', $2)`, id, text); err != nil {
 		return err
 	}
 	if _, err := s.pool.Exec(ctx, `
-		update jobs set state = 'active', waiting_card = '', next_at = now(), next_reason = '카드 결정', updated_at = now()
+		update mind.jobs set state = 'active', waiting_card = '', next_at = now(), next_reason = '카드 결정', updated_at = now()
 		 where id = $1 and state in ('active', 'waiting')`, id); err != nil {
 		return err
 	}
@@ -529,10 +530,10 @@ func (s *Store) DueN(ctx context.Context, who string, n int) ([]Job, error) {
 	if n <= 0 {
 		n = 1
 	}
-	rows, err := s.pool.Query(ctx, `select `+jobCols+` from jobs j
+	rows, err := s.pool.Query(ctx, `select `+jobCols+` from mind.jobs j
 		where j.who = $2 and j.state = 'active' and j.next_at <= now()
-		  and not exists (select 1 from job_sites s where s.login_required and s.site = any(j.sites))
-		  and not exists (select 1 from job_runs r where r.job_id = j.id and r.ended_at is null)
+		  and not exists (select 1 from mind.job_sites s where s.login_required and s.site = any(j.sites))
+		  and not exists (select 1 from mind.job_runs r where r.job_id = j.id and r.ended_at is null)
 		order by j.next_at limit $1`, n, who)
 	if err != nil {
 		return nil, err
@@ -555,24 +556,24 @@ func (s *Store) DueN(ctx context.Context, who string, n int) ([]Job, error) {
 // is the decision.
 func (s *Store) NextDue(ctx context.Context, who string) (*time.Time, error) {
 	var at *time.Time
-	err := s.pool.QueryRow(ctx, `select min(j.next_at) from jobs j
+	err := s.pool.QueryRow(ctx, `select min(j.next_at) from mind.jobs j
 		where j.who = $1 and j.state = 'active' and j.next_at > now()
-		  and not exists (select 1 from job_sites s where s.login_required and s.site = any(j.sites))`, who).Scan(&at)
+		  and not exists (select 1 from mind.job_sites s where s.login_required and s.site = any(j.sites))`, who).Scan(&at)
 	return at, err
 }
 
 // StartRun opens a run. Any run of this job left open by a crash is closed
 // first, so a job can never be stuck "running".
 func (s *Store) StartRun(ctx context.Context, jobID int64) (int64, error) {
-	if _, err := s.pool.Exec(ctx, `update job_runs set ended_at = now(), outcome = 'error', note = '중단됨'
+	if _, err := s.pool.Exec(ctx, `update mind.job_runs set ended_at = now(), outcome = 'error', note = '중단됨'
 		where job_id = $1 and ended_at is null`, jobID); err != nil {
 		return 0, err
 	}
 	var id int64
-	if err := s.pool.QueryRow(ctx, `insert into job_runs (job_id) values ($1) returning id`, jobID).Scan(&id); err != nil {
+	if err := s.pool.QueryRow(ctx, `insert into mind.job_runs (job_id) values ($1) returning id`, jobID).Scan(&id); err != nil {
 		return 0, err
 	}
-	_, err := s.pool.Exec(ctx, `update jobs set last_run_at = now() where id = $1`, jobID)
+	_, err := s.pool.Exec(ctx, `update mind.jobs set last_run_at = now() where id = $1`, jobID)
 	s.event(ctx, jobID, &id, "run_start", "실행을 시작했습니다")
 	return id, err
 }
@@ -580,15 +581,15 @@ func (s *Store) StartRun(ctx context.Context, jobID int64) (int64, error) {
 // CloseOrphans ends the runs of who's jobs a previous agent process left
 // open - its own agent's, never the other one's.
 func (s *Store) CloseOrphans(ctx context.Context, who string) error {
-	_, err := s.pool.Exec(ctx, `update job_runs set ended_at = now(), outcome = 'yielded', note = '에이전트가 재시작됨'
-		where ended_at is null and job_id in (select id from jobs where who = $1)`, who)
+	_, err := s.pool.Exec(ctx, `update mind.job_runs set ended_at = now(), outcome = 'yielded', note = '에이전트가 재시작됨'
+		where ended_at is null and job_id in (select id from mind.jobs where who = $1)`, who)
 	return err
 }
 
 func (s *Store) runJob(ctx context.Context, runID int64) (int64, bool, error) {
 	var jobID int64
 	var open bool
-	err := s.pool.QueryRow(ctx, `select job_id, ended_at is null from job_runs where id = $1`, runID).Scan(&jobID, &open)
+	err := s.pool.QueryRow(ctx, `select job_id, ended_at is null from mind.job_runs where id = $1`, runID).Scan(&jobID, &open)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, false, errors.New("그런 실행이 없습니다.")
 	}
@@ -634,7 +635,7 @@ func (s *Store) EndRun(ctx context.Context, runID int64, outcome, note string) (
 	var jobID int64
 	var decided bool
 	var started time.Time
-	err = tx.QueryRow(ctx, `update job_runs set ended_at = now(), outcome = $2, note = $3
+	err = tx.QueryRow(ctx, `update mind.job_runs set ended_at = now(), outcome = $2, note = $3
 		where id = $1 and ended_at is null returning job_id, decided, started_at`, runID, outcome, note).
 		Scan(&jobID, &decided, &started)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -645,14 +646,14 @@ func (s *Store) EndRun(ctx context.Context, runID int64, outcome, note string) (
 	}
 	var attempts int
 	var state, title string
-	if err := tx.QueryRow(ctx, `select attempts, state, title from jobs where id = $1 for update`, jobID).
+	if err := tx.QueryRow(ctx, `select attempts, state, title from mind.jobs where id = $1 for update`, jobID).
 		Scan(&attempts, &state, &title); err != nil {
 		return Ended{}, err
 	}
 	out := Ended{JobID: jobID, Title: title}
 
 	if outcome == rules.OK {
-		if _, err := tx.Exec(ctx, `update job_inbox set consumed_run = $2
+		if _, err := tx.Exec(ctx, `update mind.job_inbox set consumed_run = $2
 			where job_id = $1 and consumed_run is null and at <= $3`, jobID, runID, started); err != nil {
 			return Ended{}, err
 		}
@@ -668,7 +669,7 @@ func (s *Store) EndRun(ctx context.Context, runID int64, outcome, note string) (
 	// conversation: each one more waits longer (rules.YieldWait).
 	yields := 0
 	if outcome == rules.Yielded {
-		rows, err := tx.Query(ctx, `select outcome from job_runs
+		rows, err := tx.Query(ctx, `select outcome from mind.job_runs
 			where job_id = $1 and id <> $2 and ended_at is not null order by id desc limit 10`, jobID, runID)
 		if err != nil {
 			return Ended{}, err
@@ -696,24 +697,24 @@ func (s *Store) EndRun(ctx context.Context, runID int64, outcome, note string) (
 	carded := state == rules.Waiting
 	switch {
 	case end.Fail:
-		_, err = tx.Exec(ctx, `update jobs set state = 'failed', attempts = $2, next_at = null,
+		_, err = tx.Exec(ctx, `update mind.jobs set state = 'failed', attempts = $2, next_at = null,
 			summary = $3, updated_at = now() where id = $1`, jobID, end.Attempts, "실패: "+end.Note)
 		out.Failed, out.Note = true, end.Note
 	case (end.Retry || end.Keep) && carded:
-		_, err = tx.Exec(ctx, `update jobs set attempts = $2, updated_at = now() where id = $1`, jobID, end.Attempts)
+		_, err = tx.Exec(ctx, `update mind.jobs set attempts = $2, updated_at = now() where id = $1`, jobID, end.Attempts)
 	case end.Keep:
 		// Back to the place it had: as due as when this run got the browser,
 		// so it goes on right after the job put first - ahead of the jobs
 		// asked for while it ran.
-		_, err = tx.Exec(ctx, `update jobs set attempts = $2, next_at = $3,
+		_, err = tx.Exec(ctx, `update mind.jobs set attempts = $2, next_at = $3,
 			next_reason = '먼저 한 작업 다음에 이어서', updated_at = now() where id = $1`,
 			jobID, end.Attempts, started)
 	case end.Retry:
-		_, err = tx.Exec(ctx, `update jobs set attempts = $2, next_at = $3,
+		_, err = tx.Exec(ctx, `update mind.jobs set attempts = $2, next_at = $3,
 			next_reason = $4, updated_at = now() where id = $1`,
 			jobID, end.Attempts, time.Now().Add(end.After), retryReason(outcome, end.Note))
 	default:
-		_, err = tx.Exec(ctx, `update jobs set attempts = 0, updated_at = now() where id = $1`, jobID)
+		_, err = tx.Exec(ctx, `update mind.jobs set attempts = 0, updated_at = now() where id = $1`, jobID)
 	}
 	if err != nil {
 		return Ended{}, err
@@ -724,9 +725,9 @@ func (s *Store) EndRun(ctx context.Context, runID int64, outcome, note string) (
 	again := false
 	if !end.Fail {
 		tag, err := tx.Exec(ctx, `
-			update jobs set state = 'active', waiting_card = '', next_at = now(), next_reason = '실행 중에 온 지시·답', updated_at = now()
+			update mind.jobs set state = 'active', waiting_card = '', next_at = now(), next_reason = '실행 중에 온 지시·답', updated_at = now()
 			 where id = $1 and state in ('active', 'waiting')
-			   and exists (select 1 from job_inbox i where i.job_id = $1 and i.consumed_run is null and i.at > $2)`, jobID, started)
+			   and exists (select 1 from mind.job_inbox i where i.job_id = $1 and i.consumed_run is null and i.at > $2)`, jobID, started)
 		if err != nil {
 			return Ended{}, err
 		}
@@ -740,15 +741,15 @@ func (s *Store) EndRun(ctx context.Context, runID int64, outcome, note string) (
 	revived := false
 	if state == rules.Done && !end.Fail {
 		tag, err := tx.Exec(ctx, `
-			update jobs set state = 'active', next_at = now(), next_reason = '끝내는 중에 온 지시', finished_at = null, updated_at = now()
+			update mind.jobs set state = 'active', next_at = now(), next_reason = '끝내는 중에 온 지시', finished_at = null, updated_at = now()
 			 where id = $1 and state = 'done'
-			   and exists (select 1 from job_inbox i where i.job_id = $1 and i.consumed_run is null
+			   and exists (select 1 from mind.job_inbox i where i.job_id = $1 and i.consumed_run is null
 			                 and i.kind = 'instruction' and i.at > $2)`, jobID, started)
 		if err != nil {
 			return Ended{}, err
 		}
 		if revived = tag.RowsAffected() > 0; !revived {
-			if _, err := tx.Exec(ctx, `delete from job_inbox where job_id = $1 and consumed_run is null`, jobID); err != nil {
+			if _, err := tx.Exec(ctx, `delete from mind.job_inbox where job_id = $1 and consumed_run is null`, jobID); err != nil {
 				return Ended{}, err
 			}
 			out.Over = true
@@ -786,7 +787,7 @@ func (s *Store) EndRun(ctx context.Context, runID int64, outcome, note string) (
 	case again:
 		text = "실행을 마쳤습니다. 실행 중에 새 지시나 카드 답이 와서 곧 다시 합니다"
 	}
-	if _, err := tx.Exec(ctx, `insert into job_events (job_id, run_id, kind, text) values ($1, $2, $3, $4)`,
+	if _, err := tx.Exec(ctx, `insert into mind.job_events (job_id, run_id, kind, text) values ($1, $2, $3, $4)`,
 		jobID, runID, kind, clamp(text, 2000)); err != nil {
 		return Ended{}, err
 	}
@@ -814,14 +815,14 @@ func (s *Store) decide(ctx context.Context, runID int64, q string, args ...any) 
 	if _, err := s.pool.Exec(ctx, q, append([]any{jobID}, args...)...); err != nil {
 		return 0, err
 	}
-	_, err = s.pool.Exec(ctx, `update job_runs set decided = true where id = $1`, runID)
+	_, err = s.pool.Exec(ctx, `update mind.job_runs set decided = true where id = $1`, runID)
 	return jobID, err
 }
 
 // Schedule sets when this job runs next.
 func (s *Store) Schedule(ctx context.Context, runID int64, at time.Time, reason string) (time.Time, error) {
 	at = rules.ClampNext(time.Now(), at)
-	jobID, err := s.decide(ctx, runID, `update jobs set state = 'active', next_at = $2, next_reason = $3,
+	jobID, err := s.decide(ctx, runID, `update mind.jobs set state = 'active', next_at = $2, next_reason = $3,
 		waiting_card = '', updated_at = now() where id = $1 and state in ('active', 'waiting')`, at, reason)
 	if err == nil {
 		s.event(ctx, jobID, &runID, "schedule", fmt.Sprintf("다음 확인 %s: %s", at.Local().Format("1/2 15:04"), reason))
@@ -831,7 +832,7 @@ func (s *Store) Schedule(ctx context.Context, runID int64, at time.Time, reason 
 
 // Wait parks the job on a card; the card's decision wakes it (Answer).
 func (s *Store) Wait(ctx context.Context, runID int64, card, what string) error {
-	jobID, err := s.decide(ctx, runID, `update jobs set state = 'waiting', waiting_card = $2, next_at = null,
+	jobID, err := s.decide(ctx, runID, `update mind.jobs set state = 'waiting', waiting_card = $2, next_at = null,
 		next_reason = $3, updated_at = now() where id = $1 and state in ('active', 'waiting')`, card, what)
 	if err == nil {
 		s.event(ctx, jobID, &runID, "card", what)
@@ -843,7 +844,7 @@ func (s *Store) Wait(ctx context.Context, runID int64, card, what string) error 
 func (s *Store) Finish(ctx context.Context, runID int64, summary string) error {
 	// A done job waits on nothing: the card it may have just raised is taken
 	// down by the agent when the run ends (Ended.Over).
-	jobID, err := s.decide(ctx, runID, `update jobs set state = 'done', next_at = null, waiting_card = '', summary = $2,
+	jobID, err := s.decide(ctx, runID, `update mind.jobs set state = 'done', next_at = null, waiting_card = '', summary = $2,
 		finished_at = now(), updated_at = now() where id = $1 and state in ('active', 'waiting')`, summary)
 	if err == nil {
 		s.event(ctx, jobID, &runID, "finish", "끝냈습니다: "+summary)
@@ -857,7 +858,7 @@ func (s *Store) Report(ctx context.Context, runID int64, summary string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := s.pool.Exec(ctx, `update jobs set summary = $2, updated_at = now() where id = $1`, jobID, summary); err != nil {
+	if _, err := s.pool.Exec(ctx, `update mind.jobs set summary = $2, updated_at = now() where id = $1`, jobID, summary); err != nil {
 		return err
 	}
 	s.event(ctx, jobID, &runID, "report", summary)
@@ -870,10 +871,10 @@ func (s *Store) Remember(ctx context.Context, runID int64, key, value string) er
 		return err
 	}
 	if value == "" {
-		_, err = s.pool.Exec(ctx, `delete from job_memory where job_id = $1 and key = $2`, jobID, key)
+		_, err = s.pool.Exec(ctx, `delete from mind.job_memory where job_id = $1 and key = $2`, jobID, key)
 		return err
 	}
-	_, err = s.pool.Exec(ctx, `insert into job_memory (job_id, key, value) values ($1, $2, $3)
+	_, err = s.pool.Exec(ctx, `insert into mind.job_memory (job_id, key, value) values ($1, $2, $3)
 		on conflict (job_id, key) do update set value = excluded.value, updated_at = now()`, jobID, key, value)
 	return err
 }
@@ -896,19 +897,19 @@ func (s *Store) Record(ctx context.Context, runID int64, r RecordInput) error {
 		return err
 	}
 	if r.Remove {
-		_, err = s.pool.Exec(ctx, `delete from job_records where job_id = $1 and key = $2`, jobID, r.Key)
+		_, err = s.pool.Exec(ctx, `delete from mind.job_records where job_id = $1 and key = $2`, jobID, r.Key)
 		return err
 	}
 	metrics, _ := json.Marshal(r.Metrics)
 	if r.Metrics == nil {
 		metrics = []byte("{}")
 	}
-	_, err = s.pool.Exec(ctx, `insert into job_records (job_id, key, title, status, amount, metrics, image, url, note)
+	_, err = s.pool.Exec(ctx, `insert into mind.job_records (job_id, key, title, status, amount, metrics, image, url, note)
 		values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		on conflict (job_id, key) do update set title = excluded.title, status = excluded.status,
 		       amount = excluded.amount, metrics = excluded.metrics,
-		       image = case when excluded.image = '' then job_records.image else excluded.image end,
-		       url = case when excluded.url = '' then job_records.url else excluded.url end,
+		       image = case when excluded.image = '' then mind.job_records.image else excluded.image end,
+		       url = case when excluded.url = '' then mind.job_records.url else excluded.url end,
 		       note = excluded.note, updated_at = now()`,
 		jobID, r.Key, r.Title, r.Status, r.Amount, metrics, r.Image, r.URL, r.Note)
 	return err
@@ -928,14 +929,14 @@ func (s *Store) SetLogin(ctx context.Context, site string, required bool, note s
 	if site == "" {
 		return errors.New("사이트가 비어 있습니다.")
 	}
-	_, err := s.pool.Exec(ctx, `insert into job_sites (site, login_required, note) values ($1, $2, $3)
+	_, err := s.pool.Exec(ctx, `insert into mind.job_sites (site, login_required, note) values ($1, $2, $3)
 		on conflict (site) do update set login_required = excluded.login_required, note = excluded.note, updated_at = now()`,
 		site, required, note)
 	return err
 }
 
 func (s *Store) Sites(ctx context.Context) ([]Site, error) {
-	rows, err := s.pool.Query(ctx, `select site, login_required, note, updated_at from job_sites where login_required order by site`)
+	rows, err := s.pool.Query(ctx, `select site, login_required, note, updated_at from mind.job_sites where login_required order by site`)
 	if err != nil {
 		return nil, err
 	}
@@ -960,7 +961,7 @@ type Purge struct {
 
 // PurgeDue lists jobs that ended more than after ago and still have photos.
 func (s *Store) PurgeDue(ctx context.Context, who string, after time.Duration) ([]Purge, error) {
-	rows, err := s.pool.Query(ctx, `select id, photos from jobs
+	rows, err := s.pool.Query(ctx, `select id, photos from mind.jobs
 		where who = $2 and photos_purged_at is null and cardinality(photos) > 0
 		  and state in ('done', 'cancelled', 'failed')
 		  and coalesce(finished_at, updated_at) < $1`, time.Now().Add(-after), who)
@@ -980,7 +981,7 @@ func (s *Store) PurgeDue(ctx context.Context, who string, after time.Duration) (
 }
 
 func (s *Store) MarkPurged(ctx context.Context, id int64) error {
-	_, err := s.pool.Exec(ctx, `update jobs set photos_purged_at = now() where id = $1`, id)
+	_, err := s.pool.Exec(ctx, `update mind.jobs set photos_purged_at = now() where id = $1`, id)
 	return err
 }
 

@@ -38,7 +38,7 @@ URL = {
     "spending": os.environ.get("SPENDING_URL", "http://spending:8095"),
     "assets": os.environ.get("ASSETS_URL", "http://assets:8092"),
     "workout": os.environ.get("WORKOUT_URL", "http://workout:8091"),
-    "jobs": os.environ.get("JOBS_URL", "http://jobs:8098"),
+    "jobs": os.environ.get("JOBS_URL", "http://mind:8102/api/jobs"),
     "immich": os.environ.get("IMMICH_URL", "http://immich:2283"),
 }
 

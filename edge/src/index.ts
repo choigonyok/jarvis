@@ -82,7 +82,6 @@ interface Env {
   AGENT: Fetcher;
   INPUT: Fetcher;
   ASSETS: Fetcher;
-  JOBS: Fetcher;
   KAKAOTALK: Fetcher;
   IMESSAGE: Fetcher;
   STATUS: Fetcher;
@@ -114,7 +113,6 @@ const SERVICES: Record<string, { binding: keyof Env; origin: string }> = {
   // The conversation and the training log are kept at the way in.
   input: { binding: "INPUT", origin: "http://input:8101" },
   assets: { binding: "ASSETS", origin: "http://assets:8092" },
-  jobs: { binding: "JOBS", origin: "http://jobs:8098" },
   kakaotalk: { binding: "KAKAOTALK", origin: "http://kakaotalk:8090" },
   imessage: { binding: "IMESSAGE", origin: "http://imessage:8099" },
   status: { binding: "STATUS", origin: "http://status:8096" },
@@ -136,19 +134,19 @@ const SERVICES: Record<string, { binding: keyof Env; origin: string }> = {
 /**
  * What the guest's token opens: their own agent, the workout log (read it
  * and save what changed - inputRoute), their notifications, their own voice,
- * of context-svc the operator's day alone (guestContextRoute), and their own
- * jobs (guestJobsRoute).
+ * of context-svc the operator's day alone (guestContextRoute), and of mind
+ * their own jobs (jobsRoute).
  */
-const GUEST_SERVICES = new Set(["agent-guest", "input", "notify", "tts", "context", "jobs"]);
+const GUEST_SERVICES = new Set(["agent-guest", "input", "notify", "tts", "context", "mind"]);
 
 /**
- * What the guest may do on jobs-svc - what the 작업 tab does: list their
- * jobs, read one, and instruct, run, pause, resume or cancel it. The guest's
- * token goes on with it, so jobs-svc shows and changes the guest's own jobs
- * and finds no other. Not making one (the conversation does that), nor the
+ * What the 작업 tab does with the jobs mind keeps: list them, read one, and
+ * instruct, run, pause, resume or cancel it. The guest's token goes on with
+ * the guest's request, so mind shows and changes the guest's own jobs and
+ * finds no other. Not making one (the conversation does that), nor the
  * scheduler's routes, the sites' logins or the photo clean-up.
  */
-function guestJobsRoute(method: string, path: string): boolean {
+function jobsRoute(method: string, path: string): boolean {
   if (method === "GET") return path === "jobs" || /^jobs\/\d+$/.test(path);
   return method === "POST" && /^jobs\/\d+\/(instruct|run|pause|resume|cancel)$/.test(path);
 }
@@ -193,6 +191,7 @@ const AGENT_ROUTES = new Set(["healthz", "thread", "messages", "events", "propos
  * so, is not, or reads otherwise. The 가계부 screen: spendingRoute.
  */
 function mindRoute(method: string, path: string): boolean {
+  if (path.startsWith("api/jobs/")) return jobsRoute(method, path.slice("api/jobs/".length));
   if (path.startsWith("api/spending/")) return spendingRoute(method, path.slice("api/spending/".length));
   if (method === "GET") {
     return /^api\/(notes|places|things|meals)$/.test(path) || /^api\/notes\/[A-Za-z0-9_-]+\/versions$/.test(path);
@@ -338,7 +337,8 @@ async function gateway(request: Request, env: Env, internal: boolean): Promise<R
   if (guest && name === "context" && !guestContextRoute(request.method, rest.join("/"))) {
     return json(404, "그런 경로가 없습니다.");
   }
-  if (guest && name === "jobs" && !guestJobsRoute(request.method, rest.join("/"))) {
+  // Of mind, the guest opens their own jobs and nothing else.
+  if (guest && name === "mind" && !rest.join("/").startsWith("api/jobs/")) {
     return json(404, "그런 경로가 없습니다.");
   }
   if (name === "input" && !inputRoute(request.method, rest.join("/"))) {
@@ -374,16 +374,16 @@ async function gateway(request: Request, env: Env, internal: boolean): Promise<R
   // The services want their own token; the caller's never goes past here.
   // The guest's agent has a token of its own, which opens only the guest's
   // side of the services it calls. The voice service keeps one recording per
-  // token, jobs-svc keeps each one's jobs by it, and input-svc files what is
+  // token, mind keeps each one's jobs by it, and input-svc files what is
   // saved under who saved it, so the guest's requests go on with the guest's
   // token and nothing else: without it there is no guest voice, no guest job
   // and no guest save, never the operator's.
   if (bearer) {
     if (guest && name === "tts" && !env.JARVIS_GUEST_API_TOKEN) return json(503, "손님 목소리가 설정되지 않았습니다.");
-    if (guest && name === "jobs" && !env.JARVIS_GUEST_API_TOKEN) return json(503, "손님 작업이 설정되지 않았습니다.");
+    if (guest && name === "mind" && !env.JARVIS_GUEST_API_TOKEN) return json(503, "손님 작업이 설정되지 않았습니다.");
     if (guest && name === "input" && !env.JARVIS_GUEST_API_TOKEN) return json(503, "손님 기록이 설정되지 않았습니다.");
     const own =
-      (name === "agent-guest" || (guest && (name === "tts" || name === "jobs" || name === "input"))) &&
+      (name === "agent-guest" || (guest && (name === "tts" || name === "mind" || name === "input"))) &&
       env.JARVIS_GUEST_API_TOKEN;
     const token = own ? env.JARVIS_GUEST_API_TOKEN! : env.JARVIS_API_TOKEN;
     headers.set("authorization", `Bearer ${token}`);

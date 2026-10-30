@@ -42,7 +42,7 @@ const ASKS: Ask[] = [
   {
     title: "작업 맡기기",
     body: "“중고나라에 팔아줘”, “가격 떨어지면 알려줘”처럼 시간이 걸리는 일을 맡기면 뒤에서 해요.",
-    // The guest's jobs open no website: jobs-svc refuses one.
+    // The guest's jobs open no website: mind refuses one.
     guest: "“매일 아침 뉴스 요약해줘”처럼 시간이 걸리거나 되풀이할 일을 맡기면 뒤에서 해요. 웹사이트 로그인·구매는 못 해요.",
   },
   {
