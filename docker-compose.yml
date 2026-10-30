@@ -328,6 +328,10 @@ services:
       DATA_GO_KR_KEY: ${DATA_GO_KR_KEY:-}
       SEOUL_SUBWAY_KEY: ${SEOUL_SUBWAY_KEY:-}
       INPUT_URL: http://input:8101
+      # 날씨를 읽는 곳은 여기 하나다. 어디의 예보가 필요한지는 mind 에 묻는다.
+      MIND_URL: http://mind:8102
+      WEATHER: ${MIND_WEATHER:-}
+      WEATHER_HOME: ${MIND_WEATHER_HOME:-}
       CONTEXT_RAW_DAYS: ${CONTEXT_RAW_DAYS:-30}
     expose:
       - "8103"
@@ -902,6 +906,7 @@ services:
       # 입구와 소비자마다의 전달, 알림, 작업, iMessage 수집기, 웹 찾기, 손님 에이전트, 사진.
       INPUT_URL: http://input:8101
       NOTIFY_SVC_URL: http://output:8097
+      PHOTOS_URL: http://photos:8107
       JOBS_URL: http://jobs:8098
       IMESSAGE_URL: http://imessage:8099
       SEARCH_URL: http://search:8104
@@ -985,6 +990,30 @@ services:
   # The event log every service reports to. It only keeps events and hands
   # each subscriber (notify, agent) the types it asked for, in order; what an
   # event means is the subscriber's to decide.
+  # 사진 서버의 어댑터. Immich 를 읽어 바뀌면 기록을 남긴다. 판단은 없다.
+  photos:
+    <<: *outside
+    build:
+      context: ./photos-svc
+      additional_contexts:
+        gocommon: ./gocommon
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      LISTEN_ADDR: ":8107"
+      API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
+      INPUT_URL: http://input:8101
+      IMMICH_URL: http://immich:2283
+      IMMICH_API_KEY: ${IMMICH_MIND_API_KEY:-}
+    expose:
+      - "8107"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8107/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
   # 입구 하나. 서비스들은 input.outbox 에 쓰고, 이것만 꺼내서 봉투를 검증해 기록과 소비자별 배달을
   # 남긴다. 소비자는 표를 직접 읽는다(gocommon/queue) - 이 프로세스가 꺼져도 이미 있는 배달은 간다.
   input:

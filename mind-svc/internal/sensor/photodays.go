@@ -1,88 +1,39 @@
 package sensor
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 )
 
-// PhotoDays remembers each day's photos once the day is over: where they
-// were taken and with whom (named people only), as memory's photo collector
-// did. Days before the first run were that collector's.
-func (s *Structured) PhotoDays(ctx context.Context) error {
-	if s.Records == nil || s.ImmichURL == "" || s.ImmichKey == "" {
+// takePhotoDays remembers each day's photos once the day is over: where they
+// were taken and with whom (named people only). Seeing a day again sends only
+// what changed (a phone that uploaded late).
+func (s *Structured) takePhotoDays(ctx context.Context, days []photoDay) error {
+	if s.Records == nil {
 		return nil
 	}
-	now := s.Now().In(s.Loc)
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, s.Loc)
-	next, err := s.Store.Cursor(ctx, "records:photo-days")
-	if err != nil {
-		return err
-	}
-	if next == 0 {
-		return s.Store.SetCursor(ctx, "records:photo-days", dayNum(today))
-	}
-	day, err := time.ParseInLocation("20060102", strconv.FormatInt(next, 10), s.Loc)
-	if err != nil {
-		return err
-	}
-	for ; day.Before(today); day = day.AddDate(0, 0, 1) {
-		items, err := s.photosOn(ctx, day, day.AddDate(0, 0, 1))
+	for _, d := range days {
+		day, err := time.ParseInLocation("2006-01-02", d.Date, s.Loc)
 		if err != nil {
 			return err
 		}
-		for _, r := range PhotoDayRecords(day, items) {
+		for _, r := range PhotoDayRecords(day, d.Items) {
 			r.ValidAt = day.Format(time.RFC3339)
 			if err := s.record(ctx, r); err != nil {
 				return err
 			}
 		}
-		if err := s.Store.SetCursor(ctx, "records:photo-days", dayNum(day.AddDate(0, 0, 1))); err != nil {
-			return err
-		}
 	}
 	return nil
 }
 
-func dayNum(t time.Time) int64 {
-	n, _ := strconv.ParseInt(t.Format("20060102"), 10, 64)
-	return n
-}
-
-func (s *Structured) photosOn(ctx context.Context, from, to time.Time) ([]asset, error) {
-	var items []asset
-	for page := 1; page > 0 && page < 50; {
-		body, _ := json.Marshal(map[string]any{"takenAfter": from.UTC().Format(time.RFC3339), "takenBefore": to.UTC().Format(time.RFC3339),
-			"withExif": true, "withPeople": true, "size": 1000, "page": page})
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(s.ImmichURL, "/")+"/api/search/metadata", bytes.NewReader(body))
-		if err != nil {
-			return nil, err
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("x-api-key", s.ImmichKey)
-		var out struct {
-			Assets struct {
-				Items    []asset `json:"items"`
-				NextPage *string `json:"nextPage"`
-			} `json:"assets"`
-		}
-		if err := s.do(req, &out); err != nil {
-			return nil, err
-		}
-		items = append(items, out.Assets.Items...)
-		page = 0
-		if out.Assets.NextPage != nil {
-			page, _ = strconv.Atoi(*out.Assets.NextPage)
-		}
-	}
-	return items, nil
+type photoDay struct {
+	Date  string  `json:"date"`
+	Items []asset `json:"items"`
 }
 
 // PhotoDayRecords is a day's photos as memory keeps them: each place with

@@ -21,11 +21,13 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/context-svc/internal/api"
+	"github.com/choigonyok/jarvis/context-svc/internal/sky"
 	"github.com/choigonyok/jarvis/context-svc/internal/store"
 	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/gocommon/notify"
 	"github.com/choigonyok/jarvis/gocommon/record"
 	"github.com/choigonyok/jarvis/gocommon/watch"
+	"github.com/choigonyok/jarvis/gocommon/weather"
 )
 
 func main() {
@@ -109,6 +111,33 @@ func main() {
 		watch.Source{Kind: "context.regions", Label: "영역", Every: 5 * time.Minute, Read: watch.Local(handler, cfg.Token, "/regions", "regions")},
 		watch.Source{Kind: "context.travel", Label: "다닌 길", Every: time.Hour, Read: watch.Local(handler, cfg.Token, "/travel?days=60", "routes")},
 	)
+	// The weather: read here, and nowhere else. Home is the 집 region made on
+	// the phone, else WEATHER_HOME, else 서울.
+	if os.Getenv("WEATHER") != "false" {
+		fixed, err := weather.ParsePoint(getenv("WEATHER_HOME", "37.5665,126.9780,서울"))
+		if err != nil {
+			log.Warn("WEATHER_HOME 을 읽지 못해 서울로 둡니다", "err", err)
+			fixed = weather.Point{Name: "서울", Lat: 37.5665, Lon: 126.978}
+		}
+		forecasts := &sky.Reader{
+			Source: &sky.OpenMeteo{Agent: "jarvis-context/1.0 (+https://github.com/choigonyok/jarvis)", Zone: getenv("TZ", "Asia/Seoul")},
+			Fixed:  fixed, MindURL: os.Getenv("MIND_URL"), Token: cfg.Token,
+			Home: func(ctx context.Context) (weather.Point, bool, error) {
+				regions, err := st.Regions(ctx)
+				if err != nil {
+					return weather.Point{}, false, err
+				}
+				for _, r := range regions {
+					if r.Kind == "home" {
+						return weather.Point{Name: sky.HomeKey, Lat: r.Lat, Lon: r.Lon}, true, nil
+					}
+				}
+				return weather.Point{}, false, nil
+			},
+		}
+		(&watch.Watcher{Service: "context", Records: records, Loops: loops, Log: log}).Run(ctx,
+			watch.Source{Kind: "weather.forecast", Label: "날씨 예보", Every: 30 * time.Minute, Read: forecasts.Read})
+	}
 	srv := &http.Server{Addr: addr, Handler: handler, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second}
 	go func() {
 		log.Info("context-svc 가 듣기 시작했습니다", "addr", addr)

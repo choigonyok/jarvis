@@ -19,6 +19,7 @@
 //	POST /api/ledger/rebuild          make the result ledger and the facts table again
 //	GET  /api/slots/{name}?saved=     whether a slot's value saved then still holds
 //	GET  /api/commands/{key}          what came of a command sent through the stream (commands.go)
+//	GET  /api/weather/places          where the plans of the next two weeks are (context-svc reads their forecast)
 //	GET  /api/notes                   the notes about the operator, every status
 //	POST /api/notes/{id}              {status, text, reason} the operator on a note
 //	GET  /api/notes/{id}/versions     a note's versions, with why each
@@ -253,6 +254,14 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, http.StatusOK, map[string]int{"outcomes": rows, "facts": facts})
 	}))
 	mux.HandleFunc("GET /api/slots/{name}", s.auth(false, s.slot))
+	mux.HandleFunc("GET /api/weather/places", s.auth(true, func(w http.ResponseWriter, r *http.Request) {
+		places, err := s.m.WeatherPlaces(r.Context())
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"places": places})
+	}))
 	mux.HandleFunc("GET /api/entities/{id}/changes", s.auth(false, s.changes))
 	mux.HandleFunc("POST /api/replay", s.auth(false, s.replay))
 	mux.HandleFunc("GET /api/recall", s.auth(false, s.recall))

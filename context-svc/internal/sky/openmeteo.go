@@ -1,4 +1,4 @@
-package weather
+package sky
 
 import (
 	"context"
@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/choigonyok/jarvis/gocommon/weather"
 )
 
 // OpenMeteo reads forecasts from Open-Meteo and finds places with
@@ -34,7 +36,7 @@ type OpenMeteo struct {
 	Now    func() time.Time
 
 	mu        sync.Mutex
-	forecasts map[string]Forecast
+	forecasts map[string]weather.Forecast
 	places    map[string]place
 	// down is when a service last failed to answer, and why: for a while
 	// after, the answer is that failure, at once - a morning asks about
@@ -45,7 +47,7 @@ type OpenMeteo struct {
 }
 
 type place struct {
-	p   Point
+	p   weather.Point
 	err error
 	at  time.Time
 }
@@ -76,7 +78,7 @@ func (o *OpenMeteo) client() *http.Client {
 
 // Forecast is the days around today at p (PastDays back, sixteen ahead) and
 // the next day and a half by the hour.
-func (o *OpenMeteo) Forecast(ctx context.Context, p Point) (Forecast, error) {
+func (o *OpenMeteo) Forecast(ctx context.Context, p weather.Point) (weather.Forecast, error) {
 	key := fmt.Sprintf("%.2f,%.2f", p.Lat, p.Lon)
 	o.mu.Lock()
 	if f, ok := o.forecasts[key]; ok && o.now().Sub(f.At) < forecastTTL {
@@ -86,7 +88,7 @@ func (o *OpenMeteo) Forecast(ctx context.Context, p Point) (Forecast, error) {
 	}
 	o.mu.Unlock()
 	if err := o.stillDown("forecast"); err != nil {
-		return Forecast{}, err
+		return weather.Forecast{}, err
 	}
 
 	base := o.Forecasts
@@ -125,13 +127,13 @@ func (o *OpenMeteo) Forecast(ctx context.Context, p Point) (Forecast, error) {
 	}
 	if err := o.get(ctx, base+"?"+q.Encode(), "", &out); err != nil {
 		o.wentDown("forecast", err)
-		return Forecast{}, err
+		return weather.Forecast{}, err
 	}
 	loc, err := time.LoadLocation(zone)
 	if err != nil {
 		loc = time.FixedZone("KST", 9*60*60)
 	}
-	f := Forecast{Point: p, At: o.now()}
+	f := weather.Forecast{Point: p, At: o.now()}
 	d := out.Daily
 	for i, date := range d.Time {
 		// A day the model has nothing for (the far end of the range) is not a
@@ -139,7 +141,7 @@ func (o *OpenMeteo) Forecast(ctx context.Context, p Point) (Forecast, error) {
 		if i >= len(d.Max) || d.Max[i] == nil {
 			continue
 		}
-		f.Days = append(f.Days, Day{Date: date, Code: at(d.Code, i), Precip: num(d.Precip, i), Snow: num(d.Snow, i),
+		f.Days = append(f.Days, weather.Day{Date: date, Code: at(d.Code, i), Precip: num(d.Precip, i), Snow: num(d.Snow, i),
 			Prob: int(math.Round(num(d.Prob, i))), Max: num(d.Max, i), Min: num(d.Min, i)})
 	}
 	h := out.Hourly
@@ -148,14 +150,14 @@ func (o *OpenMeteo) Forecast(ctx context.Context, p Point) (Forecast, error) {
 		if err != nil {
 			continue
 		}
-		f.Hours = append(f.Hours, Hour{At: at, Prob: int(math.Round(num(h.Prob, i))), Precip: num(h.Precip, i)})
+		f.Hours = append(f.Hours, weather.Hour{At: at, Prob: int(math.Round(num(h.Prob, i))), Precip: num(h.Precip, i)})
 	}
 	if len(f.Days) == 0 {
-		return Forecast{}, fmt.Errorf("예보에 날이 없습니다%s", suffix(out.Reason))
+		return weather.Forecast{}, fmt.Errorf("예보에 날이 없습니다%s", suffix(out.Reason))
 	}
 	o.mu.Lock()
 	if o.forecasts == nil {
-		o.forecasts = map[string]Forecast{}
+		o.forecasts = map[string]weather.Forecast{}
 	}
 	o.forecasts[key] = f
 	o.mu.Unlock()
@@ -166,10 +168,10 @@ func (o *OpenMeteo) Forecast(ctx context.Context, p Point) (Forecast, error) {
 // near: there are two 자라섬, and the campsite is on the one near Seoul.
 // What a map files as a road, a bus stop or a stream shares its name with a
 // town often enough ("성수동" is a bus stop on Jeju) to be no answer at all.
-func (o *OpenMeteo) Locate(ctx context.Context, name string, near Point) (Point, error) {
+func (o *OpenMeteo) Locate(ctx context.Context, name string, near weather.Point) (weather.Point, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return Point{}, ErrUnknown
+		return weather.Point{}, weather.ErrUnknown
 	}
 	key := name
 	if !near.Zero() {
@@ -179,7 +181,7 @@ func (o *OpenMeteo) Locate(ctx context.Context, name string, near Point) (Point,
 		return p, err
 	}
 	if err := o.stillDown("places"); err != nil {
-		return Point{}, err
+		return weather.Point{}, err
 	}
 	o.lookup.Lock()
 	defer o.lookup.Unlock()
@@ -194,7 +196,7 @@ func (o *OpenMeteo) Locate(ctx context.Context, name string, near Point) (Point,
 	if wait := time.Until(o.last.Add(every)); wait > 0 {
 		select {
 		case <-ctx.Done():
-			return Point{}, ctx.Err()
+			return weather.Point{}, ctx.Err()
 		case <-time.After(wait):
 		}
 	}
@@ -222,10 +224,10 @@ func (o *OpenMeteo) Locate(ctx context.Context, name string, near Point) (Point,
 	o.last = time.Now()
 	if err != nil {
 		o.wentDown("places", err) // the name is not kept: the next try may reach it
-		return Point{}, err
+		return weather.Point{}, err
 	}
-	found := Point{}
-	err = ErrUnknown
+	found := weather.Point{}
+	err = weather.ErrUnknown
 	for _, h := range hits {
 		if h.Category == "highway" || h.Category == "waterway" {
 			continue
@@ -235,7 +237,7 @@ func (o *OpenMeteo) Locate(ctx context.Context, name string, near Point) (Point,
 		if e1 != nil || e2 != nil {
 			continue
 		}
-		found, err = Point{Name: name, Lat: lat, Lon: lon}, nil
+		found, err = weather.Point{Name: name, Lat: lat, Lon: lon}, nil
 		break
 	}
 	o.mu.Lock()
@@ -266,7 +268,7 @@ func (o *OpenMeteo) wentDown(service string, err error) {
 }
 
 // kept is a place looked up before, while it is still good.
-func (o *OpenMeteo) kept(name string) (Point, error, bool) {
+func (o *OpenMeteo) kept(name string) (weather.Point, error, bool) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	c, ok := o.places[name]
@@ -275,7 +277,7 @@ func (o *OpenMeteo) kept(name string) (Point, error, bool) {
 		ttl = missTTL
 	}
 	if !ok || o.now().Sub(c.at) >= ttl {
-		return Point{}, nil, false
+		return weather.Point{}, nil, false
 	}
 	return c.p, c.err, true
 }

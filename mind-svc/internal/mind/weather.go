@@ -5,11 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
+	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 	"github.com/choigonyok/jarvis/mind-svc/internal/weather"
 )
@@ -76,26 +75,90 @@ func (h *Home) Point(ctx context.Context) (weather.Point, error) {
 }
 
 // ParsePoint reads "37.5665,126.9780" or "37.5665,126.9780,서울".
-func ParsePoint(s string) (weather.Point, error) {
-	parts := strings.SplitN(strings.TrimSpace(s), ",", 3)
-	if len(parts) < 2 {
-		return weather.Point{}, fmt.Errorf("%q: 위도,경도[,이름] 꼴이어야 합니다", s)
-	}
-	lat, err1 := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
-	lon, err2 := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
-	if err1 != nil || err2 != nil || lat < -90 || lat > 90 || lon < -180 || lon > 180 {
-		return weather.Point{}, fmt.Errorf("%q: 위도,경도[,이름] 꼴이어야 합니다", s)
-	}
-	p := weather.Point{Lat: lat, Lon: lon, Name: "집"}
-	if len(parts) == 3 && strings.TrimSpace(parts[2]) != "" {
-		p.Name = strings.TrimSpace(parts[2])
-	}
-	return p, nil
-}
+func ParsePoint(s string) (weather.Point, error) { return weather.ParsePoint(s) }
 
 // WeatherState is how reading the weather went, for the status screen.
 type WeatherState struct {
 	Home  string     `json:"home,omitempty"`  // where home was taken to be
 	At    *time.Time `json:"at,omitempty"`    // the last forecast read
 	Error string     `json:"error,omitempty"` // why the latest try failed
+}
+
+// ForecastKey is where the forecast of a name is kept.
+func ForecastKey(name string) string { return "weather:" + name }
+
+// homeForecast is the name home's forecast goes by, whatever home is called.
+const homeForecast = "집"
+
+// LatestWeather is the weather as context-svc last said it: mind does not go
+// out for it. A place it has said nothing about is a place not on the map as
+// far as the loop can tell; a plan's place is told on the next round.
+type LatestWeather struct{ Store store.Store }
+
+func (l LatestWeather) read(ctx context.Context, name string) (weather.Forecast, error) {
+	var f weather.Forecast
+	raw, _, err := l.Store.Latest(ctx, ForecastKey(name))
+	if err != nil {
+		return f, err
+	}
+	return f, json.Unmarshal(raw, &f)
+}
+
+// Forecast is what was last said for p.
+func (l LatestWeather) Forecast(ctx context.Context, p weather.Point) (weather.Forecast, error) {
+	f, err := l.read(ctx, p.Name)
+	if errors.Is(err, model.ErrNotFound) {
+		f, err = l.read(ctx, homeForecast)
+	}
+	if err != nil {
+		return f, fmt.Errorf("예보가 아직 없습니다: %w", err)
+	}
+	return f, nil
+}
+
+// Locate is a name a forecast was said for.
+func (l LatestWeather) Locate(ctx context.Context, name string, _ weather.Point) (weather.Point, error) {
+	f, err := l.read(ctx, name)
+	if errors.Is(err, model.ErrNotFound) {
+		return weather.Point{}, weather.ErrUnknown
+	}
+	if err != nil {
+		return weather.Point{}, err
+	}
+	return weather.Point{Name: name, Lat: f.Point.Lat, Lon: f.Point.Lon}, nil
+}
+
+// WeatherPlaces is where the plans of the next two weeks are: what context-svc
+// asks, to know what to read the forecast of.
+func (m *Mind) WeatherPlaces(ctx context.Context) ([]WeatherPlace, error) {
+	plans, err := m.World.Entities(ctx, model.KindPlan, "", true)
+	if err != nil {
+		return nil, err
+	}
+	now := m.Opts.Now().In(m.Opts.Loc)
+	from, to := now.Format("2006-01-02"), now.AddDate(0, 0, weatherAhead).Format("2006-01-02")
+	seen := map[WeatherPlace]bool{}
+	out := []WeatherPlace{}
+	for _, p := range plans {
+		st := p.State
+		if st.Date == "" || st.Date < from || st.Date > to || st.Area == "" && st.Place == "" {
+			continue
+		}
+		w := WeatherPlace{Area: st.Area, Place: st.Place}
+		if !seen[w] {
+			seen[w] = true
+			out = append(out, w)
+		}
+	}
+	return out, nil
+}
+
+// weatherAhead is how many days ahead a plan's weather is read: as far as the
+// rain skill looks, and a little.
+const weatherAhead = 14
+
+// WeatherPlace is where a plan is.
+type WeatherPlace struct {
+	Area  string `json:"area,omitempty"`
+	Place string `json:"place,omitempty"`
 }

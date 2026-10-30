@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/gocommon/queue"
+	"github.com/choigonyok/jarvis/mind-svc/internal/mind"
 )
 
 // What the adapters leave in the stream. mind no longer goes to the calendar,
@@ -24,10 +25,15 @@ const (
 	KindNowGuest = "context.now.guest"
 	KindRegions  = "context.regions"
 	KindTravel   = "context.travel"
+	// KindForecast is what is forecast at home and where the plans are.
+	KindForecast = "weather.forecast"
+	// The last two days' photos, and the days that are over.
+	KindPhotos    = "photos.recent"
+	KindPhotoDays = "photos.days"
 )
 
 // Kinds is what the structured lane reads.
-var Kinds = []string{KindCalendarNear, KindCalendarYear, KindVisits, KindHoldings, KindNow, KindNowGuest, KindRegions, KindTravel, KindMessage}
+var Kinds = []string{KindCalendarNear, KindCalendarYear, KindVisits, KindHoldings, KindNow, KindNowGuest, KindRegions, KindTravel, KindForecast, KindPhotos, KindPhotoDays, KindMessage}
 
 // calendarRead is one read of the calendar.
 type calendarRead struct {
@@ -75,6 +81,32 @@ func (s *Structured) Take(ctx context.Context, m queue.Message) error {
 		var p portfolio
 		if err = json.Unmarshal(m.Payload, &p); err == nil {
 			return s.takeAssets(ctx, p)
+		}
+	case KindPhotos:
+		var p struct {
+			Items []asset `json:"items"`
+		}
+		if err = json.Unmarshal(m.Payload, &p); err == nil {
+			return s.takePhotos(ctx, p.Items)
+		}
+	case KindPhotoDays:
+		var p struct {
+			Days []photoDay `json:"days"`
+		}
+		if err = json.Unmarshal(m.Payload, &p); err == nil {
+			return s.takePhotoDays(ctx, p.Days)
+		}
+	case KindForecast:
+		var f struct {
+			Forecasts map[string]json.RawMessage `json:"forecasts"`
+		}
+		if err = json.Unmarshal(m.Payload, &f); err == nil {
+			for name, raw := range f.Forecasts {
+				if err := s.Store.PutLatest(ctx, mind.ForecastKey(name), raw, m.OccurredAt); err != nil {
+					return err
+				}
+			}
+			return nil
 		}
 	}
 	if err != nil {

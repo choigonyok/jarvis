@@ -38,6 +38,7 @@ type Config struct {
 	// the iMessage collector, web search, the guest's agent, photos.
 	InputURL      string
 	NotifyURL     string
+	PhotosURL     string
 	JobsURL       string
 	IMessageURL   string
 	SearchURL     string
@@ -294,6 +295,7 @@ func All(cfg Config) []check.Probe {
 		e.delivery("agent-guest", "손님 효과 → 손님 에이전트", []string{"agent-guest", "svc.mind"}),
 		e.service("svc.output", "출구(알림)", cfg.NotifyURL, []string{"postgres"}),
 		e.service("svc.jobs", "작업 서비스", cfg.JobsURL, []string{"postgres", "agent"}),
+		e.service("svc.photos", "사진 어댑터", cfg.PhotosURL, []string{"svc.immich"}),
 		e.service("svc.kakaotalk", "카톡 수집 서비스", cfg.KakaoURL, nil),
 		e.service("svc.imessage", "iMessage 수집 서비스", cfg.IMessageURL, nil),
 		// Its loops read the KakaoTalk collector and assets-svc: when one of

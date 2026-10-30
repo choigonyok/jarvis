@@ -42,8 +42,6 @@ type Structured struct {
 
 	SpendingURL string
 	WorkoutURL  string
-	ImmichURL   string
-	ImmichKey   string
 	JobsURL     string
 	// Records, when set, is long-term memory: what is read here is also
 	// remembered there.
@@ -70,7 +68,7 @@ func (s *Structured) Run(ctx context.Context, every time.Duration) {
 	defer t.Stop()
 	for {
 		for name, poll := range map[string]func(context.Context) error{
-			"spending": s.Spending, "workout": s.Workout, "photos": s.Photos, "jobs": s.Jobs, "photo-days": s.PhotoDays,
+			"spending": s.Spending, "workout": s.Workout, "jobs": s.Jobs,
 		} {
 			if err := poll(ctx); err != nil && ctx.Err() == nil {
 				s.Out.Warn("구조화 소스를 읽지 못했습니다", "source", name, "err", err)
@@ -264,54 +262,17 @@ func (s *Structured) back() time.Duration {
 
 // Photos reads Immich's photos taken since the last read (a day back on a
 // first start): when, which city, who is in them, favourites.
-func (s *Structured) Photos(ctx context.Context) error {
-	if s.ImmichURL == "" || s.ImmichKey == "" {
-		return nil
-	}
-	cur, err := s.Store.Cursor(ctx, "sensor:photos")
-	if err != nil {
-		return err
-	}
-	since := s.Now().Add(-24 * time.Hour)
-	if cur > 0 {
-		since = time.UnixMilli(cur).Add(-time.Hour) // late uploads
-	}
-	last := since
-	for page := 1; page > 0 && page < 20; {
-		body, _ := json.Marshal(map[string]any{"takenAfter": since.UTC().Format(time.RFC3339), "withExif": true, "withPeople": true, "size": 500, "page": page})
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(s.ImmichURL, "/")+"/api/search/metadata", bytes.NewReader(body))
-		if err != nil {
-			return err
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("x-api-key", s.ImmichKey)
-		var out struct {
-			Assets struct {
-				Items    []asset `json:"items"`
-				NextPage *string `json:"nextPage"`
-			} `json:"assets"`
-		}
-		if err := s.do(req, &out); err != nil {
-			return err
-		}
-		for _, a := range out.Assets.Items {
-			o, ok := a.occurrence()
-			if !ok {
-				continue
-			}
+// takePhotos is the last two days' photos, as photos-svc read them. Seeing one
+// again changes nothing unless it changed.
+func (s *Structured) takePhotos(ctx context.Context, items []asset) error {
+	for _, a := range items {
+		if o, ok := a.occurrence(); ok {
 			if err := s.observe(ctx, o); err != nil {
 				return err
 			}
-			if o.At.After(last) {
-				last = o.At
-			}
-		}
-		page = 0
-		if out.Assets.NextPage != nil {
-			page, _ = strconv.Atoi(*out.Assets.NextPage)
 		}
 	}
-	return s.Store.SetCursor(ctx, "sensor:photos", last.UnixMilli())
+	return nil
 }
 
 type asset struct {

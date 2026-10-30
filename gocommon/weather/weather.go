@@ -1,12 +1,12 @@
-// Package weather is the day's weather where the operator lives and where
-// their plans are: what fell on the days behind (for the night's reflection),
-// what is forecast for the days ahead (for the morning brief and a plan out of
-// doors). It reads, it never decides - the skills say what a forecast is
-// worth telling.
+// Package weather is the shape of the day's weather where the operator lives
+// and where their plans are: what fell on the days behind (for the night's
+// reflection), what is forecast for the days ahead (for the morning brief and
+// a plan out of doors). It reads, it never decides - the skills say what a
+// forecast is worth telling. context-svc reads the forecasts and mind reads
+// what context-svc said; this is what the two of them share.
 //
-// Forecasts come from Open-Meteo and places from OpenStreetMap's Nominatim;
-// neither needs a key. A place is a name as a conversation or the calendar
-// says it ("가평", "망원동", "자라섬 캠핑장"), found once and kept.
+// A place is a name as a conversation or the calendar says it ("가평",
+// "망원동", "자라섬 캠핑장").
 package weather
 
 import (
@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -182,4 +183,22 @@ func Names(area, place string) []string {
 	}
 	add(bare)
 	return out
+}
+
+// ParsePoint reads "37.5665,126.9780" or "37.5665,126.9780,서울".
+func ParsePoint(s string) (Point, error) {
+	parts := strings.Split(s, ",")
+	if len(parts) < 2 {
+		return Point{}, fmt.Errorf("%q: 위도,경도[,이름] 꼴이어야 합니다", s)
+	}
+	lat, err1 := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+	lon, err2 := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+	if err1 != nil || err2 != nil || lat < -90 || lat > 90 || lon < -180 || lon > 180 {
+		return Point{}, fmt.Errorf("%q: 위도,경도[,이름] 꼴이어야 합니다", s)
+	}
+	p := Point{Lat: lat, Lon: lon, Name: "집"}
+	if len(parts) > 2 && strings.TrimSpace(parts[2]) != "" {
+		p.Name = strings.TrimSpace(parts[2])
+	}
+	return p, nil
 }

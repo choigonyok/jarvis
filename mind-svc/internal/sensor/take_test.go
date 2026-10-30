@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/gocommon/queue"
+	"github.com/choigonyok/jarvis/mind-svc/internal/mind"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 	"github.com/choigonyok/jarvis/mind-svc/internal/world"
@@ -92,5 +93,58 @@ func TestTakeCalendarKeepsPlansInStep(t *testing.T) {
 	plans, _ = s.World.Entities(ctx, model.KindPlan, CalendarRoom, true)
 	if len(plans) != 0 {
 		t.Fatalf("지워진 일정의 계획이 남았습니다: %+v", plans)
+	}
+}
+
+// Photos come as a record and are occurrences; a finished day is remembered
+// once, and again only if it changed.
+func TestTakePhotos(t *testing.T) {
+	s, st, now := takeSetup(t)
+	rec := &recorder{}
+	s.Records = rec
+	ctx := context.Background()
+	stamp := now.Add(-time.Hour).Format(time.RFC3339)
+	raw, _ := json.Marshal(map[string]any{"items": []map[string]any{{"id": "p1", "fileCreatedAt": stamp, "isFavorite": true,
+		"exifInfo": map[string]any{"city": "가평"}, "people": []map[string]any{{"name": "민수"}}}}})
+	if err := s.Take(ctx, queue.Message{Kind: KindPhotos, Payload: raw, OccurredAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	o, err := st.Occurrence(ctx, "photo:p1")
+	if err != nil || o.Kind != "photo" || o.Place != "가평" || o.Class != "favorite" || len(o.People) != 1 {
+		t.Fatalf("%+v %v", o, err)
+	}
+	day, _ := json.Marshal(map[string]any{"days": []map[string]any{{"date": "2026-10-30", "items": []map[string]any{{"id": "p1", "fileCreatedAt": stamp,
+		"exifInfo": map[string]any{"city": "가평", "country": "대한민국"}, "people": []map[string]any{{"name": "민수"}}}}}}})
+	take := func() {
+		t.Helper()
+		if err := s.Take(ctx, queue.Message{Kind: KindPhotoDays, Payload: day, OccurredAt: now}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.flush(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	take()
+	if len(rec.got) == 0 {
+		t.Fatal("지난 날의 사진이 기억으로 가지 않았습니다")
+	}
+	n := len(rec.got)
+	take()
+	if len(rec.got) != n {
+		t.Fatalf("같은 것을 또 보냈습니다: %d -> %d", n, len(rec.got))
+	}
+}
+
+// A forecast comes as a record, each place under its name.
+func TestTakeForecast(t *testing.T) {
+	s, st, now := takeSetup(t)
+	raw, _ := json.Marshal(map[string]any{"forecasts": map[string]any{"집": map[string]any{"point": map[string]any{"name": "집"}}, "가평": map[string]any{"point": map[string]any{"name": "가평"}}}})
+	if err := s.Take(context.Background(), queue.Message{Kind: KindForecast, Payload: raw, OccurredAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"집", "가평"} {
+		if _, _, err := st.Latest(context.Background(), mind.ForecastKey(name)); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
 	}
 }

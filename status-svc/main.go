@@ -76,6 +76,7 @@ func main() {
 		InputURL:    getenv("INPUT_URL", "http://localhost:8101"),
 		// NOTIFY_URL is where this service's own alerts go (input-svc).
 		NotifyURL:     getenv("NOTIFY_SVC_URL", "http://localhost:8097"),
+		PhotosURL:     getenv("PHOTOS_URL", "http://localhost:8107"),
 		JobsURL:       getenv("JOBS_URL", "http://localhost:8098"),
 		IMessageURL:   getenv("IMESSAGE_URL", "http://localhost:8099"),
 		SearchURL:     getenv("SEARCH_URL", "http://localhost:8104"),

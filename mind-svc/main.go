@@ -228,9 +228,8 @@ func main() {
 		photos = act.Immich{URL: url, Key: key, Public: os.Getenv("IMMICH_PUBLIC_URL")}
 	}
 
-	// Weather: Open-Meteo for forecasts, Nominatim for places - neither needs
-	// a key. Home is the 집 region made on the phone (context-svc), else
-	// MIND_WEATHER_HOME, else 서울.
+	// Weather: as context-svc last said it. Home is the 집 region made on the
+	// phone, else MIND_WEATHER_HOME, else 서울.
 	var sky *weather.Service
 	if os.Getenv("MIND_WEATHER") != "false" {
 		fixed, err := mind.ParsePoint(getenv("MIND_WEATHER_HOME", seoul))
@@ -242,9 +241,7 @@ func main() {
 		if mode == "stack" {
 			home.Store = st
 		}
-		sky = &weather.Service{Home: home.Point, Source: &weather.OpenMeteo{
-			Agent: "jarvis-mind/1.0 (+https://github.com/choigonyok/jarvis)", Zone: getenv("TZ", "Asia/Seoul"),
-		}}
+		sky = &weather.Service{Home: home.Point, Source: mind.LatestWeather{Store: st}}
 	}
 
 	var book *act.Spending
@@ -300,7 +297,7 @@ func main() {
 		// phones and the accounts come to the lane below as records.
 		structured = &sensor.Structured{Store: st, Observer: m, World: m.World, Token: token, Loc: loc, Out: log, Now: time.Now,
 			SpendingURL: os.Getenv("SPENDING_URL"), WorkoutURL: os.Getenv("WORKOUT_URL"),
-			ImmichURL: os.Getenv("IMMICH_URL"), ImmichKey: os.Getenv("IMMICH_API_KEY"), JobsURL: os.Getenv("JOBS_URL")}
+			JobsURL: os.Getenv("JOBS_URL")}
 		// One reader for each source: memory remembers what is read here
 		// (memory-svc's own collectors for these sources are then off -
 		// MEMORY_SOURCES).
