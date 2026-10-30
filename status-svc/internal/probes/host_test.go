@@ -2,6 +2,7 @@ package probes
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -63,6 +64,86 @@ func TestHostProbes(t *testing.T) {
 	write(`{"checkedAt":"2026-01-01T00:00:00Z","filevault":"On"}`)
 	if run(e.hostFileVault()) != check.Unknown {
 		t.Fatal("점검이 멈췄으면 모름")
+	}
+}
+
+// The Mac mini's disk: how full, what fills it, and how fast it is growing -
+// from host.json and the day's lines beside it, as host-check writes them.
+func TestHostDisk(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "host.json")
+	e := &env{Config: Config{HostFile: file}}
+	now := time.Now()
+	write := func(disk string) {
+		body := `{"checkedAt":"` + now.Format(time.RFC3339) + `","disk":` + disk + `}`
+		if err := os.WriteFile(file, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run := func() check.Verdict { return e.hostDisk().Run(context.Background()) }
+
+	if v := run(); v.State != check.Unknown {
+		t.Fatalf("기록이 없으면 모름: %+v", v)
+	}
+	write(`null`)
+	if v := run(); v.State != check.Unknown || v.Meter != nil {
+		t.Fatalf("옛 host-check: %+v", v)
+	}
+
+	// 245GB with 102GB free, as on the machine this watches.
+	const fine = `{"totalKB":239362496,"freeKB":99895296,"dockerKB":70616428,"photosKB":17406464,"backupsKB":502272,
+		"docker":[{"type":"Images","size":"28.96GB","reclaimable":"8.127GB (28%)"},{"type":"Containers","size":"75.2MB","reclaimable":"8.192kB (0%)"},
+		{"type":"Local Volumes","size":"12.74GB","reclaimable":"3.402GB (26%)"},{"type":"Build Cache","size":"33.48GB","reclaimable":"21.44GB"}]}`
+	write(fine)
+	v := run()
+	if v.State != check.OK || v.Figure != "143 / 245GB" || v.Meter == nil || *v.Meter != 58 || v.Summary != "102GB 남았어요." {
+		t.Fatalf("정상: %+v", v)
+	}
+	want := []string{"도커 72.3GB: 이미지 29GB, 빌드 캐시 33GB, 볼륨 13GB", "빌드 캐시 중 21GB는 지워도 돼요", "사진 17.8GB", "매일 백업 0.5GB", "시스템과 그 밖의 파일 52.2GB"}
+	if strings.Join(v.Facts, "|") != strings.Join(want, "|") {
+		t.Fatalf("무엇이 쓰나: %q", v.Facts)
+	}
+	if v.ObservedAt == nil {
+		t.Fatal("맥미니에서 잰 때")
+	}
+
+	// A week of history: how fast, and when that reaches the warning.
+	day := func(ago int, usedKB int64) string {
+		return fmt.Sprintf(`{"day":"%s","usedKB":%d}`, now.AddDate(0, 0, -ago).Format("2006-01-02"), usedKB)
+	}
+	used := int64(239362496 - 99895296)
+	history := func(lines ...string) {
+		if err := os.WriteFile(filepath.Join(dir, "disk-history.jsonl"), []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	last := func() string { f := run().Facts; return f[len(f)-1] }
+	history(day(20, used-40_000_000), day(7, used-7_000_000), day(1, used))
+	if got := last(); !strings.HasPrefix(got, "지난 7일 동안 7.2GB 늘었어요. 이대로면 ") || !strings.Contains(got, "일쯤 뒤 85%에 닿아요") {
+		t.Fatalf("늘어나는 속도: %q", got)
+	}
+	history(day(5, used+5_000_000))
+	if got := last(); got != "지난 5일 동안 5.1GB 줄었어요" {
+		t.Fatalf("줄어듦: %q", got)
+	}
+	history(day(6, used-100))
+	if got := last(); got != "지난 6일 동안 거의 그대로예요" {
+		t.Fatalf("그대로: %q", got)
+	}
+	history(day(1, used-9_000_000))
+	if got := last(); strings.HasPrefix(got, "지난") {
+		t.Fatalf("며칠은 쌓여야 말함: %q", got)
+	}
+
+	// The two lines it is judged by; the docker table missing still measures.
+	for _, c := range []struct {
+		free  int64
+		state check.State
+	}{{35_000_000, check.Warn}, {12_000_000, check.Fail}, {38_000_000, check.OK}} {
+		write(fmt.Sprintf(`{"totalKB":239362496,"freeKB":%d,"docker":[]}`, c.free))
+		if v := run(); v.State != c.state {
+			t.Fatalf("남은 %d: %+v", c.free, v)
+		}
 	}
 }
 

@@ -9,6 +9,10 @@ export type CheckResult = {
   observedAt?: string;
   observedLabel?: string;
   facts?: string[];
+  /** The figure right of the name when it is not an age: "143 / 245GB". */
+  figure?: string;
+  /** 0-100: drawn as a thin bar under the summary. */
+  meter?: number | null;
   rule: string;
   fix?: string;
   checkedAt: string;

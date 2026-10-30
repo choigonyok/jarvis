@@ -107,8 +107,9 @@
 남아, 컨테이너를 다시 만들어도 지난 결제를 볼 수 있다: `docker compose exec browser tail -n 200 /logs/guard.log`.
 
 위 전제는 `scripts/host-check`(LaunchAgent com.jarvis.host-check, 10분마다)가 점검해
-`~/.jarvis-host/host.json` 에 적고, 상태 탭 "기반"의 맥미니 디스크 암호화 · 백업의 바깥 사본 ·
-iMessage 미러 권한 · 매일 백업 항목이 그것을 보여 준다. 매일 백업은 날짜뿐 아니라 그날 담은 것
+`~/.jarvis-host/host.json` 에 적고, 상태 탭 "기반"의 맥미니 저장 공간 · 맥미니 디스크 암호화 · 백업의 바깥 사본 ·
+iMessage 미러 권한 · 매일 백업 항목이 그것을 보여 준다. 저장 공간은 내장 디스크의 전체·남은 양과 도커·사진·백업의 크기를 재고,
+하루 한 줄을 `disk-history.jsonl` 에 60일치 남겨 얼마나 빨리 느는지도 보여 준다(85% 주의, 95% 이상). 매일 백업은 날짜뿐 아니라 그날 담은 것
 (`manifest.json` - 데이터베이스·기억 그래프·수집기·에이전트와 손님의 데이터, 승인 장부까지)에 빠진 것이
 있는지도 본다. 복원되는지는 `scripts/backup restore-test` 로 시험한다.
 

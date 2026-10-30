@@ -7,7 +7,8 @@
 #   scripts/host-check uninstall
 #
 # 적는 것: FileVault 상태, Time Machine 대상 유무, iMessage 미러 방식(binary | ssh), 마지막 백업 날짜와
-# 그 백업에서 빠진 것(그날의 manifest.json, 없으면 null), FalkorDB 의 AOF(appendonly) 설정.
+# 그 백업에서 빠진 것(그날의 manifest.json, 없으면 null), FalkorDB 의 AOF(appendonly) 설정, 내장 디스크의
+# 저장 공간과 그것을 무엇이 쓰는지. 저장 공간의 하루 기록은 disk-history.jsonl 에 60일치 남긴다.
 set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.orbstack/bin:/Applications/Docker.app/Contents/Resources/bin:$PATH"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -15,6 +16,30 @@ OUT="$HOME/.jarvis-host"
 LABEL=com.jarvis.host-check
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 BACKUPS="${JARVIS_BACKUP_DIR:-$HOME/jarvis-backups}"
+
+# 내장 디스크. 볼륨들이 한 APFS 컨테이너를 나눠 쓰므로 쓴 양은 '전체 - 남은 것'이다. 도커의 가상 디스크는
+# 성긴 파일이라 겉크기(ls)가 아니라 실제로 차지한 크기(du)로 잰다.
+disk_json() {
+  local total=$1 free=$2 vm upload photos backups use
+  vm=$(du -sk "$HOME/Library/Containers/com.docker.docker/Data/vms/0/data/Docker.raw" 2>/dev/null | cut -f1 || true)
+  upload=$(sed -n 's/^UPLOAD_LOCATION=//p' "$ROOT/immich/.env" 2>/dev/null | head -1 || true)
+  photos=$(du -sk "${upload:-$HOME/jarvis-photos}" 2>/dev/null | cut -f1 || true)
+  backups=$(du -sk "$BACKUPS" 2>/dev/null | cut -f1 || true)
+  use=$(docker system df --format '{{.Type}}|{{.Size}}|{{.Reclaimable}}' 2>/dev/null |
+    awk -F'|' 'NR>1 {printf ","} {printf "{\"type\":\"%s\",\"size\":\"%s\",\"reclaimable\":\"%s\"}", $1, $2, $3}' || true)
+  printf '{"totalKB":%s,"freeKB":%s,"dockerKB":%s,"photosKB":%s,"backupsKB":%s,"docker":[%s]}' \
+    "$total" "$free" "${vm:-0}" "${photos:-0}" "${backups:-0}" "$use"
+}
+
+# 하루에 한 줄, 그날의 마지막 값. 상태 탭이 일주일 사이에 얼마나 늘었는지를 여기서 본다.
+disk_history() {
+  local used=$1 today hist="$OUT/disk-history.jsonl"
+  today=$(date +%F)
+  { grep -v "\"day\":\"$today\"" "$hist" 2>/dev/null | tail -n 59 || true
+    printf '{"day":"%s","usedKB":%s}\n' "$today" "$used"; } > "$hist.tmp"
+  mv "$hist.tmp" "$hist"
+  chmod 644 "$hist"
+}
 
 run() {
   mkdir -p "$OUT"
@@ -29,8 +54,15 @@ run() {
   # 마지막 백업에서 빠진 것: manifest 의 missing 배열을 그대로(한 줄 JSON). manifest 가 없으면 null.
   local missing=""
   [ -n "$last" ] && missing=$(sed -n 's/.*"missing":\(\[[^]]*\]\).*/\1/p' "$BACKUPS/$last/manifest.json" 2>/dev/null || true)
-  printf '{"checkedAt":"%s","filevault":"%s","timemachine":%s,"mirror":"%s","lastBackup":"%s","backupMissing":%s,"falkordbAOF":"%s"}\n' \
-    "$(date +%Y-%m-%dT%H:%M:%S%z | sed 's/\(..\)$/:\1/')" "${fv:-unknown}" "$tm" "$mirror" "$last" "${missing:-null}" "$aof" > "$OUT/host.json.tmp"
+  local room total free disk=null
+  room=$(df -k /System/Volumes/Data 2>/dev/null | awk 'NR==2 {print $2, $4}' || true)
+  total=${room%% *} free=${room##* }
+  if [ -n "$room" ]; then
+    disk=$(disk_json "$total" "$free")
+    disk_history "$((total - free))"
+  fi
+  printf '{"checkedAt":"%s","filevault":"%s","timemachine":%s,"mirror":"%s","lastBackup":"%s","backupMissing":%s,"falkordbAOF":"%s","disk":%s}\n' \
+    "$(date +%Y-%m-%dT%H:%M:%S%z | sed 's/\(..\)$/:\1/')" "${fv:-unknown}" "$tm" "$mirror" "$last" "${missing:-null}" "$aof" "$disk" > "$OUT/host.json.tmp"
   mv "$OUT/host.json.tmp" "$OUT/host.json"
   chmod 644 "$OUT/host.json"
 }

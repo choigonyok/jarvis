@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,6 +26,25 @@ type hostFacts struct {
 	// (its manifest.json); nil when that backup has no manifest.
 	BackupMissing *[]string `json:"backupMissing"`
 	FalkorAOF     string    `json:"falkordbAOF"` // CONFIG GET appendonly: yes | no | "" (not reached)
+	// Disk is the internal disk; nil from a host-check older than it.
+	Disk *diskFacts `json:"disk"`
+}
+
+// diskFacts is the Mac mini's internal disk and what takes it up, in KiB. The
+// volumes share one container, so what is used is the whole less what is free.
+type diskFacts struct {
+	TotalKB   int64 `json:"totalKB"`
+	FreeKB    int64 `json:"freeKB"`
+	DockerKB  int64 `json:"dockerKB"` // what Docker's virtual disk really takes up
+	PhotosKB  int64 `json:"photosKB"`
+	BackupsKB int64 `json:"backupsKB"`
+	// Docker is `docker system df` as it reads: Images, Local Volumes, Build
+	// Cache, with sizes like 28.96GB and 8.127GB (28%).
+	Docker []struct {
+		Type        string `json:"type"`
+		Size        string `json:"size"`
+		Reclaimable string `json:"reclaimable"`
+	} `json:"docker"`
 }
 
 // readHost returns the facts, or the verdict to show when there are none to
@@ -59,6 +80,164 @@ func (e *env) hostProbe(id, name, rule, fix string, judge func(hostFacts) check.
 			return v
 		},
 	}
+}
+
+// The share of the disk from which it is a warning, and a fault. Docker's
+// virtual disk can grow past what is left, so it is the disk that runs out:
+// when it does the database stops taking writes.
+const (
+	diskWarnPct = 85
+	diskFailPct = 95
+)
+
+func (e *env) hostDisk() check.Probe {
+	return e.hostProbe("host.disk", "맥미니 저장 공간",
+		fmt.Sprintf("내장 디스크를 %d%% 아래로 쓰고 있으면 정상, %d%%부터 주의, %d%%부터 이상이에요. 도커(데이터베이스 포함)·사진·백업이 이 디스크를 함께 쓰고, 다 차면 데이터베이스가 쓰기를 멈춰요. 크기는 10분마다 재요.", diskWarnPct, diskWarnPct, diskFailPct),
+		"맥미니에서 docker builder prune 으로 도커 빌드 캐시부터 지우세요(다음 배포가 조금 느려질 뿐이에요). 쓰지 않는 이미지는 docker image prune -a. 사진이 크면 외장 디스크로 옮기는 수밖에 없어요.",
+		func(h hostFacts) check.Verdict { return diskVerdict(h.Disk, e.diskHistory(), time.Now()) })
+}
+
+// diskDay is one line of disk-history.jsonl: a day's last measure.
+type diskDay struct {
+	Day    string `json:"day"`
+	UsedKB int64  `json:"usedKB"`
+}
+
+// diskHistory reads what host-check keeps beside host.json; none is fine, the
+// row only says less.
+func (e *env) diskHistory() []diskDay {
+	raw, err := os.ReadFile(filepath.Join(filepath.Dir(e.HostFile), "disk-history.jsonl"))
+	if err != nil {
+		return nil
+	}
+	var days []diskDay
+	for _, line := range strings.Split(string(raw), "\n") {
+		var d diskDay
+		if json.Unmarshal([]byte(line), &d) == nil && d.Day != "" {
+			days = append(days, d)
+		}
+	}
+	return days
+}
+
+// gb is KiB as a size people read: the decimal gigabytes of Finder and Docker.
+func gb(kb int64) string {
+	g := float64(kb) * 1024 / 1e9
+	if g < 100 && math.Abs(g-math.Round(g)) >= 0.05 {
+		return fmt.Sprintf("%.1fGB", g)
+	}
+	return fmt.Sprintf("%.0fGB", g)
+}
+
+// dockerSize is a size as `docker system df` writes it ("28.96GB", "8.127GB
+// (28%)"), in GB.
+func dockerSize(s string) float64 {
+	s, _, _ = strings.Cut(strings.TrimSpace(s), " ")
+	for _, u := range []struct {
+		unit string
+		gb   float64
+	}{{"TB", 1000}, {"GB", 1}, {"MB", 1e-3}, {"kB", 1e-6}, {"B", 1e-9}} {
+		if num, ok := strings.CutSuffix(s, u.unit); ok {
+			n, err := strconv.ParseFloat(num, 64)
+			if err != nil {
+				return 0
+			}
+			return n * u.gb
+		}
+	}
+	return 0
+}
+
+// diskVerdict is the disk's row: how full it is, what fills it, how fast.
+func diskVerdict(d *diskFacts, days []diskDay, now time.Time) check.Verdict {
+	if d == nil || d.TotalKB <= 0 {
+		return check.Verdict{State: check.Unknown, Summary: "저장 공간 기록이 아직 없어요. 맥미니 점검이 한 번 돌면 채워져요."}
+	}
+	used := d.TotalKB - d.FreeKB
+	pct := int(math.Round(float64(used) * 100 / float64(d.TotalKB)))
+	v := check.Verdict{State: check.OK, Meter: &pct,
+		Figure:  fmt.Sprintf("%.0f / %.0fGB", float64(used)*1024/1e9, float64(d.TotalKB)*1024/1e9),
+		Summary: fmt.Sprintf("%s 남았어요.", gb(d.FreeKB))}
+	switch {
+	case pct >= diskFailPct:
+		v.State = check.Fail
+		v.Summary = fmt.Sprintf("%s밖에 남지 않았어요. 다 차면 데이터베이스가 멈춰요.", gb(d.FreeKB))
+	case pct >= diskWarnPct:
+		v.State = check.Warn
+		v.Summary = fmt.Sprintf("%s 남았어요. 슬슬 정리할 때예요.", gb(d.FreeKB))
+	}
+
+	sizes := map[string]float64{}
+	var dockerGB, reclaim float64
+	for _, u := range d.Docker {
+		sizes[u.Type] = dockerSize(u.Size)
+		dockerGB += sizes[u.Type]
+		if u.Type == "Build Cache" {
+			reclaim = dockerSize(u.Reclaimable)
+		}
+	}
+	dockerKB := d.DockerKB
+	if dockerKB == 0 {
+		dockerKB = int64(dockerGB * 1e9 / 1024)
+	}
+	if dockerKB > 0 {
+		line := "도커 " + gb(dockerKB)
+		if len(sizes) > 0 {
+			line += fmt.Sprintf(": 이미지 %.0fGB, 빌드 캐시 %.0fGB, 볼륨 %.0fGB", sizes["Images"], sizes["Build Cache"], sizes["Local Volumes"])
+		}
+		v.Facts = append(v.Facts, line)
+	}
+	if reclaim >= 1 {
+		v.Facts = append(v.Facts, fmt.Sprintf("빌드 캐시 중 %.0fGB는 지워도 돼요", reclaim))
+	}
+	if d.PhotosKB > 0 {
+		v.Facts = append(v.Facts, "사진 "+gb(d.PhotosKB))
+	}
+	if d.BackupsKB > 0 {
+		v.Facts = append(v.Facts, "매일 백업 "+gb(d.BackupsKB))
+	}
+	if rest := used - dockerKB - d.PhotosKB - d.BackupsKB; rest > 0 {
+		v.Facts = append(v.Facts, "시스템과 그 밖의 파일 "+gb(rest))
+	}
+	if line := diskTrend(d, used, days, now); line != "" {
+		v.Facts = append(v.Facts, line)
+	}
+	return v
+}
+
+// diskTrend is how much the disk grew over the last week of history, and when
+// that pace reaches the warning - nothing until there are a few days to go on.
+func diskTrend(d *diskFacts, used int64, days []diskDay, now time.Time) string {
+	const span, least = 7, 3
+	var from *diskDay
+	var ago int
+	for i := range days {
+		on, err := time.ParseInLocation("2006-01-02", days[i].Day, now.Location())
+		if err != nil {
+			continue
+		}
+		if n := int(now.Sub(on).Hours() / 24); n <= span && n >= least {
+			from, ago = &days[i], n
+			break
+		}
+	}
+	if from == nil {
+		return ""
+	}
+	grew := used - from.UsedKB
+	switch {
+	case grew > 1<<20:
+		line := fmt.Sprintf("지난 %d일 동안 %s 늘었어요", ago, gb(grew))
+		if left := d.TotalKB*diskWarnPct/100 - used; left > 0 {
+			if n := int(float64(left) / (float64(grew) / float64(ago))); n < 365 {
+				line += fmt.Sprintf(". 이대로면 %d일쯤 뒤 %d%%에 닿아요", n, diskWarnPct)
+			}
+		}
+		return line
+	case grew < -(1 << 20):
+		return fmt.Sprintf("지난 %d일 동안 %s 줄었어요", ago, gb(-grew))
+	}
+	return fmt.Sprintf("지난 %d일 동안 거의 그대로예요", ago)
 }
 
 func (e *env) hostFileVault() check.Probe {

@@ -37,6 +37,10 @@ type Verdict struct {
 	ObservedLabel string
 	// Facts are extra lines for the expanded row.
 	Facts []string
+	// Figure is what the row shows at its right when it is not an age
+	// ("143 / 245GB"), and Meter, 0-100, the thin bar under its summary.
+	Figure string
+	Meter  *int
 }
 
 // Probe is one check.
@@ -67,6 +71,8 @@ type Result struct {
 	ObservedAt    *time.Time `json:"observedAt,omitempty"`
 	ObservedLabel string     `json:"observedLabel,omitempty"`
 	Facts         []string   `json:"facts,omitempty"`
+	Figure        string     `json:"figure,omitempty"`
+	Meter         *int       `json:"meter,omitempty"`
 	Rule          string     `json:"rule"`
 	Fix           string     `json:"fix,omitempty"`
 	CheckedAt     time.Time  `json:"checkedAt"`
@@ -208,7 +214,7 @@ func (r *Runner) runOne(ctx context.Context, p Probe) {
 	r.results[p.ID] = &Result{
 		ID: p.ID, Group: p.Group, Name: p.Name,
 		State: v.State, Summary: v.Summary,
-		ObservedAt: v.ObservedAt, ObservedLabel: v.ObservedLabel, Facts: v.Facts,
+		ObservedAt: v.ObservedAt, ObservedLabel: v.ObservedLabel, Facts: v.Facts, Figure: v.Figure, Meter: v.Meter,
 		Rule: p.Rule, Fix: p.Fix,
 		CheckedAt: now, Since: since,
 	}

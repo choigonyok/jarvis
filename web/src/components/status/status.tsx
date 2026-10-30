@@ -238,10 +238,6 @@ const USAGE = "사용량";
  */
 type Line = Pick<CheckResult, "id" | "name" | "summary"> &
   Partial<CheckResult> & {
-    /** The figure right of the name when it is not an age: "43%", "$0.03 / $1.00". */
-    figure?: string;
-    /** 0-100: drawn as a thin bar under the summary. */
-    meter?: number | null;
     /** What opening it shows, when it is not the check's facts and rule. */
     detail?: ReactNode;
   };

@@ -321,6 +321,7 @@ func All(cfg Config) []check.Probe {
 			Every: time.Minute,
 			Run:   e.httpOK(cfg.ImmichURL + "/api/server/ping"),
 		},
+		e.hostDisk(),
 		e.hostFileVault(),
 		e.hostTimeMachine(),
 		e.hostMirror(),
