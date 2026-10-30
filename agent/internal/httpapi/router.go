@@ -33,7 +33,6 @@ import (
 type Server struct {
 	browserChecks http.Handler
 	vault         http.Handler
-	reminders     http.Handler
 	thread        *thread.Store
 	proposals     *proposal.Store
 	calendar      *calendar.Store
@@ -144,9 +143,6 @@ type Deps struct {
 	// Vault, when set, serves the saved logins to the console: the list and
 	// its uses (GET /vault) and forgetting one (DELETE /vault/{domain}).
 	Vault http.Handler
-	// Reminders, when set, serves the console's list of reminders (GET
-	// /reminders): the 작업 tab shows them beside the jobs.
-	Reminders http.Handler
 	// FollowUp tells the assistant how a payment card was decided.
 	FollowUp interface{ Enqueue(prompt string) }
 	// Jobs, when set, lets a background job's run that reaches a payment
@@ -174,14 +170,6 @@ type Deps struct {
 type Checklists interface {
 	// Find is the lists of these ids, by id.
 	Find(ctx context.Context, ids []string) (map[string]any, error)
-	// Open is the lists still open (the 작업 tab shows the unfinished).
-	Open(ctx context.Context) (any, error)
-	// Check ticks (or unticks) one item from a card, and is the list after.
-	Check(ctx context.Context, id, item string, done bool) (any, error)
-	// Drop takes an item off a list (swiped away), and is the list after.
-	Drop(ctx context.Context, id, item string) (any, error)
-	// Close closes a list, and is the list after.
-	Close(ctx context.Context, id string) (any, error)
 }
 
 func New(d Deps) *Server {
@@ -207,7 +195,6 @@ func New(d Deps) *Server {
 		mindUsage:       d.MindUsage,
 		browserChecks:   d.BrowserChecks,
 		vault:           d.Vault,
-		reminders:       d.Reminders,
 		followUp:        d.FollowUp,
 		jobs:            d.Jobs,
 		savedAddress:    d.SavedAddress,
@@ -239,12 +226,6 @@ func (s *Server) Handler() http.Handler {
 	// rather than on the mux, so /healthz stays open for the healthcheck and
 	// /intercept and /mcp keep the separate secrets they already have.
 	mux.HandleFunc("GET /thread", s.guard(s.getThread))
-	// The lists the thread's cards show, under /thread: the gateway passes
-	// the agent's routes by first segment, and these are the thread's.
-	mux.HandleFunc("GET /thread/checklists", s.guard(s.getChecklists))
-	mux.HandleFunc("POST /thread/checklists/{id}/items/{item}", s.guard(s.checkItem))
-	mux.HandleFunc("DELETE /thread/checklists/{id}/items/{item}", s.guard(s.dropItem))
-	mux.HandleFunc("DELETE /thread/checklists/{id}", s.guard(s.closeList))
 	mux.HandleFunc("POST /messages", s.guard(s.postMessage))
 	// Under /messages: the gateway passes the agent's routes by first segment.
 	mux.HandleFunc("POST /messages/{id}/steer", s.guard(s.steerMessage))
@@ -273,9 +254,6 @@ func (s *Server) Handler() http.Handler {
 	if s.vault != nil {
 		mux.HandleFunc("/vault", s.guard(s.vault.ServeHTTP))
 		mux.HandleFunc("/vault/", s.guard(s.vault.ServeHTTP))
-	}
-	if s.reminders != nil {
-		mux.HandleFunc("GET /reminders", s.guard(s.reminders.ServeHTTP))
 	}
 
 	// Claude Code dials these. The permission gate sits at /mcp; module
@@ -427,85 +405,6 @@ func (s *Server) listsOf(ctx context.Context, turns []*thread.Turn) map[string]a
 		return nil
 	}
 	return lists
-}
-
-// getChecklists is GET /thread/checklists?ids=a,b: the lists cards show -
-// and with no ids, the lists still open (the 작업 tab).
-func (s *Server) getChecklists(w http.ResponseWriter, r *http.Request) {
-	if s.checklists == nil {
-		writeErr(w, http.StatusNotFound, "체크리스트가 없습니다.")
-		return
-	}
-	if strings.TrimSpace(r.URL.Query().Get("ids")) == "" {
-		open, err := s.checklists.Open(r.Context())
-		if err != nil {
-			writeErr(w, http.StatusBadGateway, "체크리스트를 읽지 못했습니다: "+err.Error())
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"open": open})
-		return
-	}
-	var ids []string
-	for _, id := range strings.Split(r.URL.Query().Get("ids"), ",") {
-		if id = strings.TrimSpace(id); id != "" && len(ids) < 100 {
-			ids = append(ids, id)
-		}
-	}
-	lists, err := s.checklists.Find(r.Context(), ids)
-	if err != nil {
-		writeErr(w, http.StatusBadGateway, "체크리스트를 읽지 못했습니다: "+err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"checklists": lists})
-}
-
-// checkItem is a tap on a checklist card's item: POST {done}.
-func (s *Server) checkItem(w http.ResponseWriter, r *http.Request) {
-	if s.checklists == nil {
-		writeErr(w, http.StatusNotFound, "체크리스트가 없습니다.")
-		return
-	}
-	var body struct {
-		Done bool `json:"done"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil {
-		writeErr(w, http.StatusBadRequest, "본문을 읽을 수 없습니다.")
-		return
-	}
-	list, err := s.checklists.Check(r.Context(), r.PathValue("id"), r.PathValue("item"), body.Done)
-	if err != nil {
-		writeErr(w, http.StatusBadGateway, "체크하지 못했습니다: "+err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"checklist": list})
-}
-
-// dropItem is an item swiped off a card as not needed.
-func (s *Server) dropItem(w http.ResponseWriter, r *http.Request) {
-	if s.checklists == nil {
-		writeErr(w, http.StatusNotFound, "체크리스트가 없습니다.")
-		return
-	}
-	list, err := s.checklists.Drop(r.Context(), r.PathValue("id"), r.PathValue("item"))
-	if err != nil {
-		writeErr(w, http.StatusBadGateway, "빼지 못했습니다: "+err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"checklist": list})
-}
-
-// closeList closes a list from the console.
-func (s *Server) closeList(w http.ResponseWriter, r *http.Request) {
-	if s.checklists == nil {
-		writeErr(w, http.StatusNotFound, "체크리스트가 없습니다.")
-		return
-	}
-	list, err := s.checklists.Close(r.Context(), r.PathValue("id"))
-	if err != nil {
-		writeErr(w, http.StatusBadGateway, "닫지 못했습니다: "+err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"checklist": list})
 }
 
 func (s *Server) steerMessage(w http.ResponseWriter, r *http.Request) {

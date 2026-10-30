@@ -16,9 +16,8 @@ import (
 
 // lists is the checklist module as the console's routes see it.
 type lists struct {
-	mu     sync.Mutex
-	asked  []string
-	ticked []string
+	mu    sync.Mutex
+	asked []string
 }
 
 func (l *lists) Find(_ context.Context, ids []string) (map[string]any, error) {
@@ -30,31 +29,6 @@ func (l *lists) Find(_ context.Context, ids []string) (map[string]any, error) {
 		out[id] = map[string]any{"id": id, "title": "목록 " + id}
 	}
 	return out, nil
-}
-
-func (l *lists) Open(context.Context) (any, error) {
-	return []map[string]any{{"id": "chk_open"}}, nil
-}
-
-func (l *lists) Drop(_ context.Context, id, item string) (any, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.ticked = append(l.ticked, id+"/"+item+"x")
-	return map[string]any{"id": id}, nil
-}
-
-func (l *lists) Close(_ context.Context, id string) (any, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.ticked = append(l.ticked, id+" closed")
-	return map[string]any{"id": id, "status": "archived"}, nil
-}
-
-func (l *lists) Check(_ context.Context, id, item string, done bool) (any, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.ticked = append(l.ticked, id+"/"+item+map[bool]string{true: "+", false: "-"}[done])
-	return map[string]any{"id": id}, nil
 }
 
 // chatSvc answers the thread's page with a checklist card, a notice that
@@ -73,8 +47,7 @@ func chatSvc(t *testing.T) *thread.Store {
 	return thread.NewStore(srv.URL, "", bus.New())
 }
 
-// A page of the thread comes with the lists its cards show, each once; a
-// tap on an item goes to the list.
+// A page of the thread comes with the lists its cards show, each once.
 func TestThreadCarriesItsChecklists(t *testing.T) {
 	l := &lists{}
 	s := New(Deps{Thread: chatSvc(t), Proposals: proposal.NewStore(bus.New()), Runner: bgRunner{}, Checklists: l, APIToken: "svc"})
@@ -100,28 +73,5 @@ func TestThreadCarriesItsChecklists(t *testing.T) {
 	}
 	if strings.Join(l.asked, ",") != "chk_1,chk_2" {
 		t.Fatalf("목록마다 한 번: %v", l.asked)
-	}
-
-	rec = do(http.MethodPost, "/thread/checklists/chk_1/items/i2", `{"done":true}`)
-	if rec.Code != http.StatusOK || len(l.ticked) != 1 || l.ticked[0] != "chk_1/i2+" {
-		t.Fatalf("체크: %d %v", rec.Code, l.ticked)
-	}
-	rec = do(http.MethodGet, "/thread/checklists?ids=chk_9,%20chk_8", "")
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "chk_8") {
-		t.Fatalf("목록 읽기: %d %s", rec.Code, rec.Body)
-	}
-	// The 작업 tab: the lists still open; an item swiped away; a list closed.
-	rec = do(http.MethodGet, "/thread/checklists", "")
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"open":[{"id":"chk_open"}]`) {
-		t.Fatalf("열린 목록: %d %s", rec.Code, rec.Body)
-	}
-	if rec := do(http.MethodDelete, "/thread/checklists/chk_1/items/i3", ""); rec.Code != http.StatusOK {
-		t.Fatalf("빼기: %d %s", rec.Code, rec.Body)
-	}
-	if rec := do(http.MethodDelete, "/thread/checklists/chk_1", ""); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "archived") {
-		t.Fatalf("닫기: %d %s", rec.Code, rec.Body)
-	}
-	if got := strings.Join(l.ticked, ","); got != "chk_1/i2+,chk_1/i3x,chk_1 closed" {
-		t.Fatalf("체크·빼기·닫기: %s", got)
 	}
 }

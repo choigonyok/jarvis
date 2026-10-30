@@ -263,6 +263,30 @@ func (l *Stream) Wake(ctx context.Context, guest bool) error {
 // its own long clock.
 const KindJobsWake = "jobs.wake"
 
+// KindListChanged says how a list stands has changed: the screens showing it
+// redraw it, on every device.
+const KindListChanged = "checklist.changed"
+
+// ListChanged tells a person's agent a list changed: the operator's, or the
+// guest's on the guest's topic.
+func (l *Stream) ListChanged(ctx context.Context, guest bool, id string) error {
+	raw := make([]byte, 12)
+	if _, err := rand.Read(raw); err != nil {
+		return err
+	}
+	payload, err := json.Marshal(map[string]string{"checklist": id})
+	if err != nil {
+		return err
+	}
+	topic := queue.Effects
+	if guest {
+		topic = queue.GuestEffects
+	}
+	_, _, err = queue.Publish(ctx, l.db, topic, queue.Message{Kind: KindListChanged, Source: mindSource,
+		SourceKey: "list-" + hex.EncodeToString(raw), Actor: mindSource, Subject: id, Payload: payload})
+	return err
+}
+
 // Effect sends something decided that is not an observation: a write for the
 // hand to carry out.
 func (l *Stream) Effect(ctx context.Context, m queue.Message) error {

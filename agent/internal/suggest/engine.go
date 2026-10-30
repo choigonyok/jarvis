@@ -41,17 +41,21 @@ import (
 
 // Types is what the assistant subscribes to: mind's cards, what mind says
 // at a moment, and the lists it shows.
-var Types = []string{mind.CardRaised, mind.CardClosed, "remind.*", ChecklistShown, JobsWake}
+var Types = []string{mind.CardRaised, mind.CardClosed, "remind.*", ChecklistShown, ListChanged, JobsWake}
 
 // GuestTypes is what the guest's agent subscribes to: what mind says to the
 // guest at a moment.
-var GuestTypes = []string{"remind.*", JobsWake}
+var GuestTypes = []string{"remind.*", ListChanged, JobsWake}
 
 // JobsWake says a job may be due now: changed on the 작업 tab, answered, made.
 const JobsWake = "jobs.wake"
 
 // ChecklistShown is mind asking for a list in the conversation now.
 const ChecklistShown = "checklist.shown"
+
+// ListChanged says a list changed, from whichever screen or tool: the cards
+// showing it redraw.
+const ListChanged = "checklist.changed"
 
 // Event is one record of the stream, as an event.
 type Event struct {
@@ -104,6 +108,8 @@ type Config struct {
 	// Show lays a list mind put in front of the operator in the
 	// conversation, under lead; key is the event's, for redeliveries.
 	Show func(id, lead, key string)
+	// Redraw sends a list as it stands to the screens; nil: none.
+	Redraw func(id string)
 	// WakeJobs has the job scheduler look now.
 	WakeJobs func()
 }
@@ -147,6 +153,8 @@ func (e *Engine) handle(ev Event) {
 		if e.cfg.WakeJobs != nil {
 			e.cfg.WakeJobs()
 		}
+	case ev.Type == ListChanged:
+		e.listChanged(ev)
 	case e.cfg.Guest:
 		// The guest's: what mind tells the guest at its moment, and no more.
 		if strings.HasPrefix(ev.Type, "remind.") {
@@ -197,6 +205,17 @@ func (e *Engine) notice(ev Event) {
 		key = "event:" + strconv.FormatInt(ev.ID, 10)
 	}
 	e.cfg.Notice(Notice{Key: key, Title: strings.TrimSpace(ev.Notify.Title), Body: strings.TrimSpace(body), Why: strings.TrimSpace(d.Why), Checklist: d.Checklist})
+}
+
+// listChanged has the screens redraw a list.
+func (e *Engine) listChanged(ev Event) {
+	var d struct {
+		Checklist string `json:"checklist"`
+	}
+	if e.cfg.Redraw == nil || json.Unmarshal(ev.Data, &d) != nil || d.Checklist == "" {
+		return
+	}
+	e.cfg.Redraw(d.Checklist)
 }
 
 // showList is mind putting a list in front of the operator.

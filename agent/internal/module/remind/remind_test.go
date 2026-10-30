@@ -114,32 +114,3 @@ func TestTools(t *testing.T) {
 		t.Fatal("빈 목록")
 	}
 }
-
-// The console's list is mind's own answer for this person, waiting ones and
-// the last HistoryDays days', passed through as it is; only GET.
-func TestConsoleListIsMindsHistory(t *testing.T) {
-	var calls []call
-	mind := fakeMind(t, &calls)
-	h := New(mind.URL, "tok", nil).ConsoleHandler()
-
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/reminders", nil))
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"reminders"`) {
-		t.Fatalf("목록: %d %s", rec.Code, rec.Body.String())
-	}
-	if len(calls) != 1 || calls[0].path != "/api/reminders?days=30" {
-		t.Fatalf("mind 에 물은 것: %+v", calls)
-	}
-	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/reminders", nil))
-	if rec.Code != http.StatusMethodNotAllowed || len(calls) != 1 {
-		t.Fatalf("GET 만: %d %+v", rec.Code, calls)
-	}
-	// mind not answering is the console's error, not an empty list.
-	down := New("http://127.0.0.1:1", "tok", nil).ConsoleHandler()
-	rec = httptest.NewRecorder()
-	down.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/reminders", nil))
-	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("mind 가 없을 때: %d", rec.Code)
-	}
-}

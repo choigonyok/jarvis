@@ -12,6 +12,11 @@ const GATEWAY_TOKEN = process.env.JARVIS_EDGE_TOKEN ?? "";
 const GATEWAY_GUEST_TOKEN = process.env.JARVIS_EDGE_GUEST_TOKEN ?? "";
 const GATEWAY_ORIGIN = "https://jarvis-be.choigonyok.com";
 
+/** Where mind is read. */
+export const MIND_URL = (process.env.MIND_URL ?? "http://localhost:8102").replace(/\/$/, "");
+/** Where what a screen changes in mind goes in: as a record, at the way in. */
+export const MIND_WRITES = `${(process.env.INPUT_URL ?? "http://localhost:8101").replace(/\/$/, "")}/mind`;
+
 /**
  * fetch, but a request for the gateway goes over the GATEWAY service binding
  * when there is one (on Cloudflare): the gateway's services are reached only

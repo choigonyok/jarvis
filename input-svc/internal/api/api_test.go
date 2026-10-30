@@ -410,3 +410,93 @@ func TestAWorkoutSaveIsARecord(t *testing.T) {
 		t.Fatalf("%q %v", actor, err)
 	}
 }
+
+// mind's deterministic lane as far as the way in sees it: it finds the record
+// and leaves what came of it.
+func answers(t *testing.T, owner *pgxpool.Pool, table, subject string, status int, body string) <-chan string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	t.Cleanup(cancel)
+	done := make(chan string, 1)
+	go func() {
+		defer close(done)
+		for ctx.Err() == nil {
+			var key, kind string
+			err := owner.QueryRow(ctx, `select source_key, kind from input.`+table+` where subject = $1`, subject).Scan(&key, &kind)
+			if err != nil {
+				time.Sleep(10 * time.Millisecond)
+				continue
+			}
+			if _, err := owner.Exec(ctx, `insert into mind.commands (key, kind, status, body) values ($1, $2, $3, $4)`, key, kind, status, body); err != nil {
+				t.Error(err)
+			}
+			done <- kind
+			return
+		}
+	}()
+	return done
+}
+
+// What a screen changes goes in as a record, and the answer is what mind made
+// of it, as mind said it.
+func TestACommandIsARecord(t *testing.T) {
+	srv, owner := setup(t)
+	path := "/api/checklists/" + unique("chk") + "/items/i1"
+	kind := answers(t, owner, "records", path, http.StatusOK, `{"checklist":{"id":"chk_1"}}`)
+	code, out := call(t, http.MethodPost, srv.URL+"/mind"+path, token, `{"done":true}`)
+	if code != http.StatusOK || !strings.Contains(string(out), "chk_1") {
+		t.Fatalf("%d %s", code, out)
+	}
+	if got := <-kind; got != "checklist.check" {
+		t.Fatalf("종류: %q", got)
+	}
+	var payload, actor string
+	if err := owner.QueryRow(context.Background(), `select payload::text, actor from input.records where subject = $1`, path).Scan(&payload, &actor); err != nil {
+		t.Fatal(err)
+	}
+	var p struct {
+		Method, Path string
+		Body         json.RawMessage
+	}
+	if err := json.Unmarshal([]byte(payload), &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Method != http.MethodPost || p.Path != path || !strings.Contains(string(p.Body), "true") || actor != "operator" {
+		t.Fatalf("mind 가 읽을 것: %+v %s", p, actor)
+	}
+
+	// Refused by mind is refused here, and nothing said is said as nothing.
+	path = "/api/reminders/" + unique("rem")
+	answers(t, owner, "records", path, http.StatusNoContent, `{"text":""}`)
+	if code, out := call(t, http.MethodDelete, srv.URL+"/mind"+path, token, ""); code != http.StatusNoContent || len(out) != 0 {
+		t.Fatalf("%d %s", code, out)
+	}
+
+	// A path no command has is not a record, nor a read one.
+	if code, _ := call(t, http.MethodPost, srv.URL+"/mind/api/replay", token, "{}"); code != http.StatusNotFound {
+		t.Fatalf("없는 명령: %d", code)
+	}
+	if code, _ := call(t, http.MethodGet, srv.URL+"/mind/api/notes", token, ""); code != http.StatusMethodNotAllowed && code != http.StatusNotFound {
+		t.Fatalf("읽기는 이 문이 아닙니다: %d", code)
+	}
+	if code, _ := call(t, http.MethodPost, srv.URL+"/mind"+path, "", "{}"); code != http.StatusUnauthorized {
+		t.Fatalf("토큰 없이: %d", code)
+	}
+}
+
+// The guest's goes to the guest's, and the guest changes only what is theirs.
+func TestAGuestsCommandIsTheGuests(t *testing.T) {
+	srv, owner := setup(t)
+	path := "/api/checklists/" + unique("chk")
+	answers(t, owner, "guest_records", path, http.StatusOK, `{"checklist":{"id":"chk_g"}}`)
+	if code, out := call(t, http.MethodDelete, srv.URL+"/mind"+path, guestToken, ""); code != http.StatusOK || !strings.Contains(string(out), "chk_g") {
+		t.Fatalf("%d %s", code, out)
+	}
+	var mine int
+	if err := owner.QueryRow(context.Background(), `select count(*) from input.records where subject = $1`, path).Scan(&mine); err != nil || mine != 0 {
+		t.Fatalf("운영자 기록에 %d건 %v", mine, err)
+	}
+	if code, _ := call(t, http.MethodPost, srv.URL+"/mind/api/spending/transactions", guestToken, "{}"); code != http.StatusForbidden {
+		t.Fatalf("가계부: %d", code)
+	}
+}

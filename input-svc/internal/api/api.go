@@ -3,6 +3,7 @@
 //
 //	GET  /health                       the contract (gocommon/health): each consumer's delivery, the held box
 //	POST /records                      a record, from a process with no database
+//	POST /mind/{path}                  what a screen changes in mind: a record, and what came of it (also PUT, PATCH, DELETE)
 //	GET  /turns?thread=&since=&limit=&before=   the conversation: a thread, or a page of it
 //	POST /turns                        a turn said: its record, and the turn
 //	PUT  /turns/{id}                   a turn with an origin given its newest word
@@ -80,6 +81,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /turns", s.auth(true, s.appendTurn))
 	// A job's card given its newest word (see turn.Origin).
 	mux.HandleFunc("PUT /turns/{id}", s.auth(true, s.updateTurn))
+	for _, method := range []string{"POST", "PUT", "PATCH", "DELETE"} {
+		mux.HandleFunc(method+" /mind/{path...}", s.auth(true, s.command))
+	}
 	mux.HandleFunc("GET /workout", s.auth(true, s.readWorkout))
 	mux.HandleFunc("POST /workout/changes", s.auth(true, s.changeWorkout))
 	mux.HandleFunc("GET /held", s.auth(false, s.held))

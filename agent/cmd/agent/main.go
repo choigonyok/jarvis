@@ -271,12 +271,9 @@ func main() {
 		cfg.ModuleMCPURLs[messages.ServerName] = cfg.PublicMCPURL + "/" + messages.ServerName
 		cfg.Allow(messages.Tools...)
 	}
-	// The 작업 tab's list of reminders, when mind is there.
-	var reminderConsole http.Handler
 	if cfg.MindURL != "" {
 		// 리마인드: "몇 시에 / 집에 가면 / 나갈 때 알려줘". mind 가 그때 폰으로 알린다.
 		remindModule := remind.New(cfg.MindURL, cfg.APIToken, commands)
-		reminderConsole = remindModule.ConsoleHandler()
 		modules.Add(remindModule)
 		mcpMounts["/mcp/"+remind.ServerName] = remindModule.Handler()
 		cfg.ModuleMCPURLs[remind.ServerName] = cfg.PublicMCPURL + "/" + remind.ServerName
@@ -507,9 +504,14 @@ func main() {
 			jobsModule.Wake()
 		}
 	}
+	redrawList := func(id string) {
+		if checklistModule != nil {
+			checklistModule.Publish(context.Background(), id)
+		}
+	}
 	var suggester *suggest.Engine
 	if cfg.QueueURL != "" && cfg.Guest {
-		suggester = suggest.New(proposals, suggest.Config{Guest: true, Notice: layNotice, WakeJobs: wakeJobs}, log)
+		suggester = suggest.New(proposals, suggest.Config{Guest: true, Notice: layNotice, Redraw: redrawList, WakeJobs: wakeJobs}, log)
 	}
 	if cfg.QueueURL != "" && !cfg.Guest {
 		suggester = suggest.New(proposals, suggest.Config{
@@ -517,6 +519,7 @@ func main() {
 			Say:      func(lead, id string) { transcript.Raise([]string{lead}, id) },
 			Mind:     mindClient,
 			Notice:   layNotice,
+			Redraw:   redrawList,
 			WakeJobs: wakeJobs,
 			Show: func(id, lead, key string) {
 				if checklistModule == nil {
@@ -715,7 +718,6 @@ func main() {
 		MindUsage:       mindUsage,
 		BrowserChecks:   browserChecks,
 		Vault:           vaultConsole(vaultModule),
-		Reminders:       reminderConsole,
 		FollowUp:        runner,
 		Jobs:            jobPayments,
 		SavedAddress:    savedAddress(vaultModule),

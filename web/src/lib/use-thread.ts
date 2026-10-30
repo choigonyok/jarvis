@@ -18,6 +18,10 @@ import { decideProposal } from "@/lib/decide";
 import { diagFrame } from "@/lib/diag";
 import { requestResume } from "@/lib/resume";
 
+/** The lists mind keeps: read there, changed at the way in (the route says which). */
+const LISTS = "/api/mind/checklists";
+const byList = (lists?: Checklist[] | null) => Object.fromEntries((lists ?? []).map((l) => [l.id, l]));
+
 /**
  * Upsert by id: an updated turn or proposal arrives the way the first did.
  * One given a newer time (a job's card with its latest word) moves to where
@@ -108,8 +112,8 @@ export function useThread() {
       if (want.length === 0) return;
       for (const id of want) asking.current.add(id);
       try {
-        const res = await fetch(`${API}/thread/checklists?ids=${encodeURIComponent(want.join(","))}`, { cache: "no-store" });
-        if (res.ok) putLists(((await res.json()) as { checklists?: Record<string, Checklist> }).checklists);
+        const res = await fetch(`${LISTS}?ids=${encodeURIComponent(want.join(","))}`, { cache: "no-store" });
+        if (res.ok) putLists(byList(((await res.json()) as { checklists?: Checklist[] }).checklists));
       } catch {
         // The card says it could not be read; a reload asks again.
       } finally {
@@ -362,7 +366,7 @@ export function useThread() {
         }));
       }
       try {
-        const res = await fetch(`${API}/thread/checklists/${encodeURIComponent(listId)}/items/${encodeURIComponent(itemId)}`, {
+        const res = await fetch(`${LISTS}/${encodeURIComponent(listId)}/items/${encodeURIComponent(itemId)}`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ done }),
@@ -392,8 +396,10 @@ export function useThread() {
         setChecklists((prev) => ({ ...prev, [listId]: { ...before, items: before.items.filter((it) => it.id !== itemId) } }));
       }
       try {
-        const res = await fetch(`${API}/thread/checklists/${encodeURIComponent(listId)}/items/${encodeURIComponent(itemId)}`, {
-          method: "DELETE",
+        const res = await fetch(`${LISTS}/${encodeURIComponent(listId)}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ remove: [itemId], by: "card" }),
         });
         if (res.ok) {
           const body = (await res.json().catch(() => null)) as { checklist?: Checklist } | null;
@@ -413,7 +419,7 @@ export function useThread() {
   const closeList = useCallback(
     async (listId: string): Promise<string | null> => {
       try {
-        const res = await fetch(`${API}/thread/checklists/${encodeURIComponent(listId)}`, { method: "DELETE" });
+        const res = await fetch(`${LISTS}/${encodeURIComponent(listId)}`, { method: "DELETE" });
         if (res.ok) {
           const body = (await res.json().catch(() => null)) as { checklist?: Checklist } | null;
           if (body?.checklist?.id) setChecklists((prev) => ({ ...prev, [listId]: body.checklist! }));
@@ -430,10 +436,10 @@ export function useThread() {
   /** The lists still open, read from mind into the map too (null when they could not be). */
   const loadOpenLists = useCallback(async (): Promise<Checklist[] | null> => {
     try {
-      const res = await fetch(`${API}/thread/checklists`, { cache: "no-store" });
+      const res = await fetch(LISTS, { cache: "no-store" });
       if (!res.ok) return null;
-      const open = ((await res.json()) as { open?: Checklist[] }).open ?? [];
-      putLists(Object.fromEntries(open.map((l) => [l.id, l])));
+      const open = ((await res.json()) as { checklists?: Checklist[] }).checklists ?? [];
+      putLists(byList(open));
       return open;
     } catch {
       return null;

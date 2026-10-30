@@ -46,6 +46,8 @@ const GUEST_API = [
   // The guest's own jobs: the gateway opens only the 작업 tab's routes on them,
   // with the guest's token, so mind finds no other.
   "/api/jobs",
+  "/api/mind/reminders",
+  "/api/mind/checklists",
   "/api/workout",
   "/api/notify",
   "/api/tts",

@@ -118,6 +118,8 @@ func TestNoticesBecomeCards(t *testing.T) {
 	var shown []string
 	e.cfg.Notice = func(n Notice) { notices = append(notices, n) }
 	e.cfg.Show = func(id, lead, key string) { shown = append(shown, id+"|"+lead+"|"+key) }
+	var redrawn []string
+	e.cfg.Redraw = func(id string) { redrawn = append(redrawn, id) }
 	send := func(ev map[string]any) {
 		if err := e.Take(context.Background(), message(ev)); err != nil {
 			t.Fatal(err)
@@ -147,6 +149,10 @@ func TestNoticesBecomeCards(t *testing.T) {
 	}
 	if len(shown) != 1 || shown[0] != "chk_1|내일 캠핑이에요|checklist.shown:chk_1:a" {
 		t.Fatalf("mind 가 띄운 목록: %v", shown)
+	}
+	send(map[string]any{"type": ListChanged, "data": map[string]any{"checklist": "chk_1"}})
+	if len(redrawn) != 1 || redrawn[0] != "chk_1" {
+		t.Fatalf("다시 그릴 목록: %v", redrawn)
 	}
 	for _, typ := range Types {
 		if typ == "remind.*" {

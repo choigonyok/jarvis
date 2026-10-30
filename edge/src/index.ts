@@ -152,12 +152,13 @@ function jobsRoute(method: string, path: string): boolean {
 }
 
 /**
- * What the screens may do at the way in - what the 운동 tab does: read the
- * log, and save what changed in it (sessions by id). Records and the
- * conversation are for the services, and the turns reach the screen through
- * the agents.
+ * What the screens may do at the way in: what the 운동 tab does - read the log,
+ * and save what changed in it (sessions by id) - and what they change in mind,
+ * which comes here as a record whatever mind is doing (mindRoute says which).
+ * Records and the conversation are for the services.
  */
 function inputRoute(method: string, path: string): boolean {
+  if (path.startsWith("mind/")) return method !== "GET" && method !== "HEAD" && mindRoute(method, path.slice("mind/".length));
   return (method === "GET" && path === "workout") || (method === "POST" && path === "workout/changes");
 }
 
@@ -183,20 +184,28 @@ function guestContextRoute(method: string, path: string): boolean {
 const AGENT_ROLE: Record<string, string> = { agent: "owner", "agent-guest": "guest" };
 
 /** The agent routes the console drives. Anything else on the agent is internal. */
-const AGENT_ROUTES = new Set(["healthz", "thread", "messages", "events", "proposals", "calendar", "uploads", "usage", "vault", "reminders"]);
+const AGENT_ROUTES = new Set(["healthz", "thread", "messages", "events", "proposals", "calendar", "uploads", "usage", "vault"]);
 
 /**
- * What the screens may do on mind. The 생활 screen: read the notes, the map,
+ * What the screens may do with mind. The 생활 screen: read the notes, the map,
  * the things owned and the meals, read a note's versions, and say a note is
- * so, is not, or reads otherwise. The 가계부 screen: spendingRoute.
+ * so, is not, or reads otherwise. The 작업 tab: jobsRoute, the reminders and the
+ * checklists (a tick, an item swiped off, a list closed). The 가계부 screen:
+ * spendingRoute. Reads go to mind; a change goes in at the way in (inputRoute).
  */
 function mindRoute(method: string, path: string): boolean {
   if (path.startsWith("api/jobs/")) return jobsRoute(method, path.slice("api/jobs/".length));
   if (path.startsWith("api/spending/")) return spendingRoute(method, path.slice("api/spending/".length));
   if (method === "GET") {
-    return /^api\/(notes|places|things|meals)$/.test(path) || /^api\/notes\/[A-Za-z0-9_-]+\/versions$/.test(path);
+    return (
+      /^api\/(notes|places|things|meals|reminders|checklists)$/.test(path) ||
+      /^api\/notes\/[A-Za-z0-9_-]+\/versions$/.test(path)
+    );
   }
-  return method === "POST" && /^api\/notes\/[A-Za-z0-9_-]+$/.test(path);
+  if (method === "POST") {
+    return /^api\/notes\/[A-Za-z0-9_-]+$/.test(path) || /^api\/checklists\/[A-Za-z0-9_-]+\/items\/[A-Za-z0-9_-]+$/.test(path);
+  }
+  return (method === "PATCH" || method === "DELETE") && /^api\/checklists\/[A-Za-z0-9_-]+$/.test(path);
 }
 
 /**
@@ -337,8 +346,11 @@ async function gateway(request: Request, env: Env, internal: boolean): Promise<R
   if (guest && name === "context" && !guestContextRoute(request.method, rest.join("/"))) {
     return json(404, "그런 경로가 없습니다.");
   }
-  // Of mind, the guest opens their own jobs and nothing else.
-  if (guest && name === "mind" && !rest.join("/").startsWith("api/jobs/")) {
+  // Of mind, the guest opens their own jobs, reminders and lists and nothing else.
+  if (guest && name === "mind" && !/^api\/(jobs\/|reminders$|checklists(\/|$))/.test(rest.join("/"))) {
+    return json(404, "그런 경로가 없습니다.");
+  }
+  if (guest && name === "input" && rest[0] === "mind" && !/^mind\/api\/(jobs|checklists)\//.test(rest.join("/"))) {
     return json(404, "그런 경로가 없습니다.");
   }
   if (name === "input" && !inputRoute(request.method, rest.join("/"))) {
@@ -347,7 +359,7 @@ async function gateway(request: Request, env: Env, internal: boolean): Promise<R
   if ((name === "agent" || name === "agent-guest") && !AGENT_ROUTES.has(rest[0] ?? "")) {
     return json(404, "그런 경로가 없습니다.");
   }
-  if (name === "mind" && !mindRoute(request.method, rest.join("/"))) {
+  if (name === "mind" && (!["GET", "HEAD"].includes(request.method) || !mindRoute(request.method, rest.join("/")))) {
     return json(404, "그런 경로가 없습니다.");
   }
 

@@ -135,7 +135,7 @@ func (s *Server) changeChecklist(w http.ResponseWriter, r *http.Request) {
 		s.listFail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"checklist": out(l)})
+	s.listChanged(w, r, l)
 }
 
 func (s *Server) checkItem(w http.ResponseWriter, r *http.Request) {
@@ -159,7 +159,7 @@ func (s *Server) checkItem(w http.ResponseWriter, r *http.Request) {
 		s.listFail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"checklist": out(l)})
+	s.listChanged(w, r, l)
 }
 
 func (s *Server) closeChecklist(w http.ResponseWriter, r *http.Request) {
@@ -170,6 +170,18 @@ func (s *Server) closeChecklist(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.listFail(w, err)
 		return
+	}
+	s.listChanged(w, r, l)
+}
+
+// listChanged answers with the list as it stands and tells the screens showing
+// it. The change is made either way: a screen that did not hear redraws when
+// it next reads.
+func (s *Server) listChanged(w http.ResponseWriter, r *http.Request, l checklist.List) {
+	if s.stream != nil {
+		if err := s.stream.ListChanged(r.Context(), l.Person() == checklist.Guest, l.ID); err != nil {
+			s.m.Opts.Logger.Warn("체크리스트가 바뀐 것을 화면에 알리지 못했습니다", "checklist", l.ID, "err", err)
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"checklist": out(l)})
 }

@@ -1,13 +1,10 @@
-import { pathProxy } from "@/lib/proxy";
+import { MIND_URL, MIND_WRITES, pathProxy } from "@/lib/proxy";
 
-// The jobs, which mind keeps; the agent's scheduler is what runs one. The
-// gateway lets through only what the 작업 tab does (jobsRoute).
-const MIND_URL = process.env.MIND_URL ?? "http://localhost:8102";
-
+// The jobs, which mind keeps: read there, changed at the way in. The agent's
+// scheduler is what runs one. The gateway lets through only what the 작업 tab
+// does (jobsRoute).
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const proxy = pathProxy(`${MIND_URL.replace(/\/$/, "")}/api/jobs`, { label: "작업" });
-
-export const GET = proxy;
-export const POST = proxy;
+export const GET = pathProxy(`${MIND_URL}/api/jobs`, { label: "작업" });
+export const POST = pathProxy(`${MIND_WRITES}/api/jobs`, { label: "작업" });

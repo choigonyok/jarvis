@@ -1,16 +1,15 @@
-import { pathProxy } from "@/lib/proxy";
+import { MIND_URL, MIND_WRITES, pathProxy } from "@/lib/proxy";
 
-// The household book, which mind keeps. The gateway lets through only what the
-// 가계부 screen does (spendingRoute).
-const MIND_URL = process.env.MIND_URL ?? "http://localhost:8102";
-
+// The household book, which mind keeps: read there, changed at the way in. The
+// gateway lets through only what the 가계부 screen does (spendingRoute).
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const proxy = pathProxy(`${MIND_URL.replace(/\/$/, "")}/api/spending`, { label: "가계부" });
+const read = pathProxy(`${MIND_URL}/api/spending`, { label: "가계부" });
+const write = pathProxy(`${MIND_WRITES}/api/spending`, { label: "가계부" });
 
-export const GET = proxy;
-export const POST = proxy;
-export const PATCH = proxy;
-export const PUT = proxy;
-export const DELETE = proxy;
+export const GET = read;
+export const POST = write;
+export const PATCH = write;
+export const PUT = write;
+export const DELETE = write;

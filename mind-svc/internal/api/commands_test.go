@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -138,10 +139,18 @@ func TestARecordWithNoPathIsNotACommand(t *testing.T) {
 // fakeStream is the stream from the door's side: what it is given, the lane
 // does at once.
 type fakeStream struct {
-	mu   sync.Mutex
-	got  []string
-	s    *Server
-	done bool
+	mu    sync.Mutex
+	got   []string
+	lists []string
+	s     *Server
+	done  bool
+}
+
+func (f *fakeStream) ListChanged(_ context.Context, guest bool, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lists = append(f.lists, fmt.Sprintf("%s:%v", id, guest))
+	return nil
 }
 
 func (f *fakeStream) Command(ctx context.Context, key, kind, actor, method, path string, body json.RawMessage) error {
@@ -218,5 +227,42 @@ func TestTheJobsWantAToken(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/jobs/jobs", strings.NewReader(`{}`)))
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("쓰기: %d", rec.Code)
+	}
+}
+
+// A list changed from any screen or tool tells the screens showing it - the
+// guest's on the guest's side.
+func TestAChangedListTellsTheScreens(t *testing.T) {
+	s, h, _ := commandServer(t)
+	stream := &fakeStream{s: s, done: true}
+	s.SetStream(stream)
+	do := func(token, method, path, body string) string {
+		t.Helper()
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s %s: %d %s", method, path, rec.Code, rec.Body.String())
+		}
+		return rec.Body.String()
+	}
+	var made struct {
+		Checklist struct {
+			ID string `json:"id"`
+		} `json:"checklist"`
+	}
+	if err := json.Unmarshal([]byte(do("tok", http.MethodPost, "/api/checklists", `{"title":"캠핑","items":["장갑","베개"]}`)), &made); err != nil {
+		t.Fatal(err)
+	}
+	if len(stream.lists) != 0 {
+		t.Fatalf("만든 목록은 카드가 함께 갑니다: %v", stream.lists)
+	}
+	id := made.Checklist.ID
+	do("tok", http.MethodPost, "/api/checklists/"+id+"/items/i1", `{"done":true}`)
+	do("tok", http.MethodPatch, "/api/checklists/"+id, `{"remove":["i2"],"by":"card"}`)
+	do("tok", http.MethodDelete, "/api/checklists/"+id, "")
+	if want := id + ":false"; strings.Join(stream.lists, " ") != want+" "+want+" "+want {
+		t.Fatalf("%v", stream.lists)
 	}
 }

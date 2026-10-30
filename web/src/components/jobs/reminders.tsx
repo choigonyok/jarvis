@@ -17,7 +17,7 @@ export function useReminders() {
   const [reminders, setReminders] = useState<Reminder[] | null>(null);
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/agent/reminders", { cache: "no-store" });
+      const res = await fetch("/api/mind/reminders?days=30", { cache: "no-store" });
       if (!res.ok) return;
       const body = (await res.json()) as { reminders?: Reminder[] };
       setReminders(body.reminders ?? []);

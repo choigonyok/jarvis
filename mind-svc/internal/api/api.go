@@ -115,6 +115,8 @@ type Server struct {
 // Commands is the stream as far as this door needs it.
 type Commands interface {
 	Command(ctx context.Context, key, kind, actor, method, path string, body json.RawMessage) error
+	// ListChanged tells the person's screens a list changed.
+	ListChanged(ctx context.Context, guest bool, id string) error
 }
 
 // SetStream sends what changes mind through the stream.

@@ -141,7 +141,6 @@ func (m *Module) one(ctx context.Context, method, path string, in any) (List, er
 	if err := m.do(ctx, method, path, in, &out); err != nil {
 		return List{}, err
 	}
-	m.publish(out.Checklist)
 	return out.Checklist, nil
 }
 
@@ -179,37 +178,6 @@ func (m *Module) Find(ctx context.Context, ids []string) (map[string]any, error)
 		out[l.ID] = l
 	}
 	return out, nil
-}
-
-// Open is the lists still open, the latest changed first: what the 작업
-// tab shows of them (the unfinished among them).
-func (m *Module) Open(ctx context.Context) (any, error) {
-	var res struct {
-		Checklists []List `json:"checklists"`
-	}
-	if err := m.do(ctx, http.MethodGet, "/api/checklists", nil, &res); err != nil {
-		return nil, err
-	}
-	if res.Checklists == nil {
-		res.Checklists = []List{}
-	}
-	return res.Checklists, nil
-}
-
-// Drop takes an item off a list - one swiped away on a card as not needed.
-func (m *Module) Drop(ctx context.Context, id, item string) (any, error) {
-	return m.one(ctx, http.MethodPatch, "/api/checklists/"+url.PathEscape(id), map[string]any{"remove": []string{item}, "by": "card"})
-}
-
-// Close closes a list from the console.
-func (m *Module) Close(ctx context.Context, id string) (any, error) {
-	return m.one(ctx, http.MethodDelete, "/api/checklists/"+url.PathEscape(id), nil)
-}
-
-// Check is a tap on a card's item.
-func (m *Module) Check(ctx context.Context, id, item string, done bool) (any, error) {
-	return m.one(ctx, http.MethodPost, "/api/checklists/"+url.PathEscape(id)+"/items/"+url.PathEscape(item),
-		map[string]any{"done": done, "by": "card"})
 }
 
 // Show lays the list in the conversation as a card, under lead (a line on

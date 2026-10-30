@@ -148,14 +148,6 @@ func TestChecklistIsACardInTheConversation(t *testing.T) {
 		t.Fatalf("화면에 간 목록: %+v", l)
 	}
 
-	got, err := m.Check(context.Background(), "chk_1", "i2", true)
-	if err != nil || !got.(List).Items[1].Done || got.(List).Items[1].By != "card" {
-		t.Fatalf("카드에서 체크: %+v %v", got, err)
-	}
-	if l := published(t, events); !l.Items[1].Done {
-		t.Fatal("체크한 상태가 다른 화면에 가지 않았습니다")
-	}
-
 	for range 2 {
 		if _, err := m.ShowAs(context.Background(), "chk_1", "내일 출발이에요", "checklist.shown:chk_1:x"); err != nil {
 			t.Fatal(err)
@@ -171,40 +163,5 @@ func TestChecklistIsACardInTheConversation(t *testing.T) {
 	found, err := m.Find(context.Background(), []string{"chk_1"})
 	if err != nil || found["chk_1"].(List).Title != "캠핑 준비물" {
 		t.Fatalf("찾기: %+v %v", found, err)
-	}
-}
-
-// From the console: an item swiped away is taken off the list in mind, a
-// list is closed there, and the 작업 tab reads the lists still open - each
-// change going out to every screen.
-func TestConsoleDropsAndCloses(t *testing.T) {
-	mind := &fakeMind{}
-	b := bus.New()
-	events, stop := b.Subscribe()
-	defer stop()
-	m := New(mind.serve(t), "tok", nil, &conversation{}, b, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	ctx := context.Background()
-	s := session(t, m)
-	if _, isErr := call(t, s, "make_checklist", map[string]any{"title": "캠핑 준비물", "items": []string{"장갑", "베개"}, "date": "2026-10-24", "show": false}); isErr {
-		t.Fatal("만들기 실패")
-	}
-	published(t, events)
-	if _, err := m.Drop(ctx, "chk_1", "i2"); err != nil {
-		t.Fatal(err)
-	}
-	published(t, events)
-	if _, err := m.Close(ctx, "chk_1"); err != nil {
-		t.Fatal(err)
-	}
-	published(t, events)
-	open, err := m.Open(ctx)
-	if err != nil || len(open.([]List)) != 1 {
-		t.Fatalf("열린 목록: %+v %v", open, err)
-	}
-	mind.mu.Lock()
-	defer mind.mu.Unlock()
-	want := []string{"POST /api/checklists", "PATCH /api/checklists/chk_1", "DELETE /api/checklists/chk_1", "GET /api/checklists"}
-	if strings.Join(mind.calls, " | ") != strings.Join(want, " | ") {
-		t.Fatalf("mind 로 간 것: %v", mind.calls)
 	}
 }
