@@ -601,6 +601,8 @@ type SavedAddress struct {
 	Recipient string
 	Address   string
 	Detail    string
+	// Doubt is why it may be out of date: a move since it was saved.
+	Doubt string
 }
 
 // trailingParens is what a person may add after a road address's building
@@ -631,6 +633,14 @@ func addressLines(p Payment, addr *SavedAddress) (warn, saved string) {
 	summary := strings.Join(strings.Fields(p.JobSummary), "")
 	if key := roadKey(addr.Address); key != "" && strings.Contains(summary, "배송지") && !strings.Contains(summary, key) {
 		warn = "⚠ 작업이 남긴 배송지가 저장된 배송지와 다릅니다 - 승인하기 전에 주문서의 주소를 확인하세요."
+	}
+	if addr.Doubt != "" {
+		line := "⚠ " + addr.Doubt + " - 지금 사는 곳이 맞는지 확인하고 승인하세요."
+		if warn == "" {
+			warn = line
+		} else {
+			warn += "\n" + line
+		}
 	}
 	return warn, saved
 }

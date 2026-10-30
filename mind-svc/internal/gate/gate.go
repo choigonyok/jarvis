@@ -19,9 +19,11 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/act"
+	"github.com/choigonyok/jarvis/mind-svc/internal/engine"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
@@ -87,6 +89,10 @@ func DefaultPolicy() Policy {
 	}
 }
 
+// lowValue is below what a thing done and told rings for: it waits for the
+// evening (a charge filed the usual way).
+const lowValue = 0.5
+
 // BriefSkill is the morning brief's skill (skill.Brief): the one notice the
 // day's push budget never holds back.
 const BriefSkill = "brief"
@@ -106,6 +112,20 @@ type Gate struct {
 	// OnDecide hears every intent the operator answered (approved, turned
 	// down, undid) - what notes learn from.
 	OnDecide func(ctx context.Context, in model.Intent)
+	// book is the result ledger's record, replaced whole when the ledger is
+	// made again. Nil knows nothing and every intent stands as stated.
+	book atomic.Pointer[engine.Book]
+}
+
+// SetBook gives the gate the ledger's record.
+func (g *Gate) SetBook(b *engine.Book) { g.book.Store(b) }
+
+// Book is the ledger's record as the gate has it.
+func (g *Gate) Book() *engine.Book { return g.book.Load() }
+
+// Reading is an intent's confidence corrected by how its kind has gone.
+func (g *Gate) Reading(in model.Intent) engine.Reading {
+	return g.book.Load().Read(engine.Key{Source: "card", Kind: in.Kind, Skill: in.Skill, Context: in.ContextKey()}, in.Confidence)
 }
 
 func New(st store.Store, acts *act.Registry, n act.Notifier, log obs.Log, p Policy, loc *time.Location, now func() time.Time, url string, out *slog.Logger) *Gate {
@@ -196,7 +216,7 @@ func (g *Gate) Submit(ctx context.Context, in model.Intent) (model.Intent, error
 		// Linked only (the entry put there meanwhile): nothing to take back.
 		if decision == model.Notify && in.Status == model.Executed && len(in.Undo) > 0 {
 			in.Tier = "now"
-			if g.overBudget(ctx) {
+			if g.overBudget(ctx) || (in.Value > 0 && in.Value < lowValue) {
 				in.Tier = "digest"
 			}
 			// Done and told: the card offers the undo.
@@ -248,8 +268,19 @@ func (g *Gate) approveWithLocked(ctx context.Context, id string, answers map[str
 	if err != nil {
 		return in, err
 	}
+	// A form filled in and approved as it stands is answered by what it said.
 	for _, f := range in.Fields {
-		if f.Required && strings.TrimSpace(answers[f.Key]) == "" {
+		if strings.TrimSpace(answers[f.Key]) != "" {
+			continue
+		}
+		if f.Value != "" {
+			if answers == nil {
+				answers = map[string]string{}
+			}
+			answers[f.Key] = f.Value
+			continue
+		}
+		if f.Required {
 			return in, fmt.Errorf("%s 에 답해 주세요", f.Label)
 		}
 	}
@@ -504,6 +535,23 @@ func (g *Gate) decide(ctx context.Context, in model.Intent) (string, string, err
 	if level == Never {
 		return model.Drop, why, nil
 	}
+	// A slot comes graded: the engine weighed it against its own kind.
+	switch engine.Grade(in.Grade) {
+	case engine.Silent:
+		return model.Drop, "확신이 낮아 묻지 않아요", nil
+	case engine.Act:
+		if in.Reversible && !g.policy.Fixed[kind] {
+			return model.Notify, "늘 맞아서 바로 하고 알려요", nil
+		}
+	}
+	// A kind turned down again and again stops being raised, but for the odd
+	// one that keeps a way back. What is always asked stays asked.
+	if in.Grade == "" && level == AskFor && !g.policy.Fixed[kind] {
+		r := g.Reading(in)
+		if engine.Decide(engine.Spec{Reversible: in.Reversible}, r, engine.Explored(in.ID)) == engine.Silent {
+			return model.Drop, fmt.Sprintf("이런 제안은 %d번 답하신 기록상 원하지 않으셔서 묻지 않아요 (%.0f%%)", r.N, r.P*100), nil
+		}
+	}
 	if in.Confidence < g.policy.MinConfidence {
 		return model.Ask, fmt.Sprintf("확신도 %.0f%%라 직접 확인받아요", in.Confidence*100), nil
 	}
@@ -597,8 +645,9 @@ func (g *Gate) quietTopic(ctx context.Context, in model.Intent) (bool, string, e
 // summary instead: the skill is unsure, today's budget is spent, or it is
 // not worth the interruption.
 func (g *Gate) quietCard(ctx context.Context, in model.Intent) (bool, string) {
-	if in.Confidence < g.policy.MinConfidence {
-		return true, fmt.Sprintf("확신도 %.0f%%라 저녁 요약으로", in.Confidence*100)
+	r := g.Reading(in)
+	if r.P < g.policy.MinConfidence {
+		return true, fmt.Sprintf("확신도 %.0f%%라 저녁 요약으로", r.P*100)
 	}
 	if g.overBudget(ctx) {
 		return true, "오늘 알림 한도를 넘어 저녁 요약으로"
@@ -607,12 +656,18 @@ func (g *Gate) quietCard(ctx context.Context, in model.Intent) (bool, string) {
 	if g.policy.DailyCards > 0 && cards >= g.policy.DailyCards {
 		return true, "오늘 카드 한도를 넘어 저녁 요약으로"
 	}
-	stat, _ := g.st.Policy(ctx, in.Skill, in.ContextKey())
 	value := in.Value
 	if value == 0 {
 		value = 1
 	}
-	worth := in.Confidence * stat.Rate() * value
+	// A kind with answers on the ledger is read by them. The approval rate
+	// is what the ledger already corrected for: counted again it would
+	// halve the same doubt twice.
+	worth := r.P * value
+	if r.N == 0 {
+		stat, _ := g.st.Policy(ctx, in.Skill, in.ContextKey())
+		worth *= stat.Rate()
+	}
 	cost := g.policy.InterruptCost * (1 + float64(cards)/float64(max(g.policy.DailyCards, 1)))
 	if worth <= cost {
 		return true, fmt.Sprintf("방해할 만큼은 아니라 저녁 요약으로 (가치 %.2f ≤ 비용 %.2f)", worth, cost)

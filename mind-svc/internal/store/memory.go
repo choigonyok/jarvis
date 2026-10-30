@@ -35,6 +35,7 @@ type Memory struct {
 	versions map[string][]model.Note
 	outcomes []model.Outcome
 	factRows []model.FactRow
+	classes  map[string]model.Class
 	preds    map[string]model.Prediction
 	expects  map[[2]string]model.Expectation
 	replies  []model.ReplySituation
@@ -775,6 +776,30 @@ func (m *Memory) NoteVersions(_ context.Context, id string) ([]model.Note, error
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return slices.Clone(m.versions[id]), nil
+}
+
+func (m *Memory) Class(_ context.Context, kind, key string) (model.Class, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c, ok := m.classes[kind+"\x00"+key]
+	if !ok {
+		return model.Class{}, model.ErrNotFound
+	}
+	return c, nil
+}
+
+func (m *Memory) PutClass(_ context.Context, c model.Class) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	k := c.Kind + "\x00" + c.Key
+	if had, ok := m.classes[k]; ok && had.By == model.ClassByOperator && c.By != model.ClassByOperator {
+		return nil
+	}
+	if m.classes == nil {
+		m.classes = map[string]model.Class{}
+	}
+	m.classes[k] = c
+	return nil
 }
 
 func (m *Memory) ReplaceOutcomes(_ context.Context, rows []model.Outcome) error {

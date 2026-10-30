@@ -14,7 +14,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"math"
 	"net/http"
 	"net/url"
@@ -24,7 +23,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/choigonyok/jarvis/agent/internal/core/module"
-	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
 )
 
 var _ module.ContextSource = (*Module)(nil)
@@ -159,15 +157,6 @@ func (s *Store) Month(ctx context.Context, month string) (Book, error) {
 
 type Module struct {
 	store *Store
-	// proposals and log are set by Ask: where the category cards go.
-	proposals *proposal.Store
-	log       *slog.Logger
-	// attach, when set (Attach), puts each card in the conversation, where
-	// it stays once answered.
-	attach func(proposalID string)
-	// unsure is what the judge (ask.go) could not file, by "kind:id": asked
-	// of the operator instead, and not put to the judge again.
-	unsure map[string]bool
 }
 
 func New(store *Store) *Module { return &Module{store: store} }

@@ -178,6 +178,11 @@ type Store interface {
 	ReplaceFactRows(ctx context.Context, rows []model.FactRow) error
 	FactRows(ctx context.Context) ([]model.FactRow, error)
 
+	// The classification cache. PutClass keeps what the operator said: a
+	// model's answer does not write over it.
+	Class(ctx context.Context, kind, key string) (model.Class, error)
+	PutClass(ctx context.Context, c model.Class) error
+
 	// Aliases: names in conversation → memory nodes. Putting a name again
 	// moves it to the node given and counts it seen once more.
 	PutAlias(ctx context.Context, a model.Alias) error

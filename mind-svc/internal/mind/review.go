@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/choigonyok/jarvis/mind-svc/internal/act"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/predict"
 	"github.com/choigonyok/jarvis/mind-svc/internal/prefs"
@@ -317,6 +318,8 @@ func (m *Mind) reviewIntent(ctx context.Context, c candidate, now time.Time) (mo
 // answered is what came of a review or a confirmation card.
 func (m *Mind) answered(ctx context.Context, in model.Intent) {
 	switch in.Kind {
+	case act.KindCategory:
+		m.chargeAnswered(ctx, in)
 	case "review.place":
 		var r prefs.Review
 		if json.Unmarshal(in.Payload, &r) != nil {

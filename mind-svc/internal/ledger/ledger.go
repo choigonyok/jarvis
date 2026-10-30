@@ -130,6 +130,15 @@ func ofIntent(it model.Intent, in Inputs, idx occurrences, done map[string]bool)
 	return o
 }
 
+// corrected is whether a form was approved with its answer changed: the card
+// went through, and what the assistant said was wrong all the same.
+func corrected(it model.Intent) bool {
+	var r struct {
+		Corrected bool `json:"corrected"`
+	}
+	return json.Unmarshal(it.Result, &r) == nil && r.Corrected
+}
+
 // doneThrough is the plans an approved card acted on: an entry there came
 // through the assistant, whichever card of the plan it was.
 func doneThrough(intents []model.Intent) map[string]bool {
@@ -147,6 +156,9 @@ func cardResult(it model.Intent, now time.Time) string {
 	case model.Executed, model.Failed:
 		// Failed is the action's: the operator did say yes.
 		if it.DecidedBy == "user" {
+			if corrected(it) {
+				return model.ResultCorrected
+			}
 			return model.ResultApproved
 		}
 		return model.ResultKept

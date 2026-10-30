@@ -2,8 +2,11 @@ package mind
 
 import (
 	"context"
+	"time"
 
+	"github.com/choigonyok/jarvis/mind-svc/internal/engine"
 	"github.com/choigonyok/jarvis/mind-svc/internal/ledger"
+	"github.com/choigonyok/jarvis/mind-svc/internal/slot"
 )
 
 // All of history, as far as the ledger is concerned.
@@ -39,6 +42,7 @@ func (m *Mind) RebuildLedger(ctx context.Context) (outcomes, facts int, err erro
 	if err := st.ReplaceOutcomes(ctx, rows); err != nil {
 		return 0, 0, err
 	}
+	m.Gate.SetBook(engine.NewBook(rows))
 	all, err := st.Facts(ctx, ledgerLimit)
 	if err != nil {
 		return len(rows), 0, err
@@ -53,4 +57,26 @@ func (m *Mind) RebuildLedger(ctx context.Context) (outcomes, facts int, err erro
 func (m *Mind) rebuildLedger(ctx context.Context) error {
 	_, _, err := m.RebuildLedger(ctx)
 	return err
+}
+
+// SlotReading is a slot as things stand: whether a value saved at saved still
+// holds, read from the facts as they are now and not as the night left them -
+// a move said this afternoon counts on this evening's order.
+func (m *Mind) SlotReading(ctx context.Context, d slot.Def, saved time.Time) (slot.Reading, error) {
+	facts, err := m.Opts.Store.FactsWith(ctx, d.Evidence...)
+	if err != nil {
+		return slot.Reading{}, err
+	}
+	return d.Read(ledger.Intervals(facts, m.Opts.Loc), saved, m.Gate.Book()), nil
+}
+
+// loadBook gives the gate the ledger as it was last made, so a restart does
+// not forget how things have gone until the night comes round.
+func (m *Mind) loadBook(ctx context.Context) {
+	rows, err := m.Opts.Store.Outcomes(ctx)
+	if err != nil {
+		m.Opts.Logger.Warn("결과 장부를 읽지 못했습니다", "err", err)
+		return
+	}
+	m.Gate.SetBook(engine.NewBook(rows))
 }

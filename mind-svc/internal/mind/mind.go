@@ -41,10 +41,12 @@ import (
 )
 
 type Options struct {
-	Store     store.Store
-	Log       obs.Log
-	LLM       llm.Client
-	Calendar  act.Calendar
+	Store    store.Store
+	Log      obs.Log
+	LLM      llm.Client
+	Calendar act.Calendar
+	// Spending is the book, when charges are filed from here.
+	Spending  *act.Spending
 	Notifier  act.Notifier // nil: notices go through the log to notify-svc
 	Loc       *time.Location
 	Now       func() time.Time
@@ -171,9 +173,13 @@ func New(o Options) *Mind {
 	if o.Orders == nil {
 		o.Orders = &act.MemoryOrders{}
 	}
-	acts := act.NewRegistry(act.CalendarActuator{Cal: o.Calendar}, act.Note{},
+	actuators := []act.Actuator{act.CalendarActuator{Cal: o.Calendar}, act.Note{},
 		act.SettleActuator{Drafts: drafter}, act.PhotosActuator{Photos: photos}, act.CartActuator{Jobs: jobs},
-		act.DraftActuator{Drafts: drafter}, act.ReviewActuator{}, act.RebalanceActuator{Orders: o.Orders})
+		act.DraftActuator{Drafts: drafter}, act.ReviewActuator{}, act.RebalanceActuator{Orders: o.Orders}}
+	if o.Spending != nil {
+		actuators = append(actuators, o.Spending)
+	}
+	acts := act.NewRegistry(actuators...)
 	m.Gate = gate.New(o.Store, acts, notifier, o.Log, o.Policy, o.Loc, o.Now, o.URL, o.Logger)
 	m.notifier = notifier
 	if o.Reminders != nil {
@@ -269,12 +275,16 @@ func (m *Mind) Run(ctx context.Context, every time.Duration) {
 	if err := m.Conv.Resume(ctx); err != nil {
 		m.Opts.Logger.Warn("남은 대화를 다시 잡지 못했습니다", "err", err)
 	}
+	m.loadBook(ctx)
 	go m.Conv.Run(ctx, every)
 	go m.Attn.Run(ctx, every)
 	go m.Link.Run(ctx, every)
 	go m.nights(ctx, 30*time.Second)
 	go m.daily(ctx, 30*time.Second, "tick:predict", morningAt, m.Morning)
 	go m.daily(ctx, 30*time.Second, "tick:review", reviewAt, m.reviews)
+	if m.Opts.Spending != nil {
+		go m.chargeLoop(ctx)
+	}
 	if m.Remember != nil {
 		go m.Remember.Run(ctx, 15*time.Second)
 	}

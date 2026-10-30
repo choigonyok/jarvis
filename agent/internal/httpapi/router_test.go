@@ -811,3 +811,27 @@ func TestAPaymentCardShowsTheSavedAddress(t *testing.T) {
 		t.Fatalf("괄호를 뺀 도로명+건물번호: %q", roadKey("서울 중구 세종대로 110 (태평로1가)"))
 	}
 }
+
+// A move since the address was saved goes at the top of the payment card: the
+// card is the last place a person can catch it.
+func TestAPaymentCardSaysTheAddressMayBeOld(t *testing.T) {
+	addr := &SavedAddress{Recipient: "홍길동", Address: "서울 중구 세종대로 110", Doubt: "저장한 뒤 11월 2일에 사는 곳이 바뀐 기록이 있어요"}
+	warn, saved := addressLines(Payment{}, addr)
+	if !strings.HasPrefix(warn, "⚠ 저장한 뒤") || !strings.Contains(saved, "세종대로") {
+		t.Fatalf("%q %q", warn, saved)
+	}
+	card := paymentCard(Payment{Host: "pay.naver.com"}, addr)
+	if !strings.HasPrefix(card.Body, "⚠ 저장한 뒤") {
+		t.Fatalf("맨 위에 있어야 합니다: %s", card.Body)
+	}
+	// Both worries are said.
+	both, _ := addressLines(Payment{JobSummary: "배송지 부산 해운대로 1"}, addr)
+	if strings.Count(both, "⚠") != 2 {
+		t.Fatalf("%q", both)
+	}
+	clean := *addr
+	clean.Doubt = ""
+	if warn, _ := addressLines(Payment{}, &clean); warn != "" {
+		t.Fatalf("%q", warn)
+	}
+}

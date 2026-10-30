@@ -52,11 +52,13 @@ func TestWaitPaymentHearsAnApprovalWhileTheRequestIsHeld(t *testing.T) {
 }
 
 type fakeVault struct {
-	s  vault.Shipping
-	ok bool
+	s     vault.Shipping
+	ok    bool
+	doubt string
 }
 
 func (f fakeVault) Shipping(context.Context) (vault.Shipping, bool, error) { return f.s, f.ok, nil }
+func (f fakeVault) AddressDoubt(context.Context, vault.Shipping) string    { return f.doubt }
 func (f fakeVault) Preview(_ context.Context, a action.Action) (action.Card, error) {
 	return action.Card{Title: "카드 " + a.Kind, Fields: []action.Field{{Key: "x", Label: "x", Kind: "text", Private: true}}}, nil
 }
@@ -87,6 +89,11 @@ func TestOrderToolsReadTheProfileAndRaiseTheVaultCards(t *testing.T) {
 		}
 	}
 
+	// A move since it was saved: the sheet is not filled from it, the job asks.
+	m.SetVault(fakeVault{s: vault.Shipping{Name: "기본", Address: "서울 중구 세종대로 110"}, ok: true, doubt: "저장한 뒤 11월 2일에 사는 곳이 바뀐 기록이 있어요"})
+	if text, _ := callRun(t, s, "shipping_address", nil); !strings.Contains(text, "확인 필요") || !strings.Contains(text, "request_shipping_address") || strings.Contains(text, "이대로 넣습니다") {
+		t.Fatalf("이사 뒤: %s", text)
+	}
 	m.SetVault(fakeVault{})
 	if text, _ := callRun(t, s, "shipping_address", nil); !strings.Contains(text, "request_shipping_address") {
 		t.Fatalf("저장된 배송지가 없으면 카드를 올리라고 해야 합니다: %q", text)

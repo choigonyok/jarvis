@@ -2,6 +2,7 @@ package mind
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"slices"
@@ -285,26 +286,42 @@ func (m *Mind) restock(ctx context.Context) error {
 		last := t.Last.In(m.Opts.Loc)
 		body := strings.Join(t.Items, ", ")
 		// What the two-week question said of them: one not to buy again is
-		// said so.
+		// said so, and is not what the card offers.
+		item := ""
 		for _, it := range t.Items {
+			again := true
 			attrs, _ := m.Opts.Store.Attributes(ctx, "물건", it)
 			for _, a := range attrs {
 				if a.Dimension == "재구매" && a.Value < 0 {
 					body += fmt.Sprintf(" · '%s'는 다시 안 산다고 하셨어요", it)
+					again = false
 				}
 			}
+			if again {
+				item = it
+			}
 		}
-		if _, err := m.Gate.Submit(ctx, model.Intent{
-			Skill: "life", Kind: "info", Topic: "restock:" + t.Class + ":" + last.Format("2006-01-02"),
-			Title:  fmt.Sprintf("%s 살 때 됐어요 (보통 %d일마다, 마지막 %s)", t.Class, t.CycleDays, md(last)),
-			Body:   body,
-			Reason: "가진 물건", Confidence: 1,
-		}); err != nil {
+		topic := "restock:" + t.Class + ":" + last.Format("2006-01-02")
+		title := fmt.Sprintf("%s 살 때 됐어요 (보통 %d일마다, 마지막 %s)", t.Class, t.CycleDays, md(last))
+		intent := model.Intent{Skill: "life", Kind: "info", Topic: topic, Title: title, Body: body, Reason: "가진 물건", Confidence: 1}
+		if item != "" {
+			// What it would take is known: the thing last bought, the shop it
+			// came from. The card asks with that filled in, and the order
+			// sheet takes the saved address, or stops if a move put it in doubt.
+			payload, _ := json.Marshal(map[string]string{"item": item, "class": t.Class, "site": "coupang.com"})
+			intent = model.Intent{Skill: "life", Kind: "cart.add", Context: "restock", Topic: topic, Title: title + " 담아둘까요?",
+				Body: body + "\n배송지는 저장된 주소로 넣어요.", Reason: "가진 물건", Confidence: restockConfidence, Value: 0.6, Reversible: true, Payload: payload}
+		}
+		if _, err := m.Gate.Submit(ctx, intent); err != nil {
 			return err
 		}
 	}
 	return nil
 }
+
+// restockConfidence is what a cycle that has held so far is worth, before the
+// ledger has answers of its own.
+const restockConfidence = 0.75
 
 // deliveries keeps a note of how often food is delivered and when, from
 // the card payments to the delivery apps (and where the phone was) over

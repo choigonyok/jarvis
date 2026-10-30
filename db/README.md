@@ -11,6 +11,7 @@ input.records                           ← 일어난 일의 기록. 재생이 �
 commitments · workout_* · card_* · …     ← 각 서비스의 정확한 사실
 mind_*                                   ← mind 의 세계 모델·관문·노트
 mind.outcomes · mind.facts               ← 결과 장부와 기간이 붙은 사실 (원본에서 다시 만듦)
+mind.classes                             ← 분류 캐시 (모델의 답은 캐시, 운영자의 답은 값)
 ```
 
 **원문 보관(`raw_events`)은 가계부만 씁니다.** 처음에는 모든 수집기가 본 것을 여기에

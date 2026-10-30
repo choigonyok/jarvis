@@ -524,6 +524,10 @@ type Intent struct {
 	// budget does not hold it for the evening, when it would be no use.
 	Moment string `json:"moment,omitempty"`
 
+	// Grade is what the engine already decided for a slot (engine.Grade),
+	// which the gate carries out. Empty: the gate reads the intent itself.
+	Grade string `json:"grade,omitempty"`
+
 	Decision  string `json:"decision"`            // execute | notify | ask | digest | drop
 	Why       string `json:"why,omitempty"`       // why the gate decided so
 	Tier      string `json:"tier,omitempty"`      // the notification it raised: now | digest
@@ -703,6 +707,7 @@ const (
 	ResultApproved   = "approved"
 	ResultRejected   = "rejected"
 	ResultUndone     = "undone"
+	ResultCorrected  = "corrected" // approved, with the answer changed: what was said was wrong
 	ResultKept       = "kept"
 	ResultIgnored    = "ignored"
 	ResultCovered    = "covered"
@@ -720,11 +725,29 @@ func (o Outcome) Scored() (hit, ok bool) {
 	switch o.Result {
 	case ResultApproved, ResultKept, ResultHit:
 		return true, true
-	case ResultRejected, ResultUndone, ResultMiss:
+	case ResultRejected, ResultUndone, ResultCorrected, ResultMiss:
 		return false, true
 	}
 	return false, false
 }
+
+// Class is one answer of the classification cache: what a thing is, how sure,
+// and who said so. A model's answer is a cache, to be asked again if lost; an
+// operator's stands over it for good.
+type Class struct {
+	Kind  string    `json:"kind"`  // merchant.category
+	Key   string    `json:"key"`   // the thing: a merchant's name
+	Value string    `json:"value"` // what it is
+	P     float64   `json:"p"`
+	By    string    `json:"by"` // llm | operator
+	At    time.Time `json:"at"`
+}
+
+// Who wrote a class.
+const (
+	ClassByLLM      = "llm"
+	ClassByOperator = "operator"
+)
 
 // FactRow is a fact with the time it holds: the facts table, the one source
 // of what is true once memory is rebuilt from it. Single facts (where one

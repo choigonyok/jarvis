@@ -124,3 +124,22 @@ func TestWhichPaymentAPasswordIsFor(t *testing.T) {
 		}
 	}
 }
+
+// The vault keeps the address and knows nothing of moves: whoever does says so
+// here. Nobody saying anything leaves it as it was.
+func TestAddressDoubt(t *testing.T) {
+	m := &Module{}
+	saved := Shipping{Name: DefaultShipping, UpdatedAt: "2026-10-30T03:28:14+09:00"}
+	if got := m.AddressDoubt(context.Background(), saved); got != "" {
+		t.Fatalf("%q", got)
+	}
+	var asked string
+	m.CheckAddress(func(_ context.Context, at string) string { asked = at; return "이사" })
+	if got := m.AddressDoubt(context.Background(), saved); got != "이사" || asked != saved.UpdatedAt {
+		t.Fatalf("%q %q", got, asked)
+	}
+	// A profile from before the time was kept: nothing to go by.
+	if got := m.AddressDoubt(context.Background(), Shipping{}); got != "" {
+		t.Fatalf("%q", got)
+	}
+}

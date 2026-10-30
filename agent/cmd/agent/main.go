@@ -323,14 +323,6 @@ func main() {
 	} else if spendingModule != nil && cfg.Enrich {
 		log.Warn("브라우저 MCP 가 없어 묶음 결제 조회를 켜지 않습니다", "need", spending.BrowserServer)
 	}
-	// A charge the rules left in 기타 is judged by the model first - a
-	// merchant whose trade is plain is filed without a card - and the card
-	// (spending/ask.go) is for what it could not tell either.
-	if spendingModule != nil && !cfg.Guest {
-		spendingModule.Ask(proposals, log)
-		spendingModule.Attach(transcript.AttachProposal)
-		go spendingModule.RunAsker(enrichCtx, spending.AskConfig{Every: 10 * time.Minute, MaxOpen: 3, Judge: runner, Model: cfg.EnrichModel})
-	}
 	// Money taken out of an investment account that no deposit here explains
 	// is asked about, one card per withdrawal (assets/ask.go); what was spent
 	// reaches the 가계부 through assets-svc.
@@ -572,7 +564,7 @@ func main() {
 				// A background job asking for something done by hand (log in again).
 				kind, title = "job.request", "작업이 기다려요"
 			}
-			if p.Action.Kind == spending.KindCategory {
+			if mindmod.KindOf(p.Action) == spending.KindCategory {
 				// The book asking what a charge was for: muted with the rest of 가계부.
 				kind, title = "spending.ask", "가계부"
 			}
@@ -715,6 +707,20 @@ func main() {
 		Log:             log,
 	})
 	gate.SetRefuse(api.Refuse)
+	// A saved address is good until a move: mind knows of one, the vault
+	// holds the address and neither sees the other's half.
+	if vaultModule != nil && mindClient != nil {
+		slots := *mindClient
+		vaultModule.CheckAddress(func(ctx context.Context, saved string) string {
+			cctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			defer cancel()
+			got, err := slots.Slot(cctx, "shipping.address", saved)
+			if err != nil || got.Holds {
+				return ""
+			}
+			return got.Why
+		})
+	}
 
 	srv := &http.Server{
 		Addr:    cfg.Addr,

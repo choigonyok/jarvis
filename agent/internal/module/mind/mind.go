@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -145,6 +146,9 @@ func (m *Module) Revise(_ context.Context, a action.Action, edits map[string]str
 	answers := map[string]string{}
 	for i, f := range card.Fields {
 		v := strings.TrimSpace(edits[f.Key])
+		if v == "" {
+			v = strings.TrimSpace(f.Value) // filled in by mind, and left as it was
+		}
 		if f.Required && v == "" {
 			return a, action.Card{}, fmt.Errorf("%s을(를) 골라 주세요.", f.Label)
 		}
@@ -283,6 +287,36 @@ func (c Client) Do(ctx context.Context, method, path string, in, out any) error 
 	return nil
 }
 
+// KindCategory is mind's action that files a charge.
+const KindCategory = "spending.category"
+
+// KindOf is the action a mind card stands for, or the proposal's own kind.
+func KindOf(a action.Action) string {
+	if a.Kind == Approve || a.Kind == Undo {
+		var in Input
+		if json.Unmarshal(a.Input, &in) == nil && in.Kind != "" {
+			return in.Kind
+		}
+	}
+	return a.Kind
+}
+
+// Slot is what mind says of a value kept elsewhere: whether it still holds,
+// and if not, why.
+type Slot struct {
+	Holds bool    `json:"holds"`
+	Why   string  `json:"why"`
+	P     float64 `json:"p"`
+	Grade string  `json:"grade"`
+}
+
+// Slot asks about a slot's value saved at saved (RFC3339).
+func (c Client) Slot(ctx context.Context, name, saved string) (Slot, error) {
+	var out Slot
+	err := c.Do(ctx, http.MethodGet, "/api/slots/"+url.PathEscape(name)+"?saved="+url.QueryEscape(saved), nil, &out)
+	return out, err
+}
+
 // CardText is how a mind card reads on an approval card: what, then what
 // will run, then why and on what grounds.
 func CardText(c Card) action.Card {
@@ -309,6 +343,8 @@ func CardText(c Card) action.Card {
 	}
 	card := action.Card{Title: c.Title, Body: strings.TrimSpace(b.String()), Fields: c.Fields}
 	switch {
+	case c.Kind == KindCategory && c.Mode != "undo":
+		card.Consequence = "승인하면 이 분류로 바꿉니다. '앞으로도'면 이 가맹점의 지난·다음 결제도 같은 분류가 됩니다. 반려하면 기타로 두고 다시 묻지 않습니다."
 	case len(c.Fields) > 0:
 		card.Consequence = "승인하면 답을 보냅니다. 장소의 특징과 내 취향을 따로 배워요."
 	case c.Mode == "undo":

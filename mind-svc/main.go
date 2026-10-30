@@ -39,6 +39,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/backtest"
 	"github.com/choigonyok/jarvis/mind-svc/internal/checklist"
 	"github.com/choigonyok/jarvis/mind-svc/internal/clock"
+	"github.com/choigonyok/jarvis/mind-svc/internal/engine"
 	"github.com/choigonyok/jarvis/mind-svc/internal/eval"
 	"github.com/choigonyok/jarvis/mind-svc/internal/gate"
 	"github.com/choigonyok/jarvis/mind-svc/internal/interpret"
@@ -236,8 +237,12 @@ func main() {
 		}}
 	}
 
+	var book *act.Spending
+	if url := os.Getenv("SPENDING_URL"); url != "" && mode == "stack" {
+		book = &act.Spending{URL: url, Token: token}
+	}
 	m := mind.New(mind.Options{
-		Store: st, Log: logOut, LLM: client, Calendar: calendar, Notifier: notifier,
+		Store: st, Log: logOut, LLM: client, Calendar: calendar, Notifier: notifier, Spending: book,
 		Loc: loc, Now: clk.Now, Logger: log, Interpret: cfg, Settle: settle,
 		Policy: gate.DefaultPolicy(), URL: getenv("MIND_UI_URL", "http://localhost:8102/"), Mode: mode,
 		MessageRetain: time.Duration(atoiOr(getenv("MIND_MESSAGE_RETAIN_DAYS", "365"), 365)) * 24 * time.Hour,
@@ -388,6 +393,14 @@ func runBacktest(args []string, loc *time.Location) int {
 		fmt.Printf("장부 %d줄 · 결과가 있는 판단 %d건 · 기다리는 것 %d건 · 무시된 카드 %d건 · 관문이 버린 것 %d건\n", c.Rows, c.Scored, c.Open, c.Ignored, c.Quiet)
 		fmt.Printf("사람이 직접 한 것 %d건(그중 관문이 버렸던 것 %d건) · 실시간 채점과 달라진 예측 %d건\n", c.Manual, c.ManualQuiet, c.Rescored)
 		fmt.Printf("사실 %d줄 · 하나만 맞는 사실 %d줄 · 끝난 사실 %d줄\n\n", len(facts), single, ended)
+		tr := engine.Walk(rows)
+		fmt.Printf("엔진 시험(앞선 답만 보고 시간순으로): %d건 · Brier 말한 대로 %.3f → 보정 %.3f (평소 비율 %.3f)\n", tr.Cases, tr.Stated, tr.Corrected, tr.Plain)
+		for _, g := range []engine.Grade{engine.Silent, engine.AskBlank, engine.AskFilled, engine.Act} {
+			if tr.Grades[g] > 0 {
+				fmt.Printf("  %-11s %3d건, 그중 승인 %d건\n", g, tr.Grades[g], tr.Right[g])
+			}
+		}
+		fmt.Println()
 	} else {
 		in := io.Reader(os.Stdin)
 		if path := fs.Arg(0); path != "" {

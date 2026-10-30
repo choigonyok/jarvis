@@ -57,6 +57,6 @@ func savedAddress(v *vault.Module) func(context.Context) (httpapi.SavedAddress, 
 		if err != nil || !ok {
 			return httpapi.SavedAddress{}, false
 		}
-		return httpapi.SavedAddress{Recipient: s.Recipient, Address: s.Address, Detail: s.Detail}, true
+		return httpapi.SavedAddress{Recipient: s.Recipient, Address: s.Address, Detail: s.Detail, Doubt: v.AddressDoubt(ctx, s)}, true
 	}
 }

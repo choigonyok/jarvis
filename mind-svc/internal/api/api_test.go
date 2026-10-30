@@ -573,3 +573,58 @@ func TestGuestOwnRemindersAndLists(t *testing.T) {
 		}
 	}
 }
+
+// The test the design set: a move said in conversation puts the saved address
+// in doubt at once, not after the night's rebuild.
+func TestASlotHoldsUntilAMove(t *testing.T) {
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	st := store.NewMemory()
+	m := mind.New(mind.Options{
+		Store: st, Log: obs.NewMemoryLog(quiet), LLM: &llm.Script{}, Calendar: act.NewMemoryCalendar(),
+		Notifier: &act.MemoryNotifier{}, Loc: seoul, Now: time.Now, Logger: quiet, Policy: gate.DefaultPolicy(), Mode: "stack",
+	})
+	srv := httptest.NewServer(New(m, "secret", "console-secret", false, nil, quiet).Handler())
+	defer srv.Close()
+	ctx := context.Background()
+	saved := time.Date(2026, 10, 30, 3, 28, 0, 0, seoul)
+	read := func(query string) (int, map[string]any) {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/slots/"+query, nil)
+		req.Header.Set("Authorization", "Bearer secret")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var out map[string]any
+		_ = json.NewDecoder(resp.Body).Decode(&out)
+		return resp.StatusCode, out
+	}
+	at := url.QueryEscape(saved.Format(time.RFC3339))
+	lives := func(id, place string, when time.Time) model.Fact {
+		return model.Fact{ID: id, Subject: model.Party{Self: true}, Relation: "LIVES_IN", Object: model.Party{Name: place}, Status: model.FactStored, Confidence: 0.9, CreatedAt: when}
+	}
+	if err := st.PutFact(ctx, lives("f1", "수원", saved.AddDate(0, -1, 0))); err != nil {
+		t.Fatal(err)
+	}
+	if code, got := read("shipping.address?saved=" + at); code != http.StatusOK || got["holds"] != true || got["grade"] != "ask-filled" {
+		t.Fatalf("%d %+v", code, got)
+	}
+	if err := st.PutFact(ctx, lives("f2", "부산", saved.AddDate(0, 0, 10))); err != nil {
+		t.Fatal(err)
+	}
+	code, got := read("shipping.address?saved=" + at)
+	if code != http.StatusOK || got["holds"] != false || !strings.Contains(fmt.Sprint(got["why"]), "사는 곳이 바뀐") {
+		t.Fatalf("%d %+v", code, got)
+	}
+	// The value itself is never here.
+	if _, there := got["value"]; there {
+		t.Fatalf("%+v", got)
+	}
+	if code, _ := read("nothing?saved=" + at); code != http.StatusNotFound {
+		t.Fatalf("없는 슬롯: %d", code)
+	}
+	if code, _ := read("shipping.address?saved=어제"); code != http.StatusBadRequest {
+		t.Fatalf("시각이 아닙니다: %d", code)
+	}
+}

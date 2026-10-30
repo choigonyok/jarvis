@@ -951,6 +951,23 @@ func (p *Postgres) NoteVersions(ctx context.Context, id string) ([]model.Note, e
 	return scanBodies[model.Note](ctx, p, `select body from mind_note_versions where note_id = $1 order by version`, id)
 }
 
+func (p *Postgres) Class(ctx context.Context, kind, key string) (model.Class, error) {
+	c := model.Class{Kind: kind, Key: key}
+	err := p.db.QueryRow(ctx, `select value, p, by_who, at from mind.classes where kind = $1 and key = $2`, kind, key).Scan(&c.Value, &c.P, &c.By, &c.At)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return c, model.ErrNotFound
+	}
+	return c, err
+}
+
+func (p *Postgres) PutClass(ctx context.Context, c model.Class) error {
+	_, err := p.db.Exec(ctx, `insert into mind.classes (kind, key, value, p, by_who, at) values ($1, $2, $3, $4, $5, $6)
+		on conflict (kind, key) do update set value = excluded.value, p = excluded.p, by_who = excluded.by_who, at = excluded.at
+		where mind.classes.by_who <> 'operator' or excluded.by_who = 'operator'`,
+		c.Kind, c.Key, c.Value, c.P, c.By, c.At)
+	return err
+}
+
 func (p *Postgres) ReplaceOutcomes(ctx context.Context, rows []model.Outcome) error {
 	tx, err := p.db.Begin(ctx)
 	if err != nil {

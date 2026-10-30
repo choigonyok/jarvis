@@ -285,6 +285,29 @@ func messages(t *testing.T, st Store) {
 func ledger(t *testing.T, st Store) {
 	ctx := context.Background()
 	at := time.Date(2026, 10, 12, 20, 0, 0, 0, time.UTC)
+	// The classification cache: a model's answer gives way, the operator's
+	// does not.
+	if _, err := st.Class(ctx, "merchant.category", "상호"); !errors.Is(err, model.ErrNotFound) {
+		t.Fatalf("없는 분류: %v", err)
+	}
+	if err := st.PutClass(ctx, model.Class{Kind: "merchant.category", Key: "상호", Value: "식비", P: 0.9, By: model.ClassByLLM, At: at}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.PutClass(ctx, model.Class{Kind: "merchant.category", Key: "상호", Value: "교통", P: 0.7, By: model.ClassByLLM, At: at}); err != nil {
+		t.Fatal(err)
+	}
+	if c, err := st.Class(ctx, "merchant.category", "상호"); err != nil || c.Value != "교통" || c.P != 0.7 {
+		t.Fatalf("%+v %v", c, err)
+	}
+	if err := st.PutClass(ctx, model.Class{Kind: "merchant.category", Key: "상호", Value: "쇼핑", P: 1, By: model.ClassByOperator, At: at}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.PutClass(ctx, model.Class{Kind: "merchant.category", Key: "상호", Value: "식비", P: 0.9, By: model.ClassByLLM, At: at}); err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := st.Class(ctx, "merchant.category", "상호"); c.Value != "쇼핑" || c.By != model.ClassByOperator {
+		t.Fatalf("운영자의 답을 덮었습니다: %+v", c)
+	}
 	base := 0.7
 	if err := st.ReplaceOutcomes(ctx, []model.Outcome{
 		{ID: "intent:a", Source: "card", Skill: "schedule", Context: "calendar.create", Kind: "calendar.create", Rule: "이유", P: 0.8, Result: model.ResultRejected, Manual: true, At: at},
@@ -566,7 +589,7 @@ func TestPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	resetTables(t, dsn, `truncate mind_messages, mind_rooms, mind_entities, mind_changes, mind_timers, mind_intents, mind_cursors, mind_facts, mind_aliases, mind_policy_stats, mind_occurrences, mind_links, mind_thing_classes, mind_link_cache, mind_pattern_counts, mind_notes, mind_note_versions, mind_predictions, mind_expectations, mind_reply_examples, mind_llm_usage, mind_observations, mind_preferences, mind.outcomes, mind.facts restart identity cascade`)
+	resetTables(t, dsn, `truncate mind_messages, mind_rooms, mind_entities, mind_changes, mind_timers, mind_intents, mind_cursors, mind_facts, mind_aliases, mind_policy_stats, mind_occurrences, mind_links, mind_thing_classes, mind_link_cache, mind_pattern_counts, mind_notes, mind_note_versions, mind_predictions, mind_expectations, mind_reply_examples, mind_llm_usage, mind_observations, mind_preferences, mind.outcomes, mind.facts, mind.classes restart identity cascade`)
 	key := make([]byte, 32)
 	st := NewPostgres(pool, key)
 	contract(t, st)

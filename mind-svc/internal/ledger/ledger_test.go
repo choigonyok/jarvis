@@ -116,6 +116,19 @@ func TestOnlyAnsweredOnesAreScored(t *testing.T) {
 	}
 }
 
+// Approved with the answer changed went through, and was still wrong.
+func TestACorrectedAnswerCountsAgainst(t *testing.T) {
+	in := model.Intent{ID: "i", Decision: model.Ask, Status: model.Executed, DecidedBy: "user", CreatedAt: day, Result: json.RawMessage(`{"corrected":true}`)}
+	o := one(t, Inputs{Intents: []model.Intent{in}})
+	if hit, ok := o.Scored(); o.Result != model.ResultCorrected || hit || !ok {
+		t.Fatalf("%+v", o)
+	}
+	in.Result = json.RawMessage(`{"corrected":false}`)
+	if o := one(t, Inputs{Intents: []model.Intent{in}}); o.Result != model.ResultApproved {
+		t.Fatalf("%+v", o)
+	}
+}
+
 func TestDoneAndToldStandsAfterADay(t *testing.T) {
 	in := model.Intent{ID: "i", Decision: model.Notify, Status: model.Executed, CreatedAt: day}
 	if o := one(t, Inputs{Intents: []model.Intent{in}, Now: day.Add(time.Hour)}); o.Result != model.ResultOpen {

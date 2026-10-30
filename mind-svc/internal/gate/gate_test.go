@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/act"
+	"github.com/choigonyok/jarvis/mind-svc/internal/engine"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
@@ -375,5 +376,159 @@ func TestCoveredStandsAside(t *testing.T) {
 	}
 	if !closed {
 		t.Fatalf("닫혔다고 알려야 합니다: %+v", all)
+	}
+}
+
+func answers(kind, skill string, n, approved int, p float64) []model.Outcome {
+	var out []model.Outcome
+	for i := 0; i < n; i++ {
+		result := model.ResultRejected
+		if i < approved {
+			result = model.ResultApproved
+		}
+		out = append(out, model.Outcome{Source: "card", Kind: kind, Skill: skill, Context: kind, P: p, Result: result})
+	}
+	return out
+}
+
+func cardOf(t *testing.T, f *fixture) Card {
+	t.Helper()
+	f.log.Drain()
+	all, err := f.log.Read(context.Background(), 0, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c Card
+	found := false
+	for _, o := range all {
+		if o.Type == CardRaised {
+			c, found = Card{}, true
+			_ = json.Unmarshal(o.Data, &c)
+		}
+	}
+	if !found {
+		t.Fatal("카드가 없습니다")
+	}
+	return c
+}
+
+// A kind that says 90% and is rarely approved does not ring on its word.
+func TestTheRecordDecidesWhatRings(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(DefaultPolicy())
+	in := create("p1")
+	in.Skill, in.Confidence = "schedule", 0.9
+	f.g.SetBook(engine.NewBook(answers("calendar.create", "schedule", 24, 5, 0.9)))
+	got, err := f.g.Submit(ctx, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Decision != model.Ask || got.Tier != "digest" || !got.Card {
+		t.Fatalf("카드는 남고 울리지 않아야 합니다: %+v", got)
+	}
+	if c := cardOf(t, f); !c.Quiet {
+		t.Fatalf("%+v", c)
+	}
+}
+
+// A kind whose record bears it out rings as it did, and the doubt is not
+// taken off twice by the approval rate on top.
+func TestAGoodRecordStillRings(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(DefaultPolicy())
+	f.g.SetBook(engine.NewBook(answers("calendar.create", "schedule", 20, 18, 0.9)))
+	got, err := f.g.Submit(ctx, create("p1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Tier != "now" {
+		t.Fatalf("%+v", got)
+	}
+}
+
+// Turned down again and again, a kind goes quiet altogether.
+func TestAKindTurnedDownGoesSilent(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(DefaultPolicy())
+	f.g.SetBook(engine.NewBook(answers("calendar.create", "schedule", 30, 0, 0.9)))
+	silent, asked := 0, 0
+	for i := range 60 {
+		in := create("p" + string(rune('A'+i)))
+		got, err := f.g.Submit(ctx, in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch got.Decision {
+		case model.Drop:
+			silent++
+			if got.Status != model.Dropped || got.Card {
+				t.Fatalf("%+v", got)
+			}
+		case model.Ask:
+			asked++
+		}
+	}
+	if silent == 0 {
+		t.Fatal("침묵해야 합니다")
+	}
+	if asked == 0 {
+		t.Fatal("돌아올 길이 있어야 합니다: 가끔은 묻습니다")
+	}
+	if asked > silent/2 {
+		t.Fatalf("대부분 침묵해야 합니다: 물음 %d, 침묵 %d", asked, silent)
+	}
+}
+
+// What is always asked is asked whatever its record.
+func TestFixedIsNeverSilenced(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(DefaultPolicy())
+	f.g.SetBook(engine.NewBook(answers("calendar.delete", "schedule", 30, 0, 0.9)))
+	in := create("p1")
+	in.Kind = "calendar.delete"
+	payload, _ := json.Marshal(model.CalendarAction{EventID: "e1", Event: model.CalendarEvent{Title: "저녁", Date: "2026-10-17"}})
+	in.Payload = payload
+	_, _ = f.cal.Put(ctx, model.CalendarEvent{ID: "e1", Title: "저녁", Date: "2026-10-17"})
+	got, err := f.g.Submit(ctx, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Decision != model.Ask {
+		t.Fatalf("%+v", got)
+	}
+}
+
+// With no ledger the gate is what it was.
+func TestWithoutABookNothingChanges(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(DefaultPolicy())
+	got, err := f.g.Submit(ctx, create("p1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Decision != model.Ask || got.Tier != "now" {
+		t.Fatalf("%+v", got)
+	}
+}
+
+// A slot comes graded and the gate carries it out; what cannot be undone is
+// not done on a grade.
+func TestAGradeIsCarriedOut(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(DefaultPolicy())
+	in := create("p1")
+	in.Grade = string(engine.Silent)
+	if got, _ := f.g.Submit(ctx, in); got.Decision != model.Drop {
+		t.Fatalf("%+v", got)
+	}
+	in = create("p2")
+	in.Grade = string(engine.Act)
+	if got, _ := f.g.Submit(ctx, in); got.Decision != model.Notify {
+		t.Fatalf("%+v", got)
+	}
+	in = create("p3")
+	in.Grade, in.Reversible = string(engine.Act), false
+	if got, _ := f.g.Submit(ctx, in); got.Decision != model.Ask {
+		t.Fatalf("되돌릴 수 없으면 묻습니다: %+v", got)
 	}
 }

@@ -87,6 +87,20 @@ func (m *Module) Shipping(ctx context.Context) (Shipping, bool, error) {
 	return Shipping{}, false, nil
 }
 
+// CheckAddress installs what says why a saved address may be out of date ("":
+// it holds). The vault keeps the address and knows nothing of moves; mind knows
+// of moves and never sees the address.
+func (m *Module) CheckAddress(f func(ctx context.Context, saved string) string) { m.addressDoubt = f }
+
+// AddressDoubt is why a saved address should be confirmed before it is used,
+// "" when it need not be - or when nobody can say.
+func (m *Module) AddressDoubt(ctx context.Context, s Shipping) string {
+	if m.addressDoubt == nil || s.UpdatedAt == "" {
+		return ""
+	}
+	return m.addressDoubt(ctx, s.UpdatedAt)
+}
+
 // ShippingText is a profile as an order sheet is filled from it.
 func ShippingText(s Shipping) string {
 	email := s.Email
@@ -150,6 +164,8 @@ var Tools = []string{"mcp__" + ServerName + "__list_logins", "mcp__" + ServerNam
 type Module struct {
 	client *Client
 	log    *slog.Logger
+	// addressDoubt says why a saved address may be out of date (CheckAddress).
+	addressDoubt func(ctx context.Context, saved string) string
 }
 
 func New(client *Client, log *slog.Logger) *Module { return &Module{client: client, log: log} }
@@ -456,6 +472,9 @@ func (m *Module) Handler() http.Handler {
 		}
 		if !ok {
 			return text("저장된 배송지가 없습니다. save_shipping_address 로 배송지 저장 카드를 올리세요(운영자가 카드 칸에 넣습니다).", false), nil, nil
+		}
+		if why := m.AddressDoubt(ctx, s); why != "" {
+			return text("⚠ 확인 필요: "+why+". 이 주소로 주문서를 채우기 전에 save_shipping_address 로 운영자에게 확인 카드를 올리세요.\n저장된 배송지("+s.Name+"):\n"+ShippingText(s), false), nil, nil
 		}
 		return text("저장된 배송지("+s.Name+"):\n"+ShippingText(s), false), nil, nil
 	})

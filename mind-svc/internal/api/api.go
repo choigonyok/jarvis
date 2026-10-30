@@ -19,6 +19,7 @@
 //	POST /api/policy/rebuild          recount approval stats from the intents
 //	POST /api/patterns/rebuild        recount repetitions from the plans and purchases
 //	POST /api/ledger/rebuild          make the result ledger and the facts table again
+//	GET  /api/slots/{name}?saved=     whether a slot's value saved then still holds
 //	GET  /api/notes                   the notes about the operator, every status
 //	POST /api/notes/{id}              {status, text, reason} the operator on a note
 //	GET  /api/notes/{id}/versions     a note's versions, with why each
@@ -77,6 +78,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/moments"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
+	"github.com/choigonyok/jarvis/mind-svc/internal/slot"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 	"github.com/choigonyok/jarvis/mind-svc/internal/world"
 )
@@ -233,6 +235,7 @@ func (s *Server) Handler() http.Handler {
 		}
 		writeJSON(w, http.StatusOK, map[string]int{"outcomes": rows, "facts": facts})
 	}))
+	mux.HandleFunc("GET /api/slots/{name}", s.auth(false, s.slot))
 	mux.HandleFunc("GET /api/entities/{id}/changes", s.auth(false, s.changes))
 	mux.HandleFunc("POST /api/replay", s.auth(false, s.replay))
 	mux.HandleFunc("GET /api/recall", s.auth(false, s.recall))
@@ -385,6 +388,27 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) bool {
 		SameSite: http.SameSiteStrictMode, MaxAge: int(sessionTTL.Seconds())})
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 	return true
+}
+
+// slot says whether a value kept elsewhere - sealed, so never here - still
+// holds, for the one who is about to use it.
+func (s *Server) slot(w http.ResponseWriter, r *http.Request) {
+	d, ok := slot.Get(r.PathValue("name"))
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "그런 슬롯이 없습니다"})
+		return
+	}
+	saved, err := time.Parse(time.RFC3339, r.URL.Query().Get("saved"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "saved 는 RFC3339 시각이어야 합니다"})
+		return
+	}
+	got, err := s.m.SlotReading(r.Context(), d, saved)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, got)
 }
 
 // consume takes one observation from events-svc. A failure is a 500, so

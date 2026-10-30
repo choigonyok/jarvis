@@ -30,6 +30,8 @@ import (
 // cards that save one or a payment password.
 type VaultCards interface {
 	Shipping(ctx context.Context) (vault.Shipping, bool, error)
+	// AddressDoubt is why a saved address should be confirmed first, "" if not.
+	AddressDoubt(ctx context.Context, s vault.Shipping) string
 	Preview(ctx context.Context, a action.Action) (action.Card, error)
 }
 
@@ -198,6 +200,10 @@ func (m *Module) addOrderTools(server *mcp.Server, run int64, guard func() (Job,
 		}
 		if !ok {
 			return toolText("저장된 배송지가 없습니다. request_shipping_address 를 불러 배송지 저장 카드를 올리고 실행을 마치세요 - 주소를 ask 로 묻지 않습니다.", false), nil, nil
+		}
+		if why := m.vault.AddressDoubt(ctx, s); why != "" {
+			return toolText("⚠ 확인 필요: "+why+". 주문서를 채우지 말고 request_shipping_address 로 배송지 확인 카드를 올린 뒤 실행을 마치세요.\n"+
+				"저장된 배송지("+s.Name+"):\n"+vault.ShippingText(s), false), nil, nil
 		}
 		return toolText("저장된 배송지("+s.Name+") - 주문서에 이대로 넣습니다:\n"+vault.ShippingText(s)+
 			"\n결제 직전 report 의 배송지는 이 주소를 그대로 적습니다.", false), nil, nil
