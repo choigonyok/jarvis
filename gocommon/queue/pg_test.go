@@ -527,7 +527,7 @@ func TestTheGuestsRoleSeesOnlyItsOwn(t *testing.T) {
 	}
 	for _, q := range []string{
 		`select count(*) from input.records`, `select count(*) from input.deliveries`, `select count(*) from input.consumers`,
-		`select count(*) from input.outbox`, `select count(*) from events`, `select count(*) from mind_intents`,
+		`select count(*) from input.outbox`, `select count(*) from mind_intents`,
 	} {
 		if err := guest.QueryRow(ctx, q).Scan(new(int)); err == nil {
 			t.Fatalf("%s 를 읽을 수 없어야 합니다", q)

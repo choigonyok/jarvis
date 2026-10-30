@@ -7,7 +7,7 @@
 # 있고 화면에 찍지 않는다. docker-compose.yml 의 각 서비스 DATABASE_URL 이 이 값을 쓴다.
 set -euo pipefail
 HOST="${MINI_HOST:-macmini}"
-SERVICES="agent assets calendar chat context events guest input jobs memory mind notify spending status vault workout"
+SERVICES="agent assets calendar chat context guest input jobs memory mind notify spending status vault workout"
 
 ssh -o LogLevel=ERROR "$HOST" "SERVICES='$SERVICES' bash -s" <<'SH'
 set -euo pipefail
