@@ -64,8 +64,10 @@ func TestToEventOwnerAndPlace(t *testing.T) {
 	if e.Owner != event.OwnerShared || e.Source != event.SourcePartner {
 		t.Fatalf("owner/source: %+v", e)
 	}
-	if joinMemo(e.Place, e.Memo) != "📍 성수\n7시 반까지" {
-		t.Fatal("place does not round-trip through memo")
+	// Saved again, it has no separate place: the memo says it.
+	e.Date, e.Title = "2026-10-09", "데이트"
+	if err := e.Validate(); err != nil || e.Place != "" || e.Memo != "성수\n7시 반까지" {
+		t.Fatalf("다시 저장한 일정: %+v %v", e, err)
 	}
 }
 

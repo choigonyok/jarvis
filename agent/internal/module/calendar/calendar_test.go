@@ -65,7 +65,7 @@ func TestUpdatePreviewShowsBothSides(t *testing.T) {
 func TestUpdateIsAPatch(t *testing.T) {
 	m := newTestModule(t)
 	if _, err := m.Execute(context.Background(), act(t, KindCreate,
-		CreateInput{Date: "2026-09-25", Start: "19:00", Title: "합주", Place: "연습실"})); err != nil {
+		CreateInput{Date: "2026-09-25", Start: "19:00", Title: "합주", Memo: "연습실"})); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	id := m.store.Range("", "")[0].ID
@@ -76,7 +76,7 @@ func TestUpdateIsAPatch(t *testing.T) {
 	}
 
 	got, _ := m.store.Get(id)
-	if got.Start != "20:00" || got.Title != "합주" || got.Place != "연습실" {
+	if got.Start != "20:00" || got.Title != "합주" || got.Memo != "연습실" {
 		t.Fatalf("패치가 다른 필드를 지웠습니다: %+v", got)
 	}
 }

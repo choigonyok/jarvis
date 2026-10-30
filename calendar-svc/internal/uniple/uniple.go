@@ -335,8 +335,9 @@ func opt(s string) *string {
 	return &s
 }
 
-// placePrefix carries the place inside the memo. uniple has no place column,
-// and a line the app shows as text is better than a field that is dropped.
+// placePrefix is how the place was once kept in the memo's first line. Entries
+// saved since hold it as plain memo (event.Validate); these are read as ever
+// until they are next saved.
 const placePrefix = "📍 "
 
 func splitMemo(memo string) (place, rest string) {
@@ -345,16 +346,6 @@ func splitMemo(memo string) (place, rest string) {
 	}
 	first, rest, _ := strings.Cut(memo, "\n")
 	return strings.TrimPrefix(first, placePrefix), rest
-}
-
-func joinMemo(place, memo string) string {
-	if place == "" {
-		return memo
-	}
-	if memo == "" {
-		return placePrefix + place
-	}
-	return placePrefix + place + "\n" + memo
 }
 
 func hm(t *string) string {
@@ -502,7 +493,7 @@ func (c *Client) Put(ctx context.Context, e event.Event) (event.Event, error) {
 		"end_date":   opt(e.EndDate),
 		"start_time": opt(withSeconds(e.Start)),
 		"end_time":   opt(withSeconds(e.End)),
-		"memo":       opt(joinMemo(e.Place, e.Memo)),
+		"memo":       opt(e.Memo),
 	}
 
 	var saved []row

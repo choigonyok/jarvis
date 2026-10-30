@@ -26,6 +26,8 @@ type Event struct {
 	Start string `json:"start,omitempty"` // HH:MM
 	End   string `json:"end,omitempty"`   // HH:MM
 	Title string `json:"title"`
+	// Place is only ever read: what an entry saved before the place went
+	// into the memo still has. Saving folds it into Memo (Validate).
 	Place string `json:"place,omitempty"`
 	Memo  string `json:"memo,omitempty"`
 	// Source records who put it here. The UI reads it; nothing branches on it,
@@ -94,7 +96,8 @@ func (e *Event) Validate() error {
 	e.Date = strings.TrimSpace(e.Date)
 	e.Start = strings.TrimSpace(e.Start)
 	e.End = strings.TrimSpace(e.End)
-	e.Place = strings.TrimSpace(e.Place)
+	e.Memo = withPlace(strings.TrimSpace(e.Place), strings.TrimSpace(e.Memo))
+	e.Place = ""
 
 	if e.Title == "" {
 		return invalid("제목이 비어 있습니다")
@@ -140,6 +143,20 @@ func (e *Event) Validate() error {
 		e.Source = SourceHuman
 	}
 	return nil
+}
+
+// withPlace is a memo with the place in it. A calendar entry has no field of
+// its own for where: whoever writes one may still hand a place over (mind's
+// plans, an older approval card), and what is saved is the memo - the place on
+// its first line, as anyone would write it, unless the memo already says it.
+func withPlace(place, memo string) string {
+	switch {
+	case place == "" || strings.Contains(memo, place):
+		return memo
+	case memo == "":
+		return place
+	}
+	return place + "\n" + memo
 }
 
 // Conflict is an overlap the operator may want to know about.

@@ -76,8 +76,7 @@ type CreateInput struct {
 	Title   string `json:"title" jsonschema:"일정 제목. 사람이 캘린더에서 읽을 한 줄."`
 	Start   string `json:"start,omitempty" jsonschema:"시작 시각. HH:MM 24시간제. 종일 일정이면 비운다."`
 	End     string `json:"end,omitempty" jsonschema:"끝나는 시각. HH:MM 24시간제."`
-	Place   string `json:"place,omitempty" jsonschema:"장소."`
-	Memo    string `json:"memo,omitempty" jsonschema:"짧은 메모."`
+	Memo    string `json:"memo,omitempty" jsonschema:"짧은 메모. 장소는 칸이 따로 없으니 여기에 함께 적는다."`
 }
 
 type UpdateInput struct {
@@ -87,8 +86,7 @@ type UpdateInput struct {
 	Title   string `json:"title,omitempty" jsonschema:"바꿀 제목."`
 	Start   string `json:"start,omitempty" jsonschema:"바꿀 시작 시각. HH:MM."`
 	End     string `json:"end,omitempty" jsonschema:"바꿀 종료 시각. HH:MM."`
-	Place   string `json:"place,omitempty" jsonschema:"바꿀 장소."`
-	Memo    string `json:"memo,omitempty" jsonschema:"바꿀 메모."`
+	Memo    string `json:"memo,omitempty" jsonschema:"바꿀 메모. 장소도 메모에 적는다. 메모 전체가 이 내용으로 바뀌니 남길 말이 있으면 함께 적는다."`
 }
 
 type DeleteInput struct {
@@ -280,7 +278,6 @@ func eventOf(in CreateInput) Event {
 		Start:   in.Start,
 		End:     in.End,
 		Title:   in.Title,
-		Place:   in.Place,
 		Memo:    in.Memo,
 	}
 }
@@ -304,11 +301,9 @@ func merge(base Event, in UpdateInput) Event {
 	if in.End != "" {
 		out.End = in.End
 	}
-	if in.Place != "" {
-		out.Place = in.Place
-	}
 	if in.Memo != "" {
 		out.Memo = in.Memo
+		out.Place = "" // an older entry's place: the new memo says what it says
 	}
 	return out
 }
