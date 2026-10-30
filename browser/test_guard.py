@@ -3,6 +3,7 @@
     python -m unittest test_guard   (aiohttp·websockets 가 있는 곳 - 브라우저 이미지)
 """
 
+import asyncio
 import base64
 import json
 import os
@@ -271,6 +272,77 @@ class Paused(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Records(unittest.IsolatedAsyncioTestCase):
+    """가드가 혼자 내린 결정과 결제의 길은 기록으로 남고, 값은 남지 않고, 판단을 기다리게 하지 않는다."""
+
+    async def asyncSetUp(self):
+        self.g = guard.Guard(*guard.load_rules())
+
+        async def ask(*_, **__):
+            return False
+
+        self.g.ask = ask
+
+        class WS:
+            async def send(self, raw):
+                pass
+
+        self.ws = WS()
+
+    def paused(self, url, body, method="POST", rtype="XHR"):
+        return {"sessionId": "s", "params": {"requestId": "r", "resourceType": rtype, "frameId": "f",
+                                             "request": {"url": url, "method": method, "postData": body}}}
+
+    def noted(self):
+        out = []
+        while not self.g.records.empty():
+            out.append(self.g.records.get_nowait())
+        return out
+
+    async def test_a_refused_payment_is_noted_without_its_values(self):
+        await self.g.on_paused(self.ws, self.paused("https://pay.danal.co.kr/pay?token=secret-value&amount=1000", "{}"))
+        got = self.noted()
+        self.assertEqual([r["kind"] for r in got], ["guard.refused"])
+        self.assertEqual(got[0]["payload"]["why"], "blocked")
+        self.assertNotIn("secret-value", json.dumps(got))
+        self.assertIn("token", got[0]["payload"]["url"])
+
+    async def test_a_write_that_charges_nothing_is_noted(self):
+        await self.g.on_paused(self.ws, self.paused(EVENTS, json.dumps({"eventName": "changePayType", "card": "1234"})))
+        got = self.noted()
+        self.assertEqual([r["kind"] for r in got], ["guard.passed"])
+        self.assertNotIn("1234", json.dumps(got))
+
+    async def test_the_way_a_payment_goes_is_noted(self):
+        await self.g.on_paused(self.ws, self.paused("https://stdpay.inicis.com/payMain/pay?oid=abc", "", "GET", "Document"))
+        got = self.noted()
+        self.assertEqual(got[0]["kind"], "guard.flow")
+        self.assertNotIn("abc", json.dumps(got))
+
+    async def test_keys_differ_and_a_full_queue_does_not_wait(self):
+        self.g.records = asyncio.Queue(maxsize=2)
+        for i in range(5):
+            self.g.note("guard.flow", "h", n=i)  # 기다리면 여기서 멈춘다
+        got = self.noted()
+        self.assertEqual(len(got), 2)
+        self.assertNotEqual(got[0]["key"], got[1]["key"])
+
+    async def test_records_go_out_in_a_batch(self):
+        posted = []
+
+        async def post(batch):
+            posted.append(batch)
+            return True
+
+        self.g.post_records = post
+        self.g.note("guard.flow", "a")
+        self.g.note("guard.flow", "b")
+        task = asyncio.create_task(self.g.send_records())
+        await asyncio.sleep(0.01)
+        task.cancel()
+        self.assertEqual([[r["subject"] for r in b] for b in posted], [["a", "b"]])
 
 
 class JobSites(unittest.TestCase):

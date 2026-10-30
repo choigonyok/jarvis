@@ -1,0 +1,43 @@
+{"kind":"note","payload":{"text":"작업 1(장범준 LP)의 결제. 시각은 운영 job_events 의 카드와 답 그대로다. 그때의 가드 로그는 01:32 배포로 사라져 질의는 카드에서 되짚었고, 실행은 2분 보류가 있는 지금처럼 답까지 살아 있는 것으로 놓았다. 당시 카드 여섯 장 중 00:33 의 한 장은 지금 코드에서는 앞선 승인으로 지나간다."}}
+{"kind":"job.run_start","occurred_at":"2026-10-29T22:43:27+09:00","payload":{"job_id":1,"run_id":214}}
+{"kind":"guard.query","source_key":"q1","occurred_at":"2026-10-29T22:44:32+09:00","payload":{"url":"stdpay.inicis.com/payMain/pay","method":"POST","host":"stdpay.inicis.com","window":true,"amount":"113000","job":1,"background":true}}
+{"kind":"payment.requested","source_key":"requested:c1","causation_id":"q1","occurred_at":"2026-10-29T22:44:32+09:00","payload":{"card":"c1","title":"결제창에서 결제합니다","site":"pg-window","job":1}}
+{"kind":"intent.answer","occurred_at":"2026-10-29T22:45:47+09:00","payload":{"card":"c1","decision":"approved"}}
+{"kind":"guard.answer","causation_id":"q1","occurred_at":"2026-10-29T22:45:47+09:00","payload":{"decision":"approved","why":"held","card":"c1"}}
+{"kind":"job.run_end","occurred_at":"2026-10-29T22:50:49+09:00","payload":{"job_id":1,"run_id":214}}
+{"kind":"job.run_start","occurred_at":"2026-10-29T23:38:23+09:00","payload":{"job_id":1,"run_id":220}}
+{"kind":"guard.query","source_key":"q2","occurred_at":"2026-10-29T23:39:20+09:00","payload":{"url":"stdpay.inicis.com/payMain/pay","method":"POST","host":"stdpay.inicis.com","window":true,"amount":"113000","job":1,"background":true}}
+{"kind":"payment.requested","source_key":"requested:c2","causation_id":"q2","occurred_at":"2026-10-29T23:39:20+09:00","payload":{"card":"c2","title":"결제창에서 결제합니다","site":"pg-window","job":1}}
+{"kind":"guard.answer","causation_id":"q2","occurred_at":"2026-10-29T23:41:20+09:00","payload":{"decision":"rejected","why":"waiting","card":"c2"}}
+{"kind":"job.run_end","occurred_at":"2026-10-29T23:41:24+09:00","payload":{"job_id":1,"run_id":220}}
+{"kind":"intent.answer","occurred_at":"2026-10-29T23:59:27+09:00","payload":{"card":"c2","decision":"approved"}}
+{"kind":"job.run_start","occurred_at":"2026-10-30T00:32:57+09:00","payload":{"job_id":1,"run_id":224}}
+{"kind":"guard.query","source_key":"q3","occurred_at":"2026-10-30T00:33:45+09:00","payload":{"url":"stdpay.inicis.com/payMain/pay","method":"POST","host":"stdpay.inicis.com","window":true,"amount":"113000","job":1,"background":true}}
+{"kind":"guard.answer","causation_id":"q3","occurred_at":"2026-10-30T00:33:45+09:00","payload":{"decision":"approved","why":"granted"}}
+{"kind":"guard.query","source_key":"q4","occurred_at":"2026-10-30T00:37:30+09:00","payload":{"url":"new-m.pay.naver.com/pay","method":"POST","host":"new-m.pay.naver.com","fromWindow":true,"job":1,"background":true}}
+{"kind":"guard.answer","causation_id":"q4","occurred_at":"2026-10-30T00:37:30+09:00","payload":{"decision":"approved","why":"granted"}}
+{"kind":"job.run_end","occurred_at":"2026-10-30T00:39:14+09:00","payload":{"job_id":1,"run_id":224}}
+{"kind":"job.run_start","occurred_at":"2026-10-30T01:08:11+09:00","payload":{"job_id":1,"run_id":228}}
+{"kind":"guard.query","source_key":"q5","occurred_at":"2026-10-30T01:08:52+09:00","payload":{"url":"stdpay.inicis.com/payMain/pay","method":"POST","host":"stdpay.inicis.com","window":true,"amount":"113000","job":1,"background":true}}
+{"kind":"payment.requested","source_key":"requested:c3","causation_id":"q5","occurred_at":"2026-10-30T01:08:52+09:00","payload":{"card":"c3","title":"결제창에서 결제합니다","site":"pg-window","job":1}}
+{"kind":"guard.query","source_key":"q6","occurred_at":"2026-10-30T01:09:16+09:00","payload":{"url":"stdpay.inicis.com/payMain/pay","method":"POST","host":"stdpay.inicis.com","window":true,"amount":"113000","job":1,"background":true}}
+{"kind":"intent.answer","occurred_at":"2026-10-30T01:09:25+09:00","payload":{"card":"c3","decision":"approved"}}
+{"kind":"guard.answer","causation_id":"q5","occurred_at":"2026-10-30T01:09:25+09:00","payload":{"decision":"approved","why":"held","card":"c3"}}
+{"kind":"guard.answer","causation_id":"q6","occurred_at":"2026-10-30T01:09:25+09:00","payload":{"decision":"approved","why":"held","card":"c3"}}
+{"kind":"guard.query","source_key":"q7","occurred_at":"2026-10-30T01:11:05+09:00","payload":{"url":"new-m.pay.naver.com/pay","method":"POST","host":"new-m.pay.naver.com","fromWindow":true,"job":1,"background":true}}
+{"kind":"guard.answer","causation_id":"q7","occurred_at":"2026-10-30T01:11:05+09:00","payload":{"decision":"approved","why":"granted"}}
+{"kind":"job.run_end","occurred_at":"2026-10-30T01:11:39+09:00","payload":{"job_id":1,"run_id":228}}
+{"kind":"job.run_start","occurred_at":"2026-10-30T01:34:32+09:00","payload":{"job_id":1,"run_id":235}}
+{"kind":"guard.query","source_key":"q8","occurred_at":"2026-10-30T01:35:23+09:00","payload":{"url":"stdpay.inicis.com/payMain/pay","method":"POST","host":"stdpay.inicis.com","window":true,"amount":"113000","job":1,"background":true}}
+{"kind":"payment.requested","source_key":"requested:c4","causation_id":"q8","occurred_at":"2026-10-30T01:35:23+09:00","payload":{"card":"c4","title":"결제창에서 결제합니다","site":"pg-window","job":1}}
+{"kind":"intent.answer","occurred_at":"2026-10-30T01:35:49+09:00","payload":{"card":"c4","decision":"approved"}}
+{"kind":"guard.answer","causation_id":"q8","occurred_at":"2026-10-30T01:35:49+09:00","payload":{"decision":"approved","why":"held","card":"c4"}}
+{"kind":"job.run_end","occurred_at":"2026-10-30T01:42:44+09:00","payload":{"job_id":1,"run_id":235}}
+{"kind":"job.run_start","occurred_at":"2026-10-30T02:04:28+09:00","payload":{"job_id":1,"run_id":240}}
+{"kind":"guard.query","source_key":"q9","occurred_at":"2026-10-30T02:05:22+09:00","payload":{"url":"stdpay.inicis.com/payMain/pay","method":"POST","host":"stdpay.inicis.com","window":true,"amount":"113000","job":1,"background":true}}
+{"kind":"payment.requested","source_key":"requested:c5","causation_id":"q9","occurred_at":"2026-10-30T02:05:22+09:00","payload":{"card":"c5","title":"결제창에서 결제합니다","site":"pg-window","job":1}}
+{"kind":"intent.answer","occurred_at":"2026-10-30T02:05:55+09:00","payload":{"card":"c5","decision":"approved"}}
+{"kind":"guard.answer","causation_id":"q9","occurred_at":"2026-10-30T02:05:55+09:00","payload":{"decision":"approved","why":"held","card":"c5"}}
+{"kind":"guard.query","source_key":"q10","occurred_at":"2026-10-30T02:06:20+09:00","payload":{"url":"new-m.pay.naver.com/pay","method":"POST","host":"new-m.pay.naver.com","fromWindow":true,"job":1,"background":true}}
+{"kind":"guard.answer","causation_id":"q10","occurred_at":"2026-10-30T02:06:20+09:00","payload":{"decision":"approved","why":"granted"}}
+{"kind":"job.run_end","occurred_at":"2026-10-30T02:07:29+09:00","payload":{"job_id":1,"run_id":240}}

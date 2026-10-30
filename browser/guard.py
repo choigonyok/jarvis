@@ -34,6 +34,10 @@ browser-use는 건드리지 않는다. 같은 Chromium에 CDP로 따로 붙은 �
 결제 흐름은 로그에 길을 남긴다: 결제 호스트·결제창으로 가는 페이지 이동(값은 빼고 주소의
 모양만)과 그 창을 연 창. 로그는 /logs(볼륨)에도 남아 컨테이너를 다시 만들어도 사라지지 않는다 -
 10/30 01:32 배포로 01:11·01:19 실패의 로그가 지워져 원인을 다시 재현해야 했다.
+
+같은 길과, 가드가 묻지 않고 혼자 내린 결정(보낸 것·막은 것)은 기록(Record)으로도 에이전트에
+보낸다(note, 에이전트 /intercept/records). 에이전트에 묻는 요청은 에이전트가 질의와 답을 남긴다.
+재생(scripts/harness)이 읽는 것이 이 기록이고, 기록이 나가지 않아도 판단은 그대로 간다.
 """
 
 import asyncio
@@ -44,7 +48,9 @@ import logging
 import logging.handlers
 import os
 import re
+import time
 import urllib.request
+from datetime import datetime, timezone
 from fnmatch import fnmatch
 from urllib.parse import parse_qsl, urlparse
 
@@ -62,6 +68,10 @@ HOSTS_FILE = os.environ.get("PAYMENT_HOSTS_FILE", "/app/payment-hosts.json")
 # 나간다). 이것은 그 답의 제한 시간이라 2분보다 길어야 한다.
 DECISION_TIMEOUT = int(os.environ.get("JARVIS_DECISION_TIMEOUT", "150"))
 LOG_DIR = os.environ.get("JARVIS_GUARD_LOG_DIR", "/logs")
+# 기록은 판단을 기다리게 하지 않는다: 줄에 넣기만 하고, 줄이 차면 빠진다.
+RECORDS_QUEUED = 1024
+RECORDS_BATCH = 50
+RECORDS_TRIES = 3
 
 # 결제 페이지가 스스로 불러오는 이미지·폰트까지 물으면 카드가 쏟아진다.
 # 판단이 필요한 것은 문서 이동과 데이터 요청뿐이다.
@@ -289,6 +299,10 @@ class Guard:
         self.frames: dict[str, str] = {}
         self._next_id = 0
         self._send_lock = asyncio.Lock()
+        # 에이전트로 보낼 기록의 줄과, 다시 떠도 겹치지 않는 키.
+        self.records: asyncio.Queue = asyncio.Queue(maxsize=RECORDS_QUEUED)
+        self._boot = f"{int(time.time() * 1000):x}"
+        self._record_seq = 0
         # 승인은 여기 두지 않는다. 멈춘 요청은 매번 에이전트에 묻고, 에이전트가 승인 한 건(그 결제자·그
         # 사이트의 결제 한 건, 결제자가 돌아온 때부터 10분, 결제하기 한 번)으로 답한다 - 승인 창이 한
         # 곳에만 있어야 가장 느슨한 창이 실제 기준이 되는 일이 없다. 결제 한 건의 요청 여럿은 그 승인으로
@@ -397,6 +411,47 @@ class Guard:
                 return value if isinstance(value, str) else "?"
         return ""
 
+    def note(self, kind: str, subject: str, **payload) -> None:
+        """기록을 줄에 넣는다. 기다리지 않는다 - 판단이 기록 때문에 늦어지면 안 된다. 값은 넣지 않는다(url_shape)."""
+        self._record_seq += 1
+        item = {
+            "kind": kind,
+            "key": f"{self._boot}-{self._record_seq}",
+            "at": datetime.now(timezone.utc).isoformat(),
+            "subject": subject,
+            "payload": payload,
+        }
+        try:
+            self.records.put_nowait(item)
+        except asyncio.QueueFull:
+            log.warning("기록 줄이 찼습니다: %s 를 남기지 못했습니다", kind)
+
+    async def send_records(self):
+        """줄의 기록을 차례로 에이전트에 보낸다. 에이전트가 없으면 몇 번 해 보고 그 묶음은 버린다."""
+        while True:
+            batch = [await self.records.get()]
+            while len(batch) < RECORDS_BATCH and not self.records.empty():
+                batch.append(self.records.get_nowait())
+            await self.post_records(batch)
+
+    async def post_records(self, batch: list[dict]) -> bool:
+        for attempt in range(RECORDS_TRIES):
+            try:
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as s:
+                    async with s.post(
+                        AGENT_URL + "/records",
+                        json={"records": batch},
+                        headers={"Authorization": f"Bearer {TOKEN}"},
+                    ) as r:
+                        if r.status < 300:
+                            return True
+                        log.warning("기록을 보내지 못했습니다: 응답 %s", r.status)
+            except Exception as e:
+                log.warning("기록을 보내지 못했습니다: %s", e)
+            if attempt + 1 < RECORDS_TRIES:
+                await asyncio.sleep(2)
+        return False
+
     async def send(self, ws, method, params=None, session=None):
         async with self._send_lock:
             self._next_id += 1
@@ -485,10 +540,13 @@ class Guard:
                     self.frames.pop(next(iter(self.frames)))
             if self.is_window(url) or self.matches(host):
                 # 결제 흐름의 길: 값은 빼고 모양만, 어느 탭에서인지와 함께.
-                log.info("결제 흐름 이동: %s %s (탭 %s)", method, url_shape(url)[:160], (self.pages.get(session or "") or "?")[:6])
+                tab = (self.pages.get(session or "") or "?")[:6]
+                log.info("결제 흐름 이동: %s %s (탭 %s)", method, url_shape(url)[:160], tab)
+                self.note("guard.flow", host, method=method, url=url_shape(url)[:300], tab=tab)
 
         if rtype == "Document" and self.leaves_job(session, p.get("frameId"), url):
             log.warning("작업의 사이트 밖으로 가는 이동을 막았습니다: %s", url[:120])
+            self.note("guard.refused", host, why="site", method=method, url=url_shape(url)[:300])
             await self.refuse(ws, rid, session, rtype, "site", host)
             return
 
@@ -501,6 +559,7 @@ class Guard:
         # 막는 쪽을 먼저 본다. 정해진 결제 수단이 아닌 길은 물어볼 것이 없다.
         if self.blocked(url, method):
             log.warning("허용하지 않은 결제를 막았습니다: %s %s", method, url[:120])
+            self.note("guard.refused", host, why="blocked", method=method, url=url_shape(url)[:300])
             await self.refuse(ws, rid, session, rtype, "blocked", host)
             return
 
@@ -512,6 +571,7 @@ class Guard:
         # 결제 호스트로 가지만 돈이 나가지 않는 쓰기(주문서의 결제수단 선택, 통계, 봇 감지 센서).
         body = body_of(req)
         if self.passes(url, body):
+            self.note("guard.passed", host, method=method, url=url_shape(url)[:300], body=shape_of(body))
             await go()
             return
 
@@ -572,6 +632,7 @@ class Guard:
                             opener_url = self.frames.get(t.get("openerFrameId") or t["openerId"], "")
                             if self.is_window(opener_url) or self.matches(urlparse(opener_url).netloc):
                                 log.info("결제 흐름의 새 창: 연 창 %s (탭 %s)", url_shape(opener_url)[:120], tid[:6])
+                                self.note("guard.flow", urlparse(opener_url).netloc, opener=url_shape(opener_url)[:300], tab=tid[:6])
                     if t.get("type") in ("page", "iframe"):
                         # 패턴에 걸리는 요청만 멈춘다. guard가 죽어도 일반
                         # 탐색은 영향을 받지 않는다는 뜻이다.
@@ -608,6 +669,8 @@ def setup_logging():
 async def main():
     setup_logging()
     guard = Guard(*load_rules())
+    # 참조를 쥐고 있어야 태스크가 사라지지 않는다.
+    sender = asyncio.create_task(guard.send_records())
     while True:
         port = find_cdp_port()
         if port is None:

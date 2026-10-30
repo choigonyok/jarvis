@@ -46,7 +46,9 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/thread"
 	"github.com/choigonyok/jarvis/agent/internal/uploads"
 	"github.com/choigonyok/jarvis/agent/internal/usage"
+	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/gocommon/notify"
+	"github.com/choigonyok/jarvis/gocommon/record"
 	"github.com/choigonyok/jarvis/gocommon/site"
 )
 
@@ -653,6 +655,17 @@ func main() {
 		runner.OnFree(jobsModule.Wake)
 	}
 
+	// What the payment path did, as records a replay can read. The guest's
+	// agent has no database and no browser, so it writes none.
+	loops := health.NewLoops()
+	records := record.New(cfg.DatabaseURL, loops, log)
+	recordsCtx, stopRecords := context.WithCancel(context.Background())
+	recordsDone := make(chan struct{})
+	go func() {
+		defer close(recordsDone)
+		records.Run(recordsCtx)
+	}()
+
 	srv := &http.Server{
 		Addr: cfg.Addr,
 		Handler: httpapi.New(httpapi.Deps{
@@ -683,6 +696,8 @@ func main() {
 			SavedAddress:    savedAddress(vaultModule),
 			WakeJobs:        wakeJobs,
 			Checklists:      checklistConsole(checklistModule),
+			Records:         records,
+			Loops:           loops,
 			Log:             log,
 		}).Handler(),
 		// No WriteTimeout: /events streams and /mcp blocks on a human.
@@ -721,6 +736,11 @@ func main() {
 	defer cancel()
 	_ = srv.Shutdown(ctx)
 	_ = modules.Stop(ctx)
+	stopRecords()
+	select {
+	case <-recordsDone:
+	case <-ctx.Done():
+	}
 	log.Info("종료했습니다")
 }
 

@@ -2,6 +2,7 @@ package eval
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"testing"
 	"time"
@@ -36,6 +37,16 @@ func TestScenariosScripted(t *testing.T) {
 		})
 	}
 	t.Log(Summary(results))
+	// The harness reads the score here and holds it to its baseline.
+	if path := os.Getenv("JARVIS_EVAL_JSON"); path != "" {
+		out, err := json.MarshalIndent(Scores(results), "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, append(out, '\n'), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 // The same scenarios with the real model, when a key is given:

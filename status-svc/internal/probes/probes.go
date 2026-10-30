@@ -274,6 +274,9 @@ func All(cfg Config) []check.Probe {
 			Every: 30 * time.Second,
 			Run:   e.httpOK(cfg.AgentGuestURL + "/healthz"),
 		},
+		// Its loop writes the payment path as records; the process itself is
+		// the "agent" probe above.
+		e.service("svc.agent", "에이전트의 기록", cfg.AgentURL, []string{"agent", "postgres"}, "records"),
 		e.service("svc.events", "이벤트 로그", cfg.EventsURL, []string{"postgres"}, "drain"),
 		e.delivery("notify", "이벤트 → 알림", []string{"svc.notify"}),
 		e.delivery("agent", "이벤트 → 에이전트", []string{"agent"}),

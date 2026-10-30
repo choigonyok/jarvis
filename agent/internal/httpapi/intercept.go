@@ -117,6 +117,47 @@ func (s *Server) postIntercept(w http.ResponseWriter, r *http.Request) {
 	p.JobID, p.JobTitle, p.JobSummary = 0, "", ""
 	host := strings.ToLower(p.Host)
 
+	background := false
+	if bg, ok := s.runner.(interface{ InBackground() bool }); ok {
+		background = bg.InBackground()
+	}
+	isJob := false
+	if background && s.jobs != nil {
+		p.JobID, p.JobTitle, p.JobSummary, isJob = s.jobs.RunningJob()
+	}
+
+	asked := s.recordQuery(p, background)
+	v := s.judgePayment(r.Context(), p, host, background, isJob, asked)
+	s.recordAnswer(asked, p, v)
+
+	// The guard reads decision and pending; why and card are what a replay
+	// compares with what was recorded.
+	out := map[string]string{"decision": string(v.decision), "why": v.why}
+	if v.pending != "" {
+		out["pending"] = v.pending
+	}
+	if v.card != "" {
+		out["card"] = v.card
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// verdict is what a stopped request came to.
+type verdict struct {
+	decision proposal.Decision
+	// pending is the card a refused request waits on, what the guard tells
+	// the page; empty when nothing waits (a refusal with no card).
+	pending string
+	// card is the card the request went through or stopped at, however it
+	// came out; why is how the verdict was reached, in a word a replay can
+	// compare: login | background | granted | held | waiting.
+	card string
+	why  string
+}
+
+// judgePayment decides one stopped request. asked is the record of the
+// question, what the card it raises came from.
+func (s *Server) judgePayment(ctx context.Context, p Payment, host string, background, isJob bool, asked string) verdict {
 	// A background task has no one behind it. Asking a person here would put
 	// a card in front of someone who did not start anything - which is what a
 	// background order lookup on 네이버페이 did (2026-10-07). So it is decided
@@ -130,37 +171,28 @@ func (s *Server) postIntercept(w http.ResponseWriter, r *http.Request) {
 	// order sheet fail with "주문중 오류" four times and never asked anyone
 	// (job 16, 2026-10-17). So a job's payment raises a card bound to that
 	// job, and the job waits on it.
-	if bg, ok := s.runner.(interface{ InBackground() bool }); ok && bg.InBackground() {
+	if background {
 		if s.backgroundLogin[host] {
 			s.log.Info("백그라운드 작업의 로그인 요청을 허용했습니다", "host", p.Host, "method", p.Method)
-			writeJSON(w, http.StatusOK, map[string]string{"decision": string(proposal.Approve)})
-			return
-		}
-		isJob := false
-		if s.jobs != nil {
-			p.JobID, p.JobTitle, p.JobSummary, isJob = s.jobs.RunningJob()
+			return verdict{decision: proposal.Approve, why: "login"}
 		}
 		if !isJob {
 			s.log.Warn("백그라운드 작업 중 결제 도메인 요청을 묻지 않고 거부했습니다", "host", p.Host, "url", clampURL(p.URL))
-			writeJSON(w, http.StatusOK, map[string]string{"decision": string(proposal.Reject)})
-			return
+			return verdict{decision: proposal.Reject, why: "background"}
 		}
 		if s.payments.allow(p.grantSite(), p.JobID, p.Event, p.Amount) || s.insideWindow(p) {
 			s.log.Info("작업에 승인된 결제 흐름의 요청을 통과시켰습니다", "job", p.JobID, "host", host, "method", p.Method, "event", p.Event, "window", p.Window)
-			writeJSON(w, http.StatusOK, map[string]string{"decision": string(proposal.Approve)})
-			return
+			return verdict{decision: proposal.Approve, why: "granted"}
 		}
-		card := s.raisePayment(r.Context(), p)
+		card := s.raisePayment(ctx, p, asked)
 		until := time.Now().Add(s.holdDur)
 		s.jobs.PaymentRaised(p.JobID, card, until)
 		s.log.Info("작업의 결제 요청을 멈추고 카드를 올렸습니다", "job", p.JobID, "card", card, "host", host, "event", p.Event)
-		if s.holdFor(r.Context(), card, until) && s.payments.allow(p.grantSite(), p.JobID, p.Event, p.Amount) {
+		if s.holdFor(ctx, card, until) && s.payments.allow(p.grantSite(), p.JobID, p.Event, p.Amount) {
 			s.log.Info("기다리는 동안 승인돼 멈춘 결제 요청을 그대로 보냈습니다", "job", p.JobID, "card", card, "host", host)
-			writeJSON(w, http.StatusOK, map[string]string{"decision": string(proposal.Approve)})
-			return
+			return verdict{decision: proposal.Approve, card: card, why: "held"}
 		}
-		writeJSON(w, http.StatusOK, map[string]string{"decision": string(proposal.Reject), "pending": card})
-		return
+		return verdict{decision: proposal.Reject, pending: card, card: card, why: "waiting"}
 	}
 
 	// The second half of an approval: the operator said yes, and the browser
@@ -168,16 +200,14 @@ func (s *Server) postIntercept(w http.ResponseWriter, r *http.Request) {
 	// cross several of its hosts (checkout, then pay.coupang.com for the PIN).
 	if s.payments.allow(p.grantSite(), 0, p.Event, p.Amount) || s.insideWindow(p) {
 		s.log.Info("승인된 결제 흐름의 요청을 통과시켰습니다", "host", host, "method", p.Method, "window", p.Window)
-		writeJSON(w, http.StatusOK, map[string]string{"decision": string(proposal.Approve)})
-		return
+		return verdict{decision: proposal.Approve, why: "granted"}
 	}
-	card := s.raisePayment(r.Context(), p)
-	if s.holdFor(r.Context(), card, time.Now().Add(s.holdDur)) && s.payments.allow(p.grantSite(), 0, p.Event, p.Amount) {
+	card := s.raisePayment(ctx, p, asked)
+	if s.holdFor(ctx, card, time.Now().Add(s.holdDur)) && s.payments.allow(p.grantSite(), 0, p.Event, p.Amount) {
 		s.log.Info("기다리는 동안 승인돼 멈춘 결제 요청을 그대로 보냈습니다", "card", card, "host", host)
-		writeJSON(w, http.StatusOK, map[string]string{"decision": string(proposal.Approve)})
-		return
+		return verdict{decision: proposal.Approve, card: card, why: "held"}
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"decision": string(proposal.Reject), "pending": card})
+	return verdict{decision: proposal.Reject, pending: card, card: card, why: "waiting"}
 }
 
 // insideWindow is a 네이버페이 request of a payer whose approved payment
@@ -272,7 +302,7 @@ func (s *Server) holdFor(ctx context.Context, card string, until time.Time) bool
 // job) - a flow sends several requests, and the page retrying is the same
 // question - or a new one. Another payer's card is not this one's: its
 // decision goes to whoever raised it.
-func (s *Server) raisePayment(ctx context.Context, p Payment) string {
+func (s *Server) raisePayment(ctx context.Context, p Payment, asked string) string {
 	if waiting, ok := s.proposals.FindPendingWhere(func(q proposal.Proposal) bool {
 		w := paymentOf(q.Action.Input)
 		return q.Origin == proposal.OriginIntercept && w.grantSite() == p.grantSite() && w.JobID == p.JobID
@@ -293,6 +323,7 @@ func (s *Server) raisePayment(ctx context.Context, p Payment) string {
 		Action: action.Action{Kind: "browser.payment", Input: raw},
 		Card:   paymentCard(p, addr),
 	})
+	s.recordRaised(asked, p, opened)
 	// In the conversation either way - a job's too, which used to float below
 	// the thread only while it waited and was gone the moment it was
 	// answered (2026-10-21 22:03). The card names the job it is for.

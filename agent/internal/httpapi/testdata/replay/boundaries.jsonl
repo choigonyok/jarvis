@@ -1,0 +1,27 @@
+{"kind":"note","payload":{"text":"승인 하나는 결제 한 건이다: 결제하기 한 번, 금액 하나, 결제자 하나, 그 창의 팝업까지. 경계마다 새 카드나 거절이 나와야 한다."}}
+{"kind":"guard.query","source_key":"b1","occurred_at":"2026-10-30T10:00:00+09:00","payload":{"url":"checkout.coupang.com/api/node/checkout/events","method":"POST","host":"checkout.coupang.com","event":"order"}}
+{"kind":"payment.requested","source_key":"requested:k1","causation_id":"b1","occurred_at":"2026-10-30T10:00:00+09:00","payload":{"card":"k1","title":"쿠팡에서 쿠페이로 결제합니다","site":"coupang.com"}}
+{"kind":"intent.answer","occurred_at":"2026-10-30T10:00:30+09:00","payload":{"card":"k1","decision":"approved"}}
+{"kind":"guard.answer","causation_id":"b1","occurred_at":"2026-10-30T10:00:30+09:00","payload":{"decision":"approved","why":"held","card":"k1"}}
+{"kind":"guard.query","source_key":"b2","occurred_at":"2026-10-30T10:00:40+09:00","payload":{"url":"rocketpay.coupang.com/rocketpay/pay/authentication","method":"POST","host":"rocketpay.coupang.com"}}
+{"kind":"guard.answer","causation_id":"b2","occurred_at":"2026-10-30T10:00:40+09:00","payload":{"decision":"approved","why":"granted"}}
+{"kind":"guard.query","source_key":"b3","occurred_at":"2026-10-30T10:01:00+09:00","payload":{"url":"checkout.coupang.com/api/node/checkout/events","method":"POST","host":"checkout.coupang.com","event":"order"}}
+{"kind":"payment.requested","source_key":"requested:k2","causation_id":"b3","occurred_at":"2026-10-30T10:01:00+09:00","payload":{"card":"k2","title":"쿠팡에서 쿠페이로 결제합니다","site":"coupang.com"}}
+{"kind":"guard.answer","causation_id":"b3","occurred_at":"2026-10-30T10:03:00+09:00","payload":{"decision":"rejected","why":"waiting","card":"k2"}}
+{"kind":"intent.answer","occurred_at":"2026-10-30T10:03:30+09:00","payload":{"card":"k2","decision":"rejected"}}
+{"kind":"job.run_start","occurred_at":"2026-10-30T11:00:00+09:00","payload":{"job_id":7,"run_id":70}}
+{"kind":"guard.query","source_key":"b4","occurred_at":"2026-10-30T11:00:10+09:00","payload":{"url":"stdpay.inicis.com/payMain/pay","method":"POST","host":"stdpay.inicis.com","window":true,"amount":"113000","job":7,"background":true}}
+{"kind":"payment.requested","source_key":"requested:k3","causation_id":"b4","occurred_at":"2026-10-30T11:00:10+09:00","payload":{"card":"k3","title":"결제창에서 결제합니다","site":"pg-window","job":7}}
+{"kind":"intent.answer","occurred_at":"2026-10-30T11:00:40+09:00","payload":{"card":"k3","decision":"approved"}}
+{"kind":"guard.answer","causation_id":"b4","occurred_at":"2026-10-30T11:00:40+09:00","payload":{"decision":"approved","why":"held","card":"k3"}}
+{"kind":"guard.query","source_key":"b5","occurred_at":"2026-10-30T11:01:00+09:00","payload":{"url":"pay.naver.com/orderSheet","method":"POST","host":"pay.naver.com","job":7,"background":true}}
+{"kind":"payment.requested","source_key":"requested:k4","causation_id":"b5","occurred_at":"2026-10-30T11:01:00+09:00","payload":{"card":"k4","title":"결제를 진행합니다","site":"naver.com","job":7}}
+{"kind":"guard.answer","causation_id":"b5","occurred_at":"2026-10-30T11:03:00+09:00","payload":{"decision":"rejected","why":"waiting","card":"k4"}}
+{"kind":"guard.query","source_key":"b6","occurred_at":"2026-10-30T11:03:10+09:00","payload":{"url":"stdpay.inicis.com/payMain/pay","method":"POST","host":"stdpay.inicis.com","window":true,"amount":"54000","job":7,"background":true}}
+{"kind":"payment.requested","source_key":"requested:k5","causation_id":"b6","occurred_at":"2026-10-30T11:03:10+09:00","payload":{"card":"k5","title":"결제창에서 결제합니다","site":"pg-window","job":7}}
+{"kind":"guard.answer","causation_id":"b6","occurred_at":"2026-10-30T11:05:10+09:00","payload":{"decision":"rejected","why":"waiting","card":"k5"}}
+{"kind":"job.run_end","occurred_at":"2026-10-30T11:06:00+09:00","payload":{"job_id":7,"run_id":70}}
+{"kind":"guard.query","source_key":"b7","occurred_at":"2026-10-30T12:00:00+09:00","payload":{"url":"pay.naver.com/orderSheet","method":"POST","host":"pay.naver.com","background":true}}
+{"kind":"guard.answer","causation_id":"b7","occurred_at":"2026-10-30T12:00:00+09:00","payload":{"decision":"rejected","why":"background"}}
+{"kind":"guard.query","source_key":"b8","occurred_at":"2026-10-30T12:00:05+09:00","payload":{"url":"nid.naver.com/nidlogin.login","method":"POST","host":"nid.naver.com","background":true}}
+{"kind":"guard.answer","causation_id":"b8","occurred_at":"2026-10-30T12:00:05+09:00","payload":{"decision":"approved","why":"login"}}

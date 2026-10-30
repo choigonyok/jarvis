@@ -17,13 +17,16 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"regexp"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -33,6 +36,7 @@ import (
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/act"
 	"github.com/choigonyok/jarvis/mind-svc/internal/api"
+	"github.com/choigonyok/jarvis/mind-svc/internal/backtest"
 	"github.com/choigonyok/jarvis/mind-svc/internal/checklist"
 	"github.com/choigonyok/jarvis/mind-svc/internal/clock"
 	"github.com/choigonyok/jarvis/mind-svc/internal/eval"
@@ -62,6 +66,9 @@ func main() {
 
 	if len(os.Args) > 1 && os.Args[1] == "eval" {
 		os.Exit(runEval(ctx, client, loc))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "backtest" {
+		os.Exit(runBacktest(os.Args[2:]))
 	}
 
 	cfg := interpret.Config{
@@ -344,6 +351,42 @@ func main() {
 
 // seoul is home for the weather when nothing says otherwise: City Hall.
 const seoul = "37.5665,126.9780,서울"
+
+// runBacktest scores exported judgements (scripts/harness cases): one file,
+// or standard input. --at tries thresholds on them.
+func runBacktest(args []string) int {
+	fs := flag.NewFlagSet("backtest", flag.ContinueOnError)
+	at := fs.String("at", "", "시험할 문턱들, 쉼표로: 0.6,0.7,0.85")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	in := io.Reader(os.Stdin)
+	if path := fs.Arg(0); path != "" {
+		f, err := os.Open(path)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 2
+		}
+		defer f.Close()
+		in = f
+	}
+	cases, err := backtest.Read(in)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
+	fmt.Print(backtest.Report(cases))
+	for _, s := range strings.Split(*at, ",") {
+		t, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+		if err != nil {
+			continue
+		}
+		c := backtest.At(cases, t)
+		fmt.Printf("\n문턱 %.2f: %d건 진행, 그중 %d건 맞음(%.0f%%), 놓친 맞음 %d건", t, c.Kept, c.Hits, 100*c.Precision(), c.Missed)
+	}
+	fmt.Println()
+	return 0
+}
 
 // runEval reads every scenario with the real model and reports.
 func runEval(ctx context.Context, client llm.Client, loc *time.Location) int {

@@ -1,5 +1,5 @@
 {
-  "name": "S11 침묵: 거절한 주제는 다시 묻지 않고, 하루 카드 한도를 넘지 않는다",
+  "name": "S11 침묵: 거절한 주제는 다시 묻지 않고, 하루 한도가 차면 카드는 울리지 않는다",
   "room": "gate",
   "roomName": "관문",
   "turns": [
@@ -24,7 +24,7 @@
     { "submit": {"kind": "note", "topic": "t3", "context": "c3", "title": "제안3", "confidence": 1, "payload": {}}, "expect": {"cardCount": 1} },
     { "submit": {"kind": "note", "topic": "t4", "context": "c4", "title": "제안4", "confidence": 1, "payload": {}}, "expect": {"cardCount": 1} },
     { "submit": {"kind": "note", "topic": "t5", "context": "c5", "title": "제안5", "confidence": 1, "payload": {}}, "expect": {"cardCount": 1} },
-    { "submit": {"kind": "note", "topic": "t6", "context": "c6", "title": "제안6", "confidence": 1, "payload": {}}, "expect": {"noCards": true} },
-    { "submit": {"kind": "note", "topic": "t7", "context": "c7", "title": "확신 낮은 제안", "confidence": 0.5, "payload": {}}, "expect": {"noCards": true} }
+    { "submit": {"kind": "note", "topic": "t6", "context": "c6", "title": "제안6", "confidence": 1, "payload": {}}, "expect": {"quiet": ["제안6"]} },
+    { "submit": {"kind": "note", "topic": "t7", "context": "c7", "title": "확신 낮은 제안", "confidence": 0.5, "payload": {}}, "expect": {"quiet": ["확신 낮은 제안"]} }
   ]
 }

@@ -138,6 +138,11 @@ type Expect struct {
 	Cards     []string `json:"cards,omitempty"`
 	CardCount *int     `json:"cardCount,omitempty"`
 	NoCards   bool     `json:"noCards,omitempty"`
+	// Quiet: cards raised this turn that do not ring (the gate's quietCard:
+	// the card stays in the conversation, its alert waits for the evening),
+	// each matched by a word in its title. With Quiet given, no card of the
+	// turn may ring.
+	Quiet []string `json:"quiet,omitempty"`
 	// Dropped: kinds the gate dropped this turn (the ledger kept quiet).
 	Dropped []string `json:"dropped,omitempty"`
 	// Now: the situation after this turn.
@@ -296,29 +301,67 @@ type Result struct {
 
 func (r Result) Pass() bool { return len(r.Failures) == 0 }
 
-// Summary is the runs' metrics in a line: predictions (Brier), the
-// approval rate of the cards answered, and the interruptions a day.
-func Summary(rs []Result) string {
-	var scored, cards, days, busiest, ok, no int
+// Score is the runs' metrics, as the harness compares them against its
+// baseline (scripts/harness).
+type Score struct {
+	Scenarios int     `json:"scenarios"`
+	Failed    int     `json:"failed"`
+	Scored    int     `json:"scored"`
+	Brier     float64 `json:"brier"`
+	// Answered is the cards the operator answered, Approval the share approved.
+	Answered int     `json:"answered"`
+	Approval float64 `json:"approval"`
+	// Cards is every card raised, CardsADay the average on a day that had one
+	// and BusiestDay the most on one day.
+	Cards      int     `json:"cards"`
+	CardsADay  float64 `json:"cardsADay"`
+	BusiestDay int     `json:"busiestDay"`
+}
+
+// Scores adds the runs up.
+func Scores(rs []Result) Score {
+	var sc Score
+	var days, ok, no int
 	brier := 0.0
 	for _, r := range rs {
-		scored += r.Scored
+		sc.Scenarios++
+		if !r.Pass() {
+			sc.Failed++
+		}
+		sc.Scored += r.Scored
 		brier += r.Brier * float64(r.Scored)
-		cards += r.Cards
+		sc.Cards += r.Cards
 		days += r.CardDays
-		busiest = max(busiest, r.BusiestDay)
+		sc.BusiestDay = max(sc.BusiestDay, r.BusiestDay)
 		ok += r.Approved
 		no += r.Rejected
 	}
-	out := fmt.Sprintf("시나리오 %d개", len(rs))
-	if scored > 0 {
-		out += fmt.Sprintf(" · 예측 %d개 Brier %.3f", scored, brier/float64(scored))
+	if sc.Scored > 0 {
+		sc.Brier = brier / float64(sc.Scored)
 	}
-	if ok+no > 0 {
-		out += fmt.Sprintf(" · 답한 카드 %d장 승인율 %.0f%%", ok+no, 100*float64(ok)/float64(ok+no))
+	sc.Answered = ok + no
+	if sc.Answered > 0 {
+		sc.Approval = float64(ok) / float64(sc.Answered)
 	}
 	if days > 0 {
-		out += fmt.Sprintf(" · 카드 %d장, 카드가 나온 날 하루 평균 %.1f장(최대 %d장)", cards, float64(cards)/float64(days), busiest)
+		sc.CardsADay = float64(sc.Cards) / float64(days)
+	}
+	return sc
+}
+
+// Summary is the runs' metrics in a line: predictions (Brier), the
+// approval rate of the cards answered, and the interruptions a day.
+func Summary(rs []Result) string {
+	sc := Scores(rs)
+	out := fmt.Sprintf("시나리오 %d개", sc.Scenarios)
+	if sc.Scored > 0 {
+		out += fmt.Sprintf(" · 예측 %d개 Brier %.3f", sc.Scored, sc.Brier)
+	}
+	if sc.Answered > 0 {
+		out += fmt.Sprintf(" · 답한 카드 %d장 승인율 %.0f%%", sc.Answered, 100*sc.Approval)
+	}
+	if sc.CardsADay > 0 {
+		out += fmt.Sprintf(" · 카드 %d장, 카드가 나온 날 하루 평균 %.1f장(최대 %d장)", sc.Cards, sc.CardsADay, sc.BusiestDay)
 	}
 	return out
 }
@@ -954,6 +997,18 @@ func checkCards(ctx context.Context, st store.Store, ex Expect, seen map[string]
 	for _, w := range ex.Cards {
 		if !slices.ContainsFunc(titles, func(t string) bool { return strings.Contains(t, w) }) {
 			out = append(out, fmt.Sprintf("%q 카드가 나와야 함 · 나온 것: %v", w, titles))
+		}
+	}
+	for _, w := range ex.Quiet {
+		if !slices.ContainsFunc(cards, func(c gate.Card) bool { return c.Quiet && strings.Contains(c.Title, w) }) {
+			out = append(out, fmt.Sprintf("%q 카드가 조용히 나와야 함 · 나온 것: %v", w, titles))
+		}
+	}
+	if len(ex.Quiet) > 0 {
+		for _, c := range cards {
+			if !c.Quiet {
+				out = append(out, fmt.Sprintf("%q 카드가 울렸습니다", c.Title))
+			}
 		}
 	}
 	if len(ex.Dropped) > 0 {

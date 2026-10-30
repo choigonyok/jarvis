@@ -25,6 +25,8 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/thread"
 	"github.com/choigonyok/jarvis/agent/internal/uploads"
 	"github.com/choigonyok/jarvis/agent/internal/usage"
+	"github.com/choigonyok/jarvis/gocommon/health"
+	"github.com/choigonyok/jarvis/gocommon/record"
 )
 
 type Server struct {
@@ -73,6 +75,10 @@ type Server struct {
 	wakeJobs func()
 	// checklists is the lists the conversation's cards show; nil: none.
 	checklists Checklists
+	// records writes what the payment path did as Records; nil writes none.
+	records *record.Writer
+	// loops is this agent's background loops, for GET /health.
+	loops *health.Loops
 	// uploads holds photos attached in conversation; nil turns them off.
 	uploads   *uploads.Store
 	modules   *module.Registry
@@ -156,7 +162,12 @@ type Deps struct {
 	// Checklists, when set, is the lists the conversation's cards show: read
 	// with a page of the thread, ticked on a card.
 	Checklists Checklists
-	Log        *slog.Logger
+	// Records, when set, writes the guard's questions and answers, payment
+	// cards and how every card was answered, for a replay to read.
+	Records *record.Writer
+	// Loops is what GET /health reports.
+	Loops *health.Loops
+	Log   *slog.Logger
 }
 
 // Checklists is the lists behind the conversation's checklist cards (mind
@@ -206,9 +217,12 @@ func New(d Deps) *Server {
 		holdDur:         paymentHold,
 		wakeJobs:        d.WakeJobs,
 		checklists:      d.Checklists,
+		records:         d.Records,
+		loops:           d.Loops,
 	}
 	if d.Proposals != nil {
 		d.Proposals.OnDecide(s.resolvePayment)
+		d.Proposals.OnDecide(s.recordDecision)
 	}
 	return s
 }
@@ -217,6 +231,11 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	})
+	// /healthz is the process; /health is the shape the status tab reads,
+	// with what the loops of this agent are doing.
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+		health.Write(w, http.StatusOK, health.Report{Loops: s.loops.List()})
 	})
 
 	// Everything the console drives. The bearer check is on each of them
@@ -243,6 +262,7 @@ func (s *Server) Handler() http.Handler {
 
 	// The browser container dials this when a page tries to pay.
 	mux.HandleFunc("POST /intercept", s.postIntercept)
+	mux.HandleFunc("POST /intercept/records", s.postGuardRecords)
 
 	mux.HandleFunc("GET /calendar", s.guard(s.getCalendar))
 	mux.HandleFunc("POST /calendar", s.guard(s.postCalendar))

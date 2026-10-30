@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+# 바꾸기 전에 지금을 재고, 바꾼 뒤에 나빠지지 않았는지 본다. to-be 구조 전환의 모든 단계가 이 문을 지난다.
+#
+#   scripts/harness                평가 시나리오(모델 없이)·결제 재생·가드 규칙을 돌리고 기준선과 대조
+#   scripts/harness baseline       지금 평가 점수를 기준선으로 적는다 - 일부러 바뀐 때만, 고친 이유와 함께 커밋
+#   scripts/harness export [시작 [끝]]  맥미니의 기록을 읽기 전용으로 내려받는다(표준 출력). 글자(text)는 뺀다
+#   scripts/harness replay 파일     내려받은 기록을 지금 코드로 재생해 같은 답이 나오는지 본다
+#   scripts/harness cases           맥미니의 판단과 결과를 내려받는다(표준 출력)
+#   scripts/harness backtest 파일 [--at 0.6,0.7]   확신과 실제를 비교한다
+#
+# 내려받은 파일에는 일정 제목·가맹점 같은 사적인 것이 있을 수 있다. 저장소 안에 두지 말 것.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+HOST="${MINI_HOST:-macmini}"
+DIR="${MINI_DIR:-jarvis}"
+BASELINE="$ROOT/mind-svc/internal/eval/baseline.json"
+REMOTE_PATH='export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.orbstack/bin:/Applications/Docker.app/Contents/Resources/bin:$PATH"'
+
+# 읽기 전용 세션으로 질의 하나. 쓰기를 시도하면 Postgres 가 거절한다.
+readonly_sql() {
+  ssh -o LogLevel=ERROR "$HOST" "$REMOTE_PATH; cd ~/$DIR && docker compose exec -T postgres psql -U jarvis -d jarvis -X -q -At -v ON_ERROR_STOP=1 -c 'set default_transaction_read_only = on' -f -" <<<"$1"
+}
+
+score() {
+  local out="$1"
+  (cd "$ROOT/mind-svc" && JARVIS_EVAL_JSON="$out" go test -count=1 -run TestScenariosScripted ./internal/eval) >/dev/null
+}
+
+compare() {
+  python3 - "$1" "$BASELINE" <<'PY'
+import json, sys
+now, base = (json.load(open(p)) for p in sys.argv[1:3])
+rules = [
+    ("failed", "실패한 시나리오", lambda n, b: n == 0),
+    ("scenarios", "시나리오 수", lambda n, b: n >= b),
+    ("brier", "예측 Brier", lambda n, b: n <= b + 0.005),
+    ("approval", "답한 카드의 승인율", lambda n, b: n >= b - 0.01),
+    ("cardsADay", "카드가 나온 날 하루 평균", lambda n, b: n <= b + 0.05),
+    ("busiestDay", "하루 최대 카드", lambda n, b: n <= b),
+]
+bad = False
+for key, label, ok in rules:
+    good = ok(now[key], base[key])
+    bad = bad or not good
+    print(f"  {'통과' if good else '나빠짐'}  {label}: {now[key]:.3f} (기준 {base[key]:.3f})" if isinstance(now[key], float) else f"  {'통과' if good else '나빠짐'}  {label}: {now[key]} (기준 {base[key]})")
+sys.exit(1 if bad else 0)
+PY
+}
+
+guard_rules() {
+  if ! docker info >/dev/null 2>&1; then
+    echo "건너뜀: 도커가 없어 가드 규칙을 돌리지 못했습니다"
+    return 0
+  fi
+  docker run --rm -v "$ROOT/browser:/app:ro" -w /app -e PYTHONDONTWRITEBYTECODE=1 python:3.13-slim-bookworm \
+    sh -c 'pip -q install --root-user-action=ignore aiohttp websockets >/dev/null 2>&1; python -m unittest test_guard 2>&1 | tail -3'
+}
+
+all() {
+  local tmp failed=0
+  tmp="$(mktemp -t jarvis-harness)"
+  trap 'rm -f "$tmp"' RETURN
+  echo "== 평가 시나리오 (모델 없이)"
+  if score "$tmp"; then compare "$tmp" || failed=1; else echo "  시나리오가 실패했습니다 (cd mind-svc && go test ./internal/eval)"; failed=1; fi
+  echo "== 결제 재생"
+  if (cd "$ROOT/agent" && go test -count=1 -run 'TestReplay' ./internal/httpapi); then :; else failed=1; fi
+  echo "== 가드 규칙"
+  guard_rules | sed 's/^/  /'
+  if [[ ${PIPESTATUS[0]} -ne 0 ]]; then failed=1; fi
+  if [[ $failed -ne 0 ]]; then echo "하네스: 나빠진 것이 있습니다" >&2; exit 1; fi
+  echo "하네스: 통과"
+}
+
+cmd="${1:-all}"
+[[ $# -gt 0 ]] && shift
+case "$cmd" in
+  all) all ;;
+  baseline)
+    score "$BASELINE"
+    git -C "$ROOT" --no-pager diff --stat -- "$BASELINE" || true
+    echo "기준선을 적었습니다: $BASELINE" ;;
+  export)
+    from="${1:-1970-01-01}"; to="${2:-2100-01-01}"
+    readonly_sql "select json_build_object('kind', kind, 'source', source, 'source_key', source_key, 'causation_id', causation_id,
+        'actor', actor, 'trace_id', trace_id, 'occurred_at', occurred_at, 'received_at', received_at, 'payload', payload - 'text')
+      from input.records where received_at >= '$from' and received_at < '$to' order by received_at, id" ;;
+  replay)
+    [[ $# -eq 1 ]] || { echo "사용: scripts/harness replay 파일" >&2; exit 2; }
+    file="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
+    (cd "$ROOT/agent" && JARVIS_REPLAY_FILE="$file" go test -count=1 -v -run 'TestReplayFile' ./internal/httpapi) ;;
+  cases)
+    readonly_sql "select json_build_object('source', 'card',
+        'group', (body->>'skill') || '/' || coalesce(nullif(body->>'context', ''), body->>'kind'),
+        'p', (body->>'confidence')::float, 'hit', status = 'executed', 'at', body->>'createdAt')
+      from mind_intents where body->>'decidedBy' = 'user' and status in ('executed', 'rejected', 'undone')
+      union all
+      select json_build_object('source', 'prediction',
+        'group', split_part(split_part(coalesce(nullif(body->>'key', ''), target), '/', 1), ':', 1),
+        'p', (body->>'prob')::float, 'hit', (body->>'outcome')::boolean,
+        'base', (body->>'base')::float, 'at', body->>'due')
+      from mind_predictions where scored and body ? 'outcome'" ;;
+  backtest)
+    [[ $# -ge 1 ]] || { echo "사용: scripts/harness backtest 파일 [--at 0.6,0.7]" >&2; exit 2; }
+    file="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"; shift
+    (cd "$ROOT/mind-svc" && go run . backtest "$@" "$file") ;;
+  *) sed -n '2,10p' "$0"; exit 2 ;;
+esac

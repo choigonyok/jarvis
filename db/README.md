@@ -7,6 +7,7 @@
 ```
 event_outbox → events (events-svc)      ← 서비스가 낸 일. 구독자에게 배달
 raw_events (추가 전용)                  ← 카드 알림 원문 (spending-svc)
+input.records                           ← 일어난 일의 기록. 재생이 읽는 것 (아래)
 commitments · workout_* · card_* · …     ← 각 서비스의 정확한 사실
 mind_*                                   ← mind 의 세계 모델·관문·노트
 ```
@@ -78,6 +79,24 @@ alter table raw_events enable trigger raw_events_no_truncate;
 일부러 겹쳐 잡는 일정이 있고, 사람이 직접 쓰는 경로는 결재를 거치지 않기로
 한 제품입니다. 겹침은 막을 일이 아니라 알아차려서 제안할 일이므로
 `conflicts_at()` / `conflicts_for()` 이 있습니다.
+
+## 기록 (input.records, 075)
+
+to-be 구조의 입구가 될 표입니다. 지금은 재생할 것을 쌓는 데까지만 씁니다 - 판단은 아무도 여기서 읽지 않습니다.
+
+| 기록 | 낸 곳 | 층 |
+|---|---|---|
+| `guard.query` · `guard.answer` | 에이전트 `/intercept`: 가드가 멈춘 요청과 그 답 | durable |
+| `payment.requested` | 에이전트: 질의가 올린 결제 카드 | durable |
+| `intent.answer` | 에이전트: 카드의 답(결제 카드는 durable, 그 밖은 제목에 사람의 일정이 있어 raw). 이유의 글은 남기지 않고 있었는지만 | durable / raw |
+| `guard.refused` · `guard.flow` · `guard.passed` | 가드 `/intercept/records`: 묻지 않고 막은 것, 결제가 지나간 길, 묻지 않고 보낸 것 | durable / raw |
+| `job.*` | `job_events` 트리거: 작업의 모든 줄. 손님의 작업은 넣지 않음 | raw |
+
+- **쓰는 길은 `input.append` 하나입니다.** 표에 직접 쓸 권한은 어느 역할에도 없고, 받은 시각은 서버가 찍고, `(source, source_key)` 는 `input.record_keys` 가 한 번만 받습니다. 파티션 표의 유일 제약은 파티션 키를 포함해야 해서 키를 따로 둡니다.
+- **재생은 `received_at, id` 순서입니다.** `occurred_at` 은 세상에서 일어난 시각이고 둘은 다를 수 있습니다.
+- **고치지 않습니다.** UPDATE 는 트리거가 막고, DELETE 는 raw 층만 됩니다. durable 을 사람 단위로 지워야 할 때는 `records_guard` 트리거를 껐다 켭니다(raw_events 와 같은 이유). raw 층의 보존기간 집행은 input-svc 가 들어올 때 함께 옵니다 - 그때까지 `job.*` 은 `job_events` 와 같은 글을 담고, 그 글에는 카드로 받은 연락처가 있을 수 있습니다. 그래서 읽을 수 있는 역할은 소유자뿐이고, `scripts/harness export` 는 글을 빼고 내려받습니다.
+- **달마다 나눕니다.** 2028-12 까지 미리 만들어 두었고 그 뒤는 기본 파티션이 받습니다.
+- **기록이 나가지 않아도 일은 계속됩니다.** 에이전트의 쓰기는 줄에 넣기만 하고(`gocommon/record`), 트리거는 실패를 경고로만 남깁니다. 멈추면 상태 탭의 '에이전트의 기록'이 빨개집니다.
 
 ## 일정 충돌
 

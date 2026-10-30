@@ -343,7 +343,9 @@ cd web && AGENT_URL=http://localhost:8080 \
 | POST | `/consume` | events-svc 가 배달하는 곳: mind 카드·리마인드 안내 카드·체크리스트. 손님 agent 에는 손님 리마인드만 |
 | GET | `/reminders` | 작업 탭의 리마인드: 기다리는 것과 지난 30일 것(mind `GET /api/reminders?days=30`, 그 에이전트의 사람 것만) |
 | GET·POST | `/browser-checks` | 브라우저 로그인 확인 결과 / 다시 확인 요청 (status-svc 가 읽음) |
-| POST | `/intercept` | 브라우저 결제 가드가 묻는 곳 (가드 전용 토큰) |
+| POST | `/intercept` | 브라우저 결제 가드가 묻는 곳 (가드 전용 토큰). 질의와 답은 기록으로 남는다(`internal/httpapi/records.go`) |
+| POST | `/intercept/records` | 가드가 혼자 내린 결정과 결제의 길을 기록으로 남기는 곳 (가드 전용 토큰) |
+| GET | `/health` | 상태 탭이 읽는 꼴: 기록 쓰기의 진행. 프로세스만 볼 때는 `/healthz` |
 | POST | `/mcp` | Claude Code 전용 권한 질의 (사람이 쓰는 곳 아님) |
 | POST | `/mcp/<모듈>` | Claude Code 전용 모듈 도구 (사람이 쓰는 곳 아님) |
 | GET | `/healthz` | 헬스체크 |
