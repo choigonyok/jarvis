@@ -129,6 +129,10 @@ def kst(t: datetime | str | None) -> str | None:
     return (t if t.tzinfo else t.replace(tzinfo=timezone.utc)).astimezone(KST).isoformat()
 
 
+# Texts in one embedding call.
+EMBED_BATCH = 128
+
+
 def stable_id(*parts: str) -> str:
     return str(uuid.uuid5(NS, "\x1f".join(parts)))
 
@@ -432,44 +436,26 @@ class Graph:
             for r in rows
         ]
 
-    async def _place(self, group: str, spec: dict) -> str:
+    def _row_node(self, group: str, spec: dict | None) -> EntityNode:
         """The node of one end of a row: "나", the node memory had it on, or a
-        node of its name."""
-        if spec.get("self"):
-            return await self.me(group)
-        if not spec.get("id"):
-            return await self.node(group, spec.get("kind") or "Thing", spec["name"], spec["name"])
-        if spec["id"] in self._nodes:
-            return spec["id"]
-        try:
-            await EntityNode.get_by_uuid(self.drivers[group], spec["id"])
-        except NodeNotFoundError:
-            labels = ["Entity", spec["kind"]] if spec.get("kind") else ["Entity"]
-            n = EntityNode(uuid=spec["id"], name=spec.get("name") or "", group_id=group, labels=labels,
-                           summary=spec.get("summary") or "", created_at=now())
-            await n.generate_name_embedding(self.embedder)
-            await n.save(self.drivers[group])
-        self._nodes.add(spec["id"])
-        return spec["id"]
+        node of its key or name."""
+        if not spec or spec.get("self"):
+            return EntityNode(uuid=stable_id(group, "node", "Person", "self"), name=SELF_NAME.get(group, "나"), group_id=group,
+                              labels=["Entity", "Person"], summary="", created_at=now())
+        kind = spec.get("kind") or "Thing"
+        nid = spec.get("id") or stable_id(group, "node", kind, spec.get("key") or spec["name"])
+        labels = ["Entity", spec["kind"]] if spec.get("kind") else ["Entity"]
+        return EntityNode(uuid=nid, name=spec.get("name") or "", group_id=group, labels=labels,
+                          summary=spec.get("summary") or "", created_at=now())
 
-    async def put_row(self, group: str, r: dict):
-        """One row of the facts table on the graph, with no model asked: the
-        model judged it when it first went in, and the table kept the answer."""
-        if r["origin"] == "record":
-            target = r["target"]
-            source = r.get("source")
-            await self.fact(
-                group, r["key"], r["relation"], (target["kind"], target["key"], target["name"]), r["fact"],
-                valid_at=when(r.get("validAt")),
-                source=(source["kind"], source["key"], source["name"]) if source else None,
-            )
-            return
+    def _row_edge(self, group: str, r: dict, src: EntityNode, dst: EntityNode) -> EntityEdge:
+        record = r["origin"] == "record"
         invalid = when(r.get("invalidAt"))
-        edge = EntityEdge(
-            uuid=r.get("edge") or stable_id(group, "fact", r["id"]),
+        return EntityEdge(
+            uuid=stable_id(group, "edge", r["key"]) if record else (r.get("edge") or stable_id(group, "fact", r["id"])),
             group_id=group,
-            source_node_uuid=await self._place(group, r["source"]),
-            target_node_uuid=await self._place(group, r["target"]),
+            source_node_uuid=src.uuid,
+            target_node_uuid=dst.uuid,
             name=r["relation"],
             fact=r["fact"],
             created_at=now(),
@@ -478,9 +464,35 @@ class Graph:
             expired_at=invalid,
             episodes=[],
         )
-        await edge.generate_embedding(self.embedder)
-        await self._drop_if_moved(group, edge)
-        await edge.save(self.drivers[group])
+
+    async def put_rows(self, group: str, rows: list[dict]):
+        """A page of the facts table on the graph, with no model asked: the
+        model judged each row when it first went in, and the table kept the
+        answer. Names and facts are embedded a page at a time - one call each
+        would take hours under the embedding API's rate limit."""
+        planned = []
+        fresh: dict[str, EntityNode] = {}
+        for r in rows:
+            src, dst = self._row_node(group, r.get("source")), self._row_node(group, r["target"])
+            for n in (src, dst):
+                if n.uuid not in self._nodes and (n.uuid not in fresh or (n.summary and not fresh[n.uuid].summary)):
+                    fresh[n.uuid] = n
+            planned.append(self._row_edge(group, r, src, dst))
+        nodes = list(fresh.values())
+        for i in range(0, len(nodes), EMBED_BATCH):
+            chunk = nodes[i : i + EMBED_BATCH]
+            vectors = await self.embedder.create_batch([n.name.replace("\n", " ") or " " for n in chunk])
+            for n, v in zip(chunk, vectors):
+                n.name_embedding = v
+                await n.save(self.drivers[group])
+                self._nodes.add(n.uuid)
+        for i in range(0, len(planned), EMBED_BATCH):
+            chunk = planned[i : i + EMBED_BATCH]
+            vectors = await self.embedder.create_batch([e.fact.replace("\n", " ") or " " for e in chunk])
+            for e, v in zip(chunk, vectors):
+                e.fact_embedding = v
+                await self._drop_if_moved(group, e)
+                await e.save(self.drivers[group])
 
     async def rebuild(self, group: str, pages) -> int:
         """The graph made again from the facts table: what is there goes, and
@@ -492,9 +504,8 @@ class Graph:
             self._nodes.clear()
             n = 0
             async for rows in pages:
-                for r in rows:
-                    await self.put_row(group, r)
-                    n += 1
+                await self.put_rows(group, rows)
+                n += len(rows)
         return n
 
     async def communities(self, group: str) -> int:
