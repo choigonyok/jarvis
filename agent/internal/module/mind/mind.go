@@ -97,11 +97,18 @@ type Input struct {
 	Calendar *Calendar         `json:"calendar,omitempty"`
 }
 
-// Client talks to mind-svc's API.
+// Sender sends what would change mind through the stream (mindcmd).
+type Sender interface {
+	Do(ctx context.Context, method, path string, in, out any) error
+}
+
+// Client talks to mind-svc: its read API over HTTP, and what changes it through
+// Send.
 type Client struct {
 	URL   string
 	Token string
 	HTTP  *http.Client
+	Send  Sender
 }
 
 // Module is the actuator for mind.approve and mind.undo.
@@ -230,25 +237,10 @@ func (c Client) Covered(ctx context.Context, intentID, by string) error {
 	return c.Do(ctx, http.MethodPost, "/api/intents/"+intentID+"/covered", map[string]string{"by": by}, nil)
 }
 
-// Submit hands mind's gate an intent from the agent's judging turn; mind
-// answers with what it decided (a card goes out as mind.card if it rings).
-func (c Client) Submit(ctx context.Context, intent map[string]any) (Decided, error) {
-	var out Decided
-	return out, c.Do(ctx, http.MethodPost, "/api/intents", intent, &out)
-}
-
-// Decided is the part of mind's answer the judging turn reports.
-type Decided struct {
-	ID       string `json:"id"`
-	Decision string `json:"decision"`
-	Why      string `json:"why"`
-	Status   string `json:"status"`
-	Tier     string `json:"tier"`
-	Card     bool   `json:"card"`
-	Error    string `json:"error"`
-}
-
 func (c Client) Do(ctx context.Context, method, path string, in, out any) error {
+	if method != http.MethodGet && c.Send != nil {
+		return c.Send.Do(ctx, method, path, in, out)
+	}
 	var body io.Reader
 	if in != nil {
 		raw, err := json.Marshal(in)

@@ -13,12 +13,12 @@
 //	POST /api/settle                  hand settling changes to the skills now
 //	POST /api/tick                    {name: "morning" | "night"}
 //	POST /api/clock                   {advance: "25h"} move a memory-mode clock (tests the timers)
-//	POST /api/intents                 {skill, kind, topic, title, body, reason, confidence, payload} an intent from outside
 //	POST /api/intents/{id}/{approve|reject|undo}   reject takes {reason}
 //	POST /api/policy/rebuild          recount approval stats from the intents
 //	POST /api/patterns/rebuild        recount repetitions from the plans and purchases
 //	POST /api/ledger/rebuild          make the result ledger and the facts table again
 //	GET  /api/slots/{name}?saved=     whether a slot's value saved then still holds
+//	GET  /api/commands/{key}          what came of a command sent through the stream (commands.go)
 //	GET  /api/notes                   the notes about the operator, every status
 //	POST /api/notes/{id}              {status, text, reason} the operator on a note
 //	GET  /api/notes/{id}/versions     a note's versions, with why each
@@ -97,7 +97,19 @@ type Server struct {
 	// guestToken is the guest's agent's: it opens the guest's own reminders,
 	// checklists and situation, and nothing else of mind.
 	guestToken string
+	// stream takes what would change mind's state; nil (a laptop) does it at
+	// once.
+	stream Commands
+	writes *http.ServeMux
 }
+
+// Commands is the stream as far as this door needs it.
+type Commands interface {
+	Command(ctx context.Context, key, kind, actor, method, path string, body json.RawMessage) error
+}
+
+// SetStream sends what changes mind through the stream.
+func (s *Server) SetStream(c Commands) { s.stream = c }
 
 // SetGuestToken lets the guest's agent keep the guest's own reminders and
 // checklists here, and read the guest's situation (person).
@@ -109,6 +121,15 @@ func New(m *mind.Mind, token, consoleToken string, open bool, c *clock.Clock, lo
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	// What changes mind's state is reached two ways, and neither changes it
+	// here: the agent leaves a record, which the lane brings to writes; the
+	// console and the screen come to this door, which leaves the same record.
+	s.writes = http.NewServeMux()
+	owner := func(next http.HandlerFunc) http.HandlerFunc { return s.auth(false, next) }
+	write := func(pattern string, guard func(http.HandlerFunc) http.HandlerFunc, h http.HandlerFunc) {
+		s.writes.HandleFunc(pattern, h)
+		mux.HandleFunc(pattern, guard(s.written(h)))
+	}
 	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("GET /status", s.auth(true, func(w http.ResponseWriter, r *http.Request) {
 		st, err := s.m.Status(r.Context())
@@ -147,8 +168,7 @@ func (s *Server) Handler() http.Handler {
 	}))
 	mux.HandleFunc("POST /api/tick", s.auth(false, s.tick))
 	mux.HandleFunc("POST /api/clock", s.auth(false, s.moveClock))
-	mux.HandleFunc("POST /api/intents", s.auth(false, s.submit))
-	mux.HandleFunc("POST /api/intents/{id}/{action}", s.auth(false, s.decide))
+	write("POST /api/intents/{id}/{action}", owner, s.decide)
 	mux.HandleFunc("POST /api/policy/rebuild", s.auth(false, s.rebuildPolicy))
 	// The notes alone, for the console's 생활 screen: the snapshot carries
 	// message text, which that screen has no business with.
@@ -162,7 +182,7 @@ func (s *Server) Handler() http.Handler {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"notes": notes})
 	}))
-	mux.HandleFunc("POST /api/notes/{id}", s.auth(false, s.decideNote))
+	write("POST /api/notes/{id}", owner, s.decideNote)
 	mux.HandleFunc("GET /api/notes/{id}/versions", s.auth(false, func(w http.ResponseWriter, r *http.Request) {
 		vs, err := s.m.Opts.Store.NoteVersions(r.Context(), r.PathValue("id"))
 		if err != nil {
@@ -171,7 +191,7 @@ func (s *Server) Handler() http.Handler {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"versions": vs})
 	}))
-	mux.HandleFunc("POST /api/links", s.auth(false, s.decideLink))
+	write("POST /api/links", owner, s.decideLink)
 	mux.HandleFunc("GET /api/fixed", s.auth(false, func(w http.ResponseWriter, r *http.Request) {
 		fixed, err := s.m.FixedCosts(r.Context())
 		if err != nil {
@@ -240,16 +260,17 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/facts/{id}/release", s.auth(false, s.releaseFact))
 	mux.HandleFunc("POST /api/facts/{id}/drop", s.auth(false, s.dropFact))
 	mux.HandleFunc("GET /api/reminders", s.person(s.listReminders))
-	mux.HandleFunc("POST /api/reminders", s.person(s.setReminder))
-	mux.HandleFunc("PATCH /api/reminders/{id}", s.person(s.changeReminder))
-	mux.HandleFunc("DELETE /api/reminders/{id}", s.person(s.cancelReminder))
+	write("POST /api/reminders", s.person, s.setReminder)
+	write("PATCH /api/reminders/{id}", s.person, s.changeReminder)
+	write("DELETE /api/reminders/{id}", s.person, s.cancelReminder)
 	mux.HandleFunc("GET /api/checklists", s.person(s.listChecklists))
-	mux.HandleFunc("POST /api/checklists", s.person(s.makeChecklist))
+	write("POST /api/checklists", s.person, s.makeChecklist)
 	mux.HandleFunc("GET /api/checklists/{id}", s.person(s.getChecklist))
-	mux.HandleFunc("PATCH /api/checklists/{id}", s.person(s.changeChecklist))
-	mux.HandleFunc("POST /api/checklists/{id}/items/{item}", s.person(s.checkItem))
-	mux.HandleFunc("DELETE /api/checklists/{id}", s.person(s.closeChecklist))
-	mux.HandleFunc("POST /api/checklists/{id}/show", s.person(s.showChecklist))
+	write("PATCH /api/checklists/{id}", s.person, s.changeChecklist)
+	write("POST /api/checklists/{id}/items/{item}", s.person, s.checkItem)
+	write("DELETE /api/checklists/{id}", s.person, s.closeChecklist)
+	write("POST /api/checklists/{id}/show", s.person, s.showChecklist)
+	mux.HandleFunc("GET /api/commands/{key}", s.person(s.commandResult))
 	return mux
 }
 
@@ -605,26 +626,6 @@ func (s *Server) moveClock(w http.ResponseWriter, r *http.Request) {
 // over an event mind does not read (a portfolio out of band) - and hands it
 // to the same gate every skill's intent goes through: one ledger, one
 // budget, one way a card reaches the operator.
-func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
-	var in model.Intent
-	if !readJSON(w, r, &in) {
-		return
-	}
-	in.Title, in.Body = strings.TrimSpace(in.Title), strings.TrimSpace(in.Body)
-	if in.Skill == "" || in.Kind == "" || in.Title == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "skill, kind, title 이 필요합니다."})
-		return
-	}
-	in.Skill = "ext:" + strings.TrimPrefix(in.Skill, "ext:")
-	in.Decision, in.Status, in.Card, in.Tier, in.Result, in.Undo, in.Error = "", "", false, "", nil, nil, ""
-	out, err := s.m.Gate.Submit(r.Context(), in)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusCreated, out)
-}
-
 // rebuildPolicy recounts the approval stats from the intents they are
 // derived from.
 func (s *Server) rebuildPolicy(w http.ResponseWriter, r *http.Request) {

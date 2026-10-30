@@ -36,6 +36,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 )
 
 // Moves.
@@ -123,6 +125,13 @@ type Visit struct {
 	EnteredAt time.Time `json:"enteredAt,omitzero"`
 }
 
+// Timers is the one timers table: what fires a reminder at its time, in the
+// stack. It outlives a deploy, so what was due while down still rings.
+type Timers interface {
+	SetTimer(ctx context.Context, t model.Timer) error
+	CancelTimers(ctx context.Context, skill, entityID string) error
+}
+
 // Store keeps the reminders.
 type Store interface {
 	PutReminder(ctx context.Context, r Reminder) error
@@ -141,9 +150,11 @@ func (e ErrInvalid) Error() string { return string(e) }
 
 // Service waits for the moments and says the reminders.
 type Service struct {
-	St  Store
-	Now func() time.Time
-	Loc *time.Location
+	// Timers fires reminders in the stack; nil, Tick has to be run.
+	Timers Timers
+	St     Store
+	Now    func() time.Time
+	Loc    *time.Location
 	// Here is the regions the operator is in now; nil or an error: not
 	// known, and nobody is taken to be anywhere. GuestHere is the guest's.
 	Here      func(ctx context.Context) ([]Visit, error)
@@ -189,7 +200,7 @@ func (s *Service) Set(ctx context.Context, r Reminder) (Reminder, error) {
 		return r, err
 	}
 	delete(s.looked, r.ID)
-	return r, s.St.PutReminder(ctx, r)
+	return r, s.put(ctx, r)
 }
 
 // Get is one reminder.
@@ -266,7 +277,7 @@ func (s *Service) Change(ctx context.Context, id string, c Change) (Reminder, er
 		return r, err
 	}
 	delete(s.looked, r.ID)
-	return r, s.St.PutReminder(ctx, r)
+	return r, s.put(ctx, r)
 }
 
 // Cancel stops a reminder from being said.
@@ -281,7 +292,7 @@ func (s *Service) Cancel(ctx context.Context, id string) (Reminder, error) {
 		return r, ErrInvalid("기다리는 알림이 아닙니다 (" + StatusName(r.Status) + ")")
 	}
 	r.Status, r.UpdatedAt = Cancelled, s.Now()
-	return r, s.St.PutReminder(ctx, r)
+	return r, s.put(ctx, r)
 }
 
 // CancelTopic stops the reminder of this topic still waiting, if one is.
@@ -298,7 +309,7 @@ func (s *Service) CancelTopic(ctx context.Context, topic string) error {
 	for _, r := range rs {
 		if r.Topic == topic && r.Status == Waiting {
 			r.Status, r.UpdatedAt = Cancelled, s.Now()
-			if err := s.St.PutReminder(ctx, r); err != nil {
+			if err := s.put(ctx, r); err != nil {
 				return err
 			}
 		}
@@ -398,49 +409,141 @@ func (s *Service) MovedAs(ctx context.Context, who, move, region, kind string, a
 
 // Tick says what its time brought: a time reached, a latest reached with no
 // move, a start that finds the operator already there. A place reminder
-// past its until stops waiting.
+// past its until stops waiting. In the stack the timers call Fire for each
+// instead; Tick is a laptop's.
 func (s *Service) Tick(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	now := s.Now()
 	rs, err := s.St.Reminders(ctx, time.Time{})
 	if err != nil {
 		return err
 	}
-	here, known, asked := map[string][]Visit{}, map[string]bool{}, map[string]bool{}
+	t := &looking{here: map[string][]Visit{}, known: map[string]bool{}, asked: map[string]bool{}}
 	for _, r := range rs {
-		if r.Status != Waiting {
+		if _, err := s.due(ctx, r, t); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// looking is where people are, asked once a round.
+type looking struct {
+	here         map[string][]Visit
+	known, asked map[string]bool
+}
+
+// due does what the time brings for one reminder. It says whether it could
+// not tell: where the person is was not known, and it is to be looked at again.
+func (s *Service) due(ctx context.Context, r Reminder, t *looking) (bool, error) {
+	if r.Status != Waiting {
+		return false, nil
+	}
+	now := s.Now()
+	switch {
+	case r.Place == "" && r.At != nil && !r.At.After(now):
+		s.say(ctx, r, ByTime)
+	case r.Place != "" && r.At != nil && !r.At.After(now):
+		s.say(ctx, r, ByLatest)
+	case r.Place != "" && r.Until != nil && !r.Until.After(now):
+		r.Status, r.UpdatedAt = Expired, now
+		return false, s.put(ctx, r)
+	case r.Place != "" && r.Move == Arrive && r.After != nil && !r.After.After(now) && !s.looked[r.ID]:
+		who := r.Person()
+		if !t.asked[who] {
+			t.here[who], t.known[who] = s.where(ctx, who)
+			t.asked[who] = true
+		}
+		if !t.known[who] {
+			return true, nil
+		}
+		if s.looked == nil {
+			s.looked = map[string]bool{}
+		}
+		s.looked[r.ID] = true
+		for _, v := range t.here[who] {
+			if matches(r.Place, v.Region, v.Kind) {
+				s.say(ctx, r, ByThere)
+				break
+			}
+		}
+	}
+	return false, nil
+}
+
+// TimerSkill is the skill name a reminder's timers go by in the one timers
+// table.
+const TimerSkill = "remind"
+
+// lookAgain is how soon a reminder that could not tell where the person is
+// looks again.
+const lookAgain = time.Minute
+
+// Fire is one of a reminder's timers come due.
+func (s *Service) Fire(ctx context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, err := s.St.Reminder(ctx, id)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	again, err := s.due(ctx, r, &looking{here: map[string][]Visit{}, known: map[string]bool{}, asked: map[string]bool{}})
+	if err != nil {
+		return err
+	}
+	if again && s.Timers != nil {
+		return s.Timers.SetTimer(ctx, model.Timer{Skill: TimerSkill, EntityID: r.ID, Name: "there", FireAt: s.Now().Add(lookAgain)})
+	}
+	return nil
+}
+
+// Schedule makes sure every waiting reminder has its timers: what a reminder
+// stored before there were any, or whose timer was lost, is not forgotten.
+func (s *Service) Schedule(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rs, err := s.St.Reminders(ctx, time.Time{})
+	if err != nil {
+		return err
+	}
+	for _, r := range rs {
+		if err := s.schedule(ctx, r); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// put keeps a reminder and its timers.
+func (s *Service) put(ctx context.Context, r Reminder) error {
+	if err := s.St.PutReminder(ctx, r); err != nil {
+		return err
+	}
+	return s.schedule(ctx, r)
+}
+
+// schedule sets a reminder's timers to what it is waiting for now: its time,
+// its latest, its end, or when it starts to count. One no longer waiting has
+// none.
+func (s *Service) schedule(ctx context.Context, r Reminder) error {
+	if s.Timers == nil {
+		return nil
+	}
+	if err := s.Timers.CancelTimers(ctx, TimerSkill, r.ID); err != nil {
+		return err
+	}
+	if r.Status != Waiting {
+		return nil
+	}
+	for name, at := range map[string]*time.Time{"at": r.At, "until": r.Until, "after": r.After} {
+		if at == nil {
 			continue
 		}
-		switch {
-		case r.Place == "" && r.At != nil && !r.At.After(now):
-			s.say(ctx, r, ByTime)
-		case r.Place != "" && r.At != nil && !r.At.After(now):
-			s.say(ctx, r, ByLatest)
-		case r.Place != "" && r.Until != nil && !r.Until.After(now):
-			r.Status, r.UpdatedAt = Expired, now
-			if err := s.St.PutReminder(ctx, r); err != nil {
-				return err
-			}
-		case r.Place != "" && r.Move == Arrive && r.After != nil && !r.After.After(now) && !s.looked[r.ID]:
-			who := r.Person()
-			if !asked[who] {
-				here[who], known[who] = s.where(ctx, who)
-				asked[who] = true
-			}
-			if !known[who] {
-				continue // looked at again on the next tick
-			}
-			if s.looked == nil {
-				s.looked = map[string]bool{}
-			}
-			s.looked[r.ID] = true
-			for _, v := range here[who] {
-				if matches(r.Place, v.Region, v.Kind) {
-					s.say(ctx, r, ByThere)
-					break
-				}
-			}
+		if err := s.Timers.SetTimer(ctx, model.Timer{Skill: TimerSkill, EntityID: r.ID, Name: name, FireAt: *at}); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -494,7 +597,7 @@ func (s *Service) say(ctx context.Context, r Reminder, by string) {
 	}
 	now := s.Now()
 	r.Status, r.SentAt, r.Result, r.UpdatedAt = Sent, &now, result, now
-	if err := s.St.PutReminder(ctx, r); err != nil && s.Out != nil {
+	if err := s.put(ctx, r); err != nil && s.Out != nil {
 		s.Out.Warn("보낸 알림을 기록하지 못했습니다", "id", r.ID, "err", err)
 	}
 }

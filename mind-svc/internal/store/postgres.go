@@ -474,9 +474,32 @@ func (p *Postgres) PutIntent(ctx context.Context, in model.Intent) error {
 		return err
 	}
 	_, err = p.db.Exec(ctx, `
-		insert into mind_intents (id, entity_id, kind, status, body, created_at) values ($1, $2, $3, $4, $5, $6)
+		insert into mind_intents (id, entity_id, kind, status, body, created_at, holder) values ($1, $2, $3, $4, $5, $6, nullif($7, ''))
 		on conflict (id) do update set status = excluded.status, body = excluded.body`,
-		in.ID, in.EntityID, in.Kind, in.Status, body, in.CreatedAt)
+		in.ID, in.EntityID, in.Kind, in.Status, body, in.CreatedAt, in.Holder)
+	return err
+}
+
+// PutCommand keeps what came of a command. The first answer stays: a record
+// delivered twice is not asked twice.
+func (p *Postgres) PutCommand(ctx context.Context, c model.Command) error {
+	_, err := p.db.Exec(ctx, `insert into mind.commands (key, kind, who, status, body) values ($1, $2, $3, $4, $5)
+		on conflict (key) do nothing`, c.Key, c.Kind, c.Who, c.Status, string(c.Body))
+	return err
+}
+
+func (p *Postgres) Command(ctx context.Context, key string) (model.Command, error) {
+	c := model.Command{Key: key}
+	err := p.db.QueryRow(ctx, `select kind, who, status, body, at from mind.commands where key = $1`, key).
+		Scan(&c.Kind, &c.Who, &c.Status, &c.Body, &c.At)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return c, model.ErrNotFound
+	}
+	return c, err
+}
+
+func (p *Postgres) PruneCommands(ctx context.Context, before time.Time) error {
+	_, err := p.db.Exec(ctx, `delete from mind.commands where at < $1`, before)
 	return err
 }
 
@@ -513,15 +536,15 @@ func (p *Postgres) Intent(ctx context.Context, id string) (model.Intent, error) 
 }
 
 func (p *Postgres) Intents(ctx context.Context, limit int) ([]model.Intent, error) {
-	return p.intents(ctx, `order by created_at desc, id desc limit $1`, limit)
+	return p.intents(ctx, `where holder is null order by created_at desc, id desc limit $1`, limit)
 }
 
 func (p *Postgres) IntentsFor(ctx context.Context, entityID string) ([]model.Intent, error) {
-	return p.intents(ctx, `where entity_id = $1 order by created_at desc, id desc`, entityID)
+	return p.intents(ctx, `where holder is null and entity_id = $1 order by created_at desc, id desc`, entityID)
 }
 
 func (p *Postgres) IntentsSince(ctx context.Context, t time.Time) ([]model.Intent, error) {
-	return p.intents(ctx, `where created_at >= $1 order by created_at desc, id desc`, t)
+	return p.intents(ctx, `where holder is null and created_at >= $1 order by created_at desc, id desc`, t)
 }
 
 func (p *Postgres) Cursor(ctx context.Context, name string) (int64, error) {

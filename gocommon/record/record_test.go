@@ -2,9 +2,12 @@ package record
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -153,5 +156,67 @@ func TestStoppingWritesWhatIsQueued(t *testing.T) {
 	w.Run(ctx)
 	if len(to.seen()) != 2 {
 		t.Fatalf("끝나면서 남은 것을 써야 합니다: %v", to.seen())
+	}
+}
+
+func TestCommandKind(t *testing.T) {
+	for _, c := range []struct{ method, path, want string }{
+		{"POST", "/api/reminders", "reminder.set"},
+		{"PATCH", "/api/reminders/rem_1", "reminder.change"},
+		{"DELETE", "/api/reminders/rem_1", "reminder.cancel"},
+		{"POST", "/api/checklists", "checklist.make"},
+		{"PATCH", "/api/checklists/c1", "checklist.change"},
+		{"DELETE", "/api/checklists/c1", "checklist.close"},
+		{"POST", "/api/checklists/c1/items/i1", "checklist.check"},
+		{"POST", "/api/checklists/c1/show", "checklist.show"},
+		{"POST", "/api/checklists?x=1", "checklist.make"},
+		{"POST", "/api/intents/int_1/approve", "intent.answer"},
+		{"POST", "/api/notes/n1", "note.decided"},
+		{"POST", "/api/links", "link.decided"},
+		{"POST", "/somewhere", "command"},
+	} {
+		if got := CommandKind(c.method, c.path); got != c.want {
+			t.Errorf("%s %s: %s", c.method, c.path, got)
+		}
+	}
+}
+
+// Over HTTP a refusal is not tried again - it would hold up everything behind
+// it - and an outage is.
+func TestHTTPWriter(t *testing.T) {
+	var mu sync.Mutex
+	var got []string
+	statuses := []int{http.StatusServiceUnavailable, http.StatusCreated, http.StatusForbidden, http.StatusOK}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		raw, _ := io.ReadAll(r.Body)
+		var e struct {
+			Key string `json:"source_key"`
+		}
+		_ = json.Unmarshal(raw, &e)
+		got = append(got, r.URL.Path+" "+r.Header.Get("Authorization")+" "+e.Key)
+		w.WriteHeader(statuses[0])
+		statuses = statuses[1:]
+	}))
+	defer srv.Close()
+	w := NewHTTP(srv.URL+"/", "tok", health.NewLoops(), quietLog())
+	w.wait = func(context.Context, time.Duration) {}
+	stop := start(t, w)
+	w.Write(valid("a"))
+	w.Write(valid("b"))
+	w.Write(valid("c"))
+	waitFor(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(got) == 4
+	})
+	stop()
+	want := []string{"/records Bearer tok a", "/records Bearer tok a", "/records Bearer tok b", "/records Bearer tok c"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("%v", got)
+	}
+	if NewHTTP("", "", health.NewLoops(), quietLog()) != nil {
+		t.Fatal("주소가 없으면 없습니다")
 	}
 }

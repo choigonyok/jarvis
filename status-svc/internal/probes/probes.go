@@ -279,6 +279,7 @@ func All(cfg Config) []check.Probe {
 		e.service("svc.agent", "에이전트의 기록", cfg.AgentURL, []string{"agent", "postgres"}, "records"),
 		e.service("svc.input", "입구(기록)", cfg.InputURL, []string{"postgres"}, "drain", "keep"),
 		e.delivery("mind", "기록 → mind", []string{"svc.mind"}),
+		e.delivery("mind-commands", "답·리마인드·타이머 → mind", []string{"svc.mind"}),
 		e.delivery("mind-relay", "기록 → 알림 문구 넘기기", []string{"svc.mind"}),
 		e.delivery("output-status", "상태·결재 알림 → 출구", []string{"svc.output"}),
 		e.delivery("output", "효과 → 출구", []string{"svc.output", "svc.mind"}),
@@ -286,6 +287,7 @@ func All(cfg Config) []check.Probe {
 		// The guest's side: where the guest's phone is, what is said to the
 		// guest, and reminders in the guest's conversation.
 		e.delivery("mind-guest", "손님 기록 → mind", []string{"svc.mind"}),
+		e.delivery("mind-commands-guest", "손님 리마인드 → mind", []string{"svc.mind"}),
 		e.delivery("mind-relay-guest", "손님 기록 → 알림 문구 넘기기", []string{"svc.mind"}),
 		e.delivery("output-guest", "손님 효과 → 출구", []string{"svc.output", "svc.mind"}),
 		e.delivery("agent-guest", "손님 효과 → 손님 에이전트", []string{"agent-guest", "svc.mind"}),

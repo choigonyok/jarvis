@@ -56,8 +56,13 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/weather"
 )
 
-// effectsKeep is how long an effect stays once everyone has taken it.
-const effectsKeep = 30 * 24 * time.Hour
+const (
+	// effectsKeep is how long an effect stays once everyone has taken it.
+	effectsKeep = 30 * 24 * time.Hour
+	// commandsKeep is how long what came of a command stays to be read. The
+	// one who asked reads it at once; the record of it stays in the stream.
+	commandsKeep = 7 * 24 * time.Hour
+)
 
 func main() {
 	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
@@ -93,7 +98,6 @@ func main() {
 		logOut   obs.Log
 		memLog   *obs.MemoryLog
 		stream   *obs.Stream
-		db       *pgxpool.Pool
 		calendar act.Calendar = act.NewMemoryCalendar()
 		notifier act.Notifier = &act.MemoryNotifier{}
 		clk                   = clock.New()
@@ -129,7 +133,6 @@ func main() {
 			os.Exit(1)
 		}
 		defer pool.Close()
-		db = pool
 		key, err := contentKey()
 		if err != nil {
 			log.Error("MIND_CONTENT_KEY 를 읽지 못했습니다", "err", err)
@@ -247,8 +250,12 @@ func main() {
 	if url := os.Getenv("SPENDING_URL"); url != "" && mode == "stack" {
 		book = &act.Spending{URL: url, Token: token}
 	}
+	var emitTimer func(context.Context, model.Timer) error
+	if stream != nil {
+		emitTimer = mind.EmitTimer(stream)
+	}
 	m := mind.New(mind.Options{
-		Store: st, Log: logOut, LLM: client, Calendar: calendar, Notifier: notifier, Spending: book,
+		Store: st, Log: logOut, LLM: client, Calendar: calendar, Notifier: notifier, Spending: book, EmitTimer: emitTimer,
 		Loc: loc, Now: clk.Now, Logger: log, Interpret: cfg, Settle: settle,
 		Policy: gate.DefaultPolicy(), URL: getenv("MIND_UI_URL", "http://localhost:8102/"), Mode: mode,
 		MessageRetain: time.Duration(atoiOr(getenv("MIND_MESSAGE_RETAIN_DAYS", "365"), 365)) * 24 * time.Hour,
@@ -263,6 +270,13 @@ func main() {
 	if memLog != nil {
 		go memLog.Run(ctx, m.Handle)
 	}
+	mindAPI := api.New(m, token, os.Getenv("MIND_CONSOLE_TOKEN"), mode == "memory", movable, log)
+	// 손님 에이전트의 토큰: 손님 자신의 리마인드·체크리스트만 연다.
+	mindAPI.SetGuestToken(os.Getenv("API_GUEST_TOKEN"))
+	if stream != nil {
+		mindAPI.SetStream(stream)
+	}
+	handler := mindAPI.Handler()
 	if stream != nil {
 		take := func(ctx context.Context, msg queue.Message) error {
 			o, err := obs.FromMessage(msg)
@@ -271,11 +285,38 @@ func main() {
 			}
 			return m.Handle(ctx, o)
 		}
+		// The lanes. What a read of a conversation may hold up is its own
+		// lane: answers, reminders and timers go past it (the deterministic
+		// lane), and so does wording on its way out (the relay).
+		command := func(ctx context.Context, msg queue.Message) error {
+			switch {
+			case msg.Kind == obs.TimerFired:
+				return m.TimerFired(ctx, msg)
+			case msg.Kind == "payment.requested":
+				return m.PaymentRaised(ctx, msg)
+			}
+			if err := mindAPI.Command(ctx, msg); err != nil {
+				return err
+			}
+			if msg.Kind == "intent.answer" {
+				return m.HeldCard(ctx, msg)
+			}
+			return nil
+		}
+		// Their own connections: reads for the screens never wait on them.
+		lanes, err := pgxpool.New(ctx, dsn)
+		if err != nil {
+			log.Error("레인의 데이터베이스 풀을 만들지 못했습니다", "err", err)
+			os.Exit(1)
+		}
+		defer lanes.Close()
 		for _, c := range []*queue.Consumer{
-			{Pool: db, Topic: queue.Records, Name: "mind", Kinds: mind.Kinds, Handle: take, Log: log},
-			{Pool: db, Topic: queue.Guest, Name: "mind-guest", Kinds: mind.GuestKinds, Handle: take, Log: log},
-			{Pool: db, Topic: queue.Records, Name: "mind-relay", Kinds: []string{"*"}, Handle: stream.Relay(queue.Effects), Log: log},
-			{Pool: db, Topic: queue.Guest, Name: "mind-relay-guest", Kinds: []string{"*"}, Handle: stream.Relay(queue.GuestEffects), Log: log},
+			{Pool: lanes, Topic: queue.Records, Name: "mind", Kinds: mind.Kinds, Handle: take, Log: log},
+			{Pool: lanes, Topic: queue.Guest, Name: "mind-guest", Kinds: mind.GuestKinds, Handle: take, Log: log},
+			{Pool: lanes, Topic: queue.Records, Name: "mind-commands", Kinds: mind.CommandKinds, Handle: command, Log: log},
+			{Pool: lanes, Topic: queue.Guest, Name: "mind-commands-guest", Kinds: mind.GuestCommandKinds, Handle: command, Log: log},
+			{Pool: lanes, Topic: queue.Records, Name: "mind-relay", Kinds: []string{"*"}, Handle: stream.Relay(queue.Effects), Log: log},
+			{Pool: lanes, Topic: queue.Guest, Name: "mind-relay-guest", Kinds: []string{"*"}, Handle: stream.Relay(queue.GuestEffects), Log: log},
 		} {
 			go c.Run(ctx)
 		}
@@ -285,6 +326,9 @@ func main() {
 					log.Warn("지난 효과를 지우지 못했습니다", "err", err)
 				} else if n > 0 {
 					log.Info("지난 효과를 지웠습니다", "count", n)
+				}
+				if err := st.PruneCommands(ctx, time.Now().Add(-commandsKeep)); err != nil && ctx.Err() == nil {
+					log.Warn("지난 명령 결과를 지우지 못했습니다", "err", err)
 				}
 				select {
 				case <-ctx.Done():
@@ -362,12 +406,9 @@ func main() {
 	}
 
 	addr := getenv("LISTEN_ADDR", ":8102")
-	mindAPI := api.New(m, token, os.Getenv("MIND_CONSOLE_TOKEN"), mode == "memory", movable, log)
-	// 손님 에이전트의 토큰: 손님 자신의 리마인드·체크리스트만 연다.
-	mindAPI.SetGuestToken(os.Getenv("API_GUEST_TOKEN"))
 	srv := &http.Server{
 		Addr:         addr,
-		Handler:      mindAPI.Handler(),
+		Handler:      handler,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 3 * time.Minute, // a replay runs the model
 	}

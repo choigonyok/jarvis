@@ -178,6 +178,10 @@ type Store interface {
 	ReplaceFactRows(ctx context.Context, rows []model.FactRow) error
 	FactRows(ctx context.Context) ([]model.FactRow, error)
 
+	// What came of a command that came through the stream.
+	PutCommand(ctx context.Context, c model.Command) error
+	Command(ctx context.Context, key string) (model.Command, error)
+	PruneCommands(ctx context.Context, before time.Time) error
 	// The classification cache. PutClass keeps what the operator said: a
 	// model's answer does not write over it.
 	Class(ctx context.Context, kind, key string) (model.Class, error)

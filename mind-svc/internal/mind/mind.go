@@ -46,8 +46,11 @@ type Options struct {
 	LLM      llm.Client
 	Calendar act.Calendar
 	// Spending is the book, when charges are filed from here.
-	Spending  *act.Spending
-	Notifier  act.Notifier // nil: notices go through the log to output-svc
+	Spending *act.Spending
+	Notifier act.Notifier // nil: notices go through the log to output-svc
+	// EmitTimer, in the stack, sends a due timer into the stream; nil runs
+	// it where it is.
+	EmitTimer func(ctx context.Context, t model.Timer) error
 	Loc       *time.Location
 	Now       func() time.Time
 	Logger    *slog.Logger
@@ -184,6 +187,9 @@ func New(o Options) *Mind {
 	m.notifier = notifier
 	if o.Reminders != nil {
 		m.Moments = &moments.Service{St: o.Reminders, Now: o.Now, Loc: o.Loc, Here: o.Here, GuestHere: o.GuestHere, Say: m.say, Out: o.Logger}
+		if o.EmitTimer != nil {
+			m.Moments.Timers = o.Store
+		}
 	}
 	if o.Checklists != nil {
 		m.Lists = &checklist.Service{St: o.Checklists, Now: o.Now}
@@ -202,6 +208,8 @@ func New(o Options) *Mind {
 	}
 	m.Link.OnLink = m.Attn.OnLink
 	m.Attn.Expect = m.onExpect
+	m.Attn.Remind = m.remind
+	m.Attn.Emit = o.EmitTimer
 	if o.Memory != nil {
 		m.Attn.Recall = m.recallPeople
 	}
@@ -288,7 +296,11 @@ func (m *Mind) Run(ctx context.Context, every time.Duration) {
 	if m.Remember != nil {
 		go m.Remember.Run(ctx, 15*time.Second)
 	}
-	if m.Moments != nil {
+	switch {
+	case m.Moments == nil:
+	case m.Moments.Timers != nil:
+		m.scheduleReminders(ctx)
+	default:
 		go m.Moments.Run(ctx, 30*time.Second)
 	}
 }

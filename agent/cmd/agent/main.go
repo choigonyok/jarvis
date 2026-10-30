@@ -51,11 +51,16 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/usage"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/choigonyok/jarvis/agent/internal/mindcmd"
 	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/gocommon/notify"
 	"github.com/choigonyok/jarvis/gocommon/record"
 	"github.com/choigonyok/jarvis/gocommon/site"
 )
+
+// answerWait is how long an answer to one of mind's cards waits for what came
+// of it.
+const answerWait = 90 * time.Second
 
 func main() {
 	// The CLI runs this binary before every tool call: it asks the running
@@ -91,6 +96,16 @@ func main() {
 		log.Error("제안을 읽지 못했습니다", "err", err)
 		os.Exit(1)
 	}
+
+	// What the payment path did, as records a replay can read, and what is
+	// asked of mind. The guest's agent has no database: it hands them to
+	// input-svc, which takes from it only what is the guest's.
+	loops := health.NewLoops()
+	records := record.New(cfg.DatabaseURL, loops, log)
+	if records == nil {
+		records = record.NewHTTP(cfg.NotifyURL, cfg.APIToken, loops, log)
+	}
+	commands := &mindcmd.Client{URL: cfg.MindURL, Token: cfg.APIToken, Records: records, Actor: map[bool]string{true: "guest", false: "operator"}[cfg.Guest]}
 
 	// --- 모듈 -------------------------------------------------------------
 	// Adding a feature is one Add call. Removing one is deleting the line -
@@ -239,7 +254,11 @@ func main() {
 	var mindClient *mindmod.Client
 	var checklistModule *checklist.Module
 	if cfg.MindURL != "" && !cfg.Guest {
-		mindModule := mindmod.New(mindmod.Client{URL: cfg.MindURL, Token: cfg.APIToken})
+		// An answer to a card runs the thing: it may take as long as the
+		// thing does.
+		answers := *commands
+		answers.Wait = answerWait
+		mindModule := mindmod.New(mindmod.Client{URL: cfg.MindURL, Token: cfg.APIToken, Send: &answers})
 		modules.Add(mindModule)
 		c := mindModule.Client()
 		mindClient = &c
@@ -256,7 +275,7 @@ func main() {
 	var reminderConsole http.Handler
 	if cfg.MindURL != "" {
 		// 리마인드: "몇 시에 / 집에 가면 / 나갈 때 알려줘". mind 가 그때 폰으로 알린다.
-		remindModule := remind.New(cfg.MindURL, cfg.APIToken)
+		remindModule := remind.New(cfg.MindURL, cfg.APIToken, commands)
 		reminderConsole = remindModule.ConsoleHandler()
 		modules.Add(remindModule)
 		mcpMounts["/mcp/"+remind.ServerName] = remindModule.Handler()
@@ -264,7 +283,7 @@ func main() {
 		cfg.Allow(remind.Tools...)
 
 		// 체크리스트: 준비물·할 일. mind 가 체크 상태를 갖고, 대화에는 체크할 수 있는 카드로.
-		checklistModule = checklist.New(cfg.MindURL, cfg.APIToken, transcript, events, log)
+		checklistModule = checklist.New(cfg.MindURL, cfg.APIToken, commands, transcript, events, log)
 		modules.Add(checklistModule)
 		mcpMounts["/mcp/"+checklist.ServerName] = checklistModule.Handler()
 		cfg.ModuleMCPURLs[checklist.ServerName] = cfg.PublicMCPURL + "/" + checklist.ServerName
@@ -652,10 +671,6 @@ func main() {
 		runner.OnFree(jobsModule.Wake)
 	}
 
-	// What the payment path did, as records a replay can read. The guest's
-	// agent has no database and no browser, so it writes none.
-	loops := health.NewLoops()
-	records := record.New(cfg.DatabaseURL, loops, log)
 	recordsCtx, stopRecords := context.WithCancel(context.Background())
 	recordsDone := make(chan struct{})
 	go func() {

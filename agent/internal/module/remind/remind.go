@@ -47,14 +47,21 @@ type Reminder struct {
 	Line   string `json:"line"`
 }
 
+// Sender sends what would change mind through the stream (mindcmd).
+type Sender interface {
+	Do(ctx context.Context, method, path string, in, out any) error
+}
+
 type Module struct {
 	url, token string
 	http       *http.Client
+	send       Sender
 }
 
-// New talks to mind-svc at url with the services' token.
-func New(url, token string) *Module {
-	return &Module{url: strings.TrimRight(url, "/"), token: token, http: &http.Client{Timeout: 15 * time.Second}}
+// New reads mind-svc at url with the services' token and changes it through
+// send.
+func New(url, token string, send Sender) *Module {
+	return &Module{url: strings.TrimRight(url, "/"), token: token, http: &http.Client{Timeout: 15 * time.Second}, send: send}
 }
 
 func (m *Module) Name() string                { return Name }
@@ -62,6 +69,9 @@ func (m *Module) Start(context.Context) error { return nil }
 func (m *Module) Stop(context.Context) error  { return nil }
 
 func (m *Module) do(ctx context.Context, method, path string, in, out any) error {
+	if method != http.MethodGet && m.send != nil {
+		return m.send.Do(ctx, method, path, in, out)
+	}
 	var body io.Reader
 	if in != nil {
 		raw, err := json.Marshal(in)

@@ -28,6 +28,7 @@ func TestWhatGoesOutAndWhatComesIn(t *testing.T) {
 		{Observation{Source: "mind", Type: "checklist.shown"}, true},
 		{Observation{Source: "mind", Type: "action.executed"}, false},
 		{Observation{Source: "mind", Type: "action.undone"}, false},
+		{Observation{Source: "mind", Type: "timer.fired"}, false},
 		{Observation{Source: "kakao", Type: "message.observed"}, false},
 		{Observation{Source: "spending", Type: "occurrence.observed"}, false},
 	} {

@@ -481,6 +481,10 @@ type Change struct {
 // it is done quietly, done and told, asked first, kept for the evening, or
 // dropped - and records what came of it, which is what the gate learns from.
 type Intent struct {
+	// Holder is what waits for the answer and carries on with it ("job:12",
+	// "chat"), when something does: the answer is then the agent's to act on
+	// and mind only keeps the ledger (a card it did not raise).
+	Holder     string          `json:"holder,omitempty"`
 	ID         string          `json:"id"`
 	Skill      string          `json:"skill"`
 	Kind       string          `json:"kind"` // calendar.create | calendar.update | calendar.delete | info
@@ -618,6 +622,24 @@ const (
 )
 
 // Timer is a skill asking to look at an entity again at a time.
+// Holders of an intent: what waits for its answer.
+const (
+	// HeldSkill is an intent mind did not raise: a card the agent asked on
+	// its own, whose answer the agent carries on with. mind keeps the ledger.
+	HeldSkill = "held"
+)
+
+// Command is what came of something asked of mind through the stream: the
+// answer the one who asked is waiting for.
+type Command struct {
+	Key    string          `json:"key"`
+	Kind   string          `json:"kind"`
+	Who    string          `json:"who"`
+	Status int             `json:"status"`
+	Body   json.RawMessage `json:"body"`
+	At     time.Time       `json:"at"`
+}
+
 type Timer struct {
 	ID       int64      `json:"id"`
 	Skill    string     `json:"skill"`

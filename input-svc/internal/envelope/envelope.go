@@ -191,9 +191,21 @@ func merge(data json.RawMessage, notify *Notify) (json.RawMessage, error) {
 	return json.Marshal(fields)
 }
 
-// ForGuest is what a record from the guest's token may be: a notification, to
-// the guest. Whatever it said about itself, it is the guest's.
+// guestCommands are the kinds the guest's agent writes: the guest's own
+// reminders and lists, which mind keeps apart by whose record it is, and how
+// the guest's cards were answered and what the guest's tools were refused.
+var guestCommands = []string{"reminder.", "checklist.", "intent.", "policy."}
+
+// ForGuest is what a record from the guest's token may be: the guest's own
+// reminders and lists, or a notification to the guest. Whatever it said about
+// itself, it is the guest's.
 func ForGuest(e Envelope) (Envelope, error) {
+	for _, prefix := range guestCommands {
+		if strings.HasPrefix(e.Kind, prefix) {
+			e.Actor = Guest
+			return e, nil
+		}
+	}
 	var p struct {
 		Notify *Notify `json:"notify"`
 	}

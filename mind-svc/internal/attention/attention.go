@@ -20,6 +20,7 @@ import (
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/gate"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+	"github.com/choigonyok/jarvis/mind-svc/internal/moments"
 	"github.com/choigonyok/jarvis/mind-svc/internal/skill"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 	"github.com/choigonyok/jarvis/mind-svc/internal/weather"
@@ -44,6 +45,13 @@ type Attention struct {
 	// and two-hours-before looks of a plan are skills' timers; these are the
 	// same thing for anything predicted.
 	Expect func(ctx context.Context, t model.Timer)
+	// Remind takes a reminder's timers.
+	Remind func(ctx context.Context, t model.Timer)
+	// Emit, in the stack, sends a due timer into the stream as a record
+	// (timer.fired) instead of running it here: what the clock did is then
+	// on the log like everything else, and it runs in the deterministic
+	// lane. Nil runs it at once.
+	Emit func(ctx context.Context, t model.Timer) error
 	// Weather is the day's weather where a plan is, or at home (nil: not
 	// known).
 	Weather func(ctx context.Context, area, place, date string) (weather.Day, []weather.Hour, bool)
@@ -160,29 +168,56 @@ func (a *Attention) step(ctx context.Context, all bool) int {
 		a.log.Warn("타이머를 읽지 못했습니다", "err", err)
 	}
 	for _, t := range timers {
+		// Sent first: a timer marked fired whose record never went would
+		// never ring. Sent twice is one record.
+		if a.Emit != nil {
+			if err := a.Emit(ctx, t); err != nil {
+				a.log.Warn("타이머를 보내지 못했습니다", "err", err)
+				continue
+			}
+		}
 		if err := a.st.FireTimer(ctx, t.ID, now); err != nil {
 			a.log.Warn("타이머를 처리하지 못했습니다", "err", err)
 			continue
 		}
-		if t.Skill == "expect" {
-			if a.Expect != nil {
-				a.Expect(ctx, t)
-			}
-			n++
-			continue
-		}
-		e, err := a.world.Entity(ctx, t.EntityID)
-		if err != nil {
-			continue
-		}
-		for _, s := range a.skills {
-			if s.Name() == t.Skill {
-				a.apply(ctx, s, e.ID, s.OnTimer(ctx, a.view(), e, t))
-			}
+		if a.Emit == nil {
+			a.fire(ctx, t)
 		}
 		n++
 	}
 	return n
+}
+
+// Fire is a timer come back from the stream.
+func (a *Attention) Fire(ctx context.Context, t model.Timer) {
+	a.busy.Lock()
+	defer a.busy.Unlock()
+	a.fire(ctx, t)
+}
+
+// fire is what a timer is for.
+func (a *Attention) fire(ctx context.Context, t model.Timer) {
+	switch t.Skill {
+	case "expect":
+		if a.Expect != nil {
+			a.Expect(ctx, t)
+		}
+		return
+	case moments.TimerSkill:
+		if a.Remind != nil {
+			a.Remind(ctx, t)
+		}
+		return
+	}
+	e, err := a.world.Entity(ctx, t.EntityID)
+	if err != nil {
+		return
+	}
+	for _, s := range a.skills {
+		if s.Name() == t.Skill {
+			a.apply(ctx, s, e.ID, s.OnTimer(ctx, a.view(), e, t))
+		}
+	}
 }
 
 func (a *Attention) dispatch(ctx context.Context, id string, changes []model.Change) {

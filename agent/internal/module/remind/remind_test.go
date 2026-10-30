@@ -78,7 +78,7 @@ func callTool(t *testing.T, s *mcp.ClientSession, tool string, args map[string]a
 // or, when it stored nothing, say so plainly.
 func TestTools(t *testing.T) {
 	var calls []call
-	s := session(t, New(fakeMind(t, &calls).URL+"/", "tok"))
+	s := session(t, New(fakeMind(t, &calls).URL+"/", "tok", nil))
 
 	got, isErr := callTool(t, s, "set_reminder", map[string]any{"text": "베개 챙기세요", "at": "2026-10-24T08:00"})
 	if isErr || !strings.Contains(got, "저장했습니다: [rem_1] 10/24(토) 08:00 · 베개 챙기세요") {
@@ -120,7 +120,7 @@ func TestTools(t *testing.T) {
 func TestConsoleListIsMindsHistory(t *testing.T) {
 	var calls []call
 	mind := fakeMind(t, &calls)
-	h := New(mind.URL, "tok").ConsoleHandler()
+	h := New(mind.URL, "tok", nil).ConsoleHandler()
 
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/reminders", nil))
@@ -136,7 +136,7 @@ func TestConsoleListIsMindsHistory(t *testing.T) {
 		t.Fatalf("GET 만: %d %+v", rec.Code, calls)
 	}
 	// mind not answering is the console's error, not an empty list.
-	down := New("http://127.0.0.1:1", "tok").ConsoleHandler()
+	down := New("http://127.0.0.1:1", "tok", nil).ConsoleHandler()
 	rec = httptest.NewRecorder()
 	down.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/reminders", nil))
 	if rec.Code != http.StatusBadGateway {

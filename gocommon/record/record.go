@@ -14,11 +14,14 @@
 package record
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -143,6 +146,15 @@ func New(dsn string, loops *health.Loops, log *slog.Logger) *Writer {
 	w := newWriter(pgSink{pool}, loops, log)
 	w.ping = pool.Ping
 	return w
+}
+
+// NewHTTP is a Writer that hands records to input-svc at url: for a process
+// with no way to the outbox (the guest's agent). Run must be running.
+func NewHTTP(url, token string, loops *health.Loops, log *slog.Logger) *Writer {
+	if url == "" {
+		return nil
+	}
+	return newWriter(httpSink{url: strings.TrimRight(url, "/"), token: token, http: &http.Client{Timeout: tryFor}, log: log}, loops, log)
 }
 
 func newWriter(to sink, loops *health.Loops, log *slog.Logger) *Writer {
@@ -311,17 +323,59 @@ type envelope struct {
 	Payload       json.RawMessage `json:"payload"`
 }
 
-func (s pgSink) append(ctx context.Context, r Record, payload []byte) error {
-	body, err := json.Marshal(envelope{
+// outboxEnvelope is a record as it travels.
+func outboxEnvelope(r Record, payload []byte) envelope {
+	return envelope{
 		Kind: r.Kind, Source: r.Source, SourceKey: r.SourceKey, Actor: r.Actor, Channel: r.Channel, Subject: r.Subject,
 		OccurredAt: r.OccurredAt, Tier: r.Tier, SchemaVersion: r.SchemaVersion, TraceID: r.TraceID, CausationID: r.CausationID,
 		Payload: payload,
-	})
+	}
+}
+
+func (s pgSink) append(ctx context.Context, r Record, payload []byte) error {
+	body, err := json.Marshal(outboxEnvelope(r, payload))
 	if err != nil {
 		return err
 	}
 	_, err = s.pool.Exec(ctx, `insert into input.outbox (payload) values ($1)`, body)
 	return err
+}
+
+type httpSink struct {
+	url, token string
+	http       *http.Client
+	log        *slog.Logger
+}
+
+// append posts a record. One input-svc refuses is not tried again: it would
+// hold up everything behind it for good.
+func (s httpSink) append(ctx context.Context, r Record, payload []byte) error {
+	body, err := json.Marshal(outboxEnvelope(r, payload))
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.url+"/records", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if s.token != "" {
+		req.Header.Set("Authorization", "Bearer "+s.token)
+	}
+	resp, err := s.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	switch {
+	case resp.StatusCode < 300:
+		return nil
+	case resp.StatusCode < 500 && resp.StatusCode != http.StatusUnauthorized:
+		s.log.Warn("입구가 기록을 거절했습니다", "kind", r.Kind, "status", resp.StatusCode)
+		return nil
+	}
+	return fmt.Errorf("입구가 %d 를 돌려줬습니다", resp.StatusCode)
 }
 
 // Memory keeps records in memory: a test's Writer, and a replay's, which
@@ -363,4 +417,46 @@ func (m *Memory) Find(match func(Record) bool) (Record, bool) {
 func NewMemory(log *slog.Logger) (*Writer, *Memory) {
 	m := &Memory{}
 	return newWriter(m, nil, log), m
+}
+
+// CommandKind names a request for mind as the record it travels as: what the
+// agent asks of mind and what mind's door takes both come as these, and only
+// these change its state.
+func CommandKind(method, path string) string {
+	path, _, _ = strings.Cut(path, "?")
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) < 2 || parts[0] != "api" {
+		return "command"
+	}
+	switch parts[1] {
+	case "intents":
+		return "intent.answer"
+	case "notes":
+		return "note.decided"
+	case "links":
+		return "link.decided"
+	case "reminders":
+		switch method {
+		case "POST":
+			return "reminder.set"
+		case "PATCH":
+			return "reminder.change"
+		case "DELETE":
+			return "reminder.cancel"
+		}
+	case "checklists":
+		switch {
+		case method == "POST" && len(parts) == 2:
+			return "checklist.make"
+		case method == "PATCH":
+			return "checklist.change"
+		case method == "DELETE":
+			return "checklist.close"
+		case len(parts) >= 4 && parts[3] == "items":
+			return "checklist.check"
+		case len(parts) >= 4 && parts[3] == "show":
+			return "checklist.show"
+		}
+	}
+	return "command"
 }

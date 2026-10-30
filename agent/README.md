@@ -41,6 +41,7 @@ mind-svc :8102        인지 루프. 감지 → 해석 → 세계 모델 → 노
       ├─ jobs-svc      :8098  맡긴 작업의 기록 (실행은 agent 스케줄러)
       ├─ context-svc   :8103  위치·현재 상태 (OwnTracks·단축어·맥 수집기)
       ├─ input-svc     :8101  입구: outbox 를 꺼내 기록 + 소비자별 배달 (소비자는 gocommon/queue 로 직접 읽음)
+                                mind 를 바꾸는 일도 여기로 들어간다(internal/mindcmd: 기록을 남기고 mind 의 창구에서 답을 읽는다)
       ├─ output-svc    :8097  나가는 길: 효과를 읽어 알림함·웹 푸시·저녁 요약, 알림 분류 목록
       ├─ status-svc    :8096  상태 탭 (기능별 판정, 읽기만)
       └─ memory-svc    :8100  장기 기억 (Graphiti + FalkorDB)

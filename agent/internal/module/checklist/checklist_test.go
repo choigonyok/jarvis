@@ -134,7 +134,7 @@ func TestChecklistIsACardInTheConversation(t *testing.T) {
 	b := bus.New()
 	events, stop := b.Subscribe()
 	defer stop()
-	m := New(mind.serve(t), "tok", chat, b, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	m := New(mind.serve(t), "tok", nil, chat, b, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	s := session(t, m)
 
 	text, isErr := call(t, s, "make_checklist", map[string]any{"title": "캠핑 준비물", "items": []string{"장갑", "베개"}, "lead": "금요일 저녁에 다시 띄워 드릴게요"})
@@ -182,7 +182,7 @@ func TestConsoleDropsAndCloses(t *testing.T) {
 	b := bus.New()
 	events, stop := b.Subscribe()
 	defer stop()
-	m := New(mind.serve(t), "tok", &conversation{}, b, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	m := New(mind.serve(t), "tok", nil, &conversation{}, b, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	ctx := context.Background()
 	s := session(t, m)
 	if _, isErr := call(t, s, "make_checklist", map[string]any{"title": "캠핑 준비물", "items": []string{"장갑", "베개"}, "date": "2026-10-24", "show": false}); isErr {

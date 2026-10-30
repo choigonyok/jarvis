@@ -174,3 +174,29 @@ func TestTheGuestCanOnlyNotifyTheGuest(t *testing.T) {
 		t.Fatal("알림이 아닌 것은 안 됩니다")
 	}
 }
+
+// The guest's own reminders and lists come this way too, whoever they claim
+// to be from, and they are the guest's.
+func TestTheGuestAsksForTheirOwn(t *testing.T) {
+	for _, kind := range []string{"reminder.set", "checklist.make", "intent.answer", "policy.denied"} {
+		raw, _ := json.Marshal(map[string]any{"kind": kind, "source": "agent", "source_key": "k", "actor": "operator", "occurred_at": now, "tier": "raw"})
+		e, err := Parse(raw, 1, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		g, err := ForGuest(e)
+		if err != nil || !g.IsGuest() {
+			t.Fatalf("%s: %+v %v", kind, g, err)
+		}
+	}
+	for _, kind := range []string{"note.decided", "link.decided", "timer.fired", "payment.requested"} {
+		raw, _ := json.Marshal(map[string]any{"kind": kind, "source": "agent", "source_key": "k", "actor": "operator", "occurred_at": now, "tier": "raw"})
+		e, err := Parse(raw, 1, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ForGuest(e); err == nil {
+			t.Fatalf("%s 는 손님이 낼 수 없습니다", kind)
+		}
+	}
+}

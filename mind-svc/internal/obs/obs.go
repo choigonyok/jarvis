@@ -170,7 +170,32 @@ func NewStream(url, token string, db *pgxpool.Pool, kinds []string) *Stream {
 // through the outbox. What the sensors read is the second, and so is what the
 // gate did (action.*), which the loop reads back.
 func IsEffect(o Observation) bool {
-	return o.Source == mindSource && !strings.HasPrefix(o.Type, "action.")
+	return o.Source == mindSource && !strings.HasPrefix(o.Type, "action.") && o.Type != TimerFired
+}
+
+// TimerFired is mind's clock on the log: a timer whose moment came.
+const TimerFired = "timer.fired"
+
+// Command puts a request for mind on the stream, from whoever came to mind's
+// door with it (the console, the screen's note): nothing changes but through
+// the stream. It is a record like what the agent writes itself.
+func (l *Stream) Command(ctx context.Context, key, kind, actor, method, path string, body json.RawMessage) error {
+	if l.db == nil {
+		return errors.New("기록을 남길 데이터베이스가 없습니다")
+	}
+	if len(body) == 0 {
+		body = json.RawMessage("null")
+	}
+	raw, err := json.Marshal(map[string]any{
+		"kind": kind, "source": mindSource, "source_key": key, "actor": actor, "channel": "console", "subject": path,
+		"occurred_at": time.Now(), "tier": "raw", "schema_version": 1,
+		"payload": map[string]any{"method": method, "path": path, "body": body},
+	})
+	if err != nil {
+		return err
+	}
+	_, err = l.db.Exec(ctx, `insert into input.outbox (payload) values ($1)`, raw)
+	return err
 }
 
 const mindSource = "mind"

@@ -36,6 +36,7 @@ type Memory struct {
 	outcomes []model.Outcome
 	factRows []model.FactRow
 	classes  map[string]model.Class
+	commands map[string]model.Command
 	preds    map[string]model.Prediction
 	expects  map[[2]string]model.Expectation
 	replies  []model.ReplySituation
@@ -375,15 +376,15 @@ func (m *Memory) Intent(_ context.Context, id string) (model.Intent, error) {
 }
 
 func (m *Memory) Intents(_ context.Context, limit int) ([]model.Intent, error) {
-	return m.filter(func(model.Intent) bool { return true }, limit), nil
+	return m.filter(func(in model.Intent) bool { return in.Holder == "" }, limit), nil
 }
 
 func (m *Memory) IntentsFor(_ context.Context, entityID string) ([]model.Intent, error) {
-	return m.filter(func(in model.Intent) bool { return in.EntityID == entityID }, 1000), nil
+	return m.filter(func(in model.Intent) bool { return in.Holder == "" && in.EntityID == entityID }, 1000), nil
 }
 
 func (m *Memory) IntentsSince(_ context.Context, t time.Time) ([]model.Intent, error) {
-	return m.filter(func(in model.Intent) bool { return !in.CreatedAt.Before(t) }, 10000), nil
+	return m.filter(func(in model.Intent) bool { return in.Holder == "" && !in.CreatedAt.Before(t) }, 10000), nil
 }
 
 func (m *Memory) filter(keep func(model.Intent) bool, limit int) []model.Intent {
@@ -776,6 +777,40 @@ func (m *Memory) NoteVersions(_ context.Context, id string) ([]model.Note, error
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return slices.Clone(m.versions[id]), nil
+}
+
+func (m *Memory) PutCommand(_ context.Context, c model.Command) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.commands == nil {
+		m.commands = map[string]model.Command{}
+	}
+	if _, ok := m.commands[c.Key]; !ok {
+		c.At = time.Now()
+		m.commands[c.Key] = c
+	}
+	return nil
+}
+
+func (m *Memory) Command(_ context.Context, key string) (model.Command, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c, ok := m.commands[key]
+	if !ok {
+		return c, model.ErrNotFound
+	}
+	return c, nil
+}
+
+func (m *Memory) PruneCommands(_ context.Context, before time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for k, c := range m.commands {
+		if c.At.Before(before) {
+			delete(m.commands, k)
+		}
+	}
+	return nil
 }
 
 func (m *Memory) Class(_ context.Context, kind, key string) (model.Class, error) {
