@@ -25,6 +25,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/choigonyok/jarvis/gocommon/queue"
+	"github.com/choigonyok/jarvis/gocommon/record"
 )
 
 // Observation is one thing that happened, as the event log delivered it.
@@ -240,6 +241,13 @@ func (l *Stream) publish(ctx context.Context, o Observation) error {
 	return err
 }
 
+// Effect sends something decided that is not an observation: a write for the
+// hand to carry out.
+func (l *Stream) Effect(ctx context.Context, m queue.Message) error {
+	_, _, err := queue.Publish(ctx, l.db, queue.Effects, m)
+	return err
+}
+
 // relayed are the kinds without wording that output still has to hear of:
 // what took a notification's place, what answered it, and being busy.
 var relayed = map[string]bool{"suggestion.raised": true, "proposal.decided": true, "context.state": true}
@@ -294,7 +302,11 @@ func (l *Stream) Append(ctx context.Context, o Observation) error {
 	if IsEffect(o) {
 		return l.publish(ctx, o)
 	}
-	body, err := json.Marshal(o)
+	raw, err := json.Marshal(o)
+	if err != nil {
+		return err
+	}
+	body, err := record.FromEvent(raw, time.Now())
 	if err != nil {
 		return err
 	}

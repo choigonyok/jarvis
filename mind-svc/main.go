@@ -44,6 +44,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/engine"
 	"github.com/choigonyok/jarvis/mind-svc/internal/eval"
 	"github.com/choigonyok/jarvis/mind-svc/internal/gate"
+	"github.com/choigonyok/jarvis/mind-svc/internal/hand"
 	"github.com/choigonyok/jarvis/mind-svc/internal/interpret"
 	"github.com/choigonyok/jarvis/mind-svc/internal/ledger"
 	"github.com/choigonyok/jarvis/mind-svc/internal/llm"
@@ -163,7 +164,7 @@ func main() {
 			logOut = memLog
 		}
 		if getenv("MIND_CALENDAR", "memory") == "http" {
-			calendar = act.HTTPCalendar{URL: getenv("CALENDAR_URL", "http://calendar:8093"), Token: token}
+			calendar = act.HTTPCalendar{URL: getenv("CALENDAR_URL", "http://calendar:8093"), Token: token, HTTP: handed(stream, st)}
 			log.Warn("실제 캘린더(calendar-svc)에 씁니다")
 		}
 	}
@@ -205,7 +206,7 @@ func main() {
 	var orders act.Orders
 	if url := os.Getenv("ASSETS_URL"); mode == "stack" && url != "" {
 		assets = mind.AssetsHTTP{URL: url, Token: token}
-		orders = act.AssetsOrders{URL: url, Token: token}
+		orders = act.AssetsOrders{URL: url, Token: token, HTTP: handed(stream, st)}
 	}
 	// Travel: how long the usual ways take, from the stays (context-svc);
 	// here: the regions the operator is in now, for a reminder that counts
@@ -220,12 +221,12 @@ func main() {
 	// Jobs: a cart job goes to jobs-svc (the agent's browser runs it).
 	var jobs act.Jobs
 	if url := os.Getenv("JOBS_URL"); mode == "stack" && url != "" {
-		jobs = act.JobsSvc{URL: url, Token: token}
+		jobs = act.JobsSvc{URL: url, Token: token, HTTP: handed(stream, st)}
 	}
 	// Photos: albums go to Immich when it is there.
 	var photos act.Photos
 	if url, key := os.Getenv("IMMICH_URL"), os.Getenv("IMMICH_API_KEY"); mode == "stack" && url != "" && key != "" {
-		photos = act.Immich{URL: url, Key: key, Public: os.Getenv("IMMICH_PUBLIC_URL")}
+		photos = act.Immich{URL: url, Key: key, Public: os.Getenv("IMMICH_PUBLIC_URL"), HTTP: handed(stream, st)}
 	}
 
 	// Weather: as context-svc last said it. Home is the 집 region made on the
@@ -246,7 +247,7 @@ func main() {
 
 	var book *act.Spending
 	if url := os.Getenv("SPENDING_URL"); url != "" && mode == "stack" {
-		book = &act.Spending{URL: url, Token: token}
+		book = &act.Spending{URL: url, Token: token, HTTP: handed(stream, st)}
 	}
 	var emitTimer func(context.Context, model.Timer) error
 	if stream != nil {
@@ -357,6 +358,7 @@ func main() {
 			{Pool: lanes, Topic: queue.Records, Name: "mind", Kinds: mind.Kinds, Handle: take, Log: log},
 			{Pool: lanes, Topic: queue.Guest, Name: "mind-guest", Kinds: mind.GuestKinds, Handle: take, Log: log},
 			{Pool: lanes, Topic: queue.Records, Name: "mind-commands", Kinds: mind.CommandKinds, Handle: command, Log: log},
+			{Pool: lanes, Topic: queue.Records, Name: "mind-results", Kinds: []string{hand.KindResult}, Handle: func(ctx context.Context, msg queue.Message) error { return hand.Result(ctx, st, msg) }, Log: log},
 			{Pool: lanes, Topic: queue.Records, Name: "mind-structured", Kinds: sensor.Kinds, Handle: adapters, Log: log},
 			{Pool: lanes, Topic: queue.Guest, Name: "mind-commands-guest", Kinds: mind.GuestCommandKinds, Handle: command, Log: log},
 			{Pool: lanes, Topic: queue.Records, Name: "mind-relay", Kinds: []string{"*"}, Handle: stream.Relay(queue.Effects), Log: log},
@@ -528,6 +530,16 @@ func runEval(ctx context.Context, client llm.Client, loc *time.Location) int {
 
 // contentKey is the AES-256 key message text is sealed with in Postgres.
 // Without one the text is stored as it is.
+// handed is the client an actuator writes through: a write goes to output-svc
+// as an effect, and a read as it did. Without the stream (a laptop) the
+// actuator goes by itself.
+func handed(stream *obs.Stream, st store.Store) *http.Client {
+	if stream == nil {
+		return nil
+	}
+	return &http.Client{Transport: &hand.Transport{Publish: stream.Effect, Store: st}, Timeout: hand.Wait + 5*time.Second}
+}
+
 func contentKey() ([]byte, error) {
 	v := os.Getenv("MIND_CONTENT_KEY")
 	if v == "" {

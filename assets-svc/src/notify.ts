@@ -1,4 +1,4 @@
-import { enqueueEvents } from "./db.js";
+import { asRecord, enqueueEvents } from "./db.js";
 import type { Portfolio } from "./types.js";
 
 /**
@@ -159,7 +159,7 @@ function post(events: Event[]): void {
     void fetch(`${URL.replace(/\/$/, "")}/records`, {
       method: "POST",
       headers: { "content-type": "application/json", ...(TOKEN ? { authorization: `Bearer ${TOKEN}` } : {}) },
-      body: JSON.stringify(e),
+      body: JSON.stringify(asRecord(e)),
       signal: AbortSignal.timeout(5_000),
     }).catch((err: Error) => console.error("알림을 보내지 못했습니다:", e.kind, err.message));
   }

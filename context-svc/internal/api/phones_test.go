@@ -20,6 +20,22 @@ import (
 	"github.com/choigonyok/jarvis/gocommon/notify"
 )
 
+// heard is what reaches input-svc, read as the service said it: a record's
+// payload with the wording beside it, under the old names the tests ask by.
+func heard(r *http.Request) map[string]any {
+	var rec map[string]any
+	_ = json.NewDecoder(r.Body).Decode(&rec)
+	payload, _ := rec["payload"].(map[string]any)
+	e := map[string]any{"source": rec["source"], "type": rec["kind"], "kind": rec["kind"], "subject": rec["subject"], "key": rec["source_key"], "data": payload}
+	if n, ok := payload["notify"].(map[string]any); ok {
+		e["notify"] = n
+		for k, v := range n {
+			e[k] = v
+		}
+	}
+	return e
+}
+
 // phoneTest is a server with both phones, a clock that can be moved, and what
 // reaches input-svc.
 type phoneTest struct {
@@ -47,8 +63,7 @@ func newPhoneTest(t *testing.T) *phoneTest {
 	p := &phoneTest{t: t, st: st, events: make(chan map[string]any, 32)}
 	p.seoul, _ = time.LoadLocation("Asia/Seoul")
 	sink := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var e map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&e)
+		e := heard(r)
 		p.events <- e
 	}))
 	t.Cleanup(sink.Close)

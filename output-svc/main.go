@@ -26,6 +26,7 @@ import (
 	"github.com/choigonyok/jarvis/gocommon/queue"
 	"github.com/choigonyok/jarvis/gocommon/record"
 	"github.com/choigonyok/jarvis/output-svc/internal/api"
+	"github.com/choigonyok/jarvis/output-svc/internal/calls"
 	"github.com/choigonyok/jarvis/output-svc/internal/live"
 	"github.com/choigonyok/jarvis/output-svc/internal/notify"
 	"github.com/choigonyok/jarvis/output-svc/internal/push"
@@ -110,8 +111,20 @@ func main() {
 				Payload: map[string]any{"id": n.ID, "kind": n.Kind, "tier": n.Tier, "key": n.DedupeKey, "group": group}})
 		}
 	}
+	// The hand: what mind decided to write, carried out against the adapters'
+	// fixed APIs, each once.
+	token := os.Getenv("API_TOKEN")
+	bearer := func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+token) }
+	hand := &calls.Hand{Pool: pool, Records: sent, Log: log, HTTP: &http.Client{}, Services: map[string]calls.Service{
+		"calendar": {URL: os.Getenv("CALENDAR_URL"), Auth: bearer},
+		"spending": {URL: os.Getenv("SPENDING_URL"), Auth: bearer},
+		"jobs":     {URL: os.Getenv("JOBS_URL"), Auth: bearer},
+		"assets":   {URL: os.Getenv("ASSETS_URL"), Auth: bearer},
+		"immich":   {URL: os.Getenv("IMMICH_URL"), Auth: func(r *http.Request) { r.Header.Set("x-api-key", os.Getenv("IMMICH_API_KEY")) }},
+	}}
 	for _, c := range []*queue.Consumer{
 		{Pool: pool, Topic: queue.Effects, Name: "output", Kinds: []string{"*"}, Handle: server.Take, Log: log},
+		{Pool: pool, Topic: queue.Effects, Name: "output-calls", Kinds: []string{calls.KindCall}, Handle: hand.Take, Log: log},
 		{Pool: pool, Topic: queue.GuestEffects, Name: "output-guest", Kinds: []string{"*"}, Handle: server.Take, Log: log},
 		// Read from the records, past mind: that mind is down cannot be said
 		// through mind, and a card a payment waits on does not wait for a

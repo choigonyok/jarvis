@@ -109,7 +109,7 @@ func TestAppendSortsWhatItIsGiven(t *testing.T) {
 	if n := one(t, owner, `select count(*) from mind.effect_deliveries where consumer = $1 and id = $2`, name, id); n != 1 {
 		t.Fatalf("배달 %d", n)
 	}
-	if n := one(t, owner, `select count(*) from input.outbox where payload->>'key' = $1`, card); n != 0 {
+	if n := one(t, owner, `select count(*) from input.outbox where payload->>'source_key' = $1`, card); n != 0 {
 		t.Fatal("효과가 받은편지함으로 들어갔습니다")
 	}
 
@@ -117,7 +117,7 @@ func TestAppendSortsWhatItIsGiven(t *testing.T) {
 	if err := s.Append(ctx, Observation{Source: "kakao", Type: "message.observed", Subject: "room", Key: msg, OccurredAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
-	if n := one(t, owner, `select count(*) from input.outbox where payload->>'key' = $1`, msg); n != 1 {
+	if n := one(t, owner, `select count(*) from input.outbox where payload->>'source_key' = $1`, msg); n != 1 {
 		t.Fatal("일어난 일은 받은편지함으로 갑니다")
 	}
 	if n := one(t, owner, `select count(*) from mind.effects where source_key = $1`, msg); n != 0 {
@@ -203,7 +203,7 @@ func TestReadForAReplay(t *testing.T) {
 	s, owner, _ := setup(t)
 	ctx := context.Background()
 	var start int64
-	if err := owner.QueryRow(ctx, `select last_value from input.records_id_seq`).Scan(&start); err != nil {
+	if err := owner.QueryRow(ctx, `select coalesce(max(id), 0) from (select id from input.records union all select id from input.guest_records) r`).Scan(&start); err != nil {
 		t.Fatal(err)
 	}
 	put := func(guest bool, kind, k string) {

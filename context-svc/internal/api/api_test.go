@@ -791,8 +791,7 @@ func TestGuestRegions(t *testing.T) {
 	// What reaches input-svc.
 	got := make(chan map[string]any, 32)
 	sink := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var e map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&e)
+		e := heard(r)
 		got <- e
 	}))
 	defer sink.Close()

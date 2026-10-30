@@ -285,6 +285,8 @@ func All(cfg Config) []check.Probe {
 		e.delivery("mind-relay", "기록 → 알림 문구 넘기기", []string{"svc.mind"}),
 		e.delivery("output-status", "상태·결재 알림 → 출구", []string{"svc.output"}),
 		e.delivery("output", "효과 → 출구", []string{"svc.output", "svc.mind"}),
+		e.delivery("output-calls", "승인된 쓰기 → 출구", []string{"svc.output", "svc.mind"}),
+		e.delivery("mind-results", "쓰기 결과 → mind", []string{"svc.mind"}),
 		e.delivery("agent", "효과 → 에이전트", []string{"agent", "svc.mind"}),
 		// The guest's side: where the guest's phone is, what is said to the
 		// guest, and reminders in the guest's conversation.

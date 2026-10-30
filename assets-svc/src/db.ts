@@ -403,13 +403,35 @@ export async function enqueueEvents(events: unknown[]): Promise<boolean> {
   try {
     await pool.query(
       "insert into input.outbox (payload) select * from unnest($1::jsonb[])",
-      [events.map((e) => JSON.stringify(e))],
+      [events.map((e) => JSON.stringify(asRecord(e as Reported)))],
     );
     return true;
   } catch (err) {
     console.error("이벤트를 outbox 에 쓰지 못해 바로 보냅니다:", (err as Error).message);
     return false;
   }
+}
+
+/** What a report of this service's says, whether a record already or the notification shape. */
+export type Reported = {
+  source?: string; kind?: string; type?: string; tier?: string; level?: string; title?: string; body?: string; url?: string;
+  key?: string; audience?: string; data?: Record<string, unknown>; source_key?: string;
+};
+
+/** A report as the record input-svc takes: the wording goes in the payload, under notify. */
+export function asRecord(e: Reported): unknown {
+  if (e.source_key) return e;
+  const now = new Date().toISOString();
+  const notify = e.title
+    ? { tier: e.tier, level: e.level, title: e.title, body: e.body, url: e.url, audience: e.audience }
+    : undefined;
+  return {
+    kind: e.type ?? e.kind, source: e.source ?? "assets",
+    source_key: e.key ?? `ev-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    actor: e.audience === "guest" ? "guest" : (e.source ?? "assets"),
+    occurred_at: now, tier: "raw", schema_version: 1,
+    payload: { ...(e.data ?? {}), ...(notify ? { notify } : {}) },
+  };
 }
 
 /** An order as placed (or refused), for asset_orders (migration 055). */

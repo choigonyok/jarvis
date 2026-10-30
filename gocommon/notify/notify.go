@@ -20,6 +20,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/choigonyok/jarvis/gocommon/record"
 )
 
 // Event is the notification shape input-svc accepts: in the outbox, or on
@@ -73,8 +75,15 @@ func (c *Client) Emit(v any) {
 	if c == nil {
 		return
 	}
-	body, err := json.Marshal(v)
+	raw, err := json.Marshal(v)
 	if err != nil {
+		return
+	}
+	body, err := record.FromEvent(raw, time.Now())
+	if err != nil {
+		if c.log != nil {
+			c.log.Warn("이벤트를 기록으로 만들지 못했습니다", "err", err)
+		}
 		return
 	}
 	go func() {

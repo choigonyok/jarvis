@@ -967,6 +967,13 @@ services:
       VAPID_PUBLIC_KEY: ${JARVIS_VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${JARVIS_VAPID_PRIVATE_KEY:-}
       VAPID_SUBJECT: ${JARVIS_VAPID_SUBJECT:-https://jarvis.choigonyok.com}
+      # 승인된 쓰기를 대신 하는 손. 정해진 API 만 부른다(output-svc internal/calls).
+      CALENDAR_URL: http://calendar:8093
+      SPENDING_URL: http://spending:8095
+      JOBS_URL: http://jobs:8098
+      ASSETS_URL: http://assets:8092
+      IMMICH_URL: http://immich:2283
+      IMMICH_API_KEY: ${IMMICH_MIND_API_KEY:-}
     expose:
       - "8097"
     ports:

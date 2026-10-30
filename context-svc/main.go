@@ -136,7 +136,7 @@ func main() {
 			},
 		}
 		(&watch.Watcher{Service: "context", Records: records, Loops: loops, Log: log}).Run(ctx,
-			watch.Source{Kind: "weather.forecast", Label: "날씨 예보", Every: 30 * time.Minute, Read: forecasts.Read})
+			watch.Source{Kind: "weather.forecast", Label: "날씨 예보", Every: time.Hour, Read: forecasts.Read})
 	}
 	srv := &http.Server{Addr: addr, Handler: handler, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second}
 	go func() {
