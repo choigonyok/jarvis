@@ -11,7 +11,7 @@ import { usePush } from "@/lib/use-push";
 import { cn } from "@/lib/utils";
 
 /**
- * The notification inbox, read from notify-svc. Separate from the approval
+ * The notification inbox, read from output-svc. Separate from the approval
  * ledger (기록): that is what was decided, this is what happened - a card
  * waiting, a collector stopped, a budget crossed, the evening's summary.
  *
@@ -33,7 +33,7 @@ type Note = {
 
 type Settings = { muted: string[]; quietStart: string; quietEnd: string; digestAt: string };
 
-/** A category a sender can use (the part of `kind` before the dot). notify-svc owns the list. */
+/** A category a sender can use (the part of `kind` before the dot). output-svc owns the list. */
 type Category = { id: string; label: string; hint: string };
 
 const ago = (iso: string) => {
@@ -46,7 +46,7 @@ const ago = (iso: string) => {
   return d < 7 ? `${d}일 전` : new Date(iso).toLocaleDateString("ko-KR", { month: "numeric", day: "numeric" });
 };
 
-/** How many the inbox shows a page: notify-svc counts them all and sends one page. */
+/** How many the inbox shows a page: output-svc counts them all and sends one page. */
 const INBOX_PAGE = 20;
 
 export function Notifications() {

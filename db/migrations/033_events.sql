@@ -1,5 +1,5 @@
 -- 이벤트. 모든 서비스가 "무슨 일이 있었나"를 events-svc 에 보내면 여기에 먼저
--- 쌓이고, 구독한 소비자(notify-svc, agent ...)에게 차례로 전달된다. events-svc
+-- 쌓이고, 구독한 소비자(output-svc, agent ...)에게 차례로 전달된다. events-svc
 -- 는 판단하지 않는다 - 알릴지, 제안할지는 받은 쪽이 정한다.
 create table if not exists events (
   id          bigserial primary key,

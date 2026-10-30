@@ -56,6 +56,9 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/weather"
 )
 
+// effectsKeep is how long an effect stays once everyone has taken it.
+const effectsKeep = 30 * 24 * time.Hour
+
 func main() {
 	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -149,7 +152,7 @@ func main() {
 			stream = obs.NewStream(url, token, pool, append(append([]string{}, mind.Kinds...), mind.GuestKinds...))
 			logOut = stream
 			if !quiet {
-				notifier = nil // through the log, to notify-svc
+				notifier = nil // through the log, to output-svc
 			}
 		} else {
 			memLog = obs.NewMemoryLog(log)
@@ -271,9 +274,25 @@ func main() {
 		for _, c := range []*queue.Consumer{
 			{Pool: db, Topic: queue.Records, Name: "mind", Kinds: mind.Kinds, Handle: take, Log: log},
 			{Pool: db, Topic: queue.Guest, Name: "mind-guest", Kinds: mind.GuestKinds, Handle: take, Log: log},
+			{Pool: db, Topic: queue.Records, Name: "mind-relay", Kinds: []string{"*"}, Handle: stream.Relay(queue.Effects), Log: log},
+			{Pool: db, Topic: queue.Guest, Name: "mind-relay-guest", Kinds: []string{"*"}, Handle: stream.Relay(queue.GuestEffects), Log: log},
 		} {
 			go c.Run(ctx)
 		}
+		go func() {
+			for {
+				if n, err := stream.PruneEffects(ctx, effectsKeep); err != nil && ctx.Err() == nil {
+					log.Warn("지난 효과를 지우지 못했습니다", "err", err)
+				} else if n > 0 {
+					log.Info("지난 효과를 지웠습니다", "count", n)
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(24 * time.Hour):
+				}
+			}
+		}()
 	}
 	if mode == "stack" {
 		exclude := cfg.Noise

@@ -56,6 +56,13 @@ func TestEventKeepsDataAndWordingApart(t *testing.T) {
 	}
 }
 
+// Every stream is looked over.
+func TestAllIsEveryTopic(t *testing.T) {
+	if len(All) != 4 {
+		t.Fatalf("%d", len(All))
+	}
+}
+
 func TestEventOfAnEmptyPayload(t *testing.T) {
 	raw, err := Message{ID: 1, Kind: "x"}.Event()
 	if err != nil {

@@ -90,7 +90,7 @@ export function handleWorkerMessage(data: unknown, go: (path: string) => void) {
   if (msg?.type === "jarvis:push") {
     // A push that reached the phone: the phone showed it, so the page only
     // re-reads. What the page shows itself comes over its own stream
-    // (useLiveNotifications), for devices notify-svc knows are looking.
+    // (useLiveNotifications), for devices output-svc knows are looking.
     window.dispatchEvent(new Event(RESUME));
     return;
   }
@@ -115,12 +115,12 @@ export function showInApp(p: ShownPush) {
 }
 
 /**
- * While the console is on screen: an open stream from notify-svc, and every
- * 10 seconds a word that this device is looking - so notify-svc sends what
+ * While the console is on screen: an open stream from output-svc, and every
+ * 10 seconds a word that this device is looking - so output-svc sends what
  * happens over the stream, shown in the page, instead of a phone push whose
  * banner would cover it. Leaving the screen closes the stream and says so;
  * a phone that suspends the page without a word stops saying it, and
- * notify-svc goes back to pushing 15 seconds later (internal/live).
+ * output-svc goes back to pushing 15 seconds later (internal/live).
  */
 export function useLiveNotifications(enabled: boolean) {
   useEffect(() => {
@@ -159,7 +159,7 @@ export function useLiveNotifications(enabled: boolean) {
         say();
       };
       // A reconnect answered with anything but a stream closes it for good:
-      // the page stops saying it is looking, and notify-svc goes back to
+      // the page stops saying it is looking, and output-svc goes back to
       // phone pushes - banners over the open app - until it is next hidden
       // and shown. Opened again here instead, while the page is on screen.
       source.onerror = () => {
@@ -181,7 +181,7 @@ export function useLiveNotifications(enabled: boolean) {
     };
     const onVisibility = () => (document.visibilityState === "visible" ? start() : stop());
 
-    // The push subscription's endpoint is what notify-svc knows this device by.
+    // The push subscription's endpoint is what output-svc knows this device by.
     void (async () => {
       try {
         const reg = await navigator.serviceWorker?.getRegistration();

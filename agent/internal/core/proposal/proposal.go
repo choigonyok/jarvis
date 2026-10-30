@@ -129,7 +129,7 @@ type Store struct {
 	// card raised in conversation any more; this is how its decision gets
 	// back to whoever has to act on it.
 	onDecide []func(Proposal, Decision)
-	// onOpen hears every new card - how it reaches the phone (notify-svc).
+	// onOpen hears every new card - how it reaches the phone (output-svc).
 	onOpen  []func(Proposal)
 	onClose []func(Proposal)
 }

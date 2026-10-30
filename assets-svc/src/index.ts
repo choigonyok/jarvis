@@ -98,7 +98,7 @@ async function rebuild(): Promise<string> {
 
     // 스냅샷은 곁일이다. 실패해도 자산 조회는 그대로 답해야 하므로 await 하지
     // 않고, 오류는 로그로만 남긴다.
-    // 알릴 만한 것(비중 이탈, 입출금 감지, 공제 임박, 하루 요약)은 notify-svc 로.
+    // 알릴 만한 것(비중 이탈, 입출금 감지, 공제 임박, 하루 요약)은 output-svc 로.
     announce(portfolio);
 
     db.saveSnapshot(portfolio, TZ)

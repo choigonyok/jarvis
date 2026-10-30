@@ -210,7 +210,7 @@ GET /transit/lines?kind=bus|subway&region=gyeonggi|seoul&id=   그 정류장의 
 
 알림(`nudge`, 매분): 알림을 켠 경로가 그 요일·시간대 안이면 나가기 15분 안에 '슬슬 짐 싸야 해요', 2분 안(1분 늦음까지)
 '지금 나가요'를 그 사람에게(`transit.pack|go`, `audience` 운영자·손님, `tier now`) - 차 한 대(차량 번호)와 단계마다 한
-번. 시간대 밖에는 피드도 묻지 않는다. notify-svc 는 이 종류를 리마인드처럼 방해 금지에도 울린다.
+번. 시간대 밖에는 피드도 묻지 않는다. output-svc 는 이 종류를 리마인드처럼 방해 금지에도 울린다.
 
 ## 현재 상태 한 장
 
@@ -224,7 +224,7 @@ GET /transit/lines?kind=bus|subway&region=gyeonggi|seoul&id=   그 정류장의 
 
 이 한 장이 바뀌면(보고가 올 때마다, 그리고 신호가 낡아 끝나는 것까지 1분마다 확인) `context.state` 이벤트를 낸다:
 `{state, changed: ["운전 시작", "집 끝"], summary}`. 마지막으로 알린 상태는 `context_state` 의 `derived` 키에 둔다.
-notify-svc 가 이것을 듣고 **운전·회의 중에는 즉시 알림을 붙잡았다가** 끝나면 "운전·회의 중 알림 N건"으로 한 번에
+output-svc 가 이것을 듣고 **운전·회의 중에는 즉시 알림을 붙잡았다가** 끝나면 "운전·회의 중 알림 N건"으로 한 번에
 보낸다(방해 금지 시간과 같은 방식, 끝을 못 들어도 4시간 뒤 풀림). agent 의 Source 인터페이스(`module.Source`)는
 실행 경로가 없어서(레지스트리가 모으기만 한다) 쓰지 않았다: 에이전트는 기록 스트림(`gocommon/queue`)으로 받고,
 상태는 매 턴 읽는다.

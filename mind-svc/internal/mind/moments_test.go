@@ -151,7 +151,7 @@ func TestBandHomeAlreadyAndTheLatest(t *testing.T) {
 }
 
 // What the operator asked for goes out in their words, as remind.asked -
-// which notify-svc rings even in quiet hours - and the conversation is
+// which output-svc rings even in quiet hours - and the conversation is
 // shown it waiting, with its id.
 func TestAskedReminder(t *testing.T) {
 	seoul, _ := time.LoadLocation("Asia/Seoul")

@@ -1,5 +1,5 @@
 // Package push delivers one payload to every subscribed device over Web Push
-// (VAPID). It is the only way out of notify-svc: no app to install, and a tap
+// (VAPID). It is the only way out of output-svc: no app to install, and a tap
 // opens the console on the screen the notification is about.
 package push
 
@@ -16,8 +16,8 @@ import (
 
 	webpush "github.com/SherClockHolmes/webpush-go"
 
-	"github.com/choigonyok/jarvis/notify-svc/internal/live"
-	"github.com/choigonyok/jarvis/notify-svc/internal/store"
+	"github.com/choigonyok/jarvis/output-svc/internal/live"
+	"github.com/choigonyok/jarvis/output-svc/internal/store"
 )
 
 // Payload is what the console's service worker (web/public/sw.js) reads.

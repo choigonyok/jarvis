@@ -36,7 +36,7 @@ type Observation struct {
 	Data       json.RawMessage `json:"data"`
 	Key        string          `json:"key,omitempty"`
 	OccurredAt time.Time       `json:"occurredAt"`
-	// Notify is wording for a person (notify-svc reads it).
+	// Notify is wording for a person (output-svc reads it).
 	Notify json.RawMessage `json:"notify,omitempty"`
 }
 
@@ -165,7 +165,110 @@ func NewStream(url, token string, db *pgxpool.Pool, kinds []string) *Stream {
 	return &Stream{url: strings.TrimRight(url, "/"), token: token, db: db, http: &http.Client{Timeout: 10 * time.Second}, kinds: kinds}
 }
 
+// IsEffect is whether an observation is something mind decided, which goes out
+// on the effects topic, rather than something that happened, which goes in
+// through the outbox. What the sensors read is the second, and so is what the
+// gate did (action.*), which the loop reads back.
+func IsEffect(o Observation) bool {
+	return o.Source == mindSource && !strings.HasPrefix(o.Type, "action.")
+}
+
+const mindSource = "mind"
+
+// topicFor is who an effect is for: the guest's go to the guest's tables.
+func topicFor(notify json.RawMessage) queue.Topic {
+	var n struct {
+		Audience string `json:"audience"`
+	}
+	if len(notify) > 0 && json.Unmarshal(notify, &n) == nil && n.Audience == "guest" {
+		return queue.GuestEffects
+	}
+	return queue.Effects
+}
+
+// publish sends an effect. Its data and wording lie side by side in the
+// payload, as they do in a record.
+func (l *Stream) publish(ctx context.Context, o Observation) error {
+	if l.db == nil {
+		return errors.New("효과를 낼 데이터베이스가 없습니다")
+	}
+	fields := map[string]json.RawMessage{}
+	if len(o.Data) > 0 {
+		if err := json.Unmarshal(o.Data, &fields); err != nil {
+			return fmt.Errorf("효과의 data 를 읽지 못했습니다: %w", err)
+		}
+	}
+	if len(o.Notify) > 0 {
+		fields["notify"] = o.Notify
+	}
+	payload, err := json.Marshal(fields)
+	if err != nil {
+		return err
+	}
+	key := o.Key
+	if key == "" {
+		key = fmt.Sprintf("%s:%d", o.Type, time.Now().UnixNano())
+	}
+	_, _, err = queue.Publish(ctx, l.db, topicFor(o.Notify), queue.Message{
+		Kind: o.Type, Source: o.Source, SourceKey: key, Actor: mindSource, Subject: o.Subject, OccurredAt: o.OccurredAt, Payload: payload,
+	})
+	return err
+}
+
+// relayed are the kinds without wording that output still has to hear of:
+// what took a notification's place, what answered it, and being busy.
+var relayed = map[string]bool{"suggestion.raised": true, "proposal.decided": true, "context.state": true}
+
+// direct is what output reads from the records itself, so it does not need
+// mind to be up: that mind is down cannot be said through mind, and a payment
+// waiting on a card does not wait for a redeploy.
+func direct(kind string) bool {
+	return strings.HasPrefix(kind, "status.") || strings.HasPrefix(kind, "approval.")
+}
+
+// Relay passes on what another service wants said. The wording is still that
+// service's and goes out as it is; deciding what is worth saying moves here
+// with the rules (the registry). It reads the stream on its own consumer, so
+// a loop busy with a message holds up no push.
+func (l *Stream) Relay(topic queue.Topic) func(context.Context, queue.Message) error {
+	return func(ctx context.Context, m queue.Message) error {
+		if topic == queue.Effects && direct(m.Kind) {
+			return nil
+		}
+		var p struct {
+			Notify json.RawMessage `json:"notify"`
+		}
+		if err := json.Unmarshal(m.Payload, &p); err != nil {
+			return fmt.Errorf("%w: %v", queue.ErrRefused, err)
+		}
+		if len(p.Notify) == 0 && !relayed[m.Kind] {
+			return nil
+		}
+		m.CausationID = m.SourceKey
+		_, _, err := queue.Publish(ctx, l.db, topic, m)
+		return err
+	}
+}
+
+// PruneEffects forgets what went out long ago and everyone has taken. An
+// effect is on its way somewhere: what happened is in the records.
+func (l *Stream) PruneEffects(ctx context.Context, keep time.Duration) (int64, error) {
+	var n int64
+	for _, t := range []queue.Topic{queue.Effects, queue.GuestEffects} {
+		tag, err := l.db.Exec(ctx, `delete from `+t.Messages+` m where m.received_at < $1
+			and not exists (select 1 from `+t.Deliveries+` d where d.id = m.id)`, time.Now().Add(-keep))
+		if err != nil {
+			return n, err
+		}
+		n += tag.RowsAffected()
+	}
+	return n, nil
+}
+
 func (l *Stream) Append(ctx context.Context, o Observation) error {
+	if IsEffect(o) {
+		return l.publish(ctx, o)
+	}
 	body, err := json.Marshal(o)
 	if err != nil {
 		return err

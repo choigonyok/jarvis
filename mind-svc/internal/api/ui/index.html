@@ -243,7 +243,7 @@ function render() {
       ${ev ? `<div class="meta">근거 ${ev}</div>` : ""}${i.error ? `<div class="meta" style="color:var(--no)">${esc(i.error)}</div>` : ""}<div class="acts">${acts}</div></article>`;
   }).join("") || `<div class="empty">스킬이 아직 아무것도 하자고 하지 않았습니다.</div>`;
 
-  $("notices").innerHTML = s.mode === "stack" && !s.notices ? "<div>알림은 관측 로그를 거쳐 notify-svc 로 갑니다.</div>"
+  $("notices").innerHTML = s.mode === "stack" && !s.notices ? "<div>알림은 관측 로그를 거쳐 output-svc 로 갑니다.</div>"
     : (s.notices || []).slice().reverse().slice(0, 12).map((n) => `<div>${n.tier === "now" ? "🔔" : "🌙"} <b>${esc(n.title)}</b> ${esc(n.body).replace(/\n/g, " · ")}</div>`).join("") || "<div>없음</div>";
   $("calendar").innerHTML = (s.calendar || []).map((c) => `<div>${esc(c.date)}${c.start ? " " + c.start : ""} <b>${esc(c.title)}</b>${c.place ? " @" + esc(c.place) : ""}</div>`).join("") || "<div>비어 있음</div>";
   $("timers").innerHTML = (s.timers || []).map((tm) => `<div>${tm.firedAt ? "✓" : "⏰"} ${t(tm.fireAt)} · ${esc(tm.skill)}/${esc(tm.name)}</div>`).join("") || "<div>없음</div>";

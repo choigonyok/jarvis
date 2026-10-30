@@ -51,7 +51,7 @@
 //
 // When the state in one place changes (driving, in a meeting, home, at
 // work, focus), an event says so: context.state, for whatever listens -
-// notify-svc holds pushes while driving or in a meeting. It is checked on
+// output-svc holds pushes while driving or in a meeting. It is checked on
 // every report and every minute, since a signal also ends by going stale.
 package api
 

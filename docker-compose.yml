@@ -896,7 +896,7 @@ services:
       # 이 아래는 /health 의 계약(gocommon/health: 반복 작업의 진행, 격리함)이나 상태만 읽는다.
       # 입구와 소비자마다의 전달, 알림, 작업, iMessage 수집기, 웹 찾기, 손님 에이전트, 사진.
       INPUT_URL: http://input:8101
-      NOTIFY_SVC_URL: http://notify:8097
+      NOTIFY_SVC_URL: http://output:8097
       JOBS_URL: http://jobs:8098
       IMESSAGE_URL: http://imessage:8099
       SEARCH_URL: http://search:8104
@@ -939,20 +939,20 @@ services:
   # how the Worker reaches back to it - outbound only, no port opened on the
   # host. Opt in with: docker compose --profile cloudflare up -d
 
-  # 알림. 기록 스트림에서 문구가 붙은 것을 읽어 저장·중복 제거·방해 금지·저녁 요약을
-  # 거쳐 웹 푸시로 폰에 보낸다. 알림함도 여기서 읽는다.
+  # 나가는 길. mind 가 낸 효과를 읽어 저장·중복 제거·방해 금지·저녁 요약을 거쳐 웹 푸시로
+  # 폰에 보낸다. 알림함도 여기서 읽는다. 상태 알림과 결재 대기만 기록에서 바로 읽는다.
   # VAPID 키는 .env 에만 둔다(공개 저장소).
-  notify:
+  output:
     <<: *outside
     build:
-      context: ./notify-svc
+      context: ./output-svc
       additional_contexts:
         gocommon: ./gocommon
     environment:
       TZ: ${TZ:-Asia/Seoul}
       LISTEN_ADDR: ":8097"
       DATABASE_URL: >-
-        postgres://svc_notify:${JARVIS_DB_PASSWORD_NOTIFY:?scripts/db-roles 를 먼저 실행하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
+        postgres://svc_output:${JARVIS_DB_PASSWORD_OUTPUT:?scripts/db-roles 를 먼저 실행하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
       API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
       VAPID_PUBLIC_KEY: ${JARVIS_VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${JARVIS_VAPID_PRIVATE_KEY:-}
@@ -971,8 +971,11 @@ services:
       db-migrate:
         condition: service_completed_successfully
     networks:
-      - default
-      - data
+      default:
+        # 터널 뒤 게이트웨이의 Workers VPC 서비스가 이 이름으로 부른다(edge/wrangler.jsonc NOTIFY).
+        aliases:
+          - notify
+      data:
     restart: unless-stopped
   # The event log every service reports to. It only keeps events and hands
   # each subscriber (notify, agent) the types it asked for, in order; what an
@@ -1065,7 +1068,7 @@ services:
       # 감지기가 첫 시작에 건너뛴 지난 대화를 한 번, 사실만 읽는다(일정·카드 없음).
       # 끝나면 다시 돌지 않는다(mind_cursors history:done).
       MIND_HISTORY: ${MIND_HISTORY:-false}
-      # 스킬·관문의 알림(아침 브리핑, 일정 전 확인)은 notify-svc 로, 질문은
+      # 스킬·관문의 알림(아침 브리핑, 일정 전 확인)은 효과로 output-svc 에, 질문은
       # mind.card 로 에이전트에. 카드는 이 한 길로만 나간다.
       MIND_QUIET: ${MIND_QUIET:-false}
       # 날씨(Open-Meteo 예보, Nominatim 지명 - 키 없음): 아침 브리핑의 날씨 줄, 이틀 안의 야외 일정에 비 예보면

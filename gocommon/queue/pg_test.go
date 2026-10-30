@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -73,6 +74,13 @@ func newWorld(t *testing.T, topic Topic) *world {
 func (w *world) publish(kind, subject string) int64 {
 	w.t.Helper()
 	ctx := context.Background()
+	if w.topic == Effects || w.topic == GuestEffects {
+		id, dup, err := Publish(ctx, w.admin, w.topic, Message{Kind: kind, Source: "test", SourceKey: unique(w.t), Actor: "test", Subject: subject, Payload: []byte(`{"a":1}`)})
+		if err != nil || dup {
+			w.t.Fatalf("%v %v", dup, err)
+		}
+		return id
+	}
 	tx, err := w.admin.Begin(ctx)
 	if err != nil {
 		w.t.Fatal(err)
@@ -475,26 +483,64 @@ func TestRetryAndDrop(t *testing.T) {
 }
 
 // Each role of the stack reads what it is there to read, with the rights it
-// has - and the guest's sees the guest's tables and only its own rows there.
+// has.
 func TestRolesCanDoTheirPart(t *testing.T) {
-	for _, role := range []string{"svc_agent", "svc_mind", "svc_notify"} {
-		t.Run(role, func(t *testing.T) {
-			w := newWorld(t, Records)
+	for _, c := range []struct {
+		role  string
+		topic Topic
+	}{
+		{"svc_mind", Records}, {"svc_output", Records}, {"svc_mind", Guest},
+		{"svc_agent", Effects}, {"svc_output", Effects}, {"svc_output", GuestEffects},
+	} {
+		t.Run(c.role+"-"+c.topic.Name, func(t *testing.T) {
+			w := newWorld(t, c.topic)
 			id := w.publish("a", "")
 			seen := &log{}
-			start(t, w.consumer(as(t, role), func(_ context.Context, m Message) error { seen.add(m.ID); return nil }))
+			start(t, w.consumer(as(t, c.role), func(_ context.Context, m Message) error { seen.add(m.ID); return nil }))
 			eventually(t, "받게", func() bool { return len(seen.list()) == 1 && seen.list()[0] == id })
 			eventually(t, "지워지게", func() bool { return w.left() == 0 })
 		})
 	}
-	for _, role := range []string{"svc_mind", "svc_notify"} {
-		t.Run(role+"-guest", func(t *testing.T) {
-			w := newWorld(t, Guest)
-			id := w.publish("a", "")
-			seen := &log{}
-			start(t, w.consumer(as(t, role), func(_ context.Context, m Message) error { seen.add(m.ID); return nil }))
-			eventually(t, "받게", func() bool { return len(seen.list()) == 1 && seen.list()[0] == id })
-			eventually(t, "지워지게", func() bool { return w.left() == 0 })
+}
+
+// The agent reads what mind sends it, and what happened is not its to read.
+func TestTheAgentReadsOnlyEffects(t *testing.T) {
+	agent := as(t, "svc_agent")
+	for _, q := range []string{`select count(*) from input.records`, `select count(*) from input.deliveries`,
+		`select count(*) from mind.guest_effects`} {
+		if err := agent.QueryRow(context.Background(), q).Scan(new(int)); err == nil {
+			t.Fatalf("%s 를 읽을 수 없어야 합니다", q)
+		}
+	}
+}
+
+// mind publishes to both sides under its own role, once per key, with a
+// delivery for each consumer whose kinds match and none for the others.
+func TestPublishIsOncePerKey(t *testing.T) {
+	ctx := context.Background()
+	for _, topic := range []Topic{Effects, GuestEffects} {
+		t.Run(topic.Name, func(t *testing.T) {
+			w := newWorld(t, topic)
+			other := unique(t)
+			if _, err := w.admin.Exec(ctx, `insert into `+topic.Consumers+` (name, kinds) values ($1, array['b.*'])`, other); err != nil {
+				t.Fatal(err)
+			}
+			mind := as(t, "svc_mind")
+			m := Message{Kind: "a.b", Source: "mind", SourceKey: unique(t), Actor: "mind", Subject: "s"}
+			id, dup, err := Publish(ctx, mind, topic, m)
+			if err != nil || dup || id == 0 {
+				t.Fatalf("%d %v %v", id, dup, err)
+			}
+			if _, dup, err := Publish(ctx, mind, topic, m); err != nil || !dup {
+				t.Fatalf("%v %v", dup, err)
+			}
+			if w.left() != 1 {
+				t.Fatalf("배달 %d 건", w.left())
+			}
+			var n int
+			if err := w.admin.QueryRow(ctx, `select count(*) from `+topic.Deliveries+` where consumer = $1`, other).Scan(&n); err != nil || n != 0 {
+				t.Fatalf("원하지 않은 소비자: %d %v", n, err)
+			}
 		})
 	}
 }
@@ -502,32 +548,33 @@ func TestRolesCanDoTheirPart(t *testing.T) {
 func TestTheGuestsRoleSeesOnlyItsOwn(t *testing.T) {
 	ctx := context.Background()
 	guest := as(t, "svc_guest")
-	w := newWorld(t, Guest)
+	w := newWorld(t, GuestEffects)
 	w.publish("remind.asked", "")
 	admin := w.admin
-	if _, err := admin.Exec(ctx, `insert into input.guest_consumers (name, kinds) values ('agent-guest', array['remind.*']) on conflict do nothing`); err != nil {
+	if _, err := admin.Exec(ctx, `insert into mind.guest_effect_consumers (name, kinds) values ('agent-guest', array['remind.*']) on conflict do nothing`); err != nil {
 		t.Fatal(err)
 	}
-	w2 := &world{t: t, admin: admin, topic: Guest, name: "agent-guest"}
+	w2 := &world{t: t, admin: admin, topic: GuestEffects, name: "agent-guest"}
 	id := w2.publish("remind.asked", "")
 	seen := &log{}
 	start(t, w2.consumer(guest, func(_ context.Context, m Message) error { seen.add(m.ID); return nil }))
-	eventually(t, "받게", func() bool { return len(seen.list()) == 1 && seen.list()[0] == id })
+	eventually(t, "받게", func() bool { return slices.Contains(seen.list(), id) })
 
 	var n int
-	if err := guest.QueryRow(ctx, `select count(*) from input.guest_deliveries where consumer <> 'agent-guest'`).Scan(&n); err != nil || n != 0 {
+	if err := guest.QueryRow(ctx, `select count(*) from mind.guest_effect_deliveries where consumer <> 'agent-guest'`).Scan(&n); err != nil || n != 0 {
 		t.Fatalf("남의 배달이 보입니다: %d %v", n, err)
 	}
-	if tag, err := guest.Exec(ctx, `delete from input.guest_deliveries where consumer = $1`, w.name); err != nil || tag.RowsAffected() != 0 {
+	if tag, err := guest.Exec(ctx, `delete from mind.guest_effect_deliveries where consumer = $1`, w.name); err != nil || tag.RowsAffected() != 0 {
 		t.Fatalf("남의 배달을 지웠습니다: %v %v", tag, err)
 	}
-	if _, err := guest.Exec(ctx, `insert into input.guest_consumers (name, kinds) values ('notify-guest', array['*'])
+	if _, err := guest.Exec(ctx, `insert into mind.guest_effect_consumers (name, kinds) values ('output-guest', array['*'])
 		on conflict (name) do update set kinds = excluded.kinds`); err == nil {
 		t.Fatal("남의 이름으로 등록할 수 없어야 합니다")
 	}
 	for _, q := range []string{
-		`select count(*) from input.records`, `select count(*) from input.deliveries`, `select count(*) from input.consumers`,
-		`select count(*) from input.outbox`, `select count(*) from mind_intents`,
+		`select count(*) from input.records`, `select count(*) from input.guest_records`, `select count(*) from input.deliveries`,
+		`select count(*) from input.outbox`, `select count(*) from mind.effects`, `select count(*) from mind.effect_deliveries`,
+		`select count(*) from mind_intents`, `select count(*) from output.notifications`,
 	} {
 		if err := guest.QueryRow(ctx, q).Scan(new(int)); err == nil {
 			t.Fatalf("%s 를 읽을 수 없어야 합니다", q)
@@ -545,7 +592,7 @@ func TestTheGuestsRoleSeesOnlyItsOwn(t *testing.T) {
 // that is all.
 func TestProducersOnlyLeaveItInTheOutbox(t *testing.T) {
 	ctx := context.Background()
-	for _, role := range []string{"svc_agent", "svc_assets", "svc_calendar", "svc_context", "svc_mind", "svc_spending", "svc_status"} {
+	for _, role := range []string{"svc_agent", "svc_assets", "svc_calendar", "svc_context", "svc_mind", "svc_output", "svc_spending", "svc_status"} {
 		t.Run(role, func(t *testing.T) {
 			pool := as(t, role)
 			if _, err := pool.Exec(ctx, `insert into input.outbox (payload) values ('{"test":true}')`); err != nil {

@@ -482,7 +482,7 @@ func main() {
 	// (internal/suggest). The guest's agent does not suggest - it has none of
 	// the operator's data - but the guest's own reminders lay their card in
 	// the guest's conversation, as the operator's do in theirs. It reads the
-	// guest's stream, which is all its database role can see.
+	// guest's effects, which is all its database role can see.
 	var suggester *suggest.Engine
 	if cfg.QueueURL != "" && cfg.Guest {
 		suggester = suggest.New(proposals, suggest.Config{Guest: true, Notice: layNotice}, log)
@@ -616,7 +616,7 @@ func main() {
 				})
 			})
 		}
-		// Decided, the card's notification is done with: notify-svc marks it
+		// Decided, the card's notification is done with: output-svc marks it
 		// read on this event (its key is the one the notification above carried).
 		closed := func(p proposal.Proposal, decision string) {
 			notifier.Emit(map[string]any{

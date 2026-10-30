@@ -2,12 +2,12 @@ import { enqueueEvents } from "./db.js";
 import type { Portfolio } from "./types.js";
 
 /**
- * What the portfolio has to say, sent to notify-svc after each build. Each
+ * What the portfolio has to say, sent to output-svc after each build. Each
  * event carries a dedupe key, so saying the same thing on every build is
- * harmless: notify-svc keeps the first and drops the rest.
+ * harmless: output-svc keeps the first and drops the rest.
  *
  * All of it is "digest" - worth knowing today, none of it needing a hand
- * this minute - except nothing yet; notify-svc puts it in tonight's summary.
+ * this minute - except nothing yet; output-svc puts it in tonight's summary.
  */
 
 const URL = process.env.NOTIFY_URL?.trim() ?? "";

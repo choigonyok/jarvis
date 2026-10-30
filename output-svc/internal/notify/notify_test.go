@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/choigonyok/jarvis/notify-svc/internal/push"
-	"github.com/choigonyok/jarvis/notify-svc/internal/store"
+	"github.com/choigonyok/jarvis/output-svc/internal/push"
+	"github.com/choigonyok/jarvis/output-svc/internal/store"
 )
 
 type fakeStore struct {
@@ -352,5 +352,26 @@ func TestGuestSeesOnlyTheirCategories(t *testing.T) {
 	}
 	if len(CategoriesFor(store.Owner)) != len(Categories) {
 		t.Fatal("운영자 분류가 줄었습니다")
+	}
+}
+
+// What went out is told once it did, and what stayed quiet is not.
+func TestSentHearsWhatWentOut(t *testing.T) {
+	svc, _, _, _ := setup("2026-10-31 12:00")
+	var heard []string
+	svc.Sent = func(who string, ns []store.Notification, group string) {
+		for _, n := range ns {
+			heard = append(heard, who+" "+n.Kind+" "+group)
+		}
+	}
+	ctx := context.Background()
+	if _, _, err := svc.Accept(ctx, ev("spending.big", "now", "큰 결제", "a")); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := svc.Accept(ctx, ev("location.enter", "log", "도착", "b")); err != nil {
+		t.Fatal(err)
+	}
+	if len(heard) != 1 || heard[0] != "owner spending.big " {
+		t.Fatalf("%v", heard)
 	}
 }

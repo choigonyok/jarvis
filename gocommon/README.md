@@ -7,7 +7,7 @@ Go code more than one service shares, kept in one place instead of copied.
 - `queue` - the stream: `Consumer` reads a topic with SKIP LOCKED, keeps order
   per subject and the cursor at the low-water mark, and applies the `health`
   rule to what fails. input-svc publishes with `Deliver` and `Wake`. There is
-  no process behind it (agent, mind-svc, notify-svc read it; input-svc writes).
+  no process behind it (agent, mind-svc, output-svc read it; input-svc writes).
 - `collect` - the message collectors' bearer check and retention loop
   (kakaotalk-client, imessage-client).
 - `record` - writing what happened as Records to `input.outbox` (see db/README),
@@ -21,7 +21,7 @@ Go code more than one service shares, kept in one place instead of copied.
   `MaxTries` (5) times, it is held - set aside with why, the cursor moves on,
   /health counts it so the status tab shows it, and it goes again once when
   the other side works again or a person asks. Used by `queue`, input-svc,
-  spending-svc, mind-svc, jobs-svc, notify-svc; status-svc reads it.
+  spending-svc, mind-svc, jobs-svc, output-svc; status-svc reads it.
 
 Each service's `go.mod` points at it with `replace ... => ../gocommon`, and its
 Docker build receives it as the extra build context `gocommon`

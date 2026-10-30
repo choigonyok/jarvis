@@ -92,7 +92,7 @@ func main() {
 		feed.Loops = loops
 		go feed.Run(ctx)
 	}
-	// What the ledger has to say goes to notify-svc; nothing without NOTIFY_URL.
+	// What the ledger has to say goes to output-svc; nothing without NOTIFY_URL.
 	if n := notify.New(os.Getenv("NOTIFY_URL"), dsn, token, log); n != nil {
 		loops.Add("watch", "예산·큰 결제 알림", 30*time.Minute)
 		w := watch.New(st, n, log)

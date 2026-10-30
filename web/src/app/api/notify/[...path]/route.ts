@@ -1,7 +1,7 @@
 import { ROLE_HEADER } from "@/lib/role";
 import { pathProxy } from "@/lib/proxy";
 
-// notify-svc, through the gateway. /stream stays open while the page does.
+// output-svc, through the gateway. /stream stays open while the page does.
 //
 // Each person reads their own: the inbox, devices and settings a request
 // touches are the signed-in role's (x-jarvis-audience), which the middleware

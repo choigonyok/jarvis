@@ -84,7 +84,7 @@ func collect(rows pgx.Rows) ([]Notification, error) {
 // it was and reports duplicate, so a sender can retry or repeat freely.
 func (s *Store) Insert(ctx context.Context, n Notification) (Notification, bool, error) {
 	row := s.pool.QueryRow(ctx, `
-		insert into notifications (audience, source, kind, tier, level, title, body, url, dedupe_key)
+		insert into output.notifications (audience, source, kind, tier, level, title, body, url, dedupe_key)
 		values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		on conflict (dedupe_key) do nothing
 		returning `+cols,
@@ -101,14 +101,14 @@ func (s *Store) MarkDelivered(ctx context.Context, ids []int64) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	_, err := s.pool.Exec(ctx, `update notifications set delivered_at = now() where id = any($1) and delivered_at is null`, ids)
+	_, err := s.pool.Exec(ctx, `update output.notifications set delivered_at = now() where id = any($1) and delivered_at is null`, ids)
 	return err
 }
 
 // Supersede marks a still-pending notification as done without a push:
 // something better (a suggestion card about the same thing) took its place.
 func (s *Store) Supersede(ctx context.Context, key string) (bool, error) {
-	tag, err := s.pool.Exec(ctx, `update notifications set delivered_at = now() where dedupe_key = $1 and delivered_at is null`, key)
+	tag, err := s.pool.Exec(ctx, `update output.notifications set delivered_at = now() where dedupe_key = $1 and delivered_at is null`, key)
 	return tag.RowsAffected() > 0, err
 }
 
@@ -116,13 +116,13 @@ func (s *Store) Supersede(ctx context.Context, key string) (bool, error) {
 // it was still waiting: the card it pointed at has been decided, so there
 // is nothing left to look at. False when no notification carries the key.
 func (s *Store) Resolve(ctx context.Context, key string) (bool, error) {
-	tag, err := s.pool.Exec(ctx, `update notifications set read_at = coalesce(read_at, now()), delivered_at = coalesce(delivered_at, now()) where dedupe_key = $1`, key)
+	tag, err := s.pool.Exec(ctx, `update output.notifications set read_at = coalesce(read_at, now()), delivered_at = coalesce(delivered_at, now()) where dedupe_key = $1`, key)
 	return tag.RowsAffected() > 0, err
 }
 
 // Pending is what of one tier is still waiting to go out to one person, oldest first.
 func (s *Store) Pending(ctx context.Context, audience, tier string) ([]Notification, error) {
-	rows, err := s.pool.Query(ctx, `select `+cols+` from notifications where audience = $1 and tier = $2 and delivered_at is null order by created_at`, who(audience), tier)
+	rows, err := s.pool.Query(ctx, `select `+cols+` from output.notifications where audience = $1 and tier = $2 and delivered_at is null order by created_at`, who(audience), tier)
 	if err != nil {
 		return nil, err
 	}
@@ -142,7 +142,7 @@ type Inbox struct {
 // skipping `offset`. The id breaks a tie in time, so two pages never share a
 // row nor skip one.
 func (s *Store) List(ctx context.Context, audience string, limit, offset int) (Inbox, error) {
-	rows, err := s.pool.Query(ctx, `select `+cols+` from notifications where audience = $1 order by created_at desc, id desc limit $2 offset $3`, who(audience), limit, offset)
+	rows, err := s.pool.Query(ctx, `select `+cols+` from output.notifications where audience = $1 order by created_at desc, id desc limit $2 offset $3`, who(audience), limit, offset)
 	if err != nil {
 		return Inbox{}, err
 	}
@@ -151,7 +151,7 @@ func (s *Store) List(ctx context.Context, audience string, limit, offset int) (I
 		return Inbox{}, err
 	}
 	out := Inbox{Items: items}
-	err = s.pool.QueryRow(ctx, `select count(*) filter (where read_at is null), count(*) from notifications where audience = $1`, who(audience)).Scan(&out.Unread, &out.Total)
+	err = s.pool.QueryRow(ctx, `select count(*) filter (where read_at is null), count(*) from output.notifications where audience = $1`, who(audience)).Scan(&out.Unread, &out.Total)
 	return out, err
 }
 
@@ -159,16 +159,16 @@ func (s *Store) List(ctx context.Context, audience string, limit, offset int) (I
 // theirs when ids is empty.
 func (s *Store) MarkRead(ctx context.Context, audience string, ids []int64) error {
 	if len(ids) == 0 {
-		_, err := s.pool.Exec(ctx, `update notifications set read_at = now() where audience = $1 and read_at is null`, who(audience))
+		_, err := s.pool.Exec(ctx, `update output.notifications set read_at = now() where audience = $1 and read_at is null`, who(audience))
 		return err
 	}
-	_, err := s.pool.Exec(ctx, `update notifications set read_at = now() where audience = $1 and id = any($2) and read_at is null`, who(audience), ids)
+	_, err := s.pool.Exec(ctx, `update output.notifications set read_at = now() where audience = $1 and id = any($2) and read_at is null`, who(audience), ids)
 	return err
 }
 
 // Subscriptions are one person's devices.
 func (s *Store) Subscriptions(ctx context.Context, audience string) ([]Subscription, error) {
-	rows, err := s.pool.Query(ctx, `select audience, endpoint, p256dh, auth, user_agent from push_subscriptions where audience = $1 order by created_at`, who(audience))
+	rows, err := s.pool.Query(ctx, `select audience, endpoint, p256dh, auth, user_agent from output.push_subscriptions where audience = $1 order by created_at`, who(audience))
 	if err != nil {
 		return nil, err
 	}
@@ -188,7 +188,7 @@ func (s *Store) Subscriptions(ctx context.Context, audience string) ([]Subscript
 // other person moves to them.
 func (s *Store) Subscribe(ctx context.Context, sub Subscription) error {
 	_, err := s.pool.Exec(ctx, `
-		insert into push_subscriptions (audience, endpoint, p256dh, auth, user_agent) values ($1, $2, $3, $4, $5)
+		insert into output.push_subscriptions (audience, endpoint, p256dh, auth, user_agent) values ($1, $2, $3, $4, $5)
 		on conflict (endpoint) do update set audience = excluded.audience, p256dh = excluded.p256dh,
 		  auth = excluded.auth, user_agent = excluded.user_agent, failures = 0`,
 		who(sub.Audience), sub.Endpoint, sub.P256dh, sub.Auth, sub.UserAgent)
@@ -196,7 +196,7 @@ func (s *Store) Subscribe(ctx context.Context, sub Subscription) error {
 }
 
 func (s *Store) Unsubscribe(ctx context.Context, endpoint string) error {
-	_, err := s.pool.Exec(ctx, `delete from push_subscriptions where endpoint = $1`, endpoint)
+	_, err := s.pool.Exec(ctx, `delete from output.push_subscriptions where endpoint = $1`, endpoint)
 	return err
 }
 
@@ -208,18 +208,18 @@ func (s *Store) Unsubscribe(ctx context.Context, endpoint string) error {
 // any of them took.
 func (s *Store) Devices(ctx context.Context) (n, fewest int, lastOK *time.Time, err error) {
 	err = s.pool.QueryRow(ctx, `select count(*), coalesce(min(failures), 0), max(last_ok_at)
-		from push_subscriptions where audience = 'owner'`).Scan(&n, &fewest, &lastOK)
+		from output.push_subscriptions where audience = 'owner'`).Scan(&n, &fewest, &lastOK)
 	return
 }
 
 func (s *Store) PushResult(ctx context.Context, endpoint string, ok bool) error {
 	if ok {
-		_, err := s.pool.Exec(ctx, `update push_subscriptions set last_ok_at = now(), failures = 0 where endpoint = $1`, endpoint)
+		_, err := s.pool.Exec(ctx, `update output.push_subscriptions set last_ok_at = now(), failures = 0 where endpoint = $1`, endpoint)
 		return err
 	}
 	_, err := s.pool.Exec(ctx, `
-		with u as (update push_subscriptions set failures = failures + 1 where endpoint = $1 returning failures)
-		delete from push_subscriptions where endpoint = $1 and (select failures from u) >= 20`, endpoint)
+		with u as (update output.push_subscriptions set failures = failures + 1 where endpoint = $1 returning failures)
+		delete from output.push_subscriptions where endpoint = $1 and (select failures from u) >= 20`, endpoint)
 	return err
 }
 
@@ -227,7 +227,7 @@ func (s *Store) PushResult(ctx context.Context, endpoint string, ok bool) error 
 // was when they have none yet; WriteSettings replaces them.
 func (s *Store) Settings(ctx context.Context, audience string, v any) error {
 	var raw []byte
-	err := s.pool.QueryRow(ctx, `select settings from notify_audience_settings where audience = $1`, who(audience)).Scan(&raw)
+	err := s.pool.QueryRow(ctx, `select settings from output.settings where audience = $1`, who(audience)).Scan(&raw)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
@@ -243,7 +243,7 @@ func (s *Store) WriteSettings(ctx context.Context, audience string, v any) error
 		return err
 	}
 	_, err = s.pool.Exec(ctx, `
-		insert into notify_audience_settings (audience, settings, updated_at) values ($1, $2, now())
+		insert into output.settings (audience, settings, updated_at) values ($1, $2, now())
 		on conflict (audience) do update set settings = excluded.settings, updated_at = now()`, who(audience), raw)
 	return err
 }

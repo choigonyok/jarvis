@@ -1,4 +1,4 @@
-module github.com/choigonyok/jarvis/notify-svc
+module github.com/choigonyok/jarvis/output-svc
 
 go 1.25.0
 

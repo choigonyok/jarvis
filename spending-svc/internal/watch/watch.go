@@ -1,4 +1,4 @@
-// Package watch turns the ledger into news for notify-svc: a big payment, one
+// Package watch turns the ledger into news for output-svc: a big payment, one
 // abroad, money coming back, a budget being crossed, and in the evening what
 // today came to. It reads the same month the console shows (book.Summarize)
 // every few minutes and says what is new since it last looked (unsaid) -

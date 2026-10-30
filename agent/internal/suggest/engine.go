@@ -10,14 +10,14 @@
 // tells mind when the operator turns it down.
 //
 // What mind says at a moment - a reminder, the rain at the door - goes to
-// the phone through notify-svc; a notice that asks for a card (data.card)
+// the phone through output-svc; a notice that asks for a card (data.card)
 // is laid in the conversation here too, with the checklist it carries. And
 // a list mind puts in front of the operator (checklist.shown) is shown here.
 //
 // The guest's agent runs this for the guest's notices alone (Config.Guest):
 // a reminder of the guest's lays its card in the guest's conversation, as
 // the operator's do in theirs. It raises no card of mind's - it has none of
-// the operator's data - and reads the guest's stream, under a role that sees
+// the operator's data - and reads the guest's effects, under a role that sees
 // nothing else.
 package suggest
 
@@ -113,13 +113,13 @@ func New(p *proposal.Store, cfg Config, log *slog.Logger) *Engine {
 	return &Engine{proposals: p, cfg: cfg, log: log}
 }
 
-// Consumer is this engine's place on the stream: the guest's agent on the
-// guest's, under its own name.
+// Consumer is this engine's place on what mind sends out: the guest's agent on
+// the guest's, under its own name.
 func (e *Engine) Consumer(pool *pgxpool.Pool) *queue.Consumer {
 	if e.cfg.Guest {
-		return &queue.Consumer{Pool: pool, Topic: queue.Guest, Name: "agent-guest", Kinds: GuestTypes, Handle: e.Take, Log: e.log}
+		return &queue.Consumer{Pool: pool, Topic: queue.GuestEffects, Name: "agent-guest", Kinds: GuestTypes, Handle: e.Take, Log: e.log}
 	}
-	return &queue.Consumer{Pool: pool, Topic: queue.Records, Name: "agent", Kinds: Types, Handle: e.Take, Log: e.log}
+	return &queue.Consumer{Pool: pool, Topic: queue.Effects, Name: "agent", Kinds: Types, Handle: e.Take, Log: e.log}
 }
 
 // Take takes one record of the stream.

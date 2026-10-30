@@ -4,8 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 
 /**
  * Web Push for this device: register the service worker (public/sw.js),
- * subscribe with notify-svc's public key, and hand the subscription to
- * notify-svc. From then on a notification arrives with the console closed -
+ * subscribe with output-svc's public key, and hand the subscription to
+ * output-svc. From then on a notification arrives with the console closed -
  * which the in-page Notification it replaces could never do on a phone.
  *
  * iOS delivers Web Push only to a console added to the home screen (16.4+);

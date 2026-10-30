@@ -77,12 +77,12 @@ func TestEachSideLaysItsOwnReminders(t *testing.T) {
 func TestEachSideReadsItsOwnStream(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	guest := New(proposal.NewStore(bus.New()), Config{Guest: true}, log).Consumer(nil)
-	if guest.Name != "agent-guest" || guest.Topic != queue.Guest || !slices.Equal(guest.Kinds, GuestTypes) {
+	if guest.Name != "agent-guest" || guest.Topic != queue.GuestEffects || !slices.Equal(guest.Kinds, GuestTypes) {
 		t.Fatalf("손님: %s %s %v", guest.Name, guest.Topic.Name, guest.Kinds)
 	}
 	owner, _ := setup(t)
 	c := owner.Consumer(nil)
-	if c.Name != "agent" || c.Topic != queue.Records || !slices.Equal(c.Kinds, Types) {
+	if c.Name != "agent" || c.Topic != queue.Effects || !slices.Equal(c.Kinds, Types) {
 		t.Fatalf("운영자: %s %s %v", c.Name, c.Topic.Name, c.Kinds)
 	}
 }

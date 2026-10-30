@@ -3,7 +3,8 @@
 //
 // Everything that happens reaches input.outbox; input-svc alone takes it out,
 // checks the envelope, and in one transaction stores the record and leaves one
-// delivery row for each consumer that asked for its kind. A consumer takes its
+// delivery row for each consumer that asked for its kind. What mind decides
+// goes out the same way on a topic of its own (Effects). A consumer takes its
 // rows with SKIP LOCKED, deletes each once handled, and keeps a cursor: the
 // highest id below which nothing is waiting. One offset cannot say that the
 // row after the one still running is done, which parallel workers need; a
@@ -50,6 +51,13 @@ var (
 	Records = Topic{Name: "records", Messages: "input.records", Deliveries: "input.deliveries", Consumers: "input.consumers"}
 	// Guest is the guest's own: separate tables, and a role that sees no others.
 	Guest = Topic{Name: "guest", Messages: "input.guest_records", Deliveries: "input.guest_deliveries", Consumers: "input.guest_consumers"}
+	// Effects is what mind decided should go out. It does not pass through
+	// input: a record is what the world said, an effect what mind answered.
+	Effects = Topic{Name: "effects", Messages: "mind.effects", Deliveries: "mind.effect_deliveries", Consumers: "mind.effect_consumers"}
+	// GuestEffects is the same for the guest.
+	GuestEffects = Topic{Name: "guest_effects", Messages: "mind.guest_effects", Deliveries: "mind.guest_effect_deliveries", Consumers: "mind.guest_effect_consumers"}
+	// All is every stream, for what looks over them (input-svc's /health).
+	All = []Topic{Records, Guest, Effects, GuestEffects}
 )
 
 // channel is what is notified when the topic has something new.
@@ -164,6 +172,51 @@ func Deliver(ctx context.Context, tx pgx.Tx, t Topic, subs []Sub, id int64, at t
 		}
 	}
 	return nil
+}
+
+// Publish stores a message on a topic its writer owns, with its deliveries and
+// its wake-up, in one transaction: how mind sends an effect. A key already
+// stored is reported and changes nothing, so a retry is free.
+func Publish(ctx context.Context, pool *pgxpool.Pool, t Topic, m Message) (int64, bool, error) {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return 0, false, err
+	}
+	defer tx.Rollback(ctx)
+	if m.OccurredAt.IsZero() {
+		m.OccurredAt = time.Now()
+	}
+	if len(m.Payload) == 0 {
+		m.Payload = json.RawMessage("{}")
+	}
+	if m.SchemaVersion == 0 {
+		m.SchemaVersion = 1
+	}
+	var id int64
+	var at time.Time
+	err = tx.QueryRow(ctx, `insert into `+t.Messages+`
+		(kind, source, source_key, actor, channel, subject, occurred_at, schema_version, trace_id, causation_id, payload)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
+		on conflict (source, source_key) do nothing returning id, received_at`,
+		m.Kind, m.Source, m.SourceKey, m.Actor, m.Channel, m.Subject, m.OccurredAt, m.SchemaVersion,
+		m.TraceID, m.CausationID, string(m.Payload)).Scan(&id, &at)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, true, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	subs, err := Subs(ctx, tx, t)
+	if err != nil {
+		return 0, false, err
+	}
+	if err := Deliver(ctx, tx, t, subs, id, at, m.Kind, m.Subject); err != nil {
+		return 0, false, err
+	}
+	if err := Wake(ctx, tx, t); err != nil {
+		return 0, false, err
+	}
+	return id, false, tx.Commit(ctx)
 }
 
 // Wake tells the topic's consumers there is something new, when the

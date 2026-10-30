@@ -1,4 +1,4 @@
-// Package notify reports events to the stream, from which notify-svc decides
+// Package notify reports events to the stream, from which output-svc decides
 // whether they become a push, a line in the evening digest, or only an inbox
 // entry - and the agent whether they are worth a suggestion.
 //

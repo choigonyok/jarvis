@@ -47,7 +47,7 @@ type Options struct {
 	Calendar act.Calendar
 	// Spending is the book, when charges are filed from here.
 	Spending  *act.Spending
-	Notifier  act.Notifier // nil: notices go through the log to notify-svc
+	Notifier  act.Notifier // nil: notices go through the log to output-svc
 	Loc       *time.Location
 	Now       func() time.Time
 	Logger    *slog.Logger
@@ -698,7 +698,7 @@ func (m *Mind) GuestSituation(ctx context.Context) (world.Situation, error) {
 }
 
 // noticeLog lets a notice travel through the log as an event with wording,
-// which notify-svc turns into a push or a digest line.
+// which output-svc turns into a push or a digest line.
 type noticeLog struct{ log obs.Log }
 
 func (n noticeLog) AppendNotice(ctx context.Context, kind string, nt act.Notice) error {

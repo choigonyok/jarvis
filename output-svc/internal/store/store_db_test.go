@@ -26,7 +26,7 @@ func TestEveryoneHasTheirOwn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = conn.Exec(ctx, `delete from notifications where source = 'dbtest'; delete from push_subscriptions where endpoint like 'https://dbtest/%'`)
+	_, err = conn.Exec(ctx, `delete from output.notifications where source = 'dbtest'; delete from output.push_subscriptions where endpoint like 'https://dbtest/%'`)
 	conn.Close(ctx)
 	if err != nil {
 		t.Fatal(err)

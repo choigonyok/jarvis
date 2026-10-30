@@ -18,7 +18,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/choigonyok/jarvis/gocommon/health"
@@ -68,20 +67,6 @@ func (s *Server) Handler() http.Handler {
 // before the status tab calls its delivery stopped.
 const stuckAfter = 15 * time.Minute
 
-// topics is every stream, the guest's second.
-var topics = []queue.Topic{queue.Records, queue.Guest}
-
-// topicOf is the stream a consumer reads: the guest's end in -guest.
-func topicOf(consumer string) queue.Topic {
-	if strings.HasSuffix(consumer, GuestSuffix) {
-		return queue.Guest
-	}
-	return queue.Records
-}
-
-// GuestSuffix ends the name of every consumer of the guest's stream.
-const GuestSuffix = "-guest"
-
 // health answers in the stack's contract: a loop per consumer - since when it
 // has not got past a message, and why - and the held box. The names of what
 // is held are kinds and consumers, nothing from inside them.
@@ -90,7 +75,7 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	pool, now := s.store.Pool(), s.now()
 	var heldList []queue.HeldItem
-	for _, t := range topics {
+	for _, t := range queue.All {
 		states, err := queue.States(ctx, pool, t)
 		if err != nil {
 			health.Write(w, http.StatusServiceUnavailable, rep)
@@ -188,7 +173,7 @@ func (s *Server) post(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) held(w http.ResponseWriter, r *http.Request) {
 	out := []queue.HeldItem{}
-	for _, t := range topics {
+	for _, t := range queue.All {
 		held, err := queue.Held(r.Context(), s.store.Pool(), t, 200)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "격리함을 읽지 못했습니다."})
@@ -216,15 +201,27 @@ func (s *Server) onHeld(w http.ResponseWriter, r *http.Request, do func(ctx cont
 	}
 }
 
+// anyTopic does something to a consumer's held message, on the topic that has
+// it: a consumer name belongs to one.
+func anyTopic(do func(t queue.Topic) (bool, error)) (bool, error) {
+	for _, t := range queue.All {
+		ok, err := do(t)
+		if ok || err != nil {
+			return ok, err
+		}
+	}
+	return false, nil
+}
+
 func (s *Server) retryHeld(w http.ResponseWriter, r *http.Request) {
 	s.onHeld(w, r, func(ctx context.Context, consumer string, id int64) (bool, error) {
-		return queue.Retry(ctx, s.store.Pool(), topicOf(consumer), consumer, id)
+		return anyTopic(func(t queue.Topic) (bool, error) { return queue.Retry(ctx, s.store.Pool(), t, consumer, id) })
 	}, http.StatusAccepted)
 }
 
 func (s *Server) dropHeld(w http.ResponseWriter, r *http.Request) {
 	s.onHeld(w, r, func(ctx context.Context, consumer string, id int64) (bool, error) {
-		ok, err := queue.Drop(ctx, s.store.Pool(), topicOf(consumer), consumer, id)
+		ok, err := anyTopic(func(t queue.Topic) (bool, error) { return queue.Drop(ctx, s.store.Pool(), t, consumer, id) })
 		if ok {
 			s.log.Info("격리함의 메시지를 버렸습니다", "consumer", consumer, "id", id)
 		}

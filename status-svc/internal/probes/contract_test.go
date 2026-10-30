@@ -95,7 +95,7 @@ func TestAHeldBoxIsAWarning(t *testing.T) {
 }
 
 // Each consumer of the event log is its own row, so that a stuck delivery
-// to notify-svc points at notify-svc.
+// to output-svc points at output-svc.
 func TestADeliveryRowReadsItsConsumer(t *testing.T) {
 	now := time.Now()
 	since := now.Add(-30 * time.Minute)
@@ -109,7 +109,7 @@ func TestADeliveryRowReadsItsConsumer(t *testing.T) {
 	})
 	e := freshEnv()
 	e.InputURL = srv.URL
-	notify := e.delivery("notify", "기록 → 알림", []string{"svc.notify"})
+	notify := e.delivery("notify", "기록 → 알림", []string{"svc.output"})
 	if v := notify.Run(context.Background()); v.State != check.Fail || !strings.Contains(v.Summary, "401") || v.ObservedAt == nil {
 		t.Fatalf("15분 넘게 막힌 전달은 이상: %+v", v)
 	}
@@ -122,7 +122,7 @@ func TestADeliveryRowReadsItsConsumer(t *testing.T) {
 	if v := e.service("svc.input", "입구(기록)", srv.URL, nil, "drain").Run(context.Background()); v.State != check.OK {
 		t.Fatalf("입구 자신은 outbox 만 봅니다: %+v", v)
 	}
-	if notify.Deps[0] != "svc.input" || notify.Deps[1] != "svc.notify" {
+	if notify.Deps[0] != "svc.input" || notify.Deps[1] != "svc.output" {
 		t.Fatalf("원인 연결: %v", notify.Deps)
 	}
 }

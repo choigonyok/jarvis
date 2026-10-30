@@ -141,7 +141,7 @@ func TestHealthShowsDeliveryAndTheHeldBox(t *testing.T) {
 	srv, owner := setup(t)
 	ctx := context.Background()
 	name := unique("c")
-	guestName := unique("c") + GuestSuffix
+	guestName := unique("c") + "-guest"
 	if _, err := owner.Exec(ctx, `insert into input.consumers (name, kinds) values ($1, array['*'])`, name); err != nil {
 		t.Fatal(err)
 	}
@@ -198,13 +198,6 @@ func TestHealthShowsDeliveryAndTheHeldBox(t *testing.T) {
 	}
 	if code, _ := call(t, http.MethodDelete, srv.URL+"/held/"+name+"/x", token, ""); code != http.StatusBadRequest {
 		t.Fatalf("숫자가 아닌 id: %d", code)
-	}
-}
-
-// A consumer on the guest's stream is found by its name.
-func TestTheTopicOfAConsumer(t *testing.T) {
-	if topicOf("agent-guest") != queue.Guest || topicOf("mind-guest") != queue.Guest || topicOf("mind") != queue.Records {
-		t.Fatal("토픽을 잘못 골랐습니다")
 	}
 }
 

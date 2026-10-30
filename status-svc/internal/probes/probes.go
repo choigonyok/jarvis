@@ -278,15 +278,18 @@ func All(cfg Config) []check.Probe {
 		// the "agent" probe above.
 		e.service("svc.agent", "에이전트의 기록", cfg.AgentURL, []string{"agent", "postgres"}, "records"),
 		e.service("svc.input", "입구(기록)", cfg.InputURL, []string{"postgres"}, "drain", "keep"),
-		e.delivery("notify", "기록 → 알림", []string{"svc.notify"}),
-		e.delivery("agent", "기록 → 에이전트", []string{"agent"}),
 		e.delivery("mind", "기록 → mind", []string{"svc.mind"}),
-		// The guest's stream: the guest's phones, reminders in the guest's
-		// conversation, and where the guest's phone is.
-		e.delivery("notify-guest", "손님 기록 → 알림", []string{"svc.notify"}),
-		e.delivery("agent-guest", "손님 기록 → 손님 에이전트", []string{"agent-guest"}),
+		e.delivery("mind-relay", "기록 → 알림 문구 넘기기", []string{"svc.mind"}),
+		e.delivery("output-status", "상태·결재 알림 → 출구", []string{"svc.output"}),
+		e.delivery("output", "효과 → 출구", []string{"svc.output", "svc.mind"}),
+		e.delivery("agent", "효과 → 에이전트", []string{"agent", "svc.mind"}),
+		// The guest's side: where the guest's phone is, what is said to the
+		// guest, and reminders in the guest's conversation.
 		e.delivery("mind-guest", "손님 기록 → mind", []string{"svc.mind"}),
-		e.service("svc.notify", "알림 서비스", cfg.NotifyURL, []string{"postgres"}),
+		e.delivery("mind-relay-guest", "손님 기록 → 알림 문구 넘기기", []string{"svc.mind"}),
+		e.delivery("output-guest", "손님 효과 → 출구", []string{"svc.output", "svc.mind"}),
+		e.delivery("agent-guest", "손님 효과 → 손님 에이전트", []string{"agent-guest", "svc.mind"}),
+		e.service("svc.output", "출구(알림)", cfg.NotifyURL, []string{"postgres"}),
 		e.service("svc.jobs", "작업 서비스", cfg.JobsURL, []string{"postgres", "agent"}),
 		e.service("svc.kakaotalk", "카톡 수집 서비스", cfg.KakaoURL, nil),
 		e.service("svc.imessage", "iMessage 수집 서비스", cfg.IMessageURL, nil),

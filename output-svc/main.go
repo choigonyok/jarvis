@@ -1,6 +1,6 @@
-// Command notify-svc is where every service's news goes: it reads both record
-// streams, and out of them come the console's inbox, a push to the phone when
-// someone has to act, and an evening digest of the rest.
+// Command output-svc is the way out: it reads what mind decided should go out
+// (the effects), and out of it come the console's inbox, a push to the phone
+// when someone has to act, and an evening digest of the rest.
 //
 // The services only say what happened and how much it matters; whether that
 // becomes a push now, a push after quiet hours, a line in tonight's digest or
@@ -10,6 +10,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -23,11 +24,12 @@ import (
 
 	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/gocommon/queue"
-	"github.com/choigonyok/jarvis/notify-svc/internal/api"
-	"github.com/choigonyok/jarvis/notify-svc/internal/live"
-	"github.com/choigonyok/jarvis/notify-svc/internal/notify"
-	"github.com/choigonyok/jarvis/notify-svc/internal/push"
-	"github.com/choigonyok/jarvis/notify-svc/internal/store"
+	"github.com/choigonyok/jarvis/gocommon/record"
+	"github.com/choigonyok/jarvis/output-svc/internal/api"
+	"github.com/choigonyok/jarvis/output-svc/internal/live"
+	"github.com/choigonyok/jarvis/output-svc/internal/notify"
+	"github.com/choigonyok/jarvis/output-svc/internal/push"
+	"github.com/choigonyok/jarvis/output-svc/internal/store"
 )
 
 func main() {
@@ -93,10 +95,29 @@ func main() {
 	}()
 
 	server := api.New(svc, st, pusher, hub, os.Getenv("API_TOKEN"), log).WithLoops(loops)
-	// Every record of both streams: those without wording it passes over.
+	// What went out is a record too. Its text is not in it: what is in an
+	// inbox stays there.
+	sent := record.New(os.Getenv("DATABASE_URL"), loops, log)
+	go sent.Run(ctx)
+	svc.Sent = func(who string, ns []store.Notification, group string) {
+		actor := "output"
+		if who == store.Guest {
+			actor = store.Guest
+		}
+		for _, n := range ns {
+			sent.Write(record.Record{Kind: "notify.sent", Source: "output", SourceKey: fmt.Sprintf("sent:%d", n.ID), Actor: actor,
+				Channel: "push", Subject: n.Kind, Tier: record.Durable,
+				Payload: map[string]any{"id": n.ID, "kind": n.Kind, "tier": n.Tier, "key": n.DedupeKey, "group": group}})
+		}
+	}
 	for _, c := range []*queue.Consumer{
-		{Pool: pool, Topic: queue.Records, Name: "notify", Kinds: []string{"*"}, Handle: server.Take, Log: log},
-		{Pool: pool, Topic: queue.Guest, Name: "notify-guest", Kinds: []string{"*"}, Handle: server.Take, Log: log},
+		{Pool: pool, Topic: queue.Effects, Name: "output", Kinds: []string{"*"}, Handle: server.Take, Log: log},
+		{Pool: pool, Topic: queue.GuestEffects, Name: "output-guest", Kinds: []string{"*"}, Handle: server.Take, Log: log},
+		// Read from the records, past mind: that mind is down cannot be said
+		// through mind, and a card a payment waits on does not wait for a
+		// redeploy. Passing these on is not a judgement (the design's list
+		// of exceptions).
+		{Pool: pool, Topic: queue.Records, Name: "output-status", Kinds: []string{"status.*", "approval.*"}, Handle: server.Take, Log: log},
 	} {
 		go c.Run(ctx)
 	}
@@ -109,7 +130,7 @@ func main() {
 		WriteTimeout: 60 * time.Second,
 	}
 	go func() {
-		log.Info("notify-svc 가 듣기 시작했습니다", "addr", addr)
+		log.Info("output-svc 가 듣기 시작했습니다", "addr", addr)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("HTTP 서버", "err", err)
 			stop()

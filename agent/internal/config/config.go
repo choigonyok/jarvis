@@ -199,7 +199,7 @@ type Config struct {
 	// fine once a tunnel publishes it - see the boot check below.
 	APIToken string
 
-	// NotifyURL is notify-svc: a card raised here becomes a push to the
+	// NotifyURL is output-svc: a card raised here becomes a push to the
 	// operator's phone. Empty sends nothing.
 	NotifyURL string
 
@@ -207,7 +207,7 @@ type Config struct {
 	// there, so it reaches input-svc even if that is restarting.
 	DatabaseURL string
 
-	// QueueURL is where the agent reads the stream: mind's cards
+	// QueueURL is where the agent reads what mind sends out: cards
 	// (internal/suggest), and for the guest's agent the guest's own reminders
 	// and nothing else - under a role that sees only the guest's tables. It
 	// is DatabaseURL unless JARVIS_QUEUE_DATABASE_URL says otherwise.

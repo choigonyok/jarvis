@@ -421,7 +421,7 @@ type Notice struct {
 	Level string    `json:"level,omitempty"`
 	Key   string    `json:"key,omitempty"`
 	At    time.Time `json:"at"`
-	// Kind is the event it goes out as, whose category notify-svc pushes
+	// Kind is the event it goes out as, whose category output-svc pushes
 	// by: mind.notice when empty; remind.* for what is said at its moment
 	// (what the operator asked for, the rain at the door), which rings even
 	// in quiet hours.
@@ -482,7 +482,7 @@ func (m *MemoryNotifier) All() []Notice {
 }
 
 // Appender is the observation log's append, which is how a notice reaches
-// notify-svc in the stack: an event with wording, kind mind.* or remind.*.
+// output-svc in the stack: an event with wording, kind mind.* or remind.*.
 type Appender interface {
 	AppendNotice(ctx context.Context, kind string, n Notice) error
 }

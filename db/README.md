@@ -7,7 +7,9 @@
 ```
 input.outbox → input.records (input-svc) ← 서비스가 낸 일. 기록으로 남기고 소비자별 배달 행을 만든다
 input.deliveries · input.consumers       ← 스트림. 소비자가 gocommon/queue 로 직접 읽는다
-input.guest_*                            ← 손님 것은 전용 표로 (역할 svc_guest)
+input.guest_*                            ← 손님 것은 전용 표로
+mind.effects (+ 배달·소비자)              ← mind 가 낸 것: 카드·알림. output·에이전트가 읽는다. mind.guest_effects 는 손님 것 (역할 svc_guest)
+output.notifications · push_subscriptions · settings ← 알림함과 기기 (output-svc)
 raw_events (추가 전용)                  ← 카드 알림 원문 (spending-svc)
 commitments · workout_* · card_* · …     ← 각 서비스의 정확한 사실
 mind_*                                   ← mind 의 세계 모델·관문·노트

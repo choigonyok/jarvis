@@ -1,4 +1,4 @@
-// The console's service worker: it exists for Web Push. notify-svc sends a
+// The console's service worker: it exists for Web Push. output-svc sends a
 // small JSON payload ({title, body, url, tag}); this shows it, and a tap opens
 // the console on the screen it is about - an open window if there is one.
 //

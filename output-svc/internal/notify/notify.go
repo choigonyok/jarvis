@@ -22,8 +22,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/choigonyok/jarvis/notify-svc/internal/push"
-	"github.com/choigonyok/jarvis/notify-svc/internal/store"
+	"github.com/choigonyok/jarvis/output-svc/internal/push"
+	"github.com/choigonyok/jarvis/output-svc/internal/store"
 )
 
 // Event is what a service sends to POST /events.
@@ -120,6 +120,9 @@ type Sender interface {
 }
 
 type Service struct {
+	// Sent hears what went out, after it did. Nil hears nothing.
+	Sent func(who string, ns []store.Notification, group string)
+
 	store Store
 	push  Sender
 	loc   *time.Location
@@ -284,6 +287,9 @@ func (s *Service) deliver(ctx context.Context, who string, ns []store.Notificati
 	if payload.Title != "" {
 		if _, err := s.push.Send(ctx, who, payload); err != nil {
 			return err
+		}
+		if s.Sent != nil {
+			s.Sent(who, out, group)
 		}
 	}
 	return s.store.MarkDelivered(ctx, ids)

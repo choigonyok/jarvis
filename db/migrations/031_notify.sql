@@ -1,4 +1,4 @@
--- 알림. 여러 서비스가 notify-svc 에 정해진 모양의 이벤트를 보내고, notify-svc
+-- 알림. 여러 서비스가 output-svc 에 정해진 모양의 이벤트를 보내고, output-svc
 -- 가 저장·중복 제거·방해 금지·하루 요약·웹 푸시를 맡는다. 알림함은 이 표를
 -- 그대로 읽는다.
 create table if not exists notifications (

@@ -42,6 +42,7 @@ flowchart TB
     svc["기능 서비스<br/>일정 · 대화 · 가계부<br/>자산 · 운동 · 작업<br/>위치 · 알림 · 상태 · 보관함"]
     input["input-svc<br/>outbox · 기록 · 배달"]
     mind["mind-svc (Go)<br/>인지 루프 · 예측"]
+    output["output-svc<br/>알림함 · 웹 푸시"]
     memory["memory-svc (Python)<br/>Graphiti 장기 기억"]
     browser["browser<br/>Chromium · 결제 가드"]
     search["search-svc<br/>네이버 검색 · 페이지 읽기<br/>네이버 지도"]
@@ -66,8 +67,9 @@ flowchart TB
   svc -- "outbox" --> input
   collect --> mind
   input --> mind
-  mind -- "카드 제안" --> input
-  input --> agent
+  mind -- "효과: 카드·알림" --> agent
+  mind -- "효과: 카드·알림" --> output
+  input -- "상태·결재 대기" --> output
   mind --> memory
   svc --> pg
   memory --> fk

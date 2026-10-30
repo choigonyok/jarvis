@@ -1,4 +1,4 @@
-// Package api is notify-svc's HTTP surface. Same bearer scheme as the rest of
+// Package api is output-svc's HTTP surface. Same bearer scheme as the rest of
 // the stack: everything but /health needs the token.
 //
 //	POST   /events              a service reports something (notify.Event)
@@ -33,10 +33,10 @@ import (
 
 	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/gocommon/queue"
-	"github.com/choigonyok/jarvis/notify-svc/internal/live"
-	"github.com/choigonyok/jarvis/notify-svc/internal/notify"
-	"github.com/choigonyok/jarvis/notify-svc/internal/push"
-	"github.com/choigonyok/jarvis/notify-svc/internal/store"
+	"github.com/choigonyok/jarvis/output-svc/internal/live"
+	"github.com/choigonyok/jarvis/output-svc/internal/notify"
+	"github.com/choigonyok/jarvis/output-svc/internal/push"
+	"github.com/choigonyok/jarvis/output-svc/internal/store"
 )
 
 type Server struct {
@@ -147,7 +147,7 @@ func (s *Server) event(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// consumed is a record of the stream, as an event.
+// consumed is an effect, as an event.
 type consumed struct {
 	ID     int64           `json:"id"`
 	Source string          `json:"source"`
@@ -159,8 +159,7 @@ type consumed struct {
 	} `json:"notify"`
 }
 
-// Take takes one record of the stream. One with wording becomes a
-// notification by its tier; one without is not for a person to read and is
+// Take takes one effect. One with wording becomes a notification by its tier; one without is not for a person to read and is
 // taken without a word. A suggestion raised about something already waiting
 // in tonight's digest takes that line's place.
 func (s *Server) Take(ctx context.Context, m queue.Message) error {

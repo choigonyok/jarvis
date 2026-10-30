@@ -3,7 +3,7 @@
  *
  * Two people sign in through Cloudflare Access. The operator sees everything.
  * The guest gets the conversation (their own - a separate agent), the workout
- * log, the shared calendar, their own notifications (notify-svc keeps each
+ * log, the shared calendar, their own notifications (output-svc keeps each
  * person's apart), their own voice for 음성 mode (tts keeps each person's
  * recording apart, by token), the image editor (PhotoCraft, which runs in
  * their own browser and keeps nothing here) and, by the operator's choice,
