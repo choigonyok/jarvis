@@ -57,6 +57,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/moments"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
+	"github.com/choigonyok/jarvis/mind-svc/internal/registry"
 	"github.com/choigonyok/jarvis/mind-svc/internal/sensor"
 	spendingapi "github.com/choigonyok/jarvis/mind-svc/internal/spending/api"
 	spendingassets "github.com/choigonyok/jarvis/mind-svc/internal/spending/assets"
@@ -163,7 +164,7 @@ func main() {
 		// do that, until the two gates are one.
 		quiet := os.Getenv("MIND_QUIET") != "false"
 		if url := os.Getenv("INPUT_URL"); url != "" {
-			stream = obs.NewStream(url, token, pool, append(append([]string{}, mind.Kinds...), mind.GuestKinds...))
+			stream = obs.NewStream(url, token, pool, registry.Default().Kinds(registry.Interpret, false))
 			logOut = stream
 			if !quiet {
 				notifier = nil // through the log, to output-svc
@@ -323,6 +324,9 @@ func main() {
 		Memory:        mem, GuestMemory: guestMem, Photos: photos, Jobs: jobs, Assets: assets, Orders: orders, Travel: travel,
 		Weather: sky, DailyUSD: number("MIND_DAILY_USD", 1.0), Reminders: reminders, Here: here, GuestHere: guestHere, Checklists: lists,
 	})
+	if err := m.LoadRegistry(ctx); err != nil {
+		log.Warn("레지스트리를 읽지 못해 코드에 딸린 값으로 돕니다", "err", err)
+	}
 	if !client.Ready() {
 		log.Warn("LLM 키(MIND_ANTHROPIC_API_KEY)가 없어 대화를 해석하지 않습니다. 메시지는 쌓아 둡니다.")
 	}
@@ -422,14 +426,45 @@ func main() {
 			os.Exit(1)
 		}
 		defer lanes.Close()
+		// What each lane reads is the registry's.
+		lanesOf := func(r *registry.Snapshot) map[string]struct {
+			topic queue.Topic
+			kinds []string
+		} {
+			type sub = struct {
+				topic queue.Topic
+				kinds []string
+			}
+			return map[string]sub{
+				"mind":                {queue.Records, r.Kinds(registry.Interpret, false)},
+				"mind-guest":          {queue.Guest, r.Kinds(registry.Interpret, true)},
+				"mind-commands":       {queue.Records, r.Kinds(registry.Deterministic, false)},
+				"mind-commands-guest": {queue.Guest, r.Kinds(registry.Deterministic, true)},
+				"mind-structured":     {queue.Records, r.Kinds(registry.Structured, false)},
+			}
+		}
+		m.OnRegistry = func(ctx context.Context, r *registry.Snapshot) {
+			for name, sub := range lanesOf(r) {
+				if err := queue.SetKinds(ctx, lanes, sub.topic, name, sub.kinds); err != nil {
+					log.Warn("레인의 구독을 고치지 못했습니다", "consumer", name, "err", err)
+				}
+			}
+		}
+		reg := m.Registry()
+		relay := func(handle func(context.Context, queue.Message) error) func(context.Context, queue.Message) error {
+			return func(ctx context.Context, msg queue.Message) error {
+				m.NoteKind(msg.Kind)
+				return handle(ctx, msg)
+			}
+		}
 		for _, c := range []*queue.Consumer{
-			{Pool: lanes, Topic: queue.Records, Name: "mind", Kinds: mind.Kinds, Handle: take, Log: log},
-			{Pool: lanes, Topic: queue.Guest, Name: "mind-guest", Kinds: mind.GuestKinds, Handle: take, Log: log},
-			{Pool: lanes, Topic: queue.Records, Name: "mind-commands", Kinds: mind.CommandKinds, Handle: command, Log: log},
+			{Pool: lanes, Topic: queue.Records, Name: "mind", Kinds: reg.Kinds(registry.Interpret, false), Handle: take, Log: log},
+			{Pool: lanes, Topic: queue.Guest, Name: "mind-guest", Kinds: reg.Kinds(registry.Interpret, true), Handle: take, Log: log},
+			{Pool: lanes, Topic: queue.Records, Name: "mind-commands", Kinds: reg.Kinds(registry.Deterministic, false), Handle: command, Log: log},
 			{Pool: lanes, Topic: queue.Records, Name: "mind-results", Kinds: []string{hand.KindResult}, Handle: func(ctx context.Context, msg queue.Message) error { return hand.Result(ctx, st, msg) }, Log: log},
-			{Pool: lanes, Topic: queue.Records, Name: "mind-structured", Kinds: sensor.Kinds, Handle: adapters, Log: log},
-			{Pool: lanes, Topic: queue.Guest, Name: "mind-commands-guest", Kinds: mind.GuestCommandKinds, Handle: command, Log: log},
-			{Pool: lanes, Topic: queue.Records, Name: "mind-relay", Kinds: []string{"*"}, Handle: stream.Relay(queue.Effects), Log: log},
+			{Pool: lanes, Topic: queue.Records, Name: "mind-structured", Kinds: reg.Kinds(registry.Structured, false), Handle: adapters, Log: log},
+			{Pool: lanes, Topic: queue.Guest, Name: "mind-commands-guest", Kinds: reg.Kinds(registry.Deterministic, true), Handle: command, Log: log},
+			{Pool: lanes, Topic: queue.Records, Name: "mind-relay", Kinds: []string{"*"}, Handle: relay(stream.Relay(queue.Effects)), Log: log},
 			{Pool: lanes, Topic: queue.Guest, Name: "mind-relay-guest", Kinds: []string{"*"}, Handle: stream.Relay(queue.GuestEffects), Log: log},
 		} {
 			go c.Run(ctx)
@@ -515,7 +550,7 @@ func runBacktest(args []string, loc *time.Location) int {
 		rows := ledger.Build(d.Inputs)
 		cases = ledger.Cases(rows)
 		c := ledger.Count(rows)
-		facts := ledger.Intervals(d.Facts, loc)
+		facts := ledger.Intervals(d.Facts, loc, registry.Default().Single)
 		ended, single := 0, 0
 		for _, f := range facts {
 			if f.To != nil {

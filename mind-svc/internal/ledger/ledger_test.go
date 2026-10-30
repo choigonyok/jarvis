@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+	"github.com/choigonyok/jarvis/mind-svc/internal/registry"
 )
 
 var (
@@ -14,6 +15,10 @@ var (
 )
 
 func ptr[T any](v T) *T { return &v }
+
+func intervals(facts []model.Fact) []model.FactRow {
+	return Intervals(facts, seoul, registry.Default().Single)
+}
 
 func one(t *testing.T, in Inputs) model.Outcome {
 	t.Helper()
@@ -233,11 +238,11 @@ func fact(id, relation, object string, created time.Time) model.Fact {
 
 // A move ends the old address at the new one's start.
 func TestASingleFactHoldsUntilTheNext(t *testing.T) {
-	rows := Intervals([]model.Fact{
+	rows := intervals([]model.Fact{
 		fact("f2", "LIVES_IN", "부산", day.AddDate(0, 1, 0)),
 		fact("f1", "LIVES_IN", "서울", day),
 		fact("f3", "LIVES_IN", "서울", day.AddDate(0, 2, 0)),
-	}, seoul)
+	})
 	if len(rows) != 3 || rows[0].ID != "f1" || rows[0].To == nil || !rows[0].To.Equal(rows[1].From) || rows[2].To != nil {
 		t.Fatalf("%+v", rows)
 	}
@@ -249,7 +254,7 @@ func TestASingleFactHoldsUntilTheNext(t *testing.T) {
 func TestTheSameSaidAgainIsOneFact(t *testing.T) {
 	a, b := fact("f1", "LIVES_IN", "서울", day), fact("f2", "LIVES_IN", "서울", day.AddDate(0, 0, 3))
 	b.Confidence = 0.9
-	rows := Intervals([]model.Fact{a, b}, seoul)
+	rows := intervals([]model.Fact{a, b})
 	if len(rows) != 1 || rows[0].ID != "f1" || rows[0].P != 0.9 || !rows[0].From.Equal(day) {
 		t.Fatalf("%+v", rows)
 	}
@@ -257,14 +262,14 @@ func TestTheSameSaidAgainIsOneFact(t *testing.T) {
 
 func TestSaidAtOneMomentTheLaterStands(t *testing.T) {
 	a, b := fact("f1", "LIVES_IN", "서울", day), fact("f2", "LIVES_IN", "부산", day)
-	rows := Intervals([]model.Fact{a, b}, seoul)
+	rows := intervals([]model.Fact{a, b})
 	if len(rows) != 1 || rows[0].Object != "부산" {
 		t.Fatalf("%+v", rows)
 	}
 }
 
 func TestManyValuedFactsStandSideBySide(t *testing.T) {
-	rows := Intervals([]model.Fact{fact("f1", "LIKES", "커피", day), fact("f2", "LIKES", "차", day.AddDate(0, 0, 1))}, seoul)
+	rows := intervals([]model.Fact{fact("f1", "LIKES", "커피", day), fact("f2", "LIKES", "차", day.AddDate(0, 0, 1))})
 	if len(rows) != 2 || rows[0].To != nil || rows[0].Single {
 		t.Fatalf("%+v", rows)
 	}
@@ -275,7 +280,7 @@ func TestWhatMemoryEndedIsClosed(t *testing.T) {
 	a.Memory = &model.Stored{Edge: "e1"}
 	b := fact("f2", "DISLIKES", "매운 음식", day.AddDate(0, 0, 5))
 	b.Ends = []model.Ended{{ID: "e1", Fact: "매운 음식을 좋아한다"}}
-	rows := Intervals([]model.Fact{a, b}, seoul)
+	rows := intervals([]model.Fact{a, b})
 	if len(rows) != 2 || rows[0].To == nil || !rows[0].To.Equal(b.CreatedAt) {
 		t.Fatalf("%+v", rows)
 	}
@@ -284,7 +289,7 @@ func TestWhatMemoryEndedIsClosed(t *testing.T) {
 func TestADroppedFactIsNotAFact(t *testing.T) {
 	a := fact("f1", "LIVES_IN", "서울", day)
 	a.Status = model.FactDropped
-	if rows := Intervals([]model.Fact{a}, seoul); len(rows) != 0 {
+	if rows := intervals([]model.Fact{a}); len(rows) != 0 {
 		t.Fatalf("%+v", rows)
 	}
 }
@@ -292,7 +297,7 @@ func TestADroppedFactIsNotAFact(t *testing.T) {
 func TestValidAtSaysWhenItBegan(t *testing.T) {
 	a := fact("f1", "WORKS_AT", "회사", day)
 	a.ValidAt = "2026-01-15"
-	rows := Intervals([]model.Fact{a}, seoul)
+	rows := intervals([]model.Fact{a})
 	if rows[0].From.Format("2006-01-02") != "2026-01-15" {
 		t.Fatalf("%+v", rows)
 	}
@@ -311,7 +316,7 @@ func TestARowSaysHowItGoesIntoTheGraph(t *testing.T) {
 	b.Subject = model.Party{Self: true}
 	held := fact("f3", "LIKES", "커피", day)
 	held.Status = model.FactHeld
-	rows := Intervals([]model.Fact{a, b, held}, seoul)
+	rows := intervals([]model.Fact{a, b, held})
 	if len(rows) != 3 {
 		t.Fatalf("%+v", rows)
 	}
@@ -346,7 +351,7 @@ func TestWhatMemoryEndedIsEnded(t *testing.T) {
 	c := fact("f3", "GOAL", "완주", day)
 	c.Memory = &model.Stored{Edge: "edge-3", InvalidAt: "2026-12-31T00:00:00+09:00"}
 	byID := map[string]model.FactRow{}
-	for _, r := range Intervals([]model.Fact{a, b, c}, seoul) {
+	for _, r := range intervals([]model.Fact{a, b, c}) {
 		byID[r.ID] = r
 	}
 	if r := byID["f1"]; r.To == nil || r.To.In(seoul).Format("2006-01-02") != "2026-11-20" {
@@ -364,7 +369,7 @@ func TestWhatMemoryEndedIsEnded(t *testing.T) {
 func TestAFactGoneFromTheGraphStaysOut(t *testing.T) {
 	a := fact("f1", "LIKES", "커피", day)
 	a.Memory = &model.Stored{Edge: "edge-1", Gone: true}
-	rows := Intervals([]model.Fact{a}, seoul)
+	rows := intervals([]model.Fact{a})
 	if len(rows) != 1 || len(rows[0].Body) != 0 {
 		t.Fatalf("%+v", rows)
 	}

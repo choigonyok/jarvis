@@ -4,8 +4,7 @@
 // otherwise. Keeping that here means the question is asked once, and asked
 // again only when there is a reason - not every order, and not never.
 //
-// The definitions are code for now and become rows of the registry later: the
-// shape is the registry's.
+// The definitions are rows of the registry.
 package slot
 
 import (
@@ -15,6 +14,7 @@ import (
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/engine"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+	"github.com/choigonyok/jarvis/mind-svc/internal/registry"
 )
 
 // Life is how long a slot's value stays good.
@@ -41,22 +41,20 @@ type Def struct {
 	Spec   engine.Spec
 }
 
-// The slots there are.
-var (
-	Shipping = Def{Name: "shipping.address", Kind: "shipping.address", Skill: "slot", Context: "shipping.address",
-		Evidence: []string{"LIVES_IN", "HAS_ADDRESS"}, Life: UntilEvent, Secret: true, Spec: engine.Spec{Cap: engine.AskFilled}}
-	MerchantCategory = Def{Name: "merchant.category", Kind: "spending.category", Skill: "slot", Context: "merchant.category",
-		Life: Standing, Spec: engine.Spec{Reversible: true}}
+// The slots the code asks for by name.
+const (
+	Shipping         = "shipping.address"
+	MerchantCategory = "merchant.category"
 )
 
-// Get finds a slot by name.
-func Get(name string) (Def, bool) {
-	for _, d := range []Def{Shipping, MerchantCategory} {
-		if d.Name == name {
-			return d, true
-		}
+// Get finds a slot by name in the registry.
+func Get(r *registry.Snapshot, name string) (Def, bool) {
+	v, ok := r.Slot(name)
+	if !ok {
+		return Def{}, false
 	}
-	return Def{}, false
+	return Def{Name: name, Kind: v.Kind, Skill: v.Skill, Context: v.Context, Evidence: v.Evidence, Life: Life(v.Life), Secret: v.Secret,
+		Spec: engine.Spec{Reversible: v.Reversible, Cap: engine.Grade(v.Cap)}}, true
 }
 
 // Key is the slot's place in the engine's book.

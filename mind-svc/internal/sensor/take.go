@@ -39,9 +39,6 @@ const (
 	KindWorkout = "workout.changes"
 )
 
-// Kinds is what the structured lane reads.
-var Kinds = []string{KindCalendarNear, KindCalendarYear, KindVisits, KindHoldings, KindNow, KindNowGuest, KindRegions, KindTravel, KindForecast, KindPhotos, KindPhotoDays, KindMessage, KindFX, KindOutflows, KindWorkout, KindTurn}
-
 // calendarRead is one read of the calendar.
 type calendarRead struct {
 	From   string  `json:"from"`

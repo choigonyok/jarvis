@@ -10,6 +10,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/engine"
 	"github.com/choigonyok/jarvis/mind-svc/internal/llm"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+	"github.com/choigonyok/jarvis/mind-svc/internal/registry"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 )
 
@@ -18,13 +19,18 @@ var (
 	moved = saved.AddDate(0, 0, 10)
 )
 
+func shipping() Def {
+	d, _ := Get(registry.Default(), Shipping)
+	return d
+}
+
 func lives(object string, from time.Time, to *time.Time) model.FactRow {
 	return model.FactRow{ID: object, Subject: "self", Predicate: "LIVES_IN", Object: object, From: from, To: to, Single: true}
 }
 
 // The test the design set: a move puts the saved address in doubt.
 func TestAMoveEndsAnAddress(t *testing.T) {
-	r := Shipping.Read([]model.FactRow{lives("수원", saved.AddDate(0, -1, 0), &moved), lives("부산", moved, nil)}, saved, nil)
+	r := shipping().Read([]model.FactRow{lives("수원", saved.AddDate(0, -1, 0), &moved), lives("부산", moved, nil)}, saved, nil)
 	if r.Holds || !strings.Contains(r.Why, "사는 곳이 바뀐") || r.Grade != engine.AskBlank {
 		t.Fatalf("%+v", r)
 	}
@@ -41,7 +47,7 @@ func TestAnAddressHoldsWithoutAMove(t *testing.T) {
 	}
 	for name, rows := range cases {
 		t.Run(name, func(t *testing.T) {
-			r := Shipping.Read(rows, saved, nil)
+			r := shipping().Read(rows, saved, nil)
 			if !r.Holds || r.Why != "" {
 				t.Fatalf("%+v", r)
 			}
@@ -56,7 +62,7 @@ func TestAnAddressHoldsWithoutAMove(t *testing.T) {
 // Saved again after the move, it holds again.
 func TestSavingAgainSettlesIt(t *testing.T) {
 	rows := []model.FactRow{lives("수원", saved.AddDate(0, -1, 0), &moved), lives("부산", moved, nil)}
-	if r := Shipping.Read(rows, moved.AddDate(0, 0, 1), nil); !r.Holds {
+	if r := shipping().Read(rows, moved.AddDate(0, 0, 1), nil); !r.Holds {
 		t.Fatalf("%+v", r)
 	}
 }
@@ -64,10 +70,10 @@ func TestSavingAgainSettlesIt(t *testing.T) {
 func ptr[T any](v T) *T { return &v }
 
 func TestGet(t *testing.T) {
-	if d, ok := Get("shipping.address"); !ok || !d.Secret {
+	if d, ok := Get(registry.Default(), "shipping.address"); !ok || !d.Secret {
 		t.Fatalf("%+v", d)
 	}
-	if _, ok := Get("nothing"); ok {
+	if _, ok := Get(registry.Default(), "nothing"); ok {
 		t.Fatal("없는 슬롯입니다")
 	}
 }
@@ -145,12 +151,12 @@ func TestTheOperatorsWordStands(t *testing.T) {
 	f := &fakeLLM{}
 	c, st := classifier(f)
 	ctx := context.Background()
-	_ = st.PutClass(ctx, model.Class{Kind: MerchantCategory.Name, Key: "상호", Value: "교통", P: 1, By: model.ClassByOperator})
+	_ = st.PutClass(ctx, model.Class{Kind: MerchantCategory, Key: "상호", Value: "교통", P: 1, By: model.ClassByOperator})
 	if got := c.Classes(ctx, []Charge{{Kind: "tx", ID: 1, Merchant: "상호"}}, categories); got["상호"].Value != "교통" || f.calls != 0 {
 		t.Fatalf("%+v %d", got, f.calls)
 	}
-	_ = st.PutClass(ctx, model.Class{Kind: MerchantCategory.Name, Key: "상호", Value: "식비", P: 0.9, By: model.ClassByLLM})
-	if got, _ := st.Class(ctx, MerchantCategory.Name, "상호"); got.Value != "교통" {
+	_ = st.PutClass(ctx, model.Class{Kind: MerchantCategory, Key: "상호", Value: "식비", P: 0.9, By: model.ClassByLLM})
+	if got, _ := st.Class(ctx, MerchantCategory, "상호"); got.Value != "교통" {
 		t.Fatalf("모델이 덮었습니다: %+v", got)
 	}
 }

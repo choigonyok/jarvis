@@ -51,7 +51,7 @@ func (m *Mind) RebuildLedger(ctx context.Context) (outcomes, facts int, err erro
 	if err != nil {
 		return len(rows), 0, err
 	}
-	factRows := ledger.Intervals(all, m.Opts.Loc)
+	factRows := ledger.Intervals(all, m.Opts.Loc, m.Registry().Single)
 	if err := st.ReplaceFactRows(ctx, factRows); err != nil {
 		return len(rows), 0, err
 	}
@@ -167,7 +167,7 @@ func (m *Mind) SlotReading(ctx context.Context, d slot.Def, saved time.Time) (sl
 	if err != nil {
 		return slot.Reading{}, err
 	}
-	return d.Read(ledger.Intervals(facts, m.Opts.Loc), saved, m.Gate.Book()), nil
+	return d.Read(ledger.Intervals(facts, m.Opts.Loc, m.Registry().Single), saved, m.Gate.Book()), nil
 }
 
 // loadBook gives the gate the ledger as it was last made, so a restart does

@@ -180,7 +180,7 @@ func TestAnAnswerIsFiledAndKept(t *testing.T) {
 	if len(book.patches) != 1 || !strings.Contains(book.patches[0], "/transactions/1") || !strings.Contains(book.patches[0], "교통") {
 		t.Fatalf("%v", book.patches)
 	}
-	got, err := st.Class(ctx, slot.MerchantCategory.Name, "쏘카")
+	got, err := st.Class(ctx, slot.MerchantCategory, "쏘카")
 	if err != nil || got.Value != "교통" || got.By != model.ClassByOperator {
 		t.Fatalf("%+v %v", got, err)
 	}
@@ -233,7 +233,7 @@ func TestOnlyThisOnceIsNotKept(t *testing.T) {
 	if _, err := m.Gate.ApproveWith(ctx, in.ID, map[string]string{"category": "교통", "remember": act.RememberNo}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.Class(ctx, slot.MerchantCategory.Name, "쏘카"); err == nil {
+	if _, err := st.Class(ctx, slot.MerchantCategory, "쏘카"); err == nil {
 		t.Fatal("이번만이면 기억하지 않습니다")
 	}
 }
@@ -290,7 +290,7 @@ func TestARecordEarnsDoingIt(t *testing.T) {
 func TestTheOperatorsAnswerIsUsed(t *testing.T) {
 	m, st, book := chargeMind(t, "", charge(2, "쏘카"))
 	ctx := context.Background()
-	_ = st.PutClass(ctx, model.Class{Kind: slot.MerchantCategory.Name, Key: "쏘카", Value: "교통", P: 1, By: model.ClassByOperator})
+	_ = st.PutClass(ctx, model.Class{Kind: slot.MerchantCategory, Key: "쏘카", Value: "교통", P: 1, By: model.ClassByOperator})
 	if err := m.fileCharges(ctx); err != nil {
 		t.Fatal(err)
 	}

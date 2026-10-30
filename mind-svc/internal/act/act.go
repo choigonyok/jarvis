@@ -41,6 +41,15 @@ func NewRegistry(as ...Actuator) *Registry {
 	return r
 }
 
+// Kinds is every kind something here can carry out.
+func (r *Registry) Kinds() []string {
+	out := make([]string, 0, len(r.byKind))
+	for k := range r.byKind {
+		out = append(out, k)
+	}
+	return out
+}
+
 func (r *Registry) For(kind string) (Actuator, bool) {
 	a, ok := r.byKind[kind]
 	return a, ok

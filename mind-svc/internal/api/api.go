@@ -17,6 +17,8 @@
 //	POST /api/policy/rebuild          recount approval stats from the intents
 //	POST /api/patterns/rebuild        recount repetitions from the plans and purchases
 //	POST /api/ledger/rebuild          make the result ledger and the facts table again
+//	GET  /api/registry                the registry's rows, and the kinds seen with no row
+//	PUT  /api/registry/{section}/{key}  a row's body: kinds, actions, slots, relations, policy
 //	POST /api/facts/adopt             copy into the facts table what memory's graph holds and it does not
 //	GET  /api/facts/index?offset=&limit=  what memory's graph is made from (memory-svc POST /rebuild reads it)
 //	GET  /api/slots/{name}?saved=     whether a slot's value saved then still holds
@@ -159,6 +161,8 @@ func (s *Server) Handler() http.Handler {
 			func(pattern string, h http.HandlerFunc) { mux.HandleFunc(pattern, s.person(h)) },
 			func(pattern string, h http.HandlerFunc) { write(pattern, s.person, h) })
 	}
+	mux.HandleFunc("GET /api/registry", s.auth(false, s.registry))
+	write("PUT /api/registry/{section}/{key}", owner, s.writeRegistry)
 	mux.HandleFunc("POST /api/facts/adopt", s.auth(true, func(w http.ResponseWriter, r *http.Request) {
 		n, err := s.m.AdoptFacts(r.Context())
 		if err != nil {
@@ -466,10 +470,35 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+func (s *Server) registry(w http.ResponseWriter, r *http.Request) {
+	rows, err := s.m.Opts.Store.RegistryRows(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"rows": rows, "unknownKinds": s.m.UnknownKinds()})
+}
+
+func (s *Server) writeRegistry(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxCommand))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "본문을 읽지 못했습니다."})
+		return
+	}
+	switch err := s.m.WriteRegistry(r.Context(), r.PathValue("section"), r.PathValue("key"), body); {
+	case mind.BadRow(err):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+	case err != nil:
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	default:
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	}
+}
+
 // slot says whether a value kept elsewhere - sealed, so never here - still
 // holds, for the one who is about to use it.
 func (s *Server) slot(w http.ResponseWriter, r *http.Request) {
-	d, ok := slot.Get(r.PathValue("name"))
+	d, ok := slot.Get(s.m.Registry(), r.PathValue("name"))
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "그런 슬롯이 없습니다"})
 		return

@@ -532,3 +532,25 @@ func TestAGradeIsCarriedOut(t *testing.T) {
 		t.Fatalf("되돌릴 수 없으면 묻습니다: %+v", got)
 	}
 }
+
+// The way out is narrow: an action with no row is not done, whoever raised it.
+func TestAnActionWithNoRowIsNotDone(t *testing.T) {
+	p := DefaultPolicy()
+	delete(p.Levels, "calendar.create")
+	f := newFixture(p)
+	in, err := f.g.Submit(context.Background(), create("e1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in.Status != model.Failed || in.Error != "등록되지 않은 행동입니다" {
+		t.Fatalf("%+v", in)
+	}
+}
+
+// What can be carried out has a row.
+func TestEveryActionHasARow(t *testing.T) {
+	f := newFixture(DefaultPolicy())
+	if missing := f.g.Unlisted(); len(missing) != 0 {
+		t.Fatalf("%v", missing)
+	}
+}

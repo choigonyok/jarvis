@@ -15,6 +15,7 @@ import (
 	"github.com/choigonyok/jarvis/gocommon/seal"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+	"github.com/choigonyok/jarvis/mind-svc/internal/registry"
 )
 
 // Postgres is the store in the stack (migrations 035, 038). Message text is sealed
@@ -1048,6 +1049,42 @@ func (p *Postgres) ReplaceFactRows(ctx context.Context, rows []model.FactRow) er
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+func (p *Postgres) RegistryRows(ctx context.Context) ([]registry.Row, error) {
+	rows, err := p.db.Query(ctx, `select section, key, body, by_who, at from mind.registry order by section, key`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []registry.Row
+	for rows.Next() {
+		var r registry.Row
+		var body []byte
+		if err := rows.Scan(&r.Section, &r.Key, &body, &r.By, &r.At); err != nil {
+			return nil, err
+		}
+		r.Body = body
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) SeedRegistry(ctx context.Context, rows []registry.Row) error {
+	b := &pgx.Batch{}
+	for _, r := range rows {
+		b.Queue(`insert into mind.registry (section, key, body) values ($1, $2, $3::jsonb)
+			on conflict (section, key) do update set body = excluded.body, at = now()
+			where mind.registry.by_who = 'seed' and mind.registry.body <> excluded.body`, r.Section, r.Key, string(r.Body))
+	}
+	return p.db.SendBatch(ctx, b).Close()
+}
+
+func (p *Postgres) PutRegistryRow(ctx context.Context, r registry.Row) error {
+	_, err := p.db.Exec(ctx, `insert into mind.registry (section, key, body, by_who) values ($1, $2, $3::jsonb, $4)
+		on conflict (section, key) do update set body = excluded.body, by_who = excluded.by_who, at = now()`,
+		r.Section, r.Key, string(r.Body), r.By)
+	return err
 }
 
 func bodyOf(f model.FactRow) string {

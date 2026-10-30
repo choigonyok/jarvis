@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+	"github.com/choigonyok/jarvis/mind-svc/internal/registry"
 )
 
 // Memory keeps everything in this process: the loop runs on a laptop with
@@ -37,6 +38,7 @@ type Memory struct {
 	versions map[string][]model.Note
 	outcomes []model.Outcome
 	factRows []model.FactRow
+	registry map[string]registry.Row
 	// indexRows are the rows of the facts table not read from the ledger.
 	indexRows map[string]model.FactRow
 	classes   map[string]model.Class
@@ -893,6 +895,46 @@ func (m *Memory) FactRows(context.Context) ([]model.FactRow, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return slices.Clone(m.factRows), nil
+}
+
+func (m *Memory) RegistryRows(context.Context) ([]registry.Row, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]registry.Row, 0, len(m.registry))
+	for _, r := range m.registry {
+		out = append(out, r)
+	}
+	slices.SortFunc(out, func(a, b registry.Row) int {
+		return cmp.Or(cmp.Compare(a.Section, b.Section), cmp.Compare(a.Key, b.Key))
+	})
+	return out, nil
+}
+
+func (m *Memory) SeedRegistry(_ context.Context, rows []registry.Row) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.registry == nil {
+		m.registry = map[string]registry.Row{}
+	}
+	for _, r := range rows {
+		key := r.Section + "\x00" + r.Key
+		if old, ok := m.registry[key]; ok && old.By != registry.BySeed {
+			continue
+		}
+		r.By = registry.BySeed
+		m.registry[key] = r
+	}
+	return nil
+}
+
+func (m *Memory) PutRegistryRow(_ context.Context, r registry.Row) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.registry == nil {
+		m.registry = map[string]registry.Row{}
+	}
+	m.registry[r.Section+"\x00"+r.Key] = r
+	return nil
 }
 
 func (m *Memory) PutFactRow(_ context.Context, f model.FactRow) error {

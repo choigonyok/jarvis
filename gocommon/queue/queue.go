@@ -63,6 +63,12 @@ var (
 // channel is what is notified when the topic has something new.
 func (t Topic) channel() string { return "queue_" + t.Name }
 
+// SetKinds changes what a consumer reads from now on.
+func SetKinds(ctx context.Context, pool *pgxpool.Pool, t Topic, name string, kinds []string) error {
+	_, err := pool.Exec(ctx, `update `+t.Consumers+` set kinds = $2 where name = $1`, name, kinds)
+	return err
+}
+
 // OutboxChannel is what an insert into input.outbox notifies (migration 078).
 const OutboxChannel = "input_outbox"
 

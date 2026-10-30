@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+	"github.com/choigonyok/jarvis/mind-svc/internal/registry"
 )
 
 type Store interface {
@@ -181,6 +182,13 @@ type Store interface {
 	ReplaceFactRows(ctx context.Context, rows []model.FactRow) error
 	// FactRows is the checked rows.
 	FactRows(ctx context.Context) ([]model.FactRow, error)
+	// RegistryRows is the registry, whole.
+	RegistryRows(ctx context.Context) ([]registry.Row, error)
+	// SeedRegistry brings the rows nobody changed up to what ships with the
+	// code, and adds what is new. A row someone changed is left.
+	SeedRegistry(ctx context.Context, rows []registry.Row) error
+	// PutRegistryRow writes one row, as someone's.
+	PutRegistryRow(ctx context.Context, r registry.Row) error
 	// PutFactRow keeps one row that is not read from the ledger of facts.
 	PutFactRow(ctx context.Context, row model.FactRow) error
 	// IndexRows is a page of what memory's graph is made from: the oldest

@@ -441,6 +441,9 @@ const KindSpendingWrite = "spending.write"
 // KindJobsWrite is a change to a job, which mind keeps.
 const KindJobsWrite = "jobs.write"
 
+// KindRegistryWrite is a change to a row of mind's registry.
+const KindRegistryWrite = "registry.write"
+
 // CommandKind names a request for mind as the record it travels as: what the
 // agent asks of mind and what mind's door takes both come as these, and only
 // these change its state.
@@ -461,6 +464,8 @@ func CommandKind(method, path string) string {
 		return KindSpendingWrite
 	case "jobs":
 		return KindJobsWrite
+	case "registry":
+		return KindRegistryWrite
 	case "reminders":
 		switch method {
 		case "POST":

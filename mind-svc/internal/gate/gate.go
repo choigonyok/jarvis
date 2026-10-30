@@ -26,6 +26,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/engine"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
+	"github.com/choigonyok/jarvis/mind-svc/internal/registry"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 )
 
@@ -68,25 +69,24 @@ type Policy struct {
 	QuietRaised, QuietApproved, QuietRejected time.Duration
 }
 
-func DefaultPolicy() Policy {
-	return Policy{
-		Levels: map[string]string{"calendar.create": AskFor, "calendar.update": AskFor, "calendar.delete": AskFor},
-		// Orders, messages and the like are asked every time, however often
-		// they were approved: nothing here pays or sends by itself.
-		Fixed: map[string]bool{"calendar.delete": true, "cart.add": true, "message.draft": true, "settle.request": true, "review.place": true, "preference.confirm": true, "assets.rebalance": true,
-			// A context: a trip moved for the weather (skill.Rain).
-			"rain": true},
-		Promote:         3,
-		PromoteRate:     0.8,
-		Window:          30 * 24 * time.Hour,
-		DailyInterrupts: 8,
-		DailyCards:      5,
-		MinConfidence:   0.7,
-		InterruptCost:   0.25,
-		QuietRaised:     3 * 24 * time.Hour,
-		QuietApproved:   7 * 24 * time.Hour,
-		QuietRejected:   14 * 24 * time.Hour,
+// DefaultPolicy is the policy as it ships.
+func DefaultPolicy() Policy { return PolicyFrom(registry.Default()) }
+
+// PolicyFrom is the policy as the registry has it. Promotion stays here until
+// the engine takes it over.
+func PolicyFrom(r *registry.Snapshot) Policy {
+	g := r.Gate()
+	p := Policy{Levels: map[string]string{}, Fixed: map[string]bool{}, Promote: 3, PromoteRate: 0.8,
+		Window: time.Duration(g.Window), DailyInterrupts: g.DailyInterrupts, DailyCards: g.DailyCards,
+		MinConfidence: g.MinConfidence, InterruptCost: g.InterruptCost, QuietRaised: time.Duration(g.QuietRaised),
+		QuietApproved: time.Duration(g.QuietApproved), QuietRejected: time.Duration(g.QuietRejected)}
+	for kind, a := range r.Actions() {
+		p.Levels[kind] = a.Level
+		if a.Fixed {
+			p.Fixed[kind] = true
+		}
 	}
+	return p
 }
 
 // lowValue is below what a thing done and told rings for: it waits for the
@@ -119,6 +119,27 @@ type Gate struct {
 
 // SetBook gives the gate the ledger's record.
 func (g *Gate) SetBook(b *engine.Book) { g.book.Store(b) }
+
+// Unlisted is the actions something can carry out that have no row: they
+// would be refused, so a new one has to come with its row.
+func (g *Gate) Unlisted() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	var out []string
+	for _, k := range g.acts.Kinds() {
+		if _, ok := g.policy.Levels[k]; !ok {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// SetPolicy gives the gate the policy as the registry now has it.
+func (g *Gate) SetPolicy(p Policy) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.policy = p
+}
 
 // Book is the ledger's record as the gate has it.
 func (g *Gate) Book() *engine.Book { return g.book.Load() }
@@ -179,6 +200,11 @@ func (g *Gate) Submit(ctx context.Context, in model.Intent) (model.Intent, error
 		return in, g.st.PutIntent(ctx, in)
 	}
 
+	// The way out is narrow: an action with no row is not done.
+	if _, ok := g.policy.Levels[in.Kind]; !ok && len(g.policy.Levels) > 0 {
+		in.Status, in.Error = model.Failed, "등록되지 않은 행동입니다"
+		return in, g.st.PutIntent(ctx, in)
+	}
 	a, ok := g.acts.For(in.Kind)
 	if !ok {
 		in.Status, in.Error = model.Failed, "이 행동을 할 수 있는 곳이 없습니다"

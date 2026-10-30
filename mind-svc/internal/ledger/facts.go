@@ -9,17 +9,6 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 )
 
-// singleFacts are the relations with one answer at a time: a move ends the
-// old address, and the table refuses two at once. They become slots of the
-// registry when it comes.
-var singleFacts = map[string]bool{
-	"LIVES_IN":    true,
-	"HAS_ADDRESS": true,
-	"WORKS_AT":    true,
-	"STUDIES_AT":  true,
-	"BIRTHDAY_ON": true,
-}
-
 // indexEnd is one end of a row in memory's graph.
 type indexEnd struct {
 	ID   string `json:"id,omitempty"`
@@ -109,10 +98,11 @@ func validFrom(f model.Fact, loc *time.Location) time.Time {
 }
 
 // Intervals is the facts ledger as facts with the time they hold. A single
-// fact holds until the next different one; the same thing said again keeps
+// fact (one answer at a time, as the registry says) holds until the next
+// different one; the same thing said again keeps
 // the first time it was said and the surest word. What memory said a later
 // fact ended is closed there. A fact a person dropped is not one.
-func Intervals(facts []model.Fact, loc *time.Location) []model.FactRow {
+func Intervals(facts []model.Fact, loc *time.Location, single func(string) bool) []model.FactRow {
 	if loc == nil {
 		loc = time.UTC
 	}
@@ -133,7 +123,7 @@ func Intervals(facts []model.Fact, loc *time.Location) []model.FactRow {
 			continue
 		}
 		row := model.FactRow{ID: f.ID, Subject: party(f.Subject), Predicate: f.Relation, Object: party(f.Object), Text: f.Text,
-			From: validFrom(f, loc), P: f.Confidence, Single: singleFacts[f.Relation]}
+			From: validFrom(f, loc), P: f.Confidence, Single: single(f.Relation)}
 		key := row.Subject + "\x00" + row.Predicate
 		if !row.Single {
 			key += "\x00" + row.Object

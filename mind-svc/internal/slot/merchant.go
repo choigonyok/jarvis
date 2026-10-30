@@ -111,7 +111,7 @@ func (c *Classifier) Classes(ctx context.Context, charges []Charge, categories [
 			continue
 		}
 		seen[key] = true
-		got, err := c.St.Class(ctx, MerchantCategory.Name, key)
+		got, err := c.St.Class(ctx, MerchantCategory, key)
 		switch {
 		case err == nil:
 			out[key] = got
@@ -140,7 +140,7 @@ func (c *Classifier) Classes(ctx context.Context, charges []Charge, categories [
 			if !ok || category == "" || category == Other || !contains(categories, category) {
 				continue
 			}
-			class := model.Class{Kind: MerchantCategory.Name, Key: ch.Key(), Value: category, P: j.Confidence, By: model.ClassByLLM, At: c.Now()}
+			class := model.Class{Kind: MerchantCategory, Key: ch.Key(), Value: category, P: j.Confidence, By: model.ClassByLLM, At: c.Now()}
 			if err := c.St.PutClass(ctx, class); err != nil {
 				continue
 			}

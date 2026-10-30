@@ -86,7 +86,7 @@ func chargeTopic(c slot.Charge) string { return "category:" + c.Ref() }
 // chargeIntent is what the engine makes of one charge, and whether it takes a
 // place among the waiting cards.
 func (m *Mind) chargeIntent(c slot.Charge, class model.Class, categories []string) (model.Intent, bool) {
-	def := slot.MerchantCategory
+	def, _ := slot.Get(m.Registry(), slot.MerchantCategory)
 	r := m.Gate.Book().Read(def.Key(), class.P)
 	if class.By == model.ClassByOperator {
 		r.P = 1 // said by the operator: it covers the cache and needs no record
@@ -164,7 +164,7 @@ func (m *Mind) chargeAnswered(ctx context.Context, in model.Intent) {
 			return
 		}
 		key := slot.Charge{Kind: p.Kind, Merchant: p.Merchant, Name: p.Name}.Key()
-		err := m.Opts.Store.PutClass(ctx, model.Class{Kind: slot.MerchantCategory.Name, Key: key, Value: p.Chosen(), P: 1, By: model.ClassByOperator, At: m.Opts.Now()})
+		err := m.Opts.Store.PutClass(ctx, model.Class{Kind: slot.MerchantCategory, Key: key, Value: p.Chosen(), P: 1, By: model.ClassByOperator, At: m.Opts.Now()})
 		if err != nil {
 			m.Opts.Logger.Warn("고른 분류를 기억하지 못했습니다", "err", err)
 		}

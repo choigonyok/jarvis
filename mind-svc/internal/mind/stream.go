@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/choigonyok/jarvis/gocommon/queue"
-	"github.com/choigonyok/jarvis/gocommon/record"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
 )
@@ -15,15 +14,6 @@ import (
 // asked of it - an answer to a card, a reminder to keep, a timer come due. No
 // model is called here, and it runs on its own consumer, so a long read of a
 // conversation holds none of it up.
-
-// CommandKinds is what the lane reads of the operator's stream. An answer
-// (intent.answer) is here for the cards of mind's own, which the agent asks
-// of it; the cards the agent asked itself it carries on with (HeldCard).
-var CommandKinds = []string{"intent.answer", "payment.requested", "reminder.*", "checklist.*", "note.*", "link.*", record.KindSpendingWrite, record.KindJobsWrite, obs.TimerFired}
-
-// GuestCommandKinds is what the lane reads of the guest's: their reminders,
-// lists and jobs, and nothing that decides anything of the operator's.
-var GuestCommandKinds = []string{"reminder.*", "checklist.*", record.KindJobsWrite}
 
 // EmitTimer sends a due timer into the stream.
 func EmitTimer(l obs.Log) func(ctx context.Context, t model.Timer) error {

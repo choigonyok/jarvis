@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/act"
@@ -33,6 +34,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/predict"
 	"github.com/choigonyok/jarvis/mind-svc/internal/prefs"
 	"github.com/choigonyok/jarvis/mind-svc/internal/reflect"
+	"github.com/choigonyok/jarvis/mind-svc/internal/registry"
 	"github.com/choigonyok/jarvis/mind-svc/internal/self"
 	"github.com/choigonyok/jarvis/mind-svc/internal/skill"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
@@ -99,19 +101,26 @@ type Options struct {
 }
 
 type Mind struct {
-	Opts     Options
-	World    *world.World
-	Conv     *interpret.Conversation
-	Actions  *interpret.Actions
-	Attn     *attention.Attention
-	Gate     *gate.Gate
-	Skills   []skill.Skill
-	Remember *Remember // nil without long-term memory
-	Link     *link.Linker
-	Self     *self.Self
-	Predict  *predict.Predictor
-	Reflect  *reflect.Reflector
-	Prefs    *prefs.Prefs
+	Opts Options
+	// reg is the registry as it stands.
+	reg *registry.Live
+	// OnRegistry hears a new registry, once the gate has it.
+	OnRegistry func(ctx context.Context, r *registry.Snapshot)
+	// unknown is the kinds seen with no row, each said once.
+	unknownMu sync.Mutex
+	unknown   map[string]bool
+	World     *world.World
+	Conv      *interpret.Conversation
+	Actions   *interpret.Actions
+	Attn      *attention.Attention
+	Gate      *gate.Gate
+	Skills    []skill.Skill
+	Remember  *Remember // nil without long-term memory
+	Link      *link.Linker
+	Self      *self.Self
+	Predict   *predict.Predictor
+	Reflect   *reflect.Reflector
+	Prefs     *prefs.Prefs
 	// Moments says reminders at their moment; nil without Reminders.
 	Moments *moments.Service
 	// Lists is the operator's checklists; nil without Checklists.
@@ -131,7 +140,7 @@ func New(o Options) *Mind {
 	if o.Now == nil {
 		o.Now = time.Now
 	}
-	m := &Mind{Opts: o}
+	m := &Mind{Opts: o, reg: registry.NewLive(registry.Default())}
 	m.World = world.New(o.Store, o.Now)
 	cfg := o.Interpret
 	if o.Memory != nil {
