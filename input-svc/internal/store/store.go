@@ -114,7 +114,7 @@ func (s *Store) Drain(ctx context.Context, limit int) (int, error) {
 	}
 	b := newBatch(tx)
 	for _, r := range list {
-		e, why := envelope.Parse(r.payload, r.id, s.now())
+		e, why := envelope.Parse(r.payload)
 		if why != nil {
 			if _, err := tx.Exec(ctx, `insert into input.rejected (id, payload, why) values ($1, $2, $3) on conflict do nothing`,
 				r.id, string(r.payload), why.Error()); err != nil {

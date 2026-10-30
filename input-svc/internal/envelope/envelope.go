@@ -1,10 +1,7 @@
-// Package envelope reads what producers left in the outbox: a Record, or the
-// event shape the services have sent since before there were records.
+// Package envelope reads what producers left in the outbox: a Record.
 //
 // It checks the envelope and nothing inside the payload: what a kind holds is
-// that kind's business, and a kind nobody registered is let in. The event
-// shape is upcast here so that nothing past this point knows it existed; it
-// goes when the last producer sends Records of its own.
+// that kind's business, and a kind nobody registered is let in.
 package envelope
 
 import (
@@ -72,7 +69,7 @@ func (e Envelope) Check() error {
 	return nil
 }
 
-// Notify is the wording a sender attached to an event. It stays in the
+// Notify is the wording a sender attached to a record. It stays in the
 // payload under this name.
 type Notify struct {
 	Tier     string `json:"tier"`
@@ -83,39 +80,8 @@ type Notify struct {
 	Audience string `json:"audience,omitempty"`
 }
 
-// event is the old shape as sent: the event's own fields, or the notification
-// shape (kind, tier, title...) of the services that came first.
-type event struct {
-	Source     string          `json:"source"`
-	Type       string          `json:"type"`
-	Subject    string          `json:"subject"`
-	Data       json.RawMessage `json:"data"`
-	Notify     *Notify         `json:"notify"`
-	Key        string          `json:"key"`
-	OccurredAt *time.Time      `json:"occurredAt"`
-
-	Kind     string `json:"kind"`
-	Tier     string `json:"tier"`
-	Level    string `json:"level"`
-	Title    string `json:"title"`
-	Body     string `json:"body"`
-	URL      string `json:"url"`
-	Audience string `json:"audience"`
-}
-
-// Parse reads one outbox row, or says why it will never be a record. id is
-// the row's: it is the idempotency key of an event sent without one. now is
-// when an event that did not say when it happened is taken to have.
-func Parse(raw []byte, id int64, now time.Time) (Envelope, error) {
-	var probe struct {
-		SourceKey string `json:"source_key"`
-	}
-	if err := json.Unmarshal(raw, &probe); err != nil {
-		return Envelope{}, errors.New("JSON 을 읽지 못했습니다")
-	}
-	if probe.SourceKey == "" {
-		return upcast(raw, id, now)
-	}
+// Parse reads one outbox row, or says why it will never be a record.
+func Parse(raw []byte) (Envelope, error) {
 	var e Envelope
 	if err := json.Unmarshal(raw, &e); err != nil {
 		return Envelope{}, fmt.Errorf("기록의 봉투를 읽지 못했습니다: %w", err)
@@ -127,68 +93,6 @@ func Parse(raw []byte, id int64, now time.Time) (Envelope, error) {
 		e.Payload = json.RawMessage("{}")
 	}
 	return e, e.Check()
-}
-
-// upcast turns the event shape into a record. Its data stays what it was,
-// with the wording beside it; what is for the guest goes to the guest.
-func upcast(raw []byte, id int64, now time.Time) (Envelope, error) {
-	var in event
-	if err := json.Unmarshal(raw, &in); err != nil {
-		return Envelope{}, errors.New("이벤트를 읽지 못했습니다")
-	}
-	if in.Type == "" && in.Kind != "" {
-		in.Type = in.Kind
-		if in.Notify == nil && in.Title != "" {
-			in.Notify = &Notify{Tier: in.Tier, Level: in.Level, Title: in.Title, Body: in.Body, URL: in.URL, Audience: in.Audience}
-		}
-	}
-	switch {
-	case in.Source == "" || in.Type == "":
-		return Envelope{}, errors.New("source 와 type 이 필요합니다")
-	case len(in.Data) > 0 && !json.Valid(in.Data):
-		return Envelope{}, errors.New("data 는 JSON 이어야 합니다")
-	case in.Notify != nil && (in.Notify.Title == "" || !validTier(in.Notify.Tier)):
-		return Envelope{}, errors.New("notify 에는 title 과 tier(now, digest, log)가 필요합니다")
-	}
-	payload, err := merge(in.Data, in.Notify)
-	if err != nil {
-		return Envelope{}, err
-	}
-	e := Envelope{
-		Kind: in.Type, Source: in.Source, SourceKey: in.Key, Actor: in.Source, Subject: in.Subject,
-		OccurredAt: now, Tier: rawTier, SchemaVersion: 1, Payload: payload,
-	}
-	if e.SourceKey == "" {
-		e.SourceKey = fmt.Sprintf("outbox:%d", id)
-	}
-	if in.OccurredAt != nil && !in.OccurredAt.IsZero() {
-		e.OccurredAt = *in.OccurredAt
-	}
-	if in.Notify != nil && in.Notify.Audience == Guest {
-		e.Actor = Guest
-	}
-	return e, e.Check()
-}
-
-func validTier(t string) bool { return t == "now" || t == "digest" || t == "log" }
-
-// merge is data with the wording beside it. Data that is not an object, which
-// no service sends, is kept under "value".
-func merge(data json.RawMessage, notify *Notify) (json.RawMessage, error) {
-	fields := map[string]json.RawMessage{}
-	if len(data) > 0 {
-		if err := json.Unmarshal(data, &fields); err != nil || fields == nil {
-			fields = map[string]json.RawMessage{"value": data}
-		}
-	}
-	if notify != nil {
-		b, err := json.Marshal(notify)
-		if err != nil {
-			return nil, err
-		}
-		fields["notify"] = b
-	}
-	return json.Marshal(fields)
 }
 
 // guestCommands are the kinds the guest's agent writes: the guest's own

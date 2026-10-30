@@ -91,7 +91,7 @@ func TestTheDoorIsLocked(t *testing.T) {
 func TestPostStoresARecord(t *testing.T) {
 	srv, owner := setup(t)
 	key := unique("k")
-	body := fmt.Sprintf(`{"source":"t","type":"a.b","key":%q,"data":{"x":1}}`, key)
+	body := fmt.Sprintf(`{"kind":"a.b","source":"t","source_key":%q,"actor":"t","occurred_at":"2026-10-31T02:00:00Z","tier":"raw","payload":{"x":1}}`, key)
 	code, out := call(t, http.MethodPost, srv.URL+"/records", token, body)
 	if code != http.StatusCreated {
 		t.Fatalf("%d %s", code, out)
@@ -113,7 +113,7 @@ func TestPostStoresARecord(t *testing.T) {
 func TestTheGuestsTokenOnlyNotifiesTheGuest(t *testing.T) {
 	srv, owner := setup(t)
 	key := unique("k")
-	body := fmt.Sprintf(`{"source":"agent","type":"approval.pending","key":%q,"notify":{"tier":"now","title":"카드","audience":"owner"}}`, key)
+	body := fmt.Sprintf(`{"kind":"approval.pending","source":"agent","source_key":%q,"actor":"agent","occurred_at":"2026-10-31T02:00:00Z","tier":"raw","payload":{"notify":{"tier":"now","title":"카드","audience":"owner"}}}`, key)
 	if code, out := call(t, http.MethodPost, srv.URL+"/records", guestToken, body); code != http.StatusCreated {
 		t.Fatalf("%d %s", code, out)
 	}
@@ -129,7 +129,7 @@ func TestTheGuestsTokenOnlyNotifiesTheGuest(t *testing.T) {
 	if actor != "guest" || audience != "guest" {
 		t.Fatalf("%s %s", actor, audience)
 	}
-	body = fmt.Sprintf(`{"source":"agent","type":"mind.card","key":%q,"data":{"a":1}}`, unique("k"))
+	body = fmt.Sprintf(`{"kind":"mind.card","source":"agent","source_key":%q,"actor":"agent","occurred_at":"2026-10-31T02:00:00Z","tier":"raw","payload":{"a":1}}`, unique("k"))
 	if code, _ := call(t, http.MethodPost, srv.URL+"/records", guestToken, body); code != http.StatusForbidden {
 		t.Fatalf("알림이 아닌 것: %d", code)
 	}
@@ -149,7 +149,7 @@ func TestHealthShowsDeliveryAndTheHeldBox(t *testing.T) {
 		t.Fatal(err)
 	}
 	key := unique("k")
-	body := fmt.Sprintf(`{"source":"t","type":"a.b","key":%q}`, key)
+	body := fmt.Sprintf(`{"kind":"a.b","source":"t","source_key":%q,"actor":"t","occurred_at":"2026-10-31T02:00:00Z","tier":"raw"}`, key)
 	var id struct {
 		ID int64 `json:"id"`
 	}
@@ -236,7 +236,7 @@ func TestTheWholeWay(t *testing.T) {
 		}
 	}
 	if _, err := owner.Exec(ctx, `insert into input.outbox (payload) values ($1)`,
-		fmt.Sprintf(`{"source":"t","type":"whole.way","key":%q,"subject":"s","data":{"n":7},"notify":{"tier":"log","title":"t"}}`, key)); err != nil {
+		fmt.Sprintf(`{"kind":"whole.way","source":"t","source_key":%q,"actor":"t","occurred_at":"2026-10-31T02:00:00Z","tier":"raw","subject":"s","payload":{"n":7,"notify":{"tier":"log","title":"t"}}}`, key)); err != nil {
 		t.Fatal(err)
 	}
 	for {

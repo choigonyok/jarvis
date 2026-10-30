@@ -2,7 +2,7 @@
 // the stack: everything but /health needs the token.
 //
 //	GET  /health                       the contract (gocommon/health): each consumer's delivery, the held box
-//	POST /records                      a record, or the event shape, from a process with no database
+//	POST /records                      a record, from a process with no database
 //	GET  /held                         messages set aside after failing on their own
 //	POST /held/{consumer}/{id}/retry   send a held message again now
 //	DELETE /held/{consumer}/{id}       give up on a held message
@@ -146,8 +146,7 @@ func (s *Server) post(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "본문을 읽지 못했습니다."})
 		return
 	}
-	now := s.now()
-	e, err := envelope.Parse(raw, now.UnixNano(), now)
+	e, err := envelope.Parse(raw)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return

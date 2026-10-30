@@ -16,7 +16,7 @@ func TestARecordComesThroughAsItIs(t *testing.T) {
 		"subject": "coupang.com", "occurred_at": at, "tier": "durable", "schema_version": 2, "trace_id": "job:9",
 		"causation_id": "q-0", "payload": map[string]any{"a": "b"},
 	})
-	e, err := Parse(raw, 5, now)
+	e, err := Parse(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,12 +46,12 @@ func TestAnEnvelopeThatIsWrongIsSaidToBe(t *testing.T) {
 			m := base()
 			change(m)
 			raw, _ := json.Marshal(m)
-			if _, err := Parse(raw, 1, now); err == nil {
+			if _, err := Parse(raw); err == nil {
 				t.Fatal("거절해야 합니다")
 			}
 		})
 	}
-	if _, err := Parse([]byte("not json"), 1, now); err == nil {
+	if _, err := Parse([]byte("not json")); err == nil {
 		t.Fatal("JSON 이 아닙니다")
 	}
 }
@@ -59,95 +59,32 @@ func TestAnEnvelopeThatIsWrongIsSaidToBe(t *testing.T) {
 // A kind nobody registered is let in: the door is wide, the way out is not.
 func TestAnUnknownKindIsLetIn(t *testing.T) {
 	raw, _ := json.Marshal(map[string]any{"kind": "처음.보는.종류", "source": "s", "source_key": "x", "actor": "a", "occurred_at": now, "tier": "raw"})
-	if _, err := Parse(raw, 1, now); err != nil {
+	if _, err := Parse(raw); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestTheEventShapeBecomesARecord(t *testing.T) {
-	at := now.Add(-time.Minute)
-	raw, _ := json.Marshal(map[string]any{
-		"source": "spending", "type": "occurrence.observed", "subject": "tx:1", "key": "occurrence:1",
-		"data": map[string]any{"id": "x"}, "occurredAt": at,
-		"notify": map[string]any{"tier": "now", "title": "결제", "body": "1원"},
-	})
-	e, err := Parse(raw, 5, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if e.Kind != "occurrence.observed" || e.Source != "spending" || e.SourceKey != "occurrence:1" || e.Actor != "spending" ||
-		e.Subject != "tx:1" || !e.OccurredAt.Equal(at) || e.Tier != "raw" || e.SchemaVersion != 1 {
-		t.Fatalf("%+v", e)
-	}
-	var p struct {
-		ID     string `json:"id"`
-		Notify Notify `json:"notify"`
-	}
-	if err := json.Unmarshal(e.Payload, &p); err != nil {
-		t.Fatal(err)
-	}
-	if p.ID != "x" || p.Notify.Title != "결제" || p.Notify.Tier != "now" {
-		t.Fatalf("%s", e.Payload)
-	}
-}
-
-// The services that came first send the notification shape.
-func TestTheNotificationShapeBecomesARecord(t *testing.T) {
-	raw, _ := json.Marshal(map[string]any{"source": "status", "kind": "status.fail", "tier": "now", "title": "멈춤", "level": "warn", "url": "/status"})
-	e, err := Parse(raw, 12, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if e.Kind != "status.fail" || e.SourceKey != "outbox:12" || !e.OccurredAt.Equal(now) {
-		t.Fatalf("%+v", e)
-	}
-	var p struct {
-		Notify Notify `json:"notify"`
-	}
-	_ = json.Unmarshal(e.Payload, &p)
-	if p.Notify.Title != "멈춤" || p.Notify.Level != "warn" || p.Notify.URL != "/status" {
-		t.Fatalf("%s", e.Payload)
 	}
 }
 
 func TestWhatIsForTheGuestIsTheGuests(t *testing.T) {
-	raw, _ := json.Marshal(map[string]any{"source": "context", "type": "location.guest.enter",
-		"notify": map[string]any{"tier": "log", "title": "도착", "audience": "guest"}})
-	e, err := Parse(raw, 1, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !e.IsGuest() || e.Actor != Guest {
-		t.Fatalf("%+v", e)
-	}
-	raw, _ = json.Marshal(map[string]any{"source": "context", "type": "location.enter",
-		"notify": map[string]any{"tier": "log", "title": "도착", "audience": "owner"}})
-	if e, err := Parse(raw, 2, now); err != nil || e.IsGuest() {
+	raw, _ := json.Marshal(map[string]any{"kind": "location.guest.enter", "source": "context", "source_key": "x", "actor": Guest, "occurred_at": now, "tier": "raw"})
+	e, err := Parse(raw)
+	if err != nil || !e.IsGuest() {
 		t.Fatalf("%+v %v", e, err)
 	}
 }
 
-func TestABadEventIsSaidToBe(t *testing.T) {
-	for name, m := range map[string]map[string]any{
-		"no source": {"type": "a"},
-		"no type":   {"source": "a"},
-		"bad tier":  {"source": "a", "type": "b", "notify": map[string]any{"tier": "loud", "title": "x"}},
-		"no title":  {"source": "a", "type": "b", "notify": map[string]any{"tier": "now"}},
-	} {
-		t.Run(name, func(t *testing.T) {
-			raw, _ := json.Marshal(m)
-			if _, err := Parse(raw, 1, now); err == nil {
-				t.Fatal("거절해야 합니다")
-			}
-		})
+// What is not a record is not read as anything else.
+func TestTheEventShapeIsNotARecord(t *testing.T) {
+	raw, _ := json.Marshal(map[string]any{"source": "spending", "type": "a.b", "key": "k", "data": map[string]any{"id": "x"}})
+	if _, err := Parse(raw); err == nil {
+		t.Fatal("거절해야 합니다")
 	}
 }
 
 // The guest's token says what it says: to the guest, and only as a notice.
 func TestTheGuestCanOnlyNotifyTheGuest(t *testing.T) {
-	raw, _ := json.Marshal(map[string]any{"source": "agent", "type": "approval.pending", "key": "k",
-		"notify": map[string]any{"tier": "now", "title": "카드"}})
-	e, err := Parse(raw, 1, now)
+	raw, _ := json.Marshal(map[string]any{"kind": "approval.pending", "source": "agent", "source_key": "k", "actor": "agent", "occurred_at": now, "tier": "raw",
+		"payload": map[string]any{"notify": map[string]any{"tier": "now", "title": "카드"}}})
+	e, err := Parse(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,8 +102,9 @@ func TestTheGuestCanOnlyNotifyTheGuest(t *testing.T) {
 	if !g.IsGuest() || p.Notify.Audience != Guest {
 		t.Fatalf("%+v %s", g, g.Payload)
 	}
-	raw, _ = json.Marshal(map[string]any{"source": "agent", "type": "mind.card", "data": map[string]any{"a": 1}})
-	e, err = Parse(raw, 2, now)
+	raw, _ = json.Marshal(map[string]any{"kind": "mind.card", "source": "agent", "source_key": "k2", "actor": "agent", "occurred_at": now, "tier": "raw",
+		"payload": map[string]any{"a": 1}})
+	e, err = Parse(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +118,7 @@ func TestTheGuestCanOnlyNotifyTheGuest(t *testing.T) {
 func TestTheGuestAsksForTheirOwn(t *testing.T) {
 	for _, kind := range []string{"reminder.set", "checklist.make", "intent.answer", "policy.denied"} {
 		raw, _ := json.Marshal(map[string]any{"kind": kind, "source": "agent", "source_key": "k", "actor": "operator", "occurred_at": now, "tier": "raw"})
-		e, err := Parse(raw, 1, now)
+		e, err := Parse(raw)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -191,7 +129,7 @@ func TestTheGuestAsksForTheirOwn(t *testing.T) {
 	}
 	for _, kind := range []string{"note.decided", "link.decided", "timer.fired", "payment.requested"} {
 		raw, _ := json.Marshal(map[string]any{"kind": kind, "source": "agent", "source_key": "k", "actor": "operator", "occurred_at": now, "tier": "raw"})
-		e, err := Parse(raw, 1, now)
+		e, err := Parse(raw)
 		if err != nil {
 			t.Fatal(err)
 		}

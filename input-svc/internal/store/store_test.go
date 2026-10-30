@@ -42,6 +42,11 @@ func setup(t *testing.T) (*Store, *pgxpool.Pool) {
 	return New(pool), owner
 }
 
+// rec is a record as a producer leaves it.
+func rec(key, actor string, payload map[string]any) map[string]any {
+	return map[string]any{"kind": "a", "source": "t", "source_key": key, "actor": actor, "occurred_at": time.Now(), "tier": "raw", "payload": payload}
+}
+
 func put(t *testing.T, db *pgxpool.Pool, v any) {
 	t.Helper()
 	raw, err := json.Marshal(v)
@@ -122,7 +127,7 @@ func TestSayingItTwiceIsOnce(t *testing.T) {
 	s, owner := setup(t)
 	name := consumer(t, owner, "input.consumers", "*")
 	key := unique("k")
-	e := map[string]any{"source": "t", "type": "a", "key": key, "notify": map[string]any{"tier": "log", "title": "x"}}
+	e := rec(key, "t", map[string]any{"notify": map[string]any{"tier": "log", "title": "x"}})
 	put(t, owner, e)
 	put(t, owner, e)
 	drainAll(t, s)
@@ -143,8 +148,7 @@ func TestTheGuestsGoToTheGuestsTables(t *testing.T) {
 	reads := consumer(t, owner, "input.guest_consumers", "*")
 	operators := consumer(t, owner, "input.consumers", "*")
 	key := unique("k")
-	put(t, owner, map[string]any{"source": "context", "type": "location.guest.enter", "key": key,
-		"data": map[string]any{"region": "집"}, "notify": map[string]any{"tier": "log", "title": "도착", "audience": "guest"}})
+	put(t, owner, rec(key, "guest", map[string]any{"region": "집", "notify": map[string]any{"tier": "log", "title": "도착", "audience": "guest"}}))
 	drainAll(t, s)
 	if n := count(t, owner, `select count(*) from input.records where source_key = $1`, key); n != 0 {
 		t.Fatal("운영자 기록에 들어갔습니다")
@@ -171,7 +175,7 @@ func TestABadRowIsSetAside(t *testing.T) {
 	s, owner := setup(t)
 	key := unique("k")
 	put(t, owner, map[string]any{"nonsense": true, "marker": key})
-	put(t, owner, map[string]any{"source": "t", "type": "a", "key": key})
+	put(t, owner, rec(key, "t", nil))
 	drainAll(t, s)
 	if n := count(t, owner, `select count(*) from input.records where source_key = $1`, key); n != 1 {
 		t.Fatalf("다음 행이 막혔습니다: %d", n)
@@ -266,7 +270,7 @@ func TestItCanReadTheQueue(t *testing.T) {
 	s, owner := setup(t)
 	name := consumer(t, owner, "input.consumers", "*")
 	key := unique("k")
-	put(t, owner, map[string]any{"source": "t", "type": "a", "key": key})
+	put(t, owner, rec(key, "t", nil))
 	drainAll(t, s)
 	for _, topic := range []queue.Topic{queue.Records, queue.Guest} {
 		if _, err := queue.States(context.Background(), s.Pool(), topic); err != nil {
