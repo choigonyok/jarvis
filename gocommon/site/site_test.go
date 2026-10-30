@@ -12,12 +12,16 @@ func TestDomain(t *testing.T) {
 		"web.joongna.com/":                  "joongna.com",
 		"the-internet.herokuapp.com/login":  "the-internet.herokuapp.com",
 		"me.github.io":                      "me.github.io",
+		// Past what a hand-kept list knew: the regional names of .kr, others' countries.
+		"shop.seoul.kr":      "shop.seoul.kr",
+		"a.shop.busan.kr":    "shop.busan.kr",
+		"pay.example.com.br": "example.com.br",
 	} {
 		if got, err := Domain(in); err != nil || got != want {
 			t.Errorf("Domain(%q) = %q, %v; want %q", in, got, err, want)
 		}
 	}
-	for _, bad := range []string{"", "localhost", "co.kr", "github.io", "127.0.0.1", "https://[::1]/", "a..b"} {
+	for _, bad := range []string{"", "localhost", "co.kr", "seoul.kr", "github.io", "127.0.0.1", "https://[::1]/", "a..b"} {
 		if got, err := Domain(bad); err == nil {
 			t.Errorf("Domain(%q) = %q; want an error", bad, got)
 		}

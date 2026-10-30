@@ -55,7 +55,7 @@ guard_rules() {
     return 0
   fi
   docker run --rm -v "$ROOT/browser:/app:ro" -w /app -e PYTHONDONTWRITEBYTECODE=1 python:3.13-slim-bookworm \
-    sh -c 'pip -q install --root-user-action=ignore aiohttp websockets >/dev/null 2>&1; python -m unittest test_guard 2>&1 | tail -3'
+    sh -c 'pip -q install --root-user-action=ignore aiohttp websockets publicsuffixlist >/dev/null 2>&1; python -m unittest test_guard 2>&1 | tail -3'
 }
 
 all() {
@@ -66,6 +66,8 @@ all() {
   if score "$tmp"; then compare "$tmp" || failed=1; else echo "  시나리오가 실패했습니다 (cd mind-svc && go test ./internal/eval)"; failed=1; fi
   echo "== 결제 재생"
   if (cd "$ROOT/agent" && go test -count=1 -run 'TestReplay' ./internal/httpapi); then :; else failed=1; fi
+  echo "== 정책"
+  if (cd "$ROOT/agent" && go test -count=1 ./internal/policy && go test -count=1 -run 'Policy|Password|Refusal|Refuse|Gate' ./internal/httpapi); then :; else failed=1; fi
   echo "== 가드 규칙"
   guard_rules | sed 's/^/  /'
   if [[ ${PIPESTATUS[0]} -ne 0 ]]; then failed=1; fi

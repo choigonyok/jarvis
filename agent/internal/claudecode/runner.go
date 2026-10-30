@@ -677,7 +677,7 @@ func (r *Runner) args(system string) []string {
 		// uploads and the CLI's own memory (--add-dir). Nothing else in the
 		// container is the model's to read, with a card or without: not the
 		// CLI's credentials, not /etc, not another process's environment.
-		"--settings", `{"permissions":{"blockReadsOutsideWorkingDirectories":true}}`,
+		"--settings", r.settings(map[string]any{"permissions": map[string]any{"blockReadsOutsideWorkingDirectories": true}}),
 	}
 	if r.cfg.UploadsDir != "" {
 		// Attached photos live outside the workspace; Read may open them.
@@ -708,6 +708,22 @@ func (r *Runner) args(system string) []string {
 		args = append(args, "--resume", sessionID)
 	}
 	return args
+}
+
+// settings is the CLI's --settings: what the run asks for, and the policy hook
+// on every tool call of every kind of run - the allow list's too, which never
+// reach the approval gate, and the background's, which have none.
+func (r *Runner) settings(s map[string]any) string {
+	if r.cfg.PolicyHook != "" {
+		s["hooks"] = map[string]any{"PreToolUse": []any{map[string]any{
+			"hooks": []any{map[string]any{"type": "command", "command": r.cfg.PolicyHook, "timeout": 10}},
+		}}}
+	}
+	body, err := json.Marshal(s)
+	if err != nil {
+		return "{}"
+	}
+	return string(body)
 }
 
 // systemPrompt is the instructions a session is opened with - the same on
@@ -1150,6 +1166,10 @@ func (r *Runner) env(ttl string) []string {
 		"TMPDIR=/tmp",
 		// The CLI must agree with the agent about what day it is.
 		"TZ=" + os.Getenv("TZ"),
+	}
+	if r.cfg.PolicyHook != "" {
+		// The hook is this binary again, and asks the agent over loopback.
+		env = append(env, "JARVIS_POLICY_URL="+r.cfg.PolicyURL, "JARVIS_POLICY_TOKEN="+r.cfg.InternalMCPToken)
 	}
 	if u := os.Getenv("USER"); u != "" {
 		env = append(env, "USER="+u, "LOGNAME="+u)

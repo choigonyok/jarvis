@@ -22,6 +22,7 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/core/module"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
 	"github.com/choigonyok/jarvis/agent/internal/module/calendar"
+	"github.com/choigonyok/jarvis/agent/internal/policy"
 	"github.com/choigonyok/jarvis/agent/internal/thread"
 	"github.com/choigonyok/jarvis/agent/internal/uploads"
 	"github.com/choigonyok/jarvis/agent/internal/usage"
@@ -77,6 +78,9 @@ type Server struct {
 	checklists Checklists
 	// records writes what the payment path did as Records; nil writes none.
 	records *record.Writer
+	// policy is what may not happen, asked before every tool call; nil
+	// refuses nothing.
+	policy *policy.Policy
 	// loops is this agent's background loops, for GET /health.
 	loops *health.Loops
 	// uploads holds photos attached in conversation; nil turns them off.
@@ -167,7 +171,9 @@ type Deps struct {
 	Records *record.Writer
 	// Loops is what GET /health reports.
 	Loops *health.Loops
-	Log   *slog.Logger
+	// Policy, when set, answers the CLI's hook at /policy/check.
+	Policy *policy.Policy
+	Log    *slog.Logger
 }
 
 // Checklists is the lists behind the conversation's checklist cards (mind
@@ -219,6 +225,7 @@ func New(d Deps) *Server {
 		checklists:      d.Checklists,
 		records:         d.Records,
 		loops:           d.Loops,
+		policy:          d.Policy,
 	}
 	if d.Proposals != nil {
 		d.Proposals.OnDecide(s.resolvePayment)
@@ -263,6 +270,8 @@ func (s *Server) Handler() http.Handler {
 	// The browser container dials this when a page tries to pay.
 	mux.HandleFunc("POST /intercept", s.postIntercept)
 	mux.HandleFunc("POST /intercept/records", s.postGuardRecords)
+	// The CLI's PreToolUse hook, from inside this container (policy.RunHook).
+	mux.Handle("POST /policy/check", s.guardMCP(http.HandlerFunc(s.postPolicyCheck)))
 
 	mux.HandleFunc("GET /calendar", s.guard(s.getCalendar))
 	mux.HandleFunc("POST /calendar", s.guard(s.postCalendar))

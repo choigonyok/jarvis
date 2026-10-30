@@ -1,4 +1,4 @@
-package permission
+package policy
 
 import (
 	"encoding/json"

@@ -29,6 +29,8 @@ const (
 	// the to-be structure, where mind reads them.
 	KindPaymentRequested = "payment.requested"
 	KindIntentAnswer     = "intent.answer"
+	// KindPolicyDenied is a tool call the policy refused.
+	KindPolicyDenied = "policy.denied"
 
 	recordSource   = "agent"
 	browserChannel = "browser"

@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/choigonyok/jarvis/agent/internal/config"
@@ -51,5 +52,43 @@ func TestInternalMCPToken(t *testing.T) {
 	}
 	if i < 0 || json.Unmarshal([]byte(args[i+1]), &bg) != nil || bg.MCPServers["suggest"].Headers["Authorization"] != "Bearer inner" {
 		t.Fatalf("background MCP config: %v", args)
+	}
+}
+
+// The hook is on every kind of run: the allow list and the background runs
+// never reach the gate, so this is the only rule that sees them.
+func TestEveryRunCarriesThePolicyHook(t *testing.T) {
+	r := &Runner{cfg: config.Config{PolicyHook: "/usr/local/bin/agent policy-hook", PolicyURL: "http://127.0.0.1:8080/policy/check", InternalMCPToken: "tok"}}
+	value := func(args []string, flag string) string {
+		for i, a := range args {
+			if a == flag && i+1 < len(args) {
+				return args[i+1]
+			}
+		}
+		return ""
+	}
+	chat := value(r.args("system"), "--settings")
+	if !strings.Contains(chat, `"PreToolUse"`) || !strings.Contains(chat, "agent policy-hook") || !strings.Contains(chat, "blockReadsOutsideWorkingDirectories") {
+		t.Fatalf("대화: %s", chat)
+	}
+	args, err := r.backgroundArgs(Task{Name: "작업", Prompt: "p", System: "s", Allowed: []string{"mcp__job__ask"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bg := value(args, "--settings"); !strings.Contains(bg, "agent policy-hook") {
+		t.Fatalf("백그라운드: %s", bg)
+	}
+	env := strings.Join(r.env(""), "\n")
+	if !strings.Contains(env, "JARVIS_POLICY_URL=http://127.0.0.1:8080/policy/check") || !strings.Contains(env, "JARVIS_POLICY_TOKEN=tok") {
+		t.Fatalf("환경: %s", env)
+	}
+
+	// Without it (a laptop run), nothing is added and the settings stay valid.
+	off := &Runner{}
+	if got := off.settings(map[string]any{}); got != "{}" {
+		t.Fatalf("%s", got)
+	}
+	if strings.Contains(strings.Join(off.env(""), "\n"), "JARVIS_POLICY") {
+		t.Fatal("훅이 없으면 환경도 없습니다")
 	}
 }

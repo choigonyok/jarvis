@@ -54,6 +54,12 @@ type Config struct {
 	PermissionMode string
 	ApprovalWait   time.Duration
 	TurnTimeout    time.Duration
+	// PolicyHook is the command the CLI runs before every tool call, with
+	// PolicyURL where it asks. Empty leaves the CLI without the hook - a
+	// laptop run with no agent binary to call (JARVIS_POLICY_HOOK=off).
+	PolicyHook string
+	PolicyURL  string
+
 	// PublicMCPURL is what the CLI is told to dial for permission decisions.
 	// Inside one container that is loopback; split the processes and this has
 	// to change with it.
@@ -247,6 +253,7 @@ func Load() (Config, error) {
 		ApprovalWait:     envDuration("JARVIS_APPROVAL_TIMEOUT", 30*time.Minute),
 		TurnTimeout:      envDuration("JARVIS_TURN_TIMEOUT", 2*time.Hour),
 		PublicMCPURL:     env("JARVIS_MCP_URL", "http://127.0.0.1:8080/mcp"),
+		PolicyHook:       env("JARVIS_POLICY_HOOK", "/usr/local/bin/agent policy-hook"),
 		ModuleMCPURLs:    map[string]string{},
 		ExtraMCPURLs:     parseMCPURLs(os.Getenv("JARVIS_EXTRA_MCP")),
 		ExtraMCPToken:    os.Getenv("JARVIS_MCP_TOKEN"),
@@ -303,7 +310,7 @@ func Load() (Config, error) {
 		// Read opens the photos the guest attaches and the notes of its own
 		// memory, Write and Edit keep that memory - and nothing else: reads stop
 		// at those folders (runner, readRules), and any file call past them is
-		// refused without a card (the gate's refusal, set in main). No shell.
+		// refused without a card (policy.Folders). No shell.
 		builtins := "Read,Write,Edit,WebSearch,WebFetch,TodoWrite,ToolSearch"
 		c.BuiltinTools = &builtins
 		// No browser: it is logged in to the operator's shops and pay. No
@@ -355,6 +362,10 @@ func Load() (Config, error) {
 		// environment is a billing surprise waiting to happen. Say so loudly.
 		return c, fmt.Errorf("ANTHROPIC_API_KEY is set alongside CLAUDE_CODE_OAUTH_TOKEN; unset it so usage bills to the subscription")
 	}
+	if c.PolicyHook == "off" {
+		c.PolicyHook = ""
+	}
+	c.PolicyURL = strings.TrimSuffix(c.PublicMCPURL, "/mcp") + "/policy/check"
 	c.AllowedTools, c.DroppedTools = safeAllowed(c.AllowedTools)
 	workspace := c.Workspace
 	if c.Guest {

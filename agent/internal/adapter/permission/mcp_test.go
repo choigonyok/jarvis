@@ -15,6 +15,7 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/core/module"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
 	"github.com/choigonyok/jarvis/agent/internal/module/calendar"
+	"github.com/choigonyok/jarvis/agent/internal/policy"
 )
 
 func TestModuleKind(t *testing.T) {
@@ -146,7 +147,7 @@ func TestCardDoesNotBlockAndIsNotRaisedTwice(t *testing.T) {
 // to approve, one inside them goes by, and the rest of the gate is as it was.
 func TestRefusedOutrightRaisesNoCard(t *testing.T) {
 	g, store, _ := newTestGate(t, module.NewRegistry())
-	folders := Folders{"/uploads"}
+	folders := policy.Folders{"/uploads"}
 	g.SetRefuse(func(tool string, input json.RawMessage) string {
 		if file, inside := folders.Judge(tool, input); file && !inside {
 			return "밖의 파일은 안 됩니다"

@@ -421,6 +421,7 @@ func (r *Runner) backgroundArgs(t Task) ([]string, error) {
 		// person's conversation, and this is not part of it.
 		"--no-session-persistence",
 		"--append-system-prompt", t.System,
+		"--settings", r.settings(map[string]any{}),
 	}
 	if model := r.modelOf(t); model != "" {
 		args = append(args, "--model", model)

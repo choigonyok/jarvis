@@ -12,6 +12,7 @@ import unittest
 os.environ.setdefault("PAYMENT_HOSTS_FILE", os.path.join(os.path.dirname(__file__), "payment-hosts.json"))
 
 import guard  # noqa: E402
+import jobsites  # noqa: E402
 
 
 class GuardRules(unittest.TestCase):
@@ -352,8 +353,6 @@ class JobSites(unittest.TestCase):
         import tempfile
         import time
 
-        import jobsites
-
         self.jobsites = jobsites
         self.dir = tempfile.TemporaryDirectory()
         jobsites.FILE = os.path.join(self.dir.name, "job-sites.json")
@@ -401,6 +400,27 @@ class JobSites(unittest.TestCase):
 
     def test_every_navigation_is_watched(self):
         self.assertIn({"urlPattern": "*", "resourceType": "Document", "requestStage": "Request"}, self.g.patterns)
+
+
+class PublicSuffixes(unittest.TestCase):
+    """작업 사이트의 한 단계 위는 공개 접미사를 넘지 않는다 - 손으로 쓴 목록이 몰랐던 곳까지."""
+
+    def test_one_level_up_stays_above_a_public_suffix(self):
+        self.assertEqual(jobsites._domain("www.coupang.com"), "coupang.com")
+        self.assertEqual(jobsites._domain("www.11st.co.kr"), "11st.co.kr")
+        # 지역 도메인: 위로 올라가면 seoul.kr 전체가 열린다.
+        self.assertEqual(jobsites._domain("shop.seoul.kr"), "shop.seoul.kr")
+        self.assertEqual(jobsites._domain("myapp.github.io"), "myapp.github.io")
+
+    def test_a_job_does_not_open_the_neighbours(self):
+        self.assertTrue(jobsites.allowed("https://m.shop.seoul.kr/x", ["shop.seoul.kr"]))
+        self.assertFalse(jobsites.allowed("https://evil.seoul.kr/x", ["shop.seoul.kr"]))
+        self.assertFalse(jobsites.allowed("https://evil.github.io/", ["myapp.github.io"]))
+
+    def test_it_never_widens_past_one_level(self):
+        # 한 단계만 오른다: 깊은 주소의 작업이 도메인 전체를 열지 않는다.
+        self.assertTrue(jobsites.allowed("https://cafe.blog.example.com/x", ["m.blog.example.com"]))
+        self.assertFalse(jobsites.allowed("https://shop.example.com/x", ["m.blog.example.com"]))
 
 
 class InfoPagesAndWindows(unittest.IsolatedAsyncioTestCase):

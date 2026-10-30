@@ -1,2 +1,3 @@
 browser-use==0.13.10
 uvicorn
+publicsuffixlist==1.1.2.20261021

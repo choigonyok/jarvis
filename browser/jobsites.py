@@ -10,20 +10,16 @@ import os
 import time
 from urllib.parse import urlparse
 
+from publicsuffixlist import PublicSuffixList
+
 FILE = os.environ.get("JOB_SITES_FILE", "/tmp/jarvis-job-sites.json")
 
 # 사이트마다 쓰는 로그인 화면. 작업 지시가 "네이버 로그인 버튼으로" 가라고 한다.
 LOGIN_HOSTS = [h.strip().lower() for h in os.environ.get("JOB_LOGIN_HOSTS", "nid.naver.com").split(",") if h.strip()]
 
-# 이 밑의 이름은 누구나 사서 쓰는 자리라, 한 단계 위로 올라가면 남의 도메인까지 열린다.
-SHARED_SUFFIXES = {
-    "co.kr", "or.kr", "go.kr", "ne.kr", "re.kr", "pe.kr", "ac.kr", "ms.kr",
-    "co.jp", "ne.jp", "or.jp", "co.uk", "org.uk", "com.au", "com.cn", "com.tw",
-    # 누구에게나 하위 주소를 나눠 주는 곳: 그 밑의 앱 하나는 옆 앱과 남이다.
-    "github.io", "herokuapp.com", "vercel.app", "netlify.app", "pages.dev", "workers.dev",
-    "web.app", "firebaseapp.com", "appspot.com", "blogspot.com", "azurewebsites.net",
-    "cloudfront.net", "onrender.com", "fly.dev", "glitch.me", "repl.co",
-}
+# 공개 접미사 목록(co.kr, seoul.kr, github.io): 이 밑의 이름은 누구나 사서 쓰는 자리라, 한 단계 위로
+# 올라가면 남의 도메인까지 열린다. 목록을 여기서 관리하지 않는다 - Go 쪽(gocommon/site)과 같은 PSL 이다.
+_PSL = PublicSuffixList()
 
 
 def _host(site: str) -> str:
@@ -34,9 +30,9 @@ def _host(site: str) -> str:
 
 
 def _domain(host: str) -> str:
-    """www.coupang.com → coupang.com, web.joongna.com → joongna.com. 공유 접미사는 넘지 않는다."""
+    """www.coupang.com → coupang.com, web.joongna.com → joongna.com. 공개 접미사는 넘지 않는다."""
     parts = host.split(".")
-    if len(parts) >= 3 and ".".join(parts[1:]) not in SHARED_SUFFIXES:
+    if len(parts) >= 3 and not _PSL.is_public(".".join(parts[1:])):
         return ".".join(parts[1:])
     return host
 

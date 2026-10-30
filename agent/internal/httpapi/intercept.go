@@ -14,6 +14,7 @@ import (
 
 	"github.com/choigonyok/jarvis/agent/internal/core/action"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
+	"github.com/choigonyok/jarvis/gocommon/site"
 )
 
 // Payment is a request the browser container stopped on its way out, because
@@ -430,6 +431,27 @@ func (g *paymentGrants) allow(site string, job int64, event, amount string) bool
 	return true
 }
 
+// live says whether this payer has an approved payment that can still happen,
+// on any site: approved and not yet come back to, or under way.
+func (g *paymentGrants) live(job int64) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	now := g.clock()
+	for k, gr := range g.sites {
+		if k.job != job {
+			continue
+		}
+		if gr.opened.IsZero() {
+			if !now.After(gr.approved.Add(paymentWait)) {
+				return true
+			}
+		} else if !now.After(gr.opened.Add(paymentWindow)) {
+			return true
+		}
+	}
+	return false
+}
+
 // isOpen says whether this payer's approved payment on site is under way:
 // the payer came back to it and its window has not run out. It opens
 // nothing itself.
@@ -762,19 +784,11 @@ func clampURL(u string) string {
 	return string([]rune(u)[:max]) + "…"
 }
 
-// siteOf is a host's site, the unit a payment approval covers: its last two
-// labels (coupang.com), or three under a second-level domain like co.kr.
+// siteOf is a host's site, the unit a payment approval covers: its registrable
+// domain (coupang.com, 11st.co.kr). A host that has none stands for itself.
 func siteOf(host string) string {
-	labels := strings.Split(strings.Trim(strings.ToLower(host), "."), ".")
-	n := 2
-	if len(labels) >= 3 && len(labels[len(labels)-1]) == 2 {
-		switch labels[len(labels)-2] {
-		case "co", "or", "go", "ne", "ac", "re", "pe", "com", "net", "org":
-			n = 3
-		}
+	if domain, err := site.Domain(host); err == nil {
+		return domain
 	}
-	if len(labels) < n {
-		return strings.Join(labels, ".")
-	}
-	return strings.Join(labels[len(labels)-n:], ".")
+	return strings.Trim(strings.ToLower(host), ".")
 }

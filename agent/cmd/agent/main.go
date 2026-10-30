@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -42,6 +44,7 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/module/spending"
 	"github.com/choigonyok/jarvis/agent/internal/module/vault"
 	"github.com/choigonyok/jarvis/agent/internal/module/web"
+	"github.com/choigonyok/jarvis/agent/internal/policy"
 	"github.com/choigonyok/jarvis/agent/internal/suggest"
 	"github.com/choigonyok/jarvis/agent/internal/thread"
 	"github.com/choigonyok/jarvis/agent/internal/uploads"
@@ -53,6 +56,12 @@ import (
 )
 
 func main() {
+	// The CLI runs this binary before every tool call: it asks the running
+	// agent and exits, with no configuration of its own.
+	if len(os.Args) > 1 && os.Args[1] == policy.HookCommand {
+		os.Exit(policy.RunHook(os.Stdin, os.Stdout, os.Getenv("JARVIS_POLICY_URL"), os.Getenv("JARVIS_POLICY_TOKEN"), http.DefaultClient))
+	}
+
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	cfg, err := config.Load()
@@ -518,15 +527,9 @@ func main() {
 	// The guest's file tools reach its own photos and memory and nothing else:
 	// a call inside them goes by (the CLI's memory writes need no card of
 	// their own anyway), and one anywhere else is refused, never asked.
-	var guestFolders permission.Folders
+	var guestFolders policy.Folders
 	if cfg.Guest {
-		guestFolders = permission.Folders{cfg.UploadsDir, cfg.MemoryDir}
-		gate.SetRefuse(func(tool string, input json.RawMessage) string {
-			if file, inside := guestFolders.Judge(tool, input); file && !inside {
-				return "이 계정에서는 첨부한 사진과 자비스 기억 밖의 파일을 열거나 쓸 수 없습니다. 다시 시도하지 마세요."
-			}
-			return ""
-		})
+		guestFolders = policy.Folders{cfg.UploadsDir, cfg.MemoryDir}
 	}
 	// A card stands only before a change or money (2026-10-20): a job made or
 	// instructed (jobs.CardFree) and the browser's own tools - reading,
@@ -666,40 +669,56 @@ func main() {
 		records.Run(recordsCtx)
 	}()
 
+	// What may not happen, asked by the CLI's hook before every tool call
+	// and by the gate before a card.
+	mounts := make([]string, 0, len(mcpMounts))
+	for path := range mcpMounts {
+		mounts = append(mounts, path)
+	}
+	servers := policy.Servers(mounts, slices.Collect(maps.Keys(cfg.ExtraMCPURLs)), permission.ServerName, jobs.RunServerName)
+	rules := &policy.Policy{Servers: servers, Workspace: cfg.Workspace, MemoryDir: cfg.MemoryDir, Folders: guestFolders}
+	if cfg.BuiltinTools != nil && *cfg.BuiltinTools != "default" {
+		rules.Builtins = strings.Split(*cfg.BuiltinTools, ",")
+	}
+
+	api := httpapi.New(httpapi.Deps{
+		Role:            map[bool]string{true: "guest", false: "owner"}[cfg.Guest],
+		Thread:          transcript,
+		Proposals:       proposals,
+		Calendar:        calendarStore,
+		Runner:          runner,
+		Bus:             events,
+		MCP:             mcpMounts,
+		MCPToken:        cfg.InternalMCPToken,
+		AllowedOrigin:   cfg.AllowedOrigin,
+		InterceptToken:  cfg.ExtraMCPToken,
+		BackgroundLogin: cfg.BackgroundLogin,
+		APIToken:        cfg.APIToken,
+		ApprovalWait:    cfg.ApprovalWait,
+		Uploads:         photos,
+		Modules:         modules,
+		Usage:           usageTracker,
+		APIUsage:        apiUsage,
+		MindUsage:       mindUsage,
+		Consume:         consume,
+		BrowserChecks:   browserChecks,
+		Vault:           vaultConsole(vaultModule),
+		Reminders:       reminderConsole,
+		FollowUp:        runner,
+		Jobs:            jobPayments,
+		SavedAddress:    savedAddress(vaultModule),
+		WakeJobs:        wakeJobs,
+		Checklists:      checklistConsole(checklistModule),
+		Records:         records,
+		Loops:           loops,
+		Policy:          rules,
+		Log:             log,
+	})
+	gate.SetRefuse(api.Refuse)
+
 	srv := &http.Server{
-		Addr: cfg.Addr,
-		Handler: httpapi.New(httpapi.Deps{
-			Role:            map[bool]string{true: "guest", false: "owner"}[cfg.Guest],
-			Thread:          transcript,
-			Proposals:       proposals,
-			Calendar:        calendarStore,
-			Runner:          runner,
-			Bus:             events,
-			MCP:             mcpMounts,
-			MCPToken:        cfg.InternalMCPToken,
-			AllowedOrigin:   cfg.AllowedOrigin,
-			InterceptToken:  cfg.ExtraMCPToken,
-			BackgroundLogin: cfg.BackgroundLogin,
-			APIToken:        cfg.APIToken,
-			ApprovalWait:    cfg.ApprovalWait,
-			Uploads:         photos,
-			Modules:         modules,
-			Usage:           usageTracker,
-			APIUsage:        apiUsage,
-			MindUsage:       mindUsage,
-			Consume:         consume,
-			BrowserChecks:   browserChecks,
-			Vault:           vaultConsole(vaultModule),
-			Reminders:       reminderConsole,
-			FollowUp:        runner,
-			Jobs:            jobPayments,
-			SavedAddress:    savedAddress(vaultModule),
-			WakeJobs:        wakeJobs,
-			Checklists:      checklistConsole(checklistModule),
-			Records:         records,
-			Loops:           loops,
-			Log:             log,
-		}).Handler(),
+		Addr:    cfg.Addr,
+		Handler: api.Handler(),
 		// No WriteTimeout: /events streams and /mcp blocks on a human.
 		ReadHeaderTimeout: 10 * time.Second,
 	}
@@ -718,7 +737,9 @@ func main() {
 			"auto_allowed", cfg.AllowedTools,
 			"builtin_tools", builtinTools(cfg.BuiltinTools),
 			"cache_ttl", cfg.CacheTTL,
-			"session_idle", cfg.SessionIdle.String())
+			"session_idle", cfg.SessionIdle.String(),
+			"policy_servers", servers,
+			"policy_builtins", rules.Builtins)
 		if len(cfg.DroppedTools) > 0 {
 			log.Warn("JARVIS_ALLOWED_TOOLS 에서 카드를 건너뛰면 안 되는 도구를 뺐습니다", "dropped", cfg.DroppedTools)
 		}
