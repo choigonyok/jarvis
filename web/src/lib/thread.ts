@@ -77,7 +77,7 @@ export type Turn = {
   id: string;
   role: "agent" | "user";
   at: string;
-  /** Full timestamp (chat-svc); `at` is only the wall clock. */
+  /** Full timestamp (input-svc); `at` is only the wall clock. */
   atIso?: string;
   /** The earlier message this one quotes. */
   ref?: TurnRef;

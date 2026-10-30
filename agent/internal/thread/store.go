@@ -2,7 +2,7 @@
 //
 // It used to hold the approval cards too; those live in core/proposal now,
 // because a proposal can outlive - and start outside - a conversation. And the
-// transcript itself now lives in chat-svc, because what was said is what the
+// transcript itself now lives in input-svc, because what was said is what the
 // operator would notice losing.
 //
 // What is left here is the seam: the live SSE stream and the "is a run in
@@ -40,7 +40,7 @@ type Turn struct {
 	ID   string `json:"id"`
 	Role Role   `json:"role"`
 	At   string `json:"at"`
-	// AtISO is the full timestamp chat-svc records beside the wall clock. The
+	// AtISO is the full timestamp input-svc records beside the wall clock. The
 	// console does not read it yet; the record surface currently parses the
 	// epoch out of the id to recover the date, and this is what that should be
 	// built on instead (web/src/lib/ledger.ts).
@@ -110,7 +110,7 @@ func RefTo(t *Turn) *Ref {
 		text = string(r[:600]) + "…"
 	}
 	at := t.At
-	// Read, not sliced: chat-svc writes the stamp in the database session's
+	// Read, not sliced: input-svc writes the stamp in the database session's
 	// zone, which is not promised to be the operator's.
 	if ts, err := time.Parse(time.RFC3339Nano, t.AtISO); err == nil {
 		at = ts.In(refZone).Format("01-02 15:04")
@@ -121,7 +121,7 @@ func RefTo(t *Turn) *Ref {
 // refZone is the operator's clock (TZ, Asia/Seoul in the container).
 var refZone = time.Local
 
-// Store is the client to chat-svc, plus the run state that is nobody else's
+// Store is the client to the turns (input-svc), plus the run state that is nobody else's
 // business.
 //
 // The transcript is not cached. A cached one would have to be invalidated by a
@@ -134,7 +134,7 @@ type Store struct {
 	client *http.Client
 	bus    *bus.Bus
 
-	// thread is the conversation this agent owns in chat-svc: "" for the
+	// thread is the conversation this agent owns in input-svc: "" for the
 	// operator, "guest" for the guest agent. It reads and writes only that.
 	thread string
 	// newsIDs is the turn each job run speaks through, by run: a run's
@@ -266,7 +266,7 @@ func (s *Store) Snapshot() ([]*Turn, bool) {
 
 // Window is the newest `limit` turns before `before` (a turn id, or an
 // atIso; "" for the newest of all), oldest first, and whether older ones
-// remain - the console's page (chat-svc GET /turns?limit=).
+// remain - the console's page (input-svc GET /turns?limit=).
 func (s *Store) Window(before string, limit int) ([]*Turn, bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

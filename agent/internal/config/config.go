@@ -96,7 +96,7 @@ type Config struct {
 	// firmly: there is no path on this filesystem to walk past the calendar
 	// tools' schema and approval cards.
 	CalendarURL string
-	// ChatURL is where chat-svc listens. The transcript used to be a file in
+	// ChatURL is where the turns are kept (input-svc). The transcript used to be a file in
 	// /data, kept outside the workspace so the CLI's own Read and Write could
 	// not be a second door into it; it is in Postgres behind that service now.
 	ChatURL string
@@ -149,7 +149,7 @@ type Config struct {
 	// refused without a card: a file tool let loose could read this process's
 	// environment, and with it the guest's token. No shell.
 	Guest bool
-	// Thread is this agent's conversation in chat-svc: "" or "guest".
+	// Thread is this agent's conversation in input-svc: "" or "guest".
 	Thread string
 	// BuiltinTools, when set, is passed as --tools: the only built-in CLI
 	// tools the model gets. Nil means the CLI's default set. Every one of
@@ -256,7 +256,7 @@ func Load() (Config, error) {
 		ExtraMCPToken:    os.Getenv("JARVIS_MCP_TOKEN"),
 		InternalMCPToken: env("JARVIS_MCP_INTERNAL_TOKEN", randomToken()),
 		CalendarURL:      env("JARVIS_CALENDAR_URL", "http://localhost:8093"),
-		ChatURL:          env("JARVIS_CHAT_URL", "http://localhost:8094"),
+		ChatURL:          env("JARVIS_CHAT_URL", "http://localhost:8101"),
 		AssetsURL:        env("JARVIS_ASSETS_URL", "http://localhost:8092"),
 		Enrich:           envBool("JARVIS_ENRICH", true),
 		UploadsDir:       env("JARVIS_UPLOADS_DIR", ""),

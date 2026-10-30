@@ -8,8 +8,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/choigonyok/jarvis/workout-svc/internal/book"
+	"github.com/choigonyok/jarvis/input-svc/internal/workout/book"
 )
 
 // Against a throwaway Postgres with every migration applied, as the service's
@@ -30,16 +31,16 @@ func testStore(t *testing.T) *Store {
 		t.Fatal(err)
 	}
 	defer conn.Close(ctx)
-	if _, err := conn.Exec(ctx, `truncate workout_sets, workout_exercises, workout_sessions, routines restart identity cascade;
+	if _, err := conn.Exec(ctx, `truncate input.workout_sets, input.workout_exercises, input.workout_sessions, input.routines restart identity cascade;
 		delete from settings where scope = 'workout'`); err != nil {
 		t.Fatal(err)
 	}
-	s, err := Open(ctx, dsn)
+	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(s.Close)
-	return s
+	t.Cleanup(pool.Close)
+	return New(pool)
 }
 
 func session(id, name string) book.Session {
@@ -49,9 +50,8 @@ func session(id, name string) book.Session {
 		Exercises: []book.Exercise{{ID: id + "-e", Name: name, Sets: []book.Set{{Weight: 100, Reps: 5, Done: true}}}}}
 }
 
-// B-2: two writers on one book. A whole-book replace built on an old
-// revision is refused instead of deleting what the other added; changes by
-// session id never collide.
+// B-2: two writers on one book: changes by session id never collide, and a
+// deletion by id removes only that session.
 func TestTwoWritersDoNotWipeEachOther(t *testing.T) {
 	ctx := context.Background()
 	s := testStore(t)
@@ -60,18 +60,13 @@ func TestTwoWritersDoNotWipeEachOther(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mine, err := s.Apply(ctx, book.Changes{Sessions: []book.Session{session("w-op", "스쿼트")}})
+	mine, err := s.Apply(ctx, book.Changes{Sessions: []book.Session{session("w-op", "스쿼트")}}, nil)
 	if err != nil || mine != b.Revision+1 {
 		t.Fatalf("세션 추가: rev=%d err=%v", mine, err)
 	}
-	theirs, err := s.Apply(ctx, book.Changes{Sessions: []book.Session{session("w-guest", "벤치프레스")}})
+	theirs, err := s.Apply(ctx, book.Changes{Sessions: []book.Session{session("w-guest", "벤치프레스")}}, nil)
 	if err != nil {
 		t.Fatal(err)
-	}
-
-	// The operator's screen still holds the book as of `mine`.
-	if _, err := s.Save(ctx, book.Book{Sessions: []book.Session{session("w-op", "스쿼트")}}, mine); !errors.Is(err, ErrConflict) {
-		t.Fatalf("낡은 리비전의 전체 교체는 거절돼야 합니다: %v", err)
 	}
 	b, err = s.Load(ctx)
 	if err != nil {
@@ -83,18 +78,34 @@ func TestTwoWritersDoNotWipeEachOther(t *testing.T) {
 	if b.Groups["스쿼트"] != "하체" || b.Groups["벤치프레스"] != "가슴" {
 		t.Fatalf("부위는 서비스가 판정해 내려 준다: %v", b.Groups)
 	}
-
-	// A replace built on the latest revision goes through; a deletion by id
-	// removes only that session.
-	if _, err := s.Save(ctx, b, b.Revision); err != nil {
-		t.Fatalf("최신 리비전의 전체 교체: %v", err)
-	}
-	if _, err := s.Apply(ctx, book.Changes{Deleted: []string{"w-guest"}}); err != nil {
+	if _, err := s.Apply(ctx, book.Changes{Deleted: []string{"w-guest"}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	b, _ = s.Load(ctx)
 	if len(b.Sessions) != 1 || b.Sessions[0].ID != "w-op" {
 		t.Fatalf("지운 세션만 빠져야 합니다: %+v", b.Sessions)
 	}
+}
 
+// A save whose record could not be left is not saved.
+func TestASaveLandsWithItsRecord(t *testing.T) {
+	ctx := context.Background()
+	s := testStore(t)
+	refuse := func(context.Context, pgx.Tx, int64, book.Changes) error { return errors.New("안 됩니다") }
+	if _, err := s.Apply(ctx, book.Changes{Sessions: []book.Session{session("w-1", "스쿼트")}}, refuse); err == nil {
+		t.Fatal("기록이 실패하면 저장도 실패해야 합니다")
+	}
+	b, err := s.Load(ctx)
+	if err != nil || len(b.Sessions) != 0 || b.Revision != 0 {
+		t.Fatalf("%+v %v", b, err)
+	}
+	var seen book.Changes
+	var at int64
+	rev, err := s.Apply(ctx, book.Changes{Sessions: []book.Session{session("w-1", "스쿼트")}}, func(_ context.Context, _ pgx.Tx, r int64, c book.Changes) error {
+		seen, at = c, r
+		return nil
+	})
+	if err != nil || at != rev || len(seen.Sessions) != 1 {
+		t.Fatalf("%d %d %+v %v", rev, at, seen, err)
+	}
 }

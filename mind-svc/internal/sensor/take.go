@@ -35,10 +35,12 @@ const (
 	KindFX = "assets.fx"
 	// KindOutflows is what left the investment accounts and what became of it.
 	KindOutflows = "assets.outflows"
+	// KindWorkout is what changed in the training log (input-svc).
+	KindWorkout = "workout.changes"
 )
 
 // Kinds is what the structured lane reads.
-var Kinds = []string{KindCalendarNear, KindCalendarYear, KindVisits, KindHoldings, KindNow, KindNowGuest, KindRegions, KindTravel, KindForecast, KindPhotos, KindPhotoDays, KindMessage, KindFX, KindOutflows}
+var Kinds = []string{KindCalendarNear, KindCalendarYear, KindVisits, KindHoldings, KindNow, KindNowGuest, KindRegions, KindTravel, KindForecast, KindPhotos, KindPhotoDays, KindMessage, KindFX, KindOutflows, KindWorkout, KindTurn}
 
 // calendarRead is one read of the calendar.
 type calendarRead struct {
@@ -60,6 +62,15 @@ type visit struct {
 // Take is one record of an adapter's: what the source says now, whole. It is
 // kept as the latest of its kind and read as what it says.
 func (s *Structured) Take(ctx context.Context, m queue.Message) error {
+	if m.Kind == KindWorkout {
+		var c struct {
+			Sessions []session `json:"sessions"`
+		}
+		if err := json.Unmarshal(m.Payload, &c); err != nil {
+			return fmt.Errorf("%w: %s: %v", queue.ErrRefused, m.Kind, err)
+		}
+		return s.takeWorkout(ctx, c.Sessions)
+	}
 	if err := s.Store.PutLatest(ctx, m.Kind, m.Payload, m.OccurredAt); err != nil {
 		return err
 	}

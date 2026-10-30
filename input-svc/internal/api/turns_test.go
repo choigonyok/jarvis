@@ -8,14 +8,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/choigonyok/jarvis/chat-svc/internal/turn"
+	"github.com/choigonyok/jarvis/input-svc/internal/chat/turn"
 )
 
 // The guest's agent holds a token of its own, and it opens the guest's
 // thread only: the operator's conversation is neither read nor written with
 // it. (The store is not reached in these cases - the refusal comes first.)
 func TestGuestTokenOpensTheGuestThreadOnly(t *testing.T) {
-	h := New(nil, "owner-token", "guest-token", "Asia/Seoul", slog.New(slog.NewTextHandler(io.Discard, nil))).Handler()
+	h := New(nil, "owner-token", "guest-token", Views{TZ: "Asia/Seoul"}, nil, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler()
 	call := func(method, target, token, body string) int {
 		req := httptest.NewRequest(method, target, strings.NewReader(body))
 		if token != "" {
@@ -32,8 +32,11 @@ func TestGuestTokenOpensTheGuestThreadOnly(t *testing.T) {
 		{"손님이 운영자 대화 읽기", http.MethodGet, "/turns?thread=", "guest-token", "", http.StatusForbidden},
 		{"손님이 다른 대화 읽기", http.MethodGet, "/turns?thread=other", "guest-token", "", http.StatusForbidden},
 		{"손님이 운영자 대화에 쓰기", http.MethodPost, "/turns", "guest-token", `{"thread":"","role":"user","text":"x"}`, http.StatusForbidden},
+		{"손님이 운영자 대화의 카드 고치기", http.MethodPut, "/turns/a-1-1", "guest-token", `{"thread":"","paragraphs":["x"]}`, http.StatusForbidden},
 		{"토큰 없음", http.MethodGet, "/turns?thread=guest", "", "", http.StatusUnauthorized},
 		{"모르는 토큰", http.MethodGet, "/turns?thread=guest", "nope", "", http.StatusUnauthorized},
+		{"토큰 없이 운동", http.MethodGet, "/workout", "", "", http.StatusUnauthorized},
+		{"토큰 없이 운동 저장", http.MethodPost, "/workout/changes", "", `{}`, http.StatusUnauthorized},
 	} {
 		if got := call(c.method, c.target, c.token, c.body); got != c.want {
 			t.Errorf("%s: %d, want %d", c.name, got, c.want)

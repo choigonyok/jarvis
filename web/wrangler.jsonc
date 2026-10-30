@@ -42,7 +42,7 @@
   // AGENT_URL stays a secret only because it was created as one; its value is
   // https://jarvis-be.choigonyok.com/agent.
   "vars": {
-    "WORKOUT_URL": "https://jarvis-be.choigonyok.com/workout",
+    "WORKOUT_URL": "https://jarvis-be.choigonyok.com/input",
     "ASSETS_URL": "https://jarvis-be.choigonyok.com/assets",
     "JOBS_URL": "https://jarvis-be.choigonyok.com/jobs",
     "KAKAOTALK_URL": "https://jarvis-be.choigonyok.com/kakaotalk",

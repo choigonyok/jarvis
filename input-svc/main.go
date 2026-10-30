@@ -26,8 +26,11 @@ import (
 
 	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/gocommon/queue"
+	"github.com/choigonyok/jarvis/gocommon/seal"
 	"github.com/choigonyok/jarvis/input-svc/internal/api"
+	chat "github.com/choigonyok/jarvis/input-svc/internal/chat/store"
 	"github.com/choigonyok/jarvis/input-svc/internal/store"
+	workout "github.com/choigonyok/jarvis/input-svc/internal/workout/store"
 )
 
 const (
@@ -63,6 +66,16 @@ func main() {
 	defer pool.Close()
 
 	st := store.New(pool)
+	sealer, err := seal.FromBase64(os.Getenv("MESSAGE_KEY"))
+	if err != nil {
+		log.Error("MESSAGE_KEY 를 쓰지 못했습니다", "err", err)
+		os.Exit(1)
+	}
+	turns := chat.New(pool)
+	if err := turns.Resume(ctx); err != nil {
+		log.Warn("id 순번을 이어받지 못했습니다", "err", err)
+	}
+	views := api.Views{Chat: turns, Workout: workout.New(pool), Seal: sealer, TZ: getenv("TZ", "Asia/Seoul")}
 	loops := health.NewLoops()
 	loops.Add("drain", "outbox 를 기록으로", 5*time.Minute)
 	loops.Add("keep", "보존기간·파티션", 26*time.Hour)
@@ -79,7 +92,7 @@ func main() {
 	addr := getenv("LISTEN_ADDR", ":8101")
 	srv := &http.Server{
 		Addr:         addr,
-		Handler:      api.New(st, os.Getenv("API_TOKEN"), os.Getenv("API_GUEST_TOKEN"), loops, log).Handler(),
+		Handler:      api.New(st, os.Getenv("API_TOKEN"), os.Getenv("API_GUEST_TOKEN"), views, loops, log).Handler(),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}

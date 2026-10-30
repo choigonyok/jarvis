@@ -148,3 +148,38 @@ func TestTakeForecast(t *testing.T) {
 		}
 	}
 }
+
+// A session saved is a workout once it has ended, and memory hears of it. One
+// still going is nothing yet.
+func TestTakeWorkout(t *testing.T) {
+	s, st, now := takeSetup(t)
+	rec := &recorder{}
+	s.Records = rec
+	ctx := context.Background()
+	start := now.Add(-2 * time.Hour).UnixMilli()
+	end := now.Add(-time.Hour).UnixMilli()
+	raw, _ := json.Marshal(map[string]any{"sessions": []map[string]any{
+		{"id": "w1", "date": now.Format("2006-01-02"), "routineName": "하체", "startedAt": start, "endedAt": end,
+			"exercises": []map[string]any{{"id": "e1", "name": "스쿼트", "sets": []map[string]any{{"weight": 100, "reps": 5, "done": true}}}}},
+		{"id": "w2", "date": now.Format("2006-01-02"), "startedAt": start, "exercises": []map[string]any{}},
+	}})
+	if err := s.Take(ctx, queue.Message{Kind: KindWorkout, Payload: raw, OccurredAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	o, err := st.Occurrence(ctx, "workout:w1")
+	if err != nil || o.Kind != "workout" || o.Title != "하체" || o.Until == nil || len(o.Things) != 1 {
+		t.Fatalf("%+v %v", o, err)
+	}
+	if _, err := st.Occurrence(ctx, "workout:w2"); err == nil {
+		t.Fatal("끝나지 않은 운동입니다")
+	}
+	if len(s.incoming) == 0 {
+		t.Fatal("기억에도 알려야 합니다")
+	}
+	if _, _, err := st.Latest(ctx, KindWorkout); err == nil {
+		t.Fatal("운동 기록은 투영에 있고 여기 둘 것이 없습니다")
+	}
+	if err := s.Take(ctx, queue.Message{Kind: KindWorkout, Payload: []byte(`nope`), OccurredAt: now}); !errors.Is(err, queue.ErrRefused) {
+		t.Fatalf("%v", err)
+	}
+}

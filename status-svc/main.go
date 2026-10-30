@@ -66,8 +66,6 @@ func main() {
 		SpendingURL: getenv("SPENDING_URL", "http://localhost:8095"),
 		AssetsURL:   getenv("ASSETS_URL", "http://localhost:8092"),
 		CalendarURL: getenv("CALENDAR_URL", "http://localhost:8093"),
-		ChatURL:     getenv("CHAT_URL", "http://localhost:8094"),
-		WorkoutURL:  getenv("WORKOUT_URL", "http://localhost:8091"),
 		AgentURL:    getenv("AGENT_URL", "http://localhost:8080"),
 		MindURL:     getenv("MIND_URL", "http://localhost:8102"),
 		MemoryURL:   getenv("MEMORY_URL", "http://localhost:8100"),

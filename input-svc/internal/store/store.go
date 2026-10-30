@@ -152,6 +152,19 @@ func (s *Store) Put(ctx context.Context, e envelope.Envelope) (int64, bool, erro
 	return id, dup, tx.Commit(ctx)
 }
 
+// PutIn stores a record in the caller's transaction, for a read model kept
+// here: the change and its record land together or not at all.
+func (s *Store) PutIn(ctx context.Context, tx pgx.Tx, e envelope.Envelope) error {
+	if err := e.Check(); err != nil {
+		return err
+	}
+	b := newBatch(tx)
+	if _, _, err := b.put(ctx, e); err != nil {
+		return err
+	}
+	return b.wake(ctx)
+}
+
 // Prune deletes the raw tier past keep and says how much went. What a
 // consumer has not taken stays until it has.
 func (s *Store) Prune(ctx context.Context, keep time.Duration) (int64, error) {

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,13 +19,19 @@ import (
 
 	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/gocommon/queue"
+	"github.com/choigonyok/jarvis/gocommon/seal"
+	chat "github.com/choigonyok/jarvis/input-svc/internal/chat/store"
+	"github.com/choigonyok/jarvis/input-svc/internal/chat/turn"
 	"github.com/choigonyok/jarvis/input-svc/internal/store"
+	workout "github.com/choigonyok/jarvis/input-svc/internal/workout/store"
 )
 
 const (
 	token      = "services"
 	guestToken = "guest"
 )
+
+var testSeal, _ = seal.New(make([]byte, 32))
 
 var seq atomic.Int64
 
@@ -52,7 +59,8 @@ func setup(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 	loops := health.NewLoops()
 	loops.Add("drain", "outbox 를 기록으로", time.Minute)
 	loops.OK("drain")
-	srv := httptest.NewServer(New(store.New(pool), token, guestToken, loops, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler())
+	views := Views{Chat: chat.New(pool), Workout: workout.New(pool), Seal: testSeal, TZ: "Asia/Seoul"}
+	srv := httptest.NewServer(New(store.New(pool), token, guestToken, views, loops, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler())
 	t.Cleanup(srv.Close)
 	return srv, owner
 }
@@ -267,5 +275,138 @@ func TestTheWholeWay(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("끝까지 오지 않았습니다")
+	}
+}
+
+// A turn said is a record, with its words sealed, and a turn the console reads.
+func TestATurnIsARecord(t *testing.T) {
+	srv, owner := setup(t)
+	ctx := context.Background()
+	thread := fmt.Sprintf("t%d", time.Now().UnixNano()%1_000_000_000)
+	code, out := call(t, http.MethodPost, srv.URL+"/turns", token, fmt.Sprintf(`{"thread":%q,"role":"user","text":"치과 예약했어"}`, thread))
+	if code != http.StatusOK {
+		t.Fatalf("%d %s", code, out)
+	}
+	var saved turn.Turn
+	if err := json.Unmarshal(out, &saved); err != nil || saved.ID == "" {
+		t.Fatalf("%s %v", out, err)
+	}
+	var kind, actor, subject, tier string
+	var raw []byte
+	if err := owner.QueryRow(ctx, `select kind, actor, subject, tier, payload from input.records where source = 'chat' and subject = $1`, "chat:"+thread).
+		Scan(&kind, &actor, &subject, &tier, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if kind != "chat.turn" || actor != "operator" || tier != "durable" {
+		t.Fatalf("%s %s %s", kind, actor, tier)
+	}
+	if strings.Contains(string(raw), "치과") {
+		t.Fatalf("글은 봉인돼야 합니다: %s", raw)
+	}
+	var p struct {
+		Thread string `json:"thread"`
+		Sealed string `json:"sealed"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := base64.StdEncoding.DecodeString(p.Sealed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := testSeal.Open(sealed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back turn.Turn
+	if err := json.Unmarshal(plain, &back); err != nil || back.Text != "치과 예약했어" || back.ID != saved.ID || back.AtISO == "" {
+		t.Fatalf("%+v %v", back, err)
+	}
+	if code, out := call(t, http.MethodGet, srv.URL+"/turns?limit=5&thread="+thread, token, ""); code != http.StatusOK || !strings.Contains(string(out), "치과") {
+		t.Fatalf("%d %s", code, out)
+	}
+
+	// A card given its newest word is a record too.
+	code, out = call(t, http.MethodPost, srv.URL+"/turns", token, fmt.Sprintf(`{"thread":%q,"role":"agent","paragraphs":["지켜봅니다"],"origin":{"kind":"job","job":1,"run":2}}`, thread))
+	if code != http.StatusOK {
+		t.Fatalf("%d %s", code, out)
+	}
+	var card turn.Turn
+	_ = json.Unmarshal(out, &card)
+	time.Sleep(5 * time.Millisecond)
+	if code, out := call(t, http.MethodPut, srv.URL+"/turns/"+card.ID, token, fmt.Sprintf(`{"thread":%q,"paragraphs":["끝났습니다"]}`, thread)); code != http.StatusOK {
+		t.Fatalf("%d %s", code, out)
+	}
+	var n int
+	if err := owner.QueryRow(ctx, `select count(*) from input.records where subject = $1`, "chat:"+thread).Scan(&n); err != nil || n != 3 {
+		t.Fatalf("%d %v", n, err)
+	}
+}
+
+// What the guest says is the guest's: nothing of it on the operator's stream.
+func TestTheGuestsTurnIsTheGuests(t *testing.T) {
+	srv, owner := setup(t)
+	ctx := context.Background()
+	marker := unique("손님")
+	code, out := call(t, http.MethodPost, srv.URL+"/turns", guestToken, fmt.Sprintf(`{"thread":"guest","role":"user","text":%q}`, marker))
+	if code != http.StatusOK {
+		t.Fatalf("%d %s", code, out)
+	}
+	var saved turn.Turn
+	_ = json.Unmarshal(out, &saved)
+	var actor string
+	if err := owner.QueryRow(ctx, `select actor from input.guest_records where source_key like $1`, "turn:"+saved.ID+":%").Scan(&actor); err != nil || actor != "guest" {
+		t.Fatalf("%q %v", actor, err)
+	}
+	var n int
+	if err := owner.QueryRow(ctx, `select count(*) from input.records where source_key like $1`, "turn:"+saved.ID+":%").Scan(&n); err != nil || n != 0 {
+		t.Fatalf("%d %v", n, err)
+	}
+}
+
+// A save is a record of what changed, and the log reads it back at once. What
+// the guest saves is on the same book, on the guest's stream.
+func TestAWorkoutSaveIsARecord(t *testing.T) {
+	srv, owner := setup(t)
+	ctx := context.Background()
+	session := func(id string) string {
+		return fmt.Sprintf(`{"sessions":[{"id":%q,"date":"2026-10-31","startedAt":1793383465000,"endedAt":1793387065000,
+			"exercises":[{"id":"e1","name":"스쿼트","sets":[{"weight":100,"reps":5,"done":true}]}]}]}`, id)
+	}
+	id := unique("w")
+	code, out := call(t, http.MethodPost, srv.URL+"/workout/changes", token, session(id))
+	if code != http.StatusOK {
+		t.Fatalf("%d %s", code, out)
+	}
+	var saved struct {
+		Revision int64 `json:"revision"`
+	}
+	if err := json.Unmarshal(out, &saved); err != nil || saved.Revision == 0 {
+		t.Fatalf("%s %v", out, err)
+	}
+	var kind, actor string
+	var raw []byte
+	if err := owner.QueryRow(ctx, `select kind, actor, payload from input.records where source = 'workout' and source_key = $1`, fmt.Sprintf("workout:%d", saved.Revision)).
+		Scan(&kind, &actor, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if kind != "workout.changes" || actor != "operator" || !strings.Contains(string(raw), id) {
+		t.Fatalf("%s %s %s", kind, actor, raw)
+	}
+	code, out = call(t, http.MethodGet, srv.URL+"/workout", guestToken, "")
+	if code != http.StatusOK || !strings.Contains(string(out), id) {
+		t.Fatalf("%d %s", code, out)
+	}
+
+	other := unique("w")
+	code, out = call(t, http.MethodPost, srv.URL+"/workout/changes", guestToken, session(other))
+	if code != http.StatusOK {
+		t.Fatalf("%d %s", code, out)
+	}
+	if err := json.Unmarshal(out, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.QueryRow(ctx, `select actor from input.guest_records where source = 'workout' and source_key = $1`, fmt.Sprintf("workout:%d", saved.Revision)).Scan(&actor); err != nil || actor != "guest" {
+		t.Fatalf("%q %v", actor, err)
 	}
 }

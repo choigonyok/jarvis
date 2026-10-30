@@ -14,7 +14,7 @@
               │ + Bearer JARVIS_EDGE_TOKEN (운영자) / JARVIS_EDGE_GUEST_TOKEN (손님)
               ▼
            jarvis-be (edge Worker)
-              │ 토큰 없으면 401, 손님 토큰은 agent-guest·workout·notify·tts 와 context 의 GET track·owntracks/setup/guest,
+              │ 토큰 없으면 401, 손님 토큰은 agent-guest·input(운동 읽기·저장)·notify·tts 와 context 의 GET track·owntracks/setup/guest,
               │ POST owntracks/regions/guest, 손님 자기 출발 경로(transit/guest…·transit/lines)와
               │ jobs 의 작업 탭 경로(목록·하나·지시·실행·멈춤·다시·그만, 손님 토큰으로 - 손님 작업만)만,
               │ agent 는 콘솔이 쓰는 경로만
@@ -22,7 +22,7 @@
               │ (agent-guest 에는 JARVIS_GUEST_API_TOKEN)
               │ Workers VPC 바인딩 (jarvis-agent 터널)
               ▼
-           맥미니 compose: agent:8080 · workout:8091 · assets:8092
+           맥미니 compose: agent:8080 · input:8101 · assets:8092
                            mind:8102 · kakaotalk:8090 · status:8096
 
 폰·맥 수집기 ─▶ jarvis-be.choigonyok.com (공개 주소: 기본 엔트리포인트)
@@ -124,7 +124,7 @@ cloudflared(`macmini` 터널)는 다른 프로젝트 호스트명 때문에 남�
 대화·운동·캘린더·편집·위치(둘이 다닌 길, 읽기만 - 손님 폰 연결은 `OWNTRACKS_GUEST_USER`/`OWNTRACKS_GUEST_PASSWORD`, 맥미니 `.env`)·출발(자기 경로만 -
 실시간 버스·지하철 키는 `DATA_GO_KR_KEY`/`SEOUL_SUBWAY_KEY`, 맥미니 `.env`)·작업(자기 작업·체크리스트만) 페이지와 `/api/agent`·`/api/jobs`·`/api/workout`·`/api/context/track`·`/api/context/owntracks/setup/guest`·`/api/map` 등 손님 몫 API, PhotoCraft 파일(`/photocraft/`)만 미들웨어에서 통과한다 - 나머지는 403
 이거나 첫 화면으로 돌려보낸다. 손님의 대화는 별도 컨테이너 `agent-guest`(`JARVIS_ROLE=guest`)가
-받는다: chat-svc 의 thread `guest`, 별도 CLI 홈·승인 카드, 캘린더·리마인드·체크리스트·작업 모듈,
+받는다: input-svc 의 thread `guest`, 별도 CLI 홈·승인 카드, 캘린더·리마인드·체크리스트·작업 모듈,
 브라우저 토큰·자산·가계부 주소 없음. 내장 도구는 웹과, 손님 사진·자비스 기억 폴더만 닿는 Read·Write·Edit(그
 밖의 파일 호출은 카드 없이 거절 - `permission.Folders`), 셸 없음. 리마인드·체크리스트(mind)와 작업(jobs)은
 `JARVIS_GUEST_API_TOKEN` 으로 손님 것만 열리고(서로의 것은 '없음'), 손님 작업은 웹사이트도 사진도 못 쓴다(브라우저가
@@ -161,8 +161,8 @@ VNC 서버(x11vnc)는 브라우저 컨테이너 안에서만 듣고(`-localhost`
 `JARVIS_DB_PASSWORD_VAULT`(`scripts/db-roles` 가 만든다). 맥미니 `JARVIS_ALLOWED_TOOLS` 에
 `mcp__mcp-browser__browser_fill_login`(자동 입력은 카드 없이)과 `mcp__vault__list_logins`.
 
-**맥미니 .env 에 더 필요한 값.** `JARVIS_GUEST_API_TOKEN`(손님 agent 의 토큰 - chat·calendar·
-events·memory 가 손님 쪽만 열어 준다. events 는 손님 구독에 이것을 달아 보낸다), `JARVIS_MIND_CONSOLE_TOKEN`(mind 콘솔 로그인, `scripts/mini console`),
+**맥미니 .env 에 더 필요한 값.** `JARVIS_GUEST_API_TOKEN`(손님 agent 의 토큰 - input·calendar·
+memory 가 손님 쪽만 열어 준다), `JARVIS_MIND_CONSOLE_TOKEN`(mind 콘솔 로그인, `scripts/mini console`),
 `JARVIS_VNC_PASSWORD`(8자). 앞의 둘은 `openssl rand -base64 48 | tr -d '/+='` 로 만든다.
 
 **토큰은 언제나 필요하다.** compose 가 빈 `JARVIS_API_TOKEN` 을 거부하고, 서비스도 빈 `API_TOKEN` 으로는

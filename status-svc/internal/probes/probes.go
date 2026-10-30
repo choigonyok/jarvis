@@ -25,8 +25,6 @@ type Config struct {
 	SpendingURL string
 	AssetsURL   string
 	CalendarURL string
-	ChatURL     string
-	WorkoutURL  string
 	AgentURL    string
 	MindURL     string
 	MemoryURL   string
@@ -305,8 +303,6 @@ func All(cfg Config) []check.Probe {
 		e.service("svc.spending", "가계부", cfg.SpendingURL, []string{"postgres", "svc.mind"}),
 		e.service("svc.assets", "자산 서비스", cfg.AssetsURL, nil),
 		e.service("svc.calendar", "캘린더 서비스", cfg.CalendarURL, []string{"postgres"}),
-		e.service("svc.chat", "대화 기록 서비스", cfg.ChatURL, []string{"postgres"}),
-		e.service("svc.workout", "운동 기록 서비스", cfg.WorkoutURL, []string{"postgres"}),
 		e.service("svc.mind", "인지 루프(mind)", cfg.MindURL, []string{"postgres"}),
 		e.service("svc.memory", "기억 서비스", cfg.MemoryURL, []string{"postgres", "falkordb"}),
 		{

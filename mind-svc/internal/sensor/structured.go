@@ -44,9 +44,8 @@ type Structured struct {
 	// Book reads a month of the household book, every row settled.
 	Book func(ctx context.Context, month time.Time) ([]book.Tx, error)
 	// Outflows takes assets-svc's list of what left the accounts into the book.
-	Outflows   func(ctx context.Context, payload []byte) error
-	WorkoutURL string
-	JobsURL    string
+	Outflows func(ctx context.Context, payload []byte) error
+	JobsURL  string
 	// Records, when set, is long-term memory: what is read here is also
 	// remembered there.
 	Records Recorder
@@ -72,7 +71,7 @@ func (s *Structured) Run(ctx context.Context, every time.Duration) {
 	defer t.Stop()
 	for {
 		for name, poll := range map[string]func(context.Context) error{
-			"spending": s.Spending, "workout": s.Workout, "jobs": s.Jobs,
+			"spending": s.Spending, "jobs": s.Jobs,
 		} {
 			if err := poll(ctx); err != nil && ctx.Err() == nil {
 				s.Out.Warn("구조화 소스를 읽지 못했습니다", "source", name, "err", err)
@@ -170,22 +169,13 @@ func AreaOf(merchant string) string {
 
 // --- workouts ---------------------------------------------------------------
 
-// Workout reads the workout log's sessions of the last weeks.
-func (s *Structured) Workout(ctx context.Context) error {
-	if s.WorkoutURL == "" {
-		return nil
-	}
-	var book struct {
-		Sessions []session `json:"sessions"`
-	}
-	if err := s.get(ctx, s.WorkoutURL+"/workout", &book); err != nil {
-		return err
-	}
-	// The workout prediction reads four weeks of them: the log comes whole,
-	// so reading further back costs nothing.
+// takeWorkout is what changed in the training log: the sessions saved. The
+// operator's only - what the guest saved is on the guest's stream.
+func (s *Structured) takeWorkout(ctx context.Context, sessions []session) error {
+	// The workout prediction reads four weeks of them.
 	since := s.Now().Add(-max(s.back(), workoutBack))
 	cutoff := s.Now().In(s.Loc).AddDate(-1, 0, 0).Format("2006-01-02")
-	for _, w := range book.Sessions {
+	for _, w := range sessions {
 		if w.Date >= cutoff {
 			for _, r := range s.WorkoutRecords(w) {
 				if err := s.record(ctx, r); err != nil {

@@ -3,6 +3,11 @@
 //
 //	GET  /health                       the contract (gocommon/health): each consumer's delivery, the held box
 //	POST /records                      a record, from a process with no database
+//	GET  /turns?thread=&since=&limit=&before=   the conversation: a thread, or a page of it
+//	POST /turns                        a turn said: its record, and the turn
+//	PUT  /turns/{id}                   a turn with an origin given its newest word
+//	GET  /workout                      the training log, whole
+//	POST /workout/changes              what changed in it: its record, and the sessions
 //	GET  /held                         messages set aside after failing on their own
 //	POST /held/{consumer}/{id}/retry   send a held message again now
 //	DELETE /held/{consumer}/{id}       give up on a held message
@@ -22,9 +27,22 @@ import (
 
 	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/gocommon/queue"
+	"github.com/choigonyok/jarvis/gocommon/seal"
+	chat "github.com/choigonyok/jarvis/input-svc/internal/chat/store"
 	"github.com/choigonyok/jarvis/input-svc/internal/envelope"
 	"github.com/choigonyok/jarvis/input-svc/internal/store"
+	workout "github.com/choigonyok/jarvis/input-svc/internal/workout/store"
 )
+
+// Views are the read models kept here beside the records.
+type Views struct {
+	Chat    *chat.Store
+	Workout *workout.Store
+	// Seal closes a turn's words in its record.
+	Seal *seal.Sealer
+	// TZ is the wall clock a turn is stamped in.
+	TZ string
+}
 
 // Server is the HTTP surface.
 type Server struct {
@@ -38,11 +56,12 @@ type Server struct {
 	loops *health.Loops
 	log   *slog.Logger
 	now   func() time.Time
+	views Views
 }
 
 // New is the surface on s.
-func New(s *store.Store, token, guestToken string, loops *health.Loops, log *slog.Logger) *Server {
-	return &Server{store: s, token: token, guestToken: guestToken, loops: loops, log: log, now: time.Now}
+func New(s *store.Store, token, guestToken string, views Views, loops *health.Loops, log *slog.Logger) *Server {
+	return &Server{store: s, token: token, guestToken: guestToken, views: views, loops: loops, log: log, now: time.Now}
 }
 
 type guestKey struct{}
@@ -57,6 +76,12 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("POST /records", s.auth(true, s.post))
+	mux.HandleFunc("GET /turns", s.auth(true, s.listTurns))
+	mux.HandleFunc("POST /turns", s.auth(true, s.appendTurn))
+	// A job's card given its newest word (see turn.Origin).
+	mux.HandleFunc("PUT /turns/{id}", s.auth(true, s.updateTurn))
+	mux.HandleFunc("GET /workout", s.auth(true, s.readWorkout))
+	mux.HandleFunc("POST /workout/changes", s.auth(true, s.changeWorkout))
 	mux.HandleFunc("GET /held", s.auth(false, s.held))
 	mux.HandleFunc("POST /held/{consumer}/{id}/retry", s.auth(false, s.retryHeld))
 	mux.HandleFunc("DELETE /held/{consumer}/{id}", s.auth(false, s.dropHeld))

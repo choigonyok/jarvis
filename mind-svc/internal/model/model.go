@@ -58,7 +58,7 @@ func (e Entity) Live() bool {
 }
 
 // OwnerRoom is the operator's own conversation with the assistant
-// (chat-svc), read as one more room.
+// (input-svc), read as one more room.
 const OwnerRoom = "chat:owner"
 
 // AssistantsPromise is whether a loop is the assistant's own promise in its

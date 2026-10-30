@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net/http"
-	"net/http/httptest"
 	"regexp"
 	"strings"
 	"testing"
@@ -140,74 +138,46 @@ func TestMessagesRefusesWhatItCannotOpen(t *testing.T) {
 	}
 }
 
-// B-1, B-11: turns come as chat-svc writes them (RFC 3339, offset with a
-// colon, microseconds), only what is newer is asked for, and a turn in the
-// same second as the last one read is not taken for it.
-func TestChatReadsNewTurnsBySince(t *testing.T) {
-	base := time.Now().Add(-time.Hour).Truncate(time.Second)
-	at := func(us int) string {
-		return base.Add(time.Duration(us) * time.Microsecond).Format("2006-01-02T15:04:05.000000-07:00")
-	}
-	turns := []turn{
-		{ID: "u-1", Role: "user", AtISO: at(100), Text: "하나"},
-		{ID: "a-2", Role: "agent", AtISO: at(900000), Text: "둘"},
-	}
-	var sinces []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		since := r.URL.Query().Get("since")
-		sinces = append(sinces, since)
-		cut, _ := time.Parse(time.RFC3339Nano, since)
-		var out []turn
-		for _, tt := range turns {
-			if a, _ := time.Parse(time.RFC3339Nano, tt.AtISO); a.After(cut) {
-				out = append(out, tt)
-			}
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"turns": out})
-	}))
-	defer srv.Close()
-
-	st := store.NewMemory()
-	log := obs.NewMemoryLog(slog.New(slog.NewTextHandler(io.Discard, nil)))
-	go log.Run(context.Background(), func(context.Context, obs.Observation) error { return nil })
-	s := &Chat{URL: srv.URL, Store: st, Log: log, Backfill: 6 * time.Hour, Out: slog.New(slog.NewTextHandler(io.Discard, nil)), HTTP: srv.Client()}
-
-	turns = turns[:1]
-	if err := s.Poll(context.Background()); err != nil {
+// sealedTurn is a turn as input-svc leaves it in the stream.
+func sealedTurn(t *testing.T, sealer *seal.Sealer, thread string, tn turn) queue.Message {
+	t.Helper()
+	raw, _ := json.Marshal(tn)
+	closed, err := sealer.Seal(raw)
+	if err != nil {
 		t.Fatal(err)
 	}
-	turns = append(turns, turn{ID: "a-2", Role: "agent", AtISO: at(900000), Text: "둘"}) // same second, later
-	if err := s.Poll(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.Message(context.Background(), "chat:a-2"); err != nil {
-		t.Fatalf("같은 초에 온 다음 턴도 읽어야 합니다: %v", err)
-	}
-	if len(sinces) != 2 || sinces[1] == "" || !strings.Contains(sinces[1], ".") {
-		t.Fatalf("since 를 마이크로초까지 넘겨야 합니다: %q", sinces)
-	}
+	payload, _ := json.Marshal(map[string]string{"thread": thread, "sealed": base64.StdEncoding.EncodeToString(closed)})
+	return queue.Message{Kind: KindTurn, Source: "chat", SourceKey: "turn:" + tn.ID, Payload: payload}
 }
 
 // A turn with an origin is mind's own output come back - a job's news, a
 // reminder rung, a checklist shown. It is kept as a notice, under its own
-// name, never as something the assistant said in the conversation.
-func TestChatKeepsTheAssistantsOwnCardsAsNotices(t *testing.T) {
+// name, never as something the assistant said in the conversation. Times come
+// as input-svc writes them: RFC 3339, a colon in the offset, microseconds.
+func TestTurnsAreReadAsARoom(t *testing.T) {
 	at := time.Now().Add(-time.Hour).Truncate(time.Second).Format("2006-01-02T15:04:05.000000-07:00")
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"turns":[
-			{"id":"u-1","role":"user","atIso":"` + at + `","text":"그거 취소됐어"},
-			{"id":"a-2","role":"agent","atIso":"` + at + `","text":"알겠어요."},
-			{"id":"j-3","role":"agent","atIso":"` + at + `","paragraphs":["탁상시계 주문을 마쳤어요"],"origin":{"kind":"job","job":16,"run":40}},
-			{"id":"n-4","role":"agent","atIso":"` + at + `","text":"치과 예약 확인하기","origin":{"kind":"notice","ref":"moment:7"}}
-		]}`))
-	}))
-	defer srv.Close()
+	sealer, _ := seal.New(make([]byte, 32))
 	st := store.NewMemory()
 	log := obs.NewMemoryLog(slog.New(slog.NewTextHandler(io.Discard, nil)))
 	go log.Run(context.Background(), func(context.Context, obs.Observation) error { return nil })
-	s := &Chat{URL: srv.URL, Store: st, Log: log, Backfill: 6 * time.Hour, Out: slog.New(slog.NewTextHandler(io.Discard, nil)), HTTP: srv.Client()}
-	if err := s.Poll(context.Background()); err != nil {
-		t.Fatal(err)
+	s := &Messages{Store: st, Log: log, Seal: sealer}
+	ctx := context.Background()
+	job := func(kind string) *struct {
+		Kind string `json:"kind"`
+	} {
+		return &struct {
+			Kind string `json:"kind"`
+		}{kind}
+	}
+	for _, tn := range []turn{
+		{ID: "u-1", Role: "user", AtISO: at, Text: "그거 취소됐어"},
+		{ID: "a-2", Role: "agent", AtISO: at, Text: "알겠어요."},
+		{ID: "j-3", Role: "agent", AtISO: at, Paragraphs: []string{"탁상시계 주문을 마쳤어요"}, Origin: job("job")},
+		{ID: "n-4", Role: "agent", AtISO: at, Text: "치과 예약 확인하기", Origin: job("notice")},
+	} {
+		if err := s.TakeTurn(ctx, sealedTurn(t, sealer, "", tn)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	for ref, want := range map[string]struct {
 		notice bool
@@ -219,9 +189,34 @@ func TestChatKeepsTheAssistantsOwnCardsAsNotices(t *testing.T) {
 		"chat:j-3": {true, model.NoticeSender, false},
 		"chat:n-4": {true, model.NoticeSender, false},
 	} {
-		m, err := st.Message(context.Background(), ref)
+		m, err := st.Message(ctx, ref)
 		if err != nil || m.Notice != want.notice || m.Sender != want.sender || m.IsMine != want.mine {
 			t.Fatalf("%s: %+v %v", ref, m, err)
 		}
+	}
+}
+
+// Another thread is not the operator's conversation, and what cannot be read
+// will not be read next time either.
+func TestTurnsOfAnotherThreadAndBadOnes(t *testing.T) {
+	at := time.Now().Format(time.RFC3339Nano)
+	sealer, _ := seal.New(make([]byte, 32))
+	other, _ := seal.New([]byte("0123456789abcdef0123456789abcdef"))
+	st := store.NewMemory()
+	log := obs.NewMemoryLog(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	go log.Run(context.Background(), func(context.Context, obs.Observation) error { return nil })
+	s := &Messages{Store: st, Log: log, Seal: sealer}
+	ctx := context.Background()
+	if err := s.TakeTurn(ctx, sealedTurn(t, sealer, "other", turn{ID: "u-9", Role: "user", AtISO: at, Text: "다른 대화"})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Message(ctx, "chat:u-9"); err == nil {
+		t.Fatal("운영자 대화만 읽습니다")
+	}
+	if err := s.TakeTurn(ctx, sealedTurn(t, other, "", turn{ID: "u-8", Role: "user", AtISO: at, Text: "x"})); !errors.Is(err, queue.ErrRefused) {
+		t.Fatalf("%v", err)
+	}
+	if err := s.TakeTurn(ctx, sealedTurn(t, sealer, "", turn{ID: "u-7", Role: "user", AtISO: "어제", Text: "x"})); !errors.Is(err, queue.ErrRefused) {
+		t.Fatalf("%v", err)
 	}
 }

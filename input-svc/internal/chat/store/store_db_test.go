@@ -2,17 +2,55 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/choigonyok/jarvis/chat-svc/internal/turn"
+	"github.com/choigonyok/jarvis/input-svc/internal/chat/turn"
 )
 
-// B-11 and B-1 against a throwaway Postgres, as svc_chat (scripts/dbtest):
+func pool(t *testing.T, dsn string) *pgxpool.Pool {
+	t.Helper()
+	p, err := pgxpool.New(context.Background(), dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(p.Close)
+	return p
+}
+
+// A turn whose record could not be left is not stored: what the screen reads
+// and what the stream holds never disagree.
+func TestATurnLandsWithItsRecord(t *testing.T) {
+	dsn := os.Getenv("JARVIS_TEST_DSN")
+	if dsn == "" {
+		t.Skip("JARVIS_TEST_DSN 이 없어 건너뜁니다 (scripts/dbtest)")
+	}
+	ctx := context.Background()
+	s := New(pool(t, dsn))
+	const th = "dbtest-after"
+	refuse := func(context.Context, pgx.Tx, turn.Turn) error { return errors.New("안 됩니다") }
+	if _, err := s.Append(ctx, turn.Turn{Role: turn.RoleUser, Text: "하나", Thread: th}, "Asia/Seoul", refuse); err == nil {
+		t.Fatal("기록이 실패하면 턴도 실패해야 합니다")
+	}
+	all, err := s.All(ctx, "Asia/Seoul", th, time.Time{})
+	if err != nil || len(all) != 0 {
+		t.Fatalf("%+v %v", all, err)
+	}
+	var seen turn.Turn
+	saved, err := s.Append(ctx, turn.Turn{Role: turn.RoleUser, Text: "둘", Thread: th}, "Asia/Seoul",
+		func(_ context.Context, _ pgx.Tx, got turn.Turn) error { seen = got; return nil })
+	if err != nil || seen.ID != saved.ID || seen.Thread != th || seen.AtISO == "" {
+		t.Fatalf("%+v %+v %v", seen, saved, err)
+	}
+}
+
+// B-11 and B-1 against a throwaway Postgres, as svc_input (scripts/dbtest):
 // since= returns only the newer turns, and the timestamp is RFC 3339 with a
 // colon in the offset - what mind parses.
 func TestTurnsSince(t *testing.T) {
@@ -29,20 +67,16 @@ func TestTurnsSince(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = conn.Exec(ctx, `delete from turns where thread = 'dbtest'`)
+	_, err = conn.Exec(ctx, `delete from input.turns where thread = 'dbtest'`)
 	conn.Close(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := Open(ctx, dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(s.Close)
+	s := New(pool(t, dsn))
 
 	var got []turn.Turn
 	for _, text := range []string{"하나", "둘", "셋"} {
-		tt, err := s.Append(ctx, turn.Turn{Role: turn.RoleUser, Text: text, Thread: "dbtest"}, "Asia/Seoul")
+		tt, err := s.Append(ctx, turn.Turn{Role: turn.RoleUser, Text: text, Thread: "dbtest"}, "Asia/Seoul", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -70,17 +104,13 @@ func TestTurnKeepsItsReference(t *testing.T) {
 		t.Skip("JARVIS_TEST_DSN 이 없어 건너뜁니다 (scripts/dbtest)")
 	}
 	ctx := context.Background()
-	s, err := Open(ctx, dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(s.Close)
-	first, err := s.Append(ctx, turn.Turn{Role: turn.RoleAgent, Paragraphs: []string{"알람시계 T872 는 16,900원입니다."}, Thread: "dbtest-ref"}, "Asia/Seoul")
+	s := New(pool(t, dsn))
+	first, err := s.Append(ctx, turn.Turn{Role: turn.RoleAgent, Paragraphs: []string{"알람시계 T872 는 16,900원입니다."}, Thread: "dbtest-ref"}, "Asia/Seoul", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ref := &turn.Ref{ID: first.ID, Role: turn.RoleAgent, At: first.At, Text: "알람시계 T872 는 16,900원입니다."}
-	saved, err := s.Append(ctx, turn.Turn{Role: turn.RoleUser, Text: "이 제품 구매해줘", Ref: ref, Thread: "dbtest-ref"}, "Asia/Seoul")
+	saved, err := s.Append(ctx, turn.Turn{Role: turn.RoleUser, Text: "이 제품 구매해줘", Ref: ref, Thread: "dbtest-ref"}, "Asia/Seoul", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,14 +135,10 @@ func TestJobCardIsOneTurnPerRun(t *testing.T) {
 		t.Skip("JARVIS_TEST_DSN 이 없어 건너뜁니다 (scripts/dbtest)")
 	}
 	ctx := context.Background()
-	s, err := Open(ctx, dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(s.Close)
+	s := New(pool(t, dsn))
 	const th = "dbtest-job"
 	origin := &turn.Origin{Kind: "job", Job: 7, Run: 42, Title: "가격 지켜보기"}
-	card, err := s.Append(ctx, turn.Turn{Role: turn.RoleAgent, Paragraphs: []string{"지켜보는 중입니다."}, Origin: origin, Thread: th}, "Asia/Seoul")
+	card, err := s.Append(ctx, turn.Turn{Role: turn.RoleAgent, Paragraphs: []string{"지켜보는 중입니다."}, Origin: origin, Thread: th}, "Asia/Seoul", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,12 +146,12 @@ func TestJobCardIsOneTurnPerRun(t *testing.T) {
 		t.Fatalf("저장한 턴이 origin 을 돌려줘야 합니다: %+v", card.Origin)
 	}
 	time.Sleep(10 * time.Millisecond)
-	later, err := s.Append(ctx, turn.Turn{Role: turn.RoleAgent, Paragraphs: []string{"그 사이의 대화 답"}, Thread: th}, "Asia/Seoul")
+	later, err := s.Append(ctx, turn.Turn{Role: turn.RoleAgent, Paragraphs: []string{"그 사이의 대화 답"}, Thread: th}, "Asia/Seoul", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(10 * time.Millisecond)
-	updated, err := s.Update(ctx, th, card.ID, []string{"가격이 내렸습니다: 16,900원"}, "Asia/Seoul")
+	updated, err := s.Update(ctx, th, card.ID, []string{"가격이 내렸습니다: 16,900원"}, "Asia/Seoul", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,16 +168,16 @@ func TestJobCardIsOneTurnPerRun(t *testing.T) {
 	if n := len(all); n < 2 || all[n-1].ID != card.ID || all[n-1].Origin == nil {
 		t.Fatalf("다시 읽어도 카드가 마지막이고 origin 이 남아야 합니다: %+v", all)
 	}
-	if _, err := s.Update(ctx, th, later.ID, []string{"고쳐 쓰기"}, "Asia/Seoul"); err != ErrNoTurn {
+	if _, err := s.Update(ctx, th, later.ID, []string{"고쳐 쓰기"}, "Asia/Seoul", nil); err != ErrNoTurn {
 		t.Fatalf("대화의 말은 못 바꿔야 합니다: %v", err)
 	}
-	if _, err := s.Update(ctx, "other", card.ID, []string{"x"}, "Asia/Seoul"); err != ErrNoTurn {
+	if _, err := s.Update(ctx, "other", card.ID, []string{"x"}, "Asia/Seoul", nil); err != ErrNoTurn {
 		t.Fatalf("다른 스레드에서는 못 바꿔야 합니다: %v", err)
 	}
 
 	// A notice with the list it shows keeps both through the store.
 	notice, err := s.Append(ctx, turn.Turn{Role: turn.RoleAgent, Paragraphs: []string{"집에 가서 할 일"}, Thread: th,
-		Origin: &turn.Origin{Kind: "notice", Title: "집에 도착하셔서 알려 드려요", Ref: "remind:rem_1:1", Checklist: "chk_1"}}, "Asia/Seoul")
+		Origin: &turn.Origin{Kind: "notice", Title: "집에 도착하셔서 알려 드려요", Ref: "remind:rem_1:1", Checklist: "chk_1"}}, "Asia/Seoul", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,15 +199,11 @@ func TestWindowPagesByTurnID(t *testing.T) {
 		t.Skip("JARVIS_TEST_DSN 이 없어 건너뜁니다 (scripts/dbtest)")
 	}
 	ctx := context.Background()
-	s, err := Open(ctx, dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(s.Close)
+	s := New(pool(t, dsn))
 	const th = "dbtest-page"
 	var ids []string
 	for i := 0; i < 7; i++ {
-		tt, err := s.Append(ctx, turn.Turn{Role: turn.RoleUser, Text: fmt.Sprint("m", i), Thread: th}, "Asia/Seoul")
+		tt, err := s.Append(ctx, turn.Turn{Role: turn.RoleUser, Text: fmt.Sprint("m", i), Thread: th}, "Asia/Seoul", nil)
 		if err != nil {
 			t.Fatal(err)
 		}

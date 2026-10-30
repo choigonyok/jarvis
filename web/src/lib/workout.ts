@@ -61,7 +61,7 @@ export type Book = {
   sessions: Session[];
   /** Server write counter. A full replace must name the one it was built on. */
   revision?: number;
-  /** Movement → group, as workout-svc judges it. */
+  /** Movement → group, as input-svc judges it. */
   groups?: Record<string, string>;
   /** Seconds. What the rest timer counts down to. */
   restTarget?: number;
@@ -348,7 +348,7 @@ export const COMMON_EXERCISES: { name: string; group: MuscleGroup }[] = [
 
 const GROUP_OF = new Map(COMMON_EXERCISES.map((e) => [e.name, e.group]));
 
-// workout-svc's judgement, set when the book loads. The list above only
+// input-svc's judgement, set when the book loads. The list above only
 // covers the moment before that.
 let serverGroups = new Map<string, string>();
 

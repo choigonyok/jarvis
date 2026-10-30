@@ -80,7 +80,7 @@ interface Env {
   /** What the guest's agent checks (and calls the services with), in place of JARVIS_API_TOKEN. */
   JARVIS_GUEST_API_TOKEN?: string;
   AGENT: Fetcher;
-  WORKOUT: Fetcher;
+  INPUT: Fetcher;
   ASSETS: Fetcher;
   JOBS: Fetcher;
   KAKAOTALK: Fetcher;
@@ -111,7 +111,8 @@ const SERVICES: Record<string, { binding: keyof Env; origin: string }> = {
   agent: { binding: "AGENT", origin: "http://agent:8080" },
   // The guest account's own agent (its own conversation, calendar only).
   "agent-guest": { binding: "AGENT_GUEST", origin: "http://agent-guest:8081" },
-  workout: { binding: "WORKOUT", origin: "http://workout:8091" },
+  // The conversation and the training log are kept at the way in.
+  input: { binding: "INPUT", origin: "http://input:8101" },
   assets: { binding: "ASSETS", origin: "http://assets:8092" },
   jobs: { binding: "JOBS", origin: "http://jobs:8098" },
   kakaotalk: { binding: "KAKAOTALK", origin: "http://kakaotalk:8090" },
@@ -134,11 +135,11 @@ const SERVICES: Record<string, { binding: keyof Env; origin: string }> = {
 
 /**
  * What the guest's token opens: their own agent, the workout log (read it
- * and save what changed - guestWorkoutRoute), their notifications, their own
- * voice, of context-svc the operator's day alone (guestContextRoute), and
- * their own jobs (guestJobsRoute).
+ * and save what changed - inputRoute), their notifications, their own voice,
+ * of context-svc the operator's day alone (guestContextRoute), and their own
+ * jobs (guestJobsRoute).
  */
-const GUEST_SERVICES = new Set(["agent-guest", "workout", "notify", "tts", "context", "jobs"]);
+const GUEST_SERVICES = new Set(["agent-guest", "input", "notify", "tts", "context", "jobs"]);
 
 /**
  * What the guest may do on jobs-svc - what the 작업 tab does: list their
@@ -153,13 +154,12 @@ function guestJobsRoute(method: string, path: string): boolean {
 }
 
 /**
- * What the guest may do on workout-svc - what the 운동 tab does: read the
- * log, and save what changed in it (sessions by id). Not the whole-log
- * replace (PUT), which overwrites every session the operator logged with
- * whatever the guest's screen holds, nor a session's own write or delete -
- * the tab uses neither.
+ * What the screens may do at the way in - what the 운동 tab does: read the
+ * log, and save what changed in it (sessions by id). Records and the
+ * conversation are for the services, and the turns reach the screen through
+ * the agents.
  */
-function guestWorkoutRoute(method: string, path: string): boolean {
+function inputRoute(method: string, path: string): boolean {
   return (method === "GET" && path === "workout") || (method === "POST" && path === "workout/changes");
 }
 
@@ -341,7 +341,7 @@ async function gateway(request: Request, env: Env, internal: boolean): Promise<R
   if (guest && name === "jobs" && !guestJobsRoute(request.method, rest.join("/"))) {
     return json(404, "그런 경로가 없습니다.");
   }
-  if (guest && name === "workout" && !guestWorkoutRoute(request.method, rest.join("/"))) {
+  if (name === "input" && !inputRoute(request.method, rest.join("/"))) {
     return json(404, "그런 경로가 없습니다.");
   }
   if ((name === "agent" || name === "agent-guest") && !AGENT_ROUTES.has(rest[0] ?? "")) {
@@ -374,13 +374,17 @@ async function gateway(request: Request, env: Env, internal: boolean): Promise<R
   // The services want their own token; the caller's never goes past here.
   // The guest's agent has a token of its own, which opens only the guest's
   // side of the services it calls. The voice service keeps one recording per
-  // token, and jobs-svc keeps each one's jobs by it, so the guest's requests
-  // go on with the guest's token and nothing else: without it there is no
-  // guest voice and no guest job, never the operator's.
+  // token, jobs-svc keeps each one's jobs by it, and input-svc files what is
+  // saved under who saved it, so the guest's requests go on with the guest's
+  // token and nothing else: without it there is no guest voice, no guest job
+  // and no guest save, never the operator's.
   if (bearer) {
     if (guest && name === "tts" && !env.JARVIS_GUEST_API_TOKEN) return json(503, "손님 목소리가 설정되지 않았습니다.");
     if (guest && name === "jobs" && !env.JARVIS_GUEST_API_TOKEN) return json(503, "손님 작업이 설정되지 않았습니다.");
-    const own = (name === "agent-guest" || (guest && (name === "tts" || name === "jobs"))) && env.JARVIS_GUEST_API_TOKEN;
+    if (guest && name === "input" && !env.JARVIS_GUEST_API_TOKEN) return json(503, "손님 기록이 설정되지 않았습니다.");
+    const own =
+      (name === "agent-guest" || (guest && (name === "tts" || name === "jobs" || name === "input"))) &&
+      env.JARVIS_GUEST_API_TOKEN;
     const token = own ? env.JARVIS_GUEST_API_TOKEN! : env.JARVIS_API_TOKEN;
     headers.set("authorization", `Bearer ${token}`);
   }

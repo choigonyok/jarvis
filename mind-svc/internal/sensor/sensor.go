@@ -8,9 +8,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"log/slog"
-	"net/http"
-	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -27,6 +24,9 @@ import (
 
 // KindMessage is a message a collector handed on (gocommon/collect), sealed.
 const KindMessage = collect.KindMessage
+
+// KindTurn is a turn of the conversation with jarvis, sealed (input-svc).
+const KindTurn = "chat.turn"
 
 // Messages takes what the chat collectors (kakaotalk-client, imessage-client)
 // hand on. Every message comes; which are worth reading is said here.
@@ -90,15 +90,20 @@ func (s *Messages) open(q queue.Message) (collected, error) {
 	if err := json.Unmarshal(q.Payload, &p); err != nil {
 		return m, err
 	}
-	body, err := base64.StdEncoding.DecodeString(p.Sealed)
+	return m, s.unseal(p.Sealed, &m)
+}
+
+// unseal reads what a record carries sealed into into.
+func (s *Messages) unseal(sealed string, into any) error {
+	body, err := base64.StdEncoding.DecodeString(sealed)
 	if err != nil {
-		return m, err
+		return err
 	}
 	plain, err := s.Seal.Open(body)
 	if err != nil {
-		return m, err
+		return err
 	}
-	return m, json.Unmarshal(plain, &m)
+	return json.Unmarshal(plain, into)
 }
 
 func (s *Messages) worth(m collected) bool {
@@ -108,19 +113,10 @@ func (s *Messages) worth(m collected) bool {
 	return s.Exclude == nil || !s.Exclude.MatchString(m.ChatName)
 }
 
-// Chat reads the operator's conversation with jarvis (chat-svc) as one more
-// room: what the operator tells the assistant - "다음 주 화요일 치과 예약했어",
-// what it found when asked - is read like any conversation.
-type Chat struct {
-	URL      string
-	Token    string
-	Store    store.Store
-	Log      obs.Log
-	Backfill time.Duration
-	Every    time.Duration
-	Out      *slog.Logger
-	HTTP     *http.Client
-}
+// A turn of the operator's conversation with jarvis is read as one more room:
+// what the operator tells the assistant - "다음 주 화요일 치과 예약했어", what it
+// found when asked - is read like any conversation. input-svc leaves each turn
+// in the stream, sealed.
 
 type turn struct {
 	ID         string   `json:"id"`
@@ -129,96 +125,37 @@ type turn struct {
 	Text       string   `json:"text"`
 	Paragraphs []string `json:"paragraphs"`
 	// Origin is set on a turn the assistant posted on its own - a job's
-	// news, a reminder at its moment, a checklist shown (chat-svc's
+	// news, a reminder at its moment, a checklist shown (input-svc's
 	// turns.origin) - rather than said in the conversation.
 	Origin *struct {
 		Kind string `json:"kind"`
 	} `json:"origin"`
 }
 
-func (s *Chat) Run(ctx context.Context) {
-	if s.HTTP == nil {
-		s.HTTP = &http.Client{Timeout: 30 * time.Second}
+// TakeTurn is one turn said. Only the operator's thread is read here.
+func (s *Messages) TakeTurn(ctx context.Context, q queue.Message) error {
+	var p struct {
+		Thread string `json:"thread"`
+		Sealed string `json:"sealed"`
 	}
-	t := time.NewTicker(s.Every)
-	defer t.Stop()
-	for {
-		if err := s.Poll(ctx); err != nil && ctx.Err() == nil {
-			s.Out.Warn("jarvis 대화를 읽지 못했습니다", "err", err)
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-		}
+	if err := json.Unmarshal(q.Payload, &p); err != nil {
+		return fmt.Errorf("%w: %s: %v", queue.ErrRefused, q.SourceKey, err)
 	}
-}
-
-// Poll observes the turns after the last one seen (by time). The cursor is
-// the last turn's time in microseconds.
-func (s *Chat) Poll(ctx context.Context) error {
-	cur, err := s.Store.Cursor(ctx, "sensor:chat")
-	if err != nil {
-		return err
+	if p.Thread != "" {
+		return nil
 	}
-	since := time.Now().Add(-s.Backfill)
-	if cur > 0 {
-		since = time.UnixMicro(cur)
+	var t turn
+	if err := s.unseal(p.Sealed, &t); err != nil {
+		return fmt.Errorf("%w: %s: %v", queue.ErrRefused, q.SourceKey, err)
 	}
-	turns, err := s.turns(ctx, since)
-	if err != nil {
-		return err
+	msg, ok := t.message()
+	if msg.SentAt.IsZero() {
+		return fmt.Errorf("%w: %s: 턴의 시각을 읽지 못했습니다", queue.ErrRefused, q.SourceKey)
 	}
-	last := since
-	for _, t := range turns {
-		msg, ok := t.message()
-		if msg.SentAt.IsZero() {
-			if s.Out != nil {
-				s.Out.Warn("chat turn time parse failed", "id", t.ID, "at", t.AtISO)
-			}
-			continue
-		}
-		if !msg.SentAt.After(since) {
-			continue
-		}
-		if ok {
-			if err := mind.Observe(ctx, s.Store, s.Log, msg); err != nil {
-				return err
-			}
-		}
-		if msg.SentAt.After(last) {
-			last = msg.SentAt
-		}
+	if !ok {
+		return nil
 	}
-	if last.After(since) || cur == 0 {
-		return s.Store.SetCursor(ctx, "sensor:chat", last.UnixMicro())
-	}
-	return nil
-}
-
-func (s *Chat) turns(ctx context.Context, since time.Time) ([]turn, error) {
-	if s.HTTP == nil {
-		s.HTTP = &http.Client{Timeout: 30 * time.Second}
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(s.URL, "/")+"/turns?thread=&since="+url.QueryEscape(since.Format(time.RFC3339Nano)), nil)
-	if err != nil {
-		return nil, err
-	}
-	if s.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+s.Token)
-	}
-	resp, err := s.HTTP.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("chat-svc: %d", resp.StatusCode)
-	}
-	var out struct {
-		Turns []turn `json:"turns"`
-	}
-	return out.Turns, json.NewDecoder(resp.Body).Decode(&out)
+	return mind.Observe(ctx, s.Store, s.Log, msg)
 }
 
 // message is a turn as a message of the jarvis room; ok is false when it has

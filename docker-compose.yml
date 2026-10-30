@@ -124,7 +124,7 @@ services:
       # 스키마만 들고 있고, 일정은 여기로 묻는다.
       JARVIS_CALENDAR_URL: http://calendar:8093
       # 대화 기록도 마찬가지다. SSE 와 진행 상태는 에이전트에 남아 있다.
-      JARVIS_CHAT_URL: http://chat:8094
+      JARVIS_CHAT_URL: http://input:8101
       # 자산은 읽기만 한다. 주문 가능한 키는 assets-svc 에만 있고, 에이전트는
       # 거기 GET 만 친다. 부팅 의존성은 걸지 않는다 - 증권사가 죽었다고
       # 대화까지 막을 이유가 없고, 조회 실패는 도구 오류로 모델에게 간다.
@@ -179,7 +179,7 @@ services:
       # 를 친다. 없으면 에이전트가 부팅을 포기하므로, 순서를 운에 맡기지 않는다.
       calendar:
         condition: service_healthy
-      chat:
+      input:
         condition: service_healthy
     networks:
       - default
@@ -218,7 +218,7 @@ services:
       JARVIS_TURN_TIMEOUT: ${JARVIS_TURN_TIMEOUT:-2h}
       JARVIS_MEMORY_URL: http://memory:8100
       JARVIS_CALENDAR_URL: http://calendar:8093
-      JARVIS_CHAT_URL: http://chat:8094
+      JARVIS_CHAT_URL: http://input:8101
       # 손님의 결재 카드는 손님 기기로(audience guest). 운영자에게는 가지 않는다.
       JARVIS_NOTIFY_URL: http://input:8101
       # 손님 리마인드가 울리면 손님 대화에도 안내 카드로 남는다. 손님 스트림을 직접 읽는다.
@@ -255,239 +255,12 @@ services:
         condition: service_completed_successfully
       calendar:
         condition: service_healthy
-      chat:
+      input:
         condition: service_healthy
     networks:
       - default
       - search
       - guest-data
-    restart: unless-stopped
-
-  # 운동 기록. 웹의 라우트 핸들러 + 볼륨의 JSON 파일이었던 것이 서비스가 됐다.
-  # 계약은 그대로다(책 전체를 주고받는다) - 저장소만 Postgres 로 바뀌었다.
-  #
-  # 볼륨이 없는 것에 주의: 상태가 전부 데이터베이스에 있으므로 이 컨테이너는
-  # 언제든 버려도 된다.
-  workout:
-    build: ./workout-svc
-    environment:
-      TZ: ${TZ:-Asia/Seoul}
-      LISTEN_ADDR: ":8091"
-      DATABASE_URL: >-
-        postgres://svc_workout:${JARVIS_DB_PASSWORD_WORKOUT:?scripts/db-roles 를 먼저 실행하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
-      # 스택의 나머지와 같은 베어러. /health 만 예외다.
-      API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
-    expose:
-      - "8091"
-    # 루프백에만. psql 처럼 curl 로 직접 두드리는 것이 가장 빠른 확인이다.
-    ports:
-      - "127.0.0.1:${JARVIS_WORKOUT_PORT:-8091}:8091"
-    healthcheck:
-      # /health 는 데이터베이스를 ping 한다. 연결이 안 되면 unhealthy 여야
-      # 웹이 그 위에 뜨지 않는다.
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8091/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    depends_on:
-      db-migrate:
-        condition: service_completed_successfully
-    networks:
-      - default
-      - data
-    restart: unless-stopped
-
-  # 위치·현재 상태. 폰의 OwnTracks(위치·영역 진입/이탈)와 iOS 단축어·맥 수집기(CarPlay,
-  # 집중 모드, 앞에 있는 앱)가 게이트웨이(/context/owntracks, /context/signals)로 보낸 것을
-  # 받아 영역 체류(visits)와 현재 상태로 만든다. 폰은 스택의 토큰을 갖지 않는다: OwnTracks 는
-  # 자기 Basic 인증, 단축어는 신호 토큰. 좌표 원본은 CONTEXT_RAW_DAYS(기본 30일)만 둔다.
-  context:
-    <<: *outside
-    build:
-      context: ./context-svc
-      additional_contexts:
-        gocommon: ./gocommon
-    environment:
-      TZ: ${TZ:-Asia/Seoul}
-      LISTEN_ADDR: ":8103"
-      DATABASE_URL: >-
-        postgres://svc_context:${JARVIS_DB_PASSWORD_CONTEXT:?scripts/db-roles 를 먼저 실행하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
-      API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
-      SIGNAL_TOKEN: ${CONTEXT_SIGNAL_TOKEN:-}
-      OWNTRACKS_USER: ${OWNTRACKS_USER:-}
-      OWNTRACKS_PASSWORD: ${OWNTRACKS_PASSWORD:-}
-      # 손님(상대) 폰의 OwnTracks 계정. 비어 있으면 상대 폰을 받지 않는다.
-      OWNTRACKS_GUEST_USER: ${OWNTRACKS_GUEST_USER:-}
-      OWNTRACKS_GUEST_PASSWORD: ${OWNTRACKS_GUEST_PASSWORD:-}
-      # 손님 agent 의 토큰: 손님 폰이 지금 어디인지(GET /now/guest)만 연다.
-      API_GUEST_TOKEN: ${JARVIS_GUEST_API_TOKEN:-}
-      # 출발 탭의 실시간 버스(공공데이터포털 일반 인증키)·지하철(서울 열린데이터광장
-      # 실시간 지하철 인증키). 비어 있으면 그 정보만 없다.
-      DATA_GO_KR_KEY: ${DATA_GO_KR_KEY:-}
-      SEOUL_SUBWAY_KEY: ${SEOUL_SUBWAY_KEY:-}
-      INPUT_URL: http://input:8101
-      # 날씨를 읽는 곳은 여기 하나다. 어디의 예보가 필요한지는 mind 에 묻는다.
-      MIND_URL: http://mind:8102
-      WEATHER: ${MIND_WEATHER:-}
-      WEATHER_HOME: ${MIND_WEATHER_HOME:-}
-      CONTEXT_RAW_DAYS: ${CONTEXT_RAW_DAYS:-30}
-    expose:
-      - "8103"
-    ports:
-      - "127.0.0.1:${JARVIS_CONTEXT_PORT:-8103}:8103"
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8103/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    depends_on:
-      db-migrate:
-        condition: service_completed_successfully
-    networks:
-      - default
-      - data
-    restart: unless-stopped
-
-  # 웹 찾기·읽기. 네이버 검색(NAVER API HUB), 페이지 읽기와 그 안의 그림 속 글자(맥미니 호스트의
-  # OCR - ocr/, scripts/ocr), 네이버 지도(플레이스)의 근처 목록. 상태가 없다(캐시는 메모리).
-  # 바깥 페이지를 받아 파싱하는 곳이라 search 네트워크(이것과 agent 들)에만 붙는다 - 페이지가 이
-  # 프로세스를 장악해도 다른 서비스에는 닿지 못하고, 받는 쪽(fetch)도 사설 주소를 열지 않는다.
-  # 토큰은 이것만의 JARVIS_SEARCH_TOKEN(모든 서비스가 받는 JARVIS_API_TOKEN 은 여기 없다).
-  # 비어 있으면 /health 만 답하고 꺼져 있다 - 다시 뜨기를 반복하지 않는다.
-  search:
-    <<: *outside
-    build: ./search-svc
-    environment:
-      TZ: ${TZ:-Asia/Seoul}
-      LISTEN_ADDR: ":8104"
-      API_TOKEN: ${JARVIS_SEARCH_TOKEN:-}
-      # NCP 콘솔 > NAVER API HUB > Application 의 인증 정보(Client ID·Secret). 비어 있으면 네이버
-      # 검색만 꺼진다(읽기·네이버 지도는 된다).
-      NAVER_API_HUB_ID: ${NAVER_API_HUB_ID:-}
-      NAVER_API_HUB_SECRET: ${NAVER_API_HUB_SECRET:-}
-      # 그림 속 글자: 맥미니 호스트의 OCR(scripts/ocr install). 토큰은 위와 같은 것.
-      OCR_URL: ${JARVIS_OCR_URL:-http://host.docker.internal:8107}
-    expose:
-      - "8104"
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8104/health || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 5s
-    networks:
-      - search
-    restart: unless-stopped
-
-  # 로그인 정보 보관함. 운영자가 대화의 카드(비밀번호 칸)로 넣은 아이디·비밀번호를
-  # 봉인해서(AES-256-GCM) Postgres 에 두고, 브라우저가 그 사이트의 로그인 화면에 있을
-  # 때만 꺼내 준다. 키는 이 .env 에만 있다 - DB 와 백업에는 봉인된 값뿐이다.
-  # 토큰이 둘: 서비스 토큰(에이전트)은 저장·목록·지우기만, 브라우저 토큰은 꺼내기만.
-  # 공개 포트가 없고, data(Postgres)·browser(브라우저가 꺼내 감) 네트워크에만 붙는다.
-  vault:
-    build:
-      context: ./vault-svc
-      additional_contexts:
-        gocommon: ./gocommon
-    environment:
-      TZ: ${TZ:-Asia/Seoul}
-      LISTEN_ADDR: ":8105"
-      DATABASE_URL: >-
-        postgres://svc_vault:${JARVIS_DB_PASSWORD_VAULT:?scripts/db-roles 를 먼저 실행하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
-      API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
-      VAULT_RELEASE_TOKEN: ${JARVIS_VAULT_RELEASE_TOKEN:?JARVIS_VAULT_RELEASE_TOKEN 을 .env 에 설정하세요}
-      VAULT_KEY: ${JARVIS_VAULT_KEY:?JARVIS_VAULT_KEY 를 .env 에 설정하세요 (openssl rand -base64 32)}
-    expose:
-      - "8105"
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8105/health || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    depends_on:
-      db-migrate:
-        condition: service_completed_successfully
-    networks:
-      - data
-      - browser
-    restart: unless-stopped
-
-  # 작업: 대화에서 맡긴 일, 실행마다의 진행 기록, 작업이 지켜보는 대상, 사이트
-  # 로그인 상태. 기록만 한다 - 실행은 에이전트의 스케줄러가 브라우저로 한다.
-  jobs:
-    build:
-      context: ./jobs-svc
-      additional_contexts:
-        gocommon: ./gocommon
-    environment:
-      TZ: ${TZ:-Asia/Seoul}
-      LISTEN_ADDR: ":8098"
-      DATABASE_URL: >-
-        postgres://svc_jobs:${JARVIS_DB_PASSWORD_JOBS:?scripts/db-roles 를 먼저 실행하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
-      API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
-      # 작업이 끝나고 이만큼 지나면 첨부 사진을 지운다.
-      JOBS_PURGE_AFTER: ${JOBS_PURGE_AFTER:-720h}
-      # 작업 탭에서 지시하거나 "지금 실행"을 누르면 그 작업 주인의 에이전트 스케줄러를 바로 깨운다.
-      AGENT_WAKE_URL: http://agent:8080/jobs/wake
-      # 손님 토큰(손님 에이전트, 손님 작업 탭의 게이트웨이)으로는 손님 작업만.
-      API_GUEST_TOKEN: ${JARVIS_GUEST_API_TOKEN:-}
-      AGENT_GUEST_WAKE_URL: http://agent-guest:8081/jobs/wake
-    expose:
-      - "8098"
-    ports:
-      - "127.0.0.1:${JARVIS_JOBS_PORT:-8098}:8098"
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8098/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    depends_on:
-      db-migrate:
-        condition: service_completed_successfully
-    networks:
-      - default
-      - data
-    restart: unless-stopped
-
-  # 대화. 무엇을 말했는지만 여기 있다.
-  #
-  # 캘린더와 같은 경계다. 에이전트에 남은 것은 실행 중인 프로세스의 것들이다:
-  # 라이브 SSE 스트림, "지금 턴이 진행 중인가" 플래그, 그리고 몰고 있는 Claude
-  # Code 세션. 셋 다 재시작을 넘겨 살아남지 않는 것이 의도다 - 방금 시작한
-  # 프로세스는 턴 중간에 있지 않다 - 그래서 데이터베이스에 있을 이유가 없다.
-  #
-  # 제안 저장소는 옮기지 않았다. 그건 승인 게이트의 다른 반쪽이고, 결정이 날
-  # 때까지 반환하지 않는 핸들러와 한 몸이다.
-  chat:
-    build: ./chat-svc
-    environment:
-      TZ: ${TZ:-Asia/Seoul}
-      LISTEN_ADDR: ":8094"
-      DATABASE_URL: >-
-        postgres://svc_chat:${JARVIS_DB_PASSWORD_CHAT:?scripts/db-roles 를 먼저 실행하세요}@postgres:5432/${JARVIS_POSTGRES_DB:-jarvis}?sslmode=disable
-      API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
-      # 손님 agent 의 토큰: 손님 쪽(손님 대화·손님 기억·손님 알림)만 연다.
-      API_GUEST_TOKEN: ${JARVIS_GUEST_API_TOKEN:-}
-    expose:
-      - "8094"
-    ports:
-      - "127.0.0.1:${JARVIS_CHAT_PORT:-8094}:8094"
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8094/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    depends_on:
-      db-migrate:
-        condition: service_completed_successfully
-    networks:
-      - default
-      - data
     restart: unless-stopped
 
   # 캘린더. 일정의 저장만 여기 있다.
@@ -851,8 +624,6 @@ services:
       SPENDING_URL: http://mind:8102/api/spending
       ASSETS_URL: http://assets:8092
       CALENDAR_URL: http://calendar:8093
-      CHAT_URL: http://chat:8094
-      WORKOUT_URL: http://workout:8091
       AGENT_URL: http://agent:8080
       MIND_URL: http://mind:8102
       MEMORY_URL: http://memory:8100
@@ -991,6 +762,8 @@ services:
       API_TOKEN: ${JARVIS_API_TOKEN:?JARVIS_API_TOKEN 을 .env 에 설정하세요}
       API_GUEST_TOKEN: ${JARVIS_GUEST_API_TOKEN:-}
       INPUT_RAW_RETAIN_DAYS: ${INPUT_RAW_RETAIN_DAYS:-90}
+      # 대화 턴의 글은 기록에 봉인해서 둔다. mind 가 봉인을 푸는 키와 같다.
+      MESSAGE_KEY: ${MIND_CONTENT_KEY:?MIND_CONTENT_KEY 를 .env 에 설정하세요}
     expose:
       - "8101"
     ports:
@@ -1031,7 +804,6 @@ services:
       MIND_UI_URL: /
       # 구조화 소스(가계부·운동·캘린더·사진)를 규칙으로 발생(occurrence)으로 읽는다. 캘린더의
       # 일정은 세계 모델의 일정이 되고, 일정 시간·장소 안의 결제·사진은 during 으로 이어진다.
-      WORKOUT_URL: http://workout:8091
       # 가계부. 카드사 방의 메시지를 읽어 넣는다. 이름에 "카드"가 없는 결제 알림 채널(예: 카카오뱅크)은
       # 쉼표로 더한다. 카카오페이 같은 간편결제는 기본으로 빼 두었다 - 카드로 충전·결제되면 카드 알림과
       # 두 번 잡힌다.
@@ -1054,12 +826,6 @@ services:
       MIND_WEB_SEARCH: ${MIND_WEB_SEARCH:-2}
       # 장기 기억: 확인한 사실을 memory-svc(/facts)로 보내고 해석할 때 꺼내 읽는다.
       MIND_MEMORY_URL: http://memory:8100
-      # 운영자와 jarvis 의 대화도 대화방 하나로 읽는다.
-      CHAT_URL: http://chat:8094
-      MIND_CHAT_POLL: 60s
-      # 처음 뜰 때 지난 대화를 얼마나 읽나. memory-svc 가 5분마다 이미 읽어 왔으니
-      # 겹치는 만큼 같은 일정이 카드로 다시 올라오지 않게 짧게.
-      MIND_BACKFILL: ${MIND_BACKFILL:-1h}
       # 스킬·관문의 알림(아침 브리핑, 일정 전 확인)은 효과로 output-svc 에, 질문은
       # mind.card 로 에이전트에. 카드는 이 한 길로만 나간다.
       MIND_QUIET: ${MIND_QUIET:-false}
@@ -1090,7 +856,7 @@ services:
     profiles: ["cloudflare"]
     command: tunnel --no-autoupdate --metrics 127.0.0.1:20241 run --token ${CLOUDFLARE_TUNNEL_TOKEN:-}
     # 공개 ingress 는 두지 않는다. Workers VPC 서비스(edge/)가 이 터널을 통해
-    # agent·workout 등에 이름으로 닿는다 - 서비스들은 이 네트워크 안에만 있다.
+    # agent·input 등에 이름으로 닿는다 - 서비스들은 이 네트워크 안에만 있다.
     depends_on:
       - agent
     healthcheck:

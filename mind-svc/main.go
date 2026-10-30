@@ -337,11 +337,11 @@ func main() {
 			messages = &sensor.Messages{Store: st, Log: logOut, Seal: sealer, Exclude: cfg.Noise,
 				Payments: regexp.MustCompile(getenv("MIND_PAYMENT_ROOMS", `^(카카오페이|토스)$`)), Occur: m, Cards: cards.Take}
 		}
-		// Structured sources, read by rule into occurrences: the book, workouts,
-		// photos, jobs. The calendar (whose entries also become plans), the
-		// phones and the accounts come to the lane below as records.
+		// Structured sources, read by rule into occurrences: the book and jobs.
+		// The calendar (whose entries also become plans), the phones, the
+		// accounts, photos and workouts come to the lane below as records.
 		structured = &sensor.Structured{Store: st, Observer: m, World: m.World, Token: token, Loc: loc, Out: log, Now: time.Now,
-			Book: bookAPI.Month, WorkoutURL: os.Getenv("WORKOUT_URL"), JobsURL: os.Getenv("JOBS_URL"),
+			Book: bookAPI.Month, JobsURL: os.Getenv("JOBS_URL"),
 			Outflows: func(ctx context.Context, payload []byte) error {
 				return spendingassets.Take(ctx, ledgerDB, time.Local, log, payload)
 			}}
@@ -352,11 +352,6 @@ func main() {
 			structured.Records = h
 		}
 		go structured.Run(ctx, duration("MIND_STRUCTURED_POLL", 2*time.Minute))
-		if url := os.Getenv("CHAT_URL"); url != "" {
-			s := &sensor.Chat{URL: url, Token: token, Store: st, Log: logOut,
-				Backfill: duration("MIND_BACKFILL", 6*time.Hour), Every: duration("MIND_CHAT_POLL", 20*time.Second), Out: log}
-			go s.Run(ctx)
-		}
 	}
 	if stream != nil {
 		take := func(ctx context.Context, msg queue.Message) error {
@@ -385,11 +380,14 @@ func main() {
 			return nil
 		}
 		adapters := func(ctx context.Context, msg queue.Message) error {
-			if msg.Kind != sensor.KindMessage {
+			if msg.Kind != sensor.KindMessage && msg.Kind != sensor.KindTurn {
 				return structured.Take(ctx, msg)
 			}
 			if messages == nil {
 				return fmt.Errorf("%w: 봉인을 열 키가 없습니다", queue.ErrOutage)
+			}
+			if msg.Kind == sensor.KindTurn {
+				return messages.TakeTurn(ctx, msg)
 			}
 			return messages.Take(ctx, msg)
 		}

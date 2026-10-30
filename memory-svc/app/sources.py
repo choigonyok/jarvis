@@ -31,7 +31,7 @@ CHAT_GROUPS = [g.strip() for g in os.environ.get("MEMORY_CHAT_GROUPS", "owner,gu
 EXCLUDE_ROOMS = re.compile(os.environ.get("MEMORY_EXCLUDE_ROOMS", r"카드|은행|뱅크|페이|증권|알림|광고|쿠폰|배송|택배|채널"))
 
 URL = {
-    "chat": os.environ.get("CHAT_URL", "http://chat:8094"),
+    "chat": os.environ.get("CHAT_URL", "http://input:8101"),
     "kakao": os.environ.get("KAKAOTALK_URL", "http://kakaotalk:8090"),
     "imessage": os.environ.get("IMESSAGE_URL", "http://imessage:8099"),
     "calendar": os.environ.get("CALENDAR_URL", "http://calendar:8093"),
@@ -82,7 +82,7 @@ async def chat(ctx: Ctx):
         source = f"chat:{group}"
         cur = await ctx.state.cursor(source)
         after = cur.get("after", "")
-        # Compared as times, not strings: chat-svc's format has changed
+        # Compared as times, not strings: the turns' format has changed
         # ("+09" → "+09:00", then microseconds), and a string comparison
         # across formats reads the same moment as newer or older.
         after_at = datetime.fromisoformat(after) if after else None

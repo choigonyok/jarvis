@@ -21,38 +21,16 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/choigonyok/jarvis/workout-svc/internal/book"
-	"github.com/choigonyok/jarvis/workout-svc/internal/muscle"
+	"github.com/choigonyok/jarvis/input-svc/internal/workout/book"
+	"github.com/choigonyok/jarvis/input-svc/internal/workout/muscle"
 )
 
 type Store struct {
 	pool *pgxpool.Pool
 }
 
-func Open(ctx context.Context, dsn string) (*Store, error) {
-	cfg, err := pgxpool.ParseConfig(dsn)
-	if err != nil {
-		return nil, fmt.Errorf("DSN 해석: %w", err)
-	}
-	// 개인용 서비스에 커넥션이 많을 이유가 없다. 기본값(코어 수)은 이 규모에서
-	// 그냥 유휴 커넥션을 늘릴 뿐이다.
-	cfg.MaxConns = 4
-	cfg.MaxConnIdleTime = 5 * time.Minute
-
-	pool, err := pgxpool.NewWithConfig(ctx, cfg)
-	if err != nil {
-		return nil, fmt.Errorf("풀 생성: %w", err)
-	}
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
-		return nil, fmt.Errorf("연결 확인: %w", err)
-	}
-	return &Store{pool: pool}, nil
-}
-
-func (s *Store) Close() { s.pool.Close() }
-
-func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
+// New is a store on pool.
+func New(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
 // ── 읽기 ────────────────────────────────────────────────────────────────
 
@@ -67,7 +45,7 @@ func (s *Store) Load(ctx context.Context) (book.Book, error) {
 	}
 	// 기록에 적힌 부위가 표보다 우선이다 - 그때 그렇게 셌다.
 	out.Groups = muscle.Table()
-	grows, err := s.pool.Query(ctx, `select distinct on (name) name, muscle_group from workout_exercises
+	grows, err := s.pool.Query(ctx, `select distinct on (name) name, muscle_group from input.workout_exercises
 		where muscle_group is not null order by name, id desc`)
 	if err != nil {
 		return out, fmt.Errorf("부위 조회: %w", err)
@@ -85,7 +63,7 @@ func (s *Store) Load(ctx context.Context) (book.Book, error) {
 	rows, err := s.pool.Query(ctx, `
 		select id, on_date, coalesce(routine_id,''), coalesce(routine_name,''),
 		       started_at, ended_at, coalesce(note,''), body_weight
-		  from workout_sessions
+		  from input.workout_sessions
 		 order by started_at`)
 	if err != nil {
 		return out, fmt.Errorf("세션 조회: %w", err)
@@ -122,7 +100,7 @@ func (s *Store) Load(ctx context.Context) (book.Book, error) {
 
 	exRows, err := s.pool.Query(ctx, `
 		select e.id, e.session_id, coalesce(e.client_id,''), e.name, coalesce(e.note,'')
-		  from workout_exercises e
+		  from input.workout_exercises e
 		 order by e.session_id, e.ord`)
 	if err != nil {
 		return out, fmt.Errorf("종목 조회: %w", err)
@@ -159,7 +137,7 @@ func (s *Store) Load(ctx context.Context) (book.Book, error) {
 
 	setRows, err := s.pool.Query(ctx, `
 		select exercise_id, weight, reps, done, warmup
-		  from workout_sets
+		  from input.workout_sets
 		 order by exercise_id, ord`)
 	if err != nil {
 		return out, fmt.Errorf("세트 조회: %w", err)
@@ -196,7 +174,7 @@ func (s *Store) Load(ctx context.Context) (book.Book, error) {
 
 func (s *Store) loadRoutines(ctx context.Context, out *book.Book) error {
 	rows, err := s.pool.Query(ctx,
-		`select id, name, exercises from routines order by sort_order, name`)
+		`select id, name, exercises from input.routines order by sort_order, name`)
 	if err != nil {
 		return fmt.Errorf("루틴 조회: %w", err)
 	}
@@ -228,31 +206,17 @@ func (s *Store) loadRestTarget(ctx context.Context, out *book.Book) error {
 
 // ── 쓰기 ────────────────────────────────────────────────────────────────
 
-// Save replaces the book. The client sends the whole thing on every change
-// (debounced), so this has to be cheap for the common case: one session -
-// the one being trained right now - differs and the other few hundred do not.
-//
-// The content hash on each session row is what makes that cheap. Sessions
-// whose exercises hash the same are left completely alone; only the session
-// row's own columns are upserted, which is a handful of writes instead of
-// thousands.
-// ErrConflict means the book changed since the revision the caller named.
-var ErrConflict = errors.New("revision conflict")
-
 const revisionSQL = `select coalesce((select (value->>'n')::bigint from settings
 	where scope = 'workout' and key = 'revision'), 0)`
 
-// bump serialises writers and moves the revision on. expect < 0 skips the check.
-func bump(ctx context.Context, tx pgx.Tx, expect int64) (int64, error) {
+// bump serialises writers and moves the revision on.
+func bump(ctx context.Context, tx pgx.Tx) (int64, error) {
 	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtext('workout.book'))`); err != nil {
 		return 0, fmt.Errorf("잠금: %w", err)
 	}
 	var cur int64
 	if err := tx.QueryRow(ctx, revisionSQL).Scan(&cur); err != nil {
 		return 0, fmt.Errorf("리비전 조회: %w", err)
-	}
-	if expect >= 0 && expect != cur {
-		return cur, ErrConflict
 	}
 	if _, err := tx.Exec(ctx,
 		`select set_setting('workout', 'revision', jsonb_build_object('n', $1::bigint))`, cur+1); err != nil {
@@ -261,65 +225,14 @@ func bump(ctx context.Context, tx pgx.Tx, expect int64) (int64, error) {
 	return cur + 1, nil
 }
 
-func (s *Store) Save(ctx context.Context, b book.Book, expect int64) (int64, error) {
-	book.Normalize(&b)
-
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("트랜잭션 시작: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck // 커밋 후에는 무해하다
-
-	rev, err := bump(ctx, tx, expect)
-	if err != nil {
-		return rev, err
-	}
-
-	stored, err := storedHashes(ctx, tx)
-	if err != nil {
-		return 0, err
-	}
-
-	// 루틴이 세션보다 먼저다. 세션의 routine_id 는 존재하는 루틴만 참조하도록
-	// 서브쿼리로 걸러지므로, 순서가 뒤집히면 같은 요청에 함께 온 새 루틴을
-	// 가리키는 세션이 조용히 routine_id = NULL 로 저장된다.
-	if err := saveRoutines(ctx, tx, b.Routines); err != nil {
-		return 0, err
-	}
-
-	sent := make(map[string]struct{}, len(b.Sessions))
-	for _, session := range b.Sessions {
-		sent[session.ID] = struct{}{}
-		if err := saveSession(ctx, tx, session, stored[session.ID]); err != nil {
-			return 0, err
-		}
-	}
-
-	// 전체 교체에서 보내지 않은 세션은 지워진 것이다. 리비전 확인을 통과했으니
-	// 그사이 다른 사람이 더한 세션이 아니다.
-	for id := range stored {
-		if _, ok := sent[id]; ok {
-			continue
-		}
-		if err := deleteSession(ctx, tx, id); err != nil {
-			return 0, err
-		}
-	}
-
-	if err := saveRestTarget(ctx, tx, b.RestTarget); err != nil {
-		return 0, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return 0, fmt.Errorf("커밋: %w", err)
-	}
-	return rev, nil
-}
-
 // Apply writes only what changed. No revision check: sessions are written by
 // id, so two writers touching different sessions cannot lose each other's work.
-func (s *Store) Apply(ctx context.Context, c book.Changes) (int64, error) {
+// after runs in the same transaction, with the revision and what was written:
+// the record of a change and the change land together.
+func (s *Store) Apply(ctx context.Context, c book.Changes, after func(context.Context, pgx.Tx, int64, book.Changes) error) (int64, error) {
 	b := book.Book{Sessions: c.Sessions, Routines: c.Routines}
 	book.Normalize(&b)
+	c.Sessions = b.Sessions
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -327,7 +240,7 @@ func (s *Store) Apply(ctx context.Context, c book.Changes) (int64, error) {
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // 커밋 후에는 무해하다
 
-	rev, err := bump(ctx, tx, -1)
+	rev, err := bump(ctx, tx)
 	if err != nil {
 		return 0, err
 	}
@@ -351,6 +264,11 @@ func (s *Store) Apply(ctx context.Context, c book.Changes) (int64, error) {
 	if err := saveRestTarget(ctx, tx, c.RestTarget); err != nil {
 		return 0, err
 	}
+	if after != nil {
+		if err := after(ctx, tx, rev, c); err != nil {
+			return 0, err
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return 0, fmt.Errorf("커밋: %w", err)
 	}
@@ -359,7 +277,7 @@ func (s *Store) Apply(ctx context.Context, c book.Changes) (int64, error) {
 
 func storedHashes(ctx context.Context, tx pgx.Tx) (map[string]string, error) {
 	stored := map[string]string{}
-	rows, err := tx.Query(ctx, `select id, coalesce(content_hash,'') from workout_sessions`)
+	rows, err := tx.Query(ctx, `select id, coalesce(content_hash,'') from input.workout_sessions`)
 	if err != nil {
 		return nil, fmt.Errorf("해시 조회: %w", err)
 	}
@@ -378,7 +296,7 @@ func storedHashes(ctx context.Context, tx pgx.Tx) (map[string]string, error) {
 }
 
 func deleteSession(ctx context.Context, tx pgx.Tx, id string) error {
-	if _, err := tx.Exec(ctx, `delete from workout_sessions where id = $1`, id); err != nil {
+	if _, err := tx.Exec(ctx, `delete from input.workout_sessions where id = $1`, id); err != nil {
 		return fmt.Errorf("세션 삭제(%s): %w", id, err)
 	}
 	return nil
@@ -407,11 +325,11 @@ func saveSession(ctx context.Context, tx pgx.Tx, s book.Session, storedHash stri
 	// 루틴 id 는 FK 다. 루틴이 지워졌는데 세션이 이름만 들고 있는 경우가
 	// 정상이므로, 존재하지 않는 id 는 NULL 로 떨어뜨린다 - 이름은 남는다.
 	if _, err := tx.Exec(ctx, `
-		insert into workout_sessions
+		insert into input.workout_sessions
 		  (id, on_date, routine_id, routine_name, started_at, ended_at, note,
 		   body_weight, content_hash, updated_at)
 		values ($1, $2::date,
-		        (select id from routines where id = nullif($3,'')),
+		        (select id from input.routines where id = nullif($3,'')),
 		        nullif($4,''), $5, $6, nullif($7,''), $8, $9, now())
 		on conflict (id) do update set
 		  on_date      = excluded.on_date,
@@ -438,14 +356,14 @@ func saveSession(ctx context.Context, tx pgx.Tx, s book.Session, storedHash stri
 	// 전부 diff 하는 것보다, 세션 하나 분량(보통 6종목 × 4세트)을 다시 쓰는
 	// 편이 짧고 틀릴 데가 없다.
 	if _, err := tx.Exec(ctx,
-		`delete from workout_exercises where session_id = $1`, s.ID); err != nil {
+		`delete from input.workout_exercises where session_id = $1`, s.ID); err != nil {
 		return fmt.Errorf("종목 정리(%s): %w", s.ID, err)
 	}
 
 	for i, e := range s.Exercises {
 		var exerciseID int64
 		if err := tx.QueryRow(ctx, `
-			insert into workout_exercises
+			insert into input.workout_exercises
 			  (session_id, ord, name, muscle_group, note, client_id)
 			values ($1, $2, $3, $4, nullif($5,''), nullif($6,''))
 			returning id`,
@@ -456,7 +374,7 @@ func saveSession(ctx context.Context, tx pgx.Tx, s book.Session, storedHash stri
 
 		for j, set := range e.Sets {
 			if _, err := tx.Exec(ctx, `
-				insert into workout_sets (exercise_id, ord, weight, reps, done, warmup)
+				insert into input.workout_sets (exercise_id, ord, weight, reps, done, warmup)
 				values ($1, $2, $3, $4, $5, $6)`,
 				exerciseID, j, set.Weight, set.Reps, set.Done, set.Warmup); err != nil {
 				return fmt.Errorf("세트 저장(%s/%s/%d): %w", s.ID, e.Name, j, err)
@@ -479,7 +397,7 @@ func saveRoutines(ctx context.Context, tx pgx.Tx, routines []book.Routine) error
 	keep := make([]string, 0, len(routines))
 	for i, r := range routines {
 		if _, err := tx.Exec(ctx, `
-			insert into routines (id, name, exercises, sort_order, updated_at)
+			insert into input.routines (id, name, exercises, sort_order, updated_at)
 			values ($1, $2, $3, $4, now())
 			on conflict (id) do update set
 			  name       = excluded.name,
@@ -495,7 +413,7 @@ func saveRoutines(ctx context.Context, tx pgx.Tx, routines []book.Routine) error
 	// 지워진 루틴. 세션의 routine_id 는 on delete set null 이라 기록은 남고
 	// routine_name 으로 무엇이었는지 알 수 있다.
 	if _, err := tx.Exec(ctx,
-		`delete from routines where id <> all($1::text[])`, keep); err != nil {
+		`delete from input.routines where id <> all($1::text[])`, keep); err != nil {
 		return fmt.Errorf("루틴 정리: %w", err)
 	}
 	return nil

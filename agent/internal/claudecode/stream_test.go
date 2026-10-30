@@ -53,7 +53,7 @@ func streamingClaude(t *testing.T, dir string) string {
 	return path
 }
 
-// fakeTurns stands in for chat-svc: an empty transcript, and a turn posted
+// fakeTurns stands in for input-svc: an empty transcript, and a turn posted
 // comes back with an id.
 func fakeTurns() http.Handler {
 	n := 0
