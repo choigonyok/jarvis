@@ -20,24 +20,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/choigonyok/jarvis/agent/internal/core/module"
+	"github.com/choigonyok/jarvis/agent/internal/tool"
 )
 
 var _ module.ContextSource = (*Module)(nil)
 
-const (
-	Name       = "spending"
-	ServerName = "spending"
-)
-
-func QualifiedToolName(tool string) string {
-	return fmt.Sprintf("mcp__%s__%s", ServerName, tool)
-}
-
-// Tools is every tool this server has; all of them read.
-var Tools = []string{QualifiedToolName("get_spending")}
+// Name is the module.
+const Name = "spending"
 
 // --- wire shape (mind GET /api/spending/spending) ---------------------------
 
@@ -192,20 +182,17 @@ type MonthInput struct {
 	Category string `json:"category,omitempty" jsonschema:"이 분류의 내역만 나열한다(예: 식비). 비우면 전체에서 최근 순."`
 }
 
-func (m *Module) Handler() http.Handler {
-	server := mcp.NewServer(&mcp.Implementation{Name: ServerName, Version: "1"}, nil)
-	mcp.AddTool(server, &mcp.Tool{
-		Name: "get_spending",
-		Description: "가계부(카드 결제 알림으로 모은 지출)를 조회한다: 월 총액, 지난달 같은 날까지와 비교, 예산 대비 속도, " +
-			"분류별 합계, 많이 쓴 곳, 정기 결제, 건별 내역(날짜·사용처·금액·분류). 읽기 전용.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in MonthInput) (*mcp.CallToolResult, any, error) {
-		b, err := m.store.Month(ctx, in.Month)
-		if err != nil {
-			return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}}}, nil, nil
-		}
-		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: render(b, in.Category)}}}, b, nil
-	})
-	return mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
+// Look puts the book on the board.
+func (m *Module) Look(b *tool.Board) {
+	tool.Add(b, "spending", "가계부(카드 결제 알림으로 모은 지출): 월 총액, 지난달 같은 날까지와 비교, 예산 대비 속도, "+
+		"분류별 합계, 많이 쓴 곳, 정기 결제, 건별 내역(날짜·사용처·금액·분류).",
+		func(ctx context.Context, in MonthInput) (string, error) {
+			book, err := m.store.Month(ctx, in.Month)
+			if err != nil {
+				return "", err
+			}
+			return render(book, in.Category), nil
+		})
 }
 
 // --- rendering ------------------------------------------------------------

@@ -4,7 +4,7 @@
 //
 // A list said as a paragraph of bullets is read once and gone; a card keeps
 // what was ticked, and so does mind, so the next time the list is shown -
-// asked for, or at a reminder's moment (set_reminder with the list) - and
+// asked for, or at a reminder's moment (a reminder with the list) - and
 // whatever asks what is left sees the same. None of it takes an approval
 // card: it changes the operator's own list, and they asked for it.
 package checklist
@@ -21,23 +21,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/choigonyok/jarvis/agent/internal/core/bus"
 	"github.com/choigonyok/jarvis/agent/internal/thread"
+	"github.com/choigonyok/jarvis/agent/internal/tool"
 )
 
-const (
-	Name       = "checklist"
-	ServerName = "checklist"
-)
-
-// Tools is every tool this server has; none needs a card.
-var Tools = []string{
-	"mcp__" + ServerName + "__make_checklist", "mcp__" + ServerName + "__show_checklist",
-	"mcp__" + ServerName + "__change_checklist", "mcp__" + ServerName + "__list_checklists",
-	"mcp__" + ServerName + "__close_checklist",
-}
+// Name is the module.
+const Name = "checklist"
 
 // Item is one line of a list, as mind keeps it.
 type Item struct {
@@ -235,7 +225,7 @@ type MakeInput struct {
 }
 
 type ShowInput struct {
-	ID   string `json:"id" jsonschema:"체크리스트 id(chk_…). 지금 상황의 '체크리스트'나 list_checklists 에 있다"`
+	ID   string `json:"id" jsonschema:"체크리스트 id(chk_…). 지금 상황의 '체크리스트'나 look 의 checklists 에 있다"`
 	Lead string `json:"lead,omitempty" jsonschema:"카드 위에 붙일 한 줄(선택). 예: '내일 출발이라 남은 것만 확인해 보세요'"`
 }
 
@@ -258,72 +248,9 @@ type CloseInput struct {
 	ID string `json:"id" jsonschema:"닫을 체크리스트 id(chk_…)"`
 }
 
-func (m *Module) Handler() http.Handler {
-	server := mcp.NewServer(&mcp.Implementation{Name: ServerName, Version: "1"}, nil)
-	mcp.AddTool(server, &mcp.Tool{
-		Name: "make_checklist",
-		Description: "체크리스트를 만든다 - 준비물, 할 일처럼 하나씩 챙기고 지워 갈 것. 목록과 체크 상태는 mind 가 갖고, 대화에 체크할 수 있는 카드로 띄운다(show 기본 true). " +
-			"목록을 글로 늘어놓는 대신 이것을 쓴다. 같은 topic 의 열린 목록이 있으면 그 목록에 더한다. " +
-			"특정한 날을 위한 목록이면 date 를 넣는다 - mind 가 전날 저녁 집에서 남은 것만 다시 띄우고 날이 지나면 닫는다. " +
-			"그 밖의 때(집에 도착할 때, 나갈 때) 다시 띄우려면 set_reminder 의 checklist 에 이 id 를 넣는다. 안 끝난 목록은 작업 탭에도 보인다.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in MakeInput) (*mcp.CallToolResult, any, error) {
-		var out struct {
-			Checklist List `json:"checklist"`
-		}
-		if err := m.do(ctx, http.MethodPost, "/api/checklists", map[string]any{"title": in.Title, "items": in.Items, "note": in.Note, "topic": in.Topic, "date": in.Date, "source": "chat"}, &out); err != nil {
-			return failed("만들지 못했습니다", err), nil, nil
-		}
-		l := out.Checklist
-		said := "만들었습니다: " + l.Line + "\n항목: " + items(l)
-		if in.Show == nil || *in.Show {
-			m.lay(l, in.Lead, "") // and the screens hear of it
-			said += "\n대화에 체크할 수 있는 카드로 띄웠습니다. 항목을 글로 다시 늘어놓지 마세요."
-		} else {
-			m.publish(l)
-		}
-		return toolText(said, false), nil, nil
-	})
-	mcp.AddTool(server, &mcp.Tool{
-		Name: "show_checklist",
-		Description: "이미 있는 체크리스트를 지금 대화에 카드로 띄운다(체크한 상태 그대로). 운영자가 그 목록을 보자고 하거나 지금 그 목록이 필요할 때(짐 쌀 때, 집에 왔을 때, 무엇이 남았냐고 물을 때) " +
-			"말로 늘어놓지 말고 이것을 쓴다.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ShowInput) (*mcp.CallToolResult, any, error) {
-		l, err := m.Show(ctx, in.ID, in.Lead)
-		if err != nil {
-			return failed("띄우지 못했습니다", err), nil, nil
-		}
-		return toolText("대화에 카드로 띄웠습니다: "+l.Line+"\n항목을 글로 다시 늘어놓지 마세요.", false), nil, nil
-	})
-	mcp.AddTool(server, &mcp.Tool{
-		Name: "change_checklist",
-		Description: "체크리스트를 고친다: 항목 더하기·빼기, 운영자가 했다고 말한 항목 체크, 체크 풀기, 이름 바꾸기. 대화에 떠 있는 카드도 바로 바뀐다. " +
-			"운영자가 말하지 않은 항목을 체크하지 않는다.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ChangeInput) (*mcp.CallToolResult, any, error) {
-		body := map[string]any{"by": "chat"}
-		if strings.TrimSpace(in.Title) != "" {
-			body["title"] = in.Title
-		}
-		if strings.TrimSpace(in.Note) != "" {
-			body["note"] = in.Note
-		}
-		if strings.TrimSpace(in.Date) != "" {
-			body["date"] = in.Date
-		}
-		for k, v := range map[string][]string{"add": in.Add, "remove": in.Remove, "check": in.Check, "uncheck": in.Uncheck} {
-			if len(v) > 0 {
-				body[k] = v
-			}
-		}
-		l, err := m.one(ctx, http.MethodPatch, "/api/checklists/"+url.PathEscape(in.ID), body)
-		if err != nil {
-			return failed("고치지 못했습니다", err), nil, nil
-		}
-		return toolText("고쳤습니다: "+l.Line, false), nil, nil
-	})
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "list_checklists",
-		Description: "체크리스트들과 항목·체크 상태. 읽기만 한다.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ListInput) (*mcp.CallToolResult, any, error) {
+// Look puts the lists on the board.
+func (m *Module) Look(b *tool.Board) {
+	tool.Add(b, "checklists", "체크리스트들과 항목·체크 상태.", func(ctx context.Context, in ListInput) (string, error) {
 		path := "/api/checklists"
 		if in.All {
 			path += "?all=1"
@@ -332,28 +259,83 @@ func (m *Module) Handler() http.Handler {
 			Checklists []List `json:"checklists"`
 		}
 		if err := m.do(ctx, http.MethodGet, path, nil, &out); err != nil {
-			return toolText(err.Error(), true), nil, nil
+			return "", err
 		}
 		if len(out.Checklists) == 0 {
-			return toolText("체크리스트가 없습니다.", false), nil, nil
+			return "체크리스트가 없습니다.", nil
 		}
-		var b strings.Builder
+		var s strings.Builder
 		for _, l := range out.Checklists {
-			b.WriteString(l.Line + "\n  " + items(l) + "\n")
+			s.WriteString(l.Line + "\n  " + items(l) + "\n")
 		}
-		return toolText(strings.TrimRight(b.String(), "\n"), false), nil, nil
+		return strings.TrimRight(s.String(), "\n"), nil
 	})
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "close_checklist",
-		Description: "다 쓴 체크리스트를 닫는다. 지금 상황에 더 나오지 않고, 2주 동안은 list_checklists(all) 로 볼 수 있다.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in CloseInput) (*mcp.CallToolResult, any, error) {
-		l, err := m.one(ctx, http.MethodDelete, "/api/checklists/"+url.PathEscape(in.ID), nil)
-		if err != nil {
-			return failed("닫지 못했습니다", err), nil, nil
-		}
-		return toolText("닫았습니다: "+l.Line, false), nil, nil
-	})
-	return mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
+}
+
+// Change puts making, showing, changing and closing one on the board.
+func (m *Module) Change(b *tool.Board) {
+	tool.Add(b, "checklist.make", "체크리스트를 만든다 - 준비물, 할 일처럼 하나씩 챙기고 지워 갈 것. 목록과 체크 상태는 mind 가 갖고, 대화에 체크할 수 있는 카드로 띄운다(show 기본 true). "+
+		"목록을 글로 늘어놓는 대신 이것을 쓴다. 같은 topic 의 열린 목록이 있으면 그 목록에 더한다. "+
+		"특정한 날을 위한 목록이면 date 를 넣는다 - mind 가 전날 저녁 집에서 남은 것만 다시 띄우고 날이 지나면 닫는다. "+
+		"그 밖의 때(집에 도착할 때, 나갈 때) 다시 띄우려면 reminder.set 의 checklist 에 이 id 를 넣는다. 안 끝난 목록은 작업 탭에도 보인다.",
+		func(ctx context.Context, in MakeInput) (string, error) {
+			var out struct {
+				Checklist List `json:"checklist"`
+			}
+			if err := m.do(ctx, http.MethodPost, "/api/checklists", map[string]any{"title": in.Title, "items": in.Items, "note": in.Note, "topic": in.Topic, "date": in.Date, "source": "chat"}, &out); err != nil {
+				return "", failed("만들지 못했습니다", err)
+			}
+			l := out.Checklist
+			said := "만들었습니다: " + l.Line + "\n항목: " + items(l)
+			if in.Show == nil || *in.Show {
+				m.lay(l, in.Lead, "") // and the screens hear of it
+				said += "\n대화에 체크할 수 있는 카드로 띄웠습니다. 항목을 글로 다시 늘어놓지 마세요."
+			} else {
+				m.publish(l)
+			}
+			return said, nil
+		})
+	tool.Add(b, "checklist.show", "이미 있는 체크리스트를 지금 대화에 카드로 띄운다(체크한 상태 그대로). 운영자가 그 목록을 보자고 하거나 지금 그 목록이 필요할 때(짐 쌀 때, 집에 왔을 때, 무엇이 남았냐고 물을 때) "+
+		"말로 늘어놓지 말고 이것을 쓴다.",
+		func(ctx context.Context, in ShowInput) (string, error) {
+			l, err := m.Show(ctx, in.ID, in.Lead)
+			if err != nil {
+				return "", failed("띄우지 못했습니다", err)
+			}
+			return "대화에 카드로 띄웠습니다: " + l.Line + "\n항목을 글로 다시 늘어놓지 마세요.", nil
+		})
+	tool.Add(b, "checklist.change", "체크리스트를 고친다: 항목 더하기·빼기, 운영자가 했다고 말한 항목 체크, 체크 풀기, 이름 바꾸기. 대화에 떠 있는 카드도 바로 바뀐다. "+
+		"운영자가 말하지 않은 항목을 체크하지 않는다.",
+		func(ctx context.Context, in ChangeInput) (string, error) {
+			body := map[string]any{"by": "chat"}
+			if strings.TrimSpace(in.Title) != "" {
+				body["title"] = in.Title
+			}
+			if strings.TrimSpace(in.Note) != "" {
+				body["note"] = in.Note
+			}
+			if strings.TrimSpace(in.Date) != "" {
+				body["date"] = in.Date
+			}
+			for k, v := range map[string][]string{"add": in.Add, "remove": in.Remove, "check": in.Check, "uncheck": in.Uncheck} {
+				if len(v) > 0 {
+					body[k] = v
+				}
+			}
+			l, err := m.one(ctx, http.MethodPatch, "/api/checklists/"+url.PathEscape(in.ID), body)
+			if err != nil {
+				return "", failed("고치지 못했습니다", err)
+			}
+			return "고쳤습니다: " + l.Line, nil
+		})
+	tool.Add(b, "checklist.close", "다 쓴 체크리스트를 닫는다. 지금 상황에 더 나오지 않고, 2주 동안은 look 의 checklists(all) 로 볼 수 있다.",
+		func(ctx context.Context, in CloseInput) (string, error) {
+			l, err := m.one(ctx, http.MethodDelete, "/api/checklists/"+url.PathEscape(in.ID), nil)
+			if err != nil {
+				return "", failed("닫지 못했습니다", err)
+			}
+			return "닫았습니다: " + l.Line, nil
+		})
 }
 
 // items is a list's items with their ids and checks: "i1 장갑 ✓, i2 베개".
@@ -371,10 +353,6 @@ func items(l List) string {
 
 // failed is a change that did not happen, said so the conversation does not
 // tell the operator it did.
-func failed(what string, err error) *mcp.CallToolResult {
-	return toolText(what+": "+err.Error()+"\n바뀐 것이 없습니다. 운영자에게 됐다고 말하지 마세요.", true)
-}
-
-func toolText(text string, isErr bool) *mcp.CallToolResult {
-	return &mcp.CallToolResult{IsError: isErr, Content: []mcp.Content{&mcp.TextContent{Text: text}}}
+func failed(what string, err error) error {
+	return fmt.Errorf("%s: %w\n바뀐 것이 없습니다. 운영자에게 됐다고 말하지 마세요.", what, err)
 }

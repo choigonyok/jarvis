@@ -47,6 +47,7 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/policy"
 	"github.com/choigonyok/jarvis/agent/internal/suggest"
 	"github.com/choigonyok/jarvis/agent/internal/thread"
+	"github.com/choigonyok/jarvis/agent/internal/tool"
 	"github.com/choigonyok/jarvis/agent/internal/uploads"
 	"github.com/choigonyok/jarvis/agent/internal/usage"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -112,9 +113,14 @@ func main() {
 	// --- 모듈 -------------------------------------------------------------
 	// Adding a feature is one Add call. Removing one is deleting the line -
 	// nothing below this block names a specific module.
+	// Reading and leaving what changes are two tools, whatever there is to read
+	// or change: each module puts its rows on the boards.
+	look := tool.New(tool.Look, "지금 값을 읽는다. 읽기만 하고 카드가 없다. 숫자는 받은 값을 그대로 쓴다.")
+	change := tool.New(tool.Change, "리마인드와 체크리스트를 남기고 고친다. 카드가 없다. 돌려준 말이 저장된 내용이다.")
 	calendarStore := calendar.NewStore(cfg.CalendarURL, cfg.APIToken, events)
 	calendarModule := calendar.New(calendarStore)
 	modules.Add(calendarModule)
+	calendarModule.Look(look)
 
 	gate := permission.NewGate(proposals, modules, transcript, cfg.Debug, log)
 	mcpMounts := map[string]http.Handler{
@@ -142,17 +148,12 @@ func main() {
 		modules.Add(assetsModule)
 		spendingModule = spending.New(spending.NewStore(cfg.MindURL, cfg.APIToken, commands))
 		modules.Add(spendingModule)
+		assetsModule.Look(look)
+		spendingModule.Look(look)
 
-		mcpMounts["/mcp/"+assets.ServerName] = assetsModule.Handler()
-		mcpMounts["/mcp/"+spending.ServerName] = spendingModule.Handler()
-		// A module's lookups skip the card whatever JARVIS_ALLOWED_TOOLS says.
-		cfg.Allow(assets.Tools...)
-		cfg.Allow(spending.Tools...)
 		// Mounted but never put in the chat's MCP config: only the
 		// background order lookup is handed this server.
 		mcpMounts["/mcp/"+spending.EnrichServerName] = spendingModule.EnrichHandler()
-		cfg.ModuleMCPURLs[assets.ServerName] = cfg.PublicMCPURL + "/" + assets.ServerName
-		cfg.ModuleMCPURLs[spending.ServerName] = cfg.PublicMCPURL + "/" + spending.ServerName
 
 		// 로그인 정보 보관함. 저장은 카드(비밀번호 칸 - 값은 모델을 거치지 않는다),
 		// 쓰는 것은 브라우저의 browser_fill_login.
@@ -161,7 +162,7 @@ func main() {
 			modules.Add(vaultModule)
 			mcpMounts["/mcp/"+vault.ServerName] = vaultModule.Handler()
 			cfg.ModuleMCPURLs[vault.ServerName] = cfg.PublicMCPURL + "/" + vault.ServerName
-			cfg.Allow(vault.Tools...)
+			vaultModule.Look(look)
 		}
 
 	}
@@ -177,7 +178,6 @@ func main() {
 		jobsModule = jobs.New(jobs.NewStore(cfg.MindURL+jobs.Prefix, cfg.APIToken).Via(commands), jobPhotos, proposals, transcript, log)
 		if cfg.Guest {
 			jobsModule.NoBrowser()
-			cfg.Allow(jobs.QualifiedToolName("list_jobs"))
 		}
 		modules.Add(jobsModule)
 		// A run that buys reads the saved shipping address and raises the
@@ -189,7 +189,7 @@ func main() {
 		if !cfg.Guest {
 			jobsModule.SetCharges(chargeLog{store: spending.NewStore(cfg.MindURL, cfg.APIToken, commands)})
 		}
-		cfg.Allow(jobs.QualifiedToolName("get_job"))
+		jobsModule.Look(look)
 		mcpMounts["/mcp/"+jobs.ServerName] = jobsModule.Handler()
 		// Background only: /mcp/job-run/<run id>, never in the chat's config.
 		mcpMounts["/mcp/job-run"] = jobsModule.RunHandler()
@@ -202,9 +202,7 @@ func main() {
 		memoryModule = memory.New(memory.NewStore(cfg.MemoryURL, cfg.APIToken,
 			map[bool]string{true: "guest", false: "owner"}[cfg.Guest]))
 		modules.Add(memoryModule)
-		mcpMounts["/mcp/"+memory.ServerName] = memoryModule.Handler()
-		cfg.ModuleMCPURLs[memory.ServerName] = cfg.PublicMCPURL + "/" + memory.ServerName
-		cfg.Allow(memory.Tools...)
+		memoryModule.Look(look)
 	}
 
 	// 웹 찾기: 네이버 검색, 페이지 읽기(그림 속 글자까지), 네이버 지도. 찾고 읽는 것은
@@ -240,9 +238,7 @@ func main() {
 			placeModule.UseNaver(webModule.Client())
 		}
 		modules.Add(placeModule)
-		mcpMounts["/mcp/"+place.ServerName] = placeModule.Handler()
-		cfg.ModuleMCPURLs[place.ServerName] = cfg.PublicMCPURL + "/" + place.ServerName
-		cfg.Allow(place.Tools...)
+		placeModule.Look(look)
 	}
 
 	// mind-svc's gate: its cards become approval cards here, and approving
@@ -265,24 +261,30 @@ func main() {
 		// mind keeps them: for what long-term memory did not take as a fact.
 		messagesModule := messages.New(cfg.MindURL, cfg.APIToken)
 		modules.Add(messagesModule)
-		mcpMounts["/mcp/"+messages.ServerName] = messagesModule.Handler()
-		cfg.ModuleMCPURLs[messages.ServerName] = cfg.PublicMCPURL + "/" + messages.ServerName
-		cfg.Allow(messages.Tools...)
+		messagesModule.Look(look)
 	}
 	if cfg.MindURL != "" {
 		// 리마인드: "몇 시에 / 집에 가면 / 나갈 때 알려줘". mind 가 그때 폰으로 알린다.
 		remindModule := remind.New(cfg.MindURL, cfg.APIToken, commands)
 		modules.Add(remindModule)
-		mcpMounts["/mcp/"+remind.ServerName] = remindModule.Handler()
-		cfg.ModuleMCPURLs[remind.ServerName] = cfg.PublicMCPURL + "/" + remind.ServerName
-		cfg.Allow(remind.Tools...)
+		remindModule.Look(look)
+		remindModule.Change(change)
 
 		// 체크리스트: 준비물·할 일. mind 가 체크 상태를 갖고, 대화에는 체크할 수 있는 카드로.
 		checklistModule = checklist.New(cfg.MindURL, cfg.APIToken, commands, transcript, events, log)
 		modules.Add(checklistModule)
-		mcpMounts["/mcp/"+checklist.ServerName] = checklistModule.Handler()
-		cfg.ModuleMCPURLs[checklist.ServerName] = cfg.PublicMCPURL + "/" + checklist.ServerName
-		cfg.Allow(checklist.Tools...)
+		checklistModule.Look(look)
+		checklistModule.Change(change)
+	}
+	for name, board := range map[string]*tool.Board{tool.Look: look, tool.Change: change} {
+		mcpMounts["/mcp/"+name] = board.Handler()
+		cfg.ModuleMCPURLs[name] = cfg.PublicMCPURL + "/" + name
+		cfg.Allow(tool.Qualified(name))
+	}
+	if !cfg.Guest {
+		// What each feature asks is in the workspace's skills; reading one
+		// changes nothing.
+		cfg.Allow("Skill")
 	}
 
 	startCtx, cancelStart := context.WithTimeout(context.Background(), 10*time.Second)

@@ -42,6 +42,9 @@ next-env.d.ts
 
 # Agent workspace contents (keep the directory)
 /workspace/*
+!/workspace/.claude/
+/workspace/.claude/*
+!/workspace/.claude/skills/
 !/workspace/.gitkeep
 
 # 로컬 개발용 모듈 데이터(JARVIS_CALENDAR_PATH 기본값). 도커에서는 named volume.

@@ -17,24 +17,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/choigonyok/jarvis/agent/internal/core/module"
+	"github.com/choigonyok/jarvis/agent/internal/tool"
 )
 
 var _ module.ContextSource = (*Module)(nil)
 
-const (
-	Name       = "memory"
-	ServerName = "memory"
-)
-
-func QualifiedToolName(tool string) string {
-	return fmt.Sprintf("mcp__%s__%s", ServerName, tool)
-}
-
-// Tools is every tool this server has; all of them read.
-var Tools = []string{QualifiedToolName("search_memory")}
+// Name is the module.
+const Name = "memory"
 
 // Fact is one edge of the graph as memory-svc returns it.
 type Fact struct {
@@ -118,7 +108,7 @@ func (m *Module) Recall(ctx context.Context, text string) string {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("[기억에서 찾은 관련 사실 - 참고용. 지금 메시지와 관계없으면 무시하고, 더 필요하면 search_memory 로 찾으세요]\n")
+	b.WriteString("[기억에서 찾은 관련 사실 - 참고용. 지금 메시지와 관계없으면 무시하고, 더 필요하면 look 의 memory 로 찾으세요]\n")
 	for _, f := range facts {
 		b.WriteString("- " + f.Text + "\n")
 	}
@@ -130,26 +120,23 @@ type SearchInput struct {
 	Limit int    `json:"limit,omitempty" jsonschema:"최대 개수(1-30). 비우면 10."`
 }
 
-func (m *Module) Handler() http.Handler {
-	server := mcp.NewServer(&mcp.Implementation{Name: ServerName, Version: "1"}, nil)
-	mcp.AddTool(server, &mcp.Tool{
-		Name: "search_memory",
-		Description: "jarvis 의 장기 기억(지식 그래프)을 검색한다. 지난 대화, 카카오톡·iMessage 대화, 일정, 지출, 자산 보유·입출금, " +
-			"운동, 작업, 사진(날짜·장소)에서 뽑은 사실을 언제부터/언제까지 유효했는지와 함께 돌려준다. " +
-			"'전에 말했던', '지난번', 누군가와의 약속·관계·취향처럼 지금 화면에 없는 과거 맥락이 필요할 때 쓴다. " +
-			"현재 잔액·이번 달 지출처럼 지금 값은 각 서비스 도구가 더 정확하다.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in SearchInput) (*mcp.CallToolResult, any, error) {
-		limit := in.Limit
-		if limit <= 0 {
-			limit = 10
-		}
-		facts, err := m.store.Search(ctx, in.Query, min(limit, 30))
-		if err != nil {
-			return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}}}, nil, nil
-		}
-		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: render(facts)}}}, nil, nil
-	})
-	return mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
+// Look puts long-term memory on the board.
+func (m *Module) Look(b *tool.Board) {
+	tool.Add(b, "memory", "jarvis 의 장기 기억(지식 그래프)을 검색한다. 지난 대화, 카카오톡·iMessage 대화, 일정, 지출, 자산 보유·입출금, "+
+		"운동, 작업, 사진(날짜·장소)에서 뽑은 사실을 언제부터/언제까지 유효했는지와 함께 돌려준다. "+
+		"'전에 말했던', '지난번', 누군가와의 약속·관계·취향처럼 지금 화면에 없는 과거 맥락이 필요할 때 쓴다. "+
+		"현재 잔액·이번 달 지출처럼 지금 값은 portfolio·spending 이 더 정확하다.",
+		func(ctx context.Context, in SearchInput) (string, error) {
+			limit := in.Limit
+			if limit <= 0 {
+				limit = 10
+			}
+			facts, err := m.store.Search(ctx, in.Query, min(limit, 30))
+			if err != nil {
+				return "", err
+			}
+			return render(facts), nil
+		})
 }
 
 func render(facts []Fact) string {

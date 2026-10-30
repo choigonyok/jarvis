@@ -878,7 +878,7 @@ func outMessage(m model.Message, text string) messageOut {
 
 // searchMessages answers with a short stretch of each match around the
 // first word found: enough to pick one, little enough to keep the
-// conversation's context small. message_context shows the rest.
+// conversation's context small. The message_context row shows the rest.
 func (s *Server) searchMessages(w http.ResponseWriter, r *http.Request) {
 	in := r.URL.Query()
 	q := store.MessageQuery{Terms: strings.Fields(in.Get("q")), Room: in.Get("room"), Limit: bounded(in.Get("limit"), 10, 1, 20), Scan: messageScan}

@@ -24,7 +24,7 @@
 주문자·배송지(받는 분·연락처·이메일·우편번호·주소·상세주소)도 카드로 받아 봉인해 둔다(vault_profiles, 074):
   → 자비스가 save_shipping_address(대화) 또는 request_shipping_address(작업) → 승인 카드(칸 여섯, 값은 카드 기록에 안 남음)
   → PUT /profiles/기본 - 주소는 도로명과 건물번호까지가 아니면 거절한다(주문서의 주소 검색이 그것으로 찾는다)
-  → 주문서를 채울 때 get_shipping_address / shipping_address 가 GET /profiles 로 통째로 읽는다
+  → 주문서를 채울 때 `look` 의 shipping_address 와 작업의 shipping_address 가 GET /profiles 로 통째로 읽는다
     (비밀번호와 달리 모델이 읽는다 - 주문서에 치려면 알아야 한다. 그래도 개인정보라 봉인)
 ```
 

@@ -18,7 +18,7 @@
 // The orderer and shipping address (save_shipping_address) are typed into
 // the card the same way - not into the conversation, and not kept in the
 // card's record - but they are no secret from the model: an order sheet is
-// typed from them, so get_shipping_address reads them back whole. Saved once,
+// typed from them, so shipping_address reads them back whole. Saved once,
 // an order no longer asks for them (2026-10-29~30: six cards asked, and the
 // answers that came back put a wrong phone number and a wrong building
 // number on four order sheets).
@@ -36,6 +36,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/choigonyok/jarvis/agent/internal/core/action"
+	"github.com/choigonyok/jarvis/agent/internal/tool"
 	"github.com/choigonyok/jarvis/gocommon/site"
 )
 
@@ -155,11 +156,6 @@ func (m *Module) pinSaved(ctx context.Context, site string) (Pin, bool) {
 	}
 	return Pin{}, false
 }
-
-// Tools is what the conversation may call without a card: list_logins names
-// what is saved and never hands a secret out; get_shipping_address reads the
-// address an order sheet is filled with.
-var Tools = []string{"mcp__" + ServerName + "__list_logins", "mcp__" + ServerName + "__get_shipping_address"}
 
 type Module struct {
 	client *Client
@@ -381,7 +377,7 @@ func (m *Module) Execute(ctx context.Context, a action.Action) (action.Result, e
 		}
 		for _, s := range all {
 			if s.Name == name {
-				return action.Result{Note: fmt.Sprintf("배송지(%s)를 저장했습니다: %s %s. 주문서는 get_shipping_address 의 값을 그대로 넣습니다.", name, s.Address, s.Detail)}, nil
+				return action.Result{Note: fmt.Sprintf("배송지(%s)를 저장했습니다: %s %s. 주문서는 look 의 shipping_address 값을 그대로 넣습니다.", name, s.Address, s.Detail)}, nil
 			}
 		}
 		return action.Result{}, fmt.Errorf("배송지(%s)가 보관함에 없습니다", name)
@@ -432,52 +428,53 @@ func (m *Module) Execute(ctx context.Context, a action.Action) (action.Result, e
 	return action.Result{}, fmt.Errorf("모르는 동작: %s", a.Kind)
 }
 
-// Handler is the model's side: list what is saved, and ask to save or forget
-// (each a card - see Preview).
+// Look puts what is saved on the board: what names it, never a secret, and the
+// address an order sheet is filled with.
+func (m *Module) Look(b *tool.Board) {
+	tool.Add(b, "logins", "보관함에 저장된 로그인 정보의 사이트 목록(아이디는 일부만)과 저장된 결제 비밀번호(네이버페이·쿠페이)를 본다. 비밀번호는 볼 수 없다.",
+		func(ctx context.Context, _ struct{}) (string, error) {
+			logins, err := m.client.List(ctx)
+			if err != nil {
+				return "", err
+			}
+			pins, _ := m.client.Pins(ctx)
+			profiles, _ := m.client.Profiles(ctx)
+			if len(logins) == 0 && len(pins) == 0 && len(profiles) == 0 {
+				return "저장된 로그인 정보도 결제 비밀번호도 배송지도 없습니다.", nil
+			}
+			var s strings.Builder
+			for _, l := range logins {
+				fmt.Fprintf(&s, "- %s (%s): 아이디 %s, %s\n", l.Name, l.Domain, l.Hint, lastUsed(l.LastUsedAt))
+			}
+			for _, p := range pins {
+				fmt.Fprintf(&s, "- 결제 비밀번호 %s (%s): 저장됨, %s\n", p.Name, p.Site, lastUsed(p.LastUsedAt))
+			}
+			for _, a := range profiles {
+				fmt.Fprintf(&s, "- 배송지 %s: %s %s (값은 shipping_address)\n", a.Name, a.Address, a.Detail)
+			}
+			return s.String(), nil
+		})
+	tool.Add(b, "shipping_address", "주문서를 채울 주문자·받는 분·연락처·이메일·배송지를 보관함에서 읽는다. 주문서에는 이 값을 그대로 넣는다(주소 검색은 도로명+건물번호로 하고 우편번호가 같은 결과를 고른다). "+
+		"저장된 배송지가 없으면 save_shipping_address 로 카드를 올린다 - 대화로 주소를 묻지 않는다.",
+		func(ctx context.Context, _ struct{}) (string, error) {
+			s, ok, err := m.Shipping(ctx)
+			if err != nil {
+				return "", err
+			}
+			if !ok {
+				return "저장된 배송지가 없습니다. save_shipping_address 로 배송지 저장 카드를 올리세요(운영자가 카드 칸에 넣습니다).", nil
+			}
+			if why := m.AddressDoubt(ctx, s); why != "" {
+				return "⚠ 확인 필요: " + why + ". 이 주소로 주문서를 채우기 전에 save_shipping_address 로 운영자에게 확인 카드를 올리세요.\n저장된 배송지(" + s.Name + "):\n" + ShippingText(s), nil
+			}
+			return "저장된 배송지(" + s.Name + "):\n" + ShippingText(s), nil
+		})
+}
+
+// Handler is the model's side of changing what is saved: each asks for a card
+// (see Preview).
 func (m *Module) Handler() http.Handler {
 	server := mcp.NewServer(&mcp.Implementation{Name: ServerName, Version: "1"}, nil)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "list_logins",
-		Description: "보관함에 저장된 로그인 정보의 사이트 목록(아이디는 일부만)과 저장된 결제 비밀번호(네이버페이·쿠페이)를 본다. 비밀번호는 볼 수 없다.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
-		logins, err := m.client.List(ctx)
-		if err != nil {
-			return text(err.Error(), true), nil, nil
-		}
-		pins, _ := m.client.Pins(ctx)
-		profiles, _ := m.client.Profiles(ctx)
-		if len(logins) == 0 && len(pins) == 0 && len(profiles) == 0 {
-			return text("저장된 로그인 정보도 결제 비밀번호도 배송지도 없습니다.", false), nil, nil
-		}
-		var b strings.Builder
-		for _, l := range logins {
-			fmt.Fprintf(&b, "- %s (%s): 아이디 %s, %s\n", l.Name, l.Domain, l.Hint, lastUsed(l.LastUsedAt))
-		}
-		for _, p := range pins {
-			fmt.Fprintf(&b, "- 결제 비밀번호 %s (%s): 저장됨, %s\n", p.Name, p.Site, lastUsed(p.LastUsedAt))
-		}
-		for _, s := range profiles {
-			fmt.Fprintf(&b, "- 배송지 %s: %s %s (값은 get_shipping_address)\n", s.Name, s.Address, s.Detail)
-		}
-		return text(b.String(), false), nil, nil
-	})
-	mcp.AddTool(server, &mcp.Tool{
-		Name: "get_shipping_address",
-		Description: "주문서를 채울 주문자·받는 분·연락처·이메일·배송지를 보관함에서 읽는다. 주문서에는 이 값을 그대로 넣는다(주소 검색은 도로명+건물번호로 하고 우편번호가 같은 결과를 고른다). " +
-			"저장된 배송지가 없으면 save_shipping_address 로 카드를 올린다 - 대화로 주소를 묻지 않는다.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
-		s, ok, err := m.Shipping(ctx)
-		if err != nil {
-			return text(err.Error(), true), nil, nil
-		}
-		if !ok {
-			return text("저장된 배송지가 없습니다. save_shipping_address 로 배송지 저장 카드를 올리세요(운영자가 카드 칸에 넣습니다).", false), nil, nil
-		}
-		if why := m.AddressDoubt(ctx, s); why != "" {
-			return text("⚠ 확인 필요: "+why+". 이 주소로 주문서를 채우기 전에 save_shipping_address 로 운영자에게 확인 카드를 올리세요.\n저장된 배송지("+s.Name+"):\n"+ShippingText(s), false), nil, nil
-		}
-		return text("저장된 배송지("+s.Name+"):\n"+ShippingText(s), false), nil, nil
-	})
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "save_shipping_address",
 		Description: "주문자·배송지(받는 분·연락처·이메일·우편번호·주소·상세주소)를 저장하도록 운영자에게 카드를 올린다. 운영자가 카드 칸에 넣는다 - 대화로 묻지 않는다. " +

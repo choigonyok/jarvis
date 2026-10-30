@@ -2,12 +2,11 @@ package assets
 
 import (
 	"context"
+	"github.com/choigonyok/jarvis/agent/internal/tool"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // A response in the shape assets-svc sends, nulls included: a venue with no
@@ -97,60 +96,25 @@ func fakeAssets(t *testing.T, token string) *Store {
 	return NewStore(server.URL, token)
 }
 
-func connect(t *testing.T, m *Module) *mcp.ClientSession {
+func connect(t *testing.T, m *Module) *tool.Board {
 	t.Helper()
-	server := httptest.NewServer(m.Handler())
-	t.Cleanup(server.Close)
-	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil)
-	session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{Endpoint: server.URL}, nil)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	t.Cleanup(func() { _ = session.Close() })
-	return session
+	b := tool.New(tool.Look, "")
+	m.Look(b)
+	return b
 }
 
-func call(t *testing.T, s *mcp.ClientSession, tool string, args map[string]any) (string, bool) {
+func call(t *testing.T, b *tool.Board, name string, args map[string]any) (string, bool) {
 	t.Helper()
-	res, err := s.CallTool(context.Background(), &mcp.CallToolParams{Name: tool, Arguments: args})
+	out, err := b.Do(context.Background(), name, args)
 	if err != nil {
-		t.Fatalf("%s: %v", tool, err)
+		return err.Error(), true
 	}
-	var out strings.Builder
-	for _, c := range res.Content {
-		if tc, ok := c.(*mcp.TextContent); ok {
-			out.WriteString(tc.Text)
-		}
-	}
-	return out.String(), res.IsError
-}
-
-// The server has exactly the tools the pre-allowed list names, and no more.
-// A write tool added here without a card would skip the gate entirely,
-// because every name in Tools is on the auto-allow list.
-func TestToolsAreExactlyTheReadOnlyList(t *testing.T) {
-	s := connect(t, New(fakeAssets(t, "tok")))
-	res, err := s.ListTools(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("ListTools: %v", err)
-	}
-	got := map[string]bool{}
-	for _, tool := range res.Tools {
-		got[QualifiedToolName(tool.Name)] = true
-	}
-	if len(got) != len(Tools) {
-		t.Fatalf("도구 %d개, 목록 %d개: %v", len(got), len(Tools), got)
-	}
-	for _, name := range Tools {
-		if !got[name] {
-			t.Errorf("%s 가 서버에 없습니다", name)
-		}
-	}
+	return out, false
 }
 
 func TestPortfolioReadsWithNulls(t *testing.T) {
 	s := connect(t, New(fakeAssets(t, "tok")))
-	text, isErr := call(t, s, "get_portfolio", nil)
+	text, isErr := call(t, s, "portfolio", nil)
 	if isErr {
 		t.Fatalf("도구 오류: %s", text)
 	}
@@ -181,7 +145,7 @@ func TestPortfolioReadsWithNulls(t *testing.T) {
 
 func TestAllocationNamesTransfers(t *testing.T) {
 	s := connect(t, New(fakeAssets(t, "tok")))
-	text, isErr := call(t, s, "get_allocation", nil)
+	text, isErr := call(t, s, "allocation", nil)
 	if isErr {
 		t.Fatalf("도구 오류: %s", text)
 	}
@@ -198,7 +162,7 @@ func TestAllocationNamesTransfers(t *testing.T) {
 
 func TestHistory(t *testing.T) {
 	s := connect(t, New(fakeAssets(t, "tok")))
-	text, isErr := call(t, s, "get_history", map[string]any{"days": 30})
+	text, isErr := call(t, s, "asset_history", map[string]any{"days": 30})
 	if isErr {
 		t.Fatalf("도구 오류: %s", text)
 	}
@@ -211,11 +175,11 @@ func TestHistory(t *testing.T) {
 // service's own sentence, so it says why rather than inventing a number.
 func TestServiceErrorIsAToolError(t *testing.T) {
 	s := connect(t, New(fakeAssets(t, "right").withToken("wrong")))
-	text, isErr := call(t, s, "get_portfolio", nil)
+	text, isErr := call(t, s, "portfolio", nil)
 	if !isErr || !strings.Contains(text, "인증이 필요합니다") {
 		t.Fatalf("isErr=%v text=%q", isErr, text)
 	}
-	text, isErr = call(t, s, "get_allocation", nil)
+	text, isErr = call(t, s, "allocation", nil)
 	if !isErr {
 		t.Fatalf("비중 조회 실패가 오류로 가지 않았습니다: %q", text)
 	}

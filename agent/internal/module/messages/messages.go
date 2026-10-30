@@ -3,9 +3,9 @@
 //
 // Long-term memory holds what mind's interpreter took from them: facts of a
 // few kinds (plans, people, tastes). Anything else - what a word someone used
-// means, who said exactly what - is only in the text. Two tools, so a
-// question costs little context: search_messages answers with a short
-// stretch of each match, message_context with the few messages around one.
+// means, who said exactly what - is only in the text. Two rows, so a question
+// costs little context: messages answers with a short stretch of each match,
+// message_context with the few messages around one.
 //
 // Read only, and the operator's only: the guest agent is built without it.
 package messages
@@ -19,16 +19,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/choigonyok/jarvis/agent/internal/tool"
 )
 
-const (
-	Name       = "messages"
-	ServerName = "messages"
-)
-
-// Tools is every tool this server has; both read.
-var Tools = []string{"mcp__" + ServerName + "__search_messages", "mcp__" + ServerName + "__message_context"}
+// Name is the module.
+const Name = "messages"
 
 // Message is one message as mind-svc's /messages routes return it.
 type Message struct {
@@ -91,44 +86,39 @@ type SearchInput struct {
 }
 
 type ContextInput struct {
-	ID     string `json:"id" jsonschema:"search_messages 가 준 메시지 id"`
+	ID     string `json:"id" jsonschema:"messages 가 준 메시지 id"`
 	Before int    `json:"before,omitempty" jsonschema:"앞 메시지 수(0-20). 비우면 5."`
 	After  int    `json:"after,omitempty" jsonschema:"뒤 메시지 수(0-20). 비우면 5."`
 }
 
-func (m *Module) Handler() http.Handler {
-	server := mcp.NewServer(&mcp.Implementation{Name: ServerName, Version: "1"}, nil)
-	mcp.AddTool(server, &mcp.Tool{
-		Name: "search_messages",
-		Description: "카카오톡·iMessage·이 대화의 메시지 원문을 낱말로 찾는다(최신 먼저, 최대 10개, 메시지마다 찾은 낱말 둘레만). " +
-			"search_memory 로 못 찾았을 때만 쓴다: 어떤 말의 뜻, 누가 정확히 뭐라고 했는지처럼 기억에 사실로 남지 않은 것. " +
-			"고른 메시지의 앞뒤는 message_context 로 본다.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in SearchInput) (*mcp.CallToolResult, any, error) {
-		q := url.Values{"q": {in.Query}, "limit": {"10"}}
-		if in.Room != "" {
-			q.Set("room", in.Room)
-		}
-		if in.Since != "" {
-			q.Set("since", in.Since)
-		}
-		ms, err := m.get(ctx, "/messages/search", q)
-		if err != nil {
-			return toolText(err.Error(), true), nil, nil
-		}
-		return toolText(renderSearch(ms), false), nil, nil
-	})
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "message_context",
-		Description: "search_messages 로 찾은 메시지 하나와 같은 대화방의 앞뒤 메시지를 시간순으로 본다. 필요한 만큼만(기본 앞뒤 5개).",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ContextInput) (*mcp.CallToolResult, any, error) {
-		q := url.Values{"ref": {in.ID}, "before": {count(in.Before)}, "after": {count(in.After)}}
-		ms, err := m.get(ctx, "/messages/context", q)
-		if err != nil {
-			return toolText(err.Error(), true), nil, nil
-		}
-		return toolText(renderContext(ms, in.ID), false), nil, nil
-	})
-	return mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
+// Look puts the messages on the board.
+func (m *Module) Look(b *tool.Board) {
+	tool.Add(b, "messages", "카카오톡·iMessage·이 대화의 메시지 원문을 낱말로 찾는다(최신 먼저, 최대 10개, 메시지마다 찾은 낱말 둘레만). "+
+		"memory 로 못 찾았을 때만 쓴다: 어떤 말의 뜻, 누가 정확히 뭐라고 했는지처럼 기억에 사실로 남지 않은 것. "+
+		"고른 메시지의 앞뒤는 message_context 로 본다.",
+		func(ctx context.Context, in SearchInput) (string, error) {
+			q := url.Values{"q": {in.Query}, "limit": {"10"}}
+			if in.Room != "" {
+				q.Set("room", in.Room)
+			}
+			if in.Since != "" {
+				q.Set("since", in.Since)
+			}
+			ms, err := m.get(ctx, "/messages/search", q)
+			if err != nil {
+				return "", err
+			}
+			return renderSearch(ms), nil
+		})
+	tool.Add(b, "message_context", "messages 로 찾은 메시지 하나와 같은 대화방의 앞뒤 메시지를 시간순으로 본다. 필요한 만큼만(기본 앞뒤 5개).",
+		func(ctx context.Context, in ContextInput) (string, error) {
+			q := url.Values{"ref": {in.ID}, "before": {count(in.Before)}, "after": {count(in.After)}}
+			ms, err := m.get(ctx, "/messages/context", q)
+			if err != nil {
+				return "", err
+			}
+			return renderContext(ms, in.ID), nil
+		})
 }
 
 // count is a before/after the model gave, 5 when it gave none.
@@ -188,8 +178,4 @@ func who(m Message) string {
 		return m.Sender
 	}
 	return "상대"
-}
-
-func toolText(s string, isErr bool) *mcp.CallToolResult {
-	return &mcp.CallToolResult{IsError: isErr, Content: []mcp.Content{&mcp.TextContent{Text: s}}}
 }

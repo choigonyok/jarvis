@@ -80,7 +80,7 @@ type CreateInput struct {
 }
 
 type UpdateInput struct {
-	ID      string `json:"id" jsonschema:"수정할 일정의 id. list_events 로 먼저 확인한다. 반복 일정의 하루(id 에 #)는 수정할 수 없다."`
+	ID      string `json:"id" jsonschema:"수정할 일정의 id. look 의 calendar 로 먼저 확인한다. 반복 일정의 하루(id 에 #)는 수정할 수 없다."`
 	EndDate string `json:"endDate,omitempty" jsonschema:"바꿀 마지막 날. YYYY-MM-DD."`
 	Date    string `json:"date,omitempty" jsonschema:"바꿀 날짜. YYYY-MM-DD."`
 	Title   string `json:"title,omitempty" jsonschema:"바꿀 제목."`

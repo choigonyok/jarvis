@@ -2,7 +2,7 @@
 
 자비스가 웹에서 찾고 읽는 곳입니다. 네이버 검색(NAVER API HUB), 페이지 읽기와 그 안의 **그림 속 글자**,
 네이버 지도(플레이스)의 근처 목록. 대화·손님 대화·작업이 같은 도구(agent 의 `web` 모듈 `search`·`read`,
-`place` 모듈 `find_nearby`)로 씁니다.
+`place` 모듈 `nearby`)로 씁니다.
 
 ## 왜
 
@@ -12,7 +12,7 @@
   블로그·카페·뉴스가 빠집니다.
 - WebFetch 는 페이지의 글을 작은 모델로 요약할 뿐 그림을 보지 않습니다. 한국 페이지는 사실을 그림에 둡니다 - 이벤트
   보상 카드, 높이 2만 픽셀짜리 상품 상세 이미지, 포스터.
-- 근처 찾기(find_nearby)는 OpenStreetMap 이라 빠진 가게가 많고 지금 영업하는지 모릅니다.
+- 근처 찾기(`look` 의 nearby)는 OpenStreetMap 이라 빠진 가게가 많고 지금 영업하는지 모릅니다.
 - 작업(jobs)에는 내장 검색이 아예 없어서, 찾아보기만 하는 일도 브라우저로 사이트를 하나씩 열었습니다.
 
 운영 중 실제로 놓친 질문으로 시험한 결과입니다(맥북 로컬, 실제 키).
@@ -26,7 +26,7 @@
 ## 구조
 
 ```
-agent ─ web 모듈(search · read), place 모듈(find_nearby) ── JARVIS_SEARCH_TOKEN
+agent ─ web 모듈(search · read), place 모듈(nearby) ── JARVIS_SEARCH_TOKEN
    │
    ▼  search 네트워크(search-svc 와 agent·agent-guest 만)
 search-svc :8104
@@ -125,7 +125,7 @@ scripts/mini compose up -d --build search agent agent-guest
 scripts/mini exec search wget -qO- http://127.0.0.1:8104/health   # {"configured":true,"naver":true,"ocr":true,...}
 ```
 
-토큰이 비어 있으면 agent 는 예전대로입니다(WebFetch, find_nearby 는 OpenStreetMap). 키만 비어 있으면 네이버 검색만 꺼지고
+토큰이 비어 있으면 agent 는 예전대로입니다(WebFetch, 근처 찾기는 OpenStreetMap). 키만 비어 있으면 네이버 검색만 꺼지고
 읽기·장소는 됩니다. HUB 는 월 77만 5천 회(검색 범주 합계), 키당 초당 50회이고 지금은 한시적으로 무료입니다.
 
 ## 측정 (2026-10-26, 맥북 로컬 · 실제 키)

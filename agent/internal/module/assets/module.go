@@ -269,7 +269,7 @@ func renderHistory(rows []Snapshot) string {
 	}
 	first, last := rows[0], rows[len(rows)-1]
 	// No percentage: a deposit would read as a return, and the model would
-	// repeat it as one. The rate belongs to get_portfolio.
+	// repeat it as one. The rate belongs to the portfolio.
 	if len(rows) > 1 {
 		fmt.Fprintf(&b, "\n%s → %s: %s. 입출금이 섞인 금액 변화이며 수익이 아닙니다.\n",
 			first.Date, last.Date, signedKrw(last.TotalKrw-first.TotalKrw))

@@ -9,6 +9,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/choigonyok/jarvis/agent/internal/core/action"
+	"github.com/choigonyok/jarvis/agent/internal/tool"
 )
 
 // ServerName is the MCP server the CLI is told to dial for calendar work.
@@ -21,9 +22,13 @@ func QualifiedToolName(tool string) string {
 	return fmt.Sprintf("mcp__%s__%s", ServerName, tool)
 }
 
-// ToolList is the read-only tool the operator can safely pre-allow. Writes
-// are deliberately absent: they belong on a card.
-var ToolList = QualifiedToolName("list_events")
+// Look puts reading the calendar on the board. Writes are deliberately not
+// there: they belong on a card.
+func (m *Module) Look(b *tool.Board) {
+	tool.Add(b, "calendar", "캘린더 일정. 수정·삭제하려면 먼저 이걸로 id 를 확인한다.", func(_ context.Context, in ListInput) (string, error) {
+		return renderList(m.store.Range(in.From, in.To)), nil
+	})
+}
 
 // Handler exposes the calendar to Claude Code over MCP. The write tools here
 // are not gated by this package - by the time one runs, the permission gate
@@ -31,14 +36,6 @@ var ToolList = QualifiedToolName("list_events")
 // This handler's job is only to be the single door to the store.
 func (m *Module) Handler() http.Handler {
 	server := mcp.NewServer(&mcp.Implementation{Name: ServerName, Version: "1"}, nil)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "list_events",
-		Description: "캘린더 일정을 조회한다. 수정·삭제하려면 먼저 이걸로 id를 확인한다.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ListInput) (*mcp.CallToolResult, ListOutput, error) {
-		events := m.store.Range(in.From, in.To)
-		return text(renderList(events)), ListOutput{Events: events}, nil
-	})
 
 	addWrite[CreateInput](server, m, "create_event", KindCreate, "캘린더에 일정을 추가한다.")
 	addWrite[UpdateInput](server, m, "update_event", KindUpdate, "기존 일정을 수정한다. 바꿀 필드만 보낸다.")

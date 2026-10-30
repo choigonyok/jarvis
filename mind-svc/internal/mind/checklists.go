@@ -182,5 +182,5 @@ func (m *Mind) checklistLineOf(ctx context.Context, who string) string {
 		}
 		parts = append(parts, l.Line())
 	}
-	return "- 체크리스트(대화에 카드로 띄우려면 show_checklist, 고칠 때는 이 id 로): " + strings.Join(parts, " / ")
+	return "- 체크리스트(대화에 카드로 띄우려면 change 의 checklist.show, 고칠 때는 이 id 로): " + strings.Join(parts, " / ")
 }

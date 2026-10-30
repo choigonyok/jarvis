@@ -39,6 +39,7 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
 	"github.com/choigonyok/jarvis/agent/internal/module/vault"
 	"github.com/choigonyok/jarvis/agent/internal/thread"
+	"github.com/choigonyok/jarvis/agent/internal/tool"
 	"github.com/choigonyok/jarvis/agent/internal/uploads"
 )
 
@@ -663,7 +664,7 @@ type CreateInput struct {
 }
 
 type InstructInput struct {
-	ID   int64  `json:"id" jsonschema:"작업 id. list_jobs 로 확인한다."`
+	ID   int64  `json:"id" jsonschema:"작업 id. look 의 jobs 로 확인한다."`
 	Text string `json:"text" jsonschema:"작업에 전할 지시. 예: '가격을 6만 원으로 내려줘'"`
 }
 
@@ -675,7 +676,7 @@ func (m *Module) Handler() http.Handler {
 		Name: "create_job",
 		Description: "시간이 걸리거나 나중에 다시 봐야 하는 일, 웹사이트에서 백그라운드로 해야 하는 일을 작업으로 맡긴다. " +
 			"작업은 백그라운드에서 브라우저로 진행되고, 필요하면 스스로 주기적으로 다시 확인하며, 운영자에게 카드로 묻거나 로그인을 요청한다. " +
-			"진행 상황은 작업 탭에서 보인다. 정해진 시각이나 집 도착·출발 때 알려 주기만 하는 일은 작업이 아니라 set_reminder 로 맡긴다(작업은 폰 푸시를 못 보내고 위치를 모른다).",
+			"진행 상황은 작업 탭에서 보인다. 정해진 시각이나 집 도착·출발 때 알려 주기만 하는 일은 작업이 아니라 change 의 reminder.set 으로 맡긴다(작업은 폰 푸시를 못 보내고 위치를 모른다).",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in CreateInput) (*mcp.CallToolResult, any, error) {
 		if m.noBrowser && (len(in.Sites) > 0 || len(in.Photos) > 0) {
 			return toolText("이 계정의 작업은 웹사이트를 열거나 사진을 쓸 수 없습니다(브라우저는 운영자 계정이에요). sites·photos 없이 검색·정리로 되는 일만 맡길 수 있습니다.", true), nil, nil
@@ -698,28 +699,6 @@ func (m *Module) Handler() http.Handler {
 			"운영자에게 물어볼 것이나 알려야 할 다른 사실이 있을 때만 그것을 말하고, 없으면 '맡겼습니다.' 한마디로 끝내세요.", j.ID, j.Title), false), nil, nil
 	})
 	mcp.AddTool(server, &mcp.Tool{
-		Name: "list_jobs",
-		Description: "맡긴 작업들의 현황: 진행 중인 작업마다 상태, 한 줄 요약, 다음 확인 시각, 기다리는 카드. 끝난 작업은 개수와 최근 몇 개만(all=true 면 전부 짧게). " +
-			"작업 하나의 최근 기록까지 보려면 get_job. 읽기만 한다.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ListJobsInput) (*mcp.CallToolResult, any, error) {
-		js, err := m.store.List(ctx)
-		if err != nil {
-			return toolText(err.Error(), true), nil, nil
-		}
-		return toolText(m.renderList(js, in.All), false), nil, nil
-	})
-	mcp.AddTool(server, &mcp.Tool{
-		Name: "get_job",
-		Description: "작업 하나의 자세한 현황: 목표, 지시, 쓰는 사이트, 기다리는 카드, 최근 기록(진행·카드·답·보고). " +
-			"작업이 지금 무엇을 하고 있는지, 결제가 어디까지 갔는지 운영자에게 답하기 전에 본다. 읽기만 한다.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in GetJobInput) (*mcp.CallToolResult, any, error) {
-		d, err := m.store.Detail(ctx, in.ID)
-		if err != nil {
-			return toolText(err.Error(), true), nil, nil
-		}
-		return toolText(m.renderDetail(d), false), nil, nil
-	})
-	mcp.AddTool(server, &mcp.Tool{
 		Name:        "instruct_job",
 		Description: "진행 중인 작업에 지시를 더한다(가격 변경, 중단 조건 등). 작업이 곧 다시 실행되어 반영한다.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in InstructInput) (*mcp.CallToolResult, any, error) {
@@ -732,13 +711,35 @@ func (m *Module) Handler() http.Handler {
 	return mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
 }
 
+// Look puts the jobs on the board.
+func (m *Module) Look(b *tool.Board) {
+	tool.Add(b, "jobs", "맡긴 작업들의 현황: 진행 중인 작업마다 상태, 한 줄 요약, 다음 확인 시각, 기다리는 카드. 끝난 작업은 개수와 최근 몇 개만(all=true 면 전부 짧게). "+
+		"작업 하나의 최근 기록까지 보려면 job.",
+		func(ctx context.Context, in ListJobsInput) (string, error) {
+			js, err := m.store.List(ctx)
+			if err != nil {
+				return "", err
+			}
+			return m.renderList(js, in.All), nil
+		})
+	tool.Add(b, "job", "작업 하나의 자세한 현황: 목표, 지시, 쓰는 사이트, 기다리는 카드, 최근 기록(진행·카드·답·보고). "+
+		"작업이 지금 무엇을 하고 있는지, 결제가 어디까지 갔는지 운영자에게 답하기 전에 본다.",
+		func(ctx context.Context, in GetJobInput) (string, error) {
+			d, err := m.store.Detail(ctx, in.ID)
+			if err != nil {
+				return "", err
+			}
+			return m.renderDetail(d), nil
+		})
+}
+
 // ListJobsInput: all lists the finished jobs too, one short line each.
 type ListJobsInput struct {
 	All bool `json:"all,omitempty" jsonschema:"끝난 작업까지 모두 볼지(짧게). 기본은 진행 중인 것만."`
 }
 
 type GetJobInput struct {
-	ID int64 `json:"id" jsonschema:"작업 id. list_jobs 로 확인한다."`
+	ID int64 `json:"id" jsonschema:"작업 id. look 의 jobs 로 확인한다."`
 }
 
 // "waiting" is waiting on a card - any card, a question as much as a
@@ -818,7 +819,7 @@ func (m *Module) renderList(js []Job, all bool) string {
 		for _, j := range over[:min(3, len(over))] {
 			recent = append(recent, fmt.Sprintf("[%d] %s", j.ID, j.Title))
 		}
-		fmt.Fprintf(&b, "(최근: %s) - 모두 보려면 all=true, 하나를 자세히는 get_job.\n", strings.Join(recent, ", "))
+		fmt.Fprintf(&b, "(최근: %s) - 모두 보려면 all=true, 하나를 자세히는 look 의 job.\n", strings.Join(recent, ", "))
 		return b.String()
 	}
 	b.WriteString("끝난 작업:\n")
@@ -835,10 +836,10 @@ func lastTouched(j Job) time.Time {
 	return j.CreatedAt
 }
 
-// eventsShown is how many of a job's latest log lines get_job shows.
+// eventsShown is how many of a job's latest log lines the job row shows.
 const eventsShown = 15
 
-// renderDetail is one job as get_job tells it: what it is for, what it waits
+// renderDetail is one job as the job row tells it: what it is for, what it waits
 // on, and its latest log, newest last. What it remembers is named, not shown
 // (an order's phone number and address are in it).
 func (m *Module) renderDetail(d Detail) string {

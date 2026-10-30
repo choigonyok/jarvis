@@ -8,7 +8,7 @@
 // and nothing rang at the time (2026-10-20). A reminder has nothing to watch
 // or do on the web, only a moment to wait for.
 //
-// What a tool answers is what mind stored, so the conversation tells the
+// What a row answers is what mind stored, so the conversation tells the
 // operator what will happen - not what it meant to set.
 package remind
 
@@ -22,20 +22,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/choigonyok/jarvis/agent/internal/tool"
 )
 
-const (
-	Name       = "remind"
-	ServerName = "remind"
-)
-
-// Tools is every tool this server has. None needs a card: a reminder only
-// rings the operator's own phone, and they asked for it.
-var Tools = []string{
-	"mcp__" + ServerName + "__set_reminder", "mcp__" + ServerName + "__list_reminders",
-	"mcp__" + ServerName + "__change_reminder", "mcp__" + ServerName + "__cancel_reminder",
-}
+// Name is the module. None of it needs a card: a reminder only rings the
+// operator's own phone, and they asked for it.
+const Name = "remind"
 
 // Reminder is one as mind's /api/reminders answers it.
 type Reminder struct {
@@ -118,7 +110,7 @@ type SetInput struct {
 }
 
 type ChangeInput struct {
-	ID        string   `json:"id" jsonschema:"리마인드 id(rem_…). 지금 상황의 '맡아 둔 알림'이나 list_reminders 에서 확인한다"`
+	ID        string   `json:"id" jsonschema:"리마인드 id(rem_…). 지금 상황의 '맡아 둔 알림'이나 look 의 reminders 에서 확인한다"`
 	Text      string   `json:"text,omitempty" jsonschema:"새 문구. 비우면 그대로"`
 	Body      string   `json:"body,omitempty" jsonschema:"새 맥락 한 줄. 비우면 그대로"`
 	At        string   `json:"at,omitempty" jsonschema:"새 시각(또는 '늦어도') YYYY-MM-DDTHH:MM. 비우면 그대로"`
@@ -138,87 +130,82 @@ type CancelInput struct {
 	ID string `json:"id" jsonschema:"취소할 리마인드 id(rem_…)"`
 }
 
-func (m *Module) Handler() http.Handler {
-	server := mcp.NewServer(&mcp.Implementation{Name: ServerName, Version: "1"}, nil)
-	mcp.AddTool(server, &mcp.Tool{
-		Name: "set_reminder",
-		Description: "운영자가 정해진 때에 알려 달라고 한 것을 그때 폰 푸시로 알리고, 대화에도 안내 카드로 남긴다(방해 금지 시간·운전 중에도 울린다). " +
-			"때는 시각(at), 장소에 도착·출발할 때(place, move), 둘 다(장소를 기다리되 늦어도 at 에)로 정한다. " +
-			"챙길 것·할 일이 여럿이면 make_checklist 로 목록을 만들고 checklist 에 그 id 를 넣는다 - 그때 카드가 목록을 보여 준다. " +
-			"웹을 보거나 무언가를 지켜봐야 하는 일은 이것이 아니라 작업(create_job)이다. 저장된 때와 문구를 돌려준다.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in SetInput) (*mcp.CallToolResult, any, error) {
-		body := map[string]any{"text": in.Text, "source": "chat"}
-		for k, v := range map[string]string{"body": in.Body, "at": in.At, "place": in.Place, "move": in.Move, "after": in.After, "until": in.Until, "checklist": in.Checklist} {
-			if strings.TrimSpace(v) != "" {
-				body[k] = v
+// Look puts the reminders on the board.
+func (m *Module) Look(b *tool.Board) {
+	tool.Add(b, "reminders", "맡아 둔 리마인드(기다리는 것, 가까운 때 먼저). all 이면 최근 3일 안에 보냈거나 취소한 것도.",
+		func(ctx context.Context, in ListInput) (string, error) {
+			path := "/api/reminders"
+			if in.All {
+				path += "?all=1"
 			}
-		}
-		var out struct {
-			Reminder Reminder `json:"reminder"`
-		}
-		if err := m.do(ctx, http.MethodPost, "/api/reminders", body, &out); err != nil {
-			return failed("저장하지 못했습니다", err), nil, nil
-		}
-		return toolText("저장했습니다: "+out.Reminder.Line+"\n"+
-			"그때 폰으로 푸시가 가고 대화에 안내 카드가 남습니다. 운영자에게는 위의 때와 문구를 그대로 말하세요. 운영자가 말하지 않은 시각을 정했으면 그 시각을 밝히세요.", false), nil, nil
-	})
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "list_reminders",
-		Description: "맡아 둔 리마인드(기다리는 것, 가까운 때 먼저). all 이면 최근 3일 안에 보냈거나 취소한 것도. 읽기만 한다.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ListInput) (*mcp.CallToolResult, any, error) {
-		path := "/api/reminders"
-		if in.All {
-			path += "?all=1"
-		}
-		var out struct {
-			Reminders []Reminder `json:"reminders"`
-		}
-		if err := m.do(ctx, http.MethodGet, path, nil, &out); err != nil {
-			return toolText(err.Error(), true), nil, nil
-		}
-		return toolText(renderList(out.Reminders), false), nil, nil
-	})
-	mcp.AddTool(server, &mcp.Tool{
-		Name: "change_reminder",
-		Description: "리마인드의 때나 문구를 고친다. 준 칸만 바뀌고, 이미 보낸 것도 새 때를 다시 기다린다. " +
-			"운영자가 시각·조건을 바꿔 달라고 하면 새로 만들지 말고 이것으로 고친다. 고친 뒤 저장된 때와 문구를 돌려준다.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ChangeInput) (*mcp.CallToolResult, any, error) {
-		body := map[string]any{}
-		for k, v := range map[string]string{"text": in.Text, "body": in.Body, "at": in.At, "place": in.Place, "move": in.Move, "after": in.After, "until": in.Until, "checklist": in.Checklist} {
-			if strings.TrimSpace(v) != "" {
-				body[k] = v
+			var out struct {
+				Reminders []Reminder `json:"reminders"`
 			}
-		}
-		if len(in.Clear) > 0 {
-			body["clear"] = in.Clear
-		}
-		var out struct {
-			Reminder Reminder `json:"reminder"`
-		}
-		if err := m.do(ctx, http.MethodPatch, "/api/reminders/"+in.ID, body, &out); err != nil {
-			return failed("고치지 못했습니다", err), nil, nil
-		}
-		return toolText("고쳤습니다: "+out.Reminder.Line+"\n운영자에게는 위의 바뀐 때와 문구를 그대로 말하세요.", false), nil, nil
-	})
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "cancel_reminder",
-		Description: "기다리는 리마인드를 취소한다. 그때가 와도 알리지 않는다.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in CancelInput) (*mcp.CallToolResult, any, error) {
-		var out struct {
-			Reminder Reminder `json:"reminder"`
-		}
-		if err := m.do(ctx, http.MethodDelete, "/api/reminders/"+in.ID, nil, &out); err != nil {
-			return failed("취소하지 못했습니다", err), nil, nil
-		}
-		return toolText("취소했습니다: "+out.Reminder.Line, false), nil, nil
-	})
-	return mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
+			if err := m.do(ctx, http.MethodGet, path, nil, &out); err != nil {
+				return "", err
+			}
+			return renderList(out.Reminders), nil
+		})
+}
+
+// Change puts setting, changing and cancelling one on the board.
+func (m *Module) Change(b *tool.Board) {
+	tool.Add(b, "reminder.set", "운영자가 정해진 때에 알려 달라고 한 것을 그때 폰 푸시로 알리고, 대화에도 안내 카드로 남긴다(방해 금지 시간·운전 중에도 울린다). "+
+		"때는 시각(at), 장소에 도착·출발할 때(place, move), 둘 다(장소를 기다리되 늦어도 at 에)로 정한다. "+
+		"챙길 것·할 일이 여럿이면 checklist.make 로 목록을 만들고 checklist 에 그 id 를 넣는다 - 그때 카드가 목록을 보여 준다. "+
+		"웹을 보거나 무언가를 지켜봐야 하는 일은 이것이 아니라 작업(create_job)이다. 저장된 때와 문구를 돌려준다.",
+		func(ctx context.Context, in SetInput) (string, error) {
+			body := map[string]any{"text": in.Text, "source": "chat"}
+			for k, v := range map[string]string{"body": in.Body, "at": in.At, "place": in.Place, "move": in.Move, "after": in.After, "until": in.Until, "checklist": in.Checklist} {
+				if strings.TrimSpace(v) != "" {
+					body[k] = v
+				}
+			}
+			var out struct {
+				Reminder Reminder `json:"reminder"`
+			}
+			if err := m.do(ctx, http.MethodPost, "/api/reminders", body, &out); err != nil {
+				return "", failed("저장하지 못했습니다", err)
+			}
+			return "저장했습니다: " + out.Reminder.Line + "\n" +
+				"그때 폰으로 푸시가 가고 대화에 안내 카드가 남습니다. 운영자에게는 위의 때와 문구를 그대로 말하세요. 운영자가 말하지 않은 시각을 정했으면 그 시각을 밝히세요.", nil
+		})
+	tool.Add(b, "reminder.change", "리마인드의 때나 문구를 고친다. 준 칸만 바뀌고, 이미 보낸 것도 새 때를 다시 기다린다. "+
+		"운영자가 시각·조건을 바꿔 달라고 하면 새로 만들지 말고 이것으로 고친다. 고친 뒤 저장된 때와 문구를 돌려준다.",
+		func(ctx context.Context, in ChangeInput) (string, error) {
+			body := map[string]any{}
+			for k, v := range map[string]string{"text": in.Text, "body": in.Body, "at": in.At, "place": in.Place, "move": in.Move, "after": in.After, "until": in.Until, "checklist": in.Checklist} {
+				if strings.TrimSpace(v) != "" {
+					body[k] = v
+				}
+			}
+			if len(in.Clear) > 0 {
+				body["clear"] = in.Clear
+			}
+			var out struct {
+				Reminder Reminder `json:"reminder"`
+			}
+			if err := m.do(ctx, http.MethodPatch, "/api/reminders/"+in.ID, body, &out); err != nil {
+				return "", failed("고치지 못했습니다", err)
+			}
+			return "고쳤습니다: " + out.Reminder.Line + "\n운영자에게는 위의 바뀐 때와 문구를 그대로 말하세요.", nil
+		})
+	tool.Add(b, "reminder.cancel", "기다리는 리마인드를 취소한다. 그때가 와도 알리지 않는다.",
+		func(ctx context.Context, in CancelInput) (string, error) {
+			var out struct {
+				Reminder Reminder `json:"reminder"`
+			}
+			if err := m.do(ctx, http.MethodDelete, "/api/reminders/"+in.ID, nil, &out); err != nil {
+				return "", failed("취소하지 못했습니다", err)
+			}
+			return "취소했습니다: " + out.Reminder.Line, nil
+		})
 }
 
 // failed is a change that did not happen, said so the conversation does not
 // tell the operator it did.
-func failed(what string, err error) *mcp.CallToolResult {
-	return toolText(what+": "+err.Error()+"\n바뀐 것이 없습니다. 운영자에게 됐다고 말하지 마세요.", true)
+func failed(what string, err error) error {
+	return fmt.Errorf("%s: %w\n바뀐 것이 없습니다. 운영자에게 됐다고 말하지 마세요.", what, err)
 }
 
 func renderList(rs []Reminder) string {
@@ -234,8 +221,4 @@ func renderList(rs []Reminder) string {
 		b.WriteString(line + "\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
-}
-
-func toolText(text string, isErr bool) *mcp.CallToolResult {
-	return &mcp.CallToolResult{IsError: isErr, Content: []mcp.Content{&mcp.TextContent{Text: text}}}
 }

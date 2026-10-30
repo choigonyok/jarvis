@@ -1,7 +1,7 @@
 // Package web is the agent's window on search-svc: Naver's search, a page
 // read together with what its pictures say, and Naver Place near a point.
 //
-// The model gets two tools, search and read; find_nearby (module place) asks
+// The model gets two tools, search and read; "nearby" (module place) asks
 // Places. All of it only reads.
 //
 // read opens only an address that was seen: in a search result, among a read

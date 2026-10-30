@@ -3,12 +3,11 @@ package remind
 import (
 	"context"
 	"encoding/json"
+	"github.com/choigonyok/jarvis/agent/internal/tool"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type call struct {
@@ -46,32 +45,21 @@ func fakeMind(t *testing.T, calls *[]call) *httptest.Server {
 	return srv
 }
 
-func session(t *testing.T, m *Module) *mcp.ClientSession {
+func session(t *testing.T, m *Module) *tool.Board {
 	t.Helper()
-	server := httptest.NewServer(m.Handler())
-	t.Cleanup(server.Close)
-	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil)
-	s, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{Endpoint: server.URL}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = s.Close() })
-	return s
+	b := tool.New("t", "")
+	m.Look(b)
+	m.Change(b)
+	return b
 }
 
-func callTool(t *testing.T, s *mcp.ClientSession, tool string, args map[string]any) (string, bool) {
+func callTool(t *testing.T, b *tool.Board, name string, args map[string]any) (string, bool) {
 	t.Helper()
-	res, err := s.CallTool(context.Background(), &mcp.CallToolParams{Name: tool, Arguments: args})
+	out, err := b.Do(context.Background(), name, args)
 	if err != nil {
-		t.Fatalf("%s: %v", tool, err)
+		return err.Error(), true
 	}
-	var out strings.Builder
-	for _, c := range res.Content {
-		if tc, ok := c.(*mcp.TextContent); ok {
-			out.WriteString(tc.Text)
-		}
-	}
-	return out.String(), res.IsError
+	return out, false
 }
 
 // The tools hand mind only what was given, and answer with what mind stored -
@@ -80,7 +68,7 @@ func TestTools(t *testing.T) {
 	var calls []call
 	s := session(t, New(fakeMind(t, &calls).URL+"/", "tok", nil))
 
-	got, isErr := callTool(t, s, "set_reminder", map[string]any{"text": "베개 챙기세요", "at": "2026-10-24T08:00"})
+	got, isErr := callTool(t, s, "reminder.set", map[string]any{"text": "베개 챙기세요", "at": "2026-10-24T08:00"})
 	if isErr || !strings.Contains(got, "저장했습니다: [rem_1] 10/24(토) 08:00 · 베개 챙기세요") {
 		t.Fatalf("저장된 때와 문구를 돌려줘야 합니다: %q", got)
 	}
@@ -88,12 +76,12 @@ func TestTools(t *testing.T) {
 		t.Fatalf("준 칸만 보내야 합니다: %+v", c)
 	}
 
-	got, isErr = callTool(t, s, "set_reminder", map[string]any{"text": "베개", "at": "어제"})
+	got, isErr = callTool(t, s, "reminder.set", map[string]any{"text": "베개", "at": "어제"})
 	if !isErr || !strings.Contains(got, "시각을 읽지 못했습니다") || !strings.Contains(got, "됐다고 말하지 마세요") {
 		t.Fatalf("못 했으면 그렇게: %q %v", got, isErr)
 	}
 
-	got, isErr = callTool(t, s, "change_reminder", map[string]any{"id": "rem_1", "at": "2026-10-24T07:30", "clear": []string{"place"}})
+	got, isErr = callTool(t, s, "reminder.change", map[string]any{"id": "rem_1", "at": "2026-10-24T07:30", "clear": []string{"place"}})
 	if c := calls[len(calls)-1]; isErr || c.method != http.MethodPatch || c.path != "/api/reminders/rem_1" || c.body["at"] != "2026-10-24T07:30" || c.body["text"] != nil || c.body["clear"] == nil {
 		t.Fatalf("고칠 칸만: %+v %q", c, got)
 	}
@@ -101,12 +89,12 @@ func TestTools(t *testing.T) {
 		t.Fatalf("%q", got)
 	}
 
-	got, _ = callTool(t, s, "list_reminders", map[string]any{"all": true})
+	got, _ = callTool(t, s, "reminders", map[string]any{"all": true})
 	if calls[len(calls)-1].path != "/api/reminders?all=1" || !strings.Contains(got, "[rem_1] 10/24(토) 08:00") || !strings.Contains(got, "자비스가 그때로 미뤄 둔 알림") {
 		t.Fatalf("목록: %q", got)
 	}
 
-	got, isErr = callTool(t, s, "cancel_reminder", map[string]any{"id": "rem_1"})
+	got, isErr = callTool(t, s, "reminder.cancel", map[string]any{"id": "rem_1"})
 	if isErr || calls[len(calls)-1].method != http.MethodDelete || !strings.Contains(got, "취소했습니다: [rem_1]") {
 		t.Fatalf("취소: %q", got)
 	}

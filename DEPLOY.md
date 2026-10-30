@@ -69,7 +69,7 @@
   로 닿는다 - 게이트웨이는 이 둘을 모른다(agent 만 부른다). `.env` 에 `NAVER_API_HUB_ID`·`NAVER_API_HUB_SECRET`
   (NCP 콘솔 > NAVER API HUB > Application > 인증 정보)과 `JARVIS_SEARCH_TOKEN`(`openssl rand -hex 24`, search-svc 와
   OCR 이 같이 쓴다)을 넣고 `scripts/mini compose up -d --build search agent agent-guest`. 토큰이 비어 있으면
-  agent 는 예전대로(WebFetch, find_nearby 는 OpenStreetMap) 돈다. 자세한 것은 [search-svc/README.md](search-svc/README.md).
+  agent 는 예전대로(WebFetch, 근처 찾기는 OpenStreetMap) 돈다. 자세한 것은 [search-svc/README.md](search-svc/README.md).
 
 **`jarvis.choigonyok.com` 앞에는 Cloudflare Access 가 있다.** Zero Trust 앱 `jarvis`
 (팀 `choigonyok.cloudflareaccess.com`, Free 플랜), 정책 `only me` 는 운영자 이메일 하나만 허용하고
@@ -159,7 +159,7 @@ VNC 서버(x11vnc)는 브라우저 컨테이너 안에서만 듣고(`-localhost`
 **로그인 정보 보관함(vault-svc).** 맥미니 .env 에 `JARVIS_VAULT_KEY`(`openssl rand -base64 32` -
 봉인 키, DB·백업에는 없으니 따로 보관), `JARVIS_VAULT_RELEASE_TOKEN`(브라우저가 꺼낼 때만 쓰는 토큰),
 `JARVIS_DB_PASSWORD_VAULT`(`scripts/db-roles` 가 만든다). 맥미니 `JARVIS_ALLOWED_TOOLS` 에
-`mcp__mcp-browser__browser_fill_login`(자동 입력은 카드 없이)과 `mcp__vault__list_logins`.
+`mcp__mcp-browser__browser_fill_login`(자동 입력은 카드 없이)과 `mcp__look__look`.
 
 **맥미니 .env 에 더 필요한 값.** `JARVIS_GUEST_API_TOKEN`(손님 agent 의 토큰 - input·calendar·
 memory 가 손님 쪽만 열어 준다), `JARVIS_MIND_CONSOLE_TOKEN`(mind 콘솔 로그인, `scripts/mini console`),

@@ -95,7 +95,7 @@ CLI에 넘기는 `MCP_TIMEOUT`/`MCP_TOOL_TIMEOUT`은 **밀리초**입니다(CLI 
 도구의 카드는 인자를 JSON 이 아니라 "항목: 값" 줄로 그립니다(`adapter/permission/render.go`).
 
 `JARVIS_ALLOWED_TOOLS`에 있는 도구는 카드를 거치지 않습니다. **읽기 전용만 넣으세요.**
-기본값의 `mcp__calendar__list_events`가 그 예입니다. 캘린더 쓰기는 일부러 빠져 있습니다.
+`mcp__look__look`(읽기)과 `mcp__change__change`(리마인드·체크리스트)는 모듈이 켜지면 저절로 더해집니다. 캘린더 쓰기는 일부러 빠져 있습니다.
 브라우저 도구(`mcp__mcp-browser__*`)는 여기에 있어도 빼서 늘 게이트를 지나게 합니다(`config.gatedTool`) - 게이트가
 카드 없이 통과시키면서 브라우저를 대화에 넘기고, 그때 브라우저를 쓰던 작업이 멈춥니다(`Runner.TakeBrowser`).
 켜진 모듈의 조회 도구(자산·가계부·기억·위치·메시지·로그인 목록)는 모듈이 선언한 목록(`Tools`)에서
@@ -137,14 +137,27 @@ Go 는 `gocommon/site`, 브라우저는 `publicsuffixlist`.
 승인 카드, 그리고 자동 실행 가능 여부(`Reversible`). **되돌릴 수 없는 동작은 신뢰도가
 아무리 높아도 카드를 거칩니다.**
 
+### 도구와 스킬
+
+대화에 보이는 도구는 적게 유지합니다(`internal/tool`). 모든 도구는 매 요청에 설명이 실리는데, 쓰는 것은 그중 하나뿐입니다.
+
+- `look`: 지금 값을 읽는다. `what` 에 일정·자산·가계부·위치·근처·리마인드·체크리스트·작업·로그인 목록·배송지·메시지·기억 중
+  하나를 넣는다. 모듈은 도구를 만들지 않고 이 판에 줄을 더한다(`Module.Look`).
+- `change`: 리마인드와 체크리스트를 남기고 고친다(`Module.Change`). 명령 기록으로 mind 에 간다.
+- 카드를 거치는 쓰기는 그대로 저마다의 도구다(`create_event`, `save_login`, `save_shipping_address` 등): 게이트가 도구 이름으로
+  모듈의 카드를 찾는다. 작업(`create_job`, `instruct_job`)과 웹(`search`, `read`), `show_image` 도 그대로다. 작업 실행의 도구는 따로다.
+
+기능별 지시문은 시스템 프롬프트가 아니라 스킬(`workspace/.claude/skills`)에 있고, 그 일을 하기 전에 읽습니다. 시스템 프롬프트에는
+말투와 승인 규칙만 남습니다. 손님 지시문은 손님 볼륨에 스킬이 없어 프롬프트에 그대로 있고, 작업 실행의 지시문은 내장 도구가 없어
+그대로 있습니다. 금지는 어느 쪽이든 코드에 있습니다(게이트, 훅, 브라우저 가드).
+
 ### 캘린더
 
 - 일정은 `calendar-svc`(Postgres)에 있고, 주소는 `JARVIS_CALENDAR_URL`입니다.
   전에는 워크스페이스 바깥의 JSON 파일이었는데, 이유는 같습니다 — 안에 두면
   CLI의 `Read`/`Write` 도구가 모듈의 스키마와 승인 카드를 우회하는 두 번째 문이
   됩니다. 이제 에이전트의 파일시스템에 캘린더가 **아예 없습니다.**
-- 모델에겐 도구 4개만 보입니다: `list_events`(무승인) / `create_event` /
-  `update_event` / `delete_event`.
+- 읽기는 `look` 의 `calendar`(무승인), 쓰기는 `create_event` / `update_event` / `delete_event` 입니다.
 - 시간대는 `TZ`(기본 `Asia/Seoul`)입니다. 컨테이너 기본값인 UTC로 두면 한국 시간
   자정~09시 사이에 "오늘"이 하루 밀립니다. zoneinfo는 바이너리에 내장돼 있어
   이미지에 `tzdata`를 깔 필요가 없습니다.
@@ -157,8 +170,8 @@ Go 는 `gocommon/site`, 브라우저는 `publicsuffixlist`.
 - 읽기 전용입니다. 모듈이 `ContextSource` 만 구현하고 `Actuator` 가 없으므로
   승인할 동작 자체가 없습니다. 주문 가능한 키는 `assets-svc` 에만 있고, 에이전트는
   `JARVIS_ASSETS_URL` 로 GET 만 칩니다.
-- 모델에게 보이는 도구는 셋이고 전부 무승인입니다: `get_portfolio`(총액·종목·원금 대비·
-  기간 변동) / `get_allocation`(목표 비중 대비와 옮길 금액) / `get_history`(일별 스냅샷).
+- `look` 의 세 줄이고 전부 무승인입니다: `portfolio`(총액·종목·원금 대비·기간 변동) /
+  `allocation`(목표 비중 대비와 옮길 금액) / `asset_history`(일별 스냅샷).
 - 목표 비중 계산은 `assets-svc/src/target.ts` 한 곳에 있습니다. 웹과 에이전트가 같은
   `/portfolio` 의 `allocation` 을 읽으므로, 새 배당·금 종목은 거기에만 추가하면 됩니다.
 - 캘린더와 달리 부팅 때 서비스를 확인하지 않습니다. 증권사 장애가 대화까지 막을 이유가
@@ -172,7 +185,7 @@ Go 는 `gocommon/site`, 브라우저는 `publicsuffixlist`.
 
 ### 가계부
 
-- 자산과 같은 읽기 전용 모듈입니다. 도구 `get_spending`(월 합계·지난달 같은 날까지 비교·
+- 자산과 같은 읽기 전용 모듈입니다. `look` 의 `spending`(월 합계·지난달 같은 날까지 비교·
   예산 속도·분류·정기 결제·건별 내역) 하나이고 무승인입니다. 분류 변경과 예산은 화면에서 합니다.
 - **분류 묻기는 mind 의 일입니다.** 규칙이 정하지 못해 '기타'로 둔 결제는 mind 가 `GET /unclear` 로 읽어 슬롯 `merchant.category` 로 다룹니다(mind-svc README 의 '슬롯'). 카드와 결정은 다른 mind 카드와 같은 길로 오가고, 에이전트에는 판단이 없습니다. 분류 목록(`Categories`)만 자산의 출금 카드가 씁니다.
 - **백그라운드 주문 조회.** 쿠팡 결제가 새로 들어오면 에이전트가 대화와 분리된
@@ -194,7 +207,7 @@ Go 는 `gocommon/site`, 브라우저는 `publicsuffixlist`.
   늦으면 막고 작업은 `wait_payment` 로 그 카드를 기다리다 승인되면 깨어나 결제를 다시 진행합니다. 승인 뒤마다 비회원
   주문서를 처음부터 다시 치다가 연락처·건물번호가 틀리게 들어갔던 것(2026-10-30)을 줄이려는 것입니다. 쿠페이·
   네이버페이 비밀번호는 `browser_enter_payment_pin` 이 넣습니다 - 비밀번호는 저장 카드(대화 `save_payment_pin`, 작업 `request_payment_pin`, 비밀 칸 하나)로 보관함에 넣고, 그 결제 호스트의 키패드 앞에서만 꺼냅니다.
-  주문서의 주문자·배송지는 보관함의 배송지(대화 `get_shipping_address`, 작업 `shipping_address`)를 그대로 넣고, 없으면
+  주문서의 주문자·배송지는 보관함의 배송지(대화 `look` 의 `shipping_address`, 작업 `shipping_address`)를 그대로 넣고, 없으면
   저장 카드(`save_shipping_address` / `request_shipping_address`)를 올립니다 - 주문할 때마다 묻지 않습니다. 저장한 뒤 이사 기록이 있으면(mind 슬롯 `shipping.address`) 도구가 주소와 함께 '확인 필요'를 말하고 작업은 주문서를 채우지 않고 카드를 올리며, 결제 카드 맨 위에도 경고가 붙습니다. 결제 카드에는
   저장된 배송지가 보이고, 작업이 결제 직전 report 에 남긴 배송지의 도로명+건물번호가 다르면 맨 앞에 경고가 붙습니다.
   결제가 됐는지 애매하면 작업은 `payment_alerts`(가계부가 모은 카드 결제 알림, 수집이 멈췄으면 그렇다고 함)와 주문내역을
@@ -222,7 +235,7 @@ Go 는 `gocommon/site`, 브라우저는 `publicsuffixlist`.
   CLI 의 WebFetch(아무 주소나 여는)는 내장 도구에서 빠집니다(`JARVIS_BUILTIN_TOOLS` 를 직접 정했으면 그대로).
 - 지시에는 찾기 규칙이 붙습니다: 바뀌는 사실은 기억으로 답하지 않고 찾는다, 한국 일은 `search` 먼저(해외는 WebSearch),
   원문은 `read` 로, "인스타에서 봤대"는 출처 힌트다, 못 찾으면 다른 이름으로 다시 찾고 어디를 봤는지 밝힌다.
-- `find_nearby`(위치 모듈)는 네이버 지도(플레이스)를 먼저 묻습니다 - 영업 중인지와 마감 시각, 별점, 리뷰 수. 읽지
+- `look` 의 `nearby`(위치 모듈)는 네이버 지도(플레이스)를 먼저 묻습니다 - 영업 중인지와 마감 시각, 별점, 리뷰 수. 읽지
   못하면 OpenStreetMap 으로 찾고 그렇다고 말합니다. 좌표는 소수 셋째 자리(약 100m)로 반올림해 보냅니다.
 - 작업도 같은 도구를 받습니다(`jobs.SchedulerConfig.Web`). 찾아보기만 하는 작업은 사이트도 브라우저도 없이 대화와
   나란히 돕니다.
@@ -403,7 +416,7 @@ Docker로 스택을 올려 확인한 것 (Claude Code 2.1.278):
   `calendar.create_event`로 매핑되고, 카드 본문이 JSON이 아니라
   `10월 3일 (토) 09:00  캠핑 · 양평`으로 나온다.
 - **도구 스키마** — `/mcp/calendar`의 `tools/list`가 required를 정확히 보고한다
-  (`create_event`: date·title, `update_event`/`delete_event`: id, `list_events`: 없음).
+  (`create_event`: date·title, `update_event`/`delete_event`: id).
 - **거부되는 입력** — `{"date":"내일"}`은 `isError`로 되돌아온다.
 - **SSE** — 캘린더가 바뀌면 `{"type":"calendar",...}` 프레임이 즉시 나간다.
 
@@ -416,7 +429,7 @@ Docker로 스택을 올려 확인한 것 (Claude Code 2.1.278):
   (디버그와 무관하게 페이로드는 항상 로그에 남긴다.)
 - **대화 품질** — 실제 토큰으로 한 턴도 돌려본 적 없음.
 - **모델이 캘린더 도구를 제대로 쓰는지** — 도구 자체는 HTTP로 검증했지만, 실제 턴에서
-  Claude가 `list_events`로 id를 먼저 확인하고 상대 날짜를 변환하는지는 못 봤다.
+  Claude가 `look` 의 `calendar` 로 id를 먼저 확인하고 상대 날짜를 변환하는지는 못 봤다.
 
 ## 설계 근거
 

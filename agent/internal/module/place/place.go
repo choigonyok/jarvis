@@ -1,13 +1,13 @@
 // Package place is the agent's window on context-svc: where the operator is
 // (the region they are in, since when; the last fix) and the devices' state
 // (CarPlay, focus, the app in front of the Mac). Read only. It gives the
-// conversation one tool, get_context, and the judging turns facts.
+// conversation "context" on the look board, and the judging turns facts.
 //
 // The model is not asked to look where the operator is on every turn: mind
 // already puts its situation (which uses the same visits) in front of it.
 // This is for a question that needs the raw state - "아직 회사야?".
 //
-// find_nearby asks Naver's map first (Naver Place's list through search-svc,
+// "nearby" asks Naver's map first (Naver Place's list through search-svc,
 // module web): what is open now and until when, stars, reviews. OpenStreetMap
 // is behind it - for when Naver cannot be read, or search-svc is not set up -
 // and the answer says which one it was.
@@ -22,21 +22,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/choigonyok/jarvis/agent/internal/core/module"
 	"github.com/choigonyok/jarvis/agent/internal/module/web"
+	"github.com/choigonyok/jarvis/agent/internal/tool"
 )
 
 var _ module.ContextSource = (*Module)(nil)
 
-const (
-	Name       = "context"
-	ServerName = "context"
-)
-
-// Tools is what the conversation may call without a card: they only read.
-var Tools = []string{"mcp__" + ServerName + "__get_context", "mcp__" + ServerName + "__find_nearby"}
+const Name = "context"
 
 // Now is context-svc's GET /now.
 type Now struct {
@@ -65,14 +58,14 @@ type Module struct {
 	naver      NaverPlaces
 }
 
-// NaverPlaces is the map find_nearby asks first: Naver Place's list, through
+// NaverPlaces is the map "nearby" asks first: Naver Place's list, through
 // search-svc (web.Client).
 type NaverPlaces interface {
 	Places(ctx context.Context, q web.PlacesQuery) (web.Places, error)
 }
 
-// UseNaver puts Naver's map in front of OpenStreetMap. Before Handler: the
-// tool's description says which map it reads.
+// UseNaver puts Naver's map in front of OpenStreetMap. Before Look: the row
+// says which map it reads.
 func (m *Module) UseNaver(n NaverPlaces) { m.naver = n }
 
 func New(url, token string) *Module {
@@ -112,49 +105,42 @@ func (m *Module) Facts(ctx context.Context, _ string) ([]module.Fact, error) {
 	return []module.Fact{{Source: Name, Text: now.Summary}}, nil
 }
 
-// Handler is the MCP server with get_context.
-func (m *Module) Handler() http.Handler {
-	server := mcp.NewServer(&mcp.Implementation{Name: ServerName, Version: "1"}, nil)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_context",
-		Description: "운영자가 지금 어느 영역(집·회사·…)에 언제부터 있는지, 마지막 위치가 언제인지, 기기 상태(CarPlay·집중 모드 등)를 읽는다. 읽기만 한다.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
-		now, err := m.Now(ctx)
-		if err != nil {
-			return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}}}, nil, nil
-		}
-		body, _ := json.Marshal(now)
-		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: now.Summary + "\n" + string(body)}}}, nil, nil
-	})
-	type nearbyIn struct {
-		Near   string `json:"near,omitempty" jsonschema:"어디 근처인지: 비우면 지금 위치, 등록된 영역 이름(예: 집, 지수네 집), 또는 지도에서 찾을 장소·동네 이름(예: 망원동, 강남역)"`
-		What   string `json:"what,omitempty" jsonschema:"무엇을: 업종이나 물건 낱말 하나(예: 술집, 카페, 마트, 수산물, 약국, 이비인후과). 비우면 음식점. '늦게까지 하는' 같은 꾸밈말은 빼고 open 으로."`
-		Open   bool   `json:"open,omitempty" jsonschema:"지금 영업 중인 곳만"`
-		Radius int    `json:"radiusM,omitempty" jsonschema:"반경 미터(기본 1000, 최대 5000)"`
-		Limit  int    `json:"limit,omitempty" jsonschema:"최대 개수(기본 8)"`
-	}
-	description := "어느 곳 근처의 식당·카페·편의점 등을 OpenStreetMap 에서 찾는다(읽기 전용, 키 없음). 가까운 순으로 이름·종류·거리·주소·영업시간. " +
+type nearbyIn struct {
+	Near   string `json:"near,omitempty" jsonschema:"어디 근처인지: 비우면 지금 위치, 등록된 영역 이름(예: 집, 지수네 집), 또는 지도에서 찾을 장소·동네 이름(예: 망원동, 강남역)"`
+	What   string `json:"what,omitempty" jsonschema:"무엇을: 업종이나 물건 낱말 하나(예: 술집, 카페, 마트, 수산물, 약국, 이비인후과). 비우면 음식점. '늦게까지 하는' 같은 꾸밈말은 빼고 open 으로."`
+	Open   bool   `json:"open,omitempty" jsonschema:"지금 영업 중인 곳만"`
+	Radius int    `json:"radiusM,omitempty" jsonschema:"반경 미터(기본 1000, 최대 5000)"`
+	Limit  int    `json:"limit,omitempty" jsonschema:"최대 개수(기본 8)"`
+}
+
+// Look puts where the operator is, and what is near, on the board.
+func (m *Module) Look(b *tool.Board) {
+	tool.Add(b, "context", "운영자가 지금 어느 영역(집·회사·…)에 언제부터 있는지, 마지막 위치가 언제인지, 기기 상태(CarPlay·집중 모드 등).",
+		func(ctx context.Context, _ struct{}) (string, error) {
+			now, err := m.Now(ctx)
+			if err != nil {
+				return "", err
+			}
+			body, _ := json.Marshal(now)
+			return now.Summary + "\n" + string(body), nil
+		})
+	says := "어느 곳 근처의 식당·카페·편의점 등을 OpenStreetMap 에서 찾는다(키 없음). 가까운 순으로 이름·종류·거리·주소·영업시간. " +
 		"지도 데이터가 빠진 곳이 있으니 후보로만 쓰고, 답에는 출처(OpenStreetMap)와 어디 기준인지 밝힌다. 주문·예약은 하지 않는다."
 	if m.naver != nil {
-		description = "어느 곳 근처의 가게·장소(식당·술집·카페·마트·약국·병원…)를 네이버 지도(플레이스)에서 찾는다(읽기 전용). " +
+		says = "어느 곳 근처의 가게·장소(식당·술집·카페·마트·약국·병원…)를 네이버 지도(플레이스)에서 찾는다. " +
 			"네이버 지도 목록 순서로 이름·종류·거리·지금 영업 여부와 마감 시각·별점·리뷰 수·주소·링크. " +
 			"네이버를 읽지 못하면 OpenStreetMap 으로 찾고 그렇다고 알려 준다. 답에는 어디 기준인지 밝힌다. 주문·예약은 하지 않는다."
 	}
-	mcp.AddTool(server, &mcp.Tool{Name: "find_nearby", Description: description},
-		func(ctx context.Context, _ *mcp.CallToolRequest, in nearbyIn) (*mcp.CallToolResult, any, error) {
-			return m.findNearby(ctx, in.Near, in.What, in.Open, in.Radius, in.Limit), nil, nil
-		})
-	return mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
+	tool.Add(b, "nearby", says, func(ctx context.Context, in nearbyIn) (string, error) {
+		return m.findNearby(ctx, in.Near, in.What, in.Open, in.Radius, in.Limit)
+	})
 }
 
-// findNearby is find_nearby: Naver's map, else OpenStreetMap.
-func (m *Module) findNearby(ctx context.Context, near, what string, open bool, radius, limit int) *mcp.CallToolResult {
-	fail := func(err error) *mcp.CallToolResult {
-		return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}}}
-	}
+// findNearby is Naver's map, else OpenStreetMap.
+func (m *Module) findNearby(ctx context.Context, near, what string, open bool, radius, limit int) (string, error) {
 	p, err := m.Where(ctx, near)
 	if err != nil {
-		return fail(err)
+		return "", err
 	}
 	what = strings.TrimSpace(what)
 	if what == "" {
@@ -178,16 +164,16 @@ func (m *Module) findNearby(ctx context.Context, near, what string, open bool, r
 		res, err := m.naver.Places(ctx, web.PlacesQuery{Query: what, Lat: round3(p.Lat), Lng: round3(p.Lon),
 			Radius: radius, Open: open, Limit: limit, Area: area})
 		if err == nil {
-			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: renderNaver(p, what, open, radius, res)}}}
+			return renderNaver(p, what, open, radius, res), nil
 		}
 		naverErr = err
 	}
 	shops, err := m.Nearby(ctx, p, what, min(radius, 3000), limit)
 	if err != nil {
 		if naverErr != nil {
-			return fail(fmt.Errorf("네이버 지도(%v)도 OpenStreetMap 도 읽지 못했습니다: %w", naverErr, err))
+			return "", fmt.Errorf("네이버 지도(%v)도 OpenStreetMap 도 읽지 못했습니다: %w", naverErr, err)
 		}
-		return fail(err)
+		return "", err
 	}
 	head := fmt.Sprintf("%s 기준, OpenStreetMap 에서 %d곳", p.From, len(shops))
 	if naverErr != nil {
@@ -200,7 +186,7 @@ func (m *Module) findNearby(ctx context.Context, near, what string, open bool, r
 		head += " (OpenStreetMap 은 지금 영업 여부를 모릅니다 - hours 가 적힌 곳만 영업시간이 있습니다)"
 	}
 	body, _ := json.Marshal(shops)
-	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: head + "\n" + string(body)}}}
+	return head + "\n" + string(body), nil
 }
 
 func renderNaver(p Point, what string, open bool, radius int, res web.Places) string {

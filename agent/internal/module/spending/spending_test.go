@@ -2,12 +2,11 @@ package spending
 
 import (
 	"context"
+	"github.com/choigonyok/jarvis/agent/internal/tool"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const bookJSON = `{
@@ -38,25 +37,12 @@ func TestGetSpending(t *testing.T) {
 	}))
 	defer svc.Close()
 
-	mcpSrv := httptest.NewServer(New(NewStore(svc.URL, "tok", nil)).Handler())
-	defer mcpSrv.Close()
-	client := mcp.NewClient(&mcp.Implementation{Name: "t", Version: "1"}, nil)
-	session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{Endpoint: mcpSrv.URL}, nil)
+	b := tool.New(tool.Look, "")
+	New(NewStore(svc.URL, "tok", nil)).Look(b)
+	text, err := b.Do(context.Background(), "spending", map[string]any{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer session.Close()
-
-	tools, err := session.ListTools(context.Background(), nil)
-	if err != nil || len(tools.Tools) != len(Tools) {
-		t.Fatalf("도구 목록이 자동 허용 목록과 다릅니다: %v %v", tools, err)
-	}
-
-	res, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "get_spending", Arguments: map[string]any{}})
-	if err != nil || res.IsError {
-		t.Fatalf("%v %+v", err, res)
-	}
-	text := res.Content[0].(*mcp.TextContent).Text
 	for _, want := range []string{
 		"2026-10 지출 ₩310,000 (4건, 31일 중 6일 경과)",
 		"같은 날까지 ₩250,000 → ₩60,000 더 씀",

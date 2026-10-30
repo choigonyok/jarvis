@@ -9,8 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/choigonyok/jarvis/agent/internal/module/web"
 )
 
@@ -25,14 +23,11 @@ func (f *fakeNaver) Places(_ context.Context, q web.PlacesQuery) (web.Places, er
 	return f.res, f.err
 }
 
-func resultText(r *mcp.CallToolResult) string {
-	var parts []string
-	for _, c := range r.Content {
-		if t, ok := c.(*mcp.TextContent); ok {
-			parts = append(parts, t.Text)
-		}
+func resultText(text string, err error) string {
+	if err != nil {
+		return err.Error()
 	}
-	return strings.Join(parts, "\n")
+	return text
 }
 
 // 네이버 지도가 먼저: 반올림한 지금 위치, 영업 중만, 지도에서 찾은 곳이면 그 이름도 함께.

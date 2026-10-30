@@ -3,6 +3,7 @@ package checklist
 import (
 	"context"
 	"encoding/json"
+	"github.com/choigonyok/jarvis/agent/internal/tool"
 	"io"
 	"log/slog"
 	"net/http"
@@ -11,8 +12,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/choigonyok/jarvis/agent/internal/core/bus"
 	"github.com/choigonyok/jarvis/agent/internal/thread"
@@ -83,32 +82,21 @@ func (c *conversation) Told(kind, ref string) bool {
 	return false
 }
 
-func session(t *testing.T, m *Module) *mcp.ClientSession {
+func session(t *testing.T, m *Module) *tool.Board {
 	t.Helper()
-	srv := httptest.NewServer(m.Handler())
-	t.Cleanup(srv.Close)
-	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil)
-	s, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{Endpoint: srv.URL}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = s.Close() })
-	return s
+	b := tool.New("t", "")
+	m.Look(b)
+	m.Change(b)
+	return b
 }
 
-func call(t *testing.T, s *mcp.ClientSession, tool string, args map[string]any) (string, bool) {
+func call(t *testing.T, b *tool.Board, name string, args map[string]any) (string, bool) {
 	t.Helper()
-	res, err := s.CallTool(context.Background(), &mcp.CallToolParams{Name: tool, Arguments: args})
+	out, err := b.Do(context.Background(), name, args)
 	if err != nil {
-		t.Fatal(err)
+		return err.Error(), true
 	}
-	var b strings.Builder
-	for _, c := range res.Content {
-		if tc, ok := c.(*mcp.TextContent); ok {
-			b.WriteString(tc.Text)
-		}
-	}
-	return b.String(), res.IsError
+	return out, false
 }
 
 func published(t *testing.T, events <-chan bus.Event) List {
@@ -137,7 +125,7 @@ func TestChecklistIsACardInTheConversation(t *testing.T) {
 	m := New(mind.serve(t), "tok", nil, chat, b, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	s := session(t, m)
 
-	text, isErr := call(t, s, "make_checklist", map[string]any{"title": "캠핑 준비물", "items": []string{"장갑", "베개"}, "lead": "금요일 저녁에 다시 띄워 드릴게요"})
+	text, isErr := call(t, s, "checklist.make", map[string]any{"title": "캠핑 준비물", "items": []string{"장갑", "베개"}, "lead": "금요일 저녁에 다시 띄워 드릴게요"})
 	if isErr || !strings.Contains(text, "카드로 띄웠습니다") || !strings.Contains(text, "i1 장갑") {
 		t.Fatalf("만들기: %q", text)
 	}
@@ -157,7 +145,7 @@ func TestChecklistIsACardInTheConversation(t *testing.T) {
 		t.Fatalf("mind 가 띄운 목록은 한 번: %+v", chat.cards)
 	}
 
-	if text, isErr := call(t, s, "show_checklist", map[string]any{"id": "chk_9"}); !isErr || !strings.Contains(text, "바뀐 것이 없습니다") {
+	if text, isErr := call(t, s, "checklist.show", map[string]any{"id": "chk_9"}); !isErr || !strings.Contains(text, "바뀐 것이 없습니다") {
 		t.Fatalf("없는 목록: %q", text)
 	}
 	found, err := m.Find(context.Background(), []string{"chk_1"})

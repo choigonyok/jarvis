@@ -503,13 +503,22 @@ func TestRolesCanDoTheirPart(t *testing.T) {
 	}
 }
 
-// The agent reads what mind sends it, and what happened is not its to read.
+// The agent reads what mind sends it and what is said to it. What happened is
+// not its to read.
 func TestTheAgentReadsOnlyEffects(t *testing.T) {
+	ctx := context.Background()
 	agent := as(t, "svc_agent")
-	for _, q := range []string{`select count(*) from input.records`, `select count(*) from input.deliveries`,
-		`select count(*) from mind.guest_effects`} {
-		if err := agent.QueryRow(context.Background(), q).Scan(new(int)); err == nil {
-			t.Fatalf("%s 를 읽을 수 없어야 합니다", q)
+	if err := agent.QueryRow(ctx, `select count(*) from mind.guest_effects`).Scan(new(int)); err == nil {
+		t.Fatal("손님 효과를 읽을 수 없어야 합니다")
+	}
+	w := newWorld(t, Records)
+	w.publish("a.b", "")
+	for _, q := range []string{`select count(*) from input.records where kind <> 'chat.message'`,
+		`select count(*) from input.deliveries where consumer <> 'agent-chat'`,
+		`select count(*) from input.consumers where name <> 'agent-chat'`} {
+		var n int
+		if err := agent.QueryRow(ctx, q).Scan(&n); err != nil || n != 0 {
+			t.Fatalf("%s: %d %v", q, n, err)
 		}
 	}
 }
