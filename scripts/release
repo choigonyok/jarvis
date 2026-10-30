@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# 브랜치를 main 에 올리고, 그 커밋의 바뀐 파일만 맥미니로 보낸다. 작업 트리가 아니라 커밋본을 보내고 해시로 대조한다
+# (메인 체크아웃은 여러 세션이 함께 쓴다). 맥미니 소스가 지금 main 과 다르면 아무것도 하지 않는다.
+#
+#   scripts/release <브랜치>
+#
+# 컨테이너는 건드리지 않는다. 마이그레이션·빌드·재시작은 단계마다 순서가 달라서 부르는 쪽이 한다.
+# edge/ 와 web/ 은 맥미니에서 쓰지 않아 보내지 않는다(Cloudflare 로 따로 배포한다).
+set -euo pipefail
+ROOT="$(git rev-parse --show-toplevel)"
+MAIN="$(git -C "$ROOT" worktree list --porcelain | awk '/^worktree /{print $2; exit}')"
+BRANCH="${1:?브랜치를 주세요}"
+[[ "$(git -C "$MAIN" branch --show-current)" == main ]] || { echo "메인 체크아웃이 main 이 아닙니다" >&2; exit 1; }
+[[ -z "$(git -C "$MAIN" status --porcelain --untracked-files=no)" ]] || { echo "메인 체크아웃에 고친 파일이 있습니다" >&2; exit 1; }
+git -C "$MAIN" fetch -q origin
+OLD="$(git -C "$MAIN" rev-parse origin/main)"
+[[ "$(git -C "$MAIN" rev-parse HEAD)" == "$OLD" ]] || { echo "메인 체크아웃이 origin/main 이 아닙니다" >&2; exit 1; }
+git -C "$MAIN" merge-base --is-ancestor "$OLD" "$BRANCH" || { echo "main 이 앞서 있습니다: $BRANCH 를 다시 맞추세요" >&2; exit 1; }
+
+changed() { git -C "$MAIN" diff --no-renames --name-only "$@" | grep -v -E '^(edge|web)/' || true; }
+
+bad=0; n=0
+while IFS= read -r f; do
+  [[ -n "$f" ]] || continue
+  git -C "$MAIN" cat-file -e "$OLD:$f" 2>/dev/null || continue
+  n=$((n+1))
+  a=$(git -C "$MAIN" show "$OLD:$f" | md5 -q)
+  b=$(ssh -o LogLevel=ERROR -n macmini "md5 -q ~/jarvis/'$f' 2>/dev/null" || echo 없음)
+  [[ "$a" == "$b" ]] || { echo "맥미니가 ${OLD:0:7} 와 다름: $f" >&2; bad=1; }
+done < <(changed "$OLD" "$BRANCH")
+[[ $bad -eq 0 ]] || exit 1
+echo "맥미니 소스가 ${OLD:0:7} 와 같습니다 (${n}개 대조)"
+
+git -C "$MAIN" merge -q --ff-only "$BRANCH"
+git -C "$MAIN" push -q origin main 2>&1 | grep -v '^remote:' || true
+NEW="$(git -C "$MAIN" rev-parse HEAD)"
+[[ "$(git -C "$MAIN" rev-parse origin/main)" == "$NEW" ]] || { echo "push 가 되지 않았습니다" >&2; exit 1; }
+echo "main: ${NEW:0:7}"
+
+TAR=$(mktemp -t jarvis-release).tar
+trap 'rm -f "$TAR"' EXIT
+git -C "$MAIN" diff --no-renames --name-only -z --diff-filter=d "$OLD" HEAD | grep -z -v -E '^(edge|web)/' | (cd "$MAIN" && xargs -0 git archive HEAD --) > "$TAR"
+ssh -o LogLevel=ERROR macmini 'tar -xf - -C ~/jarvis' < "$TAR"
+
+bad=0; n=0
+while IFS= read -r f; do
+  [[ -n "$f" ]] || continue
+  n=$((n+1))
+  a=$(git -C "$MAIN" show "HEAD:$f" | md5 -q)
+  b=$(ssh -o LogLevel=ERROR -n macmini "md5 -q ~/jarvis/'$f'" 2>/dev/null || echo 없음)
+  [[ "$a" == "$b" ]] || { echo "다름: $f" >&2; bad=1; }
+done < <(changed --diff-filter=d "$OLD" HEAD)
+[[ $bad -eq 0 ]] || exit 1
+echo "보낸 파일 해시 일치 (${n}개)"
+
+n=0
+while IFS= read -r f; do
+  [[ -n "$f" ]] || continue
+  ssh -o LogLevel=ERROR -n macmini "rm -f ~/jarvis/'$f'"
+  n=$((n+1))
+done < <(changed --diff-filter=D "$OLD" HEAD)
+echo "지운 파일 ${n}개"
