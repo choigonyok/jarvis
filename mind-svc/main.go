@@ -42,6 +42,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/eval"
 	"github.com/choigonyok/jarvis/mind-svc/internal/gate"
 	"github.com/choigonyok/jarvis/mind-svc/internal/interpret"
+	"github.com/choigonyok/jarvis/mind-svc/internal/ledger"
 	"github.com/choigonyok/jarvis/mind-svc/internal/llm"
 	"github.com/choigonyok/jarvis/mind-svc/internal/memory"
 	"github.com/choigonyok/jarvis/mind-svc/internal/mind"
@@ -68,7 +69,7 @@ func main() {
 		os.Exit(runEval(ctx, client, loc))
 	}
 	if len(os.Args) > 1 && os.Args[1] == "backtest" {
-		os.Exit(runBacktest(os.Args[2:]))
+		os.Exit(runBacktest(os.Args[2:], loc))
 	}
 
 	cfg := interpret.Config{
@@ -352,28 +353,57 @@ func main() {
 // seoul is home for the weather when nothing says otherwise: City Hall.
 const seoul = "37.5665,126.9780,서울"
 
-// runBacktest scores exported judgements (scripts/harness cases): one file,
-// or standard input. --at tries thresholds on them.
-func runBacktest(args []string) int {
+// runBacktest scores exported judgements: a file of cases (scripts/harness
+// cases) or standard input, or with --dump a dump of a running system, whose
+// predictions are scored again from what happened (scripts/harness dump).
+// --at tries thresholds on them.
+func runBacktest(args []string, loc *time.Location) int {
 	fs := flag.NewFlagSet("backtest", flag.ContinueOnError)
 	at := fs.String("at", "", "시험할 문턱들, 쉼표로: 0.6,0.7,0.85")
+	dump := fs.String("dump", "", "scripts/harness dump 가 내려받은 폴더")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	in := io.Reader(os.Stdin)
-	if path := fs.Arg(0); path != "" {
-		f, err := os.Open(path)
+	var cases []backtest.Case
+	if *dump != "" {
+		d, err := ledger.Load(*dump)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 2
 		}
-		defer f.Close()
-		in = f
-	}
-	cases, err := backtest.Read(in)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 2
+		d.Inputs.Now, d.Inputs.Loc = time.Now(), loc
+		rows := ledger.Build(d.Inputs)
+		cases = ledger.Cases(rows)
+		c := ledger.Count(rows)
+		facts := ledger.Intervals(d.Facts, loc)
+		ended, single := 0, 0
+		for _, f := range facts {
+			if f.To != nil {
+				ended++
+			}
+			if f.Single {
+				single++
+			}
+		}
+		fmt.Printf("장부 %d줄 · 결과가 있는 판단 %d건 · 기다리는 것 %d건 · 무시된 카드 %d건 · 관문이 버린 것 %d건\n", c.Rows, c.Scored, c.Open, c.Ignored, c.Quiet)
+		fmt.Printf("사람이 직접 한 것 %d건(그중 관문이 버렸던 것 %d건) · 실시간 채점과 달라진 예측 %d건\n", c.Manual, c.ManualQuiet, c.Rescored)
+		fmt.Printf("사실 %d줄 · 하나만 맞는 사실 %d줄 · 끝난 사실 %d줄\n\n", len(facts), single, ended)
+	} else {
+		in := io.Reader(os.Stdin)
+		if path := fs.Arg(0); path != "" {
+			f, err := os.Open(path)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return 2
+			}
+			defer f.Close()
+			in = f
+		}
+		var err error
+		if cases, err = backtest.Read(in); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 2
+		}
 	}
 	fmt.Print(backtest.Report(cases))
 	for _, s := range strings.Split(*at, ",") {

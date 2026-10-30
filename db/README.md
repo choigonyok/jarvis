@@ -10,6 +10,7 @@ raw_events (추가 전용)                  ← 카드 알림 원문 (spending-s
 input.records                           ← 일어난 일의 기록. 재생이 읽는 것 (아래)
 commitments · workout_* · card_* · …     ← 각 서비스의 정확한 사실
 mind_*                                   ← mind 의 세계 모델·관문·노트
+mind.outcomes · mind.facts               ← 결과 장부와 기간이 붙은 사실 (원본에서 다시 만듦)
 ```
 
 **원문 보관(`raw_events`)은 가계부만 씁니다.** 처음에는 모든 수집기가 본 것을 여기에
@@ -97,6 +98,10 @@ to-be 구조의 입구가 될 표입니다. 지금은 재생할 것을 쌓는 �
 - **고치지 않습니다.** UPDATE 는 트리거가 막고, DELETE 는 raw 층만 됩니다. durable 을 사람 단위로 지워야 할 때는 `records_guard` 트리거를 껐다 켭니다(raw_events 와 같은 이유). raw 층의 보존기간 집행은 input-svc 가 들어올 때 함께 옵니다 - 그때까지 `job.*` 은 `job_events` 와 같은 글을 담고, 그 글에는 카드로 받은 연락처가 있을 수 있습니다. 그래서 읽을 수 있는 역할은 소유자뿐이고, `scripts/harness export` 는 글을 빼고 내려받습니다.
 - **달마다 나눕니다.** 2028-12 까지 미리 만들어 두었고 그 뒤는 기본 파티션이 받습니다.
 - **기록이 나가지 않아도 일은 계속됩니다.** 에이전트의 쓰기는 줄에 넣기만 하고(`gocommon/record`), 트리거는 실패를 경고로만 남깁니다. 멈추면 상태 탭의 '에이전트의 기록'이 빨개집니다.
+
+## 결과 장부와 사실 (mind.*, 076)
+
+`mind.outcomes` 는 판단마다 한 줄, `mind.facts` 는 사실과 그것이 맞는 기간입니다. 둘 다 원본(`mind_intents`·`mind_predictions`·`mind_occurrences`·`mind_facts`)에서 밤마다 통째로 다시 만드는 투영이라 지워도 됩니다. `mind.facts` 의 하나만 맞는 사실(`single`)은 같은 주어·서술어의 기간이 겹치면 배제 제약이 거절합니다.
 
 ## 일정 충돌
 

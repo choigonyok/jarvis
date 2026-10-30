@@ -667,6 +667,80 @@ type CalendarAction struct {
 	Event   CalendarEvent `json:"event"`
 }
 
+// Outcome is one judgement on the result ledger: what was judged, how sure,
+// and what came of it. The ledger is rebuilt from the intents and predictions
+// and what actually happened (internal/ledger), so that a prediction is
+// scored by the record of the world and not by whether its occurrence
+// happened to arrive before the deadline.
+type Outcome struct {
+	ID string `json:"id"` // intent:<id> | prediction:<id>
+	// Source is what kind of judgement: card (asked), told (done, then told),
+	// quiet (dropped by the gate), notice (only said), prediction.
+	Source  string `json:"source"`
+	Skill   string `json:"skill,omitempty"`
+	Context string `json:"context,omitempty"`
+	Kind    string `json:"kind,omitempty"`
+	// Rule is what raised it: the reason a site gives, a prediction's key.
+	Rule string  `json:"rule,omitempty"`
+	P    float64 `json:"p"`
+	// Base is what knowing only how often the thing happens would have said.
+	Base   *float64 `json:"base,omitempty"`
+	Result string   `json:"result"`
+	// Manual: it was not done through the assistant, and the operator did it
+	// by hand. For something held back, that is a miss.
+	Manual bool `json:"manual,omitempty"`
+	// Live is how the prediction was scored at its deadline, when that
+	// differs from what the record of the world says.
+	Live       *bool      `json:"live,omitempty"`
+	At         time.Time  `json:"at"`
+	ResolvedAt *time.Time `json:"resolvedAt,omitempty"`
+}
+
+// Results of an outcome. Approved, kept and hit are right; rejected, undone
+// and miss are wrong. The rest say nothing about the judgement: ignored is
+// not a refusal.
+const (
+	ResultApproved   = "approved"
+	ResultRejected   = "rejected"
+	ResultUndone     = "undone"
+	ResultKept       = "kept"
+	ResultIgnored    = "ignored"
+	ResultCovered    = "covered"
+	ResultSuperseded = "superseded"
+	ResultDropped    = "dropped"
+	ResultSent       = "sent"
+	ResultHit        = "hit"
+	ResultMiss       = "miss"
+	ResultOpen       = "open"
+)
+
+// Scored says whether the outcome holds the judgement to a result, and if
+// so whether it was right.
+func (o Outcome) Scored() (hit, ok bool) {
+	switch o.Result {
+	case ResultApproved, ResultKept, ResultHit:
+		return true, true
+	case ResultRejected, ResultUndone, ResultMiss:
+		return false, true
+	}
+	return false, false
+}
+
+// FactRow is a fact with the time it holds: the facts table, the one source
+// of what is true once memory is rebuilt from it. Single facts (where one
+// lives) cannot overlap for one subject; the database refuses it.
+type FactRow struct {
+	ID        string     `json:"id"`
+	Subject   string     `json:"subject"`
+	Predicate string     `json:"predicate"`
+	Object    string     `json:"object"`
+	Text      string     `json:"text"`
+	From      time.Time  `json:"from"`
+	To        *time.Time `json:"to,omitempty"` // nil: still true
+	P         float64    `json:"p"`
+	Single    bool       `json:"single,omitempty"`
+}
+
 // Fact is something worth remembering that is neither a plan nor a loop: what
 // someone likes or cannot eat, who is whose friend, a job changed, a thing
 // bought. It is read from a conversation like any change, resting on a quoted

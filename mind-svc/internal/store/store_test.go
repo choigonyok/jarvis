@@ -281,11 +281,47 @@ func messages(t *testing.T, st Store) {
 	}
 }
 
+// ledger is what a rebuild leaves: the rows it was given, and no others.
+func ledger(t *testing.T, st Store) {
+	ctx := context.Background()
+	at := time.Date(2026, 10, 12, 20, 0, 0, 0, time.UTC)
+	base := 0.7
+	if err := st.ReplaceOutcomes(ctx, []model.Outcome{
+		{ID: "intent:a", Source: "card", Skill: "schedule", Context: "calendar.create", Kind: "calendar.create", Rule: "이유", P: 0.8, Result: model.ResultRejected, Manual: true, At: at},
+		{ID: "prediction:b", Source: "prediction", P: 0.6, Base: &base, Result: model.ResultHit, At: at.Add(time.Hour)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ReplaceOutcomes(ctx, []model.Outcome{
+		{ID: "intent:a", Source: "card", Skill: "schedule", Context: "calendar.create", Kind: "calendar.create", Rule: "이유", P: 0.8, Result: model.ResultRejected, Manual: true, At: at},
+		{ID: "prediction:c", Source: "prediction", P: 0.6, Base: &base, Result: model.ResultHit, At: at.Add(time.Hour)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := st.Outcomes(ctx)
+	if err != nil || len(rows) != 2 || rows[0].ID != "intent:a" || !rows[0].Manual || rows[1].ID != "prediction:c" || *rows[1].Base != 0.7 {
+		t.Fatalf("장부: %+v %v", rows, err)
+	}
+
+	end := at.Add(24 * time.Hour)
+	if err := st.ReplaceFactRows(ctx, []model.FactRow{
+		{ID: "f1", Subject: "self", Predicate: "LIVES_IN", Object: "서울", Text: "서울에 산다", From: at, To: &end, P: 0.7, Single: true},
+		{ID: "f2", Subject: "self", Predicate: "LIVES_IN", Object: "부산", From: end, P: 0.9, Single: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	facts, err := st.FactRows(ctx)
+	if err != nil || len(facts) != 2 || facts[0].To == nil || !facts[0].To.Equal(end) || facts[1].To != nil || !facts[1].Single {
+		t.Fatalf("사실: %+v %v", facts, err)
+	}
+}
+
 func TestMemory(t *testing.T) {
 	messages(t, NewMemory())
 	contract(t, NewMemory())
 	facts(t, NewMemory())
 	policy(t, NewMemory())
+	ledger(t, NewMemory())
 	occurrences(t, NewMemory())
 	judge(t, NewMemory())
 	self(t, NewMemory())
@@ -495,6 +531,29 @@ func policy(t *testing.T, st Store) {
 	}
 }
 
+// One address at a time is the database's rule, not only the rebuild's.
+func exclusion(t *testing.T, st Store) {
+	ctx := context.Background()
+	at := time.Date(2026, 10, 12, 20, 0, 0, 0, time.UTC)
+	err := st.ReplaceFactRows(ctx, []model.FactRow{
+		{ID: "a", Subject: "self", Predicate: "LIVES_IN", Object: "서울", From: at, P: 1, Single: true},
+		{ID: "b", Subject: "self", Predicate: "LIVES_IN", Object: "부산", From: at.Add(time.Hour), P: 1, Single: true},
+	})
+	if err == nil {
+		t.Fatal("겹치는 주소는 거절해야 합니다")
+	}
+	if facts, _ := st.FactRows(ctx); len(facts) == 0 {
+		t.Fatal("실패한 교체는 있던 것을 지우면 안 됩니다")
+	}
+	// Many-valued facts may overlap.
+	if err := st.ReplaceFactRows(ctx, []model.FactRow{
+		{ID: "a", Subject: "self", Predicate: "LIKES", Object: "커피", From: at, P: 1},
+		{ID: "b", Subject: "self", Predicate: "LIKES", Object: "차", From: at.Add(time.Hour), P: 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // Against a throwaway Postgres with migrations 035 and 038 applied:
 // MIND_TEST_DATABASE_URL=postgres://... go test ./internal/store/
 func TestPostgres(t *testing.T) {
@@ -507,12 +566,14 @@ func TestPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	resetTables(t, dsn, `truncate mind_messages, mind_rooms, mind_entities, mind_changes, mind_timers, mind_intents, mind_cursors, mind_facts, mind_aliases, mind_policy_stats, mind_occurrences, mind_links, mind_thing_classes, mind_link_cache, mind_pattern_counts, mind_notes, mind_note_versions, mind_predictions, mind_expectations, mind_reply_examples, mind_llm_usage, mind_observations, mind_preferences restart identity cascade`)
+	resetTables(t, dsn, `truncate mind_messages, mind_rooms, mind_entities, mind_changes, mind_timers, mind_intents, mind_cursors, mind_facts, mind_aliases, mind_policy_stats, mind_occurrences, mind_links, mind_thing_classes, mind_link_cache, mind_pattern_counts, mind_notes, mind_note_versions, mind_predictions, mind_expectations, mind_reply_examples, mind_llm_usage, mind_observations, mind_preferences, mind.outcomes, mind.facts restart identity cascade`)
 	key := make([]byte, 32)
 	st := NewPostgres(pool, key)
 	contract(t, st)
 	facts(t, st)
 	policy(t, st)
+	ledger(t, st)
+	exclusion(t, st)
 	occurrences(t, st)
 	judge(t, st)
 	self(t, st)
@@ -534,7 +595,8 @@ func TestPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	back, err := st.Fact(ctx, "mf_gaveup")
-	if err != nil || back.Status != model.FactPending || back.Tries != 0 || back.NextTry.After(time.Now()) {
+	// now() is the database's clock, which may run a little ahead of this one.
+	if err != nil || back.Status != model.FactPending || back.Tries != 0 || back.NextTry.After(time.Now().Add(2*time.Second)) {
 		t.Fatalf("068 의 되살림: %+v %v", back, err)
 	}
 	if due, _ := st.DueFacts(ctx, time.Now(), 50); !slices.ContainsFunc(due, func(f model.Fact) bool { return f.ID == "mf_gaveup" }) {

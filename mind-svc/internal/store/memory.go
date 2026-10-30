@@ -33,6 +33,8 @@ type Memory struct {
 	patterns map[[4]string]model.Pattern
 	notes    map[string]model.Note
 	versions map[string][]model.Note
+	outcomes []model.Outcome
+	factRows []model.FactRow
 	preds    map[string]model.Prediction
 	expects  map[[2]string]model.Expectation
 	replies  []model.ReplySituation
@@ -773,6 +775,32 @@ func (m *Memory) NoteVersions(_ context.Context, id string) ([]model.Note, error
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return slices.Clone(m.versions[id]), nil
+}
+
+func (m *Memory) ReplaceOutcomes(_ context.Context, rows []model.Outcome) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.outcomes = slices.Clone(rows)
+	return nil
+}
+
+func (m *Memory) Outcomes(context.Context) ([]model.Outcome, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return slices.Clone(m.outcomes), nil
+}
+
+func (m *Memory) ReplaceFactRows(_ context.Context, rows []model.FactRow) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.factRows = slices.Clone(rows)
+	return nil
+}
+
+func (m *Memory) FactRows(context.Context) ([]model.FactRow, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return slices.Clone(m.factRows), nil
 }
 
 func (m *Memory) PutPrediction(_ context.Context, p model.Prediction) error {

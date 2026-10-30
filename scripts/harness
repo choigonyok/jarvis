@@ -7,8 +7,10 @@
 #   scripts/harness replay 파일     내려받은 기록을 지금 코드로 재생해 같은 답이 나오는지 본다
 #   scripts/harness cases           맥미니의 판단과 결과를 내려받는다(표준 출력)
 #   scripts/harness backtest 파일 [--at 0.6,0.7]   확신과 실제를 비교한다
+#   scripts/harness dump 폴더       맥미니의 의도·예측·발생·사실을 저장소 밖 폴더에 내려받는다
+#   scripts/harness measure 폴더 [--at 0.6,0.7]    그 폴더로 결과 장부를 만들어 잰다 - 예측은 실제 발생으로 다시 채점
 #
-# 내려받은 파일에는 일정 제목·가맹점 같은 사적인 것이 있을 수 있다. 저장소 안에 두지 말 것.
+# 내려받은 파일에는 일정 제목·가맹점 같은 사적인 것이 있다. 저장소 안에 두지 말 것.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HOST="${MINI_HOST:-macmini}"
@@ -89,19 +91,43 @@ case "$cmd" in
     file="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
     (cd "$ROOT/agent" && JARVIS_REPLAY_FILE="$file" go test -count=1 -v -run 'TestReplayFile' ./internal/httpapi) ;;
   cases)
-    readonly_sql "select json_build_object('source', 'card',
-        'group', (body->>'skill') || '/' || coalesce(nullif(body->>'context', ''), body->>'kind'),
-        'p', (body->>'confidence')::float, 'hit', status = 'executed', 'at', body->>'createdAt')
-      from mind_intents where body->>'decidedBy' = 'user' and status in ('executed', 'rejected', 'undone')
-      union all
-      select json_build_object('source', 'prediction',
-        'group', split_part(split_part(coalesce(nullif(body->>'key', ''), target), '/', 1), ':', 1),
-        'p', (body->>'prob')::float, 'hit', (body->>'outcome')::boolean,
-        'base', (body->>'base')::float, 'at', body->>'due')
-      from mind_predictions where scored and body ? 'outcome'" ;;
+    # 결과 장부가 있으면 그것을(예측은 실제 발생으로 다시 채점돼 있다). 아직이면 원본에서 읽되 마감 때의 채점 그대로다.
+    if [[ "$(readonly_sql "select to_regclass('mind.outcomes') is not null")" == "t" ]]; then
+      readonly_sql "select json_build_object('source', source,
+          'group', case when source = 'prediction' then context else skill || '/' || context end,
+          'p', p, 'hit', result in ('approved', 'kept', 'hit'), 'base', body->'base', 'at', at)
+        from mind.outcomes where result in ('approved', 'kept', 'hit', 'rejected', 'undone', 'miss')"
+    else
+      readonly_sql "select json_build_object('source', 'card',
+          'group', (body->>'skill') || '/' || coalesce(nullif(body->>'context', ''), body->>'kind'),
+          'p', (body->>'confidence')::float, 'hit', status = 'executed', 'at', body->>'createdAt')
+        from mind_intents where body->>'decidedBy' = 'user' and status in ('executed', 'rejected', 'undone')
+        union all
+        select json_build_object('source', 'prediction',
+          'group', split_part(split_part(coalesce(nullif(body->>'key', ''), target), '/', 1), ':', 1),
+          'p', (body->>'prob')::float, 'hit', (body->>'outcome')::boolean,
+          'base', (body->>'base')::float, 'at', body->>'due')
+        from mind_predictions where scored and body ? 'outcome'"
+    fi ;;
+  dump)
+    [[ $# -eq 1 ]] || { echo "사용: scripts/harness dump 폴더" >&2; exit 2; }
+    mkdir -p "$1"
+    dir="$(cd "$1" && pwd)"
+    case "$dir/" in "$ROOT"/*) echo "저장소 밖의 폴더여야 합니다 - 사적인 기록입니다" >&2; exit 2 ;; esac
+    chmod 700 "$dir"
+    readonly_sql "select body from mind_intents order by created_at" > "$dir/intents.jsonl"
+    readonly_sql "select body from mind_predictions order by due" > "$dir/predictions.jsonl"
+    readonly_sql "select body from mind_occurrences order by at" > "$dir/occurrences.jsonl"
+    readonly_sql "select body from mind_facts order by created_at" > "$dir/facts.jsonl"
+    readonly_sql "select json_build_object('name', name, 'class', class) from mind_thing_classes" > "$dir/things.jsonl"
+    wc -l "$dir"/*.jsonl | tail -6 ;;
+  measure)
+    [[ $# -ge 1 ]] || { echo "사용: scripts/harness measure 폴더 [--at 0.6,0.7]" >&2; exit 2; }
+    dir="$(cd "$1" && pwd)"; shift
+    (cd "$ROOT/mind-svc" && go run . backtest "$@" --dump "$dir") ;;
   backtest)
     [[ $# -ge 1 ]] || { echo "사용: scripts/harness backtest 파일 [--at 0.6,0.7]" >&2; exit 2; }
     file="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"; shift
     (cd "$ROOT/mind-svc" && go run . backtest "$@" "$file") ;;
-  *) sed -n '2,10p' "$0"; exit 2 ;;
+  *) sed -n '2,13p' "$0"; exit 2 ;;
 esac

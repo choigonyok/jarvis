@@ -170,6 +170,14 @@ type Store interface {
 	PutPreference(ctx context.Context, p model.Preference) error
 	Preferences(ctx context.Context) ([]model.Preference, error)
 
+	// The result ledger and the facts with the time they hold: both are made
+	// again whole from what they are read from (internal/ledger), so a
+	// rebuild replaces them.
+	ReplaceOutcomes(ctx context.Context, rows []model.Outcome) error
+	Outcomes(ctx context.Context) ([]model.Outcome, error)
+	ReplaceFactRows(ctx context.Context, rows []model.FactRow) error
+	FactRows(ctx context.Context) ([]model.FactRow, error)
+
 	// Aliases: names in conversation → memory nodes. Putting a name again
 	// moves it to the node given and counts it seen once more.
 	PutAlias(ctx context.Context, a model.Alias) error

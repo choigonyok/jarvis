@@ -18,6 +18,7 @@
 //	POST /api/intents/{id}/{approve|reject|undo}   reject takes {reason}
 //	POST /api/policy/rebuild          recount approval stats from the intents
 //	POST /api/patterns/rebuild        recount repetitions from the plans and purchases
+//	POST /api/ledger/rebuild          make the result ledger and the facts table again
 //	GET  /api/notes                   the notes about the operator, every status
 //	POST /api/notes/{id}              {status, text, reason} the operator on a note
 //	GET  /api/notes/{id}/versions     a note's versions, with why each
@@ -223,6 +224,14 @@ func (s *Server) Handler() http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]int{"plans": n})
+	}))
+	mux.HandleFunc("POST /api/ledger/rebuild", s.auth(false, func(w http.ResponseWriter, r *http.Request) {
+		rows, facts, err := s.m.RebuildLedger(r.Context())
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]int{"outcomes": rows, "facts": facts})
 	}))
 	mux.HandleFunc("GET /api/entities/{id}/changes", s.auth(false, s.changes))
 	mux.HandleFunc("POST /api/replay", s.auth(false, s.replay))

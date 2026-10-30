@@ -951,6 +951,74 @@ func (p *Postgres) NoteVersions(ctx context.Context, id string) ([]model.Note, e
 	return scanBodies[model.Note](ctx, p, `select body from mind_note_versions where note_id = $1 order by version`, id)
 }
 
+func (p *Postgres) ReplaceOutcomes(ctx context.Context, rows []model.Outcome) error {
+	tx, err := p.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `delete from mind.outcomes`); err != nil {
+		return err
+	}
+	b := &pgx.Batch{}
+	for _, o := range rows {
+		body, err := json.Marshal(o)
+		if err != nil {
+			return err
+		}
+		b.Queue(`insert into mind.outcomes (id, source, skill, context, kind, rule, p, result, manual, at, resolved_at, body)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+			o.ID, o.Source, o.Skill, o.Context, o.Kind, o.Rule, o.P, o.Result, o.Manual, o.At, o.ResolvedAt, body)
+	}
+	if err := tx.SendBatch(ctx, b).Close(); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (p *Postgres) Outcomes(ctx context.Context) ([]model.Outcome, error) {
+	return scanBodies[model.Outcome](ctx, p, `select body from mind.outcomes order by at, id`)
+}
+
+func (p *Postgres) ReplaceFactRows(ctx context.Context, rows []model.FactRow) error {
+	tx, err := p.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `delete from mind.facts`); err != nil {
+		return err
+	}
+	b := &pgx.Batch{}
+	for _, f := range rows {
+		b.Queue(`insert into mind.facts (id, subject, predicate, object, text, valid, p, single)
+			values ($1, $2, $3, $4, $5, tstzrange($6, $7, '[)'), $8, $9)`,
+			f.ID, f.Subject, f.Predicate, f.Object, f.Text, f.From, f.To, f.P, f.Single)
+	}
+	if err := tx.SendBatch(ctx, b).Close(); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (p *Postgres) FactRows(ctx context.Context) ([]model.FactRow, error) {
+	rows, err := p.db.Query(ctx, `select id, subject, predicate, object, text, lower(valid), upper(valid), p, single
+		from mind.facts order by lower(valid), id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.FactRow
+	for rows.Next() {
+		var f model.FactRow
+		if err := rows.Scan(&f.ID, &f.Subject, &f.Predicate, &f.Object, &f.Text, &f.From, &f.To, &f.P, &f.Single); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
 func (p *Postgres) PutPrediction(ctx context.Context, pr model.Prediction) error {
 	body, err := json.Marshal(pr)
 	if err != nil {
