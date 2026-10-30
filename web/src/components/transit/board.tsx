@@ -1,7 +1,7 @@
 "use client";
 
 import type { Who } from "@/lib/track";
-import { type Plan, type Route, clockOf, countdown, stageOf } from "@/lib/transit";
+import { type Arrival, type Plan, type Route, clockOf, countdown, stageOf } from "@/lib/transit";
 import { cn } from "@/lib/utils";
 
 /** Each person's own face, as on the 위치 map. */
@@ -88,18 +88,90 @@ function Rail({ who, plan, route, now }: { who: Who; plan: Plan; route: Route; n
   );
 }
 
+/** Room on a bus: the empty seats where they are counted, else how full it is. */
+function Room({ arrival }: { arrival: Arrival }) {
+  const { seats, crowd } = arrival;
+  if (seats != null) {
+    if (seats === 0) return <span className="text-reject">만석</span>;
+    return (
+      <>
+        빈자리 <span className="font-score text-[19px] leading-none font-semibold">{seats}</span>
+      </>
+    );
+  }
+  if (!crowd) return null;
+  return <span className={crowd === "만차" || crowd === "매우혼잡" ? "text-reject" : undefined}>{crowd}</span>;
+}
+
+/**
+ * What is coming on this line, in the order it comes: the one to catch bright,
+ * the ones after it, and first the ones too soon to walk to - the feeds tell
+ * of only the next two buses, and those may be all there is to see.
+ */
+function Coming({ plan, now }: { plan: Plan; now: number }) {
+  const rows = [
+    ...(plan.missed ?? []).filter((a) => Date.parse(a.at) > now - 30_000).slice(-2).map((a) => ({ a, kind: "missed" })),
+    ...(plan.catch ? [{ a: plan.catch, kind: "catch" }] : []),
+    ...plan.next.slice(0, 3).map((a) => ({ a, kind: "next" })),
+  ];
+  if (rows.length === 0) return null;
+  return (
+    <ul aria-label="오는 차" className="mt-3 divide-y divide-edge-soft border-t border-edge-soft">
+      {rows.map(({ a, kind }) => {
+        const min = Math.round((Date.parse(a.at) - now) / 60_000);
+        const about = [a.away ? `${a.away}번째 전` : "", a.note, a.rough ? "시각은 짐작" : "", kind === "missed" ? "못 타요" : ""].filter(Boolean).join(" · ");
+        return (
+          <li
+            key={`${a.at}-${a.vehicle ?? ""}`}
+            aria-current={kind === "catch" ? "true" : undefined}
+            className={cn(
+              "tnum flex min-h-10 items-center gap-3 py-1.5 text-[13px]",
+              kind === "catch" ? "font-medium text-foreground" : kind === "missed" ? "text-faint" : "text-dim",
+            )}
+          >
+            <span className="w-11 shrink-0">{clockOf(a.at)}</span>
+            <span className="w-12 shrink-0">{min <= 0 ? "곧" : `${min}분 뒤`}</span>
+            <span className="min-w-0 flex-1 truncate font-normal">{about}</span>
+            <span className="shrink-0 font-normal">
+              <Room arrival={a} />
+            </span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 /**
  * The board for one route: one's face saying how it stands, how long until one
- * must leave, the rail, and the line to catch - "18:09 7770 타기 · 도보 10분".
- * Between reads the countdown and the words go on with the clock.
+ * must leave, the rail, the line to catch - "18:09 7770 타기 · 도보 10분" - and
+ * what is coming, with the seats left on each. Between reads the countdown and
+ * the words go on with the clock.
  */
 export function Board({ who, route, plan, now }: { who: Who; route: Route; plan?: Plan; now: number }) {
   const leave = plan?.leave ? Date.parse(plan.leave) : NaN;
-  const live = plan && plan.catch && Number.isFinite(leave) ? stageOf(leave, now) : null;
-  const stage = live?.stage ?? plan?.stage ?? "off";
-  const say = live?.say ?? plan?.say ?? "불러오는 중이에요";
+  const last = plan?.last ? Date.parse(plan.last) : leave;
+  const running = plan && plan.catch && Number.isFinite(leave) ? stageOf(leave, now, last) : null;
+  // Run out between two reads: nothing to count down to until the next says what is.
+  const live = running?.stage === "none" ? null : running;
+  const stage = running?.stage ?? plan?.stage ?? "off";
+  const say = running?.say ?? plan?.say ?? "불러오는 중이에요";
   const late = stage === "run";
+  const pastGood = live !== null && now > leave;
   const shown: Plan = plan ? { ...plan, stage } : { route: route.id, now: "", next: [], stage: "off", say };
+  const caption = live
+    ? late
+      ? "나갔어야 할 때가 지났어요"
+      : pastGood
+        ? "늦어도 이때까지 나가야 해요"
+        : "나갈 때까지"
+    : plan?.error
+      ? plan.error
+      : stage !== "none"
+        ? " "
+        : plan?.missed?.length
+          ? `걸어서 ${route.walk}분이라 놓쳐요. 다음 차가 잡히면 세어 드려요.`
+          : "지금 잡히는 차가 없어요. 아직 출발 전이거나 운행이 끝났을 수 있어요.";
   return (
     <section aria-label={`${route.name} 출발`} className="pt-1">
       <div className="flex items-start gap-3">
@@ -119,11 +191,9 @@ export function Board({ who, route, plan, now }: { who: Who; route: Route; plan?
 
       <div className="mt-4">
         <p className={cn("font-score tnum text-[84px] leading-[0.95] font-semibold tracking-[-0.01em]", late ? "text-reject" : live ? "text-foreground" : "text-faint")}>
-          {live ? countdown(Math.abs(leave - now)) : "--:--"}
+          {live ? countdown(Math.abs((pastGood ? last : leave) - now)) : "--:--"}
         </p>
-        <p className="mt-1 text-[13px] text-dim">
-          {live ? (late ? "나갔어야 할 때가 지났어요" : "나갈 때까지") : plan?.error ? plan.error : stage === "none" ? "곧 오는 차가 없어요" : " "}
-        </p>
+        <p className="mt-1 text-[13px] text-dim">{caption}</p>
       </div>
 
       <div className="mt-6">
@@ -137,15 +207,9 @@ export function Board({ who, route, plan, now }: { who: Who; route: Route; plan?
         <p className="shrink-0 text-[15px] text-dim">도보 {route.walk}분</p>
       </div>
       <p className="mt-0.5 truncate text-[12.5px] text-dim">
-        {[route.stop.name, plan?.catch?.line.toward || route.line.toward, plan?.catch?.note, plan?.catch?.rough ? "도착 시각은 짐작" : ""]
-          .filter(Boolean)
-          .join(" · ")}
+        {[route.stop.name, plan?.catch?.line.toward || route.line.toward].filter(Boolean).join(" · ")}
       </p>
-      {plan && plan.next.length > 0 ? (
-        <p className="tnum mt-2 text-[12.5px] text-faint">
-          다음 {plan.next.slice(0, 3).map((a) => clockOf(a.at)).join(" · ")}
-        </p>
-      ) : null}
+      {plan ? <Coming plan={plan} now={now} /> : null}
     </section>
   );
 }

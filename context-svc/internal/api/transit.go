@@ -298,8 +298,15 @@ func (s *Server) nudge(ctx context.Context) {
 			if p.Catch == nil {
 				continue
 			}
+			catch, leave := *p.Catch, p.Leave
+			// Past leaving in good time for this one: the plan stays on it
+			// while it can be reached, the nudges go on to the next.
+			if leave.Before(now.Add(-time.Minute)) && len(p.Next) > 0 {
+				catch = p.Next[0]
+				leave = catch.At.Add(-time.Duration(max(route.Walk, 0)+max(route.Spare, 0)) * time.Minute)
+			}
 			stage := ""
-			switch left := p.Leave.Sub(now); {
+			switch left := leave.Sub(now); {
 			case left >= -time.Minute && left <= 2*time.Minute:
 				stage = "go"
 			case left > 2*time.Minute && left <= 15*time.Minute:
@@ -308,27 +315,30 @@ func (s *Server) nudge(ctx context.Context) {
 			if stage == "" {
 				continue
 			}
-			vehicle := p.Catch.Vehicle
+			vehicle := catch.Vehicle
 			if vehicle == "" {
-				vehicle = p.Catch.At.In(s.loc).Truncate(5 * time.Minute).Format("0102-1504")
+				vehicle = catch.At.In(s.loc).Truncate(5 * time.Minute).Format("0102-1504")
 			}
 			key := fmt.Sprintf("transit:%s:%s:%s:%s", source, route.ID, vehicle, stage)
 			if !s.transitSaid.first(key, now) {
 				continue
 			}
-			s.sayNudge(source, route, p, stage, key)
+			s.sayNudge(source, route, catch, leave, now, stage, key)
 		}
 	}
 }
 
-func (s *Server) sayNudge(source string, route transit.Route, p transit.Plan, stage, key string) {
-	board := p.Catch.At.In(s.loc).Format("15:04")
-	line := p.Catch.Line.Name
-	if route.Stop.Kind == transit.Subway && p.Catch.Line.Toward != "" {
-		line += "(" + strings.TrimSpace(strings.SplitN(p.Catch.Line.Toward, " - ", 2)[0]) + ")"
+func (s *Server) sayNudge(source string, route transit.Route, catch transit.Arrival, leave, now time.Time, stage, key string) {
+	board := catch.At.In(s.loc).Format("15:04")
+	line := catch.Line.Name
+	if route.Stop.Kind == transit.Subway && catch.Line.Toward != "" {
+		line += "(" + strings.TrimSpace(strings.SplitN(catch.Line.Toward, " - ", 2)[0]) + ")"
 	}
 	walk := fmt.Sprintf("%s까지 도보 %d분", route.Stop.Name, route.Walk)
-	title, body := "슬슬 짐 싸야 해요", fmt.Sprintf("%s %s 타기 · %s · %d분 뒤 나가요", board, line, walk, max(1, int(p.Leave.Sub(p.Now).Minutes()+0.5)))
+	if catch.Seats != nil {
+		walk += fmt.Sprintf(" · 빈자리 %d", *catch.Seats)
+	}
+	title, body := "슬슬 짐 싸야 해요", fmt.Sprintf("%s %s 타기 · %s · %d분 뒤 나가요", board, line, walk, max(1, int(leave.Sub(now).Minutes()+0.5)))
 	if stage == "go" {
 		title, body = "지금 나가요", fmt.Sprintf("%s %s 타기 · %s", board, line, walk)
 	}
@@ -338,9 +348,9 @@ func (s *Server) sayNudge(source string, route transit.Route, p transit.Plan, st
 	}
 	s.events.Emit(map[string]any{
 		"source": "context", "type": "transit." + stage, "subject": route.Name,
-		"data":       map[string]any{"route": route.ID, "name": route.Name, "board": p.Catch.At, "leave": p.Leave, "who": audience},
+		"data":       map[string]any{"route": route.ID, "name": route.Name, "board": catch.At, "leave": leave, "who": audience},
 		"key":        key,
-		"occurredAt": p.Now,
+		"occurredAt": now,
 		"notify":     map[string]string{"tier": "now", "title": title, "body": body, "url": "/transit", "audience": audience},
 	})
 	s.log.Info("출발을 알립니다", "who", audience, "route", route.Name, "stage", stage, "board", board)

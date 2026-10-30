@@ -168,6 +168,31 @@ func TestTransitNudge(t *testing.T) {
 		}
 	case <-time.After(300 * time.Millisecond):
 	}
+	// Past leaving in good time for one, while it can still be reached: the
+	// plan stays on it, and the nudges go on to the next, saying its seats.
+	seats := 12
+	p.today.Store(base.Add(2 * time.Minute))
+	feed.arrivals["301"] = []transit.Arrival{
+		{Line: transit.Line{ID: "9", Name: "3007"}, At: base.Add(12 * time.Minute), Vehicle: "a"},
+		{Line: transit.Line{ID: "9", Name: "3007"}, At: base.Add(30 * time.Minute), Vehicle: "b", Seats: &seats},
+	}
+	second := `{"routes":[{"name":"집","stop":{"kind":"bus","region":"gyeonggi","id":"301","name":"강남역"},"line":{"id":"9","name":"3007"},"walk":8,"spare":5,"days":[5],"from":"19:30","to":"21:00","push":true}]}`
+	if code, body := p.do("PUT", "/transit/routes", second, bearerAPI); code != 200 {
+		t.Fatalf("경로: %d %s", code, body)
+	}
+	if code, body := p.do("GET", "/transit", "", bearerAPI); code != 200 || !strings.Contains(body, `"stage":"go"`) || !strings.Contains(body, `"vehicle":"a"`) {
+		t.Fatalf("여유를 넘겨도 걸어서 탈 수 있으면 그 차: %d %s", code, body)
+	}
+	p.server.nudge(context.Background())
+	select {
+	case e := <-p.events:
+		n, _ := e["notify"].(map[string]any)
+		if e["type"] != "transit.pack" || n["body"] != "20:30 3007 타기 · 강남역까지 도보 8분 · 빈자리 12 · 15분 뒤 나가요" {
+			t.Fatalf("다음 차 알림: %v", e)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("다음 차 알림이 없음")
+	}
 	// Outside the hours: not even asked.
 	asked := feed.asked
 	p.today.Store(base.Add(2 * time.Hour))

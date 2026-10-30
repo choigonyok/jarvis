@@ -38,6 +38,10 @@ type Stop struct {
 	Lat  float64 `json:"lat,omitempty"`
 	Lon  float64 `json:"lon,omitempty"`
 	Dist int     `json:"dist,omitempty"` // meters from where it was looked for
+	// Was: the name it was asked for by, when it goes by another now.
+	Was string `json:"was,omitempty"`
+	// Like: found by a part of what was asked for, not by all of it.
+	Like bool `json:"like,omitempty"`
 }
 
 // Line is what stops there: a bus route, or a subway line in one direction.
@@ -47,6 +51,9 @@ type Line struct {
 	ID     string `json:"id"`
 	Name   string `json:"name"`             // 7770, 2호선
 	Toward string `json:"toward,omitempty"` // 강남역 방면, 성수행 - 역삼방면
+	// Order: a bus's place in its route at this stop. A route that passes a
+	// stop both ways is there twice under one id; this tells the two apart.
+	Order int `json:"order,omitempty"`
 }
 
 // Arrival is one vehicle coming to a stop.
@@ -56,12 +63,22 @@ type Arrival struct {
 	// Vehicle: which one (plate, train number) - so a nudge is said once
 	// for it, however its time moves.
 	Vehicle string `json:"vehicle,omitempty"`
-	Note    string `json:"note,omitempty"` // 급행, 막차, 3번째 전
+	Note    string `json:"note,omitempty"` // 급행, 막차
+	// Away: how many stops off a bus is now.
+	Away int `json:"away,omitempty"`
+	// Seats: a seated bus's empty seats as it goes now; nil where the feed
+	// counts none. Crowd: how full a bus is (여유, 보통, 혼잡, 매우혼잡, 만차).
+	Seats *int   `json:"seats,omitempty"`
+	Crowd string `json:"crowd,omitempty"`
 	// Rough: guessed from how far away it is, not a time the feed gave.
 	Rough bool `json:"rough,omitempty"`
 	// Way: a train's direction as the feed says it (상행, 내선), for one
 	// whose next stop is not a station known here.
 	Way string `json:"-"`
+	// Idle: no vehicle - a route's direction that is at this stop with
+	// nothing on it now, kept so the direction asked for can be told from
+	// the other one's buses (oneWay). Plans never hold one.
+	Idle bool `json:"-"`
 }
 
 // Route is a way one usually goes: from a stop, by a line, after a walk to it
@@ -98,35 +115,52 @@ type Plan struct {
 	Route string    `json:"route"`
 	Now   time.Time `json:"now"`
 	Catch *Arrival  `json:"catch,omitempty"`
+	// Leave is when to go, with the minutes to spare; Last, when one must at
+	// the latest, walking - and for two minutes after that, hurrying.
 	Leave time.Time `json:"leave,omitzero"`
+	Last  time.Time `json:"last,omitzero"`
 	Next  []Arrival `json:"next"`
-	Stage string    `json:"stage"`
-	Say   string    `json:"say"`
-	Error string    `json:"error,omitempty"`
+	// Missed: what is coming on this line sooner than one can walk there.
+	// A bus feed tells only the next two, so this may be all there is to see.
+	Missed []Arrival `json:"missed"`
+	Stage  string    `json:"stage"`
+	Say    string    `json:"say"`
+	Error  string    `json:"error,omitempty"`
 }
 
+// hurry is how much late one can leave and still make it.
+const hurry = 2 * time.Minute
+
 // Make is a route's plan at now, from the arrivals at its stop: the first of
-// its line one can still make - leaving in time for the walk and the minutes
-// to spare, or at most two minutes late, hurrying.
+// its line one can still make. The minutes to spare are a wish, not a limit:
+// a vehicle stays the one to catch while the walk still gets there, and for
+// two minutes more, hurrying. A bus feed tells only the next two vehicles, so
+// counting the spare against them left a long walk with nothing to catch
+// while its bus was in plain sight.
 func Make(r Route, arrivals []Arrival, now time.Time) Plan {
-	p := Plan{Route: r.ID, Now: now, Next: []Arrival{}}
+	p := Plan{Route: r.ID, Now: now, Next: []Arrival{}, Missed: []Arrival{}}
 	mine := takes(r, arrivals)
 	slices.SortFunc(mine, func(a, b Arrival) int { return a.At.Compare(b.At) })
-	ahead := time.Duration(max(r.Walk, 0)+max(r.Spare, 0)) * time.Minute
+	walk := time.Duration(max(r.Walk, 0)) * time.Minute
+	spare := time.Duration(max(r.Spare, 0)) * time.Minute
 	for i, a := range mine {
-		leave := a.At.Add(-ahead)
-		if leave.Before(now.Add(-2 * time.Minute)) {
+		last := a.At.Add(-walk)
+		if last.Before(now.Add(-hurry)) {
+			p.Missed = append(p.Missed, a)
 			continue
 		}
-		p.Catch, p.Leave, p.Next = &mine[i], leave, mine[i+1:]
+		p.Catch, p.Last, p.Leave, p.Next = &mine[i], last, last.Add(-spare), mine[i+1:]
 		break
 	}
 	if p.Catch == nil {
 		p.Stage, p.Say = None, "곧 오는 차가 없어요"
+		if len(p.Missed) > 0 {
+			p.Say = "지금 오는 차는 못 타요"
+		}
 		return p
 	}
 	switch left := p.Leave.Sub(now); {
-	case left < 0:
+	case now.After(p.Last):
 		p.Stage, p.Say = Run, "뛰면 탈 수 있어요"
 	case left <= 3*time.Minute:
 		p.Stage, p.Say = Go, "지금 나가요!"
@@ -142,7 +176,7 @@ func Make(r Route, arrivals []Arrival, now time.Time) Plan {
 
 // Failed is a plan with no live feed for it now, and why.
 func Failed(r Route, now time.Time, why string) Plan {
-	return Plan{Route: r.ID, Now: now, Next: []Arrival{}, Stage: Off, Say: "실시간 정보를 못 받았어요", Error: why}
+	return Plan{Route: r.ID, Now: now, Next: []Arrival{}, Missed: []Arrival{}, Stage: Off, Say: "실시간 정보를 못 받았어요", Error: why}
 }
 
 // Active is whether a route is gone at t (in loc): on one of its days, inside

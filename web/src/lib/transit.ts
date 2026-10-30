@@ -22,11 +22,33 @@ export type Stop = {
   lon?: number;
   /** Meters from where it was looked for. */
   dist?: number;
+  /** What it was asked for by, when it goes by another name now. */
+  was?: string;
+  /** Found by a part of what was asked for, not all of it. */
+  like?: boolean;
 };
 
-export type Line = { id: string; name: string; toward?: string };
+export type Line = {
+  id: string;
+  name: string;
+  toward?: string;
+  /** A bus's place on its route at this stop: which way, on a route that passes a stop both ways. */
+  order?: number;
+};
 
-export type Arrival = { line: Line; at: string; vehicle?: string; note?: string; rough?: boolean };
+export type Arrival = {
+  line: Line;
+  at: string;
+  vehicle?: string;
+  note?: string;
+  rough?: boolean;
+  /** How many stops off a bus is now. */
+  away?: number;
+  /** A seated bus's empty seats as it goes now; none where the feed counts none. */
+  seats?: number;
+  /** How full it is: 여유, 보통, 혼잡, 매우혼잡, 만차. */
+  crowd?: string;
+};
 
 export type Route = {
   id: string;
@@ -50,8 +72,13 @@ export type Plan = {
   route: string;
   now: string;
   catch?: Arrival;
+  /** When to go, with the minutes to spare. */
   leave?: string;
+  /** When one must at the latest, walking; two minutes past it, hurrying. */
+  last?: string;
   next: Arrival[];
+  /** What is coming sooner than one can walk there. */
+  missed?: Arrival[];
   stage: Stage;
   say: string;
   error?: string;
@@ -129,10 +156,11 @@ export function countdown(ms: number): string {
 export const DAY_NAMES = ["월", "화", "수", "목", "금", "토", "일"];
 
 /** The words for a stage, said again on the client as time passes between reads. */
-export function stageOf(leaveMs: number, nowMs: number): { stage: Stage; say: string } {
+export function stageOf(leaveMs: number, nowMs: number, lastMs = leaveMs): { stage: Stage; say: string } {
+  const late = nowMs - lastMs;
+  if (late > 2 * 60_000) return { stage: "none", say: "이번 차는 놓쳤어요" };
+  if (late > 0) return { stage: "run", say: "뛰면 탈 수 있어요" };
   const left = leaveMs - nowMs;
-  if (left < -2 * 60_000) return { stage: "none", say: "이번 차는 놓쳤어요" };
-  if (left < 0) return { stage: "run", say: "뛰면 탈 수 있어요" };
   if (left <= 3 * 60_000) return { stage: "go", say: "지금 나가요!" };
   if (left <= 10 * 60_000) return { stage: "soon", say: "곧 나가야 해요" };
   if (left <= 20 * 60_000) return { stage: "pack", say: "슬슬 짐 싸야 해요" };

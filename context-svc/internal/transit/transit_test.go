@@ -2,11 +2,13 @@ package transit
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -18,9 +20,9 @@ func at(hm string) time.Time {
 	return t
 }
 
-// The vehicle to make is the first one can still reach - leaving for the walk
-// and the minutes to spare, or up to two minutes late, hurrying - and what is
-// said follows how long until one must leave.
+// The vehicle to make is the first one can still reach - by the walk, or up to
+// two minutes late, hurrying - and what is said follows how long until one
+// should leave, with the minutes to spare.
 func TestMake(t *testing.T) {
 	route := Route{ID: "r", Line: Line{ID: "7770"}, Walk: 10, Spare: 1}
 	bus := func(hm string) Arrival { return Arrival{Line: Line{ID: "7770"}, At: at(hm)} }
@@ -35,8 +37,10 @@ func TestMake(t *testing.T) {
 		{"17:46", "18:09", Pack, "슬슬 짐 싸야 해요"},
 		{"17:52", "18:09", Soon, "곧 나가야 해요"},
 		{"17:57", "18:09", Go, "지금 나가요!"},
-		{"17:59", "18:09", Run, "뛰면 탈 수 있어요"},  // a minute late: hurry
-		{"18:01", "18:30", Pack, "슬슬 짐 싸야 해요"}, // three late: the next one, 18 minutes off
+		{"17:59", "18:09", Go, "지금 나가요!"},      // the spare is gone, the walk still makes it
+		{"18:00", "18:09", Run, "뛰면 탈 수 있어요"},  // a minute late for the walk: hurry
+		{"18:01", "18:09", Run, "뛰면 탈 수 있어요"},  // two late: the last that can
+		{"18:02", "18:30", Pack, "슬슬 짐 싸야 해요"}, // three late: the next one, 17 minutes off
 	} {
 		p := Make(route, []Arrival{bus("18:30"), other, bus("18:09")}, at(c.now))
 		if p.Catch == nil || !p.Catch.At.Equal(at(c.catch)) || p.Stage != c.stage || p.Say != c.say {
@@ -45,6 +49,17 @@ func TestMake(t *testing.T) {
 		if !p.Leave.Equal(p.Catch.At.Add(-11 * time.Minute)) {
 			t.Errorf("%s: 걸음 10분과 여유 1분 앞에 나서야 함: %v", c.now, p.Leave)
 		}
+		if !p.Last.Equal(p.Catch.At.Add(-10 * time.Minute)) {
+			t.Errorf("%s: 늦어도 걸음 10분 앞: %v", c.now, p.Last)
+		}
+	}
+	// Both of the two the feed tells of too soon for the walk: they are still
+	// there to see, with why they cannot be caught.
+	if p := Make(route, []Arrival{bus("18:04"), bus("18:07"), other}, at("18:00")); p.Catch != nil || p.Stage != None || p.Say != "지금 오는 차는 못 타요" || len(p.Missed) != 2 || !p.Missed[0].At.Equal(at("18:04")) {
+		t.Errorf("걸어서 못 타는 차: %+v", p)
+	}
+	if p := Make(route, []Arrival{bus("18:04"), bus("18:30")}, at("18:00")); p.Catch == nil || !p.Catch.At.Equal(at("18:30")) || len(p.Missed) != 1 {
+		t.Errorf("놓치는 차와 탈 차: %+v", p)
 	}
 	if p := Make(route, []Arrival{other}, at("17:00")); p.Catch != nil || p.Stage != None {
 		t.Errorf("다른 노선만: %+v", p)
@@ -80,6 +95,11 @@ func TestActive(t *testing.T) {
 	}
 }
 
+// running is the entries with a vehicle.
+func running(arr []Arrival) []Arrival {
+	return slices.DeleteFunc(slices.Clone(arr), func(a Arrival) bool { return a.Idle })
+}
+
 func feeds(t *testing.T, handler http.HandlerFunc) *Feeds {
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
@@ -100,8 +120,8 @@ func TestGyeonggi(t *testing.T) {
 		case "200000078":
 			w.Write([]byte(`{"response":{"comMsgHeader":{},"msgHeader":{"queryTime":"2026-10-26 18:00:00.0","resultCode":0,"resultMessage":"정상적으로 처리되었습니다."},
 				"msgBody":{"busArrivalList":[{"flag":"PASS","locationNo1":3,"locationNo2":9,"plateNo1":"경기70사1234","plateNo2":"경기70사5678",
-				"predictTime1":4,"predictTime2":17,"predictTimeSec1":250,"predictTimeSec2":1010,"remainSeatCnt1":12,"remainSeatCnt2":-1,
-				"routeDestName":"강남역","routeId":234000026,"routeName":"7770","stationId":200000078,"vehId1":1,"vehId2":2},
+				"predictTime1":4,"predictTime2":17,"predictTimeSec1":250,"predictTimeSec2":1010,"remainSeatCnt1":12,"remainSeatCnt2":-1,"crowded1":2,"crowded2":0,
+				"routeDestName":"강남역","routeId":234000026,"routeName":"7770","routeTypeCd":11,"staOrder":25,"stationId":200000078,"vehId1":1,"vehId2":2},
 				{"flag":"STOP","routeId":1,"routeName":"끝난노선","predictTimeSec1":60}]}}}`))
 		case "single":
 			w.Write([]byte(`{"response":{"msgHeader":{"resultCode":0},"msgBody":{"busArrivalList":{"routeId":5,"routeName":"5","predictTime1":3,"flag":"RUN"}}}}`))
@@ -112,15 +132,20 @@ func TestGyeonggi(t *testing.T) {
 		}
 	})
 	ctx := context.Background()
-	arr, err := f.Arrivals(ctx, Stop{Kind: Bus, Region: Gyeonggi, ID: "200000078"})
-	if err != nil || len(arr) != 2 || arr[0].Line.Name != "7770" || arr[0].Line.Toward != "강남역 방면" ||
-		!arr[0].At.Equal(at("18:00").Add(250*time.Second)) || arr[0].Note != "3번째 전 · 빈자리 12" || arr[1].Note != "9번째 전" || arr[0].Vehicle != "1" {
+	got, err := f.Arrivals(ctx, Stop{Kind: Bus, Region: Gyeonggi, ID: "200000078"})
+	arr := running(got)
+	if err != nil || len(arr) != 2 || arr[0].Line.Name != "7770" || arr[0].Line.Toward != "강남역 방면" || arr[0].Line.Order != 25 ||
+		!arr[0].At.Equal(at("18:00").Add(250*time.Second)) || arr[0].Away != 3 || arr[1].Away != 9 || arr[0].Vehicle != "1" ||
+		arr[0].Seats == nil || *arr[0].Seats != 12 || arr[1].Seats != nil || arr[0].Crowd != "보통" || arr[1].Crowd != "" {
 		t.Fatalf("도착: %+v %v", arr, err)
+	}
+	if len(got) != 3 || !got[2].Idle {
+		t.Fatalf("끝난 노선은 차 없이 방향만: %+v", got)
 	}
 	if gotKey != "key+with/slash==" {
 		t.Fatalf("키는 한 번만 이스케이프: %q", gotKey)
 	}
-	if arr, err := f.Arrivals(ctx, Stop{Kind: Bus, Region: Gyeonggi, ID: "single"}); err != nil || len(arr) != 1 || !arr[0].At.Equal(at("18:03")) {
+	if arr, err := f.Arrivals(ctx, Stop{Kind: Bus, Region: Gyeonggi, ID: "single"}); err != nil || len(arr) != 1 || !arr[0].At.Equal(at("18:03")) || arr[0].Seats != nil {
 		t.Fatalf("하나만 온 목록(분 단위만): %+v %v", arr, err)
 	}
 	if arr, err := f.Arrivals(ctx, Stop{Kind: Bus, Region: Gyeonggi, ID: "none"}); err != nil || len(arr) != 0 {
@@ -146,17 +171,37 @@ func TestSeoulBus(t *testing.T) {
 			return
 		}
 		w.Write([]byte(`{"comMsgHeader":{},"msgHeader":{"headerCd":"0","headerMsg":"정상적으로 처리되었습니다.","itemCount":0},"msgBody":{"itemList":[
-			{"busRouteId":"100100118","busRouteAbrv":"402","rtNm":"402","adirection":"광화문","arrmsg1":"5분12초후[3번째 전]","arrmsg2":"출발대기","vehId1":"111","isLast1":"0"},
-			{"busRouteId":"100100500","busRouteAbrv":"740","rtNm":"740","adirection":"덕은동","arrmsg1":"운행종료","arrmsg2":"운행종료"}]}}`))
+			{"busRouteId":"100100118","busRouteAbrv":"402","rtNm":"402","adirection":"광화문","staOrd":"12","arrmsg1":"5분12초후[3번째 전]","arrmsg2":"출발대기","vehId1":"111","isLast1":"0",
+			 "rerdieDiv1":"4","rerideNum1":"26","congestion1":"4","remndrNmpr1":"0","isFullFlag1":"0"},
+			{"busRouteId":"100100500","busRouteAbrv":"740","rtNm":"740","adirection":"덕은동","arrmsg1":"운행종료","arrmsg2":"운행종료"},
+			{"busRouteId":"100100600","busRouteAbrv":"9404","rtNm":"9404","adirection":"분당","arrmsg1":"[막차] 46분후[17번째 전]","arrmsg2":"3분후[0번째 전]",
+			 "rerdieDiv1":"1","rerideNum1":"2","remndrNmpr1":"39","rerdieDiv2":"1","rerideNum2":"41","remndrNmpr2":"0","isFullFlag2":"1"},
+			{"busRouteId":"233000999","busRouteAbrv":"3000","rtNm":"3000수원","adirection":"수원","arrmsg1":"4분후[2번째 전]","arrmsg2":"19분후[8번째 전]",
+			 "rerdieDiv1":"2","rerideNum1":"0","remndrNmpr1":"0","rerdieDiv2":"0","rerideNum2":"0","remndrNmpr2":"0"}]}}`))
 	})
 	ctx := context.Background()
 	stop := Stop{Kind: Bus, Region: Seoul, ID: "23285"}
-	arr, err := f.Arrivals(ctx, stop)
-	if err != nil || len(arr) != 1 || !arr[0].At.Equal(at("18:05").Add(12*time.Second)) || arr[0].Note != "3번째 전" || arr[0].Line.Toward != "광화문 방면" {
+	got, err := f.Arrivals(ctx, stop)
+	arr := running(got)
+	if err != nil || len(arr) != 5 || !arr[0].At.Equal(at("18:05").Add(12*time.Second)) || arr[0].Away != 3 || arr[0].Line.Toward != "광화문 방면" || arr[0].Line.Order != 12 {
 		t.Fatalf("도착: %+v %v", arr, err)
 	}
+	// Standing buses say how full; seated ones what is left; 경기's at a
+	// 서울 stop neither.
+	if arr[0].Seats != nil || arr[0].Crowd != "보통" {
+		t.Fatalf("입석 버스는 혼잡도: %+v", arr[0])
+	}
+	if arr[1].Seats == nil || *arr[1].Seats != 39 || arr[1].Note != "막차" || arr[1].Away != 17 {
+		t.Fatalf("좌석 버스의 빈자리, 메시지의 막차: %+v", arr[1])
+	}
+	if arr[2].Seats == nil || *arr[2].Seats != 0 || arr[2].Crowd != "만차" {
+		t.Fatalf("만차: %+v", arr[2])
+	}
+	if arr[3].Seats != nil || arr[3].Crowd != "" {
+		t.Fatalf("좌석을 세지 않는 노선: %+v", arr[3])
+	}
 	lines, err := f.Lines(ctx, stop)
-	if err != nil || len(lines) != 2 || lines[0].Name != "402" || lines[1].Name != "740" {
+	if err != nil || len(lines) != 4 || lines[0].Name != "402" || lines[1].Name != "740" {
 		t.Fatalf("노선(운행 끝난 것도): %+v %v", lines, err)
 	}
 	// The key not yet registered for this feed: said, not taken for "nothing here".
@@ -169,7 +214,7 @@ func TestSeoulBus(t *testing.T) {
 	}
 	xmlAnswer = true
 	arr, err = f.Arrivals(ctx, Stop{Kind: Bus, Region: Seoul, ID: "other"})
-	if err != nil || len(arr) != 2 || !arr[0].At.Equal(at("18:00").Add(30*time.Second)) || !arr[1].At.Equal(at("18:12").Add(3*time.Second)) {
+	if err != nil || len(running(arr)) != 2 || !arr[0].At.Equal(at("18:00").Add(30*time.Second)) || !arr[1].At.Equal(at("18:12").Add(3*time.Second)) {
 		t.Fatalf("XML 답: %+v %v", arr, err)
 	}
 }
@@ -225,6 +270,139 @@ func TestSubway(t *testing.T) {
 	}
 	if stationName("서울역") != "서울" || stationName("총신대입구(이수)") != "총신대입구" || stationName("역삼") != "역삼" {
 		t.Fatal("역 이름")
+	}
+}
+
+// Seats mean a count only where the feed counts them: a town bus's 0 is no
+// count, a seated bus's 0 is a full bus, and -1 is none.
+func TestGyeonggiSeats(t *testing.T) {
+	for _, c := range []struct {
+		body string
+		want int // -1: no count
+	}{
+		{`{"remainSeatCnt1":41,"routeTypeCd":11}`, 41},
+		{`{"remainSeatCnt1":0,"routeTypeCd":11}`, 0},
+		{`{"remainSeatCnt1":0,"routeTypeCd":14}`, 0},
+		{`{"remainSeatCnt1":0,"routeTypeCd":13}`, -1},
+		{`{"remainSeatCnt1":-1,"routeTypeCd":30}`, -1},
+		{`{"remainSeatCnt1":"","routeTypeCd":11}`, -1},
+		{`{"routeTypeCd":11}`, -1},
+	} {
+		var it map[string]any
+		if err := json.Unmarshal([]byte(c.body), &it); err != nil {
+			t.Fatal(err)
+		}
+		got := gyeonggiSeats(it, "1")
+		if (c.want < 0) != (got == nil) || (got != nil && *got != c.want) {
+			t.Errorf("%s: %v", c.body, got)
+		}
+	}
+}
+
+// A route that passes a stop both ways is there twice under one id: only the
+// way asked for is taken - also when just the other way has buses, and for a
+// route saved before the order was kept. A route the feed renumbered keeps
+// every bus rather than going blank.
+func TestOneWay(t *testing.T) {
+	out := Line{ID: "9", Name: "3003", Toward: "강남역 방면", Order: 24}
+	back := Line{ID: "9", Name: "3003", Toward: "호매실 방면", Order: 66}
+	busOut, busBack := Arrival{Line: out, At: at("18:10")}, Arrival{Line: back, At: at("18:05")}
+	ids := func(arr []Arrival) (s string) {
+		for _, a := range arr {
+			s += a.Line.Toward + ";"
+		}
+		return s
+	}
+	for _, c := range []struct {
+		name     string
+		want     Line
+		arrivals []Arrival
+		got      string
+	}{
+		{"방향 번호로", Line{ID: "9", Order: 24}, []Arrival{busOut, busBack}, "강남역 방면;"},
+		{"반대 방향", Line{ID: "9", Order: 66}, []Arrival{busOut, busBack}, "호매실 방면;"},
+		{"이 방향에 차가 없으면 없음", Line{ID: "9", Order: 24}, []Arrival{{Line: out, Idle: true}, busBack}, ""},
+		{"순서를 저장하지 않은 옛 경로", Line{ID: "9", Toward: "강남역 방면"}, []Arrival{busOut, busBack}, "강남역 방면;"},
+		{"순서가 바뀌면 행선지로", Line{ID: "9", Order: 25, Toward: "강남역 방면"}, []Arrival{busOut, busBack}, "강남역 방면;"},
+		{"둘 다 안 맞으면 모두", Line{ID: "9", Order: 25, Toward: "어딘가 방면"}, []Arrival{busOut, busBack}, "강남역 방면;호매실 방면;"},
+	} {
+		if got := ids(takes(Route{Stop: Stop{Kind: Bus}, Line: c.want}, c.arrivals)); got != c.got {
+			t.Errorf("%s: %q", c.name, got)
+		}
+	}
+}
+
+// A stop is found however it is written, by what it was called before, and in
+// both feeds; with nothing found, by the parts of the name.
+func TestSearch(t *testing.T) {
+	var asked []string
+	var mu sync.Mutex
+	f := feeds(t, func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/gs/getBusStationListv2"):
+			mu.Lock()
+			asked = append(asked, "경기:"+q.Get("keyword"))
+			mu.Unlock()
+			switch q.Get("keyword") {
+			case "22997", "홍우빌딩", "강남역.홍우빌딩앞":
+				w.Write([]byte(`{"response":{"msgHeader":{"resultCode":0},"msgBody":{"busStationList":{"mobileNo":" 22997","stationId":121000921,"stationName":"강남역.홍우빌딩앞","x":127.02,"y":37.49}}}}`))
+			case "강남역":
+				w.Write([]byte(`{"response":{"msgHeader":{"resultCode":0},"msgBody":{"busStationList":[{"mobileNo":" 22173","stationId":121000097,"stationName":"강남역10번출구"}]}}}`))
+			default:
+				w.Write([]byte(`{"response":{"msgHeader":{"resultCode":4,"resultMessage":"결과가 존재하지 않습니다."}}}`))
+			}
+		case strings.HasPrefix(r.URL.Path, "/seoul/getStationByName"):
+			mu.Lock()
+			asked = append(asked, "서울:"+q.Get("stSrch"))
+			mu.Unlock()
+			switch q.Get("stSrch") {
+			case "강남역홍우빌딩앞", "홍우빌딩":
+				w.Write([]byte(`{"msgHeader":{"headerCd":"0"},"msgBody":{"itemList":[{"stId":"121000921","stNm":"강남역홍우빌딩앞","arsId":"22997","tmX":"127.02","tmY":"37.49"}]}}`))
+			default:
+				w.Write([]byte(`{"msgHeader":{"headerCd":"4","headerMsg":"결과가 없습니다."},"msgBody":{"itemList":null}}`))
+			}
+		default:
+			w.Write([]byte(`{"errorMessage":{"code":"INFO-200","message":"해당하는 데이터가 없습니다."}}`))
+		}
+	})
+	ctx := context.Background()
+	has := func(stops []Stop, region, no string) bool {
+		return slices.ContainsFunc(stops, func(s Stop) bool { return s.Region == region && s.No == no })
+	}
+	// By the old name: both feeds' entries for it, saying what it is now.
+	stops, err := f.Search(ctx, "강남역나라빌딩앞")
+	if err != nil || !has(stops, Gyeonggi, "22997") || !has(stops, Seoul, "22997") || stops[0].Was != "강남역나라빌딩앞" || stops[0].Like {
+		t.Fatalf("옛 이름: %+v %v", stops, err)
+	}
+	if stops, _ := f.Search(ctx, "나라빌딩"); !has(stops, Gyeonggi, "22997") {
+		t.Fatalf("옛 이름 일부: %+v", stops)
+	}
+	// Written the way one feed does not: the other is asked without the dot,
+	// and 경기's found by the number when it was not found by the name.
+	if stops, _ := f.Search(ctx, "강남역.홍우빌딩앞"); !has(stops, Gyeonggi, "22997") || !has(stops, Seoul, "22997") || stops[0].Was != "" {
+		t.Fatalf("점 있는 이름: %+v", stops)
+	}
+	if stops, _ := f.Search(ctx, "강남역 홍우빌딩앞"); !has(stops, Gyeonggi, "22997") || !has(stops, Seoul, "22997") {
+		t.Fatalf("띄어 쓴 이름: %+v", stops)
+	}
+	// A name no feed knows: what its parts find, marked as such.
+	stops, err = f.Search(ctx, "강남역스타벅스앞")
+	if err != nil || !has(stops, Gyeonggi, "22173") || !stops[0].Like {
+		t.Fatalf("이름의 일부: %+v %v", stops, err)
+	}
+	if !slices.ContainsFunc(stops, func(s Stop) bool { return s.Kind == Subway && s.ID == "강남" }) {
+		t.Fatalf("이름의 일부로 찾은 역: %+v", stops)
+	}
+	for q, want := range map[string][]string{
+		"강남역나라빌딩앞": {"강남역", "나라빌딩"},
+		"강남역":      nil,
+		"역삼역 3번출구": {"역삼역", "3번출구"},
+		"정류장":      nil,
+	} {
+		if got := parts(q); !slices.Equal(got, want) {
+			t.Errorf("parts(%s): %q", q, got)
+		}
 	}
 }
 

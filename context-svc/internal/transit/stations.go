@@ -159,11 +159,11 @@ func heading(station, line, via, next string) bool {
 	return false
 }
 
-// takes is the arrivals a route boards. On a bus, its route's. On the subway,
-// its line's going its way - Line.ID "1002>역삼", the line and the station
-// after this one - judged by where each train stops next; a train whose next
-// stop is not a station known here goes by the direction (updnLine) of the
-// trains that are known to go that way.
+// takes is the arrivals a route boards. On a bus, its route's going its way
+// (oneWay). On the subway, its line's going its way - Line.ID "1002>역삼", the
+// line and the station after this one - judged by where each train stops
+// next; a train whose next stop is not a station known here goes by the
+// direction (updnLine) of the trains that are known to go that way.
 func takes(r Route, arrivals []Arrival) []Arrival {
 	line, via, ok := strings.Cut(r.Line.ID, ">")
 	var mine []Arrival
@@ -173,7 +173,7 @@ func takes(r Route, arrivals []Arrival) []Arrival {
 				mine = append(mine, a)
 			}
 		}
-		return mine
+		return oneWay(r.Line, mine)
 	}
 	var unsure []Arrival
 	ways := map[string]bool{}
@@ -199,6 +199,28 @@ func takes(r Route, arrivals []Arrival) []Arrival {
 		}
 	}
 	return mine
+}
+
+// oneWay is, of a bus route's entries at a stop, the buses going the way
+// wanted: a route that passes a stop both ways is there twice under one id,
+// told apart by its order on the route, or - saved before that was kept - by
+// where it is going. A direction with nothing on it counts (Idle): that the
+// other one has buses is no reason to show those. When neither matches the
+// feed has renumbered the route, and every bus stays: one going the other way
+// is better seen than a route that went blank.
+func oneWay(want Line, entries []Arrival) []Arrival {
+	way := entries
+	for _, same := range []func(Line) bool{
+		func(l Line) bool { return want.Order != 0 && l.Order == want.Order },
+		func(l Line) bool { return want.Toward != "" && l.Toward == want.Toward },
+	} {
+		if !slices.ContainsFunc(entries, func(a Arrival) bool { return same(a.Line) }) {
+			continue
+		}
+		way = slices.DeleteFunc(slices.Clone(entries), func(a Arrival) bool { return !same(a.Line) })
+		break
+	}
+	return slices.DeleteFunc(slices.Clone(way), func(a Arrival) bool { return a.Idle })
 }
 
 // The feed's trainLineNm, "성수행 - 역삼방면": where a train is bound, and the

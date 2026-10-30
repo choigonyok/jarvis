@@ -2,6 +2,7 @@ package transit
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"encoding/xml"
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // ErrNoKey is a feed asked for without its key.
@@ -194,21 +196,47 @@ func (f *Feeds) Near(ctx context.Context, lat, lon float64) ([]Stop, error) {
 	return stops, err
 }
 
+// renamed is what stops used to be called: the feeds know a stop only by its
+// name now, while maps, route lists and riders go on using the old one. 서울's
+// feed still says 강남역나라빌딩앞 for where its routes turn, at the stop it
+// lists as 강남역홍우빌딩앞 (the same stop id, 121000921).
+var renamed = [][2]string{{"나라빌딩", "홍우빌딩"}}
+
 // Search is stops by name or stop number: bus stops in both bus feeds, and a
 // station of that name if the subway feed knows it now.
+//
+// The bus feeds match a name only as it is written there, and they write one
+// stop differently (강남역.홍우빌딩앞, 강남역홍우빌딩앞), so a feed that finds
+// nothing is asked again without the spaces and dots, then by the stop's name
+// now if it was renamed. A stop only 서울's feed found is looked up in 경기's
+// by its number: that is where the seats of 경기's buses are. With nothing
+// found at all, the parts of the name are looked for, and the stops say so
+// (Like).
 func (f *Feeds) Search(ctx context.Context, q string) ([]Stop, error) {
 	q = strings.TrimSpace(q)
 	v, err := f.remember("search:"+q, 10*time.Minute, func() (any, error) {
-		out, err := gather(
-			lookup{"버스 정류장", func() ([]Stop, error) { return f.gyeonggiSearch(ctx, q) }},
-			lookup{"버스 정류장", func() ([]Stop, error) { return f.seoulSearch(ctx, q) }},
-			lookup{"역", func() ([]Stop, error) {
-				if found := stationsNamed(q); len(found) > 0 {
-					return found, nil
+		out, err := f.named(ctx, spellings(q), q)
+		if len(out) == 0 {
+			var partly []Stop
+			var failed error
+			for _, part := range parts(q) {
+				found, ferr := f.named(ctx, spellings(part), part)
+				partly = append(partly, found...)
+				failed = cmp.Or(failed, ferr)
+			}
+			if len(partly) > 0 {
+				out, err = partly, failed
+				for i := range out {
+					out[i].Like = true
 				}
-				return f.station(ctx, q) // one the list does not have, if the feed knows it now
-			}},
-		)
+			}
+		}
+		out = distinct(append(out, f.twins(ctx, out)...))
+		for i := range out {
+			if out[i].Kind == Bus && !out[i].Like && wasCalled(q) {
+				out[i].Was = q
+			}
+		}
 		// The station first, then bus stops by name.
 		slices.SortStableFunc(out, func(a, b Stop) int {
 			if (a.Kind == Subway) != (b.Kind == Subway) {
@@ -223,6 +251,121 @@ func (f *Feeds) Search(ctx context.Context, q string) ([]Stop, error) {
 	})
 	stops, _ := v.([]Stop)
 	return stops, err
+}
+
+// named asks every feed for a stop by the spellings of a name, each feed
+// stopping at the first it finds any by.
+func (f *Feeds) named(ctx context.Context, names []string, q string) ([]Stop, error) {
+	by := func(find func(context.Context, string) ([]Stop, error)) func() ([]Stop, error) {
+		return func() ([]Stop, error) {
+			for _, name := range names {
+				if stops, err := find(ctx, name); err != nil || len(stops) > 0 {
+					return stops, err
+				}
+			}
+			return nil, nil
+		}
+	}
+	return gather(
+		lookup{"버스 정류장", by(f.gyeonggiSearch)},
+		lookup{"버스 정류장", by(f.seoulSearch)},
+		lookup{"역", func() ([]Stop, error) {
+			if found := stationsNamed(q); len(found) > 0 {
+				return found, nil
+			}
+			return f.station(ctx, q) // one the list does not have, if the feed knows it now
+		}},
+	)
+}
+
+// twins is, for the stops only 서울's feed found, the same stops in 경기's, by
+// their number. A few at most: this is one call each.
+func (f *Feeds) twins(ctx context.Context, stops []Stop) []Stop {
+	const most = 6
+	have := map[string]bool{}
+	for _, s := range stops {
+		if s.Region == Gyeonggi {
+			have[s.No] = true
+		}
+	}
+	var asked []string
+	for _, s := range stops {
+		if s.Region == Seoul && s.No != "" && !have[s.No] && !slices.Contains(asked, s.No) && len(asked) < most {
+			asked = append(asked, s.No)
+		}
+	}
+	found := make([][]Stop, len(asked))
+	var wg sync.WaitGroup
+	for i, no := range asked {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			got, err := f.gyeonggiSearch(ctx, no)
+			if err == nil {
+				found[i] = slices.DeleteFunc(got, func(s Stop) bool { return s.No != no })
+			}
+		}()
+	}
+	wg.Wait()
+	return slices.Concat(found...)
+}
+
+// distinct is stops without the same one twice, keeping the first.
+func distinct(stops []Stop) []Stop {
+	seen := map[string]bool{}
+	return slices.DeleteFunc(stops, func(s Stop) bool {
+		key := s.Kind + ":" + s.Region + ":" + s.ID
+		if seen[key] {
+			return true
+		}
+		seen[key] = true
+		return false
+	})
+}
+
+// compact is a name without the spaces and dots the feeds and riders put in
+// it differently.
+func compact(name string) string {
+	return strings.NewReplacer(" ", "", ".", "", "·", "", ",", "").Replace(name)
+}
+
+// spellings is how to ask the feeds for a name: as written, without its
+// spaces and dots, and by what it is called now if it was renamed.
+func spellings(q string) []string {
+	names := []string{q, compact(q)}
+	for _, r := range renamed {
+		if now := strings.ReplaceAll(q, r[0], r[1]); now != q {
+			names = append(names, now, compact(now))
+		}
+	}
+	return slices.DeleteFunc(slices.Compact(names), func(n string) bool { return n == "" })
+}
+
+// wasCalled is whether a name is what a stop used to be called.
+func wasCalled(q string) bool {
+	return slices.ContainsFunc(renamed, func(r [2]string) bool { return strings.Contains(q, r[0]) })
+}
+
+// parts is what a name found by nothing may still be found by: 강남역 and
+// 나라빌딩 for 강남역나라빌딩앞 - the words, a station it starts with, and what
+// follows without its 앞 or 입구.
+func parts(q string) []string {
+	var out []string
+	for _, word := range strings.FieldsFunc(q, func(r rune) bool { return strings.ContainsRune(" .·,", r) }) {
+		station, rest := word, ""
+		if i := strings.LastIndex(word, "역"); i >= 0 {
+			station, rest = word[:i+len("역")], word[i+len("역"):]
+		}
+		for _, part := range []string{station, rest} {
+			for _, end := range []string{"정류장", "정류소", "입구", "앞"} {
+				part = strings.TrimSuffix(part, end)
+			}
+			if utf8.RuneCountInString(part) >= 2 && part != q && !slices.Contains(out, part) {
+				out = append(out, part)
+			}
+		}
+	}
+	return out[:min(len(out), 3)]
 }
 
 // Partial is stops found while some of the feeds asked for them failed:
@@ -430,11 +573,12 @@ func (f *Feeds) gyeonggiArrivals(ctx context.Context, stationID string) ([]Arriv
 	now := f.Now()
 	out := []Arrival{}
 	for _, it := range list {
-		if text(it["flag"]) == "STOP" {
-			continue // ended for the day
-		}
-		line := Line{ID: text(it["routeId"]), Name: text(it["routeName"]), Toward: toward(text(it["routeDestName"]))}
+		line := gyeonggiLine(it)
+		before := len(out)
 		for _, n := range []string{"1", "2"} {
+			if text(it["flag"]) == "STOP" {
+				break // ended for the day
+			}
 			sec, ok := number(it["predictTimeSec"+n])
 			if !ok {
 				if min, okMin := number(it["predictTime"+n]); okMin {
@@ -444,21 +588,49 @@ func (f *Feeds) gyeonggiArrivals(ctx context.Context, stationID string) ([]Arriv
 			if !ok || sec < 0 {
 				continue
 			}
-			a := Arrival{Line: line, At: now.Add(time.Duration(sec) * time.Second), Vehicle: text(it["vehId"+n])}
+			a := Arrival{Line: line, At: now.Add(time.Duration(sec) * time.Second), Vehicle: text(it["vehId"+n]),
+				Seats: gyeonggiSeats(it, n), Crowd: gyeonggiCrowd[text(it["crowded"+n])]}
 			if a.Vehicle == "" {
 				a.Vehicle = text(it["plateNo"+n])
 			}
 			if stops, ok := number(it["locationNo"+n]); ok && stops > 0 {
-				a.Note = fmt.Sprintf("%d번째 전", int(stops))
-			}
-			if seats, ok := number(it["remainSeatCnt"+n]); ok && seats >= 0 && text(it["remainSeatCnt"+n]) != "" {
-				a.Note = strings.TrimSpace(a.Note + fmt.Sprintf(" · 빈자리 %d", int(seats)))
-				a.Note = strings.TrimPrefix(a.Note, "· ")
+				a.Away = int(stops)
 			}
 			out = append(out, a)
 		}
+		if len(out) == before {
+			out = append(out, Arrival{Line: line, Idle: true})
+		}
 	}
 	return out, nil
+}
+
+// gyeonggiLine is a route as both of 경기's lists give it.
+func gyeonggiLine(it map[string]any) Line {
+	line := Line{ID: text(it["routeId"]), Name: text(it["routeName"]), Toward: toward(text(it["routeDestName"]))}
+	if order, ok := number(it["staOrder"]); ok {
+		line.Order = int(order)
+	}
+	return line
+}
+
+// gyeonggiCrowd is the feed's crowded, in words; 0 is that it does not say.
+var gyeonggiCrowd = map[string]string{"1": "여유", "2": "보통", "3": "혼잡", "4": "매우혼잡"}
+
+// gyeonggiSeatedRoutes are the route types (routeTypeCd) that run on seats:
+// 직행좌석·좌석·광역급행, 경기순환, 농어촌의 직행좌석·좌석, 시외, 공항.
+var gyeonggiSeatedRoutes = []string{"11", "12", "14", "16", "21", "22", "41", "42", "51", "52"}
+
+// gyeonggiSeats is a bus's empty seats. The feed says -1 or nothing when it
+// has no count, and 0 both for a full seated bus and for every bus it does
+// not count seats on: a town bus's 0 is not a full bus.
+func gyeonggiSeats(it map[string]any, n string) *int {
+	seats, ok := number(it["remainSeatCnt"+n])
+	if !ok || seats < 0 || (seats == 0 && !slices.Contains(gyeonggiSeatedRoutes, text(it["routeTypeCd"]))) {
+		return nil
+	}
+	left := int(seats)
+	return &left
 }
 
 func (f *Feeds) gyeonggiLines(ctx context.Context, stationID string) ([]Line, error) {
@@ -468,9 +640,9 @@ func (f *Feeds) gyeonggiLines(ctx context.Context, stationID string) ([]Line, er
 	}
 	out := []Line{}
 	for _, it := range list {
-		out = append(out, Line{ID: text(it["routeId"]), Name: text(it["routeName"]), Toward: toward(text(it["routeDestName"]))})
+		out = append(out, gyeonggiLine(it))
 	}
-	slices.SortFunc(out, func(a, b Line) int { return compareRoute(a.Name, b.Name) })
+	slices.SortStableFunc(out, func(a, b Line) int { return compareRoute(a.Name, b.Name) })
 	return out, nil
 }
 
@@ -499,13 +671,16 @@ func (f *Feeds) gyeonggiNear(ctx context.Context, lat, lon float64) ([]Stop, err
 	return f.gyeonggiStops(list), nil
 }
 
+// maxFound is how many stops one feed's search gives: 강남역 alone is 27.
+const maxFound = 30
+
 func (f *Feeds) gyeonggiSearch(ctx context.Context, q string) ([]Stop, error) {
 	list, err := f.gbis(ctx, f.GyeonggiStations, "getBusStationListv2", url.Values{"keyword": {q}}, "busStationList")
 	if err != nil {
 		return nil, err
 	}
 	stops := f.gyeonggiStops(list)
-	return stops[:min(len(stops), 15)], nil
+	return stops[:min(len(stops), maxFound)], nil
 }
 
 // seoulBus asks 서울's bus feed for its itemList: JSON (resultType=json)
@@ -626,24 +801,30 @@ func (f *Feeds) seoulStop(ctx context.Context, arsID string) (seoulAnswer, error
 			if line.ID == "" {
 				continue
 			}
+			line.Order, _ = strconv.Atoi(it["staOrd"])
 			ans.lines = append(ans.lines, line)
+			before := len(ans.arrivals)
 			for _, n := range []string{"1", "2"} {
 				msg := it["arrmsg"+n]
 				sec, ok := seoulSeconds(msg)
 				if !ok {
 					continue
 				}
-				a := Arrival{Line: line, At: now.Add(time.Duration(sec) * time.Second), Vehicle: it["vehId"+n]}
+				a := Arrival{Line: line, At: now.Add(time.Duration(sec) * time.Second), Vehicle: it["vehId"+n],
+					Seats: seoulSeats(it, n), Crowd: seoulCrowd(it, n)}
 				if a.Vehicle == "" {
 					a.Vehicle = it["plainNo"+n]
 				}
-				if m := bracket.FindStringSubmatch(msg); m != nil {
-					a.Note = m[1]
+				if m := stopsAway.FindStringSubmatch(msg); m != nil {
+					a.Away, _ = strconv.Atoi(m[1])
 				}
-				if it["isLast"+n] == "1" {
-					a.Note = strings.TrimSpace(a.Note + " 막차")
+				if it["isLast"+n] == "1" || strings.Contains(msg, "[막차]") {
+					a.Note = "막차"
 				}
 				ans.arrivals = append(ans.arrivals, a)
+			}
+			if len(ans.arrivals) == before {
+				ans.arrivals = append(ans.arrivals, Arrival{Line: line, Idle: true})
 			}
 		}
 		slices.SortFunc(ans.lines, func(a, b Line) int { return compareRoute(a.Name, b.Name) })
@@ -655,8 +836,30 @@ func (f *Feeds) seoulStop(ctx context.Context, arsID string) (seoulAnswer, error
 	return v.(seoulAnswer), nil
 }
 
+// seoulSeats is a 서울 bus's empty seats. rerdieDiv says what the feed counted
+// on it: 1 is a seated (광역) bus, with what is left in remndrNmpr; on 4 it
+// counts people aboard a bus that stands them, and on 0 and 2 nothing.
+func seoulSeats(it map[string]string, n string) *int {
+	if it["rerdieDiv"+n] != "1" {
+		return nil
+	}
+	left, err := strconv.Atoi(it["remndrNmpr"+n])
+	if err != nil || left < 0 {
+		return nil
+	}
+	return &left
+}
+
+// seoulCrowd is how full a 서울 bus is, in words.
+func seoulCrowd(it map[string]string, n string) string {
+	if it["isFullFlag"+n] == "1" {
+		return "만차"
+	}
+	return map[string]string{"3": "여유", "4": "보통", "5": "혼잡", "6": "매우혼잡"}[it["congestion"+n]]
+}
+
 var (
-	bracket    = regexp.MustCompile(`\[([^\]]+)\]`)
+	stopsAway  = regexp.MustCompile(`\[(\d+)번째 전\]`)
 	minSec     = regexp.MustCompile(`(\d+)\s*분\s*(\d+)\s*초\s*후`)
 	minOnly    = regexp.MustCompile(`(\d+)\s*분\s*후`)
 	secOnly    = regexp.MustCompile(`(\d+)\s*초\s*후`)
@@ -716,7 +919,7 @@ func (f *Feeds) seoulSearch(ctx context.Context, q string) ([]Stop, error) {
 		return nil, err
 	}
 	stops := f.seoulStops(list, "tmX", "tmY", "stNm")
-	return stops[:min(len(stops), 15)], nil
+	return stops[:min(len(stops), maxFound)], nil
 }
 
 // subway is the trains coming to a 서울 station, from its real-time feed. A

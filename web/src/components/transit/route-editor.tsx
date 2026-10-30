@@ -40,12 +40,19 @@ function apart(a: Stop, b: Stop): number {
 function places(stops: Stop[]): Place[] {
   const out: Place[] = [];
   for (const s of stops) {
-    const same = out.find((p) => p.stops[0].kind === s.kind && p.name === s.name && p.stops.every((o) => apart(o, s) < 400));
+    // The feeds write one stop differently (강남역.홍우빌딩앞, 강남역홍우빌딩앞):
+    // the number on its sign says it is one.
+    const same = out.find(
+      (p) =>
+        p.stops[0].kind === s.kind &&
+        (p.stops.some((o) => o.no && o.no === s.no) || (p.name === s.name && p.stops.every((o) => apart(o, s) < 400))),
+    );
     if (!same) {
       out.push({ key: `${s.kind}:${s.region ?? ""}:${s.id}`, name: s.name, stops: [s], dist: s.dist });
       continue;
     }
     same.stops.push(s);
+    if (s.region === "gyeonggi") same.name = s.name;
     if (s.dist != null && (same.dist == null || s.dist < same.dist)) same.dist = s.dist;
   }
   return out;
@@ -58,16 +65,14 @@ function sides(p: Place): number {
 
 /**
  * A place's lines, one row each: a route listed for one stop by both feeds
- * once - 경기's, whose arrivals come to the second - and by number.
+ * once - 경기's, whose arrivals come to the second and count the seats - and by
+ * number. A route that passes a stop both ways is two rows: they are two ways
+ * to go.
  */
 function choicesOf(rows: Choice[]): Choice[] {
-  const kept = new Map<string, Choice>();
-  for (const c of rows) {
-    const k = c.stop.no ? `${c.stop.no}|${c.line.name}` : `${c.stop.region}:${c.stop.id}|${c.line.id}`;
-    const had = kept.get(k);
-    if (!had || (had.stop.region !== "gyeonggi" && c.stop.region === "gyeonggi")) kept.set(k, c);
-  }
-  const out = [...kept.values()];
+  const gyeonggi = rows.filter((c) => c.stop.region === "gyeonggi");
+  const told = (c: Choice) => gyeonggi.some((g) => g.stop.no === c.stop.no && (g.line.id === c.line.id || g.line.name === c.line.name));
+  const out = rows.filter((c) => c.stop.region === "gyeonggi" || !c.stop.no || !told(c));
   if (out[0]?.stop.kind === "bus") {
     out.sort((a, b) => a.line.name.localeCompare(b.line.name, "ko", { numeric: true }) || (a.line.toward ?? "").localeCompare(b.line.toward ?? "", "ko"));
   }
@@ -233,15 +238,20 @@ function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null;
             {busy === "stops" ? <p className="mt-3 text-faint">찾는 중…</p> : null}
             {stops ? (
               stops.length ? (
-                <ul className="mt-2 divide-y divide-edge-soft">
-                  {places(stops).slice(0, 14).map((p) => (
-                    <li key={p.key}>
-                      <button type="button" onClick={() => void pick(p)} className="flex w-full items-center gap-3 py-2.5 text-left outline-none hover:bg-glass focus-visible:ring-3 focus-visible:ring-ring/50">
-                        {p.stops.length === 1 ? <StopLabel stop={p.stops[0]} /> : <PlaceLabel place={p} />}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
+                <>
+                  {stops.every((s) => s.like) ? (
+                    <p className="mt-3 text-[12px] leading-[1.55] break-keep text-dim">그 이름의 정류장은 없어서 이름의 일부로 찾았어요.</p>
+                  ) : null}
+                  <ul className="mt-2 divide-y divide-edge-soft">
+                    {places(stops).slice(0, 40).map((p) => (
+                      <li key={p.key}>
+                        <button type="button" onClick={() => void pick(p)} className="flex w-full items-center gap-3 py-2.5 text-left outline-none hover:bg-glass focus-visible:ring-3 focus-visible:ring-ring/50">
+                          {p.stops.length === 1 ? <StopLabel stop={p.stops[0]} /> : <PlaceLabel place={p} />}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </>
               ) : (
                 <p className="mt-3 text-dim">찾은 정류장이 없어요. 다른 이름으로 찾아 보세요.</p>
               )
@@ -274,7 +284,7 @@ function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null;
               ) : null}
               <ul className="divide-y divide-edge-soft">
                 {choices.map((c) => (
-                  <li key={`${c.stop.region ?? ""}:${c.stop.id}:${c.line.id}`}>
+                  <li key={`${c.stop.region ?? ""}:${c.stop.id}:${c.line.id}:${c.line.order ?? ""}`}>
                     <button type="button" onClick={() => choose(c)} className="flex w-full items-baseline gap-2 py-2.5 text-left outline-none hover:bg-glass focus-visible:ring-3 focus-visible:ring-ring/50">
                       <span className="shrink-0 text-[14px] font-medium text-foreground">{c.line.name}</span>
                       <span className="min-w-0 flex-1 truncate text-dim">{c.line.toward}</span>
@@ -413,10 +423,16 @@ function PlaceLabel({ place }: { place: Place }) {
         <span className="block text-[12px] text-faint">
           {n > 1 ? `${region} 버스 · 정류장 ${n}곳, 타는 방향으로 골라요` : `${region} 버스${place.stops[0].no ? ` · ${place.stops[0].no}` : ""}`}
         </span>
+        <Renamed was={place.stops.find((s) => s.was)?.was} />
       </span>
       {place.dist ? <span className="tnum shrink-0 text-[12px] text-faint">{place.dist >= 1000 ? `${(place.dist / 1000).toFixed(1)}km` : `${place.dist}m`}</span> : null}
     </>
   );
+}
+
+/** A stop found by what it used to be called: why a name one did not type is here. */
+function Renamed({ was }: { was?: string }) {
+  return was ? <span className="block text-[12px] text-dim">‘{was}’의 지금 이름이에요</span> : null;
 }
 
 function StopLabel({ stop }: { stop: Stop }) {
@@ -428,6 +444,7 @@ function StopLabel({ stop }: { stop: Stop }) {
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[14px] text-foreground">{stop.name}</span>
         <span className="block text-[12px] text-faint">{sub}</span>
+        <Renamed was={stop.was} />
       </span>
       {stop.dist ? <span className="tnum shrink-0 text-[12px] text-faint">{stop.dist >= 1000 ? `${(stop.dist / 1000).toFixed(1)}km` : `${stop.dist}m`}</span> : null}
     </>
