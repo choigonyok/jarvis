@@ -92,6 +92,9 @@ export function Composer({
   const ownRef = useRef<HTMLTextAreaElement>(null);
   const areaRef = inputRef ?? ownRef;
   const fileRef = useRef<HTMLInputElement>(null);
+  // What last pressed the send button. A click does not reliably say: Safari's
+  // has no pointerType.
+  const pressedBy = useRef("");
 
   useEffect(() => {
     const el = areaRef.current;
@@ -146,13 +149,16 @@ export function Composer({
     });
   }
 
-  async function send() {
+  async function send({ closeKeyboard = false } = {}) {
     if (!canSend) return;
     const text = value.trim();
     const sent = photos;
     type("");
     setPhotos([]);
-    areaRef.current?.focus();
+    // A thumb on the button is done typing: the keyboard goes, and the answer
+    // gets the screen. Enter and a mouse keep the field, the next line follows.
+    if (closeKeyboard) areaRef.current?.blur();
+    else areaRef.current?.focus();
     const ok = await onSend(text, sent.filter((p) => p.name).map((p) => p.name!));
     if (ok === false) {
       type(text);
@@ -308,7 +314,18 @@ export function Composer({
         {/* Deliberately quiet: the brightest control in this product is 승인. */}
         <button
           type="button"
-          onClick={() => void send()}
+          onPointerDown={(e) => {
+            pressedBy.current = e.pointerType;
+          }}
+          // Not taking the focus from the field on the way down: without it
+          // the tab bar comes back under the finger, this button moves up, and
+          // the press lands on whatever is there now. send() lets go of the
+          // field once the message is out.
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => {
+            void send({ closeKeyboard: pressedBy.current === "touch" || pressedBy.current === "pen" });
+            pressedBy.current = "";
+          }}
           disabled={!canSend}
           aria-label={uploading ? "사진을 올리는 중" : "메시지 보내기"}
           className={cn(round, "group text-dim disabled:opacity-40", onVoice && !composing && "max-sm:hidden")}
