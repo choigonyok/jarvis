@@ -15,7 +15,6 @@ import (
 
 	"github.com/choigonyok/jarvis/gocommon/checks"
 	"github.com/choigonyok/jarvis/gocommon/queue"
-	"github.com/choigonyok/jarvis/gocommon/record"
 	"github.com/choigonyok/jarvis/input-svc/internal/envelope"
 )
 
@@ -115,14 +114,15 @@ func (b *batch) wake(ctx context.Context) error {
 	return nil
 }
 
-// Message is a chat.message's payload, by its key: the guest's from the guest's.
-func (s *Store) Message(ctx context.Context, guest bool, key string) (json.RawMessage, error) {
+// Sealed is the payload of something a person said, by its kind and key: the
+// guest's from the guest's.
+func (s *Store) Sealed(ctx context.Context, guest bool, kind, key string) (json.RawMessage, error) {
 	table := "input.records"
 	if guest {
 		table = "input.guest_records"
 	}
 	var payload string
-	err := s.pool.QueryRow(ctx, `select payload::text from `+table+` where kind = $1 and source_key = $2`, record.KindMessage, key).Scan(&payload)
+	err := s.pool.QueryRow(ctx, `select payload::text from `+table+` where kind = $1 and source_key = $2`, kind, key).Scan(&payload)
 	return json.RawMessage(payload), err
 }
 

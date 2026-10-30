@@ -445,6 +445,10 @@ const KindJobsWrite = "jobs.write"
 // from the queue.
 const KindMessage = "chat.message"
 
+// KindAnswer is a person's answer to a card: whoever waits on the card reads it
+// from the queue, whatever mind is doing.
+const KindAnswer = "card.answer"
+
 // KindManualEdit is what a person changed by hand on a screen.
 const KindManualEdit = "manual.edit"
 

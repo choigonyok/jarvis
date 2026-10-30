@@ -20,7 +20,7 @@ func (s *Server) checkPolicy(tool string, input json.RawMessage) policy.Verdict 
 	if bg, ok := s.runner.(interface{ InBackground() bool }); ok && bg.InBackground() && s.jobs != nil {
 		job, _, _, _ = s.jobs.RunningJob()
 	}
-	v := s.policy.Check(policy.Call{Tool: tool, Input: input, PaymentApproved: s.payments.live(job)})
+	v := s.policy.Check(policy.Call{Tool: tool, Input: input, PaymentApproved: s.payments.Live(job)})
 	if !v.Deny {
 		return v
 	}

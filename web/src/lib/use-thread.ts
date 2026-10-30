@@ -5,6 +5,7 @@ import { useAgentStream } from "@/lib/stream";
 import {
   API,
   applyDraft,
+  isPrivateField,
   storedForm,
   type AgentEvent,
   type Checklist,
@@ -338,7 +339,8 @@ export function useThread() {
   const decide = useCallback(
     async (proposalId: string, decision: Decision, edits?: Record<string, string>, reason?: string) => {
       setError(null);
-      const message = await decideProposal(proposalId, decision, edits, reason);
+      const secret = proposals.find((p) => p.id === proposalId)?.card.fields?.some(isPrivateField);
+      const message = await decideProposal(proposalId, decision, edits, reason, secret);
       if (message) {
         setError(message);
         void hydrate();
@@ -349,7 +351,7 @@ export function useThread() {
       }
       return message;
     },
-    [hydrate],
+    [hydrate, proposals],
   );
 
   /**

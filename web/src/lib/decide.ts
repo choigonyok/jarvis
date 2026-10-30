@@ -13,9 +13,11 @@ export async function decideProposal(
   edits?: Record<string, string>,
   /** Why, when the operator says - a rejection's reason. */
   reason?: string,
+  /** The card has a secret field: a secret is a value, not a record, so its answer goes straight to the agent. */
+  secret?: boolean,
 ): Promise<string | null> {
   try {
-    const res = await fetch(`${API}/proposals/${proposalId}/decision`, {
+    const res = await fetch(secret ? `${API}/proposals/${proposalId}/decision` : `/api/chat/cards/${encodeURIComponent(proposalId)}/decision`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ decision, ...(edits ? { edits } : {}), ...(reason?.trim() ? { reason: reason.trim() } : {}) }),

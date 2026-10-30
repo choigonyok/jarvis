@@ -18,6 +18,7 @@ import (
 
 	"github.com/choigonyok/jarvis/agent/internal/core/bus"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
+	"github.com/choigonyok/jarvis/agent/internal/holder"
 )
 
 // A replay feeds recorded payments to the payment path as it is today and
@@ -109,7 +110,7 @@ func newReplayer() *replayer {
 	r.s = New(Deps{Proposals: r.props, Runner: r.runner, InterceptToken: "tok", FollowUp: r.fu, Jobs: r.jobs,
 		BackgroundLogin: []string{"nid.naver.com"},
 		Log:             slog.New(slog.NewTextHandler(io.Discard, nil))})
-	r.s.payments.now = r.clock.Now
+	r.s.payments.Now = r.clock.Now
 	return r
 }
 
@@ -125,7 +126,7 @@ func holdFor(recs []replayRecord, i int) time.Duration {
 		if next.OccurredAt.IsZero() {
 			continue
 		}
-		if next.OccurredAt.Sub(recs[i].OccurredAt) > paymentHold {
+		if next.OccurredAt.Sub(recs[i].OccurredAt) > holder.Hold {
 			break
 		}
 		if next.Kind == KindIntentAnswer {
@@ -172,13 +173,7 @@ func (r *replayer) ask(q replayQuery, hold time.Duration) *replayCall {
 
 // holding is how many stopped requests are held on a card.
 func (r *replayer) holding() int {
-	r.s.holds.mu.Lock()
-	defer r.s.holds.mu.Unlock()
-	n := 0
-	for _, w := range r.s.holds.cards {
-		n += w.waiting
-	}
-	return n
+	return r.s.payments.Holding()
 }
 
 func (c *replayCall) answer() map[string]string {

@@ -313,6 +313,26 @@ func (s *Store) Said(ctx context.Context, key string) (Said, error) {
 	return out, s.do(ctx, http.MethodGet, "/chat/messages/"+url.PathEscape(key), nil, &out)
 }
 
+// Answer is a person's answer to a card, as it came in at the way in.
+type Answer struct {
+	Decision string `json:"decision"`
+	// Edits are the card's form fields as the operator left them.
+	Edits map[string]string `json:"edits"`
+	// Reason is why, when the operator says (a rejection, mostly).
+	Reason string `json:"reason"`
+}
+
+// Answered reads an answer by its record's key.
+func (s *Store) Answered(ctx context.Context, key string) (Answer, error) {
+	var out Answer
+	return out, s.do(ctx, http.MethodGet, "/chat/answers/"+url.PathEscape(key), nil, &out)
+}
+
+// Replied tells whoever pressed how their answer went.
+func (s *Store) Replied(ctx context.Context, key string, status int, why string) error {
+	return s.do(ctx, http.MethodPost, "/chat/answers/"+url.PathEscape(key)+"/reply", map[string]any{"status": status, "error": why}, nil)
+}
+
 func (s *Store) Find(id string) *Turn {
 	turns, _ := s.Snapshot()
 	for _, t := range turns {

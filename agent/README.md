@@ -211,7 +211,7 @@ Go 는 `gocommon/site`, 브라우저는 `publicsuffixlist`.
   저장 카드(`save_shipping_address` / `request_shipping_address`)를 올립니다 - 주문할 때마다 묻지 않습니다. 저장한 뒤 이사 기록이 있으면(mind 슬롯 `shipping.address`) 도구가 주소와 함께 '확인 필요'를 말하고 작업은 주문서를 채우지 않고 카드를 올리며, 결제 카드 맨 위에도 경고가 붙습니다. 결제 카드에는
   저장된 배송지가 보이고, 작업이 결제 직전 report 에 남긴 배송지의 도로명+건물번호가 다르면 맨 앞에 경고가 붙습니다.
   결제가 됐는지 애매하면 작업은 `payment_alerts`(가계부가 모은 카드 결제 알림, 수집이 멈췄으면 그렇다고 함)와 주문내역을
-  먼저 봅니다. 승인 하나는 결제 한 건입니다(`paymentGrants`): 카드를
+  먼저 봅니다. 승인 하나는 결제 한 건입니다(`holder.Payments`): 카드를
   올린 쪽(대화, 또는 그 작업)의 그 사이트에만, 결제자가 다시 진행을 시작한 때(첫 요청)부터 10분, 결제하기
   (`order`)는 한 번 지나가고 두 번째 결제는 새 카드를 올립니다. 대화와 작업이 같은 규칙이고, 승인을
   기억하는 곳은 여기 하나뿐입니다 - 브라우저 가드는 멈춘 요청마다 `/intercept` 에 묻습니다. 쿠팡 주문서는 결제수단 선택도 결제하기와 같은 주소로 보내므로,
@@ -354,20 +354,20 @@ cd web && AGENT_URL=http://localhost:8080 \
 
 ## 에이전트 API
 
+화면이 부르는 것은 에이전트 자기 상태뿐입니다: 대화 페이지, 답 스트림, 대기열, 카드 목록, 사진 파일, 구독 사용량. 대화에서 한 말과
+카드의 답은 입구로 들어오고(`chat.message`, `card.answer`) 에이전트가 큐에서 집습니다(`agent-chat`). 일정은 calendar-svc, 리마인드·
+체크리스트는 mind 에서 화면이 바로 읽습니다. 결제의 승인·보류 상태는 `internal/holder` 에 있고 mind 와 무관합니다.
+
 | 메서드 | 경로 | 하는 일 |
 |---|---|---|
 | GET | `/thread` | 스레드 + 진행 여부 + 제안 전체 (최초 로딩) |
 | GET | `/events` | SSE. `turn` / `draft` / `status` / `queue` / `error` / `proposal` / `calendar` / `checklist` |
-| POST | `/messages` | `{"text":"..."}` → 202, 결과는 SSE로 |
+| POST | `/messages/{id}/steer` · `/messages/{id}/drop` | 대기열의 말을 진행 중인 턴에 끼워 넣거나 뺀다 |
 | GET | `/proposals` | 제안 전체 |
-| POST | `/proposals/{id}/decision` | `{"decision":"approved"\|"rejected"}` |
+| POST | `/proposals/{id}/decision` | 비밀 칸이 있는 카드의 답만 `{"decision":"approved"\|"rejected","edits":{}}`. 다른 카드의 답은 입구로 온다 |
 | GET | `/usage` | 구독 사용량 |
 | POST | `/uploads` · GET `/uploads/{name}` | 사진 첨부 |
-| GET | `/calendar?from=&to=` | 기간 조회 (양끝 포함) |
-| POST | `/calendar` | 사람이 직접 추가·수정. id 없으면 추가 |
-| DELETE | `/calendar/{id}` | 사람이 직접 삭제 |
-| GET | `/reminders` | 작업 탭의 리마인드: 기다리는 것과 지난 30일 것(mind `GET /api/reminders?days=30`, 그 에이전트의 사람 것만) |
-| GET·POST | `/browser-checks` | 브라우저 로그인 확인 결과 / 다시 확인 요청 (status-svc 가 읽음) |
+| GET · DELETE | `/vault` | 저장된 로그인 목록과 사용 기록 / 지우기 |
 | POST | `/intercept` | 브라우저 결제 가드가 묻는 곳 (가드 전용 토큰). 질의와 답은 기록으로 남는다(`internal/httpapi/records.go`) |
 | POST | `/intercept/records` | 가드가 혼자 내린 결정과 결제의 길을 기록으로 남기는 곳 (가드 전용 토큰) |
 | GET | `/health` | 상태 탭이 읽는 꼴: 기록 쓰기의 진행. 프로세스만 볼 때는 `/healthz` |

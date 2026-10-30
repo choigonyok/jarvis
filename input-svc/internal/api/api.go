@@ -7,6 +7,9 @@
 //	GET  /last                         when each source last had news, and the latest of each check (the status tab)
 //	POST /chat/messages                {text, images?, ref?} what a person said: a record, which the agent takes from the queue
 //	GET  /chat/messages/{key}          the words of one, for the agent that took it
+//	POST /chat/cards/{id}/decision     {decision, edits?, reason?} a person's answer to a card: a record, and how it went
+//	GET  /chat/answers/{key}           the words of an answer, for the agent that took it
+//	POST /chat/answers/{key}/reply     {status, error?} how it went, for whoever waits on the press
 //	GET  /turns?thread=&since=&limit=&before=   the conversation: a thread, or a page of it
 //	POST /turns                        a turn said: its record, and the turn
 //	PUT  /turns/{id}                   a turn with an origin given its newest word
@@ -26,6 +29,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sync"
 	"strconv"
 	"time"
 
@@ -61,6 +65,11 @@ type Server struct {
 	log   *slog.Logger
 	now   func() time.Time
 	views Views
+	// answers are the presses waiting to hear how they went.
+	answers struct {
+		sync.Mutex
+		waiting map[string]chan reply
+	}
 }
 
 // New is the surface on s.
@@ -90,6 +99,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /last", s.auth(false, s.last))
 	mux.HandleFunc("POST /chat/messages", s.auth(true, s.postMessage))
 	mux.HandleFunc("GET /chat/messages/{key}", s.auth(true, s.getMessage))
+	mux.HandleFunc("POST /chat/cards/{id}/decision", s.auth(true, s.postAnswer))
+	mux.HandleFunc("GET /chat/answers/{key}", s.auth(true, s.getAnswer))
+	mux.HandleFunc("POST /chat/answers/{key}/reply", s.auth(true, s.postReply))
 	mux.HandleFunc("GET /workout", s.auth(true, s.readWorkout))
 	mux.HandleFunc("POST /workout/changes", s.auth(true, s.changeWorkout))
 	mux.HandleFunc("GET /held", s.auth(false, s.held))

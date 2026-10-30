@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/core/bus"
 	"github.com/choigonyok/jarvis/agent/internal/core/module"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
+	"github.com/choigonyok/jarvis/agent/internal/holder"
 	"github.com/choigonyok/jarvis/agent/internal/policy"
 	"github.com/choigonyok/jarvis/agent/internal/thread"
 	"github.com/choigonyok/jarvis/agent/internal/uploads"
@@ -53,12 +55,10 @@ type Server struct {
 	// and wrong the moment a tunnel gives the agent a public hostname.
 	apiToken     string
 	approvalWait time.Duration
-	// payments are the hosts a person approved a payment on, for a while.
-	payments paymentGrants
-	// holds are the stopped payment requests held while their card waits,
-	// for holdDur at most (paymentHold; a test sets it to none).
-	holds   paymentHolds
-	holdDur time.Duration
+	// payments are what a person approved and the requests held for a card,
+	// for holdDur at most (holder.Hold; a test sets it to none).
+	payments holder.Payments
+	holdDur  time.Duration
 	// savedAddress is the shipping address the vault keeps, for the payment
 	// card; nil shows none.
 	savedAddress func(ctx context.Context) (SavedAddress, bool)
@@ -191,7 +191,7 @@ func New(d Deps) *Server {
 		followUp:        d.FollowUp,
 		jobs:            d.Jobs,
 		savedAddress:    d.SavedAddress,
-		holdDur:         paymentHold,
+		holdDur:         holder.Hold,
 		checklists:      d.Checklists,
 		records:         d.Records,
 		loops:           d.Loops,
@@ -421,6 +421,14 @@ func (s *Server) dropMessage(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// Take takes what a person did at the way in from the queue.
+func (s *Server) Take(ctx context.Context, m queue.Message) error {
+	if m.Kind == record.KindAnswer {
+		return s.takeAnswer(ctx, m)
+	}
+	return s.TakeMessage(ctx, m)
+}
+
 // TakeMessage takes one thing said at the way in from the queue and starts its
 // turn, or puts it behind the running one. What cannot be taken is said on the
 // screen and not tried again; words that could not be read yet are.
@@ -498,41 +506,77 @@ func (s *Server) getProposals(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"proposals": s.proposals.List()})
 }
 
+// postDecision takes an answer to a card with secret fields: a secret is a
+// value, not a record, so such a card alone is answered here rather than at the
+// way in.
 func (s *Server) postDecision(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Decision string `json:"decision"`
-		// Edits are the card's form fields as the operator left them.
-		Edits map[string]string `json:"edits"`
-		// Reason is why, when the operator says (a rejection, mostly).
-		Reason string `json:"reason"`
-	}
+	var body thread.Answer
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "본문을 읽을 수 없습니다.")
 		return
 	}
 	id := r.PathValue("id")
-	if proposal.Decision(body.Decision) == proposal.Approve {
+	if p, ok := s.proposals.Get(id); ok && !secret(p) {
+		writeErr(w, http.StatusBadRequest, "이 카드의 답은 입구로 옵니다.")
+		return
+	}
+	code, why := s.decide(r.Context(), id, body)
+	if why != "" {
+		writeErr(w, code, why)
+		return
+	}
+	w.WriteHeader(code)
+}
+
+// secret is whether a card has a field that must not be kept.
+func secret(p proposal.Proposal) bool {
+	return slices.ContainsFunc(p.Card.Fields, action.Field.IsPrivate)
+}
+
+// takeAnswer takes a person's answer to a card from the queue and carries on
+// with whatever waits on it: the answer is passed on, not judged, so a stopped
+// payment goes on with mind down. How it went goes back to the press; words
+// that could not be read yet are tried again.
+func (s *Server) takeAnswer(ctx context.Context, m queue.Message) error {
+	var card struct {
+		Card string `json:"card"`
+	}
+	if err := json.Unmarshal(m.Payload, &card); err != nil || card.Card == "" {
+		return fmt.Errorf("%w: 카드의 답을 읽지 못했습니다", queue.ErrRefused)
+	}
+	answer, err := s.thread.Answered(ctx, m.SourceKey)
+	if err != nil {
+		return err
+	}
+	code, why := s.decide(ctx, card.Card, answer)
+	if err := s.thread.Replied(ctx, m.SourceKey, code, why); err != nil {
+		s.log.Warn("카드의 답이 어떻게 됐는지 알리지 못했습니다", "card", card.Card, "err", err)
+	}
+	return nil
+}
+
+// decide applies an answer to a card and says how it went: a status, and why
+// when it did not.
+func (s *Server) decide(ctx context.Context, id string, a thread.Answer) (int, string) {
+	if proposal.Decision(a.Decision) == proposal.Approve {
 		// Private fields first, and out of the edits before they are kept.
-		if msg, code := s.acceptSecrets(r.Context(), id, body.Edits); msg != "" {
-			writeErr(w, code, msg)
-			return
+		if msg, code := s.acceptSecrets(ctx, id, a.Edits); msg != "" {
+			return code, msg
 		}
-		if msg, code := s.revise(r.Context(), id, body.Edits); msg != "" {
-			writeErr(w, code, msg)
-			return
+		if msg, code := s.revise(ctx, id, a.Edits); msg != "" {
+			return code, msg
 		}
 	}
-	err := s.proposals.DecideWhy(id, proposal.Decision(body.Decision), body.Reason)
+	err := s.proposals.DecideWhy(id, proposal.Decision(a.Decision), a.Reason)
 	switch {
 	case errors.Is(err, proposal.ErrNotFound):
-		writeErr(w, http.StatusNotFound, "그런 요청이 없습니다.")
+		return http.StatusNotFound, "그런 요청이 없습니다."
 	case errors.Is(err, proposal.ErrAlreadyDecided):
-		writeErr(w, http.StatusConflict, "이미 결재된 요청입니다.")
+		return http.StatusConflict, "이미 결재된 요청입니다."
 	case err != nil:
-		writeErr(w, http.StatusBadRequest, err.Error())
-	default:
-		w.WriteHeader(http.StatusNoContent)
+		return http.StatusBadRequest, err.Error()
 	}
+	return http.StatusNoContent, ""
 }
 
 // acceptSecrets hands a card's private fields (a password) to its module and

@@ -642,3 +642,52 @@ func TestWhatIsSaidWaitsAtTheWayIn(t *testing.T) {
 		t.Fatalf("빈 말: %d", code)
 	}
 }
+
+// A press on a card is a record, sealed, and it hears how it went from whoever
+// took it: the agent, with mind nowhere in it.
+func TestAnAnswerIsARecordAndHearsHowItWent(t *testing.T) {
+	srv, owner := setup(t)
+	id := unique("p")
+	type out struct {
+		code int
+		body []byte
+	}
+	done := make(chan out, 1)
+	go func() {
+		code, body := call(t, http.MethodPost, srv.URL+"/chat/cards/"+id+"/decision", token, `{"decision":"approved","edits":{"memo":"비밀 메모"}}`)
+		done <- out{code, body}
+	}()
+	var key, payload string
+	for i := 0; i < 500; i++ {
+		err := owner.QueryRow(context.Background(), `select source_key, payload::text from input.records where kind = 'card.answer' and subject = $1`, "card:"+id).Scan(&key, &payload)
+		if err == nil {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if key == "" || strings.Contains(payload, "비밀") {
+		t.Fatalf("봉인: %q %q", key, payload)
+	}
+	code, body := call(t, http.MethodGet, srv.URL+"/chat/answers/"+key, token, "")
+	if code != http.StatusOK || !strings.Contains(string(body), "비밀 메모") {
+		t.Fatalf("%d %s", code, body)
+	}
+	if code, _ := call(t, http.MethodGet, srv.URL+"/chat/answers/"+key, guestToken, ""); code != http.StatusNotFound {
+		t.Fatalf("손님은 운영자의 답을 못 읽습니다: %d", code)
+	}
+	if code, _ := call(t, http.MethodPost, srv.URL+"/chat/answers/"+key+"/reply", token, `{"status":409,"error":"이미 결재된 요청입니다."}`); code != http.StatusNoContent {
+		t.Fatalf("%d", code)
+	}
+	select {
+	case got := <-done:
+		if got.code != http.StatusConflict || !strings.Contains(string(got.body), "이미") {
+			t.Fatalf("%d %s", got.code, got.body)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("누른 쪽이 듣지 못했습니다")
+	}
+	// Nobody waiting any more is fine.
+	if code, _ := call(t, http.MethodPost, srv.URL+"/chat/answers/none/reply", token, `{"status":204}`); code != http.StatusNoContent {
+		t.Fatalf("%d", code)
+	}
+}

@@ -18,6 +18,8 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/core/bus"
 	"github.com/choigonyok/jarvis/agent/internal/core/module"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
+	"github.com/choigonyok/jarvis/agent/internal/holder"
+	"github.com/choigonyok/jarvis/agent/internal/thread"
 )
 
 type bgRunner struct{ bg bool }
@@ -416,11 +418,12 @@ func TestDecisionWithEdits(t *testing.T) {
 	})
 
 	decide := func(body string) int {
-		req := httptest.NewRequest(http.MethodPost, "/proposals/"+p.ID+"/decision", strings.NewReader(body))
-		req.SetPathValue("id", p.ID)
-		rec := httptest.NewRecorder()
-		s.postDecision(rec, req)
-		return rec.Code
+		var a thread.Answer
+		if err := json.Unmarshal([]byte(body), &a); err != nil {
+			t.Fatal(err)
+		}
+		code, _ := s.decide(context.Background(), p.ID, a)
+		return code
 	}
 
 	if code := decide(`{"decision":"approved"}`); code != http.StatusBadRequest {
@@ -480,35 +483,35 @@ func TestSiteOf(t *testing.T) {
 
 // One approval is one payment, whoever the payer: its window opens when the
 // payer is back at the payment (a job may start long after the card was
-// answered), runs paymentWindow from there, and lets one 결제하기 through - a
+// answered), runs holder.Window from there, and lets one 결제하기 through - a
 // second payment on the same site gets a card of its own. The browser's
 // guard keeps no window of its own, so this is the whole of it.
 func TestAnApprovalIsOnePayment(t *testing.T) {
 	now := time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
-	g := &paymentGrants{now: func() time.Time { return now }}
-	g.grant("coupang.com", 16, "")
+	g := &holder.Payments{Now: func() time.Time { return now }}
+	g.Grant("coupang.com", 16, "")
 
 	now = now.Add(40 * time.Minute) // the job starts when the conversation is idle
-	if !g.allow("coupang.com", 16, "order", "") {
+	if !g.Allow("coupang.com", 16, "order", "") {
 		t.Fatal("돌아온 결제자의 결제하기는 통과합니다")
 	}
-	if !g.allow("coupang.com", 16, "", "") {
+	if !g.Allow("coupang.com", 16, "", "") {
 		t.Fatal("같은 결제의 비밀번호 단계는 통과합니다")
 	}
-	if g.allow("coupang.com", 16, "order", "") {
+	if g.Allow("coupang.com", 16, "order", "") {
 		t.Fatal("두 번째 결제하기는 새 카드를 올려야 합니다")
 	}
-	if g.allow("coupang.com", 0, "", "") || g.allow("coupang.com", 17, "", "") {
+	if g.Allow("coupang.com", 0, "", "") || g.Allow("coupang.com", 17, "", "") {
 		t.Fatal("다른 결제자에게는 열리지 않습니다")
 	}
-	now = now.Add(paymentWindow + time.Second)
-	if g.allow("coupang.com", 16, "", "") {
+	now = now.Add(holder.Window + time.Second)
+	if g.Allow("coupang.com", 16, "", "") {
 		t.Fatal("돌아온 때부터 창이 지나면 닫힙니다")
 	}
 
-	g.grant("naver.com", 0, "")
-	now = now.Add(paymentWait + time.Second)
-	if g.allow("naver.com", 0, "", "") {
+	g.Grant("naver.com", 0, "")
+	now = now.Add(holder.Wait + time.Second)
+	if g.Allow("naver.com", 0, "", "") {
 		t.Fatal("돌아오지 않은 승인은 기다림이 지나면 닫힙니다")
 	}
 }
@@ -567,7 +570,7 @@ func TestAPaymentWindowIsOneCard(t *testing.T) {
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	s.holdDur = 0
 	now := time.Date(2026, 10, 29, 9, 31, 0, 0, time.UTC)
-	s.payments.now = func() time.Time { return now }
+	s.payments.Now = func() time.Time { return now }
 	post := func(body string) map[string]string {
 		req := httptest.NewRequest(http.MethodPost, "/intercept", strings.NewReader(body))
 		req.Header.Set("Authorization", "Bearer tok")
@@ -646,7 +649,7 @@ func TestAPaymentWindowIsOneCard(t *testing.T) {
 		t.Fatalf("작업의 결제창 승인으로 대화의 네이버페이가 통과했습니다: %v", conv)
 	}
 	runner.set(true)
-	now = now.Add(paymentWindow)
+	now = now.Add(holder.Window)
 	if late := post(naverPay); late["decision"] != string(proposal.Reject) {
 		t.Fatalf("결제창의 시간이 지나면 네이버페이도 닫힙니다: %v", late)
 	}
@@ -657,22 +660,22 @@ func TestAPaymentWindowIsOneCard(t *testing.T) {
 // start opens nothing), and not after its time.
 func TestAWindowIsOpenOnlyWhileItsPaymentIs(t *testing.T) {
 	now := time.Date(2026, 10, 29, 9, 31, 0, 0, time.UTC)
-	g := &paymentGrants{now: func() time.Time { return now }}
-	g.grant(windowSite, 1, "64000")
-	if g.isOpen(windowSite, 1) {
+	g := &holder.Payments{Now: func() time.Time { return now }}
+	g.Grant(windowSite, 1, "64000")
+	if g.IsOpen(windowSite, 1) {
 		t.Fatal("결제자가 결제창으로 돌아오기 전에는 열려 있지 않습니다")
 	}
-	if g.allow(windowSite, 1, "", "54000") || g.isOpen(windowSite, 1) {
+	if g.Allow(windowSite, 1, "", "54000") || g.IsOpen(windowSite, 1) {
 		t.Fatal("다른 금액의 결제창은 승인을 쓰지도 열지도 않습니다")
 	}
-	if !g.allow(windowSite, 1, "", "64000") || !g.allow(windowSite, 1, "", "") {
+	if !g.Allow(windowSite, 1, "", "64000") || !g.Allow(windowSite, 1, "", "") {
 		t.Fatal("돌아온 결제자의 그 금액 결제창과, 금액이 없는 결제창 안의 요청은 통과합니다")
 	}
-	if !g.isOpen(windowSite, 1) || g.isOpen(windowSite, 0) || g.isOpen(windowSite, 2) {
+	if !g.IsOpen(windowSite, 1) || g.IsOpen(windowSite, 0) || g.IsOpen(windowSite, 2) {
 		t.Fatal("열린 결제창은 그 결제자의 것입니다")
 	}
-	now = now.Add(paymentWindow + time.Second)
-	if g.isOpen(windowSite, 1) {
+	now = now.Add(holder.Window + time.Second)
+	if g.IsOpen(windowSite, 1) {
 		t.Fatal("시간이 지난 결제창은 닫혀 있습니다")
 	}
 	if won("64000") != "64,000원" || won("900") != "900원" || won("1234567") != "1,234,567원" {

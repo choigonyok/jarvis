@@ -10,6 +10,7 @@ import (
 
 	"github.com/choigonyok/jarvis/agent/internal/core/bus"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
+	"github.com/choigonyok/jarvis/agent/internal/holder"
 	"github.com/choigonyok/jarvis/agent/internal/policy"
 	"github.com/choigonyok/jarvis/gocommon/record"
 )
@@ -77,12 +78,12 @@ func TestThePasswordFollowsThePaymentsApproval(t *testing.T) {
 	runner := &switchRunner{}
 	s, _ := policyServer(t, Deps{Runner: runner, Jobs: jobs})
 	now := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
-	s.payments.now = func() time.Time { return now }
+	s.payments.Now = func() time.Time { return now }
 
 	if _, v := askPolicy(t, s, "mcp", pinCall); !v.Deny || v.Rule != policy.RulePaymentPIN {
 		t.Fatalf("승인 없이: %+v", v)
 	}
-	s.payments.grant("coupang.com", 0, "")
+	s.payments.Grant("coupang.com", 0, "")
 	if _, v := askPolicy(t, s, "mcp", pinCall); v.Deny {
 		t.Fatalf("대화의 승인: %+v", v)
 	}
@@ -94,14 +95,14 @@ func TestThePasswordFollowsThePaymentsApproval(t *testing.T) {
 	if _, v := askPolicy(t, s, "mcp", pinCall); !v.Deny {
 		t.Fatalf("다른 결제자: %+v", v)
 	}
-	s.payments.grant("pg-window", 7, "113000")
+	s.payments.Grant("pg-window", 7, "113000")
 	if _, v := askPolicy(t, s, "mcp", pinCall); v.Deny {
 		t.Fatalf("작업의 승인: %+v", v)
 	}
-	if !s.payments.allow("pg-window", 7, "", "113000") {
+	if !s.payments.Allow("pg-window", 7, "", "113000") {
 		t.Fatal("결제자가 돌아왔습니다")
 	}
-	now = now.Add(paymentWindow + time.Minute)
+	now = now.Add(holder.Window + time.Minute)
 	if _, v := askPolicy(t, s, "mcp", pinCall); !v.Deny {
 		t.Fatalf("창이 지났습니다: %+v", v)
 	}

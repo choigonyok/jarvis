@@ -736,9 +736,10 @@ func main() {
 		Log:             log,
 	})
 	gate.SetRefuse(api.Refuse)
-	// What is said comes in at the way in and waits there for this agent.
+	// What is said and how cards are answered come in at the way in and wait
+	// there for this agent.
 	if queuePool != nil {
-		talk := &queue.Consumer{Pool: queuePool, Topic: queue.Records, Name: "agent-chat", Kinds: []string{record.KindMessage}, Handle: api.TakeMessage, Log: log}
+		talk := &queue.Consumer{Pool: queuePool, Topic: queue.Records, Name: "agent-chat", Kinds: []string{record.KindMessage, record.KindAnswer}, Handle: api.Take, Log: log}
 		if cfg.Guest {
 			talk.Topic, talk.Name = queue.Guest, "agent-chat-guest"
 		}
