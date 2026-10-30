@@ -200,7 +200,7 @@ export function Departures() {
 function status(plan: Plan | undefined, now: number): string {
   if (!plan) return "";
   if (plan.stage === "off") return "실시간 없음";
-  if (!plan.leave || !plan.catch) return "곧 오는 차 없음";
+  if (!plan.leave || !plan.catch) return plan.missed?.length ? "걸어선 못 타요" : "곧 오는 차 없음";
   const leave = Date.parse(plan.leave);
   const { stage } = stageOf(leave, now, plan.last ? Date.parse(plan.last) : leave);
   if (stage === "none") return "놓침";
