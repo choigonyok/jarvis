@@ -43,11 +43,6 @@ type Policy struct {
 	Levels map[string]string
 	// Fixed kinds never move from their level, whatever the history.
 	Fixed map[string]bool
-	// Promote: once this many cards of a (skill, context) were answered and
-	// the approval rate (with a uniform prior) is at least PromoteRate, with
-	// the last answer an approval, an asked kind is done-and-told instead.
-	Promote     int
-	PromoteRate float64
 	// Window is how far back approvals count for the console.
 	Window time.Duration
 	// DailyInterrupts is how many pushes a day the gate allows itself; past
@@ -72,11 +67,10 @@ type Policy struct {
 // DefaultPolicy is the policy as it ships.
 func DefaultPolicy() Policy { return PolicyFrom(registry.Default()) }
 
-// PolicyFrom is the policy as the registry has it. Promotion stays here until
-// the engine takes it over.
+// PolicyFrom is the policy as the registry has it.
 func PolicyFrom(r *registry.Snapshot) Policy {
 	g := r.Gate()
-	p := Policy{Levels: map[string]string{}, Fixed: map[string]bool{}, Promote: 3, PromoteRate: 0.8,
+	p := Policy{Levels: map[string]string{}, Fixed: map[string]bool{},
 		Window: time.Duration(g.Window), DailyInterrupts: g.DailyInterrupts, DailyCards: g.DailyCards,
 		MinConfidence: g.MinConfidence, InterruptCost: g.InterruptCost, QuietRaised: time.Duration(g.QuietRaised),
 		QuietApproved: time.Duration(g.QuietApproved), QuietRejected: time.Duration(g.QuietRejected)}
@@ -561,22 +555,28 @@ func (g *Gate) decide(ctx context.Context, in model.Intent) (string, string, err
 	if level == Never {
 		return model.Drop, why, nil
 	}
-	// A slot comes graded: the engine weighed it against its own kind.
-	switch engine.Grade(in.Grade) {
-	case engine.Silent:
-		return model.Drop, "확신이 낮아 묻지 않아요", nil
-	case engine.Act:
-		if in.Reversible && !g.policy.Fixed[kind] {
-			return model.Notify, "늘 맞아서 바로 하고 알려요", nil
+	// How far it goes is the engine's: a slot comes graded against its own
+	// kind, anything else is graded here against how its kind has gone. What
+	// is always asked stays asked, and so does a kind just turned down.
+	fixed := g.policy.Fixed[kind]
+	grade, r := engine.Grade(in.Grade), engine.Reading{}
+	if grade == "" {
+		r = g.Reading(in)
+		spec := engine.Spec{Reversible: in.Reversible}
+		if fixed || turnedDown(stat) {
+			spec.Cap = engine.AskFilled
 		}
+		grade = engine.Decide(spec, r, engine.Explored(in.ID))
 	}
-	// A kind turned down again and again stops being raised, but for the odd
-	// one that keeps a way back. What is always asked stays asked.
-	if in.Grade == "" && level == AskFor && !g.policy.Fixed[kind] {
-		r := g.Reading(in)
-		if engine.Decide(engine.Spec{Reversible: in.Reversible}, r, engine.Explored(in.ID)) == engine.Silent {
-			return model.Drop, fmt.Sprintf("이런 제안은 %d번 답하신 기록상 원하지 않으셔서 묻지 않아요 (%.0f%%)", r.N, r.P*100), nil
-		}
+	switch {
+	case grade == engine.Silent && in.Grade != "":
+		return model.Drop, "확신이 낮아 묻지 않아요", nil
+	case grade == engine.Silent && !fixed:
+		// A kind turned down again and again stops being raised, but for the
+		// odd one that keeps a way back.
+		return model.Drop, fmt.Sprintf("이런 제안은 %d번 답하신 기록상 원하지 않으셔서 묻지 않아요 (%.0f%%)", r.N, r.P*100), nil
+	case grade == engine.Act && in.Reversible && !fixed:
+		return model.Notify, "늘 맞아서 바로 하고 알려요", nil
 	}
 	if in.Confidence < g.policy.MinConfidence {
 		return model.Ask, fmt.Sprintf("확신도 %.0f%%라 직접 확인받아요", in.Confidence*100), nil
@@ -593,29 +593,26 @@ func (g *Gate) decide(ctx context.Context, in model.Intent) (string, string, err
 	return model.Ask, why, nil
 }
 
-// Level is where a kind of action stands now, given how the cards of its
-// (skill, context) went, and why. A last answer that was a rejection or an
-// undo always brings it back to asking.
+// turnedDown is whether the last answer to a kind's cards was no.
+func turnedDown(stat model.PolicyStat) bool {
+	return stat.Last == model.OutcomeRejected || stat.Last == model.OutcomeUndone
+}
+
+// Level is where a kind of action starts, and why. A last answer that was a
+// rejection or an undo always brings it back to asking. Going further than it
+// starts is the engine's.
 func (p Policy) Level(kind string, stat model.PolicyStat) (string, string) {
 	base, ok := p.Levels[kind]
 	if !ok {
 		base = AskFor
 	}
-	if p.Fixed[kind] {
+	switch {
+	case p.Fixed[kind]:
 		return base, "항상 먼저 묻는 행동"
-	}
-	if stat.Last == model.OutcomeRejected || stat.Last == model.OutcomeUndone {
-		if base != AskFor {
-			return AskFor, "최근에 거절하거나 되돌리셔서 다시 물어요"
-		}
+	case base == AskFor:
 		return AskFor, "먼저 물어보는 행동"
-	}
-	decided := stat.Approved + stat.Rejected + stat.Undone
-	if base == AskFor && p.Promote > 0 && decided >= p.Promote && stat.Rate() >= p.PromoteRate {
-		return Tell, fmt.Sprintf("%d번 중 %d번 승인하셔서 바로 하고 알려요", decided, stat.Approved)
-	}
-	if base == AskFor {
-		return AskFor, "먼저 물어보는 행동"
+	case turnedDown(stat):
+		return AskFor, "최근에 거절하거나 되돌리셔서 다시 물어요"
 	}
 	return base, "믿고 맡긴 행동"
 }
@@ -671,6 +668,17 @@ func (g *Gate) quietTopic(ctx context.Context, in model.Intent) (bool, string, e
 // summary instead: the skill is unsure, today's budget is spent, or it is
 // not worth the interruption.
 func (g *Gate) quietCard(ctx context.Context, in model.Intent) (bool, string) {
+	// One subject rings once: a second card about it, from another skill,
+	// waits beside the first (a plan's "add it" and its "move it").
+	if in.EntityID != "" {
+		if open, err := g.st.IntentsFor(ctx, in.EntityID); err == nil {
+			for _, p := range open {
+				if p.ID != in.ID && p.Status == model.Pending && p.Card {
+					return true, "같은 일에 대한 카드가 이미 떠 있어 함께 볼 수 있게 두었어요"
+				}
+			}
+		}
+	}
 	r := g.Reading(in)
 	if r.P < g.policy.MinConfidence {
 		return true, fmt.Sprintf("확신도 %.0f%%라 저녁 요약으로", r.P*100)

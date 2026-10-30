@@ -187,6 +187,11 @@ func calendarTwin(ctx context.Context, v View, e model.Entity) (model.Entity, bo
 // exact entry down or took it back, or was asked it in the conversation by
 // the assistant's own card: none is asked twice.
 func (s Schedule) add(ctx context.Context, v View, e model.Entity, changes []model.Change) (model.Intent, bool) {
+	// A day gone by is not asked about: read late (the collector was down for
+	// a day, 2026-10-22), the card came for what had already happened.
+	if e.State.Date != "" && e.State.Date < v.Now().In(v.Loc()).Format("2006-01-02") {
+		return model.Intent{}, false
+	}
 	ev := event(e.State, changes)
 	payload, _ := json.Marshal(model.CalendarAction{Event: ev})
 	past, _ := v.IntentsFor(ctx, e.ID)

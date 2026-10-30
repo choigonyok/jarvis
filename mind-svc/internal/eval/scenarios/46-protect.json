@@ -1,228 +1,233 @@
 {
- "name": "보호: 겹치는 일정은 옮기기 카드(폼으로 시각을 고쳐 승인), 이동 시간이 모자라면 늦추기 카드 - 캘린더 추가를 세 번 승인한 뒤로는 추가는 바로 하고 옮기기만 묻는다",
- "room": "owner",
- "roomName": "jarvis",
- "turns": [
-  {
-   "messages": [
+  "name": "보호: 겹치는 일정은 옮기기 카드(폼으로 시각을 고쳐 승인), 이동 시간이 모자라면 늦추기 카드",
+  "room": "owner",
+  "roomName": "jarvis",
+  "turns": [
     {
-     "at": "2026-10-15T09:00",
-     "me": true,
-     "text": "20일 화요일 7시~9시 민수랑 강남에서 저녁 확정"
-    }
-   ],
-   "script": {
-    "changes": [
-     {
-      "op": "create",
-      "kind": "plan",
-      "set": {
-       "title": "민수와 저녁",
-       "status": "confirmed",
-       "date": "2026-10-20",
-       "start": "19:00",
-       "end": "21:00",
-       "place": "강남",
-       "people": [
-        "민수"
-       ],
-       "type": "식사"
-      },
-      "evidence": [
-       {
-        "line": 1,
-        "quote": "민수랑 강남에서 저녁 확정"
-       }
+      "messages": [
+        {
+          "at": "2026-10-15T09:00",
+          "me": true,
+          "text": "20일 화요일 7시~9시 민수랑 강남에서 저녁 확정"
+        }
       ],
-      "confidence": 0.9,
-      "why": "혼자 쓴 확정 메모"
-     }
-    ]
-   },
-   "expect": {
-    "intents": [
-     "calendar.create"
-    ]
-   }
-  },
-  {
-   "approve": "calendar.create",
-   "expect": {
-    "calendarCount": 1
-   }
-  },
-  {
-   "messages": [
+      "script": {
+        "changes": [
+          {
+            "op": "create",
+            "kind": "plan",
+            "set": {
+              "title": "민수와 저녁",
+              "status": "confirmed",
+              "date": "2026-10-20",
+              "start": "19:00",
+              "end": "21:00",
+              "place": "강남",
+              "people": [
+                "민수"
+              ],
+              "type": "식사"
+            },
+            "evidence": [
+              {
+                "line": 1,
+                "quote": "민수랑 강남에서 저녁 확정"
+              }
+            ],
+            "confidence": 0.9,
+            "why": "혼자 쓴 확정 메모"
+          }
+        ]
+      },
+      "expect": {
+        "intents": [
+          "calendar.create"
+        ]
+      }
+    },
     {
-     "at": "2026-10-15T09:10",
-     "me": true,
-     "text": "20일 8시 팀 회식 확정"
-    }
-   ],
-   "script": {
-    "changes": [
-     {
-      "op": "create",
-      "kind": "plan",
-      "set": {
-       "title": "팀 회식",
-       "status": "confirmed",
-       "date": "2026-10-20",
-       "start": "20:00",
-       "type": "회식"
-      },
-      "evidence": [
-       {
-        "line": 1,
-        "quote": "20일 8시 팀 회식 확정"
-       }
-      ],
-      "confidence": 0.9,
-      "why": "혼자 쓴 확정 메모"
-     }
-    ]
-   },
-   "expect": {
-    "intents": [
-     "calendar.create"
-    ],
-    "infos": [
-     "일정이 겹쳐요"
-    ]
-   }
-  },
-  {
-   "approve": "calendar.create",
-   "expect": {
-    "cards": [
-     "'팀 회식'를 21:00로 옮길까요?"
-    ],
-    "cardHas": [
-     "민수와 저녁"
-    ]
-   }
-  },
-  {
-   "approve": "calendar.update",
-   "answers": {
-    "date": "2026-10-20",
-    "start": "21:30"
-   },
-   "expect": {
-    "calendar": [
-     {
-      "titleHas": "팀 회식",
-      "date": "2026-10-20",
-      "start": "21:30"
-     },
-     {
-      "titleHas": "민수와 저녁",
-      "start": "19:00"
-     }
-    ],
-    "calendarCount": 2
-   }
-  },
-  {
-   "at": "2026-10-16T10:00",
-   "note": {
-    "text": "강남에서 홍대까지 보통 40분",
-    "rule": {
-     "kind": "travel",
-     "from": "강남",
-     "to": "홍대",
-     "minutes": 40
-    }
-   }
-  },
-  {
-   "messages": [
+      "approve": "calendar.create",
+      "expect": {
+        "calendarCount": 1
+      }
+    },
     {
-     "at": "2026-10-16T10:05",
-     "me": true,
-     "text": "21일 5시~7시 강남 고객 미팅"
-    }
-   ],
-   "script": {
-    "changes": [
-     {
-      "op": "create",
-      "kind": "plan",
-      "set": {
-       "title": "고객 미팅",
-       "status": "confirmed",
-       "date": "2026-10-21",
-       "start": "17:00",
-       "end": "19:00",
-       "place": "강남",
-       "type": "업무"
-      },
-      "evidence": [
-       {
-        "line": 1,
-        "quote": "21일 5시~7시 강남 고객 미팅"
-       }
+      "messages": [
+        {
+          "at": "2026-10-15T09:10",
+          "me": true,
+          "text": "20일 8시 팀 회식 확정"
+        }
       ],
-      "confidence": 0.9,
-      "why": "확정 메모"
-     }
-    ]
-   },
-   "expect": {
-    "intents": [
-     "calendar.create"
-    ]
-   }
-  },
-  {
-   "approve": "calendar.create"
-  },
-  {
-   "messages": [
+      "script": {
+        "changes": [
+          {
+            "op": "create",
+            "kind": "plan",
+            "set": {
+              "title": "팀 회식",
+              "status": "confirmed",
+              "date": "2026-10-20",
+              "start": "20:00",
+              "type": "회식"
+            },
+            "evidence": [
+              {
+                "line": 1,
+                "quote": "20일 8시 팀 회식 확정"
+              }
+            ],
+            "confidence": 0.9,
+            "why": "혼자 쓴 확정 메모"
+          }
+        ]
+      },
+      "expect": {
+        "intents": [
+          "calendar.create"
+        ],
+        "infos": [
+          "일정이 겹쳐요"
+        ]
+      }
+    },
     {
-     "at": "2026-10-16T10:07",
-     "me": true,
-     "text": "21일 미팅 끝나고 7시 10분에 홍대에서 지수랑 영화"
-    }
-   ],
-   "script": {
-    "changes": [
-     {
-      "op": "create",
-      "kind": "plan",
-      "set": {
-       "title": "지수와 영화",
-       "status": "confirmed",
-       "date": "2026-10-21",
-       "start": "19:10",
-       "place": "홍대",
-       "people": [
-        "지수"
-       ],
-       "type": "공연"
+      "approve": "calendar.create",
+      "expect": {
+        "cards": [
+          "'팀 회식'를 21:00로 옮길까요?"
+        ],
+        "cardHas": [
+          "민수와 저녁"
+        ]
+      }
+    },
+    {
+      "approve": "calendar.update",
+      "answers": {
+        "date": "2026-10-20",
+        "start": "21:30"
       },
-      "evidence": [
-       {
-        "line": 1,
-        "quote": "7시 10분에 홍대에서 지수랑 영화"
-       }
+      "expect": {
+        "calendar": [
+          {
+            "titleHas": "팀 회식",
+            "date": "2026-10-20",
+            "start": "21:30"
+          },
+          {
+            "titleHas": "민수와 저녁",
+            "start": "19:00"
+          }
+        ],
+        "calendarCount": 2
+      }
+    },
+    {
+      "at": "2026-10-16T10:00",
+      "note": {
+        "text": "강남에서 홍대까지 보통 40분",
+        "rule": {
+          "kind": "travel",
+          "from": "강남",
+          "to": "홍대",
+          "minutes": 40
+        }
+      }
+    },
+    {
+      "messages": [
+        {
+          "at": "2026-10-16T10:05",
+          "me": true,
+          "text": "21일 5시~7시 강남 고객 미팅"
+        }
       ],
-      "confidence": 0.9,
-      "why": "확정 메모"
-     }
-    ]
-   },
-   "expect": {
-    "intents": [
-     "calendar.create"
-    ],
-    "cards": [
-     "'지수와 영화'를 19:40로 옮길까요?"
-    ],
-    "cardHas": [
-     "40분"
-    ]
-   }
-  }
- ]
+      "script": {
+        "changes": [
+          {
+            "op": "create",
+            "kind": "plan",
+            "set": {
+              "title": "고객 미팅",
+              "status": "confirmed",
+              "date": "2026-10-21",
+              "start": "17:00",
+              "end": "19:00",
+              "place": "강남",
+              "type": "업무"
+            },
+            "evidence": [
+              {
+                "line": 1,
+                "quote": "21일 5시~7시 강남 고객 미팅"
+              }
+            ],
+            "confidence": 0.9,
+            "why": "확정 메모"
+          }
+        ]
+      },
+      "expect": {
+        "intents": [
+          "calendar.create"
+        ]
+      }
+    },
+    {
+      "approve": "calendar.create"
+    },
+    {
+      "messages": [
+        {
+          "at": "2026-10-16T10:07",
+          "me": true,
+          "text": "21일 미팅 끝나고 7시 10분에 홍대에서 지수랑 영화"
+        }
+      ],
+      "script": {
+        "changes": [
+          {
+            "op": "create",
+            "kind": "plan",
+            "set": {
+              "title": "지수와 영화",
+              "status": "confirmed",
+              "date": "2026-10-21",
+              "start": "19:10",
+              "place": "홍대",
+              "people": [
+                "지수"
+              ],
+              "type": "공연"
+            },
+            "evidence": [
+              {
+                "line": 1,
+                "quote": "7시 10분에 홍대에서 지수랑 영화"
+              }
+            ],
+            "confidence": 0.9,
+            "why": "확정 메모"
+          }
+        ]
+      },
+      "expect": {
+        "intents": [
+          "calendar.create"
+        ]
+      }
+    },
+    {
+      "approve": "calendar.create",
+      "expect": {
+        "cards": [
+          "'지수와 영화'를 19:40로 옮길까요?"
+        ],
+        "cardHas": [
+          "40분"
+        ]
+      }
+    }
+  ]
 }

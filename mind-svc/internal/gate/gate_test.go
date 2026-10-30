@@ -3,6 +3,7 @@ package gate
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -66,8 +67,19 @@ func TestBriefIsNotHeldByTheDaysBudget(t *testing.T) {
 	}
 }
 
-// Asked first; after enough approvals in a row, done and told; one undo and
-// it is asked again.
+// answered is a kind's record on the ledger: so many cards, approved or not.
+func answered(n int, result string) []model.Outcome {
+	rows := make([]model.Outcome, n)
+	for i := range rows {
+		rows[i] = model.Outcome{ID: fmt.Sprint("intent:", i), Source: "card", Kind: "calendar.create", Skill: "schedule", Context: "calendar.create",
+			P: 0.9, Result: result}
+	}
+	return rows
+}
+
+// Asked first, however sure, until the ledger has enough answers; after enough
+// approvals, done and told; one undo and it is asked again, before the ledger
+// has heard of it.
 func TestTrustIsLearned(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(DefaultPolicy())
@@ -80,9 +92,13 @@ func TestTrustIsLearned(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	in, _ := f.g.Submit(ctx, create("plan_d"))
+	if in, _ := f.g.Submit(ctx, create("plan_d")); in.Decision != model.Ask {
+		t.Fatalf("답이 %d건 쌓이기 전에는 물어야 합니다: %+v", engine.MinCases, in)
+	}
+	f.g.SetBook(engine.NewBook(answered(12, model.ResultApproved)))
+	in, _ := f.g.Submit(ctx, create("plan_e"))
 	if in.Decision != model.Notify || in.Status != model.Executed {
-		t.Fatalf("세 번 승인한 뒤에는 바로 하고 알려야 합니다: %+v", in)
+		t.Fatalf("장부가 늘 맞았다고 하면 바로 하고 알려야 합니다: %+v", in)
 	}
 	if len(f.cal.All()) != 4 {
 		t.Fatalf("캘린더에 4개: %v", f.cal.All())
@@ -93,9 +109,23 @@ func TestTrustIsLearned(t *testing.T) {
 	if len(f.cal.All()) != 3 {
 		t.Fatalf("되돌리면 빠져야 합니다: %v", f.cal.All())
 	}
-	again, _ := f.g.Submit(ctx, create("plan_e"))
+	again, _ := f.g.Submit(ctx, create("plan_f"))
 	if again.Decision != model.Ask {
 		t.Fatalf("되돌린 뒤에는 다시 물어야 합니다: %+v", again)
+	}
+}
+
+// A kind the operator keeps turning down goes silent.
+func TestWhatTheLedgerSaysAgainst(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(DefaultPolicy())
+	f.g.SetBook(engine.NewBook(answered(12, model.ResultRejected)))
+	got, _ := f.g.Submit(ctx, create("plan_z"))
+	if engine.Explored(got.ID) {
+		t.Skip("이 id 는 탐색으로 묻습니다")
+	}
+	if got.Decision != model.Drop {
+		t.Fatalf("계속 거절한 종류는 묻지 않습니다: %+v", got)
 	}
 }
 
@@ -552,5 +582,26 @@ func TestEveryActionHasARow(t *testing.T) {
 	f := newFixture(DefaultPolicy())
 	if missing := f.g.Unlisted(); len(missing) != 0 {
 		t.Fatalf("%v", missing)
+	}
+}
+
+// One subject rings once: a second skill's card about the same plan waits
+// beside the first, and the first is not taken down.
+func TestOneSubjectRingsOnce(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(DefaultPolicy())
+	first, err := f.g.Submit(ctx, create("plan_a"))
+	if err != nil || first.Tier != "now" {
+		t.Fatalf("%+v %v", first, err)
+	}
+	second := create("plan_a")
+	second.Skill = "protect"
+	got, err := f.g.Submit(ctx, second)
+	if err != nil || got.Decision != model.Ask || got.Tier != "digest" {
+		t.Fatalf("%+v %v", got, err)
+	}
+	still, err := f.st.Intent(ctx, first.ID)
+	if err != nil || still.Status != model.Pending {
+		t.Fatalf("%+v %v", still, err)
 	}
 }

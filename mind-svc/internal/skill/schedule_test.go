@@ -60,3 +60,20 @@ func TestAlikeWords(t *testing.T) {
 		t.Fatal("거절한 제목과 이유가 함께 짚은 말(은주)은 거릅니다")
 	}
 }
+
+// A day gone by is not asked about: read late, the card came for what had
+// already happened.
+func TestADayGoneByIsNotAskedAbout(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 10, 26, 15, 0, 0, 0, seoul)
+	v := view{now: now}
+	past := model.Entity{ID: "plan_a", State: model.State{Title: "저녁", Date: "2026-10-25", Status: model.Confirmed}}
+	if _, ok := (Schedule{}).add(ctx, v, past, nil); ok {
+		t.Fatal("지난 날은 묻지 않습니다")
+	}
+	today := past
+	today.State.Date = "2026-10-26"
+	if _, ok := (Schedule{}).add(ctx, v, today, nil); !ok {
+		t.Fatal("오늘은 묻습니다")
+	}
+}
