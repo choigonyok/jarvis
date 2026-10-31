@@ -7,11 +7,11 @@ jarvis 의 에이전트와 그것을 둘러싼 운영 메모입니다 - 전체 �
 **Claude Code 구독으로 과금됩니다** (API 크레딧 아님).
 
 ```
-web (Next.js, Cloudflare Workers)   jarvis.choigonyok.com, Cloudflare Access 뒤.
+web (Next.js, Cloudflare Workers)   Cloudflare Access 뒤.
       │  사람이 읽고 결재하는 화면. 자격증명은 서버측에만, 전부 프록시(src/lib/proxy.ts)
       │  서비스 바인딩(GATEWAY) + JARVIS_EDGE_TOKEN
       ▼
-edge (gateway Worker)  jarvis-be.choigonyok.com. 경로 허용 목록, 토큰을 서비스용(JARVIS_API_TOKEN)으로
+edge (gateway Worker)  경로 허용 목록, 토큰을 서비스용(JARVIS_API_TOKEN)으로
       │  바꿔 붙임. 공개 주소는 폰(OwnTracks·단축어)과 화면 탭의 VNC 소켓만 직접 씀
       │  Workers VPC → cloudflared(tunnel)
       ▼
@@ -26,30 +26,31 @@ agent (Go) :8080      결정하는 곳 - 대화, 권한 게이트, 결재 카드
       └─ exec: claude -p ...  ← 구독으로 과금, 실제 실행
 agent-guest :8081     손님 계정의 agent - 손님 대화·캘린더(손님 쪽)·리마인드·체크리스트·작업,
                       손님의 지금 상황·취향(mind, 손님 토큰)·폰 한 줄(context)·자비스 기억·첨부 사진.
-                      손님 리마인드가 울리면 손님 대화에 안내 카드(events 의 손님 구독 agent-guest).
+                      손님 리마인드가 울리면 손님 대화에 안내 카드(효과의 손님 구독).
                       운영자의 돈·메시지·브라우저·위치에는 닿지 못함, DB 에도 닿지 못함
 
-mind-svc :8102        인지 루프. 감지 → 해석 → 세계 모델 → 노트·예측·성찰 → 스킬 →
-                      하나뿐인 관문(원장·예산·신뢰도). 카드는 mind.card → agent 결재 카드
+mind-svc :8102        판단. 기록 → 레인 → 세계 모델 → 스킬 → 엔진 → 관문 → 효과.
+                      가계부·작업 장부도 여기에 있다. 카드는 효과 mind.card → agent 결재 카드
 
-기능 서비스           각자 디렉터리 하나, 이미지 하나, 상태는 Postgres 에(서비스별 역할 svc_*)
-      ├─ calendar-svc  :8093  일정 (uniple 공유 캘린더, postgres 백엔드는 롤백용)
+서비스                각자 디렉터리 하나, 이미지 하나, 상태는 Postgres 에(서비스별 역할 svc_*)
+      ├─ calendar-svc  :8093  일정 (공유 캘린더, postgres 백엔드는 롤백용)
       ├─ assets-svc    :8092  업비트·KIS·금 (주문 가능한 키가 여기에만), 목표 비중·매매 계획
-      ├─ mind      :8098  맡긴 작업의 기록 (실행은 agent 스케줄러)
       ├─ context-svc   :8103  위치·현재 상태 (OwnTracks·단축어·맥 수집기)
       ├─ input-svc     :8101  입구: outbox 를 꺼내 기록 + 소비자별 배달 (소비자는 gocommon/queue 로 직접 읽음), 대화 턴·운동의 투영
                                 mind 를 바꾸는 일도 여기로 들어간다(internal/mindcmd: 기록을 남기고 mind 의 창구에서 답을 읽는다)
       ├─ output-svc    :8097  나가는 길: 효과를 읽어 알림함·웹 푸시·저녁 요약, 알림 분류 목록
-      ├─ status-svc    :8096  상태 탭 (기능별 판정, 읽기만)
+      ├─ status-svc    :8096  상태 탭 (기능별 코드 없이 읽기만)
+      ├─ photos-svc    :8107  사진 서버를 읽어 바뀐 것을 기록으로
+      ├─ vault-svc     :8105  로그인·결제 비밀번호 보관함
       └─ memory-svc    :8100  장기 기억 (Graphiti + FalkorDB)
-수집기                kakaotalk-client :8090 · imessage-client :8099 (평문 사본, 보존 730일)
+수집기                kakaotalk-client :8090 · imessage-client :8099 (맥의 앱 DB 를 읽기만)
 tts :8106 (맥미니 호스트) 운영자·손님 각자의 목소리 복제 TTS (Qwen3-TTS 1.7B, MLX - GPU 가 필요해 compose 밖, LaunchAgent)
 browser :8931         에이전트의 Chromium (browser 네트워크에만, 결제 가드 guard.py)
 search-svc :8104      웹 찾기·읽기 - 네이버 검색, 페이지와 그림 속 글자, 네이버 지도 (search 네트워크에만)
 ocr :8107 (맥미니 호스트) 그림 속 글자 (애플 Vision - compose 밖, LaunchAgent)
 
-postgres (data 네트워크)  서비스들의 표와 이벤트 로그 · falkordb (data) 기억 그래프
-gocommon/             Go 공통 코드 (이벤트 outbox, 수집기 인증·보존)
+postgres (data 네트워크)  서비스들의 표와 기록 · falkordb (data) 기억 그래프
+gocommon/             Go 공통 코드 (큐, 기록, 어댑터 감시, 점검, 수집기 인증)
 ```
 
 각 서비스의 README 에 경계를 그은 이유와 검증한 것이 있습니다:
@@ -61,31 +62,37 @@ gocommon/             Go 공통 코드 (이벤트 outbox, 수집기 인증·보�
 [db](../db/README.md)
 
 **에이전트에 남은 것과 나간 것.** 저장소는 전부 나갔고, 결정은 전부 남았습니다.
-승인 카드·도구 스키마·`Reversible` 선언·SSE·진행 상태는 대화와 게이트의
-속성이라 에이전트의 것입니다. 제안 저장소도 남았습니다 — 그건 게이트의 다른
-반쪽이고, 결정이 날 때까지 반환하지 않는 핸들러와 한 몸입니다.
+승인 카드·도구 스키마·`Reversible` 선언·SSE·진행 상태, 결제의 승인과 보류(`internal/holder`)는
+대화와 게이트의 속성이라 에이전트의 것입니다. 제안 저장소도 남았습니다 - 카드를 올린 쪽이
+사람의 답을 받아 이어 가야 하기 때문입니다.
 
 제안(proposal)은 저장되는 객체이지 대화의 속성이 아닙니다. 그래서 **대화 없이도
-제안이 열립니다** — 생산자는 둘입니다: 대화 중의 권한 게이트(아래), 그리고 mind 의
-관문이 보낸 카드(`mind.card`, 카톡에서 확정된 약속을 캘린더에 넣을지, 비중이 벗어난
+제안이 열립니다** - 생산자는 여럿입니다: 대화 중의 권한 게이트(아래), 브라우저의 결제 가드, 작업의 `ask`,
+그리고 mind 의 관문이 보낸 카드(`mind.card`, 카톡에서 확정된 약속을 캘린더에 넣을지, 비중이 벗어난
 포트폴리오를 리밸런싱할지 같은 것). 먼저 말을 꺼낼지의 판단과 그 원장(최근에 물었나,
-거절했나, 오늘 몫을 다 썼나)은 mind 에만 있고, agent 는 카드를 띄우고 거절을 mind 에
+거절했나, 오늘 몫을 다 썼나)은 mind 에만 있고, agent 는 카드를 띄우고 답을 mind 에
 알릴 뿐입니다.
 
 ## 승인 게이트가 걸리는 자리
 
 Claude Code는 `--permission-prompt-tool`로 지정된 MCP 도구에 권한을 물어봅니다.
-그 도구가 이 에이전트의 `/mcp`이고, 핸들러는 **결정이 날 때까지 반환하지 않습니다.**
-문서상 이 대기는 무기한 허용됩니다 — *"The callback can stay pending indefinitely."*
+그 도구가 이 에이전트의 `/mcp`이고, 핸들러는 **사람을 기다리지 않습니다.** 카드를 올리고 바로
+답해 턴을 끝내고, 사람의 결정이 새 턴을 엽니다(`permission.Gate.Resolve`). CLI 의 HTTP 클라이언트가
+`MCP_TOOL_TIMEOUT` 과 상관없이 MCP 호출을 5분 뒤 포기해서, 기다리는 핸들러로는 5분 넘게 둔 카드가
+실패로 돌아와 같은 카드가 두 장 떴기 때문입니다.
 
-- 승인 → `{"behavior":"allow"}` → Claude Code가 실행
-- 반려 → `{"behavior":"deny","message":"..."}` → 실행되지 않고, 반려 사실이 모델에 전달
-- 무응답 → `JARVIS_APPROVAL_TIMEOUT` 후 반려 처리
+- 카드를 올림 → `{"behavior":"deny","message":"승인 카드를 올렸습니다..."}` → CLI 에는 거절이지만, 문구가
+  아직 실행도 반려도 아니니 응답을 마치라고 말합니다
+- 승인, 모듈의 동작 → 사람이 본 입력 그대로 모듈이 실행하고 결과를 새 턴으로 알립니다
+- 승인, CLI 자체 도구 → 그 인자의 호출 한 번을 허가하고 다시 부르라고 새 턴으로 알립니다
+- 반려 → 실행되지 않고, 반려 사실과 이유가 새 턴으로 모델에 전달됩니다
 
-CLI에 넘기는 `MCP_TIMEOUT`/`MCP_TOOL_TIMEOUT`은 **밀리초**입니다(CLI 기본 30000).
-카드가 떠 있는 동안 도구 호출은 그 예산을 쓰고 있으므로, 예산은 사람이 기다릴 수 있는
-시간(`JARVIS_APPROVAL_TIMEOUT` + 여유)보다 커야 합니다. 초 단위로 넘기면 실제 한도가
-1.8초가 되어 **승인은 됐는데 실행은 안 되는** 상태가 됩니다.
+카드의 답은 입구 `POST /chat/cards/{id}/decision` 으로 기록 `card.answer` 가 되고, 에이전트가 큐에서
+바로 읽어 이어 갑니다(`takeAnswer`). 비밀 칸이 있는 카드만 비밀이 기록에 남지 않게 에이전트의
+`POST /proposals/{id}/decision` 으로 옵니다.
+
+CLI에 넘기는 `MCP_TIMEOUT`/`MCP_TOOL_TIMEOUT`은 **밀리초**입니다(CLI 기본 30000). 결제 카드에 걸린
+브라우저 도구는 답을 기다리므로, 예산은 `JARVIS_APPROVAL_TIMEOUT` + 여유입니다.
 
 **카드는 무언가를 바꾸는 일과 결제에만 올라갑니다**: 일정 추가·수정·삭제, 로그인 정보 저장,
 결제(브라우저 결제 가드). 작업 만들기·지시(`create_job`·`instruct_job`)와 브라우저 도구(읽기·누르기·입력, 결제 카드가

@@ -104,24 +104,21 @@ windows are only reachable from the logged-in session):
 - what it saw and did goes to `~/.jarvis-host/kakaotalk-login.json`, which the
   상태 tab reads as "카톡 로그인".
 
-**The Mac mini's lock screen wants no password.** While the screen is locked,
+**A locked screen stops the login.** While the screen is locked,
 macOS hands an accessibility client the app itself in place of every window -
 KakaoTalk's, Terminal's, Safari's alike - so no login window can be read and
 nothing is typed; only the menus still answer. 2026-10-23 the screen had
 locked the night before, KakaoTalk was logged out by a 13-minute drop at
-14:38, and it read as logged in until the screen was unlocked at 02:10. So the
-lock screen is off on the Mac mini (System Settings → Lock Screen → require
-password after the screen saver or display: never; it logs in by itself at
-boot and FileVault is off, so this opens nothing new). The Mac still calls its
-screen locked whenever the display sleeps (ten idle minutes): logged in, that
-is fine; a logout seen in the menu wakes the display (as a key press would),
-which then unlocks by itself and the login goes on (`waking`). If it stays
-locked while `sysadminctl -screenLock status` says the lock wants no password,
+14:38, and it read as logged in until the screen was unlocked at 02:10. The
+Mac calls its screen locked whenever the display sleeps (ten idle minutes):
+logged in, that is fine; a logout seen in the menu wakes the display (as a key
+press would), and where the lock wants no password it unlocks by itself and
+the login goes on (`waking`). If it stays locked while `sysadminctl -screenLock status` says the lock wants no password,
 the wake just did not take: the record says `locked` and the display is woken
 again every ten minutes (2026-10-28 17:56 one wake that did not take stopped
 it until 10/30 02:40, KakaoTalk and the card alerts with it; a wake from a
-shell then opened the screen at once). If a password is on the lock after
-all, the record says `locked` (the 상태 tab fails and pushes) and the display
+shell then opened the screen at once). If the lock wants a password, the
+record says `locked` (the 상태 tab fails and pushes) and the display
 is not woken again until the screen has been seen open; logged in behind such
 a lock, `locked-in` warns.
 

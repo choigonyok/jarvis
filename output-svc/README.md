@@ -1,15 +1,19 @@
 # output-svc
 
-모든 서비스의 알림이 모이는 곳. 서비스는 **무슨 일이 있었고 얼마나 중요한지**만
-정해진 모양으로 보내고, 그게 지금 푸시가 될지, 방해 금지 시간이 끝난 뒤 갈지,
-저녁 요약의 한 줄이 될지, 알림함에만 남을지는 여기서 사람의 설정에 맞춰 정한다.
+나가는 길이다. 효과(`mind.effects`, 손님은 `mind.guest_effects`)와 상태·결재 기록을 읽어 알림함과
+웹 푸시로 내보내고, mind 가 올린 승인된 쓰기를 정해진 API 로 대신 부른다.
 
-## 이벤트 보내기
+서비스는 **무슨 일이 있었고 얼마나 중요한지**만 정해진 모양으로 남기고, 그게 지금 푸시가 될지,
+방해 금지 시간이 끝난 뒤 갈지, 저녁 요약의 한 줄이 될지, 알림함에만 남을지는 여기서 사람의 설정에
+맞춰 정한다.
+
+## 알림 남기기
+
+서비스는 `gocommon/notify`(assets-svc 는 `src/notify.ts`)로 `input.outbox` 에 남기고, 입구에서 기록이
+된다. `status.*`·`approval.*` 은 output 이 기록에서 바로 읽고, 나머지는 mind 의 전달 레인을 지나
+효과로 온다.
 
 ```
-POST /events
-Authorization: Bearer $JARVIS_API_TOKEN
-
 {
   "source": "spending",            // 보낸 서비스
   "kind":   "spending.big",        // "분류.세부". 분류 단위로 끌 수 있다
@@ -21,9 +25,6 @@ Authorization: Bearer $JARVIS_API_TOKEN
   "key":    "spending:big:123"     // 중복 방지. 같은 키는 한 번만 (선택)
 }
 ```
-
-응답: 새 알림이면 `201`과 저장된 알림, 이미 받은 키면 `200 {"duplicate":true}`,
-모양이 틀리면 `400 {"error": "..."}`.
 
 보내는 쪽은 실패해도 하던 일을 멈추지 않는다(각 서비스의 `internal/notify`,
 assets-svc 의 `src/notify.ts` 는 기다리지 않고 보낸다). 같은 일을 여러 번 말해도
@@ -51,6 +52,17 @@ assets-svc 의 `src/notify.ts` 는 기다리지 않고 보낸다). 같은 일을
 새 분류를 쓰면 콘솔 알림 설정(`web/src/components/shell/notifications.tsx` 의
 `CATEGORIES`)에도 넣어야 끌 수 있다.
 
+## 승인된 쓰기
+
+mind 가 승인된 일을 효과 `adapter.call` 로 내면 `internal/calls` 가 허용 목록만 한 번 부르고, 어떻게
+됐는지를 기록 `execute.result` 로 남긴다. 목록에 없는 쓰기는 부르지 않는다.
+
+| 어댑터 | 허용하는 호출 |
+|---|---|
+| `calendar` | `PUT /events`, `PATCH /events/{id}`, `DELETE /events/{id}` |
+| `assets` | `POST /orders`, `POST /orders/rebalance` |
+| `immich` | `POST /api/albums`, `DELETE /api/albums/{id}` |
+
 ## 그 밖의 경로 (콘솔용, 게이트웨이 `/notify` 를 거친다)
 
 - `GET /notifications?limit=50` 알림함, `POST /notifications/read` `{ids}` 또는 `{}`(모두)
@@ -75,5 +87,5 @@ assets-svc 의 `src/notify.ts` 는 기다리지 않고 보낸다). 같은 일을
 ## 설정
 
 `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` 는 `.env` 의 `JARVIS_VAPID_*` 에서 온다(공개
-저장소라 코드에 두지 않는다). 없으면 푸시 없이 알림함에만 쌓인다. 저장은 Postgres
-`notifications`, `push_subscriptions`, `notify_settings`(마이그레이션 031).
+저장소라 코드에 두지 않는다). 없으면 푸시 없이 알림함에만 쌓인다. 저장은 Postgres `output`
+스키마(`notifications`, `push_subscriptions`, `notify_audience_settings`, `calls`).
