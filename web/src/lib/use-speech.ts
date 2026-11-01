@@ -68,19 +68,21 @@ const RECAPTURE_MS = 1200;
 const AUTO_SOUND_MS = 5000;
 
 /**
- * Before a hands-free open on a phone: take the microphone for a moment and
- * let it go, so the platform's audio route is recording before the recognizer
- * asks - it can be left on playback by the answer that just ended.
+ * Before a hands-free open on a phone: take the microphone, and keep it for
+ * the session. An iPhone opens the recognizer's capture without a tap only
+ * while the page is already capturing; after the answer played it says
+ * "started" and hears nothing (2026-11-01). The recognizer's own capture
+ * then takes over - the platform mutes the earlier of two - and this one is
+ * let go when the session ends (release).
  */
-async function nudgeCapture(): Promise<string> {
+async function nudgeCapture(): Promise<{ how: string; stream: MediaStream | null }> {
   try {
     const devices = typeof navigator === "undefined" ? undefined : navigator.mediaDevices;
-    if (!devices?.getUserMedia) return "none";
+    if (!devices?.getUserMedia) return { how: "none", stream: null };
     const stream = await devices.getUserMedia({ audio: true });
-    for (const track of stream.getTracks()) track.stop();
-    return "ok";
+    return { how: "ok", stream };
   } catch (err) {
-    return err instanceof Error ? err.name : "fail";
+    return { how: err instanceof Error ? err.name : "fail", stream: null };
   }
 }
 
@@ -147,6 +149,15 @@ export function useRecognition({
   // that never reports it is not punished for that.
   const reportsAudio = useRef(false);
   const attemptRef = useRef<((tries: number, nudged?: boolean) => void) | null>(null);
+  // The capture held open for a hands-free session (nudgeCapture).
+  const held = useRef<MediaStream | null>(null);
+  const release = useCallback(() => {
+    const s = held.current;
+    held.current = null;
+    if (!s) return;
+    for (const track of s.getTracks()) track.stop();
+    diag("voice", { ev: "rec.release" });
+  }, []);
 
   useEffect(() => {
     final.current = onFinal;
@@ -155,6 +166,7 @@ export function useRecognition({
 
   // Let the session in use go: its handlers fall silent, and it is told to stop.
   const retire = useCallback(() => {
+    release();
     const e = engineRef.current;
     engineRef.current = null;
     opening.current = false;
@@ -171,7 +183,7 @@ export function useRecognition({
     } catch {
       // Already gone.
     }
-  }, []);
+  }, [release]);
 
   const schedule = useCallback((delay: number) => {
     if (retry.current) clearTimeout(retry.current);
@@ -203,9 +215,14 @@ export function useRecognition({
       if (!Recognition) return;
       if (!tapped.current && !nudged && capturesAlone()) {
         const at = Date.now();
-        void nudgeCapture().then((how) => {
+        void nudgeCapture().then(({ how, stream }) => {
           diag("voice", { ev: "rec.nudge", how, ms: Date.now() - at });
-          if (!wanted.current) return;
+          release();
+          if (!wanted.current) {
+            for (const track of stream?.getTracks() ?? []) track.stop();
+            return;
+          }
+          held.current = stream;
           setTimeout(() => attemptRef.current?.(tries, true), 300);
         });
         return;
@@ -244,6 +261,7 @@ export function useRecognition({
       const finish = () => {
         if (!mine()) return;
         quiet();
+        release();
         diag("voice", { ev: "rec.end", wanted: wanted.current ? 1 : 0, words: gotWords ? 1 : 0, captured: captured ? 1 : 0 });
         engineRef.current = null;
         opening.current = false;
@@ -467,6 +485,7 @@ export function useRecognition({
   const stop = useCallback(() => {
     wanted.current = false;
     diag("voice", { ev: "rec.stop", had: engineRef.current ? 1 : 0 });
+    release();
     if (retry.current) clearTimeout(retry.current);
     setInterim("");
     const e = engineRef.current;
@@ -479,7 +498,7 @@ export function useRecognition({
     }
     opening.current = false;
     setState((prev) => (prev === "listening" ? "idle" : prev));
-  }, []);
+  }, [release]);
 
   return {
     state,
