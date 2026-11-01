@@ -55,7 +55,7 @@ const WORDS_MS = 7000;
 const DEAF_LIMIT = 3;
 /**
  * A hands-free reopen whose capture failed (audio-capture) is tried again,
- * after the voice element is settled, this many times before a tap is asked for.
+ * after a beat, this many times before a tap is asked for.
  */
 const RECAPTURE_TRIES = 2;
 /** A beat before that try: the platform has to let go of the audio it was playing. */
@@ -66,25 +66,6 @@ const RECAPTURE_MS = 1200;
  * answer played, says it is capturing and hears nothing (2026-11-01).
  */
 const AUTO_SOUND_MS = 5000;
-
-/**
- * Before a hands-free open on a phone: take the microphone, and keep it for
- * the session. An iPhone opens the recognizer's capture without a tap only
- * while the page is already capturing; after the answer played it says
- * "started" and hears nothing (2026-11-01). The recognizer's own capture
- * then takes over - the platform mutes the earlier of two - and this one is
- * let go when the session ends (release).
- */
-async function nudgeCapture(): Promise<{ how: string; stream: MediaStream | null }> {
-  try {
-    const devices = typeof navigator === "undefined" ? undefined : navigator.mediaDevices;
-    if (!devices?.getUserMedia) return { how: "none", stream: null };
-    const stream = await devices.getUserMedia({ audio: true });
-    return { how: "ok", stream };
-  } catch (err) {
-    return { how: err instanceof Error ? err.name : "fail", stream: null };
-  }
-}
 
 /**
  * Whether this is a phone or a tablet. There the recognizer must be the only
@@ -148,16 +129,7 @@ export function useRecognition({
   // Only then is a session that never does so taken to be deaf - an engine
   // that never reports it is not punished for that.
   const reportsAudio = useRef(false);
-  const attemptRef = useRef<((tries: number, nudged?: boolean) => void) | null>(null);
-  // The capture held open for a hands-free session (nudgeCapture).
-  const held = useRef<MediaStream | null>(null);
-  const release = useCallback(() => {
-    const s = held.current;
-    held.current = null;
-    if (!s) return;
-    for (const track of s.getTracks()) track.stop();
-    diag("voice", { ev: "rec.release" });
-  }, []);
+  const attemptRef = useRef<((tries: number) => void) | null>(null);
 
   useEffect(() => {
     final.current = onFinal;
@@ -166,7 +138,6 @@ export function useRecognition({
 
   // Let the session in use go: its handlers fall silent, and it is told to stop.
   const retire = useCallback(() => {
-    release();
     const e = engineRef.current;
     engineRef.current = null;
     opening.current = false;
@@ -183,7 +154,7 @@ export function useRecognition({
     } catch {
       // Already gone.
     }
-  }, [release]);
+  }, []);
 
   const schedule = useCallback((delay: number) => {
     if (retry.current) clearTimeout(retry.current);
@@ -209,24 +180,10 @@ export function useRecognition({
   useEffect(() => {
     // One attempt to open a session; a start the engine refuses (it is still
     // letting go of the last one) is tried again shortly.
-    attemptRef.current = (tries: number, nudged = false) => {
+    attemptRef.current = (tries: number) => {
       if (!wanted.current) return;
       const Recognition = constructor();
       if (!Recognition) return;
-      if (!tapped.current && !nudged && capturesAlone()) {
-        const at = Date.now();
-        void nudgeCapture().then(({ how, stream }) => {
-          diag("voice", { ev: "rec.nudge", how, ms: Date.now() - at });
-          release();
-          if (!wanted.current) {
-            for (const track of stream?.getTracks() ?? []) track.stop();
-            return;
-          }
-          held.current = stream;
-          setTimeout(() => attemptRef.current?.(tries, true), 300);
-        });
-        return;
-      }
       retire();
       const engine = new Recognition();
       diag("voice", { ev: "rec.new", tries });
@@ -248,6 +205,9 @@ export function useRecognition({
       let capture: ReturnType<typeof setTimeout> | undefined;
       let words: ReturnType<typeof setTimeout> | undefined;
       let silence: ReturnType<typeof setTimeout> | undefined;
+      // When start() was called: a session that says "started" within a few
+      // milliseconds opened no microphone (WebKit 321436).
+      let asked = 0;
       const quiet = () => {
         clearTimeout(settle);
         clearTimeout(ending);
@@ -261,7 +221,6 @@ export function useRecognition({
       const finish = () => {
         if (!mine()) return;
         quiet();
-        release();
         diag("voice", { ev: "rec.end", wanted: wanted.current ? 1 : 0, words: gotWords ? 1 : 0, captured: captured ? 1 : 0 });
         engineRef.current = null;
         opening.current = false;
@@ -307,7 +266,7 @@ export function useRecognition({
         opening.current = false;
         setError(null);
         setState("listening");
-        diag("voice", { ev: "rec.start", reports: reportsAudio.current ? 1 : 0 });
+        diag("voice", { ev: "rec.start", reports: reportsAudio.current ? 1 : 0, took: Math.round(performance.now() - asked) });
         if (reportsAudio.current && !captured) {
           capture = setTimeout(() => replace("never opened the microphone", true), AUDIO_MS);
         }
@@ -428,6 +387,7 @@ export function useRecognition({
       engine.onend = finish;
 
       try {
+        asked = performance.now();
         engine.start();
         opening.current = true;
         diag("voice", { ev: "rec.starting", tries });
@@ -441,7 +401,7 @@ export function useRecognition({
         retire();
         diag("voice", { ev: "rec.startfail", tries });
         if (tries < START_TRIES) {
-          retry.current = setTimeout(() => attemptRef.current?.(tries + 1, true), 250);
+          retry.current = setTimeout(() => attemptRef.current?.(tries + 1), 250);
           return;
         }
         wanted.current = false;
@@ -485,7 +445,6 @@ export function useRecognition({
   const stop = useCallback(() => {
     wanted.current = false;
     diag("voice", { ev: "rec.stop", had: engineRef.current ? 1 : 0 });
-    release();
     if (retry.current) clearTimeout(retry.current);
     setInterim("");
     const e = engineRef.current;
@@ -498,7 +457,7 @@ export function useRecognition({
     }
     opening.current = false;
     setState((prev) => (prev === "listening" ? "idle" : prev));
-  }, [release]);
+  }, []);
 
   return {
     state,
@@ -549,73 +508,66 @@ function pickVoice(voices: SpeechSynthesisVoice[], lang: string) {
 }
 
 /**
- * The one element the cloned voice plays through.
- *
- * A media element, not an AudioContext, on purpose. On an iPhone Web Audio
- * is silenced by the ring/silent switch (media playback is not), and a
- * context opened before the microphone was used keeps the old sample rate
- * after it - the hardware moves to 48 kHz for the mic - and plays everything
- * a fraction high and fast from then on. Both were heard as the voice
- * "changing between answers" and "sometimes no sound" (2026-10-19). A media
- * element has neither problem, and once a tap has played it, it plays on
- * its own afterwards.
+ * The cloned voice plays through Web Audio, not a media element, on purpose.
+ * Since iOS 27 a media element that has played leaves the page's speech
+ * recognition deaf: the next session says it started and hears nothing
+ * (WebKit 321436; here 2026-11-01, "듣고 있습니다" with no words). Web Audio
+ * playback does not do that. Each answer gets a context of its own, made when
+ * the hardware runs at the rate it will play at and closed after - a context
+ * kept from before the microphone was used played everything a fraction high
+ * once the hardware had moved to 48 kHz for it (2026-10-19).
  */
-let player: HTMLAudioElement | null = null;
-let playerUnlocked = false;
-export function audioPlayer(): HTMLAudioElement | null {
+function newContext(): AudioContext | null {
   if (typeof window === "undefined") return null;
-  if (!player) {
-    player = new Audio();
-    player.preload = "auto";
-    // Not a background track: keep it out of the lock screen's controls.
-    player.setAttribute("playsinline", "");
+  const AC = window.AudioContext ?? (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AC) return null;
+  try {
+    return new AC();
+  } catch {
+    return null;
   }
-  return player;
 }
 
-/** A WAV of one silent sample: what the element plays inside the tap that unlocks it. */
-const SILENT_WAV =
-  "data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQIAAAAAAA==";
+/** The context running, or not: iOS keeps one suspended until the page has sounded inside a tap. */
+async function resumed(ctx: AudioContext): Promise<boolean> {
+  try {
+    await Promise.race([ctx.resume(), new Promise<void>((r) => setTimeout(r, 1500))]);
+  } catch {
+    // Not allowed yet: the state says so.
+  }
+  return ctx.state === "running";
+}
 
+let playerUnlocked = false;
 let synthUnlocked = false;
 
 /**
- * The voice element played to its natural end - a muted single silent
- * sample - so the next microphone opens after an element that finished, not
- * one cut off mid-sentence. The paths that hear on an iPhone (the first 시작,
- * the reopen after an answer ends) both open the mic right after the element
- * ended; 끝내기 during an answer left it paused halfway, and the 시작 after it
- * said "듣고 있습니다" and heard nothing (2026-10-19). Played inside a tap the
- * first time, it also unlocks the element for the answers that come later.
+ * A sound made inside a tap: a context started on one silent sample, so the
+ * contexts the answers are played through later may start on their own.
  */
 export function primePlayer() {
-  const el = audioPlayer();
-  if (!el) return;
-  // A real answer playing is not cut for this.
-  if (!el.paused && el.src.startsWith("blob:")) return;
+  const ctx = newContext();
+  if (!ctx) return;
   try {
-    el.muted = true;
-    el.src = SILENT_WAV;
-    const p = el.play();
-    const unmute = () => {
-      el.muted = false;
-    };
-    if (p && typeof p.then === "function") {
-      p.then(() => {
-        playerUnlocked = true;
-      })
-        .catch(() => undefined)
-        .finally(unmute);
-    } else {
-      playerUnlocked = true;
-      unmute();
-    }
+    const source = ctx.createBufferSource();
+    source.buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
+    source.connect(ctx.destination);
+    source.start(0);
   } catch {
-    el.muted = false;
+    // Nothing to prime on this engine.
   }
+  void ctx
+    .resume()
+    .then(() => {
+      playerUnlocked = true;
+    })
+    .catch(() => undefined)
+    .finally(() => {
+      setTimeout(() => void ctx.close().catch(() => undefined), 200);
+    });
 }
 
-/** Whether the voice element has been played inside a tap yet. */
+/** Whether a context has been started inside a tap yet. */
 export function playerReady() {
   return playerUnlocked;
 }
@@ -625,7 +577,7 @@ export function playerReady() {
  * a tap. Answers arrive long after any tap, so the voice stage calls this from
  * its buttons. The browser's synthesizer needs it once per page - a silent
  * utterance, never again after, so later taps do not touch it while the mic
- * opens - and the voice element is primed every time (primePlayer).
+ * opens - and a context is started every time (primePlayer).
  */
 export function unlockSpeech() {
   const synth = typeof window === "undefined" ? undefined : window.speechSynthesis;
@@ -768,17 +720,15 @@ export function useSpeech(lang = "ko-KR", server = false) {
    * with what you are hearing.
    */
   const [progress, setProgress] = useState(-1);
-  /**
-   * Kept for the ring's sake: null now that the cloned voice plays through a
-   * media element with no analyser on it. The ring then moves on `pulse`.
-   */
+  /** The cloned voice's spectrum while it plays (an analyser's bins); null otherwise. */
   const spectrum = useRef<Uint8Array | null>(null);
   const voices = useRef<SpeechSynthesisVoice[]>([]);
   const decay = useRef<number>(0);
   // Each speak() is a run; a cancel or a newer speak() retires the old one,
   // and anything it was still fetching or playing is dropped on arrival.
   const run = useRef(0);
-  const playing = useRef<HTMLAudioElement | null>(null);
+  // The context the answer being read plays through.
+  const context = useRef<AudioContext | null>(null);
   // Settles the piece playing now (its promise resolves, its handlers come off).
   const stopPiece = useRef<(() => void) | null>(null);
   // Aborts the fetches of the answer being read.
@@ -829,7 +779,7 @@ export function useSpeech(lang = "ko-KR", server = false) {
 
   const cancel = useCallback(() => {
     run.current += 1;
-    diag("voice", { ev: "tts.cancel", playing: playing.current ? 1 : 0 });
+    diag("voice", { ev: "tts.cancel", playing: context.current ? 1 : 0 });
     // The cut answer's pieces still being fetched are not wanted any more.
     fetches.current?.abort();
     fetches.current = null;
@@ -839,16 +789,10 @@ export function useSpeech(lang = "ko-KR", server = false) {
     // playing by then.
     const piece = stopPiece.current;
     stopPiece.current = null;
-    const el = playing.current;
-    playing.current = null;
-    if (el) {
-      try {
-        el.pause();
-      } catch {
-        // Not started, or already ended.
-      }
-    }
     piece?.();
+    const ctx = context.current;
+    context.current = null;
+    if (ctx) void ctx.close().catch(() => undefined);
     finish();
   }, [finish]);
 
@@ -927,9 +871,8 @@ export function useSpeech(lang = "ko-KR", server = false) {
   /** The operator's voice from the Mac mini, a sentence at a time. */
   const speakServer = useCallback(
     async (text: string) => {
-      const el = audioPlayer();
       const parts = sentences(text);
-      if (!el || parts.length === 0) {
+      if (parts.length === 0) {
         speakBrowser(text);
         return;
       }
@@ -938,9 +881,34 @@ export function useSpeech(lang = "ko-KR", server = false) {
       setSpeaking(true);
       setPreparing(true);
       setSpeaker("server");
-      diag("voice", { ev: "tts.start", parts: parts.length, chars: text.length });
       setProgress(-1);
-      spectrum.current = null;
+
+      const ctx = newContext();
+      if (!ctx) {
+        speakBrowser(text);
+        return;
+      }
+      context.current = ctx;
+      const letGo = () => {
+        if (context.current === ctx) context.current = null;
+        void ctx.close().catch(() => undefined);
+      };
+      const running = await resumed(ctx);
+      diag("voice", { ev: "tts.ctx", rate: ctx.sampleRate, state: ctx.state, running: running ? 1 : 0 });
+      if (!alive()) return;
+      if (!running) {
+        // Not allowed to sound yet (no tap since the page opened): the
+        // browser's voice at least reports, and asks for no tap on most.
+        letGo();
+        speakBrowser(text);
+        return;
+      }
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.6;
+      analyser.connect(ctx.destination);
+      const bins = new Uint8Array(analyser.frequencyBinCount);
+      spectrum.current = bins;
 
       // Where each piece starts in the answer, so the caption lights the right words.
       const offsets: number[] = [];
@@ -953,7 +921,7 @@ export function useSpeech(lang = "ko-KR", server = false) {
 
       const abort = new AbortController();
       fetches.current = abort;
-      const fetchPiece = async (i: number): Promise<string> => {
+      const fetchPiece = async (i: number): Promise<AudioBuffer> => {
         const res = await fetch("/api/tts/speak", {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -966,40 +934,51 @@ export function useSpeech(lang = "ko-KR", server = false) {
           const body = (await res.json().catch(() => ({}))) as { error?: string };
           throw new Error(body.error ?? `목소리 서비스 ${res.status}`);
         }
-        return URL.createObjectURL(await res.blob());
+        return ctx.decodeAudioData(await res.arrayBuffer());
       };
 
-      // One piece, start to end. Resolves false when the element would not
-      // play at all (no tap has unlocked it): the browser's voice then.
-      const play = (url: string, i: number) =>
+      // One piece, start to end. Resolves false when it would not play at all.
+      const play = (buffer: AudioBuffer, i: number) =>
         new Promise<boolean>((resolve) => {
           let settled = false;
           let raf = 0;
           let guard = 0;
           let last = -1;
+          const source = ctx.createBufferSource();
+          source.buffer = buffer;
+          source.connect(analyser);
           const done = (ok: boolean) => {
             if (settled) return;
             settled = true;
             window.clearTimeout(guard);
             cancelAnimationFrame(raf);
-            // Only what is still this piece's: the element is shared, and
-            // the next answer may have it already.
-            if (stopPiece.current === stop) {
-              stopPiece.current = null;
-              playing.current = null;
-              window.clearInterval(decay.current);
+            if (stopPiece.current === stop) stopPiece.current = null;
+            try {
+              source.disconnect();
+            } catch {
+              // Never connected, or gone with its context.
             }
-            if (el.onended === onEnded) el.onended = null;
-            if (el.onerror === onError) el.onerror = null;
-            if (el.onplaying === onPlaying) el.onplaying = null;
-            URL.revokeObjectURL(url);
             resolve(ok);
           };
-          const stop = () => done(true);
+          const stop = () => {
+            try {
+              source.stop();
+            } catch {
+              // Not started, or already ended.
+            }
+            done(true);
+          };
+          const startedAt = ctx.currentTime;
           const tick = () => {
             if (!alive()) return;
-            if (offsets[i] >= 0 && el.duration > 0) {
-              const frac = Math.min(1, el.currentTime / el.duration);
+            // The ring reads the sound itself; the caption follows the clock.
+            analyser.getByteFrequencyData(bins);
+            let sum = 0;
+            for (const b of bins) sum += b;
+            const heard = Math.min(1, sum / bins.length / 96);
+            if (Math.abs(heard - level.current) > 0.03) kick(heard);
+            if (offsets[i] >= 0 && buffer.duration > 0) {
+              const frac = Math.min(1, (ctx.currentTime - startedAt) / buffer.duration);
               const at = offsets[i] + Math.round(parts[i].length * frac);
               if (at !== last) {
                 last = at;
@@ -1008,84 +987,60 @@ export function useSpeech(lang = "ko-KR", server = false) {
             }
             raf = requestAnimationFrame(tick);
           };
-          const onPlaying = () => {
-            diag("voice", { ev: "tts.playing", i, dur: Number.isFinite(el.duration) ? Math.round(el.duration * 1000) : -1 });
-            // The ring moves to a steady beat: a media element gives no
-            // waveform to read without an AudioContext, which this avoids.
-            window.clearInterval(decay.current);
-            decay.current = window.setInterval(() => kick(0.45 + Math.random() * 0.4), 240);
-            // Should the end never be reported (an interruption mid-play),
-            // the piece is counted as done a little after it should have
-            // finished, and the next one is tried.
-            const expect = el.duration > 0 && Number.isFinite(el.duration) ? el.duration * 1000 : 30_000;
-            window.clearTimeout(guard);
-            guard = window.setTimeout(() => {
-              console.warn("[voice] playback did not report its end; moving on");
-              diag("voice", { ev: "tts.guard", i });
-              done(true);
-            }, expect + 2500);
-            raf = requestAnimationFrame(tick);
-          };
-          const onEnded = () => {
+          source.onended = () => {
             diag("voice", { ev: "tts.ended", i });
             done(true);
           };
-          const onError = () => {
-            diag("voice", { ev: "tts.err", i });
-            done(true);
-          };
-          el.onplaying = onPlaying;
-          el.onended = onEnded;
-          el.onerror = onError;
           stopPiece.current = stop;
-          playing.current = el;
-          el.muted = false;
-          el.src = url;
-          // If play never starts (metadata never comes), do not wait forever.
-          guard = window.setTimeout(() => done(true), 20_000);
-          const p = el.play();
-          if (p && typeof p.catch === "function") {
-            p.catch((err: unknown) => {
-              console.warn("[voice] the voice element would not play:", err);
-              diag("voice", { ev: "tts.noplay", i });
-              done(false);
-            });
+          // Should the end never be reported, the piece is counted as done a
+          // little after it should have finished, and the next one is tried.
+          guard = window.setTimeout(() => {
+            console.warn("[voice] playback did not report its end; moving on");
+            diag("voice", { ev: "tts.guard", i });
+            done(true);
+          }, buffer.duration * 1000 + 2500);
+          try {
+            source.start(0);
+            diag("voice", { ev: "tts.playing", i, dur: Math.round(buffer.duration * 1000) });
+            raf = requestAnimationFrame(tick);
+          } catch (err) {
+            console.warn("[voice] the piece would not play:", err);
+            diag("voice", { ev: "tts.noplay", i });
+            done(false);
           }
         });
 
-      let next: Promise<string> = fetchPiece(0);
+      let next: Promise<AudioBuffer> = fetchPiece(0);
       for (let i = 0; i < parts.length; i += 1) {
-        let url: string;
+        let buffer: AudioBuffer;
         try {
-          url = await next;
+          buffer = await next;
         } catch (err) {
           if (!alive()) return;
           console.warn("[voice] cloned voice unavailable, using the browser's:", err);
           diag("voice", { ev: "tts.fallback", i });
           // The rest of the answer in the browser's voice, picking up where this left off.
+          letGo();
           speakBrowser(parts.slice(i).join(" "), offsets[i] >= 0 ? offsets[i] : 0);
           return;
         }
-        if (!alive()) {
-          URL.revokeObjectURL(url);
-          return;
-        }
+        if (!alive()) return;
         if (i + 1 < parts.length) {
           next = fetchPiece(i + 1);
           // Looked at later; an early failure must not surface as unhandled meanwhile.
           next.catch(() => undefined);
         }
         setPreparing(false);
-        const played = await play(url, i);
+        const played = await play(buffer, i);
         if (!alive()) return;
         if (!played) {
-          // Nothing could be heard this way (no tap since the page opened):
-          // the browser's voice at least reports, and asks for no tap on most.
+          letGo();
           speakBrowser(parts.slice(i).join(" "), offsets[i] >= 0 ? offsets[i] : 0);
           return;
         }
       }
       diag("voice", { ev: "tts.done" });
+      letGo();
       finish();
     },
     [speakBrowser, finish, kick],
