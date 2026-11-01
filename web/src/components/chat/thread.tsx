@@ -1041,6 +1041,7 @@ export function Thread() {
     if (muted) return;
     if (!last || last.role !== "agent" || last.id === spoken.current) return;
     spoken.current = last.id;
+    diag("voice", { ev: "thread.speak", chars: text.length, origin: last.origin?.kind ?? "" });
     if (text) speak(text);
   }, [mode, muted, last, text, hydrated, speak, cancel, refreshVoice]);
 

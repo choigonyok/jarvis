@@ -7,6 +7,7 @@ import { VoiceSetup } from "@/components/chat/voice-setup";
 import { useMicLevel } from "@/lib/use-mic-level";
 import { capturesAlone, primePlayer, unlockSpeech, useRecognition, type Speaker, type VoiceInfo } from "@/lib/use-speech";
 import { cn } from "@/lib/utils";
+import { diag } from "@/lib/diag";
 
 /**
  * The voice surface.
@@ -92,11 +93,13 @@ export function VoiceStage({
     setLastSent(text);
     setNotice(null);
     setSending(true);
+    diag("voice", { ev: "stage.send", chars: text.length });
     // The question is asked: the mic closes now, not when the answer begins.
     stopRef.current();
     const sent = onSend(text);
     if (sent && typeof sent.then === "function") {
       void sent.then((ok) => {
+        diag("voice", { ev: "stage.sent", ok: ok ? 1 : 0 });
         if (ok) return;
         setSending(false);
         setNotice("보내지 못했어요. 다시 말해 주세요.");
@@ -187,6 +190,7 @@ export function VoiceStage({
   useEffect(() => {
     if (!sending) return;
     if (thinking || speaking) {
+      diag("voice", { ev: "stage.taken", thinking: thinking ? 1 : 0, speaking: speaking ? 1 : 0 });
       // eslint-disable-next-line react-hooks/set-state-in-effect -- following the thread's state, not causing it
       setSending(false);
       return;
@@ -194,6 +198,7 @@ export function VoiceStage({
     // Nothing back at all: the stream may have died quietly. Re-read, and
     // give the mic back so the question can be asked again.
     const stalled = setTimeout(() => {
+      diag("voice", { ev: "stage.stall" });
       setSending(false);
       setNotice("답이 오지 않아 연결을 다시 확인했어요.");
       onStall?.();
@@ -210,7 +215,10 @@ export function VoiceStage({
     // an iPhone in call mode, and the answer then plays through the earpiece -
     // too quietly to hear. It reopens once the answer has been spoken.
     if (speaking || thinking || sending) {
-      if (listening) stop();
+      if (listening) {
+        diag("voice", { ev: "stage.close", speaking: speaking ? 1 : 0, thinking: thinking ? 1 : 0, sending: sending ? 1 : 0 });
+        stop();
+      }
       return;
     }
     // Not after "paused": that device wants a tap, and asking again without
@@ -226,7 +234,10 @@ export function VoiceStage({
     // A beat after the voice stops before the mic opens: an iPhone has to
     // switch its audio from playing to recording, and asked too soon it
     // refuses - which is what turned the stage into "tap to talk".
-    const reopen = setTimeout(() => start({ auto: true }), 600);
+    const reopen = setTimeout(() => {
+      diag("voice", { ev: "stage.reopen", state });
+      start({ auto: true });
+    }, 600);
     return () => clearTimeout(reopen);
   }, [started, setup, speaking, thinking, sending, listening, state, start, stop]);
   const said = [draft, interim].filter(Boolean).join(" ");

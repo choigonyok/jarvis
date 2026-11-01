@@ -16,7 +16,7 @@ import {
   type Turn,
 } from "@/lib/thread";
 import { decideProposal } from "@/lib/decide";
-import { diagFrame } from "@/lib/diag";
+import { diag, diagFrame } from "@/lib/diag";
 import { requestResume } from "@/lib/resume";
 
 /** The lists mind keeps: read there, changed at the way in (the route says which). */
@@ -204,6 +204,9 @@ export function useThread() {
 
   const onEvent = useCallback((event: AgentEvent) => {
     heardAt.current = Date.now();
+    if (event.type === "status" || event.type === "turn" || event.type === "error") {
+      diag("voice", { ev: "thread." + event.type, thinking: event.type === "status" ? (event.thinking ? 1 : 0) : -1, role: event.type === "turn" ? event.turn.role : "" });
+    }
     switch (event.type) {
       case "turn":
         setTurns((prev) => upsert(prev, event.turn));
@@ -281,6 +284,7 @@ export function useThread() {
   // Re-read the thread and reopen the stream - for a screen that sent and
   // heard nothing back, which is what a quietly dead stream looks like.
   const resync = useCallback(() => {
+    diag("voice", { ev: "thread.resync" });
     void hydrate();
     requestResume();
   }, [hydrate]);
@@ -309,7 +313,10 @@ export function useThread() {
       // restarted: read the thread now and open a fresh stream.
       const asked = Date.now();
       setTimeout(() => {
-        if (heardAt.current < asked) resync();
+        if (heardAt.current < asked) {
+          diag("voice", { ev: "thread.echo-miss" });
+          resync();
+        }
       }, SEND_ECHO_MS);
       return true;
     } catch {

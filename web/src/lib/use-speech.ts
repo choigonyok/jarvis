@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { diag } from "@/lib/diag";
 
 /**
  * Both halves of voice mode. Listening is the browser's SpeechRecognition.
@@ -170,6 +171,7 @@ export function useRecognition({
       if (!Recognition) return;
       retire();
       const engine = new Recognition();
+      diag("voice", { ev: "rec.new", tries });
       engine.lang = langRef.current;
       // Continuous so a pause mid-sentence does not end the turn; interim so the
       // words appear as they are spoken instead of all at once at the end.
@@ -199,6 +201,7 @@ export function useRecognition({
       const finish = () => {
         if (!mine()) return;
         quiet();
+        diag("voice", { ev: "rec.end", wanted: wanted.current ? 1 : 0, words: gotWords ? 1 : 0, captured: captured ? 1 : 0 });
         engineRef.current = null;
         opening.current = false;
         setInterim("");
@@ -216,6 +219,7 @@ export function useRecognition({
       const replace = (why: string, counts: boolean) => {
         if (!mine()) return;
         console.warn("[voice] recognizer", why, "- opening a fresh one");
+        diag("voice", { ev: "rec.replace", why, deaf: deaf.current + (counts ? 1 : 0) });
         quiet();
         retire();
         if (counts) deaf.current += 1;
@@ -242,6 +246,7 @@ export function useRecognition({
         opening.current = false;
         setError(null);
         setState("listening");
+        diag("voice", { ev: "rec.start", reports: reportsAudio.current ? 1 : 0 });
         if (reportsAudio.current && !captured) {
           capture = setTimeout(() => replace("never opened the microphone", true), AUDIO_MS);
         }
@@ -251,12 +256,14 @@ export function useRecognition({
         captured = true;
         reportsAudio.current = true;
         clearTimeout(capture);
+        diag("voice", { ev: "rec.audio" });
       };
       const sound = () => {
         if (!mine()) return;
         captured = true;
         clearTimeout(capture);
         setHeard((h) => h + 1);
+        diag("voice", { ev: "rec.sound", words: gotWords ? 1 : 0 });
         if (!gotWords) {
           clearTimeout(words);
           words = setTimeout(() => replace("heard sound but no words", false), WORDS_MS);
@@ -284,6 +291,7 @@ export function useRecognition({
           }
         }
         setInterim(pending);
+        diag("voice", { ev: "rec.result", n: event.results.length - event.resultIndex, interim: pending.length });
 
         clearTimeout(settle);
         const heardText = pending.trim();
@@ -295,6 +303,7 @@ export function useRecognition({
           dropping = true;
           setInterim("");
           final.current(heardText);
+          diag("voice", { ev: "rec.settle", chars: heardText.length });
           try {
             engine.abort();
           } catch {
@@ -309,6 +318,7 @@ export function useRecognition({
         if (!mine()) return;
         opening.current = false;
         console.warn("[voice] recognition error:", event.error, event.message);
+        diag("voice", { ev: "rec.error", error: String(event.error), tapped: tapped.current ? 1 : 0 });
         const refused = event.error === "not-allowed" || event.error === "service-not-allowed";
         // On an automatic reopen, a refusal (or the mic still held by the voice
         // that just finished speaking) means "tap to talk", not "broken".
@@ -337,6 +347,7 @@ export function useRecognition({
       try {
         engine.start();
         opening.current = true;
+        diag("voice", { ev: "rec.starting", tries });
         // Listening is announced by onstart, not here: a state that says
         // "listening" with a closed mic is what this replaces.
         setState((prev) => (prev === "listening" ? prev : "idle"));
@@ -345,6 +356,7 @@ export function useRecognition({
         // Still letting go of the last session: try again shortly.
         quiet();
         retire();
+        diag("voice", { ev: "rec.startfail", tries });
         if (tries < START_TRIES) {
           retry.current = setTimeout(() => attemptRef.current?.(tries + 1), 250);
           return;
@@ -361,6 +373,7 @@ export function useRecognition({
     // Already asked and waiting for the engine's word: nothing to add.
     if (opening.current && wanted.current) return;
     tapped.current = !opts?.auto;
+    diag("voice", { ev: "rec.want", auto: opts?.auto ? 1 : 0 });
     wanted.current = true;
     deaf.current = 0;
     setError(null);
@@ -375,6 +388,7 @@ export function useRecognition({
   const restart = useCallback((tap = false) => {
     if (!wanted.current && !tap) return;
     tapped.current = tap;
+    diag("voice", { ev: "rec.restart", tap: tap ? 1 : 0 });
     wanted.current = true;
     deaf.current = 0;
     setError(null);
@@ -385,6 +399,7 @@ export function useRecognition({
 
   const stop = useCallback(() => {
     wanted.current = false;
+    diag("voice", { ev: "rec.stop", had: engineRef.current ? 1 : 0 });
     if (retry.current) clearTimeout(retry.current);
     setInterim("");
     const e = engineRef.current;
@@ -728,6 +743,7 @@ export function useSpeech(lang = "ko-KR", server = false) {
 
   const cancel = useCallback(() => {
     run.current += 1;
+    diag("voice", { ev: "tts.cancel", playing: playing.current ? 1 : 0 });
     // The cut answer's pieces still being fetched are not wanted any more.
     fetches.current?.abort();
     fetches.current = null;
@@ -760,6 +776,7 @@ export function useSpeech(lang = "ko-KR", server = false) {
         return;
       }
       synth.cancel();
+      diag("voice", { ev: "tts.browser", chars: text.length });
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = lang;
       const voice = pickVoice(voices.current, lang);
@@ -835,6 +852,7 @@ export function useSpeech(lang = "ko-KR", server = false) {
       setSpeaking(true);
       setPreparing(true);
       setSpeaker("server");
+      diag("voice", { ev: "tts.start", parts: parts.length, chars: text.length });
       setProgress(-1);
       spectrum.current = null;
 
@@ -857,6 +875,7 @@ export function useSpeech(lang = "ko-KR", server = false) {
           cache: "no-store",
           signal: abort.signal,
         });
+        diag("voice", { ev: "tts.piece", i, status: res.status });
         if (!res.ok) {
           const body = (await res.json().catch(() => ({}))) as { error?: string };
           throw new Error(body.error ?? `목소리 서비스 ${res.status}`);
@@ -904,6 +923,7 @@ export function useSpeech(lang = "ko-KR", server = false) {
             raf = requestAnimationFrame(tick);
           };
           const onPlaying = () => {
+            diag("voice", { ev: "tts.playing", i, dur: Number.isFinite(el.duration) ? Math.round(el.duration * 1000) : -1 });
             // The ring moves to a steady beat: a media element gives no
             // waveform to read without an AudioContext, which this avoids.
             window.clearInterval(decay.current);
@@ -915,12 +935,19 @@ export function useSpeech(lang = "ko-KR", server = false) {
             window.clearTimeout(guard);
             guard = window.setTimeout(() => {
               console.warn("[voice] playback did not report its end; moving on");
+              diag("voice", { ev: "tts.guard", i });
               done(true);
             }, expect + 2500);
             raf = requestAnimationFrame(tick);
           };
-          const onEnded = () => done(true);
-          const onError = () => done(true);
+          const onEnded = () => {
+            diag("voice", { ev: "tts.ended", i });
+            done(true);
+          };
+          const onError = () => {
+            diag("voice", { ev: "tts.err", i });
+            done(true);
+          };
           el.onplaying = onPlaying;
           el.onended = onEnded;
           el.onerror = onError;
@@ -934,6 +961,7 @@ export function useSpeech(lang = "ko-KR", server = false) {
           if (p && typeof p.catch === "function") {
             p.catch((err: unknown) => {
               console.warn("[voice] the voice element would not play:", err);
+              diag("voice", { ev: "tts.noplay", i });
               done(false);
             });
           }
@@ -947,6 +975,7 @@ export function useSpeech(lang = "ko-KR", server = false) {
         } catch (err) {
           if (!alive()) return;
           console.warn("[voice] cloned voice unavailable, using the browser's:", err);
+          diag("voice", { ev: "tts.fallback", i });
           // The rest of the answer in the browser's voice, picking up where this left off.
           speakBrowser(parts.slice(i).join(" "), offsets[i] >= 0 ? offsets[i] : 0);
           return;
@@ -970,6 +999,7 @@ export function useSpeech(lang = "ko-KR", server = false) {
           return;
         }
       }
+      diag("voice", { ev: "tts.done" });
       finish();
     },
     [speakBrowser, finish, kick],

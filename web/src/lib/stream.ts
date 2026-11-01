@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { onResume } from "@/lib/resume";
+import { diag } from "@/lib/diag";
 import { API, type AgentEvent, type Connection } from "@/lib/thread";
 
 /**
@@ -43,6 +44,7 @@ export function useAgentStream(
       source = new EventSource(`${API}/events`);
       source.onopen = () => {
         setConnection("open");
+        diag("voice", { ev: "sse.open", dropped: dropped ? 1 : 0 });
         wait = 0;
         // A reopened stream means frames were missed while it was down.
         if (dropped) reconnect.current();
@@ -51,6 +53,7 @@ export function useAgentStream(
       source.onerror = () => {
         dropped = true;
         setConnection("closed");
+        diag("voice", { ev: "sse.error", state: source.readyState });
         // A dropped connection the browser retries on its own (CONNECTING).
         // An answer that is not a stream - the gateway's 502 when the
         // request reached the guest's agent through the tunnel they share,
@@ -81,6 +84,7 @@ export function useAgentStream(
     // service worker), and every reopen is one more chance to be refused: a
     // stream opened a moment ago and not closed is already the fresh one.
     const stop = onResume(() => {
+      diag("voice", { ev: "sse.resume", state: source.readyState, age: Date.now() - openedAt });
       if (source.readyState !== EventSource.CLOSED && Date.now() - openedAt < 1500) return;
       source.close();
       dropped = true;
