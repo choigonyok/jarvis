@@ -605,3 +605,39 @@ func TestOneSubjectRingsOnce(t *testing.T) {
 		t.Fatalf("%+v %v", still, err)
 	}
 }
+
+// Two plans for one entry - the same day at the same place, read in two rooms
+// - are one question: the newer card closes the older (2026-11-01).
+func TestAlikeCalendarCardIsOneQuestion(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(DefaultPolicy())
+	alike := func(entity, title, place string) model.Intent {
+		payload, _ := json.Marshal(model.CalendarAction{Event: model.CalendarEvent{Title: title, Date: "2026-10-18", Place: place}})
+		return model.Intent{Skill: "schedule", Kind: "calendar.create", EntityID: entity, Payload: payload, Title: "캘린더에 추가: " + title, Confidence: 0.9, Reversible: true}
+	}
+	first, _ := f.g.Submit(ctx, alike("plan_a", "쉼오지캠프 2박 (하늘존별)", "쉼오지캠프"))
+	other, _ := f.g.Submit(ctx, alike("plan_o", "민수와 저녁", "강남"))
+	second, _ := f.g.Submit(ctx, alike("plan_b", "쉼오지캠프 2박3일", "쉼오지캠프"))
+	old, _ := f.st.Intent(ctx, first.ID)
+	if old.Status != model.Superseded || !strings.Contains(old.Error, "같은 일정") || old.DecidedBy != "policy" || second.Status != model.Pending {
+		t.Fatalf("앞의 카드는 닫히고 새 카드가 서야 합니다: %s %q / %s", old.Status, old.Error, second.Status)
+	}
+	if kept, _ := f.st.Intent(ctx, other.ID); kept.Status != model.Pending {
+		t.Fatalf("다른 일정의 카드는 그대로여야 합니다: %s", kept.Status)
+	}
+	stat, _ := f.st.Policy(ctx, "schedule", "calendar.create")
+	if stat.Rejected != 0 {
+		t.Fatalf("닫힌 카드는 거절로 배우지 않습니다: %+v", stat)
+	}
+	f.log.Drain()
+	all, _ := f.log.Read(ctx, 0, 100)
+	closed := false
+	for _, o := range all {
+		if o.Type == CardClosed && strings.Contains(string(o.Data), first.ID) {
+			closed = true
+		}
+	}
+	if !closed {
+		t.Fatal("닫힌 카드는 대화에서도 닫혀야 합니다")
+	}
+}

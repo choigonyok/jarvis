@@ -465,6 +465,21 @@ func (c *Conversation) known(ctx context.Context, room string) ([]view, error) {
 	// plans are shown in every room, nearest first. The partner's own
 	// entries are theirs, not the operator's to change.
 	until := c.now().In(c.loc).AddDate(0, 0, calendarDays).Format("2006-01-02")
+	// A plan made in another room that lies ahead and is not on the calendar
+	// yet - its card still open, say - is shown here too, so a room talking
+	// about the same days at the same place names it instead of making it
+	// again: one camping reserved, told in two rooms, was two entries and two
+	// cards (2026-11-01).
+	for _, e := range plans {
+		st := e.State
+		if e.Room == room || shown[e.ID] || st.CalendarID != "" || st.Status != model.Confirmed ||
+			st.Date == "" || st.Date < today || st.Date > until {
+			continue
+		}
+		np++
+		shown[e.ID] = true
+		out = append(out, view{ref: fmt.Sprintf("P%d", np), entity: e, elsewhere: true})
+	}
 	var cal []model.Entity
 	for _, e := range plans {
 		st := e.State
@@ -588,6 +603,12 @@ func (c *Conversation) apply(ctx context.Context, room string, o op, fresh []mod
 		}
 		// The same plan named again is that plan, not a second one.
 		if id := c.same(kind, s, known); id != "" {
+			if elsewhere[id] {
+				// Named as the other room or the calendar named it: what it
+				// lacked is filled in, what it had stays.
+				_, _, err := c.world.Update(ctx, id, func(cur *model.State) bool { return fill(cur, s) }, at(id))
+				return err == nil, err
+			}
 			_, _, err := c.world.Update(ctx, id, func(cur *model.State) bool { setAll(cur, kind, o.Set, refs); return true }, at(id))
 			return err == nil, err
 		}
@@ -752,7 +773,18 @@ func randomHex(n int) string {
 func (c *Conversation) same(kind string, s model.State, known []view) string {
 	for _, v := range known {
 		e := v.entity
-		if v.elsewhere || e.Kind != kind || !e.Live() {
+		if e.Kind != kind || !e.Live() {
+			continue
+		}
+		if v.elsewhere {
+			// Made in another room and not on the calendar yet: it is that
+			// plan when it is the same days at the same place, or the same
+			// title on the same day. A plan already on the calendar is not
+			// absorbed here - the schedule skill links a new one to it.
+			if kind == model.KindPlan && e.State.CalendarID == "" && s.Date != "" && e.State.Date == s.Date &&
+				((s.Place != "" && norm(e.State.Place) == norm(s.Place)) || norm(e.State.Title) == norm(s.Title)) {
+				return e.ID
+			}
 			continue
 		}
 		if norm(e.State.Title) == norm(s.Title) {
@@ -878,6 +910,30 @@ func clean(people []string) []string {
 
 func norm(s string) string {
 	return strings.ToLower(strings.Join(strings.Fields(s), ""))
+}
+
+// fill adds to a plan what another mention of it says and it lacked - a time,
+// a place, an end, who - and leaves what it had. Reports whether anything changed.
+func fill(cur *model.State, s model.State) bool {
+	changed := false
+	set := func(dst *string, v string) {
+		if *dst == "" && v != "" {
+			*dst = v
+			changed = true
+		}
+	}
+	set(&cur.Start, s.Start)
+	set(&cur.End, s.End)
+	set(&cur.EndDate, s.EndDate)
+	set(&cur.Place, s.Place)
+	set(&cur.Type, s.Type)
+	set(&cur.PlaceKind, s.PlaceKind)
+	set(&cur.Area, s.Area)
+	if len(cur.People) == 0 && len(s.People) > 0 {
+		cur.People = s.People
+		changed = true
+	}
+	return changed
 }
 
 // hearsayConfidence caps a fact about the operator that only someone else

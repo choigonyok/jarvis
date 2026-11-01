@@ -100,7 +100,7 @@ func prompt(roomName, owner string, now time.Time, loc *time.Location, known []v
 		b.WriteString(v.ref + " " + describe(v.entity) + "\n")
 	}
 	if len(cal) > 0 {
-		b.WriteString("\n## 캘린더에 있는 다가오는 일정 (이 대화방 밖에서 정함)\n")
+		b.WriteString("\n## 캘린더나 다른 대화방에 있는 다가오는 일정 (이 대화방 밖에서 정함 - 같은 날 같은 곳이면 그 일정이다)\n")
 		for _, v := range cal {
 			b.WriteString(v.ref + " " + describe(v.entity) + "\n")
 		}

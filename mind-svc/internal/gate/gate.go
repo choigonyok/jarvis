@@ -167,6 +167,14 @@ func (g *Gate) Submit(ctx context.Context, in model.Intent) (model.Intent, error
 		in.Decision, in.Status, in.Why, in.DecidedBy, in.DecidedAt = model.Drop, model.Dropped, why, "policy", &at
 		return in, g.st.PutIntent(ctx, in)
 	}
+	// One entry asked for twice - the same days at the same place, read in
+	// two rooms as two plans - is one question: the card still open for the
+	// other is closed and this one, the newer, stands (2026-11-01).
+	if in.Kind == "calendar.create" {
+		if err := g.withdrawAlike(ctx, in); err != nil {
+			return in, err
+		}
+	}
 	// A newer intent about the same thing replaces a question still open:
 	// the plan moved again before anyone answered.
 	if in.EntityID != "" {
@@ -427,6 +435,46 @@ func (g *Gate) withdraw(ctx context.Context, entityID, skill, why string) error 
 			}
 			g.closeCard(ctx, p)
 		}
+	}
+	return nil
+}
+
+// alikeWithin is how far back an open calendar question is looked for by
+// its entry: one older than this is stale whatever it asked.
+const alikeWithin = 30 * 24 * time.Hour
+
+// withdrawAlike closes the open calendar.create questions about another
+// entity that ask for the same entry as in: the same day, and the same place
+// or the same title.
+func (g *Gate) withdrawAlike(ctx context.Context, in model.Intent) error {
+	var a model.CalendarAction
+	if json.Unmarshal(in.Payload, &a) != nil || a.Event.Date == "" {
+		return nil
+	}
+	flat := func(s string) string { return strings.ToLower(strings.Join(strings.Fields(s), "")) }
+	open, err := g.st.IntentsSince(ctx, g.now().Add(-alikeWithin))
+	if err != nil {
+		return err
+	}
+	for _, p := range open {
+		if p.Status != model.Pending || p.Kind != "calendar.create" || p.EntityID == in.EntityID {
+			continue
+		}
+		var b model.CalendarAction
+		if json.Unmarshal(p.Payload, &b) != nil || b.Event.Date != a.Event.Date {
+			continue
+		}
+		samePlace := flat(a.Event.Place) != "" && flat(b.Event.Place) == flat(a.Event.Place)
+		if !samePlace && flat(b.Event.Title) != flat(a.Event.Title) {
+			continue
+		}
+		at := g.now()
+		p.Status, p.DecidedBy, p.DecidedAt, p.Tier = model.Superseded, "policy", &at, ""
+		p.Error = "같은 일정의 새 카드로 바뀜 (" + in.ID + ")"
+		if err := g.st.PutIntent(ctx, p); err != nil {
+			return err
+		}
+		g.closeCard(ctx, p)
 	}
 	return nil
 }

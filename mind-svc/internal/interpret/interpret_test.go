@@ -116,7 +116,7 @@ func TestCalendarPlansAreShownEverywhere(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := script.Prompts[0]
-	for _, want := range []string{"P1 [plan] 지수와 강릉 여행", "## 캘린더에 있는 다가오는 일정", "P2 [plan] PT", "P3 [plan] 민수와 저녁", "P4 [plan] 가나전자 본사 출근"} {
+	for _, want := range []string{"P1 [plan] 지수와 강릉 여행", "## 캘린더나 다른 대화방에 있는 다가오는 일정", "P2 [plan] PT", "P3 [plan] 민수와 저녁", "P4 [plan] 가나전자 본사 출근"} {
 		if !strings.Contains(p, want) {
 			t.Fatalf("프롬프트에 %q 가 없습니다:\n%s", want, p)
 		}
@@ -617,5 +617,31 @@ func TestAReadIsRepeatedOnce(t *testing.T) {
 	}
 	if _, due := c.Pending()["r"]; due {
 		t.Fatalf("세 번 읽지 않습니다: %v", c.Pending())
+	}
+}
+
+// The same plan told in two rooms is one plan: the other room's coming plan,
+// not on the calendar yet, is shown here, and a create for the same days at
+// the same place fills in what it lacked instead of making a second one -
+// one camping reserved was two entries and two cards (2026-11-01).
+func TestAPlanFromAnotherRoomIsNotMadeTwice(t *testing.T) {
+	ctx := context.Background()
+	c, st, script := setup(t, `{"changes":[{"op":"create","kind":"plan","set":{"title":"쉼오지캠프 2박3일","status":"confirmed","date":"2026-11-20","endDate":"2026-11-22","place":"쉼오지캠프","type":"캠핑"},"evidence":[{"line":1,"quote":"예약 완료했어"}],"confidence":0.9}]}`)
+	if _, err := c.world.Create(ctx, model.KindPlan, "q", model.State{Title: "쉼오지캠프 2박 (하늘존별)", Status: model.Confirmed, Date: "2026-11-20", Place: "쉼오지캠프"}, world.Meta{Actor: "interpreter"}); err != nil {
+		t.Fatal(err)
+	}
+	say(t, st, "sim:1", "11/20부터 쉼오지캠프 2박 예약 완료했어", true, time.Date(2026, 10, 12, 20, 1, 0, 0, seoul))
+	if err := c.Read(ctx, "r"); err != nil {
+		t.Fatal(err)
+	}
+	if p := script.Prompts[0]; !strings.Contains(p, "쉼오지캠프 2박 (하늘존별)") {
+		t.Fatalf("다른 방의 다가오는 일정이 보여야 합니다:\n%s", p)
+	}
+	plans, _ := st.Entities(ctx, model.KindPlan, "", false)
+	if len(plans) != 1 {
+		t.Fatalf("같은 일정은 하나여야 합니다: %+v", plans)
+	}
+	if got := plans[0].State; got.Title != "쉼오지캠프 2박 (하늘존별)" || got.EndDate != "2026-11-22" || got.Type != "캠핑" {
+		t.Fatalf("제목은 그대로, 빠진 것만 채워야 합니다: %+v", got)
 	}
 }
