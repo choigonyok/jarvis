@@ -1,6 +1,9 @@
 # 바깥 이름은 공유기 DNS 를 거치지 않는다(2026-10-27: 공유기가 간헐적으로
 # SERVFAIL·NXDOMAIN 을 돌려 uniple·anthropic·Voyage 호출이 끊겼다). 그 길로는
-# host.docker.internal 이 풀리지 않아 extra_hosts 로 박는다.
+# host.docker.internal 이 풀리지 않아 extra_hosts 로 박는다 - 프로세스가 /etc/hosts 를
+# 읽는 서비스에만 통한다. 터널(cloudflared)은 받지 않는다: Workers VPC 서비스의 이름은
+# cloudflared 가 컨테이너의 DNS 서버에 물어 풀기 때문에, 1.1.1.1 로는 호스트의
+# 목소리 서비스(jarvis-tts = host.docker.internal)가 dns_error 로 끊긴다(10/27~11/01 그랬다).
 x-outside: &outside
   dns: ["1.1.1.1", "8.8.8.8"]
   extra_hosts: ["host.docker.internal:host-gateway"]
@@ -958,7 +961,8 @@ services:
       - data
     restart: unless-stopped
   tunnel:
-    <<: *outside
+    # x-outside 를 받지 않는다(위 설명). 터널은 도커의 DNS 로 compose 이름과
+    # host.docker.internal 을 풀고, 바깥으로는 Cloudflare 엣지에만 간다.
     image: cloudflare/cloudflared:2026.10.0
     profiles: ["cloudflare"]
     command: tunnel --no-autoupdate --metrics 127.0.0.1:20241 run --token ${CLOUDFLARE_TUNNEL_TOKEN:-}
