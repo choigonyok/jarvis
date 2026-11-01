@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { ensurePush } from "@/lib/use-push";
 import type { useRouter } from "next/navigation";
 import { openTarget } from "@/lib/focus";
 
@@ -181,14 +182,10 @@ export function useLiveNotifications(enabled: boolean) {
     };
     const onVisibility = () => (document.visibilityState === "visible" ? start() : stop());
 
-    // The push subscription's endpoint is what output-svc knows this device by.
+    // The push subscription's endpoint is what output-svc knows this device
+    // by - made again here if the platform dropped it (ensurePush).
     void (async () => {
-      try {
-        const reg = await navigator.serviceWorker?.getRegistration();
-        endpoint = (await reg?.pushManager.getSubscription())?.endpoint ?? "";
-      } catch {
-        endpoint = "";
-      }
+      endpoint = await ensurePush();
       if (document.visibilityState === "visible") start();
     })();
     document.addEventListener("visibilitychange", onVisibility);

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { diag } from "@/lib/diag";
 
 /**
  * Web Push for this device: register the service worker (public/sw.js),
@@ -36,6 +37,45 @@ async function registration(): Promise<ServiceWorkerRegistration> {
  * Stop this device's notifications - on sign-out, so a shared or handed-on
  * device does not keep receiving the operator's alerts.
  */
+/**
+ * The device's push subscription, made again if it is gone: a phone whose
+ * permission is granted but whose subscription the platform dropped would
+ * otherwise get no push at all, with nothing on screen to say so (2026-11-01:
+ * output-svc delivered to two older subscriptions of the phone, the app on it
+ * held none). Resolves the endpoint, or "" where there is none to have.
+ */
+export async function ensurePush(): Promise<string> {
+  if (!supported() || Notification.permission !== "granted") {
+    diag("push", { permission: typeof Notification === "undefined" ? "none" : Notification.permission, supported: supported() ? 1 : 0 });
+    return "";
+  }
+  try {
+    const reg = (await navigator.serviceWorker.getRegistration("/")) ?? (await registration());
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      const keyRes = await fetch("/api/notify/vapid", { cache: "no-store" });
+      const key = (await keyRes.json()) as { publicKey?: string };
+      if (!keyRes.ok || !key.publicKey) {
+        diag("push", { permission: "granted", had: 0, vapid: keyRes.status });
+        return "";
+      }
+      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(key.publicKey) });
+      const res = await fetch("/api/notify/subscriptions", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-client-user-agent": navigator.userAgent },
+        body: JSON.stringify(sub.toJSON()),
+      });
+      diag("push", { permission: "granted", had: 0, posted: res.status });
+    } else {
+      diag("push", { permission: "granted", had: 1 });
+    }
+    return sub.endpoint;
+  } catch (err) {
+    diag("push", { permission: "granted", error: err instanceof Error ? err.name : "fail" });
+    return "";
+  }
+}
+
 export async function dropPush(): Promise<void> {
   if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
   const reg = await navigator.serviceWorker.getRegistration("/").catch(() => undefined);
