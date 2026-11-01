@@ -94,8 +94,9 @@ export function VoiceStage({
     setNotice(null);
     setSending(true);
     diag("voice", { ev: "stage.send", chars: text.length });
-    // The question is asked: the mic closes now, not when the answer begins.
-    stopRef.current();
+    // The question is asked. The mic stays open - what it hears from here
+    // until the answer is over is dropped (holding) - because an iPhone on
+    // iOS 27 opens no microphone for a session started without a tap.
     const sent = onSend(text);
     if (sent && typeof sent.then === "function") {
       void sent.then((ok) => {
@@ -120,6 +121,7 @@ export function VoiceStage({
 
   const { state, interim, error, heard, start, restart, stop, supported } = useRecognition({
     onFinal,
+    holding: speaking || thinking || sending,
   });
   useEffect(() => {
     stopRef.current = stop;
@@ -211,16 +213,11 @@ export function VoiceStage({
   // after every single answer, which is the thing this mode exists to avoid.
   useEffect(() => {
     if (!started || setup) return;
-    // Closed while Jarvis thinks as well as while it talks: an open mic keeps
-    // an iPhone in call mode, and the answer then plays through the earpiece -
-    // too quietly to hear. It reopens once the answer has been spoken.
-    if (speaking || thinking || sending) {
-      if (listening) {
-        diag("voice", { ev: "stage.close", speaking: speaking ? 1 : 0, thinking: thinking ? 1 : 0, sending: sending ? 1 : 0 });
-        stop();
-      }
-      return;
-    }
+    // Left open while Jarvis thinks and talks, its words held back
+    // (holding): on iOS 27 a session opened again afterwards without a tap
+    // hears nothing (WebKit 321436). The answer plays through Web Audio, which
+    // an iPhone sends to the speaker even with the microphone open.
+    if (speaking || thinking || sending) return;
     // Not after "paused": that device wants a tap, and asking again without
     // one only gets refused again.
     if (

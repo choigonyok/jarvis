@@ -66,6 +66,8 @@ const RECAPTURE_MS = 1200;
  * answer played, says it is capturing and hears nothing (2026-11-01).
  */
 const AUTO_SOUND_MS = 5000;
+/** A session that says it started sooner than this after start() opened no microphone (phones, iOS 27). */
+const DEAF_START_MS = 150;
 
 /**
  * Whether this is a phone or a tablet. There the recognizer must be the only
@@ -95,9 +97,18 @@ export function capturesAlone(): boolean {
 export function useRecognition({
   lang = "ko-KR",
   onFinal,
+  holding = false,
 }: {
   lang?: string;
   onFinal: (text: string) => void;
+  /**
+   * While Jarvis thinks or talks: the session stays open and what it hears
+   * is dropped. Closing the mic and opening it again afterwards is what an
+   * iPhone on iOS 27 refuses without a tap - the reopened session says it
+   * started and hears nothing (WebKit 321436) - while a session that never
+   * closed keeps hearing.
+   */
+  holding?: boolean;
 }) {
   const [state, setState] = useState<Listening>("idle");
   const [interim, setInterim] = useState("");
@@ -108,6 +119,9 @@ export function useRecognition({
   const engineRef = useRef<SpeechRecognition | null>(null);
   const final = useRef(onFinal);
   const langRef = useRef(lang);
+  const holdRef = useRef(holding);
+  // A session that ended while holding is opened again once the hold lifts.
+  const reopenWhenFree = useRef(false);
   // Whether a session should be open: set by start, cleared by stop and by
   // what cannot be fixed by trying again (a refusal, a fatal error).
   const wanted = useRef(false);
@@ -134,6 +148,7 @@ export function useRecognition({
   useEffect(() => {
     final.current = onFinal;
     langRef.current = lang;
+    holdRef.current = holding;
   });
 
   // Let the session in use go: its handlers fall silent, and it is told to stop.
@@ -225,7 +240,13 @@ export function useRecognition({
         engineRef.current = null;
         opening.current = false;
         setInterim("");
-        if (wanted.current) {
+        if (wanted.current && holdRef.current) {
+          // Jarvis is still talking: the screen opens the next session when he stops.
+          tapped.current = false;
+          reopenWhenFree.current = true;
+          diag("voice", { ev: "rec.endheld" });
+          setState((prev) => (prev === "listening" ? "idle" : prev));
+        } else if (wanted.current) {
           tapped.current = false;
           schedule(REOPEN_MS);
         } else {
@@ -266,7 +287,20 @@ export function useRecognition({
         opening.current = false;
         setError(null);
         setState("listening");
-        diag("voice", { ev: "rec.start", reports: reportsAudio.current ? 1 : 0, took: Math.round(performance.now() - asked) });
+        const took = Math.round(performance.now() - asked);
+        diag("voice", { ev: "rec.start", reports: reportsAudio.current ? 1 : 0, took });
+        if (!tapped.current && took < DEAF_START_MS && capturesAlone()) {
+          // Said "started" at once: no microphone was opened (WebKit 321436).
+          // Not "듣고 있습니다" with nothing behind it - the tap is asked for now.
+          diag("voice", { ev: "rec.deaf", took });
+          quiet();
+          retire();
+          wanted.current = false;
+          setInterim("");
+          setError("mic-silent");
+          setState("paused");
+          return;
+        }
         if (reportsAudio.current && !captured) {
           capture = setTimeout(() => replace("never opened the microphone", true), AUDIO_MS);
         }
@@ -301,6 +335,11 @@ export function useRecognition({
 
       engine.onresult = (event) => {
         if (!mine() || dropping) return;
+        if (holdRef.current) {
+          // Jarvis's own voice, or words said over his answer: not a question.
+          setInterim("");
+          return;
+        }
         clearTimeout(capture);
         clearTimeout(words);
         clearTimeout(silence);
@@ -413,6 +452,7 @@ export function useRecognition({
 
   /** `auto` when nobody tapped for this start - the hands-free reopen after Jarvis speaks. */
   const start = useCallback((opts?: { auto?: boolean }) => {
+    reopenWhenFree.current = false;
     // Already asked and waiting for the engine's word: nothing to add.
     if (opening.current && wanted.current) return;
     tapped.current = !opts?.auto;
@@ -540,13 +580,25 @@ async function resumed(ctx: AudioContext): Promise<boolean> {
 
 let playerUnlocked = false;
 let synthUnlocked = false;
+let shared: AudioContext | null = null;
 
 /**
- * A sound made inside a tap: a context started on one silent sample, so the
- * contexts the answers are played through later may start on their own.
+ * The one context the answers play through. A context an iPhone has started
+ * inside a tap goes on playing on its own; one made later, outside any tap,
+ * stays suspended for good (2026-11-01, "브라우저 음성으로 대신" every answer).
+ */
+export function sharedContext(): AudioContext | null {
+  if (shared && shared.state !== "closed") return shared;
+  shared = newContext();
+  return shared;
+}
+
+/**
+ * A sound made inside a tap: the shared context started on one silent
+ * sample, so the answers may play through it later on their own.
  */
 export function primePlayer() {
-  const ctx = newContext();
+  const ctx = sharedContext();
   if (!ctx) return;
   try {
     const source = ctx.createBufferSource();
@@ -561,10 +613,7 @@ export function primePlayer() {
     .then(() => {
       playerUnlocked = true;
     })
-    .catch(() => undefined)
-    .finally(() => {
-      setTimeout(() => void ctx.close().catch(() => undefined), 200);
-    });
+    .catch(() => undefined);
 }
 
 /** Whether a context has been started inside a tap yet. */
@@ -790,9 +839,7 @@ export function useSpeech(lang = "ko-KR", server = false) {
     const piece = stopPiece.current;
     stopPiece.current = null;
     piece?.();
-    const ctx = context.current;
     context.current = null;
-    if (ctx) void ctx.close().catch(() => undefined);
     finish();
   }, [finish]);
 
@@ -883,7 +930,7 @@ export function useSpeech(lang = "ko-KR", server = false) {
       setSpeaker("server");
       setProgress(-1);
 
-      const ctx = newContext();
+      const ctx = sharedContext();
       if (!ctx) {
         speakBrowser(text);
         return;
@@ -891,10 +938,20 @@ export function useSpeech(lang = "ko-KR", server = false) {
       context.current = ctx;
       const letGo = () => {
         if (context.current === ctx) context.current = null;
-        void ctx.close().catch(() => undefined);
       };
+      // The hardware's rate now, read off a context made for the purpose: a
+      // context kept across the microphone's use plays a fraction high and
+      // fast once the hardware moved to 48 kHz for it (2026-10-19), and the
+      // pieces are slowed by that much to come out right.
+      let hw = ctx.sampleRate;
+      const probe = newContext();
+      if (probe) {
+        hw = probe.sampleRate;
+        void probe.close().catch(() => undefined);
+      }
+      const rateFix = hw > 0 && hw !== ctx.sampleRate ? ctx.sampleRate / hw : 1;
       const running = await resumed(ctx);
-      diag("voice", { ev: "tts.ctx", rate: ctx.sampleRate, state: ctx.state, running: running ? 1 : 0 });
+      diag("voice", { ev: "tts.ctx", rate: ctx.sampleRate, hw, state: ctx.state, running: running ? 1 : 0 });
       if (!alive()) return;
       if (!running) {
         // Not allowed to sound yet (no tap since the page opened): the
@@ -946,6 +1003,7 @@ export function useSpeech(lang = "ko-KR", server = false) {
           let last = -1;
           const source = ctx.createBufferSource();
           source.buffer = buffer;
+          source.playbackRate.value = rateFix;
           source.connect(analyser);
           const done = (ok: boolean) => {
             if (settled) return;
@@ -1041,6 +1099,7 @@ export function useSpeech(lang = "ko-KR", server = false) {
       }
       diag("voice", { ev: "tts.done" });
       letGo();
+      analyser.disconnect();
       finish();
     },
     [speakBrowser, finish, kick],
