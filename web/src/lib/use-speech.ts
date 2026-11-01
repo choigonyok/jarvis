@@ -60,6 +60,29 @@ const DEAF_LIMIT = 3;
 const RECAPTURE_TRIES = 2;
 /** A beat before that try: the platform has to let go of the audio it was playing. */
 const RECAPTURE_MS = 1200;
+/**
+ * A session opened hands-free that reports no sound at all for this long is
+ * taken to be deaf and replaced: an iPhone's recognizer, opened right after the
+ * answer played, says it is capturing and hears nothing (2026-11-01).
+ */
+const AUTO_SOUND_MS = 5000;
+
+/**
+ * Before a hands-free open on a phone: take the microphone for a moment and
+ * let it go, so the platform's audio route is recording before the recognizer
+ * asks - it can be left on playback by the answer that just ended.
+ */
+async function nudgeCapture(): Promise<string> {
+  try {
+    const devices = typeof navigator === "undefined" ? undefined : navigator.mediaDevices;
+    if (!devices?.getUserMedia) return "none";
+    const stream = await devices.getUserMedia({ audio: true });
+    for (const track of stream.getTracks()) track.stop();
+    return "ok";
+  } catch (err) {
+    return err instanceof Error ? err.name : "fail";
+  }
+}
 
 /**
  * Whether this is a phone or a tablet. There the recognizer must be the only
@@ -123,7 +146,7 @@ export function useRecognition({
   // Only then is a session that never does so taken to be deaf - an engine
   // that never reports it is not punished for that.
   const reportsAudio = useRef(false);
-  const attemptRef = useRef<((tries: number) => void) | null>(null);
+  const attemptRef = useRef<((tries: number, nudged?: boolean) => void) | null>(null);
 
   useEffect(() => {
     final.current = onFinal;
@@ -174,10 +197,19 @@ export function useRecognition({
   useEffect(() => {
     // One attempt to open a session; a start the engine refuses (it is still
     // letting go of the last one) is tried again shortly.
-    attemptRef.current = (tries: number) => {
+    attemptRef.current = (tries: number, nudged = false) => {
       if (!wanted.current) return;
       const Recognition = constructor();
       if (!Recognition) return;
+      if (!tapped.current && !nudged && capturesAlone()) {
+        const at = Date.now();
+        void nudgeCapture().then((how) => {
+          diag("voice", { ev: "rec.nudge", how, ms: Date.now() - at });
+          if (!wanted.current) return;
+          setTimeout(() => attemptRef.current?.(tries, true), 300);
+        });
+        return;
+      }
       retire();
       const engine = new Recognition();
       diag("voice", { ev: "rec.new", tries });
@@ -198,12 +230,14 @@ export function useRecognition({
       let starting: ReturnType<typeof setTimeout> | undefined;
       let capture: ReturnType<typeof setTimeout> | undefined;
       let words: ReturnType<typeof setTimeout> | undefined;
+      let silence: ReturnType<typeof setTimeout> | undefined;
       const quiet = () => {
         clearTimeout(settle);
         clearTimeout(ending);
         clearTimeout(starting);
         clearTimeout(capture);
         clearTimeout(words);
+        clearTimeout(silence);
       };
 
       // The session is over: open the next while one is wanted.
@@ -259,6 +293,12 @@ export function useRecognition({
         if (reportsAudio.current && !captured) {
           capture = setTimeout(() => replace("never opened the microphone", true), AUDIO_MS);
         }
+        if (!tapped.current) {
+          silence = setTimeout(() => {
+            primePlayer();
+            replace("opened hands-free and heard no sound", true);
+          }, AUTO_SOUND_MS);
+        }
       };
       engine.onaudiostart = () => {
         if (!mine()) return;
@@ -272,6 +312,7 @@ export function useRecognition({
         captured = true;
         clearTimeout(capture);
         setHeard((h) => h + 1);
+        clearTimeout(silence);
         diag("voice", { ev: "rec.sound", words: gotWords ? 1 : 0 });
         if (!gotWords) {
           clearTimeout(words);
@@ -285,6 +326,7 @@ export function useRecognition({
         if (!mine() || dropping) return;
         clearTimeout(capture);
         clearTimeout(words);
+        clearTimeout(silence);
         gotWords = true;
         deaf.current = 0;
         recaptures.current = 0;
@@ -381,7 +423,7 @@ export function useRecognition({
         retire();
         diag("voice", { ev: "rec.startfail", tries });
         if (tries < START_TRIES) {
-          retry.current = setTimeout(() => attemptRef.current?.(tries + 1), 250);
+          retry.current = setTimeout(() => attemptRef.current?.(tries + 1, true), 250);
           return;
         }
         wanted.current = false;
