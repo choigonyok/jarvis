@@ -15,6 +15,7 @@ import (
 
 	"github.com/choigonyok/jarvis/gocommon/queue"
 	"github.com/choigonyok/jarvis/gocommon/seal"
+	"github.com/choigonyok/jarvis/mind-svc/internal/mind"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
 	"github.com/choigonyok/jarvis/mind-svc/internal/spending/ingest"
@@ -57,8 +58,15 @@ func TestMessagesTakesWhatIsWorthReading(t *testing.T) {
 		}
 	}
 	log.Drain()
-	if len(seen) != 1 || seen[0].Key != "kakao:2" {
+	if len(seen) != 1 || seen[0].Key != mind.ObservedKey("kakao:2") {
 		t.Fatalf("최근 대화 한 건만 관측해야 합니다: %+v", seen)
+	}
+	// The collector's own record of the message sits in the stream under the
+	// message's ref, and the way in keeps one record per (source, key): an
+	// observation under that same key is dropped as a repeat, and the room is
+	// never read (2026-10-31).
+	if theirs := sealed(t, sealer, "kakao", collected{RowID: 2}); seen[0].Source == theirs.Source && seen[0].Key == theirs.SourceKey {
+		t.Fatalf("관측의 키가 수집기 기록의 키와 같습니다: %s", seen[0].Key)
 	}
 	msg, err := st.Message(ctx, "kakao:2")
 	if err != nil || msg.Text != "이번 주말에 강릉 갈까?" || msg.Room != "kakao:7" || msg.Source != "kakao" || msg.RoomName != "지수" {

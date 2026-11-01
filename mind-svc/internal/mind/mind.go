@@ -340,6 +340,12 @@ func (m *Mind) SimulateMessage(ctx context.Context, msg model.Message) (model.Me
 
 // Observe stores a message's text and logs that it was seen - what every
 // sensor does.
+//
+// The observation's key is not the message's ref: a collector already left
+// the message itself in the stream under that key (message.received,
+// gocommon/collect), and the way in keeps one record per (source, key). With
+// the same key this observation was dropped as a repeat, no room ever came
+// due, and nothing said in KakaoTalk was read (2026-10-31 ~ 11-01).
 func Observe(ctx context.Context, st store.Store, log obs.Log, msg model.Message) error {
 	if err := st.PutMessage(ctx, msg); err != nil {
 		return err
@@ -347,9 +353,13 @@ func Observe(ctx context.Context, st store.Store, log obs.Log, msg model.Message
 	data, _ := json.Marshal(obs.MessageRef{Ref: msg.Ref, Room: msg.Room})
 	return log.Append(ctx, obs.Observation{
 		Source: msg.Source, Type: obs.MessageObserved, Subject: msg.Room,
-		Data: data, Key: msg.Ref, OccurredAt: msg.SentAt,
+		Data: data, Key: ObservedKey(msg.Ref), OccurredAt: msg.SentAt,
 	})
 }
+
+// ObservedKey is the record key of the observation that a message was seen:
+// its ref, set apart from the record the collector left under the ref itself.
+func ObservedKey(ref string) string { return "observed:" + ref }
 
 // Observe records an occurrence read from a structured source and logs that
 // it was seen, as a sensor does. Seeing the same one again (a payment's
