@@ -260,6 +260,13 @@ func (s *Server) readPage(ctx context.Context, u *url.URL, pictures int) (readDo
 		return readDoc{}, err
 	}
 	if res.Status != http.StatusOK {
+		s.Log.Warn("읽기 실패", "host", res.URL.Host, "status", res.Status)
+		// A shop that turns a plain client away (Coupang's 403 to anything
+		// but a browser) is not read here: the job holding the logged-in
+		// browser opens it there instead (2026-11-02).
+		if res.Status == http.StatusForbidden || res.Status == http.StatusTooManyRequests {
+			return readDoc{}, fmt.Errorf("%s 가 서버에서 읽는 것을 거절했습니다(%d). 이 사이트가 작업의 사이트면 browser_navigate 로 여세요 - 로그인된 브라우저는 열어 줍니다", res.URL.Host, res.Status)
+		}
 		return readDoc{}, fmt.Errorf("%s 가 %d 로 답했습니다", res.URL.Host, res.Status)
 	}
 	d, err := page.Parse(res.Body, res.ContentType, res.URL)

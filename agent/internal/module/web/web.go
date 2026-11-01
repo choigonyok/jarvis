@@ -374,7 +374,7 @@ func (m *Module) Handler() http.Handler {
 		Name: "read",
 		Description: "웹 페이지 하나를 읽는다: 제목·날짜·본문, 본문 속 그림에 쓰인 글자(공지 카드·상품 상세 이미지·포스터)를 그 자리에, 그리고 링크. " +
 			"검색 결과·읽은 페이지의 링크·도구가 돌려준 주소·운영자가 준 주소만 연다. 긴 페이지는 focus 로 관련 부분만, offset 으로 이어 읽는다. " +
-			"그림을 직접 봐야 하면 look. 읽기만 한다.",
+			"그림을 직접 봐야 하면 look. 읽기만 한다. 쿠팡처럼 브라우저가 아니면 거절하는 사이트(403)는 브라우저 도구로 연다.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ReadInput) (*mcp.CallToolResult, any, error) {
 		return m.read(ctx, in), nil, nil
 	})
