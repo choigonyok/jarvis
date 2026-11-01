@@ -53,6 +53,13 @@ const AUDIO_MS = 3000;
 const WORDS_MS = 7000;
 /** Sessions given up on in a row (never started, never captured) before asking for a tap. */
 const DEAF_LIMIT = 3;
+/**
+ * A hands-free reopen whose capture failed (audio-capture) is tried again,
+ * after the voice element is settled, this many times before a tap is asked for.
+ */
+const RECAPTURE_TRIES = 2;
+/** A beat before that try: the platform has to let go of the audio it was playing. */
+const RECAPTURE_MS = 1200;
 
 /**
  * Whether this is a phone or a tablet. There the recognizer must be the only
@@ -110,6 +117,8 @@ export function useRecognition({
   const opening = useRef(false);
   // Sessions given up on in a row; reset by any words heard.
   const deaf = useRef(0);
+  // Hands-free reopens that got no audio in a row; reset by words, or a tap.
+  const recaptures = useRef(0);
   // Whether this engine has been seen to report its capture (onaudiostart).
   // Only then is a session that never does so taken to be deaf - an engine
   // that never reports it is not punished for that.
@@ -278,6 +287,7 @@ export function useRecognition({
         clearTimeout(words);
         gotWords = true;
         deaf.current = 0;
+        recaptures.current = 0;
         setHeard((h) => h + 1);
         let pending = "";
         for (let i = event.resultIndex; i < event.results.length; i += 1) {
@@ -320,6 +330,19 @@ export function useRecognition({
         console.warn("[voice] recognition error:", event.error, event.message);
         diag("voice", { ev: "rec.error", error: String(event.error), tapped: tapped.current ? 1 : 0 });
         const refused = event.error === "not-allowed" || event.error === "service-not-allowed";
+        // Opened hands-free right after the answer played and got no audio:
+        // on an iPhone the element that just spoke can still hold the audio
+        // route, and the engine reports it only seconds later (2026-11-01).
+        // Settle the element as a tap would (primePlayer) and open once more.
+        if (!tapped.current && event.error === "audio-capture" && recaptures.current < RECAPTURE_TRIES) {
+          recaptures.current += 1;
+          diag("voice", { ev: "rec.recapture", n: recaptures.current });
+          quiet();
+          retire();
+          primePlayer();
+          if (wanted.current) schedule(RECAPTURE_MS);
+          return;
+        }
         // On an automatic reopen, a refusal (or the mic still held by the voice
         // that just finished speaking) means "tap to talk", not "broken".
         if (!tapped.current && (refused || event.error === "audio-capture")) {
@@ -373,6 +396,7 @@ export function useRecognition({
     // Already asked and waiting for the engine's word: nothing to add.
     if (opening.current && wanted.current) return;
     tapped.current = !opts?.auto;
+    if (!opts?.auto) recaptures.current = 0;
     diag("voice", { ev: "rec.want", auto: opts?.auto ? 1 : 0 });
     wanted.current = true;
     deaf.current = 0;
@@ -388,6 +412,7 @@ export function useRecognition({
   const restart = useCallback((tap = false) => {
     if (!wanted.current && !tap) return;
     tapped.current = tap;
+    if (tap) recaptures.current = 0;
     diag("voice", { ev: "rec.restart", tap: tap ? 1 : 0 });
     wanted.current = true;
     deaf.current = 0;

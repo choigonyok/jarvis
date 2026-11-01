@@ -231,9 +231,11 @@ export function VoiceStage({
       state === "unsupported"
     )
       return;
-    // A beat after the voice stops before the mic opens: an iPhone has to
-    // switch its audio from playing to recording, and asked too soon it
-    // refuses - which is what turned the stage into "tap to talk".
+    // The element that just spoke is settled first - played to the end of
+    // a silent clip, as every tap does - and the mic opens a beat after: an
+    // iPhone has to switch its audio from playing to recording, and asked
+    // too soon it refuses - which is what turned the stage into "tap to talk".
+    primePlayer();
     const reopen = setTimeout(() => {
       diag("voice", { ev: "stage.reopen", state });
       start({ auto: true });
