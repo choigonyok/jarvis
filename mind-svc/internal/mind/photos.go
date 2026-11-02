@@ -259,7 +259,12 @@ func (m *Mind) photosAnswered(ctx context.Context, in model.Intent) {
 	} else {
 		title = ""
 	}
-	text := strings.TrimSpace(fmt.Sprintf("%s %s 사진 %d장", a.Day, title, len(a.Photos)))
+	// A plan chosen names its own day.
+	day := a.Day
+	if strings.HasPrefix(title, day) {
+		day = ""
+	}
+	text := strings.TrimSpace(fmt.Sprintf("%s %s 사진 %d장", day, title, len(a.Photos)))
 	if note != "" {
 		text += ": " + note
 	}

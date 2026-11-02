@@ -67,8 +67,8 @@ func TestPhotosInNoPlanAreAskedAbout(t *testing.T) {
 		t.Fatalf("%+v", links)
 	}
 	facts, _ := st.Facts(ctx, 10)
-	if len(facts) != 1 || !strings.Contains(facts[0].Text, "지수와 캠핑 사진 5장: 장작 사진") {
-		t.Fatalf("%+v", facts)
+	if len(facts) != 1 || !strings.Contains(facts[0].Text, "지수와 캠핑 사진 5장: 장작 사진") || strings.Count(facts[0].Text, "10/30") != 1 {
+		t.Fatalf("날짜는 한 번만: %+v", facts)
 	}
 	// Tied now, they are not asked about again.
 	batches, err := m.unplaced(ctx, now)
