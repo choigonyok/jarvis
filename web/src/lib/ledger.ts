@@ -96,6 +96,13 @@ export function groupByDay(proposals: Proposal[], now = new Date()): Day[] {
   return days;
 }
 
+/** The day a card still waiting came, when not today: the 대기 rows have no day above them. */
+export function waitingSince(proposal: Proposal, now = new Date()): string | undefined {
+  const date = raisedAt(proposal);
+  if (!date || startOfDay(date).getTime() === startOfDay(now).getTime()) return undefined;
+  return `${date.getMonth() + 1}/${date.getDate()}`;
+}
+
 /** The order the record shows them in - and pages them in (lib/paging.ts). */
 export function newestFirst(proposals: Proposal[]): Proposal[] {
   return proposals.slice().sort((a, b) => (raisedAt(b)?.getTime() ?? 0) - (raisedAt(a)?.getTime() ?? 0));

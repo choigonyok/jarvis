@@ -5,9 +5,9 @@ import { Entry } from "@/components/ledger/entry";
 import { Header, TabBar } from "@/components/shell/header";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { Pager } from "@/components/ui/pager";
-import { filters, groupByDay, matches, newestFirst, type Filter } from "@/lib/ledger";
+import { filters, groupByDay, matches, newestFirst, waitingSince, type Filter } from "@/lib/ledger";
 import { usePaged } from "@/lib/paging";
-import { isPending } from "@/lib/thread";
+import { isPending, type Decision, type Proposal } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
 import { cn } from "@/lib/utils";
 
@@ -24,13 +24,21 @@ export function Ledger() {
   const [filter, setFilter] = useState<Filter>("all");
 
   const pending = proposals.filter(isPending);
-  const shown = useMemo(() => newestFirst(proposals.filter((p) => matches(p, filter))), [proposals, filter]);
+  // What waits stands above the days: every screen's bar lands here, and a card
+  // from yesterday is on the second page of a busy day's list. In the full view
+  // it is said once, up there.
+  const waiting = useMemo(() => (filter === "all" ? newestFirst(proposals.filter(isPending)) : []), [proposals, filter]);
+  const shown = useMemo(
+    () => newestFirst(proposals.filter((p) => matches(p, filter) && !(filter === "all" && isPending(p)))),
+    [proposals, filter],
+  );
   // Twenty a page; a day split across pages still counts all of its own.
   const counts = useMemo(() => new Map(groupByDay(shown).map((d) => [d.key, d.entries.length])), [shown]);
   const paged = usePaged(shown, { reset: filter });
   const days = groupByDay(paged.items);
 
-  const empty = hydrated && shown.length === 0;
+  const empty = hydrated && shown.length === 0 && waiting.length === 0;
+  const decideOn = (proposal: Proposal) => (d: Decision, reason?: string) => void decide(proposal.id, d, undefined, reason);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -76,6 +84,21 @@ export function Ledger() {
             </p>
           ) : null}
 
+          {waiting.length > 0 ? (
+            <section className="mb-6">
+              <div className="mb-1.5 flex items-center gap-3">
+                <h2 className="text-[12px] text-faint">대기</h2>
+                <span aria-hidden className="h-px flex-1 bg-edge-soft" />
+                <span className="tnum text-[11.5px] text-faint">{waiting.length}건</span>
+              </div>
+              <div>
+                {waiting.map((proposal) => (
+                  <Entry key={proposal.id} proposal={proposal} onDecide={decideOn(proposal)} when={waitingSince(proposal)} />
+                ))}
+              </div>
+            </section>
+          ) : null}
+
           <div id={paged.anchor} className="scroll-mt-4 space-y-6">
             {days.map((day) => (
               <section key={day.key}>
@@ -91,11 +114,7 @@ export function Ledger() {
 
                 <div>
                   {day.entries.map((proposal) => (
-                    <Entry
-                      key={proposal.id}
-                      proposal={proposal}
-                      onDecide={(d, reason) => void decide(proposal.id, d, undefined, reason)}
-                    />
+                    <Entry key={proposal.id} proposal={proposal} onDecide={decideOn(proposal)} />
                   ))}
                 </div>
               </section>

@@ -26,14 +26,17 @@ import { cn } from "@/lib/utils";
 export function Entry({
   proposal,
   onDecide,
+  when,
 }: {
   proposal: Proposal;
   onDecide: (decision: Decision, reason?: string) => void;
+  /** In place of the time, where no day stands above the row. */
+  when?: string;
 }) {
   const copy = stateCopy[proposal.state];
   const waiting = proposal.state === "pending";
   const literal = isLiteral(proposal);
-  const time = waiting ? proposal.at : (proposal.decidedAt ?? proposal.at);
+  const time = when ?? (waiting ? proposal.at : (proposal.decidedAt ?? proposal.at));
   // Money waits five seconds with 되돌리기, as on the chat's card (chat/hold.tsx).
   const hold = useHold(() => onDecide("approved"));
   // Turned down here as in the chat: asked why first (chat/reject-form.tsx).
