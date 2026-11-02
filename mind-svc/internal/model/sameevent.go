@@ -21,6 +21,12 @@ func SameEvent(a, b State) bool {
 	if a.Date == "" || a.Date != b.Date {
 		return false
 	}
+	// A stay of days told twice: the same first and last day is one trip,
+	// whatever each telling calls it. "은주와 캠핑 2박3일" read from a conversation
+	// and "편월재 캠핑 2박3일" put on the calendar were two (2026-11-03).
+	if a.EndDate != "" && a.EndDate != a.Date && a.EndDate == b.EndDate && titlesMeet(a, b) {
+		return true
+	}
 	if a.Start == "" || b.Start == "" {
 		return sameTitle(a.Title, b.Title)
 	}

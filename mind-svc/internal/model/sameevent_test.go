@@ -6,11 +6,18 @@ func TestSameEvent(t *testing.T) {
 	plan := func(title, date, start string, people ...string) State {
 		return State{Title: title, Date: date, Start: start, People: people}
 	}
+	trip := func(title, from, to string) State {
+		return State{Title: title, Date: from, EndDate: to}
+	}
 	for _, c := range []struct {
 		name string
 		a, b State
 		want bool
 	}{
+		// 2026-11-03: one stay, named by a conversation and by the calendar.
+		{"며칠 일정의 첫날·끝날이 같음", trip("은주와 캠핑 2박3일", "2027-01-01", "2027-01-03"), trip("편월재 캠핑 2박3일 (4번 사이트)", "2027-01-01", "2027-01-03"), true},
+		{"며칠 일정의 끝날이 다름", trip("은주와 캠핑", "2027-01-01", "2027-01-03"), trip("편월재 캠핑", "2027-01-01", "2027-01-02"), false},
+		{"같은 날짜 겹치는 말 없음", trip("부산 출장", "2027-01-01", "2027-01-03"), trip("제주 여행", "2027-01-01", "2027-01-03"), false},
 		{"대화의 합주와 캘린더의 합주", plan("은주와 합주", "2026-10-17", "15:00", "은주"), plan("기타 합주 (은주)", "2026-10-17", "15:00"), true},
 		{"사람만 같음", plan("저녁", "2026-10-17", "19:00", "민수"), plan("민수 생일 파티", "2026-10-17", "19:20"), true},
 		{"낱말만 같음", plan("치과 예약", "2026-10-17", "10:00"), plan("치과", "2026-10-17", "10:00"), true},

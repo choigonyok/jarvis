@@ -642,6 +642,24 @@ func TestAlikeCalendarCardIsOneQuestion(t *testing.T) {
 	}
 }
 
+// One stay asked about under two names: the same first and last day and a word
+// in common are one question, and approving both would put it on twice
+// (2026-11-03).
+func TestCardsAboutOneStayAreOneQuestion(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(DefaultPolicy())
+	stay := func(entity, title string) model.Intent {
+		payload, _ := json.Marshal(model.CalendarAction{Event: model.CalendarEvent{Title: title, Date: "2027-01-01", EndDate: "2027-01-03"}})
+		return model.Intent{Skill: "schedule", Kind: "calendar.create", EntityID: entity, Payload: payload, Title: "캘린더에 추가: " + title, Confidence: 0.9, Reversible: true}
+	}
+	first, _ := f.g.Submit(ctx, stay("plan_a", "은주와 캠핑 2박3일"))
+	second, _ := f.g.Submit(ctx, stay("plan_b", "편월재 캠핑 2박3일 (4번 사이트)"))
+	old, _ := f.st.Intent(ctx, first.ID)
+	if old.Status != model.Superseded || second.Status != model.Pending {
+		t.Fatalf("앞의 카드는 닫히고 새 카드가 서야 합니다: %s / %s", old.Status, second.Status)
+	}
+}
+
 // One morning's plans asked four cards and none closed another (2026-11-02):
 // a question about an entry closes the other plans' questions about it, and a
 // question about one outing closes the other parts'. Another day's stays.

@@ -495,13 +495,14 @@ func (g *Gate) sameEntry(ctx context.Context, x model.Intent, a model.CalendarAc
 	if flat(a.Event.Title) == flat(b.Event.Title) {
 		return true
 	}
-	return model.SameOuting(g.planOf(ctx, x, a), g.planOf(ctx, y, b))
+	one, other := g.planOf(ctx, x, a), g.planOf(ctx, y, b)
+	return model.SameOuting(one, other) || model.SameEvent(one, other)
 }
 
 // planOf is the plan a calendar question is about, or what the question itself
 // says of it when there is none.
 func (g *Gate) planOf(ctx context.Context, in model.Intent, a model.CalendarAction) model.State {
-	s := model.State{Title: a.Event.Title, Date: a.Event.Date, Start: a.Event.Start, End: a.Event.End}
+	s := model.State{Title: a.Event.Title, Date: a.Event.Date, EndDate: a.Event.EndDate, Start: a.Event.Start, End: a.Event.End}
 	if e, err := g.st.Entity(ctx, in.EntityID); err == nil {
 		s.People = e.State.People
 	}
