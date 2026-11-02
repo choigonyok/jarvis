@@ -5,6 +5,7 @@ import { BellRing } from "lucide-react";
 import { ChecklistBody, type Drop, type Fold, type Tick } from "@/components/chat/checklist";
 import { GoalAsks } from "@/components/chat/goal-asks";
 import { Markdown } from "@/components/chat/markdown";
+import { CopyButton } from "@/components/ui/copy-button";
 import type { Checklist, Turn } from "@/lib/thread";
 import { cn } from "@/lib/utils";
 
@@ -37,15 +38,18 @@ export function NoticeCard({
   const [open, setOpen] = useState(false);
   const long = body.length > 160 || body.split("\n").length > 3;
   const why = turn.origin?.title;
+  // What was only said: a list copies itself, and a goal's question is answered.
+  const copied = !turn.origin?.checklist && !turn.origin?.goals?.length ? [said, body].filter(Boolean).join("\n") : "";
   return (
-    <section className="w-full max-w-[34rem] rounded-xl bg-glass-raised px-4 py-3.5 sm:px-5">
+    <section className="relative w-full max-w-[34rem] rounded-xl bg-glass-raised px-4 py-3.5 sm:px-5">
+      {copied ? <CopyButton text={copied} label="알림 복사" className="absolute top-0 right-0" /> : null}
       {why ? (
-        <p className="flex items-center gap-1.5 text-[11.5px] text-faint" data-search-skip>
+        <p className={cn("flex items-center gap-1.5 text-[11.5px] text-faint", copied && "pr-7")} data-search-skip>
           <BellRing aria-hidden className="size-3.5 shrink-0" strokeWidth={1.8} />
           <span className="min-w-0">{why}</span>
         </p>
       ) : null}
-      {said ? <h3 className={cn("text-[15px] leading-snug font-medium text-foreground", why && "mt-1.5")}>{said}</h3> : null}
+      {said ? <h3 className={cn("text-[15px] leading-snug font-medium text-foreground", why && "mt-1.5", copied && !why && "pr-7")}>{said}</h3> : null}
       {body ? (
         <div className={cn("mt-1 text-[13.5px] leading-relaxed text-dim [&_p]:my-0 [&_ul]:my-1", !open && long && "line-clamp-4")}>
           <Markdown>{body}</Markdown>

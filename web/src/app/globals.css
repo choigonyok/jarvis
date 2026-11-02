@@ -131,6 +131,28 @@
   body {
     height: 100dvh;
   }
+  /* A long press is the app's, not the browser's: on a touch screen no share
+     sheet or link preview opens under the thumb, and no word of a tab gets
+     selected. What is worth taking elsewhere has its own button
+     (ui/copy-button.tsx). The conversation's words and the fields stay
+     selectable: a part of an answer can only be taken that way. A mouse keeps
+     dragging over anything. */
+  @media (pointer: coarse) {
+    * {
+      -webkit-touch-callout: none;
+    }
+    body {
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    input,
+    textarea,
+    [contenteditable],
+    .selectable {
+      -webkit-user-select: text;
+      user-select: text;
+    }
+  }
   /* Safari zooms the page whenever a focused field is under 16px, which on
      this console meant every one of them. Below the tablet breakpoint the
      fields are 16px; the visual scale above is unchanged. */

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowUp, ExternalLink } from "lucide-react";
 import { ProposalCard } from "@/components/chat/proposal-card";
+import { CopyButton } from "@/components/ui/copy-button";
 import { Pager } from "@/components/ui/pager";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { type Job, type JobDetail, type JobEvent, LIVE, send, stateLabel, stateTone, when } from "@/lib/jobs";
@@ -122,7 +123,12 @@ function Body({
       </SheetHeader>
 
       <div className="scrollbar-hairline min-h-0 flex-1 overflow-y-auto px-4 pb-4 sm:px-5">
-        {j.summary ? <p className="text-[13.5px] leading-relaxed text-foreground/90">{j.summary}</p> : null}
+        {j.summary ? (
+          <div className="flex items-start gap-1">
+            <p className="selectable min-w-0 flex-1 text-[13.5px] leading-relaxed text-foreground/90">{j.summary}</p>
+            <CopyButton text={j.summary} label="요약 복사" className="-mt-2.5 -mr-2.5" />
+          </div>
+        ) : null}
 
         {cards.map((p) => (
           <ProposalCard

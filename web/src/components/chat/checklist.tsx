@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { ChevronDown, X } from "lucide-react";
 import { UNDO_MS } from "@/components/shell/undo";
+import { CopyButton } from "@/components/ui/copy-button";
 import type { Checklist, ChecklistItem } from "@/lib/thread";
 import { cn } from "@/lib/utils";
 
@@ -13,6 +14,11 @@ export type Drop = (itemId: string) => Promise<string | null>;
 
 /** How far a row is pulled before letting go strikes it off. */
 const STRIKE = 72;
+
+/** A list as words to paste somewhere: what is ticked says so. */
+function asText(list: Checklist): string {
+  return [list.title, ...list.items.map((i) => `${i.done ? "✓" : "-"} ${i.text}`)].join("\n");
+}
 
 /** A list shown folded until asked: its title, how far along, what is left. */
 export type Fold = { open: boolean; onToggle: () => void };
@@ -144,13 +150,13 @@ export function ChecklistBody({
     <div data-checklist-id={list.id}>
       {fold ? (
         // The accordion's own pattern: the heading holds the button.
-        <h3 className="-mx-2 -mt-1.5">
+        <h3 className="-mx-2 -mt-1.5 flex items-center">
           <button
             type="button"
             onClick={fold.onToggle}
             aria-expanded={fold.open}
             aria-controls={itemsId}
-            className="flex min-h-11 w-full items-center justify-between gap-3 rounded-lg px-2 py-1.5 text-left outline-none hover:bg-glass focus-visible:ring-3 focus-visible:ring-ring/50 mouse:min-h-9"
+            className="flex min-h-11 min-w-0 flex-1 items-center justify-between gap-3 rounded-lg px-2 py-1.5 text-left outline-none hover:bg-glass focus-visible:ring-3 focus-visible:ring-ring/50 mouse:min-h-9"
           >
             <span className="min-w-0 text-[14.5px] leading-snug font-medium text-foreground">{list.title}</span>
             <span className="flex shrink-0 items-center gap-1.5">
@@ -161,11 +167,13 @@ export function ChecklistBody({
               />
             </span>
           </button>
+          <CopyButton text={asText(list)} label={`${list.title} 복사`} />
         </h3>
       ) : (
-        <div className="flex items-baseline justify-between gap-3">
-          <h3 className="min-w-0 text-[14.5px] leading-snug font-medium text-foreground">{list.title}</h3>
+        <div className="flex items-center gap-3">
+          <h3 className="min-w-0 flex-1 text-[14.5px] leading-snug font-medium text-foreground">{list.title}</h3>
           {count}
+          <CopyButton text={asText(list)} label={`${list.title} 복사`} className="-my-3 -mr-3 -ml-2" />
         </div>
       )}
       {list.note || list.status === "archived" ? (
@@ -341,18 +349,23 @@ function Row({
           >
             되돌리기
           </button>
-        ) : onStrike ? (
-          // With a pointer there is no pull: the row offers the same, on hover.
-          <button
-            type="button"
-            onClick={onStrike}
-            aria-label={`${item.text} 빼기`}
-            title="빼기"
-            className="hidden size-9 shrink-0 items-center justify-center self-center rounded-md text-faint opacity-0 transition-opacity outline-none group-hover/item:opacity-100 hover:text-reject focus-visible:opacity-100 focus-visible:ring-3 focus-visible:ring-ring/50 pointer-fine:flex"
-          >
-            <X aria-hidden className="size-3.5" />
-          </button>
-        ) : null}
+        ) : (
+          <>
+            <CopyButton text={item.text} label={`${item.text} 복사`} className="self-center" />
+            {onStrike ? (
+              // With a pointer there is no pull: the row offers the same, on hover.
+              <button
+                type="button"
+                onClick={onStrike}
+                aria-label={`${item.text} 빼기`}
+                title="빼기"
+                className="hidden size-9 shrink-0 items-center justify-center self-center rounded-md text-faint opacity-0 transition-opacity outline-none group-hover/item:opacity-100 hover:text-reject focus-visible:opacity-100 focus-visible:ring-3 focus-visible:ring-ring/50 pointer-fine:flex"
+              >
+                <X aria-hidden className="size-3.5" />
+              </button>
+            ) : null}
+          </>
+        )}
       </div>
     </li>
   );

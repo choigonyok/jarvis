@@ -18,7 +18,7 @@ import type { Processor } from "unified";
  */
 export const Markdown = memo(function Markdown({ children }: { children: string }) {
   return (
-    <div className="max-w-[36rem] space-y-2.5 text-[14.5px] leading-[1.75] text-pretty text-foreground/90">
+    <div className="selectable max-w-[36rem] space-y-2.5 text-[14.5px] leading-[1.75] text-pretty text-foreground/90">
       <ReactMarkdown remarkPlugins={PLUGINS} components={COMPONENTS}>
         {children}
       </ReactMarkdown>

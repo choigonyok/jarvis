@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { CopyButton } from "@/components/ui/copy-button";
 import { Pager } from "@/components/ui/pager";
 import { usePaged } from "@/lib/paging";
 import { detail, outcome, outcomeTone, type Reminder, waiting } from "@/lib/reminders";
@@ -103,17 +104,20 @@ function ReminderRow({ reminder: r }: { reminder: Reminder }) {
   const live = waiting(r);
   const result = outcome(r);
   return (
-    <div className="px-2 py-3">
-      <div className="flex items-baseline gap-2">
-        <p className={cn("line-clamp-2 min-w-0 text-[14.5px] break-words", live ? "text-foreground/90" : "text-dim")}>
-          {r.text}
-        </p>
-        {result ? <span className={cn("ms-auto shrink-0 text-[12px]", outcomeTone(r))}>{result}</span> : null}
+    <div className="flex items-start gap-1 py-1.5 pl-2">
+      <div className="min-w-0 flex-1 py-1.5">
+        <div className="flex items-baseline gap-2">
+          <p className={cn("line-clamp-2 min-w-0 text-[14.5px] break-words", live ? "text-foreground/90" : "text-dim")}>
+            {r.text}
+          </p>
+          {result ? <span className={cn("ms-auto shrink-0 text-[12px]", outcomeTone(r))}>{result}</span> : null}
+        </div>
+        {live && r.body ? (
+          <p className="mt-1 line-clamp-2 text-[12.5px] whitespace-pre-line break-words text-dim">{r.body}</p>
+        ) : null}
+        <p className={cn("tnum mt-1 text-[11.5px] break-words", live ? "text-dim" : "text-faint")}>{detail(r)}</p>
       </div>
-      {live && r.body ? (
-        <p className="mt-1 line-clamp-2 text-[12.5px] whitespace-pre-line break-words text-dim">{r.body}</p>
-      ) : null}
-      <p className={cn("tnum mt-1 text-[11.5px] break-words", live ? "text-dim" : "text-faint")}>{detail(r)}</p>
+      <CopyButton text={[r.text, r.body].filter(Boolean).join("\n")} label={`${r.text} 복사`} />
     </div>
   );
 }

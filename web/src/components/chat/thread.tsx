@@ -357,7 +357,7 @@ const TurnRow = memo(function TurnRow({
           {turn.text ? (
             <div className="max-w-[80%] rounded-2xl border border-edge bg-glass-raised px-4 py-2.5 text-[14.5px] leading-relaxed text-foreground sm:max-w-[26rem]">
               {turn.ref ? <Quote quote={turn.ref} at={quoteAt} onJump={() => onJump(turn.ref!.id)} /> : null}
-              <p className="break-words whitespace-pre-wrap">{turn.text}</p>
+              <p className="selectable break-words whitespace-pre-wrap">{turn.text}</p>
             </div>
           ) : null}
           <span className="flex items-center gap-1.5 pr-1" data-search-skip>
