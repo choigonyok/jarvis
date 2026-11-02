@@ -111,7 +111,15 @@ func (s Schedule) OnChange(ctx context.Context, v View, e model.Entity, changes 
 		fromCalendar = fromCalendar && (c.Actor == "sensor:calendar" || c.Actor == model.ActorCard)
 	}
 	if moved && !fromCalendar {
-		r.Intents = append(r.Intents, s.move(e, *base, changes))
+		// A move still waiting has not happened: the calendar is where it was,
+		// and that is what this one moves from. Back there, nothing is left to ask.
+		from, waiting := waitingFrom(ctx, v, e, *base)
+		switch {
+		case waiting && calendarFields(from) == calendarFields(st):
+			r.Withdraw = true
+		default:
+			r.Intents = append(r.Intents, s.move(e, from, changes))
+		}
 	}
 	if linked || moved {
 		r.CancelTimers = true
@@ -313,6 +321,21 @@ func CalendarLink(st model.State) string {
 	return "/calendar?" + q.Encode()
 }
 
+// waitingFrom is what the calendar holds while a move of e waits for its answer:
+// the plan as that card found it, base when no card waits.
+func waitingFrom(ctx context.Context, v View, e model.Entity, base model.State) (model.State, bool) {
+	past, _ := v.IntentsFor(ctx, e.ID)
+	for _, p := range past {
+		var a model.CalendarAction
+		if p.Kind != "calendar.update" || p.Status != model.Pending || json.Unmarshal(p.Payload, &a) != nil || a.Was == nil {
+			continue
+		}
+		base.Title, base.Date, base.EndDate, base.Start, base.End, base.Place = a.Was.Title, a.Was.Date, a.Was.EndDate, a.Was.Start, a.Was.End, a.Was.Place
+		return base, true
+	}
+	return base, false
+}
+
 func (s Schedule) move(e model.Entity, before model.State, changes []model.Change) model.Intent {
 	ev := event(e.State, changes)
 	was := event(before, nil)
@@ -402,6 +425,7 @@ func diff(a, b model.State) string {
 	add("제목", a.Title, b.Title)
 	add("날짜", a.Date, b.Date)
 	add("시작", a.Start, b.Start)
+	add("끝", a.End, b.End)
 	add("장소", a.Place, b.Place)
 	if len(parts) == 0 {
 		return "세부 변경"

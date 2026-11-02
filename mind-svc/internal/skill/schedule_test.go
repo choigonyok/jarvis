@@ -3,6 +3,7 @@ package skill
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -101,5 +102,45 @@ func TestAnOpenCardIsNotAskedAgain(t *testing.T) {
 	moved.State.Start = "11:00"
 	if _, ok := (Schedule{}).add(ctx, open, moved, nil); !ok {
 		t.Fatal("시각이 바뀌면 새로 물어야 합니다")
+	}
+}
+
+// A move still waiting has not happened. Told 15:00, then 16:00, then 15:00 again
+// with nobody answering, the calendar never left 15:00: the card said 16:00 → 15:00,
+// and turned down it would have left the plan at an hour nobody holds (2026-11-02).
+func TestAMoveMovesFromWhatTheCalendarHolds(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 11, 2, 15, 8, 0, 0, seoul)
+	at15 := model.State{Title: "지수와 합주", Status: model.Confirmed, Date: "2026-11-28", Start: "15:00", CalendarID: "cal1"}
+	at16 := at15
+	at16.Start = "16:00"
+	change := func(before, after model.State) []model.Change {
+		return []model.Change{{Before: &before, After: after, Actor: "interpreter", Confidence: 0.9}}
+	}
+	moved := Schedule{}.OnChange(ctx, view{now: now}, model.Entity{ID: "plan_a", Kind: model.KindPlan, State: at16}, change(at15, at16))
+	if len(moved.Intents) != 1 {
+		t.Fatalf("%+v", moved)
+	}
+	card := moved.Intents[0]
+	card.ID, card.Status, card.CreatedAt = "int_move", model.Pending, now
+	open := view{now: now, intents: []model.Intent{card}}
+
+	back := Schedule{}.OnChange(ctx, open, model.Entity{ID: "plan_a", Kind: model.KindPlan, State: at15}, change(at16, at15))
+	if len(back.Intents) != 0 || !back.Withdraw {
+		t.Fatalf("캘린더 그대로로 돌아왔으면 물을 것이 없습니다: %+v", back)
+	}
+
+	at15to17 := at15
+	at15to17.End = "17:00"
+	end := Schedule{}.OnChange(ctx, open, model.Entity{ID: "plan_a", Kind: model.KindPlan, State: at15to17}, change(at16, at15to17))
+	if len(end.Intents) != 1 {
+		t.Fatalf("%+v", end)
+	}
+	var a model.CalendarAction
+	if err := json.Unmarshal(end.Intents[0].Payload, &a); err != nil || a.Was == nil || a.Was.Start != "15:00" {
+		t.Fatalf("캘린더에 있는 15:00 에서 옮깁니다: %+v %v", a, err)
+	}
+	if title := end.Intents[0].Title; strings.Contains(title, "16:00") || !strings.Contains(title, "끝 없음 → 17:00") {
+		t.Fatalf("바뀐 것을 말하고 없던 시각은 말하지 않습니다: %s", title)
 	}
 }
