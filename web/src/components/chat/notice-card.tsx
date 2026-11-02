@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { BellRing } from "lucide-react";
 import { ChecklistBody, type Drop, type Fold, type Tick } from "@/components/chat/checklist";
+import { GoalAsks } from "@/components/chat/goal-asks";
 import { Markdown } from "@/components/chat/markdown";
 import type { Checklist, Turn } from "@/lib/thread";
 import { cn } from "@/lib/utils";
@@ -14,7 +15,8 @@ import { cn } from "@/lib/utils";
  *
  * Lit like a checklist, not framed like a decision: nothing waits on it.
  * Above its words, why now, the way the push said it. A reminder that
- * carries a list shows the list under them, ticked as it stands.
+ * carries a list shows the list under them, ticked as it stands; one that asks
+ * about a goal's day takes the answer there.
  */
 export function NoticeCard({
   turn,
@@ -64,6 +66,7 @@ export function NoticeCard({
           <ChecklistBody list={list} onTick={onTick} onDrop={onDrop} fold={fold} />
         </div>
       ) : null}
+      {turn.origin?.goals?.length ? <GoalAsks asks={turn.origin.goals} /> : null}
     </section>
   );
 }

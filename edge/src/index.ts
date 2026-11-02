@@ -196,12 +196,13 @@ const AGENT_ROUTES = new Set(["healthz", "thread", "messages", "events", "propos
  * the things owned and the meals, read a note's versions, and say a note is
  * so, is not, or reads otherwise. The 작업 tab: jobsRoute, the reminders and the
  * checklists (a tick, an item swiped off, a list closed). The 가계부 screen:
- * spendingRoute. The 캘린더 tab's edits to an entry. Reads go to mind; a change
- * goes in at the way in (inputRoute).
+ * spendingRoute. The 캘린더 tab's edits to an entry. The 목표 tab: goalsRoute.
+ * Reads go to mind; a change goes in at the way in (inputRoute).
  */
 function mindRoute(method: string, path: string): boolean {
   if (path.startsWith("api/jobs/")) return jobsRoute(method, path.slice("api/jobs/".length));
   if (path.startsWith("api/spending/")) return spendingRoute(method, path.slice("api/spending/".length));
+  if (path === "api/goals" || path.startsWith("api/goals/")) return goalsRoute(method, path.slice("api/goals".length));
   if (method === "GET") {
     return (
       /^api\/(notes|places|things|meals|reminders|checklists)$/.test(path) ||
@@ -213,6 +214,25 @@ function mindRoute(method: string, path: string): boolean {
   }
   if (method !== "PATCH" && method !== "DELETE") return false;
   return /^api\/checklists\/[A-Za-z0-9_-]+$/.test(path) || /^api\/calendar\/[^/]+$/.test(path);
+}
+
+/**
+ * What the 목표 tab does with each person's goals, whoever's token it carries:
+ * the list and one goal, making one, changing and removing it, marking a day.
+ * `rest` is what follows api/goals.
+ */
+function goalsRoute(method: string, rest: string): boolean {
+  const one = /^\/[A-Za-z0-9_-]+$/.test(rest);
+  switch (method) {
+    case "GET":
+      return rest === "" || one;
+    case "POST":
+      return rest === "" || /^\/[A-Za-z0-9_-]+\/checks$/.test(rest);
+    case "PATCH":
+    case "DELETE":
+      return one;
+  }
+  return false;
 }
 
 /** What the 캘린더 tab reads from the adapter. A change goes in at the way in like any other (mindRoute). */
@@ -358,11 +378,11 @@ async function gateway(request: Request, env: Env, internal: boolean): Promise<R
   if (guest && name === "context" && !guestContextRoute(request.method, rest.join("/"))) {
     return json(404, "그런 경로가 없습니다.");
   }
-  // Of mind, the guest opens their own jobs, reminders and lists and nothing else.
-  if (guest && name === "mind" && !/^api\/(jobs\/|reminders$|checklists(\/|$))/.test(rest.join("/"))) {
+  // Of mind, the guest opens their own jobs, reminders, lists and goals and nothing else.
+  if (guest && name === "mind" && !/^api\/(jobs\/|reminders$|checklists(\/|$)|goals(\/|$))/.test(rest.join("/"))) {
     return json(404, "그런 경로가 없습니다.");
   }
-  if (guest && name === "input" && rest[0] === "mind" && !/^mind\/api\/(jobs|checklists|calendar)\//.test(rest.join("/"))) {
+  if (guest && name === "input" && rest[0] === "mind" && !/^mind\/api\/((jobs|checklists|calendar)\/|goals(\/|$))/.test(rest.join("/"))) {
     return json(404, "그런 경로가 없습니다.");
   }
   if (name === "calendar" && !calendarRoute(request.method, rest.join("/"))) {

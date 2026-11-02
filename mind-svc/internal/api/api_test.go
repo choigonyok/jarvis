@@ -18,6 +18,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/checklist"
 	"github.com/choigonyok/jarvis/mind-svc/internal/clock"
 	"github.com/choigonyok/jarvis/mind-svc/internal/gate"
+	"github.com/choigonyok/jarvis/mind-svc/internal/goals"
 	"github.com/choigonyok/jarvis/mind-svc/internal/interpret"
 	"github.com/choigonyok/jarvis/mind-svc/internal/llm"
 	"github.com/choigonyok/jarvis/mind-svc/internal/memory"
@@ -628,5 +629,89 @@ func TestASlotHoldsUntilAMove(t *testing.T) {
 	}
 	if code, _ := read("shipping.address?saved=어제"); code != http.StatusBadRequest {
 		t.Fatalf("시각이 아닙니다: %d", code)
+	}
+}
+
+// Each person's goals are their own: the list, one goal, changing it and marking
+// a day - another's is not found. Going through the door they answer as they do
+// on the lane.
+func TestGoalsAreEachPersonsOwn(t *testing.T) {
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	m := mind.New(mind.Options{
+		Store: store.NewMemory(), Log: obs.NewMemoryLog(quiet), LLM: &llm.Script{}, Calendar: act.NewMemoryCalendar(),
+		Notifier: &act.MemoryNotifier{}, Loc: seoul, Now: time.Now, Logger: quiet, Policy: gate.DefaultPolicy(), Mode: "stack",
+		Goals: goals.NewMemory(),
+	})
+	api := New(m, "secret", "", false, nil, quiet)
+	api.SetGuestToken("guest-secret")
+	srv := httptest.NewServer(api.Handler())
+	defer srv.Close()
+	do := func(token, method, path, body string) (int, string) {
+		t.Helper()
+		req, _ := http.NewRequest(method, srv.URL+path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	id := func(body string) string {
+		var v struct {
+			Goal struct {
+				ID string `json:"id"`
+			} `json:"goal"`
+		}
+		if json.Unmarshal([]byte(body), &v) != nil || v.Goal.ID == "" {
+			t.Fatalf("%s", body)
+		}
+		return v.Goal.ID
+	}
+	code, body := do("guest-secret", "POST", "/api/goals", `{"title":"산책","cadence":"daily"}`)
+	if code != 200 || !strings.Contains(body, `"who":"guest"`) || !strings.Contains(body, `"rule":"매일"`) {
+		t.Fatalf("%d %s", code, body)
+	}
+	guest := id(body)
+	code, body = do("secret", "POST", "/api/goals", `{"title":"운동","cadence":"weekly","times":3}`)
+	if code != 200 {
+		t.Fatalf("%d %s", code, body)
+	}
+	owner := id(body)
+	if code, body := do("secret", "POST", "/api/goals", `{"title":"운동"}`); code != 400 || !strings.Contains(body, "주기") {
+		t.Fatalf("잘못된 목표는 이유와 함께 거절합니다: %d %s", code, body)
+	}
+	if _, body := do("guest-secret", "GET", "/api/goals", ""); strings.Contains(body, "운동") || !strings.Contains(body, "산책") || !strings.Contains(body, `"today"`) {
+		t.Fatal(body)
+	}
+	if _, body := do("secret", "GET", "/api/goals", ""); !strings.Contains(body, "운동") || strings.Contains(body, "산책") {
+		t.Fatal(body)
+	}
+	for _, c := range [][3]string{
+		{"GET", "/api/goals/" + owner, ""},
+		{"PATCH", "/api/goals/" + owner, `{"title":"가로채기"}`},
+		{"DELETE", "/api/goals/" + owner, ""},
+		{"POST", "/api/goals/" + owner + "/checks", `{"mark":"done"}`},
+	} {
+		if code, body := do("guest-secret", c[0], c[1], c[2]); code != 404 {
+			t.Fatalf("%v: %d %s", c, code, body)
+		}
+	}
+	code, body = do("secret", "POST", "/api/goals/"+owner+"/checks", `{"mark":"done"}`)
+	if code != 200 || !strings.Contains(body, `"stats"`) || !strings.Contains(body, `"marks"`) || !strings.Contains(body, `"mark":"done"`) {
+		t.Fatalf("%d %s", code, body)
+	}
+	if code, body := do("secret", "POST", "/api/goals/"+owner+"/checks", `{"mark":"maybe"}`); code != 400 {
+		t.Fatalf("%d %s", code, body)
+	}
+	if code, body := do("secret", "GET", "/api/goals/"+owner, ""); code != 200 || !strings.Contains(body, `"bars"`) {
+		t.Fatalf("%d %s", code, body)
+	}
+	if code, body := do("secret", "PATCH", "/api/goals/"+owner, `{"pause":true}`); code != 200 || !strings.Contains(body, `"status":"paused"`) {
+		t.Fatalf("%d %s", code, body)
+	}
+	if code, _ := do("guest-secret", "DELETE", "/api/goals/"+guest, ""); code != 200 {
+		t.Fatal(code)
 	}
 }

@@ -140,6 +140,8 @@ services:
       JARVIS_MIND_URL: http://mind:8102
       # 위치·현재 상태(읽기만). look 의 context 와 판단 턴의 사실.
       JARVIS_CONTEXT_URL: http://context:8103
+      # 사진 보관함(읽기만). look 의 photos.
+      JARVIS_PHOTOS_URL: http://photos:8107
       JARVIS_MEMORY_URL: http://memory:8100
       # 웹 찾기(search-svc): 네이버 검색, 페이지와 그림 속 글자 읽기, 네이버 지도. 토큰이 비어 있으면
       # web 도구가 없고 예전대로(WebFetch, 근처 찾기는 OpenStreetMap).

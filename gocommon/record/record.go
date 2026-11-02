@@ -488,6 +488,17 @@ func CommandKind(method, path string) string {
 		case "DELETE":
 			return "reminder.cancel"
 		}
+	case "goals":
+		switch {
+		case method == "POST" && len(parts) == 2:
+			return "goal.make"
+		case method == "PATCH":
+			return "goal.change"
+		case method == "DELETE":
+			return "goal.remove"
+		case len(parts) >= 4 && parts[3] == "checks":
+			return "goal.check"
+		}
 	case "checklists":
 		switch {
 		case method == "POST" && len(parts) == 2:

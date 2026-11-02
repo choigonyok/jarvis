@@ -1,0 +1,369 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Check, Minus, Plus } from "lucide-react";
+import { GoalForm } from "@/components/goals/goal-form";
+import { GoalSheet } from "@/components/goals/goal-sheet";
+import { Header, TabBar } from "@/components/shell/header";
+import { Retry } from "@/components/shell/retry";
+import { StandingBar } from "@/components/shell/standing-bar";
+import { Button } from "@/components/ui/button";
+import { type Cell, type Goal, type Mark, listGoals, markDay, waitsToday, weekdayOf, WEEK_ROW, whenLabel } from "@/lib/goals";
+import { onResume } from "@/lib/resume";
+import { isPending } from "@/lib/thread";
+import { useThread } from "@/lib/use-thread";
+import { cn } from "@/lib/utils";
+
+/**
+ * The register. Every goal is one row on one shared week, Monday to Sunday, so
+ * a day reads down the page the way a teacher's attendance sheet does, and the
+ * week so far reads across. It is a list you mark, not a set of cards: the marks
+ * are the content, and the only colour on the page is what was done and what
+ * was not. Under each row, today's two answers.
+ */
+export function Goals() {
+  const { proposals, connection } = useThread();
+  const waiting = proposals.filter(isPending);
+  const [goals, setGoals] = useState<Goal[] | null>(null);
+  const [ended, setEnded] = useState<Goal[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [making, setMaking] = useState(false);
+  const [editing, setEditing] = useState<Goal | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const { goals: all } = await listGoals(true);
+      setGoals(all.filter((g) => g.status !== "ended"));
+      setEnded(all.filter((g) => g.status === "ended"));
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "목표를 불러오지 못했습니다.");
+    }
+  }, []);
+
+  useEffect(() => {
+    // load sets state only after its fetch resolves; the rule cannot see that.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void load();
+  }, [load]);
+  useEffect(() => onResume(load), [load]);
+  // The name a notification gives: straight to that goal.
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("goal");
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (id) setOpenId(id);
+  }, []);
+
+  const replace = useCallback((next: Goal) => {
+    setGoals((cur) => cur?.map((g) => (g.id === next.id ? next : g)) ?? cur);
+  }, []);
+
+  const going = useMemo(() => (goals ?? []).filter((g) => g.status === "active"), [goals]);
+  const resting = useMemo(() => (goals ?? []).filter((g) => g.status === "paused"), [goals]);
+  const open = [...(goals ?? []), ...ended].find((g) => g.id === openId) ?? null;
+  const today = going[0]?.progress.today ?? resting[0]?.progress.today ?? "";
+  const left = going.filter(waitsToday).length;
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <Header connection={connection} pending={waiting.length} />
+      <StandingBar pending={waiting} href="/record" />
+
+      <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
+        <div className="mx-auto w-full max-w-[42rem] px-4 pt-5 pb-12 sm:px-8 sm:pt-7 sm:pb-8">
+          {error && !goals ? (
+            <div className="py-16 text-center">
+              <p className="text-[13px] text-dim">{error}</p>
+              <Retry onRetry={load} />
+            </div>
+          ) : null}
+
+          {goals && goals.length === 0 && ended.length === 0 ? (
+            <Empty onMake={() => setMaking(true)} />
+          ) : null}
+
+          {goals && goals.length + ended.length > 0 ? (
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h2 className="text-[15px] leading-snug font-medium text-foreground">
+                {going.length === 0 ? "지금 이어 가는 목표가 없어요" : left === 0 ? "오늘 할 일은 다 적었어요" : `오늘 ${left}개 남았어요`}
+              </h2>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setMaking(true)}
+                className="tap h-11 shrink-0 gap-1 px-2 text-[13px] text-dim hover:text-foreground mouse:h-8 mouse:min-h-0 mouse:min-w-0"
+              >
+                <Plus aria-hidden className="size-4" />
+                목표
+              </Button>
+            </div>
+          ) : null}
+
+          {going.length > 0 ? (
+            <>
+              <WeekHead today={today} />
+              <ol>
+                {going.map((g) => (
+                  <Row key={g.id} goal={g} onOpen={() => setOpenId(g.id)} onChanged={replace} />
+                ))}
+              </ol>
+            </>
+          ) : null}
+
+          {resting.length > 0 ? (
+            <section className="mt-8">
+              <h2 className="mb-1 text-[12.5px] text-dim">쉬는 중</h2>
+              <ul>
+                {resting.map((g) => (
+                  <Plain key={g.id} goal={g} onOpen={() => setOpenId(g.id)} />
+                ))}
+              </ul>
+            </section>
+          ) : null}
+
+          {ended.length > 0 ? (
+            <details className="group mt-8">
+              <summary className="tap-y cursor-pointer list-none text-[12.5px] text-dim outline-none focus-visible:ring-3 focus-visible:ring-ring/50 [&::-webkit-details-marker]:hidden">
+                끝낸 목표 {ended.length}개
+              </summary>
+              <ul className="mt-1">
+                {ended.map((g) => (
+                  <Plain key={g.id} goal={g} onOpen={() => setOpenId(g.id)} />
+                ))}
+              </ul>
+            </details>
+          ) : null}
+        </div>
+      </main>
+
+      <TabBar pending={waiting.length} />
+
+      <GoalSheet
+        goal={open}
+        onOpenChange={(v) => {
+          if (!v) setOpenId(null);
+        }}
+        onChanged={() => void load()}
+        onEdit={(g) => setEditing(g)}
+      />
+      <GoalForm
+        open={making || editing !== null}
+        goal={editing}
+        onOpenChange={(v) => {
+          if (!v) {
+            setMaking(false);
+            setEditing(null);
+          }
+        }}
+        onSaved={() => void load()}
+      />
+    </div>
+  );
+}
+
+/** Nothing here yet: what a goal is, and the one thing to do about it. */
+function Empty({ onMake }: { onMake: () => void }) {
+  return (
+    <div className="max-w-[30rem] py-10">
+      <h2 className="text-[17px] leading-snug font-medium text-foreground">되풀이해서 하려는 일을 적어 보세요</h2>
+      <p className="mt-2 text-[13.5px] leading-relaxed text-dim">
+        매일, 정한 요일마다, 주 몇 번으로 세우고 날마다 했다·안 했다만 누르면 달성률은 알아서 쌓여요. 대화에서 “주 3회 운동 목표 만들어줘”라고
+        해도 돼요.
+      </p>
+      <Button variant="outline" onClick={onMake} className="mt-5 h-11 border-edge bg-glass-raised text-[13.5px] text-foreground mouse:h-9">
+        <Plus aria-hidden className="size-4" />
+        목표 만들기
+      </Button>
+    </div>
+  );
+}
+
+/** The row every goal's cells stand under. */
+const WEEK_GRID = "grid grid-cols-7 w-[11.5rem] shrink-0 sm:w-[15.75rem]";
+
+/** The week's heads, over the column of cells. Today's stands out: the eye starts there. */
+function WeekHead({ today }: { today: string }) {
+  const at = today ? (weekdayOf(today) + 6) % 7 : -1;
+  return (
+    <div className="flex items-end justify-end border-b border-edge-soft pb-1.5" aria-hidden>
+      <div className={WEEK_GRID}>
+        {WEEK_ROW.map((d, i) => (
+          <span key={d} className={cn("text-center text-[11.5px]", i === at ? "font-medium text-foreground" : "text-faint")}>
+            {d}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One goal: its name and how it stands, its week, and under them the answer for
+ * the day picked - today, until another day's cell is tapped. A day is changed
+ * here and not by tapping a cell through its states, so a thumb brushing a row
+ * marks nothing.
+ */
+function Row({ goal, onOpen, onChanged }: { goal: Goal; onOpen: () => void; onChanged: (g: Goal) => void }) {
+  const p = goal.progress;
+  const [picked, setPicked] = useState<string | null>(null);
+  // Said at once, then as mind has it: a thumb does not wait on a round trip.
+  const [saying, setSaying] = useState<Mark | "" | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  const day = picked ?? p.today;
+  const cell = p.week.find((c) => c.day === day);
+  const said = saying !== null && day === (picked ?? p.today) ? saying || undefined : cell?.mark;
+  const quietToday = !picked && !p.asks && goal.cadence !== "weekly" && goal.cadence !== "monthly";
+
+  async function say(mark: Mark | "") {
+    setFailed(null);
+    setSaying(mark);
+    try {
+      const { goal: next } = await markDay(goal.id, day, mark);
+      onChanged(next);
+      setPicked(null);
+    } catch (e) {
+      setFailed(e instanceof Error ? e.message : "기록하지 못했어요. 다시 눌러 주세요.");
+    } finally {
+      setSaying(null);
+    }
+  }
+
+  return (
+    <li data-focus={`goal:${goal.id}`} className="border-b border-edge-soft py-3">
+      <div className="flex items-start justify-between gap-3">
+        <button
+          type="button"
+          onClick={onOpen}
+          className="-mx-1 min-h-11 min-w-0 flex-1 rounded-md px-1 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50 mouse:min-h-0"
+        >
+          <span className="block text-[14.5px] leading-snug font-medium break-keep text-foreground">{goal.title}</span>
+          <span className={cn("mt-0.5 block text-[12px] leading-snug", p.tight ? "text-foreground/90" : "text-dim")}>
+            {p.says || goal.rule}
+          </span>
+        </button>
+        <div className={WEEK_GRID} role="group" aria-label={`${goal.title} 이번 주`}>
+          {p.week.map((c) => (
+            <Dot
+              key={c.day}
+              cell={c}
+              today={p.today}
+              picked={c.day === picked}
+              onPick={() => setPicked(picked === c.day || c.day === p.today ? null : c.day)}
+              saying={c.day === day ? saying : null}
+            />
+          ))}
+        </div>
+      </div>
+
+      {quietToday ? null : said ? (
+        <p className="anim-settle mt-1.5 flex min-h-9 items-center gap-1.5 text-[12.5px] text-dim">
+          {said === "done" ? <Check aria-hidden className="size-3.5 text-approve" /> : <Minus aria-hidden className="size-3.5 text-reject" />}
+          {whenLabel(day, p.today)} {said === "done" ? "했어요" : "안 했어요"}
+          <button
+            type="button"
+            onClick={() => void say("")}
+            className="tap-y ml-1 text-[12px] text-faint underline-offset-2 outline-none hover:text-dim hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
+          >
+            되돌리기
+          </button>
+        </p>
+      ) : (
+        <div className="mt-2">
+          {picked ? <p className="mb-1.5 text-[12px] text-dim">{whenLabel(day, p.today)} 기록</p> : null}
+          {/* The same pair as a card's: the answer that counts on the thumb's side. */}
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-1.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={saying !== null}
+              onClick={() => void say("missed")}
+              className="h-11 text-[13.5px] text-dim hover:bg-reject/10 hover:text-reject mouse:h-8 mouse:px-3 mouse:text-[0.8rem]"
+            >
+              안 했다
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={saying !== null}
+              onClick={() => void say("done")}
+              className="h-11 border-edge bg-glass-raised text-[13.5px] text-foreground hover:border-approve/35 hover:bg-approve/12 hover:text-approve mouse:h-8 mouse:px-3.5 mouse:text-[0.8rem] dark:bg-glass-raised dark:hover:bg-approve/12"
+            >
+              했다
+            </Button>
+          </div>
+        </div>
+      )}
+      {failed ? (
+        <p role="alert" className="mt-1.5 text-[12px] text-reject">
+          {failed}
+        </p>
+      ) : null}
+    </li>
+  );
+}
+
+/**
+ * One day of a row. Done is the approve colour with a tick and missed the
+ * reject colour with a dash, so neither rests on colour alone; a day asked of
+ * and left unsaid is an empty ring, and a day that asks nothing a speck.
+ */
+function Dot({
+  cell,
+  today,
+  picked,
+  onPick,
+  saying,
+}: {
+  cell: Cell;
+  today: string;
+  picked: boolean;
+  onPick: () => void;
+  saying: Mark | "" | null;
+}) {
+  const mark = saying === null ? cell.mark : saying || undefined;
+  const label = `${whenLabel(cell.day, today)}${mark === "done" ? " 했음" : mark === "missed" ? " 안 했음" : cell.asks ? " 기록 없음" : ""}`;
+  return (
+    <button
+      type="button"
+      disabled={!cell.open}
+      aria-label={label}
+      aria-pressed={picked}
+      onClick={onPick}
+      className={cn(
+        "tap-y flex h-9 items-center justify-center rounded-lg outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+        cell.day === today && "bg-glass-raised",
+        picked && "ring-1 ring-edge",
+      )}
+    >
+      <span
+        aria-hidden
+        className={cn(
+          "flex size-[1.125rem] items-center justify-center rounded-full",
+          mark === "done" && "bg-approve/85 text-background",
+          mark === "missed" && "bg-reject/15 text-reject",
+          !mark && cell.asks && cell.open && "border border-edge",
+          !mark && !(cell.asks && cell.open) && "size-[3px] bg-faint/40",
+        )}
+      >
+        {mark === "done" ? <Check className="size-3" strokeWidth={3} /> : mark === "missed" ? <Minus className="size-3" strokeWidth={3} /> : null}
+      </span>
+    </button>
+  );
+}
+
+/** A goal resting or ended: its name and how it stands. */
+function Plain({ goal, onOpen }: { goal: Goal; onOpen: () => void }) {
+  return (
+    <li className="border-b border-edge-soft">
+      <button
+        type="button"
+        onClick={onOpen}
+        className="flex min-h-11 w-full items-baseline justify-between gap-3 rounded-md py-2.5 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+      >
+        <span className="min-w-0 truncate text-[14px] text-foreground/85">{goal.title}</span>
+        <span className="shrink-0 text-[12px] text-faint">{goal.progress.says}</span>
+      </button>
+    </li>
+  );
+}

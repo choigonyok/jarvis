@@ -4,6 +4,8 @@
 // renders these directly and the split should not be visible on screen.
 package turn
 
+import "encoding/json"
+
 type Role string
 
 const (
@@ -67,6 +69,8 @@ type Origin struct {
 	Ref string `json:"ref,omitempty"`
 	// Checklist is the list the card shows (mind's checklist id).
 	Checklist string `json:"checklist,omitempty"`
+	// Goals are the days the card asks about (mind's goals).
+	Goals json.RawMessage `json:"goals,omitempty"`
 }
 
 // Ref is a quoted earlier turn: which one, who said it, when, and how it began.

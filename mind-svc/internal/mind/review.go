@@ -357,6 +357,8 @@ func (m *Mind) answered(ctx context.Context, in model.Intent) {
 		m.chargeAnswered(ctx, in)
 	case "calendar.create", "calendar.update":
 		m.calendarAnswered(ctx, in)
+	case act.KindPhotoPlace:
+		m.photosAnswered(ctx, in)
 	case "review.place":
 		var r prefs.Review
 		if json.Unmarshal(in.Payload, &r) != nil {
@@ -435,7 +437,7 @@ func (m *Mind) expireQuestions(ctx context.Context) error {
 		case in.Kind == "calendar.create" && json.Unmarshal(in.Payload, &a) == nil && a.Event.Date != "" && max(a.Event.Date, a.Event.EndDate) < today:
 			// Adding what is over is no question: it sat under a thumb for days.
 			in.Error = "일정 날짜가 지나 거둠"
-		case (in.Kind == "review.place" || in.Kind == "preference.confirm") && now.Sub(in.CreatedAt) >= reviewExpires:
+		case (in.Kind == "review.place" || in.Kind == "preference.confirm" || in.Kind == act.KindPhotoPlace) && now.Sub(in.CreatedAt) >= reviewExpires:
 			in.Error = "3일 동안 답이 없어 거둠"
 		default:
 			continue

@@ -24,6 +24,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/checklist"
 	"github.com/choigonyok/jarvis/mind-svc/internal/draft"
 	"github.com/choigonyok/jarvis/mind-svc/internal/gate"
+	"github.com/choigonyok/jarvis/mind-svc/internal/goals"
 	"github.com/choigonyok/jarvis/mind-svc/internal/interpret"
 	"github.com/choigonyok/jarvis/mind-svc/internal/link"
 	"github.com/choigonyok/jarvis/mind-svc/internal/llm"
@@ -98,6 +99,8 @@ type Options struct {
 	GuestHere func(ctx context.Context) ([]moments.Visit, error)
 	// Checklists is where the operator's lists are kept; nil: none.
 	Checklists checklist.Store
+	// Goals is where each person's goals are kept; nil: none.
+	Goals goals.Store
 }
 
 type Mind struct {
@@ -125,6 +128,8 @@ type Mind struct {
 	Moments *moments.Service
 	// Lists is the operator's checklists; nil without Checklists.
 	Lists *checklist.Service
+	// Goals is each person's goals; nil without Options.Goals.
+	Goals *goals.Service
 	// nightly and mornings are further steps of the night and the morning,
 	// in order.
 	nightly  []func(ctx context.Context) error
@@ -187,7 +192,7 @@ func New(o Options) *Mind {
 	}
 	actuators := []act.Actuator{act.CalendarActuator{Cal: o.Calendar}, act.Note{},
 		act.SettleActuator{Drafts: drafter}, act.PhotosActuator{Photos: photos}, act.CartActuator{Jobs: jobs},
-		act.DraftActuator{Drafts: drafter}, act.ReviewActuator{}, act.RebalanceActuator{Orders: o.Orders}}
+		act.DraftActuator{Drafts: drafter}, act.ReviewActuator{}, act.PhotoPlaceActuator{}, act.RebalanceActuator{Orders: o.Orders}}
 	if o.Spending != nil {
 		actuators = append(actuators, o.Spending)
 	}
@@ -203,13 +208,16 @@ func New(o Options) *Mind {
 	if o.Checklists != nil {
 		m.Lists = &checklist.Service{St: o.Checklists, Now: o.Now}
 	}
+	if o.Goals != nil {
+		m.Goals = &goals.Service{St: o.Goals, Now: o.Now, Loc: o.Loc}
+	}
 	m.Prefs = &prefs.Prefs{St: o.Store, LLM: o.LLM, Now: o.Now}
 	m.Gate.OnDecide = func(ctx context.Context, in model.Intent) {
 		m.learn(ctx, in)
 		m.answered(ctx, in)
 	}
 	m.mornings = append(m.mornings, m.people, m.gift, m.weekend, m.restock, m.deadlines, m.warranties)
-	m.nightly = append(m.nightly, m.pruneMessages, m.expireQuestions, m.statedPreferences, m.deliveries, m.travelNotes, m.fixedChanges, m.moved, m.closeLists, m.rebuildLedger)
+	m.nightly = append(m.nightly, m.pruneMessages, m.expireQuestions, m.statedPreferences, m.deliveries, m.travelNotes, m.fixedChanges, m.moved, m.closeLists, m.endGoals, m.rebuildLedger)
 	m.Skills = []skill.Skill{skill.Schedule{}, skill.Loops{}, skill.Brief{}, skill.After{}, skill.Protect{}, skill.Rain{}}
 	m.Attn = attention.New(m.Skills, m.World, o.Store, m.Gate, o.Settle, o.Loc, o.Now, o.Logger)
 	if o.Weather != nil {
@@ -299,6 +307,10 @@ func (m *Mind) Run(ctx context.Context, every time.Duration) {
 	go m.nights(ctx, 30*time.Second)
 	go m.daily(ctx, 30*time.Second, "tick:predict", morningAt, m.Morning)
 	go m.daily(ctx, 30*time.Second, "tick:review", reviewAt, m.reviews)
+	go m.every(ctx, photosEvery, m.askPhotos)
+	go m.daily(ctx, 30*time.Second, "tick:goals:noon", goalNoonAt, m.goalNoon)
+	go m.daily(ctx, 30*time.Second, "tick:goals:night", goalNightAt, m.goalNight)
+	go m.every(ctx, goalTick, m.goalHour)
 	if m.Opts.Spending != nil {
 		go m.chargeLoop(ctx)
 	}
@@ -691,6 +703,9 @@ func (m *Mind) Situation(ctx context.Context) (world.Situation, error) {
 	if line := m.checklistLine(ctx); line != "" {
 		s.Text += "\n" + line
 	}
+	if line := m.goalLineOf(ctx, goals.Owner); line != "" {
+		s.Text += "\n" + line
+	}
 	if line := m.expectLines(ctx); line != "" {
 		s.Text += "\n" + line
 	}
@@ -723,6 +738,9 @@ func (m *Mind) GuestSituation(ctx context.Context) (world.Situation, error) {
 		s.Text += "\n" + lines
 	}
 	if line := m.checklistLineOf(ctx, checklist.Guest); line != "" {
+		s.Text += "\n" + line
+	}
+	if line := m.goalLineOf(ctx, goals.Guest); line != "" {
 		s.Text += "\n" + line
 	}
 	return s, nil

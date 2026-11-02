@@ -48,6 +48,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/engine"
 	"github.com/choigonyok/jarvis/mind-svc/internal/eval"
 	"github.com/choigonyok/jarvis/mind-svc/internal/gate"
+	"github.com/choigonyok/jarvis/mind-svc/internal/goals"
 	"github.com/choigonyok/jarvis/mind-svc/internal/hand"
 	"github.com/choigonyok/jarvis/mind-svc/internal/interpret"
 	jobsapi "github.com/choigonyok/jarvis/mind-svc/internal/jobs/api"
@@ -124,6 +125,7 @@ func main() {
 	// in memory on a laptop.
 	var reminders moments.Store = moments.NewMemory()
 	var lists checklist.Store = checklist.NewMemory()
+	var kept goals.Store = goals.NewMemory()
 	if dsn == "" {
 		st = store.NewMemory()
 		memLog = obs.NewMemoryLog(log)
@@ -162,6 +164,7 @@ func main() {
 		st = store.NewPostgres(pool, key)
 		reminders = moments.NewPostgres(pool)
 		lists = checklist.NewPostgres(pool)
+		kept = goals.NewPostgres(pool)
 		// Quiet: the skills and the gate run and the console shows what they
 		// would say, but no notice reaches a phone - the agent's cards still
 		// do that, until the two gates are one.
@@ -326,7 +329,7 @@ func main() {
 		Policy: gate.DefaultPolicy(), URL: getenv("MIND_UI_URL", "http://localhost:8102/"), Mode: mode,
 		MessageRetain: time.Duration(atoiOr(getenv("MIND_MESSAGE_RETAIN_DAYS", "365"), 365)) * 24 * time.Hour,
 		Memory:        mem, GuestMemory: guestMem, Photos: photos, Jobs: jobs, Assets: assets, Orders: orders, Travel: travel,
-		Weather: sky, DailyUSD: number("MIND_DAILY_USD", 1.0), Reminders: reminders, Here: here, GuestHere: guestHere, Checklists: lists,
+		Weather: sky, DailyUSD: number("MIND_DAILY_USD", 1.0), Reminders: reminders, Here: here, GuestHere: guestHere, Checklists: lists, Goals: kept,
 	})
 	if err := m.LoadRegistry(ctx); err != nil {
 		log.Warn("레지스트리를 읽지 못해 코드에 딸린 값으로 돕니다", "err", err)

@@ -76,6 +76,8 @@ type Origin struct {
 	// Checklist is the list the card shows (mind's checklist id) - as it
 	// stands whenever it is drawn, its items ticked on the card itself.
 	Checklist string `json:"checklist,omitempty"`
+	// Goals are the days the card asks about (mind's goals), answered on it.
+	Goals json.RawMessage `json:"goals,omitempty"`
 }
 
 // Origin kinds.

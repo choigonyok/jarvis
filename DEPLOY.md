@@ -124,7 +124,7 @@ cloudflared(`macmini` 터널)는 다른 프로젝트 호스트명 때문에 남�
 대화·운동·캘린더·편집·위치(둘이 다닌 길, 읽기만 - 손님 폰 연결은 `OWNTRACKS_GUEST_USER`/`OWNTRACKS_GUEST_PASSWORD`, 맥미니 `.env`)·출발(자기 경로만 -
 실시간 버스·지하철 키는 `DATA_GO_KR_KEY`/`SEOUL_SUBWAY_KEY`, 맥미니 `.env`)·작업(자기 작업·체크리스트만) 페이지와 `/api/agent`·`/api/jobs`·`/api/workout`·`/api/context/track`·`/api/context/owntracks/setup/guest`·`/api/map` 등 손님 몫 API, PhotoCraft 파일(`/photocraft/`)만 미들웨어에서 통과한다 - 나머지는 403
 이거나 첫 화면으로 돌려보낸다. 손님의 대화는 별도 컨테이너 `agent-guest`(`JARVIS_ROLE=guest`)가
-받는다: input-svc 의 thread `guest`, 별도 CLI 홈·승인 카드, 캘린더·리마인드·체크리스트·작업 모듈,
+받는다: input-svc 의 thread `guest`, 별도 CLI 홈·승인 카드, 캘린더·리마인드·체크리스트·목표·작업 모듈,
 브라우저 토큰·자산·가계부 주소 없음. 내장 도구는 웹과, 손님 사진·자비스 기억 폴더만 닿는 Read·Write·Edit(그
 밖의 파일 호출은 카드 없이 거절 - `permission.Folders`), 셸 없음. 리마인드·체크리스트(mind)와 작업(jobs)은
 `JARVIS_GUEST_API_TOKEN` 으로 손님 것만 열리고(서로의 것은 '없음'), 손님 작업은 웹사이트도 사진도 못 쓴다(브라우저가

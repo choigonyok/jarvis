@@ -3,6 +3,7 @@ package suggest
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -106,6 +107,41 @@ func TestMindCards(t *testing.T) {
 	deliver(e, mind.CardClosed, map[string]string{"intentId": "int_b", "status": "superseded"})
 	if p, _ := e.findCard("int_b"); p.State != proposal.Rejected {
 		t.Fatalf("mind 에서 닫힌 카드는 닫혀야 합니다: %+v", p)
+	}
+}
+
+// A card about photos shows them: fetched from the library into the uploads, and
+// a photo that cannot be fetched leaves the question standing.
+func TestACardShowsItsPhotos(t *testing.T) {
+	e, props := setup(t)
+	e.cfg.Photo = func(_ context.Context, id string) (string, error) {
+		if id == "gone" {
+			return "", errors.New("없음")
+		}
+		return id + ".jpg", nil
+	}
+	deliver(e, mind.CardRaised, map[string]any{"intentId": "int_p", "mode": "ask", "skill": "photos", "kind": "photos.place", "title": "11/2(월) 사진 5장, 어느 일정이에요?",
+		"confidence": 0.9, "photos": []string{"a", "gone", "b"}, "fields": []map[string]any{{"key": "plan", "label": "어느 일정", "kind": "select", "options": []string{"일정 아님"}}}})
+	list := props.List()
+	if len(list) != 1 || strings.Join(list[0].Card.Images, ",") != "a.jpg,b.jpg" {
+		t.Fatalf("%+v", list)
+	}
+	if !strings.Contains(list[0].Card.Consequence, "일정에 묶어") {
+		t.Fatalf("%q", list[0].Card.Consequence)
+	}
+}
+
+// A notice that asks about a goal's day carries the question to its card.
+func TestANoticeCarriesWhatItAsks(t *testing.T) {
+	e, _ := setup(t)
+	var got []Notice
+	e.cfg.Notice = func(n Notice) { got = append(got, n) }
+	deliver(e, "remind.goal", map[string]any{"card": true, "why": "어제 기록이 없어서 여쭤봐요", "body": "", "goals": []map[string]string{{"goal": "goal_1", "title": "물 2L", "day": "2026-11-02"}}})
+	_ = e.Take(context.Background(), message(map[string]any{"type": "remind.goal", "key": "goal:noon",
+		"data":   map[string]any{"card": true, "why": "어제 기록이 없어서 여쭤봐요", "body": "", "goals": []map[string]string{{"goal": "goal_1", "title": "물 2L", "day": "2026-11-02"}}},
+		"notify": map[string]any{"tier": "now", "title": "어제 '물 2L' 했어요?"}}))
+	if len(got) != 1 || !strings.Contains(string(got[0].Goals), `"goal_1"`) || got[0].Title != "어제 '물 2L' 했어요?" || got[0].Why != "어제 기록이 없어서 여쭤봐요" {
+		t.Fatalf("%+v", got)
 	}
 }
 

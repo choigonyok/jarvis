@@ -91,6 +91,8 @@ type Notice struct {
 	Why   string // why now: "집에 도착하셔서 알려 드려요"
 	// Checklist is the list it shows, if it carries one.
 	Checklist string
+	// Goals are the days it asks about, if it asks.
+	Goals json.RawMessage
 }
 
 type Config struct {
@@ -117,6 +119,9 @@ type Config struct {
 	Entry func(change json.RawMessage)
 	// WakeJobs has the job scheduler look now.
 	WakeJobs func()
+	// Photo brings a photo of the library in to be shown on a card, and is its
+	// upload name; nil: a card shows no photos.
+	Photo func(ctx context.Context, id string) (string, error)
 }
 
 type Engine struct {
@@ -188,11 +193,12 @@ func (e *Engine) notice(ev Event) {
 		return
 	}
 	var d struct {
-		Card      bool    `json:"card"`
-		Why       string  `json:"why"`
-		Body      *string `json:"body"`
-		Checklist string  `json:"checklist"`
-		Who       string  `json:"who"`
+		Card      bool            `json:"card"`
+		Why       string          `json:"why"`
+		Body      *string         `json:"body"`
+		Checklist string          `json:"checklist"`
+		Who       string          `json:"who"`
+		Goals     json.RawMessage `json:"goals"`
 	}
 	if json.Unmarshal(ev.Data, &d) != nil || !d.Card {
 		return
@@ -213,7 +219,7 @@ func (e *Engine) notice(ev Event) {
 	if key == "" {
 		key = "event:" + strconv.FormatInt(ev.ID, 10)
 	}
-	e.cfg.Notice(Notice{Key: key, Title: strings.TrimSpace(ev.Notify.Title), Body: strings.TrimSpace(body), Why: strings.TrimSpace(d.Why), Checklist: d.Checklist})
+	e.cfg.Notice(Notice{Key: key, Title: strings.TrimSpace(ev.Notify.Title), Body: strings.TrimSpace(body), Why: strings.TrimSpace(d.Why), Checklist: d.Checklist, Goals: d.Goals})
 }
 
 // listChanged has the screens redraw a list.
@@ -275,6 +281,7 @@ func (e *Engine) raiseCard(ev Event) {
 		kind = mind.Undo
 	}
 	card := mind.CardText(c)
+	card.Images = e.photos(c.Photos)
 	in := mind.Input{IntentID: c.IntentID, Kind: c.Kind, Calendar: c.Calendar}
 	if len(card.Fields) > 0 {
 		in.Card = &card // a form: redrawn with the answers on approval
@@ -299,6 +306,26 @@ func (e *Engine) raiseCard(ev Event) {
 		"data": map[string]any{"topic": "mind:" + c.Skill, "proposalId": p.ID, "title": c.Title, "intentId": c.IntentID},
 		"key":  "suggestion:raised:" + p.ID,
 	})
+}
+
+// photos brings a card's photos in. One that cannot be fetched is left out: the
+// question stands without it.
+func (e *Engine) photos(ids []string) []string {
+	if e.cfg.Photo == nil || len(ids) == 0 {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var out []string
+	for _, id := range ids {
+		name, err := e.cfg.Photo(ctx, id)
+		if err != nil {
+			e.log.Warn("카드의 사진을 가져오지 못했습니다", "photo", id, "err", err)
+			continue
+		}
+		out = append(out, name)
+	}
+	return out
 }
 
 // closeCard settles the card of an intent answered or withdrawn in mind

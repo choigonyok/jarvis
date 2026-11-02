@@ -91,7 +91,9 @@ export function ProposalCard({
           {readableTitle(proposal.card.title)}
         </h3>
 
-        {proposal.card.images?.length ? <CardPhotos names={proposal.card.images} /> : null}
+        {proposal.card.images?.length ? (
+          <CardPhotos names={proposal.card.images} cover={!proposal.action.kind.startsWith("mind.")} />
+        ) : null}
 
         {form && !settled ? (
           <FormFields fields={fields} values={values} onChange={(k, v) => setValues((cur) => ({ ...cur, [k]: v }))} />
@@ -178,20 +180,23 @@ export function ProposalCard({
   );
 }
 
-/** The listing's photos as it will show them: the first one is the cover. */
-function CardPhotos({ names }: { names: string[] }) {
+/**
+ * The photos a card is about. A listing's are shown as it will show them, the
+ * first the cover; the ones a question asks about (cover false) are all alike.
+ */
+function CardPhotos({ names, cover }: { names: string[]; cover: boolean }) {
   return (
-    <ul className="scrollbar-none -mx-4 mt-3 flex gap-1.5 overflow-x-auto px-4 sm:-mx-5 sm:px-5" aria-label="올릴 사진">
+    <ul className="scrollbar-none -mx-4 mt-3 flex gap-1.5 overflow-x-auto px-4 sm:-mx-5 sm:px-5" aria-label={cover ? "올릴 사진" : "사진"}>
       {names.map((name, i) => (
         <li key={name} className="relative shrink-0">
           {/* eslint-disable-next-line @next/next/no-img-element -- served by the agent behind the proxy */}
           <img
             src={photoUrl(name)}
-            alt={i === 0 ? "대표 사진" : `사진 ${i + 1}`}
+            alt={cover && i === 0 ? "대표 사진" : `사진 ${i + 1}`}
             loading="lazy"
-            className={cn("rounded-lg border border-edge-soft bg-well object-cover", i === 0 ? "size-24" : "size-20 mt-4")}
+            className={cn("rounded-lg border border-edge-soft bg-well object-cover", !cover ? "size-24" : i === 0 ? "size-24" : "size-20 mt-4")}
           />
-          {i === 0 ? (
+          {cover && i === 0 ? (
             <span className="absolute bottom-1 left-1 rounded bg-background/80 px-1.5 py-px text-[10.5px] text-dim">대표</span>
           ) : null}
         </li>

@@ -22,6 +22,7 @@ import {
   ReceiptText,
   ListChecks,
   Images,
+  Target,
   TrainFront,
   Wallet,
 } from "lucide-react";
@@ -57,6 +58,7 @@ const ICON: Record<string, LucideIcon> = {
   "/assets": Wallet,
   "/spending": ReceiptText,
   "/jobs": ListChecks,
+  "/goals": Target,
   "/photos": Images,
   "/edit": Brush,
   "/life": BookUser,
@@ -87,6 +89,8 @@ const primary: Tab[] = [
 const secondary: Tab[] = [
   // 맡긴 일이 지금 어디까지 왔는지. 대화 바로 다음에 읽힌다.
   { href: "/jobs", label: "작업" },
+  // 되풀이해서 하려는 일과 날마다의 기록. 맡긴 일 바로 다음, 내가 할 일.
+  { href: "/goals", label: "목표" },
   { href: "/assets", label: "자산" },
   { href: "/spending", label: "가계부" },
   { href: "/calendar", label: "캘린더" },
@@ -122,9 +126,9 @@ const visible = (tabs: Tab[], role: Role) =>
  * conversation, money in and money out - always sit in it; the guest has
  * their own tabs and no 더보기.
  */
-const OWNER_BAR = ["/", "/jobs", "/assets", "/spending", "/calendar", "/workout", "/record"];
+const OWNER_BAR = ["/", "/jobs", "/goals", "/assets", "/spending", "/calendar", "/workout", "/record"];
 const OWNER_MORE = ["/life", "/location", "/transit", "/photos", "/edit", "/screen", "/kakao", "/status"];
-const GUEST_BAR = ["/", "/jobs", "/calendar", "/location", "/transit", "/workout", "/edit"];
+const GUEST_BAR = ["/", "/jobs", "/goals", "/calendar", "/location", "/transit", "/workout", "/edit"];
 
 const byHref = new Map([...primary, ...secondary].map((t) => [t.href, t]));
 const pick = (hrefs: string[]) => hrefs.flatMap((h) => (byHref.has(h) ? [byHref.get(h)!] : []));
@@ -255,7 +259,7 @@ export function Header({
         scrollPageToTop();
       }}
     >
-      <div className="mx-auto flex h-13 w-full max-w-[52rem] items-center justify-between px-4 sm:h-14 sm:px-8">
+      <div className="mx-auto flex h-13 w-full max-w-[56rem] items-center justify-between px-4 sm:h-14 sm:px-8">
         <div className="flex min-w-0 items-baseline gap-3">
           <h1
             className="shrink-0 text-[15px] font-semibold tracking-tight text-foreground select-none"

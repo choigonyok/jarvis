@@ -34,10 +34,12 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/module/assets"
 	"github.com/choigonyok/jarvis/agent/internal/module/calendar"
 	"github.com/choigonyok/jarvis/agent/internal/module/checklist"
+	"github.com/choigonyok/jarvis/agent/internal/module/goal"
 	"github.com/choigonyok/jarvis/agent/internal/module/jobs"
 	"github.com/choigonyok/jarvis/agent/internal/module/memory"
 	"github.com/choigonyok/jarvis/agent/internal/module/messages"
 	mindmod "github.com/choigonyok/jarvis/agent/internal/module/mind"
+	photolib "github.com/choigonyok/jarvis/agent/internal/module/photos"
 	"github.com/choigonyok/jarvis/agent/internal/module/place"
 	"github.com/choigonyok/jarvis/agent/internal/module/remind"
 	"github.com/choigonyok/jarvis/agent/internal/module/show"
@@ -231,6 +233,14 @@ func main() {
 		cfg.Allow(show.Tools...)
 	}
 
+	// 사진 보관함(사진 탭): 담긴 것·장소·날로 찾아 그 사진을 대화에서 보여 준다. 운영자의 것이라 손님은 없다.
+	var library *photolib.Module
+	if cfg.PhotosURL != "" && !cfg.Guest && photos != nil {
+		library = photolib.New(cfg.PhotosURL, cfg.MindURL, cfg.APIToken, photos, log)
+		modules.Add(library)
+		library.Look(look)
+	}
+
 	// Where the operator is (context-svc), read only. Not the guest's.
 	if cfg.ContextURL != "" && !cfg.Guest {
 		placeModule := place.New(cfg.ContextURL, cfg.APIToken)
@@ -275,6 +285,12 @@ func main() {
 		modules.Add(checklistModule)
 		checklistModule.Look(look)
 		checklistModule.Change(change)
+
+		// 목표: 되풀이할 일. mind 가 날마다의 기록을 갖고, 말로 한 것도 탭으로 한 것과 같다.
+		goalModule := goal.New(cfg.MindURL, cfg.APIToken, commands)
+		modules.Add(goalModule)
+		goalModule.Look(look)
+		goalModule.Change(change)
 	}
 	for name, board := range map[string]*tool.Board{tool.Look: look, tool.Change: change} {
 		mcpMounts["/mcp/"+name] = board.Handler()
@@ -494,7 +510,7 @@ func main() {
 		if n.Body != "" {
 			paragraphs = append(paragraphs, n.Body)
 		}
-		transcript.Card(thread.Origin{Kind: thread.OriginNotice, Title: n.Why, Ref: n.Key, Checklist: n.Checklist}, paragraphs)
+		transcript.Card(thread.Origin{Kind: thread.OriginNotice, Title: n.Why, Ref: n.Key, Checklist: n.Checklist, Goals: n.Goals}, paragraphs)
 		if n.Checklist != "" && checklistModule != nil {
 			checklistModule.Publish(context.Background(), n.Checklist)
 		}
@@ -530,6 +546,13 @@ func main() {
 			Redraw:   redrawList,
 			Entry:    entryChanged,
 			WakeJobs: wakeJobs,
+			Photo: func(ctx context.Context, id string) (string, error) {
+				if library == nil {
+					return "", errors.New("사진 보관함이 연결되지 않았습니다")
+				}
+				name, _, err := library.Keep(ctx, id)
+				return name, err
+			},
 			Show: func(id, lead, key string) {
 				if checklistModule == nil {
 					return

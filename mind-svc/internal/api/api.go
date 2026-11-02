@@ -163,6 +163,12 @@ func (s *Server) Handler() http.Handler {
 			func(pattern string, h http.HandlerFunc) { mux.HandleFunc(pattern, owner(h)) },
 			func(pattern string, h http.HandlerFunc) { write(pattern, owner, h) })
 	}
+	mux.HandleFunc("GET /api/goals", s.person(s.listGoals))
+	mux.HandleFunc("GET /api/goals/{id}", s.person(s.getGoal))
+	write("POST /api/goals", s.person, s.makeGoal)
+	write("PATCH /api/goals/{id}", s.person, s.changeGoal)
+	write("DELETE /api/goals/{id}", s.person, s.removeGoal)
+	write("POST /api/goals/{id}/checks", s.person, s.markGoal)
 	if s.jobs != nil {
 		mux.HandleFunc("GET "+jobs.Prefix+"/health", s.jobs.Health())
 		s.jobs.Mount(
@@ -261,6 +267,15 @@ func (s *Server) Handler() http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"fixed": fixed})
+	}))
+	// When photos of a place were taken: the conversation looks there (photos-svc).
+	mux.HandleFunc("GET /api/photos/when", s.auth(true, func(w http.ResponseWriter, r *http.Request) {
+		out, err := s.m.PhotoWindows(r.Context(), r.URL.Query().Get("q"))
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"windows": out})
 	}))
 	mux.HandleFunc("GET /api/places", s.auth(false, func(w http.ResponseWriter, r *http.Request) {
 		places, err := s.m.Places(r.Context())

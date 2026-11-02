@@ -106,7 +106,12 @@ export type TurnOrigin = {
   ref?: string;
   /** The checklist the card shows, by id. */
   checklist?: string;
+  /** The days a notice asks about, answered on the card. */
+  goals?: GoalAsk[];
 };
+
+/** One day of one goal a notice asks about. */
+export type GoalAsk = { goal: string; title: string; day: string };
 
 /** One line of a checklist. */
 export type ChecklistItem = {

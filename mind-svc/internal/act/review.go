@@ -61,3 +61,41 @@ func (ReviewActuator) Execute(_ context.Context, kind string, payload json.RawMe
 func (ReviewActuator) Undo(context.Context, string, json.RawMessage) (json.RawMessage, error) {
 	return json.RawMessage(`{}`), nil
 }
+
+// KindPhotoPlace is a question about photos with no plan of their own: which
+// plan they are of.
+const KindPhotoPlace = "photos.place"
+
+// PhotoPlaceActuator does photos.place: an answer, which mind files under the
+// plan named (answered). Undoing takes the photos off it.
+type PhotoPlaceActuator struct{}
+
+func (PhotoPlaceActuator) Kinds() []string { return []string{KindPhotoPlace} }
+
+func (PhotoPlaceActuator) Preview(_ context.Context, _ string, payload json.RawMessage) (string, error) {
+	var a struct {
+		Photos []string `json:"photos"`
+	}
+	if err := json.Unmarshal(payload, &a); err != nil {
+		return "", err
+	}
+	if len(a.Photos) == 0 {
+		return "", errors.New("사진이 없습니다")
+	}
+	return fmt.Sprintf("사진 %d장을 고른 일정에 묶어 둡니다", len(a.Photos)), nil
+}
+
+func (PhotoPlaceActuator) Execute(_ context.Context, _ string, payload json.RawMessage) (json.RawMessage, json.RawMessage, error) {
+	var a answered
+	if err := json.Unmarshal(payload, &a); err != nil {
+		return nil, nil, err
+	}
+	if strings.TrimSpace(a.Answers["plan"]) == "" && strings.TrimSpace(a.Answers["note"]) == "" {
+		return nil, nil, errors.New("어느 일정인지 골라 주세요")
+	}
+	return mustJSON(map[string]any{"answers": a.Answers}), json.RawMessage(`{"op":"forget"}`), nil
+}
+
+func (PhotoPlaceActuator) Undo(context.Context, string, json.RawMessage) (json.RawMessage, error) {
+	return json.RawMessage(`{}`), nil
+}

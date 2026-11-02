@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -73,13 +74,13 @@ func TestDaysAreTheFinishedOnes(t *testing.T) {
 	var got struct {
 		Days []Day `json:"days"`
 	}
-	if err := json.Unmarshal(raw, &got); err != nil || len(got.Days) != daysBack {
+	if err := json.Unmarshal(raw, &got); err != nil || len(got.Days) < daysBack {
 		t.Fatalf("%s %v", raw, err)
 	}
 	if got.Days[0].Date != "2026-10-28" || got.Days[2].Date != "2026-10-30" {
 		t.Fatalf("%+v", got.Days)
 	}
-	last := (*asked)[len(*asked)-1]
+	last := (*asked)[daysBack-1]
 	if last["takenAfter"] != "2026-10-29T15:00:00Z" || last["takenBefore"] != "2026-10-30T15:00:00Z" {
 		t.Fatalf("%v", last)
 	}
@@ -91,5 +92,107 @@ func TestAFailureIsSaid(t *testing.T) {
 	im := Immich{URL: srv.URL, Key: "key", HTTP: srv.Client()}
 	if _, err := im.Taken(context.Background(), time.Now(), nil); err == nil {
 		t.Fatal("실패는 오류입니다")
+	}
+}
+
+// The days that are over, and each read a week more of the past - until it has
+// been back as far as it goes.
+func TestDaysWalkBackAWeekAtATime(t *testing.T) {
+	srv, _ := fakeImmich(t, 1)
+	im := Immich{URL: srv.URL, Key: "key", HTTP: srv.Client()}
+	now := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+	read := im.Days(func() time.Time { return now }, time.UTC)
+	days := func() []string {
+		v, err := read(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, d := range v.(map[string]any)["days"].([]Day) {
+			out = append(out, d.Date)
+		}
+		return out
+	}
+	first := days()
+	if len(first) != daysBack+walkDays || first[daysBack] != "2026-10-29" || first[len(first)-1] != "2026-10-23" {
+		t.Fatalf("%v", first)
+	}
+	if second := days(); second[daysBack] != "2026-10-22" {
+		t.Fatalf("%v", second)
+	}
+	for range walkBack / walkDays {
+		days()
+	}
+	if last := days(); len(last) != daysBack {
+		t.Fatalf("끝까지 간 뒤에는 지난 며칠만: %v", last)
+	}
+}
+
+// The window: words go to the likeness search, a day range to the clock, and a
+// photo comes back as bytes. The token is asked for, and an id is an id.
+func TestDoor(t *testing.T) {
+	var asked map[string]any
+	var path string
+	seoul := time.FixedZone("KST", 9*60*60)
+	immich := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		if strings.HasSuffix(path, "/thumbnail") {
+			w.Header().Set("Content-Type", "image/jpeg")
+			_, _ = w.Write([]byte("jpeg"))
+			return
+		}
+		_ = json.NewDecoder(r.Body).Decode(&asked)
+		city := "Seoul"
+		_ = json.NewEncoder(w).Encode(map[string]any{"assets": map[string]any{"items": []any{
+			Asset{ID: "a", LocalDateTime: "2026-10-30T10:00:00.000Z", IsFavorite: true, ExifInfo: &struct {
+				City             *string `json:"city"`
+				State            *string `json:"state"`
+				Country          *string `json:"country"`
+				DateTimeOriginal *string `json:"dateTimeOriginal"`
+			}{City: &city}},
+			Asset{ID: "b", IsTrashed: true},
+		}}})
+	}))
+	defer immich.Close()
+	srv := httptest.NewServer(door(Immich{URL: immich.URL, Key: "key", HTTP: immich.Client()}, "tok", seoul))
+	defer srv.Close()
+	get := func(path, token string) (int, string) {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, srv.URL+path, nil)
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		var b strings.Builder
+		_, _ = io.Copy(&b, res.Body)
+		return res.StatusCode, b.String()
+	}
+	if code, _ := get("/search?q=x", ""); code != http.StatusUnauthorized {
+		t.Fatal(code)
+	}
+	code, body := get("/search?q=%EC%84%9C%EB%B2%84&from=2026-10-30&to=2026-10-30&limit=3", "tok")
+	if code != 200 || path != "/api/search/smart" || asked["query"] != "서버" || asked["size"].(float64) != 3 ||
+		asked["takenAfter"] != "2026-10-29T15:00:00Z" || asked["takenBefore"] != "2026-10-30T15:00:00Z" {
+		t.Fatalf("%d %s %v", code, path, asked)
+	}
+	if !strings.Contains(body, `"id":"a"`) || !strings.Contains(body, `"city":"Seoul"`) || strings.Contains(body, `"id":"b"`) {
+		t.Fatal(body)
+	}
+	if _, _ = get("/search", "tok"); path != "/api/search/metadata" || asked["order"] != "desc" {
+		t.Fatalf("%s %v", path, asked)
+	}
+	if code, _ := get("/search?from=어제", "tok"); code != http.StatusBadRequest {
+		t.Fatal(code)
+	}
+	if code, _ := get("/assets/..%2Fadmin/preview", "tok"); code != http.StatusBadRequest && code != http.StatusNotFound {
+		t.Fatal(code)
+	}
+	id := "01234567-89ab-cdef-0123-456789abcdef"
+	if code, body := get("/assets/"+id+"/preview", "tok"); code != 200 || body != "jpeg" || path != "/api/assets/"+id+"/thumbnail" {
+		t.Fatalf("%d %q %s", code, body, path)
 	}
 }

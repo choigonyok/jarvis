@@ -62,6 +62,8 @@ type Card struct {
 	// Calendar is a calendar card's change: what tells it from the same
 	// change asked in the conversation.
 	Calendar *Calendar `json:"calendar,omitempty"`
+	// Photos are photos of the library the card shows, by id.
+	Photos []string `json:"photos,omitempty"`
 }
 
 type Evidence struct {
@@ -337,6 +339,8 @@ func CardText(c Card) action.Card {
 	switch {
 	case c.Kind == KindCategory && c.Mode != "undo":
 		card.Consequence = "승인하면 이 분류로 바꿉니다. '앞으로도'면 이 가맹점의 지난·다음 결제도 같은 분류가 됩니다. 반려하면 기타로 두고 다시 묻지 않습니다."
+	case c.Kind == "photos.place" && c.Mode != "undo":
+		card.Consequence = "승인하면 이 사진들을 그 일정에 묶어 둡니다. 반려하면 그대로 두고 다시 묻지 않습니다."
 	case len(c.Fields) > 0:
 		card.Consequence = "승인하면 답을 보냅니다. 장소의 특징과 내 취향을 따로 배워요."
 	case c.Mode == "undo":

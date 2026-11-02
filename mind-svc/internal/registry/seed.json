@@ -9,6 +9,7 @@
     "registry.write": {"lane": "deterministic"},
     "reminder.*": {"lane": "deterministic", "guest": true},
     "checklist.*": {"lane": "deterministic", "guest": true},
+    "goal.*": {"lane": "deterministic", "guest": true},
     "note.*": {"lane": "deterministic"},
     "link.*": {"lane": "deterministic"},
     "spending.write": {"lane": "deterministic"},
@@ -72,6 +73,7 @@
     "preference.confirm": {"level": "ask", "fixed": true, "hand": "none"},
     "assets.rebalance": {"level": "ask", "fixed": true, "hand": "output"},
     "photos.album": {"level": "ask", "hand": "output"},
+    "photos.place": {"level": "ask", "fixed": true, "hand": "none"},
     "spending.category": {"level": "ask", "hand": "mind"},
     "note": {"level": "ask", "hand": "none"},
     "rain": {"level": "ask", "fixed": true}
