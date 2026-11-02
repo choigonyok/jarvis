@@ -705,6 +705,13 @@ func TestGoalsAreEachPersonsOwn(t *testing.T) {
 	if code, body := do("secret", "POST", "/api/goals/"+owner+"/checks", `{"mark":"maybe"}`); code != 400 {
 		t.Fatalf("%d %s", code, body)
 	}
+	// A body that lost its mark takes nothing back; a mark of "" does.
+	if code, body := do("secret", "POST", "/api/goals/"+owner+"/checks", ``); code != 400 {
+		t.Fatalf("%d %s", code, body)
+	}
+	if _, body := do("secret", "GET", "/api/goals/"+owner, ""); !strings.Contains(body, `"mark":"done"`) {
+		t.Fatalf("지워졌습니다: %s", body)
+	}
 	if code, body := do("secret", "GET", "/api/goals/"+owner, ""); code != 200 || !strings.Contains(body, `"bars"`) {
 		t.Fatalf("%d %s", code, body)
 	}
