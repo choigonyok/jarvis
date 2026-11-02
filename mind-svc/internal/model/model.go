@@ -61,6 +61,10 @@ func (e Entity) Live() bool {
 // (input-svc), read as one more room.
 const OwnerRoom = "chat:owner"
 
+// IsOwnerRoom is whether a room is the operator's own conversation with the
+// assistant.
+func IsOwnerRoom(room string) bool { return strings.HasSuffix(room, ":owner") }
+
 // AssistantsPromise is whether a loop is the assistant's own promise in its
 // conversation with the operator ("알려 드릴게요"): what it promised there is
 // a reminder or a job of its own, which tells it at its moment. Someone
@@ -576,11 +580,12 @@ const (
 	Dropped    = "dropped"
 	Superseded = "superseded"
 	Failed     = "failed"
+	Asked      = "asked" // the assistant's own card, up in the conversation (HeldSkill)
 )
 
 // ByConversation decides an intent the conversation asked already: the
-// assistant's own card for the same change was up when mind's came, and
-// mind's was not shown (the agent's suggest engine).
+// assistant's own card for the same change came first, and mind's is not
+// asked as well (gate.Asked).
 const ByConversation = "conversation"
 
 // Covered is whether the intent stood aside for the same question asked in
@@ -641,6 +646,9 @@ const (
 	// its own, whose answer the agent carries on with. mind keeps the ledger.
 	HeldSkill = "held"
 )
+
+// HeldID is the intent of the agent's card.
+func HeldID(card string) string { return "card:" + card }
 
 // Command is what came of something asked of mind through the stream: the
 // answer the one who asked is waiting for.

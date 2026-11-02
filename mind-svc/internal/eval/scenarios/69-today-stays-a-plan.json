@@ -1,0 +1,15 @@
+{
+  "name": "오늘 일정은 카드 없이 일정으로만 둔다: 오늘 넣자는 카드는 지금까지 한 장도 승인되지 않았다",
+  "room": "today-plan",
+  "roomName": "지수",
+  "turns": [
+    {
+      "messages": [
+        { "at": "2026-11-03T12:00", "from": "지수", "text": "오늘 저녁 7시에 강남에서 볼래?" },
+        { "at": "2026-11-03T12:01", "me": true, "text": "좋아 7시에 보자" }
+      ],
+      "script": {"changes":[{"op":"create","kind":"plan","set":{"title":"지수와 저녁","status":"confirmed","date":"2026-11-03","start":"19:00","place":"강남"},"evidence":[{"line":2,"quote":"좋아 7시에 보자"}],"confidence":0.9,"why":"둘 다 동의"}]},
+      "expect": { "plans": [{ "status": "confirmed", "date": "2026-11-03", "start": "19:00" }], "planCount": 1, "noCards": true, "noActions": true }
+    }
+  ]
+}

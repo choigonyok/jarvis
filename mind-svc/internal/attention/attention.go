@@ -334,6 +334,8 @@ func (v view) IntentsSince(ctx context.Context, t time.Time) ([]model.Intent, er
 func (v view) Now() time.Time      { return v.a.now() }
 func (v view) Loc() *time.Location { return v.a.loc }
 
+func (v view) Same(ctx context.Context, a, b model.State) bool { return v.a.gate.Same(ctx, a, b) }
+
 func (v view) Links(ctx context.Context, id string) ([]model.Link, error) {
 	return v.a.st.LinksOf(ctx, id)
 }

@@ -819,8 +819,21 @@ func (s *Server) decide(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&body)
 		in, err = s.m.Gate.Covered(r.Context(), id, strings.TrimSpace(body.By))
+	case "asked":
+		// A calendar card the assistant raised in the conversation (id): it is
+		// the question, and mind does not ask it as well.
+		var body struct {
+			Kind     string               `json:"kind"`
+			Title    string               `json:"title"`
+			Calendar model.CalendarAction `json:"calendar"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "카드를 읽지 못했습니다."})
+			return
+		}
+		in, err = s.m.Gate.Asked(r.Context(), id, body.Kind, body.Title, body.Calendar)
 	default:
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "approve, reject, undo, covered 중 하나입니다."})
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "approve, reject, undo, covered, asked 중 하나입니다."})
 		return
 	}
 	switch {

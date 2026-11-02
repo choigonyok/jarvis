@@ -211,6 +211,7 @@ func New(o Options) *Mind {
 	if o.Goals != nil {
 		m.Goals = &goals.Service{St: o.Goals, Now: o.Now, Loc: o.Loc}
 	}
+	m.Gate.Judge = (&link.SameJudge{LLM: o.LLM, Log: o.Logger}).Of
 	m.Prefs = &prefs.Prefs{St: o.Store, LLM: o.LLM, Now: o.Now}
 	m.Gate.OnDecide = func(ctx context.Context, in model.Intent) {
 		m.learn(ctx, in)

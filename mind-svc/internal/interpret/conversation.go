@@ -558,7 +558,7 @@ func placeless(known []view) bool {
 
 // OwnerRoom is the operator's own conversation with the assistant, where
 // what is said is about the operator's day anywhere.
-func OwnerRoom(room string) bool { return strings.HasSuffix(room, ":owner") }
+func OwnerRoom(room string) bool { return model.IsOwnerRoom(room) }
 
 // op is one change the model proposes.
 type op struct {

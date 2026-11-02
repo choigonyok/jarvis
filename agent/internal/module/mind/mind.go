@@ -35,8 +35,9 @@ const (
 
 // Event types of the one path a card takes (mind-svc internal/gate).
 const (
-	CardRaised = "mind.card"
-	CardClosed = "mind.card.closed"
+	CardRaised  = "mind.card"
+	CardUpdated = "mind.card.updated"
+	CardClosed  = "mind.card.closed"
 )
 
 // Card is mind.card's data (mind-svc internal/gate.Card).
@@ -59,9 +60,6 @@ type Card struct {
 	// Fields make it a form: a question (a review, "맞나요?") answered on
 	// the card, the answers sent back with the approval.
 	Fields []action.Field `json:"fields,omitempty"`
-	// Calendar is a calendar card's change: what tells it from the same
-	// change asked in the conversation.
-	Calendar *Calendar `json:"calendar,omitempty"`
 	// Photos are photos of the library the card shows, by id.
 	Photos []string `json:"photos,omitempty"`
 }
@@ -71,9 +69,9 @@ type Evidence struct {
 	Quote string `json:"quote"`
 }
 
-// Calendar is the change a calendar card asks for (mind-svc
-// model.CalendarAction): the entry it is about, if it is about one, and the
-// entry to be.
+// Calendar is the change a card in the conversation asks for, as mind says it
+// (mind-svc model.CalendarAction): the entry it is about, if it is about one,
+// and the entry to be.
 type Calendar struct {
 	EventID string `json:"eventId,omitempty"`
 	Event   Event  `json:"event"`
@@ -81,22 +79,20 @@ type Calendar struct {
 
 // Event is an entry as mind says it.
 type Event struct {
-	Title string `json:"title"`
-	Date  string `json:"date"`
-	Start string `json:"start,omitempty"`
-	End   string `json:"end,omitempty"`
+	Title   string `json:"title"`
+	Date    string `json:"date"`
+	EndDate string `json:"endDate,omitempty"`
+	Start   string `json:"start,omitempty"`
+	End     string `json:"end,omitempty"`
 }
 
 // Input is what an approval card carries to mind. A form card also keeps
 // its own card, to redraw it with the operator's answers, and the answers.
-// A calendar card keeps its change, to be told from the same change raised
-// in the conversation after it.
 type Input struct {
 	IntentID string            `json:"intentId"`
 	Card     *action.Card      `json:"card,omitempty"`
 	Answers  map[string]string `json:"answers,omitempty"`
 	Kind     string            `json:"kind,omitempty"`
-	Calendar *Calendar         `json:"calendar,omitempty"`
 }
 
 // Sender sends what would change mind through the stream (mindcmd).
@@ -232,11 +228,10 @@ func (c Client) Reject(ctx context.Context, intentID, reason string) error {
 	return c.Do(ctx, http.MethodPost, "/api/intents/"+intentID+"/reject", map[string]string{"reason": reason}, nil)
 }
 
-// Covered tells mind its card is not shown: the conversation asks the same
-// already, on the assistant's own card (by). Nobody answered it - mind
-// learns nothing from it and does not ask it again.
-func (c Client) Covered(ctx context.Context, intentID, by string) error {
-	return c.Do(ctx, http.MethodPost, "/api/intents/"+intentID+"/covered", map[string]string{"by": by}, nil)
+// Asked tells mind a card in the conversation asks a calendar change: mind does
+// not ask it as well, and puts away its own.
+func (c Client) Asked(ctx context.Context, card, kind, title string, cal Calendar) error {
+	return c.Do(ctx, http.MethodPost, "/api/intents/"+card+"/asked", map[string]any{"kind": kind, "title": title, "calendar": cal}, nil)
 }
 
 func (c Client) Do(ctx context.Context, method, path string, in, out any) error {

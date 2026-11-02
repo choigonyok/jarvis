@@ -1,0 +1,27 @@
+{
+  "name": "답하기 전에 시각이 또 바뀌면 같은 카드가 고쳐진다: 다시 울리지 않고, 승인하면 마지막 시각으로 들어간다",
+  "room": "band-time",
+  "roomName": "민수",
+  "turns": [
+    {
+      "messages": [
+        { "at": "2026-11-03T20:00", "from": "민수", "text": "토요일 3시에 합주 어때?" },
+        { "at": "2026-11-03T20:01", "me": true, "text": "좋아 3시에 보자" }
+      ],
+      "script": {"changes":[{"op":"create","kind":"plan","set":{"title":"민수와 합주","status":"confirmed","date":"2026-11-07","start":"15:00"},"evidence":[{"line":2,"quote":"좋아 3시에 보자"}],"confidence":0.9,"why":"둘 다 동의"}]},
+      "expect": { "plans": [{ "status": "confirmed", "date": "2026-11-07", "start": "15:00" }], "planCount": 1, "intents": ["calendar.create"], "cardCount": 1 }
+    },
+    {
+      "messages": [
+        { "at": "2026-11-03T20:20", "from": "민수", "text": "아 미안 4시로 미루자" },
+        { "at": "2026-11-03T20:21", "me": true, "text": "응 4시 좋아" }
+      ],
+      "script": {"changes":[{"op":"update","kind":"plan","ref":"P1","set":{"start":"16:00"},"evidence":[{"line":1,"quote":"4시로 미루자"}],"confidence":0.9,"why":"시각을 옮김"}]},
+      "expect": { "plans": [{ "status": "confirmed", "date": "2026-11-07", "start": "16:00" }], "planCount": 1, "noCards": true }
+    },
+    {
+      "approve": "calendar.create",
+      "expect": { "calendar": [{ "date": "2026-11-07", "start": "16:00" }], "calendarCount": 1 }
+    }
+  ]
+}

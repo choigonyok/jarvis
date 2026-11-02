@@ -24,6 +24,10 @@ type view struct {
 	intents []model.Intent
 }
 
+func (v view) Same(_ context.Context, a, b model.State) bool {
+	return model.Compare(a, b) == model.Same
+}
+
 func (v view) IntentsSince(_ context.Context, t time.Time) ([]model.Intent, error) {
 	var out []model.Intent
 	for _, in := range v.intents {
@@ -247,20 +251,6 @@ func TestTwoPlansOnOneEntryBecomeOne(t *testing.T) {
 	}
 }
 
-// Already under way by the time it is read, it is not asked about: a card to
-// add 10:00 came at 10:12.
-func TestAPlanUnderWayIsNotAsked(t *testing.T) {
-	now := time.Date(2026, 11, 28, 10, 12, 0, 0, seoul)
-	p := talked("p1", "지수와 합주", "10:00", "", now)
-	if r := (Schedule{}).OnChange(context.Background(), view{plans: []model.Entity{p}, now: now}, p, []model.Change{{After: p.State}}); len(r.Intents) != 0 {
-		t.Fatalf("%+v", r.Intents)
-	}
-	p.State.Start = "19:00"
-	if r := (Schedule{}).OnChange(context.Background(), view{plans: []model.Entity{p}, now: now}, p, []model.Change{{After: p.State}}); len(r.Intents) != 1 {
-		t.Fatalf("아직 안 시작한 일정은 물어야 합니다: %+v", r.Intents)
-	}
-}
-
 // What protect moves an entry for: another entry. Not a plan turned down, not a
 // plan nobody has agreed to put on the calendar, not a part of the same outing
 // (2026-11-02).
@@ -287,5 +277,39 @@ func TestOnlyAnotherEntryMovesAnEntry(t *testing.T) {
 	setting.State.End = "14:00"
 	if r := (Protect{}).OnChange(context.Background(), view{plans: []model.Entity{lunch, setting}, now: now}, lunch, nil); len(r.Intents) != 0 {
 		t.Fatalf("한 만남의 두 부분은 겹치는 것이 아닙니다: %+v", r.Intents)
+	}
+}
+
+// Two rooms on one dinner are one question: the second telling goes on the plan
+// told first, and it is that plan's card that says so.
+func TestATellingInAnotherRoomIsOneQuestion(t *testing.T) {
+	now := time.Date(2026, 11, 3, 10, 0, 0, 0, seoul)
+	first := talked("p1", "지수와 저녁", "19:00", "", now.Add(-time.Hour))
+	first.State.Date = "2026-11-20"
+	second := talked("p2", "저녁 약속 (지수)", "19:00", "", now)
+	second.Room, second.State.Date, second.State.Place = "kakao:2", "2026-11-20", "연습실 역삼점"
+	v := view{plans: []model.Entity{first, second}, now: now}
+	r := (Schedule{}).OnChange(context.Background(), v, second, []model.Change{{After: second.State}})
+	if len(r.Intents) != 0 || !r.Withdraw || len(r.Updates) != 2 {
+		t.Fatalf("합쳐야 합니다: %+v", r)
+	}
+	next := first
+	if !r.Updates[0].Set(&next.State) || next.State.Place != "연습실 역삼점" {
+		t.Fatalf("먼저 말한 일정에 새 내용이: %+v", next.State)
+	}
+	gone := second
+	if !r.Updates[1].Set(&gone.State) || gone.State.Status != model.Cancelled || gone.State.MergedInto != first.ID {
+		t.Fatalf("%+v", gone.State)
+	}
+
+	// It is first told once: the plan told first does not fold into the later.
+	if r := (Schedule{}).OnChange(context.Background(), v, first, []model.Change{{After: first.State}}); len(r.Intents) != 1 {
+		t.Fatalf("먼저 말한 일정은 묻습니다: %+v", r)
+	}
+
+	// Another day is another plan.
+	second.State.Date = "2026-11-21"
+	if r := (Schedule{}).OnChange(context.Background(), view{plans: []model.Entity{first, second}, now: now}, second, []model.Change{{After: second.State}}); len(r.Intents) != 1 {
+		t.Fatalf("다른 날은 따로 묻습니다: %+v", r)
 	}
 }

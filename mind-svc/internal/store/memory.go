@@ -394,6 +394,10 @@ func (m *Memory) IntentsSince(_ context.Context, t time.Time) ([]model.Intent, e
 	return m.filter(func(in model.Intent) bool { return in.Holder == "" && !in.CreatedAt.Before(t) }, 10000), nil
 }
 
+func (m *Memory) HeldSince(_ context.Context, t time.Time) ([]model.Intent, error) {
+	return m.filter(func(in model.Intent) bool { return in.Holder != "" && !in.CreatedAt.Before(t) }, 10000), nil
+}
+
 func (m *Memory) filter(keep func(model.Intent) bool, limit int) []model.Intent {
 	m.mu.Lock()
 	defer m.mu.Unlock()

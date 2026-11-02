@@ -216,6 +216,32 @@ func TestAnAnswerRunsTheCard(t *testing.T) {
 	}
 }
 
+// A card raised in the conversation comes through the stream like any answer,
+// and mind's own card about the same entry stands aside.
+func TestACardInTheConversationComesByTheStream(t *testing.T) {
+	s, h, m := commandServer(t)
+	ctx := context.Background()
+	payload, _ := json.Marshal(model.CalendarAction{Event: model.CalendarEvent{Title: "지수와 합주", Date: "2026-11-20", Start: "15:00"}})
+	in, err := m.Gate.Submit(ctx, model.Intent{Skill: gate.ScheduleSkill, Kind: "calendar.create", EntityID: "plan_a", Payload: payload, Title: "캘린더에 추가", Confidence: 0.9, Reversible: true})
+	if err != nil || in.Status != model.Pending {
+		t.Fatalf("%+v %v", in, err)
+	}
+	body := `{"kind":"calendar.create_event","title":"일정을 추가합니다","calendar":{"event":{"title":"기타 합주 (지수)","date":"2026-11-20","start":"15:00"}}}`
+	if err := s.Command(ctx, command("intent.answer", "cmd-5", "operator", "POST", "/api/intents/p-1/asked", body)); err != nil {
+		t.Fatal(err)
+	}
+	if code, out := read(t, h, "tok", "cmd-5"); code != http.StatusOK || out["status"] != float64(200) {
+		t.Fatalf("%d %v", code, out)
+	}
+	held, err := m.Opts.Store.Intent(ctx, "card:p-1")
+	if err != nil || held.Status != model.Asked || held.Kind != "calendar.create_event" {
+		t.Fatalf("%+v %v", held, err)
+	}
+	if got, _ := m.Opts.Store.Intent(ctx, in.ID); !got.Covered() {
+		t.Fatalf("%+v", got)
+	}
+}
+
 // The jobs are for those who hold a token; the guest's opens their side.
 func TestTheJobsWantAToken(t *testing.T) {
 	m := mind.New(mind.Options{Store: store.NewMemory(), Log: obs.NewMemoryLog(slog.New(slog.NewTextHandler(io.Discard, nil))),

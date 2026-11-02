@@ -24,7 +24,7 @@ func TestEntryLikeOneTurnedDownIsNotAskedAgain(t *testing.T) {
 		Error: "롤체 약속은 캘린더에 추가하지마", CreatedAt: at, DecidedAt: &at,
 	}}}
 	plan := func(id, title string) model.Entity {
-		return model.Entity{ID: id, Kind: model.KindPlan, State: model.State{Title: title, Status: model.Confirmed, Date: "2026-10-26", Start: "18:00"}}
+		return model.Entity{ID: id, Kind: model.KindPlan, State: model.State{Title: title, Status: model.Confirmed, Date: "2026-10-27", Start: "18:00"}}
 	}
 	if _, ok := (Schedule{}).add(ctx, v, plan("plan_same", "은주와 롤체"), nil); ok {
 		t.Fatal("거절한 것과 같은 제목은 다시 묻지 않아야 합니다")
@@ -62,20 +62,25 @@ func TestAlikeWords(t *testing.T) {
 	}
 }
 
-// A day gone by is not asked about: read late, the card came for what had
-// already happened.
-func TestADayGoneByIsNotAskedAbout(t *testing.T) {
+// Today and the days gone by are not asked about: 25 cards to add today's plan,
+// and not one approved. Tomorrow is, and a card for a plan that came to today
+// goes.
+func TestOnlyWhatIsComingIsAskedAbout(t *testing.T) {
 	ctx := context.Background()
-	now := time.Date(2026, 10, 26, 15, 0, 0, 0, seoul)
-	v := view{now: now}
-	past := model.Entity{ID: "plan_a", State: model.State{Title: "저녁", Date: "2026-10-25", Status: model.Confirmed}}
-	if _, ok := (Schedule{}).add(ctx, v, past, nil); ok {
-		t.Fatal("지난 날은 묻지 않습니다")
+	v := view{now: time.Date(2026, 10, 26, 15, 0, 0, 0, seoul)}
+	plan := model.Entity{ID: "plan_a", Kind: model.KindPlan, State: model.State{Title: "저녁", Status: model.Confirmed}}
+	for date, want := range map[string]int{"2026-10-25": 0, "2026-10-26": 0, "2026-10-27": 1} {
+		plan.State.Date = date
+		r := Schedule{}.OnChange(ctx, v, plan, []model.Change{{After: plan.State}})
+		if len(r.Intents) != want || r.Withdraw != (want == 0) {
+			t.Fatalf("%s: %+v", date, r)
+		}
 	}
-	today := past
-	today.State.Date = "2026-10-26"
-	if _, ok := (Schedule{}).add(ctx, v, today, nil); !ok {
-		t.Fatal("오늘은 묻습니다")
+	// A plan told late at night for the next morning is still tomorrow's.
+	late := view{now: time.Date(2026, 10, 26, 23, 50, 0, 0, seoul)}
+	plan.State.Date, plan.State.Start = "2026-10-27", "09:00"
+	if r := (Schedule{}).OnChange(ctx, late, plan, []model.Change{{After: plan.State}}); len(r.Intents) != 1 {
+		t.Fatalf("내일 아침 일정은 묻습니다: %+v", r)
 	}
 }
 

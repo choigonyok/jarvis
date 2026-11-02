@@ -63,8 +63,6 @@ type raisedCard struct {
 	Title string `json:"title"`
 }
 
-func heldID(card string) string { return "card:" + card }
-
 // mindActions are the agent's actions that are answers to mind's own cards,
 // which come here as commands and are not the agent's to hold.
 var mindActions = map[string]bool{"mind.approve": true, "mind.undo": true}
@@ -76,7 +74,7 @@ func (m *Mind) PaymentRaised(ctx context.Context, msg queue.Message) error {
 		return fmt.Errorf("%w: 결제 카드를 읽지 못했습니다", queue.ErrRefused)
 	}
 	return m.Opts.Store.PutIntent(ctx, model.Intent{
-		ID: heldID(c.Card), Skill: model.HeldSkill, Kind: "payment", Title: c.Title, Holder: msg.TraceID,
+		ID: model.HeldID(c.Card), Skill: model.HeldSkill, Kind: "payment", Title: c.Title, Holder: msg.TraceID,
 		Status: model.Pending, CreatedAt: msg.OccurredAt,
 	})
 }
@@ -89,15 +87,15 @@ func (m *Mind) HeldCard(ctx context.Context, msg queue.Message) error {
 	if err := json.Unmarshal(msg.Payload, &a); err != nil || a.Card == "" || mindActions[a.Action] {
 		return nil
 	}
-	in, err := m.Opts.Store.Intent(ctx, heldID(a.Card))
+	in, err := m.Opts.Store.Intent(ctx, model.HeldID(a.Card))
 	if err != nil {
-		in = model.Intent{ID: heldID(a.Card), Skill: model.HeldSkill, Kind: a.Action, Title: a.Title, Holder: msg.TraceID, CreatedAt: msg.OccurredAt}
+		in = model.Intent{ID: model.HeldID(a.Card), Skill: model.HeldSkill, Kind: a.Action, Title: a.Title, Holder: msg.TraceID, CreatedAt: msg.OccurredAt}
 		if in.Holder == "" {
 			in.Holder = "chat"
 		}
 	}
 	in.Status = model.Rejected
-	if a.Decision == "approve" {
+	if a.Decision == "approved" {
 		in.Status = model.Executed
 	}
 	return m.Opts.Store.PutIntent(ctx, in)

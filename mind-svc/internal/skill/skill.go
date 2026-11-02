@@ -45,6 +45,8 @@ type View interface {
 	IntentsSince(ctx context.Context, t time.Time) ([]model.Intent, error)
 	Now() time.Time
 	Loc() *time.Location
+	// Same is whether two plans are one event (gate.Same).
+	Same(ctx context.Context, a, b model.State) bool
 	// Recall is a few things long-term memory holds about these people -
 	// "지수: 매운 음식을 못 먹음" - to put in front of the operator when it
 	// helps. Empty when memory has nothing or is not there.

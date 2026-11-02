@@ -71,6 +71,9 @@ type Store interface {
 	// IntentsSince is every intent created since t, newest first - what the
 	// gate learns from and counts against the day's budget.
 	IntentsSince(ctx context.Context, t time.Time) ([]model.Intent, error)
+	// HeldSince is every card the agent holds raised since t, newest first:
+	// what the conversation asked for itself.
+	HeldSince(ctx context.Context, t time.Time) ([]model.Intent, error)
 
 	// Sensor cursors.
 	Cursor(ctx context.Context, name string) (int64, error)

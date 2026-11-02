@@ -41,7 +41,7 @@ import (
 
 // Types is what the assistant subscribes to: mind's cards, what mind says
 // at a moment, and the lists it shows.
-var Types = []string{mind.CardRaised, mind.CardClosed, "remind.*", ChecklistShown, ListChanged, CalendarChanged, JobsWake}
+var Types = []string{mind.CardRaised, mind.CardUpdated, mind.CardClosed, "remind.*", ChecklistShown, ListChanged, CalendarChanged, JobsWake}
 
 // GuestTypes is what the guest's agent subscribes to: what mind says to the
 // guest at a moment.
@@ -176,6 +176,8 @@ func (e *Engine) handle(ev Event) {
 		}
 	case ev.Type == mind.CardRaised:
 		e.raiseCard(ev)
+	case ev.Type == mind.CardUpdated:
+		e.reviseCard(ev)
 	case ev.Type == mind.CardClosed:
 		e.closeCard(ev)
 	case strings.HasPrefix(ev.Type, "remind."):
@@ -266,29 +268,9 @@ func (e *Engine) raiseCard(ev Event) {
 	if _, ok := e.findCard(c.IntentID); ok {
 		return
 	}
-	if c.Mode == "ask" {
-		if chat, ok := e.chatCard(c.Kind, c.Calendar); ok {
-			err := e.cover(c.IntentID, chat.ID)
-			if err == nil {
-				e.log.Info("대화에 같은 일정 카드가 있어 mind 카드를 열지 않았습니다", "intent", c.IntentID, "card", chat.ID)
-				return
-			}
-			e.log.Warn("mind 에 대화의 카드가 있다고 알리지 못해 카드를 엽니다", "intent", c.IntentID, "card", chat.ID, "err", err)
-		}
-	}
-	kind := mind.Approve
-	if c.Mode == "undo" {
-		kind = mind.Undo
-	}
-	card := mind.CardText(c)
-	card.Images = e.photos(c.Photos)
-	in := mind.Input{IntentID: c.IntentID, Kind: c.Kind, Calendar: c.Calendar}
-	if len(card.Fields) > 0 {
-		in.Card = &card // a form: redrawn with the answers on approval
-	}
-	input, _ := json.Marshal(in)
+	act, card := e.drawCard(c)
 	p, _ := e.proposals.Open(proposal.Proposal{
-		Origin: proposal.OriginSuggest, Action: action.Action{Kind: kind, Input: input},
+		Origin: proposal.OriginSuggest, Action: act,
 		Card: card, Confidence: c.Confidence, Quiet: c.Quiet,
 	})
 	if e.cfg.Say != nil {
@@ -306,6 +288,43 @@ func (e *Engine) raiseCard(ev Event) {
 		"data": map[string]any{"topic": "mind:" + c.Skill, "proposalId": p.ID, "title": c.Title, "intentId": c.IntentID},
 		"key":  "suggestion:raised:" + p.ID,
 	})
+}
+
+// drawCard is what a mind card is as an approval card.
+func (e *Engine) drawCard(c mind.Card) (action.Action, action.Card) {
+	kind := mind.Approve
+	if c.Mode == "undo" {
+		kind = mind.Undo
+	}
+	card := mind.CardText(c)
+	card.Images = e.photos(c.Photos)
+	in := mind.Input{IntentID: c.IntentID, Kind: c.Kind}
+	if len(card.Fields) > 0 {
+		in.Card = &card // a form: redrawn with the answers on approval
+	}
+	input, _ := json.Marshal(in)
+	return action.Action{Kind: kind, Input: input}, card
+}
+
+// reviseCard puts on a waiting card what its question has become. It stays
+// where it is and rings nothing more. One the agent never opened is opened.
+func (e *Engine) reviseCard(ev Event) {
+	var c mind.Card
+	if json.Unmarshal(ev.Data, &c) != nil || c.IntentID == "" {
+		return
+	}
+	p, ok := e.findCard(c.IntentID)
+	if !ok {
+		e.raiseCard(ev)
+		return
+	}
+	if p.State != proposal.Pending {
+		return
+	}
+	act, card := e.drawCard(c)
+	if err := e.proposals.Refresh(p.ID, act, card, c.Confidence); err != nil {
+		e.log.Warn("카드를 고치지 못했습니다", "card", p.ID, "intent", c.IntentID, "err", err)
+	}
 }
 
 // photos brings a card's photos in. One that cannot be fetched is left out: the

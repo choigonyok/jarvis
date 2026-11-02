@@ -322,6 +322,27 @@ func (s *Store) ReviseWith(id string, a action.Action, c action.Card, edits map[
 	return nil
 }
 
+// Refresh puts on a waiting card what it asks now, for the screens to redraw
+// where it is: unlike ReviseWith nobody edited it, and it is said at once.
+func (s *Store) Refresh(id string, a action.Action, c action.Card, confidence float64) error {
+	s.mu.Lock()
+	p, ok := s.byID[id]
+	if !ok {
+		s.mu.Unlock()
+		return ErrNotFound
+	}
+	if p.State != Pending {
+		s.mu.Unlock()
+		return ErrAlreadyDecided
+	}
+	p.Action, p.Card, p.Confidence = a, c, confidence
+	s.save()
+	snapshot := *p
+	s.mu.Unlock()
+	s.bus.Publish(bus.Event{Type: "proposal", Proposal: snapshot})
+	return nil
+}
+
 // OnDecide registers fn to hear every decision. Register before serving.
 func (s *Store) OnDecide(fn func(Proposal, Decision)) {
 	s.mu.Lock()

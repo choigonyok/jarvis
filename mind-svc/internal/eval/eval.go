@@ -94,6 +94,9 @@ type Turn struct {
 	Entries []model.CalendarEvent `json:"entries,omitempty"`
 	// Note is a note the operator wrote (confirmed), before the turn runs.
 	Note *model.Note `json:"note,omitempty"`
+	// Asked is a calendar card the assistant raised in the conversation, told
+	// to mind before the turn runs, as the agent tells it.
+	Asked *model.CalendarAction `json:"asked,omitempty"`
 	// Script is what the model should answer to this turn's reading, for the
 	// deterministic run.
 	Script json.RawMessage `json:"script,omitempty"`
@@ -563,6 +566,15 @@ func Run(ctx context.Context, sc Scenario, client llm.Client, loc *time.Location
 				fail(i, "캘린더 읽기: %v", err)
 			}
 			quiesce()
+		}
+		if t.Asked != nil {
+			kind := "calendar.create_event"
+			if t.Asked.EventID != "" {
+				kind = "calendar.update_event"
+			}
+			if _, err := m.Gate.Asked(ctx, fmt.Sprintf("eval-%d", i), kind, t.Asked.Event.Title, *t.Asked); err != nil {
+				fail(i, "%v", err)
+			}
 		}
 		before, _ := st.Intents(ctx, 10000)
 		seen := map[string]bool{}

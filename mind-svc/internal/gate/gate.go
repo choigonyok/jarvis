@@ -91,6 +91,9 @@ const lowValue = 0.5
 // day's push budget never holds back.
 const BriefSkill = "brief"
 
+// ScheduleSkill is the skill that reads plans onto the calendar (skill.Schedule).
+const ScheduleSkill = "schedule"
+
 type Gate struct {
 	st     store.Store
 	acts   *act.Registry
@@ -106,6 +109,9 @@ type Gate struct {
 	// OnDecide hears every intent the operator answered (approved, turned
 	// down, undid) - what notes learn from.
 	OnDecide func(ctx context.Context, in model.Intent)
+	// Judge hears what the rules leave open of two plans (Same). Nil leaves
+	// them apart.
+	Judge func(ctx context.Context, a, b model.State) bool
 	// book is the result ledger's record, replaced whole when the ledger is
 	// made again. Nil knows nothing and every intent stands as stated.
 	book atomic.Pointer[engine.Book]
@@ -167,23 +173,47 @@ func (g *Gate) Submit(ctx context.Context, in model.Intent) (model.Intent, error
 		in.Decision, in.Status, in.Why, in.DecidedBy, in.DecidedAt = model.Drop, model.Dropped, why, "policy", &at
 		return in, g.st.PutIntent(ctx, in)
 	}
-	// One entry asked about twice - the same days at the same place, read in
-	// two rooms as two plans (2026-11-01), or a move and a move of it - is one
-	// question: the card still open for the other is closed and this one, the
-	// newer, stands.
+	open, asked := g.openCard(ctx, in)
 	if strings.HasPrefix(in.Kind, "calendar.") {
-		if err := g.withdrawAlike(ctx, in); err != nil {
+		// Asked in the conversation: the assistant's own card is the question.
+		if by, ok := g.askedInChat(ctx, in); ok {
+			at := g.now()
+			in.Status, in.DecidedBy, in.DecidedAt, in.Error = model.Superseded, model.ByConversation, &at, coveredBy(by)
+			return in, g.st.PutIntent(ctx, in)
+		}
+		// One entry asked about twice - the same days at the same place, read
+		// in two rooms as two plans (2026-11-01), or a move and a move of it -
+		// is one question: the card still open for the other is closed and
+		// this one, the newer, stands.
+		by := in.ID
+		if asked {
+			by = open.ID
+		}
+		if err := g.withdrawAlike(ctx, in, by); err != nil {
 			return in, err
 		}
 	}
-	// A newer intent about the same thing replaces a question still open:
-	// the plan moved again before anyone answered.
+	// A newer intent about the same thing replaces a question still open: the
+	// plan moved again before anyone answered. The card that asks the same thing
+	// stays up until this one is known to be a question too.
 	if in.EntityID != "" {
-		if err := g.withdraw(ctx, in.EntityID, in.Skill, "새 판단으로 대체됨"); err != nil {
+		if err := g.withdraw(ctx, in.EntityID, in.Skill, "새 판단으로 대체됨", open.ID); err != nil {
 			return in, err
 		}
 	}
+	out, err := g.admit(ctx, in, open, asked)
+	if asked && out.ID != open.ID {
+		// Done, dropped or failed instead: there is no question left to keep.
+		if err := g.replace(ctx, open, "새 판단으로 대체됨"); err != nil {
+			return out, err
+		}
+	}
+	return out, err
+}
 
+// admit does with an intent what the policy says. A question that asks what
+// open asks (asked) goes on that card.
+func (g *Gate) admit(ctx context.Context, in, open model.Intent, asked bool) (model.Intent, error) {
 	if in.Kind == "info" {
 		in.Decision, in.Status, in.DecidedBy = model.Digest, model.Executed, "policy"
 		in.Tier, in.Why = "digest", "알려 둘 일"
@@ -254,6 +284,9 @@ func (g *Gate) Submit(ctx context.Context, in model.Intent) (model.Intent, error
 			g.tellLocal(ctx, in, "처리했어요", in.Title+"\n되돌리려면 눌러서 확인하세요")
 		}
 	case model.Ask:
+		if asked {
+			return g.retell(ctx, in, open)
+		}
 		in.Tier = "now"
 		if quiet, why := g.quietCard(ctx, in); quiet {
 			in.Tier, in.Why = "digest", why
@@ -271,6 +304,37 @@ func (g *Gate) Submit(ctx context.Context, in model.Intent) (model.Intent, error
 	case model.Drop:
 		in.Status = model.Dropped
 	}
+	return in, g.st.PutIntent(ctx, in)
+}
+
+// openCard is the card still open that asks what in asks: the same plan, the
+// same skill, the same kind of calendar change.
+func (g *Gate) openCard(ctx context.Context, in model.Intent) (model.Intent, bool) {
+	if in.EntityID == "" || !strings.HasPrefix(in.Kind, "calendar.") {
+		return model.Intent{}, false
+	}
+	about, err := g.st.IntentsFor(ctx, in.EntityID)
+	if err != nil {
+		return model.Intent{}, false
+	}
+	for _, p := range about {
+		if p.Status == model.Pending && p.Card && p.Skill == in.Skill && p.Kind == in.Kind {
+			return p, true
+		}
+	}
+	return model.Intent{}, false
+}
+
+// retell puts what a question has become on the card asking it. A time moved
+// again before anyone answered is one question: closed and raised anew each
+// time it rang each time, and 45 entries took 81 cards (to 2026-11-03). The card
+// keeps its place, its ring and its count; only what it says changes.
+func (g *Gate) retell(ctx context.Context, in, open model.Intent) (model.Intent, error) {
+	in.ID, in.CreatedAt, in.Card, in.Tier, in.Why = open.ID, open.CreatedAt, true, open.Tier, open.Why
+	if len(in.Evidence) == 0 {
+		in.Evidence = open.Evidence
+	}
+	g.send(ctx, in, "ask", CardUpdated, fmt.Sprintf("%s:%s:%d", CardUpdated, in.ID, g.now().UnixNano()))
 	return in, g.st.PutIntent(ctx, in)
 }
 
@@ -420,23 +484,31 @@ func (g *Gate) hear(ctx context.Context, in model.Intent) {
 func (g *Gate) Withdraw(ctx context.Context, entityID, skill string) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return g.withdraw(ctx, entityID, skill, "더 이상 필요 없음")
+	return g.withdraw(ctx, entityID, skill, "더 이상 필요 없음", "")
 }
 
-func (g *Gate) withdraw(ctx context.Context, entityID, skill, why string) error {
+// withdraw closes a skill's open questions about an entity, but for keep.
+func (g *Gate) withdraw(ctx context.Context, entityID, skill, why, keep string) error {
 	open, err := g.st.IntentsFor(ctx, entityID)
 	if err != nil {
 		return err
 	}
 	for _, p := range open {
-		if p.Status == model.Pending && p.Skill == skill {
-			p.Status, p.Error = model.Superseded, why
-			if err := g.st.PutIntent(ctx, p); err != nil {
+		if p.Status == model.Pending && p.Skill == skill && p.ID != keep {
+			if err := g.replace(ctx, p, why); err != nil {
 				return err
 			}
-			g.closeCard(ctx, p)
 		}
 	}
+	return nil
+}
+
+func (g *Gate) replace(ctx context.Context, p model.Intent, why string) error {
+	p.Status, p.Error = model.Superseded, why
+	if err := g.st.PutIntent(ctx, p); err != nil {
+		return err
+	}
+	g.closeCard(ctx, p)
 	return nil
 }
 
@@ -445,8 +517,8 @@ func (g *Gate) withdraw(ctx context.Context, entityID, skill, why string) error 
 const alikeWithin = 30 * 24 * time.Hour
 
 // withdrawAlike closes the open calendar questions about other plans that ask
-// about the same entry as in (sameEntry).
-func (g *Gate) withdrawAlike(ctx context.Context, in model.Intent) error {
+// about the same entry as in (sameEntry): the card by asks it now.
+func (g *Gate) withdrawAlike(ctx context.Context, in model.Intent, by string) error {
 	var a model.CalendarAction
 	if json.Unmarshal(in.Payload, &a) != nil {
 		return nil
@@ -467,7 +539,7 @@ func (g *Gate) withdrawAlike(ctx context.Context, in model.Intent) error {
 		}
 		at := g.now()
 		p.Status, p.DecidedBy, p.DecidedAt, p.Tier = model.Superseded, "policy", &at, ""
-		p.Error = "같은 일정의 새 카드로 바뀜 (" + in.ID + ")"
+		p.Error = "같은 일정의 새 카드로 바뀜 (" + by + ")"
 		if err := g.st.PutIntent(ctx, p); err != nil {
 			return err
 		}
@@ -477,44 +549,130 @@ func (g *Gate) withdrawAlike(ctx context.Context, in model.Intent) error {
 }
 
 // sameEntry is whether two calendar questions are about one entry: the entry
-// itself, or the same day and the same place, the same title or the same
-// outing. The rule was narrower (a new entry alone, the same place or title to
-// the letter), and of four cards about one morning's plans none closed another
-// (2026-11-02): one room's booking and the lunch after it say neither.
+// itself, or plans that are one event.
 func (g *Gate) sameEntry(ctx context.Context, x model.Intent, a model.CalendarAction, y model.Intent, b model.CalendarAction) bool {
 	if a.EventID != "" && a.EventID == b.EventID {
 		return true
 	}
-	if a.Event.Date == "" || a.Event.Date != b.Event.Date {
-		return false
-	}
-	flat := func(s string) string { return strings.ToLower(strings.Join(strings.Fields(s), "")) }
-	if p := flat(a.Event.Place); p != "" && p == flat(b.Event.Place) {
+	return g.Same(ctx, g.planOf(ctx, x, a), g.planOf(ctx, y, b))
+}
+
+// Same is the one answer to whether two plans are one event, for all that asks
+// the operator about plans: the rules (model.Compare), and what they leave open,
+// the judgement.
+func (g *Gate) Same(ctx context.Context, a, b model.State) bool {
+	switch model.Compare(a, b) {
+	case model.Same:
 		return true
+	case model.Unsure:
+		return g.Judge != nil && g.Judge(ctx, a, b)
 	}
-	if flat(a.Event.Title) == flat(b.Event.Title) {
-		return true
-	}
-	one, other := g.planOf(ctx, x, a), g.planOf(ctx, y, b)
-	return model.SameOuting(one, other) || model.SameEvent(one, other)
+	return false
 }
 
 // planOf is the plan a calendar question is about, or what the question itself
 // says of it when there is none.
 func (g *Gate) planOf(ctx context.Context, in model.Intent, a model.CalendarAction) model.State {
-	s := model.State{Title: a.Event.Title, Date: a.Event.Date, EndDate: a.Event.EndDate, Start: a.Event.Start, End: a.Event.End}
+	s := model.State{Title: a.Event.Title, Date: a.Event.Date, EndDate: a.Event.EndDate, Start: a.Event.Start, End: a.Event.End, Place: a.Event.Place}
 	if e, err := g.st.Entity(ctx, in.EntityID); err == nil {
 		s.People = e.State.People
 	}
 	return s
 }
 
+// askedWithin is how long a card raised in the conversation speaks for its
+// question, answered or not: mind reads the same conversation a minute later,
+// and turned down there, it is not asked again here.
+const askedWithin = 48 * time.Hour
+
+// Asked enters a calendar card the assistant raised in the conversation. What
+// the operator asked for by name is the card they are looking at: mind read the
+// same words as a plan, found no entry and asked as well, and 6 of the 7 entries
+// asked for that way took two cards (to 2026-11-03). mind's card still open about
+// it stands aside, and none is raised while the row speaks (askedInChat). With
+// no card in the conversation mind's is the only question, and stands.
+func (g *Gate) Asked(ctx context.Context, card, kind, title string, a model.CalendarAction) (model.Intent, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	payload, err := json.Marshal(a)
+	if err != nil {
+		return model.Intent{}, err
+	}
+	in, err := g.st.Intent(ctx, model.HeldID(card))
+	switch {
+	case errors.Is(err, model.ErrNotFound):
+		in = model.Intent{ID: model.HeldID(card), Skill: model.HeldSkill, Kind: kind, Title: title, Holder: "chat", Status: model.Asked, CreatedAt: g.now()}
+	case err != nil:
+		return in, err
+	}
+	in.Payload = payload
+	if err := g.st.PutIntent(ctx, in); err != nil {
+		return in, err
+	}
+	open, err := g.st.IntentsSince(ctx, g.now().Add(-alikeWithin))
+	if err != nil {
+		return in, err
+	}
+	for _, p := range open {
+		if p.Status == model.Pending && strings.HasPrefix(p.Kind, "calendar.") && g.asksSame(ctx, p, in) {
+			if _, err := g.cover(ctx, p, card); err != nil {
+				return in, err
+			}
+		}
+	}
+	return in, nil
+}
+
+// askedInChat is the card in the conversation that asks what in asks.
+func (g *Gate) askedInChat(ctx context.Context, in model.Intent) (string, bool) {
+	rows, err := g.st.HeldSince(ctx, g.now().Add(-askedWithin))
+	if err != nil {
+		return "", false
+	}
+	for _, held := range rows {
+		if g.asksSame(ctx, in, held) {
+			return strings.TrimPrefix(held.ID, model.HeldID("")), true
+		}
+	}
+	return "", false
+}
+
+// asksSame is whether a card in the conversation (held) asks what in asks: the
+// same entry, unless it is moved two ways - two changes to one entry are two
+// questions - or plans that are one event. What the operator said to the
+// assistant is a plan read from the very words of the card, under a title of the
+// interpreter's: there, the day and the hour say it.
+func (g *Gate) asksSame(ctx context.Context, in, held model.Intent) bool {
+	var a, b model.CalendarAction
+	if len(held.Payload) == 0 || !strings.HasPrefix(held.Kind, "calendar.") ||
+		json.Unmarshal(in.Payload, &a) != nil || json.Unmarshal(held.Payload, &b) != nil {
+		return false
+	}
+	told := false
+	if e, err := g.st.Entity(ctx, in.EntityID); err == nil && in.Skill == ScheduleSkill {
+		told = model.IsOwnerRoom(e.Room)
+	}
+	one, other := g.planOf(ctx, in, a), g.planOf(ctx, held, b)
+	switch {
+	case a.EventID != "" && a.EventID == b.EventID:
+		return told || in.Kind != "calendar.update" || !strings.HasPrefix(held.Kind, "calendar.update") || sameMove(a.Event, b.Event)
+	case told:
+		return model.SameHour(one, other)
+	case a.EventID != "" && b.EventID != "":
+		return false
+	}
+	return g.Same(ctx, one, other)
+}
+
+// sameMove is whether what the conversation's card says of an entry (b, only
+// what it changes) is where mind would move it (a).
+func sameMove(a, b model.CalendarEvent) bool {
+	return b.Date+b.Start != "" && (b.Date == "" || b.Date == a.Date) && (b.Start == "" || b.Start == a.Start)
+}
+
 // Covered stands an asked intent aside for the same question asked in the
-// conversation: the assistant's own card for the change (by) was up when
-// this one's card came, so the agent did not show it - the operator was
-// asked twice for one entry (2026-10-26). Nobody answered it, so there is
-// nothing to learn from, and it rang nothing, so it is none of the day's
-// cards.
+// conversation, on the assistant's own card (by). Nobody answered it, so there is
+// nothing to learn from, and it is none of the day's cards.
 func (g *Gate) Covered(ctx context.Context, id, by string) (model.Intent, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -522,17 +680,25 @@ func (g *Gate) Covered(ctx context.Context, id, by string) (model.Intent, error)
 	if err != nil {
 		return in, err
 	}
+	return g.cover(ctx, in, by)
+}
+
+func (g *Gate) cover(ctx context.Context, in model.Intent, by string) (model.Intent, error) {
 	at := g.now()
-	in.Status, in.DecidedBy, in.DecidedAt, in.Tier = model.Superseded, model.ByConversation, &at, ""
-	in.Error = "대화에서 같은 카드를 먼저 올렸어요"
-	if by != "" {
-		in.Error += " (" + by + ")"
-	}
+	in.Status, in.DecidedBy, in.DecidedAt, in.Tier, in.Error = model.Superseded, model.ByConversation, &at, "", coveredBy(by)
 	if err := g.st.PutIntent(ctx, in); err != nil {
 		return in, err
 	}
 	g.closeCard(ctx, in)
 	return in, nil
+}
+
+func coveredBy(card string) string {
+	why := "대화에서 같은 카드를 먼저 올렸어요"
+	if card != "" {
+		why += " (" + card + ")"
+	}
+	return why
 }
 
 func (g *Gate) pending(ctx context.Context, id string) (model.Intent, error) {
@@ -843,30 +1009,25 @@ type Card struct {
 	// Quiet: raise the card, but do not ring for it - it goes out with the
 	// evening digest (quietCard said why).
 	Quiet bool `json:"quiet,omitempty"`
-	// Calendar is a calendar card's change - the entry it is about and the
-	// entry to be - for the agent to tell it from the same change asked in
-	// the conversation (Covered).
-	Calendar *model.CalendarAction `json:"calendar,omitempty"`
 }
 
 // The one path a card takes to the operator, and back.
 const (
-	CardRaised = "mind.card"
-	CardClosed = "mind.card.closed"
+	CardRaised  = "mind.card"
+	CardUpdated = "mind.card.updated"
+	CardClosed  = "mind.card.closed"
 )
 
 func (g *Gate) card(ctx context.Context, in model.Intent, mode string) {
+	g.send(ctx, in, mode, CardRaised, CardRaised+":"+in.ID)
+}
+
+func (g *Gate) send(ctx context.Context, in model.Intent, mode, typ, key string) {
 	c := Card{IntentID: in.ID, Mode: mode, Skill: in.Skill, Kind: in.Kind, Title: in.Title, Body: in.Body,
 		Preview: in.Preview, Reason: in.Reason, Why: in.Why, Evidence: in.Evidence, Confidence: in.Confidence, Reversible: in.Reversible,
 		Fields: in.Fields, Photos: in.Photos, Quiet: in.Tier != "now"}
-	if strings.HasPrefix(in.Kind, "calendar.") {
-		var a model.CalendarAction
-		if json.Unmarshal(in.Payload, &a) == nil {
-			c.Calendar = &a
-		}
-	}
 	data, _ := json.Marshal(c)
-	g.append(ctx, obs.Observation{Source: "mind", Type: CardRaised, Subject: in.ID, Data: data, Key: CardRaised + ":" + in.ID, OccurredAt: g.now()})
+	g.append(ctx, obs.Observation{Source: "mind", Type: typ, Subject: in.ID, Data: data, Key: key, OccurredAt: g.now()})
 }
 
 // Close tells the agent a card went stale (withdrawn from outside the gate).

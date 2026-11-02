@@ -42,6 +42,15 @@ func create(entity string) model.Intent {
 	return model.Intent{Skill: "schedule", Kind: "calendar.create", EntityID: entity, Payload: payload, Title: "캘린더에 추가", Confidence: 0.9, Reversible: true}
 }
 
+// move is a change to a plan already on the calendar: another question than
+// its add.
+func move(entity string) model.Intent {
+	in := create(entity)
+	in.Kind = "calendar.update"
+	in.Payload, _ = json.Marshal(model.CalendarAction{EventID: "ev1", Event: model.CalendarEvent{Title: "저녁", Date: "2026-10-18"}})
+	return in
+}
+
 // The day's push budget holds other notices for the evening, never the
 // morning brief: loops told at 07:00 must not send the 08:00 brief to the
 // digest (2026-10-25: nine loops with one person did).
@@ -177,13 +186,89 @@ func TestNewerReplacesUnanswered(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(DefaultPolicy())
 	first, _ := f.g.Submit(ctx, create("plan_x"))
-	second, _ := f.g.Submit(ctx, create("plan_x"))
+	second, _ := f.g.Submit(ctx, move("plan_x"))
 	old, _ := f.st.Intent(ctx, first.ID)
-	if old.Status != model.Superseded || second.Status != model.Pending {
+	if old.Status != model.Superseded || second.Status != model.Pending || second.ID == first.ID {
 		t.Fatalf("앞의 질문은 대체돼야 합니다: %s / %s", old.Status, second.Status)
 	}
 	if _, err := f.g.Approve(ctx, first.ID); err == nil {
 		t.Fatal("대체된 제안은 승인할 수 없어야 합니다")
+	}
+}
+
+// A plan that moves again before anyone answered is one question: the card
+// stays where it is and says what the plan says now. It rings once, counts
+// once, and an answer does what it says now (45 entries took 81 cards).
+func TestAnOpenCardIsToldWhatChanged(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(DefaultPolicy())
+	first := create("plan_x")
+	first.Evidence = []model.Evidence{{Ref: "m1", Quote: "토요일에 보자"}}
+	asked, err := f.g.Submit(ctx, first)
+	if err != nil || !asked.Card {
+		t.Fatalf("%+v %v", asked, err)
+	}
+	moved := create("plan_x")
+	moved.Title = "캘린더에 추가: 19:00 저녁"
+	moved.Payload, _ = json.Marshal(model.CalendarAction{Event: model.CalendarEvent{Title: "저녁 plan_x", Date: "2026-10-17", Start: "19:00"}})
+	told, err := f.g.Submit(ctx, moved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if told.ID != asked.ID || told.Status != model.Pending || !told.CreatedAt.Equal(asked.CreatedAt) || told.Tier != asked.Tier {
+		t.Fatalf("같은 카드여야 합니다: %+v / %+v", told, asked)
+	}
+	if len(told.Evidence) != 1 {
+		t.Fatalf("새 근거가 없으면 있던 근거를 둡니다: %+v", told.Evidence)
+	}
+
+	f.log.Drain()
+	all, _ := f.log.Read(ctx, 0, 1000)
+	var raised, updated, closed int
+	var said Card
+	for _, o := range all {
+		switch o.Type {
+		case CardRaised:
+			raised++
+		case CardUpdated:
+			updated++
+			_ = json.Unmarshal(o.Data, &said)
+		case CardClosed:
+			closed++
+		}
+	}
+	if raised != 1 || updated != 1 || closed != 0 {
+		t.Fatalf("올림 %d 고침 %d 닫음 %d", raised, updated, closed)
+	}
+	if said.IntentID != asked.ID || said.Title != moved.Title {
+		t.Fatalf("%+v", said)
+	}
+	if stat, _ := f.st.Policy(ctx, "schedule", told.ContextKey()); stat.Shown != 1 {
+		t.Fatalf("한 번 물은 것은 한 번입니다: %+v", stat)
+	}
+	done, err := f.g.Approve(ctx, asked.ID)
+	if err != nil || done.Status != model.Executed {
+		t.Fatalf("%+v %v", done, err)
+	}
+	if evs, _ := f.cal.Range(ctx, "2026-10-17", "2026-10-17"); len(evs) != 1 || evs[0].Start != "19:00" {
+		t.Fatalf("지금 말하는 대로 들어갑니다: %+v", evs)
+	}
+}
+
+// What comes of the newer intent decides: a move that is done without asking
+// leaves no question, and the card goes the way it always went.
+func TestACardNotAskedAgainCloses(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(DefaultPolicy())
+	asked, _ := f.g.Submit(ctx, create("plan_x"))
+	bad := create("plan_x")
+	bad.Payload = []byte(`{}`)
+	if _, err := f.g.Submit(ctx, bad); err != nil {
+		t.Fatal(err)
+	}
+	old, _ := f.st.Intent(ctx, asked.ID)
+	if old.Status != model.Superseded {
+		t.Fatalf("못 묻게 됐으면 앞의 카드를 닫습니다: %s", old.Status)
 	}
 }
 
@@ -202,7 +287,7 @@ func TestCardsGoOutAndClose(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(DefaultPolicy())
 	first, _ := f.g.Submit(ctx, create("plan_x"))
-	second, _ := f.g.Submit(ctx, create("plan_x"))
+	second, _ := f.g.Submit(ctx, move("plan_x"))
 	if !first.Card || !second.Card {
 		t.Fatalf("카드로 나가야 합니다: %+v %+v", first, second)
 	}
@@ -228,15 +313,15 @@ func TestCardsGoOutAndClose(t *testing.T) {
 	if rej.Error != "이미 넣었어" {
 		t.Fatalf("거절 이유가 남아야 합니다: %+v", rej)
 	}
-	stat, _ := f.st.Policy(ctx, "schedule", "calendar.create")
-	if stat.Shown != 2 || stat.Rejected != 1 || stat.Last != model.OutcomeRejected {
+	stat, _ := f.st.Policy(ctx, "schedule", "calendar.update")
+	if stat.Shown != 1 || stat.Rejected != 1 || stat.Last != model.OutcomeRejected {
 		t.Fatalf("승인율 통계: %+v", stat)
 	}
 	if n, err := f.g.Rebuild(ctx); err != nil || n != 2 {
 		t.Fatalf("다시 세기: %d %v", n, err)
 	}
-	again, _ := f.st.Policy(ctx, "schedule", "calendar.create")
-	if again.Shown != 2 || again.Rejected != 1 {
+	again, _ := f.st.Policy(ctx, "schedule", "calendar.update")
+	if again.Shown != 1 || again.Rejected != 1 {
 		t.Fatalf("다시 센 통계가 같아야 합니다: %+v", again)
 	}
 }
@@ -391,21 +476,140 @@ func TestCoveredStandsAside(t *testing.T) {
 
 	f.log.Drain()
 	all, _ := f.log.Read(ctx, 0, 100)
-	var raised Card
 	var closed bool
 	for _, o := range all {
-		switch o.Type {
-		case CardRaised:
-			_ = json.Unmarshal(o.Data, &raised)
-		case CardClosed:
+		if o.Type == CardClosed {
 			closed = o.Subject == in.ID
 		}
 	}
-	if raised.Calendar == nil || raised.Calendar.Event.Title != "저녁 plan_c" || raised.Calendar.Event.Date != "2026-10-17" {
-		t.Fatalf("카드에 바꿀 일정이 실려야 합니다: %+v", raised)
-	}
 	if !closed {
 		t.Fatalf("닫혔다고 알려야 합니다: %+v", all)
+	}
+}
+
+// addAt is a card about a plan of room, whatever the plan is called.
+func addAt(t *testing.T, f *fixture, entity, room, title, date, start string) model.Intent {
+	t.Helper()
+	if _, _, err := f.st.Put(context.Background(), model.Entity{ID: entity, Kind: model.KindPlan, Room: room,
+		State: model.State{Title: title, Status: model.Confirmed, Date: date, Start: start}}, model.Change{}); err != nil {
+		t.Fatal(err)
+	}
+	payload, _ := json.Marshal(model.CalendarAction{Event: model.CalendarEvent{Title: title, Date: date, Start: start}})
+	return model.Intent{Skill: ScheduleSkill, Kind: "calendar.create", EntityID: entity, Payload: payload, Title: "캘린더에 추가: " + title, Confidence: 0.9, Reversible: true}
+}
+
+// A card the conversation raised is the question: mind's own, open about the
+// same entry, stands aside, and none is raised while it speaks. Another entry is
+// asked as before.
+func TestACardInTheConversationIsTheQuestion(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(DefaultPolicy())
+	open, _ := f.g.Submit(ctx, addAt(t, f, "plan_a", "kakao:1", "지수와 합주", "2026-11-17", "15:00"))
+	other, _ := f.g.Submit(ctx, addAt(t, f, "plan_b", "kakao:1", "치과", "2026-11-18", "15:00"))
+	held, err := f.g.Asked(ctx, "p-1", "calendar.create_event", "기타 합주 (지수)", model.CalendarAction{
+		Event: model.CalendarEvent{Title: "기타 합주 (지수)", Date: "2026-11-17", Start: "15:00", End: "17:00"}})
+	if err != nil || held.ID != "card:p-1" || held.Status != model.Asked {
+		t.Fatalf("%+v %v", held, err)
+	}
+	if in, _ := f.st.Intent(ctx, open.ID); !in.Covered() || !strings.Contains(in.Error, "p-1") {
+		t.Fatalf("같은 일정의 mind 카드는 비켜섭니다: %+v", in)
+	}
+	if in, _ := f.st.Intent(ctx, other.ID); in.Status != model.Pending {
+		t.Fatalf("다른 일정은 그대로: %+v", in)
+	}
+	if stat, _ := f.st.Policy(ctx, ScheduleSkill, "calendar.create"); stat.Rejected != 0 {
+		t.Fatalf("아무도 답하지 않았습니다: %+v", stat)
+	}
+
+	// Read a minute later, in another room or the same.
+	again, _ := f.g.Submit(ctx, addAt(t, f, "plan_c", "kakao:2", "지수와 합주", "2026-11-17", "15:00"))
+	if !again.Covered() || again.Card {
+		t.Fatalf("대화의 카드가 있으면 올리지 않습니다: %+v", again)
+	}
+	if in, _ := f.st.Intent(ctx, again.ID); !in.Covered() {
+		t.Fatalf("기록에 남아야 다시 묻지 않습니다: %+v", in)
+	}
+
+	// Two days on, it no longer speaks.
+	f.clock = f.clock.Add(askedWithin + time.Minute)
+	late, _ := f.g.Submit(ctx, addAt(t, f, "plan_d", "kakao:2", "지수와 합주", "2026-11-17", "15:00"))
+	if late.Status != model.Pending || !late.Card {
+		t.Fatalf("%+v", late)
+	}
+}
+
+// What was said to the assistant is a plan read from the words of the card, under
+// a title of the interpreter's. There the day and the hour say it: the same day
+// with nothing against it is one, and two hours apart it is not.
+func TestToldToTheAssistantTheHourSaysIt(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(DefaultPolicy())
+	if _, err := f.g.Asked(ctx, "p-1", "calendar.create_event", "강남 고기집", model.CalendarAction{
+		Event: model.CalendarEvent{Title: "강남 고기집", Date: "2026-11-17", Start: "19:00"}}); err != nil {
+		t.Fatal(err)
+	}
+	same, _ := f.g.Submit(ctx, addAt(t, f, "plan_a", model.OwnerRoom, "회식", "2026-11-17", "19:30"))
+	if !same.Covered() {
+		t.Fatalf("같은 방, 같은 시각: %+v", same)
+	}
+	apart, _ := f.g.Submit(ctx, addAt(t, f, "plan_b", model.OwnerRoom, "치과", "2026-11-17", "15:00"))
+	if apart.Status != model.Pending {
+		t.Fatalf("시각이 떨어진 일은 따로 묻습니다: %+v", apart)
+	}
+	room, _ := f.g.Submit(ctx, addAt(t, f, "plan_c", "kakao:1", "회식", "2026-11-17", "19:30"))
+	if room.Status != model.Pending {
+		t.Fatalf("다른 방에서는 시각만으로 잇지 않습니다: %+v", room)
+	}
+}
+
+// Two changes to one entry are two questions; the same change is one.
+func TestAMoveAskedInTheConversation(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(DefaultPolicy())
+	entry, _ := f.cal.Put(ctx, model.CalendarEvent{Title: "합주", Date: "2026-11-17", Start: "15:00"})
+	if _, err := f.g.Asked(ctx, "p-1", "calendar.update_event", "합주 16시로", model.CalendarAction{
+		EventID: entry.ID, Event: model.CalendarEvent{Start: "16:00"}}); err != nil {
+		t.Fatal(err)
+	}
+	move := func(entity, start string) model.Intent {
+		payload, _ := json.Marshal(model.CalendarAction{EventID: entry.ID, Event: model.CalendarEvent{Title: "합주", Date: "2026-11-17", Start: start}})
+		return model.Intent{Skill: ScheduleSkill, Kind: "calendar.update", EntityID: entity, Payload: payload, Title: "합주 옮기기", Confidence: 0.9, Reversible: true}
+	}
+	if in, _ := f.g.Submit(ctx, move("plan_a", "16:00")); !in.Covered() {
+		t.Fatalf("같은 옮김: %+v", in)
+	}
+	if in, _ := f.g.Submit(ctx, move("plan_b", "18:00")); in.Status != model.Pending {
+		t.Fatalf("다른 옮김은 묻습니다: %+v", in)
+	}
+}
+
+// With no card in the conversation, mind's is the only question.
+func TestNoCardInTheConversationAsksAsBefore(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(DefaultPolicy())
+	in, _ := f.g.Submit(ctx, addAt(t, f, "plan_a", model.OwnerRoom, "캠프", "2026-11-17", ""))
+	if in.Status != model.Pending || !in.Card {
+		t.Fatalf("%+v", in)
+	}
+}
+
+// What the rules leave open goes to the judgement, once it is there.
+func TestWhatTheRulesCannotSayIsJudged(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(DefaultPolicy())
+	a := model.State{Title: "지수 생일 저녁", Date: "2026-11-17", Start: "19:00"}
+	b := model.State{Title: "저녁 약속", Date: "2026-11-17", Start: "21:30"}
+	if f.g.Same(ctx, a, b) {
+		t.Fatal("판단이 없으면 둘입니다")
+	}
+	asked := 0
+	f.g.Judge = func(context.Context, model.State, model.State) bool { asked++; return true }
+	if !f.g.Same(ctx, a, b) || asked != 1 {
+		t.Fatalf("판단을 따릅니다: %d", asked)
+	}
+	b.Date = "2026-11-18"
+	if f.g.Same(ctx, a, b) || asked != 1 {
+		t.Fatalf("규칙이 다르다면 묻지 않습니다: %d", asked)
 	}
 }
 
@@ -652,8 +856,8 @@ func TestCardsAboutOneStayAreOneQuestion(t *testing.T) {
 		payload, _ := json.Marshal(model.CalendarAction{Event: model.CalendarEvent{Title: title, Date: "2027-01-01", EndDate: "2027-01-03"}})
 		return model.Intent{Skill: "schedule", Kind: "calendar.create", EntityID: entity, Payload: payload, Title: "캘린더에 추가: " + title, Confidence: 0.9, Reversible: true}
 	}
-	first, _ := f.g.Submit(ctx, stay("plan_a", "은주와 캠핑 2박3일"))
-	second, _ := f.g.Submit(ctx, stay("plan_b", "편월재 캠핑 2박3일 (4번 사이트)"))
+	first, _ := f.g.Submit(ctx, stay("plan_a", "지수와 캠핑 2박3일"))
+	second, _ := f.g.Submit(ctx, stay("plan_b", "숲속 캠핑 2박3일 (4번 사이트)"))
 	old, _ := f.st.Intent(ctx, first.ID)
 	if old.Status != model.Superseded || second.Status != model.Pending {
 		t.Fatalf("앞의 카드는 닫히고 새 카드가 서야 합니다: %s / %s", old.Status, second.Status)

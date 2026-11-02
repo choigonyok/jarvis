@@ -169,7 +169,7 @@ func TestAHeldCardIsOnlyLedger(t *testing.T) {
 	if err != nil || in.Holder != "job:12" || in.Status != model.Pending || in.Skill != model.HeldSkill {
 		t.Fatalf("%+v %v", in, err)
 	}
-	answer, _ := json.Marshal(map[string]any{"card": "p-1", "action": "payment.approve", "decision": "approve"})
+	answer, _ := json.Marshal(map[string]any{"card": "p-1", "action": "payment.approve", "decision": "approved"})
 	if err := m.HeldCard(ctx, queue.Message{Payload: answer, TraceID: "job:12", OccurredAt: now}); err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +181,7 @@ func TestAHeldCardIsOnlyLedger(t *testing.T) {
 		t.Fatalf("관문이 세는 곳에 들어갔습니다: %+v", list)
 	}
 	// One raised without a request before it: the answer is its first word.
-	other, _ := json.Marshal(map[string]any{"card": "p-2", "action": "calendar.add", "decision": "reject", "title": "일정"})
+	other, _ := json.Marshal(map[string]any{"card": "p-2", "action": "calendar.add", "decision": "rejected", "title": "일정"})
 	if err := m.HeldCard(ctx, queue.Message{Payload: other, OccurredAt: now}); err != nil {
 		t.Fatal(err)
 	}
@@ -189,11 +189,36 @@ func TestAHeldCardIsOnlyLedger(t *testing.T) {
 		t.Fatalf("%+v %v", in, err)
 	}
 	// mind's own cards are commands, not the agent's to hold.
-	own, _ := json.Marshal(map[string]any{"card": "p-3", "action": "mind.approve", "decision": "approve"})
+	own, _ := json.Marshal(map[string]any{"card": "p-3", "action": "mind.approve", "decision": "approved"})
 	if err := m.HeldCard(ctx, queue.Message{Payload: own, OccurredAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := m.Opts.Store.Intent(ctx, "card:p-3"); err == nil {
 		t.Fatal("mind 의 카드를 장부에 또 넣었습니다")
+	}
+}
+
+// A card raised in the conversation keeps what it asked when it is answered: the
+// row is what mind reads for two days. A yes is a yes (the agent says "approved",
+// and every approved card was closed as turned down).
+func TestAnAnswerClosesTheAskedRow(t *testing.T) {
+	now := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+	m, _, _ := streamed(t, &now)
+	ctx := context.Background()
+	a := model.CalendarAction{Event: model.CalendarEvent{Title: "저녁", Date: "2026-11-20"}}
+	if _, err := m.Gate.Asked(ctx, "p-1", "calendar.create_event", "저녁", a); err != nil {
+		t.Fatal(err)
+	}
+	answer, _ := json.Marshal(map[string]any{"card": "p-1", "action": "calendar.create_event", "decision": "approved"})
+	if err := m.HeldCard(ctx, queue.Message{Payload: answer, OccurredAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	in, err := m.Opts.Store.Intent(ctx, "card:p-1")
+	if err != nil || in.Status != model.Executed || len(in.Payload) == 0 || in.Holder != "chat" {
+		t.Fatalf("%+v %v", in, err)
+	}
+	rows, _ := m.Opts.Store.HeldSince(ctx, now.Add(-time.Hour))
+	if len(rows) != 1 {
+		t.Fatalf("%+v", rows)
 	}
 }

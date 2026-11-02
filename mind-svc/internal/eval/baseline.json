@@ -1,11 +1,11 @@
 {
-  "scenarios": 66,
+  "scenarios": 69,
   "failed": 0,
   "scored": 17,
   "brier": 0.15186470588235296,
-  "answered": 44,
-  "approval": 0.8636363636363636,
-  "cards": 113,
-  "cardsADay": 1.2696629213483146,
+  "answered": 48,
+  "approval": 0.875,
+  "cards": 103,
+  "cardsADay": 1.271604938271605,
   "busiestDay": 7
 }

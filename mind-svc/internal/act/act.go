@@ -125,8 +125,7 @@ func entryLine(e model.CalendarEvent) string {
 	return line + " " + e.Title
 }
 
-// existing is an entry on the same day whose title is the event's, or holds
-// it, or is held by it.
+// existing is the entry already there that the event would add (model.SameEntry).
 func (c CalendarActuator) existing(ctx context.Context, e model.CalendarEvent) (model.CalendarEvent, bool) {
 	to := e.Date
 	if e.EndDate != "" {
@@ -136,11 +135,11 @@ func (c CalendarActuator) existing(ctx context.Context, e model.CalendarEvent) (
 	if err != nil {
 		return model.CalendarEvent{}, false
 	}
-	norm := func(s string) string { return strings.Join(strings.Fields(s), "") }
-	want := norm(e.Title)
+	plan := func(x model.CalendarEvent) model.State {
+		return model.State{Title: x.Title, Date: x.Date, EndDate: x.EndDate, Start: x.Start, End: x.End}
+	}
 	for _, x := range evs {
-		got := norm(x.Title)
-		if x.Date == e.Date && want != "" && got != "" && (got == want || strings.Contains(got, want) || strings.Contains(want, got)) {
+		if model.SameEntry(plan(e), plan(x)) {
 			return x, true
 		}
 	}

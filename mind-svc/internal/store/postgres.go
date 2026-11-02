@@ -564,6 +564,10 @@ func (p *Postgres) IntentsSince(ctx context.Context, t time.Time) ([]model.Inten
 	return p.intents(ctx, `where holder is null and created_at >= $1 order by created_at desc, id desc`, t)
 }
 
+func (p *Postgres) HeldSince(ctx context.Context, t time.Time) ([]model.Intent, error) {
+	return p.intents(ctx, `where holder is not null and created_at >= $1 order by created_at desc, id desc`, t)
+}
+
 func (p *Postgres) Cursor(ctx context.Context, name string) (int64, error) {
 	var v int64
 	err := p.db.QueryRow(ctx, `select value from mind_cursors where name = $1`, name).Scan(&v)

@@ -87,6 +87,19 @@ func (s Schedule) OnChange(ctx context.Context, v View, e model.Entity, changes 
 				}})
 			return r
 		}
+		// Told before and not on the calendar yet: one question, on the plan
+		// told first.
+		if first, ok := firstTelling(ctx, v, e); ok {
+			return s.merge(e, first, changes)
+		}
+		// The calendar is for what is coming: a plan for today or a day gone by
+		// stays a plan, and a card for another day no longer stands. Of 25 cards
+		// asking to add today's, none was approved (to 2026-11-03), and read late,
+		// a card came for what had already happened (2026-10-22).
+		if st.Date <= v.Now().In(v.Loc()).Format("2006-01-02") {
+			r.Withdraw = true
+			return r
+		}
 		if in, ok := s.add(ctx, v, e, changes); ok {
 			r.Intents = append(r.Intents, in)
 		}
@@ -191,15 +204,29 @@ func withMemory(body string, lines []string) string {
 	return body + "\n기억: " + strings.Join(lines, " · ")
 }
 
-// calendarTwin is a plan on the calendar that is this one told another way
-// (model.SameEvent).
+// calendarTwin is a plan on the calendar that is this one told another way.
 func calendarTwin(ctx context.Context, v View, e model.Entity) (model.Entity, bool) {
 	plans, err := v.Entities(ctx, model.KindPlan, "", true)
 	if err != nil {
 		return model.Entity{}, false
 	}
 	for _, p := range plans {
-		if p.ID != e.ID && p.State.CalendarID != "" && p.State.Status == model.Confirmed && model.SameEvent(e.State, p.State) {
+		if p.ID != e.ID && p.State.CalendarID != "" && p.State.Status == model.Confirmed && v.Same(ctx, e.State, p.State) {
+			return p, true
+		}
+	}
+	return model.Entity{}, false
+}
+
+// firstTelling is a plan told earlier that this one tells again, not on the
+// calendar yet: two rooms on one dinner were two plans, and a card each.
+func firstTelling(ctx context.Context, v View, e model.Entity) (model.Entity, bool) {
+	plans, err := v.Entities(ctx, model.KindPlan, "", true)
+	if err != nil {
+		return model.Entity{}, false
+	}
+	for _, p := range plans {
+		if p.ID != e.ID && p.State.CalendarID == "" && p.State.Status == model.Confirmed && p.CreatedAt.Before(e.CreatedAt) && v.Same(ctx, e.State, p.State) {
 			return p, true
 		}
 	}
@@ -262,16 +289,6 @@ func (s Schedule) merge(e, into model.Entity, changes []model.Change) Result {
 func (s Schedule) add(ctx context.Context, v View, e model.Entity, changes []model.Change) (model.Intent, bool) {
 	// Deleted on the calendar a moment ago: that was the answer.
 	if e.State.Declined != "" && byCalendar(changes) {
-		return model.Intent{}, false
-	}
-	// A day gone by is not asked about: read late (the collector was down for
-	// a day, 2026-10-22), the card came for what had already happened.
-	if e.State.Date != "" && e.State.Date < v.Now().In(v.Loc()).Format("2006-01-02") {
-		return model.Intent{}, false
-	}
-	// Nor one already under way: a card to add 10:00 raised at 10:12 asks about
-	// a morning that was not read right, or one that needs no reminding.
-	if at, timed, ok := When(e.State, v.Loc()); ok && timed && !at.After(v.Now()) {
 		return model.Intent{}, false
 	}
 	ev := event(e.State, changes)

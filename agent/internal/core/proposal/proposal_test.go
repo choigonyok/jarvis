@@ -122,3 +122,36 @@ func TestOpened(t *testing.T) {
 		t.Fatal("모양이 다른 id")
 	}
 }
+
+// A card told what it asks now says so at once, and a decided one stays decided.
+func TestRefresh(t *testing.T) {
+	b := bus.New()
+	s := NewStore(b)
+	p, _ := s.Open(Proposal{Action: action.Action{Kind: "x.y"}, Card: action.Card{Title: "처음"}})
+	events, stop := b.Subscribe()
+	defer stop()
+	if err := s.Refresh(p.ID, action.Action{Kind: "x.z"}, action.Card{Title: "고침"}, 0.7); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Get(p.ID)
+	if got.Card.Title != "고침" || got.Action.Kind != "x.z" || got.Confidence != 0.7 || got.State != Pending {
+		t.Fatalf("%+v", got)
+	}
+	select {
+	case ev := <-events:
+		if p, ok := ev.Proposal.(Proposal); !ok || p.Card.Title != "고침" {
+			t.Fatalf("%+v", ev)
+		}
+	default:
+		t.Fatal("화면에 알려야 합니다")
+	}
+	if err := s.Refresh("없음", action.Action{}, action.Card{}, 0); err != ErrNotFound {
+		t.Fatal(err)
+	}
+	if err := s.Decide(p.ID, Reject); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Refresh(p.ID, action.Action{}, action.Card{}, 0); err != ErrAlreadyDecided {
+		t.Fatal(err)
+	}
+}
