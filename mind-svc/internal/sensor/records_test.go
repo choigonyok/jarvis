@@ -68,6 +68,8 @@ func TestRecordsWording(t *testing.T) {
 		State            *string `json:"state"`
 		Country          *string `json:"country"`
 		DateTimeOriginal *string `json:"dateTimeOriginal"`
+		Make             *string `json:"make"`
+		TimeZone         *string `json:"timeZone"`
 	}{City: &city, Country: &country}
 	a.People = append(a.People, struct {
 		Name string `json:"name"`

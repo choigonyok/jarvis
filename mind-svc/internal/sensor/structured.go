@@ -239,11 +239,11 @@ func (s *Structured) back() time.Duration {
 
 // Photos reads Immich's photos taken since the last read (a day back on a
 // first start): when, which city, who is in them, favourites.
-// takePhotos is the last two days' photos, as photos-svc read them. Seeing one
+// takePhotos is the last three days' photos, as photos-svc read them. Seeing one
 // again changes nothing unless it changed.
 func (s *Structured) takePhotos(ctx context.Context, items []asset) error {
 	for _, a := range items {
-		if o, ok := a.occurrence(); ok {
+		if o, ok := a.occurrence(s.Loc); ok {
 			if err := s.observe(ctx, o); err != nil {
 				return err
 			}
@@ -265,26 +265,35 @@ type asset struct {
 		State            *string `json:"state"`
 		Country          *string `json:"country"`
 		DateTimeOriginal *string `json:"dateTimeOriginal"`
+		Make             *string `json:"make"`
+		TimeZone         *string `json:"timeZone"`
 	} `json:"exifInfo"`
 	People []struct {
 		Name string `json:"name"`
 	} `json:"people"`
 }
 
-func (a asset) occurrence() (model.Occurrence, bool) {
-	if a.IsTrashed || a.ID == "" {
+// occurrence is the photo as something that happened. Only what a camera took
+// is: a screenshot or a saved picture names no camera, and with no time zone
+// Immich reads its hour as UTC, so tonight's screenshot was tomorrow morning's
+// photo (2026-11-02). A camera with no zone stays on its own clock.
+func (a asset) occurrence(loc *time.Location) (model.Occurrence, bool) {
+	if a.IsTrashed || a.ID == "" || a.ExifInfo == nil || a.ExifInfo.Make == nil || *a.ExifInfo.Make == "" {
 		return model.Occurrence{}, false
 	}
 	stamp := a.FileCreatedAt
-	if a.ExifInfo != nil && a.ExifInfo.DateTimeOriginal != nil {
+	if a.ExifInfo.DateTimeOriginal != nil {
 		stamp = *a.ExifInfo.DateTimeOriginal
 	}
 	at, err := time.Parse(time.RFC3339, stamp)
 	if err != nil {
 		return model.Occurrence{}, false
 	}
+	if wall, err := time.Parse(time.RFC3339, a.LocalDateTime); err == nil && a.ExifInfo.TimeZone == nil {
+		at = time.Date(wall.Year(), wall.Month(), wall.Day(), wall.Hour(), wall.Minute(), wall.Second(), 0, loc)
+	}
 	o := model.Occurrence{ID: "photo:" + a.ID, Kind: "photo", At: at, Count: 1, Ref: "immich:" + a.ID}
-	if a.ExifInfo != nil && a.ExifInfo.City != nil {
+	if a.ExifInfo.City != nil {
 		o.Area = *a.ExifInfo.City
 		o.Place = *a.ExifInfo.City
 		if a.ExifInfo.State != nil {

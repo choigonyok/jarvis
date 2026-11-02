@@ -248,9 +248,9 @@ func (s Schedule) merge(e, into model.Entity, changes []model.Change) Result {
 	return r
 }
 
-// add is "put it on the calendar" - unless the operator already turned this
-// exact entry down or took it back, or was asked it in the conversation by
-// the assistant's own card: none is asked twice.
+// add is "put it on the calendar" - unless the operator is being asked this
+// exact entry now, already turned it down or took it back, or was asked it in
+// the conversation by the assistant's own card: none is asked twice.
 func (s Schedule) add(ctx context.Context, v View, e model.Entity, changes []model.Change) (model.Intent, bool) {
 	// Deleted on the calendar a moment ago: that was the answer.
 	if e.State.Declined != "" && byCalendar(changes) {
@@ -270,7 +270,9 @@ func (s Schedule) add(ctx context.Context, v View, e model.Entity, changes []mod
 	payload, _ := json.Marshal(model.CalendarAction{Event: ev})
 	past, _ := v.IntentsFor(ctx, e.ID)
 	for _, p := range past {
-		if p.Kind == "calendar.create" && (p.Status == model.Rejected || p.Status == model.Undone || p.Covered()) && samePayload(p.Payload, payload) {
+		// Still open, the same question stands: a note added to the plan is no
+		// reason to take the card away and ask it again.
+		if p.Kind == "calendar.create" && (p.Status == model.Pending || p.Status == model.Rejected || p.Status == model.Undone || p.Covered()) && samePayload(p.Payload, payload) {
 			return model.Intent{}, false
 		}
 	}

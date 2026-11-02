@@ -77,3 +77,29 @@ func TestADayGoneByIsNotAskedAbout(t *testing.T) {
 		t.Fatal("오늘은 묻습니다")
 	}
 }
+
+// A card still open stands while its plan gathers notes: asked again each time,
+// one question left and came back five times in a day (2026-11-02).
+func TestAnOpenCardIsNotAskedAgain(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 11, 2, 11, 13, 0, 0, seoul)
+	plan := model.Entity{ID: "plan_a", Kind: model.KindPlan, State: model.State{Title: "지수와 톤 세팅", Status: model.Confirmed,
+		Date: "2026-11-28", Start: "10:00", Place: "연습실 역삼점"}}
+	first, ok := (Schedule{}).add(ctx, view{now: now}, plan, nil)
+	if !ok {
+		t.Fatal("처음에는 물어야 합니다")
+	}
+	first.ID, first.Status, first.CreatedAt = "int_open", model.Pending, now
+	open := view{now: now, intents: []model.Intent{first}}
+	noted := plan
+	noted.State.Note = "끝나고 점심"
+	evidence := []model.Change{{Evidence: []model.Evidence{{Ref: "m1", Quote: "끝나고 점심 먹자"}}}}
+	if _, ok := (Schedule{}).add(ctx, open, noted, evidence); ok {
+		t.Fatal("메모만 늘었으면 열린 카드가 그대로입니다")
+	}
+	moved := plan
+	moved.State.Start = "11:00"
+	if _, ok := (Schedule{}).add(ctx, open, moved, nil); !ok {
+		t.Fatal("시각이 바뀌면 새로 물어야 합니다")
+	}
+}

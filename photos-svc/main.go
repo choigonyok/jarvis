@@ -15,8 +15,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -35,8 +35,10 @@ import (
 
 const (
 	recentEvery = 2 * time.Minute
-	recentBack  = 48 * time.Hour
-	daysEvery   = 30 * time.Minute
+	// recentBack reaches as far back as mind asks about photos: a phone that
+	// uploads a day or two late is still in time.
+	recentBack = 72 * time.Hour
+	daysEvery  = 30 * time.Minute
 	// daysBack is how many finished days each read carries: a phone that
 	// uploaded late, or a day this was not running.
 	daysBack = 3
@@ -66,6 +68,8 @@ type Asset struct {
 		State            *string `json:"state"`
 		Country          *string `json:"country"`
 		DateTimeOriginal *string `json:"dateTimeOriginal"`
+		Make             *string `json:"make"`
+		TimeZone         *string `json:"timeZone"`
 	} `json:"exifInfo,omitempty"`
 	People []struct {
 		Name string `json:"name"`
@@ -124,7 +128,7 @@ func (im Immich) Taken(ctx context.Context, from time.Time, to *time.Time) ([]As
 	return out, nil
 }
 
-// Recent is the last two days' photos.
+// Recent is the last three days' photos.
 func (im Immich) Recent(now func() time.Time) func(context.Context) (any, error) {
 	return func(ctx context.Context) (any, error) {
 		items, err := im.Taken(ctx, now().Add(-recentBack), nil)

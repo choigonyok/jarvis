@@ -96,6 +96,34 @@ func TestTakeCalendarKeepsPlansInStep(t *testing.T) {
 	}
 }
 
+// A photo is what a camera took, at its own hour: a screenshot is not a moment
+// of the day, and with no time zone its hour read as UTC lands nine hours on.
+func TestOnlyACameraTakesPhotos(t *testing.T) {
+	s, st, now := takeSetup(t)
+	ctx := context.Background()
+	wall := time.Date(2026, 11, 2, 21, 3, 0, 0, time.UTC).Format(time.RFC3339)
+	raw, _ := json.Marshal(map[string]any{"items": []map[string]any{
+		{"id": "shot", "fileCreatedAt": wall, "localDateTime": wall, "exifInfo": map[string]any{"dateTimeOriginal": wall}},
+		{"id": "saved", "fileCreatedAt": wall, "localDateTime": wall},
+		{"id": "camera", "fileCreatedAt": wall, "localDateTime": wall, "exifInfo": map[string]any{"dateTimeOriginal": wall, "make": "Canon"}},
+	}})
+	if err := s.Take(ctx, queue.Message{Kind: KindPhotos, Payload: raw, OccurredAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"photo:shot", "photo:saved"} {
+		if o, err := st.Occurrence(ctx, id); err == nil {
+			t.Fatalf("카메라가 찍은 것이 아닙니다: %+v", o)
+		}
+	}
+	o, err := st.Occurrence(ctx, "photo:camera")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := o.At.In(s.Loc).Format("15:04"); got != "21:03" {
+		t.Fatalf("시간대 없는 사진은 찍힌 벽시계 시각입니다: %s", got)
+	}
+}
+
 // Photos come as a record and are occurrences; a finished day is remembered
 // once, and again only if it changed.
 func TestTakePhotos(t *testing.T) {
@@ -105,7 +133,7 @@ func TestTakePhotos(t *testing.T) {
 	ctx := context.Background()
 	stamp := now.Add(-time.Hour).Format(time.RFC3339)
 	raw, _ := json.Marshal(map[string]any{"items": []map[string]any{{"id": "p1", "fileCreatedAt": stamp, "isFavorite": true,
-		"exifInfo": map[string]any{"city": "가평"}, "people": []map[string]any{{"name": "민수"}}}}})
+		"exifInfo": map[string]any{"city": "가평", "make": "Apple", "timeZone": "UTC+9"}, "people": []map[string]any{{"name": "민수"}}}}})
 	if err := s.Take(ctx, queue.Message{Kind: KindPhotos, Payload: raw, OccurredAt: now}); err != nil {
 		t.Fatal(err)
 	}

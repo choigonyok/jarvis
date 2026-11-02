@@ -55,7 +55,7 @@ func TestRecentReadsEveryPage(t *testing.T) {
 	if strings.Contains(string(raw), "버릴것") {
 		t.Fatalf("쓰지 않는 것은 나가지 않습니다: %s", raw)
 	}
-	if (*asked)[0]["takenAfter"] != "2026-10-29T12:00:00Z" || (*asked)[0]["takenBefore"] != nil {
+	if (*asked)[0]["takenAfter"] != "2026-10-28T12:00:00Z" || (*asked)[0]["takenBefore"] != nil {
 		t.Fatalf("%v", (*asked)[0])
 	}
 }
@@ -149,6 +149,8 @@ func TestDoor(t *testing.T) {
 				State            *string `json:"state"`
 				Country          *string `json:"country"`
 				DateTimeOriginal *string `json:"dateTimeOriginal"`
+				Make             *string `json:"make"`
+				TimeZone         *string `json:"timeZone"`
 			}{City: &city}},
 			Asset{ID: "b", IsTrashed: true},
 		}}})

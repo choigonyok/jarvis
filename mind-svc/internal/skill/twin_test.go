@@ -45,7 +45,15 @@ func (v view) Entity(_ context.Context, id string) (model.Entity, error) {
 func (v view) Entities(context.Context, string, string, bool) ([]model.Entity, error) {
 	return v.plans, nil
 }
-func (view) IntentsFor(context.Context, string) ([]model.Intent, error) { return nil, nil }
+func (v view) IntentsFor(_ context.Context, id string) ([]model.Intent, error) {
+	var out []model.Intent
+	for _, in := range v.intents {
+		if in.EntityID == id {
+			out = append(out, in)
+		}
+	}
+	return out, nil
+}
 func (v view) Now() time.Time {
 	if !v.now.IsZero() {
 		return v.now
