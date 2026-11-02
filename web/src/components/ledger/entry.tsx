@@ -1,8 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import { Collapsible } from "radix-ui";
 import { ChevronDown } from "lucide-react";
 import { HoldBar, holdsMoney, useHold } from "@/components/chat/hold";
+import { RejectForm } from "@/components/chat/reject-form";
 import { Button } from "@/components/ui/button";
 import { isLiteral, readableBody, readableConsequence } from "@/lib/card-body";
 import { stateCopy, summarize } from "@/lib/ledger";
@@ -26,7 +28,7 @@ export function Entry({
   onDecide,
 }: {
   proposal: Proposal;
-  onDecide: (decision: Decision) => void;
+  onDecide: (decision: Decision, reason?: string) => void;
 }) {
   const copy = stateCopy[proposal.state];
   const waiting = proposal.state === "pending";
@@ -34,6 +36,8 @@ export function Entry({
   const time = waiting ? proposal.at : (proposal.decidedAt ?? proposal.at);
   // Money waits five seconds with 되돌리기, as on the chat's card (chat/hold.tsx).
   const hold = useHold(() => onDecide("approved"));
+  // Turned down here as in the chat: asked why first (chat/reject-form.tsx).
+  const [asking, setAsking] = useState(false);
 
   return (
     <Collapsible.Root
@@ -104,15 +108,20 @@ export function Entry({
           {proposal.note ? (
             <p className="mt-1.5 text-[11.5px] text-faint">{proposal.note}</p>
           ) : null}
+          {proposal.reason ? <p className="mt-1.5 text-[12px] leading-normal text-dim">이유: {proposal.reason}</p> : null}
 
           {waiting && hold.holding ? (
             <HoldBar className="mt-3" left={hold.left} onCancel={hold.cancel} />
+          ) : waiting && asking ? (
+            <div className="mt-3">
+              <RejectForm onCancel={() => setAsking(false)} onReject={(why) => onDecide("rejected", why)} />
+            </div>
           ) : waiting ? (
             <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-1.5">
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => onDecide("rejected")}
+                onClick={() => setAsking(true)}
                 className="h-11 text-[13px] text-dim hover:bg-reject/10 hover:text-reject mouse:h-7 mouse:px-2.5 mouse:text-[12.5px]"
               >
                 반려

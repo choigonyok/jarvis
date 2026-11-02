@@ -1,6 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import { Trash2 } from "lucide-react";
+import { RejectForm } from "@/components/chat/reject-form";
 import { Button } from "@/components/ui/button";
 import { timeLabel, type Ghost } from "@/lib/proposed";
 import type { CalendarEvent, Decision } from "@/lib/thread";
@@ -99,10 +101,11 @@ export function GhostRow({
   onDecide,
 }: {
   ghost: Ghost;
-  onDecide: (decision: Decision) => void;
+  onDecide: (decision: Decision, reason?: string) => void;
 }) {
   const copy = ghostCopy[ghost.op];
   const preview = ghost.op === "delete" ? null : ghost.preview;
+  const [asking, setAsking] = useState(false);
 
   return (
     <div className="ml-2 rounded-lg border border-dashed border-edge bg-glass/60 px-3 py-2.5">
@@ -126,25 +129,32 @@ export function GhostRow({
       <p className="mt-1.5 text-[12px] leading-normal text-dim">{copy.consequence}</p>
 
       {/* The same decision as the chat's card, so it gets the same treatment
-          on a phone: full width, real height, a gap you cannot thumb across. */}
-      <div className="mt-2.5 grid grid-cols-2 gap-2 sm:mt-2 sm:flex sm:items-center sm:justify-end sm:gap-1.5">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => onDecide("rejected")}
-          className="h-11 text-[13px] text-dim hover:bg-reject/10 hover:text-reject mouse:h-7 mouse:px-2.5 mouse:text-[12.5px]"
-        >
-          반려
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => onDecide("approved")}
-          className="h-11 border-edge bg-glass-raised text-[13px] text-foreground hover:border-approve/35 hover:bg-approve/12 hover:text-approve mouse:h-7 mouse:px-3 mouse:text-[12.5px] dark:bg-glass-raised dark:hover:bg-approve/12"
-        >
-          승인
-        </Button>
-      </div>
+          on a phone: full width, real height, a gap you cannot thumb across -
+          and turned down, the same question why. */}
+      {asking ? (
+        <div className="mt-2.5">
+          <RejectForm onCancel={() => setAsking(false)} onReject={(why) => onDecide("rejected", why)} />
+        </div>
+      ) : (
+        <div className="mt-2.5 grid grid-cols-2 gap-2 sm:mt-2 sm:flex sm:items-center sm:justify-end sm:gap-1.5">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setAsking(true)}
+            className="h-11 text-[13px] text-dim hover:bg-reject/10 hover:text-reject mouse:h-7 mouse:px-2.5 mouse:text-[12.5px]"
+          >
+            반려
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onDecide("approved")}
+            className="h-11 border-edge bg-glass-raised text-[13px] text-foreground hover:border-approve/35 hover:bg-approve/12 hover:text-approve mouse:h-7 mouse:px-3 mouse:text-[12.5px] dark:bg-glass-raised dark:hover:bg-approve/12"
+          >
+            승인
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

@@ -94,7 +94,7 @@ export function Ledger() {
                     <Entry
                       key={proposal.id}
                       proposal={proposal}
-                      onDecide={(d) => void decide(proposal.id, d)}
+                      onDecide={(d, reason) => void decide(proposal.id, d, undefined, reason)}
                     />
                   ))}
                 </div>

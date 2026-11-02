@@ -13,6 +13,7 @@ import { QueuedMessages } from "@/components/chat/queued";
 import { SwipeRow } from "@/components/chat/swipe-row";
 import { SearchBar, SearchToggle, useThreadSearch } from "@/components/chat/thread-search";
 import { readableTitle } from "@/lib/card-body";
+import { raisedAt } from "@/lib/ledger";
 import { onFocusProposal } from "@/lib/resume";
 import { Markdown } from "@/components/chat/markdown";
 import { VoiceStage } from "@/components/chat/voice-stage";
@@ -492,6 +493,7 @@ const Transcript = memo(function Transcript({
   onDraftShown,
   error,
   hydrated,
+  hasMore,
   onQuote,
   onJump,
   onDecide,
@@ -506,6 +508,8 @@ const Transcript = memo(function Transcript({
   checklists: Record<string, Checklist>;
   /** Every card that waited while this page was open. */
   waited: ReadonlySet<string>;
+  /** The thread goes on above the oldest turn loaded. */
+  hasMore: boolean;
   thinking: boolean;
   /** The answer being written. */
   draft: Draft | null;
@@ -525,8 +529,14 @@ const Transcript = memo(function Transcript({
   // laid in the conversation - floats below the thread while it waits. One
   // that was waiting on this screen stays once decided: a card answered
   // under your thumb and then gone reads as one that never came (2026-10-21).
+  // A card raised before the oldest turn loaded is not one of these: its turn
+  // is on a page above, and it shows there. Taken for one, it sat at the bottom
+  // of the thread from the moment 60 newer turns had passed it - and stayed
+  // there once decided, on a phone that keeps the page open (2026-11-02).
   const attached = new Set(turns.map((t) => t.proposalId).filter(Boolean));
-  const unattached = proposals.filter((p) => !attached.has(p.id) && (isPending(p) || waited.has(p.id)));
+  const oldest = hasMore && turns[0]?.atIso ? Date.parse(turns[0].atIso) : NaN;
+  const above = (p: Proposal) => (raisedAt(p)?.getTime() ?? Infinity) < oldest;
+  const unattached = proposals.filter((p) => !attached.has(p.id) && !above(p) && (isPending(p) || waited.has(p.id)));
   // When a quoted turn is on the page its own stamp says when; one that has
   // scrolled out of the loaded thread falls back to the agent's.
   const times = new Map(turns.map((t) => [t.id, turnTime(t.atIso, t.at)]));
@@ -809,7 +819,12 @@ export function Thread() {
   const focusCard = useCallback(() => {
     const id = wanted.current;
     const card = id ? scrollRef.current?.querySelector<HTMLElement>(`[data-proposal-id="${CSS.escape(id)}"]`) : null;
-    if (!card) return;
+    if (!card) {
+      // Older than what is loaded: its turn is on a page above. The view stays
+      // where it is and the turns come in behind it until the card is among them.
+      if (id && hasMore && !loadingOlder && !olderFailed && byId.has(id)) void loadOlder();
+      return;
+    }
     wanted.current = null;
     pinned.current = false;
     held.current = card;
@@ -824,7 +839,7 @@ export function Thread() {
       url.searchParams.delete("proposal");
       window.history.replaceState(window.history.state, "", url.pathname + url.search);
     }
-  }, []);
+  }, [hasMore, loadingOlder, olderFailed, byId, loadOlder]);
   useEffect(() => {
     wanted.current = new URLSearchParams(window.location.search).get("proposal");
     return onFocusProposal((id) => {
@@ -834,7 +849,7 @@ export function Thread() {
   }, [focusCard]);
   useEffect(() => {
     if (wanted.current) focusCard();
-  }, [turns, proposals, focusCard]);
+  }, [turns, proposals, loadingOlder, focusCard]);
   // The reader taking over - a touch, a wheel, typing, anywhere on the page
   // (the composer is outside the thread) - lets go of a held card.
   useEffect(() => {
@@ -1172,6 +1187,7 @@ export function Thread() {
             onDraftShown={draftShown}
             error={error}
             hydrated={hydrated}
+            hasMore={hasMore}
             onQuote={quote}
             onJump={jumpTo}
             onDecide={decide}

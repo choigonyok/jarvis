@@ -309,7 +309,7 @@ export function Calendar() {
                     {ghost ? (
                       <GhostRow
                         ghost={ghost}
-                        onDecide={(d) => void decide(ghost.proposal.id, d)}
+                        onDecide={(d, reason) => void decide(ghost.proposal.id, d, reason)}
                       />
                     ) : null}
                   </div>
@@ -319,7 +319,7 @@ export function Calendar() {
                 <GhostRow
                   key={ghost.proposal.id}
                   ghost={ghost}
-                  onDecide={(d) => void decide(ghost.proposal.id, d)}
+                  onDecide={(d, reason) => void decide(ghost.proposal.id, d, reason)}
                 />
               ))}
             </div>
