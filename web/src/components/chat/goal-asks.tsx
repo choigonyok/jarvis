@@ -12,17 +12,17 @@ import { cn } from "@/lib/utils";
  * trip to the 목표 tab. What was answered is read back, so the card says the same
  * on the next visit and on the other device.
  */
-export function GoalAsks({ asks }: { asks: GoalAsk[] }) {
+export function GoalAsks({ asks, said }: { asks: GoalAsk[]; said?: string }) {
   return (
     <ul className="mt-3 space-y-3 border-t border-edge-soft pt-3">
       {asks.map((a) => (
-        <Ask key={`${a.goal}:${a.day}`} ask={a} named={asks.length > 1} />
+        <Ask key={`${a.goal}:${a.day}`} ask={a} named={asks.length > 1 || !said?.includes(a.title)} />
       ))}
     </ul>
   );
 }
 
-/** One ask: named when there are several, the notice's own words saying it when not. */
+/** One ask: the notice's own words say it when they name the goal; otherwise it is named here. */
 function Ask({ ask, named }: { ask: GoalAsk; named: boolean }) {
   // Undefined until read; null is no word yet.
   const [said, setSaid] = useState<Mark | null | undefined>(undefined);

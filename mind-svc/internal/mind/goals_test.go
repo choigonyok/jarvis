@@ -193,6 +193,64 @@ func TestEveningsWords(t *testing.T) {
 	}
 }
 
+// Pushes of one kind take each other's place on a phone: goals due at one
+// moment go out as one notice, each person's own, every goal answerable there.
+func TestGoalsOfOneMomentGoOutTogether(t *testing.T) {
+	ctx := context.Background()
+	seoul, _ := time.LoadLocation("Asia/Seoul")
+	nine := time.Date(2026, 11, 5, 21, 0, 0, 0, seoul)
+	m, note, _ := goalMind(t, nine.Add(-time.Hour))
+	makeGoal(t, m, goals.New{Title: "독서", Cadence: goals.Daily, Start: "2026-11-05", Remind: "21:00"})
+	makeGoal(t, m, goals.New{Title: "스트레칭", Cadence: goals.Daily, Start: "2026-11-05", Remind: "21:00"})
+	makeGoal(t, m, goals.New{Title: "손님 독서", Cadence: goals.Daily, Start: "2026-11-05", Remind: "21:00", Who: goals.Guest})
+	m.Goals.Now = func() time.Time { return nine }
+	m.Opts.Now = m.Goals.Now
+	if err := m.goalHour(ctx); err != nil {
+		t.Fatal(err)
+	}
+	all := note.All()
+	if len(all) != 2 {
+		t.Fatalf("사람마다 하나씩이어야 합니다: %v", said(note))
+	}
+	for _, n := range all {
+		asks, _ := n.Data["goals"].([]goalAsk)
+		switch n.Audience {
+		case goals.Guest:
+			if len(asks) != 1 || !strings.Contains(n.Title, "손님 독서") {
+				t.Fatalf("%+v", n)
+			}
+		default:
+			if len(asks) != 2 || n.Title != "오늘 목표 2개, 했어요?" {
+				t.Fatalf("%+v", n)
+			}
+		}
+	}
+
+	thursday := time.Date(2026, 11, 5, 21, 30, 0, 0, seoul)
+	m, note, _ = goalMind(t, thursday)
+	run := makeGoal(t, m, goals.New{Title: "달리기", Cadence: goals.Weekly, Times: 3, Start: "2026-11-02"})
+	read := makeGoal(t, m, goals.New{Title: "책", Cadence: goals.Weekly, Times: 3, Start: "2026-11-02"})
+	if _, _, err := m.Goals.MarkDay(ctx, read.ID, "2026-11-05", goals.Missed, "", goals.ByCard); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := m.goalNight(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	all = note.All()
+	if len(all) != 1 || all[0].Title != "목표 2개가 남은 날 다 해야 해요" {
+		t.Fatalf("%v", said(note))
+	}
+	if b := all[0].Body; !strings.Contains(b, "- 달리기: 이번 주 0/3, 금·토·일 모두 해야 3번을 채워요") || !strings.Contains(b, "- 책: ") {
+		t.Fatal(b)
+	}
+	// 책 was answered today: only 달리기 is left to ask about.
+	if asks, _ := all[0].Data["goals"].([]goalAsk); len(asks) != 1 || asks[0].Goal != run.ID {
+		t.Fatalf("%+v", asks)
+	}
+}
+
 // A workout saved marks the goal tied to the log, unless the day was said.
 func TestAWorkoutMarksItsGoal(t *testing.T) {
 	ctx := context.Background()

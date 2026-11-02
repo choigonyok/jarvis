@@ -172,6 +172,7 @@ func (m *Mind) goalNight(ctx context.Context) error {
 	}
 	guard := map[string][]goalAsk{}
 	week := map[string][]string{}
+	tight := map[string][]tightGoal{}
 	for _, g := range gs {
 		ms := marks[g.ID]
 		p := g.Of(ms, today)
@@ -197,16 +198,15 @@ func (m *Mind) goalNight(ctx context.Context) error {
 			if g.Cadence == goals.Monthly {
 				word = "이번 달"
 			}
-			title := fmt.Sprintf("'%s' 남은 날 다 해야 해요", g.Title)
-			body := fmt.Sprintf("%s %d/%d, %s 모두 해야 %d번을 채워요", word, p.Period.Done, p.Period.Target, dayNames(left), p.Period.Target)
-			if err := m.goalSay(ctx, who, key, title, body, "지금 채우면 겨우 맞출 수 있어요", asks); err != nil {
-				return err
-			}
-			if err := m.Opts.Store.SetCursor(ctx, key, 1); err != nil {
-				return err
-			}
+			tight[who] = append(tight[who], tightGoal{key: key, title: g.Title, asks: asks,
+				says: fmt.Sprintf("%s %d/%d, %s 모두 해야 %d번을 채워요", word, p.Period.Done, p.Period.Target, dayNames(left), p.Period.Target)})
 		case p.Asks && p.Mark == "" && p.Streak >= goalGuard:
 			guard[who] = append(guard[who], goalAsk{Goal: g.ID, Title: fmt.Sprintf("%s (%d%s째)", g.Title, p.Streak, p.Unit), Day: today})
+		}
+	}
+	for who, list := range tight {
+		if err := m.sayTight(ctx, who, list); err != nil {
+			return err
 		}
 	}
 	for who, list := range guard {
@@ -223,6 +223,39 @@ func (m *Mind) goalNight(ctx context.Context) error {
 			if err := m.goalSay(ctx, who, "goal:week:"+who+":"+today, "이번 주 목표", strings.Join(lines, " · "), "한 주를 마치며", nil); err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+// tightGoal is a target that takes every day left.
+type tightGoal struct {
+	key, title, says string
+	asks             []goalAsk
+}
+
+// sayTight says one person's tight targets in one notice: pushes of one kind
+// take each other's place on the phone, so a second would leave only itself.
+func (m *Mind) sayTight(ctx context.Context, who string, list []tightGoal) error {
+	title, body := fmt.Sprintf("'%s' 남은 날 다 해야 해요", list[0].title), list[0].says
+	if len(list) > 1 {
+		title = fmt.Sprintf("목표 %d개가 남은 날 다 해야 해요", len(list))
+		lines := make([]string, len(list))
+		for i, t := range list {
+			lines[i] = fmt.Sprintf("- %s: %s", t.title, t.says)
+		}
+		body = strings.Join(lines, "\n")
+	}
+	var asks []goalAsk
+	for _, t := range list {
+		asks = append(asks, t.asks...)
+	}
+	if err := m.goalSay(ctx, who, list[0].key, title, body, "지금 채우면 겨우 맞출 수 있어요", asks); err != nil {
+		return err
+	}
+	for _, t := range list {
+		if err := m.Opts.Store.SetCursor(ctx, t.key, 1); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -260,7 +293,8 @@ func dayNames(days []string) string {
 }
 
 // goalHour says the goals whose hour has come, once a day each, for today if
-// nothing has been said of it and it still matters.
+// nothing has been said of it and it still matters. Goals of one hour go out
+// together, for the reason sayTight gives.
 func (m *Mind) goalHour(ctx context.Context) error {
 	if m.Goals == nil {
 		return nil
@@ -272,6 +306,8 @@ func (m *Mind) goalHour(ctx context.Context) error {
 	now := m.Opts.Now().In(m.Opts.Loc)
 	today := m.Goals.Today()
 	stamp, _ := strconv.ParseInt(now.Format("20060102"), 10, 64)
+	due := map[string][]goalAsk{}
+	says := map[string]string{}
 	for _, g := range gs {
 		if g.Remind == "" || g.Status != goals.Active {
 			continue
@@ -297,9 +333,15 @@ func (m *Mind) goalHour(ctx context.Context) error {
 		if p.Mark != "" || !p.Asks && !weekly || weekly && p.Need == 0 {
 			continue
 		}
-		body := p.Says
-		if err := m.goalSay(ctx, g.Person(), "goal:hour:"+g.ID+":"+today, fmt.Sprintf("오늘 '%s' 했어요?", g.Title), body, "정해 둔 시각이에요",
-			[]goalAsk{{Goal: g.ID, Title: g.Title, Day: today}}); err != nil {
+		due[g.Person()] = append(due[g.Person()], goalAsk{Goal: g.ID, Title: g.Title, Day: today})
+		says[g.Person()] = p.Says
+	}
+	for who, list := range due {
+		title, body := fmt.Sprintf("오늘 '%s' 했어요?", list[0].Title), says[who]
+		if len(list) > 1 {
+			title, body = fmt.Sprintf("오늘 목표 %d개, 했어요?", len(list)), ""
+		}
+		if err := m.goalSay(ctx, who, "goal:hour:"+list[0].Goal+":"+today, title, body, "정해 둔 시각이에요", list); err != nil {
 			return err
 		}
 	}

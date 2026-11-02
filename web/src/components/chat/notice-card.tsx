@@ -66,7 +66,7 @@ export function NoticeCard({
           <ChecklistBody list={list} onTick={onTick} onDrop={onDrop} fold={fold} />
         </div>
       ) : null}
-      {turn.origin?.goals?.length ? <GoalAsks asks={turn.origin.goals} /> : null}
+      {turn.origin?.goals?.length ? <GoalAsks asks={turn.origin.goals} said={said} /> : null}
     </section>
   );
 }
