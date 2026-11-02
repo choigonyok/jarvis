@@ -138,7 +138,7 @@ type MakeInput struct {
 
 type CheckInput struct {
 	ID   string `json:"id" jsonschema:"목표 id(goal_…). 지금 상황의 '목표'나 look 의 goals 에 있다"`
-	Mark string `json:"mark" jsonschema:"done(했다), missed(안 했다), 지우려면 빈 값"`
+	Mark string `json:"mark" jsonschema:"done(했다), missed(안 했다), clear(기록 지우기)"`
 	Day  string `json:"day,omitempty" jsonschema:"어느 날인지 YYYY-MM-DD(기본 오늘). '어제 했어'면 어제 날짜"`
 	Note string `json:"note,omitempty" jsonschema:"그날에 대한 한 줄(선택)"`
 }
@@ -169,7 +169,11 @@ func (m *Module) Change(b *tool.Board) {
 		})
 	tool.Add(b, "goal.check", "목표의 하루를 기록한다. 운영자가 했다, 안 했다고 말한 것만 적는다. 짐작해서 적지 않는다.",
 		func(ctx context.Context, in CheckInput) (string, error) {
-			g, err := m.one(ctx, http.MethodPost, "/api/goals/"+url.PathEscape(in.ID)+"/checks", map[string]string{"day": in.Day, "mark": in.Mark, "note": in.Note, "by": "chat"})
+			mark := in.Mark
+			if mark == "clear" {
+				mark = ""
+			}
+			g, err := m.one(ctx, http.MethodPost, "/api/goals/"+url.PathEscape(in.ID)+"/checks", map[string]string{"day": in.Day, "mark": mark, "note": in.Note, "by": "chat"})
 			if err != nil {
 				return "", fmt.Errorf("기록하지 못했습니다: %w", err)
 			}

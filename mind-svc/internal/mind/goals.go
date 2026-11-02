@@ -277,7 +277,8 @@ func (m *Mind) goalHour(ctx context.Context) error {
 			continue
 		}
 		at, err := time.ParseInLocation("2006-01-02 15:04", today+" "+g.Remind, m.Opts.Loc)
-		if err != nil || now.Before(at) || now.Sub(at) > goalRemindFor {
+		// Made after its hour had passed, it starts with tomorrow's.
+		if err != nil || now.Before(at) || now.Sub(at) > goalRemindFor || g.CreatedAt.After(at) {
 			continue
 		}
 		key := "goal:hour:" + g.ID

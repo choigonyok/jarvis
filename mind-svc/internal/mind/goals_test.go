@@ -175,6 +175,22 @@ func TestEveningsWords(t *testing.T) {
 	if got := said(note); len(got) != 1 {
 		t.Fatalf("이미 답한 날은 묻지 않습니다: %v", got)
 	}
+	// Made after its hour had passed, it waits for tomorrow's.
+	late, lateNote, lateClock := goalMind(t, seven.Add(time.Hour))
+	makeGoal(t, late, goals.New{Title: "늦게 만든 목표", Cadence: goals.Daily, Remind: "20:00"})
+	if err := late.goalHour(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := said(lateNote); len(got) != 0 {
+		t.Fatalf("%v", got)
+	}
+	lateClock.Pin(seven.AddDate(0, 0, 1))
+	if err := late.goalHour(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := said(lateNote); len(got) != 1 {
+		t.Fatalf("%v", got)
+	}
 }
 
 // A workout saved marks the goal tied to the log, unless the day was said.

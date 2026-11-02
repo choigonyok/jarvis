@@ -3,9 +3,11 @@ package tool
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -73,5 +75,60 @@ func TestTheToolDoesWhatItNames(t *testing.T) {
 func TestQualified(t *testing.T) {
 	if Qualified(Look) != "mcp__look__look" {
 		t.Fatal(Qualified(Look))
+	}
+}
+
+type markIn struct {
+	ID   string `json:"id" jsonschema:"목표 id"`
+	Mark string `json:"mark" jsonschema:"done 또는 missed"`
+	Day  string `json:"day,omitempty" jsonschema:"어느 날"`
+}
+
+// What the row does not have, or cannot do without, is refused with what it
+// takes - it does not run on nothing and say it did.
+func TestArgumentsAreHeldToTheRow(t *testing.T) {
+	ran := 0
+	b := New(Change, "남긴다.")
+	Add(b, "goal.check", "기록한다.", func(context.Context, markIn) (string, error) {
+		ran++
+		return "기록했습니다", nil
+	})
+	ctx := context.Background()
+	if _, err := b.Do(ctx, "goal.check", map[string]any{"id": "g", "status": "done"}); err == nil || !strings.Contains(err.Error(), "status") || !strings.Contains(err.Error(), "mark(필수)") {
+		t.Fatalf("%v", err)
+	}
+	if _, err := b.Do(ctx, "goal.check", map[string]any{"id": "g", "mark": ""}); err == nil || !strings.Contains(err.Error(), "꼭 있어야 할 인자가 없습니다: mark") {
+		t.Fatalf("%v", err)
+	}
+	if ran != 0 {
+		t.Fatalf("돌면 안 됩니다: %d", ran)
+	}
+	if out, err := b.Do(ctx, "goal.check", map[string]any{"id": "g", "mark": "done", "day": "2026-11-02"}); err != nil || out != "기록했습니다" {
+		t.Fatalf("%q %v", out, err)
+	}
+}
+
+// A board longer than the CLI keeps says every row in short and every argument
+// by name, inside the limit; help says a row whole.
+func TestALongBoardFits(t *testing.T) {
+	b := New(Change, "남긴다.")
+	for i := range 24 {
+		Add(b, fmt.Sprintf("row.%d", i), strings.Repeat("아주 길게 설명하는 줄입니다 ", 12)+". 그다음 문장", func(context.Context, markIn) (string, error) { return "", nil })
+	}
+	d := b.Description()
+	if n := utf8.RuneCountInString(d); n > keep {
+		t.Fatalf("%d자", n)
+	}
+	for _, want := range []string{"row.0", "row.23", "id*, mark*, day", "what 에 help"} {
+		if !strings.Contains(d, want) {
+			t.Fatalf("%q 가 없습니다:\n%s", want, d)
+		}
+	}
+	whole, err := b.Do(context.Background(), Help, map[string]any{"name": "row.23"})
+	if err != nil || !strings.Contains(whole, "그다음 문장") || !strings.Contains(whole, "mark(필수): done 또는 missed") {
+		t.Fatalf("%q %v", whole, err)
+	}
+	if _, err := b.Do(context.Background(), Help, nil); err == nil || !strings.Contains(err.Error(), "row.23") {
+		t.Fatalf("%v", err)
 	}
 }

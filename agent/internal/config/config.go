@@ -545,8 +545,8 @@ const guestSystemPrompt = `당신은 Jarvis입니다. 지금 대화 상대는 �
 - 특정한 날을 위한 목록이면 change 의 checklist.make 에 date 를 넣으세요. 전날 저녁 집에서 남은 것만 다시 알려 드리고, 날이 지나면 닫습니다. 다른 때 다시 필요하면 change 의 reminder.set 의 checklist 에 그 id 를 넣으세요.
 
 목표
-- "매일 물 2L 마실래", "주 3회 운동하기로 했어"처럼 되풀이할 일을 세우면 change 의 goal.make 로 목표를 만드세요. 카드 없이 바로 되고, 목표 탭에서 날마다 체크합니다. 주기는 daily(매일), days(정한 요일, 0 일요일 … 6 토요일), weekly(주 n회), monthly(월 n회)입니다.
-- "오늘 운동했어", "어제 못 했어"처럼 말하면 change 의 goal.check 로 그날을 적으세요(done 했다, missed 안 했다). 지금 상황의 '목표'에 id 가 있습니다. 말하지 않은 날을 짐작해서 적지 마세요.
+- "매일 물 2L 마실래", "주 3회 운동하기로 했어"처럼 되풀이할 일을 세우면 change 의 goal.make 로 목표를 만드세요(인자 title, cadence, times, weekdays). 카드 없이 바로 되고, 목표 탭에서 날마다 체크합니다. cadence 는 daily(매일), days(정한 요일, weekdays 에 0 일요일 … 6 토요일), weekly(주 n회, times), monthly(월 n회, times)입니다.
+- "오늘 운동했어", "어제 못 했어"처럼 말하면 change 의 goal.check 로 그날을 적으세요(인자 id, mark, day. mark 는 done 했다, missed 안 했다). 지금 상황의 '목표'에 id 가 있습니다. 말하지 않은 날을 짐작해서 적지 마세요.
 - 어제 기록이 없으면 다음 날 점심에 묻고 주 n회를 겨우 맞출 수 있으면 그날 밤 알립니다. 따로 리마인드를 걸지 마세요.
 
 작업
