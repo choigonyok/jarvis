@@ -105,9 +105,20 @@ type State struct {
 
 	// Set by what was done about it, not by what was said.
 	CalendarID string `json:"calendarId,omitempty"`
+	// Declined is what the operator said turning down the card that would
+	// put this plan on the calendar ("반려" when they said nothing): the plan
+	// stays as it was read, but moves nothing and collides with nothing.
+	Declined string `json:"declined,omitempty"`
+	// MergedInto is the plan this one turned out to be: a second telling of
+	// one event, called off so that one plan speaks for it.
+	MergedInto string `json:"mergedInto,omitempty"`
 
 	Note string `json:"note,omitempty"`
 }
+
+// ActorCard is who changes a plan because the operator answered a card about
+// it: what they said is already so, and nothing is asked about it.
+const ActorCard = "card"
 
 // Plan types the interpreter labels plans with.
 var PlanTypes = []string{"데이트", "캠핑", "여행", "회식", "식사", "모임", "운동", "병원", "업무", "경조사", "기념일", "쇼핑", "공연", "기타"}
@@ -514,6 +525,8 @@ type Intent struct {
 	// Card is whether a card went out for it (mind.card): what the agent
 	// shows and the operator answers.
 	Card bool `json:"card,omitempty"`
+	// Photos are what its card shows, by the photo server's ids.
+	Photos []string `json:"photos,omitempty"`
 	// Fields make its card a form - a question to answer, not only approve.
 	// The answers come back in the payload's "answers".
 	Fields []Field `json:"fields,omitempty"`
@@ -691,6 +704,9 @@ type CalendarEvent struct {
 type CalendarAction struct {
 	EventID string        `json:"eventId,omitempty"`
 	Event   CalendarEvent `json:"event"`
+	// Was is the entry as it stood before a move read in a conversation: what
+	// the plan goes back to if the operator turns the move down.
+	Was *CalendarEvent `json:"was,omitempty"`
 }
 
 // Outcome is one judgement on the result ledger: what was judged, how sure,

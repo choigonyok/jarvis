@@ -641,3 +641,45 @@ func TestAlikeCalendarCardIsOneQuestion(t *testing.T) {
 		t.Fatal("닫힌 카드는 대화에서도 닫혀야 합니다")
 	}
 }
+
+// One morning's plans asked four cards and none closed another (2026-11-02):
+// a question about an entry closes the other plans' questions about it, and a
+// question about one outing closes the other parts'. Another day's stays.
+func TestCardsAboutOneOutingAreOneQuestion(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(DefaultPolicy())
+	plan := func(id, title string) {
+		if _, _, err := f.st.Put(ctx, model.Entity{ID: id, Kind: model.KindPlan, Room: "r", State: model.State{Title: title, Status: model.Confirmed, Date: "2026-10-28", People: []string{"지수"}}}, model.Change{Actor: "t", Evidence: []model.Evidence{}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	plan("plan_a", "지수와 합주 (연습실 D)")
+	plan("plan_b", "지수와 점심")
+	ask := func(entity, kind, eventID, title, date, start string) model.Intent {
+		payload, _ := json.Marshal(model.CalendarAction{EventID: eventID, Event: model.CalendarEvent{Title: title, Date: date, Start: start}})
+		return model.Intent{Skill: "schedule", Kind: kind, EntityID: entity, Payload: payload, Title: title, Confidence: 0.9, Reversible: true}
+	}
+	entry, err := f.cal.Put(ctx, model.CalendarEvent{Title: "지수와 톤 세팅", Date: "2026-10-28", Start: "10:00"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, _ := f.g.Submit(ctx, ask("plan_o", "calendar.create", "", "지수와 커피", "2026-11-02", "12:00"))
+	first, _ := f.g.Submit(ctx, ask("plan_a", "calendar.update", entry.ID, "지수와 합주 (연습실 D)", "2026-10-28", "12:00"))
+	if first.Status != model.Pending {
+		t.Fatalf("%+v", first)
+	}
+	second, _ := f.g.Submit(ctx, ask("plan_c", "calendar.update", entry.ID, "지수와 톤 세팅", "2026-10-28", "11:00"))
+	if old, _ := f.st.Intent(ctx, first.ID); old.Status != model.Superseded || !strings.Contains(old.Error, second.ID) {
+		t.Fatalf("같은 캘린더 항목의 앞 카드는 닫혀야 합니다: %s %q", old.Status, old.Error)
+	}
+	third, _ := f.g.Submit(ctx, ask("plan_b", "calendar.create", "", "지수와 점심", "2026-10-28", "13:00"))
+	if third.Status != model.Pending {
+		t.Fatalf("%+v", third)
+	}
+	if lunch, _ := f.st.Intent(ctx, second.ID); lunch.Status != model.Superseded {
+		t.Fatalf("같은 사람과 이어지는 일정의 카드는 하나로: %s", lunch.Status)
+	}
+	if kept, _ := f.st.Intent(ctx, other.ID); kept.Status != model.Pending {
+		t.Fatalf("다른 날의 카드는 그대로: %s", kept.Status)
+	}
+}

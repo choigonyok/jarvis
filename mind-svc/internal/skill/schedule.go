@@ -56,11 +56,25 @@ func (s Schedule) OnChange(ctx context.Context, v View, e model.Entity, changes 
 	// A date was set: a "날짜 정하기" loop for it is done.
 	r.Updates = append(r.Updates, closeLoopsTitled(ctx, v, e, "날짜 정하기")...)
 
+	// Two plans from conversations on one entry speak over each other: each
+	// moved it its own way, and one morning asked two moves of one entry
+	// (2026-11-02). The first to hold it keeps it; this one is merged into it.
+	if st.CalendarID != "" {
+		if first, ok := entryHolder(ctx, v, e); ok {
+			return s.merge(e, first, changes)
+		}
+	}
+
 	if st.CalendarID == "" {
 		// Put on the calendar some other way - by the assistant in a
 		// conversation, by hand - under a title of its own: that entry is
 		// this plan, not a gap to fill (nor, in protect, a collision).
 		if twin, ok := calendarTwin(ctx, v, e); ok {
+			// The entry is a plan of a conversation's: the same event told a
+			// second time, not an entry with nobody speaking for it.
+			if twin.Room != CalendarRoom {
+				return s.merge(e, twin, changes)
+			}
 			r.Withdraw = true
 			r.Updates = append(r.Updates, Update{ID: e.ID, Why: "캘린더의 같은 일정(" + twin.State.Title + ")에 이음",
 				Set: func(st *model.State) bool {
@@ -91,9 +105,10 @@ func (s Schedule) OnChange(ctx context.Context, v View, e model.Entity, changes 
 	moved := base != nil && base.CalendarID != "" && calendarFields(*base) != calendarFields(st)
 	// Moved on the calendar itself (by hand, or by an approved move): the
 	// calendar already says so.
+	// A move turned down on its card goes back the same way: nothing to ask.
 	fromCalendar := true
 	for _, c := range changes {
-		fromCalendar = fromCalendar && c.Actor == "sensor:calendar"
+		fromCalendar = fromCalendar && (c.Actor == "sensor:calendar" || c.Actor == model.ActorCard)
 	}
 	if moved && !fromCalendar {
 		r.Intents = append(r.Intents, s.move(e, *base, changes))
@@ -183,13 +198,72 @@ func calendarTwin(ctx context.Context, v View, e model.Entity) (model.Entity, bo
 	return model.Entity{}, false
 }
 
+// CalendarRoom is where plans read off the calendar itself live.
+const CalendarRoom = "calendar"
+
+// entryHolder is the plan from a conversation already holding e's calendar
+// entry, if another did first.
+func entryHolder(ctx context.Context, v View, e model.Entity) (model.Entity, bool) {
+	if e.Room == CalendarRoom {
+		return model.Entity{}, false
+	}
+	plans, err := v.Entities(ctx, model.KindPlan, "", true)
+	if err != nil {
+		return model.Entity{}, false
+	}
+	for _, p := range plans {
+		if p.ID != e.ID && p.Room != CalendarRoom && p.State.CalendarID == e.State.CalendarID && p.CreatedAt.Before(e.CreatedAt) {
+			return p, true
+		}
+	}
+	return model.Entity{}, false
+}
+
+// merge folds a second telling of an event into the plan that speaks for it:
+// where it said, and what the first lacked, go on that plan, and if that moves
+// its entry that is the one question asked. The second is called off, taking
+// nothing off the calendar with it.
+func (s Schedule) merge(e, into model.Entity, changes []model.Change) Result {
+	told := e.State
+	next := into
+	take := func(cur *model.State) bool {
+		changed := model.Fill(cur, told)
+		if told.Place != "" && told.Place != cur.Place {
+			cur.Place = told.Place
+			changed = true
+		}
+		return changed
+	}
+	take(&next.State)
+	r := Result{Withdraw: true, Updates: []Update{
+		{ID: into.ID, Why: "같은 일정을 다시 말함(" + told.Title + ")", Set: take},
+		{ID: e.ID, Why: "같은 일정(" + into.State.Title + ")에 합침", Set: func(cur *model.State) bool {
+			cur.Status, cur.MergedInto, cur.CalendarID = model.Cancelled, into.ID, ""
+			return true
+		}},
+	}}
+	if into.State.CalendarID != "" && calendarFields(next.State) != calendarFields(into.State) {
+		r.Intents = append(r.Intents, s.move(next, into.State, changes))
+	}
+	return r
+}
+
 // add is "put it on the calendar" - unless the operator already turned this
 // exact entry down or took it back, or was asked it in the conversation by
 // the assistant's own card: none is asked twice.
 func (s Schedule) add(ctx context.Context, v View, e model.Entity, changes []model.Change) (model.Intent, bool) {
+	// Deleted on the calendar a moment ago: that was the answer.
+	if e.State.Declined != "" && byCalendar(changes) {
+		return model.Intent{}, false
+	}
 	// A day gone by is not asked about: read late (the collector was down for
 	// a day, 2026-10-22), the card came for what had already happened.
 	if e.State.Date != "" && e.State.Date < v.Now().In(v.Loc()).Format("2006-01-02") {
+		return model.Intent{}, false
+	}
+	// Nor one already under way: a card to add 10:00 raised at 10:12 asks about
+	// a morning that was not read right, or one that needs no reminding.
+	if at, timed, ok := When(e.State, v.Loc()); ok && timed && !at.After(v.Now()) {
 		return model.Intent{}, false
 	}
 	ev := event(e.State, changes)
@@ -239,7 +313,8 @@ func CalendarLink(st model.State) string {
 
 func (s Schedule) move(e model.Entity, before model.State, changes []model.Change) model.Intent {
 	ev := event(e.State, changes)
-	payload, _ := json.Marshal(model.CalendarAction{EventID: e.State.CalendarID, Event: ev})
+	was := event(before, nil)
+	payload, _ := json.Marshal(model.CalendarAction{EventID: e.State.CalendarID, Event: ev, Was: &was})
 	return model.Intent{
 		Kind: "calendar.update", EntityID: e.ID, Payload: payload,
 		Title:  "캘린더 수정: " + e.State.Title + " (" + diff(before, e.State) + ")",

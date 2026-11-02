@@ -266,3 +266,25 @@ func TestClassifyMoreTitles(t *testing.T) {
 		}
 	}
 }
+
+// The entry of a conversation's plan deleted by hand: the plan stays what was
+// said, holds no entry any more, and says so - or the next card about it asks
+// to change what is not there ("not found", 2026-11-02).
+func TestSyncCalendarLetsGoOfAnEntryDeletedByHand(t *testing.T) {
+	ctx := context.Background()
+	st := store.NewMemory()
+	now := time.Date(2026, 11, 2, 15, 12, 0, 0, seoul)
+	w := world.New(st, func() time.Time { return now })
+	s := &Structured{Store: st, Observer: observer{st}, World: w, Loc: seoul, Now: func() time.Time { return now }}
+	talked, err := w.Create(ctx, model.KindPlan, "kakao:7", model.State{Title: "지수와 톤 세팅", Status: model.Confirmed, Date: "2026-11-28", Start: "10:00", CalendarID: "gone"}, Meta())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SyncCalendar(ctx, []entry{{ID: "other", Title: "그림자", Date: "2026-11-28", Start: "15:00"}}, "2026-11-01", "2026-12-01"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := st.Entity(ctx, talked.ID)
+	if got.State.Status != model.Confirmed || got.State.CalendarID != "" || got.State.Declined != GoneByHand {
+		t.Fatalf("%+v", got.State)
+	}
+}

@@ -2,6 +2,8 @@ package skill
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -198,5 +200,84 @@ func TestNotAskedAgainAfterTheConversationAsked(t *testing.T) {
 	v.asked = []model.Intent{{Kind: covered.Kind, Payload: covered.Payload, Status: model.Superseded, DecidedBy: model.ByConversation}}
 	if r := (Schedule{}).OnChange(context.Background(), v, plan, changes); len(r.Intents) != 1 {
 		t.Fatalf("날짜가 바뀌면 새 질문입니다: %+v", r.Intents)
+	}
+}
+
+func talked(id, title, start, calendarID string, created time.Time, people ...string) model.Entity {
+	return model.Entity{ID: id, Kind: model.KindPlan, Room: "kakao:7", CreatedAt: created, State: model.State{
+		Title: title, Status: model.Confirmed, Date: "2026-11-28", Start: start, People: people, CalendarID: calendarID}}
+}
+
+// A second telling of one event, tied to the entry the first holds, is merged
+// into the first - and what it adds is the one question asked. Two plans on one
+// entry each asked their own move (2026-11-02).
+func TestTwoPlansOnOneEntryBecomeOne(t *testing.T) {
+	t0 := time.Date(2026, 10, 26, 23, 0, 0, 0, seoul)
+	first := talked("p1", "지수와 톤 세팅 만남", "10:00", "c1", t0, "지수")
+	first.State.Place = "서현역"
+	second := talked("p2", "지수와 합주 (연습실 D)", "12:00", "c1", t0.Add(time.Hour), "지수")
+	second.State.Place = "연습실 역삼점 D"
+	r := Schedule{}.OnChange(context.Background(), view{plans: []model.Entity{first, second}}, second, []model.Change{{Before: &first.State, After: second.State, Actor: "interpreter"}})
+	if len(r.Updates) != 2 || !r.Withdraw {
+		t.Fatalf("%+v", r)
+	}
+	st := second.State
+	r.Updates[1].Set(&st)
+	if st.Status != model.Cancelled || st.MergedInto != "p1" || st.CalendarID != "" {
+		t.Fatalf("합쳐진 쪽은 캘린더를 두고 물러나야 합니다: %+v", st)
+	}
+	if len(r.Intents) != 1 || r.Intents[0].EntityID != "p1" || r.Intents[0].Kind != "calendar.update" || !strings.Contains(r.Intents[0].Title, "서현역 → 연습실 역삼점 D") {
+		t.Fatalf("먼저 잡은 일정의 카드 하나만: %+v", r.Intents)
+	}
+	var a model.CalendarAction
+	if json.Unmarshal(r.Intents[0].Payload, &a) != nil || a.Was == nil || a.Was.Place != "서현역" {
+		t.Fatalf("옮기기 전을 들고 있어야 반려할 때 되돌립니다: %+v", a)
+	}
+	// The one that held it first stays put.
+	if r := (Schedule{}).OnChange(context.Background(), view{plans: []model.Entity{first, second}}, first, []model.Change{{Before: &first.State, After: first.State}}); len(r.Updates) != 0 {
+		t.Fatalf("%+v", r)
+	}
+}
+
+// Already under way by the time it is read, it is not asked about: a card to
+// add 10:00 came at 10:12.
+func TestAPlanUnderWayIsNotAsked(t *testing.T) {
+	now := time.Date(2026, 11, 28, 10, 12, 0, 0, seoul)
+	p := talked("p1", "지수와 합주", "10:00", "", now)
+	if r := (Schedule{}).OnChange(context.Background(), view{plans: []model.Entity{p}, now: now}, p, []model.Change{{After: p.State}}); len(r.Intents) != 0 {
+		t.Fatalf("%+v", r.Intents)
+	}
+	p.State.Start = "19:00"
+	if r := (Schedule{}).OnChange(context.Background(), view{plans: []model.Entity{p}, now: now}, p, []model.Change{{After: p.State}}); len(r.Intents) != 1 {
+		t.Fatalf("아직 안 시작한 일정은 물어야 합니다: %+v", r.Intents)
+	}
+}
+
+// What protect moves an entry for: another entry. Not a plan turned down, not a
+// plan nobody has agreed to put on the calendar, not a part of the same outing
+// (2026-11-02).
+func TestOnlyAnotherEntryMovesAnEntry(t *testing.T) {
+	now := time.Date(2026, 11, 2, 15, 41, 0, 0, seoul)
+	band := model.Entity{ID: "cal", Kind: model.KindPlan, Room: CalendarRoom, State: model.State{Title: "그림자", Status: model.Confirmed, Date: "2026-11-28", Start: "15:00", End: "18:00", CalendarID: "c9"}}
+	check := func(name string, want int, other model.Entity) {
+		t.Helper()
+		v := view{plans: []model.Entity{band, other}, now: now}
+		if r := (Protect{}).OnChange(context.Background(), v, band, nil); len(r.Intents) != want {
+			t.Fatalf("%s: %+v", name, r.Intents)
+		}
+	}
+	rehearsal := talked("p1", "치과 예약", "15:00", "", now)
+	rehearsal.State.End = "17:00"
+	check("캘린더에 없는 일정", 0, rehearsal)
+	rehearsal.State.CalendarID = "c10"
+	check("다른 캘린더 일정", 1, rehearsal)
+	rehearsal.State.Declined = "틀렸어"
+	check("반려한 일정", 0, rehearsal)
+
+	lunch := talked("p2", "지수와 점심", "11:00", "c2", now, "지수")
+	setting := talked("p3", "지수와 톤 세팅", "10:00", "c3", now, "지수")
+	setting.State.End = "14:00"
+	if r := (Protect{}).OnChange(context.Background(), view{plans: []model.Entity{lunch, setting}, now: now}, lunch, nil); len(r.Intents) != 0 {
+		t.Fatalf("한 만남의 두 부분은 겹치는 것이 아닙니다: %+v", r.Intents)
 	}
 }

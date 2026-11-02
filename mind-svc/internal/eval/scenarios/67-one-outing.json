@@ -1,0 +1,297 @@
+{
+ "name": "한 번의 만남은 일정 하나: 만나서 톤 세팅하고 점심 먹는 오전이 합주 일정·점심 일정으로 쪼개지지 않고, 장소·시간만 정하는 대화와 예약 문자가 오늘 날짜의 새 일정이 되지 않으며, 해 보겠다는 말에는 시간이 안 바뀌고, 지나가며 말한 밴드 합주는 캘린더의 그 일정이다",
+ "room": "kakao:jisu",
+ "roomName": "지수",
+ "turns": [
+  {
+   "messages": [
+    {
+     "at": "2026-11-02T09:40",
+     "from": "지수",
+     "text": "그러면 28일 합주 전에 보는 거 가능해? 톤 세팅 같이 하자"
+    },
+    {
+     "at": "2026-11-02T09:41",
+     "from": "지수",
+     "text": "합주 3시 시작이야"
+    },
+    {
+     "at": "2026-11-02T09:42",
+     "me": true,
+     "text": "오케이 한 10시에는 보는 게 좋겠다"
+    },
+    {
+     "at": "2026-11-02T09:43",
+     "me": true,
+     "text": "끝나고 점심 먹고 합주 가게"
+    },
+    {
+     "at": "2026-11-02T09:44",
+     "from": "지수",
+     "text": "맞아"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "create",
+      "kind": "plan",
+      "set": {
+       "title": "지수와 톤 세팅",
+       "status": "confirmed",
+       "date": "2026-11-28",
+       "dateFrom": "28일",
+       "start": "10:00",
+       "people": [
+        "지수"
+       ],
+       "type": "기타",
+       "note": "끝나고 점심"
+      },
+      "evidence": [
+       {
+        "line": 3,
+        "quote": "10시에는 보는 게 좋겠다"
+       }
+      ],
+      "confidence": 0.85,
+      "why": "28일 합주 전에 만나 톤 세팅"
+     }
+    ]
+   },
+   "expect": {
+    "plans": [
+     {
+      "titleHas": "톤 세팅",
+      "status": "confirmed",
+      "date": "2026-11-28",
+      "start": "10:00"
+     }
+    ],
+    "intents": [
+     "calendar.create"
+    ],
+    "cards": [
+     "톤 세팅"
+    ],
+    "noPlans": [
+     {
+      "titleHas": "점심"
+     },
+     {
+      "titleHas": "합주"
+     }
+    ]
+   },
+   "at": "2026-11-02T09:30",
+   "entries": [
+    {
+     "id": "cal-band",
+     "title": "그림자",
+     "date": "2026-11-28",
+     "start": "15:00",
+     "end": "18:00",
+     "owner": "shared"
+    }
+   ]
+  },
+  {
+   "approve": "calendar.create",
+   "expect": {
+    "calendarCount": 2
+   }
+  },
+  {
+   "messages": [
+    {
+     "at": "2026-11-02T09:50",
+     "me": true,
+     "text": "연습실 1호점 c로 할까?"
+    },
+    {
+     "at": "2026-11-02T09:51",
+     "me": true,
+     "text": "앰프 우리 평소 쓰던 거여서"
+    },
+    {
+     "at": "2026-11-02T09:52",
+     "from": "지수",
+     "text": "아 그래? 그러면 거기로 가자"
+    },
+    {
+     "at": "2026-11-02T09:53",
+     "from": "지수",
+     "text": "10시부터 14시?"
+    },
+    {
+     "at": "2026-11-02T09:54",
+     "me": true,
+     "text": "으응 그러자그러자"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "update",
+      "kind": "plan",
+      "ref": "P1",
+      "set": {
+       "place": "연습실 1호점 C",
+       "end": "14:00"
+      },
+      "evidence": [
+       {
+        "line": 4,
+        "quote": "10시부터 14시?"
+       }
+      ],
+      "confidence": 0.85,
+      "why": "톤 세팅할 곳과 끝나는 시각을 정함"
+     }
+    ]
+   },
+   "expect": {
+    "plans": [
+     {
+      "titleHas": "톤 세팅",
+      "date": "2026-11-28",
+      "start": "10:00"
+     }
+    ],
+    "planCount": 2,
+    "intents": [
+     "calendar.update"
+    ],
+    "noPlans": [
+     {
+      "titleHas": "점심"
+     },
+     {
+      "titleHas": "합주"
+     }
+    ]
+   }
+  },
+  {
+   "approve": "calendar.update",
+   "expect": {
+    "calendar": [
+     {
+      "titleHas": "톤 세팅",
+      "date": "2026-11-28",
+      "start": "10:00"
+     }
+    ],
+    "calendarCount": 2
+   }
+  },
+  {
+   "messages": [
+    {
+     "at": "2026-11-02T12:15",
+     "from": "지수",
+     "text": "[소리합주실] 예약상태: 완료 ROOM: 역삼점 D 예약일: 2026-11-28 (토) 시간: 10:00 ~ 14:00 인원: 2명"
+    },
+    {
+     "at": "2026-11-02T12:16",
+     "from": "지수",
+     "text": "완료"
+    }
+   ],
+   "script": {
+    "changes": [
+     {
+      "op": "update",
+      "kind": "plan",
+      "ref": "P1",
+      "set": {
+       "place": "연습실 역삼점 D"
+      },
+      "evidence": [
+       {
+        "line": 1,
+        "quote": "ROOM: 역삼점 D"
+       }
+      ],
+      "confidence": 0.9,
+      "why": "이야기하던 톤 세팅의 예약 안내"
+     }
+    ]
+   },
+   "expect": {
+    "plans": [
+     {
+      "titleHas": "톤 세팅",
+      "date": "2026-11-28",
+      "start": "10:00"
+     }
+    ],
+    "planCount": 2,
+    "intents": [
+     "calendar.update"
+    ],
+    "noPlans": [
+     {
+      "titleHas": "점심"
+     },
+     {
+      "titleHas": "합주"
+     }
+    ]
+   }
+  },
+  {
+   "approve": "calendar.update"
+  },
+  {
+   "messages": [
+    {
+     "at": "2026-11-02T15:05",
+     "from": "지수",
+     "text": "예약 변경해볼게 4시간 유지한 상태에서"
+    },
+    {
+     "at": "2026-11-02T15:06",
+     "me": true,
+     "text": "가능하면 아예 12-4로 하고"
+    },
+    {
+     "at": "2026-11-02T15:07",
+     "from": "지수",
+     "text": "그것도 좋다"
+    },
+    {
+     "at": "2026-11-02T15:08",
+     "me": true,
+     "text": "점심을 11시에 먹는 게 좋겠다"
+    },
+    {
+     "at": "2026-11-02T15:09",
+     "from": "지수",
+     "text": "ㅇㅇ 그렇게 해볼게"
+    }
+   ],
+   "script": {
+    "changes": []
+   },
+   "expect": {
+    "plans": [
+     {
+      "titleHas": "톤 세팅",
+      "start": "10:00"
+     }
+    ],
+    "planCount": 2,
+    "noCards": true,
+    "noPlans": [
+     {
+      "titleHas": "점심"
+     },
+     {
+      "titleHas": "합주"
+     }
+    ]
+   }
+  }
+ ]
+}

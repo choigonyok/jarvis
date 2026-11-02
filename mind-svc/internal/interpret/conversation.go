@@ -94,7 +94,7 @@ func NewConversation(cfg Config, st store.Store, w *world.World, client llm.Clie
 		cfg.MaxBatch = 40
 	}
 	if cfg.Context == 0 {
-		cfg.Context = 12
+		cfg.Context = 24
 	}
 	if cfg.MinConf == 0 {
 		cfg.MinConf = 0.5
@@ -273,7 +273,7 @@ func (c *Conversation) Read(ctx context.Context, room string) error {
 	if c.cfg.Search > 0 && placeless(known) {
 		ask = llm.WithSearch(ctx, c.cfg.Search)
 	}
-	answer, err := c.llm.Complete(ask, system, prompt(name, c.cfg.Owner, c.now(), c.loc, known, remembered, earlier, fresh))
+	answer, err := c.llm.Complete(ask, system, prompt(name, c.cfg.Owner, c.now(), c.loc, known, remembered, c.turnedDown(ctx), earlier, fresh))
 	if err != nil && !errors.Is(err, llm.ErrNoAnswer) {
 		c.retryLater(room, err)
 		return err
@@ -323,7 +323,7 @@ func (c *Conversation) Read(ctx context.Context, room string) error {
 	}
 	applied := 0
 	for _, o := range ops {
-		ok, err := c.apply(ctx, room, o, fresh, known, remembered)
+		ok, err := c.apply(ctx, room, o, earlier, fresh, known, remembered)
 		if err != nil {
 			return err
 		}
@@ -414,6 +414,44 @@ func (c *Conversation) LastRead() (time.Time, string) {
 	return c.read, c.failed
 }
 
+// turnedWithin and turnedMax are how far back, and how many of, the words the
+// operator left on the cards they turned down are shown to every read.
+const (
+	turnedWithin = 60 * 24 * time.Hour
+	turnedMax    = 12
+)
+
+// turnedDown is what the operator said turning down calendar cards lately,
+// the newest first: "X 가 밴드 합주야" said once on a card is how the next
+// read should take a band's rehearsal, and it went unread until it had been
+// said twice and asked again (2026-10-16, 10-22). The quick answers say nothing
+// beside the card they were on, and the plan shows those itself.
+func (c *Conversation) turnedDown(ctx context.Context) []string {
+	recent, err := c.st.IntentsSince(ctx, c.now().Add(-turnedWithin))
+	if err != nil {
+		c.log.Warn("반려 이유를 읽지 못했습니다", "err", err)
+		return nil
+	}
+	var out []string
+	for _, in := range recent {
+		why := strings.TrimSpace(in.Error)
+		if in.Status != model.Rejected || why == "" || !strings.HasPrefix(in.Kind, "calendar.") || slices.Contains(quickReasons, why) {
+			continue
+		}
+		line := "'" + strings.TrimPrefix(in.Title, "캘린더에 추가: ") + "' 카드: " + oneLine(why)
+		if !slices.Contains(out, line) {
+			out = append(out, line)
+		}
+		if len(out) == turnedMax {
+			break
+		}
+	}
+	return out
+}
+
+// quickReasons are the card's own one-tap answers (web, chat/reject-form.tsx).
+var quickReasons = []string{"지금은 필요 없어", "이미 했어", "틀렸어", "다시 묻지 마"}
+
 // known is what the world model holds for this room, by short ref: live
 // plans and loops, and plans that ended recently (so "다시 가기로 했어" can
 // revive one instead of starting another).
@@ -426,7 +464,8 @@ func (c *Conversation) known(ctx context.Context, room string) ([]view, error) {
 	var out []view
 	np, nl := 0, 0
 	for _, e := range all {
-		if !e.Live() && e.UpdatedAt.Before(cutoff) {
+		// One merged into another is that one, which is shown.
+		if !e.Live() && e.UpdatedAt.Before(cutoff) || e.State.MergedInto != "" {
 			continue
 		}
 		switch e.Kind {
@@ -472,7 +511,7 @@ func (c *Conversation) known(ctx context.Context, room string) ([]view, error) {
 	// cards (2026-11-01).
 	for _, e := range plans {
 		st := e.State
-		if e.Room == room || shown[e.ID] || st.CalendarID != "" || st.Status != model.Confirmed ||
+		if e.Room == room || shown[e.ID] || st.CalendarID != "" || st.Status != model.Confirmed || st.Declined != "" ||
 			st.Date == "" || st.Date < today || st.Date > until {
 			continue
 		}
@@ -555,7 +594,7 @@ func parse(answer string) ([]op, error) {
 // apply checks a proposed change and writes it. A change it does not
 // believe - no evidence that holds, a ref that names nothing, too unsure -
 // is logged and skipped, not an error.
-func (c *Conversation) apply(ctx context.Context, room string, o op, fresh []model.Message, known []view, remembered []Memory) (bool, error) {
+func (c *Conversation) apply(ctx context.Context, room string, o op, earlier, fresh []model.Message, known []view, remembered []Memory) (bool, error) {
 	skip := func(why string) (bool, error) {
 		c.log.Info("해석 결과를 버립니다", "room", room, "op", o.Op, "ref", o.Ref, "why", why)
 		return false, nil
@@ -606,11 +645,25 @@ func (c *Conversation) apply(ctx context.Context, room string, o op, fresh []mod
 			if elsewhere[id] {
 				// Named as the other room or the calendar named it: what it
 				// lacked is filled in, what it had stays.
-				_, _, err := c.world.Update(ctx, id, func(cur *model.State) bool { return fill(cur, s) }, at(id))
+				_, _, err := c.world.Update(ctx, id, func(cur *model.State) bool { return model.Fill(cur, s) }, at(id))
 				return err == nil, err
 			}
 			_, _, err := c.world.Update(ctx, id, func(cur *model.State) bool { setAll(cur, kind, o.Set, refs); return true }, at(id))
 			return err == nil, err
+		}
+		if kind == model.KindPlan {
+			// A part of an outing already known is that outing, whatever the
+			// model made of it (rule 26): what it adds goes on that plan.
+			if id := outing(s, known); id != "" {
+				_, _, err := c.world.Update(ctx, id, func(cur *model.State) bool { return partOf(cur, s) }, at(id))
+				return err == nil, err
+			}
+			// Dated today with nothing said about the day (rule 28): it is
+			// the plan the conversation was already on, moved along.
+			if id := c.continued(s, o, earlier, fresh, known); id != "" {
+				_, _, err := c.world.Update(ctx, id, func(cur *model.State) bool { return detailsOf(cur, s) }, at(id))
+				return err == nil, err
+			}
 		}
 		_, err := c.world.Create(ctx, kind, room, s, meta)
 		return err == nil, err
@@ -797,6 +850,90 @@ func (c *Conversation) same(kind string, s model.State, known []view) string {
 	return ""
 }
 
+// outing is a live plan that s is a part of (model.SameOuting): one of this
+// room's, or another room's not on the calendar yet. One the operator turned
+// down is no plan to add to.
+func outing(s model.State, known []view) string {
+	for _, v := range known {
+		e := v.entity
+		if e.Kind != model.KindPlan || !e.Live() || e.State.Declined != "" || v.elsewhere && e.State.CalendarID != "" {
+			continue
+		}
+		if model.SameOuting(e.State, s) {
+			return e.ID
+		}
+	}
+	return ""
+}
+
+// partOf puts a part of an outing on its plan: what the plan lacked, and the
+// part itself in its note.
+func partOf(cur *model.State, s model.State) bool {
+	changed := model.Fill(cur, s)
+	line := strings.TrimSpace(s.Title + " " + s.Start)
+	if !strings.Contains(cur.Note, s.Title) {
+		cur.Note = strings.TrimSpace(strings.TrimRight(cur.Note+" · "+line, " ·"))
+		cur.Note = strings.TrimPrefix(cur.Note, "· ")
+		changed = true
+	}
+	return changed
+}
+
+// continued is the live plan a create really continues: the model filled in
+// today for a day nobody named, and a plan with one of the same people lies
+// ahead. "10시부터 14시?" settling the room for the 28th was read as a plan for
+// that morning, for hours nobody was free (2026-11-02).
+func (c *Conversation) continued(s model.State, o op, earlier, fresh []model.Message, known []view) string {
+	if s.Date == "" || len(fresh) == 0 || s.Date != fresh[len(fresh)-1].SentAt.In(c.loc).Format("2006-01-02") {
+		return ""
+	}
+	var from string
+	if raw, ok := o.Set["dateFrom"]; ok {
+		_ = json.Unmarshal(raw, &from)
+	}
+	if from = norm(from); from != "" {
+		for _, m := range slices.Concat(earlier, fresh) {
+			if strings.Contains(norm(m.Text), from) {
+				return ""
+			}
+		}
+	}
+	for _, v := range known {
+		e := v.entity
+		if e.Kind != model.KindPlan || !e.Live() || e.State.Declined != "" || e.State.Date <= s.Date {
+			continue
+		}
+		next := e.State
+		next.Date = s.Date
+		if model.SameOuting(model.State{Title: s.Title, Date: s.Date, People: s.People}, next) {
+			return e.ID
+		}
+	}
+	return ""
+}
+
+// detailsOf takes what a create that continues a plan settled: where, and
+// until when; the plan keeps what it is and its day.
+func detailsOf(cur *model.State, s model.State) bool {
+	before := *cur
+	if s.Place != "" {
+		cur.Place = s.Place
+	}
+	if s.Start != "" {
+		cur.Start = s.Start
+	}
+	if s.End != "" {
+		cur.End = s.End
+	}
+	if s.PlaceKind != "" {
+		cur.PlaceKind = s.PlaceKind
+	}
+	if s.Note != "" {
+		cur.Note = s.Note
+	}
+	return !world.Same(before, *cur)
+}
+
 // verify keeps the evidence that holds: a line among the new messages, not a
 // notice - mind's own output is never its evidence - and a quote that is in
 // it.
@@ -910,30 +1047,6 @@ func clean(people []string) []string {
 
 func norm(s string) string {
 	return strings.ToLower(strings.Join(strings.Fields(s), ""))
-}
-
-// fill adds to a plan what another mention of it says and it lacked - a time,
-// a place, an end, who - and leaves what it had. Reports whether anything changed.
-func fill(cur *model.State, s model.State) bool {
-	changed := false
-	set := func(dst *string, v string) {
-		if *dst == "" && v != "" {
-			*dst = v
-			changed = true
-		}
-	}
-	set(&cur.Start, s.Start)
-	set(&cur.End, s.End)
-	set(&cur.EndDate, s.EndDate)
-	set(&cur.Place, s.Place)
-	set(&cur.Type, s.Type)
-	set(&cur.PlaceKind, s.PlaceKind)
-	set(&cur.Area, s.Area)
-	if len(cur.People) == 0 && len(s.People) > 0 {
-		cur.People = s.People
-		changed = true
-	}
-	return changed
 }
 
 // hearsayConfidence caps a fact about the operator that only someone else

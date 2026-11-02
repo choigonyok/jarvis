@@ -30,7 +30,12 @@ const minLength = time.Hour
 func (p Protect) OnChange(ctx context.Context, v View, e model.Entity, _ []model.Change) Result {
 	st := e.State
 	start, end, ok := known(st, v.Loc())
-	if !ok || st.Status != model.Confirmed || st.Owner == "partner" || !start.After(v.Now()) {
+	if !ok || st.Status != model.Confirmed || st.Owner == "partner" || st.Declined != "" || !start.After(v.Now()) {
+		return Result{Withdraw: true}
+	}
+	// A move still being asked about has not happened: what it would land on
+	// is for after the answer, and two cards about one move read as two moves.
+	if asking(ctx, v, e) {
 		return Result{Withdraw: true}
 	}
 	plans, err := v.Entities(ctx, model.KindPlan, "", true)
@@ -39,10 +44,16 @@ func (p Protect) OnChange(ctx context.Context, v View, e model.Entity, _ []model
 	}
 	for _, o := range plans {
 		if o.ID == e.ID || o.State.Status != model.Confirmed || o.State.Owner == "partner" ||
+			// Turned down, it is not on the operator's day to collide with.
+			o.State.Declined != "" ||
 			o.State.CalendarID != "" && o.State.CalendarID == st.CalendarID ||
 			// The same event told twice (a conversation's plan and its
-			// calendar entry, before schedule ties them) collides with nothing.
-			model.SameEvent(st, o.State) {
+			// calendar entry, before schedule ties them) collides with nothing,
+			// and neither do the parts of one outing.
+			model.SameEvent(st, o.State) || model.SameOuting(st, o.State) ||
+			// An entry is not moved for what is not on the calendar yet: the
+			// card to add that asks first.
+			st.CalendarID != "" && o.State.CalendarID == "" {
 			continue
 		}
 		os, oe, ok := known(o.State, v.Loc())
@@ -74,6 +85,20 @@ func (p Protect) OnChange(ctx context.Context, v View, e model.Entity, _ []model
 		}
 	}
 	return Result{Withdraw: true}
+}
+
+// asking is whether a card is open to move the plan's entry.
+func asking(ctx context.Context, v View, e model.Entity) bool {
+	open, err := v.IntentsFor(ctx, e.ID)
+	if err != nil {
+		return false
+	}
+	for _, in := range open {
+		if in.Status == model.Pending && in.Skill == "schedule" && in.Kind == "calendar.update" {
+			return true
+		}
+	}
+	return false
 }
 
 // move is the card: calendar.update when the plan is on the calendar, a

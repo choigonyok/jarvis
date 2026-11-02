@@ -167,10 +167,11 @@ func (g *Gate) Submit(ctx context.Context, in model.Intent) (model.Intent, error
 		in.Decision, in.Status, in.Why, in.DecidedBy, in.DecidedAt = model.Drop, model.Dropped, why, "policy", &at
 		return in, g.st.PutIntent(ctx, in)
 	}
-	// One entry asked for twice - the same days at the same place, read in
-	// two rooms as two plans - is one question: the card still open for the
-	// other is closed and this one, the newer, stands (2026-11-01).
-	if in.Kind == "calendar.create" {
+	// One entry asked about twice - the same days at the same place, read in
+	// two rooms as two plans (2026-11-01), or a move and a move of it - is one
+	// question: the card still open for the other is closed and this one, the
+	// newer, stands.
+	if strings.HasPrefix(in.Kind, "calendar.") {
 		if err := g.withdrawAlike(ctx, in); err != nil {
 			return in, err
 		}
@@ -443,29 +444,25 @@ func (g *Gate) withdraw(ctx context.Context, entityID, skill, why string) error 
 // its entry: one older than this is stale whatever it asked.
 const alikeWithin = 30 * 24 * time.Hour
 
-// withdrawAlike closes the open calendar.create questions about another
-// entity that ask for the same entry as in: the same day, and the same place
-// or the same title.
+// withdrawAlike closes the open calendar questions about other plans that ask
+// about the same entry as in (sameEntry).
 func (g *Gate) withdrawAlike(ctx context.Context, in model.Intent) error {
 	var a model.CalendarAction
-	if json.Unmarshal(in.Payload, &a) != nil || a.Event.Date == "" {
+	if json.Unmarshal(in.Payload, &a) != nil {
 		return nil
 	}
-	flat := func(s string) string { return strings.ToLower(strings.Join(strings.Fields(s), "")) }
 	open, err := g.st.IntentsSince(ctx, g.now().Add(-alikeWithin))
 	if err != nil {
 		return err
 	}
 	for _, p := range open {
-		if p.Status != model.Pending || p.Kind != "calendar.create" || p.EntityID == in.EntityID {
+		// One's own plan: replaced by skill below, and another skill's card
+		// about it waits beside this one.
+		if p.Status != model.Pending || !strings.HasPrefix(p.Kind, "calendar.") || p.EntityID == in.EntityID {
 			continue
 		}
 		var b model.CalendarAction
-		if json.Unmarshal(p.Payload, &b) != nil || b.Event.Date != a.Event.Date {
-			continue
-		}
-		samePlace := flat(a.Event.Place) != "" && flat(b.Event.Place) == flat(a.Event.Place)
-		if !samePlace && flat(b.Event.Title) != flat(a.Event.Title) {
+		if json.Unmarshal(p.Payload, &b) != nil || !g.sameEntry(ctx, in, a, p, b) {
 			continue
 		}
 		at := g.now()
@@ -477,6 +474,38 @@ func (g *Gate) withdrawAlike(ctx context.Context, in model.Intent) error {
 		g.closeCard(ctx, p)
 	}
 	return nil
+}
+
+// sameEntry is whether two calendar questions are about one entry: the entry
+// itself, or the same day and the same place, the same title or the same
+// outing. The rule was narrower (a new entry alone, the same place or title to
+// the letter), and of four cards about one morning's plans none closed another
+// (2026-11-02): one room's booking and the lunch after it say neither.
+func (g *Gate) sameEntry(ctx context.Context, x model.Intent, a model.CalendarAction, y model.Intent, b model.CalendarAction) bool {
+	if a.EventID != "" && a.EventID == b.EventID {
+		return true
+	}
+	if a.Event.Date == "" || a.Event.Date != b.Event.Date {
+		return false
+	}
+	flat := func(s string) string { return strings.ToLower(strings.Join(strings.Fields(s), "")) }
+	if p := flat(a.Event.Place); p != "" && p == flat(b.Event.Place) {
+		return true
+	}
+	if flat(a.Event.Title) == flat(b.Event.Title) {
+		return true
+	}
+	return model.SameOuting(g.planOf(ctx, x, a), g.planOf(ctx, y, b))
+}
+
+// planOf is the plan a calendar question is about, or what the question itself
+// says of it when there is none.
+func (g *Gate) planOf(ctx context.Context, in model.Intent, a model.CalendarAction) model.State {
+	s := model.State{Title: a.Event.Title, Date: a.Event.Date, Start: a.Event.Start, End: a.Event.End}
+	if e, err := g.st.Entity(ctx, in.EntityID); err == nil {
+		s.People = e.State.People
+	}
+	return s
 }
 
 // Covered stands an asked intent aside for the same question asked in the
@@ -809,6 +838,7 @@ type Card struct {
 	Confidence float64          `json:"confidence"`
 	Reversible bool             `json:"reversible"`
 	Fields     []model.Field    `json:"fields,omitempty"`
+	Photos     []string         `json:"photos,omitempty"`
 	// Quiet: raise the card, but do not ring for it - it goes out with the
 	// evening digest (quietCard said why).
 	Quiet bool `json:"quiet,omitempty"`
@@ -827,7 +857,7 @@ const (
 func (g *Gate) card(ctx context.Context, in model.Intent, mode string) {
 	c := Card{IntentID: in.ID, Mode: mode, Skill: in.Skill, Kind: in.Kind, Title: in.Title, Body: in.Body,
 		Preview: in.Preview, Reason: in.Reason, Why: in.Why, Evidence: in.Evidence, Confidence: in.Confidence, Reversible: in.Reversible,
-		Fields: in.Fields, Quiet: in.Tier != "now"}
+		Fields: in.Fields, Photos: in.Photos, Quiet: in.Tier != "now"}
 	if strings.HasPrefix(in.Kind, "calendar.") {
 		var a model.CalendarAction
 		if json.Unmarshal(in.Payload, &a) == nil {

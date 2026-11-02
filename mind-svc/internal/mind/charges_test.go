@@ -21,6 +21,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
 	"github.com/choigonyok/jarvis/mind-svc/internal/slot"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
+	"github.com/choigonyok/jarvis/mind-svc/internal/world"
 	"io"
 	"log/slog"
 )
@@ -433,5 +434,37 @@ func TestAdoptFacts(t *testing.T) {
 	}
 	if rows, _ := st.IndexRows(ctx, 0, 10); len(rows) != 3 {
 		t.Fatalf("%+v", rows)
+	}
+}
+
+// A plan turned down stays as it was read, off the operator's day; a move
+// turned down did not happen, and the plan going back asks nothing.
+func TestCalendarCardsAnswered(t *testing.T) {
+	ctx := context.Background()
+	m, st, _ := chargeMind(t, "")
+	made, err := m.World.Create(ctx, model.KindPlan, "r", model.State{Title: "지수와 합주", Status: model.Confirmed, Date: "2026-11-28", Start: "12:00", CalendarID: "c1"}, world.Meta{Actor: "interpreter"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, _ := json.Marshal(model.CalendarAction{EventID: "c1", Event: model.CalendarEvent{Title: "지수와 합주", Date: "2026-11-28", Start: "12:00"},
+		Was: &model.CalendarEvent{Title: "지수와 합주", Date: "2026-11-28", Start: "10:00"}})
+	m.calendarAnswered(ctx, model.Intent{ID: "i1", Kind: "calendar.update", EntityID: made.ID, Status: model.Rejected, Payload: payload})
+	got, _ := st.Entity(ctx, made.ID)
+	if got.State.Start != "10:00" {
+		t.Fatalf("반려한 수정은 되돌아가야 합니다: %+v", got.State)
+	}
+	cs, _ := st.Changes(ctx, made.ID, 1)
+	if len(cs) != 1 || cs[0].Actor != model.ActorCard {
+		t.Fatalf("카드의 답으로 남아야 물어보지 않습니다: %+v", cs)
+	}
+
+	add, _ := json.Marshal(model.CalendarAction{Event: model.CalendarEvent{Title: "지수와 합주", Date: "2026-11-28"}})
+	m.calendarAnswered(ctx, model.Intent{ID: "i2", Kind: "calendar.create", EntityID: made.ID, Status: model.Rejected, Error: "합주 아니고 톤 세팅이야", Payload: add})
+	if got, _ = st.Entity(ctx, made.ID); got.State.Declined != "합주 아니고 톤 세팅이야" {
+		t.Fatalf("%+v", got.State)
+	}
+	m.calendarAnswered(ctx, model.Intent{ID: "i3", Kind: "calendar.create", EntityID: made.ID, Status: model.Executed, Payload: add})
+	if got, _ = st.Entity(ctx, made.ID); got.State.Declined != "" {
+		t.Fatalf("승인하면 풀립니다: %+v", got.State)
 	}
 }

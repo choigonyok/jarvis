@@ -33,3 +33,30 @@ func TestSameEvent(t *testing.T) {
 		}
 	}
 }
+
+func TestSameOuting(t *testing.T) {
+	plan := func(title, start, end string, people ...string) State {
+		return State{Title: title, Date: "2026-11-28", Start: start, End: end, People: people}
+	}
+	for _, c := range []struct {
+		name string
+		a, b State
+		want bool
+	}{
+		{"겹치는 두 부분", plan("지수와 톤 세팅", "10:00", "14:00", "지수"), plan("지수와 점심", "11:00", "", "지수"), true},
+		{"끝나고 바로 이어짐", plan("지수와 톤 세팅", "10:00", "14:00", "지수"), plan("지수와 합주", "15:00", "", "지수"), true},
+		{"시각 없는 부분", plan("지수와 톤 세팅", "10:00", "", "지수"), plan("지수와 점심", "", "", "지수"), true},
+		{"제목에만 있는 사람", plan("지수와 점심", "11:00", "", "지수"), plan("지수 톤 세팅", "10:00", ""), true},
+		{"같은 사람도 오래 떨어지면 따로", plan("지수와 점심", "12:00", "", "지수"), plan("지수와 저녁", "19:00", "", "지수"), false},
+		{"다른 사람", plan("지수와 점심", "12:00", "", "지수"), plan("민수와 커피", "12:30", "", "민수"), false},
+		{"사람이 없으면 알 수 없음", plan("점심", "12:00", ""), plan("커피", "12:30", ""), false},
+		{"다른 날", State{Title: "지수와 점심", Date: "2026-11-27", Start: "12:00", People: []string{"지수"}}, plan("지수와 커피", "12:30", "", "지수"), false},
+	} {
+		if got := SameOuting(c.a, c.b); got != c.want {
+			t.Errorf("%s: %v", c.name, got)
+		}
+		if got := SameOuting(c.b, c.a); got != c.want {
+			t.Errorf("%s (뒤집어서): %v", c.name, got)
+		}
+	}
+}

@@ -645,3 +645,99 @@ func TestAPlanFromAnotherRoomIsNotMadeTwice(t *testing.T) {
 		t.Fatalf("제목은 그대로, 빠진 것만 채워야 합니다: %+v", got)
 	}
 }
+
+// A part of an outing already known goes on its plan, whatever the model made
+// of it: one morning was five plans and four cards (2026-11-02).
+func TestAPartOfAnOutingIsThatOuting(t *testing.T) {
+	ctx := context.Background()
+	c, st, _ := setup(t, `{"changes":[{"op":"create","kind":"plan","set":{"title":"지수와 점심","status":"confirmed","date":"2026-11-28","dateFrom":"28일","start":"11:00","people":["지수"],"type":"식사"},"evidence":[{"line":1,"quote":"점심을 11시에"}],"confidence":0.7}]}`)
+	first, err := c.world.Create(ctx, model.KindPlan, "r", model.State{Title: "지수와 톤 세팅", Status: model.Confirmed, Date: "2026-11-28", Start: "10:00", End: "14:00", People: []string{"지수"}}, world.Meta{Actor: "interpreter"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	say(t, st, "sim:1", "28일 점심을 11시에 먹자", true, time.Date(2026, 10, 12, 20, 1, 0, 0, seoul))
+	if err := c.Read(ctx, "r"); err != nil {
+		t.Fatal(err)
+	}
+	plans, _ := st.Entities(ctx, model.KindPlan, "", false)
+	if len(plans) != 1 {
+		t.Fatalf("만남은 일정 하나여야 합니다: %+v", plans)
+	}
+	got, _ := st.Entity(ctx, first.ID)
+	if got.State.Title != "지수와 톤 세팅" || got.State.Start != "10:00" || !strings.Contains(got.State.Note, "지수와 점심 11:00") {
+		t.Fatalf("제목과 시각은 그대로, 식사는 메모로: %+v", got.State)
+	}
+}
+
+// Dated today with nothing said about the day, by the same people as a plan
+// ahead: it is that plan going on. "10시부터 14시?" settling the room for the
+// 28th became a plan for that morning (2026-11-02).
+func TestADayNobodySaidIsTheConversationsDay(t *testing.T) {
+	ctx := context.Background()
+	made := func(date string) string {
+		return `{"changes":[{"op":"create","kind":"plan","set":{"title":"지수와 합주 (연습실 1호점)","status":"confirmed","date":"2026-10-12",` + date + `"start":"10:00","end":"14:00","place":"연습실 1호점 C","people":["지수"]},"evidence":[{"line":1,"quote":"10시부터 14시"}],"confidence":0.8}]}`
+	}
+	for _, c := range []struct {
+		name, date, text string
+		plans            int
+	}{
+		{"날짜를 말하지 않음", ``, "10시부터 14시? 연습실 1호점 C", 1},
+		{"인용한 말이 메시지에 없음", `"dateFrom":"오늘",`, "10시부터 14시? 연습실 1호점 C", 1},
+		{"오늘이라고 말함", `"dateFrom":"오늘",`, "오늘 10시부터 14시 연습실 1호점 C", 2},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			cv, st, _ := setup(t, made(c.date))
+			first, err := cv.world.Create(ctx, model.KindPlan, "r", model.State{Title: "지수와 톤 세팅", Status: model.Confirmed, Date: "2026-11-28", Start: "10:00", Place: "서현역", People: []string{"지수"}}, world.Meta{Actor: "interpreter"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			say(t, st, "sim:1", c.text, true, time.Date(2026, 10, 12, 20, 1, 0, 0, seoul))
+			if err := cv.Read(ctx, "r"); err != nil {
+				t.Fatal(err)
+			}
+			plans, _ := st.Entities(ctx, model.KindPlan, "", false)
+			if len(plans) != c.plans {
+				t.Fatalf("%d개여야 합니다: %+v", c.plans, plans)
+			}
+			if c.plans == 1 {
+				got, _ := st.Entity(ctx, first.ID)
+				if got.State.Date != "2026-11-28" || got.State.Title != "지수와 톤 세팅" || got.State.Place != "연습실 1호점 C" || got.State.End != "14:00" {
+					t.Fatalf("이야기하던 일정의 장소·끝 시각이 바뀌어야 합니다: %+v", got.State)
+				}
+			}
+		})
+	}
+}
+
+// What the operator said turning a card down reaches every read; the quick
+// answers say nothing away from their card, and the plan shows those itself.
+func TestWhatACardWasTurnedDownWithIsRead(t *testing.T) {
+	ctx := context.Background()
+	c, st, script := setup(t, `{"changes":[]}`)
+	at := time.Date(2026, 10, 10, 20, 0, 0, 0, seoul)
+	for id, why := range map[string]string{"a": "그림자 가 밴드 합주야 시간만 바꿔줘", "b": "틀렸어"} {
+		if err := st.PutIntent(ctx, model.Intent{ID: id, Kind: "calendar.create", Status: model.Rejected, Title: "캘린더에 추가: 12/12(토) 15:00 밴드 합주 " + id, Error: why, CreatedAt: at}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := c.world.Create(ctx, model.KindPlan, "r", model.State{Title: "지수와 롤체", Status: model.Confirmed, Date: "2026-10-20", Note: "온라인으로", Declined: "틀렸어"}, world.Meta{Actor: "interpreter"}); err != nil {
+		t.Fatal(err)
+	}
+	gone, err := c.world.Create(ctx, model.KindPlan, "r", model.State{Title: "합친 일정", Status: model.Cancelled, Date: "2026-10-21", MergedInto: "p1"}, world.Meta{Actor: "skill:schedule"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	say(t, st, "sim:1", "그러자", true, time.Date(2026, 10, 12, 20, 1, 0, 0, seoul))
+	if err := c.Read(ctx, "r"); err != nil {
+		t.Fatal(err)
+	}
+	p := script.Prompts[0]
+	for _, want := range []string{"## 운영자가 카드를 반려하며 남긴 말", "12/12(토) 15:00 밴드 합주 a' 카드: 그림자 가 밴드 합주야 시간만 바꿔줘", "메모 온라인으로", "반려됨: 틀렸어"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("프롬프트에 %q 가 없습니다:\n%s", want, p)
+		}
+	}
+	if strings.Contains(p, "밴드 합주 b") || strings.Contains(p, gone.State.Title) {
+		t.Errorf("한 번 누른 답과 합친 일정은 보이지 않아야 합니다:\n%s", p)
+	}
+}

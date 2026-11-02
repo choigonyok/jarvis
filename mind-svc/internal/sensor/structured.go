@@ -433,15 +433,26 @@ func (s *Structured) SyncCalendar(ctx context.Context, events []entry, from, to 
 		}
 	}
 	for _, p := range plans {
-		if p.Room == CalendarRoom && p.Live() && p.State.CalendarID != "" && !seen[p.State.CalendarID] {
-			if _, _, err := s.World.Update(ctx, p.ID, func(st *model.State) bool { st.Status = model.Cancelled; return true },
-				world.Meta{Actor: "sensor:calendar", Why: "캘린더에서 지워짐"}); err != nil {
-				return err
-			}
+		if !p.Live() || p.State.CalendarID == "" || seen[p.State.CalendarID] {
+			continue
+		}
+		// A plan from a conversation stays what was said, but the entry it
+		// held was taken off by hand: it no longer holds one, or the next card
+		// about it asks to change what is not there (2026-11-02, "not found").
+		set := func(st *model.State) bool { st.CalendarID, st.Declined = "", GoneByHand; return true }
+		if p.Room == CalendarRoom {
+			set = func(st *model.State) bool { st.Status = model.Cancelled; return true }
+		}
+		if _, _, err := s.World.Update(ctx, p.ID, set, world.Meta{Actor: "sensor:calendar", Why: "캘린더에서 지워짐"}); err != nil {
+			return err
 		}
 	}
 	return nil
 }
+
+// GoneByHand is what a plan says of itself when its entry was deleted on the
+// calendar: the operator's word on it, like a card turned down.
+const GoneByHand = "캘린더에서 직접 지움"
 
 // syncEntry keeps the plan an entry is in step with it. A plan from a
 // conversation that is on the calendar speaks for its entry; a plan read

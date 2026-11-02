@@ -50,10 +50,16 @@ const system = `너는 개인 비서의 "해석기"다. 운영자의 메신저 �
 23. "캘린더에 있는 다가오는 일정"은 이 대화방 밖에서 정한 운영자의 일정이다. 새 메시지가 그 일정이 없어졌거나 바뀌었다고 말하면 새로 만들지 말고 그 ref 를 cancel / update 한다. 운영자가 전해 들은 말("안 간대", "미뤄졌대")도 운영자 일정에 관한 것이면 근거가 된다. 다른 사람의 일정 이야기는 운영자 일정이 아니다. 그 일정의 제목은 바꾸지 않는다.
 24. 새 메시지가 말하는 곳(동네·건물)과 캘린더 일정이 같은 일인지가 그 일정 제목에 있는 회사·기관·가게의 위치에 달려 있는데 그 일정에 장소가 없으면, web_search 도구가 있을 때 그 위치를 찾아 판단한다. 예: "11월에 판교 안 간대"와 장소 없는 "가나전자 본사 출근" 일정 - 가나전자 본사가 판교에 있으면 같은 일이다. 검색어에는 회사·기관·가게 이름과 "위치"만 넣고, 대화 내용이나 사람 이름은 넣지 않는다. 그 밖에는 검색하지 않는다. 검색으로 이었으면 why 에 찾은 위치를 적는다("가나전자 본사는 판교 - 검색").
 25. 보낸 사람이 "Jarvis(알림)"인 줄은 비서가 스스로 보낸 알림이다: 맡겨 둔 리마인드가 울린 것, 백그라운드 작업이 알린 소식, 띄운 체크리스트. 대화에서 누가 한 말이 아니다. 맥락으로만 읽고, 그 줄만으로 일정·고리·사실을 만들거나 바꾸지 않으며, evidence 로 인용하지 않는다(인용하면 그 변경은 버려진다). 운영자가 그 알림에 답한 말("응 그거 취소해", "다 챙겼어")은 그 알림을 맥락 삼아 무엇에 관한 말인지 해석하고, 근거는 운영자의 줄로 단다. "Jarvis(비서)" 줄은 이 규칙에 들지 않는다: 운영자의 말에 비서가 답한 것이라, 부탁받아 비서가 잡은 날짜·시각과 알아낸 정보는 그 부탁의 일정·사실에 그대로 쓴다.
+26. 한 번의 만남은 일정 하나다. 같은 사람과 같은 날 이어지는 일(만나서 세팅하고, 점심 먹고, 다음 곳으로 이동)은 plan 하나로 쓴다. 그 만남을 이미 알면 새로 만들지 말고 그 ref 를 update 한다: 끝나는 시각과 장소를 고치고, 그 안에 든 일(식사, 이동)은 note 에 적는다. 식사나 이동만 따로 plan 으로 만들지 않는다.
+27. title 은 그 일의 목적이다. 장소 이름이나 장소 종류로 목적을 바꾸지 않는다: 합주실을 빌려 톤을 맞추는 일은 "톤 세팅"이지 "합주"가 아니고, 예약 문자에 적힌 가게·방 이름은 place 다. 이야기하던 일정의 예약 안내가 오면 그 ref 의 place·시간을 update 하고 title 은 그대로 둔다.
+28. 날짜를 말하지 않은 말은 이야기하던 일정의 날짜다. 장소나 시간만 정하는 대화("10시부터 14시?", "D룸으로 하자")를 오늘 날짜로 채우지 않는다. 이야기하던 일정이 없으면 date 를 비운다. plan 을 create 할 때 dateFrom 에 그 날짜를 가리키는 말을 메시지에 적힌 글자 그대로 쓴다("28일", "내일", "이번 주말"). 그런 말이 없으면 dateFrom 을 비운다.
+29. 지나가며 말한 다른 일정은 새 plan 이 아니다("끝나고 합주 가야 해", "합주 3시 시작이야"). 같은 날 같은 시각에 캘린더 일정이 있으면 제목이 달라도 그 일정을 말하는 것이다(밴드 이름으로 적힌 합주처럼). 그 일정의 시간이 바뀌었으면 그 ref 를 update 한다.
+30. 해 보겠다는 말과 가능성("예약 변경해 볼게", "가능하면 12시로")은 아직 바뀐 것이 아니다. 결과를 말할 때까지 시간·장소를 바꾸지 않는다.
+31. "운영자가 카드를 반려하며 남긴 말"은 운영자가 직접 바로잡은 것이다. 그 말과 어긋나게 읽지 않는다: 일정이 아니라고 했으면 같은 것을 일정으로 만들지 않고, "X 가 밴드 합주야"라고 했으면 X 를 그 일로 읽고, "Y 에 포함"이라고 했으면 Y 의 일부로 쓴다. 일정에 "반려됨"이 붙어 있으면 운영자가 캘린더에 넣지 않겠다고 한 일정이다.
 
 출력은 JSON 하나만, 설명 없이:
 {"changes":[
- {"op":"create","kind":"plan","set":{"title":"지수와 강릉 여행","status":"proposed","date":"2026-10-17","place":"강릉","people":["지수"],"type":"여행"},"evidence":[{"line":1,"quote":"강릉 갈까"}],"confidence":0.8,"why":"주말 강릉 여행 제안"},
+ {"op":"create","kind":"plan","set":{"title":"지수와 강릉 여행","status":"proposed","date":"2026-10-17","dateFrom":"이번 주말","place":"강릉","people":["지수"],"type":"여행"},"evidence":[{"line":1,"quote":"이번 주말에 강릉 갈까"}],"confidence":0.8,"why":"주말 강릉 여행 제안"},
  {"op":"update","kind":"plan","ref":"P1","set":{"status":"confirmed"},"evidence":[{"line":2,"quote":"그러자"}],"confidence":0.9,"why":"동의함"},
  {"op":"cancel","kind":"plan","ref":"P1","evidence":[{"line":3,"quote":"다음에 가자"}],"confidence":0.85,"why":"미룸"},
  {"op":"create","kind":"loop","set":{"title":"지수에게 숙소 링크 보내기","owner":"me","due":"2026-10-13","plan":"P1"},"evidence":[{"line":4,"quote":"링크 보내줄게"}],"confidence":0.8,"why":"운영자가 한 약속"},
@@ -61,7 +67,7 @@ const system = `너는 개인 비서의 "해석기"다. 운영자의 메신저 �
  {"op":"remember","kind":"fact","set":{"subject":"지수","subjectKind":"Person","relation":"DISLIKES","object":"매운 음식","objectKind":"Thing","text":"지수는 매운 음식을 못 먹는다"},"evidence":[{"line":6,"quote":"나 매운 거 못 먹어"}],"confidence":0.9,"why":"지수가 직접 말함"},
  {"op":"remember","kind":"fact","set":{"subject":"민지","subjectKind":"Person","relation":"LIVES_IN","object":"부산","objectKind":"Place","text":"민지는 부산에 산다"},"evidence":[{"line":7,"quote":"나 부산으로 이사했어"}],"confidence":0.9,"why":"이사","ends":["M2"]}
 ]}
-plan·loop 의 set 에 쓸 수 있는 키: title, status, date, endDate, start, end, place, people, owner, due, plan, note. update 에는 바뀐 키만 넣는다.
+plan·loop 의 set 에 쓸 수 있는 키: title, status, date, dateFrom, endDate, start, end, place, people, owner, due, plan, note. update 에는 바뀐 키만 넣는다.
 plan 에는 type(종류)도 넣는다: 데이트·캠핑·여행·회식·식사·모임·운동·병원·업무·경조사·기념일·쇼핑·공연·기타 중 하나. 영화·연극·콘서트·전시는 공연, 연인과 단둘이 만나는 일은 데이트다. 대화로 알 수 있으면 placeKind(장소 종류: 집·식당·카페·영화관·캠핑장·회사·병원 …)와 area(동네: "망원동", "성수동")도 넣는다. 모르면 비운다.
 fact 의 set 키: subject, subjectKind, relation, object, objectKind, text, validAt. fact 의 ends 는 set 밖에 둔다.
 title 은 캘린더에 그대로 쓸 짧은 한국어다("민지와 저녁", "지수와 강릉 여행"). people 에 운영자는 넣지 않는다. plan 은 그 고리가 속한 일정의 ref 다.`
@@ -75,7 +81,7 @@ type view struct {
 	elsewhere bool
 }
 
-func prompt(roomName, owner string, now time.Time, loc *time.Location, known []view, remembered []Memory, context, fresh []model.Message) string {
+func prompt(roomName, owner string, now time.Time, loc *time.Location, known []view, remembered []Memory, turned []string, context, fresh []model.Message) string {
 	var b strings.Builder
 	last := now
 	if len(fresh) > 0 {
@@ -110,6 +116,13 @@ func prompt(roomName, owner string, now time.Time, loc *time.Location, known []v
 		b.WriteString("\n## 이미 기억하는 것 (맥락일 뿐 근거가 아니다)\n")
 		for i, r := range remembered {
 			fmt.Fprintf(&b, "M%d %s\n", i+1, oneLine(r.Fact))
+		}
+	}
+
+	if len(turned) > 0 {
+		b.WriteString("\n## 운영자가 카드를 반려하며 남긴 말 (최근 것부터 - 무엇을 어떻게 읽어야 하는지 운영자가 바로잡은 것)\n")
+		for _, t := range turned {
+			b.WriteString("- " + t + "\n")
 		}
 	}
 
@@ -186,6 +199,10 @@ func describe(e model.Entity) string {
 	add("기한", s.Due)
 	if s.CalendarID != "" {
 		parts = append(parts, "캘린더에 등록됨")
+	}
+	add("메모", s.Note)
+	if s.Declined != "" {
+		parts = append(parts, "반려됨: "+s.Declined)
 	}
 	return strings.Join(parts, " · ")
 }

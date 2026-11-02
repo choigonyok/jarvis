@@ -35,7 +35,48 @@ func SameEvent(a, b State) bool {
 	return titlesMeet(a, b)
 }
 
-func titlesMeet(a, b State) bool {
+// outingGap is the longest gap between two parts of one outing: lunch after
+// a morning together is the same day out, dinner six hours later is not.
+const outingGap = 2 * time.Hour
+
+// SameOuting is whether two plans are parts of one outing told apart: the
+// same day, with the same person, and no long gap between them. "톤 세팅" at
+// ten and "점심" at eleven with one friend are one thing to have on the
+// calendar, and asking about each is how one morning became four cards
+// (2026-11-02). A part told without a time is taken to be of it too.
+func SameOuting(a, b State) bool {
+	if a.Date == "" || a.Date != b.Date || !sharePerson(a, b) {
+		return false
+	}
+	if a.Start == "" || b.Start == "" {
+		return true
+	}
+	as, ae, ok := clock(a)
+	bs, be, ok2 := clock(b)
+	if !ok || !ok2 {
+		return false
+	}
+	return max(as, bs)-min(ae, be) <= outingGap
+}
+
+// clock is when a plan starts and ends on a day's clock: an hour when no end
+// was said.
+func clock(s State) (time.Duration, time.Duration, bool) {
+	start, err := time.Parse("15:04", s.Start)
+	if err != nil {
+		return 0, 0, false
+	}
+	from := time.Duration(start.Hour())*time.Hour + time.Duration(start.Minute())*time.Minute
+	to := from + time.Hour
+	if end, err := time.Parse("15:04", s.End); err == nil {
+		if t := time.Duration(end.Hour())*time.Hour + time.Duration(end.Minute())*time.Minute; t > from {
+			to = t
+		}
+	}
+	return from, to, true
+}
+
+func sharePerson(a, b State) bool {
 	for _, p := range a.People {
 		if p != "" && (slices.Contains(b.People, p) || strings.Contains(b.Title, p)) {
 			return true
@@ -45,6 +86,13 @@ func titlesMeet(a, b State) bool {
 		if p != "" && strings.Contains(a.Title, p) {
 			return true
 		}
+	}
+	return false
+}
+
+func titlesMeet(a, b State) bool {
+	if sharePerson(a, b) {
+		return true
 	}
 	wa, wb := words(a.Title), words(b.Title)
 	for w := range wa {
@@ -65,6 +113,31 @@ func TakeTime(st *State, entry State) bool {
 	}
 	st.Start, st.End = entry.Start, entry.End
 	return true
+}
+
+// Fill adds to a plan what another telling of it says and it lacked - a time,
+// a place, an end, who - and leaves what it had. It reports whether anything
+// changed.
+func Fill(cur *State, s State) bool {
+	changed := false
+	set := func(dst *string, v string) {
+		if *dst == "" && v != "" {
+			*dst = v
+			changed = true
+		}
+	}
+	set(&cur.Start, s.Start)
+	set(&cur.End, s.End)
+	set(&cur.EndDate, s.EndDate)
+	set(&cur.Place, s.Place)
+	set(&cur.Type, s.Type)
+	set(&cur.PlaceKind, s.PlaceKind)
+	set(&cur.Area, s.Area)
+	if len(cur.People) == 0 && len(s.People) > 0 {
+		cur.People = s.People
+		changed = true
+	}
+	return changed
 }
 
 // sameTitle is whether two titles name one thing: the same letters, or one

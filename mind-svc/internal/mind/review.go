@@ -3,6 +3,7 @@ package mind
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/predict"
 	"github.com/choigonyok/jarvis/mind-svc/internal/prefs"
+	"github.com/choigonyok/jarvis/mind-svc/internal/world"
 )
 
 // Questions before suggestions: after a night at a campsite or a meal at a
@@ -33,6 +35,39 @@ const (
 	// reviewExpires: an unanswered question is withdrawn after this long.
 	reviewExpires = 3 * 24 * time.Hour
 )
+
+// calendarAnswered keeps the plan true to what the operator said of its card.
+// A plan turned down stays as it was read - the next read sees it and why -
+// but it is off the operator's day; a move turned down did not happen, so the
+// plan goes back to the entry as it stands.
+func (m *Mind) calendarAnswered(ctx context.Context, in model.Intent) {
+	if in.EntityID == "" {
+		return
+	}
+	var a model.CalendarAction
+	if json.Unmarshal(in.Payload, &a) != nil {
+		return
+	}
+	var set func(*model.State) bool
+	switch {
+	case in.Kind == "calendar.create" && (in.Status == model.Rejected || in.Status == model.Undone):
+		why := firstNonEmpty(strings.TrimSpace(in.Error), "반려")
+		set = func(s *model.State) bool { s.Declined = why; return true }
+	case in.Kind == "calendar.create" && in.Status == model.Executed:
+		set = func(s *model.State) bool { s.Declined = ""; return true }
+	case in.Kind == "calendar.update" && in.Status == model.Rejected && a.Was != nil:
+		was := *a.Was
+		set = func(s *model.State) bool {
+			s.Title, s.Date, s.EndDate, s.Start, s.End, s.Place = was.Title, was.Date, was.EndDate, was.Start, was.End, was.Place
+			return true
+		}
+	default:
+		return
+	}
+	if _, _, err := m.World.Update(ctx, in.EntityID, set, world.Meta{Actor: model.ActorCard, Why: "카드에 답함: " + in.Title}); err != nil && !errors.Is(err, model.ErrNotFound) {
+		m.Opts.Logger.Warn("카드의 답을 일정에 남기지 못했습니다", "intent", in.ID, "err", err)
+	}
+}
 
 // candidate is something worth a review question.
 type candidate struct {
@@ -320,6 +355,8 @@ func (m *Mind) answered(ctx context.Context, in model.Intent) {
 	switch in.Kind {
 	case act.KindCategory:
 		m.chargeAnswered(ctx, in)
+	case "calendar.create", "calendar.update":
+		m.calendarAnswered(ctx, in)
 	case "review.place":
 		var r prefs.Review
 		if json.Unmarshal(in.Payload, &r) != nil {
@@ -388,11 +425,22 @@ func (m *Mind) expireQuestions(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	today := now.In(m.Opts.Loc).Format("2006-01-02")
 	for _, in := range recent {
-		if in.Status != model.Pending || (in.Kind != "review.place" && in.Kind != "preference.confirm") || now.Sub(in.CreatedAt) < reviewExpires {
+		if in.Status != model.Pending {
 			continue
 		}
-		in.Status, in.Error = model.Superseded, "3일 동안 답이 없어 거둠"
+		var a model.CalendarAction
+		switch {
+		case in.Kind == "calendar.create" && json.Unmarshal(in.Payload, &a) == nil && a.Event.Date != "" && max(a.Event.Date, a.Event.EndDate) < today:
+			// Adding what is over is no question: it sat under a thumb for days.
+			in.Error = "일정 날짜가 지나 거둠"
+		case (in.Kind == "review.place" || in.Kind == "preference.confirm") && now.Sub(in.CreatedAt) >= reviewExpires:
+			in.Error = "3일 동안 답이 없어 거둠"
+		default:
+			continue
+		}
+		in.Status = model.Superseded
 		if err := m.Opts.Store.PutIntent(ctx, in); err != nil {
 			return err
 		}

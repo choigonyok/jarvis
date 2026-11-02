@@ -133,7 +133,8 @@ func Same(a, b model.State) bool {
 	return a.Title == b.Title && a.Status == b.Status && a.Date == b.Date && a.EndDate == b.EndDate &&
 		a.Start == b.Start && a.End == b.End && a.Place == b.Place && slices.Equal(a.People, b.People) &&
 		a.Shared == b.Shared && a.Owner == b.Owner && a.Due == b.Due && a.PlanID == b.PlanID &&
-		a.CalendarID == b.CalendarID && a.Note == b.Note && a.Type == b.Type && a.PlaceKind == b.PlaceKind && a.Area == b.Area
+		a.CalendarID == b.CalendarID && a.Declined == b.Declined && a.MergedInto == b.MergedInto &&
+		a.Note == b.Note && a.Type == b.Type && a.PlaceKind == b.PlaceKind && a.Area == b.Area
 }
 
 func newID(kind string) string {
