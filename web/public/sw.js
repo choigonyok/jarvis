@@ -25,8 +25,8 @@ self.addEventListener("push", (event) => {
         tag: data.tag || undefined,
         // A replaced notification with the same tag still deserves a buzz.
         renotify: Boolean(data.tag),
-        icon: "/icons/icon-192.v2.png",
-        badge: "/icons/icon-192.v2.png",
+        icon: "/icons/icon-192.v3.png",
+        badge: "/icons/icon-192.v3.png",
         data: { url: data.url || "/" },
       });
       // And an open console hears of it at once: it re-reads, and shows it
