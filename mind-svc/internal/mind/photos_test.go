@@ -82,6 +82,38 @@ func TestPhotosInNoPlanAreAskedAbout(t *testing.T) {
 	}
 }
 
+// A card shows six plans, nearest the photos first: 14:53's photos were asked
+// about with the day's other plans and not the rehearsal at 15:00 (2026-11-02).
+func TestTheNearestPlansAreOffered(t *testing.T) {
+	ctx := context.Background()
+	m, st, _ := chargeMind(t, "")
+	seoul := m.Opts.Loc
+	base := time.Date(2026, 10, 30, 14, 53, 0, 0, seoul)
+	for _, p := range []struct{ title, start string }{{"아침 약속", "07:00"}, {"늦은 약속", "23:30"}, {"밤 약속", "22:00"}, {"새벽 약속", "05:00"},
+		{"저녁 약속", "20:00"}, {"이른 약속", "08:00"}, {"합주", "15:00"}, {"시간 없는 약속", ""}} {
+		if _, err := m.World.Create(ctx, model.KindPlan, "r", model.State{Title: p.title, Status: model.Confirmed, Date: "2026-10-30", Start: p.start}, world.Meta{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	batch := []model.Occurrence{shot("a", base), shot("b", base.Add(time.Minute)), shot("c", base.Add(2*time.Minute))}
+	for _, o := range batch {
+		if err := st.PutOccurrence(ctx, o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	in, ok, err := m.photoQuestion(ctx, batch)
+	if err != nil || !ok {
+		t.Fatalf("%v %v", ok, err)
+	}
+	opts := in.Fields[0].Options
+	if len(opts) != 7 || !strings.Contains(opts[0], "합주") || opts[6] != noPlan {
+		t.Fatalf("가까운 일정부터 여섯, 끝에 '일정 아님': %v", opts)
+	}
+	if got := farFrom(model.State{Date: "2026-10-29", EndDate: "2026-10-31"}, base, seoul); got != 0 {
+		t.Fatalf("이어지는 일정 안의 사진은 그 일정이 가장 가깝습니다: %v", got)
+	}
+}
+
 // A few photos are not worth a question; a burst still going waits; with no plan
 // near it takes more, and it asks what they were. Nights are left alone.
 func TestWhenPhotosAreNotAskedAbout(t *testing.T) {

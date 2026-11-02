@@ -1,9 +1,11 @@
 package mind
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 	"time"
@@ -151,6 +153,11 @@ func (m *Mind) photoQuestion(ctx context.Context, batch []model.Occurrence) (mod
 	if err != nil {
 		return model.Intent{}, false, err
 	}
+	// Nearest first: a day can hold more plans than a card shows, and the one
+	// the photos belong to is the one just before or after them.
+	slices.SortStableFunc(plans, func(a, b model.Entity) int {
+		return cmp.Compare(farFrom(a.State, first, loc), farFrom(b.State, first, loc))
+	})
 	choices := map[string]string{}
 	var options []string
 	for _, p := range plans {
@@ -194,6 +201,22 @@ func (m *Mind) photoQuestion(ctx context.Context, batch []model.Occurrence) (mod
 	}
 	in.Fields = []model.Field{{Key: "plan", Label: "어느 일정", Kind: "select", Options: append(options, noPlan), Required: true}, note}
 	return in, true, nil
+}
+
+// farFrom is how far a plan lay from a moment: none while it was on, and a plan
+// with no hour comes after the ones with an hour close by.
+func farFrom(st model.State, at time.Time, loc *time.Location) time.Duration {
+	when, timed, ok := skill.When(st, loc)
+	if !ok {
+		return math.MaxInt64
+	}
+	if day := at.In(loc).Format("2006-01-02"); st.EndDate != "" && st.Date <= day && day <= st.EndDate {
+		return 0
+	}
+	if !timed {
+		return when.Sub(at).Abs() + 6*time.Hour
+	}
+	return when.Sub(at).Abs()
 }
 
 // spread is n of ids evenly apart: a batch, not five of one moment.
