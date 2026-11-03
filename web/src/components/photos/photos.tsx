@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronLeft, Download, Play, Search, X } from "lucide-react";
+import Link from "next/link";
+import { Brush, ChevronLeft, Download, Play, Search, X } from "lucide-react";
 import { Header, TabBar } from "@/components/shell/header";
 import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
@@ -39,7 +40,20 @@ export function Photos() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <Header connection={connection} pending={waiting.length} />
+      <Header
+        connection={connection}
+        pending={waiting.length}
+        actions={
+          <Link
+            href="/edit"
+            aria-label="사진 편집"
+            title="사진 편집"
+            className="flex size-11 items-center justify-center rounded-lg text-faint transition-colors outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50"
+          >
+            <Brush aria-hidden className="size-[18px]" strokeWidth={1.8} />
+          </Link>
+        }
+      />
       <StandingBar pending={waiting} href="/record" />
 
       <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">

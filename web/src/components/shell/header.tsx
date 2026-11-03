@@ -22,6 +22,7 @@ import {
   ReceiptText,
   ListChecks,
   Images,
+  Sun,
   Target,
   TrainFront,
   Wallet,
@@ -37,7 +38,7 @@ import { Notifications } from "@/components/shell/notifications";
 import { useRole } from "@/components/shell/role";
 import { UsageBars } from "@/components/shell/usage-bars";
 import { focusSection, forgetFocus, onFocusRequest } from "@/lib/focus";
-import { GUEST_PAGES, type Role } from "@/lib/role";
+import type { Role } from "@/lib/role";
 import { dropPush } from "@/lib/use-push";
 import type { Connection } from "@/lib/thread";
 import { cn } from "@/lib/utils";
@@ -70,75 +71,108 @@ const ICON: Record<string, LucideIcon> = {
   "/status": Activity,
 };
 
+/** One place on the phone's bar, and the screens that live there. */
+type Hub = {
+  id: string;
+  label: string;
+  icon: LucideIcon;
+  screens: Tab[];
+  /** Opens as a list of its screens: none of them is where you would land. */
+  list?: boolean;
+};
+
 /**
- * Nine surfaces is more than a thumb bar can hold - five is the limit before
- * the targets get too narrow to hit reliably. So the phone keeps the ones you
- * open on purpose, and the ones you only reach for once you are already
- * looking at something - 자산, the calendar, the agent's screen, KakaoTalk,
- * 상태 -
- * move behind 더보기. A wide header has room for all of them at once.
+ * Sixteen screens are more than a thumb bar can hold - five is the limit before
+ * a slot is too narrow for its word. So the bar names five places, by what you
+ * came for, and a place's screens sit in the header where the name was: going
+ * between them costs no row, and each stays one short page. 더보기 is the screens
+ * you reach for only when something is up.
  */
-const primary: Tab[] = [
-  { href: "/", label: "대화" },
-  { href: "/workout", label: "운동" },
-  { href: "/record", label: "기록" },
+const OWNER_HUBS: Hub[] = [
+  { id: "talk", label: "대화", icon: MessageCircle, screens: [{ href: "/", label: "대화" }] },
+  {
+    id: "today",
+    label: "오늘",
+    icon: Sun,
+    screens: [
+      { href: "/calendar", label: "일정" },
+      { href: "/jobs", label: "작업" },
+      { href: "/goals", label: "목표" },
+      { href: "/workout", label: "운동" },
+      { href: "/transit", label: "출발" },
+    ],
+  },
+  {
+    id: "money",
+    label: "돈",
+    icon: Wallet,
+    screens: [
+      { href: "/assets", label: "자산" },
+      { href: "/spending", label: "가계부" },
+    ],
+  },
+  {
+    id: "life",
+    label: "생활",
+    icon: BookUser,
+    screens: [
+      { href: "/life", label: "나" },
+      { href: "/photos", label: "사진" },
+      { href: "/location", label: "위치" },
+    ],
+  },
+  {
+    id: "more",
+    label: "더보기",
+    icon: Ellipsis,
+    list: true,
+    screens: [
+      { href: "/record", label: "기록" },
+      { href: "/kakao", label: "카톡" },
+      { href: "/screen", label: "화면" },
+      { href: "/status", label: "상태" },
+    ],
+  },
 ];
 
-// all 이 이 배열을 그대로 펼치므로, 넓은 화면의 읽는 순서가 대화 → 운동 →
-// 작업 → 자산 → 가계부로 이어진다: 맡긴 일 다음에 "쌓아두는 것"끼리 붙어 있다.
-const secondary: Tab[] = [
-  // 맡긴 일이 지금 어디까지 왔는지. 대화 바로 다음에 읽힌다.
+/** The guest has few screens of their own: each is a place, in the order of the bar. */
+const GUEST_TABS: Tab[] = [
+  { href: "/", label: "대화" },
   { href: "/jobs", label: "작업" },
-  // 되풀이해서 하려는 일과 날마다의 기록. 맡긴 일 바로 다음, 내가 할 일.
   { href: "/goals", label: "목표" },
-  { href: "/assets", label: "자산" },
-  { href: "/spending", label: "가계부" },
   { href: "/calendar", label: "캘린더" },
-  { href: "/photos", label: "사진" },
-  // 사진 다음에 그림을 고치는 곳. PhotoCraft 가 보는 사람의 브라우저 안에서 돈다.
-  { href: "/edit", label: "편집" },
-  // Jarvis 가 내 생활에서 읽어 낸 것: 나에 대한 노트, 회고한 장소, 가진 물건, 식사.
-  { href: "/life", label: "생활" },
-  // 하루 동안 어디를 다녔는지: 폰이 보낸 위치를 지도 위에 되감아 보고, 끝은 지금.
   { href: "/location", label: "위치" },
-  // 자주 타는 버스·지하철로 언제 나가야 하는지: 실시간 도착을 세는 곳.
   { href: "/transit", label: "출발" },
-  { href: "/screen", label: "화면" },
-  { href: "/kakao", label: "카톡" },
-  // 맨 끝. 매일 여는 곳이 아니라 뭔가 이상할 때 찾아오는 곳이다.
-  { href: "/status", label: "상태" },
-];
-
-/** Reading order on a wide screen: talk, the things you keep, then the queue. */
-const all: Tab[] = [
-  { href: "/", label: "대화" },
   { href: "/workout", label: "운동" },
-  ...secondary,
-  { href: "/record", label: "기록" },
+  { href: "/edit", label: "편집" },
 ];
+const GUEST_HUBS: Hub[] = GUEST_TABS.map((tab) => ({ id: tab.href, label: tab.label, icon: ICON[tab.href] ?? Ellipsis, screens: [tab] }));
+/** Reading order on a wide screen. */
+const GUEST_WIDE = ["/", "/workout", "/jobs", "/goals", "/calendar", "/edit", "/location", "/transit"];
 
-/** The tabs a role is shown. The middleware is what actually refuses the rest. */
-const visible = (tabs: Tab[], role: Role) =>
-  role === "guest" ? tabs.filter((t) => GUEST_PAGES.has(t.href)) : tabs;
+/** The places a role is shown. The middleware is what actually refuses the rest. */
+const hubsFor = (role: Role) => (role === "guest" ? GUEST_HUBS : OWNER_HUBS);
 
-/**
- * The phone's bar, icons only. The operator's daily surfaces - the
- * conversation, money in and money out - always sit in it; the guest has
- * their own tabs and no 더보기.
- */
-const OWNER_BAR = ["/", "/jobs", "/goals", "/assets", "/spending", "/calendar", "/workout", "/record"];
-const OWNER_MORE = ["/life", "/location", "/transit", "/photos", "/edit", "/screen", "/kakao", "/status"];
-const GUEST_BAR = ["/", "/jobs", "/goals", "/calendar", "/location", "/transit", "/workout", "/edit"];
+/** The place a screen belongs to. 편집 is reached from 사진 and is no screen of its own there. */
+const hubOf = (hubs: Hub[], pathname: string) =>
+  hubs.find((h) => h.screens.some((s) => s.href === pathname)) ?? (pathname === "/edit" ? hubs.find((h) => h.id === "life") : undefined);
 
-const byHref = new Map([...primary, ...secondary].map((t) => [t.href, t]));
-const pick = (hrefs: string[]) => hrefs.flatMap((h) => (byHref.has(h) ? [byHref.get(h)!] : []));
+const LAST = "jarvis:hub:";
 
-/** A role's screens on a phone: the ones in the bar, and the ones behind 더보기. */
-function screensFor(role: Role) {
-  return {
-    bar: pick(role === "guest" ? GUEST_BAR : OWNER_BAR),
-    more: role === "guest" ? [] : pick(OWNER_MORE),
-  };
+/** A place opens on the screen left open there, on this device. */
+function lastIn(hub: Hub): string {
+  try {
+    const saved = localStorage.getItem(LAST + hub.id);
+    if (saved && hub.screens.some((s) => s.href === saved)) return saved;
+  } catch {}
+  return hub.screens[0].href;
+}
+
+function remember(hub: Hub, pathname: string) {
+  if (hub.screens.length < 2 || !hub.screens.some((s) => s.href === pathname)) return;
+  try {
+    localStorage.setItem(LAST + hub.id, pathname);
+  } catch {}
 }
 
 /** Where a waiting decision is announced: the surface that lists them by name. */
@@ -194,9 +228,17 @@ export function Header({
 }) {
   const pathname = usePathname();
   const role = useRole();
-  const tabs = visible(all, role);
+  const hubs = hubsFor(role);
+  const here = hubOf(hubs, pathname);
+  const strip = here && here.screens.length > 1 ? here.screens : null;
+  const wide = role === "guest" ? GUEST_WIDE.map((href) => hubs.find((h) => h.screens[0].href === href)!) : hubs;
   const router = useRouter();
+  const signOut = useSignOut();
   const status = connectionCopy[connection];
+
+  useEffect(() => {
+    if (here) remember(here, pathname);
+  }, [here, pathname]);
 
   // A notification's target (?focus=, lib/focus.ts): every screen has this
   // header, so every screen brings the part a notification is about into
@@ -236,20 +278,6 @@ export function Header({
     dispatchEvent(new Event("jarvis:probe"));
   }
 
-  async function signOut() {
-    // 세션이 남아 있을 때 지운다 - 로그아웃한 뒤에는 notify 에 닿지 못한다.
-    await dropPush();
-    const res = await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
-    const body = (await res?.json().catch(() => null)) as { next?: string } | null;
-    if (body?.next && body.next !== "/login") {
-      // Cloudflare Access's own sign-out: a full page load, not a client route.
-      window.location.href = body.next;
-      return;
-    }
-    router.replace("/login");
-    router.refresh();
-  }
-
   return (
     <header
       className="inset-x-safe pt-safe shrink-0 border-b border-edge-soft bg-background"
@@ -259,35 +287,51 @@ export function Header({
         scrollPageToTop();
       }}
     >
-      <div className="mx-auto flex h-13 w-full max-w-[56rem] items-center justify-between px-4 sm:h-14 sm:px-8">
+      <div className="mx-auto flex h-13 w-full max-w-[56rem] items-center justify-between gap-2 px-4 sm:h-14 sm:px-8">
         <div className="flex min-w-0 items-baseline gap-3">
+          {/* On a phone a place's screens stand where the name stood. */}
           <h1
-            className="shrink-0 text-[15px] font-semibold tracking-tight text-foreground select-none"
+            className={cn(
+              "shrink-0 text-[15px] font-semibold tracking-tight text-foreground select-none",
+              strip && "max-sm:sr-only",
+            )}
             onClick={secretTap}
           >
             Jarvis
           </h1>
-          {/* The same links, in the bar below, on a phone. A row that runs
+          {strip ? <Strip screens={strip} pending={pending} className="sm:hidden" /> : null}
+          {/* The same places, in the bar below, on a phone. A row that runs
               out of room scrolls inside itself; a label never breaks in two.
               Under a finger (an iPad, a phone on its side) a label is a 44px
               target; with a mouse it is only the word. */}
           <nav className="scrollbar-none hidden min-w-0 items-baseline overflow-x-auto sm:flex mouse:gap-[9px]" aria-label="화면">
-            {tabs.map((tab) => {
-              const active = pathname === tab.href;
+            {wide.map((hub) => {
+              const active = hub === here;
               return (
                 <Link
-                  key={tab.href}
-                  href={tab.href}
+                  key={hub.id}
+                  href={hub.screens[0].href}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    const href = lastIn(hub);
+                    if (href !== pathname) router.push(href);
+                  }}
                   aria-current={active ? "page" : undefined}
                   className={cn(
                     "inline-flex h-11 shrink-0 items-center rounded-sm px-1.5 text-[13px] whitespace-nowrap transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-auto mouse:px-0",
                     active ? "text-foreground" : "text-faint hover:text-dim",
                   )}
                 >
-                  {tab.label}
+                  {hub.label}
                 </Link>
               );
             })}
+            {strip ? (
+              <>
+                <span aria-hidden className="mx-2 h-3 w-px shrink-0 self-center bg-edge-soft mouse:mx-0.5" />
+                <Strip screens={strip} pending={pending} wide />
+              </>
+            ) : null}
           </nav>
         </div>
 
@@ -316,11 +360,15 @@ export function Header({
           <p className="hidden text-[11.5px] text-faint lg:block" aria-live="polite">
             {pending > 0 ? `결재 대기 ${pending}건` : "결재 대기 없음"}
           </p>
+          {/* 더보기 has it on a phone: the name's row is the screens' now. */}
           <button
             type="button"
             onClick={() => void signOut()}
             aria-label="로그아웃"
-            className="-mr-2 flex h-11 min-w-11 items-center justify-center rounded-lg text-faint transition-colors outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50 sm:mr-0 sm:px-1.5 sm:text-[11.5px] mouse:h-auto mouse:min-w-0 mouse:px-0"
+            className={cn(
+              "-mr-2 h-11 min-w-11 items-center justify-center rounded-lg text-faint transition-colors outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50 sm:mr-0 sm:px-1.5 sm:text-[11.5px] mouse:h-auto mouse:min-w-0 mouse:px-0",
+              role === "guest" ? "flex" : "hidden sm:flex",
+            )}
           >
             <LogOut aria-hidden className="size-4 sm:hidden" />
             <span className="hidden sm:inline">로그아웃</span>
@@ -328,6 +376,93 @@ export function Header({
         </div>
       </div>
     </header>
+  );
+}
+
+function useSignOut() {
+  const router = useRouter();
+  return async () => {
+    // 세션이 남아 있을 때 지운다 - 로그아웃한 뒤에는 notify 에 닿지 못한다.
+    await dropPush();
+    const res = await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
+    const body = (await res?.json().catch(() => null)) as { next?: string } | null;
+    if (body?.next && body.next !== "/login") {
+      // Cloudflare Access's own sign-out: a full page load, not a client route.
+      window.location.href = body.next;
+      return;
+    }
+    router.replace("/login");
+    router.refresh();
+  };
+}
+
+/**
+ * A place's screens, as words in the header. No second row: on a phone they
+ * take the name's place, the screen you are on set the way the name was, so the
+ * header says where you are and gives the page all it gave before. It moves the
+ * moment one is tapped; the page follows when it is ready.
+ */
+function Strip({
+  screens,
+  pending,
+  wide,
+  className,
+}: {
+  screens: Tab[];
+  pending: number;
+  wide?: boolean;
+  className?: string;
+}) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const [chosen, setChosen] = useState(pathname);
+  const [, startNavigation] = useTransition();
+  const body = (
+    <>
+      {screens.map((tab) => {
+        const active = tab.href === chosen;
+        const marked = pending > 0 && tab.href === pendingHome;
+        return (
+          <Link
+            key={tab.href}
+            href={tab.href}
+            prefetch
+            draggable={false}
+            aria-current={tab.href === pathname ? "page" : undefined}
+            aria-label={marked ? `${tab.label}, 결재 대기 ${pending}건` : undefined}
+            ref={(el) => {
+              // On a narrow phone the row scrolls: the screen you are on stays in it.
+              if (el && active && !wide) el.parentElement?.scrollTo({ left: el.offsetLeft - 16 });
+            }}
+            onClick={(e) => {
+              e.preventDefault();
+              setChosen(tab.href);
+              if (tab.href !== pathname) startNavigation(() => router.push(tab.href));
+            }}
+            className={cn(
+              "inline-flex h-11 shrink-0 items-center gap-1 rounded-sm px-1.5 whitespace-nowrap transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+              wide ? "text-[13px] mouse:h-auto mouse:px-0" : "max-sm:first:-ml-1.5",
+              wide
+                ? active
+                  ? "text-foreground"
+                  : "text-faint hover:text-dim"
+                : active
+                  ? "text-[15px] font-semibold tracking-tight text-foreground"
+                  : "text-[14px] text-faint",
+            )}
+          >
+            {tab.label}
+            {marked ? <span aria-hidden className="anim-breathe size-[5px] rounded-full bg-foreground/80" /> : null}
+          </Link>
+        );
+      })}
+    </>
+  );
+  if (wide) return body;
+  return (
+    <nav aria-label="이곳의 화면" className={cn("scrollbar-none relative flex min-w-0 items-baseline overflow-x-auto", className)}>
+      {body}
+    </nav>
   );
 }
 
@@ -353,15 +488,16 @@ export function TabBar({
   const role = useRole();
   const [more, setMore] = useState(false);
   const [navigating, startNavigation] = useTransition();
+  const signOut = useSignOut();
 
-  // Icons only, so more of them fit: everything a person opens every day is
-  // one tap away, and only the rarely visited wait behind 더보기.
-  const { bar: mainTabs, more: moreTabs } = screensFor(role);
-  const moreSlot = moreTabs.length > 0 ? mainTabs.length : -1;
-
-  const inMore = moreTabs.some((tab) => tab.href === pathname);
-  const slots = mainTabs.length + (moreTabs.length > 0 ? 1 : 0);
-  const at = inMore ? moreSlot : mainTabs.findIndex((tab) => tab.href === pathname);
+  const hubs = hubsFor(role);
+  // Five places have room for their word; the guest's eight are icons.
+  const worded = hubs.length <= 5;
+  const here = hubOf(hubs, pathname);
+  const at = here ? hubs.indexOf(here) : -1;
+  const slots = hubs.length;
+  const moreSlot = hubs.findIndex((h) => h.list);
+  const inMore = at >= 0 && at === moreSlot;
 
   // Where the lens is. It moves the moment a tab is chosen, not when the page
   // has loaded: the bar answers the finger, and the page follows when it is
@@ -373,9 +509,9 @@ export function TabBar({
     setChosen(at);
   }, [at]);
 
-  // Every tab is prefetched, so most switches have nothing left to wait for.
+  // Every screen is prefetched, so most switches have nothing left to wait for.
   useEffect(() => {
-    for (const tab of [...mainTabs, ...moreTabs]) router.prefetch(tab.href);
+    for (const hub of hubs) for (const tab of hub.screens) router.prefetch(tab.href);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [role]);
 
@@ -384,10 +520,12 @@ export function TabBar({
       setMore(true);
       return;
     }
-    const tab = mainTabs[slot];
-    if (!tab) return;
+    const hub = hubs[slot];
+    if (!hub) return;
     setChosen(slot);
-    if (tab.href !== pathname) startNavigation(() => router.push(tab.href));
+    // A place opens where it was left; its own slot again goes to its first screen.
+    const href = slot === at ? hub.screens[0].href : lastIn(hub);
+    if (href !== pathname) startNavigation(() => router.push(href));
   }
 
   // Dragging along the bar, as on iOS: the lens follows the finger and the tab
@@ -441,7 +579,9 @@ export function TabBar({
   // width (below) is what keeps the targets, and on a narrow phone each share
   // gives a little instead of pushing the last one off the screen.
   const item =
-    "liquid-press relative z-10 flex min-h-11 min-w-0 flex-1 items-center justify-center rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50";
+    "liquid-press relative z-10 flex min-h-11 min-w-0 flex-1 flex-col items-center justify-center gap-[3px] rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50";
+  const icon = worded ? "size-5" : "size-[22px]";
+  const word = (label: string) => (worded ? <span className="text-[10.5px] leading-none">{label}</span> : null);
 
   return (
     <nav
@@ -462,12 +602,12 @@ export function TabBar({
     >
       <div
         className="liquid-glass pointer-events-auto relative mx-auto flex h-[3.75rem] w-full rounded-full p-1.5"
-        // 44px a tab and no wider - a short bar for a short list, three icons
-        // do not stretch edge to edge - and never wider than the space between
-        // the gutters. Eight tabs at a fixed 44px were 364px, more than a
-        // 390px phone has (358): the bar ran into the right gutter, and on a
-        // 360px phone cut 더보기 off.
-        style={{ maxWidth: `calc(${slots} * 2.75rem + 0.75rem)` }}
+        // 60px a slot with its word, 44px an icon alone, and no wider - a short
+        // bar for a short list does not stretch edge to edge - and never wider
+        // than the space between the gutters. Eight tabs at a fixed 44px were
+        // 364px, more than a 390px phone has (358): the bar ran into the right
+        // gutter, and on a 360px phone cut 더보기 off.
+        style={{ maxWidth: `calc(${slots} * ${worded ? "3.75rem" : "2.75rem"} + 0.75rem)` }}
       >
         <div
           ref={track}
@@ -496,21 +636,22 @@ export function TabBar({
               opacity: lit >= 0 || dragging ? 1 : 0,
             }}
           />
-          {mainTabs.map((tab, slot) => {
+          {hubs.map((hub, slot) => {
+            if (hub.list) return null;
             const active = slot === lit;
-            const Icon = ICON[tab.href] ?? Ellipsis;
+            const Icon = hub.icon;
             // Only the surface that renders the queue wears the mark, so it
             // reads as "there is something to decide over there".
-            const marked = pending > 0 && tab.href === pendingHome;
+            const marked = pending > 0 && hub.screens.some((s) => s.href === pendingHome);
             return (
               <Link
-                key={tab.href}
-                href={tab.href}
+                key={hub.id}
+                href={hub.screens[0].href}
                 prefetch
                 draggable={false}
-                aria-label={marked ? `${tab.label}, 결재 대기 ${pending}건` : tab.label}
-                title={tab.label}
-                aria-current={pathname === tab.href ? "page" : undefined}
+                aria-label={marked ? `${hub.label}, 결재 대기 ${pending}건` : hub.label}
+                title={hub.label}
+                aria-current={here === hub ? "page" : undefined}
                 onClick={(e) => {
                   // Navigation is ours, so the lens can move before the page does.
                   e.preventDefault();
@@ -520,7 +661,7 @@ export function TabBar({
                 className={cn(item, active ? "text-foreground" : "text-dim")}
               >
                 <span className="relative">
-                  <Icon aria-hidden className="size-[22px]" strokeWidth={active ? 2.1 : 1.7} />
+                  <Icon aria-hidden className={icon} strokeWidth={active ? 2.1 : 1.7} />
                   {marked ? (
                     <span
                       aria-hidden
@@ -528,14 +669,18 @@ export function TabBar({
                     />
                   ) : null}
                 </span>
+                {word(hub.label)}
               </Link>
             );
           })}
 
-          {moreTabs.length > 0 ? (
+          {moreSlot >= 0 ? (
             <Sheet open={more} onOpenChange={setMore}>
               <SheetTrigger
-                aria-label={inMore ? `다른 화면 (지금: ${moreTabs.find((t) => t.href === pathname)?.label})` : "다른 화면"}
+                aria-label={
+                  (inMore ? `다른 화면 (지금: ${hubs[moreSlot].screens.find((t) => t.href === pathname)?.label})` : "다른 화면") +
+                  (pending > 0 ? `, 결재 대기 ${pending}건` : "")
+                }
                 title="다른 화면"
                 onClick={(e) => {
                   if (suppressClick.current) e.preventDefault();
@@ -545,7 +690,21 @@ export function TabBar({
                 {(() => {
                   // Inside 더보기, the slot shows where you are rather than "more".
                   const Icon = inMore ? (ICON[pathname] ?? Ellipsis) : Ellipsis;
-                  return <Icon aria-hidden className="size-[22px]" strokeWidth={lit === moreSlot ? 2.1 : 1.7} />;
+                  const name = inMore ? hubs[moreSlot].screens.find((t) => t.href === pathname)?.label : undefined;
+                  return (
+                    <>
+                      <span className="relative">
+                        <Icon aria-hidden className={icon} strokeWidth={lit === moreSlot ? 2.1 : 1.7} />
+                        {pending > 0 ? (
+                          <span
+                            aria-hidden
+                            className="anim-breathe absolute -top-0.5 -right-1.5 size-[6px] rounded-full bg-foreground/80"
+                          />
+                        ) : null}
+                      </span>
+                      {word(name ?? hubs[moreSlot].label)}
+                    </>
+                  );
                 })()}
               </SheetTrigger>
               <SheetContent
@@ -558,7 +717,7 @@ export function TabBar({
                   </SheetTitle>
                 </SheetHeader>
                 <ScreenList
-                  tabs={moreTabs}
+                  tabs={hubs[moreSlot].screens}
                   pending={pending}
                   onPick={(tab) => {
                     setMore(false);
@@ -566,6 +725,16 @@ export function TabBar({
                     if (tab.href !== pathname) startNavigation(() => router.push(tab.href));
                   }}
                 />
+                <div className="border-t border-edge-soft px-2 pt-2 pb-4">
+                  <button
+                    type="button"
+                    onClick={() => void signOut()}
+                    className="flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-[14.5px] text-dim outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                  >
+                    <LogOut aria-hidden className="size-[18px]" strokeWidth={1.8} />
+                    로그아웃
+                  </button>
+                </div>
               </SheetContent>
             </Sheet>
           ) : null}
@@ -629,7 +798,7 @@ export function ScreenMenu({ pending }: { pending: number }) {
   const router = useRouter();
   const role = useRole();
   const [open, setOpen] = useState(false);
-  const { bar, more } = screensFor(role);
+  const tabs = hubsFor(role).flatMap((hub) => hub.screens);
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger
@@ -646,7 +815,7 @@ export function ScreenMenu({ pending }: { pending: number }) {
           <SheetTitle className="text-[14px] font-medium text-foreground">다른 화면</SheetTitle>
         </SheetHeader>
         <ScreenList
-          tabs={[...bar, ...more]}
+          tabs={tabs}
           pending={pending}
           onPick={(tab) => {
             setOpen(false);

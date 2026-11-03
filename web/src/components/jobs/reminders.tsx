@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CopyButton } from "@/components/ui/copy-button";
+import { DetailSheet } from "@/components/ui/detail-sheet";
 import { Pager } from "@/components/ui/pager";
 import { usePaged } from "@/lib/paging";
 import { detail, outcome, outcomeTone, type Reminder, waiting } from "@/lib/reminders";
@@ -72,16 +73,17 @@ export function PastReminders({ reminders }: { reminders: Reminder[] }) {
     <section className="mt-8 border-t border-edge-soft pt-4">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setOpen(true)}
+        aria-haspopup="dialog"
         aria-expanded={open}
         className="tap flex w-full items-center justify-between rounded-lg px-2 text-[13px] text-dim outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
       >
         지난 리마인드
         <span className="tnum text-[12px] text-faint">{list.length}</span>
       </button>
-      {open ? (
+      <DetailSheet title="지난 리마인드" open={open} onOpenChange={setOpen}>
         <div id={paged.anchor} className="scroll-mt-4">
-          <ul className="mt-2 space-y-1">
+          <ul className="space-y-1">
             {paged.items.map((r) => (
               <li key={r.id}>
                 <ReminderRow reminder={r} />
@@ -91,7 +93,7 @@ export function PastReminders({ reminders }: { reminders: Reminder[] }) {
           <Pager {...paged} className="px-2" />
           <p className="px-2 pt-2 text-[11.5px] leading-relaxed text-faint">지난 30일 것만 보입니다.</p>
         </div>
-      ) : null}
+      </DetailSheet>
     </section>
   );
 }

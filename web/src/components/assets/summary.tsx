@@ -1,17 +1,18 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronRight } from "lucide-react";
+import { DetailSheet } from "@/components/ui/detail-sheet";
 import { type Bridge, signedKrw } from "@/lib/portfolio";
-import { cn } from "@/lib/utils";
 
 /**
- * One question, answered in a line, with the detail folded under it.
+ * One question, answered in a line, with the detail in a sheet.
  *
  * The tab used to lay every section out at full length - four phone screens
  * - and then split them into tabs, which hid the answers behind a choice. A
  * row says what matters in the line itself; the section it came from opens
- * in place for whoever wants to check the working.
+ * over the page for whoever wants to check the working, and the page stays
+ * the length it was.
  */
 export function Row({
   id,
@@ -30,7 +31,7 @@ export function Row({
   focus?: string;
   /** The answer, always visible. */
   children: ReactNode;
-  /** The section the answer comes from, shown when open. None: the row is the whole answer. */
+  /** The section the answer comes from, in a sheet when open. None: the row is the whole answer. */
   detail?: ReactNode;
 }) {
   if (detail === undefined || !onToggle) {
@@ -48,27 +49,19 @@ export function Row({
       <button
         type="button"
         onClick={onToggle}
+        aria-haspopup="dialog"
         aria-expanded={open}
-        aria-controls={`${id}-detail`}
         className="group flex w-full items-start gap-3 py-4 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
       >
         <span id={`${id}-title`} className="w-[4.5rem] shrink-0 pt-px text-[12.5px] text-faint">
           {title}
         </span>
         <span className="min-w-0 flex-1">{children}</span>
-        <ChevronDown
-          aria-hidden
-          className={cn(
-            "mt-0.5 size-4 shrink-0 text-faint transition-transform group-hover:text-dim motion-reduce:transition-none",
-            open && "rotate-180",
-          )}
-        />
+        <ChevronRight aria-hidden className="mt-0.5 size-4 shrink-0 text-faint group-hover:text-dim" />
       </button>
-      {open ? (
-        <div id={`${id}-detail`} className="pb-6">
-          {detail}
-        </div>
-      ) : null}
+      <DetailSheet title={title} open={open} onOpenChange={onToggle}>
+        {detail}
+      </DetailSheet>
     </section>
   );
 }

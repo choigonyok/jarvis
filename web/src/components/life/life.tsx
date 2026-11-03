@@ -6,7 +6,9 @@ import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { Meals } from "@/components/life/meals";
 import { Notes } from "@/components/life/notes";
+import { DetailRow } from "@/components/ui/detail-sheet";
 import { Pager } from "@/components/ui/pager";
+import { onFocusWanted, wantedFocus } from "@/lib/focus";
 import {
   type Loaded,
   type Meal,
@@ -27,6 +29,11 @@ import { isPending } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
 import { cn } from "@/lib/utils";
 
+type Shelf = "notes" | "places" | "things" | "meals";
+
+/** Notes asked about on the screen itself; the rest are one line away. */
+const ASKED_HERE = 3;
+
 type Book = {
   notes: Loaded<Note[]>;
   places: Loaded<Place[]>;
@@ -41,14 +48,19 @@ type Book = {
  * buying, the meals they paid for.
  *
  * The screen opens on the question that brings someone here - is there
- * anything it wants me to check - and every line below is the status tab's
- * one line: a name, a figure on the right, a line of what it means.
+ * anything it wants me to check - with the notes that ask it, and each ledger
+ * is one line that opens its list in a sheet: four lists one after another were
+ * five and a half phone screens.
  * Monthly charges are not here: 가계부's 매달 나가는 돈 is the same list.
  */
 export function Life() {
   const { proposals, connection } = useThread();
   const waiting = proposals.filter(isPending);
   const [book, setBook] = useState<Book | null>(null);
+  const [shelf, setShelf] = useState<Shelf | null>(null);
+  // The notes asked about on the screen itself, as they were when it was read:
+  // one answered stays where it is until the next visit.
+  const [asked, setAsked] = useState<ReadonlySet<string>>(new Set());
 
   const load = useCallback(
     () =>
@@ -61,6 +73,7 @@ export function Life() {
         // The order is the visit's: an answered note keeps its place until next time.
         if (notes.data) notes = { data: byAttention(notes.data) };
         setBook({ notes, places, things, meals });
+        setAsked(new Set((notes.data ?? []).filter((n) => n.status === "hypothesis").slice(0, ASKED_HERE).map((n) => n.id)));
       }),
     [],
   );
@@ -69,6 +82,17 @@ export function Life() {
   }, [load]);
   // Back to the app, or a pull to refresh.
   useEffect(() => onResume(load), [load]);
+
+  // A notification names what is in a sheet: the sheet opens when it is wanted.
+  useEffect(() => {
+    const show = (id: string) => {
+      if (id === "notes" || id.startsWith("note:")) setShelf("notes");
+      else if (id === "places" || id === "things" || id === "meals") setShelf(id);
+    };
+    const first = wantedFocus();
+    if (first) show(first);
+    return onFocusWanted(show);
+  }, []);
 
   function changed(next: Note) {
     setBook((b) => (b?.notes.data ? { ...b, notes: { data: b.notes.data.map((n) => (n.id === next.id ? next : n)) } } : b));
@@ -98,39 +122,73 @@ export function Life() {
             <>
               <Headline notes={book.notes} />
 
-              <Section name="나에 대한 노트" focus="notes" tally={noteTally(book.notes.data)}>
-                {book.notes.error ? (
-                  <Trouble what="노트를" onRetry={load}>{book.notes.error}</Trouble>
-                ) : book.notes.data!.length === 0 ? (
-                  <Empty>밤마다 반복되는 일과 빗나간 예측에서 노트가 생겨요.</Empty>
-                ) : (
-                  <Notes notes={book.notes.data!} onChange={changed} />
-                )}
-              </Section>
+              {book.notes.data?.some((n) => asked.has(n.id)) ? (
+                <div className="mt-5">
+                  <Notes notes={book.notes.data.filter((n) => asked.has(n.id))} onChange={changed} />
+                </div>
+              ) : null}
 
-              <Section name="나만의 지도" focus="places" tally={book.places.data?.length ? `${book.places.data.length}곳` : null}>
-                {book.places.error ? (
-                  <Trouble what="지도를" onRetry={load}>{book.places.error}</Trouble>
-                ) : book.places.data!.length === 0 ? (
-                  <Empty>캠핑이나 처음 간 식당 뒤에 오는 회고 카드에 답하면 그곳이 여기 쌓여요.</Empty>
-                ) : (
-                  <Places places={book.places.data!} />
-                )}
-              </Section>
+              <ul className="mt-7 divide-y divide-edge-soft border-y border-edge-soft">
+                <DetailRow
+                  title="나에 대한 노트"
+                  focus="notes"
+                  line={book.notes.error ? "불러오지 못했어요" : noteTally(book.notes.data)}
+                  open={shelf === "notes"}
+                  onOpenChange={(v) => setShelf(v ? "notes" : null)}
+                >
+                  {book.notes.error ? (
+                    <Trouble what="노트를" onRetry={load}>{book.notes.error}</Trouble>
+                  ) : book.notes.data!.length === 0 ? (
+                    <Empty>밤마다 반복되는 일과 빗나간 예측에서 노트가 생겨요.</Empty>
+                  ) : (
+                    <Notes notes={book.notes.data!} onChange={changed} />
+                  )}
+                </DetailRow>
 
-              <Section name="가진 물건" focus="things" tally={book.things.data?.length ? `반년 ${book.things.data.length}종` : null}>
-                {book.things.error ? (
-                  <Trouble what="물건을" onRetry={load}>{book.things.error}</Trouble>
-                ) : book.things.data!.length === 0 ? (
-                  <Empty>쿠팡 주문이 상품별로 읽히면 아침마다 조금씩 종류가 나뉘어 여기 모여요.</Empty>
-                ) : (
-                  <Things things={book.things.data!} />
-                )}
-              </Section>
+                <DetailRow
+                  title="나만의 지도"
+                  focus="places"
+                  line={book.places.error ? "불러오지 못했어요" : book.places.data?.slice(0, 3).map((p) => p.name).join(", ")}
+                  figure={book.places.data?.length ? `${book.places.data.length}곳` : null}
+                  open={shelf === "places"}
+                  onOpenChange={(v) => setShelf(v ? "places" : null)}
+                >
+                  {book.places.error ? (
+                    <Trouble what="지도를" onRetry={load}>{book.places.error}</Trouble>
+                  ) : book.places.data!.length === 0 ? (
+                    <Empty>캠핑이나 처음 간 식당 뒤에 오는 회고 카드에 답하면 그곳이 여기 쌓여요.</Empty>
+                  ) : (
+                    <Places places={book.places.data!} />
+                  )}
+                </DetailRow>
 
-              <Section name="식사" focus="meals" tally="최근 30일">
-                {book.meals.error ? <Trouble what="식사를" onRetry={load}>{book.meals.error}</Trouble> : <Meals meals={book.meals.data!} />}
-              </Section>
+                <DetailRow
+                  title="가진 물건"
+                  focus="things"
+                  line={book.things.error ? "불러오지 못했어요" : thingLine(book.things.data)}
+                  figure={book.things.data?.length ? `반년 ${book.things.data.length}종` : null}
+                  open={shelf === "things"}
+                  onOpenChange={(v) => setShelf(v ? "things" : null)}
+                >
+                  {book.things.error ? (
+                    <Trouble what="물건을" onRetry={load}>{book.things.error}</Trouble>
+                  ) : book.things.data!.length === 0 ? (
+                    <Empty>쿠팡 주문이 상품별로 읽히면 아침마다 조금씩 종류가 나뉘어 여기 모여요.</Empty>
+                  ) : (
+                    <Things things={book.things.data!} />
+                  )}
+                </DetailRow>
+
+                <DetailRow
+                  title="식사"
+                  focus="meals"
+                  line={book.meals.error ? "불러오지 못했어요" : book.meals.data?.length ? `최근 30일 ${book.meals.data.length}끼` : "최근 30일"}
+                  open={shelf === "meals"}
+                  onOpenChange={(v) => setShelf(v ? "meals" : null)}
+                >
+                  {book.meals.error ? <Trouble what="식사를" onRetry={load}>{book.meals.error}</Trouble> : <Meals meals={book.meals.data!} />}
+                </DetailRow>
+              </ul>
             </>
           )}
         </div>
@@ -170,20 +228,12 @@ function noteTally(notes: Note[] | undefined): string | null {
     .join(" · ");
 }
 
-/** A part of the screen: its name, and on the right what is in it. */
-function Section({ name, focus, tally, children }: { name: string; focus: string; tally: string | null; children: ReactNode }) {
-  const id = `life-${focus}`;
-  return (
-    <section className="mt-10 sm:mt-12" aria-labelledby={id} data-focus={focus}>
-      <div className="mb-1 flex items-baseline justify-between gap-3">
-        <h2 id={id} className="text-[12px] text-faint">
-          {name}
-        </h2>
-        {tally ? <span className="tnum text-[11.5px] text-faint">{tally}</span> : null}
-      </div>
-      {children}
-    </section>
-  );
+/** The line under 가진 물건: what runs out next, or what there is. */
+function thingLine(things: Thing[] | undefined): string | undefined {
+  if (!things?.length) return undefined;
+  const list = byNeed(things);
+  const next = list[0].next;
+  return next ? `${list[0].class} ${dueLabel(next)}` : list.slice(0, 3).map((t) => t.class).join(", ");
 }
 
 function Empty({ children }: { children: ReactNode }) {

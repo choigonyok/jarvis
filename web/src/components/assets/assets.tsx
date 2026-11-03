@@ -30,6 +30,7 @@ import {
   type Holding,
   type Portfolio,
 } from "@/lib/portfolio";
+import { onFocusWanted, wantedFocus } from "@/lib/focus";
 import type { Plan } from "@/lib/trade-plan";
 import { onResume } from "@/lib/resume";
 import { isPending } from "@/lib/thread";
@@ -77,17 +78,24 @@ export function Assets() {
     reloadRecord();
   }, [reloadRecord]);
 
-  // A notification about a section opens it (lib/focus.ts): the allocation
-  // and its rows, the tax inside 수익.
+  // A notification about a section opens its sheet (lib/focus.ts): the
+  // allocation and its rows, the tax inside 수익. What it names is in the sheet,
+  // so the sheet opens when it is wanted, not when it is found.
   useEffect(() => {
-    const opened = (e: Event) => {
-      const id = (e.target as HTMLElement).dataset.focus ?? "";
+    const show = (id: string) => {
       if (id.startsWith("allocation")) setOpen((o) => ({ ...o, alloc: true }));
       if (id === "tax") setOpen((o) => ({ ...o, bridge: true }));
       if (id === "principal") setOpen((o) => ({ ...o, principal: true }));
     };
-    document.addEventListener("jarvis:focused", opened);
-    return () => document.removeEventListener("jarvis:focused", opened);
+    const first = wantedFocus();
+    if (first) show(first);
+    const stop = onFocusWanted(show);
+    const found = (e: Event) => show((e.target as HTMLElement).dataset.focus ?? "");
+    document.addEventListener("jarvis:focused", found);
+    return () => {
+      stop();
+      document.removeEventListener("jarvis:focused", found);
+    };
   }, []);
 
 
@@ -284,16 +292,18 @@ export function Assets() {
                       <AllocationDetail
                         allocation={allocation}
                         tax={data.realized?.tax}
-                        onRebalance={() =>
-                          setAsking({ title: "리밸런싱 주문", reason: "rebalance", load: checkRebalance })
-                        }
-                        onFill={(plan: Plan) =>
+                        onRebalance={() => {
+                          setOpen((o) => ({ ...o, alloc: false }));
+                          setAsking({ title: "리밸런싱 주문", reason: "rebalance", load: checkRebalance });
+                        }}
+                        onFill={(plan: Plan) => {
+                          setOpen((o) => ({ ...o, alloc: false }));
                           setAsking({
                             title: "새로 넣을 돈으로 사기",
                             reason: "deposit",
                             load: () => sendOrders(requestsOf(plan), { reason: "deposit", dryRun: true }),
-                          })
-                        }
+                          });
+                        }}
                       />
                     }
                   >

@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ChevronDown, RotateCw } from "lucide-react";
 import { Header, TabBar } from "@/components/shell/header";
 import { StandingBar } from "@/components/shell/standing-bar";
+import { DetailRow } from "@/components/ui/detail-sheet";
+import { onFocusWanted, wantedFocus } from "@/lib/focus";
 import {
   type CheckResult,
   type CheckState,
@@ -62,6 +64,10 @@ export function Status() {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
+  // The group whose sheet is up, and the check a notification named: its group
+  // opens once the report says which that is.
+  const [sheet, setSheet] = useState<string | null>(null);
+  const [aim, setAim] = useState<string | null>(null);
   const [, tick] = useState(0);
 
   const apply = useCallback((out: Fetched) => {
@@ -92,14 +98,24 @@ export function Status() {
   }, [apply]);
 
   // A notification about a check lands on its row (lib/focus.ts): open it
-  // too, so what is wrong and what to do are on screen.
+  // too, so what is wrong and what to do are on screen. The row is in its
+  // group's sheet, so the sheet opens when it is wanted.
   useEffect(() => {
+    const wanted = (id: string) => {
+      if (id.startsWith("check:")) setAim(id.slice("check:".length));
+    };
+    const first = wantedFocus();
+    if (first) wanted(first);
+    const stop = onFocusWanted(wanted);
     const opened = (e: Event) => {
       const id = (e.target as HTMLElement).dataset.focus?.replace(/^check:/, "");
       if (id) setOpen(id);
     };
     document.addEventListener("jarvis:focused", opened);
-    return () => document.removeEventListener("jarvis:focused", opened);
+    return () => {
+      stop();
+      document.removeEventListener("jarvis:focused", opened);
+    };
   }, []);
 
   async function refresh() {
@@ -108,15 +124,22 @@ export function Status() {
     setRefreshing(false);
   }
 
-  function reveal(id: string) {
-    setOpen(id);
-    requestAnimationFrame(() =>
-      document.getElementById(`check-${id}`)?.scrollIntoView({ block: "center", behavior: "smooth" }),
-    );
-  }
-
   const results = report?.results ?? [];
   const spend = usageRows(usage);
+  const groupOf = (id: string) => results.find((r) => r.id === id)?.group ?? (spend.some((r) => r.id === id) ? USAGE : null);
+
+  function reveal(id: string) {
+    setOpen(id);
+    setSheet(groupOf(id));
+    // The sheet lays it out on the next frame.
+    window.setTimeout(() => document.getElementById(`check-${id}`)?.scrollIntoView({ block: "center" }), 120);
+  }
+
+  const shown = sheet ?? (aim ? groupOf(aim) : null);
+  const show = (group: string) => (v: boolean) => {
+    setAim(null);
+    setSheet(v ? group : null);
+  };
   const lastChecked = results.reduce<string | null>(
     (latest, r) => (!latest || r.checkedAt > latest ? r.checkedAt : latest),
     null,
@@ -158,49 +181,34 @@ export function Status() {
                 {error ? <span role="alert">{error}</span> : null}
               </div>
 
-              {order.map((group) => {
-                const rows = group === USAGE ? spend : results.filter((r) => r.group === group);
-                if (rows.length === 0) return null;
-                return (
-                  <Group key={group} name={group} rows={rows}>
-                    <Rows rows={rows} open={open} setOpen={setOpen} onPick={reveal} />
-                  </Group>
-                );
-              })}
+              <ul className="mt-7 divide-y divide-edge-soft border-y border-edge-soft">
+                {order.map((group) => {
+                  const rows = group === USAGE ? spend : results.filter((r) => r.group === group);
+                  if (rows.length === 0) return null;
+                  const { worst, tally, trouble } = standing(rows);
+                  return (
+                    <DetailRow
+                      key={group}
+                      title={group}
+                      mark={<Mark state={worst} />}
+                      line={trouble}
+                      figure={<span className={worst === "fail" || worst === "warn" ? "text-dim" : undefined}>{tally}</span>}
+                      open={shown === group}
+                      onOpenChange={show(group)}
+                    >
+                      <Rows rows={rows} open={open} setOpen={setOpen} onPick={reveal} />
+                    </DetailRow>
+                  );
+                })}
 
-              <Group name="폰 연결">
-                <ul>
-                  <Row
-                    r={{
-                      id: "phone",
-                      name: "위치·기기 상태 보내기",
-                      summary: "아이폰이 위치(OwnTracks)와 기기 상태(단축어)를 jarvis로 보내도록 설정해요.",
-                    }}
-                    open={open === "phone"}
-                    onToggle={() => setOpen(open === "phone" ? null : "phone")}
-                    onPick={reveal}
-                  >
-                    <PhoneSetup />
-                  </Row>
-                </ul>
-              </Group>
+                <DetailRow title="폰 연결" line="아이폰이 위치와 기기 상태를 보내게 설정해요." open={shown === "phone"} onOpenChange={show("phone")}>
+                  <PhoneSetup />
+                </DetailRow>
 
-              <Group name="로그인 정보">
-                <ul>
-                  <Row
-                    r={{
-                      id: "logins",
-                      name: "저장된 로그인",
-                      summary: "자비스가 로그인 화면에 자동으로 넣는 사이트와, 넣은 기록이에요.",
-                    }}
-                    open={open === "logins"}
-                    onToggle={() => setOpen(open === "logins" ? null : "logins")}
-                    onPick={reveal}
-                  >
-                    {open === "logins" ? <SavedLogins /> : null}
-                  </Row>
-                </ul>
-              </Group>
+                <DetailRow title="로그인 정보" line="자비스가 자동으로 넣는 사이트와 넣은 기록이에요." open={shown === "logins"} onOpenChange={show("logins")}>
+                  <SavedLogins />
+                </DetailRow>
+              </ul>
             </>
           )}
         </div>
@@ -366,30 +374,20 @@ function Headline({ results, onPick }: { results: Line[]; onPick: (id: string) =
   );
 }
 
-/** A group: its name, and on the right how its rows stand, so a glance down the page reads the tally. */
-function Group({ name, rows, children }: { name: string; rows?: Line[]; children: ReactNode }) {
-  const count = (state: CheckState) => rows?.filter((r) => r.state === state).length ?? 0;
+/** How a group stands: its worst mark, the tally for the right of its line, and what is wrong by name. */
+function standing(rows: Line[]) {
+  const count = (state: CheckState) => rows.filter((r) => r.state === state).length;
   const [fail, warn, unknown] = [count("fail"), count("warn"), count("unknown")];
   // "모두 정상" only when every row was measured and is fine.
-  const tally = !rows
-    ? null
-    : fail || warn
+  const tally =
+    fail || warn
       ? [fail && `이상 ${fail}`, warn && `주의 ${warn}`].filter(Boolean).join(" · ")
       : unknown
         ? `측정 안 함 ${unknown}`
         : "모두 정상";
-  const id = `group-${name}`;
-  return (
-    <section className="mt-9 sm:mt-11" aria-labelledby={id}>
-      <div className="mb-1 flex items-baseline justify-between gap-3">
-        <h2 id={id} className="text-[12px] text-faint">
-          {name}
-        </h2>
-        {tally ? <span className={cn("text-[11.5px]", fail || warn ? "text-dim" : "text-faint")}>{tally}</span> : null}
-      </div>
-      {children}
-    </section>
-  );
+  const worst: CheckState = fail ? "fail" : warn ? "warn" : unknown ? "unknown" : "ok";
+  const trouble = rows.filter((r) => r.state === "fail" || r.state === "warn").map((r) => r.name).join(", ");
+  return { worst, tally, trouble: trouble || undefined };
 }
 
 /**

@@ -8,6 +8,7 @@ import { StandingBar } from "@/components/shell/standing-bar";
 import { ChecklistCard } from "@/components/chat/checklist";
 import { JobSheet } from "@/components/jobs/job-sheet";
 import { PastReminders, useReminders, WaitingReminders } from "@/components/jobs/reminders";
+import { DetailSheet } from "@/components/ui/detail-sheet";
 import { Pager } from "@/components/ui/pager";
 import { type BlockedSite, type Job, LIVE, stateLabel, stateTone, when } from "@/lib/jobs";
 import { usePaged } from "@/lib/paging";
@@ -190,16 +191,17 @@ export function Jobs() {
             <section className="mt-8 border-t border-edge-soft pt-4">
               <button
                 type="button"
-                onClick={() => setShowEnded((v) => !v)}
+                onClick={() => setShowEnded(true)}
+                aria-haspopup="dialog"
                 aria-expanded={showEnded}
                 className="tap flex w-full items-center justify-between rounded-lg px-2 text-[13px] text-dim outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
               >
                 끝난 작업
                 <span className="tnum text-[12px] text-faint">{ended.length}</span>
               </button>
-              {showEnded ? (
+              <DetailSheet title="끝난 작업" open={showEnded} onOpenChange={setShowEnded}>
                 <div id={endedPaged.anchor} className="scroll-mt-4">
-                  <ul className="mt-2 space-y-1">
+                  <ul className="space-y-1">
                     {endedPaged.items.map((j) => (
                       <li key={j.id}>
                         <Row job={j} onOpen={() => setOpenId(j.id)} />
@@ -208,7 +210,7 @@ export function Jobs() {
                   </ul>
                   <Pager {...endedPaged} className="px-2" />
                 </div>
-              ) : null}
+              </DetailSheet>
             </section>
           ) : null}
 
