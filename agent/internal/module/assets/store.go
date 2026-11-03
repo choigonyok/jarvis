@@ -126,6 +126,7 @@ type Drift struct {
 	Target   float64  `json:"target"`
 	GapKrw   float64  `json:"gapKrw"`
 	InBand   bool     `json:"inBand"`
+	Spent    bool     `json:"spent"` // cash under its target: left out of the sums
 	Symbols  []string `json:"symbols"`
 }
 

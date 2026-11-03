@@ -48,8 +48,9 @@ const SHORT: Record<Bucket, string> = { growth: "유망주", coin: "코인", cas
  */
 export function DriftColumns({ allocation }: { allocation: Allocation }) {
   const { rows } = allocation;
-  // One scale for all, so a bigger bar is a bigger miss.
-  const reach = Math.max(...rows.map((r) => Math.max(Math.abs(r.current - r.target), bandOf(r))), 0.01) * 1.15;
+  // One scale for all, so a bigger bar is a bigger miss. Cash spent is no miss:
+  // it has no bar, and does not shrink the others'.
+  const reach = Math.max(...rows.map((r) => Math.max(r.spent ? 0 : Math.abs(r.current - r.target), bandOf(r))), 0.01) * 1.15;
   const H = 44;
   const y = (d: number) => H / 2 - (d / reach) * (H / 2);
   return (
@@ -65,19 +66,21 @@ export function DriftColumns({ allocation }: { allocation: Allocation }) {
               preserveAspectRatio="none"
               className="h-11 w-full"
               role="img"
-              aria-label={`${r.label} 지금 ${pct(r.current)}, 목표 ${pct(r.target)}${r.inBand ? "" : ", 허용 범위 밖"}`}
+              aria-label={`${r.label} 지금 ${pct(r.current)}, 목표 ${pct(r.target)}${r.spent ? ", 계산에서 제외" : r.inBand ? "" : ", 허용 범위 밖"}`}
             >
               <rect x="0" y={y(band)} width="20" height={y(-band) - y(band)} rx="1.5" fill="oklch(1 0 0 / 6%)" />
               <line x1="0" x2="20" y1={H / 2} y2={H / 2} stroke="oklch(1 0 0 / 30%)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
-              <rect
-                x="7"
-                y={Math.min(y(d), H / 2)}
-                width="6"
-                height={Math.max(0.6, Math.abs(y(d) - H / 2))}
-                rx="1"
-                fill={HUE[r.id]}
-                opacity={r.inBand ? 0.75 : 1}
-              />
+              {!r.spent ? (
+                <rect
+                  x="7"
+                  y={Math.min(y(d), H / 2)}
+                  width="6"
+                  height={Math.max(0.6, Math.abs(y(d) - H / 2))}
+                  rx="1"
+                  fill={HUE[r.id]}
+                  opacity={r.inBand ? 0.75 : 1}
+                />
+              ) : null}
               {!r.inBand ? (
                 <rect
                   x="5.5"
@@ -94,7 +97,7 @@ export function DriftColumns({ allocation }: { allocation: Allocation }) {
             </svg>
             <p className={cn("mt-1 truncate text-[11px]", r.inBand ? "text-faint" : "text-foreground")}>{SHORT[r.id]}</p>
             <p className={cn("tnum text-[11px]", r.inBand ? "text-faint" : "font-semibold text-foreground")}>
-              {pp === 0 ? "0" : `${pp > 0 ? "+" : "−"}${Math.abs(pp)}%p`}
+              {r.spent ? "제외" : pp === 0 ? "0" : `${pp > 0 ? "+" : "−"}${Math.abs(pp)}%p`}
             </p>
           </li>
         );
@@ -169,13 +172,14 @@ export function AllocationDetail({
             <span className={r.inBand ? "text-dim" : "font-semibold text-foreground"}>{pct(r.current)}</span>
             <span className="text-faint">→ {pct(r.target)}</span>
             <span className="w-[5.5rem] shrink-0 text-right text-[11.5px] text-faint">
-              {Math.abs(r.gapKrw) < 10_000 ? "맞음" : `${krwShort(Math.abs(r.gapKrw))} ${r.gapKrw > 0 ? "부족" : "많음"}`}
+              {r.spent ? "계산 제외" : Math.abs(r.gapKrw) < 10_000 ? "맞음" : `${krwShort(Math.abs(r.gapKrw))} ${r.gapKrw > 0 ? "부족" : "많음"}`}
             </span>
           </li>
         ))}
       </ul>
       <p className="text-[11px] leading-relaxed text-faint">
         허용 범위는 목표 ±7%p, 비중이 작은 자산은 목표의 절반까지예요. 그림의 옅은 띠가 그 범위예요.
+        {rows.some((r) => r.spent) ? " 현금이 목표보다 적으면 리밸런싱에 쓴 돈으로 보고 계산에서 빼요." : ""}
       </p>
 
       {rebalance.orders.length || rebalance.unpicked.length ? (

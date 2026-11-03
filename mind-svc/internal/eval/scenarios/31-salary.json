@@ -12,6 +12,12 @@
    "label": "주식",
    "current": 0.63,
    "target": 0.6
+  },
+  {
+   "label": "현금",
+   "current": 0.03,
+   "target": 0.12,
+   "spent": true
   }
  ],
  "turns": [

@@ -1,3 +1,4 @@
+import { movesOf } from "./target.js";
 import type { Allocation, Bucket, Holding } from "./types.js";
 
 /**
@@ -172,6 +173,25 @@ function finish(ctx: Ctx, orders: Order[], deposit: number, unpicked: Plan["unpi
 }
 
 /**
+ * How far each bucket moves: the moves, so a bucket sells what the others need
+ * and no more. With cash spent that leaves some over target, and only those
+ * still off their band are brought the rest of the way, the money staying
+ * cash. Nothing inside its band is sold to bring cash back.
+ */
+function deltasOf(rows: Allocation["rows"], total: number): Map<Bucket, number> {
+  const deltas = new Map<Bucket, number>();
+  for (const m of movesOf(rows, 0)) {
+    deltas.set(m.to, (deltas.get(m.to) ?? 0) + m.amountKrw);
+    deltas.set(m.from, (deltas.get(m.from) ?? 0) - m.amountKrw);
+  }
+  for (const r of rows) {
+    const after = (r.valueKrw + (deltas.get(r.id) ?? 0)) / total;
+    if (Math.abs(after - r.target) > r.band) deltas.set(r.id, r.gapKrw);
+  }
+  return deltas;
+}
+
+/**
  * Buy and sell so each bucket lands as near its target as whole units allow -
  * once something has left its band. While every bucket is inside, there is
  * nothing to do: the allocation section says "목표 비중대로예요", and a plan
@@ -182,9 +202,10 @@ export function rebalancePlan(allocation: Allocation, holdings: Holding[], opts:
   const orders: Order[] = [];
   const unpicked: Plan["unpicked"] = [];
   if (allocation.rows.every((r) => r.inBand)) return finish(ctx, orders, 0, unpicked);
+  const deltas = deltasOf(ctx.rows, ctx.total);
   for (const r of ctx.rows) {
     if (r.id === "cash") continue;
-    const delta = r.target * ctx.total - (ctx.value.get(r.id) ?? 0);
+    const delta = deltas.get(r.id) ?? 0;
     const got = ordersFor(r.id, delta, ctx, "nearest");
     if (got.length === 0 && delta >= MIN_ORDER && !(ctx.byBucket.get(r.id)?.length)) {
       unpicked.push({ bucket: r.id, label: r.label, amountKrw: delta });
@@ -209,18 +230,13 @@ export function depositPlan(
   const ctx = context(allocation, holdings, opts);
   const total = ctx.total + depositKrw;
   const need = new Map<Bucket, number>();
-  // Cash is a bucket too: when it is short, its share of the deposit simply
-  // stays cash.
-  let cashShort = 0;
+  // Nothing is kept back for cash: what the buckets do not take stays cash.
   for (const r of ctx.rows) {
     const gap = r.target * total - (ctx.value.get(r.id) ?? 0);
-    if (gap <= 0) continue;
-    if (r.id === "cash") cashShort = gap;
-    else need.set(r.id, gap);
+    if (gap > 0 && r.id !== "cash") need.set(r.id, gap);
   }
-  const needSum = [...need.values()].reduce((s, v) => s + v, 0) + cashShort;
+  const needSum = [...need.values()].reduce((s, v) => s + v, 0);
   const scale = needSum > depositKrw ? depositKrw / needSum : 1;
-  const keepCash = cashShort * scale;
 
   const orders: Order[] = [];
   const unpicked: Plan["unpicked"] = [];
@@ -238,7 +254,7 @@ export function depositPlan(
 
   // Top up with whole units where the shortfall is still largest.
   const reserved = unpicked.reduce((s, u) => s + u.amountKrw, 0);
-  let left = depositKrw - spent - reserved - keepCash;
+  let left = depositKrw - spent - reserved;
   const bought = new Map<Bucket, number>();
   for (const o of orders) bought.set(o.bucket, (bought.get(o.bucket) ?? 0) + o.amountKrw);
   for (;;) {

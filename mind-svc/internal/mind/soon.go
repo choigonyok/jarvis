@@ -33,6 +33,8 @@ type Drift struct {
 	Label   string  `json:"label"`
 	Current float64 `json:"current"`
 	Target  float64 `json:"target"`
+	// Spent: cash under its target, spent on the other buckets. Nothing is short.
+	Spent bool `json:"spent"`
 }
 
 var weekdayNames = []string{"일", "월", "화", "수", "목", "금", "토"}
@@ -242,7 +244,7 @@ func (m *Mind) salary(ctx context.Context, o model.Occurrence) error {
 				worst, label := 0.0, ""
 				for _, r := range rows {
 					d := points(r.Target) - points(r.Current)
-					if d > worst {
+					if d > worst && !r.Spent {
 						worst, label = d, r.Label
 					}
 				}

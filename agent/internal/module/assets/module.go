@@ -231,6 +231,9 @@ func renderAllocation(p Portfolio) string {
 				gap = krw(-r.GapKrw) + " 초과"
 			}
 		}
+		if r.Spent {
+			gap, state = "채울 필요 없음", "리밸런싱에 쓴 현금이라 계산에서 뺌"
+		}
 		symbols := ""
 		if len(r.Symbols) > 0 {
 			symbols = " [" + strings.Join(r.Symbols, " ") + "]"
@@ -247,11 +250,11 @@ func renderAllocation(p Portfolio) string {
 		b.WriteString("\n옮길 돈 없음.\n")
 		return b.String()
 	}
-	b.WriteString("\n옮기면 목표가 되는 돈 (큰 초과분이 큰 부족분을 먼저 채움)\n")
+	b.WriteString("\n옮기면 목표에 가까워지는 돈 (범위 밖과 큰 초과분이 큰 부족분을 먼저 채움)\n")
 	for _, mv := range a.Moves {
 		note := ""
 		if mv.Optional {
-			note = " · 여유(받는 쪽이 이미 범위 안)"
+			note = " · 여유(양쪽 다 범위 안)"
 		}
 		fmt.Fprintf(&b, "- %s → %s %s%s\n", label[mv.From], label[mv.To], krw(mv.AmountKrw), note)
 	}

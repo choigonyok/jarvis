@@ -20,6 +20,8 @@ export type Drift = {
   inBand: boolean;
   /** How far `current` may sit from `target` and still be in band. Absent from an older assets-svc. */
   band?: number;
+  /** Cash under its target: spent on the other buckets, and left out of the sums. */
+  spent?: boolean;
   symbols: string[];
 };
 
@@ -27,7 +29,7 @@ export type Move = {
   from: Bucket;
   to: Bucket;
   amountKrw: number;
-  /** The bucket being filled is already inside its band - worth doing, not urgent. */
+  /** Both buckets are inside their bands - worth doing, not urgent. */
   optional: boolean;
 };
 

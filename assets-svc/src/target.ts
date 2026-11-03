@@ -74,15 +74,19 @@ export function driftOf(holdings: Holding[], cashKrw: number): {
   const rows = BUCKETS.map((b) => {
     const valueKrw = value.get(b.id) ?? 0;
     const current = totalKrw > 0 ? valueKrw / totalKrw : 0;
+    // Cash under its target went into the other buckets, on purpose: it is
+    // what a rebalance is paid with. Nothing is off and nothing is owed to it.
+    const spent = b.id === "cash" && current < b.target;
     return {
       id: b.id,
       label: b.label,
       valueKrw,
       current,
       target: b.target,
-      gapKrw: b.target * totalKrw - valueKrw,
-      inBand: Math.abs(current - b.target) <= bandOf(b.target),
+      gapKrw: spent ? 0 : b.target * totalKrw - valueKrw,
+      inBand: spent || Math.abs(current - b.target) <= bandOf(b.target),
       band: bandOf(b.target),
+      spent,
       symbols: symbols.get(b.id) ?? [],
     };
   });
@@ -91,14 +95,16 @@ export function driftOf(holdings: Holding[], cashKrw: number): {
 
 /**
  * The gaps, turned into transfers: what is over target pays for what is
- * under, largest first. Rebalancing is "move this from there to here", and a
- * list of separate buy and sell amounts leaves that matching to the reader.
+ * under, what has left its band first, then largest first. With cash spent
+ * more is over than under, and that order is what gets the off-band bucket
+ * back. Rebalancing is "move this from there to here", and a list of separate
+ * buy and sell amounts leaves that matching to the reader.
  */
 export function movesOf(rows: Drift[], minKrw = 10_000): Move[] {
   const over = rows
     .filter((r) => r.gapKrw < 0)
     .map((r) => ({ row: r, left: -r.gapKrw }))
-    .sort((a, b) => b.left - a.left);
+    .sort((a, b) => Number(a.row.inBand) - Number(b.row.inBand) || b.left - a.left);
   const under = rows
     .filter((r) => r.gapKrw > 0)
     .map((r) => ({ row: r, left: r.gapKrw }))
@@ -117,7 +123,7 @@ export function movesOf(rows: Drift[], minKrw = 10_000): Move[] {
         from: give.row.id,
         to: need.row.id,
         amountKrw: amount,
-        optional: need.row.inBand,
+        optional: need.row.inBand && give.row.inBand,
       });
     }
   }
