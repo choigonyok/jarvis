@@ -78,6 +78,10 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == policy.HookCommand {
 		os.Exit(policy.RunHook(os.Stdin, os.Stdout, os.Getenv("JARVIS_POLICY_URL"), os.Getenv("JARVIS_POLICY_TOKEN"), http.DefaultClient))
 	}
+	// The conversation's tests on the real model (scripts/convo).
+	if len(os.Args) > 1 && os.Args[1] == ConvoCommand {
+		os.Exit(convoMain(os.Args[2:]))
+	}
 
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
@@ -122,8 +126,10 @@ func main() {
 	// nothing below this block names a specific module.
 	// Reading and leaving what changes are two tools, whatever there is to read
 	// or change: each module puts its rows on the boards.
-	look := tool.New(tool.Look, "지금 값을 읽는다. 읽기만 하고 카드가 없다. 숫자는 받은 값을 그대로 쓴다.")
-	change := tool.New(tool.Change, "리마인드와 체크리스트를 남기고 고친다. 카드가 없다. 돌려준 말이 저장된 내용이다.")
+	// The conversation's tests (internal/convo) put up the same boards and
+	// servers: what is added here is added there too.
+	look := tool.New(tool.Look, tool.LookAbout)
+	change := tool.New(tool.Change, tool.ChangeAbout)
 	calendarStore := calendar.NewStore(cfg.CalendarURL, cfg.APIToken, events)
 	calendarModule := calendar.New(calendarStore)
 	modules.Add(calendarModule)
@@ -271,6 +277,15 @@ func main() {
 		modules.Add(mindModule)
 		c := mindModule.Client()
 		mindClient = &c
+		// What mind knows beyond the situation in front of every turn - the
+		// loops, the plans, its notes, what it asked and why - and the rules
+		// the operator set, which everything that reads mind keeps to.
+		mindModule.Look(look)
+		mindModule.LookRules(look)
+		mindModule.Change(change)
+		if jobsModule != nil {
+			jobsModule.SetRules(c.RuleLines)
+		}
 
 		// The messages themselves (KakaoTalk, iMessage, this conversation), as
 		// mind keeps them: for what long-term memory did not take as a fact.

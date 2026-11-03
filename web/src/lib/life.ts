@@ -119,6 +119,9 @@ export async function versions(id: string): Promise<Note[] | null> {
 }
 
 /** "운동", or for a note about someone, their name. */
+/** The scope of the notes that are the operator's rules for the assistant (mind's model.RuleScope). */
+export const RULE_SCOPE = "규칙";
+
 export function scopeLabel(scope: string | undefined): string {
   if (!scope) return "";
   return scope.startsWith("사람:") ? scope.slice(3) : scope;

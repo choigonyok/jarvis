@@ -1,0 +1,10 @@
+{
+  "name": "어제 못 했다는 말은 어제 날짜로",
+  "why": "goal 스킬: 어제 일이면 day 에 그 날짜. 말하지 않은 날을 짐작하지 않는다.",
+  "situation": "[지금 상황 · 12:40]\n- 진행 중인 일정도 최근 위치 단서도 없음. 위치·동행이 필요한 답이면 먼저 물어볼 것\n- 목표: 물 2L 마시기(goal_water) 매일 - 어제 기록 없음",
+  "say": "어제는 물 못 마셨어",
+  "answers": {"change:goal.check": "적었습니다: 물 2L 마시기 - 어제 안 했음."},
+  "expect": {
+    "calls": [{"tool": "change", "what": "goal.check", "args": {"id": "goal_water", "mark": "missed", "day": "@yesterday"}}]
+  }
+}

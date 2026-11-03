@@ -23,6 +23,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/choigonyok/jarvis/agent/internal/adapter/permission"
 	"github.com/choigonyok/jarvis/agent/internal/config"
@@ -35,6 +36,21 @@ var ErrBusy = errors.New("이미 처리 중인 요청이 있습니다")
 
 // ErrNotQueued is a steer or drop of a message no longer waiting.
 var ErrNotQueued = errors.New("대기 중인 메시지가 아닙니다")
+
+// ErrNotRunning is a stop with no answer being written.
+var ErrNotRunning = errors.New("멈출 답이 없습니다")
+
+// stopGrace is how long a turn asked to stop has to end by itself before its
+// process is killed: the CLI answers an interrupt at once (2.1.287: 10ms), so
+// this is for one stuck in a call that does not hear it.
+var stopGrace = 5 * time.Second
+
+// What a stopped turn leaves in the conversation: under the words it had
+// written, or alone when it had written none.
+const (
+	stoppedMark = "(여기서 멈췄어요)"
+	stoppedLine = "(답을 멈췄어요)"
+)
 
 // Queued is one message waiting behind the running turn.
 type Queued struct {
@@ -83,6 +99,11 @@ type Runner struct {
 	// them what shown and showing are to the situation.
 	waiting                  func() []string
 	cardsShown, cardsShowing string
+	// rules is the operator's rules as mind last gave them with the
+	// situation, a line each ("" none); rulesShown and rulesShowing are to
+	// them what cardsShown and cardsShowing are to the cards.
+	rules                    string
+	rulesShown, rulesShowing string
 	// hold, when set, says a card this conversation raised is still open:
 	// its decision continues the work, so the session must not change under it.
 	hold    func(now time.Time) bool
@@ -94,6 +115,15 @@ type Runner struct {
 	// input is the running turn's stdin while it still takes messages (until
 	// its result): a steered message is written here.
 	input io.WriteCloser
+	// gen numbers the turns; cancel ends the running one's process. stopGen
+	// is the turn the operator asked to stop (Stop), ended the last that ran
+	// to its end, killed one stopped by force, resulted the last whose result
+	// came - and how it came (outcome: its subtype, "success" when not an
+	// error). marked: a stopped turn's words already say so (stoppedMark).
+	gen, stopGen, ended, killed, resulted int64
+	outcome                               string
+	cancel                                context.CancelFunc
+	marked                                bool
 	// bgs is every background task in flight (see Background); the one on
 	// the browser is what TakeBrowser stops when the conversation goes to
 	// use it.
@@ -115,11 +145,15 @@ type Runner struct {
 	// so the session never saw them; what came since is put in front of
 	// the next message. In memory only: after a restart a few are told again.
 	newsSeen string
+	// marksSeen is the same for the operator's marks on answers (marks).
+	marksSeen string
 	// onFree hears a place come free (OnFree).
 	onFree []func()
 	// seen hears all text the model is shown: what it is sent and what
 	// every tool gives back (OnSeen).
 	seen func(string)
+	// tools hears each tool the conversation's model calls (OnTool).
+	tools func(name string, input json.RawMessage)
 	// live is the draft of the text block the model is writing, and that
 	// block's index in its message; "" between blocks. Only the turn's
 	// reading of its stream touches it.
@@ -132,6 +166,41 @@ type Runner struct {
 // and in background tasks. The web module keeps the addresses in it: the
 // only ones its read will open.
 func (r *Runner) OnSeen(fn func(string)) { r.seen = fn }
+
+// OnTool hands fn each tool the conversation's model calls, as it calls it -
+// its name and input, whatever then becomes of the call. The conversation's
+// tests read what was done off it (internal/convo).
+func (r *Runner) OnTool(fn func(name string, input json.RawMessage)) { r.tools = fn }
+
+// toolUses is the tool calls in one assistant line of the stream.
+func toolUses(raw json.RawMessage) []struct {
+	Name  string          `json:"name"`
+	Input json.RawMessage `json:"input"`
+} {
+	var msg struct {
+		Content []struct {
+			Type  string          `json:"type"`
+			Name  string          `json:"name"`
+			Input json.RawMessage `json:"input"`
+		} `json:"content"`
+	}
+	if len(raw) == 0 || json.Unmarshal(raw, &msg) != nil {
+		return nil
+	}
+	var out []struct {
+		Name  string          `json:"name"`
+		Input json.RawMessage `json:"input"`
+	}
+	for _, b := range msg.Content {
+		if b.Type == "tool_use" && b.Name != "" {
+			out = append(out, struct {
+				Name  string          `json:"name"`
+				Input json.RawMessage `json:"input"`
+			}{b.Name, b.Input})
+		}
+	}
+	return out
+}
 
 func (r *Runner) saw(text string) {
 	if r.seen != nil && text != "" {
@@ -319,11 +388,72 @@ func (r *Runner) start(q *Queued) string {
 	}
 	prompt := withRef(withImages(q.Text, q.Images, r.cfg.UploadsDir), q.Ref, r.person())
 	if r.recall != nil {
-		if known := r.recall(context.Background(), q.Text); known != "" {
+		if known := r.recall(context.Background(), r.recallQuery(q.Text, time.Now())); known != "" {
 			prompt = known + "\n" + prompt
 		}
 	}
 	return prompt
+}
+
+// shortSaid is how short a message is, in characters, for the exchange before
+// it to be searched with it: "응 그거 해줘", "그날 몇 시였지?" say little alone,
+// and memory answered "응 그거 해줘" alone with eight facts that only shared a
+// word with it (2026-11-03).
+const shortSaid = 40
+
+// exchangeFresh is how recent the exchange before a message must be to count
+// as what it is about.
+const exchangeFresh = 2 * time.Hour
+
+// recallQuery is what memory is asked about a message: the message, and when
+// it is short, the exchange it follows.
+func (r *Runner) recallQuery(text string, now time.Time) string {
+	text = strings.TrimSpace(text)
+	if utf8.RuneCountInString(text) >= shortSaid || r.store == nil {
+		return text
+	}
+	turns, _, err := r.store.Window("", 8)
+	if err != nil {
+		return text
+	}
+	return withExchange(text, turns, now)
+}
+
+// withExchange is a short message with the exchange before it: the answer
+// it follows and what the operator said before that answer, when recent. The
+// message itself, already in the transcript, is passed over.
+func withExchange(text string, turns []*thread.Turn, now time.Time) string {
+	var said, answer string
+	passed := false
+	for i := len(turns) - 1; i >= 0 && said == ""; i-- {
+		t := turns[i]
+		if t.Origin != nil || t.ProposalID != "" {
+			continue
+		}
+		if at, err := time.Parse(time.RFC3339Nano, t.AtISO); err == nil && now.Sub(at) > exchangeFresh {
+			break
+		}
+		switch t.Role {
+		case thread.RoleUser:
+			if !passed && strings.TrimSpace(t.Text) == text {
+				passed = true
+				continue
+			}
+			said = strings.TrimSpace(t.Text)
+		case thread.RoleAgent:
+			if answer == "" {
+				answer = strings.Join(strings.Fields(strings.Join(t.Paragraphs, " ")), " ")
+			}
+		}
+	}
+	parts := []string{text}
+	if answer != "" {
+		parts = append(parts, clamp(answer, 160))
+	}
+	if said != "" {
+		parts = append(parts, clamp(said, 120))
+	}
+	return strings.Join(parts, " / ")
 }
 
 // queued numbers the queue's entries. The clock alone gave two messages
@@ -363,7 +493,8 @@ func (r *Runner) Steer(id string) (steered bool, err error) {
 	}
 	q := r.queue[at]
 	r.queue = slices.Delete(r.queue, at, at+1)
-	if r.input != nil {
+	// Not into a turn that is being stopped: it would end with the message.
+	if r.input != nil && r.stopGen != r.gen {
 		r.saw(q.Text)
 		if err := writeUser(r.input, withRef(withImages(q.Text, q.Images, r.cfg.UploadsDir), q.Ref, r.person())); err == nil {
 			r.mu.Unlock()
@@ -394,6 +525,78 @@ func (r *Runner) Drop(id string) error {
 	r.mu.Unlock()
 	r.showQueue()
 	return nil
+}
+
+// Stop ends the answer being written: the CLI is asked to interrupt the turn,
+// as Esc does in its terminal - what it wrote so far stays, in its session and
+// on the screen, marked as stopped - and what waits behind it goes on. A turn
+// that does not end within stopGrace is killed, and the next message opens a
+// new session, since one cut off mid-call may not resume. stopped is false
+// when the turn was past its answer already (or between two turns).
+func (r *Runner) Stop() (stopped bool, err error) {
+	r.mu.Lock()
+	if !r.running {
+		r.mu.Unlock()
+		return false, ErrNotRunning
+	}
+	gen := r.gen
+	if r.ended == gen || r.resulted == gen || r.stopGen == gen {
+		// Answered already and ending by itself, or already asked.
+		stopping := r.stopGen == gen && r.ended != gen && r.resulted != gen
+		r.mu.Unlock()
+		return stopping, nil
+	}
+	r.stopGen = gen
+	in := r.input
+	r.mu.Unlock()
+	if in != nil {
+		// Without its input open the turn is at its result already, or not
+		// started: turn sends the interrupt once it has one.
+		r.interrupt(in)
+	}
+	time.AfterFunc(stopGrace, func() { r.kill(gen) })
+	return true, nil
+}
+
+// interrupt asks the CLI on its stdin to stop the turn (the stream-json
+// control protocol the Agent SDK's interrupt uses).
+func (r *Runner) interrupt(in io.Writer) {
+	line, _ := json.Marshal(map[string]any{
+		"type": "control_request", "request_id": queueID("stop"),
+		"request": map[string]any{"subtype": "interrupt"},
+	})
+	if _, err := in.Write(append(line, '\n')); err != nil {
+		r.log.Warn("멈춤 요청을 보내지 못해 바로 끝냅니다", "err", err)
+		go r.kill(r.genNow())
+	}
+}
+
+func (r *Runner) genNow() int64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.gen
+}
+
+// kill ends turn gen's process, if it is still running.
+func (r *Runner) kill(gen int64) {
+	r.mu.Lock()
+	cancel := r.cancel
+	live := r.gen == gen && r.ended != gen && cancel != nil
+	if live {
+		r.killed = gen
+	}
+	r.mu.Unlock()
+	if live {
+		r.log.Warn("멈춘 턴이 끝나지 않아 프로세스를 끝냅니다", "turn", gen)
+		cancel()
+	}
+}
+
+// stopping is whether the running turn was asked to stop.
+func (r *Runner) stopping() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.stopGen == r.gen && r.gen != 0
 }
 
 // writeUser is one user message on a stream-json stdin.
@@ -537,6 +740,16 @@ func (r *Runner) limitedUntil(err error, now time.Time) (bool, time.Time) {
 func (r *Runner) turn(prompt string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), r.cfg.TurnTimeout)
 	defer cancel()
+	r.mu.Lock()
+	r.gen++
+	gen := r.gen
+	r.cancel, r.marked, r.outcome = cancel, false, ""
+	r.mu.Unlock()
+	defer func() {
+		r.mu.Lock()
+		r.ended, r.cancel = gen, nil
+		r.mu.Unlock()
+	}()
 
 	// Read first: the taste list mind gives with the situation is part of
 	// the instructions.
@@ -554,6 +767,7 @@ func (r *Runner) turn(prompt string) error {
 	if fresh {
 		r.shown, r.showing = "", ""
 		r.cardsShown = ""
+		r.rulesShown = ""
 	}
 	r.opening = want
 	var gap time.Duration
@@ -569,7 +783,9 @@ func (r *Runner) turn(prompt string) error {
 	}
 	// What the jobs said meanwhile, which the session has not seen.
 	head += r.jobNews()
+	head += r.marks(time.Now())
 	head += r.cards()
+	head += r.rulesBlock()
 
 	cmd := exec.CommandContext(ctx, r.cfg.ClaudeBin, r.args(system)...)
 	cmd.Dir = r.cfg.Workspace
@@ -591,6 +807,8 @@ func (r *Runner) turn(prompt string) error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("claude 실행: %w", err)
 	}
+	var t tally
+	t.begin(time.Now())
 	r.saw(head + prompt)
 	if err := writeUser(stdin, head+prompt); err != nil {
 		stdin.Close()
@@ -599,9 +817,13 @@ func (r *Runner) turn(prompt string) error {
 	}
 	r.mu.Lock()
 	r.input = stdin
+	asked := r.stopGen == gen
 	r.mu.Unlock()
+	if asked {
+		// Stopped before the process could hear it.
+		r.interrupt(stdin)
+	}
 
-	var t tally
 	scanErr := r.consume(stdout, &t)
 	// A message cut off mid-sentence (the CLI died, the turn timed out) is
 	// not left on screen as if it were said.
@@ -618,6 +840,30 @@ func (r *Runner) turn(prompt string) error {
 	err = scanErr
 	if err == nil && waitErr != nil {
 		err = fmt.Errorf("claude 종료: %w", waitErr)
+	}
+	r.mu.Lock()
+	killed, marked := r.killed == gen, r.marked
+	// Asked to stop, and it did: the CLI ended the turn as interrupted, or
+	// gave no result at all. One that finished its answer as the stop came
+	// (a success) was not stopped, and says nothing of it.
+	stopped := killed || (r.stopGen == gen && r.outcome != "success")
+	r.mu.Unlock()
+	if stopped {
+		// Asked for: not a failure, and nothing to say about it but that.
+		if err != nil {
+			r.log.Info("멈춘 턴", "turn", gen, "end", err.Error())
+		}
+		err = nil
+		if !marked {
+			r.store.AppendAgent([]string{stoppedLine})
+		}
+		if killed {
+			// Cut off mid-call, its session may hold a call with no
+			// answer: the next message opens a new one with the recap.
+			r.mu.Lock()
+			r.sessionID = ""
+			r.mu.Unlock()
+		}
 	}
 	r.account(&t, fresh, head+prompt, gap, err == nil)
 	return err
@@ -644,6 +890,7 @@ func (r *Runner) account(t *tally, fresh bool, opening string, gap time.Duration
 	}
 	if ok {
 		r.cardsShown = r.cardsShowing
+		r.rulesShown = r.rulesShowing
 	}
 	base, history := r.base, r.historyLocked()
 	r.mu.Unlock()
@@ -928,6 +1175,69 @@ func (r *Runner) jobNews() string {
 		strings.Join(lines, "\n") + "\n[작업 소식 끝]\n\n"
 }
 
+// marksWithin is how old a mark may be and still be told: after a restart the
+// ones of the last hours are told again, not the thread's whole history.
+const marksWithin = 12 * time.Hour
+
+// marksTurns bounds the marks handed to one turn.
+const marksTurns = 5
+
+// marks is what the operator marked answers with on the screen since the model
+// was last told - "좋아요", or "틀렸어요" and why - for the front of this turn's
+// message. A mark is made beside the conversation, not in it, so the session
+// would not know of it otherwise.
+func (r *Runner) marks(now time.Time) string {
+	if r.store == nil {
+		return ""
+	}
+	turns, _, err := r.store.Window("", 80)
+	if err != nil {
+		return ""
+	}
+	r.mu.Lock()
+	seen := r.marksSeen
+	r.mu.Unlock()
+	since := now.Add(-marksWithin)
+	var lines []string
+	newest := seen
+	for i := len(turns) - 1; i >= 0 && len(lines) < marksTurns; i-- {
+		t := turns[i]
+		f := t.Feedback
+		if t.Role != thread.RoleAgent || f == nil || f.At <= seen {
+			continue
+		}
+		if at, err := time.Parse(time.RFC3339Nano, f.At); err != nil || at.Before(since) {
+			continue
+		}
+		if f.At > newest {
+			newest = f.At
+		}
+		said := clamp(strings.Join(strings.Fields(strings.Join(t.Paragraphs, " ")), " "), 80)
+		line := fmt.Sprintf("- %s 의 답 「%s」: ", t.At, said)
+		if f.Mark == "bad" {
+			line += "틀렸다고 표시"
+		} else {
+			line += "좋았다고 표시"
+		}
+		if note := strings.TrimSpace(f.Note); note != "" {
+			line += " - " + clamp(note, 200)
+		}
+		lines = append(lines, line)
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	r.mu.Lock()
+	if newest > r.marksSeen {
+		r.marksSeen = newest
+	}
+	r.mu.Unlock()
+	slices.Reverse(lines)
+	who := r.person()
+	return "[" + who + " 표시 - " + who + "가 화면에서 앞의 답에 남긴 표시. 틀렸다고 했으면 무엇이 틀렸는지 생각해 이번 답부터 고치고, 이유가 있으면 따르세요. 길게 사과하지 마세요]\n" +
+		strings.Join(lines, "\n") + "\n[" + who + " 표시 끝]\n\n"
+}
+
 // cards is the cards on the screen still waiting for an answer, for the front
 // of this turn's message. They are what "이 카드 뭐야" asks about, and no tool
 // lists them: asked about two payment cards the guard had raised, the model
@@ -953,6 +1263,29 @@ func (r *Runner) cards() string {
 	who := r.person()
 	return "[답을 기다리는 카드 - " + who + " 화면에 떠 있고 아직 답하지 않은 것. 승인·반려는 " + who + "가 화면에서 합니다]\n" +
 		body + "\n[답을 기다리는 카드 끝]\n\n"
+}
+
+// rulesBlock is the rules the operator set (mind's, with the situation), for
+// the front of this turn's message - the session they were set in has them,
+// but a new one does not, and a rule set on a card's answer or taken back on
+// the 생활 screen reaches no session otherwise. Like the cards, said in full
+// when it changed, in a line when not, and once when it emptied.
+func (r *Runner) rulesBlock() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	body, shown := r.rules, r.rulesShown
+	r.rulesShowing = body
+	who := r.person()
+	switch {
+	case body == "" && shown == "":
+		return ""
+	case body == "":
+		return "[" + who + "가 정한 규칙] 없음 - 앞 메시지 때의 규칙은 거둬졌습니다\n\n"
+	case body == shown:
+		return "[" + who + "가 정한 규칙] 앞 메시지 때와 같음\n\n"
+	}
+	return "[" + who + "가 정한 규칙 - 늘 지킵니다. 바꾸거나 그만두라고 하면 change 의 rule.set·rule.end]\n" +
+		body + "\n[" + who + "가 정한 규칙 끝]\n\n"
 }
 
 // situation is mind's "right now" - the plan that may be going on, the
@@ -993,6 +1326,8 @@ func (r *Runner) situation() string {
 		Text string `json:"text"`
 		// Absent when mind could not read them - not the same as none.
 		Prefs *string `json:"prefs"`
+		// The operator's rules, the same way.
+		Rules *[]string `json:"rules"`
 	}
 	if resp.StatusCode >= 300 || json.NewDecoder(resp.Body).Decode(&now) != nil {
 		return ""
@@ -1006,6 +1341,15 @@ func (r *Runner) situation() string {
 	r.mu.Lock()
 	if now.Prefs != nil {
 		r.prefs = capPrefs(*now.Prefs, prefsMaxRunes)
+	}
+	if now.Rules != nil {
+		var lines []string
+		for _, l := range *now.Rules {
+			if l = strings.TrimSpace(l); l != "" {
+				lines = append(lines, "- "+l)
+			}
+		}
+		r.rules = strings.Join(lines, "\n")
 	}
 	r.nowText, r.nowAt = text, time.Now()
 	r.mu.Unlock()
@@ -1231,6 +1575,9 @@ type event struct {
 	Message   json.RawMessage `json:"message"`
 	Result    string          `json:"result"`
 	IsError   bool            `json:"is_error"`
+	// The CLI's own clock for the run, on the result line.
+	DurationMS    int64 `json:"duration_ms"`
+	DurationAPIMS int64 `json:"duration_api_ms"`
 	// Event is a stream_event's API event: a piece of the message being
 	// written (--include-partial-messages).
 	Event json.RawMessage `json:"event"`
@@ -1277,6 +1624,7 @@ func (r *Runner) consume(stdout interface{ Read([]byte) (int, error) }, t *tally
 	var failed error
 	err := scan(stdout, func(ev event) {
 		t.observe(ev)
+		t.clocked(ev, time.Now())
 		if failed != nil {
 			// What the allowance says still counts once the turn is lost.
 			if ev.Type == "rate_limit_event" {
@@ -1345,10 +1693,25 @@ func (r *Runner) handle(ev event) error {
 			return fmt.Errorf("claude api error: %s: %s",
 				ev.Error, clamp(strings.Join(paragraphsOf(ev.Message), " "), 300))
 		}
+		if r.tools != nil && ev.ParentToolUseID == "" {
+			for _, u := range toolUses(ev.Message) {
+				r.tools(u.Name, u.Input)
+			}
+		}
 		// One message, one turn. Splitting it per paragraph used to read
 		// fine as plain text, but a fenced code block with a blank line
 		// in it would land as two turns and stop being one block.
 		paragraphs := paragraphsOf(ev.Message)
+		if len(paragraphs) > 0 && ev.ParentToolUseID == "" && r.stopping() {
+			// The words written when the turn was stopped, flushed by the
+			// CLI as it ends: kept, and said to be where it stopped - once.
+			r.mu.Lock()
+			if !r.marked {
+				paragraphs = append(paragraphs, stoppedMark)
+				r.marked = true
+			}
+			r.mu.Unlock()
+		}
 		// The CLI sends a block's whole text right after its last piece:
 		// the turn takes the draft's place.
 		if r.live != "" && ev.ParentToolUseID == "" && hasText(ev.Message) {
@@ -1362,7 +1725,13 @@ func (r *Runner) handle(ev event) error {
 		r.saw(toolResults(ev.Message))
 	case "result":
 		r.closeInput()
-		if ev.IsError {
+		r.mu.Lock()
+		r.resulted, r.outcome = r.gen, ev.Subtype
+		if !ev.IsError {
+			r.outcome = "success"
+		}
+		r.mu.Unlock()
+		if ev.IsError && !(r.stopping() && ev.Subtype == "error_during_execution") {
 			return fmt.Errorf("claude result error: %s", clamp(ev.Result, 500))
 		}
 	}

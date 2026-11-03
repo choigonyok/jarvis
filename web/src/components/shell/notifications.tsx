@@ -247,13 +247,26 @@ export function Notifications() {
   );
 }
 
+/**
+ * When the operator answers mind's cards, as mind counts it (GET /api/attention):
+ * the evening hour they answer most at, with how often - offered for the digest,
+ * whose time stays theirs to set.
+ */
+type Attention = { known: boolean; cards: number; evening?: { hour: number; rate: number; rang: number } };
+
 function NotifySettings() {
   const push = usePush();
   const [set, setSet] = useState<Settings | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [attention, setAttention] = useState<Attention | null>(null);
 
   useEffect(() => {
+    // The operator's only; the guest's token is refused, and nothing is offered.
+    void fetch("/api/mind/attention", { cache: "no-store" })
+      .then((r) => (r.ok ? (r.json() as Promise<Attention>) : null))
+      .then((a) => a && setAttention(a))
+      .catch(() => {});
     void fetch("/api/notify/categories", { cache: "no-store" })
       .then((r) => (r.ok ? (r.json() as Promise<{ categories: Category[] }>) : null))
       .then((b) => b && setCategories(b.categories))
@@ -387,6 +400,7 @@ function NotifySettings() {
                 className="tnum h-9 rounded-lg border border-edge-soft bg-glass px-2 text-[16px] text-foreground mouse:text-[12.5px]"
               />
             </label>
+            <DigestHint attention={attention} digestAt={set.digestAt} onUse={(at) => void save({ ...set, digestAt: at })} />
             <p className="text-[11px] leading-relaxed text-faint">
               방해 금지 시간에 생긴 알림은 끝나는 시각에 한 번에 와요. 큰 결제·비중 이탈 같은 건 하루 요약으로 모아서 와요.
             </p>
@@ -395,5 +409,44 @@ function NotifySettings() {
         </>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The evening hour the operator answers cards at most, under the digest's time:
+ * a line when it is already there, and a way to move it when it is not. Nothing
+ * until there have been cards enough to say.
+ */
+function DigestHint({
+  attention,
+  digestAt,
+  onUse,
+}: {
+  attention: Attention | null;
+  digestAt: string;
+  onUse: (at: string) => void;
+}) {
+  const best = attention?.known ? attention.evening : undefined;
+  if (!best) return null;
+  const at = `${String(best.hour).padStart(2, "0")}:00`;
+  const pct = Math.round(best.rate * 100);
+  const here = Number(digestAt.slice(0, 2)) === best.hour;
+  return (
+    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-relaxed text-faint">
+      <span>
+        {here
+          ? `요즘 ${best.hour}시 전후에 카드에 가장 잘 답해요(${pct}%). 요약도 그때 와요.`
+          : `요즘 ${best.hour}시 전후에 카드에 가장 잘 답해요(${pct}%).`}
+      </span>
+      {here ? null : (
+        <button
+          type="button"
+          onClick={() => onUse(at)}
+          className="tap-y h-7 rounded-full border border-edge-soft px-2.5 text-[11.5px] text-dim outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+        >
+          요약을 {best.hour}시로
+        </button>
+      )}
+    </p>
   );
 }

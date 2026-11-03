@@ -57,7 +57,8 @@ const columns = `
 	       coalesce(session_id, ''),
 	       coalesce(images, '{}'),
 	       coalesce(ref::text, ''),
-	       coalesce(origin::text, '')`
+	       coalesce(origin::text, ''),
+	       coalesce(feedback::text, '')`
 
 const selectList = columns + `
 	  from input.turns`
@@ -79,14 +80,10 @@ func (s *Store) All(ctx context.Context, tz, thread string, since time.Time) ([]
 
 	out := []turn.Turn{}
 	for rows.Next() {
-		var t turn.Turn
-		var ref, origin string
-		if err := rows.Scan(&t.ID, &t.Role, &t.At, &t.AtISO, &t.Paragraphs,
-			&t.Text, &t.ProposalID, &t.SessionID, &t.Images, &ref, &origin); err != nil {
+		t, err := scanRow(rows)
+		if err != nil {
 			return nil, fmt.Errorf("턴 읽기: %w", err)
 		}
-		t.Ref = readRef(ref)
-		t.Origin = readOrigin(origin)
 		out = append(out, t)
 	}
 	return out, rows.Err()
@@ -244,6 +241,47 @@ func (s *Store) Update(ctx context.Context, thread, id string, paragraphs []stri
 	return saved, tx.Commit(ctx)
 }
 
+// Mark leaves a person's mark on one of the assistant's turns in a thread - nil
+// takes it off - and returns the turn as it now stands. Only the assistant's
+// own words are marked: a person's, a card's or a job's news are not answers.
+// ErrNoTurn when there is no such turn.
+func (s *Store) Mark(ctx context.Context, thread, id string, fb *turn.Feedback, tz string, after After) (turn.Turn, error) {
+	var value any
+	if fb != nil {
+		b, err := json.Marshal(fb)
+		if err != nil {
+			return turn.Turn{}, err
+		}
+		value = string(b)
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return turn.Turn{}, fmt.Errorf("턴 표시: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // 커밋 후에는 무해하다
+	saved, err := scanRow(tx.QueryRow(ctx, `
+		with marked as (
+		  update input.turns set feedback = $4::jsonb
+		   where id = $2 and thread = $3 and role = 'agent' and origin is null and proposal_id is null
+		  returning *
+		)
+		`+columns+`
+		  from marked`, tz, id, thread, value))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return turn.Turn{}, ErrNoTurn
+	}
+	if err != nil {
+		return turn.Turn{}, fmt.Errorf("턴 표시: %w", err)
+	}
+	saved.Thread = thread
+	if after != nil {
+		if err := after(ctx, tx, saved); err != nil {
+			return turn.Turn{}, err
+		}
+	}
+	return saved, tx.Commit(ctx)
+}
+
 // ErrNoTurn: no turn with that id in that thread that may be rewritten.
 var ErrNoTurn = errors.New("그런 턴이 없습니다")
 
@@ -253,14 +291,26 @@ type scanner interface {
 
 func scanRow(r scanner) (turn.Turn, error) {
 	var t turn.Turn
-	var ref, origin string
+	var ref, origin, feedback string
 	if err := r.Scan(&t.ID, &t.Role, &t.At, &t.AtISO,
-		&t.Paragraphs, &t.Text, &t.ProposalID, &t.SessionID, &t.Images, &ref, &origin); err != nil {
+		&t.Paragraphs, &t.Text, &t.ProposalID, &t.SessionID, &t.Images, &ref, &origin, &feedback); err != nil {
 		return turn.Turn{}, err
 	}
 	t.Ref = readRef(ref)
 	t.Origin = readOrigin(origin)
+	t.Feedback = readFeedback(feedback)
 	return t, nil
+}
+
+func readFeedback(raw string) *turn.Feedback {
+	if raw == "" {
+		return nil
+	}
+	var f turn.Feedback
+	if json.Unmarshal([]byte(raw), &f) != nil || f.Mark == "" {
+		return nil
+	}
+	return &f
 }
 
 func originJSON(o *turn.Origin) any {

@@ -24,6 +24,12 @@
 //	GET  /api/slots/{name}?saved=     whether a slot's value saved then still holds
 //	GET  /api/commands/{key}          what came of a command sent through the stream (commands.go)
 //	GET  /api/weather/places          where the plans of the next two weeks are (context-svc reads their forecast)
+//	GET  /api/loops?all=1             the loops still open, soonest due first (all: and those closed in two weeks)
+//	GET  /api/plans?from=&to=         the plans whose days touch the range, with where each was read and what it rests on
+//	GET  /api/asked?days=7            what mind asked and told lately, with why and on what grounds
+//	GET  /api/attention               when the operator answers cards, by the hour (the gate's slow hours, the digest's best hour)
+//	GET  /api/rules                   what the operator told the assistant to keep to (notes of the rule scope)
+//	POST /api/rules                   {text, said?} a rule the operator gave in the conversation (a command)
 //	GET  /api/notes                   the notes about the operator, every status
 //	POST /api/notes/{id}              {status, text, reason} the operator on a note
 //	GET  /api/notes/{id}/versions     a note's versions, with why each
@@ -223,6 +229,12 @@ func (s *Server) Handler() http.Handler {
 		_, _ = w.Write(page)
 	})
 	mux.HandleFunc("GET /api/snapshot", s.auth(false, s.snapshot))
+	mux.HandleFunc("GET /api/loops", s.auth(false, s.loops))
+	mux.HandleFunc("GET /api/plans", s.auth(false, s.plans))
+	mux.HandleFunc("GET /api/asked", s.auth(false, s.asked))
+	mux.HandleFunc("GET /api/rules", s.auth(false, s.rules))
+	mux.HandleFunc("GET /api/attention", s.auth(false, s.attention))
+	write("POST /api/rules", owner, s.setRule)
 	mux.HandleFunc("GET /now", s.person(s.now))
 	// The messages themselves, for the conversation: what mind read but did
 	// not keep as a fact. The services' token only - these hand out text.
@@ -379,20 +391,34 @@ func (s *Server) now(w http.ResponseWriter, r *http.Request) {
 	// Absent when it could not be read, "" when there is none: the agent
 	// keeps the list in its instructions and changes them only on an answer.
 	var prefs *string
+	// The operator's rules, the same way: absent when unread, empty when none.
+	var rules *[]string
 	if guest {
 		if text, ok := s.m.GuestPreferences(); ok {
 			prefs = &text
 		}
-	} else if text, err := s.m.PreferencesRead(r.Context()); err == nil {
-		prefs = &text
 	} else {
-		s.log.Warn("취향을 읽지 못했습니다", "err", err)
+		if text, err := s.m.PreferencesRead(r.Context()); err == nil {
+			prefs = &text
+		} else {
+			s.log.Warn("취향을 읽지 못했습니다", "err", err)
+		}
+		if lines, err := s.m.RuleLines(r.Context()); err == nil {
+			if lines == nil {
+				lines = []string{}
+			}
+			rules = &lines
+		} else {
+			s.log.Warn("규칙을 읽지 못했습니다", "err", err)
+		}
 	}
 	writeJSON(w, http.StatusOK, struct {
 		world.Situation
 		// Prefs is what is known of the asker's taste, with grounds.
 		Prefs *string `json:"prefs,omitempty"`
-	}{now, prefs})
+		// Rules is what the operator told the assistant to keep to.
+		Rules *[]string `json:"rules,omitempty"`
+	}{now, prefs, rules})
 }
 
 type caller struct{}

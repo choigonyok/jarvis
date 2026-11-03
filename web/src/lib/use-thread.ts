@@ -360,6 +360,50 @@ export function useThread() {
   const steer = useCallback((id: string) => onQueued(id, "steer"), [onQueued]);
   const drop = useCallback((id: string) => onQueued(id, "drop"), [onQueued]);
 
+  /**
+   * Stops the answer being written: what it wrote so far stays, marked where it
+   * stopped, and what waits behind it goes on. The end arrives over the
+   * stream; an answer that had just ended has nothing to stop.
+   */
+  const stop = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/thread/stop`, { method: "POST" });
+      if (!res.ok && res.status !== 409) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        setError(body?.error ?? "답을 멈추지 못했습니다.");
+      }
+    } catch {
+      setError("에이전트에 연결하지 못했습니다.");
+    }
+  }, []);
+
+  /**
+   * Marks an answer good or wrong ("" takes the mark off), with why when it is
+   * wrong. Resolves to what to say when it could not be kept; the mark shows
+   * once it is. Jarvis hears of it before its next turn.
+   */
+  const mark = useCallback(
+    async (turnId: string, value: "good" | "bad" | "", note = ""): Promise<string | null> => {
+      try {
+        const res = await fetch(`/api/chat/turns/${encodeURIComponent(turnId)}/feedback`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ mark: value, ...(value === "bad" && note.trim() ? { note: note.trim() } : {}) }),
+        });
+        if (!res.ok) {
+          const body = (await res.json().catch(() => null)) as { error?: string } | null;
+          return body?.error ?? "표시하지 못했어요.";
+        }
+        const saved = (await res.json()) as Turn;
+        setTurns((prev) => prev.map((t) => (t.id === turnId ? { ...t, feedback: saved.feedback } : t)));
+        return null;
+      } catch {
+        return "표시하지 못했어요. 연결을 확인해 주세요.";
+      }
+    },
+    [setTurns],
+  );
+
   const decide = useCallback(
     async (proposalId: string, decision: Decision, edits?: Record<string, string>, reason?: string) => {
       setError(null);
@@ -500,6 +544,8 @@ export function useThread() {
     send,
     steer,
     drop,
+    stop,
+    mark,
     decide,
   };
 }

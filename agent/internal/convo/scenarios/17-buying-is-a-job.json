@@ -1,0 +1,9 @@
+{
+  "name": "사 달라는 일은 작업으로, 결제는 카드로",
+  "why": "jobs·payment 스킬: 구매는 작업이 결제 단계까지 하고 결제 승인 카드가 묻는다. 대화가 브라우저를 직접 몰지 않는다.",
+  "say": "쿠팡에서 참나무 장작 10kg 하나 주문해줘",
+  "expect": {
+    "calls": [{"tool": "create_job"}],
+    "never": [{"tool": "browser_navigate"}, {"tool": "browser_click"}]
+  }
+}

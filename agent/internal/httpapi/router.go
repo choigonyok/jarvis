@@ -108,6 +108,11 @@ type queuer interface {
 	Drop(id string) error
 }
 
+// stopper ends the answer being written.
+type stopper interface {
+	Stop() (stopped bool, err error)
+}
+
 type Deps struct {
 	// Role is "owner" or "guest": which agent this is. Every response says so
 	// (X-Jarvis-Agent), and the gateway refuses one from the wrong agent.
@@ -227,6 +232,9 @@ func (s *Server) Handler() http.Handler {
 	// agent's routes by first segment.
 	mux.HandleFunc("POST /messages/{id}/steer", s.guard(s.steerMessage))
 	mux.HandleFunc("POST /messages/{id}/drop", s.guard(s.dropMessage))
+	// The 멈추기 button: the answer being written ends where it is. Under
+	// /thread, a route the gateway already passes.
+	mux.HandleFunc("POST /thread/stop", s.guard(s.stopTurn))
 	mux.HandleFunc("POST /uploads", s.guard(s.postUpload))
 	mux.HandleFunc("GET /usage", s.guard(s.getUsage))
 	mux.HandleFunc("GET /uploads/{name}", s.guard(s.getUpload))
@@ -409,6 +417,24 @@ func (s *Server) steerMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"steered": steered})
+}
+
+func (s *Server) stopTurn(w http.ResponseWriter, r *http.Request) {
+	st, ok := s.runner.(stopper)
+	if !ok {
+		writeErr(w, http.StatusNotFound, "멈출 수 없습니다.")
+		return
+	}
+	stopped, err := st.Stop()
+	if errors.Is(err, claudecode.ErrNotRunning) {
+		writeErr(w, http.StatusConflict, "지금 쓰고 있는 답이 없습니다.")
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"stopped": stopped})
 }
 
 func (s *Server) dropMessage(w http.ResponseWriter, r *http.Request) {

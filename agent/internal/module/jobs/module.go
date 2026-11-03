@@ -125,7 +125,13 @@ type Module struct {
 	// saved shipping address and the vault's cards, and the card alerts.
 	vault   VaultCards
 	charges ChargeLog
+	// rules is the operator's rules for the assistant (mind's), read before
+	// each run: a run keeps to them as the conversation does. Nil: none.
+	rules func(ctx context.Context) []string
 }
+
+// SetRules has each run read the operator's rules before it starts.
+func (m *Module) SetRules(fn func(ctx context.Context) []string) { m.rules = fn }
 
 // EndNote is a job that is over, for the phone: done (Text is what its
 // finish said) or stopped after failing (Text is why).

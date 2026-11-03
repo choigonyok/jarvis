@@ -10,6 +10,7 @@
 //	POST /chat/cards/{id}/decision     {decision, edits?, reason?} a person's answer to a card: a record, and how it went
 //	GET  /chat/answers/{key}           the words of an answer, for the agent that took it
 //	POST /chat/answers/{key}/reply     {status, error?} how it went, for whoever waits on the press
+//	POST /chat/turns/{id}/feedback     {mark: good|bad|"", note?} a person's mark on an answer: a record, and the turn
 //	GET  /turns?thread=&since=&limit=&before=   the conversation: a thread, or a page of it
 //	POST /turns                        a turn said: its record, and the turn
 //	PUT  /turns/{id}                   a turn with an origin given its newest word
@@ -102,6 +103,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /chat/cards/{id}/decision", s.auth(true, s.postAnswer))
 	mux.HandleFunc("GET /chat/answers/{key}", s.auth(true, s.getAnswer))
 	mux.HandleFunc("POST /chat/answers/{key}/reply", s.auth(true, s.postReply))
+	mux.HandleFunc("POST /chat/turns/{id}/feedback", s.auth(true, s.postFeedback))
 	mux.HandleFunc("GET /workout", s.auth(true, s.readWorkout))
 	mux.HandleFunc("POST /workout/changes", s.auth(true, s.changeWorkout))
 	mux.HandleFunc("GET /held", s.auth(false, s.held))

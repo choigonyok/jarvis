@@ -24,6 +24,13 @@ const (
 	Change = "change"
 )
 
+// What each board says of itself, at the top of its description: the agent and
+// the conversation's tests put up the same boards.
+const (
+	LookAbout   = "지금 값을 읽는다. 읽기만 하고 카드가 없다. 숫자는 받은 값을 그대로 쓴다."
+	ChangeAbout = "리마인드·체크리스트·목표·규칙을 남기고 고친다. 카드가 없다. 돌려준 말이 저장된 내용이다."
+)
+
 // Qualified is how the CLI refers to a board's tool.
 func Qualified(name string) string { return "mcp__" + name + "__" + name }
 
@@ -160,6 +167,25 @@ func argsOf(t reflect.Type) string {
 		out = append(out, line)
 	}
 	return strings.Join(out, "; ")
+}
+
+// Stand is the board as it reads - its name, what it says and every row with
+// its arguments, held to them as strictly - answered by answer instead of the
+// rows' own work: the conversation's tests put the real board in front of the
+// model, and the scenario says what each row gives back.
+func (b *Board) Stand(answer func(ctx context.Context, what string, args json.RawMessage) (string, error)) *Board {
+	out := &Board{name: b.name, about: b.about}
+	for _, r := range b.rows {
+		name := r.name
+		r.run = func(ctx context.Context, raw json.RawMessage) (string, error) {
+			if err := r.check(raw); err != nil {
+				return "", err
+			}
+			return answer(ctx, name, raw)
+		}
+		out.rows = append(out.rows, r)
+	}
+	return out
 }
 
 // Do runs one thing on the board: what the tool does with a call.

@@ -1,0 +1,9 @@
+{
+  "name": "앞으로 지킬 말은 규칙으로 남긴다",
+  "why": "운영자가 정한 규칙은 세션이 바뀌어도, mind 와 작업에도 남아야 한다(change 의 rule.set).",
+  "say": "앞으로 답할 때 링크는 붙이지 마",
+  "answers": {"change:rule.set": "규칙으로 남겼습니다: 답에 링크를 붙이지 않는다 (id note_ab12cd34ef). 운영자 폰에 알림이 갑니다."},
+  "expect": {
+    "calls": [{"tool": "change", "what": "rule.set"}]
+  }
+}

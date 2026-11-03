@@ -1,0 +1,10 @@
+{
+  "name": "되풀이할 일은 목표로",
+  "why": "goal 스킬: '주 3회 운동하기로 했어'는 goal.make, 주기는 말한 대로.",
+  "say": "이번 달부터 주 3회는 운동하기로 했어",
+  "answers": {"change:goal.make": "목표 goal_1 '운동'을 만들었습니다: 주 3회."},
+  "expect": {
+    "calls": [{"tool": "change", "what": "goal.make", "args": {"cadence": "weekly", "times": "3"}}],
+    "never": [{"tool": "change", "what": "reminder.set"}]
+  }
+}

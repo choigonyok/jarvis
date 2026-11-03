@@ -3,6 +3,7 @@ package claudecode
 import (
 	"encoding/json"
 	"slices"
+	"time"
 	"unicode/utf8"
 )
 
@@ -46,6 +47,52 @@ type tally struct {
 	models   []string
 	costUSD  float64
 	numTurns int
+	// When the run's process started, and when it showed itself: its session
+	// opened (system init), its first word to the operator appeared, its
+	// result came. What a turn costs before the model says anything is the
+	// CLI starting, reading its settings and dialling every MCP server - none
+	// of it in the token counts. The CLI's own durations are on the result.
+	started, initAt, firstAt, doneAt time.Time
+	durationMS, apiMS                int64
+}
+
+// begin marks the run's process started.
+func (t *tally) begin(at time.Time) { t.started = at }
+
+// clocked notes when the run showed what ev is, at `at`.
+func (t *tally) clocked(ev event, at time.Time) {
+	switch ev.Type {
+	case "system":
+		if ev.Subtype == "init" && t.initAt.IsZero() {
+			t.initAt = at
+		}
+	case "stream_event":
+		if ev.ParentToolUseID != "" || !t.firstAt.IsZero() || len(ev.Event) == 0 {
+			return
+		}
+		var se streamEvent
+		if json.Unmarshal(ev.Event, &se) == nil && se.Type == "content_block_delta" && se.Delta.Type == "text_delta" && se.Delta.Text != "" {
+			t.firstAt = at
+		}
+	case "assistant":
+		if t.firstAt.IsZero() && ev.ParentToolUseID == "" && !ev.IsAPIErrorMessage && hasText(ev.Message) {
+			t.firstAt = at
+		}
+	case "result":
+		if t.doneAt.IsZero() {
+			t.doneAt = at
+		}
+		t.durationMS, t.apiMS = ev.DurationMS, ev.DurationAPIMS
+	}
+}
+
+// since is how long after the start `at` was, in milliseconds; -1 when it
+// did not happen.
+func (t *tally) since(at time.Time) int64 {
+	if t.started.IsZero() || at.IsZero() {
+		return -1
+	}
+	return at.Sub(t.started).Milliseconds()
 }
 
 func (t *tally) observe(ev event) {
@@ -135,6 +182,14 @@ func (t *tally) attrs() []any {
 		"models", t.models,
 		"turns", t.numTurns,
 		"cost_usd", t.costUSD,
+		// What the operator waits through: the process up to its session,
+		// to the first word of the answer, to the end; and the CLI's own
+		// account of the run and of the time spent waiting on the API.
+		"startup_ms", t.since(t.initAt),
+		"first_text_ms", t.since(t.firstAt),
+		"total_ms", t.since(t.doneAt),
+		"cli_ms", t.durationMS,
+		"api_ms", t.apiMS,
 	}
 }
 

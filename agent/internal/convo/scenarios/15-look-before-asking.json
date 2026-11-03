@@ -1,0 +1,13 @@
+{
+  "name": "알 수 있는 것은 찾아보고 답한다",
+  "why": "11/03 09:08: 캠핑장 예약 확정은 iMessage 에 있었는데 보지 않고 운영자에게 되물었다.",
+  "say": "소나무숲 캠핑장 예약 확정됐어?",
+  "answers": {
+    "look:messages": "- [iMessage · 010-0000-0000 · 11/1 23:40] 예약확정되었습니다~ 소나무숲 캠핑장 A-3 (예약번호 C000000-TEST)",
+    "look:plans": "- 11/8(토) 소나무숲 캠핑 [확정] · iMessage 대화: \"예약확정되었습니다~\""
+  },
+  "expect": {
+    "anyOf": [{"tool": "look", "what": "messages"}, {"tool": "look", "what": "plans"}, {"tool": "look", "what": "memory"}, {"tool": "look", "what": "calendar"}],
+    "says": ["확정"]
+  }
+}

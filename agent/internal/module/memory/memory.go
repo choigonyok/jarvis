@@ -32,7 +32,26 @@ type Fact struct {
 	Relation  string  `json:"relation"`
 	ValidAt   *string `json:"validAt"`
 	InvalidAt *string `json:"invalidAt"`
+	// Score is how well the fact answers the query, by the reranker (0~1);
+	// nil when memory ranked without it (Voyage out of reach).
+	Score *float64 `json:"score"`
 }
+
+// JobRelation is the relation memory keeps a job by (mind's sensor
+// JobRecord): a job asked for, and what it did once it was over. Not a fact
+// about the operator's life - where a job stands is the job's (look 의 job).
+const JobRelation = "맡긴 작업"
+
+// What is put in front of a message on its own (Recall). Measured on the live
+// graph (2026-11-03, ten typical messages): a fact that answers the message
+// scored 0.6~0.86, one that only shared a word 0.35~0.55 - all of "응 그거
+// 해줘"'s were 0.47~0.53 - and a job's report came first for "예약 확정됐어?"
+// and filled all eight places for "쿠팡 주문한 거 어떻게 됐어?".
+const (
+	recallMin   = 0.55
+	recallMax   = 6
+	recallAsked = 12
+)
 
 // --- client ---------------------------------------------------------------
 
@@ -95,24 +114,46 @@ func (m *Module) Facts(ctx context.Context, query string) ([]module.Fact, error)
 	return out, nil
 }
 
-// Recall renders Facts as a block to put in front of the operator's message,
-// or "" when there is nothing (or memory is down - a turn never waits on it).
-func (m *Module) Recall(ctx context.Context, text string) string {
-	if strings.TrimSpace(text) == "" {
+// Recall renders what memory holds that answers the message as a block to put
+// in front of it, or "" when there is nothing that does (or memory is down - a
+// turn never waits on it). Not what only shares a word with it (recallMin), and
+// not a job's report: the job says where it stands, and a report kept from the
+// middle of one was handed over as a fact after the job had found otherwise.
+func (m *Module) Recall(ctx context.Context, query string) string {
+	if strings.TrimSpace(query) == "" {
 		return ""
 	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	facts, err := m.Facts(ctx, clip(text, 500))
-	if err != nil || len(facts) == 0 {
+	facts, err := m.store.Search(ctx, clip(query, 500), recallAsked)
+	if err != nil {
+		return ""
+	}
+	kept := pick(facts)
+	if len(kept) == 0 {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("[기억에서 찾은 관련 사실 - 참고용. 지금 메시지와 관계없으면 무시하고, 더 필요하면 look 의 memory 로 찾으세요]\n")
-	for _, f := range facts {
-		b.WriteString("- " + f.Text + "\n")
+	b.WriteString("[기억에서 찾은 관련 사실 - 참고용. 지금 메시지와 관계없으면 무시하고, 더 필요하면 look 의 memory 로 찾으세요. 작업이 어디까지 했는지는 look 의 job 으로 보세요]\n")
+	for _, f := range kept {
+		b.WriteString("- " + line(f) + "\n")
 	}
 	return b.String()
+}
+
+// pick is what of a search goes in front of a message: no job's report,
+// nothing scored below recallMin, at most recallMax, best first as they came.
+func pick(facts []Fact) []Fact {
+	var out []Fact
+	for _, f := range facts {
+		if f.Relation == JobRelation || (f.Score != nil && *f.Score < recallMin) {
+			continue
+		}
+		if out = append(out, f); len(out) == recallMax {
+			break
+		}
+	}
+	return out
 }
 
 type SearchInput struct {
@@ -145,7 +186,11 @@ func render(facts []Fact) string {
 	}
 	var b strings.Builder
 	for _, f := range facts {
-		b.WriteString("- " + line(f) + "\n")
+		s := line(f)
+		if f.Relation == JobRelation {
+			s += " [작업 기록 - 지금 어디까지 했는지는 look 의 job]"
+		}
+		b.WriteString("- " + s + "\n")
 	}
 	return b.String()
 }

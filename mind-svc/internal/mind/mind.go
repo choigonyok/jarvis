@@ -102,7 +102,8 @@ type Options struct {
 }
 
 type Mind struct {
-	busy busy
+	busy   busy
+	rhythm rhythmCache
 	Opts Options
 	// reg is the registry as it stands.
 	reg *registry.Live
@@ -212,7 +213,7 @@ func New(o Options) *Mind {
 	}
 	m.Gate.Judge = (&link.SameJudge{LLM: o.LLM, Log: o.Logger}).Of
 	m.Gate.Turned = (&link.TurnedJudge{LLM: o.LLM, Log: o.Logger}).Of
-	m.Gate.Busy = m.Busy
+	m.Gate.Busy = m.BusyOrSlow
 	m.Prefs = &prefs.Prefs{St: o.Store, LLM: o.LLM, Now: o.Now}
 	m.Gate.OnDecide = func(ctx context.Context, in model.Intent) {
 		m.learn(ctx, in)

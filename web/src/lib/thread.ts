@@ -99,7 +99,12 @@ export type Turn = {
    * moment (a notice), or a checklist shown.
    */
   origin?: TurnOrigin;
+  /** The operator's mark on this answer, as it was left last. */
+  feedback?: TurnFeedback;
 };
+
+/** A mark on one of Jarvis's answers: it was good, or wrong - and why. */
+export type TurnFeedback = { mark: "good" | "bad"; note?: string; at: string };
 
 export type TurnOrigin = {
   kind: "job" | "notice" | "checklist";

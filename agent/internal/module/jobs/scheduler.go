@@ -288,6 +288,9 @@ func (m *Module) runOnce(ctx context.Context, bg Background, cfg SchedulerConfig
 	m.cutMu.Unlock()
 	waiting := m.waitingOn(j.ID)
 	text := prompt(d, cfg.UploadsDir, time.Now(), before, waiting)
+	if m.rules != nil {
+		text = withRules(text, m.rules(bctx))
+	}
 	var extra []string
 	if browser {
 		extra = []string{BrowserServer}
@@ -617,6 +620,21 @@ func prompt(d Detail, uploadsDir string, now time.Time, cut []string, waiting []
 		b.WriteString("\n지금 할 일을 하고, schedule_next·ask·request_login·finish 중 하나로 마치세요.")
 	}
 	return b.String()
+}
+
+// withRules puts the operator's rules for the assistant in front of a run's
+// message: a run keeps to them as the conversation does ("결제는 하나카드로",
+// "판매 글에 연락처는 넣지 마").
+func withRules(text string, rules []string) string {
+	if len(rules) == 0 {
+		return text
+	}
+	var b strings.Builder
+	b.WriteString("운영자가 정한 규칙 (자비스가 늘 지키는 것 - 이 작업에 닿는 것은 지키세요)\n")
+	for _, r := range rules {
+		b.WriteString("- " + r + "\n")
+	}
+	return b.String() + "\n" + text
 }
 
 func clampText(s string, n int) string {

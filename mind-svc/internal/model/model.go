@@ -241,6 +241,11 @@ type Note struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
+// RuleScope is the scope of a note the operator set rather than one mind
+// found: a standing word to the assistant ("렌터카 대여는 일정에 넣지 마"),
+// confirmed when said, with no rule a prediction is made from (mind's Rules).
+const RuleScope = "규칙"
+
 // Note statuses.
 const (
 	Hypothesis = "hypothesis"

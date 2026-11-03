@@ -10,6 +10,7 @@
 | `POST /mind/{경로}` (PUT·PATCH·DELETE) | 화면의 쓰기. 기록을 남기고 mind 의 결정적 레인이 한 결과를 읽어 답한다. mind 가 내려가 있으면 202 로 답하고 기록은 남는다 |
 | `POST /chat/messages` | 대화에서 한 말. 기록(`chat.message`, 글은 봉인)이 되고 에이전트가 큐에서 집는다. `GET /chat/messages/{키}` 로 글을 읽는다 |
 | `POST /chat/cards/{id}/decision` | 카드의 답. 기록(`card.answer`, 내용은 봉인)이 되고 그 카드를 기다리는 에이전트가 큐에서 집어 이어 간다. 10초 안에 결과를 돌려주고, 못 들으면 202. 비밀 칸이 있는 카드는 여기로 오지 않는다 |
+| `POST /chat/turns/{id}/feedback` | 답에 남긴 표시 `{mark: good\|bad\|"", note?}`. 기록(`chat.feedback`, 지속층, 이유는 봉인)과 턴의 `feedback` 칸을 한 트랜잭션에 쓴다. 에이전트의 말(작업·알림·카드가 아닌 답)에만, 자기 스레드에만 남는다. 빈 값은 지운다 |
 | `/last` | 소스별로 새 소식이 마지막으로 온 때와 점검(`check.result`)의 최신 값. 상태 탭이 읽는다 |
 | `/held` | 다섯 번 실패해 따로 둔 메시지 |
 | `/turns`, `/workout` | 대화와 운동의 투영 |
@@ -29,6 +30,7 @@
 | GET | `/turns` | 대화 전체, 오래된 것부터. `?limit=60[&before=<턴 id 또는 atIso>]` 면 그 앞의 최신 60개와 `hasMore`(콘솔의 페이지) |
 | POST | `/turns` | 한 턴 추가. id 와 시각은 여기서 발급. 기록 `chat.turn` |
 | PUT | `/turns/{id}` | `origin` 이 있는 턴(작업 카드)의 문단을 바꾸고 시각을 지금으로. 대화의 말은 못 바꾼다 |
+| POST | `/chat/turns/{id}/feedback` | 답의 표시(위). 턴의 `feedback`(101)은 마지막 표시이고, 원본은 기록이다. 에이전트는 다음 턴 앞에 새 표시를 대화 모델에 건넨다 |
 
 - 턴의 글은 기록에 **봉인해서** 둡니다(`MESSAGE_KEY`, mind 의 `MIND_CONTENT_KEY` 와 같은 값). mind 는 기록을 받아 봉인을 열고
   대화방 하나로 읽습니다(`sensor.Messages.TakeTurn`).

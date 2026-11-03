@@ -1,0 +1,8 @@
+{
+  "name": "혼잣말에 작업이나 카드를 만들지 않는다",
+  "why": "승인 규칙: 운영자가 시키지 않았는데 떠올린 작업은 말로 한 번 묻는다.",
+  "say": "요즘 캠핑 장비 사고 싶은 게 많네",
+  "expect": {
+    "never": [{"tool": "create_job"}, {"tool": "create_event"}, {"tool": "change", "what": "checklist.make"}]
+  }
+}

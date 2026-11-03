@@ -1,0 +1,9 @@
+{
+  "name": "사진 보관함을 물으면 찾아서 답한다",
+  "why": "photos 스킬: 담긴 것을 물으면 look 의 photos 의 query 로 찾는다.",
+  "say": "작년 가을에 캠핑 가서 찍은 사진 있어?",
+  "answers": {"look:photos": "사진 2장 (비슷한 순)\n- 2025-10-18 14:02 · 가평 · camp-1.jpg → /tmp/uploads/camp-1.jpg\n- 2025-10-18 18:40 · 가평 · camp-2.jpg → /tmp/uploads/camp-2.jpg"},
+  "expect": {
+    "calls": [{"tool": "look", "what": "photos"}]
+  }
+}

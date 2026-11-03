@@ -1,0 +1,12 @@
+{
+  "name": "바뀌는 사실은 찾아서 답한다",
+  "why": "searchRules: 가격·일정·이벤트·공지처럼 확인할 수 있는 사실은 기억으로 답하지 말고 찾는다.",
+  "say": "이번 주에 나온 롤토체스 패치 노트 뭐 바뀌었어?",
+  "answers": {
+    "search": "1. [뉴스] 전략적 팀 전투 15.22 패치 노트 - 증강 3종 조정 (https://example.com/tft-1522)",
+    "read": "15.22 패치: 증강 '견고한 심장' 체력 증가, '마법사' 시너지 피해량 감소. (출처 https://example.com/tft-1522)"
+  },
+  "expect": {
+    "anyOf": [{"tool": "search"}, {"tool": "WebSearch"}]
+  }
+}

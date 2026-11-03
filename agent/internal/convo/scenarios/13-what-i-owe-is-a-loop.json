@@ -1,0 +1,10 @@
+{
+  "name": "하기로 한 것을 물으면 열린 고리를 본다",
+  "why": "열린 고리(mind 의 loop)는 아침 알림으로만 나오고 대화에서는 조회할 수 없었다(look 의 loops).",
+  "say": "내가 지수한테 뭐 보내주기로 했었지?",
+  "answers": {"look:loops": "- [내가 할 것] 지수에게 캠핑장 링크 보내기 · 기한 11/5(수) · '지수와 캠핑' 일정 · 카카오톡 '지수' 대화: \"링크 보내줄게\""},
+  "expect": {
+    "anyOf": [{"tool": "look", "what": "loops"}, {"tool": "look", "what": "memory"}, {"tool": "look", "what": "messages"}],
+    "says": ["링크"]
+  }
+}

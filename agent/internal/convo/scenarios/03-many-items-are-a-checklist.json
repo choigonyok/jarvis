@@ -1,0 +1,9 @@
+{
+  "name": "챙길 것이 여럿이면 체크리스트로",
+  "why": "checklist 스킬: 글머리표로 늘어놓지 말고 checklist.make 로 카드를 띄운다.",
+  "say": "이번 주말 캠핑 준비물 정리해줘. 텐트, 침낭, 랜턴, 버너, 장작",
+  "answers": {"change:checklist.make": "체크리스트 chk_1 '캠핑 준비물'을 만들어 대화에 띄웠습니다(항목 5개)."},
+  "expect": {
+    "calls": [{"tool": "change", "what": "checklist.make", "args": {"items": "텐트"}}]
+  }
+}

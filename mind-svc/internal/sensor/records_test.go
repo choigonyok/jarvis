@@ -60,6 +60,10 @@ func TestRecordsWording(t *testing.T) {
 	if j.Key != "job:3" || j.Fact != "2026-10-12에 맡긴 작업 '장작 담기': 쿠팡 장바구니에 장작 - 지금 끝남. 담음" {
 		t.Errorf("job: %+v", j)
 	}
+	// While it goes on, a run's summary is a guess of the moment, not a fact.
+	if j := s.JobRecord(job{ID: 4, Title: "예약 확인", Goal: "캠핑장 예약 확정", State: "active", Summary: "접수가 안 됐을 수 있어요", CreatedAt: "2026-11-01T23:00:00+09:00"}); j.Fact != "2026-11-01에 맡긴 작업 '예약 확인': 캠핑장 예약 확정 - 지금 진행 중" {
+		t.Errorf("진행 중인 작업: %+v", j)
+	}
 	city, country := "Gapyeong", "South Korea"
 	day := time.Date(2026, 10, 11, 0, 0, 0, 0, seoul)
 	a := asset{ID: "a1"}

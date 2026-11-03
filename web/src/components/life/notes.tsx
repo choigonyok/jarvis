@@ -10,6 +10,7 @@ import {
   decide,
   moment,
   pct,
+  RULE_SCOPE,
   scopeLabel,
   versions as readVersions,
 } from "@/lib/life";
@@ -131,9 +132,33 @@ function NoteRow({
   const asking = note.status === "hypothesis";
   const gone = note.status === "rejected";
   const scope = scopeLabel(note.scope);
+  // A rule the operator gave the assistant (mind's rule scope): not a guess,
+  // so no sureness to show - it stands until taken back or reworded here.
+  const rule = note.scope === RULE_SCOPE && note.status === "confirmed";
 
   const buttons =
-    mode !== "idle" ? null : asking ? (
+    mode !== "idle" ? null : rule ? (
+      <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:gap-1.5">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setMode("why")}
+          disabled={busy}
+          className="h-11 text-[13.5px] text-dim hover:bg-reject/10 hover:text-reject mouse:h-8 mouse:px-3 mouse:text-[0.8rem]"
+        >
+          거두기
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setMode("edit")}
+          disabled={busy}
+          className="h-11 px-3 text-[13px] text-faint hover:text-foreground mouse:h-8 mouse:text-[0.8rem]"
+        >
+          고치기
+        </Button>
+      </div>
+    ) : asking ? (
       <div className="grid grid-cols-[1fr_1fr_auto] gap-2 sm:flex sm:items-center sm:gap-1.5">
         <Button
           variant="ghost"
@@ -184,15 +209,25 @@ function NoteRow({
             >
               {note.text}
             </span>
-            <span className={cn("tnum shrink-0 text-[13px]", gone ? "text-faint" : "text-foreground/80")}>
-              <span className="hidden text-[11.5px] text-faint sm:inline">확신 </span>
-              {pct(note.confidence)}
-            </span>
+            {note.scope === RULE_SCOPE ? null : (
+              <span className={cn("tnum shrink-0 text-[13px]", gone ? "text-faint" : "text-foreground/80")}>
+                <span className="hidden text-[11.5px] text-faint sm:inline">확신 </span>
+                {pct(note.confidence)}
+              </span>
+            )}
           </span>
           <span className="mt-0.5 block text-[12.5px] leading-[1.55] text-faint">
-            {[scope, statusLabel[note.status], note.reason].filter(Boolean).join(" · ")}
+            {[
+              scope,
+              note.scope === RULE_SCOPE
+                ? { confirmed: "지키는 중", rejected: "거둠" }[note.status as string] ?? statusLabel[note.status]
+                : statusLabel[note.status],
+              note.reason,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
           </span>
-          {!gone ? (
+          {!gone && note.scope !== RULE_SCOPE ? (
             <span aria-hidden className="mt-2 block h-[3px] max-w-[14rem] overflow-hidden rounded-full bg-foreground/10">
               <span className="block h-full rounded-full bg-foreground/45" style={{ width: pct(note.confidence) }} />
             </span>
@@ -217,11 +252,15 @@ function NoteRow({
 
         {mode === "why" ? (
           <div className="anim-settle mt-2.5 space-y-2">
-            <p className="text-[12.5px] text-dim">왜 아닌가요? 비워도 돼요. 적어 두면 다음 노트를 만들 때 읽어요.</p>
+            <p className="text-[12.5px] text-dim">
+              {rule
+                ? "거두면 자비스가 더는 따르지 않아요. 이유가 있으면 적어 주세요(비워도 돼요)."
+                : "왜 아닌가요? 비워도 돼요. 적어 두면 다음 노트를 만들 때 읽어요."}
+            </p>
             <input
               value={why}
               onChange={(e) => setWhy(e.target.value)}
-              placeholder="예: 그날은 비가 와서 그랬어"
+              placeholder={rule ? "예: 이제는 넣어도 돼" : "예: 그날은 비가 와서 그랬어"}
               aria-label="아닌 이유"
               maxLength={300}
               className={field}
@@ -233,11 +272,16 @@ function NoteRow({
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => void answer({ status: "rejected", reason: why.trim() }, "아니라고 했어요. 다시 만들지 않아요.")}
+                onClick={() =>
+                  void answer(
+                    { status: "rejected", reason: why.trim() },
+                    rule ? "거뒀어요. 자비스가 더는 따르지 않아요." : "아니라고 했어요. 다시 만들지 않아요.",
+                  )
+                }
                 disabled={busy}
                 className="h-11 border-edge text-[13.5px] text-reject hover:bg-reject/10 mouse:h-8 mouse:px-3.5 mouse:text-[0.8rem]"
               >
-                아니에요
+                {rule ? "거두기" : "아니에요"}
               </Button>
             </div>
           </div>

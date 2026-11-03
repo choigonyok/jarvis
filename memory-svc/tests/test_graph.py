@@ -62,8 +62,30 @@ class GraphTest(unittest.IsolatedAsyncioTestCase):
         self.g.voyage.rerank = unreachable
         facts = await self.g.search("망원", "guest", 5)
         self.assertTrue(any("망원" in f["fact"] for f in facts), facts)
+        self.assertFalse(any("score" in f for f in facts), "낱말로만 찾은 것에는 점수가 없다")
         nodes = await self.g.find("망원", "guest", 5)
         self.assertTrue(any("망원" in n["name"] for n in nodes), nodes)
+
+    async def test_a_reranked_fact_says_how_well_it_answers(self):
+        """Ranked by the reranker, each fact carries its score, in the order
+        the facts come: what the conversation reads to leave out a fact that
+        only shares a word with the message."""
+        await self.g.fact("guest", "k-s1", "LIKES", ("Place", "p7", "망원 카페"), "나는 망원 카페를 좋아한다")
+        await self.g.fact("guest", "k-s2", "LIKES", ("Thing", "t7", "망원 시장 떡볶이"), "나는 망원 시장 떡볶이를 좋아한다")
+
+        async def embed(texts, **kwargs):
+            return [[0.1] * 16 for _ in texts]
+
+        async def rerank(query, documents, **kwargs):
+            order = sorted(range(len(documents)), key=lambda i: "카페" not in documents[i])
+            return [(i, 0.91 if "카페" in documents[i] else 0.12) for i in order]
+
+        self.g.voyage.embed = embed
+        self.g.voyage.rerank = rerank
+        facts = await self.g.search("망원 카페", "guest", 5)
+        self.assertGreaterEqual(len(facts), 2, facts)
+        self.assertIn("카페", facts[0]["fact"])
+        self.assertEqual([f["score"] for f in facts[:2]], [0.91, 0.12])
 
     async def test_an_edge_that_moves_is_still_one_edge(self):
         """G-D2: the same fact key written again with another target moves the

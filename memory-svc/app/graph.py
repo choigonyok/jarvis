@@ -558,13 +558,21 @@ class Graph:
 
         With Voyage out of reach (the embedding or the reranker), by the
         words alone, ranked without a model: an answer short of its best
-        rather than none - it was a 500 and a traceback (2026-10-27)."""
+        rather than none - it was a 500 and a traceback (2026-10-27).
+
+        Ranked by the reranker, each fact carries its score (0~1): how well
+        it answers the question, which a caller putting facts in front of
+        every message reads to leave out what only shares a word with it.
+        By MMR or by the words alone there is no such score."""
         try:
-            edges = await self._search_edges(query, group, limit, center, mode, vectors=True)
+            results = await self._search_edges(query, group, limit, center, mode, vectors=True)
+            scored = mode == "rerank"
         except UNREACHABLE as e:
             log.warning("검색 모델(Voyage)에 닿지 못해 낱말로만 찾습니다: %s", e)
-            edges = await self._search_edges(query, group, limit, center, "rrf", vectors=False)
-        return await self._facts(group, edges)
+            results = await self._search_edges(query, group, limit, center, "rrf", vectors=False)
+            scored = False
+        scores = list(results.edge_reranker_scores or []) if scored else []
+        return await self._facts(group, results.edges, scores)
 
     async def _search_edges(self, query: str, group: str, limit: int, center: str | None, mode: str, vectors: bool):
         methods = [EdgeSearchMethod.bm25]
@@ -588,10 +596,12 @@ class Graph:
             query_vector=await self.query_vector(query) if vectors else None,
             driver=self.drivers[group],
         )
-        return results.edges
+        return results
 
-    async def _facts(self, group: str, edges) -> list[dict]:
+    async def _facts(self, group: str, edges, scores=()) -> list[dict]:
         names = await self.names(group, {u for e in edges for u in (e.source_node_uuid, e.target_node_uuid)})
+        # A score only when there is one for every fact, in the facts' order.
+        scored = len(scores) == len(edges)
         return [
             {
                 "id": e.uuid,
@@ -603,8 +613,9 @@ class Graph:
                 "invalidAt": kst(e.invalid_at),
                 "source": {"id": e.source_node_uuid, "name": names.get(e.source_node_uuid, "")},
                 "target": {"id": e.target_node_uuid, "name": names.get(e.target_node_uuid, "")},
+                **({"score": round(float(scores[i]), 4)} if scored else {}),
             }
-            for e in edges
+            for i, e in enumerate(edges)
         ]
 
     async def find(self, query: str, group: str, limit: int = 5) -> list[dict]:

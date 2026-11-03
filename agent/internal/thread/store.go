@@ -62,6 +62,16 @@ type Turn struct {
 	// Origin, when set, says this is news from elsewhere - a background
 	// job's run - not the conversation's own words. See JobNews.
 	Origin *Origin `json:"origin,omitempty"`
+	// Feedback is the operator's latest mark on this answer, as input-svc
+	// keeps it (the screen leaves it there, not here).
+	Feedback *Feedback `json:"feedback,omitempty"`
+}
+
+// Feedback is the operator's mark on an answer: good, or wrong with why.
+type Feedback struct {
+	Mark string `json:"mark"` // good | bad
+	Note string `json:"note,omitempty"`
+	At   string `json:"at"`
 }
 
 // Origin is where a turn came from when not from the conversation session.

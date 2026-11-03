@@ -60,6 +60,7 @@
     "status.*": {"lane": "relay"},
     "check.result": {"lane": "relay"},
     "chat.message": {"lane": "relay"},
+    "chat.feedback": {"lane": "relay"},
     "card.answer": {"lane": "relay"},
     "suggestion.*": {"lane": "relay"}
   },

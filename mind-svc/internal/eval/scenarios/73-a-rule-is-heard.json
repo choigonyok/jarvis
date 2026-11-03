@@ -1,0 +1,24 @@
+{
+  "name": "운영자가 정한 규칙은 해석에도 닿는다: 차 대여는 일정으로 읽지 않고, 다른 약속은 그대로 읽는다",
+  "room": "rule-car",
+  "roomName": "민수",
+  "turns": [
+    {
+      "note": { "id": "note_rule_car", "text": "렌터카·차량 대여는 일정 카드로 올리지 않는다", "scope": "규칙" },
+      "messages": [
+        { "at": "2026-11-05T20:00", "from": "민수", "text": "21일엔 뭐 타고 가?" },
+        { "at": "2026-11-05T20:01", "me": true, "text": "그린카 예약했어. 11월 21일 아침 9시 픽업이야" }
+      ],
+      "script": {"changes":[]},
+      "expect": { "noPlans": [{ "titleHas": "그린카" }, { "titleHas": "대여" }, { "titleHas": "픽업" }], "noCards": true }
+    },
+    {
+      "messages": [
+        { "at": "2026-11-05T21:00", "from": "민수", "text": "21일 저녁 7시에 속초에서 회 먹자" },
+        { "at": "2026-11-05T21:01", "me": true, "text": "좋아 그때 봐" }
+      ],
+      "script": {"changes":[{"op":"create","kind":"plan","set":{"title":"민수와 저녁","status":"confirmed","date":"2026-11-21","start":"19:00","place":"속초","people":["민수"]},"evidence":[{"line":2,"quote":"좋아 그때 봐"}],"confidence":0.9,"why":"둘 다 동의"}]},
+      "expect": { "intents": ["calendar.create"] }
+    }
+  ]
+}

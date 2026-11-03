@@ -6,7 +6,9 @@ import { MIND_URL, MIND_WRITES, pathProxy } from "@/lib/proxy";
 // ticks and items, and a goal and its days, which go in at the way in. The rest
 // of mind (the log, its clock, message text) is not reachable this way; the
 // gateway refuses it too.
-const reads = /^(notes|places|things|meals|reminders|checklists|goals(\/[A-Za-z0-9_-]+)?|notes\/[A-Za-z0-9_-]+\/versions)$/;
+// attention: when the operator answers cards, which the notification settings
+// offer the digest's time by.
+const reads = /^(notes|places|things|meals|reminders|checklists|attention|goals(\/[A-Za-z0-9_-]+)?|notes\/[A-Za-z0-9_-]+\/versions)$/;
 const writes = /^(notes\/[A-Za-z0-9_-]+|checklists\/[A-Za-z0-9_-]+(\/items\/[A-Za-z0-9_-]+)?|goals(\/[A-Za-z0-9_-]+(\/checks)?)?)$/;
 
 export const runtime = "nodejs";

@@ -449,6 +449,10 @@ const KindMessage = "chat.message"
 // from the queue, whatever mind is doing.
 const KindAnswer = "card.answer"
 
+// KindFeedback is a person's mark on one of the assistant's answers (input-svc
+// POST /chat/turns/{id}/feedback): good, or wrong with why.
+const KindFeedback = "chat.feedback"
+
 // KindManualEdit is what a person changed by hand on a screen.
 const KindManualEdit = "manual.edit"
 
@@ -469,6 +473,9 @@ func CommandKind(method, path string) string {
 		return "intent.answer"
 	case "notes":
 		return "note.decided"
+	case "rules":
+		// A rule the operator gave is a note of its own scope (mind's Rules).
+		return "note.rule"
 	case "links":
 		return "link.decided"
 	case "spending":

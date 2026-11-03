@@ -54,7 +54,24 @@ type Turn struct {
 	// card beside the conversation, and a later word from the same run
 	// replaces it (PUT /turns/{id}) instead of adding another.
 	Origin *Origin `json:"origin,omitempty"`
+	// Feedback is what the person marked an answer with, last. The record
+	// chat.feedback is the original; this is the screen's copy of the latest.
+	Feedback *Feedback `json:"feedback,omitempty"`
 }
+
+// Feedback is a person's mark on one answer: good, or wrong - with why, when
+// they say.
+type Feedback struct {
+	Mark string `json:"mark"` // good | bad
+	Note string `json:"note,omitempty"`
+	At   string `json:"at"` // RFC 3339
+}
+
+// Marks a person may leave on an answer.
+const (
+	Good = "good"
+	Bad  = "bad"
+)
 
 // Origin is where a turn came from when not from the conversation.
 type Origin struct {

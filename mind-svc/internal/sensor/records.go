@@ -292,13 +292,21 @@ func (s *Structured) WorkoutRecords(w session) []model.Record {
 
 var jobState = map[string]string{"active": "진행 중", "waiting": "승인 대기", "paused": "멈춤", "done": "끝남", "cancelled": "그만둠", "failed": "실패"}
 
+// jobOver is the states a job ends in: its last summary is then what it did.
+var jobOver = map[string]bool{"done": true, "cancelled": true, "failed": true}
+
+// JobRecord is a job as memory keeps it: that it was asked for, and once it
+// is over what it did. A run's summary while the job goes on is its guess of
+// the moment ("접수가 안 됐을 수 있어요"), and kept as a fact it was handed
+// to the conversation as one after the job had found otherwise (2026-11-03);
+// where a job stands now is the job's to say (look 의 job).
 func (s *Structured) JobRecord(j job) model.Record {
 	state := jobState[j.State]
 	if state == "" {
 		state = j.State
 	}
 	fact := fmt.Sprintf("%s에 맡긴 작업 '%s': %s - 지금 %s", first(j.CreatedAt, 10), j.Title, j.Goal, state)
-	if j.Summary != "" {
+	if j.Summary != "" && jobOver[j.State] {
 		fact += ". " + j.Summary
 	}
 	id := strconv.FormatInt(j.ID, 10)

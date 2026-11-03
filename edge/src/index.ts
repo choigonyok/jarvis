@@ -164,7 +164,12 @@ function jobsRoute(method: string, path: string): boolean {
 function inputRoute(method: string, path: string): boolean {
   if (path.startsWith("mind/")) return method !== "GET" && method !== "HEAD" && mindRoute(method, path.slice("mind/".length));
   if (method === "GET") return path === "workout";
-  return method === "POST" && (["workout/changes", "chat/messages"].includes(path) || /^chat\/cards\/[A-Za-z0-9_-]+\/decision$/.test(path));
+  return (
+    method === "POST" &&
+    (["workout/changes", "chat/messages"].includes(path) ||
+      /^chat\/cards\/[A-Za-z0-9_-]+\/decision$/.test(path) ||
+      /^chat\/turns\/[a-z]+-[0-9]+-[0-9]+\/feedback$/.test(path))
+  );
 }
 
 /**
@@ -205,7 +210,7 @@ function mindRoute(method: string, path: string): boolean {
   if (path === "api/goals" || path.startsWith("api/goals/")) return goalsRoute(method, path.slice("api/goals".length));
   if (method === "GET") {
     return (
-      /^api\/(notes|places|things|meals|reminders|checklists)$/.test(path) ||
+      /^api\/(notes|places|things|meals|reminders|checklists|attention)$/.test(path) ||
       /^api\/notes\/[A-Za-z0-9_-]+\/versions$/.test(path)
     );
   }

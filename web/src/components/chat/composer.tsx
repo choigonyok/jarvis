@@ -50,6 +50,7 @@ function ComposerView({
   inputRef,
   queued,
   busy = false,
+  onStop,
   draftKey,
 }: {
   /** Resolves false when the message did not go out, so what was typed comes back. */
@@ -69,6 +70,8 @@ function ComposerView({
   queued?: ReactNode;
   /** Jarvis is working: what is sent now waits its turn, and the field says so. */
   busy?: boolean;
+  /** Stops the answer being written: offered in the send button's place while nothing is typed. */
+  onStop?: () => void;
   /** Where what is typed but not sent is kept, so leaving the tab does not lose it. */
   draftKey?: string;
 }) {
@@ -113,6 +116,18 @@ function ComposerView({
   // place, as in every messenger, and the words get the width the second
   // button held.
   const composing = value.trim() !== "" || photos.length > 0;
+  // While Jarvis writes and nothing is typed, the send button's place stops
+  // him - the grammar of every assistant. Typing turns it back into send:
+  // what is sent then waits its turn.
+  const stoppable = busy && !composing && Boolean(onStop);
+  // Pressed once, it waits for the answer to end; the next answer can be
+  // stopped again.
+  const [stopping, setStopping] = useState(false);
+  const [wasBusy, setWasBusy] = useState(busy);
+  if (busy !== wasBusy) {
+    setWasBusy(busy);
+    if (!busy) setStopping(false);
+  }
 
   // Escape lets go of a quote, the way it closes anything else that is open.
   useEffect(() => {
@@ -300,7 +315,7 @@ function ComposerView({
             under the composer would put three bars between the transcript and
             the bottom of the screen; a mic in the send button's place while
             nothing is typed is the grammar every messaging app already taught. */}
-        {onVoice && !composing ? (
+        {onVoice && !composing && !stoppable ? (
           <button
             type="button"
             onClick={onVoice}
@@ -311,7 +326,26 @@ function ComposerView({
           </button>
         ) : null}
 
-        {/* Deliberately quiet: the brightest control in this product is 승인. */}
+        {stoppable ? (
+          // Quiet like send, and not red: stopping is not turning anything down.
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              setStopping(true);
+              onStop?.();
+            }}
+            disabled={stopping}
+            aria-label={stopping ? "멈추는 중" : "답 멈추기"}
+            title="답 멈추기"
+            className={cn(round, "group text-dim disabled:opacity-40")}
+          >
+            <span className="flex size-9 items-center justify-center rounded-full bg-glass-raised transition-colors group-enabled:group-hover:text-foreground">
+              <span aria-hidden className="size-2.5 rounded-[2px] bg-current" />
+            </span>
+          </button>
+        ) : (
+        /* Deliberately quiet: the brightest control in this product is 승인. */
         <button
           type="button"
           onPointerDown={(e) => {
@@ -334,6 +368,7 @@ function ComposerView({
             <ArrowUp aria-hidden className="size-[18px]" />
           </span>
         </button>
+        )}
       </div>
     </div>
   );

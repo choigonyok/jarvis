@@ -1,0 +1,9 @@
+{
+  "name": "웹사이트에서 할 일은 작업으로 맡긴다",
+  "why": "jobs 스킬: 대화 안에서 브라우저로 직접 하지 말고 작업으로 넘긴다. 운영자가 정할 값(가격)은 지어내지 않는다.",
+  "say": "중고나라에 아이패드 에어 5 팔아줘. 가격은 시세 보고 정하자",
+  "expect": {
+    "calls": [{"tool": "create_job"}],
+    "never": [{"tool": "browser_navigate"}, {"tool": "browser_click"}, {"tool": "create_event"}]
+  }
+}

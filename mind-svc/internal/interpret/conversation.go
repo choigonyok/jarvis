@@ -274,7 +274,7 @@ func (c *Conversation) Read(ctx context.Context, room string) error {
 	if c.cfg.Search > 0 && placeless(known) {
 		ask = llm.WithSearch(ctx, c.cfg.Search)
 	}
-	answer, err := c.llm.Complete(ask, systemText(), prompt(name, c.cfg.Owner, c.now(), c.loc, known, remembered, c.turnedDown(ctx), earlier, fresh))
+	answer, err := c.llm.Complete(ask, systemText(), prompt(name, c.cfg.Owner, c.now(), c.loc, known, remembered, c.turnedDown(ctx), c.rules(ctx), earlier, fresh))
 	if err != nil && !errors.Is(err, llm.ErrNoAnswer) {
 		c.retryLater(room, err)
 		return err
@@ -437,6 +437,28 @@ func (c *Conversation) turnedDown(ctx context.Context) []string {
 		if line := "'" + t.Title + "' 카드: " + oneLine(t.Reason); !slices.Contains(out, line) {
 			out = append(out, line)
 		}
+	}
+	return out
+}
+
+// rules is what the operator told the assistant to keep to (mind's Rules):
+// a rule on what is a plan ("렌터카 대여는 일정이 아니다") holds in every room.
+func (c *Conversation) rules(ctx context.Context) []string {
+	notes, err := c.st.Notes(ctx)
+	if err != nil {
+		c.log.Warn("운영자의 규칙을 읽지 못했습니다", "err", err)
+		return nil
+	}
+	var rules []model.Note
+	for _, n := range notes {
+		if n.Scope == model.RuleScope && n.Status == model.Confirmed {
+			rules = append(rules, n)
+		}
+	}
+	slices.SortStableFunc(rules, func(a, b model.Note) int { return a.CreatedAt.Compare(b.CreatedAt) })
+	out := make([]string, 0, len(rules))
+	for _, n := range rules {
+		out = append(out, n.Text)
 	}
 	return out
 }

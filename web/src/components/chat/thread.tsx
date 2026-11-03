@@ -3,6 +3,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowDown, Reply } from "lucide-react";
+import { MarkButtons, WrongForm, WrongNote, useAnswerMarks, type MarkAnswer } from "@/components/chat/answer-marks";
 import { Composer } from "@/components/chat/composer";
 import { ModeToggle, type ChatMode } from "@/components/chat/mode-toggle";
 import { ChecklistCard } from "@/components/chat/checklist";
@@ -236,12 +237,15 @@ const TurnRow = memo(function TurnRow({
   onDecide,
   onTick,
   onDrop,
+  onMark,
   opened,
   onFold,
   typing,
   onShown,
 }: {
   turn: Turn;
+  /** Marks an answer good or wrong; absent where answers are not marked. */
+  onMark?: MarkAnswer;
   /** The answer being written for this row, while it is. */
   typing?: Draft;
   onShown?: (id: string, turn?: string) => void;
@@ -280,6 +284,26 @@ const TurnRow = memo(function TurnRow({
     turn.origin?.checklist ? onTick(turn.origin.checklist, item, done) : Promise.resolve(null);
   const drop = (item: string) => (turn.origin?.checklist ? onDrop(turn.origin.checklist, item) : Promise.resolve(null));
   const fold = { open: opened, onToggle: () => onFold(turn.id) };
+  // An answer of Jarvis's own, once written - not a card, a job's word or a
+  // notice - is what can be marked good or wrong.
+  const answer =
+    turn.role === "agent" &&
+    !typing &&
+    !turn.origin &&
+    !turn.proposalId &&
+    Boolean(turn.paragraphs?.length || turn.images?.length) &&
+    Boolean(onMark);
+  const marks = useAnswerMarks(turn.id, onMark);
+  const markButtons = (className?: string) => (
+    <MarkButtons
+      feedback={turn.feedback}
+      busy={marks.busy}
+      onGood={marks.good}
+      onWrong={marks.wrong}
+      onClear={marks.clear}
+      className={className}
+    />
+  );
   // A divider where the day changes: with it, a turn's own stamp only has to
   // say the time, and a reply that came hours later - a suggestion overnight
   // - is plainly not a live one.
@@ -295,7 +319,9 @@ const TurnRow = memo(function TurnRow({
           <SwipeRow onRef={ref}>
             <div className={ROW}>
               <Rail at={typing ? undefined : time} onRef={ref} />
-              <div className="min-w-0">
+              {/* Its own height, not the row's: the marks below it sit under
+                  the last line, not under the rail's taller stack. */}
+              <div className="relative min-w-0 self-start">
                 {typing ? (
                   <Typed draft={typing} onShown={onShown} />
                 ) : turn.origin?.kind === "notice" ? (
@@ -335,13 +361,40 @@ const TurnRow = memo(function TurnRow({
                     onDecide={(d, edits, reason) => onDecide(proposal.id, d, edits, reason)}
                   />
                 ) : null}
-                {/* The rail holds the time on a wide screen; a phone
-                    has no rail, so it sits under the message. */}
-                {time ? (
-                  <p className="tnum mt-1.5 text-[11px] text-faint sm:hidden" data-search-skip>
-                    {time}
-                  </p>
+                {answer ? <WrongNote feedback={turn.feedback} /> : null}
+                {answer && marks.asking ? (
+                  <WrongForm busy={marks.busy} error={marks.error} onCancel={marks.cancel} onSave={marks.saveWrong} />
                 ) : null}
+                {/* The rail holds the time on a wide screen; a phone
+                    has no rail, so it sits under the message - with the
+                    marks beside it where there is no pointer to find them
+                    in the rail. */}
+                {time || answer ? (
+                  <div
+                    className={cn("mt-1.5 flex items-center gap-1.5", answer ? "sm:pointer-fine:hidden" : "sm:hidden")}
+                    data-search-skip
+                  >
+                    {time ? <span className="tnum text-[11px] text-faint sm:hidden">{time}</span> : null}
+                    {answer ? markButtons("-ml-1") : null}
+                    {answer && marks.error && !marks.asking ? (
+                      <span className="text-[11.5px] text-reject" role="status">
+                        {marks.error}
+                      </span>
+                    ) : null}
+                  </div>
+                ) : null}
+                {/* With a pointer the marks wait under the answer, in the gap
+                    before the next turn - taking no room of their own - until
+                    the answer is hovered, like 참조; set, they stay: they are
+                    its status. */}
+                {answer
+                  ? markButtons(
+                      cn(
+                        "absolute top-full left-0 mt-1 -ml-1.5 hidden sm:pointer-fine:flex",
+                        !turn.feedback && !marks.asking && "opacity-0 group-hover/turn:opacity-100 focus-within:opacity-100",
+                      ),
+                    )
+                  : null}
               </div>
             </div>
           </SwipeRow>
@@ -519,10 +572,12 @@ const Transcript = memo(function Transcript({
   onDecide,
   onTick,
   onDrop,
+  onMark,
   opened,
   onFold,
 }: {
   turns: Turn[];
+  onMark: MarkAnswer;
   proposals: Proposal[];
   byId: Map<string, Proposal>;
   checklists: Record<string, Checklist>;
@@ -596,6 +651,7 @@ const Transcript = memo(function Transcript({
               onDecide={onDecide}
               onTick={onTick}
               onDrop={onDrop}
+              onMark={onMark}
               opened={opened.has(turn.id)}
               onFold={onFold}
             />
@@ -693,6 +749,8 @@ export function Thread() {
     send,
     steer,
     drop,
+    stop,
+    mark,
     decide,
   } = useThread();
   const scrollRef = useRef<HTMLElement>(null);
@@ -1226,6 +1284,7 @@ export function Thread() {
             onDecide={decide}
             onTick={tick}
             onDrop={dropItem}
+            onMark={mark}
             opened={opened}
             onFold={fold}
           />
@@ -1281,6 +1340,7 @@ export function Thread() {
               onCancelQuote={cancelQuote}
               inputRef={inputRef}
               busy={thinking}
+              onStop={stop}
               draftKey={`jarvis:composer-draft:${role}`}
               queued={queued}
             />

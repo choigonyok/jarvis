@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# 대화 회귀 시험(agent/internal/convo)을 실제 CLI·모델로 돌린다.
+#
+#   scripts/convo                       시나리오 전부를 한 번씩
+#   scripts/convo -runs 3 -only '1[0-5]'  agent convo 의 인자를 그대로 넘긴다
+#
+# 지금 소스로 에이전트를 맥미니용(linux)으로 빌드하고, 맥미니의 운영 에이전트 이미지로 새 컨테이너를 띄워
+# 그 안에서 돌린다 - 같은 CLI 판, 같은 스킬, 같은 도구 설명. 운영 컨테이너·볼륨(대화 세션, 기억 폴더)에는
+# 닿지 않는다. 운영 에이전트에서 가져가는 것은 구독 토큰·모델·허용 도구·캐시 설정 넷뿐이고, 맥미니 안에서
+# 600 파일로만 넘겼다가 끝나면 지운다(화면에 찍지 않는다). 백엔드는 모두 시나리오의 대역이다.
+#
+# 한 번 돌릴 때마다 운영자와 같은 구독 사용량을 쓴다(시나리오 하나가 대화 한 턴).
+set -euo pipefail
+
+HOST="${MINI_HOST:-macmini}"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+REMOTE_PATH='export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.orbstack/bin:/Applications/Docker.app/Contents/Resources/bin:$PATH"'
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+
+case "$(ssh -o LogLevel=ERROR "$HOST" uname -m)" in
+  arm64 | aarch64) ARCH=arm64 ;;
+  *) ARCH=amd64 ;;
+esac
+echo "→ 에이전트를 linux/$ARCH 로 빌드합니다"
+(cd "$ROOT/agent" && CGO_ENABLED=0 GOOS=linux GOARCH="$ARCH" go build -o "$WORK/agent" ./cmd/agent)
+mkdir -p "$WORK/scenarios" "$WORK/skills"
+cp "$ROOT"/agent/internal/convo/scenarios/*.json "$WORK/scenarios/"
+cp -R "$ROOT"/workspace/.claude/skills/. "$WORK/skills/"
+
+echo "→ $HOST 로 보냅니다"
+ssh -o LogLevel=ERROR "$HOST" 'rm -rf ~/convo-run && mkdir -p ~/convo-run'
+rsync -az "$WORK"/ "$HOST":convo-run/
+
+# 인자는 원격 셸에서 다시 읽히므로 하나씩 감싼다.
+args=""
+for a in "$@"; do args+=" $(printf '%q' "$a")"; done
+
+ssh -o LogLevel=ERROR "$HOST" "bash -s" <<REMOTE
+set -euo pipefail
+$REMOTE_PATH
+cd ~/jarvis
+agent=\$(docker compose ps -q agent </dev/null)
+[ -n "\$agent" ] || { echo "운영 에이전트 컨테이너가 없습니다" >&2; exit 1; }
+image=\$(docker inspect -f '{{.Config.Image}}' "\$agent")
+umask 077
+docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "\$agent" \
+  | grep -E '^(CLAUDE_CODE_OAUTH_TOKEN|JARVIS_MODEL|JARVIS_ALLOWED_TOOLS|JARVIS_CACHE_TTL)=' > ~/convo-run/env
+trap 'rm -f ~/convo-run/env' EXIT
+docker run --rm --env-file ~/convo-run/env -e TZ=Asia/Seoul -v ~/convo-run:/x:ro --entrypoint /x/agent "\$image" \
+  convo -scenarios /x/scenarios -skills /x/skills $args </dev/null
+REMOTE

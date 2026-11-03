@@ -225,3 +225,55 @@ func TestWindowPagesByTurnID(t *testing.T) {
 		t.Fatalf("없는 id 는 빈 페이지지 오류가 아닙니다: %v", err)
 	}
 }
+
+// A mark stays on the answer it was left on - the assistant's own words only -
+// and the record of it lands with it; taking it off leaves none.
+func TestAMarkStaysOnTheAnswer(t *testing.T) {
+	dsn := os.Getenv("JARVIS_TEST_DSN")
+	if dsn == "" {
+		t.Skip("JARVIS_TEST_DSN 이 없어 건너뜁니다 (scripts/dbtest)")
+	}
+	ctx := context.Background()
+	s := New(pool(t, dsn))
+	const th = "dbtest-mark"
+	asked, err := s.Append(ctx, turn.Turn{Role: turn.RoleUser, Text: "토요일 날씨", Thread: th}, "Asia/Seoul", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	answer, err := s.Append(ctx, turn.Turn{Role: turn.RoleAgent, Paragraphs: []string{"비가 와요"}, Thread: th}, "Asia/Seoul", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	card, err := s.Append(ctx, turn.Turn{Role: turn.RoleAgent, ProposalID: "p-1-x", Thread: th}, "Asia/Seoul", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fb := &turn.Feedback{Mark: turn.Bad, Note: "일요일 얘기였어", At: "2026-11-03T21:00:00+09:00"}
+	for _, id := range []string{asked.ID, card.ID} {
+		if _, err := s.Mark(ctx, th, id, fb, "Asia/Seoul", nil); !errors.Is(err, ErrNoTurn) {
+			t.Fatalf("%s: 답이 아닌 턴에는 표시하지 않습니다: %v", id, err)
+		}
+	}
+	if _, err := s.Mark(ctx, "other", answer.ID, fb, "Asia/Seoul", nil); !errors.Is(err, ErrNoTurn) {
+		t.Fatalf("다른 대화의 턴은 없는 것입니다: %v", err)
+	}
+	var recorded turn.Turn
+	saved, err := s.Mark(ctx, th, answer.ID, fb, "Asia/Seoul", func(_ context.Context, _ pgx.Tx, got turn.Turn) error { recorded = got; return nil })
+	if err != nil || saved.Feedback == nil || saved.Feedback.Mark != turn.Bad || recorded.ID != answer.ID {
+		t.Fatalf("%+v %+v %v", saved, recorded, err)
+	}
+	all, err := s.All(ctx, "Asia/Seoul", th, time.Time{})
+	if err != nil || len(all) != 3 || all[1].Feedback == nil || all[1].Feedback.Note != "일요일 얘기였어" || all[0].Feedback != nil {
+		t.Fatalf("%+v %v", all, err)
+	}
+	if cleared, err := s.Mark(ctx, th, answer.ID, nil, "Asia/Seoul", nil); err != nil || cleared.Feedback != nil {
+		t.Fatalf("지우면 남지 않습니다: %+v %v", cleared, err)
+	}
+	fail := func(context.Context, pgx.Tx, turn.Turn) error { return fmt.Errorf("기록 실패") }
+	if _, err := s.Mark(ctx, th, answer.ID, fb, "Asia/Seoul", fail); err == nil {
+		t.Fatal("기록이 실패하면 표시도 실패해야 합니다")
+	}
+	if all, _ := s.All(ctx, "Asia/Seoul", th, time.Time{}); all[1].Feedback != nil {
+		t.Fatalf("기록 없이 표시만 남으면 안 됩니다: %+v", all[1])
+	}
+}
