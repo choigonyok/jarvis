@@ -289,6 +289,31 @@ func (s *Store) Window(before string, limit int) ([]*Turn, bool, error) {
 	return payload.Turns, payload.HasMore, nil
 }
 
+// LastSaid is what the operator said last, if they said it within the last
+// while - "" otherwise, or when the thread cannot be read.
+func (s *Store) LastSaid(within time.Duration) string {
+	turns, _, err := s.Window("", 8)
+	if err != nil {
+		return ""
+	}
+	return lastSaid(turns, time.Now().Add(-within))
+}
+
+func lastSaid(turns []*Turn, since time.Time) string {
+	for i := len(turns) - 1; i >= 0; i-- {
+		t := turns[i]
+		if t.Role != RoleUser {
+			continue
+		}
+		at, err := time.Parse(time.RFC3339Nano, t.AtISO)
+		if err != nil || at.Before(since) {
+			return ""
+		}
+		return strings.TrimSpace(t.Text)
+	}
+	return ""
+}
+
 func (s *Store) AppendUser(text string, images ...string) *Turn {
 	return s.append(&Turn{Role: RoleUser, Text: text, Images: images})
 }

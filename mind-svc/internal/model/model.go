@@ -257,7 +257,6 @@ const (
 //	rate: on days Feature(Arg) holds, Target happens at Rate, against Base
 //	      on other days (Days such days seen)
 //	travel: from From to To takes about Minutes
-//	salary: once pay arrives, Plan is bought within days
 //
 // The engine's own (predict.Mine), each about Key - what is expected, as
 // predict.Keys names it:
@@ -286,8 +285,6 @@ type Rule struct {
 	From    string `json:"from,omitempty"`
 	To      string `json:"to,omitempty"`
 	Minutes int    `json:"minutes,omitempty"`
-	// salary: what is bought once pay arrives (a plan in words).
-	Plan string `json:"plan,omitempty"`
 
 	// The engine's rules.
 	Key    string    `json:"key,omitempty"`

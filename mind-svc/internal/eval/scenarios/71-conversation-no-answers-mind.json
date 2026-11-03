@@ -1,0 +1,37 @@
+{
+  "name": "대화 카드에 가려진 mind 의 질문은 그 카드의 반려를 답으로 받는다: 시각이 바뀌어도 다시 묻지 않고, 다른 약속은 묻는다",
+  "room": "car-covered",
+  "roomName": "민수",
+  "turns": [
+    {
+      "asked": { "event": { "title": "쏘카 대여", "date": "2026-11-07", "start": "10:00" } },
+      "messages": [
+        { "at": "2026-11-03T20:00", "from": "민수", "text": "토요일에 차는 어떡해?" },
+        { "at": "2026-11-03T20:01", "me": true, "text": "쏘카 예약했어. 11월 7일 오전 10시 대여야" }
+      ],
+      "script": {"changes":[{"op":"create","kind":"plan","set":{"title":"쏘카 대여","status":"confirmed","date":"2026-11-07","start":"10:00"},"evidence":[{"line":2,"quote":"쏘카 예약했어. 11월 7일 오전 10시 대여야"}],"confidence":0.9,"why":"예약했다고 함"}]},
+      "expect": { "noCards": true }
+    },
+    {
+      "rejectAsked": true,
+      "reason": "차 예약은 일정 카드 필요없어",
+      "expect": { "noCards": true, "plans": [{ "titleHas": "쏘카", "declinedHas": "차 예약" }] }
+    },
+    {
+      "messages": [
+        { "at": "2026-11-04T20:00", "from": "민수", "text": "토요일 몇 시에 빌린다고 했지?" },
+        { "at": "2026-11-04T20:01", "me": true, "text": "아 11시로 바꿨어" }
+      ],
+      "script": {"changes":[{"op":"update","kind":"plan","ref":"P1","set":{"start":"11:00"},"evidence":[{"line":2,"quote":"아 11시로 바꿨어"}],"confidence":0.9,"why":"시각을 옮김"}]},
+      "expect": { "noCards": true }
+    },
+    {
+      "messages": [
+        { "at": "2026-11-04T21:00", "from": "민수", "text": "14일 저녁 7시에 강남에서 밥 먹자" },
+        { "at": "2026-11-04T21:01", "me": true, "text": "좋아 그때 봐" }
+      ],
+      "script": {"changes":[{"op":"create","kind":"plan","set":{"title":"민수와 저녁","status":"confirmed","date":"2026-11-14","start":"19:00","place":"강남","people":["민수"]},"evidence":[{"line":2,"quote":"좋아 그때 봐"}],"confidence":0.9,"why":"둘 다 동의"}]},
+      "expect": { "intents": ["calendar.create"] }
+    }
+  ]
+}

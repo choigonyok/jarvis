@@ -328,8 +328,20 @@ func (v view) IntentsFor(ctx context.Context, id string) ([]model.Intent, error)
 	return v.a.st.IntentsFor(ctx, id)
 }
 
+// IntentsSince is mind's own and the cards the conversation asked: a no given
+// on either is a no.
 func (v view) IntentsSince(ctx context.Context, t time.Time) ([]model.Intent, error) {
-	return v.a.st.IntentsSince(ctx, t)
+	mine, err := v.a.st.IntentsSince(ctx, t)
+	if err != nil {
+		return nil, err
+	}
+	held, err := v.a.st.HeldSince(ctx, t)
+	if err != nil {
+		return nil, err
+	}
+	all := append(mine, held...)
+	slices.SortStableFunc(all, func(a, b model.Intent) int { return b.CreatedAt.Compare(a.CreatedAt) })
+	return all, nil
 }
 func (v view) Now() time.Time      { return v.a.now() }
 func (v view) Loc() *time.Location { return v.a.loc }

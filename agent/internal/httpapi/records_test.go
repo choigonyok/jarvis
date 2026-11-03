@@ -98,7 +98,8 @@ func TestAPaymentLeavesItsChain(t *testing.T) {
 	}
 }
 
-// A form's fields and a reason stay out of the record of an answer.
+// A form's fields and a reason stay out of the record of an answer - but for a
+// calendar card of the conversation's, whose no mind reads.
 func TestAnAnswerKeepsNoWords(t *testing.T) {
 	props := proposal.NewStore(bus.New())
 	_, mem := recordingServer(t, Deps{Proposals: props, Runner: bgRunner{}})
@@ -122,6 +123,20 @@ func TestAnAnswerKeepsNoWords(t *testing.T) {
 	}
 	if r.Tier != record.Raw || r.Payload.(map[string]any)["hasReason"] != true {
 		t.Fatalf("기록: %+v", r)
+	}
+
+	// A calendar card of the conversation's keeps its no: mind reads it.
+	c, _ := props.Open(proposal.Proposal{
+		Origin: proposal.OriginChat,
+		Action: action.Action{Kind: "calendar.create_event", Input: json.RawMessage(`{"title":"쏘카 대여","date":"2026-11-17"}`)},
+		Card:   action.Card{Title: "일정을 추가합니다", Body: "11월 17일 쏘카 대여"},
+	})
+	if err := props.DecideWhy(c.ID, proposal.Reject, "차 예약은 일정 카드 필요없어"); err != nil {
+		t.Fatal(err)
+	}
+	r, ok = mem.Find(func(r record.Record) bool { return r.Kind == KindIntentAnswer && r.SourceKey == "answer:"+c.ID })
+	if !ok || r.Tier != record.Raw || r.Payload.(map[string]any)["reason"] != "차 예약은 일정 카드 필요없어" {
+		t.Fatalf("캘린더 카드의 반려 이유: %+v", r)
 	}
 }
 

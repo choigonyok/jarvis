@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/choigonyok/jarvis/gocommon/queue"
+	"github.com/choigonyok/jarvis/mind-svc/internal/gate"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
 )
@@ -55,6 +56,9 @@ type answeredCard struct {
 	Action   string `json:"action"`
 	Title    string `json:"title"`
 	Decision string `json:"decision"`
+	// Reason is the operator's words turning down a calendar card of the
+	// conversation's.
+	Reason string `json:"reason"`
 }
 
 // payment.requested says a payment card went up; the answer closes it.
@@ -80,25 +84,16 @@ func (m *Mind) PaymentRaised(ctx context.Context, msg queue.Message) error {
 }
 
 // HeldCard is the answer to a card the agent asked itself: the agent carries
-// on with it whether or not mind is up, and mind closes its ledger. Nothing is
-// done here.
+// on with it whether or not mind is up, and mind closes its ledger and hears
+// what a no said (gate.Answered). Nothing is done here.
 func (m *Mind) HeldCard(ctx context.Context, msg queue.Message) error {
 	var a answeredCard
 	if err := json.Unmarshal(msg.Payload, &a); err != nil || a.Card == "" || mindActions[a.Action] {
 		return nil
 	}
-	in, err := m.Opts.Store.Intent(ctx, model.HeldID(a.Card))
-	if err != nil {
-		in = model.Intent{ID: model.HeldID(a.Card), Skill: model.HeldSkill, Kind: a.Action, Title: a.Title, Holder: msg.TraceID, CreatedAt: msg.OccurredAt}
-		if in.Holder == "" {
-			in.Holder = "chat"
-		}
-	}
-	in.Status = model.Rejected
-	if a.Decision == "approved" {
-		in.Status = model.Executed
-	}
-	return m.Opts.Store.PutIntent(ctx, in)
+	_, err := m.Gate.Answered(ctx, gate.HeldAnswer{Card: a.Card, Kind: a.Action, Title: a.Title, Holder: msg.TraceID,
+		Approved: a.Decision == "approved", Reason: a.Reason, At: msg.OccurredAt})
+	return err
 }
 
 // scheduleReminders gives every waiting reminder its timers.

@@ -3,6 +3,8 @@ package suggest
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/choigonyok/jarvis/agent/internal/core/action"
@@ -44,6 +46,48 @@ func (e *Engine) tellAsked(p proposal.Proposal) {
 		e.log.Warn("mind 에 대화의 일정 카드를 알리지 못했습니다", "card", p.ID, "err", err)
 	}
 }
+
+// Consult is asked before a calendar card goes up in the conversation: an entry
+// the operator turned down the like of is not asked again. The conversation's
+// card passed no gate, and "차 예약은 일정 카드 필요없어" said on one was asked
+// again in the next session (2026-11-03). mind says which no, if any, speaks for
+// it; what the operator said just now (said) is the newer word, and a request in
+// it stands. With no answer from mind the card goes up as before.
+func (e *Engine) Consult(ctx context.Context, a action.Action, said string) string {
+	if e.cfg.Mind == nil || a.Kind != calendar.KindCreate {
+		return ""
+	}
+	var in calendar.CreateInput
+	if json.Unmarshal(a.Input, &in) != nil || strings.TrimSpace(in.Title) == "" {
+		return ""
+	}
+	if r := []rune(said); len(r) > saidMax {
+		said = string(r[:saidMax])
+	}
+	ctx, cancel := context.WithTimeout(ctx, consultWait)
+	defer cancel()
+	t, ok, err := e.cfg.Mind.TurnedDown(ctx, mind.Event{Title: in.Title, Date: in.Date, EndDate: in.EndDate, Start: in.Start, End: in.End}, in.Memo, said)
+	if err != nil {
+		e.log.Warn("반려한 일정인지 mind 에 묻지 못했습니다", "err", err)
+		return ""
+	}
+	if !ok {
+		return ""
+	}
+	at := t.At.In(time.Local)
+	return fmt.Sprintf("승인 카드를 올리지 않았습니다. 운영자가 %d/%d에 비슷한 일정 카드('%s')를 반려하며 이렇게 말했습니다: \"%s\". "+
+		"이 일정은 캘린더에 넣지 마세요. 필요하면 그 말 때문에 넣지 않았다고 한 줄로 알리고 이번 응답을 마치세요. "+
+		"운영자가 이 일정을 캘린더에 넣어 달라고 직접 말하면 그때 다시 요청하면 됩니다.",
+		int(at.Month()), at.Day(), t.Title, strings.Join(strings.Fields(t.Reason), " "))
+}
+
+const (
+	// consultWait is how long a card waits on mind's word before it goes up
+	// without it: mind asks a judgement (up to 20s).
+	consultWait = 25 * time.Second
+	// saidMax is how much of what was said just now goes with the question.
+	saidMax = 1500
+)
 
 // calendarChange is what a calendar action asks, as mind says it.
 func calendarChange(a action.Action) (mind.Calendar, bool) {

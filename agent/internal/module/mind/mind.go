@@ -234,6 +234,32 @@ func (c Client) Asked(ctx context.Context, card, kind, title string, cal Calenda
 	return c.Do(ctx, http.MethodPost, "/api/intents/"+card+"/asked", map[string]any{"kind": kind, "title": title, "calendar": cal}, nil)
 }
 
+// Turned is a calendar card the operator turned down in words of their own
+// (mind-svc model.Turned).
+type Turned struct {
+	Title  string    `json:"title"`
+	Reason string    `json:"reason"`
+	At     time.Time `json:"at"`
+}
+
+// TurnedDown asks mind whether the operator turned down the like of an entry
+// about to be asked for in the conversation, and on which card. said is what
+// they said just now.
+func (c Client) TurnedDown(ctx context.Context, ev Event, memo, said string) (Turned, bool, error) {
+	q := url.Values{"title": {ev.Title}}
+	for k, v := range map[string]string{"date": ev.Date, "endDate": ev.EndDate, "start": ev.Start, "end": ev.End, "memo": memo, "said": said} {
+		if v != "" {
+			q.Set(k, v)
+		}
+	}
+	var out struct {
+		Turned bool   `json:"turned"`
+		Card   Turned `json:"card"`
+	}
+	err := c.Do(ctx, http.MethodGet, "/api/calendar/turned?"+q.Encode(), nil, &out)
+	return out.Card, out.Turned, err
+}
+
 func (c Client) Do(ctx context.Context, method, path string, in, out any) error {
 	if method != http.MethodGet && c.Send != nil {
 		return c.Send.Do(ctx, method, path, in, out)

@@ -414,43 +414,31 @@ func (c *Conversation) LastRead() (time.Time, string) {
 	return c.read, c.failed
 }
 
-// turnedWithin and turnedMax are how far back, and how many of, the words the
-// operator left on the cards they turned down are shown to every read.
-const (
-	turnedWithin = 60 * 24 * time.Hour
-	turnedMax    = 12
-)
-
 // turnedDown is what the operator said turning down calendar cards lately,
-// the newest first: "X 가 밴드 합주야" said once on a card is how the next
-// read should take a band's rehearsal, and it went unread until it had been
-// said twice and asked again (2026-10-16, 10-22). The quick answers say nothing
-// beside the card they were on, and the plan shows those itself.
+// mind's and the conversation's, the newest first: "X 가 밴드 합주야" said once
+// on a card is how the next read should take a band's rehearsal, and it went
+// unread until it had been said twice and asked again (2026-10-16, 10-22). The
+// quick answers say nothing beside the card they were on, and the plan shows
+// those itself.
 func (c *Conversation) turnedDown(ctx context.Context) []string {
-	recent, err := c.st.IntentsSince(ctx, c.now().Add(-turnedWithin))
+	since := c.now().Add(-model.TurnedWithin)
+	mine, err := c.st.IntentsSince(ctx, since)
 	if err != nil {
 		c.log.Warn("반려 이유를 읽지 못했습니다", "err", err)
 		return nil
 	}
+	held, err := c.st.HeldSince(ctx, since)
+	if err != nil {
+		c.log.Warn("대화 카드의 반려 이유를 읽지 못했습니다", "err", err)
+	}
 	var out []string
-	for _, in := range recent {
-		why := strings.TrimSpace(in.Error)
-		if in.Status != model.Rejected || why == "" || !strings.HasPrefix(in.Kind, "calendar.") || slices.Contains(quickReasons, why) {
-			continue
-		}
-		line := "'" + strings.TrimPrefix(in.Title, "캘린더에 추가: ") + "' 카드: " + oneLine(why)
-		if !slices.Contains(out, line) {
+	for _, t := range model.TurnedDown(mine, held, model.TurnedMax) {
+		if line := "'" + t.Title + "' 카드: " + oneLine(t.Reason); !slices.Contains(out, line) {
 			out = append(out, line)
-		}
-		if len(out) == turnedMax {
-			break
 		}
 	}
 	return out
 }
-
-// quickReasons are the card's own one-tap answers (web, chat/reject-form.tsx).
-var quickReasons = []string{"지금은 필요 없어", "이미 했어", "틀렸어", "다시 묻지 마"}
 
 // known is what the world model holds for this room, by short ref: live
 // plans and loops, and plans that ended recently (so "다시 가기로 했어" can

@@ -112,6 +112,10 @@ type Gate struct {
 	// Judge hears what the rules leave open of two plans (Same). Nil leaves
 	// them apart.
 	Judge func(ctx context.Context, a, b model.State) bool
+	// Turned hears whether an entry the assistant would put on the calendar is
+	// the like of one the operator turned down, and which (TurnedDown): the
+	// number of it in past, 0 for none. Nil asks nothing.
+	Turned func(ctx context.Context, past []model.Turned, ev model.CalendarEvent, said string) int
 	// book is the result ledger's record, replaced whole when the ledger is
 	// made again. Nil knows nothing and every intent stands as stated.
 	book atomic.Pointer[engine.Book]
@@ -156,8 +160,17 @@ func New(st store.Store, acts *act.Registry, n act.Notifier, log obs.Log, p Poli
 // Submit takes an intent from a skill and does with it what the policy says.
 func (g *Gate) Submit(ctx context.Context, in model.Intent) (model.Intent, error) {
 	g.mu.Lock()
-	defer g.mu.Unlock()
+	out, answered, err := g.submit(ctx, in)
+	g.mu.Unlock()
+	if answered {
+		g.hear(ctx, out)
+	}
+	return out, err
+}
 
+// submit is Submit with the gate held. answered: the intent came out answered
+// already (turned down in the conversation), for whoever learns from answers.
+func (g *Gate) submit(ctx context.Context, in model.Intent) (model.Intent, bool, error) {
 	in.ID = newID()
 	in.CreatedAt = g.now()
 	in.Status = model.Pending
@@ -167,19 +180,23 @@ func (g *Gate) Submit(ctx context.Context, in model.Intent) (model.Intent, error
 	// The ledger first: a topic raised, approved or turned down lately is
 	// not raised again - not even to replace its own open question.
 	if quiet, why, err := g.quietTopic(ctx, in); err != nil {
-		return in, err
+		return in, false, err
 	} else if quiet {
 		at := g.now()
 		in.Decision, in.Status, in.Why, in.DecidedBy, in.DecidedAt = model.Drop, model.Dropped, why, "policy", &at
-		return in, g.st.PutIntent(ctx, in)
+		return in, false, g.st.PutIntent(ctx, in)
 	}
 	open, asked := g.openCard(ctx, in)
 	if strings.HasPrefix(in.Kind, "calendar.") {
-		// Asked in the conversation: the assistant's own card is the question.
-		if by, ok := g.askedInChat(ctx, in); ok {
+		// Asked in the conversation: the assistant's own card is the question,
+		// and turned down there, it is turned down here.
+		if held, ok := g.askedInChat(ctx, in); ok {
 			at := g.now()
-			in.Status, in.DecidedBy, in.DecidedAt, in.Error = model.Superseded, model.ByConversation, &at, coveredBy(by)
-			return in, g.st.PutIntent(ctx, in)
+			in.Status, in.DecidedBy, in.DecidedAt, in.Error = model.Superseded, model.ByConversation, &at, coveredBy(heldCard(held))
+			if held.Status == model.Rejected {
+				in.Status, in.Error = model.Rejected, held.Error
+			}
+			return in, in.Status == model.Rejected, g.st.PutIntent(ctx, in)
 		}
 		// One entry asked about twice - the same days at the same place, read
 		// in two rooms as two plans (2026-11-01), or a move and a move of it -
@@ -190,7 +207,7 @@ func (g *Gate) Submit(ctx context.Context, in model.Intent) (model.Intent, error
 			by = open.ID
 		}
 		if err := g.withdrawAlike(ctx, in, by); err != nil {
-			return in, err
+			return in, false, err
 		}
 	}
 	// A newer intent about the same thing replaces a question still open: the
@@ -198,17 +215,17 @@ func (g *Gate) Submit(ctx context.Context, in model.Intent) (model.Intent, error
 	// stays up until this one is known to be a question too.
 	if in.EntityID != "" {
 		if err := g.withdraw(ctx, in.EntityID, in.Skill, "새 판단으로 대체됨", open.ID); err != nil {
-			return in, err
+			return in, false, err
 		}
 	}
 	out, err := g.admit(ctx, in, open, asked)
 	if asked && out.ID != open.ID {
 		// Done, dropped or failed instead: there is no question left to keep.
 		if err := g.replace(ctx, open, "새 판단으로 대체됨"); err != nil {
-			return out, err
+			return out, false, err
 		}
 	}
-	return out, err
+	return out, false, err
 }
 
 // admit does with an intent what the policy says. A question that asks what
@@ -624,17 +641,125 @@ func (g *Gate) Asked(ctx context.Context, card, kind, title string, a model.Cale
 }
 
 // askedInChat is the card in the conversation that asks what in asks.
-func (g *Gate) askedInChat(ctx context.Context, in model.Intent) (string, bool) {
+func (g *Gate) askedInChat(ctx context.Context, in model.Intent) (model.Intent, bool) {
 	rows, err := g.st.HeldSince(ctx, g.now().Add(-askedWithin))
 	if err != nil {
-		return "", false
+		return model.Intent{}, false
 	}
 	for _, held := range rows {
 		if g.asksSame(ctx, in, held) {
-			return strings.TrimPrefix(held.ID, model.HeldID("")), true
+			return held, true
 		}
 	}
-	return "", false
+	return model.Intent{}, false
+}
+
+// heldCard is the agent's card a held row stands for.
+func heldCard(held model.Intent) string { return strings.TrimPrefix(held.ID, model.HeldID("")) }
+
+// HeldAnswer is how the operator answered a card the agent holds (an
+// intent.answer of the agent's).
+type HeldAnswer struct {
+	Card, Kind, Title, Holder string
+	Approved                  bool
+	// Reason is the operator's words turning a calendar card down.
+	Reason string
+	At     time.Time
+}
+
+// Answered enters the answer to a card the agent asked itself, which the agent
+// carries on with whether or not mind is up. A calendar card of the
+// conversation's turned down is turned down for mind as well: its own question
+// that stood aside for it (cover) is turned down with the operator's words, so
+// the next read and the next card hear them - they reached that session's model
+// alone, and the next session asked the same again (2026-11-03). Only a card
+// mind was told of (Asked) speaks for the operator: the guest's agent tells mind
+// nothing, and the guest's words are not theirs.
+func (g *Gate) Answered(ctx context.Context, a HeldAnswer) (model.Intent, error) {
+	g.mu.Lock()
+	in, turned, err := g.answered(ctx, a)
+	g.mu.Unlock()
+	for _, p := range turned {
+		g.hear(ctx, p)
+	}
+	return in, err
+}
+
+func (g *Gate) answered(ctx context.Context, a HeldAnswer) (model.Intent, []model.Intent, error) {
+	in, err := g.st.Intent(ctx, model.HeldID(a.Card))
+	told := err == nil
+	switch {
+	case errors.Is(err, model.ErrNotFound):
+		in = model.Intent{ID: model.HeldID(a.Card), Skill: model.HeldSkill, Kind: a.Kind, Title: a.Title, Holder: a.Holder, CreatedAt: a.At}
+		if in.Holder == "" {
+			in.Holder = "chat"
+		}
+	case err != nil:
+		return in, nil, err
+	}
+	at := g.now()
+	in.Status, in.DecidedBy, in.DecidedAt = model.Rejected, "user", &at
+	if a.Approved {
+		in.Status = model.Executed
+	}
+	var turned []model.Intent
+	if told && in.Status == model.Rejected && strings.HasPrefix(in.Kind, "calendar.") {
+		in.Error = strings.TrimSpace(a.Reason)
+		if turned, err = g.turnDownCovered(ctx, in); err != nil {
+			return in, turned, err
+		}
+	}
+	return in, turned, g.st.PutIntent(ctx, in)
+}
+
+// turnDownCovered turns down the questions of mind's that stood aside for a
+// card of the conversation's the operator turned down: theirs is its answer.
+func (g *Gate) turnDownCovered(ctx context.Context, held model.Intent) ([]model.Intent, error) {
+	recent, err := g.st.IntentsSince(ctx, held.CreatedAt.Add(-alikeWithin))
+	if err != nil {
+		return nil, err
+	}
+	by := coveredBy(heldCard(held))
+	var out []model.Intent
+	for _, p := range recent {
+		if !p.Covered() || p.Error != by {
+			continue
+		}
+		at := g.now()
+		p.Status, p.DecidedAt, p.Error = model.Rejected, &at, held.Error
+		if err := g.st.PutIntent(ctx, p); err != nil {
+			return out, err
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+// TurnedDown is the no the operator already gave to the like of an entry the
+// assistant would ask for in the conversation: its card passed no gate, and
+// asked again what "차 예약은 일정 카드 필요없어" turned down (2026-11-03).
+// What they said just now (said) is the newer word, and a request in it stands.
+func (g *Gate) TurnedDown(ctx context.Context, ev model.CalendarEvent, said string) (model.Turned, bool, error) {
+	if g.Turned == nil {
+		return model.Turned{}, false, nil
+	}
+	since := g.now().Add(-model.TurnedWithin)
+	mine, err := g.st.IntentsSince(ctx, since)
+	if err != nil {
+		return model.Turned{}, false, err
+	}
+	held, err := g.st.HeldSince(ctx, since)
+	if err != nil {
+		return model.Turned{}, false, err
+	}
+	past := model.TurnedDown(mine, held, model.TurnedMax)
+	if len(past) == 0 {
+		return model.Turned{}, false, nil
+	}
+	if i := g.Turned(ctx, past, ev, said); i >= 1 && i <= len(past) {
+		return past[i-1], true, nil
+	}
+	return model.Turned{}, false, nil
 }
 
 // asksSame is whether a card in the conversation (held) asks what in asks: the

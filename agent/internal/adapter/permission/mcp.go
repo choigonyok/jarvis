@@ -85,7 +85,11 @@ type Gate struct {
 	// card, nothing for anyone to approve (the guest's file tools outside
 	// their folders).
 	refuse func(tool string, input json.RawMessage) string
-	mu     sync.Mutex
+	// consult, when set, is asked last, before a card goes up: a reason holds
+	// the card back, with the reason for the model (what the operator already
+	// turned down, by mind).
+	consult func(ctx context.Context, act action.Action) string
+	mu      sync.Mutex
 	// grants are approved calls the CLI runs itself (Bash, WebSearch, an
 	// outside MCP server). Keyed by tool and exact arguments, spent once: the
 	// operator approved that call, not the tool.
@@ -123,6 +127,11 @@ func (g *Gate) SetAutoAllow(f func(tool string, input json.RawMessage) bool) { g
 // reason refuses the call, with the reason for the model; "" lets it on to
 // the rest of the gate. Asked before anything else.
 func (g *Gate) SetRefuse(f func(tool string, input json.RawMessage) string) { g.refuse = f }
+
+// SetConsult installs the word asked before a card goes up: a reason holds the
+// card back, with the reason for the model; "" raises it. Asked after
+// everything else, of a call that would raise a card.
+func (g *Gate) SetConsult(f func(ctx context.Context, act action.Action) string) { g.consult = f }
 
 // Handler returns an http.Handler to mount at the path the CLI is pointed at.
 func (g *Gate) Handler() http.Handler {
@@ -180,6 +189,13 @@ func (g *Gate) decide(ctx context.Context, _ *mcp.CallToolRequest, in Request) (
 			Message: fmt.Sprintf("같은 요청의 승인 카드(%s)가 이미 올라가 있습니다. 다시 요청하지 마세요. "+
 				"운영자가 결정하면 그 결과가 새 메시지로 옵니다. 지금은 응답을 마치세요.", waiting.ID),
 		})
+	}
+
+	if g.consult != nil {
+		if why := g.consult(ctx, act); why != "" {
+			g.log.Info("카드를 올리지 않음", "kind", act.Kind)
+			return reply(Response{Behavior: "deny", Message: why})
+		}
 	}
 
 	// A card this one corrects - the same thing asked again with a changed

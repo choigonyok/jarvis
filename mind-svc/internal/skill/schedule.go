@@ -301,13 +301,13 @@ func (s Schedule) add(ctx context.Context, v View, e model.Entity, changes []mod
 			return model.Intent{}, false
 		}
 	}
-	// Nor the like of an entry turned down lately - the same title on
-	// another day, or what the reason named: "롤체 약속은 캘린더에 추가하지마"
-	// was about the kind of thing, and "은주와 롤체" was asked again the next
-	// day (2026-10-25~26).
+	// Nor the like of an entry turned down lately, on mind's card or the
+	// conversation's - the same title on another day, or what the reason
+	// named: "롤체 약속은 캘린더에 추가하지마" was about the kind of thing, and
+	// "지수와 롤체" was asked again the next day (2026-10-25~26).
 	if recent, err := v.IntentsSince(ctx, v.Now().Add(-turnedDownFor)); err == nil {
 		for _, p := range recent {
-			if p.Kind != "calendar.create" || (p.Status != model.Rejected && p.Status != model.Undone) {
+			if (p.Kind != "calendar.create" && p.Kind != model.HeldCalendarCreate) || (p.Status != model.Rejected && p.Status != model.Undone) {
 				continue
 			}
 			var a model.CalendarAction

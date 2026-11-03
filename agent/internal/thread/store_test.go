@@ -149,3 +149,24 @@ func TestThinkingIsLocalAndNotPersisted(t *testing.T) {
 		t.Fatal("새로 뜬 스토어가 진행 중이라고 답했습니다")
 	}
 }
+
+// What the operator said last counts only while it is fresh, and only theirs:
+// the assistant's answer after it does not hide it.
+func TestLastSaidIsTheOperatorsAndFresh(t *testing.T) {
+	now := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+	at := func(d time.Duration) string { return now.Add(d).Format(time.RFC3339Nano) }
+	turns := []*Turn{
+		{Role: RoleUser, Text: "어제 한 말", AtISO: at(-24 * time.Hour)},
+		{Role: RoleUser, Text: " 그린카 넣어 줘 ", AtISO: at(-2 * time.Minute)},
+		{Role: RoleAgent, Paragraphs: []string{"카드를 올렸어요"}, AtISO: at(-time.Minute)},
+	}
+	if got := lastSaid(turns, now.Add(-15*time.Minute)); got != "그린카 넣어 줘" {
+		t.Fatalf("%q", got)
+	}
+	if got := lastSaid(turns, now.Add(-time.Minute)); got != "" {
+		t.Fatalf("지난 말은 방금 한 말이 아닙니다: %q", got)
+	}
+	if got := lastSaid(turns[2:], now.Add(-time.Hour)); got != "" {
+		t.Fatalf("%q", got)
+	}
+}

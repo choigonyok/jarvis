@@ -57,8 +57,6 @@ type Scenario struct {
 	Judge map[string]json.RawMessage `json:"judge,omitempty"`
 	// Reflect is the night's hypotheses for the scripted run.
 	Reflect json.RawMessage `json:"reflect,omitempty"`
-	// Allocation is what assets-svc would say of the allocation.
-	Allocation []mind.Drift `json:"allocation,omitempty"`
 	// Routes are the ways measured from the stays (context-svc /travel).
 	Routes []mind.Route `json:"routes,omitempty"`
 	// Prefs are the scripted run's answers to "map this note onto
@@ -97,6 +95,9 @@ type Turn struct {
 	// Asked is a calendar card the assistant raised in the conversation, told
 	// to mind before the turn runs, as the agent tells it.
 	Asked *model.CalendarAction `json:"asked,omitempty"`
+	// RejectAsked turns down the latest of those cards, with Reason, as the
+	// agent's answer reaches mind.
+	RejectAsked bool `json:"rejectAsked,omitempty"`
 	// Script is what the model should answer to this turn's reading, for the
 	// deterministic run.
 	Script json.RawMessage `json:"script,omitempty"`
@@ -286,6 +287,8 @@ type Match struct {
 	Owner    string   `json:"owner,omitempty"`
 	DueFrom  string   `json:"due,omitempty"` // due starts with this
 	OnCal    *bool    `json:"onCalendar,omitempty"`
+	// DeclinedHas: what the operator said turning it down has this ("반려" when nothing).
+	DeclinedHas string `json:"declinedHas,omitempty"`
 }
 
 type Result struct {
@@ -509,7 +512,7 @@ func Run(ctx context.Context, sc Scenario, client llm.Client, loc *time.Location
 		Store: st, Log: log, LLM: client, Calendar: cal, Notifier: &act.MemoryNotifier{},
 		Loc: loc, Now: clk.Now, Logger: quiet, Interpret: interpret.Config{Owner: "나", Search: 2},
 		Settle: 0, Policy: gate.DefaultPolicy(), Mode: "eval", Memory: memory.NewFake(clk.Now),
-		Assets: assets(sc.Allocation), Travel: travel(sc.Routes), Weather: sky(sc.Weather),
+		Travel: travel(sc.Routes), Weather: sky(sc.Weather),
 	})
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -525,6 +528,7 @@ func Run(ctx context.Context, sc Scenario, client llm.Client, loc *time.Location
 	room := "sim:" + sc.Room
 
 	var logSeen int64
+	asked := "" // the latest card the conversation raised (Asked)
 	for i, t := range sc.Turns {
 		if t.At != "" {
 			at, err := time.ParseInLocation("2006-01-02T15:04", t.At, loc)
@@ -572,7 +576,8 @@ func Run(ctx context.Context, sc Scenario, client llm.Client, loc *time.Location
 			if t.Asked.EventID != "" {
 				kind = "calendar.update_event"
 			}
-			if _, err := m.Gate.Asked(ctx, fmt.Sprintf("eval-%d", i), kind, t.Asked.Event.Title, *t.Asked); err != nil {
+			asked = fmt.Sprintf("eval-%d", i)
+			if _, err := m.Gate.Asked(ctx, asked, kind, t.Asked.Event.Title, *t.Asked); err != nil {
 				fail(i, "%v", err)
 			}
 		}
@@ -626,6 +631,14 @@ func Run(ctx context.Context, sc Scenario, client llm.Client, loc *time.Location
 				_, err = m.Gate.RejectWhy(ctx, id, t.Reason)
 			}
 			if err != nil {
+				fail(i, "%v", err)
+			}
+		case t.RejectAsked:
+			if asked == "" {
+				fail(i, "반려할 대화 카드가 없음")
+				continue
+			}
+			if _, err := m.Gate.Answered(ctx, gate.HeldAnswer{Card: asked, Kind: "calendar.create_event", Reason: t.Reason, At: clk.Now()}); err != nil {
 				fail(i, "%v", err)
 			}
 		case t.Undo != "":
@@ -738,13 +751,6 @@ func travel(routes []mind.Route) mind.Travel {
 		return nil
 	}
 	return mind.StaticTravel(routes)
-}
-
-func assets(rows []mind.Drift) mind.Assets {
-	if rows == nil {
-		return nil
-	}
-	return mind.StaticAssets(rows)
 }
 
 func latest(intents []model.Intent, kind, status string) string {
@@ -878,7 +884,8 @@ func matches(e model.Entity, m Match) bool {
 		m.Start != "" && s.Start != m.Start ||
 		m.TitleHas != "" && !strings.Contains(s.Title, m.TitleHas) ||
 		m.Owner != "" && s.Owner != m.Owner ||
-		m.DueFrom != "" && !strings.HasPrefix(s.Due, m.DueFrom) {
+		m.DueFrom != "" && !strings.HasPrefix(s.Due, m.DueFrom) ||
+		m.DeclinedHas != "" && !strings.Contains(s.Declined, m.DeclinedHas) {
 		return false
 	}
 	for _, p := range m.People {
@@ -945,6 +952,9 @@ func summary(es []model.Entity) string {
 		}
 		if s.CalendarID != "" {
 			p += " 캘린더"
+		}
+		if s.Declined != "" {
+			p += " 반려: " + s.Declined
 		}
 		parts = append(parts, p+"]")
 	}

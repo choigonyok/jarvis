@@ -263,3 +263,40 @@ func TestCorrectedCallReplacesTheWaitingCard(t *testing.T) {
 		}
 	}
 }
+
+// A card the operator already turned down the like of is held back before it
+// goes up: the model hears why, nothing waits for anyone, and a card the word
+// lets by goes up as before.
+func TestConsultHoldsTheCardBack(t *testing.T) {
+	store := calendar.NewStore("http://127.0.0.1:1", "", bus.New())
+	modules := module.NewRegistry()
+	modules.Add(calendar.New(store))
+	g, cards, _ := newTestGate(t, modules)
+	var asked []action.Action
+	g.SetConsult(func(_ context.Context, a action.Action) string {
+		asked = append(asked, a)
+		if strings.Contains(string(a.Input), "그린카") {
+			return "승인 카드를 올리지 않았습니다. 차 예약은 일정 카드 필요없어"
+		}
+		return ""
+	})
+	call := func(title string) Response {
+		res, _, _ := g.decide(context.Background(), nil, Request{"tool_name": "mcp__calendar__create_event",
+			"input": map[string]any{"date": "2026-11-24", "start": "10:00", "title": title}})
+		return behavior(t, res)
+	}
+	if r := call("그린카 대여"); r.Behavior != "deny" || !strings.Contains(r.Message, "차 예약은") || cards.PendingCount() != 0 {
+		t.Fatalf("%+v, 카드 %d", r, cards.PendingCount())
+	}
+	if r := call("민수와 저녁"); r.Behavior != "deny" || !strings.Contains(r.Message, "승인 카드(") || cards.PendingCount() != 1 {
+		t.Fatalf("다른 일정은 카드로: %+v, 카드 %d", r, cards.PendingCount())
+	}
+	if len(asked) != 2 || asked[0].Kind != calendar.KindCreate {
+		t.Fatalf("%+v", asked)
+	}
+	// The same call again is the card already up, without asking again.
+	call("민수와 저녁")
+	if len(asked) != 2 || cards.PendingCount() != 1 {
+		t.Fatalf("이미 올라간 카드: %d번 물음, 카드 %d", len(asked), cards.PendingCount())
+	}
+}

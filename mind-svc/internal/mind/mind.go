@@ -74,8 +74,6 @@ type Options struct {
 	Drafter act.Drafter
 	// Jobs is where browser jobs are made; nil keeps them in memory.
 	Jobs act.Jobs
-	// Assets is the allocation, read only; nil: not known.
-	Assets Assets
 	// Orders is where an approved rebalance's orders are placed (assets-svc);
 	// nil keeps them in memory.
 	Orders act.Orders
@@ -212,6 +210,7 @@ func New(o Options) *Mind {
 		m.Goals = &goals.Service{St: o.Goals, Now: o.Now, Loc: o.Loc}
 	}
 	m.Gate.Judge = (&link.SameJudge{LLM: o.LLM, Log: o.Logger}).Of
+	m.Gate.Turned = (&link.TurnedJudge{LLM: o.LLM, Log: o.Logger}).Of
 	m.Prefs = &prefs.Prefs{St: o.Store, LLM: o.LLM, Now: o.Now}
 	m.Gate.OnDecide = func(ctx context.Context, in model.Intent) {
 		m.learn(ctx, in)
@@ -273,9 +272,6 @@ func (m *Mind) Handle(ctx context.Context, o obs.Observation) error {
 			}
 			// After matching, so it does not meet what it starts itself.
 			if _, err := m.Predict.Follow(ctx, occ); err != nil {
-				return err
-			}
-			if err := m.salary(ctx, occ); err != nil {
 				return err
 			}
 			if err := m.late(ctx, occ); err != nil {

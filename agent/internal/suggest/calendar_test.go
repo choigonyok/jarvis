@@ -1,9 +1,13 @@
 package suggest
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -130,5 +134,47 @@ func TestACardIsToldWhatChanged(t *testing.T) {
 	deliver(e, mind.CardUpdated, mindCard("int_b", "calendar.create", "민수와 저녁"))
 	if p, ok := e.findCard("int_b"); !ok || p.State != proposal.Pending {
 		t.Fatalf("%+v", props.List())
+	}
+}
+
+// Before a new entry's card goes up in the conversation, mind is asked with the
+// entry and what the operator said just now; a no it names comes back as why the
+// card was held back. Another kind of card, no answer or no mind: up it goes.
+func TestANewEntryIsAskedOfMindFirst(t *testing.T) {
+	e, _ := setup(t)
+	if why := e.Consult(context.Background(), chatAction(calendar.KindCreate, calendar.CreateInput{Title: "그린카 대여"}), ""); why != "" {
+		t.Fatalf("mind 가 없으면 묻지 않습니다: %q", why)
+	}
+	var got url.Values
+	reply := map[string]any{"turned": true, "card": map[string]any{"title": "쏘카 대여", "reason": "차 예약은\n일정 카드 필요없어", "at": "2026-11-03T01:00:00Z"}}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/calendar/turned" || r.Header.Get("Authorization") != "Bearer tok" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		got = r.URL.Query()
+		_ = json.NewEncoder(w).Encode(reply)
+	}))
+	defer srv.Close()
+	e.cfg.Mind = &mind.Client{URL: srv.URL, Token: "tok"}
+	entry := chatAction(calendar.KindCreate, calendar.CreateInput{Title: "그린카 대여", Date: "2026-11-24", Start: "10:00", Memo: "강남역"})
+	why := e.Consult(context.Background(), entry, strings.Repeat("가", saidMax+10))
+	if !strings.Contains(why, "올리지 않았습니다") || !strings.Contains(why, "'쏘카 대여'") || !strings.Contains(why, `"차 예약은 일정 카드 필요없어"`) {
+		t.Fatalf("%q", why)
+	}
+	if got.Get("title") != "그린카 대여" || got.Get("date") != "2026-11-24" || got.Get("start") != "10:00" || got.Get("memo") != "강남역" ||
+		len([]rune(got.Get("said"))) != saidMax || got.Has("end") {
+		t.Fatalf("%v", got)
+	}
+	reply = map[string]any{"turned": false}
+	if why := e.Consult(context.Background(), entry, "그린카 넣어 줘"); why != "" {
+		t.Fatalf("%q", why)
+	}
+	if why := e.Consult(context.Background(), chatAction(calendar.KindUpdate, calendar.UpdateInput{ID: "ev1", Title: "그린카 대여"}), ""); why != "" || got.Get("said") != "그린카 넣어 줘" {
+		t.Fatalf("고치는 카드는 묻지 않습니다: %q %v", why, got)
+	}
+	srv.Close()
+	if why := e.Consult(context.Background(), entry, ""); why != "" {
+		t.Fatalf("답이 없으면 그대로 올립니다: %q", why)
 	}
 }

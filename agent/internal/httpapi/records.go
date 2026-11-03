@@ -122,21 +122,28 @@ func (s *Server) recordRaised(asked string, p Payment, opened *proposal.Proposal
 // answers come to is what the result ledger starts from. A payment's is
 // durable. Other cards name a person's plans in their titles, so they stay
 // where they can be deleted. The reason is the operator's own words: only
-// whether there was one.
+// whether there was one - but for a calendar card of the conversation's, whose
+// no mind hears as one given on its own card (mind-svc gate.Answered): it went
+// to that session's model alone, and the next session asked the same again
+// (2026-11-03).
 func (s *Server) recordDecision(p proposal.Proposal, d proposal.Decision) {
 	tier, trace, subject, cause := record.Raw, "chat", p.Action.Kind, ""
 	if p.Origin == proposal.OriginIntercept {
 		pay := paymentOf(p.Action.Input)
 		tier, trace, subject, cause = record.Durable, payerOf(pay.JobID), pay.grantSite(), "requested:"+p.ID
 	}
+	payload := map[string]any{
+		"card": p.ID, "origin": string(p.Origin), "action": p.Action.Kind, "title": p.Card.Title,
+		"decision": string(d), "hasReason": p.Reason != "",
+	}
+	if p.Origin == proposal.OriginChat && strings.HasPrefix(p.Action.Kind, "calendar.") && p.Reason != "" {
+		payload["reason"] = p.Reason
+	}
 	s.records.Write(record.Record{
 		Kind: KindIntentAnswer, Source: recordSource, SourceKey: "answer:" + p.ID,
 		Actor: "operator", Channel: "console", Subject: subject,
 		Tier: tier, TraceID: trace, CausationID: cause,
-		Payload: map[string]any{
-			"card": p.ID, "origin": string(p.Origin), "action": p.Action.Kind, "title": p.Card.Title,
-			"decision": string(d), "hasReason": p.Reason != "",
-		},
+		Payload: payload,
 	})
 }
 

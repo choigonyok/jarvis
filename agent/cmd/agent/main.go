@@ -26,6 +26,7 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/browsercheck"
 	"github.com/choigonyok/jarvis/agent/internal/claudecode"
 	"github.com/choigonyok/jarvis/agent/internal/config"
+	"github.com/choigonyok/jarvis/agent/internal/core/action"
 	"github.com/choigonyok/jarvis/agent/internal/core/bus"
 	"github.com/choigonyok/jarvis/agent/internal/core/module"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
@@ -66,6 +67,10 @@ import (
 // answerWait is how long an answer to one of mind's cards waits for what came
 // of it.
 const answerWait = 90 * time.Second
+
+// saidWithin is how fresh what the operator said must be to count as said just
+// now, beside a card the assistant is about to raise.
+const saidWithin = 15 * time.Minute
 
 func main() {
 	// The CLI runs this binary before every tool call: it asks the running
@@ -566,6 +571,13 @@ func main() {
 		// A calendar card the conversation raises takes the place of mind's
 		// waiting card for the same change.
 		proposals.OnOpen(suggester.OnOpen)
+		// And before it goes up, mind says whether the operator turned down the
+		// like of it - with what they said just now, the newer word.
+		if mindClient != nil {
+			gate.SetConsult(func(ctx context.Context, a action.Action) string {
+				return suggester.Consult(ctx, a, transcript.LastSaid(saidWithin))
+			})
+		}
 	}
 	if suggester != nil {
 		pool, err := pgxpool.New(enrichCtx, cfg.QueueURL)

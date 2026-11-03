@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"net/http"
 	"strings"
 	"time"
 
@@ -20,22 +19,7 @@ import (
 //   people  the morning of a plan with someone, what is still open with them
 //   gift    an anniversary close enough that a wished-for gift must be
 //           ordered now to arrive in time
-//   salary  pay arrived, and the notes say it is put to work within days
 //   late    a payment far from where a plan is, too close to its start
-
-// Assets reads the allocation (assets-svc, read only).
-type Assets interface {
-	Allocation(ctx context.Context) ([]Drift, error)
-}
-
-// Drift is one bucket of the allocation: where it is against its target.
-type Drift struct {
-	Label   string  `json:"label"`
-	Current float64 `json:"current"`
-	Target  float64 `json:"target"`
-	// Spent: cash under its target, spent on the other buckets. Nothing is short.
-	Spent bool `json:"spent"`
-}
 
 var weekdayNames = []string{"일", "월", "화", "수", "목", "금", "토"}
 
@@ -223,59 +207,6 @@ func slicesHasPerson(people []string, name string) bool {
 	return false
 }
 
-// salary: pay arrived. If the notes say it is put to work within days, the
-// card says how the allocation stands and what the plan was - a plan only:
-// the assets side reads and never orders.
-func (m *Mind) salary(ctx context.Context, o model.Occurrence) error {
-	if o.Kind != "deposit" || o.Class != "급여" {
-		return nil
-	}
-	notes, err := m.Opts.Store.Notes(ctx)
-	if err != nil {
-		return err
-	}
-	for _, n := range notes {
-		if n.Status == model.Rejected || n.Rule == nil || n.Rule.Kind != "salary" {
-			continue
-		}
-		gap := ""
-		if m.Opts.Assets != nil {
-			if rows, err := m.Opts.Assets.Allocation(ctx); err == nil {
-				worst, label := 0.0, ""
-				for _, r := range rows {
-					d := points(r.Target) - points(r.Current)
-					if d > worst && !r.Spent {
-						worst, label = d, r.Label
-					}
-				}
-				if worst >= 1 {
-					gap = fmt.Sprintf("%s 비중 목표보다 %.0f%%p 낮음. ", label, worst)
-				}
-			}
-		}
-		at := o.At.In(m.Opts.Loc)
-		payload, _ := json.Marshal(map[string]string{"plan": n.Rule.Plan, "noteId": n.ID})
-		if _, err := m.Gate.Submit(ctx, model.Intent{
-			Skill: "salary", Kind: "note", Topic: "salary:" + at.Format("2006-01"), Context: "salary", Payload: payload,
-			Title:  fmt.Sprintf("월급 들어왔어요. %s이번 달 적립 %s 어떠세요?", gap, n.Rule.Plan),
-			Body:   n.Text,
-			Reason: "월급이 들어오면 며칠 안에 적립하셨어요", Confidence: 0.8, Value: 0.9, Reversible: true,
-			Evidence: []model.Evidence{{Ref: o.Ref, Quote: o.Quote}},
-		}); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// points is a share as percentage points: 0.17 or 17 both as 17.
-func points(f float64) float64 {
-	if math.Abs(f) <= 1 {
-		return f * 100
-	}
-	return f
-}
-
 // late: a payment (or photo) somewhere a plan is a known trip away from,
 // too close to the plan's start to make it - "민수에게 '10분 정도 늦을 것
 // 같아 미안!' 보낼까요?". The message is a draft; sending it is the
@@ -350,57 +281,4 @@ func firstNonEmpty(vs ...string) string {
 		}
 	}
 	return ""
-}
-
-// AssetsHTTP is assets-svc's portfolio, read for its allocation.
-type AssetsHTTP struct {
-	URL, Token string
-}
-
-func (a AssetsHTTP) Allocation(ctx context.Context) ([]Drift, error) {
-	var out struct {
-		Allocation *struct {
-			Rows []Drift `json:"rows"`
-		} `json:"allocation"`
-		Problems []string `json:"problems"`
-	}
-	if err := getJSON(ctx, strings.TrimRight(a.URL, "/")+"/portfolio", a.Token, &out); err != nil {
-		return nil, err
-	}
-	// Half the accounts is no allocation: a broker that timed out reads as
-	// "유망주 0%", and a plan from that would be wrong by exactly that much.
-	for _, p := range out.Problems {
-		if strings.HasPrefix(p, "업비트:") || strings.HasPrefix(p, "한국투자증권:") || strings.HasPrefix(p, "금현물:") {
-			return nil, fmt.Errorf("잔고를 다 읽지 못했습니다: %s", p)
-		}
-	}
-	if out.Allocation == nil {
-		return nil, nil
-	}
-	return out.Allocation.Rows, nil
-}
-
-// StaticAssets is a fixed allocation (evaluation).
-type StaticAssets []Drift
-
-func (s StaticAssets) Allocation(context.Context) ([]Drift, error) { return s, nil }
-
-func getJSON(ctx context.Context, url, token string, out any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return err
-	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	client := &http.Client{Timeout: 20 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 300 {
-		return fmt.Errorf("GET %s: %d", url, resp.StatusCode)
-	}
-	return json.NewDecoder(resp.Body).Decode(out)
 }

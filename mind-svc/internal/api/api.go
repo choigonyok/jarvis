@@ -330,6 +330,7 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, http.StatusOK, map[string]int{"outcomes": rows, "facts": facts})
 	}))
 	mux.HandleFunc("GET /api/slots/{name}", s.auth(false, s.slot))
+	mux.HandleFunc("GET /api/calendar/turned", s.auth(false, s.turned))
 	mux.HandleFunc("GET /api/weather/places", s.auth(true, func(w http.ResponseWriter, r *http.Request) {
 		places, err := s.m.WeatherPlaces(r.Context())
 		if err != nil {
@@ -539,6 +540,29 @@ func (s *Server) slot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, got)
+}
+
+// turned is asked by the agent before a calendar card goes up in the
+// conversation: whether the operator turned down the like of the entry, and on
+// which card (gate.TurnedDown). said is what they said just now.
+func (s *Server) turned(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	ev := model.CalendarEvent{Title: strings.TrimSpace(q.Get("title")), Date: q.Get("date"), EndDate: q.Get("endDate"),
+		Start: q.Get("start"), End: q.Get("end"), Memo: q.Get("memo")}
+	if ev.Title == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "title 이 필요합니다"})
+		return
+	}
+	t, ok, err := s.m.Gate.TurnedDown(r.Context(), ev, strings.TrimSpace(q.Get("said")))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	out := map[string]any{"turned": ok}
+	if ok {
+		out["card"] = t
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) recall(w http.ResponseWriter, r *http.Request) {

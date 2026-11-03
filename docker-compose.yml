@@ -922,7 +922,7 @@ services:
       # 쉼표로 더한다. 카카오페이 같은 간편결제는 기본으로 빼 두었다 - 카드로 충전·결제되면 카드 알림과
       # 두 번 잡힌다.
       SPENDING_EXTRA_CHANNELS: ${SPENDING_EXTRA_CHANNELS:-}
-      # 월급 카드에 비중 차이를 적으려고 자산 배분을 읽기만 한다.
+      # 승인한 리밸런싱 카드의 주문을 assets-svc 로 보낸다(증권사 키는 그쪽에만 있다).
       ASSETS_URL: http://assets:8092
       # 영역 체류(visits)를 발생으로 읽는다: 지금 상황의 가장 확실한 위치 단서.
       IMMICH_URL: http://immich:2283

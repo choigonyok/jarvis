@@ -722,3 +722,61 @@ func TestGoalsAreEachPersonsOwn(t *testing.T) {
 		t.Fatal(code)
 	}
 }
+
+// The agent asks before a calendar card goes up in the conversation: the entry,
+// and what the operator said just now. A no the judgement names comes back with
+// the card it was given on; with no title there is nothing to ask.
+func TestTheAgentAsksWhatWasTurnedDown(t *testing.T) {
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	st := store.NewMemory()
+	m := mind.New(mind.Options{
+		Store: st, Log: obs.NewMemoryLog(quiet), LLM: &llm.Script{}, Calendar: act.NewMemoryCalendar(),
+		Notifier: &act.MemoryNotifier{}, Loc: seoul, Now: time.Now, Logger: quiet, Policy: gate.DefaultPolicy(), Mode: "stack",
+	})
+	srv := httptest.NewServer(New(m, "secret", "console-secret", false, nil, quiet).Handler())
+	defer srv.Close()
+	ctx := context.Background()
+	read := func(token, query string) (int, map[string]any) {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/calendar/turned?"+query, nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var out map[string]any
+		_ = json.NewDecoder(resp.Body).Decode(&out)
+		return resp.StatusCode, out
+	}
+	q := url.Values{"title": {"그린카 대여"}, "date": {"2026-11-24"}, "start": {"10:00"}, "said": {"그린카 예약했어"}}.Encode()
+	if code, got := read("secret", q); code != http.StatusOK || got["turned"] != false {
+		t.Fatalf("반려한 것이 없습니다: %d %+v", code, got)
+	}
+	if _, err := m.Gate.Asked(ctx, "p-1", model.HeldCalendarCreate, "일정을 추가합니다", model.CalendarAction{
+		Event: model.CalendarEvent{Title: "쏘카 대여", Date: "2026-11-17", Start: "10:00"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Gate.Answered(ctx, gate.HeldAnswer{Card: "p-1", Kind: model.HeldCalendarCreate, Reason: "차 예약은 일정 카드 필요없어", At: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	var said string
+	m.Gate.Turned = func(_ context.Context, past []model.Turned, ev model.CalendarEvent, s string) int {
+		said = s
+		if ev.Title == "그린카 대여" && len(past) == 1 {
+			return 1
+		}
+		return 0
+	}
+	code, got := read("secret", q)
+	card, _ := got["card"].(map[string]any)
+	if code != http.StatusOK || got["turned"] != true || card["title"] != "쏘카 대여" || card["reason"] != "차 예약은 일정 카드 필요없어" || said != "그린카 예약했어" {
+		t.Fatalf("%d %+v %q", code, got, said)
+	}
+	if code, _ := read("secret", "date=2026-11-24"); code != http.StatusBadRequest {
+		t.Fatalf("제목이 없으면 물을 것이 없습니다: %d", code)
+	}
+	if code, _ := read("wrong", q); code != http.StatusUnauthorized {
+		t.Fatalf("토큰 없이는 안 됩니다: %d", code)
+	}
+}
