@@ -157,6 +157,10 @@ const hubsFor = (role: Role) => (role === "guest" ? GUEST_HUBS : OWNER_HUBS);
 const hubOf = (hubs: Hub[], pathname: string) =>
   hubs.find((h) => h.screens.some((s) => s.href === pathname)) ?? (pathname === "/edit" ? hubs.find((h) => h.id === "life") : undefined);
 
+/** How long a finger rests on a place before its screens come up. */
+const HOLD_MS = 350;
+const MENU_WIDTH = 148;
+
 const LAST = "jarvis:hub:";
 
 /** A place opens on the screen left open there, on this device. */
@@ -471,7 +475,8 @@ function Strip({
  * off the edges and the home indicator, the way iOS 26 draws its tab bar. The
  * page scrolls beneath it (see --tabbar-space in globals.css, which gives the
  * scrollers room at the end). A lens of brighter glass sits under the current
- * tab and slides when you tap another.
+ * tab and slides when you tap another. Pressed and held, a place lists its
+ * screens above the bar, to slide up to and let go on.
  *
  * It hides while something is being typed - the keyboard has covered it
  * anyway, and the space it gives back is what the transcript needs most then.
@@ -531,7 +536,17 @@ export function TabBar({
   // Dragging along the bar, as on iOS: the lens follows the finger and the tab
   // under it on release is the one opened.
   const track = useRef<HTMLDivElement>(null);
-  const drag = useRef<{ startX: number; moved: boolean; width: number; left: number } | null>(null);
+  const drag = useRef<{
+    startX: number;
+    moved: boolean;
+    width: number;
+    left: number;
+    slot: number;
+    /** The finger is choosing among a place's screens. */
+    menu: boolean;
+    /** It has been over one of them. */
+    entered: boolean;
+  } | null>(null);
   // Where the finger is along the bar, and the slot under it - both worked out
   // in the pointer handler, which is where the bar's width is known.
   const [held, setHeld] = useState<{ x: number; slot: number } | null>(null);
@@ -539,14 +554,59 @@ export function TabBar({
   const slotAt = (x: number, width: number) =>
     Math.min(slots - 1, Math.max(0, Math.floor((x / width) * slots)));
 
+  // A finger resting on a place brings up its screens: it slides up to one and
+  // lets go, one gesture. Let go at once, the list stays for a tap.
+  const [menu, setMenu] = useState<{ slot: number; at: number; left: number; pinned: boolean } | null>(null);
+  const menuBox = useRef<HTMLDivElement>(null);
+  const holding = useRef<number | undefined>(undefined);
+  const stopHold = () => window.clearTimeout(holding.current);
+
+  function startHold(slot: number, el: HTMLElement, pointer: number) {
+    stopHold();
+    if (hubs[slot].screens.length < 2) return;
+    holding.current = window.setTimeout(() => {
+      const d = drag.current;
+      if (!d) return;
+      d.menu = true;
+      el.setPointerCapture(pointer);
+      setHeld(null);
+      const center = d.left + ((slot + 0.5) * d.width) / slots;
+      setMenu({ slot, at: -1, left: Math.max(12, Math.min(center - MENU_WIDTH / 2, innerWidth - MENU_WIDTH - 12)), pinned: false });
+      navigator.vibrate?.(8);
+    }, HOLD_MS);
+  }
+
+  /** The screen under the finger: the row it is level with, wherever it is across. */
+  function itemAt(y: number, slot: number) {
+    const box = menuBox.current?.getBoundingClientRect();
+    if (!box || y < box.top - 24 || y > box.bottom + 6) return -1;
+    const n = hubs[slot].screens.length;
+    return Math.min(n - 1, Math.max(0, Math.floor(((y - box.top) / box.height) * n)));
+  }
+
+  function openScreen(slot: number, href: string) {
+    setMenu(null);
+    setChosen(slot);
+    if (href !== pathname) startNavigation(() => router.push(href));
+  }
+
   function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
     const box = track.current?.getBoundingClientRect();
     if (!box) return;
-    drag.current = { startX: e.clientX, moved: false, width: box.width, left: box.left };
+    setMenu(null);
+    const slot = slotAt(e.clientX - box.left, box.width);
+    drag.current = { startX: e.clientX, moved: false, width: box.width, left: box.left, slot, menu: false, entered: false };
+    startHold(slot, e.currentTarget, e.pointerId);
   }
   function onPointerMove(e: React.PointerEvent<HTMLDivElement>) {
     const d = drag.current;
     if (!d) return;
+    if (d.menu) {
+      const at = itemAt(e.clientY, d.slot);
+      if (at >= 0) d.entered = true;
+      setMenu((m) => (m && m.at !== at ? { ...m, at } : m));
+      return;
+    }
     if (!d.moved && Math.abs(e.clientX - d.startX) < 8) return;
     if (!d.moved) {
       d.moved = true;
@@ -555,24 +615,41 @@ export function TabBar({
       e.currentTarget.setPointerCapture(e.pointerId);
     }
     const x = Math.min(d.width, Math.max(0, e.clientX - d.left));
-    setHeld({ x, slot: slotAt(x, d.width) });
+    const slot = slotAt(x, d.width);
+    // Sliding along the bar and resting on a place opens it the same way.
+    if (slot !== d.slot) {
+      d.slot = slot;
+      startHold(slot, e.currentTarget, e.pointerId);
+    }
+    setHeld({ x, slot });
   }
   function onPointerUp(e: React.PointerEvent<HTMLDivElement>) {
+    stopHold();
     const d = drag.current;
     drag.current = null;
-    if (!d?.moved) return;
+    if (!d?.menu && !d?.moved) return;
     suppressClick.current = true;
     setTimeout(() => (suppressClick.current = false), 0);
     setHeld(null);
+    if (d.menu) {
+      const at = itemAt(e.clientY, d.slot);
+      if (at >= 0) openScreen(d.slot, hubs[d.slot].screens[at].href);
+      // Slid over the list and away: called off.
+      else if (d.entered) setMenu(null);
+      else setMenu((m) => m && { ...m, at: -1, pinned: true });
+      return;
+    }
     go(slotAt(Math.min(d.width, Math.max(0, e.clientX - d.left)), d.width));
   }
   function onPointerCancel() {
+    stopHold();
     drag.current = null;
     setHeld(null);
+    setMenu(null);
   }
 
   const dragging = held !== null;
-  const lit = held ? held.slot : chosen;
+  const lit = held ? held.slot : menu ? menu.slot : chosen;
   const slotWidth = 100 / slots;
 
   // A slot is an equal share of the bar rather than a fixed 44px: the bar's
@@ -600,6 +677,14 @@ export function TabBar({
         paddingRight: "max(env(safe-area-inset-right), 1rem)",
       }}
     >
+      {menu?.pinned ? (
+        <button
+          type="button"
+          aria-label="닫기"
+          onClick={() => setMenu(null)}
+          className="pointer-events-auto absolute inset-0 outline-none"
+        />
+      ) : null}
       <div
         className="liquid-glass pointer-events-auto relative mx-auto flex h-[3.75rem] w-full rounded-full p-1.5"
         // 60px a slot with its word, 44px an icon alone, and no wider - a short
@@ -616,6 +701,8 @@ export function TabBar({
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerCancel}
+          // Android's own long press on a link.
+          onContextMenu={(e) => e.preventDefault()}
         >
           {/* The lens: one slot wide. It sits on the chosen tab, follows the
               finger while dragging, and breathes while the page loads. */}
@@ -740,6 +827,50 @@ export function TabBar({
           ) : null}
         </div>
       </div>
+      {menu ? (
+        <div
+          ref={menuBox}
+          role="menu"
+          aria-label={`${hubs[menu.slot].label}의 화면`}
+          className="liquid-glass pointer-events-auto origin-bottom animate-in rounded-3xl p-1.5 duration-150 fade-in-0 zoom-in-95 motion-reduce:animate-none"
+          // Inline: .liquid-glass sets its own position and next to no paint,
+          // and words read over a page need more than the bar's icons do.
+          style={{
+            position: "absolute",
+            background: "color-mix(in oklab, var(--popover) 96%, transparent)",
+            left: menu.left,
+            width: MENU_WIDTH,
+            bottom: "calc(max(env(safe-area-inset-bottom), 0.5rem) + 4.25rem)",
+          }}
+        >
+          {hubs[menu.slot].screens.map((tab, i) => {
+            const Icon = ICON[tab.href] ?? Ellipsis;
+            return (
+              <Link
+                key={tab.href}
+                href={tab.href}
+                role="menuitem"
+                draggable={false}
+                aria-current={tab.href === pathname ? "page" : undefined}
+                onClick={(e) => {
+                  e.preventDefault();
+                  openScreen(menu.slot, tab.href);
+                }}
+                className={cn(
+                  "flex h-12 items-center gap-2.5 rounded-[1.1rem] px-3 text-[14.5px] transition-colors duration-75 outline-none select-none focus-visible:ring-3 focus-visible:ring-ring/50",
+                  i === menu.at ? "bg-glass-raised text-foreground" : tab.href === pathname ? "text-foreground" : "text-dim",
+                )}
+              >
+                <Icon aria-hidden className="size-[18px]" strokeWidth={i === menu.at ? 2.1 : 1.8} />
+                {tab.label}
+                {pending > 0 && tab.href === pendingHome ? (
+                  <span aria-hidden className="anim-breathe size-[6px] rounded-full bg-foreground/80" />
+                ) : null}
+              </Link>
+            );
+          })}
+        </div>
+      ) : null}
     </nav>
   );
 }
