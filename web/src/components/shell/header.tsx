@@ -521,15 +521,16 @@ export function TabBar({
   }, [role]);
 
   function go(slot: number) {
-    if (slot === moreSlot) {
+    if (slot === moreSlot && !inMore) {
       setMore(true);
       return;
     }
     const hub = hubs[slot];
     if (!hub) return;
     setChosen(slot);
-    // A place opens where it was left; its own slot again goes to its first screen.
-    const href = slot === at ? hub.screens[0].href : lastIn(hub);
+    // A place opens where it was left; its own slot again goes round its screens.
+    const next = (hub.screens.findIndex((s) => s.href === pathname) + 1) % hub.screens.length;
+    const href = slot === at ? hub.screens[next].href : lastIn(hub);
     if (href !== pathname) startNavigation(() => router.push(href));
   }
 
@@ -770,7 +771,13 @@ export function TabBar({
                 }
                 title="다른 화면"
                 onClick={(e) => {
-                  if (suppressClick.current) e.preventDefault();
+                  if (suppressClick.current) {
+                    e.preventDefault();
+                  } else if (inMore) {
+                    // Inside it, the slot goes round its screens like any other.
+                    e.preventDefault();
+                    go(moreSlot);
+                  }
                 }}
                 className={cn(item, lit === moreSlot ? "text-foreground" : "text-dim")}
               >
