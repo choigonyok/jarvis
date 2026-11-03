@@ -228,6 +228,10 @@ func (s *Server) insideWindow(p Payment) bool {
 // question - or a new one. Another payer's card is not this one's: its
 // decision goes to whoever raised it.
 func (s *Server) raisePayment(ctx context.Context, p Payment, asked string) string {
+	// Finding and opening are one step: a page sends its writes together, and
+	// two that both found none opened two cards 5ms apart (2026-11-03).
+	s.raising.Lock()
+	defer s.raising.Unlock()
 	if waiting, ok := s.proposals.FindPendingWhere(func(q proposal.Proposal) bool {
 		w := paymentOf(q.Action.Input)
 		return q.Origin == proposal.OriginIntercept && w.grantSite() == p.grantSite() && w.JobID == p.JobID

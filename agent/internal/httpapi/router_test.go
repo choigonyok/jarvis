@@ -151,6 +151,35 @@ func TestInterceptRaisesACardAndReturnsAtOnce(t *testing.T) {
 	}
 }
 
+// A page sends its writes together. Two that arrive at once are still one
+// question: 네이버페이's history sent two point lookups and each opened a
+// card, 5ms apart, while the first was still reading the saved address.
+func TestWritesAtOnceAreOneCard(t *testing.T) {
+	props := proposal.NewStore(bus.New())
+	s := New(Deps{Proposals: props, Runner: bgRunner{}, InterceptToken: "tok",
+		SavedAddress: func(context.Context) (SavedAddress, bool) {
+			time.Sleep(30 * time.Millisecond)
+			return SavedAddress{}, false
+		},
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	s.holdDur = 0
+	var wg sync.WaitGroup
+	for _, path := range []string{"booking-points", "accumulable-points"} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			req := httptest.NewRequest(http.MethodPost, "/intercept", strings.NewReader(
+				`{"url":"https://pay.naver.com/web-api/points/`+path+`","method":"POST","host":"pay.naver.com"}`))
+			req.Header.Set("Authorization", "Bearer tok")
+			s.postIntercept(httptest.NewRecorder(), req)
+		}()
+	}
+	wg.Wait()
+	if n := len(props.List()); n != 1 {
+		t.Fatalf("함께 온 쓰기 둘에 카드 %d 장", n)
+	}
+}
+
 // switchRunner is a runner whose background state a test changes.
 type switchRunner struct {
 	mu sync.Mutex

@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/choigonyok/jarvis/agent/internal/claudecode"
@@ -59,6 +60,8 @@ type Server struct {
 	// for holdDur at most (holder.Hold; a test sets it to none).
 	payments holder.Payments
 	holdDur  time.Duration
+	// raising is held from looking for a flow's card to opening one.
+	raising sync.Mutex
 	// savedAddress is the shipping address the vault keeps, for the payment
 	// card; nil shows none.
 	savedAddress func(ctx context.Context) (SavedAddress, bool)

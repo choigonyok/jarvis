@@ -1,6 +1,7 @@
 package proposal
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -153,5 +154,36 @@ func TestRefresh(t *testing.T) {
 	}
 	if err := s.Refresh(p.ID, action.Action{}, action.Card{}, 0); err != ErrAlreadyDecided {
 		t.Fatal(err)
+	}
+}
+
+// The cards the conversation is told are waiting: only those still waiting,
+// oldest first, each with what it says, who raised it and when - a card of
+// another day with its date.
+func TestWaitingIsWhatIsOnTheScreen(t *testing.T) {
+	s := NewStore(bus.New())
+	pay, _ := s.Open(Proposal{Origin: OriginIntercept, Card: action.Card{Title: "결제를 진행합니다", Body: "pay.example.com\n\nhttps://pay.example.com/points/booking"}})
+	done, _ := s.Open(Proposal{Origin: OriginChat, Card: action.Card{Title: "일정을 추가합니다"}})
+	s.Open(Proposal{Origin: OriginSuggest, Card: action.Card{Title: "캠핑 일정 추가할까요?"}})
+	if err := s.Decide(done.ID, Reject); err != nil {
+		t.Fatal(err)
+	}
+	now := pay.Opened()
+	got := s.Waiting(now)
+	if len(got) != 2 {
+		t.Fatalf("%q", got)
+	}
+	if want := "- 결제를 진행합니다: pay.example.com / https://pay.example.com/points/booking (브라우저가 보내려던 요청을 결제 감시가 멈춘 것, " + now.Format("15:04") + ")"; got[0] != want {
+		t.Fatalf("\n%s\n%s", got[0], want)
+	}
+	if got[1] != "- 캠핑 일정 추가할까요? (비서가 먼저 묻는 것, "+now.Format("15:04")+")" {
+		t.Fatalf("%q", got[1])
+	}
+	if l := pay.line(now.AddDate(0, 0, 1)); !strings.Contains(l, now.Format("1/2 15:04")) {
+		t.Fatalf("다른 날의 카드는 날짜까지: %s", l)
+	}
+	long := Proposal{Card: action.Card{Title: "t", Body: strings.Repeat("가", 300)}, Origin: "kakao", At: "09:00"}
+	if l := long.line(now); !strings.Contains(l, strings.Repeat("가", waitingRunes)+"… (kakao, 09:00)") {
+		t.Fatalf("%s", l)
 	}
 }

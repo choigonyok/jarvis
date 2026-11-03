@@ -490,3 +490,54 @@ func (s *Store) PendingCount() int {
 	}
 	return n
 }
+
+// Waiting is every card still waiting for an answer, oldest first, a line
+// each as the conversation is told of them: what the card says, who raised
+// it, and when.
+func (s *Store) Waiting(now time.Time) []string {
+	var out []string
+	for _, p := range s.PendingWhere(func(Proposal) bool { return true }) {
+		out = append(out, p.line(now))
+	}
+	return out
+}
+
+// raisedBy is who raised a card, in the words the conversation is told.
+var raisedBy = map[string]string{
+	OriginChat:      "대화에서 올린 카드",
+	OriginIntercept: "브라우저가 보내려던 요청을 결제 감시가 멈춘 것",
+	OriginNotice:    "작업이 손으로 해 달라고 부탁한 것",
+	OriginSuggest:   "비서가 먼저 묻는 것",
+}
+
+// waitingRunes bounds what one waiting card shows of its body.
+const waitingRunes = 240
+
+func (p Proposal) line(now time.Time) string {
+	var parts []string
+	for _, l := range strings.Split(p.Card.Body, "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			parts = append(parts, l)
+		}
+	}
+	body := strings.Join(parts, " / ")
+	if r := []rune(body); len(r) > waitingRunes {
+		body = string(r[:waitingRunes]) + "…"
+	}
+	at := p.At
+	if t := p.Opened(); !t.IsZero() {
+		at = t.In(now.Location()).Format("15:04")
+		if y, m, d := t.In(now.Location()).Date(); y != now.Year() || m != now.Month() || d != now.Day() {
+			at = t.In(now.Location()).Format("1/2 15:04")
+		}
+	}
+	by := raisedBy[p.Origin]
+	if by == "" {
+		by = p.Origin
+	}
+	line := "- " + p.Card.Title
+	if body != "" {
+		line += ": " + body
+	}
+	return line + " (" + by + ", " + at + ")"
+}

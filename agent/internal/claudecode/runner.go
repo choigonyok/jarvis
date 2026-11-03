@@ -78,6 +78,11 @@ type Runner struct {
 	// shown is the situation last put in front of a message in this session;
 	// showing is this turn's, kept once the turn went through.
 	shown, showing string
+	// waiting, when set, is the cards on the screen still waiting for an
+	// answer, a line each (SetWaiting). cardsShown and cardsShowing are to
+	// them what shown and showing are to the situation.
+	waiting                  func() []string
+	cardsShown, cardsShowing string
 	// hold, when set, says a card this conversation raised is still open:
 	// its decision continues the work, so the session must not change under it.
 	hold    func(now time.Time) bool
@@ -217,6 +222,10 @@ func (r *Runner) persist() {
 
 // SetHold names the cards the session must not change under (rotateLocked).
 func (r *Runner) SetHold(fn func(now time.Time) bool) { r.hold = fn }
+
+// SetWaiting names the cards on the screen still waiting for an answer, a
+// line each, for the front of every turn (cards).
+func (r *Runner) SetWaiting(fn func() []string) { r.waiting = fn }
 
 // rotateLocked drops the session before a typed message when it went quiet
 // (SessionIdle since its last turn) or grew large (SessionMaxTokens), so the
@@ -544,6 +553,7 @@ func (r *Runner) turn(prompt string) error {
 	}
 	if fresh {
 		r.shown, r.showing = "", ""
+		r.cardsShown = ""
 	}
 	r.opening = want
 	var gap time.Duration
@@ -559,6 +569,7 @@ func (r *Runner) turn(prompt string) error {
 	}
 	// What the jobs said meanwhile, which the session has not seen.
 	head += r.jobNews()
+	head += r.cards()
 
 	cmd := exec.CommandContext(ctx, r.cfg.ClaudeBin, r.args(system)...)
 	cmd.Dir = r.cfg.Workspace
@@ -630,6 +641,9 @@ func (r *Runner) account(t *tally, fresh bool, opening string, gap time.Duration
 	if ok && r.showing != "" {
 		// What the session saw last; a turn that showed none leaves it.
 		r.shown = r.showing
+	}
+	if ok {
+		r.cardsShown = r.cardsShowing
 	}
 	base, history := r.base, r.historyLocked()
 	r.mu.Unlock()
@@ -912,6 +926,33 @@ func (r *Runner) jobNews() string {
 	slices.Reverse(lines)
 	return "[작업 소식 - 백그라운드 작업과 때 맞춘 알림이 그 사이 대화에 카드로 남긴 것. " + r.person() + "도 카드로 봤습니다. 물으면 답하고, 아니면 굳이 되풀이하지 마세요]\n" +
 		strings.Join(lines, "\n") + "\n[작업 소식 끝]\n\n"
+}
+
+// cards is the cards on the screen still waiting for an answer, for the front
+// of this turn's message. They are what "이 카드 뭐야" asks about, and no tool
+// lists them: asked about two payment cards the guard had raised, the model
+// looked at the jobs and said none was waiting (2026-11-03). The list the
+// session last saw is one line; one that emptied since is said once.
+func (r *Runner) cards() string {
+	if r.waiting == nil {
+		return ""
+	}
+	body := strings.Join(r.waiting(), "\n")
+	r.mu.Lock()
+	shown := r.cardsShown
+	r.cardsShowing = body
+	r.mu.Unlock()
+	switch {
+	case body == "" && shown == "":
+		return ""
+	case body == "":
+		return "[답을 기다리는 카드] 없음 - 앞 메시지 때의 카드는 답을 받았거나 내려갔습니다\n\n"
+	case body == shown:
+		return "[답을 기다리는 카드] 앞 메시지 때와 같음\n\n"
+	}
+	who := r.person()
+	return "[답을 기다리는 카드 - " + who + " 화면에 떠 있고 아직 답하지 않은 것. 승인·반려는 " + who + "가 화면에서 합니다]\n" +
+		body + "\n[답을 기다리는 카드 끝]\n\n"
 }
 
 // situation is mind's "right now" - the plan that may be going on, the

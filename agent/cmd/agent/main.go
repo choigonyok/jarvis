@@ -346,6 +346,9 @@ func main() {
 		})
 		return open
 	})
+	// Every card still waiting is in front of each turn: the operator asks
+	// about what is on the screen, whoever raised it.
+	runner.SetWaiting(func() []string { return proposals.Waiting(time.Now()) })
 
 	// 묶음 가맹점(쿠팡·네이버페이) 결제가 새로 들어왔을 때만 깨어나, 대화와
 	// 분리된 세션으로 주문목록을 읽어 상품별로 나눈다.
@@ -412,12 +415,7 @@ func main() {
 	if u, ok := cfg.ExtraMCPURLs[spending.BrowserServer]; ok && !cfg.Guest {
 		checker := &browsercheck.Checker{
 			Client: browsercheck.New(u, cfg.ExtraMCPToken),
-			Sites: []browsercheck.Site{
-				{ID: "coupang", Name: "쿠팡 주문 내역", Orders: "https://mc.coupang.com/ssr/desktop/order/list", LoginHost: "login.coupang.com"},
-				// The order lookup reads 네이버페이's history too: its sign-in lapsing is
-				// as much a stop as 쿠팡's, and only 쿠팡's was looked at.
-				{ID: "naverpay", Name: "네이버페이 결제내역", Orders: "https://pay.naver.com/pc/history", LoginHost: "nid.naver.com"},
-			},
+			Sites:  loginSites,
 			// 다른 탭이 로그인 화면이면(누가 비밀번호를 치는 중일 수 있다) 열지 않는다.
 			BusyHosts: []string{"login.coupang.com", "nid.naver.com", "pay.naver.com"},
 			Every:     30 * time.Minute,
@@ -862,6 +860,16 @@ func checklistConsole(m *checklist.Module) httpapi.Checklists {
 		return nil
 	}
 	return m
+}
+
+// loginSites are the order histories the login check opens. None is on a
+// host the payment guard asks about (browser/payment-hosts.json): the guard
+// stops every write there, the page's own too, and with nobody behind the
+// check it is the operator's screen that gets the cards. 네이버페이's history
+// raised two at its first look, for its own point lookups (2026-11-03). Its
+// sign-in is read off what the order lookups ran into instead (Say).
+var loginSites = []browsercheck.Site{
+	{ID: "coupang", Name: "쿠팡 주문 내역", Orders: "https://mc.coupang.com/ssr/desktop/order/list", LoginHost: "login.coupang.com"},
 }
 
 // relogin signs a logged-out site back in with the login the vault keeps: a
