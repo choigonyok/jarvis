@@ -75,6 +75,11 @@ export type TurnRef = {
 
 export type Turn = {
   id: string;
+  /**
+   * The row it is drawn in, when not its id: the answer's that typed it (this
+   * page's own, never the server's) - the row that wrote the answer keeps it.
+   */
+  rowKey?: string;
   role: "agent" | "user";
   at: string;
   /** Full timestamp (input-svc); `at` is only the wall clock. */

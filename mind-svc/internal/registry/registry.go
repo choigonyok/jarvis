@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+	"unicode"
 )
 
 // Sections of the table.
@@ -29,6 +30,7 @@ const (
 	SectionFact   = "fact"
 	SectionPolicy = "policy"
 	SectionSource = "source"
+	SectionPlan   = "plan"
 )
 
 // Who wrote a row.
@@ -116,6 +118,42 @@ type Source struct {
 	Deps  []string `json:"deps,omitempty"`
 }
 
+// PlanKind is a kind of plan and all a kind decides, in one row: what the
+// interpreter is told of it, the words a calendar entry's title says it with,
+// the payments that are of it, and what follows it. The kinds were a list in
+// the model, another in the prompt, the classifier's words and names compared
+// in eight places; a kind not on the list was 기타, out of linking and learning
+// - 92 of 165 plans, 24 of 28 band rehearsals (2026-11-03).
+type PlanKind struct {
+	Name string `json:"-"`
+	// Order is where it stands: in the interpreter's list, and which kind a
+	// title is read as when its words say two.
+	Order int `json:"order"`
+	// Told is a sentence for the interpreter, for when the name alone does not
+	// say what it is.
+	Told string `json:"told,omitempty"`
+	// Words say it in a calendar entry's title. A short Latin word (PT) or one
+	// Hangul letter (술) counts only as a word of its own: ChatGPT is no
+	// workout, 미술관 and 수술 no drink.
+	Words []string `json:"words,omitempty"`
+	// Fits are the spending classes a payment during it is of the plan.
+	Fits []string `json:"fits,omitempty"`
+	// Meal: food is of it, delivered too, and a bill paid during it is split
+	// with who was there.
+	Meal bool `json:"meal,omitempty"`
+	// Photos: its photos are worth sending to who was there.
+	Photos bool `json:"photos,omitempty"`
+	// Outdoors: it happens under the sky.
+	Outdoors bool `json:"outdoors,omitempty"`
+	// Stay is what is asked about once it has ended (캠핑장, 숙소).
+	Stay string `json:"stay,omitempty"`
+	// Work: a day's work, when its end is when the day's work ends.
+	Work bool `json:"work,omitempty"`
+}
+
+// OtherKind is the kind of a plan none of the others is.
+const OtherKind = "기타"
+
 // Duration is a time span written as "72h".
 type Duration time.Duration
 
@@ -167,6 +205,7 @@ type Snapshot struct {
 	slots   map[string]Slot
 	facts   map[string]Fact
 	gate    Gate
+	plans   []PlanKind
 }
 
 // Parse reads the rows.
@@ -198,11 +237,22 @@ func Parse(rows []Row) (*Snapshot, error) {
 		case SectionSource:
 			var v Source
 			err = json.Unmarshal(r.Body, &v)
+		case SectionPlan:
+			var v PlanKind
+			err = json.Unmarshal(r.Body, &v)
+			v.Name = r.Key
+			s.plans = append(s.plans, v)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("레지스트리 %s/%s: %w", r.Section, r.Key, err)
 		}
 	}
+	sort.SliceStable(s.plans, func(i, j int) bool {
+		if s.plans[i].Order != s.plans[j].Order {
+			return s.plans[i].Order < s.plans[j].Order
+		}
+		return s.plans[i].Name < s.plans[j].Name
+	})
 	return s, nil
 }
 
@@ -264,6 +314,14 @@ func Check(section, key string, body json.RawMessage) error {
 		}
 		if v.Warn <= 0 || v.Fail <= v.Warn {
 			return errors.New("소스의 fail 은 warn 보다 길어야 합니다")
+		}
+	case SectionPlan:
+		var v PlanKind
+		if err := dec(&v); err != nil {
+			return err
+		}
+		if strings.ContainsAny(key, "·, ") {
+			return fmt.Errorf("종류 이름에 쓸 수 없는 글자가 있습니다: %q", key)
 		}
 	default:
 		return fmt.Errorf("없는 구역입니다: %s", section)
@@ -336,6 +394,73 @@ func (s *Snapshot) Single(predicate string) bool { return s.facts[predicate].Sin
 
 // Gate is the gate's numbers.
 func (s *Snapshot) Gate() Gate { return s.gate }
+
+// PlanKinds is every kind of plan, in order.
+func (s *Snapshot) PlanKinds() []PlanKind { return slices.Clone(s.plans) }
+
+// PlanKind is a kind by name: a name not in the table is a kind with no name
+// that decides nothing.
+func (s *Snapshot) PlanKind(name string) PlanKind {
+	for _, k := range s.plans {
+		if k.Name == name {
+			return k
+		}
+	}
+	return PlanKind{}
+}
+
+// HasPlanKind is whether a kind is in the table.
+func (s *Snapshot) HasPlanKind(name string) bool { return s.PlanKind(name).Name != "" }
+
+// KindOf is the kind a calendar entry's title says, OtherKind when none: the
+// first in order whose word it holds.
+func (s *Snapshot) KindOf(title string) string {
+	up := strings.ToUpper(title)
+	tokens := strings.FieldsFunc(up, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
+	for _, k := range s.plans {
+		for _, w := range k.Words {
+			w = strings.ToUpper(w)
+			if short(w) && slices.Contains(tokens, w) || !short(w) && strings.Contains(up, w) {
+				return k.Name
+			}
+		}
+	}
+	return OtherKind
+}
+
+// short is a word that counts only as a word of its own: Latin of three
+// letters or fewer, or one Hangul letter.
+func short(w string) bool {
+	if r := []rune(w); len(r) == 1 {
+		return unicode.Is(unicode.Hangul, r[0])
+	}
+	if len(w) > 3 {
+		return false
+	}
+	for _, r := range w {
+		if r > unicode.MaxASCII || !unicode.IsLetter(r) {
+			return false
+		}
+	}
+	return true
+}
+
+// current is the table as mind last read it, for what reads a kind of plan
+// without a mind at hand.
+var current atomic.Pointer[Snapshot]
+
+// SetCurrent makes s the table what reads kinds sees.
+func SetCurrent(s *Snapshot) { current.Store(s) }
+
+// Current is the table as mind last read it, or as it ships.
+func Current() *Snapshot {
+	if s := current.Load(); s != nil {
+		return s
+	}
+	s := Default()
+	current.CompareAndSwap(nil, s)
+	return current.Load()
+}
 
 //go:embed seed.json
 var seedJSON []byte

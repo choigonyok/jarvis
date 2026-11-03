@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { memo, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { ArrowUp, ImagePlus, Mic, Reply, X } from "lucide-react";
 import { uploadPhoto } from "@/lib/uploads";
 import { cn } from "@/lib/utils";
@@ -39,7 +39,7 @@ const draft = {
   },
 };
 
-export function Composer({
+function ComposerView({
   onSend,
   onVoice,
   onFocusChange,
@@ -338,3 +338,7 @@ export function Composer({
     </div>
   );
 }
+
+// Drawn again only when what they show changes: the thread above them
+// renders on every frame of an answer.
+export const Composer = memo(ComposerView);

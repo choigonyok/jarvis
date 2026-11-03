@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+	"github.com/choigonyok/jarvis/mind-svc/internal/registry"
 	"github.com/choigonyok/jarvis/mind-svc/internal/spending/book"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 	"github.com/choigonyok/jarvis/mind-svc/internal/world"
@@ -579,39 +580,10 @@ func fromEntry(ev entry) model.State {
 	return st
 }
 
-// classes are the words in an entry's title that say what kind of plan it
-// is - a rule, since a title is a few words and a model call per entry
-// would cost more than it knows.
-var classes = []struct {
-	kind  string
-	words []string
-}{
-	{"캠핑", []string{"캠핑", "글램핑", "차박"}},
-	{"여행", []string{"여행", "제주", "부산", "강릉", "속초", "해외", "출국", "숙소", "호캉스"}},
-	{"데이트", []string{"데이트", "💕", "❤"}},
-	{"회식", []string{"회식", "송년회", "워크샵"}},
-	{"경조사", []string{"결혼식", "돌잔치", "장례", "조문"}},
-	{"기념일", []string{"기념일", "생일", "생신", "주년", "100일", "200일", "300일", "500일", "1000일"}},
-	{"병원", []string{"병원", "치과", "진료", "검진", "의원", "약속 진료", "주사", "접종"}},
-	{"운동", []string{"PT", "헬스", "운동", "필라테스", "요가", "클라이밍", "러닝"}},
-	{"공연", []string{"영화", "공연", "콘서트", "뮤지컬", "전시", "야구", "축구", "페스티벌", "페어"}},
-	{"업무", []string{"회의", "미팅", "면접", "발표", "출장"}},
-	{"식사", []string{"저녁", "점심", "브런치", "식사", "밥", "술", "치킨", "삼겹살", "고기"}},
-	{"모임", []string{"모임", "동창", "정모"}},
-	{"쇼핑", []string{"쇼핑", "장보기"}},
-}
-
-// Classify is a plan type from an entry's title.
-func Classify(title string) string {
-	for _, c := range classes {
-		for _, w := range c.words {
-			if strings.Contains(strings.ToUpper(title), strings.ToUpper(w)) {
-				return c.kind
-			}
-		}
-	}
-	return "기타"
-}
+// Classify is a plan's kind from an entry's title (registry plan kinds): a
+// rule, since a title is a few words and a model call per entry would cost more
+// than it knows.
+func Classify(title string) string { return registry.Current().KindOf(title) }
 
 var withRE = regexp.MustCompile(`^(.+?)(와|과|랑|이랑|하고)\s`)
 

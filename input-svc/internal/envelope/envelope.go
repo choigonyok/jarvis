@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/choigonyok/jarvis/gocommon/person"
 )
 
 // Envelope is a record ready to store.
@@ -29,7 +31,7 @@ type Envelope struct {
 }
 
 // Guest is the actor of what is the guest's: it goes to the guest's tables.
-const Guest = "guest"
+const Guest = person.Guest
 
 // IsGuest is whether the record belongs in the guest's tables.
 func (e Envelope) IsGuest() bool { return e.Actor == Guest }

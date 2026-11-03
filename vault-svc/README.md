@@ -29,7 +29,7 @@
 ```
 
 결제 비밀번호를 로그인과 따로 두는 것은, 로그인은 등록 도메인마다 하나(naver.com)라서 네이버 로그인과
-네이버페이 결제 비밀번호가 한 칸을 두고 다투기 때문이다. 둘 곳은 `PinSites`(pay.naver.com, coupang.com)뿐이고,
+네이버페이 결제 비밀번호가 한 칸을 두고 다투기 때문이다. 둘 곳은 `PinSites`(gocommon/pay 의 한 표: pay.naver.com, coupang.com)뿐이고,
 봉인의 AAD 는 `pin:` + 결제 호스트라 로그인 봉인과 섞이지 않는다.
 
 ## 토큰 둘

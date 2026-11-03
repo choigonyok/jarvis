@@ -29,6 +29,7 @@ import (
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/llm"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+	"github.com/choigonyok/jarvis/mind-svc/internal/registry"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 	"github.com/choigonyok/jarvis/mind-svc/internal/world"
 )
@@ -273,7 +274,7 @@ func (c *Conversation) Read(ctx context.Context, room string) error {
 	if c.cfg.Search > 0 && placeless(known) {
 		ask = llm.WithSearch(ctx, c.cfg.Search)
 	}
-	answer, err := c.llm.Complete(ask, system, prompt(name, c.cfg.Owner, c.now(), c.loc, known, remembered, c.turnedDown(ctx), earlier, fresh))
+	answer, err := c.llm.Complete(ask, systemText(), prompt(name, c.cfg.Owner, c.now(), c.loc, known, remembered, c.turnedDown(ctx), earlier, fresh))
 	if err != nil && !errors.Is(err, llm.ErrNoAnswer) {
 		c.retryLater(room, err)
 		return err
@@ -627,6 +628,12 @@ func (c *Conversation) apply(ctx context.Context, room string, o op, earlier, fr
 		setAll(&s, kind, o.Set, refs)
 		if strings.TrimSpace(s.Title) == "" {
 			return skip("제목 없음")
+		}
+		// Of no kind the model named, the title may still say one ("밴드 합주").
+		if kind == model.KindPlan && (s.Type == "" || s.Type == registry.OtherKind) {
+			if k := registry.Current().KindOf(s.Title); k != registry.OtherKind {
+				s.Type = k
+			}
 		}
 		// The same plan named again is that plan, not a second one.
 		if id := c.same(kind, s, known); id != "" {
@@ -984,7 +991,7 @@ func setAll(s *model.State, kind string, set map[string]json.RawMessage, refs ma
 		s.Place = v
 	}
 	if kind == model.KindPlan {
-		if v, ok := str("type"); ok && (v == "" || slices.Contains(model.PlanTypes, v)) {
+		if v, ok := str("type"); ok && (v == "" || registry.Current().HasPlanKind(v)) {
 			s.Type = v
 		}
 		if v, ok := str("placeKind"); ok {

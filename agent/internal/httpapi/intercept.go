@@ -441,10 +441,9 @@ func addressLines(p Payment, addr *SavedAddress) (warn, saved string) {
 	return warn, saved
 }
 
-// paymentCard says what is being asked. The login host is on the ask list
-// because a session there is what lets a payment go through - but opening
-// its sign-in page charges nothing, and a card that says "결제가 청구됩니다"
-// for it teaches a person that the card's words are not to be believed.
+// paymentCard says what is being asked: a payment, every time - a sign-in
+// host is let through without a card (backgroundLogin) and none is on the ask
+// list, so a card for opening a sign-in page never came (2026-11-03).
 func paymentCard(p Payment, addr *SavedAddress) action.Card {
 	// The host is the part a person can actually judge; the path is there
 	// for the case where two flows share a provider.
@@ -497,13 +496,6 @@ func paymentCard(p Payment, addr *SavedAddress) action.Card {
 			Title:       "쿠팡에서 쿠페이로 결제합니다",
 			Body:        body,
 			Consequence: consequence,
-		}
-	}
-	if strings.EqualFold(p.Host, "nid.naver.com") {
-		return action.Card{
-			Title:       "네이버 로그인 화면을 엽니다",
-			Body:        body,
-			Consequence: "로그인만 진행됩니다 · 결제는 따로 묻습니다",
 		}
 	}
 	consequence := fmt.Sprintf("결제가 청구됩니다 · 되돌릴 수 없습니다 · 승인하면 이 결제 한 건이 진행됩니다(다시 진행한 때부터 %d분 안에)", int(holder.Window.Minutes()))

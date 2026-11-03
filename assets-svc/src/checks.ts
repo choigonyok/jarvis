@@ -5,6 +5,8 @@
  * means this service stopped saying.
  */
 
+import { type Account, accountOf, detailOf } from "./accounts.js";
+
 export type Check = {
   id: string;
   group: string;
@@ -18,37 +20,37 @@ export type Check = {
   deps: string[];
 };
 
-const VENUES: { id: string; name: string; prefixes: string[]; bad: "warn" | "fail"; rule: string; fix: string }[] = [
+const VENUES: { id: string; name: string; accounts: Account[]; bad: "warn" | "fail"; rule: string; fix: string }[] = [
   {
-    id: "assets.upbit", name: "업비트 잔고", prefixes: ["업비트:"], bad: "fail",
+    id: "assets.upbit", name: "업비트 잔고", accounts: ["upbit"], bad: "fail",
     rule: "자산 서비스가 업비트 잔고를 읽으면 정상, 오류를 돌려주면 이상. 5분마다 확인해요.",
     fix: "업비트 API 키의 허용 IP와 만료일을 확인하세요.",
   },
   {
-    id: "assets.kis", name: "한국투자증권 잔고", prefixes: ["한국투자증권:"], bad: "fail",
+    id: "assets.kis", name: "한국투자증권 잔고", accounts: ["kis"], bad: "fail",
     rule: "자산 서비스가 주식 계좌 잔고를 읽으면 정상, 오류를 돌려주면 이상. 5분마다 확인해요.",
     fix: "KIS 앱키 만료(1년)와 계좌번호를 확인하세요. 토큰은 1분에 한 번만 발급되니 서비스 재시작 직후 1분은 실패할 수 있어요.",
   },
   {
-    id: "assets.gold", name: "금현물 계좌", prefixes: ["금현물:"], bad: "fail",
+    id: "assets.gold", name: "금현물 계좌", accounts: ["gold"], bad: "fail",
     rule: "자산 서비스가 금현물 계좌를 읽으면 정상, 오류를 돌려주면 이상.",
     fix: "금현물 계좌용 KIS 앱키(주식 계좌와 별도)를 확인하세요.",
   },
   {
-    id: "assets.flows", name: "원금 기록", prefixes: ["업비트 입출금 내역:", "원금 기록:"], bad: "warn",
+    id: "assets.flows", name: "원금 기록", accounts: ["upbitFlows", "flows"], bad: "warn",
     rule: "업비트 입출금 내역과 직접 적은 원금 기록을 읽으면 정상, 어느 쪽이든 실패하면 주의(수익률이 틀려져요).",
     fix: "업비트 키에 입출금 조회 권한이 있는지 확인하세요.",
   },
 ];
 
-/** What a read of the portfolio says of each account: its problems, by the name they start with. */
+/** What a read of the portfolio says of each account: its problems, by the account they are about. */
 export function venueChecks(problems: readonly string[], at: Date): Check[] {
-  return VENUES.map(({ id, name, prefixes, bad, rule, fix }) => {
+  return VENUES.map(({ id, name, accounts, bad, rule, fix }) => {
     const row = { id, group: "외부 계정", name, rule, fix, deps: ["svc.assets"] };
     for (const message of problems) {
-      const prefix = prefixes.find((p) => message.startsWith(p));
-      if (!prefix) continue;
-      const detail = message.slice(prefix.length).trim();
+      const account = accountOf(message);
+      if (!account || !accounts.includes(account)) continue;
+      const detail = detailOf(message);
       if (detail.includes("설정되지 않았습니다")) return { ...row, state: "unknown" as const, summary: "키가 설정되지 않아 연결하지 않았어요." };
       return { ...row, state: bad, summary: [...detail].slice(0, 160).join("") };
     }

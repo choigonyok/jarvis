@@ -28,7 +28,7 @@ func TestARequestedJobIsOfferedTheFront(t *testing.T) {
 	chat := &transcript{}
 	m := New(NewStore((&jobsSvc{}).serve(t).URL, ""), nil, props, chat, quietLog())
 	holder := Job{ID: 1, Title: "중고나라에 올리기", Sites: []string{"web.joongna.com"}}
-	asked := Job{ID: 2, Title: "쿠팡 장작 주문", Sites: []string{"www.coupang.com"}, NextReason: "첫 실행"}
+	asked := Job{ID: 2, Title: "쿠팡 장작 주문", Sites: []string{"www.coupang.com"}, NextReason: "첫 실행", Asked: true}
 	last := time.Now().Add(-time.Hour)
 	clock := Job{ID: 3, Title: "가격 지켜보기", Sites: []string{"shop.example"}, NextReason: "다음 확인", LastRunAt: &last}
 
@@ -47,7 +47,7 @@ func TestARequestedJobIsOfferedTheFront(t *testing.T) {
 		t.Fatalf("카드가 대화에 남아야 합니다: %v", chat.attached)
 	}
 	// Instructed again: still the same wait, no second card.
-	asked.NextReason = "새 지시"
+	asked.NextReason, asked.Asked = "새 지시", true
 	m.offerFirst(asked, holder)
 	if len(firstCards(props)) != 1 {
 		t.Fatal("같은 기다림에 카드가 또 올라왔습니다")
@@ -221,7 +221,7 @@ func TestTheSchedulerOffersTheFrontWhileTheBrowserIsBusy(t *testing.T) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/due":
 			_ = json.NewEncoder(w).Encode(map[string]any{"jobs": []Job{
-				{ID: 2, Title: "쿠팡 장작 주문", Sites: []string{"www.coupang.com"}, NextReason: "첫 실행"},
+				{ID: 2, Title: "쿠팡 장작 주문", Sites: []string{"www.coupang.com"}, NextReason: "첫 실행", Asked: true},
 				{ID: 4, Title: "주간 운동 요약"},
 			}})
 		case r.Method == http.MethodGet && r.URL.Path == "/jobs/4":

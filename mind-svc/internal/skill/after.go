@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+	"github.com/choigonyok/jarvis/mind-svc/internal/registry"
 )
 
 // After owns what comes once a plan is over: what was paid during it is
@@ -104,7 +105,7 @@ type Settle struct {
 // there, when the operator paid it.
 func settle(e model.Entity, during []seen) (model.Intent, bool) {
 	st := e.State
-	if st.Type != "식사" && st.Type != "회식" && st.Type != "모임" || len(st.People) == 0 {
+	if !registry.Current().PlanKind(st.Type).Meal || len(st.People) == 0 {
 		return model.Intent{}, false
 	}
 	var total int64
@@ -145,7 +146,7 @@ type Album struct {
 // photos gathers a date's or a trip's photos for the person it was with.
 func photos(e model.Entity, during []seen, loc *time.Location) (model.Intent, bool) {
 	st := e.State
-	if st.Type != "데이트" && st.Type != "여행" && st.Type != "캠핑" || len(st.People) == 0 {
+	if !registry.Current().PlanKind(st.Type).Photos || len(st.People) == 0 {
 		return model.Intent{}, false
 	}
 	var shots []model.Occurrence

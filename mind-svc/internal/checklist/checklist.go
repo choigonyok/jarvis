@@ -20,6 +20,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/choigonyok/jarvis/gocommon/person"
 )
 
 // Statuses.
@@ -31,8 +33,8 @@ const (
 // Whose a list is: the operator's or the guest's. Each sees and changes only
 // their own.
 const (
-	Owner = "owner"
-	Guest = "guest"
+	Owner = person.Owner
+	Guest = person.Guest
 )
 
 // Who changed an item.

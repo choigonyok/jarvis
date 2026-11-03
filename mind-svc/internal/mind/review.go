@@ -13,6 +13,8 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/predict"
 	"github.com/choigonyok/jarvis/mind-svc/internal/prefs"
+	"github.com/choigonyok/jarvis/mind-svc/internal/registry"
+	"github.com/choigonyok/jarvis/mind-svc/internal/spending/category"
 	"github.com/choigonyok/jarvis/mind-svc/internal/world"
 )
 
@@ -79,12 +81,15 @@ type candidate struct {
 	evidence             []model.Evidence // the words it rests on (a decision's)
 }
 
+// cafeVisit is what a café visit costs at least: more than a coffee to go.
+const cafeVisit = 8000
+
 // workoutEvery: a workout is asked about at most this often.
 const workoutEvery = 3 * 24 * time.Hour
 
 // reviews asks tonight's questions: campsites and trips that ended today,
-// stays of a night or more at a campsite region, and restaurants paid at for
-// the first time today.
+// stays of a night or more at a campsite region, and restaurants and cafés
+// paid at for the first time today.
 func (m *Mind) reviews(ctx context.Context) error {
 	st, loc := m.Opts.Store, m.Opts.Loc
 	now := m.Opts.Now().In(loc)
@@ -104,18 +109,15 @@ func (m *Mind) reviews(ctx context.Context) error {
 	}
 	for _, p := range plans {
 		ps := p.State
-		if (ps.Status != model.Confirmed && ps.Status != model.Done) || ps.Place == "" || (ps.Type != "캠핑" && ps.Type != "여행") {
+		stay := registry.Current().PlanKind(ps.Type).Stay
+		if (ps.Status != model.Confirmed && ps.Status != model.Done) || ps.Place == "" || stay == "" {
 			continue
 		}
 		sp, ok := m.World.Span(ctx, p, now, loc)
 		if !ok || sp.End.After(now) || now.Sub(sp.End) > 30*time.Hour {
 			continue
 		}
-		kind := "캠핑장"
-		if ps.Type == "여행" {
-			kind = "숙소"
-		}
-		cands = append(cands, candidate{subjectType: kind, subject: ps.Place, planID: p.ID, with: ps.People, at: sp.Start})
+		cands = append(cands, candidate{subjectType: stay, subject: ps.Place, planID: p.ID, with: ps.People, at: sp.Start})
 	}
 	stays, err := st.Occurrences(ctx, today.AddDate(0, 0, -3), now, "visit")
 	if err != nil {
@@ -131,7 +133,16 @@ func (m *Mind) reviews(ctx context.Context) error {
 		return err
 	}
 	for _, o := range meals {
-		if o.Class != "식비" || o.Amount < 15000 || delivery(o.Title) {
+		var kind string
+		switch {
+		case o.Class == "식비" && o.Amount >= 15000 && !delivery(o.Title):
+			kind = "식당"
+		// A café of its own, sat in: a branch of a chain is like the next, and a
+		// coffee to go is no visit. Preferences learned 카페 and nothing asked
+		// about one (2026-11-03).
+		case o.Class == "카페·간식" && o.Amount >= cafeVisit && !category.IsCafeChain(o.Title):
+			kind = "카페"
+		default:
 			continue
 		}
 		before, err := st.Occurrences(ctx, today.AddDate(0, 0, -180), today, "purchase")
@@ -141,7 +152,7 @@ func (m *Mind) reviews(ctx context.Context) error {
 		if slices.ContainsFunc(before, func(b model.Occurrence) bool { return b.Title == o.Title }) {
 			continue // not new
 		}
-		cands = append(cands, candidate{subjectType: "식당", subject: o.Title, at: o.At})
+		cands = append(cands, candidate{subjectType: kind, subject: o.Title, at: o.At})
 	}
 
 	// A big decision three months on: was it right, were the reasons?

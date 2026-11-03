@@ -68,12 +68,12 @@ const (
 // say is a reminder's moment come. The operator's own go out in their words
 // as remind.asked, which rings even in quiet hours: they asked for this
 // moment. The assistant's own go through the gate like any judgement.
-func (m *Mind) say(ctx context.Context, r moments.Reminder) (string, error) {
+func (m *Mind) say(ctx context.Context, r moments.Reminder) (moments.Said, error) {
 	if r.Source == moments.Rebalance {
 		wording, _ := json.Marshal(map[string]string{"title": r.Text, "body": r.Body})
 		in, err := m.portfolioBand(ctx, obs.Observation{Source: "assets", Type: AssetsBand, Key: r.Ref, Notify: wording}, true)
 		if err != nil {
-			return "", err
+			return moments.Said{}, err
 		}
 		return outcome(in), nil
 	}
@@ -84,9 +84,9 @@ func (m *Mind) say(ctx context.Context, r moments.Reminder) (string, error) {
 		l, ok := m.reminderList(ctx, r)
 		switch {
 		case !ok || l.Status != checklist.Active:
-			return "목록이 닫혀 말하지 않음", nil
+			return moments.Said{How: moments.HowSilent, Why: "목록이 닫힘"}, nil
 		case len(l.Left()) == 0:
-			return "다 해서 말하지 않음", nil
+			return moments.Said{How: moments.HowSilent, Why: "다 함"}, nil
 		}
 		kind = "remind.list"
 	}
@@ -121,27 +121,25 @@ func (m *Mind) say(ctx context.Context, r moments.Reminder) (string, error) {
 		n.Audience, data["who"] = moments.Guest, moments.Guest
 	}
 	if s, ok := m.notifier.(act.Sender); ok {
-		return "푸시", s.Send(ctx, n)
+		return moments.Said{How: moments.HowPush}, s.Send(ctx, n)
 	}
 	m.notifier.Notify(ctx, n)
-	return "푸시", nil
+	return moments.Said{How: moments.HowPush}, nil
 }
 
-// outcome is what the gate made of an intent, in a few words.
-func outcome(in model.Intent) string {
+// outcome is what the gate made of an intent.
+func outcome(in model.Intent) moments.Said {
 	switch {
 	case in.Status == model.Dropped:
-		return "말하지 않음: " + in.Why
+		return moments.Said{How: moments.HowSilent, Why: in.Why}
 	case in.Status == model.Failed:
-		return "실패: " + in.Error
-	case in.Card && in.Tier == "now":
-		return "카드"
+		return moments.Said{How: moments.HowFailed, Why: in.Error}
 	case in.Card:
-		return "카드(저녁 요약으로)"
+		return moments.Said{How: moments.HowCard}
 	case in.Tier == "now":
-		return "푸시"
+		return moments.Said{How: moments.HowPush}
 	}
-	return "저녁 요약으로"
+	return moments.Said{How: moments.HowDigest}
 }
 
 // onLocation is the operator arriving at a region or leaving it - or the

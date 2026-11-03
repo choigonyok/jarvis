@@ -29,6 +29,7 @@ import {
   usdKrwRate,
 } from "./venues.js";
 import { CLOSED_TTL_MS, OPEN_TTL_MS, UPBIT_TTL_MS, krxOpen, memo, usOpen } from "./freshness.js";
+import { accountOf, problem } from "./accounts.js";
 
 // Each venue's answer, reused for as long as its numbers can actually have
 // moved - see freshness.ts. Upbit's USDT price values USDT and is the
@@ -161,11 +162,11 @@ export async function buildPortfolio(): Promise<Portfolio> {
 
   const [upbit, kis, gold, upbitFlowsRead, kisFillsRead, upbitTrades, goldSettledRead] = await Promise.all([
     upbitCached.get().catch((e: Error) => {
-      problems.push(`업비트: ${e.message}`);
+      problems.push(problem("upbit", e.message));
       return { holdings: [] as Holding[], cashKrw: 0, cash: [] as CashLine[], problems: [] as string[] };
     }),
     kisCached.get().catch((e: Error) => {
-      problems.push(`한국투자증권: ${e.message}`);
+      problems.push(problem("kis", e.message));
       return {
         holdings: [] as Holding[],
         cashKrw: 0,
@@ -176,11 +177,11 @@ export async function buildPortfolio(): Promise<Portfolio> {
       };
     }),
     goldCached.get().catch((e: Error) => {
-      problems.push(`금현물: ${e.message}`);
+      problems.push(problem("gold", e.message));
       return undefined;
     }),
     flowsCached.get().catch((e: Error) => {
-      problems.push(`업비트 입출금 내역: ${e.message}`);
+      problems.push(problem("upbitFlows", e.message));
       return null;
     }),
     kisTradesCached.get().catch((e: Error) => {
@@ -249,7 +250,7 @@ export async function buildPortfolio(): Promise<Portfolio> {
   const principalFlows = [
     upbitFlowsRead,
     await db.manualFlows(PRINCIPAL_SINCE).catch((e: Error) => {
-      problems.push(`원금 기록: ${e.message}`);
+      problems.push(problem("flows", e.message));
       return null;
     }),
   ] as const;
@@ -366,7 +367,7 @@ export async function buildPortfolio(): Promise<Portfolio> {
   if (kisReplay || upbitTrades) {
     const sales = [...(kisReplay?.sales ?? [])];
     const missing: Realized["missing"] = kisReplay ? [] : ["kis"];
-    if (upbitTrades && !problems.some((p) => p.startsWith("업비트: "))) {
+    if (upbitTrades && !problems.some((p) => accountOf(p) === "upbit")) {
       const heldNow = new Map(upbit.holdings.map((h) => [h.symbol, h.quantity]));
       const replay = replayUpbit(upbitTrades.fills, heldNow, upbitTrades.closeAtStart);
       for (const h of upbit.holdings) {

@@ -19,17 +19,9 @@ import (
 
 // askedFor is whether the operator is waiting on a job right now: one they
 // made, instructed, ran or restarted - not a job's own clock, nor the run
-// after a card's answer (they have just been asked something already).
-func askedFor(j Job) bool {
-	if j.LastRunAt == nil {
-		return true
-	}
-	switch j.NextReason {
-	case "첫 실행", "새 지시", "지금 실행", "다시 시작", "끝내는 중에 온 지시":
-		return true
-	}
-	return false
-}
+// after a card's answer (they have just been asked something already). mind
+// says which (Job.Asked); a job never run is always.
+func askedFor(j Job) bool { return j.Asked || j.LastRunAt == nil }
 
 // offerFirst raises a job's 먼저 card, once per wait: the job was asked for
 // and waits for the browser behind holder's run.

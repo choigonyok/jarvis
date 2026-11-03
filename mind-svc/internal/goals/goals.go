@@ -20,12 +20,14 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/choigonyok/jarvis/gocommon/person"
 )
 
 // Whose a goal is. Each sees and changes only their own.
 const (
-	Owner = "owner"
-	Guest = "guest"
+	Owner = person.Owner
+	Guest = person.Guest
 )
 
 // How often a goal asks.

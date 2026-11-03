@@ -646,25 +646,74 @@ func Stated(relation, text string) (string, int, bool) {
 	default:
 		return "", 0, false
 	}
-	words := map[string][]string{
-		"소음": {"시끄러", "소음", "조용"}, "청결": {"더러", "청결", "깨끗"}, "공간": {"붐비", "사람 많", "북적"},
-		"사이트 간격": {"사이트 간격", "다닥다닥"}, "화장실·샤워장": {"화장실", "샤워장"}, "뷰·자연": {"뷰", "경치", "자연"},
-		"가격 대비": {"가성비", "비싼"}, "접근성": {"멀리", "가까운", "접근"}, "응대": {"불친절", "친절"},
-	}
-	for dim, ws := range words {
-		for _, w := range ws {
-			if strings.Contains(text, w) {
-				// "조용한 곳이 좋아" (LIKES quiet) is minding noise as much as
-				// "시끄러운 거 싫어": seeking the good side of a dimension whose
-				// word names the bad side is the same preference.
-				if (w == "조용" || w == "깨끗" || w == "가까운" || w == "친절" || w == "가성비") && pol > 0 {
-					return dim, -1, true
-				}
-				return dim, pol, true
+	// The word said first decides, and a word inside another (리뷰, 자연스럽게)
+	// is not that word: "리뷰 많은 식당" was a view, and which of two dimensions a
+	// sentence came out as was the map's order (2026-11-03).
+	at, dim, word := -1, "", ""
+	for _, d := range statedWords {
+		for _, w := range d.words {
+			if i := wordAt(text, w); i >= 0 && (at < 0 || i < at) {
+				at, dim, word = i, d.dim, w
 			}
 		}
 	}
-	return "", 0, false
+	if at < 0 {
+		return "", 0, false
+	}
+	// "조용한 곳이 좋아" (LIKES quiet) is minding noise as much as "시끄러운 거
+	// 싫어": seeking the good side of a dimension whose word names the bad side
+	// is the same preference.
+	if (word == "조용" || word == "깨끗" || word == "가까운" || word == "친절" || word == "가성비") && pol > 0 {
+		return dim, -1, true
+	}
+	return dim, pol, true
+}
+
+// statedWords are the words a dimension is said with, in a fixed order.
+var statedWords = []struct {
+	dim   string
+	words []string
+}{
+	{"소음", []string{"시끄러", "소음", "조용"}}, {"청결", []string{"더러", "청결", "깨끗"}}, {"공간", []string{"붐비", "사람 많", "북적"}},
+	{"사이트 간격", []string{"사이트 간격", "다닥다닥"}}, {"화장실·샤워장", []string{"화장실", "샤워장"}}, {"뷰·자연", []string{"뷰", "경치", "자연"}},
+	{"가격 대비", []string{"가성비", "비싼"}}, {"접근성", []string{"멀리", "가까운", "접근"}}, {"응대", []string{"불친절", "친절"}},
+}
+
+// notWords are the longer words a dimension's word hides in.
+var notWords = map[string][]string{
+	"뷰":  {"리뷰", "인터뷰", "프리뷰", "뷰티", "뷰어"},
+	"자연": {"자연스", "자연히", "부자연"},
+	"친절": {"불친절"},
+	"접근": {"접근성 떨어"},
+}
+
+// wordAt is where w first stands in text as itself, -1 when only inside a word
+// it is not.
+func wordAt(text, w string) int {
+	hidden := make([]bool, len(text))
+	for _, n := range notWords[w] {
+		for j := 0; ; {
+			k := strings.Index(text[j:], n)
+			if k < 0 {
+				break
+			}
+			for b := j + k; b < j+k+len(n); b++ {
+				hidden[b] = true
+			}
+			j += k + len(n)
+		}
+	}
+	for from := 0; from < len(text); {
+		i := strings.Index(text[from:], w)
+		if i < 0 {
+			return -1
+		}
+		if i += from; !hidden[i] {
+			return i
+		}
+		from = i + len(w)
+	}
+	return -1
 }
 
 // Why is the grounds of a preference, as a card or an answer shows it:

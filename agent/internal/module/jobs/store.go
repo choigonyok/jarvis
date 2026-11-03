@@ -55,6 +55,8 @@ type Job struct {
 	State        string     `json:"state"`
 	NextAt       *time.Time `json:"nextAt,omitempty"`
 	NextReason   string     `json:"nextReason,omitempty"`
+	// Asked: the operator is waiting on it, as mind says (mind-svc jobs/store).
+	Asked        bool       `json:"asked"`
 	WaitingCard  string     `json:"waitingCard,omitempty"`
 	Summary      string     `json:"summary,omitempty"`
 	Attempts     int        `json:"attempts"`

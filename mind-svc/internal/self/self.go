@@ -128,8 +128,10 @@ func Condition(n model.Note, reason string) string {
 	if r == "" {
 		return ""
 	}
+	// Left over, said so: "집에 남았어", "아직 있어". A bare "있어" was any
+	// reason at all - "일정이 있어" read as leftovers (2026-11-03).
 	if n.Rule != nil && n.Rule.Kind == "prep" {
-		for _, w := range []string{"남았", "남아", "있어", "있음", "아직 있"} {
+		for _, w := range []string{"남았", "남아", "아직 있", "집에 있", "이미 있", "많이 있"} {
 			if strings.Contains(r, w) {
 				return fmt.Sprintf("직전 %s 후 남은 경우 제외", n.Rule.PlanKind)
 			}

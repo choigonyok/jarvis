@@ -38,3 +38,27 @@ func TestKey(t *testing.T) {
 		t.Fatal("공백 차이로 다른 가맹점이 됐습니다")
 	}
 }
+
+// One list each for the delivery apps and the online stores, for every reader: a
+// delivery app is not online, though 쿠팡이츠 holds 쿠팡 - its meal is eaten where
+// the operator is, and a dinner at home is where it links.
+func TestDeliveryIsNotOnline(t *testing.T) {
+	for _, m := range []string{"쿠팡이츠", "쿠팡이츠 강남", "배달의민족", "(주)우아한형제들", "요기요"} {
+		if !IsDelivery(m) || IsOnline(m) {
+			t.Fatalf("%s: 배달 %v 온라인 %v", m, IsDelivery(m), IsOnline(m))
+		}
+	}
+	for _, m := range []string{"쿠팡", "COUPANG", "네이버페이", "SSG.COM", "APPLE.COM/BILL", "Netflix.com"} {
+		if !IsOnline(m) || IsDelivery(m) {
+			t.Fatalf("%s: 온라인 %v", m, IsOnline(m))
+		}
+	}
+	for _, m := range []string{"스타벅스 강남", "BSSG식당", "합정식당"} {
+		if IsOnline(m) {
+			t.Fatalf("%s 는 그 자리의 결제입니다", m)
+		}
+	}
+	if Classify("쿠팡이츠") != "식비" || Classify("쿠팡") != "쇼핑" || Classify("유니클로 강남") != "쇼핑" {
+		t.Fatal("분류는 그대로")
+	}
+}

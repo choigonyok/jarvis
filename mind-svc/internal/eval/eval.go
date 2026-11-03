@@ -289,6 +289,8 @@ type Match struct {
 	OnCal    *bool    `json:"onCalendar,omitempty"`
 	// DeclinedHas: what the operator said turning it down has this ("반려" when nothing).
 	DeclinedHas string `json:"declinedHas,omitempty"`
+	// Type is its kind (registry plan kinds).
+	Type string `json:"type,omitempty"`
 }
 
 type Result struct {
@@ -885,7 +887,8 @@ func matches(e model.Entity, m Match) bool {
 		m.TitleHas != "" && !strings.Contains(s.Title, m.TitleHas) ||
 		m.Owner != "" && s.Owner != m.Owner ||
 		m.DueFrom != "" && !strings.HasPrefix(s.Due, m.DueFrom) ||
-		m.DeclinedHas != "" && !strings.Contains(s.Declined, m.DeclinedHas) {
+		m.DeclinedHas != "" && !strings.Contains(s.Declined, m.DeclinedHas) ||
+		m.Type != "" && s.Type != m.Type {
 		return false
 	}
 	for _, p := range m.People {
@@ -955,6 +958,9 @@ func summary(es []model.Entity) string {
 		}
 		if s.Declined != "" {
 			p += " 반려: " + s.Declined
+		}
+		if s.Type != "" {
+			p += " (" + s.Type + ")"
 		}
 		parts = append(parts, p+"]")
 	}

@@ -1,8 +1,14 @@
 const ZONE = "Asia/Seoul";
 
+// The formatters, made once: toLocale* builds a formatter on every call, and a
+// thread works out every turn's day and time on each frame of an answer.
+const DAY = new Intl.DateTimeFormat("sv-SE", { timeZone: ZONE });
+const CLOCK = new Intl.DateTimeFormat("ko-KR", { timeZone: ZONE, hour: "2-digit", minute: "2-digit", hour12: false });
+const WEEKDAY = new Intl.DateTimeFormat("ko-KR", { timeZone: "UTC", weekday: "long" });
+
 /** The calendar day a moment falls on, on the operator's clock (YYYY-MM-DD). */
 export function dayOf(d: Date): string {
-  return d.toLocaleDateString("sv-SE", { timeZone: ZONE });
+  return DAY.format(d);
 }
 
 function parse(iso: string | undefined): Date | null {
@@ -15,7 +21,7 @@ function parse(iso: string | undefined): Date | null {
 export function clock(iso: string | undefined, at?: string): string {
   const t = parse(iso);
   if (!t) return at ?? "";
-  return t.toLocaleTimeString("ko-KR", { timeZone: ZONE, hour: "2-digit", minute: "2-digit", hour12: false });
+  return CLOCK.format(t);
 }
 
 /** The day a turn was said on, or "" when it has no full stamp. */
@@ -33,7 +39,7 @@ export function dayLabel(day: string, now = new Date()): string {
   if (day === today) return "오늘";
   if (day === dayOf(new Date(now.getTime() - 86_400_000))) return "어제";
   const [y, m, d] = day.split("-").map(Number);
-  const weekday = new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("ko-KR", { timeZone: "UTC", weekday: "long" });
+  const weekday = WEEKDAY.format(new Date(Date.UTC(y, m - 1, d)));
   const date = `${m}월 ${d}일 ${weekday}`;
   return String(y) === today.slice(0, 4) ? date : `${y}년 ${date}`;
 }

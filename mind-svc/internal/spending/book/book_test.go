@@ -129,3 +129,31 @@ func TestItemsSplitCategories(t *testing.T) {
 		t.Fatalf("%v", got)
 	}
 }
+
+// One rule for every reader: a price that held and changed says from what; a
+// bill that goes up and down is listed and says no change; two months alone
+// must agree to be a bill at all.
+func TestMonthlyIsOneRule(t *testing.T) {
+	now := at("2026-11-03 12:00")
+	c := func(when string, krw int64, merchant string) Charge {
+		return Charge{Merchant: merchant, Category: "구독", AmountKrw: krw, At: at(when)}
+	}
+	got := Monthly([]Charge{
+		c("2026-07-14 09:00", 13500, "넷플릭스"), c("2026-08-14 09:00", 13500, "넷플릭스"), c("2026-09-14 09:00", 13500, "넷플릭스"), c("2026-10-14 09:00", 17000, "넷플릭스"),
+		c("2026-08-25 09:00", 52000, "SKT"), c("2026-09-25 09:00", 57000, "SKT"), c("2026-10-25 09:00", 55000, "SKT"),
+		c("2026-09-02 09:00", 9900, "왓챠"), c("2026-10-02 09:00", 14900, "왓챠"),
+	}, now)
+	by := map[string]Recurring{}
+	for _, r := range got {
+		by[r.Merchant] = r
+	}
+	if r := by["넷플릭스"]; r.BeforeKrw != 13500 || r.AmountKrw != 17000 || r.Run != 4 || r.Months != 4 {
+		t.Fatalf("값이 바뀐 구독: %+v", r)
+	}
+	if r, ok := by["SKT"]; !ok || r.BeforeKrw != 0 || r.Run != 3 {
+		t.Fatalf("오르내리는 요금은 목록에 있고 바뀐 것은 아닙니다: %+v %v", r, ok)
+	}
+	if _, ok := by["왓챠"]; ok || len(got) != 2 {
+		t.Fatalf("두 달뿐이면 금액이 맞아야 합니다: %+v", got)
+	}
+}

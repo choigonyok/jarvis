@@ -1,6 +1,7 @@
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import * as db from "./db.js";
 import type { CashLine, Flow, Holding } from "./types.js";
+import { problem } from "./accounts.js";
 
 /**
  * Reading the two brokerages.
@@ -316,7 +317,7 @@ export async function upbitFlows(
       }
       const close = closes.get(row.currency)!.get(date);
       if (!close) {
-        problems.push(`업비트: ${date} ${row.currency} 이체를 원화로 환산하지 못해 원금에서 빠졌습니다.`);
+        problems.push(problem("upbit", `${date} ${row.currency} 이체를 원화로 환산하지 못해 원금에서 빠졌습니다.`));
         continue;
       }
       krw *= close;
@@ -612,7 +613,7 @@ async function kisForeignCash(token: string): Promise<{
     bookUsd: held === null ? null : bookUsd + held,
     rate: rate > 0 ? rate : null,
     problems: unpriced.length
-      ? [`한국투자증권: 환율을 몰라 빠진 외화 예수금 ${unpriced.join(", ")}`]
+      ? [problem("kis", `환율을 몰라 빠진 외화 예수금 ${unpriced.join(", ")}`)]
       : [],
   };
 }

@@ -37,6 +37,7 @@ import (
 
 	"github.com/choigonyok/jarvis/agent/internal/core/action"
 	"github.com/choigonyok/jarvis/agent/internal/tool"
+	"github.com/choigonyok/jarvis/gocommon/pay"
 	"github.com/choigonyok/jarvis/gocommon/site"
 )
 
@@ -129,19 +130,25 @@ type PinInput struct {
 }
 
 // payOf is the payment host a payment password is kept for, and its name.
+// pinList is the keypad payments as the tools name them: "네이버페이·쿠팡 쿠페이".
+func pinList() string {
+	var names []string
+	for _, p := range pay.Pins() {
+		names = append(names, p.Name)
+	}
+	return strings.Join(names, "·")
+}
+
 // The host is the one its keypad is on (vault-svc's PinSites).
 func payOf(raw json.RawMessage) (site, name string, err error) {
 	var in PinInput
 	if err := json.Unmarshal(raw, &in); err != nil {
 		return "", "", fmt.Errorf("입력을 읽지 못했습니다: %w", err)
 	}
-	switch strings.ToLower(strings.ReplaceAll(strings.TrimSpace(in.Pay), " ", "")) {
-	case "네이버페이", "네이버", "naverpay", "npay", "naver", "pay.naver.com":
-		return "pay.naver.com", "네이버페이", nil
-	case "쿠페이", "쿠팡", "쿠팡페이", "coupay", "coupang", "coupang.com":
-		return "coupang.com", "쿠팡 쿠페이", nil
+	if p, ok := pay.PinFor(in.Pay); ok {
+		return p.Host, p.Name, nil
 	}
-	return "", "", fmt.Errorf("어느 결제의 비밀번호인지 알 수 없습니다(%q): '네이버페이' 또는 '쿠페이'로 다시 요청하세요", in.Pay)
+	return "", "", fmt.Errorf("어느 결제의 비밀번호인지 알 수 없습니다(%q): %s(으)로 다시 요청하세요", in.Pay, pay.Names())
 }
 
 func (m *Module) pinSaved(ctx context.Context, site string) (Pin, bool) {
@@ -180,7 +187,7 @@ func (m *Module) Specs() []action.Spec {
 	return []action.Spec{
 		{Kind: KindSave, Summary: "사이트의 로그인 정보(아이디·비밀번호)를 운영자에게 카드로 받아 보관함에 저장한다.", Reversible: true},
 		{Kind: KindForget, Summary: "저장된 로그인 정보를 지운다.", Reversible: false},
-		{Kind: KindSavePin, Summary: "결제 비밀번호(네이버페이·쿠페이 숫자 6자리)를 운영자에게 카드로 받아 보관함에 저장한다.", Reversible: true},
+		{Kind: KindSavePin, Summary: "결제 비밀번호(" + pinList() + " 숫자 6자리)를 운영자에게 카드로 받아 보관함에 저장한다.", Reversible: true},
 		{Kind: KindForgetPin, Summary: "저장된 결제 비밀번호를 지운다.", Reversible: false},
 		{Kind: KindSaveShipping, Summary: "주문자·배송지(받는 분·연락처·이메일·주소)를 운영자에게 카드로 받아 보관함에 저장한다.", Reversible: true},
 		{Kind: KindForgetShipping, Summary: "저장된 배송지를 지운다.", Reversible: false},
@@ -431,7 +438,7 @@ func (m *Module) Execute(ctx context.Context, a action.Action) (action.Result, e
 // Look puts what is saved on the board: what names it, never a secret, and the
 // address an order sheet is filled with.
 func (m *Module) Look(b *tool.Board) {
-	tool.Add(b, "logins", "보관함에 저장된 로그인 정보의 사이트 목록(아이디는 일부만)과 저장된 결제 비밀번호(네이버페이·쿠페이)를 본다. 비밀번호는 볼 수 없다.",
+	tool.Add(b, "logins", "보관함에 저장된 로그인 정보의 사이트 목록(아이디는 일부만)과 저장된 결제 비밀번호("+pinList()+")를 본다. 비밀번호는 볼 수 없다.",
 		func(ctx context.Context, _ struct{}) (string, error) {
 			logins, err := m.client.List(ctx)
 			if err != nil {
@@ -499,7 +506,7 @@ func (m *Module) Handler() http.Handler {
 	addWrite(server, m, "save_login", KindSave, "사이트의 로그인 정보를 저장하도록 운영자에게 카드를 올린다. 운영자가 카드의 칸에 아이디·비밀번호를 넣는다 - "+
 		"대화로 비밀번호를 묻거나 받지 않는다. 저장되면 그 사이트 로그인 화면에서 browser_fill_login 이 넣는다.")
 	addWrite(server, m, "forget_login", KindForget, "저장된 로그인 정보를 지운다.")
-	addPin(server, m, "save_payment_pin", KindSavePin, "결제 비밀번호(네이버페이·쿠페이 숫자 6자리)를 저장하도록 운영자에게 카드를 올린다. "+
+	addPin(server, m, "save_payment_pin", KindSavePin, "결제 비밀번호("+pinList()+" 숫자 6자리)를 저장하도록 운영자에게 카드를 올린다. "+
 		"운영자가 카드의 비밀 칸에 넣는다 - 대화로 묻거나 받지 않는다. browser_enter_payment_pin 이 결제 비밀번호가 저장되어 있지 않다고 하거나, "+
 		"운영자가 결제 비밀번호를 넣겠다고 하면 부른다. 저장되면 그 결제의 비밀번호 키패드에서 browser_enter_payment_pin 이 넣는다.")
 	addPin(server, m, "forget_payment_pin", KindForgetPin, "저장된 결제 비밀번호를 지운다.")

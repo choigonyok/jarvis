@@ -2,6 +2,7 @@ package mind
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -277,5 +278,71 @@ func TestRebalanceCardPlacesWhatItShowed(t *testing.T) {
 	}
 	if n != 0 {
 		t.Fatalf("방금 답한 리밸런싱을 다시 물었습니다: %d", n)
+	}
+}
+
+// Each night a plan of no kind whose title says one is given it, linking sees
+// it, and nothing is asked about it - a kind is no question.
+func TestPlansOfNoKindAreReadAgain(t *testing.T) {
+	ctx := context.Background()
+	at := time.Date(2026, 11, 3, 23, 0, 0, 0, time.UTC)
+	m, st, _ := testMind(t, at)
+	put := func(id, title, kind string) {
+		t.Helper()
+		if _, _, err := st.Put(ctx, model.Entity{ID: id, Kind: model.KindPlan, Room: "kakao:1",
+			State: model.State{Title: title, Status: model.Confirmed, Date: "2026-11-20", Start: "19:00", Type: kind}}, model.Change{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	put("plan_a", "밴드 합주", "기타")
+	put("plan_b", "미용실 가용", "")
+	put("plan_c", "블루문", "기타")
+	put("plan_d", "합주실 저녁", "식사")
+	if err := m.retype(ctx); err != nil {
+		t.Fatal(err)
+	}
+	m.Attn.Settle(ctx)
+	for id, want := range map[string]string{"plan_a": "취미", "plan_b": "미용", "plan_c": "기타", "plan_d": "식사"} {
+		if e, _ := st.Entity(ctx, id); e.State.Type != want {
+			t.Errorf("%s: %q, %q 여야 합니다", id, e.State.Type, want)
+		}
+	}
+	if ins, _ := st.Intents(ctx, 100); len(ins) != 0 {
+		t.Fatalf("종류는 물을 일이 아닙니다: %+v", ins)
+	}
+}
+
+// A café paid at for the first time, sat in, is asked about that night like a
+// restaurant; a branch of a chain or a coffee to go is not.
+func TestAFirstCafeIsReviewed(t *testing.T) {
+	ctx := context.Background()
+	seoul, _ := time.LoadLocation("Asia/Seoul")
+	now := time.Date(2026, 11, 3, 21, 0, 0, 0, seoul)
+	m, st, _ := testMind(t, now)
+	for _, o := range []model.Occurrence{
+		pay("spending:1", "망원 작은카페", "카페·간식", 12000, now.Add(-5*time.Hour)),
+		pay("spending:2", "스타벅스 합정점", "카페·간식", 15000, now.Add(-4*time.Hour)),
+		pay("spending:3", "연남 커피바", "카페·간식", 4500, now.Add(-3*time.Hour)),
+	} {
+		if err := st.PutOccurrence(ctx, o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := m.reviews(ctx); err != nil {
+		t.Fatal(err)
+	}
+	ins, _ := st.Intents(ctx, 100)
+	var asked []string
+	for _, in := range ins {
+		var r struct {
+			SubjectType string `json:"subjectType"`
+			Subject     string `json:"subject"`
+		}
+		if in.Kind == "review.place" && json.Unmarshal(in.Payload, &r) == nil {
+			asked = append(asked, r.SubjectType+":"+r.Subject)
+		}
+	}
+	if !slices.Equal(asked, []string{"카페:망원 작은카페"}) {
+		t.Fatalf("%v", asked)
 	}
 }

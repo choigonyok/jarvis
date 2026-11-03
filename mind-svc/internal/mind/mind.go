@@ -102,6 +102,7 @@ type Options struct {
 }
 
 type Mind struct {
+	busy busy
 	Opts Options
 	// reg is the registry as it stands.
 	reg *registry.Live
@@ -211,13 +212,14 @@ func New(o Options) *Mind {
 	}
 	m.Gate.Judge = (&link.SameJudge{LLM: o.LLM, Log: o.Logger}).Of
 	m.Gate.Turned = (&link.TurnedJudge{LLM: o.LLM, Log: o.Logger}).Of
+	m.Gate.Busy = m.Busy
 	m.Prefs = &prefs.Prefs{St: o.Store, LLM: o.LLM, Now: o.Now}
 	m.Gate.OnDecide = func(ctx context.Context, in model.Intent) {
 		m.learn(ctx, in)
 		m.answered(ctx, in)
 	}
 	m.mornings = append(m.mornings, m.people, m.gift, m.weekend, m.restock, m.deadlines, m.warranties)
-	m.nightly = append(m.nightly, m.pruneMessages, m.expireQuestions, m.statedPreferences, m.deliveries, m.travelNotes, m.fixedChanges, m.moved, m.closeLists, m.endGoals, m.rebuildLedger)
+	m.nightly = append(m.nightly, m.pruneMessages, m.expireQuestions, m.statedPreferences, m.deliveries, m.travelNotes, m.fixedChanges, m.moved, m.closeLists, m.endGoals, m.retype, m.rebuildLedger)
 	m.Skills = []skill.Skill{skill.Schedule{}, skill.Loops{}, skill.Brief{}, skill.After{}, skill.Protect{}, skill.Rain{}}
 	m.Attn = attention.New(m.Skills, m.World, o.Store, m.Gate, o.Settle, o.Loc, o.Now, o.Logger)
 	if o.Weather != nil {
@@ -263,33 +265,49 @@ func (m *Mind) Handle(ctx context.Context, o obs.Observation) error {
 		if err := json.Unmarshal(o.Data, &ref); err != nil {
 			return nil
 		}
-		if err := m.Link.Occurrence(ctx, ref.ID); err != nil {
-			return err
-		}
-		if occ, err := m.Opts.Store.Occurrence(ctx, ref.ID); err == nil {
-			if _, err := m.Predict.Match(ctx, occ); err != nil {
-				return err
-			}
-			// After matching, so it does not meet what it starts itself.
-			if _, err := m.Predict.Follow(ctx, occ); err != nil {
-				return err
-			}
-			if err := m.late(ctx, occ); err != nil {
-				return err
-			}
-			if err := m.nearWish(ctx, occ); err != nil {
-				return err
-			}
-			if err := m.chore(ctx, occ); err != nil {
-				return err
-			}
-			if err := m.investMemo(ctx, occ); err != nil {
-				return err
-			}
-		}
-		return nil
+		return m.occurred(ctx, ref.ID)
 	}
 	return nil
+}
+
+// occurred has everything that listens hear an occurrence, each on its own: a
+// listener that fails no longer keeps the ones after it from hearing, and a
+// failed read of the occurrence is tried again instead of skipping them all
+// (it was taken as "not there"). What failed is said and the message comes
+// again; each listener hears the same occurrence again as the same.
+func (m *Mind) occurred(ctx context.Context, id string) error {
+	var errs []error
+	fail := func(step string, err error) {
+		m.Opts.Logger.Warn("발생을 다 듣지 못했습니다", "step", step, "occurrence", id, "err", err)
+		errs = append(errs, fmt.Errorf("%s: %w", step, err))
+	}
+	if err := m.Link.Occurrence(ctx, id); err != nil {
+		fail("link", err)
+	}
+	occ, err := m.Opts.Store.Occurrence(ctx, id)
+	if errors.Is(err, model.ErrNotFound) {
+		return errors.Join(errs...)
+	}
+	if err != nil {
+		fail("read", err)
+		return errors.Join(errs...)
+	}
+	// Matched before it starts anything of its own, so it does not meet what it
+	// started: what it would follow waits for the match.
+	if _, err := m.Predict.Match(ctx, occ); err != nil {
+		fail("match", err)
+	} else if _, err := m.Predict.Follow(ctx, occ); err != nil {
+		fail("follow", err)
+	}
+	for _, l := range []struct {
+		name string
+		hear func(context.Context, model.Occurrence) error
+	}{{"late", m.late}, {"nearWish", m.nearWish}, {"chore", m.chore}, {"investMemo", m.investMemo}} {
+		if err := l.hear(ctx, occ); err != nil {
+			fail(l.name, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // Run keeps the interpreters and attention going until ctx ends.

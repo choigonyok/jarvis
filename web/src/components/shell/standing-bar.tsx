@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { memo } from "react";
 import { summarize } from "@/lib/ledger";
 import type { Proposal } from "@/lib/thread";
 import { cn } from "@/lib/utils";
@@ -15,7 +16,7 @@ import { cn } from "@/lib/utils";
  * the only way out, which is why the only control is the one that takes you
  * to it.
  */
-export function StandingBar({
+function StandingBarView({
   pending,
   href = "/",
   /** Set where the waiting card is already on screen; saying it twice is nagging. */
@@ -62,3 +63,7 @@ export function StandingBar({
     </div>
   );
 }
+
+// Drawn again only when what is waiting changes: the thread above it renders
+// on every frame of an answer.
+export const StandingBar = memo(StandingBarView);

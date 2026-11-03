@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
+import { memo, useEffect, useRef, useState, useTransition, type ReactNode } from "react";
 import { PROBE_KEY } from "@/components/shell/viewport-probe";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -220,7 +220,7 @@ function scrollPageToTop() {
  * sample each other in Chrome, which once showed as the tab labels ghosting
  * into the header.
  */
-export function Header({
+function HeaderView({
   connection,
   pending,
   actions,
@@ -481,7 +481,7 @@ function Strip({
  * It hides while something is being typed - the keyboard has covered it
  * anyway, and the space it gives back is what the transcript needs most then.
  */
-export function TabBar({
+function TabBarView({
   pending,
   hidden,
 }: {
@@ -964,3 +964,8 @@ export function ScreenMenu({ pending }: { pending: number }) {
     </Sheet>
   );
 }
+
+// Drawn again only when what they show changes: the thread above them
+// renders on every frame of an answer.
+export const Header = memo(HeaderView);
+export const TabBar = memo(TabBarView);

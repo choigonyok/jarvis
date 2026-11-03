@@ -124,8 +124,9 @@ type State struct {
 // it: what they said is already so, and nothing is asked about it.
 const ActorCard = "card"
 
-// Plan types the interpreter labels plans with.
-var PlanTypes = []string{"데이트", "캠핑", "여행", "회식", "식사", "모임", "운동", "병원", "업무", "경조사", "기념일", "쇼핑", "공연", "기타"}
+// ActorKind is who gives a plan the kind its title says (mind's nightly read):
+// linking hears it, and nothing is asked about it - a kind is no question.
+const ActorKind = "kind"
 
 // Occurrence is something that happened, read from a structured source by
 // rule: a payment, an item in it, a photo, a workout, a calendar entry, a

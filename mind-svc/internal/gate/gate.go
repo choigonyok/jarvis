@@ -116,6 +116,9 @@ type Gate struct {
 	// the like of one the operator turned down, and which (TurnedDown): the
 	// number of it in past, 0 for none. Nil asks nothing.
 	Turned func(ctx context.Context, past []model.Turned, ev model.CalendarEvent, said string) int
+	// Busy is what keeps the operator busy now - driving, a meeting, a focus -
+	// "" when nothing does. Nil: never.
+	Busy func() string
 	// book is the result ledger's record, replaced whole when the ledger is
 	// made again. Nil knows nothing and every intent stands as stated.
 	book atomic.Pointer[engine.Book]
@@ -322,6 +325,13 @@ func (g *Gate) admit(ctx context.Context, in, open model.Intent, asked bool) (mo
 		in.Status = model.Dropped
 	}
 	return in, g.st.PutIntent(ctx, in)
+}
+
+func (g *Gate) busyNow() string {
+	if g.Busy == nil {
+		return ""
+	}
+	return g.Busy()
 }
 
 // openCard is the card still open that asks what in asks: the same plan, the
@@ -1074,6 +1084,11 @@ func (g *Gate) quietCard(ctx context.Context, in model.Intent) (bool, string) {
 	cost := g.policy.InterruptCost * (1 + float64(cards)/float64(max(g.policy.DailyCards, 1)))
 	if worth <= cost {
 		return true, fmt.Sprintf("방해할 만큼은 아니라 저녁 요약으로 (가치 %.2f ≤ 비용 %.2f)", worth, cost)
+	}
+	// Busy, a buzz costs twice: what is worth less waits for the evening, and
+	// does not come in the heap of what was held through it.
+	if why := g.busyNow(); why != "" && worth <= 2*cost {
+		return true, fmt.Sprintf("%s이라 저녁 요약으로 (가치 %.2f ≤ 비용 %.2f)", why, worth, 2*cost)
 	}
 	return false, ""
 }

@@ -130,3 +130,54 @@ func TestSourcesShipAndAreChecked(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A title's kind is the first in order whose word it holds, and a short word -
+// Latin of three letters or fewer, one Hangul letter - only as a word of its own.
+func TestKindOfATitle(t *testing.T) {
+	r := Default()
+	for title, want := range map[string]string{
+		"가평 캠핑": "캠핑", "호캉스": "여행", "💕": "데이트", "팀 회의": "업무", "재택근무": "업무", "본사 출근": "업무",
+		"발표 연습": "업무", "치과": "병원", "무릎 수술": "병원", "미용실 가용": "미용", "헤어 커트": "미용",
+		"PT 받기": "운동", "서연이랑 야구 보기": "공연", "민수와 저녁": "식사", "술 약속": "식사", "술자리": "식사",
+		"밴드 합주": "취미", "합주 연습": "취미", "베이스 레슨": "취미", "밴드 뒷풀이": "모임", "장보기": "쇼핑",
+		"ChatGPT 구독 해지": OtherKind, "미술관 관람": OtherKind, "기술 스터디": OtherKind, "예술의전당": OtherKind, "뭔가": OtherKind,
+	} {
+		if got := r.KindOf(title); got != want {
+			t.Errorf("%s: %s, %s 여야 합니다", title, got, want)
+		}
+	}
+	if k := r.PlanKind("식사"); !k.Meal || !slices.Contains(k.Fits, "식비") || r.PlanKind("취미").Meal {
+		t.Fatalf("%+v", k)
+	}
+	if r.PlanKind("캠핑").Stay != "캠핑장" || !r.PlanKind("여행").Outdoors || !r.PlanKind("업무").Work || r.HasPlanKind("없는 종류") {
+		t.Fatal("종류마다의 성질")
+	}
+	kinds := r.PlanKinds()
+	if kinds[len(kinds)-1].Name != OtherKind {
+		t.Fatalf("기타는 맨 끝: %+v", kinds[len(kinds)-1])
+	}
+}
+
+// A kind is a row: written, it is in the table the next read sees, in its
+// place; a name with a separator in it would break the interpreter's list.
+func TestAKindIsARow(t *testing.T) {
+	rows := append(Seed(), Row{Section: SectionPlan, Key: "봉사", Body: []byte(`{"order": 14, "words": ["봉사"]}`), By: ByOperator})
+	r, err := Parse(rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.KindOf("주말 봉사") != "봉사" || !r.HasPlanKind("봉사") {
+		t.Fatal("새 종류")
+	}
+	if err := Check(SectionPlan, "봉사", []byte(`{"order": 14}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := Check(SectionPlan, "봉사·취미", []byte(`{}`)); err == nil {
+		t.Fatal("구분 글자가 든 이름은 안 됩니다")
+	}
+	SetCurrent(r)
+	defer SetCurrent(Default())
+	if Current().KindOf("주말 봉사") != "봉사" {
+		t.Fatal("지금 표")
+	}
+}

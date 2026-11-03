@@ -405,6 +405,8 @@ func main() {
 				return m.TimerFired(ctx, msg)
 			case msg.Kind == "payment.requested":
 				return m.PaymentRaised(ctx, msg)
+			case msg.Kind == mind.KindState:
+				return m.StateSaid(ctx, msg)
 			}
 			if err := mindAPI.Command(ctx, msg); err != nil {
 				return err

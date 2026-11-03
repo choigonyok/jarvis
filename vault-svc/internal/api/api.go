@@ -35,6 +35,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/choigonyok/jarvis/gocommon/pay"
 	"github.com/choigonyok/jarvis/gocommon/site"
 	"github.com/choigonyok/jarvis/vault-svc/internal/seal"
 	"github.com/choigonyok/jarvis/vault-svc/internal/store"
@@ -60,13 +61,25 @@ type Store interface {
 }
 
 // PinSites are the payment hosts a payment password may be saved for, each
-// the host its keypad is on (and the hosts under it). Not a registrable
-// domain like a login's: naver.com is the login's, pay.naver.com the
-// password's - a page elsewhere on naver.com (a blog, a cafe, anyone's) never
-// gets it.
-var PinSites = map[string]string{
-	"pay.naver.com": "네이버페이",
-	"coupang.com":   "쿠팡(쿠페이)",
+// the host its keypad is on (and the hosts under it), as the one table has
+// them (gocommon/pay). Not a registrable domain like a login's: naver.com is
+// the login's, pay.naver.com the password's - a page elsewhere on naver.com (a
+// blog, a cafe, anyone's) never gets it.
+var PinSites = func() map[string]string {
+	m := map[string]string{}
+	for _, p := range pay.Pins() {
+		m[p.Host] = p.Name
+	}
+	return m
+}()
+
+// pinPlaces is where a payment password may go, as a refusal says it.
+func pinPlaces() string {
+	var out []string
+	for _, p := range pay.Pins() {
+		out = append(out, p.Name+" "+p.Host)
+	}
+	return strings.Join(out, ", ")
 }
 
 type Server struct {
@@ -285,7 +298,7 @@ func (s *Server) listPins(w http.ResponseWriter, r *http.Request) {
 func (s *Server) putPin(w http.ResponseWriter, r *http.Request) {
 	where, ok := pinSite(r.PathValue("site"))
 	if !ok {
-		writeErr(w, http.StatusBadRequest, "결제 비밀번호를 둘 수 있는 곳이 아닙니다(네이버페이 pay.naver.com, 쿠팡 coupang.com).")
+		writeErr(w, http.StatusBadRequest, "결제 비밀번호를 둘 수 있는 곳이 아닙니다("+pinPlaces()+").")
 		return
 	}
 	var in struct {

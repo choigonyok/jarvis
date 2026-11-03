@@ -12,6 +12,7 @@ import (
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/llm"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+	"github.com/choigonyok/jarvis/mind-svc/internal/registry"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 )
 
@@ -129,7 +130,7 @@ func Bucket(gap time.Duration) string {
 // estimate; repetition (pattern counts) makes it surer, and makes a thing
 // common sense is unsure of (water) linkable at all.
 func (l *Linker) prep(ctx context.Context, item model.Occurrence, p model.Entity, rivals int) error {
-	if l.Judge == nil || p.State.Type == "" || p.State.Type == "기타" {
+	if l.Judge == nil || p.State.Type == "" || p.State.Type == registry.OtherKind {
 		return nil
 	}
 	sp, ok := l.World.Span(ctx, p, l.Now(), l.Loc)

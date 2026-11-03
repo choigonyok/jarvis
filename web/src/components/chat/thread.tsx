@@ -31,7 +31,7 @@ import {
   type Turn,
   type TurnRef,
 } from "@/lib/thread";
-import { diag, diagScroll, takeFrames, takeScrolls, viewOf, watchScrolls } from "@/lib/diag";
+import { diag } from "@/lib/diag";
 import { photoUrl } from "@/lib/uploads";
 import { speakable, useSpeech, useVoiceStatus } from "@/lib/use-speech";
 import { useThread } from "@/lib/use-thread";
@@ -238,8 +238,13 @@ const TurnRow = memo(function TurnRow({
   onDrop,
   opened,
   onFold,
+  typing,
+  onShown,
 }: {
   turn: Turn;
+  /** The answer being written for this row, while it is. */
+  typing?: Draft;
+  onShown?: (id: string, turn?: string) => void;
   proposal?: Proposal;
   /** The checklist the turn's card shows, as it stands. */
   list?: Checklist;
@@ -281,15 +286,19 @@ const TurnRow = memo(function TurnRow({
   const divider = day ? <DayDivider day={day} /> : null;
 
   if (turn.role === "agent") {
+    // Nothing to quote of an answer still being written.
+    const ref = typing ? () => {} : quote;
     return (
       <>
         {divider}
-        <li data-turn-id={turn.id} className="group/turn">
-          <SwipeRow onRef={quote}>
+        <li data-turn-id={turn.id} className="group/turn" aria-busy={typing ? "true" : undefined}>
+          <SwipeRow onRef={ref}>
             <div className={ROW}>
-              <Rail at={time} onRef={quote} />
+              <Rail at={typing ? undefined : time} onRef={ref} />
               <div className="min-w-0">
-                {turn.origin?.kind === "notice" ? (
+                {typing ? (
+                  <Typed draft={typing} onShown={onShown} />
+                ) : turn.origin?.kind === "notice" ? (
                   <NoticeCard turn={turn} list={list} onTick={tick} onDrop={drop} fold={fold} />
                 ) : turn.origin?.kind === "checklist" ? (
                   <>
@@ -390,8 +399,11 @@ const MAX_RATE = 0.18;
  * ceiling is for - this is for a stream that has run away from the screen.
  */
 const BACKLOG = 1200;
-/** The least time between redraws: each one parses the markdown again. */
-const FRAME_MS = 33;
+/**
+ * The least time between redraws: each one parses the markdown again, all of
+ * it, so a long answer is redrawn less often - the words come out as fast.
+ */
+const frameMs = (length: number) => (length < 1500 ? 33 : length < 4000 ? 66 : 100);
 /** How long a send holds the view at the bottom, at least, and at most. */
 const HOLD_MS = 800;
 const HOLD_MAX_MS = 3000;
@@ -409,10 +421,20 @@ const progress = new Map<string, number>();
  * (back from the voice stage) goes on from where it was (progress), not from
  * the start. With reduced motion everything is shown as it lands.
  */
+/** Whether the reader asked for less motion. */
+const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/**
+ * Down to the very bottom of el, where landing put it - smooth when the reader
+ * may watch it go, at once when they asked for less motion or it must not be
+ * overtaken. One place for what the thread did in two, each its own way.
+ */
+function toEnd(el: HTMLElement, smooth: boolean) {
+  el.scrollTo({ top: el.scrollHeight, behavior: smooth && !reducedMotion() ? "smooth" : "auto" });
+}
+
 function useTyped(id: string, text: string, atOnce: boolean): string {
-  const [still] = useState(
-    () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-  );
+  const [still] = useState(() => typeof window !== "undefined" && reducedMotion());
   const [shown, setShown] = useState(() => (atOnce ? text.length : (progress.get(id) ?? 0)));
   const pos = useRef(shown);
   const goal = useRef(shown);
@@ -434,7 +456,7 @@ function useTyped(id: string, text: string, atOnce: boolean): string {
       pos.current = Math.min(text.length, pos.current + rate.current * Math.max(0, now - last));
       last = now;
       const out = pos.current >= text.length;
-      if (out || now - drawn >= FRAME_MS) {
+      if (out || now - drawn >= frameMs(text.length)) {
         drawn = now;
         progress.set(id, pos.current);
         setShown(Math.floor(pos.current));
@@ -454,27 +476,25 @@ function useTyped(id: string, text: string, atOnce: boolean): string {
 }
 
 /**
- * The answer while it is written: where its turn will be, in its words, laid
+ * The answer while it is written, in the row its turn will keep: its words, laid
  * out as the runner stores them so the turn reads the same. Once its turn has
- * come and the last word is out, the turn takes its place (onShown).
+ * come and the last word is out, it says so (onShown) and the row shows the turn.
  */
-const DraftRow = memo(function DraftRow({ draft, onShown }: { draft: Draft; onShown: (id: string) => void }) {
+function Typed({ draft, onShown }: { draft: Draft; onShown?: (id: string, turn?: string) => void }) {
   const typed = useTyped(draft.id, draft.text, Boolean(draft.joined));
   const out = typed.length >= draft.text.length;
   useEffect(() => {
     if (out && draft.turn) {
       progress.delete(draft.id);
-      onShown(draft.id);
+      onShown?.(draft.id, draft.turn);
     }
   }, [out, draft.turn, draft.id, onShown]);
   const text = storedForm(typed);
-  return (
-    <li className={ROW} aria-busy="true">
-      <Rail />
-      <div className="min-w-0">{text ? <Markdown>{text}</Markdown> : null}</div>
-    </li>
-  );
-});
+  return text ? <Markdown>{text}</Markdown> : null;
+}
+
+/** The turn an answer will be, while its own has not come. */
+const drafted = (d: Draft): Turn => ({ id: d.id, role: "agent", at: "" });
 
 /**
  * The conversation itself, apart from the screen around it: a search being
@@ -513,7 +533,7 @@ const Transcript = memo(function Transcript({
   thinking: boolean;
   /** The answer being written. */
   draft: Draft | null;
-  onDraftShown: (id: string) => void;
+  onDraftShown: (id: string, turn?: string) => void;
   error: string | null;
   hydrated: boolean;
   onQuote: (ref: TurnRef) => void;
@@ -554,14 +574,19 @@ const Transcript = memo(function Transcript({
       ) : null}
 
       <ol className="space-y-7">
-        {turns.map((turn, i) => {
-          // A finished answer still coming out holds this place (DraftRow).
-          if (turn.id === draft?.turn) return null;
+        {[
+          ...turns.map((turn, i) => {
+          // A finished answer still coming out writes itself here. The row is
+          // keyed by the answer it typed (Turn.rowKey once it is out): keyed by
+          // its turn, the row was built again the moment the last word was out.
+          const typing = turn.id === draft?.turn ? draft : undefined;
           const day = turnDay(turn.atIso);
           return (
             <TurnRow
-              key={turn.id}
+              key={typing ? typing.id : (turn.rowKey ?? turn.id)}
               turn={turn}
+              typing={typing}
+              onShown={onDraftShown}
               proposal={turn.proposalId ? byId.get(turn.proposalId) : undefined}
               list={turn.origin?.checklist ? checklists[turn.origin.checklist] : undefined}
               day={day && day !== turnDay(turns[i - 1]?.atIso) ? day : null}
@@ -575,9 +600,9 @@ const Transcript = memo(function Transcript({
               onFold={onFold}
             />
           );
-        })}
+          }),
 
-        {unattached.map((proposal) => (
+          ...unattached.map((proposal) => (
           <li key={proposal.id} className={ROW}>
             <Rail at={proposal.at} />
             <div className="min-w-0">
@@ -587,12 +612,32 @@ const Transcript = memo(function Transcript({
               />
             </div>
           </li>
-        ))}
+          )),
+
+          // The answer before its turn has come: the same row, at the end. In
+          // one list with the turns, under the key it keeps, it moves into the
+          // turn's place instead of being built again there.
+          draft && draft.text.trim() && !draft.turn ? (
+            <TurnRow
+              key={draft.id}
+              turn={drafted(draft)}
+              typing={draft}
+              onShown={onDraftShown}
+              day={null}
+              quoteAt=""
+              onQuote={onQuote}
+              onJump={onJump}
+              onDecide={onDecide}
+              onTick={onTick}
+              onDrop={onDrop}
+              opened={false}
+              onFold={onFold}
+            />
+          ) : null,
+        ]}
 
         {/* While the answer grows the dots have nothing to say. */}
-        {draft && draft.text.trim() ? (
-          <DraftRow key={draft.id} draft={draft} onShown={onDraftShown} />
-        ) : thinking ? (
+        {draft && draft.text.trim() ? null : thinking ? (
           <li
             className={ROW}
             aria-live="polite"
@@ -687,7 +732,7 @@ export function Thread() {
   // the backlog would be recited from the top the moment you switch modes.
   const spoken = useRef<string | null>(null);
 
-  const waiting = proposals.filter(isPending);
+  const waiting = useMemo(() => proposals.filter(isPending), [proposals]);
   const pending = waiting.length;
   // The bar speaks for what you cannot see. A card sitting in the transcript
   // in front of you is already saying it.
@@ -748,6 +793,8 @@ export function Thread() {
   // otherwise read as a finger forever, and nothing would follow again.
   const touchAt = useRef(0);
   const finger = useCallback(() => touching.current && performance.now() - touchAt.current < 1500, []);
+  // The view follows the bottom: pinned there, and no finger moving it.
+  const following = useCallback(() => pinned.current && !finger(), [finger]);
   const settle = useRef<number | undefined>(undefined);
 
   // Set while a page of older turns is on its way: how tall the thread was
@@ -782,14 +829,12 @@ export function Thread() {
     // line has above the composer's fade) out of sight, so every fresh read -
     // coming back to the tab, say - slid the view 48px up, the last line under
     // the fade.
-    if (pinned.current && !finger()) {
-      const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (following()) {
       // While a send holds the bottom, at once: a smooth ride is overtaken by
       // the next frame's hold, and on iOS it put the view back up.
-      const now = performance.now() < holdUntil.current;
-      el.scrollTo({ top: el.scrollHeight, behavior: still || now ? "auto" : "smooth" });
+      toEnd(el, performance.now() >= holdUntil.current);
     }
-  }, [turns, proposals, thinking, error, mode, finger]);
+  }, [turns, proposals, thinking, error, mode, finger, following]);
 
   // Scrolling up near the top asks for the page above. Asked once per page:
   // the next ask waits for this one to land (loadingOlder) and be measured.
@@ -884,7 +929,6 @@ export function Thread() {
   const toNewest = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const before = { ...viewOf(el), pinned: pinned.current, held: Boolean(held.current), touching: touching.current, finger: finger() };
     held.current = null;
     pinned.current = true;
     el.scrollTop = el.scrollHeight;
@@ -899,16 +943,6 @@ export function Thread() {
       requestAnimationFrame(hold);
     };
     requestAnimationFrame(hold);
-    // Temporary (lib/diag.ts): where the view went on the phone after a send.
-    const after = viewOf(el);
-    const t0 = performance.now();
-    const samples: unknown[] = [];
-    const take = () =>
-      samples.push({ dt: Math.round(performance.now() - t0), ...viewOf(scrollRef.current), pinned: pinned.current, touching: touching.current, finger: finger() });
-    watchScrolls(3000);
-    requestAnimationFrame(take);
-    for (const ms of [100, 300, 700, 1500, 3000]) window.setTimeout(take, ms);
-    window.setTimeout(() => diag("send", { before, after, samples, scrolls: takeScrolls() }), 3100);
   }, [finger]);
 
   // Down to the newest turn - and staying there as more come.
@@ -917,8 +951,7 @@ export function Thread() {
     if (!el) return;
     held.current = null;
     pinned.current = true;
-    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    el.scrollTo({ top: el.scrollHeight, behavior: still ? "auto" : "smooth" });
+    toEnd(el, true);
   }, []);
 
   // A quote tapped in a bubble goes back to the message it quotes, and marks
@@ -946,52 +979,13 @@ export function Thread() {
     const ro = new ResizeObserver(() => {
       // Photos above a held card push it down as they load: keep it centred.
       if (held.current) held.current.scrollIntoView({ block: "center" });
-      else if (pinned.current && !finger()) el.scrollTop = el.scrollHeight;
+      else if (following()) el.scrollTop = el.scrollHeight;
     });
     ro.observe(content);
     ro.observe(el);
     return () => ro.disconnect();
     // Again for the scroller the voice stage's return builds.
-  }, [mode, finger]);
-
-  // Temporary (lib/diag.ts): while an answer is written, how far it has come
-  // out and where the view is, every 0.1s; and once per load, the device.
-  const drafting = Boolean(draft);
-  useEffect(() => {
-    if (!drafting) return;
-    const t0 = performance.now();
-    const samples: number[][] = [];
-    const id = window.setInterval(() => {
-      const el = scrollRef.current;
-      const row = el?.querySelector("li[aria-busy=true]");
-      if (samples.length < 600)
-        samples.push([
-          Math.round(performance.now() - t0),
-          row?.textContent?.length ?? -1,
-          el ? Math.round(el.scrollHeight - el.scrollTop - el.clientHeight) : -1,
-          pinned.current ? 1 : 0,
-          touching.current ? 1 : 0,
-          finger() ? 1 : 0,
-        ]);
-    }, 100);
-    return () => {
-      window.clearInterval(id);
-      diag("answer", { samples, ...takeFrames() });
-    };
-  }, [drafting, finger]);
-  useEffect(() => {
-    const id = window.setTimeout(
-      () =>
-        diag("load", {
-          ua: navigator.userAgent,
-          standalone: matchMedia("(display-mode: standalone)").matches,
-          motion: matchMedia("(prefers-reduced-motion: reduce)").matches ? "reduce" : "full",
-          view: viewOf(scrollRef.current),
-        }),
-      1500,
-    );
-    return () => window.clearTimeout(id);
-  }, []);
+  }, [mode, following]);
 
   // Watch the waiting cards themselves rather than guessing from scroll
   // position: the bar exists to speak for a decision you cannot see, so what
@@ -1060,10 +1054,59 @@ export function Thread() {
     if (text) speak(text);
   }, [mode, muted, last, text, hydrated, speak, cancel, refreshVoice]);
 
-  function switchMode(next: ChatMode) {
+  const switchMode = useCallback((next: ChatMode) => {
     setMode(next);
     window.localStorage.setItem(MODE_KEY, next);
-  }
+  }, []);
+
+  // What the header and the composer are handed stays the same while it means
+  // the same: they are drawn again only when it changes, not on every frame of
+  // an answer.
+  const openGuide = useCallback(() => setGuide(true), []);
+  const headerActions = useMemo(
+    () => (
+      <>
+        <GuideToggle open={guide} onOpen={openGuide} />
+        <SearchToggle search={search} />
+      </>
+    ),
+    [guide, openGuide, search],
+  );
+  const sendFromComposer = useCallback(
+    async (text: string, images: string[]) => {
+      toNewest();
+      const ok = await send(text, images, quoting?.id);
+      if (ok) setQuoting(null);
+      return ok;
+    },
+    [toNewest, send, quoting],
+  );
+  const toVoice = useCallback(() => switchMode("voice"), [switchMode]);
+  const cancelQuote = useCallback(() => setQuoting(null), []);
+  const quotingLine = useMemo(
+    () =>
+      quoting
+        ? { label: quoting.role === "agent" ? "Jarvis에게 답장" : "내 메시지에 답장", text: quoting.text || "사진" }
+        : null,
+    [quoting],
+  );
+  const queued = useMemo(
+    () => (
+      <QueuedMessages
+        queue={queue}
+        onSteer={(id) => {
+          toNewest();
+          return steer(id);
+        }}
+        onDrop={drop}
+        onRestore={(text, images) => {
+          toNewest();
+          void send(text, images);
+        }}
+      />
+    ),
+    [queue, toNewest, steer, drop, send],
+  );
 
   // The transcript is the same one either way - the stage is a different
   // window onto it, not a second store. Leaving voice mode drops you back
@@ -1093,16 +1136,7 @@ export function Thread() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <Header
-        connection={connection}
-        pending={pending}
-        actions={
-          <>
-            <GuideToggle open={guide} onOpen={() => setGuide(true)} />
-            <SearchToggle search={search} />
-          </>
-        }
-      />
+      <Header connection={connection} pending={pending} actions={headerActions} />
       <GuideSheet open={guide} onOpenChange={setGuide} role={role} />
       <SearchBar search={search} />
       <StandingBar pending={waiting} href="/record" muted={cardsVisible} />
@@ -1133,7 +1167,6 @@ export function Thread() {
             if (gap > 1) holdUntil.current = Math.min(holdFrom.current + HOLD_MAX_MS, Math.max(holdUntil.current, now + 300));
           } else if (rose && gap > 1) pinned.current = false;
           else if (gap < 8) pinned.current = true;
-          diagScroll(el.scrollTop, gap, rose, pinned.current);
           window.clearTimeout(settle.current);
           const ask = () => {
             if (finger()) settle.current = window.setTimeout(ask, 120);
@@ -1238,43 +1271,18 @@ export function Thread() {
         <div className="inset-x-safe">
           <div className={cn("mx-auto w-full max-w-[46rem] px-4 sm:px-8 sm:pb-6", typing ? "pb-2" : "pb-0")}>
             <Composer
-              onSend={async (text, images) => {
-                toNewest();
-                const ok = await send(text, images, quoting?.id);
-                if (ok) setQuoting(null);
-                return ok;
-              }}
+              onSend={sendFromComposer}
               allowPhotos
               // The guest's jobs open no website: no selling for them.
               photoHint={role === "guest" ? "사진에 대해 한마디" : undefined}
-              onVoice={() => switchMode("voice")}
+              onVoice={toVoice}
               onFocusChange={setTyping}
-              quoting={
-                quoting
-                  ? {
-                      label: quoting.role === "agent" ? "Jarvis에게 답장" : "내 메시지에 답장",
-                      text: quoting.text || "사진",
-                    }
-                  : null
-              }
-              onCancelQuote={() => setQuoting(null)}
+              quoting={quotingLine}
+              onCancelQuote={cancelQuote}
               inputRef={inputRef}
               busy={thinking}
               draftKey={`jarvis:composer-draft:${role}`}
-              queued={
-                <QueuedMessages
-                  queue={queue}
-                  onSteer={(id) => {
-                    toNewest();
-                    return steer(id);
-                  }}
-                  onDrop={drop}
-                  onRestore={(text, images) => {
-                    toNewest();
-                    void send(text, images);
-                  }}
-                />
-              }
+              queued={queued}
             />
             {/* On a phone this switch is the mic inside the composer; spending a
                 third bar on it would leave the transcript a strip. */}

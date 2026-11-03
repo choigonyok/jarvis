@@ -28,6 +28,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -37,6 +38,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/choigonyok/jarvis/gocommon/person"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 )
 
@@ -56,8 +58,8 @@ const (
 
 // Whose a reminder is.
 const (
-	Owner = "owner"
-	Guest = "guest"
+	Owner = person.Owner
+	Guest = person.Guest
 )
 
 // Sources: who wanted it said.
@@ -99,14 +101,79 @@ type Reminder struct {
 	Checklist string `json:"checklist,omitempty"`
 	// Who is whose it is: "" or owner, the operator's; guest, the guest's.
 	Who string `json:"who,omitempty"`
-	// Status, and what came of saying it: "푸시", "카드", or why nothing
-	// was said.
+	// Status, and what came of saying it: How, for what reads it; Unsaid,
+	// why nothing went out; Result, the same in words ("푸시", "카드").
 	Status    string     `json:"status"`
 	SentAt    *time.Time `json:"sentAt,omitempty"`
 	SentBy    string     `json:"sentBy,omitempty"`
+	How       string     `json:"how,omitempty"`
+	Unsaid    string     `json:"unsaid,omitempty"`
 	Result    string     `json:"result,omitempty"`
 	CreatedAt time.Time  `json:"createdAt"`
 	UpdatedAt time.Time  `json:"updatedAt"`
+}
+
+// How a reminder went, as what reads it reads it (web/src/lib/reminders.ts): it
+// read the words, and "목록이 닫혀 말하지 않음" showed as said (2026-11-03).
+const (
+	HowPush   = "push"
+	HowCard   = "card"
+	HowDigest = "digest" // with the evening's summary
+	HowSilent = "silent" // nothing went out, for Why
+	HowFailed = "failed"
+)
+
+// Said is how saying a reminder went: How, and why when nothing went out.
+type Said struct {
+	How string
+	Why string
+}
+
+// Words is Said as Result keeps it.
+func (s Said) Words() string {
+	switch s.How {
+	case HowPush:
+		return "푸시"
+	case HowCard:
+		return "카드"
+	case HowDigest:
+		return "저녁 요약으로"
+	case HowFailed:
+		return "실패: " + s.Why
+	}
+	return "말하지 않음: " + s.Why
+}
+
+// UnmarshalJSON reads a reminder, and one kept before How was gives it from
+// its words - read here, where the words were made, and nowhere else.
+func (r *Reminder) UnmarshalJSON(b []byte) error {
+	type plain Reminder
+	if err := json.Unmarshal(b, (*plain)(r)); err != nil {
+		return err
+	}
+	if r.How == "" && r.Status == Sent {
+		r.How, r.Unsaid = howOf(r.Result)
+	}
+	return nil
+}
+
+func howOf(words string) (how, why string) {
+	words = strings.TrimSpace(words)
+	switch {
+	case words == "푸시":
+		return HowPush, ""
+	case strings.HasPrefix(words, "카드"):
+		return HowCard, ""
+	case words == "저녁 요약으로":
+		return HowDigest, ""
+	case strings.HasPrefix(words, "실패:"):
+		return HowFailed, strings.TrimSpace(strings.TrimPrefix(words, "실패:"))
+	case strings.HasPrefix(words, "말하지 않음"):
+		return HowSilent, strings.TrimSpace(strings.TrimLeft(strings.TrimPrefix(words, "말하지 않음"), ":："))
+	case strings.HasSuffix(words, "말하지 않음"):
+		return HowSilent, strings.TrimSpace(strings.TrimSuffix(words, "말하지 않음"))
+	}
+	return HowPush, ""
 }
 
 // Person is whose the reminder is: Owner or Guest.
@@ -159,9 +226,9 @@ type Service struct {
 	// known, and nobody is taken to be anywhere. GuestHere is the guest's.
 	Here      func(ctx context.Context) ([]Visit, error)
 	GuestHere func(ctx context.Context) ([]Visit, error)
-	// Say says a reminder whose moment came, and what came of it ("푸시");
-	// an error leaves it waiting, to be tried again.
-	Say func(ctx context.Context, r Reminder) (string, error)
+	// Say says a reminder whose moment came, and what came of it; an error
+	// leaves it waiting, to be tried again.
+	Say func(ctx context.Context, r Reminder) (Said, error)
 	Out *slog.Logger
 
 	mu sync.Mutex
@@ -177,7 +244,7 @@ func (s *Service) Set(ctx context.Context, r Reminder) (Reminder, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.Now()
-	r.ID, r.Status, r.SentAt, r.SentBy, r.Result = "", Waiting, nil, "", ""
+	r.ID, r.Status, r.SentAt, r.SentBy, r.Result, r.How, r.Unsaid = "", Waiting, nil, "", "", "", ""
 	r.CreatedAt, r.UpdatedAt = now, now
 	if r.Source == "" {
 		r.Source = Asked
@@ -272,7 +339,7 @@ func (s *Service) Change(ctx context.Context, id string, c Change) (Reminder, er
 		r.Until = c.Until
 	}
 	now := s.Now()
-	r.Status, r.SentAt, r.SentBy, r.Result, r.UpdatedAt = Waiting, nil, "", "", now
+	r.Status, r.SentAt, r.SentBy, r.Result, r.How, r.Unsaid, r.UpdatedAt = Waiting, nil, "", "", "", "", now
 	if err := s.check(&r, now); err != nil {
 		return r, err
 	}
@@ -588,7 +655,7 @@ func (s *Service) Run(ctx context.Context, every time.Duration) {
 // leaves it waiting.
 func (s *Service) say(ctx context.Context, r Reminder, by string) {
 	r.SentBy = by
-	result, err := s.Say(ctx, r)
+	said, err := s.Say(ctx, r)
 	if err != nil {
 		if s.Out != nil {
 			s.Out.Warn("알림을 보내지 못했습니다", "id", r.ID, "err", err)
@@ -596,7 +663,8 @@ func (s *Service) say(ctx context.Context, r Reminder, by string) {
 		return
 	}
 	now := s.Now()
-	r.Status, r.SentAt, r.Result, r.UpdatedAt = Sent, &now, result, now
+	r.Status, r.SentAt, r.UpdatedAt = Sent, &now, now
+	r.How, r.Unsaid, r.Result = said.How, said.Why, said.Words()
 	if err := s.put(ctx, r); err != nil && s.Out != nil {
 		s.Out.Warn("보낸 알림을 기록하지 못했습니다", "id", r.ID, "err", err)
 	}

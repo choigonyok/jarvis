@@ -148,7 +148,7 @@ func TestDatedListComesUpTheEveningBefore(t *testing.T) {
 	}
 	rs, _ = f.m.Moments.List(ctx, true)
 	for _, r := range rs {
-		if r.Checklist == done.ID && !strings.Contains(r.Result, "다 해서") {
+		if r.Checklist == done.ID && (r.How != moments.HowSilent || r.Unsaid != "다 함") {
 			t.Fatalf("다 한 목록은 말하지 않고 그렇게 남깁니다: %+v", r)
 		}
 	}

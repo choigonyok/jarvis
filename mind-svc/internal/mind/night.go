@@ -12,6 +12,7 @@ import (
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/link"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+	"github.com/choigonyok/jarvis/mind-svc/internal/registry"
 	"github.com/choigonyok/jarvis/mind-svc/internal/skill"
 	"github.com/choigonyok/jarvis/mind-svc/internal/world"
 )
@@ -111,7 +112,7 @@ func (m *Mind) ended(ctx context.Context, since, until time.Time) ([]model.Entit
 	var out []model.Entity
 	for _, p := range plans {
 		st := p.State
-		if (st.Status != model.Confirmed && st.Status != model.Done) || st.Type == "" || st.Type == "기타" {
+		if (st.Status != model.Confirmed && st.Status != model.Done) || st.Type == "" || st.Type == registry.OtherKind {
 			continue
 		}
 		sp, ok := m.World.Span(ctx, p, until, loc)
@@ -380,4 +381,35 @@ func (m *Mind) pruneMessages(ctx context.Context) error {
 		m.Opts.Logger.Info("보존 기한이 지난 메시지를 지웠습니다", "count", n)
 	}
 	return err
+}
+
+// retype, each night: a plan of no kind whose title says one is given it - a
+// kind added to the table, or a title the model left 기타 ("밴드 합주") - so
+// linking and learning see it. 92 of 165 plans were of no kind (2026-11-03).
+func (m *Mind) retype(ctx context.Context) error {
+	plans, err := m.Opts.Store.Entities(ctx, model.KindPlan, "", false)
+	if err != nil {
+		return err
+	}
+	kinds := registry.Current()
+	for _, p := range plans {
+		if p.State.Type != "" && p.State.Type != registry.OtherKind {
+			continue
+		}
+		k := kinds.KindOf(p.State.Title)
+		if k == registry.OtherKind {
+			continue
+		}
+		set := func(st *model.State) bool {
+			if st.Type != "" && st.Type != registry.OtherKind {
+				return false
+			}
+			st.Type = k
+			return true
+		}
+		if _, _, err := m.World.Update(ctx, p.ID, set, world.Meta{Actor: model.ActorKind, Why: "제목으로 종류를 읽음: " + k}); err != nil && !errors.Is(err, model.ErrNotFound) {
+			return err
+		}
+	}
+	return nil
 }

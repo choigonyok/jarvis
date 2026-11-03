@@ -33,6 +33,7 @@ func (m *Mind) readRegistry(ctx context.Context) error {
 		return err
 	}
 	m.reg.Set(r)
+	registry.SetCurrent(r)
 	m.Gate.SetPolicy(gate.PolicyFrom(r))
 	if missing := m.Gate.Unlisted(); len(missing) > 0 {
 		m.Opts.Logger.Error("레지스트리에 없는 행동은 하지 않습니다", "kinds", missing)

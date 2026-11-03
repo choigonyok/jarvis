@@ -1,0 +1,23 @@
+{
+  "name": "종류가 목록 밖이던 일정: 밴드 합주는 취미, 미용실은 미용 - 모델이 기타로 두어도 제목이 말하는 종류로",
+  "room": "kinds",
+  "roomName": "민수",
+  "turns": [
+    {
+      "messages": [
+        { "at": "2026-11-03T20:00", "from": "민수", "text": "토요일 3시에 밴드 합주 어때?" },
+        { "at": "2026-11-03T20:01", "me": true, "text": "좋아 3시에 보자" }
+      ],
+      "script": {"changes":[{"op":"create","kind":"plan","set":{"title":"민수와 밴드 합주","status":"confirmed","date":"2026-11-07","start":"15:00","type":"기타","people":["민수"]},"evidence":[{"line":2,"quote":"좋아 3시에 보자"}],"confidence":0.9,"why":"둘 다 동의"}]},
+      "expect": { "plans": [{ "titleHas": "합주", "type": "취미" }] }
+    },
+    {
+      "messages": [
+        { "at": "2026-11-03T21:00", "from": "민수", "text": "일요일엔 뭐 해?" },
+        { "at": "2026-11-03T21:01", "me": true, "text": "일요일 11시에 미용실 예약해 놨어" }
+      ],
+      "script": {"changes":[{"op":"create","kind":"plan","set":{"title":"미용실","status":"confirmed","date":"2026-11-08","start":"11:00"},"evidence":[{"line":2,"quote":"일요일 11시에 미용실 예약해 놨어"}],"confidence":0.9,"why":"예약함"}]},
+      "expect": { "plans": [{ "titleHas": "미용", "type": "미용" }] }
+    }
+  ]
+}

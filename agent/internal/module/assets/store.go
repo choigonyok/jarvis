@@ -126,6 +126,7 @@ type Drift struct {
 	Target   float64  `json:"target"`
 	GapKrw   float64  `json:"gapKrw"`
 	InBand   bool     `json:"inBand"`
+	Band     float64  `json:"band"`  // how far it may drift, as a fraction
 	Spent    bool     `json:"spent"` // cash under its target: left out of the sums
 	Symbols  []string `json:"symbols"`
 }
@@ -162,6 +163,7 @@ type TaxBasket struct {
 	GainKrw      float64 `json:"gainKrw"`
 	DeductionKrw float64 `json:"deductionKrw"`
 	TaxKrw       float64 `json:"taxKrw"`
+	Rate         float64 `json:"rate"`
 	InForce      bool    `json:"inForce"`
 }
 

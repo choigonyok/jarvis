@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/choigonyok/jarvis/gocommon/person"
 	"github.com/choigonyok/jarvis/input-svc/internal/chat/store"
 	"github.com/choigonyok/jarvis/input-svc/internal/chat/turn"
 	"github.com/choigonyok/jarvis/input-svc/internal/envelope"
@@ -27,7 +28,7 @@ import (
 const kindTurn = "chat.turn"
 
 // guestThread is the one thread the guest's token opens.
-const guestThread = "guest"
+const guestThread = person.Guest
 
 // threadName is "" (the operator) or a short lowercase name. Anything else is
 // refused rather than stored: a typo would quietly start a second, empty

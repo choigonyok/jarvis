@@ -6,7 +6,26 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+	"github.com/choigonyok/jarvis/mind-svc/internal/registry"
 )
+
+// systemText is the interpreter's instructions with the kinds of plan as the
+// registry has them now: a kind added there is one the next read can name.
+func systemText() string {
+	return strings.Replace(system, "{{종류}}", kindsSentence(registry.Current()), 1)
+}
+
+// kindsSentence names every kind, then says what the names alone do not.
+func kindsSentence(r *registry.Snapshot) string {
+	var names, told []string
+	for _, k := range r.PlanKinds() {
+		names = append(names, k.Name)
+		if k.Told != "" {
+			told = append(told, k.Told)
+		}
+	}
+	return strings.TrimSpace(strings.Join(names, "·") + " 중 하나. " + strings.Join(told, " "))
+}
 
 // The interpreter reads; it does not decide what to do. What it returns is a
 // set of changes to the world model and facts for long-term memory, each
@@ -68,7 +87,7 @@ const system = `너는 개인 비서의 "해석기"다. 운영자의 메신저 �
  {"op":"remember","kind":"fact","set":{"subject":"민지","subjectKind":"Person","relation":"LIVES_IN","object":"부산","objectKind":"Place","text":"민지는 부산에 산다"},"evidence":[{"line":7,"quote":"나 부산으로 이사했어"}],"confidence":0.9,"why":"이사","ends":["M2"]}
 ]}
 plan·loop 의 set 에 쓸 수 있는 키: title, status, date, dateFrom, endDate, start, end, place, people, owner, due, plan, note. update 에는 바뀐 키만 넣는다.
-plan 에는 type(종류)도 넣는다: 데이트·캠핑·여행·회식·식사·모임·운동·병원·업무·경조사·기념일·쇼핑·공연·기타 중 하나. 영화·연극·콘서트·전시는 공연, 연인과 단둘이 만나는 일은 데이트다. 대화로 알 수 있으면 placeKind(장소 종류: 집·식당·카페·영화관·캠핑장·회사·병원 …)와 area(동네: "망원동", "성수동")도 넣는다. 모르면 비운다.
+plan 에는 type(종류)도 넣는다: {{종류}} 대화로 알 수 있으면 placeKind(장소 종류: 집·식당·카페·영화관·캠핑장·회사·병원 …)와 area(동네: "망원동", "성수동")도 넣는다. 모르면 비운다.
 fact 의 set 키: subject, subjectKind, relation, object, objectKind, text, validAt. fact 의 ends 는 set 밖에 둔다.
 title 은 캘린더에 그대로 쓸 짧은 한국어다("민지와 저녁", "지수와 강릉 여행"). people 에 운영자는 넣지 않는다. plan 은 그 고리가 속한 일정의 ref 다.`
 

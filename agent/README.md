@@ -209,7 +209,7 @@ Go 는 `gocommon/site`, 브라우저는 `publicsuffixlist`.
   `JARVIS_ENRICH=false` 로 끕니다.
   백그라운드 작업이 브라우저를 쓰는 동안 결제 안전장치(`/intercept`)에 걸린 요청은 카드를 띄우지
   않고 그 자리에서 결정합니다 — 그 카드 앞에는 아무것도 시작하지 않은 사람이 앉아 있기 때문입니다.
-  `JARVIS_BACKGROUND_LOGIN_HOSTS`(기본 `nid.naver.com`)는 허용하고(브라우저에 저장된 비밀번호로 로그인
+  `JARVIS_BACKGROUND_LOGIN_HOSTS`(compose 의 `LOGIN_HOSTS`, 브라우저의 `JOB_LOGIN_HOSTS` 와 같은 값, 기본 `nid.naver.com`)는 허용하고(브라우저에 저장된 비밀번호로 로그인
   버튼만 누르게 함), 나머지 — 모든 결제 호스트 — 는 거부합니다.
   예외는 작업(jobs)입니다. 대화는 브라우저 일을 전부 작업으로 넘기므로, 운영자가 맡긴 구매의 결제도
   작업에서 일어납니다. 작업의 실행이 결제하기에 닿으면 그 작업에 묶인 결제 카드를 올리고, 멈춘 요청은 카드의

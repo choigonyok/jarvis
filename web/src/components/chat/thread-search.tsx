@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { ChevronDown, ChevronUp, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -179,28 +179,34 @@ export function useThreadSearch(root: RefObject<HTMLElement | null>) {
     setQuery(q);
   }, []);
 
-  return {
-    open,
-    query,
-    total: live.length,
-    at: live.length ? at : 0,
-    /** The query once typing has paused (SearchBar holds what is being typed). */
-    setQuery: settle,
-    show: () => {
-      first.current = true;
-      setOpen(true);
-    },
-    close: () => {
-      setOpen(false);
-      asked.current = "";
-      setQuery("");
-      setHits(NONE);
-      setAt(0);
-    },
-    /** Older: further up the thread. */
-    older: () => setAt((i) => (live.length ? Math.min(live.length - 1, i + 1) : 0)),
-    newer: () => setAt((i) => Math.max(0, i - 1)),
-  };
+  // The same answer while nothing in it changed: the header holding the search
+  // is not drawn again on every frame of an answer.
+  const total = live.length;
+  return useMemo(
+    () => ({
+      open,
+      query,
+      total,
+      at: total ? at : 0,
+      /** The query once typing has paused (SearchBar holds what is being typed). */
+      setQuery: settle,
+      show: () => {
+        first.current = true;
+        setOpen(true);
+      },
+      close: () => {
+        setOpen(false);
+        asked.current = "";
+        setQuery("");
+        setHits(NONE);
+        setAt(0);
+      },
+      /** Older: further up the thread. */
+      older: () => setAt((i) => (total ? Math.min(total - 1, i + 1) : 0)),
+      newer: () => setAt((i) => Math.max(0, i - 1)),
+    }),
+    [open, query, total, at, settle],
+  );
 }
 
 const NONE: Hit[] = [];

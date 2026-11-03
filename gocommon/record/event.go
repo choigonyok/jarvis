@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+
+	"github.com/choigonyok/jarvis/gocommon/person"
 )
 
 // Notify is wording for a person a record may carry: how a service says
@@ -42,7 +44,7 @@ type event struct {
 
 // GuestActor is the actor of what is the guest's: input-svc puts it in the
 // guest's tables.
-const GuestActor = "guest"
+const GuestActor = person.Guest
 
 // FromEvent is a report as a record's envelope, ready for the outbox. Its data
 // stays what it was, with the wording beside it, and what is for the guest is

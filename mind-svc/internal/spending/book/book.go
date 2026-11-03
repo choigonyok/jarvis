@@ -7,6 +7,8 @@
 package book
 
 import (
+	"math"
+	"slices"
 	"sort"
 	"time"
 
@@ -110,6 +112,10 @@ type Recurring struct {
 	LastAt string `json:"lastAt"`
 	NextAt string `json:"nextAt"`
 	Months int    `json:"months"`
+	// Run is the months in a row up to the latest.
+	Run int `json:"run"`
+	// BeforeKrw is the price that held before this month's changed.
+	BeforeKrw int64 `json:"beforeKrw,omitempty"`
 }
 
 type Summary struct {
@@ -297,65 +303,129 @@ func addToCategories(t Tx, cat func(string) *CategoryTotal) {
 	c.Count++
 }
 
-// FindRecurring picks out what charges itself every month: the same merchant
-// in at least two of the last four months, at roughly the same amount and on
-// roughly the same day. A subscription you forgot about is the point - so one
-// that has lapsed (nothing in 45 days) is not listed.
+// FindRecurring is the ledger's transactions that charge themselves every month
+// (Monthly).
 func FindRecurring(txs []Tx, now time.Time) []Recurring {
-	loc := now.Location()
-	groups := map[string][]Tx{}
+	var charges []Charge
 	for _, t := range txs {
 		Settle(&t)
-		if t.Status != "ok" || now.Sub(t.ApprovedAt) > 125*24*time.Hour {
+		if t.Status == "ok" {
+			charges = append(charges, Charge{Merchant: t.Merchant, Category: t.Category, AmountKrw: t.AmountKrw, At: t.ApprovedAt})
+		}
+	}
+	return Monthly(charges, now)
+}
+
+// Charge is one payment as either ledger has it: spending's transactions, or
+// mind's purchases.
+type Charge struct {
+	Merchant  string
+	Category  string
+	AmountKrw int64
+	At        time.Time
+}
+
+const (
+	monthlyRead   = 183 * 24 * time.Hour // what is read: half a year
+	monthlySeen   = 125 * 24 * time.Hour // two months of it within this, to be listed
+	monthlyLapsed = 45 * 24 * time.Hour  // nothing in this long: it ended
+)
+
+// Monthly is what charges itself every month - a subscription, a bill - read
+// one way for every screen and every word about it: the same merchant once a
+// month in two of the last four months, the latest within 45 days, on about the
+// same day (five days apart at most, or either side of a month's turn), at
+// about the same amount (15%). This month's may have changed from a price that
+// held (5%): Before says from what - two months alone say nothing of a change,
+// and must agree. The spending screen, the evening's word on a changed bill and
+// the word on one that did not come each had a rule of their own (2026-11-03:
+// two of four months ±15%, three running ±5%, and the engine's cycles).
+func Monthly(charges []Charge, now time.Time) []Recurring {
+	loc := now.Location()
+	groups := map[string][]Charge{}
+	for _, c := range charges {
+		if c.At.After(now) || now.Sub(c.At) > monthlyRead {
 			continue
 		}
-		k := category.Key(t.Merchant)
-		groups[k] = append(groups[k], t)
+		k := category.Key(c.Merchant)
+		groups[k] = append(groups[k], c)
 	}
-
 	out := []Recurring{}
 	for _, g := range groups {
-		sort.Slice(g, func(i, j int) bool { return g[i].ApprovedAt.Before(g[j].ApprovedAt) })
-		// One charge per month: a merchant visited three times in one month is
-		// a habit, not a subscription.
-		months := map[string]Tx{}
-		for _, t := range g {
-			months[t.ApprovedAt.In(loc).Format("2006-01")] = t
+		sort.Slice(g, func(i, j int) bool { return g[i].At.Before(g[j].At) })
+		months, recent := map[string]bool{}, map[string]bool{}
+		for _, c := range g {
+			m := c.At.In(loc).Format("2006-01")
+			months[m] = true
+			if now.Sub(c.At) <= monthlySeen {
+				recent[m] = true
+			}
 		}
-		if len(months) < 2 || len(months) != len(g) {
+		// Once a month: three times in one is a habit, not a bill.
+		if len(months) != len(g) || len(recent) < 2 {
 			continue
 		}
 		last := g[len(g)-1]
-		if now.Sub(last.ApprovedAt) > 45*24*time.Hour {
+		if now.Sub(last.At) > monthlyLapsed {
 			continue
 		}
-		minA, maxA := last.AmountKrw, last.AmountKrw
 		minD, maxD := 31, 1
-		for _, t := range g {
-			minA, maxA = min(minA, t.AmountKrw), max(maxA, t.AmountKrw)
-			d := t.ApprovedAt.In(loc).Day()
+		for _, c := range g {
+			d := c.At.In(loc).Day()
 			minD, maxD = min(minD, d), max(maxD, d)
-		}
-		if float64(maxA-minA) > 0.15*float64(maxA) {
-			continue
 		}
 		// A charge on the 30th one month and the 1st the next is the same
 		// billing day across a month boundary.
 		if maxD-minD > 5 && !(minD <= 3 && maxD >= 27) {
 			continue
 		}
-		lastDay := last.ApprovedAt.In(loc)
-		next := lastDay.AddDate(0, 1, 0)
-		out = append(out, Recurring{
+		var before []int64
+		for _, c := range g[:len(g)-1] {
+			before = append(before, c.AmountKrw)
+		}
+		mid := median64(before)
+		near := func(a int64, share float64) bool { return math.Abs(float64(a-mid)) <= share*float64(mid) }
+		steady, held := true, true
+		for _, a := range before {
+			steady, held = steady && near(a, 0.15), held && near(a, 0.05)
+		}
+		if !steady || len(g) == 2 && !near(last.AmountKrw, 0.15) {
+			continue
+		}
+		lastDay := last.At.In(loc)
+		r := Recurring{
 			Merchant:  last.Merchant,
 			Category:  last.Category,
 			AmountKrw: last.AmountKrw,
 			Day:       lastDay.Day(),
 			LastAt:    lastDay.Format("2006-01-02"),
-			NextAt:    next.Format("2006-01-02"),
-			Months:    len(months),
-		})
+			NextAt:    lastDay.AddDate(0, 1, 0).Format("2006-01-02"),
+			Months:    len(g),
+			Run:       running(months, lastDay),
+		}
+		if held && len(g) > 2 && !near(last.AmountKrw, 0.05) {
+			r.BeforeKrw = mid
+		}
+		out = append(out, r)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].NextAt < out[j].NextAt })
 	return out
+}
+
+// running is how many months in a row, up to the latest, had the charge.
+func running(months map[string]bool, last time.Time) int {
+	n := 0
+	for m := time.Date(last.Year(), last.Month(), 1, 0, 0, 0, 0, last.Location()); months[m.Format("2006-01")]; m = m.AddDate(0, -1, 0) {
+		n++
+	}
+	return n
+}
+
+func median64(xs []int64) int64 {
+	s := slices.Clone(xs)
+	slices.Sort(s)
+	if len(s) == 0 {
+		return 0
+	}
+	return s[len(s)/2]
 }

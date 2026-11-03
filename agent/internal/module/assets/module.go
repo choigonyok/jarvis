@@ -180,8 +180,8 @@ func renderPortfolio(p Portfolio) string {
 				fmt.Fprintf(&b, "- %d년 %s 실현손익 %s · 아직 과세 안 함\n", r.Tax.Year, label, signedKrw(t.GainKrw))
 				continue
 			}
-			fmt.Fprintf(&b, "- %d년 %s 실현손익 %s · 공제 %s · 예상 양도세 %s (22%%, 매도일 환율 기준 추정)\n",
-				r.Tax.Year, label, signedKrw(t.GainKrw), krw(t.DeductionKrw), krw(t.TaxKrw))
+			fmt.Fprintf(&b, "- %d년 %s 실현손익 %s · 공제 %s · 예상 양도세 %s (%s, 매도일 환율 기준 추정)\n",
+				r.Tax.Year, label, signedKrw(t.GainKrw), krw(t.DeductionKrw), krw(t.TaxKrw), pct0(t.Rate))
 		}
 		for _, v := range r.Missing {
 			fmt.Fprintf(&b, "- %s 매도 내역을 읽지 못해 빠짐\n", venueLabel[v])
@@ -217,7 +217,7 @@ func renderAllocation(p Portfolio) string {
 		return "비중을 계산할 자산이 없습니다."
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "비중 계산 대상 %s (고정자산 제외). 허용 범위는 목표 ±7%%p, 목표의 절반을 넘지 않음.\n\n", krw(a.TotalKrw))
+	fmt.Fprintf(&b, "비중 계산 대상 %s (고정자산 제외).\n\n", krw(a.TotalKrw))
 	for _, r := range a.Rows {
 		state := "범위 안"
 		if !r.InBand {
@@ -238,8 +238,12 @@ func renderAllocation(p Portfolio) string {
 		if len(r.Symbols) > 0 {
 			symbols = " [" + strings.Join(r.Symbols, " ") + "]"
 		}
+		target := pct0(r.Target)
+		if r.Band > 0 {
+			target += fmt.Sprintf("(±%.0f%%p)", r.Band*100)
+		}
 		fmt.Fprintf(&b, "- %s: 지금 %s (%s) / 목표 %s · %s · %s%s\n",
-			r.Label, pct1(r.Current), krw(r.ValueKrw), pct0(r.Target), gap, state, symbols)
+			r.Label, pct1(r.Current), krw(r.ValueKrw), target, gap, state, symbols)
 	}
 
 	label := map[string]string{}

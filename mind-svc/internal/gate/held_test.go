@@ -114,3 +114,26 @@ func TestTheConversationAsksWhatWasTurnedDown(t *testing.T) {
 		}
 	}
 }
+
+// Driving, in a meeting, in a focus: a buzz costs twice, and what is not worth
+// it waits for the evening; what is, rings as before.
+func TestBusyCostsTwice(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(DefaultPolicy())
+	busy := "운전 중"
+	f.g.Busy = func() string { return busy }
+	in, _ := f.g.Submit(ctx, create("p1"))
+	if in.Tier != "digest" || !strings.Contains(in.Why, "운전 중") || !in.Card {
+		t.Fatalf("바쁠 때 그만한 값이 아닌 카드: %+v", in)
+	}
+	busy = ""
+	if in, _ := f.g.Submit(ctx, create("p2")); in.Tier != "now" {
+		t.Fatalf("바쁘지 않으면 그대로: %+v", in)
+	}
+	busy = "회의 중"
+	strong := create("p3")
+	strong.Value = 3
+	if in, _ := f.g.Submit(ctx, strong); in.Tier != "now" {
+		t.Fatalf("그만한 값이면 울립니다: %+v", in)
+	}
+}

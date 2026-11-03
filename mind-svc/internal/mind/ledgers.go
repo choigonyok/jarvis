@@ -15,6 +15,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
 	"github.com/choigonyok/jarvis/mind-svc/internal/prefs"
+	"github.com/choigonyok/jarvis/mind-svc/internal/spending/book"
 )
 
 // The rest of a life's long run, each read from what is already kept: the
@@ -110,73 +111,21 @@ type Fixed struct {
 	Before   int64  `json:"before,omitempty"` // the amount before, when it changed
 }
 
-// FixedCosts is the monthly charges of the last half year: the same
-// merchant in three or more months in a row, about the same day and the
-// same amount.
+// FixedCosts is the charges that come back every month, by the one rule the
+// spending screen reads too (book.Monthly).
 func (m *Mind) FixedCosts(ctx context.Context) ([]Fixed, error) {
-	loc := m.Opts.Loc
-	now := m.Opts.Now()
+	now := m.Opts.Now().In(m.Opts.Loc)
 	pays, err := m.Opts.Store.Occurrences(ctx, now.AddDate(0, -6, 0), now, "purchase")
 	if err != nil {
 		return nil, err
 	}
-	by := map[string][]model.Occurrence{}
+	charges := make([]book.Charge, 0, len(pays))
 	for _, p := range pays {
-		by[p.Title] = append(by[p.Title], p)
+		charges = append(charges, book.Charge{Merchant: p.Title, Category: p.Class, AmountKrw: p.Amount, At: p.At})
 	}
 	out := []Fixed{}
-	for merchant, ps := range by {
-		sort.Slice(ps, func(i, j int) bool { return ps[i].At.Before(ps[j].At) })
-		months := map[string]model.Occurrence{}
-		for _, p := range ps {
-			months[p.At.In(loc).Format("2006-01")] = p // the month's latest
-		}
-		if len(months) < 3 || len(months) != len(ps) {
-			continue // not monthly, or more than once in a month: shopping, not a bill
-		}
-		keys := make([]string, 0, len(months))
-		for k := range months {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		run := 1
-		for i := 1; i < len(keys); i++ {
-			a, _ := time.Parse("2006-01", keys[i-1])
-			b, _ := time.Parse("2006-01", keys[i])
-			if a.AddDate(0, 1, 0).Equal(b) {
-				run++
-			} else {
-				run = 1
-			}
-		}
-		if run < 3 {
-			continue
-		}
-		var amounts []int64
-		var days []int
-		for _, k := range keys {
-			amounts = append(amounts, months[k].Amount)
-			days = append(days, months[k].At.In(loc).Day())
-		}
-		if slices.Max(days)-slices.Min(days) > 4 {
-			continue
-		}
-		mid := median64(amounts[:len(amounts)-1])
-		steady := 0
-		for _, a := range amounts[:len(amounts)-1] {
-			if math.Abs(float64(a-mid)) <= 0.05*float64(mid) {
-				steady++
-			}
-		}
-		if steady < len(amounts)-1 {
-			continue
-		}
-		last := months[keys[len(keys)-1]]
-		f := Fixed{Merchant: merchant, Amount: last.Amount, Day: days[len(days)/2], Months: run, Last: last.At.In(loc).Format("2006-01-02")}
-		if math.Abs(float64(last.Amount-mid)) > 0.05*float64(mid) {
-			f.Before = mid
-		}
-		out = append(out, f)
+	for _, r := range book.Monthly(charges, now) {
+		out = append(out, Fixed{Merchant: r.Merchant, Amount: r.AmountKrw, Day: r.Day, Months: r.Run, Last: r.LastAt, Before: r.BeforeKrw})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Amount > out[j].Amount })
 	return out, nil
@@ -192,7 +141,8 @@ func (m *Mind) fixedChanges(ctx context.Context) error {
 	now := m.Opts.Now()
 	for _, f := range fixed {
 		last, err := time.ParseInLocation("2006-01-02", f.Last, m.Opts.Loc)
-		if err != nil || f.Before == 0 || now.Sub(last) > 3*24*time.Hour {
+		// A price that held three months running and changed now.
+		if err != nil || f.Before == 0 || f.Months < 3 || now.Sub(last) > 3*24*time.Hour {
 			continue
 		}
 		if _, err := m.Gate.Submit(ctx, model.Intent{
@@ -205,15 +155,6 @@ func (m *Mind) fixedChanges(ctx context.Context) error {
 		}
 	}
 	return nil
-}
-
-func median64(xs []int64) int64 {
-	s := slices.Clone(xs)
-	slices.Sort(s)
-	if len(s) == 0 {
-		return 0
-	}
-	return s[len(s)/2]
 }
 
 // --- warranties and sizes --------------------------------------------------------

@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/choigonyok/jarvis/gocommon/person"
 	"github.com/choigonyok/jarvis/mind-svc/internal/jobs/rules"
 )
 
@@ -100,13 +101,16 @@ type Job struct {
 	State        string     `json:"state"`
 	NextAt       *time.Time `json:"nextAt,omitempty"`
 	NextReason   string     `json:"nextReason,omitempty"`
-	WaitingCard  string     `json:"waitingCard,omitempty"`
-	Summary      string     `json:"summary,omitempty"`
-	Attempts     int        `json:"attempts"`
-	LastRunAt    *time.Time `json:"lastRunAt,omitempty"`
-	FinishedAt   *time.Time `json:"finishedAt,omitempty"`
-	PhotosGone   bool       `json:"photosGone,omitempty"`
-	CreatedAt    time.Time  `json:"createdAt"`
+	// Asked: the operator is waiting on it - they made it, instructed it, ran
+	// or restarted it - not its own clock, nor the run after a card's answer.
+	Asked       bool       `json:"asked"`
+	WaitingCard string     `json:"waitingCard,omitempty"`
+	Summary     string     `json:"summary,omitempty"`
+	Attempts    int        `json:"attempts"`
+	LastRunAt   *time.Time `json:"lastRunAt,omitempty"`
+	FinishedAt  *time.Time `json:"finishedAt,omitempty"`
+	PhotosGone  bool       `json:"photosGone,omitempty"`
+	CreatedAt   time.Time  `json:"createdAt"`
 	// Running is set while a background run of this job is in flight, with
 	// the last thing it did.
 	Running     bool   `json:"running"`
@@ -121,8 +125,8 @@ type Job struct {
 
 // Whose a job is.
 const (
-	Owner = "owner"
-	Guest = "guest"
+	Owner = person.Owner
+	Guest = person.Guest
 )
 
 const jobCols = `j.id, j.title, j.goal, j.instructions, j.sites, j.photos, j.state, j.next_at,
@@ -147,8 +151,14 @@ func scanJob(row pgx.Row) (Job, error) {
 	if !j.Running {
 		j.CurrentStep = ""
 	}
+	j.Asked = j.LastRunAt == nil || askedReasons[j.NextReason]
 	return j, err
 }
+
+// askedReasons are the next_reason words of a run the operator asked for, as
+// the statements here write them. The agent reads Asked: it compared these
+// words itself, across the service line (2026-11-03).
+var askedReasons = map[string]bool{"첫 실행": true, "새 지시": true, "지금 실행": true, "다시 시작": true, "끝내는 중에 온 지시": true}
 
 type NewJob struct {
 	Title        string   `json:"title"`

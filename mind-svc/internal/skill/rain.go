@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+	"github.com/choigonyok/jarvis/mind-svc/internal/registry"
 	"github.com/choigonyok/jarvis/mind-svc/internal/weather"
 )
 
@@ -191,7 +192,7 @@ func firstNonEmpty(vs ...string) string {
 // trip, a trip), its kind of place (a park, a beach), or a word in its
 // title (피크닉, 등산, 야구).
 func Outdoors(st model.State) bool {
-	if st.Type == "캠핑" || st.Type == "여행" {
+	if registry.Current().PlanKind(st.Type).Outdoors {
 		return true
 	}
 	if slices.Contains(outdoorPlaces, st.PlaceKind) || strings.Contains(st.PlaceKind, "캠핑") {

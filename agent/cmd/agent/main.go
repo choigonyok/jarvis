@@ -414,6 +414,9 @@ func main() {
 			Client: browsercheck.New(u, cfg.ExtraMCPToken),
 			Sites: []browsercheck.Site{
 				{ID: "coupang", Name: "쿠팡 주문 내역", Orders: "https://mc.coupang.com/ssr/desktop/order/list", LoginHost: "login.coupang.com"},
+				// The order lookup reads 네이버페이's history too: its sign-in lapsing is
+				// as much a stop as 쿠팡's, and only 쿠팡's was looked at.
+				{ID: "naverpay", Name: "네이버페이 결제내역", Orders: "https://pay.naver.com/pc/history", LoginHost: "nid.naver.com"},
 			},
 			// 다른 탭이 로그인 화면이면(누가 비밀번호를 치는 중일 수 있다) 열지 않는다.
 			BusyHosts: []string{"login.coupang.com", "nid.naver.com", "pay.naver.com"},

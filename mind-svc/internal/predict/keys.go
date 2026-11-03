@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+	"github.com/choigonyok/jarvis/mind-svc/internal/spending/category"
 )
 
 // Keys are the names an occurrence happens under, from the most general to
@@ -62,15 +63,8 @@ func Keys(o model.Occurrence, thing func(name string) string) []string {
 // Delivery is food delivered, read from a delivery app's card payment.
 const Delivery = "delivery"
 
-// IsDelivery is whether a merchant is a food delivery app.
-func IsDelivery(merchant string) bool {
-	for _, w := range []string{"배달의민족", "배민", "우아한형제", "쿠팡이츠", "요기요", "땡겨요"} {
-		if strings.Contains(merchant, w) {
-			return true
-		}
-	}
-	return false
-}
+// IsDelivery is whether a merchant is a food delivery app (category.Delivery).
+func IsDelivery(merchant string) bool { return category.IsDelivery(merchant) }
 
 // Parts is a key taken apart: its kind, class and title ("" when absent).
 func Parts(key string) (kind, class, title string) {

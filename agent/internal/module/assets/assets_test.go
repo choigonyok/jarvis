@@ -190,3 +190,21 @@ func (s *Store) withToken(token string) *Store {
 	c.token = token
 	return &c
 }
+
+// The targets, their bands and the tax rate are assets-svc's: said as it sends
+// them, and the tools' own words carry none of the numbers (they had the
+// targets, and "현금(달러)" after the label had become 현금).
+func TestTheNumbersAreTheServicesOwn(t *testing.T) {
+	out := renderAllocation(Portfolio{Allocation: &Allocation{TotalKrw: 1000000, Rows: []Drift{
+		{ID: "coin", Label: "메이저코인", ValueKrw: 300000, Current: 0.3, Target: 0.3, InBand: true, Band: 0.07},
+		{ID: "gold", Label: "금", ValueKrw: 50000, Current: 0.05, Target: 0.05, InBand: true, Band: 0.025},
+	}}})
+	if !strings.Contains(out, "목표 30%(±7%p)") || !strings.Contains(out, "목표 5%(±2%p)") || strings.Contains(out, "±7%p, 목표의 절반") {
+		t.Fatal(out)
+	}
+	for _, n := range []string{"45", "250만", "22%", "현금(달러)"} {
+		if strings.Contains(portfolioDesc+allocationDesc, n) {
+			t.Fatalf("도구 설명에 %q", n)
+		}
+	}
+}

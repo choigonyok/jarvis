@@ -11,12 +11,14 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/choigonyok/jarvis/gocommon/person"
 )
 
 // The two people notifications are for.
 const (
-	Owner = "owner"
-	Guest = "guest"
+	Owner = person.Owner
+	Guest = person.Guest
 )
 
 // Audiences is everyone a notification can be for.

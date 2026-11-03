@@ -16,7 +16,7 @@ import {
   type Turn,
 } from "@/lib/thread";
 import { decideProposal } from "@/lib/decide";
-import { diag, diagFrame } from "@/lib/diag";
+import { diag } from "@/lib/diag";
 import { requestResume } from "@/lib/resume";
 
 /** The lists mind keeps: read there, changed at the way in (the route says which). */
@@ -28,6 +28,17 @@ const byList = (lists?: Checklist[] | null) => Object.fromEntries((lists ?? []).
  * One given a newer time (a job's card with its latest word) moves to where
  * that time puts it - the bottom - rather than being rewritten in place.
  */
+/**
+ * A turn the server sends again keeps the row this page drew it in (rowKey):
+ * the server does not know it, and without it the row is built again.
+ */
+function keepRows(prev: Turn[], next: Turn[]): Turn[] {
+  const rows = new Map<string, string>();
+  for (const t of prev) if (t.rowKey) rows.set(t.id, t.rowKey);
+  if (rows.size === 0) return next;
+  return next.map((t) => (t.rowKey || !rows.has(t.id) ? t : { ...t, rowKey: rows.get(t.id) }));
+}
+
 function upsert<T extends { id: string; atIso?: string }>(list: T[], next: T): T[] {
   const at = list.findIndex((item) => item.id === next.id);
   if (at === -1) return [...list, next];
@@ -126,7 +137,7 @@ export function useThread() {
 
   const setTurns = useCallback((next: Turn[] | ((prev: Turn[]) => Turn[])) => {
     setTurnsState((prev) => {
-      const value = typeof next === "function" ? next(prev) : next;
+      const value = keepRows(prev, typeof next === "function" ? next(prev) : next);
       cached = { ...(cached ?? { proposals: [], thinking: false }), turns: value };
       return value;
     });
@@ -235,7 +246,6 @@ export function useThread() {
         setProposals((prev) => upsert(prev, event.proposal));
         break;
       case "draft":
-        if (!event.draft.gone) diagFrame(event.draft.at, event.draft.text?.length ?? 0);
         setDraft((cur) => applyDraft(cur, event.draft));
         break;
       case "status":
@@ -279,7 +289,11 @@ export function useThread() {
   });
 
   // The screen has let out a finished draft's last word: its turn shows.
-  const draftShown = useCallback((id: string) => setDraft((cur) => (cur?.id === id ? null : cur)), []);
+  // The last word out: the turn shows itself, in the row that typed it.
+  const draftShown = useCallback((id: string, turn?: string) => {
+    setDraft((cur) => (cur?.id === id ? null : cur));
+    if (turn) setTurns((prev) => prev.map((t) => (t.id === turn ? { ...t, rowKey: id } : t)));
+  }, [setTurns]);
 
   // Re-read the thread and reopen the stream - for a screen that sent and
   // heard nothing back, which is what a quietly dead stream looks like.
@@ -342,6 +356,9 @@ export function useThread() {
       setError("에이전트에 연결하지 못했습니다.");
     }
   }, [hydrate]);
+  // Stable, so the composer's queue is not drawn again on every frame.
+  const steer = useCallback((id: string) => onQueued(id, "steer"), [onQueued]);
+  const drop = useCallback((id: string) => onQueued(id, "drop"), [onQueued]);
 
   const decide = useCallback(
     async (proposalId: string, decision: Decision, edits?: Record<string, string>, reason?: string) => {
@@ -481,8 +498,8 @@ export function useThread() {
     loadOlder,
     resync,
     send,
-    steer: (id: string) => onQueued(id, "steer"),
-    drop: (id: string) => onQueued(id, "drop"),
+    steer,
+    drop,
     decide,
   };
 }

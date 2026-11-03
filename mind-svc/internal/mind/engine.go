@@ -11,6 +11,7 @@ import (
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/predict"
+	"github.com/choigonyok/jarvis/mind-svc/internal/spending/category"
 )
 
 // The prediction engine's place in the day (predict/mine.go, engine.go):
@@ -55,7 +56,14 @@ func (m *Mind) scored(ctx context.Context, prs ...model.Prediction) {
 			continue
 		}
 		switch predict.Source(n.Rule.Key) {
-		case "purchase", "deposit", "bill", "transfer", "asset":
+		case "purchase":
+			// A payment is a bill that did not come only if it is a monthly
+			// charge by the one rule the spending screen and the word on a
+			// changed bill read (book.Monthly).
+			if !m.monthlyCharge(ctx, n.Rule.Key) {
+				continue
+			}
+		case "deposit", "bill", "transfer", "asset":
 		default:
 			continue
 		}
@@ -73,6 +81,20 @@ func (m *Mind) scored(ctx context.Context, prs ...model.Prediction) {
 			m.Opts.Logger.Warn("빗나간 기대를 알리지 못했습니다", "err", err)
 		}
 	}
+}
+
+// monthlyCharge is whether a payment's key is a merchant that charges itself
+// every month.
+func (m *Mind) monthlyCharge(ctx context.Context, key string) bool {
+	_, _, title := predict.Parts(key)
+	if title == "" {
+		return false
+	}
+	fixed, err := m.FixedCosts(ctx)
+	if err != nil {
+		return false
+	}
+	return slices.ContainsFunc(fixed, func(f Fixed) bool { return category.Key(f.Merchant) == category.Key(title) })
 }
 
 // Notes is the notes with how their predictions went, as of now - the

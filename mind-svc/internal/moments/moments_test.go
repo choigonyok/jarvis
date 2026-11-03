@@ -2,6 +2,7 @@ package moments
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"strings"
@@ -26,12 +27,12 @@ func newFixture(t *testing.T) *fixture {
 	f := &fixture{now: time.Date(2026, 10, 23, 9, 0, 0, 0, seoul)}
 	f.s = &Service{St: NewMemory(), Loc: seoul, Now: func() time.Time { return f.now },
 		Here: func(context.Context) ([]Visit, error) { return f.here, nil },
-		Say: func(_ context.Context, r Reminder) (string, error) {
+		Say: func(_ context.Context, r Reminder) (Said, error) {
 			if f.fail != nil {
-				return "", f.fail
+				return Said{}, f.fail
 			}
 			f.said = append(f.said, r)
-			return "푸시", nil
+			return Said{How: HowPush}, nil
 		}}
 	return f
 }
@@ -324,5 +325,32 @@ func TestPostgres(t *testing.T) {
 	}
 	if _, err := st.Reminder(ctx, "rem_none"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("없는 알림: %v", err)
+	}
+}
+
+// How a reminder went is kept as what reads it reads it, beside the words; one
+// kept before How was is given it from its words when read - a closed list's
+// "목록이 닫혀 말하지 않음" was read as said.
+func TestHowAReminderWent(t *testing.T) {
+	for words, want := range map[string]Said{
+		"푸시": {How: HowPush}, "카드": {How: HowCard}, "카드(저녁 요약으로)": {How: HowCard}, "저녁 요약으로": {How: HowDigest},
+		"실패: 연결 끊김": {How: HowFailed, Why: "연결 끊김"}, "말하지 않음: 같은 주제": {How: HowSilent, Why: "같은 주제"},
+		"목록이 닫혀 말하지 않음": {How: HowSilent, Why: "목록이 닫혀"}, "다 해서 말하지 않음": {How: HowSilent, Why: "다 해서"},
+	} {
+		var r Reminder
+		if err := json.Unmarshal([]byte(`{"status":"sent","result":"`+words+`"}`), &r); err != nil {
+			t.Fatal(err)
+		}
+		if r.How != want.How || r.Unsaid != want.Why {
+			t.Errorf("%s: %q %q", words, r.How, r.Unsaid)
+		}
+	}
+	var w Reminder
+	_ = json.Unmarshal([]byte(`{"status":"waiting"}`), &w)
+	if w.How != "" {
+		t.Fatal("기다리는 것은 아직 어떻게 되지 않았습니다")
+	}
+	if got := (Said{How: HowSilent, Why: "다 함"}).Words(); got != "말하지 않음: 다 함" {
+		t.Fatal(got)
 	}
 }

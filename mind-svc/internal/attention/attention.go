@@ -75,6 +75,11 @@ func New(skills []skill.Skill, w *world.World, st store.Store, g *gate.Gate, set
 // OnChange queues a change; it is dispatched once the entity has been still
 // for the settle time.
 func (a *Attention) OnChange(e model.Entity, c model.Change) {
+	// A kind read again from the title is nothing for a skill to act on: a
+	// night of it must not ask about every plan it touched.
+	if c.Actor == model.ActorKind {
+		return
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	b := a.pending[e.ID]

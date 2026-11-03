@@ -164,3 +164,24 @@ func TestPrepCountsTheNearestPlanOnly(t *testing.T) {
 		t.Fatalf("데이트 4번(같은 날 두 번 적힌 것은 하나), 향초는 가장 가까운 한 번에만: total %d support %d %+v", total, support, ps)
 	}
 }
+
+// A payment the engine learned to expect is a bill that did not come only if it
+// is a monthly charge by the screen's own rule: a habit that skips a month is
+// not.
+func TestMissedIsOnlyAMonthlyCharge(t *testing.T) {
+	seoul, _ := time.LoadLocation("Asia/Seoul")
+	day := func(m time.Month, d int) time.Time { return time.Date(2026, m, d, 9, 0, 0, 0, seoul) }
+	m, st, _ := testMind(t, day(11, 16))
+	ctx := context.Background()
+	for i, mo := range []time.Month{8, 9, 10} {
+		_ = st.PutOccurrence(ctx, pay(fmt.Sprintf("n%d", i), "넷플릭스", "구독", 17000, day(mo, 15)))
+	}
+	_ = st.PutOccurrence(ctx, pay("b1", "합정 꽃집", "기타", 30000, day(8, 2)))
+	_ = st.PutOccurrence(ctx, pay("b2", "합정 꽃집", "기타", 41000, day(10, 9)))
+	if !m.monthlyCharge(ctx, "purchase/구독@넷플릭스") {
+		t.Fatal("매달 오는 넷플릭스")
+	}
+	if m.monthlyCharge(ctx, "purchase/기타@합정 꽃집") || m.monthlyCharge(ctx, "purchase/구독") {
+		t.Fatal("가끔 사는 꽃집, 가맹점 없는 열쇠는 아닙니다")
+	}
+}

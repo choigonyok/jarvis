@@ -1,5 +1,6 @@
 import { asRecord, enqueueEvents } from "./db.js";
 import type { Portfolio } from "./types.js";
+import { halfRead } from "./accounts.js";
 
 /**
  * What the portfolio has to say, sent to output-svc after each build. Each
@@ -33,9 +34,7 @@ const signed = (v: number) => `${v > 0 ? "+" : ""}${won(v)}`;
  * is wrong and a plan made from them would sell what is there to buy what is
  * only unread.
  */
-export function halfRead(problems: readonly string[] | undefined): boolean {
-  return (problems ?? []).some((m) => m.startsWith("업비트:") || m.startsWith("한국투자증권:") || m.startsWith("금현물:"));
-}
+export { halfRead };
 
 export function eventsOf(p: Portfolio, now = new Date()): Event[] {
   const today = now.toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });

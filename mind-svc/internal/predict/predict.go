@@ -12,12 +12,14 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/link"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+	"github.com/choigonyok/jarvis/mind-svc/internal/registry"
 	"github.com/choigonyok/jarvis/mind-svc/internal/self"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 	"github.com/choigonyok/jarvis/mind-svc/internal/weather"
@@ -485,6 +487,12 @@ var Features = map[string]string{
 	"evening":    "arg 시각(HH:MM) 이후에 시작하는 일정이 있음",
 	"spent_over": "그날 결제 합이 arg 원 이상",
 	"rain":       "그날 집 근처에 arg mm 이상 비나 눈이 옴(지난날은 내린 양, 다가올 날은 예보)",
+	// What else a day is made of, beyond the seven a reflection was held to
+	// (2026-11-03): who it was with, where, what kind of spending, a workout.
+	"with":    "arg 이름의 사람과 함께하는 일정이 있음",
+	"place":   "arg 동네나 장소에서 결제·체류했거나 그곳 일정이 있음",
+	"class":   "arg 분류(식비·카페·간식·교통·쇼핑 …)의 결제가 있음",
+	"workout": "운동 기록이 있음(arg 가 있으면 그 낱말이 든 운동만)",
 }
 
 // Holds is whether feature(arg) holds on day d.
@@ -511,7 +519,7 @@ func Holds(feature, arg string, d Day, loc *time.Location) bool {
 			// A work plan in the evening is a late leave ahead of time: one
 			// starting after the usual leaving hour, or within two hours of
 			// the cut.
-			if feature == "evening" && start >= cut || feature == "late_leave" && pl.State.Type == "업무" && start >= min(cut-120, 18*60+30) {
+			if feature == "evening" && start >= cut || feature == "late_leave" && registry.Current().PlanKind(pl.State.Type).Work && start >= min(cut-120, 18*60+30) {
 				return true
 			}
 		}
@@ -542,6 +550,41 @@ func Holds(feature, arg string, d Day, loc *time.Location) bool {
 		mm := 1.0
 		_, _ = fmt.Sscan(arg, &mm)
 		return d.Weather != nil && d.Weather.Precip >= max(mm, 0.1)
+	case "with":
+		for _, pl := range d.Plans {
+			if arg != "" && (slices.Contains(pl.State.People, arg) || strings.Contains(pl.State.Title, arg)) {
+				return true
+			}
+		}
+	case "place":
+		if arg == "" {
+			return false
+		}
+		for _, o := range d.Occ {
+			if (o.Kind == "purchase" || o.Kind == "visit") && (strings.Contains(o.Area, arg) || strings.Contains(o.Place, arg) || o.Kind == "visit" && strings.Contains(o.Title, arg)) {
+				return true
+			}
+		}
+		for _, pl := range d.Plans {
+			if strings.Contains(pl.State.Area, arg) || strings.Contains(pl.State.Place, arg) {
+				return true
+			}
+		}
+	case "class":
+		for _, o := range d.Occ {
+			if o.Kind == "purchase" && arg != "" && o.Class == arg {
+				return true
+			}
+		}
+	case "workout":
+		if d.Workout && arg == "" {
+			return true
+		}
+		for _, o := range d.Occ {
+			if o.Kind == "workout" && (arg == "" || strings.Contains(o.Title, arg)) {
+				return true
+			}
+		}
 	}
 	return false
 }

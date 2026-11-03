@@ -1,0 +1,7 @@
+{
+  "_comment": "결제 비밀번호를 보관함에 두고 그 결제의 키패드에 넣는 결제. vault-svc(둘 수 있는 곳), 에이전트(모델이 부르는 이름), 브라우저 pin.py(키패드 설정, test_pin.py 가 이 표와 같은지 본다)가 이 한 표를 따른다. host 는 키패드가 뜨는 호스트이고 그 아래 호스트도 포함한다.",
+  "pins": [
+    {"host": "pay.naver.com", "name": "네이버페이", "aliases": ["네이버페이", "네이버", "naverpay", "npay", "naver", "pay.naver.com"]},
+    {"host": "coupang.com", "name": "쿠팡 쿠페이", "aliases": ["쿠페이", "쿠팡", "쿠팡페이", "coupay", "coupang", "coupang.com"]}
+  ]
+}

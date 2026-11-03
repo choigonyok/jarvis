@@ -11,7 +11,7 @@ func Region(s string) string {
 	if s == "" {
 		return ""
 	}
-	if k, ok := romanized[strings.ToLower(strings.SplitN(s, ",", 2)[0])]; ok {
+	if k, ok := korean(strings.ToLower(strings.SplitN(s, ",", 2)[0])); ok {
 		s = k
 	}
 	s = strings.ToLower(strings.Join(strings.Fields(s), ""))
@@ -44,8 +44,52 @@ var romanized = map[string]string{
 	"jungnang-gu": "중랑", "seongbuk-gu": "성북", "gangbuk-gu": "강북", "dobong-gu": "도봉", "nowon-gu": "노원", "eunpyeong-gu": "은평",
 	"seodaemun-gu": "서대문", "mapo-gu": "마포", "yangcheon-gu": "양천", "gangseo-gu": "강서", "guro-gu": "구로", "geumcheon-gu": "금천",
 	"yeongdeungpo-gu": "영등포", "dongjak-gu": "동작", "gwanak-gu": "관악", "seocho-gu": "서초", "gangnam-gu": "강남", "songpa-gu": "송파",
-	"gangdong-gu": "강동",
+	"gangdong-gu": "강동", "bundang-gu": "분당",
 }
+
+// romanSuffixes are what Immich puts after a region's name to say its kind.
+var romanSuffixes = []string{"-si", "-gun", "-gu", "-dong", "-eup", "-myeon"}
+
+// korean is a region's Korean name from Immich's English, with or without the
+// suffix: "Hongcheon-gun", "Pocheon-si" and "Yongsan-dong" are the table's
+// 홍천, 포천 and 용산 - the suffix used to come off only after the table was
+// looked in, and 7 of the 15 photos with a region stayed "yongsan" (2026-11-03).
+func korean(name string) (string, bool) {
+	if k, ok := romanized[name]; ok {
+		return k, true
+	}
+	k, ok := byBase[romanBase(name)]
+	return k, ok
+}
+
+func romanBase(name string) string {
+	for _, suf := range romanSuffixes {
+		name = strings.TrimSuffix(name, suf)
+	}
+	return name
+}
+
+// byBase is the table by names without their suffix, but for a name more than
+// one region shares (jung-gu is in most cities).
+var byBase = func() map[string]string {
+	names := map[string]map[string]bool{}
+	for k, v := range romanized {
+		b := romanBase(k)
+		if names[b] == nil {
+			names[b] = map[string]bool{}
+		}
+		names[b][v] = true
+	}
+	m := map[string]string{}
+	for b, vs := range names {
+		for v := range vs {
+			if len(vs) == 1 && b != "jung" {
+				m[b] = v
+			}
+		}
+	}
+	return m
+}()
 
 var cities = func() map[string]bool {
 	m := map[string]bool{}

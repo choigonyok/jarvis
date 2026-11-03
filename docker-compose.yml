@@ -84,6 +84,8 @@ services:
       # anyone east of Greenwich once it passes midnight locally.
       TZ: ${TZ:-Asia/Seoul}
       JARVIS_MODEL: ${JARVIS_MODEL:-}
+      # 백그라운드 작업이 카드 없이 쓰는 로그인 화면(쉼표로 여럿). 브라우저의 JOB_LOGIN_HOSTS 와 같은 값이다.
+      JARVIS_BACKGROUND_LOGIN_HOSTS: ${LOGIN_HOSTS:-nid.naver.com}
       # 백그라운드 모델. 비우면 에이전트 기본값: 주문 조회·작업 sonnet, 잘 안 끝난 작업의 재시도 opus.
       JARVIS_ENRICH_MODEL: ${JARVIS_ENRICH_MODEL:-}
       JARVIS_JOBS_MODEL: ${JARVIS_JOBS_MODEL:-}
@@ -503,6 +505,8 @@ services:
     <<: *outside
     build: ./browser
     environment:
+      # 작업이 늘 열 수 있는 로그인 화면. 에이전트의 JARVIS_BACKGROUND_LOGIN_HOSTS 와 같은 값이다.
+      JOB_LOGIN_HOSTS: ${LOGIN_HOSTS:-nid.naver.com}
       TZ: ${TZ:-Asia/Seoul}
       # Same token the agent sends. The port is on the compose network only,
       # but a bridge that accepts anything is a bridge that will be pointed at

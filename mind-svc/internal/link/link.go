@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+	"github.com/choigonyok/jarvis/mind-svc/internal/registry"
+	"github.com/choigonyok/jarvis/mind-svc/internal/spending/category"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 	"github.com/choigonyok/jarvis/mind-svc/internal/world"
 )
@@ -47,13 +49,6 @@ type Linker struct {
 
 // Kinds of occurrence that can happen during a plan.
 var duringKinds = []string{"purchase", "photo", "workout"}
-
-// online merchants: a purchase there is not made where the plan is.
-var online = []string{"쿠팡", "COUPANG", "네이버페이", "NAVERPAY", "11번가", "G마켓", "지마켓", "옥션", "무신사", "29CM", "SSG",
-	"컬리", "알리익스프레스", "ALIEXPRESS", "AMAZON", "아마존", "테무", "TEMU", "에이블리", "지그재그", "APPLE.COM", "GOOGLE", "NETFLIX"}
-
-// delivery apps: bought from wherever the operator is.
-var delivery = []string{"배달의민족", "배민", "우아한형제", "쿠팡이츠", "요기요", "땡겨요"}
 
 // Watch queues every changed plan for linking; Settle or Run links them.
 func (l *Linker) Watch(e model.Entity, _ model.Change) {
@@ -149,7 +144,7 @@ func (l *Linker) Plan(ctx context.Context, p model.Entity) error {
 	if !ok {
 		return nil
 	}
-	if l.Judge != nil && p.State.Type != "" && p.State.Type != "기타" {
+	if l.Judge != nil && p.State.Type != "" && p.State.Type != registry.OtherKind {
 		items, err := l.St.Occurrences(ctx, sp.Start.Add(-window), sp.Start, "purchase.item")
 		if err != nil {
 			return err
@@ -198,7 +193,8 @@ func (l *Linker) during(ctx context.Context, o model.Occurrence, p model.Entity)
 	if !planned(p) {
 		return nil
 	}
-	if o.Kind == "purchase" && containsAny(o.Title, online) {
+	// Bought online, not where the plan is (a delivery app is not online).
+	if o.Kind == "purchase" && category.IsOnline(o.Title) {
 		return nil
 	}
 	sp, ok := l.World.Span(ctx, p, l.Now(), l.Loc)
@@ -230,7 +226,7 @@ func (l *Linker) during(ctx context.Context, o model.Occurrence, p model.Entity)
 	switch {
 	case same:
 		link.Confidence, link.State, link.Why = 0.9, model.Confirmed, "일정 시간·장소 안"
-	case place && !containsAny(o.Title, delivery):
+	case place && !category.IsDelivery(o.Title):
 		return nil // somewhere else
 	case !timed:
 		return nil
@@ -248,18 +244,13 @@ func fits(o model.Occurrence, st model.State) bool {
 	if o.Kind != "purchase" {
 		return false
 	}
-	food := o.Class == "식비" || o.Class == "카페·간식" || containsAny(o.Title, delivery)
-	switch st.Type {
-	case "식사", "회식", "모임":
-		return food
-	case "데이트":
-		return food && (st.PlaceKind == "집" || containsAny(o.Title, delivery))
-	case "공연":
-		return o.Class == "문화·여가"
-	case "운동":
-		return o.Class == "운동"
+	k := registry.Current().PlanKind(st.Type)
+	if k.Meal && category.IsDelivery(o.Title) || slices.Contains(k.Fits, o.Class) {
+		return true
 	}
-	return false
+	// A date is food only at home, or brought there.
+	food := o.Class == "식비" || o.Class == "카페·간식" || category.IsDelivery(o.Title)
+	return st.Type == "데이트" && food && (st.PlaceKind == "집" || category.IsDelivery(o.Title))
 }
 
 // put writes a link unless the operator already said what it is.
@@ -327,7 +318,7 @@ func (l *Linker) prepAll(ctx context.Context, item model.Occurrence, plans []mod
 	}
 	var fit []model.Entity
 	for _, p := range plans {
-		if !planned(p) || p.State.Type == "" || p.State.Type == "기타" {
+		if !planned(p) || p.State.Type == "" || p.State.Type == registry.OtherKind {
 			continue
 		}
 		sp, ok := l.World.Span(ctx, p, l.Now(), l.Loc)

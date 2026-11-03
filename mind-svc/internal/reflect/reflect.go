@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"slices"
 	"sort"
@@ -346,6 +347,10 @@ func parse(answer string) ([]*Hypothesis, error) {
 	for _, h := range out.Hypotheses {
 		if _, ok := predict.Features[h.Feature]; ok && strings.TrimSpace(h.Text) != "" && len(keep) < 4 {
 			keep = append(keep, h)
+		} else if !ok {
+			// No feature to test it with: said, so the features grow where the
+			// model keeps reaching (it was dropped without a word).
+			slog.Info("시험할 특징이 없는 가설", "feature", h.Feature, "text", h.Text)
 		}
 	}
 	return keep, nil

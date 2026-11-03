@@ -16,8 +16,17 @@ export type Reminder = {
   /** Who set it: chat, checklist, rebalance. */
   source: string;
   status: "waiting" | "sent" | "cancelled" | "expired";
-  /** When it was said, and how: "푸시", "카드", or "말하지 않음: …" (why it was not). */
+  /** When it was said. */
   sentAt?: string;
+  /**
+   * How it went once its moment came: mind's code, read here instead of its
+   * words - "목록이 닫혀 말하지 않음" read as said (2026-11-03). silent: nothing
+   * went out, for `unsaid`.
+   */
+  how?: "push" | "card" | "digest" | "silent" | "failed";
+  /** Why nothing went out, or what failed. */
+  unsaid?: string;
+  /** The same in mind's words. */
   result?: string;
   updatedAt: string;
   /** mind's words for the moment: "10/29(수) 08:00", "집에 도착할 때 · 늦어도 11/11(화) 21:00". */
@@ -26,7 +35,16 @@ export type Reminder = {
 
 export const waiting = (r: Reminder) => r.status === "waiting";
 
-const NOT_SAID = "말하지 않음";
+const HOW: Record<NonNullable<Reminder["how"]>, string> = {
+  push: "푸시로 알림",
+  card: "카드로 알림",
+  digest: "저녁 요약으로",
+  silent: "말하지 않음",
+  failed: "보내지 못함",
+};
+
+/** Nothing went out. */
+const unsaid = (r: Reminder) => r.how === "silent" || r.how === "failed";
 
 /** What came of it, short - the row's right side. "" while it waits. */
 export function outcome(r: Reminder): string {
@@ -38,15 +56,11 @@ export function outcome(r: Reminder): string {
     case "expired":
       return "기한 지남";
   }
-  const how = (r.result ?? "").trim();
-  if (how.startsWith(NOT_SAID)) return NOT_SAID;
-  if (how === "푸시") return "푸시로 알림";
-  if (how === "카드") return "카드로 알림";
-  return "알림";
+  return (r.how && HOW[r.how]) || "알림";
 }
 
 export function outcomeTone(r: Reminder): string {
-  if (r.status === "sent" && !(r.result ?? "").startsWith(NOT_SAID)) return "text-approve";
+  if (r.status === "sent" && !unsaid(r)) return "text-approve";
   return "text-faint";
 }
 
@@ -65,7 +79,6 @@ export function detail(r: Reminder): string {
   else if (r.status === "cancelled") parts.push(`${when(r.updatedAt)} 취소`);
   else parts.push(r.when);
   parts.push(sourceLabel(r));
-  const why = (r.result ?? "").trim();
-  if (r.status === "sent" && why.startsWith(NOT_SAID)) parts.push(why.slice(NOT_SAID.length).replace(/^[:：]\s*/, ""));
+  if (r.status === "sent" && unsaid(r)) parts.push(r.unsaid ?? "");
   return parts.filter(Boolean).join(" · ");
 }

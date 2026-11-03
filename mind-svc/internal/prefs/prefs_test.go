@@ -165,3 +165,25 @@ func TestOthers(t *testing.T) {
 		t.Fatalf("주간 회고: %+v", obs)
 	}
 }
+
+// A sentence's dimension is the word said first, the same every time, and a
+// word inside a longer one is not that word: a review is not a view, and acting
+// naturally is not nature.
+func TestStatedReadsWordsAsWords(t *testing.T) {
+	for i := 0; i < 50; i++ {
+		if d, _, ok := Stated("DISLIKES", "시끄러운 곳하고 더러운 곳"); !ok || d != "소음" {
+			t.Fatalf("먼저 말한 것: %q %v", d, ok)
+		}
+	}
+	for _, text := range []string{"리뷰 많은 식당", "인터뷰 영상", "뷰티샵", "자연스럽지 않은 말투"} {
+		if d, _, ok := Stated("LIKES", text); ok {
+			t.Fatalf("%q 는 %s 가 아닙니다", text, d)
+		}
+	}
+	if d, pol, ok := Stated("LIKES", "리뷰 보니 오션뷰가 좋대"); !ok || d != "뷰·자연" || pol != 1 {
+		t.Fatalf("다른 말 안에 없는 뷰: %q %d %v", d, pol, ok)
+	}
+	if d, pol, ok := Stated("DISLIKES", "불친절한 가게"); !ok || d != "응대" || pol != -1 {
+		t.Fatalf("%q %d %v", d, pol, ok)
+	}
+}
