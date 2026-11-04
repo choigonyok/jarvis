@@ -8,7 +8,7 @@ import { Header, TabBar } from "@/components/shell/header";
 import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { Button } from "@/components/ui/button";
-import { type Cell, type Goal, type Mark, listGoals, markDay, waitsToday, weekdayOf, WEEK_ROW, whenLabel } from "@/lib/goals";
+import { type Cell, type Check as DayCheck, type Goal, type Mark, checkDay, listGoals, perDayOf, tally, waitsToday, weekdayOf, WEEK_ROW, whenLabel } from "@/lib/goals";
 import { onResume } from "@/lib/resume";
 import { isPending } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
@@ -198,36 +198,49 @@ function WeekHead({ today }: { today: string }) {
   );
 }
 
+/** How a day stands while it is being said: its mark, and of a goal of more than one a day how many times. */
+type DayState = { mark?: Mark; count: number };
+
 /**
  * One goal: its name and how it stands, its week, and under them the answer for
  * the day picked - today, until another day's cell is tapped. A day is changed
  * here and not by tapping a cell through its states, so a thumb brushing a row
- * marks nothing.
+ * marks nothing. A goal of more than one a day answers a time at a time: one
+ * more tap for each, and the day is done when they are all there.
  */
 function Row({ goal, onOpen, onChanged }: { goal: Goal; onOpen: () => void; onChanged: (g: Goal) => void }) {
   const p = goal.progress;
+  const n = perDayOf(goal);
+  const many = n > 1;
   const [picked, setPicked] = useState<string | null>(null);
   // Said at once, then as mind has it: a thumb does not wait on a round trip.
-  const [saying, setSaying] = useState<Mark | "" | null>(null);
+  const [saying, setSaying] = useState<DayState | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const day = picked ?? p.today;
   const cell = p.week.find((c) => c.day === day);
-  const said = saying !== null && day === (picked ?? p.today) ? saying || undefined : cell?.mark;
+  const now: DayState = saying ?? { mark: cell?.mark, count: cell?.count ?? 0 };
   const quietToday = !picked && !p.asks && goal.cadence !== "weekly" && goal.cadence !== "monthly";
+  const when = whenLabel(day, p.today);
 
-  async function say(mark: Mark | "") {
+  async function say(check: DayCheck, next: DayState) {
     setFailed(null);
-    setSaying(mark);
+    setSaying(next);
     try {
-      const { goal: next } = await markDay(goal.id, day, mark);
-      onChanged(next);
-      setPicked(null);
+      const { goal: got } = await checkDay(goal.id, day, check);
+      onChanged(got);
+      // Once a time at a time, the day stays picked until it is said.
+      if (!many || next.mark) setPicked(null);
     } catch (e) {
       setFailed(e instanceof Error ? e.message : "기록하지 못했어요. 다시 눌러 주세요.");
     } finally {
       setSaying(null);
     }
   }
+
+  const once = () => say({ add: 1 }, now.count + 1 >= n ? { mark: "done", count: n } : { count: now.count + 1 });
+  const fewer = () => say({ add: -1 }, { count: Math.max(now.count - 1, 0) });
+  // Back from 안 했다 to what was done of the day, or to nothing.
+  const unsay = () => (many && now.count > 0 ? say({ count: now.count }, { count: now.count }) : say({ mark: "" }, { count: 0 }));
 
   return (
     <li data-focus={`goal:${goal.id}`} className="border-b border-edge-soft py-3">
@@ -246,38 +259,59 @@ function Row({ goal, onOpen, onChanged }: { goal: Goal; onOpen: () => void; onCh
           {p.week.map((c) => (
             <Dot
               key={c.day}
-              cell={c}
+              cell={c.day === day && saying ? { ...c, mark: saying.mark, count: saying.count } : c}
+              of={n}
               today={p.today}
               picked={c.day === picked}
               onPick={() => setPicked(picked === c.day || c.day === p.today ? null : c.day)}
-              saying={c.day === day ? saying : null}
             />
           ))}
         </div>
       </div>
 
-      {quietToday ? null : said ? (
+      {quietToday ? null : now.mark ? (
         <p className="anim-settle mt-1.5 flex min-h-9 items-center gap-1.5 text-[12.5px] text-dim">
-          {said === "done" ? <Check aria-hidden className="size-3.5 text-approve" /> : <Minus aria-hidden className="size-3.5 text-reject" />}
-          {whenLabel(day, p.today)} {said === "done" ? "했어요" : "안 했어요"}
+          {now.mark === "done" ? <Check aria-hidden className="size-3.5 text-approve" /> : <Minus aria-hidden className="size-3.5 text-reject" />}
+          {when}{" "}
+          {now.mark === "done" ? (many ? `${n}번 다 했어요` : "했어요") : now.count > 0 ? `안 했어요 (${tally(now.count, n)})` : "안 했어요"}
           <button
             type="button"
-            onClick={() => void say("")}
+            disabled={saying !== null}
+            onClick={() => void (many && now.mark === "done" ? fewer() : unsay())}
             className="tap-y ml-1 text-[12px] text-faint underline-offset-2 outline-none hover:text-dim hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
           >
-            되돌리기
+            {many && now.mark === "done" ? "하나 빼기" : "되돌리기"}
           </button>
         </p>
       ) : (
-        <div className="mt-2">
-          {picked ? <p className="mb-1.5 text-[12px] text-dim">{whenLabel(day, p.today)} 기록</p> : null}
+        // On a wide screen the day's line and its answers share a row.
+        <div className="mt-2 sm:flex sm:items-center sm:gap-3">
+          {many ? (
+            <p className="mb-1.5 flex min-h-6 items-center gap-1.5 text-[12px] text-dim sm:mb-0">
+              <span className="tnum">
+                {when} {tally(now.count, n)}
+              </span>
+              {now.count > 0 ? (
+                <button
+                  type="button"
+                  disabled={saying !== null}
+                  onClick={() => void fewer()}
+                  className="tap-y ml-1 text-[12px] text-faint underline-offset-2 outline-none hover:text-dim hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
+                >
+                  하나 빼기
+                </button>
+              ) : null}
+            </p>
+          ) : picked ? (
+            <p className="mb-1.5 text-[12px] text-dim sm:mb-0">{when} 기록</p>
+          ) : null}
           {/* The same pair as a card's: the answer that counts on the thumb's side. */}
-          <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-1.5">
+          <div className="grid grid-cols-2 gap-2 sm:ml-auto sm:flex sm:justify-end sm:gap-1.5">
             <Button
               variant="ghost"
               size="sm"
               disabled={saying !== null}
-              onClick={() => void say("missed")}
+              onClick={() => void say({ mark: "missed" }, { mark: "missed", count: now.count })}
               className="h-11 text-[13.5px] text-dim hover:bg-reject/10 hover:text-reject mouse:h-8 mouse:px-3 mouse:text-[0.8rem]"
             >
               안 했다
@@ -286,10 +320,10 @@ function Row({ goal, onOpen, onChanged }: { goal: Goal; onOpen: () => void; onCh
               variant="outline"
               size="sm"
               disabled={saying !== null}
-              onClick={() => void say("done")}
+              onClick={() => void (many ? once() : say({ mark: "done" }, { mark: "done", count: 0 }))}
               className="h-11 border-edge bg-glass-raised text-[13.5px] text-foreground hover:border-approve/35 hover:bg-approve/12 hover:text-approve mouse:h-8 mouse:px-3.5 mouse:text-[0.8rem] dark:bg-glass-raised dark:hover:bg-approve/12"
             >
-              했다
+              {many ? "한 번 했다" : "했다"}
             </Button>
           </div>
         </div>
@@ -306,23 +340,17 @@ function Row({ goal, onOpen, onChanged }: { goal: Goal; onOpen: () => void; onCh
 /**
  * One day of a row. Done is the approve colour with a tick and missed the
  * reject colour with a dash, so neither rests on colour alone; a day asked of
- * and left unsaid is an empty ring, and a day that asks nothing a speck.
+ * and left unsaid is an empty ring, and a day that asks nothing a speck. A goal
+ * of more than one a day splits the ring into its times, and each time done
+ * fills one: the ring filling is the day going, and full it is the tick.
  */
-function Dot({
-  cell,
-  today,
-  picked,
-  onPick,
-  saying,
-}: {
-  cell: Cell;
-  today: string;
-  picked: boolean;
-  onPick: () => void;
-  saying: Mark | "" | null;
-}) {
-  const mark = saying === null ? cell.mark : saying || undefined;
-  const label = `${whenLabel(cell.day, today)}${mark === "done" ? " 했음" : mark === "missed" ? " 안 했음" : cell.asks ? " 기록 없음" : ""}`;
+function Dot({ cell, of, today, picked, onPick }: { cell: Cell; of: number; today: string; picked: boolean; onPick: () => void }) {
+  const mark = cell.mark;
+  const count = cell.count ?? 0;
+  const going = !mark && of > 1 && (count > 0 || (cell.asks && cell.open));
+  const label = `${whenLabel(cell.day, today)}${
+    mark === "done" ? " 했음" : mark === "missed" ? " 안 했음" : going ? ` ${tally(count, of)}` : cell.asks ? " 기록 없음" : ""
+  }`;
   return (
     <button
       type="button"
@@ -336,19 +364,43 @@ function Dot({
         picked && "ring-1 ring-edge",
       )}
     >
-      <span
-        aria-hidden
-        className={cn(
-          "flex size-[1.125rem] items-center justify-center rounded-full",
-          mark === "done" && "bg-approve/85 text-background",
-          mark === "missed" && "bg-reject/15 text-reject",
-          !mark && cell.asks && cell.open && "border border-edge",
-          !mark && !(cell.asks && cell.open) && "size-[3px] bg-faint/40",
-        )}
-      >
-        {mark === "done" ? <Check className="size-3" strokeWidth={3} /> : mark === "missed" ? <Minus className="size-3" strokeWidth={3} /> : null}
-      </span>
+      {going ? (
+        <Times count={count} of={of} />
+      ) : (
+        <span
+          aria-hidden
+          className={cn(
+            "flex size-[1.125rem] items-center justify-center rounded-full",
+            mark === "done" && "bg-approve/85 text-background",
+            mark === "missed" && "bg-reject/15 text-reject",
+            !mark && cell.asks && cell.open && "border border-edge",
+            !mark && !(cell.asks && cell.open) && "size-[3px] bg-faint/40",
+          )}
+        >
+          {mark === "done" ? <Check className="size-3" strokeWidth={3} /> : mark === "missed" ? <Minus className="size-3" strokeWidth={3} /> : null}
+        </span>
+      )}
     </button>
+  );
+}
+
+/** The ring of a day asked more than once: one arc for each time, from the top, those done filled. Past eight, one arc. */
+function Times({ count, of }: { count: number; of: number }) {
+  const r = 7.25;
+  const around = 2 * Math.PI * r;
+  const gap = of > 8 ? 0 : 2;
+  const arc = (around - gap * of) / of;
+  // The first `filled` arcs of the ring, then nothing for the rest of the way round.
+  const dash = (filled: number) =>
+    gap === 0 ? `${(around * filled) / of} ${around}` : [...Array.from({ length: filled }, () => `${arc} ${gap}`), `0 ${around}`].join(" ");
+  return (
+    <svg aria-hidden viewBox="0 0 18 18" className="size-[1.125rem] -rotate-90">
+      {/* Offset by half a gap, so the gaps sit across the top and not after it. */}
+      <circle cx="9" cy="9" r={r} fill="none" strokeWidth="1.75" className="stroke-dim/35" strokeDasharray={dash(of)} strokeDashoffset={-gap / 2} />
+      {count > 0 ? (
+        <circle cx="9" cy="9" r={r} fill="none" strokeWidth="1.75" className="stroke-approve" strokeDasharray={dash(count)} strokeDashoffset={-gap / 2} />
+      ) : null}
+    </svg>
   );
 }
 

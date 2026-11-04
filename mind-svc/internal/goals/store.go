@@ -91,9 +91,9 @@ func (m *Memory) Marks(_ context.Context, goal string) (map[string]Mark, error) 
 	return out, nil
 }
 
-// Postgres keeps them in mind_goals and mind_goal_marks (migration 100): a goal
-// as it is, with what it is looked up by beside it, and a row for each day
-// marked.
+// Postgres keeps them in mind_goals and mind_goal_marks (migrations 100, 102): a
+// goal as it is, with what it is looked up by beside it, and a row for each day
+// marked or under way.
 type Postgres struct{ db *pgxpool.Pool }
 
 func NewPostgres(db *pgxpool.Pool) *Postgres { return &Postgres{db: db} }
@@ -157,9 +157,9 @@ func (p *Postgres) DeleteGoal(ctx context.Context, id string) error {
 
 func (p *Postgres) PutMark(ctx context.Context, m Mark) error {
 	_, err := p.db.Exec(ctx, `
-		insert into mind_goal_marks (goal_id, day, mark, note, by_whom, at) values ($1, $2::date, $3, $4, $5, $6)
-		on conflict (goal_id, day) do update set mark = excluded.mark, note = excluded.note, by_whom = excluded.by_whom, at = excluded.at`,
-		m.Goal, m.Day, m.Mark, m.Note, m.By, m.At)
+		insert into mind_goal_marks (goal_id, day, mark, count, note, by_whom, at) values ($1, $2::date, $3, $4, $5, $6, $7)
+		on conflict (goal_id, day) do update set mark = excluded.mark, count = excluded.count, note = excluded.note, by_whom = excluded.by_whom, at = excluded.at`,
+		m.Goal, m.Day, m.Mark, m.Count, m.Note, m.By, m.At)
 	return err
 }
 
@@ -169,7 +169,7 @@ func (p *Postgres) DeleteMark(ctx context.Context, goal, day string) error {
 }
 
 func (p *Postgres) Marks(ctx context.Context, goal string) (map[string]Mark, error) {
-	rows, err := p.db.Query(ctx, `select to_char(day, 'YYYY-MM-DD'), mark, note, by_whom, at from mind_goal_marks where goal_id = $1`, goal)
+	rows, err := p.db.Query(ctx, `select to_char(day, 'YYYY-MM-DD'), mark, count, note, by_whom, at from mind_goal_marks where goal_id = $1`, goal)
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +177,7 @@ func (p *Postgres) Marks(ctx context.Context, goal string) (map[string]Mark, err
 	out := map[string]Mark{}
 	for rows.Next() {
 		m := Mark{Goal: goal}
-		if err := rows.Scan(&m.Day, &m.Mark, &m.Note, &m.By, &m.At); err != nil {
+		if err := rows.Scan(&m.Day, &m.Mark, &m.Count, &m.Note, &m.By, &m.At); err != nil {
 			return nil, err
 		}
 		out[m.Day] = m

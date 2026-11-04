@@ -1,0 +1,10 @@
+{
+  "name": "하루에 여러 번 하는 일은 횟수가 있는 목표 하나",
+  "why": "goal 스킬: '매일 물 4번'은 goal.make(cadence daily, perDay 4) 하나. 목표를 여럿 만들거나 리마인드로 걸지 않는다.",
+  "say": "매일 물 4번 마시는 목표 만들어줘",
+  "answers": {"change:goal.make": "만들었습니다: [goal_h2o] 물 마시기 (매일 4번) · 오늘 기록 없음"},
+  "expect": {
+    "calls": [{"tool": "change", "what": "goal.make", "args": {"cadence": "daily", "perDay": "4"}}],
+    "never": [{"tool": "change", "what": "reminder.set"}]
+  }
+}

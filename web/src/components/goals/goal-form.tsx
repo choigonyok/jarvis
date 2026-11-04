@@ -21,7 +21,10 @@ const RULES: { value: Cadence; label: string }[] = [
 /** Monday first, as the register reads; the numbers are mind's, Sunday 0. */
 const WEEKDAYS = [1, 2, 3, 4, 5, 6, 0];
 
-const blank = { title: "", note: "", cadence: "daily" as Cadence, times: 3, weekdays: [1, 3, 5], start: "", end: "", remind: "", workout: false };
+const blank = { title: "", note: "", cadence: "daily" as Cadence, times: 3, perDay: 1, weekdays: [1, 3, 5], start: "", end: "", remind: "", workout: false };
+
+/** The most a day may ask, as mind holds it. */
+const MOST_A_DAY = 20;
 
 function start(goal: Goal | null) {
   if (!goal) return blank;
@@ -30,6 +33,7 @@ function start(goal: Goal | null) {
     note: goal.note ?? "",
     cadence: goal.cadence,
     times: goal.times ?? 3,
+    perDay: goal.perDay ?? 1,
     weekdays: goal.weekdays ?? [1, 3, 5],
     start: goal.start,
     end: goal.end ?? "",
@@ -71,6 +75,8 @@ function Form({ goal, onClose, onSaved }: { goal: Goal | null; onClose: () => vo
   const set = <K extends keyof typeof v>(key: K, value: (typeof v)[K]) => setV((cur) => ({ ...cur, [key]: value }));
   const counted = v.cadence === "weekly" || v.cadence === "monthly";
   const most = v.cadence === "weekly" ? 6 : 28;
+  // A day asked of may ask it more than once; a count over days asks of no day.
+  const many = !counted && v.perDay > 1;
   const ready = v.title.trim() !== "" && (v.cadence !== "days" || v.weekdays.length > 0);
 
   // A week holds fewer than a month: seven a week is every day, and says so.
@@ -84,7 +90,7 @@ function Form({ goal, onClose, onSaved }: { goal: Goal | null; onClose: () => vo
       title: v.title,
       note: v.note,
       cadence: v.cadence,
-      ...(counted ? { times: v.times } : {}),
+      ...(counted ? { times: v.times } : { perDay: v.perDay }),
       ...(v.cadence === "days" ? { weekdays: v.weekdays } : {}),
       ...(v.start ? { start: v.start } : {}),
       end: v.end,
@@ -186,9 +192,31 @@ function Form({ goal, onClose, onSaved }: { goal: Goal | null; onClose: () => vo
                 </button>
               </div>
             </div>
-          ) : null}
+          ) : (
+            <div className="mt-2.5 flex items-center justify-between gap-3">
+              <p className="text-[13.5px] text-foreground/90">
+                하루에 <span className="tnum font-medium">{v.perDay}</span>번
+              </p>
+              <div className="flex gap-1.5">
+                <button type="button" aria-label="하루 횟수 줄이기" disabled={v.perDay <= 1} onClick={() => set("perDay", v.perDay - 1)} className={step}>
+                  <Minus aria-hidden className="size-4" />
+                </button>
+                <button
+                  type="button"
+                  aria-label="하루 횟수 늘리기"
+                  disabled={v.perDay >= MOST_A_DAY}
+                  onClick={() => set("perDay", v.perDay + 1)}
+                  className={step}
+                >
+                  <Plus aria-hidden className="size-4" />
+                </button>
+              </div>
+            </div>
+          )}
           <p className="mt-2 text-[12px] leading-relaxed text-faint">
-            {v.cadence === "daily"
+            {many
+              ? `할 때마다 한 번 했다를 누르고, ${v.perDay}번을 채우면 그날 했다가 돼요. 다 채우지 못한 날은 다음 날 점심에 물어봐요.`
+              : v.cadence === "daily"
               ? "하루라도 기록이 없으면 다음 날 점심에 혹시 했는지 물어봐요."
               : v.cadence === "days"
                 ? "고른 요일만 세요. 기록이 없으면 다음 날 점심에 물어봐요."

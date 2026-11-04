@@ -148,22 +148,26 @@ func (s *Server) markGoal(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Day  string  `json:"day"`
 		Mark *string `json:"mark"`
-		Note string  `json:"note"`
-		By   string  `json:"by"`
+		// Of a goal of more than one a day: how many times that day, or how
+		// many more.
+		Count *int   `json:"count"`
+		Add   int    `json:"add"`
+		Note  string `json:"note"`
+		By    string `json:"by"`
 	}
 	if !readJSON(w, r, &in) {
 		return
 	}
 	// An empty mark takes a day back, and no day is today: a body that lost its
 	// mark on the way must not read as that.
-	if in.Mark == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "기록(mark)이 없습니다."})
+	if in.Mark == nil && in.Count == nil && in.Add == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "기록(mark)이나 횟수(count, add)가 없습니다."})
 		return
 	}
 	if in.By == "" {
 		in.By = goals.ByCard
 	}
-	g, marks, err := s.m.Goals.MarkDay(r.Context(), g.ID, in.Day, *in.Mark, in.Note, in.By)
+	g, marks, err := s.m.Goals.CheckDay(r.Context(), g.ID, goals.Check{Day: in.Day, Mark: in.Mark, Count: in.Count, Add: in.Add, Note: in.Note, By: in.By})
 	if err != nil {
 		s.goalFail(w, err)
 		return

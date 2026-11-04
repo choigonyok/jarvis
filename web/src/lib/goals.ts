@@ -11,6 +11,8 @@ export type Cell = {
   /** It may be marked: not yet to come, not rested. */
   open?: boolean;
   mark?: Mark;
+  /** How many times that day, of a goal of more than one a day. */
+  count?: number;
 };
 
 export type Period = { from: string; to: string; target: number; done: number };
@@ -19,6 +21,8 @@ export type Progress = {
   today: string;
   asks: boolean;
   mark?: Mark;
+  /** How many times today so far, of a goal of more than one a day. */
+  count?: number;
   period: Period;
   need: number;
   room: number;
@@ -40,6 +44,8 @@ export type Goal = {
   note?: string;
   cadence: Cadence;
   times?: number;
+  /** How many times a day, of a goal of days: 물 4번. Empty, once. */
+  perDay?: number;
   weekdays?: number[];
   start: string;
   end?: string;
@@ -53,7 +59,13 @@ export type Goal = {
 
 export type Bar = { from: string; to: string; target: number; done: number; open?: boolean };
 export type WeekdayStat = { day: number; done: number; asks: number };
-export type Stats = { bars: Bar[]; weekdays: WeekdayStat[]; marks: Record<string, Mark> };
+export type Stats = {
+  bars: Bar[];
+  weekdays: WeekdayStat[];
+  marks: Record<string, Mark>;
+  /** How many times each day went, of a goal of more than one a day: a day still going is here and not in marks. */
+  counts?: Record<string, number>;
+};
 
 /** What the form sends: every field a goal is made of. */
 export type Draft = {
@@ -61,6 +73,7 @@ export type Draft = {
   note?: string;
   cadence: Cadence;
   times?: number;
+  perDay?: number;
   weekdays?: number[];
   start?: string;
   end?: string;
@@ -105,7 +118,27 @@ export async function removeGoal(id: string): Promise<unknown> {
 
 /** Says how a day went; "" takes it back. */
 export async function markDay(id: string, day: string, mark: Mark | ""): Promise<{ goal: Goal; stats: Stats }> {
-  return call(`/${encodeURIComponent(id)}/checks`, { method: "POST", body: JSON.stringify({ day, mark }) });
+  return checkDay(id, day, { mark });
+}
+
+/**
+ * A word on a day: a mark, or - of a goal of more than one a day - how many
+ * times it went (count) or how many more (add, fewer below zero).
+ */
+export type Check = { mark: Mark | "" } | { count: number } | { add: number };
+
+export async function checkDay(id: string, day: string, check: Check): Promise<{ goal: Goal; stats: Stats }> {
+  return call(`/${encodeURIComponent(id)}/checks`, { method: "POST", body: JSON.stringify({ day, ...check }) });
+}
+
+/** How many times a day the goal asks: 1 unless it asks more. */
+export function perDayOf(g: Pick<Goal, "perDay">): number {
+  return Math.max(g.perDay ?? 1, 1);
+}
+
+/** How far a day went, as said: "2/4번". */
+export function tally(count: number, perDay: number): string {
+  return `${count}/${perDay}번`;
 }
 
 const WEEK = ["일", "월", "화", "수", "목", "금", "토"];

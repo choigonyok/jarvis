@@ -1,0 +1,11 @@
+{
+  "name": "하루 여러 번인 목표는 한 번 했다고 하면 한 번 더",
+  "why": "goal 스킬: 하루 여러 번인 목표에 '물 한 잔 마셨어'는 goal.check(id, add 1). mark done 은 그날 다 했다는 뜻이라 쓰지 않는다.",
+  "situation": "[지금 상황 · 15:10]\n- 진행 중인 일정도 최근 위치 단서도 없음. 위치·동행이 필요한 답이면 먼저 물어볼 것\n- 목표(운영자가 했다·안 했다고 말하면 change 의 goal.check, 이 id 로. 하루 여러 번인 목표는 한 번 했다면 add 1): [goal_h2o] 물 마시기 (매일 4번) · 오늘 2/4번",
+  "say": "방금 물 한 잔 마셨어",
+  "answers": {"change:goal.check": "기록했습니다: [goal_h2o] 물 마시기 (매일 4번) · 오늘 3/4번"},
+  "expect": {
+    "calls": [{"tool": "change", "what": "goal.check", "args": {"id": "goal_h2o", "add": "1"}}],
+    "never": [{"tool": "change", "what": "goal.check", "args": {"mark": "done"}}]
+  }
+}

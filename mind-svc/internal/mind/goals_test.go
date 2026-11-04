@@ -129,6 +129,46 @@ func TestYesterdayIsAskedAboutAtNoon(t *testing.T) {
 	}
 }
 
+// 물 4번 left at two yesterday is asked about at noon like a day with no word -
+// the rest may only have gone untapped - and the card says how far it went;
+// today's hour asks of a day not done yet, and says how far it is.
+func TestADayStillGoingIsAsked(t *testing.T) {
+	ctx := context.Background()
+	seoul, _ := time.LoadLocation("Asia/Seoul")
+	noon := time.Date(2026, 11, 5, 12, 30, 0, 0, seoul)
+	m, note, clk := goalMind(t, noon)
+	water := makeGoal(t, m, goals.New{Title: "물 마시기", Cadence: goals.Daily, PerDay: 4, Start: "2026-11-02", Remind: "21:00"})
+	two := 2
+	if _, _, err := m.Goals.CheckDay(ctx, water.ID, goals.Check{Day: "2026-11-04", Count: &two, By: goals.ByCard}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.goalNoon(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got := note.All()
+	if len(got) != 1 || got[0].Title != "어제 '물 마시기' 했어요? (2/4번)" {
+		t.Fatalf("%v", said(note))
+	}
+	list, _ := got[0].Data["goals"].([]goalAsk)
+	if len(list) != 1 || list[0].Count != 2 || list[0].PerDay != 4 || list[0].Day != "2026-11-04" {
+		t.Fatalf("%+v", list)
+	}
+
+	if _, _, err := m.Goals.CheckDay(ctx, water.ID, goals.Check{Add: 3, By: goals.ByCard}); err != nil {
+		t.Fatal(err)
+	}
+	clk.Pin(time.Date(2026, 11, 5, 21, 0, 30, 0, seoul))
+	if err := m.goalHour(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := note.All(); len(got) != 2 || got[1].Title != "오늘 '물 마시기' 했어요? (3/4번)" {
+		t.Fatalf("%v", said(note))
+	}
+	if line := m.goalLineOf(ctx, goals.Owner); !strings.Contains(line, "(매일 4번)") || !strings.Contains(line, "오늘 3/4번") || !strings.Contains(line, "add 1") {
+		t.Fatalf("%q", line)
+	}
+}
+
 // A run worth keeping gets a word before the day ends; the goal's own hour is
 // said once, and not once today has an answer. Sunday says how the week went.
 func TestEveningsWords(t *testing.T) {

@@ -1,10 +1,11 @@
 // Package goals keeps what the operator (and the guest, each their own) means
 // to do again and again - every day, on chosen days, so many times a week or a
-// month - and whether they did. Marking is theirs: a tap on 했다 or 안 했다, a
-// word in the conversation. What it adds up to is worked out here, from the
-// marks alone, so there is nothing stored to drift from them: how this week
-// stands, whether what is left can still make it, how long it has held, how far
-// it has gone.
+// month, and on a day so many times over (물 4번) - and whether they did. Marking
+// is theirs: a tap on 했다 or 안 했다, one more tap for each time of a day, a word
+// in the conversation. What it adds up to is worked out here, from the marks
+// alone, so there is nothing stored to drift from them: how this week stands,
+// whether what is left can still make it, how long it has held, how far it has
+// gone.
 package goals
 
 import (
@@ -77,6 +78,9 @@ type Goal struct {
 	Cadence string `json:"cadence"`
 	// Times is how many a week or a month.
 	Times int `json:"times,omitempty"`
+	// PerDay is how many times a day it asks of a day it asks of - 물 4번 - for
+	// a goal of days; empty, once.
+	PerDay int `json:"perDay,omitempty"`
 	// Weekdays are the days it asks, Sunday 0, ascending.
 	Weekdays []int  `json:"weekdays,omitempty"`
 	Start    string `json:"start"`         // the first day it counts, YYYY-MM-DD
@@ -100,14 +104,17 @@ func (g Goal) Person() string {
 	return Owner
 }
 
-// Mark is one day's word on a goal.
+// Mark is one day's word on a goal. Of a goal of more than one a day, Count is
+// how many times that day; a day short of them and not said to be missed has
+// no mark yet: it is still going.
 type Mark struct {
-	Goal string    `json:"goal"`
-	Day  string    `json:"day"` // YYYY-MM-DD
-	Mark string    `json:"mark"`
-	Note string    `json:"note,omitempty"`
-	By   string    `json:"by,omitempty"`
-	At   time.Time `json:"at"`
+	Goal  string    `json:"goal"`
+	Day   string    `json:"day"` // YYYY-MM-DD
+	Mark  string    `json:"mark"`
+	Count int       `json:"count,omitempty"`
+	Note  string    `json:"note,omitempty"`
+	By    string    `json:"by,omitempty"`
+	At    time.Time `json:"at"`
 }
 
 // Store keeps the goals and their marks.
@@ -135,6 +142,7 @@ const (
 	maxTitle  = 60
 	maxNote   = 200
 	maxGoals  = 40
+	maxPerDay = 20
 )
 
 var clockRE = regexp.MustCompile(`^([01]\d|2[0-3]):[0-5]\d$`)
@@ -156,6 +164,7 @@ type New struct {
 	Note     string `json:"note,omitempty"`
 	Cadence  string `json:"cadence"`
 	Times    int    `json:"times,omitempty"`
+	PerDay   int    `json:"perDay,omitempty"`
 	Weekdays []int  `json:"weekdays,omitempty"`
 	Start    string `json:"start,omitempty"`
 	End      string `json:"end,omitempty"`
@@ -187,7 +196,7 @@ func (s *Service) Make(ctx context.Context, n New) (Goal, error) {
 		return Goal{}, ErrInvalid(fmt.Sprintf("목표는 %d개까지입니다", maxGoals))
 	}
 	now := s.Now()
-	g := Goal{ID: newID(), Title: n.Title, Note: n.Note, Cadence: n.Cadence, Times: n.Times, Weekdays: n.Weekdays, Start: n.Start, End: n.End,
+	g := Goal{ID: newID(), Title: n.Title, Note: n.Note, Cadence: n.Cadence, Times: n.Times, PerDay: n.PerDay, Weekdays: n.Weekdays, Start: n.Start, End: n.End,
 		Remind: n.Remind, Auto: n.Auto, Status: Active, CreatedAt: now, UpdatedAt: now}
 	if n.Who == Guest {
 		g.Who = Guest
@@ -246,6 +255,16 @@ func (g *Goal) tidy() error {
 	default:
 		return ErrInvalid(fmt.Sprintf("주기(cadence)는 daily, days, weekly, monthly 중 하나입니다: %q", g.Cadence))
 	}
+	// Once a day is no count to keep.
+	if g.PerDay <= 1 {
+		g.PerDay = 0
+	}
+	switch {
+	case g.PerDay > maxPerDay:
+		return ErrInvalid(fmt.Sprintf("하루에 몇 번인지(perDay)는 %d번까지입니다", maxPerDay))
+	case g.PerDay > 0 && g.counted():
+		return ErrInvalid("하루에 몇 번인지(perDay)는 매일·요일마다 하는 목표에만 정합니다")
+	}
 	if _, err := time.Parse(dayLayout, g.Start); err != nil {
 		return ErrInvalid(fmt.Sprintf("시작일(start)은 YYYY-MM-DD 입니다: %q", g.Start))
 	}
@@ -272,6 +291,7 @@ type Change struct {
 	Note     *string `json:"note,omitempty"`
 	Cadence  *string `json:"cadence,omitempty"`
 	Times    *int    `json:"times,omitempty"`
+	PerDay   *int    `json:"perDay,omitempty"`
 	Weekdays *[]int  `json:"weekdays,omitempty"`
 	Start    *string `json:"start,omitempty"`
 	End      *string `json:"end,omitempty"`
@@ -302,6 +322,13 @@ func (s *Service) Change(ctx context.Context, id string, c Change) (Goal, error)
 	}
 	if c.Times != nil {
 		g.Times = *c.Times
+	}
+	switch {
+	case c.PerDay != nil:
+		g.PerDay = *c.PerDay
+	case g.counted():
+		// Made a count over days, it no longer asks so many of a day.
+		g.PerDay = 0
 	}
 	if c.Weekdays != nil {
 		g.Weekdays = *c.Weekdays
@@ -356,6 +383,25 @@ func (g *Goal) finish(on bool, today string) {
 // MarkDay says how a day went: Done, Missed, or "" to take it back. Today and
 // the days before it, back to the goal's first.
 func (s *Service) MarkDay(ctx context.Context, id, day, mark, note, by string) (Goal, map[string]Mark, error) {
+	return s.CheckDay(ctx, id, Check{Day: day, Mark: &mark, Note: note, By: by})
+}
+
+// Check is one word on a day: a mark - Done, Missed, "" to take the day back -
+// or, of a goal of more than one a day, how many times it was done that day
+// (Count) or how many more (Add, fewer below zero). Of a goal of once a day a
+// count is done or not.
+type Check struct {
+	Day   string
+	Mark  *string
+	Count *int
+	Add   int
+	Note  string
+	By    string
+}
+
+// CheckDay writes a word on a day: today and the days before it, back to the
+// goal's first.
+func (s *Service) CheckDay(ctx context.Context, id string, c Check) (Goal, map[string]Mark, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	g, err := s.St.Goal(ctx, id)
@@ -363,34 +409,126 @@ func (s *Service) MarkDay(ctx context.Context, id, day, mark, note, by string) (
 		return g, nil, err
 	}
 	today := s.Today()
-	if day == "" {
-		day = today
+	if c.Day == "" {
+		c.Day = today
 	}
-	if _, err := time.Parse(dayLayout, day); err != nil {
-		return g, nil, ErrInvalid(fmt.Sprintf("날짜(day)는 YYYY-MM-DD 입니다: %q", day))
+	if _, err := time.Parse(dayLayout, c.Day); err != nil {
+		return g, nil, ErrInvalid(fmt.Sprintf("날짜(day)는 YYYY-MM-DD 입니다: %q", c.Day))
 	}
 	switch {
-	case day > today:
+	case c.Day > today:
 		return g, nil, ErrInvalid("아직 오지 않은 날은 기록할 수 없습니다")
-	case day < g.Start:
+	case c.Day < g.Start:
 		return g, nil, ErrInvalid("시작일 전의 날은 기록할 수 없습니다. 시작일을 앞당겨 주세요")
-	case g.End != "" && day > g.End:
+	case g.End != "" && c.Day > g.End:
 		return g, nil, ErrInvalid("끝난 뒤의 날은 기록할 수 없습니다")
 	}
-	switch mark {
-	case "":
-		err = s.St.DeleteMark(ctx, id, day)
-	case Done, Missed:
-		err = s.St.PutMark(ctx, Mark{Goal: id, Day: day, Mark: mark, Note: clip(clean(note), maxNote), By: by, At: s.Now()})
-	default:
-		return g, nil, ErrInvalid(fmt.Sprintf("기록(mark)은 done, missed, 또는 빈 값입니다: %q", mark))
+	marks, err := s.St.Marks(ctx, id)
+	if err != nil {
+		return g, nil, err
+	}
+	m, keep, err := g.check(marks[c.Day], c)
+	if err != nil {
+		return g, nil, err
+	}
+	if keep {
+		m.Goal, m.Day, m.By, m.At = id, c.Day, c.By, s.Now()
+		err = s.St.PutMark(ctx, m)
+	} else {
+		err = s.St.DeleteMark(ctx, id, c.Day)
 	}
 	if err != nil {
 		return g, nil, err
 	}
-	marks, err := s.St.Marks(ctx, id)
+	marks, err = s.St.Marks(ctx, id)
 	return g, marks, err
 }
+
+// check is what a day's mark becomes for a word on it; keep false, the day has
+// none left.
+func (g Goal) check(cur Mark, c Check) (Mark, bool, error) {
+	n := g.times()
+	note := clip(clean(c.Note), maxNote)
+	var m Mark
+	count := 0
+	switch {
+	case c.Mark != nil:
+		switch *c.Mark {
+		case "":
+			return Mark{}, false, nil
+		case Done:
+			m.Mark, count = Done, n
+			if cur.Mark == "" && note == "" {
+				note = cur.Note
+			}
+		case Missed:
+			// Said not done, what was done of it stays to be seen - of a day
+			// that was going, not of one said done.
+			m.Mark = Missed
+			if cur.Mark != Done {
+				count = min(cur.Count, n-1)
+			}
+			if c.Count != nil {
+				count = min(max(*c.Count, 0), n-1)
+			}
+		default:
+			return Mark{}, false, ErrInvalid(fmt.Sprintf("기록(mark)은 done, missed, 또는 빈 값입니다: %q", *c.Mark))
+		}
+		m.Count, m.Note = count, note
+		if n == 1 {
+			m.Count = 0
+		}
+		return m, true, nil
+	case c.Count != nil:
+		count = *c.Count
+	case c.Add != 0:
+		count = g.CountOf(cur) + c.Add
+	default:
+		return Mark{}, false, ErrInvalid("기록(mark)이나 횟수(count, add)가 필요합니다")
+	}
+	// A count says how far the day has gone: all of it is done, none is no
+	// word on it, and between them it is still going - a word it was missed
+	// gives way to one more time.
+	if note == "" {
+		note = cur.Note
+	}
+	switch count = min(max(count, 0), n); {
+	case count == 0:
+		return Mark{}, false, nil
+	case count == n:
+		m.Mark = Done
+	}
+	m.Count, m.Note = count, note
+	if n == 1 {
+		m.Count = 0
+	}
+	return m, true, nil
+}
+
+// times is how many times a day it asks of a day it asks of.
+func (g Goal) times() int { return max(g.PerDay, 1) }
+
+// many is a mark's count as the screen shows it: of a goal of more than one a
+// day only.
+func (g Goal) many(m Mark) int {
+	if g.PerDay < 2 {
+		return 0
+	}
+	return g.CountOf(m)
+}
+
+// CountOf is how many times of its day a mark says were done: all of them, of
+// a day done.
+func (g Goal) CountOf(m Mark) int {
+	if m.Mark == Done {
+		return g.times()
+	}
+	return min(m.Count, g.times())
+}
+
+// counted is whether the goal counts over days - so many a week, a month -
+// and asks of no day in particular.
+func (g Goal) counted() bool { return g.Cadence == Weekly || g.Cadence == Monthly }
 
 // Unmarked says Done of a day nobody has marked: what a tied source reports
 // does not overrule what the person said.
@@ -577,14 +715,18 @@ type Cell struct {
 	Asks bool   `json:"asks,omitempty"` // the goal asks of this day
 	Open bool   `json:"open,omitempty"` // it may be marked: not yet, not rested
 	Mark string `json:"mark,omitempty"`
+	// Count is how many times that day, of a goal of more than one a day.
+	Count int `json:"count,omitempty"`
 }
 
 // Progress is where a goal stands today.
 type Progress struct {
 	Today string `json:"today"`
-	// Asks is whether today is asked of; Mark what today was marked.
-	Asks bool   `json:"asks"`
-	Mark string `json:"mark,omitempty"`
+	// Asks is whether today is asked of; Mark what today was marked, and Count
+	// how many times so far, of a goal of more than one a day.
+	Asks  bool   `json:"asks"`
+	Mark  string `json:"mark,omitempty"`
+	Count int    `json:"count,omitempty"`
 	// Period is the one today falls in.
 	Period Period `json:"period"`
 	// Need is how many it still takes, Room how many days could still give it
@@ -613,7 +755,7 @@ type Progress struct {
 func (g Goal) Of(marks map[string]Mark, today string) Progress {
 	p := Progress{Today: today, Asks: g.Asks(today), Unit: g.unit()}
 	if m, ok := marks[today]; ok {
-		p.Mark = m.Mark
+		p.Mark, p.Count = m.Mark, g.many(m)
 	}
 	for _, m := range marks {
 		if m.Mark == Done {
@@ -640,7 +782,7 @@ func (g Goal) Of(marks map[string]Mark, today string) Progress {
 		d := shift(week, i)
 		c := Cell{Day: d, Asks: g.Asks(d), Open: d <= today && g.counts(d)}
 		if m, ok := marks[d]; ok {
-			c.Mark = m.Mark
+			c.Mark, c.Count = m.Mark, g.many(m)
 		}
 		p.Week = append(p.Week, c)
 	}
@@ -757,10 +899,14 @@ func shortDay(day string) string {
 
 var weekdayNames = []string{"일", "월", "화", "수", "목", "금", "토"}
 
-// Rule says how often a goal asks: "매일", "월·수·금", "주 3회".
+// Rule says how often a goal asks: "매일", "월·수·금", "주 3회", "매일 4번",
+// "월·수·금 하루 2번".
 func (g Goal) Rule() string {
 	switch g.Cadence {
 	case Daily:
+		if g.PerDay > 1 {
+			return fmt.Sprintf("매일 %d번", g.PerDay)
+		}
 		return "매일"
 	case Days:
 		names := make([]string, 0, len(g.Weekdays))
@@ -769,6 +915,9 @@ func (g Goal) Rule() string {
 			if d := i % 7; slices.Contains(g.Weekdays, d) {
 				names = append(names, weekdayNames[d])
 			}
+		}
+		if g.PerDay > 1 {
+			return fmt.Sprintf("%s 하루 %d번", strings.Join(names, "·"), g.PerDay)
 		}
 		return strings.Join(names, "·")
 	case Weekly:
@@ -780,7 +929,8 @@ func (g Goal) Rule() string {
 }
 
 // Line is a goal in one line, for the conversation's situation and a tool's
-// answer: "[goal_1a2b] 운동 (주 3회) 이번 주 1/3 · 남은 4일 중 2번 · 오늘 기록 없음".
+// answer: "[goal_1a2b] 운동 (주 3회) 이번 주 1/3 · 남은 4일 중 2번 · 오늘 기록 없음",
+// "[goal_3c4d] 물 마시기 (매일 4번) · 오늘 2/4번".
 func (g Goal) Line(p Progress) string {
 	s := "[" + g.ID + "] " + g.Title + " (" + g.Rule() + ")"
 	if p.Says != "" {
@@ -790,8 +940,12 @@ func (g Goal) Line(p Progress) string {
 		switch {
 		case p.Mark == Done:
 			s += " · 오늘 했음"
+		case p.Mark == Missed && p.Count > 0:
+			s += fmt.Sprintf(" · 오늘 안 했음(%d/%d번)", p.Count, g.PerDay)
 		case p.Mark == Missed:
 			s += " · 오늘 안 했음"
+		case p.Count > 0:
+			s += fmt.Sprintf(" · 오늘 %d/%d번", p.Count, g.PerDay)
 		case p.Asks:
 			s += " · 오늘 기록 없음"
 		}
@@ -839,6 +993,9 @@ type Stats struct {
 	Weekdays []Weekday `json:"weekdays"`
 	// Marks is every day marked, by day.
 	Marks map[string]string `json:"marks"`
+	// Counts is how many times each day went, of a goal of more than one a
+	// day: a day still going is here and not in Marks.
+	Counts map[string]int `json:"counts,omitempty"`
 }
 
 // barsShown is how far back the graph goes: twelve weeks, or twelve months.
@@ -848,7 +1005,15 @@ const barsShown = 12
 func (g Goal) StatsOf(marks map[string]Mark, today string) Stats {
 	st := Stats{Bars: []Bar{}, Weekdays: []Weekday{}, Marks: map[string]string{}}
 	for d, m := range marks {
-		st.Marks[d] = m.Mark
+		if m.Mark != "" {
+			st.Marks[d] = m.Mark
+		}
+		if n := g.many(m); n > 0 {
+			if st.Counts == nil {
+				st.Counts = map[string]int{}
+			}
+			st.Counts[d] = n
+		}
 	}
 	last := today
 	if g.End != "" && g.End < last {
@@ -892,7 +1057,9 @@ func (g Goal) StatsOf(marks map[string]Mark, today string) Stats {
 	}
 	for d := g.Start; d <= last; d = shift(d, 1) {
 		w := int(parse(d).Weekday())
-		m, marked := marks[d]
+		// Today still going is not asked yet.
+		m := marks[d]
+		marked := m.Mark != ""
 		switch g.Cadence {
 		case Weekly, Monthly:
 			// Any day will do: what counts is how the days it was done fall.

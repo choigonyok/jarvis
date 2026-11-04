@@ -40,11 +40,32 @@ const (
 )
 
 // goalAsk is one question a notice card asks: how did this day go. The card
-// answers it with 했다 and 안 했다.
+// answers it with 했다 and 안 했다 - of a goal of more than one a day, 했다 is
+// all of them, and Count is how many so far of PerDay.
 type goalAsk struct {
-	Goal  string `json:"goal"`
-	Title string `json:"title"`
-	Day   string `json:"day"`
+	Goal   string `json:"goal"`
+	Title  string `json:"title"`
+	Day    string `json:"day"`
+	Count  int    `json:"count,omitempty"`
+	PerDay int    `json:"perDay,omitempty"`
+}
+
+// askOf is the question about a goal's day, with how far that day went.
+func askOf(g goals.Goal, title, day string, m goals.Mark) goalAsk {
+	a := goalAsk{Goal: g.ID, Title: title, Day: day}
+	if g.PerDay > 1 {
+		a.Count, a.PerDay = g.CountOf(m), g.PerDay
+	}
+	return a
+}
+
+// sofar is how far a day of a goal of more than one a day went, as a title
+// ends: " (2/4번)"; nothing of one not under way.
+func sofar(a goalAsk) string {
+	if a.Count == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (%d/%d번)", a.Count, a.PerDay)
 }
 
 // goalSay rings the person's phone and lays a card in their conversation.
@@ -142,13 +163,16 @@ func (m *Mind) goalNoon(ctx context.Context) error {
 	}
 	asks := map[string][]goalAsk{}
 	for _, g := range gs {
-		if _, said := marks[g.ID][yesterday]; said || !g.Asks(yesterday) || lapsed(g, marks[g.ID], today) {
+		// A day still going when it ended - 물 2 of 4 - is asked too: the rest
+		// may only have gone untapped.
+		m := marks[g.ID][yesterday]
+		if m.Mark != "" || !g.Asks(yesterday) || lapsed(g, marks[g.ID], today) {
 			continue
 		}
-		asks[g.Person()] = append(asks[g.Person()], goalAsk{Goal: g.ID, Title: g.Title, Day: yesterday})
+		asks[g.Person()] = append(asks[g.Person()], askOf(g, g.Title, yesterday, m))
 	}
 	for who, list := range asks {
-		title := fmt.Sprintf("어제 '%s' 했어요?", list[0].Title)
+		title := fmt.Sprintf("어제 '%s' 했어요?%s", list[0].Title, sofar(list[0]))
 		if len(list) > 1 {
 			title = fmt.Sprintf("어제 목표 %d개에 기록이 없어요", len(list))
 		}
@@ -192,7 +216,7 @@ func (m *Mind) goalNight(ctx context.Context) error {
 			}
 			var asks []goalAsk
 			if p.Mark == "" {
-				asks = []goalAsk{{Goal: g.ID, Title: g.Title, Day: today}}
+				asks = []goalAsk{askOf(g, g.Title, today, ms[today])}
 			}
 			word := "이번 주"
 			if g.Cadence == goals.Monthly {
@@ -201,7 +225,7 @@ func (m *Mind) goalNight(ctx context.Context) error {
 			tight[who] = append(tight[who], tightGoal{key: key, title: g.Title, asks: asks,
 				says: fmt.Sprintf("%s %d/%d, %s 모두 해야 %d번을 채워요", word, p.Period.Done, p.Period.Target, dayNames(left), p.Period.Target)})
 		case p.Asks && p.Mark == "" && p.Streak >= goalGuard:
-			guard[who] = append(guard[who], goalAsk{Goal: g.ID, Title: fmt.Sprintf("%s (%d%s째)", g.Title, p.Streak, p.Unit), Day: today})
+			guard[who] = append(guard[who], askOf(g, fmt.Sprintf("%s (%d%s째)", g.Title, p.Streak, p.Unit), today, ms[today]))
 		}
 	}
 	for who, list := range tight {
@@ -210,7 +234,11 @@ func (m *Mind) goalNight(ctx context.Context) error {
 		}
 	}
 	for who, list := range guard {
-		title := fmt.Sprintf("오늘 '%s' 기록이 아직 없어요", strings.SplitN(list[0].Title, " (", 2)[0])
+		name := strings.SplitN(list[0].Title, " (", 2)[0]
+		title := fmt.Sprintf("오늘 '%s' 기록이 아직 없어요", name)
+		if list[0].Count > 0 {
+			title = fmt.Sprintf("오늘 '%s' 아직 %d/%d번이에요", name, list[0].Count, list[0].PerDay)
+		}
 		if len(list) > 1 {
 			title = fmt.Sprintf("이어 온 목표 %d개에 오늘 기록이 없어요", len(list))
 		}
@@ -333,11 +361,11 @@ func (m *Mind) goalHour(ctx context.Context) error {
 		if p.Mark != "" || !p.Asks && !weekly || weekly && p.Need == 0 {
 			continue
 		}
-		due[g.Person()] = append(due[g.Person()], goalAsk{Goal: g.ID, Title: g.Title, Day: today})
+		due[g.Person()] = append(due[g.Person()], askOf(g, g.Title, today, marks[today]))
 		says[g.Person()] = p.Says
 	}
 	for who, list := range due {
-		title, body := fmt.Sprintf("오늘 '%s' 했어요?", list[0].Title), says[who]
+		title, body := fmt.Sprintf("오늘 '%s' 했어요?%s", list[0].Title, sofar(list[0])), says[who]
 		if len(list) > 1 {
 			title, body = fmt.Sprintf("오늘 목표 %d개, 했어요?", len(list)), ""
 		}
@@ -418,5 +446,5 @@ func (m *Mind) goalLineOf(ctx context.Context, who string) string {
 	if len(parts) == 0 {
 		return ""
 	}
-	return "- 목표(운영자가 했다·안 했다고 말하면 change 의 goal.check, 이 id 로): " + strings.Join(parts, " / ")
+	return "- 목표(운영자가 했다·안 했다고 말하면 change 의 goal.check, 이 id 로. 하루 여러 번인 목표는 한 번 했다면 add 1): " + strings.Join(parts, " / ")
 }

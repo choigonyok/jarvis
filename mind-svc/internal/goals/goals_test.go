@@ -289,6 +289,144 @@ func TestMarkDay(t *testing.T) {
 	}
 }
 
+// 물 4번: each time is one more tap, and the day is done once all of them are.
+// A day short of them is still going - no 했다, no 안 했다 - until it is said to
+// be missed, which keeps what was done of it; taking one back reopens a day done.
+func TestTimesADay(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 11, 5, 21, 0, 0, 0, seoul)
+	s := service(&now)
+	g, err := s.Make(ctx, New{Title: "물 마시기", Cadence: Daily, PerDay: 4, Start: "2026-11-02"})
+	if err != nil || g.PerDay != 4 || g.Rule() != "매일 4번" {
+		t.Fatalf("%+v %v", g, err)
+	}
+	check := func(c Check) (Progress, Mark) {
+		t.Helper()
+		c.By = ByCard
+		g, m, err := s.CheckDay(ctx, g.ID, c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return g.Of(m, "2026-11-05"), m["2026-11-05"]
+	}
+	mark := func(m string) *string { return &m }
+	count := func(n int) *int { return &n }
+
+	check(Check{Add: 1})
+	p, m := check(Check{Add: 1, Note: "점심"})
+	if p.Mark != "" || p.Count != 2 || m.Count != 2 || m.Note != "점심" || !strings.HasSuffix(g.Line(p), "· 오늘 2/4번") {
+		t.Fatalf("두 번까지는 아직 하는 중: %+v %+v %q", p, m, g.Line(p))
+	}
+	if p.Week[3].Count != 2 || p.Week[3].Mark != "" {
+		t.Fatalf("이번 주 칸에도 두 번: %+v", p.Week[3])
+	}
+	if p, m = check(Check{Add: 2}); p.Mark != Done || p.Count != 4 || m.Note != "점심" || p.Streak != 1 {
+		t.Fatalf("네 번이면 했다: %+v %+v", p, m)
+	}
+	if p, _ = check(Check{Add: 1}); p.Mark != Done || p.Count != 4 {
+		t.Fatalf("넘쳐도 다 한 날: %+v", p)
+	}
+	if p, _ = check(Check{Add: -1}); p.Mark != "" || p.Count != 3 {
+		t.Fatalf("하나 빼면 다시 하는 중: %+v", p)
+	}
+	if p, _ = check(Check{Mark: mark(Missed)}); p.Mark != Missed || p.Count != 3 || !strings.HasSuffix(g.Line(p), "오늘 안 했음(3/4번)") {
+		t.Fatalf("안 했다고 해도 한 만큼은 남는다: %+v %q", p, g.Line(p))
+	}
+	if p, _ = check(Check{Add: 1}); p.Mark != Done {
+		t.Fatalf("안 했다 뒤에 한 번 더 해서 다 채움: %+v", p)
+	}
+	if p, _ = check(Check{Mark: mark(Missed)}); p.Mark != Missed || p.Count != 0 {
+		t.Fatalf("다 했다던 날을 안 했다로 고치면 몇 번인지 모른다: %+v", p)
+	}
+	if p, _ = check(Check{Count: count(1)}); p.Mark != "" || p.Count != 1 {
+		t.Fatalf("몇 번인지 바로 적기: %+v", p)
+	}
+	if _, m := check(Check{Count: count(0)}); m.Day != "" {
+		t.Fatalf("0번은 기록이 없는 날: %+v", m)
+	}
+	if p, _ = check(Check{Mark: mark(Done)}); p.Mark != Done || p.Count != 4 {
+		t.Fatalf("했다는 다 한 날: %+v", p)
+	}
+	if _, m := check(Check{Mark: mark("")}); m.Day != "" {
+		t.Fatalf("지우면 그날이 비어야 합니다: %+v", m)
+	}
+	var bad ErrInvalid
+	if _, _, err := s.CheckDay(ctx, g.ID, Check{By: ByCard}); !errors.As(err, &bad) {
+		t.Fatalf("아무 말도 없는 기록은 받지 않습니다: %v", err)
+	}
+
+	// Yesterday stopped at two: not done, and the run it closes is broken; the
+	// graph has both how many and that it was not done.
+	check(Check{Add: 4})
+	if _, _, err := s.CheckDay(ctx, g.ID, Check{Day: "2026-11-04", Count: count(2), By: ByCard}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.CheckDay(ctx, g.ID, Check{Day: "2026-11-03", Mark: mark(Done), By: ByCard}); err != nil {
+		t.Fatal(err)
+	}
+	ms, _ := s.Marks(ctx, g.ID)
+	p = g.Of(ms, "2026-11-05")
+	if p.Streak != 1 || p.Best != 1 || p.Rate == nil || *p.Rate >= 1 {
+		t.Fatalf("어제 두 번에서 멈춘 날은 하지 않은 날: %+v", p)
+	}
+	st := g.StatsOf(ms, "2026-11-05")
+	if st.Counts["2026-11-04"] != 2 || st.Counts["2026-11-03"] != 4 || st.Marks["2026-11-03"] != Done {
+		t.Fatalf("그래프의 횟수: %+v", st)
+	}
+	if _, ok := st.Marks["2026-11-04"]; ok {
+		t.Fatalf("하는 중이던 날은 했다·안 했다가 없습니다: %+v", st.Marks)
+	}
+}
+
+// Once a day is what it was: a count is done or nothing, and no count is kept.
+func TestOnceADayCountsAsDone(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 11, 5, 21, 0, 0, 0, seoul)
+	s := service(&now)
+	g, err := s.Make(ctx, New{Title: "독서", Cadence: Daily, PerDay: 1, Start: "2026-11-02"})
+	if err != nil || g.PerDay != 0 || g.Rule() != "매일" {
+		t.Fatalf("%+v %v", g, err)
+	}
+	if _, m, err := s.CheckDay(ctx, g.ID, Check{Add: 1, By: ByChat}); err != nil || m["2026-11-05"].Mark != Done || m["2026-11-05"].Count != 0 {
+		t.Fatalf("%+v %v", m, err)
+	}
+	g2, m, err := s.CheckDay(ctx, g.ID, Check{Add: -1, By: ByChat})
+	if err != nil || len(m) != 0 || g2.Of(m, "2026-11-05").Count != 0 {
+		t.Fatalf("%+v %v", m, err)
+	}
+}
+
+// So many a day is for a goal of days; changed to a count over days it goes.
+func TestPerDayIsForDays(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 11, 5, 9, 0, 0, 0, seoul)
+	s := service(&now)
+	var bad ErrInvalid
+	for _, n := range []New{
+		{Title: "운동", Cadence: Weekly, Times: 3, PerDay: 2},
+		{Title: "물", Cadence: Daily, PerDay: 21},
+	} {
+		if _, err := s.Make(ctx, n); !errors.As(err, &bad) {
+			t.Errorf("%+v: %v", n, err)
+		}
+	}
+	g, err := s.Make(ctx, New{Title: "약 먹기", Cadence: Days, Weekdays: []int{1, 3, 5}, PerDay: 2})
+	if err != nil || g.Rule() != "월·수·금 하루 2번" {
+		t.Fatalf("%+v %v", g, err)
+	}
+	three := 3
+	if g, err = s.Change(ctx, g.ID, Change{PerDay: &three}); err != nil || g.PerDay != 3 {
+		t.Fatalf("%+v %v", g, err)
+	}
+	weekly, times := Weekly, 2
+	if g, err = s.Change(ctx, g.ID, Change{Cadence: &weekly, Times: &times}); err != nil || g.PerDay != 0 || g.Rule() != "주 2회" {
+		t.Fatalf("주 몇 번으로 바꾸면 하루 몇 번은 없어집니다: %+v %v", g, err)
+	}
+	if _, err = s.Change(ctx, g.ID, Change{PerDay: &three}); !errors.As(err, &bad) {
+		t.Fatalf("주 몇 번 목표에 하루 몇 번은 없습니다: %v", err)
+	}
+}
+
 func TestLine(t *testing.T) {
 	g := weekly(3)
 	g.ID, g.Title = "goal_1", "운동"
@@ -333,6 +471,20 @@ func TestPostgresStore(t *testing.T) {
 		t.Fatalf("%+v %v", m, err)
 	}
 	if _, m, err := s.MarkDay(ctx, g.ID, "2026-11-03", "", "", ByCard); err != nil || len(m) != 1 {
+		t.Fatalf("%+v %v", m, err)
+	}
+	// So many a day: a day still going is a row with no mark yet (102).
+	four := 4
+	if g, err = s.Change(ctx, g.ID, Change{PerDay: &four}); err != nil || g.PerDay != 4 {
+		t.Fatalf("%+v %v", g, err)
+	}
+	if _, m, err := s.CheckDay(ctx, g.ID, Check{Day: "2026-11-03", Add: 2, Note: "아침", By: ByCard}); err != nil || m["2026-11-03"].Mark != "" || m["2026-11-03"].Count != 2 || m["2026-11-03"].Note != "아침" {
+		t.Fatalf("%+v %v", m, err)
+	}
+	if _, m, err := s.CheckDay(ctx, g.ID, Check{Day: "2026-11-03", Add: 2, By: ByCard}); err != nil || m["2026-11-03"].Mark != Done || m["2026-11-03"].Count != 4 {
+		t.Fatalf("%+v %v", m, err)
+	}
+	if _, m, err := s.CheckDay(ctx, g.ID, Check{Day: "2026-11-03", Mark: new(string), By: ByCard}); err != nil || len(m) != 1 {
 		t.Fatalf("%+v %v", m, err)
 	}
 	on := true

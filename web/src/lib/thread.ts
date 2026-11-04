@@ -120,8 +120,8 @@ export type TurnOrigin = {
   goals?: GoalAsk[];
 };
 
-/** One day of one goal a notice asks about. */
-export type GoalAsk = { goal: string; title: string; day: string };
+/** One day of one goal a notice asks about: of a goal of more than one a day, how far it went (count of perDay). */
+export type GoalAsk = { goal: string; title: string; day: string; count?: number; perDay?: number };
 
 /** One line of a checklist. */
 export type ChecklistItem = {

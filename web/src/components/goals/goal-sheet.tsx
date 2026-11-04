@@ -1,21 +1,24 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, ChevronLeft, ChevronRight, Minus } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Minus, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import {
   type Bar,
+  type Check as DayCheck,
   type Goal,
   type Mark,
   type Stats,
   changeGoal,
+  checkDay,
   dayLabel,
-  markDay,
   monthWeeks,
+  perDayOf,
   percent,
   readGoal,
   removeGoal,
+  tally,
   WEEK_ROW,
   whenLabel,
 } from "@/lib/goals";
@@ -95,9 +98,9 @@ function Body({ goal, onChanged, onClose, onEdit }: { goal: Goal; onChanged: () 
     }
   }
 
-  async function mark(day: string, m: Mark | "") {
+  async function mark(day: string, check: DayCheck) {
     try {
-      const got = await markDay(now.id, day, m);
+      const got = await checkDay(now.id, day, check);
       setNow(got.goal);
       setStats(got.stats);
       onChanged();
@@ -262,8 +265,9 @@ function Bars({ goal, bars }: { goal: Goal; bars: Bar[] }) {
  * Each day of a month, the same marks as the register. A past day can be
  * changed here: tap it, and its two answers open under the grid.
  */
-function Month({ goal, stats, onMark }: { goal: Goal; stats: Stats; onMark: (day: string, m: Mark | "") => Promise<void> }) {
+function Month({ goal, stats, onMark }: { goal: Goal; stats: Stats; onMark: (day: string, check: DayCheck) => Promise<void> }) {
   const today = goal.progress.today;
+  const n = perDayOf(goal);
   const [ym, setYm] = useState(() => ({ y: Number(today.slice(0, 4)), m: Number(today.slice(5, 7)) }));
   const [picked, setPicked] = useState<string | null>(null);
   const weeks = useMemo(() => monthWeeks(ym.y, ym.m), [ym]);
@@ -277,6 +281,7 @@ function Month({ goal, stats, onMark }: { goal: Goal; stats: Stats; onMark: (day
     });
   };
   const said = picked ? stats.marks[picked] : undefined;
+  const count = picked ? (stats.counts?.[picked] ?? 0) : 0;
   return (
     <section aria-label="달력">
       <div className="flex items-center justify-between">
@@ -304,7 +309,16 @@ function Month({ goal, stats, onMark }: { goal: Goal; stats: Stats; onMark: (day
           <div key={i} className="grid grid-cols-7 gap-1">
             {week.map((d, j) =>
               d ? (
-                <Day key={d} day={d} mark={stats.marks[d]} open={counted(d)} today={d === today} picked={d === picked} onPick={() => setPicked(d === picked ? null : d)} />
+                <Day
+                  key={d}
+                  day={d}
+                  mark={stats.marks[d]}
+                  share={n > 1 ? (stats.counts?.[d] ?? 0) / n : 0}
+                  open={counted(d)}
+                  today={d === today}
+                  picked={d === picked}
+                  onPick={() => setPicked(d === picked ? null : d)}
+                />
               ) : (
                 <span key={j} />
               ),
@@ -321,16 +335,47 @@ function Month({ goal, stats, onMark }: { goal: Goal; stats: Stats; onMark: (day
           <Minus aria-hidden className="size-3 text-reject" />
           안 했다
         </span>
+        {n > 1 ? (
+          <span className="flex items-center gap-1">
+            <span aria-hidden className="h-[3px] w-3 rounded-full bg-approve/70" />
+            한 만큼
+          </span>
+        ) : null}
         <span>빈칸은 기록 없음</span>
       </p>
-      {picked ? (
+      {picked && n > 1 ? (
+        // A time at a time, or the whole day at once: a day gone by is put right here.
+        <div className="anim-settle mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-well px-3 py-2">
+          <span className="tnum text-[12.5px] text-dim">
+            {whenLabel(picked, today)} {said === "done" ? `${n}번 다 했어요` : said === "missed" ? `안 했어요 (${tally(count, n)})` : tally(count, n)}
+          </span>
+          <span className="flex gap-1.5">
+            <button
+              type="button"
+              className={choice(said === "missed")}
+              onClick={() => void onMark(picked, said === "missed" ? (count > 0 ? { count } : { mark: "" }) : { mark: "missed" })}
+            >
+              안 했다
+            </button>
+            <button type="button" aria-label="하나 빼기" disabled={count === 0} className={choice(false)} onClick={() => void onMark(picked, { add: -1 })}>
+              <Minus aria-hidden className="size-3.5" />
+            </button>
+            <button type="button" aria-label="한 번 더" disabled={said === "done"} className={choice(false)} onClick={() => void onMark(picked, { add: 1 })}>
+              <Plus aria-hidden className="size-3.5" />
+            </button>
+            <button type="button" className={choice(said === "done")} onClick={() => void onMark(picked, said === "done" ? { mark: "" } : { mark: "done" })}>
+              다 했다
+            </button>
+          </span>
+        </div>
+      ) : picked ? (
         <div className="anim-settle mt-2 flex items-center justify-between gap-2 rounded-lg bg-well px-3 py-2">
           <span className="text-[12.5px] text-dim">{whenLabel(picked, today)}</span>
           <span className="flex gap-1.5">
-            <button type="button" className={choice(said === "missed")} onClick={() => void onMark(picked, said === "missed" ? "" : "missed")}>
+            <button type="button" className={choice(said === "missed")} onClick={() => void onMark(picked, { mark: said === "missed" ? "" : "missed" })}>
               안 했다
             </button>
-            <button type="button" className={choice(said === "done")} onClick={() => void onMark(picked, said === "done" ? "" : "done")}>
+            <button type="button" className={choice(said === "done")} onClick={() => void onMark(picked, { mark: said === "done" ? "" : "done" })}>
               했다
             </button>
           </span>
@@ -345,26 +390,49 @@ const stepper =
 
 const choice = (on: boolean) =>
   cn(
-    "min-h-10 rounded-lg border px-3 text-[13px] outline-none focus-visible:ring-3 focus-visible:ring-ring/50 mouse:min-h-8",
+    "flex min-h-10 min-w-10 items-center justify-center rounded-lg border px-3 text-[13px] outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-35 mouse:min-h-8 mouse:min-w-8",
     on ? "border-edge bg-glass-raised text-foreground" : "border-edge-soft text-dim hover:bg-glass",
   );
 
-function Day({ day, mark, open, today, picked, onPick }: { day: string; mark?: Mark; open: boolean; today: boolean; picked: boolean; onPick: () => void }) {
+/** A day of the month. Of a goal of more than one a day, the line along its foot is how much of the day was done (share). */
+function Day({
+  day,
+  mark,
+  share,
+  open,
+  today,
+  picked,
+  onPick,
+}: {
+  day: string;
+  mark?: Mark;
+  share: number;
+  open: boolean;
+  today: boolean;
+  picked: boolean;
+  onPick: () => void;
+}) {
+  const going = !mark && share > 0;
   return (
     <button
       type="button"
       disabled={!open}
       onClick={onPick}
       aria-pressed={picked}
-      aria-label={`${dayLabel(day)}${mark === "done" ? " 했음" : mark === "missed" ? " 안 했음" : ""}`}
+      aria-label={`${dayLabel(day)}${mark === "done" ? " 했음" : mark === "missed" ? " 안 했음" : going ? ` ${Math.round(share * 100)}% 함` : ""}`}
       className={cn(
-        "tnum relative flex h-10 items-center justify-center rounded-md text-[12px] outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-default mouse:h-8",
+        "tnum relative flex h-10 items-center justify-center overflow-hidden rounded-md text-[12px] outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-default mouse:h-8",
         mark === "done" ? "bg-approve/25 text-foreground" : mark === "missed" ? "bg-reject/12 text-dim" : open ? "bg-glass text-dim" : "text-faint/50",
         today && "ring-1 ring-dim/60",
         picked && "ring-2 ring-foreground/60",
       )}
     >
       {Number(day.slice(8, 10))}
+      {(going || mark === "missed") && share > 0 ? (
+        <span aria-hidden className="absolute inset-x-1.5 bottom-1 h-[3px] rounded-full bg-well">
+          <span className="block h-full rounded-full bg-approve/70" style={{ width: `${share * 100}%` }} />
+        </span>
+      ) : null}
     </button>
   );
 }

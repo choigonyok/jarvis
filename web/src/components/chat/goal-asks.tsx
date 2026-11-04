@@ -3,14 +3,15 @@
 import { useEffect, useState } from "react";
 import { Check, Minus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { type Mark, markDay, readGoal, whenLabel } from "@/lib/goals";
+import { type Mark, checkDay, readGoal, tally, whenLabel } from "@/lib/goals";
 import type { GoalAsk } from "@/lib/thread";
 import { cn } from "@/lib/utils";
 
 /**
  * The days a notice asks about, answered where it asks: 했다 or 안 했다, no
  * trip to the 목표 tab. What was answered is read back, so the card says the same
- * on the next visit and on the other device.
+ * on the next visit and on the other device. Of a goal of more than one a day,
+ * 했다 is all of them, and taking it back goes back to how far the day went.
  */
 export function GoalAsks({ asks, said }: { asks: GoalAsk[]; said?: string }) {
   return (
@@ -26,6 +27,8 @@ export function GoalAsks({ asks, said }: { asks: GoalAsk[]; said?: string }) {
 function Ask({ ask, named }: { ask: GoalAsk; named: boolean }) {
   // Undefined until read; null is no word yet.
   const [said, setSaid] = useState<Mark | null | undefined>(undefined);
+  // How many times the day went before it was answered, of a goal of more than one a day.
+  const [count, setCount] = useState(0);
   const [today, setToday] = useState("");
   const [gone, setGone] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -37,6 +40,7 @@ function Ask({ ask, named }: { ask: GoalAsk; named: boolean }) {
         if (!alive) return;
         setToday(goal.progress.today);
         setSaid(stats.marks[ask.day] ?? null);
+        if (!stats.marks[ask.day]) setCount(stats.counts?.[ask.day] ?? 0);
       })
       .catch(() => {
         if (alive) setGone(true);
@@ -51,7 +55,7 @@ function Ask({ ask, named }: { ask: GoalAsk; named: boolean }) {
     setFailed(false);
     setSaid(mark || null);
     try {
-      await markDay(ask.goal, ask.day, mark);
+      await checkDay(ask.goal, ask.day, mark === "" && count > 0 ? { count } : { mark });
     } catch {
       setSaid(before);
       setFailed(true);
@@ -63,7 +67,11 @@ function Ask({ ask, named }: { ask: GoalAsk; named: boolean }) {
     <li>
       {named ? (
         <p className="mb-1.5 text-[13.5px] leading-snug text-foreground/90">
-          {ask.title} <span className="text-[12px] text-faint">{today ? whenLabel(ask.day, today) : ""}</span>
+          {ask.title}{" "}
+          <span className="text-[12px] text-faint">
+            {today ? whenLabel(ask.day, today) : ""}
+            {ask.perDay && count > 0 ? ` ${tally(count, ask.perDay)}` : ""}
+          </span>
         </p>
       ) : null}
       {said ? (

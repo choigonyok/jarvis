@@ -1,5 +1,6 @@
-// Package goal is the conversation's goals - "매일 물 2L 마시기", "주 3회 운동" -
-// kept by mind-svc with each day's 했다 or 안 했다, and shown on the 목표 tab.
+// Package goal is the conversation's goals - "매일 물 2L 마시기", "주 3회 운동",
+// "하루 물 4번" - kept by mind-svc with each day's 했다 or 안 했다 (or how many
+// times, of a goal of more than one a day), and shown on the 목표 tab.
 // Here the conversation makes one when asked and writes down what the person
 // says of a day, so that saying it is as good as tapping it. None of it takes a
 // card: it changes the person's own goals, and they asked for it.
@@ -129,6 +130,7 @@ type MakeInput struct {
 	Title    string `json:"title" jsonschema:"목표 이름, 짧게. 예: '물 2L 마시기', '운동'"`
 	Cadence  string `json:"cadence" jsonschema:"daily(매일), days(정한 요일마다), weekly(주 n회), monthly(월 n회)"`
 	Times    int    `json:"times,omitempty" jsonschema:"weekly·monthly 의 횟수"`
+	PerDay   int    `json:"perDay,omitempty" jsonschema:"하루에 몇 번(daily·days 만). '하루 물 4번' → 4. 하루 한 번이면 비운다"`
 	Weekdays []int  `json:"weekdays,omitempty" jsonschema:"days 의 요일. 0 일요일, 1 월요일 … 6 토요일"`
 	Note     string `json:"note,omitempty" jsonschema:"왜 하는지 한 줄(선택)"`
 	Start    string `json:"start,omitempty" jsonschema:"시작일 YYYY-MM-DD(선택, 기본 오늘)"`
@@ -138,9 +140,12 @@ type MakeInput struct {
 
 type CheckInput struct {
 	ID   string `json:"id" jsonschema:"목표 id(goal_…). 지금 상황의 '목표'나 look 의 goals 에 있다"`
-	Mark string `json:"mark" jsonschema:"done(했다), missed(안 했다), clear(기록 지우기)"`
-	Day  string `json:"day,omitempty" jsonschema:"어느 날인지 YYYY-MM-DD(기본 오늘). '어제 했어'면 어제 날짜"`
-	Note string `json:"note,omitempty" jsonschema:"그날에 대한 한 줄(선택)"`
+	Mark string `json:"mark,omitempty" jsonschema:"done(했다), missed(안 했다), clear(기록 지우기). 하루 여러 번인 목표에서 done 은 그날 다 했다는 뜻"`
+	// Of a goal of more than one a day: how many times that day, or how many more.
+	Count *int   `json:"count,omitempty" jsonschema:"하루 여러 번인 목표에서 그날 모두 몇 번 했는지. '오늘 물 3번 마셨어' → 3"`
+	Add   int    `json:"add,omitempty" jsonschema:"하루 여러 번인 목표에서 몇 번 더 했는지. '한 잔 더 마셨어' → 1, 잘못 셌으면 -1"`
+	Day   string `json:"day,omitempty" jsonschema:"어느 날인지 YYYY-MM-DD(기본 오늘). '어제 했어'면 어제 날짜"`
+	Note  string `json:"note,omitempty" jsonschema:"그날에 대한 한 줄(선택)"`
 }
 
 type ChangeInput struct {
@@ -149,6 +154,7 @@ type ChangeInput struct {
 	Note     *string `json:"note,omitempty" jsonschema:"새 한 줄"`
 	Cadence  *string `json:"cadence,omitempty" jsonschema:"새 주기: daily, days, weekly, monthly"`
 	Times    *int    `json:"times,omitempty" jsonschema:"새 횟수"`
+	PerDay   *int    `json:"perDay,omitempty" jsonschema:"하루에 몇 번. 1 이면 하루 한 번"`
 	Weekdays *[]int  `json:"weekdays,omitempty" jsonschema:"새 요일. 0 일요일 … 6 토요일"`
 	End      *string `json:"end,omitempty" jsonschema:"끝나는 날 YYYY-MM-DD. 빈 값이면 없앤다"`
 	Remind   *string `json:"remind,omitempty" jsonschema:"물어볼 시각 HH:MM. 빈 값이면 없앤다"`
@@ -167,13 +173,28 @@ func (m *Module) Change(b *tool.Board) {
 			}
 			return "만들었습니다: " + g.Line, nil
 		})
-	tool.Add(b, "goal.check", "목표의 하루를 기록한다. 운영자가 했다, 안 했다고 말한 것만 적는다. 짐작해서 적지 않는다.",
+	tool.Add(b, "goal.check", "목표의 하루를 기록한다. 운영자가 했다, 안 했다고 말한 것만 적는다. 짐작해서 적지 않는다. "+
+		"하루 여러 번인 목표는 한 번 했다고 하면 add 1, 몇 번 했다고 하면 count 로 적는다.",
 		func(ctx context.Context, in CheckInput) (string, error) {
-			mark := in.Mark
-			if mark == "clear" {
-				mark = ""
+			body := map[string]any{"day": in.Day, "note": in.Note, "by": "chat"}
+			switch {
+			case in.Mark == "clear":
+				body["mark"] = ""
+			case in.Mark != "":
+				// Missed with a count: done so many times, and that was the day.
+				body["mark"] = in.Mark
+				if in.Count != nil {
+					body["count"] = *in.Count
+				}
+			case in.Count != nil:
+				body["count"] = *in.Count
+			case in.Add != 0:
+				body["add"] = in.Add
+			default:
+				// Nothing said is no mark to make: told as made, it was not (2026-11-02).
+				return "", fmt.Errorf("goal.check 에 mark, count, add 중 하나가 필요합니다")
 			}
-			g, err := m.one(ctx, http.MethodPost, "/api/goals/"+url.PathEscape(in.ID)+"/checks", map[string]string{"day": in.Day, "mark": mark, "note": in.Note, "by": "chat"})
+			g, err := m.one(ctx, http.MethodPost, "/api/goals/"+url.PathEscape(in.ID)+"/checks", body)
 			if err != nil {
 				return "", fmt.Errorf("기록하지 못했습니다: %w", err)
 			}

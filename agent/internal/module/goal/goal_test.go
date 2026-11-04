@@ -60,6 +60,48 @@ func TestChangesGoThroughTheStream(t *testing.T) {
 	}
 }
 
+// Of a goal of more than one a day, a time is one more and a number is the
+// day's count; a mark under a day said with nothing in it is not made.
+func TestTimesOfADay(t *testing.T) {
+	send := &fakeSender{}
+	b := tool.New("change", "")
+	New("http://unused", "", send).Change(b)
+	ctx := context.Background()
+	if _, err := b.Do(ctx, "goal.make", map[string]any{"title": "물 마시기", "cadence": "daily", "perDay": 4}); err != nil {
+		t.Fatal(err)
+	}
+	if c := send.calls[0]; c.body["perDay"] != float64(4) {
+		t.Fatalf("%+v", c)
+	}
+	if _, err := b.Do(ctx, "goal.check", map[string]any{"id": "goal_1", "add": 1}); err != nil {
+		t.Fatal(err)
+	}
+	if c := send.calls[1]; c.body["add"] != float64(1) || c.body["mark"] != nil || c.body["count"] != nil {
+		t.Fatalf("한 번 더: %+v", c)
+	}
+	if _, err := b.Do(ctx, "goal.check", map[string]any{"id": "goal_1", "count": 3, "day": "2026-11-04"}); err != nil {
+		t.Fatal(err)
+	}
+	if c := send.calls[2]; c.body["count"] != float64(3) || c.body["mark"] != nil {
+		t.Fatalf("세 번: %+v", c)
+	}
+	if _, err := b.Do(ctx, "goal.check", map[string]any{"id": "goal_1", "mark": "missed", "count": 2}); err != nil {
+		t.Fatal(err)
+	}
+	if c := send.calls[3]; c.body["mark"] != "missed" || c.body["count"] != float64(2) {
+		t.Fatalf("두 번 하고 그만: %+v", c)
+	}
+	if _, err := b.Do(ctx, "goal.check", map[string]any{"id": "goal_1", "mark": "clear"}); err != nil {
+		t.Fatal(err)
+	}
+	if c := send.calls[4]; c.body["mark"] != "" {
+		t.Fatalf("지우기: %+v", c)
+	}
+	if _, err := b.Do(ctx, "goal.check", map[string]any{"id": "goal_1"}); err == nil || len(send.calls) != 5 {
+		t.Fatalf("아무것도 없는 기록은 보내지 않습니다: %v %d", err, len(send.calls))
+	}
+}
+
 func TestLookReadsMind(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer tok" || r.URL.Path != "/api/goals" {
