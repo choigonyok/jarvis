@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import Link from "next/link";
 import { ArrowDown, Reply } from "lucide-react";
 import { MarkButtons, WrongForm, WrongNote, useAnswerMarks, type MarkAnswer } from "@/components/chat/answer-marks";
@@ -25,6 +25,14 @@ import { StandingBar } from "@/components/shell/standing-bar";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Marker, MarkerContent } from "@/components/ui/marker";
 import { Message, MessageContent, MessageFooter } from "@/components/ui/message";
+import {
+  MessageScroller,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+  useMessageScroller,
+} from "@/components/ui/message-scroller";
 import {
   isPending,
   plainText,
@@ -105,11 +113,11 @@ function RefButton({ onClick }: { onClick: () => void }) {
 /** Where one day of the conversation ends and the next begins: the date between two hairlines. */
 function DayDivider({ day }: { day: string }) {
   return (
-    <li data-search-skip>
+    <MessageScrollerItem data-search-skip>
       <Marker variant="separator" className="text-faint before:bg-edge-soft after:bg-edge-soft">
         <MarkerContent className="tnum text-[11.5px]">{dayLabel(day)}</MarkerContent>
       </Marker>
-    </li>
+    </MessageScrollerItem>
   );
 }
 
@@ -322,7 +330,7 @@ const TurnRow = memo(function TurnRow({
     return (
       <>
         {divider}
-        <li data-turn-id={turn.id} className="group/turn" aria-busy={typing ? "true" : undefined}>
+        <MessageScrollerItem messageId={turn.id} data-turn-id={turn.id} className="group/turn" aria-busy={typing ? "true" : undefined}>
           <SwipeRow onRef={ref}>
             <Message className={cn(ROW, "gap-0 text-base")}>
               <Rail at={typing ? undefined : time} onRef={ref} />
@@ -405,14 +413,14 @@ const TurnRow = memo(function TurnRow({
               </MessageContent>
             </Message>
           </SwipeRow>
-        </li>
+        </MessageScrollerItem>
       </>
     );
   }
   return (
     <>
       {divider}
-      <li data-turn-id={turn.id} className="group/turn">
+      <MessageScrollerItem messageId={turn.id} data-turn-id={turn.id} className="group/turn">
         <SwipeRow onRef={quote}>
           <Message align="end" className="text-base">
             <MessageContent className="items-end gap-1.5">
@@ -440,7 +448,7 @@ const TurnRow = memo(function TurnRow({
             </MessageContent>
           </Message>
         </SwipeRow>
-      </li>
+      </MessageScrollerItem>
     </>
   );
 });
@@ -489,15 +497,6 @@ const progress = new Map<string, number>();
  */
 /** Whether the reader asked for less motion. */
 const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-/**
- * Down to the very bottom of el, where landing put it - smooth when the reader
- * may watch it go, at once when they asked for less motion or it must not be
- * overtaken. One place for what the thread did in two, each its own way.
- */
-function toEnd(el: HTMLElement, smooth: boolean) {
-  el.scrollTo({ top: el.scrollHeight, behavior: smooth && !reducedMotion() ? "smooth" : "auto" });
-}
 
 function useTyped(id: string, text: string, atOnce: boolean): string {
   const [still] = useState(() => typeof window !== "undefined" && reducedMotion());
@@ -632,19 +631,21 @@ const Transcript = memo(function Transcript({
   // scrolled out of the loaded thread falls back to the agent's.
   const times = new Map(turns.map((t) => [t.id, turnTime(t.atIso, t.at)]));
 
+  // Every row is a direct child of the scroller's content. The room under
+  // the last row is the content's own, so the bottom the scroller keeps to is
+  // the page's.
   return (
-    <>
+    <MessageScrollerContent className="gap-7 pb-12 sm:pb-6">
       {hydrated && turns.length === 0 ? (
-        <div className={ROW}>
+        <MessageScrollerItem className={ROW}>
           <Rail />
           <p className="max-w-[32rem] text-[14.5px] leading-[1.75] text-dim">
             무엇을 맡길지 적어주세요. 상태를 바꾸는 일은 실행 전에 승인
             카드로 올라옵니다.
           </p>
-        </div>
+        </MessageScrollerItem>
       ) : null}
 
-      <ol className="space-y-7">
         {[
           ...turns.map((turn, i) => {
           // A finished answer still coming out writes itself here. The row is
@@ -675,7 +676,7 @@ const Transcript = memo(function Transcript({
           }),
 
           ...unattached.map((proposal) => (
-          <li key={proposal.id} className={ROW}>
+          <MessageScrollerItem key={proposal.id} messageId={`card:${proposal.id}`} className={ROW}>
             <Rail at={proposal.at} />
             <div className="min-w-0">
               <ProposalCard
@@ -683,7 +684,7 @@ const Transcript = memo(function Transcript({
                 onDecide={(d, edits, reason) => onDecide(proposal.id, d, edits, reason)}
               />
             </div>
-          </li>
+          </MessageScrollerItem>
           )),
 
           // The answer before its turn has come: the same row, at the end. In
@@ -710,24 +711,42 @@ const Transcript = memo(function Transcript({
 
         {/* While the answer grows the steps have nothing to say. */}
         {draft && draft.text.trim() ? null : thinking ? (
-          <li className={ROW} aria-live="polite" data-search-skip>
+          <MessageScrollerItem className={ROW} aria-live="polite" data-search-skip>
             <Rail />
             <Working steps={steps} />
-          </li>
+          </MessageScrollerItem>
         ) : null}
 
         {error ? (
-          <li className={ROW} role="status">
+          <MessageScrollerItem className={ROW} role="status">
             <Rail />
             <p className="max-w-[36rem] border-l-2 border-reject pl-3 text-[13.5px] leading-relaxed text-dim">
               {error}
             </p>
-          </li>
+          </MessageScrollerItem>
         ) : null}
-      </ol>
-    </>
+    </MessageScrollerContent>
   );
 });
+
+/** The scroller's moves: to the end, to a row. */
+type Scroller = ReturnType<typeof useMessageScroller>;
+
+/**
+ * Hands the scroller's moves to the screen around it: a send from the
+ * composer, the 맨 아래로 button and a push landing on a card all live
+ * outside the scroller.
+ */
+function ScrollerMoves({ toRef }: { toRef: RefObject<Scroller | null> }) {
+  const moves = useMessageScroller();
+  useLayoutEffect(() => {
+    toRef.current = moves;
+    return () => {
+      if (toRef.current === moves) toRef.current = null;
+    };
+  }, [toRef, moves]);
+  return null;
+}
 
 export function Thread() {
   const role = useRole();
@@ -759,7 +778,7 @@ export function Thread() {
     mark,
     decide,
   } = useThread();
-  const scrollRef = useRef<HTMLElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const search = useThreadSearch(scrollRef);
   // What can be asked of Jarvis in words (ⓘ, left of search). Its sheet is
@@ -802,27 +821,18 @@ export function Thread() {
   // in front of you is already saying it.
   const [cardsVisible, setCardsVisible] = useState(false);
 
-  // Opening the tab lands on the newest turn before anything is painted - no
-  // scroll from the top. After that the view follows the bottom (pinned) -
-  // the steps it is taking, a message queued above the composer, an answer as it is
-  // written - from a message you send (which takes the view down first), or
-  // the reader coming back down to it, until the reader scrolls up themselves. Following is decided
-  // by what the reader did, not by where the view happens to be: when being
-  // within 80px of the bottom counted as following, a reader who had scrolled
-  // a line up to read was pulled back down by the next turn.
-  const landed = useRef(false);
-  // The scroller it landed in. The voice stage takes this whole screen, the
-  // scroller with it, and coming back builds a fresh one at the top: a new
-  // scroller lands again, rather than opening on the oldest turns.
-  const landedIn = useRef<HTMLElement | null>(null);
-  const pinned = useRef(true);
-  // Where the last scroll left the view: a scroll up from there is the
-  // reader's - the view only ever goes down on its own.
-  const lastTop = useRef(0);
+  // The scroller (ui/message-scroller.tsx) lands on the newest turn before
+  // anything is painted and follows the bottom on its own - the steps being
+  // taken, a message queued above the composer, an answer as it is written -
+  // until the reader scrolls themselves, and again once they are back at the
+  // very bottom. Following is decided by what the reader did, not by where
+  // the view happens to be: a reader who scrolls a line up to read is not
+  // pulled back down by the next turn. Its moves are reached from here.
+  const scroller = useRef<Scroller | null>(null);
   // Until when a send holds the view at the bottom (toNewest): one scrollTop
   // did not stick on the phone - iOS put the view back where it had been
-  // within 120ms as the keyboard and the layout moved, and that read as the
-  // reader scrolling up (2026-10-27 23:56). A finger on the thread ends it.
+  // within 120ms as the keyboard and the layout moved (2026-10-27 23:56). A
+  // finger on the thread ends it.
   const holdUntil = useRef(0);
   // When that send was: the hold is stretched while the view is still moving
   // (iOS momentum, the keyboard) but never past HOLD_MAX_MS from it.
@@ -839,9 +849,9 @@ export function Thread() {
     if (at === -1) return 0;
     return turns.slice(at + 1).filter((t) => t.role === "agent").length;
   }, [away, seenAt, turns]);
-  // The card a tapped push brought the reader to. While set, nothing pulls
-  // the view back to the bottom - not new turns, not photos above finishing
-  // their layout - until the reader touches the thread themselves.
+  // The card a tapped push brought the reader to. While set it is kept in the
+  // middle - photos above finishing their layout would push it down - until
+  // the reader touches the thread themselves.
   const held = useRef<HTMLElement | null>(null);
   // Whether a finger is on the thread, and the wait for scrolling to settle:
   // the page above is asked for only once the reader has stopped near the
@@ -854,57 +864,54 @@ export function Thread() {
   // When the finger last moved, or came down. A touch whose end never came -
   // the row under it replaced as it was touched (a draft turning into its
   // turn), its touchend dispatched to a node no longer in the page - would
-  // otherwise read as a finger forever, and nothing would follow again.
+  // otherwise read as a finger forever.
   const touchAt = useRef(0);
   const finger = useCallback(() => touching.current && performance.now() - touchAt.current < 1500, []);
-  // The view follows the bottom: pinned there, and no finger moving it.
-  const following = useCallback(() => pinned.current && !finger(), [finger]);
   const settle = useRef<number | undefined>(undefined);
-
+  // Where the finger came down: a move of less than a few pixels up or down
+  // from there is not scrolling.
+  const touchY = useRef<number | null>(null);
+  // When the reader last scrolled the thread themselves (a move up or down,
+  // a wheel turn).
+  const intentAt = useRef(0);
   // Set while a page of older turns is on its way: how tall the thread was
   // and where the reader was, so once the page is in front of them the view
-  // is moved by exactly what was added and nothing seems to jump.
+  // is moved by exactly what was added and nothing seems to jump. This is
+  // the screen's and not the scroller's: the scroller tells a page put in
+  // front by its first row changing, and the first row is often the day's
+  // divider, which goes when older turns of the same day come in front of it
+  // - on an iPhone the reader was dropped onto the oldest turn of the new
+  // page (2026-11-05, simulator Safari).
   const above = useRef<{ height: number; top: number } | null>(null);
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (!el || turns.length === 0) return;
-    if (landedIn.current !== el) {
-      el.scrollTop = el.scrollHeight;
-      landedIn.current = el;
-      landed.current = true;
-      pinned.current = true;
-      return;
-    }
-    if (above.current) {
-      const { height, top } = above.current;
-      above.current = null;
-      const target = el.scrollHeight - height + top;
-      el.scrollTop = target;
-      // iOS can still be finishing a fling it owns and put its own position
-      // back over this one: look again on the next frame.
-      requestAnimationFrame(() => {
-        if (!finger() && Math.abs(el.scrollTop - target) > 2) el.scrollTop = target;
-      });
-      return;
-    }
-    if (held.current) return;
-    // The very bottom, where landing put it - not an empty div after the last
-    // turn: aligning that left the thread's bottom padding (the room the last
-    // line has above the composer's fade) out of sight, so every fresh read -
-    // coming back to the tab, say - slid the view 48px up, the last line under
-    // the fade.
-    if (following()) {
-      // While a send holds the bottom, at once: a smooth ride is overtaken by
-      // the next frame's hold, and on iOS it put the view back up.
-      toEnd(el, performance.now() >= holdUntil.current);
-    }
-  }, [turns, proposals, thinking, steps, error, mode, finger, following]);
+    if (!el || !above.current) return;
+    const { height, top } = above.current;
+    above.current = null;
+    const target = el.scrollHeight - height + top;
+    el.scrollTop = target;
+    // iOS can still be finishing a fling it owns and put its own position
+    // back over this one: look again on the next frame.
+    requestAnimationFrame(() => {
+      if (!finger() && Math.abs(el.scrollTop - target) > 2) el.scrollTop = target;
+    });
+  }, [turns, finger]);
 
-  // Scrolling up near the top asks for the page above. Asked once per page:
-  // the next ask waits for this one to land (loadingOlder) and be measured.
+  // Back at the very bottom by the reader's own hand: following again. The
+  // scroller looks only when the view moves, and a finger or a wheel still
+  // pushing at the bottom moves nothing - it would stay let go of, and the
+  // answer would grow out of sight under a reader who is right there.
+  const wheelEnd = useRef<number | undefined>(undefined);
+  const repin = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el || held.current) return;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight <= 2) scroller.current?.scrollToEnd();
+  }, []);
+
+  // Scrolling up near the top asks for the page above.
   const askOlder = useCallback(
     (el: HTMLElement, tapped = false) => {
-      if (!hasMore || loadingOlder || above.current || !landed.current) return;
+      if (!hasMore || loadingOlder || above.current) return;
       // A page that failed is asked again only on a tap, not by every scroll.
       if (olderFailed && !tapped) return;
       if (!tapped && el.scrollTop > 320) return;
@@ -935,10 +942,15 @@ export function Thread() {
       return;
     }
     wanted.current = null;
-    pinned.current = false;
     held.current = card;
-    // At once, not smooth: from the bottom of a long thread a smooth scroll
-    // is a long ride, and its first frames still read as "at the bottom".
+    // To its row through the scroller, so it stops following the bottom,
+    // then the card itself to the middle - as near as the thread's ends let
+    // it: the scroller's own centring would pad the bottom with blank room
+    // to put a card just raised in the middle. At once, not smooth: from the
+    // bottom of a long thread a smooth scroll is a long ride, and its first
+    // frames still read as "at the bottom".
+    const row = card.closest<HTMLElement>("[data-message-id]")?.dataset.messageId;
+    if (row) scroller.current?.scrollToMessage(row, { align: "nearest" });
     card.scrollIntoView({ block: "center" });
     card.classList.remove("card-flash");
     void card.offsetWidth; // restart the animation on a second tap
@@ -957,7 +969,12 @@ export function Thread() {
     });
   }, [focusCard]);
   useEffect(() => {
-    if (wanted.current) focusCard();
+    if (!wanted.current) return;
+    // A frame later: the first rows a page brings are landed at the bottom
+    // by the scroller as they come in, and that landing must not come after
+    // this one.
+    const frame = requestAnimationFrame(focusCard);
+    return () => cancelAnimationFrame(frame);
   }, [turns, proposals, loadingOlder, focusCard]);
   // The reader taking over - a touch, a wheel, typing, anywhere on the page
   // (the composer is outside the thread) - lets go of a held card.
@@ -991,11 +1008,8 @@ export function Thread() {
   // answer as it is written, the turns after it. At once, not smooth: from far
   // up a smooth ride is long, and the message is already on its way.
   const toNewest = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
     held.current = null;
-    pinned.current = true;
-    el.scrollTop = el.scrollHeight;
+    scroller.current?.scrollToEnd();
     // Held there frame by frame while the keyboard and the layout settle, and
     // while the view still moves on its own (onScroll stretches it).
     holdFrom.current = performance.now();
@@ -1003,7 +1017,7 @@ export function Thread() {
     const hold = () => {
       const now = scrollRef.current;
       if (!now || performance.now() >= holdUntil.current || finger()) return;
-      if (now.scrollHeight - now.scrollTop - now.clientHeight > 1) now.scrollTop = now.scrollHeight;
+      if (now.scrollHeight - now.scrollTop - now.clientHeight > 1) scroller.current?.scrollToEnd();
       requestAnimationFrame(hold);
     };
     requestAnimationFrame(hold);
@@ -1011,45 +1025,51 @@ export function Thread() {
 
   // Down to the newest turn - and staying there as more come.
   const toBottom = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
     held.current = null;
-    pinned.current = true;
-    toEnd(el, true);
-  }, []);
+    const smooth = !reducedMotion();
+    scroller.current?.scrollToEnd({ behavior: smooth ? "smooth" : "auto" });
+    if (!smooth) return;
+    // A smooth ride is stopped by anything else that moves the view - a page
+    // of older turns landing in front is put back where the reader was
+    // (WebKit, 2026-11-05). Where it stopped short and the reader has not
+    // taken the view since, the rest of the way is gone at once.
+    const asked = performance.now();
+    window.setTimeout(() => {
+      const el = scrollRef.current;
+      if (!el || held.current || finger() || intentAt.current > asked) return;
+      if (el.scrollHeight - el.scrollTop - el.clientHeight > 2) scroller.current?.scrollToEnd();
+    }, 700);
+  }, [finger]);
 
   // A quote tapped in a bubble goes back to the message it quotes, and marks
   // it the way a tapped push marks a card.
   const jumpTo = useCallback((id: string) => {
     const row = scrollRef.current?.querySelector<HTMLElement>(`[data-turn-id="${CSS.escape(id)}"]`);
     if (!row) return;
-    pinned.current = false;
     held.current = row;
+    scroller.current?.scrollToMessage(id, { align: "nearest" });
     row.scrollIntoView({ block: "center" });
     row.classList.remove("turn-flash");
     void row.offsetWidth;
     row.classList.add("turn-flash");
   }, []);
 
-  // Photos and long markdown finish laying out after the first paint, and an
-  // answer grows as it is written; while the reader is pinned to the bottom,
-  // keep them there as the page grows. The view itself shrinks too - a
-  // message queued above the composer, the keyboard - and the bottom stays
-  // in sight then as well. Not under a finger: the reader is moving it.
+  // The bottom is the scroller's to keep as the page grows. A card a push
+  // landed on is this screen's: photos above it finishing their layout push
+  // it down, and the view itself changes height (the bar over the thread
+  // folds once the card is in sight), so it is put back in the middle.
   useEffect(() => {
     const el = scrollRef.current;
     const content = el?.firstElementChild;
     if (!el || !content) return;
     const ro = new ResizeObserver(() => {
-      // Photos above a held card push it down as they load: keep it centred.
-      if (held.current) held.current.scrollIntoView({ block: "center" });
-      else if (following()) el.scrollTop = el.scrollHeight;
+      held.current?.scrollIntoView({ block: "center" });
     });
     ro.observe(content);
     ro.observe(el);
     return () => ro.disconnect();
     // Again for the scroller the voice stage's return builds.
-  }, [mode, following]);
+  }, [mode]);
 
   // Watch the waiting cards themselves rather than guessing from scroll
   // position: the bar exists to speak for a decision you cannot see, so what
@@ -1205,98 +1225,126 @@ export function Thread() {
       <SearchBar search={search} />
       <StandingBar pending={waiting} href="/record" muted={cardsVisible} />
 
-      <main
-        ref={scrollRef}
-        onScroll={(e) => {
-          const el = e.currentTarget;
-          const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
-          // Where the reader is, whoever scrolled: the button is about position.
-          setAway(gap > Math.max(320, el.clientHeight * 0.6));
-          if (gap < 80) {
-            const newest = turns.at(-1)?.id ?? null;
-            setSeenAt((prev) => (prev === newest ? prev : newest));
-          }
-          const rose = el.scrollTop < lastTop.current - 1;
-          lastTop.current = el.scrollTop;
-          if (held.current) return; // our own scroll to a card, not the reader's
-          // Up is the reader taking the view: following stops, even a line
-          // above the bottom. Back at the very bottom it starts again.
-          // (Content shrinking under a pinned view also moves it up - to the
-          // bottom, which is not away from it.)
-          const now = performance.now();
-          if (now < holdUntil.current && !finger()) {
-            pinned.current = true;
-            // Still moving without a finger - iOS momentum, the keyboard -
-            // so the hold lasts until it has stopped.
-            if (gap > 1) holdUntil.current = Math.min(holdFrom.current + HOLD_MAX_MS, Math.max(holdUntil.current, now + 300));
-          } else if (rose && gap > 1) pinned.current = false;
-          else if (gap < 8) pinned.current = true;
-          window.clearTimeout(settle.current);
-          const ask = () => {
-            if (finger()) settle.current = window.setTimeout(ask, 120);
-            else askOlder(el);
-          };
-          settle.current = window.setTimeout(ask, 180);
-        }}
-        onTouchStart={() => {
-          touching.current = true;
-          touchAt.current = performance.now();
-          holdUntil.current = 0;
-        }}
-        onTouchMove={() => {
-          touchAt.current = performance.now();
-        }}
-        onTouchEnd={(e) => {
-          touching.current = false;
-          // What came while a finger rested on the thread, without scrolling it.
-          if (pinned.current && !held.current) e.currentTarget.scrollTop = e.currentTarget.scrollHeight;
-        }}
-        onTouchCancel={() => {
-          touching.current = false;
-        }}
-
-        className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain"
-      >
-        <div className="mx-auto w-full max-w-[46rem] px-4 pt-7 pb-12 sm:px-8 sm:pt-10 sm:pb-6">
-          {turns.length > 0 && (hasMore || loadingOlder) ? (
-            olderFailed && !loadingOlder ? (
-              <button
-                type="button"
-                onClick={() => scrollRef.current && askOlder(scrollRef.current, true)}
-                className="tap mx-auto mb-6 block text-center text-[11.5px] text-faint underline-offset-2 outline-none hover:text-dim hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
+      <MessageScrollerProvider autoScroll defaultScrollPosition="end">
+        <ScrollerMoves toRef={scroller} />
+        <main className="flex min-h-0 flex-1 flex-col">
+          <MessageScroller>
+            <MessageScrollerViewport
+              ref={scrollRef}
+              aria-label="대화"
+              preserveScrollOnPrepend={false}
+              onScroll={(e) => {
+                const el = e.currentTarget;
+                const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+                // Where the reader is, whoever scrolled: the button is about position.
+                setAway(gap > Math.max(320, el.clientHeight * 0.6));
+                if (gap < 80) {
+                  const newest = turns.at(-1)?.id ?? null;
+                  setSeenAt((prev) => (prev === newest ? prev : newest));
+                }
+                if (held.current) return; // our own scroll to a card, not the reader's
+                // Still moving without a finger after a send - iOS momentum,
+                // the keyboard - so the hold lasts until it has stopped.
+                const now = performance.now();
+                if (now < holdUntil.current && !finger() && gap > 1) {
+                  holdUntil.current = Math.min(holdFrom.current + HOLD_MAX_MS, Math.max(holdUntil.current, now + 300));
+                }
+                window.clearTimeout(settle.current);
+                const ask = () => {
+                  if (finger()) settle.current = window.setTimeout(ask, 120);
+                  else askOlder(el);
+                };
+                settle.current = window.setTimeout(ask, 180);
+              }}
+              onTouchStart={() => {
+                touching.current = true;
+                touchAt.current = performance.now();
+                holdUntil.current = 0;
+              }}
+              onTouchMove={() => {
+                touchAt.current = performance.now();
+              }}
+              onTouchEnd={() => {
+                touching.current = false;
+                repin();
+              }}
+              onTouchCancel={() => {
+                touching.current = false;
+                repin();
+              }}
+              onKeyUp={repin}
+              className="scrollbar-hairline inset-x-safe relative"
+            >
+              {/* The scroller takes any touch move or wheel turn as the reader
+                  scrolling and stops following the bottom. A finger resting
+                  on the thread, or a table or a command scrolled sideways, is
+                  not that: only a move up or down reaches it. */}
+              <div
+                onTouchStart={(e) => {
+                  touchY.current = e.touches[0]?.clientY ?? null;
+                }}
+                onTouchMove={(e) => {
+                  const y = e.touches[0]?.clientY;
+                  if (touchY.current !== null && y !== undefined && Math.abs(y - touchY.current) < 8) {
+                    e.stopPropagation();
+                    return;
+                  }
+                  intentAt.current = performance.now();
+                }}
+                onWheel={(e) => {
+                  if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) {
+                    e.stopPropagation();
+                    return;
+                  }
+                  intentAt.current = performance.now();
+                  window.clearTimeout(wheelEnd.current);
+                  wheelEnd.current = window.setTimeout(repin, 150);
+                }}
               >
-                이전 대화를 불러오지 못했어요. 눌러서 다시
-              </button>
-            ) : (
-              <p className="mb-6 text-center text-[11.5px] text-faint" aria-live="polite">
-                {loadingOlder ? "이전 대화를 불러오는 중" : "위로 올리면 이전 대화가 이어집니다"}
-              </p>
-            )
-          ) : null}
-          <Transcript
-            turns={turns}
-            proposals={proposals}
-            byId={byId}
-            checklists={checklists}
-            waited={waited}
-            thinking={thinking}
-            draft={draft}
-            steps={steps}
-            onDraftShown={draftShown}
-            error={error}
-            hydrated={hydrated}
-            hasMore={hasMore}
-            onQuote={quote}
-            onJump={jumpTo}
-            onDecide={decide}
-            onTick={tick}
-            onDrop={dropItem}
-            onMark={mark}
-            opened={opened}
-            onFold={fold}
-          />
-        </div>
-      </main>
+                <div className="mx-auto w-full max-w-[46rem] px-4 pt-7 sm:px-8 sm:pt-10">
+                  {turns.length > 0 && (hasMore || loadingOlder) ? (
+                    olderFailed && !loadingOlder ? (
+                      <button
+                        type="button"
+                        onClick={() => scrollRef.current && askOlder(scrollRef.current, true)}
+                        className="tap mx-auto mb-6 block text-center text-[11.5px] text-faint underline-offset-2 outline-none hover:text-dim hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
+                      >
+                        이전 대화를 불러오지 못했어요. 눌러서 다시
+                      </button>
+                    ) : (
+                      <p className="mb-6 text-center text-[11.5px] text-faint" aria-live="polite">
+                        {loadingOlder ? "이전 대화를 불러오는 중" : "위로 올리면 이전 대화가 이어집니다"}
+                      </p>
+                    )
+                  ) : null}
+                  <Transcript
+                    turns={turns}
+                    proposals={proposals}
+                    byId={byId}
+                    checklists={checklists}
+                    waited={waited}
+                    thinking={thinking}
+                    draft={draft}
+                    steps={steps}
+                    onDraftShown={draftShown}
+                    error={error}
+                    hydrated={hydrated}
+                    hasMore={hasMore}
+                    onQuote={quote}
+                    onJump={jumpTo}
+                    onDecide={decide}
+                    onTick={tick}
+                    onDrop={dropItem}
+                    onMark={mark}
+                    opened={opened}
+                    onFold={fold}
+                  />
+                </div>
+              </div>
+            </MessageScrollerViewport>
+          </MessageScroller>
+        </main>
+      </MessageScrollerProvider>
 
       {/* Lifted above the floating tab bar; it drops back down while typing,
           when the bar hides. On a phone it floats a gutter above the bar and

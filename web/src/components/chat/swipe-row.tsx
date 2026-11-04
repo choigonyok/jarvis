@@ -128,6 +128,12 @@ export function SwipeRow({
       }}
       onPointerUp={() => end(true)}
       onPointerCancel={() => end(false)}
+      // A message pulled sideways is not the thread being scrolled: the
+      // scroller around it would take the move as the reader scrolling and
+      // stop following an answer being written.
+      onTouchMove={(e) => {
+        if (pull.current?.sideways) e.stopPropagation();
+      }}
     >
       <div
         ref={body}
