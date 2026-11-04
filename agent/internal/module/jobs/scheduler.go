@@ -2,7 +2,6 @@ package jobs
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/choigonyok/jarvis/agent/internal/claudecode"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
+	"github.com/choigonyok/jarvis/agent/internal/steps"
 )
 
 // BrowserServer is the JARVIS_EXTRA_MCP entry for the shared browser.
@@ -408,47 +408,16 @@ func (m *Module) purge(ctx context.Context) {
 }
 
 // describe turns one step of a run into a progress line, or "" to skip it.
-// What a person watching wants: where it went, what it pressed and typed.
+// What a person watching wants: where it went, what it pressed and typed
+// (steps.Line, which the conversation's progress line reads too). The job's
+// own tools log themselves in mind (schedule, card, report).
 func describe(s claudecode.Step) (string, string) {
 	if s.Tool == "" {
 		return "note", clampText(s.Text, 300)
 	}
-	var in map[string]any
-	_ = json.Unmarshal(s.Input, &in)
-	str := func(k string) string {
-		v, _ := in[k].(string)
-		return v
+	if line := steps.Line(s.Tool, s.Input); line != "" {
+		return "step", line
 	}
-	name := s.Tool[strings.LastIndex(s.Tool, "__")+2:]
-	switch name {
-	case "browser_navigate":
-		return "step", "열기: " + clampText(str("url"), 120)
-	case "browser_click":
-		return "step", "누르기"
-	case "browser_type":
-		return "step", "입력: " + clampText(str("text"), 40)
-	case "browser_get_state", "browser_extract_content":
-		return "step", "화면 읽기"
-	case "browser_screenshot":
-		return "step", "화면 보기"
-	case "browser_scroll":
-		return "step", "스크롤"
-	case "browser_go_back":
-		return "step", "뒤로"
-	case "browser_upload_files":
-		n := 0
-		if ps, ok := in["paths"].([]any); ok {
-			n = len(ps)
-		}
-		return "step", fmt.Sprintf("사진 %d장 넣기", n)
-	case "view_photos":
-		return "step", "사진 보기"
-	case "search":
-		return "step", "검색: " + clampText(str("query"), 80)
-	case "read":
-		return "step", "읽기: " + clampText(str("url"), 120)
-	}
-	// The job's own tools log themselves in mind (schedule, card, report).
 	return "", ""
 }
 

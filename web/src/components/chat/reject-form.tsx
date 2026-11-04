@@ -2,14 +2,12 @@
 
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { Input } from "@/components/ui/input";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 /** The reasons a card is usually turned down, a tap each. */
 const QUICK_REASONS = ["지금은 필요 없어", "이미 했어", "틀렸어", "다시 묻지 마"];
 
-/** The field style a card's inputs share. */
-export const cardInput =
-  "w-full rounded-lg border border-edge-soft bg-well px-3 text-[16px] text-foreground outline-none placeholder:text-faint focus-visible:border-edge focus-visible:ring-3 focus-visible:ring-ring/50 mouse:text-[13.5px]";
 
 /**
  * 반려 asks, once, why - optional, one tap for the usual reasons. The reason is
@@ -30,46 +28,48 @@ export function RejectForm({
   return (
     <div className="anim-settle space-y-2">
       <p className="px-1 text-[12px] text-dim">반려하는 이유가 있으면 알려 주세요. 다음 제안에 반영해요.</p>
-      <div className="flex flex-wrap gap-1.5">
+      {/* The chip lit is the reason written: typing another lights none. */}
+      <ToggleGroup
+        type="single"
+        aria-label="자주 쓰는 이유"
+        variant="chip"
+        tone="reject"
+        size="chip"
+        spacing={1.5}
+        value={QUICK_REASONS.includes(why) ? why : ""}
+        onValueChange={(v) => {
+          if (v) setWhy(v);
+        }}
+        className="flex-wrap"
+      >
         {QUICK_REASONS.map((r) => (
-          <button
-            key={r}
-            type="button"
-            onClick={() => setWhy(r)}
-            aria-pressed={why === r}
-            className={cn(
-              "h-9 rounded-full border px-3 text-[12.5px] mouse:h-7 mouse:text-[12px]",
-              why === r ? "border-reject/40 bg-reject/10 text-reject" : "border-edge-soft text-dim hover:text-foreground",
-            )}
-          >
+          <ToggleGroupItem key={r} value={r} className="tap-y">
             {r}
-          </button>
+          </ToggleGroupItem>
         ))}
-      </div>
-      <input
+      </ToggleGroup>
+      <Input
         value={why}
         onChange={(e) => setWhy(e.target.value)}
         placeholder="직접 적기 (비워도 돼요)"
         aria-label="반려 이유"
         maxLength={300}
-        className={cn(cardInput, "h-11 mouse:h-8")}
+        className="mouse:h-8 mouse:text-[13.5px]"
       />
       <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-1.5">
         <Button
-          variant="ghost"
-          size="sm"
+          variant="quiet"
+          size="pair"
           onClick={onCancel}
           disabled={busy}
-          className="h-12 text-[13.5px] text-dim mouse:h-8 mouse:px-3 mouse:text-[0.8rem]"
         >
           취소
         </Button>
         <Button
-          variant="outline"
-          size="sm"
+          variant="refuse"
+          size="pair"
           onClick={() => onReject(why)}
           disabled={busy}
-          className="h-12 border-edge text-[13.5px] text-reject hover:bg-reject/10 mouse:h-8 mouse:px-3.5 mouse:text-[0.8rem]"
         >
           반려
         </Button>

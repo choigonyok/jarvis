@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Check, Copy } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 type Setup = {
   link: string;
@@ -26,11 +27,8 @@ type Setup = {
  * its own (who="guest", from the 위치 screen's 내 폰 연결): its own account,
  * and no shortcuts - it sends where it is and nothing else.
  */
-/** The one action style of these steps: quiet, full width on a phone. */
-const action =
-  "inline-flex h-11 w-full items-center justify-center rounded-lg bg-glass-raised px-4 text-[13px] text-foreground outline-none transition-colors hover:bg-white/12 focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 mouse:h-9 sm:w-auto";
-const quiet =
-  "inline-flex h-11 w-full items-center justify-center rounded-lg px-3 text-[13px] text-dim outline-none transition-colors hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 mouse:h-9 sm:w-auto";
+/** Each step's control: full width on a phone, its own width beside the words on a wide screen. */
+const step = "w-full sm:w-auto";
 
 export function PhoneSetup({ who = "owner" }: { who?: "owner" | "guest" }) {
   const guest = who === "guest";
@@ -96,17 +94,17 @@ export function PhoneSetup({ who = "owner" }: { who?: "owner" | "guest" }) {
             </span>
             {setup ? (
               <span className="mt-2 flex flex-col gap-1 sm:flex-row">
-                <a href={setup.link} className={action}>
-                  OwnTracks 열어서 설정 넣기
-                </a>
-                <button type="button" className={quiet} onClick={() => void copy("link", setup.link)}>
+                <Button variant="raised" size="touch" asChild className={step}>
+                  <a href={setup.link}>OwnTracks 열어서 설정 넣기</a>
+                </Button>
+                <Button variant="quiet" size="touch-sm" className={step} onClick={() => void copy("link", setup.link)}>
                   {copied === "link" ? "복사했어요" : "링크 복사"}
-                </button>
+                </Button>
               </span>
             ) : (
-              <button type="button" className={`mt-2 ${action}`} onClick={() => void load()} disabled={busy}>
+              <Button variant="raised" size="touch" className={`mt-2 ${step}`} onClick={() => void load()} disabled={busy}>
                 {busy ? "불러오는 중" : "jarvis 설정 불러오기"}
-              </button>
+              </Button>
             )}
             <span className="mt-2 block text-[12px] text-faint">
               OwnTracks가 열렸는데 아무것도 바뀌지 않으면 2번 스위치가 꺼져 있는 거예요. 링크 복사 후 Safari 주소창에 붙여 넣어도 열려요.
@@ -133,14 +131,15 @@ export function PhoneSetup({ who = "owner" }: { who?: "owner" | "guest" }) {
               하나만 둡니다: 방식 POST, 헤더 Authorization, 본문 JSON. &ldquo;즉시 실행&rdquo;을 켜고 &ldquo;실행 시 알림&rdquo;은 꺼요.
             </span>
             {!showSignals ? (
-              <button
-                type="button"
-                className={`mt-1 ${quiet} sm:-ms-3`}
+              <Button
+                variant="quiet"
+                size="touch-sm"
+                className={`mt-1 ${step} sm:-ms-3`}
                 onClick={() => void load().then((s) => s && setShowSignals(true))}
                 disabled={busy}
               >
                 단축어에 넣을 값 보기
-              </button>
+              </Button>
             ) : setup?.signals ? (
               <ul className="mt-2 divide-y divide-edge-soft">
                 <CopyRow label="URL" value={setup.signals.url} id="url" copied={copied} onCopy={copy} />

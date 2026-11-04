@@ -1,19 +1,41 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowUp, ExternalLink } from "lucide-react";
+import { ArrowUp, ChevronRight, ExternalLink } from "lucide-react";
 import { ProposalCard } from "@/components/chat/proposal-card";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { BottomSheetContent, BottomSheetDescription, BottomSheetHeader, BottomSheetTitle } from "@/components/ui/bottom-sheet";
+import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { CopyButton } from "@/components/ui/copy-button";
+import { Input } from "@/components/ui/input";
 import { Pager } from "@/components/ui/pager";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Sheet } from "@/components/ui/sheet";
+import {
+  Trace,
+  TraceCollapsible,
+  TraceCollapsibleContent,
+  TraceCollapsibleTrigger,
+  TraceDescription,
+  TraceLine,
+  TraceTitle,
+} from "@/components/ui/trace";
 import { type Job, type JobDetail, type JobEvent, LIVE, send, stateLabel, stateTone, when } from "@/lib/jobs";
 import { usePaged } from "@/lib/paging";
 import type { Decision, Proposal } from "@/lib/thread";
 import { photoUrl } from "@/lib/uploads";
 import { cn } from "@/lib/utils";
 
-const quiet =
-  "tap min-h-11 rounded-lg border border-edge-soft px-3 text-[13.5px] text-dim transition-colors outline-none hover:bg-glass hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-40 mouse:min-h-9 mouse:text-[13px]";
 
 export function JobSheet({
   job,
@@ -30,15 +52,11 @@ export function JobSheet({
 }) {
   return (
     <Sheet open={job !== null} onOpenChange={onOpenChange}>
-      <SheetContent
-        side="bottom"
-        onOpenAutoFocus={(e) => e.preventDefault()}
-        className="inset-x-safe pb-safe h-[92dvh] max-h-[92dvh] gap-0 border-edge-soft bg-background sm:mx-auto sm:max-w-xl sm:rounded-t-2xl sm:border-x"
-      >
+      <BottomSheetContent width="lg" height="full">
         {job ? (
           <Body key={job.id} job={job} proposals={proposals} onDecide={onDecide} onChanged={onChanged} />
         ) : null}
-      </SheetContent>
+      </BottomSheetContent>
     </Sheet>
   );
 }
@@ -57,7 +75,6 @@ function Body({
   const [detail, setDetail] = useState<JobDetail | null>(null);
   const [text, setText] = useState("");
   const [note, setNote] = useState<string | null>(null);
-  const [confirmCancel, setConfirmCancel] = useState(false);
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/jobs/jobs/${job.id}?events=300`, { cache: "no-store" }).catch(() => null);
@@ -111,16 +128,16 @@ function Body({
 
   return (
     <>
-      <SheetHeader className="px-4 pt-4 pb-2 sm:px-5">
-        <SheetTitle className="pr-8 text-[15.5px] leading-snug font-medium">{j.title}</SheetTitle>
-        <SheetDescription className={cn("flex items-center gap-1.5 text-[12.5px]", stateTone(j))}>
-          {j.running ? <span aria-hidden className="anim-breathe size-[6px] rounded-full bg-approve" /> : null}
-          {stateLabel(j)}
+      <BottomSheetHeader>
+        <BottomSheetTitle className="text-[15.5px] leading-snug">{j.title}</BottomSheetTitle>
+        <BottomSheetDescription className={cn("flex items-center gap-1.5 text-[12.5px]", stateTone(j))}>
+          {/* A run going now: a light passes over what it is doing. */}
+          <span className={cn(j.running && "shimmer motion-reduce:shimmer-none")}>{stateLabel(j)}</span>
           {!j.running && j.state === "active" && j.nextAt && !j.blockedSites?.length ? (
             <span className="text-faint">· 다음 {when(j.nextAt)}</span>
           ) : null}
-        </SheetDescription>
-      </SheetHeader>
+        </BottomSheetDescription>
+      </BottomSheetHeader>
 
       <div className="scrollbar-hairline min-h-0 flex-1 overflow-y-auto px-4 pb-4 sm:px-5">
         {j.summary ? (
@@ -194,30 +211,33 @@ function Body({
           </section>
         ) : null}
 
-        <details className="mt-5 rounded-lg border border-edge-soft px-3 py-2.5">
-          <summary className="cursor-pointer text-[12.5px] text-dim outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
+        <Collapsible className="mt-5 rounded-lg border border-edge-soft px-3 py-2.5">
+          <CollapsibleTrigger className="group/goal flex w-full cursor-pointer items-center gap-1 text-left text-[12.5px] text-dim outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
             맡긴 일
-          </summary>
-          <p className="mt-2 text-[13px] leading-relaxed whitespace-pre-wrap text-foreground/85">{j.goal}</p>
-          {j.instructions ? (
-            <p className="mt-2 text-[12.5px] leading-relaxed whitespace-pre-wrap text-dim">{j.instructions}</p>
-          ) : null}
-          {j.photos.length && !j.photosGone ? (
-            <div className="scrollbar-none mt-2 flex gap-1.5 overflow-x-auto">
-              {j.photos.map((p) => (
-                // eslint-disable-next-line @next/next/no-img-element -- served by the agent behind the proxy
-                <img key={p} src={photoUrl(p)} alt="" loading="lazy" className="size-16 shrink-0 rounded-lg object-cover" />
-              ))}
-            </div>
-          ) : null}
-        </details>
+            <ChevronRight aria-hidden className="size-3.5 text-faint transition-transform group-aria-expanded/goal:rotate-90 motion-reduce:transition-none" />
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <p className="mt-2 text-[13px] leading-relaxed whitespace-pre-wrap text-foreground/85">{j.goal}</p>
+            {j.instructions ? (
+              <p className="mt-2 text-[12.5px] leading-relaxed whitespace-pre-wrap text-dim">{j.instructions}</p>
+            ) : null}
+            {j.photos.length && !j.photosGone ? (
+              <div className="scrollbar-none mt-2 flex gap-1.5 overflow-x-auto">
+                {j.photos.map((p) => (
+                  // eslint-disable-next-line @next/next/no-img-element -- served by the agent behind the proxy
+                  <img key={p} src={photoUrl(p)} alt="" loading="lazy" className="size-16 shrink-0 rounded-lg object-cover" />
+                ))}
+              </div>
+            ) : null}
+          </CollapsibleContent>
+        </Collapsible>
 
         <section id={runsPaged.anchor} className="mt-6 scroll-mt-4" aria-label="진행 기록">
           <h3 className="mb-2 text-[12.5px] text-dim">진행</h3>
           {runs.length === 0 ? (
             <p className="text-[12.5px] text-faint">아직 기록이 없습니다.</p>
           ) : (
-            <ol className="space-y-4">
+            <Trace className="gap-4">
               {/* The newest runs are on the first page: the one going now, and two open. */}
               {runsPaged.items.map((g, i) => (
                 <Run
@@ -227,7 +247,7 @@ function Body({
                   open={runsPaged.page === 1 && i < 2}
                 />
               ))}
-            </ol>
+            </Trace>
           )}
           <Pager {...runsPaged} unit="번" />
         </section>
@@ -246,55 +266,54 @@ function Body({
             }}
             className="flex items-end gap-2"
           >
-            <label className="min-w-0 flex-1">
-              <span className="sr-only">작업에 지시하기</span>
-              <input
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                placeholder={ended ? "다시 맡길 일 (예: 가격 내려서 다시 올려줘)" : "지시하기 (예: 가격 6만 원으로 내려줘)"}
-                className="h-11 w-full rounded-lg border border-edge-soft bg-glass px-3 text-[16px] text-foreground outline-none placeholder:text-faint focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-9 mouse:text-[13px]"
-              />
-            </label>
-            <button type="submit" disabled={!text.trim()} aria-label="지시 보내기" className={cn(quiet, "w-11 shrink-0 px-0 sm:w-9")}>
-              <ArrowUp aria-hidden className="mx-auto size-4" />
-            </button>
+            <Input
+              surface="glass"
+              aria-label="작업에 지시하기"
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder={ended ? "다시 맡길 일 (예: 가격 내려서 다시 올려줘)" : "지시하기 (예: 가격 6만 원으로 내려줘)"}
+              className="min-w-0 flex-1"
+            />
+            <Button type="submit" variant="lined" size="icon-touch" disabled={!text.trim()} aria-label="지시 보내기" className="mouse:size-9">
+              <ArrowUp aria-hidden />
+            </Button>
           </form>
         ) : null}
         <div className="mt-2 flex gap-2">
           {j.state === "active" || j.state === "paused" ? (
-            <button type="button" disabled={j.running} onClick={() => void act("run", {}, "지금 실행합니다.")} className={cn(quiet, "flex-1")}>
+            <Button variant="lined" size="touch-sm" disabled={j.running} onClick={() => void act("run", {}, "지금 실행합니다.")} className="flex-1">
               지금 실행
-            </button>
+            </Button>
           ) : null}
           {j.state === "active" || j.state === "waiting" ? (
-            <button type="button" onClick={() => void act("pause", {}, "멈췄습니다.")} className={cn(quiet, "flex-1")}>
+            <Button variant="lined" size="touch-sm" onClick={() => void act("pause", {}, "멈췄습니다.")} className="flex-1">
               멈추기
-            </button>
+            </Button>
           ) : j.state === "paused" || j.state === "failed" ? (
-            <button type="button" onClick={() => void act("resume", {}, "다시 시작합니다.")} className={cn(quiet, "flex-1")}>
+            <Button variant="lined" size="touch-sm" onClick={() => void act("resume", {}, "다시 시작합니다.")} className="flex-1">
               다시 시작
-            </button>
+            </Button>
           ) : null}
           {!ended || j.state === "failed" ? (
-            <button
-              type="button"
-              onClick={() => {
-                if (!confirmCancel) {
-                  setConfirmCancel(true);
-                  return;
-                }
-                setConfirmCancel(false);
-                void act("cancel", {}, "그만뒀습니다.");
-              }}
-              onBlur={() => setConfirmCancel(false)}
-              className={cn(
-                quiet,
-                "flex-1",
-                confirmCancel && "border-reject/40 bg-reject/10 text-reject hover:bg-reject/15 hover:text-reject",
-              )}
-            >
-              {confirmCancel ? "한 번 더 누르면 그만둠" : "그만두기"}
-            </button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="lined" size="touch-sm" className="flex-1">
+                  그만두기
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>{j.title} 작업을 그만둘까요?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    그만둔 작업은 다시 시작하거나 지시할 수 없어요. 같은 일은 대화에서 새로 맡겨야 해요.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>두기</AlertDialogCancel>
+                  <AlertDialogAction onClick={() => void act("cancel", {}, "그만뒀습니다.")}>그만두기</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           ) : null}
         </div>
       </div>
@@ -335,19 +354,26 @@ const TONE: Record<string, string> = {
   schedule: "text-faint",
 };
 
+/**
+ * One run: when, and how many things it did, opening to what it did step by
+ * step. The run going now has a light passing over its line (Trace) where the
+ * breathing dot used to be.
+ */
 function Run({ group: g, live, open }: { group: RunGroup; live: boolean; open: boolean }) {
   const steps = g.events.filter((e) => e.kind === "step").length;
   const time = when(g.at);
   return (
-    <li>
-      <details open={open || live} className="group">
-        <summary className="flex cursor-pointer list-none items-center gap-2 text-[12px] text-faint outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
-          {live ? <span aria-hidden className="anim-breathe size-[6px] rounded-full bg-approve" /> : null}
-          <span className="tnum">{time}</span>
-          <span>{g.runId ? (live ? "실행 중" : "실행") : "기록"}</span>
-          {steps ? <span className="tnum">· 동작 {steps}</span> : null}
-        </summary>
-        <ol className="mt-1.5 space-y-1 border-l border-edge-soft pl-3">
+    <TraceCollapsible defaultOpen={open || live}>
+      <TraceCollapsibleTrigger className="text-[12px]">
+        <TraceLine status={live ? "running" : undefined} className="gap-1.5 text-[12px] text-faint">
+          <TraceTitle className="tnum">
+            {time} {g.runId ? (live ? "실행 중" : "실행") : "기록"}
+          </TraceTitle>
+          {steps ? <TraceDescription>· 동작 {steps}</TraceDescription> : null}
+        </TraceLine>
+      </TraceCollapsibleTrigger>
+      <TraceCollapsibleContent className="pl-3">
+        <ol className="space-y-1">
           {g.events.map((e) => (
             <li
               key={e.id}
@@ -361,7 +387,7 @@ function Run({ group: g, live, open }: { group: RunGroup; live: boolean; open: b
             </li>
           ))}
         </ol>
-      </details>
-    </li>
+      </TraceCollapsibleContent>
+    </TraceCollapsible>
   );
 }

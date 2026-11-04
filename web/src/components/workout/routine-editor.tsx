@@ -3,9 +3,9 @@
 import { useState } from "react";
 import { ArrowDown, ArrowUp, Plus, X } from "lucide-react";
 import { ExercisePicker } from "@/components/workout/exercise-picker";
-import { Panel, quietButton, saveButton } from "@/components/workout/panel";
+import { Panel } from "@/components/ui/bottom-sheet";
+import { Button } from "@/components/ui/button";
 import type { Routine, Session } from "@/lib/workout";
-import { cn } from "@/lib/utils";
 
 /**
  * Writing the split.
@@ -69,13 +69,14 @@ export function RoutineEditor({
                   />
                 </label>
                 {draft.length > 1 ? (
-                  <button
-                    type="button"
+                  <Button
+                    variant="discard"
+                    size="touch-sm"
                     onClick={() => setDraft((d) => d.filter((r) => r.id !== routine.id))}
-                    className={cn(quietButton, "shrink-0 text-faint hover:text-reject")}
+                    className="shrink-0"
                   >
                     삭제
-                  </button>
+                  </Button>
                 ) : null}
               </div>
 
@@ -115,14 +116,10 @@ export function RoutineEditor({
                   </li>
                 ))}
               </ol>
-              <button
-                type="button"
-                onClick={() => setAdding(routine.id)}
-                className={cn(quietButton, "mt-0.5 flex items-center gap-1.5 text-faint")}
-              >
+              <Button variant="quiet" size="touch-sm" onClick={() => setAdding(routine.id)} className="mt-0.5 text-faint">
                 <Plus aria-hidden className="size-3.5" />
                 종목
-              </button>
+              </Button>
             </section>
           ))}
         </div>
@@ -138,20 +135,21 @@ export function RoutineEditor({
         </button>
 
         <div className="mt-5 flex gap-2">
-          <button type="button" onClick={() => onOpenChange(false)} className={cn(quietButton, "flex-1 bg-glass")}>
+          <Button variant="soft" size="touch-sm" onClick={() => onOpenChange(false)} className="flex-1">
             닫기
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="raised"
+            size="touch"
             disabled={!valid}
             onClick={() => {
               onSave(draft.map((r) => ({ ...r, name: r.name.trim() })));
               onOpenChange(false);
             }}
-            className={saveButton}
+            className="flex-1"
           >
             저장
-          </button>
+          </Button>
         </div>
         {!valid ? <p className="mt-2 text-center text-[12px] text-faint">이름 없는 루틴이 있어요.</p> : null}
       </Panel>

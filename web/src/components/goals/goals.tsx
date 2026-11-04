@@ -8,6 +8,8 @@ import { Header, TabBar } from "@/components/shell/header";
 import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { type Cell, type Check as DayCheck, type Goal, type Mark, checkDay, listGoals, perDayOf, tally, waitsToday, weekdayOf, WEEK_ROW, whenLabel } from "@/lib/goals";
 import { onResume } from "@/lib/resume";
 import { isPending } from "@/lib/thread";
@@ -80,7 +82,7 @@ export function Goals() {
           ) : null}
 
           {goals && goals.length === 0 && ended.length === 0 ? (
-            <Empty onMake={() => setMaking(true)} />
+            <NoGoals onMake={() => setMaking(true)} />
           ) : null}
 
           {goals && goals.length + ended.length > 0 ? (
@@ -123,16 +125,18 @@ export function Goals() {
           ) : null}
 
           {ended.length > 0 ? (
-            <details className="group mt-8">
-              <summary className="tap-y cursor-pointer list-none text-[12.5px] text-dim outline-none focus-visible:ring-3 focus-visible:ring-ring/50 [&::-webkit-details-marker]:hidden">
+            <Collapsible className="mt-8">
+              <CollapsibleTrigger className="tap-y cursor-pointer text-[12.5px] text-dim outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
                 끝낸 목표 {ended.length}개
-              </summary>
-              <ul className="mt-1">
-                {ended.map((g) => (
-                  <Plain key={g.id} goal={g} onOpen={() => setOpenId(g.id)} />
-                ))}
-              </ul>
-            </details>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <ul className="mt-1">
+                  {ended.map((g) => (
+                    <Plain key={g.id} goal={g} onOpen={() => setOpenId(g.id)} />
+                  ))}
+                </ul>
+              </CollapsibleContent>
+            </Collapsible>
           ) : null}
         </div>
       </main>
@@ -163,19 +167,25 @@ export function Goals() {
 }
 
 /** Nothing here yet: what a goal is, and the one thing to do about it. */
-function Empty({ onMake }: { onMake: () => void }) {
+function NoGoals({ onMake }: { onMake: () => void }) {
   return (
-    <div className="max-w-[30rem] py-10">
-      <h2 className="text-[17px] leading-snug font-medium text-foreground">되풀이해서 하려는 일을 적어 보세요</h2>
-      <p className="mt-2 text-[13.5px] leading-relaxed text-dim">
-        매일, 정한 요일마다, 주 몇 번으로 세우고 날마다 했다·안 했다만 누르면 달성률은 알아서 쌓여요. 대화에서 “주 3회 운동 목표 만들어줘”라고
-        해도 돼요.
-      </p>
-      <Button variant="outline" onClick={onMake} className="mt-5 h-11 border-edge bg-glass-raised text-[13.5px] text-foreground mouse:h-9">
-        <Plus aria-hidden className="size-4" />
-        목표 만들기
-      </Button>
-    </div>
+    <Empty align="start" className="max-w-[30rem] py-10">
+      <EmptyHeader className="gap-2">
+        <EmptyTitle asChild className="text-[17px] text-foreground">
+          <h2>되풀이해서 하려는 일을 적어 보세요</h2>
+        </EmptyTitle>
+        <EmptyDescription>
+          매일, 정한 요일마다, 주 몇 번으로 세우고 날마다 했다·안 했다만 누르면 달성률은 알아서 쌓여요. 대화에서 “주 3회 운동 목표 만들어줘”라고
+          해도 돼요.
+        </EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
+        <Button variant="raised" size="touch" onClick={onMake}>
+          <Plus aria-hidden />
+          목표 만들기
+        </Button>
+      </EmptyContent>
+    </Empty>
   );
 }
 
@@ -308,20 +318,18 @@ function Row({ goal, onOpen, onChanged }: { goal: Goal; onOpen: () => void; onCh
           {/* The same pair as a card's: the answer that counts on the thumb's side. */}
           <div className="grid grid-cols-2 gap-2 sm:ml-auto sm:flex sm:justify-end sm:gap-1.5">
             <Button
-              variant="ghost"
-              size="sm"
+              variant="reject"
+              size="pair-sm"
               disabled={saying !== null}
               onClick={() => void say({ mark: "missed" }, { mark: "missed", count: now.count })}
-              className="h-11 text-[13.5px] text-dim hover:bg-reject/10 hover:text-reject mouse:h-8 mouse:px-3 mouse:text-[0.8rem]"
             >
               안 했다
             </Button>
             <Button
-              variant="outline"
-              size="sm"
+              variant="approve"
+              size="pair-sm"
               disabled={saying !== null}
               onClick={() => void (many ? once() : say({ mark: "done" }, { mark: "done", count: 0 }))}
-              className="h-11 border-edge bg-glass-raised text-[13.5px] text-foreground hover:border-approve/35 hover:bg-approve/12 hover:text-approve mouse:h-8 mouse:px-3.5 mouse:text-[0.8rem] dark:bg-glass-raised dark:hover:bg-approve/12"
             >
               {many ? "한 번 했다" : "했다"}
             </Button>

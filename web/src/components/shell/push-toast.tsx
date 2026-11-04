@@ -1,19 +1,19 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { useRole } from "@/components/shell/role";
+import { PUSH_TOASTER } from "@/components/shell/toasts";
 import { handleWorkerMessage, onPushShown, useLiveNotifications, useNotificationOpen, type ShownPush } from "@/lib/resume";
 
 const SHOWN_MS = 4000;
-const LEAVE_MS = 240;
 
 /**
  * Pushes while the console is on screen, on every tab: the service worker's
  * messages are heard here (lib/resume.ts), and a push that arrives drops a
  * banner in from above the screen, holds for a few seconds and goes back up.
- * A tap goes where the push points; flicking it up sends it away early.
- * Mounted once, in the root layout.
+ * Mounted once, in the root layout, beside the toasters (shell/toasts.tsx).
  */
 export function PushBridge() {
   const role = useRole();
@@ -25,97 +25,54 @@ export function PushBridge() {
   return role === "owner" ? <PushToast /> : null;
 }
 
+/**
+ * The banner: a toast on the push toaster (shell/toasts.tsx). One at a time -
+ * a second push while one is up takes its place and is counted ("외 2건"),
+ * rather than stacking over the screen. A tap goes where the push points; a
+ * flick up sends it away early (sonner's swipe, toward the edge it came from);
+ * a finger on it holds it.
+ */
 function PushToast() {
   const router = useRouter();
-  const [push, setPush] = useState<ShownPush | null>(null);
-  const [leaving, setLeaving] = useState(false);
-  const [more, setMore] = useState(0);
   const showing = useRef(false);
-  const timer = useRef<number | undefined>(undefined);
-  const drag = useRef<{ y: number; dy: number } | null>(null);
-  const box = useRef<HTMLDivElement>(null);
-
-  const leave = () => {
-    window.clearTimeout(timer.current);
-    setLeaving(true);
-    timer.current = window.setTimeout(() => {
-      showing.current = false;
-      setPush(null);
-      setLeaving(false);
-    }, LEAVE_MS);
-  };
-  const leaveRef = useRef(leave);
-  useEffect(() => {
-    leaveRef.current = leave;
-  });
+  const more = useRef(0);
 
   useEffect(
     () =>
       onPushShown((p) => {
-        // One banner at a time: a second push while one is up replaces it
-        // and is counted, rather than stacking over the screen.
-        setMore((m) => (showing.current ? m + 1 : 0));
+        more.current = showing.current ? more.current + 1 : 0;
         showing.current = true;
-        setPush(p);
-        setLeaving(false);
-        window.clearTimeout(timer.current);
-        timer.current = window.setTimeout(() => leaveRef.current(), SHOWN_MS);
+        const count = more.current;
+        const gone = () => {
+          showing.current = false;
+        };
+        toast.custom(
+          (id) => (
+            <Banner
+              push={p}
+              more={count}
+              onOpen={() => {
+                toast.dismiss(id);
+                handleWorkerMessage({ type: "jarvis:open", url: p.url }, (path) => router.push(path));
+              }}
+            />
+          ),
+          { id: "push", toasterId: PUSH_TOASTER, duration: SHOWN_MS, onAutoClose: gone, onDismiss: gone },
+        );
       }),
-    [],
+    [router],
   );
-  useEffect(() => () => window.clearTimeout(timer.current), []);
 
-  if (!push) return null;
+  return null;
+}
 
-  const open = () => {
-    leave();
-    handleWorkerMessage({ type: "jarvis:open", url: push.url }, (path) => router.push(path));
-  };
-
+function Banner({ push, more, onOpen }: { push: ShownPush; more: number; onOpen: () => void }) {
   return (
-    <div
-      ref={box}
-      role="status"
-      aria-live="polite"
-      // A drag on the banner is the banner's: not the page's pull to refresh.
-      data-no-pull=""
-      className={`push-toast fixed inset-x-0 z-50 mx-auto w-[calc(100%-32px)] max-w-[26rem] touch-none select-none ${leaving ? "push-toast-leave" : ""}`}
-      style={{ top: "calc(env(safe-area-inset-top) + 8px)" }}
-      onPointerDown={(e) => {
-        e.currentTarget.setPointerCapture(e.pointerId);
-        drag.current = { y: e.clientY, dy: 0 };
-        window.clearTimeout(timer.current); // held while touched
-      }}
-      onPointerMove={(e) => {
-        if (!drag.current || !box.current) return;
-        drag.current.dy = Math.min(0, e.clientY - drag.current.y);
-        box.current.style.transform = `translateY(${drag.current.dy}px)`;
-      }}
-      onPointerUp={() => {
-        const d = drag.current;
-        drag.current = null;
-        if (!d || !box.current) return;
-        if (d.dy < -24) {
-          // Flicked up: it carries on from where the finger let go. Put back
-          // to its place first, the exit would start from there - a jump
-          // down and a second rise, which looked like a second banner.
-          box.current.style.setProperty("--drag", `${d.dy}px`);
-          return leave();
-        }
-        box.current.style.transform = "";
-        if (d.dy > -6) return open(); // a tap
-        timer.current = window.setTimeout(() => leaveRef.current(), SHOWN_MS);
-      }}
-      onPointerCancel={() => {
-        drag.current = null;
-        if (box.current) box.current.style.transform = "";
-        timer.current = window.setTimeout(() => leaveRef.current(), SHOWN_MS);
-      }}
-    >
+    // A drag on the banner is the banner's: not the page's pull to refresh.
+    <div data-no-pull="" className="w-full select-none" role="status" aria-live="polite">
       <button
         type="button"
-        onClick={(e) => e.preventDefault()}
-        onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && open()}
+        onClick={onOpen}
         className="liquid-glass block w-full rounded-2xl px-4 py-3 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
       >
         <span className="block text-[14px] font-semibold text-foreground">

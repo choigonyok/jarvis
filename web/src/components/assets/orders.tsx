@@ -2,8 +2,23 @@
 
 import { useEffect, useState } from "react";
 import { Check, X } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { Panel } from "@/components/ui/bottom-sheet";
+import { Button } from "@/components/ui/button";
+import { Field, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
 import { Pager } from "@/components/ui/pager";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { type OrderRequest, type OrderResult, type PlacedOrder, type Standing, cancelStanding, sendOrders } from "@/lib/orders";
 import { usePaged } from "@/lib/paging";
 import { type Holding, krw, quantity } from "@/lib/portfolio";
@@ -20,42 +35,6 @@ import { cn } from "@/lib/utils";
  * or "앱에서 직접" for KRX gold, which this cannot order.
  */
 
-const field =
-  "tnum h-11 w-full rounded-lg border border-edge-soft bg-glass px-3 text-[16px] text-foreground outline-none placeholder:text-faint focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-9 mouse:text-[13px]";
-
-/** The one bright control in a sheet is the one that sends - same as the approval card. */
-const sendButton =
-  "tap min-h-11 w-full rounded-lg bg-glass-raised px-4 text-[14px] font-medium text-foreground transition-colors outline-none hover:bg-foreground/15 focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 mouse:min-h-9 mouse:text-[13px]";
-
-function Panel({
-  open,
-  onOpenChange,
-  title,
-  description,
-  children,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  title: string;
-  description?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent
-        side="bottom"
-        onOpenAutoFocus={(e) => e.preventDefault()}
-        className="inset-x-safe pb-safe max-h-[88dvh] gap-0 border-edge-soft bg-background sm:mx-auto sm:max-w-lg sm:rounded-t-2xl sm:border-x"
-      >
-        <SheetHeader className="px-4 pt-4 pb-2 sm:px-5">
-          <SheetTitle className="pr-8 text-[15px] font-medium">{title}</SheetTitle>
-          {description ? <SheetDescription className="text-[12px] text-faint">{description}</SheetDescription> : null}
-        </SheetHeader>
-        <div className="scrollbar-hairline min-h-0 overflow-y-auto px-4 pb-4 sm:px-5">{children}</div>
-      </SheetContent>
-    </Sheet>
-  );
-}
 
 /** "코카콜라 1주 매수", "BTC ₩50,000 매도", "금현물 2g 매수". */
 export function orderLine(o: OrderRequest, names: Map<string, string>): string {
@@ -185,9 +164,9 @@ export function PlanSheet({
             미국 주식은 지금가보다 0.3% 유리하게 지정가로 내서 바로 체결되게 해요. 업비트는 시장가예요. 원금 대비 수익률에는 들어가지
             않아요 - 원금은 입출금만이에요.
           </p>
-          <button type="button" className={sendButton} disabled={busy} onClick={() => void send()}>
+          <Button variant="raised" size="touch" className="w-full" disabled={busy} onClick={() => void send()}>
             {busy ? "보내는 중…" : `주문 ${ready.length}건 보내기${sells ? ` (매도 ${sells}건 먼저)` : ""}`}
-          </button>
+          </Button>
         </div>
       ) : null}
     </Panel>
@@ -268,34 +247,42 @@ export function OrderSheet({
         <OrderList results={[result]} names={names} />
       ) : (
         <div className="space-y-3">
-          <div role="radiogroup" aria-label="매수 또는 매도" className="grid grid-cols-2 gap-1 rounded-lg bg-well p-1">
+          <ToggleGroup
+            type="single"
+            aria-label="매수 또는 매도"
+            variant="segment"
+            spacing={1}
+            value={side}
+            onValueChange={(v) => {
+              if (v) setSide(v as "buy" | "sell");
+            }}
+            className="grid w-full grid-cols-2 rounded-lg bg-well p-1"
+          >
             {(["buy", "sell"] as const).map((s) => (
-              <button
+              <ToggleGroupItem
                 key={s}
-                type="button"
-                role="radio"
-                aria-checked={side === s}
-                onClick={() => setSide(s)}
+                value={s}
                 disabled={s === "sell" && holding.quantity <= 0}
-                className={cn(
-                  "tap rounded-md text-[13.5px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-40",
-                  side === s ? "bg-glass-raised text-foreground" : "text-dim",
-                )}
+                className="tap text-[13.5px] text-dim"
               >
                 {s === "buy" ? "매수" : "매도"}
-              </button>
+              </ToggleGroupItem>
             ))}
-          </div>
-          <label className="block">
-            <span className="mb-1 block text-[12px] text-faint">{coin ? "금액 (원)" : gold ? "그램" : "주 수"}</span>
-            <input
+          </ToggleGroup>
+          <Field>
+            <FieldLabel htmlFor={`order-${holding.id}`} className="text-faint">
+              {coin ? "금액 (원)" : gold ? "그램" : "주 수"}
+            </FieldLabel>
+            <Input
+              id={`order-${holding.id}`}
+              surface="glass"
+              className="tnum"
               inputMode="numeric"
               value={n ? n.toLocaleString("ko-KR") : ""}
               onChange={(e) => setAmount(e.target.value)}
               placeholder={coin ? "예: 50,000" : "예: 1"}
-              className={field}
             />
-          </label>
+          </Field>
           <div className="flex flex-wrap gap-1.5">
             {(coin ? [10_000, 50_000, 100_000] : [1, 2, 5]).map((v) => (
               <button
@@ -324,9 +311,9 @@ export function OrderSheet({
             {gold ? " · 금현물은 한국투자 앱에서 직접 주문해야 해요" : null}
           </p>
           {error ? <p className="text-[12.5px] text-reject/90">{error}</p> : null}
-          <button type="button" className={sendButton} disabled={busy || n <= 0 || tooMuch || tooSmall} onClick={() => void send()}>
+          <Button variant="raised" size="touch" className="w-full" disabled={busy || n <= 0 || tooMuch || tooSmall} onClick={() => void send()}>
             {busy ? "보내는 중…" : n > 0 ? `${line} 주문 보내기` : "수량을 적어 주세요"}
-          </button>
+          </Button>
         </div>
       )}
     </Panel>
@@ -365,24 +352,42 @@ function Waiting({ standing, names, onChanged }: { standing: Standing[]; names: 
                 </span>
               </span>
               {o.status === "active" ? (
-                <button
-                  type="button"
-                  disabled={busy === o.id}
-                  onClick={async () => {
-                    setBusy(o.id);
-                    try {
-                      setNote(await cancelStanding(o.id));
-                      onChanged();
-                    } catch (e) {
-                      setNote((e as Error).message);
-                    } finally {
-                      setBusy(null);
-                    }
-                  }}
-                  className="tap shrink-0 rounded-lg px-2 text-[12px] text-faint outline-none hover:text-reject focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50"
-                >
-                  취소
-                </button>
+                // One press used to cancel at once - and today's order at the
+                // broker with it. Asked first, as every irreversible step is.
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="discard" size="inline" disabled={busy === o.id} className="tap shrink-0 px-2 text-[12px]">
+                      취소
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>대기 주문을 취소할까요?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        {name} {o.units}주 ${o.limitPrice.toFixed(2)} {o.side === "buy" ? "이하 매수" : "이상 매도"}를 더는 내지 않고, 오늘 증권사에 낸
+                        주문도 함께 취소해요. 되돌릴 수 없어요.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>두기</AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={async () => {
+                          setBusy(o.id);
+                          try {
+                            setNote(await cancelStanding(o.id));
+                            onChanged();
+                          } catch (e) {
+                            setNote((e as Error).message);
+                          } finally {
+                            setBusy(null);
+                          }
+                        }}
+                      >
+                        주문 취소
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
               ) : null}
             </li>
           );

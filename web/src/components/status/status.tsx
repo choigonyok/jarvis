@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ChevronDown, RotateCw } from "lucide-react";
 import { Header, TabBar } from "@/components/shell/header";
 import { StandingBar } from "@/components/shell/standing-bar";
+import { Progress } from "@/components/ui/progress";
 import { DetailRow } from "@/components/ui/detail-sheet";
 import { onFocusWanted, wantedFocus } from "@/lib/focus";
 import {
@@ -485,9 +486,7 @@ function Row({
             {r.summary}
           </span>
           {r.meter !== undefined ? (
-            <span aria-hidden className="mt-2 block h-1 overflow-hidden rounded-full bg-foreground/12">
-              <span className={cn("block h-full rounded-full", tone(r.meter ?? null))} style={{ width: `${Math.min(100, r.meter ?? 0)}%` }} />
-            </span>
+            <Progress aria-hidden value={r.meter ?? 0} className="mt-2" indicatorClassName={tone(r.meter ?? null)} />
           ) : null}
           {r.cause && r.causeName ? (
             <span className="mt-1 block text-[12.5px] text-faint">

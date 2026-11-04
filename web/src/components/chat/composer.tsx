@@ -2,11 +2,21 @@
 
 import { memo, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { ArrowUp, ImagePlus, Mic, Reply, X } from "lucide-react";
+import {
+  Attachment,
+  AttachmentAction,
+  AttachmentContent,
+  AttachmentDescription,
+  AttachmentGroup,
+  AttachmentMedia,
+  AttachmentTitle,
+} from "@/components/ui/attachment";
+import { Spinner } from "@/components/ui/spinner";
 import { uploadPhoto } from "@/lib/uploads";
 import { cn } from "@/lib/utils";
 
 /** One photo on its way in: shown from memory at once, sent by name once uploaded. */
-type Attachment = { key: string; preview: string; name?: string; error?: string };
+type Photo = { key: string; preview: string; name?: string; error?: string };
 
 const MAX_PHOTOS = 12;
 
@@ -91,7 +101,7 @@ function ComposerView({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (kept) setValue((cur) => cur || kept);
   }, [draftKey]);
-  const [photos, setPhotos] = useState<Attachment[]>([]);
+  const [photos, setPhotos] = useState<Photo[]>([]);
   const ownRef = useRef<HTMLTextAreaElement>(null);
   const areaRef = inputRef ?? ownRef;
   const fileRef = useRef<HTMLInputElement>(null);
@@ -211,40 +221,45 @@ function ComposerView({
       ) : null}
 
       {photos.length > 0 ? (
-        <ul className="scrollbar-none mb-1 flex gap-1.5 overflow-x-auto px-2.5 pt-1.5" aria-label="첨부한 사진">
-          {photos.map((p) => (
-            <li key={p.key} className="relative shrink-0">
-              {/* eslint-disable-next-line @next/next/no-img-element -- a local object URL, nothing to optimise */}
-              <img
-                src={p.preview}
-                alt=""
-                className={cn(
-                  "size-16 rounded-2xl object-cover transition-opacity",
-                  !p.name && !p.error && "opacity-45",
-                  p.error && "opacity-30 grayscale",
-                )}
-              />
-              {!p.name && !p.error ? (
-                <span aria-hidden className="absolute inset-0 flex items-center justify-center">
-                  <span className="size-4 animate-spin rounded-full border-2 border-foreground/25 border-t-foreground/80 motion-reduce:animate-none" />
-                </span>
-              ) : null}
-              {p.error ? (
-                <span className="absolute inset-x-1 bottom-1 truncate rounded bg-background/80 px-1 text-[10px] text-reject" title={p.error}>
-                  실패
-                </span>
-              ) : null}
-              <button
-                type="button"
-                onClick={() => remove(p.key)}
-                aria-label="사진 빼기"
-                className="absolute -top-0.5 -right-0.5 flex size-6 items-center justify-center rounded-full bg-background/90 text-dim outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
-              >
-                <X aria-hidden className="size-3.5" />
-              </button>
-            </li>
-          ))}
-        </ul>
+        <AttachmentGroup role="list" aria-label="첨부한 사진" className="snap-none scroll-fade-none mb-1 gap-1.5 px-2.5 pt-1.5 pb-0">
+          {photos.map((p) => {
+            const state = p.error ? "error" : p.name ? "done" : "uploading";
+            return (
+              <Attachment key={p.key} role="listitem" surface="bare" size="photo" state={state} className="min-w-0 flex-nowrap">
+                <div className="relative shrink-0">
+                  <AttachmentMedia
+                    variant="image"
+                    className="size-16 w-16 rounded-2xl bg-transparent transition-opacity group-data-[state=error]/attachment:opacity-30 group-data-[state=error]/attachment:grayscale group-data-[state=uploading]/attachment:opacity-45"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element -- a local object URL, nothing to optimise */}
+                    <img src={p.preview} alt="" />
+                  </AttachmentMedia>
+                  {state === "uploading" ? (
+                    <span className="absolute inset-0 flex items-center justify-center">
+                      <Spinner aria-label="사진을 올리는 중" className="text-foreground/80" />
+                    </span>
+                  ) : null}
+                  <AttachmentAction
+                    onClick={() => remove(p.key)}
+                    aria-label="사진 빼기"
+                    className="absolute -top-0.5 -right-0.5 size-6 rounded-full bg-background/90 text-dim hover:bg-background/90 hover:text-foreground"
+                  >
+                    <X aria-hidden className="size-3.5" />
+                  </AttachmentAction>
+                </div>
+                {/* Why it failed, beside it: a phone has no pointer to hover for it. */}
+                {p.error ? (
+                  <AttachmentContent className="w-36 pr-1">
+                    <AttachmentTitle className="font-normal text-reject">올리지 못했어요</AttachmentTitle>
+                    <AttachmentDescription className="line-clamp-2 text-[11.5px] leading-snug whitespace-normal text-dim group-data-[state=error]/attachment:text-dim">
+                      {p.error}
+                    </AttachmentDescription>
+                  </AttachmentContent>
+                ) : null}
+              </Attachment>
+            );
+          })}
+        </AttachmentGroup>
       ) : null}
 
       <div className="flex items-end">

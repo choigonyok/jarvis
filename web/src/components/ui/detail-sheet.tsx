@@ -2,7 +2,8 @@
 
 import type { ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { BottomSheetBody, BottomSheetContent, BottomSheetHeader, BottomSheetTitle } from "@/components/ui/bottom-sheet";
+import { Sheet } from "@/components/ui/sheet";
 
 /**
  * What a line opens: the working behind it, over the page. A page that unfolds
@@ -22,17 +23,12 @@ export function DetailSheet({
 }) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent
-        side="bottom"
-        aria-describedby={undefined}
-        onOpenAutoFocus={(e) => e.preventDefault()}
-        className="inset-x-safe pb-safe max-h-[88dvh] gap-0 border-edge-soft bg-background sm:mx-auto sm:max-w-2xl sm:rounded-t-2xl sm:border"
-      >
-        <SheetHeader className="shrink-0 px-4 pt-4 pb-2 sm:px-6">
-          <SheetTitle className="text-[14px] font-medium text-foreground">{title}</SheetTitle>
-        </SheetHeader>
-        <div className="scrollbar-hairline min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-6 sm:px-6">{children}</div>
-      </SheetContent>
+      <BottomSheetContent width="xl" aria-describedby={undefined}>
+        <BottomSheetHeader className="sm:px-6">
+          <BottomSheetTitle className="pr-0 text-[14px]">{title}</BottomSheetTitle>
+        </BottomSheetHeader>
+        <BottomSheetBody className="flex-1 pb-6 sm:px-6">{children}</BottomSheetBody>
+      </BottomSheetContent>
     </Sheet>
   );
 }

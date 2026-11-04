@@ -2,6 +2,17 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, Check, Mic, Play, RotateCcw, Square } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Caption, DOT, IconButton, PrimaryButton, QuietButton, Spectrum, type Tone } from "@/components/chat/voice-parts";
 import { unlockSpeech, type VoiceInfo } from "@/lib/use-speech";
 import { concatSamples, encodeWav, toBase64 } from "@/lib/wav";
@@ -383,7 +394,23 @@ export function VoiceSetup({
         ) : (
           <>
             {kept && (
-              <QuietButton onClick={() => void forget()}>지우기</QuietButton>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <QuietButton>지우기</QuietButton>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>저장한 목소리를 지울까요?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      다시 녹음할 때까지 자비스는 브라우저의 기본 목소리로 말해요. 되돌릴 수 없어요.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>두기</AlertDialogCancel>
+                    <AlertDialogAction onClick={() => void forget()}>지우기</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             )}
             <PrimaryButton onClick={() => void begin()} disabled={unavailable}>
               <Mic aria-hidden className="size-4" />

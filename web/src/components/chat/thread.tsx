@@ -13,6 +13,7 @@ import { ProposalCard } from "@/components/chat/proposal-card";
 import { QueuedMessages } from "@/components/chat/queued";
 import { SwipeRow } from "@/components/chat/swipe-row";
 import { SearchBar, SearchToggle, useThreadSearch } from "@/components/chat/thread-search";
+import { Working } from "@/components/chat/working";
 import { readableTitle } from "@/lib/card-body";
 import { raisedAt } from "@/lib/ledger";
 import { onFocusProposal } from "@/lib/resume";
@@ -21,6 +22,9 @@ import { VoiceStage } from "@/components/chat/voice-stage";
 import { Header, TabBar } from "@/components/shell/header";
 import { useRole } from "@/components/shell/role";
 import { StandingBar } from "@/components/shell/standing-bar";
+import { Bubble, BubbleContent } from "@/components/ui/bubble";
+import { Marker, MarkerContent } from "@/components/ui/marker";
+import { Message, MessageContent, MessageFooter } from "@/components/ui/message";
 import {
   isPending,
   plainText,
@@ -29,6 +33,7 @@ import {
   type Checklist,
   type Draft,
   type Proposal,
+  type Step,
   type Turn,
   type TurnRef,
 } from "@/lib/thread";
@@ -97,11 +102,13 @@ function RefButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-/** Where one day of the conversation ends and the next begins. */
+/** Where one day of the conversation ends and the next begins: the date between two hairlines. */
 function DayDivider({ day }: { day: string }) {
   return (
-    <li className="flex justify-center" data-search-skip>
-      <span className="tnum text-[11.5px] text-faint">{dayLabel(day)}</span>
+    <li data-search-skip>
+      <Marker variant="separator" className="text-faint before:bg-edge-soft after:bg-edge-soft">
+        <MarkerContent className="tnum text-[11.5px]">{dayLabel(day)}</MarkerContent>
+      </Marker>
     </li>
   );
 }
@@ -317,11 +324,11 @@ const TurnRow = memo(function TurnRow({
         {divider}
         <li data-turn-id={turn.id} className="group/turn" aria-busy={typing ? "true" : undefined}>
           <SwipeRow onRef={ref}>
-            <div className={ROW}>
+            <Message className={cn(ROW, "gap-0 text-base")}>
               <Rail at={typing ? undefined : time} onRef={ref} />
               {/* Its own height, not the row's: the marks below it sit under
                   the last line, not under the rail's taller stack. */}
-              <div className="relative min-w-0 self-start">
+              <MessageContent className="relative block self-start">
                 {typing ? (
                   <Typed draft={typing} onShown={onShown} />
                 ) : turn.origin?.kind === "notice" ? (
@@ -370,8 +377,8 @@ const TurnRow = memo(function TurnRow({
                     marks beside it where there is no pointer to find them
                     in the rail. */}
                 {time || answer ? (
-                  <div
-                    className={cn("mt-1.5 flex items-center gap-1.5", answer ? "sm:pointer-fine:hidden" : "sm:hidden")}
+                  <MessageFooter
+                    className={cn("mt-1.5 gap-1.5 px-0 text-base font-normal", answer ? "sm:pointer-fine:hidden" : "sm:hidden")}
                     data-search-skip
                   >
                     {time ? <span className="tnum text-[11px] text-faint sm:hidden">{time}</span> : null}
@@ -381,7 +388,7 @@ const TurnRow = memo(function TurnRow({
                         {marks.error}
                       </span>
                     ) : null}
-                  </div>
+                  </MessageFooter>
                 ) : null}
                 {/* With a pointer the marks wait under the answer, in the gap
                     before the next turn - taking no room of their own - until
@@ -395,8 +402,8 @@ const TurnRow = memo(function TurnRow({
                       ),
                     )
                   : null}
-              </div>
-            </div>
+              </MessageContent>
+            </Message>
           </SwipeRow>
         </li>
       </>
@@ -406,26 +413,32 @@ const TurnRow = memo(function TurnRow({
     <>
       {divider}
       <li data-turn-id={turn.id} className="group/turn">
-        <SwipeRow onRef={quote} className="flex flex-col items-end gap-1.5">
-          {turn.ref && !turn.text ? (
-            <div className="max-w-[80%] sm:max-w-[26rem]">
-              <Quote quote={turn.ref} at={quoteAt} onJump={() => onJump(turn.ref!.id)} />
-            </div>
-          ) : null}
-          {turn.images?.length ? <Photos names={turn.images} /> : null}
-          {/* No backdrop blur: behind a bubble is only the flat page, so it
-              showed nothing, and made a phone redraw the bubble's backdrop
-              on every frame it moved. */}
-          {turn.text ? (
-            <div className="max-w-[80%] rounded-2xl border border-edge bg-glass-raised px-4 py-2.5 text-[14.5px] leading-relaxed text-foreground sm:max-w-[26rem]">
-              {turn.ref ? <Quote quote={turn.ref} at={quoteAt} onJump={() => onJump(turn.ref!.id)} /> : null}
-              <p className="selectable break-words whitespace-pre-wrap">{turn.text}</p>
-            </div>
-          ) : null}
-          <span className="flex items-center gap-1.5 pr-1" data-search-skip>
-            <RefButton onClick={quote} />
-            <span className="tnum text-[11px] text-faint">{time}</span>
-          </span>
+        <SwipeRow onRef={quote}>
+          <Message align="end" className="text-base">
+            <MessageContent className="items-end gap-1.5">
+              {turn.ref && !turn.text ? (
+                <div className="max-w-[80%] sm:max-w-[26rem]">
+                  <Quote quote={turn.ref} at={quoteAt} onJump={() => onJump(turn.ref!.id)} />
+                </div>
+              ) : null}
+              {turn.images?.length ? <Photos names={turn.images} /> : null}
+              {/* No backdrop blur: behind a bubble is only the flat page, so it
+                  showed nothing, and made a phone redraw the bubble's backdrop
+                  on every frame it moved. */}
+              {turn.text ? (
+                <Bubble variant="mine" align="end" className="max-w-[80%] sm:max-w-[26rem]">
+                  <BubbleContent>
+                    {turn.ref ? <Quote quote={turn.ref} at={quoteAt} onJump={() => onJump(turn.ref!.id)} /> : null}
+                    <p className="selectable break-words whitespace-pre-wrap">{turn.text}</p>
+                  </BubbleContent>
+                </Bubble>
+              ) : null}
+              <MessageFooter className="gap-1.5 px-0 pr-1 text-base font-normal" data-search-skip>
+                <RefButton onClick={quote} />
+                <span className="tnum text-[11px] text-faint">{time}</span>
+              </MessageFooter>
+            </MessageContent>
+          </Message>
         </SwipeRow>
       </li>
     </>
@@ -563,6 +576,7 @@ const Transcript = memo(function Transcript({
   waited,
   thinking,
   draft,
+  steps,
   onDraftShown,
   error,
   hydrated,
@@ -588,6 +602,8 @@ const Transcript = memo(function Transcript({
   thinking: boolean;
   /** The answer being written. */
   draft: Draft | null;
+  /** What the turn under way has done since the last thing said. */
+  steps: Step[];
   onDraftShown: (id: string, turn?: string) => void;
   error: string | null;
   hydrated: boolean;
@@ -692,22 +708,11 @@ const Transcript = memo(function Transcript({
           ) : null,
         ]}
 
-        {/* While the answer grows the dots have nothing to say. */}
+        {/* While the answer grows the steps have nothing to say. */}
         {draft && draft.text.trim() ? null : thinking ? (
-          <li
-            className={ROW}
-            aria-live="polite"
-            aria-label="Jarvis가 작업 중입니다"
-          >
+          <li className={ROW} aria-live="polite" data-search-skip>
             <Rail />
-            <span
-              aria-hidden
-              className="anim-think flex h-6 items-center gap-1"
-            >
-              <span className="size-[5px] rounded-full bg-dim" />
-              <span className="size-[5px] rounded-full bg-dim" />
-              <span className="size-[5px] rounded-full bg-dim" />
-            </span>
+            <Working steps={steps} />
           </li>
         ) : null}
 
@@ -736,6 +741,7 @@ export function Thread() {
     waited,
     thinking,
     draft,
+    steps,
     draftShown,
     queue,
     connection,
@@ -798,7 +804,7 @@ export function Thread() {
 
   // Opening the tab lands on the newest turn before anything is painted - no
   // scroll from the top. After that the view follows the bottom (pinned) -
-  // the dots, a message queued above the composer, an answer as it is
+  // the steps it is taking, a message queued above the composer, an answer as it is
   // written - from a message you send (which takes the view down first), or
   // the reader coming back down to it, until the reader scrolls up themselves. Following is decided
   // by what the reader did, not by where the view happens to be: when being
@@ -892,7 +898,7 @@ export function Thread() {
       // the next frame's hold, and on iOS it put the view back up.
       toEnd(el, performance.now() >= holdUntil.current);
     }
-  }, [turns, proposals, thinking, error, mode, finger, following]);
+  }, [turns, proposals, thinking, steps, error, mode, finger, following]);
 
   // Scrolling up near the top asks for the page above. Asked once per page:
   // the next ask waits for this one to land (loadingOlder) and be measured.
@@ -981,7 +987,7 @@ export function Thread() {
 
   // A message of yours - typed and sent, a waiting one put into the running
   // turn, one taken back - takes the view to the newest turn, wherever you
-  // were reading, and from there it follows what comes back: the dots, the
+  // were reading, and from there it follows what comes back: the steps, the
   // answer as it is written, the turns after it. At once, not smooth: from far
   // up a smooth ride is long, and the message is already on its way.
   const toNewest = useCallback(() => {
@@ -1275,6 +1281,7 @@ export function Thread() {
             waited={waited}
             thinking={thinking}
             draft={draft}
+            steps={steps}
             onDraftShown={draftShown}
             error={error}
             hydrated={hydrated}

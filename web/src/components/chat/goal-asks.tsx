@@ -89,20 +89,18 @@ function Ask({ ask, named }: { ask: GoalAsk; named: boolean }) {
       ) : (
         <div className={cn("grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-1.5", said === undefined && "opacity-50")}>
           <Button
-            variant="ghost"
-            size="sm"
+            variant="reject"
+            size="pair-sm"
             disabled={said === undefined}
             onClick={() => void say("missed")}
-            className="h-11 text-[13.5px] text-dim hover:bg-reject/10 hover:text-reject mouse:h-8 mouse:px-3 mouse:text-[0.8rem]"
           >
             안 했다
           </Button>
           <Button
-            variant="outline"
-            size="sm"
+            variant="approve"
+            size="pair-sm"
             disabled={said === undefined}
             onClick={() => void say("done")}
-            className="h-11 border-edge bg-glass-raised text-[13.5px] text-foreground hover:border-approve/35 hover:bg-approve/12 hover:text-approve mouse:h-8 mouse:px-3.5 mouse:text-[0.8rem] dark:bg-glass-raised dark:hover:bg-approve/12"
           >
             했다
           </Button>

@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import { Play } from "lucide-react";
 import { daysSince, lastDone, mostOverdue, type Routine, type Session } from "@/lib/workout";
 import { cn } from "@/lib/utils";
@@ -39,8 +40,8 @@ export function RoutinePicker({
   const lead = ranked.find((r) => r.routine.id === overdue?.id) ?? ranked[0];
   const others = ranked.filter((r) => r !== lead);
 
-  const quiet =
-    "tap rounded-lg px-2.5 text-[12.5px] text-faint transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50";
+  // The way to anything other than a routine: the faintest words here.
+  const quiet = "px-2.5 text-[12.5px] text-faint mouse:text-[12.5px]";
 
   return (
     <div>
@@ -94,17 +95,17 @@ export function RoutinePicker({
       ) : null}
 
       <div className="-ms-2.5 mt-1 flex flex-wrap items-center">
-        <button type="button" onClick={onFree} className={quiet}>
+        <Button variant="quiet" size="touch-sm" onClick={onFree} className={quiet}>
           빈 운동
-        </button>
+        </Button>
         {onRepeat ? (
-          <button type="button" onClick={onRepeat} className={quiet}>
+          <Button variant="quiet" size="touch-sm" onClick={onRepeat} className={quiet}>
             지난 운동 반복
-          </button>
+          </Button>
         ) : null}
-        <button type="button" onClick={onEdit} className={quiet}>
+        <Button variant="quiet" size="touch-sm" onClick={onEdit} className={quiet}>
           루틴 편집
-        </button>
+        </Button>
       </div>
     </div>
   );

@@ -157,7 +157,10 @@ type Store struct {
 
 	mu       sync.Mutex
 	thinking bool
-	log      *slog.Logger
+	// steps is what the turn under way has done since the last thing said
+	// (steps.go).
+	steps []Step
+	log   *slog.Logger
 
 	// drafts is the message being written, sent on as it grows (draft.go).
 	drafts drafts
@@ -502,6 +505,13 @@ func (s *Store) appendAs(t *Turn, draft string) *Turn {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	// Words or a card in the conversation's own flow end the stretch of
+	// steps before them. A job's news and a card laid from elsewhere
+	// (Origin) come in beside a turn under way, which goes on.
+	if t.Origin == nil {
+		s.endSteps()
+	}
+
 	t.Thread = s.thread
 	var saved Turn
 	if err := s.do(ctx, http.MethodPost, "/turns", t, &saved); err != nil {
@@ -528,6 +538,8 @@ func (s *Store) SetThinking(v bool) {
 	}
 	s.thinking = v
 	s.mu.Unlock()
+	// A run starts with nothing done, and leaves nothing behind.
+	s.endSteps()
 	s.bus.Publish(bus.Event{Type: "status", Thinking: v})
 }
 

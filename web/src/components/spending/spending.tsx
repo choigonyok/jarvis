@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, Plus, Search, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Search } from "lucide-react";
+import { ClearChip } from "@/components/ui/badge";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { Header, TabBar } from "@/components/shell/header";
 import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
@@ -258,17 +260,19 @@ export function Spending() {
               >
                 <div className="mb-3 flex items-center gap-2 px-2">
                   <h2 className="text-[13px] text-dim">내역</h2>
-                  <label className="relative ms-auto min-w-0 flex-1 sm:max-w-56">
-                    <span className="sr-only">사용처나 메모로 찾기</span>
-                    <Search aria-hidden className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-faint" />
-                    <input
+                  <InputGroup className="ms-auto h-10 min-w-0 flex-1 border-transparent sm:max-w-56 mouse:h-8">
+                    <InputGroupAddon className="pl-2.5">
+                      <Search aria-hidden className="size-3.5" />
+                    </InputGroupAddon>
+                    <InputGroupInput
                       type="search"
+                      aria-label="사용처나 메모로 찾기"
                       value={query}
                       onChange={(e) => setQuery(e.target.value)}
                       placeholder="찾기"
-                      className="h-10 w-full rounded-lg bg-glass ps-8 pe-2 text-[16px] text-foreground outline-none placeholder:text-faint focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-8 mouse:text-[12.5px]"
+                      className="ps-1.5 pe-2 mouse:text-[12.5px]"
                     />
-                  </label>
+                  </InputGroup>
                   <button
                     type="button"
                     onClick={() =>
@@ -283,9 +287,9 @@ export function Spending() {
 
                 {filtered ? (
                   <div className="mb-3 flex flex-wrap items-center gap-1.5 px-2 text-[12px]">
-                    {day ? <Chip label={dayLabel(day)} onClear={() => setDay(null)} /> : null}
-                    {category ? <Chip label={category} onClear={() => setCategory(null)} /> : null}
-                    {query.trim() ? <Chip label={`“${query.trim()}”`} onClear={() => setQuery("")} /> : null}
+                    {day ? <ClearChip label={dayLabel(day)} onClear={() => setDay(null)} /> : null}
+                    {category ? <ClearChip label={category} onClear={() => setCategory(null)} /> : null}
+                    {query.trim() ? <ClearChip label={`“${query.trim()}”`} onClear={() => setQuery("")} /> : null}
                     <span className="tnum ms-auto text-faint">
                       {shown.length}건 · {krw(shownTotal)}
                     </span>
@@ -482,16 +486,3 @@ function Blocked({
   );
 }
 
-function Chip({ label, onClear }: { label: string; onClear: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClear}
-      aria-label={`${label} 조건 지우기`}
-      className="flex min-h-8 items-center gap-1 rounded-full bg-glass-raised ps-3 pe-2 text-foreground/90 outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-    >
-      {label}
-      <X aria-hidden className="size-3 text-faint" />
-    </button>
-  );
-}

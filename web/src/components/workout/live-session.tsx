@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { Plus } from "lucide-react";
 import { ExerciseHistory } from "@/components/workout/exercise-history";
 import { ExercisePicker } from "@/components/workout/exercise-picker";
-import { quietButton } from "@/components/workout/panel";
+import { Button } from "@/components/ui/button";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Input } from "@/components/ui/input";
 import { local, primeChime, useNow, useWakeLock } from "@/lib/use-gym";
 import {
@@ -25,7 +26,6 @@ import {
   type WorkoutSet,
 } from "@/lib/workout";
 import { type Rest } from "@/components/workout/live-shared";
-import { cn } from "@/lib/utils";
 import {
   SetMap,
   ExerciseLine,
@@ -71,7 +71,6 @@ export function LiveSession({
   onEnd,
   onDiscard,
   onUndoable,
-  notice,
 }: {
   session: Session;
   history: Session[];
@@ -90,7 +89,6 @@ export function LiveSession({
   onDiscard: () => void;
   onUndoable: (label: string, restore: () => void) => void;
   /** The undo toast, shown on top of the dock rather than under it. */
-  notice?: React.ReactNode;
 }) {
   const now = useNow();
   useWakeLock(true);
@@ -383,32 +381,24 @@ export function LiveSession({
           </p>
           <div className="-ms-3 mt-1.5 flex flex-wrap items-center">
             {lastActive ? (
-              <button
-                type="button"
-                onClick={() => onEnd(lastActive)}
-                className={quietButton}
-              >
+              <Button variant="quiet" size="touch-sm" onClick={() => onEnd(lastActive)}>
                 마지막 세트 시각으로 끝내기
-              </button>
+              </Button>
             ) : (
-              <button
-                type="button"
-                onClick={() => setFinishing(true)}
-                className={quietButton}
-              >
+              <Button variant="quiet" size="touch-sm" onClick={() => setFinishing(true)}>
                 끝내기
-              </button>
+              </Button>
             )}
-            <button
-              type="button"
+            <Button
+              variant="quiet"
+              size="touch-sm"
               onClick={() => {
                 setStaleDismissed(true);
                 touch();
               }}
-              className={quietButton}
             >
               계속하기
-            </button>
+            </Button>
           </div>
         </div>
       ) : null}
@@ -485,7 +475,7 @@ export function LiveSession({
               defaultValue={session.bodyWeight || ""}
               onBlur={(e) => onBodyWeight(Number(e.target.value) || 0)}
               placeholder="0"
-              className="tnum h-11 w-28 border-edge bg-well/40 text-center text-[16px] sm:text-sm"
+              className="tnum w-28 text-center"
             />
             <span className="text-[12px] text-faint">kg</span>
           </span>
@@ -496,7 +486,6 @@ export function LiveSession({
             defaultValue={session.note ?? ""}
             onBlur={(e) => onNote(e.target.value)}
             placeholder="컨디션, 통증, 바꾼 것"
-            className="h-11 border-edge bg-well/40 text-[16px] sm:text-sm"
           />
         </label>
         <div className="sm:col-span-2">
@@ -506,31 +495,26 @@ export function LiveSession({
           >
             기본 휴식
           </span>
-          <div
-            className="flex gap-2"
-            role="radiogroup"
+          <ToggleGroup
+            type="single"
             aria-labelledby="rest-default"
+            variant="segment"
+            size="touch"
+            spacing={2}
+            value={String(restTarget)}
+            onValueChange={(v) => {
+              if (v) onRestTarget(Number(v));
+            }}
+            className="flex w-full"
           >
             {REST_PRESETS.map((seconds) => (
-              <button
-                key={seconds}
-                type="button"
-                role="radio"
-                aria-checked={restTarget === seconds}
-                onClick={() => onRestTarget(seconds)}
-                className={cn(
-                  "min-h-11 flex-1 rounded-lg text-[13px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
-                  restTarget === seconds
-                    ? "bg-glass-raised text-foreground"
-                    : "bg-glass text-faint hover:text-dim",
-                )}
-              >
+              <ToggleGroupItem key={seconds} value={String(seconds)} className="flex-1 rounded-lg bg-glass">
                 {seconds % 60
                   ? `${Math.floor(seconds / 60)}분 ${seconds % 60}초`
                   : `${seconds / 60}분`}
-              </button>
+              </ToggleGroupItem>
             ))}
-          </div>
+          </ToggleGroup>
         </div>
       </section>
 
@@ -538,7 +522,6 @@ export function LiveSession({
         now={now}
         rest={rest}
         onRest={setRest}
-        notice={notice}
         exercise={focusExercise}
         focus={focus}
         previous={

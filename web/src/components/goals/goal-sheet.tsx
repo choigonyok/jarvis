@@ -2,8 +2,20 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, ChevronLeft, ChevronRight, Minus, Plus } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { BottomSheetContent, BottomSheetDescription, BottomSheetHeader, BottomSheetTitle } from "@/components/ui/bottom-sheet";
 import { Button } from "@/components/ui/button";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Sheet } from "@/components/ui/sheet";
 import {
   type Bar,
   type Check as DayCheck,
@@ -24,8 +36,6 @@ import {
 } from "@/lib/goals";
 import { cn } from "@/lib/utils";
 
-const quiet =
-  "tap min-h-11 rounded-lg border border-edge-soft px-3 text-[13.5px] text-dim transition-colors outline-none hover:bg-glass hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-40 mouse:min-h-9 mouse:text-[13px]";
 
 /**
  * One goal, all the way back: how much of it was done, how it went week by
@@ -44,13 +54,9 @@ export function GoalSheet({
 }) {
   return (
     <Sheet open={goal !== null} onOpenChange={onOpenChange}>
-      <SheetContent
-        side="bottom"
-        onOpenAutoFocus={(e) => e.preventDefault()}
-        className="inset-x-safe pb-safe h-[92dvh] max-h-[92dvh] gap-0 border-edge-soft bg-background sm:mx-auto sm:max-w-xl sm:rounded-t-2xl sm:border-x"
-      >
+      <BottomSheetContent width="lg" height="full">
         {goal ? <Body key={goal.id} goal={goal} onChanged={onChanged} onClose={() => onOpenChange(false)} onEdit={onEdit} /> : null}
-      </SheetContent>
+      </BottomSheetContent>
     </Sheet>
   );
 }
@@ -59,7 +65,6 @@ function Body({ goal, onChanged, onClose, onEdit }: { goal: Goal; onChanged: () 
   const [now, setNow] = useState(goal);
   const [stats, setStats] = useState<Stats | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
-  const [leaving, setLeaving] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -112,14 +117,14 @@ function Body({ goal, onChanged, onClose, onEdit }: { goal: Goal; onChanged: () 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Stays put over what scrolls: the sheet's close sits on this row. */}
-      <SheetHeader className="shrink-0 border-b border-edge-soft px-4 pt-4 pb-3 sm:px-6">
-        <SheetTitle className="pr-8 text-[17px] leading-snug font-medium break-keep text-foreground">{now.title}</SheetTitle>
-        <SheetDescription className="text-[12.5px] text-dim">
+      <BottomSheetHeader className="border-b border-edge-soft pb-3 sm:px-6">
+        <BottomSheetTitle className="text-[17px] leading-snug break-keep">{now.title}</BottomSheetTitle>
+        <BottomSheetDescription className="text-[12.5px] text-dim">
           {now.rule}
           {now.remind ? `, ${now.remind}에 물어봐요` : ""}
           {now.end ? `, ${dayLabel(now.end)}까지` : ""}
-        </SheetDescription>
-      </SheetHeader>
+        </BottomSheetDescription>
+      </BottomSheetHeader>
 
       <div className="scrollbar-hairline min-h-0 flex-1 space-y-7 overflow-y-auto overscroll-contain px-4 pt-4 pb-8 sm:px-6">
         {now.note ? <p className="text-[13.5px] leading-relaxed text-dim">{now.note}</p> : null}
@@ -152,35 +157,41 @@ function Body({ goal, onChanged, onClose, onEdit }: { goal: Goal; onChanged: () 
 
         <div className="flex flex-wrap gap-2">
           {now.status === "ended" ? (
-            <button type="button" className={quiet} onClick={() => void act({ finish: false })}>
+            <Button variant="lined" size="touch-sm" onClick={() => void act({ finish: false })}>
               다시 시작
-            </button>
-          ) : (
-            <>
-              <button type="button" className={quiet} onClick={() => onEdit(now)}>
-                고치기
-              </button>
-              <button type="button" className={quiet} onClick={() => void act({ pause: now.status !== "paused" })}>
-                {now.status === "paused" ? "다시 시작" : "잠깐 쉬기"}
-              </button>
-              <button type="button" className={quiet} onClick={() => void act({ finish: true })}>
-                끝내기
-              </button>
-            </>
-          )}
-          {leaving ? (
-            <Button
-              variant="outline"
-              onClick={() => void remove()}
-              className="min-h-11 border-edge text-[13.5px] text-reject hover:bg-reject/10 mouse:min-h-9 mouse:text-[13px]"
-            >
-              기록까지 지우기
             </Button>
           ) : (
-            <button type="button" className={quiet} onClick={() => setLeaving(true)}>
-              지우기
-            </button>
+            <>
+              <Button variant="lined" size="touch-sm" onClick={() => onEdit(now)}>
+                고치기
+              </Button>
+              <Button variant="lined" size="touch-sm" onClick={() => void act({ pause: now.status !== "paused" })}>
+                {now.status === "paused" ? "다시 시작" : "잠깐 쉬기"}
+              </Button>
+              <Button variant="lined" size="touch-sm" onClick={() => void act({ finish: true })}>
+                끝내기
+              </Button>
+            </>
           )}
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="lined" size="touch-sm">
+                지우기
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>{now.title} 목표를 지울까요?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  지금까지의 기록도 함께 지워져요. 기록을 남기려면 지우지 말고 끝내기를 누르세요. 되돌릴 수 없어요.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>두기</AlertDialogCancel>
+                <AlertDialogAction onClick={() => void remove()}>기록까지 지우기</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
         {now.status === "active" || now.status === "paused" ? (
           <p className="text-[12px] leading-relaxed text-faint">쉬는 날은 달성률에 세지 않아요. 끝내면 기록은 남고 목록에서만 내려가요.</p>

@@ -27,13 +27,8 @@ import {
   TrainFront,
   Wallet,
 } from "lucide-react";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@/components/ui/sheet";
+import { BottomSheetContent, BottomSheetHeader, BottomSheetTitle } from "@/components/ui/bottom-sheet";
+import { Sheet, SheetTrigger } from "@/components/ui/sheet";
 import { Notifications } from "@/components/shell/notifications";
 import { useRole } from "@/components/shell/role";
 import { UsageBars } from "@/components/shell/usage-bars";
@@ -801,15 +796,10 @@ function TabBarView({
                   );
                 })()}
               </SheetTrigger>
-              <SheetContent
-                side="bottom"
-                className="inset-x-safe pb-safe border-edge-soft bg-background"
-              >
-                <SheetHeader className="px-4 pt-4 pb-1">
-                  <SheetTitle className="text-[14px] font-medium text-foreground">
-                    다른 화면
-                  </SheetTitle>
-                </SheetHeader>
+              <BottomSheetContent width="full" keepFocus={false} aria-describedby={undefined} className="gap-4">
+                <BottomSheetHeader className="pb-1 sm:px-4">
+                  <BottomSheetTitle className="pr-0 text-[14px]">다른 화면</BottomSheetTitle>
+                </BottomSheetHeader>
                 <ScreenList
                   tabs={hubs[moreSlot].screens}
                   pending={pending}
@@ -829,7 +819,7 @@ function TabBarView({
                     로그아웃
                   </button>
                 </div>
-              </SheetContent>
+              </BottomSheetContent>
             </Sheet>
           ) : null}
         </div>
@@ -948,10 +938,10 @@ export function ScreenMenu({ pending }: { pending: number }) {
           <span aria-hidden className="anim-breathe absolute top-2.5 right-2 size-[6px] rounded-full bg-foreground/80" />
         ) : null}
       </SheetTrigger>
-      <SheetContent side="bottom" className="inset-x-safe pb-safe border-edge-soft bg-background">
-        <SheetHeader className="px-4 pt-4 pb-1">
-          <SheetTitle className="text-[14px] font-medium text-foreground">다른 화면</SheetTitle>
-        </SheetHeader>
+      <BottomSheetContent width="full" keepFocus={false} aria-describedby={undefined} className="gap-4">
+        <BottomSheetHeader className="pb-1 sm:px-4">
+          <BottomSheetTitle className="pr-0 text-[14px]">다른 화면</BottomSheetTitle>
+        </BottomSheetHeader>
         <ScreenList
           tabs={tabs}
           pending={pending}
@@ -960,7 +950,7 @@ export function ScreenMenu({ pending }: { pending: number }) {
             if (tab.href !== pathname) router.push(tab.href);
           }}
         />
-      </SheetContent>
+      </BottomSheetContent>
     </Sheet>
   );
 }

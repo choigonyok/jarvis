@@ -1,11 +1,16 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { PopoverContent } from "@/components/ui/popover";
 
 /**
  * The header's popovers - notifications, usage - in one shape: the same
  * width, the same title row, the same place on a phone (pinned under the
- * header, a gutter from each edge, rather than hanging off a 44px button).
+ * header, a gutter from each edge, rather than hanging off a 44px button:
+ * globals.css puts the popover back there below the tablet width).
+ *
+ * A Popover: a tap outside or Esc closes it and the focus goes back to the
+ * button that opened it. It appears without a flourish, as it always has.
  */
 export function HeaderPanel({
   title,
@@ -20,16 +25,18 @@ export function HeaderPanel({
   label?: string;
 }) {
   return (
-    <div
-      role="dialog"
+    <PopoverContent
+      align="end"
+      sideOffset={4}
+      data-header-panel=""
       aria-label={label ?? title}
-      className="absolute top-full right-0 z-50 mt-1 w-[21rem] overflow-hidden rounded-xl border border-edge bg-popover shadow-lg max-sm:fixed max-sm:inset-x-3 max-sm:top-[calc(env(safe-area-inset-top)+3.5rem)] max-sm:w-auto"
+      className="w-[21rem] gap-0 overflow-hidden rounded-xl border border-edge bg-popover p-0 text-base shadow-lg ring-0 data-open:animate-none data-closed:animate-none max-sm:w-full"
     >
       <div className="flex min-h-11 items-center justify-between gap-2 border-b border-edge-soft px-3.5 py-1.5">
         <p className="text-[13px] text-foreground">{title}</p>
         {aside ? <div className="flex items-center gap-1">{aside}</div> : null}
       </div>
       {children}
-    </div>
+    </PopoverContent>
   );
 }

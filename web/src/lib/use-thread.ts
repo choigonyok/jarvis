@@ -13,6 +13,7 @@ import {
   type Decision,
   type Proposal,
   type Queued,
+  type Step,
   type Turn,
 } from "@/lib/thread";
 import { decideProposal } from "@/lib/decide";
@@ -95,6 +96,10 @@ export function useThread() {
   // place (draftShown). Not cached: a stream that opens mid-answer is sent
   // it whole first.
   const [draft, setDraft] = useState<Draft | null>(null);
+  // What the turn under way has done since the last thing said (the line
+  // where the dots used to be). Not cached: a run is not under way on a
+  // fresh page until the thread says so.
+  const [steps, setSteps] = useState<Step[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(() => cached !== null);
   const [queue, setQueueState] = useState<Queued[]>(() => cachedQueue);
@@ -169,11 +174,13 @@ export function useThread() {
         proposals: Proposal[];
         queue?: Queued[];
         checklists?: Record<string, Checklist>;
+        steps?: Step[];
       };
       setTurns(data.turns ?? []);
       setMore(Boolean(data.hasMore));
       setProposals(data.proposals ?? []);
       setThinking(Boolean(data.thinking));
+      setSteps(data.thinking ? (data.steps ?? []) : []);
       setQueue(data.queue ?? []);
       putLists(data.checklists);
     } catch {
@@ -248,8 +255,12 @@ export function useThread() {
       case "draft":
         setDraft((cur) => applyDraft(cur, event.draft));
         break;
+      case "steps":
+        setSteps(event.steps ?? []);
+        break;
       case "status":
         setThinking(Boolean(event.thinking));
+        if (!event.thinking) setSteps([]);
         // A run that is over is writing nothing - but a finished answer may
         // still be coming out on screen.
         if (!event.thinking) setDraft((cur) => (cur?.turn ? cur : null));
@@ -261,6 +272,7 @@ export function useThread() {
         setError(event.message);
         setThinking(false);
         setDraft(null);
+        setSteps([]);
         break;
     }
   }, [setTurns, setProposals, setQueue, setChecklists, fetchLists]);
@@ -531,6 +543,7 @@ export function useThread() {
     waited: waited as ReadonlySet<string>,
     thinking,
     draft,
+    steps,
     draftShown,
     queue,
     connection,

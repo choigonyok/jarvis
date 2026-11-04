@@ -1,8 +1,25 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { Panel } from "@/components/ui/bottom-sheet";
+import { Button } from "@/components/ui/button";
+import { Field, FieldContent, FieldDescription, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Pager } from "@/components/ui/pager";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { SwitchRow } from "@/components/ui/switch";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { usePaged } from "@/lib/paging";
 import { krw } from "@/lib/portfolio";
 import {
@@ -17,58 +34,13 @@ import {
   dayLabel,
   send,
 } from "@/lib/spending";
-import { cn } from "@/lib/utils";
 
-const field =
-  "h-11 w-full rounded-lg border border-edge-soft bg-glass px-3 text-[16px] text-foreground outline-none placeholder:text-faint focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-9 mouse:text-[13px]";
-
-const quietButton =
-  "tap rounded-lg px-3 text-[13px] text-dim transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50";
-
-/** The one bright control in a sheet is the one that saves - same as the approval card. */
-const saveButton =
-  "tap min-h-11 flex-1 rounded-lg bg-glass-raised px-4 text-[14px] font-medium text-foreground transition-colors outline-none hover:bg-foreground/15 focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 mouse:min-h-9 mouse:text-[13px]";
 
 const digits = (s: string) => Number(s.replace(/[^\d]/g, "")) || 0;
 const grouped = (s: string) => {
   const n = digits(s);
   return n ? n.toLocaleString("ko-KR") : "";
 };
-
-/** A bottom sheet on a phone; a centred one on a wide screen rather than a 1400px-wide strip. */
-function Panel({
-  open,
-  onOpenChange,
-  title,
-  description,
-  children,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  title: string;
-  description?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent
-        side="bottom"
-        // Opening a sheet should not throw up the keyboard or a date picker
-        // before anything has been read.
-        onOpenAutoFocus={(e) => e.preventDefault()}
-        className="inset-x-safe pb-safe max-h-[88dvh] gap-0 border-edge-soft bg-background sm:mx-auto sm:max-w-lg sm:rounded-t-2xl sm:border-x"
-      >
-        <SheetHeader className="px-4 pt-4 pb-2 sm:px-5">
-          <SheetTitle className="pr-8 text-[15px] font-medium">{title}</SheetTitle>
-          {description ? (
-            <SheetDescription className="text-[12px] text-faint">{description}</SheetDescription>
-          ) : null}
-        </SheetHeader>
-        <div className="scrollbar-hairline min-h-0 overflow-y-auto px-4 pb-4 sm:px-5">{children}</div>
-      </SheetContent>
-    </Sheet>
-  );
-}
 
 function CategoryPicker({
   names,
@@ -82,70 +54,29 @@ function CategoryPicker({
   allowAuto?: boolean;
 }) {
   const options = allowAuto ? ["", ...names] : names;
+  // "" is 자동, and a group's "" means nothing is picked: the empty name goes
+  // by a word of its own while it is in the group.
+  const AUTO = "__auto";
   return (
-    <div role="radiogroup" aria-label="분류" className="grid grid-cols-3 gap-1.5 sm:grid-cols-4">
-      {options.map((name) => {
-        const on = value === name;
-        return (
-          <button
-            key={name || "auto"}
-            type="button"
-            role="radio"
-            aria-checked={on}
-            onClick={() => onChange(name)}
-            className={cn(
-              "min-h-11 rounded-lg border px-2 text-[13px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 mouse:min-h-9 mouse:text-[12.5px]",
-              on
-                ? "border-edge bg-glass-raised text-foreground"
-                : "border-edge-soft text-dim hover:bg-glass",
-            )}
-          >
-            {name || "자동"}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function Toggle({
-  checked,
-  onChange,
-  label,
-  hint,
-}: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-  label: string;
-  hint?: string;
-}) {
-  return (
-    <label className="flex min-h-11 cursor-pointer items-center justify-between gap-3 py-1">
-      <span>
-        <span className="block text-[13.5px] text-foreground/90">{label}</span>
-        {hint ? <span className="block text-[11.5px] text-faint">{hint}</span> : null}
-      </span>
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-        className="peer sr-only"
-      />
-      <span
-        aria-hidden
-        className={cn(
-          "relative h-6 w-10 shrink-0 rounded-full transition-colors peer-focus-visible:ring-3 peer-focus-visible:ring-ring/50",
-          checked ? "bg-foreground/80" : "bg-glass-raised",
-        )}
-      >
-        <span
-          className={cn(
-            "absolute top-0.5 size-5 rounded-full bg-background transition-transform motion-reduce:transition-none",
-            checked ? "translate-x-[18px]" : "translate-x-0.5",
-          )}
-        />
-      </span>
-    </label>
+    <ToggleGroup
+      type="single"
+      aria-label="분류"
+      variant="tile"
+      size="touch"
+      spacing={1.5}
+      value={value === "" ? (allowAuto ? AUTO : "") : value}
+      // One is always picked: pressing the picked one again keeps it.
+      onValueChange={(v) => {
+        if (v) onChange(v === AUTO ? "" : v);
+      }}
+      className="grid w-full grid-cols-3 sm:grid-cols-4"
+    >
+      {options.map((name) => (
+        <ToggleGroupItem key={name || AUTO} value={name || AUTO} className="px-2">
+          {name || "자동"}
+        </ToggleGroupItem>
+      ))}
+    </ToggleGroup>
   );
 }
 
@@ -199,6 +130,7 @@ function TxForm({
   const [amount, setAmount] = useState(tx.amountKrw.toLocaleString("ko-KR"));
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const id = useId();
 
   // A won figure can be corrected where it was a guess (a dollar charge) or
   // where a person wrote it. One read off an alert is what the card company
@@ -234,8 +166,8 @@ function TxForm({
     );
   };
 
+  // Asked first (the 지우기 below opens the question): a deleted line is gone.
   const remove = async () => {
-    if (!window.confirm(`${tx.merchant} ${krw(tx.amountKrw)}을 지울까요?`)) return;
     const err = await send(`transactions/${tx.id}`, "DELETE");
     if (err) setError(err);
     else onSaved("지웠어요");
@@ -274,9 +206,9 @@ function TxForm({
         </h3>
         <CategoryPicker names={names} value={category} onChange={setCategory} />
         {recategorised ? (
-          <Toggle
+          <SwitchRow
             checked={remember}
-            onChange={setRemember}
+            onCheckedChange={setRemember}
             label="이 가맹점은 앞으로도 이 분류로"
             hint="지난 내역 중 같은 가맹점도 함께 바뀌어요. 하나씩 고친 건 그대로 둬요."
           />
@@ -286,40 +218,41 @@ function TxForm({
       {amountEditable ? (
         <section className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           {tx.source === "manual" ? (
-            <label className="block">
-              <span className="mb-1 block text-[12px] text-dim">사용처</span>
-              <input className={field} value={merchant} onChange={(e) => setMerchant(e.target.value)} />
-            </label>
+            <Field>
+              <FieldLabel htmlFor={`${id}-merchant`}>사용처</FieldLabel>
+              <Input id={`${id}-merchant`} surface="glass" value={merchant} onChange={(e) => setMerchant(e.target.value)} />
+            </Field>
           ) : null}
-          <label className="block">
-            <span className="mb-1 block text-[12px] text-dim">
-              {tx.estimated ? "원화 금액 (명세서에 찍힌 값으로)" : "금액"}
-            </span>
-            <input
-              className={cn(field, "tnum")}
+          <Field>
+            <FieldLabel htmlFor={`${id}-amount`}>{tx.estimated ? "원화 금액 (명세서에 찍힌 값으로)" : "금액"}</FieldLabel>
+            <Input
+              id={`${id}-amount`}
+              surface="glass"
+              className="tnum"
               inputMode="numeric"
               value={amount}
               onChange={(e) => setAmount(grouped(e.target.value))}
             />
-          </label>
+          </Field>
         </section>
       ) : null}
 
-      <label className="block">
-        <span className="mb-1 block text-[12px] text-dim">메모</span>
-        <input
-          className={field}
+      <Field>
+        <FieldLabel htmlFor={`${id}-memo`}>메모</FieldLabel>
+        <Input
+          id={`${id}-memo`}
+          surface="glass"
           value={memo}
           maxLength={200}
           placeholder="누구와, 무엇을"
           onChange={(e) => setMemo(e.target.value)}
         />
-      </label>
+      </Field>
 
       {tx.status !== "cancel" ? (
-        <Toggle
+        <SwitchRow
           checked={excluded}
-          onChange={setExcluded}
+          onCheckedChange={setExcluded}
           label="합계에서 빼기"
           hint="돌려받을 경비나 내 계좌끼리 옮긴 돈처럼 지출이 아닌 것"
         />
@@ -329,13 +262,29 @@ function TxForm({
 
       <div className="flex items-center gap-2 pt-1">
         {tx.source === "manual" ? (
-          <button type="button" onClick={() => void remove()} className={quietButton}>
-            지우기
-          </button>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="quiet" size="touch-sm">
+                지우기
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>이 내역을 지울까요?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  {tx.merchant} {krw(tx.amountKrw)}이 가계부와 이번 달 합계에서 빠져요. 되돌릴 수 없어요.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>두기</AlertDialogCancel>
+                <AlertDialogAction onClick={() => void remove()}>지우기</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         ) : null}
-        <button type="button" disabled={saving} onClick={() => void save()} className={saveButton}>
+        <Button variant="raised" size="touch" disabled={saving} onClick={() => void save()} className="flex-1">
           {saving ? "저장하는 중" : "저장"}
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -390,9 +339,9 @@ function OrderSection({
         <p className="mt-1.5 text-[11.5px] text-faint">{tx.enrichNote}</p>
       ) : null}
       {tx.enrichStatus !== "pending" ? (
-        <button type="button" onClick={() => void retry()} className={cn(quietButton, "-ms-3 mt-1")}>
+        <Button variant="quiet" size="touch-sm" onClick={() => void retry()} className="-ms-3 mt-1">
           주문 다시 확인하기
-        </button>
+        </Button>
       ) : null}
       {error ? <p className="mt-1 text-[12.5px] text-reject">{error}</p> : null}
     </section>
@@ -430,20 +379,13 @@ function ItemRow({
           {item.listedKrw !== item.amountKrw ? ` (주문서 ${krw(item.listedKrw)})` : ""}
         </span>
       </span>
-      <label className="shrink-0">
-        <span className="sr-only">{item.name} 분류</span>
-        <select
-          value={category}
-          onChange={(e) => void change(e.target.value)}
-          className="h-11 rounded-lg border border-edge-soft bg-background px-2 text-[16px] text-dim outline-none focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-8 mouse:text-[12.5px]"
-        >
-          {names.map((n) => (
-            <option key={n} value={n}>
-              {n}
-            </option>
-          ))}
-        </select>
-      </label>
+      <NativeSelect aria-label={`${item.name} 분류`} value={category} onChange={(e) => void change(e.target.value)}>
+        {names.map((n) => (
+          <NativeSelectOption key={n} value={n}>
+            {n}
+          </NativeSelectOption>
+        ))}
+      </NativeSelect>
     </li>
   );
 }
@@ -496,6 +438,7 @@ function AddForm({
   const [memo, setMemo] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const id = useId();
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -519,42 +462,44 @@ function AddForm({
         </pre>
       ) : null}
       <div className="grid grid-cols-2 gap-2">
-        <label className="block">
-          <span className="mb-1 block text-[12px] text-dim">날짜</span>
-          <input type="date" required className={field} value={date} onChange={(e) => setDate(e.target.value)} />
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-[12px] text-dim">시각</span>
-          <input type="time" className={field} value={time} onChange={(e) => setTime(e.target.value)} />
-        </label>
+        <Field>
+          <FieldLabel htmlFor={`${id}-date`}>날짜</FieldLabel>
+          <Input id={`${id}-date`} surface="glass" type="date" required value={date} onChange={(e) => setDate(e.target.value)} />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor={`${id}-time`}>시각</FieldLabel>
+          <Input id={`${id}-time`} surface="glass" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
+        </Field>
       </div>
-      <label className="block">
-        <span className="mb-1 block text-[12px] text-dim">사용처</span>
-        <input className={field} value={merchant} maxLength={80} onChange={(e) => setMerchant(e.target.value)} />
-      </label>
-      <label className="block">
-        <span className="mb-1 block text-[12px] text-dim">금액</span>
-        <input
-          className={cn(field, "tnum")}
+      <Field>
+        <FieldLabel htmlFor={`${id}-merchant`}>사용처</FieldLabel>
+        <Input id={`${id}-merchant`} surface="glass" value={merchant} maxLength={80} onChange={(e) => setMerchant(e.target.value)} />
+      </Field>
+      <Field>
+        <FieldLabel htmlFor={`${id}-amount`}>금액</FieldLabel>
+        <Input
+          id={`${id}-amount`}
+          surface="glass"
+          className="tnum"
           inputMode="numeric"
           placeholder="0"
           value={amount}
           onChange={(e) => setAmount(grouped(e.target.value))}
         />
-      </label>
+      </Field>
       <section>
         <h3 className="mb-2 text-[12px] text-dim">분류</h3>
         <CategoryPicker names={names} value={category} onChange={setCategory} allowAuto />
       </section>
-      <label className="block">
-        <span className="mb-1 block text-[12px] text-dim">메모</span>
-        <input className={field} value={memo} maxLength={200} onChange={(e) => setMemo(e.target.value)} />
-      </label>
+      <Field>
+        <FieldLabel htmlFor={`${id}-memo`}>메모</FieldLabel>
+        <Input id={`${id}-memo`} surface="glass" value={memo} maxLength={200} onChange={(e) => setMemo(e.target.value)} />
+      </Field>
       {error ? <p className="text-[12.5px] text-reject">{error}</p> : null}
       <div className="flex pt-1">
-        <button type="submit" disabled={saving} className={saveButton}>
+        <Button type="submit" variant="raised" size="touch" disabled={saving} className="flex-1">
           {saving ? "적는 중" : "적기"}
-        </button>
+        </Button>
       </div>
     </form>
   );
@@ -593,6 +538,7 @@ function BudgetForm({ book, onSaved }: { book: Book; onSaved: (note: string) => 
   );
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const id = useId();
 
   const prevOf = (name: string) => book.categories.find((c) => c.name === name)?.prevKrw ?? 0;
 
@@ -613,19 +559,21 @@ function BudgetForm({ book, onSaved }: { book: Book; onSaved: (note: string) => 
   };
 
   const row = (key: string, label: string, hint: string) => (
-    <label key={key || "total"} className="flex items-center gap-3">
-      <span className="min-w-0 flex-1">
-        <span className="block text-[13.5px] text-foreground/90">{label}</span>
-        <span className="block text-[11.5px] text-faint">{hint}</span>
-      </span>
-      <input
-        className={cn(field, "tnum w-36 text-right sm:w-32")}
+    <Field key={key || "total"} orientation="horizontal" className="min-h-0">
+      <FieldContent>
+        <FieldLabel htmlFor={`${id}-${key || "total"}`}>{label}</FieldLabel>
+        <FieldDescription>{hint}</FieldDescription>
+      </FieldContent>
+      <Input
+        id={`${id}-${key || "total"}`}
+        surface="glass"
+        className="tnum w-36 text-right sm:w-32"
         inputMode="numeric"
         placeholder="없음"
         value={values[key] ?? ""}
         onChange={(e) => setValues((v) => ({ ...v, [key]: grouped(e.target.value) }))}
       />
-    </label>
+    </Field>
   );
 
   return (
@@ -638,9 +586,9 @@ function BudgetForm({ book, onSaved }: { book: Book; onSaved: (note: string) => 
       </div>
       {error ? <p className="text-[12.5px] text-reject">{error}</p> : null}
       <div className="flex pt-1">
-        <button type="submit" disabled={saving} className={saveButton}>
+        <Button type="submit" variant="raised" size="touch" disabled={saving} className="flex-1">
           {saving ? "저장하는 중" : "저장"}
-        </button>
+        </Button>
       </div>
     </form>
   );
@@ -686,12 +634,12 @@ export function UnparsedSheet({
             {u.reason ? <p className="mb-2 text-[11.5px] break-words text-faint">{u.reason}</p> : null}
             <pre className="font-sans text-[12.5px] leading-relaxed whitespace-pre-wrap text-dim">{u.body}</pre>
             <div className="mt-3 flex gap-2">
-              <button type="button" onClick={() => void dismiss(u)} className={quietButton}>
+              <Button variant="quiet" size="touch-sm" onClick={() => void dismiss(u)}>
                 결제 아님
-              </button>
-              <button type="button" onClick={() => onWrite(u)} className={saveButton}>
+              </Button>
+              <Button variant="raised" size="touch" onClick={() => onWrite(u)} className="flex-1">
                 내용 적기
-              </button>
+              </Button>
             </div>
           </li>
         ))}

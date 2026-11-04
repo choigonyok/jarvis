@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { ChevronDown, ChevronUp, Search, X } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
+import { Toggle } from "@/components/ui/toggle";
 
 /** Text that is chrome, not something said: times, buttons, the quote copies. */
 const SKIP = "button, svg, [data-search-skip]";
@@ -216,18 +217,14 @@ export type ThreadSearch = ReturnType<typeof useThreadSearch>;
 /** The search button in the header. */
 export function SearchToggle({ search }: { search: ThreadSearch }) {
   return (
-    <button
-      type="button"
-      onClick={() => (search.open ? search.close() : search.show())}
+    <Toggle
+      pressed={search.open}
+      onPressedChange={(on) => (on ? search.show() : search.close())}
       aria-label={search.open ? "검색 닫기" : "대화 검색"}
-      aria-pressed={search.open}
-      className={cn(
-        "flex size-11 items-center justify-center rounded-lg transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 mouse:size-8",
-        search.open ? "text-foreground" : "text-faint hover:text-dim",
-      )}
+      className="size-11 text-faint hover:bg-transparent hover:text-dim data-[state=on]:bg-transparent data-[state=on]:text-foreground mouse:size-8"
     >
       <Search aria-hidden className="size-[18px] mouse:size-4" />
-    </button>
+    </Toggle>
   );
 }
 
@@ -258,9 +255,15 @@ function SearchRow({ search }: { search: ThreadSearch }) {
   return (
     <div className="inset-x-safe shrink-0 border-b border-edge-soft bg-background" role="search">
       <div className="mx-auto flex h-14 w-full max-w-[52rem] items-center gap-1 px-4 sm:px-8">
-        <label className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-full bg-well px-3.5">
-          <Search aria-hidden className="size-4 shrink-0 text-faint" />
-          <input
+        <InputGroup
+          surface="well"
+          // The caret is the focus here: the row is nothing but this field.
+          className="h-10 min-w-0 flex-1 rounded-full border-transparent mouse:h-10 has-[[data-slot=input-group-control]:focus-visible]:border-transparent has-[[data-slot=input-group-control]:focus-visible]:ring-0"
+        >
+          <InputGroupAddon className="pl-3.5">
+            <Search aria-hidden />
+          </InputGroupAddon>
+          <InputGroupInput
             ref={input}
             type="search"
             enterKeyHint="search"
@@ -279,12 +282,14 @@ function SearchRow({ search }: { search: ThreadSearch }) {
             }}
             placeholder="대화에서 찾기"
             aria-label="대화에서 찾을 말"
-            className="min-w-0 flex-1 bg-transparent text-[14.5px] text-foreground outline-none placeholder:text-faint [&::-webkit-search-cancel-button]:hidden"
+            className="pl-1.5 mouse:text-[14.5px] [&::-webkit-search-cancel-button]:hidden"
           />
-          <span className="tnum shrink-0 text-[12px] text-faint" aria-live="polite">
-            {count}
-          </span>
-        </label>
+          <InputGroupAddon align="inline-end" className="pr-3.5">
+            <span className="tnum text-[12px] font-normal text-faint" aria-live="polite">
+              {count}
+            </span>
+          </InputGroupAddon>
+        </InputGroup>
         <button
           type="button"
           onClick={search.older}

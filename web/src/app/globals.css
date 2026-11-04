@@ -267,19 +267,6 @@
   }
 }
 
-@keyframes think {
-  0%,
-  60%,
-  100% {
-    opacity: 0.22;
-    transform: translateY(0);
-  }
-  30% {
-    opacity: 0.85;
-    transform: translateY(-2px);
-  }
-}
-
 .anim-edge {
   transform-origin: top;
   animation: edge-wipe 420ms cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -292,15 +279,6 @@
 }
 .anim-spin-slow {
   animation: spin-slow 1.1s linear infinite;
-}
-.anim-think > span {
-  animation: think 1.25s ease-in-out infinite;
-}
-.anim-think > span:nth-child(2) {
-  animation-delay: 0.16s;
-}
-.anim-think > span:nth-child(3) {
-  animation-delay: 0.32s;
 }
 
 /* A held approval's 되돌리기 (components/chat/hold.tsx): the time left, as a
@@ -368,28 +346,6 @@
   color: var(--background);
 }
 
-/* A push arriving with the console open drops in from above the screen,
-   holds, and goes back up the way it came. */
-@keyframes push-drop {
-  from {
-    transform: translateY(calc(-100% - 24px - env(safe-area-inset-top)));
-  }
-}
-@keyframes push-rise {
-  from {
-    transform: translateY(var(--drag, 0px));
-  }
-  to {
-    transform: translateY(calc(-100% - 24px - env(safe-area-inset-top)));
-  }
-}
-.push-toast {
-  animation: push-drop 280ms cubic-bezier(0.2, 0.9, 0.25, 1.05);
-}
-.push-toast-leave {
-  animation: push-rise 240ms cubic-bezier(0.4, 0, 1, 1) forwards;
-}
-
 /* A checklist item ticked: its mark draws itself in (components/chat/
    checklist.tsx). The list finished: the progress line fills the rest of
    the way in the approving green - the one moment a list has. */
@@ -421,8 +377,6 @@
 @media (prefers-reduced-motion: reduce) {
   .tick-draw,
   .list-done,
-  .push-toast,
-  .push-toast-leave,
   .card-flash,
   .turn-flash,
   .focus-flash,
@@ -430,8 +384,7 @@
   .anim-settle,
   .anim-breathe,
   .anim-spin-slow,
-  .hold-drain,
-  .anim-think > span {
+  .hold-drain {
     animation: none !important;
   }
   * {
@@ -624,6 +577,20 @@
   }
   main {
     overflow-x: hidden;
+  }
+}
+
+/* The header's panels (components/shell/panel.tsx) on a phone: under the
+   header, a gutter from each edge. A Popover places its box with a transform
+   from the button it hangs off; below the tablet width that box is put back
+   where the panels have always been. */
+@media (max-width: 639px) {
+  [data-radix-popper-content-wrapper]:has(> [data-header-panel]) {
+    transform: none !important;
+    top: calc(env(safe-area-inset-top) + 3.5rem + 0.25rem) !important;
+    left: 0.75rem !important;
+    right: 0.75rem !important;
+    min-width: 0 !important;
   }
 }
 

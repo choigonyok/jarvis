@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 /**
@@ -21,71 +22,40 @@ export const DOT: Record<Tone, string> = {
 };
 
 export function IconButton({
-  onClick,
   label,
   pressed,
-  children,
-}: {
-  onClick: () => void;
-  label: string;
-  pressed?: boolean;
-  children: React.ReactNode;
-}) {
+  className,
+  ...props
+}: React.ComponentProps<typeof Button> & { label: string; pressed?: boolean }) {
   return (
-    <button
+    <Button
       type="button"
-      onClick={onClick}
+      variant="quiet"
+      size="icon-touch"
       aria-label={label}
       aria-pressed={pressed}
-      className="tap flex items-center justify-center rounded-lg text-faint transition-colors outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50"
-    >
-      {children}
-    </button>
+      className={cn("text-faint hover:text-dim mouse:size-11", className)}
+      {...props}
+    />
   );
 }
 
 /** The one filled button on a voice screen: whatever the next thing to do is. */
-export function PrimaryButton({
-  onClick,
-  children,
-  disabled,
-}: {
-  onClick: () => void;
-  children: React.ReactNode;
-  disabled?: boolean;
-}) {
+export function PrimaryButton({ className, ...props }: React.ComponentProps<typeof Button>) {
   return (
-    <button
+    <Button
       type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className="flex h-12 min-w-[8rem] items-center justify-center gap-2 rounded-full bg-foreground px-7 text-[14.5px] font-medium text-background transition-opacity outline-none hover:opacity-90 focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-40"
-    >
-      {children}
-    </button>
+      variant="default"
+      size="voice"
+      className={cn("min-w-[8rem] rounded-full px-7 text-[14.5px] font-medium disabled:opacity-40", className)}
+      {...props}
+    />
   );
 }
 
 /** The outlined one beside it: the way back, or the smaller choice. */
-export function QuietButton({
-  onClick,
-  children,
-  disabled,
-}: {
-  onClick: () => void;
-  children: React.ReactNode;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className="flex h-12 items-center justify-center gap-2 rounded-full border border-edge px-5 text-[14px] text-dim transition-colors outline-none hover:border-white/20 hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-40"
-    >
-      {children}
-    </button>
-  );
+export function QuietButton({ className, ...props }: React.ComponentProps<typeof Button>) {
+  return <Button type="button" variant="pill" size="voice" className={cn("disabled:opacity-40", className)} {...props} />;
 }
 
 /**

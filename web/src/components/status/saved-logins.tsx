@@ -1,10 +1,21 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
 import { Pager } from "@/components/ui/pager";
 import { usePaged } from "@/lib/paging";
 import { API } from "@/lib/thread";
-import { cn } from "@/lib/utils";
 
 type Login = { domain: string; name: string; hint: string; lastUsedAt?: string; uses: number };
 type Use = { at: string; domain: string; host: string; purpose: string; outcome: "released" | "none" | "refused" | "failed" };
@@ -16,8 +27,6 @@ const outcomeCopy: Record<Use["outcome"], string> = {
   failed: "열지 못함",
 };
 
-const quiet =
-  "inline-flex h-11 items-center justify-center rounded-lg px-3 text-[13px] text-dim outline-none transition-colors hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 mouse:h-8";
 
 function when(iso: string) {
   const d = new Date(iso);
@@ -37,7 +46,6 @@ export function SavedLogins() {
   const [data, setData] = useState<{ logins: Login[]; uses: Use[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [forgetting, setForgetting] = useState<string | null>(null);
-  const [confirm, setConfirm] = useState<string | null>(null);
   // The sites twenty a page, what was done with them ten.
   const logins = useMemo(() => data?.logins ?? [], [data]);
   const uses = useMemo(() => data?.uses ?? [], [data]);
@@ -69,7 +77,6 @@ export function SavedLogins() {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error ?? "지우지 못했어요.");
       }
-      setConfirm(null);
       await load();
     } catch (e) {
       setError((e as Error).message);
@@ -107,20 +114,26 @@ export function SavedLogins() {
                   아이디 {l.hint} · {l.lastUsedAt ? `마지막 사용 ${when(l.lastUsedAt)} · ${l.uses}번` : "아직 안 씀"}
                 </p>
               </div>
-              {confirm === l.domain ? (
-                <div className="flex shrink-0 items-center">
-                  <button type="button" className={cn(quiet, "text-reject hover:text-reject")} disabled={forgetting !== null} onClick={() => void forget(l.domain)}>
-                    {forgetting === l.domain ? "지우는 중" : "정말 지우기"}
-                  </button>
-                  <button type="button" className={quiet} onClick={() => setConfirm(null)}>
-                    두기
-                  </button>
-                </div>
-              ) : (
-                <button type="button" className={cn(quiet, "shrink-0")} onClick={() => setConfirm(l.domain)}>
-                  지우기
-                </button>
-              )}
+              {/* Asked the way every irreversible 지우기 is (AlertDialog). */}
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="quiet" size="touch-sm" className="shrink-0" disabled={forgetting !== null}>
+                    {forgetting === l.domain ? "지우는 중" : "지우기"}
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>{l.name} 로그인 정보를 지울까요?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      자비스가 {l.domain}에 다시 로그인하려면 대화에서 로그인 정보를 다시 저장해야 해요. 되돌릴 수 없어요.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>두기</AlertDialogCancel>
+                    <AlertDialogAction onClick={() => void forget(l.domain)}>지우기</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </li>
           ))}
         </ul>

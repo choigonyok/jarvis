@@ -3,8 +3,14 @@
 import { useState } from "react";
 import { Check, X } from "lucide-react";
 import { HoldBar, holdsMoney, useHold } from "@/components/chat/hold";
-import { cardInput as input, RejectForm } from "@/components/chat/reject-form";
+import { RejectForm } from "@/components/chat/reject-form";
 import { Button } from "@/components/ui/button";
+import { CodeBlock, CodeBlockContent, CodeBlockCopyButton } from "@/components/ui/code-block";
+import { FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Toggle } from "@/components/ui/toggle";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { isPrivateField, type CardField, type Decision, type Proposal, type ProposalState } from "@/lib/thread";
 import { isLiteral, readableBody, readableConsequence, readableTitle } from "@/lib/card-body";
 import { photoUrl } from "@/lib/uploads";
@@ -108,17 +114,17 @@ export function ProposalCard({
             because a broken line changes what it says, so it scrolls. A
             sentence has no such constraint and wraps, which is what a narrow
             screen needs. */}
-        {form && settled ? null : (
-        <pre
-          className={cn(
-            "scrollbar-hairline mt-3 rounded-md bg-well px-3 py-2.5 leading-relaxed text-dim",
-            literal
-              ? "overflow-x-auto font-mono text-[12px]"
-              : "tnum font-sans text-[13px] whitespace-pre-wrap [&_code]:font-sans",
-          )}
-        >
-          <code>{readableBody(proposal.card.body)}</code>
-        </pre>
+        {form && settled ? null : literal ? (
+          <CodeBlock className="mt-3 text-dim">
+            <CodeBlockContent>
+              <code>{readableBody(proposal.card.body)}</code>
+            </CodeBlockContent>
+            <CodeBlockCopyButton value={readableBody(proposal.card.body)} label="명령 복사" />
+          </CodeBlock>
+        ) : (
+          <pre className="scrollbar-hairline tnum mt-3 rounded-md bg-well px-3 py-2.5 font-sans text-[13px] whitespace-pre-wrap text-dim [&_code]:font-sans">
+            <code>{readableBody(proposal.card.body)}</code>
+          </pre>
         )}
 
         <p className="mt-2.5 text-[12px] leading-normal text-dim">
@@ -151,20 +157,18 @@ export function ProposalCard({
              must not be able to land on 반려. */
           <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end sm:gap-1.5">
             <Button
-              variant="ghost"
-              size="sm"
+              variant="reject"
+              size="pair"
               onClick={() => setAsking(true)}
               disabled={busy}
-              className="h-12 text-[13.5px] text-dim hover:bg-reject/10 hover:text-reject mouse:h-8 mouse:px-3 mouse:text-[0.8rem]"
             >
               반려
             </Button>
             <Button
-              variant="outline"
-              size="sm"
+              variant="approve"
+              size="pair"
               onClick={() => (holdsMoney(proposal) ? hold.start() : void decide("approved"))}
               disabled={busy || missing.length > 0}
-              className="h-12 border-edge bg-glass-raised text-[13.5px] text-foreground hover:border-approve/35 hover:bg-approve/12 hover:text-approve mouse:h-8 mouse:px-3.5 mouse:text-[0.8rem] dark:bg-glass-raised dark:hover:bg-approve/12"
             >
               승인
             </Button>
@@ -221,81 +225,80 @@ function FormFields({
         const value = values[f.key] ?? "";
         return (
           <div key={f.key}>
-            <label htmlFor={f.kind === "select" || f.kind === "multi" ? undefined : id} className="mb-1.5 block text-[12px] text-dim">
-              {f.label}
-            </label>
+            {f.kind === "select" || f.kind === "multi" ? (
+              <p id={`${id}-label`} className="mb-1.5 text-[12px] text-dim">
+                {f.label}
+              </p>
+            ) : (
+              <FieldLabel htmlFor={id} className="mb-1.5">
+                {f.label}
+              </FieldLabel>
+            )}
             {f.kind === "number" ? (
               // The price is the decision on this card; it gets the type size.
               <div className="relative">
-                <input
+                <Input
                   id={id}
                   inputMode="numeric"
                   autoComplete="off"
                   value={value ? Number(value.replace(/[^\d]/g, "") || 0).toLocaleString("ko-KR") : ""}
                   onChange={(e) => onChange(f.key, e.target.value.replace(/[^\d]/g, ""))}
                   placeholder="숫자로 적기"
-                  className={cn(input, "tnum h-12 pe-9 text-[20px] font-medium mouse:h-11 mouse:text-[18px]")}
+                  className="tnum h-12 pe-9 text-[20px] font-medium mouse:h-11 mouse:text-[18px]"
                 />
                 <span aria-hidden className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-[14px] text-faint">
                   원
                 </span>
               </div>
             ) : f.kind === "textarea" ? (
-              <textarea
+              <Textarea
                 id={id}
                 rows={6}
                 value={value}
                 onChange={(e) => onChange(f.key, e.target.value)}
-                className={cn(input, "scrollbar-hairline resize-y py-2.5 leading-relaxed")}
+                className="scrollbar-hairline min-h-[11rem] resize-y"
               />
             ) : f.kind === "multi" ? (
-              <div role="group" aria-label={f.label} className="flex flex-wrap gap-1.5">
-                {(f.options ?? []).map((o) => {
-                  const picked = value ? value.split(",").filter(Boolean) : [];
-                  const on = picked.includes(o);
-                  return (
-                    <button
-                      key={o}
-                      type="button"
-                      aria-pressed={on}
-                      onClick={() =>
-                        onChange(f.key, (on ? picked.filter((p) => p !== o) : [...picked, o]).join(","))
-                      }
-                      className={cn(
-                        "min-h-10 rounded-full border px-3 text-[13px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 mouse:min-h-8 mouse:text-[12.5px]",
-                        on ? "border-edge bg-glass-raised text-foreground" : "border-edge-soft text-dim hover:bg-glass",
-                      )}
-                    >
-                      {o}
-                    </button>
-                  );
-                })}
-              </div>
+              <ToggleGroup
+                type="multiple"
+                aria-labelledby={`${id}-label`}
+                variant="chip"
+                size="touch"
+                spacing={1.5}
+                // Kept in the order the card offers them.
+                value={value ? value.split(",").filter(Boolean) : []}
+                onValueChange={(on) => onChange(f.key, (f.options ?? []).filter((o) => on.includes(o)).join(","))}
+                className="flex-wrap"
+              >
+                {(f.options ?? []).map((o) => (
+                  <ToggleGroupItem key={o} value={o} className="hover:bg-glass">
+                    {o}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
             ) : f.kind === "select" ? (
-              <div role="radiogroup" aria-label={f.label} className="flex flex-wrap gap-1.5">
-                {(f.options ?? []).map((o) => {
-                  const on = value === o;
-                  return (
-                    <button
-                      key={o}
-                      type="button"
-                      role="radio"
-                      aria-checked={on}
-                      onClick={() => onChange(f.key, o)}
-                      className={cn(
-                        "min-h-10 rounded-lg border px-3 text-[13px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 mouse:min-h-8 mouse:text-[12.5px]",
-                        on ? "border-edge bg-glass-raised text-foreground" : "border-edge-soft text-dim hover:bg-glass",
-                      )}
-                    >
-                      {o}
-                    </button>
-                  );
-                })}
-              </div>
+              <ToggleGroup
+                type="single"
+                aria-labelledby={`${id}-label`}
+                variant="tile"
+                size="touch"
+                spacing={1.5}
+                value={value}
+                onValueChange={(o) => {
+                  if (o) onChange(f.key, o);
+                }}
+                className="flex-wrap"
+              >
+                {(f.options ?? []).map((o) => (
+                  <ToggleGroupItem key={o} value={o}>
+                    {o}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
             ) : f.kind === "secret" ? (
               <SecretInput id={id} value={value} onChange={(v) => onChange(f.key, v)} />
             ) : (
-              <input
+              <Input
                 id={id}
                 value={value}
                 onChange={(e) => onChange(f.key, e.target.value)}
@@ -303,7 +306,7 @@ function FormFields({
                 {...(isPrivateField(f)
                   ? { autoComplete: "username", autoCapitalize: "none", autoCorrect: "off", spellCheck: false }
                   : {})}
-                className={cn(input, "h-11 mouse:h-9")}
+                className="mouse:text-[13.5px]"
               />
             )}
             {f.hint ? <p className="mt-1.5 text-[11.5px] leading-relaxed whitespace-pre-wrap text-faint">{f.hint}</p> : null}
@@ -323,7 +326,7 @@ function SecretInput({ id, value, onChange }: { id: string; value: string; onCha
   const [shown, setShown] = useState(false);
   return (
     <div className="relative">
-      <input
+      <Input
         id={id}
         type={shown ? "text" : "password"}
         value={value}
@@ -332,17 +335,17 @@ function SecretInput({ id, value, onChange }: { id: string; value: string; onCha
         autoCapitalize="none"
         autoCorrect="off"
         spellCheck={false}
-        className={cn(input, "h-11 pe-14 mouse:h-9")}
+        className="pe-14 mouse:text-[13.5px]"
       />
-      <button
-        type="button"
-        onClick={() => setShown((s) => !s)}
-        aria-pressed={shown}
+      <Toggle
+        pressed={shown}
+        onPressedChange={setShown}
         aria-label={shown ? "비밀번호 가리기" : "비밀번호 보기"}
-        className="absolute inset-y-0 right-1 my-auto flex h-9 items-center rounded-md px-2.5 text-[12px] text-faint outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-7"
+        size="sm"
+        className="absolute inset-y-0 right-1 my-auto h-9 rounded-md font-normal text-[12px] text-faint hover:bg-transparent hover:text-foreground data-[state=on]:bg-transparent mouse:h-7"
       >
         {shown ? "가리기" : "보기"}
-      </button>
+      </Toggle>
     </div>
   );
 }

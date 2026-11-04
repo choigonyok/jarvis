@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronDown, X } from "lucide-react";
 import { UNDO_MS } from "@/components/shell/undo";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { CopyButton } from "@/components/ui/copy-button";
+import { Progress } from "@/components/ui/progress";
 import type { Checklist, ChecklistItem } from "@/lib/thread";
 import { cn } from "@/lib/utils";
 
@@ -54,7 +56,6 @@ export function ChecklistBody({
   /** Set where lists stand folded, a few to a screen (the 작업 tab). */
   fold?: Fold;
 }) {
-  const itemsId = useId();
   const items = list?.items ?? [];
   // Struck off and waiting out their five seconds: still on screen, struck.
   const [striking, setStriking] = useState<ReadonlySet<string>>(() => new Set());
@@ -147,15 +148,14 @@ export function ChecklistBody({
   const open = !fold || fold.open;
   const left = live.filter((i) => !i.done);
   return (
+    <Collapsible asChild open={open} onOpenChange={fold ? () => fold.onToggle() : undefined}>
     <div data-checklist-id={list.id}>
       {fold ? (
         // The accordion's own pattern: the heading holds the button.
         <h3 className="-mx-2 -mt-1.5 flex items-center">
+          <CollapsibleTrigger asChild>
           <button
             type="button"
-            onClick={fold.onToggle}
-            aria-expanded={fold.open}
-            aria-controls={itemsId}
             className="flex min-h-11 min-w-0 flex-1 items-center justify-between gap-3 rounded-lg px-2 py-1.5 text-left outline-none hover:bg-glass focus-visible:ring-3 focus-visible:ring-ring/50 mouse:min-h-9"
           >
             <span className="min-w-0 text-[14.5px] leading-snug font-medium text-foreground">{list.title}</span>
@@ -167,6 +167,7 @@ export function ChecklistBody({
               />
             </span>
           </button>
+          </CollapsibleTrigger>
           <CopyButton text={asText(list)} label={`${list.title} 복사`} />
         </h3>
       ) : (
@@ -181,18 +182,17 @@ export function ChecklistBody({
           {[list.note, list.status === "archived" ? "닫은 목록이에요" : ""].filter(Boolean).join(" - ")}
         </p>
       ) : null}
-      <div aria-hidden className={cn("h-[2px] overflow-hidden rounded-full bg-edge", fold ? "mt-1.5" : "mt-2.5")}>
-        <div
-          className={cn(
-            "h-full rounded-full transition-[width,background-color] duration-300 ease-out motion-reduce:transition-none",
-            all ? "bg-approve" : "bg-foreground/60",
-            finished && "list-done",
-          )}
-          style={{ width: `${share}%` }}
-        />
-      </div>
-      {open ? (
-        <div id={itemsId}>
+      <Progress
+        aria-hidden
+        value={share}
+        className={cn("h-[2px] bg-edge", fold ? "mt-1.5" : "mt-2.5")}
+        indicatorClassName={cn(
+          "transition-[width,background-color] duration-300 ease-out motion-reduce:transition-none",
+          all ? "bg-approve" : "bg-foreground/60",
+          finished && "list-done",
+        )}
+      />
+      <CollapsibleContent>
           <ul className="-mx-2 mt-1.5" aria-label={list.title}>
             {items.map((item) => (
               <Row
@@ -212,15 +212,16 @@ export function ChecklistBody({
             </p>
           ) : null}
           {onClose ? <CloseList onClose={onClose} /> : null}
-        </div>
-      ) : left.length > 0 ? (
+      </CollapsibleContent>
+      {!open && left.length > 0 ? (
         // Folded: what is left, in a line - enough to know whether to open it.
-        <p id={itemsId} className="mt-2 truncate text-[12.5px] text-dim">
+        <p className="mt-2 truncate text-[12.5px] text-dim">
           남은 것: {left.slice(0, 4).map((i) => i.text).join(", ")}
           {left.length > 4 ? ` 외 ${left.length - 4}개` : ""}
         </p>
       ) : null}
     </div>
+    </Collapsible>
   );
 }
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { X } from "lucide-react";
+import { ClearChip } from "@/components/ui/badge";
 import { Pager } from "@/components/ui/pager";
 import { usePaged } from "@/lib/paging";
 import { krw } from "@/lib/portfolio";
@@ -133,8 +133,8 @@ export function Meals({ meals }: { meals: Meal[] }) {
 
       {slot || way ? (
         <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[12px]">
-          {slot ? <Chip label={slot} onClear={() => setSlot(null)} /> : null}
-          {way ? <Chip label={WAYS.find((w) => w.way === way)!.label} onClear={() => setWay(null)} /> : null}
+          {slot ? <ClearChip label={slot} onClear={() => setSlot(null)} /> : null}
+          {way ? <ClearChip label={WAYS.find((w) => w.way === way)!.label} onClear={() => setWay(null)} /> : null}
           <span className="tnum ms-auto text-faint">
             {shown.length}번 · {krw(total)}
           </span>
@@ -165,16 +165,3 @@ export function Meals({ meals }: { meals: Meal[] }) {
   );
 }
 
-function Chip({ label, onClear }: { label: string; onClear: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClear}
-      aria-label={`${label} 조건 지우기`}
-      className="flex min-h-8 items-center gap-1 rounded-full bg-glass-raised ps-3 pe-2 text-foreground/90 outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-    >
-      {label}
-      <X aria-hidden className="size-3 text-faint" />
-    </button>
-  );
-}

@@ -364,6 +364,8 @@ func (s *Server) getThread(w http.ResponseWriter, r *http.Request) {
 		"thinking":  thinking,
 		"hasMore":   hasMore,
 		"proposals": s.proposals.List(),
+		// What the turn under way has done so far, said in lines.
+		"steps": s.thread.Steps(),
 	}
 	// So do the lists their checklist cards show, as they stand now. A
 	// thread is not held up for them: without mind the cards say so.
@@ -754,6 +756,12 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	// at once; its next pieces follow on the stream, which was subscribed to
 	// first so none fall in between.
 	if s.thread != nil {
+		// So is what the turn under way has done so far.
+		if steps := s.thread.Steps(); len(steps) > 0 {
+			if payload, err := json.Marshal(bus.Event{Type: "steps", Steps: steps}); err == nil {
+				fmt.Fprintf(w, "data: %s\n\n", payload)
+			}
+		}
 		if d := s.thread.CurrentDraft(); d != nil {
 			if payload, err := json.Marshal(bus.Event{Type: "draft", Draft: d}); err == nil {
 				fmt.Fprintf(w, "data: %s\n\n", payload)

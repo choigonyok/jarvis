@@ -1,11 +1,12 @@
 "use client";
 
-import { memo } from "react";
+import { isValidElement, memo, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 // remark-parse is what gives a processor's data its micromark extensions.
 import type {} from "remark-parse";
 import type { Processor } from "unified";
+import { CodeBlock, CodeBlockContent, CodeBlockCopyButton } from "@/components/ui/code-block";
 
 /**
  * The agent's reply, rendered as the document it already is.
@@ -97,11 +98,12 @@ const COMPONENTS: Components = {
   },
   // Recessed rather than outlined: a block of code is something you
   // look into, and the well is the layer this console already has
-  // for that.
+  // for that. It scrolls rather than wraps, and copies whole.
   pre: ({ children }) => (
-    <pre className="overflow-x-auto rounded-md bg-well p-3 leading-[1.6] text-foreground/90">
-      {children}
-    </pre>
+    <CodeBlock className="text-foreground/90">
+      <CodeBlockContent className="p-3 leading-[1.6]">{children}</CodeBlockContent>
+      <CodeBlockCopyButton value={textOf(children).replace(/\n$/, "")} label="코드 복사" />
+    </CodeBlock>
   ),
 
   // A quote is marked by where it sits, not by a box around it.
@@ -143,3 +145,11 @@ const COMPONENTS: Components = {
     <td className="border-b border-edge-soft py-1.5 pe-3 align-top">{children}</td>
   ),
 };
+
+/** The words inside rendered markdown - a code block's, to copy. */
+function textOf(node: ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(textOf).join("");
+  if (isValidElement<{ children?: ReactNode }>(node)) return textOf(node.props.children);
+  return "";
+}

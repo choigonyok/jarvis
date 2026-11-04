@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Check, Minus, Plus, TrendingUp, X } from "lucide-react";
-import { quietButton, saveButton } from "@/components/workout/panel";
+import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 import { chime } from "@/lib/use-gym";
 import {
   clock,
@@ -30,7 +31,6 @@ export function Dock({
   now,
   rest,
   onRest,
-  notice,
   exercise,
   focus,
   previous,
@@ -48,7 +48,6 @@ export function Dock({
   now: number;
   rest: Rest | null;
   onRest: (rest: Rest | null) => void;
-  notice?: React.ReactNode;
   exercise: Exercise | undefined;
   focus: SetRef | null;
   previous: WorkoutSet | null;
@@ -72,16 +71,33 @@ export function Dock({
     const el = measured.current;
     if (!el || typeof ResizeObserver === "undefined") return;
     const root = document.documentElement;
-    const observer = new ResizeObserver(([entry]) =>
-      root.style.setProperty(
-        "--dock-h",
-        `${Math.ceil(entry.borderBoxSize?.[0]?.blockSize ?? el.offsetHeight)}px`,
-      ),
-    );
+    // And where its top is, from the bottom of the screen: the 되돌리기 toast
+    // stands over the dock while it is up (--dock-top, shell/toasts.tsx). It
+    // is stuck to the bottom while there is more to scroll, and sits after
+    // the last exercise when there is not.
+    let frame = 0;
+    const place = () => {
+      frame = 0;
+      root.style.setProperty("--dock-top", `${Math.ceil(window.innerHeight - el.getBoundingClientRect().top)}px`);
+    };
+    const later = () => {
+      if (!frame) frame = requestAnimationFrame(place);
+    };
+    const observer = new ResizeObserver(([entry]) => {
+      const h = Math.ceil(entry.borderBoxSize?.[0]?.blockSize ?? el.offsetHeight);
+      root.style.setProperty("--dock-h", `${h}px`);
+      later();
+    });
     observer.observe(el);
+    window.addEventListener("scroll", later, { capture: true, passive: true });
+    window.addEventListener("resize", later);
     return () => {
       observer.disconnect();
+      cancelAnimationFrame(frame);
+      window.removeEventListener("scroll", later, { capture: true });
+      window.removeEventListener("resize", later);
       root.style.removeProperty("--dock-h");
+      root.style.removeProperty("--dock-top");
     };
   }, []);
 
@@ -101,7 +117,6 @@ export function Dock({
     // bottom-2, not tab bar + gap: the scroll area's own bottom padding
     // (pb-tabbar) already insets where a sticky child can sit.
     <div ref={measured} className="sticky bottom-2 z-20 mt-6">
-      {notice}
       <div className="liquid-glass rounded-2xl p-3 sm:p-3.5">
         {rest ? <RestStrip now={now} rest={rest} onRest={onRest} /> : null}
 
@@ -207,13 +222,9 @@ export function Dock({
             <p className="min-w-0 flex-1 text-[13.5px] text-dim">
               종목을 추가하면 여기서 세트를 기록해요.
             </p>
-            <button
-              type="button"
-              onClick={onAddExercise}
-              className={cn(saveButton, "flex-none")}
-            >
+            <Button variant="raised" size="touch" onClick={onAddExercise} className="flex-none">
               종목 추가
-            </button>
+            </Button>
           </div>
         ) : (
           <div>
@@ -221,23 +232,15 @@ export function Dock({
               모든 세트를 마쳤어요.
             </p>
             <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={onAddSet}
-                className={cn(quietButton, "flex-1 bg-glass")}
-              >
+              <Button variant="soft" size="touch-sm" onClick={onAddSet} className="flex-1">
                 세트 추가
-              </button>
-              <button
-                type="button"
-                onClick={onAddExercise}
-                className={cn(quietButton, "flex-1 bg-glass")}
-              >
+              </Button>
+              <Button variant="soft" size="touch-sm" onClick={onAddExercise} className="flex-1">
                 종목 추가
-              </button>
-              <button type="button" onClick={onFinish} className={saveButton}>
+              </Button>
+              <Button variant="raised" size="touch" onClick={onFinish} className="flex-1">
                 끝내기
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -319,15 +322,12 @@ export function RestStrip({
           <X aria-hidden className="size-4" />
         </button>
       </div>
-      <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-well [@media(max-height:700px)]:hidden">
-        <div
-          className={cn(
-            "h-full rounded-full",
-            over ? "bg-approve/70" : "bg-foreground/60",
-          )}
-          style={{ width: `${share * 100}%` }}
-        />
-      </div>
+      <Progress
+        aria-label="휴식"
+        value={share * 100}
+        className="mt-1.5 bg-well [@media(max-height:700px)]:hidden"
+        indicatorClassName={over ? "bg-approve/70" : "bg-foreground/60"}
+      />
     </div>
   );
 }

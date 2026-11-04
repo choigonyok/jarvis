@@ -7,6 +7,8 @@ import { onInboxRequest, onResume } from "@/lib/resume";
 import { Bell, Settings2 } from "lucide-react";
 import { HeaderPanel } from "@/components/shell/panel";
 import { Pager } from "@/components/ui/pager";
+import { Popover, PopoverTrigger } from "@/components/ui/popover";
+import { Switch } from "@/components/ui/switch";
 import { usePush } from "@/lib/use-push";
 import { cn } from "@/lib/utils";
 
@@ -58,7 +60,6 @@ export function Notifications() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [failed, setFailed] = useState(false);
-  const wrap = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLUListElement>(null);
   // The page the timer and a return to the app read again.
   const shownPage = useRef(1);
@@ -113,20 +114,6 @@ export function Notifications() {
     return onInboxRequest(() => setOpen(true));
   }, []);
 
-  useEffect(() => {
-    if (!open) return;
-    const close = (e: PointerEvent) => {
-      if (!wrap.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    document.addEventListener("pointerdown", close);
-    document.addEventListener("keydown", esc);
-    return () => {
-      document.removeEventListener("pointerdown", close);
-      document.removeEventListener("keydown", esc);
-    };
-  }, [open]);
-
   const markRead = async (ids: number[]) => {
     setNotes((ns) => ns.map((n) => (ids.length === 0 || ids.includes(n.id) ? { ...n, readAt: n.readAt ?? new Date().toISOString() } : n)));
     setUnread((u) => (ids.length === 0 ? 0 : Math.max(0, u - ids.filter((id) => notes.find((n) => n.id === id && !n.readAt)).length)));
@@ -138,18 +125,19 @@ export function Notifications() {
   };
 
   return (
-    <div ref={wrap} className="relative">
-      <button
-        type="button"
-        onClick={() => {
-          setOpen((v) => !v);
-          setView("list");
-          // Opened, the inbox starts at its newest page.
-          shownPage.current = 1;
-          setPage(1);
-          void load(1);
-        }}
-        aria-expanded={open}
+    <Popover
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o);
+        if (!o) return;
+        setView("list");
+        // Opened, the inbox starts at its newest page.
+        shownPage.current = 1;
+        setPage(1);
+        void load(1);
+      }}
+    >
+      <PopoverTrigger
         aria-label={unread ? `알림 ${unread}개 안 읽음` : "알림"}
         className="relative flex size-11 items-center justify-center rounded-lg text-faint transition-colors outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50 mouse:size-8"
       >
@@ -157,7 +145,7 @@ export function Notifications() {
         {unread ? (
           <span aria-hidden className="absolute top-2.5 right-2.5 size-[7px] rounded-full bg-reject ring-2 ring-background sm:top-1 sm:right-1" />
         ) : null}
-      </button>
+      </PopoverTrigger>
 
       {open ? (
         <HeaderPanel
@@ -243,7 +231,7 @@ export function Notifications() {
           )}
         </HeaderPanel>
       ) : null}
-    </div>
+    </Popover>
   );
 }
 
@@ -352,13 +340,11 @@ function NotifySettings() {
                         <span className="block text-foreground/90">{label}</span>
                         <span className="block text-[11px] text-faint">{hint}</span>
                       </span>
-                      <input
-                        type="checkbox"
+                      <Switch
                         checked={on}
-                        onChange={() =>
+                        onCheckedChange={() =>
                           void save({ ...set, muted: on ? [...set.muted, id] : set.muted.filter((m) => m !== id) })
                         }
-                        className="size-4 accent-foreground"
                       />
                     </label>
                   </li>

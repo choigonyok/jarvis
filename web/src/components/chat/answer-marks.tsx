@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { ThumbsDown, ThumbsUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { cardInput } from "@/components/chat/reject-form";
+import { Input } from "@/components/ui/input";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { TurnFeedback } from "@/lib/thread";
 import { cn } from "@/lib/utils";
 
@@ -99,47 +100,48 @@ export function WrongForm({
   return (
     <div className="anim-settle mt-2 max-w-[30rem] space-y-2" data-search-skip>
       <p className="px-1 text-[12px] text-dim">무엇이 틀렸는지 알려 주면 다음 답부터 고쳐요.</p>
-      <div className="flex flex-wrap gap-1.5">
+      <ToggleGroup
+        type="single"
+        aria-label="자주 틀리는 것"
+        variant="chip"
+        tone="reject"
+        size="chip"
+        spacing={1.5}
+        value={WRONG_FOR.includes(why) ? why : ""}
+        onValueChange={(v) => {
+          if (v) setWhy(v);
+        }}
+        className="flex-wrap"
+      >
         {WRONG_FOR.map((r) => (
-          <button
-            key={r}
-            type="button"
-            onClick={() => setWhy(r)}
-            aria-pressed={why === r}
-            className={cn(
-              "tap-y h-9 rounded-full border px-3 text-[12.5px] mouse:h-7 mouse:text-[12px]",
-              why === r ? "border-reject/40 bg-reject/10 text-reject" : "border-edge-soft text-dim hover:text-foreground",
-            )}
-          >
+          <ToggleGroupItem key={r} value={r} className="tap-y">
             {r}
-          </button>
+          </ToggleGroupItem>
         ))}
-      </div>
-      <input
+      </ToggleGroup>
+      <Input
         value={why}
         onChange={(e) => setWhy(e.target.value)}
         placeholder="직접 적기 (비워도 돼요)"
         aria-label="틀린 이유"
         maxLength={500}
-        className={cn(cardInput, "h-11 mouse:h-8")}
+        className="mouse:h-8 mouse:text-[13.5px]"
       />
       {error ? <p className="px-1 text-[12px] text-reject">{error}</p> : null}
       <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-1.5">
         <Button
-          variant="ghost"
-          size="sm"
+          variant="quiet"
+          size="pair"
           onClick={onCancel}
           disabled={busy}
-          className="h-12 text-[13.5px] text-dim mouse:h-8 mouse:px-3 mouse:text-[0.8rem]"
         >
           취소
         </Button>
         <Button
-          variant="outline"
-          size="sm"
+          variant="refuse"
+          size="pair"
           onClick={() => onSave(why)}
           disabled={busy}
-          className="h-12 border-edge text-[13.5px] text-reject hover:bg-reject/10 mouse:h-8 mouse:px-3.5 mouse:text-[0.8rem]"
         >
           틀렸다고 남기기
         </Button>

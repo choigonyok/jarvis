@@ -1,7 +1,8 @@
 "use client";
 
 import { Flame } from "lucide-react";
-import { Panel, quietButton, saveButton } from "@/components/workout/panel";
+import { Panel } from "@/components/ui/bottom-sheet";
+import { Button } from "@/components/ui/button";
 import {
   clock,
   doneSets,
@@ -121,32 +122,24 @@ export function FinishPanel({
       ) : null}
 
       <div className="flex gap-2">
-        <button
-          type="button"
-          onClick={() => onOpenChange(false)}
-          className={cn(quietButton, "flex-1 bg-glass")}
-        >
+        <Button variant="soft" size="touch-sm" onClick={() => onOpenChange(false)} className="flex-1">
           계속하기
-        </button>
+        </Button>
         {anything ? (
-          <button type="button" onClick={onEnd} className={saveButton}>
+          <Button variant="raised" size="touch" onClick={onEnd} className="flex-1">
             기록하고 끝내기
-          </button>
+          </Button>
         ) : (
-          <button type="button" onClick={onDiscard} className={saveButton}>
+          <Button variant="raised" size="touch" onClick={onDiscard} className="flex-1">
             운동 취소
-          </button>
+          </Button>
         )}
       </div>
       {anything ? (
         <div className="mt-2 flex justify-center">
-          <button
-            type="button"
-            onClick={onDiscard}
-            className={cn(quietButton, "text-faint hover:text-reject")}
-          >
+          <Button variant="discard" size="touch-sm" onClick={onDiscard}>
             기록 버리기
-          </button>
+          </Button>
         </div>
       ) : null}
     </Panel>

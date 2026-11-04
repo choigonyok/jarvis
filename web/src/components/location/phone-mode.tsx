@@ -2,7 +2,8 @@
 
 import type { ReactNode } from "react";
 import { BatteryLow, LocateFixed } from "lucide-react";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { BottomSheetContent, BottomSheetHeader, BottomSheetTitle } from "@/components/ui/bottom-sheet";
+import { Sheet } from "@/components/ui/sheet";
 import { RADIUS } from "@/components/location/register";
 import { type Track, type Watch, type Who, MOVE, SIGNIFICANT, ago, span } from "@/lib/track";
 import { cn } from "@/lib/utils";
@@ -86,10 +87,10 @@ export function ModesSheet({
 }) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="bottom" className="inset-x-safe pb-safe max-h-[88dvh] overflow-y-auto border-edge-soft bg-background">
-        <SheetHeader className="px-4 pt-4 pb-1 sm:px-6">
-          <SheetTitle className="text-[15px] font-medium text-foreground">위치 등록과 모드</SheetTitle>
-        </SheetHeader>
+      <BottomSheetContent width="full" keepFocus={false} aria-describedby={undefined} className="gap-4 overflow-y-auto">
+        <BottomSheetHeader className="pb-1 sm:px-6">
+          <BottomSheetTitle className="pr-0">위치 등록과 모드</BottomSheetTitle>
+        </BottomSheetHeader>
         <div className="mx-auto w-full max-w-[40rem] space-y-6 px-4 pb-8 text-[13px] leading-[1.65] text-dim sm:px-6">
           {today ? (
             <Part title="지금">
@@ -148,7 +149,7 @@ export function ModesSheet({
             </dl>
           </Part>
         </div>
-      </SheetContent>
+      </BottomSheetContent>
     </Sheet>
   );
 }

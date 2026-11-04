@@ -1,6 +1,6 @@
 "use client";
 
-import { cn } from "@/lib/utils";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 export type ChatMode = "text" | "voice";
 
@@ -21,31 +21,22 @@ export function ModeToggle({
   onChange: (mode: ChatMode) => void;
 }) {
   return (
-    <div
-      role="radiogroup"
+    <ToggleGroup
+      type="single"
       aria-label="대화 방식"
-      className="inline-flex items-center gap-0.5 rounded-lg border border-edge-soft bg-glass p-0.5"
+      variant="segment"
+      spacing={0.5}
+      value={mode}
+      onValueChange={(v) => {
+        if (v) onChange(v as ChatMode);
+      }}
+      className="rounded-lg border border-edge-soft bg-glass p-0.5"
     >
-      {modes.map((item) => {
-        const active = mode === item.value;
-        return (
-          <button
-            key={item.value}
-            type="button"
-            role="radio"
-            aria-checked={active}
-            onClick={() => onChange(item.value)}
-            className={cn(
-              "rounded-md px-2.5 py-1 text-[12px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
-              active
-                ? "bg-glass-raised text-foreground"
-                : "text-faint hover:text-dim",
-            )}
-          >
-            {item.label}
-          </button>
-        );
-      })}
-    </div>
+      {modes.map((item) => (
+        <ToggleGroupItem key={item.value} value={item.value} className="h-auto px-2.5 py-1 text-[12px]">
+          {item.label}
+        </ToggleGroupItem>
+      ))}
+    </ToggleGroup>
   );
 }

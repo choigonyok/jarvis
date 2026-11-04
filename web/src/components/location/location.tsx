@@ -8,7 +8,11 @@ import { Retry } from "@/components/shell/retry";
 import { useRole } from "@/components/shell/role";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { PhoneSetup } from "@/components/status/phone-setup";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { BottomSheetContent, BottomSheetHeader, BottomSheetTitle } from "@/components/ui/bottom-sheet";
+import { Button } from "@/components/ui/button";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { Sheet } from "@/components/ui/sheet";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { DayMap, type Spot } from "@/components/location/day-map";
 import { ModeTag, ModesSheet } from "@/components/location/phone-mode";
 import { type Here, RegisterPanel } from "@/components/location/register";
@@ -357,7 +361,7 @@ function Viewer({
         <ViewSwitch view={view} onView={onView} />
         {registering ? null : (
           <>
-            <Empty scene={scene} onConnect={() => setConnecting(true)} />
+            <NoTrack scene={scene} onConnect={() => setConnecting(true)} />
             <PlaceButtons onExplain={() => setExplaining(true)} onRegister={register} />
           </>
         )}
@@ -482,14 +486,14 @@ function Viewer({
       />
 
       <Sheet open={connecting} onOpenChange={setConnecting}>
-        <SheetContent side="bottom" className="inset-x-safe pb-safe max-h-[88dvh] overflow-y-auto border-edge-soft bg-background">
-          <SheetHeader className="px-4 pt-4 pb-1">
-            <SheetTitle className="text-[14px] font-medium text-foreground">내 폰 연결</SheetTitle>
-          </SheetHeader>
+        <BottomSheetContent width="full" keepFocus={false} aria-describedby={undefined} className="gap-4 overflow-y-auto">
+          <BottomSheetHeader className="pb-1 sm:px-4">
+            <BottomSheetTitle className="pr-0 text-[14px]">내 폰 연결</BottomSheetTitle>
+          </BottomSheetHeader>
           <div className="px-4 pb-6 text-[13px]">
             <PhoneSetup who="guest" />
           </div>
-        </SheetContent>
+        </BottomSheetContent>
       </Sheet>
     </div>
   );
@@ -533,27 +537,25 @@ function lastFix(track: Track | undefined): Here | null {
 /** 나 · 함께 · 상대, over the map's top left: the calendar's own words and dots for the two people. */
 function ViewSwitch({ view, onView }: { view: View; onView: (v: View) => void }) {
   return (
-    <div
-      role="group"
+    <ToggleGroup
+      type="single"
       aria-label="누구의 하루"
-      className="absolute top-3 left-3 z-10 flex rounded-full bg-popover p-1 shadow-[0_6px_16px_-6px_oklch(0_0_0/70%)]"
+      variant="pill"
+      size="chip"
+      spacing={0}
+      value={view}
+      onValueChange={(v) => {
+        if (v) onView(v as View);
+      }}
+      className="absolute top-3 left-3 z-10 rounded-full bg-popover p-1 shadow-[0_6px_16px_-6px_oklch(0_0_0/70%)]"
     >
       {VIEWS.map((v) => (
-        <button
-          key={v.view}
-          type="button"
-          aria-pressed={view === v.view}
-          onClick={() => onView(v.view)}
-          className={cn(
-            "flex h-9 items-center gap-1.5 rounded-full px-3 text-[12.5px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-7 mouse:px-2.5",
-            view === v.view ? "bg-glass-raised text-foreground" : "text-dim hover:text-foreground",
-          )}
-        >
+        <ToggleGroupItem key={v.view} value={v.view} className="px-3 text-dim hover:text-foreground mouse:px-2.5">
           <span aria-hidden className={cn("size-[6px] rounded-full", v.dot)} />
           {v.label}
-        </button>
+        </ToggleGroupItem>
       ))}
-    </div>
+    </ToggleGroup>
   );
 }
 
@@ -581,7 +583,7 @@ function Arrow({ label, disabled, onClick, children }: { label: string; disabled
  * Over the map when there is nothing on it: why, and what to do about it -
  * for the guest's own phone, the way to connect it.
  */
-function Empty({ scene, onConnect }: { scene: Scene; onConnect: () => void }) {
+function NoTrack({ scene, onConnect }: { scene: Scene; onConnect: () => void }) {
   const role = useRole();
   if (scene.people.some((p) => p.day.nodes.length > 0)) return null;
   const p = scene.people[0];
@@ -594,13 +596,9 @@ function Empty({ scene, onConnect }: { scene: Scene; onConnect: () => void }) {
     body = (
       <>
         아이폰의 OwnTracks 가 위치를 보내면 여기 내 고양이가 그려져요.
-        <button
-          type="button"
-          onClick={onConnect}
-          className="tap mt-3 flex w-full items-center justify-center rounded-lg bg-glass-raised px-4 text-[13px] text-foreground transition-colors outline-none hover:bg-foreground/15 focus-visible:ring-3 focus-visible:ring-ring/50 mouse:min-h-9"
-        >
+        <Button variant="raised" size="touch" onClick={onConnect} className="mt-3 w-full">
           내 폰 연결
-        </button>
+        </Button>
       </>
     );
   } else if (p.me && never) {
@@ -623,10 +621,12 @@ function Empty({ scene, onConnect }: { scene: Scene; onConnect: () => void }) {
   }
   return (
     <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-8">
-      <div className="pointer-events-auto max-w-[22rem] rounded-xl bg-popover px-5 py-4 text-center shadow-[0_10px_30px_-12px_oklch(0_0_0/80%)]">
-        <p className="text-[14.5px] text-foreground/90">{title}</p>
-        <div className="mt-1 text-[12.5px] leading-[1.55] break-keep text-pretty text-dim">{body}</div>
-      </div>
+      <Empty className="pointer-events-auto max-w-[22rem] gap-0 rounded-xl bg-popover px-5 py-4 shadow-[0_10px_30px_-12px_oklch(0_0_0/80%)]">
+        <EmptyHeader className="gap-1">
+          <EmptyTitle className="text-[14.5px] font-normal">{title}</EmptyTitle>
+          <EmptyDescription className="text-[12.5px] leading-[1.55]">{body}</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     </div>
   );
 }

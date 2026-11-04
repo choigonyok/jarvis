@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { HeaderPanel } from "@/components/shell/panel";
+import { Popover, PopoverTrigger } from "@/components/ui/popover";
+import { Progress } from "@/components/ui/progress";
 import {
   agoLabel,
   ageMinutes,
@@ -38,21 +40,6 @@ import { cn } from "@/lib/utils";
 export function UsageBars() {
   const usage = useUsage();
   const [open, setOpen] = useState(false);
-  const wrap = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const close = (e: PointerEvent) => {
-      if (!wrap.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    document.addEventListener("pointerdown", close);
-    document.addEventListener("keydown", esc);
-    return () => {
-      document.removeEventListener("pointerdown", close);
-      document.removeEventListener("keydown", esc);
-    };
-  }, [open]);
 
   const five = pct(usage?.fiveHour);
   const week = pct(usage?.sevenDay);
@@ -76,12 +63,9 @@ export function UsageBars() {
     : null;
 
   return (
-    <div ref={wrap} className="relative">
-      <button
-        type="button"
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
         aria-label={label}
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
         className="flex h-11 w-12 flex-col justify-center gap-[3px] rounded-lg px-1.5 outline-none select-none focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-8"
       >
         <Bar value={five} faint={stale || five == null} />
@@ -89,7 +73,7 @@ export function UsageBars() {
         {usage?.api ? <Bar value={api} /> : null}
         {voyage ? <Bar value={free} /> : null}
         {mind ? <Bar value={mindPct} /> : null}
-      </button>
+      </PopoverTrigger>
 
       {open ? (
         <HeaderPanel
@@ -175,7 +159,7 @@ export function UsageBars() {
           </div>
         </HeaderPanel>
       ) : null}
-    </div>
+    </Popover>
   );
 }
 
@@ -193,15 +177,14 @@ function windowNote(w?: { resetsAt: string; reset?: boolean }): string | undefin
 
 function Bar({ value, faint }: { value: number | null; faint?: boolean }) {
   return (
-    <span
+    // At least a sliver of a line once anything is used.
+    <Progress
+      inline
       aria-hidden
-      className={cn("block h-[3px] w-full overflow-hidden rounded-full bg-foreground/12 transition-opacity", faint && "opacity-45")}
-    >
-      <span
-        className={cn("block h-full rounded-full transition-[width] duration-500", tone(value))}
-        style={{ width: `${Math.min(100, Math.max(value ?? 0, value ? 3 : 0))}%` }}
-      />
-    </span>
+      value={Math.max(value ?? 0, value ? 3 : 0)}
+      className={cn("h-[3px] transition-opacity", faint && "opacity-45")}
+      indicatorClassName={cn("transition-[width] duration-500", tone(value))}
+    />
   );
 }
 
@@ -243,9 +226,7 @@ function Meter({
         </span>
         <span className="tnum text-[13px] text-foreground">{figure}</span>
       </div>
-      <span aria-hidden className="mt-1.5 block h-1 overflow-hidden rounded-full bg-foreground/12">
-        <span className={cn("block h-full rounded-full", tone(value))} style={{ width: `${Math.min(100, value ?? 0)}%` }} />
-      </span>
+      <Progress aria-hidden value={value ?? 0} className="mt-1.5" indicatorClassName={tone(value)} />
       {note ? <p className="tnum mt-1 text-[11px] leading-snug text-faint">{note}</p> : null}
       {children}
     </div>

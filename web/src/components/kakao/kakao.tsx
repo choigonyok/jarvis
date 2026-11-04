@@ -1,12 +1,15 @@
 "use client";
 
 import { useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { ChevronDown, Search } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { Header, TabBar } from "@/components/shell/header";
 import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
+import { BottomSheetContent, BottomSheetHeader, BottomSheetTitle } from "@/components/ui/bottom-sheet";
+import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Pager } from "@/components/ui/pager";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { Sheet, SheetTrigger } from "@/components/ui/sheet";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { usePaged } from "@/lib/paging";
 import { useKakao, type KakaoMessage, type KakaoRoom, type Source } from "@/lib/use-kakao";
 import { useThread } from "@/lib/use-thread";
@@ -56,32 +59,19 @@ export function Kakao() {
     <div className="flex h-full min-h-0 flex-col">
       <Header connection={connection} pending={pending} />
       <StandingBar pending={waitingList} href="/record" />
-      <div className="px-gutter mx-auto w-full max-w-[46rem] shrink-0 pt-2 sm:pt-3">
-        <div role="tablist" aria-label="메신저" className="inline-flex gap-0.5 rounded-lg border border-edge-soft bg-glass p-0.5">
-          {(
-            [
-              ["kakao", "카카오톡"],
-              ["imessage", "iMessage"],
-            ] as const
-          ).map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              role="tab"
-              aria-selected={source === key}
-              onClick={() => pick(key)}
-              className={cn(
-                "tap-y min-h-8 rounded-md px-3 text-[12.5px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
-                source === key ? "bg-glass-raised text-foreground" : "text-faint hover:text-dim",
-              )}
-            >
-              {label}
-            </button>
-          ))}
+      {/* The root draws no box: the list and the panel stay in this column. */}
+      <Tabs value={source} onValueChange={(v) => pick(v as Source)} className="contents">
+        <div className="px-gutter mx-auto w-full max-w-[46rem] shrink-0 pt-2 sm:pt-3">
+          <TabsList aria-label="메신저">
+            <TabsTrigger value="kakao">카카오톡</TabsTrigger>
+            <TabsTrigger value="imessage">iMessage</TabsTrigger>
+          </TabsList>
         </div>
-      </div>
-      {/* Each source keeps its own rooms and scroll; switching starts fresh. */}
-      <Feed key={source} source={source} />
+        {/* Each source keeps its own rooms and scroll; switching starts fresh. */}
+        <TabsContent value={source} className="flex min-h-0 flex-1 flex-col">
+          <Feed key={source} source={source} />
+        </TabsContent>
+      </Tabs>
       <TabBar pending={pending} />
     </div>
   );
@@ -195,7 +185,7 @@ function RoomPicker({
   // Twenty rooms a page. The list scrolls on its own inside the sheet, so a
   // page turned takes it back to its top.
   const paged = usePaged(found, { reset: query.trim() });
-  const list = useRef<HTMLUListElement>(null);
+  const list = useRef<HTMLDivElement>(null);
   const turn = (page: number) => {
     paged.go(page);
     list.current?.scrollTo({ top: 0 });
@@ -220,63 +210,58 @@ function RoomPicker({
             <ChevronDown aria-hidden className="size-3.5 shrink-0 text-faint" />
           </span>
         </SheetTrigger>
-        <SheetContent
-          side="bottom"
+        <BottomSheetContent
+          keepFocus={false}
           // A finger came to scroll the recent rooms; a keyboard popping up
           // over them would hide the list it opened. A mouse types at once.
           onOpenAutoFocus={(e) => {
             if (matchMedia("(pointer: coarse)").matches) e.preventDefault();
           }}
-          className="inset-x-safe pb-safe max-h-[85dvh] gap-0 border-edge-soft bg-background sm:inset-x-auto sm:left-1/2 sm:w-[30rem] sm:-translate-x-1/2 sm:rounded-t-2xl"
+          aria-describedby={undefined}
+          className="max-h-[85dvh] sm:max-w-[30rem]"
         >
-          <SheetHeader className="px-4 pt-4 pb-2">
-            <SheetTitle className="text-[14px] font-medium text-foreground">
+          <BottomSheetHeader className="sm:px-4">
+            <BottomSheetTitle className="text-[14px]">
               대화방 <span className="tabular-nums text-faint">{rooms.length}</span>
-            </SheetTitle>
-          </SheetHeader>
-          <label className="relative mx-4 mb-2 block">
-            <Search aria-hidden className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-faint" />
-            <input
-              type="search"
+            </BottomSheetTitle>
+          </BottomSheetHeader>
+          {/* Found by name, gone through with the arrow keys; Enter opens the
+              lit room. The list is filtered and paged here (shouldFilter off). */}
+          <Command shouldFilter={false} label="대화방 찾기" className="min-h-0 flex-1">
+            <CommandInput
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onValueChange={setQuery}
               placeholder="방 이름으로 찾기"
               aria-label="방 이름으로 찾기"
               enterKeyHint="search"
-              className="h-11 w-full rounded-lg bg-glass ps-9 pe-3 text-[16px] text-foreground outline-none placeholder:text-faint focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-9 mouse:text-[13px]"
+              wrapperClassName="mx-4 mb-2 w-auto border-transparent"
             />
-          </label>
-          <ul ref={list} className="scrollbar-hairline min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-4">
-            {paged.items.map((room) => {
-              const active = room.id === current.id;
-              return (
-                <li key={room.id}>
-                  <button
-                    type="button"
-                    onClick={() => {
+            <CommandList ref={list} className="scrollbar-hairline min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-4">
+              {paged.items.map((room) => {
+                const active = room.id === current.id;
+                return (
+                  <CommandItem
+                    key={room.id}
+                    value={room.id}
+                    onSelect={() => {
                       onSelect(room.id);
                       setOpen(false);
                       setQuery("");
                     }}
                     aria-current={active ? "true" : undefined}
-                    className={cn(
-                      "flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50",
-                      active ? "bg-glass-raised text-foreground" : "text-dim hover:bg-glass",
-                    )}
+                    className={cn("min-h-12 rounded-xl px-3", active ? "bg-glass-raised text-foreground" : "text-dim")}
                   >
                     <span className="min-w-0 flex-1 truncate text-[14.5px]">{room.name}</span>
                     <span className="shrink-0 text-[11.5px] tabular-nums text-faint">{when(room)}</span>
                     <span className="w-9 shrink-0 text-end text-[11.5px] tabular-nums text-faint">{room.messages}</span>
-                  </button>
-                </li>
-              );
-            })}
-            {found.length === 0 ? (
-              <li className="px-3 py-6 text-center text-[13px] text-faint">&lsquo;{query.trim()}&rsquo;에 맞는 방이 없어요.</li>
-            ) : null}
-          </ul>
+                  </CommandItem>
+                );
+              })}
+              <CommandEmpty className="px-3 py-6 text-center">&lsquo;{query.trim()}&rsquo;에 맞는 방이 없어요.</CommandEmpty>
+            </CommandList>
+          </Command>
           <Pager {...paged} go={turn} unit="개" className="mx-4 mt-0 mb-3" />
-        </SheetContent>
+        </BottomSheetContent>
       </Sheet>
 
       {/* The rest, newest first: one line's worth, and nothing sideways. */}

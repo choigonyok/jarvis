@@ -232,10 +232,17 @@ export function applyDraft(cur: Draft | null, f: DraftFrame): Draft | null {
   return { ...cur, text: cur.text.slice(0, f.at) + (f.text ?? "") };
 }
 
+/**
+ * One thing the turn under way has done since the last thing said, in a line
+ * (agent internal/steps): the newest is what it is doing now.
+ */
+export type Step = { text: string; at: string };
+
 export type AgentEvent =
   | { type: "queue"; queue?: Queued[] }
   | { type: "turn"; turn: Turn; replaces?: string }
   | { type: "draft"; draft: DraftFrame }
+  | { type: "steps"; steps?: Step[] }
   | { type: "status"; thinking?: boolean }
   | { type: "error"; message: string }
   | { type: "proposal"; proposal: Proposal }

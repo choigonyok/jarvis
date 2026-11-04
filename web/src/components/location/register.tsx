@@ -2,9 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { LocateFixed, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { Spot } from "@/components/location/day-map";
 import { type LatLon, type Who, ago, object, registerRegion, toward } from "@/lib/track";
-import { cn } from "@/lib/utils";
 
 /** Where the place is taken from: the browser, now - or what the phone last sent. */
 export type Here = LatLon & { acc: number; at: number; from: "browser" | "phone" };
@@ -15,10 +17,6 @@ export const RADIUS = 50;
 /** Names offered first: the two places most people register. */
 const COMMON = ["집", "회사"];
 
-const action =
-  "inline-flex h-11 w-full items-center justify-center rounded-lg bg-glass-raised px-4 text-[13.5px] text-foreground outline-none transition-colors hover:bg-white/12 focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-45 mouse:h-9";
-const quiet =
-  "inline-flex h-11 items-center justify-center rounded-lg px-3 text-[13px] text-dim outline-none transition-colors hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-45 mouse:h-8";
 
 /**
  * 위치 등록, in the panel under the map: where the viewer is now becomes one of
@@ -155,9 +153,9 @@ export function RegisterPanel({
               OwnTracks에 바로 넣으면 지금부터 이 원 안에서 Significant로 지내요. OwnTracks가 바뀌는 내용을 보여 주면
               Continue를 누르세요.
             </p>
-            <a href={made.link} className={cn(action, "mt-3")}>
-              OwnTracks에 바로 넣기
-            </a>
+            <Button variant="raised" size="touch" asChild className="mt-3 w-full">
+              <a href={made.link}>OwnTracks에 바로 넣기</a>
+            </Button>
             <p className="mt-2 text-[12px] leading-[1.55] text-faint">안 눌러도 폰이 다음에 위치를 보낼 때 들어가요.</p>
           </>
         ) : (
@@ -198,36 +196,42 @@ export function RegisterPanel({
         {close}
       </div>
       {!finding && (here?.from !== "browser" || rough) ? (
-        <button
-          type="button"
+        <Button
+          variant="quiet"
+          size="touch-sm"
           onClick={() => {
             setFinding(true);
             locate();
           }}
-          className={cn(quiet, "-ml-3 gap-1.5")}
+          className="-ml-3"
         >
-          <LocateFixed aria-hidden className="size-4" strokeWidth={1.8} />
+          <LocateFixed aria-hidden strokeWidth={1.8} />
           다시 찾기
-        </button>
+        </Button>
       ) : null}
 
-      <div role="group" aria-label="이름" className="mt-3 flex flex-wrap gap-1.5">
+      {/* The chip lit is the name written: typing another one lights none. */}
+      <ToggleGroup
+        type="single"
+        aria-label="이름"
+        variant="chip"
+        tone="mine"
+        size="chip"
+        spacing={1.5}
+        value={chips.includes(n) ? n : ""}
+        onValueChange={(v) => {
+          if (v) rename(v);
+        }}
+        className="mt-3 flex-wrap"
+      >
         {chips.map((c) => (
-          <button
-            key={c}
-            type="button"
-            aria-pressed={n === c}
-            onClick={() => rename(c)}
-            className={cn(
-              "flex h-9 items-center rounded-full border px-3.5 text-[13px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-7 mouse:px-3",
-              n === c ? "border-mine/45 bg-mine/12 text-foreground" : "border-edge text-dim hover:text-foreground",
-            )}
-          >
+          <ToggleGroupItem key={c} value={c} className="px-3.5 text-[13px] mouse:px-3">
             {c}
-          </button>
+          </ToggleGroupItem>
         ))}
-      </div>
-      <input
+      </ToggleGroup>
+      <Input
+        surface="glass"
         value={name}
         onChange={(e) => rename(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && void submit()}
@@ -235,11 +239,11 @@ export function RegisterPanel({
         aria-label="영역 이름"
         maxLength={30}
         enterKeyHint="done"
-        className="mt-2 h-11 w-full rounded-lg border border-edge bg-transparent px-3 text-[14px] text-foreground outline-none placeholder:text-faint focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40 mouse:h-9"
+        className="mt-2"
       />
-      <button type="button" onClick={() => void submit()} disabled={!here || !n || busy} className={cn(action, "mt-3")}>
+      <Button variant="raised" size="touch" onClick={() => void submit()} disabled={!here || !n || busy} className="mt-3 w-full">
         {busy ? "등록하는 중…" : n ? `${toward(n)} 등록` : "이름을 정하면 등록할 수 있어요"}
-      </button>
+      </Button>
       {error ? (
         <p role="alert" className="mt-2 text-[12.5px] text-reject">
           {error}

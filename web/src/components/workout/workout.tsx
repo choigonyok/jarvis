@@ -12,7 +12,7 @@ import { VolumeBar } from "@/components/workout/volume-bar";
 import { Header, ScreenMenu, TabBar } from "@/components/shell/header";
 import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
-import { FloatingUndo, UndoNotice, useUndo } from "@/components/shell/undo";
+import { useUndo } from "@/components/shell/undo";
 import { Pager } from "@/components/ui/pager";
 import { isoDate } from "@/lib/month";
 import { usePaged } from "@/lib/paging";
@@ -37,6 +37,7 @@ import {
   volumeOf,
   type Session,
 } from "@/lib/workout";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 
 /** The three things the tab is opened for when nothing is running. */
@@ -92,7 +93,7 @@ export function Workout() {
   }
 
   // One undo at a time, for five seconds (components/shell/undo.tsx).
-  const { undo, offer: offerUndo, take: takeUndo } = useUndo();
+  const { offer: offerUndo } = useUndo();
 
   const past = useMemo(
     () =>
@@ -147,7 +148,6 @@ export function Workout() {
       );
   }
 
-  const notice = undo ? <UndoNotice label={undo.label} onUndo={takeUndo} /> : null;
 
   // While a set is being lifted the screen is the gym's: the tab bar goes the
   // way it goes for the keyboard and the waiting line keeps quiet, so the dock
@@ -206,18 +206,12 @@ export function Workout() {
                   );
               }}
               onUndoable={offerUndo}
-              notice={notice}
             />
           ) : loaded ? (
-            <>
-              <ViewTabs view={view} onChange={choose} />
+            <Tabs value={view} onValueChange={(v) => choose(v as View)}>
+              <ViewTabs />
 
-              {view === "today" ? (
-                <div
-                  id="view-today"
-                  role="tabpanel"
-                  aria-labelledby="tab-today"
-                >
+              <TabsContent value="today">
                   <section aria-label="루틴" className="mb-10">
                     <RoutinePicker
                       routines={routines}
@@ -329,15 +323,10 @@ export function Workout() {
                       )}
                     </section>
                   ) : null}
-                </div>
-              ) : null}
+              </TabsContent>
 
-              {view === "log" ? (
-                <section
-                  id="view-log"
-                  role="tabpanel"
-                  aria-labelledby="tab-log"
-                >
+              <TabsContent value="log" asChild>
+                <section>
                   <WorkoutCalendar
                     sessions={book.sessions}
                     selected={day}
@@ -381,22 +370,15 @@ export function Workout() {
                     </div>
                   )}
                 </section>
-              ) : null}
+              </TabsContent>
 
-              {view === "lifts" ? (
-                <div
-                  id="view-lifts"
-                  role="tabpanel"
-                  aria-labelledby="tab-lifts"
-                >
-                  <Lifts sessions={book.sessions} onOpen={setLooking} />
-                </div>
-              ) : null}
-            </>
+              <TabsContent value="lifts">
+                <Lifts sessions={book.sessions} onOpen={setLooking} />
+              </TabsContent>
+            </Tabs>
           ) : null}
         </div>
 
-        {!live && notice ? <FloatingUndo>{notice}</FloatingUndo> : null}
       </main>
 
       <RoutineEditor
@@ -419,55 +401,22 @@ export function Workout() {
 
 /**
  * 오늘, 기록, 종목 - a segmented control rather than three scrolls of one
- * long page. Arrow keys move between them, as a tab list should.
+ * long page. The arrow keys move between them and each is tied to its view
+ * (Tabs).
  */
-function ViewTabs({
-  view,
-  onChange,
-}: {
-  view: View;
-  onChange: (view: View) => void;
-}) {
+function ViewTabs() {
   return (
-    <div
-      role="tablist"
-      aria-label="운동 화면"
-      className="mb-7 grid grid-cols-3 gap-1 rounded-xl bg-glass p-1"
-      onKeyDown={(e) => {
-        if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
-        const i = VIEWS.findIndex((v) => v.id === view);
-        const next =
-          VIEWS[
-            (i + (e.key === "ArrowRight" ? 1 : VIEWS.length - 1)) % VIEWS.length
-          ];
-        onChange(next.id);
-        document.getElementById(`tab-${next.id}`)?.focus();
-      }}
-    >
-      {VIEWS.map((v) => {
-        const on = v.id === view;
-        return (
-          <button
-            key={v.id}
-            id={`tab-${v.id}`}
-            type="button"
-            role="tab"
-            aria-selected={on}
-            aria-controls={`view-${v.id}`}
-            tabIndex={on ? 0 : -1}
-            onClick={() => onChange(v.id)}
-            className={cn(
-              "min-h-11 rounded-lg text-[13.5px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
-              on
-                ? "bg-glass-raised font-medium text-foreground"
-                : "text-dim hover:text-foreground",
-            )}
-          >
-            {v.label}
-          </button>
-        );
-      })}
-    </div>
+    <TabsList aria-label="운동 화면" className="mb-7 grid w-full grid-cols-3 gap-1 rounded-xl border-0 p-1">
+      {VIEWS.map((v) => (
+        <TabsTrigger
+          key={v.id}
+          value={v.id}
+          className="min-h-11 rounded-lg text-[13.5px] text-dim hover:text-foreground data-active:font-medium"
+        >
+          {v.label}
+        </TabsTrigger>
+      ))}
+    </TabsList>
   );
 }
 

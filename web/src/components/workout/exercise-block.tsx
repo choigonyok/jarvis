@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, ChevronDown, Flame, Minus, Plus, Trash2 } from "lucide-react";
-import { quietButton } from "@/components/workout/panel";
+import { Button } from "@/components/ui/button";
 import { VolumeBar } from "@/components/workout/volume-bar";
 import {
   kg,
@@ -325,17 +325,10 @@ export function ExerciseBlock({
 
       {editing ? (
         <div className="mt-2 flex justify-end">
-          <button
-            type="button"
-            onClick={onRemove}
-            className={cn(
-              quietButton,
-              "flex items-center gap-1.5 text-faint hover:text-reject",
-            )}
-          >
-            <Trash2 aria-hidden className="size-4" />
+          <Button variant="discard" size="touch-sm" onClick={onRemove}>
+            <Trash2 aria-hidden />
             {exercise.name} 빼기
-          </button>
+          </Button>
         </div>
       ) : (
         <>

@@ -14,13 +14,16 @@ import "sync"
 // imports on the packages that fill them; exactly one slot is set per event,
 // and the JSON shape is what the browser reads, so the names are contractual.
 type Event struct {
-	Type string `json:"type"` // turn | draft | status | error | proposal | calendar | queue | checklist
+	Type string `json:"type"` // turn | draft | steps | status | error | proposal | calendar | queue | checklist
 
 	Turn any `json:"turn,omitempty"`
 	// Replaces, on a turn, is the draft it is the finished form of.
 	Replaces string `json:"replaces,omitempty"`
 	// Draft is a message still being written (thread.Draft).
-	Draft    any `json:"draft,omitempty"`
+	Draft any `json:"draft,omitempty"`
+	// Steps is what the turn under way has done since the last thing said,
+	// the whole of it (thread.Step): an empty list is news too.
+	Steps    any `json:"steps,omitempty"`
 	Proposal any `json:"proposal,omitempty"`
 	Calendar any `json:"calendar,omitempty"`
 	// Checklist is a list as it stands now: a card that shows it redraws.

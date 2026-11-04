@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Collapsible } from "radix-ui";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ChevronDown } from "lucide-react";
 import { HoldBar, holdsMoney, useHold } from "@/components/chat/hold";
 import { RejectForm } from "@/components/chat/reject-form";
@@ -43,7 +43,7 @@ export function Entry({
   const [asking, setAsking] = useState(false);
 
   return (
-    <Collapsible.Root
+    <Collapsible
       className={cn(
         "group/entry relative rounded-lg transition-colors",
         "hover:bg-glass focus-within:bg-glass",
@@ -60,7 +60,7 @@ export function Entry({
         )}
       />
 
-      <Collapsible.Trigger
+      <CollapsibleTrigger
         className={cn(
           "flex w-full items-baseline gap-3 rounded-lg py-2.5 pr-2 pl-4 text-left outline-none",
           "min-h-11 mouse:min-h-0",
@@ -87,9 +87,9 @@ export function Entry({
           aria-hidden
           className="size-3.5 shrink-0 self-center text-faint transition-transform group-data-[state=open]/entry:rotate-180 motion-reduce:transition-none"
         />
-      </Collapsible.Trigger>
+      </CollapsibleTrigger>
 
-      <Collapsible.Content className="overflow-hidden data-[state=closed]:animate-none">
+      <CollapsibleContent className="overflow-hidden data-[state=closed]:animate-none">
         <div className="pt-0.5 pr-2 pb-3 pl-4">
           {/* What would actually run. A literal command keeps its line breaks
               and scrolls; a module's sentence wraps. */}
@@ -122,25 +122,23 @@ export function Entry({
           ) : waiting ? (
             <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-1.5">
               <Button
-                variant="ghost"
-                size="sm"
+                variant="reject"
+                size="pair-sm"
                 onClick={() => setAsking(true)}
-                className="h-11 text-[13px] text-dim hover:bg-reject/10 hover:text-reject mouse:h-7 mouse:px-2.5 mouse:text-[12.5px]"
               >
                 반려
               </Button>
               <Button
-                variant="outline"
-                size="sm"
+                variant="approve"
+                size="pair-sm"
                 onClick={() => (holdsMoney(proposal) ? hold.start() : onDecide("approved"))}
-                className="h-11 border-edge bg-glass-raised text-[13px] text-foreground hover:border-approve/35 hover:bg-approve/12 hover:text-approve mouse:h-7 mouse:px-3 mouse:text-[12.5px] dark:bg-glass-raised dark:hover:bg-approve/12"
               >
                 승인
               </Button>
             </div>
           ) : null}
         </div>
-      </Collapsible.Content>
-    </Collapsible.Root>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }

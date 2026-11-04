@@ -138,18 +138,16 @@ export function GhostRow({
       ) : (
         <div className="mt-2.5 grid grid-cols-2 gap-2 sm:mt-2 sm:flex sm:items-center sm:justify-end sm:gap-1.5">
           <Button
-            variant="ghost"
-            size="sm"
+            variant="reject"
+            size="pair-sm"
             onClick={() => setAsking(true)}
-            className="h-11 text-[13px] text-dim hover:bg-reject/10 hover:text-reject mouse:h-7 mouse:px-2.5 mouse:text-[12.5px]"
           >
             반려
           </Button>
           <Button
-            variant="outline"
-            size="sm"
+            variant="approve"
+            size="pair-sm"
             onClick={() => onDecide("approved")}
-            className="h-11 border-edge bg-glass-raised text-[13px] text-foreground hover:border-approve/35 hover:bg-approve/12 hover:text-approve mouse:h-7 mouse:px-3 mouse:text-[12.5px] dark:bg-glass-raised dark:hover:bg-approve/12"
           >
             승인
           </Button>

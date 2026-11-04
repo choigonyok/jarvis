@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Keyboard, MousePointer2, MousePointerClick, Move } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Toggle } from "@/components/ui/toggle";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 /**
  * The parts of noVNC's RFB this uses. sendKey and clipboardPasteFrom are
@@ -259,61 +260,46 @@ export function RemoteTouch({
           </div>
         ) : null}
         <div className="flex items-center gap-1.5 rounded-xl border border-edge bg-popover p-1">
-          <div role="radiogroup" aria-label="터치 방식" className="flex gap-1">
-            <ModeButton on={mode === "click"} onClick={() => setMode("click")} Icon={MousePointer2} label="클릭" />
-            <ModeButton on={mode === "drag"} onClick={() => setMode("drag")} Icon={Move} label="드래그" />
-          </div>
-          <button
-            type="button"
-            aria-pressed={rightNext}
-            onClick={() => setRightNext((v) => !v)}
-            className={cn(
-              "flex h-9 items-center gap-1 rounded-lg px-2.5 text-[12.5px]",
-              rightNext ? "bg-foreground text-background" : "text-dim",
-            )}
+          <ToggleGroup
+            type="single"
+            aria-label="터치 방식"
+            variant="segment"
+            spacing={1}
+            value={mode}
+            onValueChange={(v) => {
+              if (v) setMode(v as typeof mode);
+            }}
           >
-            <MousePointerClick aria-hidden className="size-4" />
+            <ToggleGroupItem value="click" className="h-9 gap-1 rounded-lg px-2.5 text-[12.5px] text-dim">
+              <MousePointer2 aria-hidden />
+              클릭
+            </ToggleGroupItem>
+            <ToggleGroupItem value="drag" className="h-9 gap-1 rounded-lg px-2.5 text-[12.5px] text-dim">
+              <Move aria-hidden />
+              드래그
+            </ToggleGroupItem>
+          </ToggleGroup>
+          {/* The next tap is a right click: lit as the brightest thing here,
+              because it changes what the next touch does. */}
+          <Toggle
+            pressed={rightNext}
+            onPressedChange={setRightNext}
+            className="h-9 gap-1 px-2.5 text-[12.5px] font-normal text-dim hover:bg-transparent data-[state=on]:bg-foreground data-[state=on]:text-background"
+          >
+            <MousePointerClick aria-hidden />
             우클릭
-          </button>
-          <button
-            type="button"
-            aria-pressed={typing}
-            onClick={() => setTyping((v) => !v)}
-            className={cn(
-              "ms-auto flex h-9 items-center gap-1 rounded-lg px-2.5 text-[12.5px]",
-              typing ? "bg-glass-raised text-foreground" : "text-dim",
-            )}
+          </Toggle>
+          <Toggle
+            pressed={typing}
+            onPressedChange={setTyping}
+            className="ms-auto h-9 gap-1 px-2.5 text-[12.5px] font-normal text-dim hover:bg-transparent data-[state=on]:bg-glass-raised data-[state=on]:text-foreground"
           >
-            <Keyboard aria-hidden className="size-4" />
+            <Keyboard aria-hidden />
             키보드
-          </button>
+          </Toggle>
         </div>
       </div>
     </>
   );
 }
 
-function ModeButton({
-  on,
-  onClick,
-  Icon,
-  label,
-}: {
-  on: boolean;
-  onClick: () => void;
-  Icon: typeof Move;
-  label: string;
-}) {
-  return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={on}
-      onClick={onClick}
-      className={cn("flex h-9 items-center gap-1 rounded-lg px-2.5 text-[12.5px]", on ? "bg-glass-raised text-foreground" : "text-dim")}
-    >
-      <Icon aria-hidden className="size-4" />
-      {label}
-    </button>
-  );
-}

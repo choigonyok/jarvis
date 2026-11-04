@@ -3,7 +3,10 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { Check, ChevronDown, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Input } from "@/components/ui/input";
 import { Pager } from "@/components/ui/pager";
+import { Textarea } from "@/components/ui/textarea";
 import {
   type Note,
   type NoteStatus,
@@ -139,51 +142,32 @@ function NoteRow({
   const buttons =
     mode !== "idle" ? null : rule ? (
       <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:gap-1.5">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setMode("why")}
-          disabled={busy}
-          className="h-11 text-[13.5px] text-dim hover:bg-reject/10 hover:text-reject mouse:h-8 mouse:px-3 mouse:text-[0.8rem]"
-        >
+        <Button variant="reject" size="pair-sm" onClick={() => setMode("why")} disabled={busy}>
           거두기
         </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setMode("edit")}
-          disabled={busy}
-          className="h-11 px-3 text-[13px] text-faint hover:text-foreground mouse:h-8 mouse:text-[0.8rem]"
-        >
+        <Button variant="quiet" size="pair-sm" onClick={() => setMode("edit")} disabled={busy} className={later}>
           고치기
         </Button>
       </div>
     ) : asking ? (
       <div className="grid grid-cols-[1fr_1fr_auto] gap-2 sm:flex sm:items-center sm:gap-1.5">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setMode("why")}
-          disabled={busy}
-          className="h-11 text-[13.5px] text-dim hover:bg-reject/10 hover:text-reject mouse:h-8 mouse:px-3 mouse:text-[0.8rem]"
-        >
+        <Button variant="reject" size="pair-sm" onClick={() => setMode("why")} disabled={busy}>
           아니에요
         </Button>
         <Button
-          variant="outline"
-          size="sm"
+          variant="approve"
+          size="pair-sm"
           onClick={() => void answer({ status: "confirmed" }, "맞다고 했어요. 예측과 제안에 그대로 써요.")}
           disabled={busy}
-          className="h-11 border-edge bg-glass-raised text-[13.5px] text-foreground hover:border-approve/35 hover:bg-approve/12 hover:text-approve mouse:h-8 mouse:px-3.5 mouse:text-[0.8rem] dark:bg-glass-raised dark:hover:bg-approve/12"
         >
           맞아요
         </Button>
         <Button
-          variant="ghost"
-          size="sm"
+          variant="quiet"
+          size="pair-sm"
           onClick={() => setMode("edit")}
           disabled={busy}
-          className="h-11 px-3 text-[13px] text-faint hover:text-foreground mouse:h-8 mouse:text-[0.8rem]"
+          className={later}
         >
           고치기
         </Button>
@@ -191,11 +175,11 @@ function NoteRow({
     ) : null;
 
   return (
+    <Collapsible asChild open={open} onOpenChange={toggle}>
     <li data-focus={`note:${note.id}`} className="scroll-mt-24 py-3">
+      <CollapsibleTrigger asChild>
       <button
         type="button"
-        onClick={toggle}
-        aria-expanded={open}
         className="flex w-full items-start gap-3 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
       >
         <Mark status={note.status} className="mt-[8px]" />
@@ -235,6 +219,7 @@ function NoteRow({
         </span>
         <ChevronDown aria-hidden className={cn("mt-1 size-4 shrink-0 text-faint transition-transform", open && "rotate-180")} />
       </button>
+      </CollapsibleTrigger>
 
       <div className="ms-[19px] me-7">
         {said && mode === "idle" ? (
@@ -257,21 +242,21 @@ function NoteRow({
                 ? "거두면 자비스가 더는 따르지 않아요. 이유가 있으면 적어 주세요(비워도 돼요)."
                 : "왜 아닌가요? 비워도 돼요. 적어 두면 다음 노트를 만들 때 읽어요."}
             </p>
-            <input
+            <Input
               value={why}
               onChange={(e) => setWhy(e.target.value)}
               placeholder={rule ? "예: 이제는 넣어도 돼" : "예: 그날은 비가 와서 그랬어"}
               aria-label="아닌 이유"
               maxLength={300}
-              className={field}
+              className="mouse:h-8 mouse:text-[13.5px]"
             />
             <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-1.5">
-              <Button variant="ghost" size="sm" onClick={() => setMode("idle")} disabled={busy} className={quiet}>
+              <Button variant="quiet" size="pair-sm" onClick={() => setMode("idle")} disabled={busy}>
                 취소
               </Button>
               <Button
-                variant="outline"
-                size="sm"
+                variant="refuse"
+                size="pair-sm"
                 onClick={() =>
                   void answer(
                     { status: "rejected", reason: why.trim() },
@@ -279,7 +264,6 @@ function NoteRow({
                   )
                 }
                 disabled={busy}
-                className="h-11 border-edge text-[13.5px] text-reject hover:bg-reject/10 mouse:h-8 mouse:px-3.5 mouse:text-[0.8rem]"
               >
                 {rule ? "거두기" : "아니에요"}
               </Button>
@@ -289,33 +273,31 @@ function NoteRow({
 
         {mode === "edit" ? (
           <div className="anim-settle mt-2.5 space-y-2">
-            <textarea
+            <Textarea
               value={text}
               onChange={(e) => setText(e.target.value)}
               aria-label="노트 문장"
               rows={2}
               maxLength={300}
-              className={cn(field, "h-auto resize-none py-2 leading-[1.5]")}
+              className="min-h-[calc(2lh+18px)] resize-none py-2 leading-[1.5]"
             />
             <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-1.5">
               <Button
-                variant="ghost"
-                size="sm"
+                variant="quiet"
+                size="pair-sm"
                 onClick={() => {
                   setMode("idle");
                   setText(note.text);
                 }}
                 disabled={busy}
-                className={quiet}
               >
                 취소
               </Button>
               <Button
-                variant="outline"
-                size="sm"
+                variant="raised"
+                size="pair-sm"
                 onClick={() => void answer({ text: text.trim(), reason: "문장을 고침" }, "고쳐 두었어요.")}
                 disabled={busy || !text.trim() || text.trim() === note.text}
-                className="h-11 border-edge bg-glass-raised text-[13.5px] text-foreground mouse:h-8 mouse:px-3.5 mouse:text-[0.8rem] dark:bg-glass-raised"
               >
                 저장
               </Button>
@@ -330,8 +312,7 @@ function NoteRow({
         ) : null}
       </div>
 
-      {open ? (
-        <div className="anim-settle mt-3 mb-1 ms-[19px] space-y-3 border-s border-edge ps-4 text-[12.5px] leading-[1.6] break-keep">
+      <CollapsibleContent className="anim-settle mt-3 mb-1 ms-[19px] space-y-3 border-s border-edge ps-4 text-[12.5px] leading-[1.6] break-keep">
           {note.evidence && note.evidence.length > 0 ? (
             <div>
               <p className="text-faint">근거</p>
@@ -384,29 +365,23 @@ function NoteRow({
               )}
             </div>
           ) : null}
-        </div>
-      ) : null}
+      </CollapsibleContent>
     </li>
+    </Collapsible>
   );
 }
 
+/** A word to press among the notes' history: underlined, the height of the line, a thumb's band around it. */
 function TextButton({ onClick, disabled, children }: { onClick: () => void; disabled?: boolean; children: ReactNode }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className="tap -my-3 text-dim underline decoration-edge underline-offset-[3px] outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 disabled:text-faint"
-    >
+    <Button variant="underline" size="inline" onClick={onClick} disabled={disabled} className="tap -my-3">
       {children}
-    </button>
+    </Button>
   );
 }
 
-const field =
-  "h-11 w-full rounded-lg border border-edge-soft bg-well px-3 text-[16px] text-foreground outline-none placeholder:text-faint focus-visible:border-edge focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-8 mouse:text-[13.5px]";
-
-const quiet = "h-11 text-[13.5px] text-dim mouse:h-8 mouse:px-3 mouse:text-[0.8rem]";
+/** The answer that can wait (고치기): fainter than the two that settle the note. */
+const later = "px-3 text-[13px] text-faint";
 
 const markLabel: Record<NoteStatus, string> = { hypothesis: "확인 전", confirmed: "맞음", rejected: "아님" };
 

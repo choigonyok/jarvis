@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { Pager } from "@/components/ui/pager";
-import { Panel } from "@/components/workout/panel";
+import { Panel } from "@/components/ui/bottom-sheet";
 import { usePaged } from "@/lib/paging";
 import {
   bestSet,

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
+import { Accordion } from "radix-ui";
 import type { Queued } from "@/lib/thread";
 import { cn } from "@/lib/utils";
 
@@ -23,6 +24,10 @@ const TEXT = "pl-1 group-data-[lead=text]/composer:pl-0";
  * sits there too. One line each, oldest first (the order they will go in); a
  * tap shows the whole message. 지금 반영 hands one to the running turn, which
  * reads it at its next step; ✕ takes it back, with a moment to undo.
+ *
+ * One message is open at a time, and the arrow keys go up and down the lines:
+ * an accordion (Radix's own, for its state and keys - the line itself is what
+ * opens, in place, so there is no panel under it).
  */
 export function QueuedMessages({
   queue,
@@ -58,6 +63,13 @@ export function QueuedMessages({
   if (rows.length === 0) return null;
 
   return (
+    <Accordion.Root
+      type="single"
+      collapsible
+      value={open ?? ""}
+      onValueChange={(v) => setOpen(v || null)}
+      asChild
+    >
     <ol
       aria-label={`보내기를 기다리는 메시지 ${queue.length}개`}
       className="scrollbar-hairline mb-1 max-h-[11.5rem] overflow-y-auto overscroll-contain border-b border-edge-soft pb-1"
@@ -86,28 +98,29 @@ export function QueuedMessages({
           );
         }
 
-        const expanded = open === q.id;
         const busy = steering === q.id;
         return (
-          <li key={q.id} className={ROW}>
+          <Accordion.Item key={q.id} value={q.id} asChild>
+          <li className={ROW}>
             {/* The system's mark for "not yet": the same breathing dot as a
                 calendar entry waiting on a decision, centred under the photo
                 button (or in the padding where there is none). */}
             <span aria-hidden className="anim-breathe mt-[19.5px] size-[5px] justify-self-center rounded-full bg-dim sm:mt-[17.5px]" />
-            <button
-              type="button"
-              onClick={() => setOpen(expanded ? null : q.id)}
-              aria-expanded={expanded}
-              title={expanded ? undefined : text}
-              className={cn(
-                TEXT,
-                "min-h-11 min-w-0 py-3 text-left text-[13.5px] leading-[1.45] text-dim outline-none mouse:min-h-10 mouse:py-2.5",
-                "rounded-md focus-visible:ring-3 focus-visible:ring-ring/50",
-                expanded ? "break-words whitespace-pre-wrap text-foreground/85" : "truncate",
-              )}
-            >
-              {text}
-            </button>
+            <Accordion.Header asChild>
+              <div className="min-w-0">
+                <Accordion.Trigger
+                  title={open === q.id ? undefined : text}
+                  className={cn(
+                    TEXT,
+                    "block min-h-11 w-full min-w-0 truncate py-3 text-left text-[13.5px] leading-[1.45] text-dim outline-none mouse:min-h-10 mouse:py-2.5",
+                    "rounded-md focus-visible:ring-3 focus-visible:ring-ring/50",
+                    "data-[state=open]:overflow-visible data-[state=open]:break-words data-[state=open]:whitespace-pre-wrap data-[state=open]:text-foreground/85",
+                  )}
+                >
+                  {text}
+                </Accordion.Trigger>
+              </div>
+            </Accordion.Header>
             {/* The send button's quiet glass: the brightest control in this
                 product stays 승인. A thumb high, the glass inside smaller. */}
             <button
@@ -142,8 +155,10 @@ export function QueuedMessages({
               <X aria-hidden className="size-4" />
             </button>
           </li>
+          </Accordion.Item>
         );
       })}
     </ol>
+    </Accordion.Root>
   );
 }

@@ -48,6 +48,7 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/module/vault"
 	"github.com/choigonyok/jarvis/agent/internal/module/web"
 	"github.com/choigonyok/jarvis/agent/internal/policy"
+	"github.com/choigonyok/jarvis/agent/internal/steps"
 	"github.com/choigonyok/jarvis/agent/internal/suggest"
 	"github.com/choigonyok/jarvis/agent/internal/thread"
 	"github.com/choigonyok/jarvis/agent/internal/tool"
@@ -339,6 +340,12 @@ func main() {
 		}
 	}
 	runner := claudecode.New(cfg, transcript, log)
+	// Each tool the conversation calls, said in a line on the console while
+	// the turn is under way: where a long search has got to, before a word
+	// of the answer.
+	runner.OnTool(func(name string, input json.RawMessage) {
+		transcript.Step(steps.Line(name, input))
+	})
 	// Subscription use, read off every run's stream; kept beside the proposals.
 	usageTracker := usage.New(filepath.Join(filepath.Dir(cfg.ProposalsPath), "usage.json"))
 	runner.SetUsage(usageTracker)

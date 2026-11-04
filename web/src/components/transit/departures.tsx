@@ -8,6 +8,9 @@ import { useRole } from "@/components/shell/role";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { Board } from "@/components/transit/board";
 import { RouteEditor } from "@/components/transit/route-editor";
+import { Button } from "@/components/ui/button";
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { onResume } from "@/lib/resume";
 import { isPending } from "@/lib/thread";
 import type { Who } from "@/lib/track";
@@ -116,28 +119,26 @@ export function Departures() {
               <p className="pt-10 text-center text-[13px] text-faint">불러오는 중…</p>
             )
           ) : routes.length === 0 ? (
-            <Empty onAdd={() => setEditing(null)} />
+            <NoRoutes onAdd={() => setEditing(null)} />
           ) : (
             <>
-              {routes.length > 1 ? (
-                <div role="tablist" aria-label="경로" className="-mx-1 mb-5 flex gap-1 overflow-x-auto px-1 pb-1">
-                  {routes.map((r) => (
-                    <button
-                      key={r.id}
-                      role="tab"
-                      aria-selected={current?.id === r.id}
-                      onClick={() => pick(r.id)}
-                      className={cn(
-                        "flex h-9 shrink-0 items-center rounded-full px-3.5 text-[13px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-7",
-                        current?.id === r.id ? "bg-glass-raised text-foreground" : "text-dim hover:text-foreground",
-                      )}
-                    >
-                      {r.name}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-              {current ? <Board who={who} route={current} plan={planOf.get(current.id)} now={now} /> : null}
+              {/* One route's board at a time; the arrow keys go between them. */}
+              <Tabs value={current?.id ?? ""} onValueChange={pick}>
+                {routes.length > 1 ? (
+                  <TabsList variant="pills" aria-label="경로" className="-mx-1 mb-5 overflow-x-auto px-1 pb-1">
+                    {routes.map((r) => (
+                      <TabsTrigger key={r.id} value={r.id}>
+                        {r.name}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                ) : null}
+                {current ? (
+                  <TabsContent value={current.id}>
+                    <Board who={who} route={current} plan={planOf.get(current.id)} now={now} />
+                  </TabsContent>
+                ) : null}
+              </Tabs>
               {!read.feeds.buses || !read.feeds.subway ? <Keys feeds={read.feeds} /> : null}
 
               <section className="mt-10" aria-label="내 경로">
@@ -209,22 +210,20 @@ function status(plan: Plan | undefined, now: number): string {
   return min <= 0 ? "지금 나가기" : `${clockOf(plan.leave)} 나가기`;
 }
 
-function Empty({ onAdd }: { onAdd: () => void }) {
+function NoRoutes({ onAdd }: { onAdd: () => void }) {
   return (
-    <div className="pt-12 text-center">
-      <p className="text-[15px] text-foreground/90">자주 타는 버스나 지하철을 경로로 두면</p>
-      <p className="mt-1 text-[13.5px] leading-[1.6] break-keep text-dim">
-        실시간 도착으로 언제 나가야 하는지 세어 드리고, 정한 시간대에는 알림도 보내요.
-      </p>
-      <button
-        type="button"
-        onClick={onAdd}
-        className="mt-5 inline-flex h-11 items-center gap-1.5 rounded-lg bg-glass-raised px-4 text-[13.5px] text-foreground outline-none hover:bg-white/12 focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-9"
-      >
-        <Plus aria-hidden className="size-4" strokeWidth={1.8} />
-        경로 추가
-      </button>
-    </div>
+    <Empty className="pt-12">
+      <EmptyHeader className="gap-1">
+        <EmptyTitle className="font-normal">자주 타는 버스나 지하철을 경로로 두면</EmptyTitle>
+        <EmptyDescription>실시간 도착으로 언제 나가야 하는지 세어 드리고, 정한 시간대에는 알림도 보내요.</EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
+        <Button variant="raised" size="touch" onClick={onAdd}>
+          <Plus aria-hidden strokeWidth={1.8} />
+          경로 추가
+        </Button>
+      </EmptyContent>
+    </Empty>
   );
 }
 

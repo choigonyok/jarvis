@@ -2,7 +2,8 @@
 
 import { useRef } from "react";
 import { Info } from "lucide-react";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { BottomSheetContent, BottomSheetDescription, BottomSheetHeader, BottomSheetTitle } from "@/components/ui/bottom-sheet";
+import { Sheet } from "@/components/ui/sheet";
 import type { Role } from "@/lib/role";
 import { cn } from "@/lib/utils";
 
@@ -153,8 +154,9 @@ export function GuideSheet({
   const back = useRef<HTMLElement | null>(null);
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent
-        side="bottom"
+      <BottomSheetContent
+        width="full"
+        keepFocus={false}
         onOpenAutoFocus={() => {
           back.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
         }}
@@ -162,12 +164,12 @@ export function GuideSheet({
           e.preventDefault();
           back.current?.focus();
         }}
-        className="inset-x-safe pb-safe max-h-[88dvh] overflow-y-auto border-edge-soft bg-background"
+        className="gap-4 overflow-y-auto"
       >
-        <SheetHeader className="mx-auto w-full max-w-[40rem] px-4 pt-4 pb-1 sm:px-6">
-          <SheetTitle className="text-[15px] font-medium text-foreground">말로 시킬 수 있는 일</SheetTitle>
-          <SheetDescription className="text-[12.5px] text-faint">대화창에 이렇게 말해 보세요.</SheetDescription>
-        </SheetHeader>
+        <BottomSheetHeader className="mx-auto w-full max-w-[40rem] pb-1 sm:px-6">
+          <BottomSheetTitle className="pr-0">말로 시킬 수 있는 일</BottomSheetTitle>
+          <BottomSheetDescription className="text-[12.5px]">대화창에 이렇게 말해 보세요.</BottomSheetDescription>
+        </BottomSheetHeader>
         <dl className="mx-auto w-full max-w-[40rem] space-y-4 px-4 pb-8 sm:px-6">
           {asks.map((a) => (
             <div key={a.title}>
@@ -178,7 +180,7 @@ export function GuideSheet({
             </div>
           ))}
         </dl>
-      </SheetContent>
+      </BottomSheetContent>
     </Sheet>
   );
 }

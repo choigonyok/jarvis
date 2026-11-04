@@ -1,6 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
+import { UNDO_TOASTER } from "@/components/shell/toasts";
 
 /**
  * One undo at a time, for five seconds - long enough to see what you did,
@@ -12,44 +14,57 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
  * left the device - not even the partner's calendar saw it. A commit still
  * waiting is done at once when another undo replaces it, when the screen
  * goes, or when the page is put away.
+ *
+ * The line is a toast (sonner, components/shell/toasts.tsx): its five
+ * seconds, and its closing by itself, are the commit's; swiping it away
+ * keeps what was done, as letting it run out does.
  */
 export const UNDO_MS = 5000;
 
-type Pending = { id: number; label: string; restore: () => void; commit?: () => void };
+type Pending = { id: string; label: string; restore: () => void; commit?: () => void };
 
 export function useUndo() {
   const [undo, setUndo] = useState<Pending | null>(null);
   const current = useRef<Pending | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const settle = useCallback((commit: boolean) => {
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = null;
     const was = current.current;
     current.current = null;
+    if (was) toast.dismiss(was.id);
+    setUndo((u) => (u && u.id === was?.id ? null : u));
     if (commit) was?.commit?.();
   }, []);
-
-  const offer = useCallback(
-    (label: string, restore: () => void, commit?: () => void) => {
-      settle(true);
-      const next = { id: Date.now(), label, restore, commit };
-      current.current = next;
-      setUndo(next);
-      timer.current = setTimeout(() => {
-        settle(true);
-        setUndo((u) => (u?.id === next.id ? null : u));
-      }, UNDO_MS);
-    },
-    [settle],
-  );
 
   const take = useCallback(() => {
     const was = current.current;
     settle(false);
-    setUndo(null);
     was?.restore();
   }, [settle]);
+
+  const offer = useCallback(
+    (label: string, restore: () => void, commit?: () => void) => {
+      settle(true);
+      const next: Pending = { id: `undo-${Date.now()}`, label, restore, commit };
+      current.current = next;
+      setUndo(next);
+      // The toast's own end is this undo's end - unless another took its place.
+      const ended = () => {
+        if (current.current?.id === next.id) settle(true);
+      };
+      toast.custom(
+        () => (
+          <UndoNotice
+            label={label}
+            onUndo={() => {
+              if (current.current?.id === next.id) take();
+            }}
+          />
+        ),
+        { id: next.id, toasterId: UNDO_TOASTER, duration: UNDO_MS, onAutoClose: ended, onDismiss: ended },
+      );
+    },
+    [settle, take],
+  );
 
   // Leaving the screen, or the phone putting the page away, is not an undo.
   useEffect(() => {
@@ -67,10 +82,7 @@ export function useUndo() {
 /** The line itself: what was done, and the way back. */
 export function UndoNotice({ label, onUndo }: { label: string; onUndo: () => void }) {
   return (
-    <div
-      role="status"
-      className="liquid-glass mb-2 flex items-center gap-2 rounded-2xl py-1 ps-3.5 pe-1 text-[13px]"
-    >
+    <div role="status" className="liquid-glass flex w-full items-center gap-2 rounded-2xl py-1 ps-3.5 pe-1 text-[13px]">
       <span className="min-w-0 flex-1 truncate text-foreground/90">{label}</span>
       <button
         type="button"
@@ -79,20 +91,6 @@ export function UndoNotice({ label, onUndo }: { label: string; onUndo: () => voi
       >
         되돌리기
       </button>
-    </div>
-  );
-}
-
-/** The line where nothing else holds it: just above the tab bar (or the home indicator). */
-export function FloatingUndo({ children }: { children: ReactNode }) {
-  return (
-    <div
-      className="pointer-events-none fixed inset-x-0 z-30 mx-auto max-w-[42rem] px-4 sm:px-8"
-      style={{
-        bottom: "calc(max(var(--tabbar-space), env(safe-area-inset-bottom)) + 0.75rem)",
-      }}
-    >
-      <div className="pointer-events-auto">{children}</div>
     </div>
   );
 }

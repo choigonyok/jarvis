@@ -5,11 +5,11 @@ import { Entry } from "@/components/ledger/entry";
 import { Header, TabBar } from "@/components/shell/header";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { Pager } from "@/components/ui/pager";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { filters, groupByDay, matches, newestFirst, waitingSince, type Filter } from "@/lib/ledger";
 import { usePaged } from "@/lib/paging";
 import { isPending, type Decision, type Proposal } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
-import { cn } from "@/lib/utils";
 
 /**
  * Everything the agent has asked to do, and what happened to each one.
@@ -49,32 +49,24 @@ export function Ledger() {
 
       <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
         <div className="mx-auto w-full max-w-[42rem] px-4 pt-5 pb-10 sm:px-8 sm:pt-6 sm:pb-6">
-          <div
-            role="radiogroup"
+          <ToggleGroup
+            type="single"
             aria-label="보기"
-            className="mb-5 inline-flex items-center gap-0.5 rounded-lg border border-edge-soft bg-glass p-0.5"
+            variant="segment"
+            size="segment"
+            spacing={0.5}
+            value={filter}
+            onValueChange={(v) => {
+              if (v) setFilter(v as Filter);
+            }}
+            className="mb-5 rounded-lg border border-edge-soft bg-glass p-0.5"
           >
-            {filters.map((item) => {
-              const active = filter === item.value;
-              return (
-                <button
-                  key={item.value}
-                  type="button"
-                  role="radio"
-                  aria-checked={active}
-                  onClick={() => setFilter(item.value)}
-                  className={cn(
-                    "tap-y min-h-9 rounded-md px-3 text-[12.5px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 mouse:min-h-0 mouse:px-2.5 mouse:py-1",
-                    active
-                      ? "bg-glass-raised text-foreground"
-                      : "text-faint hover:text-dim",
-                  )}
-                >
-                  {item.label}
-                </button>
-              );
-            })}
-          </div>
+            {filters.map((item) => (
+              <ToggleGroupItem key={item.value} value={item.value} className="min-h-9 mouse:min-h-0 mouse:px-2.5 mouse:py-1">
+                {item.label}
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
 
           {empty ? (
             <p className="max-w-[30rem] text-[13.5px] leading-relaxed text-faint">

@@ -8,7 +8,7 @@ import { MonthSwipe, type MonthSwipeHandle } from "@/components/calendar/month-s
 import { OWNER_LABEL, OWNERS, OwnerDot, ownerOf, type Owner } from "@/components/calendar/owner";
 import { Header, TabBar } from "@/components/shell/header";
 import { StandingBar } from "@/components/shell/standing-bar";
-import { FloatingUndo, UndoNotice, useUndo } from "@/components/shell/undo";
+import { useUndo } from "@/components/shell/undo";
 import { Button } from "@/components/ui/button";
 import {
   addDays,
@@ -59,7 +59,7 @@ export function Calendar() {
   // A removal waits five seconds with 되돌리기 on screen before it is sent:
   // the row is gone at once, and an undo means the shared calendar never
   // heard of it (components/shell/undo.tsx).
-  const { undo, offer, take } = useUndo();
+  const { offer } = useUndo();
   const [leaving, setLeaving] = useState<ReadonlySet<string>>(new Set());
   const allEvents = useMemo(() => fetched.filter((e) => !leaving.has(e.id)), [fetched, leaving]);
   function erase(event: CalendarEvent) {
@@ -336,11 +336,6 @@ export function Calendar() {
           ) : null}
         </div>
 
-        {undo ? (
-          <FloatingUndo>
-            <UndoNotice label={undo.label} onUndo={take} />
-          </FloatingUndo>
-        ) : null}
       </main>
 
       <TabBar pending={pendingCount} />

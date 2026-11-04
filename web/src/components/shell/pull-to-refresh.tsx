@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import { onResume, refreshAll } from "@/lib/resume";
 import { cn } from "@/lib/utils";
 
@@ -169,10 +170,11 @@ export function PullToRefresh() {
           ready ? "text-foreground" : "text-faint",
         )}
       >
-        <RefreshCw
-          className={cn("size-4", reloading && "animate-spin motion-reduce:animate-none")}
-          style={reloading ? undefined : { transform: `rotate(${(pull / TRIGGER) * 270}deg)` }}
-        />
+        {reloading ? (
+          <Spinner icon={RefreshCw} />
+        ) : (
+          <RefreshCw className="size-4" style={{ transform: `rotate(${(pull / TRIGGER) * 270}deg)` }} />
+        )}
       </span>
     </div>
   );

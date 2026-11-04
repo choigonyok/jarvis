@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Brush, ChevronLeft, Download, Play, Search, X } from "lucide-react";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Header, TabBar } from "@/components/shell/header";
 import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
@@ -22,7 +25,6 @@ import {
 import { onResume } from "@/lib/resume";
 import { isPending } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
-import { cn } from "@/lib/utils";
 
 type View = { kind: "library" } | { kind: "albums" } | { kind: "album"; album: Album } | { kind: "search"; query: string };
 
@@ -58,6 +60,15 @@ export function Photos() {
 
       <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
         <div className="mx-auto w-full max-w-[64rem] px-3 pt-3 pb-10 sm:px-6 sm:pt-5">
+          {/* 보관함 and 앨범 are tabs; a search is neither - its results show with no tab lit. */}
+          <Tabs
+            value={view.kind === "library" ? "library" : view.kind === "search" ? "" : "albums"}
+            onValueChange={(v) => {
+              setQuery("");
+              setView({ kind: v as "library" | "albums" });
+            }}
+            className="contents"
+          >
           <div className="mb-3 flex flex-wrap items-center gap-2">
             {view.kind === "album" ? (
               <button
@@ -69,31 +80,10 @@ export function Photos() {
                 {view.album.albumName}
               </button>
             ) : (
-              <div role="tablist" aria-label="보기" className="inline-flex gap-0.5 rounded-lg border border-edge-soft bg-glass p-0.5">
-                {(
-                  [
-                    ["library", "보관함"],
-                    ["albums", "앨범"],
-                  ] as const
-                ).map(([kind, label]) => (
-                  <button
-                    key={kind}
-                    type="button"
-                    role="tab"
-                    aria-selected={view.kind === kind}
-                    onClick={() => {
-                      setQuery("");
-                      setView({ kind });
-                    }}
-                    className={cn(
-                      "min-h-8 rounded-md px-3 text-[12.5px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
-                      view.kind === kind ? "bg-glass-raised text-foreground" : "text-faint hover:text-dim",
-                    )}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
+              <TabsList aria-label="보기">
+                <TabsTrigger value="library">보관함</TabsTrigger>
+                <TabsTrigger value="albums">앨범</TabsTrigger>
+              </TabsList>
             )}
             <form
               onSubmit={(e) => {
@@ -101,34 +91,42 @@ export function Photos() {
                 const q = query.trim();
                 if (q) setView({ kind: "search", query: q });
               }}
-              className="relative ms-auto min-w-0 flex-1 sm:max-w-72"
+              className="ms-auto min-w-0 flex-1 sm:max-w-72"
             >
-              <label className="sr-only" htmlFor="photo-search">
-                사진에 있는 것으로 찾기
-              </label>
-              <Search aria-hidden className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-faint" />
-              <input
-                id="photo-search"
-                type="search"
-                value={query}
-                onChange={(e) => {
-                  setQuery(e.target.value);
-                  if (!e.target.value && view.kind === "search") setView({ kind: "library" });
-                }}
-                placeholder="바다, 강아지, 생일 케이크…"
-                className="h-9 w-full rounded-lg bg-glass ps-8 pe-2 text-[16px] text-foreground outline-none placeholder:text-faint focus-visible:ring-3 focus-visible:ring-ring/50 mouse:text-[13px]"
-              />
+              <InputGroup className="h-9 border-transparent mouse:h-9">
+                <InputGroupAddon className="pl-2.5">
+                  <Search aria-hidden className="size-3.5" />
+                </InputGroupAddon>
+                <InputGroupInput
+                  id="photo-search"
+                  type="search"
+                  aria-label="사진에 있는 것으로 찾기"
+                  value={query}
+                  onChange={(e) => {
+                    setQuery(e.target.value);
+                    if (!e.target.value && view.kind === "search") setView({ kind: "library" });
+                  }}
+                  placeholder="바다, 강아지, 생일 케이크…"
+                  className="ps-1.5 pe-2"
+                />
+              </InputGroup>
             </form>
           </div>
 
-          {view.kind === "library" ? <Timeline onOpen={(list, index) => setOpen({ list, index })} /> : null}
-          {view.kind === "album" ? (
-            <Timeline key={view.album.id} albumId={view.album.id} onOpen={(list, index) => setOpen({ list, index })} />
-          ) : null}
-          {view.kind === "albums" ? <Albums onPick={(album) => setView({ kind: "album", album })} /> : null}
+          <TabsContent value="library">
+            <Timeline onOpen={(list, index) => setOpen({ list, index })} />
+          </TabsContent>
+          <TabsContent value="albums">
+            {view.kind === "album" ? (
+              <Timeline key={view.album.id} albumId={view.album.id} onOpen={(list, index) => setOpen({ list, index })} />
+            ) : (
+              <Albums onPick={(album) => setView({ kind: "album", album })} />
+            )}
+          </TabsContent>
           {view.kind === "search" ? (
             <Results key={view.query} query={view.query} onOpen={(list, index) => setOpen({ list, index })} />
           ) : null}
+          </Tabs>
         </div>
       </main>
 
@@ -354,15 +352,16 @@ function Viewer({ list, start, onClose }: { list: Asset[]; start: number; onClos
   const drag = useRef<{ x: number; y: number } | null>(null);
   const go = useCallback((d: number) => setIndex((i) => Math.min(list.length - 1, Math.max(0, i + d))), [list.length]);
 
+  // Esc is the dialog's own (it closes, and the focus goes back to the
+  // photo it was opened from); the arrows move.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
       if (e.key === "ArrowLeft") go(-1);
       if (e.key === "ArrowRight") go(1);
     };
     addEventListener("keydown", onKey);
     return () => removeEventListener("keydown", onKey);
-  }, [go, onClose]);
+  }, [go]);
 
   if (!a) return null;
   const when = new Date(a.takenAt).toLocaleString("ko-KR", {
@@ -373,12 +372,13 @@ function Viewer({ list, start, onClose }: { list: Asset[]; start: number; onClos
     minute: "2-digit",
   });
 
+  // A dialog: the focus stays inside while it is open and goes back to the
+  // photo after, the page under it does not scroll, and Esc closes it.
   return (
-    <div
-      role="dialog"
-      aria-modal
-      aria-label="사진 보기"
-      className="screen-h fixed inset-x-0 top-0 z-[70] flex flex-col bg-black"
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+    <DialogContent
+      variant="fullscreen"
+      aria-describedby={undefined}
       onPointerDown={(e) => {
         drag.current = { x: e.clientX, y: e.clientY };
       }}
@@ -392,6 +392,7 @@ function Viewer({ list, start, onClose }: { list: Asset[]; start: number; onClos
         else if (dy > 120 && Math.abs(dy) > Math.abs(dx)) onClose();
       }}
     >
+      <DialogTitle className="sr-only">사진 보기</DialogTitle>
       <div className="pt-safe flex shrink-0 items-center gap-2 px-2 py-2 text-white">
         <button type="button" onClick={onClose} aria-label="닫기" className="flex size-11 items-center justify-center rounded-lg outline-none focus-visible:ring-3 focus-visible:ring-white/50">
           <X aria-hidden className="size-5" />
@@ -414,6 +415,7 @@ function Viewer({ list, start, onClose }: { list: Asset[]; start: number; onClos
           <video key={a.id} src={videoUrl(a.id)} poster={thumbUrl(a.id, "preview")} controls autoPlay playsInline className="max-h-full max-w-full" />
         )}
       </div>
-    </div>
+    </DialogContent>
+    </Dialog>
   );
 }

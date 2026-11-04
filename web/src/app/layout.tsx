@@ -1,5 +1,6 @@
 import { PhotoCraft } from "@/components/edit/photocraft";
 import { PushBridge } from "@/components/shell/push-toast";
+import { Toasts } from "@/components/shell/toasts";
 import type { Metadata, Viewport } from "next";
 import { Barlow_Condensed, Instrument_Sans, JetBrains_Mono } from "next/font/google";
 import { headers } from "next/headers";
@@ -79,6 +80,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           {/* The 편집 tab's editor: here rather than in the tab, so it outlives a visit to another one. */}
           <PhotoCraft />
           <PushBridge />
+          <Toasts />
         </RoleProvider>
         <ViewportProbe />
         <NoZoom />

@@ -2,20 +2,29 @@
 
 import { type ReactNode, useState } from "react";
 import { BusFront, LocateFixed, Minus, Plus, Search, TrainFront } from "lucide-react";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { BottomSheetContent, BottomSheetHeader, BottomSheetTitle } from "@/components/ui/bottom-sheet";
+import { Button } from "@/components/ui/button";
+import { Command, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Input } from "@/components/ui/input";
+import { InputGroupAddon, InputGroupButton } from "@/components/ui/input-group";
+import { Sheet } from "@/components/ui/sheet";
+import { SwitchRow } from "@/components/ui/switch";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { Who } from "@/lib/track";
 import { DAY_NAMES, type Line, type Route, type Stop, findLines, findStops, walkMinutes } from "@/lib/transit";
-import { cn } from "@/lib/utils";
 
 const NAMES = ["출근", "퇴근", "학원"];
-
-const action =
-  "inline-flex h-11 items-center justify-center gap-1.5 rounded-lg bg-glass-raised px-4 text-[13.5px] text-foreground outline-none transition-colors hover:bg-white/12 focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-45 mouse:h-9";
-const chip = (on: boolean) =>
-  cn(
-    "flex h-9 items-center rounded-full border px-3.5 text-[13px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-7 mouse:px-3",
-    on ? "border-mine/45 bg-mine/12 text-foreground" : "border-edge text-dim hover:text-foreground",
-  );
 
 /**
  * Stops of one name close together - the two sides of a road, or one stop as
@@ -103,13 +112,13 @@ export function RouteEditor({
 }) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="bottom" className="inset-x-safe pb-safe max-h-[92dvh] overflow-y-auto border-edge-soft bg-background">
-        <SheetHeader className="px-4 pt-4 pb-1 sm:px-6">
-          <SheetTitle className="text-[15px] font-medium text-foreground">{route ? `${route.name} 경로 고치기` : "경로 추가"}</SheetTitle>
-        </SheetHeader>
+      <BottomSheetContent width="full" height="tall" keepFocus={false} aria-describedby={undefined} className="gap-4 overflow-y-auto">
+        <BottomSheetHeader className="pb-1 sm:px-6">
+          <BottomSheetTitle className="pr-0">{route ? `${route.name} 경로 고치기` : "경로 추가"}</BottomSheetTitle>
+        </BottomSheetHeader>
         {/* Keyed so a new opening starts from what is being changed. */}
         {open ? <Form key={route?.id ?? "new"} who={who} route={route} onSave={onSave} onDelete={onDelete} /> : null}
-      </SheetContent>
+      </BottomSheetContent>
     </Sheet>
   );
 }
@@ -132,6 +141,8 @@ function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null;
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [missed, setMissed] = useState<string | null>(null);
+  // The stop the arrow keys light in what was found; Enter takes it.
+  const [lit, setLit] = useState("");
 
   async function look(by: Parameters<typeof findStops>[1]) {
     setBusy("stops");
@@ -209,55 +220,69 @@ function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null;
             {stop ? <StopLabel stop={stop} /> : <PlaceLabel place={place} />}
           </Picked>
         ) : (
-          <>
-            <div className="flex gap-2">
-              <button type="button" onClick={() => void look({ near: "me" })} disabled={busy === "stops"} className={action}>
-                <LocateFixed aria-hidden className="size-4 text-mine" strokeWidth={1.8} />
-                지금 위치 근처
-              </button>
-              <form
-                className="flex min-w-0 flex-1 items-center gap-1 rounded-lg border border-edge pr-1 pl-3 focus-within:border-ring"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (q.trim()) void look({ q: q.trim() });
-                }}
-              >
-                <input
+          // The name is searched on the server (shouldFilter off). Enter with
+          // nothing found searches; with stops found it takes the lit one, so
+          // changing the name drops what the last search found. The form is
+          // the 찾기 button's.
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (q.trim()) void look({ q: q.trim() });
+            }}
+          >
+            <Command shouldFilter={false} value={lit} onValueChange={setLit} label="정류장 찾기">
+              <div className="flex gap-2">
+                <Button type="button" variant="raised" size="touch" onClick={() => void look({ near: "me" })} disabled={busy === "stops"}>
+                  <LocateFixed aria-hidden className="text-mine" strokeWidth={1.8} />
+                  지금 위치 근처
+                </Button>
+                <CommandInput
+                  icon={false}
                   value={q}
-                  onChange={(e) => setQ(e.target.value)}
+                  onValueChange={(v) => {
+                    setQ(v);
+                    setStops(null);
+                  }}
+                  // cmdk keeps Enter for the lit row (and stops the form's own
+                  // submit), so with nothing found Enter searches from here.
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter" || e.nativeEvent.isComposing || e.keyCode === 229) return;
+                    if (!stops?.length && q.trim()) void look({ q: q.trim() });
+                  }}
                   placeholder="정류장·역 이름"
                   aria-label="정류장이나 역 이름"
                   enterKeyHint="search"
-                  className="h-11 min-w-0 flex-1 bg-transparent text-[14px] text-foreground outline-none placeholder:text-faint mouse:h-9"
-                />
-                <button type="submit" aria-label="찾기" className="flex size-9 items-center justify-center rounded-md text-dim hover:text-foreground mouse:size-7">
-                  <Search aria-hidden className="size-4" strokeWidth={1.8} />
-                </button>
-              </form>
-            </div>
-            {busy === "stops" ? <p className="mt-3 text-faint">찾는 중…</p> : null}
-            {stops ? (
-              stops.length ? (
-                <>
-                  {stops.every((s) => s.like) ? (
-                    <p className="mt-3 text-[12px] leading-[1.55] break-keep text-dim">그 이름의 정류장은 없어서 이름의 일부로 찾았어요.</p>
-                  ) : null}
-                  <ul className="mt-2 divide-y divide-edge-soft">
-                    {places(stops).slice(0, 40).map((p) => (
-                      <li key={p.key}>
-                        <button type="button" onClick={() => void pick(p)} className="flex w-full items-center gap-3 py-2.5 text-left outline-none hover:bg-glass focus-visible:ring-3 focus-visible:ring-ring/50">
+                  wrapperClassName="min-w-0 flex-1"
+                >
+                  <InputGroupAddon align="inline-end">
+                    <InputGroupButton type="submit" size="icon-sm" aria-label="찾기" className="text-dim hover:text-foreground mouse:size-7">
+                      <Search aria-hidden strokeWidth={1.8} />
+                    </InputGroupButton>
+                  </InputGroupAddon>
+                </CommandInput>
+              </div>
+              {busy === "stops" ? <p className="mt-3 text-faint">찾는 중…</p> : null}
+              {stops ? (
+                stops.length ? (
+                  <>
+                    {stops.every((s) => s.like) ? (
+                      <p className="mt-3 text-[12px] leading-[1.55] break-keep text-dim">그 이름의 정류장은 없어서 이름의 일부로 찾았어요.</p>
+                    ) : null}
+                    <CommandList className="mt-2 *:divide-y *:divide-edge-soft">
+                      {places(stops).slice(0, 40).map((p) => (
+                        <CommandItem key={p.key} value={p.key} onSelect={() => void pick(p)} className="rounded-none px-0 py-2.5">
                           {p.stops.length === 1 ? <StopLabel stop={p.stops[0]} /> : <PlaceLabel place={p} />}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              ) : (
-                <p className="mt-3 text-dim">찾은 정류장이 없어요. 다른 이름으로 찾아 보세요.</p>
-              )
-            ) : null}
-            {missed ? <p className="mt-2 text-[12px] leading-[1.55] break-keep text-dim">{missed}</p> : null}
-          </>
+                        </CommandItem>
+                      ))}
+                    </CommandList>
+                  </>
+                ) : (
+                  <p className="mt-3 text-dim">찾은 정류장이 없어요. 다른 이름으로 찾아 보세요.</p>
+                )
+              ) : null}
+              {missed ? <p className="mt-2 text-[12px] leading-[1.55] break-keep text-dim">{missed}</p> : null}
+            </Command>
+          </form>
         )}
       </Step>
 
@@ -314,46 +339,65 @@ function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null;
 
           <Step title="이름과 알림">
             <div className="flex flex-wrap gap-1.5">
-              {NAMES.map((n) => (
-                <button key={n} type="button" aria-pressed={name === n} onClick={() => setName(n)} className={chip(name === n)}>
-                  {n}
-                </button>
-              ))}
-              <input
+              {/* The chip lit is the name written; the field takes any other. */}
+              <ToggleGroup
+                type="single"
+                aria-label="이름"
+                variant="chip"
+                tone="mine"
+                size="chip"
+                spacing={1.5}
+                value={NAMES.includes(name) ? name : ""}
+                onValueChange={(v) => {
+                  if (v) setName(v);
+                }}
+              >
+                {NAMES.map((n) => (
+                  <ToggleGroupItem key={n} value={n} className="px-3.5 text-[13px] mouse:px-3">
+                    {n}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
+              <Input
+                surface="glass"
                 value={NAMES.includes(name) ? "" : name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="다른 이름"
                 aria-label="경로 이름"
                 maxLength={20}
-                className="h-9 w-28 rounded-full border border-edge bg-transparent px-3.5 text-[13px] text-foreground outline-none placeholder:text-faint focus-visible:border-ring mouse:h-7"
+                className="h-9 w-28 rounded-full px-3.5 mouse:h-7"
               />
             </div>
-            <div className="mt-3 flex flex-wrap gap-1.5" role="group" aria-label="요일">
-              {DAY_NAMES.map((d, i) => {
-                const on = days.includes(i + 1);
-                return (
-                  <button
-                    key={d}
-                    type="button"
-                    aria-pressed={on}
-                    onClick={() => setDays(on ? days.filter((x) => x !== i + 1) : [...days, i + 1].sort())}
-                    className={cn(chip(on), "w-10 justify-center px-0 mouse:w-8 mouse:px-0")}
-                  >
-                    {d}
-                  </button>
-                );
-              })}
-            </div>
+            <ToggleGroup
+              type="multiple"
+              aria-label="요일"
+              variant="chip"
+              tone="mine"
+              size="chip"
+              spacing={1.5}
+              value={days.map(String)}
+              onValueChange={(v) => setDays(v.map(Number).sort())}
+              className="mt-3 flex-wrap"
+            >
+              {DAY_NAMES.map((d, i) => (
+                <ToggleGroupItem key={d} value={String(i + 1)} className="w-10 px-0 text-[13px] mouse:w-8">
+                  {d}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
             <div className="mt-3 flex items-center gap-2 text-dim">
-              <input type="time" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="시간대 시작" className="tnum h-11 rounded-lg border border-edge bg-transparent px-3 text-foreground outline-none focus-visible:border-ring mouse:h-9" />
+              <Input surface="glass" type="time" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="시간대 시작" className="tnum w-auto" />
               부터
-              <input type="time" value={to} onChange={(e) => setTo(e.target.value)} aria-label="시간대 끝" className="tnum h-11 rounded-lg border border-edge bg-transparent px-3 text-foreground outline-none focus-visible:border-ring mouse:h-9" />
+              <Input surface="glass" type="time" value={to} onChange={(e) => setTo(e.target.value)} aria-label="시간대 끝" className="tnum w-auto" />
               까지
             </div>
-            <label className={cn("mt-3 flex items-center gap-2.5", !windowSet && "opacity-50")}>
-              <input type="checkbox" checked={push && windowSet} disabled={!windowSet} onChange={(e) => setPush(e.target.checked)} className="size-4 accent-[var(--mine)]" />
-              <span className="text-foreground/90">이 시간대에 나갈 때를 알림으로 알려 주기</span>
-            </label>
+            <SwitchRow
+              checked={push && windowSet}
+              disabled={!windowSet}
+              onCheckedChange={setPush}
+              label="이 시간대에 나갈 때를 알림으로 알려 주기"
+              className="mt-2"
+            />
             <p className="mt-1.5 text-[12px] leading-[1.55] break-keep text-faint">
               나가기 15분 전에 ‘슬슬 짐 싸야 해요’, 2분 전에 ‘지금 나가요’를 보내요. 방해 금지 시간에도 울려요.
             </p>
@@ -368,23 +412,37 @@ function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null;
       ) : null}
 
       <div className="flex items-center gap-2">
-        <button type="button" onClick={() => void save()} disabled={!stop || !line || !name.trim() || busy === "save"} className={cn(action, "flex-1")}>
+        <Button variant="raised" size="touch" onClick={() => void save()} disabled={!stop || !line || !name.trim() || busy === "save"} className="flex-1">
           {busy === "save" ? "저장하는 중…" : "경로 저장"}
-        </button>
-        {onDelete ? (
-          <button
-            type="button"
-            onClick={() => {
-              setBusy("save");
-              void onDelete().catch((e) => {
-                setError(e instanceof Error ? e.message : "지우지 못했어요.");
-                setBusy(null);
-              });
-            }}
-            className="h-11 rounded-lg px-3 text-[13px] text-dim outline-none hover:text-reject focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-9"
-          >
-            지우기
-          </button>
+        </Button>
+        {onDelete && route ? (
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="reject" size="touch-sm" disabled={busy === "save"}>
+                지우기
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>{route.name} 경로를 지울까요?</AlertDialogTitle>
+                <AlertDialogDescription>이 경로의 출발 시각과 알림이 함께 사라져요. 되돌릴 수 없어요.</AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>두기</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => {
+                    setBusy("save");
+                    void onDelete().catch((e) => {
+                      setError(e instanceof Error ? e.message : "지우지 못했어요.");
+                      setBusy(null);
+                    });
+                  }}
+                >
+                  지우기
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         ) : null}
       </div>
     </div>
