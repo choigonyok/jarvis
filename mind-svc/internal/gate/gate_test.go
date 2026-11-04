@@ -583,6 +583,53 @@ func TestAMoveAskedInTheConversation(t *testing.T) {
 	}
 }
 
+// A card in the conversation that added an entry does not speak for changing
+// it after: approved at 11:56, it kept both moves of '은주와 저녁's place - 망원
+// at 12:00, 모퉁이맥주 from KakaoTalk at 17:30 - off the calendar (2026-11-04).
+// Adding the same again is still its question; a move the memo says already
+// is no question at all.
+func TestAChangeAfterTheConversationAddedItIsAsked(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(DefaultPolicy())
+	entry, _ := f.cal.Put(ctx, model.CalendarEvent{Title: "은주와 저녁", Date: "2026-11-04", Memo: "퇴근 후 · 망원", Owner: "shared"})
+	if _, err := f.g.Asked(ctx, "p-1", model.HeldCalendarCreate, "일정을 추가합니다", model.CalendarAction{
+		Event: model.CalendarEvent{Title: "은주와 저녁", Date: "2026-11-04"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.g.Answered(ctx, HeldAnswer{Card: "p-1", Kind: model.HeldCalendarCreate, Approved: true, At: f.clock}); err != nil {
+		t.Fatal(err)
+	}
+	for _, room := range []string{"calendar", model.OwnerRoom} {
+		entity := "plan_" + strings.ReplaceAll(room, ":", "_")
+		if _, _, err := f.st.Put(ctx, model.Entity{ID: entity, Kind: model.KindPlan, Room: room,
+			State: model.State{Title: "은주와 저녁", Status: model.Confirmed, Date: "2026-11-04", Place: "모퉁이맥주", CalendarID: entry.ID}}, model.Change{}); err != nil {
+			t.Fatal(err)
+		}
+		change := func(kind, place string) model.Intent {
+			was := model.CalendarEvent{Title: "은주와 저녁", Date: "2026-11-04", Place: "망원"}
+			payload, _ := json.Marshal(model.CalendarAction{EventID: entry.ID, Was: &was, Event: model.CalendarEvent{Title: "은주와 저녁", Date: "2026-11-04", Place: place, Owner: "shared"}})
+			return model.Intent{Skill: ScheduleSkill, Kind: kind, EntityID: entity, Payload: payload, Title: "캘린더 수정: 은주와 저녁", Confidence: 0.85, Reversible: true}
+		}
+		moved, _ := f.g.Submit(ctx, change("calendar.update", "모퉁이맥주"))
+		if moved.Status != model.Pending || !moved.Card {
+			t.Fatalf("%s: 추가한 카드는 그 뒤의 수정을 대신하지 않습니다: %+v", room, moved)
+		}
+		said, _ := f.g.Submit(ctx, change("calendar.update", "망원"))
+		if said.Status != model.Executed || said.Card || !strings.HasPrefix(said.Why, "캘린더에 이미 그렇게") {
+			t.Fatalf("%s: 메모에 이미 있는 장소는 묻지 않습니다: %+v", room, said)
+		}
+		gone, _ := f.g.Submit(ctx, change("calendar.delete", ""))
+		if gone.Status != model.Pending || !gone.Card {
+			t.Fatalf("%s: 지우는 것도 따로 묻습니다: %+v", room, gone)
+		}
+		_ = f.g.Withdraw(ctx, entity, ScheduleSkill)
+	}
+	again, _ := f.g.Submit(ctx, addAt(t, f, "plan_again", "kakao:1", "은주와 저녁", "2026-11-04", ""))
+	if !again.Covered() {
+		t.Fatalf("같은 일정을 또 추가하는 것은 대화의 카드가 물었습니다: %+v", again)
+	}
+}
+
 // With no card in the conversation, mind's is the only question.
 func TestNoCardInTheConversationAsksAsBefore(t *testing.T) {
 	ctx := context.Background()

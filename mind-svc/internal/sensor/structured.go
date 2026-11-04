@@ -529,6 +529,13 @@ func (s *Structured) syncEntry(ctx context.Context, ev entry, linked []model.Ent
 	_, _, err := s.World.Update(ctx, own.ID, func(st *model.State) bool {
 		want := fromEntry(ev)
 		want.Type, want.PlaceKind, want.Area = keep(st.Type, want.Type), keep(st.PlaceKind, want.PlaceKind), keep(st.Area, want.Area)
+		// Where is kept in the memo now, not in a field (calendar-svc,
+		// 2026-10-30): an entry whose memo says the plan's place still has it,
+		// and reading it again took it off the plan - after the move to it
+		// was approved, too (2026-11-03 캠핑장, 2026-11-04 망원).
+		if want.Place == "" && st.Place != "" && strings.Contains(ev.Memo, st.Place) {
+			want.Place = st.Place
+		}
 		if len(st.People) > 0 && len(want.People) == 0 {
 			want.People = st.People
 		}

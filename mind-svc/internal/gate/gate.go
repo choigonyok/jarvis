@@ -774,13 +774,21 @@ func (g *Gate) TurnedDown(ctx context.Context, ev model.CalendarEvent, said stri
 
 // asksSame is whether a card in the conversation (held) asks what in asks: the
 // same entry, unless it is moved two ways - two changes to one entry are two
-// questions - or plans that are one event. What the operator said to the
+// questions, and so are adding it and changing it - or plans that are one
+// event. What the operator said to the
 // assistant is a plan read from the very words of the card, under a title of the
 // interpreter's: there, the day and the hour say it.
 func (g *Gate) asksSame(ctx context.Context, in, held model.Intent) bool {
 	var a, b model.CalendarAction
 	if len(held.Payload) == 0 || !strings.HasPrefix(held.Kind, "calendar.") ||
 		json.Unmarshal(in.Payload, &a) != nil || json.Unmarshal(held.Payload, &b) != nil {
+		return false
+	}
+	// A card that asked to add an entry speaks for adding it, not for what
+	// changes about it after: approved at 11:56, '은주와 저녁' kept both moves of
+	// its place that day (망원, then 모퉁이맥주 from KakaoTalk) off the calendar
+	// for its 48 hours (2026-11-04).
+	if in.Kind != "calendar.create" && held.Kind == model.HeldCalendarCreate {
 		return false
 	}
 	told := false
@@ -873,6 +881,9 @@ func (g *Gate) linkOnly(ctx context.Context, in *model.Intent, by string, alread
 	at := g.now()
 	in.Status, in.DecidedBy, in.DecidedAt, in.ExecutedAt = model.Executed, by, &at, &at
 	in.Why, in.Preview = "이미 있어서 연결만 했어요: "+already.Line, already.Line
+	if in.Kind == "calendar.update" {
+		in.Why = "캘린더에 이미 그렇게 적혀 있어요: " + already.Line
+	}
 	in.Result, _ = json.Marshal(map[string]any{"calendarId": already.ID, "linked": true})
 	g.observe(ctx, obs.ActionExecuted, *in, in.Result)
 }

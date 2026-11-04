@@ -857,7 +857,9 @@ func check(ctx context.Context, st store.Store, cal *act.MemoryCalendar, ex Expe
 	for _, want := range ex.Calendar {
 		found := false
 		for _, e := range cal.All() {
-			if (want.Place == "" || e.Place == want.Place) && (want.Date == "" || e.Date == want.Date) &&
+			// Where is kept in the memo (calendar-svc, 2026-10-30), and a move
+			// puts it there.
+			if (want.Place == "" || e.Place == want.Place || strings.Contains(e.Memo, want.Place)) && (want.Date == "" || e.Date == want.Date) &&
 				(want.TitleHas == "" || strings.Contains(e.Title, want.TitleHas)) {
 				found = true
 			}

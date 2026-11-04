@@ -94,6 +94,58 @@ func TestSyncCalendar(t *testing.T) {
 
 func Meta() world.Meta { return world.Meta{Actor: "test"} }
 
+// Where is kept in the memo now (calendar-svc, 2026-10-30). Reading an entry
+// again keeps the place of its plan when the memo says it, and only then: the
+// approved move to 캠핑장 (2026-11-03) and 망원 (2026-11-04) were read off
+// their plans minutes later.
+func TestSyncCalendarKeepsThePlaceTheMemoSays(t *testing.T) {
+	ctx := context.Background()
+	st := store.NewMemory()
+	now := time.Date(2026, 11, 4, 16, 0, 0, 0, seoul)
+	w := world.New(st, func() time.Time { return now })
+	s := &Structured{Store: st, Observer: observer{st}, World: w, Loc: seoul, Now: func() time.Time { return now }}
+	evs := []entry{{ID: "c1", Title: "은주와 저녁", Date: "2026-11-04", Memo: "퇴근 후 · 망원", Owner: "shared"}}
+	if err := s.SyncCalendar(ctx, evs, "2026-10-28", "2027-01-04"); err != nil {
+		t.Fatal(err)
+	}
+	plans, _ := st.Entities(ctx, model.KindPlan, CalendarRoom, true)
+	if len(plans) != 1 {
+		t.Fatalf("%+v", plans)
+	}
+	id := plans[0].ID
+	place := func(p string) {
+		t.Helper()
+		if _, _, err := w.Update(ctx, id, func(st *model.State) bool { st.Place = p; return true }, Meta()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read := func() string {
+		t.Helper()
+		if err := s.SyncCalendar(ctx, evs, "2026-10-28", "2027-01-04"); err != nil {
+			t.Fatal(err)
+		}
+		got, _ := st.Entity(ctx, id)
+		return got.State.Place
+	}
+	place("망원")
+	if got := read(); got != "망원" {
+		t.Fatalf("메모에 있는 장소는 그대로: %q", got)
+	}
+	place("모퉁이맥주")
+	if got := read(); got != "" {
+		t.Fatalf("캘린더가 모르는 장소는 캘린더를 따릅니다: %q", got)
+	}
+	evs[0].Memo = "모퉁이맥주\n퇴근 후 · 망원"
+	place("모퉁이맥주")
+	if got := read(); got != "모퉁이맥주" {
+		t.Fatalf("옮긴 뒤에도 그대로: %q", got)
+	}
+	evs[0].Place = "골목호프"
+	if got := read(); got != "골목호프" {
+		t.Fatalf("항목의 장소가 먼저입니다: %q", got)
+	}
+}
+
 // An entry put on the calendar another way (the assistant, in a conversation)
 // under another title is tied to the conversation's plan it is - no second
 // plan of the calendar's own to be "missing from the calendar" or to collide.

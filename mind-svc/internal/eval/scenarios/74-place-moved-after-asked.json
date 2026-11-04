@@ -1,0 +1,35 @@
+{
+  "name": "비서 카드로 넣은 일정의 장소를 카톡에서 바꾸면 묻는다: 넣은 카드는 그 뒤의 수정을 대신하지 않고, 승인하면 메모 첫 줄에 들어가며 메모는 남고, 다시 읽어도 장소가 그대로다 (2026-11-04 은주와 저녁)",
+  "room": "eunju-dinner",
+  "roomName": "은주",
+  "turns": [
+    {
+      "at": "2026-11-04T11:56",
+      "entries": [
+        { "id": "cal-dinner", "title": "은주와 저녁", "date": "2026-11-04", "memo": "퇴근 후 · 망원", "owner": "shared" }
+      ],
+      "asked": { "event": { "title": "은주와 저녁", "date": "2026-11-04" } },
+      "expect": { "noCards": true, "calendarCount": 1, "plans": [{ "titleHas": "은주와 저녁", "onCalendar": true }] }
+    },
+    {
+      "messages": [
+        { "at": "2026-11-04T17:25", "from": "은주", "text": "골목호프이랑 모퉁이맥주 중에 어디 갈래?" },
+        { "at": "2026-11-04T17:28", "me": true, "text": "모퉁이요~" },
+        { "at": "2026-11-04T17:29", "from": "은주", "text": "그래용" }
+      ],
+      "script": {"changes":[{"op":"update","kind":"plan","ref":"P1","set":{"place":"모퉁이맥주","placeKind":"식당"},"evidence":[{"line":2,"quote":"모퉁이요~"},{"line":3,"quote":"그래용"}],"confidence":0.85,"why":"운영자가 모퉁이맥주를 고르고 은주가 동의함"}]},
+      "expect": { "plans": [{ "titleHas": "은주와 저녁", "place": "모퉁이맥주", "onCalendar": true }], "intents": ["calendar.update"], "cardCount": 1 }
+    },
+    {
+      "approve": "calendar.update",
+      "expect": { "calendar": [{ "place": "모퉁이맥주", "date": "2026-11-04" }, { "place": "퇴근 후", "date": "2026-11-04" }], "calendarCount": 1 }
+    },
+    {
+      "at": "2026-11-04T18:06",
+      "entries": [
+        { "id": "cal-dinner", "title": "은주와 저녁", "date": "2026-11-04", "memo": "모퉁이맥주\n퇴근 후 · 망원", "owner": "shared" }
+      ],
+      "expect": { "noCards": true, "plans": [{ "titleHas": "은주와 저녁", "place": "모퉁이맥주", "onCalendar": true }] }
+    }
+  ]
+}

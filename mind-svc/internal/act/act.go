@@ -166,6 +166,13 @@ func (c CalendarActuator) Preview(ctx context.Context, kind string, payload json
 			return "", &Already{ID: same.ID, Line: entryLine(same)}
 		}
 	}
+	if kind == "calendar.update" {
+		// Said there already - the place in the memo the assistant's own card
+		// wrote ("퇴근 후 · 망원", 2026-11-04): nothing to ask.
+		if prev, err := c.Cal.Get(ctx, a.EventID); err == nil && unchanged(prev, moved(prev, a)) {
+			return "", &Already{ID: prev.ID, Line: entryLine(prev)}
+		}
+	}
 	line := a.Event.Date
 	if a.Event.Start != "" {
 		line += " " + a.Event.Start
@@ -243,9 +250,7 @@ func (c CalendarActuator) Execute(ctx context.Context, kind string, payload json
 		if err != nil {
 			return nil, nil, err
 		}
-		next := a.Event
-		next.ID = a.EventID
-		saved, err := c.Cal.Put(ctx, next)
+		saved, err := c.Cal.Put(ctx, moved(prev, a))
 		if err != nil {
 			return nil, nil, err
 		}
@@ -278,6 +283,58 @@ func (c CalendarActuator) Undo(ctx context.Context, _ string, undo json.RawMessa
 		return result(saved.ID), err
 	}
 	return nil, fmt.Errorf("되돌릴 수 없는 기록 %q", u.Op)
+}
+
+// moved is the entry as a move leaves it: when and what as the plan says, and
+// the entry's own memo with where in it. The calendar keeps where in the memo
+// (calendar-svc event.Validate, 2026-10-30), and the memo is the operator's:
+// a move wrote mind's line over it, and "퇴근 후 · 망원" would have gone with the
+// move to 모퉁이맥주 (2026-11-04).
+func moved(prev model.CalendarEvent, a model.CalendarAction) model.CalendarEvent {
+	next := a.Event
+	next.ID = a.EventID
+	// An entry read with its place on an old 📍 line keeps it, and a plan that
+	// knows no place takes none off.
+	place, was := next.Place, prev.Place
+	if place == "" {
+		place = prev.Place
+	}
+	if was == "" && a.Was != nil {
+		was = a.Was.Place
+	}
+	next.Memo, next.Place = movedMemo(prev.Memo, was, place), ""
+	return next
+}
+
+// movedMemo is a memo with the place moved to: on its first line, unless the
+// memo says it already, and the old place, alone on the first line, gives way.
+func movedMemo(memo, was, place string) string {
+	if place == "" {
+		return memo
+	}
+	if first, rest, _ := strings.Cut(memo, "\n"); was != "" && was != place && strings.TrimSpace(first) == was {
+		memo = rest
+	}
+	return withPlace(place, memo)
+}
+
+// withPlace is calendar-svc's: what it saves of a memo handed a place.
+func withPlace(place, memo string) string {
+	switch {
+	case place == "" || strings.Contains(memo, place):
+		return memo
+	case memo == "":
+		return place
+	}
+	return place + "\n" + memo
+}
+
+// unchanged is whether a move would leave the entry as it is, the memo as
+// the calendar would show it.
+func unchanged(prev, next model.CalendarEvent) bool {
+	return prev.Title == next.Title && prev.Date == next.Date && prev.EndDate == next.EndDate &&
+		prev.Start == next.Start && prev.End == next.End && prev.Owner == next.Owner &&
+		withPlace(prev.Place, prev.Memo) == next.Memo
 }
 
 func result(id string) json.RawMessage { return mustJSON(map[string]string{"calendarId": id}) }
