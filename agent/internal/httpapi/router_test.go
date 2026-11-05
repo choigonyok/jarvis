@@ -620,10 +620,10 @@ func TestAPaymentWindowIsOneCard(t *testing.T) {
 		t.Fatalf("결제창을 여는 요청은 카드를 올리고 막아야 합니다: %v", first)
 	}
 	cards := props.List()
-	if len(cards) != 1 || cards[0].Card.Title != "결제창에서 결제합니다" {
+	if len(cards) != 1 || cards[0].Card.Title != "결제창에서 64,000원을 결제합니다" {
 		t.Fatalf("결제창 카드: %+v", cards)
 	}
-	for _, want := range []string{"결제창이 받은 금액: 64,000원", "결제창이 받은 상품: 장범준 2집 LP", "stdpay.inicis.com", "작업: 장범준"} {
+	for _, want := range []string{"결제 금액: 64,000원 (결제창이 받은 금액)", "결제창이 받은 상품: 장범준 2집 LP", "stdpay.inicis.com", "작업: 장범준"} {
 		if !strings.Contains(cards[0].Card.Body, want) {
 			t.Fatalf("카드에 %q 가 없습니다: %s", want, cards[0].Card.Body)
 		}
@@ -841,6 +841,69 @@ func TestAPaymentCardShowsTheSavedAddress(t *testing.T) {
 	}
 	if roadKey("서울 중구 세종대로 110 (태평로1가)") != "세종대로110" {
 		t.Fatalf("괄호를 뺀 도로명+건물번호: %q", roadKey("서울 중구 세종대로 110 (태평로1가)"))
+	}
+}
+
+// How much is the first thing a payment card says: the title - which is how
+// the phone's notice begins - and the body's first line, with where it was
+// read. A 네이버페이 order's request carries no amount, so a job's says what
+// the job reported right before paying; the books of 2026-11-05 had theirs
+// only inside that report.
+func TestAPaymentCardSaysHowMuch(t *testing.T) {
+	book := Payment{Host: "m.pay.naver.com", URL: "https://m.pay.naver.com/orderApi/payment/universal/log", JobID: 7, JobTitle: "책 주문",
+		JobSummary: "결제 직전 · 책 1권 (알라딘) · 17,100원(배송비 0) · 네이버페이 · 배송지 서울 중구 세종대로 110 101동 1001호"}
+	card := paymentCard(book, nil)
+	if card.Title != "17,100원을 결제합니다" {
+		t.Fatalf("제목: %q", card.Title)
+	}
+	if !strings.HasPrefix(card.Body, "결제 금액: 17,100원 (작업이 결제 직전에 남긴 금액)\n작업: 책 주문\n") {
+		t.Fatalf("본문 첫 줄: %s", card.Body)
+	}
+	if !strings.Contains(card.Consequence, "결제 한 건(17,100원)") {
+		t.Fatalf("결과 문구: %q", card.Consequence)
+	}
+	// The conversation's own payment has no report: the card says it could not read one.
+	bare := paymentCard(Payment{Host: "pay.naver.com", URL: "https://pay.naver.com/x"}, nil)
+	if bare.Title != "결제를 진행합니다" || !strings.HasPrefix(bare.Body, "결제 금액: 읽지 못했습니다") || strings.Contains(bare.Consequence, "원)") {
+		t.Fatalf("금액을 모르면 모른다고 합니다: %+v", bare)
+	}
+	coupang := paymentCard(Payment{Host: "checkout.coupang.com", JobID: 3, JobTitle: "휴지", JobSummary: "결제 직전 · 휴지 · 1개 · 결제 금액 34,350원 · 쿠페이"}, nil)
+	if coupang.Title != "쿠팡에서 쿠페이로 34,350원을 결제합니다" || !strings.Contains(coupang.Consequence, "결제 한 건(34,350원)") {
+		t.Fatalf("쿠팡: %+v", coupang)
+	}
+	// What the window was handed is the amount the approval is held to; a job
+	// that said another is a warning above everything.
+	window := Payment{Host: "stdpay.inicis.com", Window: true, Amount: "113000", JobID: 1, JobTitle: "LP",
+		JobSummary: "결제 직전 · LP 2장 · 결제 금액 108,000원 · 신용카드"}
+	card = paymentCard(window, nil)
+	if card.Title != "결제창에서 113,000원을 결제합니다" || !strings.HasPrefix(card.Body, "⚠ 작업이 남긴 금액(108,000원)과 결제창이 받은 금액(113,000원)이 다릅니다") ||
+		!strings.Contains(card.Body, "결제 금액: 113,000원 (결제창이 받은 금액)") {
+		t.Fatalf("결제창과 작업의 금액이 다르면: %+v", card)
+	}
+	window.JobSummary = "결제 직전 · LP 2장 · 113,000원(상품 108,000+배송 5,000) · 신용카드"
+	if card := paymentCard(window, nil); strings.Contains(card.Body, "⚠") {
+		t.Fatalf("같은 금액이면 경고하지 않습니다: %s", card.Body)
+	}
+}
+
+// The reports jobs actually left before paying (2026-10-30 LP, 2026-11-05
+// books, addresses replaced), and the shapes the amount is not read from.
+func TestReportedAmount(t *testing.T) {
+	for summary, want := range map[string]string{
+		"결제 직전 · 소설 1권 (알라딘) · 17,100원(배송비 0) · 네이버페이 · 배송지 서울 중구 세종대로 110":                                    "17100",
+		"결제 직전 · 에세이(옮긴이 이름, 개정판) 1권 · 16,920원(배송비 0) · 알라딘 네이버페이 · 배송지 세종대로 110":                              "16920",
+		"결제 직전 · 공식 MD몰 장범준 2집 LP 1개(59,000원)+3집 LP 1개(49,000원) · 상품 108,000원+배송비 5,000원=113,000원 · 결제수단 신용카드": "113000",
+		"결제 직전 · 공식 MD몰 장범준 2집 LP 1개(59,000원)+3집 LP 1개(49,000원) · 113,000원(배송비 5,000 포함) · 결제수단 신용카드":          "113000",
+		"결제 직전 · 장범준 2집 LP + 3집 LP(공식 MD몰, 비회원) · 각 1개 · 113,000원(상품 108,000+배송 5,000) · 결제수단 신용카드":            "113000",
+		"결제 직전 · 책 · 1권 · 결제 금액 15,300원(포인트 1,800원 사용) · 네이버페이":                                                "15300",
+		"주문서를 채웠습니다 · 최종 결제금액 9,900원":                                                                          "9900",
+		"장바구니에 담았습니다 · 19,000원":  "",
+		"결제 직전 · 책 · 1권 · 네이버페이": "",
+		"": "",
+	} {
+		if got := reportedAmount(summary); got != want {
+			t.Errorf("%q: %q, want %q", summary, got, want)
+		}
 	}
 }
 

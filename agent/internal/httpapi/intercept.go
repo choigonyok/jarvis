@@ -447,7 +447,11 @@ func addressLines(p Payment, addr *SavedAddress) (warn, saved string) {
 
 // paymentCard says what is being asked: a payment, every time - a sign-in
 // host is let through without a card (backgroundLogin) and none is on the ask
-// list, so a card for opening a sign-in page never came (2026-11-03).
+// list, so a card for opening a sign-in page never came (2026-11-03). How much
+// is said first - in the title, which is also how the phone's notice begins,
+// and in the body's first line with where it was read - because it is the
+// thing being approved: a book's 17,100원 was a word inside the job's report,
+// and the notice and the card did not show it (2026-11-05).
 func paymentCard(p Payment, addr *SavedAddress) action.Card {
 	// The host is the part a person can actually judge; the path is there
 	// for the case where two flows share a provider.
@@ -463,6 +467,7 @@ func paymentCard(p Payment, addr *SavedAddress) action.Card {
 	if saved != "" {
 		body = saved + "\n" + body
 	}
+	amount, from := paidAmount(p)
 	if p.JobID != 0 {
 		// What is being bought is the job's to say: the request carries no
 		// amount (but a payment window's), and the job's last report is what
@@ -473,60 +478,145 @@ func paymentCard(p Payment, addr *SavedAddress) action.Card {
 		}
 		body = job + "\n\n" + body
 	}
+	line := "결제 금액: 읽지 못했습니다 - 결제 화면에서 금액을 확인하고 승인하세요"
+	if amount != "" {
+		line = "결제 금액: " + won(amount) + " (" + from + ")"
+	}
+	if p.JobID != 0 {
+		body = line + "\n" + body
+	} else {
+		body = line + "\n\n" + body
+	}
+	if told := reportedAmount(p.JobSummary); p.Amount != "" && told != "" && told != p.Amount {
+		line := "⚠ 작업이 남긴 금액(" + won(told) + ")과 결제창이 받은 금액(" + won(p.Amount) + ")이 다릅니다 - 주문서를 확인하고 승인하세요."
+		if warn == "" {
+			warn = line
+		} else {
+			warn += "\n" + line
+		}
+	}
 	if warn != "" {
 		body = warn + "\n\n" + body
 	}
+	note := ""
+	if amount != "" {
+		note = "(" + won(amount) + ")"
+	}
 	if p.Window {
 		consequence := fmt.Sprintf("결제가 청구됩니다 · 되돌릴 수 없습니다 · 승인하면 결제창을 다시 연 때부터 %d분 동안 결제 한 건%s이 진행됩니다(결제창 안에서는 네이버페이·신용카드)",
-			int(holder.Window.Minutes()), amountNote(p))
+			int(holder.Window.Minutes()), note)
 		if p.JobID != 0 {
 			consequence = fmt.Sprintf("결제가 청구됩니다 · 되돌릴 수 없습니다 · 승인하면 이 작업이 결제창을 다시 열어 결제 한 건%s을 진행합니다(연 때부터 %d분, 결제창 안에서는 네이버페이·신용카드)",
-				amountNote(p), int(holder.Window.Minutes()))
+				note, int(holder.Window.Minutes()))
 		}
 		return action.Card{
-			Title:       "결제창에서 결제합니다",
+			Title:       payTitle("결제창에서 ", amount, "결제창에서 결제합니다"),
 			Body:        body,
 			Consequence: consequence,
 		}
 	}
 	if site := siteOf(p.Host); site == "coupang.com" {
-		consequence := fmt.Sprintf("결제가 청구됩니다 · 되돌릴 수 없습니다 · 승인하면 이 결제 한 건이 진행됩니다(다시 진행한 때부터 %d분 안에, 결제하기 한 번)",
-			int(holder.Window.Minutes()))
+		consequence := fmt.Sprintf("결제가 청구됩니다 · 되돌릴 수 없습니다 · 승인하면 이 결제 한 건%s이 진행됩니다(다시 진행한 때부터 %d분 안에, 결제하기 한 번)",
+			note, int(holder.Window.Minutes()))
 		if p.JobID != 0 {
-			consequence = fmt.Sprintf("결제가 청구됩니다 · 되돌릴 수 없습니다 · 승인하면 이 작업이 결제 한 건을 다시 진행합니다(진행한 때부터 %d분 안에, 결제하기 한 번)",
-				int(holder.Window.Minutes()))
+			consequence = fmt.Sprintf("결제가 청구됩니다 · 되돌릴 수 없습니다 · 승인하면 이 작업이 결제 한 건%s을 다시 진행합니다(진행한 때부터 %d분 안에, 결제하기 한 번)",
+				note, int(holder.Window.Minutes()))
 		}
 		return action.Card{
-			Title:       "쿠팡에서 쿠페이로 결제합니다",
+			Title:       payTitle("쿠팡에서 쿠페이로 ", amount, "쿠팡에서 쿠페이로 결제합니다"),
 			Body:        body,
 			Consequence: consequence,
 		}
 	}
-	consequence := fmt.Sprintf("결제가 청구됩니다 · 되돌릴 수 없습니다 · 승인하면 이 결제 한 건이 진행됩니다(다시 진행한 때부터 %d분 안에)", int(holder.Window.Minutes()))
+	consequence := fmt.Sprintf("결제가 청구됩니다 · 되돌릴 수 없습니다 · 승인하면 이 결제 한 건%s이 진행됩니다(다시 진행한 때부터 %d분 안에)", note, int(holder.Window.Minutes()))
 	if p.JobID != 0 {
-		consequence = fmt.Sprintf("결제가 청구됩니다 · 되돌릴 수 없습니다 · 승인하면 이 작업이 결제 한 건을 다시 진행합니다(진행한 때부터 %d분 안에)", int(holder.Window.Minutes()))
+		consequence = fmt.Sprintf("결제가 청구됩니다 · 되돌릴 수 없습니다 · 승인하면 이 작업이 결제 한 건%s을 다시 진행합니다(진행한 때부터 %d분 안에)", note, int(holder.Window.Minutes()))
 	}
 	return action.Card{
-		Title:       "결제를 진행합니다",
+		Title:       payTitle("", amount, "결제를 진행합니다"),
 		Body:        body,
 		Consequence: consequence,
 	}
 }
 
-// windowOrder is what a payment window was handed, as the card shows it -
-// the mall's own words, so cut short and kept on one line.
-func windowOrder(p Payment) string {
-	var lines []string
+// payTitle is a payment card's title: how much, when the card knows it -
+// "결제창에서 64,000원을 결제합니다" - and unknown, the title without it.
+func payTitle(where, amount, unknown string) string {
+	if amount == "" {
+		return unknown
+	}
+	return where + won(amount) + "을 결제합니다"
+}
+
+// paidAmount is how much a payment card says it is for, and where it read
+// that: what the request hands a payment window, else what the job said right
+// before paying. No other payment's request carries one - 네이버페이's held
+// writes were a log line, a password check and the order sheet's ids
+// (2026-11-05) - and a guess is worse than none on this card.
+func paidAmount(p Payment) (amount, from string) {
 	if p.Amount != "" {
-		lines = append(lines, "결제창이 받은 금액: "+won(p.Amount))
+		return p.Amount, "결제창이 받은 금액"
 	}
-	if item := strings.Join(strings.Fields(p.Item), " "); item != "" {
-		if r := []rune(item); len(r) > 60 {
-			item = string(r[:60]) + "…"
+	if a := reportedAmount(p.JobSummary); a != "" {
+		return a, "작업이 결제 직전에 남긴 금액"
+	}
+	return "", ""
+}
+
+var (
+	// "결제 금액 17,100원", as the job is told to write it before paying.
+	paidLabelRE = regexp.MustCompile(`(?:결제|총|합계)\s*금액\s*:?\s*([0-9][0-9,]*)\s*원`)
+	// The total of a sum written out: "108,000원+배송비 5,000원=113,000원".
+	paidTotalRE = regexp.MustCompile(`=\s*([0-9][0-9,]*)\s*원`)
+	// A part of the report that is an amount: "17,100원(배송비 0)".
+	paidPartRE = regexp.MustCompile(`^\s*([0-9][0-9,]*)\s*원`)
+)
+
+// reportedAmount is the amount in the job's report right before paying,
+// '결제 직전 · 상품 · 수량 · 결제 금액 N원 · 결제수단 · 배송지': the amount named as
+// such, else - in a report of that shape - the total of a sum written out, or
+// the first part that is an amount (items' own prices sit inside the part
+// naming them). Nothing when the report does not say it plainly.
+func reportedAmount(summary string) string {
+	if m := paidLabelRE.FindStringSubmatch(summary); m != nil {
+		return amountDigits(m[1])
+	}
+	if !strings.Contains(summary, "결제 직전") {
+		return ""
+	}
+	if all := paidTotalRE.FindAllStringSubmatch(summary, -1); len(all) > 0 {
+		return amountDigits(all[len(all)-1][1])
+	}
+	for _, part := range strings.Split(summary, "·") {
+		if m := paidPartRE.FindStringSubmatch(part); m != nil {
+			return amountDigits(m[1])
 		}
-		lines = append(lines, "결제창이 받은 상품: "+item)
 	}
-	return strings.Join(lines, "\n")
+	return ""
+}
+
+// amountDigits is an amount as the card keeps one, digits only: "17,100" is
+// "17100"; nothing of none.
+func amountDigits(s string) string {
+	n, err := strconv.ParseUint(strings.ReplaceAll(s, ",", ""), 10, 64)
+	if err != nil || n == 0 {
+		return ""
+	}
+	return strconv.FormatUint(n, 10)
+}
+
+// windowOrder is what a payment window was handed besides its amount (the
+// card's first line), as the card shows it - the mall's own words, so cut
+// short and kept on one line.
+func windowOrder(p Payment) string {
+	item := strings.Join(strings.Fields(p.Item), " ")
+	if item == "" {
+		return ""
+	}
+	if r := []rune(item); len(r) > 60 {
+		item = string(r[:60]) + "…"
+	}
+	return "결제창이 받은 상품: " + item
 }
 
 // amountNote is the amount an approval of a window is held to, in

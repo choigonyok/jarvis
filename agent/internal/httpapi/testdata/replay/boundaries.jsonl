@@ -11,14 +11,14 @@
 {"kind":"intent.answer","occurred_at":"2026-10-30T10:03:30+09:00","payload":{"card":"k2","decision":"rejected"}}
 {"kind":"job.run_start","occurred_at":"2026-10-30T11:00:00+09:00","payload":{"job_id":7,"run_id":70}}
 {"kind":"guard.query","source_key":"b4","occurred_at":"2026-10-30T11:00:10+09:00","payload":{"url":"stdpay.inicis.com/payMain/pay","method":"POST","host":"stdpay.inicis.com","window":true,"amount":"113000","job":7,"background":true}}
-{"kind":"payment.requested","source_key":"requested:k3","causation_id":"b4","occurred_at":"2026-10-30T11:00:10+09:00","payload":{"card":"k3","title":"결제창에서 결제합니다","site":"pg-window","job":7}}
+{"kind":"payment.requested","source_key":"requested:k3","causation_id":"b4","occurred_at":"2026-10-30T11:00:10+09:00","payload":{"card":"k3","title":"결제창에서 113,000원을 결제합니다","site":"pg-window","job":7}}
 {"kind":"intent.answer","occurred_at":"2026-10-30T11:00:40+09:00","payload":{"card":"k3","decision":"approved"}}
 {"kind":"guard.answer","causation_id":"b4","occurred_at":"2026-10-30T11:00:40+09:00","payload":{"decision":"approved","why":"held","card":"k3"}}
 {"kind":"guard.query","source_key":"b5","occurred_at":"2026-10-30T11:01:00+09:00","payload":{"url":"pay.naver.com/orderSheet","method":"POST","host":"pay.naver.com","job":7,"background":true}}
 {"kind":"payment.requested","source_key":"requested:k4","causation_id":"b5","occurred_at":"2026-10-30T11:01:00+09:00","payload":{"card":"k4","title":"결제를 진행합니다","site":"naver.com","job":7}}
 {"kind":"guard.answer","causation_id":"b5","occurred_at":"2026-10-30T11:03:00+09:00","payload":{"decision":"rejected","why":"waiting","card":"k4"}}
 {"kind":"guard.query","source_key":"b6","occurred_at":"2026-10-30T11:03:10+09:00","payload":{"url":"stdpay.inicis.com/payMain/pay","method":"POST","host":"stdpay.inicis.com","window":true,"amount":"54000","job":7,"background":true}}
-{"kind":"payment.requested","source_key":"requested:k5","causation_id":"b6","occurred_at":"2026-10-30T11:03:10+09:00","payload":{"card":"k5","title":"결제창에서 결제합니다","site":"pg-window","job":7}}
+{"kind":"payment.requested","source_key":"requested:k5","causation_id":"b6","occurred_at":"2026-10-30T11:03:10+09:00","payload":{"card":"k5","title":"결제창에서 54,000원을 결제합니다","site":"pg-window","job":7}}
 {"kind":"guard.answer","causation_id":"b6","occurred_at":"2026-10-30T11:05:10+09:00","payload":{"decision":"rejected","why":"waiting","card":"k5"}}
 {"kind":"job.run_end","occurred_at":"2026-10-30T11:06:00+09:00","payload":{"job_id":7,"run_id":70}}
 {"kind":"guard.query","source_key":"b7","occurred_at":"2026-10-30T12:00:00+09:00","payload":{"url":"pay.naver.com/orderSheet","method":"POST","host":"pay.naver.com","background":true}}
