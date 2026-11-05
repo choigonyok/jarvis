@@ -80,7 +80,8 @@ export type PrincipalPart = {
  * Money held outside any brokerage at a set amount - nothing to query, nothing
  * that moves. Part of the total, never part of the allocation.
  */
-export type FixedAsset = { id: string; label: string; valueKrw: number };
+/** A fixed asset (fixed.ts): until is the last day it was held, for one given up. */
+export type FixedAsset = { id: string; label: string; valueKrw: number; until?: string };
 
 /** One movement of money into (+) or out of (-) the pot. */
 export type Flow = {

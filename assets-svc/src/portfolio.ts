@@ -30,6 +30,7 @@ import {
 } from "./venues.js";
 import { CLOSED_TTL_MS, OPEN_TTL_MS, UPBIT_TTL_MS, krxOpen, memo, usOpen } from "./freshness.js";
 import { accountOf, problem } from "./accounts.js";
+import { fixedAssetsFrom, fixedOn, heldOn } from "./fixed.js";
 
 // Each venue's answer, reused for as long as its numbers can actually have
 // moved - see freshness.ts. Upbit's USDT price values USDT and is the
@@ -110,35 +111,8 @@ export function invalidateVenues(): void {
   }
 }
 
-/**
- * 조회할 곳이 없는 고정 자산(주택청약 등). 더 넣지도 빼지도 않을 돈이라 값이
- * 고정이다. 원금에도 같은 금액이 들어가므로 수익은 0으로 남고, 비중 계산에서는
- * 빠진다 - 옮길 수 없는 돈을 리밸런싱 대상으로 세면 목표가 왜곡된다.
- *
- * 금액은 개인 정보라 코드가 아니라 환경변수에 둔다(공개 저장소):
- *   FIXED_ASSETS='[{"id":"housing-subscription","label":"주택청약","valueKrw":1000000}]'
- * 형식이 틀리면 없는 것으로 보고 로그를 남긴다 - 자산 조회 전체를 멈출 일은 아니다.
- */
-function fixedAssets(): FixedAsset[] {
-  const raw = process.env.FIXED_ASSETS?.trim();
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) throw new Error("배열이 아닙니다");
-    return parsed.map((f, i) => {
-      const { id, label, valueKrw } = f as Record<string, unknown>;
-      if (typeof label !== "string" || typeof valueKrw !== "number" || !Number.isFinite(valueKrw)) {
-        throw new Error(`${i}번째 항목에 label·valueKrw 가 없습니다`);
-      }
-      return { id: typeof id === "string" ? id : `fixed-${i}`, label, valueKrw };
-    });
-  } catch (e) {
-    console.error("FIXED_ASSETS 를 읽지 못해 고정 자산 없이 계산합니다:", (e as Error).message);
-    return [];
-  }
-}
-const FIXED_ASSETS = fixedAssets();
-const fixedKrw = FIXED_ASSETS.reduce((sum, f) => sum + f.valueKrw, 0);
+/** The fixed assets (주택청약 등), from the environment - fixed.ts says why there. */
+const FIXED_ASSETS = fixedAssetsFrom(process.env.FIXED_ASSETS);
 
 /** The day principal is counted from. Everything held then counts as put in. */
 
@@ -237,6 +211,8 @@ export async function buildPortfolio(): Promise<Portfolio> {
   // not explain is a deposit or withdrawal, written into the ledger before it
   // is read below. Only with both halves - a guess from one would be stored.
   const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
+  // Held today: one given up (until) no longer counts, in the total or the principal.
+  const fixedKrw = fixedOn(FIXED_ASSETS, today);
   const accounts = [
     { venue: "kis" as const, cash: kis.bookCash, movements, label: "한국투자증권" },
     { venue: "gold" as const, cash: goldCash, movements: goldSettled, label: "금현물" },
@@ -430,7 +406,8 @@ export async function buildPortfolio(): Promise<Portfolio> {
   if (principal) {
     const flows = principal.flows;
     const putIn = (date: string) =>
-      fixedKrw + flows.filter((f) => f.date <= date).reduce((sum, f) => sum + f.amountKrw, 0);
+      // What was fixed on that day: its snapshot's total held it.
+      fixedOn(FIXED_ASSETS, date) + flows.filter((f) => f.date <= date).reduce((sum, f) => sum + f.amountKrw, 0);
     const rows = await db.history(3650).catch(() => []);
     track = rows
       .filter((r) => r.date >= PRINCIPAL_SINCE && r.date < today)
@@ -456,7 +433,7 @@ export async function buildPortfolio(): Promise<Portfolio> {
     series,
     at: new Date().toISOString(),
     principal,
-    fixed: FIXED_ASSETS,
+    fixed: FIXED_ASSETS.filter((f) => heldOn(f, today)),
     allocation: allocationOf(holdings, cashKrw),
     problems,
   };
