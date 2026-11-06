@@ -3,12 +3,13 @@ import { PushBridge } from "@/components/shell/push-toast";
 import { Toasts } from "@/components/shell/toasts";
 import type { Metadata, Viewport } from "next";
 import { Barlow_Condensed, Instrument_Sans, JetBrains_Mono } from "next/font/google";
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { RoleProvider } from "@/components/shell/role";
 import { NoZoom } from "@/components/shell/no-zoom";
 import { PullToRefresh } from "@/components/shell/pull-to-refresh";
 import { ViewportProbe } from "@/components/shell/viewport-probe";
 import { ROLE_HEADER } from "@/lib/role";
+import { BAR_COLOR, THEME_COOKIE, themeOf } from "@/lib/theme-name";
 import "./globals.css";
 
 const instrument = Instrument_Sans({
@@ -52,31 +53,34 @@ export const metadata: Metadata = {
   },
 };
 
-export const viewport: Viewport = {
-  width: "device-width",
-  initialScale: 1,
-  // cover lets the background run under the notch and the home indicator;
-  // the safe-area insets are what keep controls out from under them.
-  viewportFit: "cover",
-  // The browser's own bars, by the phone's theme (globals.css): the page's
-  // background either way.
-  themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#f9fafb" },
-    { media: "(prefers-color-scheme: dark)", color: "#0b0d12" },
-  ],
-  // maximum-scale=1 is what stops iOS from zooming in when a text field takes
-  // focus. Safari ignores it for a pinch since iOS 10, so the browser can
-  // still be pinch-zoomed; the home-screen app locks that too
-  // (components/shell/no-zoom.tsx).
-  maximumScale: 1,
-};
+export async function generateViewport(): Promise<Viewport> {
+  return {
+    width: "device-width",
+    initialScale: 1,
+    // cover lets the background run under the notch and the home indicator;
+    // the safe-area insets are what keep controls out from under them.
+    viewportFit: "cover",
+    // The browser's own bars: the page's background, in the theme the
+    // header's switch chose (lib/theme-name.ts). The switch repaints them.
+    themeColor: BAR_COLOR[themeOf((await cookies()).get(THEME_COOKIE)?.value)],
+    // maximum-scale=1 is what stops iOS from zooming in when a text field takes
+    // focus. Safari ignores it for a pinch since iOS 10, so the browser can
+    // still be pinch-zoomed; the home-screen app locks that too
+    // (components/shell/no-zoom.tsx).
+    maximumScale: 1,
+  };
+}
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
   // Stamped by the middleware; absent on /login, where nobody is signed in yet.
   const role = (await headers()).get(ROLE_HEADER) === "guest" ? "guest" : "owner";
+  // Sent already in the chosen theme (globals.css reads data-theme): no flash
+  // of the other one before the page's script runs.
+  const theme = themeOf((await cookies()).get(THEME_COOKIE)?.value);
   return (
     <html
       lang="ko"
+      data-theme={theme}
       className={`${instrument.variable} ${jetbrains.variable} ${scoreboard.variable} antialiased`}
     >
       <body className="overflow-hidden">

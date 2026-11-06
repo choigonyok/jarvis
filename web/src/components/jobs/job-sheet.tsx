@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowUp, ChevronRight, ExternalLink } from "lucide-react";
+import { WithUploads } from "@/components/chat/inline-photos";
 import { ProposalCard } from "@/components/chat/proposal-card";
 import { AsOf } from "@/components/shell/as-of";
 import {
@@ -448,7 +449,7 @@ function Run({ group: g, live, open, gone }: { group: RunGroup; live: boolean; o
                 TONE[e.kind] ?? "text-dim",
               )}
             >
-              {e.kind === "shot" ? <Shot name={e.text} gone={gone} /> : e.text}
+              {e.kind === "shot" ? <Shot name={e.text} gone={gone} /> : <WithUploads text={e.text} />}
             </li>
           ))}
         </ol>

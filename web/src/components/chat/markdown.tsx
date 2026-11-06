@@ -1,12 +1,15 @@
 "use client";
 
+import type { Parent, PhrasingContent, Root } from "mdast";
 import { isValidElement, memo, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 // remark-parse is what gives a processor's data its micromark extensions.
 import type {} from "remark-parse";
 import type { Processor } from "unified";
+import { UPLOAD_NAME, UploadAlbum, UploadThumb, uploadOf, uploadsIn } from "@/components/chat/inline-photos";
 import { CodeBlock, CodeBlockContent, CodeBlockCopyButton } from "@/components/ui/code-block";
+import { photoUrl } from "@/lib/uploads";
 
 /**
  * The agent's reply, rendered as the document it already is.
@@ -20,9 +23,11 @@ import { CodeBlock, CodeBlockContent, CodeBlockCopyButton } from "@/components/u
 export const Markdown = memo(function Markdown({ children }: { children: string }) {
   return (
     <div className="selectable max-w-[36rem] space-y-2.5 text-read leading-[1.75] text-pretty text-ink">
-      <ReactMarkdown remarkPlugins={PLUGINS} components={COMPONENTS}>
-        {children}
-      </ReactMarkdown>
+      <UploadAlbum names={uploadsIn(children)}>
+        <ReactMarkdown remarkPlugins={PLUGINS} components={COMPONENTS}>
+          {children}
+        </ReactMarkdown>
+      </UploadAlbum>
     </div>
   );
 });
@@ -31,7 +36,7 @@ export const Markdown = memo(function Markdown({ children }: { children: string 
 // render made React rebuild every element of every message whenever the thread
 // re-rendered - a cost on a long thread, and it broke anything that holds on
 // to the text (search marks).
-const PLUGINS = [remarkGfm, noStrikethrough];
+const PLUGINS = [remarkGfm, noStrikethrough, uploadsAsPhotos];
 
 // A tilde is never a strike. In Korean it is a range - "3시~5시", "10~20개" -
 // or a tone - "좋아요~~" - and GFM struck out everything between two of them,
@@ -40,6 +45,42 @@ const PLUGINS = [remarkGfm, noStrikethrough];
 function noStrikethrough(this: Processor) {
   const data = this.data();
   (data.micromarkExtensions ??= []).push({ disable: { null: ["strikethrough"] } });
+}
+
+// The agent's own photos named in the words (chat/inline-photos.tsx) become
+// pictures where they are named: the words around a name say what it shows.
+// Not inside code, where a name is a literal, nor inside a link, which a
+// picture would turn into a second thing to press.
+function uploadsAsPhotos() {
+  return (tree: Root) => photosIn(tree);
+}
+
+function photosIn(node: Parent) {
+  for (let i = 0; i < node.children.length; i++) {
+    const child = node.children[i];
+    if (child.type === "text") {
+      const parts = split(child.value);
+      if (parts) {
+        node.children.splice(i, 1, ...parts);
+        i += parts.length - 1;
+      }
+    } else if ("children" in child && child.type !== "link" && child.type !== "linkReference") {
+      photosIn(child);
+    }
+  }
+}
+
+function split(text: string): PhrasingContent[] | null {
+  const out: PhrasingContent[] = [];
+  let last = 0;
+  for (const m of text.matchAll(UPLOAD_NAME)) {
+    if (m.index > last) out.push({ type: "text", value: text.slice(last, m.index) });
+    out.push({ type: "image", url: photoUrl(m[0]), alt: "사진" });
+    last = m.index + m[0].length;
+  }
+  if (out.length === 0) return null;
+  if (last < text.length) out.push({ type: "text", value: text.slice(last) });
+  return out;
 }
 
 const COMPONENTS: Components = {
@@ -119,8 +160,13 @@ const COMPONENTS: Components = {
   // read may have put there - would be fetched the moment the reply showed,
   // with no click, and could carry whatever its query holds out. It shows
   // as a link, opened only if tapped. (The CSP's img-src says the same.)
+  // The one exception is the agent's own photo, on this console's own
+  // address and by a name of its own form, with nothing that could carry
+  // anything out.
   img: ({ src, alt }) =>
-    typeof src === "string" && src ? (
+    typeof src === "string" && uploadOf(src) ? (
+      <UploadThumb name={uploadOf(src)!} />
+    ) : typeof src === "string" && src ? (
       <a
         href={src}
         target="_blank"

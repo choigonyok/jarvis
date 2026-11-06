@@ -31,6 +31,7 @@ import {
 import { BottomSheetContent, BottomSheetHeader, BottomSheetTitle } from "@/components/ui/bottom-sheet";
 import { Sheet, SheetTrigger } from "@/components/ui/sheet";
 import { Notifications } from "@/components/shell/notifications";
+import { ThemeToggle } from "@/components/shell/theme-toggle";
 import { useRole } from "@/components/shell/role";
 import { UsageBars } from "@/components/shell/usage-bars";
 import { focusSection, forgetFocus, onFocusRequest } from "@/lib/focus";
@@ -370,6 +371,8 @@ function HeaderView({
           {/* The guest's bars are their own agent's: the subscription only,
               never what the operator's API keys cost. */}
           <UsageBars />
+          {/* Dark or light, by this switch and not the phone's setting. */}
+          <ThemeToggle />
           {/* Each person's own: the guest's inbox holds their jarvis's cards
               and the shared calendar, never the operator's arrivals. */}
           <Notifications />

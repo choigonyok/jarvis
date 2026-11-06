@@ -22,6 +22,7 @@ import { readableTitle } from "@/lib/card-body";
 import { raisedAt } from "@/lib/ledger";
 import { onFocusProposal } from "@/lib/resume";
 import { Markdown } from "@/components/chat/markdown";
+import { uploadsIn } from "@/components/chat/inline-photos";
 import { VoiceStage } from "@/components/chat/voice-stage";
 import { Header, TabBar } from "@/components/shell/header";
 import { useRole } from "@/components/shell/role";
@@ -168,6 +169,10 @@ function JobNews({ turn, fold }: { turn: Turn; fold: Fold }) {
   const text = turn.paragraphs?.join("\n\n") ?? "";
   const long = text.length > 160 || text.includes("\n");
   const job = turn.origin?.job;
+  // A photo the words name is shown where they name it (chat/markdown.tsx);
+  // below them, only the ones they do not.
+  const named = uploadsIn(text);
+  const shown = (turn.images ?? []).filter((n) => !named.includes(n));
   return (
     <div className="max-w-[36rem] rounded-xl bg-well px-3.5 py-2.5">
       <div className="flex items-baseline justify-between gap-3" data-search-skip>
@@ -193,9 +198,9 @@ function JobNews({ turn, fold }: { turn: Turn; fold: Fold }) {
         <Markdown>{text}</Markdown>
       </div>
       {/* What the run showed with its word: a screen it took, the job's photo. */}
-      {turn.images?.length ? (
+      {shown.length ? (
         <div className="mt-2">
-          <Photos names={turn.images} alt="작업이 보여 준 사진" />
+          <Photos names={shown} alt="작업이 보여 준 사진" />
         </div>
       ) : null}
       {long ? (

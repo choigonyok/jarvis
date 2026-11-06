@@ -2,9 +2,10 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
-/* The phone's own setting picks the theme (below): dark is how the console
-   was made, light is the same page for daylight (2026-11-07). */
-@custom-variant dark (@media (prefers-color-scheme: dark));
+/* The header's switch picks the theme, as the root's data-theme (the server
+   sets it from the cookie, lib/theme-name.ts): dark is how the console was
+   made, light is the same page for daylight. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 /* A wide screen worked with a mouse or a trackpad: the one place a control may
    shrink to a pointer's size. Width alone (sm) used to decide it, and gave an
@@ -112,7 +113,8 @@
   }
 }
 
-/* Dark: the console as it was made, for reading at night. */
+/* Dark: the console as it was made, for reading at night - and what a page
+   with no choice made yet is in. */
 :root {
   color-scheme: dark;
   --background: oklch(0.158 0.004 265);
@@ -180,46 +182,44 @@
    dark ones keep (7.1 and 5.3:1), because sun on glass takes contrast away.
    The hues keep their angles and drop in lightness until they read as words
    (4.8-5.6:1). */
-@media (prefers-color-scheme: light) {
-  :root {
-    color-scheme: light;
-    --background: oklch(0.985 0.002 265);
-    --foreground: oklch(0.2 0.006 265);
+:root[data-theme="light"] {
+  color-scheme: light;
+  --background: oklch(0.985 0.002 265);
+  --foreground: oklch(0.2 0.006 265);
 
-    --dim: oklch(0.45 0.006 265);
-    --faint: oklch(0.52 0.006 265);
-    --edge: oklch(0 0 0 / 10%);
-    --edge-soft: oklch(0 0 0 / 6%);
-    --glass: oklch(0 0 0 / 3.5%);
-    --glass-raised: oklch(0 0 0 / 6%);
-    --well: oklch(0 0 0 / 4.5%);
+  --dim: oklch(0.45 0.006 265);
+  --faint: oklch(0.52 0.006 265);
+  --edge: oklch(0 0 0 / 10%);
+  --edge-soft: oklch(0 0 0 / 6%);
+  --glass: oklch(0 0 0 / 3.5%);
+  --glass-raised: oklch(0 0 0 / 6%);
+  --well: oklch(0 0 0 / 4.5%);
 
-    --approve: oklch(0.52 0.13 150);
-    --reject: oklch(0.55 0.19 25);
-    --online: oklch(0.6 0.15 152);
-    --mine: oklch(0.52 0.15 300);
-    --partner: oklch(0.55 0.115 72);
+  --approve: oklch(0.52 0.13 150);
+  --reject: oklch(0.55 0.19 25);
+  --online: oklch(0.6 0.15 152);
+  --mine: oklch(0.52 0.15 300);
+  --partner: oklch(0.55 0.115 72);
 
-    --caution: oklch(0.63 0.135 75);
-    --shade: oklch(0.2 0.006 265 / 22%);
-    --hairline: oklch(0 0 0 / 14%);
-    --flash: oklch(0 0 0 / 6%);
-    --found: oklch(0 0 0 / 13%);
-    --class-growth: oklch(0.55 0.1 252);
-    --class-coin: oklch(0.55 0.12 298);
-    --class-cash: oklch(0.62 0.008 265);
-    --class-dividend: oklch(0.5 0.05 225);
-    --class-gold: oklch(0.64 0.115 82);
+  --caution: oklch(0.63 0.135 75);
+  --shade: oklch(0.2 0.006 265 / 22%);
+  --hairline: oklch(0 0 0 / 14%);
+  --flash: oklch(0 0 0 / 6%);
+  --found: oklch(0 0 0 / 13%);
+  --class-growth: oklch(0.55 0.1 252);
+  --class-coin: oklch(0.55 0.12 298);
+  --class-cash: oklch(0.62 0.008 265);
+  --class-dividend: oklch(0.5 0.05 225);
+  --class-gold: oklch(0.64 0.115 82);
 
-    --card: oklch(0 0 0 / 3.5%);
-    --popover: oklch(1 0 0);
-    --primary: oklch(0.2 0.006 265);
-    --primary-foreground: oklch(0.985 0.002 265);
-    --secondary: oklch(0 0 0 / 5%);
-    --muted: oklch(0 0 0 / 4.5%);
-    --accent: oklch(0 0 0 / 5%);
-    --ring: oklch(0.45 0.006 265);
-  }
+  --card: oklch(0 0 0 / 3.5%);
+  --popover: oklch(1 0 0);
+  --primary: oklch(0.2 0.006 265);
+  --primary-foreground: oklch(0.985 0.002 265);
+  --secondary: oklch(0 0 0 / 5%);
+  --muted: oklch(0 0 0 / 4.5%);
+  --accent: oklch(0 0 0 / 5%);
+  --ring: oklch(0.45 0.006 265);
 }
 
 @layer base {
@@ -685,46 +685,44 @@
 /* The same glass by day: frosted white over the page, a rim lit white, a
    shadow that is a shadow and not a hole. The lens under the current tab is
    a little ink pressed into it - white on white would not show. */
-@media (prefers-color-scheme: light) {
-  .liquid-glass {
-    background: linear-gradient(180deg, oklch(1 0 0 / 66%), oklch(1 0 0 / 52%) 55%, oklch(1 0 0 / 60%));
-    -webkit-backdrop-filter: blur(20px) saturate(180%) brightness(1.04);
-    backdrop-filter: blur(20px) saturate(180%) brightness(1.04);
-    box-shadow:
-      inset 0 0 0 1px oklch(0 0 0 / 5%),
-      inset 0 -10px 18px -12px oklch(1 0 0 / 70%),
-      0 18px 40px -16px oklch(0.2 0.006 265 / 30%),
-      0 4px 12px -4px oklch(0.2 0.006 265 / 12%);
-  }
-  .liquid-glass::before {
-    background: linear-gradient(
-      135deg,
-      oklch(1 0 0 / 100%) 0%,
-      oklch(1 0 0 / 60%) 22%,
-      oklch(0 0 0 / 4%) 48%,
-      oklch(0 0 0 / 6%) 74%,
-      oklch(1 0 0 / 80%) 100%
-    );
-  }
-  .liquid-glass::after {
-    background:
-      radial-gradient(90% 70% at 30% -25%, oklch(1 0 0 / 55%), transparent 60%),
-      radial-gradient(60% 55% at 85% 130%, oklch(1 0 0 / 30%), transparent 70%);
-  }
-  .liquid-lens {
-    background: radial-gradient(130% 90% at 50% -10%, oklch(0 0 0 / 4%), oklch(0 0 0 / 7.5%) 55%, oklch(0 0 0 / 9%) 100%);
-    box-shadow:
-      inset 0 -6px 10px -6px oklch(0 0 0 / 10%),
-      inset 0 4px 8px -6px oklch(1 0 0 / 90%),
-      0 2px 8px -4px oklch(0.2 0.006 265 / 18%);
-  }
-  .liquid-lens::before {
-    background: linear-gradient(160deg, oklch(1 0 0 / 95%) 0%, oklch(1 0 0 / 35%) 35%, oklch(0 0 0 / 4%) 60%, oklch(1 0 0 / 55%) 100%);
-  }
-  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-    .liquid-glass {
-      background: oklch(0.97 0.002 265 / 97%);
-    }
+:root[data-theme="light"] .liquid-glass {
+  background: linear-gradient(180deg, oklch(1 0 0 / 66%), oklch(1 0 0 / 52%) 55%, oklch(1 0 0 / 60%));
+  -webkit-backdrop-filter: blur(20px) saturate(180%) brightness(1.04);
+  backdrop-filter: blur(20px) saturate(180%) brightness(1.04);
+  box-shadow:
+    inset 0 0 0 1px oklch(0 0 0 / 5%),
+    inset 0 -10px 18px -12px oklch(1 0 0 / 70%),
+    0 18px 40px -16px oklch(0.2 0.006 265 / 30%),
+    0 4px 12px -4px oklch(0.2 0.006 265 / 12%);
+}
+:root[data-theme="light"] .liquid-glass::before {
+  background: linear-gradient(
+    135deg,
+    oklch(1 0 0 / 100%) 0%,
+    oklch(1 0 0 / 60%) 22%,
+    oklch(0 0 0 / 4%) 48%,
+    oklch(0 0 0 / 6%) 74%,
+    oklch(1 0 0 / 80%) 100%
+  );
+}
+:root[data-theme="light"] .liquid-glass::after {
+  background:
+    radial-gradient(90% 70% at 30% -25%, oklch(1 0 0 / 55%), transparent 60%),
+    radial-gradient(60% 55% at 85% 130%, oklch(1 0 0 / 30%), transparent 70%);
+}
+:root[data-theme="light"] .liquid-lens {
+  background: radial-gradient(130% 90% at 50% -10%, oklch(0 0 0 / 4%), oklch(0 0 0 / 7.5%) 55%, oklch(0 0 0 / 9%) 100%);
+  box-shadow:
+    inset 0 -6px 10px -6px oklch(0 0 0 / 10%),
+    inset 0 4px 8px -6px oklch(1 0 0 / 90%),
+    0 2px 8px -4px oklch(0.2 0.006 265 / 18%);
+}
+:root[data-theme="light"] .liquid-lens::before {
+  background: linear-gradient(160deg, oklch(1 0 0 / 95%) 0%, oklch(1 0 0 / 35%) 35%, oklch(0 0 0 / 4%) 60%, oklch(1 0 0 / 55%) 100%);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root[data-theme="light"] .liquid-glass {
+    background: oklch(0.97 0.002 265 / 97%);
   }
 }
 
@@ -735,8 +733,8 @@
    phone's own edge, the island in it - and they stay readable. Its height is
    the status bar's: in the browser, or wherever the page starts below the
    bar, it is nothing. */
-@media (display-mode: standalone) and (prefers-color-scheme: light) {
-  body::before {
+@media (display-mode: standalone) {
+  :root[data-theme="light"] body::before {
     content: "";
     position: fixed;
     inset-inline: 0;

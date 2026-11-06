@@ -1,30 +1,48 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
+import { BAR_COLOR, THEME_COOKIE, type Theme } from "@/lib/theme-name";
+
+export type { Theme };
 
 /**
- * The theme the phone asks for (globals.css follows it with a media query).
- * What draws its own colors - the map's renderer, a canvas - reads it here,
- * since neither can read the CSS tokens.
+ * The theme the page is in: the root's data-theme, which the server set from
+ * the cookie and the header's switch changes (lib/theme-name.ts). What draws
+ * its own colors - the map's renderer, a canvas - reads it here, since
+ * neither can read the CSS tokens.
  */
-export type Theme = "light" | "dark";
-
-const QUERY = "(prefers-color-scheme: light)";
-
 export function themeNow(): Theme {
-  if (typeof window === "undefined") return "dark";
-  return window.matchMedia(QUERY).matches ? "light" : "dark";
+  if (typeof document === "undefined") return "dark";
+  return document.documentElement.dataset.theme === "light" ? "light" : "dark";
 }
 
-/** Calls back when the phone's theme changes (at sunset, say); returns the unsubscribe. */
+const CHANGED = "jarvis:theme";
+
+/** Calls back when the switch changes the theme; returns the unsubscribe. */
 export function onThemeChange(cb: (theme: Theme) => void): () => void {
-  const mq = window.matchMedia(QUERY);
-  const listen = () => cb(mq.matches ? "light" : "dark");
-  mq.addEventListener("change", listen);
-  return () => mq.removeEventListener("change", listen);
+  const listen = () => cb(themeNow());
+  window.addEventListener(CHANGED, listen);
+  return () => window.removeEventListener(CHANGED, listen);
 }
 
-/** The theme, for a component that draws by it. Dark on the server, as the page was made. */
+/**
+ * Puts the page in a theme, at once and for the next visit: the root's
+ * attribute (globals.css reads it), the cookie the server reads, and the
+ * browser's own bars.
+ */
+export function setTheme(theme: Theme) {
+  document.documentElement.dataset.theme = theme;
+  const secure = location.protocol === "https:" ? "; secure" : "";
+  // Two years: a choice, not a session.
+  document.cookie = `${THEME_COOKIE}=${theme}; path=/; max-age=${60 * 60 * 24 * 730}; samesite=lax${secure}`;
+  for (const meta of document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')) {
+    meta.content = BAR_COLOR[theme];
+    meta.removeAttribute("media");
+  }
+  window.dispatchEvent(new Event(CHANGED));
+}
+
+/** The theme, for a component that draws by it. Dark on the server, until the page is read. */
 export function useTheme(): Theme {
   return useSyncExternalStore(
     (cb) => onThemeChange(() => cb()),
