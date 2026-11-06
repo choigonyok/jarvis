@@ -4,13 +4,13 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import Link from "next/link";
 import { ArrowDown, Reply } from "lucide-react";
 import { Lightbox } from "@/components/ui/lightbox";
-import { Retry } from "@/components/shell/retry";
+import { Failed } from "@/components/shell/failed";
 import { Spinner } from "@/components/ui/spinner";
 import { MarkButtons, WrongForm, WrongNote, useAnswerMarks, type MarkAnswer } from "@/components/chat/answer-marks";
 import { Composer } from "@/components/chat/composer";
 import { ModeToggle, type ChatMode } from "@/components/chat/mode-toggle";
 import { ChecklistCard, type Fold } from "@/components/chat/checklist";
-import { GuideSheet, GuideToggle, starters } from "@/components/chat/guide";
+import { GuideSheet, starters } from "@/components/chat/guide";
 import { Button } from "@/components/ui/button";
 import { NoticeCard } from "@/components/chat/notice-card";
 import { ProposalCard } from "@/components/chat/proposal-card";
@@ -97,7 +97,7 @@ function spokenText(turn: Turn): string {
 function Rail({ at, onRef }: { at?: string; onRef?: () => void }) {
   return (
     <div className="hidden flex-col items-end gap-1 pt-[3px] pr-3 sm:flex sm:pr-4" data-search-skip>
-      {at ? <span className="tnum text-[11px] text-faint">{at}</span> : null}
+      {at ? <span className="tnum text-meta text-faint">{at}</span> : null}
       {onRef ? <RefButton onClick={onRef} /> : null}
     </div>
   );
@@ -115,7 +115,7 @@ function RefButton({ onClick }: { onClick: () => void }) {
       onClick={onClick}
       aria-label="이 메시지 참조"
       title="참조"
-      className="hidden size-6 items-center justify-center rounded-md text-faint opacity-0 transition-opacity outline-none group-hover/turn:opacity-100 hover:text-foreground focus-visible:opacity-100 focus-visible:ring-3 focus-visible:ring-ring/50 pointer-fine:flex"
+      className="hidden size-6 items-center justify-center rounded-md text-faint opacity-0 transition-opacity group-hover/turn:opacity-100 hover:text-foreground focus-visible:opacity-100 focus-ring pointer-fine:flex"
     >
       <Reply aria-hidden className="size-3.5" />
     </button>
@@ -127,7 +127,7 @@ function DayDivider({ day }: { day: string }) {
   return (
     <MessageScrollerItem data-search-skip>
       <Marker variant="separator" className="text-faint before:bg-edge-soft after:bg-edge-soft">
-        <MarkerContent className="tnum text-[11.5px]">{dayLabel(day)}</MarkerContent>
+        <MarkerContent className="tnum text-meta">{dayLabel(day)}</MarkerContent>
       </Marker>
     </MessageScrollerItem>
   );
@@ -143,13 +143,13 @@ function Quote({ quote, at, onJump }: { quote: TurnRef; at: string; onJump: () =
       type="button"
       onClick={onJump}
       data-search-skip
-      className="mb-2 block w-full rounded-xl bg-well px-3 py-2 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+      className="mb-2 block w-full rounded-xl bg-well px-3 py-2 text-left focus-ring"
     >
-      <span className="tnum block text-[11.5px] text-faint">
+      <span className="tnum block text-meta text-faint">
         {quote.role === "agent" ? "Jarvis" : "나"}
         {at ? ` · ${at}` : ""}
       </span>
-      <span className="line-clamp-2 text-[13px] leading-snug text-dim">{plainText(quote.text) || "사진"}</span>
+      <span className="line-clamp-2 text-ui leading-snug text-dim">{plainText(quote.text) || "사진"}</span>
     </button>
   );
 }
@@ -171,22 +171,22 @@ function JobNews({ turn, fold }: { turn: Turn; fold: Fold }) {
   return (
     <div className="max-w-[36rem] rounded-xl bg-well px-3.5 py-2.5">
       <div className="flex items-baseline justify-between gap-3" data-search-skip>
-        <span className="min-w-0 truncate text-[11.5px] text-faint">
+        <span className="min-w-0 truncate text-meta text-faint">
           작업 · {turn.origin?.title || "이름 없음"}
           {/* Open while a newer word came: written here, not moved to the bottom. */}
-          {turn.freshNews ? <span className="ms-1.5 text-foreground/80">· 새 소식</span> : null}
+          {turn.freshNews ? <span className="ms-1.5 text-ink">· 새 소식</span> : null}
         </span>
         <Link
           // To this job's own sheet, not the top of the list.
           href={job ? `/jobs?focus=${encodeURIComponent(`job:${job}`)}` : "/jobs"}
-          className="shrink-0 text-[11.5px] text-faint underline-offset-2 outline-none hover:text-dim hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="shrink-0 text-meta text-faint underline-offset-2 hover:text-dim hover:underline focus-ring"
         >
           작업 탭
         </Link>
       </div>
       <div
         className={cn(
-          "mt-1 text-[14px] leading-relaxed text-dim [&_p]:my-0 [&_ul]:my-1",
+          "mt-1 text-body leading-relaxed text-dim [&_p]:my-0 [&_ul]:my-1",
           !open && long && "line-clamp-3",
         )}
       >
@@ -203,7 +203,7 @@ function JobNews({ turn, fold }: { turn: Turn; fold: Fold }) {
           type="button"
           onClick={fold.onToggle}
           aria-expanded={open}
-          className="tap mt-1 text-[12px] text-faint outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="tap mt-1 text-aside text-faint hover:text-dim focus-ring"
           data-search-skip
         >
           {open ? "접기" : "더 보기"}
@@ -243,7 +243,7 @@ function Photos({ names, alt = "보낸 사진" }: { names: string[]; alt?: strin
             type="button"
             onClick={() => setOpen(i)}
             aria-label={`${alt} 크게 보기`}
-            className="block overflow-hidden rounded-xl border border-edge-soft bg-well outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+            className="block overflow-hidden rounded-xl bg-well focus-ring"
           >
             {/* eslint-disable-next-line @next/next/no-img-element -- served by the agent behind the proxy */}
             <img
@@ -420,10 +420,10 @@ const TurnRow = memo(function TurnRow({
                     className={cn("mt-1.5 gap-1.5 px-0 text-base font-normal", answer ? "sm:pointer-fine:hidden" : "sm:hidden")}
                     data-search-skip
                   >
-                    {time ? <span className="tnum text-[11px] text-faint sm:hidden">{time}</span> : null}
+                    {time ? <span className="tnum text-meta text-faint sm:hidden">{time}</span> : null}
                     {answer ? markButtons("-ml-1") : null}
                     {answer && marks.error && !marks.asking ? (
-                      <span className="text-[11.5px] text-reject" role="status">
+                      <span className="text-meta text-reject" role="status">
                         {marks.error}
                       </span>
                     ) : null}
@@ -474,7 +474,7 @@ const TurnRow = memo(function TurnRow({
               ) : null}
               <MessageFooter className="gap-1.5 px-0 pr-1 text-base font-normal" data-search-skip>
                 <RefButton onClick={quote} />
-                <span className="tnum text-[11px] text-faint">{time}</span>
+                <span className="tnum text-meta text-faint">{time}</span>
               </MessageFooter>
             </MessageContent>
           </Message>
@@ -686,15 +686,12 @@ const Transcript = memo(function Transcript({
             // Nothing could be read: said as that, with the way to read again
             // - not as a conversation yet to start (2026-11-06 review: both
             // showed, and the only way back was a reload).
-            <div className="max-w-[32rem]">
-              <p role="status" className="border-l-2 border-reject pl-3 text-[13.5px] leading-relaxed text-dim">
-                {error}
-              </p>
-              <Retry onRetry={onRetry} />
-            </div>
+            <Failed onRetry={onRetry} className="max-w-[32rem]">
+              {error}
+            </Failed>
           ) : (
             <div className="max-w-[32rem]">
-              <p className="text-[14.5px] leading-[1.75] text-dim">
+              <p className="text-read leading-[1.75] text-dim">
                 무엇을 맡길지 적어주세요. 상태를 바꾸는 일은 실행 전에 승인 카드로 올라와요.
               </p>
               {/* What to say, shaped as one's own message is: a tap puts it in
@@ -705,14 +702,14 @@ const Transcript = memo(function Transcript({
                     <button
                       type="button"
                       onClick={() => onStarter(text)}
-                      className="flex min-h-11 items-center rounded-2xl border border-edge bg-glass-raised px-4 text-left text-[14px] text-foreground transition-colors outline-none hover:bg-foreground/10 focus-visible:ring-3 focus-visible:ring-ring/50 mouse:min-h-9 mouse:text-[13.5px]"
+                      className="flex min-h-11 items-center rounded-2xl border border-edge bg-glass-raised px-4 text-left text-body text-foreground transition-colors hover:bg-foreground/10 focus-ring mouse:min-h-9 mouse:text-ui"
                     >
                       {text}
                     </button>
                   </li>
                 ))}
               </ul>
-              <Button variant="underline" size="inline" onClick={onGuide} className="tap mt-2 text-[13px]">
+              <Button variant="underline" size="inline" onClick={onGuide} className="tap mt-2 text-ui">
                 말로 시킬 수 있는 일 더 보기
               </Button>
             </div>
@@ -792,11 +789,9 @@ const Transcript = memo(function Transcript({
         ) : null}
 
         {error && !(hydrated && turns.length === 0) ? (
-          <MessageScrollerItem className={ROW} role="status">
+          <MessageScrollerItem className={ROW}>
             <Rail />
-            <p className="max-w-[36rem] border-l-2 border-reject pl-3 text-[13.5px] leading-relaxed text-dim">
-              {error}
-            </p>
+            <Failed className="max-w-[36rem]">{error}</Failed>
           </MessageScrollerItem>
         ) : null}
     </MessageScrollerContent>
@@ -1281,15 +1276,9 @@ export function Thread() {
   const fillRef = useRef<((text: string) => void) | null>(null);
   const startWith = useCallback((text: string) => fillRef.current?.(text), []);
   const firstSays = useMemo(() => starters(role), [role]);
-  const headerActions = useMemo(
-    () => (
-      <>
-        <GuideToggle open={guide} onOpen={openGuide} />
-        <SearchToggle search={search} />
-      </>
-    ),
-    [guide, openGuide, search],
-  );
+  // Search alone: what can be asked moved from here into the empty field
+  // (the composer's ⓘ) - five grey icons in a phone's header had no order.
+  const headerActions = useMemo(() => <SearchToggle search={search} />, [search]);
   const sendFromComposer = useCallback(
     async (text: string, images: string[]) => {
       toNewest();
@@ -1446,18 +1435,18 @@ export function Thread() {
                   wheelEnd.current = window.setTimeout(repin, 150);
                 }}
               >
-                <div className="mx-auto w-full max-w-[46rem] px-4 pt-7 sm:px-8 sm:pt-10">
+                <div className="mx-auto w-full max-w-page px-4 pt-7 sm:px-8 sm:pt-10">
                   {turns.length > 0 && (hasMore || loadingOlder) ? (
                     olderFailed && !loadingOlder ? (
                       <button
                         type="button"
                         onClick={() => scrollRef.current && askOlder(scrollRef.current, true)}
-                        className="tap mx-auto mb-6 block text-center text-[11.5px] text-faint underline-offset-2 outline-none hover:text-dim hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
+                        className="tap mx-auto mb-6 block text-center text-meta text-faint underline-offset-2 hover:text-dim hover:underline focus-ring"
                       >
                         이전 대화를 불러오지 못했어요. 눌러서 다시
                       </button>
                     ) : (
-                      <p className="mb-6 text-center text-[11.5px] text-faint" aria-live="polite">
+                      <p className="mb-6 text-center text-meta text-faint" aria-live="polite">
                         {loadingOlder ? "이전 대화를 불러오는 중…" : "위로 올리면 이전 대화가 이어져요"}
                       </p>
                     )
@@ -1512,10 +1501,10 @@ export function Thread() {
         {seeking ? (
           <div className="pointer-events-none absolute inset-x-0 bottom-full pb-3">
             <div className="inset-x-safe">
-              <div className="mx-auto flex w-full max-w-[46rem] justify-center px-4 sm:px-8">
+              <div className="mx-auto flex w-full max-w-page justify-center px-4 sm:px-8">
                 <p
                   role="status"
-                  className="anim-settle flex h-11 items-center gap-2 rounded-full bg-popover px-4 text-[13px] text-dim shadow-lg ring-1 ring-edge mouse:h-10"
+                  className="anim-settle flex h-11 items-center gap-2 rounded-full bg-popover px-4 text-ui text-dim shadow-lg ring-1 ring-edge mouse:h-10"
                 >
                   <Spinner className="size-3.5" />
                   카드를 찾는 중…
@@ -1526,17 +1515,17 @@ export function Thread() {
         ) : away ? (
           <div className="pointer-events-none absolute inset-x-0 bottom-full pb-3">
             <div className="inset-x-safe">
-              <div className="mx-auto flex w-full max-w-[46rem] justify-center px-4 sm:px-8">
+              <div className="mx-auto flex w-full max-w-page justify-center px-4 sm:px-8">
                 <button
                   type="button"
                   onClick={toBottom}
                   aria-label={unseen ? `새 메시지 ${unseen}개, 맨 아래로` : "맨 아래로"}
                   className={cn(
-                    "anim-settle pointer-events-auto flex h-11 items-center justify-center gap-1.5 rounded-full bg-popover text-dim shadow-lg ring-1 ring-edge transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-10",
+                    "anim-settle pointer-events-auto flex h-11 items-center justify-center gap-1.5 rounded-full bg-popover text-dim shadow-lg ring-1 ring-edge transition-colors hover:text-foreground focus-ring mouse:h-10",
                     unseen ? "pr-3.5 pl-4" : "w-11 sm:w-10",
                   )}
                 >
-                  {unseen ? <span className="tnum text-[13px] text-foreground">새 메시지 {unseen}</span> : null}
+                  {unseen ? <span className="tnum text-ui text-foreground">새 메시지 {unseen}</span> : null}
                   <ArrowDown aria-hidden className="size-[18px] shrink-0" strokeWidth={1.8} />
                 </button>
               </div>
@@ -1546,7 +1535,7 @@ export function Thread() {
         {/* Two boxes: the safe-area padding and the gutter would otherwise
             be one padding, and the safe area (0 on most phones) would win. */}
         <div className="inset-x-safe">
-          <div className={cn("mx-auto w-full max-w-[46rem] px-4 sm:px-8 sm:pb-6", typing ? "pb-2" : "pb-0")}>
+          <div className={cn("mx-auto w-full max-w-page px-4 sm:px-8 sm:pb-6", typing ? "pb-2" : "pb-0")}>
             <Composer
               onSend={sendFromComposer}
               allowPhotos
@@ -1558,6 +1547,7 @@ export function Thread() {
               onCancelQuote={cancelQuote}
               inputRef={inputRef}
               fillRef={fillRef}
+              onGuide={openGuide}
               busy={thinking}
               onStop={stop}
               draftKey={`jarvis:composer-draft:${role}`}

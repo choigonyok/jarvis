@@ -6,7 +6,7 @@ import {
   useMessageScroller,
   useMessageScrollerScrollable,
 } from "@shadcn/react/message-scroller"
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 
 /**
  * The conversation's scroller (@shadcn/react). It lands on the newest turn

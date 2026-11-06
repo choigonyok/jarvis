@@ -7,8 +7,9 @@ import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/in
 import { Lightbox } from "@/components/ui/lightbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Header, TabBar } from "@/components/shell/header";
-import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { Failed } from "@/components/shell/failed";
 import {
   type Album,
   type Asset,
@@ -51,7 +52,7 @@ export function Photos() {
             href="/edit"
             aria-label="사진 편집"
             title="사진 편집"
-            className="flex size-11 items-center justify-center rounded-lg text-faint transition-colors outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50"
+            className="flex size-11 items-center justify-center rounded-lg text-faint transition-colors hover:text-dim focus-ring"
           >
             <Brush aria-hidden className="size-[18px]" strokeWidth={1.8} />
           </Link>
@@ -60,7 +61,7 @@ export function Photos() {
       <StandingBar pending={waiting} />
 
       <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
-        <div className="mx-auto w-full max-w-[64rem] px-3 pt-3 pb-10 sm:px-6 sm:pt-5">
+        <div className="mx-auto w-full max-w-page-wider px-3 pt-3 pb-10 sm:px-6 sm:pt-5">
           {/* 보관함 and 앨범 are tabs; a search is neither - its results show with no tab lit. */}
           <Tabs
             value={view.kind === "library" ? "library" : view.kind === "search" ? "" : "albums"}
@@ -75,7 +76,7 @@ export function Photos() {
               <button
                 type="button"
                 onClick={() => setView({ kind: "albums" })}
-                className="tap -ms-1 flex min-h-9 items-center gap-1 rounded-lg px-1.5 text-[13px] text-dim outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+                className="tap -ms-1 flex items-center gap-1 rounded-lg px-1.5 text-ui text-dim hover:text-foreground focus-ring mouse:min-h-9"
               >
                 <ChevronLeft aria-hidden className="size-4" />
                 {view.album.albumName}
@@ -189,23 +190,24 @@ function Timeline({ albumId, onOpen }: { albumId?: string; onOpen: (list: Asset[
 
   if (error) {
     return (
-      <div className="py-16 text-center">
-        <p className="text-[13px] text-dim">{error}</p>
-        <Retry onRetry={readBuckets} />
-      </div>
+      <Failed onRetry={readBuckets} className="py-10">
+        {error}
+      </Failed>
     );
   }
   if (!buckets) return null;
   if (buckets.length === 0) {
     return (
-      <div className="py-16 text-center">
-        <p className="text-[14px] text-foreground/90">{albumId ? "앨범이 비어 있어요." : "아직 백업된 사진이 없어요."}</p>
-        {albumId ? null : (
-          <p className="mx-auto mt-2 max-w-[26rem] text-[12.5px] leading-relaxed text-dim">
-            아이폰에 Immich 앱을 설치하고 맥미니로 백업을 켜면, 올라간 사진과 영상이 여기에 날짜별로 쌓여요.
-          </p>
-        )}
-      </div>
+      <Empty className="py-16">
+        <EmptyHeader>
+          <EmptyTitle>{albumId ? "앨범이 비어 있어요" : "아직 백업된 사진이 없어요"}</EmptyTitle>
+          {albumId ? null : (
+            <EmptyDescription>
+              아이폰에 Immich 앱을 설치하고 맥미니로 백업을 켜면, 올라간 사진과 영상이 여기에 날짜별로 쌓여요.
+            </EmptyDescription>
+          )}
+        </EmptyHeader>
+      </Empty>
     );
   }
 
@@ -252,9 +254,9 @@ function Month({
 
   return (
     <section ref={ref} aria-label={monthLabel(bucket.timeBucket)}>
-      <h2 className="mb-2 flex items-baseline gap-2 px-1 text-[13.5px] text-foreground/90">
+      <h2 className="mb-2 flex items-baseline gap-2 px-1 text-ui text-ink">
         {monthLabel(bucket.timeBucket)}
-        <span className="tnum text-[11.5px] text-faint">{bucket.count}</span>
+        <span className="tnum text-meta text-faint">{bucket.count}</span>
       </h2>
       <Grid count={bucket.count} assets={assets} onOpen={onOpen} />
     </section>
@@ -276,7 +278,7 @@ function Grid({ count, assets, onOpen }: { count: number; assets?: Asset[]; onOp
                 {/* eslint-disable-next-line @next/next/no-img-element -- Immich thumbnails through the proxy */}
                 <img src={thumbUrl(a.id)} alt="" loading="lazy" className="size-full object-cover" />
                 {!a.isImage ? (
-                  <span className="tnum absolute right-1 bottom-1 flex items-center gap-0.5 rounded bg-black/55 px-1 py-px text-[10.5px] text-white">
+                  <span className="tnum absolute right-1 bottom-1 flex items-center gap-0.5 rounded bg-black/55 px-1 py-px text-tiny text-white">
                     <Play aria-hidden className="size-2.5 fill-current" />
                     {clip(a.duration)}
                   </span>
@@ -309,29 +311,35 @@ function Albums({ onPick }: { onPick: (a: Album) => void }) {
   }, [readAlbums]);
   if (error) {
     return (
-      <div className="py-16 text-center">
-        <p className="text-[13px] text-dim">{error}</p>
-        <Retry onRetry={readAlbums} />
-      </div>
+      <Failed onRetry={readAlbums} className="py-10">
+        {error}
+      </Failed>
     );
   }
   if (!albums) return null;
   if (albums.length === 0) {
-    return <p className="py-16 text-center text-[13px] text-dim">앨범이 없어요. Immich 앱이나 웹에서 앨범을 만들면 여기에 나와요.</p>;
+    return (
+      <Empty className="py-16">
+        <EmptyHeader>
+          <EmptyTitle>앨범이 없어요</EmptyTitle>
+          <EmptyDescription>Immich 앱이나 웹에서 앨범을 만들면 여기에 나와요.</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    );
   }
   return (
     <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
       {albums.map((a) => (
         <li key={a.id}>
-          <button type="button" onClick={() => onPick(a)} className="block w-full text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
+          <button type="button" onClick={() => onPick(a)} className="block w-full text-left focus-ring">
             <span className="block aspect-square overflow-hidden rounded-xl bg-well">
               {a.albumThumbnailAssetId ? (
                 // eslint-disable-next-line @next/next/no-img-element -- Immich thumbnails through the proxy
                 <img src={thumbUrl(a.albumThumbnailAssetId)} alt="" loading="lazy" className="size-full object-cover" />
               ) : null}
             </span>
-            <span className="mt-1.5 block truncate text-[13px] text-foreground/90">{a.albumName}</span>
-            <span className="tnum block text-[11.5px] text-faint">{a.assetCount}</span>
+            <span className="mt-1.5 block truncate text-ui text-ink">{a.albumName}</span>
+            <span className="tnum block text-meta text-faint">{a.assetCount}</span>
           </button>
         </li>
       ))}
@@ -347,12 +355,21 @@ function Results({ query, onOpen }: { query: string; onOpen: (list: Asset[], ind
       .then(setAssets)
       .catch(() => setError("찾지 못했어요. 사진 분석이 끝나지 않았을 수 있어요."));
   }, [query]);
-  if (error) return <p className="py-16 text-center text-[13px] text-dim">{error}</p>;
-  if (!assets) return <p className="py-16 text-center text-[13px] text-faint">찾는 중…</p>;
-  if (assets.length === 0) return <p className="py-16 text-center text-[13px] text-dim">&ldquo;{query}&rdquo;에 맞는 사진이 없어요.</p>;
+  if (error) return <Failed className="py-10">{error}</Failed>;
+  if (!assets) return <p className="py-16 text-center text-ui text-faint">찾는 중…</p>;
+  if (assets.length === 0) {
+    return (
+      <Empty className="py-16">
+        <EmptyHeader>
+          <EmptyTitle>&ldquo;{query}&rdquo;에 맞는 사진이 없어요</EmptyTitle>
+          <EmptyDescription>다른 말로 찾아보세요. 사진 분석이 끝나지 않은 사진은 아직 찾지 못해요.</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    );
+  }
   return (
     <section aria-label={`${query} 검색 결과`}>
-      <p className="mb-2 px-1 text-[12.5px] text-dim">
+      <p className="mb-2 px-1 text-aside text-dim">
         &ldquo;{query}&rdquo; <span className="tnum text-faint">{assets.length}</span>
       </p>
       <Grid count={assets.length} assets={assets} onOpen={(a) => onOpen(assets, assets.indexOf(a))} />

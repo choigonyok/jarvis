@@ -330,7 +330,7 @@ export function VoiceSetup({
         <IconButton onClick={leave} label="음성 모드로 돌아가기">
           <ArrowLeft aria-hidden className="size-[18px]" />
         </IconButton>
-        <span className="text-[13px] text-dim">내 목소리</span>
+        <span className="text-ui text-dim">내 목소리</span>
         {/* Same width as the button on the left, so the title sits centred. */}
         <span aria-hidden className="size-9" />
       </div>
@@ -344,7 +344,7 @@ export function VoiceSetup({
         />
 
         <div className="flex min-h-0 w-full max-w-[32rem] flex-col items-center text-center">
-          <p className="flex items-center gap-2 text-[13px] text-dim" role="status" aria-live="polite">
+          <p className="flex items-center gap-2 text-ui text-dim" role="status" aria-live="polite">
             <span
               aria-hidden
               className={cn(
@@ -356,7 +356,7 @@ export function VoiceSetup({
             {status.text}
           </p>
           {hint && (
-            <p className="mt-3 max-w-[26rem] text-[13.5px] leading-relaxed text-faint">{hint}</p>
+            <p className="mt-3 max-w-[26rem] text-ui leading-relaxed text-faint">{hint}</p>
           )}
           <div className="mt-1 w-full">
             <Caption text={SCRIPT} tone={recording ? "you" : "jarvis"} />

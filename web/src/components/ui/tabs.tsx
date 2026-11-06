@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 import { Tabs as TabsPrimitive } from "radix-ui"
 
 /**
@@ -64,12 +64,12 @@ function TabsList({
 // Plain classes rather than variants keyed to the list's attribute, so a
 // screen's own sizes (cn) win over these.
 const tabsTriggerVariants = cva(
-  "tap-y inline-flex items-center justify-center gap-1.5 whitespace-nowrap transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 data-active:bg-glass-raised data-active:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "tap-y inline-flex items-center justify-center gap-1.5 whitespace-nowrap transition-colors focus-ring disabled:pointer-events-none disabled:opacity-50 data-active:bg-glass-raised data-active:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
-        segment: "min-h-8 rounded-md px-3 text-[12.5px] text-faint hover:text-dim",
-        pills: "h-9 shrink-0 rounded-full px-3.5 text-[13px] text-dim hover:text-foreground mouse:h-7",
+        segment: "min-h-8 rounded-md px-3 text-aside text-faint hover:text-dim",
+        pills: "h-9 shrink-0 rounded-full px-3.5 text-ui text-dim hover:text-foreground mouse:h-7",
       },
     },
   }

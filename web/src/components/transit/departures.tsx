@@ -109,15 +109,15 @@ export function Departures() {
       <Header connection={connection} pending={waiting.length} />
       <StandingBar pending={waiting} />
       <main className="inset-x-safe min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
-        <div className="mx-auto w-full max-w-[34rem] px-4 pt-5 pb-10 sm:px-6 sm:pt-8">
+        <div className="mx-auto w-full max-w-page-narrow px-4 pt-5 pb-10 sm:px-8 sm:pt-8">
           {!read ? (
             error ? (
               <div className="pt-10 text-center">
-                <p className="mb-3 text-[13px] text-dim">{error}</p>
+                <p className="mb-3 text-ui text-dim">{error}</p>
                 <Retry onRetry={load} />
               </div>
             ) : (
-              <p className="pt-10 text-center text-[13px] text-faint">{SAY.loading}</p>
+              <p className="pt-10 text-center text-ui text-faint">{SAY.loading}</p>
             )
           ) : routes.length === 0 ? (
             <NoRoutes onAdd={() => setEditing(null)} />
@@ -143,27 +143,27 @@ export function Departures() {
               {!read.feeds.buses || !read.feeds.subway ? <Keys feeds={read.feeds} /> : null}
 
               <section className="mt-10" aria-label="내 경로">
-                <h2 className="mb-1 text-[13.5px] font-medium text-foreground">내 경로</h2>
+                <h2 className="mb-1 text-ui font-medium text-foreground">내 경로</h2>
                 <ul className="divide-y divide-edge-soft">
                   {routes.map((r) => (
                     <li key={r.id} className="flex items-center gap-2">
                       <button
                         type="button"
                         onClick={() => pick(r.id)}
-                        className="flex min-w-0 flex-1 items-baseline gap-3 py-3 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                        className="flex min-w-0 flex-1 items-baseline gap-3 py-3 text-left focus-ring"
                       >
-                        <span className={cn("w-12 shrink-0 text-[14px]", current?.id === r.id ? "text-foreground" : "text-foreground/80")}>{r.name}</span>
-                        <span className="min-w-0 flex-1 truncate text-[12.5px] text-dim">
+                        <span className={cn("w-12 shrink-0 text-body", current?.id === r.id ? "text-foreground" : "text-ink")}>{r.name}</span>
+                        <span className="min-w-0 flex-1 truncate text-aside text-dim">
                           {r.stop.name} · {r.line.name}
                           {r.from ? ` · ${r.from}–${r.to}${r.push ? " 알림" : ""}` : ""}
                         </span>
-                        <span className="tnum shrink-0 text-[12.5px] text-faint">{status(planOf.get(r.id), now)}</span>
+                        <span className="tnum shrink-0 text-aside text-faint">{status(planOf.get(r.id), now)}</span>
                       </button>
                       <button
                         type="button"
                         onClick={() => setEditing(r)}
                         aria-label={`${r.name} 고치기`}
-                        className="tap -mr-2 flex shrink-0 items-center justify-center rounded-full text-faint outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+                        className="tap -mr-2 flex shrink-0 items-center justify-center rounded-full text-faint hover:text-foreground focus-ring"
                       >
                         <Pencil aria-hidden className="size-[15px]" strokeWidth={1.8} />
                       </button>
@@ -174,7 +174,7 @@ export function Departures() {
                   type="button"
                   onClick={() => setEditing(null)}
                   disabled={routes.length >= 12}
-                  className="mt-2 inline-flex h-11 items-center gap-1.5 rounded-lg px-1 text-[13.5px] text-dim outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-40 mouse:h-9"
+                  className="mt-2 inline-flex h-11 items-center gap-1.5 rounded-lg px-1 text-ui text-dim hover:text-foreground focus-ring disabled:opacity-40 mouse:h-9"
                 >
                   <Plus aria-hidden className="size-4" strokeWidth={1.8} />
                   경로 추가
@@ -232,7 +232,7 @@ function NoRoutes({ onAdd }: { onAdd: () => void }) {
 function Keys({ feeds }: { feeds: { buses: boolean; subway: boolean } }) {
   const missing = [!feeds.buses && "버스", !feeds.subway && "지하철"].filter(Boolean).join("·");
   return (
-    <p className="mt-6 text-[12px] leading-[1.55] break-keep text-faint">
+    <p className="mt-6 text-aside leading-[1.55] break-keep text-faint">
       {missing} 실시간 정보 키가 아직 없어 그 경로는 시각을 세지 못해요. 키를 맥미니에 넣으면 바로 이어져요.
     </p>
   );

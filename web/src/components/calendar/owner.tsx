@@ -29,7 +29,7 @@ const fillVertical: Record<Owner, string> = {
 
 export const ownerText: Record<Owner, string> = {
   me: "text-mine",
-  shared: "text-foreground/80",
+  shared: "text-ink",
   partner: "text-partner",
 };
 

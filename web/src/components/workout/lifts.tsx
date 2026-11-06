@@ -35,7 +35,7 @@ export function Lifts({ sessions, onOpen }: { sessions: Session[]; onOpen: (name
 
   if (rows.length === 0) {
     return (
-      <p className="text-[13.5px] leading-relaxed text-faint">
+      <p className="text-ui leading-relaxed text-faint">
         아직 기록한 종목이 없어요. 운동을 한 번 마치면 종목마다 추정 1RM이 여기에 쌓여요.
       </p>
     );
@@ -48,7 +48,7 @@ export function Lifts({ sessions, onOpen }: { sessions: Session[]; onOpen: (name
         if (mine.length === 0) return null;
         return (
           <section key={group} aria-labelledby={`lift-${group}`}>
-            <h2 id={`lift-${group}`} className="mb-1 text-[13px] text-dim">
+            <h2 id={`lift-${group}`} className="mb-1 text-ui text-dim">
               {group}
             </h2>
             <ul className="border-t border-edge-soft">
@@ -57,11 +57,11 @@ export function Lifts({ sessions, onOpen }: { sessions: Session[]; onOpen: (name
                   <button
                     type="button"
                     onClick={() => onOpen(row.name)}
-                    className="flex min-h-16 w-full items-center gap-3 px-1 py-2 text-left outline-none hover:bg-glass focus-visible:ring-3 focus-visible:ring-ring/50"
+                    className="flex min-h-16 w-full items-center gap-3 px-1 py-2 text-left hover:bg-glass focus-ring"
                   >
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[15px] text-foreground">{row.name}</span>
-                      <span className="block truncate text-[12px] text-faint">마지막 {dayLabel(row.date)}</span>
+                      <span className="block truncate text-title text-foreground">{row.name}</span>
+                      <span className="block truncate text-aside text-faint">마지막 {dayLabel(row.date)}</span>
                     </span>
                     <Trend values={row.trend} />
                     <span className="w-16 shrink-0 text-right">
@@ -70,10 +70,10 @@ export function Lifts({ sessions, onOpen }: { sessions: Session[]; onOpen: (name
                           <span className="font-score tnum block text-[22px] leading-none font-semibold text-foreground">
                             {Math.round(row.best)}
                           </span>
-                          <span className="block text-[11px] text-faint">1RM kg</span>
+                          <span className="block text-meta text-faint">1RM kg</span>
                         </>
                       ) : (
-                        <span className="text-[12px] text-faint">맨몸</span>
+                        <span className="text-aside text-faint">맨몸</span>
                       )}
                     </span>
                     <ChevronRight aria-hidden className="size-4 shrink-0 text-faint" />
@@ -114,7 +114,7 @@ function Trend({ values }: { values: number[] }) {
         strokeWidth="1.5"
         strokeLinejoin="round"
         strokeLinecap="round"
-        className={up ? "stroke-approve/70" : "stroke-dim/60"}
+        className={up ? "stroke-approve-fill" : "stroke-dim/60"}
       />
       <circle cx={lx} cy={ly} r="2.25" className={up ? "fill-approve" : "fill-dim"} />
     </svg>

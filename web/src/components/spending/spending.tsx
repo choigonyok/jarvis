@@ -5,8 +5,8 @@ import Link from "next/link";
 import { ChevronLeft, ChevronRight, Plus, Search } from "lucide-react";
 import { ClearChip } from "@/components/ui/badge";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
+import { Failed } from "@/components/shell/failed";
 import { Header, TabBar } from "@/components/shell/header";
-import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { AsOf } from "@/components/shell/as-of";
 import { useKept } from "@/lib/keep";
@@ -194,17 +194,17 @@ export function Spending() {
       <StandingBar pending={waiting} />
 
       <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
-        <div className="mx-auto w-full max-w-[42rem] px-4 pt-4 pb-12 sm:px-8 sm:pt-7 sm:pb-8">
+        <div className="mx-auto w-full max-w-page px-4 pt-4 pb-12 sm:px-8 sm:pt-7 sm:pb-8">
           <div className="-ms-2 mb-3 flex items-center gap-1">
             <button
               type="button"
               onClick={() => goMonth(shiftMonth(month, -1))}
               aria-label="지난달"
-              className="tap flex items-center justify-center rounded-lg text-faint transition-colors outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50"
+              className="tap flex items-center justify-center rounded-lg text-faint transition-colors hover:text-dim focus-ring"
             >
               <ChevronLeft aria-hidden className="size-4" />
             </button>
-            <h2 className="min-w-14 text-center text-[13px] text-dim" aria-live="polite">
+            <h2 className="min-w-14 text-center text-ui text-dim" aria-live="polite">
               {monthLabel(month, month.slice(0, 4) !== thisMonth().slice(0, 4))}
             </h2>
             <button
@@ -212,19 +212,19 @@ export function Spending() {
               onClick={() => goMonth(shiftMonth(month, 1))}
               disabled={current}
               aria-label="다음 달"
-              className="tap flex items-center justify-center rounded-lg text-faint transition-colors outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-30"
+              className="tap flex items-center justify-center rounded-lg text-faint transition-colors hover:text-dim focus-ring disabled:opacity-30"
             >
               <ChevronRight aria-hidden className="size-4" />
             </button>
             {asked && loading ? (
-              <span className="ms-1 text-[12px] text-faint" aria-live="polite">
+              <span className="ms-1 text-aside text-faint" aria-live="polite">
                 {monthLabel(asked, asked.slice(0, 4) !== month.slice(0, 4))} 불러오는 중…
               </span>
             ) : !current ? (
               <button
                 type="button"
                 onClick={() => goMonth(thisMonth())}
-                className="tap ms-1 rounded-lg px-2 text-[12px] text-faint transition-colors outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50"
+                className="tap ms-1 rounded-lg px-2 text-aside text-faint transition-colors hover:text-dim focus-ring"
               >
                 이번 달
               </button>
@@ -243,10 +243,9 @@ export function Spending() {
           ) : null}
 
           {error && !book ? (
-            <div className="py-16 text-center">
-              <p className="text-[13px] text-dim">{error}</p>
-              <Retry onRetry={() => load(failed ?? month)} />
-            </div>
+            <Failed onRetry={() => load(failed ?? month)} className="py-8">
+              {error}
+            </Failed>
           ) : null}
 
           {book ? (
@@ -265,7 +264,7 @@ export function Spending() {
 
               {book.categories.length > 0 ? (
                 <section className="mt-6 border-t border-edge-soft pt-5" aria-label="분류별">
-                  <h2 className="mb-2 px-2 text-[13px] text-dim">어디에 썼나</h2>
+                  <h2 className="mb-2 px-2 text-ui text-dim">어디에 썼나</h2>
                   <Categories book={book} selected={category} onSelect={setCategory} />
                 </section>
               ) : null}
@@ -273,8 +272,8 @@ export function Spending() {
               {book.recurring.length > 0 ? (
                 <section className="mt-6 border-t border-edge-soft pt-5" aria-label="정기 결제">
                   <div className="mb-2 flex items-baseline justify-between px-2">
-                    <h2 className="text-[13px] text-dim">매달 나가는 돈</h2>
-                    <span className="tnum text-[11.5px] text-faint">
+                    <h2 className="text-ui text-dim">매달 나가는 돈</h2>
+                    <span className="tnum text-meta text-faint">
                       월 {krw(book.recurring.reduce((s, r) => s + r.amountKrw, 0))}
                     </span>
                   </div>
@@ -282,14 +281,14 @@ export function Spending() {
                     {book.recurring.map((r) => (
                       <li key={r.merchant} className="flex items-center gap-3 px-2 py-2">
                         <span className="min-w-0 flex-1">
-                          <span className="block truncate text-[13.5px] text-foreground/90">{r.merchant}</span>
-                          <span className="block text-[11.5px] text-faint">
+                          <span className="block truncate text-ui text-ink">{r.merchant}</span>
+                          <span className="block text-meta text-faint">
                             매달 {r.day}일 무렵 · {r.months}개월째
                           </span>
                         </span>
                         <span className="shrink-0 text-right">
-                          <span className="tnum block text-[13.5px] text-foreground/90">{krw(r.amountKrw)}</span>
-                          <span className="tnum block text-[11px] text-faint">
+                          <span className="tnum block text-ui text-ink">{krw(r.amountKrw)}</span>
+                          <span className="tnum block text-meta text-faint">
                             {r.nextAt.slice(5).replace("-", "/")} 예정
                           </span>
                         </span>
@@ -305,7 +304,7 @@ export function Spending() {
                 data-focus={day ? `day:${day}` : "recent"}
               >
                 <div className="mb-3 flex items-center gap-2 px-2">
-                  <h2 className="text-[13px] text-dim">내역</h2>
+                  <h2 className="text-ui text-dim">내역</h2>
                   <InputGroup className="ms-auto h-10 min-w-0 flex-1 border-transparent sm:max-w-56 mouse:h-8">
                     <InputGroupAddon className="pl-2.5">
                       <Search aria-hidden className="size-3.5" />
@@ -316,7 +315,7 @@ export function Spending() {
                       value={query}
                       onChange={(e) => setQuery(e.target.value)}
                       placeholder="찾기"
-                      className="ps-1.5 pe-2 mouse:text-[12.5px]"
+                      className="ps-1.5 pe-2 mouse:text-aside"
                     />
                   </InputGroup>
                   <button
@@ -324,7 +323,7 @@ export function Spending() {
                     onClick={() =>
                       setDraft({ date: day ?? (current ? today : `${month}-01`), time: current ? clock(new Date().toISOString()) : "12:00" })
                     }
-                    className="tap flex shrink-0 items-center gap-1 rounded-lg px-2 text-[12.5px] text-dim transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+                    className="tap flex shrink-0 items-center gap-1 rounded-lg px-2 text-aside text-dim transition-colors hover:text-foreground focus-ring"
                   >
                     <Plus aria-hidden className="size-3.5" />
                     직접 적기
@@ -332,7 +331,7 @@ export function Spending() {
                 </div>
 
                 {filtered ? (
-                  <div className="mb-3 flex flex-wrap items-center gap-1.5 px-2 text-[12px]">
+                  <div className="mb-3 flex flex-wrap items-center gap-1.5 px-2 text-aside">
                     {day ? <ClearChip label={dayLabel(day)} onClear={() => setDay(null)} /> : null}
                     {category ? <ClearChip label={category} onClear={() => setCategory(null)} /> : null}
                     {query.trim() ? <ClearChip label={`“${query.trim()}”`} onClear={() => setQuery("")} /> : null}
@@ -345,7 +344,7 @@ export function Spending() {
                 {shown.length > 0 ? (
                   <Transactions txs={shown} onOpen={setOpen} reset={`${month}|${day ?? ""}|${category ?? ""}|${query.trim()}`} />
                 ) : (
-                  <p className="px-2 py-8 text-center text-[13px] text-faint">
+                  <p className="px-2 py-8 text-center text-ui text-faint">
                     {filtered
                       ? "조건에 맞는 내역이 없어요."
                       : current
@@ -356,13 +355,13 @@ export function Spending() {
               </section>
             </div>
           ) : loading ? (
-            <p className="py-16 text-center text-[13px] text-faint">{SAY.loading}</p>
+            <Placeholder />
           ) : null}
         </div>
 
         {note ? (
           <div className="pointer-events-none sticky bottom-3 flex justify-center px-4" role="status">
-            <p className="rounded-full bg-popover px-4 py-2 text-[12.5px] text-foreground shadow-lg">{note}</p>
+            <p className="rounded-full bg-popover px-4 py-2 text-aside text-foreground shadow-lg">{note}</p>
           </div>
         ) : null}
       </main>
@@ -390,6 +389,28 @@ export function Spending() {
   );
 }
 
+/**
+ * The month's place while it is read: the headline's figure, its lines and the
+ * pace bar as quiet blocks of their size - the figures arrive into them, as a
+ * photo into its tile, instead of pushing the page down when they come.
+ */
+function Placeholder() {
+  return (
+    <div className="pt-1">
+      <p role="status" className="sr-only">
+        {SAY.loading}
+      </p>
+      <div aria-hidden>
+        <div className="h-(--display-lg) w-52 rounded-lg bg-well" />
+        <div className="mt-3 h-4 w-36 rounded bg-well" />
+        <div className="mt-2 h-4 w-56 rounded bg-well" />
+        <div className="mt-8 h-2.5 w-full rounded-full bg-well" />
+        <div className="mt-8 h-24 w-full rounded-lg bg-well" />
+      </div>
+    </div>
+  );
+}
+
 function Headline({ book, current, day }: { book: Book; current: boolean; day: string | null }) {
   // A day picked on the strip takes over the headline: its total is what
   // the person is now looking at.
@@ -397,14 +418,14 @@ function Headline({ book, current, day }: { book: Book; current: boolean; day: s
   if (picked) {
     return (
       <div>
-        <p className="tnum text-[34px] leading-none font-semibold tracking-tight text-foreground sm:text-[40px]">
+        <p className="tnum text-display-lg leading-none font-semibold tracking-tight text-foreground">
           {krw(picked.totalKrw)}
         </p>
-        <p className="mt-2 text-[13px] text-dim">
+        <p className="mt-2 text-ui text-dim">
           {dayLabel(picked.date)}에 쓴 돈
           <span className="tnum text-faint"> · {picked.count}건</span>
         </p>
-        <p className="tnum mt-0.5 text-[13px] text-faint">
+        <p className="tnum mt-0.5 text-ui text-faint">
           {current ? "이번 달" : monthLabel(book.month)} 전체 {krw(book.totalKrw)}
         </p>
       </div>
@@ -425,14 +446,14 @@ function Headline({ book, current, day }: { book: Book; current: boolean; day: s
   }
   return (
     <div>
-      <p className="tnum text-[34px] leading-none font-semibold tracking-tight text-foreground sm:text-[40px]">
+      <p className="tnum text-display-lg leading-none font-semibold tracking-tight text-foreground">
         {krw(book.totalKrw)}
       </p>
-      <p className="mt-2 text-[13px] text-dim">
+      <p className="mt-2 text-ui text-dim">
         {current ? "이번 달 쓴 돈" : `${monthLabel(book.month)}에 쓴 돈`}
         <span className="tnum text-faint"> · {book.count}건</span>
       </p>
-      {compare ? <p className="mt-0.5 text-[13px] text-dim">{compare}</p> : null}
+      {compare ? <p className="mt-0.5 text-ui text-dim">{compare}</p> : null}
     </div>
   );
 }
@@ -455,7 +476,7 @@ function Status({
   const trouble = c.stale;
   return (
     <div className="mt-3 space-y-1.5">
-      <p className="flex items-start gap-1.5 text-[11.5px] leading-[1.5] text-faint">
+      <p className="flex items-start gap-1.5 text-meta leading-[1.5] text-faint">
         <span
           aria-hidden
           className={cn("mt-[6px] size-[5px] shrink-0 rounded-full", trouble ? "bg-faint" : "bg-online")}
@@ -474,7 +495,7 @@ function Status({
           data-focus="unparsed"
           type="button"
           onClick={onOpenUnparsed}
-          className="tap -mx-1 flex items-center gap-1.5 rounded-md px-1 text-left text-[12.5px] text-foreground/90 outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="tap -mx-1 flex items-center gap-1.5 rounded-md px-1 text-left text-aside text-ink hover:text-foreground focus-ring"
         >
           <span aria-hidden className="anim-breathe size-[5px] shrink-0 rounded-full bg-dim" />
           읽지 못한 카드 알림 {book.unparsed.length}건이 합계에서 빠져 있어요
@@ -506,15 +527,15 @@ function Blocked({
     else onRetried(`${label} 주문을 다시 확인할게요`);
   };
   return (
-    <div className="text-[12.5px]">
-      <p className="flex items-start gap-1.5 leading-[1.5] text-foreground/90">
+    <div className="text-aside">
+      <p className="flex items-start gap-1.5 leading-[1.5] text-ink">
         <span aria-hidden className="anim-breathe mt-[7px] size-[5px] shrink-0 rounded-full bg-dim" />
         {label} 로그인이 풀려 산 상품을 못 읽고 있어요
       </p>
       <div className="-ms-1 flex items-center gap-1 ps-3">
         <Link
           href="/screen"
-          className="tap flex items-center rounded-md px-1 text-dim underline decoration-edge underline-offset-4 outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="tap flex items-center rounded-md px-1 text-dim underline decoration-edge underline-offset-4 hover:text-foreground focus-ring"
         >
           화면 탭에서 로그인
         </Link>
@@ -522,7 +543,7 @@ function Blocked({
         <button
           type="button"
           onClick={() => void retry()}
-          className="tap flex items-center rounded-md px-1 text-dim outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="tap flex items-center rounded-md px-1 text-dim hover:text-foreground focus-ring"
         >
           로그인했으면 다시 시도
         </button>

@@ -36,20 +36,20 @@ export function Categories({
               onClick={() => onSelect(active ? null : c.name)}
               aria-pressed={active}
               className={cn(
-                "w-full rounded-lg px-2 py-2.5 text-left transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+                "w-full rounded-lg px-2 py-2.5 text-left transition-colors focus-ring",
                 active ? "bg-glass-raised" : "hover:bg-glass",
                 selected && !active && "opacity-55",
               )}
             >
               <span className="flex items-baseline justify-between gap-3">
-                <span className="text-[13.5px] text-foreground/90">
+                <span className="text-ui text-ink">
                   {c.name}
-                  <span className="tnum ms-2 text-[11.5px] text-faint">
+                  <span className="tnum ms-2 text-meta text-faint">
                     {c.count ? `${c.count}건` : ""}
                     {c.count && share >= 0.01 ? ` · ${Math.round(share * 100)}%` : ""}
                   </span>
                 </span>
-                <span className="tnum shrink-0 text-[13.5px] text-foreground/90">
+                <span className="tnum shrink-0 text-ui text-ink">
                   {krw(c.totalKrw)}
                 </span>
               </span>
@@ -66,7 +66,7 @@ export function Categories({
                   />
                 ) : null}
               </span>
-              <span className="mt-1.5 block text-[11.5px] text-faint">
+              <span className="mt-1.5 block text-meta text-faint">
                 {c.budgetKrw !== null
                   ? over
                     ? `예산 ${krw(c.budgetKrw)}보다 ${krw(c.totalKrw - c.budgetKrw)} 더 씀`

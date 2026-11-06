@@ -47,7 +47,7 @@ export function AsOf({
 }) {
   if (failed) {
     return (
-      <p role="status" className={cn("tnum text-[11.5px] text-reject/85", className)}>
+      <p role="status" className={cn("tnum text-meta text-reject", className)}>
         {failedText ?? (at ? `${clock(at, seconds)} 값` : "불러오지 못했어요")}
         {onRetry ? (
           <>
@@ -56,7 +56,7 @@ export function AsOf({
               type="button"
               onClick={onRetry}
               disabled={busy}
-              className="tap-y underline decoration-reject/40 underline-offset-[3px] outline-none hover:text-reject focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-60"
+              className="tap-y underline decoration-reject-fill underline-offset-[3px] hover:text-reject focus-ring disabled:opacity-60"
             >
               {busy ? SAY.loading : SAY.retry}
             </button>
@@ -67,7 +67,7 @@ export function AsOf({
   }
   if (!at) return null;
   return (
-    <p className={cn("tnum text-[11.5px] text-faint", className)} aria-live="polite">
+    <p className={cn("tnum text-meta text-faint", className)} aria-live="polite">
       {clock(at, seconds)} 기준{children}
       {busy ? " · 갱신 중…" : ""}
     </p>

@@ -25,7 +25,7 @@ export function DetailSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <BottomSheetContent width="xl" aria-describedby={undefined}>
         <BottomSheetHeader className="sm:px-6">
-          <BottomSheetTitle className="pr-0 text-[14px]">{title}</BottomSheetTitle>
+          <BottomSheetTitle className="pr-0 text-body">{title}</BottomSheetTitle>
         </BottomSheetHeader>
         <BottomSheetBody className="flex-1 pb-6 sm:px-6">{children}</BottomSheetBody>
       </BottomSheetContent>
@@ -63,14 +63,14 @@ export function DetailRow({
         onClick={() => onOpenChange(true)}
         aria-haspopup="dialog"
         aria-expanded={open}
-        className="flex min-h-14 w-full items-center gap-3 py-3 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+        className="flex min-h-14 w-full items-center gap-3 py-3 text-left focus-ring"
       >
         {mark}
         <span className="min-w-0 flex-1">
-          <span className="block text-[14.5px] text-foreground/90">{title}</span>
-          {line ? <span className="mt-0.5 block truncate text-[13px] text-faint">{line}</span> : null}
+          <span className="block text-body text-ink">{title}</span>
+          {line ? <span className="mt-0.5 block truncate text-ui text-faint">{line}</span> : null}
         </span>
-        {figure ? <span className="tnum shrink-0 text-[12px] text-faint">{figure}</span> : null}
+        {figure ? <span className="tnum shrink-0 text-aside text-faint">{figure}</span> : null}
         <ChevronRight aria-hidden className="size-4 shrink-0 text-faint" />
       </button>
       <DetailSheet title={title} open={open} onOpenChange={onOpenChange}>

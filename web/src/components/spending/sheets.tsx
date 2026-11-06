@@ -175,25 +175,25 @@ function TxForm({
 
   return (
     <div className="space-y-5">
-      <p className="tnum text-[24px] leading-none font-semibold tracking-tight text-foreground">
+      <p className="tnum text-display leading-none font-semibold tracking-tight text-foreground">
         {tx.estimated ? "약 " : ""}
         {krw(tx.amountKrw)}
         {tx.foreignAmount !== null ? (
-          <span className="ms-2 text-[13px] font-normal text-faint">${tx.foreignAmount.toFixed(2)}</span>
+          <span className="ms-2 text-ui font-normal text-faint">${tx.foreignAmount.toFixed(2)}</span>
         ) : null}
         {tx.installment > 0 ? (
-          <span className="ms-2 text-[13px] font-normal text-faint">{tx.installment}개월 할부</span>
+          <span className="ms-2 text-ui font-normal text-faint">{tx.installment}개월 할부</span>
         ) : null}
       </p>
       {tx.status === "cancelled" ? (
-        <p className="text-[12.5px] text-dim">취소 알림이 와서 합계에서 빠졌어요.</p>
+        <p className="text-aside text-dim">취소 알림이 와서 합계에서 빠졌어요.</p>
       ) : tx.status === "cancel" ? (
-        <p className="text-[12.5px] text-dim">위 결제를 취소한 알림이에요. 짝이 되는 결제와 함께 합계에서 빠졌어요.</p>
+        <p className="text-aside text-dim">위 결제를 취소한 알림이에요. 짝이 되는 결제와 함께 합계에서 빠졌어요.</p>
       ) : tx.status === "refund" ? (
-        <p className="text-[12.5px] text-dim">짝이 되는 결제를 못 찾은 취소라서, 돌려받은 돈으로 합계에서 뺐어요.</p>
+        <p className="text-aside text-dim">짝이 되는 결제를 못 찾은 취소라서, 돌려받은 돈으로 합계에서 뺐어요.</p>
       ) : null}
       {tx.source === "asset" ? (
-        <p className="text-[12.5px] leading-relaxed text-dim">
+        <p className="text-aside leading-relaxed text-dim">
           {tx.issuer}에서 뺀 돈을 지출로 답한 내역이에요. 금액이나 용도를 바꾸려면 자산 탭 원금에서 다시 물어 주세요.
         </p>
       ) : null}
@@ -201,7 +201,7 @@ function TxForm({
       {tx.enrichSource ? <OrderSection tx={tx} names={names} onSaved={onSaved} /> : null}
 
       <section>
-        <h3 className="mb-2 text-[12px] text-dim">
+        <h3 className="mb-2 text-aside text-dim">
           {tx.items?.length ? "결제 전체 분류 (상품이 없을 때 쓰여요)" : "분류"}
         </h3>
         <CategoryPicker names={names} value={category} onChange={setCategory} />
@@ -258,7 +258,7 @@ function TxForm({
         />
       ) : null}
 
-      {error ? <p className="text-[12.5px] text-reject">{error}</p> : null}
+      {error ? <p className="text-aside text-reject">{error}</p> : null}
 
       <div className="flex items-center gap-2 pt-1">
         {tx.source === "manual" ? (
@@ -326,8 +326,8 @@ function OrderSection({
 
   return (
     <section>
-      <h3 className="mb-2 text-[12px] text-dim">{site}에서 산 것</h3>
-      {status ? <p className="mb-2 text-[12.5px] text-dim">{status}</p> : null}
+      <h3 className="mb-2 text-aside text-dim">{site}에서 산 것</h3>
+      {status ? <p className="mb-2 text-aside text-dim">{status}</p> : null}
       {items.length > 0 ? (
         <ul className="space-y-1">
           {items.map((it) => (
@@ -336,14 +336,14 @@ function OrderSection({
         </ul>
       ) : null}
       {items.length > 0 && tx.enrichNote ? (
-        <p className="mt-1.5 text-[11.5px] text-faint">{tx.enrichNote}</p>
+        <p className="mt-1.5 text-meta text-faint">{tx.enrichNote}</p>
       ) : null}
       {tx.enrichStatus !== "pending" ? (
         <Button variant="quiet" size="touch-sm" onClick={() => void retry()} className="-ms-3 mt-1">
           주문 다시 확인하기
         </Button>
       ) : null}
-      {error ? <p className="mt-1 text-[12.5px] text-reject">{error}</p> : null}
+      {error ? <p className="mt-1 text-aside text-reject">{error}</p> : null}
     </section>
   );
 }
@@ -370,11 +370,11 @@ function ItemRow({
   return (
     <li className="flex items-center gap-2 rounded-lg bg-glass px-3 py-2">
       <span className="min-w-0 flex-1">
-        <span className="block text-[13px] leading-snug text-foreground/90">
+        <span className="block text-ui leading-snug text-ink">
           {item.name}
           {item.quantity > 1 ? <span className="text-faint"> ×{item.quantity}</span> : null}
         </span>
-        <span className="tnum block text-[11.5px] text-faint">
+        <span className="tnum block text-meta text-faint">
           {krw(item.amountKrw)}
           {item.listedKrw !== item.amountKrw ? ` (주문서 ${krw(item.listedKrw)})` : ""}
         </span>
@@ -457,7 +457,7 @@ function AddForm({
   return (
     <form onSubmit={(e) => void save(e)} className="space-y-4">
       {draft.from ? (
-        <pre className="max-h-40 overflow-y-auto rounded-lg bg-well p-3 font-sans text-[12.5px] leading-relaxed whitespace-pre-wrap text-dim">
+        <pre className="max-h-40 overflow-y-auto rounded-lg bg-well p-3 font-sans text-aside leading-relaxed whitespace-pre-wrap text-dim">
           {draft.from.body}
         </pre>
       ) : null}
@@ -488,14 +488,14 @@ function AddForm({
         />
       </Field>
       <section>
-        <h3 className="mb-2 text-[12px] text-dim">분류</h3>
+        <h3 className="mb-2 text-aside text-dim">분류</h3>
         <CategoryPicker names={names} value={category} onChange={setCategory} allowAuto />
       </section>
       <Field>
         <FieldLabel htmlFor={`${id}-memo`}>메모</FieldLabel>
         <Input id={`${id}-memo`} surface="glass" value={memo} maxLength={200} onChange={(e) => setMemo(e.target.value)} />
       </Field>
-      {error ? <p className="text-[12.5px] text-reject">{error}</p> : null}
+      {error ? <p className="text-aside text-reject">{error}</p> : null}
       <div className="flex pt-1">
         <Button type="submit" variant="raised" size="touch" disabled={saving} className="flex-1">
           {saving ? "적는 중" : "적기"}
@@ -584,7 +584,7 @@ function BudgetForm({ book, onSaved }: { book: Book; onSaved: (note: string) => 
           row(name, name, prevOf(name) ? `지난달 ${krw(prevOf(name))}` : "지난달 없음"),
         )}
       </div>
-      {error ? <p className="text-[12.5px] text-reject">{error}</p> : null}
+      {error ? <p className="text-aside text-reject">{error}</p> : null}
       <div className="flex pt-1">
         <Button type="submit" variant="raised" size="touch" disabled={saving} className="flex-1">
           {saving ? "저장하는 중" : "저장"}
@@ -628,11 +628,11 @@ export function UnparsedSheet({
       <ul className="space-y-3">
         {paged.items.map((u) => (
           <li key={u.messageId} className="rounded-xl bg-glass p-3">
-            <p className="mb-2 text-[11.5px] text-faint">
+            <p className="mb-2 text-meta text-faint">
               {u.chatName} · {dayLabel(dayKey(u.sentAt))} {clock(u.sentAt)}
             </p>
-            {u.reason ? <p className="mb-2 text-[11.5px] break-words text-faint">{u.reason}</p> : null}
-            <pre className="font-sans text-[12.5px] leading-relaxed whitespace-pre-wrap text-dim">{u.body}</pre>
+            {u.reason ? <p className="mb-2 text-meta break-words text-faint">{u.reason}</p> : null}
+            <pre className="font-sans text-aside leading-relaxed whitespace-pre-wrap text-dim">{u.body}</pre>
             <div className="mt-3 flex gap-2">
               <Button variant="quiet" size="touch-sm" onClick={() => void dismiss(u)}>
                 결제 아님
@@ -645,7 +645,7 @@ export function UnparsedSheet({
         ))}
       </ul>
       <Pager {...paged} />
-      {error ? <p className="mt-3 text-[12.5px] text-reject">{error}</p> : null}
+      {error ? <p className="mt-3 text-aside text-reject">{error}</p> : null}
     </Panel>
   );
 }

@@ -3,13 +3,14 @@
 import { useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ChevronDown } from "lucide-react";
 import { Header, TabBar } from "@/components/shell/header";
-import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { BottomSheetContent, BottomSheetHeader, BottomSheetTitle } from "@/components/ui/bottom-sheet";
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Pager } from "@/components/ui/pager";
 import { Sheet, SheetTrigger } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { Failed } from "@/components/shell/failed";
 import { usePaged } from "@/lib/paging";
 import { useKakao, type KakaoMessage, type KakaoRoom, type Source } from "@/lib/use-kakao";
 import { useThread } from "@/lib/use-thread";
@@ -61,7 +62,7 @@ export function Kakao() {
       <StandingBar pending={waitingList} />
       {/* The root draws no box: the list and the panel stay in this column. */}
       <Tabs value={source} onValueChange={(v) => pick(v as Source)} className="contents">
-        <div className="px-gutter mx-auto w-full max-w-[46rem] shrink-0 pt-2 sm:pt-3">
+        <div className="px-gutter mx-auto w-full max-w-page shrink-0 pt-2 sm:pt-3">
           <TabsList aria-label="메신저">
             <TabsTrigger value="kakao">카카오톡</TabsTrigger>
             <TabsTrigger value="imessage">iMessage</TabsTrigger>
@@ -103,7 +104,7 @@ function Feed({ source }: { source: Source }) {
 
   return (
     <>
-      <main className="px-gutter pb-tabbar mx-auto flex min-h-0 w-full max-w-[46rem] flex-1 flex-col overflow-x-hidden">
+      <main className="px-gutter pb-tabbar mx-auto flex min-h-0 w-full max-w-page flex-1 flex-col overflow-x-hidden">
         {/* 방 고르기. 수집된 방만 나온다 - 목록 상태만 있고 본문이 없는 방은
             읽을 것이 없으므로 자리를 차지할 이유가 없다. */}
         {rooms.length > 0 ? <RoomPicker rooms={rooms} selected={selected} onSelect={setSelected} /> : null}
@@ -117,31 +118,31 @@ function Feed({ source }: { source: Source }) {
           className="scrollbar-hairline min-h-0 flex-1 touch-pan-y overflow-x-hidden overflow-y-auto overscroll-contain pb-4 sm:pb-6"
         >
           {!hydrated ? null : error && source !== "imessage" ? (
-            <div className="pt-10 text-center">
-              <p className="text-[13px] text-faint">{error}</p>
-              <Retry onRetry={reload} />
-            </div>
+            <Failed onRetry={reload} className="pt-10">
+              {error}
+            </Failed>
           ) : rooms.length === 0 ? (
-            <div className="grid place-items-center px-8 pt-16">
+            <Empty className="px-8 pt-16">
               {source === "imessage" ? (
-                <p className="max-w-[26rem] text-center text-[13px] leading-relaxed text-faint">
-                  아직 수집된 문자가 없어요.
-                  <br />
-                  맥미니의 메시지 앱에 Apple ID로 로그인하고(iCloud에 메시지 켜기), Docker에 전체 디스크 접근 권한을 주면
-                  여기에 쌓여요.
-                </p>
+                <EmptyHeader>
+                  <EmptyTitle>아직 수집된 문자가 없어요</EmptyTitle>
+                  <EmptyDescription>
+                    맥미니의 메시지 앱에 Apple ID로 로그인하고(iCloud에 메시지 켜기), Docker에 전체 디스크 접근 권한을 주면
+                    여기에 쌓여요.
+                  </EmptyDescription>
+                </EmptyHeader>
               ) : (
-                <p className="max-w-[26rem] text-center text-[13px] leading-relaxed text-faint">
-                  아직 수집된 대화가 없어요.
-                  <br />
-                  맥에서 수집기를 띄우면 여기에 쌓여요.
-                  <br />
-                  <code className="mt-2 inline-block font-mono text-[12px] text-dim">
-                    docker compose up -d kakaotalk
-                  </code>
-                </p>
+                <>
+                  <EmptyHeader>
+                    <EmptyTitle>아직 수집된 대화가 없어요</EmptyTitle>
+                    <EmptyDescription>맥에서 수집기를 띄우면 여기에 쌓여요.</EmptyDescription>
+                  </EmptyHeader>
+                  <EmptyContent>
+                    <code className="font-mono text-aside text-dim">docker compose up -d kakaotalk</code>
+                  </EmptyContent>
+                </>
               )}
-            </div>
+            </Empty>
           ) : (
             <div className="space-y-2.5">
               {messages.map((m, i) => (
@@ -204,7 +205,7 @@ function RoomPicker({
           aria-label={`대화방: ${current.name}. 누르면 전체 ${rooms.length}개 방에서 골라요`}
           className="group flex h-11 max-w-[60%] shrink-0 items-center outline-none"
         >
-          <span className="flex min-w-0 items-center gap-1.5 rounded-lg bg-glass-raised px-3 py-2 text-[13px] text-foreground group-focus-visible:ring-3 group-focus-visible:ring-ring/50">
+          <span className="flex min-w-0 items-center gap-1.5 rounded-lg bg-glass-raised px-3 py-2 text-ui text-foreground group-focus-visible:ring-3 group-focus-visible:ring-ring/50">
             <span className="truncate">{current.name}</span>
             <span className="shrink-0 tabular-nums text-faint">{current.messages}</span>
             <ChevronDown aria-hidden className="size-3.5 shrink-0 text-faint" />
@@ -221,7 +222,7 @@ function RoomPicker({
           className="max-h-[85dvh] sm:max-w-[30rem]"
         >
           <BottomSheetHeader className="sm:px-4">
-            <BottomSheetTitle className="text-[14px]">
+            <BottomSheetTitle className="text-body">
               대화방 <span className="tabular-nums text-faint">{rooms.length}</span>
             </BottomSheetTitle>
           </BottomSheetHeader>
@@ -251,9 +252,9 @@ function RoomPicker({
                     aria-current={active ? "true" : undefined}
                     className={cn("min-h-12 rounded-xl px-3", active ? "bg-glass-raised text-foreground" : "text-dim")}
                   >
-                    <span className="min-w-0 flex-1 truncate text-[14.5px]">{room.name}</span>
-                    <span className="shrink-0 text-[11.5px] tabular-nums text-faint">{when(room)}</span>
-                    <span className="w-9 shrink-0 text-end text-[11.5px] tabular-nums text-faint">{room.messages}</span>
+                    <span className="min-w-0 flex-1 truncate text-body">{room.name}</span>
+                    <span className="shrink-0 text-meta tabular-nums text-faint">{when(room)}</span>
+                    <span className="w-9 shrink-0 text-end text-meta tabular-nums text-faint">{room.messages}</span>
                   </CommandItem>
                 );
               })}
@@ -273,7 +274,7 @@ function RoomPicker({
             onClick={() => onSelect(room.id)}
             className="group flex h-11 max-w-full shrink-0 items-center outline-none"
           >
-            <span className="flex min-w-0 items-center rounded-md px-2.5 py-2 text-[12.5px] whitespace-nowrap text-faint transition-colors group-hover:text-dim group-focus-visible:ring-3 group-focus-visible:ring-ring/50">
+            <span className="flex min-w-0 items-center rounded-md px-2.5 py-2 text-aside whitespace-nowrap text-faint transition-colors group-hover:text-dim group-focus-visible:ring-3 group-focus-visible:ring-ring/50">
               <span className="truncate">{room.name}</span>
               <span className="ms-1.5 shrink-0 tabular-nums text-faint">{room.messages}</span>
             </span>
@@ -311,7 +312,7 @@ function Line({
   return (
     <>
       {newDay && (
-        <p className="pt-4 pb-1 text-center text-[11px] text-faint tabular-nums">
+        <p className="pt-4 pb-1 text-center text-meta text-faint tabular-nums">
           {message.date}
         </p>
       )}
@@ -323,23 +324,23 @@ function Line({
       >
         {message.mine ? (
           <>
-            <span className="shrink-0 text-[11px] text-faint tabular-nums">
+            <span className="shrink-0 text-meta text-faint tabular-nums">
               {message.time}
             </span>
-            <p className="max-w-[78%] rounded-xl bg-glass-raised px-3 py-1.5 text-[14px] leading-[1.7] [word-break:break-all] whitespace-pre-wrap text-foreground sm:max-w-[26rem]">
+            <p className="max-w-[78%] rounded-xl bg-glass-raised px-3 py-1.5 text-body leading-[1.7] [overflow-wrap:anywhere] whitespace-pre-wrap text-foreground sm:max-w-[26rem]">
               {message.text}
             </p>
           </>
         ) : (
           <>
-            <span className="w-[2.6rem] shrink-0 text-end text-[11px] text-faint tabular-nums sm:w-[3.2rem]">
+            <span className="w-[2.6rem] shrink-0 text-end text-meta text-faint tabular-nums sm:w-[3.2rem]">
               {repeated ? "" : message.time}
             </span>
             <div className="min-w-0">
               {!repeated && message.sender && (
-                <p className="text-[11.5px] text-dim">{message.sender}</p>
+                <p className="text-meta text-dim">{message.sender}</p>
               )}
-              <p className="text-[14px] leading-[1.7] [word-break:break-all] whitespace-pre-wrap text-foreground/90 sm:max-w-[30rem]">
+              <p className="text-body leading-[1.7] [overflow-wrap:anywhere] whitespace-pre-wrap text-ink sm:max-w-[30rem]">
                 {message.text}
               </p>
             </div>

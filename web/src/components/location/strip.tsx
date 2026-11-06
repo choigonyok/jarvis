@@ -107,7 +107,7 @@ export function Strip({
         onPointerUp={up}
         onPointerCancel={up}
         onKeyDown={key}
-        className="relative h-11 cursor-pointer touch-none rounded-lg outline-none select-none focus-visible:ring-3 focus-visible:ring-ring/50"
+        className="relative h-11 cursor-pointer touch-none rounded-lg select-none focus-ring"
       >
         <div className="absolute inset-x-0 top-2 bottom-2 overflow-hidden rounded-[7px] bg-glass">
           {day.people.map((person, row) => (
@@ -180,7 +180,7 @@ function Row({
             style={{ left: `${left}%`, width: `${width}%` }}
           >
             {single && it.node.name && room >= 30 ? (
-              <span className="truncate px-1.5 text-[10.5px] text-dim">{it.node.name}</span>
+              <span className="truncate px-1.5 text-tiny text-dim">{it.node.name}</span>
             ) : null}
           </span>
         );
@@ -193,7 +193,7 @@ function Row({
 function Hours({ day }: { day: Scene }) {
   const nowAt = ((day.end - day.start) / (day.dayEnd - day.start)) * 100;
   return (
-    <div aria-hidden className="tnum relative mt-0.5 h-4 text-[10.5px] text-faint">
+    <div aria-hidden className="tnum relative mt-0.5 h-4 text-tiny text-faint">
       {[0, 6, 12, 18, 24].map((h) => {
         const left = (h / 24) * 100;
         // Today, the hour under 지금 gives it the room.

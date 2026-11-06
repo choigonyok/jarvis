@@ -33,7 +33,7 @@ export function HeaderPanel({
       className="w-[21rem] gap-0 overflow-hidden rounded-xl border border-edge bg-popover p-0 text-base shadow-lg ring-0 data-open:animate-none data-closed:animate-none max-sm:w-full"
     >
       <div className="flex min-h-11 items-center justify-between gap-2 border-b border-edge-soft px-3.5 py-1.5">
-        <p className="text-[13px] text-foreground">{title}</p>
+        <p className="text-ui text-foreground">{title}</p>
         {aside ? <div className="flex items-center gap-1">{aside}</div> : null}
       </div>
       {children}

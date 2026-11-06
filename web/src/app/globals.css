@@ -51,12 +51,65 @@
   --color-partner: var(--partner);
   --color-caution: var(--caution);
   --color-shade: var(--shade);
+  /* Words being read: a step under the titles' full foreground (text-ink).
+     It was foreground/90, /85 and /80 written out in 104 places. */
+  --color-ink: color-mix(in oklab, var(--foreground) 90%, transparent);
+  /* A signal in three strengths and no others: the word itself (approve),
+     what fills a mark - a bar, an edge, a dot (-fill), and what tints a
+     surface (-wash). It was seven opacities each. */
+  --color-approve-fill: color-mix(in oklab, var(--approve) 70%, transparent);
+  --color-approve-wash: color-mix(in oklab, var(--approve) 15%, transparent);
+  --color-reject-fill: color-mix(in oklab, var(--reject) 70%, transparent);
+  --color-reject-wash: color-mix(in oklab, var(--reject) 15%, transparent);
+
+  /* The type scale. Twenty-six sizes half a pixel apart had grown up screen
+     by screen - 12 beside 12.5, 13 beside 13.5, the same job either way. One
+     size a role (web/DESIGN.md "타이포"). The scoreboard numerals (font-score)
+     keep sizes of their own. */
+  --text-tiny: 10.5px; /* over a photo, the map's credit */
+  --text-meta: 11.5px; /* times, labels, a count beside something */
+  --text-aside: 12.5px; /* the line under a thing, what explains it */
+  --text-ui: 13.5px; /* buttons, rows, a sheet's text */
+  --text-body: 14.5px; /* a row's name, a sheet's paragraph */
+  --text-read: var(--read); /* the conversation itself: bigger on a phone */
+  --text-title: 15px; /* a screen's, a sheet's, a card's name */
+  --text-field: 16px; /* what is typed: under 16px a phone zooms the page */
+  --text-heading: 17px; /* the one line a screen is about (the bus to catch) */
+  --text-lead: 20px; /* a card's value, a sheet's figure */
+  --text-display: var(--display); /* the first line that answers a screen */
+  --text-display-lg: var(--display-lg); /* the biggest answer: a month's spending */
+
+  /* How wide a page reads. One width for the header and every one-column
+     page, so their left edges are one line on a wide screen; narrower for
+     the month grid and the transit board; wider where a page goes two
+     columns - the calendar's month and day, and the assets' list and plan,
+     and the photos' grid. They were eighteen widths. */
+  --container-page: 46rem;
+  --container-page-narrow: 34rem;
+  --container-page-wide: 58rem;
+  --container-page-wider: 72rem;
 
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) * 1.4);
   --radius-2xl: calc(var(--radius) * 1.8);
+}
+
+/* The two display sizes grow a step on a wide screen. The conversation's
+   words go the other way: a phone is read most and held closest, and 14.5px
+   at 90% was small there - 16px on a phone, the same 36rem measure. */
+:root {
+  --display: 26px;
+  --display-lg: 34px;
+  --read: 16px;
+}
+@media (width >= 40rem) {
+  :root {
+    --display: 30px;
+    --display-lg: 40px;
+    --read: 14.5px;
+  }
 }
 
 /* Dark: the console as it was made, for reading at night. */
@@ -472,8 +525,8 @@
    a push shown in the app. Everything that sits in the page - the composer,
    cards, panels, sheets - is a solid surface.
 
-   The rim is light, not a line: the approval card stays the only element in
-   this product with a border. */
+   The rim is light, not a line: a border in this product is for what a
+   hand is on - a decision, a field, one's own words (web/DESIGN.md). */
 
 :root {
   /* What the floating bar takes from the bottom of the page. Zero unless the
@@ -693,6 +746,12 @@
     background: oklch(0.158 0.004 265);
     pointer-events: none;
   }
+}
+
+/* What every pressable thing does under the keyboard: no outline, a ring
+   when focus came by keyboard. It was written out 173 times. */
+@utility focus-ring {
+  @apply outline-none focus-visible:ring-3 focus-visible:ring-ring/50;
 }
 
 @utility scrollbar-none {

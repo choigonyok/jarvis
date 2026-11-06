@@ -70,13 +70,13 @@ function OrderList({ results, names }: { results: OrderResult[]; names: Map<stri
           </span>
           <span className="min-w-0 flex-1">
             <span className="flex items-baseline justify-between gap-3">
-              <span className="text-[14px] text-foreground/90">{orderLine(r, names)}</span>
-              <span className="tnum shrink-0 text-[12px] text-faint">
+              <span className="text-body text-ink">{orderLine(r, names)}</span>
+              <span className="tnum shrink-0 text-aside text-faint">
                 {statusText[r.status] || (r.units !== null && r.venue !== "upbit" ? `약 ${krw(r.amountKrw)}` : "")}
               </span>
             </span>
             {r.message ? (
-              <span className={cn("mt-0.5 block text-[12px] leading-relaxed", r.status === "failed" ? "text-reject/90" : "text-faint")}>
+              <span className={cn("mt-0.5 block text-aside leading-relaxed", r.status === "failed" ? "text-reject" : "text-faint")}>
                 {r.message}
               </span>
             ) : null}
@@ -156,13 +156,13 @@ export function PlanSheet({
       title={title}
       description={placed ? "보낸 결과예요. 체결은 잠시 뒤 잔고에 반영돼요." : "아래 주문을 그대로 보내요. 파는 것부터 내요."}
     >
-      {!checked && !error ? <p className="py-6 text-center text-[13px] text-faint">주문을 확인하는 중…</p> : null}
+      {!checked && !error ? <p className="py-6 text-center text-ui text-faint">주문을 확인하는 중…</p> : null}
       {shown.length ? <OrderList results={shown} names={names} /> : null}
-      {checked && shown.length === 0 ? <p className="py-6 text-center text-[13px] text-faint">지금 낼 주문이 없어요.</p> : null}
-      {error ? <p className="mt-2 text-[12.5px] text-reject/90">{error}</p> : null}
+      {checked && shown.length === 0 ? <p className="py-6 text-center text-ui text-faint">지금 낼 주문이 없어요.</p> : null}
+      {error ? <p className="mt-2 text-aside text-reject">{error}</p> : null}
       {!placed && ready.length > 0 ? (
         <div className="mt-3 space-y-2">
-          <p className="text-[11.5px] leading-relaxed text-faint">
+          <p className="text-meta leading-relaxed text-faint">
             미국 주식은 지금가보다 0.3% 유리하게 지정가로 내서 바로 체결되게 해요. 업비트는 시장가예요. 원금 대비 수익률에는 들어가지
             않아요 - 원금은 입출금만이에요.
           </p>
@@ -272,7 +272,7 @@ export function OrderSheet({
                 key={s}
                 value={s}
                 disabled={s === "sell" && holding.quantity <= 0}
-                className="tap text-[13.5px] text-dim"
+                className="tap text-ui text-dim"
               >
                 {s === "buy" ? "매수" : "매도"}
               </ToggleGroupItem>
@@ -298,7 +298,7 @@ export function OrderSheet({
                 key={v}
                 type="button"
                 onClick={() => setAmount(String(v))}
-                className="tap rounded-full bg-glass px-3 text-[12.5px] text-dim outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+                className="tap rounded-full bg-glass px-3 text-aside text-dim hover:text-foreground focus-ring"
               >
                 {coin ? krw(v) : `${v}${gold ? "g" : "주"}`}
               </button>
@@ -307,19 +307,19 @@ export function OrderSheet({
               <button
                 type="button"
                 onClick={() => setAmount(String(coin ? Math.floor(holding.valueKrw) : held))}
-                className="tap rounded-full bg-glass px-3 text-[12.5px] text-dim outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+                className="tap rounded-full bg-glass px-3 text-aside text-dim hover:text-foreground focus-ring"
               >
                 전부
               </button>
             ) : null}
           </div>
-          <p className="tnum text-[12px] leading-relaxed text-faint">
+          <p className="tnum text-aside leading-relaxed text-faint">
             {n > 0 ? `약 ${krw(amountKrw)}` : ""}
-            {tooMuch ? <span className="text-reject/90"> · 갖고 있는 것보다 많아요</span> : null}
-            {tooSmall ? <span className="text-reject/90"> · 업비트는 ₩5,000부터예요</span> : null}
+            {tooMuch ? <span className="text-reject"> · 갖고 있는 것보다 많아요</span> : null}
+            {tooSmall ? <span className="text-reject"> · 업비트는 ₩5,000부터예요</span> : null}
             {gold ? " · 금현물은 한국투자 앱에서 직접 주문해야 해요" : null}
           </p>
-          {error ? <p className="text-[12.5px] text-reject/90">{error}</p> : null}
+          {error ? <p className="text-aside text-reject">{error}</p> : null}
           <Button variant="raised" size="touch" className="w-full" disabled={busy || n <= 0 || tooMuch || tooSmall} onClick={() => void send()}>
             {busy ? "보내는 중…" : n > 0 ? `${line} 주문 보내기` : "수량을 적어 주세요"}
           </Button>
@@ -345,17 +345,17 @@ function Waiting({ standing, names, onChanged }: { standing: Standing[]; names: 
   if (active.length === 0 && done.length === 0) return null;
   return (
     <section aria-label="대기 주문" className="mb-3">
-      <p className="mb-1 text-[11.5px] text-faint">대기 주문 · 체결될 때까지 거래일마다 다시 내요</p>
+      <p className="mb-1 text-meta text-faint">대기 주문 · 체결될 때까지 거래일마다 다시 내요</p>
       <ul className="divide-y divide-edge-soft">
         {[...active, ...done].map((o) => {
           const name = names.get(`kis:${o.symbol}`) ?? o.symbol;
           return (
-            <li key={o.id} className="flex items-start gap-3 py-2 text-[12.5px]">
+            <li key={o.id} className="flex items-start gap-3 py-2 text-aside">
               <span className="min-w-0 flex-1">
-                <span className={o.status === "active" ? "text-foreground/90" : "text-faint"}>
+                <span className={o.status === "active" ? "text-ink" : "text-faint"}>
                   {name} {o.units}주 ${o.limitPrice.toFixed(2)} {o.side === "buy" ? "이하에 매수" : "이상에 매도"}
                 </span>
-                <span className="block text-[11.5px] leading-relaxed text-faint">
+                <span className="block text-meta leading-relaxed text-faint">
                   {o.status === "filled" ? "체결됐어요" : o.status === "cancelled" ? "취소됨" : o.status === "expired" ? "기한이 지났어요" : o.message}
                 </span>
               </span>
@@ -364,7 +364,7 @@ function Waiting({ standing, names, onChanged }: { standing: Standing[]; names: 
                 // broker with it. Asked first, as every irreversible step is.
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
-                    <Button variant="discard" size="inline" disabled={busy === o.id} className="tap shrink-0 px-2 text-[12px]">
+                    <Button variant="discard" size="inline" disabled={busy === o.id} className="tap shrink-0 px-2 text-aside">
                       취소
                     </Button>
                   </AlertDialogTrigger>
@@ -401,7 +401,7 @@ function Waiting({ standing, names, onChanged }: { standing: Standing[]; names: 
           );
         })}
       </ul>
-      {note ? <p className="mt-1 text-[11.5px] text-dim">{note}</p> : null}
+      {note ? <p className="mt-1 text-meta text-dim">{note}</p> : null}
     </section>
   );
 }
@@ -420,24 +420,24 @@ export function OrderRecord({
 }) {
   const names = new Map(holdings.map((h) => [`${h.venue}:${h.symbol}`, h.name]));
   const paged = usePaged(orders);
-  if (orders.length === 0 && standing.length === 0) return <p className="text-[12.5px] text-faint">아직 낸 주문이 없어요.</p>;
+  if (orders.length === 0 && standing.length === 0) return <p className="text-aside text-faint">아직 낸 주문이 없어요.</p>;
   return (
     <>
     <Waiting standing={standing} names={names} onChanged={onChanged} />
     <div id={paged.anchor} className="scroll-mt-4" />
     <ul className="divide-y divide-edge-soft">
       {paged.items.map((o) => (
-        <li key={o.id} className="flex items-baseline gap-3 py-2 text-[12.5px]">
+        <li key={o.id} className="flex items-baseline gap-3 py-2 text-aside">
           <span className="tnum w-[5.5rem] shrink-0 text-faint">{when(o.createdAt)}</span>
           <span className="min-w-0 flex-1">
-            <span className="text-foreground/90">{orderLine(o, names)}</span>
-            {o.reason === "rebalance" ? <span className="ms-1.5 text-[11px] text-faint">리밸런싱</span> : null}
-            {o.reason === "standing" ? <span className="ms-1.5 text-[11px] text-faint">대기 주문</span> : null}
+            <span className="text-ink">{orderLine(o, names)}</span>
+            {o.reason === "rebalance" ? <span className="ms-1.5 text-meta text-faint">리밸런싱</span> : null}
+            {o.reason === "standing" ? <span className="ms-1.5 text-meta text-faint">대기 주문</span> : null}
             {o.status !== "placed" ? (
-              <span className={cn("block text-[11.5px]", o.status === "failed" ? "text-reject/90" : "text-faint")}>{o.message}</span>
+              <span className={cn("block text-meta", o.status === "failed" ? "text-reject" : "text-faint")}>{o.message}</span>
             ) : null}
           </span>
-          <span className={cn("shrink-0 text-[11.5px]", o.status === "failed" ? "text-reject/90" : "text-faint")}>
+          <span className={cn("shrink-0 text-meta", o.status === "failed" ? "text-reject" : "text-faint")}>
             {statusText[o.status]}
           </span>
         </li>

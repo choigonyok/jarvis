@@ -213,7 +213,7 @@ function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null;
 
   const windowSet = from !== "" && to !== "";
   return (
-    <div className="mx-auto w-full max-w-[40rem] space-y-6 px-4 pb-8 text-[13px] sm:px-6">
+    <div className="mx-auto w-full max-w-[40rem] space-y-6 px-4 pb-8 text-ui sm:px-6">
       <Step title="어디서 타요">
         {place ? (
           <Picked onChange={() => { setPlace(null); setStop(null); setChoices(null); setLine(null); }}>
@@ -266,7 +266,7 @@ function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null;
                 stops.length ? (
                   <>
                     {stops.every((s) => s.like) ? (
-                      <p className="mt-3 text-[12px] leading-[1.55] break-keep text-dim">그 이름의 정류장은 없어서 이름의 일부로 찾았어요.</p>
+                      <p className="mt-3 text-aside leading-[1.55] break-keep text-dim">그 이름의 정류장은 없어서 이름의 일부로 찾았어요.</p>
                     ) : null}
                     <CommandList className="mt-2 *:divide-y *:divide-edge-soft">
                       {places(stops).slice(0, 40).map((p) => (
@@ -280,7 +280,7 @@ function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null;
                   <p className="mt-3 text-dim">찾은 정류장이 없어요. 다른 이름으로 찾아 보세요.</p>
                 )
               ) : null}
-              {missed ? <p className="mt-2 text-[12px] leading-[1.55] break-keep text-dim">{missed}</p> : null}
+              {missed ? <p className="mt-2 text-aside leading-[1.55] break-keep text-dim">{missed}</p> : null}
             </Command>
           </form>
         )}
@@ -295,7 +295,7 @@ function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null;
                 if (!choices) void loadChoices(place);
               }}
             >
-              <span className="shrink-0 text-[14px] font-medium text-foreground">{line.name}</span>
+              <span className="shrink-0 text-body font-medium text-foreground">{line.name}</span>
               <span className="min-w-0 truncate text-dim">{line.toward}</span>
             </Picked>
           ) : busy === "lines" ? (
@@ -303,17 +303,17 @@ function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null;
           ) : choices && choices.length ? (
             <>
               {sides(place) > 1 ? (
-                <p className="mb-1 text-[12px] leading-[1.55] break-keep text-faint">
+                <p className="mb-1 text-aside leading-[1.55] break-keep text-faint">
                   이름이 같은 정류장 {sides(place)}곳의 노선이에요. 타는 방향을 고르면 그쪽 정류장으로 정해져요 - 끝의 번호는 정류장 표지판의 번호예요.
                 </p>
               ) : null}
               <ul className="divide-y divide-edge-soft">
                 {choices.map((c) => (
                   <li key={`${c.stop.region ?? ""}:${c.stop.id}:${c.line.id}:${c.line.order ?? ""}`}>
-                    <button type="button" onClick={() => choose(c)} className="flex w-full items-baseline gap-2 py-2.5 text-left outline-none hover:bg-glass focus-visible:ring-3 focus-visible:ring-ring/50">
-                      <span className="shrink-0 text-[14px] font-medium text-foreground">{c.line.name}</span>
+                    <button type="button" onClick={() => choose(c)} className="flex w-full items-baseline gap-2 py-2.5 text-left hover:bg-glass focus-ring">
+                      <span className="shrink-0 text-body font-medium text-foreground">{c.line.name}</span>
                       <span className="min-w-0 flex-1 truncate text-dim">{c.line.toward}</span>
-                      {sides(place) > 1 && c.stop.no ? <span className="tnum shrink-0 text-[12px] text-faint">{c.stop.no}</span> : null}
+                      {sides(place) > 1 && c.stop.no ? <span className="tnum shrink-0 text-aside text-faint">{c.stop.no}</span> : null}
                     </button>
                   </li>
                 ))}
@@ -332,7 +332,7 @@ function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null;
               <Stepper label="정류장까지" value={walk} min={0} max={90} unit="분" onChange={setWalk} />
               <Stepper label="일찍 도착" value={spare} min={0} max={15} unit="분" onChange={setSpare} />
             </div>
-            <p className="mt-2 text-[12px] text-faint">
+            <p className="mt-2 text-aside text-faint">
               {stop.dist ? `지금 위치에서 ${stop.dist}m, 걸어서 ${walkMinutes(stop.dist)}분쯤이에요. ` : ""}나갈 때는 도착 시각에서 이만큼 앞이에요.
             </p>
           </Step>
@@ -353,7 +353,7 @@ function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null;
                 }}
               >
                 {NAMES.map((n) => (
-                  <ToggleGroupItem key={n} value={n} className="px-3.5 text-[13px] mouse:px-3">
+                  <ToggleGroupItem key={n} value={n} className="px-3.5 text-ui mouse:px-3">
                     {n}
                   </ToggleGroupItem>
                 ))}
@@ -380,7 +380,7 @@ function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null;
               className="mt-3 flex-wrap"
             >
               {DAY_NAMES.map((d, i) => (
-                <ToggleGroupItem key={d} value={String(i + 1)} className="w-10 px-0 text-[13px] mouse:w-8">
+                <ToggleGroupItem key={d} value={String(i + 1)} className="w-10 px-0 text-ui mouse:w-8">
                   {d}
                 </ToggleGroupItem>
               ))}
@@ -398,7 +398,7 @@ function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null;
               label="이 시간대에 나갈 때를 알림으로 알려 주기"
               className="mt-2"
             />
-            <p className="mt-1.5 text-[12px] leading-[1.55] break-keep text-faint">
+            <p className="mt-1.5 text-aside leading-[1.55] break-keep text-faint">
               나가기 15분 전에 ‘슬슬 짐 싸야 해요’, 2분 전에 ‘지금 나가요’를 보내요. 방해 금지 시간에도 울려요.
             </p>
           </Step>
@@ -406,7 +406,7 @@ function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null;
       ) : null}
 
       {error ? (
-        <p role="alert" className="text-[12.5px] text-reject">
+        <p role="alert" className="text-aside text-reject">
           {error}
         </p>
       ) : null}
@@ -452,7 +452,7 @@ function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null;
 function Step({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section>
-      <h3 className="mb-2 text-[13.5px] font-medium text-foreground">{title}</h3>
+      <h3 className="mb-2 text-ui font-medium text-foreground">{title}</h3>
       {children}
     </section>
   );
@@ -462,7 +462,7 @@ function Picked({ children, onChange }: { children: ReactNode; onChange: () => v
   return (
     <div className="flex items-center justify-between gap-3">
       <div className="flex min-w-0 items-center gap-3">{children}</div>
-      <button type="button" onClick={onChange} className="shrink-0 text-[12.5px] text-dim underline-offset-2 outline-none hover:text-foreground hover:underline focus-visible:ring-3 focus-visible:ring-ring/50">
+      <button type="button" onClick={onChange} className="shrink-0 text-aside text-dim underline-offset-2 hover:text-foreground hover:underline focus-ring">
         바꾸기
       </button>
     </div>
@@ -477,20 +477,20 @@ function PlaceLabel({ place }: { place: Place }) {
     <>
       <BusFront aria-hidden className="size-[18px] shrink-0 text-dim" strokeWidth={1.7} />
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[14px] text-foreground">{place.name}</span>
-        <span className="block text-[12px] text-faint">
+        <span className="block truncate text-body text-foreground">{place.name}</span>
+        <span className="block text-aside text-faint">
           {n > 1 ? `${region} 버스 · 정류장 ${n}곳, 타는 방향으로 골라요` : `${region} 버스${place.stops[0].no ? ` · ${place.stops[0].no}` : ""}`}
         </span>
         <Renamed was={place.stops.find((s) => s.was)?.was} />
       </span>
-      {place.dist ? <span className="tnum shrink-0 text-[12px] text-faint">{place.dist >= 1000 ? `${(place.dist / 1000).toFixed(1)}km` : `${place.dist}m`}</span> : null}
+      {place.dist ? <span className="tnum shrink-0 text-aside text-faint">{place.dist >= 1000 ? `${(place.dist / 1000).toFixed(1)}km` : `${place.dist}m`}</span> : null}
     </>
   );
 }
 
 /** A stop found by what it used to be called: why a name one did not type is here. */
 function Renamed({ was }: { was?: string }) {
-  return was ? <span className="block text-[12px] text-dim">‘{was}’의 지금 이름이에요</span> : null;
+  return was ? <span className="block text-aside text-dim">‘{was}’의 지금 이름이에요</span> : null;
 }
 
 function StopLabel({ stop }: { stop: Stop }) {
@@ -500,24 +500,24 @@ function StopLabel({ stop }: { stop: Stop }) {
     <>
       <Icon aria-hidden className="size-[18px] shrink-0 text-dim" strokeWidth={1.7} />
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[14px] text-foreground">{stop.name}</span>
-        <span className="block text-[12px] text-faint">{sub}</span>
+        <span className="block truncate text-body text-foreground">{stop.name}</span>
+        <span className="block text-aside text-faint">{sub}</span>
         <Renamed was={stop.was} />
       </span>
-      {stop.dist ? <span className="tnum shrink-0 text-[12px] text-faint">{stop.dist >= 1000 ? `${(stop.dist / 1000).toFixed(1)}km` : `${stop.dist}m`}</span> : null}
+      {stop.dist ? <span className="tnum shrink-0 text-aside text-faint">{stop.dist >= 1000 ? `${(stop.dist / 1000).toFixed(1)}km` : `${stop.dist}m`}</span> : null}
     </>
   );
 }
 
 function Stepper({ label, value, min, max, unit, onChange }: { label: string; value: number; min: number; max: number; unit: string; onChange: (v: number) => void }) {
-  const btn = "flex size-9 items-center justify-center rounded-full border border-edge text-dim outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-40 mouse:size-7";
+  const btn = "flex size-9 items-center justify-center rounded-full border border-edge text-dim hover:text-foreground focus-ring disabled:opacity-40 mouse:size-7";
   return (
     <div className="flex items-center gap-2.5">
       <span className="text-dim">{label}</span>
       <button type="button" aria-label={`${label} 줄이기`} disabled={value <= min} onClick={() => onChange(value - 1)} className={btn}>
         <Minus aria-hidden className="size-3.5" strokeWidth={2} />
       </button>
-      <span className="tnum w-10 text-center text-[15px] text-foreground">
+      <span className="tnum w-10 text-center text-title text-foreground">
         {value}
         {unit}
       </span>

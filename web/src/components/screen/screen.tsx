@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { type RemoteRFB, RemoteTouch } from "@/components/screen/remote-touch";
 import { Header, TabBar } from "@/components/shell/header";
 import { StandingBar } from "@/components/shell/standing-bar";
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { useThread } from "@/lib/use-thread";
 import { isPending } from "@/lib/thread";
 import { cn } from "@/lib/utils";
@@ -130,7 +131,7 @@ export function Screen({ vncUrl, ticketed = false }: { vncUrl: string; ticketed?
           "inset-x-safe min-h-0 flex-1",
           controlling
             ? "pb-safe screen-h fixed inset-x-0 top-0 z-50 flex flex-col bg-background p-3 pt-[max(env(safe-area-inset-top),0.75rem)] sm:p-6"
-            : "mx-auto flex w-full max-w-[46rem] flex-col px-4 pt-3 pb-[calc(var(--tabbar-space)+0.75rem)] sm:px-8 sm:py-4",
+            : "mx-auto flex w-full max-w-page flex-col px-4 pt-3 pb-[calc(var(--tabbar-space)+0.75rem)] sm:px-8 sm:py-4",
         )}
       >
         <div className="mb-2.5 flex shrink-0 items-center justify-between gap-3">
@@ -140,7 +141,7 @@ export function Screen({ vncUrl, ticketed = false }: { vncUrl: string; ticketed?
               Esc is the desktop way out. A phone has no Esc, so the button on
               the right is the only exit there - which is why it is named for
               leaving rather than toggled silently. */}
-          <p className="min-w-0 truncate text-[11.5px] text-faint" aria-live="polite">
+          <p className="min-w-0 truncate text-meta text-faint" aria-live="polite">
             {controlling ? (
               <>
                 조작 중<span className="hidden sm:inline"> · Esc로 돌아가요</span>
@@ -155,9 +156,9 @@ export function Screen({ vncUrl, ticketed = false }: { vncUrl: string; ticketed?
             disabled={state !== "open"}
             aria-pressed={controlling}
             className={cn(
-              "flex shrink-0 items-center justify-center rounded-lg px-3 text-[12.5px] transition-colors outline-none",
-              "min-h-11 mouse:min-h-0 mouse:px-2 mouse:py-1 mouse:text-[12px]",
-              "focus-visible:ring-3 focus-visible:ring-ring/50",
+              "flex shrink-0 items-center justify-center rounded-lg px-3 text-aside transition-colors outline-none",
+              "min-h-11 mouse:min-h-0 mouse:px-2 mouse:py-1 mouse:text-aside",
+              "focus-ring",
               "disabled:pointer-events-none disabled:text-faint/40",
               controlling
                 ? "bg-glass-raised text-foreground"
@@ -168,8 +169,9 @@ export function Screen({ vncUrl, ticketed = false }: { vncUrl: string; ticketed?
           </button>
         </div>
 
-        {/* No border: in this product a border means a decision is waiting,
-            and this is a window, not a card. It is recessed instead.
+        {/* No border: in this product a border is for what a hand is on - a
+            decision, a field - and this is a window, not a card. It is
+            recessed instead.
 
             The remote screen is 16:10 and this is a window onto it, so where
             there is width to spare the well keeps that shape rather than
@@ -193,21 +195,23 @@ export function Screen({ vncUrl, ticketed = false }: { vncUrl: string; ticketed?
           {controlling && touch && state === "open" ? <RemoteTouch rfb={rfb} canvasHost={mount} /> : null}
 
           {state !== "open" && (
-            <div className="absolute inset-0 grid place-items-center px-8">
-              <p className="max-w-[24rem] text-center text-[12.5px] leading-relaxed text-balance text-faint sm:text-[13px]">
-                {state === "connecting" ? (
-                  "에이전트가 브라우저를 쓰기 시작하면 여기에 나타나요."
-                ) : (
-                  <>
-                    브라우저 컨테이너가 응답하지 않아요.
-                    <br />
-                    <code className="mt-2 inline-block font-mono text-[12px] text-dim">
-                      docker compose up -d browser
-                    </code>
-                  </>
-                )}
-              </p>
-            </div>
+            <Empty className="absolute inset-0 px-8">
+              {state === "connecting" ? (
+                <EmptyHeader>
+                  <EmptyTitle>아직 쓰는 화면이 없어요</EmptyTitle>
+                  <EmptyDescription>에이전트가 브라우저를 쓰기 시작하면 여기에 나타나요.</EmptyDescription>
+                </EmptyHeader>
+              ) : (
+                <>
+                  <EmptyHeader>
+                    <EmptyTitle>브라우저 컨테이너가 응답하지 않아요</EmptyTitle>
+                  </EmptyHeader>
+                  <EmptyContent>
+                    <code className="font-mono text-aside text-dim">docker compose up -d browser</code>
+                  </EmptyContent>
+                </>
+              )}
+            </Empty>
           )}
         </div>
       </main>

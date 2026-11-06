@@ -61,7 +61,7 @@ export function ViewportProbe() {
 
   if (!on || !lines) return null;
   return (
-    <pre className="pointer-events-none fixed top-24 left-2 z-[100] rounded-lg bg-black/85 p-2 font-mono text-[10px] leading-snug text-white">
+    <pre className="pointer-events-none fixed top-24 left-2 z-[100] rounded-lg bg-black/85 p-2 font-mono text-tiny leading-snug text-white">
       {lines.join("\n")}
     </pre>
   );

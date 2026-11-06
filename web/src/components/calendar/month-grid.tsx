@@ -24,7 +24,7 @@ export function WeekdayRow() {
   return (
     <div className="mb-1.5 grid grid-cols-7 gap-px" aria-hidden>
       {WEEKDAYS.map((label) => (
-        <div key={label} className="py-1 text-center text-[11px] text-faint">
+        <div key={label} className="py-1 text-center text-meta text-faint">
           {label}
         </div>
       ))}
@@ -120,14 +120,14 @@ export function MonthGrid({
               onClick={() => onSelect(cell.date)}
               className={cn(
                 "flex h-12 flex-col items-center justify-center gap-[3px] rounded-lg transition-colors outline-none sm:h-14",
-                "focus-visible:ring-3 focus-visible:ring-ring/50",
+                "focus-ring",
                 isSelected ? "bg-glass-raised" : "hover:bg-glass",
               )}
             >
               <span
                 className={cn(
-                  "tnum grid size-6 place-items-center rounded-full text-[13.5px] leading-none sm:text-[13px]",
-                  !cell.inMonth && "text-faint/60",
+                  "tnum grid size-6 place-items-center rounded-full text-ui leading-none",
+                  !cell.inMonth && "text-faint",
                   cell.inMonth && (isSelected || isToday ? "text-foreground" : "text-dim"),
                   isToday && "font-semibold ring-1 ring-foreground/45",
                 )}
@@ -135,7 +135,7 @@ export function MonthGrid({
                 {cell.day}
               </span>
 
-              {/* 점 하나가 일정 하나, 색이 그 주인: 파랑은 나, 호박색은 상대,
+              {/* 점 하나가 일정 하나, 색이 그 주인: 보라는 나, 호박색은 상대,
                   반반은 함께. 숨쉬는 빈 원은 결재 대기. */}
               <span
                 aria-hidden

@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 
 import {
   Sheet,
@@ -89,7 +89,7 @@ function BottomSheetTitle({
 }: React.ComponentProps<typeof SheetTitle>) {
   return (
     <SheetTitle
-      className={cn("pr-12 text-[15px] font-medium text-foreground mouse:pr-8", className)}
+      className={cn("pr-12 text-title font-medium text-foreground mouse:pr-8", className)}
       {...props}
     />
   )
@@ -101,7 +101,7 @@ function BottomSheetDescription({
 }: React.ComponentProps<typeof SheetDescription>) {
   return (
     <SheetDescription
-      className={cn("text-[12px] text-faint", className)}
+      className={cn("text-aside text-faint", className)}
       {...props}
     />
   )

@@ -1,11 +1,9 @@
 "use client";
 
 import { useRef } from "react";
-import { Info } from "lucide-react";
 import { BottomSheetContent, BottomSheetDescription, BottomSheetHeader, BottomSheetTitle } from "@/components/ui/bottom-sheet";
 import { Sheet } from "@/components/ui/sheet";
 import type { Role } from "@/lib/role";
-import { cn } from "@/lib/utils";
 
 /**
  * Something Jarvis can be asked in words. A “quoted” phrase in body is shown
@@ -133,26 +131,6 @@ export function starters(role: Role): string[] {
   });
 }
 
-/** The ⓘ in the chat's header, left of search. */
-export function GuideToggle({ open, onOpen }: { open: boolean; onOpen: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      aria-label="말로 시킬 수 있는 일"
-      aria-haspopup="dialog"
-      aria-expanded={open}
-      title="말로 시킬 수 있는 일"
-      className={cn(
-        "flex size-11 items-center justify-center rounded-lg transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 mouse:size-8",
-        open ? "text-foreground" : "text-faint hover:text-dim",
-      )}
-    >
-      <Info aria-hidden className="size-[18px] mouse:size-4" />
-    </button>
-  );
-}
-
 /**
  * What can be asked of Jarvis in words, for this account: the guest's agent
  * is built without the operator's money, messages, logins and browser, so
@@ -188,13 +166,13 @@ export function GuideSheet({
       >
         <BottomSheetHeader className="mx-auto w-full max-w-[40rem] pb-1 sm:px-6">
           <BottomSheetTitle className="pr-0">말로 시킬 수 있는 일</BottomSheetTitle>
-          <BottomSheetDescription className="text-[12.5px]">대화창에 이렇게 말해 보세요.</BottomSheetDescription>
+          <BottomSheetDescription className="text-aside">대화창에 이렇게 말해 보세요.</BottomSheetDescription>
         </BottomSheetHeader>
         <dl className="mx-auto w-full max-w-[40rem] space-y-4 px-4 pb-8 sm:px-6">
           {asks.map((a) => (
             <div key={a.title}>
-              <dt className="text-[14px] font-medium text-foreground">{a.title}</dt>
-              <dd className="mt-0.5 text-[13px] leading-[1.7] break-keep text-pretty text-dim">
+              <dt className="text-body font-medium text-foreground">{a.title}</dt>
+              <dd className="mt-0.5 text-ui leading-[1.7] break-keep text-pretty text-dim">
                 <Said text={role === "guest" && a.guest ? a.guest : a.body} />
               </dd>
             </div>

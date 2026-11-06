@@ -134,7 +134,7 @@ export function RegisterPanel({
       type="button"
       onClick={onClose}
       aria-label="닫기"
-      className="tap -mt-1 -mr-2 flex shrink-0 items-center justify-center rounded-full text-dim transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+      className="tap -mt-1 -mr-2 flex shrink-0 items-center justify-center rounded-full text-dim transition-colors hover:text-foreground focus-ring"
     >
       <X aria-hidden className="size-[18px]" strokeWidth={1.8} />
     </button>
@@ -144,22 +144,22 @@ export function RegisterPanel({
     return (
       <div aria-live="polite">
         <div className="flex items-start justify-between gap-3">
-          <p className="text-[15px] font-medium text-foreground">{object(made.name)} 등록했어요</p>
+          <p className="text-title font-medium text-foreground">{object(made.name)} 등록했어요</p>
           {close}
         </div>
         {made.link ? (
           <>
-            <p className="mt-1 text-[13px] leading-[1.6] break-keep text-pretty text-dim">
+            <p className="mt-1 text-ui leading-[1.6] break-keep text-pretty text-dim">
               OwnTracks에 바로 넣으면 지금부터 이 원 안에서 Significant로 지내요. OwnTracks가 바뀌는 내용을 보여 주면
               Continue를 누르세요.
             </p>
             <Button variant="raised" size="touch" asChild className="mt-3 w-full">
               <a href={made.link}>OwnTracks에 바로 넣기</a>
             </Button>
-            <p className="mt-2 text-[12px] leading-[1.55] text-faint">안 눌러도 폰이 다음에 위치를 보낼 때 들어가요.</p>
+            <p className="mt-2 text-aside leading-[1.55] text-faint">안 눌러도 폰이 다음에 위치를 보낼 때 들어가요.</p>
           </>
         ) : (
-          <p className="mt-1 text-[13px] leading-[1.6] break-keep text-pretty text-dim">
+          <p className="mt-1 text-ui leading-[1.6] break-keep text-pretty text-dim">
             폰이 다음에 위치를 보낼 때 OwnTracks에 들어가요. 폰의 영역 목록을 먼저 확인해서, 같은 이름이 있으면 그 영역을 이
             자리로 옮겨요.
           </p>
@@ -177,8 +177,8 @@ export function RegisterPanel({
     <div>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-[15px] font-medium text-foreground">지금 있는 곳을 내 영역으로</p>
-          <p aria-live="polite" className="mt-0.5 text-[12.5px] leading-[1.55] break-keep text-dim">
+          <p className="text-title font-medium text-foreground">지금 있는 곳을 내 영역으로</p>
+          <p aria-live="polite" className="mt-0.5 text-aside leading-[1.55] break-keep text-dim">
             {finding ? (
               "지금 위치를 찾는 중…"
             ) : here?.from === "browser" ? (
@@ -225,7 +225,7 @@ export function RegisterPanel({
         className="mt-3 flex-wrap"
       >
         {chips.map((c) => (
-          <ToggleGroupItem key={c} value={c} className="px-3.5 text-[13px] mouse:px-3">
+          <ToggleGroupItem key={c} value={c} className="px-3.5 text-ui mouse:px-3">
             {c}
           </ToggleGroupItem>
         ))}
@@ -245,11 +245,11 @@ export function RegisterPanel({
         {busy ? "등록하는 중…" : n ? `${toward(n)} 등록` : "이름을 정하면 등록할 수 있어요"}
       </Button>
       {error ? (
-        <p role="alert" className="mt-2 text-[12.5px] text-reject">
+        <p role="alert" className="mt-2 text-aside text-reject">
           {error}
         </p>
       ) : (
-        <p className="mt-2 text-[12px] leading-[1.55] break-keep text-pretty text-faint">
+        <p className="mt-2 text-aside leading-[1.55] break-keep text-pretty text-faint">
           {moving
             ? `이미 있는 ${object(n)} 이 자리로 옮겨요. 반경은 ${RADIUS}m예요.`
             : `반경 ${RADIUS}m. 이 안에서는 Significant로 배터리를 아끼고, 나서면 바로 Move로 길을 자세히 그려요.`}

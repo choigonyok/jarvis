@@ -27,7 +27,7 @@ export function RejectForm({
   const [why, setWhy] = useState("");
   return (
     <div className="anim-settle space-y-2">
-      <p className="px-1 text-[12px] text-dim">반려하는 이유가 있으면 알려 주세요. 다음 제안에 반영해요.</p>
+      <p className="px-1 text-aside text-dim">반려하는 이유가 있으면 알려 주세요. 다음 제안에 반영해요.</p>
       {/* The chip lit is the reason written: typing another lights none. */}
       <ToggleGroup
         type="single"
@@ -54,7 +54,7 @@ export function RejectForm({
         placeholder="직접 적기 (비워도 돼요)"
         aria-label="반려 이유"
         maxLength={300}
-        className="mouse:h-8 mouse:text-[13.5px]"
+        className="mouse:h-8 mouse:text-ui"
       />
       <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-1.5">
         <Button

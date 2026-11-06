@@ -64,14 +64,14 @@ export function Entry({
         className={cn(
           "flex w-full items-baseline gap-3 rounded-lg py-2.5 pr-2 pl-4 text-left outline-none",
           "min-h-11 mouse:min-h-0",
-          "focus-visible:ring-3 focus-visible:ring-ring/50",
+          "focus-ring",
         )}
       >
-        <span className="tnum w-[2.9rem] shrink-0 text-[12px] text-faint">{time}</span>
+        <span className="tnum w-[2.9rem] shrink-0 text-aside text-faint">{time}</span>
 
         {/* One line, always. A row that wraps to two breaks the rhythm of the
             column, and everything it would have said is a tap away. */}
-        <span className="min-w-0 flex-1 truncate text-[14px] leading-snug text-foreground/90">
+        <span className="min-w-0 flex-1 truncate text-body leading-snug text-ink">
           {summarize(proposal)}
         </span>
 
@@ -79,7 +79,7 @@ export function Entry({
             left the word brighter than the request it describes, so the word
             keeps only what the edge cannot say - rejected from failed,
             approved from executed. */}
-        <span className="shrink-0 text-[11.5px] whitespace-nowrap text-dim">
+        <span className="shrink-0 text-meta whitespace-nowrap text-dim">
           {copy.label}
         </span>
 
@@ -97,21 +97,21 @@ export function Entry({
             className={cn(
               "scrollbar-hairline rounded-md bg-well px-3 py-2.5 leading-relaxed text-dim",
               literal
-                ? "overflow-x-auto font-mono text-[12px]"
-                : "tnum font-sans text-[12.5px] whitespace-pre-wrap [&_code]:font-sans",
+                ? "overflow-x-auto font-mono text-aside"
+                : "tnum font-sans text-aside whitespace-pre-wrap [&_code]:font-sans",
             )}
           >
             <code>{readableBody(proposal.card.body)}</code>
           </pre>
 
-          <p className="mt-2 text-[12px] leading-normal text-dim">
+          <p className="mt-2 text-aside leading-normal text-dim">
             {readableConsequence(proposal.card.consequence)}
           </p>
 
           {proposal.note ? (
-            <p className="mt-1.5 text-[11.5px] text-faint">{proposal.note}</p>
+            <p className="mt-1.5 text-meta text-faint">{proposal.note}</p>
           ) : null}
-          {proposal.reason ? <p className="mt-1.5 text-[12px] leading-normal text-dim">이유: {proposal.reason}</p> : null}
+          {proposal.reason ? <p className="mt-1.5 text-aside leading-normal text-dim">이유: {proposal.reason}</p> : null}
 
           {waiting && hold.holding ? (
             <HoldBar className="mt-3" left={hold.left} onCancel={hold.cancel} />

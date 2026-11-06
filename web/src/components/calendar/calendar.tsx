@@ -8,8 +8,8 @@ import { EventSheet } from "@/components/calendar/event-sheet";
 import { type DayMark } from "@/components/calendar/month-grid";
 import { MonthSwipe, type MonthSwipeHandle } from "@/components/calendar/month-swipe";
 import { OWNER_LABEL, OWNERS, OwnerDot, ownerOf, type Owner } from "@/components/calendar/owner";
+import { Failed } from "@/components/shell/failed";
 import { Header, TabBar } from "@/components/shell/header";
-import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { useUndo } from "@/components/shell/undo";
 import { Button } from "@/components/ui/button";
@@ -192,10 +192,10 @@ export function Calendar() {
             page: the grid keeps its place while the day's detail changes
             beside it. Below that width the detail follows underneath, which is
             what a phone can show honestly. */}
-        <div className="mx-auto grid w-full max-w-[34rem] grid-cols-1 gap-x-10 px-4 pt-5 pb-12 sm:px-8 sm:pt-6 sm:pb-6 lg:max-w-[58rem] lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
+        <div className="mx-auto grid w-full max-w-page-narrow grid-cols-1 gap-x-10 px-4 pt-5 pb-12 sm:px-8 sm:pt-6 sm:pb-6 lg:max-w-page-wide lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
           <div>
             <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-[15px] font-medium tracking-tight text-foreground">
+              <h2 className="text-title font-medium tracking-tight text-foreground">
                 {cursor.year}년 {cursor.month + 1}월
               </h2>
               <div className="flex items-center gap-1">
@@ -204,7 +204,7 @@ export function Calendar() {
                     variant="ghost"
                     size="sm"
                     onClick={() => setSelected(today)}
-                    className="h-10 px-3 text-[13px] text-dim hover:text-foreground mouse:h-7 mouse:px-2.5 mouse:text-[12.5px]"
+                    className="h-10 px-3 text-ui text-dim hover:text-foreground mouse:h-7 mouse:px-2.5 mouse:text-aside"
                   >
                     오늘
                   </Button>
@@ -253,10 +253,10 @@ export function Calendar() {
                     aria-pressed={on}
                     onClick={() => toggle(owner)}
                     className={cn(
-                      "tap-y flex h-9 items-center gap-2 rounded-full border px-3 text-[12.5px] transition-colors outline-none mouse:h-7 mouse:px-2.5 mouse:text-[12px]",
-                      "focus-visible:ring-3 focus-visible:ring-ring/50",
+                      "tap-y flex h-9 items-center gap-2 rounded-full border px-3 text-aside transition-colors outline-none mouse:h-7 mouse:px-2.5",
+                      "focus-ring",
                       on
-                        ? "border-edge bg-glass text-foreground/85 hover:bg-glass-raised"
+                        ? "border-edge bg-glass text-ink hover:bg-glass-raised"
                         : "border-edge-soft text-faint hover:text-dim",
                     )}
                   >
@@ -269,14 +269,14 @@ export function Calendar() {
             </div>
 
             {elsewhere.length > 0 ? (
-              <p className="mt-4 flex items-center gap-2 text-[12.5px] text-dim">
+              <p className="mt-4 flex items-center gap-2 text-aside text-dim">
                 <span aria-hidden className="anim-breathe size-[5px] rounded-full bg-dim" />
                 이 달 밖에 결재 대기 {elsewhere.length}건
                 <Button
                   variant="ghost"
                   size="xs"
                   onClick={() => setSelected(elsewhere[0].preview.date)}
-                  className="h-8 px-2.5 text-[12px] text-dim hover:text-foreground mouse:h-6 mouse:px-2"
+                  className="h-8 px-2.5 text-aside text-dim hover:text-foreground mouse:h-6 mouse:px-2"
                 >
                   보기
                 </Button>
@@ -292,13 +292,13 @@ export function Calendar() {
             {/* A row is a time, a title and a way to remove it. Let the column
                 run to 1000px and those three sit a screen apart. */}
             <div className="lg:max-w-[26rem]">
-            <h3 className="mb-3 px-2 text-[13px] text-dim">
+            <h3 className="mb-3 px-2 text-ui text-dim">
               {korDate(selected)}
               {selected === today ? <span className="text-faint"> · 오늘</span> : null}
             </h3>
 
             {dayEvents.length === 0 && dayCreates.length === 0 ? (
-              <p className="px-2 text-[13.5px] leading-relaxed text-faint">
+              <p className="px-2 text-ui leading-relaxed text-faint">
                 {/* The calendar is written by the assistant now, so an empty
                     day is an instruction rather than a dead end. */}
                 비어 있는 날이에요. 일정은 대화로 Jarvis에게 맡기세요.
@@ -339,14 +339,11 @@ export function Calendar() {
           </section>
 
           {error ? (
-            <div className="mt-6 lg:col-span-2">
-              <p role="status" className="border-l-2 border-reject pl-3 text-[13.5px] leading-relaxed text-dim">
-                {error}
-              </p>
-              {/* The month that could not be read, read again on the spot -
-                  the way back was leaving the tab (2026-11-06 review). */}
-              {loaded ? <Retry onRetry={reload} /> : null}
-            </div>
+            // The month that could not be read, read again on the spot - the
+            // way back was leaving the tab (2026-11-06 review).
+            <Failed onRetry={loaded ? reload : undefined} className="mt-6 lg:col-span-2">
+              {error}
+            </Failed>
           ) : null}
         </div>
 

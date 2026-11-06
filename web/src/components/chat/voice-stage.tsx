@@ -420,7 +420,7 @@ export function VoiceStage({
 
         <div className="flex min-h-0 w-full max-w-[32rem] flex-col items-center text-center">
           <p
-            className="flex items-center gap-2 text-[13px] text-dim"
+            className="flex items-center gap-2 text-ui text-dim"
             role="status"
             aria-live="polite"
           >
@@ -435,7 +435,7 @@ export function VoiceStage({
             {status.text}
           </p>
           {echo && (
-            <p className="mt-3 line-clamp-1 text-[13.5px] leading-relaxed text-faint">
+            <p className="mt-3 line-clamp-1 text-ui leading-relaxed text-faint">
               {echo}
             </p>
           )}
@@ -443,17 +443,17 @@ export function VoiceStage({
             {caption}
           </div>
           {notice && !said ? (
-            <p className="mt-1 text-[13px] leading-relaxed text-faint" role="status">
+            <p className="mt-1 text-ui leading-relaxed text-faint" role="status">
               {notice}
             </p>
           ) : null}
           {quietLong && !said && !notice ? (
-            <p className="mt-1 text-[13px] leading-relaxed text-faint">
+            <p className="mt-1 text-ui leading-relaxed text-faint">
               말해도 반응이 없나요?{" "}
               <button
                 type="button"
                 onClick={listenAgain}
-                className="tap text-dim underline underline-offset-2 outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+                className="tap text-dim underline underline-offset-2 hover:text-foreground focus-ring"
               >
                 다시 듣기
               </button>
@@ -464,7 +464,7 @@ export function VoiceStage({
 
       <div className="flex shrink-0 flex-col items-center justify-center gap-4 px-6 pt-2 pb-8">
         {!supported ? (
-          <p className="max-w-[26rem] text-center text-[13px] leading-relaxed text-dim">
+          <p className="max-w-[26rem] text-center text-ui leading-relaxed text-dim">
             이 브라우저는 음성 인식을 지원하지 않아요. Chrome이나 Safari에서
             열면 쓸 수 있어요.
           </p>
@@ -488,7 +488,7 @@ export function VoiceStage({
               <button
                 type="button"
                 onClick={openSetup}
-                className="tap text-[13px] text-faint transition-colors outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50"
+                className="tap text-ui text-faint transition-colors hover:text-dim focus-ring"
               >
                 내 목소리로 답하게 하기
               </button>

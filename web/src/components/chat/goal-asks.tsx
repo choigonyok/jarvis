@@ -66,22 +66,22 @@ function Ask({ ask, named }: { ask: GoalAsk; named: boolean }) {
   return (
     <li>
       {named ? (
-        <p className="mb-1.5 text-[13.5px] leading-snug text-foreground/90">
+        <p className="mb-1.5 text-ui leading-snug text-ink">
           {ask.title}{" "}
-          <span className="text-[12px] text-faint">
+          <span className="text-aside text-faint">
             {today ? whenLabel(ask.day, today) : ""}
             {ask.perDay && count > 0 ? ` ${tally(count, ask.perDay)}` : ""}
           </span>
         </p>
       ) : null}
       {said ? (
-        <p className="anim-settle flex min-h-9 items-center gap-1.5 text-[12.5px] text-dim">
+        <p className="anim-settle flex min-h-9 items-center gap-1.5 text-aside text-dim">
           {said === "done" ? <Check aria-hidden className="size-3.5 text-approve" /> : <Minus aria-hidden className="size-3.5 text-reject" />}
           {said === "done" ? "했어요" : "안 했어요"}
           <button
             type="button"
             onClick={() => void say("")}
-            className="tap-y ml-1 text-[12px] text-faint underline-offset-2 outline-none hover:text-dim hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
+            className="tap-y ml-1 text-aside text-faint underline-offset-2 hover:text-dim hover:underline focus-ring"
           >
             되돌리기
           </button>
@@ -107,7 +107,7 @@ function Ask({ ask, named }: { ask: GoalAsk; named: boolean }) {
         </div>
       )}
       {failed ? (
-        <p role="alert" className="mt-1 text-[12px] text-reject">
+        <p role="alert" className="mt-1 text-aside text-reject">
           기록하지 못했어요. 다시 눌러 주세요.
         </p>
       ) : null}

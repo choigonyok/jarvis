@@ -39,9 +39,9 @@ export function OutflowSummary({ outflows }: { outflows: Outflow[] }) {
   if (spent === 0 && asking.length === 0) return null;
   return (
     <>
-      {spent > 0 ? <p className="tnum mt-1 text-[12.5px] text-dim">투자에서 꺼내 쓴 돈 {krw(spent)}</p> : null}
+      {spent > 0 ? <p className="tnum mt-1 text-aside text-dim">투자에서 꺼내 쓴 돈 {krw(spent)}</p> : null}
       {asking.length > 0 ? (
-        <p className="tnum mt-1 text-[12px] leading-relaxed text-dim">
+        <p className="tnum mt-1 text-aside leading-relaxed text-dim">
           <span aria-hidden className="me-1.5 inline-block size-1.5 rounded-full bg-reject align-middle" />
           어디로 갔는지 묻는 중 {asking.length}건 · {krw(asking.reduce((sum, o) => sum + o.askKrw, 0))}
         </p>
@@ -79,10 +79,10 @@ function partLine(p: OutflowPart, whole: number): string {
 export function OutflowList({ outflows, onChanged }: { outflows: Outflow[]; onChanged: () => void }) {
   const newest = useMemo(() => [...outflows].reverse(), [outflows]);
   const paged = usePaged(newest);
-  if (outflows.length === 0) return <p className="text-[12.5px] text-faint">아직 뺀 돈이 없어요.</p>;
+  if (outflows.length === 0) return <p className="text-aside text-faint">아직 뺀 돈이 없어요.</p>;
   return (
     <div id={paged.anchor} className="scroll-mt-4">
-      <p className="mb-2 text-[12px] leading-relaxed text-faint">
+      <p className="mb-2 text-aside leading-relaxed text-faint">
         다른 투자 계좌로 다시 들어온 돈은 옮긴 것으로 보고, 아니면 대화에서 카드로 물어요. 지출로 답한 돈은 가계부에 들어가요.
       </p>
       <ul className="divide-y divide-edge-soft">
@@ -118,29 +118,29 @@ function OutflowRow({ outflow: o, onChanged }: { outflow: Outflow; onChanged: ()
   };
 
   return (
-    <li className="flex items-start gap-3 py-2.5 text-[12.5px]">
+    <li className="flex items-start gap-3 py-2.5 text-aside">
       <span className="tnum w-[2.75rem] shrink-0 pt-px text-faint">{md(o.date)}</span>
       <span className="min-w-0 flex-1">
-        <span className="tnum block text-foreground/90">
+        <span className="tnum block text-ink">
           {VENUE_LABEL[o.venue]} {krw(o.amountKrw)}
         </span>
         {o.parts.map((p, i) => (
-          <span key={i} className="tnum block truncate text-[11.5px] text-dim">
+          <span key={i} className="tnum block truncate text-meta text-dim">
             {partLine(p, o.amountKrw)}
           </span>
         ))}
         {o.status === "ask" ? (
-          <span className="tnum block text-[11.5px] text-dim">
+          <span className="tnum block text-meta text-dim">
             <span aria-hidden className="me-1.5 inline-block size-1.5 rounded-full bg-reject align-middle" />
             어디로 갔는지 묻는 중{o.parts.length > 0 ? ` ${krw(o.askKrw)}` : ""}
           </span>
         ) : o.status === "waiting" ? (
-          <span className="block text-[11.5px] text-faint">
+          <span className="block text-meta text-faint">
             다른 계좌로 들어오는지 보는 중 · {monthDay(addDays(o.date, 3))}에 물어요
           </span>
         ) : null}
-        {state === "done" ? <span className="block text-[11.5px] text-faint">다시 물을게요. 곧 대화에 카드가 와요.</span> : null}
-        {error ? <span className="block text-[11.5px] text-reject/90">{error}</span> : null}
+        {state === "done" ? <span className="block text-meta text-faint">다시 물을게요. 곧 대화에 카드가 와요.</span> : null}
+        {error ? <span className="block text-meta text-reject">{error}</span> : null}
       </span>
       {answered && state !== "done" ? (
         <button
@@ -148,7 +148,7 @@ function OutflowRow({ outflow: o, onChanged }: { outflow: Outflow; onChanged: ()
           disabled={state === "busy"}
           onClick={() => void askAgain()}
           // The hit area reaches above and below; the word sits level with the amount.
-          className="tap -mt-2.5 -mb-2.5 flex shrink-0 items-start rounded-lg px-1.5 pt-3 text-[11.5px] leading-none text-faint transition-colors outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50"
+          className="tap -mt-2.5 -mb-2.5 flex shrink-0 items-start rounded-lg px-1.5 pt-3 text-meta leading-none text-faint transition-colors hover:text-dim focus-ring disabled:opacity-50"
         >
           {state === "busy" ? "지우는 중" : "다시 묻기"}
         </button>

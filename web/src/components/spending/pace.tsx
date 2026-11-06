@@ -62,7 +62,7 @@ export function Pace({
         <button
           type="button"
           onClick={onEditBudget}
-          className="tap -mx-1 rounded-md px-1 text-left text-[12.5px] text-dim underline decoration-edge underline-offset-4 outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="tap -mx-1 rounded-md px-1 text-left text-aside text-dim underline decoration-edge underline-offset-4 hover:text-foreground focus-ring"
         >
           한 달 예산을 정하면 쓰는 속도를 보여 드려요
         </button>
@@ -103,9 +103,9 @@ function PaceLine({
   return (
     <div className="mt-3 flex items-start justify-between gap-3">
       <div className="min-w-0">
-        <p className="text-[13px] text-foreground/90">{sentence}</p>
+        <p className="text-ui text-ink">{sentence}</p>
         {hasBudget && running && left >= 0 ? (
-          <p className="mt-0.5 text-[11.5px] text-faint">
+          <p className="mt-0.5 text-meta text-faint">
             {Math.abs(ahead) < reference * 0.02
               ? "달이 지나는 만큼 쓰고 있어요"
               : ahead > 0
@@ -117,7 +117,7 @@ function PaceLine({
       <button
         type="button"
         onClick={onEditBudget}
-        className="tap -my-2 shrink-0 rounded-md px-1 text-[12px] text-faint transition-colors outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50"
+        className="tap -my-2 shrink-0 rounded-md px-1 text-aside text-faint transition-colors hover:text-dim focus-ring"
       >
         {hasBudget ? `예산 ${krw(reference)}` : "예산 정하기"}
       </button>
@@ -171,8 +171,8 @@ function DayStrip({
               transform: `translateX(${scrub! < n * 0.2 ? "-15%" : scrub! > n * 0.8 ? "-85%" : "-50%"})`,
             }}
           >
-            <p className="text-[11px] text-faint">{dayLabel(shown.date)}</p>
-            <p className="tnum text-[13.5px] font-medium text-foreground">
+            <p className="text-meta text-faint">{dayLabel(shown.date)}</p>
+            <p className="tnum text-ui font-medium text-foreground">
               {shown.count ? `${krw(shown.totalKrw)} · ${shown.count}건` : "지출 없음"}
             </p>
           </div>
@@ -296,7 +296,7 @@ function DayStrip({
                   <span
                     aria-hidden
                     className={cn(
-                      "tnum absolute top-full mt-1 left-0 text-[10px] leading-none",
+                      "tnum absolute top-full mt-1 left-0 text-tiny leading-none",
                       today || selected ? "text-dim" : "text-faint",
                     )}
                   >

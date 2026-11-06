@@ -43,7 +43,7 @@ export function MarkButtons({
   // A thumb's width each and a gap between them - they mean opposite things
   // (28px side by side, 2026-11-06 review). Under a mouse, the mark's own size.
   const mark =
-    "tap-y flex h-5 min-w-11 items-center justify-center rounded-md outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-40 mouse:min-w-7";
+    "tap-y flex h-5 min-w-11 items-center justify-center rounded-md transition-colors focus-ring disabled:opacity-40 mouse:min-w-7";
   return (
     <span className={cn("flex items-center gap-1 mouse:gap-0", className)} data-search-skip>
       <button
@@ -76,7 +76,7 @@ export function MarkButtons({
 export function WrongNote({ feedback }: { feedback?: TurnFeedback }) {
   if (feedback?.mark !== "bad" || !feedback.note) return null;
   return (
-    <p className="mt-1.5 text-[12.5px] leading-snug text-dim" data-search-skip>
+    <p className="mt-1.5 text-aside leading-snug text-dim" data-search-skip>
       <span className="text-reject">틀렸어요</span> · {feedback.note}
     </p>
   );
@@ -101,7 +101,7 @@ export function WrongForm({
   const [why, setWhy] = useState("");
   return (
     <div className="anim-settle mt-2 max-w-[30rem] space-y-2" data-search-skip>
-      <p className="px-1 text-[12px] text-dim">무엇이 틀렸는지 알려 주면 다음 답부터 고쳐요.</p>
+      <p className="px-1 text-aside text-dim">무엇이 틀렸는지 알려 주면 다음 답부터 고쳐요.</p>
       <ToggleGroup
         type="single"
         aria-label="자주 틀리는 것"
@@ -127,9 +127,9 @@ export function WrongForm({
         placeholder="직접 적기 (비워도 돼요)"
         aria-label="틀린 이유"
         maxLength={500}
-        className="mouse:h-8 mouse:text-[13.5px]"
+        className="mouse:h-8 mouse:text-ui"
       />
-      {error ? <p className="px-1 text-[12px] text-reject">{error}</p> : null}
+      {error ? <p className="px-1 text-aside text-reject">{error}</p> : null}
       <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-1.5">
         <Button
           variant="quiet"

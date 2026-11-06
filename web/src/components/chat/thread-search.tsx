@@ -317,7 +317,7 @@ function SearchRow({ search }: { search: ThreadSearch }) {
   const offerMore = Boolean(q) && !search.seeking && search.further && (search.total === 0 || search.at >= search.total - 1);
   return (
     <div className="inset-x-safe shrink-0 border-b border-edge-soft bg-background" role="search">
-      <div className="mx-auto flex h-14 w-full max-w-[52rem] items-center gap-1 px-4 sm:px-8">
+      <div className="mx-auto flex h-14 w-full max-w-page items-center gap-1 px-4 sm:px-8">
         <InputGroup
           surface="well"
           // The caret is the focus here: the row is nothing but this field.
@@ -345,10 +345,10 @@ function SearchRow({ search }: { search: ThreadSearch }) {
             }}
             placeholder="대화에서 찾기"
             aria-label="대화에서 찾을 말"
-            className="pl-1.5 mouse:text-[14.5px] [&::-webkit-search-cancel-button]:hidden"
+            className="pl-1.5 mouse:text-body [&::-webkit-search-cancel-button]:hidden"
           />
           <InputGroupAddon align="inline-end" className="pr-3.5">
-            <span className="tnum text-[12px] font-normal text-faint" aria-live="polite">
+            <span className="tnum text-aside font-normal text-faint" aria-live="polite">
               {count}
             </span>
           </InputGroupAddon>
@@ -357,7 +357,7 @@ function SearchRow({ search }: { search: ThreadSearch }) {
           <button
             type="button"
             onClick={() => void search.findMore()}
-            className="tap-y shrink-0 rounded-full px-2 text-[12.5px] text-foreground outline-none hover:text-foreground/80 focus-visible:ring-3 focus-visible:ring-ring/50"
+            className="tap-y shrink-0 rounded-full px-2 text-aside text-foreground hover:text-ink focus-ring"
           >
             {search.aboveFailed ? "다시 찾기" : "더 찾기"}
           </button>
@@ -367,7 +367,7 @@ function SearchRow({ search }: { search: ThreadSearch }) {
           onClick={search.older}
           disabled={search.seeking || (search.at >= search.total - 1 && !search.further)}
           aria-label="이전 결과 (더 오래된)"
-          className="flex size-10 shrink-0 items-center justify-center rounded-full text-dim outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-30"
+          className="flex size-10 shrink-0 items-center justify-center rounded-full text-dim hover:text-foreground focus-ring disabled:opacity-30"
         >
           <ChevronUp aria-hidden className="size-[18px]" />
         </button>
@@ -376,7 +376,7 @@ function SearchRow({ search }: { search: ThreadSearch }) {
           onClick={search.newer}
           disabled={search.at <= 0}
           aria-label="다음 결과 (더 최근)"
-          className="flex size-10 shrink-0 items-center justify-center rounded-full text-dim outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-30"
+          className="flex size-10 shrink-0 items-center justify-center rounded-full text-dim hover:text-foreground focus-ring disabled:opacity-30"
         >
           <ChevronDown aria-hidden className="size-[18px]" />
         </button>
@@ -384,7 +384,7 @@ function SearchRow({ search }: { search: ThreadSearch }) {
           type="button"
           onClick={search.close}
           aria-label="검색 닫기"
-          className="-mr-2 flex size-10 shrink-0 items-center justify-center rounded-full text-faint outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="-mr-2 flex size-10 shrink-0 items-center justify-center rounded-full text-faint hover:text-foreground focus-ring"
         >
           <X aria-hidden className="size-[18px]" />
         </button>

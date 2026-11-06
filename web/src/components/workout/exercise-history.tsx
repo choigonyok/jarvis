@@ -53,7 +53,7 @@ export function ExerciseHistory({
       description={name ? `${groupOf(name)} · ${history.length}회 기록` : undefined}
     >
       {history.length === 0 ? (
-        <p className="py-4 text-[13px] leading-relaxed text-faint">
+        <p className="py-4 text-ui leading-relaxed text-faint">
           아직 끝낸 기록이 없어요. 이 종목을 한 번 마치면 여기에 회차별로 쌓여요.
         </p>
       ) : (
@@ -61,19 +61,19 @@ export function ExerciseHistory({
           <div className="mb-4 flex gap-6">
             {best ? (
               <div>
-                <p className="text-[11.5px] text-faint">추정 1RM</p>
-                <p className="tnum text-[22px] leading-tight font-semibold text-foreground">
+                <p className="text-meta text-faint">추정 1RM</p>
+                <p className="tnum text-lead leading-tight font-semibold text-foreground">
                   {Math.round(best.oneRm)}kg
                 </p>
-                <p className="tnum text-[11.5px] text-faint">
+                <p className="tnum text-meta text-faint">
                   {load(best.weight)}×{best.reps} · {dayLabel(best.date)}
                 </p>
               </div>
             ) : null}
             {top > 0 ? (
               <div>
-                <p className="text-[11.5px] text-faint">최고 무게</p>
-                <p className="tnum text-[22px] leading-tight font-semibold text-foreground">{load(top)}kg</p>
+                <p className="text-meta text-faint">최고 무게</p>
+                <p className="tnum text-lead leading-tight font-semibold text-foreground">{load(top)}kg</p>
               </div>
             ) : null}
           </div>
@@ -94,7 +94,7 @@ export function ExerciseHistory({
                   );
                 })}
               </div>
-              <div className="tnum mt-1 flex justify-between text-[10.5px] text-faint">
+              <div className="tnum mt-1 flex justify-between text-tiny text-faint">
                 <span>{dayLabel(trend[0].date)}</span>
                 <span>{dayLabel(trend[trend.length - 1].date)}</span>
               </div>
@@ -108,13 +108,13 @@ export function ExerciseHistory({
             {paged.items.map((h) => (
               <li key={h.id}>
                 <div className="flex items-baseline justify-between gap-3">
-                  <span className="text-[12.5px] text-dim">{dayLabel(h.date)}</span>
-                  <span className="tnum text-[11.5px] text-faint">
+                  <span className="text-aside text-dim">{dayLabel(h.date)}</span>
+                  <span className="tnum text-meta text-faint">
                     {kg(h.volume)}
                     {h.oneRm ? ` · 1RM ${Math.round(h.oneRm)}` : ""}
                   </span>
                 </div>
-                <p className="tnum mt-0.5 text-[13px] leading-relaxed text-foreground/85">
+                <p className="tnum mt-0.5 text-ui leading-relaxed text-ink">
                   {h.sets.map((s, i) => (
                     <span key={i} className={cn("me-2 inline-block", s.warmup && "text-faint")}>
                       {s.warmup ? "W " : ""}
@@ -148,25 +148,25 @@ function RecordTable({ name, sessions }: { name: string; sessions: Session[] }) 
   return (
     <div className="mb-5 space-y-4">
       <section aria-label="기록">
-        <p className="mb-1 text-[11.5px] text-faint">기록</p>
+        <p className="mb-1 text-meta text-faint">기록</p>
         <ul className="divide-y divide-edge-soft">
           {rows.map(([label, value, date]) => (
-            <li key={label} className="flex items-baseline gap-3 py-1.5 text-[12.5px]">
+            <li key={label} className="flex items-baseline gap-3 py-1.5 text-aside">
               <span className="w-24 shrink-0 text-dim">{label}</span>
-              <span className="tnum min-w-0 flex-1 text-foreground/90">{value}</span>
-              <span className="tnum shrink-0 text-[11px] text-faint">{dayLabel(date)}</span>
+              <span className="tnum min-w-0 flex-1 text-ink">{value}</span>
+              <span className="tnum shrink-0 text-meta text-faint">{dayLabel(date)}</span>
             </li>
           ))}
         </ul>
       </section>
       {maxes.length ? (
         <section aria-label="반복 수별 예상 무게">
-          <p className="mb-1.5 text-[11.5px] text-faint">반복 수별 예상 무게 (추정 1RM 기준)</p>
+          <p className="mb-1.5 text-meta text-faint">반복 수별 예상 무게 (추정 1RM 기준)</p>
           <ol className="grid grid-cols-6 gap-1 text-center">
             {maxes.map((m) => (
               <li key={m.reps} className="rounded-lg bg-glass py-1.5">
-                <span className="tnum block text-[13px] text-foreground/90">{load(m.weight)}</span>
-                <span className="tnum block text-[10.5px] text-faint">{m.reps}회</span>
+                <span className="tnum block text-ui text-ink">{load(m.weight)}</span>
+                <span className="tnum block text-tiny text-faint">{m.reps}회</span>
               </li>
             ))}
           </ol>

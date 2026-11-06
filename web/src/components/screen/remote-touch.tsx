@@ -223,7 +223,7 @@ export function RemoteTouch({
               autoCapitalize="off"
               autoCorrect="off"
               spellCheck={false}
-              className="h-10 min-w-0 flex-1 rounded-lg bg-glass px-3 text-[16px] text-foreground outline-none placeholder:text-faint"
+              className="h-10 min-w-0 flex-1 rounded-lg bg-glass px-3 text-field text-foreground outline-none placeholder:text-faint"
             />
             <button
               type="button"
@@ -233,11 +233,11 @@ export function RemoteTouch({
                 setText("");
                 input.current?.focus();
               }}
-              className="h-10 shrink-0 rounded-lg bg-glass-raised px-3 text-[13px] text-foreground disabled:opacity-40"
+              className="h-10 shrink-0 rounded-lg bg-glass-raised px-3 text-ui text-foreground disabled:opacity-40"
             >
               넣기
             </button>
-            <button type="submit" className="h-10 shrink-0 rounded-lg bg-glass-raised px-3 text-[13px] text-foreground">
+            <button type="submit" className="h-10 shrink-0 rounded-lg bg-glass-raised px-3 text-ui text-foreground">
               넣고 ↵
             </button>
           </form>
@@ -252,7 +252,7 @@ export function RemoteTouch({
                 // Keep the text field focused, so the phone keyboard stays up.
                 onPointerDown={(e) => e.preventDefault()}
                 onClick={() => rfb.current?.sendKey(k.keysym, k.code)}
-                className="tnum h-9 min-w-11 shrink-0 rounded-lg border border-edge bg-popover px-2.5 text-[13px] text-foreground"
+                className="tnum h-9 min-w-11 shrink-0 rounded-lg border border-edge bg-popover px-2.5 text-ui text-foreground"
               >
                 {k.label}
               </button>
@@ -270,11 +270,11 @@ export function RemoteTouch({
               if (v) setMode(v as typeof mode);
             }}
           >
-            <ToggleGroupItem value="click" className="h-9 gap-1 rounded-lg px-2.5 text-[12.5px] text-dim">
+            <ToggleGroupItem value="click" className="h-9 gap-1 rounded-lg px-2.5 text-aside text-dim">
               <MousePointer2 aria-hidden />
               클릭
             </ToggleGroupItem>
-            <ToggleGroupItem value="drag" className="h-9 gap-1 rounded-lg px-2.5 text-[12.5px] text-dim">
+            <ToggleGroupItem value="drag" className="h-9 gap-1 rounded-lg px-2.5 text-aside text-dim">
               <Move aria-hidden />
               드래그
             </ToggleGroupItem>
@@ -284,7 +284,7 @@ export function RemoteTouch({
           <Toggle
             pressed={rightNext}
             onPressedChange={setRightNext}
-            className="h-9 gap-1 px-2.5 text-[12.5px] font-normal text-dim hover:bg-transparent data-[state=on]:bg-foreground data-[state=on]:text-background"
+            className="h-9 gap-1 px-2.5 text-aside font-normal text-dim hover:bg-transparent data-[state=on]:bg-foreground data-[state=on]:text-background"
           >
             <MousePointerClick aria-hidden />
             우클릭
@@ -292,7 +292,7 @@ export function RemoteTouch({
           <Toggle
             pressed={typing}
             onPressedChange={setTyping}
-            className="ms-auto h-9 gap-1 px-2.5 text-[12.5px] font-normal text-dim hover:bg-transparent data-[state=on]:bg-glass-raised data-[state=on]:text-foreground"
+            className="ms-auto h-9 gap-1 px-2.5 text-aside font-normal text-dim hover:bg-transparent data-[state=on]:bg-glass-raised data-[state=on]:text-foreground"
           >
             <Keyboard aria-hidden />
             키보드

@@ -41,7 +41,7 @@ export function VolumeBar({
         <div
           className={cn(
             "absolute inset-y-0 left-0 rounded-[2px]",
-            previous === null ? "bg-dim/50" : ahead ? "bg-approve/55" : "bg-dim/45",
+            previous === null ? "bg-dim/50" : ahead ? "bg-approve-fill" : "bg-dim/45",
           )}
           style={{ width }}
         />
@@ -57,12 +57,12 @@ export function VolumeBar({
         ) : null}
       </div>
 
-      <p className="tnum mt-1 text-[11.5px] text-faint">
+      <p className="tnum mt-1 text-meta text-faint">
         {kg(volume)}
         {delta === null ? (
           <span className="ms-2">첫 기록</span>
         ) : (
-          <span className={cn("ms-2", ahead ? "text-approve/75" : "text-dim")}>
+          <span className={cn("ms-2", ahead ? "text-approve" : "text-dim")}>
             지난 회차 {kg(previous ?? 0)} ·{" "}
             {level ? "같음" : signedKg(delta)}
           </span>

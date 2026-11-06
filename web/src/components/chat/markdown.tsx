@@ -12,14 +12,14 @@ import { CodeBlock, CodeBlockContent, CodeBlockCopyButton } from "@/components/u
  * The agent's reply, rendered as the document it already is.
  *
  * Every element here is bound by the same rules as the rest of the console:
- * the only bordered thing in this product is an approval card, so nothing
- * below draws a box; monospace is reserved for literal code and commands, so
+ * a border is for what a person's hand is on - a decision, a field, their
+ * own words - so nothing below draws a box; monospace is reserved for literal code and commands, so
  * it appears on `code` and nowhere else; and the measure stays at 36rem so a
  * line never runs past what is comfortable to read.
  */
 export const Markdown = memo(function Markdown({ children }: { children: string }) {
   return (
-    <div className="selectable max-w-[36rem] space-y-2.5 text-[14.5px] leading-[1.75] text-pretty text-foreground/90">
+    <div className="selectable max-w-[36rem] space-y-2.5 text-read leading-[1.75] text-pretty text-ink">
       <ReactMarkdown remarkPlugins={PLUGINS} components={COMPONENTS}>
         {children}
       </ReactMarkdown>
@@ -45,16 +45,18 @@ function noStrikethrough(this: Processor) {
 const COMPONENTS: Components = {
   p: ({ children }) => <p>{children}</p>,
 
-  // Headings step down in weight, not in a different typeface. 600 is
-  // the heaviest weight this console loads.
+  // Headings step down in size against the words around them (1.2, 1.1,
+  // 1em of text-read), all at 600 - the heaviest weight this console loads -
+  // with room above, so an answer's sections read as sections. They were
+  // 16, 15 and 14.5px over 14.5px words: a heading only by its weight.
   h1: ({ children }) => (
-    <h2 className="pt-1.5 text-[16px] font-semibold text-foreground">{children}</h2>
+    <h2 className="pt-3 text-[1.2em] leading-snug font-semibold text-foreground">{children}</h2>
   ),
   h2: ({ children }) => (
-    <h3 className="pt-1.5 text-[15px] font-semibold text-foreground">{children}</h3>
+    <h3 className="pt-2.5 text-[1.1em] leading-snug font-semibold text-foreground">{children}</h3>
   ),
   h3: ({ children }) => (
-    <h4 className="pt-1 text-[14.5px] font-medium text-foreground">{children}</h4>
+    <h4 className="pt-1.5 text-[1em] font-semibold text-foreground">{children}</h4>
   ),
 
   ul: ({ children }) => (
@@ -72,7 +74,7 @@ const COMPONENTS: Components = {
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="underline decoration-dim underline-offset-[3px] transition-colors hover:decoration-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+      className="underline decoration-dim underline-offset-[3px] transition-colors hover:decoration-foreground focus-ring focus-visible:outline-none"
     >
       {children}
     </a>
@@ -89,18 +91,18 @@ const COMPONENTS: Components = {
     const block = /language-/.test(className ?? "");
     if (!block) {
       return (
-        <code className="rounded-sm bg-glass-raised px-[0.4em] py-[0.15em] font-mono text-[12.5px] text-foreground">
+        <code className="rounded-sm bg-glass-raised px-[0.4em] py-[0.15em] font-mono text-aside text-foreground">
           {children}
         </code>
       );
     }
-    return <code className="font-mono text-[12.5px]">{children}</code>;
+    return <code className="font-mono text-aside">{children}</code>;
   },
   // Recessed rather than outlined: a block of code is something you
   // look into, and the well is the layer this console already has
   // for that. It scrolls rather than wraps, and copies whole.
   pre: ({ children }) => (
-    <CodeBlock className="text-foreground/90">
+    <CodeBlock className="text-ink">
       <CodeBlockContent className="p-3 leading-[1.6]">{children}</CodeBlockContent>
       <CodeBlockCopyButton value={textOf(children).replace(/\n$/, "")} label="코드 복사" />
     </CodeBlock>
@@ -123,7 +125,7 @@ const COMPONENTS: Components = {
         href={src}
         target="_blank"
         rel="noopener noreferrer"
-        className="underline decoration-dim underline-offset-[3px] transition-colors hover:decoration-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+        className="underline decoration-dim underline-offset-[3px] transition-colors hover:decoration-foreground focus-ring focus-visible:outline-none"
       >
         {alt || "이미지 링크"}
       </a>
@@ -133,7 +135,7 @@ const COMPONENTS: Components = {
   // ones scroll inside their own box so the thread never does.
   table: ({ children }) => (
     <div className="overflow-x-auto">
-      <table className="w-full border-collapse text-[13.5px]">{children}</table>
+      <table className="w-full border-collapse text-ui">{children}</table>
     </div>
   ),
   th: ({ children }) => (

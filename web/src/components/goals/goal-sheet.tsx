@@ -120,8 +120,8 @@ function Body({ goal, onChanged, onClose, onEdit }: { goal: Goal; onChanged: () 
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Stays put over what scrolls: the sheet's close sits on this row. */}
       <BottomSheetHeader className="border-b border-edge-soft pb-3 sm:px-6">
-        <BottomSheetTitle className="text-[17px] leading-snug break-keep">{now.title}</BottomSheetTitle>
-        <BottomSheetDescription className="text-[12.5px] text-dim">
+        <BottomSheetTitle className="text-heading leading-snug break-keep">{now.title}</BottomSheetTitle>
+        <BottomSheetDescription className="text-aside text-dim">
           {now.rule}
           {now.remind ? `, ${now.remind}에 물어봐요` : ""}
           {now.end ? `, ${dayLabel(now.end)}까지` : ""}
@@ -129,12 +129,12 @@ function Body({ goal, onChanged, onClose, onEdit }: { goal: Goal; onChanged: () 
       </BottomSheetHeader>
 
       <div className="scrollbar-hairline min-h-0 flex-1 space-y-7 overflow-y-auto overscroll-contain px-4 pt-4 pb-8 sm:px-6">
-        {now.note ? <p className="text-[13.5px] leading-relaxed text-dim">{now.note}</p> : null}
+        {now.note ? <p className="text-ui leading-relaxed text-dim">{now.note}</p> : null}
 
         <section aria-label="달성률" className="flex items-end justify-between gap-4">
           <div>
-            <p className="tnum text-[40px] leading-none font-medium tracking-tight text-foreground">{percent(p.rate)}</p>
-            <p className="mt-1.5 text-[12.5px] text-dim">{p.rate === null ? "아직 지난 기록이 없어요" : "지금까지 달성률"}</p>
+            <p className="tnum text-display-lg leading-none font-semibold tracking-tight text-foreground">{percent(p.rate)}</p>
+            <p className="mt-1.5 text-aside text-dim">{p.rate === null ? "아직 지난 기록이 없어요" : "지금까지 달성률"}</p>
           </div>
           <dl className="tnum grid grid-cols-3 gap-5 text-right">
             <Figure label="연속" value={`${p.streak}${p.unit}`} />
@@ -152,32 +152,32 @@ function Body({ goal, onChanged, onClose, onEdit }: { goal: Goal; onChanged: () 
         ) : null}
 
         {failed ? (
-          <p role="alert" className="text-[12.5px] text-reject">
+          <p role="alert" className="text-aside text-reject">
             {failed}
           </p>
         ) : null}
 
         <div className="flex flex-wrap gap-2">
           {now.status === "ended" ? (
-            <Button variant="lined" size="touch-sm" onClick={() => void act({ finish: false })}>
+            <Button variant="soft" size="touch-sm" onClick={() => void act({ finish: false })}>
               다시 시작
             </Button>
           ) : (
             <>
-              <Button variant="lined" size="touch-sm" onClick={() => onEdit(now)}>
+              <Button variant="soft" size="touch-sm" onClick={() => onEdit(now)}>
                 고치기
               </Button>
-              <Button variant="lined" size="touch-sm" onClick={() => void act({ pause: now.status !== "paused" })}>
+              <Button variant="soft" size="touch-sm" onClick={() => void act({ pause: now.status !== "paused" })}>
                 {now.status === "paused" ? "다시 시작" : "잠깐 쉬기"}
               </Button>
-              <Button variant="lined" size="touch-sm" onClick={() => void act({ finish: true })}>
+              <Button variant="soft" size="touch-sm" onClick={() => void act({ finish: true })}>
                 끝내기
               </Button>
             </>
           )}
           <AlertDialog>
             <AlertDialogTrigger asChild>
-              <Button variant="lined" size="touch-sm">
+              <Button variant="soft" size="touch-sm">
                 지우기
               </Button>
             </AlertDialogTrigger>
@@ -196,7 +196,7 @@ function Body({ goal, onChanged, onClose, onEdit }: { goal: Goal; onChanged: () 
           </AlertDialog>
         </div>
         {now.status === "active" || now.status === "paused" ? (
-          <p className="text-[12px] leading-relaxed text-faint">쉬는 날은 달성률에 세지 않아요. 끝내면 기록은 남고 목록에서만 내려가요.</p>
+          <p className="text-aside leading-relaxed text-faint">쉬는 날은 달성률에 세지 않아요. 끝내면 기록은 남고 목록에서만 내려가요.</p>
         ) : null}
       </div>
     </div>
@@ -206,8 +206,8 @@ function Body({ goal, onChanged, onClose, onEdit }: { goal: Goal; onChanged: () 
 function Figure({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <dd className="text-[15px] leading-none font-medium text-foreground">{value}</dd>
-      <dt className="mt-1.5 text-[11.5px] text-faint">{label}</dt>
+      <dd className="text-title leading-none font-medium text-foreground">{value}</dd>
+      <dt className="mt-1.5 text-meta text-faint">{label}</dt>
     </div>
   );
 }
@@ -233,8 +233,8 @@ function Bars({ goal, bars }: { goal: Goal; bars: Bar[] }) {
   return (
     <section aria-label={monthly ? "달마다" : "주마다"}>
       <div className="flex items-baseline justify-between gap-3">
-        <h3 className="text-[13.5px] font-medium text-foreground">{monthly ? "달마다" : "주마다"}</h3>
-        <p className="tnum text-[12.5px] text-dim" aria-live="polite">
+        <h3 className="text-ui font-medium text-foreground">{monthly ? "달마다" : "주마다"}</h3>
+        <p className="tnum text-aside text-dim" aria-live="polite">
           {name} {b.done}/{b.target}
         </p>
       </div>
@@ -248,7 +248,7 @@ function Bars({ goal, bars }: { goal: Goal; bars: Bar[] }) {
               onClick={() => setAt(i)}
               aria-label={`${shortDay(bar.from)}부터 ${bar.done}/${bar.target}`}
               aria-pressed={i === shown}
-              className="group relative flex h-full min-w-0 flex-1 items-end justify-center rounded-t-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+              className="group relative flex h-full min-w-0 flex-1 items-end justify-center rounded-t-sm focus-ring"
             >
               {i === shown ? <span aria-hidden className="absolute inset-x-0 inset-y-0 rounded-t-sm bg-glass" /> : null}
               {/* The tick: what this one asked. */}
@@ -257,7 +257,7 @@ function Bars({ goal, bars }: { goal: Goal; bars: Bar[] }) {
                 aria-hidden
                 className={cn(
                   "relative w-full max-w-3.5 rounded-t-[4px]",
-                  bar.open && !hit ? "border border-b-0 border-dim/60" : hit ? "bg-approve/75" : "bg-foreground/30",
+                  bar.open && !hit ? "border border-b-0 border-dim/60" : hit ? "bg-approve-fill" : "bg-foreground/30",
                 )}
                 style={{ height: `${(bar.done / top) * 100}%`, minHeight: bar.done > 0 ? 3 : 0 }}
               />
@@ -265,7 +265,7 @@ function Bars({ goal, bars }: { goal: Goal; bars: Bar[] }) {
           );
         })}
       </div>
-      <div className="tnum mt-1 flex justify-between text-[11px] text-faint" aria-hidden>
+      <div className="tnum mt-1 flex justify-between text-meta text-faint" aria-hidden>
         <span>{monthly ? `${Number(bars[0].from.slice(5, 7))}월` : shortDay(bars[0].from)}</span>
         <span>{monthly ? `${Number(bars.at(-1)!.from.slice(5, 7))}월` : shortDay(bars.at(-1)!.from)}</span>
       </div>
@@ -297,7 +297,7 @@ function Month({ goal, stats, onMark }: { goal: Goal; stats: Stats; onMark: (day
   return (
     <section aria-label="달력">
       <div className="flex items-center justify-between">
-        <h3 className="tnum text-[13.5px] font-medium text-foreground">
+        <h3 className="tnum text-ui font-medium text-foreground">
           {ym.y}년 {ym.m}월
         </h3>
         <div className="flex">
@@ -311,7 +311,7 @@ function Month({ goal, stats, onMark }: { goal: Goal; stats: Stats; onMark: (day
       </div>
       <div className="mt-2 grid grid-cols-7 text-center" aria-hidden>
         {WEEK_ROW.map((d) => (
-          <span key={d} className="text-[11px] text-faint">
+          <span key={d} className="text-meta text-faint">
             {d}
           </span>
         ))}
@@ -338,7 +338,7 @@ function Month({ goal, stats, onMark }: { goal: Goal; stats: Stats; onMark: (day
           </div>
         ))}
       </div>
-      <p className="mt-2 flex items-center gap-3 text-[11.5px] text-faint">
+      <p className="mt-2 flex items-center gap-3 text-meta text-faint">
         <span className="flex items-center gap-1">
           <Check aria-hidden className="size-3 text-approve" />
           했다
@@ -349,7 +349,7 @@ function Month({ goal, stats, onMark }: { goal: Goal; stats: Stats; onMark: (day
         </span>
         {n > 1 ? (
           <span className="flex items-center gap-1">
-            <span aria-hidden className="h-[3px] w-3 rounded-full bg-approve/70" />
+            <span aria-hidden className="h-[3px] w-3 rounded-full bg-approve-fill" />
             한 만큼
           </span>
         ) : null}
@@ -358,7 +358,7 @@ function Month({ goal, stats, onMark }: { goal: Goal; stats: Stats; onMark: (day
       {picked && n > 1 ? (
         // A time at a time, or the whole day at once: a day gone by is put right here.
         <div className="anim-settle mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-well px-3 py-2">
-          <span className="tnum text-[12.5px] text-dim">
+          <span className="tnum text-aside text-dim">
             {whenLabel(picked, today)} {said === "done" ? `${n}번 다 했어요` : said === "missed" ? `안 했어요 (${tally(count, n)})` : tally(count, n)}
           </span>
           <span className="flex gap-1.5">
@@ -382,7 +382,7 @@ function Month({ goal, stats, onMark }: { goal: Goal; stats: Stats; onMark: (day
         </div>
       ) : picked ? (
         <div className="anim-settle mt-2 flex items-center justify-between gap-2 rounded-lg bg-well px-3 py-2">
-          <span className="text-[12.5px] text-dim">{whenLabel(picked, today)}</span>
+          <span className="text-aside text-dim">{whenLabel(picked, today)}</span>
           <span className="flex gap-1.5">
             <button type="button" className={choice(said === "missed")} onClick={() => void onMark(picked, { mark: said === "missed" ? "" : "missed" })}>
               안 했다
@@ -398,11 +398,11 @@ function Month({ goal, stats, onMark }: { goal: Goal; stats: Stats; onMark: (day
 }
 
 const stepper =
-  "flex size-11 items-center justify-center rounded-lg text-faint outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-30 mouse:size-8";
+  "flex size-11 items-center justify-center rounded-lg text-faint hover:text-foreground focus-ring disabled:opacity-30 mouse:size-8";
 
 const choice = (on: boolean) =>
   cn(
-    "flex min-h-10 min-w-10 items-center justify-center rounded-lg border px-3 text-[13px] outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-35 mouse:min-h-8 mouse:min-w-8",
+    "flex min-h-10 min-w-10 items-center justify-center rounded-lg border px-3 text-ui focus-ring disabled:opacity-35 mouse:min-h-8 mouse:min-w-8",
     on ? "border-edge bg-glass-raised text-foreground" : "border-edge-soft text-dim hover:bg-glass",
   );
 
@@ -433,8 +433,8 @@ function Day({
       aria-pressed={picked}
       aria-label={`${dayLabel(day)}${mark === "done" ? " 했음" : mark === "missed" ? " 안 했음" : going ? ` ${Math.round(share * 100)}% 함` : ""}`}
       className={cn(
-        "tnum relative flex h-10 items-center justify-center overflow-hidden rounded-md text-[12px] outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-default mouse:h-8",
-        mark === "done" ? "bg-approve/25 text-foreground" : mark === "missed" ? "bg-reject/12 text-dim" : open ? "bg-glass text-dim" : "text-faint/50",
+        "tnum relative flex h-10 items-center justify-center overflow-hidden rounded-md text-aside focus-ring disabled:cursor-default mouse:h-8",
+        mark === "done" ? "bg-approve-wash text-foreground" : mark === "missed" ? "bg-reject-wash text-dim" : open ? "bg-glass text-dim" : "text-faint",
         today && "ring-1 ring-dim/60",
         picked && "ring-2 ring-foreground/60",
       )}
@@ -442,7 +442,7 @@ function Day({
       {Number(day.slice(8, 10))}
       {(going || mark === "missed") && share > 0 ? (
         <span aria-hidden className="absolute inset-x-1.5 bottom-1 h-[3px] rounded-full bg-well">
-          <span className="block h-full rounded-full bg-approve/70" style={{ width: `${share * 100}%` }} />
+          <span className="block h-full rounded-full bg-approve-fill" style={{ width: `${share * 100}%` }} />
         </span>
       ) : null}
     </button>
@@ -457,17 +457,17 @@ function Weekdays({ goal, stats }: { goal: Goal; stats: Stats }) {
   const top = free ? Math.max(1, ...days.map((d) => d.done)) : 1;
   return (
     <section aria-label="요일별">
-      <h3 className="text-[13.5px] font-medium text-foreground">요일별</h3>
+      <h3 className="text-ui font-medium text-foreground">요일별</h3>
       <ul className="mt-2 space-y-1.5">
         {days.map((d) => {
           const share = free ? d.done / top : d.done / d.asks;
           return (
             <li key={d.day} className="flex items-center gap-2.5">
-              <span className="w-4 text-[12px] text-dim">{WEEK_ROW[(d.day + 6) % 7]}</span>
+              <span className="w-4 text-aside text-dim">{WEEK_ROW[(d.day + 6) % 7]}</span>
               <span className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-well">
                 <span className="block h-full rounded-full bg-foreground/45" style={{ width: `${share * 100}%` }} />
               </span>
-              <span className="tnum w-12 text-right text-[12px] text-dim">
+              <span className="tnum w-12 text-right text-aside text-dim">
                 {free ? `${d.done}번` : `${d.done}/${d.asks}`}
               </span>
             </li>

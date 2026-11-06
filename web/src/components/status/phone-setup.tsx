@@ -74,7 +74,7 @@ export function PhoneSetup({ who = "owner" }: { who?: "owner" | "guest" }) {
   return (
     <div>
       <p className="text-pretty text-dim">이 화면을 아이폰에서 열고 차례로 하세요.</p>
-      <ol className="mt-3 space-y-3.5 text-[13px] leading-[1.6]">
+      <ol className="mt-3 space-y-3.5 text-ui leading-[1.6]">
           <Step n={1}>
             OwnTracks를 설치해요.{" "}
             <a
@@ -107,7 +107,7 @@ export function PhoneSetup({ who = "owner" }: { who?: "owner" | "guest" }) {
                 {busy ? SAY.loading : "jarvis 설정 불러오기"}
               </Button>
             )}
-            <span className="mt-2 block text-[12px] text-faint">
+            <span className="mt-2 block text-aside text-faint">
               OwnTracks가 열렸는데 아무것도 바뀌지 않으면 2번 스위치가 꺼져 있는 거예요. 링크 복사 후 Safari 주소창에 붙여 넣어도 열려요.
             </span>
           </Step>
@@ -161,7 +161,7 @@ export function PhoneSetup({ who = "owner" }: { who?: "owner" | "guest" }) {
           )}
       </ol>
       {error ? (
-        <p role="alert" className="mt-3 text-[12.5px] text-reject">
+        <p role="alert" className="mt-3 text-aside text-reject">
           {error}
         </p>
       ) : null}
@@ -172,7 +172,7 @@ export function PhoneSetup({ who = "owner" }: { who?: "owner" | "guest" }) {
 function Step({ n, children }: { n: number; children: React.ReactNode }) {
   return (
     <li className="flex gap-3">
-      <span className="tnum mt-px w-4 shrink-0 text-[12px] text-faint">{n}</span>
+      <span className="tnum mt-px w-4 shrink-0 text-aside text-faint">{n}</span>
       <span className="min-w-0 flex-1 text-pretty text-dim">{children}</span>
     </li>
   );
@@ -198,11 +198,11 @@ function CopyRow({
       <button
         type="button"
         onClick={() => onCopy(id, value)}
-        className="flex min-h-12 w-full items-center gap-3 py-2 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+        className="flex min-h-12 w-full items-center gap-3 py-2 text-left focus-ring"
       >
         <span className="min-w-0 flex-1">
-          <span className="block text-[12px] text-faint">{label}</span>
-          <span className="block truncate font-mono text-[12px] text-dim">{shown ?? value}</span>
+          <span className="block text-aside text-faint">{label}</span>
+          <span className="block truncate font-mono text-aside text-dim">{shown ?? value}</span>
         </span>
         {copied === id ? (
           <Check aria-label="복사됨" className="size-4 shrink-0 text-online" />

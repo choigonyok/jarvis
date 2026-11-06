@@ -47,22 +47,22 @@ export function EventRow({
     >
       <OwnerBar owner={owner} className="my-0.5" />
       <Body onEdit={onEdit}>
-      <span className="tnum w-[3.6rem] shrink-0 pt-px text-[12px] leading-snug text-dim sm:w-[4.25rem]">
+      <span className="tnum w-[3.6rem] shrink-0 pt-px text-aside leading-snug text-dim sm:w-[4.25rem]">
         {timeLabel(event)}
       </span>
-      <span className="min-w-0 flex-1 text-[14.5px] leading-snug text-foreground/90">
-        <span className={cn(leaving && "line-through decoration-reject/60")}>
+      <span className="min-w-0 flex-1 text-body leading-snug text-ink">
+        <span className={cn(leaving && "line-through decoration-reject-fill")}>
           {event.title}
         </span>
         {event.place ? (
           <span className="text-dim"> · {event.place}</span>
         ) : null}
-        <span className="mt-0.5 block text-[11.5px] leading-tight text-faint">
+        <span className="mt-0.5 block text-meta leading-tight text-faint">
           <span className={cn("font-medium", ownerText[owner])}>{OWNER_LABEL[owner]}</span>
           {rest ? ` · ${rest}` : null}
         </span>
         {event.memo ? (
-          <span className="mt-1 line-clamp-2 block text-[12.5px] leading-normal whitespace-pre-line text-dim">
+          <span className="mt-1 line-clamp-2 block text-aside leading-normal whitespace-pre-line text-dim">
             {event.memo}
           </span>
         ) : null}
@@ -76,7 +76,7 @@ export function EventRow({
         size="icon-xs"
         onClick={onDelete}
         aria-label={`${event.title} 삭제`}
-        className="tap touch-visible -my-2 shrink-0 text-faint opacity-0 transition-opacity group-hover/row:opacity-100 hover:bg-reject/10 hover:text-reject focus-visible:opacity-100 mouse:my-0 mouse:size-6 mouse:min-h-0 mouse:min-w-0"
+        className="tap touch-visible -my-2 shrink-0 text-faint opacity-0 transition-opacity group-hover/row:opacity-100 hover:bg-reject-wash hover:text-reject focus-visible:opacity-100 mouse:my-0 mouse:size-6 mouse:min-h-0 mouse:min-w-0"
       >
         <Trash2 aria-hidden className="size-4 mouse:size-3.5" />
       </Button>
@@ -95,7 +95,7 @@ function Body({ onEdit, children }: { onEdit?: () => void; children: ReactNode }
     <button
       type="button"
       onClick={onEdit}
-      className="-my-1 flex min-w-0 flex-1 items-start gap-3 rounded-md py-1 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+      className="-my-1 flex min-w-0 flex-1 items-start gap-3 rounded-md py-1 text-left focus-ring"
     >
       {children}
       <span className="sr-only">고치기</span>
@@ -145,24 +145,24 @@ export function GhostRow({
 
   return (
     <div className="ml-2 rounded-lg border border-dashed border-edge bg-glass/60 px-3 py-2.5">
-      <div className="flex items-center gap-2 text-[11px] text-faint">
+      <div className="flex items-center gap-2 text-meta text-faint">
         <span aria-hidden className="anim-breathe size-[5px] rounded-full bg-dim" />
         <span>{busy ? "보내는 중" : sentAs ? "반영 중" : copy.label}</span>
       </div>
 
       {preview ? (
         <div className="mt-1.5 flex items-baseline gap-3">
-          <span className="tnum w-[3.6rem] shrink-0 text-[12px] text-dim sm:w-[4.25rem]">
+          <span className="tnum w-[3.6rem] shrink-0 text-aside text-dim sm:w-[4.25rem]">
             {timeLabel(preview)}
           </span>
-          <span className="min-w-0 flex-1 text-[14.5px] leading-snug text-foreground/90">
+          <span className="min-w-0 flex-1 text-body leading-snug text-ink">
             {preview.title}
             {preview.place ? <span className="text-dim"> · {preview.place}</span> : null}
           </span>
         </div>
       ) : null}
 
-      <p className="mt-1.5 text-[12px] leading-normal text-dim">{copy.consequence}</p>
+      <p className="mt-1.5 text-aside leading-normal text-dim">{copy.consequence}</p>
 
       {/* The same decision as the chat's card, so it gets the same treatment
           on a phone: full width, real height, a gap you cannot thumb across -

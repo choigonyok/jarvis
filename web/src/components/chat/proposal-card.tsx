@@ -99,13 +99,13 @@ export function ProposalCard({
       <div className="px-4 pt-3.5 pb-4 sm:px-5">
         {/* Only an undecided proposal announces itself; a settled one is read by its edge. */}
         {settled ? null : (
-          <div className="mb-2 flex items-center gap-2 text-[11px] text-faint">
+          <div className="mb-2 flex items-center gap-2 text-meta text-faint">
             <span aria-hidden className="anim-breathe size-[5px] rounded-full bg-dim" />
             <span>{busy ? "보내는 중" : onItsWay ? "반영 중" : "결재 대기"}</span>
           </div>
         )}
 
-        <h3 className="text-[14.5px] leading-snug font-medium text-foreground">
+        <h3 className="text-body leading-snug font-medium text-foreground">
           {readableTitle(proposal.card.title)}
         </h3>
 
@@ -134,12 +134,12 @@ export function ProposalCard({
             <CodeBlockCopyButton value={readableBody(proposal.card.body)} label="명령 복사" />
           </CodeBlock>
         ) : (
-          <pre className="scrollbar-hairline tnum mt-3 rounded-md bg-well px-3 py-2.5 font-sans text-[13px] whitespace-pre-wrap text-dim [&_code]:font-sans">
+          <pre className="scrollbar-hairline tnum mt-3 rounded-md bg-well px-3 py-2.5 font-sans text-ui whitespace-pre-wrap text-dim [&_code]:font-sans">
             <code>{readableBody(proposal.card.body)}</code>
           </pre>
         )}
 
-        <p className="mt-2.5 text-[12px] leading-normal text-dim">
+        <p className="mt-2.5 text-aside leading-normal text-dim">
           {readableConsequence(proposal.card.consequence)}
         </p>
       </div>
@@ -148,7 +148,7 @@ export function ProposalCard({
         {settled ? (
           <p
             className={cn(
-              "anim-settle flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11.5px]",
+              "anim-settle flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-meta",
               settled.tone,
             )}
           >
@@ -200,7 +200,7 @@ export function ProposalCard({
           </div>
         )}
         {!settled && (refusal || missing.length > 0) ? (
-          <p role={refusal ? "alert" : undefined} className={cn("mt-2 px-1 text-[12px]", refusal ? "text-reject" : "text-faint")}>
+          <p role={refusal ? "alert" : undefined} className={cn("mt-2 px-1 text-aside", refusal ? "text-reject" : "text-faint")}>
             {refusal ?? `${missing.map((f) => f.label).join(", ")}을(를) 적으면 승인할 수 있어요.`}
           </p>
         ) : null}
@@ -223,10 +223,10 @@ function CardPhotos({ names, cover }: { names: string[]; cover: boolean }) {
             src={photoUrl(name)}
             alt={cover && i === 0 ? "대표 사진" : `사진 ${i + 1}`}
             loading="lazy"
-            className={cn("rounded-lg border border-edge-soft bg-well object-cover", !cover ? "size-24" : i === 0 ? "size-24" : "size-20 mt-4")}
+            className={cn("rounded-lg bg-well object-cover", !cover ? "size-24" : i === 0 ? "size-24" : "size-20 mt-4")}
           />
           {cover && i === 0 ? (
-            <span className="absolute bottom-1 left-1 rounded bg-background/80 px-1.5 py-px text-[10.5px] text-dim">대표</span>
+            <span className="absolute bottom-1 left-1 rounded bg-background/80 px-1.5 py-px text-tiny text-dim">대표</span>
           ) : null}
         </li>
       ))}
@@ -251,7 +251,7 @@ function FormFields({
         return (
           <div key={f.key}>
             {f.kind === "select" || f.kind === "multi" ? (
-              <p id={`${id}-label`} className="mb-1.5 text-[12px] text-dim">
+              <p id={`${id}-label`} className="mb-1.5 text-aside text-dim">
                 {f.label}
               </p>
             ) : (
@@ -269,9 +269,9 @@ function FormFields({
                   value={value ? Number(value.replace(/[^\d]/g, "") || 0).toLocaleString("ko-KR") : ""}
                   onChange={(e) => onChange(f.key, e.target.value.replace(/[^\d]/g, ""))}
                   placeholder="숫자로 적기"
-                  className="tnum h-12 pe-9 text-[20px] font-medium mouse:h-11 mouse:text-[18px]"
+                  className="tnum h-12 pe-9 text-lead font-medium mouse:h-11"
                 />
-                <span aria-hidden className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-[14px] text-faint">
+                <span aria-hidden className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-body text-faint">
                   원
                 </span>
               </div>
@@ -331,10 +331,10 @@ function FormFields({
                 {...(isPrivateField(f)
                   ? { autoComplete: "username", autoCapitalize: "none", autoCorrect: "off", spellCheck: false }
                   : {})}
-                className="mouse:text-[13.5px]"
+                className="mouse:text-ui"
               />
             )}
-            {f.hint ? <p className="mt-1.5 text-[11.5px] leading-relaxed whitespace-pre-wrap text-faint">{f.hint}</p> : null}
+            {f.hint ? <p className="mt-1.5 text-meta leading-relaxed whitespace-pre-wrap text-faint">{f.hint}</p> : null}
           </div>
         );
       })}
@@ -347,11 +347,11 @@ function FormSummary({ fields }: { fields: CardField[] }) {
   const shown = fields.filter((f) => f.value && f.kind !== "textarea" && !isPrivateField(f)).slice(0, 4);
   if (shown.length === 0) return null;
   return (
-    <dl className="mt-2 space-y-0.5 text-[13px]">
+    <dl className="mt-2 space-y-0.5 text-ui">
       {shown.map((f) => (
         <div key={f.key} className="flex gap-2">
           <dt className="shrink-0 text-faint">{f.label}</dt>
-          <dd className="tnum min-w-0 truncate text-foreground/85">
+          <dd className="tnum min-w-0 truncate text-ink">
             {f.kind === "number" ? Number(f.value).toLocaleString("ko-KR") : f.value}
           </dd>
         </div>

@@ -69,7 +69,7 @@ export function FinishPanel({
           ["세트", `${sets}`],
         ].map(([label, value]) => (
           <div key={label}>
-            <dt className="text-[11.5px] text-faint">{label}</dt>
+            <dt className="text-meta text-faint">{label}</dt>
             <dd className="font-score tnum text-[30px] leading-tight font-semibold text-foreground">
               {value}
             </dd>
@@ -78,12 +78,12 @@ export function FinishPanel({
       </dl>
 
       {delta !== null && anything ? (
-        <p className="mb-3 text-[13px] text-dim">
+        <p className="mb-3 text-ui text-dim">
           지난 {session.routineName}보다{" "}
           <span
             className={cn(
               "tnum",
-              delta > 0 ? "text-approve" : "text-foreground/90",
+              delta > 0 ? "text-approve" : "text-ink",
             )}
           >
             {delta === 0 ? "같은 볼륨" : signedKg(delta)}
@@ -94,9 +94,9 @@ export function FinishPanel({
       {records.length > 0 ? (
         <ul className="mb-4 space-y-1.5">
           {records.map((r) => (
-            <li key={r.name} className="flex items-center gap-2 text-[13px]">
+            <li key={r.name} className="flex items-center gap-2 text-ui">
               <Flame aria-hidden className="size-3.5 shrink-0 text-approve" />
-              <span className="min-w-0 flex-1 truncate text-foreground/90">
+              <span className="min-w-0 flex-1 truncate text-ink">
                 {r.name}
               </span>
               <span className="tnum shrink-0 text-faint">
@@ -112,11 +112,11 @@ export function FinishPanel({
       ) : null}
 
       {!anything ? (
-        <p className="mb-4 text-[13px] leading-relaxed text-dim">
+        <p className="mb-4 text-ui leading-relaxed text-dim">
           체크한 세트가 없어서 남길 기록이 없어요.
         </p>
       ) : open_ > 0 ? (
-        <p className="mb-4 text-[13px] leading-relaxed text-dim">
+        <p className="mb-4 text-ui leading-relaxed text-dim">
           체크하지 않은 세트 {open_}개는 기록에서 빠져요.
         </p>
       ) : null}

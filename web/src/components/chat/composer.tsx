@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
-import { ArrowUp, ImagePlus, Mic, Reply, X } from "lucide-react";
+import { ArrowUp, ImagePlus, Info, Mic, Reply, X } from "lucide-react";
 import {
   Attachment,
   AttachmentAction,
@@ -25,7 +25,7 @@ export type Quoting = { label: string; text: string };
 
 /** A round control the height of the bar's inner track, like a tab bar slot. */
 const round =
-  "tap flex size-12 shrink-0 items-center justify-center rounded-full outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50";
+  "tap flex size-12 shrink-0 items-center justify-center rounded-full transition-colors focus-ring";
 
 /**
  * What was typed and not sent, kept on this device. The chat page unmounts
@@ -63,6 +63,7 @@ function ComposerView({
   onStop,
   draftKey,
   fillRef,
+  onGuide,
 }: {
   /** Resolves false when the message did not go out, so what was typed comes back. */
   onSend: (text: string, images: string[]) => Promise<boolean> | void;
@@ -91,6 +92,12 @@ function ComposerView({
    * conversation's first things to say, chat/thread.tsx).
    */
   fillRef?: RefObject<((text: string) => void) | null>;
+  /**
+   * Opens what can be asked (chat/guide.tsx). Its ⓘ stands in the field while
+   * nothing is typed - where one wonders what to say - and steps aside for
+   * the words: in the header it was one of five grey icons on a phone.
+   */
+  onGuide?: () => void;
 }) {
   const [value, setValue] = useState("");
   // Text only: a photo's preview is an object URL that does not outlive the page.
@@ -227,14 +234,14 @@ function ComposerView({
         <div className="flex items-start gap-2 pt-1.5 pr-1 pb-1 pl-3.5">
           <Reply aria-hidden className="mt-[3px] size-3.5 shrink-0 text-faint" />
           <div className="min-w-0 flex-1">
-            <p className="text-[12px] leading-snug text-dim">{quoting.label}</p>
-            <p className="truncate text-[12.5px] leading-snug text-faint">{quoting.text}</p>
+            <p className="text-aside leading-snug text-dim">{quoting.label}</p>
+            <p className="truncate text-aside leading-snug text-faint">{quoting.text}</p>
           </div>
           <button
             type="button"
             onClick={onCancelQuote}
             aria-label="참조 빼기"
-            className="flex size-8 shrink-0 items-center justify-center rounded-full text-faint outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+            className="flex size-8 shrink-0 items-center justify-center rounded-full text-faint hover:text-foreground focus-ring"
           >
             <X aria-hidden className="size-4" />
           </button>
@@ -257,7 +264,7 @@ function ComposerView({
                   </AttachmentMedia>
                   {state === "uploading" ? (
                     <span className="absolute inset-0 flex items-center justify-center">
-                      <Spinner aria-label="사진을 올리는 중" className="text-foreground/80" />
+                      <Spinner aria-label="사진을 올리는 중" className="text-ink" />
                     </span>
                   ) : null}
                   <AttachmentAction
@@ -272,7 +279,7 @@ function ComposerView({
                 {p.error ? (
                   <AttachmentContent className="w-36 pr-1">
                     <AttachmentTitle className="font-normal text-reject">올리지 못했어요</AttachmentTitle>
-                    <AttachmentDescription className="line-clamp-2 text-[11.5px] leading-snug whitespace-normal text-dim group-data-[state=error]/attachment:text-dim">
+                    <AttachmentDescription className="line-clamp-2 text-meta leading-snug whitespace-normal text-dim group-data-[state=error]/attachment:text-dim">
                       {p.error}
                     </AttachmentDescription>
                   </AttachmentContent>
@@ -345,10 +352,26 @@ function ComposerView({
           // What is typed here is kept (draftKey): the page may be reloaded under it.
           data-keeps-draft={draftKey ? "" : undefined}
           className={cn(
-            "scrollbar-hairline max-h-28 min-h-12 flex-1 resize-none bg-transparent py-3 text-[14.5px] leading-relaxed text-foreground outline-none placeholder:text-faint sm:max-h-[168px]",
+            "scrollbar-hairline max-h-28 min-h-12 flex-1 resize-none bg-transparent py-3 text-body leading-relaxed text-foreground outline-none placeholder:text-faint sm:max-h-[168px]",
             allowPhotos ? "px-1" : "pl-3.5 pr-1",
           )}
         />
+
+        {onGuide && !composing && !quoting ? (
+          <button
+            type="button"
+            // Keeps the field's focus on the way down, as send does: losing it
+            // brings the tab bar back and moves this button from under the finger.
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={onGuide}
+            aria-label="말로 시킬 수 있는 일"
+            aria-haspopup="dialog"
+            title="말로 시킬 수 있는 일"
+            className={cn(round, "text-faint hover:text-foreground")}
+          >
+            <Info aria-hidden className="size-5" strokeWidth={1.8} />
+          </button>
+        ) : null}
 
         {/* The mode switch lives here on a phone. Stacking a separate toggle
             under the composer would put three bars between the transcript and

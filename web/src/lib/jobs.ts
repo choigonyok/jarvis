@@ -84,7 +84,7 @@ export function stateLabel(j: Job): string {
 export function stateTone(j: Job): string {
   if (j.running) return "text-approve";
   // Waiting on the operator is not the calendar's violet: the row carries the breathing ring.
-  if (j.blockedSites?.length || j.state === "waiting") return "text-foreground/90";
+  if (j.blockedSites?.length || j.state === "waiting") return "text-ink";
   if (j.state === "failed") return "text-reject";
   if (j.state === "active") return "text-dim";
   return "text-faint";

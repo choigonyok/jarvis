@@ -73,13 +73,13 @@ function Banner({ push, more, onOpen }: { push: ShownPush; more: number; onOpen:
       <button
         type="button"
         onClick={onOpen}
-        className="liquid-glass block w-full rounded-2xl px-4 py-3 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+        className="liquid-glass block w-full rounded-2xl px-4 py-3 text-left focus-ring"
       >
-        <span className="block text-[14px] font-semibold text-foreground">
+        <span className="block text-body font-semibold text-foreground">
           {push.title}
-          {more ? <span className="tnum ml-1.5 text-[12px] font-normal text-faint">외 {more}건</span> : null}
+          {more ? <span className="tnum ml-1.5 text-aside font-normal text-faint">외 {more}건</span> : null}
         </span>
-        {push.body ? <span className="mt-0.5 line-clamp-2 block text-[13px] leading-snug text-dim">{push.body}</span> : null}
+        {push.body ? <span className="mt-0.5 line-clamp-2 block text-ui leading-snug text-dim">{push.body}</span> : null}
       </button>
     </div>
   );

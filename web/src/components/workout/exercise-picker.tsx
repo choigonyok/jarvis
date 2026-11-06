@@ -114,7 +114,7 @@ export function ExercisePicker({
           {q && !exact ? (
             <CommandItem value={NEW} onSelect={() => pick(query)} className="min-h-12">
               <Plus aria-hidden className="text-dim" />
-              <span className="min-w-0 flex-1 truncate text-[14px] text-foreground">‘{query.trim()}’ 새 종목으로 추가</span>
+              <span className="min-w-0 flex-1 truncate text-body text-foreground">‘{query.trim()}’ 새 종목으로 추가</span>
             </CommandItem>
           ) : null}
           {shown.map((row) => {
@@ -122,13 +122,13 @@ export function ExercisePicker({
             return (
               <CommandItem key={row.name} value={row.name} onSelect={() => pick(row.name)} className="min-h-12 py-1.5">
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[14px] text-foreground/90">{row.name}</span>
-                  <span className="tnum block truncate text-[11.5px] text-faint">
+                  <span className="block truncate text-body text-ink">{row.name}</span>
+                  <span className="tnum block truncate text-meta text-faint">
                     {groupOf(row.name)}
                     {row.date && row.top ? ` · ${dayLabel(row.date)} ${setLabel(row.top)}` : ""}
                   </span>
                 </span>
-                {already ? <span className="shrink-0 text-[11.5px] text-faint">추가됨</span> : null}
+                {already ? <span className="shrink-0 text-meta text-faint">추가됨</span> : null}
               </CommandItem>
             );
           })}

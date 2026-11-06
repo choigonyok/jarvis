@@ -82,12 +82,12 @@ export function useUndo() {
 /** The line itself: what was done, and the way back. */
 export function UndoNotice({ label, onUndo }: { label: string; onUndo: () => void }) {
   return (
-    <div role="status" className="liquid-glass flex w-full items-center gap-2 rounded-2xl py-1 ps-3.5 pe-1 text-[13px]">
-      <span className="min-w-0 flex-1 truncate text-foreground/90">{label}</span>
+    <div role="status" className="liquid-glass flex w-full items-center gap-2 rounded-2xl py-1 ps-3.5 pe-1 text-ui">
+      <span className="min-w-0 flex-1 truncate text-ink">{label}</span>
       <button
         type="button"
         onClick={onUndo}
-        className="tap shrink-0 rounded-lg px-3 font-medium text-foreground underline underline-offset-4 outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+        className="tap shrink-0 rounded-lg px-3 font-medium text-foreground underline underline-offset-4 focus-ring"
       >
         되돌리기
       </button>

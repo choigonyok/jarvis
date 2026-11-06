@@ -1,6 +1,6 @@
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 import { Slot } from "radix-ui"
 
 /**
@@ -80,7 +80,7 @@ function EmptyTitle({
   return (
     <Comp
       data-slot="empty-title"
-      className={cn("text-[15px] leading-snug font-medium text-foreground/90", className)}
+      className={cn("text-title leading-snug font-medium text-ink", className)}
       {...props}
     />
   )
@@ -91,7 +91,7 @@ function EmptyDescription({ className, ...props }: React.ComponentProps<"div">) 
     <div
       data-slot="empty-description"
       className={cn(
-        "text-[13.5px] leading-relaxed break-keep text-pretty text-dim [&_a]:underline [&_a]:decoration-edge [&_a]:underline-offset-[3px] [&_a:hover]:text-foreground",
+        "text-ui leading-relaxed break-keep text-pretty text-dim [&_a]:underline [&_a]:decoration-edge [&_a]:underline-offset-[3px] [&_a:hover]:text-foreground",
         className
       )}
       {...props}

@@ -3,10 +3,12 @@
 import { useKept } from "@/lib/keep";
 import { useMemo } from "react";
 import { Entry } from "@/components/ledger/entry";
+import { Failed } from "@/components/shell/failed";
 import { Header, TabBar } from "@/components/shell/header";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { Pager } from "@/components/ui/pager";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { filters, groupByDay, matches, newestFirst, waitingSince, type Filter } from "@/lib/ledger";
 import { usePaged } from "@/lib/paging";
 import { isPending, type Decision, type Proposal } from "@/lib/thread";
@@ -50,7 +52,7 @@ export function Ledger() {
       <StandingBar pending={pending} muted />
 
       <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
-        <div className="mx-auto w-full max-w-[42rem] px-4 pt-5 pb-10 sm:px-8 sm:pt-6 sm:pb-6">
+        <div className="mx-auto w-full max-w-page px-4 pt-5 pb-10 sm:px-8 sm:pt-6 sm:pb-6">
           <ToggleGroup
             type="single"
             aria-label="보기"
@@ -71,19 +73,22 @@ export function Ledger() {
           </ToggleGroup>
 
           {empty ? (
-            <p className="max-w-[30rem] text-[13.5px] leading-relaxed text-faint">
-              {filter === "all"
-                ? "아직 올라온 요청이 없어요. Jarvis가 상태를 바꾸는 일을 하려 할 때마다 여기에 남아요."
-                : "이 조건에 맞는 요청이 없어요."}
-            </p>
+            <Empty align="start" className="py-6">
+              <EmptyHeader>
+                <EmptyTitle>{filter === "all" ? "아직 올라온 요청이 없어요" : "이 조건에 맞는 요청이 없어요"}</EmptyTitle>
+                {filter === "all" ? (
+                  <EmptyDescription>Jarvis가 상태를 바꾸는 일을 하려 할 때마다 여기에 남아요.</EmptyDescription>
+                ) : null}
+              </EmptyHeader>
+            </Empty>
           ) : null}
 
           {waiting.length > 0 ? (
             <section className="mb-6">
               <div className="mb-1.5 flex items-center gap-3">
-                <h2 className="text-[12px] text-faint">대기</h2>
+                <h2 className="text-aside text-faint">대기</h2>
                 <span aria-hidden className="h-px flex-1 bg-edge-soft" />
-                <span className="tnum text-[11.5px] text-faint">{waiting.length}건</span>
+                <span className="tnum text-meta text-faint">{waiting.length}건</span>
               </div>
               <div>
                 {waiting.map((proposal) => (
@@ -99,9 +104,9 @@ export function Ledger() {
                 {/* The day is a rule with a name on it, not a card header:
                     what matters is where one day stops and the next starts. */}
                 <div className="mb-1.5 flex items-center gap-3">
-                  <h2 className="text-[12px] text-faint">{day.label}</h2>
+                  <h2 className="text-aside text-faint">{day.label}</h2>
                   <span aria-hidden className="h-px flex-1 bg-edge-soft" />
-                  <span className="tnum text-[11.5px] text-faint">
+                  <span className="tnum text-meta text-faint">
                     {counts.get(day.key) ?? day.entries.length}건
                   </span>
                 </div>
@@ -117,12 +122,7 @@ export function Ledger() {
           <Pager {...paged} unit="장" />
 
           {error ? (
-            <p
-              role="status"
-              className="mt-6 border-l-2 border-reject pl-3 text-[13.5px] leading-relaxed text-dim"
-            >
-              {error}
-            </p>
+            <Failed className="mt-6">{error}</Failed>
           ) : null}
         </div>
       </main>

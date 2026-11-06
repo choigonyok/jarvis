@@ -159,22 +159,22 @@ export function Status() {
       {/* inset-x-safe and px-4 both set padding-left, so they sit on
           different elements: the notch inset outside, the gutter inside. */}
       <main className="scrollbar-hairline inset-x-safe min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
-        <div className="mx-auto w-full max-w-[46rem] px-4 pt-6 pb-10 sm:px-8 sm:pt-10">
+        <div className="mx-auto w-full max-w-page px-4 pt-6 pb-10 sm:px-8 sm:pt-10">
           {!report ? (
-            <p className="pt-10 text-center text-[13px] text-faint">
+            <p className="pt-10 text-center text-ui text-faint">
               {error ?? "상태를 불러오는 중…"}
             </p>
           ) : (
             <>
               <Headline results={[...results, ...spend]} onPick={reveal} />
 
-              <div className="mt-3 flex items-center gap-3 text-[11.5px] text-faint">
+              <div className="mt-3 flex items-center gap-3 text-meta text-faint">
                 {lastChecked ? <span className="tnum">확인 {since(lastChecked)}</span> : null}
                 <button
                   type="button"
                   onClick={() => void refresh()}
                   disabled={refreshing}
-                  className="tap -my-3 flex items-center gap-1.5 rounded-md px-1 text-dim transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 disabled:text-faint"
+                  className="tap -my-3 flex items-center gap-1.5 rounded-md px-1 text-dim transition-colors hover:text-foreground focus-ring disabled:text-faint"
                 >
                   <RotateCw aria-hidden className={cn("size-3.5", refreshing && "anim-spin-slow")} />
                   {refreshing ? "확인하는 중" : "다시 확인"}
@@ -343,7 +343,7 @@ function Headline({ results, onPick }: { results: Line[]; onPick: (id: string) =
 
   return (
     <div data-focus="problems">
-      <p className="text-[26px] leading-[1.25] font-medium tracking-[-0.015em] text-foreground sm:text-[30px]">
+      <p className="text-display leading-[1.25] font-semibold tracking-tight text-foreground">
         {sentence}
       </p>
       {top.length > 0 ? (
@@ -353,10 +353,10 @@ function Headline({ results, onPick }: { results: Line[]; onPick: (id: string) =
               <button
                 type="button"
                 onClick={() => onPick(r.id)}
-                className="group -mx-1 flex w-full items-start gap-3 rounded-md px-1 py-0.5 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                className="group -mx-1 flex w-full items-start gap-3 rounded-md px-1 py-0.5 text-left focus-ring"
               >
                 <Mark state={r.state} className="mt-[7px]" />
-                <span className="min-w-0 text-[14.5px] leading-[1.55] text-pretty">
+                <span className="min-w-0 text-body leading-[1.55] text-pretty">
                   <span className="text-foreground">{r.name}</span>
                   <span className="text-dim"> {r.summary}</span>
                 </span>
@@ -365,12 +365,12 @@ function Headline({ results, onPick }: { results: Line[]; onPick: (id: string) =
           ))}
         </ul>
       ) : (
-        <p className="mt-2 text-[13.5px] text-dim">
+        <p className="mt-2 text-ui text-dim">
           {results.length}개 항목을 확인했어요
           {unmeasured > 0 ? `. ${unmeasured}개는 측정하지 않아요.` : "."}
         </p>
       )}
-      {extra ? <p className="mt-2 text-[12.5px] text-faint">{extra}</p> : null}
+      {extra ? <p className="mt-2 text-aside text-faint">{extra}</p> : null}
     </div>
   );
 }
@@ -430,14 +430,14 @@ function Rows({
           <button
             type="button"
             onClick={() => setShowServices(true)}
-            className="flex min-h-12 w-full items-center gap-3 py-3 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+            className="flex min-h-12 w-full items-center gap-3 py-3 text-left focus-ring"
           >
             <Mark state="ok" />
-            <span className="min-w-0 flex-1 text-[14.5px] text-foreground/90">
+            <span className="min-w-0 flex-1 text-body text-ink">
               서비스 {healthyServices.length}개
-              <span className="mt-0.5 block text-[13px] text-faint">모두 응답해요.</span>
+              <span className="mt-0.5 block text-ui text-faint">모두 응답해요.</span>
             </span>
-            <span className="shrink-0 text-[12px] text-faint">펼치기</span>
+            <span className="shrink-0 text-aside text-faint">펼치기</span>
           </button>
         </li>
       ) : null}
@@ -467,14 +467,14 @@ function Row({
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className="flex min-h-12 w-full items-start gap-3 py-3 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+        className="flex min-h-12 w-full items-start gap-3 py-3 text-left focus-ring"
       >
         <Mark state={r.state} className="mt-[7px]" />
         <span className="min-w-0 flex-1">
           <span className="flex items-baseline justify-between gap-3">
-            <span className={cn("text-[14.5px]", trouble ? "text-foreground" : "text-foreground/90")}>{r.name}</span>
+            <span className={cn("text-body", trouble ? "text-foreground" : "text-ink")}>{r.name}</span>
             {figure ? (
-              <span className={cn("tnum shrink-0", r.figure ? "text-[13px] text-foreground/90" : "text-[11.5px] text-faint")}>
+              <span className={cn("tnum shrink-0", r.figure ? "text-ui text-ink" : "text-meta text-faint")}>
                 {/* An age's label rides along on wide screens; on a phone the
                     age alone fits beside the name. */}
                 {!r.figure && r.observedLabel ? <span className="hidden sm:inline">{r.observedLabel} </span> : null}
@@ -482,14 +482,14 @@ function Row({
               </span>
             ) : null}
           </span>
-          <span className={cn("mt-0.5 block text-[13px] leading-[1.55] text-pretty", trouble ? "text-dim" : "text-faint")}>
+          <span className={cn("mt-0.5 block text-ui leading-[1.55] text-pretty", trouble ? "text-dim" : "text-faint")}>
             {r.summary}
           </span>
           {r.meter !== undefined ? (
             <Progress aria-hidden value={r.meter ?? 0} className="mt-2" indicatorClassName={tone(r.meter ?? null)} />
           ) : null}
           {r.cause && r.causeName ? (
-            <span className="mt-1 block text-[12.5px] text-faint">
+            <span className="mt-1 block text-aside text-faint">
               {/* A span, not a nested button: the whole row is already one. */}
               <span
                 role="link"
@@ -504,7 +504,7 @@ function Row({
                     onPick(r.cause!);
                   }
                 }}
-                className="cursor-pointer text-dim underline decoration-edge underline-offset-[3px] outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+                className="cursor-pointer text-dim underline decoration-edge underline-offset-[3px] hover:text-foreground focus-ring"
               >
                 {r.causeName}
               </span>{" "}
@@ -516,7 +516,7 @@ function Row({
       </button>
 
       {open ? (
-        <div className="anim-settle mb-4 ms-[19px] space-y-3 border-s border-edge ps-4 text-[12.5px] leading-[1.6]">
+        <div className="anim-settle mb-4 ms-[19px] space-y-3 border-s border-edge ps-4 text-aside leading-[1.6]">
           {children ?? (
             <>
               {r.facts && r.facts.length > 0 ? (
@@ -533,7 +533,7 @@ function Row({
                 <button
                   type="button"
                   onClick={() => onPick("phone")}
-                  className="text-dim underline decoration-edge underline-offset-[3px] outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+                  className="text-dim underline decoration-edge underline-offset-[3px] hover:text-foreground focus-ring"
                 >
                   폰 연결 설정 열기
                 </button>
@@ -569,7 +569,7 @@ function Days({ label, days }: { label: string; days: { day: string; usd: number
       {days.map((d) => (
         <li key={d.day} className="flex flex-1 flex-col items-center gap-1" title={`${d.day} ${usd(d.usd)} · ${d.note}`}>
           <span className="block w-full rounded-sm bg-foreground/45" style={{ height: `${Math.max(2, (d.usd / top) * 30)}px` }} />
-          <span className="tnum text-[10px] text-faint">{d.day.slice(8)}</span>
+          <span className="tnum text-tiny text-faint">{d.day.slice(8)}</span>
         </li>
       ))}
     </ul>

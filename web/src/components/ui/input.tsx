@@ -1,6 +1,6 @@
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 
 /**
  * A field as the console sets one: a thumb's height on a touch screen and 16px
@@ -9,7 +9,7 @@ import { cn } from "cn"
  * or a form sets its fields into.
  */
 const inputVariants = cva(
-  "flex h-11 w-full min-w-0 rounded-lg border border-edge-soft px-3 text-[16px] text-foreground transition-[color,box-shadow] outline-none file:inline-flex file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-faint selection:bg-primary selection:text-primary-foreground focus-visible:border-edge focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 mouse:h-9 mouse:text-[13px]",
+  "flex h-11 w-full min-w-0 rounded-lg border border-edge-soft px-3 text-field text-foreground transition-[color,box-shadow] file:inline-flex file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-faint selection:bg-primary selection:text-primary-foreground focus-visible:border-edge focus-ring disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 mouse:h-9 mouse:text-ui",
   {
     variants: {
       surface: {

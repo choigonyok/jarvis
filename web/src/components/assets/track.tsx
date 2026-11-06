@@ -34,7 +34,7 @@ export function Track({ points }: { points: TrackPoint[] }) {
 
   if (points.length < 2) {
     return (
-      <p className="rounded-lg border border-edge-soft bg-glass px-4 py-5 text-[12.5px] leading-relaxed text-faint">
+      <p className="rounded-lg bg-glass px-4 py-5 text-aside leading-relaxed text-faint">
         하루에 한 번 기록해요. 이틀치가 쌓이면 여기에 그려져요.
       </p>
     );
@@ -86,13 +86,13 @@ export function Track({ points }: { points: TrackPoint[] }) {
 
   return (
     <figure ref={root}>
-      <figcaption className="mb-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11.5px] text-faint">
+      <figcaption className="mb-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-meta text-faint">
         <Key mark="line">총자산</Key>
         <Key mark="dashed">넣은 원금</Key>
         <Key mark="bar">원금 대비 수익률</Key>
       </figcaption>
 
-      <div className="relative rounded-lg border border-edge-soft bg-glass px-12 pt-5 pb-5">
+      <div className="relative rounded-lg bg-glass px-12 pt-5 pb-5">
         <div
           className="relative touch-pan-y"
           onPointerDown={pick}
@@ -163,25 +163,25 @@ export function Track({ points }: { points: TrackPoint[] }) {
           {/* Each scale's ends, on its own side: won left, percent right,
               placed at the plot's own heights. */}
           <span
-            className="tnum pointer-events-none absolute right-full mr-2 -translate-y-1/2 text-[10.5px] whitespace-nowrap text-faint"
+            className="tnum pointer-events-none absolute right-full mr-2 -translate-y-1/2 text-tiny whitespace-nowrap text-faint"
             style={{ top: "0%" }}
           >
             {manwon(top)}
           </span>
           <span
-            className="tnum pointer-events-none absolute right-full mr-2 -translate-y-1/2 text-[10.5px] whitespace-nowrap text-faint"
+            className="tnum pointer-events-none absolute right-full mr-2 -translate-y-1/2 text-tiny whitespace-nowrap text-faint"
             style={{ top: `${(LINE_H / H) * 100}%` }}
           >
             {manwon(bottom)}
           </span>
           <span
-            className="tnum pointer-events-none absolute left-full ml-2 -translate-y-1/2 text-[10.5px] whitespace-nowrap text-faint"
+            className="tnum pointer-events-none absolute left-full ml-2 -translate-y-1/2 text-tiny whitespace-nowrap text-faint"
             style={{ top: `${(BAR_TOP / H) * 100}%` }}
           >
             {percent(rTop, 1)}
           </span>
           <span
-            className="tnum pointer-events-none absolute left-full ml-2 -translate-y-1/2 text-[10.5px] whitespace-nowrap text-faint"
+            className="tnum pointer-events-none absolute left-full ml-2 -translate-y-1/2 text-tiny whitespace-nowrap text-faint"
             style={{ top: "100%" }}
           >
             {percent(rBottom, 1)}
@@ -210,7 +210,7 @@ export function Track({ points }: { points: TrackPoint[] }) {
 
       </div>
 
-      <div className="mt-1.5 flex justify-between px-12 text-[10.5px] text-faint">
+      <div className="mt-1.5 flex justify-between px-12 text-tiny text-faint">
         <span className="tnum">{points[0].date.slice(5).replace("-", ".")}</span>
         <span className="tnum">{points[n - 1].date.slice(5).replace("-", ".")}</span>
       </div>
@@ -221,13 +221,13 @@ export function Track({ points }: { points: TrackPoint[] }) {
 function Card({ point, rate }: { point: TrackPoint; rate: number }) {
   const gain = point.totalKrw - point.principalKrw;
   return (
-    <div className="tnum w-max rounded-lg border border-edge bg-popover px-3 py-2 text-[12px] leading-relaxed shadow-lg">
-      <p className="text-foreground/90">
+    <div className="tnum w-max rounded-lg border border-edge bg-popover px-3 py-2 text-aside leading-relaxed shadow-lg">
+      <p className="text-ink">
         {Number(point.date.slice(5, 7))}월 {Number(point.date.slice(8, 10))}일
       </p>
       <p className="text-dim">총자산 {krw(point.totalKrw)}</p>
       <p className="text-faint">넣은 원금 {krw(point.principalKrw)}</p>
-      <p className={gain >= 0 ? "text-approve/85" : "text-reject/85"}>
+      <p className={gain >= 0 ? "text-approve" : "text-reject"}>
         수익 {signedKrw(gain)} · {percent(rate, 2)}
       </p>
     </div>
@@ -238,7 +238,7 @@ function Key({ mark, children }: { mark: "line" | "dashed" | "bar"; children: Re
   return (
     <span className="flex items-center gap-1.5">
       {mark === "bar" ? (
-        <span aria-hidden className="h-2.5 w-1.5 rounded-[1px] bg-approve/70" />
+        <span aria-hidden className="h-2.5 w-1.5 rounded-[1px] bg-approve-fill" />
       ) : (
         <svg aria-hidden viewBox="0 0 16 4" className="h-1 w-4">
           <line
@@ -249,7 +249,7 @@ function Key({ mark, children }: { mark: "line" | "dashed" | "bar"; children: Re
             stroke="currentColor"
             strokeWidth="2"
             strokeDasharray={mark === "dashed" ? "3 2" : undefined}
-            className={mark === "dashed" ? "text-faint" : "text-foreground/80"}
+            className={mark === "dashed" ? "text-faint" : "text-ink"}
           />
         </svg>
       )}

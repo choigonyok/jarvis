@@ -36,7 +36,7 @@ function StandingBarView({
   // one that has waited longest, and the one named below.
   const first = pending[0];
   const go =
-    "tap flex shrink-0 items-center rounded-lg px-2 text-[12.5px] text-foreground transition-colors outline-none hover:text-foreground/80 focus-visible:ring-3 focus-visible:ring-ring/50 mouse:min-h-0 mouse:min-w-0 mouse:py-1";
+    "tap flex shrink-0 items-center rounded-lg px-2 text-aside text-foreground transition-colors hover:text-ink focus-ring mouse:min-h-0 mouse:min-w-0 mouse:py-1";
 
   return (
     <div
@@ -46,10 +46,10 @@ function StandingBarView({
         show ? "border-b" : "h-0 border-b-0",
       )}
     >
-      <div className="mx-auto flex w-full max-w-[46rem] items-center gap-2.5 px-4 py-2 sm:px-8">
+      <div className="mx-auto flex w-full max-w-page items-center gap-2.5 px-4 py-2 sm:px-8">
         <span aria-hidden className="anim-breathe size-[5px] shrink-0 rounded-full bg-dim" />
 
-        <p className="min-w-0 flex-1 truncate text-[12.5px] text-dim">
+        <p className="min-w-0 flex-1 truncate text-aside text-dim">
           {/* The oldest one by name: "2건" alone tells you there is work
               without telling you whether it can wait. */}
           {count > 1 ? (

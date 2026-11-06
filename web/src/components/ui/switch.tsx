@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 import { Switch as SwitchPrimitive } from "radix-ui"
 
 /**
@@ -18,7 +18,7 @@ function Switch({
     <SwitchPrimitive.Root
       data-slot="switch"
       className={cn(
-        "peer group/switch relative inline-flex h-6 w-10 shrink-0 items-center rounded-full transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 data-disabled:cursor-not-allowed data-disabled:opacity-50 data-checked:bg-foreground/80 data-unchecked:bg-glass-raised",
+        "peer group/switch relative inline-flex h-6 w-10 shrink-0 items-center rounded-full transition-colors focus-ring data-disabled:cursor-not-allowed data-disabled:opacity-50 data-checked:bg-foreground/80 data-unchecked:bg-glass-raised",
         className
       )}
       {...props}
@@ -53,9 +53,9 @@ function SwitchRow({
       )}
     >
       <span className="min-w-0 flex-1">
-        <span className="block text-[13.5px] text-foreground/90">{label}</span>
+        <span className="block text-ui text-ink">{label}</span>
         {hint ? (
-          <span className="block text-[11.5px] text-faint">{hint}</span>
+          <span className="block text-meta text-faint">{hint}</span>
         ) : null}
       </span>
       <Switch {...props} />

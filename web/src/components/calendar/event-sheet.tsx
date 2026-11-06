@@ -120,7 +120,7 @@ function Form({
         <Textarea id={`${id}-memo`} surface="glass" rows={3} maxLength={500} value={memo} onChange={(e) => setMemo(e.target.value)} className="min-h-[5.5rem]" />
       </Field>
       {error ? (
-        <p role="alert" className="text-[12.5px] text-reject">
+        <p role="alert" className="text-aside text-reject">
           {error}
         </p>
       ) : null}

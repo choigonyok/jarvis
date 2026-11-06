@@ -1,6 +1,6 @@
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 import { Slot } from "radix-ui"
 
 function BubbleGroup({ className, ...props }: React.ComponentProps<"div">) {
@@ -35,7 +35,7 @@ const bubbleVariants = cva(
         // Jarvis: the person's own words, the one bubble in the thread - a
         // raised capsule with a hairline, solid (no blur: behind it is only
         // the flat page). Jarvis's side has no bubble at all.
-        mine: "*:data-[slot=bubble-content]:rounded-2xl *:data-[slot=bubble-content]:border-edge *:data-[slot=bubble-content]:bg-glass-raised *:data-[slot=bubble-content]:px-4 *:data-[slot=bubble-content]:py-2.5 *:data-[slot=bubble-content]:text-[14.5px] *:data-[slot=bubble-content]:text-foreground",
+        mine: "*:data-[slot=bubble-content]:rounded-2xl *:data-[slot=bubble-content]:border-edge *:data-[slot=bubble-content]:bg-glass-raised *:data-[slot=bubble-content]:px-4 *:data-[slot=bubble-content]:py-2.5 *:data-[slot=bubble-content]:text-read *:data-[slot=bubble-content]:text-foreground",
       },
     },
     defaultVariants: {

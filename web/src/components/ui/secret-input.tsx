@@ -34,7 +34,7 @@ export function SecretInput({
         autoCapitalize="none"
         autoCorrect="off"
         spellCheck={false}
-        className={cn("pe-14 mouse:text-[13.5px]", className)}
+        className={cn("pe-14 mouse:text-ui", className)}
         {...rest}
       />
       <Toggle
@@ -42,7 +42,7 @@ export function SecretInput({
         onPressedChange={setShown}
         aria-label={shown ? "비밀번호 가리기" : "비밀번호 보기"}
         size="sm"
-        className="absolute inset-y-0 right-1 my-auto h-9 rounded-md font-normal text-[12px] text-faint hover:bg-transparent hover:text-foreground data-[state=on]:bg-transparent mouse:h-7"
+        className="absolute inset-y-0 right-1 my-auto h-9 rounded-md font-normal text-aside text-faint hover:bg-transparent hover:text-foreground data-[state=on]:bg-transparent mouse:h-7"
       >
         {shown ? "가리기" : "보기"}
       </Toggle>

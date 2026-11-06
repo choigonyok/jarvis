@@ -44,7 +44,7 @@ export function SetMap({
             onClick={() => onJump(exercise)}
             aria-label={`${exercise.name}, ${working.length}세트 중 ${done}세트 완료`}
             aria-current={here ? "step" : undefined}
-            className="flex h-11 items-center gap-[3px] rounded-lg px-1.5 outline-none hover:bg-glass focus-visible:ring-3 focus-visible:ring-ring/50"
+            className="flex h-11 items-center gap-[3px] rounded-lg px-1.5 hover:bg-glass focus-ring"
           >
             {exercise.sets.map((set, i) => (
               <span
@@ -56,7 +56,7 @@ export function SetMap({
                   here && focus?.index === i
                     ? "bg-foreground"
                     : set.done
-                      ? "bg-approve/75"
+                      ? "bg-approve-fill"
                       : "bg-foreground/14",
                 )}
               />
@@ -85,7 +85,7 @@ export function ExerciseLine({
       type="button"
       onClick={onOpen}
       aria-expanded={false}
-      className="flex min-h-14 w-full items-center gap-3 px-1 py-2 text-left outline-none hover:bg-glass focus-visible:ring-3 focus-visible:ring-ring/50"
+      className="flex min-h-14 w-full items-center gap-3 px-1 py-2 text-left hover:bg-glass focus-ring"
     >
       <span
         className={cn(
@@ -106,13 +106,13 @@ export function ExerciseLine({
       <span className="min-w-0 flex-1">
         <span
           className={cn(
-            "block truncate text-[15px]",
+            "block truncate text-title",
             complete ? "text-dim" : "text-foreground",
           )}
         >
           {exercise.name}
         </span>
-        <span className="tnum block truncate text-[12px] text-faint">
+        <span className="tnum block truncate text-aside text-faint">
           {complete
             ? `${working.length}세트 · ${kg(volumeOf(exercise))}`
             : next
@@ -184,13 +184,13 @@ export function ExerciseBlock({
         <button
           type="button"
           onClick={onHistory}
-          className="-ms-1 flex min-h-11 min-w-0 items-center gap-2 rounded-lg px-1 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="-ms-1 flex min-h-11 min-w-0 items-center gap-2 rounded-lg px-1 text-left focus-ring"
         >
-          <span className="truncate text-[17px] font-semibold text-foreground underline decoration-edge underline-offset-4">
+          <span className="truncate text-heading font-semibold text-foreground underline decoration-edge underline-offset-4">
             {exercise.name}
           </span>
           {beats ? (
-            <span className="flex shrink-0 items-center gap-1 text-[12px] text-approve">
+            <span className="flex shrink-0 items-center gap-1 text-aside text-approve">
               <Flame aria-hidden className="size-3.5" />
               최고 기록
             </span>
@@ -204,7 +204,7 @@ export function ExerciseBlock({
           onClick={() => onEditing(!editing)}
           aria-pressed={editing}
           className={cn(
-            "tap -me-2 shrink-0 rounded-lg px-3 text-[13px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+            "tap -me-2 shrink-0 rounded-lg px-3 text-ui transition-colors focus-ring",
             editing
               ? "bg-glass-raised text-foreground"
               : "text-dim hover:text-foreground",
@@ -215,7 +215,7 @@ export function ExerciseBlock({
       </div>
 
       {best ? (
-        <p className="tnum mb-2 text-[12px] text-faint">
+        <p className="tnum mb-2 text-aside text-faint">
           최고 {setLabel(best)} · 추정 1RM {Math.round(best.oneRm)}kg
         </p>
       ) : null}
@@ -223,7 +223,7 @@ export function ExerciseBlock({
       {/* Column heads, once, so the numbers below need no units of their own. */}
       <div
         aria-hidden
-        className="grid grid-cols-[1.75rem_1fr_4.25rem_3rem_2.75rem] items-center gap-2 px-1 pb-1 text-[11.5px] text-faint"
+        className="grid grid-cols-[1.75rem_1fr_4.25rem_3rem_2.75rem] items-center gap-2 px-1 pb-1 text-meta text-faint"
       >
         <span className="text-center">세트</span>
         <span>지난번</span>
@@ -260,17 +260,17 @@ export function ExerciseBlock({
                   onClick={() => onFocus(i)}
                   aria-label={`${label.long} ${load(set.weight)}kg ${set.reps}회${set.done ? ", 완료" : ""}`}
                   aria-current={focused || undefined}
-                  className="grid min-h-12 flex-1 grid-cols-[1.75rem_1fr_4.25rem_3rem] items-center gap-2 rounded-lg px-1 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                  className="grid min-h-12 flex-1 grid-cols-[1.75rem_1fr_4.25rem_3rem] items-center gap-2 rounded-lg px-1 text-left focus-ring"
                 >
                   <span
                     className={cn(
-                      "tnum text-center text-[13px]",
+                      "tnum text-center text-ui",
                       set.warmup ? "text-dim" : "text-faint",
                     )}
                   >
                     {label.short}
                   </span>
-                  <span className="tnum truncate text-[12.5px] text-faint">
+                  <span className="tnum truncate text-aside text-faint">
                     {before ? setLabel(before) : "—"}
                   </span>
                   <span
@@ -295,7 +295,7 @@ export function ExerciseBlock({
                     type="button"
                     onClick={() => onRemoveSet(i)}
                     aria-label={`${label.long} 삭제`}
-                    className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-reject/12 text-reject transition-colors outline-none hover:bg-reject/20 focus-visible:ring-3 focus-visible:ring-ring/50"
+                    className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-reject-wash text-reject transition-colors focus-ring"
                   >
                     <Minus aria-hidden className="size-[18px]" />
                   </button>
@@ -308,10 +308,10 @@ export function ExerciseBlock({
                     aria-pressed={set.done}
                     aria-label={`${label.long} 완료`}
                     className={cn(
-                      "flex size-11 shrink-0 items-center justify-center rounded-lg transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+                      "flex size-11 shrink-0 items-center justify-center rounded-lg transition-colors focus-ring",
                       set.done
-                        ? "bg-approve/15 text-approve"
-                        : "text-faint/70 hover:text-dim",
+                        ? "bg-approve-wash text-approve"
+                        : "text-faint hover:text-dim",
                     )}
                   >
                     <Check aria-hidden className="size-[18px]" />
@@ -336,7 +336,7 @@ export function ExerciseBlock({
             <button
               type="button"
               onClick={() => onAddSet(false)}
-              className="tap flex flex-1 items-center justify-center gap-1.5 rounded-lg text-[13px] text-faint transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+              className="tap flex flex-1 items-center justify-center gap-1.5 rounded-lg text-ui text-faint transition-colors hover:text-foreground focus-ring"
             >
               <Plus aria-hidden className="size-3.5" />
               세트
@@ -344,7 +344,7 @@ export function ExerciseBlock({
             <button
               type="button"
               onClick={() => onAddSet(true)}
-              className="tap flex flex-1 items-center justify-center gap-1.5 rounded-lg text-[13px] text-faint transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+              className="tap flex flex-1 items-center justify-center gap-1.5 rounded-lg text-ui text-faint transition-colors hover:text-foreground focus-ring"
             >
               <Plus aria-hidden className="size-3.5" />
               워밍업

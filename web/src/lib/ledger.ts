@@ -24,10 +24,10 @@ export const stateCopy: Record<ProposalState, { label: string; edge: string }> =
   // of the column is to be readable at a glance *before* the words - not
   // instead of them.
   pending: { label: "대기 중", edge: "bg-dim/50" },
-  approved: { label: "승인함", edge: "bg-approve/65" },
-  executed: { label: "실행함", edge: "bg-approve/65" },
-  rejected: { label: "반려함", edge: "bg-reject/65" },
-  failed: { label: "실패함", edge: "bg-reject/65" },
+  approved: { label: "승인함", edge: "bg-approve-fill" },
+  executed: { label: "실행함", edge: "bg-approve-fill" },
+  rejected: { label: "반려함", edge: "bg-reject-fill" },
+  failed: { label: "실패함", edge: "bg-reject-fill" },
 };
 
 export function matches(proposal: Proposal, filter: Filter): boolean {

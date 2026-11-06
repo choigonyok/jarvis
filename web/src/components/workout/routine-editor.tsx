@@ -65,7 +65,7 @@ export function RoutineEditor({
                     value={routine.name}
                     onChange={(e) => patch(routine.id, (r) => ({ ...r, name: e.target.value }))}
                     placeholder="루틴 이름"
-                    className="h-11 w-full rounded-lg border border-edge-soft bg-glass px-3 text-[16px] font-medium text-foreground outline-none placeholder:text-faint focus-visible:ring-3 focus-visible:ring-ring/50"
+                    className="h-11 w-full rounded-lg border border-edge-soft bg-glass px-3 text-field font-medium text-foreground placeholder:text-faint focus-ring"
                   />
                 </label>
                 {draft.length > 1 ? (
@@ -83,14 +83,14 @@ export function RoutineEditor({
               <ol className="space-y-px">
                 {routine.exercises.map((name, i) => (
                   <li key={`${name}-${i}`} className="flex min-h-11 items-center gap-1 ps-3">
-                    <span className="tnum w-5 shrink-0 text-[11.5px] text-faint">{i + 1}</span>
-                    <span className="min-w-0 flex-1 truncate text-[14px] text-foreground/90">{name}</span>
+                    <span className="tnum w-5 shrink-0 text-meta text-faint">{i + 1}</span>
+                    <span className="min-w-0 flex-1 truncate text-body text-ink">{name}</span>
                     <button
                       type="button"
                       onClick={() => move(routine.id, i, -1)}
                       disabled={i === 0}
                       aria-label={`${name} 위로`}
-                      className="flex size-11 items-center justify-center rounded-md text-faint outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-30"
+                      className="flex size-11 items-center justify-center rounded-md text-faint hover:text-foreground focus-ring disabled:opacity-30"
                     >
                       <ArrowUp aria-hidden className="size-4" />
                     </button>
@@ -99,7 +99,7 @@ export function RoutineEditor({
                       onClick={() => move(routine.id, i, 1)}
                       disabled={i === routine.exercises.length - 1}
                       aria-label={`${name} 아래로`}
-                      className="flex size-11 items-center justify-center rounded-md text-faint outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-30"
+                      className="flex size-11 items-center justify-center rounded-md text-faint hover:text-foreground focus-ring disabled:opacity-30"
                     >
                       <ArrowDown aria-hidden className="size-4" />
                     </button>
@@ -109,7 +109,7 @@ export function RoutineEditor({
                         patch(routine.id, (r) => ({ ...r, exercises: r.exercises.filter((_, j) => j !== i) }))
                       }
                       aria-label={`${name} 빼기`}
-                      className="flex size-11 items-center justify-center rounded-md text-faint outline-none hover:text-reject focus-visible:ring-3 focus-visible:ring-ring/50"
+                      className="flex size-11 items-center justify-center rounded-md text-faint hover:text-reject focus-ring"
                     >
                       <X aria-hidden className="size-4" />
                     </button>
@@ -129,7 +129,7 @@ export function RoutineEditor({
           onClick={() =>
             setDraft((d) => [...d, { id: `r-${Date.now()}`, name: "", exercises: [] }])
           }
-          className="mt-5 flex h-11 w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-edge text-[13px] text-dim outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="mt-5 flex h-11 w-full items-center justify-center gap-1.5 rounded-lg bg-glass text-ui text-dim hover:text-foreground focus-ring"
         >
           <Plus aria-hidden className="size-4" />새 루틴
         </button>
@@ -151,7 +151,7 @@ export function RoutineEditor({
             저장
           </Button>
         </div>
-        {!valid ? <p className="mt-2 text-center text-[12px] text-faint">이름 없는 루틴이 있어요.</p> : null}
+        {!valid ? <p className="mt-2 text-center text-aside text-faint">이름 없는 루틴이 있어요.</p> : null}
       </Panel>
 
       <ExercisePicker

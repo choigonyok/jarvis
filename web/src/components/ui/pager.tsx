@@ -19,7 +19,7 @@ export function slots(page: number, count: number): (number | "gap")[] {
 // 32px wide and 36px tall, the press reaching 44px above and below (tap-y):
 // at the last pages - ‹ 1 … 6 7 8 › - the line still fits a 360px phone.
 const button =
-  "tap-y flex h-9 min-w-8 items-center justify-center rounded-md px-1 text-[12.5px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-7 mouse:min-w-7";
+  "tap-y flex h-9 min-w-8 items-center justify-center rounded-md px-1 text-aside transition-colors focus-ring mouse:h-7 mouse:min-w-7";
 
 export function Pager({
   page,
@@ -47,7 +47,7 @@ export function Pager({
       aria-label="페이지"
       className={cn("mt-4 flex flex-wrap items-center justify-between gap-x-3 gap-y-1", className)}
     >
-      <p className="tnum text-[11.5px] text-faint">
+      <p className="tnum text-meta text-faint">
         {from}–{to} / {total}
         {unit}
       </p>
@@ -63,7 +63,7 @@ export function Pager({
         </button>
         {slots(page, pageCount).map((s, i) =>
           s === "gap" ? (
-            <span key={`gap-${i}`} aria-hidden className="w-4 text-center text-[12px] text-faint">
+            <span key={`gap-${i}`} aria-hidden className="w-4 text-center text-aside text-faint">
               …
             </span>
           ) : (

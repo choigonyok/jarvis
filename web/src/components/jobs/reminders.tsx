@@ -50,7 +50,7 @@ export function WaitingReminders({ reminders }: { reminders: Reminder[] }) {
   if (list.length === 0) return null;
   return (
     <section className="mt-8 scroll-mt-4" aria-label="맡아 둔 리마인드" id={paged.anchor} data-focus="reminders">
-      <h2 className="mb-1 px-1 text-[12.5px] text-dim">맡아 둔 리마인드</h2>
+      <h2 className="mb-1 px-1 text-aside text-dim">맡아 둔 리마인드</h2>
       <ul className="space-y-1">
         {paged.items.map((r) => (
           <li key={r.id} data-focus={`reminder:${r.id}`}>
@@ -76,10 +76,10 @@ export function PastReminders({ reminders }: { reminders: Reminder[] }) {
         onClick={() => setOpen(true)}
         aria-haspopup="dialog"
         aria-expanded={open}
-        className="tap flex w-full items-center justify-between rounded-lg px-2 text-[13px] text-dim outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+        className="tap flex w-full items-center justify-between rounded-lg px-2 text-ui text-dim hover:text-foreground focus-ring"
       >
         지난 리마인드
-        <span className="tnum text-[12px] text-faint">{list.length}</span>
+        <span className="tnum text-aside text-faint">{list.length}</span>
       </button>
       <DetailSheet title="지난 리마인드" open={open} onOpenChange={setOpen}>
         <div id={paged.anchor} className="scroll-mt-4">
@@ -91,7 +91,7 @@ export function PastReminders({ reminders }: { reminders: Reminder[] }) {
             ))}
           </ul>
           <Pager {...paged} className="px-2" />
-          <p className="px-2 pt-2 text-[11.5px] leading-relaxed text-faint">지난 30일 것만 보여요.</p>
+          <p className="px-2 pt-2 text-meta leading-relaxed text-faint">지난 30일 것만 보여요.</p>
         </div>
       </DetailSheet>
     </section>
@@ -109,15 +109,15 @@ function ReminderRow({ reminder: r }: { reminder: Reminder }) {
     <div className="flex items-start gap-1 py-1.5 pl-2">
       <div className="min-w-0 flex-1 py-1.5">
         <div className="flex items-baseline gap-2">
-          <p className={cn("line-clamp-2 min-w-0 text-[14.5px] break-words", live ? "text-foreground/90" : "text-dim")}>
+          <p className={cn("line-clamp-2 min-w-0 text-body break-words", live ? "text-ink" : "text-dim")}>
             {r.text}
           </p>
-          {result ? <span className={cn("ms-auto shrink-0 text-[12px]", outcomeTone(r))}>{result}</span> : null}
+          {result ? <span className={cn("ms-auto shrink-0 text-aside", outcomeTone(r))}>{result}</span> : null}
         </div>
         {live && r.body ? (
-          <p className="mt-1 line-clamp-2 text-[12.5px] whitespace-pre-line break-words text-dim">{r.body}</p>
+          <p className="mt-1 line-clamp-2 text-aside whitespace-pre-line break-words text-dim">{r.body}</p>
         ) : null}
-        <p className={cn("tnum mt-1 text-[11.5px] break-words", live ? "text-dim" : "text-faint")}>{detail(r)}</p>
+        <p className={cn("tnum mt-1 text-meta break-words", live ? "text-dim" : "text-faint")}>{detail(r)}</p>
       </div>
       <CopyButton text={[r.text, r.body].filter(Boolean).join("\n")} label={`${r.text} 복사`} />
     </div>

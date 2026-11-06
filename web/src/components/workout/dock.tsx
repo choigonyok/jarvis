@@ -123,7 +123,7 @@ export function Dock({
         {exercise && focus && set ? (
           <>
             <div className="-mt-1 mb-1 flex items-center gap-2">
-              <p className="min-w-0 flex-1 truncate text-[14px] text-foreground">
+              <p className="min-w-0 flex-1 truncate text-body text-foreground">
                 {exercise.name}
                 <span className="ms-1.5 text-dim">
                   {set.warmup ? `워밍업 ${nth}` : `${nth}세트`}
@@ -134,7 +134,7 @@ export function Dock({
                 onClick={() => onWarmup(focus)}
                 aria-pressed={Boolean(set.warmup)}
                 className={cn(
-                  "min-h-11 shrink-0 rounded-md px-2.5 text-[12.5px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+                  "min-h-11 shrink-0 rounded-md px-2.5 text-aside transition-colors focus-ring",
                   set.warmup
                     ? "bg-glass-raised text-foreground"
                     : "text-faint hover:text-dim",
@@ -145,7 +145,7 @@ export function Dock({
               <button
                 type="button"
                 onClick={() => onRemoveSet(focus)}
-                className="min-h-11 shrink-0 rounded-md px-2.5 text-[12.5px] text-faint transition-colors outline-none hover:text-reject focus-visible:ring-3 focus-visible:ring-ring/50"
+                className="min-h-11 shrink-0 rounded-md px-2.5 text-aside text-faint transition-colors hover:text-reject focus-ring"
               >
                 세트 삭제
               </button>
@@ -158,7 +158,7 @@ export function Dock({
               <button
                 type="button"
                 onClick={() => onRaise(exercise.id, hint.from, hint.to)}
-                className="mb-2 flex w-full items-center gap-2 rounded-lg bg-glass px-3 py-2 text-left text-[12.5px] outline-none transition-colors hover:bg-glass-raised focus-visible:ring-3 focus-visible:ring-ring/50"
+                className="mb-2 flex w-full items-center gap-2 rounded-lg bg-glass px-3 py-2 text-left text-aside transition-colors hover:bg-glass-raised focus-ring"
               >
                 <TrendingUp aria-hidden className="size-4 shrink-0 text-approve" />
                 <span className="min-w-0 flex-1 text-dim">
@@ -188,7 +188,7 @@ export function Dock({
 
             {/* On a short phone the dock gives this line back: the row above
                 already says what last time was. */}
-            <p className="tnum mt-1.5 flex justify-between gap-3 px-1 text-[12px] text-faint [@media(max-height:700px)]:hidden">
+            <p className="tnum mt-1.5 flex justify-between gap-3 px-1 text-aside text-faint [@media(max-height:700px)]:hidden">
               <span className="truncate">
                 {exercise && isBarbell(exercise.name)
                   ? set.weight === 20
@@ -207,10 +207,10 @@ export function Dock({
               type="button"
               onClick={() => onToggle(focus)}
               className={cn(
-                "mt-2.5 flex h-12 w-full items-center justify-center gap-2 rounded-xl text-[15px] font-medium transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+                "mt-2.5 flex h-12 w-full items-center justify-center gap-2 rounded-xl text-title font-medium transition-colors focus-ring",
                 set.done
                   ? "bg-glass text-dim hover:text-foreground"
-                  : "bg-approve/18 text-approve hover:bg-approve/25",
+                  : "bg-approve-wash text-approve",
               )}
             >
               <Check aria-hidden className="size-[18px]" />
@@ -219,7 +219,7 @@ export function Dock({
           </>
         ) : empty ? (
           <div className="flex items-center gap-3">
-            <p className="min-w-0 flex-1 text-[13.5px] text-dim">
+            <p className="min-w-0 flex-1 text-ui text-dim">
               종목을 추가하면 여기서 세트를 기록해요.
             </p>
             <Button variant="raised" size="touch" onClick={onAddExercise} className="flex-none">
@@ -228,7 +228,7 @@ export function Dock({
           </div>
         ) : (
           <div>
-            <p className="mb-2 text-[13.5px] text-foreground">
+            <p className="mb-2 text-ui text-foreground">
               모든 세트를 마쳤어요.
             </p>
             <div className="flex gap-2">
@@ -287,7 +287,7 @@ export function RestStrip({
   return (
     <div className="mb-2.5 border-b border-edge-soft pb-2.5">
       <div className="-mt-1 flex items-center gap-2">
-        <span className="text-[12px] text-faint">휴식</span>
+        <span className="text-aside text-faint">휴식</span>
         <span
           role="timer"
           aria-live="off"
@@ -302,14 +302,14 @@ export function RestStrip({
         <button
           type="button"
           onClick={() => nudge(-15)}
-          className="tnum min-h-11 rounded-md px-2.5 text-[12.5px] text-dim outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="tnum min-h-11 rounded-md px-2.5 text-aside text-dim hover:text-foreground focus-ring"
         >
           −15초
         </button>
         <button
           type="button"
           onClick={() => nudge(15)}
-          className="tnum min-h-11 rounded-md px-2.5 text-[12.5px] text-dim outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="tnum min-h-11 rounded-md px-2.5 text-aside text-dim hover:text-foreground focus-ring"
         >
           +15초
         </button>
@@ -317,7 +317,7 @@ export function RestStrip({
           type="button"
           onClick={() => onRest(null)}
           aria-label="휴식 끝내기"
-          className="flex size-11 items-center justify-center rounded-md text-faint outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="flex size-11 items-center justify-center rounded-md text-faint hover:text-foreground focus-ring"
         >
           <X aria-hidden className="size-4" />
         </button>
@@ -326,7 +326,7 @@ export function RestStrip({
         aria-label="휴식"
         value={share * 100}
         className="mt-1.5 bg-well [@media(max-height:700px)]:hidden"
-        indicatorClassName={over ? "bg-approve/70" : "bg-foreground/60"}
+        indicatorClassName={over ? "bg-approve-fill" : "bg-foreground/60"}
       />
     </div>
   );
@@ -355,7 +355,7 @@ export function Stepper({
   const [text, setText] = useState<string | null>(null);
   const shown = text ?? load(value);
   const button =
-    "flex h-12 w-11 shrink-0 items-center justify-center rounded-lg bg-glass text-dim transition-colors outline-none hover:text-foreground active:bg-glass-raised focus-visible:ring-3 focus-visible:ring-ring/50";
+    "flex h-12 w-11 shrink-0 items-center justify-center rounded-lg bg-glass text-dim transition-colors hover:text-foreground active:bg-glass-raised focus-ring";
 
   return (
     <div className="flex items-center gap-1">
@@ -391,7 +391,7 @@ export function Stepper({
           // dock the number does not drift off to the middle of the field.
           className="font-score tnum w-[3em] min-w-0 bg-transparent text-right text-[30px] leading-none font-semibold text-foreground outline-none"
         />
-        <span aria-hidden className="shrink-0 text-[11.5px] text-faint">
+        <span aria-hidden className="shrink-0 text-meta text-faint">
           {unit}
         </span>
       </label>

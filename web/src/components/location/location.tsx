@@ -211,14 +211,14 @@ function Waiting({
       <ViewSwitch view={view} onView={onView} />
       {error ? (
         <div>
-          <p className="text-[20px] leading-[1.3] font-medium text-foreground">위치를 불러오지 못했어요</p>
-          <p role="alert" className="mt-2 max-w-[30rem] text-[13.5px] leading-[1.6] break-keep text-pretty text-dim">
+          <p className="text-lead leading-[1.3] font-medium text-foreground">위치를 불러오지 못했어요</p>
+          <p role="alert" className="mt-2 max-w-[30rem] text-ui leading-[1.6] break-keep text-pretty text-dim">
             {error} 계속 이러면 상태 탭에서 위치 서비스(context)가 응답하는지 보세요.
           </p>
           <Retry onRetry={onRetry} />
         </div>
       ) : (
-        <p className="text-[13px] text-faint">{SAY.loading}</p>
+        <p className="text-ui text-faint">{SAY.loading}</p>
       )}
     </main>
   );
@@ -369,7 +369,7 @@ function Viewer({
       </div>
       <aside className="inset-x-safe flex shrink-0 flex-col border-t border-edge-soft bg-background pb-tabbar sm:landscape:w-[22rem] sm:landscape:border-t-0 sm:landscape:border-l sm:landscape:pl-0 lg:landscape:w-[25rem]">
         {registering ? (
-          <div className="mx-auto w-full max-w-[42rem] px-4 pt-3 pb-4 sm:px-8 sm:landscape:px-5 sm:landscape:pt-4">
+          <div className="mx-auto w-full max-w-page px-4 pt-3 pb-4 sm:px-8 sm:landscape:px-5 sm:landscape:pt-4">
             <RegisterPanel
               who={me}
               names={(mine?.regions ?? []).map((r) => r.name)}
@@ -383,7 +383,7 @@ function Viewer({
         ) : null}
         <div
           className={cn(
-            "mx-auto w-full max-w-[42rem] px-4 pt-2 pb-3 sm:px-8 sm:landscape:px-5 sm:landscape:pt-4",
+            "mx-auto w-full max-w-page px-4 pt-2 pb-3 sm:px-8 sm:landscape:px-5 sm:landscape:pt-4",
             registering && "hidden",
           )}
         >
@@ -392,7 +392,7 @@ function Viewer({
               <Arrow label="전날" disabled={date <= first} onClick={() => onDate(shiftDay(date, -1))}>
                 <ChevronLeft aria-hidden className="size-[18px]" strokeWidth={1.8} />
               </Arrow>
-              <label className="relative flex min-h-11 items-center rounded-lg px-1 text-[14px] text-foreground/90 focus-within:ring-3 focus-within:ring-ring/50">
+              <label className="relative flex min-h-11 items-center rounded-lg px-1 text-body text-ink focus-within:ring-3 focus-within:ring-ring/50">
                 {dateLabel(date)}
                 <input
                   type="date"
@@ -411,12 +411,12 @@ function Viewer({
               </Arrow>
             </div>
             {date === today ? (
-              <span className="text-[12px] text-faint">{loading ? "불러오는 중…" : "오늘"}</span>
+              <span className="text-aside text-faint">{loading ? "불러오는 중…" : "오늘"}</span>
             ) : (
               <button
                 type="button"
                 onClick={() => onDate(today)}
-                className="tap -mr-2 rounded-lg px-2 text-[12.5px] text-dim transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 mouse:min-h-0 mouse:min-w-0 mouse:py-1"
+                className="tap -mr-2 rounded-lg px-2 text-aside text-dim transition-colors hover:text-foreground focus-ring mouse:min-h-0 mouse:min-w-0 mouse:py-1"
               >
                 {loading ? "불러오는 중…" : "오늘로"}
               </button>
@@ -424,7 +424,7 @@ function Viewer({
           </div>
 
           <div className="mt-0.5 flex items-center justify-between gap-4">
-            <p className="tnum text-[40px] leading-none font-medium tracking-[-0.025em] text-foreground">
+            <p className="tnum text-display-lg leading-none font-semibold tracking-tight text-foreground">
               {live ? "지금" : hm(t, scene.dayEnd)}
             </p>
             <div className="flex shrink-0 items-center gap-1">
@@ -432,7 +432,7 @@ function Viewer({
                 type="button"
                 onClick={() => setSpeed(speed === 4 ? 1 : speed * 2)}
                 aria-label={`재생 속도 ${speed}배`}
-                className="tnum tap rounded-full px-2 text-[12.5px] text-dim transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+                className="tnum tap rounded-full px-2 text-aside text-dim transition-colors hover:text-foreground focus-ring"
               >
                 {speed}×
               </button>
@@ -441,7 +441,7 @@ function Viewer({
                 onClick={playing ? pause : play}
                 disabled={scene.clock.length <= 0 || still}
                 aria-label={playing ? "멈춤" : atEnd ? "하루 처음부터 보기" : "이어서 보기"}
-                className="flex size-12 items-center justify-center rounded-full bg-glass-raised text-foreground transition-colors outline-none hover:bg-foreground/15 focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-40"
+                className="flex size-12 items-center justify-center rounded-full bg-glass-raised text-foreground transition-colors hover:bg-foreground/15 focus-ring disabled:opacity-40"
               >
                 {playing ? (
                   <Pause aria-hidden className="size-5" strokeWidth={1.8} fill="currentColor" />
@@ -455,7 +455,7 @@ function Viewer({
           {both ? (
             <div aria-live={playing ? "off" : "polite"} className="mt-1.5 space-y-0.5">
               {scene.people.map((p) => (
-                <p key={p.who} className="flex min-w-0 items-center gap-2 text-[13.5px] text-dim">
+                <p key={p.who} className="flex min-w-0 items-center gap-2 text-ui text-dim">
                   <span aria-hidden className={cn("size-[6px] shrink-0 rounded-full", p.me ? "bg-mine" : "bg-partner")} />
                   <span className="sr-only">{p.me ? "나" : "상대"}: </span>
                   <span className="truncate">{sentence(p.day, t, live)}</span>
@@ -464,7 +464,7 @@ function Viewer({
               ))}
             </div>
           ) : (
-            <p aria-live={playing ? "off" : "polite"} className="mt-1.5 flex min-w-0 items-center gap-2 text-[13.5px] text-dim">
+            <p aria-live={playing ? "off" : "polite"} className="mt-1.5 flex min-w-0 items-center gap-2 text-ui text-dim">
               <span className="truncate">{sentence(scene.people[0].day, t, live)}</span>
               <ModeTag watch={watchOf(scene.people[0])} onOpen={() => setExplaining(true)} />
             </p>
@@ -489,9 +489,9 @@ function Viewer({
       <Sheet open={connecting} onOpenChange={setConnecting}>
         <BottomSheetContent width="full" keepFocus={false} aria-describedby={undefined} className="gap-4 overflow-y-auto">
           <BottomSheetHeader className="pb-1 sm:px-4">
-            <BottomSheetTitle className="pr-0 text-[14px]">내 폰 연결</BottomSheetTitle>
+            <BottomSheetTitle className="pr-0 text-body">내 폰 연결</BottomSheetTitle>
           </BottomSheetHeader>
-          <div className="px-4 pb-6 text-[13px]">
+          <div className="px-4 pb-6 text-ui">
             <PhoneSetup who="guest" />
           </div>
         </BottomSheetContent>
@@ -513,14 +513,14 @@ function PlaceButtons({ onExplain, onRegister }: { onExplain: () => void; onRegi
         onClick={onExplain}
         aria-label="위치 등록과 모드 설명"
         title="위치 등록과 모드"
-        className="flex size-9 items-center justify-center rounded-full text-dim transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 mouse:size-7"
+        className="flex size-9 items-center justify-center rounded-full text-dim transition-colors hover:text-foreground focus-ring mouse:size-7"
       >
         <Info aria-hidden className="size-[17px]" strokeWidth={1.8} />
       </button>
       <button
         type="button"
         onClick={onRegister}
-        className="flex h-9 items-center gap-1.5 rounded-full bg-glass-raised pr-3.5 pl-3 text-[12.5px] text-foreground transition-colors outline-none hover:bg-foreground/15 focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-7"
+        className="flex h-9 items-center gap-1.5 rounded-full bg-glass-raised pr-3.5 pl-3 text-aside text-foreground transition-colors hover:bg-foreground/15 focus-ring mouse:h-7"
       >
         <LocateFixed aria-hidden className="size-4 text-mine" strokeWidth={1.8} />
         위치 등록
@@ -573,7 +573,7 @@ function Arrow({ label, disabled, onClick, children }: { label: string; disabled
       aria-label={label}
       disabled={disabled}
       onClick={onClick}
-      className="flex size-11 items-center justify-center rounded-lg text-dim transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-30"
+      className="flex size-11 items-center justify-center rounded-lg text-dim transition-colors hover:text-foreground focus-ring disabled:opacity-30"
     >
       {children}
     </button>
@@ -624,8 +624,8 @@ function NoTrack({ scene, onConnect }: { scene: Scene; onConnect: () => void }) 
     <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-8">
       <Empty className="pointer-events-auto max-w-[22rem] gap-0 rounded-xl bg-popover px-5 py-4 shadow-[0_10px_30px_-12px_var(--shade)]">
         <EmptyHeader className="gap-1">
-          <EmptyTitle className="text-[14.5px] font-normal">{title}</EmptyTitle>
-          <EmptyDescription className="text-[12.5px] leading-[1.55]">{body}</EmptyDescription>
+          <EmptyTitle className="text-body font-normal">{title}</EmptyTitle>
+          <EmptyDescription className="text-aside leading-[1.55]">{body}</EmptyDescription>
         </EmptyHeader>
       </Empty>
     </div>
@@ -689,11 +689,11 @@ function DayList({ scene, t, onSeek }: { scene: Scene; t: number; onSeek: (t: nu
   return (
     <section aria-labelledby="day-list" className="hidden min-h-0 flex-1 flex-col border-t border-edge-soft sm:landscape:flex">
       <div className="flex items-baseline justify-between gap-3 px-5 pt-4 pb-1">
-        <h2 id="day-list" className="text-[12px] text-faint">
+        <h2 id="day-list" className="text-aside text-faint">
           하루
         </h2>
         {moves.length ? (
-          <span className="tnum text-[11.5px] text-faint">
+          <span className="tnum text-meta text-faint">
             이동 {span(time)} · {distance(moved)}
           </span>
         ) : null}
@@ -711,7 +711,7 @@ function DayList({ scene, t, onSeek }: { scene: Scene; t: number; onSeek: (t: nu
                 onClick={() => onSeek(Math.max(it.start, day.start))}
                 aria-current={active ? "true" : undefined}
                 className={cn(
-                  "flex min-h-11 w-full items-baseline gap-3 rounded-lg px-3 py-2.5 text-left transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+                  "flex min-h-11 w-full items-baseline gap-3 rounded-lg px-3 py-2.5 text-left transition-colors focus-ring",
                   active ? "bg-glass-raised" : "hover:bg-glass",
                 )}
               >
@@ -721,13 +721,13 @@ function DayList({ scene, t, onSeek }: { scene: Scene; t: number; onSeek: (t: nu
                     className={cn("size-[6px] shrink-0 -translate-y-px self-center rounded-full", p.me ? "bg-mine" : "bg-partner")}
                   />
                 ) : null}
-                <span className="tnum w-[6.25rem] shrink-0 text-[12px] text-faint">
+                <span className="tnum w-[6.25rem] shrink-0 text-aside text-faint">
                   {from}–{to}
                 </span>
-                <span className={cn("min-w-0 flex-1 truncate text-[14px]", it.type === "stay" ? "text-foreground/90" : "text-dim")}>
+                <span className={cn("min-w-0 flex-1 truncate text-body", it.type === "stay" ? "text-ink" : "text-dim")}>
                   {it.type === "stay" ? (it.node.name ?? "이름 없는 곳") : `${MODE_WORD[it.mode]} · ${distance(it.meters)}`}
                 </span>
-                <span className="tnum shrink-0 text-[12px] text-faint">{span(it.end - it.start)}</span>
+                <span className="tnum shrink-0 text-aside text-faint">{span(it.end - it.start)}</span>
               </button>
             </li>
           );

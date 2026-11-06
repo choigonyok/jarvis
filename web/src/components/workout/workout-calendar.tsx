@@ -57,9 +57,9 @@ export function WorkoutCalendar({
   return (
     <section aria-label="운동 달력">
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-[13px] text-dim">
+        <h2 className="text-ui text-dim">
           {cursor.year}년 {cursor.month + 1}월
-          <span className="ms-2 tnum text-[11.5px] text-faint">{trained}일</span>
+          <span className="ms-2 tnum text-meta text-faint">{trained}일</span>
         </h2>
         <div className="flex items-center gap-1">
           {sameMonth(today, cursor) ? null : (
@@ -67,7 +67,7 @@ export function WorkoutCalendar({
               variant="ghost"
               size="sm"
               onClick={() => setCursor(cursorOf(today))}
-              className="h-11 px-3 text-[12.5px] text-dim hover:text-foreground mouse:h-7"
+              className="h-11 px-3 text-aside text-dim hover:text-foreground mouse:h-7"
             >
               이번 달
             </Button>
@@ -95,7 +95,7 @@ export function WorkoutCalendar({
 
       <div className="mb-1 grid grid-cols-7 gap-px" aria-hidden>
         {WEEKDAYS.map((label) => (
-          <div key={label} className="py-1 text-center text-[11px] text-faint">
+          <div key={label} className="py-1 text-center text-meta text-faint">
             {label}
           </div>
         ))}
@@ -116,16 +116,16 @@ export function WorkoutCalendar({
             <>
               <span
                 className={cn(
-                  "tnum text-[12px] leading-none",
-                  !cell.inMonth && "text-faint/50",
-                  cell.inMonth && (done ? "text-approve/90" : "text-faint"),
+                  "tnum text-aside leading-none",
+                  !cell.inMonth && "text-faint",
+                  cell.inMonth && (done ? "text-approve" : "text-faint"),
                   isToday && "font-semibold underline decoration-2 underline-offset-[3px]",
                 )}
               >
                 {cell.day}
               </span>
               {done ? (
-                <span className="max-w-full truncate px-0.5 text-[11px] leading-none text-approve/70">
+                <span className="max-w-full truncate px-0.5 text-meta leading-none text-approve">
                   {done[0].routineName ?? "운동"}
                 </span>
               ) : null}
@@ -133,7 +133,7 @@ export function WorkoutCalendar({
           );
           const shape = cn(
             "flex h-12 flex-col items-center justify-center gap-0.5 rounded-lg sm:h-14",
-            done ? "bg-approve/12" : cell.inMonth ? "bg-glass" : "",
+            done ? "bg-approve-wash" : cell.inMonth ? "bg-glass" : "",
             chosen && "ring-2 ring-foreground/70",
           );
           return done && cell.inMonth ? (
@@ -143,7 +143,7 @@ export function WorkoutCalendar({
               aria-label={label}
               aria-pressed={chosen}
               onClick={() => onSelect(chosen ? null : cell.date)}
-              className={cn(shape, "outline-none hover:bg-approve/18 focus-visible:ring-3 focus-visible:ring-ring/50")}
+              className={cn(shape, "hover:bg-approve-wash focus-ring")}
             >
               {body}
             </button>

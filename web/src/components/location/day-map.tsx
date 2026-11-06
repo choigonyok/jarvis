@@ -303,7 +303,7 @@ export function DayMap({
       {/* Sized by height, not by inset: MapLibre's own stylesheet makes this box position: relative. */}
       <div ref={box} className="size-full bg-background" />
       {broken !== null ? (
-        <p role="alert" className="absolute inset-x-0 top-1/2 -translate-y-1/2 px-8 text-center text-[13px] text-dim">
+        <p role="alert" className="absolute inset-x-0 top-1/2 -translate-y-1/2 px-8 text-center text-ui text-dim">
           {broken}
         </p>
       ) : null}
@@ -313,12 +313,12 @@ export function DayMap({
           onClick={() => fit(true)}
           aria-label="하루 전체 보기"
           title="하루 전체 보기"
-          className="absolute top-3 right-3 flex size-11 items-center justify-center rounded-full bg-popover text-dim shadow-[0_6px_16px_-6px_var(--shade)] transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 mouse:size-9"
+          className="absolute top-3 right-3 flex size-11 items-center justify-center rounded-full bg-popover text-dim shadow-[0_6px_16px_-6px_var(--shade)] transition-colors hover:text-foreground focus-ring mouse:size-9"
         >
           <Maximize2 aria-hidden className="size-4" strokeWidth={1.8} />
         </button>
       ) : null}
-      <p className="absolute bottom-1.5 left-2.5 text-[10px] text-faint/70">
+      <p className="absolute bottom-1.5 left-2.5 text-tiny text-faint">
         <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer" className="hover:text-dim">
           © OpenStreetMap
         </a>
@@ -569,10 +569,10 @@ function name(
     if (text !== n.text) {
       n.text = text;
       const title = document.createElement("b");
-      title.className = "text-[12.5px] font-medium text-foreground/90";
+      title.className = "text-aside font-medium text-ink";
       title.textContent = place.name ?? "";
       const when = document.createElement("span");
-      when.className = "tnum text-[11px] text-dim";
+      when.className = "tnum text-meta text-dim";
       when.textContent = hours;
       n.el.replaceChildren(...(place.name ? [title] : []), ...(hours ? [when] : []));
       n.el.style.display = "";

@@ -81,7 +81,7 @@ export function QueuedMessages({
           // The controls give way to what happened, as on a decided card.
           return (
             <li key={q.id} className={cn(ROW, "min-h-11 items-center mouse:min-h-10")} role="status">
-              <span className={cn(TEXT, "col-start-2 truncate text-[13px] text-dim")}>보내지 않았어요</span>
+              <span className={cn(TEXT, "col-start-2 truncate text-ui text-dim")}>보내지 않았어요</span>
               {onRestore ? (
                 <button
                   type="button"
@@ -89,7 +89,7 @@ export function QueuedMessages({
                     setDropped((cur) => cur.filter((d) => d.id !== q.id));
                     onRestore(q.text, q.images);
                   }}
-                  className="tap col-span-2 col-start-3 flex h-11 items-center justify-self-end rounded-full px-3 text-[12.5px] text-foreground/85 outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-10"
+                  className="tap col-span-2 col-start-3 flex h-11 items-center justify-self-end rounded-full px-3 text-aside text-ink hover:text-foreground focus-ring mouse:h-10"
                 >
                   되돌리기
                 </button>
@@ -112,9 +112,9 @@ export function QueuedMessages({
                   title={open === q.id ? undefined : text}
                   className={cn(
                     TEXT,
-                    "block min-h-11 w-full min-w-0 truncate py-3 text-left text-[13.5px] leading-[1.45] text-dim outline-none mouse:min-h-10 mouse:py-2.5",
-                    "rounded-md focus-visible:ring-3 focus-visible:ring-ring/50",
-                    "data-[state=open]:overflow-visible data-[state=open]:break-words data-[state=open]:whitespace-pre-wrap data-[state=open]:text-foreground/85",
+                    "block min-h-11 w-full min-w-0 truncate py-3 text-left text-ui leading-[1.45] text-dim outline-none mouse:min-h-10 mouse:py-2.5",
+                    "rounded-md focus-ring",
+                    "data-[state=open]:overflow-visible data-[state=open]:break-words data-[state=open]:whitespace-pre-wrap data-[state=open]:text-ink",
                   )}
                 >
                   {text}
@@ -137,7 +137,7 @@ export function QueuedMessages({
               aria-label={busy ? undefined : "진행 중인 작업에 지금 반영"}
               className="tap group ml-2 flex h-11 items-center rounded-full outline-none mouse:h-10"
             >
-              <span className="flex h-8 items-center rounded-full bg-glass-raised px-3 text-[12.5px] whitespace-nowrap text-dim transition-colors group-hover:text-foreground group-focus-visible:ring-3 group-focus-visible:ring-ring/50 group-disabled:opacity-60 mouse:h-7">
+              <span className="flex h-8 items-center rounded-full bg-glass-raised px-3 text-aside whitespace-nowrap text-dim transition-colors group-hover:text-foreground group-focus-visible:ring-3 group-focus-visible:ring-ring/50 group-disabled:opacity-60 mouse:h-7">
                 {busy ? "반영하는 중" : "지금 반영"}
               </span>
             </button>
@@ -150,7 +150,7 @@ export function QueuedMessages({
                 void onDrop(q.id);
               }}
               aria-label="보내지 않고 빼기"
-              className="tap flex size-11 items-center justify-center justify-self-center rounded-full text-faint outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-40 mouse:size-10"
+              className="tap flex size-11 items-center justify-center justify-self-center rounded-full text-faint hover:text-foreground focus-ring disabled:opacity-40 mouse:size-10"
             >
               <X aria-hidden className="size-4" />
             </button>

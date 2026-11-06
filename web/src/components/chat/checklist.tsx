@@ -99,8 +99,8 @@ export function ChecklistBody({
   if (!list) {
     return (
       <div>
-        <h3 className="text-[14.5px] leading-snug font-medium text-foreground">{title || "체크리스트"}</h3>
-        <p className="mt-1 text-[12.5px] text-faint">목록을 불러오지 못했어요.</p>
+        <h3 className="text-body leading-snug font-medium text-foreground">{title || "체크리스트"}</h3>
+        <p className="mt-1 text-aside text-faint">목록을 불러오지 못했어요.</p>
         {/* As every screen's failed read: the way back on the spot. The
             screens read again (a pull to refresh's), and the list missing
             from the page is asked for with them. */}
@@ -149,7 +149,7 @@ export function ChecklistBody({
 
   const share = live.length ? (done / live.length) * 100 : 0;
   const count = (
-    <span className={cn("tnum shrink-0 text-[12px]", all ? "text-approve" : "text-faint")} aria-live="polite">
+    <span className={cn("tnum shrink-0 text-aside", all ? "text-approve" : "text-faint")} aria-live="polite">
       {all ? "다 했어요" : `${done}/${live.length}`}
     </span>
   );
@@ -164,9 +164,9 @@ export function ChecklistBody({
           <CollapsibleTrigger asChild>
           <button
             type="button"
-            className="flex min-h-11 min-w-0 flex-1 items-center justify-between gap-3 rounded-lg px-2 py-1.5 text-left outline-none hover:bg-glass focus-visible:ring-3 focus-visible:ring-ring/50 mouse:min-h-9"
+            className="flex min-h-11 min-w-0 flex-1 items-center justify-between gap-3 rounded-lg px-2 py-1.5 text-left hover:bg-glass focus-ring mouse:min-h-9"
           >
-            <span className="min-w-0 text-[14.5px] leading-snug font-medium text-foreground">{list.title}</span>
+            <span className="min-w-0 text-body leading-snug font-medium text-foreground">{list.title}</span>
             <span className="flex shrink-0 items-center gap-1.5">
               {count}
               <ChevronDown
@@ -180,13 +180,13 @@ export function ChecklistBody({
         </h3>
       ) : (
         <div className="flex items-center gap-3">
-          <h3 className="min-w-0 flex-1 text-[14.5px] leading-snug font-medium text-foreground">{list.title}</h3>
+          <h3 className="min-w-0 flex-1 text-body leading-snug font-medium text-foreground">{list.title}</h3>
           {count}
           <CopyButton text={asText(list)} label={`${list.title} 복사`} className="-my-3 -mr-3 -ml-2" />
         </div>
       )}
       {list.note || list.status === "archived" ? (
-        <p className="mt-0.5 text-[12px] leading-normal text-faint">
+        <p className="mt-0.5 text-aside leading-normal text-faint">
           {[list.note, list.status === "archived" ? "닫은 목록이에요" : ""].filter(Boolean).join(" - ")}
         </p>
       ) : null}
@@ -215,7 +215,7 @@ export function ChecklistBody({
             ))}
           </ul>
           {refusal ? (
-            <p role="alert" className="mt-1 px-0.5 text-[12px] text-reject">
+            <p role="alert" className="mt-1 px-0.5 text-aside text-reject">
               {refusal}
             </p>
           ) : null}
@@ -223,7 +223,7 @@ export function ChecklistBody({
       </CollapsibleContent>
       {!open && left.length > 0 ? (
         // Folded: what is left, in a line - enough to know whether to open it.
-        <p className="mt-2 truncate text-[12.5px] text-dim">
+        <p className="mt-2 truncate text-aside text-dim">
           남은 것: {left.slice(0, 4).map((i) => i.text).join(", ")}
           {left.length > 4 ? ` 외 ${left.length - 4}개` : ""}
         </p>
@@ -323,14 +323,14 @@ function Row({
           }}
           onPointerUp={() => release(true)}
           onPointerCancel={() => release(false)}
-          className="relative flex min-h-11 min-w-0 flex-1 touch-pan-y items-start gap-3 rounded-lg px-2 py-2.5 text-left outline-none select-none hover:bg-glass focus-visible:ring-3 focus-visible:ring-ring/50 mouse:min-h-9 mouse:py-2"
+          className="relative flex min-h-11 min-w-0 flex-1 touch-pan-y items-start gap-3 rounded-lg px-2 py-2.5 text-left select-none hover:bg-glass focus-ring mouse:min-h-9 mouse:py-2"
         >
           <Mark done={item.done} draw={draw} faint={struck} />
           <span className="min-w-0 flex-1">
             <span
               className={cn(
-                "relative inline-block max-w-full text-[14px] leading-snug transition-colors duration-200 motion-reduce:transition-none",
-                struck ? "text-faint line-through decoration-reject/80" : item.done ? "text-faint" : "text-foreground",
+                "relative inline-block max-w-full text-body leading-snug transition-colors duration-200 motion-reduce:transition-none",
+                struck ? "text-faint line-through decoration-reject-fill" : item.done ? "text-faint" : "text-foreground",
               )}
             >
               {item.text}
@@ -345,7 +345,7 @@ function Row({
           <span
             ref={hint}
             aria-hidden
-            className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 rounded-md bg-background/80 px-1.5 text-[12.5px] text-reject opacity-0"
+            className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 rounded-md bg-background/80 px-1.5 text-aside text-reject opacity-0"
           >
             빼기
           </span>
@@ -354,7 +354,7 @@ function Row({
           <button
             type="button"
             onClick={onUnstrike}
-            className="anim-settle flex min-h-11 shrink-0 items-center rounded-lg px-2.5 text-[12.5px] font-medium text-foreground underline underline-offset-4 outline-none focus-visible:ring-3 focus-visible:ring-ring/50 mouse:min-h-9"
+            className="anim-settle flex min-h-11 shrink-0 items-center rounded-lg px-2.5 text-aside font-medium text-foreground underline underline-offset-4 focus-ring mouse:min-h-9"
           >
             되돌리기
           </button>
@@ -368,7 +368,7 @@ function Row({
                 onClick={onStrike}
                 aria-label={`${item.text} 빼기`}
                 title="빼기"
-                className="hidden size-9 shrink-0 items-center justify-center self-center rounded-md text-faint opacity-0 transition-opacity outline-none group-hover/item:opacity-100 hover:text-reject focus-visible:opacity-100 focus-visible:ring-3 focus-visible:ring-ring/50 pointer-fine:flex"
+                className="hidden size-9 shrink-0 items-center justify-center self-center rounded-md text-faint opacity-0 transition-opacity group-hover/item:opacity-100 hover:text-reject focus-visible:opacity-100 focus-ring pointer-fine:flex"
               >
                 <X aria-hidden className="size-3.5" />
               </button>
@@ -414,7 +414,7 @@ function CloseList({ onClose }: { onClose: () => Promise<string | null> }) {
   const [said, setSaid] = useState<string | null>(null);
   return (
     <div className="mt-1 flex items-center justify-end gap-2">
-      {said ? <span className="text-[12px] text-reject">{said}</span> : null}
+      {said ? <span className="text-aside text-reject">{said}</span> : null}
       <button
         type="button"
         disabled={busy}
@@ -423,7 +423,7 @@ function CloseList({ onClose }: { onClose: () => Promise<string | null> }) {
           setSaid(await onClose());
           setBusy(false);
         }}
-        className="tap rounded-lg px-2 text-[12.5px] text-faint outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50"
+        className="tap rounded-lg px-2 text-aside text-faint hover:text-dim focus-ring disabled:opacity-50"
       >
         목록 닫기
       </button>

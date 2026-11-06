@@ -33,7 +33,7 @@ export function ModeToggle({
       className="rounded-lg border border-edge-soft bg-glass p-0.5"
     >
       {modes.map((item) => (
-        <ToggleGroupItem key={item.value} value={item.value} className="h-auto px-2.5 py-1 text-[12px]">
+        <ToggleGroupItem key={item.value} value={item.value} className="h-auto px-2.5 py-1 text-aside">
           {item.label}
         </ToggleGroupItem>
       ))}

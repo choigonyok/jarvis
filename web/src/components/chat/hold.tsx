@@ -113,7 +113,7 @@ export function useHold(id: string, send: () => void) {
  */
 export function Sending({ className }: { className?: string }) {
   return (
-    <p role="status" className={cn("anim-settle flex min-h-12 items-center gap-2 px-1 text-[12.5px] text-dim mouse:min-h-8", className)}>
+    <p role="status" className={cn("anim-settle flex min-h-12 items-center gap-2 px-1 text-aside text-dim mouse:min-h-8", className)}>
       <Spinner className="size-3.5" />
       결정을 보내는 중…
     </p>
@@ -128,7 +128,7 @@ export function Sending({ className }: { className?: string }) {
  */
 export function Sent({ decision, className }: { decision: Decision; className?: string }) {
   return (
-    <p role="status" className={cn("anim-settle flex min-h-12 items-center gap-2 px-1 text-[12.5px] text-dim mouse:min-h-8", className)}>
+    <p role="status" className={cn("anim-settle flex min-h-12 items-center gap-2 px-1 text-aside text-dim mouse:min-h-8", className)}>
       <span aria-hidden className="anim-breathe size-[5px] shrink-0 rounded-full bg-dim" />
       <span>
         {decision === "approved" ? "승인을 보냈어요" : "반려를 보냈어요"}
@@ -141,7 +141,7 @@ export function Sent({ decision, className }: { decision: Decision; className?: 
 /** What a card says of a hold let go by leaving: nothing was sent, and it can be asked again. */
 export function HeldBack({ className }: { className?: string }) {
   return (
-    <p role="status" className={cn("mb-2 px-0.5 text-[12.5px] text-dim", className)}>
+    <p role="status" className={cn("mb-2 px-0.5 text-aside text-dim", className)}>
       승인이 보류됐어요. 화면을 떠나서 결제를 보내지 않았어요.
     </p>
   );
@@ -155,13 +155,13 @@ export function HeldBack({ className }: { className?: string }) {
 export function HoldBar({ left, onCancel, className }: { left: number; onCancel: () => void; className?: string }) {
   return (
     <div className={cn("anim-settle", className)} role="status">
-      <p className="mb-2 px-0.5 text-[12.5px] text-dim">
+      <p className="mb-2 px-0.5 text-aside text-dim">
         <span className="tnum text-foreground">{left}초</span> 뒤에 결제를 진행해요. 화면을 떠나면 보류돼요.
       </p>
       <button
         type="button"
         onClick={onCancel}
-        className="relative h-11 w-full overflow-hidden rounded-lg border border-edge bg-glass text-[13.5px] font-medium text-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-8 mouse:text-[0.8rem]"
+        className="relative h-11 w-full overflow-hidden rounded-lg border border-edge bg-glass text-ui font-medium text-foreground focus-ring mouse:h-8 mouse:text-[0.8rem]"
       >
         <span aria-hidden className="hold-drain absolute inset-0 bg-foreground/12" style={{ animationDuration: `${HOLD_MS}ms` }} />
         <span className="relative">되돌리기</span>

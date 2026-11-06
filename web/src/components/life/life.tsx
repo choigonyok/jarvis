@@ -105,16 +105,16 @@ export function Life() {
       <StandingBar pending={waiting} />
 
       <main className="scrollbar-hairline inset-x-safe min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
-        <div className="mx-auto w-full max-w-[42rem] px-4 pt-6 pb-12 sm:px-8 sm:pt-10">
+        <div className="mx-auto w-full max-w-page px-4 pt-6 pb-12 sm:px-8 sm:pt-10">
           {!book ? (
-            <p className="pt-10 text-center text-[13px] text-faint">{SAY.loading}</p>
+            <p className="pt-10 text-center text-ui text-faint">{SAY.loading}</p>
           ) : [book.notes, book.places, book.things, book.meals].every((x) => x.error) ? (
             // Nothing came back: one sentence for it, not four of the same.
             <div>
-              <p className="text-[26px] leading-[1.25] font-medium tracking-[-0.015em] text-foreground sm:text-[30px]">
+              <p className="text-display leading-[1.25] font-semibold tracking-tight text-foreground">
                 생활 장부를 불러오지 못했어요
               </p>
-              <p role="alert" className="mt-2 max-w-[34rem] text-[13.5px] leading-[1.6] break-keep text-pretty text-dim">
+              <p role="alert" className="mt-2 max-w-[34rem] text-ui leading-[1.6] break-keep text-pretty text-dim">
                 {book.notes.error} 계속 이러면 상태 탭에서 인지 루프(mind)가 응답하는지 보세요.
               </p>
               <Retry onRetry={load} />
@@ -212,8 +212,8 @@ function Headline({ notes }: { notes: Loaded<Note[]> }) {
         : "아직 노트가 없어요";
   return (
     <div>
-      <p className="text-[26px] leading-[1.25] font-medium tracking-[-0.015em] text-foreground sm:text-[30px]">{sentence}</p>
-      <p className="mt-2 max-w-[34rem] text-[13.5px] leading-[1.6] break-keep text-pretty text-dim">
+      <p className="text-display leading-[1.25] font-semibold tracking-tight text-foreground">{sentence}</p>
+      <p className="mt-2 max-w-[34rem] text-ui leading-[1.6] break-keep text-pretty text-dim">
         Jarvis가 지난 일들에서 나에 대해 짐작한 문장이에요. 맞다고 한 것은 예측과 제안에 그대로 쓰고, 아니라고 한 것은
         다시 만들지 않아요.
       </p>
@@ -238,14 +238,14 @@ function thingLine(things: Thing[] | undefined): string | undefined {
 }
 
 function Empty({ children }: { children: ReactNode }) {
-  return <p className="py-3 text-[13px] leading-[1.55] break-keep text-pretty text-faint">{children}</p>;
+  return <p className="py-3 text-ui leading-[1.55] break-keep text-pretty text-faint">{children}</p>;
 }
 
 /** One part that did not come back, while the others did. */
 function Trouble({ what, children, onRetry }: { what: string; children: ReactNode; onRetry: () => unknown }) {
   return (
     <div className="py-3">
-      <p role="alert" className="text-[13px] leading-[1.55] break-keep text-pretty text-dim">
+      <p role="alert" className="text-ui leading-[1.55] break-keep text-pretty text-dim">
         {what} 불러오지 못했어요. {children}
       </p>
       <Retry onRetry={onRetry} />
@@ -269,17 +269,17 @@ function Places({ places }: { places: Place[] }) {
         return (
           <li key={`${p.type}:${p.name}`} className="py-3">
             <div className="flex items-baseline justify-between gap-3">
-              <span className="min-w-0 truncate text-[14.5px] text-foreground/90">{p.name}</span>
-              <span className="tnum shrink-0 text-[13px] text-foreground/90">
+              <span className="min-w-0 truncate text-body text-ink">{p.name}</span>
+              <span className="tnum shrink-0 text-ui text-ink">
                 {p.score.toFixed(1)}
-                <span className="text-[11.5px] text-faint"> / 5</span>
+                <span className="text-meta text-faint"> / 5</span>
               </span>
             </div>
-            <p className="mt-0.5 text-[12.5px] text-faint">
+            <p className="mt-0.5 text-aside text-faint">
               {said.join(" · ")} · 마지막 {shortDate(p.last)}
             </p>
             {p.good?.length || p.bad?.length ? (
-              <p className="mt-1 text-[12.5px] leading-[1.55] text-pretty">
+              <p className="mt-1 text-aside leading-[1.55] text-pretty">
                 {p.good?.length ? (
                   <span className="text-dim">
                     <span className="text-faint">좋았던 점 </span>
@@ -321,12 +321,12 @@ function Things({ things }: { things: Thing[] }) {
   return (
     <div>
       {sizes.length > 0 ? (
-        <p className="py-2 text-[13px] leading-[1.6] text-pretty text-dim">
+        <p className="py-2 text-ui leading-[1.6] text-pretty text-dim">
           <span className="text-faint">사이즈 </span>
           {sizes.map((t, i) => (
             <span key={t.class}>
               {i > 0 ? <span className="text-faint"> · </span> : null}
-              {t.class} <span className="tnum text-foreground/90">{t.sizes!.join(", ")}</span>
+              {t.class} <span className="tnum text-ink">{t.sizes!.join(", ")}</span>
             </span>
           ))}
         </p>
@@ -339,13 +339,13 @@ function Things({ things }: { things: Thing[] }) {
             return (
               <li key={t.class} className="py-3">
                 <div className="flex items-baseline justify-between gap-3">
-                  <span className="min-w-0 truncate text-[14.5px] text-foreground/80">{t.class}</span>
-                  <span className="tnum shrink-0 text-[11.5px] text-faint">
+                  <span className="min-w-0 truncate text-body text-ink">{t.class}</span>
+                  <span className="tnum shrink-0 text-meta text-faint">
                     {shortDate(t.bought[t.bought.length - 1] ?? t.last)}
                     {t.bought.length > 1 ? ` · ${t.bought.length}번` : ""}
                   </span>
                 </div>
-                <p className="mt-0.5 truncate text-[12.5px] text-faint">{t.items.join(", ")}</p>
+                <p className="mt-0.5 truncate text-aside text-faint">{t.items.join(", ")}</p>
               </li>
             );
           }
@@ -353,15 +353,15 @@ function Things({ things }: { things: Thing[] }) {
           return (
             <li key={t.class} className="py-3">
               <div className="flex items-baseline justify-between gap-3">
-                <span className="min-w-0 truncate text-[14.5px] text-foreground/90">{t.class}</span>
-                <span className={cn("tnum shrink-0 text-[13px]", left <= 2 ? "text-foreground" : "text-faint")}>
+                <span className="min-w-0 truncate text-body text-ink">{t.class}</span>
+                <span className={cn("tnum shrink-0 text-ui", left <= 2 ? "text-foreground" : "text-faint")}>
                   {left <= 0 ? "살 때 됐어요" : `${dueLabel(t.next!)} 차례`}
                 </span>
               </div>
-              <p className="mt-0.5 text-[12.5px] text-faint">
+              <p className="mt-0.5 text-aside text-faint">
                 보통 {t.cycleDays}일마다 · 마지막 {shortDate(t.bought[t.bought.length - 1] ?? t.last)} · 반년에 {t.bought.length}번
               </p>
-              <p className="mt-0.5 truncate text-[12.5px] text-dim">{t.items.join(", ")}</p>
+              <p className="mt-0.5 truncate text-aside text-dim">{t.items.join(", ")}</p>
             </li>
           );
         })}

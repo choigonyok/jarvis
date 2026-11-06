@@ -54,7 +54,7 @@ export function Meals({ meals }: { meals: Meal[] }) {
 
   if (meals.length === 0) {
     return (
-      <p className="py-3 text-[13px] leading-[1.55] break-keep text-pretty text-faint">
+      <p className="py-3 text-ui leading-[1.55] break-keep text-pretty text-faint">
         최근 30일에 끼니로 읽힌 결제가 없어요. 식비로 분류된 카드 결제와 배달앱 결제가 여기 모여요.
       </p>
     );
@@ -62,7 +62,7 @@ export function Meals({ meals }: { meals: Meal[] }) {
 
   return (
     <div>
-      <p className="text-[13.5px] leading-[1.55] text-dim">
+      <p className="text-ui leading-[1.55] text-dim">
         끼니 결제 {meals.length}번 · 그중 배달 {delivered.length}번
         {delivered.length > 0 ? ` (${krw(delivered.reduce((s, m) => s + m.amount, 0))})` : ""}
       </p>
@@ -85,17 +85,17 @@ export function Meals({ meals }: { meals: Meal[] }) {
                 aria-label={`${s} ${c.all}번${how ? `, ${how}` : ""}`}
                 onClick={() => setSlot(active ? null : s)}
                 className={cn(
-                  "w-full rounded-lg px-2 py-2.5 text-left transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+                  "w-full rounded-lg px-2 py-2.5 text-left transition-colors focus-ring",
                   active ? "bg-glass-raised" : "hover:bg-glass",
                   slot && !active && "opacity-55",
                 )}
               >
                 <span className="flex items-baseline justify-between gap-3">
-                  <span className="text-[13.5px] text-foreground/90">
+                  <span className="text-ui text-ink">
                     {s}
-                    <span className="tnum ms-2 text-[11.5px] text-faint">{how}</span>
+                    <span className="tnum ms-2 text-meta text-faint">{how}</span>
                   </span>
-                  <span className="tnum shrink-0 text-[13.5px] text-foreground/90">{c.all}번</span>
+                  <span className="tnum shrink-0 text-ui text-ink">{c.all}번</span>
                 </span>
                 <span aria-hidden className="mt-2 flex h-1 w-full overflow-hidden rounded-full bg-glass">
                   <span className="flex h-full" style={{ width: `${(c.all / top) * 100}%` }}>
@@ -120,7 +120,7 @@ export function Meals({ meals }: { meals: Meal[] }) {
               aria-pressed={active}
               onClick={() => setWay(active ? null : w)}
               className={cn(
-                "tap -my-2 flex items-center gap-1.5 rounded-md px-1.5 text-[12px] outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50",
+                "tap -my-2 flex items-center gap-1.5 rounded-md px-1.5 text-aside transition-colors focus-ring",
                 active ? "text-foreground" : "text-faint hover:text-dim",
               )}
             >
@@ -132,7 +132,7 @@ export function Meals({ meals }: { meals: Meal[] }) {
       </div>
 
       {slot || way ? (
-        <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[12px]">
+        <div className="mt-3 flex flex-wrap items-center gap-1.5 text-aside">
           {slot ? <ClearChip label={slot} onClear={() => setSlot(null)} /> : null}
           {way ? <ClearChip label={WAYS.find((w) => w.way === way)!.label} onClear={() => setWay(null)} /> : null}
           <span className="tnum ms-auto text-faint">
@@ -142,19 +142,19 @@ export function Meals({ meals }: { meals: Meal[] }) {
       ) : null}
 
       {shown.length === 0 ? (
-        <p className="py-6 text-center text-[13px] text-faint">이 조건의 끼니가 없어요.</p>
+        <p className="py-6 text-center text-ui text-faint">이 조건의 끼니가 없어요.</p>
       ) : (
         <div id={paged.anchor} className="scroll-mt-4">
         <ul className="mt-2 space-y-px">
           {paged.items.map((m) => (
             <li key={m.at + m.merchant} className="flex items-center gap-3 py-2">
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-[13.5px] text-foreground/90">{m.merchant}</span>
-                <span className="tnum block text-[11.5px] text-faint">
+                <span className="block truncate text-ui text-ink">{m.merchant}</span>
+                <span className="tnum block text-meta text-faint">
                   {moment(m.at)} · {m.slot} · {WAYS.find((w) => w.way === wayOf(m))!.label}
                 </span>
               </span>
-              <span className="tnum shrink-0 text-[13.5px] text-foreground/90">{krw(m.amount)}</span>
+              <span className="tnum shrink-0 text-ui text-ink">{krw(m.amount)}</span>
             </li>
           ))}
         </ul>

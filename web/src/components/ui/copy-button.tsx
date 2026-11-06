@@ -52,7 +52,7 @@ export function CopyButton({ text, label, className }: { text: string; label: st
       aria-label={words}
       title={words}
       className={cn(
-        "flex size-11 shrink-0 items-center justify-center rounded-md text-faint transition-colors outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50 mouse:size-8",
+        "flex size-11 shrink-0 items-center justify-center rounded-md text-faint transition-colors hover:text-dim focus-ring mouse:size-8",
         className,
       )}
     >

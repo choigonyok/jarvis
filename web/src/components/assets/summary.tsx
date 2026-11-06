@@ -37,7 +37,7 @@ export function Row({
   if (detail === undefined || !onToggle) {
     return (
       <section aria-labelledby={`${id}-title`} data-focus={focus} className="flex items-start gap-3 border-t border-edge-soft py-4">
-        <span id={`${id}-title`} className="w-[4.5rem] shrink-0 pt-px text-[12.5px] text-faint">
+        <span id={`${id}-title`} className="w-[4.5rem] shrink-0 pt-px text-aside text-faint">
           {title}
         </span>
         <div className="min-w-0 flex-1">{children}</div>
@@ -51,9 +51,9 @@ export function Row({
         onClick={onToggle}
         aria-haspopup="dialog"
         aria-expanded={open}
-        className="group flex w-full items-start gap-3 py-4 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+        className="group flex w-full items-start gap-3 py-4 text-left focus-ring"
       >
-        <span id={`${id}-title`} className="w-[4.5rem] shrink-0 pt-px text-[12.5px] text-faint">
+        <span id={`${id}-title`} className="w-[4.5rem] shrink-0 pt-px text-aside text-faint">
           {title}
         </span>
         <span className="min-w-0 flex-1">{children}</span>
@@ -88,9 +88,9 @@ export function ProfitLines(bridge: Bridge) {
   return (
     <ul className="space-y-1">
       {parts(bridge).map((p) => (
-        <li key={p.key} className="tnum flex items-baseline justify-between gap-3 text-[13px]">
+        <li key={p.key} className="tnum flex items-baseline justify-between gap-3 text-ui">
           <span className="text-dim">{p.label}</span>
-          <span className={p.value >= 0 ? "text-approve/85" : "text-reject/85"}>{signedKrw(p.value)}</span>
+          <span className={p.value >= 0 ? "text-approve" : "text-reject"}>{signedKrw(p.value)}</span>
         </li>
       ))}
     </ul>
@@ -102,11 +102,11 @@ export function ProfitOther({ other, otherKrw }: Bridge) {
   if (!other.length) return null;
   return (
     <div>
-      <p className="tnum mb-1.5 flex justify-between text-[12px] text-faint">
+      <p className="tnum mb-1.5 flex justify-between text-aside text-faint">
         <span>환율·수수료·기타 세부</span>
         <span>{signedKrw(otherKrw)}</span>
       </p>
-      <ul className="space-y-0.5 border-l border-edge-soft ps-3 text-[12px]">
+      <ul className="space-y-0.5 border-l border-edge-soft ps-3 text-aside">
         {other.map((o) => (
           <li key={o.id} className="tnum flex justify-between gap-3">
             <span className="text-faint">{o.label}</span>

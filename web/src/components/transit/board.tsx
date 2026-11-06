@@ -77,7 +77,7 @@ function Rail({ who, plan, route, now }: { who: Who; plan: Plan; route: Route; n
         style={{ left: `${(meX / W) * 100}%`, top: `${((ground - 27) / H) * 100}%` }}
       />
       {known ? (
-        <div className="tnum relative mt-1 h-4 text-[11.5px] text-dim">
+        <div className="tnum relative mt-1 h-4 text-meta text-dim">
           <span className="absolute -translate-x-1/2 whitespace-nowrap" style={{ left: `${(flagX / W) * 100}%` }}>
             {clockOf(plan.leave!)} 나가기
           </span>
@@ -125,7 +125,7 @@ function Coming({ plan, now }: { plan: Plan; now: number }) {
             key={`${a.at}-${a.vehicle ?? ""}`}
             aria-current={kind === "catch" ? "true" : undefined}
             className={cn(
-              "tnum flex min-h-10 items-center gap-3 py-1.5 text-[13px]",
+              "tnum flex min-h-10 items-center gap-3 py-1.5 text-ui",
               kind === "catch" ? "font-medium text-foreground" : kind === "missed" ? "text-faint" : "text-dim",
             )}
           >
@@ -180,9 +180,9 @@ export function Board({ who, route, plan, now }: { who: Who; route: Route; plan?
         <p
           aria-live="polite"
           className={cn(
-            "relative rounded-[12px] border-[1.5px] px-3.5 py-2 text-[16px] leading-snug font-medium break-keep",
+            "relative rounded-[12px] border-[1.5px] px-3.5 py-2 text-heading leading-snug font-medium break-keep",
             "before:absolute before:top-[14px] before:-left-[7px] before:size-3 before:rotate-45 before:border-b-[1.5px] before:border-l-[1.5px] before:bg-background",
-            stage === "go" ? "border-foreground/80 text-foreground before:border-foreground/80" : late ? "border-reject/70 text-reject before:border-reject/70" : "border-foreground/40 text-foreground/90 before:border-foreground/40",
+            stage === "go" ? "border-foreground/80 text-foreground before:border-foreground/80" : late ? "border-reject-fill text-reject before:border-reject-fill" : "border-foreground/40 text-ink before:border-foreground/40",
           )}
         >
           {say}
@@ -193,7 +193,7 @@ export function Board({ who, route, plan, now }: { who: Who; route: Route; plan?
         <p className={cn("font-score tnum text-[84px] leading-[0.95] font-semibold tracking-[-0.01em]", late ? "text-reject" : live ? "text-foreground" : "text-faint")}>
           {live ? countdown(Math.abs((pastGood ? last : leave) - now)) : "--:--"}
         </p>
-        <p className="mt-1 text-[13px] text-dim">{caption}</p>
+        <p className="mt-1 text-ui text-dim">{caption}</p>
       </div>
 
       <div className="mt-6">
@@ -201,12 +201,12 @@ export function Board({ who, route, plan, now }: { who: Who; route: Route; plan?
       </div>
 
       <div className="mt-4 flex items-baseline justify-between gap-3">
-        <p className="min-w-0 truncate text-[17px] font-medium text-foreground">
+        <p className="min-w-0 truncate text-heading font-medium text-foreground">
           {plan?.catch ? `${clockOf(plan.catch.at)} ${plan.catch.line.name || route.line.name} 타기` : `${route.line.name} 타기`}
         </p>
-        <p className="shrink-0 text-[15px] text-dim">도보 {route.walk}분</p>
+        <p className="shrink-0 text-title text-dim">도보 {route.walk}분</p>
       </div>
-      <p className="mt-0.5 truncate text-[12.5px] text-dim">
+      <p className="mt-0.5 truncate text-aside text-dim">
         {[route.stop.name, plan?.catch?.line.toward || route.line.toward].filter(Boolean).join(" · ")}
       </p>
       {plan ? <Coming plan={plan} now={now} /> : null}

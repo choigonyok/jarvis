@@ -6,6 +6,7 @@ import { openTarget, targetOf } from "@/lib/focus";
 import { onInboxRequest, onResume } from "@/lib/resume";
 import { Bell, Settings2 } from "lucide-react";
 import { HeaderPanel } from "@/components/shell/panel";
+import { Button } from "@/components/ui/button";
 import { Pager } from "@/components/ui/pager";
 import { Popover, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
@@ -141,7 +142,7 @@ export function Notifications() {
     >
       <PopoverTrigger
         aria-label={unread ? `알림 ${unread}개 안 읽음` : "알림"}
-        className="relative flex size-11 items-center justify-center rounded-lg text-faint transition-colors outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50 mouse:size-8"
+        className="relative flex size-11 items-center justify-center rounded-lg text-faint transition-colors hover:text-dim focus-ring mouse:size-8"
       >
         <Bell aria-hidden className="size-[18px] mouse:size-4" />
         {unread ? (
@@ -158,7 +159,7 @@ export function Notifications() {
                 <button
                   type="button"
                   onClick={() => void markRead([])}
-                  className="min-h-8 rounded px-1.5 text-[11.5px] text-faint outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50"
+                  className="tap rounded px-1.5 text-meta text-faint hover:text-dim focus-ring mouse:min-h-8 mouse:min-w-0"
                 >
                   모두 읽음
                 </button>
@@ -168,7 +169,7 @@ export function Notifications() {
                 onClick={() => setView((v) => (v === "list" ? "settings" : "list"))}
                 aria-label={view === "list" ? "알림 설정" : "알림 목록"}
                 aria-pressed={view === "settings"}
-                className="flex size-8 items-center justify-center rounded text-faint outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50"
+                className="flex size-11 items-center justify-center rounded text-faint hover:text-dim focus-ring mouse:size-8"
               >
                 {view === "list" ? <Settings2 aria-hidden className="size-4" /> : <Bell aria-hidden className="size-4" />}
               </button>
@@ -183,9 +184,9 @@ export function Notifications() {
             <>
             <ul ref={list} className="max-h-[min(28rem,70vh)] overflow-x-hidden overflow-y-auto overscroll-contain">
               {failed && notes.length === 0 ? (
-                <li className="px-3.5 py-6 text-center text-[12.5px] text-dim">알림 서비스에 연결하지 못했어요.</li>
+                <li className="px-3.5 py-6 text-center text-aside text-dim">알림 서비스에 연결하지 못했어요.</li>
               ) : notes.length === 0 ? (
-                <li className="px-3.5 py-6 text-center text-[12.5px] text-faint">아직 알림이 없어요.</li>
+                <li className="px-3.5 py-6 text-center text-aside text-faint">아직 알림이 없어요.</li>
               ) : (
                 notes.map((n) => (
                   <li key={n.id}>
@@ -208,10 +209,10 @@ export function Notifications() {
                       />
                       <span className="min-w-0 flex-1">
                         <span className="flex items-baseline justify-between gap-2">
-                          <span className={cn("truncate text-[12.5px]", n.readAt ? "text-dim" : "text-foreground")}>{n.title}</span>
-                          <span className="shrink-0 text-[11px] text-faint">{ago(n.createdAt)}</span>
+                          <span className={cn("truncate text-aside", n.readAt ? "text-dim" : "text-foreground")}>{n.title}</span>
+                          <span className="shrink-0 text-meta text-faint">{ago(n.createdAt)}</span>
                         </span>
-                        {n.body ? <span className="mt-0.5 block text-[12px] leading-relaxed text-dim">{n.body}</span> : null}
+                        {n.body ? <span className="mt-0.5 block text-aside leading-relaxed text-dim">{n.body}</span> : null}
                       </span>
                     </button>
                   </li>
@@ -259,7 +260,7 @@ function NotifySettings() {
       .catch(() => {});
     void fetch("/api/notify/categories", { cache: "no-store" })
       .then((r) => (r.ok ? (r.json() as Promise<{ categories: Category[] }>) : null))
-      .then((b) => b && setCategories(b.categories))
+      .then((b) => b && setCategories(b.categories ?? []))
       .catch(() => {});
     void fetch("/api/notify/settings", { cache: "no-store" })
       .then((r) => (r.ok ? (r.json() as Promise<Settings>) : null))
@@ -291,9 +292,9 @@ function NotifySettings() {
   };
 
   return (
-    <div className="max-h-[min(30rem,72vh)] space-y-4 overflow-x-hidden overflow-y-auto overscroll-contain px-3.5 py-3 text-[12.5px]">
+    <div className="max-h-[min(30rem,72vh)] space-y-4 overflow-x-hidden overflow-y-auto overscroll-contain px-3.5 py-3 text-aside">
       <section>
-        <p className="mb-1.5 text-[11.5px] text-faint">이 기기</p>
+        <p className="mb-1.5 text-meta text-faint">이 기기</p>
         <p className="leading-relaxed text-dim">{device[push.state]}</p>
         <div className="mt-2 flex flex-wrap gap-2">
           {push.state === "off" || push.state === "unavailable" ? (
@@ -301,7 +302,7 @@ function NotifySettings() {
               type="button"
               disabled={push.busy}
               onClick={() => void push.enable()}
-              className="min-h-9 rounded-lg bg-glass-raised px-3 text-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50"
+              className="min-h-11 rounded-lg bg-glass-raised px-3 text-foreground focus-ring disabled:opacity-50 mouse:min-h-9"
             >
               알림 받기
             </button>
@@ -311,7 +312,7 @@ function NotifySettings() {
               <button
                 type="button"
                 onClick={() => void fetch("/api/notify/test", { method: "POST" })}
-                className="min-h-9 rounded-lg bg-glass-raised px-3 text-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                className="min-h-11 rounded-lg bg-glass-raised px-3 text-foreground focus-ring mouse:min-h-9"
               >
                 시험 알림 보내기
               </button>
@@ -319,7 +320,7 @@ function NotifySettings() {
                 type="button"
                 disabled={push.busy}
                 onClick={() => void push.disable()}
-                className="min-h-9 rounded-lg px-3 text-faint outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50"
+                className="min-h-11 rounded-lg px-3 text-faint hover:text-dim focus-ring disabled:opacity-50 mouse:min-h-9"
               >
                 이 기기 끄기
               </button>
@@ -331,7 +332,7 @@ function NotifySettings() {
       {set ? (
         <>
           <section>
-            <p className="mb-1 text-[11.5px] text-faint">받을 알림</p>
+            <p className="mb-1 text-meta text-faint">받을 알림</p>
             <ul className="divide-y divide-edge-soft">
               {categories.map(({ id, label, hint }) => {
                 const on = !set.muted.includes(id);
@@ -339,8 +340,8 @@ function NotifySettings() {
                   <li key={id}>
                     <label className="flex min-h-11 cursor-pointer items-center gap-3 py-1.5">
                       <span className="min-w-0 flex-1">
-                        <span className="block text-foreground/90">{label}</span>
-                        <span className="block text-[11px] text-faint">{hint}</span>
+                        <span className="block text-ink">{label}</span>
+                        <span className="block text-meta text-faint">{hint}</span>
                       </span>
                       <Switch
                         checked={on}
@@ -353,11 +354,11 @@ function NotifySettings() {
                 );
               })}
             </ul>
-            <p className="mt-1 text-[11px] leading-relaxed text-faint">끈 알림도 알림함에는 남아요.</p>
+            <p className="mt-1 text-meta leading-relaxed text-faint">끈 알림도 알림함에는 남아요.</p>
           </section>
 
           <section className="space-y-2">
-            <p className="text-[11.5px] text-faint">시간</p>
+            <p className="text-meta text-faint">시간</p>
             {/* Two time fields are wide where a browser draws a clock in
                 each (Chrome, 136px at 16px): on a narrow phone they go under
                 the words, to the right, rather than past the edge. */}
@@ -368,14 +369,14 @@ function NotifySettings() {
                   type="time"
                   value={set.quietStart}
                   onChange={(e) => void save({ ...set, quietStart: e.target.value })}
-                  className="tnum h-9 rounded-lg border border-edge-soft bg-glass px-2 text-[16px] text-foreground mouse:text-[12.5px]"
+                  className="tnum h-11 rounded-lg border border-edge-soft bg-glass px-2 text-field text-foreground mouse:h-9 mouse:text-aside"
                 />
                 <span className="text-faint">~</span>
                 <input
                   type="time"
                   value={set.quietEnd}
                   onChange={(e) => void save({ ...set, quietEnd: e.target.value })}
-                  className="tnum h-9 rounded-lg border border-edge-soft bg-glass px-2 text-[16px] text-foreground mouse:text-[12.5px]"
+                  className="tnum h-11 rounded-lg border border-edge-soft bg-glass px-2 text-field text-foreground mouse:h-9 mouse:text-aside"
                 />
               </span>
             </label>
@@ -385,14 +386,14 @@ function NotifySettings() {
                 type="time"
                 value={set.digestAt}
                 onChange={(e) => void save({ ...set, digestAt: e.target.value })}
-                className="tnum h-9 rounded-lg border border-edge-soft bg-glass px-2 text-[16px] text-foreground mouse:text-[12.5px]"
+                className="tnum h-11 rounded-lg border border-edge-soft bg-glass px-2 text-field text-foreground mouse:h-9 mouse:text-aside"
               />
             </label>
             <DigestHint attention={attention} digestAt={set.digestAt} onUse={(at) => void save({ ...set, digestAt: at })} />
-            <p className="text-[11px] leading-relaxed text-faint">
+            <p className="text-meta leading-relaxed text-faint">
               방해 금지 시간에 생긴 알림은 끝나는 시각에 한 번에 와요. 큰 결제·비중 이탈 같은 건 하루 요약으로 모아서 와요.
             </p>
-            {note ? <p className="text-[11.5px] text-reject/90">{note}</p> : null}
+            {note ? <p className="text-meta text-reject">{note}</p> : null}
           </section>
         </>
       ) : null}
@@ -420,20 +421,17 @@ function DigestHint({
   const pct = Math.round(best.rate * 100);
   const here = Number(digestAt.slice(0, 2)) === best.hour;
   return (
-    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-relaxed text-faint">
+    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta leading-relaxed text-faint">
       <span>
         {here
           ? `요즘 ${best.hour}시 전후에 카드에 가장 잘 답해요(${pct}%). 요약도 그때 와요.`
           : `요즘 ${best.hour}시 전후에 카드에 가장 잘 답해요(${pct}%).`}
       </span>
       {here ? null : (
-        <button
-          type="button"
-          onClick={() => onUse(at)}
-          className="tap-y h-7 rounded-full border border-edge-soft px-2.5 text-[11.5px] text-dim outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
-        >
+        // A word to press inside the sentence: no pill, no edge, a thumb's height.
+        <Button variant="underline" size="inline" onClick={() => onUse(at)} className="tap ms-1 text-meta">
           요약을 {best.hour}시로
-        </button>
+        </Button>
       )}
     </p>
   );

@@ -41,29 +41,29 @@ export function RoutinePicker({
   const others = ranked.filter((r) => r !== lead);
 
   // The way to anything other than a routine: the faintest words here.
-  const quiet = "px-2.5 text-[12.5px] text-faint mouse:text-[12.5px]";
+  const quiet = "px-2.5 text-aside text-faint";
 
   return (
     <div>
       {lead ? (
         <div className="mb-4">
-          <p className="text-[12.5px] text-dim">
+          <p className="text-aside text-dim">
             {lead.days === null
               ? "아직 한 번도 안 한 루틴이에요"
               : lead.days === 0
                 ? "오늘 이미 했어요"
                 : `${lead.days}일째 쉬고 있어요`}
           </p>
-          <h1 className="mt-1 text-[30px] leading-[1.15] font-semibold tracking-tight text-foreground sm:text-[34px]">
+          <h1 className="mt-1 text-display leading-[1.15] font-semibold tracking-tight text-foreground">
             {lead.routine.name}
           </h1>
-          <p className="mt-1.5 text-[13px] leading-relaxed text-dim">
+          <p className="mt-1.5 text-ui leading-relaxed text-dim">
             {lead.routine.exercises.join(" · ") || "종목 없음"}
           </p>
           <button
             type="button"
             onClick={() => onStart(lead.routine)}
-            className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-approve/18 text-[15px] font-medium text-approve transition-colors outline-none hover:bg-approve/25 focus-visible:ring-3 focus-visible:ring-ring/50 sm:w-auto sm:px-8"
+            className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-approve-wash text-title font-medium text-approve transition-colors focus-ring sm:w-auto sm:px-8"
           >
             <Play aria-hidden className="size-4" />
             시작
@@ -78,13 +78,13 @@ export function RoutinePicker({
               <button
                 type="button"
                 onClick={() => onStart(routine)}
-                className="flex min-h-12 w-full items-center gap-3 rounded-lg px-2 text-left transition-colors outline-none hover:bg-glass focus-visible:ring-3 focus-visible:ring-ring/50"
+                className="flex min-h-12 w-full items-center gap-3 rounded-lg px-2 text-left transition-colors hover:bg-glass focus-ring"
               >
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[14px] text-foreground/90">{routine.name}</span>
-                  <span className="block truncate text-[11.5px] text-faint">{routine.exercises.join(" · ")}</span>
+                  <span className="block truncate text-body text-ink">{routine.name}</span>
+                  <span className="block truncate text-meta text-faint">{routine.exercises.join(" · ")}</span>
                 </span>
-                <span className={cn("tnum shrink-0 text-[12px]", days === null ? "text-faint" : "text-dim")}>
+                <span className={cn("tnum shrink-0 text-aside", days === null ? "text-faint" : "text-dim")}>
                   {ago(days)}
                 </span>
                 <Play aria-hidden className="size-3.5 shrink-0 text-faint" />

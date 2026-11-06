@@ -47,7 +47,7 @@ export function PrimaryButton({ className, ...props }: React.ComponentProps<type
       type="button"
       variant="default"
       size="voice"
-      className={cn("min-w-[8rem] rounded-full px-7 text-[14.5px] font-medium disabled:opacity-40", className)}
+      className={cn("min-w-[8rem] rounded-full px-7 text-body font-medium disabled:opacity-40", className)}
       {...props}
     />
   );
@@ -106,7 +106,7 @@ export function Caption({
             : "text-[clamp(1.2rem,4vw,1.5rem)] leading-[1.5]",
           tone === "hint" && "text-faint",
           tone === "you" && "text-foreground",
-          tone === "jarvis" && (reading ? "text-faint/70" : "text-dim"),
+          tone === "jarvis" && (reading ? "text-faint" : "text-dim"),
         )}
       >
         {reading ? (

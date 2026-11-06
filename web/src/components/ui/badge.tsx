@@ -1,6 +1,6 @@
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 import { Slot } from "radix-ui"
 import { X } from "lucide-react"
 
@@ -21,7 +21,7 @@ const badgeVariants = cva(
         link: "text-primary underline-offset-4 hover:underline",
         // Jarvis: a condition laid on a list (a day, a category, words),
         // there to be cleared.
-        chip: "h-auto min-h-8 rounded-full bg-glass-raised ps-3 pe-2 text-[length:inherit] font-normal text-foreground/90 [&>svg]:size-3! [&>svg]:text-faint",
+        chip: "h-auto min-h-8 rounded-full bg-glass-raised ps-3 pe-2 text-[length:inherit] font-normal text-ink [&>svg]:size-3! [&>svg]:text-faint",
       },
     },
     defaultVariants: {

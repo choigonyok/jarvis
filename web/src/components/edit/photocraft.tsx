@@ -183,20 +183,20 @@ function Status({ phase, onRetry }: { phase: Phase; onRetry: () => void }) {
     <div role="status" className="absolute inset-0 grid place-items-center px-8 text-center">
       {problem ? (
         <div>
-          <p className="text-[14px] text-foreground/90">{problem[0]}</p>
-          <p className="mx-auto mt-1.5 max-w-[24rem] text-[12.5px] leading-relaxed text-balance text-dim">
+          <p className="text-body text-ink">{problem[0]}</p>
+          <p className="mx-auto mt-1.5 max-w-[24rem] text-aside leading-relaxed text-balance text-dim">
             {problem[1]}
           </p>
           <Retry onRetry={onRetry} />
         </div>
       ) : (
         <div>
-          <p className="flex items-center justify-center gap-2 text-[13px] text-dim">
+          <p className="flex items-center justify-center gap-2 text-ui text-dim">
             <span aria-hidden className="anim-breathe size-[5px] rounded-full bg-dim" />
             PhotoCraft를 여는 중
           </p>
           {phase === "slow" ? (
-            <p className="mx-auto mt-1.5 max-w-[22rem] text-[12.5px] leading-relaxed text-balance text-faint">
+            <p className="mx-auto mt-1.5 max-w-[22rem] text-aside leading-relaxed text-balance text-faint">
               처음 열 때는 편집기 파일을 받느라 조금 걸려요.
             </p>
           ) : null}

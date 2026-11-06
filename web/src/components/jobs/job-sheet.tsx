@@ -144,8 +144,8 @@ function Body({
   return (
     <>
       <BottomSheetHeader>
-        <BottomSheetTitle className="text-[15.5px] leading-snug">{j.title}</BottomSheetTitle>
-        <BottomSheetDescription className={cn("flex items-center gap-1.5 text-[12.5px]", stateTone(j))}>
+        <BottomSheetTitle className="text-title leading-snug">{j.title}</BottomSheetTitle>
+        <BottomSheetDescription className={cn("flex items-center gap-1.5 text-aside", stateTone(j))}>
           {/* A run going now: a light passes over what it is doing. */}
           <span className={cn(j.running && "shimmer motion-reduce:shimmer-none")}>{stateLabel(j)}</span>
           {!j.running && j.state === "active" && j.nextAt && !j.blockedSites?.length ? (
@@ -157,7 +157,7 @@ function Body({
       <div className="scrollbar-hairline min-h-0 flex-1 overflow-y-auto px-4 pb-4 sm:px-5">
         {j.summary ? (
           <div className="flex items-start gap-1">
-            <p className="selectable min-w-0 flex-1 text-[13.5px] leading-relaxed text-foreground/90">{j.summary}</p>
+            <p className="selectable min-w-0 flex-1 text-ui leading-relaxed text-ink">{j.summary}</p>
             <CopyButton text={j.summary} label="요약 복사" className="-mt-2.5 -mr-2.5" />
           </div>
         ) : null}
@@ -188,18 +188,18 @@ function Body({
                       src={photoUrl(r.image)}
                       alt=""
                       loading="lazy"
-                      className="size-14 shrink-0 rounded-lg border border-edge-soft bg-well object-cover"
+                      className="size-14 shrink-0 rounded-lg bg-well object-cover"
                     />
                   ) : null}
                   <div className="min-w-0 flex-1">
                     <p className="flex items-baseline gap-2">
-                      <span className="min-w-0 truncate text-[13.5px] text-foreground/90">{r.title}</span>
-                      {r.status ? <span className="ms-auto shrink-0 text-[12px] text-dim">{r.status}</span> : null}
+                      <span className="min-w-0 truncate text-ui text-ink">{r.title}</span>
+                      {r.status ? <span className="ms-auto shrink-0 text-aside text-dim">{r.status}</span> : null}
                     </p>
                     {r.amount != null ? (
-                      <p className="tnum text-[15px] font-medium text-foreground">{r.amount.toLocaleString("ko-KR")}원</p>
+                      <p className="tnum text-title font-medium text-foreground">{r.amount.toLocaleString("ko-KR")}원</p>
                     ) : null}
-                    <p className="tnum mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11.5px] text-faint">
+                    <p className="tnum mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-meta text-faint">
                       {Object.entries(r.metrics ?? {}).map(([k, v]) => (
                         <span key={k}>
                           {k} <span className="text-dim">{v}</span>
@@ -210,14 +210,14 @@ function Body({
                           href={r.url}
                           target="_blank"
                           rel="noreferrer"
-                          className="inline-flex items-center gap-1 text-dim outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+                          className="inline-flex items-center gap-1 text-dim hover:text-foreground focus-ring"
                         >
                           <ExternalLink aria-hidden className="size-3" />
                           열기
                         </a>
                       ) : null}
                     </p>
-                    {r.note ? <p className="mt-0.5 text-[11.5px] text-faint">{r.note}</p> : null}
+                    {r.note ? <p className="mt-0.5 text-meta text-faint">{r.note}</p> : null}
                   </div>
                 </li>
               ))}
@@ -226,15 +226,15 @@ function Body({
           </section>
         ) : null}
 
-        <Collapsible className="mt-5 rounded-lg border border-edge-soft px-3 py-2.5">
-          <CollapsibleTrigger className="group/goal flex w-full cursor-pointer items-center gap-1 text-left text-[12.5px] text-dim outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
+        <Collapsible className="mt-5 rounded-lg bg-glass px-3 py-2.5">
+          <CollapsibleTrigger className="group/goal flex w-full cursor-pointer items-center gap-1 text-left text-aside text-dim focus-ring">
             맡긴 일
             <ChevronRight aria-hidden className="size-3.5 text-faint transition-transform group-aria-expanded/goal:rotate-90 motion-reduce:transition-none" />
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <p className="mt-2 text-[13px] leading-relaxed whitespace-pre-wrap text-foreground/85">{j.goal}</p>
+            <p className="mt-2 text-ui leading-relaxed whitespace-pre-wrap text-ink">{j.goal}</p>
             {j.instructions ? (
-              <p className="mt-2 text-[12.5px] leading-relaxed whitespace-pre-wrap text-dim">{j.instructions}</p>
+              <p className="mt-2 text-aside leading-relaxed whitespace-pre-wrap text-dim">{j.instructions}</p>
             ) : null}
             {j.photos.length && !j.photosGone ? (
               <div className="scrollbar-none mt-2 flex gap-1.5 overflow-x-auto">
@@ -248,14 +248,14 @@ function Body({
         </Collapsible>
 
         <section id={runsPaged.anchor} className="mt-6 scroll-mt-4" aria-label="진행 기록">
-          <h3 className="mb-2 text-[12.5px] text-dim">진행</h3>
+          <h3 className="mb-2 text-aside text-dim">진행</h3>
           {detail && failed ? <AsOf at={readAt} failed onRetry={() => void load()} className="mb-2" /> : null}
           {!detail && failed ? (
             <AsOf at={null} failedText="진행 기록을 불러오지 못했어요" failed onRetry={() => void load()} />
           ) : !detail ? (
-            <p className="text-[12.5px] text-faint">{SAY.loading}</p>
+            <p className="text-aside text-faint">{SAY.loading}</p>
           ) : runs.length === 0 ? (
-            <p className="text-[12.5px] text-faint">아직 기록이 없어요.</p>
+            <p className="text-aside text-faint">아직 기록이 없어요.</p>
           ) : (
             <Trace className="gap-4">
               {/* The newest runs are on the first page: the one going now, and two open. */}
@@ -276,7 +276,7 @@ function Body({
 
       <div className="border-t border-edge-soft px-4 pt-3 pb-3 sm:px-5">
         {note ? (
-          <p role="status" className={cn("mb-2 text-[12px]", note.failed ? "text-reject/85" : "text-dim")}>
+          <p role="status" className={cn("mb-2 text-aside", note.failed ? "text-reject" : "text-dim")}>
             {note.failed ? "전하지 못했어요: " : ""}
             {note.text}
             {note.retry ? (
@@ -285,7 +285,7 @@ function Body({
                 <button
                   type="button"
                   onClick={note.retry}
-                  className="tap-y underline decoration-reject/40 underline-offset-[3px] outline-none hover:text-reject focus-visible:ring-3 focus-visible:ring-ring/50"
+                  className="tap-y underline decoration-reject-fill underline-offset-[3px] hover:text-reject focus-ring"
                 >
                   다시 시도
                 </button>
@@ -312,30 +312,30 @@ function Body({
               placeholder={ended ? "다시 맡길 일 (예: 가격 내려서 다시 올려줘)" : "지시하기 (예: 가격 6만 원으로 내려줘)"}
               className="min-w-0 flex-1"
             />
-            <Button type="submit" variant="lined" size="icon-touch" disabled={!text.trim()} aria-label="지시 보내기" className="mouse:size-9">
+            <Button type="submit" variant="soft" size="icon-touch" disabled={!text.trim()} aria-label="지시 보내기" className="mouse:size-9">
               <ArrowUp aria-hidden />
             </Button>
           </form>
         ) : null}
         <div className="mt-2 flex gap-2">
           {j.state === "active" || j.state === "paused" ? (
-            <Button variant="lined" size="touch-sm" disabled={j.running} onClick={() => void act("run", {}, "지금 실행해요.")} className="flex-1">
+            <Button variant="soft" size="touch-sm" disabled={j.running} onClick={() => void act("run", {}, "지금 실행해요.")} className="flex-1">
               지금 실행
             </Button>
           ) : null}
           {j.state === "active" || j.state === "waiting" ? (
-            <Button variant="lined" size="touch-sm" onClick={() => void act("pause", {}, "멈췄어요.")} className="flex-1">
+            <Button variant="soft" size="touch-sm" onClick={() => void act("pause", {}, "멈췄어요.")} className="flex-1">
               멈추기
             </Button>
           ) : j.state === "paused" || j.state === "failed" ? (
-            <Button variant="lined" size="touch-sm" onClick={() => void act("resume", {}, "다시 시작해요.")} className="flex-1">
+            <Button variant="soft" size="touch-sm" onClick={() => void act("resume", {}, "다시 시작해요.")} className="flex-1">
               다시 시작
             </Button>
           ) : null}
           {!ended || j.state === "failed" ? (
             <AlertDialog>
               <AlertDialogTrigger asChild>
-                <Button variant="lined" size="touch-sm" className="flex-1">
+                <Button variant="soft" size="touch-sm" className="flex-1">
                   그만두기
                 </Button>
               </AlertDialogTrigger>
@@ -377,7 +377,7 @@ function Shot({ name, gone }: { name: string; gone: boolean }) {
         type="button"
         onClick={() => setOpen(true)}
         aria-label="작업이 찍은 화면 크게 보기"
-        className="block w-fit overflow-hidden rounded-lg border border-edge-soft bg-well outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+        className="block w-fit overflow-hidden rounded-lg bg-well focus-ring"
       >
         {/* eslint-disable-next-line @next/next/no-img-element -- served by the agent behind the proxy */}
         <img src={photoUrl(name)} alt="작업이 찍은 화면" loading="lazy" className="block max-h-48 w-auto max-w-[16rem] object-contain" />
@@ -408,7 +408,7 @@ function group(events: JobEvent[]): RunGroup[] {
 const TONE: Record<string, string> = {
   step: "text-faint",
   note: "text-dim",
-  progress: "text-foreground/90",
+  progress: "text-ink",
   report: "text-foreground",
   card: "text-mine",
   answer: "text-mine",
@@ -429,8 +429,8 @@ function Run({ group: g, live, open, gone }: { group: RunGroup; live: boolean; o
   const time = when(g.at);
   return (
     <TraceCollapsible defaultOpen={open || live}>
-      <TraceCollapsibleTrigger className="text-[12px]">
-        <TraceLine status={live ? "running" : undefined} className="gap-1.5 text-[12px] text-faint">
+      <TraceCollapsibleTrigger className="text-aside">
+        <TraceLine status={live ? "running" : undefined} className="gap-1.5 text-aside text-faint">
           <TraceTitle className="tnum">
             {time} {g.runId ? (live ? "실행 중" : "실행") : "기록"}
           </TraceTitle>
@@ -444,7 +444,7 @@ function Run({ group: g, live, open, gone }: { group: RunGroup; live: boolean; o
               key={e.id}
               className={cn(
                 "leading-relaxed whitespace-pre-wrap",
-                e.kind === "step" ? "text-[11.5px]" : "text-[12.5px]",
+                e.kind === "step" ? "text-meta" : "text-aside",
                 TONE[e.kind] ?? "text-dim",
               )}
             >

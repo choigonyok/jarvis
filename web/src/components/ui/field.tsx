@@ -2,7 +2,7 @@
 
 import { useMemo } from "react"
 import { cva, type VariantProps } from "class-variance-authority"
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
@@ -112,9 +112,9 @@ function FieldLabel({
       className={cn(
         // The line height is the surroundings' (a sheet's is tighter than a
         // page's), as the plain word over a field always had.
-        "group/field-label peer/field-label block w-fit text-[12px] leading-[inherit] font-normal text-dim group-data-[disabled=true]/field:opacity-50",
+        "group/field-label peer/field-label block w-fit text-aside leading-[inherit] font-normal text-dim group-data-[disabled=true]/field:opacity-50",
         // Beside a switch it is the setting's name, read as a line of text.
-        "group-data-[orientation=horizontal]/field:text-[13.5px] group-data-[orientation=horizontal]/field:text-foreground/90",
+        "group-data-[orientation=horizontal]/field:text-ui group-data-[orientation=horizontal]/field:text-ink",
         className
       )}
       {...props}
@@ -140,7 +140,7 @@ function FieldDescription({ className, ...props }: React.ComponentProps<"p">) {
     <p
       data-slot="field-description"
       className={cn(
-        "text-left text-[11.5px] font-normal text-faint",
+        "text-left text-meta font-normal text-faint",
         "[&>a]:underline [&>a]:underline-offset-4 [&>a:hover]:text-primary",
         className
       )}
@@ -222,7 +222,7 @@ function FieldError({
     <div
       role="alert"
       data-slot="field-error"
-      className={cn("text-[12.5px] font-normal text-reject", className)}
+      className={cn("text-aside font-normal text-reject", className)}
       {...props}
     >
       {content}

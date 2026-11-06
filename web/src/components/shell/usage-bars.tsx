@@ -80,7 +80,7 @@ export function UsageBars() {
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         aria-label={label}
-        className="flex h-11 w-12 flex-col justify-center gap-[3px] rounded-lg px-1.5 outline-none select-none focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-8"
+        className="flex h-11 w-12 flex-col justify-center gap-[3px] rounded-lg px-1.5 select-none focus-ring mouse:h-8"
       >
         <Bar value={five} faint={stale || five == null} />
         <Bar value={week} faint={stale || week == null} />
@@ -92,7 +92,7 @@ export function UsageBars() {
       {open ? (
         <HeaderPanel
           title="사용량"
-          aside={at ? <span className="tnum text-[11.5px] text-faint">{at} 기준{age != null ? ` · ${agoLabel(age)}` : ""}</span> : null}
+          aside={at ? <span className="tnum text-meta text-faint">{at} 기준{age != null ? ` · ${agoLabel(age)}` : ""}</span> : null}
         >
           <div className="max-h-[min(30rem,72vh)] space-y-4 overflow-y-auto overscroll-contain px-3.5 py-3">
             <Group name="Claude 구독">
@@ -111,7 +111,7 @@ export function UsageBars() {
                 note={windowNote(usage?.sevenDay)}
               />
               {stale ? (
-                <p className="text-[11px] leading-snug text-faint">
+                <p className="text-meta leading-snug text-faint">
                   {agoLabel(age!)} 값이에요. 그 뒤에 claude.ai나 다른 기기에서 쓴 양은 다음 대화나 작업 때(쉬는 동안엔 한 시간마다)
                   반영돼요.
                 </p>
@@ -157,7 +157,7 @@ export function UsageBars() {
                     {mind.purposes.length ? (
                       <ul className="mt-1 space-y-0.5">
                         {mind.purposes.map((p) => (
-                          <li key={p.purpose} className="tnum flex justify-between text-[11px] text-faint">
+                          <li key={p.purpose} className="tnum flex justify-between text-meta text-faint">
                             <span>{PURPOSE[p.purpose] ?? p.purpose}</span>
                             <span>
                               {p.calls}번 · {usd(p.usd)}
@@ -205,7 +205,7 @@ function Bar({ value, faint }: { value: number | null; faint?: boolean }) {
 function Group({ name, children }: { name: string; children: ReactNode }) {
   return (
     <section>
-      <p className="mb-1.5 text-[11.5px] text-faint">{name}</p>
+      <p className="mb-1.5 text-meta text-faint">{name}</p>
       <div className="space-y-3">{children}</div>
     </section>
   );
@@ -233,15 +233,15 @@ function Meter({
 }) {
   return (
     <div className={cn("transition-opacity", faint && "opacity-60")}>
-      <div className="flex items-baseline justify-between gap-3 text-[12.5px]">
+      <div className="flex items-baseline justify-between gap-3 text-aside">
         <span className="text-dim">
           {name}
-          {detail ? <span className="ms-1.5 text-[11px] text-faint">{detail}</span> : null}
+          {detail ? <span className="ms-1.5 text-meta text-faint">{detail}</span> : null}
         </span>
-        <span className="tnum text-[13px] text-foreground">{figure}</span>
+        <span className="tnum text-ui text-foreground">{figure}</span>
       </div>
       <Progress aria-hidden value={value ?? 0} className="mt-1.5" indicatorClassName={tone(value)} />
-      {note ? <p className="tnum mt-1 text-[11px] leading-snug text-faint">{note}</p> : null}
+      {note ? <p className="tnum mt-1 text-meta leading-snug text-faint">{note}</p> : null}
       {children}
     </div>
   );

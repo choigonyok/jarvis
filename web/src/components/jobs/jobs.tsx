@@ -10,8 +10,10 @@ import { useKept } from "@/lib/keep";
 import { ChecklistCard } from "@/components/chat/checklist";
 import { JobSheet } from "@/components/jobs/job-sheet";
 import { PastReminders, useReminders, WaitingReminders } from "@/components/jobs/reminders";
+import { Button } from "@/components/ui/button";
 import { DetailSheet } from "@/components/ui/detail-sheet";
 import { Pager } from "@/components/ui/pager";
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { type BlockedSite, type Job, LIVE, stateLabel, stateTone, when } from "@/lib/jobs";
 import { usePaged } from "@/lib/paging";
 import { onResume } from "@/lib/resume";
@@ -125,27 +127,30 @@ export function Jobs() {
       <StandingBar pending={waiting} />
 
       <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
-        <div className="mx-auto w-full max-w-[42rem] px-4 pt-4 pb-12 sm:px-8 sm:pt-7 sm:pb-8">
+        <div className="mx-auto w-full max-w-page px-4 pt-4 pb-12 sm:px-8 sm:pt-7 sm:pb-8">
           {error && !jobs ? (
             <div className="py-16 text-center">
-              <p className="text-[13px] text-dim">{error}</p>
+              <p className="text-ui text-dim">{error}</p>
               <Retry onRetry={load} />
             </div>
           ) : null}
           {error && jobs ? <AsOf at={readAt} failed onRetry={() => void load()} className="mb-3" /> : null}
 
           {blocked.length > 0 ? (
-            <section role="alert" className="mb-5 rounded-xl border border-mine/25 bg-mine/[0.06] px-4 py-3.5">
-              <p className="text-[13.5px] text-foreground/90">
+            // Waiting on the operator, said the way a waiting card says it - the
+            // breathing dot - not in the calendar's violet, which means "mine".
+            <section role="alert" className="mb-5 rounded-xl bg-glass px-4 py-3.5">
+              <p className="flex items-center gap-2 text-ui text-ink">
+                <span aria-hidden className="anim-breathe size-[5px] shrink-0 rounded-full bg-dim" />
                 {blocked.map((b) => b.site).join(", ")} 에 다시 로그인해야 해요.
               </p>
-              <p className="mt-1 text-[12px] leading-relaxed text-dim">
+              <p className="mt-1 text-aside leading-relaxed text-dim">
                 이 사이트를 쓰는 작업은 쉬고 있어요. 화면 탭에서 로그인한 뒤 대화에 올라온 로그인 카드를 승인하면
                 이어서 해요.
               </p>
               <Link
                 href="/screen"
-                className="tap mt-3 inline-flex min-h-10 items-center rounded-lg border border-edge px-3 text-[13px] text-foreground outline-none hover:bg-glass focus-visible:ring-3 focus-visible:ring-ring/50 mouse:min-h-8"
+                className="tap mt-3 inline-flex items-center rounded-lg bg-glass-raised px-3 text-ui text-foreground transition-colors hover:bg-foreground/15 focus-ring mouse:min-h-8"
               >
                 화면 탭 열기
               </Link>
@@ -154,7 +159,7 @@ export function Jobs() {
 
           {lists.length > 0 ? (
             <section className="mb-6" aria-label="안 끝난 체크리스트" data-focus="checklists">
-              <h2 className="mb-2 px-1 text-[12.5px] text-dim">안 끝난 체크리스트</h2>
+              <h2 className="mb-2 px-1 text-aside text-dim">안 끝난 체크리스트</h2>
               <ul className="space-y-3">
                 {lists.map((l) => (
                   <li key={l.id}>
@@ -184,19 +189,20 @@ export function Jobs() {
                 <Pager {...livePaged} className="px-2" />
               </div>
             ) : (
-              <div className="py-14 text-center">
-                <p className="text-[14px] text-foreground/90">맡긴 작업이 없어요.</p>
-                <p className="mx-auto mt-2 max-w-[24rem] text-[12.5px] leading-relaxed text-dim">
-                  대화에서 시간이 걸리는 일을 맡기면 여기서 진행을 볼 수 있어요. 예를 들어 &ldquo;이거 중고나라에
-                  올려줘&rdquo;, &ldquo;이 상품 가격 내려가면 알려줘&rdquo;, &ldquo;택배 도착하면 알려줘&rdquo;.
-                </p>
-                <Link
-                  href="/"
-                  className="tap mt-4 inline-flex min-h-10 items-center rounded-lg border border-edge px-4 text-[13px] text-foreground outline-none hover:bg-glass focus-visible:ring-3 focus-visible:ring-ring/50"
-                >
-                  대화로 가기
-                </Link>
-              </div>
+              <Empty className="py-14">
+                <EmptyHeader>
+                  <EmptyTitle>맡긴 작업이 없어요</EmptyTitle>
+                  <EmptyDescription>
+                    대화에서 시간이 걸리는 일을 맡기면 여기서 진행을 볼 수 있어요. 예를 들어 &ldquo;이거 중고나라에
+                    올려줘&rdquo;, &ldquo;이 상품 가격 내려가면 알려줘&rdquo;, &ldquo;택배 도착하면 알려줘&rdquo;.
+                  </EmptyDescription>
+                </EmptyHeader>
+                <EmptyContent>
+                  <Button variant="raised" size="touch" asChild>
+                    <Link href="/">대화로 가기</Link>
+                  </Button>
+                </EmptyContent>
+              </Empty>
             )
           ) : null}
 
@@ -209,10 +215,10 @@ export function Jobs() {
                 onClick={() => setShowEnded(true)}
                 aria-haspopup="dialog"
                 aria-expanded={showEnded}
-                className="tap flex w-full items-center justify-between rounded-lg px-2 text-[13px] text-dim outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+                className="tap flex w-full items-center justify-between rounded-lg px-2 text-ui text-dim hover:text-foreground focus-ring"
               >
                 끝난 작업
-                <span className="tnum text-[12px] text-faint">{ended.length}</span>
+                <span className="tnum text-aside text-faint">{ended.length}</span>
               </button>
               <DetailSheet title="끝난 작업" open={showEnded} onOpenChange={setShowEnded}>
                 <div id={endedPaged.anchor} className="scroll-mt-4">
@@ -253,10 +259,10 @@ function Row({ job: j, onOpen }: { job: Job; onOpen: () => void }) {
     <button
       type="button"
       onClick={onOpen}
-      className="flex w-full items-start gap-3.5 rounded-xl px-2 py-3 text-left transition-colors outline-none hover:bg-glass focus-visible:ring-3 focus-visible:ring-ring/50"
+      className="flex w-full items-start gap-3.5 rounded-xl px-2 py-3 text-left transition-colors hover:bg-glass focus-ring"
     >
       {cover ? (
-        <span className="relative mt-0.5 block size-14 shrink-0 overflow-hidden rounded-lg border border-edge-soft bg-well">
+        <span className="relative mt-0.5 block size-14 shrink-0 overflow-hidden rounded-lg bg-well">
           {/* eslint-disable-next-line @next/next/no-img-element -- served by the agent behind the proxy */}
           <img
             src={photoUrl(cover)}
@@ -269,20 +275,20 @@ function Row({ job: j, onOpen }: { job: Job; onOpen: () => void }) {
       ) : null}
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline gap-2">
-          <span className={cn("min-w-0 truncate text-[14.5px]", ended ? "text-dim" : "text-foreground/90")}>
+          <span className={cn("min-w-0 truncate text-body", ended ? "text-dim" : "text-ink")}>
             {j.title}
           </span>
-          <span className={cn("ms-auto flex shrink-0 items-center gap-1.5 text-[12px]", stateTone(j))}>
+          <span className={cn("ms-auto flex shrink-0 items-center gap-1.5 text-aside", stateTone(j))}>
             {j.running ? <span aria-hidden className="anim-breathe size-[6px] rounded-full bg-approve" /> : null}
             {stateLabel(j)}
           </span>
         </span>
         {j.running && j.currentStep ? (
-          <span className="mt-1 block truncate text-[12.5px] text-dim">{j.currentStep}</span>
+          <span className="mt-1 block truncate text-aside text-dim">{j.currentStep}</span>
         ) : j.summary ? (
-          <span className="mt-1 block truncate text-[12.5px] text-dim">{j.summary}</span>
+          <span className="mt-1 block truncate text-aside text-dim">{j.summary}</span>
         ) : null}
-        <span className="tnum mt-1 block truncate text-[11.5px] text-faint">
+        <span className="tnum mt-1 block truncate text-meta text-faint">
           {j.running
             ? "지금 실행 중"
             : j.state === "active" && j.nextAt && !j.blockedSites?.length

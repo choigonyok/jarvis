@@ -28,8 +28,8 @@ export function Transactions({ txs, onOpen, reset }: { txs: Tx[]; onOpen: (t: Tx
         {days.map((g) => (
           <section key={g.date} aria-label={dayLabel(g.date)}>
             <div className="mb-1 flex items-baseline justify-between px-2">
-              <h3 className="text-[12px] text-dim">{dayLabel(g.date)}</h3>
-              <span className="tnum text-[11.5px] text-faint">{krw(totals.get(g.date) ?? g.totalKrw)}</span>
+              <h3 className="text-aside text-dim">{dayLabel(g.date)}</h3>
+              <span className="tnum text-meta text-faint">{krw(totals.get(g.date) ?? g.totalKrw)}</span>
             </div>
             <ul className="space-y-px">
               {g.txs.map((t) => (
@@ -69,32 +69,32 @@ function Row({ t, onOpen }: { t: Tx; onOpen: () => void }) {
     <button
       type="button"
       onClick={onOpen}
-      className="flex w-full items-start gap-3 rounded-lg px-2 py-2.5 text-left transition-colors outline-none hover:bg-glass focus-visible:ring-3 focus-visible:ring-ring/50"
+      className="flex w-full items-start gap-3 rounded-lg px-2 py-2.5 text-left transition-colors hover:bg-glass focus-ring"
     >
       {/* Money taken out of an investment account has a day, not an hour. */}
-      <span className="tnum w-9 shrink-0 pt-[3px] text-[11px] text-faint">{t.source === "asset" ? "" : clock(t.approvedAt)}</span>
+      <span className="tnum w-9 shrink-0 pt-[3px] text-meta text-faint">{t.source === "asset" ? "" : clock(t.approvedAt)}</span>
       <span className="min-w-0 flex-1">
         <span
           className={cn(
-            "block truncate text-[14px]",
-            quiet ? "text-faint" : "text-foreground/90",
+            "block truncate text-body",
+            quiet ? "text-faint" : "text-ink",
             struck && "line-through decoration-faint",
           )}
         >
           {t.merchant}
         </span>
-        <span className="block truncate text-[11.5px] text-faint">{notes.join(" · ")}</span>
+        <span className="block truncate text-meta text-faint">{notes.join(" · ")}</span>
         {items.length > 0 ? (
           // What the order was, under the charge it explains. A hairline on
           // the left ties the lines to the row without boxing them.
           <span className="mt-1.5 block space-y-0.5 border-s border-edge ps-2.5">
             {items.map((it) => (
-              <span key={it.id} className="flex items-baseline gap-2 text-[12px]">
+              <span key={it.id} className="flex items-baseline gap-2 text-aside">
                 <span className="min-w-0 flex-1 truncate text-dim">
                   {it.name}
                   {it.quantity > 1 ? <span className="text-faint"> ×{it.quantity}</span> : null}
                 </span>
-                <span className="shrink-0 text-[11px] text-faint">{it.category}</span>
+                <span className="shrink-0 text-meta text-faint">{it.category}</span>
                 <span className="tnum w-[4.5rem] shrink-0 text-right text-dim">{krw(it.amountKrw)}</span>
               </span>
             ))}
@@ -104,8 +104,8 @@ function Row({ t, onOpen }: { t: Tx; onOpen: () => void }) {
       <span className="shrink-0 text-right">
         <span
           className={cn(
-            "tnum block text-[14px]",
-            quiet ? "text-faint" : "text-foreground/90",
+            "tnum block text-body",
+            quiet ? "text-faint" : "text-ink",
             struck && "line-through decoration-faint",
           )}
         >
@@ -114,7 +114,7 @@ function Row({ t, onOpen }: { t: Tx; onOpen: () => void }) {
           {krw(t.amountKrw)}
         </span>
         {t.foreignAmount !== null ? (
-          <span className="tnum block text-[11px] text-faint">${t.foreignAmount.toFixed(2)}</span>
+          <span className="tnum block text-meta text-faint">${t.foreignAmount.toFixed(2)}</span>
         ) : null}
       </span>
     </button>

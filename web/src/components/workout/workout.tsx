@@ -10,8 +10,8 @@ import { RoutineEditor } from "@/components/workout/routine-editor";
 import { RoutinePicker } from "@/components/workout/routine-picker";
 import { WorkoutCalendar } from "@/components/workout/workout-calendar";
 import { VolumeBar } from "@/components/workout/volume-bar";
+import { Failed } from "@/components/shell/failed";
 import { Header, ScreenMenu, TabBar } from "@/components/shell/header";
-import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { useUndo } from "@/components/shell/undo";
 import { Pager } from "@/components/ui/pager";
@@ -169,18 +169,13 @@ export function Workout() {
       <StandingBar pending={waiting} muted={lifting} />
 
       <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
-        <div className="mx-auto w-full max-w-[42rem] px-4 pt-5 pb-12 sm:px-8 sm:pt-7 sm:pb-8">
+        <div className="mx-auto w-full max-w-page px-4 pt-5 pb-12 sm:px-8 sm:pt-7 sm:pb-8">
           {error ? (
-            <div className="mb-5">
-              <p
-                role="status"
-                className="border-l-2 border-reject pl-3 text-[13.5px] leading-relaxed text-dim"
-              >
-                {error}
-              </p>
-              {/* Only a log that never came: one that did not save is saved again with the next change. */}
-              {book.sessions.length === 0 ? <Retry onRetry={w.reload} /> : null}
-            </div>
+            // Again only for a log that never came: one that did not save is
+            // saved again with the next change.
+            <Failed onRetry={book.sessions.length === 0 ? w.reload : undefined} className="mb-5">
+              {error}
+            </Failed>
           ) : null}
 
           {live ? (
@@ -235,8 +230,8 @@ export function Workout() {
                   {week ? (
                     <section aria-label="최근 7일">
                       <div className="mb-3 flex items-baseline justify-between gap-3">
-                        <h2 className="text-[13px] text-dim">최근 7일</h2>
-                        <p className="tnum text-[12px] text-faint">
+                        <h2 className="text-ui text-dim">최근 7일</h2>
+                        <p className="tnum text-aside text-faint">
                           {week.count}회 · {kg(week.volume)} ·{" "}
                           {clock(week.time)}
                           {week.streak > 1 ? ` · ${week.streak}일 연속` : ""}
@@ -256,12 +251,12 @@ export function Workout() {
                               aria-label={`${dayLabel(date)}${done.length ? `, ${done.map((s) => s.routineName ?? "운동").join(", ")}` : ", 쉼"}`}
                               className={cn(
                                 "flex h-14 flex-col items-center justify-center gap-1 rounded-lg",
-                                done.length ? "bg-approve/12" : "bg-glass",
+                                done.length ? "bg-approve-wash" : "bg-glass",
                               )}
                             >
                               <span
                                 className={cn(
-                                  "text-[11px]",
+                                  "text-meta",
                                   isToday
                                     ? "font-semibold text-foreground"
                                     : "text-faint",
@@ -269,7 +264,7 @@ export function Workout() {
                               >
                                 {"일월화수목금토"[d.getDay()]}
                               </span>
-                              <span className="max-w-full truncate px-1 text-[11px] leading-none text-approve/80">
+                              <span className="max-w-full truncate px-1 text-meta leading-none text-approve">
                                 {done[0]?.routineName ??
                                   (done.length ? "운동" : "")}
                               </span>
@@ -298,7 +293,7 @@ export function Workout() {
                                 >
                                   <span
                                     className={cn(
-                                      "w-8 shrink-0 text-[12px]",
+                                      "w-8 shrink-0 text-aside",
                                       value ? "text-dim" : "text-faint",
                                     )}
                                   >
@@ -312,7 +307,7 @@ export function Workout() {
                                       }}
                                     />
                                   </span>
-                                  <span className="tnum w-16 shrink-0 text-right text-[11.5px] text-faint">
+                                  <span className="tnum w-16 shrink-0 text-right text-meta text-faint">
                                     {value ? kg(value) : "—"}
                                   </span>
                                 </li>
@@ -321,7 +316,7 @@ export function Workout() {
                           })()}
                         </ul>
                       ) : (
-                        <p className="text-[13px] text-faint">
+                        <p className="text-ui text-faint">
                           이번 주는 아직 기록이 없어요.
                         </p>
                       )}
@@ -338,11 +333,11 @@ export function Workout() {
                   />
 
                   {day ? (
-                    <div className="mt-4 flex items-center gap-2 text-[12px]">
+                    <div className="mt-4 flex items-center gap-2 text-aside">
                       <button
                         type="button"
                         onClick={() => setDay(null)}
-                        className="flex min-h-11 items-center gap-1 rounded-full bg-glass-raised ps-3.5 pe-2.5 text-foreground/90 outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                        className="flex min-h-11 items-center gap-1 rounded-full bg-glass-raised ps-3.5 pe-2.5 text-ink focus-ring"
                       >
                         {dayLabel(day)}
                         <X aria-hidden className="size-3.5 text-faint" />
@@ -352,7 +347,7 @@ export function Workout() {
                   ) : null}
 
                   {past.length === 0 ? (
-                    <p className="mt-6 text-[13.5px] leading-relaxed text-faint">
+                    <p className="mt-6 text-ui leading-relaxed text-faint">
                       아직 기록이 없어요. 위에서 루틴을 시작하면 종목과 세트가
                       여기에 쌓이고, 다음부터는 세트마다 지난번 기록이 옆에
                       붙어요.
@@ -415,7 +410,7 @@ function ViewTabs() {
         <TabsTrigger
           key={v.id}
           value={v.id}
-          className="min-h-11 rounded-lg text-[13.5px] text-dim hover:text-foreground data-active:font-medium"
+          className="min-h-11 rounded-lg text-ui text-dim hover:text-foreground data-active:font-medium"
         >
           {v.label}
         </TabsTrigger>
@@ -443,7 +438,7 @@ function SessionLog({
       aria-label={`${dayLabel(session.date)} ${session.routineName ?? "운동"}`}
     >
       <div className="mb-2 flex items-center gap-3">
-        <h3 className="min-w-0 flex-1 truncate text-[13.5px] text-foreground/90">
+        <h3 className="min-w-0 flex-1 truncate text-ui text-ink">
           <span className="text-dim">{dayLabel(session.date)}</span>
           <span className="ms-2">{session.routineName ?? "운동"}</span>
         </h3>
@@ -451,23 +446,23 @@ function SessionLog({
           type="button"
           onClick={onRemove}
           aria-label={`${dayLabel(session.date)} 기록 지우기`}
-          className="tap -me-2 flex shrink-0 items-center justify-center rounded-lg text-faint/70 transition-colors outline-none hover:text-reject focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="tap -me-2 flex shrink-0 items-center justify-center rounded-lg text-faint transition-colors hover:text-reject focus-ring"
         >
           <Trash2 aria-hidden className="size-3.5" />
         </button>
       </div>
-      <p className="tnum -mt-2 mb-3 text-[11.5px] text-faint">
+      <p className="tnum -mt-2 mb-3 text-meta text-faint">
         {kg(sessionVolume(session))} · {doneSets(session)}세트 ·{" "}
         {clock(durationOf(session))}
         {session.bodyWeight ? ` · 체중 ${load(session.bodyWeight)}kg` : ""}
       </p>
       {session.note ? (
-        <p className="mb-3 text-[12.5px] leading-relaxed text-dim">
+        <p className="mb-3 text-aside leading-relaxed text-dim">
           {session.note}
         </p>
       ) : null}
       {records.length ? (
-        <p className="mb-3 flex items-start gap-1.5 text-[12.5px] leading-relaxed text-foreground/90">
+        <p className="mb-3 flex items-start gap-1.5 text-aside leading-relaxed text-ink">
           <TrendingUp aria-hidden className="mt-[3px] size-3.5 shrink-0 text-approve" />
           <span>
             기록 갱신{" "}
@@ -490,11 +485,11 @@ function SessionLog({
                   <button
                     type="button"
                     onClick={() => onLook(exercise.name)}
-                    className="shrink-0 rounded text-[13.5px] text-foreground/90 underline decoration-edge underline-offset-4 outline-none hover:decoration-dim focus-visible:ring-3 focus-visible:ring-ring/50"
+                    className="shrink-0 rounded text-ui text-ink underline decoration-edge underline-offset-4 hover:decoration-dim focus-ring"
                   >
                     {exercise.name}
                   </button>
-                  <span className="tnum min-w-0 truncate text-[12px] text-dim">
+                  <span className="tnum min-w-0 truncate text-aside text-dim">
                     {working.map((s, i) => (
                       <span key={i} className="me-2.5">
                         {setLabel(s)}
@@ -554,32 +549,32 @@ function Consistency({ past, now }: { past: Session[]; now: number }) {
   return (
     <section aria-label="이번 주 목표" className="mb-8">
       <div className="mb-2.5 flex items-center justify-between gap-3">
-        <h2 className="text-[13px] text-dim">이번 주</h2>
-        <div className="flex items-center gap-0.5 text-[12px] text-faint">
+        <h2 className="text-ui text-dim">이번 주</h2>
+        <div className="flex items-center gap-0.5 text-aside text-faint">
           <span className="me-1">목표</span>
           <button
             type="button"
             onClick={() => change(goal - 1)}
             aria-label="목표 줄이기"
-            className="flex size-11 items-center justify-center rounded-full outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 mouse:size-8"
+            className="flex size-11 items-center justify-center rounded-full hover:text-foreground focus-ring mouse:size-8"
           >
             <Minus aria-hidden className="size-3.5" />
           </button>
-          <span className="tnum w-7 text-center text-foreground/90">{goal}회</span>
+          <span className="tnum w-7 text-center text-ink">{goal}회</span>
           <button
             type="button"
             onClick={() => change(goal + 1)}
             aria-label="목표 늘리기"
-            className="flex size-11 items-center justify-center rounded-full outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 mouse:size-8"
+            className="flex size-11 items-center justify-center rounded-full hover:text-foreground focus-ring mouse:size-8"
           >
             <Plus aria-hidden className="size-3.5" />
           </button>
         </div>
       </div>
       <p className="mb-3 flex items-baseline gap-2">
-        <span className="tnum text-[26px] leading-none font-semibold text-foreground">{thisWeek}</span>
-        <span className="tnum text-[13px] text-dim">/ {goal}회</span>
-        <span className="ms-auto text-[12px] text-faint">
+        <span className="tnum text-display leading-none font-semibold tracking-tight text-foreground">{thisWeek}</span>
+        <span className="tnum text-ui text-dim">/ {goal}회</span>
+        <span className="ms-auto text-aside text-faint">
           {thisWeek >= goal ? "이번 주 목표를 채웠어요" : `${goal - thisWeek}번 더`}
         </span>
       </p>
@@ -595,14 +590,14 @@ function Consistency({ past, now }: { past: Session[]; now: number }) {
               key={w.start.toISOString()}
               className={cn(
                 "flex-1 rounded-t-[3px]",
-                w.count === 0 ? "bg-well" : w.count >= goal ? "bg-approve/60" : "bg-dim/40",
+                w.count === 0 ? "bg-well" : w.count >= goal ? "bg-approve-fill" : "bg-dim/40",
                 i === weeks.length - 1 && "ring-1 ring-foreground/30",
               )}
               style={{ height: `${w.count === 0 ? 6 : (w.count / top) * 100}%` }}
             />
           ))}
         </div>
-        <div className="tnum mt-1 flex justify-between text-[11px] text-faint">
+        <div className="tnum mt-1 flex justify-between text-meta text-faint">
           <span>{monthDay(dayOf(weeks[0].start))}</span>
           <span>8주 중 {hit}주 목표 달성</span>
           <span>이번 주</span>

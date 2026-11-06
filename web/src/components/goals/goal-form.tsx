@@ -116,7 +116,7 @@ function Form({ goal, onClose, onSaved }: { goal: Goal | null; onClose: () => vo
       }}
     >
       <BottomSheetHeader className="pb-0 sm:px-6">
-        <BottomSheetTitle className="pr-0 text-[16px]">{goal ? "목표 고치기" : "새 목표"}</BottomSheetTitle>
+        <BottomSheetTitle className="pr-0">{goal ? "목표 고치기" : "새 목표"}</BottomSheetTitle>
         <BottomSheetDescription className="sr-only">이름과 주기를 정해요.</BottomSheetDescription>
       </BottomSheetHeader>
 
@@ -127,7 +127,7 @@ function Form({ goal, onClose, onSaved }: { goal: Goal | null; onClose: () => vo
         </Field>
 
         <div>
-          <p id="goal-cadence" className="mb-1 text-[12px] text-dim">
+          <p id="goal-cadence" className="mb-1 text-aside text-dim">
             얼마나 자주
           </p>
           <ToggleGroup
@@ -143,7 +143,7 @@ function Form({ goal, onClose, onSaved }: { goal: Goal | null; onClose: () => vo
             className="grid w-full grid-cols-4 rounded-lg border border-edge-soft bg-glass p-0.5"
           >
             {RULES.map((r) => (
-              <ToggleGroupItem key={r.value} value={r.value} className="min-h-9 px-0 text-[13px]">
+              <ToggleGroupItem key={r.value} value={r.value} className="min-h-9 px-0 text-ui">
                 {r.label}
               </ToggleGroupItem>
             ))}
@@ -160,7 +160,7 @@ function Form({ goal, onClose, onSaved }: { goal: Goal | null; onClose: () => vo
               className="mt-2.5 grid w-full grid-cols-7"
             >
               {WEEKDAYS.map((d, i) => (
-                <ToggleGroupItem key={d} value={String(d)} className="h-11 px-0 text-[13.5px] text-faint mouse:h-9">
+                <ToggleGroupItem key={d} value={String(d)} className="h-11 px-0 text-ui text-faint mouse:h-9">
                   {WEEK_ROW[i]}
                 </ToggleGroupItem>
               ))}
@@ -169,30 +169,30 @@ function Form({ goal, onClose, onSaved }: { goal: Goal | null; onClose: () => vo
 
           {counted ? (
             <div className="mt-2.5 flex items-center justify-between gap-3">
-              <p className="text-[13.5px] text-foreground/90">
+              <p className="text-ui text-ink">
                 {v.cadence === "weekly" ? "한 주에" : "한 달에"} <span className="tnum font-medium">{v.times}</span>번
               </p>
               <div className="flex gap-1.5">
-                <Button type="button" variant="lined" size="icon-touch" aria-label="한 번 줄이기" disabled={v.times <= 1} onClick={() => set("times", v.times - 1)} className="disabled:opacity-30">
+                <Button type="button" variant="soft" size="icon-touch" aria-label="한 번 줄이기" disabled={v.times <= 1} onClick={() => set("times", v.times - 1)} className="disabled:opacity-30">
                   <Minus aria-hidden />
                 </Button>
-                <Button type="button" variant="lined" size="icon-touch" aria-label="한 번 늘리기" disabled={v.times >= most} onClick={() => set("times", v.times + 1)} className="disabled:opacity-30">
+                <Button type="button" variant="soft" size="icon-touch" aria-label="한 번 늘리기" disabled={v.times >= most} onClick={() => set("times", v.times + 1)} className="disabled:opacity-30">
                   <Plus aria-hidden />
                 </Button>
               </div>
             </div>
           ) : (
             <div className="mt-2.5 flex items-center justify-between gap-3">
-              <p className="text-[13.5px] text-foreground/90">
+              <p className="text-ui text-ink">
                 하루에 <span className="tnum font-medium">{v.perDay}</span>번
               </p>
               <div className="flex gap-1.5">
-                <Button type="button" variant="lined" size="icon-touch" aria-label="하루 횟수 줄이기" disabled={v.perDay <= 1} onClick={() => set("perDay", v.perDay - 1)} className="disabled:opacity-30">
+                <Button type="button" variant="soft" size="icon-touch" aria-label="하루 횟수 줄이기" disabled={v.perDay <= 1} onClick={() => set("perDay", v.perDay - 1)} className="disabled:opacity-30">
                   <Minus aria-hidden />
                 </Button>
                 <Button
                   type="button"
-                  variant="lined"
+                  variant="soft"
                   size="icon-touch"
                   aria-label="하루 횟수 늘리기"
                   disabled={v.perDay >= MOST_A_DAY}
@@ -204,7 +204,7 @@ function Form({ goal, onClose, onSaved }: { goal: Goal | null; onClose: () => vo
               </div>
             </div>
           )}
-          <p className="mt-2 text-[12px] leading-relaxed text-faint">
+          <p className="mt-2 text-aside leading-relaxed text-faint">
             {many
               ? `할 때마다 한 번 했다를 누르고, ${v.perDay}번을 채우면 그날 했다가 돼요. 다 채우지 못한 날은 다음 날 점심에 물어봐요.`
               : v.cadence === "daily"
@@ -245,14 +245,14 @@ function Form({ goal, onClose, onSaved }: { goal: Goal | null; onClose: () => vo
           <button
             type="button"
             onClick={() => setMore(true)}
-            className="tap-y text-[12.5px] text-faint underline-offset-2 outline-none hover:text-dim hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
+            className="tap-y text-aside text-faint underline-offset-2 hover:text-dim hover:underline focus-ring"
           >
             이유, 기간, 물어볼 시각 정하기
           </button>
         )}
 
         {failed ? (
-          <p role="alert" className="text-[12.5px] text-reject">
+          <p role="alert" className="text-aside text-reject">
             {failed}
           </p>
         ) : null}

@@ -86,31 +86,31 @@ export function SavedLogins() {
   }
 
   if (!data) {
-    return <p className="py-2 text-[12.5px] text-faint">{error ?? SAY.loading}</p>;
+    return <p className="py-2 text-aside text-faint">{error ?? SAY.loading}</p>;
   }
   return (
     <div className="space-y-4 py-1">
-      <p className="text-[12.5px] leading-relaxed text-dim">
+      <p className="text-aside leading-relaxed text-dim">
         대화에서 &ldquo;쿠팡 로그인 정보 저장해줘&rdquo;라고 하면 저장 카드가 올라와요. 카드에 넣은 아이디·비밀번호는 암호화해서
         보관하고, 그 사이트의 로그인 화면에서만 자동으로 넣어요. Jarvis는 값을 볼 수 없어요.
       </p>
       {error ? (
-        <p role="alert" className="text-[12.5px] text-reject">
+        <p role="alert" className="text-aside text-reject">
           {error}
         </p>
       ) : null}
       {data.logins.length === 0 ? (
-        <p className="text-[13px] text-faint">저장된 로그인 정보가 없어요.</p>
+        <p className="text-ui text-faint">저장된 로그인 정보가 없어요.</p>
       ) : (
         <div id={loginsPaged.anchor} className="scroll-mt-4">
         <ul className="divide-y divide-edge-soft">
           {loginsPaged.items.map((l) => (
             <li key={l.domain} className="flex items-center gap-3 py-2.5">
               <div className="min-w-0 flex-1">
-                <p className="truncate text-[13.5px] text-foreground/90">
-                  {l.name} <span className="text-[12px] text-faint">{l.domain}</span>
+                <p className="truncate text-ui text-ink">
+                  {l.name} <span className="text-aside text-faint">{l.domain}</span>
                 </p>
-                <p className="tnum mt-0.5 text-[11.5px] text-faint">
+                <p className="tnum mt-0.5 text-meta text-faint">
                   아이디 {l.hint} · {l.lastUsedAt ? `마지막 사용 ${when(l.lastUsedAt)} · ${l.uses}번` : "아직 안 씀"}
                 </p>
               </div>
@@ -142,10 +142,10 @@ export function SavedLogins() {
       )}
       {data.uses.length > 0 ? (
         <div id={usesPaged.anchor} className="scroll-mt-4">
-          <p className="mb-1.5 text-[12px] text-faint">최근에 쓴 기록</p>
+          <p className="mb-1.5 text-aside text-faint">최근에 쓴 기록</p>
           <ul className="space-y-1">
             {usesPaged.items.map((u, i) => (
-              <li key={`${u.at}-${i}`} className="tnum flex gap-2 text-[12px] text-dim">
+              <li key={`${u.at}-${i}`} className="tnum flex gap-2 text-aside text-dim">
                 <span className="shrink-0 text-faint">{when(u.at)}</span>
                 <span className="min-w-0 truncate">
                   {u.host || u.domain} · {u.purpose || "?"} · {outcomeCopy[u.outcome] ?? u.outcome}

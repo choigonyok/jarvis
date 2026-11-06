@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SecretInput } from "@/components/ui/secret-input";
+import { Failed } from "@/components/shell/failed";
 
 /**
  * The first thing anyone sees. It stays as quiet as the rest of the console -
@@ -54,18 +55,18 @@ export function LoginForm() {
     <main className="inset-x-safe flex h-full items-start justify-center px-5 pt-[18vh] sm:items-center sm:pt-0">
       <form
         onSubmit={submit}
-        className="w-full max-w-[20rem] rounded-2xl border border-edge bg-glass p-5 sm:p-6"
+        className="w-full max-w-[20rem] rounded-2xl bg-glass p-5 sm:p-6"
       >
-        <h1 className="text-[15px] font-semibold tracking-tight text-foreground">
+        <h1 className="text-title font-semibold tracking-tight text-foreground">
           Jarvis
         </h1>
-        <p className="mt-1.5 text-[13px] leading-relaxed text-faint">
+        <p className="mt-1.5 text-ui leading-relaxed text-faint">
           계속하려면 로그인하세요.
         </p>
 
         <div className="mt-6 space-y-3">
           <label className="block">
-            <span className="mb-1.5 block text-[11.5px] text-faint">아이디</span>
+            <span className="mb-1.5 block text-meta text-faint">아이디</span>
             <Input
               value={id}
               onChange={(e) => setId(e.target.value)}
@@ -73,35 +74,30 @@ export function LoginForm() {
               // No autoFocus on touch: it throws the keyboard up over the form
               // before anyone has decided to type.
               required
-              className="h-11 border-edge bg-well/40 mouse:h-9 mouse:text-[14px]"
+              className="h-11 border-edge bg-well/40 mouse:h-9 mouse:text-body"
             />
           </label>
           <label className="block">
-            <span className="mb-1.5 block text-[11.5px] text-faint">비밀번호</span>
+            <span className="mb-1.5 block text-meta text-faint">비밀번호</span>
             {/* With 보기: a phone keyboard makes a typo easy, and this is the one place to see it. */}
             <SecretInput
               value={password}
               onChange={setPassword}
               autoComplete="current-password"
               required
-              className="h-11 border-edge bg-well/40 mouse:h-9 mouse:text-[14px]"
+              className="h-11 border-edge bg-well/40 mouse:h-9 mouse:text-body"
             />
           </label>
         </div>
 
         {error ? (
-          <p
-            role="status"
-            className="mt-4 border-l-2 border-reject pl-3 text-[12.5px] leading-relaxed text-dim"
-          >
-            {error}
-          </p>
+          <Failed className="mt-4">{error}</Failed>
         ) : null}
 
         <Button
           type="submit"
           disabled={busy || !id.trim() || !password}
-          className="mt-6 h-12 w-full rounded-lg text-[14px] mouse:h-9 mouse:text-[13.5px]"
+          className="mt-6 h-12 w-full rounded-lg text-body mouse:h-9 mouse:text-ui"
         >
           {busy ? "확인 중" : "로그인"}
         </Button>

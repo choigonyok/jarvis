@@ -338,7 +338,7 @@ export function LiveSession({
     <div className="pb-2">
       <div className="mb-3 flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="truncate text-[15px] font-medium text-foreground">
+          <h1 className="truncate text-title font-medium text-foreground">
             {session.routineName ?? "운동"}
           </h1>
           <p
@@ -348,14 +348,14 @@ export function LiveSession({
           >
             {clock(now - session.startedAt)}
           </p>
-          <p className="tnum mt-1.5 text-[12.5px] text-dim">
+          <p className="tnum mt-1.5 text-aside text-dim">
             {workingDone}/{working.length}세트 · {kg(volume)}
           </p>
         </div>
         <button
           type="button"
           onClick={() => setFinishing(true)}
-          className="tap mt-1 shrink-0 rounded-lg bg-glass-raised px-4 text-[13.5px] text-foreground transition-colors outline-none hover:bg-approve/12 hover:text-approve focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="tap mt-1 shrink-0 rounded-lg bg-glass-raised px-4 text-ui text-foreground transition-colors hover:bg-approve-wash hover:text-approve focus-ring"
         >
           끝내기
         </button>
@@ -374,7 +374,7 @@ export function LiveSession({
           role="status"
           className="mt-3 mb-2 rounded-xl bg-glass px-3.5 py-3"
         >
-          <p className="text-[13.5px] leading-relaxed text-foreground/90">
+          <p className="text-ui leading-relaxed text-ink">
             {lastActive
               ? `마지막 세트 뒤로 ${Math.floor((now - since) / 3_600_000)}시간이 지났어요. 그때 끝난 운동인가요?`
               : `시작한 지 ${Math.floor((now - since) / 3_600_000)}시간이 지났어요. 끝난 운동인가요?`}
@@ -456,7 +456,7 @@ export function LiveSession({
       <button
         type="button"
         onClick={() => setPicking(true)}
-        className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-edge text-[13.5px] text-dim transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+        className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-glass text-ui text-dim transition-colors hover:text-foreground focus-ring"
       >
         <Plus aria-hidden className="size-4" />
         종목 추가
@@ -467,7 +467,7 @@ export function LiveSession({
         className="mt-8 grid gap-4 sm:grid-cols-[auto_1fr]"
       >
         <label className="block">
-          <span className="mb-1.5 block text-[12px] text-faint">오늘 체중</span>
+          <span className="mb-1.5 block text-aside text-faint">오늘 체중</span>
           <span className="flex items-center gap-2">
             <Input
               type="number"
@@ -477,11 +477,11 @@ export function LiveSession({
               placeholder="0"
               className="tnum w-28 text-center"
             />
-            <span className="text-[12px] text-faint">kg</span>
+            <span className="text-aside text-faint">kg</span>
           </span>
         </label>
         <label className="block">
-          <span className="mb-1.5 block text-[12px] text-faint">메모</span>
+          <span className="mb-1.5 block text-aside text-faint">메모</span>
           <Input
             defaultValue={session.note ?? ""}
             onBlur={(e) => onNote(e.target.value)}
@@ -491,7 +491,7 @@ export function LiveSession({
         <div className="sm:col-span-2">
           <span
             id="rest-default"
-            className="mb-1.5 block text-[12px] text-faint"
+            className="mb-1.5 block text-aside text-faint"
           >
             기본 휴식
           </span>

@@ -74,10 +74,10 @@ export function Goals() {
       <StandingBar pending={waiting} />
 
       <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
-        <div className="mx-auto w-full max-w-[42rem] px-4 pt-5 pb-12 sm:px-8 sm:pt-7 sm:pb-8">
+        <div className="mx-auto w-full max-w-page px-4 pt-5 pb-12 sm:px-8 sm:pt-7 sm:pb-8">
           {error && !goals ? (
             <div className="py-16 text-center">
-              <p className="text-[13px] text-dim">{error}</p>
+              <p className="text-ui text-dim">{error}</p>
               <Retry onRetry={load} />
             </div>
           ) : null}
@@ -88,14 +88,14 @@ export function Goals() {
 
           {goals && goals.length + ended.length > 0 ? (
             <div className="mb-4 flex items-center justify-between gap-3">
-              <h2 className="text-[15px] leading-snug font-medium text-foreground">
+              <h2 className="text-title leading-snug font-medium text-foreground">
                 {going.length === 0 ? "지금 이어 가는 목표가 없어요" : left === 0 ? "오늘 할 일은 다 적었어요" : `오늘 ${left}개 남았어요`}
               </h2>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => setMaking(true)}
-                className="tap h-11 shrink-0 gap-1 px-2 text-[13px] text-dim hover:text-foreground mouse:h-8 mouse:min-h-0 mouse:min-w-0"
+                className="tap h-11 shrink-0 gap-1 px-2 text-ui text-dim hover:text-foreground mouse:h-8 mouse:min-h-0 mouse:min-w-0"
               >
                 <Plus aria-hidden className="size-4" />
                 목표
@@ -116,7 +116,7 @@ export function Goals() {
 
           {resting.length > 0 ? (
             <section className="mt-8">
-              <h2 className="mb-1 text-[12.5px] text-dim">쉬는 중</h2>
+              <h2 className="mb-1 text-aside text-dim">쉬는 중</h2>
               <ul>
                 {resting.map((g) => (
                   <Plain key={g.id} goal={g} onOpen={() => setOpenId(g.id)} />
@@ -127,7 +127,7 @@ export function Goals() {
 
           {ended.length > 0 ? (
             <Collapsible className="mt-8">
-              <CollapsibleTrigger className="tap-y cursor-pointer text-[12.5px] text-dim outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
+              <CollapsibleTrigger className="tap-y cursor-pointer text-aside text-dim focus-ring">
                 끝낸 목표 {ended.length}개
               </CollapsibleTrigger>
               <CollapsibleContent>
@@ -172,7 +172,7 @@ function NoGoals({ onMake }: { onMake: () => void }) {
   return (
     <Empty align="start" className="max-w-[30rem] py-10">
       <EmptyHeader className="gap-2">
-        <EmptyTitle asChild className="text-[17px] text-foreground">
+        <EmptyTitle asChild className="text-foreground">
           <h2>되풀이해서 하려는 일을 적어 보세요</h2>
         </EmptyTitle>
         <EmptyDescription>
@@ -200,7 +200,7 @@ function WeekHead({ today }: { today: string }) {
     <div className="flex items-end justify-end border-b border-edge-soft pb-1.5" aria-hidden>
       <div className={WEEK_GRID}>
         {WEEK_ROW.map((d, i) => (
-          <span key={d} className={cn("text-center text-[11.5px]", i === at ? "font-medium text-foreground" : "text-faint")}>
+          <span key={d} className={cn("text-center text-meta", i === at ? "font-medium text-foreground" : "text-faint")}>
             {d}
           </span>
         ))}
@@ -259,10 +259,10 @@ function Row({ goal, onOpen, onChanged }: { goal: Goal; onOpen: () => void; onCh
         <button
           type="button"
           onClick={onOpen}
-          className="-mx-1 min-h-11 min-w-0 flex-1 rounded-md px-1 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50 mouse:min-h-0"
+          className="-mx-1 min-h-11 min-w-0 flex-1 rounded-md px-1 text-left focus-ring mouse:min-h-0"
         >
-          <span className="block text-[14.5px] leading-snug font-medium break-keep text-foreground">{goal.title}</span>
-          <span className={cn("mt-0.5 block text-[12px] leading-snug", p.tight ? "text-foreground/90" : "text-dim")}>
+          <span className="block text-body leading-snug font-medium break-keep text-foreground">{goal.title}</span>
+          <span className={cn("mt-0.5 block text-aside leading-snug", p.tight ? "text-ink" : "text-dim")}>
             {p.says || goal.rule}
           </span>
         </button>
@@ -281,7 +281,7 @@ function Row({ goal, onOpen, onChanged }: { goal: Goal; onOpen: () => void; onCh
       </div>
 
       {quietToday ? null : now.mark ? (
-        <p className="anim-settle mt-1.5 flex min-h-9 items-center gap-1.5 text-[12.5px] text-dim">
+        <p className="anim-settle mt-1.5 flex min-h-9 items-center gap-1.5 text-aside text-dim">
           {now.mark === "done" ? <Check aria-hidden className="size-3.5 text-approve" /> : <Minus aria-hidden className="size-3.5 text-reject" />}
           {when}{" "}
           {now.mark === "done" ? (many ? `${n}번 다 했어요` : "했어요") : now.count > 0 ? `안 했어요 (${tally(now.count, n)})` : "안 했어요"}
@@ -289,7 +289,7 @@ function Row({ goal, onOpen, onChanged }: { goal: Goal; onOpen: () => void; onCh
             type="button"
             disabled={saying !== null}
             onClick={() => void (many && now.mark === "done" ? fewer() : unsay())}
-            className="tap-y ml-1 text-[12px] text-faint underline-offset-2 outline-none hover:text-dim hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
+            className="tap-y ml-1 text-aside text-faint underline-offset-2 hover:text-dim hover:underline focus-ring"
           >
             {many && now.mark === "done" ? "하나 빼기" : "되돌리기"}
           </button>
@@ -298,7 +298,7 @@ function Row({ goal, onOpen, onChanged }: { goal: Goal; onOpen: () => void; onCh
         // On a wide screen the day's line and its answers share a row.
         <div className="mt-2 sm:flex sm:items-center sm:gap-3">
           {many ? (
-            <p className="mb-1.5 flex min-h-6 items-center gap-1.5 text-[12px] text-dim sm:mb-0">
+            <p className="mb-1.5 flex min-h-6 items-center gap-1.5 text-aside text-dim sm:mb-0">
               <span className="tnum">
                 {when} {tally(now.count, n)}
               </span>
@@ -307,14 +307,14 @@ function Row({ goal, onOpen, onChanged }: { goal: Goal; onOpen: () => void; onCh
                   type="button"
                   disabled={saying !== null}
                   onClick={() => void fewer()}
-                  className="tap-y ml-1 text-[12px] text-faint underline-offset-2 outline-none hover:text-dim hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
+                  className="tap-y ml-1 text-aside text-faint underline-offset-2 hover:text-dim hover:underline focus-ring"
                 >
                   하나 빼기
                 </button>
               ) : null}
             </p>
           ) : picked ? (
-            <p className="mb-1.5 text-[12px] text-dim sm:mb-0">{when} 기록</p>
+            <p className="mb-1.5 text-aside text-dim sm:mb-0">{when} 기록</p>
           ) : null}
           {/* The same pair as a card's: the answer that counts on the thumb's side. */}
           <div className="grid grid-cols-2 gap-2 sm:ml-auto sm:flex sm:justify-end sm:gap-1.5">
@@ -338,7 +338,7 @@ function Row({ goal, onOpen, onChanged }: { goal: Goal; onOpen: () => void; onCh
         </div>
       )}
       {failed ? (
-        <p role="alert" className="mt-1.5 text-[12px] text-reject">
+        <p role="alert" className="mt-1.5 text-aside text-reject">
           {failed}
         </p>
       ) : null}
@@ -368,7 +368,7 @@ function Dot({ cell, of, today, picked, onPick }: { cell: Cell; of: number; toda
       aria-pressed={picked}
       onClick={onPick}
       className={cn(
-        "tap-y flex h-9 items-center justify-center rounded-lg outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+        "tap-y flex h-9 items-center justify-center rounded-lg focus-ring",
         cell.day === today && "bg-glass-raised",
         picked && "ring-1 ring-edge",
       )}
@@ -380,8 +380,8 @@ function Dot({ cell, of, today, picked, onPick }: { cell: Cell; of: number; toda
           aria-hidden
           className={cn(
             "flex size-[1.125rem] items-center justify-center rounded-full",
-            mark === "done" && "bg-approve/85 text-background",
-            mark === "missed" && "bg-reject/15 text-reject",
+            mark === "done" && "bg-approve text-background",
+            mark === "missed" && "bg-reject-wash text-reject",
             !mark && cell.asks && cell.open && "border border-edge",
             !mark && !(cell.asks && cell.open) && "size-[3px] bg-faint/40",
           )}
@@ -420,10 +420,10 @@ function Plain({ goal, onOpen }: { goal: Goal; onOpen: () => void }) {
       <button
         type="button"
         onClick={onOpen}
-        className="flex min-h-11 w-full items-baseline justify-between gap-3 rounded-md py-2.5 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+        className="flex min-h-11 w-full items-baseline justify-between gap-3 rounded-md py-2.5 text-left focus-ring"
       >
-        <span className="min-w-0 truncate text-[14px] text-foreground/85">{goal.title}</span>
-        <span className="shrink-0 text-[12px] text-faint">{goal.progress.says}</span>
+        <span className="min-w-0 truncate text-body text-ink">{goal.title}</span>
+        <span className="shrink-0 text-aside text-faint">{goal.progress.says}</span>
       </button>
     </li>
   );

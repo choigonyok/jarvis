@@ -44,14 +44,14 @@ export function NoticeCard({
     <section className="relative w-full max-w-[34rem] rounded-xl bg-glass-raised px-4 py-3.5 sm:px-5">
       {copied ? <CopyButton text={copied} label="알림 복사" className="absolute top-0 right-0" /> : null}
       {why ? (
-        <p className={cn("flex items-center gap-1.5 text-[11.5px] text-faint", copied && "pr-7")} data-search-skip>
+        <p className={cn("flex items-center gap-1.5 text-meta text-faint", copied && "pr-7")} data-search-skip>
           <BellRing aria-hidden className="size-3.5 shrink-0" strokeWidth={1.8} />
           <span className="min-w-0">{why}</span>
         </p>
       ) : null}
-      {said ? <h3 className={cn("text-[15px] leading-snug font-medium text-foreground", why && "mt-1.5", copied && !why && "pr-7")}>{said}</h3> : null}
+      {said ? <h3 className={cn("text-title leading-snug font-medium text-foreground", why && "mt-1.5", copied && !why && "pr-7")}>{said}</h3> : null}
       {body ? (
-        <div className={cn("mt-1 text-[13.5px] leading-relaxed text-dim [&_p]:my-0 [&_ul]:my-1", !open && long && "line-clamp-4")}>
+        <div className={cn("mt-1 text-ui leading-relaxed text-dim [&_p]:my-0 [&_ul]:my-1", !open && long && "line-clamp-4")}>
           <Markdown>{body}</Markdown>
         </div>
       ) : null}
@@ -60,7 +60,7 @@ export function NoticeCard({
           type="button"
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
-          className="tap mt-1 text-[12px] text-faint outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="tap mt-1 text-aside text-faint hover:text-dim focus-ring"
           data-search-skip
         >
           {open ? "접기" : "더 보기"}

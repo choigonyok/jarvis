@@ -8,9 +8,11 @@ import { RealizedSection } from "@/components/assets/realized";
 import { ProfitLines, ProfitOther, Row } from "@/components/assets/summary";
 import { AllocationDetail, DriftColumns } from "@/components/assets/target";
 import { Track } from "@/components/assets/track";
+import { Failed } from "@/components/shell/failed";
 import { Header, TabBar } from "@/components/shell/header";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { AsOf } from "@/components/shell/as-of";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { useKept } from "@/lib/keep";
 import {
   checkRebalance,
@@ -182,17 +184,17 @@ export function Assets() {
       <StandingBar pending={waiting} />
 
       <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
-        <div className="mx-auto w-full max-w-[42rem] px-4 pt-5 pb-12 sm:px-8 sm:pt-7 sm:pb-6 lg:grid lg:max-w-[72rem] lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)] lg:gap-14">
+        <div className="mx-auto w-full max-w-page px-4 pt-5 pb-12 sm:px-8 sm:pt-7 sm:pb-6 lg:grid lg:max-w-page-wider lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)] lg:gap-14">
           <div className="min-w-0">
             <div className="mb-6 flex items-start justify-between gap-4">
               <div>
-                <p className="text-[12px] text-faint">총자산</p>
-                <p className="tnum mt-0.5 text-[26px] leading-none font-semibold tracking-tight text-foreground sm:text-[30px]">
+                <p className="text-aside text-faint">총자산</p>
+                <p className="tnum mt-0.5 text-display leading-none font-semibold tracking-tight text-foreground">
                   {data ? krw(data.totalKrw) : "—"}
                 </p>
                 {data ? (
-                  <p className="tnum mt-2 text-[13px]">
-                    <span className={cn(up ? "text-approve/80" : "text-reject/80")}>
+                  <p className="tnum mt-2 text-ui">
+                    <span className={cn(up ? "text-approve" : "text-reject")}>
                       {signedKrw(profit)}
                     </span>
                     <span className="ms-2 text-dim">{percent(rate)}</span>
@@ -202,6 +204,10 @@ export function Assets() {
                         : "평가손익 (원금 기록을 읽지 못함)"}
                     </span>
                   </p>
+                ) : loading ? (
+                  // The profit line's place while the total is read: it arrives
+                  // into it rather than pushing the holdings down.
+                  <p aria-hidden className="mt-2 h-5 w-48 rounded bg-well" />
                 ) : null}
                 {data ? (
                   <AsOf
@@ -223,7 +229,7 @@ export function Assets() {
                 onClick={() => void load(true)}
                 disabled={loading}
                 aria-label="잔고 새로 불러오기"
-                className="tap flex shrink-0 items-center justify-center rounded-lg text-faint transition-colors outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-40 mouse:size-9 mouse:min-h-0 mouse:min-w-0"
+                className="tap flex shrink-0 items-center justify-center rounded-lg text-faint transition-colors hover:text-dim focus-ring disabled:opacity-40 mouse:size-9 mouse:min-h-0 mouse:min-w-0"
               >
                 <RefreshCw
                   aria-hidden
@@ -235,12 +241,7 @@ export function Assets() {
             {/* Nothing read yet: the whole screen says it. A refresh that
                 failed over figures already shown is said on their line. */}
             {error && !data ? (
-              <p
-                role="status"
-                className="mb-5 border-l-2 border-reject pl-3 text-[13.5px] leading-relaxed text-dim"
-              >
-                {error} 키 설정을 확인하고 다시 시도해 주세요.
-              </p>
+              <Failed className="mb-5">{error} 키 설정을 확인하고 다시 시도해 주세요.</Failed>
             ) : null}
 
             {/* A venue that failed is named. A total quietly missing a holding
@@ -248,11 +249,8 @@ export function Assets() {
             {data?.problems.length ? (
               <ul className="mb-5 space-y-1">
                 {data.problems.map((problem) => (
-                  <li
-                    key={problem}
-                    className="border-l-2 border-reject/60 pl-3 text-[12.5px] leading-relaxed text-dim"
-                  >
-                    {problem}
+                  <li key={problem}>
+                    <Failed quiet>{problem}</Failed>
                   </li>
                 ))}
               </ul>
@@ -280,7 +278,7 @@ export function Assets() {
                   {bridge ? (
                     <ProfitLines {...bridge} />
                   ) : (
-                    <span className="tnum text-[13px] text-dim">평가손익 {signedKrw(unrealizedKrw)}</span>
+                    <span className="tnum text-ui text-dim">평가손익 {signedKrw(unrealizedKrw)}</span>
                   )}
                 </Row>
 
@@ -311,13 +309,13 @@ export function Assets() {
                     }
                   >
                     {offBand.length ? (
-                      <p className="flex items-baseline gap-2 text-[13px] text-foreground/90">
+                      <p className="flex items-baseline gap-2 text-ui text-ink">
                         <span aria-hidden className="size-1.5 shrink-0 self-center rounded-full bg-reject" />
                         비정상
-                        <span className="text-[12px] text-dim">{fixes.join(" · ")}</span>
+                        <span className="text-aside text-dim">{fixes.join(" · ")}</span>
                       </p>
                     ) : (
-                      <p className="text-[13px] text-dim">정상</p>
+                      <p className="text-ui text-dim">정상</p>
                     )}
                     <div className="mt-3">
                       <DriftColumns allocation={allocation} />
@@ -339,13 +337,13 @@ export function Assets() {
                       ) : undefined
                     }
                   >
-                    <p className="tnum text-[13px] text-foreground/90">
+                    <p className="tnum text-ui text-ink">
                       {krw(principal.principalKrw)}
                       <span className="ms-2 text-faint">{since}부터 넣은 돈</span>
                     </p>
                     {/* A ledger that disagrees with the trades is the one thing said here. */}
                     {principal.checks?.map((c) => (
-                      <p key={`${c.kind}-${c.date ?? ""}`} className="mt-1 text-[12px] leading-relaxed text-dim">
+                      <p key={`${c.kind}-${c.date ?? ""}`} className="mt-1 text-aside leading-relaxed text-dim">
                         <span aria-hidden className="me-1.5 inline-block size-1.5 rounded-full bg-reject align-middle" />
                         {c.message}
                       </p>
@@ -362,7 +360,7 @@ export function Assets() {
                   onToggle={() => toggle("orders")}
                   detail={<OrderRecord orders={record} holdings={data.holdings} standing={standing} onChanged={reloadRecord} />}
                 >
-                  <p className="text-[13px] text-dim">
+                  <p className="text-ui text-dim">
                     {standing.some((o) => o.status === "active")
                       ? `대기 주문 ${standing.filter((o) => o.status === "active").length}건 · ` +
                         standing
@@ -381,7 +379,7 @@ export function Assets() {
           <div className="min-w-0 max-lg:mt-8">
             {data && data.holdings.length > 0 ? (
               <section aria-label="보유 종목">
-                <p className="mb-1 px-2 text-[12px] text-faint">보유</p>
+                <p className="mb-1 px-2 text-aside text-faint">보유</p>
                 <div className="space-y-0.5">
                   {data.holdings.map((h) => {
                     const profit = profitOf(h);
@@ -395,13 +393,13 @@ export function Assets() {
                         data-focus={`holding:${h.id}`}
                         onClick={() => setOrdering(h)}
                         aria-label={`${h.name} 주문`}
-                        className="flex w-full items-baseline gap-3 rounded-lg px-2 py-2.5 text-left transition-colors outline-none hover:bg-glass focus-visible:ring-3 focus-visible:ring-ring/50"
+                        className="flex w-full items-baseline gap-3 rounded-lg px-2 py-2.5 text-left transition-colors hover:bg-glass focus-ring"
                       >
                         <span className="block min-w-0 flex-1">
-                          <span className="block truncate text-[14px] text-foreground/90">
+                          <span className="block truncate text-body text-ink">
                             {h.name}
                           </span>
-                          <span className="block tnum mt-0.5 text-[11.5px] text-faint">
+                          <span className="block tnum mt-0.5 text-meta text-faint">
                             {quantity(h.quantity)}
                             {h.kind === "stock" ? "주" : h.kind === "gold" ? "g" : ""} · 평단{" "}
                             {h.currency === "USD"
@@ -411,22 +409,22 @@ export function Assets() {
                           </span>
                         </span>
                         <span className="block shrink-0 text-right">
-                          <span className="block tnum text-[14px] text-foreground/90">
+                          <span className="block tnum text-body text-ink">
                             {krw(h.valueKrw)}
                           </span>
                           <span
                             className={cn(
-                              "tnum mt-0.5 block text-[11.5px]",
-                              gain ? "text-approve/75" : "text-reject/75",
+                              "tnum mt-0.5 block text-meta",
+                              gain ? "text-approve" : "text-reject",
                             )}
                           >
                             {percent(rateOf(h))}{" "}
                             <span className="text-faint">{signedKrw(profit)}</span>
                           </span>
                           {sold !== 0 ? (
-                            <span className="block tnum mt-0.5 text-[11.5px] text-faint">
+                            <span className="block tnum mt-0.5 text-meta text-faint">
                               판 것{" "}
-                              <span className={sold >= 0 ? "text-approve/75" : "text-reject/75"}>{signedKrw(sold)}</span>
+                              <span className={sold >= 0 ? "text-approve" : "text-reject"}>{signedKrw(sold)}</span>
                               <span className="ms-1.5">합계 {signedKrw(profit + sold)}</span>
                             </span>
                           ) : null}
@@ -444,23 +442,23 @@ export function Assets() {
                     .map((c) => (
                       <div key={c.id} className="flex items-baseline gap-3 rounded-lg px-2 py-2.5">
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-[14px] text-foreground/90">
+                          <p className="truncate text-body text-ink">
                             {c.currency === "USD" ? "달러" : "원화"}
-                            <span className="ms-2 text-[12px] text-faint">{c.label}</span>
+                            <span className="ms-2 text-aside text-faint">{c.label}</span>
                           </p>
-                          <p className="tnum mt-0.5 text-[11.5px] text-faint">
+                          <p className="tnum mt-0.5 text-meta text-faint">
                             현금
                             {data.totalKrw > 0 ? ` · ${Math.round((c.valueKrw / data.totalKrw) * 100)}%` : ""}
                           </p>
                         </div>
                         <div className="shrink-0 text-right">
-                          <p className="tnum text-[14px] text-foreground/90">
+                          <p className="tnum text-body text-ink">
                             {c.currency === "USD"
                               ? `$${c.amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                               : krw(c.amount)}
                           </p>
                           {c.currency === "USD" ? (
-                            <p className="tnum mt-0.5 text-[11.5px] text-faint">{krw(c.valueKrw)}</p>
+                            <p className="tnum mt-0.5 text-meta text-faint">{krw(c.valueKrw)}</p>
                           ) : null}
                         </div>
                       </div>
@@ -468,22 +466,24 @@ export function Assets() {
                   {(data.fixed ?? []).map((f) => (
                     <div key={f.id} className="flex items-baseline gap-3 rounded-lg px-2 py-2.5">
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-[14px] text-foreground/90">{f.label}</p>
-                        <p className="tnum mt-0.5 text-[11.5px] text-faint">
+                        <p className="truncate text-body text-ink">{f.label}</p>
+                        <p className="tnum mt-0.5 text-meta text-faint">
                           고정 · 비중 계산 제외
                           {data.totalKrw > 0 ? ` · ${Math.round((f.valueKrw / data.totalKrw) * 100)}%` : ""}
                         </p>
                       </div>
-                      <p className="tnum shrink-0 text-right text-[14px] text-foreground/90">{krw(f.valueKrw)}</p>
+                      <p className="tnum shrink-0 text-right text-body text-ink">{krw(f.valueKrw)}</p>
                     </div>
                   ))}
                 </div>
               </section>
             ) : !loading && !error && data ? (
-              <p className="text-[13.5px] leading-relaxed text-faint">
-                보유 중인 종목이 없어요. 업비트나 증권 계좌에 자산이 생기면 여기에
-                나타나요.
-              </p>
+              <Empty align="start" className="py-6">
+                <EmptyHeader>
+                  <EmptyTitle>보유 중인 종목이 없어요</EmptyTitle>
+                  <EmptyDescription>업비트나 증권 계좌에 자산이 생기면 여기에 나타나요.</EmptyDescription>
+                </EmptyHeader>
+              </Empty>
             ) : null}
           </div>
 
@@ -492,11 +492,11 @@ export function Assets() {
           {data && data.holdings.length > 0 ? (
             <section aria-labelledby="assets-track-title" className="mt-10 lg:col-span-2">
               <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-                <h2 id="assets-track-title" className="text-[13px] text-dim">
+                <h2 id="assets-track-title" className="text-ui text-dim">
                   자산 변화
                 </h2>
                 {first && track.length >= 2 ? (
-                  <p className="tnum text-[12px] text-faint">
+                  <p className="tnum text-aside text-faint">
                     {Number(first.date.slice(5, 7))}/{Number(first.date.slice(8, 10))}부터{" "}
                     <span className="whitespace-nowrap">
                       {krw(first.totalKrw)} → {krw(data.totalKrw)}

@@ -1,5 +1,5 @@
 import * as React from "react"
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 
 import {
   Collapsible,
@@ -35,7 +35,7 @@ function TraceLine({
       className={cn(
         // A step said in a line of grey; the one being done now has a light
         // passing over its words (shimmer) - none where motion is reduced.
-        "flex w-fit max-w-full min-w-0 items-center gap-2 text-[13px] text-dim transition-colors in-[a,button]:cursor-pointer in-[a:hover,button:hover]:text-foreground data-[status=done]:text-faint data-[status=error]:text-reject data-[status=error]:in-[a:hover,button:hover]:text-reject data-[status=pending]:opacity-60 data-[status=running]:*:data-[slot=trace-title]:shimmer",
+        "flex w-fit max-w-full min-w-0 items-center gap-2 text-ui text-dim transition-colors in-[a,button]:cursor-pointer in-[a:hover,button:hover]:text-foreground data-[status=done]:text-faint data-[status=error]:text-reject data-[status=error]:in-[a:hover,button:hover]:text-reject data-[status=pending]:opacity-60 data-[status=running]:*:data-[slot=trace-title]:shimmer",
         className
       )}
       {...props}
@@ -114,7 +114,7 @@ function TraceCollapsibleTrigger({
     <CollapsibleTrigger
       data-slot="trace-collapsible-trigger"
       className={cn(
-        "group/trace-collapsible-trigger flex w-fit max-w-full min-w-0 cursor-pointer items-center gap-1 rounded-md text-left text-faint transition-colors outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50 has-[[data-status=error]]:text-reject",
+        "group/trace-collapsible-trigger flex w-fit max-w-full min-w-0 cursor-pointer items-center gap-1 rounded-md text-left text-faint transition-colors hover:text-dim focus-ring has-[[data-status=error]]:text-reject",
         className
       )}
       {...props}

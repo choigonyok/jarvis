@@ -14,7 +14,7 @@ import type { Step } from "@/lib/thread";
 export function Working({ steps }: { steps: Step[] }) {
   if (steps.length === 0) {
     return (
-      <Marker className="min-h-6 text-[13px] text-dim">
+      <Marker className="min-h-6 text-ui text-dim">
         <MarkerContent className="shimmer motion-reduce:shimmer-none">생각하는 중</MarkerContent>
       </Marker>
     );

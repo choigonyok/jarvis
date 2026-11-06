@@ -67,14 +67,14 @@ export function Notes({ notes, onChange }: { notes: Note[]; onChange: (n: Note) 
           <button
             type="button"
             onClick={() => setShowRejected(true)}
-            className="flex min-h-12 w-full items-center gap-3 py-3 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+            className="flex min-h-12 w-full items-center gap-3 py-3 text-left focus-ring"
           >
             <Mark status="rejected" />
-            <span className="min-w-0 flex-1 text-[14.5px] text-foreground/90">
+            <span className="min-w-0 flex-1 text-body text-ink">
               아니라고 한 노트 {tucked.length}개
-              <span className="mt-0.5 block text-[13px] text-faint">다시 만들지 않아요.</span>
+              <span className="mt-0.5 block text-ui text-faint">다시 만들지 않아요.</span>
             </span>
-            <span className="shrink-0 text-[12px] text-faint">펼치기</span>
+            <span className="shrink-0 text-aside text-faint">펼치기</span>
           </button>
         </li>
       ) : null}
@@ -181,27 +181,27 @@ function NoteRow({
       <CollapsibleTrigger asChild>
       <button
         type="button"
-        className="flex w-full items-start gap-3 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+        className="flex w-full items-start gap-3 text-left focus-ring"
       >
         <Mark status={note.status} className="mt-[8px]" />
         <span className="min-w-0 flex-1">
           <span className="flex items-baseline justify-between gap-3">
             <span
               className={cn(
-                "text-[15px] leading-[1.5] break-keep text-pretty",
-                asking ? "text-foreground" : gone ? "text-faint line-through decoration-faint/60" : "text-foreground/90",
+                "text-title leading-[1.5] break-keep text-pretty",
+                asking ? "text-foreground" : gone ? "text-faint line-through decoration-faint/60" : "text-ink",
               )}
             >
               {note.text}
             </span>
             {note.scope === RULE_SCOPE ? null : (
-              <span className={cn("tnum shrink-0 text-[13px]", gone ? "text-faint" : "text-foreground/80")}>
-                <span className="hidden text-[11.5px] text-faint sm:inline">확신 </span>
+              <span className={cn("tnum shrink-0 text-ui", gone ? "text-faint" : "text-ink")}>
+                <span className="hidden text-meta text-faint sm:inline">확신 </span>
                 {pct(note.confidence)}
               </span>
             )}
           </span>
-          <span className="mt-0.5 block text-[12.5px] leading-[1.55] text-faint">
+          <span className="mt-0.5 block text-aside leading-[1.55] text-faint">
             {[
               scope,
               note.scope === RULE_SCOPE
@@ -224,7 +224,7 @@ function NoteRow({
 
       <div className="ms-[19px] me-7">
         {said && mode === "idle" ? (
-          <p role="status" className="anim-settle mt-2 flex items-center gap-1.5 text-[12px] text-dim">
+          <p role="status" className="anim-settle mt-2 flex items-center gap-1.5 text-aside text-dim">
             {note.status === "rejected" ? (
               <X aria-hidden className="size-3.5 text-reject" />
             ) : (
@@ -238,7 +238,7 @@ function NoteRow({
 
         {mode === "why" ? (
           <div className="anim-settle mt-2.5 space-y-2">
-            <p className="text-[12.5px] text-dim">
+            <p className="text-aside text-dim">
               {rule
                 ? "거두면 Jarvis가 더는 따르지 않아요. 이유가 있으면 적어 주세요(비워도 돼요)."
                 : "왜 아닌가요? 비워도 돼요. 적어 두면 다음 노트를 만들 때 읽어요."}
@@ -249,7 +249,7 @@ function NoteRow({
               placeholder={rule ? "예: 이제는 넣어도 돼" : "예: 그날은 비가 와서 그랬어"}
               aria-label="아닌 이유"
               maxLength={300}
-              className="mouse:h-8 mouse:text-[13.5px]"
+              className="mouse:h-8 mouse:text-ui"
             />
             <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-1.5">
               <Button variant="quiet" size="pair-sm" onClick={() => setMode("idle")} disabled={busy}>
@@ -307,13 +307,13 @@ function NoteRow({
         ) : null}
 
         {error ? (
-          <p role="alert" className="mt-2 text-[12px] text-reject">
+          <p role="alert" className="mt-2 text-aside text-reject">
             {error}
           </p>
         ) : null}
       </div>
 
-      <CollapsibleContent className="anim-settle mt-3 mb-1 ms-[19px] space-y-3 border-s border-edge ps-4 text-[12.5px] leading-[1.6] break-keep">
+      <CollapsibleContent className="anim-settle mt-3 mb-1 ms-[19px] space-y-3 border-s border-edge ps-4 text-aside leading-[1.6] break-keep">
           {note.evidence && note.evidence.length > 0 ? (
             <div>
               <p className="text-faint">근거</p>
@@ -382,7 +382,7 @@ function TextButton({ onClick, disabled, children }: { onClick: () => void; disa
 }
 
 /** The answer that can wait (고치기): fainter than the two that settle the note. */
-const later = "px-3 text-[13px] text-faint";
+const later = "px-3 text-ui text-faint";
 
 const markLabel: Record<NoteStatus, string> = { hypothesis: "확인 전", confirmed: "맞음", rejected: "아님" };
 
@@ -399,7 +399,7 @@ function Mark({ status, className }: { status: NoteStatus; className?: string })
       ) : status === "confirmed" ? (
         <span className="size-[6px] rounded-full bg-approve" />
       ) : (
-        <span className="size-[6px] rounded-full bg-reject/70" />
+        <span className="size-[6px] rounded-full bg-reject-fill" />
       )}
     </span>
   );

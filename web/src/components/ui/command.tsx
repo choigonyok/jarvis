@@ -3,7 +3,7 @@
 import * as React from "react"
 import { Command as CommandPrimitive } from "cmdk"
 import { SearchIcon } from "lucide-react"
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 
 import { InputGroup, InputGroupAddon } from "@/components/ui/input-group"
 
@@ -49,7 +49,7 @@ function CommandInput({
       <CommandPrimitive.Input
         data-slot="input-group-control"
         className={cn(
-          "h-full min-w-0 flex-1 bg-transparent pr-3 text-[16px] text-foreground outline-none placeholder:text-faint disabled:cursor-not-allowed disabled:opacity-50 mouse:text-[13px]",
+          "h-full min-w-0 flex-1 bg-transparent pr-3 text-field text-foreground outline-none placeholder:text-faint disabled:cursor-not-allowed disabled:opacity-50 mouse:text-ui",
           icon ? "pl-1.5" : "pl-3",
           className
         )}
@@ -84,7 +84,7 @@ function CommandEmpty({
   return (
     <CommandPrimitive.Empty
       data-slot="command-empty"
-      className={cn("px-2 py-4 text-[13px] text-faint", className)}
+      className={cn("px-2 py-4 text-ui text-faint", className)}
       {...props}
     />
   )
@@ -98,7 +98,7 @@ function CommandGroup({
     <CommandPrimitive.Group
       data-slot="command-group"
       className={cn(
-        "**:[[cmdk-group-heading]]:px-2 **:[[cmdk-group-heading]]:py-1.5 **:[[cmdk-group-heading]]:text-[11.5px] **:[[cmdk-group-heading]]:text-faint",
+        "**:[[cmdk-group-heading]]:px-2 **:[[cmdk-group-heading]]:py-1.5 **:[[cmdk-group-heading]]:text-meta **:[[cmdk-group-heading]]:text-faint",
         className
       )}
       {...props}

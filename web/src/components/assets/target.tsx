@@ -96,8 +96,8 @@ export function DriftColumns({ allocation }: { allocation: Allocation }) {
                 />
               ) : null}
             </svg>
-            <p className={cn("mt-1 truncate text-[11px]", r.inBand ? "text-faint" : "text-foreground")}>{SHORT[r.id]}</p>
-            <p className={cn("tnum text-[11px]", r.inBand ? "text-faint" : "font-semibold text-foreground")}>
+            <p className={cn("mt-1 truncate text-meta", r.inBand ? "text-faint" : "text-foreground")}>{SHORT[r.id]}</p>
+            <p className={cn("tnum text-meta", r.inBand ? "text-faint" : "font-semibold text-foreground")}>
               {r.spent ? "제외" : pp === 0 ? "0" : `${pp > 0 ? "+" : "−"}${Math.abs(pp)}%p`}
             </p>
           </li>
@@ -164,27 +164,27 @@ export function AllocationDetail({
     <div className="space-y-2.5">
       <ul className="divide-y divide-edge-soft border-y border-edge-soft">
         {rows.map((r) => (
-          <li key={r.id} data-focus={`allocation:${r.id}`} className="tnum flex items-baseline gap-2 py-2 text-[12.5px]">
+          <li key={r.id} data-focus={`allocation:${r.id}`} className="tnum flex items-baseline gap-2 py-2 text-aside">
             <Dot id={r.id} />
             <span className="min-w-0 flex-1 truncate">
               <span className={r.inBand ? "text-dim" : "text-foreground"}>{r.label}</span>
-              {r.symbols.length ? <span className="ms-1.5 text-[11px] text-faint">{r.symbols.join(" ")}</span> : null}
+              {r.symbols.length ? <span className="ms-1.5 text-meta text-faint">{r.symbols.join(" ")}</span> : null}
             </span>
             <span className={r.inBand ? "text-dim" : "font-semibold text-foreground"}>{pct(r.current)}</span>
             <span className="text-faint">→ {pct(r.target)}</span>
-            <span className="w-[5.5rem] shrink-0 text-right text-[11.5px] text-faint">
+            <span className="w-[5.5rem] shrink-0 text-right text-meta text-faint">
               {r.spent ? "계산 제외" : Math.abs(r.gapKrw) < 10_000 ? "맞음" : `${krwShort(Math.abs(r.gapKrw))} ${r.gapKrw > 0 ? "부족" : "많음"}`}
             </span>
           </li>
         ))}
       </ul>
-      <p className="text-[11px] leading-relaxed text-faint">
+      <p className="text-meta leading-relaxed text-faint">
         허용 범위는 목표 ±7%p, 비중이 작은 자산은 목표의 절반까지예요. 그림의 옅은 띠가 그 범위예요.
         {rows.some((r) => r.spent) ? " 현금이 목표보다 적으면 리밸런싱에 쓴 돈으로 보고 계산에서 빼요." : ""}
       </p>
 
       {rebalance.orders.length || rebalance.unpicked.length ? (
-        <div className="text-[12.5px] leading-relaxed">
+        <div className="text-aside leading-relaxed">
           <p className="text-dim">
             주 단위로 맞추면{" "}
             {[
@@ -206,7 +206,7 @@ export function AllocationDetail({
         </div>
       ) : null}
 
-      <label className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[12.5px] text-dim">
+      <label className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-aside text-dim">
         <span className="shrink-0">새로 넣을 돈</span>
         <span className="relative">
           <input
@@ -214,9 +214,9 @@ export function AllocationDetail({
             value={deposit ? deposit.toLocaleString("ko-KR") : ""}
             onChange={(e) => setAmount(e.target.value)}
             placeholder="예: 1,000,000"
-            className="tnum h-9 w-36 rounded-lg border border-edge-soft bg-glass px-2.5 pe-7 text-[16px] text-foreground outline-none placeholder:text-faint focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-8 mouse:text-[13px]"
+            className="tnum h-9 w-36 rounded-lg border border-edge-soft bg-glass px-2.5 pe-7 text-field text-foreground placeholder:text-faint focus-ring mouse:h-8 mouse:text-ui"
           />
-          <span aria-hidden className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-[12px] text-faint">
+          <span aria-hidden className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-aside text-faint">
             원
           </span>
         </span>
@@ -240,7 +240,7 @@ export function AllocationDetail({
 
 /** Opens a confirm sheet - quiet, since the sheet holds the one bright button. */
 const planButton =
-  "tap mt-1 inline-flex items-center rounded-lg bg-glass px-3 text-[12.5px] text-foreground/90 outline-none transition-colors hover:bg-glass-raised focus-visible:ring-3 focus-visible:ring-ring/50";
+  "tap mt-1 inline-flex items-center rounded-lg bg-glass px-3 text-aside text-ink transition-colors hover:bg-glass-raised focus-ring";
 
 /** ₩136,000 → "₩13.6만"; under ten thousand stays in won. */
 function krwShort(v: number): string {

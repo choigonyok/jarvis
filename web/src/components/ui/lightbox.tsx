@@ -58,7 +58,7 @@ export function Lightbox({ items, start = 0, onClose }: { items: LightboxItem[];
           >
             <X aria-hidden className="size-5" />
           </button>
-          <p className="tnum min-w-0 flex-1 truncate text-[12.5px] text-white/75">
+          <p className="tnum min-w-0 flex-1 truncate text-aside text-white/75">
             {item.title ?? ""}
             {many ? (
               <span className={cn("text-white/45", item.title && "ms-2")}>

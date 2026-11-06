@@ -317,12 +317,12 @@ function HeaderView({
         scrollPageToTop();
       }}
     >
-      <div className="mx-auto flex h-13 w-full max-w-[56rem] items-center justify-between gap-2 px-4 sm:h-14 sm:px-8">
+      <div className="mx-auto flex h-13 w-full max-w-page items-center justify-between gap-2 px-4 sm:h-14 sm:px-8">
         <div className="flex min-w-0 items-baseline gap-3">
           {/* On a phone a place's screens stand where the name stood. */}
           <h1
             className={cn(
-              "shrink-0 text-[15px] font-semibold tracking-tight text-foreground select-none",
+              "shrink-0 text-title font-semibold tracking-tight text-foreground select-none",
               strip && "max-sm:sr-only",
             )}
             onClick={secretTap}
@@ -348,7 +348,7 @@ function HeaderView({
                   }}
                   aria-current={active ? "page" : undefined}
                   className={cn(
-                    "inline-flex h-11 shrink-0 items-center rounded-sm px-1.5 text-[13px] whitespace-nowrap transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-auto mouse:px-0",
+                    "inline-flex h-11 shrink-0 items-center rounded-sm px-1.5 text-ui whitespace-nowrap transition-colors focus-ring mouse:h-auto mouse:px-0",
                     active ? "text-foreground" : "text-faint hover:text-dim",
                   )}
                 >
@@ -373,7 +373,7 @@ function HeaderView({
           {/* Each person's own: the guest's inbox holds their jarvis's cards
               and the shared calendar, never the operator's arrivals. */}
           <Notifications />
-          <span className="flex items-center gap-1.5 text-[11.5px] text-faint">
+          <span className="flex items-center gap-1.5 text-meta text-faint">
             <span
               aria-hidden
               className={cn(
@@ -388,7 +388,7 @@ function HeaderView({
             <span className={cn(dropped ? "text-dim" : "hidden sm:inline")}>{status.label}</span>
             {dropped ? null : <span className="sr-only sm:hidden">{status.label}</span>}
           </span>
-          <p className="hidden text-[11.5px] text-faint lg:block" aria-live="polite">
+          <p className="hidden text-meta text-faint lg:block" aria-live="polite">
             {pending > 0 ? `결재 대기 ${pending}건` : "결재 대기 없음"}
           </p>
           {/* 더보기 has it on a phone: the name's row is the screens' now. */}
@@ -397,7 +397,7 @@ function HeaderView({
             onClick={() => void signOut()}
             aria-label="로그아웃"
             className={cn(
-              "-mr-2 h-11 min-w-11 items-center justify-center rounded-lg text-faint transition-colors outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50 sm:mr-0 sm:px-1.5 sm:text-[11.5px] mouse:h-auto mouse:min-w-0 mouse:px-0",
+              "-mr-2 h-11 min-w-11 items-center justify-center rounded-lg text-faint transition-colors hover:text-dim focus-ring sm:mr-0 sm:px-1.5 sm:text-meta mouse:h-auto mouse:min-w-0 mouse:px-0",
               role === "guest" ? "flex" : "hidden sm:flex",
             )}
           >
@@ -420,9 +420,9 @@ function HeaderView({
 function Offline() {
   return (
     <div role="status" className="border-t border-edge-soft bg-glass">
-      <div className="mx-auto flex w-full max-w-[46rem] items-center gap-2.5 px-4 py-2 sm:px-8">
+      <div className="mx-auto flex w-full max-w-page items-center gap-2.5 px-4 py-2 sm:px-8">
         <WifiOff aria-hidden className="size-3.5 shrink-0 text-faint" strokeWidth={1.8} />
-        <p className="min-w-0 flex-1 text-[12.5px] text-dim">인터넷 연결이 없어요 · 연결되면 다시 읽어요</p>
+        <p className="min-w-0 flex-1 text-aside text-dim">인터넷 연결이 없어요 · 연결되면 다시 읽어요</p>
       </div>
     </div>
   );
@@ -489,15 +489,15 @@ function Strip({
               if (tab.href !== pathname) startNavigation(() => router.push(tab.href));
             }}
             className={cn(
-              "inline-flex h-11 shrink-0 items-center gap-1 rounded-sm px-1.5 whitespace-nowrap transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
-              wide ? "text-[13px] mouse:h-auto mouse:px-0" : "max-sm:first:-ml-1.5",
+              "inline-flex h-11 shrink-0 items-center gap-1 rounded-sm px-1.5 whitespace-nowrap transition-colors focus-ring",
+              wide ? "text-ui mouse:h-auto mouse:px-0" : "max-sm:first:-ml-1.5",
               wide
                 ? active
                   ? "text-foreground"
                   : "text-faint hover:text-dim"
                 : active
-                  ? "text-[15px] font-semibold tracking-tight text-foreground"
-                  : "text-[14px] text-faint",
+                  ? "text-title font-semibold tracking-tight text-foreground"
+                  : "text-body text-faint",
             )}
           >
             {tab.label}
@@ -703,9 +703,9 @@ function TabBarView({
   // width (below) is what keeps the targets, and on a narrow phone each share
   // gives a little instead of pushing the last one off the screen.
   const item =
-    "liquid-press relative z-10 flex min-h-11 min-w-0 flex-1 flex-col items-center justify-center gap-[3px] rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50";
+    "liquid-press relative z-10 flex min-h-11 min-w-0 flex-1 flex-col items-center justify-center gap-[3px] rounded-full focus-ring";
   const icon = worded ? "size-5" : "size-[22px]";
-  const word = (label: string) => (worded ? <span className="text-[10.5px] leading-none">{label}</span> : null);
+  const word = (label: string) => (worded ? <span className="text-tiny leading-none">{label}</span> : null);
 
   return (
     <nav
@@ -849,7 +849,7 @@ function TabBarView({
               </SheetTrigger>
               <BottomSheetContent width="full" keepFocus={false} aria-describedby={undefined} className="gap-4">
                 <BottomSheetHeader className="pb-1 sm:px-4">
-                  <BottomSheetTitle className="pr-0 text-[14px]">다른 화면</BottomSheetTitle>
+                  <BottomSheetTitle className="pr-0 text-body">다른 화면</BottomSheetTitle>
                 </BottomSheetHeader>
                 <ScreenList
                   tabs={hubs[moreSlot].screens}
@@ -864,7 +864,7 @@ function TabBarView({
                   <button
                     type="button"
                     onClick={() => void signOut()}
-                    className="flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-[14.5px] text-dim outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                    className="flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-body text-dim focus-ring"
                   >
                     <LogOut aria-hidden className="size-[18px]" strokeWidth={1.8} />
                     로그아웃
@@ -905,7 +905,7 @@ function TabBarView({
                   openScreen(menu.slot, tab.href);
                 }}
                 className={cn(
-                  "flex h-12 items-center gap-2.5 rounded-[1.1rem] px-3 text-[14.5px] transition-colors duration-75 outline-none select-none focus-visible:ring-3 focus-visible:ring-ring/50",
+                  "flex h-12 items-center gap-2.5 rounded-[1.1rem] px-3 text-body transition-colors duration-75 select-none focus-ring",
                   i === menu.at ? "bg-glass-raised text-foreground" : tab.href === pathname ? "text-foreground" : "text-dim",
                 )}
               >
@@ -952,7 +952,7 @@ function ScreenList({
             aria-current={active ? "page" : undefined}
             aria-label={marked ? `${tab.label}, 결재 대기 ${pending}건` : undefined}
             className={cn(
-              "flex min-h-12 items-center gap-3 rounded-xl px-3 text-[14.5px] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+              "flex min-h-12 items-center gap-3 rounded-xl px-3 text-body transition-colors focus-ring",
               active ? "bg-glass-raised text-foreground" : "text-dim",
             )}
           >
@@ -982,7 +982,7 @@ export function ScreenMenu({ pending }: { pending: number }) {
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger
         aria-label={pending > 0 ? `다른 화면, 결재 대기 ${pending}건` : "다른 화면"}
-        className="relative flex size-11 items-center justify-center rounded-lg text-faint transition-colors outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50 sm:hidden"
+        className="relative flex size-11 items-center justify-center rounded-lg text-faint transition-colors hover:text-dim focus-ring sm:hidden"
       >
         <LayoutGrid aria-hidden className="size-[18px]" strokeWidth={1.8} />
         {pending > 0 ? (
@@ -991,7 +991,7 @@ export function ScreenMenu({ pending }: { pending: number }) {
       </SheetTrigger>
       <BottomSheetContent width="full" keepFocus={false} aria-describedby={undefined} className="gap-4">
         <BottomSheetHeader className="pb-1 sm:px-4">
-          <BottomSheetTitle className="pr-0 text-[14px]">다른 화면</BottomSheetTitle>
+          <BottomSheetTitle className="pr-0 text-body">다른 화면</BottomSheetTitle>
         </BottomSheetHeader>
         <ScreenList
           tabs={tabs}

@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 import { Toggle as TogglePrimitive } from "radix-ui"
 
 /**
@@ -13,7 +13,7 @@ import { Toggle as TogglePrimitive } from "radix-ui"
  * reject red, a place of one's own in one's own violet (tone).
  */
 const toggleVariants = cva(
-  "group/toggle inline-flex items-center justify-center gap-1.5 whitespace-nowrap transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "group/toggle inline-flex items-center justify-center gap-1.5 whitespace-nowrap transition-colors focus-ring disabled:pointer-events-none disabled:opacity-40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
@@ -30,7 +30,7 @@ const toggleVariants = cva(
       tone: {
         neutral: "",
         reject:
-          "data-[state=on]:border-reject/40 data-[state=on]:bg-reject/10 data-[state=on]:text-reject data-[state=on]:hover:text-reject",
+          "data-[state=on]:border-reject-fill data-[state=on]:bg-reject-wash data-[state=on]:text-reject data-[state=on]:hover:text-reject",
         mine: "border-edge data-[state=on]:border-mine/45 data-[state=on]:bg-mine/12 data-[state=on]:text-foreground",
       },
       size: {
@@ -38,9 +38,9 @@ const toggleVariants = cva(
         sm: "h-7 min-w-7 px-2.5 text-[0.8rem]",
         lg: "h-9 min-w-9 px-2.5",
         // A thumb's on a touch screen, a pointer's under a mouse.
-        touch: "min-h-11 px-3 text-[13px] mouse:min-h-9 mouse:text-[12.5px]",
-        chip: "h-9 px-3 text-[12.5px] mouse:h-7 mouse:text-[12px]",
-        segment: "tap-y min-h-8 px-3 text-[12.5px]",
+        touch: "min-h-11 px-3 text-ui mouse:min-h-9 mouse:text-aside",
+        chip: "h-9 px-3 text-aside mouse:h-7",
+        segment: "tap-y min-h-8 px-3 text-aside",
       },
     },
     defaultVariants: {

@@ -50,7 +50,7 @@ export function ModeTag({ watch, onOpen }: { watch?: Watch; onOpen: () => void }
       onClick={onOpen}
       aria-label={`${label} - 이유 보기`}
       title={label}
-      className="-my-1 ml-auto flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[11.5px] text-faint transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+      className="-my-1 ml-auto flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-meta text-faint transition-colors hover:text-foreground focus-ring"
     >
       {watch.downgraded ? (
         <>
@@ -91,7 +91,7 @@ export function ModesSheet({
         <BottomSheetHeader className="pb-1 sm:px-6">
           <BottomSheetTitle className="pr-0">위치 등록과 모드</BottomSheetTitle>
         </BottomSheetHeader>
-        <div className="mx-auto w-full max-w-[40rem] space-y-6 px-4 pb-8 text-[13px] leading-[1.65] text-dim sm:px-6">
+        <div className="mx-auto w-full max-w-[40rem] space-y-6 px-4 pb-8 text-ui leading-[1.65] text-dim sm:px-6">
           {today ? (
             <Part title="지금">
               <ul className="space-y-3">
@@ -113,7 +113,7 @@ export function ModesSheet({
             <button
               type="button"
               onClick={onRegister}
-              className="mt-3 inline-flex h-11 items-center gap-1.5 rounded-lg bg-glass-raised px-4 text-[13.5px] text-foreground transition-colors outline-none hover:bg-foreground/12 focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-9"
+              className="mt-3 inline-flex h-11 items-center gap-1.5 rounded-lg bg-glass-raised px-4 text-ui text-foreground transition-colors hover:bg-foreground/12 focus-ring mouse:h-9"
             >
               <LocateFixed aria-hidden className="size-4 text-mine" strokeWidth={1.8} />
               지금 위치 등록하기
@@ -157,7 +157,7 @@ export function ModesSheet({
 function Part({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section>
-      <h3 className="mb-1.5 text-[13.5px] font-medium text-foreground">{title}</h3>
+      <h3 className="mb-1.5 text-ui font-medium text-foreground">{title}</h3>
       {children}
     </section>
   );
@@ -166,7 +166,7 @@ function Part({ title, children }: { title: string; children: ReactNode }) {
 function Rule({ term, children }: { term: string; children: ReactNode }) {
   return (
     <div>
-      <dt className="text-foreground/90">{term}</dt>
+      <dt className="text-ink">{term}</dt>
       <dd className="break-keep text-pretty">{children}</dd>
     </div>
   );
@@ -175,7 +175,7 @@ function Rule({ term, children }: { term: string; children: ReactNode }) {
 function Setting({ term, children }: { term: string; children: ReactNode }) {
   return (
     <>
-      <dt className="text-foreground/85">{term}</dt>
+      <dt className="text-ink">{term}</dt>
       <dd className="tnum">{children}</dd>
     </>
   );
@@ -202,7 +202,7 @@ function Phone({ me, track, readAt }: { me: boolean; track?: Track; readAt: numb
         {w ? (
           <>
             <p className="break-keep text-pretty">{reason(w)}</p>
-            <p className="tnum text-[12px] text-faint">
+            <p className="tnum text-aside text-faint">
               {w.batt ? `배터리 ${w.batt}%${w.charging ? " 충전 중" : ""} · ` : ""}
               {ago(since)} 판단
               {since > 6 * 3_600_000 ? ` · 그 뒤로 ${span(since)} 동안 위치가 없어요` : ""}
@@ -213,7 +213,7 @@ function Phone({ me, track, readAt }: { me: boolean; track?: Track; readAt: numb
         )}
         {pending.length ? (
           <p className="mt-1 break-keep text-pretty">
-            OwnTracks에 넣는 중: <span className="text-foreground/85">{pending.join(", ")}</span> · 폰이 다음에 위치를 보낼 때
+            OwnTracks에 넣는 중: <span className="text-ink">{pending.join(", ")}</span> · 폰이 다음에 위치를 보낼 때
             들어가요.
           </p>
         ) : null}

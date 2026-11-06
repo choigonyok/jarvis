@@ -31,20 +31,20 @@ export function RealizedSection({ realized }: { realized: Realized }) {
 
   return (
     <div>
-      <p className="text-[15px] leading-snug text-foreground/90">
+      <p className="text-title leading-snug text-ink">
         {lines.length === 0 ? (
           `${m}월 ${d}일 이후 판 것이 없어요`
         ) : (
           <>
             {m}월 {d}일 이후 팔아서{" "}
-            <span className={cn("tnum font-semibold", up ? "text-approve/85" : "text-reject/85")}>
+            <span className={cn("tnum font-semibold", up ? "text-approve" : "text-reject")}>
               {signedKrw(totalKrw)}
             </span>
           </>
         )}
       </p>
       {missing.length > 0 ? (
-        <p className="mt-1 text-[12px] text-dim">
+        <p className="mt-1 text-aside text-dim">
           {missing.map((v) => (v === "kis" ? "한국투자증권" : "업비트")).join(", ")} 매도 내역을 읽지 못해 빠져 있어요.
         </p>
       ) : null}
@@ -58,19 +58,19 @@ export function RealizedSection({ realized }: { realized: Realized }) {
             return (
               <li key={l.id} className="flex items-baseline gap-3 rounded-lg px-2 py-2">
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-[14px] text-foreground/90">
+                  <p className="truncate text-body text-ink">
                     {l.name}
-                    {!l.held ? <span className="ms-2 text-[11.5px] text-faint">다 팖</span> : null}
+                    {!l.held ? <span className="ms-2 text-meta text-faint">다 팖</span> : null}
                   </p>
-                  <p className="tnum mt-0.5 text-[11.5px] text-faint">
+                  <p className="tnum mt-0.5 text-meta text-faint">
                     {l.sales}번 · 판 금액 {krw(l.proceedsKrw)}
                   </p>
                 </div>
                 <div className="shrink-0 text-right">
-                  <p className={cn("tnum text-[14px]", gain ? "text-approve/85" : "text-reject/85")}>
+                  <p className={cn("tnum text-body", gain ? "text-approve" : "text-reject")}>
                     {signedKrw(l.profitKrw)}
                   </p>
-                  <p className="tnum mt-0.5 text-[11.5px] text-faint">
+                  <p className="tnum mt-0.5 text-meta text-faint">
                     {percent(rate)}
                   </p>
                 </div>
@@ -104,7 +104,7 @@ export function TaxGauge({ basket, year, addKrw = 0 }: { basket: TaxBasket; year
   const label = BASKET_LABEL[basket.kind];
   if (!basket.inForce) {
     return (
-      <p className="text-[12px] leading-relaxed text-faint">
+      <p className="text-aside leading-relaxed text-faint">
         {label} 양도세는 아직 걷지 않아요. 올해 {label} 손익 {signedKrw(basket.gainKrw + addKrw)}
         {basket.kind === "coin" ? ", 가상자산 과세는 2027년부터 시행 예정이에요." : "."}
       </p>
@@ -125,9 +125,9 @@ export function TaxGauge({ basket, year, addKrw = 0 }: { basket: TaxBasket; year
 
   return (
     <div>
-      <div className="flex items-baseline justify-between gap-3 text-[12.5px]">
+      <div className="flex items-baseline justify-between gap-3 text-aside">
         <span className="text-dim">
-          {year}년 {label} 실현손익 <span className="tnum text-foreground/90">{signedKrw(basket.gainKrw)}</span>
+          {year}년 {label} 실현손익 <span className="tnum text-ink">{signedKrw(basket.gainKrw)}</span>
         </span>
         <span className="tnum shrink-0 text-faint">공제 {krw(deduction)}</span>
       </div>
@@ -147,7 +147,7 @@ export function TaxGauge({ basket, year, addKrw = 0 }: { basket: TaxBasket; year
         ) : null}
       </div>
 
-      <p className="tnum mt-1.5 text-[12px] leading-relaxed text-dim">
+      <p className="tnum mt-1.5 text-aside leading-relaxed text-dim">
         {planning ? (
           taxAfter > taxBefore ? (
             <>이번 매도로 양도세가 약 <span className="text-foreground">{krw(taxAfter - taxBefore)}</span> 늘어요 (올해 합계 약 {krw(taxAfter)})</>
