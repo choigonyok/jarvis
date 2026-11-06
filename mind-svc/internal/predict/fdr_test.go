@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand/v2"
+	"strings"
 	"testing"
 	"time"
 
@@ -79,6 +80,37 @@ func TestADailyRuleMustStandOutAmongAllTried(t *testing.T) {
 			if _, err := st.Note(ctx, n.ID); err != nil {
 				t.Fatalf("새로 찾은 우연이 들어옴: %s", n.Text)
 			}
+		}
+	}
+}
+
+// A weekday's share is said by how much it differs, not only which way.
+func TestDailyTextSaysHowMuch(t *testing.T) {
+	fit := func(day time.Weekday, on, off float64) dailyFit {
+		var f dailyFit
+		f.day, f.base = day, off
+		for w := range 7 {
+			f.n[w], f.k[w], f.rates[w] = 10, int(math.Round(off*10)), off
+			if time.Weekday(w) == day {
+				f.k[w], f.rates[w] = int(math.Round(on*10)), on
+			}
+			f.N += f.n[w]
+			f.K += f.k[w]
+		}
+		return f
+	}
+	for _, c := range []struct {
+		on, off float64
+		want    string
+	}{
+		{0.9, 0.2, "있는 편이다"},
+		{0.35, 0.05, "다른 날보다 잦다"},
+		{0.1, 0.9, "거의 없다"},
+		{0.5, 0.95, "다른 날보다 드물다"},
+	} {
+		text, _ := dailyText("배달 주문", fit(time.Tuesday, c.on, c.off))
+		if !strings.Contains(text, c.want) {
+			t.Errorf("%.0f%% vs %.0f%%: %q", c.on*100, c.off*100, text)
 		}
 	}
 }

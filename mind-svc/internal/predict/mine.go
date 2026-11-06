@@ -29,9 +29,13 @@ import (
 const (
 	dailyWindow  = 56 // days a daily rule's shares are read from
 	dailyMinDays = 14 // days seen, at least, before a daily rule
-	dailyTest    = 28 // days a daily rule is tried on, walking forward
-	dailyEffect  = 0.2
-	dailyP       = 0.1
+	// dailyMinWeekday: a weekday (or the weekend) must have come round this
+	// often before it can stand out. From two, one Tuesday in three made a
+	// rule ("화요일엔 … 거의 없다", 2026-11-07).
+	dailyMinWeekday = 3
+	dailyTest       = 28 // days a daily rule is tried on, walking forward
+	dailyEffect     = 0.2
+	dailyP          = 0.1
 
 	cycleWindow = 210 // days a cycle is read from
 	cycleMin    = 4   // times seen, at least
@@ -265,6 +269,12 @@ func (p *Predictor) Mine(ctx context.Context) ([]model.Note, error) {
 	return append(out, p.mineAfter(recent, now)...), nil
 }
 
+// broad is a key too wide to be a habit of its own: arriving anywhere one
+// goes often (the bare visit key - home, work and the rest together) is
+// most days, and a rule on it ("화요일엔 자주 가는 곳 도착이 거의 없다") said
+// nothing a person could place (2026-11-07). Each place has its own key.
+func broad(key string) bool { return key == "visit" }
+
 // hasTime is whether a calendar entry's time says when it starts: one with
 // only a date is not a moment anything follows.
 func hasTime(t time.Time, loc *time.Location) bool {
@@ -313,7 +323,7 @@ func fitDaily(days []time.Time, hit map[string]bool) dailyFit {
 	f.p = 1
 	looks := 0
 	for w := range 7 {
-		if f.n[w] < 2 {
+		if f.n[w] < dailyMinWeekday {
 			continue
 		}
 		looks++
@@ -325,7 +335,7 @@ func fitDaily(days []time.Time, hit map[string]bool) dailyFit {
 	}
 	nE, kE := f.n[0]+f.n[6], f.k[0]+f.k[6]
 	nD, kD := f.N-nE, f.K-kE
-	if nE >= 2 && nD >= 2 {
+	if nE >= dailyMinWeekday && nD >= dailyMinWeekday {
 		looks++
 		rE, rD := self.Shrunk(kE, nE, f.base, 2), self.Shrunk(kD, nD, f.base, 2)
 		p := Fisher(kE, nE-kE, kD, nD-kD)
@@ -400,7 +410,7 @@ type dailyFound struct {
 func (p *Predictor) mineDaily(s *stream, today time.Time) dailyFound {
 	// Whether a day has a workout is the workout prediction's (Workout),
 	// with the reflection's notes; the engine keeps to the kinds of it.
-	if !Targetable(s.key) || s.key == "workout" {
+	if !Targetable(s.key) || s.key == "workout" || broad(s.key) {
 		return dailyFound{}
 	}
 	// The source's first day was likely read from part way through.
@@ -477,10 +487,21 @@ func dailyText(label string, f dailyFit) (string, []string) {
 	}
 	when := weekdays(in)
 	ev := []string{fmt.Sprintf("최근 %d일 중 %s %d일에 %d번, 다른 날 %d일에 %d번", f.N, when, n, k, f.N-n, f.K-k)}
-	if on > off {
-		return fmt.Sprintf("%s엔 %s 있는 편이다 (%s %.0f%%, 다른 날 %.0f%%)", when, Subject(label), when, on*100, off*100), ev
+	// Said by how much, not only which way: "거의 없다" was said of a day
+	// that had it half the time, "있는 편이다" of one that had it a third of
+	// the time (2026-11-07).
+	var how string
+	switch {
+	case on > off && on >= 0.5:
+		how = "있는 편이다"
+	case on > off:
+		how = "다른 날보다 잦다"
+	case on <= 0.25:
+		how = "거의 없다"
+	default:
+		how = "다른 날보다 드물다"
 	}
-	return fmt.Sprintf("%s엔 %s 거의 없다 (%s %.0f%%, 다른 날 %.0f%%)", when, Subject(label), when, on*100, off*100), ev
+	return fmt.Sprintf("%s엔 %s %s (%s %.0f%%, 다른 날 %.0f%%)", when, Subject(label), how, when, on*100, off*100), ev
 }
 
 var weekdayKo = []string{"일", "월", "화", "수", "목", "금", "토"}
@@ -580,7 +601,7 @@ func abs(x int) int {
 }
 
 func (p *Predictor) mineCycle(s *stream, today time.Time) (model.Note, bool) {
-	if !Targetable(s.key) {
+	if !Targetable(s.key) || broad(s.key) {
 		return model.Note{}, false
 	}
 	var dates []time.Time

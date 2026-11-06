@@ -332,15 +332,28 @@ func (m *Mind) notesFromPatterns(ctx context.Context, kinds []string) error {
 		slices.Sort(classes)
 		for _, class := range classes {
 			n := support[class]
+			// Shown once seen twice with common sense for the pair, three
+			// times without. Seen once with strong common sense it is a
+			// candidate: it predicts, and the card comes before the next
+			// plan of the kind, but the operator is not asked to confirm a
+			// habit from one time - a campsite booked once before a 취미
+			// and once before a 모임 was shown as a habit of each ("취미
+			// 며칠 전에 캠핑장을 산다", 2026-11-07). Common sense judges
+			// the class against the kind of plan, not the plan itself.
 			j, err := st.LinkCache(ctx, class, kind)
 			common := err == nil && j.Rel != "unrelated" && j.Plausibility >= 0.5
-			if !common && (n < 3 || err == nil && j.Plausibility < 0.1) {
+			status := model.Hypothesis
+			switch {
+			case n >= 3 && (err != nil || j.Plausibility >= 0.1), n >= 2 && common:
+			case n == 1 && common && j.Plausibility >= 0.8:
+				status = model.Candidate
+			default:
 				continue
 			}
 			b := best[class].Bucket
-			note := model.Note{ID: self.ID("prep", kind, class), Text: self.PrepText(kind, class, b), Scope: kind,
+			note := model.Note{ID: self.ID("prep", kind, class), Text: self.PrepText(kind, class, b), Scope: kind, Status: status,
 				Confidence: math.Round(self.Shrunk(n, max(total, n), 0.3, 1)*100) / 100,
-				Evidence:   []string{fmt.Sprintf("%s %d번 중 %d번, 시작 전에 %s 샀다", kind, max(total, n), n, self.Object(class))},
+				Evidence:   []string{fmt.Sprintf("%s %d번 중 %d번, 시작 전에 %s %s", kind, max(total, n), n, self.Object(class), self.Verb(class, "었다"))},
 				Rule:       &model.Rule{Kind: "prep", PlanKind: kind, Class: class, Bucket: b, Support: n, Total: max(total, n)}}
 			if _, _, err := m.Self.Hold(ctx, note, fmt.Sprintf("밤 정리: %s %d번 중 %d번", kind, max(total, n), n)); err != nil {
 				return err

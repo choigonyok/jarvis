@@ -43,7 +43,12 @@ func (s *Self) Hold(ctx context.Context, n model.Note, reason string) (model.Not
 	now := s.Now()
 	switch {
 	case errors.Is(err, model.ErrNotFound):
-		n.Status, n.Version, n.Reason, n.CreatedAt, n.UpdatedAt = model.Hypothesis, 1, reason, now, now
+		// A hypothesis, unless what found it says it is not one yet (a
+		// candidate: predicts in silence, is not shown).
+		if n.Status == "" {
+			n.Status = model.Hypothesis
+		}
+		n.Version, n.Reason, n.CreatedAt, n.UpdatedAt = 1, reason, now, now
 		return n, true, s.St.PutNote(ctx, n)
 	case err != nil:
 		return n, false, err
@@ -61,7 +66,14 @@ func (s *Self) Hold(ctx context.Context, n model.Note, reason string) (model.Not
 	if old.Text == n.Text && math.Abs(old.Confidence-n.Confidence) < 0.05 && sameRule(old.Rule, n.Rule) {
 		return old, false, nil
 	}
-	n.Status, n.Version, n.Reason, n.CreatedAt, n.UpdatedAt = old.Status, old.Version+1, reason, old.CreatedAt, now
+	status := old.Status
+	switch {
+	case status == model.Candidate && n.Status == model.Hypothesis:
+		status = model.Hypothesis // seen enough now to be shown
+	case status == model.Hypothesis && n.Status == model.Candidate:
+		status = model.Candidate // shown on one time, which is not enough now
+	}
+	n.Status, n.Version, n.Reason, n.CreatedAt, n.UpdatedAt = status, old.Version+1, reason, old.CreatedAt, now
 	n.Written, n.Track = old.Written, old.Track
 	if n.Rule != nil && old.Rule != nil {
 		n.Rule.Except, n.Rule.Exceptions, n.Rule.Off, n.Rule.Since = old.Rule.Except, old.Rule.Exceptions, old.Rule.Off, old.Rule.Since
@@ -133,6 +145,9 @@ func (s *Self) Learn(ctx context.Context, id string, approved bool, reason, plan
 	if approved {
 		n.Confidence = math.Min(0.95, math.Round((n.Confidence+0.1)*100)/100)
 		n.Reason = "제안을 승인하심"
+		if n.Status == model.Candidate {
+			n.Status = model.Hypothesis // the operator's yes is the second time
+		}
 		return s.St.PutNote(ctx, n)
 	}
 	n.Confidence = math.Max(0.1, math.Round((n.Confidence-0.1)*100)/100)
@@ -183,7 +198,25 @@ func PrepText(kind, class, bucket string) string {
 	if when == "" {
 		when = "전"
 	}
-	return fmt.Sprintf("%s %s에 %s 산다", kind, when, Object(class))
+	return fmt.Sprintf("%s %s에 %s %s", kind, when, Object(class), Verb(class, "다"))
+}
+
+// Verb is what one does with a class of thing: a place or a ticket is
+// booked, anything else bought. "캠핑장을 산다" asked what buying a campsite
+// could mean (2026-11-07). The ending: "다" for a note, "었다" for evidence.
+func Verb(class, ending string) string {
+	for _, w := range []string{"캠핑장", "야영장", "글램핑", "숙소", "펜션", "호텔", "리조트", "예약", "티켓", "입장권", "항공권", "승차권"} {
+		if strings.Contains(class, w) {
+			if ending == "었다" {
+				return "예약했다"
+			}
+			return "예약한다"
+		}
+	}
+	if ending == "었다" {
+		return "샀다"
+	}
+	return "산다"
 }
 
 // Object is a noun with its object particle: 장작을, 생수를.

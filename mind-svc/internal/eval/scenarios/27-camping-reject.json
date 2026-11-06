@@ -106,7 +106,7 @@
     "notes": [
      {
       "textHas": "캠핑 며칠 전에 장작을 산다",
-      "status": "hypothesis"
+      "status": "candidate"
      }
     ]
    }
@@ -197,7 +197,8 @@
     "notes": [
      {
       "textHas": "장작",
-      "except": "직전 캠핑 후 남은 경우 제외"
+      "except": "직전 캠핑 후 남은 경우 제외",
+      "status": "candidate"
      }
     ]
    }
