@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { CodeBlock, CodeBlockContent, CodeBlockCopyButton } from "@/components/ui/code-block";
 import { FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Lightbox } from "@/components/ui/lightbox";
 import { SecretInput } from "@/components/ui/secret-input";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -212,25 +213,42 @@ export function ProposalCard({
 /**
  * The photos a card is about. A listing's are shown as it will show them, the
  * first the cover; the ones a question asks about (cover false) are all alike.
+ * A tap opens them full screen, one after another under the finger: a card
+ * showed several only as small tiles, with no way to see one whole
+ * (2026-11-07).
  */
 function CardPhotos({ names, cover }: { names: string[]; cover: boolean }) {
+  const [open, setOpen] = useState<number | null>(null);
+  const alt = (i: number) => (cover && i === 0 ? "대표 사진" : `사진 ${i + 1}`);
   return (
-    <ul className="scrollbar-none -mx-4 mt-3 flex gap-1.5 overflow-x-auto px-4 sm:-mx-5 sm:px-5" aria-label={cover ? "올릴 사진" : "사진"}>
-      {names.map((name, i) => (
-        <li key={name} className="relative shrink-0">
-          {/* eslint-disable-next-line @next/next/no-img-element -- served by the agent behind the proxy */}
-          <img
-            src={photoUrl(name)}
-            alt={cover && i === 0 ? "대표 사진" : `사진 ${i + 1}`}
-            loading="lazy"
-            className={cn("rounded-lg bg-well object-cover", !cover ? "size-24" : i === 0 ? "size-24" : "size-20 mt-4")}
-          />
-          {cover && i === 0 ? (
-            <span className="absolute bottom-1 left-1 rounded bg-background/80 px-1.5 py-px text-tiny text-dim">대표</span>
-          ) : null}
-        </li>
-      ))}
-    </ul>
+    <>
+      <ul className="scrollbar-none -mx-4 mt-3 flex gap-1.5 overflow-x-auto px-4 sm:-mx-5 sm:px-5" aria-label={cover ? "올릴 사진" : "사진"}>
+        {names.map((name, i) => (
+          <li key={name} className="relative shrink-0">
+            <button
+              type="button"
+              onClick={() => setOpen(i)}
+              aria-label={`${alt(i)} 크게 보기`}
+              className={cn("block overflow-hidden rounded-lg bg-well focus-ring", cover && i > 0 && "mt-4")}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element -- served by the agent behind the proxy */}
+              <img
+                src={photoUrl(name)}
+                alt={alt(i)}
+                loading="lazy"
+                className={cn("block object-cover", !cover ? "size-24" : i === 0 ? "size-24" : "size-20")}
+              />
+            </button>
+            {cover && i === 0 ? (
+              <span className="pointer-events-none absolute bottom-1 left-1 rounded bg-background/80 px-1.5 py-px text-tiny text-dim">대표</span>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+      {open !== null ? (
+        <Lightbox items={names.map((name, i) => ({ src: photoUrl(name), alt: alt(i) }))} start={open} onClose={() => setOpen(null)} />
+      ) : null}
+    </>
   );
 }
 

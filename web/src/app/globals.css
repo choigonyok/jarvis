@@ -726,26 +726,6 @@
   }
 }
 
-/* A home-screen app draws the clock and the battery in white over the top of
-   the page, whatever the page is (apple-mobile-web-app-status-bar-style
-   black-translucent; no setting gives dark ones over the page). By day the
-   page is white, so the strip under them is kept at night's colour - the
-   phone's own edge, the island in it - and they stay readable. Its height is
-   the status bar's: in the browser, or wherever the page starts below the
-   bar, it is nothing. */
-@media (display-mode: standalone) {
-  :root[data-theme="light"] body::before {
-    content: "";
-    position: fixed;
-    inset-inline: 0;
-    top: 0;
-    z-index: 2147483647;
-    height: env(safe-area-inset-top);
-    background: oklch(0.158 0.004 265);
-    pointer-events: none;
-  }
-}
-
 /* What every pressable thing does under the keyboard: no outline, a ring
    when focus came by keyboard. It was written out 173 times. */
 @utility focus-ring {
@@ -793,12 +773,17 @@ html {
   background-color: var(--background);
 }
 
-/* The screen's height. In the browser, dvh - Safari's bars come and go. In
-   a home-screen app there are no bars, and dvh is not to be trusted there:
-   measured on an iPhone it reported the small viewport (svh = screen - status
-   bar, 793 of 852) at one launch and the full screen at the next, which
-   showed as an empty strip under the page. lvh was the full screen every
-   time, so a home-screen app uses it.
+/* The screen's height. In the browser, dvh - Safari's bars come and go.
+
+   In a home-screen app, the page's height either way its status bar was set
+   when it was added (layout.tsx): the smaller of lvh and dvh with the top
+   inset added. Under the opaque bar (default) the page starts below it and is
+   dvh tall, while lvh may still count the bar in - 874 against 812 on an
+   iPhone 17 Pro (iOS 26.2), at one launch of two - and the inset is 0. Under
+   black-translucent, from before 2026-11-07, the page runs under the bar: lvh
+   was the whole screen every time, and dvh the screen less the bar (793 of
+   852, measured on an iPhone) at one launch and the whole screen at the next,
+   which showed as an empty strip under the page - so lvh it is there.
 
    Things pinned to the bottom (the tab bar, the voice and screen overlays)
    are placed from the top with this height rather than with bottom: 0, so
@@ -806,13 +791,13 @@ html {
 @utility screen-h {
   height: 100dvh;
   @media (display-mode: standalone) {
-    height: 100lvh;
+    height: min(100lvh, calc(100dvh + env(safe-area-inset-top)));
   }
 }
 @media (display-mode: standalone) {
   html,
   body {
-    height: 100lvh !important;
+    height: min(100lvh, calc(100dvh + env(safe-area-inset-top))) !important;
   }
 }
 

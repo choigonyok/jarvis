@@ -183,15 +183,7 @@ function Body({
             <ul className="space-y-1.5">
               {recordsPaged.items.map((r) => (
                 <li key={r.key} className="flex gap-3 rounded-xl bg-glass p-2.5">
-                  {r.image && !j.photosGone ? (
-                    // eslint-disable-next-line @next/next/no-img-element -- served by the agent behind the proxy
-                    <img
-                      src={photoUrl(r.image)}
-                      alt=""
-                      loading="lazy"
-                      className="size-14 shrink-0 rounded-lg bg-well object-cover"
-                    />
-                  ) : null}
+                  {r.image && !j.photosGone ? <PhotoTiles names={[r.image]} label={r.title} className="size-14" /> : null}
                   <div className="min-w-0 flex-1">
                     <p className="flex items-baseline gap-2">
                       <span className="min-w-0 truncate text-ui text-ink">{r.title}</span>
@@ -239,10 +231,7 @@ function Body({
             ) : null}
             {j.photos.length && !j.photosGone ? (
               <div className="scrollbar-none mt-2 flex gap-1.5 overflow-x-auto">
-                {j.photos.map((p) => (
-                  // eslint-disable-next-line @next/next/no-img-element -- served by the agent behind the proxy
-                  <img key={p} src={photoUrl(p)} alt="" loading="lazy" className="size-16 shrink-0 rounded-lg object-cover" />
-                ))}
+                <PhotoTiles names={j.photos} label="작업 사진" className="size-16" />
               </div>
             ) : null}
           </CollapsibleContent>
@@ -368,7 +357,7 @@ type RunGroup = { key: string; runId?: number; at: string; events: JobEvent[] };
  * home-screen app out to Safari. Gone with the job's photos after it ended,
  * it says so instead of leaving a broken picture.
  */
-function Shot({ name, gone }: { name: string; gone: boolean }) {
+function Shot({ name, gone, album }: { name: string; gone: boolean; album: string[] }) {
   const [open, setOpen] = useState(false);
   if (gone) return <span className="text-faint">찍은 화면 (지웠어요)</span>;
   return (
@@ -383,8 +372,41 @@ function Shot({ name, gone }: { name: string; gone: boolean }) {
         {/* eslint-disable-next-line @next/next/no-img-element -- served by the agent behind the proxy */}
         <img src={photoUrl(name)} alt="작업이 찍은 화면" loading="lazy" className="block max-h-48 w-auto max-w-[16rem] object-contain" />
       </button>
-      {open ? <Lightbox items={[{ src: photoUrl(name), alt: "작업이 찍은 화면" }]} onClose={() => setOpen(false)} /> : null}
+      {open ? (
+        <Lightbox
+          items={album.map((n) => ({ src: photoUrl(n), alt: "작업이 찍은 화면" }))}
+          start={Math.max(0, album.indexOf(name))}
+          onClose={() => setOpen(false)}
+        />
+      ) : null}
     </span>
+  );
+}
+
+/**
+ * Photos as tiles that open full screen, one after another under the finger:
+ * the job's own photos, what a record shows.
+ */
+function PhotoTiles({ names, label, className }: { names: string[]; label: string; className: string }) {
+  const [open, setOpen] = useState<number | null>(null);
+  return (
+    <>
+      {names.map((n, i) => (
+        <button
+          key={n}
+          type="button"
+          onClick={() => setOpen(i)}
+          aria-label={`${label} 크게 보기`}
+          className={cn("block shrink-0 overflow-hidden rounded-lg bg-well focus-ring", className)}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element -- served by the agent behind the proxy */}
+          <img src={photoUrl(n)} alt="" loading="lazy" className="size-full object-cover" />
+        </button>
+      ))}
+      {open !== null ? (
+        <Lightbox items={names.map((n) => ({ src: photoUrl(n), alt: label }))} start={open} onClose={() => setOpen(null)} />
+      ) : null}
+    </>
   );
 }
 
@@ -427,6 +449,8 @@ const TONE: Record<string, string> = {
  */
 function Run({ group: g, live, open, gone }: { group: RunGroup; live: boolean; open: boolean; gone: boolean }) {
   const steps = g.events.filter((e) => e.kind === "step").length;
+  // The screens the run took, oldest first: each opens among them.
+  const shots = g.events.filter((e) => e.kind === "shot").map((e) => e.text).reverse();
   const time = when(g.at);
   return (
     <TraceCollapsible defaultOpen={open || live}>
@@ -449,7 +473,7 @@ function Run({ group: g, live, open, gone }: { group: RunGroup; live: boolean; o
                 TONE[e.kind] ?? "text-dim",
               )}
             >
-              {e.kind === "shot" ? <Shot name={e.text} gone={gone} /> : <WithUploads text={e.text} />}
+              {e.kind === "shot" ? <Shot name={e.text} gone={gone} album={shots} /> : <WithUploads text={e.text} />}
             </li>
           ))}
         </ol>

@@ -1,13 +1,13 @@
 "use client";
 
-import type { Parent, PhrasingContent, Root } from "mdast";
+import type { Parent, PhrasingContent, Root, RootContent } from "mdast";
 import { isValidElement, memo, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 // remark-parse is what gives a processor's data its micromark extensions.
 import type {} from "remark-parse";
 import type { Processor } from "unified";
-import { UPLOAD_NAME, UploadAlbum, UploadThumb, uploadOf, uploadsIn } from "@/components/chat/inline-photos";
+import { UPLOAD_NAME, UploadAlbum, UploadMark, UploadRow, uploadOf, uploadsIn } from "@/components/chat/inline-photos";
 import { CodeBlock, CodeBlockContent, CodeBlockCopyButton } from "@/components/ui/code-block";
 import { photoUrl } from "@/lib/uploads";
 
@@ -47,35 +47,48 @@ function noStrikethrough(this: Processor) {
   (data.micromarkExtensions ??= []).push({ disable: { null: ["strikethrough"] } });
 }
 
-// The agent's own photos named in the words (chat/inline-photos.tsx) become
-// pictures where they are named: the words around a name say what it shows.
-// Not inside code, where a name is a literal, nor inside a link, which a
-// picture would turn into a second thing to press.
+// The agent's own photos named in the words (chat/inline-photos.tsx): each
+// name a numbered mark where it stands (an image node, drawn as the mark),
+// and the photos a paragraph or a heading names in a row right under it - in
+// a list, under its item's words. Not inside code, where a name is a
+// literal, nor inside a link, which a mark would turn into a second thing to
+// press.
 function uploadsAsPhotos() {
-  return (tree: Root) => photosIn(tree);
+  return (tree: Root) => void photosIn(tree);
 }
 
-function photosIn(node: Parent) {
+/** Marks the names under node; returns those named in its phrasing, for the block they are in. */
+function photosIn(node: Parent): string[] {
+  const named: string[] = [];
   for (let i = 0; i < node.children.length; i++) {
     const child = node.children[i];
     if (child.type === "text") {
-      const parts = split(child.value);
+      const parts = split(child.value, named);
       if (parts) {
         node.children.splice(i, 1, ...parts);
         i += parts.length - 1;
       }
     } else if ("children" in child && child.type !== "link" && child.type !== "linkReference") {
-      photosIn(child);
+      const inner = photosIn(child);
+      if (child.type === "paragraph" || child.type === "heading") {
+        if (inner.length) node.children.splice(++i, 0, row(inner));
+      } else if (child.type === "tableCell") {
+        if (inner.length) (child.children as unknown[]).push(row(inner));
+      } else {
+        for (const n of inner) if (!named.includes(n)) named.push(n);
+      }
     }
   }
+  return named;
 }
 
-function split(text: string): PhrasingContent[] | null {
+function split(text: string, named: string[]): PhrasingContent[] | null {
   const out: PhrasingContent[] = [];
   let last = 0;
   for (const m of text.matchAll(UPLOAD_NAME)) {
     if (m.index > last) out.push({ type: "text", value: text.slice(last, m.index) });
     out.push({ type: "image", url: photoUrl(m[0]), alt: "사진" });
+    if (!named.includes(m[0])) named.push(m[0]);
     last = m.index + m[0].length;
   }
   if (out.length === 0) return null;
@@ -83,7 +96,12 @@ function split(text: string): PhrasingContent[] | null {
   return out;
 }
 
-const COMPONENTS: Components = {
+/** The row of a block's photos: an element of its own, drawn by COMPONENTS["upload-row"]. */
+function row(names: string[]): RootContent {
+  return { type: "uploadRow", data: { hName: "upload-row", hProperties: { dataNames: names.join(" ") } } } as unknown as RootContent;
+}
+
+const COMPONENTS = {
   p: ({ children }) => <p>{children}</p>,
 
   // Headings step down in size against the words around them (1.2, 1.1,
@@ -165,7 +183,7 @@ const COMPONENTS: Components = {
   // anything out.
   img: ({ src, alt }) =>
     typeof src === "string" && uploadOf(src) ? (
-      <UploadThumb name={uploadOf(src)!} />
+      <UploadMark name={uploadOf(src)!} />
     ) : typeof src === "string" && src ? (
       <a
         href={src}
@@ -192,7 +210,10 @@ const COMPONENTS: Components = {
   td: ({ children }) => (
     <td className="border-b border-edge-soft py-1.5 pe-3 align-top">{children}</td>
   ),
-};
+
+  // The photos a block names, under it (uploadsAsPhotos).
+  "upload-row": (props: { "data-names"?: string }) => <UploadRow names={(props["data-names"] ?? "").split(" ").filter(Boolean)} />,
+} as Components;
 
 /** The words inside rendered markdown - a code block's, to copy. */
 function textOf(node: ReactNode): string {

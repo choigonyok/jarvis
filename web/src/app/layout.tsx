@@ -37,11 +37,19 @@ export const metadata: Metadata = {
   title: "Jarvis",
   description: "개인 AI 어시스턴트와의 대화, 그리고 실행 요청 결재.",
   // Added to the home screen this runs without Safari's chrome, which is the
-  // right shape for something you open to approve one thing and close.
-  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "Jarvis" },
-  // Next emits only the newer "mobile-web-app-capable"; iOS still keys the
-  // translucent status bar off the Apple name, and without it a home-screen
-  // launch draws the page below the notch and leaves the strip blank.
+  // right shape for something you open to approve one thing and close. The
+  // status bar is its own, opaque, and the page starts below it: iOS paints
+  // it the page's colour with the clock in ink by day and white by night, and
+  // follows the header's theme switch as it happens (measured on an iPhone 17
+  // Pro, iOS 26.2). black-translucent ran the page under the clock, and iOS
+  // 26.1 draws a dark blur over the top of such an app that no page can take
+  // off - with the dark strip the light theme laid under the clock, the notch
+  // looked wrong (2026-11-07). iOS reads this when the app is added to the
+  // home screen: an app added before keeps the old bar until it is added
+  // again.
+  appleWebApp: { capable: true, statusBarStyle: "default", title: "Jarvis" },
+  // Next emits only the newer "mobile-web-app-capable"; iOS still keys a
+  // home-screen app's status bar off the Apple name.
   other: { "apple-mobile-web-app-capable": "yes" },
   icons: {
     // A tab is 16px: the orb alone on a clear ground, the full icon above that.
