@@ -141,6 +141,9 @@ func (s *Server) updateTurn(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Thread     string   `json:"thread"`
 		Paragraphs []string `json:"paragraphs"`
+		// Images are the photos the word shows (a job's run, the screen it
+		// took): the card's own are kept when none come.
+		Images []string `json:"images"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&in); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "본문을 읽을 수 없습니다."})
@@ -158,7 +161,11 @@ func (s *Server) updateTurn(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "내용이 없는 턴입니다."})
 		return
 	}
-	saved, err := s.views.Chat.Update(r.Context(), in.Thread, r.PathValue("id"), in.Paragraphs, s.views.TZ, s.keepTurn(asGuest(r)))
+	if len(in.Images) > 8 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "사진은 8장까지입니다."})
+		return
+	}
+	saved, err := s.views.Chat.Update(r.Context(), in.Thread, r.PathValue("id"), in.Paragraphs, in.Images, s.views.TZ, s.keepTurn(asGuest(r)))
 	if errors.Is(err, store.ErrNoTurn) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "그런 턴이 없습니다."})
 		return

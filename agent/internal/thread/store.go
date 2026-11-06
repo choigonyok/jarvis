@@ -407,8 +407,10 @@ func (s *Store) AppendAgentImages(images []string, caption string) *Turn {
 // run that reports twice updates its card rather than stacking two. It is
 // not a model turn - nothing of the session is touched, which is the point:
 // the conversation goes on undisturbed, and the next turn is told (the
-// runner's job news). The console draws it as a card beside the thread.
-func (s *Store) JobNews(o Origin, paragraphs []string) *Turn {
+// runner's job news). The console draws it as a card beside the thread, with
+// its photos (a screen the run took): a later word without photos leaves the
+// card's as they were.
+func (s *Store) JobNews(o Origin, paragraphs, images []string) *Turn {
 	if len(paragraphs) == 0 || o.Run == 0 {
 		return nil
 	}
@@ -430,6 +432,9 @@ func (s *Store) JobNews(o Origin, paragraphs []string) *Turn {
 		defer cancel()
 		var saved Turn
 		body := map[string]any{"thread": s.thread, "paragraphs": paragraphs}
+		if len(images) > 0 {
+			body["images"] = images
+		}
 		if err := s.do(ctx, http.MethodPut, "/turns/"+url.PathEscape(id), body, &saved); err == nil {
 			s.bus.Publish(bus.Event{Type: "turn", Turn: saved})
 			return &saved
@@ -437,7 +442,7 @@ func (s *Store) JobNews(o Origin, paragraphs []string) *Turn {
 			s.log.Warn("작업 소식을 갱신하지 못해 새로 적습니다", "run", o.Run, "err", err)
 		}
 	}
-	t := s.append(&Turn{Role: RoleAgent, Paragraphs: paragraphs, Origin: &o})
+	t := s.append(&Turn{Role: RoleAgent, Paragraphs: paragraphs, Images: images, Origin: &o})
 	s.newsMu.Lock()
 	if s.newsIDs == nil {
 		s.newsIDs = map[int64]string{}

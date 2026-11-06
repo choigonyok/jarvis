@@ -38,6 +38,7 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/core/module"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
 	"github.com/choigonyok/jarvis/agent/internal/module/vault"
+	"github.com/choigonyok/jarvis/agent/internal/shot"
 	"github.com/choigonyok/jarvis/agent/internal/thread"
 	"github.com/choigonyok/jarvis/agent/internal/tool"
 	"github.com/choigonyok/jarvis/agent/internal/uploads"
@@ -75,13 +76,17 @@ func QualifiedToolName(tool string) string {
 // card per run, replaced by the run's later word (thread.Store.JobNews) -
 // and the cards a run raises, where they then stay, decided or not.
 type Notifier interface {
-	JobNews(o thread.Origin, paragraphs []string) *thread.Turn
+	JobNews(o thread.Origin, paragraphs, images []string) *thread.Turn
 	AttachProposal(proposalID string)
 }
 
 type Module struct {
-	store     *Store
-	uploads   *uploads.Store
+	store   *Store
+	uploads *uploads.Store
+	// camera takes the shared browser's screen for a run (capture); nil:
+	// none here. shots is what each job took with it.
+	camera    *shot.Camera
+	shots     shots
 	proposals *proposal.Store
 	notify    Notifier
 	log       *slog.Logger
@@ -891,6 +896,50 @@ func (m *Module) renderDetail(d Detail) string {
 		}
 	}
 	return b.String()
+}
+
+// SetCamera lets a run keep the browser's screen as a photo (capture).
+func (m *Module) SetCamera(c *shot.Camera) { m.camera = c }
+
+// shots is each job's screens taken (capture) in this process: what its
+// report and records may show as its own.
+type shots struct {
+	mu sync.Mutex
+	by map[int64][]string
+}
+
+func (s *shots) add(job int64, name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.by == nil {
+		s.by = map[int64][]string{}
+	}
+	s.by[job] = append(s.by[job], name)
+}
+
+func (s *shots) has(job int64, name string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return contains(s.by[job], name)
+}
+
+// own is whether a photo is the job's to show: one it was given, or a screen
+// it took - here, or before a restart, by its run lines.
+func (m *Module) own(ctx context.Context, j Job, name string) bool {
+	if contains(j.Photos, name) || m.shots.has(j.ID, name) {
+		return true
+	}
+	d, err := m.store.Detail(ctx, j.ID)
+	if err != nil {
+		return false
+	}
+	for _, e := range d.Events {
+		if e.Kind == "shot" && e.Text == name {
+			m.shots.add(j.ID, name)
+			return true
+		}
+	}
+	return false
 }
 
 func contains(xs []string, x string) bool {

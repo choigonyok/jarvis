@@ -53,7 +53,7 @@ func TestReminderShowsItsChecklist(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(sit.Text, "체크리스트") || !strings.Contains(sit.Text, "["+l.ID+"] 집에 가서 할 일 1/3") {
+	if !strings.Contains(sit.Text, "체크리스트") || !strings.Contains(sit.Text, "집에 가서 할 일 1/3 · 남은 것: 빨래, 택배 뜯기 (id "+l.ID+")") {
 		t.Fatalf("지금 상황에 열린 목록이 없습니다:\n%s", sit.Text)
 	}
 }

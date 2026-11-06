@@ -126,6 +126,7 @@ type Expect struct {
 	NoLoops       bool     `json:"noLoops,omitempty"`
 	Intents       []string `json:"intents,omitempty"`   // kinds raised this turn
 	NoActions     bool     `json:"noActions,omitempty"` // no action intents raised this turn
+	NoIntents     bool     `json:"noIntents,omitempty"` // nothing raised this turn, not even a notice
 	Calendar      []Match  `json:"calendar,omitempty"`
 	CalendarCount *int     `json:"calendarCount,omitempty"`
 	// Facts for long-term memory, as the ledger holds them.
@@ -801,6 +802,9 @@ func check(ctx context.Context, st store.Store, cal *act.MemoryCalendar, ex Expe
 		if !slices.Contains(raised, k) {
 			out = append(out, fmt.Sprintf("의도 %s 가 나와야 함 · 나온 것: %v", k, raised))
 		}
+	}
+	if ex.NoIntents && len(raised) > 0 {
+		out = append(out, fmt.Sprintf("아무 의도도 없어야 하는데 %v", raised))
 	}
 	if ex.NoActions {
 		for _, k := range raised {

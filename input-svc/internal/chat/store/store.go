@@ -208,10 +208,15 @@ func (s *Store) Append(ctx context.Context, t turn.Turn, tz string, after After)
 // bottom of the thread, not wherever the run first spoke. Only turns with an
 // origin may be rewritten - the conversation's own words stand as said.
 // ErrNoTurn when no such turn is in this thread.
-func (s *Store) Update(ctx context.Context, thread, id string, paragraphs []string, tz string, after After) (turn.Turn, error) {
-	var p any
+func (s *Store) Update(ctx context.Context, thread, id string, paragraphs, images []string, tz string, after After) (turn.Turn, error) {
+	var p, pics any
 	if len(paragraphs) > 0 {
 		p = paragraphs
+	}
+	// Photos come with a word that has them (a run's screen); a word without
+	// leaves the card's photos as they were.
+	if len(images) > 0 {
+		pics = images
 	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -220,12 +225,12 @@ func (s *Store) Update(ctx context.Context, thread, id string, paragraphs []stri
 	defer tx.Rollback(ctx) //nolint:errcheck // 커밋 후에는 무해하다
 	saved, err := scanRow(tx.QueryRow(ctx, `
 		with updated as (
-		  update input.turns set paragraphs = $4, at = now()
+		  update input.turns set paragraphs = $4, images = coalesce($5::text[], images), at = now()
 		   where id = $2 and thread = $3 and origin is not null
 		  returning *
 		)
 		`+columns+`
-		  from updated`, tz, id, thread, p))
+		  from updated`, tz, id, thread, p, pics))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return turn.Turn{}, ErrNoTurn
 	}

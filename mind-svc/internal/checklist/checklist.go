@@ -104,9 +104,11 @@ func (l List) Count() string {
 }
 
 // Line is a list in one line, for the conversation's situation and a
-// tool's answer: "[chk_1a2b] 캠핑 준비물 3/7 (10/24 용) · 남은 것: 장갑, 베개".
+// tool's answer: "캠핑 준비물 3/7 (10/24 용) · 남은 것: 장갑, 베개 (id chk_1a2b)".
+// The id is last, named for the tools' handle it is (2026-11-06: said back to
+// the operator when it led).
 func (l List) Line() string {
-	s := "[" + l.ID + "] " + l.Title + " " + l.Count()
+	s := l.Title + " " + l.Count()
 	if d, err := time.Parse("2006-01-02", l.Date); err == nil {
 		s += fmt.Sprintf(" (%d/%d 용)", int(d.Month()), d.Day())
 	}
@@ -118,7 +120,7 @@ func (l List) Line() string {
 	if l.Status == Archived {
 		s += " (닫음)"
 	}
-	return s
+	return s + " (id " + l.ID + ")"
 }
 
 // Names is items' words joined, the first n of them: "장갑, 베개 외 2개".

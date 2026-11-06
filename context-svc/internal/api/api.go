@@ -121,6 +121,9 @@ type Server struct {
 	// The live transit feeds, and the departure nudges said already.
 	feed        transitFeed
 	transitSaid nudged
+	// lastFix is when a fix of the operator's phone was last passed on
+	// (announceFix), under ownerMu.
+	lastFix time.Time
 }
 
 func New(st *store.Store, cfg Config, events *notify.Client, log *slog.Logger) *Server {
@@ -355,6 +358,7 @@ func (s *Server) ingest(ctx context.Context, rep report, at time.Time) ([]map[st
 		if rep.Acc > s.cfg.Trust {
 			break // too rough to say which region
 		}
+		s.announceFix(rep, at)
 		// A fix says which regions the phone is in now - by the phone's own
 		// list and by the circles kept here - and so corrects any enter or
 		// leave that never arrived.
@@ -925,6 +929,35 @@ func (s *Server) announce(event, region, kind string, at time.Time) {
 		"key":        fmt.Sprintf("location:%s:%s:%s:%d", event, region, day, at.Unix()),
 		"occurredAt": at,
 		"notify":     map[string]string{"tier": "log", "title": title, "body": at.Format("15:04")},
+	})
+}
+
+// fixEvery is how far apart fixes are passed on: enough to tell a city's
+// edge crossed within a minute or so, while a phone in Move mode reports many
+// times a minute.
+const fixEvery = time.Minute
+
+// fixLate is how old a fix may be and still be passed on: one the phone kept
+// while it was offline says where it was, not where it is.
+const fixLate = 10 * time.Minute
+
+// announceFix passes a fix of the operator's phone on (location.fix), as it
+// comes, at most about once a minute: what a reminder for a place on the map -
+// a city, a station, which no region marks - is judged by in mind, without
+// anyone asking where the phone is (2026-11-06: only the regions' comings and
+// goings reached mind, so "수원에 도착하면" could not ring). The coordinates
+// stay in the records two days (input-svc), the raw reports here
+// CONTEXT_RAW_DAYS.
+func (s *Server) announceFix(rep report, at time.Time) {
+	if s.now().Sub(at) > fixLate || !s.lastFix.IsZero() && at.Sub(s.lastFix) < fixEvery {
+		return
+	}
+	s.lastFix = at
+	s.events.Emit(map[string]any{
+		"source": "context", "type": "location.fix", "subject": "owner",
+		"data":       map[string]any{"lat": rep.Lat, "lon": rep.Lon, "acc": rep.Acc},
+		"key":        fmt.Sprintf("location:fix:%d", at.Unix()),
+		"occurredAt": at,
 	})
 }
 

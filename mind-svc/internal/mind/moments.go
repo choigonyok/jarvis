@@ -30,6 +30,10 @@ const (
 	LocationLeave      = "location.leave"
 	LocationGuestEnter = "location.guest.enter"
 	LocationGuestLeave = "location.guest.leave"
+	// LocationFix is where the operator's phone is, as it reports - at most
+	// about a minute apart (context-svc): what a reminder for a place on the
+	// map, which no region marks, goes by.
+	LocationFix = "location.fix"
 )
 
 // HereLatest is where the phones are, from what context-svc last said.
@@ -176,6 +180,27 @@ func (m *Mind) onLocation(ctx context.Context, o obs.Observation) error {
 		return m.rainOut(ctx, at)
 	}
 	return nil
+}
+
+// onFix is a fix of the operator's phone: the reminders waiting for a place on
+// the map hear where it is now.
+func (m *Mind) onFix(ctx context.Context, o obs.Observation) error {
+	if m.Moments == nil {
+		return nil
+	}
+	var d struct {
+		Lat *float64 `json:"lat"`
+		Lon *float64 `json:"lon"`
+		Acc float64  `json:"acc"`
+	}
+	if err := json.Unmarshal(o.Data, &d); err != nil || d.Lat == nil || d.Lon == nil {
+		return nil
+	}
+	at := o.OccurredAt
+	if at.IsZero() {
+		at = m.Opts.Now()
+	}
+	return m.Moments.Fixed(ctx, moments.Owner, moments.Fix{Lat: *d.Lat, Lon: *d.Lon, Acc: d.Acc, At: at})
 }
 
 // rainOut is leaving home on a day it will still rain: when, and the
@@ -341,7 +366,7 @@ func (m *Mind) reminderLinesOf(ctx context.Context, who string) string {
 		if r.Source == moments.Asked || r.Source == moments.Console {
 			asked = append(asked, r.Line(m.Opts.Loc))
 		} else if r.Source == moments.Lists {
-			held = append(held, r.When(m.Opts.Loc)+" · "+r.Text+" (체크리스트 "+r.Checklist+" 의 남은 것)")
+			held = append(held, r.When(m.Opts.Loc)+" · "+r.Text+" (체크리스트 "+r.Checklist+" 의 남은 것, id 는 답에 쓰지 않는다)")
 		} else {
 			held = append(held, r.When(m.Opts.Loc)+" · "+r.Text)
 		}
@@ -351,7 +376,7 @@ func (m *Mind) reminderLinesOf(ctx context.Context, who string) string {
 		if len(asked) > 8 {
 			asked = append(asked[:8], fmt.Sprintf("… 그 밖에 %d개", len(asked)-8))
 		}
-		b.WriteString("- 맡아 둔 알림(그때 폰 푸시, 고칠 때는 이 id 로): " + strings.Join(asked, " / ") + "\n")
+		b.WriteString("- 맡아 둔 알림(그때 폰 푸시. 괄호 속 id 는 고칠 때 도구에 넣는 값이라 답에 쓰지 않는다): " + strings.Join(asked, " / ") + "\n")
 	}
 	if len(held) > 0 {
 		b.WriteString("- 자비스가 그때로 미뤄 둔 알림: " + strings.Join(held, " / ") + "\n")

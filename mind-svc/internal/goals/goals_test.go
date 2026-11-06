@@ -314,7 +314,7 @@ func TestTimesADay(t *testing.T) {
 
 	check(Check{Add: 1})
 	p, m := check(Check{Add: 1, Note: "점심"})
-	if p.Mark != "" || p.Count != 2 || m.Count != 2 || m.Note != "점심" || !strings.HasSuffix(g.Line(p), "· 오늘 2/4번") {
+	if p.Mark != "" || p.Count != 2 || m.Count != 2 || m.Note != "점심" || !strings.Contains(g.Line(p), "· 오늘 2/4번 (id ") {
 		t.Fatalf("두 번까지는 아직 하는 중: %+v %+v %q", p, m, g.Line(p))
 	}
 	if p.Week[3].Count != 2 || p.Week[3].Mark != "" {
@@ -329,7 +329,7 @@ func TestTimesADay(t *testing.T) {
 	if p, _ = check(Check{Add: -1}); p.Mark != "" || p.Count != 3 {
 		t.Fatalf("하나 빼면 다시 하는 중: %+v", p)
 	}
-	if p, _ = check(Check{Mark: mark(Missed)}); p.Mark != Missed || p.Count != 3 || !strings.HasSuffix(g.Line(p), "오늘 안 했음(3/4번)") {
+	if p, _ = check(Check{Mark: mark(Missed)}); p.Mark != Missed || p.Count != 3 || !strings.Contains(g.Line(p), "오늘 안 했음(3/4번) (id ") {
 		t.Fatalf("안 했다고 해도 한 만큼은 남는다: %+v %q", p, g.Line(p))
 	}
 	if p, _ = check(Check{Add: 1}); p.Mark != Done {
@@ -431,7 +431,7 @@ func TestLine(t *testing.T) {
 	g := weekly(3)
 	g.ID, g.Title = "goal_1", "운동"
 	p := g.Of(marks("2026-11-02"), "2026-11-03")
-	want := "[goal_1] 운동 (주 3회) 이번 주 1/3 · 남은 6일 중 2번"
+	want := "운동 (주 3회) 이번 주 1/3 · 남은 6일 중 2번 (id goal_1)"
 	if got := g.Line(p); got != want {
 		t.Fatalf("%q", got)
 	}

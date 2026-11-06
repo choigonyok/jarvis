@@ -151,7 +151,7 @@ func TestJobCardIsOneTurnPerRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(10 * time.Millisecond)
-	updated, err := s.Update(ctx, th, card.ID, []string{"가격이 내렸습니다: 16,900원"}, "Asia/Seoul", nil)
+	updated, err := s.Update(ctx, th, card.ID, []string{"가격이 내렸습니다: 16,900원"}, []string{"a1b2.jpg"}, "Asia/Seoul", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,10 +168,16 @@ func TestJobCardIsOneTurnPerRun(t *testing.T) {
 	if n := len(all); n < 2 || all[n-1].ID != card.ID || all[n-1].Origin == nil {
 		t.Fatalf("다시 읽어도 카드가 마지막이고 origin 이 남아야 합니다: %+v", all)
 	}
-	if _, err := s.Update(ctx, th, later.ID, []string{"고쳐 쓰기"}, "Asia/Seoul", nil); err != ErrNoTurn {
+	if len(updated.Images) != 1 || updated.Images[0] != "a1b2.jpg" {
+		t.Fatalf("새 말의 사진도 함께: %+v", updated.Images)
+	}
+	if kept, err := s.Update(ctx, th, card.ID, []string{"아직 그대로입니다"}, nil, "Asia/Seoul", nil); err != nil || len(kept.Images) != 1 || kept.Images[0] != "a1b2.jpg" {
+		t.Fatalf("사진 없는 새 말은 카드의 사진을 그대로 둔다: %+v %v", kept.Images, err)
+	}
+	if _, err := s.Update(ctx, th, later.ID, []string{"고쳐 쓰기"}, nil, "Asia/Seoul", nil); err != ErrNoTurn {
 		t.Fatalf("대화의 말은 못 바꿔야 합니다: %v", err)
 	}
-	if _, err := s.Update(ctx, "other", card.ID, []string{"x"}, "Asia/Seoul", nil); err != ErrNoTurn {
+	if _, err := s.Update(ctx, "other", card.ID, []string{"x"}, nil, "Asia/Seoul", nil); err != ErrNoTurn {
 		t.Fatalf("다른 스레드에서는 못 바꿔야 합니다: %v", err)
 	}
 

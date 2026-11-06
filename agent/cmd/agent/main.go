@@ -48,6 +48,7 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/module/vault"
 	"github.com/choigonyok/jarvis/agent/internal/module/web"
 	"github.com/choigonyok/jarvis/agent/internal/policy"
+	"github.com/choigonyok/jarvis/agent/internal/shot"
 	"github.com/choigonyok/jarvis/agent/internal/steps"
 	"github.com/choigonyok/jarvis/agent/internal/suggest"
 	"github.com/choigonyok/jarvis/agent/internal/thread"
@@ -181,6 +182,13 @@ func main() {
 
 	}
 
+	// 브라우저 화면을 사진으로: 작업의 보고(capture), 대화의 show_image(capture). 손님은
+	// 브라우저가 없다.
+	var camera *shot.Camera
+	if u, ok := cfg.ExtraMCPURLs[jobs.BrowserServer]; ok && !cfg.Guest {
+		camera = shot.New(u, cfg.ExtraMCPToken)
+	}
+
 	// 작업. 대화에서 맡긴 일을 백그라운드에서, 작업이 정한 주기로 한다. 손님의 것은
 	// 손님 작업(mind 가 손님 토큰으로 묶는다)이고, 웹사이트도 사진도 없다 - 대화에
 	// 첨부한 손님 사진도 작업에는 넘기지 않는다(mind 가 손님 작업의 사진을 받지 않는다).
@@ -192,6 +200,9 @@ func main() {
 		jobsModule = jobs.New(jobs.NewStore(cfg.MindURL+jobs.Prefix, cfg.APIToken).Via(commands), jobPhotos, proposals, transcript, log)
 		if cfg.Guest {
 			jobsModule.NoBrowser()
+		}
+		if camera != nil {
+			jobsModule.SetCamera(camera)
 		}
 		modules.Add(jobsModule)
 		// A run that buys reads the saved shipping address and raises the
@@ -239,6 +250,9 @@ func main() {
 			seen = webModule.Seen
 		}
 		showModule := show.New(photos, transcript, seen, log)
+		if camera != nil {
+			showModule.SetCamera(camera)
+		}
 		modules.Add(showModule)
 		mcpMounts["/mcp/"+show.ServerName] = showModule.Handler()
 		cfg.ModuleMCPURLs[show.ServerName] = cfg.PublicMCPURL + "/" + show.ServerName
@@ -254,8 +268,9 @@ func main() {
 	}
 
 	// Where the operator is (context-svc), read only. Not the guest's.
+	var placeModule *place.Module
 	if cfg.ContextURL != "" && !cfg.Guest {
-		placeModule := place.New(cfg.ContextURL, cfg.APIToken)
+		placeModule = place.New(cfg.ContextURL, cfg.APIToken)
 		if webModule != nil {
 			placeModule.UseNaver(webModule.Client())
 		}
@@ -297,6 +312,11 @@ func main() {
 	if cfg.MindURL != "" {
 		// 리마인드: "몇 시에 / 집에 가면 / 나갈 때 알려줘". mind 가 그때 폰으로 알린다.
 		remindModule := remind.New(cfg.MindURL, cfg.APIToken, commands)
+		// A place that is no region - "수원시에 도착하면" - found on the map, and
+		// waited for by the phone's fixes. The guest's are their regions' names.
+		if placeModule != nil {
+			remindModule.UseMap(placeModule)
+		}
 		modules.Add(remindModule)
 		remindModule.Look(look)
 		remindModule.Change(change)

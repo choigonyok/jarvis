@@ -971,10 +971,15 @@ type Purge struct {
 
 // PurgeDue lists jobs that ended more than after ago and still have photos.
 func (s *Store) PurgeDue(ctx context.Context, who string, after time.Duration) ([]Purge, error) {
-	rows, err := s.pool.Query(ctx, `select id, photos from mind.jobs
-		where who = $2 and photos_purged_at is null and cardinality(photos) > 0
-		  and state in ('done', 'cancelled', 'failed')
-		  and coalesce(finished_at, updated_at) < $1`, time.Now().Add(-after), who)
+	// The screens a run took (its "shot" lines) go with the job's photos: an
+	// order page holds an address as a photo of a parcel does.
+	rows, err := s.pool.Query(ctx, `select j.id, j.photos || coalesce(array(
+		    select e.text from mind.job_events e where e.job_id = j.id and e.kind = 'shot'), '{}')
+		  from mind.jobs j
+		 where j.who = $2 and j.photos_purged_at is null
+		   and (cardinality(j.photos) > 0 or exists (select 1 from mind.job_events e where e.job_id = j.id and e.kind = 'shot'))
+		   and j.state in ('done', 'cancelled', 'failed')
+		   and coalesce(j.finished_at, j.updated_at) < $1`, time.Now().Add(-after), who)
 	if err != nil {
 		return nil, err
 	}

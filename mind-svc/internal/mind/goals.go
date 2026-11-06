@@ -446,5 +446,5 @@ func (m *Mind) goalLineOf(ctx context.Context, who string) string {
 	if len(parts) == 0 {
 		return ""
 	}
-	return "- 목표(운영자가 했다·안 했다고 말하면 change 의 goal.check, 이 id 로. 하루 여러 번인 목표는 한 번 했다면 add 1): " + strings.Join(parts, " / ")
+	return "- 목표(운영자가 했다·안 했다고 말하면 change 의 goal.check 에 괄호 속 id 로. 하루 여러 번인 목표는 한 번 했다면 add 1. id 는 답에 쓰지 않는다): " + strings.Join(parts, " / ")
 }

@@ -192,7 +192,10 @@ func New(o Options) *Mind {
 	}
 	actuators := []act.Actuator{act.CalendarActuator{Cal: o.Calendar}, act.Note{},
 		act.SettleActuator{Drafts: drafter}, act.PhotosActuator{Photos: photos}, act.CartActuator{Jobs: jobs},
-		act.DraftActuator{Drafts: drafter}, act.ReviewActuator{}, act.PhotoPlaceActuator{}, act.RebalanceActuator{Orders: o.Orders}}
+		act.DraftActuator{Drafts: drafter}, act.ReviewActuator{}, act.PhotoPlaceActuator{}, act.RebalanceActuator{Orders: o.Orders},
+		// The operator's own promise, approved as a reminder: m.Moments, set
+		// below, is what keeps it.
+		remindAct{m: m}}
 	if o.Spending != nil {
 		actuators = append(actuators, o.Spending)
 	}
@@ -261,6 +264,8 @@ func (m *Mind) Handle(ctx context.Context, o obs.Observation) error {
 		return m.band(ctx, o)
 	case LocationEnter, LocationLeave, LocationGuestEnter, LocationGuestLeave:
 		return m.onLocation(ctx, o)
+	case LocationFix:
+		return m.onFix(ctx, o)
 	case obs.OccurrenceObserved:
 		var ref obs.OccurrenceRef
 		if err := json.Unmarshal(o.Data, &ref); err != nil {

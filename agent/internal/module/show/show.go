@@ -11,6 +11,10 @@
 // model to "show" an address of its own making cannot carry anything out in
 // it. Only https, never an address inside this network, and only JPEG, PNG
 // or WebP of a sane size.
+//
+// It also shows the shared browser's screen as it is (capture): what a job
+// has open, the page the conversation is on - a picture of it, taken through
+// the bridge (package shot), kept with the uploads like the rest.
 package show
 
 import (
@@ -30,6 +34,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/choigonyok/jarvis/agent/internal/shot"
 	"github.com/choigonyok/jarvis/agent/internal/thread"
 	"github.com/choigonyok/jarvis/agent/internal/uploads"
 )
@@ -59,6 +64,8 @@ type Module struct {
 	// module's ledger); nil: no address is fetched.
 	seen   func(string) bool
 	client *http.Client
+	// camera takes the browser's screen (capture); nil: no browser here.
+	camera *shot.Camera
 	log    *slog.Logger
 }
 
@@ -68,6 +75,9 @@ func New(up *uploads.Store, t Thread, seen func(string) bool, log *slog.Logger) 
 	return &Module{uploads: up, thread: t, seen: seen, client: publicClient(), log: log}
 }
 
+// SetCamera lets it show the shared browser's screen (capture).
+func (m *Module) SetCamera(c *shot.Camera) { m.camera = c }
+
 func (*Module) Name() string                { return Name }
 func (*Module) Start(context.Context) error { return nil }
 func (*Module) Stop(context.Context) error  { return nil }
@@ -76,6 +86,8 @@ type ShowInput struct {
 	URLs    []string `json:"urls,omitempty" jsonschema:"보여 줄 그림의 주소(https). 읽은 페이지의 '그림 주소'·검색 결과·운영자의 말에 나온 주소 그대로. 짐작해 만든 주소는 열지 않는다"`
 	Uploads []string `json:"uploads,omitempty" jsonschema:"이미 있는 사진 이름(운영자가 보낸 사진·작업 사진. 예: 3f2a…c9.jpg)"`
 	Caption string   `json:"caption,omitempty" jsonschema:"사진과 함께 보일 한 줄(선택). 사진이 무엇인지"`
+	Capture bool     `json:"capture,omitempty" jsonschema:"true 면 지금 브라우저에 떠 있는 화면을 찍어 함께 띄운다. 작업이 쓰고 있어도 찍기만 하고 아무것도 누르지 않는다"`
+	Full    bool     `json:"full,omitempty" jsonschema:"capture 와 함께 true 면 보이는 부분이 아니라 페이지 전체를 찍는다"`
 }
 
 func (m *Module) Handler() http.Handler {
@@ -84,6 +96,7 @@ func (m *Module) Handler() http.Handler {
 		Name: "show_image",
 		Description: fmt.Sprintf("운영자에게 사진을 대화에 띄워 보여 준다(한 번에 %d장까지). 상품·장소·음식처럼 보면 바로 아는 것, 운영자가 '보여줘' 한 것에 쓴다. "+
 			"웹 사진은 읽은 페이지의 '그림 주소'나 검색 결과 등 대화에 나온 https 주소만, 아니면 이미 있는 사진 이름(uploads). "+
+			"브라우저에 지금 떠 있는 화면(작업이 연 페이지, 주문 결과)을 보여 줄 때는 capture. "+
 			"띄운 사진은 대화에 따로 남으니, 답에서 같은 사진을 다시 설명하거나 주소를 늘어놓지 않는다.", MaxPictures),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ShowInput) (*mcp.CallToolResult, any, error) {
 		return m.show(ctx, in), nil, nil
@@ -93,9 +106,12 @@ func (m *Module) Handler() http.Handler {
 
 func (m *Module) show(ctx context.Context, in ShowInput) *mcp.CallToolResult {
 	n := len(in.URLs) + len(in.Uploads)
+	if in.Capture {
+		n++
+	}
 	switch {
 	case n == 0:
-		return fail("보여 줄 사진이 없습니다. urls 나 uploads 를 주세요.")
+		return fail("보여 줄 사진이 없습니다. urls 나 uploads 를 주거나 capture 로 브라우저 화면을 찍으세요.")
 	case n > MaxPictures:
 		return fail(fmt.Sprintf("한 번에 %d장까지 보여 줄 수 있습니다.", MaxPictures))
 	}
@@ -107,6 +123,13 @@ func (m *Module) show(ctx context.Context, in ShowInput) *mcp.CallToolResult {
 			continue
 		}
 		names = append(names, name)
+	}
+	if in.Capture {
+		if name, err := m.capture(ctx, in.Full); err != nil {
+			problems = append(problems, "브라우저 화면: "+err.Error())
+		} else {
+			names = append(names, name)
+		}
 	}
 	for _, raw := range in.URLs {
 		name, err := m.fetch(ctx, strings.TrimSpace(raw))
@@ -125,6 +148,25 @@ func (m *Module) show(ctx context.Context, in ShowInput) *mcp.CallToolResult {
 		text += "\n띄우지 못한 것:\n- " + strings.Join(problems, "\n- ")
 	}
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}
+}
+
+// capture keeps the browser's screen as it is now, and is its name.
+func (m *Module) capture(ctx context.Context, full bool) (string, error) {
+	if m.camera == nil {
+		return "", errors.New("이 대화에는 브라우저가 없습니다")
+	}
+	data, err := m.camera.Take(ctx, full)
+	if err != nil {
+		return "", err
+	}
+	name, err := m.uploads.Save(bytes.NewReader(data))
+	if err != nil {
+		return "", err
+	}
+	if m.log != nil {
+		m.log.Info("대화에 브라우저 화면을 띄웁니다", "bytes", len(data), "name", name)
+	}
+	return name, nil
 }
 
 // fetch brings one picture from the web into the uploads, and is its name.

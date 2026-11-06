@@ -42,7 +42,7 @@ func TestSayingSomethingEndsTheStretch(t *testing.T) {
 	s.Step("일정 보기")
 	next(t, events)
 
-	s.JobNews(Origin{Kind: "job", Run: 7}, []string{"생수를 장바구니에 담았어요"})
+	s.JobNews(Origin{Kind: "job", Run: 7}, []string{"생수를 장바구니에 담았어요"}, nil)
 	if ev := next(t, events); ev.Type != "turn" {
 		t.Fatalf("작업 소식: %+v", ev)
 	}

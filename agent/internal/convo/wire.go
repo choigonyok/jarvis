@@ -117,6 +117,7 @@ func wire(ctx context.Context, cfg *config.Config, store *thread.Store, events *
 	messagesModule.Look(look)
 
 	remindModule := remind.New(cfg.MindURL, cfg.APIToken, nil)
+	remindModule.UseMap(placeModule)
 	w.modules.Add(remindModule)
 	remindModule.Look(look)
 	remindModule.Change(change)

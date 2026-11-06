@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/choigonyok/jarvis/agent/internal/module/place"
 	"github.com/choigonyok/jarvis/agent/internal/tool"
 )
 
@@ -44,11 +45,25 @@ type Sender interface {
 	Do(ctx context.Context, method, path string, in, out any) error
 }
 
+// Map knows the operator's regions and finds any other place by its name
+// on the map (module place).
+type Map interface {
+	IsRegion(ctx context.Context, name string) (bool, error)
+	FindArea(ctx context.Context, name string) (place.Area, error)
+}
+
 type Module struct {
 	url, token string
 	http       *http.Client
 	send       Sender
+	// mapper turns a place that is no region into an area mind can judge by
+	// the phone's fixes; nil (the guest's): a place is a region's name.
+	mapper Map
 }
+
+// UseMap lets a reminder wait for a place on the map - "수원시에 도착하면" -
+// besides the operator's own regions.
+func (m *Module) UseMap(mp Map) { m.mapper = mp }
 
 // New reads mind-svc at url with the services' token and changes it through
 // send.
@@ -102,7 +117,7 @@ type SetInput struct {
 	Text      string `json:"text" jsonschema:"폰에 뜰 한 줄, 운영자에게 하는 말로. 예: '내일 캠핑, 장갑 챙기세요'"`
 	Body      string `json:"body,omitempty" jsonschema:"그 아래 한 줄 더 붙일 맥락(선택). 예: '장작 팰 때 쓸 작업용 장갑'"`
 	At        string `json:"at,omitempty" jsonschema:"알릴 시각 YYYY-MM-DDTHH:MM. place 와 함께 주면 '늦어도 이때는': 그때까지 도착·출발 소식이 없으면 이 시각에 대신 알린다"`
-	Place     string `json:"place,omitempty" jsonschema:"장소 조건: home(집)·work(회사) 또는 등록된 영역 이름. 비우면 시각(at)만으로 알린다"`
+	Place     string `json:"place,omitempty" jsonschema:"장소 조건: home(집)·work(회사), 등록된 영역 이름, 또는 지도의 지역 이름(정식 이름으로: 수원시·강남구·판교동·수원역 - '수원'이 아니라 '수원시'). 지역은 그 경계에 들고 날 때 알린다. 비우면 시각(at)만으로 알린다"`
 	Move      string `json:"move,omitempty" jsonschema:"arrive(그 장소에 도착할 때, 기본) 또는 leave(그 장소에서 나갈 때)"`
 	After     string `json:"after,omitempty" jsonschema:"장소 조건을 이때부터 센다 YYYY-MM-DDTHH:MM. 이때 이미 그 장소에 있으면 그때 바로 알린다(예: '금요일 퇴근하고 집에 오면' → 그날 19:00). 비우면 지금부터 다음 도착·출발에"`
 	Until     string `json:"until,omitempty" jsonschema:"at 없이 장소 조건만일 때, 이때가 지나도록 도착·출발이 없으면 알리지 않고 끝낸다(선택)"`
@@ -114,7 +129,7 @@ type ChangeInput struct {
 	Text      string   `json:"text,omitempty" jsonschema:"새 문구. 비우면 그대로"`
 	Body      string   `json:"body,omitempty" jsonschema:"새 맥락 한 줄. 비우면 그대로"`
 	At        string   `json:"at,omitempty" jsonschema:"새 시각(또는 '늦어도') YYYY-MM-DDTHH:MM. 비우면 그대로"`
-	Place     string   `json:"place,omitempty" jsonschema:"새 장소 조건 home·work·영역 이름. 비우면 그대로"`
+	Place     string   `json:"place,omitempty" jsonschema:"새 장소 조건 home·work·영역 이름·지도의 지역 정식 이름. 비우면 그대로"`
 	Move      string   `json:"move,omitempty" jsonschema:"arrive 또는 leave. 비우면 그대로"`
 	After     string   `json:"after,omitempty" jsonschema:"장소 조건을 셀 새 시작 YYYY-MM-DDTHH:MM. 비우면 그대로"`
 	Until     string   `json:"until,omitempty" jsonschema:"새 기한 YYYY-MM-DDTHH:MM. 비우면 그대로"`
@@ -161,13 +176,17 @@ func (m *Module) Change(b *tool.Board) {
 					body[k] = v
 				}
 			}
+			found, err := m.area(ctx, in.Place, body)
+			if err != nil {
+				return "", failed("저장하지 못했습니다", err)
+			}
 			var out struct {
 				Reminder Reminder `json:"reminder"`
 			}
 			if err := m.do(ctx, http.MethodPost, "/api/reminders", body, &out); err != nil {
 				return "", failed("저장하지 못했습니다", err)
 			}
-			return "저장했습니다: " + out.Reminder.Line + "\n" +
+			return "저장했습니다.\n" + said(out.Reminder, found) +
 				"그때 폰으로 푸시가 가고 대화에 안내 카드가 남습니다. 운영자에게는 위의 때와 문구를 그대로 말하세요. 운영자가 말하지 않은 시각을 정했으면 그 시각을 밝히세요.", nil
 		})
 	tool.Add(b, "reminder.change", "리마인드의 때나 문구를 고친다. 준 칸만 바뀌고, 이미 보낸 것도 새 때를 다시 기다린다. "+
@@ -182,13 +201,17 @@ func (m *Module) Change(b *tool.Board) {
 			if len(in.Clear) > 0 {
 				body["clear"] = in.Clear
 			}
+			found, err := m.area(ctx, in.Place, body)
+			if err != nil {
+				return "", failed("고치지 못했습니다", err)
+			}
 			var out struct {
 				Reminder Reminder `json:"reminder"`
 			}
 			if err := m.do(ctx, http.MethodPatch, "/api/reminders/"+in.ID, body, &out); err != nil {
 				return "", failed("고치지 못했습니다", err)
 			}
-			return "고쳤습니다: " + out.Reminder.Line + "\n운영자에게는 위의 바뀐 때와 문구를 그대로 말하세요.", nil
+			return "고쳤습니다.\n" + said(out.Reminder, found) + "운영자에게는 위의 바뀐 때와 문구를 그대로 말하세요.", nil
 		})
 	tool.Add(b, "reminder.cancel", "기다리는 리마인드를 취소한다. 그때가 와도 알리지 않는다.",
 		func(ctx context.Context, in CancelInput) (string, error) {
@@ -198,8 +221,59 @@ func (m *Module) Change(b *tool.Board) {
 			if err := m.do(ctx, http.MethodDelete, "/api/reminders/"+in.ID, nil, &out); err != nil {
 				return "", failed("취소하지 못했습니다", err)
 			}
-			return "취소했습니다: " + out.Reminder.Line, nil
+			return "취소했습니다: " + words(out.Reminder), nil
 		})
+}
+
+// area puts the outline of a place that is none of the operator's regions in
+// body (mind waits for it by the phone's fixes), and says what the map found;
+// "" when the place is a region or there is none. A place the map does not
+// know is not kept as a region that never comes (2026-11-06: "수원").
+func (m *Module) area(ctx context.Context, p string, body map[string]any) (string, error) {
+	p = strings.TrimSpace(p)
+	if p == "" || m.mapper == nil {
+		return "", nil
+	}
+	switch strings.ToLower(p) {
+	case "집", "home", "회사", "직장", "사무실", "work":
+		return "", nil
+	}
+	region, err := m.mapper.IsRegion(ctx, p)
+	if err != nil || region {
+		return "", err
+	}
+	a, err := m.mapper.FindArea(ctx, p)
+	if err != nil {
+		return "", fmt.Errorf("%w. 등록한 영역도 아닙니다 - 지도의 정식 이름(수원시, 강남구, 판교동, 수원역)으로 다시 정하거나 운영자에게 물으세요", err)
+	}
+	body["area"] = a
+	return firstNonEmpty(a.Where, a.Name), nil
+}
+
+// words is a reminder as the operator is told it: when, and what - its id is
+// the tools' handle and never said (2026-11-06: "[rem_7270d1c1]" in an
+// answer, copied from here).
+func words(r Reminder) string {
+	return r.When + " · " + r.Text
+}
+
+// said is what a set or a change tells the conversation: what to say, what
+// the map found, and apart from both, the id to change it by.
+func said(r Reminder, found string) string {
+	s := "운영자에게 말할 때와 문구: " + words(r) + "\n"
+	if found != "" {
+		s += "지도에서 찾은 곳: " + found + " - 이 경계에 들고 날 때 알립니다.\n"
+	}
+	return s + "(고칠 때 도구에 넣는 id: " + r.ID + " - 답에는 쓰지 않습니다)\n"
+}
+
+func firstNonEmpty(vs ...string) string {
+	for _, v := range vs {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // failed is a change that did not happen, said so the conversation does not

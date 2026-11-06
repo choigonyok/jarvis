@@ -39,6 +39,7 @@
     "assets.band": {"lane": "interpret"},
     "location.enter": {"lane": "interpret"},
     "location.leave": {"lane": "interpret"},
+    "location.fix": {"lane": "interpret"},
     "location.guest.enter": {"lane": "interpret", "guest": true},
     "location.guest.leave": {"lane": "interpret", "guest": true},
 
@@ -69,6 +70,7 @@
     "calendar.update": {"level": "ask", "hand": "output"},
     "calendar.delete": {"level": "ask", "fixed": true, "hand": "output"},
     "cart.add": {"level": "ask", "fixed": true, "hand": "mind"},
+    "remind.set": {"level": "ask", "fixed": true, "hand": "mind"},
     "message.draft": {"level": "ask", "fixed": true, "hand": "none"},
     "settle.request": {"level": "ask", "fixed": true, "hand": "none"},
     "review.place": {"level": "ask", "fixed": true, "hand": "none"},

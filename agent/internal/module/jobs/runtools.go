@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -376,8 +377,13 @@ type FinishInput struct {
 }
 
 type ReportInput struct {
-	Summary string `json:"summary" jsonschema:"작업의 지금 현황 한 줄. 작업 탭의 요약이 된다. 예: '판매중 · 조회 48 · 찜 5 · 채팅 3'"`
-	Notify  bool   `json:"notify,omitempty" jsonschema:"대화에도 알릴지. 운영자가 알고 싶어 할 변화(판매, 가격 하락, 도착, 문제)일 때만 true"`
+	Summary string   `json:"summary" jsonschema:"작업의 지금 현황 한 줄. 작업 탭의 요약이 된다. 예: '판매중 · 조회 48 · 찜 5 · 채팅 3'"`
+	Notify  bool     `json:"notify,omitempty" jsonschema:"대화에도 알릴지. 운영자가 알고 싶어 할 변화(판매, 가격 하락, 도착, 문제)일 때만 true"`
+	Images  []string `json:"images,omitempty" jsonschema:"notify 와 함께 대화의 작업 카드에 보일 사진 이름(capture 로 찍은 화면, 작업 사진. 4장까지)"`
+}
+
+type CaptureInput struct {
+	Full bool `json:"full,omitempty" jsonschema:"true 면 보이는 부분이 아니라 페이지 전체를 찍는다"`
 }
 
 type MemoryInput struct {
@@ -391,7 +397,7 @@ type RecordToolInput struct {
 	Status  string           `json:"status,omitempty" jsonschema:"상태 한 단어. 예: 판매중, 예약중, 판매완료, 배송중, 도착"`
 	Amount  *int64           `json:"amount,omitempty" jsonschema:"원 단위 금액(가격 등)"`
 	Metrics map[string]int64 `json:"metrics,omitempty" jsonschema:"숫자들. 예: {'조회':48,'찜':5,'채팅':3}"`
-	Image   string           `json:"image,omitempty" jsonschema:"대표 사진 이름(작업 사진 중 하나)"`
+	Image   string           `json:"image,omitempty" jsonschema:"대표 사진 이름(작업 사진이나 capture 로 찍은 화면)"`
 	URL     string           `json:"url,omitempty" jsonschema:"대상 주소"`
 	Note    string           `json:"note,omitempty"`
 	Remove  bool             `json:"remove,omitempty" jsonschema:"더 볼 필요 없는 대상을 지울 때 true"`
@@ -460,6 +466,35 @@ func (m *Module) runServer(run int64) *mcp.Server {
 				return fail(ctx.Err()), nil, nil
 			}
 			return ok(fmt.Sprintf("%d초 기다렸습니다. 화면을 다시 보세요.", secs)), nil, nil
+		})
+
+	// The screen as a photo for the operator - browser_screenshot shows the
+	// page to the run alone (2026-11-06: "브라우저에서 필요할 때 캡처해서
+	// 사진 따서 보여줄 수 있게").
+	mcp.AddTool(server, &mcp.Tool{Name: "capture", Description: "지금 브라우저 화면을 사진으로 남긴다(작업 탭의 실행 기록에도 보인다). 운영자가 봐야 알 화면(주문 완료, 올린 글, 막힌 화면)일 때 부르고, 돌려받은 이름을 report 의 images 나 record 의 image 에 넣는다."},
+		func(ctx context.Context, _ *mcp.CallToolRequest, in CaptureInput) (*mcp.CallToolResult, any, error) {
+			j, bad := guard()
+			if bad != nil {
+				return bad, nil, nil
+			}
+			if m.camera == nil || m.uploads == nil || !needsBrowser(j) {
+				return toolText("이 작업에서는 브라우저 화면을 찍을 수 없습니다.", true), nil, nil
+			}
+			data, err := m.camera.Take(ctx, in.Full)
+			if err != nil {
+				return fail(err), nil, nil
+			}
+			name, err := m.uploads.Save(bytes.NewReader(data))
+			if err != nil {
+				return fail(err), nil, nil
+			}
+			m.shots.add(j.ID, name)
+			// The run's own line: the 작업 tab draws the picture, and the purge
+			// takes it with the job's photos.
+			if err := m.store.Step(ctx, run, "shot", name); err != nil {
+				m.log.Warn("찍은 화면을 실행 기록에 남기지 못했습니다", "job", j.ID, "err", err)
+			}
+			return ok("찍었습니다: " + name + "\n운영자에게 보이려면 report(notify=true) 의 images 나 record 의 image 에 이 이름을 넣으세요."), nil, nil
 		})
 
 	mcp.AddTool(server, &mcp.Tool{Name: "view_photos", Description: "작업에 첨부된 사진을 본다."},
@@ -759,8 +794,21 @@ func (m *Module) runServer(run int64) *mcp.Server {
 				return fail(err), nil, nil
 			}
 			m.current.report(run, in.Summary)
+			var shown, strange []string
+			for _, name := range in.Images {
+				switch name = strings.TrimSpace(name); {
+				case len(shown) == 4:
+				case m.own(ctx, j, name):
+					shown = append(shown, name)
+				default:
+					strange = append(strange, name)
+				}
+			}
 			if in.Notify {
-				m.say(j, run, in.Summary)
+				m.say(j, run, in.Summary, shown...)
+			}
+			if len(strange) > 0 {
+				return ok("남겼습니다. 이 작업의 사진이 아니라 보이지 않은 것: " + strings.Join(strange, ", ")), nil, nil
 			}
 			return ok("갱신했습니다."), nil, nil
 		})
@@ -786,7 +834,7 @@ func (m *Module) runServer(run int64) *mcp.Server {
 		if bad != nil {
 			return bad, nil, nil
 		}
-		if in.Image != "" && !contains(j.Photos, in.Image) {
+		if in.Image != "" && !m.own(ctx, j, in.Image) {
 			in.Image = ""
 		}
 		if err := m.store.Record(ctx, run, RecordInput(in)); err != nil {
@@ -809,11 +857,11 @@ func (m *Module) attach(proposalID string) {
 
 // say puts a job run's news in the conversation - as the run's card, which
 // its next word replaces. The card carries the job's title itself.
-func (m *Module) say(j Job, run int64, text string) {
+func (m *Module) say(j Job, run int64, text string, images ...string) {
 	if m.notify == nil {
 		return
 	}
-	m.notify.JobNews(thread.Origin{Kind: thread.OriginJob, Job: j.ID, Run: run, Title: j.Title}, []string{text})
+	m.notify.JobNews(thread.Origin{Kind: thread.OriginJob, Job: j.ID, Run: run, Title: j.Title}, []string{text}, images)
 }
 
 func mimeOf(name string) string {

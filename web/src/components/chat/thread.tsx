@@ -188,6 +188,12 @@ function JobNews({ turn, fold }: { turn: Turn; fold: Fold }) {
       >
         <Markdown>{text}</Markdown>
       </div>
+      {/* What the run showed with its word: a screen it took, the job's photo. */}
+      {turn.images?.length ? (
+        <div className="mt-2">
+          <Photos names={turn.images} alt="작업이 보여 준 사진" />
+        </div>
+      ) : null}
       {long ? (
         <button
           type="button"

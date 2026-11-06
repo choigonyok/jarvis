@@ -15,6 +15,10 @@
 //	             not have told
 //	until        a place reminder with no latest stops
 //	             waiting then
+//	area         a place by its name on the map - a city, a  "수원에 도착하면"
+//	             district, a station - rather than one of
+//	             the phone's regions: judged here, fix by fix
+//	             (Fixed), against its outline
 //
 // What is stored is what is said, and the conversation answers from what is
 // stored - never from what it meant to store.
@@ -91,11 +95,17 @@ type Reminder struct {
 	// rebalance was raised by.
 	Ref   string     `json:"ref,omitempty"`
 	At    *time.Time `json:"at,omitempty"`
-	Place string     `json:"place,omitempty"` // home | work | a region's name
-	Move  string     `json:"move,omitempty"`  // arrive | leave
-	After *time.Time `json:"after,omitempty"`
-	Until *time.Time `json:"until,omitempty"`
-	URL   string     `json:"url,omitempty"` // where a tap goes
+	Place string     `json:"place,omitempty"` // home | work | a region's name | an area's, as the operator said it
+	// Area is the place's outline when it is no region of the phone's but a
+	// place on the map ("수원"): what the fixes are held against.
+	Area *Area  `json:"area,omitempty"`
+	Move string `json:"move,omitempty"` // arrive | leave
+	// Inside is whether the last fix that counted was in the area: an
+	// arrival is a fix inside after one outside, across a restart too.
+	Inside *bool      `json:"inside,omitempty"`
+	After  *time.Time `json:"after,omitempty"`
+	Until  *time.Time `json:"until,omitempty"`
+	URL    string     `json:"url,omitempty"` // where a tap goes
 	// Checklist is a list shown with it, as it stands then (checklist): what
 	// to pack, what to do on getting home.
 	Checklist string `json:"checklist,omitempty"`
@@ -236,6 +246,9 @@ type Service struct {
 	// once each (again after a restart, which is harmless: being there
 	// while it counts is its moment).
 	looked map[string]bool
+	// fixes is each person's last fix (Fixed), for an area reminder that
+	// starts to count: gone with a restart, and then the next fix says.
+	fixes map[string]Fix
 }
 
 // Set stores a new reminder; one with the topic of a reminder still waiting
@@ -245,7 +258,7 @@ func (s *Service) Set(ctx context.Context, r Reminder) (Reminder, error) {
 	defer s.mu.Unlock()
 	now := s.Now()
 	r.ID, r.Status, r.SentAt, r.SentBy, r.Result, r.How, r.Unsaid = "", Waiting, nil, "", "", "", ""
-	r.CreatedAt, r.UpdatedAt = now, now
+	r.CreatedAt, r.UpdatedAt, r.Inside = now, now, nil
 	if r.Source == "" {
 		r.Source = Asked
 	}
@@ -283,10 +296,13 @@ type Change struct {
 	Checklist *string    `json:"checklist,omitempty"`
 	At        *time.Time `json:"at,omitempty"`
 	Place     *string    `json:"place,omitempty"`
-	Move      *string    `json:"move,omitempty"`
-	After     *time.Time `json:"after,omitempty"`
-	Until     *time.Time `json:"until,omitempty"`
-	Clear     []string   `json:"clear,omitempty"`
+	// Area is the outline a place on the map goes by; a new place without
+	// one is a region again.
+	Area  *Area      `json:"area,omitempty"`
+	Move  *string    `json:"move,omitempty"`
+	After *time.Time `json:"after,omitempty"`
+	Until *time.Time `json:"until,omitempty"`
+	Clear []string   `json:"clear,omitempty"`
 }
 
 // Change changes a reminder. One already said or cancelled waits again, for
@@ -303,7 +319,7 @@ func (s *Service) Change(ctx context.Context, id string, c Change) (Reminder, er
 		case "at":
 			r.At = nil
 		case "place":
-			r.Place, r.Move = "", ""
+			r.Place, r.Move, r.Area = "", "", nil
 		case "after":
 			r.After = nil
 		case "until":
@@ -327,7 +343,9 @@ func (s *Service) Change(ctx context.Context, id string, c Change) (Reminder, er
 		r.At = c.At
 	}
 	if c.Place != nil {
-		r.Place = *c.Place
+		r.Place, r.Area = *c.Place, c.Area
+	} else if c.Area != nil {
+		r.Area = c.Area
 	}
 	if c.Move != nil {
 		r.Move = *c.Move
@@ -340,6 +358,7 @@ func (s *Service) Change(ctx context.Context, id string, c Change) (Reminder, er
 	}
 	now := s.Now()
 	r.Status, r.SentAt, r.SentBy, r.Result, r.How, r.Unsaid, r.UpdatedAt = Waiting, nil, "", "", "", "", now
+	r.Inside = nil
 	if err := s.check(&r, now); err != nil {
 		return r, err
 	}
@@ -462,7 +481,7 @@ func (s *Service) MovedAs(ctx context.Context, who, move, region, kind string, a
 		return err
 	}
 	for _, r := range rs {
-		if r.Status != Waiting || r.Person() != who || r.Place == "" || r.Move != move || !matches(r.Place, region, kind) {
+		if r.Status != Waiting || r.Person() != who || r.Place == "" || r.Area != nil || r.Move != move || !matches(r.Place, region, kind) {
 			continue
 		}
 		// A move before it counts, or before it was set as it is.
@@ -515,6 +534,16 @@ func (s *Service) due(ctx context.Context, r Reminder, t *looking) (bool, error)
 	case r.Place != "" && r.Until != nil && !r.Until.After(now):
 		r.Status, r.UpdatedAt = Expired, now
 		return false, s.put(ctx, r)
+	case r.Area != nil && r.Move == Arrive && r.After != nil && !r.After.After(now) && !s.looked[r.ID]:
+		// No region to look in: the last fix says, and without one new
+		// enough the next fix does (Fixed).
+		if s.looked == nil {
+			s.looked = map[string]bool{}
+		}
+		s.looked[r.ID] = true
+		if in, ok := s.thereNow(r.Person(), *r.Area); ok && in {
+			s.say(ctx, r, ByThere)
+		}
 	case r.Place != "" && r.Move == Arrive && r.After != nil && !r.After.After(now) && !s.looked[r.ID]:
 		who := r.Person()
 		if !t.asked[who] {
@@ -690,7 +719,7 @@ func (s *Service) check(r *Reminder, now time.Time) error {
 		return ErrInvalid("알릴 말은 200자까지입니다")
 	}
 	if r.Place == "" {
-		r.Move, r.After, r.Until = "", nil, nil
+		r.Move, r.After, r.Until, r.Area, r.Inside = "", nil, nil, nil, nil
 		if r.At == nil {
 			return ErrInvalid("언제 알릴지가 필요합니다: 시각(at)이나 장소(place)")
 		}
@@ -701,6 +730,11 @@ func (s *Service) check(r *Reminder, now time.Time) error {
 	}
 	if r.Move == "" {
 		r.Move = Arrive
+	}
+	if r.Area != nil {
+		if err := r.Area.valid(); err != nil {
+			return err
+		}
 	}
 	if !slices.Contains([]string{Arrive, Leave}, r.Move) {
 		return ErrInvalid("move 는 arrive(도착) 나 leave(출발) 입니다")
@@ -800,11 +834,13 @@ func (r Reminder) Why(loc *time.Location) string {
 }
 
 // Line is a reminder in one line, for a list and for the conversation's
-// situation: "[rem_1a2b] 10/24(토) 08:00 · 베개 챙기기".
+// situation: "10/24(토) 08:00 · 베개 챙기기 (id rem_1a2b)". The id is last and
+// named for what it is - the tools' handle, not words to say: first, it was
+// said back to the operator with the rest (2026-11-06).
 func (r Reminder) Line(loc *time.Location) string {
-	s := "[" + r.ID + "] " + r.When(loc) + " · " + r.Text
+	s := r.When(loc) + " · " + r.Text
 	if r.Checklist != "" {
-		s += " · 체크리스트 " + r.Checklist
+		s += " · 체크리스트와 함께"
 	}
 	if r.Status != Waiting {
 		s += " (" + StatusName(r.Status)
@@ -816,7 +852,16 @@ func (r Reminder) Line(loc *time.Location) string {
 		}
 		s += ")"
 	}
-	return s
+	return s + " " + r.Handle()
+}
+
+// Handle is the reminder's id as the tools take it, said apart from its
+// words: "(id rem_1a2b)", "(id rem_1a2b, 체크리스트 chk_3c4d)".
+func (r Reminder) Handle() string {
+	if r.Checklist != "" {
+		return "(id " + r.ID + ", 체크리스트 " + r.Checklist + ")"
+	}
+	return "(id " + r.ID + ")"
 }
 
 // StatusName is a status in words.

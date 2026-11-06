@@ -108,6 +108,10 @@ func mindFake(sc Scenario) http.Handler {
 		}
 		writeJSON(w, map[string]any{"text": sc.Situation, "prefs": "", "rules": rules})
 	})
+	// context-svc's regions: home and work, as the reminders' places know them.
+	mux.HandleFunc("GET /regions", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, map[string]any{"regions": []map[string]string{{"name": "집", "kind": "home"}, {"name": "회사", "kind": "work"}}})
+	})
 	mux.HandleFunc("GET /search", func(w http.ResponseWriter, _ *http.Request) {
 		facts := []map[string]any{}
 		for _, f := range sc.Memory {

@@ -246,6 +246,36 @@ func TestPruneTakesOnlyWhatIsDue(t *testing.T) {
 	}
 }
 
+// A phone's fixes go two days after they came, whatever the raw tier's
+// retention: the coordinates are kept for their month in context-svc only.
+func TestPruneTakesFixesSooner(t *testing.T) {
+	s, owner := setup(t)
+	ctx := context.Background()
+	fix, recent, other := unique("fix"), unique("recent"), unique("other")
+	insert := func(key, kind string, at time.Time) {
+		t.Helper()
+		if _, err := owner.Exec(ctx, `insert into input.records (kind, source, source_key, actor, occurred_at, received_at, tier)
+			values ($1, 'prune', $2, 'x', $3, $3, 'raw')`, kind, key, at); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := owner.Exec(ctx, `insert into input.record_keys (source, source_key) values ('prune', $1)`, key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	three := time.Now().Add(-3 * 24 * time.Hour)
+	insert(fix, "location.fix", three)
+	insert(recent, "location.fix", time.Now().Add(-time.Hour))
+	insert(other, "location.enter", three)
+	if _, err := s.Prune(ctx, 90*24*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range map[string]int{fix: 0, recent: 1, other: 1} {
+		if n := count(t, owner, `select count(*) from input.records where source = 'prune' and source_key = $1`, key); n != want {
+			t.Fatalf("%s: %d", key, n)
+		}
+	}
+}
+
 func TestPartitionsAreMadeAhead(t *testing.T) {
 	s, owner := setup(t)
 	ctx := context.Background()

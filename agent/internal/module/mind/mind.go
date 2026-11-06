@@ -362,6 +362,9 @@ func CardText(c Card) action.Card {
 		card.Consequence = "승인하면 이 분류로 바꿉니다. '앞으로도'면 이 가맹점의 지난·다음 결제도 같은 분류가 됩니다. 반려하면 기타로 두고 다시 묻지 않습니다."
 	case c.Kind == "photos.place" && c.Mode != "undo":
 		card.Consequence = "승인하면 이 사진들을 그 일정에 묶어 둡니다. 반려하면 그대로 두고 다시 묻지 않습니다."
+	case c.Kind == "remind.set" && c.Mode != "undo":
+		// A promise found in a conversation, offered as a reminder (mind's loops).
+		card.Consequence = "승인하면 고른 때에 이 말로 폰에 알리는 리마인드를 만듭니다. 반려하면 만들지 않습니다."
 	case len(c.Fields) > 0:
 		card.Consequence = "승인하면 답을 보냅니다. 장소의 특징과 내 취향을 따로 배워요."
 	case c.Mode == "undo":

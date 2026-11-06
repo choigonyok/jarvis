@@ -2,6 +2,7 @@ package skill
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -65,5 +66,104 @@ func TestBriefIsTheOperatorsDay(t *testing.T) {
 	}
 	if !strings.Contains(in.Body, "은주에게 연락하기") || !strings.Contains(in.Body, "기한 지난 할 일 1개 더") {
 		t.Fatalf("사흘 안의 할 일은 이름으로, 더 오래된 것은 수로: %s", in.Body)
+	}
+}
+
+// A loop is told about once for its deadline: a note added later is the same
+// loop, and its timer stays as it was - not set again for "now" when the time
+// has gone by (2026-11-06: a second push 32 minutes after the first, when the
+// order list was added). A deadline moved is told again.
+func TestLoopIsToldOncePerDeadline(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 11, 6, 17, 59, 0, 0, seoul)
+	v := view{now: now}
+	made := model.State{Title: "책 돌려받기", Status: model.Open, Owner: "them", People: []string{"지수"}, Due: "2026-11-06"}
+	e := model.Entity{ID: "loop_a", Kind: model.KindLoop, Room: "kakao:1", State: made}
+
+	r := (Loops{}).OnChange(ctx, v, e, []model.Change{{After: made}})
+	if !r.CancelTimers || len(r.Timers) != 1 || !r.Timers[0].FireAt.Equal(now) {
+		t.Fatalf("새 고리는 기한 타이머를 건다(지난 시각이면 지금): %+v", r)
+	}
+
+	noted := made
+	noted.Note = "두 권, 문 앞에 두기로"
+	e.State = noted
+	if r := (Loops{}).OnChange(ctx, v, e, []model.Change{{Before: &made, After: noted}}); r.CancelTimers || len(r.Timers) != 0 || len(r.Intents) != 0 {
+		t.Fatalf("메모만 바뀐 고리는 타이머를 건드리지 않아야 합니다: %+v", r)
+	}
+
+	moved := noted
+	moved.Due = "2026-11-08"
+	e.State = moved
+	r = (Loops{}).OnChange(ctx, v, e, []model.Change{{Before: &noted, After: moved}})
+	if !r.CancelTimers || len(r.Timers) != 1 || !r.Timers[0].FireAt.Equal(time.Date(2026, 11, 8, 9, 0, 0, 0, seoul)) {
+		t.Fatalf("기한이 바뀌면 그 기한으로 다시 건다: %+v", r)
+	}
+
+	reopened := moved
+	reopened.Status = model.Open
+	done := moved
+	done.Status = model.Done
+	if r := (Loops{}).OnChange(ctx, v, e, []model.Change{{Before: &done, After: reopened}}); len(r.Timers) != 1 {
+		t.Fatalf("다시 열린 고리는 다시 건다: %+v", r)
+	}
+}
+
+// The operator's own promise is not pushed: it is offered as a reminder on a
+// card - when and in what words, both theirs to change - and rings only as
+// the reminder it becomes (the operator's rule, 2026-11-06). Money owed is
+// still a line at its deadline.
+func TestOperatorsPromiseIsOfferedAsAReminder(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 11, 6, 17, 59, 0, 0, seoul)
+	v := view{now: now}
+	made := model.State{Title: "빵 사 가기", Status: model.Open, Owner: "me", People: []string{"지수"}, Due: "2026-11-06", Note: "소금빵 둘"}
+	e := model.Entity{ID: "loop_b", Kind: model.KindLoop, Room: "kakao:1", State: made}
+
+	r := (Loops{}).OnChange(ctx, v, e, []model.Change{{After: made}})
+	if len(r.Timers) != 0 || len(r.Intents) != 1 {
+		t.Fatalf("운영자의 약속은 푸시 타이머가 아니라 카드 하나: %+v", r)
+	}
+	in := r.Intents[0]
+	if in.Kind != KindRemind || in.EntityID != "loop_b" || !in.Reversible || in.Topic != "" {
+		t.Fatalf("리마인드 제안 카드여야 합니다: %+v", in)
+	}
+	if len(in.Fields) != 2 || in.Fields[0].Key != "at" || in.Fields[0].Value != "11/6(금) 18:30" || len(in.Fields[0].Options) != 3 || in.Fields[1].Value != "빵 사 가기" {
+		t.Fatalf("시각(다음 30분부터 세 칸)과 문구를 고를 수 있어야 합니다: %+v", in.Fields)
+	}
+	var p struct {
+		Loop, Text, Body, At string
+		Choices              map[string]string
+	}
+	if err := json.Unmarshal(in.Payload, &p); err != nil || p.At != "2026-11-06T18:30" || p.Choices["11/6(금) 19:30"] != "2026-11-06T19:30" || p.Body != "소금빵 둘" || p.Loop != "loop_b" {
+		t.Fatalf("카드의 값: %+v (%v)", p, err)
+	}
+
+	// A timed deadline: three hours before it.
+	timed := made
+	timed.Due = "2026-11-07T19:00"
+	e.State = timed
+	r = (Loops{}).OnChange(ctx, v, e, []model.Change{{Before: &made, After: timed}})
+	if len(r.Intents) != 1 || r.Intents[0].Fields[0].Value != "11/7(토) 16:00" {
+		t.Fatalf("시각이 있는 기한은 세 시간 전: %+v", r.Intents)
+	}
+
+	// A timer kept from before: a card then too, not a push.
+	if r := (Loops{}).OnTimer(ctx, v, e, model.Timer{Name: "due"}); len(r.Intents) != 1 || r.Intents[0].Kind != KindRemind {
+		t.Fatalf("남아 있던 타이머도 카드로: %+v", r)
+	}
+
+	// Long past: not offered.
+	stale := made
+	stale.Due = "2026-11-01"
+	e.State = stale
+	if r := (Loops{}).OnChange(ctx, v, e, []model.Change{{After: stale}}); len(r.Intents) != 0 || len(r.Timers) != 0 {
+		t.Fatalf("하루 넘게 지난 기한은 묻지 않는다: %+v", r)
+	}
+
+	owed := model.State{Title: "모임비 받기", Status: model.Open, Owner: "me", Type: "정산", Due: "2026-11-09"}
+	e = model.Entity{ID: "loop_c", Kind: model.KindLoop, Room: "kakao:1", State: owed}
+	if r := (Loops{}).OnChange(ctx, v, e, []model.Change{{After: owed}}); len(r.Timers) != 1 || len(r.Intents) != 0 {
+		t.Fatalf("정산은 그대로 기한에 한 줄: %+v", r)
 	}
 }

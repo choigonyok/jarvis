@@ -494,3 +494,46 @@ func TestAJobPutFirstAndTheRunItStops(t *testing.T) {
 		t.Fatal("멈춘 작업은 먼저 할 수 없습니다")
 	}
 }
+
+// The screens a run took go with the job's photos once it is over: a job with
+// only those is purged too, and none twice.
+func TestPurgeTakesTheScreensARunTook(t *testing.T) {
+	dsn := os.Getenv("JARVIS_TEST_DSN")
+	if dsn == "" {
+		t.Skip("JARVIS_TEST_DSN 이 없어 건너뜁니다 (scripts/dbtest mind-svc)")
+	}
+	ctx := context.Background()
+	s, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	j, err := s.Create(ctx, NewJob{Title: "화면만 찍은 작업", Goal: "주문 확인"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := s.StartRun(ctx, j.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Step(ctx, run, "shot", "a1b2c3.jpg"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Finish(ctx, run, "끝"); err != nil {
+		t.Fatal(err)
+	}
+	due, err := s.PurgeDue(ctx, j.Who, -time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(due, func(p Purge) bool { return p.ID == j.ID })
+	if i < 0 || !slices.Contains(due[i].Photos, "a1b2c3.jpg") {
+		t.Fatalf("찍은 화면이 정리 대상에: %+v", due)
+	}
+	if err := s.MarkPurged(ctx, j.ID); err != nil {
+		t.Fatal(err)
+	}
+	due, err = s.PurgeDue(ctx, j.Who, -time.Hour)
+	if err != nil || slices.ContainsFunc(due, func(p Purge) bool { return p.ID == j.ID }) {
+		t.Fatalf("한 번 지운 작업은 다시 오지 않는다: %+v %v", due, err)
+	}
+}

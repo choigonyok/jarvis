@@ -42,7 +42,7 @@ func TestListKeepsWhatIsDone(t *testing.T) {
 	if l, err = s.Change(ctx, l.ID, Change{Check: []string{"장갑"}, Add: []string{"이소가스"}, Remove: []string{"i3"}, By: ByChat}); err != nil {
 		t.Fatal(err)
 	}
-	if line := l.Line(); line != "["+l.ID+"] 캠핑 준비물 2/3 · 남은 것: 이소가스" {
+	if line := l.Line(); line != "캠핑 준비물 2/3 · 남은 것: 이소가스 (id "+l.ID+")" {
 		t.Fatalf("한 줄: %s", line)
 	}
 	if l.Items[2].ID != "i4" {
@@ -93,7 +93,7 @@ func TestTopicMakesOneList(t *testing.T) {
 		t.Fatalf("열린 목록: %+v", active)
 	}
 	all, _ := s.All(ctx, true)
-	if len(all) != 2 || all[1].Status != Archived || !strings.HasSuffix(all[1].Line(), "(닫음)") {
+	if len(all) != 2 || all[1].Status != Archived || !strings.Contains(all[1].Line(), "(닫음) (id ") {
 		t.Fatalf("닫은 것까지: %+v", all)
 	}
 	// A closed list's topic is free: the next one is a list of its own.

@@ -263,6 +263,7 @@ function Body({
                   group={g}
                   live={runsPaged.page === 1 && i === 0 && j.running}
                   open={runsPaged.page === 1 && i < 2}
+                  gone={!!j.photosGone}
                 />
               ))}
             </Trace>
@@ -358,6 +359,29 @@ function Body({
 
 type RunGroup = { key: string; runId?: number; at: string; events: JobEvent[] };
 
+/**
+ * A screen the run took (capture), where it took it: a tile that opens the
+ * photo. Gone with the job's photos after it ended, it says so instead of
+ * leaving a broken picture.
+ */
+function Shot({ name, gone }: { name: string; gone: boolean }) {
+  if (gone) return <span className="text-faint">찍은 화면 (지웠어요)</span>;
+  return (
+    <span className="flex flex-col gap-1">
+      <span>화면을 찍었어요</span>
+      <a
+        href={photoUrl(name)}
+        target="_blank"
+        rel="noreferrer"
+        className="block w-fit overflow-hidden rounded-lg border border-edge-soft bg-well outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element -- served by the agent behind the proxy */}
+        <img src={photoUrl(name)} alt="작업이 찍은 화면" loading="lazy" className="block max-h-48 w-auto max-w-[16rem] object-contain" />
+      </a>
+    </span>
+  );
+}
+
 /** Events arrive newest first; group each run's lines together, keeping that order. */
 function group(events: JobEvent[]): RunGroup[] {
   const out: RunGroup[] = [];
@@ -387,6 +411,7 @@ const TONE: Record<string, string> = {
   error: "text-reject",
   finish: "text-approve",
   schedule: "text-faint",
+  shot: "text-dim",
 };
 
 /**
@@ -394,7 +419,7 @@ const TONE: Record<string, string> = {
  * step. The run going now has a light passing over its line (Trace) where the
  * breathing dot used to be.
  */
-function Run({ group: g, live, open }: { group: RunGroup; live: boolean; open: boolean }) {
+function Run({ group: g, live, open, gone }: { group: RunGroup; live: boolean; open: boolean; gone: boolean }) {
   const steps = g.events.filter((e) => e.kind === "step").length;
   const time = when(g.at);
   return (
@@ -418,7 +443,7 @@ function Run({ group: g, live, open }: { group: RunGroup; live: boolean; open: b
                 TONE[e.kind] ?? "text-dim",
               )}
             >
-              {e.text}
+              {e.kind === "shot" ? <Shot name={e.text} gone={gone} /> : e.text}
             </li>
           ))}
         </ol>

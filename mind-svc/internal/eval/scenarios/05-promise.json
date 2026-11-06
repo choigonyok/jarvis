@@ -9,9 +9,9 @@
         { "at": "2026-10-12T15:02", "me": true, "text": "네 내일 오전까지 보내드릴게요" }
       ],
       "script": {"changes":[{"op":"create","kind":"loop","set":{"title":"팀장님께 견적서 보내기","owner":"me","due":"2026-10-13T12:00"},"evidence":[{"line":2,"quote":"내일 오전까지 보내드릴게요"}],"confidence":0.85,"why":"운영자가 한 약속"}]},
-      "expect": { "loops": [{ "owner": "me", "due": "2026-10-13", "status": "open" }], "noActions": true }
+      "expect": { "loops": [{ "owner": "me", "due": "2026-10-13", "status": "open" }], "intents": ["remind.set"], "cards": ["견적서"] }
     },
-    { "advance": "18h", "expect": { "intents": ["info"] } },
+    { "advance": "18h", "expect": { "noIntents": true } },
     {
       "messages": [
         { "at": "2026-10-13T10:30", "me": true, "text": "견적서 메일로 보내드렸습니다" },

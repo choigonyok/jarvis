@@ -26,7 +26,7 @@ type transcript struct {
 	attached []string
 }
 
-func (t *transcript) JobNews(thread.Origin, []string) *thread.Turn { return nil }
+func (t *transcript) JobNews(thread.Origin, []string, []string) *thread.Turn { return nil }
 func (t *transcript) AttachProposal(id string) {
 	t.mu.Lock()
 	t.attached = append(t.attached, id)

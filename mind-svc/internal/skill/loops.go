@@ -2,6 +2,7 @@ package skill
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -11,40 +12,170 @@ import (
 )
 
 // Loops owns open loops - what I promised, what I owe a reply on, what
-// someone owes me - and brings one up before its deadline.
+// someone owes me - and brings one up before its deadline: someone else's
+// as a push, the operator's own as a card offering a reminder.
 type Loops struct{}
+
+// KindRemind is the card that offers a reminder for the operator's own
+// promise. Approved, mind keeps it as a reminder, which is what rings.
+const KindRemind = "remind.set"
 
 func (Loops) Name() string                                { return "loops" }
 func (Loops) Wants(e model.Entity) bool                   { return e.Kind == model.KindLoop }
 func (Loops) OnTick(context.Context, View, string) Result { return Result{} }
 
-func (Loops) OnChange(_ context.Context, v View, e model.Entity, _ []model.Change) Result {
-	r := Result{CancelTimers: true}
+func (Loops) OnChange(_ context.Context, v View, e model.Entity, changes []model.Change) Result {
 	// The assistant's own promise is told by the reminder or the job it
 	// became - not again, as "Jarvis가 하기로 한 것" at 09:00 on the day,
 	// knowing neither its time nor its changes (2026-10-20).
 	if !e.Live() || e.State.Due == "" || e.AssistantsPromise() {
+		return Result{CancelTimers: true}
+	}
+	// A loop is told about once for its deadline. A note or a title changed is
+	// the same loop and the same deadline: its timer stays as it was, fired or
+	// not. Setting it anew put a deadline already gone by at "now", so the
+	// order list added to a "사 가기" at 18:31 rang its 18:00 push again at
+	// 18:32 (2026-11-06).
+	if !newDeadline(changes) {
+		return Result{}
+	}
+	at, ok := DueAt(e.State.Due, v.Loc())
+	if !ok {
+		return Result{CancelTimers: true}
+	}
+	if operators(e) {
+		// The operator's own promise is offered as a reminder and rings only as
+		// one: a card, never a push of its own. The operator's rule
+		// (2026-11-06): "내가 명시적으로 말한 게 아니면 리마인드 생성 카드를
+		// 띄우는 쪽으로" - and the 18:00 push went out past it.
+		r := Result{CancelTimers: true}
+		if in, ok := remindCard(e, at, v); ok {
+			r.Intents = []model.Intent{in}
+		}
 		return r
 	}
-	if at, ok := DueAt(e.State.Due, v.Loc()); ok {
-		remind := at.Add(-3 * time.Hour)
-		if !strings.Contains(e.State.Due, "T") {
-			remind = at.Add(-9 * time.Hour) // 09:00 on the day
+	remind := at.Add(-3 * time.Hour)
+	if !strings.Contains(e.State.Due, "T") {
+		remind = at.Add(-9 * time.Hour) // 09:00 on the day
+	}
+	if e.State.Type == "정산" {
+		remind = at // the evening of the third day
+	}
+	if remind.Before(v.Now()) {
+		remind = v.Now()
+	}
+	return Result{CancelTimers: true, Timers: []model.Timer{{Skill: "loops", EntityID: e.ID, Name: "due", FireAt: remind}}}
+}
+
+// newDeadline is whether changes gave a loop a deadline to keep: made with
+// one, given another, opened again, or passed to someone else. None at all is
+// the loop as it stands, asked about (a settle, a test).
+func newDeadline(changes []model.Change) bool {
+	if len(changes) == 0 {
+		return true
+	}
+	for _, c := range changes {
+		if c.Before == nil {
+			return true
 		}
-		if e.State.Type == "정산" {
-			remind = at // the evening of the third day
+		b, a := *c.Before, c.After
+		if b.Due != a.Due || b.Owner != a.Owner || !live(b.Status) && live(a.Status) {
+			return true
 		}
-		if remind.Before(v.Now()) {
-			remind = v.Now()
-		}
-		r.Timers = []model.Timer{{Skill: "loops", EntityID: e.ID, Name: "due", FireAt: remind}}
+	}
+	return false
+}
+
+func live(status string) bool {
+	switch status {
+	case model.Cancelled, model.Done, model.Closed:
+		return false
+	}
+	return true
+}
+
+// operators is whether a loop is the operator's own to do: what they
+// promised. Money owed is someone else's to send, whoever the interpreter
+// named.
+func operators(e model.Entity) bool {
+	return e.State.Owner == "me" && e.State.Type != "정산"
+}
+
+// remindCard offers a reminder for the operator's own promise: when (three
+// hours before a time, 09:00 on a day, or the next half hour when that has
+// gone by) and in what words, both theirs to change on the card. A deadline a
+// day gone is not offered: the morning brief counts it.
+func remindCard(e model.Entity, due time.Time, v View) (model.Intent, bool) {
+	now, loc := v.Now(), v.Loc()
+	if due.Before(now.Add(-24 * time.Hour)) {
+		return model.Intent{}, false
+	}
+	first := due.Add(-3 * time.Hour)
+	if !strings.Contains(e.State.Due, "T") {
+		first = due.Add(-9 * time.Hour)
+	}
+	if first.Before(now.Add(10 * time.Minute)) {
+		first = nextHalfHour(now.Add(20 * time.Minute))
+	}
+	choices := map[string]string{}
+	var options []string
+	for i := range 3 {
+		t := first.Add(time.Duration(i) * time.Hour).In(loc)
+		label := stamp(t)
+		options = append(options, label)
+		choices[label] = t.Format("2006-01-02T15:04")
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"loop": e.ID, "text": e.State.Title, "body": e.State.Note, "at": choices[options[0]], "choices": choices,
+	})
+	body := "기한 " + dueText(e.State.Due, loc)
+	if len(e.State.People) > 0 {
+		body += " · " + strings.Join(e.State.People, ", ")
+	}
+	return model.Intent{
+		Kind: KindRemind, EntityID: e.ID, Payload: payload,
+		Title:  e.State.Title + " - 알려 드릴까요?",
+		Body:   body,
+		Reason: "하기로 하신 일이에요. 알려 달라고 하신 건 아니라 리마인드로 걸어 둘지 먼저 물어요",
+		// Approved, it is a reminder - cancelled again by undoing.
+		Confidence: 1, Reversible: true,
+		Fields: []model.Field{
+			{Key: "at", Label: "언제 알릴까요", Kind: "select", Value: options[0], Options: options, Required: true},
+			{Key: "text", Label: "알릴 말", Kind: "text", Value: e.State.Title, Required: true},
+		},
+	}, true
+}
+
+// nextHalfHour is t, or the next :00 or :30 after it.
+func nextHalfHour(t time.Time) time.Time {
+	r := t.Truncate(30 * time.Minute)
+	if r.Before(t) {
+		r = r.Add(30 * time.Minute)
 	}
 	return r
+}
+
+// stamp is "11/6(금) 18:30".
+func stamp(t time.Time) string {
+	return fmt.Sprintf("%d/%d(%s) %s", int(t.Month()), t.Day(), weekdays[t.Weekday()], t.Format("15:04"))
 }
 
 func (Loops) OnTimer(_ context.Context, v View, e model.Entity, t model.Timer) Result {
 	if t.Name != "due" || !e.Live() || e.AssistantsPromise() {
 		return Result{}
+	}
+	if operators(e) {
+		// A timer kept from before the operator's own promises became cards:
+		// offered now as one, not pushed.
+		at, ok := DueAt(e.State.Due, v.Loc())
+		if !ok {
+			return Result{}
+		}
+		in, ok := remindCard(e, at, v)
+		if !ok {
+			return Result{}
+		}
+		return Result{Intents: []model.Intent{in}}
 	}
 	title := e.State.Title
 	if e.State.Owner == "them" {

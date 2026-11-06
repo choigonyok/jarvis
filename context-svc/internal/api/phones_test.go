@@ -447,3 +447,44 @@ func TestRegisterRegion(t *testing.T) {
 		t.Fatalf("운영자 영역은 운영자 것만: %+v", regions)
 	}
 }
+
+// A fix is passed on as it comes (location.fix), a minute apart at most
+// often - a phone in Move mode reports many times a minute - and one kept
+// while the phone was offline not at all: mind judges a reminder for a place
+// on the map by them, without asking where the phone is.
+func TestFixesArePassedOn(t *testing.T) {
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	got := make(chan map[string]any, 8)
+	sink := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { got <- heard(r) }))
+	defer sink.Close()
+	server := New(nil, Config{}, notify.New(sink.URL, "", "", quiet), quiet)
+	seoul, _ := time.LoadLocation("Asia/Seoul")
+	now := time.Date(2026, 11, 6, 20, 30, 0, 0, seoul)
+	server.now = func() time.Time { return now }
+
+	server.announceFix(report{Lat: 35.60, Lon: 128.10, Acc: 12}, now)
+	server.announceFix(report{Lat: 35.601, Lon: 128.101, Acc: 12}, now.Add(20*time.Second))
+	server.announceFix(report{Lat: 35.70, Lon: 128.00, Acc: 12}, now.Add(-20*time.Minute))
+	server.announceFix(report{Lat: 35.61, Lon: 128.11, Acc: 9}, now.Add(70*time.Second))
+
+	var fixes []map[string]any
+	for len(fixes) < 2 {
+		select {
+		case e := <-got:
+			fixes = append(fixes, e)
+		case <-time.After(3 * time.Second):
+			t.Fatalf("좌표 둘이 와야 합니다: %+v", fixes)
+		}
+	}
+	select {
+	case e := <-got:
+		t.Fatalf("1분 안의 것과 늦은 것은 넘기지 않아야 합니다: %+v", e)
+	case <-time.After(300 * time.Millisecond):
+	}
+	for _, e := range fixes {
+		d, _ := e["data"].(map[string]any)
+		if e["type"] != "location.fix" || d["lat"] == nil || d["lon"] == nil || d["acc"] == nil || e["notify"] != nil {
+			t.Fatalf("좌표만, 알림 문구 없이: %+v", e)
+		}
+	}
+}

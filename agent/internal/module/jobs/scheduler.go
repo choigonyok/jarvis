@@ -32,6 +32,8 @@ func runTools(browser bool) []string {
 		} {
 			out = append(out, "mcp__"+BrowserServer+"__"+t)
 		}
+		// The screen kept as a photo for the operator: only a run on the browser.
+		out = append(out, "mcp__"+RunServerName+"__capture")
 	}
 	for _, t := range []string{"progress", "view_photos", "ask", "request_login", "request_sites", "schedule_next", "wait_payment", "wait", "finish", "report", "remember", "record",
 		"shipping_address", "request_shipping_address", "request_payment_pin", "payment_alerts"} {
@@ -477,6 +479,7 @@ const runSystem = `당신은 Jarvis의 백그라운드 작업 실행입니다. �
 - 큰 단계마다 progress 로 한 줄 남깁니다(운영자가 작업 탭에서 실시간으로 봅니다).
 - 지켜보는 대상이 있으면 record 로 현황을 남깁니다(판매 글이면 key=글 번호, 상태, 가격, 조회·찜·채팅 수, 대표 사진).
 - 실행을 마치기 전에 report 로 작업 한 줄 현황을 갱신합니다. 운영자가 알아야 할 변화(팔림, 가격 하락, 도착, 문제)는 notify=true.
+- 화면을 봐야 알 수 있는 것(주문 완료, 올린 글, 막힌 화면의 오류)은 capture 로 찍어 report(notify=true) 의 images 에 넣습니다. 대화의 작업 카드와 작업 탭에 사진으로 보입니다. 확인하려고 보는 화면은 찍지 않습니다(그건 browser_screenshot).
 - 다음 실행에 필요한 것(알아낸 사이트 절차, 올린 글 주소)은 remember 로 남깁니다.
 
 화면 다루기

@@ -5,7 +5,7 @@ description: 운영자가 되풀이해서 하려는 일(목표)을 말하거나,
 - "매일 물 2L 마실래", "주 3회 운동하기로 했어"처럼 되풀이할 일을 세우면 change 의 goal.make 로 목표를 만드세요. 카드 없이 바로 됩니다. 한 번 하고 끝나는 일은 목표가 아니라 체크리스트나 리마인드입니다.
 - goal.make 의 인자: title, cadence, times, perDay, weekdays, note, start, end, remind. cadence 는 daily(매일), days(정한 요일, weekdays 에 0 일요일 … 6 토요일), weekly(주 n회, times), monthly(월 n회, times)입니다. 말하지 않은 주기를 정하지 말고, 모호하면 한 번 물어보세요.
 - "하루 물 4번", "약 하루 2번"처럼 하루에 여러 번 하는 일은 perDay 에 그 횟수를 넣습니다(daily·days 만, 20번까지). 목표는 하나이고, 그날 그 횟수를 다 채우면 했다가 됩니다. "물 2L 마시기"처럼 횟수를 말하지 않았으면 perDay 를 비웁니다.
-- "오늘 운동했어", "어제 못 했어"처럼 말하면 change 의 goal.check 로 그날을 적으세요. 인자: id, mark(done 했다, missed 안 했다, clear 기록 지우기), count, add, day(어제 일이면 그 날짜, 오늘이면 비움), note. 지금 상황의 '목표'에 id 가 있습니다. 운영자가 말하지 않은 날을 짐작해서 적지 마세요.
+- "오늘 운동했어", "어제 못 했어"처럼 말하면 change 의 goal.check 로 그날을 적으세요. 인자: id, mark(done 했다, missed 안 했다, clear 기록 지우기), count, add, day(어제 일이면 그 날짜, 오늘이면 비움), note. 지금 상황의 '목표'에 id 가 있습니다(goal_… 는 도구에 넣는 값이라 답에는 쓰지 말고 목표 이름으로 말하세요). 운영자가 말하지 않은 날을 짐작해서 적지 마세요.
 - 하루 여러 번인 목표(지금 상황에 "(매일 4번)", "오늘 2/4번"처럼 보입니다): "물 한 잔 마셨어"는 add 1, "오늘 물 3번 마셨어"는 count 3, "오늘 물 다 마셨어"는 mark done, "두 번 마시고 말았어"는 mark missed 와 count 2 입니다. 잘못 셌다고 하면 add -1 입니다. mark, count, add 중 하나는 꼭 넣습니다.
 - 어떻게 되고 있냐고 물으면 지금 상황의 '목표'나 look 의 goals 로 답하세요. 자세한 그래프는 목표 탭에 있습니다.
 - 잠깐 쉰다고 하면 goal.change 의 pause 로 쉬게 두세요. 쉬는 날은 세지 않습니다. 그만둔다고 하면 finish 로 끝냅니다(기록은 남습니다).

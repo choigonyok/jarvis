@@ -17,6 +17,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/choigonyok/jarvis/agent/internal/shot"
 	"github.com/choigonyok/jarvis/agent/internal/thread"
 	"github.com/choigonyok/jarvis/agent/internal/uploads"
 )
@@ -138,5 +139,34 @@ func TestOnlyThePublicInternet(t *testing.T) {
 	res := m.show(context.Background(), ShowInput{URLs: []string{srv.URL + "/a.png"}})
 	if !res.IsError || !strings.Contains(text(res), "내부 주소") {
 		t.Fatalf("루프백은 열지 않습니다: %s", text(res))
+	}
+}
+
+// The shared browser's screen is shown as it is now (capture): a picture taken
+// through the bridge and kept with the uploads. Without a browser it says so.
+func TestShowsTheBrowsersScreen(t *testing.T) {
+	data := pngBytes(t)
+	server := mcp.NewServer(&mcp.Implementation{Name: "mcp-browser", Version: "1"}, nil)
+	server.AddTool(&mcp.Tool{Name: shot.Tool, InputSchema: map[string]any{"type": "object"}}, func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.ImageContent{Data: data, MIMEType: "image/png"}}}, nil
+	})
+	bridge := httptest.NewServer(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil))
+	defer bridge.Close()
+	up, err := uploads.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	thr := &shown{}
+	m := New(up, thr, nil, nil)
+	if r := m.show(context.Background(), ShowInput{Capture: true}); !r.IsError || !strings.Contains(text(r), "브라우저가 없습니다") {
+		t.Fatalf("브라우저 없이: %q", text(r))
+	}
+	m.SetCamera(shot.New(bridge.URL, ""))
+	r := m.show(context.Background(), ShowInput{Capture: true, Caption: "주문 완료 화면"})
+	if r.IsError || len(thr.images) != 1 || len(thr.images[0]) != 1 || thr.caption[0] != "주문 완료 화면" {
+		t.Fatalf("찍은 화면 한 장: %q %+v", text(r), thr.images)
+	}
+	if _, err := up.Path(thr.images[0][0]); err != nil {
+		t.Fatalf("사진으로 남아야 합니다: %v", err)
 	}
 }

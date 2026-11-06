@@ -16,16 +16,19 @@ import (
 // clock - "2026-10-24T08:00" - or RFC 3339.
 
 type reminderIn struct {
-	Text   *string  `json:"text"`
-	Body   *string  `json:"body"`
-	At     string   `json:"at"`
-	Place  *string  `json:"place"`
-	Move   *string  `json:"move"`
-	After  string   `json:"after"`
-	Until  string   `json:"until"`
-	URL    string   `json:"url"`
-	Source string   `json:"source"`
-	Clear  []string `json:"clear"`
+	Text  *string `json:"text"`
+	Body  *string `json:"body"`
+	At    string  `json:"at"`
+	Place *string `json:"place"`
+	// Area is the outline of a place on the map that is no region (the
+	// conversation looks it up by its name): where its fixes are held.
+	Area   *moments.Area `json:"area"`
+	Move   *string       `json:"move"`
+	After  string        `json:"after"`
+	Until  string        `json:"until"`
+	URL    string        `json:"url"`
+	Source string        `json:"source"`
+	Clear  []string      `json:"clear"`
 	// Checklist is a list to show with it (checklist id).
 	Checklist *string `json:"checklist"`
 }
@@ -141,6 +144,7 @@ func (s *Server) setReminder(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.Place != nil {
 		rem.Place = *in.Place
+		rem.Area = in.Area
 	}
 	if in.Move != nil {
 		rem.Move = *in.Move
@@ -180,7 +184,7 @@ func (s *Server) changeReminder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	saved, err := svc.Change(r.Context(), r.PathValue("id"), moments.Change{
-		Text: in.Text, Body: in.Body, At: at, Place: in.Place, Move: in.Move, After: after, Until: until, Clear: in.Clear,
+		Text: in.Text, Body: in.Body, At: at, Place: in.Place, Area: in.Area, Move: in.Move, After: after, Until: until, Clear: in.Clear,
 		Checklist: in.Checklist,
 	})
 	if err != nil {

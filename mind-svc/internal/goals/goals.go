@@ -929,10 +929,12 @@ func (g Goal) Rule() string {
 }
 
 // Line is a goal in one line, for the conversation's situation and a tool's
-// answer: "[goal_1a2b] 운동 (주 3회) 이번 주 1/3 · 남은 4일 중 2번 · 오늘 기록 없음",
-// "[goal_3c4d] 물 마시기 (매일 4번) · 오늘 2/4번".
+// answer: "운동 (주 3회) 이번 주 1/3 · 남은 4일 중 2번 · 오늘 기록 없음 (id goal_1a2b)",
+// "물 마시기 (매일 4번) · 오늘 2/4번 (id goal_3c4d)". The id is last, named for
+// the tools' handle it is - put first, it was said back to the operator with
+// the rest (2026-11-06).
 func (g Goal) Line(p Progress) string {
-	s := "[" + g.ID + "] " + g.Title + " (" + g.Rule() + ")"
+	s := g.Title + " (" + g.Rule() + ")"
 	if p.Says != "" {
 		s += " " + p.Says
 	}
@@ -950,7 +952,7 @@ func (g Goal) Line(p Progress) string {
 			s += " · 오늘 기록 없음"
 		}
 	}
-	return s
+	return s + " (id " + g.ID + ")"
 }
 
 // LeftDays is the days from after today to the end of the period that could
