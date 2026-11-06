@@ -14,6 +14,7 @@
 //	POST /api/tick                    {name: "morning" | "night"}
 //	POST /api/clock                   {advance: "25h"} move a memory-mode clock (tests the timers)
 //	POST /api/intents/{id}/{approve|reject|undo}   reject takes {reason}
+//	POST /api/intents/{id}/{useful|useless}        the operator's one tap on a notice
 //	POST /api/policy/rebuild          recount approval stats from the intents
 //	POST /api/patterns/rebuild        recount repetitions from the plans and purchases
 //	POST /api/ledger/rebuild          make the result ledger and the facts table again
@@ -26,6 +27,8 @@
 //	GET  /api/weather/places          where the plans of the next two weeks are (context-svc reads their forecast)
 //	GET  /api/loops?all=1             the loops still open, soonest due first (all: and those closed in two weeks)
 //	GET  /api/plans?from=&to=         the plans whose days touch the range, with where each was read and what it rests on
+//	GET  /api/expectations            what the rules that came true expect of today, with ids
+//	POST /api/expectations/{id}/deny  {said} the operator: that will not happen today
 //	GET  /api/asked?days=7            what mind asked and told lately, with why and on what grounds
 //	GET  /api/attention               when the operator answers cards, by the hour (the gate's slow hours, the digest's best hour)
 //	GET  /api/rules                   what the operator told the assistant to keep to (notes of the rule scope)
@@ -232,6 +235,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/loops", s.auth(false, s.loops))
 	mux.HandleFunc("GET /api/plans", s.auth(false, s.plans))
 	mux.HandleFunc("GET /api/asked", s.auth(false, s.asked))
+	mux.HandleFunc("GET /api/expectations", s.auth(false, s.expected))
+	write("POST /api/expectations/{id}/deny", owner, s.denyExpected)
 	mux.HandleFunc("GET /api/rules", s.auth(false, s.rules))
 	mux.HandleFunc("GET /api/attention", s.auth(false, s.attention))
 	write("POST /api/rules", owner, s.setRule)
@@ -842,6 +847,35 @@ func (s *Server) decideLink(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// expected is what the rules that have come true expect of today, for the
+// conversation's look: what /now says, with the ids the operator's "오늘은
+// 아니야" is said on, and those already said so.
+func (s *Server) expected(w http.ResponseWriter, r *http.Request) {
+	out := s.m.Expected(r.Context())
+	if out == nil {
+		out = []mind.Expected{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"expected": out})
+}
+
+// denyExpected is the operator saying what a prediction expects will not
+// happen today.
+func (s *Server) denyExpected(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Said string `json:"said"`
+	}
+	_ = json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&in)
+	pr, err := s.m.DenyExpected(r.Context(), r.PathValue("id"), in.Said)
+	switch {
+	case errors.Is(err, model.ErrNotFound):
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "그런 예측이 없습니다."})
+	case err != nil:
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+	default:
+		writeJSON(w, http.StatusOK, map[string]any{"id": pr.ID, "text": pr.Text})
+	}
+}
+
 func (s *Server) decide(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var in model.Intent
@@ -861,6 +895,9 @@ func (s *Server) decide(w http.ResponseWriter, r *http.Request) {
 		in, err = s.m.Gate.RejectWhy(r.Context(), id, strings.TrimSpace(body.Reason))
 	case "undo":
 		in, err = s.m.Gate.Undo(r.Context(), id)
+	case "useful", "useless":
+		// One tap on a notice in the inbox: 도움됐어요 · 필요 없어요.
+		in, err = s.m.Gate.Heard(r.Context(), id, r.PathValue("action") == "useful")
 	case "covered":
 		// The agent did not show the card: its conversation asks the same
 		// already, on the assistant's own card (by).
@@ -883,7 +920,7 @@ func (s *Server) decide(w http.ResponseWriter, r *http.Request) {
 		}
 		in, err = s.m.Gate.Asked(r.Context(), id, body.Kind, body.Title, body.Calendar)
 	default:
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "approve, reject, undo, covered, asked 중 하나입니다."})
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "approve, reject, undo, useful, useless, covered, asked 중 하나입니다."})
 		return
 	}
 	switch {

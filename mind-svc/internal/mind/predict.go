@@ -169,8 +169,8 @@ func (m *Mind) onExpect(ctx context.Context, t model.Timer) {
 		}
 		exps, _ := m.Opts.Store.Expectations(ctx, pr.ID)
 		for _, e := range exps {
-			if e.State == "met" {
-				return
+			if e.State == "met" || e.Denied != "" {
+				return // bought, or the operator said it will not be (DenyExpected)
 			}
 		}
 		if in, ok := m.prepIntent(ctx, pr); ok {
@@ -190,6 +190,9 @@ func (m *Mind) prepIntent(ctx context.Context, pr model.Prediction) (model.Inten
 	plan, err := st.Entity(ctx, pr.PlanID)
 	if err != nil || plan.State.Status != model.Confirmed {
 		return model.Intent{}, false
+	}
+	if m.Predict.LeftOver(ctx, note.Rule) != nil {
+		return model.Intent{}, false // what is at home does not need buying
 	}
 	class := note.Rule.Class
 	// The last time: the purchase linked to an earlier plan of the kind.
@@ -228,7 +231,10 @@ func (m *Mind) prepIntent(ctx context.Context, pr model.Prediction) (model.Inten
 	payload, _ := json.Marshal(map[string]string{"item": item, "class": class, "planId": plan.ID, "noteId": note.ID, "site": "coupang.com"})
 	return model.Intent{
 		Skill: "predict", Kind: "cart.add", EntityID: plan.ID, Topic: "prep:" + class + ":" + plan.ID, Context: "prep:" + plan.State.Type,
-		Payload: payload, Title: title, Body: body, Reason: "준비물을 아직 안 사셨어요", Confidence: math.Max(0.75, pr.Prob),
+		// The prediction's own chance: a 30% one was sent as 75% sure, and
+		// what the ledger learnt of prep cards was learnt of a number that
+		// never moved (2026-11-07).
+		Payload: payload, Title: title, Body: body, Reason: "준비물을 아직 안 사셨어요", Confidence: pr.Prob,
 		Value: 0.9, Evidence: ev, Reversible: true,
 	}, true
 }
@@ -282,15 +288,16 @@ func (m *Mind) learn(ctx context.Context, in model.Intent) {
 	}
 	var p struct {
 		NoteID string `json:"noteId"`
+		PlanID string `json:"planId"`
 	}
 	if json.Unmarshal(in.Payload, &p) != nil || p.NoteID == "" {
 		return
 	}
 	switch in.Status {
 	case model.Executed:
-		_ = m.Self.Learn(ctx, p.NoteID, true, "")
+		_ = m.Self.Learn(ctx, p.NoteID, true, "", p.PlanID)
 	case model.Rejected:
-		_ = m.Self.Learn(ctx, p.NoteID, false, in.Error)
+		_ = m.Self.Learn(ctx, p.NoteID, false, in.Error, p.PlanID)
 	}
 }
 

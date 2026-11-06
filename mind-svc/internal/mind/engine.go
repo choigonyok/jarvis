@@ -2,6 +2,7 @@ package mind
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -150,18 +151,45 @@ func (m *Mind) forgetTracks() {
 	m.tracks.mu.Unlock()
 }
 
+// Expected is one thing a rule that has come true expects of today, as the
+// conversation is told it: the prediction it is, in words, and - when the
+// operator said it will not happen today - what they said.
+type Expected struct {
+	ID     string    `json:"id"`
+	Text   string    `json:"text"`
+	Prob   float64   `json:"prob"`
+	Due    time.Time `json:"due"`
+	Denied string    `json:"denied,omitempty"`
+	key    string
+}
+
 // expectLines is what the rules that have come true expect of today, for
-// the conversation: open predictions whose window holds today, likely
-// enough to be worth saying, from a rule shown or confirmed (the workout
-// predictor once its own record is good). What already happened is not
-// expected any more.
+// the conversation (Expected), but what the operator said will not happen.
 func (m *Mind) expectLines(ctx context.Context) string {
+	var parts []string
+	for _, e := range m.Expected(ctx) {
+		if e.Denied == "" && len(parts) < 5 {
+			parts = append(parts, e.Text)
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "- 평소대로라면 오늘 있을 일(예측이 맞아 온 습관만 · 확률일 뿐이니 사실처럼 말하지 말 것): " + strings.Join(parts, " · ")
+}
+
+// Expected is what the rules that have come true expect of today: open
+// predictions whose window holds today, likely enough to be worth saying,
+// from a rule shown or confirmed (the workout predictor once its own record
+// is good), one a thing, the likeliest first. What already happened is not
+// expected any more.
+func (m *Mind) Expected(ctx context.Context) []Expected {
 	st, loc := m.Opts.Store, m.Opts.Loc
 	now := m.Opts.Now().In(loc)
 	end := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc).AddDate(0, 0, 1)
 	prs, err := st.Predictions(ctx, now, now.AddDate(0, 0, 8))
 	if err != nil {
-		return ""
+		return nil
 	}
 	notes := map[string]model.Note{}
 	if ns, err := st.Notes(ctx); err == nil {
@@ -169,11 +197,7 @@ func (m *Mind) expectLines(ctx context.Context) string {
 			notes[n.ID] = n
 		}
 	}
-	type item struct {
-		key, text string
-		prob      float64
-	}
-	var items []item
+	var items []Expected
 	for _, pr := range prs {
 		if pr.ScoredAt != nil || pr.Prob < 0.6 || pr.From != nil && !pr.From.Before(end) {
 			continue
@@ -181,10 +205,13 @@ func (m *Mind) expectLines(ctx context.Context) string {
 		if !m.sayable(ctx, pr, notes) {
 			continue
 		}
-		met := false
+		met, denied := false, ""
 		if es, err := st.Expectations(ctx, pr.ID); err == nil {
 			for _, e := range es {
 				met = met || e.State == "met"
+				if e.Denied != "" {
+					denied = e.Denied
+				}
 			}
 		}
 		if met {
@@ -198,22 +225,51 @@ func (m *Mind) expectLines(ctx context.Context) string {
 		if !pr.Due.Before(end) {
 			text += fmt.Sprintf(" (%s까지)", md(pr.Due.In(loc)))
 		}
-		items = append(items, item{key, text, pr.Prob})
+		items = append(items, Expected{ID: pr.ID, Text: text, Prob: pr.Prob, Due: pr.Due, Denied: denied, key: key})
 	}
-	sort.SliceStable(items, func(i, j int) bool { return items[i].prob > items[j].prob })
-	var parts []string
+	sort.SliceStable(items, func(i, j int) bool { return items[i].Prob > items[j].Prob })
+	var out []Expected
 	var seen []string
 	for _, it := range items {
-		if slices.Contains(seen, it.key) || len(parts) == 5 {
+		if slices.Contains(seen, it.key) {
 			continue
 		}
 		seen = append(seen, it.key)
-		parts = append(parts, it.text)
+		out = append(out, it)
 	}
-	if len(parts) == 0 {
-		return ""
+	return out
+}
+
+// DenyExpected is the operator's word that what a prediction expects will
+// not happen ("오늘은 운동 안 해"): it is not said to the conversation
+// again, and a prep purchase it waits on is not brought up ahead. It is still
+// scored by what happens: a word is not an outcome.
+func (m *Mind) DenyExpected(ctx context.Context, id, said string) (model.Prediction, error) {
+	st := m.Opts.Store
+	pr, err := st.Prediction(ctx, id)
+	if err != nil {
+		return pr, err
 	}
-	return "- 평소대로라면 오늘 있을 일(예측이 맞아 온 습관만 · 확률일 뿐이니 사실처럼 말하지 말 것): " + strings.Join(parts, " · ")
+	if pr.ScoredAt != nil {
+		return pr, errors.New("이미 채점이 끝난 예측입니다")
+	}
+	if said = strings.TrimSpace(said); said == "" {
+		said = "오늘은 아니라고 하심"
+	}
+	es, err := st.Expectations(ctx, id)
+	if err != nil {
+		return pr, err
+	}
+	for _, e := range es {
+		if e.State != "open" {
+			continue
+		}
+		e.Denied = said
+		if err := st.PutExpectation(ctx, e); err != nil {
+			return pr, err
+		}
+	}
+	return pr, nil
 }
 
 // sayable is whether a prediction may reach the operator: made from a rule

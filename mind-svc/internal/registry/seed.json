@@ -11,6 +11,7 @@
     "checklist.*": {"lane": "deterministic", "guest": true},
     "goal.*": {"lane": "deterministic", "guest": true},
     "note.*": {"lane": "deterministic"},
+    "expect.*": {"lane": "deterministic"},
     "link.*": {"lane": "deterministic"},
     "spending.write": {"lane": "deterministic"},
     "jobs.write": {"lane": "deterministic", "guest": true},

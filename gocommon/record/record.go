@@ -471,6 +471,9 @@ func CommandKind(method, path string) string {
 	switch parts[1] {
 	case "intents":
 		return "intent.answer"
+	case "expectations":
+		// The operator's word that what mind expects will not happen today.
+		return "expect.denied"
 	case "notes":
 		return "note.decided"
 	case "rules":

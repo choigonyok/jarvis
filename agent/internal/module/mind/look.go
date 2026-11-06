@@ -33,6 +33,14 @@ type askedIn struct {
 	Days int `json:"days,omitempty" jsonschema:"며칠 치(1~30). 비우면 7"`
 }
 
+// expectedView is one thing mind expects of today (mind-svc mind.Expected).
+type expectedView struct {
+	ID     string  `json:"id"`
+	Text   string  `json:"text"`
+	Prob   float64 `json:"prob"`
+	Denied string  `json:"denied"`
+}
+
 // Look puts mind's world model and its own word on the board.
 func (m *Module) Look(b *tool.Board) {
 	tool.Add(b, "loops", "열린 고리: 운영자가 하기로 한 것(me)과 남이 해 주기로 한 것(them). 카톡·iMessage·이 대화에서 읽은 약속·부탁을 기한이 가까운 것부터, 어느 대화의 어떤 말에서 읽었는지와 함께 준다.",
@@ -86,6 +94,16 @@ func (m *Module) Look(b *tool.Board) {
 			}
 			return renderNotes(out.Notes), nil
 		})
+	tool.Add(b, "expectations", "평소대로라면 오늘 있을 일(예측이 맞아 온 습관만, 확률)을 id 와 함께 준다. 운영자가 오늘은 아니라고 한 것은 그 말과 함께. 접을 때 change 의 expect.deny 에 id 를 넣는다.",
+		func(ctx context.Context, _ struct{}) (string, error) {
+			var out struct {
+				Expected []expectedView `json:"expected"`
+			}
+			if err := m.c.Do(ctx, http.MethodGet, "/api/expectations", nil, &out); err != nil {
+				return "", err
+			}
+			return renderExpected(out.Expected), nil
+		})
 	tool.Add(b, "asked", "mind 가 최근에 묻거나 알린 것(카드·알림·저녁 요약·묻지 않고 넘긴 것)을 그 이유·근거·관문의 판단·운영자의 답과 함께 준다. '왜 그 카드 올렸어?', '어제 뭐 알려줬지?'에 답할 때.",
 		func(ctx context.Context, in askedIn) (string, error) {
 			path := "/api/asked"
@@ -101,6 +119,21 @@ func (m *Module) Look(b *tool.Board) {
 			}
 			return renderAsked(out.Days, out.Asked), nil
 		})
+}
+
+func renderExpected(list []expectedView) string {
+	if len(list) == 0 {
+		return "오늘 기대하는 일이 없습니다(맞아 온 습관이 아직 없거나 이미 일어났습니다)."
+	}
+	var s strings.Builder
+	for _, e := range list {
+		fmt.Fprintf(&s, "- %s (id %s)", e.Text, e.ID)
+		if e.Denied != "" {
+			fmt.Fprintf(&s, " · 접음: %s", e.Denied)
+		}
+		s.WriteString("\n")
+	}
+	return s.String()
 }
 
 type loopView struct {

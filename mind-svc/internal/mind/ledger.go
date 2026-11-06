@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/engine"
@@ -47,6 +48,7 @@ func (m *Mind) RebuildLedger(ctx context.Context) (outcomes, facts int, err erro
 		return 0, 0, err
 	}
 	m.Gate.SetBook(engine.NewBook(rows))
+	m.trial.set(engine.Walk(rows), now)
 	all, err := st.Facts(ctx, ledgerLimit)
 	if err != nil {
 		return len(rows), 0, err
@@ -179,4 +181,26 @@ func (m *Mind) loadBook(ctx context.Context) {
 		return
 	}
 	m.Gate.SetBook(engine.NewBook(rows))
+	m.trial.set(engine.Walk(rows), m.Opts.Now())
+}
+
+// trial is the judgement engine held to its own past (engine.Walk) as the
+// ledger was last made: for the status tab, which had no way to see whether
+// the correction it applies does better than what was said (2026-11-07).
+type trial struct {
+	mu sync.Mutex
+	at time.Time
+	t  engine.Trial
+}
+
+func (t *trial) set(v engine.Trial, at time.Time) {
+	t.mu.Lock()
+	t.t, t.at = v, at
+	t.mu.Unlock()
+}
+
+func (t *trial) get() (engine.Trial, time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.t, t.at
 }

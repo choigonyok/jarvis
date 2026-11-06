@@ -354,3 +354,31 @@ func TestAScreenEditGoesByTheHand(t *testing.T) {
 		t.Fatalf("화면에 알린 것: %v", stream.entries)
 	}
 }
+
+// The inbox's one tap on a notice comes by the stream like a card's answer,
+// and is kept on the notice; a card is not answered this way.
+func TestANoticeIsHeardByTheStream(t *testing.T) {
+	s, h, m := commandServer(t)
+	ctx := context.Background()
+	notice, err := m.Gate.Submit(ctx, model.Intent{Skill: "life", Kind: "info", Topic: "restock:생수:2026-10-01", Title: "생수 살 때 됐어요", Confidence: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Command(ctx, command("intent.answer", "cmd-h1", "operator", "POST", "/api/intents/"+notice.ID+"/useless", "null")); err != nil {
+		t.Fatal(err)
+	}
+	if code, out := read(t, h, "tok", "cmd-h1"); code != http.StatusOK || out["status"] != float64(200) {
+		t.Fatalf("%d %v", code, out)
+	}
+	if got, _ := m.Opts.Store.Intent(ctx, notice.ID); got.Heard != model.HeardUseless {
+		t.Fatalf("%+v", got)
+	}
+	card, err := m.Gate.Submit(ctx, model.Intent{Skill: "t", Kind: "note.add", Title: "메모", Body: "내용", Confidence: 0.5, Topic: "x", Reversible: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Command(ctx, command("intent.answer", "cmd-h2", "operator", "POST", "/api/intents/"+card.ID+"/useful", "null"))
+	if _, out := read(t, h, "tok", "cmd-h2"); out["status"] != float64(http.StatusConflict) {
+		t.Fatalf("카드는 알림 답으로 답하지 않음: %v", out)
+	}
+}

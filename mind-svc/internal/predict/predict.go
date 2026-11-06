@@ -63,6 +63,10 @@ func (p *Predictor) Put(ctx context.Context, pr model.Prediction, keys ...string
 	}
 	pr.Prob = math.Round(pr.Prob*100) / 100
 	pr.Base = math.Round(pr.Base*1000) / 1000 // a rare thing's chance is small, not none
+	if pr.Prior != nil {
+		prior := math.Round(*pr.Prior*1000) / 1000
+		pr.Prior = &prior
+	}
 	if pr.Key == "" && len(keys) > 0 {
 		pr.Key = keys[0]
 	}
@@ -71,14 +75,17 @@ func (p *Predictor) Put(ctx context.Context, pr model.Prediction, keys ...string
 	}
 	for _, k := range keys {
 		existing, _ := p.St.Expectations(ctx, pr.ID)
-		met := false
+		met, denied := false, ""
 		for _, e := range existing {
 			met = met || e.Key == k && e.State == "met"
+			if e.Key == k {
+				denied = e.Denied // predicted again, it is still what the operator said
+			}
 		}
 		if met {
 			continue
 		}
-		e := model.Expectation{PredictionID: pr.ID, Key: k, Due: pr.Due, State: "open"}
+		e := model.Expectation{PredictionID: pr.ID, Key: k, Due: pr.Due, State: "open", Denied: denied}
 		if pr.From != nil {
 			e.From = *pr.From
 		}
@@ -245,7 +252,7 @@ func (p *Predictor) Workout(ctx context.Context, day time.Time) (model.Predictio
 	}
 	for _, note := range notes {
 		r := note.Rule
-		if note.Status == model.Rejected || r == nil || r.Kind != "rate" || r.Target != "workout" || len(today) == 0 {
+		if note.Status == model.Rejected || r == nil || r.Kind != "rate" || r.Target != "workout" || r.Off || len(today) == 0 {
 			continue
 		}
 		if !Holds(r.Feature, r.Arg, today[0], p.Loc) {
@@ -259,11 +266,15 @@ func (p *Predictor) Workout(ctx context.Context, day time.Time) (model.Predictio
 		basis = append(basis, note.ID)
 		why += " · " + note.Text
 	}
-	return model.Prediction{
+	pr := model.Prediction{
 		Target: "workout:" + day.Format("2006-01-02"), Text: fmt.Sprintf("%s 운동 %.0f%% (%s)", label(day, p.Now(), p.Loc), prob*100, why),
 		Prob: prob, Due: day.AddDate(0, 0, 1).Add(-time.Minute), Basis: basis,
 		Key: "workout", From: &day, Base: float64(sessions) / float64(len(past)),
-	}, true, nil
+	}
+	if len(basis) > 0 {
+		pr.Prior = &base // the comparable days' share: what the rate notes that moved it are held to
+	}
+	return pr, true, nil
 }
 
 func label(day, now time.Time, loc *time.Location) string {
@@ -303,18 +314,25 @@ func (p *Predictor) Prep(ctx context.Context, plan model.Entity) ([]model.Predic
 		}
 		due := dayStart(sp.Start, p.Loc).Add(-time.Minute)
 		prob := self.Shrunk(r.Support, r.Total, 0.3, 1)
-		if len(r.Except) > 0 {
-			prob *= 0.8 // it does not always hold
-		}
 		target := "buy:" + r.Class + ":" + plan.ID
 		from := now
 		if old, err := p.St.Prediction(ctx, ID(target)); err == nil && old.From != nil {
 			from = *old.From // asked again: the window opened the first time
 		}
+		base := p.bought(ctx, r.Class, due.Sub(from))
+		text := fmt.Sprintf("%d/%d까지 %s 구매", int(due.Month()), due.Day(), r.Class)
+		// The operator said what was bought before was left over, and none of
+		// it has been bought since: the plan does not call for it, and what is
+		// left is the chance it is bought anyway. Every condition once took
+		// a fifth off, forever, whatever it said (until 2026-11-07).
+		if left := p.LeftOver(ctx, r); left != nil {
+			prob = base
+			text += " (" + left.Text + ")"
+		}
 		pr, err := p.Put(ctx, model.Prediction{
 			Target: target, PlanID: plan.ID, Basis: []string{n.ID},
-			Text: fmt.Sprintf("%d/%d까지 %s 구매 %.0f%%", int(due.Month()), due.Day(), r.Class, prob*100), Prob: prob, Due: due,
-			Key: "purchase.item:" + r.Class, From: &from, Base: p.bought(ctx, r.Class, due.Sub(from)),
+			Text: fmt.Sprintf("%s %.0f%%", text, prob*100), Prob: prob, Due: due,
+			Key: "purchase.item:" + r.Class, From: &from, Base: base,
 		}, "purchase.item:"+r.Class)
 		if err != nil {
 			return out, err
@@ -322,6 +340,32 @@ func (p *Predictor) Prep(ctx context.Context, plan model.Entity) ([]model.Predic
 		out = append(out, pr)
 	}
 	return out, nil
+}
+
+// LeftOver is the leftover the operator last said of a prep rule's class
+// ("집에 남았어", Exception) while it still stands: nothing of the class has
+// been bought since it was said. Nil: none said, or used up.
+func (p *Predictor) LeftOver(ctx context.Context, r *model.Rule) *model.Exception {
+	if r == nil {
+		return nil
+	}
+	for i := len(r.Exceptions) - 1; i >= 0; i-- {
+		e := r.Exceptions[i]
+		if e.Kind != model.ExceptLeftover {
+			continue
+		}
+		items, err := p.St.Occurrences(ctx, e.At, p.Now().Add(time.Second), "purchase.item")
+		if err != nil {
+			return nil
+		}
+		for _, it := range items {
+			if c, err := p.St.ThingClass(ctx, it.Title); err == nil && c == r.Class {
+				return nil // bought again since: what was left is not what there is now
+			}
+		}
+		return &e
+	}
+	return nil
 }
 
 // bought is the chance a thing of class is bought in a window this long
@@ -378,24 +422,62 @@ func (p *Predictor) Match(ctx context.Context, o model.Occurrence) ([]string, er
 		if err != nil {
 			return met, err
 		}
-		for _, e := range open {
-			if o.At.After(e.Due) || !e.From.IsZero() && o.At.Before(e.From) {
+		// What reached mind after its prediction was scored a miss - the card
+		// payments of 10/28-10/30, passed on only when KakaoTalk signed in
+		// again - meets it all the same, and the prediction is scored again:
+		// one truth. Before, the ledger went by what happened while the
+		// rules' records and the night's reflection went by the miss.
+		late, err := p.St.MissedExpectations(ctx, k, o.At)
+		if err != nil {
+			return met, err
+		}
+		for _, e := range append(open, late...) {
+			if !p.within(ctx, e, o) {
 				continue
 			}
-			if e.From.IsZero() && strings.HasPrefix(e.Key, "workout") { // from before windows: the day is in the target
-				pr, err := p.St.Prediction(ctx, e.PredictionID)
-				if err != nil || pr.Target != "workout:"+o.At.In(p.Loc).Format("2006-01-02") {
-					continue
-				}
-			}
+			missed := e.State == "missed"
 			e.State, e.MetBy = "met", o.ID
 			if err := p.St.PutExpectation(ctx, e); err != nil {
 				return met, err
+			}
+			if missed {
+				if err := p.rescore(ctx, e.PredictionID); err != nil {
+					return met, err
+				}
 			}
 			met = append(met, e.PredictionID)
 		}
 	}
 	return met, nil
+}
+
+// within is whether an occurrence falls in an expectation's window.
+func (p *Predictor) within(ctx context.Context, e model.Expectation, o model.Occurrence) bool {
+	if o.At.After(e.Due) || !e.From.IsZero() && o.At.Before(e.From) {
+		return false
+	}
+	if e.From.IsZero() && strings.HasPrefix(e.Key, "workout") { // from before windows: the day is in the target
+		pr, err := p.St.Prediction(ctx, e.PredictionID)
+		if err != nil || pr.Target != "workout:"+o.At.In(p.Loc).Format("2006-01-02") {
+			return false
+		}
+	}
+	return true
+}
+
+// rescore scores again a prediction scored a miss whose thing turned up
+// late (Match): it happened after all. A surprise it was not any more is
+// not reflected on; one already reflected on stays so.
+func (p *Predictor) rescore(ctx context.Context, id string) error {
+	pr, err := p.St.Prediction(ctx, id)
+	if err != nil || pr.ScoredAt == nil || pr.Outcome == nil || *pr.Outcome {
+		return err
+	}
+	happened, now := true, p.Now()
+	score := (pr.Prob - 1) * (pr.Prob - 1)
+	pr.Outcome, pr.Score, pr.RescoredAt = &happened, &score, &now
+	pr.Surprise = math.Abs(pr.Prob-1) >= Surprise
+	return p.St.PutPrediction(ctx, pr)
 }
 
 // Score marks every prediction due by now: what happened (an expectation

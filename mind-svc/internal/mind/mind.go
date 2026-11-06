@@ -137,6 +137,8 @@ type Mind struct {
 	notifier act.Notifier
 	// tracks is the rules' records, read again every few minutes.
 	tracks tracks
+	// trial is the judgement engine's trial on the ledger, as last made.
+	trial trial
 	// taste is the guest's taste as last read from their memory.
 	taste guestTaste
 }

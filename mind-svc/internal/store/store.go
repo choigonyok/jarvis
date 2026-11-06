@@ -151,6 +151,10 @@ type Store interface {
 	PutExpectation(ctx context.Context, e model.Expectation) error
 	// OpenExpectations is the open expectations of a key.
 	OpenExpectations(ctx context.Context, key string) ([]model.Expectation, error)
+	// MissedExpectations is the expectations of a key scored missed whose
+	// window had not closed by at: what an occurrence that reached mind late
+	// still meets.
+	MissedExpectations(ctx context.Context, key string, at time.Time) ([]model.Expectation, error)
 	Expectations(ctx context.Context, predictionID string) ([]model.Expectation, error)
 
 	// Reply situations: AddReplySituation opens one (idempotent by kind

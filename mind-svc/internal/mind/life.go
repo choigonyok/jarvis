@@ -310,7 +310,7 @@ func (m *Mind) restock(ctx context.Context) error {
 			// sheet takes the saved address, or stops if a move put it in doubt.
 			payload, _ := json.Marshal(map[string]string{"item": item, "class": t.Class, "site": "coupang.com"})
 			intent = model.Intent{Skill: "life", Kind: "cart.add", Context: "restock", Topic: topic, Title: title + " 담아둘까요?",
-				Body: body + "\n배송지는 저장된 주소로 넣어요.", Reason: "가진 물건", Confidence: restockConfidence, Value: 0.6, Reversible: true, Payload: payload}
+				Body: body + "\n배송지는 저장된 주소로 넣어요.", Reason: "가진 물건", Confidence: m.restockChance(ctx, t), Value: 0.6, Reversible: true, Payload: payload}
 		}
 		if _, err := m.Gate.Submit(ctx, intent); err != nil {
 			return err
@@ -319,9 +319,32 @@ func (m *Mind) restock(ctx context.Context) error {
 	return nil
 }
 
-// restockConfidence is what a cycle that has held so far is worth, before the
-// ledger has answers of its own.
-const restockConfidence = 0.75
+// restockChance is how likely a thing is bought about now: the engine's own
+// prediction of its cycle while one is open, else the share of the gaps
+// between its purchases that came round in the window the card is raised
+// in, pulled toward even while there are few. It was 0.75 for every thing
+// until 2026-11-07: a thing bought twice at random looked as sure as water.
+func (m *Mind) restockChance(ctx context.Context, t Thing) float64 {
+	st := m.Opts.Store
+	if n, err := st.Note(ctx, self.ID(predict.Cycle, "purchase.item/"+t.Class)); err == nil && n.Rule != nil && n.Rule.Kind == predict.Cycle && !n.Rule.Off {
+		if pr, err := st.Prediction(ctx, predict.ID("cycle:"+n.Rule.Key+":"+n.Rule.Last)); err == nil && pr.ScoredAt == nil {
+			return pr.Prob
+		}
+	}
+	k, gaps := 0, 0
+	for i := 1; i < len(t.Bought); i++ {
+		a, err1 := time.ParseInLocation("2006-01-02", t.Bought[i-1], m.Opts.Loc)
+		b, err2 := time.ParseInLocation("2006-01-02", t.Bought[i], m.Opts.Loc)
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		gaps++
+		if g := int(math.Round(b.Sub(a).Hours() / 24)); g >= t.CycleDays-2 && g <= t.CycleDays+t.CycleDays/2 {
+			k++
+		}
+	}
+	return math.Round(self.Shrunk(k, gaps, 0.5, 1)*100) / 100
+}
 
 // deliveries keeps a note of how often food is delivered and when, from
 // the card payments to the delivery apps (and where the phone was) over

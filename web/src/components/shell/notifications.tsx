@@ -6,6 +6,7 @@ import { openTarget, targetOf } from "@/lib/focus";
 import { onInboxRequest, onResume } from "@/lib/resume";
 import { Bell, Settings2 } from "lucide-react";
 import { HeaderPanel } from "@/components/shell/panel";
+import { useRole } from "@/components/shell/role";
 import { Button } from "@/components/ui/button";
 import { Pager } from "@/components/ui/pager";
 import { Popover, PopoverTrigger } from "@/components/ui/popover";
@@ -31,9 +32,41 @@ type Note = {
   title: string;
   body: string;
   url: string;
+  /** The sender's key: "mind:<intent>" for what mind sent. */
+  key?: string | null;
   createdAt: string;
   readAt: string | null;
 };
+
+/**
+ * What the operator said of one of mind's notices: it helped, or it was not
+ * needed. mind keeps it and holds the next notices of the kind to it; this
+ * device keeps it too, only so the inbox shows what was pressed.
+ */
+type Heard = "useful" | "useless";
+
+const HEARD_KEY = "jarvis.heard";
+
+function readHeard(): Record<string, Heard> {
+  try {
+    const raw = window.localStorage.getItem(HEARD_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, Heard>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function keepHeard(all: Record<string, Heard>) {
+  try {
+    // The latest few hundred: the inbox pages back further than anyone answers.
+    window.localStorage.setItem(HEARD_KEY, JSON.stringify(Object.fromEntries(Object.entries(all).slice(-300))));
+  } catch {
+    // Not kept here; mind has it.
+  }
+}
+
+/** The intent a notice of mind's was (mind.info): what the one tap answers. Cards and what was done and told are answered elsewhere. */
+const noticeOf = (n: Note) => (n.kind === "mind.info" && n.key?.startsWith("mind:") ? n.key.slice("mind:".length) : null);
 
 type Settings = { muted: string[]; quietStart: string; quietEnd: string; digestAt: string };
 
@@ -56,6 +89,9 @@ const INBOX_PAGE = 20;
 
 export function Notifications() {
   const router = useRouter();
+  const role = useRole();
+  const [heard, setHeard] = useState<Record<string, Heard>>(() => (typeof window === "undefined" ? {} : readHeard()));
+  const [unheard, setUnheard] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<"list" | "settings">("list");
   const [notes, setNotes] = useState<Note[]>([]);
@@ -116,6 +152,21 @@ export function Notifications() {
     // ...or, with the console already open, tells it so (lib/resume.ts).
     return onInboxRequest(() => setOpen(true));
   }, []);
+
+  // One tap, kept at once; taken back when mind did not take it.
+  const say = async (id: string, v: Heard) => {
+    const before = heard;
+    const next = { ...heard, [id]: v };
+    setHeard(next);
+    setUnheard(null);
+    keepHeard(next);
+    const res = await fetch(`/api/mind/intents/${encodeURIComponent(id)}/${v}`, { method: "POST", keepalive: true }).catch(() => null);
+    if (!res?.ok) {
+      setHeard(before);
+      keepHeard(before);
+      setUnheard(id);
+    }
+  };
 
   const markRead = async (ids: number[]) => {
     setNotes((ns) => ns.map((n) => (ids.length === 0 || ids.includes(n.id) ? { ...n, readAt: n.readAt ?? new Date().toISOString() } : n)));
@@ -188,7 +239,9 @@ export function Notifications() {
               ) : notes.length === 0 ? (
                 <li className="px-3.5 py-6 text-center text-aside text-faint">아직 알림이 없어요.</li>
               ) : (
-                notes.map((n) => (
+                notes.map((n) => {
+                  const about = role === "owner" ? noticeOf(n) : null;
+                  return (
                   <li key={n.id}>
                     <button
                       type="button"
@@ -215,8 +268,10 @@ export function Notifications() {
                         {n.body ? <span className="mt-0.5 block text-aside leading-relaxed text-dim">{n.body}</span> : null}
                       </span>
                     </button>
+                    {about ? <HeardRow said={heard[about]} failed={unheard === about} onSay={(v) => void say(about, v)} /> : null}
                   </li>
-                ))
+                  );
+                })
               )}
             </ul>
             <Pager
@@ -235,6 +290,34 @@ export function Notifications() {
         </HeaderPanel>
       ) : null}
     </Popover>
+  );
+}
+
+/**
+ * The one tap on a notice of mind's, under its words: aligned with them, past
+ * the unread dot (each button's px-1 inside the row's inset), as close under
+ * them as the 44px press allows. Pressed, it stays pressed; pressing the other
+ * changes it.
+ */
+function HeardRow({ said, failed, onSay }: { said?: Heard; failed: boolean; onSay: (v: Heard) => void }) {
+  return (
+    <div role="group" aria-label="이 알림이 쓸모 있었는지" className="flex items-center gap-2 pr-3.5 pb-2 pl-[1.625rem] text-meta">
+      {(["useful", "useless"] as const).map((v) => (
+        <button
+          key={v}
+          type="button"
+          aria-pressed={said === v}
+          onClick={() => onSay(v)}
+          className={cn(
+            "tap -my-3 rounded px-1 transition-colors focus-ring mouse:-my-1 mouse:min-h-7 mouse:min-w-0",
+            said === v ? "text-foreground" : "text-faint hover:text-dim",
+          )}
+        >
+          {v === "useful" ? "도움됐어요" : "필요 없어요"}
+        </button>
+      ))}
+      {failed ? <span role="status" className="text-reject">보내지 못했어요</span> : null}
+    </div>
   );
 }
 

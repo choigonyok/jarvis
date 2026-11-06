@@ -202,6 +202,7 @@ const AGENT_ROUTES = new Set(["healthz", "thread", "messages", "events", "propos
  * so, is not, or reads otherwise. The 작업 tab: jobsRoute, the reminders and the
  * checklists (a tick, an item swiped off, a list closed). The 가계부 screen:
  * spendingRoute. The 캘린더 tab's edits to an entry. The 목표 tab: goalsRoute.
+ * The inbox: the one tap on a notice mind sent (도움됐어요 · 필요 없어요).
  * Reads go to mind; a change goes in at the way in (inputRoute).
  */
 function mindRoute(method: string, path: string): boolean {
@@ -215,7 +216,11 @@ function mindRoute(method: string, path: string): boolean {
     );
   }
   if (method === "POST") {
-    return /^api\/notes\/[A-Za-z0-9_-]+$/.test(path) || /^api\/checklists\/[A-Za-z0-9_-]+\/items\/[A-Za-z0-9_-]+$/.test(path);
+    return (
+      /^api\/notes\/[A-Za-z0-9_-]+$/.test(path) ||
+      /^api\/intents\/[A-Za-z0-9_-]+\/(useful|useless)$/.test(path) ||
+      /^api\/checklists\/[A-Za-z0-9_-]+\/items\/[A-Za-z0-9_-]+$/.test(path)
+    );
   }
   if (method !== "PATCH" && method !== "DELETE") return false;
   return /^api\/checklists\/[A-Za-z0-9_-]+$/.test(path) || /^api\/calendar\/[^/]+$/.test(path);

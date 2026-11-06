@@ -35,7 +35,9 @@ func ID(parts ...string) string {
 // Hold writes a belief found from the evidence: a new hypothesis, or a new
 // version of the note it already is when its numbers or words moved. A
 // note the operator rejected stays rejected; one they confirmed stays
-// confirmed, with fresh numbers.
+// confirmed, with fresh numbers and their confidence. A sentence the
+// operator wrote stays theirs; what its record made of it (Track, Off,
+// Since: predict.Grade) and the conditions they gave (Except) stay too.
 func (s *Self) Hold(ctx context.Context, n model.Note, reason string) (model.Note, bool, error) {
 	old, err := s.St.Note(ctx, n.ID)
 	now := s.Now()
@@ -48,14 +50,35 @@ func (s *Self) Hold(ctx context.Context, n model.Note, reason string) (model.Not
 	case old.Status == model.Rejected:
 		return old, false, nil
 	}
+	if old.Written {
+		n.Text = old.Text
+	} else if old.Rule != nil {
+		n.Text = WithExcept(n.Text, old.Rule.Except)
+	}
+	if old.Status == model.Confirmed {
+		n.Confidence = old.Confidence
+	}
 	if old.Text == n.Text && math.Abs(old.Confidence-n.Confidence) < 0.05 && sameRule(old.Rule, n.Rule) {
 		return old, false, nil
 	}
 	n.Status, n.Version, n.Reason, n.CreatedAt, n.UpdatedAt = old.Status, old.Version+1, reason, old.CreatedAt, now
+	n.Written, n.Track = old.Written, old.Track
 	if n.Rule != nil && old.Rule != nil {
-		n.Rule.Except = old.Rule.Except
+		n.Rule.Except, n.Rule.Exceptions, n.Rule.Off, n.Rule.Since = old.Rule.Except, old.Rule.Exceptions, old.Rule.Off, old.Rule.Since
 	}
 	return n, true, s.St.PutNote(ctx, n)
+}
+
+// WithExcept is a sentence found again with the conditions the operator's
+// refusals added to it (Learn): the night writes the sentence afresh, and
+// the "(직전 캠핑 후 남은 경우 제외)" was lost from it.
+func WithExcept(text string, except []string) string {
+	for _, c := range except {
+		if !strings.Contains(text, c) {
+			text = strings.TrimSuffix(text, ".") + " (" + c + ")"
+		}
+	}
+	return text
 }
 
 func sameRule(a, b *model.Rule) bool {
@@ -78,8 +101,8 @@ func (s *Self) Decide(ctx context.Context, id, status, text, reason string) (mod
 		}
 		n.Status = status
 	}
-	if t := strings.TrimSpace(text); t != "" {
-		n.Text = t
+	if t := strings.TrimSpace(text); t != "" && t != n.Text {
+		n.Text, n.Written = t, true
 	}
 	if n.Status == model.Confirmed {
 		n.Confidence = math.Max(n.Confidence, 0.9)
@@ -92,10 +115,12 @@ func (s *Self) Decide(ctx context.Context, id, status, text, reason string) (mod
 	return n, s.St.PutNote(ctx, n)
 }
 
-// Learn moves a note by what came of acting on it: approved, it is surer;
-// turned down with a reason, the reason becomes a condition the note holds
-// under ("직전 캠핑 후 남은 경우 제외").
-func (s *Self) Learn(ctx context.Context, id string, approved bool, reason string) error {
+// Learn moves a note by what came of acting on it - for the plan it was
+// about, if it was about one: approved, it is surer; turned down with a
+// reason, the reason becomes a condition the note holds under ("직전 캠핑 후
+// 남은 경우 제외"), in words on the note and in a form a prediction checks
+// (Exception).
+func (s *Self) Learn(ctx context.Context, id string, approved bool, reason, plan string) error {
 	n, err := s.St.Note(ctx, id)
 	if errors.Is(err, model.ErrNotFound) {
 		return nil
@@ -112,13 +137,25 @@ func (s *Self) Learn(ctx context.Context, id string, approved bool, reason strin
 	}
 	n.Confidence = math.Max(0.1, math.Round((n.Confidence-0.1)*100)/100)
 	n.Reason = "제안을 거절하심"
-	if cond := Condition(n, reason); cond != "" && n.Rule != nil && !slices.Contains(n.Rule.Except, cond) {
+	cond := Condition(n, reason)
+	if cond != "" && n.Rule != nil && !slices.Contains(n.Rule.Except, cond) {
 		n.Rule.Except = append(n.Rule.Except, cond)
 		n.Text = strings.TrimSuffix(n.Text, ".") + " (" + cond + ")"
+	}
+	if cond != "" && n.Rule != nil {
+		kind := model.ExceptSaid
+		if strings.HasSuffix(cond, leftoverSuffix) {
+			kind = model.ExceptLeftover
+		}
+		// Each time it is said: a leftover said again is said of now.
+		n.Rule.Exceptions = append(n.Rule.Exceptions, model.Exception{Kind: kind, Text: cond, Plan: plan, At: n.UpdatedAt})
 		n.Reason += ": " + strings.TrimSpace(reason)
 	}
 	return s.St.PutNote(ctx, n)
 }
+
+// leftoverSuffix ends a leftover's condition in words.
+const leftoverSuffix = "후 남은 경우 제외"
 
 // Condition is a rejection's reason as the condition a note does not hold
 // under. "집에 남았어" on "캠핑 전에 장작을 산다" is "직전 캠핑 후 남은 경우
@@ -133,7 +170,7 @@ func Condition(n model.Note, reason string) string {
 	if n.Rule != nil && n.Rule.Kind == "prep" {
 		for _, w := range []string{"남았", "남아", "아직 있", "집에 있", "이미 있", "많이 있"} {
 			if strings.Contains(r, w) {
-				return fmt.Sprintf("직전 %s 후 남은 경우 제외", n.Rule.PlanKind)
+				return fmt.Sprintf("직전 %s %s", n.Rule.PlanKind, leftoverSuffix)
 			}
 		}
 	}

@@ -952,3 +952,90 @@ func TestCardsAboutOneOutingAreOneQuestion(t *testing.T) {
 		t.Fatalf("다른 날의 카드는 그대로: %s", kept.Status)
 	}
 }
+
+// The floor on confidence is held to the confidence the grade went by: a
+// kind that says 90% and is approved about half the time is asked, though
+// it would be done and told on its word.
+func TestTheFloorIsTheCorrectedConfidence(t *testing.T) {
+	ctx := context.Background()
+	p := DefaultPolicy()
+	p.Levels["calendar.create"] = Tell
+	f := newFixture(p)
+	if got, _ := f.g.Submit(ctx, create("p0")); got.Decision != model.Notify {
+		t.Fatalf("기록이 없으면 말한 확신대로: %+v", got)
+	}
+	f.g.SetBook(engine.NewBook(answers("calendar.create", "schedule", 24, 10, 0.9)))
+	got, err := f.g.Submit(ctx, create("p1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Decision != model.Ask || !strings.HasPrefix(got.Why, "확신도 ") || strings.HasPrefix(got.Why, "확신도 90%") {
+		t.Fatalf("고친 확신이 바닥 아래면 물음: %+v", got)
+	}
+}
+
+// A notice is answered with one tap, and the next of its kind is held to
+// what was said of the ones before: mostly not needed, it waits for the
+// evening; never needed, it is not sent but for the odd one. The brief is
+// what was asked for, whatever was said.
+func TestANoticeIsHeldToWhatWasSaidOfItsKind(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(DefaultPolicy())
+	notice := func(topic string) model.Intent {
+		return model.Intent{Skill: "life", Kind: "info", Topic: topic, Title: "생수 살 때 됐어요", Confidence: 1, Urgent: true}
+	}
+	first, err := f.g.Submit(ctx, notice("restock:생수:2026-10-01"))
+	if err != nil || first.Decision != model.Notify {
+		t.Fatalf("기록이 없으면 그대로: %+v %v", first, err)
+	}
+	heard, err := f.g.Heard(ctx, first.ID, false)
+	if err != nil || heard.Heard != model.HeardUseless || heard.HeardAt == nil {
+		t.Fatalf("한 번 누른 답: %+v %v", heard, err)
+	}
+	if _, err := f.g.Heard(ctx, "int_none", true); err == nil {
+		t.Fatal("없는 알림")
+	}
+	heard_ := func(n, useful int) []model.Outcome {
+		var out []model.Outcome
+		for i := range n {
+			result := model.ResultRejected
+			if i < useful {
+				result = model.ResultApproved
+			}
+			out = append(out, model.Outcome{Source: "notice", Kind: engine.NoticeKind("restock"), Skill: "life", Context: "restock", P: engine.NoticeStated, Result: result})
+		}
+		return out
+	}
+	f.g.SetBook(engine.NewBook(heard_(12, 4)))
+	if got, _ := f.g.Submit(ctx, notice("restock:휴지:2026-10-02")); got.Decision != model.Digest || got.Tier != "digest" || !strings.Contains(got.Why, "필요 없다고") {
+		t.Fatalf("대개 필요 없던 종류는 저녁 요약으로: %+v", got)
+	}
+	f.g.SetBook(engine.NewBook(heard_(30, 0)))
+	sent, dropped := 0, 0
+	for i := range 40 {
+		got, _ := f.g.Submit(ctx, notice(fmt.Sprintf("restock:물건%d:2026-10-03", i)))
+		switch got.Decision {
+		case model.Drop:
+			dropped++
+			if got.Status != model.Dropped || got.Tier != "" {
+				t.Fatalf("%+v", got)
+			}
+		default:
+			sent++
+		}
+	}
+	if dropped == 0 || sent == 0 || sent > dropped/2 {
+		t.Fatalf("늘 필요 없던 종류는 보내지 않되 가끔은: 보냄 %d, 안 보냄 %d", sent, dropped)
+	}
+	// Another kind of notice, and the brief, are not held to it.
+	other := notice("missed:netflix:2026-10-15")
+	other.Skill = "predict"
+	if got, _ := f.g.Submit(ctx, other); got.Decision != model.Notify {
+		t.Fatalf("다른 종류는 그대로: %+v", got)
+	}
+	brief := notice("restock:brief")
+	brief.Skill = BriefSkill
+	if got, _ := f.g.Submit(ctx, brief); got.Decision != model.Notify {
+		t.Fatalf("브리핑은 그대로: %+v", got)
+	}
+}

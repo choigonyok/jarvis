@@ -234,7 +234,10 @@ type Note struct {
 	Rule       *Rule    `json:"rule,omitempty"`     // the machine-readable form predictions use
 	// Track is how the predictions made from it went, as of when it was
 	// read: counted from the scored predictions, never kept apart from them.
-	Track     *Track    `json:"track,omitempty"`
+	Track *Track `json:"track,omitempty"`
+	// Written: the operator wrote its sentence. The night's numbers move
+	// its rule and its record, never the words.
+	Written   bool      `json:"written,omitempty"`
 	Version   int       `json:"version"`
 	Reason    string    `json:"reason,omitempty"` // why this version
 	CreatedAt time.Time `json:"createdAt"`
@@ -287,6 +290,9 @@ type Rule struct {
 	Base     float64  `json:"base,omitempty"`
 	Days     int      `json:"days,omitempty"`
 	Except   []string `json:"except,omitempty"` // conditions the operator added ("직전 캠핑 후 남은 경우")
+	// Exceptions are the same conditions in a form they can be checked by
+	// (since 2026-11-07; Except keeps their words on the note).
+	Exceptions []Exception `json:"exceptions,omitempty"`
 	// travel: from From to To usually takes Minutes.
 	From    string `json:"from,omitempty"`
 	To      string `json:"to,omitempty"`
@@ -371,6 +377,24 @@ func (t Track) Accuracy() float64 {
 	return (float64(t.Right) + 1.5) / (float64(t.N) + 3)
 }
 
+// Exception is a condition a note does not hold under, as the operator's
+// refusal gave it. A leftover ("집에 남았어", on a plan's prep card) holds
+// from when it was said until something of the class is bought again: what
+// is at home does not need buying. Said is a reason kept in its own words,
+// which nothing checks - it is shown on the next card.
+type Exception struct {
+	Kind string    `json:"kind"` // leftover | said
+	Text string    `json:"text"` // as it reads on the note
+	Plan string    `json:"plan,omitempty"`
+	At   time.Time `json:"at"`
+}
+
+// Kinds of exception.
+const (
+	ExceptLeftover = "leftover"
+	ExceptSaid     = "said"
+)
+
 // Prediction is something expected, with a probability and a time by which
 // it will be known: "오늘 운동 65%", "11/14까지 장작 구매 60%". Scored
 // against what happened (Brier: (prob − outcome)²); a miss is a surprise,
@@ -389,13 +413,23 @@ type Prediction struct {
 	From *time.Time `json:"from,omitempty"`
 	// Base is what knowing only how often the thing happens would have said:
 	// what the prediction's skill is measured against.
-	Base      float64    `json:"base,omitempty"`
+	Base float64 `json:"base,omitempty"`
+	// Prior is what the rule said before the rate notes in Basis moved it
+	// (the weekday's share, the comparable days'): what each of those notes
+	// is measured against - did moving it help. Nil: nothing moved it, or
+	// it was made before 2026-11-07, when nothing kept what it said.
+	Prior     *float64   `json:"prior,omitempty"`
 	Outcome   *bool      `json:"outcome,omitempty"`
 	Score     *float64   `json:"score,omitempty"`
 	Surprise  bool       `json:"surprise,omitempty"`
 	Reflected bool       `json:"reflected,omitempty"`
 	CreatedAt time.Time  `json:"createdAt"`
 	ScoredAt  *time.Time `json:"scoredAt,omitempty"`
+	// RescoredAt is when what it waited for turned up after it was scored
+	// a miss - a card payment the KakaoTalk app passed on two days late -
+	// and it was scored again by it: one truth, the world's record, for the
+	// ledger, the rules' records and the reflection alike.
+	RescoredAt *time.Time `json:"rescoredAt,omitempty"`
 }
 
 // Expectation is a prediction waiting for an occurrence, found by key: a
@@ -409,6 +443,10 @@ type Expectation struct {
 	Due   time.Time `json:"due"`
 	State string    `json:"state"` // open | met | missed
 	MetBy string    `json:"metBy,omitempty"`
+	// Denied is the operator's word that it will not happen ("오늘은 운동
+	// 안 해"): not said again, its lead not brought up. It is still scored
+	// by what happens, as any other.
+	Denied string `json:"denied,omitempty"`
 }
 
 // ReplySituation is a kind of moment a reply was written in - someone
@@ -562,10 +600,22 @@ type Intent struct {
 	Undo   json.RawMessage `json:"undo,omitempty"`
 	Error  string          `json:"error,omitempty"`
 
+	// Heard is the operator's one tap on a notice (info) in the inbox:
+	// HeardUseful (도움됐어요) or HeardUseless (필요 없어요). It is what the
+	// ledger scores a notice by, and what the next of its kind is held to.
+	Heard   string     `json:"heard,omitempty"`
+	HeardAt *time.Time `json:"heardAt,omitempty"`
+
 	CreatedAt  time.Time  `json:"createdAt"`
 	DecidedAt  *time.Time `json:"decidedAt,omitempty"`
 	ExecutedAt *time.Time `json:"executedAt,omitempty"`
 }
+
+// What the operator said of a notice.
+const (
+	HeardUseful  = "useful"
+	HeardUseless = "useless"
+)
 
 // Decisions and statuses of an intent.
 const (
@@ -610,6 +660,19 @@ type Field struct {
 func (in Intent) ContextKey() string {
 	if in.Context != "" {
 		return in.Context
+	}
+	return in.Kind
+}
+
+// NoticeKey is what notices (info) are told apart by on the ledger: the
+// context when one was given, else what the topic is about ("missed",
+// "restock"), else the kind.
+func (in Intent) NoticeKey() string {
+	if in.Context != "" {
+		return in.Context
+	}
+	if k, _, ok := strings.Cut(in.Topic, ":"); ok && k != "" {
+		return k
 	}
 	return in.Kind
 }

@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/backtest"
+	"github.com/choigonyok/jarvis/mind-svc/internal/engine"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/predict"
 )
@@ -103,8 +104,18 @@ func ofIntent(it model.Intent, in Inputs, idx occurrences, done map[string]bool)
 		Rule: it.Reason, P: it.Confidence, At: it.CreatedAt, ResolvedAt: it.DecidedAt}
 	switch {
 	case it.Kind == "info":
-		// Only said: a brief, a reminder. There is nothing to get wrong.
-		o.Source, o.Result = "notice", model.ResultSent
+		// Only said: a brief, a reminder - scored by the one tap in the inbox
+		// when there was one (도움됐어요 · 필요 없어요), against what a notice
+		// is taken to be worth (engine.NoticeStated). Its kind is what it is
+		// about, so that what was said of one kind is not said of all.
+		o.Source, o.Result, o.P = "notice", model.ResultSent, engine.NoticeStated
+		o.Kind, o.Context = engine.NoticeKind(it.NoticeKey()), it.NoticeKey()
+		switch it.Heard {
+		case model.HeardUseful:
+			o.Result, o.ResolvedAt = model.ResultApproved, it.HeardAt
+		case model.HeardUseless:
+			o.Result, o.ResolvedAt = model.ResultRejected, it.HeardAt
+		}
 	case it.Decision == model.Ask:
 		o.Source = "card"
 		o.Result = cardResult(it, in.Now)

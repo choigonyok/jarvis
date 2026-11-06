@@ -120,8 +120,14 @@ func (r *Reflector) Night(ctx context.Context) ([]Result, error) {
 	var out []Result
 	var errs []error
 	for _, key := range order {
-		res, err := r.reflectOn(ctx, key, by[key])
+		res, answered, err := r.reflectOn(ctx, key, by[key])
+		// Reflected on once the model has answered on them; a night without
+		// the model, or a call that failed, leaves them for the next - they
+		// were marked all the same, and never looked at (2026-11-07).
 		for _, p := range by[key] {
+			if !answered {
+				break
+			}
 			p.Reflected = true
 			if err := r.St.PutPrediction(ctx, p); err != nil {
 				return out, err
@@ -181,13 +187,14 @@ func (r *Reflector) target(ctx context.Context, key string) target {
 	}}
 }
 
-func (r *Reflector) reflectOn(ctx context.Context, key string, surprises []model.Prediction) (Result, error) {
+// reflectOn is one target's reflection, and whether the model answered on it.
+func (r *Reflector) reflectOn(ctx context.Context, key string, surprises []model.Prediction) (Result, bool, error) {
 	res := Result{Target: key, Surprises: len(surprises)}
 	tg := r.target(ctx, key)
 	end := dayStart(r.Now(), r.Loc)
 	days, err := r.Predict.Days(ctx, end.Add(-window), end)
 	if err != nil {
-		return res, err
+		return res, false, err
 	}
 	// The comparison is between days of the same sort as the surprises:
 	// weekdays with weekdays.
@@ -214,15 +221,16 @@ func (r *Reflector) reflectOn(ctx context.Context, key string, surprises []model
 		}
 	}
 	if r.LLM == nil || !r.LLM.Ready() {
-		return res, nil
+		return res, false, nil
 	}
-	answer, err := r.LLM.Complete(llm.WithPurpose(ctx, llm.Reflect), System, r.prompt(tg, pool, surprised, missed >= 0))
+	prompt := r.prompt(tg, pool, surprised, missed >= 0) + r.turnedDown(ctx, key)
+	answer, err := r.LLM.Complete(llm.WithPurpose(ctx, llm.Reflect), System, prompt)
 	if err != nil {
-		return res, err
+		return res, false, err
 	}
 	hs, err := parse(answer)
 	if err != nil {
-		return res, err
+		return res, true, err
 	}
 	res.Hypotheses = hs
 	r.test(hs, pool, tg.hit)
@@ -240,11 +248,11 @@ func (r *Reflector) reflectOn(ctx context.Context, key string, surprises []model
 			Rule:       &model.Rule{Kind: "rate", Target: key, Feature: h.Feature, Arg: h.Arg, Rate: h.Rate, Base: h.Base, Days: h.With[0]}}
 		saved, _, err := r.Self.Hold(ctx, note, "밤 성찰: 예측이 틀린 날 "+fmt.Sprint(len(surprises))+"일")
 		if err != nil {
-			return res, err
+			return res, true, err
 		}
 		res.Notes = append(res.Notes, saved)
 	}
-	return res, nil
+	return res, true, nil
 }
 
 func weekday(w time.Weekday) bool { return w != time.Saturday && w != time.Sunday }
@@ -328,6 +336,32 @@ func (r *Reflector) prompt(tg target, pool []predict.Day, surprised map[string]b
 			b.WriteString(line(pool[i]) + "\n")
 			n++
 		}
+	}
+	return b.String()
+}
+
+// turnedDown is what the operator said was not so of the target: the rate
+// notes they rejected, with why when they said. Proposed again, the same one
+// comes to nothing (self.Hold keeps a rejection), and took one of the night's
+// few hypotheses: the model was never told (until 2026-11-07).
+func (r *Reflector) turnedDown(ctx context.Context, key string) string {
+	notes, err := r.St.Notes(ctx)
+	if err != nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, n := range notes {
+		if n.Status != model.Rejected || n.Rule == nil || n.Rule.Kind != "rate" || n.Rule.Target != key {
+			continue
+		}
+		if b.Len() == 0 {
+			b.WriteString("\n## 운영자가 아니라고 한 가설 (같은 특징·인자로 다시 내지 말 것)\n")
+		}
+		fmt.Fprintf(&b, "- %s (%s %s)", n.Text, n.Rule.Feature, n.Rule.Arg)
+		if why := strings.TrimPrefix(n.Reason, "운영자: "); why != "" && !strings.HasPrefix(why, "운영자가 ") {
+			b.WriteString(" · 이유: " + why)
+		}
+		b.WriteString("\n")
 	}
 	return b.String()
 }

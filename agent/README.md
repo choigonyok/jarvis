@@ -157,9 +157,11 @@ Go 는 `gocommon/site`, 브라우저는 `publicsuffixlist`.
 
 - `look`: 지금 값을 읽는다. `what` 에 일정·자산·가계부·위치·근처·리마인드·체크리스트·목표·사진·작업·로그인 목록·배송지·메시지·기억,
   그리고 mind 가 아는 것(`loops` 열린 약속·부탁, `plans` 캘린더와 대화에서만 정한 일정, `notes` 운영자에 대한 노트, `asked` mind 가
-  최근에 묻거나 알린 것과 그 이유, `rules` 운영자가 정한 규칙) 중 하나를 넣는다. 모듈은 도구를 만들지 않고 이 판에 줄을 더한다(`Module.Look`).
+  최근에 묻거나 알린 것과 그 이유, `rules` 운영자가 정한 규칙, `expectations` 평소대로라면 오늘 있을 일과 그 id) 중 하나를 넣는다. 모듈은 도구를 만들지 않고 이 판에 줄을 더한다(`Module.Look`).
 - `change`: 리마인드·체크리스트·목표를 남기고 고치고, 운영자가 앞으로 늘 지킬 것을 정하면 규칙으로 남기거나 거둔다(`rule.set`·`rule.end`,
   `Module.Change`). 명령 기록으로 mind 에 간다. 규칙은 카드 없이 남고, 운영자 폰에 "자비스가 지킬 규칙을 남겼어요" 알림이 간다.
+  운영자가 오늘 있을 일을 아니라고 하면("오늘은 운동 안 해") `expect.deny` 로 접는다: mind 가 그 기대를 다시 말하지 않고, 준비물이면
+  미리 꺼내지 않는다. 실제로 일어나면 그대로 맞은 것으로 센다(`expect.denied` 기록).
 - 카드를 거치는 쓰기는 그대로 저마다의 도구다(`create_event`, `save_login`, `save_shipping_address` 등): 게이트가 도구 이름으로
   모듈의 카드를 찾는다. 작업(`create_job`, `instruct_job`)과 웹(`search`, `read`), `show_image` 도 그대로다. 작업 실행의 도구는 따로다.
 

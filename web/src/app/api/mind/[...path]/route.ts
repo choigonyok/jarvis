@@ -7,9 +7,10 @@ import { MIND_URL, MIND_WRITES, pathProxy } from "@/lib/proxy";
 // of mind (the log, its clock, message text) is not reachable this way; the
 // gateway refuses it too.
 // attention: when the operator answers cards, which the notification settings
-// offer the digest's time by.
+// offer the digest's time by. intents/{id}/useful|useless: the inbox's one tap
+// on a notice mind sent.
 const reads = /^(notes|places|things|meals|reminders|checklists|attention|goals(\/[A-Za-z0-9_-]+)?|notes\/[A-Za-z0-9_-]+\/versions)$/;
-const writes = /^(notes\/[A-Za-z0-9_-]+|checklists\/[A-Za-z0-9_-]+(\/items\/[A-Za-z0-9_-]+)?|goals(\/[A-Za-z0-9_-]+(\/checks)?)?)$/;
+const writes = /^(notes\/[A-Za-z0-9_-]+|intents\/[A-Za-z0-9_-]+\/(useful|useless)|checklists\/[A-Za-z0-9_-]+(\/items\/[A-Za-z0-9_-]+)?|goals(\/[A-Za-z0-9_-]+(\/checks)?)?)$/;
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

@@ -137,6 +137,8 @@ func look(what string, args map[string]any) string {
 		return "노트 보기"
 	case "asked":
 		return "최근에 묻고 알린 것 보기"
+	case "expectations":
+		return "오늘 있을 일 보기"
 	case "context":
 		return "지금 위치 보기"
 	case "nearby":
@@ -178,6 +180,8 @@ func change(what string, args map[string]any) string {
 		return about("규칙 남기기", clamp(str(args, "text"), 40))
 	case "rule.end":
 		return "규칙 거두기"
+	case "expect.deny":
+		return "오늘 있을 일 접기"
 	case "goal.make":
 		return about("목표 만들기", str(args, "title"))
 	case "goal.check":

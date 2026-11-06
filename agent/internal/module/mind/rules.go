@@ -54,6 +54,11 @@ type ruleSetIn struct {
 	Said string `json:"said,omitempty" jsonschema:"운영자가 그렇게 말한 문장 그대로"`
 }
 
+type expectDenyIn struct {
+	ID   string `json:"id" jsonschema:"예측 id (look 의 expectations)"`
+	Said string `json:"said,omitempty" jsonschema:"운영자가 그렇게 말한 문장 그대로"`
+}
+
 type ruleEndIn struct {
 	ID  string `json:"id" jsonschema:"규칙 id (look 의 rules)"`
 	Why string `json:"why,omitempty" jsonschema:"운영자가 거두며 한 말"`
@@ -98,6 +103,16 @@ func (m *Module) Change(b *tool.Board) {
 				return fmt.Sprintf("이미 있는 규칙입니다: %s (id %s)", out.Rule.Text, out.Rule.ID), nil
 			}
 			return fmt.Sprintf("규칙으로 남겼습니다: %s (id %s). 운영자 폰에 알림이 갑니다.", out.Rule.Text, out.Rule.ID), nil
+		})
+	tool.Add(b, "expect.deny", "평소대로라면 오늘 있을 일을 운영자가 오늘은 아니라고 하면(예: '오늘은 운동 안 해') 접는다. 그 뒤로는 말하지 않고, 준비물이면 미리 챙기라고 하지 않는다. 실제로 일어나면 그대로 맞은 것으로 센다.",
+		func(ctx context.Context, in expectDenyIn) (string, error) {
+			var out struct {
+				Text string `json:"text"`
+			}
+			if err := m.c.Do(ctx, http.MethodPost, "/api/expectations/"+url.PathEscape(in.ID)+"/deny", in, &out); err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("접었습니다: %s. 오늘은 다시 말하지 않습니다.", out.Text), nil
 		})
 	tool.Add(b, "rule.end", "운영자가 그만 지켜도 된다고 한 규칙을 거둔다.",
 		func(ctx context.Context, in ruleEndIn) (string, error) {

@@ -1196,6 +1196,10 @@ func (p *Postgres) OpenExpectations(ctx context.Context, key string) ([]model.Ex
 	return scanBodies[model.Expectation](ctx, p, `select body from mind_expectations where match_key = $1 and state = 'open' order by prediction_id`, key)
 }
 
+func (p *Postgres) MissedExpectations(ctx context.Context, key string, at time.Time) ([]model.Expectation, error) {
+	return scanBodies[model.Expectation](ctx, p, `select body from mind_expectations where match_key = $1 and state = 'missed' and due >= $2 order by prediction_id`, key, at)
+}
+
 func (p *Postgres) Expectations(ctx context.Context, predictionID string) ([]model.Expectation, error) {
 	return scanBodies[model.Expectation](ctx, p, `select body from mind_expectations where prediction_id = $1 order by match_key`, predictionID)
 }

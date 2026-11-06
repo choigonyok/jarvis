@@ -175,6 +175,8 @@ func TestCommandKind(t *testing.T) {
 		{"DELETE", "/api/goals/g1", "goal.remove"},
 		{"POST", "/api/goals/g1/checks", "goal.check"},
 		{"POST", "/api/intents/int_1/approve", "intent.answer"},
+		{"POST", "/api/intents/int_1/useless", "intent.answer"},
+		{"POST", "/api/expectations/pred_1/deny", "expect.denied"},
 		{"POST", "/api/notes/n1", "note.decided"},
 		{"POST", "/api/rules", "note.rule"},
 		{"POST", "/api/links", "link.decided"},

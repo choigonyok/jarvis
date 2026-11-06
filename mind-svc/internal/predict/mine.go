@@ -206,16 +206,44 @@ func (p *Predictor) Mine(ctx context.Context) ([]model.Note, error) {
 	}
 	slices.Sort(keys)
 	today := dayStart(now, p.Loc)
-	var out []model.Note
+	// Every stream is tried for a weekday that stands out: of so many tries
+	// some stand out by chance. A daily rule found for the first time must
+	// stand out among all the streams tried tonight (discoveries); one already
+	// known is held to its own record instead (Grade). Until 2026-11-07 each
+	// stream's least likely of eight looks was taken at p ≤ 0.1 as it was.
+	var found []dailyFound
+	tried := 0
 	for _, k := range keys {
-		s := all[k]
-		daily, isDaily := p.mineDaily(s, today)
-		if isDaily {
-			out = append(out, daily)
+		d := p.mineDaily(all[k], today)
+		if d.tried {
+			tried++
 		}
+		if d.ok {
+			found = append(found, d)
+		}
+	}
+	var fresh []float64
+	known := map[string]bool{}
+	for _, d := range found {
+		if old, err := p.St.Note(ctx, d.note.ID); err == nil && old.Status != model.Rejected {
+			known[d.note.ID] = true
+			continue
+		}
+		fresh = append(fresh, d.p)
+	}
+	cut := discoveries(fresh, tried, dailyP)
+	isDaily := map[string]bool{}
+	var out []model.Note
+	for _, d := range found {
+		if known[d.note.ID] || d.p <= cut {
+			out = append(out, d.note)
+			isDaily[d.note.Rule.Key] = true
+		}
+	}
+	for _, k := range keys {
 		// A week or less between times, on the weekdays a daily rule
 		// already names, is that rule said again.
-		if n, ok := p.mineCycle(s, today); ok && (!isDaily || n.Rule.Gap > 7) {
+		if n, ok := p.mineCycle(all[k], today); ok && (!isDaily[k] || n.Rule.Gap > 7) {
 			out = append(out, n)
 		}
 	}
@@ -283,10 +311,12 @@ func fitDaily(days []time.Time, hit map[string]bool) dailyFit {
 		f.rates[w] = self.Shrunk(f.k[w], f.n[w], f.base, 2)
 	}
 	f.p = 1
+	looks := 0
 	for w := range 7 {
 		if f.n[w] < 2 {
 			continue
 		}
+		looks++
 		p := Fisher(f.k[w], f.n[w]-f.k[w], f.K-f.k[w], (f.N-f.n[w])-(f.K-f.k[w]))
 		eff := math.Abs(f.rates[w] - f.base)
 		if p < f.p || p == f.p && eff > f.effect {
@@ -296,6 +326,7 @@ func fitDaily(days []time.Time, hit map[string]bool) dailyFit {
 	nE, kE := f.n[0]+f.n[6], f.k[0]+f.k[6]
 	nD, kD := f.N-nE, f.K-kE
 	if nE >= 2 && nD >= 2 {
+		looks++
 		rE, rD := self.Shrunk(kE, nE, f.base, 2), self.Shrunk(kD, nD, f.base, 2)
 		p := Fisher(kE, nE-kE, kD, nD-kD)
 		if eff := math.Abs(rE - rD); p <= f.p && eff >= dailyEffect {
@@ -308,7 +339,37 @@ func fitDaily(days []time.Time, hit map[string]bool) dailyFit {
 			}
 		}
 	}
+	f.p = sidak(f.p, looks)
 	return f
+}
+
+// sidak is the chance the least likely of so many looks is as unlikely as p
+// by chance alone: one weekday of seven standing out at p is not as rare as
+// p.
+func sidak(p float64, looks int) float64 {
+	if looks <= 1 || p >= 1 {
+		return p
+	}
+	return -math.Expm1(float64(looks) * math.Log1p(-p))
+}
+
+// discoveries is how unlikely a finding must be to stand among so many tried
+// (Benjamini-Hochberg at q): the largest of ps that is no more than its rank
+// over tried times q; -1 when none is. Of the findings it lets stand, at most
+// a share q is expected to be chance.
+func discoveries(ps []float64, tried int, q float64) float64 {
+	sorted := slices.Clone(ps)
+	slices.Sort(sorted)
+	if tried < len(sorted) {
+		tried = len(sorted)
+	}
+	cut := -1.0
+	for i, p := range sorted {
+		if p <= float64(i+1)/float64(tried)*q {
+			cut = p
+		}
+	}
+	return cut
 }
 
 // days is every local day in [from, to).
@@ -328,11 +389,19 @@ func (p *Predictor) hitDays(s *stream) map[string]bool {
 	return hit
 }
 
-func (p *Predictor) mineDaily(s *stream, today time.Time) (model.Note, bool) {
+// dailyFound is a stream tried for a daily rule: whether it was (enough days),
+// and whether one stood out on its own (ok), how unlikely (p, for its looks).
+type dailyFound struct {
+	note      model.Note
+	p         float64
+	tried, ok bool
+}
+
+func (p *Predictor) mineDaily(s *stream, today time.Time) dailyFound {
 	// Whether a day has a workout is the workout prediction's (Workout),
 	// with the reflection's notes; the engine keeps to the kinds of it.
 	if !Targetable(s.key) || s.key == "workout" {
-		return model.Note{}, false
+		return dailyFound{}
 	}
 	// The source's first day was likely read from part way through.
 	first := dayStart(s.since, p.Loc).AddDate(0, 0, 1)
@@ -343,11 +412,11 @@ func (p *Predictor) mineDaily(s *stream, today time.Time) (model.Note, bool) {
 	ds := days(start, today)
 	hit := p.hitDays(s)
 	if len(ds) < dailyMinDays {
-		return model.Note{}, false
+		return dailyFound{}
 	}
 	f := fitDaily(ds, hit)
 	if f.K < 4 || f.N-f.K < 2 || !f.informative() {
-		return model.Note{}, false
+		return dailyFound{tried: true}
 	}
 	// Tried on the last weeks, each day from the eight weeks before it.
 	var test model.Track
@@ -377,7 +446,7 @@ func (p *Predictor) mineDaily(s *stream, today time.Time) (model.Note, bool) {
 	}
 	n := model.Note{ID: self.ID(Daily, s.key), Text: text, Scope: scope(s.key), Evidence: append(ev, testLine(test)...),
 		Rule: &model.Rule{Kind: Daily, Key: s.key, Rates: rates, Base: round3(f.base), Days: f.N, Support: f.K, Usual: p.usualAt(s), Test: &test}}
-	return n, true
+	return dailyFound{note: n, p: f.p, tried: true, ok: true}
 }
 
 // dailyText says what stands out: "일요일엔 배달 주문이 있는 편이다 (그날

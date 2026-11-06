@@ -34,7 +34,7 @@ type Notification struct {
 	Title       string     `json:"title"`
 	Body        string     `json:"body"`
 	URL         string     `json:"url"`
-	DedupeKey   *string    `json:"-"`
+	DedupeKey   *string    `json:"key,omitempty"` // the sender's: "mind:<intent>" for mind's, which the inbox answers by
 	CreatedAt   time.Time  `json:"createdAt"`
 	DeliveredAt *time.Time `json:"deliveredAt"`
 	ReadAt      *time.Time `json:"readAt"`

@@ -85,14 +85,17 @@ func (p *Predictor) Keep(ctx context.Context, mined []model.Note) error {
 		r := *n.Rule
 		reason := ""
 		if old.Rule != nil {
-			r.Except, r.Since, r.Off = old.Rule.Except, old.Rule.Since, old.Rule.Off
+			r.Except, r.Exceptions, r.Since, r.Off = old.Rule.Except, old.Rule.Exceptions, old.Rule.Since, old.Rule.Off
 			if r.Off && (old.Reason == reasonGone || now.Sub(old.UpdatedAt) >= offRest) {
 				since := now
 				r.Off, r.Since, reason = false, &since, "밤 정리: 다시 보여 다시 시험하는 중"
 			}
 		}
 		upd := old
-		upd.Text, upd.Scope, upd.Rule = n.Text, n.Scope, &r
+		upd.Scope, upd.Rule = n.Scope, &r
+		if !old.Written {
+			upd.Text = self.WithExcept(n.Text, r.Except) // the operator's own sentence stays theirs: the numbers move under it
+		}
 		upd.Evidence = append(n.Evidence, liveLines(old.Evidence)...)
 		// A sentence shown to the operator keeps its versions; a candidate's
 		// numbers move every night and nobody reads them.
@@ -150,6 +153,11 @@ func (p *Predictor) Grade(ctx context.Context) error {
 		}
 		total := test.Plus(live)
 		status, off, reason := n.Status, n.Rule.Off, ""
+		// Stopped for missing, and the misses were not misses after all: what
+		// it waited for came late and was scored again (Match).
+		if off && strings.HasPrefix(n.Reason, reasonFailing) && (live.N < offN || live.Skill() >= offSkill) {
+			off, reason = false, "다시 채점해 보니 계속 빗나간 게 아니어서 다시 예측함: "+Words(live)
+		}
 		switch {
 		case status == model.Candidate && !off && live.N >= minLive(n.Rule.Kind) && total.N >= showN &&
 			total.Skill() >= showSkill && total.Accuracy() >= showAccuracy:
@@ -164,6 +172,11 @@ func (p *Predictor) Grade(ctx context.Context) error {
 			}
 		}
 		conf := confidence(test, live, n.Confidence)
+		if n.Status == model.Confirmed {
+			// The operator's confirmation is theirs: its record is shown on
+			// it, and does not take the confidence back night by night.
+			conf = n.Confidence
+		}
 		lt := live
 		upd := n
 		upd.Status, upd.Confidence, upd.Track = status, conf, &lt
@@ -181,7 +194,84 @@ func (p *Predictor) Grade(ctx context.Context) error {
 			return err
 		}
 	}
+	return p.gradeRates(ctx, notes, tracks, now)
+}
+
+// rateLive is how many predictions a rate note must have moved before its
+// own record, not the night's test, decides how far it moves the next.
+const rateLive = 5
+
+// gradeRates moves the reflection's rate notes ("21시 이후 퇴근한 날은 운동을
+// 거의 안 한다") by their record, as Grade does the engine's rules: each
+// prediction one of them moved is scored against what it would have said
+// unmoved (Prior). A note whose moves helped moves more, one whose moves
+// hurt goes back to testing, and one that keeps hurting is no longer
+// applied - until offRest has passed, when it is tried afresh. A note the
+// operator confirmed keeps their weight and is never stopped.
+func (p *Predictor) gradeRates(ctx context.Context, notes []model.Note, tracks map[string]model.Track, now time.Time) error {
+	for _, n := range notes {
+		if n.Rule == nil || n.Rule.Kind != "rate" || n.Status == model.Rejected {
+			continue
+		}
+		r := *n.Rule
+		reason := ""
+		live := tracks[n.ID]
+		if r.Off && now.Sub(n.UpdatedAt) >= offRest {
+			since := now
+			r.Off, r.Since, reason = false, &since, "쉬고 나서 다시 시험하는 중"
+			live = model.Track{} // its record starts again from Since
+		}
+		if live.N == 0 && reason == "" {
+			continue
+		}
+		status, conf := n.Status, n.Confidence
+		if live.N >= rateLive && status != model.Confirmed {
+			conf = round2(math.Min(0.9, math.Max(0.1, 0.5+live.Skill())))
+		}
+		switch {
+		case status == model.Hypothesis && live.N >= hideN && live.Skill() < 0:
+			status, reason = model.Candidate, "이 조건으로 옮긴 예측이 옮기기 전만 못해 다시 시험하는 중: "+MovedWords(live)
+		case status == model.Candidate && !r.Off && live.N >= showN && live.Skill() >= showSkill:
+			status, reason = model.Hypothesis, "이 조건으로 옮긴 예측이 맞아 와서 다시 보여 드림: "+MovedWords(live)
+		}
+		if !r.Off && status != model.Confirmed && live.N >= offN && live.Skill() < offSkill {
+			r.Off, reason = true, "이 조건으로 옮길수록 빗나가 더는 쓰지 않음: "+MovedWords(live)
+			if status == model.Hypothesis {
+				status = model.Candidate
+			}
+		}
+		lt := live
+		upd := n
+		upd.Status, upd.Confidence, upd.Track, upd.Rule = status, conf, &lt, &r
+		if live.N > 0 {
+			upd.Evidence = append(withoutLive(n.Evidence), livePrefix+MovedWords(live))
+		}
+		if reason == "" && math.Abs(conf-n.Confidence) >= 0.05 {
+			reason = "예측 기록: " + MovedWords(live)
+		}
+		if reason != "" {
+			upd.Version, upd.Reason, upd.UpdatedAt = n.Version+1, reason, now
+		}
+		if err := p.St.PutNote(ctx, upd); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// MovedWords is a rate note's record said: "이 조건으로 옮긴 예측 8번 중
+// 6번 맞음 · 옮기기 전보다 오차 22% 적음".
+func MovedWords(t model.Track) string {
+	s := fmt.Sprintf("이 조건으로 옮긴 예측 %d번 중 %d번 맞음", t.N, t.Right)
+	switch sk := t.Skill(); {
+	case sk >= 0.05:
+		s += fmt.Sprintf(" · 옮기기 전보다 오차 %.0f%% 적음", sk*100)
+	case sk <= -0.05:
+		s += fmt.Sprintf(" · 옮기기 전보다 오차 %.0f%% 많음", -sk*100)
+	default:
+		s += " · 옮기기 전과 비슷"
+	}
+	return s
 }
 
 // confidence is a rule's record as a share of calls right, from the days it
@@ -254,6 +344,19 @@ func RuleOf(pr model.Prediction) string {
 	return pr.Basis[0]
 }
 
+// movedBy is the rate notes that moved a prediction from what its rule said
+// (Prior): the workout predictor's whole basis, a daily rule's after its own
+// note. Each is held to whether moving it helped.
+func movedBy(pr model.Prediction) []string {
+	if pr.Prior == nil || len(pr.Basis) == 0 {
+		return nil
+	}
+	if strings.HasPrefix(pr.Target, "workout:") {
+		return pr.Basis
+	}
+	return pr.Basis[1:]
+}
+
 // baseOf is what the plain rate said; a prediction from before the engine
 // said nothing to measure against, so it counts as no better and no worse.
 func baseOf(pr model.Prediction) float64 {
@@ -265,7 +368,11 @@ func baseOf(pr model.Prediction) float64 {
 
 // Tracks is how each rule's predictions went: the scored predictions of the
 // last year, by the rule they were made from (RuleOf), counted from the
-// rule's Since, the latest trackMax of them.
+// rule's Since, the latest trackMax of them - and, for each rate note that
+// moved one (movedBy), against what it said before it was moved. Until
+// 2026-11-07 only a prediction's first note was credited: a reflection's
+// note that kept being right never grew surer, and one that kept being
+// wrong was never stopped.
 func (p *Predictor) Tracks(ctx context.Context) (map[string]model.Track, error) {
 	now := p.Now()
 	prs, err := p.St.Predictions(ctx, now.AddDate(-1, 0, 0), now.Add(time.Minute))
@@ -282,16 +389,25 @@ func (p *Predictor) Tracks(ctx context.Context) (map[string]model.Track, error) 
 			since[n.ID] = *n.Rule.Since
 		}
 	}
-	by := map[string][]model.Prediction{}
+	type scored struct {
+		prob, base float64
+		happened   bool
+	}
+	by := map[string][]scored{}
+	credit := func(id string, pr model.Prediction, base float64) {
+		if s, ok := since[id]; ok && pr.CreatedAt.Before(s) {
+			return
+		}
+		by[id] = append(by[id], scored{pr.Prob, base, *pr.Outcome})
+	}
 	for _, pr := range prs {
 		if pr.ScoredAt == nil || pr.Outcome == nil {
 			continue
 		}
-		id := RuleOf(pr)
-		if s, ok := since[id]; ok && pr.CreatedAt.Before(s) {
-			continue
+		credit(RuleOf(pr), pr, baseOf(pr))
+		for _, id := range movedBy(pr) {
+			credit(id, pr, *pr.Prior)
 		}
-		by[id] = append(by[id], pr)
 	}
 	out := map[string]model.Track{}
 	for id, list := range by {
@@ -299,8 +415,8 @@ func (p *Predictor) Tracks(ctx context.Context) (map[string]model.Track, error) 
 			list = list[len(list)-trackMax:]
 		}
 		var t model.Track
-		for _, pr := range list {
-			t = t.Add(pr.Prob, baseOf(pr), *pr.Outcome)
+		for _, s := range list {
+			t = t.Add(s.prob, s.base, s.happened)
 		}
 		out[id] = t
 	}
@@ -346,6 +462,10 @@ func (p *Predictor) Expect(ctx context.Context) ([]model.Prediction, error) {
 			}
 			pr = model.Prediction{Target: "day:" + r.Key + ":" + today.Format(dateFmt), Text: text, Prob: prob, Base: r.Base,
 				Key: r.Key, From: &today, Due: today.AddDate(0, 0, 1).Add(-time.Minute), Basis: append([]string{n.ID}, basis...)}
+			if len(basis) > 0 {
+				prior := r.Rates[today.Weekday()] // what the rate notes that moved it are held to
+				pr.Prior = &prior
+			}
 		case Cycle:
 			last, err := time.ParseInLocation(dateFmt, r.Last, p.Loc)
 			if err != nil || r.Gap <= 0 {
@@ -381,7 +501,7 @@ func (p *Predictor) rated(ctx context.Context, key string, prob float64, day tim
 	var basis, why []string
 	for _, n := range notes {
 		r := n.Rule
-		if n.Status == model.Rejected || r == nil || r.Kind != "rate" || r.Target != key {
+		if n.Status == model.Rejected || r == nil || r.Kind != "rate" || r.Target != key || r.Off {
 			continue
 		}
 		if today == nil {

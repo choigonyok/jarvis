@@ -1025,6 +1025,10 @@ func (m *Memory) OpenExpectations(_ context.Context, key string) ([]model.Expect
 	return m.expectsWhere(func(e model.Expectation) bool { return e.Key == key && e.State == "open" }), nil
 }
 
+func (m *Memory) MissedExpectations(_ context.Context, key string, at time.Time) ([]model.Expectation, error) {
+	return m.expectsWhere(func(e model.Expectation) bool { return e.Key == key && e.State == "missed" && !e.Due.Before(at) }), nil
+}
+
 func (m *Memory) Expectations(_ context.Context, predictionID string) ([]model.Expectation, error) {
 	return m.expectsWhere(func(e model.Expectation) bool { return e.PredictionID == predictionID }), nil
 }

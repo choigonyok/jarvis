@@ -156,6 +156,38 @@ func (g *Gate) Reading(in model.Intent) engine.Reading {
 	return g.book.Load().Read(engine.Key{Source: "card", Kind: in.Kind, Skill: in.Skill, Context: in.ContextKey()}, in.Confidence)
 }
 
+// noticeReading is how notices like this one were heard: the chance the
+// operator finds it worth having, from what a notice is taken to be worth
+// moved by what they said of the ones before (ledger: Heard).
+func (g *Gate) noticeReading(in model.Intent) engine.Reading {
+	return g.book.Load().Read(engine.Key{Source: "notice", Kind: engine.NoticeKind(in.NoticeKey()), Skill: in.Skill, Context: in.NoticeKey()}, engine.NoticeStated)
+}
+
+// Heard is the operator's one tap on a notice in the inbox: it helped, or it
+// was not needed. The ledger scores the notice by it when it is made again
+// (each night), and the next notices of its kind are held to that record
+// (admit): a kind said again and again not to be needed is no longer sent,
+// but for the odd one, and one mostly not needed waits for the evening.
+// Until 2026-11-07 a notice could not be answered, so nothing ever learnt
+// which of them were wanted.
+func (g *Gate) Heard(ctx context.Context, id string, useful bool) (model.Intent, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	in, err := g.st.Intent(ctx, id)
+	if err != nil {
+		return in, err
+	}
+	if in.Kind != "info" {
+		return in, errors.New("알림이 아닙니다")
+	}
+	at := g.now()
+	in.Heard, in.HeardAt = model.HeardUseless, &at
+	if useful {
+		in.Heard = model.HeardUseful
+	}
+	return in, g.st.PutIntent(ctx, in)
+}
+
 func New(st store.Store, acts *act.Registry, n act.Notifier, log obs.Log, p Policy, loc *time.Location, now func() time.Time, url string, out *slog.Logger) *Gate {
 	return &Gate{st: st, acts: acts, notify: n, log: log, policy: p, loc: loc, now: now, url: url, out: out}
 }
@@ -245,6 +277,22 @@ func (g *Gate) admit(ctx context.Context, in, open model.Intent, asked bool) (mo
 			// digest (2026-10-25).
 			if in.Moment == "" && in.Skill != BriefSkill && g.overBudget(ctx) {
 				in.Decision, in.Tier, in.Why = model.Digest, "digest", "오늘 알림 한도를 넘어 저녁 요약으로"
+			}
+		}
+		// What the operator said of notices like it, one tap in the inbox
+		// (Heard). The morning brief and what is said at its moment were
+		// asked for, and are not held to it.
+		if r := g.noticeReading(in); in.Moment == "" && in.Skill != BriefSkill && r.N >= engine.MinCases {
+			switch {
+			case r.P < engine.SilentBelow && !engine.Explored(in.ID):
+				// One in exploreEvery still goes: the way back.
+				at := g.now()
+				in.Decision, in.Status, in.Tier, in.DecidedAt = model.Drop, model.Dropped, "", &at
+				in.Why = fmt.Sprintf("이런 알림은 %d번 답하신 기록상 필요 없으셔서 보내지 않아요 (%.0f%%)", r.N, r.P*100)
+				return in, g.st.PutIntent(ctx, in)
+			case r.P < engine.FillAbove && in.Decision == model.Notify:
+				in.Decision, in.Tier = model.Digest, "digest"
+				in.Why = fmt.Sprintf("이런 알림은 필요 없다고 하신 때가 많아 저녁 요약으로 (%.0f%%)", r.P*100)
 			}
 		}
 		at := g.now()
@@ -911,6 +959,11 @@ func (g *Gate) tell(ctx context.Context, in model.Intent, title, body string) {
 		Title: title, Body: strings.TrimSpace(body), URL: g.link(in),
 		Tier: in.Tier, Level: level, Key: "mind:" + in.ID, At: g.now(),
 	}
+	if in.Kind == "info" {
+		// Told only: the inbox answers it with one tap (Heard), which a
+		// thing done and told is not.
+		n.Kind = "mind.info"
+	}
 	if in.Moment != "" && in.Tier == "now" {
 		// Said at its moment (the rain at the door): in the conversation too.
 		n.Kind, n.Card, n.Data = "remind."+in.Moment, true, map[string]any{"why": in.Reason}
@@ -968,8 +1021,14 @@ func (g *Gate) decide(ctx context.Context, in model.Intent) (string, string, err
 	case grade == engine.Act && in.Reversible && !fixed:
 		return model.Notify, "늘 맞아서 바로 하고 알려요", nil
 	}
-	if in.Confidence < g.policy.MinConfidence {
-		return model.Ask, fmt.Sprintf("확신도 %.0f%%라 직접 확인받아요", in.Confidence*100), nil
+	// The confidence held to the floor is the one the grade went by: what was
+	// stated, corrected by how its kind has gone (a slot's, as it came).
+	p := in.Confidence
+	if in.Grade == "" {
+		p = r.P
+	}
+	if p < g.policy.MinConfidence {
+		return model.Ask, fmt.Sprintf("확신도 %.0f%%라 직접 확인받아요", p*100), nil
 	}
 	if !in.Reversible && level != AskFor {
 		return model.Ask, "되돌릴 수 없는 일이라 먼저 물어요", nil

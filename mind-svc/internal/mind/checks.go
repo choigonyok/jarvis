@@ -3,9 +3,11 @@ package mind
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/choigonyok/jarvis/gocommon/checks"
+	"github.com/choigonyok/jarvis/mind-svc/internal/engine"
 )
 
 // Checks is how reading and remembering stand, for the status tab: only mind
@@ -16,7 +18,56 @@ func (m *Mind) Checks(ctx context.Context) ([]checks.Result, error) {
 		return nil, err
 	}
 	now := m.Opts.Now()
-	return []checks.Result{reading(st, now), remembering(st, now)}, nil
+	t, at := m.trial.get()
+	return []checks.Result{reading(st, now), remembering(st, now), judging(t, at)}, nil
+}
+
+// trialMin is how many answered judgements the trial needs before it says
+// whether the correction helps.
+const trialMin = 20
+
+// judging is the judgement engine held to its own past (engine.Walk) as the
+// night left it: whether the confidences corrected by the ledger came closer
+// to the answers than the confidences as they were said - each corrected
+// only by the answers before it.
+func judging(t engine.Trial, at time.Time) checks.Result {
+	v := checks.Result{ID: "mind.judgment", Group: "판단", Name: "판단 보정", Deps: []string{"svc.mind"},
+		Rule:          fmt.Sprintf("카드에 답한 기록으로 고친 확신이 고치기 전 확신보다 답에 가까우면 정상(카드마다 그 전에 쌓인 답만으로 고쳐 봄). 고친 쪽이 더 멀면 주의. 답한 판단이 %d건이 안 되면 아직 가리지 않아요.", trialMin),
+		Fix:           "고친 확신이 더 나쁘면 한 종류의 답이 한쪽으로 쏠렸을 수 있어요. mind 콘솔의 결과 장부에서 어떤 종류가 빗나가는지 보세요.",
+		ObservedLabel: "마지막 시험"}
+	if at.IsZero() {
+		v.State, v.Summary = checks.Unknown, "아직 결과 장부를 읽지 않았어요."
+		return v
+	}
+	v.ObservedAt = &at
+	v.Figure = fmt.Sprintf("%d건", t.Cases)
+	if t.Cases > 0 {
+		v.Facts = append(v.Facts,
+			fmt.Sprintf("오차(브라이어, 낮을수록 좋음): 말한 확신 %.3f → 고친 확신 %.3f · 늘 평균 승인율만 말했다면 %.3f", t.Stated, t.Corrected, t.Plain))
+		var parts []string
+		for _, g := range []struct {
+			grade engine.Grade
+			name  string
+		}{{engine.Act, "바로 함"}, {engine.AskFilled, "채워서 물음"}, {engine.AskBlank, "빈칸으로 물음"}, {engine.Silent, "조용히 둠"}} {
+			if n := t.Grades[g.grade]; n > 0 {
+				parts = append(parts, fmt.Sprintf("%s %d건 중 승인 %d", g.name, n, t.Right[g.grade]))
+			}
+		}
+		if len(parts) > 0 {
+			v.Facts = append(v.Facts, "고친 확신대로였다면: "+strings.Join(parts, " · "))
+		}
+	}
+	switch {
+	case t.Cases < trialMin:
+		v.State, v.Summary = checks.OK, fmt.Sprintf("답한 판단이 %d건이라 아직 가리지 않아요.", t.Cases)
+	case t.Corrected > t.Stated+0.005:
+		v.State, v.Summary = checks.Warn, fmt.Sprintf("고친 확신이 고치기 전보다 답에서 멀어요 (오차 %.3f → %.3f).", t.Stated, t.Corrected)
+	case t.Corrected < t.Stated-0.005:
+		v.State, v.Summary = checks.OK, fmt.Sprintf("고친 확신이 고치기 전보다 오차가 %.0f%% 작아요.", (t.Stated-t.Corrected)/t.Stated*100)
+	default:
+		v.State, v.Summary = checks.OK, "고친 확신과 고치기 전 확신이 비슷해요."
+	}
+	return v
 }
 
 func reading(st Status, now time.Time) checks.Result {

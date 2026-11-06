@@ -57,7 +57,9 @@ type env struct {
 
 // Groups in screen order. 격리함 is what services set aside after trying
 // too often - the rule in gocommon/health - each row one service's box.
-var Groups = []string{"수집", "가계부 상품 상세", "외부 계정", "격리함", "기반"}
+// 판단 is how mind's judgement holds up against what was answered (its own
+// check on the stream, mind.judgment).
+var Groups = []string{"수집", "가계부 상품 상세", "외부 계정", "판단", "격리함", "기반"}
 
 // All is the rows that are always there.
 func All(cfg Config) []check.Probe {

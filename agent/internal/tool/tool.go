@@ -28,7 +28,7 @@ const (
 // the conversation's tests put up the same boards.
 const (
 	LookAbout   = "지금 값을 읽는다. 읽기만 하고 카드가 없다. 숫자는 받은 값을 그대로 쓴다."
-	ChangeAbout = "리마인드·체크리스트·목표·규칙을 남기고 고친다. 카드가 없다. 돌려준 말이 저장된 내용이다."
+	ChangeAbout = "리마인드·체크리스트·목표·규칙을 남기고 고친다. 오늘 있을 일을 접는다. 카드가 없다. 돌려준 말이 저장된 내용이다."
 )
 
 // Qualified is how the CLI refers to a board's tool.

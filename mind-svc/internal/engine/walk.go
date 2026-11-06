@@ -34,7 +34,9 @@ func Walk(rows []model.Outcome) Trial {
 	var seen, hits int
 	for _, o := range sorted {
 		hit, ok := o.Scored()
-		if !ok || o.Source == "prediction" {
+		// A notice heard is the operator's word on a notice, not on a
+		// judgement of what to do: the trial is of the cards.
+		if !ok || o.Source == "prediction" || o.Source == "notice" {
 			continue
 		}
 		out := 0.0

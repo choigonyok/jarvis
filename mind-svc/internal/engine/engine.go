@@ -73,10 +73,17 @@ const (
 	SilentBelow = 0.10
 	FillAbove   = 0.50
 	ActAbove    = 0.90
+	// NoticeStated is what a notice is taken to be worth before anyone said:
+	// most are wanted. Its record moves it like a card's (ledger: a notice
+	// the operator said helped is approved, one not needed rejected).
+	NoticeStated = 0.8
 	// exploreEvery is one silent judgement in so many asked anyway. Without
 	// it a kind gone silent has no answers left to come back on.
 	exploreEvery = 10
 )
+
+// NoticeKind is a notice's kind on the ledger: info, by what it is about.
+func NoticeKind(about string) string { return "info." + about }
 
 // tally is one group's record.
 type tally struct {
