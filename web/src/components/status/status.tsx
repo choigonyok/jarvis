@@ -154,7 +154,7 @@ export function Status() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <Header connection={connection} pending={waiting.length} />
-      <StandingBar pending={waiting} href="/record" />
+      <StandingBar pending={waiting} />
 
       {/* inset-x-safe and px-4 both set padding-left, so they sit on
           different elements: the notch inset outside, the gutter inside. */}

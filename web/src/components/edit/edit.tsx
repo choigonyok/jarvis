@@ -31,7 +31,7 @@ export function Edit() {
         pending={waiting.length}
         actions={<ScreenMenu pending={waiting.length} />}
       />
-      <StandingBar pending={waiting} href="/record" />
+      <StandingBar pending={waiting} />
 
       {/* Clear of the home indicator, and of the notch on a phone turned on its side. */}
       <div className="inset-x-safe pb-safe flex min-h-0 flex-1 flex-col">

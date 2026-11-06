@@ -170,7 +170,7 @@ export function Location() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <Header connection={connection} pending={waiting.length} />
-      <StandingBar pending={waiting} href="/record" />
+      <StandingBar pending={waiting} />
       {scene ? (
         <Viewer
           scene={scene}

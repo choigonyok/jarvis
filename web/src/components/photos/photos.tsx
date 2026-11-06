@@ -56,7 +56,7 @@ export function Photos() {
           </Link>
         }
       />
-      <StandingBar pending={waiting} href="/record" />
+      <StandingBar pending={waiting} />
 
       <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
         <div className="mx-auto w-full max-w-[64rem] px-3 pt-3 pb-10 sm:px-6 sm:pt-5">

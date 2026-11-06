@@ -10,6 +10,8 @@ import { AllocationDetail, DriftColumns } from "@/components/assets/target";
 import { Track } from "@/components/assets/track";
 import { Header, TabBar } from "@/components/shell/header";
 import { StandingBar } from "@/components/shell/standing-bar";
+import { AsOf } from "@/components/shell/as-of";
+import { useKept } from "@/lib/keep";
 import {
   checkRebalance,
   recentOrders,
@@ -65,7 +67,8 @@ export function Assets() {
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState<Record<Fold, boolean>>({ bridge: false, alloc: false, orders: false, principal: false });
   const toggle = (k: Fold) => setOpen((o) => ({ ...o, [k]: !o[k] }));
-  const [ordering, setOrdering] = useState<Holding | null>(null);
+  // The order sheet left open stays open across a tab switch (lib/keep.ts).
+  const [ordering, setOrdering] = useKept<Holding | null>("assets:ordering", null);
   const [asking, setAsking] = useState<PlanAsk | null>(null);
   const [record, setRecord] = useState<PlacedOrder[]>([]);
   const [standing, setStanding] = useState<Standing[]>([]);
@@ -177,7 +180,7 @@ export function Assets() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <Header connection={connection} pending={waiting.length} />
-      <StandingBar pending={waiting} href="/record" />
+      <StandingBar pending={waiting} />
 
       <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
         <div className="mx-auto w-full max-w-[42rem] px-4 pt-5 pb-12 sm:px-8 sm:pt-7 sm:pb-6 lg:grid lg:max-w-[72rem] lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)] lg:gap-14">
@@ -202,17 +205,16 @@ export function Assets() {
                   </p>
                 ) : null}
                 {data ? (
-                  <p className="tnum mt-1.5 text-[11.5px] text-faint" aria-live="polite">
-                    {new Date(data.at).toLocaleTimeString("ko-KR", {
-                      timeZone: "Asia/Seoul",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      second: "2-digit",
-                      hour12: false,
-                    })}{" "}
-                    기준 · 환율 {krw(data.usdKrw)}/$
-                    {data.stale || loading ? " · 갱신 중…" : ""}
-                  </p>
+                  <AsOf
+                    at={data.at}
+                    seconds
+                    busy={data.stale || loading}
+                    failed={error !== null}
+                    onRetry={() => void load(true)}
+                    className="mt-1.5"
+                  >
+                    {" "}· 환율 {krw(data.usdKrw)}/$
+                  </AsOf>
                 ) : null}
               </div>
 
@@ -231,7 +233,9 @@ export function Assets() {
               </button>
             </div>
 
-            {error ? (
+            {/* Nothing read yet: the whole screen says it. A refresh that
+                failed over figures already shown is said on their line. */}
+            {error && !data ? (
               <p
                 role="status"
                 className="mb-5 border-l-2 border-reject pl-3 text-[13.5px] leading-relaxed text-dim"

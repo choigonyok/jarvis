@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Check, X } from "lucide-react";
-import { HoldBar, holdsMoney, useHold } from "@/components/chat/hold";
+import { HeldBack, HoldBar, holdsMoney, useHold } from "@/components/chat/hold";
 import { RejectForm } from "@/components/chat/reject-form";
 import { Button } from "@/components/ui/button";
 import { CodeBlock, CodeBlockContent, CodeBlockCopyButton } from "@/components/ui/code-block";
@@ -58,7 +58,7 @@ export function ProposalCard({
     else setValues((cur) => Object.fromEntries(Object.entries(cur).map(([k, v]) => [k, fields.some((f) => f.key === k && isPrivateField(f)) ? "" : v])));
   }
   // Money: the approval waits five seconds with 되돌리기 on the card (chat/hold.tsx).
-  const hold = useHold(() => void decide("approved"));
+  const hold = useHold(proposal.id, () => void decide("approved"));
   // A command or a file's content the CLI would run is shown as the literal
   // call; anything else - a module's change, a job's or the browser's
   // arguments - as words (lib/card-body.ts).
@@ -155,23 +155,26 @@ export function ProposalCard({
              a phone it was a pair of 32px targets sitting a thumb-width apart.
              Full width, 48px, and a real gap between them: reaching for 승인
              must not be able to land on 반려. */
-          <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end sm:gap-1.5">
-            <Button
-              variant="reject"
-              size="pair"
-              onClick={() => setAsking(true)}
-              disabled={busy}
-            >
-              반려
-            </Button>
-            <Button
-              variant="approve"
-              size="pair"
-              onClick={() => (holdsMoney(proposal) ? hold.start() : void decide("approved"))}
-              disabled={busy || missing.length > 0}
-            >
-              승인
-            </Button>
+          <div>
+            {hold.interrupted ? <HeldBack /> : null}
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end sm:gap-1.5">
+              <Button
+                variant="reject"
+                size="pair"
+                onClick={() => setAsking(true)}
+                disabled={busy}
+              >
+                반려
+              </Button>
+              <Button
+                variant="approve"
+                size="pair"
+                onClick={() => (holdsMoney(proposal) ? hold.start() : void decide("approved"))}
+                disabled={busy || missing.length > 0}
+              >
+                {hold.interrupted ? "다시 승인" : "승인"}
+              </Button>
+            </div>
           </div>
         )}
         {!settled && (refusal || missing.length > 0) ? (

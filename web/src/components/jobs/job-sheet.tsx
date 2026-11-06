@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowUp, ChevronRight, ExternalLink } from "lucide-react";
 import { ProposalCard } from "@/components/chat/proposal-card";
+import { AsOf } from "@/components/shell/as-of";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -73,12 +74,24 @@ function Body({
   onChanged: () => void;
 }) {
   const [detail, setDetail] = useState<JobDetail | null>(null);
+  // Whether the last read of the detail failed, and when the one on screen
+  // was read: a failure had been swallowed into "아직 기록이 없습니다".
+  const [failed, setFailed] = useState(false);
+  const [readAt, setReadAt] = useState<Date | null>(null);
   const [text, setText] = useState("");
-  const [note, setNote] = useState<string | null>(null);
+  // What the last thing done here came to - a failure in the failure's colour,
+  // with the way to try again; it read the same as success.
+  const [note, setNote] = useState<{ text: string; failed?: boolean; retry?: () => void } | null>(null);
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/jobs/jobs/${job.id}?events=300`, { cache: "no-store" }).catch(() => null);
-    if (res?.ok) setDetail((await res.json()) as JobDetail);
+    if (res?.ok) {
+      setDetail((await res.json()) as JobDetail);
+      setFailed(false);
+      setReadAt(new Date());
+    } else {
+      setFailed(true);
+    }
   }, [job.id]);
 
   useEffect(() => {
@@ -111,9 +124,9 @@ function Body({
     return card && !own.includes(card) ? [card, ...own] : own;
   }, [proposals, card, j.id, j.sites]);
 
-  const act = async (path: string, body: unknown, done: string) => {
+  const act = async (path: string, body: unknown, done: string): Promise<string | null> => {
     const err = await send(`jobs/${j.id}/${path}`, body);
-    setNote(err ?? done);
+    setNote(err ? { text: err, failed: true, retry: () => void act(path, body, done) } : { text: done });
     await load();
     onChanged();
     return err;
@@ -234,7 +247,12 @@ function Body({
 
         <section id={runsPaged.anchor} className="mt-6 scroll-mt-4" aria-label="진행 기록">
           <h3 className="mb-2 text-[12.5px] text-dim">진행</h3>
-          {runs.length === 0 ? (
+          {detail && failed ? <AsOf at={readAt} failed onRetry={() => void load()} className="mb-2" /> : null}
+          {!detail && failed ? (
+            <AsOf at={null} failedText="진행 기록을 불러오지 못했어요" failed onRetry={() => void load()} />
+          ) : !detail ? (
+            <p className="text-[12.5px] text-faint">불러오는 중…</p>
+          ) : runs.length === 0 ? (
             <p className="text-[12.5px] text-faint">아직 기록이 없습니다.</p>
           ) : (
             <Trace className="gap-4">
@@ -254,7 +272,24 @@ function Body({
       </div>
 
       <div className="border-t border-edge-soft px-4 pt-3 pb-3 sm:px-5">
-        {note ? <p role="status" className="mb-2 text-[12px] text-dim">{note}</p> : null}
+        {note ? (
+          <p role="status" className={cn("mb-2 text-[12px]", note.failed ? "text-reject/85" : "text-dim")}>
+            {note.failed ? "전하지 못했어요: " : ""}
+            {note.text}
+            {note.retry ? (
+              <>
+                {" · "}
+                <button
+                  type="button"
+                  onClick={note.retry}
+                  className="tap-y underline decoration-reject/40 underline-offset-[3px] outline-none hover:text-reject focus-visible:ring-3 focus-visible:ring-ring/50"
+                >
+                  다시 시도
+                </button>
+              </>
+            ) : null}
+          </p>
+        ) : null}
         {j.state !== "cancelled" ? (
           <form
             onSubmit={async (e) => {

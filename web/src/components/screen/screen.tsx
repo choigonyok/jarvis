@@ -122,7 +122,7 @@ export function Screen({ vncUrl, ticketed = false }: { vncUrl: string; ticketed?
         <Header connection={connection} pending={pending} />
         {/* Inside the dimmed block on purpose: while you are driving the
             remote browser the room goes quiet, and that includes this. */}
-        <StandingBar pending={waitingList} href="/record" />
+        <StandingBar pending={waitingList} />
       </div>
 
       <main

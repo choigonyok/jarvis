@@ -95,7 +95,17 @@ function rangeOf(hit: Hit): Range | null {
  * so the thread keeps its own DOM. Where the API is missing the arrows still
  * walk, and the line the hit is on is brought to the middle.
  */
-export function useThreadSearch(root: RefObject<HTMLElement | null>) {
+/** The thread above what is loaded, as useThread has it. */
+export type Above = { hasMore: boolean; failed: boolean; load: () => Promise<unknown> };
+
+/**
+ * How many pages a 더 찾기 reads before it stops to ask again: a word said
+ * once three weeks ago is a few pages up, and a word never said is every page
+ * there is.
+ */
+const PAGES_A_LOOK = 6;
+
+export function useThreadSearch(root: RefObject<HTMLElement | null>, above?: Above) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<Hit[]>(NONE);
@@ -170,6 +180,39 @@ export function useThreadSearch(root: RefObject<HTMLElement | null>) {
     [],
   );
 
+  // What is shown is only what is loaded: "없음" there was said of the whole
+  // conversation, and three weeks back was never looked at (2026-11-06
+  // review). Looking further reads the pages above, one at a time, until the
+  // word turns up further back - or the conversation's start, or a few pages,
+  // after which it asks again.
+  const [seeking, setSeeking] = useState(false);
+  const aboveRef = useRef(above);
+  const totalRef = useRef(0);
+  useEffect(() => {
+    aboveRef.current = above;
+    totalRef.current = live.length;
+  });
+  const findMore = useCallback(async () => {
+    if (seeking) return;
+    setSeeking(true);
+    const before = totalRef.current;
+    try {
+      for (let i = 0; i < PAGES_A_LOOK; i++) {
+        const a = aboveRef.current;
+        // A page that failed is asked again once; failing again, it stops.
+        if (!a?.hasMore || (i > 0 && a.failed)) break;
+        await a.load();
+        // The rows land, and the search reads them again (the observer waits 200ms).
+        await new Promise((r) => window.setTimeout(r, 320));
+        if (totalRef.current > before) break;
+      }
+    } finally {
+      setSeeking(false);
+    }
+    // Hits run newest first: the first one found above is the one after the old last.
+    if (totalRef.current > before) setAt(before);
+  }, [seeking]);
+
   // The query last asked for: Enter and the pause after typing may both hand
   // in the same one, and only a new one starts again from the newest hit.
   const asked = useRef("");
@@ -183,12 +226,19 @@ export function useThreadSearch(root: RefObject<HTMLElement | null>) {
   // The same answer while nothing in it changed: the header holding the search
   // is not drawn again on every frame of an answer.
   const total = live.length;
+  const further = Boolean(above?.hasMore);
+  const aboveFailed = Boolean(above?.failed);
   return useMemo(
     () => ({
       open,
       query,
       total,
       at: total ? at : 0,
+      /** More of the conversation is above what was searched. */
+      further,
+      aboveFailed,
+      seeking,
+      findMore,
       /** The query once typing has paused (SearchBar holds what is being typed). */
       setQuery: settle,
       show: () => {
@@ -202,11 +252,14 @@ export function useThreadSearch(root: RefObject<HTMLElement | null>) {
         setHits(NONE);
         setAt(0);
       },
-      /** Older: further up the thread. */
-      older: () => setAt((i) => (total ? Math.min(total - 1, i + 1) : 0)),
+      /** Older: further up the thread - past the oldest loaded, the pages above. */
+      older: () => {
+        if (total && at < total - 1) setAt(at + 1);
+        else if (further) void findMore();
+      },
       newer: () => setAt((i) => Math.max(0, i - 1)),
     }),
-    [open, query, total, at, settle],
+    [open, query, total, at, settle, further, aboveFailed, seeking, findMore],
   );
 }
 
@@ -251,7 +304,17 @@ function SearchRow({ search }: { search: ThreadSearch }) {
   }, [text, setQuery]);
 
   const q = search.query.trim();
-  const count = !q ? "" : search.total === 0 ? "없음" : `${search.at + 1}/${search.total}`;
+  // "없음" only of the whole conversation; of what is loaded, it says so.
+  const count = !q
+    ? ""
+    : search.seeking
+      ? "찾는 중…"
+      : search.total === 0
+        ? search.further
+          ? "불러온 대화엔 없음"
+          : "없음"
+        : `${search.at + 1}/${search.total}${search.further ? "+" : ""}`;
+  const offerMore = Boolean(q) && !search.seeking && search.further && (search.total === 0 || search.at >= search.total - 1);
   return (
     <div className="inset-x-safe shrink-0 border-b border-edge-soft bg-background" role="search">
       <div className="mx-auto flex h-14 w-full max-w-[52rem] items-center gap-1 px-4 sm:px-8">
@@ -290,10 +353,19 @@ function SearchRow({ search }: { search: ThreadSearch }) {
             </span>
           </InputGroupAddon>
         </InputGroup>
+        {offerMore ? (
+          <button
+            type="button"
+            onClick={() => void search.findMore()}
+            className="tap-y shrink-0 rounded-full px-2 text-[12.5px] text-foreground outline-none hover:text-foreground/80 focus-visible:ring-3 focus-visible:ring-ring/50"
+          >
+            {search.aboveFailed ? "다시 찾기" : "더 찾기"}
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={search.older}
-          disabled={search.at >= search.total - 1}
+          disabled={search.seeking || (search.at >= search.total - 1 && !search.further)}
           aria-label="이전 결과 (더 오래된)"
           className="flex size-10 shrink-0 items-center justify-center rounded-full text-dim outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-30"
         >

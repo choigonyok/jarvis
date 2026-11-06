@@ -76,7 +76,8 @@ const buttonVariants = cva(
     ],
     defaultVariants: {
       variant: "default",
-      size: "default",
+      // A thumb's size unless a button says otherwise (44px; a pointer's 36).
+      size: "touch",
     },
   }
 )

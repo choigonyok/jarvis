@@ -6,7 +6,7 @@ import { ArrowDown, Reply } from "lucide-react";
 import { MarkButtons, WrongForm, WrongNote, useAnswerMarks, type MarkAnswer } from "@/components/chat/answer-marks";
 import { Composer } from "@/components/chat/composer";
 import { ModeToggle, type ChatMode } from "@/components/chat/mode-toggle";
-import { ChecklistCard } from "@/components/chat/checklist";
+import { ChecklistCard, type Fold } from "@/components/chat/checklist";
 import { GuideSheet, GuideToggle } from "@/components/chat/guide";
 import { NoticeCard } from "@/components/chat/notice-card";
 import { ProposalCard } from "@/components/chat/proposal-card";
@@ -48,17 +48,25 @@ import {
 import { diag } from "@/lib/diag";
 import { photoUrl } from "@/lib/uploads";
 import { speakable, useSpeech, useVoiceStatus } from "@/lib/use-speech";
-import { useThread } from "@/lib/use-thread";
+import { openedTurns, useThread } from "@/lib/use-thread";
 import { cn } from "@/lib/utils";
 import { clock, dayLabel, refTime, turnDay, turnTime } from "@/lib/when";
 
 const MODE_KEY = "jarvis:chat-mode";
 
-// The checklist cards opened here (by turn), for as long as the app is
-// open: leaving for another tab and coming back finds them as they were.
-// A card comes folded - its title, how far along, what is left - and is
-// opened by its title when wanted (2026-10-22: "접힌 게 디폴트").
-const openedTurns = new Set<string>();
+/**
+ * Where the reader was in the conversation when they left it for another tab:
+ * the row at the top of the view, how far into the view it stood, and the
+ * newest turn then. Coming back lands there - it had always landed at the
+ * bottom (2026-11-06 review) - unless they had been at the bottom, and what
+ * came meanwhile is counted on the way down (새 메시지 N).
+ */
+let readingSpot: { row: string; offset: number; newest: string | null } | null = null;
+
+// The cards opened here (by turn) - checklists, a job's news - live in
+// lib/use-thread.ts (openedTurns), for as long as the app is open. A card
+// comes folded - its title, how far along, what is left - and is opened by
+// its title when wanted (2026-10-22: "접힌 게 디폴트").
 
 /**
  * An agent turn as it is read aloud: a job's card is announced as the job's,
@@ -151,18 +159,22 @@ function Quote({ quote, at, onJump }: { quote: TurnRef; at: string; onJump: () =
  * newest word - a chatty run never fills the thread. The way to the job
  * itself is the 작업 tab.
  */
-function JobNews({ turn }: { turn: Turn }) {
-  const [open, setOpen] = useState(false);
+function JobNews({ turn, fold }: { turn: Turn; fold: Fold }) {
+  const open = fold.open;
   const text = turn.paragraphs?.join("\n\n") ?? "";
   const long = text.length > 160 || text.includes("\n");
+  const job = turn.origin?.job;
   return (
     <div className="max-w-[36rem] rounded-xl bg-well px-3.5 py-2.5">
       <div className="flex items-baseline justify-between gap-3" data-search-skip>
         <span className="min-w-0 truncate text-[11.5px] text-faint">
           작업 · {turn.origin?.title || "이름 없음"}
+          {/* Open while a newer word came: written here, not moved to the bottom. */}
+          {turn.freshNews ? <span className="ms-1.5 text-foreground/80">· 새 소식</span> : null}
         </span>
         <Link
-          href="/jobs"
+          // To this job's own sheet, not the top of the list.
+          href={job ? `/jobs?focus=${encodeURIComponent(`job:${job}`)}` : "/jobs"}
           className="shrink-0 text-[11.5px] text-faint underline-offset-2 outline-none hover:text-dim hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
         >
           작업 탭
@@ -179,7 +191,8 @@ function JobNews({ turn }: { turn: Turn }) {
       {long ? (
         <button
           type="button"
-          onClick={() => setOpen((v) => !v)}
+          onClick={fold.onToggle}
+          aria-expanded={open}
           className="tap mt-1 text-[12px] text-faint outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50"
           data-search-skip
         >
@@ -352,7 +365,7 @@ const TurnRow = memo(function TurnRow({
                     <ChecklistCard list={list} title={turn.origin.title} onTick={tick} onDrop={drop} fold={fold} />
                   </>
                 ) : turn.origin ? (
-                  <JobNews turn={turn} />
+                  <JobNews turn={turn} fold={fold} />
                 ) : turn.images?.length ? (
                   // Pictures the assistant shows (show_image): the photos, and
                   // its line about them under, as a messenger sends a photo.
@@ -780,7 +793,7 @@ export function Thread() {
   } = useThread();
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const search = useThreadSearch(scrollRef);
+  const search = useThreadSearch(scrollRef, { hasMore, failed: olderFailed, load: loadOlder });
   // What can be asked of Jarvis in words (ⓘ, left of search). Its sheet is
   // drawn outside the header: a tap on the backdrop would otherwise reach the
   // header's own tap, which scrolls the thread to the top and loads older turns.
@@ -897,14 +910,51 @@ export function Thread() {
     });
   }, [turns, finger]);
 
+  // Leaving for another tab: where the reader was. Coming back: there again.
+  const newest = useRef<string | null>(null);
+  useEffect(() => {
+    newest.current = turns.at(-1)?.id ?? null;
+  });
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    const spot = readingSpot;
+    readingSpot = null;
+    const row = el && spot ? el.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(spot.row)}"]`) : null;
+    if (el && spot && row) {
+      // The reader's own place, as a scroll would take it: the scroller lets go of the bottom.
+      el.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+      el.scrollTop += row.getBoundingClientRect().top - el.getBoundingClientRect().top - spot.offset;
+      setSeenAt(spot.newest);
+      setAway(true);
+    }
+    return () => {
+      // The view on screen as the reader leaves - voice mode builds it anew -
+      // not the one there on arriving.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      const view = scrollRef.current;
+      if (!view || view.scrollHeight - view.scrollTop - view.clientHeight < 80) return;
+      const top = view.getBoundingClientRect().top;
+      for (const r of view.querySelectorAll<HTMLElement>("[data-message-id]")) {
+        const box = r.getBoundingClientRect();
+        if (box.bottom > top + 1 && r.dataset.messageId) {
+          readingSpot = { row: r.dataset.messageId, offset: box.top - top, newest: newest.current };
+          break;
+        }
+      }
+    };
+  }, []);
+
   // Back at the very bottom by the reader's own hand: following again. The
   // scroller looks only when the view moves, and a finger or a wheel still
   // pushing at the bottom moves nothing - it would stay let go of, and the
   // answer would grow out of sight under a reader who is right there.
   const wheelEnd = useRef<number | undefined>(undefined);
+  // When something in the thread was last opened or closed to be read (a
+  // job's 더 보기, a checklist, a notice): the reader took the view then.
+  const expanding = useRef(0);
   const repin = useCallback(() => {
     const el = scrollRef.current;
-    if (!el || held.current) return;
+    if (!el || held.current || performance.now() - expanding.current < 1500) return;
     if (el.scrollHeight - el.scrollTop - el.clientHeight <= 2) scroller.current?.scrollToEnd();
   }, []);
 
@@ -961,6 +1011,14 @@ export function Thread() {
       window.history.replaceState(window.history.state, "", url.pathname + url.search);
     }
   }, [hasMore, loadingOlder, olderFailed, byId, loadOlder]);
+  // 결재하기 here: to the card where it stands, not to another screen.
+  const goToCard = useCallback(
+    (id: string) => {
+      wanted.current = id;
+      focusCard();
+    },
+    [focusCard],
+  );
   useEffect(() => {
     wanted.current = new URLSearchParams(window.location.search).get("proposal");
     return onFocusProposal((id) => {
@@ -1223,7 +1281,7 @@ export function Thread() {
       <Header connection={connection} pending={pending} actions={headerActions} />
       <GuideSheet open={guide} onOpenChange={setGuide} role={role} />
       <SearchBar search={search} />
-      <StandingBar pending={waiting} href="/record" muted={cardsVisible} />
+      <StandingBar pending={waiting} onGo={goToCard} muted={cardsVisible} />
 
       <MessageScrollerProvider autoScroll defaultScrollPosition="end">
         <ScrollerMoves toRef={scroller} />
@@ -1280,6 +1338,17 @@ export function Thread() {
                   on the thread, or a table or a command scrolled sideways, is
                   not that: only a move up or down reaches it. */}
               <div
+                onPointerDownCapture={(e) => {
+                  if (!(e.target as Element).closest("[aria-expanded]")) return;
+                  // Opening or closing something to read it is the reader taking
+                  // the view, as a scroll is: left to the scroller, the view went
+                  // on following the bottom as the card grew - and the finger let
+                  // go at the bottom put it back there - and the head of what was
+                  // opened went up out of sight (2026-11-06 review). The scroller
+                  // lets go on the keys it scrolls by; one is said here, not pressed.
+                  expanding.current = performance.now();
+                  scrollRef.current?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+                }}
                 onTouchStart={(e) => {
                   touchY.current = e.touches[0]?.clientY ?? null;
                 }}

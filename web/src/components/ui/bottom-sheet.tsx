@@ -89,7 +89,7 @@ function BottomSheetTitle({
 }: React.ComponentProps<typeof SheetTitle>) {
   return (
     <SheetTitle
-      className={cn("pr-8 text-[15px] font-medium text-foreground", className)}
+      className={cn("pr-12 text-[15px] font-medium text-foreground mouse:pr-8", className)}
       {...props}
     />
   )

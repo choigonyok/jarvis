@@ -1,5 +1,6 @@
 "use client";
 
+import { useKept } from "@/lib/keep";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, Minus, Plus } from "lucide-react";
 import { GoalForm } from "@/components/goals/goal-form";
@@ -29,7 +30,8 @@ export function Goals() {
   const [goals, setGoals] = useState<Goal[] | null>(null);
   const [ended, setEnded] = useState<Goal[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [openId, setOpenId] = useState<string | null>(null);
+  // The goal left open stays open across a tab switch (lib/keep.ts).
+  const [openId, setOpenId] = useKept<string | null>("goals:open", null);
   const [making, setMaking] = useState(false);
   const [editing, setEditing] = useState<Goal | null>(null);
 
@@ -53,9 +55,8 @@ export function Goals() {
   // The name a notification gives: straight to that goal.
   useEffect(() => {
     const id = new URLSearchParams(window.location.search).get("goal");
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (id) setOpenId(id);
-  }, []);
+  }, [setOpenId]);
 
   const replace = useCallback((next: Goal) => {
     setGoals((cur) => cur?.map((g) => (g.id === next.id ? next : g)) ?? cur);
@@ -70,7 +71,7 @@ export function Goals() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <Header connection={connection} pending={waiting.length} />
-      <StandingBar pending={waiting} href="/record" />
+      <StandingBar pending={waiting} />
 
       <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
         <div className="mx-auto w-full max-w-[42rem] px-4 pt-5 pb-12 sm:px-8 sm:pt-7 sm:pb-8">

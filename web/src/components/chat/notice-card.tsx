@@ -59,6 +59,7 @@ export function NoticeCard({
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
           className="tap mt-1 text-[12px] text-faint outline-none hover:text-dim focus-visible:ring-3 focus-visible:ring-ring/50"
           data-search-skip
         >

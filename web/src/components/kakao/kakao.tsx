@@ -58,7 +58,7 @@ export function Kakao() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <Header connection={connection} pending={pending} />
-      <StandingBar pending={waitingList} href="/record" />
+      <StandingBar pending={waitingList} />
       {/* The root draws no box: the list and the panel stay in this column. */}
       <Tabs value={source} onValueChange={(v) => pick(v as Source)} className="contents">
         <div className="px-gutter mx-auto w-full max-w-[46rem] shrink-0 pt-2 sm:pt-3">

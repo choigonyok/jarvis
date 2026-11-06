@@ -95,6 +95,7 @@ const OWNER_HUBS: Hub[] = [
       { href: "/goals", label: "목표" },
       { href: "/workout", label: "운동" },
       { href: "/transit", label: "출발" },
+      { href: "/record", label: "기록" },
     ],
   },
   {
@@ -122,7 +123,6 @@ const OWNER_HUBS: Hub[] = [
     icon: Ellipsis,
     list: true,
     screens: [
-      { href: "/record", label: "기록" },
       { href: "/kakao", label: "카톡" },
       { href: "/screen", label: "화면" },
       { href: "/status", label: "상태" },
@@ -130,20 +130,29 @@ const OWNER_HUBS: Hub[] = [
   },
 ];
 
-/** The guest has few screens of their own: each is a place, in the order of the bar. */
-const GUEST_TABS: Tab[] = [
-  { href: "/", label: "대화" },
-  { href: "/jobs", label: "작업" },
-  { href: "/goals", label: "목표" },
-  { href: "/calendar", label: "캘린더" },
-  { href: "/location", label: "위치" },
-  { href: "/transit", label: "출발" },
-  { href: "/workout", label: "운동" },
-  { href: "/edit", label: "편집" },
+/**
+ * The guest's places, grouped as the operator's are: eight screens were eight
+ * wordless icons, more slots than the operator's five, and every one a single
+ * screen, so neither the bar nor the header said where you were (2026-11-06
+ * review). Five places keep their words.
+ */
+const GUEST_HUBS: Hub[] = [
+  { id: "talk", label: "대화", icon: MessageCircle, screens: [{ href: "/", label: "대화" }] },
+  {
+    id: "today",
+    label: "오늘",
+    icon: Sun,
+    screens: [
+      { href: "/calendar", label: "캘린더" },
+      { href: "/jobs", label: "작업" },
+      { href: "/goals", label: "목표" },
+      { href: "/transit", label: "출발" },
+    ],
+  },
+  { id: "workout", label: "운동", icon: Dumbbell, screens: [{ href: "/workout", label: "운동" }] },
+  { id: "location", label: "위치", icon: MapPin, screens: [{ href: "/location", label: "위치" }] },
+  { id: "edit", label: "편집", icon: Brush, screens: [{ href: "/edit", label: "편집" }] },
 ];
-const GUEST_HUBS: Hub[] = GUEST_TABS.map((tab) => ({ id: tab.href, label: tab.label, icon: ICON[tab.href] ?? Ellipsis, screens: [tab] }));
-/** Reading order on a wide screen. */
-const GUEST_WIDE = ["/", "/workout", "/jobs", "/goals", "/calendar", "/edit", "/location", "/transit"];
 
 /** The places a role is shown. The middleware is what actually refuses the rest. */
 const hubsFor = (role: Role) => (role === "guest" ? GUEST_HUBS : OWNER_HUBS);
@@ -174,8 +183,12 @@ function remember(hub: Hub, pathname: string) {
   } catch {}
 }
 
-/** Where a waiting decision is announced: the surface that lists them by name. */
-const pendingHome = "/record";
+/**
+ * Where a waiting decision is announced: the conversation, where the card
+ * stands and is decided - the mark sat on 더보기, two taps from a card that
+ * was a tab away (2026-11-06 review).
+ */
+const pendingHome = "/";
 
 /**
  * The status-bar tap every phone app answers: back to the top of what you are
@@ -230,7 +243,9 @@ function HeaderView({
   const hubs = hubsFor(role);
   const here = hubOf(hubs, pathname);
   const strip = here && here.screens.length > 1 ? here.screens : null;
-  const wide = role === "guest" ? GUEST_WIDE.map((href) => hubs.find((h) => h.screens[0].href === href)!) : hubs;
+  // A place of one screen says which: "Jarvis" over every one of them told
+  // nobody where they were. The conversation is Jarvis's own.
+  const title = here && !strip && here.screens[0].href !== "/" ? here.screens[0].label : "Jarvis";
   const router = useRouter();
   const signOut = useSignOut();
   const status = connectionCopy[connection];
@@ -296,7 +311,7 @@ function HeaderView({
             )}
             onClick={secretTap}
           >
-            Jarvis
+            {title}
           </h1>
           {strip ? <Strip screens={strip} pending={pending} className="sm:hidden" /> : null}
           {/* The same places, in the bar below, on a phone. A row that runs
@@ -304,7 +319,7 @@ function HeaderView({
               Under a finger (an iPad, a phone on its side) a label is a 44px
               target; with a mouse it is only the word. */}
           <nav className="scrollbar-none hidden min-w-0 items-baseline overflow-x-auto sm:flex mouse:gap-[9px]" aria-label="화면">
-            {wide.map((hub) => {
+            {hubs.map((hub) => {
               const active = hub === here;
               return (
                 <Link
@@ -491,13 +506,14 @@ function TabBarView({
   const signOut = useSignOut();
 
   const hubs = hubsFor(role);
-  // Five places have room for their word; the guest's eight are icons.
+  // Five places have room for their word.
   const worded = hubs.length <= 5;
   const here = hubOf(hubs, pathname);
   const at = here ? hubs.indexOf(here) : -1;
   const slots = hubs.length;
   const moreSlot = hubs.findIndex((h) => h.list);
   const inMore = at >= 0 && at === moreSlot;
+  const moreMarked = pending > 0 && moreSlot >= 0 && hubs[moreSlot].screens.some((s) => s.href === pendingHome);
 
   // Where the lens is. It moves the moment a tab is chosen, not when the page
   // has loaded: the bar answers the finger, and the page follows when it is
@@ -762,7 +778,7 @@ function TabBarView({
               <SheetTrigger
                 aria-label={
                   (inMore ? `다른 화면 (지금: ${hubs[moreSlot].screens.find((t) => t.href === pathname)?.label})` : "다른 화면") +
-                  (pending > 0 ? `, 결재 대기 ${pending}건` : "")
+                  (moreMarked ? `, 결재 대기 ${pending}건` : "")
                 }
                 title="다른 화면"
                 onClick={(e) => {
@@ -784,7 +800,7 @@ function TabBarView({
                     <>
                       <span className="relative">
                         <Icon aria-hidden className={icon} strokeWidth={lit === moreSlot ? 2.1 : 1.7} />
-                        {pending > 0 ? (
+                        {moreMarked ? (
                           <span
                             aria-hidden
                             className="anim-breathe absolute -top-0.5 -right-1.5 size-[6px] rounded-full bg-foreground/80"

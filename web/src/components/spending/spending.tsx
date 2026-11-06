@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, Plus, Search } from "lucide-react";
 import { ClearChip } from "@/components/ui/badge";
@@ -8,6 +8,8 @@ import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/in
 import { Header, TabBar } from "@/components/shell/header";
 import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
+import { AsOf } from "@/components/shell/as-of";
+import { useKept } from "@/lib/keep";
 import { Categories } from "@/components/spending/categories";
 import { Pace } from "@/components/spending/pace";
 import {
@@ -52,49 +54,69 @@ export function Spending() {
   const { proposals, connection } = useThread();
   const waiting = proposals.filter(isPending);
 
-  const [month, setMonth] = useState(thisMonth);
+  // The month on screen is the month whose figures are on screen: a month
+  // asked for (asked) takes its name only when it has come. Moving there and
+  // failing had left last month's numbers under the new month's name.
+  const [month, setMonth] = useKept("spending:month", thisMonth);
+  const [asked, setAsked] = useState<string | null>(null);
+  const latest = useRef(month);
   const [book, setBook] = useState<Book | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [readAt, setReadAt] = useState<Date | null>(null);
+  // The last read failed; what is shown is the read before it.
+  const [failed, setFailed] = useState<string | null>(null);
 
-  const [day, setDay] = useState<string | null>(null);
-  const [category, setCategory] = useState<string | null>(null);
+  const [day, setDay] = useKept<string | null>("spending:day", null);
+  const [category, setCategory] = useKept<string | null>("spending:category", null);
   const [query, setQuery] = useState("");
 
-  const [open, setOpen] = useState<Tx | null>(null);
+  // The payment left open stays open across a tab switch (lib/keep.ts).
+  const [open, setOpen] = useKept<Tx | null>("spending:open", null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [budgetOpen, setBudgetOpen] = useState(false);
   const [unparsedOpen, setUnparsedOpen] = useState(false);
   const [note, setNote] = useState<string | null>(null);
 
-  const load = useCallback(async (m: string) => {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/spending/spending?month=${m}`, { cache: "no-store" });
-      if (!res.ok) throw new Error(String(res.status));
-      setBook((await res.json()) as Book);
-      setError(null);
-    } catch {
-      setError("가계부를 불러오지 못했어요. 잠시 뒤 다시 시도하세요.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const load = useCallback(
+    async (m: string) => {
+      latest.current = m;
+      setLoading(true);
+      try {
+        const res = await fetch(`/api/spending/spending?month=${m}`, { cache: "no-store" });
+        if (!res.ok) throw new Error(String(res.status));
+        const next = (await res.json()) as Book;
+        // A month asked for since: this answer is not the one on screen.
+        if (latest.current !== m) return;
+        setBook(next);
+        setMonth(m);
+        setAsked(null);
+        setError(null);
+        setFailed(null);
+        setReadAt(new Date());
+      } catch {
+        if (latest.current !== m) return;
+        setError("가계부를 불러오지 못했어요. 잠시 뒤 다시 시도하세요.");
+        setFailed(m);
+      } finally {
+        if (latest.current === m) setLoading(false);
+      }
+    },
+    [setMonth],
+  );
 
   useEffect(() => {
-    // load sets state only after its fetch resolves; the rule cannot see that.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load(month);
-  }, [load, month]);
+    void load(latest.current);
+  }, [load]);
   // Back to the app, or a pull to refresh: the month on screen, again.
-  useEffect(() => onResume(() => load(month)), [load, month]);
+  useEffect(() => onResume(() => load(latest.current)), [load]);
 
   // A charge made while the tab is open should appear without a pull: the
   // collector reads alerts within seconds, so a minute is the slow side.
   useEffect(() => {
     if (month !== thisMonth()) return;
     const id = window.setInterval(() => {
-      if (document.visibilityState === "visible") void load(month);
+      if (document.visibilityState === "visible" && latest.current === month) void load(month);
     }, 60_000);
     return () => window.clearInterval(id);
   }, [load, month]);
@@ -115,10 +137,15 @@ export function Spending() {
   };
 
   const goMonth = (m: string) => {
-    setMonth(m);
+    setAsked(m === month ? null : m);
     setDay(null);
     setCategory(null);
+    void load(m);
   };
+  // What a failed read says: a month asked for and not read, or this month's
+  // refresh - its figures still standing, as of when they were read.
+  const failedLine =
+    failed && failed !== month ? `${monthLabel(failed, failed.slice(0, 4) !== month.slice(0, 4))}을 불러오지 못했어요` : undefined;
 
   // A notification's target (lib/focus.ts): the month it is about; a
   // payment's row with nothing filtering it out; a day as that day's rows.
@@ -136,6 +163,9 @@ export function Spending() {
     };
     apply(new URLSearchParams(window.location.search));
     return onOpenParams(apply);
+    // Once, and on each notification opened here: the setters are state's
+    // own and goMonth reads them, so nothing it uses goes stale.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const shown = useMemo(() => {
@@ -160,7 +190,7 @@ export function Spending() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <Header connection={connection} pending={waiting.length} />
-      <StandingBar pending={waiting} href="/record" />
+      <StandingBar pending={waiting} />
 
       <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
         <div className="mx-auto w-full max-w-[42rem] px-4 pt-4 pb-12 sm:px-8 sm:pt-7 sm:pb-8">
@@ -185,7 +215,11 @@ export function Spending() {
             >
               <ChevronRight aria-hidden className="size-4" />
             </button>
-            {!current ? (
+            {asked && loading ? (
+              <span className="ms-1 text-[12px] text-faint" aria-live="polite">
+                {monthLabel(asked, asked.slice(0, 4) !== month.slice(0, 4))} 불러오는 중…
+              </span>
+            ) : !current ? (
               <button
                 type="button"
                 onClick={() => goMonth(thisMonth())}
@@ -196,10 +230,21 @@ export function Spending() {
             ) : null}
           </div>
 
+          {book && failed ? (
+            <AsOf
+              at={readAt}
+              failed
+              failedText={failedLine}
+              busy={loading}
+              onRetry={() => void load(failed)}
+              className="-mt-1 mb-3"
+            />
+          ) : null}
+
           {error && !book ? (
             <div className="py-16 text-center">
               <p className="text-[13px] text-dim">{error}</p>
-              <Retry onRetry={() => load(month)} />
+              <Retry onRetry={() => load(failed ?? month)} />
             </div>
           ) : null}
 

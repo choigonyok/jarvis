@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ChevronDown } from "lucide-react";
-import { HoldBar, holdsMoney, useHold } from "@/components/chat/hold";
+import { HeldBack, HoldBar, holdsMoney, useHold } from "@/components/chat/hold";
 import { RejectForm } from "@/components/chat/reject-form";
 import { Button } from "@/components/ui/button";
 import { isLiteral, readableBody, readableConsequence } from "@/lib/card-body";
@@ -38,7 +38,7 @@ export function Entry({
   const literal = isLiteral(proposal);
   const time = when ?? (waiting ? proposal.at : (proposal.decidedAt ?? proposal.at));
   // Money waits five seconds with 되돌리기, as on the chat's card (chat/hold.tsx).
-  const hold = useHold(() => onDecide("approved"));
+  const hold = useHold(proposal.id, () => onDecide("approved"));
   // Turned down here as in the chat: asked why first (chat/reject-form.tsx).
   const [asking, setAsking] = useState(false);
 
@@ -120,21 +120,24 @@ export function Entry({
               <RejectForm onCancel={() => setAsking(false)} onReject={(why) => onDecide("rejected", why)} />
             </div>
           ) : waiting ? (
-            <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-1.5">
-              <Button
-                variant="reject"
-                size="pair-sm"
-                onClick={() => setAsking(true)}
-              >
-                반려
-              </Button>
-              <Button
-                variant="approve"
-                size="pair-sm"
-                onClick={() => (holdsMoney(proposal) ? hold.start() : onDecide("approved"))}
-              >
-                승인
-              </Button>
+            <div className="mt-3">
+              {hold.interrupted ? <HeldBack /> : null}
+              <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-1.5">
+                <Button
+                  variant="reject"
+                  size="pair-sm"
+                  onClick={() => setAsking(true)}
+                >
+                  반려
+                </Button>
+                <Button
+                  variant="approve"
+                  size="pair-sm"
+                  onClick={() => (holdsMoney(proposal) ? hold.start() : onDecide("approved"))}
+                >
+                  {hold.interrupted ? "다시 승인" : "승인"}
+                </Button>
+              </div>
             </div>
           ) : null}
         </div>

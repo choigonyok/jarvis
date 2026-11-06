@@ -1,5 +1,6 @@
 "use client";
 
+import { useKept } from "@/lib/keep";
 import { useEffect, useMemo, useState } from "react";
 import { Minus, Plus, Trash2, TrendingUp, X } from "lucide-react";
 import { ExerciseHistory } from "@/components/workout/exercise-history";
@@ -68,7 +69,8 @@ export function Workout() {
 
   const [editing, setEditing] = useState(false);
   const [looking, setLooking] = useState<string | null>(null);
-  const [day, setDay] = useState<string | null>(null);
+  // The day picked stays picked across a tab switch (lib/keep.ts).
+  const [day, setDay] = useKept<string | null>("workout:day", null);
   const [view, setView] = useState<View>("today");
 
   // The view lives in the URL hash, so 기록 or 종목 can be bookmarked and the
@@ -85,8 +87,9 @@ export function Workout() {
   }, []);
   function choose(next: View) {
     setView(next);
+    // The entry's own state kept: the router's, and a sheet's place in it.
     history.replaceState(
-      null,
+      history.state,
       "",
       next === "today" ? window.location.pathname : `#${next}`,
     );
@@ -162,7 +165,7 @@ export function Workout() {
         pending={waiting.length}
         actions={lifting ? <ScreenMenu pending={waiting.length} /> : undefined}
       />
-      <StandingBar pending={waiting} href="/record" muted={lifting} />
+      <StandingBar pending={waiting} muted={lifting} />
 
       <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
         <div className="mx-auto w-full max-w-[42rem] px-4 pt-5 pb-12 sm:px-8 sm:pt-7 sm:pb-8">

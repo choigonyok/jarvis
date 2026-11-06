@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useKept } from "@/lib/keep";
+import { useMemo } from "react";
 import { Entry } from "@/components/ledger/entry";
 import { Header, TabBar } from "@/components/shell/header";
 import { StandingBar } from "@/components/shell/standing-bar";
@@ -21,7 +22,8 @@ import { useThread } from "@/lib/use-thread";
  */
 export function Ledger() {
   const { proposals, connection, error, hydrated, decide } = useThread();
-  const [filter, setFilter] = useState<Filter>("all");
+  // The filter stays across a tab switch (lib/keep.ts).
+  const [filter, setFilter] = useKept<Filter>("record:filter", "all");
 
   const pending = proposals.filter(isPending);
   // What waits stands above the days: every screen's bar lands here, and a card

@@ -106,7 +106,7 @@ export function Departures() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <Header connection={connection} pending={waiting.length} />
-      <StandingBar pending={waiting} href="/record" />
+      <StandingBar pending={waiting} />
       <main className="inset-x-safe min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
         <div className="mx-auto w-full max-w-[34rem] px-4 pt-5 pb-10 sm:px-6 sm:pt-8">
           {!read ? (

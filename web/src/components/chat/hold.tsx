@@ -19,13 +19,24 @@ export function holdsMoney(p: Proposal): boolean {
 }
 
 /**
+ * The cards whose held approval was let go by leaving - another tab, the phone
+ * put away, a call, voice mode - and not sent. Kept past the card's own life
+ * on screen: coming back, the card says so and asks again.
+ */
+const letGo = new Set<string>();
+
+/**
  * An approval held for HOLD_MS before it is sent. 되돌리기 lets go of it and
  * nothing was sent. Leaving the screen, or the phone putting the page away,
- * is not an undo: the approval goes then.
+ * lets go of it too: a payment is not sent in the moment nobody is looking -
+ * a held approval sent on the way out was the commonest way the wait came to
+ * nothing (2026-11-06 review). The card then says it was held back
+ * (interrupted), and 다시 승인 holds it again.
  */
-export function useHold(send: () => void) {
+export function useHold(id: string, send: () => void) {
   const [until, setUntil] = useState<number | null>(null);
   const [now, setNow] = useState(0);
+  const [interrupted, setInterrupted] = useState(() => letGo.has(id));
   const latest = useRef(send);
   useEffect(() => {
     latest.current = send;
@@ -35,9 +46,19 @@ export function useHold(send: () => void) {
   const fire = useCallback(() => {
     if (!armed.current) return;
     armed.current = false;
+    letGo.delete(id);
     setUntil(null);
     latest.current();
-  }, []);
+  }, [id]);
+
+  // Gone from the screen while waiting: held back, not sent.
+  const holdBack = useCallback(() => {
+    if (!armed.current) return;
+    armed.current = false;
+    letGo.add(id);
+    setUntil(null);
+    setInterrupted(true);
+  }, [id]);
 
   useEffect(() => {
     if (until === null) return;
@@ -50,27 +71,47 @@ export function useHold(send: () => void) {
   }, [until, fire]);
 
   useEffect(() => {
-    window.addEventListener("pagehide", fire);
+    // Hidden is the phone put away or another app in front: a timer left
+    // running would send the moment the page thaws.
+    const hidden = () => document.visibilityState === "hidden" && holdBack();
+    window.addEventListener("pagehide", holdBack);
+    document.addEventListener("visibilitychange", hidden);
     return () => {
-      window.removeEventListener("pagehide", fire);
-      fire();
+      window.removeEventListener("pagehide", holdBack);
+      document.removeEventListener("visibilitychange", hidden);
+      holdBack();
     };
-  }, [fire]);
+  }, [holdBack]);
 
   return {
     holding: until !== null,
+    /** The last hold was let go by leaving: nothing was sent. */
+    interrupted,
     left: until === null ? 0 : Math.max(1, Math.ceil((until - now) / 1000)),
     start: () => {
       armed.current = true;
+      letGo.delete(id);
+      setInterrupted(false);
       const t = Date.now();
       setNow(t);
       setUntil(t + HOLD_MS);
     },
     cancel: () => {
       armed.current = false;
+      letGo.delete(id);
+      setInterrupted(false);
       setUntil(null);
     },
   };
+}
+
+/** What a card says of a hold let go by leaving: nothing was sent, and it can be asked again. */
+export function HeldBack({ className }: { className?: string }) {
+  return (
+    <p role="status" className={cn("mb-2 px-0.5 text-[12.5px] text-dim", className)}>
+      승인이 보류됐어요. 화면을 떠나서 결제를 보내지 않았어요.
+    </p>
+  );
 }
 
 /**
@@ -82,7 +123,7 @@ export function HoldBar({ left, onCancel, className }: { left: number; onCancel:
   return (
     <div className={cn("anim-settle", className)} role="status">
       <p className="mb-2 px-0.5 text-[12.5px] text-dim">
-        <span className="tnum text-foreground">{left}초</span> 뒤에 결제를 진행해요.
+        <span className="tnum text-foreground">{left}초</span> 뒤에 결제를 진행해요. 화면을 떠나면 보류돼요.
       </p>
       <button
         type="button"

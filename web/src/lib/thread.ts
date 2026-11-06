@@ -92,6 +92,8 @@ export type Turn = {
   images?: string[];
   /** Points at a proposal; the card itself lives in the proposal store. */
   proposalId?: string;
+  /** This page's own: a newer word came for a card open in front of the reader, written where it is. */
+  freshNews?: boolean;
   /**
    * Set when the turn is not the conversation's own words: news from a
    * background job's run (drawn beside the thread; a later word from the

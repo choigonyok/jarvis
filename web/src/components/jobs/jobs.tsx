@@ -5,6 +5,8 @@ import Link from "next/link";
 import { Header, TabBar } from "@/components/shell/header";
 import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
+import { AsOf } from "@/components/shell/as-of";
+import { useKept } from "@/lib/keep";
 import { ChecklistCard } from "@/components/chat/checklist";
 import { JobSheet } from "@/components/jobs/job-sheet";
 import { PastReminders, useReminders, WaitingReminders } from "@/components/jobs/reminders";
@@ -54,7 +56,18 @@ export function Jobs() {
   const [jobs, setJobs] = useState<Job[] | null>(null);
   const [blocked, setBlocked] = useState<BlockedSite[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [openId, setOpenId] = useState<number | null>(null);
+  // When the list on screen was read: a refresh that fails leaves it, and says
+  // it is that read - a run shown as going on may have ended since.
+  const [readAt, setReadAt] = useState<Date | null>(null);
+  // The sheet left open stays open across a tab switch, and a link to one job
+  // (?focus=job:<id> - a job's news in the conversation) opens its sheet, not
+  // the top of the list (2026-11-06 review).
+  const [openId, setOpenId] = useKept<number | null>("jobs:open", null);
+  useEffect(() => {
+    const focus = new URLSearchParams(window.location.search).get("focus") ?? "";
+    const m = /^job:(\d+)$/.exec(focus);
+    if (m) setOpenId(Number(m[1]));
+  }, [setOpenId]);
   const [showEnded, setShowEnded] = useState(false);
 
   const load = useCallback(async () => {
@@ -68,6 +81,7 @@ export function Jobs() {
       setJobs(body.jobs);
       setBlocked(body.blockedSites);
       setError(null);
+      setReadAt(new Date());
     } catch {
       setError("작업을 불러오지 못했습니다. 잠시 뒤 다시 시도하세요.");
     }
@@ -108,7 +122,7 @@ export function Jobs() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <Header connection={connection} pending={waiting.length} />
-      <StandingBar pending={waiting} href="/record" />
+      <StandingBar pending={waiting} />
 
       <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
         <div className="mx-auto w-full max-w-[42rem] px-4 pt-4 pb-12 sm:px-8 sm:pt-7 sm:pb-8">
@@ -118,6 +132,7 @@ export function Jobs() {
               <Retry onRetry={load} />
             </div>
           ) : null}
+          {error && jobs ? <AsOf at={readAt} failed onRetry={() => void load()} className="mb-3" /> : null}
 
           {blocked.length > 0 ? (
             <section role="alert" className="mb-5 rounded-xl border border-mine/25 bg-mine/[0.06] px-4 py-3.5">

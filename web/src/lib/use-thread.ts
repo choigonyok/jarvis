@@ -40,10 +40,24 @@ function keepRows(prev: Turn[], next: Turn[]): Turn[] {
   return next.map((t) => (t.rowKey || !rows.has(t.id) ? t : { ...t, rowKey: rows.get(t.id) }));
 }
 
-function upsert<T extends { id: string; atIso?: string }>(list: T[], next: T): T[] {
+/**
+ * The cards opened here - a checklist, a job's news unfolded - by turn, for as
+ * long as the app is open: leaving for another tab and coming back finds them
+ * as they were, and one being read stays where it is (upsert).
+ */
+export const openedTurns = new Set<string>();
+
+function upsert<T extends { id: string; atIso?: string }>(list: T[], next: T, inPlace?: (id: string) => boolean): T[] {
   const at = list.findIndex((item) => item.id === next.id);
   if (at === -1) return [...list, next];
   const copy = list.slice();
+  // A newer word on a card open in front of the reader is written where it
+  // is, marked as news: moved down to its time, the card being read vanished
+  // and came back at the bottom (2026-11-06 review).
+  if (inPlace?.(next.id) && next.atIso && copy[at].atIso && next.atIso > copy[at].atIso) {
+    copy[at] = { ...next, freshNews: true };
+    return copy;
+  }
   if (next.atIso && copy[at].atIso && next.atIso > copy[at].atIso) {
     copy.splice(at, 1);
     let to = copy.length;
@@ -227,7 +241,7 @@ export function useThread() {
     }
     switch (event.type) {
       case "turn":
-        setTurns((prev) => upsert(prev, event.turn));
+        setTurns((prev) => upsert(prev, event.turn, (id) => openedTurns.has(id)));
         if (event.replaces) {
           const { replaces, turn } = event;
           // In the same render as the turn, so the words never show twice:

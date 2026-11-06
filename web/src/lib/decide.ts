@@ -21,6 +21,8 @@ export async function decideProposal(
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ decision, ...(edits ? { edits } : {}), ...(reason?.trim() ? { reason: reason.trim() } : {}) }),
+      // Sent as the page goes away too: an answer given is an answer kept.
+      keepalive: true,
     });
     if (res.ok) return null;
     const body = (await res.json().catch(() => null)) as { error?: string } | null;

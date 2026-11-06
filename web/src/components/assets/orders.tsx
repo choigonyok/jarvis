@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { keepValue, keptValue } from "@/lib/keep";
 import { Check, X } from "lucide-react";
 import {
   AlertDialog,
@@ -194,13 +195,20 @@ export function OrderSheet({
   const [result, setResult] = useState<OrderResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // A fresh form for each holding - but one half typed is kept for it while
+  // the app is open, so a tab switch does not lose the amount (lib/keep.ts).
+  const holdingId = holding?.id;
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- a fresh form for each holding
-    setSide("buy");
-    setAmount("");
+    const draft = holdingId ? keptValue<{ side: "buy" | "sell"; amount: string }>(`order:${holdingId}`) : undefined;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the form of this holding
+    setSide(draft?.side ?? "buy");
+    setAmount(draft?.amount ?? "");
     setResult(null);
     setError(null);
-  }, [holding?.id]);
+  }, [holdingId]);
+  useEffect(() => {
+    if (holding) keepValue(`order:${holding.id}`, amount ? { side, amount } : undefined);
+  }, [holding, side, amount]);
 
   if (!holding) return null;
   const coin = holding.kind === "coin";

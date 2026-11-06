@@ -1,5 +1,6 @@
 "use client";
 
+import { useKept } from "@/lib/keep";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { EventRow, GhostRow } from "@/components/calendar/event-row";
@@ -34,7 +35,8 @@ import { cn } from "@/lib/utils";
  */
 export function Calendar() {
   const today = isoDate(new Date());
-  const [selected, setSelected] = useState(today);
+  // The day picked stays picked across a tab switch (lib/keep.ts).
+  const [selected, setSelected] = useKept("calendar:selected", today);
   // A notification about an entry opens its day (?date=, lib/focus.ts); the
   // header then brings the entry itself into view.
   useEffect(() => {
@@ -44,7 +46,7 @@ export function Calendar() {
     };
     open(new URLSearchParams(window.location.search));
     return onOpenParams(open);
-  }, []);
+  }, [setSelected]);
   // The month on screen follows the selected day - there is no second piece
   // of state that could disagree with it.
   const cursor: Cursor = useMemo(() => cursorOf(selected), [selected]);
@@ -173,7 +175,7 @@ export function Calendar() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <Header connection={connection} pending={pendingCount} />
-      <StandingBar pending={waiting} href="/record" />
+      <StandingBar pending={waiting} />
 
       <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
         {/* The month and the day it selects are one view, so on a screen wide
