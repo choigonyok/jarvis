@@ -42,7 +42,7 @@ export function Goals() {
       setEnded(all.filter((g) => g.status === "ended"));
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "목표를 불러오지 못했습니다.");
+      setError(e instanceof Error ? e.message : "목표를 불러오지 못했어요.");
     }
   }, []);
 

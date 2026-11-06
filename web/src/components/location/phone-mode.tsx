@@ -113,7 +113,7 @@ export function ModesSheet({
             <button
               type="button"
               onClick={onRegister}
-              className="mt-3 inline-flex h-11 items-center gap-1.5 rounded-lg bg-glass-raised px-4 text-[13.5px] text-foreground transition-colors outline-none hover:bg-white/12 focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-9"
+              className="mt-3 inline-flex h-11 items-center gap-1.5 rounded-lg bg-glass-raised px-4 text-[13.5px] text-foreground transition-colors outline-none hover:bg-foreground/12 focus-visible:ring-3 focus-visible:ring-ring/50 mouse:h-9"
             >
               <LocateFixed aria-hidden className="size-4 text-mine" strokeWidth={1.8} />
               지금 위치 등록하기

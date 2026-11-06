@@ -21,7 +21,7 @@ const hex = (buf: ArrayBuffer) =>
 
 export async function GET() {
   if (!GATEWAY || !GATEWAY_TOKEN) {
-    return Response.json({ error: "원격 화면이 설정되지 않았습니다." }, { status: 503 });
+    return Response.json({ error: "원격 화면이 설정되지 않았어요." }, { status: 503 });
   }
   const exp = String(Math.floor(Date.now() / 1000) + TTL_SECONDS);
   const key = await crypto.subtle.importKey(

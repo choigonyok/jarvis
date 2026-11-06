@@ -58,7 +58,12 @@ export const viewport: Viewport = {
   // cover lets the background run under the notch and the home indicator;
   // the safe-area insets are what keep controls out from under them.
   viewportFit: "cover",
-  themeColor: "#0b0d12",
+  // The browser's own bars, by the phone's theme (globals.css): the page's
+  // background either way.
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f9fafb" },
+    { media: "(prefers-color-scheme: dark)", color: "#0b0d12" },
+  ],
   // maximum-scale=1 is what stops iOS from zooming in when a text field takes
   // focus. Safari ignores it for a pinch since iOS 10, so the browser can
   // still be pinch-zoomed; the home-screen app locks that too
@@ -72,7 +77,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="ko"
-      className={`dark ${instrument.variable} ${jetbrains.variable} ${scoreboard.variable} antialiased`}
+      className={`${instrument.variable} ${jetbrains.variable} ${scoreboard.variable} antialiased`}
     >
       <body className="overflow-hidden">
         <RoleProvider role={role}>

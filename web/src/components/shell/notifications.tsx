@@ -10,6 +10,7 @@ import { Pager } from "@/components/ui/pager";
 import { Popover, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
 import { usePush } from "@/lib/use-push";
+import { dayOf, monthDay } from "@/lib/when";
 import { cn } from "@/lib/utils";
 
 /**
@@ -45,7 +46,8 @@ const ago = (iso: string) => {
   const h = Math.round(m / 60);
   if (h < 24) return `${h}시간 전`;
   const d = Math.round(h / 24);
-  return d < 7 ? `${d}일 전` : new Date(iso).toLocaleDateString("ko-KR", { month: "numeric", day: "numeric" });
+  // Older than a week, the day itself - as every screen names one (lib/when.ts).
+  return d < 7 ? `${d}일 전` : monthDay(dayOf(new Date(iso)));
 };
 
 /** How many the inbox shows a page: output-svc counts them all and sends one page. */

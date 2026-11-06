@@ -6,7 +6,9 @@ import { UNDO_MS } from "@/components/shell/undo";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { CopyButton } from "@/components/ui/copy-button";
 import { Progress } from "@/components/ui/progress";
+import { Retry } from "@/components/shell/retry";
 import type { Checklist, ChecklistItem } from "@/lib/thread";
+import { refreshAll } from "@/lib/resume";
 import { cn } from "@/lib/utils";
 
 /** Ticks or unticks an item; resolves to what to say when it was not saved. */
@@ -31,10 +33,12 @@ export type Fold = { open: boolean; onToggle: () => void };
  *
  * Every row is the button: 44px tall, the whole width, so a tap anywhere on
  * the words ticks it. Ticked, a row goes quiet in place - nothing moves under
- * the thumb. One that is not needed is pulled right to left: the pull draws a
- * line through it from the right, and let go past the mark it is struck off,
- * with 되돌리기 on its row for five seconds before it leaves the list. A
- * strike-through means only that - taken off - never "done".
+ * the thumb. One that is not needed is pulled left to right: the pull draws a
+ * line through it from the left, and let go past the mark it is struck off,
+ * with 되돌리기 on its row for five seconds before it leaves the list. To the
+ * right, not the left: a pull to the left on this same screen quotes a
+ * message, and one hand's gesture should not mean two things (2026-11-06
+ * review). A strike-through means only that - taken off - never "done".
  *
  * What is ticked and taken off is kept by mind, so the list reads the same
  * the next time it is shown, wherever.
@@ -96,7 +100,11 @@ export function ChecklistBody({
     return (
       <div>
         <h3 className="text-[14.5px] leading-snug font-medium text-foreground">{title || "체크리스트"}</h3>
-        <p className="mt-1 text-[12.5px] text-faint">목록을 불러오지 못했어요. 새로고침하면 다시 읽어 와요.</p>
+        <p className="mt-1 text-[12.5px] text-faint">목록을 불러오지 못했어요.</p>
+        {/* As every screen's failed read: the way back on the spot. The
+            screens read again (a pull to refresh's), and the list missing
+            from the page is asked for with them. */}
+        <Retry onRetry={() => refreshAll()} />
       </div>
     );
   }
@@ -226,10 +234,10 @@ export function ChecklistBody({
 }
 
 /**
- * One item. A tap ticks it; a pull to the left strikes it off. Only a
+ * One item. A tap ticks it; a pull to the right strikes it off. Only a
  * sideways pull on a touch screen is taken (a vertical move scrolls), and the
  * row is marked data-no-swipe so the conversation's own pull - quoting the
- * turn - does not start under it.
+ * turn, to the left - does not start under it.
  */
 function Row({
   item,
@@ -299,7 +307,7 @@ function Row({
             const dy = e.clientY - p.y;
             if (p.sideways === null) {
               if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
-              p.sideways = dx < 0 && Math.abs(dx) > Math.abs(dy) * 1.2;
+              p.sideways = dx > 0 && Math.abs(dx) > Math.abs(dy) * 1.2;
               if (!p.sideways) {
                 pull.current = null;
                 return;
@@ -307,7 +315,7 @@ function Row({
               e.currentTarget.setPointerCapture(e.pointerId);
               if (line.current) line.current.style.transition = "none";
             }
-            const progress = Math.min(1, Math.max(0, -dx) / STRIKE);
+            const progress = Math.min(1, Math.max(0, dx) / STRIKE);
             const past = progress >= 1;
             if (past && !p.past) navigator.vibrate?.(8);
             p.past = past;
@@ -326,11 +334,11 @@ function Row({
               )}
             >
               {item.text}
-              {/* The pull's line: drawn from the right across the words. */}
+              {/* The pull's line: drawn from the left across the words. */}
               <span
                 ref={line}
                 aria-hidden
-                className="pointer-events-none absolute inset-x-0 top-[0.66em] h-[1.5px] origin-right scale-x-0 rounded-full bg-reject transition-transform duration-200 ease-out"
+                className="pointer-events-none absolute inset-x-0 top-[0.66em] h-[1.5px] origin-left scale-x-0 rounded-full bg-reject transition-transform duration-200 ease-out"
               />
             </span>
           </span>

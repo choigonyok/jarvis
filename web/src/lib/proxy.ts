@@ -36,7 +36,7 @@ function gatewayFetch(target: string, init: RequestInit): Promise<Response> {
 }
 
 export type ProxyOptions = {
-  /** Shown when the service cannot be reached: "<label>에 연결하지 못했습니다." */
+  /** Shown when the service cannot be reached: "<label>에 연결하지 못했어요." */
   label: string;
   /** Request headers passed on, besides the bearer token. */
   requestHeaders?: string[];
@@ -60,7 +60,7 @@ export async function forward(
   }
   const guest = request.headers.get(ROLE_HEADER) === "guest";
   if (guest && !GATEWAY_GUEST_TOKEN) {
-    return Response.json({ error: "손님용 연결이 설정되지 않았습니다." }, { status: 503 });
+    return Response.json({ error: "손님용 연결이 설정되지 않았어요." }, { status: 503 });
   }
   const token = guest ? GATEWAY_GUEST_TOKEN : GATEWAY_TOKEN;
   if (token) headers.set("authorization", `Bearer ${token}`);
@@ -83,7 +83,7 @@ export async function forward(
       signal: request.signal,
     });
   } catch {
-    return Response.json({ error: `${opts.label}에 연결하지 못했습니다.` }, { status: 502 });
+    return Response.json({ error: `${opts.label}에 연결하지 못했어요.` }, { status: 502 });
   }
 
   const out = new Headers({ "cache-control": "no-store" });
@@ -119,11 +119,11 @@ export function pathProxy(
   return async (request: Request, context: Ctx): Promise<Response> => {
     const { path } = await context.params;
     if (path.some(unsafeSegment)) {
-      return Response.json({ error: "없는 경로입니다." }, { status: 404 });
+      return Response.json({ error: "없는 경로예요." }, { status: 404 });
     }
     const joined = path.map(encodeURIComponent).join("/");
     if (opts.allow && !opts.allow(path.join("/"))) {
-      return Response.json({ error: "없는 경로입니다." }, { status: 404 });
+      return Response.json({ error: "없는 경로예요." }, { status: 404 });
     }
     const root = typeof base === "string" ? base : base(request);
     if (root instanceof Response) return root;

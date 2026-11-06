@@ -16,7 +16,7 @@ import {
   type Step,
   type Turn,
 } from "@/lib/thread";
-import { decideProposal } from "@/lib/decide";
+import { DECIDE_ECHO_MS, decideProposal } from "@/lib/decide";
 import { diag } from "@/lib/diag";
 import { requestResume } from "@/lib/resume";
 
@@ -197,8 +197,11 @@ export function useThread() {
       setSteps(data.thinking ? (data.steps ?? []) : []);
       setQueue(data.queue ?? []);
       putLists(data.checklists);
+      // Read: a failure said before this (a first load that did not come) is
+      // over - it had stood at the bottom of the thread for good (2026-11-06 review).
+      setError(null);
     } catch {
-      setError("스레드를 불러오지 못했습니다.");
+      setError("대화를 불러오지 못했어요.");
     } finally {
       setHydrated(true);
     }
@@ -344,7 +347,7 @@ export function useThread() {
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { error?: string } | null;
-        setError(body?.error ?? "메시지를 보내지 못했습니다.");
+        setError(body?.error ?? "메시지를 보내지 못했어요.");
         return false;
       }
       // What was sent comes back over the stream within a moment - as a turn,
@@ -360,7 +363,7 @@ export function useThread() {
       }, SEND_ECHO_MS);
       return true;
     } catch {
-      setError("에이전트에 연결하지 못했습니다.");
+      setError("에이전트에 연결하지 못했어요.");
       return false;
     }
   }, [resync]);
@@ -375,11 +378,11 @@ export function useThread() {
       const res = await fetch(`${API}/messages/${encodeURIComponent(id)}/${action}`, { method: "POST" });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { error?: string } | null;
-        setError(body?.error ?? "대기 중인 메시지를 바꾸지 못했습니다.");
+        setError(body?.error ?? "대기 중인 메시지를 바꾸지 못했어요.");
         void hydrate();
       }
     } catch {
-      setError("에이전트에 연결하지 못했습니다.");
+      setError("에이전트에 연결하지 못했어요.");
     }
   }, [hydrate]);
   // Stable, so the composer's queue is not drawn again on every frame.
@@ -396,10 +399,10 @@ export function useThread() {
       const res = await fetch(`${API}/thread/stop`, { method: "POST" });
       if (!res.ok && res.status !== 409) {
         const body = (await res.json().catch(() => null)) as { error?: string } | null;
-        setError(body?.error ?? "답을 멈추지 못했습니다.");
+        setError(body?.error ?? "답을 멈추지 못했어요.");
       }
     } catch {
-      setError("에이전트에 연결하지 못했습니다.");
+      setError("에이전트에 연결하지 못했어요.");
     }
   }, []);
 
@@ -434,16 +437,27 @@ export function useThread() {
     async (proposalId: string, decision: Decision, edits?: Record<string, string>, reason?: string) => {
       setError(null);
       const secret = proposals.find((p) => p.id === proposalId)?.card.fields?.some(isPrivateField);
-      const message = await decideProposal(proposalId, decision, edits, reason, secret);
-      if (message) {
-        setError(message);
+      const posted = await decideProposal(proposalId, decision, edits, reason, secret);
+      if (!posted.ok) {
+        setError(posted.error);
         void hydrate();
-      } else {
-        // The card's notification is marked read behind this (output-svc on
-        // the agent's event); the inbox badge is asked to look again.
-        window.setTimeout(() => window.dispatchEvent(new Event("jarvis:decided")), 1500);
+        return posted.error;
       }
-      return message;
+      if (posted.already) {
+        // Decided before this reached it: the card as it now stands.
+        void hydrate();
+        return null;
+      }
+      // The card's notification is marked read behind this (output-svc on
+      // the agent's event); the inbox badge is asked to look again.
+      window.setTimeout(() => window.dispatchEvent(new Event("jarvis:decided")), 1500);
+      // The card comes back decided over the stream within a moment. Still
+      // waiting by then is a stream gone quiet: the thread is read again, as
+      // a sent message's missing echo is (SEND_ECHO_MS).
+      window.setTimeout(() => {
+        if (cached?.proposals.find((p) => p.id === proposalId)?.state === "pending") void hydrate();
+      }, DECIDE_ECHO_MS);
+      return null;
     },
     [hydrate, proposals],
   );

@@ -4,10 +4,12 @@ import { useKept } from "@/lib/keep";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { EventRow, GhostRow } from "@/components/calendar/event-row";
+import { EventSheet } from "@/components/calendar/event-sheet";
 import { type DayMark } from "@/components/calendar/month-grid";
 import { MonthSwipe, type MonthSwipeHandle } from "@/components/calendar/month-swipe";
 import { OWNER_LABEL, OWNERS, OwnerDot, ownerOf, type Owner } from "@/components/calendar/owner";
 import { Header, TabBar } from "@/components/shell/header";
+import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { useUndo } from "@/components/shell/undo";
 import { Button } from "@/components/ui/button";
@@ -55,8 +57,15 @@ export function Calendar() {
   // narrows the month to one person's days and back.
   const [hidden, setHidden] = useState<ReadonlySet<Owner>>(new Set());
 
-  const { events: fetched, proposed, waiting, pendingCount, connection, error, remove, decide } =
+  const { events: fetched, proposed, waiting, pendingCount, connection, error, loaded, reload, save, remove, decide } =
     useCalendar(cursor);
+
+  // One of your own entries being changed in place (event-sheet.tsx). The
+  // partner's are not: changing someone else's day is a conversation. Nor
+  // one day of a repeating entry: the shared calendar takes that only in its
+  // own app (calendar-svc refuses it).
+  const [editing, setEditing] = useState<CalendarEvent | null>(null);
+  const editable = (e: CalendarEvent) => ownerOf(e) !== "partner" && !e.id.includes("#");
 
   // A removal waits five seconds with 되돌리기 on screen before it is sent:
   // the row is gone at once, and an undo means the shared calendar never
@@ -292,7 +301,7 @@ export function Calendar() {
               <p className="px-2 text-[13.5px] leading-relaxed text-faint">
                 {/* The calendar is written by the assistant now, so an empty
                     day is an instruction rather than a dead end. */}
-                비어 있는 날입니다. 일정은 대화로 Jarvis에게 맡기세요.
+                비어 있는 날이에요. 일정은 대화로 Jarvis에게 맡기세요.
               </p>
             ) : null}
 
@@ -306,12 +315,13 @@ export function Calendar() {
                     <EventRow
                       event={event}
                       pending={ghost}
+                      onEdit={editable(event) && !ghost ? () => setEditing(event) : undefined}
                       onDelete={() => erase(event)}
                     />
                     {ghost ? (
                       <GhostRow
                         ghost={ghost}
-                        onDecide={(d, reason) => void decide(ghost.proposal.id, d, reason)}
+                        onDecide={(d, reason) => decide(ghost.proposal.id, d, reason)}
                       />
                     ) : null}
                   </div>
@@ -321,7 +331,7 @@ export function Calendar() {
                 <GhostRow
                   key={ghost.proposal.id}
                   ghost={ghost}
-                  onDecide={(d, reason) => void decide(ghost.proposal.id, d, reason)}
+                  onDecide={(d, reason) => decide(ghost.proposal.id, d, reason)}
                 />
               ))}
             </div>
@@ -329,16 +339,29 @@ export function Calendar() {
           </section>
 
           {error ? (
-            <p
-              role="status"
-              className="mt-6 border-l-2 border-reject pl-3 text-[13.5px] leading-relaxed text-dim lg:col-span-2"
-            >
-              {error}
-            </p>
+            <div className="mt-6 lg:col-span-2">
+              <p role="status" className="border-l-2 border-reject pl-3 text-[13.5px] leading-relaxed text-dim">
+                {error}
+              </p>
+              {/* The month that could not be read, read again on the spot -
+                  the way back was leaving the tab (2026-11-06 review). */}
+              {loaded ? <Retry onRetry={reload} /> : null}
+            </div>
           ) : null}
         </div>
 
       </main>
+
+      <EventSheet
+        event={editing}
+        onOpenChange={(open) => {
+          if (!open) setEditing(null);
+        }}
+        // The whole entry with what was changed: the calendar takes an edit as
+        // the entry it is to be, and what is left out would be dropped. The
+        // place is in the memo's first line now (the sheet put it there).
+        onSave={(patch) => (editing ? save({ ...editing, ...patch, place: undefined }) : Promise.resolve(false))}
+      />
 
       <TabBar pending={pendingCount} />
     </div>

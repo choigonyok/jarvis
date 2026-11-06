@@ -11,6 +11,7 @@ import { Sheet } from "@/components/ui/sheet";
 import { SwitchRow } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { type Cadence, type Draft, type Goal, changeGoal, makeGoal, WEEK_ROW } from "@/lib/goals";
+import { SAY } from "@/lib/say";
 
 const RULES: { value: Cadence; label: string }[] = [
   { value: "daily", label: "매일" },
@@ -101,7 +102,7 @@ function Form({ goal, onClose, onSaved }: { goal: Goal | null; onClose: () => vo
       onSaved();
       onClose();
     } catch (e) {
-      setFailed(e instanceof Error ? e.message : "저장하지 못했습니다.");
+      setFailed(e instanceof Error ? e.message : SAY.couldNotSave);
       setBusy(false);
     }
   }
@@ -116,7 +117,7 @@ function Form({ goal, onClose, onSaved }: { goal: Goal | null; onClose: () => vo
     >
       <BottomSheetHeader className="pb-0 sm:px-6">
         <BottomSheetTitle className="pr-0 text-[16px]">{goal ? "목표 고치기" : "새 목표"}</BottomSheetTitle>
-        <BottomSheetDescription className="sr-only">이름과 주기를 정합니다.</BottomSheetDescription>
+        <BottomSheetDescription className="sr-only">이름과 주기를 정해요.</BottomSheetDescription>
       </BottomSheetHeader>
 
       <div className="space-y-5 px-4 pt-4 pb-6 sm:px-6">

@@ -1,4 +1,5 @@
 /** The wire shape of the book (mind GET /api/spending/spending), and what the screen derives from it. */
+import { ago as whenAgo, dayLabel as whenDayLabel } from "@/lib/when";
 
 export type TxStatus = "ok" | "cancelled" | "cancel" | "refund" | "excluded";
 
@@ -113,8 +114,6 @@ export type Book = {
   enrichBlocked: { source: string; label: string }[];
 };
 
-const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
-
 /** Seoul's wall clock, whatever timezone the phone is in. */
 const seoul = (iso: string) =>
   new Date(new Date(iso).toLocaleString("en-US", { timeZone: "Asia/Seoul" }));
@@ -129,11 +128,9 @@ export function clock(iso: string): string {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
-/** "10월 6일 (화)" from YYYY-MM-DD. */
+/** "오늘", "어제", "11월 6일 (목)" from YYYY-MM-DD (lib/when.ts). */
 export function dayLabel(date: string): string {
-  const [y, m, d] = date.split("-").map(Number);
-  const wd = new Date(y, m - 1, d).getDay();
-  return `${m}월 ${d}일 (${WEEKDAYS[wd]})`;
+  return whenDayLabel(date);
 }
 
 export function monthLabel(month: string, withYear = false): string {
@@ -147,15 +144,9 @@ export function shiftMonth(month: string, by: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
-/** "3분 전", "2시간 전", "어제 22:51", "10/3". */
+/** "방금", "3분 전", "2시간 전", then "어제 22:51", "11월 3일 14:02" (lib/when.ts). */
 export function ago(iso: string, now = Date.now()): string {
-  const t = new Date(iso).getTime();
-  const min = Math.round((now - t) / 60000);
-  if (min < 1) return "방금";
-  if (min < 60) return `${min}분 전`;
-  if (min < 60 * 12) return `${Math.round(min / 60)}시간 전`;
-  const d = seoul(iso);
-  return `${d.getMonth() + 1}/${d.getDate()} ${clock(iso)}`;
+  return whenAgo(iso, new Date(now));
 }
 
 /** Card and issuer, short: "하나 5*2*". */
@@ -193,5 +184,5 @@ export async function send(
   }).catch(() => null);
   if (res?.ok) return null;
   const err = (await res?.json().catch(() => null)) as { error?: string } | null;
-  return err?.error ?? "저장하지 못했습니다.";
+  return err?.error ?? "저장하지 못했어요.";
 }

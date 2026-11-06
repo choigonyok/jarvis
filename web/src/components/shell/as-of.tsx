@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { SAY } from "@/lib/say";
 import { cn } from "@/lib/utils";
 
 /** "14:05", or "14:05:09" with seconds, in Seoul. */
@@ -57,7 +58,7 @@ export function AsOf({
               disabled={busy}
               className="tap-y underline decoration-reject/40 underline-offset-[3px] outline-none hover:text-reject focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-60"
             >
-              {busy ? "불러오는 중…" : "다시 시도"}
+              {busy ? SAY.loading : SAY.retry}
             </button>
           </>
         ) : null}

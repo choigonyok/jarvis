@@ -1,36 +1,26 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# web - Jarvis 콘솔
 
-## Getting Started
+대화, 결재, 그리고 오늘·돈·생활 화면을 띄우는 Next.js 앱이다. Cloudflare Workers(OpenNext)에 올라간다.
 
-First, run the development server:
+- 무엇을 왜 이렇게 그리는지: [DESIGN.md](DESIGN.md)
+- 전체 구조와 서비스: [../README.md](../README.md)
+- 배포와 비밀 값: [../DEPLOY.md](../DEPLOY.md)
 
-```bash
+## 로컬에서 띄우기
+
+```sh
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+`next dev` 는 백엔드를 부를 서비스 바인딩이 없다. 맥북에서는 로컬 compose 를 띄우고
+`AGENT_URL=http://localhost:8080` 처럼 `.env.local` 로 가리킨다(자세한 것은 DEPLOY.md).
+화면만 볼 때는 `npm run build && npm run start` 가 `next dev` 보다 운영과 가깝다.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 올리기
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```sh
+npm run cf:build && npm run cf:deploy
+```
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+`cf:deploy` 는 빌드하지 않고 있는 `.open-next` 를 올린다. 늘 `cf:build` 가 먼저다.

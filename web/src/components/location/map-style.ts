@@ -2,15 +2,22 @@ import type { ExpressionSpecification, LayerSpecification, StyleSpecification } 
 
 /**
  * The 위치 screen's base map: the console's one grey ramp laid over
- * OpenMapTiles (OpenFreeMap's vector tiles). The map is the dark under the
- * day's light - land is the page's own background, water is a step darker,
- * roads a few steps lighter by how big they are, the names a quiet grey. No
- * hue, no icons: the only bright thing on it is where the operator went.
+ * OpenMapTiles (OpenFreeMap's vector tiles). By night the map is the dark
+ * under the day's light - land is the page's own background, water is a step
+ * darker, roads a few steps lighter by how big they are, the names a quiet
+ * grey. By day it is paper under ink - the same land, water a step darker
+ * still, roads a few steps darker by size, the names a darker grey. No hue,
+ * no icons either way: the only coloured thing on it is where they went.
  *
  * The colors are the tokens in globals.css (oklch, hue 265) worked out to hex:
- * the tile renderer does not read oklch.
+ * the tile renderer does not read oklch, nor the page's CSS.
  */
-const C = {
+type Palette = Record<
+  "land" | "water" | "park" | "building" | "minor" | "mid" | "major" | "motorway" | "rail" | "labelBig" | "label" | "labelSmall" | "waterLabel",
+  string
+>;
+
+const NIGHT: Palette = {
   land: "#0c0d0f", // --background
   water: "#040508", // l 0.118
   park: "#0f1011", // l 0.171
@@ -24,6 +31,22 @@ const C = {
   label: "#67696c", // l 0.52
   labelSmall: "#545558", // l 0.45
   waterLabel: "#45484d", // l 0.4
+};
+
+const DAY: Palette = {
+  land: "#f9fafb", // --background, l 0.985
+  water: "#e4e6ea", // l 0.925
+  park: "#f1f2f5", // l 0.962
+  building: "#eaebee", // l 0.94
+  minor: "#dee0e2", // l 0.905
+  mid: "#d1d2d5", // l 0.865
+  major: "#c3c4c7", // l 0.82
+  motorway: "#b3b4b7", // l 0.77
+  rail: "#d0d1d4", // l 0.86
+  labelBig: "#545559", // l 0.45, 7.1:1
+  label: "#67696c", // l 0.52, 5.3:1
+  labelSmall: "#787a7e", // l 0.58
+  waterLabel: "#7e8084", // l 0.6
 };
 
 /** Korean first: a name in Korean where the map has one, the local name elsewhere. */
@@ -51,9 +74,14 @@ const roads = (id: string, classes: string[], color: string, stops: [number, num
  * tileset: the TileJSON URL (/api/map/planet). font: the CSS families to set
  * the names in, regular and medium - the console's own face, so the map's
  * words read like the rest of the page (the glyphs are drawn here in the
- * browser, not fetched).
+ * browser, not fetched). theme: the phone's (lib/theme.ts).
  */
-export function baseStyle(tileset: string, font: { regular: string[]; medium: string[] }): StyleSpecification {
+export function baseStyle(
+  tileset: string,
+  font: { regular: string[]; medium: string[] },
+  theme: "light" | "dark" = "dark",
+): StyleSpecification {
+  const C = theme === "light" ? DAY : NIGHT;
   const halo = { "text-halo-color": C.land, "text-halo-width": 1.4, "text-halo-blur": 0.4 };
   return {
     version: 8,

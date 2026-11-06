@@ -716,6 +716,8 @@ export function useVoiceStatus(): VoiceInfo & { refresh: () => Promise<void> } {
       const res = await fetch("/api/tts/voice", { cache: "no-store" });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
+        // What went wrong is for the diagnostics; the screen says what to do.
+        diag("voice", { ev: "tts.voice-unavailable", status: res.status });
         setInfo({ state: "unavailable", error: body.error });
         return;
       }

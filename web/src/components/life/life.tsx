@@ -27,6 +27,7 @@ import { krw } from "@/lib/portfolio";
 import { onResume } from "@/lib/resume";
 import { isPending } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
+import { SAY } from "@/lib/say";
 import { cn } from "@/lib/utils";
 
 type Shelf = "notes" | "places" | "things" | "meals";
@@ -106,7 +107,7 @@ export function Life() {
       <main className="scrollbar-hairline inset-x-safe min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
         <div className="mx-auto w-full max-w-[42rem] px-4 pt-6 pb-12 sm:px-8 sm:pt-10">
           {!book ? (
-            <p className="pt-10 text-center text-[13px] text-faint">불러오는 중이에요.</p>
+            <p className="pt-10 text-center text-[13px] text-faint">{SAY.loading}</p>
           ) : [book.notes, book.places, book.things, book.meals].every((x) => x.error) ? (
             // Nothing came back: one sentence for it, not four of the same.
             <div>

@@ -1,31 +1,36 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Trash2 } from "lucide-react";
+import { Sending, Sent } from "@/components/chat/hold";
 import { RejectForm } from "@/components/chat/reject-form";
 import { Button } from "@/components/ui/button";
+import { sentOn } from "@/lib/decide";
 import { timeLabel, type Ghost } from "@/lib/proposed";
 import type { CalendarEvent, Decision } from "@/lib/thread";
+import { dayRange } from "@/lib/when";
 import { cn } from "@/lib/utils";
 
 import { OWNER_LABEL, OwnerBar, ownerOf, ownerText } from "@/components/calendar/owner";
-
-const md = (date: string) => `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}`;
 
 /** A settled entry. The calendar is shared with a partner, so every row says
  *  whose it is twice over: the colored edge to scan by, and the word to be
  *  sure. Who *wrote* it is said only when it is not who you would guess - a
  *  shared plan the partner put in.
  *
- *  A partner's entry has no delete button. Removing something from someone
- *  else's day is a conversation, not a tap. */
+ *  A partner's entry has no delete button, and does not open to be changed.
+ *  Removing or changing something in someone else's day is a conversation,
+ *  not a tap. One of your own opens, on a tap, to be changed in place. */
 export function EventRow({
   event,
   pending,
+  onEdit,
   onDelete,
 }: {
   event: CalendarEvent;
   pending?: Ghost;
+  /** Set where the entry may be changed here (calendar/event-sheet.tsx). */
+  onEdit?: () => void;
   onDelete: () => void;
 }) {
   const leaving = pending?.op === "delete";
@@ -41,6 +46,7 @@ export function EventRow({
       )}
     >
       <OwnerBar owner={owner} className="my-0.5" />
+      <Body onEdit={onEdit}>
       <span className="tnum w-[3.6rem] shrink-0 pt-px text-[12px] leading-snug text-dim sm:w-[4.25rem]">
         {timeLabel(event)}
       </span>
@@ -61,6 +67,7 @@ export function EventRow({
           </span>
         ) : null}
       </span>
+      </Body>
       {/* Hidden until pointed at is hidden forever on a touch screen, so
           `touch-visible` brings it back wherever hover does not exist. */}
       {owner === "partner" ? null : (
@@ -78,18 +85,36 @@ export function EventRow({
   );
 }
 
+/**
+ * The time and the words: a button that opens the entry where it may be
+ * changed, else just themselves. Read out as the entry it is, then 고치기.
+ */
+function Body({ onEdit, children }: { onEdit?: () => void; children: ReactNode }) {
+  if (!onEdit) return <>{children}</>;
+  return (
+    <button
+      type="button"
+      onClick={onEdit}
+      className="-my-1 flex min-w-0 flex-1 items-start gap-3 rounded-md py-1 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+    >
+      {children}
+      <span className="sr-only">고치기</span>
+    </button>
+  );
+}
+
 function meta(e: CalendarEvent): string {
   const parts: string[] = [];
   if (e.source === "partner" && ownerOf(e) !== "partner") parts.push("상대가 등록");
-  if (e.endDate) parts.push(`${md(e.date)}–${md(e.endDate)}`);
+  if (e.endDate) parts.push(dayRange(e.date, e.endDate));
   if (e.recurrence) parts.push("반복");
   return parts.join(" · ");
 }
 
 const ghostCopy: Record<Ghost["op"], { label: string; consequence: string }> = {
-  create: { label: "추가 제안", consequence: "승인하면 캘린더에 들어옵니다." },
-  update: { label: "수정 제안", consequence: "승인하면 이 내용으로 바뀝니다." },
-  delete: { label: "삭제 제안", consequence: "승인하면 지워집니다. 되돌릴 수 없습니다." },
+  create: { label: "추가 제안", consequence: "승인하면 캘린더에 들어와요." },
+  update: { label: "수정 제안", consequence: "승인하면 이 내용으로 바뀌어요." },
+  delete: { label: "삭제 제안", consequence: "승인하면 지워져요. 되돌릴 수 없어요." },
 };
 
 /**
@@ -101,17 +126,28 @@ export function GhostRow({
   onDecide,
 }: {
   ghost: Ghost;
-  onDecide: (decision: Decision, reason?: string) => void;
+  /** Resolves to what to say when it did not go. */
+  onDecide: (decision: Decision, reason?: string) => Promise<string | null>;
 }) {
   const copy = ghostCopy[ghost.op];
   const preview = ghost.op === "delete" ? null : ghost.preview;
   const [asking, setAsking] = useState(false);
+  // As on the conversation's card: on its way, then taken and not back yet
+  // (lib/decide.ts) - never the pair again while it is.
+  const [busy, setBusy] = useState(false);
+  const [sentAs, setSentAs] = useState(() => sentOn(ghost.proposal.id));
+  async function decide(d: Decision, why?: string) {
+    setBusy(true);
+    const failed = await onDecide(d, why);
+    setBusy(false);
+    if (!failed) setSentAs(sentOn(ghost.proposal.id));
+  }
 
   return (
     <div className="ml-2 rounded-lg border border-dashed border-edge bg-glass/60 px-3 py-2.5">
       <div className="flex items-center gap-2 text-[11px] text-faint">
         <span aria-hidden className="anim-breathe size-[5px] rounded-full bg-dim" />
-        <span>{copy.label}</span>
+        <span>{busy ? "보내는 중" : sentAs ? "반영 중" : copy.label}</span>
       </div>
 
       {preview ? (
@@ -131,9 +167,13 @@ export function GhostRow({
       {/* The same decision as the chat's card, so it gets the same treatment
           on a phone: full width, real height, a gap you cannot thumb across -
           and turned down, the same question why. */}
-      {asking ? (
+      {busy ? (
+        <Sending className="mt-1" />
+      ) : sentAs ? (
+        <Sent decision={sentAs} className="mt-1" />
+      ) : asking ? (
         <div className="mt-2.5">
-          <RejectForm onCancel={() => setAsking(false)} onReject={(why) => onDecide("rejected", why)} />
+          <RejectForm onCancel={() => setAsking(false)} onReject={(why) => void decide("rejected", why)} />
         </div>
       ) : (
         <div className="mt-2.5 grid grid-cols-2 gap-2 sm:mt-2 sm:flex sm:items-center sm:justify-end sm:gap-1.5">
@@ -147,7 +187,7 @@ export function GhostRow({
           <Button
             variant="approve"
             size="pair-sm"
-            onClick={() => onDecide("approved")}
+            onClick={() => void decide("approved")}
           >
             승인
           </Button>

@@ -10,14 +10,15 @@ import type { Order, Plan } from "@/lib/trade-plan";
 /**
  * Each bucket keeps one hue everywhere it appears. None of them is green or
  * red - those mean profit and loss on this surface - and gold is the one
- * colour allowed to be literal.
+ * colour allowed to be literal. The values are the theme's (globals.css
+ * --class-*): lighter by night, deeper by day.
  */
 const HUE: Record<Bucket, string> = {
-  growth: "oklch(0.7 0.085 252)",
-  coin: "oklch(0.7 0.1 298)",
-  cash: "oklch(0.82 0.008 265)",
-  dividend: "oklch(0.6 0.045 225)",
-  gold: "oklch(0.8 0.105 82)",
+  growth: "var(--class-growth)",
+  coin: "var(--class-coin)",
+  cash: "var(--class-cash)",
+  dividend: "var(--class-dividend)",
+  gold: "var(--class-gold)",
 };
 
 const pct = (rate: number) => {
@@ -68,8 +69,8 @@ export function DriftColumns({ allocation }: { allocation: Allocation }) {
               role="img"
               aria-label={`${r.label} 지금 ${pct(r.current)}, 목표 ${pct(r.target)}${r.spent ? ", 계산에서 제외" : r.inBand ? "" : ", 허용 범위 밖"}`}
             >
-              <rect x="0" y={y(band)} width="20" height={y(-band) - y(band)} rx="1.5" fill="oklch(1 0 0 / 6%)" />
-              <line x1="0" x2="20" y1={H / 2} y2={H / 2} stroke="oklch(1 0 0 / 30%)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+              <rect x="0" y={y(band)} width="20" height={y(-band) - y(band)} rx="1.5" className="fill-foreground/6" />
+              <line x1="0" x2="20" y1={H / 2} y2={H / 2} className="stroke-foreground/30" strokeWidth="1" vectorEffect="non-scaling-stroke" />
               {!r.spent ? (
                 <rect
                   x="7"
@@ -77,7 +78,7 @@ export function DriftColumns({ allocation }: { allocation: Allocation }) {
                   width="6"
                   height={Math.max(0.6, Math.abs(y(d) - H / 2))}
                   rx="1"
-                  fill={HUE[r.id]}
+                  style={{ fill: HUE[r.id] }}
                   opacity={r.inBand ? 0.75 : 1}
                 />
               ) : null}

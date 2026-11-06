@@ -25,8 +25,8 @@ export async function middleware(request: NextRequest) {
     if (!role) {
       // Through Access, but on neither list: the lists are the narrower answer.
       return isApi
-        ? NextResponse.json({ error: "이 계정에는 권한이 없습니다." }, { status: 403 })
-        : new NextResponse("이 계정에는 권한이 없습니다.", { status: 403 });
+        ? NextResponse.json({ error: "이 계정에는 권한이 없어요." }, { status: 403 })
+        : new NextResponse("이 계정에는 권한이 없어요.", { status: 403 });
     }
   } else if (await valid(token)) {
     role = "owner";
@@ -35,7 +35,7 @@ export async function middleware(request: NextRequest) {
   if (role) {
     if (role === "guest" && !guestMay(request.nextUrl.pathname)) {
       return isApi
-        ? NextResponse.json({ error: "이 계정에서는 열 수 없습니다." }, { status: 403 })
+        ? NextResponse.json({ error: "이 계정에서는 열 수 없어요." }, { status: 403 })
         : NextResponse.redirect(new URL("/", request.url));
     }
     // Overwritten on every request, so a client cannot send its own.
@@ -47,7 +47,7 @@ export async function middleware(request: NextRequest) {
   // An expired session inside a fetch should read as 401, not as a login page
   // arriving where JSON was expected.
   if (isApi) {
-    return NextResponse.json({ error: "인증이 필요합니다." }, { status: 401 });
+    return NextResponse.json({ error: "로그인이 필요해요." }, { status: 401 });
   }
 
   const login = new URL("/login", request.url);

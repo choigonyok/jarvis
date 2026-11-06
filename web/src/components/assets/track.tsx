@@ -114,7 +114,7 @@ export function Track({ points }: { points: TrackPoint[] }) {
               x2={W}
               y1={zero}
               y2={zero}
-              stroke="oklch(1 0 0 / 14%)"
+              className="stroke-foreground/14"
               strokeWidth="1"
               vectorEffect="non-scaling-stroke"
             />
@@ -136,7 +136,7 @@ export function Track({ points }: { points: TrackPoint[] }) {
                 x2={x(at)}
                 y1="0"
                 y2={H}
-                stroke="oklch(1 0 0 / 22%)"
+                className="stroke-foreground/22"
                 strokeWidth="1"
                 vectorEffect="non-scaling-stroke"
               />
@@ -144,7 +144,7 @@ export function Track({ points }: { points: TrackPoint[] }) {
             <path
               d={line(points.map((p) => p.principalKrw), true)}
               fill="none"
-              stroke="oklch(1 0 0 / 38%)"
+              className="stroke-foreground/38"
               strokeWidth="2"
               strokeDasharray="4 3"
               vectorEffect="non-scaling-stroke"
@@ -152,7 +152,7 @@ export function Track({ points }: { points: TrackPoint[] }) {
             <path
               d={line(points.map((p) => p.totalKrw))}
               fill="none"
-              stroke="oklch(1 0 0 / 85%)"
+              className="stroke-foreground/85"
               strokeWidth="2"
               strokeLinejoin="round"
               strokeLinecap="round"

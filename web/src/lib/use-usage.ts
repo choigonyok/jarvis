@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { API } from "@/lib/thread";
+import { dateTime } from "@/lib/when";
 
 /** The Claude subscription's use, as the agent last read it (agent/internal/usage).
  *  `reset`: the window started over after that reading, so what it holds now is
@@ -123,7 +124,7 @@ export function useUsage(enabled = true): Usage | null {
   return enabled ? usage : null;
 }
 
-/** "2시간 10분 뒤", "10/14 (화) 09:00". */
+/** "2시간 10분 뒤", "내일 09:00", "10월 14일 09:00". */
 export function resetLabel(iso: string, now = Date.now()): string {
   const t = new Date(iso).getTime();
   const min = Math.max(0, Math.round((t - now) / 60000));
@@ -133,10 +134,8 @@ export function resetLabel(iso: string, now = Date.now()): string {
     const m = min % 60;
     return m ? `${h}시간 ${m}분 뒤` : `${h}시간 뒤`;
   }
-  const d = new Date(iso);
-  const day = d.toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", weekday: "short" });
-  const time = d.toLocaleTimeString("ko-KR", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", hour12: false });
-  return `${day} ${time}`;
+  // A day or more away: the moment, as every screen says one (lib/when.ts).
+  return dateTime(iso, new Date(now));
 }
 
 /** The window's use as a percent; null when unread or reset since it was read. */
@@ -162,6 +161,6 @@ export function agoLabel(min: number): string {
 export function tone(p: number | null): string {
   if (p == null) return "bg-faint/40";
   if (p >= 90) return "bg-reject";
-  if (p >= 70) return "bg-[oklch(0.8_0.14_75)]";
+  if (p >= 70) return "bg-caution";
   return "bg-foreground/60";
 }

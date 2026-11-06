@@ -39,6 +39,7 @@ import {
   type Session,
 } from "@/lib/workout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { dayOf, monthDay } from "@/lib/when";
 import { cn } from "@/lib/utils";
 
 /** The three things the tab is opened for when nothing is running. */
@@ -602,7 +603,7 @@ function Consistency({ past, now }: { past: Session[]; now: number }) {
           ))}
         </div>
         <div className="tnum mt-1 flex justify-between text-[11px] text-faint">
-          <span>{`${weeks[0].start.getMonth() + 1}/${weeks[0].start.getDate()}`}</span>
+          <span>{monthDay(dayOf(weeks[0].start))}</span>
           <span>8주 중 {hit}주 목표 달성</span>
           <span>이번 주</span>
         </div>

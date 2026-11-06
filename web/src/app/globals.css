@@ -2,7 +2,9 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
-@custom-variant dark (&:is(.dark *));
+/* The phone's own setting picks the theme (below): dark is how the console
+   was made, light is the same page for daylight (2026-11-07). */
+@custom-variant dark (@media (prefers-color-scheme: dark));
 
 /* A wide screen worked with a mouse or a trackpad: the one place a control may
    shrink to a pointer's size. Width alone (sm) used to decide it, and gave an
@@ -47,6 +49,8 @@
   --color-online: var(--online);
   --color-mine: var(--mine);
   --color-partner: var(--partner);
+  --color-caution: var(--caution);
+  --color-shade: var(--shade);
 
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
@@ -55,9 +59,9 @@
   --radius-2xl: calc(var(--radius) * 1.8);
 }
 
-/* Dark is the only mode this console ships. */
-:root,
-.dark {
+/* Dark: the console as it was made, for reading at night. */
+:root {
+  color-scheme: dark;
   --background: oklch(0.158 0.004 265);
   --foreground: oklch(0.945 0.002 265);
 
@@ -79,6 +83,23 @@
   --mine: oklch(0.78 0.11 300);
   --partner: oklch(0.83 0.115 72);
 
+  /* A meter nearing its limit (the usage bars at 70%). Not a signal: it
+     says "soon", and red keeps meaning 반려 and 실패. */
+  --caution: oklch(0.8 0.14 75);
+  /* What a control floating over the map casts. */
+  --shade: oklch(0 0 0 / 70%);
+  /* Faint marks laid on the page itself: a scrollbar, a quoted message
+     brought into view, a search match. */
+  --hairline: oklch(1 0 0 / 9%);
+  --flash: oklch(1 0 0 / 8%);
+  --found: oklch(1 0 0 / 20%);
+  /* The asset classes on the 자산 target chart: quiet hues, set apart. */
+  --class-growth: oklch(0.7 0.085 252);
+  --class-coin: oklch(0.7 0.1 298);
+  --class-cash: oklch(0.82 0.008 265);
+  --class-dividend: oklch(0.6 0.045 225);
+  --class-gold: oklch(0.8 0.105 82);
+
   --card: oklch(1 0 0 / 3.5%);
   --card-foreground: var(--foreground);
   --popover: oklch(0.205 0.004 265);
@@ -96,6 +117,56 @@
   --input: var(--edge);
   --ring: oklch(0.62 0.004 265);
   --radius: 0.75rem;
+}
+
+/* Light: the same page for daylight - the transit board on a street, the
+   map on a walk, a set between lifts by a window. One grey ramp still, the
+   same hue (265) gone the other way: a cool white, never cream, and ink. The
+   veils that were white over the night are ink over the day, at the same
+   strengths. The two faint greys are set higher than the 4.5:1 floor the
+   dark ones keep (7.1 and 5.3:1), because sun on glass takes contrast away.
+   The hues keep their angles and drop in lightness until they read as words
+   (4.8-5.6:1). */
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --background: oklch(0.985 0.002 265);
+    --foreground: oklch(0.2 0.006 265);
+
+    --dim: oklch(0.45 0.006 265);
+    --faint: oklch(0.52 0.006 265);
+    --edge: oklch(0 0 0 / 10%);
+    --edge-soft: oklch(0 0 0 / 6%);
+    --glass: oklch(0 0 0 / 3.5%);
+    --glass-raised: oklch(0 0 0 / 6%);
+    --well: oklch(0 0 0 / 4.5%);
+
+    --approve: oklch(0.52 0.13 150);
+    --reject: oklch(0.55 0.19 25);
+    --online: oklch(0.6 0.15 152);
+    --mine: oklch(0.52 0.15 300);
+    --partner: oklch(0.55 0.115 72);
+
+    --caution: oklch(0.63 0.135 75);
+    --shade: oklch(0.2 0.006 265 / 22%);
+    --hairline: oklch(0 0 0 / 14%);
+    --flash: oklch(0 0 0 / 6%);
+    --found: oklch(0 0 0 / 13%);
+    --class-growth: oklch(0.55 0.1 252);
+    --class-coin: oklch(0.55 0.12 298);
+    --class-cash: oklch(0.62 0.008 265);
+    --class-dividend: oklch(0.5 0.05 225);
+    --class-gold: oklch(0.64 0.115 82);
+
+    --card: oklch(0 0 0 / 3.5%);
+    --popover: oklch(1 0 0);
+    --primary: oklch(0.2 0.006 265);
+    --primary-foreground: oklch(0.985 0.002 265);
+    --secondary: oklch(0 0 0 / 5%);
+    --muted: oklch(0 0 0 / 4.5%);
+    --accent: oklch(0 0 0 / 5%);
+    --ring: oklch(0.45 0.006 265);
+  }
 }
 
 @layer base {
@@ -117,7 +188,6 @@
   }
   html {
     @apply font-sans;
-    color-scheme: dark;
     /* A phone's viewport is not a fixed thing: the URL bar retracts as you
        scroll and 100vh keeps measuring the taller state, so a composer pinned
        to the bottom sits below the fold. dvh follows what is actually
@@ -221,13 +291,13 @@
   }
   .scrollbar-hairline {
     scrollbar-width: thin;
-    scrollbar-color: oklch(1 0 0 / 10%) transparent;
+    scrollbar-color: var(--hairline) transparent;
   }
   .scrollbar-hairline::-webkit-scrollbar {
     width: 6px;
   }
   .scrollbar-hairline::-webkit-scrollbar-thumb {
-    background: oklch(1 0 0 / 9%);
+    background: var(--hairline);
     border-radius: 999px;
   }
 }
@@ -316,8 +386,8 @@
 @keyframes turn-flash {
   0%,
   35% {
-    background: oklch(1 0 0 / 8%);
-    box-shadow: 0 0 0 10px oklch(1 0 0 / 8%);
+    background: var(--flash);
+    box-shadow: 0 0 0 10px var(--flash);
   }
   100% {
     background: transparent;
@@ -338,7 +408,7 @@
    appear, and the one in view, inverted - no hue, the signal colours keep
    their meanings. */
 ::highlight(chat-search) {
-  background-color: oklch(1 0 0 / 20%);
+  background-color: var(--found);
   color: inherit;
 }
 ::highlight(chat-search-current) {
@@ -556,6 +626,72 @@
   }
   .liquid-lens-waiting {
     animation: none;
+  }
+}
+
+/* The same glass by day: frosted white over the page, a rim lit white, a
+   shadow that is a shadow and not a hole. The lens under the current tab is
+   a little ink pressed into it - white on white would not show. */
+@media (prefers-color-scheme: light) {
+  .liquid-glass {
+    background: linear-gradient(180deg, oklch(1 0 0 / 66%), oklch(1 0 0 / 52%) 55%, oklch(1 0 0 / 60%));
+    -webkit-backdrop-filter: blur(20px) saturate(180%) brightness(1.04);
+    backdrop-filter: blur(20px) saturate(180%) brightness(1.04);
+    box-shadow:
+      inset 0 0 0 1px oklch(0 0 0 / 5%),
+      inset 0 -10px 18px -12px oklch(1 0 0 / 70%),
+      0 18px 40px -16px oklch(0.2 0.006 265 / 30%),
+      0 4px 12px -4px oklch(0.2 0.006 265 / 12%);
+  }
+  .liquid-glass::before {
+    background: linear-gradient(
+      135deg,
+      oklch(1 0 0 / 100%) 0%,
+      oklch(1 0 0 / 60%) 22%,
+      oklch(0 0 0 / 4%) 48%,
+      oklch(0 0 0 / 6%) 74%,
+      oklch(1 0 0 / 80%) 100%
+    );
+  }
+  .liquid-glass::after {
+    background:
+      radial-gradient(90% 70% at 30% -25%, oklch(1 0 0 / 55%), transparent 60%),
+      radial-gradient(60% 55% at 85% 130%, oklch(1 0 0 / 30%), transparent 70%);
+  }
+  .liquid-lens {
+    background: radial-gradient(130% 90% at 50% -10%, oklch(0 0 0 / 4%), oklch(0 0 0 / 7.5%) 55%, oklch(0 0 0 / 9%) 100%);
+    box-shadow:
+      inset 0 -6px 10px -6px oklch(0 0 0 / 10%),
+      inset 0 4px 8px -6px oklch(1 0 0 / 90%),
+      0 2px 8px -4px oklch(0.2 0.006 265 / 18%);
+  }
+  .liquid-lens::before {
+    background: linear-gradient(160deg, oklch(1 0 0 / 95%) 0%, oklch(1 0 0 / 35%) 35%, oklch(0 0 0 / 4%) 60%, oklch(1 0 0 / 55%) 100%);
+  }
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .liquid-glass {
+      background: oklch(0.97 0.002 265 / 97%);
+    }
+  }
+}
+
+/* A home-screen app draws the clock and the battery in white over the top of
+   the page, whatever the page is (apple-mobile-web-app-status-bar-style
+   black-translucent; no setting gives dark ones over the page). By day the
+   page is white, so the strip under them is kept at night's colour - the
+   phone's own edge, the island in it - and they stay readable. Its height is
+   the status bar's: in the browser, or wherever the page starts below the
+   bar, it is nothing. */
+@media (display-mode: standalone) and (prefers-color-scheme: light) {
+  body::before {
+    content: "";
+    position: fixed;
+    inset-inline: 0;
+    top: 0;
+    z-index: 2147483647;
+    height: env(safe-area-inset-top);
+    background: oklch(0.158 0.004 265);
+    pointer-events: none;
   }
 }
 

@@ -16,6 +16,7 @@ import { isPending } from "@/lib/thread";
 import type { Who } from "@/lib/track";
 import { type Departures as Read, type Plan, type Route, clockOf, readDepartures, saveRoutes, stageOf } from "@/lib/transit";
 import { useThread } from "@/lib/use-thread";
+import { SAY } from "@/lib/say";
 import { cn } from "@/lib/utils";
 
 /** The route a person last looked at, in their own browser. */
@@ -116,7 +117,7 @@ export function Departures() {
                 <Retry onRetry={load} />
               </div>
             ) : (
-              <p className="pt-10 text-center text-[13px] text-faint">불러오는 중…</p>
+              <p className="pt-10 text-center text-[13px] text-faint">{SAY.loading}</p>
             )
           ) : routes.length === 0 ? (
             <NoRoutes onAdd={() => setEditing(null)} />

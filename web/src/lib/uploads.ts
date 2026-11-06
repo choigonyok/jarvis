@@ -23,11 +23,11 @@ export async function shrink(file: File): Promise<Blob> {
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("사진을 줄이지 못했습니다.");
+  if (!ctx) throw new Error("사진을 줄이지 못했어요.");
   ctx.drawImage(source.image, 0, 0, w, h);
   source.close();
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.86));
-  if (!blob) throw new Error("사진을 줄이지 못했습니다.");
+  if (!blob) throw new Error("사진을 줄이지 못했어요.");
   return blob;
 }
 
@@ -50,7 +50,7 @@ async function decode(file: File): Promise<Decoded> {
       await img.decode();
     } catch {
       URL.revokeObjectURL(url);
-      throw new Error("이 사진 형식은 읽을 수 없습니다.");
+      throw new Error("이 사진 형식은 읽을 수 없어요.");
     }
     return { image: img, width: img.naturalWidth, height: img.naturalHeight, close: () => URL.revokeObjectURL(url) };
   }
@@ -65,6 +65,6 @@ export async function uploadPhoto(file: File): Promise<string> {
     body,
   });
   const json = (await res.json().catch(() => null)) as { name?: string; error?: string } | null;
-  if (!res.ok || !json?.name) throw new Error(json?.error ?? "사진을 올리지 못했습니다.");
+  if (!res.ok || !json?.name) throw new Error(json?.error ?? "사진을 올리지 못했어요.");
   return json.name;
 }

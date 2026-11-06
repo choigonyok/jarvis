@@ -180,7 +180,7 @@ function DayStrip({
         <div
           ref={strip}
           role="group"
-          aria-label="날짜별 지출. 누르거나, 누른 채 옆으로 밀어 고른 날의 내역만 봅니다"
+          aria-label="날짜별 지출. 누르거나, 누른 채 옆으로 밀어 고른 날의 내역만 봐요"
           className="relative flex h-16 touch-pan-y items-end gap-[2px] select-none [-webkit-touch-callout:none] sm:h-20 sm:gap-[3px]"
           onContextMenu={(e) => e.preventDefault()}
           onPointerDown={(e) => {

@@ -1,5 +1,6 @@
 // A goal, and how it stands, as mind worked it out from its marks. Nothing here
 // adds up: the screen shows what mind says, so a phone and a laptop never differ.
+import { dateLabel } from "@/lib/when";
 
 export type Mark = "done" | "missed";
 export type Cadence = "daily" | "days" | "weekly" | "monthly";
@@ -92,7 +93,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const body = (await res.json().catch(() => null)) as (T & { error?: string }) | null;
   // 202: mind is away. The record is in and will be done; there is nothing to
   // draw yet, and the next read has it.
-  if (!res.ok || res.status === 202 || !body) throw new Error(body?.error ?? "목표를 불러오지 못했습니다.");
+  if (!res.ok || res.status === 202 || !body) throw new Error(body?.error ?? "목표를 불러오지 못했어요.");
   return body;
 }
 
@@ -141,8 +142,6 @@ export function tally(count: number, perDay: number): string {
   return `${count}/${perDay}번`;
 }
 
-const WEEK = ["일", "월", "화", "수", "목", "금", "토"];
-
 /** The week as a row reads it, Monday first. */
 export const WEEK_ROW = ["월", "화", "수", "목", "금", "토", "일"];
 
@@ -152,15 +151,15 @@ export function weekdayOf(day: string): number {
   return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
 }
 
-/** "11/2(월)". */
+/** "11월 2일 (월)" (lib/when.ts). */
 export function dayLabel(day: string): string {
-  return `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}(${WEEK[weekdayOf(day)]})`;
+  return dateLabel(day);
 }
 
 /** "오늘", "어제", or the date. */
 export function whenLabel(day: string, today: string): string {
   if (day === today) return "오늘";
-  return day === shift(today, -1) ? "어제" : dayLabel(day);
+  return day === shift(today, -1) ? "어제" : dateLabel(day);
 }
 
 /** day moved by n days. */

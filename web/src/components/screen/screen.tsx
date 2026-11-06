@@ -143,7 +143,7 @@ export function Screen({ vncUrl, ticketed = false }: { vncUrl: string; ticketed?
           <p className="min-w-0 truncate text-[11.5px] text-faint" aria-live="polite">
             {controlling ? (
               <>
-                조작 중<span className="hidden sm:inline"> · Esc로 돌아갑니다</span>
+                조작 중<span className="hidden sm:inline"> · Esc로 돌아가요</span>
               </>
             ) : (
               ""
@@ -196,10 +196,10 @@ export function Screen({ vncUrl, ticketed = false }: { vncUrl: string; ticketed?
             <div className="absolute inset-0 grid place-items-center px-8">
               <p className="max-w-[24rem] text-center text-[12.5px] leading-relaxed text-balance text-faint sm:text-[13px]">
                 {state === "connecting" ? (
-                  "에이전트가 브라우저를 쓰기 시작하면 여기에 나타납니다."
+                  "에이전트가 브라우저를 쓰기 시작하면 여기에 나타나요."
                 ) : (
                   <>
-                    브라우저 컨테이너가 응답하지 않습니다.
+                    브라우저 컨테이너가 응답하지 않아요.
                     <br />
                     <code className="mt-2 inline-block font-mono text-[12px] text-dim">
                       docker compose up -d browser

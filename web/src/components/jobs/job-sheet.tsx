@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { CopyButton } from "@/components/ui/copy-button";
 import { Input } from "@/components/ui/input";
+import { Lightbox } from "@/components/ui/lightbox";
 import { Pager } from "@/components/ui/pager";
 import { Sheet } from "@/components/ui/sheet";
 import {
@@ -35,6 +36,7 @@ import { type Job, type JobDetail, type JobEvent, LIVE, send, stateLabel, stateT
 import { usePaged } from "@/lib/paging";
 import type { Decision, Proposal } from "@/lib/thread";
 import { photoUrl } from "@/lib/uploads";
+import { SAY } from "@/lib/say";
 import { cn } from "@/lib/utils";
 
 
@@ -251,9 +253,9 @@ function Body({
           {!detail && failed ? (
             <AsOf at={null} failedText="진행 기록을 불러오지 못했어요" failed onRetry={() => void load()} />
           ) : !detail ? (
-            <p className="text-[12.5px] text-faint">불러오는 중…</p>
+            <p className="text-[12.5px] text-faint">{SAY.loading}</p>
           ) : runs.length === 0 ? (
-            <p className="text-[12.5px] text-faint">아직 기록이 없습니다.</p>
+            <p className="text-[12.5px] text-faint">아직 기록이 없어요.</p>
           ) : (
             <Trace className="gap-4">
               {/* The newest runs are on the first page: the one going now, and two open. */}
@@ -297,7 +299,7 @@ function Body({
               e.preventDefault();
               const t = text.trim();
               if (!t) return;
-              const err = await act("instruct", { text: t }, "작업에 전했습니다. 곧 반영합니다.");
+              const err = await act("instruct", { text: t }, "작업에 전했어요. 곧 반영해요.");
               if (!err) setText("");
             }}
             className="flex items-end gap-2"
@@ -317,16 +319,16 @@ function Body({
         ) : null}
         <div className="mt-2 flex gap-2">
           {j.state === "active" || j.state === "paused" ? (
-            <Button variant="lined" size="touch-sm" disabled={j.running} onClick={() => void act("run", {}, "지금 실행합니다.")} className="flex-1">
+            <Button variant="lined" size="touch-sm" disabled={j.running} onClick={() => void act("run", {}, "지금 실행해요.")} className="flex-1">
               지금 실행
             </Button>
           ) : null}
           {j.state === "active" || j.state === "waiting" ? (
-            <Button variant="lined" size="touch-sm" onClick={() => void act("pause", {}, "멈췄습니다.")} className="flex-1">
+            <Button variant="lined" size="touch-sm" onClick={() => void act("pause", {}, "멈췄어요.")} className="flex-1">
               멈추기
             </Button>
           ) : j.state === "paused" || j.state === "failed" ? (
-            <Button variant="lined" size="touch-sm" onClick={() => void act("resume", {}, "다시 시작합니다.")} className="flex-1">
+            <Button variant="lined" size="touch-sm" onClick={() => void act("resume", {}, "다시 시작해요.")} className="flex-1">
               다시 시작
             </Button>
           ) : null}
@@ -346,7 +348,7 @@ function Body({
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                   <AlertDialogCancel>두기</AlertDialogCancel>
-                  <AlertDialogAction onClick={() => void act("cancel", {}, "그만뒀습니다.")}>그만두기</AlertDialogAction>
+                  <AlertDialogAction onClick={() => void act("cancel", {}, "그만뒀어요.")}>그만두기</AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
@@ -361,23 +363,26 @@ type RunGroup = { key: string; runId?: number; at: string; events: JobEvent[] };
 
 /**
  * A screen the run took (capture), where it took it: a tile that opens the
- * photo. Gone with the job's photos after it ended, it says so instead of
- * leaving a broken picture.
+ * photo full screen, in the app (ui/lightbox.tsx) - as a link it took a
+ * home-screen app out to Safari. Gone with the job's photos after it ended,
+ * it says so instead of leaving a broken picture.
  */
 function Shot({ name, gone }: { name: string; gone: boolean }) {
+  const [open, setOpen] = useState(false);
   if (gone) return <span className="text-faint">찍은 화면 (지웠어요)</span>;
   return (
     <span className="flex flex-col gap-1">
       <span>화면을 찍었어요</span>
-      <a
-        href={photoUrl(name)}
-        target="_blank"
-        rel="noreferrer"
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-label="작업이 찍은 화면 크게 보기"
         className="block w-fit overflow-hidden rounded-lg border border-edge-soft bg-well outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
       >
         {/* eslint-disable-next-line @next/next/no-img-element -- served by the agent behind the proxy */}
         <img src={photoUrl(name)} alt="작업이 찍은 화면" loading="lazy" className="block max-h-48 w-auto max-w-[16rem] object-contain" />
-      </a>
+      </button>
+      {open ? <Lightbox items={[{ src: photoUrl(name), alt: "작업이 찍은 화면" }]} onClose={() => setOpen(false)} /> : null}
     </span>
   );
 }

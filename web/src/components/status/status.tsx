@@ -162,7 +162,7 @@ export function Status() {
         <div className="mx-auto w-full max-w-[46rem] px-4 pt-6 pb-10 sm:px-8 sm:pt-10">
           {!report ? (
             <p className="pt-10 text-center text-[13px] text-faint">
-              {error ?? "상태를 불러오는 중이에요."}
+              {error ?? "상태를 불러오는 중…"}
             </p>
           ) : (
             <>
@@ -206,7 +206,7 @@ export function Status() {
                   <PhoneSetup />
                 </DetailRow>
 
-                <DetailRow title="로그인 정보" line="자비스가 자동으로 넣는 사이트와 넣은 기록이에요." open={shown === "logins"} onOpenChange={show("logins")}>
+                <DetailRow title="로그인 정보" line="Jarvis가 자동으로 넣는 사이트와 넣은 기록이에요." open={shown === "logins"} onOpenChange={show("logins")}>
                   <SavedLogins />
                 </DetailRow>
               </ul>

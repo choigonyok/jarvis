@@ -34,6 +34,8 @@ import {
   WEEK_ROW,
   whenLabel,
 } from "@/lib/goals";
+import { SAY } from "@/lib/say";
+import { monthDay } from "@/lib/when";
 import { cn } from "@/lib/utils";
 
 
@@ -72,7 +74,7 @@ function Body({ goal, onChanged, onClose, onEdit }: { goal: Goal; onChanged: () 
       setNow(got.goal);
       setStats(got.stats);
     } catch (e) {
-      setFailed(e instanceof Error ? e.message : "불러오지 못했습니다.");
+      setFailed(e instanceof Error ? e.message : SAY.couldNotLoad);
     }
   }, [goal.id]);
   useEffect(() => {
@@ -89,7 +91,7 @@ function Body({ goal, onChanged, onClose, onEdit }: { goal: Goal; onChanged: () 
       setNow(next);
       onChanged();
     } catch (e) {
-      setFailed(e instanceof Error ? e.message : "바꾸지 못했습니다.");
+      setFailed(e instanceof Error ? e.message : "바꾸지 못했어요.");
     }
   }
 
@@ -99,7 +101,7 @@ function Body({ goal, onChanged, onClose, onEdit }: { goal: Goal; onChanged: () 
       onChanged();
       onClose();
     } catch (e) {
-      setFailed(e instanceof Error ? e.message : "지우지 못했습니다.");
+      setFailed(e instanceof Error ? e.message : SAY.couldNotDelete);
     }
   }
 
@@ -110,7 +112,7 @@ function Body({ goal, onChanged, onClose, onEdit }: { goal: Goal; onChanged: () 
       setStats(got.stats);
       onChanged();
     } catch (e) {
-      setFailed(e instanceof Error ? e.message : "기록하지 못했습니다.");
+      setFailed(e instanceof Error ? e.message : "기록하지 못했어요.");
     }
   }
 
@@ -210,9 +212,8 @@ function Figure({ label, value }: { label: string; value: string }) {
   );
 }
 
-function shortDay(day: string): string {
-  return `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`;
-}
+/** "11월 2일" (lib/when.ts). */
+const shortDay = (day: string) => monthDay(day);
 
 /**
  * How it went, bar by bar: what was done against what was asked. One series, so

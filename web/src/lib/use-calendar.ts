@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAgentStream } from "@/lib/stream";
 import { gridBounds, shiftMonth, type Cursor } from "@/lib/month";
-import { decideProposal } from "@/lib/decide";
+import { DECIDE_ECHO_MS, decideProposal } from "@/lib/decide";
 import {
   API,
   isPending,
@@ -51,7 +51,7 @@ export function useCalendar(cursor: Cursor) {
       setProposals(props.proposals ?? []);
       setError(null);
     } catch {
-      setError("캘린더를 불러오지 못했습니다.");
+      setError("캘린더를 불러오지 못했어요.");
     } finally {
       setLoaded(true);
     }
@@ -119,12 +119,12 @@ export function useCalendar(cursor: Cursor) {
         });
         if (!res.ok) {
           const body = (await res.json().catch(() => null)) as { error?: string } | null;
-          setError(body?.error ?? "일정을 저장하지 못했습니다.");
+          setError(body?.error ?? "일정을 저장하지 못했어요.");
           return false;
         }
         return true;
       } catch {
-        setError("에이전트에 연결하지 못했습니다.");
+        setError("에이전트에 연결하지 못했어요.");
         return false;
       }
     },
@@ -140,23 +140,40 @@ export function useCalendar(cursor: Cursor) {
       // series. keepalive: a removal's undo window can close as the page goes.
       const res = await fetch(`${CALENDAR}/${encodeURIComponent(id)}`, { method: "DELETE", keepalive: true });
       if (!res.ok && res.status !== 204) {
-        setError("일정을 지우지 못했습니다.");
+        setError("일정을 지우지 못했어요.");
         return false;
       }
       return true;
     } catch {
-      setError("에이전트에 연결하지 못했습니다.");
+      setError("에이전트에 연결하지 못했어요.");
       return false;
     }
   }, []);
 
+  // The cards as they stand now, for a check made a moment after deciding.
+  const latest = useRef(proposals);
+  useEffect(() => {
+    latest.current = proposals;
+  }, [proposals]);
+
+  /** Resolves to what to say when the decision did not go; the row says it is on its way when it did. */
   const decide = useCallback(
-    async (proposalId: string, decision: Decision, reason?: string) => {
-      const message = await decideProposal(proposalId, decision, undefined, reason);
-      if (message) {
-        setError(message);
+    async (proposalId: string, decision: Decision, reason?: string): Promise<string | null> => {
+      const posted = await decideProposal(proposalId, decision, undefined, reason);
+      if (!posted.ok) {
+        setError(posted.error);
         void hydrate();
+        return posted.error;
       }
+      if (posted.already) {
+        void hydrate();
+        return null;
+      }
+      // Back over the stream in a moment; still waiting then, read again.
+      window.setTimeout(() => {
+        if (latest.current.some((p) => p.id === proposalId && isPending(p))) void hydrate();
+      }, DECIDE_ECHO_MS);
+      return null;
     },
     [hydrate],
   );
@@ -169,6 +186,8 @@ export function useCalendar(cursor: Cursor) {
     connection,
     error,
     loaded,
+    /** Reads the month again, by hand - under "불러오지 못했어요". */
+    reload: hydrate,
     save,
     remove,
     decide,

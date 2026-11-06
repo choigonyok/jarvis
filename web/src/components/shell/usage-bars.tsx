@@ -20,12 +20,19 @@ import {
 } from "@/lib/use-usage";
 import { cn } from "@/lib/utils";
 
+/** Where a meter starts to warm (lib/use-usage.ts tone): the header shows the bars from here. */
+const WARM = 70;
+
 /**
  * Hairlines in the header: the Claude subscription's 5-hour window on top, the
  * weekly one below it, then the API keys that cost money by use - memory's
  * against its daily cap, the search key (Voyage) into its free tokens, mind's
- * against its daily cap. Always there, never asking for attention until they
- * fill. A tap shows the numbers.
+ * against its daily cap. A tap shows the numbers.
+ *
+ * Only once one of them warms (70%, tone below). Always there, they were five
+ * hairlines in 48px beside the bell on a phone - unreadable, and taking the
+ * bell's room - on every screen, while the 상태 tab has the same lines in
+ * words (2026-11-07 review). Quiet until they fill now means not there.
  *
  * Every line in the panel is the same meter: a name and its figure, the bar,
  * and one line under it that says when it resets or what the month came to.
@@ -52,15 +59,22 @@ export function UsageBars() {
   const mindPct = capPct(mind);
   const label =
     five == null && week == null
-      ? "Claude 사용량을 아직 읽지 못했습니다"
+      ? "Claude 사용량을 아직 읽지 못했어요"
       : `Claude 사용량${age != null ? `(${agoLabel(age)} 측정)` : ""}: 5시간 ${five ?? "-"}%, 주간 ${week ?? "-"}%` +
         (api == null ? "" : `, 기억용 API 하루 상한의 ${api}%`) +
         (voyage ? `, 검색용 API 오늘 ${usd(voyage.todayUsd)}` : "") +
         (mindPct == null ? "" : `, 판단용 API 하루 상한의 ${mindPct}%`);
   const paid = Boolean(usage?.api || voyage || mind);
+  // Stale or not yet read says nothing worth the room.
+  const warm = [stale ? null : five, stale ? null : week, usage?.api ? api : null, voyage ? free : null, mind ? mindPct : null].some(
+    (v) => v != null && v >= WARM,
+  );
   const at = usage?.at
     ? new Date(usage.at).toLocaleTimeString("ko-KR", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", hour12: false })
     : null;
+
+  // Kept while its panel is open, so a reading that cools under the finger does not take the panel away.
+  if (!warm && !open) return null;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>

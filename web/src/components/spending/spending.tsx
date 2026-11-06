@@ -38,6 +38,7 @@ import { onOpenParams } from "@/lib/focus";
 import { onResume } from "@/lib/resume";
 import { isPending } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
+import { SAY } from "@/lib/say";
 import { cn } from "@/lib/utils";
 
 const thisMonth = () =>
@@ -355,7 +356,7 @@ export function Spending() {
               </section>
             </div>
           ) : loading ? (
-            <p className="py-16 text-center text-[13px] text-faint">불러오는 중</p>
+            <p className="py-16 text-center text-[13px] text-faint">{SAY.loading}</p>
           ) : null}
         </div>
 

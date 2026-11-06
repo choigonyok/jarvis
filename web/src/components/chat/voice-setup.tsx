@@ -82,7 +82,7 @@ function useRecorder(onFull: () => void) {
   const start = useCallback(async (): Promise<boolean> => {
     setError(null);
     if (!navigator.mediaDevices?.getUserMedia || typeof AudioContext === "undefined") {
-      setError("이 브라우저에서는 녹음할 수 없습니다. Chrome이나 Safari에서 열어 주세요.");
+      setError("이 브라우저에서는 녹음할 수 없어요. Chrome이나 Safari에서 열어 주세요.");
       return false;
     }
     let stream: MediaStream;
@@ -94,8 +94,8 @@ function useRecorder(onFull: () => void) {
       const name = (err as { name?: string }).name;
       setError(
         name === "NotAllowedError"
-          ? "마이크 권한이 필요합니다. 브라우저 설정에서 허용한 뒤 다시 시도하세요."
-          : "마이크를 열지 못했습니다. 다른 앱이 쓰고 있지 않은지 확인해 주세요.",
+          ? "마이크 권한이 필요해요. 브라우저 설정에서 허용한 뒤 다시 시도하세요."
+          : "마이크를 열지 못했어요. 다른 앱이 쓰고 있지 않은지 확인해 주세요.",
       );
       return false;
     }
@@ -201,7 +201,7 @@ export function VoiceSetup({
     if (!t || t.seconds < MIN_SECONDS) {
       setTake(null);
       setStep("idle");
-      setProblem(t ? "녹음이 너무 짧습니다. 대본을 끝까지 읽어 주세요." : "녹음된 소리가 없습니다.");
+      setProblem(t ? "녹음이 너무 짧아요. 대본을 끝까지 읽어 주세요." : "녹음된 소리가 없어요.");
       return;
     }
     setTake(t);
@@ -264,13 +264,13 @@ export function VoiceSetup({
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? `저장에 실패했습니다 (${res.status}).`);
+        throw new Error(body.error ?? `저장하지 못했어요 (${res.status}).`);
       }
       await onChanged();
       setStep("saved");
     } catch (err) {
       setStep("recorded");
-      setProblem(err instanceof Error ? err.message : "저장에 실패했습니다.");
+      setProblem(err instanceof Error ? err.message : "저장하지 못했어요.");
     }
   }
 
@@ -278,10 +278,10 @@ export function VoiceSetup({
     setProblem(null);
     try {
       const res = await fetch("/api/tts/voice", { method: "DELETE" });
-      if (!res.ok) throw new Error(`지우지 못했습니다 (${res.status}).`);
+      if (!res.ok) throw new Error(`지우지 못했어요 (${res.status}).`);
       await onChanged();
     } catch (err) {
-      setProblem(err instanceof Error ? err.message : "지우지 못했습니다.");
+      setProblem(err instanceof Error ? err.message : "지우지 못했어요.");
     }
   }
 
@@ -298,7 +298,7 @@ export function VoiceSetup({
   const status: { text: string; tone: Tone } = recorder.error || problem
     ? { text: "다시 해 주세요", tone: "error" }
     : unavailable && step === "idle"
-      ? { text: "목소리 서비스에 닿지 못했습니다", tone: "error" }
+      ? { text: "목소리 서비스에 닿지 못했어요", tone: "error" }
       : recording
         ? { text: `읽는 중 ${clock(recorder.seconds)}`, tone: "listening" }
         : step === "recorded"
@@ -306,22 +306,22 @@ export function VoiceSetup({
           : step === "saving"
             ? { text: "목소리를 익히는 중", tone: "thinking" }
             : step === "saved"
-              ? { text: "이제 이 목소리로 답합니다", tone: "speaking" }
+              ? { text: "이제 이 목소리로 답해요", tone: "speaking" }
               : kept
                 ? { text: `등록된 목소리 ${voice.seconds ? `· ${Math.round(voice.seconds)}초` : ""}`, tone: "speaking" }
-                : { text: "아직 등록된 목소리가 없습니다", tone: "idle" };
+                : { text: "아직 등록된 목소리가 없어요", tone: "idle" };
 
   const hint =
     recorder.error ??
     problem ??
     (unavailable && step === "idle"
-      ? `맥미니의 목소리 서비스가 꺼져 있거나 닿지 않습니다. 켜진 뒤 다시 열어 주세요.${voice.error ? ` (${voice.error})` : ""}`
+      ? "맥미니의 목소리 서비스가 꺼져 있거나 닿지 않아요. 켜진 뒤 다시 열어 주세요."
       : step === "idle"
         ? kept
-          ? "다시 녹음하면 새 목소리로 바뀝니다. 조용한 곳에서 아래 대본을 평소 말투로 읽어 주세요."
-          : "조용한 곳에서, 아래 대본을 평소 말투로 끝까지 읽어 주세요. 한 번이면 됩니다."
+          ? "다시 녹음하면 새 목소리로 바뀌어요. 조용한 곳에서 아래 대본을 평소 말투로 읽어 주세요."
+          : "조용한 곳에서, 아래 대본을 평소 말투로 끝까지 읽어 주세요. 한 번이면 돼요."
         : step === "saved"
-          ? "다음 답부터 이 목소리로 들립니다."
+          ? "다음 답부터 이 목소리로 들려요."
           : null);
 
   return (
@@ -402,7 +402,7 @@ export function VoiceSetup({
                   <AlertDialogHeader>
                     <AlertDialogTitle>저장한 목소리를 지울까요?</AlertDialogTitle>
                     <AlertDialogDescription>
-                      다시 녹음할 때까지 자비스는 브라우저의 기본 목소리로 말해요. 되돌릴 수 없어요.
+                      다시 녹음할 때까지 Jarvis는 브라우저의 기본 목소리로 말해요. 되돌릴 수 없어요.
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>

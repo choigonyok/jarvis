@@ -1,4 +1,5 @@
 /** Pure date helpers for the month grid. No React, no fetching - just dates. */
+import { dateLabel } from "@/lib/when";
 
 export type Cursor = { year: number; month: number }; // month: 0-11
 
@@ -38,10 +39,9 @@ export function addDays(iso: string, days: number): string {
   return isoDate(d);
 }
 
-/** "9월 25일 (금)" - the same sentence the agent's cards use. */
+/** "9월 25일 (금)" - the same sentence the agent's cards use (lib/when.ts). */
 export function korDate(iso: string): string {
-  const d = parseISO(iso);
-  return `${d.getMonth() + 1}월 ${d.getDate()}일 (${WEEKDAYS[d.getDay()]})`;
+  return dateLabel(iso);
 }
 
 export type Cell = {

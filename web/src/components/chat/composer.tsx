@@ -62,6 +62,7 @@ function ComposerView({
   busy = false,
   onStop,
   draftKey,
+  fillRef,
 }: {
   /** Resolves false when the message did not go out, so what was typed comes back. */
   onSend: (text: string, images: string[]) => Promise<boolean> | void;
@@ -84,6 +85,12 @@ function ComposerView({
   onStop?: () => void;
   /** Where what is typed but not sent is kept, so leaving the tab does not lose it. */
   draftKey?: string;
+  /**
+   * Set here to a function that puts words in the field, as if typed, and
+   * focuses it - in the same tap, so a phone's keyboard comes up (the empty
+   * conversation's first things to say, chat/thread.tsx).
+   */
+  fillRef?: RefObject<((text: string) => void) | null>;
 }) {
   const [value, setValue] = useState("");
   // Text only: a photo's preview is an object URL that does not outlive the page.
@@ -104,6 +111,20 @@ function ComposerView({
   const [photos, setPhotos] = useState<Photo[]>([]);
   const ownRef = useRef<HTMLTextAreaElement>(null);
   const areaRef = inputRef ?? ownRef;
+  useEffect(() => {
+    if (!fillRef) return;
+    fillRef.current = (text: string) => {
+      type(text);
+      const el = areaRef.current;
+      if (!el) return;
+      el.focus();
+      // Once the words are in: the caret after them, to go on.
+      requestAnimationFrame(() => el.setSelectionRange(el.value.length, el.value.length));
+    };
+    return () => {
+      fillRef.current = null;
+    };
+  });
   const fileRef = useRef<HTMLInputElement>(null);
   // What last pressed the send button. A click does not reliably say: Safari's
   // has no pointerType.
@@ -296,13 +317,16 @@ function ComposerView({
           onFocus={() => onFocusChange?.(true)}
           onBlur={() => onFocusChange?.(false)}
           onKeyDown={(e) => {
-            // Enter on a phone keyboard is a newline, not a send: there is no
-            // shift to hold, and a stray send is worse than a stray line.
+            // Enter sends only where there is a shift to hold - a keyboard
+            // under a mouse. Judged by the pointer, not the width: an iPad is
+            // wide, and its on-screen Enter was sending (2026-11-06 review).
+            // On a touch keyboard Enter is a newline, and a stray line is
+            // better than a stray send.
             if (
               e.key === "Enter" &&
               !e.shiftKey &&
               !e.nativeEvent.isComposing &&
-              window.innerWidth >= 640
+              window.matchMedia("(pointer: fine)").matches
             ) {
               e.preventDefault();
               void send();

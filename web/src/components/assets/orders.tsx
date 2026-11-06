@@ -23,6 +23,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { type OrderRequest, type OrderResult, type PlacedOrder, type Standing, cancelStanding, sendOrders } from "@/lib/orders";
 import { usePaged } from "@/lib/paging";
 import { type Holding, krw, quantity } from "@/lib/portfolio";
+import { dateTime } from "@/lib/when";
 import { cn } from "@/lib/utils";
 
 /**
@@ -328,9 +329,8 @@ export function OrderSheet({
   );
 }
 
-/** "10/18 01:12". */
-const when = (iso: string) =>
-  new Date(iso).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+/** "오늘 01:12", "10월 18일 01:12" (lib/when.ts). */
+const when = (iso: string) => dateTime(iso);
 
 /**
  * Standing orders waiting for their price - "내려오면 사" - each placed again

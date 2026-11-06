@@ -41,6 +41,7 @@ import {
   toward,
 } from "@/lib/track";
 import { useThread } from "@/lib/use-thread";
+import { SAY } from "@/lib/say";
 import { cn } from "@/lib/utils";
 
 /** Whose day is on the screen: the viewer's, both, or the other's - the calendar's 나 · 함께 · 상대. */
@@ -217,7 +218,7 @@ function Waiting({
           <Retry onRetry={onRetry} />
         </div>
       ) : (
-        <p className="text-[13px] text-faint">불러오는 중이에요.</p>
+        <p className="text-[13px] text-faint">{SAY.loading}</p>
       )}
     </main>
   );
@@ -506,7 +507,7 @@ function Viewer({
  */
 function PlaceButtons({ onExplain, onRegister }: { onExplain: () => void; onRegister: () => void }) {
   return (
-    <div className="absolute right-3 bottom-3 z-10 flex items-center gap-0.5 rounded-full bg-popover p-1 shadow-[0_6px_16px_-6px_oklch(0_0_0/70%)]">
+    <div className="absolute right-3 bottom-3 z-10 flex items-center gap-0.5 rounded-full bg-popover p-1 shadow-[0_6px_16px_-6px_var(--shade)]">
       <button
         type="button"
         onClick={onExplain}
@@ -547,7 +548,7 @@ function ViewSwitch({ view, onView }: { view: View; onView: (v: View) => void })
       onValueChange={(v) => {
         if (v) onView(v as View);
       }}
-      className="absolute top-3 left-3 z-10 rounded-full bg-popover p-1 shadow-[0_6px_16px_-6px_oklch(0_0_0/70%)]"
+      className="absolute top-3 left-3 z-10 rounded-full bg-popover p-1 shadow-[0_6px_16px_-6px_var(--shade)]"
     >
       {VIEWS.map((v) => (
         <ToggleGroupItem key={v.view} value={v.view} className="px-3 text-dim hover:text-foreground mouse:px-2.5">
@@ -621,7 +622,7 @@ function NoTrack({ scene, onConnect }: { scene: Scene; onConnect: () => void }) 
   }
   return (
     <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-8">
-      <Empty className="pointer-events-auto max-w-[22rem] gap-0 rounded-xl bg-popover px-5 py-4 shadow-[0_10px_30px_-12px_oklch(0_0_0/80%)]">
+      <Empty className="pointer-events-auto max-w-[22rem] gap-0 rounded-xl bg-popover px-5 py-4 shadow-[0_10px_30px_-12px_var(--shade)]">
         <EmptyHeader className="gap-1">
           <EmptyTitle className="text-[14.5px] font-normal">{title}</EmptyTitle>
           <EmptyDescription className="text-[12.5px] leading-[1.55]">{body}</EmptyDescription>

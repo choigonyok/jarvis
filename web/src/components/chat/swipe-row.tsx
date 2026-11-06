@@ -60,7 +60,7 @@ export function SwipeRow({
     const shown = Math.min(1, -p.dx / THRESHOLD);
     i.style.opacity = String(shown);
     i.style.scale = String(p.armed ? 1.12 : 0.85 + shown * 0.15);
-    i.style.background = p.armed ? "oklch(1 0 0 / 0.1)" : "";
+    i.style.background = p.armed ? "color-mix(in oklab, var(--foreground) 10%, transparent)" : "";
   }
 
   function end(quote: boolean) {

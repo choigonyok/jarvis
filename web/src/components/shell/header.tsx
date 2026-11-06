@@ -26,6 +26,7 @@ import {
   Target,
   TrainFront,
   Wallet,
+  WifiOff,
 } from "lucide-react";
 import { BottomSheetContent, BottomSheetHeader, BottomSheetTitle } from "@/components/ui/bottom-sheet";
 import { Sheet, SheetTrigger } from "@/components/ui/sheet";
@@ -33,6 +34,8 @@ import { Notifications } from "@/components/shell/notifications";
 import { useRole } from "@/components/shell/role";
 import { UsageBars } from "@/components/shell/usage-bars";
 import { focusSection, forgetFocus, onFocusRequest } from "@/lib/focus";
+import { useOnline } from "@/lib/online";
+import { requestResume } from "@/lib/resume";
 import type { Role } from "@/lib/role";
 import { dropPush } from "@/lib/use-push";
 import type { Connection } from "@/lib/thread";
@@ -249,6 +252,19 @@ function HeaderView({
   const router = useRouter();
   const signOut = useSignOut();
   const status = connectionCopy[connection];
+  // No network at all: said in a line under the header (below), not by the
+  // dot - and once it is back, every screen reads again (lib/resume.ts), as
+  // the line promised.
+  const online = useOnline();
+  const wasOnline = useRef(online);
+  useEffect(() => {
+    if (online && !wasOnline.current) requestResume();
+    wasOnline.current = online;
+  }, [online]);
+  // The stream down while the phone is online: the word stands beside the
+  // dot on a phone too, where the dot alone looked like any quiet dot
+  // (2026-11-07 review).
+  const dropped = connection === "closed" && online;
 
   useEffect(() => {
     if (here) remember(here, pathname);
@@ -366,10 +382,11 @@ function HeaderView({
                 connection === "connecting" && "anim-breathe",
               )}
             />
-            {/* The dot alone carries this on a phone; the word is the luxury
-                of a wide row. */}
-            <span className="hidden sm:inline">{status.label}</span>
-            <span className="sr-only sm:hidden">{status.label}</span>
+            {/* The dot alone carries "연결됨" on a phone; the word is the
+                luxury of a wide row - but a lost connection is said in words
+                everywhere. */}
+            <span className={cn(dropped ? "text-dim" : "hidden sm:inline")}>{status.label}</span>
+            {dropped ? null : <span className="sr-only sm:hidden">{status.label}</span>}
           </span>
           <p className="hidden text-[11.5px] text-faint lg:block" aria-live="polite">
             {pending > 0 ? `결재 대기 ${pending}건` : "결재 대기 없음"}
@@ -389,7 +406,25 @@ function HeaderView({
           </button>
         </div>
       </div>
+      {online ? null : <Offline />}
     </header>
+  );
+}
+
+/**
+ * No network: one line where the standing bar would be, the same shape and
+ * no colour - it is a fact about the phone, not a failure of anything asked.
+ * It says why a screen could not read (the transit board's 읽지 못했어요
+ * gave no reason underground) and what happens next.
+ */
+function Offline() {
+  return (
+    <div role="status" className="border-t border-edge-soft bg-glass">
+      <div className="mx-auto flex w-full max-w-[46rem] items-center gap-2.5 px-4 py-2 sm:px-8">
+        <WifiOff aria-hidden className="size-3.5 shrink-0 text-faint" strokeWidth={1.8} />
+        <p className="min-w-0 flex-1 text-[12.5px] text-dim">인터넷 연결이 없어요 · 연결되면 다시 읽어요</p>
+      </div>
+    </div>
   );
 }
 

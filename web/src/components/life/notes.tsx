@@ -18,6 +18,7 @@ import {
   versions as readVersions,
 } from "@/lib/life";
 import { usePaged } from "@/lib/paging";
+import { SAY } from "@/lib/say";
 import { cn } from "@/lib/utils";
 
 /**
@@ -239,7 +240,7 @@ function NoteRow({
           <div className="anim-settle mt-2.5 space-y-2">
             <p className="text-[12.5px] text-dim">
               {rule
-                ? "거두면 자비스가 더는 따르지 않아요. 이유가 있으면 적어 주세요(비워도 돼요)."
+                ? "거두면 Jarvis가 더는 따르지 않아요. 이유가 있으면 적어 주세요(비워도 돼요)."
                 : "왜 아닌가요? 비워도 돼요. 적어 두면 다음 노트를 만들 때 읽어요."}
             </p>
             <Input
@@ -260,7 +261,7 @@ function NoteRow({
                 onClick={() =>
                   void answer(
                     { status: "rejected", reason: why.trim() },
-                    rule ? "거뒀어요. 자비스가 더는 따르지 않아요." : "아니라고 했어요. 다시 만들지 않아요.",
+                    rule ? "거뒀어요. Jarvis가 더는 따르지 않아요." : "아니라고 했어요. 다시 만들지 않아요.",
                   )
                 }
                 disabled={busy}
@@ -329,7 +330,7 @@ function NoteRow({
           <div>
             <p className="text-faint">고친 이력</p>
             {history === "loading" || history === null ? (
-              <p className="text-faint">불러오는 중이에요.</p>
+              <p className="text-faint">{SAY.loading}</p>
             ) : history.length === 0 ? (
               <p className="text-faint">이력을 불러오지 못했어요.</p>
             ) : (

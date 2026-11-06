@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Check, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { SAY } from "@/lib/say";
 
 type Setup = {
   link: string;
@@ -75,7 +76,7 @@ export function PhoneSetup({ who = "owner" }: { who?: "owner" | "guest" }) {
       <p className="text-pretty text-dim">이 화면을 아이폰에서 열고 차례로 하세요.</p>
       <ol className="mt-3 space-y-3.5 text-[13px] leading-[1.6]">
           <Step n={1}>
-            OwnTracks를 설치합니다.{" "}
+            OwnTracks를 설치해요.{" "}
             <a
               href="https://apps.apple.com/app/id692424691"
               className="text-dim underline decoration-edge underline-offset-[3px] hover:text-foreground"
@@ -85,12 +86,12 @@ export function PhoneSetup({ who = "owner" }: { who?: "owner" | "guest" }) {
           </Step>
           <Step n={2}>
             OwnTracks 지도 왼쪽 위 ⓘ → Settings → Remote Control에서{" "}
-            <span className="text-foreground">Allow external configuration</span>을 켭니다. 26.2.3부터 기본으로 꺼져 있어요.
+            <span className="text-foreground">Allow external configuration</span>을 켜요. 26.2.3부터 기본으로 꺼져 있어요.
           </Step>
           <Step n={3}>
             <span className="block">
               &ldquo;jarvis 설정 불러오기&rdquo; 다음에 &ldquo;OwnTracks 열어서 설정 넣기&rdquo;를 누르면 OwnTracks가 바뀌는 내용을 보여
-              줘요. Continue를 누르면 서버 주소·계정·모니터링(Significant)·원격 설정이 한 번에 들어갑니다.
+              줘요. Continue를 누르면 서버 주소·계정·모니터링(Significant)·원격 설정이 한 번에 들어가요.
             </span>
             {setup ? (
               <span className="mt-2 flex flex-col gap-1 sm:flex-row">
@@ -103,7 +104,7 @@ export function PhoneSetup({ who = "owner" }: { who?: "owner" | "guest" }) {
               </span>
             ) : (
               <Button variant="raised" size="touch" className={`mt-2 ${step}`} onClick={() => void load()} disabled={busy}>
-                {busy ? "불러오는 중" : "jarvis 설정 불러오기"}
+                {busy ? SAY.loading : "jarvis 설정 불러오기"}
               </Button>
             )}
             <span className="mt-2 block text-[12px] text-faint">
@@ -113,12 +114,12 @@ export function PhoneSetup({ who = "owner" }: { who?: "owner" | "guest" }) {
           {guest ? (
             <Step n={4}>
               설정 → 개인정보 보호 및 보안 → 위치 서비스 → OwnTracks에서 <span className="text-foreground">항상</span>과 정확한
-              위치를 켜고, 동작 및 피트니스와 백그라운드 앱 새로 고침도 켭니다. 자주 머무는 곳을 OwnTracks에서 영역으로 만들어
+              위치를 켜고, 동작 및 피트니스와 백그라운드 앱 새로 고침도 켜요. 자주 머무는 곳을 OwnTracks에서 영역으로 만들어
               두면 그 안에서는 배터리를 아껴요.
             </Step>
           ) : (
             <Step n={4}>
-              위치 권한을 <span className="text-foreground">항상 허용</span>으로 둡니다. 집·회사 같은 영역은 OwnTracks에서
+              위치 권한을 <span className="text-foreground">항상 허용</span>으로 둬요. 집·회사 같은 영역은 OwnTracks에서
               만들면 jarvis에도 그대로 들어와요.
             </Step>
           )}
@@ -128,7 +129,7 @@ export function PhoneSetup({ who = "owner" }: { who?: "owner" | "guest" }) {
           <Step n={5}>
             <span className="block">
               (선택) 단축어 → 자동화에서 CarPlay·집중 모드·충전기를 계기로 고르고, 동작은 <span className="text-foreground">URL 내용 가져오기</span>{" "}
-              하나만 둡니다: 방식 POST, 헤더 Authorization, 본문 JSON. &ldquo;즉시 실행&rdquo;을 켜고 &ldquo;실행 시 알림&rdquo;은 꺼요.
+              하나만 둬요: 방식 POST, 헤더 Authorization, 본문 JSON. &ldquo;즉시 실행&rdquo;을 켜고 &ldquo;실행 시 알림&rdquo;은 꺼요.
             </span>
             {!showSignals ? (
               <Button

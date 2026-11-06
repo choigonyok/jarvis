@@ -125,16 +125,16 @@ function Feed({ source }: { source: Source }) {
             <div className="grid place-items-center px-8 pt-16">
               {source === "imessage" ? (
                 <p className="max-w-[26rem] text-center text-[13px] leading-relaxed text-faint">
-                  아직 수집된 문자가 없습니다.
+                  아직 수집된 문자가 없어요.
                   <br />
                   맥미니의 메시지 앱에 Apple ID로 로그인하고(iCloud에 메시지 켜기), Docker에 전체 디스크 접근 권한을 주면
-                  여기에 쌓입니다.
+                  여기에 쌓여요.
                 </p>
               ) : (
                 <p className="max-w-[26rem] text-center text-[13px] leading-relaxed text-faint">
-                  아직 수집된 대화가 없습니다.
+                  아직 수집된 대화가 없어요.
                   <br />
-                  맥에서 수집기를 띄우면 여기에 쌓입니다.
+                  맥에서 수집기를 띄우면 여기에 쌓여요.
                   <br />
                   <code className="mt-2 inline-block font-mono text-[12px] text-dim">
                     docker compose up -d kakaotalk
@@ -201,7 +201,7 @@ function RoomPicker({
         }}
       >
         <SheetTrigger
-          aria-label={`대화방: ${current.name}. 누르면 전체 ${rooms.length}개 방에서 고릅니다`}
+          aria-label={`대화방: ${current.name}. 누르면 전체 ${rooms.length}개 방에서 골라요`}
           className="group flex h-11 max-w-[60%] shrink-0 items-center outline-none"
         >
           <span className="flex min-w-0 items-center gap-1.5 rounded-lg bg-glass-raised px-3 py-2 text-[13px] text-foreground group-focus-visible:ring-3 group-focus-visible:ring-ring/50">

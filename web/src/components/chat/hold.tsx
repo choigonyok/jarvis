@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Proposal } from "@/lib/thread";
+import { Spinner } from "@/components/ui/spinner";
+import type { Decision, Proposal } from "@/lib/thread";
 import { cn } from "@/lib/utils";
 
 /** How long an approval that spends money waits, with 되돌리기 on the card. */
@@ -103,6 +104,38 @@ export function useHold(id: string, send: () => void) {
       setUntil(null);
     },
   };
+}
+
+/**
+ * The decision on its way, where the buttons were. Without it the pair came
+ * back dimmed the moment the hold ended, and read as "not sent yet"
+ * (2026-11-06 review, measured: 반려·승인 at 50% for the whole round trip).
+ */
+export function Sending({ className }: { className?: string }) {
+  return (
+    <p role="status" className={cn("anim-settle flex min-h-12 items-center gap-2 px-1 text-[12.5px] text-dim mouse:min-h-8", className)}>
+      <Spinner className="size-3.5" />
+      결정을 보내는 중…
+    </p>
+  );
+}
+
+/**
+ * The decision taken, and the card not back with it yet - where the buttons
+ * were, until the card reads 승인함 or 반려함. The breathing dot is the one a
+ * waiting card has: it is still waiting, on Jarvis now, not on you. Still no
+ * green: the colour comes with the card's own word that it is done.
+ */
+export function Sent({ decision, className }: { decision: Decision; className?: string }) {
+  return (
+    <p role="status" className={cn("anim-settle flex min-h-12 items-center gap-2 px-1 text-[12.5px] text-dim mouse:min-h-8", className)}>
+      <span aria-hidden className="anim-breathe size-[5px] shrink-0 rounded-full bg-dim" />
+      <span>
+        {decision === "approved" ? "승인을 보냈어요" : "반려를 보냈어요"}
+        <span className="text-faint"> · 반영 중</span>
+      </span>
+    </p>
+  );
 }
 
 /** What a card says of a hold let go by leaving: nothing was sent, and it can be asked again. */

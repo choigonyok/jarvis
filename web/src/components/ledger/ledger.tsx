@@ -73,8 +73,8 @@ export function Ledger() {
           {empty ? (
             <p className="max-w-[30rem] text-[13.5px] leading-relaxed text-faint">
               {filter === "all"
-                ? "아직 올라온 요청이 없습니다. Jarvis가 상태를 바꾸는 일을 하려 할 때마다 여기에 남습니다."
-                : "이 조건에 맞는 요청이 없습니다."}
+                ? "아직 올라온 요청이 없어요. Jarvis가 상태를 바꾸는 일을 하려 할 때마다 여기에 남아요."
+                : "이 조건에 맞는 요청이 없어요."}
             </p>
           ) : null}
 

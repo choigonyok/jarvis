@@ -4,10 +4,11 @@ import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SecretInput } from "@/components/ui/secret-input";
 
 /**
  * The first thing anyone sees. It stays as quiet as the rest of the console -
- * a single card on the same dark ground - because it is a door, not a product
+ * a single card on the page's own ground - because it is a door, not a product
  * page: there is exactly one person who gets through it.
  */
 export function LoginForm() {
@@ -31,7 +32,7 @@ export function LoginForm() {
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { error?: string } | null;
-        setError(body?.error ?? "로그인하지 못했습니다.");
+        setError(body?.error ?? "로그인하지 못했어요.");
         setPassword("");
         return;
       }
@@ -41,7 +42,7 @@ export function LoginForm() {
       router.replace(from && from.startsWith("/") ? from : "/");
       router.refresh();
     } catch {
-      setError("서버에 연결하지 못했습니다.");
+      setError("서버에 연결하지 못했어요.");
     } finally {
       setBusy(false);
     }
@@ -77,10 +78,10 @@ export function LoginForm() {
           </label>
           <label className="block">
             <span className="mb-1.5 block text-[11.5px] text-faint">비밀번호</span>
-            <Input
-              type="password"
+            {/* With 보기: a phone keyboard makes a typo easy, and this is the one place to see it. */}
+            <SecretInput
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={setPassword}
               autoComplete="current-password"
               required
               className="h-11 border-edge bg-well/40 mouse:h-9 mouse:text-[14px]"

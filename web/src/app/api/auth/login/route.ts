@@ -16,7 +16,7 @@ export async function POST(request: Request) {
   // password" would send the operator hunting for a typo that is not there.
   if (!credentials()) {
     return Response.json(
-      { error: "로그인이 설정되지 않았습니다. JARVIS_AUTH_ID 와 JARVIS_AUTH_PASSWORD 를 넣으세요." },
+      { error: "로그인이 설정되지 않았어요. JARVIS_AUTH_ID 와 JARVIS_AUTH_PASSWORD 를 넣으세요." },
       { status: 503 },
     );
   }
@@ -27,7 +27,7 @@ export async function POST(request: Request) {
   if (!(await check(id, password))) {
     await new Promise((resolve) => setTimeout(resolve, DELAY_MS));
     return Response.json(
-      { error: "아이디 또는 비밀번호가 맞지 않습니다." },
+      { error: "아이디 또는 비밀번호가 맞지 않아요." },
       { status: 401 },
     );
   }

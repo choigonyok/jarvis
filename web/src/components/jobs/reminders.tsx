@@ -91,7 +91,7 @@ export function PastReminders({ reminders }: { reminders: Reminder[] }) {
             ))}
           </ul>
           <Pager {...paged} className="px-2" />
-          <p className="px-2 pt-2 text-[11.5px] leading-relaxed text-faint">지난 30일 것만 보입니다.</p>
+          <p className="px-2 pt-2 text-[11.5px] leading-relaxed text-faint">지난 30일 것만 보여요.</p>
         </div>
       </DetailSheet>
     </section>

@@ -1,3 +1,4 @@
+import { dateLabel as whenDateLabel } from "@/lib/when";
 /**
  * A day of where the operator went (context-svc GET /track, through
  * /api/context/track), made into what the 위치 screen draws and replays:
@@ -573,9 +574,7 @@ export const MODE_WORD: Record<Mode, string> = {
 
 /** "10월 22일 (목)". */
 export function dateLabel(date: string): string {
-  const [y, m, d] = date.split("-").map(Number);
-  const weekday = new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("ko-KR", { timeZone: "UTC", weekday: "short" });
-  return `${m}월 ${d}일 (${weekday})`;
+  return whenDateLabel(date);
 }
 
 /** The operator's today, YYYY-MM-DD. */

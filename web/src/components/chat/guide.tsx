@@ -113,6 +113,26 @@ const ASKS: Ask[] = [
   { title: "사진 보여 주고 묻기", body: "사진을 붙여서 물으면 사진을 보고 답해요." },
 ];
 
+/**
+ * The first things to say on an empty conversation, by account - four of the
+ * phrases above, as the guide has them for that account. Behind the ⓘ alone,
+ * a first day (the guest's above all) began at one sentence and an empty
+ * field (2026-11-07 review).
+ */
+const FIRST: Record<Role, string[]> = {
+  owner: ["일정 보기", "리마인드 걸기", "체크리스트 만들기", "지출 조회"],
+  guest: ["일정 보기", "리마인드 걸기", "체크리스트 만들기", "목표 세우기·기록하기"],
+};
+
+export function starters(role: Role): string[] {
+  return FIRST[role].flatMap((title) => {
+    const ask = ASKS.find((a) => a.title === title);
+    const said = (role === "guest" && ask?.guest) || ask?.body || "";
+    const first = said.match(/“([^”]+)”/)?.[1];
+    return first ? [first] : [];
+  });
+}
+
 /** The ⓘ in the chat's header, left of search. */
 export function GuideToggle({ open, onOpen }: { open: boolean; onOpen: () => void }) {
   return (

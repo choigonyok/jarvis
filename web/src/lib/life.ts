@@ -5,6 +5,8 @@
  * apart from the operator's word on a note.
  */
 
+import { dateTime, monthDay } from "@/lib/when";
+
 export type NoteStatus = "hypothesis" | "confirmed" | "rejected";
 
 export type Note = {
@@ -139,11 +141,9 @@ export function daysUntil(date: string, from = today()): number {
   return Math.round((b - a) / 86_400_000);
 }
 
-/** "10/31", the year only when it is not this one. */
+/** "10월 31일", the year first when it is not this one (lib/when.ts). */
 export function shortDate(date: string): string {
-  const [y, m, d] = date.slice(0, 10).split("-").map(Number);
-  const md = `${m}/${d}`;
-  return String(y) === today().slice(0, 4) ? md : `${y}. ${md}`;
+  return monthDay(date.slice(0, 10));
 }
 
 /** When a consumable is due next, as a person says it. */
@@ -156,13 +156,9 @@ export function dueLabel(next: string): string {
   return `${n}일 뒤`;
 }
 
-/** A moment as the day and the clock: "10/18 19:42". */
+/** A moment as the day and the clock: "어제 19:42", "10월 18일 19:42" (lib/when.ts). */
 export function moment(iso: string): string {
-  const t = new Date(iso);
-  if (Number.isNaN(t.getTime())) return "";
-  const day = t.toLocaleDateString("sv-SE", { timeZone: ZONE });
-  const hm = t.toLocaleTimeString("ko-KR", { timeZone: ZONE, hour: "2-digit", minute: "2-digit", hour12: false });
-  return `${shortDate(day)} ${hm}`;
+  return dateTime(iso);
 }
 
 /** Notes in the order they want attention: the ones asking first, then the ones held, then the ones let go; newest first within. */

@@ -16,6 +16,8 @@ import { Button } from "@/components/ui/button";
 import { Pager } from "@/components/ui/pager";
 import { usePaged } from "@/lib/paging";
 import { API } from "@/lib/thread";
+import { SAY } from "@/lib/say";
+import { dateTime } from "@/lib/when";
 
 type Login = { domain: string; name: string; hint: string; lastUsedAt?: string; uses: number };
 type Use = { at: string; domain: string; host: string; purpose: string; outcome: "released" | "none" | "refused" | "failed" };
@@ -28,10 +30,8 @@ const outcomeCopy: Record<Use["outcome"], string> = {
 };
 
 
-function when(iso: string) {
-  const d = new Date(iso);
-  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-}
+/** "오늘 14:02", "10월 18일 14:02" - on Seoul's clock, as everywhere (lib/when.ts); it read the phone's own. */
+const when = (iso: string) => dateTime(iso);
 
 /**
  * The logins Jarvis keeps (vault-svc): which sites, under which username
@@ -86,13 +86,13 @@ export function SavedLogins() {
   }
 
   if (!data) {
-    return <p className="py-2 text-[12.5px] text-faint">{error ?? "불러오는 중이에요."}</p>;
+    return <p className="py-2 text-[12.5px] text-faint">{error ?? SAY.loading}</p>;
   }
   return (
     <div className="space-y-4 py-1">
       <p className="text-[12.5px] leading-relaxed text-dim">
         대화에서 &ldquo;쿠팡 로그인 정보 저장해줘&rdquo;라고 하면 저장 카드가 올라와요. 카드에 넣은 아이디·비밀번호는 암호화해서
-        보관하고, 그 사이트의 로그인 화면에서만 자동으로 넣어요. 자비스는 값을 볼 수 없어요.
+        보관하고, 그 사이트의 로그인 화면에서만 자동으로 넣어요. Jarvis는 값을 볼 수 없어요.
       </p>
       {error ? (
         <p role="alert" className="text-[12.5px] text-reject">
@@ -125,7 +125,7 @@ export function SavedLogins() {
                   <AlertDialogHeader>
                     <AlertDialogTitle>{l.name} 로그인 정보를 지울까요?</AlertDialogTitle>
                     <AlertDialogDescription>
-                      자비스가 {l.domain}에 다시 로그인하려면 대화에서 로그인 정보를 다시 저장해야 해요. 되돌릴 수 없어요.
+                      Jarvis가 {l.domain}에 다시 로그인하려면 대화에서 로그인 정보를 다시 저장해야 해요. 되돌릴 수 없어요.
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>

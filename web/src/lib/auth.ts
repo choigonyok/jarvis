@@ -41,7 +41,7 @@ const encoder = new TextEncoder();
 
 async function key(): Promise<CryptoKey> {
   const s = secret();
-  if (!s) throw new Error("JARVIS_AUTH_ID / JARVIS_AUTH_PASSWORD 가 설정되지 않았습니다");
+  if (!s) throw new Error("JARVIS_AUTH_ID / JARVIS_AUTH_PASSWORD 가 설정되지 않았어요");
   return crypto.subtle.importKey(
     "raw",
     encoder.encode(s),

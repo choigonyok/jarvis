@@ -1,3 +1,4 @@
+import { dayLabel as whenDayLabel } from "@/lib/when";
 /**
  * A workout is a list of exercises, each a list of sets. That is the whole
  * model - everything the surface shows (volume, totals, comparisons against
@@ -264,19 +265,9 @@ export function today(): string {
   ).padStart(2, "0")}`;
 }
 
-const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
-
+/** "오늘", "어제", "11월 2일 (월)" (lib/when.ts). */
 export function dayLabel(date: string, now = new Date()): string {
-  const [y, m, d] = date.split("-").map(Number);
-  const when = new Date(y, m - 1, d);
-  const days = Math.round(
-    (new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() -
-      when.getTime()) /
-      86_400_000,
-  );
-  if (days === 0) return "오늘";
-  if (days === 1) return "어제";
-  return `${m}월 ${d}일 (${WEEKDAYS[when.getDay()]})`;
+  return whenDayLabel(date, now);
 }
 
 /**

@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Brush, ChevronLeft, Download, Play, Search, X } from "lucide-react";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Brush, ChevronLeft, Play, Search } from "lucide-react";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
+import { Lightbox } from "@/components/ui/lightbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Header, TabBar } from "@/components/shell/header";
 import { Retry } from "@/components/shell/retry";
@@ -25,6 +25,7 @@ import {
 import { onResume } from "@/lib/resume";
 import { isPending } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
+import { dateTime } from "@/lib/when";
 
 type View = { kind: "library" } | { kind: "albums" } | { kind: "album"; album: Album } | { kind: "search"; query: string };
 
@@ -130,7 +131,21 @@ export function Photos() {
         </div>
       </main>
 
-      {open ? <Viewer list={open.list} start={open.index} onClose={() => setOpen(null)} /> : null}
+      {/* Full screen in the app's own viewer (ui/lightbox.tsx): two fingers
+          zoom, a finger moves on or pulls down to close. */}
+      {open ? (
+        <Lightbox
+          items={open.list.map((a) => ({
+            kind: a.isImage ? "image" : "video",
+            src: a.isImage ? thumbUrl(a.id, "preview") : videoUrl(a.id),
+            poster: a.isImage ? undefined : thumbUrl(a.id, "preview"),
+            title: dateTime(a.takenAt),
+            download: originalUrl(a.id),
+          }))}
+          start={open.index}
+          onClose={() => setOpen(null)}
+        />
+      ) : null}
       <TabBar pending={waiting.length} />
     </div>
   );
@@ -150,7 +165,7 @@ function Timeline({ albumId, onOpen }: { albumId?: string; onOpen: (list: Asset[
           setBuckets(b);
           setError(null);
         })
-        .catch(() => setError("사진 서버에 연결하지 못했습니다.")),
+        .catch(() => setError("사진 서버에 연결하지 못했어요.")),
     [albumId],
   );
   useEffect(() => {
@@ -184,10 +199,10 @@ function Timeline({ albumId, onOpen }: { albumId?: string; onOpen: (list: Asset[
   if (buckets.length === 0) {
     return (
       <div className="py-16 text-center">
-        <p className="text-[14px] text-foreground/90">{albumId ? "앨범이 비어 있습니다." : "아직 백업된 사진이 없습니다."}</p>
+        <p className="text-[14px] text-foreground/90">{albumId ? "앨범이 비어 있어요." : "아직 백업된 사진이 없어요."}</p>
         {albumId ? null : (
           <p className="mx-auto mt-2 max-w-[26rem] text-[12.5px] leading-relaxed text-dim">
-            아이폰에 Immich 앱을 설치하고 맥미니로 백업을 켜면, 올라간 사진과 영상이 여기에 날짜별로 쌓입니다.
+            아이폰에 Immich 앱을 설치하고 맥미니로 백업을 켜면, 올라간 사진과 영상이 여기에 날짜별로 쌓여요.
           </p>
         )}
       </div>
@@ -286,7 +301,7 @@ function Albums({ onPick }: { onPick: (a: Album) => void }) {
           setAlbums(a);
           setError(null);
         })
-        .catch(() => setError("앨범을 불러오지 못했습니다.")),
+        .catch(() => setError("앨범을 불러오지 못했어요.")),
     [],
   );
   useEffect(() => {
@@ -302,7 +317,7 @@ function Albums({ onPick }: { onPick: (a: Album) => void }) {
   }
   if (!albums) return null;
   if (albums.length === 0) {
-    return <p className="py-16 text-center text-[13px] text-dim">앨범이 없습니다. Immich 앱이나 웹에서 앨범을 만들면 여기에 나옵니다.</p>;
+    return <p className="py-16 text-center text-[13px] text-dim">앨범이 없어요. Immich 앱이나 웹에서 앨범을 만들면 여기에 나와요.</p>;
   }
   return (
     <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
@@ -330,11 +345,11 @@ function Results({ query, onOpen }: { query: string; onOpen: (list: Asset[], ind
   useEffect(() => {
     smartSearch(query)
       .then(setAssets)
-      .catch(() => setError("찾지 못했습니다. 사진 분석이 끝나지 않았을 수 있습니다."));
+      .catch(() => setError("찾지 못했어요. 사진 분석이 끝나지 않았을 수 있어요."));
   }, [query]);
   if (error) return <p className="py-16 text-center text-[13px] text-dim">{error}</p>;
   if (!assets) return <p className="py-16 text-center text-[13px] text-faint">찾는 중…</p>;
-  if (assets.length === 0) return <p className="py-16 text-center text-[13px] text-dim">&ldquo;{query}&rdquo;에 맞는 사진이 없습니다.</p>;
+  if (assets.length === 0) return <p className="py-16 text-center text-[13px] text-dim">&ldquo;{query}&rdquo;에 맞는 사진이 없어요.</p>;
   return (
     <section aria-label={`${query} 검색 결과`}>
       <p className="mb-2 px-1 text-[12.5px] text-dim">
@@ -342,80 +357,5 @@ function Results({ query, onOpen }: { query: string; onOpen: (list: Asset[], ind
       </p>
       <Grid count={assets.length} assets={assets} onOpen={(a) => onOpen(assets, assets.indexOf(a))} />
     </section>
-  );
-}
-
-/** One photo or video, full screen. Swipe or arrow keys to move, Esc to close. */
-function Viewer({ list, start, onClose }: { list: Asset[]; start: number; onClose: () => void }) {
-  const [index, setIndex] = useState(Math.max(0, start));
-  const a = list[index];
-  const drag = useRef<{ x: number; y: number } | null>(null);
-  const go = useCallback((d: number) => setIndex((i) => Math.min(list.length - 1, Math.max(0, i + d))), [list.length]);
-
-  // Esc is the dialog's own (it closes, and the focus goes back to the
-  // photo it was opened from); the arrows move.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "ArrowLeft") go(-1);
-      if (e.key === "ArrowRight") go(1);
-    };
-    addEventListener("keydown", onKey);
-    return () => removeEventListener("keydown", onKey);
-  }, [go]);
-
-  if (!a) return null;
-  const when = new Date(a.takenAt).toLocaleString("ko-KR", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-
-  // A dialog: the focus stays inside while it is open and goes back to the
-  // photo after, the page under it does not scroll, and Esc closes it.
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-    <DialogContent
-      variant="fullscreen"
-      aria-describedby={undefined}
-      onPointerDown={(e) => {
-        drag.current = { x: e.clientX, y: e.clientY };
-      }}
-      onPointerUp={(e) => {
-        const d = drag.current;
-        drag.current = null;
-        if (!d) return;
-        const dx = e.clientX - d.x;
-        const dy = e.clientY - d.y;
-        if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) go(dx < 0 ? 1 : -1);
-        else if (dy > 120 && Math.abs(dy) > Math.abs(dx)) onClose();
-      }}
-    >
-      <DialogTitle className="sr-only">사진 보기</DialogTitle>
-      <div className="pt-safe flex shrink-0 items-center gap-2 px-2 py-2 text-white">
-        <button type="button" onClick={onClose} aria-label="닫기" className="flex size-11 items-center justify-center rounded-lg outline-none focus-visible:ring-3 focus-visible:ring-white/50">
-          <X aria-hidden className="size-5" />
-        </button>
-        <p className="tnum min-w-0 flex-1 truncate text-[12.5px] text-white/75">
-          {when}
-          <span className="ms-2 text-white/45">
-            {index + 1} / {list.length}
-          </span>
-        </p>
-        <a href={originalUrl(a.id)} download aria-label="원본 받기" className="flex size-11 items-center justify-center rounded-lg outline-none focus-visible:ring-3 focus-visible:ring-white/50">
-          <Download aria-hidden className="size-5" />
-        </a>
-      </div>
-      <div className="pb-safe flex min-h-0 flex-1 items-center justify-center">
-        {a.isImage ? (
-          // eslint-disable-next-line @next/next/no-img-element -- Immich preview through the proxy
-          <img key={a.id} src={thumbUrl(a.id, "preview")} alt="" className="max-h-full max-w-full object-contain select-none" draggable={false} />
-        ) : (
-          <video key={a.id} src={videoUrl(a.id)} poster={thumbUrl(a.id, "preview")} controls autoPlay playsInline className="max-h-full max-w-full" />
-        )}
-      </div>
-    </DialogContent>
-    </Dialog>
   );
 }

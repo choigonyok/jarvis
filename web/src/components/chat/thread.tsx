@@ -3,11 +3,15 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import Link from "next/link";
 import { ArrowDown, Reply } from "lucide-react";
+import { Lightbox } from "@/components/ui/lightbox";
+import { Retry } from "@/components/shell/retry";
+import { Spinner } from "@/components/ui/spinner";
 import { MarkButtons, WrongForm, WrongNote, useAnswerMarks, type MarkAnswer } from "@/components/chat/answer-marks";
 import { Composer } from "@/components/chat/composer";
 import { ModeToggle, type ChatMode } from "@/components/chat/mode-toggle";
 import { ChecklistCard, type Fold } from "@/components/chat/checklist";
-import { GuideSheet, GuideToggle } from "@/components/chat/guide";
+import { GuideSheet, GuideToggle, starters } from "@/components/chat/guide";
+import { Button } from "@/components/ui/button";
 import { NoticeCard } from "@/components/chat/notice-card";
 import { ProposalCard } from "@/components/chat/proposal-card";
 import { QueuedMessages } from "@/components/chat/queued";
@@ -217,37 +221,45 @@ const ROW =
  * Photos sent with a message, above its bubble - or shown by the assistant
  * (show_image), on its side. One photo is shown whole-ish; several become a
  * square grid, the way a messenger stacks an album. A photo deleted after its
- * listing ended shows as an empty tile, not a broken icon.
+ * listing ended shows as an empty tile, not a broken icon. A tap opens it
+ * full screen here (ui/lightbox.tsx): a link to the file took a home-screen
+ * app out to the browser (2026-11-06 review).
  */
 function Photos({ names, alt = "보낸 사진" }: { names: string[]; alt?: string }) {
   const single = names.length === 1;
+  const [open, setOpen] = useState<number | null>(null);
   return (
-    <div
-      className={cn(
-        // As wide as the photos: the assistant's sit in a full-width column.
-        "grid w-fit max-w-[80%] gap-1 sm:max-w-[26rem]",
-        single ? "grid-cols-1" : names.length === 2 || names.length === 4 ? "grid-cols-2" : "grid-cols-3",
-      )}
-    >
-      {names.map((name) => (
-        <a
-          key={name}
-          href={photoUrl(name)}
-          target="_blank"
-          rel="noreferrer"
-          className="block overflow-hidden rounded-xl border border-edge-soft bg-well outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element -- served by the agent behind the proxy */}
-          <img
-            src={photoUrl(name)}
-            alt={alt}
-            loading="lazy"
-            onError={(e) => (e.currentTarget.style.visibility = "hidden")}
-            className={cn("block object-cover", single ? "max-h-72 w-auto max-w-full" : "aspect-square w-24 sm:w-28")}
-          />
-        </a>
-      ))}
-    </div>
+    <>
+      <div
+        className={cn(
+          // As wide as the photos: the assistant's sit in a full-width column.
+          "grid w-fit max-w-[80%] gap-1 sm:max-w-[26rem]",
+          single ? "grid-cols-1" : names.length === 2 || names.length === 4 ? "grid-cols-2" : "grid-cols-3",
+        )}
+      >
+        {names.map((name, i) => (
+          <button
+            key={name}
+            type="button"
+            onClick={() => setOpen(i)}
+            aria-label={`${alt} 크게 보기`}
+            className="block overflow-hidden rounded-xl border border-edge-soft bg-well outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element -- served by the agent behind the proxy */}
+            <img
+              src={photoUrl(name)}
+              alt={alt}
+              loading="lazy"
+              onError={(e) => (e.currentTarget.style.visibility = "hidden")}
+              className={cn("block object-cover", single ? "max-h-72 w-auto max-w-full" : "aspect-square w-24 sm:w-28")}
+            />
+          </button>
+        ))}
+      </div>
+      {open !== null ? (
+        <Lightbox items={names.map((name) => ({ src: photoUrl(name), alt }))} start={open} onClose={() => setOpen(null)} />
+      ) : null}
+    </>
   );
 }
 
@@ -376,7 +388,7 @@ const TurnRow = memo(function TurnRow({
                   // Pictures the assistant shows (show_image): the photos, and
                   // its line about them under, as a messenger sends a photo.
                   <>
-                    <Photos names={turn.images} alt={turn.paragraphs?.[0] || "자비스가 보여 준 사진"} />
+                    <Photos names={turn.images} alt={turn.paragraphs?.[0] || "Jarvis가 보여 준 사진"} />
                     {turn.paragraphs?.length ? (
                       <div className="mt-2">
                         <Markdown>{turn.paragraphs.join("\n\n")}</Markdown>
@@ -607,9 +619,21 @@ const Transcript = memo(function Transcript({
   onMark,
   opened,
   onFold,
+  onRetry,
+  starters,
+  onStarter,
+  onGuide,
 }: {
   turns: Turn[];
   onMark: MarkAnswer;
+  /** Reads the thread again, by hand - under "불러오지 못했어요". */
+  onRetry: () => void;
+  /** The first things to say, on a conversation with nothing in it yet (chat/guide.tsx). */
+  starters: string[];
+  /** Puts one in the field - not sent: it is a start, to finish in one's own words. */
+  onStarter: (text: string) => void;
+  /** Opens everything there is to say (the ⓘ's sheet). */
+  onGuide: () => void;
   proposals: Proposal[];
   byId: Map<string, Proposal>;
   checklists: Record<string, Checklist>;
@@ -658,10 +682,41 @@ const Transcript = memo(function Transcript({
       {hydrated && turns.length === 0 ? (
         <MessageScrollerItem className={ROW}>
           <Rail />
-          <p className="max-w-[32rem] text-[14.5px] leading-[1.75] text-dim">
-            무엇을 맡길지 적어주세요. 상태를 바꾸는 일은 실행 전에 승인
-            카드로 올라옵니다.
-          </p>
+          {error ? (
+            // Nothing could be read: said as that, with the way to read again
+            // - not as a conversation yet to start (2026-11-06 review: both
+            // showed, and the only way back was a reload).
+            <div className="max-w-[32rem]">
+              <p role="status" className="border-l-2 border-reject pl-3 text-[13.5px] leading-relaxed text-dim">
+                {error}
+              </p>
+              <Retry onRetry={onRetry} />
+            </div>
+          ) : (
+            <div className="max-w-[32rem]">
+              <p className="text-[14.5px] leading-[1.75] text-dim">
+                무엇을 맡길지 적어주세요. 상태를 바꾸는 일은 실행 전에 승인 카드로 올라와요.
+              </p>
+              {/* What to say, shaped as one's own message is: a tap puts it in
+                  the field, to finish and send. */}
+              <ul className="mt-4 flex flex-wrap gap-2" aria-label="이렇게 말해 보세요">
+                {starters.map((text) => (
+                  <li key={text}>
+                    <button
+                      type="button"
+                      onClick={() => onStarter(text)}
+                      className="flex min-h-11 items-center rounded-2xl border border-edge bg-glass-raised px-4 text-left text-[14px] text-foreground transition-colors outline-none hover:bg-foreground/10 focus-visible:ring-3 focus-visible:ring-ring/50 mouse:min-h-9 mouse:text-[13.5px]"
+                    >
+                      {text}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <Button variant="underline" size="inline" onClick={onGuide} className="tap mt-2 text-[13px]">
+                말로 시킬 수 있는 일 더 보기
+              </Button>
+            </div>
+          )}
         </MessageScrollerItem>
       ) : null}
 
@@ -736,7 +791,7 @@ const Transcript = memo(function Transcript({
           </MessageScrollerItem>
         ) : null}
 
-        {error ? (
+        {error && !(hydrated && turns.length === 0) ? (
           <MessageScrollerItem className={ROW} role="status">
             <Rail />
             <p className="max-w-[36rem] border-l-2 border-reject pl-3 text-[13.5px] leading-relaxed text-dim">
@@ -988,16 +1043,27 @@ export function Thread() {
   // card may arrive after the tap (the thread is still loading): it is
   // looked for again as turns and cards come in.
   const wanted = useRef<string | null>(null);
+  // Pages above being read for the card: said over the composer meanwhile -
+  // the view sat still at the bottom with nothing to show for it (2026-11-06 review).
+  const [seeking, setSeeking] = useState(false);
   const focusCard = useCallback(() => {
     const id = wanted.current;
     const card = id ? scrollRef.current?.querySelector<HTMLElement>(`[data-proposal-id="${CSS.escape(id)}"]`) : null;
     if (!card) {
       // Older than what is loaded: its turn is on a page above. The view stays
       // where it is and the turns come in behind it until the card is among them.
-      if (id && hasMore && !loadingOlder && !olderFailed && byId.has(id)) void loadOlder();
+      if (id && hasMore && !loadingOlder && !olderFailed && byId.has(id)) {
+        setSeeking(true);
+        void loadOlder();
+      } else if (id && (!hasMore || olderFailed)) {
+        // Nowhere further to look.
+        wanted.current = null;
+        setSeeking(false);
+      }
       return;
     }
     wanted.current = null;
+    setSeeking(false);
     held.current = card;
     // To its row through the scroller, so it stops following the bottom,
     // then the card itself to the middle - as near as the thread's ends let
@@ -1211,6 +1277,10 @@ export function Thread() {
   // the same: they are drawn again only when it changes, not on every frame of
   // an answer.
   const openGuide = useCallback(() => setGuide(true), []);
+  // The empty conversation's first things to say go into the field, as typed.
+  const fillRef = useRef<((text: string) => void) | null>(null);
+  const startWith = useCallback((text: string) => fillRef.current?.(text), []);
+  const firstSays = useMemo(() => starters(role), [role]);
   const headerActions = useMemo(
     () => (
       <>
@@ -1388,7 +1458,7 @@ export function Thread() {
                       </button>
                     ) : (
                       <p className="mb-6 text-center text-[11.5px] text-faint" aria-live="polite">
-                        {loadingOlder ? "이전 대화를 불러오는 중" : "위로 올리면 이전 대화가 이어집니다"}
+                        {loadingOlder ? "이전 대화를 불러오는 중…" : "위로 올리면 이전 대화가 이어져요"}
                       </p>
                     )
                   ) : null}
@@ -1413,6 +1483,10 @@ export function Thread() {
                     onMark={mark}
                     opened={opened}
                     onFold={fold}
+                    onRetry={resync}
+                    starters={firstSays}
+                    onStarter={startWith}
+                    onGuide={openGuide}
                   />
                 </div>
               </div>
@@ -1435,7 +1509,21 @@ export function Thread() {
             over it, there only while the newest turn is out of sight. It
             says how many replies came meanwhile, so a reply that landed while
             you were reading back is not missed. */}
-        {away ? (
+        {seeking ? (
+          <div className="pointer-events-none absolute inset-x-0 bottom-full pb-3">
+            <div className="inset-x-safe">
+              <div className="mx-auto flex w-full max-w-[46rem] justify-center px-4 sm:px-8">
+                <p
+                  role="status"
+                  className="anim-settle flex h-11 items-center gap-2 rounded-full bg-popover px-4 text-[13px] text-dim shadow-lg ring-1 ring-edge mouse:h-10"
+                >
+                  <Spinner className="size-3.5" />
+                  카드를 찾는 중…
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : away ? (
           <div className="pointer-events-none absolute inset-x-0 bottom-full pb-3">
             <div className="inset-x-safe">
               <div className="mx-auto flex w-full max-w-[46rem] justify-center px-4 sm:px-8">
@@ -1469,6 +1557,7 @@ export function Thread() {
               quoting={quotingLine}
               onCancelQuote={cancelQuote}
               inputRef={inputRef}
+              fillRef={fillRef}
               busy={thinking}
               onStop={stop}
               draftKey={`jarvis:composer-draft:${role}`}

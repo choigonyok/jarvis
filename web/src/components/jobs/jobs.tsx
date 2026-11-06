@@ -83,7 +83,7 @@ export function Jobs() {
       setError(null);
       setReadAt(new Date());
     } catch {
-      setError("작업을 불러오지 못했습니다. 잠시 뒤 다시 시도하세요.");
+      setError("작업을 불러오지 못했어요. 잠시 뒤 다시 시도하세요.");
     }
   }, [loadOpenLists]);
 
@@ -137,11 +137,11 @@ export function Jobs() {
           {blocked.length > 0 ? (
             <section role="alert" className="mb-5 rounded-xl border border-mine/25 bg-mine/[0.06] px-4 py-3.5">
               <p className="text-[13.5px] text-foreground/90">
-                {blocked.map((b) => b.site).join(", ")} 에 다시 로그인해야 합니다.
+                {blocked.map((b) => b.site).join(", ")} 에 다시 로그인해야 해요.
               </p>
               <p className="mt-1 text-[12px] leading-relaxed text-dim">
-                이 사이트를 쓰는 작업은 쉬고 있습니다. 화면 탭에서 로그인한 뒤 대화에 올라온 로그인 카드를 승인하면
-                이어서 합니다.
+                이 사이트를 쓰는 작업은 쉬고 있어요. 화면 탭에서 로그인한 뒤 대화에 올라온 로그인 카드를 승인하면
+                이어서 해요.
               </p>
               <Link
                 href="/screen"
@@ -185,9 +185,9 @@ export function Jobs() {
               </div>
             ) : (
               <div className="py-14 text-center">
-                <p className="text-[14px] text-foreground/90">맡긴 작업이 없습니다.</p>
+                <p className="text-[14px] text-foreground/90">맡긴 작업이 없어요.</p>
                 <p className="mx-auto mt-2 max-w-[24rem] text-[12.5px] leading-relaxed text-dim">
-                  대화에서 시간이 걸리는 일을 맡기면 여기서 진행을 볼 수 있습니다. 예를 들어 &ldquo;이거 중고나라에
+                  대화에서 시간이 걸리는 일을 맡기면 여기서 진행을 볼 수 있어요. 예를 들어 &ldquo;이거 중고나라에
                   올려줘&rdquo;, &ldquo;이 상품 가격 내려가면 알려줘&rdquo;, &ldquo;택배 도착하면 알려줘&rdquo;.
                 </p>
                 <Link
@@ -288,7 +288,7 @@ function Row({ job: j, onOpen }: { job: Job; onOpen: () => void }) {
             : j.state === "active" && j.nextAt && !j.blockedSites?.length
               ? `다음 ${when(j.nextAt)}${j.nextReason ? ` · ${j.nextReason}` : ""}`
               : j.state === "waiting"
-                ? "카드에 답하면 이어서 합니다"
+                ? "카드에 답하면 이어서 해요"
                 : j.finishedAt
                   ? `${ago(j.finishedAt)} 끝남`
                   : j.lastRunAt

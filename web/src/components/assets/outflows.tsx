@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Pager } from "@/components/ui/pager";
 import { usePaged } from "@/lib/paging";
 import { krw, VENUE_LABEL, type Outflow, type OutflowPart } from "@/lib/portfolio";
+import { monthDay } from "@/lib/when";
 
 /**
  * Where money taken out of the accounts went (assets-svc outflows.ts).
@@ -57,7 +58,7 @@ function partLine(p: OutflowPart, whole: number): string {
   const amount = p.amountKrw < whole - 0.5 ? ` ${krw(p.amountKrw)}` : "";
   switch (p.use) {
     case "transfer":
-      return p.to ? `→ ${VENUE_LABEL[p.to.venue]}로 옮김 · ${md(p.to.date)}${amount}` : `다른 투자 계좌로 옮김${amount}`;
+      return p.to ? `→ ${VENUE_LABEL[p.to.venue]}로 옮김 · ${monthDay(p.to.date)}${amount}` : `다른 투자 계좌로 옮김${amount}`;
     case "spend":
       return `지출${p.category ? `(${p.category})` : ""}${p.memo ? ` · ${p.memo}` : ""}${amount}`;
     case "card":
@@ -69,7 +70,7 @@ function partLine(p: OutflowPart, whole: number): string {
       const until = p.decidedAt
         ? new Date(Date.parse(p.decidedAt) + 30 * 86_400_000).toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" })
         : null;
-      return `아직 통장에${amount}${until ? ` · ${md(until)}까지 기다려요` : ""}`;
+      return `아직 통장에${amount}${until ? ` · ${monthDay(until)}까지 기다려요` : ""}`;
     }
   }
 }
@@ -135,7 +136,7 @@ function OutflowRow({ outflow: o, onChanged }: { outflow: Outflow; onChanged: ()
           </span>
         ) : o.status === "waiting" ? (
           <span className="block text-[11.5px] text-faint">
-            다른 계좌로 들어오는지 보는 중 · {md(addDays(o.date, 3))}에 물어요
+            다른 계좌로 들어오는지 보는 중 · {monthDay(addDays(o.date, 3))}에 물어요
           </span>
         ) : null}
         {state === "done" ? <span className="block text-[11.5px] text-faint">다시 물을게요. 곧 대화에 카드가 와요.</span> : null}

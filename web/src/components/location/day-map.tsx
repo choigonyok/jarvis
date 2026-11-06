@@ -5,6 +5,7 @@ import type { Map as MapLibre } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { Maximize2 } from "lucide-react";
 import { baseStyle } from "@/components/location/map-style";
+import { type Theme, onThemeChange, themeNow } from "@/lib/theme";
 import { type Day, type Mode, type Node, type Person, type Scene, type Stay, type Who, headAt, hm, meters } from "@/lib/track";
 
 /** What is laid over the map, inside it: the light, the places' names, the people's marks. */
@@ -18,18 +19,25 @@ type Layer = {
 /**
  * Each person's light, in the shared calendar's colors: the viewer's own is
  * mine (violet), the other's partner (amber) - the tokens in globals.css,
- * worked out to rgb for the canvas. Where both went the same way, the two add
- * up towards white.
+ * worked out to rgb for the canvas, the night's and the day's. By night
+ * light adds up, and where both went the same way the two go towards white;
+ * by day it is ink that does, and the two together go dark.
  */
-const TONE = { mine: "194, 167, 244", partner: "246, 187, 112" } as const;
-const toneOf = (p: Person) => TONE[p.me ? "mine" : "partner"];
+type Tone = "mine" | "partner";
+const TONE: Record<Theme, Record<Tone, string>> = {
+  dark: { mine: "194, 167, 244", partner: "246, 187, 112" },
+  light: { mine: "119, 80, 177", partner: "154, 101, 9" },
+};
+/** The page's own background, punched out of the light for a place stayed at. */
+const GROUND: Record<Theme, string> = { dark: "#0c0d0f", light: "#f9fafb" };
+const toneOf = (p: Person, theme: Theme) => TONE[theme][p.me ? "mine" : "partner"];
 
 /**
  * A place being made one of a phone's regions (위치 등록): its circle on the
  * map, dashed while it is being named and drawn whole once it is made - so
  * how far 50 m reaches is seen, not imagined.
  */
-export type Spot = { lat: number; lon: number; radius: number; name: string; tone: keyof typeof TONE; made?: boolean };
+export type Spot = { lat: number; lon: number; radius: number; name: string; tone: Tone; made?: boolean };
 
 /**
  * The day on a map, as light: the way gone so far up to the moment shown,
@@ -70,6 +78,8 @@ export function DayMap({
   const [broken, setBroken] = useState<string | null>(null);
   // What a draw reads: the map's own events call it outside React.
   const now = useRef({ scene, t, live, follow, spot });
+  // The phone's theme, which the renderer and the canvas cannot read from CSS.
+  const theme = useRef<Theme>("dark");
   useLayoutEffect(() => {
     now.current = { scene, t, live, follow, spot };
   });
@@ -82,9 +92,10 @@ export function DayMap({
         if (gone || !box.current) return;
         maplibre.setWorkerUrl(new URL("maplibre-gl/dist/maplibre-gl-worker.mjs", import.meta.url).href);
         const { bounds } = now.current.scene;
+        theme.current = themeNow();
         made = new maplibre.Map({
           container: box.current,
-          style: baseStyle(`${location.origin}/api/map/planet`, consoleFonts()),
+          style: baseStyle(`${location.origin}/api/map/planet`, consoleFonts(), theme.current),
           ...(bounds
             ? { bounds, fitBoundsOptions: { padding: padding(box.current), maxZoom: 15 } }
             : { center: [126.978, 37.5665], zoom: 10 }),
@@ -125,8 +136,16 @@ export function DayMap({
         map.current = made;
       })
       .catch(() => !gone && setBroken("지도를 불러오지 못했어요."));
+    // The phone turning light or dark (at sunset, say) repaints the map and the light on it.
+    const off = onThemeChange((next) => {
+      theme.current = next;
+      if (!made) return;
+      made.setStyle(baseStyle(`${location.origin}/api/map/planet`, consoleFonts(), next));
+      made.triggerRepaint();
+    });
     return () => {
       gone = true;
+      off();
       made?.remove();
       map.current = null;
       layer.current = null;
@@ -212,12 +231,13 @@ export function DayMap({
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
     const at = (p: { lat: number; lon: number }) => m.project([p.lon, p.lat]);
+    const day = theme.current;
 
     // The ways so far, as light that adds up where it crosses itself - and
-    // where the two went together.
-    ctx.globalCompositeOperation = "lighter";
+    // where the two went together. By day, as ink that darkens the same way.
+    ctx.globalCompositeOperation = day === "light" ? "multiply" : "lighter";
     ctx.lineJoin = "round";
-    for (const person of scene.people) light(ctx, person, t, at);
+    for (const person of scene.people) light(ctx, person, t, at, day);
     ctx.setLineDash([]);
 
     // The places stayed at, once reached: a ring cut out of the light.
@@ -229,15 +249,15 @@ export function DayMap({
         const p = at(n);
         ctx.beginPath();
         ctx.arc(p.x, p.y, 5.5, 0, Math.PI * 2);
-        ctx.fillStyle = "#0c0d0f";
+        ctx.fillStyle = GROUND[day];
         ctx.fill();
         ctx.lineWidth = 1.5;
-        ctx.strokeStyle = `rgba(${toneOf(person)}, ${position?.node === n ? 0.95 : 0.55})`;
+        ctx.strokeStyle = `rgba(${toneOf(person, day)}, ${position?.node === n ? 0.95 : 0.55})`;
         ctx.stroke();
       }
     }
 
-    if (now.current.spot) circle(ctx, now.current.spot, at, w, getComputedStyle(m.getContainer()).fontFamily);
+    if (now.current.spot) circle(ctx, now.current.spot, at, w, getComputedStyle(m.getContainer()).fontFamily, day);
 
     // Each person's mark: where they were at t. Two at the same place stand
     // side by side as the pair is drawn: the cream cat (the guest's) on the
@@ -268,7 +288,9 @@ export function DayMap({
       el.style.transform = `translate(${p.x - 21}px, ${p.y - 21}px)`;
       const halo = el.firstElementChild as HTMLElement | null;
       if (halo) {
-        halo.style.background = `radial-gradient(circle, rgba(${toneOf(person)}, 0.5) 0%, rgba(${toneOf(person)}, 0.16) 45%, transparent 70%)`;
+        // By day the cat's outline needs no light behind it; the glow stays to say "now".
+        const [core, edge] = day === "light" ? [0.3, 0.1] : [0.5, 0.16];
+        halo.style.background = `radial-gradient(circle, rgba(${toneOf(person, day)}, ${core}) 0%, rgba(${toneOf(person, day)}, ${edge}) 45%, transparent 70%)`;
         halo.classList.toggle("anim-breathe", live);
       }
     });
@@ -291,7 +313,7 @@ export function DayMap({
           onClick={() => fit(true)}
           aria-label="하루 전체 보기"
           title="하루 전체 보기"
-          className="absolute top-3 right-3 flex size-11 items-center justify-center rounded-full bg-popover text-dim shadow-[0_6px_16px_-6px_oklch(0_0_0/70%)] transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 mouse:size-9"
+          className="absolute top-3 right-3 flex size-11 items-center justify-center rounded-full bg-popover text-dim shadow-[0_6px_16px_-6px_var(--shade)] transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 mouse:size-9"
         >
           <Maximize2 aria-hidden className="size-4" strokeWidth={1.8} />
         </button>
@@ -336,6 +358,7 @@ function light(
   person: Person,
   t: number,
   at: (p: { lat: number; lon: number }) => { x: number; y: number },
+  theme: Theme,
 ) {
   const position = headAt(person.day, t);
   type Run = { mode: Mode; level: number; points: { x: number; y: number }[]; offset: number };
@@ -354,7 +377,7 @@ function light(
     runs.at(-1)!.points.push(b);
     along += Math.hypot(b.x - a.x, b.y - a.y);
   }
-  const tone = toneOf(person);
+  const tone = toneOf(person, theme);
   for (const r of runs) {
     if (r.points.length < 2) continue;
     const style = STROKE[r.mode];
@@ -387,10 +410,12 @@ function circle(
   at: (p: { lat: number; lon: number }) => { x: number; y: number },
   w: number,
   font: string,
+  theme: Theme,
 ) {
   const c = at(spot);
   const r = Math.max(4, Math.abs(at({ lat: spot.lat + spot.radius / 111_320, lon: spot.lon }).y - c.y));
-  const tone = TONE[spot.tone];
+  const tone = TONE[theme][spot.tone];
+  const day = theme === "light";
   ctx.beginPath();
   ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
   ctx.fillStyle = `rgba(${tone}, ${spot.made ? 0.16 : 0.09})`;
@@ -404,7 +429,7 @@ function circle(
   const title = spot.name || "이름을 정해 주세요";
   const size = `반경 ${spot.radius}m`;
   ctx.save();
-  ctx.shadowColor = "#0c0d0f";
+  ctx.shadowColor = GROUND[theme];
   ctx.shadowBlur = 6;
   ctx.textBaseline = "middle";
   ctx.font = `500 12.5px ${font}`;
@@ -415,10 +440,12 @@ function circle(
   ctx.textAlign = left ? "right" : "left";
   const x = left ? c.x - r - 10 : c.x + r + 10;
   ctx.font = `500 12.5px ${font}`;
-  ctx.fillStyle = spot.name ? "rgba(241, 241, 243, 0.94)" : "rgba(241, 241, 243, 0.6)";
+  // The page's words and its dim grey, worked out to rgb (globals.css).
+  const ink = day ? "21, 22, 25" : "241, 241, 243";
+  ctx.fillStyle = `rgba(${ink}, ${spot.name ? 0.94 : 0.6})`;
   ctx.fillText(title, x, c.y - 8);
   ctx.font = `400 11px ${font}`;
-  ctx.fillStyle = "rgba(166, 167, 172, 0.95)";
+  ctx.fillStyle = day ? "rgba(84, 85, 89, 0.95)" : "rgba(166, 167, 172, 0.95)";
   ctx.fillText(size, x, c.y + 8);
   ctx.restore();
 }
@@ -440,8 +467,8 @@ const PAIR = 14.5;
 
 /**
  * A person's mark: their cat over a soft glow in their color, which breathes
- * when it is now. The glow keeps the cat's dark outline from sinking into the
- * dark map.
+ * when it is now. By night the glow keeps the cat's dark outline from sinking
+ * into the dark map.
  */
 function mark(who: Who): HTMLDivElement {
   const el = document.createElement("div");
@@ -532,7 +559,7 @@ function name(
     let n = l.names.get(key);
     if (!n) {
       const el = document.createElement("div");
-      el.className = "pointer-events-none absolute top-0 left-0 flex flex-col font-sans leading-[1.25] whitespace-nowrap [text-shadow:0_0_6px_#0c0d0f,0_0_2px_#0c0d0f]";
+      el.className = "pointer-events-none absolute top-0 left-0 flex flex-col font-sans leading-[1.25] whitespace-nowrap [text-shadow:0_0_6px_var(--background),0_0_2px_var(--background)]";
       l.root.insertBefore(el, l.marks.values().next().value ?? null);
       n = { el, text: "", w: 0, h: 0 };
       l.names.set(key, n);

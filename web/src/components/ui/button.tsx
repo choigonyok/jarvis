@@ -40,7 +40,7 @@ const buttonVariants = cva(
         lined: "border-edge-soft text-dim hover:bg-glass hover:text-foreground",
         // The voice screen's way back: an outlined capsule beside its one
         // filled button.
-        pill: "rounded-full border-edge text-dim hover:border-white/20 hover:text-foreground",
+        pill: "rounded-full border-edge text-dim hover:border-foreground/20 hover:text-foreground",
         // A word to press inside a sentence.
         underline:
           "h-auto rounded-sm px-0 font-normal text-dim underline decoration-edge underline-offset-[3px] hover:text-foreground disabled:text-faint disabled:opacity-100",

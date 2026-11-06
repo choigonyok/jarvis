@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AudioLines, Keyboard, Mic, Volume2, VolumeX, X } from "lucide-react";
+import { AudioLines, Keyboard, Mic, Volume2, VolumeX } from "lucide-react";
 import { Caption, DOT, IconButton, PrimaryButton, QuietButton, Spectrum, type Tone } from "@/components/chat/voice-parts";
 import { VoiceSetup } from "@/components/chat/voice-setup";
 import { useMicLevel } from "@/lib/use-mic-level";
@@ -312,7 +312,7 @@ export function VoiceStage({
         : thinking || sending
           ? { text: "생각하는 중", tone: "thinking" }
           : listening
-            ? { text: "듣고 있습니다", tone: "listening" }
+            ? { text: "듣고 있어요", tone: "listening" }
             : { text: "마이크를 여는 중", tone: "idle" };
 
   // What takes the big line. Whoever is talking right now owns it; between
@@ -325,8 +325,8 @@ export function VoiceStage({
         tone="hint"
         text={
           ownVoice
-            ? "시작을 누르고 말하세요. 말이 끝나면 Jarvis가 내 목소리로 답합니다."
-            : "시작을 누르고 말하세요. 말이 끝나면 Jarvis가 소리로 답합니다."
+            ? "시작을 누르고 말하세요. 말이 끝나면 Jarvis가 내 목소리로 답해요."
+            : "시작을 누르고 말하세요. 말이 끝나면 Jarvis가 소리로 답해요."
         }
       />
     );
@@ -337,7 +337,7 @@ export function VoiceStage({
         text={
           error === "mic-silent"
             ? "마이크가 열렸는데 소리가 들어오지 않았어요. 말하기를 눌러 다시 열어 주세요."
-            : `이 기기가 마이크를 자동으로 다시 열지 못하게 했습니다. 말하기를 눌러 이어서 말하세요.${error ? ` (${error})` : ""}`
+            : "이 기기가 마이크를 자동으로 다시 열지 못하게 했어요. 말하기를 눌러 이어서 말하세요."
         }
       />
     );
@@ -347,7 +347,7 @@ export function VoiceStage({
         tone="hint"
         text={
           state === "denied"
-            ? "마이크 권한이 필요합니다. 브라우저 설정에서 허용한 뒤 다시 시작하세요."
+            ? "마이크 권한이 필요해요. 브라우저 설정에서 허용한 뒤 다시 시작하세요."
             : failure(error)
         }
       />
@@ -371,11 +371,9 @@ export function VoiceStage({
 
   return (
     <div className="pb-safe pt-safe inset-x-safe screen-h fixed inset-x-0 top-0 z-50 flex flex-col bg-background">
-      <div className="flex h-13 shrink-0 items-center justify-between px-3 sm:h-14 sm:px-6">
-        <IconButton onClick={leave} label="음성 모드 나가기">
-          <X aria-hidden className="size-[18px]" />
-        </IconButton>
-
+      {/* One way out, the keyboard on the right: an ✕ on the left did the
+          same thing under another name (2026-11-06 review). */}
+      <div className="flex h-13 shrink-0 items-center justify-end px-3 sm:h-14 sm:px-6">
         <div className="flex items-center gap-1">
           <IconButton onClick={openSetup} label={ownVoice ? "내 목소리 (등록됨)" : "내 목소리 등록"}>
             <AudioLines aria-hidden className={cn("size-[18px]", ownVoice && "text-online/80")} />
@@ -467,8 +465,8 @@ export function VoiceStage({
       <div className="flex shrink-0 flex-col items-center justify-center gap-4 px-6 pt-2 pb-8">
         {!supported ? (
           <p className="max-w-[26rem] text-center text-[13px] leading-relaxed text-dim">
-            이 브라우저는 음성 인식을 지원하지 않습니다. Chrome이나 Safari에서
-            열면 쓸 수 있습니다.
+            이 브라우저는 음성 인식을 지원하지 않아요. Chrome이나 Safari에서
+            열면 쓸 수 있어요.
           </p>
         ) : started && paused && !speaking ? (
           <div className="flex items-center gap-3">
@@ -533,16 +531,20 @@ function useHeard(signal: number): number {
   return level;
 }
 
-/** What a fatal recognizer error means, in words that say what to do. */
+/**
+ * What a fatal recognizer error means, in words that say what to do. The
+ * code itself is the diagnostics' (lib/use-speech.ts, rec.error): "(network)"
+ * at the end of a sentence told nobody anything (2026-11-07 review).
+ */
 function failure(code: string | null) {
   switch (code) {
     case "network":
-      return "음성 인식 서버에 연결하지 못했습니다. 끝내기를 누른 뒤 다시 시작해 보세요. (network)";
+      return "음성 인식 서버에 연결하지 못했어요. 끝내기를 누른 뒤 다시 시작해 보세요.";
     case "audio-capture":
-      return "마이크 소리를 받지 못했습니다. 입력 장치를 확인해 주세요. (audio-capture)";
+      return "마이크 소리를 받지 못했어요. 입력 장치를 확인해 주세요.";
     case "language-not-supported":
-      return "이 브라우저가 한국어 인식을 지원하지 않습니다. (language-not-supported)";
+      return "이 브라우저는 한국어를 알아듣지 못해요. Safari나 Chrome에서 열어 주세요.";
     default:
-      return `음성 인식이 멈췄습니다. (${code ?? "unknown"})`;
+      return "음성 인식이 멈췄어요. 끝내기를 누른 뒤 다시 시작해 보세요.";
   }
 }

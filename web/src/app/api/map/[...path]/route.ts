@@ -18,7 +18,7 @@ type Ctx = { params: Promise<{ path: string[] }> };
 /** On Cloudflare, how long its cache keeps what was fetched. Ignored anywhere else. */
 const kept = (seconds: number) => ({ cf: { cacheEverything: true, cacheTtl: seconds } }) as RequestInit;
 
-const missing = () => Response.json({ error: "없는 경로입니다." }, { status: 404 });
+const missing = () => Response.json({ error: "없는 경로예요." }, { status: 404 });
 
 export async function GET(request: Request, context: Ctx): Promise<Response> {
   const { path } = await context.params;
@@ -32,7 +32,7 @@ export async function GET(request: Request, context: Ctx): Promise<Response> {
   try {
     upstream = await fetch(`${ORIGIN}/planet/${build}/${z}/${x}/${y}.pbf`, kept(30 * 86_400));
   } catch {
-    return Response.json({ error: "지도 타일에 연결하지 못했습니다." }, { status: 502 });
+    return Response.json({ error: "지도 타일에 연결하지 못했어요." }, { status: 502 });
   }
   if (!upstream.ok) return new Response(null, { status: upstream.status === 404 ? 404 : 502 });
   // The body comes decompressed; it goes on without a content-encoding, and
@@ -53,12 +53,12 @@ async function tileset(origin: string): Promise<Response> {
     if (!res.ok) throw new Error(String(res.status));
     body = await res.json();
   } catch {
-    return Response.json({ error: "지도 타일 정보를 가져오지 못했습니다." }, { status: 502 });
+    return Response.json({ error: "지도 타일 정보를 가져오지 못했어요." }, { status: 502 });
   }
   const tiles = (body.tiles ?? []).flatMap((url) => {
     const build = url.match(/\/planet\/([^/]+)\/\{z\}\/\{x\}\/\{y\}\.pbf$/)?.[1];
     return build && BUILD.test(build) ? [`${origin}/api/map/tiles/${build}/{z}/{x}/{y}.pbf`] : [];
   });
-  if (tiles.length === 0) return Response.json({ error: "지도 타일 정보를 읽지 못했습니다." }, { status: 502 });
+  if (tiles.length === 0) return Response.json({ error: "지도 타일 정보를 읽지 못했어요." }, { status: 502 });
   return Response.json({ ...body, tiles }, { headers: { "cache-control": "private, max-age=3600" } });
 }

@@ -37,6 +37,7 @@ import type { Plan } from "@/lib/trade-plan";
 import { onResume } from "@/lib/resume";
 import { isPending } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
+import { dayLabel, dayOf, monthDay } from "@/lib/when";
 import { cn } from "@/lib/utils";
 
 type Fold = "bridge" | "alloc" | "orders" | "principal";
@@ -119,7 +120,7 @@ export function Assets() {
         followUp.current = window.setTimeout(() => again.current(tries + 1), 2500);
       }
     } catch {
-      setError("잔고를 불러오지 못했습니다.");
+      setError("잔고를 불러오지 못했어요.");
     } finally {
       setLoading(false);
     }
@@ -169,9 +170,7 @@ export function Assets() {
           return `${label(m.from)}에서 ${label(m.to)}로 ${krw(m.amountKrw)} 옮기기`;
         })
     : [];
-  const since = principal
-    ? `${Number(principal.since.slice(5, 7))}/${Number(principal.since.slice(8, 10))}`
-    : "";
+  const since = principal ? monthDay(principal.since) : "";
   const track = data?.track ?? [];
   const first = track[0];
   const rateOf0 = (p: { totalKrw: number; principalKrw: number }) =>
@@ -371,7 +370,7 @@ export function Assets() {
                           .map((o) => `${data.holdings.find((h) => h.symbol === o.symbol)?.name ?? o.symbol} $${o.limitPrice.toFixed(2)} ${o.side === "buy" ? "이하 매수" : "이상 매도"}`)
                           .join(", ")
                       : record[0]
-                      ? `최근 ${new Date(record[0].createdAt).toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric" })} · ${record.filter((o) => o.status === "placed").length}건 보냄`
+                      ? `최근 ${dayLabel(dayOf(new Date(record[0].createdAt)))} · ${record.filter((o) => o.status === "placed").length}건 보냄`
                       : "종목을 누르면 사고팔 수 있어요"}
                   </p>
                 </Row>
@@ -482,8 +481,8 @@ export function Assets() {
               </section>
             ) : !loading && !error && data ? (
               <p className="text-[13.5px] leading-relaxed text-faint">
-                보유 중인 종목이 없습니다. 업비트나 증권 계좌에 자산이 생기면 여기에
-                나타납니다.
+                보유 중인 종목이 없어요. 업비트나 증권 계좌에 자산이 생기면 여기에
+                나타나요.
               </p>
             ) : null}
           </div>

@@ -68,7 +68,7 @@ export function useWorkout() {
       saved.current = data;
       setError(null);
     } catch {
-      setError("기록을 불러오지 못했습니다.");
+      setError("기록을 불러오지 못했어요.");
     } finally {
       setLoaded(true);
     }
@@ -102,7 +102,7 @@ export function useWorkout() {
       saved.current = next;
       setError(null);
     } catch {
-      setError("기록을 저장하지 못했습니다.");
+      setError("기록을 저장하지 못했어요.");
     }
   }, []);
 

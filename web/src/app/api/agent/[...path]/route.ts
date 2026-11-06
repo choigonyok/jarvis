@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 const proxy = pathProxy(
   (request) => {
     if (request.headers.get(ROLE_HEADER) !== "guest") return AGENT_URL;
-    return AGENT_GUEST_URL || Response.json({ error: "손님용 jarvis 가 설정되지 않았습니다." }, { status: 503 });
+    return AGENT_GUEST_URL || Response.json({ error: "손님용 jarvis 가 설정되지 않았어요." }, { status: 503 });
   },
   { label: "에이전트", responseHeaders: ["content-length"] },
 );

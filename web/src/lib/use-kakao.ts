@@ -96,7 +96,7 @@ export function useKakao(source: Source = "kakao") {
       // 처음 들어왔을 때는 가장 최근 방을 연다.
       setSelected((cur) => cur ?? data[0]?.id ?? null);
     } catch {
-      setError("수집된 대화를 불러오지 못했습니다.");
+      setError("수집된 대화를 불러오지 못했어요.");
     } finally {
       setHydrated(true);
     }
@@ -124,7 +124,7 @@ export function useKakao(source: Source = "kakao") {
       );
       setError(null);
     } catch {
-      setError("메시지를 불러오지 못했습니다.");
+      setError("메시지를 불러오지 못했어요.");
     }
   }, [API]);
 

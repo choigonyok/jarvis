@@ -1,4 +1,5 @@
 import { readableTitle } from "@/lib/card-body";
+import { dayLabel as whenDayLabel, dayOf, monthDay } from "@/lib/when";
 import type { Proposal, ProposalState } from "@/lib/thread";
 
 /**
@@ -58,17 +59,10 @@ export function raisedAt(proposal: Proposal): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
-
-/** "9월 22일 (화)", and today and yesterday by name. */
+/** "오늘", "어제", "9월 22일 (화)" (lib/when.ts). */
 export function dayLabel(date: Date | null, now = new Date()): string {
   if (!date) return "날짜 없음";
-  const days = Math.round(
-    (startOfDay(now).getTime() - startOfDay(date).getTime()) / 86_400_000,
-  );
-  if (days === 0) return "오늘";
-  if (days === 1) return "어제";
-  return `${date.getMonth() + 1}월 ${date.getDate()}일 (${WEEKDAYS[date.getDay()]})`;
+  return whenDayLabel(dayOf(date), now);
 }
 
 function startOfDay(d: Date): Date {
@@ -100,7 +94,7 @@ export function groupByDay(proposals: Proposal[], now = new Date()): Day[] {
 export function waitingSince(proposal: Proposal, now = new Date()): string | undefined {
   const date = raisedAt(proposal);
   if (!date || startOfDay(date).getTime() === startOfDay(now).getTime()) return undefined;
-  return `${date.getMonth() + 1}/${date.getDate()}`;
+  return monthDay(dayOf(date), now);
 }
 
 /** The order the record shows them in - and pages them in (lib/paging.ts). */

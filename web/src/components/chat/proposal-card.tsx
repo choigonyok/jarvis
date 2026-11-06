@@ -1,18 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, X } from "lucide-react";
-import { HeldBack, HoldBar, holdsMoney, useHold } from "@/components/chat/hold";
+import { HeldBack, HoldBar, Sending, Sent, holdsMoney, useHold } from "@/components/chat/hold";
 import { RejectForm } from "@/components/chat/reject-form";
 import { Button } from "@/components/ui/button";
 import { CodeBlock, CodeBlockContent, CodeBlockCopyButton } from "@/components/ui/code-block";
 import { FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { SecretInput } from "@/components/ui/secret-input";
 import { Textarea } from "@/components/ui/textarea";
-import { Toggle } from "@/components/ui/toggle";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { isPrivateField, type CardField, type Decision, type Proposal, type ProposalState } from "@/lib/thread";
 import { isLiteral, readableBody, readableConsequence, readableTitle } from "@/lib/card-body";
+import { heardBack, sentOn } from "@/lib/decide";
 import { photoUrl } from "@/lib/uploads";
 import { cn } from "@/lib/utils";
 
@@ -44,6 +45,13 @@ export function ProposalCard({
   const [refusal, setRefusal] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [asking, setAsking] = useState(false);
+  // Taken, and the card not back with it yet (lib/decide.ts): said in the
+  // buttons' place until it is, here or wherever the card is drawn again.
+  const [sentAs, setSentAs] = useState(() => sentOn(proposal.id));
+  const onItsWay = settled ? undefined : sentAs;
+  useEffect(() => {
+    if (settled) heardBack(proposal.id);
+  }, [settled, proposal.id]);
   // A required field left empty (the price of a listing, say) is the one thing
   // a form card cannot be approved without: the operator fills it in, never the model.
   const missing = fields.filter((f) => f.required && !(values[f.key] ?? "").trim());
@@ -53,9 +61,13 @@ export function ProposalCard({
     setBusy(true);
     const reason = await onDecide(d, form && d === "approved" ? values : undefined, because);
     setBusy(false);
-    if (reason) setRefusal(reason);
+    if (reason) {
+      setRefusal(reason);
+      return;
+    }
+    setSentAs(sentOn(proposal.id));
     // A typed password is not kept on screen once it has been handed over.
-    else setValues((cur) => Object.fromEntries(Object.entries(cur).map(([k, v]) => [k, fields.some((f) => f.key === k && isPrivateField(f)) ? "" : v])));
+    setValues((cur) => Object.fromEntries(Object.entries(cur).map(([k, v]) => [k, fields.some((f) => f.key === k && isPrivateField(f)) ? "" : v])));
   }
   // Money: the approval waits five seconds with 되돌리기 on the card (chat/hold.tsx).
   const hold = useHold(proposal.id, () => void decide("approved"));
@@ -89,7 +101,7 @@ export function ProposalCard({
         {settled ? null : (
           <div className="mb-2 flex items-center gap-2 text-[11px] text-faint">
             <span aria-hidden className="anim-breathe size-[5px] rounded-full bg-dim" />
-            <span>결재 대기</span>
+            <span>{busy ? "보내는 중" : onItsWay ? "반영 중" : "결재 대기"}</span>
           </div>
         )}
 
@@ -145,9 +157,19 @@ export function ProposalCard({
             <span className="tnum text-faint">· {proposal.decidedAt}</span>
             {proposal.note ? <span className="text-faint">· {proposal.note}</span> : null}
             {proposal.reason ? <span className="text-faint">· 이유: {proposal.reason}</span> : null}
+            {/* Where a no goes: mind's own question, turned down, is not put
+                again for a while (its topic two weeks, an entry like it a
+                month, a place told 다시 묻지 마 never). */}
+            {proposal.state === "rejected" && proposal.action.kind === "mind.approve" ? (
+              <span className="w-full text-faint">같은 제안은 한동안 다시 묻지 않아요.</span>
+            ) : null}
           </p>
         ) : hold.holding ? (
           <HoldBar left={hold.left} onCancel={hold.cancel} />
+        ) : busy ? (
+          <Sending />
+        ) : onItsWay ? (
+          <Sent decision={onItsWay} />
         ) : asking ? (
           <RejectForm busy={busy} onCancel={() => setAsking(false)} onReject={(why) => void decide("rejected", why)} />
         ) : (
@@ -179,7 +201,7 @@ export function ProposalCard({
         )}
         {!settled && (refusal || missing.length > 0) ? (
           <p role={refusal ? "alert" : undefined} className={cn("mt-2 px-1 text-[12px]", refusal ? "text-reject" : "text-faint")}>
-            {refusal ?? `${missing.map((f) => f.label).join(", ")}을(를) 적으면 승인할 수 있습니다.`}
+            {refusal ?? `${missing.map((f) => f.label).join(", ")}을(를) 적으면 승인할 수 있어요.`}
           </p>
         ) : null}
       </div>
@@ -316,39 +338,6 @@ function FormFields({
           </div>
         );
       })}
-    </div>
-  );
-}
-
-/**
- * A password field, hidden as typed, with a 보기 toggle - a phone keyboard
- * makes a typo easy and this is the only chance to see it. It goes from here
- * to the vault and is never shown again.
- */
-function SecretInput({ id, value, onChange }: { id: string; value: string; onChange: (v: string) => void }) {
-  const [shown, setShown] = useState(false);
-  return (
-    <div className="relative">
-      <Input
-        id={id}
-        type={shown ? "text" : "password"}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        autoComplete="new-password"
-        autoCapitalize="none"
-        autoCorrect="off"
-        spellCheck={false}
-        className="pe-14 mouse:text-[13.5px]"
-      />
-      <Toggle
-        pressed={shown}
-        onPressedChange={setShown}
-        aria-label={shown ? "비밀번호 가리기" : "비밀번호 보기"}
-        size="sm"
-        className="absolute inset-y-0 right-1 my-auto h-9 rounded-md font-normal text-[12px] text-faint hover:bg-transparent hover:text-foreground data-[state=on]:bg-transparent mouse:h-7"
-      >
-        {shown ? "가리기" : "보기"}
-      </Toggle>
     </div>
   );
 }
