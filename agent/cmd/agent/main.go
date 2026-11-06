@@ -690,9 +690,13 @@ func main() {
 				// Where a withdrawal went: muted with the rest of 자산.
 				kind, title = "assets.ask", "자산"
 			}
-			body := p.Card.Title
-			if p.Card.Body != "" {
-				body += " - " + p.Card.Body
+			// What the card is, as its title says it, over the gist of its
+			// body; what kind of card it is goes in the kind (the inbox says
+			// it, and it is what is muted). The title was the kind's word
+			// ("결재 대기", "제안") over the whole card (2026-11-07).
+			body := notify.Brief(p.Card.Body, 140)
+			if body == "" {
+				body = title
 			}
 			// A quiet card (mind's gate: not worth a buzz now) waits for the
 			// evening digest; the card itself is up meanwhile.
@@ -703,7 +707,7 @@ func main() {
 			notifier.Send(notify.Event{
 				Source: "agent", Kind: kind, Tier: tier, Level: level,
 				// Straight to the card, not the bottom of the thread.
-				Title: title, Body: body, URL: "/?proposal=" + p.ID, Key: keyPrefix + p.ID,
+				Title: notify.Brief(p.Card.Title, 80), Body: body, URL: "/?proposal=" + p.ID, Key: keyPrefix + p.ID,
 				Audience: audience,
 			})
 		})
@@ -715,18 +719,17 @@ func main() {
 			if cfg.Guest {
 				endKey = "guest-job-end:"
 			}
+			// Which job and how it ended over the gist of its last word: the
+			// title was "작업을 끝냈어요" for every job, over the first 300
+			// characters of its report (2026-11-07).
 			jobsModule.OnEnd(func(e jobs.EndNote) {
-				kind, title, level := "job.done", "작업을 끝냈어요", "info"
+				kind, title, level := "job.done", "끝냈어요: ", "info"
 				if !e.Done {
-					kind, title, level = "job.failed", "작업이 멈췄어요", "warn"
-				}
-				body := e.Job.Title
-				if t := strings.TrimSpace(e.Text); t != "" {
-					body += " - " + t
+					kind, title, level = "job.failed", "멈췄어요: ", "warn"
 				}
 				notifier.Send(notify.Event{
 					Source: "agent", Kind: kind, Tier: "now", Level: level,
-					Title: title, Body: clip(body, 300),
+					Title: title + notify.Brief(e.Job.Title, 60), Body: notify.Brief(e.Text, 140),
 					URL: fmt.Sprintf("/jobs?focus=job:%d", e.Job.ID), Key: fmt.Sprintf("%s%d", endKey, e.Run),
 					Audience: audience,
 				})

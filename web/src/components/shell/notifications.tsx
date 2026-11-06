@@ -12,6 +12,7 @@ import { Pager } from "@/components/ui/pager";
 import { Popover, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
 import { usePush } from "@/lib/use-push";
+import { readable } from "@/lib/brief";
 import { dayOf, monthDay } from "@/lib/when";
 import { cn } from "@/lib/utils";
 
@@ -241,6 +242,9 @@ export function Notifications() {
               ) : (
                 notes.map((n) => {
                   const about = role === "owner" ? noticeOf(n) : null;
+                  // One line of title, two of body: a job's report ran to
+                  // 300 characters of document here (2026-11-07).
+                  const said = readable(n.title, n.body);
                   return (
                   <li key={n.id}>
                     <button
@@ -262,10 +266,10 @@ export function Notifications() {
                       />
                       <span className="min-w-0 flex-1">
                         <span className="flex items-baseline justify-between gap-2">
-                          <span className={cn("truncate text-aside", n.readAt ? "text-dim" : "text-foreground")}>{n.title}</span>
+                          <span className={cn("truncate text-aside", n.readAt ? "text-dim" : "text-foreground")}>{said.title}</span>
                           <span className="shrink-0 text-meta text-faint">{ago(n.createdAt)}</span>
                         </span>
-                        {n.body ? <span className="mt-0.5 block text-aside leading-relaxed text-dim">{n.body}</span> : null}
+                        {said.body ? <span className="mt-0.5 line-clamp-2 text-aside leading-relaxed text-dim">{said.body}</span> : null}
                       </span>
                     </button>
                     {about ? <HeardRow said={heard[about]} failed={unheard === about} onSay={(v) => void say(about, v)} /> : null}

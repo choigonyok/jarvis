@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { useRole } from "@/components/shell/role";
 import { PUSH_TOASTER } from "@/components/shell/toasts";
+import { readable } from "@/lib/brief";
 import { handleWorkerMessage, onPushShown, useLiveNotifications, useNotificationOpen, type ShownPush } from "@/lib/resume";
 
 const SHOWN_MS = 4000;
@@ -67,6 +68,7 @@ function PushToast() {
 }
 
 function Banner({ push, more, onOpen }: { push: ShownPush; more: number; onOpen: () => void }) {
+  const said = readable(push.title, push.body ?? "");
   return (
     // A drag on the banner is the banner's: not the page's pull to refresh.
     <div data-no-pull="" className="w-full select-none" role="status" aria-live="polite">
@@ -75,11 +77,11 @@ function Banner({ push, more, onOpen }: { push: ShownPush; more: number; onOpen:
         onClick={onOpen}
         className="liquid-glass block w-full rounded-2xl px-4 py-3 text-left focus-ring"
       >
-        <span className="block text-body font-semibold text-foreground">
-          {push.title}
+        <span className="line-clamp-1 text-body font-semibold text-foreground">
+          {said.title}
           {more ? <span className="tnum ml-1.5 text-aside font-normal text-faint">외 {more}건</span> : null}
         </span>
-        {push.body ? <span className="mt-0.5 line-clamp-2 block text-ui leading-snug text-dim">{push.body}</span> : null}
+        {said.body ? <span className="mt-0.5 line-clamp-2 text-ui leading-snug text-dim">{said.body}</span> : null}
       </button>
     </div>
   );
