@@ -1,4 +1,7 @@
-package mind
+// Package remember is the way from the evidence ledger to long-term memory:
+// the facts the interpreter believed wait on the ledger and go to memory-svc
+// from here, whatever mind is doing meanwhile.
+package remember
 
 import (
 	"context"
@@ -42,7 +45,8 @@ type Remember struct {
 	pause   time.Time
 }
 
-func NewRemember(st store.Store, mem memory.Client, now func() time.Time, log *slog.Logger) *Remember {
+// New is a Remember over the ledger in st, sending to mem.
+func New(st store.Store, mem memory.Client, now func() time.Time, log *slog.Logger) *Remember {
 	return &Remember{Store: st, Memory: mem, Now: now, Log: log, nudge: make(chan struct{}, 1)}
 }
 

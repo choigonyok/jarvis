@@ -36,6 +36,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/prefs"
 	"github.com/choigonyok/jarvis/mind-svc/internal/reflect"
 	"github.com/choigonyok/jarvis/mind-svc/internal/registry"
+	"github.com/choigonyok/jarvis/mind-svc/internal/remember"
 	"github.com/choigonyok/jarvis/mind-svc/internal/self"
 	"github.com/choigonyok/jarvis/mind-svc/internal/skill"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
@@ -118,7 +119,7 @@ type Mind struct {
 	Attn      *attention.Attention
 	Gate      *gate.Gate
 	Skills    []skill.Skill
-	Remember  *Remember // nil without long-term memory
+	Remember  *remember.Remember // nil without long-term memory
 	Link      *link.Linker
 	Self      *self.Self
 	Predict   *predict.Predictor
@@ -151,7 +152,7 @@ func New(o Options) *Mind {
 	m.World = world.New(o.Store, o.Now)
 	cfg := o.Interpret
 	if o.Memory != nil {
-		m.Remember = NewRemember(o.Store, o.Memory, o.Now, o.Logger)
+		m.Remember = remember.New(o.Store, o.Memory, o.Now, o.Logger)
 		cfg.Recall, cfg.OnFact = m.recallRoom, m.Remember.Nudge
 	}
 	m.Conv = interpret.NewConversation(cfg, o.Store, m.World, o.LLM, o.Loc, o.Now, o.Logger)

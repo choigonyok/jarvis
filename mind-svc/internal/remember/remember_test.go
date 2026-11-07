@@ -1,4 +1,4 @@
-package mind
+package remember
 
 import (
 	"context"
@@ -34,7 +34,7 @@ func TestRememberStoresAndLearnsNames(t *testing.T) {
 	now := time.Date(2026, 10, 12, 20, 0, 0, 0, time.UTC)
 	st := store.NewMemory()
 	mem := memory.NewFake(func() time.Time { return now })
-	r := NewRemember(st, mem, func() time.Time { return now }, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	r := New(st, mem, func() time.Time { return now }, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	_ = st.PutFact(ctx, pending("mf_1", "지수", "DISLIKES", "매운 음식", "지수는 매운 음식을 못 먹는다", now))
 	_ = st.PutFact(ctx, pending("mf_2", "나", "FRIEND_OF", "지수", "지수는 나의 대학 동기다", now))
@@ -123,7 +123,7 @@ func TestAnOutageCostsAFactNothing(t *testing.T) {
 	_ = st.PutFact(ctx, pending("mf_1", "지수", "LIKES", "뿌링클", "지수는 뿌링클을 좋아한다", now))
 
 	calls := 0
-	r := NewRemember(st, down{calls: &calls}, clock, quiet)
+	r := New(st, down{calls: &calls}, clock, quiet)
 	for i := 0; i < 30; i++ {
 		_, _ = r.Flush(ctx)
 		now = now.Add(20 * time.Second)
@@ -136,7 +136,7 @@ func TestAnOutageCostsAFactNothing(t *testing.T) {
 		t.Fatalf("10분 동안 %d번 두드렸습니다: 갈수록 오래 쉬어야 합니다", calls)
 	}
 
-	budget := NewRemember(st, later{outage: true}, clock, quiet)
+	budget := New(st, later{outage: true}, clock, quiet)
 	for i := 0; i < 3*health.MaxTries; i++ {
 		now = now.Add(7 * time.Hour)
 		_, _ = budget.Flush(ctx)
@@ -158,7 +158,7 @@ func TestAFactThatKeepsFailingIsHeldNotGivenUp(t *testing.T) {
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
 	_ = st.PutFact(ctx, pending("mf_1", "지수", "LIKES", "뿌링클", "지수는 뿌링클을 좋아한다", now))
 
-	r := NewRemember(st, later{}, clock, quiet)
+	r := New(st, later{}, clock, quiet)
 	if _, err := r.Flush(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -199,17 +199,15 @@ func TestAFactThatKeepsFailingIsHeldNotGivenUp(t *testing.T) {
 		t.Fatalf("다시 보낸 사실이 들어가야 합니다: %+v", f)
 	}
 
-	// Held again; a person drops it.
+	// Held again; a person drops it (what the life ledgers read of held and
+	// dropped facts is mind's: TestHeldFactsStayInTheLifeLedgers).
 	_ = st.PutFact(ctx, model.Fact{ID: "mf_3", Room: "r", Subject: model.Party{Name: "나", Self: true}, Relation: "WANTS",
 		Object: model.Party{Name: "캠핑 의자"}, Text: "캠핑 의자를 사고 싶다", Status: model.FactHeld, CreatedAt: now})
-	if !wish(model.Fact{Status: model.FactHeld, Relation: "WANTS", Object: model.Party{Name: "캠핑 의자"}}) {
-		t.Fatal("보류한 사실도 생활 장부에는 남습니다")
-	}
 	if err := r.Drop(ctx, "mf_3"); err != nil {
 		t.Fatal(err)
 	}
-	if f, _ = st.Fact(ctx, "mf_3"); f.Status != model.FactDropped || wish(f) {
-		t.Fatalf("버린 사실은 장부에서도 빠집니다: %+v", f)
+	if f, _ = st.Fact(ctx, "mf_3"); f.Status != model.FactDropped {
+		t.Fatalf("버린 사실은 버린 것으로: %+v", f)
 	}
 	if err := r.Drop(ctx, "mf_1"); !errors.Is(err, model.ErrConflict) {
 		t.Fatalf("보류하지 않은 사실은 버리지 않습니다: %v", err)
@@ -223,7 +221,7 @@ func TestARefusedBatchCostsOnlyTheFactRefused(t *testing.T) {
 	now := time.Date(2026, 10, 12, 20, 0, 0, 0, time.UTC)
 	st := store.NewMemory()
 	clock := func() time.Time { return now }
-	r := NewRemember(st, refuses{memory.NewFake(clock), "mf_2"}, clock, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	r := New(st, refuses{memory.NewFake(clock), "mf_2"}, clock, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	_ = st.PutFact(ctx, pending("mf_1", "지수", "LIKES", "뿌링클", "지수는 뿌링클을 좋아한다", now))
 	_ = st.PutFact(ctx, pending("mf_2", "지수", "LIKES", "", "", now))
 	_ = st.PutFact(ctx, pending("mf_3", "나", "FRIEND_OF", "지수", "지수는 나의 대학 동기다", now))
