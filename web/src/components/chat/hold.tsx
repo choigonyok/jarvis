@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Spinner } from "@/components/ui/spinner";
+import { ACTION } from "@/lib/kinds";
 import type { Decision, Proposal } from "@/lib/thread";
 import { cn } from "@/lib/utils";
 
@@ -16,7 +17,7 @@ export const HOLD_MS = 5000;
  * of what it does - it is not held.)
  */
 export function holdsMoney(p: Proposal): boolean {
-  return p.action.kind === "browser.payment";
+  return p.action.kind === ACTION.browserPayment;
 }
 
 /**

@@ -34,6 +34,7 @@ import {
   TraceTitle,
 } from "@/components/ui/trace";
 import { type Job, type JobDetail, type JobEvent, LIVE, send, stateLabel, stateTone, when } from "@/lib/jobs";
+import { ACTION, JOB_EVENT } from "@/lib/kinds";
 import { usePaged } from "@/lib/paging";
 import type { Decision, Proposal } from "@/lib/thread";
 import { photoUrl } from "@/lib/uploads";
@@ -120,9 +121,9 @@ function Body({
     const own = proposals.filter(
       (p) =>
         p.state === "pending" &&
-        (((p.action.kind === "job.ask" || p.action.kind === "job.first") &&
+        (((p.action.kind === ACTION.jobAsk || p.action.kind === ACTION.jobFirst) &&
           (p.action.input as { jobId?: number }).jobId === j.id) ||
-          (p.action.kind === "job.login" && j.sites.includes(String((p.action.input as { site?: string }).site)))),
+          (p.action.kind === ACTION.jobLogin && j.sites.includes(String((p.action.input as { site?: string }).site)))),
     );
     return card && !own.includes(card) ? [card, ...own] : own;
   }, [proposals, card, j.id, j.sites]);
@@ -415,7 +416,7 @@ function group(events: JobEvent[]): RunGroup[] {
   const out: RunGroup[] = [];
   for (const e of events) {
     // The run's own header already says it started.
-    if (e.kind === "run_start") continue;
+    if (e.kind === JOB_EVENT.runStart) continue;
     const last = out[out.length - 1];
     const same = last && (e.runId ? last.runId === e.runId : !last.runId);
     if (same) {
@@ -447,9 +448,9 @@ const TONE: Record<string, string> = {
  * step. The run going now has a light passing over its line (Trace).
  */
 function Run({ group: g, live, open, gone }: { group: RunGroup; live: boolean; open: boolean; gone: boolean }) {
-  const steps = g.events.filter((e) => e.kind === "step").length;
+  const steps = g.events.filter((e) => e.kind === JOB_EVENT.step).length;
   // The screens the run took, oldest first: each opens among them.
-  const shots = g.events.filter((e) => e.kind === "shot").map((e) => e.text).reverse();
+  const shots = g.events.filter((e) => e.kind === JOB_EVENT.shot).map((e) => e.text).reverse();
   const time = when(g.at);
   return (
     <TraceCollapsible defaultOpen={open || live}>
@@ -468,11 +469,11 @@ function Run({ group: g, live, open, gone }: { group: RunGroup; live: boolean; o
               key={e.id}
               className={cn(
                 "leading-relaxed whitespace-pre-wrap",
-                e.kind === "step" ? "text-meta" : "text-aside",
+                e.kind === JOB_EVENT.step ? "text-meta" : "text-aside",
                 TONE[e.kind] ?? "text-dim",
               )}
             >
-              {e.kind === "shot" ? <Shot name={e.text} gone={gone} album={shots} /> : <WithUploads text={e.text} />}
+              {e.kind === JOB_EVENT.shot ? <Shot name={e.text} gone={gone} album={shots} /> : <WithUploads text={e.text} />}
             </li>
           ))}
         </ol>

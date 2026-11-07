@@ -1,3 +1,4 @@
+import { ACTION } from "@/lib/kinds";
 import type { CalendarEvent, Proposal } from "@/lib/thread";
 
 /**
@@ -37,7 +38,7 @@ export function toGhost(proposal: Proposal, events: CalendarEvent[]): Ghost | nu
   const input = proposal.action.input ?? {};
 
   switch (proposal.action.kind) {
-    case "calendar.create_event": {
+    case ACTION.calendarCreate: {
       const date = str(input, "date");
       const title = str(input, "title");
       if (!date || !title) return null;
@@ -53,7 +54,7 @@ export function toGhost(proposal: Proposal, events: CalendarEvent[]): Ghost | nu
         },
       };
     }
-    case "calendar.update_event": {
+    case ACTION.calendarUpdate: {
       const targetId = str(input, "id");
       const target = events.find((e) => e.id === targetId);
       if (!targetId || !target) return null;
@@ -71,7 +72,7 @@ export function toGhost(proposal: Proposal, events: CalendarEvent[]): Ghost | nu
         },
       };
     }
-    case "calendar.delete_event": {
+    case ACTION.calendarDelete: {
       const targetId = str(input, "id");
       if (!targetId || !events.some((e) => e.id === targetId)) return null;
       return { op: "delete", proposal, targetId };

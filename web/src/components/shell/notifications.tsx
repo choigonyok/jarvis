@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { openTarget, targetOf } from "@/lib/focus";
+import { MIND_KEY, NOTE } from "@/lib/kinds";
 import { onInboxRequest, onResume } from "@/lib/resume";
 import { Bell, Settings2 } from "lucide-react";
 import { HeaderPanel } from "@/components/shell/panel";
@@ -67,7 +68,7 @@ function keepHeard(all: Record<string, Heard>) {
 }
 
 /** The intent a notice of mind's was (mind.info): what the one tap answers. Cards and what was done and told are answered elsewhere. */
-const noticeOf = (n: Note) => (n.kind === "mind.info" && n.key?.startsWith("mind:") ? n.key.slice("mind:".length) : null);
+const noticeOf = (n: Note) => (n.kind === NOTE.mindInfo && n.key?.startsWith(MIND_KEY) ? n.key.slice(MIND_KEY.length) : null);
 
 type Settings = { muted: string[]; quietStart: string; quietEnd: string; digestAt: string };
 

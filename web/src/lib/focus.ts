@@ -1,5 +1,7 @@
 "use client";
 
+import { NOTE, SENDER } from "@/lib/kinds";
+
 /**
  * Where a notification takes you, all the way in.
  *
@@ -40,27 +42,28 @@ export function onFocusRequest(fn: (id: string) => void): () => void {
  * Notifications from before their senders said which part (or a kind that
  * never does) still land on the right section, from the kind alone.
  */
-const BY_KIND: [RegExp, string, string][] = [
-  [/^spending\.unparsed/, "/spending", "unparsed"],
-  [/^spending\.budget/, "/spending", "budget"],
-  [/^spending\.daily/, "/spending", "today"],
-  [/^spending\./, "/spending", "recent"],
-  [/^assets\.(flow|ledger)/, "/assets", "principal"],
-  [/^assets\.tax/, "/assets", "tax"],
-  [/^assets\.band/, "/assets", "allocation"],
-  [/^assets\./, "/assets", "summary"],
-  [/^status\./, "/status", "problems"],
-  [/^calendar\./, "/calendar", "day"],
-  [/^location\./, "/status", "check:context.location"],
-  [/^job\./, "/jobs", "waiting"],
+const BY_KIND: [string[], string, string][] = [
+  [[NOTE.spendingUnparsed], "/spending", "unparsed"],
+  [[NOTE.spendingBudget], "/spending", "budget"],
+  [[NOTE.spendingDaily], "/spending", "today"],
+  [[SENDER.spending], "/spending", "recent"],
+  [[NOTE.assetsFlow, NOTE.assetsLedger], "/assets", "principal"],
+  [[NOTE.assetsTax], "/assets", "tax"],
+  [[NOTE.assetsBand], "/assets", "allocation"],
+  [[SENDER.assets], "/assets", "summary"],
+  [[SENDER.status], "/status", "problems"],
+  [[SENDER.calendar], "/calendar", "day"],
+  [[SENDER.location], "/status", "check:context.location"],
+  [[SENDER.job], "/jobs", "waiting"],
 ];
 
 /** Where an inbox entry goes: its own url, with a section filled in from its kind when it has none. */
 export function targetOf(note: { url: string; kind: string }): string {
   const url = new URL(note.url || "/", "http://x");
   if (url.searchParams.has("focus") || url.searchParams.has("proposal") || url.hash) return note.url || "/";
-  for (const [kind, path, focus] of BY_KIND) {
-    if (!kind.test(note.kind)) continue;
+  for (const [kinds, path, focus] of BY_KIND) {
+    // A kind's start: "spending.budget" is every budget notice, "spending." every one of spending's.
+    if (!kinds.some((k) => note.kind.startsWith(k))) continue;
     if (url.pathname !== "/" && url.pathname !== path) break;
     url.searchParams.set("focus", focus);
     return path + url.search;

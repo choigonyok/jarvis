@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAgentStream } from "@/lib/stream";
 import { gridBounds, shiftMonth, type Cursor } from "@/lib/month";
 import { DECIDE_ECHO_MS, decideProposal } from "@/lib/decide";
+import { MODULE, ofModule } from "@/lib/kinds";
 import {
   API,
   isPending,
@@ -95,7 +96,7 @@ export function useCalendar(cursor: Cursor) {
 
   /** Calendar proposals still waiting on a decision, in the order raised. */
   const proposed = useMemo(
-    () => proposals.filter((p) => isPending(p) && p.action.kind.startsWith("calendar.")),
+    () => proposals.filter((p) => isPending(p) && ofModule(p.action.kind, MODULE.calendar)),
     [proposals],
   );
 

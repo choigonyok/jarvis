@@ -1,3 +1,4 @@
+import { CLAUDE_MCP, MODULE, ofModule } from "@/lib/kinds";
 import type { Proposal } from "@/lib/thread";
 
 /**
@@ -9,7 +10,7 @@ import type { Proposal } from "@/lib/thread";
  */
 export function isLiteral(p: Proposal): boolean {
   const kind = p.action.kind;
-  return kind.startsWith("claude.") && !kind.startsWith("claude.mcp__");
+  return ofModule(kind, MODULE.claude) && !kind.startsWith(CLAUDE_MCP);
 }
 
 // The agent's own labels (agent/internal/adapter/permission/render.go), for

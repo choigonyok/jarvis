@@ -13,6 +13,7 @@ import { SecretInput } from "@/components/ui/secret-input";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { isPrivateField, type CardField, type Decision, type Proposal, type ProposalState } from "@/lib/thread";
+import { ACTION, MODULE, ofModule } from "@/lib/kinds";
 import { isLiteral, readableBody, readableConsequence, readableTitle } from "@/lib/card-body";
 import { heardBack, sentOn } from "@/lib/decide";
 import { photoUrl } from "@/lib/uploads";
@@ -111,7 +112,7 @@ export function ProposalCard({
         </h3>
 
         {proposal.card.images?.length ? (
-          <CardPhotos names={proposal.card.images} cover={!proposal.action.kind.startsWith("mind.")} />
+          <CardPhotos names={proposal.card.images} cover={!ofModule(proposal.action.kind, MODULE.mind)} />
         ) : null}
 
         {form && !settled ? (
@@ -161,7 +162,7 @@ export function ProposalCard({
             {/* Where a no goes: mind's own question, turned down, is not put
                 again for a while (its topic two weeks, an entry like it a
                 month, a place told 다시 묻지 마 never). */}
-            {proposal.state === "rejected" && proposal.action.kind === "mind.approve" ? (
+            {proposal.state === "rejected" && proposal.action.kind === ACTION.mindApprove ? (
               <span className="w-full text-faint">같은 제안은 한동안 다시 묻지 않아요.</span>
             ) : null}
           </p>
