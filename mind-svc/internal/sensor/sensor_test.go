@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/choigonyok/jarvis/gocommon/collect"
 	"github.com/choigonyok/jarvis/gocommon/queue"
 	"github.com/choigonyok/jarvis/gocommon/seal"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
@@ -31,7 +32,7 @@ func sealed(t *testing.T, sealer *seal.Sealer, source string, m collected) queue
 		t.Fatal(err)
 	}
 	payload, _ := json.Marshal(map[string]string{"sealed": base64.StdEncoding.EncodeToString(body)})
-	return queue.Message{Kind: KindMessage, Source: source, SourceKey: fmt.Sprintf("%s:%d", source, m.RowID), Payload: payload}
+	return queue.Message{Kind: collect.KindMessage, Source: source, SourceKey: fmt.Sprintf("%s:%d", source, m.RowID), Payload: payload}
 }
 
 // Every message comes; one worth reading is observed once, text in the store
@@ -155,7 +156,7 @@ func sealedTurn(t *testing.T, sealer *seal.Sealer, thread string, tn turn) queue
 		t.Fatal(err)
 	}
 	payload, _ := json.Marshal(map[string]string{"thread": thread, "sealed": base64.StdEncoding.EncodeToString(closed)})
-	return queue.Message{Kind: KindTurn, Source: "chat", SourceKey: "turn:" + tn.ID, Payload: payload}
+	return queue.Message{Kind: model.KindChatTurn, Source: "chat", SourceKey: "turn:" + tn.ID, Payload: payload}
 }
 
 // A turn with an origin is mind's own output come back - a job's news, a

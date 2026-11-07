@@ -33,6 +33,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/choigonyok/jarvis/gocommon/checks"
+	"github.com/choigonyok/jarvis/gocommon/collect"
 	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/gocommon/notify"
 	"github.com/choigonyok/jarvis/gocommon/queue"
@@ -399,29 +400,29 @@ func main() {
 		// lane), and so does wording on its way out (the relay).
 		command := func(ctx context.Context, msg queue.Message) error {
 			switch {
-			case msg.Kind == obs.TimerFired:
+			case msg.Kind == model.KindTimerFired:
 				return m.TimerFired(ctx, msg)
-			case msg.Kind == "payment.requested":
+			case msg.Kind == model.KindPaymentRequested:
 				return m.PaymentRaised(ctx, msg)
-			case msg.Kind == mind.KindState:
+			case msg.Kind == model.KindContextState:
 				return m.StateSaid(ctx, msg)
 			}
 			if err := mindAPI.Command(ctx, msg); err != nil {
 				return err
 			}
-			if msg.Kind == "intent.answer" {
+			if msg.Kind == model.KindIntentAnswer {
 				return m.HeldCard(ctx, msg)
 			}
 			return nil
 		}
 		adapters := func(ctx context.Context, msg queue.Message) error {
-			if msg.Kind != sensor.KindMessage && msg.Kind != sensor.KindTurn {
+			if msg.Kind != collect.KindMessage && msg.Kind != model.KindChatTurn {
 				return structured.Take(ctx, msg)
 			}
 			if messages == nil {
 				return fmt.Errorf("%w: 봉인을 열 키가 없습니다", queue.ErrOutage)
 			}
-			if msg.Kind == sensor.KindTurn {
+			if msg.Kind == model.KindChatTurn {
 				return messages.TakeTurn(ctx, msg)
 			}
 			return messages.Take(ctx, msg)
@@ -491,7 +492,7 @@ func main() {
 			{Pool: lanes, Topic: queue.Records, Name: "mind", Kinds: reg.Kinds(registry.Interpret, false), Handle: take, Log: log},
 			{Pool: lanes, Topic: queue.Guest, Name: "mind-guest", Kinds: reg.Kinds(registry.Interpret, true), Handle: take, Log: log},
 			{Pool: lanes, Topic: queue.Records, Name: "mind-commands", Kinds: reg.Kinds(registry.Deterministic, false), Handle: command, Log: log},
-			{Pool: lanes, Topic: queue.Records, Name: "mind-results", Kinds: []string{hand.KindResult}, Handle: func(ctx context.Context, msg queue.Message) error { return hand.Result(ctx, st, msg) }, Log: log},
+			{Pool: lanes, Topic: queue.Records, Name: "mind-results", Kinds: []string{model.KindExecuteResult}, Handle: func(ctx context.Context, msg queue.Message) error { return hand.Result(ctx, st, msg) }, Log: log},
 			{Pool: lanes, Topic: queue.Records, Name: "mind-structured", Kinds: reg.Kinds(registry.Structured, false), Handle: adapters, Log: log},
 			{Pool: lanes, Topic: queue.Guest, Name: "mind-commands-guest", Kinds: reg.Kinds(registry.Deterministic, true), Handle: command, Log: log},
 			{Pool: lanes, Topic: queue.Records, Name: "mind-relay", Kinds: []string{"*"}, Handle: relay(stream.Relay(queue.Effects)), Log: log},

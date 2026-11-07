@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/choigonyok/jarvis/gocommon/collect"
 	"github.com/choigonyok/jarvis/gocommon/queue"
 	"github.com/choigonyok/jarvis/gocommon/seal"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
@@ -21,12 +20,6 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/spending/ingest"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 )
-
-// KindMessage is a message a collector handed on (gocommon/collect), sealed.
-const KindMessage = collect.KindMessage
-
-// KindTurn is a turn of the conversation with jarvis, sealed (input-svc).
-const KindTurn = model.KindChatTurn
 
 // Messages takes what the chat collectors (kakaotalk-client, imessage-client)
 // hand on. Every message comes; which are worth reading is said here.

@@ -167,9 +167,6 @@ func IsEffect(o Observation) bool {
 	return o.Source == mindSource && !strings.HasPrefix(o.Type, "action.") && o.Type != model.KindTimerFired
 }
 
-// TimerFired is mind's clock on the log: a timer whose moment came.
-const TimerFired = model.KindTimerFired
-
 // Command puts a request for mind on the stream, from whoever came to mind's
 // door with it (the console, the screen's note): nothing changes but through
 // the stream. It is a record like what the agent writes itself.

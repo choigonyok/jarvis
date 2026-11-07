@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/spending/book"
 	"github.com/choigonyok/jarvis/mind-svc/internal/spending/category"
 	"github.com/choigonyok/jarvis/mind-svc/internal/spending/enrich"
@@ -467,11 +468,12 @@ func (s *Store) Seen(ctx context.Context) (Seen, error) {
 // rateFor is how old a dollar rate may be and still anchor an estimate.
 const rateFor = 24 * time.Hour
 
-// USDKrw is the rate assets-svc last said (assets.fx), if it is recent enough.
+// USDKrw is the rate assets-svc last said, as the structured lane keeps it in
+// mind.latest (model.KindAssetsFX), if it is recent enough.
 func (s *Store) USDKrw(ctx context.Context) (float64, bool, error) {
 	var rate float64
-	err := s.pool.QueryRow(ctx, `select coalesce((payload->>'usdKrw')::float8, 0) from mind.latest where kind = 'assets.fx' and at > $1`,
-		time.Now().Add(-rateFor)).Scan(&rate)
+	err := s.pool.QueryRow(ctx, `select coalesce((payload->>'usdKrw')::float8, 0) from mind.latest where kind = $1 and at > $2`,
+		model.KindAssetsFX, time.Now().Add(-rateFor)).Scan(&rate)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, false, nil
 	}

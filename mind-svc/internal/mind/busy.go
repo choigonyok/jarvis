@@ -8,17 +8,12 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/gocommon/queue"
-	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/rhythm"
 )
 
 // The operator's state as context-svc says it (context.state): driving, in a
 // meeting, in a focus. Output holds pushes through it, and the gate's own
 // judgement of what is worth a buzz now hears it too (gate.Busy).
-
-// KindState is context-svc's word on the operator's state, the kind the
-// deterministic lane hands to StateSaid.
-const KindState = model.KindContextState
 
 // busyLapse is how long a state is believed without a word that it ended (as
 // output-svc believes it).

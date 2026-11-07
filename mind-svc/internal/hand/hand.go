@@ -26,10 +26,6 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 )
 
-// KindResult is what came of a write on its way to an adapter
-// (model.KindAdapterCall), the kind mind's results lane reads.
-const KindResult = model.KindExecuteResult
-
 const (
 	// Wait is how long a write is given. Past it the hand refuses it, so a
 	// write that was reported as failed cannot happen after all.

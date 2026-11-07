@@ -70,9 +70,9 @@ func (p *Postgres) Entities(ctx context.Context, kind, room string, liveOnly boo
 func (p *Postgres) PlansOn(ctx context.Context, from, to string) ([]model.Entity, error) {
 	rows, err := p.db.Query(ctx, `
 		select id, kind, room, state, version, created_at, updated_at from mind_entities
-		 where kind = 'plan' and coalesce(state->>'date', '') <> '' and state->>'date' <= $2
+		 where kind = $3 and coalesce(state->>'date', '') <> '' and state->>'date' <= $2
 		   and coalesce(nullif(state->>'endDate', ''), state->>'date') >= $1
-		 order by id`, from, to)
+		 order by id`, from, to, model.KindPlan)
 	if err != nil {
 		return nil, err
 	}
