@@ -58,3 +58,35 @@ func TestTheVerdictsNeedTheToken(t *testing.T) {
 		}
 	}
 }
+
+// A refresh whose caller leaves still records what its probes found: they
+// run apart from the request, not cut short with it.
+func TestARefreshOutlivesItsCaller(t *testing.T) {
+	started, release := make(chan struct{}), make(chan struct{})
+	runner := check.NewRunner(nil, []check.Probe{{ID: "slow", Name: "slow", Every: time.Hour,
+		Run: func(ctx context.Context) check.Verdict {
+			close(started)
+			<-release
+			if ctx.Err() != nil {
+				return check.Verdict{State: check.Fail, Summary: "응답이 없어요."}
+			}
+			return check.Verdict{State: check.OK, Summary: "응답해요."}
+		}}}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	h := New(runner, "tok").Handler()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodPost, "/refresh", nil).WithContext(ctx)
+	req.Header.Set("Authorization", "Bearer tok")
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.ServeHTTP(httptest.NewRecorder(), req)
+	}()
+	<-started
+	cancel()
+	close(release)
+	<-done
+	if got := runner.State("slow"); got != check.OK {
+		t.Fatalf("떠난 요청이 확인을 끊었습니다: %s", got)
+	}
+}

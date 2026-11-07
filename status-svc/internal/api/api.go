@@ -3,6 +3,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"time"
 
@@ -43,7 +44,10 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	svc.WriteJSON(w, http.StatusOK, response{Snapshot: s.runner.Snapshot(), Now: time.Now()})
 }
 
+// refresh runs the probes apart from the request, each under its own
+// timeout: a caller that leaves does not cut them short, so what they record
+// is what the services answered, never that nobody waited for it.
 func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
-	s.runner.Refresh(r.Context())
+	s.runner.Refresh(context.WithoutCancel(r.Context()))
 	s.status(w, r)
 }
