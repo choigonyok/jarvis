@@ -64,8 +64,6 @@ var weighty = []string{"MARRIED_TO", "PARENT_OF", "CHILD_OF", "DIVORCED_FROM", "
 // "우리 애를 어떻게 데리고 가지?" said of a doll.
 var unnamedKin = []string{"아이", "자녀", "아기", "애기", "아들", "딸", "남편", "아내", "와이프", "배우자"}
 
-const weightyConfidence = 0.8
-
 // isWeighty is a fact that needs its subject's own words to stand.
 func isWeighty(relation, object string) bool {
 	return slices.Contains(weighty, relation) || relation == "FAMILY_OF" && slices.Contains(unnamedKin, strings.TrimSpace(object))

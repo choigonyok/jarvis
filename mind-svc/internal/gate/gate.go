@@ -28,6 +28,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
 	"github.com/choigonyok/jarvis/mind-svc/internal/registry"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
+	"github.com/choigonyok/jarvis/mind-svc/internal/tuning"
 )
 
 // Trust levels of a kind of action.
@@ -160,7 +161,7 @@ func (g *Gate) Reading(in model.Intent) engine.Reading {
 // operator finds it worth having, from what a notice is taken to be worth
 // moved by what they said of the ones before (ledger: Heard).
 func (g *Gate) noticeReading(in model.Intent) engine.Reading {
-	return g.book.Load().Read(engine.Key{Source: "notice", Kind: engine.NoticeKind(in.NoticeKey()), Skill: in.Skill, Context: in.NoticeKey()}, engine.NoticeStated)
+	return g.book.Load().Read(engine.Key{Source: "notice", Kind: engine.NoticeKind(in.NoticeKey()), Skill: in.Skill, Context: in.NoticeKey()}, tuning.Default().Engine.NoticeStated)
 }
 
 // Heard is the operator's one tap on a notice in the inbox: it helped, or it
@@ -276,17 +277,18 @@ func (g *Gate) admit(ctx context.Context, in, open model.Intent, asked bool) (mo
 			}
 		}
 		// What the operator said of notices like it, one tap in the inbox
-		// (Heard). The morning brief and what is said at its moment were
-		// asked for, and are not held to it.
-		if r := g.noticeReading(in); in.Moment == "" && in.Skill != BriefSkill && r.N >= engine.MinCases {
+		// (Heard), held to the engine's numbers. The morning brief and what
+		// is said at its moment were asked for, and are not held to it.
+		tuned := tuning.Default().Engine
+		if r := g.noticeReading(in); in.Moment == "" && in.Skill != BriefSkill && r.N >= tuned.MinCases {
 			switch {
-			case r.P < engine.SilentBelow && !engine.Explored(in.ID):
-				// One in exploreEvery still goes: the way back.
+			case r.P < tuned.SilentBelow && !engine.Explored(in.ID):
+				// One in ExploreEvery still goes: the way back.
 				at := g.now()
 				in.Decision, in.Status, in.Tier, in.DecidedAt = model.Drop, model.Dropped, "", &at
 				in.Why = fmt.Sprintf("이런 알림은 %d번 답하신 기록상 필요 없으셔서 보내지 않아요 (%.0f%%)", r.N, r.P*100)
 				return in, g.st.PutIntent(ctx, in)
-			case r.P < engine.FillAbove && in.Decision == model.Notify:
+			case r.P < tuned.FillAbove && in.Decision == model.Notify:
 				in.Decision, in.Tier = model.Digest, "digest"
 				in.Why = fmt.Sprintf("이런 알림은 필요 없다고 하신 때가 많아 저녁 요약으로 (%.0f%%)", r.P*100)
 			}

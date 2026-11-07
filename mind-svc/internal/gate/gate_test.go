@@ -15,6 +15,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
+	"github.com/choigonyok/jarvis/mind-svc/internal/tuning"
 )
 
 var seoul, _ = time.LoadLocation("Asia/Seoul")
@@ -102,7 +103,7 @@ func TestTrustIsLearned(t *testing.T) {
 		}
 	}
 	if in, _ := f.g.Submit(ctx, create("plan_d")); in.Decision != model.Ask {
-		t.Fatalf("답이 %d건 쌓이기 전에는 물어야 합니다: %+v", engine.MinCases, in)
+		t.Fatalf("답이 %d건 쌓이기 전에는 물어야 합니다: %+v", tuning.Default().Engine.MinCases, in)
 	}
 	f.g.SetBook(engine.NewBook(answered(12, model.ResultApproved)))
 	in, _ := f.g.Submit(ctx, create("plan_e"))
@@ -1001,7 +1002,7 @@ func TestANoticeIsHeldToWhatWasSaidOfItsKind(t *testing.T) {
 			if i < useful {
 				result = model.ResultApproved
 			}
-			out = append(out, model.Outcome{Source: "notice", Kind: engine.NoticeKind("restock"), Skill: "life", Context: "restock", P: engine.NoticeStated, Result: result})
+			out = append(out, model.Outcome{Source: "notice", Kind: engine.NoticeKind("restock"), Skill: "life", Context: "restock", P: tuning.Default().Engine.NoticeStated, Result: result})
 		}
 		return out
 	}

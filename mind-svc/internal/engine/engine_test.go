@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+	"github.com/choigonyok/jarvis/mind-svc/internal/tuning"
 )
 
 var key = Key{Source: "card", Kind: "calendar.create", Skill: "schedule", Context: "calendar.create"}
@@ -102,8 +103,8 @@ func TestGrades(t *testing.T) {
 		want Grade
 	}{
 		{"새 종류는 아무리 확신해도 묻는다", rev, Reading{P: 0.99, N: 0}, AskFilled},
-		{"k건 전에는 승격 금지", rev, Reading{P: 0.95, N: MinCases - 1}, AskFilled},
-		{"k건을 넘고 확실하면 한다", rev, Reading{P: 0.95, N: MinCases}, Act},
+		{"k건 전에는 승격 금지", rev, Reading{P: 0.95, N: tuning.Default().Engine.MinCases - 1}, AskFilled},
+		{"k건을 넘고 확실하면 한다", rev, Reading{P: 0.95, N: tuning.Default().Engine.MinCases}, Act},
 		{"되돌릴 수 없으면 영원히 묻는다", Spec{}, Reading{P: 0.99, N: 500}, AskFilled},
 		{"상한이 있으면 넘지 않는다", Spec{Reversible: true, Cap: AskFilled}, Reading{P: 0.99, N: 500}, AskFilled},
 		{"반반이면 채워서 묻는다", rev, Reading{P: 0.6, N: 20}, AskFilled},
@@ -120,7 +121,7 @@ func TestGrades(t *testing.T) {
 	}
 }
 
-// A kind gone silent keeps a way back: one in exploreEvery is asked, the same
+// A kind gone silent keeps a way back: one in ExploreEvery is asked, the same
 // ones every time, and the asking lets its record recover.
 func TestSilenceKeepsAWayBack(t *testing.T) {
 	if got := Decide(Spec{Reversible: true}, Reading{P: 0.05, N: 20}, true); got != AskBlank {

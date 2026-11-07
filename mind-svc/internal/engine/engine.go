@@ -7,7 +7,8 @@
 //
 // The rules are the design's, in code the model cannot reach:
 //
-//   - A new kind asks. Nothing is promoted past asking before MinCases.
+//   - A new kind asks. Nothing is promoted past asking before it has
+//     MinCases answers (tuning).
 //   - What cannot be undone is asked forever, whatever its record.
 //   - Ignored is not refused: only answers move a kind's record.
 //   - A kind turned down again and again goes silent, but keeps a small chance
@@ -22,6 +23,7 @@ import (
 	"math"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+	"github.com/choigonyok/jarvis/mind-svc/internal/tuning"
 )
 
 // Grade is how far an action may go, in order.
@@ -60,27 +62,9 @@ type Spec struct {
 	Cap Grade
 }
 
-const (
-	// MinCases is how many answers a kind needs before it may be promoted
-	// past asking, or go silent.
-	MinCases = 5
-	// strength is how many answers it takes for a group to speak half for
-	// itself against what it pools with: a few answers move a judgement a
-	// little, many move it to what they say.
-	strength = 8
-	// Below SilentBelow a settled kind is not raised; from FillAbove the
-	// answer is filled in; from ActAbove it is done.
-	SilentBelow = 0.10
-	FillAbove   = 0.50
-	ActAbove    = 0.90
-	// NoticeStated is what a notice is taken to be worth before anyone said:
-	// most are wanted. Its record moves it like a card's (ledger: a notice
-	// the operator said helped is approved, one not needed rejected).
-	NoticeStated = 0.8
-	// exploreEvery is one silent judgement in so many asked anyway. Without
-	// it a kind gone silent has no answers left to come back on.
-	exploreEvery = 10
-)
+// The numbers the engine grades by - how many answers a kind needs, where a
+// corrected confidence turns into asking or doing - are tuning's
+// (tuning.Engine).
 
 // NoticeKind is a notice's kind on the ledger: info, by what it is about.
 func NoticeKind(about string) string { return model.Info + "." + about }
@@ -183,6 +167,7 @@ func (b *Book) Read(k Key, stated float64) Reading {
 	if b == nil {
 		return Reading{P: stated}
 	}
+	strength := tuning.Default().Engine.Strength
 	shift, n := 0.0, 0
 	for _, key := range k.levels() {
 		t := b.groups[key]
@@ -199,30 +184,31 @@ func (b *Book) Read(k Key, stated float64) Reading {
 	return Reading{P: logistic(logit(stated) + shift), N: n}
 }
 
-// Explored says whether this silent judgement is the one in exploreEvery that
+// Explored says whether this silent judgement is the one in ExploreEvery that
 // is asked anyway. The id decides, so a replay comes to the same answer.
 func Explored(id string) bool {
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(id))
-	return h.Sum32()%exploreEvery == 0
+	return h.Sum32()%tuning.Default().Engine.ExploreEvery == 0
 }
 
 // Decide grades a reading for a kind of action.
 func Decide(s Spec, r Reading, explore bool) Grade {
+	tuned := tuning.Default().Engine
 	var g Grade
 	switch {
-	case r.P >= ActAbove:
+	case r.P >= tuned.ActAbove:
 		g = Act
-	case r.P >= FillAbove:
+	case r.P >= tuned.FillAbove:
 		g = AskFilled
-	case r.P >= SilentBelow || r.N < MinCases:
+	case r.P >= tuned.SilentBelow || r.N < tuned.MinCases:
 		g = AskBlank
 	case explore:
 		g = AskBlank
 	default:
 		g = Silent
 	}
-	if r.N < MinCases {
+	if r.N < tuned.MinCases {
 		g = lower(g, AskFilled)
 	}
 	if !s.Reversible {

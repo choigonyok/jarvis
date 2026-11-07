@@ -31,6 +31,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/registry"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
+	"github.com/choigonyok/jarvis/mind-svc/internal/tuning"
 	"github.com/choigonyok/jarvis/mind-svc/internal/world"
 )
 
@@ -40,9 +41,11 @@ type Config struct {
 	Idle     time.Duration // a conversation with someone
 	IdleSelf time.Duration // a notes-to-self room: nobody is going to answer
 	IdleSim  time.Duration // the simulator
-	MaxBatch int           // read at once past this many waiting messages
-	Context  int           // earlier messages given as context
-	MinConf  float64       // changes below this are not applied
+	// How much a read takes in and what it believes; zero is tuning's
+	// (tuning.Interpret).
+	MaxBatch int     // read at once past this many waiting messages
+	Context  int     // earlier messages given as context
+	MinConf  float64 // changes below this are not applied
 	// Search is how many web searches a read may make (0: none), offered only
 	// when a calendar plan shown has no place - to know where the office in
 	// its title is.
@@ -91,14 +94,15 @@ type Conversation struct {
 }
 
 func NewConversation(cfg Config, st store.Store, w *world.World, client llm.Client, loc *time.Location, now func() time.Time, log *slog.Logger) *Conversation {
+	tuned := tuning.Default().Interpret
 	if cfg.MaxBatch == 0 {
-		cfg.MaxBatch = 40
+		cfg.MaxBatch = tuned.MaxBatch
 	}
 	if cfg.Context == 0 {
-		cfg.Context = 24
+		cfg.Context = tuned.Context
 	}
 	if cfg.MinConf == 0 {
-		cfg.MinConf = 0.5
+		cfg.MinConf = tuned.MinConf
 	}
 	if cfg.Owner == "" {
 		cfg.Owner = "나"
@@ -284,10 +288,11 @@ func (c *Conversation) Read(ctx context.Context, room string) error {
 		ops, err = parse(answer)
 	}
 	if err != nil {
-		// 같은 배치는 같은 이유(대개 max_tokens 에서 잘린 JSON, 또는 생각하다 한도에 닿아 답이 없음)로
-		// 또 실패한다.
-		// 배치를 반으로 줄이고, 한 건으로도 못 읽으면 그 메시지를 격리한다.
-		if len(fresh) == 1 && c.failCount(room) >= quarantineAfter {
+		// The same batch fails again for the same reason - mostly JSON cut off
+		// at max_tokens, or no answer when thinking reached the limit - so the
+		// batch is halved, and a single message still unreadable is
+		// quarantined.
+		if len(fresh) == 1 && c.failCount(room) >= tuning.Default().Interpret.QuarantineAfter {
 			c.log.Error("해석할 수 없는 메시지를 건너뜁니다", "room", room, "at", last, "err", err)
 			if err := c.st.MarkRoom(ctx, room, last); err != nil {
 				return err
@@ -384,24 +389,22 @@ func (c *Conversation) moved(ctx context.Context, ops []op, known []view) (bool,
 	return false, nil
 }
 
-// quarantineAfter is how many failed reads in a row a single message gets
-// before it is skipped, so one unreadable message cannot spend the day's budget.
-const quarantineAfter = 4
-
 func (c *Conversation) failCount(room string) int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.fails[room]
 }
 
-// retryLater backs off exponentially: 1, 2, 4 ... minutes, capped at 6 hours.
+// retryLater backs off exponentially from tuning's RetryFirst (1, 2, 4 ...
+// minutes), capped at RetryMax.
 func (c *Conversation) retryLater(room string, err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	wait := 30 * time.Minute
+	tuned := tuning.Default().Interpret
+	wait := tuned.RetryNoBudget
 	if !errors.Is(err, llm.ErrBudget) && !errors.Is(err, llm.ErrNoKey) {
 		c.fails[room]++
-		wait = min(time.Minute<<min(c.fails[room]-1, 9), 6*time.Hour)
+		wait = min(tuned.RetryFirst<<min(c.fails[room]-1, 9), tuned.RetryMax)
 	}
 	c.backoff[room] = c.now().Add(wait)
 	c.failed = err.Error()
@@ -510,9 +513,11 @@ func (c *Conversation) known(ctx context.Context, room string) ([]view, error) {
 	// The calendar is the operator's wherever its entries were made, and a
 	// conversation anywhere may call one off - "11월에 판교 안 간대" ends the
 	// office day put on the calendar by hand. Its coming plans are shown
-	// in every room, nearest first. The partner's own entries are theirs,
+	// in every room, nearest first, as far ahead as tuning's CalendarDays
+	// and at most CalendarMax of them. The partner's own entries are theirs,
 	// not the operator's to change.
-	until := c.now().In(c.loc).AddDate(0, 0, calendarDays).Format("2006-01-02")
+	tuned := tuning.Default().Interpret
+	until := c.now().In(c.loc).AddDate(0, 0, tuned.CalendarDays).Format("2006-01-02")
 	// A plan made in another room that lies ahead and is not on the calendar
 	// yet - its card still open, say - is shown here too, so a room talking
 	// about the same days at the same place names it instead of making it
@@ -540,19 +545,12 @@ func (c *Conversation) known(ctx context.Context, room string) ([]view, error) {
 	slices.SortFunc(cal, func(a, b model.Entity) int {
 		return strings.Compare(a.State.Date+" "+a.State.Start, b.State.Date+" "+b.State.Start)
 	})
-	for _, e := range cal[:min(len(cal), calendarMax)] {
+	for _, e := range cal[:min(len(cal), tuned.CalendarMax)] {
 		np++
 		out = append(out, view{ref: fmt.Sprintf("P%d", np), entity: e, elsewhere: true})
 	}
 	return out, nil
 }
-
-// calendarDays is how far ahead the calendar's plans are shown - as far as
-// the calendar is read (two months) - and calendarMax how many at most.
-const (
-	calendarDays = 61
-	calendarMax  = 40
-)
 
 // placeless is whether a calendar plan shown has no place: whether what is
 // said elsewhere is about it may turn on where the office in its title is.
@@ -750,11 +748,12 @@ func (c *Conversation) remember(ctx context.Context, room string, o op, evidence
 			return skip("이미 적은 사실")
 		}
 	}
+	tuned := tuning.Default().Interpret
 	confidence := o.Confidence
 	if hearsay {
-		confidence = min(confidence, hearsayConfidence)
+		confidence = min(confidence, tuned.HearsayConfidence)
 	}
-	if isWeighty(relation, object) && (confidence < weightyConfidence || !saidBy(evidence, fresh, subject, c.party(subject, "").Self)) {
+	if isWeighty(relation, object) && (confidence < tuned.WeightyConfidence || !saidBy(evidence, fresh, subject, c.party(subject, "").Self)) {
 		return skip("결혼·자녀 같은 큰 사실은 당사자가 분명히 말한 것만")
 	}
 	same, against, err := c.knownLike(ctx, c.endsOf(subject, relation, object), remembered)
@@ -779,7 +778,7 @@ func (c *Conversation) remember(ctx context.Context, room string, o op, evidence
 		f.ValidAt = v
 	}
 	if hearsay {
-		f.Confidence = min(f.Confidence, hearsayConfidence)
+		f.Confidence = min(f.Confidence, tuned.HearsayConfidence)
 		if !strings.Contains(f.Why, "상대가 한 말") {
 			f.Why = strings.TrimSpace("상대가 한 말. " + f.Why)
 		}
@@ -1063,11 +1062,6 @@ func clean(people []string) []string {
 func norm(s string) string {
 	return strings.ToLower(strings.Join(strings.Fields(s), ""))
 }
-
-// hearsayConfidence caps a fact about the operator that only someone else
-// said: kept, so it can be asked about or confirmed later, but never taken
-// for something the operator said.
-const hearsayConfidence = 0.4
 
 var (
 	// The speaker talking about themselves: a first-person subject.

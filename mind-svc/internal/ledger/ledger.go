@@ -26,6 +26,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/engine"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/predict"
+	"github.com/choigonyok/jarvis/mind-svc/internal/tuning"
 )
 
 // A card nobody answered for this long was ignored, which is not refused.
@@ -106,9 +107,9 @@ func ofIntent(it model.Intent, in Inputs, idx occurrences, done map[string]bool)
 	case it.Kind == model.Info:
 		// Only said: a brief, a reminder - scored by the one tap in the inbox
 		// when there was one (도움됐어요 · 필요 없어요), against what a notice
-		// is taken to be worth (engine.NoticeStated). Its kind is what it is
-		// about, so that what was said of one kind is not said of all.
-		o.Source, o.Result, o.P = "notice", model.ResultSent, engine.NoticeStated
+		// is taken to be worth (tuning's NoticeStated). Its kind is what it
+		// is about, so that what was said of one kind is not said of all.
+		o.Source, o.Result, o.P = "notice", model.ResultSent, tuning.Default().Engine.NoticeStated
 		o.Kind, o.Context = engine.NoticeKind(it.NoticeKey()), it.NoticeKey()
 		switch it.Heard {
 		case model.HeardUseful:

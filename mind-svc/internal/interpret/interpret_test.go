@@ -14,6 +14,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/llm"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
+	"github.com/choigonyok/jarvis/mind-svc/internal/tuning"
 	"github.com/choigonyok/jarvis/mind-svc/internal/world"
 )
 
@@ -437,7 +438,7 @@ func TestHearsayAboutTheOperatorIsKeptLow(t *testing.T) {
 	if len(fs) != 1 {
 		t.Fatalf("상대가 운영자에 대해 한 말은 남아야 합니다: %+v", fs)
 	}
-	if fs[0].Confidence > hearsayConfidence || !strings.Contains(fs[0].Why, "상대가 한 말") || !fs[0].Subject.Self {
+	if fs[0].Confidence > tuning.Default().Interpret.HearsayConfidence || !strings.Contains(fs[0].Why, "상대가 한 말") || !fs[0].Subject.Self {
 		t.Fatalf("낮은 확신도의 들은 말로 남아야 합니다: %+v", fs[0])
 	}
 }
