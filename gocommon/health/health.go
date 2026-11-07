@@ -52,8 +52,14 @@ type Report struct {
 	// does not change it - the loops say so themselves, and a container
 	// whose healthcheck fails takes the services that wait on it down too.
 	Status string `json:"status"`
-	Loops  []Loop `json:"loops,omitempty"`
-	Held   *Held  `json:"held,omitempty"`
+	// Error is why the service cannot do its work at all, beside a 503.
+	Error string `json:"error,omitempty"`
+	Loops []Loop `json:"loops,omitempty"`
+	Held  *Held  `json:"held,omitempty"`
+	// About is what else a service says of itself to whoever reads its
+	// /health - which key it seals with, what it is set up for. Nothing is
+	// judged by it.
+	About map[string]any `json:"about,omitempty"`
 }
 
 // Loop is one background loop: what it is for, and how it is doing. A round

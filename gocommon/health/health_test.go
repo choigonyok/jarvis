@@ -82,9 +82,25 @@ func TestWriteSaysOKOrDown(t *testing.T) {
 		t.Fatalf("%v %+v", err, r)
 	}
 	rec = httptest.NewRecorder()
-	Write(rec, http.StatusServiceUnavailable, Report{})
+	Write(rec, http.StatusServiceUnavailable, Report{Error: "데이터베이스에 연결할 수 없습니다."})
+	r = Report{}
 	_ = json.NewDecoder(rec.Body).Decode(&r)
-	if rec.Code != http.StatusServiceUnavailable || r.Status != "down" {
+	if rec.Code != http.StatusServiceUnavailable || r.Status != "down" || r.Error == "" {
 		t.Fatalf("%d %+v", rec.Code, r)
+	}
+}
+
+// What a service says of itself rides along, and an empty report is the
+// plain {"status":"ok"} every reader already takes.
+func TestAboutRidesAlong(t *testing.T) {
+	rec := httptest.NewRecorder()
+	Write(rec, http.StatusOK, Report{About: map[string]any{"key": "257335f4"}})
+	if got := rec.Body.String(); got != `{"status":"ok","about":{"key":"257335f4"}}`+"\n" {
+		t.Fatalf("%s", got)
+	}
+	rec = httptest.NewRecorder()
+	Write(rec, http.StatusOK, Report{})
+	if got := rec.Body.String(); got != `{"status":"ok"}`+"\n" || rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("%s %v", got, rec.Header())
 	}
 }

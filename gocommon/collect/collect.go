@@ -6,10 +6,11 @@ package collect
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"net/http"
 	"time"
+
+	"github.com/choigonyok/jarvis/gocommon/svc"
 )
 
 // Guard requires "Authorization: Bearer <token>". An empty token lets
@@ -17,7 +18,7 @@ import (
 // unless told to).
 func Guard(token string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if token != "" && subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+token)) != 1 {
+		if token != "" && !svc.Bearer(r, token) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
