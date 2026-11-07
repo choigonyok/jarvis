@@ -67,12 +67,18 @@ func (p *Postgres) Entities(ctx context.Context, kind, room string, liveOnly boo
 	return out, rows.Err()
 }
 
-func (p *Postgres) PlansOn(ctx context.Context, from, to string) ([]model.Entity, error) {
-	rows, err := p.db.Query(ctx, `
+// plansOn reads the plans by date through the partial index
+// mind_entities_plan_date (db/migrations/041), whose predicate is
+// kind = 'plan'. The kind is written into the text, not bound: a prepared
+// statement's generic plan cannot match a bound $n to that predicate.
+const plansOn = `
 		select id, kind, room, state, version, created_at, updated_at from mind_entities
-		 where kind = $3 and coalesce(state->>'date', '') <> '' and state->>'date' <= $2
+		 where kind = '` + model.KindPlan + `' and coalesce(state->>'date', '') <> '' and state->>'date' <= $2
 		   and coalesce(nullif(state->>'endDate', ''), state->>'date') >= $1
-		 order by id`, from, to, model.KindPlan)
+		 order by id`
+
+func (p *Postgres) PlansOn(ctx context.Context, from, to string) ([]model.Entity, error) {
+	rows, err := p.db.Query(ctx, plansOn, from, to)
 	if err != nil {
 		return nil, err
 	}

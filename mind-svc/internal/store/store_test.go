@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -676,5 +677,22 @@ func resetTables(t *testing.T, dsn, sql string) {
 	defer conn.Close(context.Background())
 	if _, err := conn.Exec(context.Background(), sql); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The plans' date lookup names its kind in the query text, as the partial
+// index built for it does (db/migrations/041): bound as $n, a prepared
+// statement's generic plan cannot use that index.
+func TestPlansOnNamesItsKindAsItsIndexDoes(t *testing.T) {
+	migration, err := os.ReadFile("../../../db/migrations/041_mind_plans_on.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	where := "where kind = '" + model.KindPlan + "'"
+	if !strings.Contains(string(migration), where) {
+		t.Fatalf("색인의 조건이 바뀌었습니다: %s", migration)
+	}
+	if !strings.Contains(plansOn, where) {
+		t.Fatalf("PlansOn 은 색인과 같은 조건을 글로 적어야 합니다: %s", plansOn)
 	}
 }
