@@ -79,8 +79,8 @@ function Body({
   onChanged: () => void;
 }) {
   // Every step lands here a few seconds after it happens while a run is live.
-  // Not read again on coming back to the app: the list under the sheet is,
-  // and this reads within seconds anyway.
+  // Coming back to the app, the list under the sheet is read at once; this
+  // waits for its own next read (15 seconds at the most).
   const read = useResource<JobDetail>(
     `job:${job.id}`,
     async (signal) => {
