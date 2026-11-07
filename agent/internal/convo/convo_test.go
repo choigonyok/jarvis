@@ -149,8 +149,11 @@ func TestEveryScenarioCanPassAndFail(t *testing.T) {
 // agent beside it - no module, board, gate, store or runner of its own. The
 // jobs module is named only for the shared browser's server name. Nor does it
 // rewire what the assembly returns: a setter on it (Runner.OnTool,
-// Proposals.OnDecide) or a field written over would swap or add to the
-// agent's own wiring. A hook the tests need is a field of assemble.Deps.
+// Proposals.OnDecide), called or taken as a value, or a field written over
+// would swap or add to the agent's own wiring. The assembly goes nowhere the
+// check cannot follow: only to a function of this package or a function
+// literal, whose parameter is then held too, or to a server that serves it.
+// A hook the tests need is a field of assemble.Deps.
 func TestTheHarnessIsTheAgentsAssembly(t *testing.T) {
 	const agent = "github.com/choigonyok/jarvis/agent/internal/"
 	builds := []string{"module/", "claudecode", "adapter/", "core/", "tool", "suggest", "httpapi"}
@@ -171,7 +174,8 @@ func TestTheHarnessIsTheAgentsAssembly(t *testing.T) {
 		}
 		asts[f] = parsed
 	}
-	held := assemblyNames(asts)
+	funcs := packageFuncs(asts)
+	held := assemblyNames(asts, funcs)
 	for _, f := range slices.Sorted(maps.Keys(asts)) {
 		parsed := asts[f]
 		for _, imp := range parsed.Imports {
@@ -185,36 +189,48 @@ func TestTheHarnessIsTheAgentsAssembly(t *testing.T) {
 				}
 			}
 		}
-		ast.Inspect(parsed, func(n ast.Node) bool {
-			switch n := n.(type) {
-			case *ast.CallExpr:
-				if sel, ok := n.Fun.(*ast.SelectorExpr); ok && setter.MatchString(sel.Sel.Name) && held[rootName(sel.X)] {
-					t.Errorf("%s:%d: %s - 조립한 에이전트의 연결을 바꿉니다. 하네스에 필요한 것은 assemble.Deps 로 넘깁니다", f, fset.Position(n.Pos()).Line, sel.Sel.Name)
-				}
-			case *ast.AssignStmt:
-				if n.Tok == token.DEFINE {
-					break
-				}
-				for _, lhs := range n.Lhs {
-					switch lhs.(type) {
-					case *ast.SelectorExpr, *ast.IndexExpr:
-						if held[rootName(lhs)] {
-							t.Errorf("%s:%d: 조립한 에이전트의 것을 덮어씁니다. 하네스에 필요한 것은 assemble.Deps 로 넘깁니다", f, fset.Position(n.Pos()).Line)
+		for _, decl := range parsed.Decls {
+			fn, _ := decl.(*ast.FuncDecl)
+			in := held[fn]
+			ast.Inspect(decl, func(n ast.Node) bool {
+				switch n := n.(type) {
+				case *ast.CallExpr:
+					if params(n.Fun, funcs) != nil || serves(n.Fun) || measures(n.Fun) {
+						break
+					}
+					for _, arg := range n.Args {
+						if assembly(arg, in) {
+							t.Errorf("%s:%d: 조립한 에이전트를 시험이 따라가지 못하는 곳에 넘깁니다. 하네스에 필요한 것은 assemble.Deps 로 넘깁니다", f, fset.Position(arg.Pos()).Line)
+						}
+					}
+				case *ast.AssignStmt:
+					if n.Tok == token.DEFINE {
+						break
+					}
+					for _, lhs := range n.Lhs {
+						switch lhs.(type) {
+						case *ast.SelectorExpr, *ast.IndexExpr:
+							if in[rootName(lhs)] {
+								t.Errorf("%s:%d: 조립한 에이전트의 것을 덮어씁니다. 하네스에 필요한 것은 assemble.Deps 로 넘깁니다", f, fset.Position(n.Pos()).Line)
+							}
+						}
+					}
+				case *ast.SelectorExpr:
+					if setter.MatchString(n.Sel.Name) && in[rootName(n.X)] {
+						t.Errorf("%s:%d: %s - 조립한 에이전트의 연결을 바꿉니다. 하네스에 필요한 것은 assemble.Deps 로 넘깁니다", f, fset.Position(n.Pos()).Line, n.Sel.Name)
+					}
+					if x, ok := n.X.(*ast.Ident); ok {
+						switch {
+						case x.Name == "assemble" && n.Sel.Name == "Assemble":
+							assembled = true
+						case x.Name == "jobs" && n.Sel.Name != "BrowserServer":
+							t.Errorf("%s: jobs.%s - 작업 모듈은 assemble 이 세웁니다", f, n.Sel.Name)
 						}
 					}
 				}
-			case *ast.SelectorExpr:
-				if x, ok := n.X.(*ast.Ident); ok {
-					switch {
-					case x.Name == "assemble" && n.Sel.Name == "Assemble":
-						assembled = true
-					case x.Name == "jobs" && n.Sel.Name != "BrowserServer":
-						t.Errorf("%s: jobs.%s - 작업 모듈은 assemble 이 세웁니다", f, n.Sel.Name)
-					}
-				}
-			}
-			return true
-		})
+				return true
+			})
+		}
 	}
 	if !assembled {
 		t.Fatal("하네스는 에이전트를 assemble.Assemble 로 세워야 합니다")
@@ -225,53 +241,146 @@ func TestTheHarnessIsTheAgentsAssembly(t *testing.T) {
 var setter = regexp.MustCompile(`^(On|Set)[A-Z]`)
 
 // assemblyNames is the names the harness holds the assembly, or a part of
-// it, under: what assemble.Assemble or wire returned, and what is read off
-// one of those (agent.Runner, agent.Boards[path]) - assigned or declared
-// with var.
-func assemblyNames(files map[string]*ast.File) map[string]bool {
-	held := map[string]bool{}
-	for grew := true; grew; {
+// it, under, in each function: what assemble.Assemble or wire returned, what
+// is read off one of those (agent.Runner, agent.Boards[path]) or copied from
+// one (a := *agent) - assigned or declared with var - and the parameter a
+// function of this package, or a function literal, takes one in as. A name
+// is held in its own function only: another function's h is another h.
+func assemblyNames(files map[string]*ast.File, funcs map[string]*ast.FuncDecl) map[*ast.FuncDecl]map[string]bool {
+	held := map[*ast.FuncDecl]map[string]bool{}
+	grew := true
+	hold := func(fn *ast.FuncDecl, name string) {
+		if name == "" || name == "_" || held[fn][name] {
+			return
+		}
+		if held[fn] == nil {
+			held[fn] = map[string]bool{}
+		}
+		held[fn][name] = true
+		grew = true
+	}
+	for grew {
 		grew = false
 		for _, file := range files {
-			ast.Inspect(file, func(n ast.Node) bool {
-				var names, values []ast.Expr
-				switch n := n.(type) {
-				case *ast.AssignStmt:
-					names, values = n.Lhs, n.Rhs
-				case *ast.ValueSpec:
-					for _, name := range n.Names {
-						names = append(names, name)
+			for _, decl := range file.Decls {
+				fn, _ := decl.(*ast.FuncDecl)
+				ast.Inspect(decl, func(n ast.Node) bool {
+					var names, values []ast.Expr
+					switch n := n.(type) {
+					case *ast.CallExpr:
+						// The callee's parameter: a literal's is in this
+						// function, a package function's in that one.
+						to := fn
+						if callee, ok := bare(n.Fun).(*ast.Ident); ok && funcs[callee.Name] != nil {
+							to = funcs[callee.Name]
+						}
+						taken := params(n.Fun, funcs)
+						for i, arg := range n.Args {
+							if assembly(arg, held[fn]) {
+								hold(to, paramAt(taken, i))
+							}
+						}
+						return true
+					case *ast.AssignStmt:
+						names, values = n.Lhs, n.Rhs
+					case *ast.ValueSpec:
+						for _, name := range n.Names {
+							names = append(names, name)
+						}
+						values = n.Values
+					default:
+						return true
 					}
-					values = n.Values
-				default:
+					if len(names) == 0 {
+						return true
+					}
+					// One value for several names is a call's results: the
+					// first is what it returned (agent, err := wire(...)).
+					for i, value := range values {
+						to := names[0]
+						if len(values) == len(names) {
+							to = names[i]
+						}
+						if name, ok := to.(*ast.Ident); ok && assembly(value, held[fn]) {
+							hold(fn, name.Name)
+						}
+					}
 					return true
-				}
-				if len(names) == 0 {
-					return true
-				}
-				// One value for several names is a call's results: the
-				// first is what it returned (agent, err := wire(...)).
-				for i, value := range values {
-					to := names[0]
-					if len(values) == len(names) {
-						to = names[i]
-					}
-					name, ok := to.(*ast.Ident)
-					if !ok || name.Name == "_" || held[name.Name] || !assembly(value, held) {
-						continue
-					}
-					held[name.Name] = true
-					grew = true
-				}
-				return true
-			})
+				})
+			}
 		}
 	}
 	return held
 }
 
-// assembly is whether e is the assembly or read off it.
+// packageFuncs is the package's own functions, by name.
+func packageFuncs(files map[string]*ast.File) map[string]*ast.FuncDecl {
+	funcs := map[string]*ast.FuncDecl{}
+	for _, file := range files {
+		for _, d := range file.Decls {
+			if fn, ok := d.(*ast.FuncDecl); ok && fn.Recv == nil {
+				funcs[fn.Name.Name] = fn
+			}
+		}
+	}
+	return funcs
+}
+
+// params is the parameters of what a call calls, when the check can follow
+// it there: a function of this package, or a function literal.
+func params(fun ast.Expr, funcs map[string]*ast.FuncDecl) *ast.FieldList {
+	switch fn := bare(fun).(type) {
+	case *ast.Ident:
+		if decl, ok := funcs[fn.Name]; ok {
+			return decl.Type.Params
+		}
+	case *ast.FuncLit:
+		return fn.Type.Params
+	}
+	return nil
+}
+
+// paramAt is the name of the parameter the i-th argument lands in; the last
+// one takes what is left over (variadic).
+func paramAt(list *ast.FieldList, i int) string {
+	if list == nil {
+		return ""
+	}
+	var names []string
+	for _, field := range list.List {
+		if len(field.Names) == 0 {
+			names = append(names, "")
+		}
+		for _, name := range field.Names {
+			names = append(names, name.Name)
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	return names[min(i, len(names)-1)]
+}
+
+// serves is whether a call hands what it is given to a server to serve - a
+// handler put on a mux or a test server - which cannot rewire it.
+func serves(fun ast.Expr) bool {
+	sel, ok := bare(fun).(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	x, ok := sel.X.(*ast.Ident)
+	return ok && (x.Name == "mux" && sel.Sel.Name == "Handle" || x.Name == "httptest" && sel.Sel.Name == "NewServer")
+}
+
+// measures is whether a call only measures what it is given (len, cap).
+func measures(fun ast.Expr) bool {
+	id, ok := bare(fun).(*ast.Ident)
+	return ok && (id.Name == "len" || id.Name == "cap")
+}
+
+// assembly is whether e is the assembly, read off it or a copy of it.
 func assembly(e ast.Expr, held map[string]bool) bool {
+	e = bare(e)
 	if call, ok := e.(*ast.CallExpr); ok {
 		switch fn := call.Fun.(type) {
 		case *ast.Ident:
@@ -284,11 +393,32 @@ func assembly(e ast.Expr, held map[string]bool) bool {
 			}
 		}
 	}
-	switch e.(type) {
+	switch x := e.(type) {
+	case *ast.Ident:
+		return held[x.Name]
 	case *ast.SelectorExpr, *ast.IndexExpr:
 		return held[rootName(e)]
 	}
 	return false
+}
+
+// bare is e without the parentheses, dereference or address-of around it.
+func bare(e ast.Expr) ast.Expr {
+	for {
+		switch x := e.(type) {
+		case *ast.ParenExpr:
+			e = x.X
+		case *ast.StarExpr:
+			e = x.X
+		case *ast.UnaryExpr:
+			if x.Op != token.AND {
+				return e
+			}
+			e = x.X
+		default:
+			return e
+		}
+	}
 }
 
 // rootName is the variable an expression is read off: agent for
