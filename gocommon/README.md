@@ -70,9 +70,12 @@ These four are here under that rule, and stay:
   publisher (kakaotalk-client, imessage-client).
 - `seal` - what keeps text from lying about in the clear (AES-256-GCM): a
   message's text from the collectors on through input-svc and mind-svc's
-  store, and vault-svc's logins. One form, `jsl2 | key id | nonce | sealed`,
-  bound to its place (a login's domain, or nothing); the two forms without the
-  prefix that stored rows hold still open.
+  store, and vault-svc's logins. Every reader opens both forms - bare
+  (`nonce | sealed`: a message's binds nothing, a vault row's binds
+  `jarvis-vault/v1/<place>`) and headed (`jsl2 | key id | nonce | sealed`,
+  bound to its head and its place). `Written`, one constant, says which one is
+  written: bare, until mind-svc, input-svc, vault-svc and both collectors run
+  code that opens headed.
 
 Each service's `go.mod` points at it with `replace ... => ../gocommon`, and its
 Docker build receives it as the extra build context `gocommon`

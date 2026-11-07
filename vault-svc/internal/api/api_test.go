@@ -3,8 +3,11 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -332,8 +335,8 @@ func TestAShippingProfileIsReadWholeAndNeedsItsBuildingNumber(t *testing.T) {
 }
 
 // legacyKey is the test key gocommon/seal's fixtures are sealed with (bytes
-// 0..31); the rows below are two of those fixtures, as the vault keeps a seal
-// without the prefix.
+// 0..31); the bare rows below are two of those fixtures, as the vault keeps
+// them.
 func legacyKey() []byte {
 	key := make([]byte, 32)
 	for i := range key {
@@ -351,11 +354,55 @@ func b64(t *testing.T, s string) []byte {
 	return b
 }
 
-// What is already in the vault keeps opening: a login and a shipping profile
-// sealed in the form without the prefix. Saved again, a login is in the form
-// with it, and opens the same.
-func TestRowsWithoutThePrefixStillOpen(t *testing.T) {
-	s, err := seal.New(legacyKey())
+func gcm(t *testing.T, key []byte) cipher.AEAD {
+	t.Helper()
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aead, err := cipher.NewGCM(block)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return aead
+}
+
+// headedRow is a row in the headed form, made here by hand: "jsl2", the key
+// id and the nonce in the nonce column, the sealed text in sealed, bound to
+// those first eight bytes and the place.
+func headedRow(t *testing.T, key []byte, keyID, place, plain string) (head, rest []byte) {
+	t.Helper()
+	id, err := hex.DecodeString(keyID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head = append(append([]byte("jsl2"), id...), make([]byte, 12)...)
+	if _, err := rand.Read(head[8:]); err != nil {
+		t.Fatal(err)
+	}
+	return head, gcm(t, key).Seal(nil, head[8:], []byte(plain), append(append([]byte{}, head[:8]...), place...))
+}
+
+// bareOpen opens a row as a vault that knows only the bare form does: the
+// nonce from its own column, bound to "jarvis-vault/v1/" + the place.
+func bareOpen(t *testing.T, key []byte, place string, nonce, sealed []byte) string {
+	t.Helper()
+	if len(nonce) != 12 {
+		t.Fatalf("%s: nonce 열은 nonce 12바이트여야 합니다: %x", place, nonce)
+	}
+	plain, err := gcm(t, key).Open(nil, nonce, sealed, []byte("jarvis-vault/v1/"+place))
+	if err != nil {
+		t.Fatalf("%s: 머리 없는 형식만 아는 보관함이 열지 못합니다: %v", place, err)
+	}
+	return string(plain)
+}
+
+// The vault reads rows with either head - the bare form's 12-byte nonce and
+// the headed form's 20 bytes - and writes the bare form, which a vault that
+// knows only that form still opens.
+func TestRowsOfBothHeadsOpenAndSavedRowsAreBare(t *testing.T) {
+	key := legacyKey()
+	s, err := seal.New(key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -365,31 +412,60 @@ func TestRowsWithoutThePrefixStillOpen(t *testing.T) {
 		Nonce: b64(t, "AwwalwJ61+a0j+l4"), Sealed: b64(t, "//CLReJoBi/V4HOGIklNUK9O4xeSYbZpKfiz3LNY2skHaFdmRFpIDwixgP8zPdvWI3rxCwweLdBq")}
 	f.profiles["기본"] = store.Profile{Name: "기본", KeyID: "257335f4", Nonce: b64(t, "omcITuSdejeNDrjN"),
 		Sealed: b64(t, "iwhHviKIIOpLTcqa4DE1kV8x9z0k/XNwW9UrHsGcSMvd4R6tgwaqJRkwQdxjAAdiJbtBSRYDQIFvWfBuDRVFQMaKXub9iy9hkcvk/zJtDnECpOgCLL0ehHjcs3BiNS4bMUkeuxVP+ie+wn8VqsdGYNoqnCypRSY+ArogHkPEmkbReAi/apJMaIa+rQXRhkMSUVdyHlQiQsqmg+KNPSjZ")}
-	release := func() map[string]string {
+	head, rest := headedRow(t, key, s.ID(), "example.org", `{"u":"you@example.org","p":"pw-test-5678"}`)
+	f.logins["example.org"] = store.Login{Domain: "example.org", Name: "예시 2", Hint: "yo***@e***", KeyID: s.ID(), Nonce: head, Sealed: rest}
+	head, rest = headedRow(t, key, s.ID(), "pin:pay.naver.com", `{"pin":"135790"}`)
+	f.pins["pay.naver.com"] = store.Pin{Site: "pay.naver.com", Name: "네이버페이", KeyID: s.ID(), Nonce: head, Sealed: rest}
+	head, rest = headedRow(t, key, s.ID(), "profile:회사",
+		`{"name":"","recipient":"김시험","phone":"01000000001","zip":"00001","address":"테스트시 시험구 예시로 2","detail":"202동 202호"}`)
+	f.profiles["회사"] = store.Profile{Name: "회사", KeyID: s.ID(), Nonce: head, Sealed: rest}
+
+	release := func(host string) map[string]string {
 		t.Helper()
-		code, body := call(h, http.MethodPost, "/release", "browser", `{"host":"www.example.com","purpose":"chat"}`)
+		code, body := call(h, http.MethodPost, "/release", "browser", `{"host":"`+host+`","purpose":"chat"}`)
 		var got map[string]string
 		if code != http.StatusOK || json.Unmarshal([]byte(body), &got) != nil {
-			t.Fatalf("꺼내기: %d %s", code, body)
+			t.Fatalf("%s 꺼내기: %d %s", host, code, body)
 		}
 		return got
 	}
-	if got := release(); got["username"] != "me@example.com" || got["password"] != "pw-test-1234" {
-		t.Fatalf("%v", got)
+	if got := release("www.example.com"); got["username"] != "me@example.com" || got["password"] != "pw-test-1234" {
+		t.Fatalf("머리 없는 행: %v", got)
+	}
+	if got := release("www.example.org"); got["username"] != "you@example.org" || got["password"] != "pw-test-5678" {
+		t.Fatalf("머리 있는 행: %v", got)
+	}
+	if code, body := call(h, http.MethodPost, "/release-pin", "browser", `{"site":"pay.naver.com","host":"pay.naver.com"}`); code != http.StatusOK || !strings.Contains(body, "135790") {
+		t.Fatalf("머리 있는 결제 비밀번호: %d %s", code, body)
 	}
 	code, body := call(h, http.MethodGet, "/profiles", "svc", "")
-	if code != http.StatusOK || !strings.Contains(body, "홍길동") || !strings.Contains(body, "101동 101호") {
-		t.Fatalf("배송지: %d %s", code, body)
+	for _, want := range []string{"홍길동", "101동 101호", "김시험", "202동 202호"} {
+		if code != http.StatusOK || !strings.Contains(body, want) {
+			t.Fatalf("배송지에 %s 가 없습니다: %d %s", want, code, body)
+		}
 	}
 
-	if code, _ := call(h, http.MethodPut, "/logins/example.com", "svc", `{"username":"me@example.com","password":"pw-new-5678"}`); code != http.StatusOK {
-		t.Fatalf("다시 저장: %d", code)
+	// Saved again, each row is bare, under the same key id.
+	for _, c := range []struct{ path, body string }{
+		{"/logins/example.org", `{"username":"you@example.org","password":"pw-new-5678"}`},
+		{"/pins/pay.naver.com", `{"pin":"246802"}`},
+		{"/profiles/회사", `{"recipient":"김시험","phone":"010-0000-0001","zip":"00001","address":"테스트시 시험구 예시로 2","detail":"203동 203호"}`},
+	} {
+		if code, body := call(h, http.MethodPut, c.path, "svc", c.body); code != http.StatusOK {
+			t.Fatalf("%s 다시 저장: %d %s", c.path, code, body)
+		}
 	}
-	l := f.logins["example.com"]
-	if len(l.Nonce) != seal.HeadSize || !bytes.HasPrefix(l.Nonce, []byte("jsl2")) || l.KeyID != s.ID() {
-		t.Fatalf("다시 쓴 행: %x %s", l.Nonce, l.KeyID)
+	l := f.logins["example.org"]
+	if l.KeyID != s.ID() || !strings.Contains(bareOpen(t, key, "example.org", l.Nonce, l.Sealed), "pw-new-5678") {
+		t.Fatalf("다시 쓴 로그인: %x %s", l.Nonce, l.KeyID)
 	}
-	if got := release(); got["password"] != "pw-new-5678" {
+	if p := f.pins["pay.naver.com"]; p.KeyID != s.ID() || !strings.Contains(bareOpen(t, key, "pin:pay.naver.com", p.Nonce, p.Sealed), "246802") {
+		t.Fatalf("다시 쓴 결제 비밀번호: %x %s", p.Nonce, p.KeyID)
+	}
+	if p := f.profiles["회사"]; p.KeyID != s.ID() || !strings.Contains(bareOpen(t, key, "profile:회사", p.Nonce, p.Sealed), "203동 203호") {
+		t.Fatalf("다시 쓴 배송지: %x %s", p.Nonce, p.KeyID)
+	}
+	if got := release("www.example.org"); got["password"] != "pw-new-5678" {
 		t.Fatalf("%v", got)
 	}
 }

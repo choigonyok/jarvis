@@ -44,11 +44,13 @@
 
 ## 봉인
 
-`gocommon/seal` 의 봉인이다: AES-256-GCM, 쓸 때마다 새 nonce, 봉인의 머리(`jsl2`·키 id·nonce)와 행의
-도메인을 연관 데이터로 묶는다 - 봉인된 행을 다른 도메인으로 옮기면 열리지 않는다. 머리는 `nonce` 열에, 나머지는
-`sealed` 열에 둔다. 머리가 없는 행(`nonce` 열에 nonce 만 있고 `jarvis-vault/v1/<domain>` 에 묶인 것)도 그대로
-열리고, 다시 저장하면 머리가 붙는다. 키는 `VAULT_KEY`(맥미니 .env 의 `JARVIS_VAULT_KEY`, `openssl rand -base64 32`)에만 있고
-DB·백업에는 없다(백업에는 봉인된 값뿐). **키를 잃으면 저장된 정보는 다시 넣어야 한다** - 따로 보관해 둘 것.
+`gocommon/seal` 의 봉인이다: AES-256-GCM, 쓸 때마다 새 nonce. 행은 `nonce` 열에 nonce(12바이트)를, `sealed`
+열에 봉인을 두고 `jarvis-vault/v1/<domain>` 에 묶는다 - 봉인된 행을 다른 도메인으로 옮기면 열리지 않는다.
+`nonce` 열에 머리 있는 형식의 머리(`jsl2`·키 id·nonce, 20바이트)가 든 행도 연다 - 그 행은 머리와 도메인에 묶여 있다.
+어느 형식으로 쓸지는 `gocommon/seal` 의 `Written` 하나가 정하고, 머리 없는 형식만 아는 보관함도 행을 열도록
+모든 읽는 쪽이 머리 있는 형식을 열게 될 때까지는 머리 없는 형식으로 쓴다.
+키는 `VAULT_KEY`(맥미니 .env 의 `JARVIS_VAULT_KEY`, `openssl rand -base64 32`)에만 있고 DB·백업에는 없다(백업에는
+봉인된 값뿐). **키를 잃으면 저장된 정보는 다시 넣어야 한다** - 따로 보관해 둘 것.
 행마다 키의 해시 앞부분(`key_id`)을 남겨, 키가 바뀌면 "다른 키로 저장됨"이라고 알린다.
 
 ## 도메인
