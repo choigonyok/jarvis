@@ -149,7 +149,8 @@ Go 는 `gocommon/site`, 브라우저는 `publicsuffixlist`.
 | `Actuator` | 세상을 바꾼다 (+ 승인 카드를 직접 그린다) | ✓ |
 | `ContextSource` | 판단에 쓸 사실을 내놓는다 | ✓ |
 
-추가는 `main.go`의 `modules.Add(...)` 한 줄, 제거는 그 줄을 지우는 것입니다.
+추가는 `internal/assemble` 의 블록 하나(`modules.Add(...)` 와 그 모듈의 판·서버), 제거는 그 블록을 지우는 것입니다.
+에이전트(`cmd/agent`)와 대화 회귀 시험(`internal/convo`)이 같은 `assemble.Assemble` 로 세워지므로 한 곳만 고칩니다.
 레지스트리가 타입 단언으로 분류하므로 빈 메서드를 채울 일이 없습니다.
 
 모듈이 선언한 동작(`action.Spec`)은 세 곳을 한꺼번에 먹입니다 — MCP 도구 정의,
@@ -409,11 +410,11 @@ cd web && AGENT_URL=http://localhost:8080 \
 
 | 메서드 | 경로 | 하는 일 |
 |---|---|---|
-| GET | `/thread` | 스레드 + 진행 여부 + 제안 전체 (최초 로딩) |
+| GET | `/thread` | 스레드 + 진행 여부 + 카드: 기다리는 것과 최근(올린 지 14일 안)에 결정한 것, 그리고 그 페이지의 턴이 가리키는 것 (최초 로딩) |
 | GET | `/events` | SSE. `turn` / `draft` / `status` / `queue` / `error` / `proposal` / `calendar` / `checklist` |
 | POST | `/messages/{id}/steer` · `/messages/{id}/drop` | 대기열의 말을 진행 중인 턴에 끼워 넣거나 뺀다 |
 | POST | `/thread/stop` | 쓰고 있는 답을 멈춘다(CLI 에 stream-json `interrupt`). 쓴 데까지 남고 "(여기서 멈췄어요)"가 붙으며, 기다리던 말은 이어서 간다. 5초 안에 끝나지 않으면 프로세스를 끝내고 다음 말은 새 세션으로 연다. 멈출 답이 없으면 409 |
-| GET | `/proposals` | 제안 전체 |
+| GET | `/proposals` | 기다리는 카드와 최근에 결정한 카드. 그보다 오래된 카드는 `proposals-archive.json` 으로 옮겨 두고 id 로만 찾는다 |
 | POST | `/proposals/{id}/decision` | 비밀 칸이 있는 카드의 답만 `{"decision":"approved"\|"rejected","edits":{}}`. 다른 카드의 답은 입구로 온다 |
 | GET | `/usage` | 구독 사용량 |
 | POST | `/uploads` · GET `/uploads/{name}` | 사진 첨부 |
@@ -446,7 +447,7 @@ cd web && AGENT_URL=http://localhost:8080 \
 규칙에서 하나씩 왔고(`scenarios/*.json`, 값은 모두 가짜), 무엇을 지키는지 `why` 에 적혀 있습니다.
 
 - **같은 것**: 설정 읽기, 지시문, 스킬, `look`·`change` 판과 모듈 도구의 설명, 결재 게이트(카드 문구까지), 메시지 앞에 붙는 블록은
-  에이전트의 코드 그대로입니다(`wire.go` 는 `cmd/agent/main.go` 의 배선을 따라가고, 새 모듈이 빠지면 시험이 실패합니다).
+  에이전트의 코드 그대로입니다(시험도 에이전트와 같은 `assemble.Assemble` 로 세워지고, 대역은 그 `Deps` 로만 들어갑니다).
 - **대역인 것**: 백엔드의 답만 시나리오가 정합니다. 운영 데이터에는 닿지 않습니다.
 - **채점**: CLI 스트림의 도구 호출과 마지막 답으로 합니다(`Runner.OnTool`).
 - `go test ./internal/convo` 는 모델 없이 돕니다: 시나리오마다 기대한 호출을 그대로 내는 가짜 CLI 로 통과하고, 금지된 호출이나
