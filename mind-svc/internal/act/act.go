@@ -61,7 +61,7 @@ func (r *Registry) For(kind string) (Actuator, bool) {
 // messages stay here - outside what the assistant does by itself.
 type Note struct{}
 
-func (Note) Kinds() []string { return []string{"note"} }
+func (Note) Kinds() []string { return []string{model.NoteOnly} }
 
 func (Note) Preview(_ context.Context, _ string, payload json.RawMessage) (string, error) {
 	var p struct {

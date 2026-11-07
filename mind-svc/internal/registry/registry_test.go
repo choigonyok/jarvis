@@ -81,6 +81,22 @@ func TestTheCodesKindsHaveTheirLanes(t *testing.T) {
 	}
 }
 
+// The intents mind raises by name (model) have their action rows: the gate
+// does nothing it has no row for. A notice does nothing and needs none.
+func TestTheCodesIntentsHaveTheirRows(t *testing.T) {
+	s := Default()
+	for _, k := range []string{model.CalendarCreate, model.CalendarUpdate, model.CalendarDelete, model.CartAdd,
+		model.RemindSet, model.MessageDraft, model.SettleRequest, model.ReviewPlace, model.PreferenceConfirm,
+		model.AssetsRebalance, model.PhotosAlbum, model.PhotosPlace, model.SpendingCategory, model.NoteOnly} {
+		if _, ok := s.Action(k); !ok {
+			t.Errorf("%s: 행동 줄이 없습니다", k)
+		}
+	}
+	if _, ok := s.Action(model.Info); ok {
+		t.Error("알림은 행동 줄이 없습니다")
+	}
+}
+
 // What only the guest's stream carries is read on theirs, and a kind with a
 // reader of its own is not in its lane's line.
 func TestWhatEachReaderSubscribesTo(t *testing.T) {

@@ -379,7 +379,7 @@ func (m *Mind) goalHour(ctx context.Context) error {
 // goalWorkout marks the goals tied to the workout log: a day with a workout was
 // done, unless the operator said otherwise.
 func (m *Mind) goalWorkout(ctx context.Context, o model.Occurrence) error {
-	if m.Goals == nil || o.Kind != "workout" {
+	if m.Goals == nil || o.Kind != model.Workout {
 		return nil
 	}
 	gs, err := m.Goals.AllOf(ctx, goals.Owner, false)

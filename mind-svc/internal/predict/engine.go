@@ -338,7 +338,7 @@ func withoutLive(ev []string) []string {
 // its target's kind.
 func RuleOf(pr model.Prediction) string {
 	kind, _, _ := strings.Cut(pr.Target, ":")
-	if kind == "workout" || len(pr.Basis) == 0 {
+	if kind == model.Workout || len(pr.Basis) == 0 {
 		return kind
 	}
 	return pr.Basis[0]
@@ -351,7 +351,7 @@ func movedBy(pr model.Prediction) []string {
 	if pr.Prior == nil || len(pr.Basis) == 0 {
 		return nil
 	}
-	if strings.HasPrefix(pr.Target, "workout:") {
+	if strings.HasPrefix(pr.Target, model.Workout+":") {
 		return pr.Basis
 	}
 	return pr.Basis[1:]

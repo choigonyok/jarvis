@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 )
 
 // Photos is where photo albums are made: Immich in the stack, a map on a
@@ -32,7 +34,7 @@ type album struct {
 	To     string   `json:"to"`
 }
 
-func (PhotosActuator) Kinds() []string { return []string{"photos.album"} }
+func (PhotosActuator) Kinds() []string { return []string{model.PhotosAlbum} }
 
 func (PhotosActuator) Preview(_ context.Context, _ string, payload json.RawMessage) (string, error) {
 	var a album

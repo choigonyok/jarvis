@@ -8,17 +8,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/moments"
-	"github.com/choigonyok/jarvis/mind-svc/internal/skill"
 )
 
 // remindAct carries out the card loops raises for the operator's own promise
-// (skill.KindRemind): approved, the reminder it offered is kept - at the time
+// (model.RemindSet): approved, the reminder it offered is kept - at the time
 // and in the words the operator left on the card - and undone, it is
 // cancelled. One reminder waits per loop: approved again, it is changed.
 type remindAct struct{ m *Mind }
 
-func (remindAct) Kinds() []string { return []string{skill.KindRemind} }
+func (remindAct) Kinds() []string { return []string{model.RemindSet} }
 
 // remindPayload is what the card carries, and the operator's answers to it.
 type remindPayload struct {

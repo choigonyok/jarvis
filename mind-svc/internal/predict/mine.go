@@ -156,10 +156,10 @@ func dedupe(all map[string]*stream) {
 func widens(wide, narrow string) bool {
 	if wide == Delivery {
 		_, _, title := Parts(narrow)
-		return Source(narrow) == "purchase" && IsDelivery(title)
+		return Source(narrow) == model.Purchase && IsDelivery(title)
 	}
 	if narrow == Delivery {
-		return wide == "purchase" || wide == "purchase/식비"
+		return wide == model.Purchase || wide == model.Purchase+"/식비"
 	}
 	return Source(wide) == Source(narrow) && (strings.HasPrefix(narrow, wide+"/") || strings.HasPrefix(narrow, wide+"@"))
 }
@@ -257,7 +257,7 @@ func (p *Predictor) Mine(ctx context.Context) ([]model.Note, error) {
 			c.since = lo
 		}
 		for _, e := range s.events {
-			if !e.at.Before(c.since) && (Source(k) != "calendar" || hasTime(e.at, p.Loc)) {
+			if !e.at.Before(c.since) && (Source(k) != model.Calendar || hasTime(e.at, p.Loc)) {
 				c.events = append(c.events, e)
 			}
 		}
@@ -272,7 +272,7 @@ func (p *Predictor) Mine(ctx context.Context) ([]model.Note, error) {
 // goes often (the bare visit key - home, work and the rest together) is
 // most days, and a rule on it ("화요일엔 자주 가는 곳 도착이 거의 없다") said nothing a
 // person could place. Each place has its own key.
-func broad(key string) bool { return key == "visit" }
+func broad(key string) bool { return key == model.Visit }
 
 // hasTime is whether a calendar entry's time says when it starts: one with
 // only a date is not a moment anything follows.
@@ -409,7 +409,7 @@ type dailyFound struct {
 func (p *Predictor) mineDaily(s *stream, today time.Time) dailyFound {
 	// Whether a day has a workout is the workout prediction's (Workout),
 	// with the reflection's notes; the engine keeps to the kinds of it.
-	if !Targetable(s.key) || s.key == "workout" || broad(s.key) {
+	if !Targetable(s.key) || s.key == model.Workout || broad(s.key) {
 		return dailyFound{}
 	}
 	// The source's first day was likely read from part way through.
@@ -537,7 +537,7 @@ func (p *Predictor) usual(s *stream) string {
 }
 
 func (p *Predictor) usualAt(s *stream) string {
-	if len(s.events) < 3 || Source(s.key) == "calendar" {
+	if len(s.events) < 3 || Source(s.key) == model.Calendar {
 		return ""
 	}
 	var mins []int
@@ -824,19 +824,19 @@ func scope(key string) string {
 		return "식사"
 	}
 	switch Source(key) {
-	case "purchase":
+	case model.Purchase:
 		return "지출"
-	case "purchase.item":
+	case model.PurchaseItem:
 		return "물건"
-	case "visit":
+	case model.Visit:
 		return "장소"
-	case "workout":
+	case model.Workout:
 		return "운동"
-	case "photo":
+	case model.Photo:
 		return "사진"
-	case "asset":
+	case model.Asset:
 		return "자산"
-	case "transfer", "deposit", "bill":
+	case model.Transfer, model.Deposit, model.Bill:
 		return "돈"
 	}
 	return Source(key)

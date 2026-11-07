@@ -161,7 +161,7 @@ func (m *Mind) weekend(ctx context.Context) error {
 // nearWish: arriving in a region where a place the operator wants to go
 // is - said the moment it is near.
 func (m *Mind) nearWish(ctx context.Context, o model.Occurrence) error {
-	if o.Kind != "visit" || o.Until != nil || m.Opts.Now().Sub(o.At) > time.Hour {
+	if o.Kind != model.Visit || o.Until != nil || m.Opts.Now().Sub(o.At) > time.Hour {
 		return nil
 	}
 	ws, err := m.wishes(ctx, WantsToVisit)
@@ -200,7 +200,7 @@ type Thing struct {
 func (m *Mind) Things(ctx context.Context, classify int) ([]Thing, error) {
 	st, loc := m.Opts.Store, m.Opts.Loc
 	now := m.Opts.Now()
-	items, err := st.Occurrences(ctx, now.AddDate(0, -6, 0), now, "purchase.item")
+	items, err := st.Occurrences(ctx, now.AddDate(0, -6, 0), now, model.PurchaseItem)
 	if err != nil {
 		return nil, err
 	}
@@ -276,7 +276,7 @@ func (m *Mind) restock(ctx context.Context) error {
 		// The engine predicts the same cycle and keeps its record: once its
 		// predictions have done worse than the plain rate, the cycle is not
 		// what it looks like, and saying "살 때 됐어요" would be nagging.
-		if tr := tracks[self.ID(predict.Cycle, "purchase.item/"+t.Class)]; tr.N >= 3 && tr.Skill() < 0 {
+		if tr := tracks[self.ID(predict.Cycle, model.PurchaseItem+"/"+t.Class)]; tr.N >= 3 && tr.Skill() < 0 {
 			continue
 		}
 		next, err := time.ParseInLocation("2006-01-02", t.Next, m.Opts.Loc)
@@ -309,7 +309,7 @@ func (m *Mind) restock(ctx context.Context) error {
 			// came from. The card asks with that filled in, and the order
 			// sheet takes the saved address, or stops if a move put it in doubt.
 			payload, _ := json.Marshal(map[string]string{"item": item, "class": t.Class, "site": "coupang.com"})
-			intent = model.Intent{Skill: "life", Kind: "cart.add", Context: "restock", Topic: topic, Title: title + " 담아둘까요?",
+			intent = model.Intent{Skill: "life", Kind: model.CartAdd, Context: "restock", Topic: topic, Title: title + " 담아둘까요?",
 				Body: body + "\n배송지는 저장된 주소로 넣어요.", Reason: "가진 물건", Confidence: m.restockChance(ctx, t), Value: 0.6, Reversible: true, Payload: payload}
 		}
 		if _, err := m.Gate.Submit(ctx, intent); err != nil {
@@ -326,7 +326,7 @@ func (m *Mind) restock(ctx context.Context) error {
 // random does not look as sure as water.
 func (m *Mind) restockChance(ctx context.Context, t Thing) float64 {
 	st := m.Opts.Store
-	if n, err := st.Note(ctx, self.ID(predict.Cycle, "purchase.item/"+t.Class)); err == nil && n.Rule != nil && n.Rule.Kind == predict.Cycle && !n.Rule.Off {
+	if n, err := st.Note(ctx, self.ID(predict.Cycle, model.PurchaseItem+"/"+t.Class)); err == nil && n.Rule != nil && n.Rule.Kind == predict.Cycle && !n.Rule.Off {
 		if pr, err := st.Prediction(ctx, predict.ID("cycle:"+n.Rule.Key+":"+n.Rule.Last)); err == nil && pr.ScoredAt == nil {
 			return pr.Prob
 		}
@@ -353,11 +353,11 @@ func (m *Mind) restockChance(ctx context.Context, t Thing) float64 {
 func (m *Mind) deliveries(ctx context.Context) error {
 	st, loc := m.Opts.Store, m.Opts.Loc
 	now := m.Opts.Now()
-	pays, err := st.Occurrences(ctx, now.AddDate(0, 0, -28), now, "purchase")
+	pays, err := st.Occurrences(ctx, now.AddDate(0, 0, -28), now, model.Purchase)
 	if err != nil {
 		return err
 	}
-	stays, err := st.Occurrences(ctx, now.AddDate(0, 0, -29), now, "visit")
+	stays, err := st.Occurrences(ctx, now.AddDate(0, 0, -29), now, model.Visit)
 	if err != nil {
 		return err
 	}

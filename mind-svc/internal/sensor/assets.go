@@ -51,7 +51,7 @@ var venues = map[string]string{"upbit": "업비트", "kis": "한국투자증권"
 // venue that failed to load leaves its holdings out.
 func (s *Structured) takeAssets(ctx context.Context, p portfolio) error {
 	now := s.Now().In(s.Loc)
-	held, err := s.Store.Occurrences(ctx, time.Time{}, now.Add(time.Minute), "asset")
+	held, err := s.Store.Occurrences(ctx, time.Time{}, now.Add(time.Minute), model.Asset)
 	if err != nil {
 		return err
 	}
@@ -71,7 +71,7 @@ func (s *Structured) takeAssets(ctx context.Context, p portfolio) error {
 			at = old.At // first seen
 		}
 		fact := fmt.Sprintf("%s(%s)을 %s%s 보유 중 (%s)", x.Name, x.Symbol, num(x.Quantity, 4), unit, when)
-		if err := s.observe(ctx, model.Occurrence{ID: id, Kind: "asset", At: at, Title: x.Name, Things: []string{x.Symbol},
+		if err := s.observe(ctx, model.Occurrence{ID: id, Kind: model.Asset, At: at, Title: x.Name, Things: []string{x.Symbol},
 			Class: "보유", Ref: id, Quote: fact}); err != nil {
 			return err
 		}
@@ -118,7 +118,7 @@ func (s *Structured) takeAssets(ctx context.Context, p portfolio) error {
 			}
 			at, _ := time.ParseInLocation("2006-01-02", f.Date, s.Loc)
 			id := "asset:flow:" + f.ID
-			if err := s.observe(ctx, model.Occurrence{ID: id, Kind: "asset", At: at, Title: venue, Class: verb, Amount: abs(f.AmountKrw), Ref: id, Quote: fact}); err != nil {
+			if err := s.observe(ctx, model.Occurrence{ID: id, Kind: model.Asset, At: at, Title: venue, Class: verb, Amount: abs(f.AmountKrw), Ref: id, Quote: fact}); err != nil {
 				return err
 			}
 			if err := s.record(ctx, model.Record{Key: "flow:" + f.ID, Relation: verb, Target: model.Node{Kind: "Account", Key: f.Venue, Name: venue},
@@ -137,7 +137,7 @@ func (s *Structured) takeAssets(ctx context.Context, p portfolio) error {
 			fact := fmt.Sprintf("%s %s %s%s 매도, 실현손익 %s", x.Date, x.Name, num(x.Quantity, 8), unit, wonText(profit))
 			at, _ := time.ParseInLocation("2006-01-02", x.Date, s.Loc)
 			id := "asset:sale:" + x.ID
-			if err := s.observe(ctx, model.Occurrence{ID: id, Kind: "asset", At: at, Title: x.Name, Things: []string{x.Symbol}, Class: "매도",
+			if err := s.observe(ctx, model.Occurrence{ID: id, Kind: model.Asset, At: at, Title: x.Name, Things: []string{x.Symbol}, Class: "매도",
 				Amount: profit, Ref: id, Quote: fact}); err != nil {
 				return err
 			}
@@ -185,7 +185,7 @@ func (s *Structured) Jobs(ctx context.Context) error {
 			continue
 		}
 		id := fmt.Sprintf("job:%d", j.ID)
-		if err := s.observe(ctx, model.Occurrence{ID: id, Kind: "job", At: at, Until: j.FinishedAt, Title: j.Title, Class: j.State,
+		if err := s.observe(ctx, model.Occurrence{ID: id, Kind: model.Job, At: at, Until: j.FinishedAt, Title: j.Title, Class: j.State,
 			Ref: id, Quote: first(j.Goal, 200)}); err != nil {
 			return err
 		}

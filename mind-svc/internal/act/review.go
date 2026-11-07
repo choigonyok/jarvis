@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 )
 
 // ReviewActuator does review.place and preference.confirm: an answer to a
@@ -14,7 +16,7 @@ import (
 // preferences' to work out. Undoing withdraws the answer.
 type ReviewActuator struct{}
 
-func (ReviewActuator) Kinds() []string { return []string{"review.place", "preference.confirm"} }
+func (ReviewActuator) Kinds() []string { return []string{model.ReviewPlace, model.PreferenceConfirm} }
 
 type answered struct {
 	SubjectType string            `json:"subjectType"`
@@ -28,7 +30,7 @@ func (ReviewActuator) Preview(_ context.Context, kind string, payload json.RawMe
 	if err := json.Unmarshal(payload, &a); err != nil {
 		return "", err
 	}
-	if kind == "review.place" {
+	if kind == model.ReviewPlace {
 		switch a.SubjectType {
 		case "캠핑장", "숙소", "식당", "카페", "":
 			return fmt.Sprintf("%s 회고를 기록합니다 (이 장소의 특징과 내 취향을 따로 배워요)", a.Subject), nil
@@ -46,7 +48,7 @@ func (ReviewActuator) Execute(_ context.Context, kind string, payload json.RawMe
 		return nil, nil, err
 	}
 	switch kind {
-	case "review.place":
+	case model.ReviewPlace:
 		if n, err := strconv.Atoi(strings.TrimSpace(a.Answers["score"])); err != nil || n < 1 || n > 5 {
 			return nil, nil, errors.New("점수(1~5)가 필요합니다")
 		}
@@ -62,15 +64,11 @@ func (ReviewActuator) Undo(context.Context, string, json.RawMessage) (json.RawMe
 	return json.RawMessage(`{}`), nil
 }
 
-// KindPhotoPlace is a question about photos with no plan of their own: which
-// plan they are of.
-const KindPhotoPlace = "photos.place"
-
 // PhotoPlaceActuator does photos.place: an answer, which mind files under the
 // plan named (answered). Undoing takes the photos off it.
 type PhotoPlaceActuator struct{}
 
-func (PhotoPlaceActuator) Kinds() []string { return []string{KindPhotoPlace} }
+func (PhotoPlaceActuator) Kinds() []string { return []string{model.PhotosPlace} }
 
 func (PhotoPlaceActuator) Preview(_ context.Context, _ string, payload json.RawMessage) (string, error) {
 	var a struct {

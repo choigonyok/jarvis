@@ -177,7 +177,7 @@ func (m *Mind) gift(ctx context.Context) error {
 			payload, _ := json.Marshal(map[string]string{"item": item, "class": "선물", "planId": p.ID, "site": "coupang.com"})
 			said := f.CreatedAt.In(loc)
 			if _, err := m.Gate.Submit(ctx, model.Intent{
-				Skill: "gift", Kind: "cart.add", EntityID: p.ID, Topic: "gift:" + p.ID + ":" + item, Context: "gift", Payload: payload,
+				Skill: "gift", Kind: model.CartAdd, EntityID: p.ID, Topic: "gift:" + p.ID + ":" + item, Context: "gift", Payload: payload,
 				Title:  fmt.Sprintf("%s %d일 남음. %s 배송 최대 %d일이라 %s. 장바구니에 담을까요?", p.State.Type, left, self.Topic(item), shipping, urgency),
 				Body:   fmt.Sprintf("%s · %s에 %s", p.State.Title, md(said), f.Text),
 				Reason: "기념일에 맞춰 도착하려면 지금 주문해야 해요", Confidence: 0.85, Value: 1, Evidence: f.Evidence, Reversible: true,
@@ -212,10 +212,10 @@ func slicesHasPerson(people []string, name string) bool {
 // 같아 미안!' 보낼까요?". The message is a draft; sending it is the
 // operator's.
 func (m *Mind) late(ctx context.Context, o model.Occurrence) error {
-	if (o.Kind != "purchase" && o.Kind != "photo" && o.Kind != "visit") || o.Area == "" && o.Place == "" {
+	if (o.Kind != model.Purchase && o.Kind != model.Photo && o.Kind != model.Visit) || o.Area == "" && o.Place == "" {
 		return nil // nowhere known: no grounds to say anything
 	}
-	if o.Kind == "visit" {
+	if o.Kind == model.Visit {
 		if o.Until == nil {
 			return nil // arrived, not leaving
 		}
@@ -261,7 +261,7 @@ func (m *Mind) late(ctx context.Context, o model.Occurrence) error {
 			text := fmt.Sprintf("%d분 정도 늦을 것 같아 미안!", mins)
 			payload, _ := json.Marshal(map[string]string{"to": who, "text": text, "purpose": fmt.Sprintf("%s 약속에 %d분 정도 늦는다고 미안하다고", p.State.Start, mins), "planId": p.ID})
 			if _, err := m.Gate.Submit(ctx, model.Intent{
-				Skill: "late", Kind: "message.draft", EntityID: p.ID, Topic: "late:" + p.ID, Context: "late", Payload: payload,
+				Skill: "late", Kind: model.MessageDraft, EntityID: p.ID, Topic: "late:" + p.ID, Context: "late", Payload: payload,
 				Title:  fmt.Sprintf("%s에게 '%s' 보낼까요?", who, text),
 				Body:   fmt.Sprintf("%s %s · %s %s에서 출발하면 %s쯤 도착 (%s)", p.State.Start, p.State.Title, o.At.In(loc).Format("15:04"), firstNonEmpty(o.Area, o.Place), eta.In(loc).Format("15:04"), n.Text),
 				Reason: "약속 시각보다 늦게 도착할 것 같아요", Confidence: 0.8, Value: 1, Reversible: true,

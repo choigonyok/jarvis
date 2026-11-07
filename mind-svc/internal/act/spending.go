@@ -5,10 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-)
 
-// KindCategory files a charge under a category.
-const KindCategory = "spending.category"
+	"github.com/choigonyok/jarvis/mind-svc/internal/model"
+)
 
 // Answers of the remember field.
 const (
@@ -37,7 +36,7 @@ type Spending struct {
 	Book Book
 }
 
-func (Spending) Kinds() []string { return []string{KindCategory} }
+func (Spending) Kinds() []string { return []string{model.SpendingCategory} }
 
 // CategoryPayload is what a category intent carries: the charge, and what the
 // assistant thought it was (shown filled in, or kept to be scored).

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+
+	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 )
 
 // DraftActuator does message.draft: a message the operator may send - an
@@ -22,7 +24,7 @@ type draft struct {
 	IncomingRef string `json:"incomingRef,omitempty"`
 }
 
-func (DraftActuator) Kinds() []string { return []string{"message.draft"} }
+func (DraftActuator) Kinds() []string { return []string{model.MessageDraft} }
 
 func (a DraftActuator) Prepare(ctx context.Context, _ string, payload json.RawMessage) (json.RawMessage, error) {
 	var d draft

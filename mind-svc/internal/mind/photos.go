@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/choigonyok/jarvis/mind-svc/internal/act"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/skill"
 )
@@ -114,7 +113,7 @@ func dayNumber(t time.Time) (int64, error) {
 // oldest first; a batch still being taken waits.
 func (m *Mind) unplaced(ctx context.Context, now time.Time) ([][]model.Occurrence, error) {
 	st := m.Opts.Store
-	photos, err := st.Occurrences(ctx, now.Add(-photosBack), now, "photo")
+	photos, err := st.Occurrences(ctx, now.Add(-photosBack), now, model.Photo)
 	if err != nil {
 		return nil, err
 	}
@@ -188,7 +187,7 @@ func (m *Mind) photoQuestion(ctx context.Context, batch []model.Occurrence) (mod
 		when += " · " + place
 	}
 	in := model.Intent{
-		Skill: "photos", Kind: act.KindPhotoPlace, Topic: "photos:place:" + batch[0].ID, Context: act.KindPhotoPlace,
+		Skill: "photos", Kind: model.PhotosPlace, Topic: "photos:place:" + batch[0].ID, Context: model.PhotosPlace,
 		Payload: payload, Title: fmt.Sprintf("%s 사진 %d장, 어느 일정이에요?", day, len(batch)), Body: when,
 		Reason: "찍은 시간에 맞는 일정이 없어요", Confidence: 0.9, Value: 1, Reversible: true, Photos: spread(ids, photosShown),
 	}
@@ -336,7 +335,7 @@ func (m *Mind) PhotoWindows(ctx context.Context, q string) ([]PhotoWindow, error
 		seen[w.From] = true
 		out = append(out, w)
 	}
-	stays, err := st.Occurrences(ctx, now.AddDate(-photoYears, 0, 0), now, "visit")
+	stays, err := st.Occurrences(ctx, now.AddDate(-photoYears, 0, 0), now, model.Visit)
 	if err != nil {
 		return nil, err
 	}

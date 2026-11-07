@@ -115,7 +115,7 @@ type Fixed struct {
 // spending screen reads too (book.Monthly).
 func (m *Mind) FixedCosts(ctx context.Context) ([]Fixed, error) {
 	now := m.Opts.Now().In(m.Opts.Loc)
-	pays, err := m.Opts.Store.Occurrences(ctx, now.AddDate(0, -6, 0), now, "purchase")
+	pays, err := m.Opts.Store.Occurrences(ctx, now.AddDate(0, -6, 0), now, model.Purchase)
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +172,7 @@ var electronic = []string{"가전", "디지털", "컴퓨터", "노트북", "휴�
 func (m *Mind) warranties(ctx context.Context) error {
 	st, loc := m.Opts.Store, m.Opts.Loc
 	now := m.Opts.Now()
-	items, err := st.Occurrences(ctx, now.Add(-Warranty-15*24*time.Hour), now.Add(-Warranty+15*24*time.Hour), "purchase.item")
+	items, err := st.Occurrences(ctx, now.Add(-Warranty-15*24*time.Hour), now.Add(-Warranty+15*24*time.Hour), model.PurchaseItem)
 	if err != nil {
 		return err
 	}
@@ -293,7 +293,7 @@ var weekdayRE = regexp.MustCompile(`([월화수목금토일])요일`)
 // chore: arriving home in the evening, the day before a chore's day ("분리수거
 // 는 목요일") - said once that evening.
 func (m *Mind) chore(ctx context.Context, o model.Occurrence) error {
-	if o.Kind != "visit" || o.Class != "home" || o.Until != nil {
+	if o.Kind != model.Visit || o.Class != "home" || o.Until != nil {
 		return nil
 	}
 	loc := m.Opts.Loc
@@ -336,7 +336,7 @@ func (m *Mind) chore(ctx context.Context, o model.Occurrence) error {
 // investMemo: a holding sold - with why it was bought, as said then, next to
 // what came of it.
 func (m *Mind) investMemo(ctx context.Context, o model.Occurrence) error {
-	if o.Kind != "asset" || o.Class != "매도" {
+	if o.Kind != model.Asset || o.Class != "매도" {
 		return nil
 	}
 	facts, err := m.Opts.Store.FactsOn(ctx, InvestedBecause, time.Time{}, m.Opts.Now().Add(time.Minute))
@@ -410,7 +410,7 @@ func (m *Mind) Places(ctx context.Context) ([]Place, error) {
 			p.Last = d
 		}
 	}
-	occ, err := st.Occurrences(ctx, m.Opts.Now().AddDate(-2, 0, 0), m.Opts.Now(), "visit", "purchase")
+	occ, err := st.Occurrences(ctx, m.Opts.Now().AddDate(-2, 0, 0), m.Opts.Now(), model.Visit, model.Purchase)
 	if err != nil {
 		return nil, err
 	}
@@ -421,7 +421,7 @@ func (m *Mind) Places(ctx context.Context) ([]Place, error) {
 		for _, o := range occ {
 			if o.Title == p.Name || o.Place == p.Name {
 				p.Visits++
-				if o.Kind == "purchase" {
+				if o.Kind == model.Purchase {
 					p.Spent += o.Amount
 				}
 			}
@@ -459,11 +459,11 @@ func (m *Mind) Meals(ctx context.Context, days int) ([]Meal, error) {
 	st, loc := m.Opts.Store, m.Opts.Loc
 	now := m.Opts.Now()
 	from := now.AddDate(0, 0, -days)
-	pays, err := st.Occurrences(ctx, from, now, "purchase")
+	pays, err := st.Occurrences(ctx, from, now, model.Purchase)
 	if err != nil {
 		return nil, err
 	}
-	stays, err := st.Occurrences(ctx, from.Add(-24*time.Hour), now, "visit")
+	stays, err := st.Occurrences(ctx, from.Add(-24*time.Hour), now, model.Visit)
 	if err != nil {
 		return nil, err
 	}
@@ -526,7 +526,7 @@ func (m *Mind) portfolioBand(ctx context.Context, o obs.Observation, now bool) (
 			for i, x := range orders {
 				lines[i] = x.Line()
 			}
-			in.Kind = "assets.rebalance"
+			in.Kind = model.AssetsRebalance
 			in.Title = title + " - 리밸런싱할까요?"
 			in.Body = strings.TrimSpace(n.Body + "\n" + strings.Join(lines, " · "))
 			in.Payload, _ = json.Marshal(act.RebalancePlan{PlanID: o.Key, Orders: orders})

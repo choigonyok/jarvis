@@ -16,10 +16,6 @@ import (
 // as a push, the operator's own as a card offering a reminder.
 type Loops struct{}
 
-// KindRemind is the card that offers a reminder for the operator's own
-// promise. Approved, mind keeps it as a reminder, which is what rings.
-const KindRemind = "remind.set"
-
 func (Loops) Name() string                                { return "loops" }
 func (Loops) Wants(e model.Entity) bool                   { return e.Kind == model.KindLoop }
 func (Loops) OnTick(context.Context, View, string) Result { return Result{} }
@@ -132,7 +128,7 @@ func remindCard(e model.Entity, due time.Time, v View) (model.Intent, bool) {
 		body += " · " + strings.Join(e.State.People, ", ")
 	}
 	return model.Intent{
-		Kind: KindRemind, EntityID: e.ID, Payload: payload,
+		Kind: model.RemindSet, EntityID: e.ID, Payload: payload,
 		Title:  e.State.Title + " - 알려 드릴까요?",
 		Body:   body,
 		Reason: "하기로 하신 일이에요. 알려 달라고 하신 건 아니라 리마인드로 걸어 둘지 먼저 물어요",

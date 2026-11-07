@@ -129,12 +129,12 @@ const ActorCard = "card"
 const ActorKind = "kind"
 
 // Occurrence is something that happened, read from a structured source by
-// rule: a payment, an item in it, a photo, a workout, a calendar entry, a
-// transfer. Each is an index onto its source, which keeps the original -
-// Ref says where.
+// rule: a payment, an item in it, a stay, a workout, a photo, a calendar
+// entry, a transfer, a holding, a job. Each is an index onto its source,
+// which keeps the original - Ref says where.
 type Occurrence struct {
 	ID     string     `json:"id"`   // spending:812, spending:812#1, photo:<asset>, workout:2026-10-14 …
-	Kind   string     `json:"kind"` // purchase | purchase.item | photo | workout | calendar | transfer
+	Kind   string     `json:"kind"` // an occurrence kind (kinds.go): purchase, purchase.item, visit, workout …
 	At     time.Time  `json:"at"`
 	Until  *time.Time `json:"until,omitempty"`
 	Title  string     `json:"title"`           // the merchant, the item, the entry's title
@@ -543,7 +543,7 @@ type Intent struct {
 	Holder     string          `json:"holder,omitempty"`
 	ID         string          `json:"id"`
 	Skill      string          `json:"skill"`
-	Kind       string          `json:"kind"` // calendar.create | calendar.update | calendar.delete | info
+	Kind       string          `json:"kind"` // an intent kind (kinds.go): calendar.create, cart.add, info …
 	EntityID   string          `json:"entityId,omitempty"`
 	Payload    json.RawMessage `json:"payload,omitempty"`
 	Title      string          `json:"title"`

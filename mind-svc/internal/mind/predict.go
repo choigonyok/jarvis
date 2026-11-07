@@ -61,7 +61,7 @@ func (m *Mind) morningWorkout(ctx context.Context, today time.Time) error {
 		return err
 	}
 	if okToday {
-		if todayP, err = m.Predict.Put(ctx, todayP, "workout"); err != nil {
+		if todayP, err = m.Predict.Put(ctx, todayP, model.Workout); err != nil {
 			return err
 		}
 	}
@@ -70,7 +70,7 @@ func (m *Mind) morningWorkout(ctx context.Context, today time.Time) error {
 		return err
 	}
 	if okTomorrow {
-		if tomorrow, err = m.Predict.Put(ctx, tomorrow, "workout"); err != nil {
+		if tomorrow, err = m.Predict.Put(ctx, tomorrow, model.Workout); err != nil {
 			return err
 		}
 		if okToday {
@@ -230,7 +230,7 @@ func (m *Mind) prepIntent(ctx context.Context, pr model.Prediction) (model.Inten
 	}
 	payload, _ := json.Marshal(map[string]string{"item": item, "class": class, "planId": plan.ID, "noteId": note.ID, "site": "coupang.com"})
 	return model.Intent{
-		Skill: "predict", Kind: "cart.add", EntityID: plan.ID, Topic: "prep:" + class + ":" + plan.ID, Context: "prep:" + plan.State.Type,
+		Skill: "predict", Kind: model.CartAdd, EntityID: plan.ID, Topic: "prep:" + class + ":" + plan.ID, Context: "prep:" + plan.State.Type,
 		// The prediction's own chance: a 30% one was sent as 75% sure, and
 		// what the ledger learnt of prep cards was learnt of a number that
 		// never moved.
@@ -247,7 +247,7 @@ func (m *Mind) lastPrep(ctx context.Context, plan model.Entity, class string) (*
 	if !ok {
 		return nil, model.Entity{}
 	}
-	items, err := st.Occurrences(ctx, sp.Start.Add(-120*24*time.Hour), sp.Start, "purchase.item")
+	items, err := st.Occurrences(ctx, sp.Start.Add(-120*24*time.Hour), sp.Start, model.PurchaseItem)
 	if err != nil {
 		return nil, model.Entity{}
 	}

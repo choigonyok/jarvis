@@ -18,26 +18,26 @@ func Keys(o model.Occurrence, thing func(name string) string) []string {
 	kind := strings.TrimSpace(o.Kind)
 	class, title := clean(o.Class), clean(o.Title)
 	switch kind {
-	case "", "job":
+	case "", model.Job:
 		return nil // the assistant's own errands, not the operator's life
-	case "asset":
+	case model.Asset:
 		if class == "" || class == "보유" {
 			return nil // a holding is a state, not something that happened
 		}
-	case "purchase.item":
+	case model.PurchaseItem:
 		if thing != nil {
 			if c := clean(thing(o.Title)); c != "" {
 				class = c // what it is, over the shop's category
 			}
 		}
 		title = "" // an item's own name rarely comes round; its class does
-	case "photo":
+	case model.Photo:
 		title = ""
-	case "workout":
+	case model.Workout:
 		if title == "운동" {
 			title = ""
 		}
-	case "transfer":
+	case model.Transfer:
 		title = ""
 		if len(o.People) > 0 {
 			title = clean(o.People[0])
@@ -54,7 +54,7 @@ func Keys(o model.Occurrence, thing func(name string) string) []string {
 			keys = append(keys, kind+"@"+title)
 		}
 	}
-	if kind == "purchase" && IsDelivery(o.Title) {
+	if kind == model.Purchase && IsDelivery(o.Title) {
 		keys = append(keys, Delivery)
 	}
 	return keys
@@ -83,7 +83,7 @@ func Parts(key string) (kind, class, title string) {
 // when it could have been seen at all. Delivery is seen in the payments.
 func Source(key string) string {
 	if key == Delivery {
-		return "purchase"
+		return model.Purchase
 	}
 	kind, _, _ := Parts(key)
 	return kind
@@ -94,7 +94,7 @@ func Source(key string) string {
 // thing to predict.
 func Targetable(key string) bool {
 	switch Source(key) {
-	case "calendar", "job", "":
+	case model.Calendar, model.Job, "":
 		return false
 	}
 	return true
@@ -109,7 +109,7 @@ func Label(key string) string {
 	kind, class, title := Parts(key)
 	name := shortName(title)
 	switch kind {
-	case "purchase":
+	case model.Purchase:
 		switch {
 		case name != "":
 			return name + " 결제"
@@ -117,12 +117,12 @@ func Label(key string) string {
 			return class + " 결제"
 		}
 		return "카드 결제"
-	case "purchase.item":
+	case model.PurchaseItem:
 		if class != "" {
 			return class + " 구매"
 		}
 		return "상품 구매"
-	case "visit":
+	case model.Visit:
 		if name != "" {
 			return name + " 도착"
 		}
@@ -130,24 +130,24 @@ func Label(key string) string {
 			return place + " 도착"
 		}
 		return "자주 가는 곳 도착"
-	case "workout":
+	case model.Workout:
 		if name != "" {
 			return name + " 운동"
 		}
 		return "운동"
-	case "photo":
+	case model.Photo:
 		return "사진"
-	case "transfer":
+	case model.Transfer:
 		if name != "" {
 			return name + "님 송금"
 		}
 		return "송금 받음"
-	case "asset":
+	case model.Asset:
 		if name != "" {
 			return strings.TrimSpace(name + " " + class)
 		}
 		return "자산 " + class
-	case "calendar":
+	case model.Calendar:
 		if name != "" {
 			return name
 		}

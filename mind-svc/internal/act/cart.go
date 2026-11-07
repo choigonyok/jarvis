@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+
+	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 )
 
 // Jobs is where a browser job is made: the ledger in the stack, run by the
@@ -29,7 +31,7 @@ type cart struct {
 	Site   string `json:"site"`
 }
 
-func (CartActuator) Kinds() []string { return []string{"cart.add"} }
+func (CartActuator) Kinds() []string { return []string{model.CartAdd} }
 
 func (CartActuator) Preview(_ context.Context, _ string, payload json.RawMessage) (string, error) {
 	var c cart

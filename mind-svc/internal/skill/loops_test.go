@@ -123,7 +123,7 @@ func TestOperatorsPromiseIsOfferedAsAReminder(t *testing.T) {
 		t.Fatalf("운영자의 약속은 푸시 타이머가 아니라 카드 하나: %+v", r)
 	}
 	in := r.Intents[0]
-	if in.Kind != KindRemind || in.EntityID != "loop_b" || !in.Reversible || in.Topic != "" {
+	if in.Kind != model.RemindSet || in.EntityID != "loop_b" || !in.Reversible || in.Topic != "" {
 		t.Fatalf("리마인드 제안 카드여야 합니다: %+v", in)
 	}
 	if len(in.Fields) != 2 || in.Fields[0].Key != "at" || in.Fields[0].Value != "11/6(금) 18:30" || len(in.Fields[0].Options) != 3 || in.Fields[1].Value != "빵 사 가기" {
@@ -147,7 +147,7 @@ func TestOperatorsPromiseIsOfferedAsAReminder(t *testing.T) {
 	}
 
 	// A timer kept from before: a card then too, not a push.
-	if r := (Loops{}).OnTimer(ctx, v, e, model.Timer{Name: "due"}); len(r.Intents) != 1 || r.Intents[0].Kind != KindRemind {
+	if r := (Loops{}).OnTimer(ctx, v, e, model.Timer{Name: "due"}); len(r.Intents) != 1 || r.Intents[0].Kind != model.RemindSet {
 		t.Fatalf("남아 있던 타이머도 카드로: %+v", r)
 	}
 

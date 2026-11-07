@@ -204,7 +204,7 @@ func (m *Mind) countPlan(ctx context.Context, p model.Entity) error {
 	if err := st.CountPattern(ctx, model.Pattern{KindA: kind, Rel: model.PrepFor, Total: 1, LastSeen: sp.Start}); err != nil {
 		return err
 	}
-	items, err := st.Occurrences(ctx, sp.Start.Add(-14*24*time.Hour), sp.Start, "purchase.item")
+	items, err := st.Occurrences(ctx, sp.Start.Add(-14*24*time.Hour), sp.Start, model.PurchaseItem)
 	if err != nil {
 		return err
 	}

@@ -98,8 +98,8 @@ func (r *Reflector) Night(ctx context.Context) ([]Result, error) {
 		}
 		key := ""
 		switch {
-		case strings.HasPrefix(p.Target, "workout:"):
-			key = "workout"
+		case strings.HasPrefix(p.Target, model.Workout+":"):
+			key = model.Workout
 		case strings.HasPrefix(p.Target, "day:") && p.Key != "" && len(p.Basis) > 0:
 			if n, err := r.St.Note(ctx, p.Basis[0]); err == nil && predict.Trusted(n) {
 				key = p.Key
@@ -148,8 +148,8 @@ const maxTargets = 2
 
 // dayOf is the day a surprise was about.
 func (r *Reflector) dayOf(p model.Prediction) string {
-	if strings.HasPrefix(p.Target, "workout:") {
-		return strings.TrimPrefix(p.Target, "workout:")
+	if strings.HasPrefix(p.Target, model.Workout+":") {
+		return strings.TrimPrefix(p.Target, model.Workout+":")
 	}
 	if p.From != nil {
 		return p.From.In(r.Loc).Format("2006-01-02")
@@ -165,7 +165,7 @@ type target struct {
 }
 
 func (r *Reflector) target(ctx context.Context, key string) target {
-	if key == "workout" {
+	if key == model.Workout {
 		return target{key, "운동", func(d predict.Day) bool { return d.Workout }}
 	}
 	seen := map[string]string{}
@@ -235,7 +235,7 @@ func (r *Reflector) reflectOn(ctx context.Context, key string, surprises []model
 	res.Hypotheses = hs
 	r.test(hs, pool, tg.hit)
 	scope := "운동"
-	if key != "workout" {
+	if key != model.Workout {
 		scope = tg.label
 	}
 	for _, h := range hs {
@@ -267,7 +267,7 @@ func dayStart(t time.Time, loc *time.Location) time.Time {
 func (r *Reflector) prompt(tg target, pool []predict.Day, surprised map[string]bool, missed bool) string {
 	var b strings.Builder
 	what := tg.label + "(그날 있었는지)"
-	if tg.key == "workout" {
+	if tg.key == model.Workout {
 		what = "운동(그날 운동 기록이 있는지)"
 	}
 	b.WriteString("목표: " + what + "\n\n## 특징 목록 (가설은 이 중 하나로)\n")
@@ -284,11 +284,11 @@ func (r *Reflector) prompt(tg target, pool []predict.Day, surprised map[string]b
 		for _, o := range d.Occ {
 			t := o.At.In(r.Loc).Format("15:04")
 			switch o.Kind {
-			case "purchase":
+			case model.Purchase:
 				parts = append(parts, fmt.Sprintf("%s %s(%s)", t, o.Title, o.Class))
-			case "workout":
+			case model.Workout:
 				parts = append(parts, t+" 운동 "+o.Title)
-			case "visit":
+			case model.Visit:
 				parts = append(parts, t+" "+o.Title+" 도착")
 			}
 		}
@@ -305,12 +305,12 @@ func (r *Reflector) prompt(tg target, pool []predict.Day, surprised map[string]b
 		}
 		w := []string{"일", "월", "화", "수", "목", "금", "토"}[d.Weekday]
 		mark := tg.label + " 있음"
-		if tg.key == "workout" {
+		if tg.key == model.Workout {
 			mark = "운동함"
 		}
 		if !tg.hit(d) {
 			mark = tg.label + " 없음"
-			if tg.key == "workout" {
+			if tg.key == model.Workout {
 				mark = "운동 안 함"
 			}
 		}
@@ -318,7 +318,7 @@ func (r *Reflector) prompt(tg target, pool []predict.Day, surprised map[string]b
 	}
 	head := "\n## 예측이 틀린 날 (있을 것으로 봤지만 없음)\n"
 	switch {
-	case tg.key == "workout":
+	case tg.key == model.Workout:
 		head = "\n## 예측이 틀린 날 (운동할 것으로 봤지만 안 함)\n"
 	case !missed:
 		head = "\n## 예측이 틀린 날 (없을 것으로 봤지만 있었음)\n"

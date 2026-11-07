@@ -10,7 +10,6 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/moments"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
-	"github.com/choigonyok/jarvis/mind-svc/internal/skill"
 	"github.com/choigonyok/jarvis/mind-svc/internal/world"
 )
 
@@ -32,7 +31,7 @@ func TestPromiseIsOfferedAndApprovedAsAReminder(t *testing.T) {
 
 	var card model.Intent
 	for _, in := range f.intents("") {
-		if in.Kind == skill.KindRemind {
+		if in.Kind == model.RemindSet {
 			card = in
 		}
 		if in.Kind == "info" {

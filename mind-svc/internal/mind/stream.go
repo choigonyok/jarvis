@@ -69,7 +69,7 @@ type raisedCard struct {
 
 // mindActions are the agent's actions that are answers to mind's own cards,
 // which come here as commands and are not the agent's to hold.
-var mindActions = map[string]bool{"mind.approve": true, "mind.undo": true}
+var mindActions = map[string]bool{model.MindApprove: true, model.MindUndo: true}
 
 // PaymentRaised enters a card the agent holds in the ledger.
 func (m *Mind) PaymentRaised(ctx context.Context, msg queue.Message) error {
@@ -78,7 +78,7 @@ func (m *Mind) PaymentRaised(ctx context.Context, msg queue.Message) error {
 		return fmt.Errorf("%w: 결제 카드를 읽지 못했습니다", queue.ErrRefused)
 	}
 	return m.Opts.Store.PutIntent(ctx, model.Intent{
-		ID: model.HeldID(c.Card), Skill: model.HeldSkill, Kind: "payment", Title: c.Title, Holder: msg.TraceID,
+		ID: model.HeldID(c.Card), Skill: model.HeldSkill, Kind: model.HeldPayment, Title: c.Title, Holder: msg.TraceID,
 		Status: model.Pending, CreatedAt: msg.OccurredAt,
 	})
 }

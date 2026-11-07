@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 )
 
 // Preparer is an actuator that fills in its payload before anyone sees it -
@@ -60,7 +62,7 @@ type settle struct {
 	Drafts    map[string]string `json:"drafts,omitempty"`
 }
 
-func (SettleActuator) Kinds() []string { return []string{"settle.request"} }
+func (SettleActuator) Kinds() []string { return []string{model.SettleRequest} }
 
 func (a SettleActuator) Prepare(ctx context.Context, _ string, payload json.RawMessage) (json.RawMessage, error) {
 	var s settle

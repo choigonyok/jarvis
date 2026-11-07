@@ -112,7 +112,7 @@ func settle(e model.Entity, during []seen) (model.Intent, bool) {
 	var ev []model.Evidence
 	var where []string
 	for _, o := range during {
-		if o.Kind != "purchase" || o.Amount <= 0 || !o.Sure {
+		if o.Kind != model.Purchase || o.Amount <= 0 || !o.Sure {
 			continue
 		}
 		total += o.Amount
@@ -126,7 +126,7 @@ func settle(e model.Entity, during []seen) (model.Intent, bool) {
 	per := (total/n + 50) / 100 * 100
 	payload, _ := json.Marshal(Settle{PlanID: e.ID, Title: st.Title, Date: st.Date, Total: total, PerPerson: per, People: st.People})
 	return model.Intent{
-		Kind: "settle.request", EntityID: e.ID, Topic: "settle:" + e.ID, Context: "settle", Payload: payload,
+		Kind: model.SettleRequest, EntityID: e.ID, Topic: "settle:" + e.ID, Context: "settle", Payload: payload,
 		Title:  fmt.Sprintf("1인 %s원. 정산 메시지 보낼까요?", won(per)),
 		Body:   fmt.Sprintf("%s · 내가 낸 %s원을 %d명이 나누면 1인 %s원\n%s", st.Title, won(total), n, won(per), strings.Join(where, ", ")),
 		Reason: "함께한 일정 중에 내가 계산했어요", Confidence: 0.85, Evidence: ev, Reversible: true,
@@ -152,7 +152,7 @@ func photos(e model.Entity, during []seen, loc *time.Location) (model.Intent, bo
 	var shots []model.Occurrence
 	sure := 0
 	for _, o := range during {
-		if o.Kind == "photo" && strings.HasPrefix(o.ID, "photo:") {
+		if o.Kind == model.Photo && strings.HasPrefix(o.ID, "photo:") {
 			shots = append(shots, o.Occurrence)
 			if o.Sure {
 				sure++
@@ -174,7 +174,7 @@ func photos(e model.Entity, during []seen, loc *time.Location) (model.Intent, bo
 	name := fmt.Sprintf("%d/%d %s", int(day.Month()), day.Day(), st.Title)
 	payload, _ := json.Marshal(Album{PlanID: e.ID, Name: name, All: all, Picked: picked, To: to})
 	return model.Intent{
-		Kind: "photos.album", EntityID: e.ID, Topic: "photos:" + e.ID, Context: "photos", Payload: payload,
+		Kind: model.PhotosAlbum, EntityID: e.ID, Topic: "photos:" + e.ID, Context: "photos", Payload: payload,
 		Title:  fmt.Sprintf("오늘 사진 %d장. 잘 나온 %d장 골라뒀어요. %s에게 보낼까요?", len(shots), len(picked), to),
 		Body:   fmt.Sprintf("%s 동안 찍은 사진 %d장", st.Title, len(shots)),
 		Reason: "함께한 일정의 사진이에요", Confidence: 0.8, Reversible: true,

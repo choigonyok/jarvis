@@ -47,7 +47,7 @@ func (m *Mind) fileCharges(ctx context.Context) error {
 	}
 	open, seen := 0, map[string]bool{}
 	for _, in := range recent {
-		if in.Kind != act.KindCategory {
+		if in.Kind != model.SpendingCategory {
 			continue
 		}
 		seen[in.Topic] = true

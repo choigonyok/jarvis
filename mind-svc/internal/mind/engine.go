@@ -57,14 +57,14 @@ func (m *Mind) scored(ctx context.Context, prs ...model.Prediction) {
 			continue
 		}
 		switch predict.Source(n.Rule.Key) {
-		case "purchase":
+		case model.Purchase:
 			// A payment is a bill that did not come only if it is a monthly
 			// charge by the one rule the spending screen and the word on a
 			// changed bill read (book.Monthly).
 			if !m.monthlyCharge(ctx, n.Rule.Key) {
 				continue
 			}
-		case "deposit", "bill", "transfer", "asset":
+		case model.Deposit, model.Bill, model.Transfer, model.Asset:
 		default:
 			continue
 		}
@@ -276,8 +276,8 @@ func (m *Mind) DenyExpected(ctx context.Context, id, said string) (model.Predict
 // that has come true (shown or confirmed); the workout predictor, which
 // rests on no note, once its own record beats the plain rate.
 func (m *Mind) sayable(ctx context.Context, pr model.Prediction, notes map[string]model.Note) bool {
-	if strings.HasPrefix(pr.Target, "workout:") {
-		t := m.cachedTracks(ctx)["workout"]
+	if strings.HasPrefix(pr.Target, model.Workout+":") {
+		t := m.cachedTracks(ctx)[model.Workout]
 		return t.N >= 5 && t.Skill() >= 0.1
 	}
 	if len(pr.Basis) == 0 {
@@ -289,7 +289,7 @@ func (m *Mind) sayable(ctx context.Context, pr model.Prediction, notes map[strin
 
 // expectLabel is what a prediction expects, in words.
 func expectLabel(pr model.Prediction, notes map[string]model.Note) string {
-	if strings.HasPrefix(pr.Target, "workout:") {
+	if strings.HasPrefix(pr.Target, model.Workout+":") {
 		return "운동"
 	}
 	if len(pr.Basis) > 0 {

@@ -143,13 +143,13 @@ func (s *Structured) Spending(ctx context.Context) error {
 // Purchase is a charge as occurrences: the payment, then its items.
 func Purchase(t tx) []model.Occurrence {
 	ref := fmt.Sprintf("spending:%d", t.ID)
-	pay := model.Occurrence{ID: ref, Kind: "purchase", At: t.ApprovedAt, Title: t.Merchant, Place: t.Merchant,
+	pay := model.Occurrence{ID: ref, Kind: model.Purchase, At: t.ApprovedAt, Title: t.Merchant, Place: t.Merchant,
 		Area: AreaOf(t.Merchant), Class: t.Category, Amount: t.AmountKrw, Ref: ref,
 		Quote: fmt.Sprintf("%s %s원", t.Merchant, won(t.AmountKrw))}
 	out := []model.Occurrence{pay}
 	for _, it := range t.Items {
 		pay.Things = append(pay.Things, it.Name)
-		out = append(out, model.Occurrence{ID: fmt.Sprintf("%s#%d", ref, it.ID), Kind: "purchase.item", At: t.ApprovedAt,
+		out = append(out, model.Occurrence{ID: fmt.Sprintf("%s#%d", ref, it.ID), Kind: model.PurchaseItem, At: t.ApprovedAt,
 			Title: it.Name, Class: it.Category, Amount: it.AmountKrw, Count: max(it.Quantity, 1), Ref: ref,
 			Quote: fmt.Sprintf("%s %s원", it.Name, won(it.AmountKrw))})
 	}
@@ -198,7 +198,7 @@ func (s *Structured) takeWorkout(ctx context.Context, sessions []session) error 
 		if title == "" {
 			title = "운동"
 		}
-		if err := s.observe(ctx, model.Occurrence{ID: "workout:" + w.ID, Kind: "workout", At: at, Until: &until, Title: title,
+		if err := s.observe(ctx, model.Occurrence{ID: "workout:" + w.ID, Kind: model.Workout, At: at, Until: &until, Title: title,
 			Things: names, Count: len(names), Ref: "workout:" + w.ID, Quote: title}); err != nil {
 			return err
 		}
@@ -293,7 +293,7 @@ func (a asset) occurrence(loc *time.Location) (model.Occurrence, bool) {
 	if wall, err := time.Parse(time.RFC3339, a.LocalDateTime); err == nil && a.ExifInfo.TimeZone == nil {
 		at = time.Date(wall.Year(), wall.Month(), wall.Day(), wall.Hour(), wall.Minute(), wall.Second(), 0, loc)
 	}
-	o := model.Occurrence{ID: "photo:" + a.ID, Kind: "photo", At: at, Count: 1, Ref: "immich:" + a.ID}
+	o := model.Occurrence{ID: "photo:" + a.ID, Kind: model.Photo, At: at, Count: 1, Ref: "immich:" + a.ID}
 	if a.ExifInfo.City != nil {
 		o.Area = *a.ExifInfo.City
 		o.Place = *a.ExifInfo.City
@@ -434,7 +434,7 @@ func (s *Structured) SyncCalendar(ctx context.Context, events []entry, from, to 
 		if err != nil {
 			continue
 		}
-		if err := s.observe(ctx, model.Occurrence{ID: "calendar:" + ev.ID, Kind: "calendar", At: at, Title: ev.Title,
+		if err := s.observe(ctx, model.Occurrence{ID: "calendar:" + ev.ID, Kind: model.Calendar, At: at, Title: ev.Title,
 			Place: ev.Place, Area: world.Region(ev.Place), Class: Classify(ev.Title), People: People(ev.Title), Ref: "calendar:" + ev.ID}); err != nil {
 			return err
 		}
@@ -623,7 +623,7 @@ func (s *Structured) takeVisits(ctx context.Context, vs []visit) error {
 			area = v.Region
 		}
 		ref := fmt.Sprintf("visit:%d", v.ID)
-		if err := s.observe(ctx, model.Occurrence{ID: ref, Kind: "visit", At: v.EnteredAt, Until: v.LeftAt, Title: v.Region,
+		if err := s.observe(ctx, model.Occurrence{ID: ref, Kind: model.Visit, At: v.EnteredAt, Until: v.LeftAt, Title: v.Region,
 			Place: v.Region, Area: area, Class: v.Kind, Ref: ref, Quote: v.Region}); err != nil {
 			return err
 		}
@@ -656,7 +656,7 @@ func Transfer(ref string, at time.Time, text string) (model.Occurrence, bool) {
 		if err != nil || n <= 0 {
 			continue
 		}
-		return model.Occurrence{ID: ref, Kind: "transfer", At: at, Title: "송금 받음", People: []string{who}, Amount: n, Ref: ref,
+		return model.Occurrence{ID: ref, Kind: model.Transfer, At: at, Title: "송금 받음", People: []string{who}, Amount: n, Ref: ref,
 			Quote: strings.TrimSpace(m[0])}, true
 	}
 	return model.Occurrence{}, false

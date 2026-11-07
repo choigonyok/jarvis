@@ -78,9 +78,9 @@ func index(list []model.Occurrence, thing func(string) string) occurrences {
 	idx := occurrences{byKey: map[string][]time.Time{}, all: list, thing: thing}
 	for _, o := range list {
 		keys := predict.Keys(o, thing)
-		if o.Kind == "purchase.item" && thing != nil {
+		if o.Kind == model.PurchaseItem && thing != nil {
 			if c := thing(o.Title); c != "" {
-				keys = append(keys, "purchase.item:"+c)
+				keys = append(keys, model.PurchaseItem+":"+c)
 			}
 		}
 		for _, k := range keys {
@@ -201,13 +201,13 @@ func doneByHand(it model.Intent, idx occurrences, loc *time.Location) bool {
 		}
 		want := model.State{Title: a.Event.Title, Date: a.Event.Date, Start: a.Event.Start}
 		return slices.ContainsFunc(idx.all, func(o model.Occurrence) bool {
-			if o.Kind != "calendar" {
+			if o.Kind != model.Calendar {
 				return false
 			}
 			at := o.At.In(loc)
 			return model.SameEvent(want, model.State{Title: o.Title, Date: at.Format("2006-01-02"), Start: at.Format("15:04"), People: o.People})
 		})
-	case "cart.add":
+	case model.CartAdd:
 		var c struct {
 			Item  string `json:"item"`
 			Class string `json:"class"`
@@ -217,7 +217,7 @@ func doneByHand(it model.Intent, idx occurrences, loc *time.Location) bool {
 		}
 		until := it.CreatedAt.Add(tuning.Default().Ledger.ManualWithin)
 		return slices.ContainsFunc(idx.all, func(o model.Occurrence) bool {
-			if o.Kind != "purchase.item" || o.At.Before(it.CreatedAt) || o.At.After(until) {
+			if o.Kind != model.PurchaseItem || o.At.Before(it.CreatedAt) || o.At.After(until) {
 				return false
 			}
 			if c.Item != "" && strings.Contains(o.Title, c.Item) {

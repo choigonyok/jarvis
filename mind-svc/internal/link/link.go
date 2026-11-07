@@ -48,7 +48,7 @@ type Linker struct {
 }
 
 // Kinds of occurrence that can happen during a plan.
-var duringKinds = []string{"purchase", "photo", "workout"}
+var duringKinds = []string{model.Purchase, model.Photo, model.Workout}
 
 // Watch queues every changed plan for linking; Settle or Run links them.
 func (l *Linker) Watch(e model.Entity, _ model.Change) {
@@ -102,10 +102,10 @@ func (l *Linker) Occurrence(ctx context.Context, id string) error {
 	if err != nil {
 		return nil
 	}
-	if o.Kind == "transfer" {
+	if o.Kind == model.Transfer {
 		return l.paid(ctx, o)
 	}
-	if o.Kind == "purchase.item" {
+	if o.Kind == model.PurchaseItem {
 		day := o.At.In(l.Loc)
 		plans, err := l.St.PlansOn(ctx, day.Format("2006-01-02"), day.Add(window).Format("2006-01-02"))
 		if err != nil {
@@ -145,7 +145,7 @@ func (l *Linker) Plan(ctx context.Context, p model.Entity) error {
 		return nil
 	}
 	if l.Judge != nil && p.State.Type != "" && p.State.Type != registry.OtherKind {
-		items, err := l.St.Occurrences(ctx, sp.Start.Add(-window), sp.Start, "purchase.item")
+		items, err := l.St.Occurrences(ctx, sp.Start.Add(-window), sp.Start, model.PurchaseItem)
 		if err != nil {
 			return err
 		}
@@ -194,7 +194,7 @@ func (l *Linker) during(ctx context.Context, o model.Occurrence, p model.Entity)
 		return nil
 	}
 	// Bought online, not where the plan is (a delivery app is not online).
-	if o.Kind == "purchase" && category.IsOnline(o.Title) {
+	if o.Kind == model.Purchase && category.IsOnline(o.Title) {
 		return nil
 	}
 	sp, ok := l.World.Span(ctx, p, l.Now(), l.Loc)
@@ -206,7 +206,7 @@ func (l *Linker) during(ctx context.Context, o model.Occurrence, p model.Entity)
 	place := world.Known(o.Area, o.Place, st.Area, st.Place)
 	same := place && world.SamePlace(o.Area, o.Place, st.Area, st.Place)
 	link := model.Link{From: o.ID, To: p.ID, Rel: model.During, By: "rule", Evidence: []string{o.Ref}}
-	if o.Kind == "photo" {
+	if o.Kind == model.Photo {
 		// A photo's place is a city ("Seoul", "Gapyeong"): it can tell a trip
 		// from home, not one street from the next.
 		switch {
@@ -241,7 +241,7 @@ func (l *Linker) during(ctx context.Context, o model.Occurrence, p model.Entity)
 // fits is whether what was bought is what the plan is: a meal during a
 // dinner or a get-together, food delivered during a date at home.
 func fits(o model.Occurrence, st model.State) bool {
-	if o.Kind != "purchase" {
+	if o.Kind != model.Purchase {
 		return false
 	}
 	k := registry.Current().PlanKind(st.Type)

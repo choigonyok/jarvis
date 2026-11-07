@@ -164,19 +164,19 @@ func (w *World) situation(ctx context.Context, now time.Time, loc *time.Location
 		s.Text = s.text()
 		return s, nil
 	}
-	occ, err := w.st.Occurrences(ctx, now.Add(-clueWindow), now.Add(time.Minute), "purchase", "photo")
+	occ, err := w.st.Occurrences(ctx, now.Add(-clueWindow), now.Add(time.Minute), model.Purchase, model.Photo)
 	if err != nil {
 		return s, err
 	}
 	// Where the phone says the operator is: a stay in a region that has not
 	// ended. Read over a day, since an arrival may be hours old.
-	stays, err := w.st.Occurrences(ctx, now.Add(-24*time.Hour), now.Add(time.Minute), "visit")
+	stays, err := w.st.Occurrences(ctx, now.Add(-24*time.Hour), now.Add(time.Minute), model.Visit)
 	if err != nil {
 		return s, err
 	}
 	for i := len(stays) - 1; i >= 0; i-- {
 		if v := stays[i]; v.Until == nil {
-			s.Here = &Clue{At: v.At.In(loc), Kind: "visit", Title: v.Title, Place: v.Place, Area: v.Area}
+			s.Here = &Clue{At: v.At.In(loc), Kind: model.Visit, Title: v.Title, Place: v.Place, Area: v.Area}
 			break
 		}
 	}
@@ -361,7 +361,7 @@ func (c Clue) since(now time.Time) string {
 }
 
 func (c Clue) line() string {
-	what := map[string]string{"purchase": "결제", "photo": "사진", "visit": "도착"}[c.Kind]
+	what := map[string]string{model.Purchase: "결제", model.Photo: "사진", model.Visit: "도착"}[c.Kind]
 	where := c.Area
 	if where == "" {
 		where = c.Place

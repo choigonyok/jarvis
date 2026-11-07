@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/choigonyok/jarvis/mind-svc/internal/act"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/predict"
 	"github.com/choigonyok/jarvis/mind-svc/internal/prefs"
@@ -119,7 +118,7 @@ func (m *Mind) reviews(ctx context.Context) error {
 		}
 		cands = append(cands, candidate{subjectType: stay, subject: ps.Place, planID: p.ID, with: ps.People, at: sp.Start})
 	}
-	stays, err := st.Occurrences(ctx, today.AddDate(0, 0, -3), now, "visit")
+	stays, err := st.Occurrences(ctx, today.AddDate(0, 0, -3), now, model.Visit)
 	if err != nil {
 		return err
 	}
@@ -128,7 +127,7 @@ func (m *Mind) reviews(ctx context.Context) error {
 			cands = append(cands, candidate{subjectType: "캠핑장", subject: v.Title, at: v.At})
 		}
 	}
-	meals, err := st.Occurrences(ctx, today, now, "purchase")
+	meals, err := st.Occurrences(ctx, today, now, model.Purchase)
 	if err != nil {
 		return err
 	}
@@ -145,7 +144,7 @@ func (m *Mind) reviews(ctx context.Context) error {
 		default:
 			continue
 		}
-		before, err := st.Occurrences(ctx, today.AddDate(0, 0, -180), today, "purchase")
+		before, err := st.Occurrences(ctx, today.AddDate(0, 0, -180), today, model.Purchase)
 		if err != nil {
 			return err
 		}
@@ -173,7 +172,7 @@ func (m *Mind) reviews(ctx context.Context) error {
 	}
 
 	// A purchase two weeks on: would it be bought again?
-	items, err := st.Occurrences(ctx, today.AddDate(0, 0, -16), today.AddDate(0, 0, -13), "purchase.item")
+	items, err := st.Occurrences(ctx, today.AddDate(0, 0, -16), today.AddDate(0, 0, -13), model.PurchaseItem)
 	if err != nil {
 		return err
 	}
@@ -186,7 +185,7 @@ func (m *Mind) reviews(ctx context.Context) error {
 	}
 
 	// A workout today: how hard did it feel? Not every day.
-	works, err := st.Occurrences(ctx, today, now, "workout")
+	works, err := st.Occurrences(ctx, today, now, model.Workout)
 	if err != nil {
 		return err
 	}
@@ -287,11 +286,11 @@ func (m *Mind) weekCandidate(ctx context.Context, today time.Time) (candidate, e
 	works, photos := 0, 0
 	for _, o := range occ {
 		switch o.Kind {
-		case "purchase":
+		case model.Purchase:
 			spent += o.Amount
-		case "workout":
+		case model.Workout:
 			works++
-		case "photo":
+		case model.Photo:
 			photos++
 		}
 	}
@@ -320,7 +319,7 @@ func (m *Mind) reviewIntent(ctx context.Context, c candidate, now time.Time) (mo
 	payload, _ := json.Marshal(prefs.Review{SubjectType: c.subjectType, Subject: c.subject, Context: ctxt, PlanID: c.planID})
 	when := fmt.Sprintf("%d/%d", int(c.at.Month()), c.at.Day())
 	in := model.Intent{
-		Skill: "review", Kind: "review.place", EntityID: c.planID, Topic: "review:" + c.subjectType + ":" + placeKey(c.subject), Context: "review",
+		Skill: "review", Kind: model.ReviewPlace, EntityID: c.planID, Topic: "review:" + c.subjectType + ":" + placeKey(c.subject), Context: "review",
 		Payload: payload, Title: fmt.Sprintf("%s (%s) 어땠어요?", c.subject, when),
 		Body:   "한두 번 누르면 돼요. 이 장소의 특징과 내 취향을 따로 배워서 다음에 고를 때 써요.",
 		Reason: "다녀온 곳 회고", Confidence: 0.9, Value: 1, Reversible: true, Evidence: c.evidence,
@@ -363,13 +362,13 @@ func (m *Mind) reviewIntent(ctx context.Context, c candidate, now time.Time) (mo
 // answered is what came of a review or a confirmation card.
 func (m *Mind) answered(ctx context.Context, in model.Intent) {
 	switch in.Kind {
-	case act.KindCategory:
+	case model.SpendingCategory:
 		m.chargeAnswered(ctx, in)
 	case model.CalendarCreate, model.CalendarUpdate:
 		m.calendarAnswered(ctx, in)
-	case act.KindPhotoPlace:
+	case model.PhotosPlace:
 		m.photosAnswered(ctx, in)
-	case "review.place":
+	case model.ReviewPlace:
 		var r prefs.Review
 		if json.Unmarshal(in.Payload, &r) != nil {
 			return
@@ -393,7 +392,7 @@ func (m *Mind) answered(ctx context.Context, in model.Intent) {
 				_ = m.Opts.Store.SetCursor(ctx, "review:never:"+neverKey(r.SubjectType, r.Subject), 1)
 			}
 		}
-	case "preference.confirm":
+	case model.PreferenceConfirm:
 		var p struct {
 			Dimension string            `json:"dimension"`
 			Polarity  int               `json:"polarity"`
@@ -423,7 +422,7 @@ func confirmIntent(p model.Preference) model.Intent {
 		options = append(options, "가족과 갈 때만", "친구와 갈 때만")
 	}
 	return model.Intent{
-		Skill: "prefs", Kind: "preference.confirm", Topic: fmt.Sprintf("pref:%s:%d:%s", p.Dimension, p.Polarity, p.Scope), Context: "prefs",
+		Skill: "prefs", Kind: model.PreferenceConfirm, Topic: fmt.Sprintf("pref:%s:%d:%s", p.Dimension, p.Polarity, p.Scope), Context: "prefs",
 		Payload: payload, Title: fmt.Sprintf("%s 맞나요?", prefs.Text(p)), Body: prefs.Why(p),
 		Reason: "여러 곳에서 같은 답을 하셨어요", Confidence: 0.85, Value: 0.9, Reversible: true,
 		Fields: []model.Field{{Key: "answer", Label: "답", Kind: "select", Options: options, Required: true}},
@@ -447,7 +446,7 @@ func (m *Mind) expireQuestions(ctx context.Context) error {
 		case in.Kind == model.CalendarCreate && json.Unmarshal(in.Payload, &a) == nil && a.Event.Date != "" && max(a.Event.Date, a.Event.EndDate) < today:
 			// Adding what is over is no question: it sat under a thumb for days.
 			in.Error = "일정 날짜가 지나 거둠"
-		case (in.Kind == "review.place" || in.Kind == "preference.confirm" || in.Kind == act.KindPhotoPlace) && now.Sub(in.CreatedAt) >= reviewExpires:
+		case (in.Kind == model.ReviewPlace || in.Kind == model.PreferenceConfirm || in.Kind == model.PhotosPlace) && now.Sub(in.CreatedAt) >= reviewExpires:
 			in.Error = "3일 동안 답이 없어 거둠"
 		default:
 			continue

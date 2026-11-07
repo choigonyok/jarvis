@@ -33,7 +33,7 @@ func (a *Actions) Handle(ctx context.Context, o obs.Observation) error {
 	var r calendarResult
 	_ = json.Unmarshal(d.Result, &r)
 	meta := world.Meta{Actor: "observer", ObservationID: o.ID, Why: o.Type + " " + d.Kind}
-	if d.Kind == "settle.request" {
+	if d.Kind == model.SettleRequest {
 		return a.settle(ctx, o, d, meta)
 	}
 

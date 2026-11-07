@@ -41,7 +41,7 @@ func (m *Mind) reply(ctx context.Context, msg model.Message) error {
 	payload, _ := json.Marshal(map[string]string{"to": who, "purpose": fmt.Sprintf("%d일 만에 연락 온 상대에게 반갑게 첫 답장", days),
 		"situation": "reconnect", "room": msg.Room, "incomingRef": msg.Ref})
 	_, err = m.Gate.Submit(ctx, model.Intent{
-		Skill: "reply", Kind: "message.draft", Topic: "reply:" + msg.Ref, Context: "reconnect", Payload: payload,
+		Skill: "reply", Kind: model.MessageDraft, Topic: "reply:" + msg.Ref, Context: "reconnect", Payload: payload,
 		Title:  fmt.Sprintf("%s님이 %d일 만에 연락했어요. 답장 초안 만들어 뒀어요", who, days),
 		Reason: "오랜만의 연락", Confidence: 0.8, Value: 0.9, Reversible: true,
 		Evidence: []model.Evidence{{Ref: msg.Ref, Quote: clip(msg.Text, 40)}},
@@ -57,7 +57,7 @@ func (m *Mind) compare(ctx context.Context, msg model.Message) error {
 		return err
 	}
 	for _, in := range recent {
-		if in.Kind != "message.draft" || in.Skill != "reply" || in.Status == model.Superseded {
+		if in.Kind != model.MessageDraft || in.Skill != "reply" || in.Status == model.Superseded {
 			continue
 		}
 		var p struct {

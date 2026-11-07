@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 )
 
 // fakeLedger is the book: what was filed, each as a line.
@@ -40,7 +42,7 @@ func raw(p CategoryPayload) json.RawMessage {
 func TestFilingACharge(t *testing.T) {
 	s, book := fakeBook()
 	ctx := context.Background()
-	res, undo, err := s.Execute(ctx, KindCategory, raw(CategoryPayload{Kind: "tx", ID: 12, Merchant: "상호", Proposed: "식비",
+	res, undo, err := s.Execute(ctx, model.SpendingCategory, raw(CategoryPayload{Kind: "tx", ID: 12, Merchant: "상호", Proposed: "식비",
 		Answers: map[string]string{"category": "식비", "remember": RememberYes}}))
 	if err != nil {
 		t.Fatal(err)
@@ -56,7 +58,7 @@ func TestFilingACharge(t *testing.T) {
 // Changing the answer on the form is a correction: what was said was wrong.
 func TestACorrectionIsSaid(t *testing.T) {
 	s, book := fakeBook()
-	res, _, err := s.Execute(context.Background(), KindCategory, raw(CategoryPayload{Kind: "tx", ID: 1, Proposed: "식비",
+	res, _, err := s.Execute(context.Background(), model.SpendingCategory, raw(CategoryPayload{Kind: "tx", ID: 1, Proposed: "식비",
 		Answers: map[string]string{"category": "교통", "remember": RememberNo}}))
 	if err != nil || !strings.Contains(string(res), `"corrected":true`) || book.calls[0] != "charge 1 교통 remember=false" {
 		t.Fatalf("%s %v %+v", res, err, book.calls)
@@ -66,7 +68,7 @@ func TestACorrectionIsSaid(t *testing.T) {
 // Asked with the form empty, picking anything is no correction of nothing.
 func TestABlankFormCorrectsNothing(t *testing.T) {
 	s, _ := fakeBook()
-	res, _, err := s.Execute(context.Background(), KindCategory, raw(CategoryPayload{Kind: "tx", ID: 1, Answers: map[string]string{"category": "교통"}}))
+	res, _, err := s.Execute(context.Background(), model.SpendingCategory, raw(CategoryPayload{Kind: "tx", ID: 1, Answers: map[string]string{"category": "교통"}}))
 	if err != nil || !strings.Contains(string(res), `"corrected":false`) {
 		t.Fatalf("%s %v", res, err)
 	}
@@ -75,7 +77,7 @@ func TestABlankFormCorrectsNothing(t *testing.T) {
 // Done without asking, it files what was proposed.
 func TestDoneWithoutAskingUsesWhatWasProposed(t *testing.T) {
 	s, book := fakeBook()
-	if _, _, err := s.Execute(context.Background(), KindCategory, raw(CategoryPayload{Kind: "tx", ID: 1, Proposed: "식비"})); err != nil {
+	if _, _, err := s.Execute(context.Background(), model.SpendingCategory, raw(CategoryPayload{Kind: "tx", ID: 1, Proposed: "식비"})); err != nil {
 		t.Fatal(err)
 	}
 	if book.calls[0] != "charge 1 식비 remember=true" {
@@ -85,7 +87,7 @@ func TestDoneWithoutAskingUsesWhatWasProposed(t *testing.T) {
 
 func TestNothingToFile(t *testing.T) {
 	s, _ := fakeBook()
-	if _, _, err := s.Execute(context.Background(), KindCategory, raw(CategoryPayload{Kind: "tx", ID: 1})); err == nil {
+	if _, _, err := s.Execute(context.Background(), model.SpendingCategory, raw(CategoryPayload{Kind: "tx", ID: 1})); err == nil {
 		t.Fatal("고른 분류가 없습니다")
 	}
 }
@@ -94,13 +96,13 @@ func TestAProductAndUndoAndSettle(t *testing.T) {
 	s, book := fakeBook()
 	ctx := context.Background()
 	item := raw(CategoryPayload{Kind: "item", ID: 5, Answers: map[string]string{"category": "식비"}})
-	if _, _, err := s.Execute(ctx, KindCategory, item); err != nil {
+	if _, _, err := s.Execute(ctx, model.SpendingCategory, item); err != nil {
 		t.Fatal(err)
 	}
 	if book.calls[0] != "item 5 식비" {
 		t.Fatalf("%+v", book.calls)
 	}
-	if _, err := s.Undo(ctx, KindCategory, item); err != nil {
+	if _, err := s.Undo(ctx, model.SpendingCategory, item); err != nil {
 		t.Fatal(err)
 	}
 	if book.calls[1] != "item 5 기타" {
@@ -117,7 +119,7 @@ func TestAProductAndUndoAndSettle(t *testing.T) {
 func TestABookThatRefuses(t *testing.T) {
 	s, book := fakeBook()
 	book.fail = errors.New("안 됩니다")
-	if _, _, err := s.Execute(context.Background(), KindCategory, raw(CategoryPayload{Kind: "tx", ID: 1, Proposed: "식비"})); err == nil {
+	if _, _, err := s.Execute(context.Background(), model.SpendingCategory, raw(CategoryPayload{Kind: "tx", ID: 1, Proposed: "식비"})); err == nil {
 		t.Fatal("실패를 말해야 합니다")
 	}
 }

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 )
 
 // Orders is where orders are placed: assets-svc in the stack, the one
@@ -75,7 +77,7 @@ type RebalancePlan struct {
 	Orders []Order `json:"orders"`
 }
 
-func (RebalanceActuator) Kinds() []string { return []string{"assets.rebalance"} }
+func (RebalanceActuator) Kinds() []string { return []string{model.AssetsRebalance} }
 
 func (RebalanceActuator) Preview(_ context.Context, _ string, payload json.RawMessage) (string, error) {
 	var p RebalancePlan

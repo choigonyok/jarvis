@@ -92,7 +92,7 @@ func categoryIntents(t *testing.T, st *store.Memory) []model.Intent {
 	}
 	var out []model.Intent
 	for _, in := range all {
-		if in.Kind == act.KindCategory {
+		if in.Kind == model.SpendingCategory {
 			out = append(out, in)
 		}
 	}
@@ -266,7 +266,7 @@ func TestARecordEarnsDoingIt(t *testing.T) {
 	ctx := context.Background()
 	var rows []model.Outcome
 	for i := 0; i < 12; i++ {
-		rows = append(rows, model.Outcome{Source: "card", Kind: act.KindCategory, Skill: "slot", Context: "merchant.category", P: 0.95, Result: model.ResultApproved})
+		rows = append(rows, model.Outcome{Source: "card", Kind: model.SpendingCategory, Skill: "slot", Context: "merchant.category", P: 0.95, Result: model.ResultApproved})
 	}
 	m.Gate.SetBook(engine.NewBook(rows))
 	if err := m.fileCharges(ctx); err != nil {

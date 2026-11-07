@@ -178,7 +178,7 @@ func (p *Predictor) Days(ctx context.Context, from, to time.Time) ([]Day, error)
 			continue
 		}
 		d.Occ = append(d.Occ, o)
-		if o.Kind == "workout" {
+		if o.Kind == model.Workout {
 			d.Workout, d.Routine = true, o.Title
 		}
 	}
@@ -252,7 +252,7 @@ func (p *Predictor) Workout(ctx context.Context, day time.Time) (model.Predictio
 	}
 	for _, note := range notes {
 		r := note.Rule
-		if note.Status == model.Rejected || r == nil || r.Kind != "rate" || r.Target != "workout" || r.Off || len(today) == 0 {
+		if note.Status == model.Rejected || r == nil || r.Kind != "rate" || r.Target != model.Workout || r.Off || len(today) == 0 {
 			continue
 		}
 		if !Holds(r.Feature, r.Arg, today[0], p.Loc) {
@@ -267,9 +267,9 @@ func (p *Predictor) Workout(ctx context.Context, day time.Time) (model.Predictio
 		why += " · " + note.Text
 	}
 	pr := model.Prediction{
-		Target: "workout:" + day.Format("2006-01-02"), Text: fmt.Sprintf("%s 운동 %.0f%% (%s)", label(day, p.Now(), p.Loc), prob*100, why),
+		Target: model.Workout + ":" + day.Format("2006-01-02"), Text: fmt.Sprintf("%s 운동 %.0f%% (%s)", label(day, p.Now(), p.Loc), prob*100, why),
 		Prob: prob, Due: day.AddDate(0, 0, 1).Add(-time.Minute), Basis: basis,
-		Key: "workout", From: &day, Base: float64(sessions) / float64(len(past)),
+		Key: model.Workout, From: &day, Base: float64(sessions) / float64(len(past)),
 	}
 	if len(basis) > 0 {
 		pr.Prior = &base // the comparable days' share: what the rate notes that moved it are held to
@@ -331,8 +331,8 @@ func (p *Predictor) Prep(ctx context.Context, plan model.Entity) ([]model.Predic
 		pr, err := p.Put(ctx, model.Prediction{
 			Target: target, PlanID: plan.ID, Basis: []string{n.ID},
 			Text: fmt.Sprintf("%s %.0f%%", text, prob*100), Prob: prob, Due: due,
-			Key: "purchase.item:" + r.Class, From: &from, Base: base,
-		}, "purchase.item:"+r.Class)
+			Key: model.PurchaseItem + ":" + r.Class, From: &from, Base: base,
+		}, model.PurchaseItem+":"+r.Class)
 		if err != nil {
 			return out, err
 		}
@@ -353,7 +353,7 @@ func (p *Predictor) LeftOver(ctx context.Context, r *model.Rule) *model.Exceptio
 		if e.Kind != model.ExceptLeftover {
 			continue
 		}
-		items, err := p.St.Occurrences(ctx, e.At, p.Now().Add(time.Second), "purchase.item")
+		items, err := p.St.Occurrences(ctx, e.At, p.Now().Add(time.Second), model.PurchaseItem)
 		if err != nil {
 			return nil
 		}
@@ -372,7 +372,7 @@ func (p *Predictor) LeftOver(ctx context.Context, r *model.Rule) *model.Exceptio
 // prediction is measured against.
 func (p *Predictor) bought(ctx context.Context, class string, window time.Duration) float64 {
 	now := p.Now()
-	items, err := p.St.Occurrences(ctx, now.AddDate(0, 0, -120), now, "purchase.item")
+	items, err := p.St.Occurrences(ctx, now.AddDate(0, 0, -120), now, model.PurchaseItem)
 	if err != nil {
 		return 0
 	}
@@ -393,10 +393,10 @@ func (p *Predictor) bought(ctx context.Context, class string, window time.Durati
 func (p *Predictor) Match(ctx context.Context, o model.Occurrence) ([]string, error) {
 	keys := Keys(o, p.thingOf(ctx))
 	switch o.Kind {
-	case "purchase.item":
+	case model.PurchaseItem:
 		class, err := p.St.ThingClass(ctx, o.Title)
 		if err == nil {
-			keys = append(keys, "purchase.item:"+class)
+			keys = append(keys, model.PurchaseItem+":"+class)
 			break
 		}
 		// Not classified yet: only if something is waiting on an item, ask
@@ -406,12 +406,12 @@ func (p *Predictor) Match(ctx context.Context, o model.Occurrence) ([]string, er
 			if n.Rule == nil || n.Rule.Kind != "prep" || p.Judge == nil {
 				continue
 			}
-			open, _ := p.St.OpenExpectations(ctx, "purchase.item:"+n.Rule.Class)
+			open, _ := p.St.OpenExpectations(ctx, model.PurchaseItem+":"+n.Rule.Class)
 			if len(open) == 0 {
 				continue
 			}
 			if j, err := p.Judge.Of(ctx, o.Title, n.Rule.PlanKind); err == nil && j.Class == n.Rule.Class {
-				keys = append(keys, "purchase.item:"+j.Class)
+				keys = append(keys, model.PurchaseItem+":"+j.Class)
 			}
 		}
 	}
@@ -454,9 +454,9 @@ func (p *Predictor) within(ctx context.Context, e model.Expectation, o model.Occ
 	if o.At.After(e.Due) || !e.From.IsZero() && o.At.Before(e.From) {
 		return false
 	}
-	if e.From.IsZero() && strings.HasPrefix(e.Key, "workout") { // from before windows: the day is in the target
+	if e.From.IsZero() && strings.HasPrefix(e.Key, model.Workout) { // from before windows: the day is in the target
 		pr, err := p.St.Prediction(ctx, e.PredictionID)
-		if err != nil || pr.Target != "workout:"+o.At.In(p.Loc).Format("2006-01-02") {
+		if err != nil || pr.Target != model.Workout+":"+o.At.In(p.Loc).Format("2006-01-02") {
 			return false
 		}
 	}
@@ -586,7 +586,7 @@ func Holds(feature, arg string, d Day, loc *time.Location) bool {
 		cut := at.Hour()*60 + at.Minute()
 		for _, o := range d.Occ {
 			t := o.At.In(loc)
-			if feature == "late_leave" && o.Kind == "purchase" && o.Class == "교통" && t.Hour()*60+t.Minute() >= cut {
+			if feature == "late_leave" && o.Kind == model.Purchase && o.Class == "교통" && t.Hour()*60+t.Minute() >= cut {
 				return true
 			}
 		}
@@ -605,7 +605,7 @@ func Holds(feature, arg string, d Day, loc *time.Location) bool {
 		}
 	case "merchant":
 		for _, o := range d.Occ {
-			if o.Kind == "purchase" && arg != "" && strings.Contains(o.Title, arg) {
+			if o.Kind == model.Purchase && arg != "" && strings.Contains(o.Title, arg) {
 				return true
 			}
 		}
@@ -621,7 +621,7 @@ func Holds(feature, arg string, d Day, loc *time.Location) bool {
 		var limit, sum int64
 		_, _ = fmt.Sscan(arg, &limit)
 		for _, o := range d.Occ {
-			if o.Kind == "purchase" {
+			if o.Kind == model.Purchase {
 				sum += o.Amount
 			}
 		}
@@ -641,7 +641,7 @@ func Holds(feature, arg string, d Day, loc *time.Location) bool {
 			return false
 		}
 		for _, o := range d.Occ {
-			if (o.Kind == "purchase" || o.Kind == "visit") && (strings.Contains(o.Area, arg) || strings.Contains(o.Place, arg) || o.Kind == "visit" && strings.Contains(o.Title, arg)) {
+			if (o.Kind == model.Purchase || o.Kind == model.Visit) && (strings.Contains(o.Area, arg) || strings.Contains(o.Place, arg) || o.Kind == model.Visit && strings.Contains(o.Title, arg)) {
 				return true
 			}
 		}
@@ -652,7 +652,7 @@ func Holds(feature, arg string, d Day, loc *time.Location) bool {
 		}
 	case "class":
 		for _, o := range d.Occ {
-			if o.Kind == "purchase" && arg != "" && o.Class == arg {
+			if o.Kind == model.Purchase && arg != "" && o.Class == arg {
 				return true
 			}
 		}
@@ -661,7 +661,7 @@ func Holds(feature, arg string, d Day, loc *time.Location) bool {
 			return true
 		}
 		for _, o := range d.Occ {
-			if o.Kind == "workout" && (arg == "" || strings.Contains(o.Title, arg)) {
+			if o.Kind == model.Workout && (arg == "" || strings.Contains(o.Title, arg)) {
 				return true
 			}
 		}

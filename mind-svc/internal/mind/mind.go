@@ -720,7 +720,7 @@ func (m *Mind) GuestSituation(ctx context.Context) (world.Situation, error) {
 		for _, v := range vs {
 			// The latest come into, when it is in two.
 			if here == nil || v.EnteredAt.After(here.At) {
-				here = &world.Clue{At: v.EnteredAt, Kind: "visit", Title: v.Region, Place: v.Region}
+				here = &world.Clue{At: v.EnteredAt, Kind: model.Visit, Title: v.Region, Place: v.Region}
 			}
 		}
 	}

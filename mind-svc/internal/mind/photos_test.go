@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/choigonyok/jarvis/mind-svc/internal/act"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/world"
 )
@@ -40,7 +39,7 @@ func TestPhotosInNoPlanAreAskedAbout(t *testing.T) {
 		t.Fatal(err)
 	}
 	asked, _ := st.Intents(ctx, 10)
-	if len(asked) != 1 || asked[0].Kind != act.KindPhotoPlace || !asked[0].Card {
+	if len(asked) != 1 || asked[0].Kind != model.PhotosPlace || !asked[0].Card {
 		t.Fatalf("%+v", asked)
 	}
 	in := asked[0]
@@ -176,7 +175,7 @@ func TestOldQuestionsAreTakenBack(t *testing.T) {
 	for _, in := range []model.Intent{
 		{ID: "past", Kind: "calendar.create", Status: model.Pending, Payload: old, CreatedAt: now.Add(-time.Hour)},
 		{ID: "ahead", Kind: "calendar.create", Status: model.Pending, Payload: ahead, CreatedAt: now.Add(-time.Hour)},
-		{ID: "photos", Kind: act.KindPhotoPlace, Status: model.Pending, CreatedAt: now.Add(-reviewExpires)},
+		{ID: "photos", Kind: model.PhotosPlace, Status: model.Pending, CreatedAt: now.Add(-reviewExpires)},
 	} {
 		if err := st.PutIntent(ctx, in); err != nil {
 			t.Fatal(err)
