@@ -58,16 +58,24 @@ func TestTheTokenGuardsEveryRouteButHealth(t *testing.T) {
 	}
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"configured":false`) {
+	var rep struct {
+		Status string          `json:"status"`
+		About  map[string]bool `json:"about"`
+	}
+	// Up but off is up, in the stack's contract, and says what is set up.
+	if err := json.Unmarshal(rec.Body.Bytes(), &rep); err != nil || rec.Code != http.StatusOK || rep.Status != "ok" ||
+		rep.About["configured"] || !rep.About["naver"] || rep.About["ocr"] {
 		t.Errorf("health: %d %s", rec.Code, rec.Body)
 	}
 }
 
 func TestSearchAsksNaverAndSaysWhatItChecked(t *testing.T) {
+	// Yesterday's post, inside the last seven days the search asks for.
+	posted := time.Now().AddDate(0, 0, -1).Format("20060102")
 	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/search/v1/blog":
-			w.Write([]byte(`{"total": 2, "items": [{"title": "<b>20판</b> 보상", "link": "https://blog.naver.com/a/1", "postdate": "20261025", "bloggername": "기록"}]}`))
+			w.Write([]byte(`{"total": 2, "items": [{"title": "<b>20판</b> 보상", "link": "https://blog.naver.com/a/1", "postdate": "` + posted + `", "bloggername": "기록"}]}`))
 		default:
 			w.Write([]byte(`{"total": 0, "items": []}`))
 		}

@@ -333,7 +333,10 @@ services:
   # 비어 있으면 /health 만 답하고 꺼져 있다 - 다시 뜨기를 반복하지 않는다.
   search:
     <<: *outside
-    build: ./search-svc
+    build:
+      context: ./search-svc
+      additional_contexts:
+        gocommon: ./gocommon
     environment:
       TZ: ${TZ:-Asia/Seoul}
       LISTEN_ADDR: ":8104"

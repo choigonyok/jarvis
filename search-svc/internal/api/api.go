@@ -1,6 +1,6 @@
 // Package api serves search-svc to the agent, behind one token.
 //
-//	GET  /health   {"ok", "configured", "naver", "ocr"} - no token
+//	GET  /health   the stack's contract, about {configured, naver, ocr} - no token
 //	POST /search   {query, sources, since, sort, limit} → hits, and what each source was asked and gave
 //	POST /read     {url, focus, offset, max, look, pictures} → the page as text, its pictures read in place
 //	POST /places   {query, lat, lng, radius, open, limit, area} → Naver Place's list around a point
@@ -12,7 +12,6 @@ package api
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -26,6 +25,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/choigonyok/jarvis/gocommon/health"
+	"github.com/choigonyok/jarvis/gocommon/svc"
 	"github.com/choigonyok/jarvis/search-svc/internal/fetch"
 	"github.com/choigonyok/jarvis/search-svc/internal/find"
 	"github.com/choigonyok/jarvis/search-svc/internal/imgtext"
@@ -74,11 +75,16 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
+// health answers in the stack's contract (gocommon/health). Up but off - no
+// token, no Naver keys, the OCR away - is still up: what it is set up for is
+// said, never judged.
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 	defer cancel()
 	ocr := s.OCRHealth != nil && s.OCRHealth(ctx)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "configured": s.Token != "", "naver": s.Naver.Configured(), "ocr": ocr})
+	health.Write(w, http.StatusOK, health.Report{About: map[string]any{
+		"configured": s.Token != "", "naver": s.Naver.Configured(), "ocr": ocr,
+	}})
 }
 
 func (s *Server) guard(next func(http.ResponseWriter, *http.Request)) http.HandlerFunc {
@@ -87,8 +93,7 @@ func (s *Server) guard(next func(http.ResponseWriter, *http.Request)) http.Handl
 			writeErr(w, http.StatusServiceUnavailable, "검색 서비스가 꺼져 있습니다(JARVIS_SEARCH_TOKEN 없음)")
 			return
 		}
-		got := r.Header.Get("Authorization")
-		if subtle.ConstantTimeCompare([]byte(got), []byte("Bearer "+s.Token)) != 1 {
+		if !svc.Bearer(r, s.Token) {
 			writeErr(w, http.StatusUnauthorized, "토큰이 맞지 않습니다")
 			return
 		}

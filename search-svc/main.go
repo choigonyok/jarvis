@@ -15,16 +15,13 @@ package main
 
 import (
 	"context"
-	"errors"
-	"log/slog"
 	"net/http"
 	"os"
-	"os/signal"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
+	"github.com/choigonyok/jarvis/gocommon/svc"
 	"github.com/choigonyok/jarvis/search-svc/internal/api"
 	"github.com/choigonyok/jarvis/search-svc/internal/fetch"
 	"github.com/choigonyok/jarvis/search-svc/internal/imgtext"
@@ -32,7 +29,7 @@ import (
 )
 
 func main() {
-	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	log := svc.Logger()
 	token := os.Getenv("API_TOKEN")
 	if token == "" {
 		// Up but off, not a restart loop: the stack comes up the same on a
@@ -51,29 +48,23 @@ func main() {
 		images.Token = token
 	}
 
-	srv := &http.Server{
-		Addr: getenv("LISTEN_ADDR", ":8104"),
+	ctx, stop := svc.Signals()
+	defer stop()
+	if svc.Serve(ctx, svc.Server{
+		Name: "search-svc", Addr: svc.Env("LISTEN_ADDR", ":8104"), Log: log,
+		Says: []any{"naver", client.Configured(), "ocr", ocrURL != ""},
 		Handler: (&api.Server{
 			Token: token, Naver: client, Fetch: web, Images: images, Log: log,
 			OCRHealth: ocrHealth(ocrURL, ocrHTTP),
 		}).Handler(),
-		ReadTimeout: 10 * time.Second,
-		// A page with a long detail image is read in tens of seconds.
-		WriteTimeout: 150 * time.Second,
+		Read: 10 * time.Second,
+		// A page with a long detail image is read in tens of seconds, and
+		// one being read gets longer to finish on the way down.
+		Write: 150 * time.Second,
+		Drain: 10 * time.Second,
+	}) != nil {
+		os.Exit(1)
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	go func() {
-		log.Info("search-svc 가 듣기 시작했습니다", "addr", srv.Addr, "naver", client.Configured(), "ocr", ocrURL != "")
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Error("서버가 멈췄습니다", "err", err)
-			stop()
-		}
-	}()
-	<-ctx.Done()
-	shut, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	_ = srv.Shutdown(shut)
 }
 
 // ocrHealth asks the OCR's /health, at most once a minute.
@@ -102,11 +93,4 @@ func ocrHealth(base string, client *http.Client) func(context.Context) bool {
 		at = time.Now()
 		return up
 	}
-}
-
-func getenv(k, def string) string {
-	if v := os.Getenv(k); v != "" {
-		return v
-	}
-	return def
 }

@@ -11,7 +11,10 @@ require (
 
 require (
 	github.com/andybalholm/cascadia v1.3.3 // indirect
+	github.com/choigonyok/jarvis/gocommon v0.0.0
 	github.com/go-shiori/dom v0.0.0-20230515143342-73569d674e1c // indirect
 	github.com/gogs/chardet v0.0.0-20211120154057-b7413eaefb8f // indirect
 	github.com/itlightning/dateparse v0.2.1 // indirect
 )
+
+replace github.com/choigonyok/jarvis/gocommon => ../gocommon
