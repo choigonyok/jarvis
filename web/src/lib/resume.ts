@@ -53,29 +53,42 @@ export function onShown(fn: () => unknown): () => void {
   };
 }
 
+/** What a request to re-read carries: a pull to refresh waits; a push says when it came. */
+type Asking = { wait?: Wait; at?: number } | null;
+
 /**
  * Asked to re-read: a push or a notice in the page (something changed), a
  * tapped notification, the network back, a stream that went quiet, a pull
- * to refresh - which waits for the promise fn answers with.
+ * to refresh - which waits for the promise fn answers with. For a push or a
+ * notice fn hears when it came (ms): a read started after that already has
+ * what it is about.
  */
-export function onAsked(fn: () => unknown): () => void {
+export function onAsked(fn: (at?: number) => unknown): () => void {
   const asked = (e: Event) => {
-    const done = fn();
-    const wait = (e as CustomEvent<{ wait?: Wait } | null>).detail?.wait;
-    if (wait && done instanceof Promise) wait(done);
+    const detail = (e as CustomEvent<Asking>).detail;
+    const at = detail?.at;
+    const done = fn(typeof at === "number" && Number.isFinite(at) ? at : undefined);
+    if (detail?.wait && done instanceof Promise) detail.wait(done);
   };
   window.addEventListener(RESUME, asked);
   return () => window.removeEventListener(RESUME, asked);
 }
 
-/** Either one: the page shown again, or asked to re-read. */
+/** Either one: the page shown again, or asked to re-read. fn is called with nothing. */
 export function onResume(fn: () => unknown): () => void {
   const offShown = onShown(fn);
-  const offAsked = onAsked(fn);
+  const offAsked = onAsked(() => fn());
   return () => {
     offShown();
     offAsked();
   };
+}
+
+/** Asks every screen to re-read for what came at `at` (ms) - or, without it, for whatever there is. */
+function askFor(at?: unknown) {
+  window.dispatchEvent(
+    typeof at === "number" && Number.isFinite(at) ? new CustomEvent<Asking>(RESUME, { detail: { at } }) : new Event(RESUME),
+  );
 }
 
 /** Asks every screen to re-read and reopen its streams, as on coming back to the app. */
@@ -110,17 +123,18 @@ export function onInboxRequest(fn: () => void): () => void {
  * screen it is about if that is not the one showing.
  */
 export function handleWorkerMessage(data: unknown, go: (path: string) => void) {
-  const msg = data as { type?: string; title?: string; body?: string; url?: string } | null;
+  // `at` is when the push came (public/sw.js); a worker from before it says nothing, and every screen reads.
+  const msg = data as { type?: string; title?: string; body?: string; url?: string; at?: unknown } | null;
   if (msg?.type === "jarvis:push") {
     // A push that reached the phone: the phone showed it, so the page only
     // re-reads. What the page shows itself comes over its own stream
     // (useLiveNotifications), for devices output-svc knows are looking.
-    window.dispatchEvent(new Event(RESUME));
+    askFor(msg.at);
     return;
   }
   if (msg?.type !== "jarvis:open") return;
   const target = new URL(String(msg.url || "/"), window.location.origin);
-  window.dispatchEvent(new Event(RESUME));
+  askFor(msg.at);
   if (target.searchParams.get("inbox") === "1") window.dispatchEvent(new Event(INBOX));
   const card = target.searchParams.get("proposal");
   if (card && target.pathname === window.location.pathname) {
@@ -132,9 +146,9 @@ export function handleWorkerMessage(data: unknown, go: (path: string) => void) {
   openTarget(target.pathname + target.search, go);
 }
 
-/** Show a push in the page and re-read, as one that came over the stream. */
+/** Show a push in the page and re-read, as one that came over the stream - now. */
 export function showInApp(p: ShownPush) {
-  window.dispatchEvent(new Event(RESUME));
+  askFor(Date.now());
   window.dispatchEvent(new CustomEvent<ShownPush>(SHOWN, { detail: p }));
 }
 

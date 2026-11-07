@@ -9,6 +9,9 @@ self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
 
 self.addEventListener("push", (event) => {
+  // When the push came: a read the console started after this already has
+  // what it is about, so the console need not read again for it.
+  const at = Date.now();
   let data = {};
   try {
     data = event.data ? event.data.json() : {};
@@ -27,13 +30,13 @@ self.addEventListener("push", (event) => {
         renotify: Boolean(data.tag),
         icon: "/icons/icon-192.v3.png",
         badge: "/icons/icon-192.v3.png",
-        data: { url: data.url || "/" },
+        data: { url: data.url || "/", at },
       });
       // And an open console hears of it at once: it re-reads, and shows it
       // in the app if it is on screen (lib/resume.ts).
       const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
       for (const w of windows) {
-        w.postMessage({ type: "jarvis:push", title, body: data.body || "", url: data.url || "/" });
+        w.postMessage({ type: "jarvis:push", title, body: data.body || "", url: data.url || "/", at });
       }
     })(),
   );
@@ -42,6 +45,8 @@ self.addEventListener("push", (event) => {
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const url = new URL(event.notification.data?.url || "/", self.location.origin).href;
+  // When its push came, for the console to tell a read that has it already.
+  const at = event.notification.data?.at;
   event.waitUntil(
     (async () => {
       const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
@@ -54,7 +59,7 @@ self.addEventListener("notificationclick", (event) => {
           // Refused focus (a browser that allows it only for some taps)
           // must not cost the re-read.
           await w.focus().catch(() => {});
-          w.postMessage({ type: "jarvis:open", url });
+          w.postMessage({ type: "jarvis:open", url, at });
           return;
         }
       }

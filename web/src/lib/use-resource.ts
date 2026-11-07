@@ -10,19 +10,22 @@ import { onAsked, onShown } from "@/lib/resume";
  * network back, a pull to refresh) and, if asked, every so often while the
  * page is on screen.
  *
- * The newest read is the one whose answer is shown. A newer read does not
- * call off one under way, only stops showing what it brings: cutting a
- * request short cuts short what it set going on the service, which may keep
- * that as a failure. A read made before the page was last shown again - before
- * it was hidden, or while it was - is the exception: a phone drops a hidden
- * page's connections without an error, so it may never answer, and the next
- * read calls it off. The page shown again reads unless a read was made since
- * (a page back from the back-forward cache says so twice). The console asking
- * reads even so - what changed may have come after the read under way left -
- * and a pull to refresh waits for that read; only an action under way is
- * waited for instead. A poll leaves a read under way to finish unless it has
- * hung for three rounds and half a minute at least. Leaving the screen or a
- * new key calls off every read under way.
+ * A newer read does not call off one under way: cutting a request short
+ * cuts short what it set going on the service, which may keep that as a
+ * failure. What lands is shown if it was asked for after what is on screen,
+ * so an older read's answer shows if it comes first and stays if the newer
+ * one fails; what an action here just did (mutate) stands over every read
+ * asked for before it. A read made before the page was last shown again -
+ * before it was hidden, or while it was - is the exception: a phone drops a
+ * hidden page's connections without an error, so it may never answer, and
+ * the next read calls it off. The page shown again reads unless a read was
+ * made since (a page back from the back-forward cache says so twice). The
+ * console asking reads too - what changed may have come after the read
+ * under way left - unless that read started after what it asks about came
+ * (a push's or a notice's time) or an action is under way, and a pull to
+ * refresh waits for the read it leaves. A poll leaves a read under way to
+ * finish unless it has hung for three rounds and half a minute at least.
+ * Leaving the screen or a new key calls off every read under way.
  *
  * A read that fails is tried again after a wait that doubles; until one
  * succeeds, what was shown stays, and the error is beside it. A key that
@@ -73,12 +76,12 @@ export type Resource<T> = {
    * Reads now this once another way: an action, such as a POST that makes
    * the service look again. Nothing calls it off - not leaving the screen,
    * coming back or another read - as that would cut it short where it runs;
-   * its answer is shown unless a newer read has been made since. It is an
+   * its answer is shown unless what is on screen was asked for after it. It is an
    * action, so its failure shows at once, untried again. It resolves as
    * reload does.
    */
   reloadWith: (action: () => Promise<T>) => Promise<void>;
-  /** Changes what is shown until the next read lands: what an action here just did. */
+  /** Changes what is shown until a read asked for after it lands: what an action here just did. */
   mutate: (next: (prev: T | undefined) => T | undefined) => void;
 };
 
@@ -86,6 +89,8 @@ type Shown<T> = Pick<Resource<T>, "data" | "dataKey" | "error" | "readAt">;
 
 /** A read under way. */
 type Flight = {
+  /** Its place in the order reads were asked for: a later one's answer is newer. */
+  seq: number;
   /** How many times the page had been shown again when it started (shows). */
   shows: number;
   /** When it started: a read waited on for rounds is taken for hung. */
@@ -138,8 +143,12 @@ export function useResource<T>(key: string | null, fetcher: Fetcher<T>, options:
     latest.current = fetcher;
   });
   const keyRef = useRef(key);
-  // The newest read, whose answer is the one shown.
+  // The newest read: its failure is the one said, and whoever waits waits for it.
   const flight = useRef<Flight | null>(null);
+  // The last read asked for, and the place of what is on screen in that
+  // order: an answer from before it is older than what is shown.
+  const asked = useRef(0);
+  const onScreen = useRef(0);
   // Every read under way that can be called off: the newest, and the older
   // ones it left to finish.
   const out = useRef(new Set<Flight>());
@@ -161,6 +170,7 @@ export function useResource<T>(key: string | null, fetcher: Fetcher<T>, options:
     out.current.clear();
     window.clearTimeout(flight.current?.retry);
     flight.current = null;
+    onScreen.current = asked.current;
     letGo();
   }, [letGo]);
 
@@ -180,7 +190,8 @@ export function useResource<T>(key: string | null, fetcher: Fetcher<T>, options:
         out.current.delete(f);
       }
       const ctrl = new AbortController();
-      const mine: Flight = { shows, at: Date.now(), ctrl: action ? undefined : ctrl };
+      asked.current += 1;
+      const mine: Flight = { seq: asked.current, shows, at: Date.now(), ctrl: action ? undefined : ctrl };
       flight.current = mine;
       if (!action) out.current.add(mine);
       const done = caughtUp();
@@ -189,9 +200,12 @@ export function useResource<T>(key: string | null, fetcher: Fetcher<T>, options:
         (action ? action() : latest.current(ctrl.signal, n)).then(
           (data) => {
             out.current.delete(mine);
+            if (mine.seq > onScreen.current) {
+              onScreen.current = mine.seq;
+              setShown({ data, dataKey: k, error: null, readAt: new Date() });
+            }
             if (flight.current !== mine) return;
             flight.current = null;
-            setShown({ data, dataKey: k, error: null, readAt: new Date() });
             letGo();
           },
           (err: unknown) => {
@@ -246,8 +260,10 @@ export function useResource<T>(key: string | null, fetcher: Fetcher<T>, options:
   // The console asking (a push, a tapped notification, the network back, a
   // pull to refresh): what it asks about may have come after the read under
   // way left, so a new read is made and the pull waits for it; the one under
-  // way lands unseen. An action under way is waited for instead - it brings
-  // the newest there is, and a read made now would hide its answer.
+  // way still shows if it lands first. A read that started after what it asks
+  // about came (`at`: a tapped notification's push, pushes held while the
+  // phone slept) has it already and is waited for, as is an action under way
+  // - it brings the newest there is.
   useEffect(() => {
     if (!resume || key === null) return;
     const offShown = onShown(() => {
@@ -255,9 +271,9 @@ export function useResource<T>(key: string | null, fetcher: Fetcher<T>, options:
       if (f && f.shows === shows) return caughtUp();
       return read(keyRef.current);
     });
-    const offAsked = onAsked(() => {
+    const offAsked = onAsked((at) => {
       const f = flight.current;
-      if (f && !f.ctrl && f.shows === shows) return caughtUp();
+      if (f && f.shows === shows && (!f.ctrl || (at !== undefined && f.at >= at))) return caughtUp();
       return read(keyRef.current);
     });
     return () => {
@@ -269,6 +285,7 @@ export function useResource<T>(key: string | null, fetcher: Fetcher<T>, options:
   const reload = useCallback(() => read(keyRef.current), [read]);
   const reloadWith = useCallback((action: () => Promise<T>) => read(keyRef.current, action), [read]);
   const mutate = useCallback((next: (prev: T | undefined) => T | undefined) => {
+    onScreen.current = asked.current;
     setShown((s) => ({ ...s, data: next(s.data) }));
   }, []);
 
