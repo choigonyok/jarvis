@@ -52,7 +52,7 @@ ocr (맥미니 호스트, Swift · 애플 Vision ko+en) - ../ocr
 
 | 메서드 | 경로 | 하는 일 |
 |---|---|---|
-| GET | `/health` | `{ok, configured, naver, ocr}` - 토큰 불필요 |
+| GET | `/health` | 스택의 /health 계약(`gocommon/health`): `{status, about: {configured, naver, ocr}}` - 토큰 불필요 |
 | POST | `/search` | `{query, sources?, since?, sort?, limit?}` → `hits`(출처·제목·주소·요약·날짜·글쓴이)와 `checked`(출처마다 몇 건 중 몇 건, 기간 밖, 오류) |
 | POST | `/read` | `{url, focus?, offset?, max?, look?, pictures?}` → 제목·날짜·본문(그림 속 글자가 그 자리에)·그림 목록·링크, `look` 이면 그림 조각 JPEG |
 | POST | `/places` | `{query, lat, lng, radius?, open?, limit?, area?}` → 이름·종류·거리·영업 상태와 마감 시각·별점·리뷰 수·주소·링크 |
@@ -122,7 +122,7 @@ JARVIS_SEARCH_TOKEN=...     openssl rand -hex 24
 ```bash
 scripts/ocr install                                   # 맥미니 호스트에 OCR (swiftc 빌드 + LaunchAgent)
 scripts/mini compose up -d --build search agent agent-guest
-scripts/mini exec search wget -qO- http://127.0.0.1:8104/health   # {"configured":true,"naver":true,"ocr":true,...}
+scripts/mini exec search wget -qO- http://127.0.0.1:8104/health   # {"status":"ok","about":{"configured":true,"naver":true,"ocr":true}}
 ```
 
 토큰이 비어 있으면 agent 는 예전대로입니다(WebFetch, 근처 찾기는 OpenStreetMap). 키만 비어 있으면 네이버 검색만 꺼지고

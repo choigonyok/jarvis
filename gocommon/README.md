@@ -37,7 +37,7 @@ These four are here under that rule, and stay:
   listen with the service's own read and write limits until SIGINT or SIGTERM
   (`Signals`), then let what is in flight finish. A handler that waits as long
   as the write limit moves its own deadline (`Extend`); an event stream lifts
-  it (`Stream`). Used by every Go service but agent and assets-svc.
+  it (`Stream`). Used by every Go service but agent.
 - `svc/pg` - Postgres for a main: `Open` waits for the database (30 tries, a
   second apart) before the service goes on, `Retry` does the same for a store's
   own opener, and `Lazy` is for status-svc, which watches the database rather
