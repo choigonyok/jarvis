@@ -101,7 +101,7 @@ func (m *Mind) moveWorkout(ctx context.Context, today time.Time, todayP, tomorro
 		why = " · " + n.Text
 	}
 	_, _ = m.Gate.Submit(ctx, model.Intent{
-		Skill: "predict", Kind: "info", Topic: "move:" + tomorrow.Target,
+		Skill: "predict", Kind: model.Info, Topic: "move:" + tomorrow.Target,
 		Title:  fmt.Sprintf("내일(%s) 운동 확률 %.0f%%. %s를 오늘(%s)로?", w[today.AddDate(0, 0, 1).Weekday()], tomorrow.Prob*100, routine, w[today.Weekday()]),
 		Body:   strings.TrimPrefix(why, " · "),
 		Reason: "내일 예측이 낮음", Confidence: 1,

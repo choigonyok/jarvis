@@ -103,7 +103,7 @@ func ofIntent(it model.Intent, in Inputs, idx occurrences, done map[string]bool)
 	o := model.Outcome{ID: "intent:" + it.ID, Skill: it.Skill, Context: it.ContextKey(), Kind: it.Kind,
 		Rule: it.Reason, P: it.Confidence, At: it.CreatedAt, ResolvedAt: it.DecidedAt}
 	switch {
-	case it.Kind == "info":
+	case it.Kind == model.Info:
 		// Only said: a brief, a reminder - scored by the one tap in the inbox
 		// when there was one (도움됐어요 · 필요 없어요), against what a notice
 		// is taken to be worth (engine.NoticeStated). Its kind is what it is
@@ -199,7 +199,7 @@ func cardResult(it model.Intent, now time.Time) string {
 // for what leaves a record: a calendar entry, a purchase.
 func doneByHand(it model.Intent, idx occurrences, loc *time.Location) bool {
 	switch it.Kind {
-	case "calendar.create":
+	case model.CalendarCreate:
 		var a model.CalendarAction
 		if json.Unmarshal(it.Payload, &a) != nil || a.Event.Date == "" {
 			return false

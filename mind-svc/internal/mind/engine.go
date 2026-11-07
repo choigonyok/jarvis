@@ -74,7 +74,7 @@ func (m *Mind) scored(ctx context.Context, prs ...model.Prediction) {
 			last = md(t)
 		}
 		if _, err := m.Gate.Submit(ctx, model.Intent{
-			Skill: "predict", Kind: "info", Topic: "missed:" + n.Rule.Key + ":" + n.Rule.Last,
+			Skill: "predict", Kind: model.Info, Topic: "missed:" + n.Rule.Key + ":" + n.Rule.Last,
 			Title:  fmt.Sprintf("이번엔 %s 없었어요", predict.Subject(label)),
 			Body:   fmt.Sprintf("%s (마지막 %s). 해지했거나 결제 수단이 바뀌었는지 확인해 보세요.", n.Text, last),
 			Reason: "기대가 빗나감", Confidence: pr.Prob, Value: 0.3,

@@ -188,12 +188,12 @@ func (Loops) OnTimer(_ context.Context, v View, e model.Entity, t model.Timer) R
 		// Money owed is a line in the evening, not a push: it is the
 		// other person's to do.
 		return Result{Intents: []model.Intent{{
-			Kind: "info", EntityID: e.ID, Title: e.State.Title + " - 아직이에요", Body: "기한 " + dueText(e.State.Due, v.Loc()),
+			Kind: model.Info, EntityID: e.ID, Title: e.State.Title + " - 아직이에요", Body: "기한 " + dueText(e.State.Due, v.Loc()),
 			Reason: "정산이 3일째 들어오지 않음", Confidence: 1,
 		}}}
 	}
 	return Result{Intents: []model.Intent{{
-		Kind: "info", EntityID: e.ID, Title: title, Body: "기한 " + dueText(e.State.Due, v.Loc()),
+		Kind: model.Info, EntityID: e.ID, Title: title, Body: "기한 " + dueText(e.State.Due, v.Loc()),
 		Reason: "기한이 다가오는 열린 고리", Confidence: 1, Urgent: true,
 	}}}
 }
@@ -301,7 +301,7 @@ func (Brief) OnTick(ctx context.Context, v View, tick string) Result {
 		title += " · " + sky.Fall()
 	}
 	return Result{Intents: []model.Intent{{
-		Kind: "info", Title: title, Body: strings.Join(lines, "\n"),
+		Kind: model.Info, Title: title, Body: strings.Join(lines, "\n"),
 		Reason: "아침 브리핑", Confidence: 1, Urgent: true,
 	}}}
 }

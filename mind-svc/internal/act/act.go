@@ -96,7 +96,7 @@ type Calendar interface {
 type CalendarActuator struct{ Cal Calendar }
 
 func (CalendarActuator) Kinds() []string {
-	return []string{"calendar.create", "calendar.update", "calendar.delete"}
+	return []string{model.CalendarCreate, model.CalendarUpdate, model.CalendarDelete}
 }
 
 type calendarUndo struct {
@@ -151,22 +151,22 @@ func (c CalendarActuator) Preview(ctx context.Context, kind string, payload json
 	if err := json.Unmarshal(payload, &a); err != nil {
 		return "", err
 	}
-	if kind != "calendar.delete" {
+	if kind != model.CalendarDelete {
 		if _, err := time.Parse("2006-01-02", a.Event.Date); err != nil || strings.TrimSpace(a.Event.Title) == "" {
 			return "", errors.New("날짜(YYYY-MM-DD)와 제목이 필요합니다")
 		}
 	}
-	if kind != "calendar.create" && a.EventID == "" {
+	if kind != model.CalendarCreate && a.EventID == "" {
 		return "", errors.New("어느 일정인지(eventId)가 필요합니다")
 	}
-	if kind == "calendar.create" {
+	if kind == model.CalendarCreate {
 		// Put there already - by hand, or before this loop was the one that
 		// asked: link to it rather than ask to add it twice.
 		if same, ok := c.existing(ctx, a.Event); ok {
 			return "", &Already{ID: same.ID, Line: entryLine(same)}
 		}
 	}
-	if kind == "calendar.update" {
+	if kind == model.CalendarUpdate {
 		// Said there already - the place in the memo the assistant's own card
 		// wrote: nothing to ask.
 		if prev, err := c.Cal.Get(ctx, a.EventID); err == nil && unchanged(prev, moved(prev, a)) {
@@ -186,9 +186,9 @@ func (c CalendarActuator) Preview(ctx context.Context, kind string, payload json
 		where = "공유 일정"
 	}
 	switch kind {
-	case "calendar.create":
+	case model.CalendarCreate:
 		return where + "에 추가: " + line, nil
-	case "calendar.update":
+	case model.CalendarUpdate:
 		return "일정 수정: " + line, nil
 	default:
 		return "일정 삭제: " + line, nil
@@ -233,7 +233,7 @@ func (c CalendarActuator) Execute(ctx context.Context, kind string, payload json
 		a.Event.Start = t
 	}
 	switch kind {
-	case "calendar.create":
+	case model.CalendarCreate:
 		// Looked at again when it runs, not only when it was asked: a card
 		// waits, and the same entry may have gone on the calendar meanwhile
 		// - the assistant's own card for it approved first.
@@ -245,7 +245,7 @@ func (c CalendarActuator) Execute(ctx context.Context, kind string, payload json
 			return nil, nil, err
 		}
 		return result(saved.ID), mustJSON(calendarUndo{Op: "delete", ID: saved.ID}), nil
-	case "calendar.update":
+	case model.CalendarUpdate:
 		prev, err := c.Cal.Get(ctx, a.EventID)
 		if err != nil {
 			return nil, nil, err
@@ -255,7 +255,7 @@ func (c CalendarActuator) Execute(ctx context.Context, kind string, payload json
 			return nil, nil, err
 		}
 		return result(saved.ID), mustJSON(calendarUndo{Op: "restore", Event: prev}), nil
-	case "calendar.delete":
+	case model.CalendarDelete:
 		gone, err := c.Cal.Delete(ctx, a.EventID)
 		if err != nil {
 			return nil, nil, err

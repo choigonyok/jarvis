@@ -170,7 +170,7 @@ func (s Schedule) OnTimer(ctx context.Context, v View, e model.Entity, t model.T
 		if st.Place != "" {
 			body += " · " + st.Place
 		}
-		in := model.Intent{Kind: "info", EntityID: e.ID, Title: "내일 " + st.Title, Reason: "하루 전 확인", Confidence: 1, Link: CalendarLink(st)}
+		in := model.Intent{Kind: model.Info, EntityID: e.ID, Title: "내일 " + st.Title, Reason: "하루 전 확인", Confidence: 1, Link: CalendarLink(st)}
 		if len(loops) > 0 {
 			titles := make([]string, len(loops))
 			for i, l := range loops {
@@ -188,7 +188,7 @@ func (s Schedule) OnTimer(ctx context.Context, v View, e model.Entity, t model.T
 		}
 		body = withMemory(body, v.Recall(ctx, st.People))
 		return Result{Intents: []model.Intent{{
-			Kind: "info", EntityID: e.ID, Title: st.Start + " " + st.Title, Body: body,
+			Kind: model.Info, EntityID: e.ID, Title: st.Start + " " + st.Title, Body: body,
 			Reason: "두 시간 전 알림", Confidence: 1, Urgent: true, Link: CalendarLink(st),
 		}}}
 	}
@@ -297,7 +297,7 @@ func (s Schedule) add(ctx context.Context, v View, e model.Entity, changes []mod
 	for _, p := range past {
 		// Still open, the same question stands: a note added to the plan is no
 		// reason to take the card away and ask it again.
-		if p.Kind == "calendar.create" && (p.Status == model.Pending || p.Status == model.Rejected || p.Status == model.Undone || p.Covered()) && samePayload(p.Payload, payload) {
+		if p.Kind == model.CalendarCreate && (p.Status == model.Pending || p.Status == model.Rejected || p.Status == model.Undone || p.Covered()) && samePayload(p.Payload, payload) {
 			return model.Intent{}, false
 		}
 	}
@@ -307,7 +307,7 @@ func (s Schedule) add(ctx context.Context, v View, e model.Entity, changes []mod
 	// 롤체" was asked again the next day.
 	if recent, err := v.IntentsSince(ctx, v.Now().Add(-turnedDownFor)); err == nil {
 		for _, p := range recent {
-			if (p.Kind != "calendar.create" && p.Kind != model.HeldCalendarCreate) || (p.Status != model.Rejected && p.Status != model.Undone) {
+			if (p.Kind != model.CalendarCreate && p.Kind != model.HeldCalendarCreate) || (p.Status != model.Rejected && p.Status != model.Undone) {
 				continue
 			}
 			var a model.CalendarAction
@@ -317,7 +317,7 @@ func (s Schedule) add(ctx context.Context, v View, e model.Entity, changes []mod
 		}
 	}
 	return model.Intent{
-		Kind: "calendar.create", EntityID: e.ID, Payload: payload,
+		Kind: model.CalendarCreate, EntityID: e.ID, Payload: payload,
 		Title:  "캘린더에 추가: " + Day(e.State, v.Loc()) + " " + e.State.Title,
 		Reason: "대화에서 확정됐는데 캘린더에 없어요", Confidence: confidence(changes),
 		Evidence: evidence(changes), Reversible: true, Link: CalendarLink(e.State),
@@ -344,7 +344,7 @@ func waitingFrom(ctx context.Context, v View, e model.Entity, base model.State) 
 	past, _ := v.IntentsFor(ctx, e.ID)
 	for _, p := range past {
 		var a model.CalendarAction
-		if p.Kind != "calendar.update" || p.Status != model.Pending || json.Unmarshal(p.Payload, &a) != nil || a.Was == nil {
+		if p.Kind != model.CalendarUpdate || p.Status != model.Pending || json.Unmarshal(p.Payload, &a) != nil || a.Was == nil {
 			continue
 		}
 		base.Title, base.Date, base.EndDate, base.Start, base.End, base.Place = a.Was.Title, a.Was.Date, a.Was.EndDate, a.Was.Start, a.Was.End, a.Was.Place
@@ -358,7 +358,7 @@ func (s Schedule) move(e model.Entity, before model.State, changes []model.Chang
 	was := event(before, nil)
 	payload, _ := json.Marshal(model.CalendarAction{EventID: e.State.CalendarID, Event: ev, Was: &was})
 	return model.Intent{
-		Kind: "calendar.update", EntityID: e.ID, Payload: payload,
+		Kind: model.CalendarUpdate, EntityID: e.ID, Payload: payload,
 		Title:  "캘린더 수정: " + e.State.Title + " (" + diff(before, e.State) + ")",
 		Reason: "대화에서 일정이 바뀌었어요", Confidence: confidence(changes),
 		Evidence: evidence(changes), Reversible: true, Link: CalendarLink(e.State),
@@ -368,7 +368,7 @@ func (s Schedule) move(e model.Entity, before model.State, changes []model.Chang
 func (s Schedule) remove(e model.Entity, changes []model.Change) model.Intent {
 	payload, _ := json.Marshal(model.CalendarAction{EventID: e.State.CalendarID, Event: event(e.State, nil)})
 	return model.Intent{
-		Kind: "calendar.delete", EntityID: e.ID, Payload: payload,
+		Kind: model.CalendarDelete, EntityID: e.ID, Payload: payload,
 		Title: "캘린더에서 삭제: " + e.State.Title, Body: readWhy(changes),
 		Reason: "대화에서 취소됐어요", Confidence: confidence(changes),
 		Evidence: evidence(changes), Reversible: true,

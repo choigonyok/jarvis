@@ -85,7 +85,7 @@ func (m *Mind) deadlines(ctx context.Context) error {
 		}
 		what := firstNonEmpty(f.Object.Name, f.Text)
 		if _, err := m.Gate.Submit(ctx, model.Intent{
-			Skill: "life", Kind: "info", Topic: cursor,
+			Skill: "life", Kind: model.Info, Topic: cursor,
 			Title: fmt.Sprintf("%s 만기까지 %d일 (%s)", what, days, md(due)),
 			Body:  f.Text, Reason: "기한이 있는 일", Confidence: 1, Urgent: days <= 7, Evidence: f.Evidence,
 		}); err != nil {
@@ -146,7 +146,7 @@ func (m *Mind) fixedChanges(ctx context.Context) error {
 			continue
 		}
 		if _, err := m.Gate.Submit(ctx, model.Intent{
-			Skill: "life", Kind: "info", Topic: "fixed:" + f.Merchant + ":" + f.Last[:7],
+			Skill: "life", Kind: model.Info, Topic: "fixed:" + f.Merchant + ":" + f.Last[:7],
 			Title:  fmt.Sprintf("%s %s → %s (매달 %d일쯤)", f.Merchant, money(f.Before), money(f.Amount), f.Day),
 			Body:   fmt.Sprintf("%d달째 이어지는 고정비가 이번에 바뀌었어요", f.Months),
 			Reason: "고정비", Confidence: 1,
@@ -191,7 +191,7 @@ func (m *Mind) warranties(ctx context.Context) error {
 			continue
 		}
 		if _, err := m.Gate.Submit(ctx, model.Intent{
-			Skill: "life", Kind: "info", Topic: cursor,
+			Skill: "life", Kind: model.Info, Topic: cursor,
 			Title:  fmt.Sprintf("%s 보증이 곧 끝나요 (%s까지, 보통 1년)", it.Title, md(end.In(loc))),
 			Body:   fmt.Sprintf("%s에 %s에 산 것. 고장이나 불편한 데가 있으면 그 전에 맡기세요", md(it.At.In(loc)), money(it.Amount)),
 			Reason: "가진 물건", Confidence: 1,
@@ -259,7 +259,7 @@ func (m *Mind) moved(ctx context.Context) error {
 			body += " 지난번: " + strings.Join(lines, " · ")
 		}
 		if _, err := m.Gate.Submit(ctx, model.Intent{
-			Skill: "life", Kind: "info", Topic: "moved:" + who + ":" + f.Object.Name,
+			Skill: "life", Kind: model.Info, Topic: "moved:" + who + ":" + f.Object.Name,
 			Title: fmt.Sprintf("%s님이 %s(으)로 이사했대요", who, f.Object.Name), Body: body,
 			Reason: "사람의 근황", Confidence: 1, Evidence: f.Evidence,
 		}); err != nil {
@@ -321,7 +321,7 @@ func (m *Mind) chore(ctx context.Context, o model.Occurrence) error {
 		}
 		what := firstNonEmpty(f.Object.Name, f.Text)
 		if _, err := m.Gate.Submit(ctx, model.Intent{
-			Skill: "life", Kind: "info", Topic: "chore:" + what + ":" + at.Format("2006-01-02"),
+			Skill: "life", Kind: model.Info, Topic: "chore:" + what + ":" + at.Format("2006-01-02"),
 			Title: fmt.Sprintf("내일(%s) %s 날이에요", tomorrow, what), Body: f.Text,
 			Reason: "집안일", Confidence: 1, Urgent: true, Evidence: f.Evidence,
 		}); err != nil {
@@ -358,7 +358,7 @@ func (m *Mind) investMemo(ctx context.Context, o model.Occurrence) error {
 			continue
 		}
 		if _, err := m.Gate.Submit(ctx, model.Intent{
-			Skill: "life", Kind: "info", Topic: "memo:" + o.ID,
+			Skill: "life", Kind: model.Info, Topic: "memo:" + o.ID,
 			Title:  fmt.Sprintf("%s 매도 · 살 때 이유: %s", o.Title, f.Text),
 			Body:   fmt.Sprintf("%s (%s에 하신 말)", o.Quote, md(f.CreatedAt.In(m.Opts.Loc))),
 			Reason: "투자 판단 메모", Confidence: 1, Evidence: f.Evidence,
@@ -514,7 +514,7 @@ func (m *Mind) portfolioBand(ctx context.Context, o obs.Observation, now bool) (
 	_ = json.Unmarshal(o.Notify, &n)
 	title := firstNonEmpty(n.Title, "자산 비중이 목표 범위를 벗어났어요")
 	in := model.Intent{
-		Skill: "assets", Kind: "info", Topic: "rebalance",
+		Skill: "assets", Kind: model.Info, Topic: "rebalance",
 		Title:  title + " - 리밸런싱을 검토해 보세요",
 		Body:   strings.TrimSpace(n.Body + "\n자산 탭의 목표 비중에서 매매 계획을 볼 수 있어요."),
 		Reason: "목표 비중의 허용 범위를 벗어남", Confidence: 0.8,

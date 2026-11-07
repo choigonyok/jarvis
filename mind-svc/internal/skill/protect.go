@@ -94,7 +94,7 @@ func asking(ctx context.Context, v View, e model.Entity) bool {
 		return false
 	}
 	for _, in := range open {
-		if in.Status == model.Pending && in.Skill == "schedule" && in.Kind == "calendar.update" {
+		if in.Status == model.Pending && in.Skill == "schedule" && in.Kind == model.CalendarUpdate {
 			return true
 		}
 	}
@@ -120,7 +120,7 @@ func (Protect) move(e, other model.Entity, at time.Time, length time.Duration, v
 	if st.CalendarID == "" {
 		// A line, not the question: the question comes once it is on the
 		// calendar, under its own topic.
-		in.Kind, in.Title, in.Confidence, in.Topic = "info", "일정이 겹쳐요: "+st.Title, 1, "protect-note:"+e.ID+":"+other.ID
+		in.Kind, in.Title, in.Confidence, in.Topic = model.Info, "일정이 겹쳐요: "+st.Title, 1, "protect-note:"+e.ID+":"+other.ID
 		return in
 	}
 	ev := event(st, nil)
@@ -129,7 +129,7 @@ func (Protect) move(e, other model.Entity, at time.Time, length time.Duration, v
 		ev.End = newStart.Add(length).Format("15:04")
 	}
 	payload, _ := json.Marshal(model.CalendarAction{EventID: st.CalendarID, Event: ev})
-	in.Kind, in.Payload = "calendar.update", payload
+	in.Kind, in.Payload = model.CalendarUpdate, payload
 	in.Fields = []model.Field{
 		{Key: "date", Label: "날짜", Kind: "text", Value: ev.Date, Required: true, Hint: "YYYY-MM-DD"},
 		{Key: "start", Label: "시작", Kind: "text", Value: ev.Start, Required: true, Hint: "HH:MM"},

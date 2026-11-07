@@ -83,7 +83,7 @@ const (
 )
 
 // NoticeKind is a notice's kind on the ledger: info, by what it is about.
-func NoticeKind(about string) string { return "info." + about }
+func NoticeKind(about string) string { return model.Info + "." + about }
 
 // tally is one group's record.
 type tally struct {

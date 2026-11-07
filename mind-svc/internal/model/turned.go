@@ -18,10 +18,6 @@ const (
 	TurnedMax    = 12
 )
 
-// HeldCalendarCreate is the assistant's own card for a new entry as its held
-// row has it (the agent's calendar.KindCreate).
-const HeldCalendarCreate = "calendar.create_event"
-
 // Turned is a calendar card the operator turned down in words of their own.
 type Turned struct {
 	Title  string    `json:"title"` // the entry, as the card had it
@@ -67,5 +63,5 @@ func TurnedDown(mine, held []Intent, max int) []Turned {
 // operator's own.
 func saidWhy(in Intent) bool {
 	why := strings.TrimSpace(in.Error)
-	return in.Status == Rejected && why != "" && strings.HasPrefix(in.Kind, "calendar.") && !slices.Contains(QuickReasons, why)
+	return in.Status == Rejected && why != "" && IsCalendar(in.Kind) && !slices.Contains(QuickReasons, why)
 }

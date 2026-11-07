@@ -154,7 +154,7 @@ func (m *Mind) lapseLoops(ctx context.Context) error {
 	if len(folded) == 0 {
 		return nil
 	}
-	_, err = m.Gate.Submit(ctx, model.Intent{Skill: "loops", Kind: "info", Topic: "lapsed:" + now.In(m.Opts.Loc).Format("2006-01-02"),
+	_, err = m.Gate.Submit(ctx, model.Intent{Skill: "loops", Kind: model.Info, Topic: "lapsed:" + now.In(m.Opts.Loc).Format("2006-01-02"),
 		Title:  fmt.Sprintf("기한이 2주 넘게 지난 할 일 %d개를 접었어요", len(folded)),
 		Body:   "· " + strings.Join(folded, "\n· ") + "\n아직 할 일이면 말씀해 주세요.",
 		Reason: "밤 정리", Confidence: 1})

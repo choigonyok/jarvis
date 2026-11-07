@@ -78,7 +78,7 @@ func (m *Mind) ceremony(ctx context.Context, e model.Entity) error {
 		day = md(d)
 	}
 	_, err = m.Gate.Submit(ctx, model.Intent{
-		Skill: "life", Kind: "info", EntityID: e.ID, Topic: "ledger:" + e.ID,
+		Skill: "life", Kind: model.Info, EntityID: e.ID, Topic: "ledger:" + e.ID,
 		Title:  fmt.Sprintf("%s(%s) · %s님과 주고받은 기록: %s", st.Title, day, who, lines[0]),
 		Body:   strings.Join(lines, "\n"),
 		Reason: "경조사 장부", Confidence: 1, Evidence: ev,
@@ -150,7 +150,7 @@ func (m *Mind) weekend(ctx context.Context) error {
 		return err
 	}
 	_, err = m.Gate.Submit(ctx, model.Intent{
-		Skill: "life", Kind: "info", Topic: "wish:" + pick.Object.Name + ":" + sat.Format("2006-01-02"),
+		Skill: "life", Kind: model.Info, Topic: "wish:" + pick.Object.Name + ":" + sat.Format("2006-01-02"),
 		Title:  fmt.Sprintf("이번 주말이 비어 있어요. 가고 싶다던 %s 어때요?", pick.Object.Name),
 		Body:   fmt.Sprintf("%s에 말씀하셨어요: %s", md(pick.CreatedAt.In(m.Opts.Loc)), pick.Text),
 		Reason: "버킷리스트", Confidence: 1, Evidence: pick.Evidence,
@@ -173,7 +173,7 @@ func (m *Mind) nearWish(ctx context.Context, o model.Occurrence) error {
 			continue
 		}
 		if _, err := m.Gate.Submit(ctx, model.Intent{
-			Skill: "life", Kind: "info", Topic: "wishnear:" + f.Object.Name + ":" + o.At.In(m.Opts.Loc).Format("2006-01-02"),
+			Skill: "life", Kind: model.Info, Topic: "wishnear:" + f.Object.Name + ":" + o.At.In(m.Opts.Loc).Format("2006-01-02"),
 			Title: fmt.Sprintf("가고 싶다던 %s, 지금 근처예요", f.Object.Name),
 			Body:  f.Text, Reason: "버킷리스트", Confidence: 1, Urgent: true, Evidence: f.Evidence,
 		}); err != nil {
@@ -303,7 +303,7 @@ func (m *Mind) restock(ctx context.Context) error {
 		}
 		topic := "restock:" + t.Class + ":" + last.Format("2006-01-02")
 		title := fmt.Sprintf("%s 살 때 됐어요 (보통 %d일마다, 마지막 %s)", t.Class, t.CycleDays, md(last))
-		intent := model.Intent{Skill: "life", Kind: "info", Topic: topic, Title: title, Body: body, Reason: "가진 물건", Confidence: 1}
+		intent := model.Intent{Skill: "life", Kind: model.Info, Topic: topic, Title: title, Body: body, Reason: "가진 물건", Confidence: 1}
 		if item != "" {
 			// What it would take is known: the thing last bought, the shop it
 			// came from. The card asks with that filled in, and the order

@@ -1,5 +1,32 @@
 package model
 
+import "strings"
+
+// Kinds of intent the layers tell apart by name: a notice, which only tells,
+// and the changes to the calendar - mind's own, and the assistant's cards for
+// them in the conversation. How far an action may go is its registry row's;
+// a notice has none, as it does nothing.
+const (
+	// Info is a notice: it tells, and changes nothing.
+	Info           = "info"
+	CalendarCreate = "calendar.create"
+	CalendarUpdate = "calendar.update"
+	CalendarDelete = "calendar.delete"
+	// HeldCalendarCreate and HeldCalendarUpdate are the assistant's own cards
+	// for a new entry and for a move, as their held rows have them (the
+	// agent's calendar.KindCreate, calendar.KindUpdate).
+	HeldCalendarCreate = "calendar.create_event"
+	HeldCalendarUpdate = "calendar.update_event"
+)
+
+// IsCalendar is whether an intent of kind changes the calendar: one of mind's
+// calendar.* or a card of the conversation's for one.
+func IsCalendar(kind string) bool { return strings.HasPrefix(kind, "calendar.") }
+
+// IsCalendarUpdate is whether an intent of kind moves an entry already there:
+// mind's calendar.update or the conversation's card for a move.
+func IsCalendarUpdate(kind string) bool { return strings.HasPrefix(kind, CalendarUpdate) }
+
 // Record kinds: what a record on the stream is, as the registry's kind rows
 // name it (registry/seed.json says which lane reads each). Every layer names
 // a kind by these, so each is spelled once, and the registry's tests hold the

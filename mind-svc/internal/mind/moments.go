@@ -203,7 +203,7 @@ func (m *Mind) rainOut(ctx context.Context, at time.Time) error {
 		take = "눈길 조심하세요"
 	}
 	_, err := m.Gate.Submit(ctx, model.Intent{
-		Skill: "moments", Kind: "info", Topic: "rain.out:" + today,
+		Skill: "moments", Kind: model.Info, Topic: "rain.out:" + today,
 		Title: words + " · " + take, Body: "오늘 집 날씨: " + day.Line(),
 		Reason: "비 오는 날 집을 나섬", Confidence: 1, Urgent: true, Moment: "rain",
 	})

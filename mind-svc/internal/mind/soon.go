@@ -106,7 +106,7 @@ func (m *Mind) people(ctx context.Context) error {
 		}
 		for _, who := range order {
 			opens := byWho[who]
-			in := model.Intent{Skill: "people", Kind: "info", Topic: "meet:" + p.ID + ":" + who,
+			in := model.Intent{Skill: "people", Kind: model.Info, Topic: "meet:" + p.ID + ":" + who,
 				Reason: "만나는 사람에게 걸린 열린 고리", Confidence: 1, Urgent: true}
 			if len(opens) == 1 {
 				in.EntityID, in.Evidence = opens[0].id, opens[0].ev

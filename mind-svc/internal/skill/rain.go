@@ -97,7 +97,7 @@ func (Rain) intent(ctx context.Context, v View, p model.Entity, wet weather.Day,
 		alt, ok = dryDay(ctx, v, st, today)
 	}
 	if !ok {
-		in.Kind, in.Confidence, in.Urgent = "info", 1, true
+		in.Kind, in.Confidence, in.Urgent = model.Info, 1, true
 		in.Title = head + "에 " + wet.Fall() + " 예보"
 		in.Body = wet.Line() + ". " + pack + "."
 		if st.CalendarID != "" {
@@ -114,7 +114,7 @@ func (Rain) intent(ctx context.Context, v View, p model.Entity, wet weather.Day,
 	payload, _ := json.Marshal(model.CalendarAction{EventID: st.CalendarID, Event: ev})
 	moved := st
 	moved.Date, moved.EndDate, moved.Start = ev.Date, ev.EndDate, ""
-	in.Kind, in.Payload = "calendar.update", payload
+	in.Kind, in.Payload = model.CalendarUpdate, payload
 	in.Title = fmt.Sprintf("'%s'를 %s로 옮길까요?", st.Title, Day(moved, loc))
 	in.Body = fmt.Sprintf("%s · %s 예보\n%s엔 비·눈 예보가 없어요(예보는 바뀔 수 있어요). 그대로 간다면 %s.", head, wet.Fall(), Day(moved, loc), pack)
 	in.Fields = []model.Field{{Key: "date", Label: "날짜", Kind: "text", Value: ev.Date, Required: true, Hint: "YYYY-MM-DD"}}

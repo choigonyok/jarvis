@@ -52,12 +52,12 @@ func (m *Mind) calendarAnswered(ctx context.Context, in model.Intent) {
 	}
 	var set func(*model.State) bool
 	switch {
-	case in.Kind == "calendar.create" && (in.Status == model.Rejected || in.Status == model.Undone):
+	case in.Kind == model.CalendarCreate && (in.Status == model.Rejected || in.Status == model.Undone):
 		why := firstNonEmpty(strings.TrimSpace(in.Error), "반려")
 		set = func(s *model.State) bool { s.Declined = why; return true }
-	case in.Kind == "calendar.create" && in.Status == model.Executed:
+	case in.Kind == model.CalendarCreate && in.Status == model.Executed:
 		set = func(s *model.State) bool { s.Declined = ""; return true }
-	case in.Kind == "calendar.update" && in.Status == model.Rejected && a.Was != nil:
+	case in.Kind == model.CalendarUpdate && in.Status == model.Rejected && a.Was != nil:
 		was := *a.Was
 		set = func(s *model.State) bool {
 			s.Title, s.Date, s.EndDate, s.Start, s.End, s.Place = was.Title, was.Date, was.EndDate, was.Start, was.End, was.Place
@@ -365,7 +365,7 @@ func (m *Mind) answered(ctx context.Context, in model.Intent) {
 	switch in.Kind {
 	case act.KindCategory:
 		m.chargeAnswered(ctx, in)
-	case "calendar.create", "calendar.update":
+	case model.CalendarCreate, model.CalendarUpdate:
 		m.calendarAnswered(ctx, in)
 	case act.KindPhotoPlace:
 		m.photosAnswered(ctx, in)
@@ -444,7 +444,7 @@ func (m *Mind) expireQuestions(ctx context.Context) error {
 		}
 		var a model.CalendarAction
 		switch {
-		case in.Kind == "calendar.create" && json.Unmarshal(in.Payload, &a) == nil && a.Event.Date != "" && max(a.Event.Date, a.Event.EndDate) < today:
+		case in.Kind == model.CalendarCreate && json.Unmarshal(in.Payload, &a) == nil && a.Event.Date != "" && max(a.Event.Date, a.Event.EndDate) < today:
 			// Adding what is over is no question: it sat under a thumb for days.
 			in.Error = "일정 날짜가 지나 거둠"
 		case (in.Kind == "review.place" || in.Kind == "preference.confirm" || in.Kind == act.KindPhotoPlace) && now.Sub(in.CreatedAt) >= reviewExpires:

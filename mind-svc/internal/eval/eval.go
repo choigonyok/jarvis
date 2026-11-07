@@ -575,9 +575,9 @@ func Run(ctx context.Context, sc Scenario, client llm.Client, loc *time.Location
 			quiesce()
 		}
 		if t.Asked != nil {
-			kind := "calendar.create_event"
+			kind := model.HeldCalendarCreate
 			if t.Asked.EventID != "" {
-				kind = "calendar.update_event"
+				kind = model.HeldCalendarUpdate
 			}
 			asked = fmt.Sprintf("eval-%d", i)
 			if _, err := m.Gate.Asked(ctx, asked, kind, t.Asked.Event.Title, *t.Asked); err != nil {
@@ -641,7 +641,7 @@ func Run(ctx context.Context, sc Scenario, client llm.Client, loc *time.Location
 				fail(i, "반려할 대화 카드가 없음")
 				continue
 			}
-			if _, err := m.Gate.Answered(ctx, gate.HeldAnswer{Card: asked, Kind: "calendar.create_event", Reason: t.Reason, At: clk.Now()}); err != nil {
+			if _, err := m.Gate.Answered(ctx, gate.HeldAnswer{Card: asked, Kind: model.HeldCalendarCreate, Reason: t.Reason, At: clk.Now()}); err != nil {
 				fail(i, "%v", err)
 			}
 		case t.Undo != "":
@@ -808,7 +808,7 @@ func check(ctx context.Context, st store.Store, cal *act.MemoryCalendar, ex Expe
 	}
 	if ex.NoActions {
 		for _, k := range raised {
-			if k != "info" {
+			if k != model.Info {
 				out = append(out, "행동 의도가 없어야 하는데 "+k)
 			}
 		}
@@ -1221,7 +1221,7 @@ func checkSelf(ctx context.Context, st store.Store, ex Expect, seen map[string]b
 		intents, _ := st.Intents(ctx, 10000)
 		var titles []string
 		for _, in := range intents {
-			if !seen[in.ID] && in.Kind == "info" {
+			if !seen[in.ID] && in.Kind == model.Info {
 				titles = append(titles, in.Title)
 			}
 		}

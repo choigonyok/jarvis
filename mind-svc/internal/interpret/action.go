@@ -38,12 +38,12 @@ func (a *Actions) Handle(ctx context.Context, o obs.Observation) error {
 
 	var set func(*model.State) bool
 	switch {
-	case o.Type == model.KindActionExecuted && d.Kind == "calendar.create" && r.CalendarID != "":
+	case o.Type == model.KindActionExecuted && d.Kind == model.CalendarCreate && r.CalendarID != "":
 		set = func(s *model.State) bool { s.CalendarID = r.CalendarID; return true }
-	case o.Type == model.KindActionExecuted && d.Kind == "calendar.delete",
-		o.Type == model.KindActionUndone && d.Kind == "calendar.create":
+	case o.Type == model.KindActionExecuted && d.Kind == model.CalendarDelete,
+		o.Type == model.KindActionUndone && d.Kind == model.CalendarCreate:
 		set = func(s *model.State) bool { s.CalendarID = ""; return true }
-	case o.Type == model.KindActionUndone && d.Kind == "calendar.delete" && r.CalendarID != "":
+	case o.Type == model.KindActionUndone && d.Kind == model.CalendarDelete && r.CalendarID != "":
 		// Put back under a new id.
 		set = func(s *model.State) bool { s.CalendarID = r.CalendarID; return true }
 	default:

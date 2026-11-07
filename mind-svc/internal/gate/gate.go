@@ -175,7 +175,7 @@ func (g *Gate) Heard(ctx context.Context, id string, useful bool) (model.Intent,
 	if err != nil {
 		return in, err
 	}
-	if in.Kind != "info" {
+	if in.Kind != model.Info {
 		return in, errors.New("알림이 아닙니다")
 	}
 	at := g.now()
@@ -220,7 +220,7 @@ func (g *Gate) submit(ctx context.Context, in model.Intent) (model.Intent, bool,
 		return in, false, g.st.PutIntent(ctx, in)
 	}
 	open, asked := g.openCard(ctx, in)
-	if strings.HasPrefix(in.Kind, "calendar.") {
+	if model.IsCalendar(in.Kind) {
 		// Asked in the conversation: the assistant's own card is the question,
 		// and turned down there, it is turned down here.
 		if held, ok := g.askedInChat(ctx, in); ok {
@@ -264,7 +264,7 @@ func (g *Gate) submit(ctx context.Context, in model.Intent) (model.Intent, bool,
 // admit does with an intent what the policy says. A question that asks what
 // open asks (asked) goes on that card.
 func (g *Gate) admit(ctx context.Context, in, open model.Intent, asked bool) (model.Intent, error) {
-	if in.Kind == "info" {
+	if in.Kind == model.Info {
 		in.Decision, in.Status, in.DecidedBy = model.Digest, model.Executed, "policy"
 		in.Tier, in.Why = "digest", "알려 둘 일"
 		if in.Urgent {
@@ -381,7 +381,7 @@ func (g *Gate) busyNow() string {
 // openCard is the card still open that asks what in asks: the same plan, the
 // same skill, the same kind of calendar change.
 func (g *Gate) openCard(ctx context.Context, in model.Intent) (model.Intent, bool) {
-	if in.EntityID == "" || !strings.HasPrefix(in.Kind, "calendar.") {
+	if in.EntityID == "" || !model.IsCalendar(in.Kind) {
 		return model.Intent{}, false
 	}
 	about, err := g.st.IntentsFor(ctx, in.EntityID)
@@ -601,7 +601,7 @@ func (g *Gate) withdrawAlike(ctx context.Context, in model.Intent, by string) er
 	for _, p := range open {
 		// One's own plan: replaced by skill below, and another skill's card
 		// about it waits beside this one.
-		if p.Status != model.Pending || !strings.HasPrefix(p.Kind, "calendar.") || p.EntityID == in.EntityID {
+		if p.Status != model.Pending || !model.IsCalendar(p.Kind) || p.EntityID == in.EntityID {
 			continue
 		}
 		var b model.CalendarAction
@@ -685,7 +685,7 @@ func (g *Gate) Asked(ctx context.Context, card, kind, title string, a model.Cale
 		return in, err
 	}
 	for _, p := range open {
-		if p.Status == model.Pending && strings.HasPrefix(p.Kind, "calendar.") && g.asksSame(ctx, p, in) {
+		if p.Status == model.Pending && model.IsCalendar(p.Kind) && g.asksSame(ctx, p, in) {
 			if _, err := g.cover(ctx, p, card); err != nil {
 				return in, err
 			}
@@ -757,7 +757,7 @@ func (g *Gate) answered(ctx context.Context, a HeldAnswer) (model.Intent, []mode
 		in.Status = model.Executed
 	}
 	var turned []model.Intent
-	if told && in.Status == model.Rejected && strings.HasPrefix(in.Kind, "calendar.") {
+	if told && in.Status == model.Rejected && model.IsCalendar(in.Kind) {
 		in.Error = strings.TrimSpace(a.Reason)
 		if turned, err = g.turnDownCovered(ctx, in); err != nil {
 			return in, turned, err
@@ -824,7 +824,7 @@ func (g *Gate) TurnedDown(ctx context.Context, ev model.CalendarEvent, said stri
 // interpreter's: there, the day and the hour say it.
 func (g *Gate) asksSame(ctx context.Context, in, held model.Intent) bool {
 	var a, b model.CalendarAction
-	if len(held.Payload) == 0 || !strings.HasPrefix(held.Kind, "calendar.") ||
+	if len(held.Payload) == 0 || !model.IsCalendar(held.Kind) ||
 		json.Unmarshal(in.Payload, &a) != nil || json.Unmarshal(held.Payload, &b) != nil {
 		return false
 	}
@@ -832,7 +832,7 @@ func (g *Gate) asksSame(ctx context.Context, in, held model.Intent) bool {
 	// changes about it after: approved at 11:56, '은주와 저녁' kept both moves of
 	// its place that day (망원, then 모퉁이맥주 from KakaoTalk) off the calendar
 	// for its 48 hours.
-	if in.Kind != "calendar.create" && held.Kind == model.HeldCalendarCreate {
+	if in.Kind != model.CalendarCreate && held.Kind == model.HeldCalendarCreate {
 		return false
 	}
 	told := false
@@ -842,7 +842,7 @@ func (g *Gate) asksSame(ctx context.Context, in, held model.Intent) bool {
 	one, other := g.planOf(ctx, in, a), g.planOf(ctx, held, b)
 	switch {
 	case a.EventID != "" && a.EventID == b.EventID:
-		return told || in.Kind != "calendar.update" || !strings.HasPrefix(held.Kind, "calendar.update") || sameMove(a.Event, b.Event)
+		return told || in.Kind != model.CalendarUpdate || !model.IsCalendarUpdate(held.Kind) || sameMove(a.Event, b.Event)
 	case told:
 		return model.SameHour(one, other)
 	case a.EventID != "" && b.EventID != "":
@@ -925,7 +925,7 @@ func (g *Gate) linkOnly(ctx context.Context, in *model.Intent, by string, alread
 	at := g.now()
 	in.Status, in.DecidedBy, in.DecidedAt, in.ExecutedAt = model.Executed, by, &at, &at
 	in.Why, in.Preview = "이미 있어서 연결만 했어요: "+already.Line, already.Line
-	if in.Kind == "calendar.update" {
+	if in.Kind == model.CalendarUpdate {
 		in.Why = "캘린더에 이미 그렇게 적혀 있어요: " + already.Line
 	}
 	in.Result, _ = json.Marshal(map[string]any{"calendarId": already.ID, "linked": true})
@@ -955,7 +955,7 @@ func (g *Gate) tell(ctx context.Context, in model.Intent, title, body string) {
 		Title: title, Body: strings.TrimSpace(body), URL: g.link(in),
 		Tier: in.Tier, Level: level, Key: "mind:" + in.ID, At: g.now(),
 	}
-	if in.Kind == "info" {
+	if in.Kind == model.Info {
 		// Told only: the inbox answers it with one tap (Heard), which a
 		// thing done and told is not.
 		n.Kind = model.KindMindInfo
