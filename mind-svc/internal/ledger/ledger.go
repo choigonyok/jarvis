@@ -29,15 +29,9 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/tuning"
 )
 
-// A card nobody answered for this long was ignored, which is not refused.
-// An action done and told stands once this long has gone without an undo.
-const (
-	ignoredAfter = 7 * 24 * time.Hour
-	keptAfter    = 24 * time.Hour
-	// manualWithin is how long after a held-back purchase buying it by hand
-	// still counts as that purchase.
-	manualWithin = 14 * 24 * time.Hour
-)
+// How long it takes for a judgement to count as answered - a card ignored, an
+// action kept, a purchase made by hand - and the window a prediction with
+// none of its own is scored over are tuning's (tuning.Ledger).
 
 // Inputs is what the ledger is built from.
 type Inputs struct {
@@ -125,7 +119,7 @@ func ofIntent(it model.Intent, in Inputs, idx occurrences, done map[string]bool)
 		switch {
 		case it.Status == model.Undone:
 			o.Result = model.ResultUndone
-		case it.Status == model.Executed && in.Now.Sub(it.CreatedAt) >= keptAfter:
+		case it.Status == model.Executed && in.Now.Sub(it.CreatedAt) >= tuning.Default().Ledger.KeptAfter:
 			o.Result = model.ResultKept
 		default:
 			o.Result = model.ResultOpen
@@ -189,7 +183,7 @@ func cardResult(it model.Intent, now time.Time) string {
 		}
 		return model.ResultSuperseded
 	case model.Pending:
-		if now.Sub(it.CreatedAt) >= ignoredAfter {
+		if now.Sub(it.CreatedAt) >= tuning.Default().Ledger.IgnoredAfter {
 			return model.ResultIgnored
 		}
 	}
@@ -221,7 +215,7 @@ func doneByHand(it model.Intent, idx occurrences, loc *time.Location) bool {
 		if json.Unmarshal(it.Payload, &c) != nil {
 			return false
 		}
-		until := it.CreatedAt.Add(manualWithin)
+		until := it.CreatedAt.Add(tuning.Default().Ledger.ManualWithin)
 		return slices.ContainsFunc(idx.all, func(o model.Occurrence) bool {
 			if o.Kind != "purchase.item" || o.At.Before(it.CreatedAt) || o.At.After(until) {
 				return false
@@ -248,7 +242,7 @@ func ofPrediction(pr model.Prediction, now time.Time, idx occurrences) model.Out
 	}
 	happened, known := false, false
 	if pr.Key != "" {
-		from := pr.Due.Add(-24 * time.Hour)
+		from := pr.Due.Add(-tuning.Default().Ledger.DueWindow)
 		if pr.From != nil {
 			from = *pr.From
 		}

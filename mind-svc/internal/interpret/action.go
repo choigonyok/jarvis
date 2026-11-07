@@ -9,6 +9,7 @@ import (
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
+	"github.com/choigonyok/jarvis/mind-svc/internal/tuning"
 	"github.com/choigonyok/jarvis/mind-svc/internal/world"
 )
 
@@ -93,9 +94,10 @@ func (a *Actions) settle(ctx context.Context, o obs.Observation, d obs.ActionDat
 	if json.Unmarshal(d.Result, &s) != nil || s.PerPerson <= 0 {
 		return nil
 	}
+	// What each owes is due a few days after the plan (tuning's SettleDays).
 	due := ""
 	if day, err := time.Parse("2006-01-02", s.Date); err == nil {
-		due = day.AddDate(0, 0, 3).Format("2006-01-02")
+		due = day.AddDate(0, 0, tuning.Default().Interpret.SettleDays).Format("2006-01-02")
 	}
 	for _, p := range s.People {
 		if open[p] != "" {

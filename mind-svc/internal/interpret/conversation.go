@@ -423,7 +423,8 @@ func (c *Conversation) LastRead() (time.Time, string) {
 // card is how the next read should take a band's rehearsal. The quick answers
 // say nothing beside the card they were on, and the plan shows those itself.
 func (c *Conversation) turnedDown(ctx context.Context) []string {
-	since := c.now().Add(-model.TurnedWithin)
+	turned := tuning.Default().Turned
+	since := c.now().Add(-turned.Within)
 	mine, err := c.st.IntentsSince(ctx, since)
 	if err != nil {
 		c.log.Warn("반려 이유를 읽지 못했습니다", "err", err)
@@ -434,7 +435,7 @@ func (c *Conversation) turnedDown(ctx context.Context) []string {
 		c.log.Warn("대화 카드의 반려 이유를 읽지 못했습니다", "err", err)
 	}
 	var out []string
-	for _, t := range model.TurnedDown(mine, held, model.TurnedMax) {
+	for _, t := range model.TurnedDown(mine, held, turned.Max) {
 		if line := "'" + t.Title + "' 카드: " + oneLine(t.Reason); !slices.Contains(out, line) {
 			out = append(out, line)
 		}
@@ -465,14 +466,14 @@ func (c *Conversation) rules(ctx context.Context) []string {
 }
 
 // known is what the world model holds for this room, by short ref: live
-// plans and loops, and plans that ended recently (so "다시 가기로 했어" can
-// revive one instead of starting another).
+// plans and loops, and plans that ended in the last EndedDays (tuning), so
+// "다시 가기로 했어" can revive one instead of starting another.
 func (c *Conversation) known(ctx context.Context, room string) ([]view, error) {
 	all, err := c.world.Entities(ctx, "", room, false)
 	if err != nil {
 		return nil, err
 	}
-	cutoff := c.now().AddDate(0, 0, -14)
+	cutoff := c.now().AddDate(0, 0, -tuning.Default().Interpret.EndedDays)
 	var out []view
 	np, nl := 0, 0
 	for _, e := range all {
@@ -739,7 +740,10 @@ func (c *Conversation) remember(ctx context.Context, room string, o op, evidence
 			hearsay = true
 		}
 	}
-	recent, err := c.st.Facts(ctx, 300)
+	// The same words in the same room among the newest facts were written
+	// already (tuning's RecentFacts).
+	tuned := tuning.Default().Interpret
+	recent, err := c.st.Facts(ctx, tuned.RecentFacts)
 	if err != nil {
 		return false, err
 	}
@@ -748,7 +752,6 @@ func (c *Conversation) remember(ctx context.Context, room string, o op, evidence
 			return skip("이미 적은 사실")
 		}
 	}
-	tuned := tuning.Default().Interpret
 	confidence := o.Confidence
 	if hearsay {
 		confidence = min(confidence, tuned.HearsayConfidence)

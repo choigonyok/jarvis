@@ -11,13 +11,6 @@ import (
 // they say nothing beside the card they were on.
 var QuickReasons = []string{"지금은 필요 없어", "이미 했어", "틀렸어", "다시 묻지 마"}
 
-// TurnedWithin and TurnedMax are how far back, and how many of, the words the
-// operator left on the calendar cards they turned down are read again.
-const (
-	TurnedWithin = 60 * 24 * time.Hour
-	TurnedMax    = 12
-)
-
 // Turned is a calendar card the operator turned down in words of their own.
 type Turned struct {
 	Title  string    `json:"title"` // the entry, as the card had it

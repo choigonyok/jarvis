@@ -68,6 +68,7 @@ import (
 	spendingstore "github.com/choigonyok/jarvis/mind-svc/internal/spending/store"
 	"github.com/choigonyok/jarvis/mind-svc/internal/spending/watch"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
+	"github.com/choigonyok/jarvis/mind-svc/internal/tuning"
 	"github.com/choigonyok/jarvis/mind-svc/internal/weather"
 )
 
@@ -97,13 +98,16 @@ func main() {
 		os.Exit(runBacktest(os.Args[2:], loc))
 	}
 
+	// When a room is read and how far a read may search: tuning's, unless the
+	// machine says otherwise.
+	reads := tuning.Default().Interpret
 	cfg := interpret.Config{
 		Owner:    svc.Env("MIND_OWNER_NAME", "나"),
-		Idle:     svc.Duration("MIND_IDLE", 3*time.Minute),
-		IdleSelf: svc.Duration("MIND_IDLE_SELF", 45*time.Second),
-		IdleSim:  svc.Duration("MIND_IDLE_SIM", 4*time.Second),
+		Idle:     svc.Duration("MIND_IDLE", reads.Idle),
+		IdleSelf: svc.Duration("MIND_IDLE_SELF", reads.IdleSelf),
+		IdleSim:  svc.Duration("MIND_IDLE_SIM", reads.IdleSim),
 		Noise:    regexp.MustCompile(svc.Env("MIND_EXCLUDE_ROOMS", `카드|은행|뱅크|페이|증권|알림|광고|쿠폰|배송|택배|채널`)),
-		Search:   svc.Int("MIND_WEB_SEARCH", 2),
+		Search:   svc.Int("MIND_WEB_SEARCH", reads.Search),
 	}
 	token := os.Getenv("API_TOKEN")
 	dsn := os.Getenv("DATABASE_URL")

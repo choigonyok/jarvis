@@ -84,10 +84,6 @@ func PolicyFrom(r *registry.Snapshot) Policy {
 	return p
 }
 
-// lowValue is below what a thing done and told rings for: it waits for the
-// evening (a charge filed the usual way).
-const lowValue = 0.5
-
 // BriefSkill is the morning brief's skill (skill.Brief): the one notice the
 // day's push budget never holds back.
 const BriefSkill = "brief"
@@ -341,7 +337,7 @@ func (g *Gate) admit(ctx context.Context, in, open model.Intent, asked bool) (mo
 		// Linked only (the entry put there meanwhile): nothing to take back.
 		if decision == model.Notify && in.Status == model.Executed && len(in.Undo) > 0 {
 			in.Tier = "now"
-			if g.overBudget(ctx) || (in.Value > 0 && in.Value < lowValue) {
+			if g.overBudget(ctx) || (in.Value > 0 && in.Value < tuning.Default().Gate.LowValue) {
 				in.Tier = "digest"
 			}
 			// Done and told: the card offers the undo.
@@ -585,18 +581,15 @@ func (g *Gate) replace(ctx context.Context, p model.Intent, why string) error {
 	return nil
 }
 
-// alikeWithin is how far back an open calendar question is looked for by
-// its entry: one older than this is stale whatever it asked.
-const alikeWithin = 30 * 24 * time.Hour
-
 // withdrawAlike closes the open calendar questions about other plans that ask
-// about the same entry as in (sameEntry): the card by asks it now.
+// about the same entry as in (sameEntry): the card by asks it now. Questions
+// older than tuning's AlikeWithin are stale whatever they asked.
 func (g *Gate) withdrawAlike(ctx context.Context, in model.Intent, by string) error {
 	var a model.CalendarAction
 	if json.Unmarshal(in.Payload, &a) != nil {
 		return nil
 	}
-	open, err := g.st.IntentsSince(ctx, g.now().Add(-alikeWithin))
+	open, err := g.st.IntentsSince(ctx, g.now().Add(-tuning.Default().Gate.AlikeWithin))
 	if err != nil {
 		return err
 	}
@@ -653,11 +646,6 @@ func (g *Gate) planOf(ctx context.Context, in model.Intent, a model.CalendarActi
 	return s
 }
 
-// askedWithin is how long a card raised in the conversation speaks for its
-// question, answered or not: mind reads the same conversation a minute later,
-// and turned down there, it is not asked again here.
-const askedWithin = 48 * time.Hour
-
 // Asked enters a calendar card the assistant raised in the conversation. What
 // the operator asked for by name is the card they are looking at - mind reads
 // the same words as a plan, finds no entry and would ask as well. mind's card
@@ -682,7 +670,7 @@ func (g *Gate) Asked(ctx context.Context, card, kind, title string, a model.Cale
 	if err := g.st.PutIntent(ctx, in); err != nil {
 		return in, err
 	}
-	open, err := g.st.IntentsSince(ctx, g.now().Add(-alikeWithin))
+	open, err := g.st.IntentsSince(ctx, g.now().Add(-tuning.Default().Gate.AlikeWithin))
 	if err != nil {
 		return in, err
 	}
@@ -696,9 +684,10 @@ func (g *Gate) Asked(ctx context.Context, card, kind, title string, a model.Cale
 	return in, nil
 }
 
-// askedInChat is the card in the conversation that asks what in asks.
+// askedInChat is the card in the conversation that asks what in asks, while
+// it speaks for its question (tuning's AskedWithin).
 func (g *Gate) askedInChat(ctx context.Context, in model.Intent) (model.Intent, bool) {
-	rows, err := g.st.HeldSince(ctx, g.now().Add(-askedWithin))
+	rows, err := g.st.HeldSince(ctx, g.now().Add(-tuning.Default().Gate.AskedWithin))
 	if err != nil {
 		return model.Intent{}, false
 	}
@@ -771,7 +760,7 @@ func (g *Gate) answered(ctx context.Context, a HeldAnswer) (model.Intent, []mode
 // turnDownCovered turns down the questions of mind's that stood aside for a
 // card of the conversation's the operator turned down: theirs is its answer.
 func (g *Gate) turnDownCovered(ctx context.Context, held model.Intent) ([]model.Intent, error) {
-	recent, err := g.st.IntentsSince(ctx, held.CreatedAt.Add(-alikeWithin))
+	recent, err := g.st.IntentsSince(ctx, held.CreatedAt.Add(-tuning.Default().Gate.AlikeWithin))
 	if err != nil {
 		return nil, err
 	}
@@ -799,7 +788,8 @@ func (g *Gate) TurnedDown(ctx context.Context, ev model.CalendarEvent, said stri
 	if g.Turned == nil {
 		return model.Turned{}, false, nil
 	}
-	since := g.now().Add(-model.TurnedWithin)
+	turned := tuning.Default().Turned
+	since := g.now().Add(-turned.Within)
 	mine, err := g.st.IntentsSince(ctx, since)
 	if err != nil {
 		return model.Turned{}, false, err
@@ -808,7 +798,7 @@ func (g *Gate) TurnedDown(ctx context.Context, ev model.CalendarEvent, said stri
 	if err != nil {
 		return model.Turned{}, false, err
 	}
-	past := model.TurnedDown(mine, held, model.TurnedMax)
+	past := model.TurnedDown(mine, held, turned.Max)
 	if len(past) == 0 {
 		return model.Turned{}, false, nil
 	}
@@ -1153,10 +1143,12 @@ func (g *Gate) quietCard(ctx context.Context, in model.Intent) (bool, string) {
 	if worth <= cost {
 		return true, fmt.Sprintf("방해할 만큼은 아니라 저녁 요약으로 (가치 %.2f ≤ 비용 %.2f)", worth, cost)
 	}
-	// Busy, a buzz costs twice: what is worth less waits for the evening, and
-	// does not come in the heap of what was held through it.
-	if why := g.busyNow(); why != "" && worth <= 2*cost {
-		return true, fmt.Sprintf("%s이라 저녁 요약으로 (가치 %.2f ≤ 비용 %.2f)", why, worth, 2*cost)
+	// Busy, a buzz costs more (tuning's BusyCost times as much): what is worth
+	// less waits for the evening, and does not come in the heap of what was
+	// held through it.
+	busy := tuning.Default().Gate.BusyCost * cost
+	if why := g.busyNow(); why != "" && worth <= busy {
+		return true, fmt.Sprintf("%s이라 저녁 요약으로 (가치 %.2f ≤ 비용 %.2f)", why, worth, busy)
 	}
 	return false, ""
 }

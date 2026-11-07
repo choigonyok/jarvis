@@ -39,6 +39,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/reflect"
 	"github.com/choigonyok/jarvis/mind-svc/internal/sensor"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
+	"github.com/choigonyok/jarvis/mind-svc/internal/tuning"
 	"github.com/choigonyok/jarvis/mind-svc/internal/weather"
 	"github.com/choigonyok/jarvis/mind-svc/internal/world"
 )
@@ -513,7 +514,7 @@ func Run(ctx context.Context, sc Scenario, client llm.Client, loc *time.Location
 	cal := act.NewMemoryCalendar()
 	m := mind.New(mind.Options{
 		Store: st, Log: log, LLM: client, Calendar: cal, Notifier: &act.MemoryNotifier{},
-		Loc: loc, Now: clk.Now, Logger: quiet, Interpret: interpret.Config{Owner: "나", Search: 2},
+		Loc: loc, Now: clk.Now, Logger: quiet, Interpret: interpret.Config{Owner: "나", Search: tuning.Default().Interpret.Search},
 		Settle: 0, Policy: gate.DefaultPolicy(), Mode: "eval", Memory: memory.NewFake(clk.Now),
 		Travel: travel(sc.Routes), Weather: sky(sc.Weather),
 	})

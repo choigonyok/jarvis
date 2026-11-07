@@ -532,7 +532,7 @@ func TestACardInTheConversationIsTheQuestion(t *testing.T) {
 	}
 
 	// Two days on, it no longer speaks.
-	f.clock = f.clock.Add(askedWithin + time.Minute)
+	f.clock = f.clock.Add(tuning.Default().Gate.AskedWithin + time.Minute)
 	late, _ := f.g.Submit(ctx, addAt(t, f, "plan_d", "kakao:2", "지수와 합주", "2026-11-17", "15:00"))
 	if late.Status != model.Pending || !late.Card {
 		t.Fatalf("%+v", late)
