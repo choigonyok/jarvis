@@ -206,28 +206,31 @@ export function Status() {
   );
 }
 
-/**
- * The report, read: POST makes the service look again before answering; GET
- * reads what it has. A failure is said in the service's words when it has
- * them.
- */
+type Fetched = { report: StatusReport; error?: undefined } | { report?: undefined; error: string };
+
+/** POST makes the service look again before answering; GET reads what it has. */
+async function fetchReport(method: "GET" | "POST", signal?: AbortSignal): Promise<Fetched> {
+  try {
+    const res = await fetch(method === "POST" ? "/api/status/refresh" : "/api/status/status", {
+      method,
+      cache: "no-store",
+      signal,
+    });
+    const body = await res.json();
+    if (!res.ok) return { error: body.error ?? "상태를 불러오지 못했어요." };
+    return { report: body as StatusReport };
+  } catch {
+    return { error: "상태를 불러오지 못했어요." };
+  }
+}
+
+/** The report as useResource reads it: a failure, in the service's words when it has them, is thrown. */
 const reportOf =
   (method: "GET" | "POST"): Fetcher<StatusReport> =>
   async (signal) => {
-    let res: Response;
-    let body: { error?: string } & Partial<StatusReport>;
-    try {
-      res = await fetch(method === "POST" ? "/api/status/refresh" : "/api/status/status", {
-        method,
-        cache: "no-store",
-        signal,
-      });
-      body = await res.json();
-    } catch {
-      throw new Error("상태를 불러오지 못했어요.");
-    }
-    if (!res.ok) throw new Error(body.error ?? "상태를 불러오지 못했어요.");
-    return body as StatusReport;
+    const out = await fetchReport(method, signal);
+    if (out.error !== undefined) throw new Error(out.error);
+    return out.report;
   };
 
 const USAGE = "사용량";
