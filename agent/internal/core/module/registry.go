@@ -10,7 +10,8 @@ import (
 )
 
 // Registry holds the enabled modules and sorts them by capability. Adding a
-// feature is one Add call in main; removing one is deleting that line.
+// feature is one Add call where the agent is put together
+// (internal/assemble); removing one is deleting that line.
 type Registry struct {
 	mu        sync.RWMutex
 	all       []Module

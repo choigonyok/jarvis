@@ -16,14 +16,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/choigonyok/jarvis/agent/internal/adapter/permission"
-	"github.com/choigonyok/jarvis/agent/internal/claudecode"
+	"github.com/choigonyok/jarvis/agent/internal/assemble"
 	"github.com/choigonyok/jarvis/agent/internal/config"
-	"github.com/choigonyok/jarvis/agent/internal/core/bus"
-	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
 	"github.com/choigonyok/jarvis/agent/internal/module/jobs"
 	"github.com/choigonyok/jarvis/agent/internal/thread"
-	"github.com/choigonyok/jarvis/agent/internal/usage"
 )
 
 // Options is how scenarios are run.
@@ -171,13 +167,19 @@ func run(ctx context.Context, opt Options, sc Scenario) ([]Recorded, string, tim
 		// only answers from the scenario.
 		"JARVIS_POLICY_HOOK": "off",
 		"JARVIS_ROLE":        "",
+		"JARVIS_JOBS":        "true",
+		"JARVIS_DEBUG":       "false",
+		// Nothing leaves the run: no pushes, no records, no stream read.
+		"JARVIS_NOTIFY_URL":         "",
+		"JARVIS_DATABASE_URL":       "",
+		"JARVIS_QUEUE_DATABASE_URL": "",
 	}.apply()
 	defer restore()
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, "", t, err
 	}
-	cfg.DatabaseURL, cfg.QueueURL = "", ""
+	cfg.DatabaseURL, cfg.QueueURL, cfg.NotifyURL = "", "", ""
 	if opt.Claude != "" {
 		cfg.ClaudeBin = opt.Claude
 	}
@@ -185,54 +187,31 @@ func run(ctx context.Context, opt Options, sc Scenario) ([]Recorded, string, tim
 		cfg.TurnTimeout = opt.Timeout
 	}
 
-	events := bus.New()
-	store := thread.NewStore(input.URL, "", events)
-	proposals := proposal.NewStore(events)
 	log, clock := capture(opt.Log)
-	w, err := wire(ctx, &cfg, store, events, log)
-	if err != nil {
-		return nil, "", t, err
-	}
 	answer := func(key string) string {
 		if a, ok := sc.Answers[key]; ok {
 			return a
 		}
 		return standIn(key)
 	}
-	for path, b := range w.boards {
-		name := strings.TrimPrefix(path, "/mcp/")
-		mux.Handle(path, b.Stand(func(_ context.Context, what string, _ json.RawMessage) (string, error) {
-			return answer(name + ":" + what), nil
-		}).Handler())
-	}
-	for path, tools := range w.servers {
-		mux.Handle(path, stand(strings.TrimPrefix(path, "/mcp/"), tools, func(tool string, _ json.RawMessage) string { return answer(tool) }))
-	}
-	mux.Handle("/browser", stand(jobs.BrowserServer, browserTools(), func(tool string, _ json.RawMessage) string { return answer(tool) }))
-
-	gate := permission.NewGate(proposals, w.modules, store, false, log)
-	// The agent's own judgement of what passes without a card: a job made or
-	// instructed, and the browser's own tools.
-	gate.SetAutoAllow(func(tool string, input json.RawMessage) bool {
-		return jobs.BrowserTool(tool) || (w.jobs != nil && w.jobs.CardFree(tool, input))
-	})
-	mux.Handle("/mcp", gate.Handler())
-
-	runner := claudecode.New(cfg, store, log)
-	runner.SetUsage(usage.New(""))
-	if w.memory != nil {
-		runner.SetRecall(w.memory.Recall)
-	}
-	waiting := sc.Waiting
-	runner.SetWaiting(func() []string { return waiting })
 	var mu sync.Mutex
 	var calls []Recorded
-	runner.OnTool(func(name string, input json.RawMessage) {
-		mu.Lock()
-		calls = append(calls, Recorded{Name: name, Input: append(json.RawMessage(nil), input...)})
-		mu.Unlock()
-	})
-	gate.SetFollowUp(runner)
+	waiting := sc.Waiting
+	// The agent itself, put together as cmd/agent puts it together; what the
+	// run fakes is handed in, and nothing of it is started.
+	agent, err := wire(ctx, &cfg, assemble.Deps{
+		Log: log,
+		Tools: func(name string, input json.RawMessage) {
+			mu.Lock()
+			calls = append(calls, Recorded{Name: name, Input: append(json.RawMessage(nil), input...)})
+			mu.Unlock()
+		},
+		Waiting: func() []string { return waiting },
+	}, mux, answer)
+	if err != nil {
+		return nil, "", t, err
+	}
+	runner := agent.Runner
 
 	before := transcript.count()
 	if sc.Prompt != "" {

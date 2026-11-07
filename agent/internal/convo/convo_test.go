@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -139,29 +142,56 @@ func TestEveryScenarioCanPassAndFail(t *testing.T) {
 	}
 }
 
-// The tests put up what the agent puts up: a module with tools for the
-// conversation that wire does not add is one no scenario sees.
-func TestEveryModuleIsWired(t *testing.T) {
-	src, err := os.ReadFile("wire.go")
+// The tests put up what the agent puts up: the harness is put together by
+// the agent's own assembly (internal/assemble), and builds nothing of the
+// agent beside it - no module, board, gate, store or runner of its own. The
+// jobs module is named only for the shared browser's server name.
+func TestTheHarnessIsTheAgentsAssembly(t *testing.T) {
+	const agent = "github.com/choigonyok/jarvis/agent/internal/"
+	builds := []string{"module/", "claudecode", "adapter/", "core/", "tool", "suggest", "httpapi"}
+	files, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	offers := regexp.MustCompile(`func \(m \*Module\) (Look|Change|Handler)\(`)
-	dirs, err := os.ReadDir("../module")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, d := range dirs {
-		files, _ := filepath.Glob(filepath.Join("../module", d.Name(), "*.go"))
-		for _, f := range files {
-			if strings.HasSuffix(f, "_test.go") {
+	assembled := false
+	fset := token.NewFileSet()
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		parsed, err := parser.ParseFile(fset, f, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, imp := range parsed.Imports {
+			path, _ := strconv.Unquote(imp.Path.Value)
+			if path == agent+"module/jobs" {
 				continue
 			}
-			body, _ := os.ReadFile(f)
-			if offers.Match(body) && !strings.Contains(string(src), `"github.com/choigonyok/jarvis/agent/internal/module/`+d.Name()+`"`) {
-				t.Errorf("internal/module/%s 는 대화에 도구를 내놓는데 wire.go 가 세우지 않습니다", d.Name())
+			for _, b := range builds {
+				if strings.HasPrefix(path, agent+b) {
+					t.Errorf("%s 가 %s 를 가져옵니다 - 에이전트를 이루는 것은 assemble 만 세웁니다", f, strings.TrimPrefix(path, agent))
+				}
 			}
 		}
+		ast.Inspect(parsed, func(n ast.Node) bool {
+			sel, ok := n.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			if x, ok := sel.X.(*ast.Ident); ok {
+				switch {
+				case x.Name == "assemble" && sel.Sel.Name == "Assemble":
+					assembled = true
+				case x.Name == "jobs" && sel.Sel.Name != "BrowserServer":
+					t.Errorf("%s: jobs.%s - 작업 모듈은 assemble 이 세웁니다", f, sel.Sel.Name)
+				}
+			}
+			return true
+		})
+	}
+	if !assembled {
+		t.Fatal("하네스는 에이전트를 assemble.Assemble 로 세워야 합니다")
 	}
 }
 
