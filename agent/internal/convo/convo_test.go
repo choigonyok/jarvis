@@ -7,8 +7,10 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -145,7 +147,10 @@ func TestEveryScenarioCanPassAndFail(t *testing.T) {
 // The tests put up what the agent puts up: the harness is put together by
 // the agent's own assembly (internal/assemble), and builds nothing of the
 // agent beside it - no module, board, gate, store or runner of its own. The
-// jobs module is named only for the shared browser's server name.
+// jobs module is named only for the shared browser's server name. Nor does it
+// rewire what the assembly returns: a setter on it (Runner.OnTool,
+// Proposals.OnDecide) or a field written over would swap or add to the
+// agent's own wiring. A hook the tests need is a field of assemble.Deps.
 func TestTheHarnessIsTheAgentsAssembly(t *testing.T) {
 	const agent = "github.com/choigonyok/jarvis/agent/internal/"
 	builds := []string{"module/", "claudecode", "adapter/", "core/", "tool", "suggest", "httpapi"}
@@ -155,6 +160,7 @@ func TestTheHarnessIsTheAgentsAssembly(t *testing.T) {
 	}
 	assembled := false
 	fset := token.NewFileSet()
+	asts := map[string]*ast.File{}
 	for _, f := range files {
 		if strings.HasSuffix(f, "_test.go") {
 			continue
@@ -163,6 +169,11 @@ func TestTheHarnessIsTheAgentsAssembly(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		asts[f] = parsed
+	}
+	held := assemblyNames(asts)
+	for _, f := range slices.Sorted(maps.Keys(asts)) {
+		parsed := asts[f]
 		for _, imp := range parsed.Imports {
 			path, _ := strconv.Unquote(imp.Path.Value)
 			if path == agent+"module/jobs" {
@@ -175,16 +186,31 @@ func TestTheHarnessIsTheAgentsAssembly(t *testing.T) {
 			}
 		}
 		ast.Inspect(parsed, func(n ast.Node) bool {
-			sel, ok := n.(*ast.SelectorExpr)
-			if !ok {
-				return true
-			}
-			if x, ok := sel.X.(*ast.Ident); ok {
-				switch {
-				case x.Name == "assemble" && sel.Sel.Name == "Assemble":
-					assembled = true
-				case x.Name == "jobs" && sel.Sel.Name != "BrowserServer":
-					t.Errorf("%s: jobs.%s - 작업 모듈은 assemble 이 세웁니다", f, sel.Sel.Name)
+			switch n := n.(type) {
+			case *ast.CallExpr:
+				if sel, ok := n.Fun.(*ast.SelectorExpr); ok && setter.MatchString(sel.Sel.Name) && held[rootName(sel.X)] {
+					t.Errorf("%s:%d: %s - 조립한 에이전트의 연결을 바꿉니다. 하네스에 필요한 것은 assemble.Deps 로 넘깁니다", f, fset.Position(n.Pos()).Line, sel.Sel.Name)
+				}
+			case *ast.AssignStmt:
+				if n.Tok == token.DEFINE {
+					break
+				}
+				for _, lhs := range n.Lhs {
+					switch lhs.(type) {
+					case *ast.SelectorExpr, *ast.IndexExpr:
+						if held[rootName(lhs)] {
+							t.Errorf("%s:%d: 조립한 에이전트의 것을 덮어씁니다. 하네스에 필요한 것은 assemble.Deps 로 넘깁니다", f, fset.Position(n.Pos()).Line)
+						}
+					}
+				}
+			case *ast.SelectorExpr:
+				if x, ok := n.X.(*ast.Ident); ok {
+					switch {
+					case x.Name == "assemble" && n.Sel.Name == "Assemble":
+						assembled = true
+					case x.Name == "jobs" && n.Sel.Name != "BrowserServer":
+						t.Errorf("%s: jobs.%s - 작업 모듈은 assemble 이 세웁니다", f, n.Sel.Name)
+					}
 				}
 			}
 			return true
@@ -192,6 +218,101 @@ func TestTheHarnessIsTheAgentsAssembly(t *testing.T) {
 	}
 	if !assembled {
 		t.Fatal("하네스는 에이전트를 assemble.Assemble 로 세워야 합니다")
+	}
+}
+
+// setter is a method that wires something in: an On or Set hook.
+var setter = regexp.MustCompile(`^(On|Set)[A-Z]`)
+
+// assemblyNames is the names the harness holds the assembly, or a part of
+// it, under: what assemble.Assemble or wire returned, and what is read off
+// one of those (agent.Runner, agent.Boards[path]) - assigned or declared
+// with var.
+func assemblyNames(files map[string]*ast.File) map[string]bool {
+	held := map[string]bool{}
+	for grew := true; grew; {
+		grew = false
+		for _, file := range files {
+			ast.Inspect(file, func(n ast.Node) bool {
+				var names, values []ast.Expr
+				switch n := n.(type) {
+				case *ast.AssignStmt:
+					names, values = n.Lhs, n.Rhs
+				case *ast.ValueSpec:
+					for _, name := range n.Names {
+						names = append(names, name)
+					}
+					values = n.Values
+				default:
+					return true
+				}
+				if len(names) == 0 {
+					return true
+				}
+				// One value for several names is a call's results: the
+				// first is what it returned (agent, err := wire(...)).
+				for i, value := range values {
+					to := names[0]
+					if len(values) == len(names) {
+						to = names[i]
+					}
+					name, ok := to.(*ast.Ident)
+					if !ok || name.Name == "_" || held[name.Name] || !assembly(value, held) {
+						continue
+					}
+					held[name.Name] = true
+					grew = true
+				}
+				return true
+			})
+		}
+	}
+	return held
+}
+
+// assembly is whether e is the assembly or read off it.
+func assembly(e ast.Expr, held map[string]bool) bool {
+	if call, ok := e.(*ast.CallExpr); ok {
+		switch fn := call.Fun.(type) {
+		case *ast.Ident:
+			if fn.Name == "wire" {
+				return true
+			}
+		case *ast.SelectorExpr:
+			if x, ok := fn.X.(*ast.Ident); ok && x.Name == "assemble" && fn.Sel.Name == "Assemble" {
+				return true
+			}
+		}
+	}
+	switch e.(type) {
+	case *ast.SelectorExpr, *ast.IndexExpr:
+		return held[rootName(e)]
+	}
+	return false
+}
+
+// rootName is the variable an expression is read off: agent for
+// agent.Boards[path].Stand(answer).
+func rootName(e ast.Expr) string {
+	for {
+		switch x := e.(type) {
+		case *ast.Ident:
+			return x.Name
+		case *ast.SelectorExpr:
+			e = x.X
+		case *ast.IndexExpr:
+			e = x.X
+		case *ast.CallExpr:
+			e = x.Fun
+		case *ast.ParenExpr:
+			e = x.X
+		case *ast.StarExpr:
+			e = x.X
+		case *ast.TypeAssertExpr:
+			e = x.X
+		default:
+			return ""
+		}
 	}
 }
 
