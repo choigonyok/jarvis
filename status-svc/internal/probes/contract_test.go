@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -117,10 +118,50 @@ func TestEveryServiceRowReadsTheContract(t *testing.T) {
 			contracts.mu.Lock()
 			contracts.byID = map[string]*cached{}
 			contracts.mu.Unlock()
-			if v := p.Run(context.Background()); v.State != c.state {
+			v := p.Run(context.Background())
+			if v.State != c.state {
 				t.Errorf("%s · %s: %+v", c.name, p.ID, v)
 			}
+			if c.code != http.StatusOK && !slices.Contains(v.Facts, "서비스가 밝힌 이유: 데이터베이스에 연결할 수 없습니다.") {
+				t.Errorf("%s · %s: 503 의 이유가 펼친 줄에 없습니다: %+v", c.name, p.ID, v)
+			}
 		}
+	}
+}
+
+// A 503 says why in the row's opened lines, on every row that reads the
+// contract, and the verdict is what it was: a service row is broken, a held
+// box unread, a delivery broken.
+func TestA503SaysWhyInTheOpenedRow(t *testing.T) {
+	why := "데이터베이스에 연결할 수 없습니다."
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		health.Write(w, http.StatusServiceUnavailable, health.Report{Error: why})
+	}))
+	defer srv.Close()
+	e := freshEnv()
+	e.InputURL = srv.URL
+	for _, c := range []struct {
+		probe   check.Probe
+		state   check.State
+		summary string
+	}{
+		{e.service("svc.vault", "로그인 정보 보관함", srv.URL, nil), check.Fail, "응답 코드 503."},
+		{e.loop("kakao.read", "수집", "카카오톡", srv.URL, "read", nil, "", ""), check.Fail, "응답 코드 503."},
+		{e.heldBox("spending.unparsed", "가계부", srv.URL, "", "", nil), check.Unknown, "격리함을 읽지 못했어요 (응답 코드 503)."},
+		{e.delivery("notify", "기록 → 알림", nil), check.Fail, "입구의 상태를 읽지 못했어요."},
+	} {
+		v := c.probe.Run(context.Background())
+		if v.State != c.state || v.Summary != c.summary || !slices.Contains(v.Facts, "서비스가 밝힌 이유: "+why) {
+			t.Errorf("%s: %+v", c.probe.ID, v)
+		}
+	}
+
+	quiet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer quiet.Close()
+	if v := freshEnv().service("svc.x", "x", quiet.URL, nil).Run(context.Background()); v.State != check.Fail || len(v.Facts) != 0 {
+		t.Fatalf("이유를 말하지 않은 503 에는 덧붙일 것이 없습니다: %+v", v)
 	}
 }
 

@@ -95,7 +95,7 @@ func (e *env) service(id, name, base string, deps []string, only ...string) chec
 			case f.err != nil:
 				return fail("응답이 없어요.")
 			case f.code != http.StatusOK:
-				return fail(fmt.Sprintf("응답 코드 %d.", f.code))
+				return said(f, fail(fmt.Sprintf("응답 코드 %d.", f.code)))
 			}
 			return judgeLoops(f, only, time.Now())
 		},
@@ -116,6 +116,16 @@ func (e *env) loop(id, group, name, base, loop string, deps []string, rule, fix 
 		return v
 	}
 	return p
+}
+
+// said is v with what a service that answered said of why it cannot work
+// (the contract's error, beside a 503), as a line of the opened row. The
+// verdict stays v's.
+func said(f fetched, v check.Verdict) check.Verdict {
+	if why := strings.TrimSpace(f.report.Error); why != "" {
+		v.Facts = append(v.Facts, "서비스가 밝힌 이유: "+clip(why, 200))
+	}
+	return v
 }
 
 // judgeLoops is the verdict on a service that answered: its loops, worst
@@ -176,7 +186,7 @@ func (e *env) heldBox(id, name, base, rule, fix string, deps []string) check.Pro
 			case f.err != nil:
 				return check.Verdict{State: check.Unknown, Summary: "서비스가 답하지 않아 격리함을 읽지 못했어요."}
 			case f.code != http.StatusOK:
-				return check.Verdict{State: check.Unknown, Summary: fmt.Sprintf("격리함을 읽지 못했어요 (응답 코드 %d).", f.code)}
+				return said(f, check.Verdict{State: check.Unknown, Summary: fmt.Sprintf("격리함을 읽지 못했어요 (응답 코드 %d).", f.code)})
 			}
 			return judgeHeld(f.report.Held, time.Now())
 		},
@@ -218,7 +228,7 @@ func (e *env) delivery(consumer, name string, deps []string) check.Probe {
 		Run: func(ctx context.Context) check.Verdict {
 			f := e.contract(ctx, e.InputURL+"/health")
 			if f.err != nil || f.code != http.StatusOK {
-				return fail("입구의 상태를 읽지 못했어요.")
+				return said(f, fail("입구의 상태를 읽지 못했어요."))
 			}
 			for _, l := range f.report.Loops {
 				if l.Name != "deliver:"+consumer {
