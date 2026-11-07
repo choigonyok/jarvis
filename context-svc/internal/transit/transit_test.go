@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -489,5 +491,56 @@ func TestStations(t *testing.T) {
 		if got := takes(r, c.trains); len(got) != c.want {
 			t.Errorf("%s %s: %+v", c.station, c.line, got)
 		}
+	}
+}
+
+// A feed is asked apart from its caller: one that has gone away or run out of
+// time hands get a context that is neither.
+func TestTheFeedIsAskedApartFromItsCaller(t *testing.T) {
+	f := New("", "")
+	gone, cancel := context.WithCancel(context.Background())
+	cancel()
+	late, stop := context.WithTimeout(context.Background(), -time.Second)
+	defer stop()
+	for i, ctx := range []context.Context{gone, late} {
+		v, err := f.remember(ctx, fmt.Sprint("apart:", i), time.Minute, func(ctx context.Context) (any, error) {
+			_, deadline := ctx.Deadline()
+			return ctx.Err() == nil && !deadline, nil
+		})
+		if err != nil || v != true {
+			t.Fatalf("%d: 피드에 묻는 컨텍스트가 호출한 쪽과 함께 끝났습니다", i)
+		}
+	}
+}
+
+// A caller that goes away while the feed is answering does not cut it short:
+// the answer lands for whoever asks next, who gets it without asking the feed
+// again - not a failure that was only the first caller leaving.
+func TestACallerLeavingDoesNotCutTheFeedShort(t *testing.T) {
+	var calls atomic.Int32
+	asked, answer := make(chan struct{}, 1), make(chan struct{})
+	f := feeds(t, func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		select {
+		case asked <- struct{}{}:
+		default:
+		}
+		<-answer
+		w.Write([]byte(`{"response":{"msgHeader":{"resultCode":0},"msgBody":{"busArrivalList":{"routeId":5,"routeName":"5","predictTime1":3,"flag":"RUN"}}}}`))
+	})
+	stop := Stop{Kind: Bus, Region: Gyeonggi, ID: "200000078"}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = f.Arrivals(ctx, stop)
+	}()
+	<-asked
+	cancel()
+	close(answer)
+	<-done
+	got, err := f.Arrivals(context.Background(), stop)
+	if err != nil || len(running(got)) != 1 || calls.Load() != 1 {
+		t.Fatalf("다음에 묻는 쪽은 피드가 한 답을 받아야 합니다: %+v %v (피드에 %d번 물음)", got, err, calls.Load())
 	}
 }

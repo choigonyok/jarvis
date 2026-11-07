@@ -83,14 +83,19 @@ func (f *Feeds) Configured() (buses, subway bool) {
 // remember asks get once per key while ttl lasts - a failure for half a
 // minute at most, so a failing feed is not asked again at once nor kept
 // failing for long.
-func (f *Feeds) remember(key string, ttl time.Duration, get func() (any, error)) (any, error) {
+//
+// get runs on ctx without its cancellation, bounded by the HTTP client's
+// timeout on each call: a caller that goes away or runs out of time does not
+// cut the feed short, so what the feed says still lands here for whoever
+// asks next, and a failure kept is always the feed's own.
+func (f *Feeds) remember(ctx context.Context, key string, ttl time.Duration, get func(context.Context) (any, error)) (any, error) {
 	f.mu.Lock()
 	if c, ok := f.cache[key]; ok && f.Now().Sub(c.at) < ttl && (c.err == nil || f.Now().Sub(c.at) < 30*time.Second) {
 		f.mu.Unlock()
 		return c.val, c.err
 	}
 	f.mu.Unlock()
-	v, err := get()
+	v, err := get(context.WithoutCancel(ctx))
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.cache == nil {
@@ -111,13 +116,17 @@ func (f *Feeds) remember(key string, ttl time.Duration, get func() (any, error))
 func (f *Feeds) Arrivals(ctx context.Context, s Stop) ([]Arrival, error) {
 	switch {
 	case s.Kind == Subway:
-		v, err := f.remember("subway:"+s.ID, 25*time.Second, func() (any, error) { return f.subway(ctx, s.ID) })
+		v, err := f.remember(ctx, "subway:"+s.ID, 25*time.Second, func(ctx context.Context) (any, error) {
+			return f.subway(ctx, s.ID)
+		})
 		if err != nil {
 			return nil, err
 		}
 		return v.([]Arrival), nil
 	case s.Region == Gyeonggi:
-		v, err := f.remember("gyeonggi:"+s.ID, 25*time.Second, func() (any, error) { return f.gyeonggiArrivals(ctx, s.ID) })
+		v, err := f.remember(ctx, "gyeonggi:"+s.ID, 25*time.Second, func(ctx context.Context) (any, error) {
+			return f.gyeonggiArrivals(ctx, s.ID)
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -159,7 +168,9 @@ func (f *Feeds) Lines(ctx context.Context, s Stop) ([]Line, error) {
 		slices.SortStableFunc(lines, func(a, b Line) int { return strings.Compare(a.ID, b.ID) })
 		return lines, nil
 	case s.Region == Gyeonggi:
-		v, err := f.remember("gyeonggi-lines:"+s.ID, time.Hour, func() (any, error) { return f.gyeonggiLines(ctx, s.ID) })
+		v, err := f.remember(ctx, "gyeonggi-lines:"+s.ID, time.Hour, func(ctx context.Context) (any, error) {
+			return f.gyeonggiLines(ctx, s.ID)
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -178,7 +189,7 @@ func (f *Feeds) Lines(ctx context.Context, s Stop) ([]Line, error) {
 // and stations (1.5 km) - nearest first.
 func (f *Feeds) Near(ctx context.Context, lat, lon float64) ([]Stop, error) {
 	key := fmt.Sprintf("near:%.3f,%.3f", lat, lon)
-	v, err := f.remember(key, 5*time.Minute, func() (any, error) {
+	v, err := f.remember(ctx, key, 5*time.Minute, func(ctx context.Context) (any, error) {
 		out, err := gather(
 			lookup{"버스 정류장", func() ([]Stop, error) { return f.gyeonggiNear(ctx, lat, lon) }},
 			lookup{"버스 정류장", func() ([]Stop, error) { return f.seoulNear(ctx, lat, lon) }},
@@ -214,7 +225,7 @@ var renamed = [][2]string{{"나라빌딩", "홍우빌딩"}}
 // (Like).
 func (f *Feeds) Search(ctx context.Context, q string) ([]Stop, error) {
 	q = strings.TrimSpace(q)
-	v, err := f.remember("search:"+q, 10*time.Minute, func() (any, error) {
+	v, err := f.remember(ctx, "search:"+q, 10*time.Minute, func(ctx context.Context) (any, error) {
 		out, err := f.named(ctx, spellings(q), q)
 		if len(out) == 0 {
 			var partly []Stop
@@ -785,7 +796,7 @@ type seoulAnswer struct {
 }
 
 func (f *Feeds) seoulStop(ctx context.Context, arsID string) (seoulAnswer, error) {
-	v, err := f.remember("seoul:"+arsID, 25*time.Second, func() (any, error) {
+	v, err := f.remember(ctx, "seoul:"+arsID, 25*time.Second, func(ctx context.Context) (any, error) {
 		list, err := f.seoulBus(ctx, "getStationByUid", url.Values{"arsId": {arsID}})
 		if err != nil {
 			return nil, err
