@@ -310,6 +310,9 @@ scripts/mini up                               # 맥미니로 보내고 docker co
 (cd edge && npx wrangler deploy)
 ```
 
+콘솔 빌드(`cf:build`)는 콘솔이 읽는 에이전트 구조체와 `web/src/lib/gen/` 이 같은지 먼저 보므로,
+빌드하는 맥에 Go 가 있어야 합니다([web/README.md](../web/README.md)의 "에이전트의 타입").
+
 `JARVIS_POSTGRES_PASSWORD` 가 없으면 compose 가 그 자리에서 멈춥니다. 기본값을
 두지 않은 것은 의도입니다 — 리포지터리에 적힌 비밀번호는 비밀번호가 아닙니다.
 서비스별 역할 비밀번호(`JARVIS_DB_PASSWORD_*`)도 마찬가지입니다.

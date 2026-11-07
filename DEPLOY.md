@@ -53,7 +53,9 @@
 - 맥북의 `next dev` 는 서비스 바인딩이 없어 공개 주소로 부르는데, 공개 주소는 콘솔 경로를 열지
   않는다 - 로컬 개발은 로컬 compose(`AGENT_URL=http://localhost:8080` 등)로 한다.
 - 콘솔 배포: `cd web && npm run cf:build && npm run cf:deploy`. 백엔드 주소는
-  `web/wrangler.jsonc` 의 `vars`(AGENT_URL 만 비밀).
+  `web/wrangler.jsonc` 의 `vars`(AGENT_URL 만 비밀). `cf:build` 는 먼저 `web/src/lib/gen/` 이 에이전트의
+  Go 구조체와 같은지 보므로(`npm run gen:types -- --check`, [web/README.md](web/README.md)) 빌드하는
+  맥에 Go 가 있어야 한다. 다르면 빌드가 멈추고, `npm run gen:types` 로 다시 쓴 것을 커밋한 뒤 올린다.
 - 편집 탭의 PhotoCraft(브라우저에서만 도는 이미지 편집기)는 콘솔의 정적 파일로 같이 올라간다. 빌드 전
   `prebuild` 가 `web/scripts/photocraft.mjs` 로 버전·SHA-256 을 고정한 릴리스를 `web/public/photocraft/`
   (깃 밖)에 받는다. 버전을 올릴 때는 그 스크립트의 버전과 해시(릴리스의 SHA256SUMS.txt)만 바꾼다.
