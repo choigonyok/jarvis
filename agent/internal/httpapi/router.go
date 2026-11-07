@@ -359,11 +359,20 @@ func (s *Server) getThread(w http.ResponseWriter, r *http.Request) {
 	}
 	// Proposals ride along: a client hydrating the thread needs the cards
 	// those turns point at, and one round trip is one less way to be stale.
+	// The live cards come too - every one waiting, drawn apart from any turn,
+	// and those decided lately, which the record lists and the pages above
+	// point at - but not every card there ever was.
+	var cards []string
+	for _, t := range turns {
+		if t.ProposalID != "" {
+			cards = append(cards, t.ProposalID)
+		}
+	}
 	body := map[string]any{
 		"turns":     turns,
 		"thinking":  thinking,
 		"hasMore":   hasMore,
-		"proposals": s.proposals.List(),
+		"proposals": s.proposals.ListWith(cards),
 		// What the turn under way has done so far, said in lines.
 		"steps": s.thread.Steps(),
 	}

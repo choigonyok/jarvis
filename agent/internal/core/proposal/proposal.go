@@ -113,9 +113,12 @@ var (
 // Store keeps every proposal raised here, and releases whoever is waiting on
 // a decision. One operator, one process, so a mutex and a slice are the whole
 // concurrency story; Persist adds a file behind them so the record of what was
-// decided outlives the container it was decided in.
+// decided outlives the container it was decided in, and an archive beside it
+// for the cards decided long ago (archive.go).
 type Store struct {
-	mu      sync.Mutex
+	mu sync.Mutex
+	// order and byID are the live cards: every one still waiting, and those
+	// decided lately.
 	order   []*Proposal
 	byID    map[string]*Proposal
 	waiters map[string]chan Decision
@@ -124,6 +127,20 @@ type Store struct {
 	// path is empty until Persist is called.
 	path string
 	log  *slog.Logger
+	// archivePath is where decided cards go once old; archived and
+	// archivedOrder hold them once read (nil until a lookup needs them), and
+	// archiveBroken says the file could not be read. archivedAt is the last
+	// pass that looked for cards to move there.
+	archivePath   string
+	archived      map[string]*Proposal
+	archivedOrder []*Proposal
+	archiveBroken bool
+	archivedAt    time.Time
+	// changed is when each card last changed in this process: a card stays
+	// live a while after it, whatever its age (settledFor).
+	changed map[string]time.Time
+	// now is the clock: time.Now, but for a test.
+	now func() time.Time
 	// onDecide hears every decision after it is recorded. Nobody blocks on a
 	// card raised in conversation; this is how its decision gets back to
 	// whoever has to act on it.
@@ -145,6 +162,10 @@ type file struct {
 // whenever it comes. So does a payment card - the request it stopped was
 // refused at once, and approving it only opens the host for a retry. Anything
 // else still pending is settled as rejected on the way in.
+//
+// Decided cards raised long enough ago move to the archive beside the file
+// on the way in, and once a day after (archive.go); the archive itself is
+// not read until a card in it is asked for.
 func (s *Store) Persist(path string, log *slog.Logger) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -155,6 +176,7 @@ func (s *Store) Persist(path string, log *slog.Logger) error {
 	}
 	s.order = saved.Proposals
 	s.seq = saved.Seq
+	now := s.now()
 	for _, p := range s.order {
 		// A suggestion waits too: approving it runs its action directly, with
 		// no turn that the restart could have cut short.
@@ -162,13 +184,17 @@ func (s *Store) Persist(path string, log *slog.Logger) error {
 			p.State = Rejected
 			p.Note = "에이전트가 재시작되어 만료되었습니다."
 			if p.DecidedAt == "" {
-				p.DecidedAt = time.Now().Format("15:04")
+				p.DecidedAt = now.Format("15:04")
 			}
 		}
 		s.byID[p.ID] = p
 	}
 	s.path = path
+	s.archivePath = archivePathFor(path)
 	s.log = log
+	if s.archiveLocked(now) {
+		s.writeLocked()
+	}
 	return nil
 }
 
@@ -178,6 +204,14 @@ func (s *Store) save() {
 	if s.path == "" {
 		return
 	}
+	if now := s.now(); now.Sub(s.archivedAt) >= archiveEvery {
+		s.archiveLocked(now)
+	}
+	s.writeLocked()
+}
+
+// writeLocked writes the live file.
+func (s *Store) writeLocked() {
 	if err := jsonfile.Save(s.path, file{Proposals: s.order, Seq: s.seq}); err != nil && s.log != nil {
 		s.log.Error("제안을 저장하지 못했습니다", "err", err)
 	}
@@ -187,7 +221,9 @@ func NewStore(b *bus.Bus) *Store {
 	return &Store{
 		byID:    map[string]*Proposal{},
 		waiters: map[string]chan Decision{},
+		changed: map[string]time.Time{},
 		bus:     b,
+		now:     time.Now,
 	}
 }
 
@@ -197,15 +233,17 @@ func NewStore(b *bus.Bus) *Store {
 func (s *Store) Open(p Proposal) (*Proposal, <-chan Decision) {
 	s.mu.Lock()
 	s.seq++
-	p.ID = fmt.Sprintf("p-%d-%d", time.Now().UnixMilli(), s.seq)
+	now := s.now()
+	p.ID = fmt.Sprintf("p-%d-%d", now.UnixMilli(), s.seq)
 	p.State = Pending
-	p.At = time.Now().Format("15:04")
+	p.At = now.Format("15:04")
 	if p.Origin == "" {
 		p.Origin = OriginChat
 	}
 	stored := &p
 	s.order = append(s.order, stored)
 	s.byID[stored.ID] = stored
+	s.changed[stored.ID] = now
 
 	// Buffered so a producer that walked away never blocks the deciding side.
 	ch := make(chan Decision, 1)
@@ -251,7 +289,7 @@ func (s *Store) DecideWhy(id string, d Decision, reason string) error {
 		return fmt.Errorf("invalid decision %q", d)
 	}
 	s.mu.Lock()
-	p, ok := s.byID[id]
+	p, _, ok := s.lookupLocked(id)
 	if !ok {
 		s.mu.Unlock()
 		return ErrNotFound
@@ -260,7 +298,9 @@ func (s *Store) DecideWhy(id string, d Decision, reason string) error {
 		s.mu.Unlock()
 		return ErrAlreadyDecided
 	}
-	p.DecidedAt = time.Now().Format("15:04")
+	now := s.now()
+	p.DecidedAt = now.Format("15:04")
+	s.changed[id] = now
 	if r := []rune(strings.TrimSpace(reason)); len(r) > 0 {
 		if len(r) > 500 {
 			r = r[:500]
@@ -302,7 +342,7 @@ func (s *Store) Revise(id string, a action.Action, c action.Card) error {
 // ReviseWith revises a form card and records the operator's edits.
 func (s *Store) ReviseWith(id string, a action.Action, c action.Card, edits map[string]string) error {
 	s.mu.Lock()
-	p, ok := s.byID[id]
+	p, _, ok := s.lookupLocked(id)
 	if !ok {
 		s.mu.Unlock()
 		return ErrNotFound
@@ -311,11 +351,13 @@ func (s *Store) ReviseWith(id string, a action.Action, c action.Card, edits map[
 		s.mu.Unlock()
 		return ErrAlreadyDecided
 	}
+	now := s.now()
 	p.Action = a
 	p.Card = c
 	if len(edits) > 0 {
-		p.Edits = append(p.Edits, Edit{At: time.Now().Format(time.RFC3339), Fields: edits})
+		p.Edits = append(p.Edits, Edit{At: now.Format(time.RFC3339), Fields: edits})
 	}
+	s.changed[id] = now
 	s.save()
 	s.mu.Unlock()
 	return nil
@@ -325,7 +367,7 @@ func (s *Store) ReviseWith(id string, a action.Action, c action.Card, edits map[
 // where it is: unlike ReviseWith nobody edited it, and it is said at once.
 func (s *Store) Refresh(id string, a action.Action, c action.Card, confidence float64) error {
 	s.mu.Lock()
-	p, ok := s.byID[id]
+	p, _, ok := s.lookupLocked(id)
 	if !ok {
 		s.mu.Unlock()
 		return ErrNotFound
@@ -335,6 +377,7 @@ func (s *Store) Refresh(id string, a action.Action, c action.Card, confidence fl
 		return ErrAlreadyDecided
 	}
 	p.Action, p.Card, p.Confidence = a, c, confidence
+	s.changed[id] = s.now()
 	s.save()
 	snapshot := *p
 	s.mu.Unlock()
@@ -423,11 +466,13 @@ func (s *Store) Settle(id string, state State, note string) {
 		s.mu.Unlock()
 		return
 	}
+	now := s.now()
 	p.State = state
 	p.Note = note
 	if p.DecidedAt == "" {
-		p.DecidedAt = time.Now().Format("15:04")
+		p.DecidedAt = now.Format("15:04")
 	}
+	s.changed[id] = now
 	s.save()
 	snapshot := *p
 	s.mu.Unlock()
@@ -444,9 +489,11 @@ func (s *Store) Abandon(id, note string) {
 		s.mu.Unlock()
 		return
 	}
+	now := s.now()
 	p.State = Rejected
 	p.Note = note
-	p.DecidedAt = time.Now().Format("15:04")
+	p.DecidedAt = now.Format("15:04")
+	s.changed[id] = now
 	delete(s.waiters, id)
 	s.save()
 	snapshot := *p
@@ -458,16 +505,20 @@ func (s *Store) Abandon(id, note string) {
 	}
 }
 
+// Get is the card of this id, live or archived: a turn of long ago still
+// shows its card, and a job still hears what became of the one it waited on.
 func (s *Store) Get(id string) (Proposal, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	p, ok := s.byID[id]
+	p, _, ok := s.lookupLocked(id)
 	if !ok {
 		return Proposal{}, false
 	}
 	return *p, true
 }
 
+// List is the live cards, oldest first: every one still waiting, and those
+// decided lately. An archived card is reached by its id (Get, ListWith).
 func (s *Store) List() []Proposal {
 	s.mu.Lock()
 	defer s.mu.Unlock()

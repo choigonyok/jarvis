@@ -371,18 +371,16 @@ func (e *Engine) closeCard(ev Event) {
 	}
 }
 
-// findCard is the card of a mind intent, if one was opened.
+// findCard is the card of a mind intent, if one was opened - archived too:
+// a card mind sends again for an intent decided long ago is not opened twice.
 func (e *Engine) findCard(intentID string) (proposal.Proposal, bool) {
-	for _, p := range e.proposals.List() {
+	return e.proposals.Find(func(p proposal.Proposal) bool {
 		if p.Action.Kind != mind.Approve && p.Action.Kind != mind.Undo {
-			continue
+			return false
 		}
 		var in mind.Input
-		if json.Unmarshal(p.Action.Input, &in) == nil && in.IntentID == intentID {
-			return p, true
-		}
-	}
-	return proposal.Proposal{}, false
+		return json.Unmarshal(p.Action.Input, &in) == nil && in.IntentID == intentID
+	})
 }
 
 // OnDecide hears every decision. Turning a mind card down is told to mind,
