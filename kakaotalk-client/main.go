@@ -11,6 +11,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/choigonyok/jarvis/gocommon/collect"
@@ -94,8 +95,8 @@ func main() {
 		}
 		go pub.Run(ctx)
 	}
-	// 평문 사본의 보존 기한(일). 0 이면 지우지 않는다.
-	go collect.Retain(ctx, svc.Int("RETAIN_DAYS", 730), st.Prune, func(n int64, err error) {
+	// 평문 사본의 보존 기한(일). 0 이하면 지우지 않는다.
+	go collect.Retain(ctx, retainDays(), st.Prune, func(n int64, err error) {
 		log.Info("보존 기한이 지난 메시지를 지웠습니다", "count", n, "err", err)
 	})
 
@@ -103,4 +104,14 @@ func main() {
 		Read: 10 * time.Second, Write: 30 * time.Second, Log: log}) != nil {
 		os.Exit(1)
 	}
+}
+
+// retainDays is RETAIN_DAYS, how many days the plain copy keeps a message:
+// any whole number as written - zero or below keeps everything
+// (collect.Retain) - and 730 when it is unset or not a whole number.
+func retainDays() int {
+	if n, err := strconv.ParseInt(os.Getenv("RETAIN_DAYS"), 10, 64); err == nil {
+		return int(n)
+	}
+	return 730
 }

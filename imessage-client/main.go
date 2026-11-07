@@ -12,6 +12,7 @@ import (
 	"cmp"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	_ "time/tzdata"
@@ -130,8 +131,8 @@ func main() {
 		go pub.Run(ctx)
 	}
 
-	// 보존 기한이 지난 메시지는 하루에 한 번 지운다(0 = 모두 둔다).
-	days := svc.Int("RETAIN_DAYS", 730)
+	// 보존 기한이 지난 메시지는 하루에 한 번 지운다(0 이하 = 모두 둔다).
+	days := retainDays()
 	go collect.Retain(ctx, days, st.Prune, func(n int64, err error) {
 		log.Info("보존 기한이 지난 메시지를 지웠습니다", "count", n, "days", days, "err", err)
 	})
@@ -141,4 +142,13 @@ func main() {
 		Read: 10 * time.Second, Write: 30 * time.Second, Log: log}) != nil {
 		os.Exit(1)
 	}
+}
+
+// retainDays is RETAIN_DAYS, how many days the copy keeps a message: 730
+// when it is unset, and anything else read as a whole number, with what is
+// not one read as zero. Zero or below keeps everything (collect.Retain), so a
+// value typed wrong deletes nothing.
+func retainDays() int {
+	days, _ := strconv.Atoi(svc.Env("RETAIN_DAYS", "730"))
+	return days
 }
