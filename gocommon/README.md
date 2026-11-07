@@ -80,3 +80,10 @@ These four are here under that rule, and stay:
 Each service's `go.mod` points at it with `replace ... => ../gocommon`, and its
 Docker build receives it as the extra build context `gocommon`
 (`additional_contexts` in docker-compose.yml).
+
+The repository root's `go.work` puts the thirteen Go modules in one
+workspace: an editor opened at the root resolves every module, a command run
+there takes several at once (`go test ./agent/... ./gocommon/...`), and
+`go work sync` brings every module to the same version of a dependency they
+share once one of them moves it. Docker builds send only a service's folder
+and `gocommon`, so each module builds alone there, as with `GOWORK=off`.

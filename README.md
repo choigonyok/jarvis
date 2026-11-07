@@ -232,6 +232,7 @@ ocr/                그림 속 글자 읽기 (Swift, 애플 Vision, 맥미니 �
 workspace/          에이전트 작업 폴더 - 기능별 스킬
 db/                 마이그레이션과 서비스별 역할
 gocommon/           Go 공통 코드 - 큐 · 기록 · 어댑터 감시 · 점검 · health · 봉인
+go.work             Go 모듈 13개를 한 작업 공간으로 (Docker 빌드는 모듈마다 따로)
 immich/             사진 서버 compose
 scripts/            맥미니 배포 · 백업 · DB 테스트 · 전환 하네스
 docs/               구조도 이미지

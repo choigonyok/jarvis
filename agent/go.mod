@@ -2,12 +2,12 @@ module github.com/choigonyok/jarvis/agent
 
 go 1.25.0
 
-require github.com/modelcontextprotocol/go-sdk v1.8.0
-
 require (
-	github.com/jackc/pgx/v5 v5.11.0 // indirect
-	golang.org/x/net v0.57.0 // indirect
+	github.com/jackc/pgx/v5 v5.11.0
+	github.com/modelcontextprotocol/go-sdk v1.8.0
 )
+
+require golang.org/x/net v0.58.0 // indirect
 
 require (
 	github.com/choigonyok/jarvis/gocommon v0.0.0
@@ -21,9 +21,8 @@ require (
 	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/text v0.40.0 // indirect
+	golang.org/x/text v0.41.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
-	golang.org/x/tools v0.48.0 // indirect
 )
 
 replace github.com/choigonyok/jarvis/gocommon => ../gocommon

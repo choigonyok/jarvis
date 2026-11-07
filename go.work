@@ -1,0 +1,17 @@
+go 1.25.0
+
+use (
+	./agent
+	./calendar-svc
+	./context-svc
+	./gocommon
+	./imessage-client
+	./input-svc
+	./kakaotalk-client
+	./mind-svc
+	./output-svc
+	./photos-svc
+	./search-svc
+	./status-svc
+	./vault-svc
+)

@@ -9,6 +9,8 @@ require (
 	golang.org/x/text v0.41.0
 )
 
+require github.com/stretchr/testify v1.11.1 // indirect
+
 require (
 	github.com/andybalholm/cascadia v1.3.3 // indirect
 	github.com/choigonyok/jarvis/gocommon v0.0.0
