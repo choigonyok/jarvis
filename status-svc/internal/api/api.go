@@ -3,11 +3,11 @@
 package api
 
 import (
-	"crypto/subtle"
-	"encoding/json"
 	"net/http"
 	"time"
 
+	"github.com/choigonyok/jarvis/gocommon/health"
+	"github.com/choigonyok/jarvis/gocommon/svc"
 	"github.com/choigonyok/jarvis/status-svc/internal/check"
 )
 
@@ -20,8 +20,10 @@ func New(r *check.Runner, token string) *Server { return &Server{runner: r, toke
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	// The stack's contract (gocommon/health) like every service's: up, and
+	// no loop of its own for anyone to watch - this is the one watching.
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		health.Write(w, http.StatusOK, health.Report{})
 	})
 	mux.HandleFunc("GET /status", s.auth(s.status))
 	// Runs every probe now (slow ones respect their floor) and answers with
@@ -30,15 +32,7 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if s.token != "" && subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+s.token)) != 1 {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "인증이 필요합니다."})
-			return
-		}
-		next(w, r)
-	}
-}
+func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc { return svc.Guard(s.token, next) }
 
 type response struct {
 	check.Snapshot
@@ -46,17 +40,10 @@ type response struct {
 }
 
 func (s *Server) status(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, response{Snapshot: s.runner.Snapshot(), Now: time.Now()})
+	svc.WriteJSON(w, http.StatusOK, response{Snapshot: s.runner.Snapshot(), Now: time.Now()})
 }
 
 func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
 	s.runner.Refresh(r.Context())
 	s.status(w, r)
-}
-
-func writeJSON(w http.ResponseWriter, code int, v any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(v)
 }

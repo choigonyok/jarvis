@@ -69,6 +69,61 @@ func TestAServiceIsJudgedByItsLoops(t *testing.T) {
 	}
 }
 
+// Every service's row reads its /health in the contract: what it says of
+// itself rides along unjudged, and a 503 with its reason is broken - the
+// same verdicts a body without the contract's fields (a bare key, an "ok" flag)
+// get.
+func TestEveryServiceRowReadsTheContract(t *testing.T) {
+	code, body := http.StatusOK, ""
+	stack := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/health") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(code)
+		_, _ = w.Write([]byte(body))
+	}))
+	defer stack.Close()
+	u := stack.URL
+	cfg := Config{KakaoURL: u, SpendingURL: u + "/api/spending", AssetsURL: u, CalendarURL: u, AgentURL: u, MindURL: u,
+		MemoryURL: u, ContextURL: u, VaultURL: u, InputURL: u, NotifyURL: u, PhotosURL: u, JobsURL: u + "/api/jobs",
+		IMessageURL: u, SearchURL: u}
+	var rows []check.Probe
+	for _, p := range All(cfg) {
+		// Immich is not ours: it is asked its own ping.
+		if strings.HasPrefix(p.ID, "svc.") && p.ID != "svc.immich" {
+			rows = append(rows, p)
+		}
+	}
+	if len(rows) < 15 {
+		t.Fatalf("서비스 줄이 %d개뿐입니다", len(rows))
+	}
+	for _, c := range []struct {
+		name  string
+		code  int
+		body  string
+		state check.State
+	}{
+		{"계약", http.StatusOK, `{"status":"ok"}`, check.OK},
+		{"보관함의 키", http.StatusOK, `{"status":"ok","about":{"key":"257335f4"}}`, check.OK},
+		{"웹 찾기의 설정", http.StatusOK, `{"status":"ok","about":{"configured":true,"naver":true,"ocr":false}}`, check.OK},
+		{"키만 있는 보관함", http.StatusOK, `{"status":"ok","key":"257335f4"}`, check.OK},
+		{"ok 만 있는 웹 찾기", http.StatusOK, `{"ok":true,"configured":false,"naver":false,"ocr":false}`, check.OK},
+		{"데이터베이스 없음", http.StatusServiceUnavailable, `{"status":"down","error":"데이터베이스에 연결할 수 없습니다."}`, check.Fail},
+	} {
+		code, body = c.code, c.body
+		for _, p := range rows {
+			contracts.mu.Lock()
+			contracts.byID = map[string]*cached{}
+			contracts.mu.Unlock()
+			if v := p.Run(context.Background()); v.State != c.state {
+				t.Errorf("%s · %s: %+v", c.name, p.ID, v)
+			}
+		}
+	}
+}
+
 // What a service set aside is a warning row of its own, with what and why,
 // and where a person deals with it.
 func TestAHeldBoxIsAWarning(t *testing.T) {

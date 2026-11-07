@@ -5,15 +5,9 @@
 package main
 
 import (
-	"context"
-	"errors"
-	"log/slog"
-	"net/http"
 	"net/url"
 	"os"
-	"os/signal"
 	"sync"
-	"syscall"
 	"time"
 
 	_ "time/tzdata"
@@ -21,64 +15,55 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/choigonyok/jarvis/gocommon/notify"
+	"github.com/choigonyok/jarvis/gocommon/svc"
+	"github.com/choigonyok/jarvis/gocommon/svc/pg"
 	"github.com/choigonyok/jarvis/status-svc/internal/api"
 	"github.com/choigonyok/jarvis/status-svc/internal/check"
 	"github.com/choigonyok/jarvis/status-svc/internal/probes"
 )
 
 func main() {
-	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	// An empty token would leave every route open to anything on the
-	// network. Only a local trial may run that way, and must say so.
-	if os.Getenv("API_TOKEN") == "" && os.Getenv("API_TOKEN_OPTIONAL") != "true" {
-		log.Error("API_TOKEN 이 비어 있습니다. 로컬 시험이라면 API_TOKEN_OPTIONAL=true")
-		os.Exit(1)
-	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	log := svc.Logger()
+	token := svc.Token(log)
+	ctx, stop := svc.Signals()
 	defer stop()
 
 	// The database is one of the things being watched, so failing to reach it
 	// is a verdict, not a reason to exit. The pool connects lazily.
 	var pool *pgxpool.Pool
 	if dsn := os.Getenv("DATABASE_URL"); dsn != "" {
-		cfg, err := pgxpool.ParseConfig(dsn)
-		if err != nil {
+		var err error
+		if pool, err = pg.Lazy(ctx, dsn, 3); err != nil {
 			log.Error("DATABASE_URL 을 해석하지 못했습니다", "err", err)
-			os.Exit(1)
-		}
-		cfg.MaxConns = 3
-		if pool, err = pgxpool.NewWithConfig(ctx, cfg); err != nil {
-			log.Error("데이터베이스 풀을 만들지 못했습니다", "err", err)
 			os.Exit(1)
 		}
 		defer pool.Close()
 	}
 
-	token := os.Getenv("API_TOKEN")
 	cfg := probes.Config{
 		Token:       token,
-		KakaoURL:    getenv("KAKAOTALK_URL", "http://localhost:8090"),
-		SpendingURL: getenv("SPENDING_URL", "http://localhost:8102/api/spending"),
-		AssetsURL:   getenv("ASSETS_URL", "http://localhost:8092"),
-		CalendarURL: getenv("CALENDAR_URL", "http://localhost:8093"),
-		AgentURL:    getenv("AGENT_URL", "http://localhost:8080"),
-		MindURL:     getenv("MIND_URL", "http://localhost:8102"),
-		MemoryURL:   getenv("MEMORY_URL", "http://localhost:8100"),
-		ContextURL:  getenv("CONTEXT_URL", "http://localhost:8103"),
-		VaultURL:    getenv("VAULT_URL", "http://localhost:8105"),
-		InputURL:    getenv("INPUT_URL", "http://localhost:8101"),
+		KakaoURL:    svc.Env("KAKAOTALK_URL", "http://localhost:8090"),
+		SpendingURL: svc.Env("SPENDING_URL", "http://localhost:8102/api/spending"),
+		AssetsURL:   svc.Env("ASSETS_URL", "http://localhost:8092"),
+		CalendarURL: svc.Env("CALENDAR_URL", "http://localhost:8093"),
+		AgentURL:    svc.Env("AGENT_URL", "http://localhost:8080"),
+		MindURL:     svc.Env("MIND_URL", "http://localhost:8102"),
+		MemoryURL:   svc.Env("MEMORY_URL", "http://localhost:8100"),
+		ContextURL:  svc.Env("CONTEXT_URL", "http://localhost:8103"),
+		VaultURL:    svc.Env("VAULT_URL", "http://localhost:8105"),
+		InputURL:    svc.Env("INPUT_URL", "http://localhost:8101"),
 		// NOTIFY_URL is where this service's own alerts go (input-svc).
-		NotifyURL:     getenv("NOTIFY_SVC_URL", "http://localhost:8097"),
-		PhotosURL:     getenv("PHOTOS_URL", "http://localhost:8107"),
-		JobsURL:       getenv("JOBS_URL", "http://localhost:8102/api/jobs"),
-		IMessageURL:   getenv("IMESSAGE_URL", "http://localhost:8099"),
-		SearchURL:     getenv("SEARCH_URL", "http://localhost:8104"),
-		AgentGuestURL: getenv("AGENT_GUEST_URL", "http://localhost:8081"),
-		ImmichURL:     getenv("IMMICH_URL", "http://localhost:2283"),
-		TTSURL:        getenv("TTS_URL", "http://localhost:8106"),
-		OCRURL:        getenv("OCR_URL", "http://localhost:8107"),
-		FalkorAddr:    getenv("FALKORDB_ADDR", "localhost:6379"),
-		BrowserAddr:   getenv("BROWSER_ADDR", "localhost:8931"),
+		NotifyURL:     svc.Env("NOTIFY_SVC_URL", "http://localhost:8097"),
+		PhotosURL:     svc.Env("PHOTOS_URL", "http://localhost:8107"),
+		JobsURL:       svc.Env("JOBS_URL", "http://localhost:8102/api/jobs"),
+		IMessageURL:   svc.Env("IMESSAGE_URL", "http://localhost:8099"),
+		SearchURL:     svc.Env("SEARCH_URL", "http://localhost:8104"),
+		AgentGuestURL: svc.Env("AGENT_GUEST_URL", "http://localhost:8081"),
+		ImmichURL:     svc.Env("IMMICH_URL", "http://localhost:2283"),
+		TTSURL:        svc.Env("TTS_URL", "http://localhost:8106"),
+		OCRURL:        svc.Env("OCR_URL", "http://localhost:8107"),
+		FalkorAddr:    svc.Env("FALKORDB_ADDR", "localhost:6379"),
+		BrowserAddr:   svc.Env("BROWSER_ADDR", "localhost:8931"),
 		DB:            pool,
 	}
 	runner := check.NewRunner(probes.Groups, probes.All(cfg), log)
@@ -150,33 +135,15 @@ func main() {
 	}
 	go runner.Run(ctx)
 
-	addr := getenv("LISTEN_ADDR", ":8096")
-	srv := &http.Server{
-		Addr:         addr,
-		Handler:      api.New(runner, token).Handler(),
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 120 * time.Second, // /refresh waits for the slow probes
+	if svc.Serve(ctx, svc.Server{
+		Name: "status-svc", Addr: svc.Env("LISTEN_ADDR", ":8096"), Log: log,
+		Handler: api.New(runner, token).Handler(),
+		Read:    10 * time.Second,
+		Write:   120 * time.Second, // /refresh waits for the slow probes
+	}) != nil {
+		os.Exit(1)
 	}
-	go func() {
-		log.Info("status-svc 가 듣기 시작했습니다", "addr", addr)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Error("HTTP 서버", "err", err)
-			stop()
-		}
-	}()
-
-	<-ctx.Done()
-	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_ = srv.Shutdown(shutdown)
 }
 
 // failHold is how long a probe has to stay broken before it is pushed.
 const failHold = 5 * time.Minute
-
-func getenv(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
-}
