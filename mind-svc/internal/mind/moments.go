@@ -22,20 +22,6 @@ import (
 // assistant's own judgements that are worth more at such a moment than at
 // once - a rebalance for the evening at home, the rain at the door.
 
-// Location events (context-svc), as the operator arrives at a region or
-// leaves it - and as the guest's phone does at the guest's own regions.
-
-const (
-	LocationEnter      = "location.enter"
-	LocationLeave      = "location.leave"
-	LocationGuestEnter = "location.guest.enter"
-	LocationGuestLeave = "location.guest.leave"
-	// LocationFix is where the operator's phone is, as it reports - at most
-	// about a minute apart (context-svc): what a reminder for a place on the
-	// map, which no region marks, goes by.
-	LocationFix = "location.fix"
-)
-
 // HereLatest is where the phones are, from what context-svc last said.
 type HereLatest struct{ Store store.Store }
 
@@ -52,22 +38,13 @@ func (h HereLatest) read(ctx context.Context, kind string) ([]moments.Visit, err
 
 // Visits is where the operator is now: the open visits.
 func (h HereLatest) Visits(ctx context.Context) ([]moments.Visit, error) {
-	return h.read(ctx, sensorNow)
+	return h.read(ctx, model.KindContextNow)
 }
 
 // GuestVisits is where the guest's phone is now: the guest's own regions.
 func (h HereLatest) GuestVisits(ctx context.Context) ([]moments.Visit, error) {
-	return h.read(ctx, sensorNowGuest)
+	return h.read(ctx, model.KindContextNowGuest)
 }
-
-// The adapters' records this package reads the latest of (sensor imports
-// this package, so the names are repeated here).
-const (
-	sensorNow      = "context.now"
-	sensorNowGuest = "context.now.guest"
-	sensorRegions  = "context.regions"
-	sensorTravel   = "context.travel"
-)
 
 // say is a reminder's moment come. The operator's own go out in their words
 // as remind.asked, which rings even in quiet hours: they asked for this
@@ -75,13 +52,13 @@ const (
 func (m *Mind) say(ctx context.Context, r moments.Reminder) (moments.Said, error) {
 	if r.Source == moments.Rebalance {
 		wording, _ := json.Marshal(map[string]string{"title": r.Text, "body": r.Body})
-		in, err := m.portfolioBand(ctx, obs.Observation{Source: "assets", Type: AssetsBand, Key: r.Ref, Notify: wording}, true)
+		in, err := m.portfolioBand(ctx, obs.Observation{Source: "assets", Type: model.KindAssetsBand, Key: r.Ref, Notify: wording}, true)
 		if err != nil {
 			return moments.Said{}, err
 		}
 		return outcome(in), nil
 	}
-	kind := "remind.asked"
+	kind := model.KindRemindAsked
 	if r.Source == moments.Lists {
 		// mind's own: what is left on a list, the evening before its day -
 		// and nothing at all when nothing is left, or the list was closed.
@@ -92,7 +69,7 @@ func (m *Mind) say(ctx context.Context, r moments.Reminder) (moments.Said, error
 		case len(l.Left()) == 0:
 			return moments.Said{How: moments.HowSilent, Why: "다 함"}, nil
 		}
-		kind = "remind.list"
+		kind = model.KindRemindList
 	}
 	why := r.Why(m.Opts.Loc)
 	if now := m.Opts.Now(); r.SentBy == moments.ByTime && r.At != nil && now.Sub(*r.At) > 10*time.Minute {
@@ -158,14 +135,14 @@ func (m *Mind) onLocation(ctx context.Context, o obs.Observation) error {
 		return nil
 	}
 	move := moments.Arrive
-	if o.Type == LocationLeave || o.Type == LocationGuestLeave {
+	if o.Type == model.KindLocationLeave || o.Type == model.KindLocationGuestLeave {
 		move = moments.Leave
 	}
 	at := o.OccurredAt
 	if at.IsZero() {
 		at = m.Opts.Now()
 	}
-	if o.Type == LocationGuestEnter || o.Type == LocationGuestLeave {
+	if o.Type == model.KindLocationGuestEnter || o.Type == model.KindLocationGuestLeave {
 		if m.Moments == nil {
 			return nil
 		}

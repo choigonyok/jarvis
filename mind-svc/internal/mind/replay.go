@@ -81,7 +81,7 @@ func (m *Mind) Replay(ctx context.Context, client llm.Client, after int64, limit
 	}
 	for _, o := range obsList {
 		rep.Observations++
-		if o.Type != obs.MessageObserved {
+		if o.Type != model.KindMessageObserved {
 			continue
 		}
 		msg, err := m.messageOf(ctx, o)

@@ -78,7 +78,7 @@ func (f *momentsFixture) intents(topic string) []model.Intent {
 
 func band(title, body, key string) obs.Observation {
 	wording, _ := json.Marshal(map[string]string{"title": title, "body": body})
-	return obs.Observation{Source: "assets", Type: AssetsBand, Key: key, Notify: wording}
+	return obs.Observation{Source: "assets", Type: model.KindAssetsBand, Key: key, Notify: wording}
 }
 
 // A portfolio out of band in the morning is brought up on coming home after
@@ -103,11 +103,11 @@ func TestBandWaitsForComingHome(t *testing.T) {
 	f.clk.Pin(f.at(17, 0))
 	f.tick(t) // not home yet
 	f.clk.Pin(f.at(18, 40))
-	f.move(t, LocationEnter, "회사", "work")
+	f.move(t, model.KindLocationEnter, "회사", "work")
 	if ins := f.intents("rebalance"); len(ins) != 0 {
 		t.Fatalf("집에 오기 전에 물었습니다: %+v", ins)
 	}
-	f.move(t, LocationEnter, "집", "home")
+	f.move(t, model.KindLocationEnter, "집", "home")
 	ins := f.intents("rebalance")
 	if len(ins) != 1 || ins[0].Tier != "now" || !strings.Contains(ins[0].Body, "코인: 지금 30%") {
 		t.Fatalf("집에 오면 지금 알려야 합니다(저녁 요약 아님): %+v", ins)
@@ -215,11 +215,11 @@ func TestRainAtTheDoor(t *testing.T) {
 		Hours: map[string][]weather.Hour{"": append(hours(20, 15, 16, 17), hours(21)...)},
 	}}
 	f := newMomentsFixture(t, time.Date(2026, 10, 20, 8, 10, 0, 0, seoul), sky)
-	f.move(t, LocationLeave, "회사", "work")
+	f.move(t, model.KindLocationLeave, "회사", "work")
 	if ins := f.intents("rain.out"); len(ins) != 0 {
 		t.Fatalf("집이 아닌 곳을 나설 때는: %+v", ins)
 	}
-	f.move(t, LocationLeave, "집", "home")
+	f.move(t, model.KindLocationLeave, "집", "home")
 	ins := f.intents("rain.out")
 	if len(ins) != 1 || ins[0].Title != "15~18시 비 · 우산 챙기세요" || ins[0].Tier != "now" || ins[0].Moment != "rain" {
 		t.Fatalf("집을 나설 때 비 소식: %+v", ins)
@@ -229,7 +229,7 @@ func TestRainAtTheDoor(t *testing.T) {
 		t.Fatalf("remind.rain 으로: %+v", ns)
 	}
 	f.clk.Pin(f.at(12, 0))
-	f.move(t, LocationLeave, "집", "home")
+	f.move(t, model.KindLocationLeave, "집", "home")
 	if ins := f.intents("rain.out"); len(ins) != 1 {
 		t.Fatalf("하루 한 번만: %+v", ins)
 	}
@@ -245,13 +245,13 @@ func TestRainAtTheDoor(t *testing.T) {
 
 	// A dry day.
 	f = newMomentsFixture(t, time.Date(2026, 10, 21, 8, 10, 0, 0, seoul), sky)
-	f.move(t, LocationLeave, "집", "home")
+	f.move(t, model.KindLocationLeave, "집", "home")
 	if ins := f.intents("rain.out"); len(ins) != 0 {
 		t.Fatalf("맑은 날: %+v", ins)
 	}
 	// At night, a leaving is more likely the phone drifting.
 	f = newMomentsFixture(t, time.Date(2026, 10, 20, 3, 0, 0, 0, seoul), sky)
-	f.move(t, LocationLeave, "집", "home")
+	f.move(t, model.KindLocationLeave, "집", "home")
 	if ins := f.intents("rain.out"); len(ins) != 0 {
 		t.Fatalf("밤에는: %+v", ins)
 	}
@@ -292,12 +292,12 @@ func TestGuestReminders(t *testing.T) {
 	}
 
 	f.clk.Pin(f.at(18, 0))
-	f.move(t, LocationEnter, "집", "home")
+	f.move(t, model.KindLocationEnter, "집", "home")
 	if ns := f.notice.All(); len(ns) != 1 || ns[0].Title != "우산 말리기" || ns[0].Audience != "" {
 		t.Fatalf("운영자가 집에 오면 운영자의 것만: %+v", ns)
 	}
 	f.clk.Pin(f.at(18, 30))
-	f.move(t, LocationGuestEnter, "집", "home")
+	f.move(t, model.KindLocationGuestEnter, "집", "home")
 	ns := f.notice.All()
 	if len(ns) != 2 || ns[1].Title != "학원 가방 챙기기" || ns[1].Audience != "guest" || ns[1].Data["who"] != "guest" {
 		t.Fatalf("손님이 집에 오면 손님의 것이 손님에게: %+v", ns)

@@ -59,7 +59,7 @@ func TestAReminderGoesByTheStream(t *testing.T) {
 		t.Fatalf("레인이 말하기 전에 말했습니다: %s", got.Status)
 	}
 	raw, _ := json.Marshal((*sent)[0])
-	if err := m.TimerFired(ctx, queue.Message{Kind: obs.TimerFired, Payload: raw}); err != nil {
+	if err := m.TimerFired(ctx, queue.Message{Kind: model.KindTimerFired, Payload: raw}); err != nil {
 		t.Fatal(err)
 	}
 	got, _ = m.Moments.St.Reminder(ctx, r.ID)
@@ -67,7 +67,7 @@ func TestAReminderGoesByTheStream(t *testing.T) {
 		t.Fatalf("%+v", got)
 	}
 	// Delivered again it is not said again.
-	if err := m.TimerFired(ctx, queue.Message{Kind: obs.TimerFired, Payload: raw}); err != nil {
+	if err := m.TimerFired(ctx, queue.Message{Kind: model.KindTimerFired, Payload: raw}); err != nil {
 		t.Fatal(err)
 	}
 }

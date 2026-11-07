@@ -244,7 +244,7 @@ func New(o Options) *Mind {
 // Handle is the loop's entry: one observation from the log.
 func (m *Mind) Handle(ctx context.Context, o obs.Observation) error {
 	switch o.Type {
-	case obs.MessageObserved:
+	case model.KindMessageObserved:
 		var ref obs.MessageRef
 		if err := json.Unmarshal(o.Data, &ref); err != nil {
 			return nil // not ours to fix; skip it
@@ -260,15 +260,15 @@ func (m *Mind) Handle(ctx context.Context, o obs.Observation) error {
 		if err := m.reply(ctx, msg); err != nil {
 			m.Opts.Logger.Warn("답장 상황을 기록하지 못했습니다", "err", err)
 		}
-	case obs.ActionExecuted, obs.ActionUndone:
+	case model.KindActionExecuted, model.KindActionUndone:
 		return m.Actions.Handle(ctx, o)
-	case AssetsBand:
+	case model.KindAssetsBand:
 		return m.band(ctx, o)
-	case LocationEnter, LocationLeave, LocationGuestEnter, LocationGuestLeave:
+	case model.KindLocationEnter, model.KindLocationLeave, model.KindLocationGuestEnter, model.KindLocationGuestLeave:
 		return m.onLocation(ctx, o)
-	case LocationFix:
+	case model.KindLocationFix:
 		return m.onFix(ctx, o)
-	case obs.OccurrenceObserved:
+	case model.KindOccurrenceObserved:
 		var ref obs.OccurrenceRef
 		if err := json.Unmarshal(o.Data, &ref); err != nil {
 			return nil
@@ -387,7 +387,7 @@ func Observe(ctx context.Context, st store.Store, log obs.Log, msg model.Message
 	}
 	data, _ := json.Marshal(obs.MessageRef{Ref: msg.Ref, Room: msg.Room})
 	return log.Append(ctx, obs.Observation{
-		Source: msg.Source, Type: obs.MessageObserved, Subject: msg.Room,
+		Source: msg.Source, Type: model.KindMessageObserved, Subject: msg.Room,
 		Data: data, Key: ObservedKey(msg.Ref), OccurredAt: msg.SentAt,
 	})
 }
@@ -405,7 +405,7 @@ func (m *Mind) Observe(ctx context.Context, o model.Occurrence) error {
 	}
 	data, _ := json.Marshal(obs.OccurrenceRef{ID: o.ID, Kind: o.Kind})
 	return m.Opts.Log.Append(ctx, obs.Observation{
-		Source: strings.SplitN(o.ID, ":", 2)[0], Type: obs.OccurrenceObserved, Subject: o.ID,
+		Source: strings.SplitN(o.ID, ":", 2)[0], Type: model.KindOccurrenceObserved, Subject: o.ID,
 		Data: data, Key: "occurrence:" + o.ID + ":" + o.At.UTC().Format(time.RFC3339), OccurredAt: o.At,
 	})
 }

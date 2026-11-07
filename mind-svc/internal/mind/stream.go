@@ -24,7 +24,7 @@ func EmitTimer(l obs.Log) func(ctx context.Context, t model.Timer) error {
 			return err
 		}
 		return l.Append(ctx, obs.Observation{
-			Source: "mind", Type: obs.TimerFired, Subject: t.Skill + ":" + t.EntityID, Data: data,
+			Source: "mind", Type: model.KindTimerFired, Subject: t.Skill + ":" + t.EntityID, Data: data,
 			Key: fmt.Sprintf("timer:%d:%d", t.ID, t.FireAt.Unix()), OccurredAt: t.FireAt,
 		})
 	}

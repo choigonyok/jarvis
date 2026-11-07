@@ -567,7 +567,7 @@ func (e EventsNotifier) Notify(ctx context.Context, n Notice) {
 func (e EventsNotifier) Send(ctx context.Context, n Notice) error {
 	kind := n.Kind
 	if kind == "" {
-		kind = "mind.notice"
+		kind = model.KindMindNotice
 	}
 	return e.Log.AppendNotice(ctx, kind, n)
 }

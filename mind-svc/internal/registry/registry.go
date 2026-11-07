@@ -20,6 +20,8 @@ import (
 	"sync/atomic"
 	"time"
 	"unicode"
+
+	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 )
 
 // Sections of the table.
@@ -195,7 +197,7 @@ type Row struct {
 
 // locked are the kinds of mind's own loop: what comes back from it is read
 // deterministically, whoever edits the table.
-var locked = []string{"intent.answer", "execute.result", "manual.edit", "payment.requested", "timer.fired", "registry.changed"}
+var locked = []string{model.KindIntentAnswer, model.KindExecuteResult, model.KindManualEdit, model.KindPaymentRequested, model.KindTimerFired, model.KindRegistryChanged}
 
 // Snapshot is the table as it stands, whole. It is never changed: a new one
 // replaces it.

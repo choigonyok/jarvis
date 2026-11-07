@@ -20,7 +20,7 @@ func TestMindHearsTheOperatorsState(t *testing.T) {
 	ctx := context.Background()
 	say := func(state string) {
 		t.Helper()
-		if err := m.StateSaid(ctx, queue.Message{Kind: KindState, Payload: []byte(`{"state":` + state + `}`)}); err != nil {
+		if err := m.StateSaid(ctx, queue.Message{Kind: model.KindContextState, Payload: []byte(`{"state":` + state + `}`)}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -43,7 +43,7 @@ func TestMindHearsTheOperatorsState(t *testing.T) {
 	if m.Busy() != "" {
 		t.Fatal(m.Busy())
 	}
-	if err := m.StateSaid(ctx, queue.Message{Kind: KindState, Payload: []byte(`잘못`)}); err == nil {
+	if err := m.StateSaid(ctx, queue.Message{Kind: model.KindContextState, Payload: []byte(`잘못`)}); err == nil {
 		t.Fatal("읽지 못하는 것은 받지 않습니다")
 	}
 }
@@ -71,13 +71,13 @@ func TestAnHourAnsweredLateIsBusy(t *testing.T) {
 	if why := m.BusyOrSlow(); !strings.Contains(why, "15시") {
 		t.Fatalf("오후 세 시는 답이 늦는 때입니다: %q", why)
 	}
-	if err := m.StateSaid(ctx, queue.Message{Kind: KindState, Payload: []byte(`{"state":{"driving":true}}`)}); err != nil {
+	if err := m.StateSaid(ctx, queue.Message{Kind: model.KindContextState, Payload: []byte(`{"state":{"driving":true}}`)}); err != nil {
 		t.Fatal(err)
 	}
 	if why := m.BusyOrSlow(); why != "운전 중" {
 		t.Fatalf("들은 상태가 먼저입니다: %q", why)
 	}
-	if err := m.StateSaid(ctx, queue.Message{Kind: KindState, Payload: []byte(`{"state":{}}`)}); err != nil {
+	if err := m.StateSaid(ctx, queue.Message{Kind: model.KindContextState, Payload: []byte(`{"state":{}}`)}); err != nil {
 		t.Fatal(err)
 	}
 	clk.Pin(time.Date(2026, 11, 4, 20, 30, 0, 0, seoul))

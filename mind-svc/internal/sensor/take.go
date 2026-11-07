@@ -8,35 +8,7 @@ import (
 
 	"github.com/choigonyok/jarvis/gocommon/queue"
 	"github.com/choigonyok/jarvis/mind-svc/internal/mind"
-)
-
-// What the adapters leave in the stream. mind does not go to the calendar,
-// the phones or the accounts itself: each reads its own outside and leaves a
-// record when what it read changed (gocommon/watch), and this is the lane
-// that takes them - by rule, no model.
-const (
-	KindCalendarNear = "calendar.near"
-	KindCalendarYear = "calendar.year"
-	KindVisits       = "context.visits"
-	KindHoldings     = "assets.holdings"
-	// Those only kept, for whoever asks: where the phones are, the regions,
-	// the ways taken.
-	KindNow      = "context.now"
-	KindNowGuest = "context.now.guest"
-	KindRegions  = "context.regions"
-	KindTravel   = "context.travel"
-	// KindForecast is what is forecast at home and where the plans are.
-	KindForecast = "weather.forecast"
-	// The last two days' photos, and the days that are over.
-	KindPhotos    = "photos.recent"
-	KindPhotoDays = "photos.days"
-	// KindFX is the dollar's rate, only kept: a card alert in dollars is
-	// estimated in won with it.
-	KindFX = "assets.fx"
-	// KindOutflows is what left the investment accounts and what became of it.
-	KindOutflows = "assets.outflows"
-	// KindWorkout is what changed in the training log (input-svc).
-	KindWorkout = "workout.changes"
+	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 )
 
 // calendarRead is one read of the calendar.
@@ -59,7 +31,7 @@ type visit struct {
 // Take is one record of an adapter's: what the source says now, whole. It is
 // kept as the latest of its kind and read as what it says.
 func (s *Structured) Take(ctx context.Context, m queue.Message) error {
-	if m.Kind == KindWorkout {
+	if m.Kind == model.KindWorkoutChanges {
 		var c struct {
 			Sessions []session `json:"sessions"`
 		}
@@ -73,47 +45,47 @@ func (s *Structured) Take(ctx context.Context, m queue.Message) error {
 	}
 	var err error
 	switch m.Kind {
-	case KindCalendarNear:
+	case model.KindCalendarNear:
 		var c calendarRead
 		if err = json.Unmarshal(m.Payload, &c); err == nil {
 			return s.takeCalendar(ctx, c)
 		}
-	case KindCalendarYear:
+	case model.KindCalendarYear:
 		var c calendarRead
 		if err = json.Unmarshal(m.Payload, &c); err == nil {
 			return s.takeCalendarYear(ctx, c)
 		}
-	case KindVisits:
+	case model.KindContextVisits:
 		var v struct {
 			Visits []visit `json:"visits"`
 		}
 		if err = json.Unmarshal(m.Payload, &v); err == nil {
 			return s.takeVisits(ctx, v.Visits)
 		}
-	case KindHoldings:
+	case model.KindAssetsHoldings:
 		var p portfolio
 		if err = json.Unmarshal(m.Payload, &p); err == nil {
 			return s.takeAssets(ctx, p)
 		}
-	case KindPhotos:
+	case model.KindPhotosRecent:
 		var p struct {
 			Items []asset `json:"items"`
 		}
 		if err = json.Unmarshal(m.Payload, &p); err == nil {
 			return s.takePhotos(ctx, p.Items)
 		}
-	case KindPhotoDays:
+	case model.KindPhotosDays:
 		var p struct {
 			Days []photoDay `json:"days"`
 		}
 		if err = json.Unmarshal(m.Payload, &p); err == nil {
 			return s.takePhotoDays(ctx, p.Days)
 		}
-	case KindOutflows:
+	case model.KindAssetsOutflows:
 		if s.Outflows != nil {
 			return s.Outflows(ctx, m.Payload)
 		}
-	case KindForecast:
+	case model.KindWeatherForecast:
 		var f struct {
 			Forecasts map[string]json.RawMessage `json:"forecasts"`
 		}

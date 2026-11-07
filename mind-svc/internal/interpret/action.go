@@ -38,12 +38,12 @@ func (a *Actions) Handle(ctx context.Context, o obs.Observation) error {
 
 	var set func(*model.State) bool
 	switch {
-	case o.Type == obs.ActionExecuted && d.Kind == "calendar.create" && r.CalendarID != "":
+	case o.Type == model.KindActionExecuted && d.Kind == "calendar.create" && r.CalendarID != "":
 		set = func(s *model.State) bool { s.CalendarID = r.CalendarID; return true }
-	case o.Type == obs.ActionExecuted && d.Kind == "calendar.delete",
-		o.Type == obs.ActionUndone && d.Kind == "calendar.create":
+	case o.Type == model.KindActionExecuted && d.Kind == "calendar.delete",
+		o.Type == model.KindActionUndone && d.Kind == "calendar.create":
 		set = func(s *model.State) bool { s.CalendarID = ""; return true }
-	case o.Type == obs.ActionUndone && d.Kind == "calendar.delete" && r.CalendarID != "":
+	case o.Type == model.KindActionUndone && d.Kind == "calendar.delete" && r.CalendarID != "":
 		// Put back under a new id.
 		set = func(s *model.State) bool { s.CalendarID = r.CalendarID; return true }
 	default:
@@ -77,7 +77,7 @@ func (a *Actions) settle(ctx context.Context, o obs.Observation, d obs.ActionDat
 			open[l.State.People[0]] = l.ID
 		}
 	}
-	if o.Type == obs.ActionUndone {
+	if o.Type == model.KindActionUndone {
 		for _, id := range open {
 			if _, _, err := a.World.Update(ctx, id, func(s *model.State) bool { s.Status = model.Closed; return true }, meta); err != nil {
 				return err

@@ -11,6 +11,7 @@ import (
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/act"
 	"github.com/choigonyok/jarvis/mind-svc/internal/checklist"
+	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/moments"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
 )
@@ -36,7 +37,7 @@ func TestReminderShowsItsChecklist(t *testing.T) {
 	}
 
 	f.clk.Pin(f.at(21, 30))
-	f.move(t, LocationEnter, "집", "home")
+	f.move(t, model.KindLocationEnter, "집", "home")
 	all := f.notice.All()
 	if len(all) != 1 {
 		t.Fatalf("알림 %d개", len(all))
@@ -98,7 +99,7 @@ func TestShowChecklistAsksTheAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := f.m.Opts.Log.(*obs.MemoryLog).Read(ctx, 0, 10)
-	if len(got) == 0 || got[len(got)-1].Type != ChecklistShown || !strings.Contains(string(got[len(got)-1].Data), l.ID) {
+	if len(got) == 0 || got[len(got)-1].Type != model.KindChecklistShown || !strings.Contains(string(got[len(got)-1].Data), l.ID) {
 		t.Fatalf("보여 달라는 이벤트: %+v", got)
 	}
 	if _, err := f.m.ShowChecklist(ctx, "chk_none", ""); err == nil {
@@ -137,7 +138,7 @@ func TestDatedListComesUpTheEveningBefore(t *testing.T) {
 	}
 
 	f.clk.Pin(time.Date(2026, 10, 23, 19, 10, 0, 0, seoul))
-	f.move(t, LocationEnter, "집", "home")
+	f.move(t, model.KindLocationEnter, "집", "home")
 	all := f.notice.All()
 	if len(all) != 1 {
 		t.Fatalf("남은 것이 있는 목록만 말해야 합니다: %+v", all)

@@ -27,7 +27,7 @@ func TestTakeVisits(t *testing.T) {
 	s, st, now := takeSetup(t)
 	ctx := context.Background()
 	raw, _ := json.Marshal(map[string]any{"visits": []map[string]any{{"id": 7, "region": "회사", "kind": "work", "enteredAt": now.Add(-time.Hour)}}})
-	if err := s.Take(ctx, queue.Message{Kind: KindVisits, Payload: raw, OccurredAt: now}); err != nil {
+	if err := s.Take(ctx, queue.Message{Kind: model.KindContextVisits, Payload: raw, OccurredAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	o, err := st.Occurrence(ctx, "visit:7")
@@ -43,17 +43,17 @@ func TestTakeKeepsTheLatest(t *testing.T) {
 	ctx := context.Background()
 	newer := json.RawMessage(`{"visits":[{"region":"집"}]}`)
 	older := json.RawMessage(`{"visits":[{"region":"회사"}]}`)
-	if err := s.Take(ctx, queue.Message{Kind: KindNow, Payload: newer, OccurredAt: now}); err != nil {
+	if err := s.Take(ctx, queue.Message{Kind: model.KindContextNow, Payload: newer, OccurredAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Take(ctx, queue.Message{Kind: KindNow, Payload: older, OccurredAt: now.Add(-time.Minute)}); err != nil {
+	if err := s.Take(ctx, queue.Message{Kind: model.KindContextNow, Payload: older, OccurredAt: now.Add(-time.Minute)}); err != nil {
 		t.Fatal(err)
 	}
-	got, at, err := st.Latest(ctx, KindNow)
+	got, at, err := st.Latest(ctx, model.KindContextNow)
 	if err != nil || string(got) != string(newer) || !at.Equal(now) {
 		t.Fatalf("%s %v %v", got, at, err)
 	}
-	if _, _, err := st.Latest(ctx, KindRegions); !errors.Is(err, model.ErrNotFound) {
+	if _, _, err := st.Latest(ctx, model.KindContextRegions); !errors.Is(err, model.ErrNotFound) {
 		t.Fatalf("%v", err)
 	}
 }
@@ -61,7 +61,7 @@ func TestTakeKeepsTheLatest(t *testing.T) {
 // What cannot be read will not be readable next time.
 func TestTakeRefusesWhatItCannotRead(t *testing.T) {
 	s, _, now := takeSetup(t)
-	for _, kind := range []string{KindVisits, KindCalendarNear, KindCalendarYear, KindHoldings} {
+	for _, kind := range []string{model.KindContextVisits, model.KindCalendarNear, model.KindCalendarYear, model.KindAssetsHoldings} {
 		err := s.Take(context.Background(), queue.Message{Kind: kind, Payload: json.RawMessage(`[1]`), OccurredAt: now})
 		if !errors.Is(err, queue.ErrRefused) {
 			t.Fatalf("%s: %v", kind, err)
@@ -77,7 +77,7 @@ func TestTakeCalendarKeepsPlansInStep(t *testing.T) {
 	from, to := now.AddDate(0, 0, -7).Format("2006-01-02"), now.AddDate(0, 2, 0).Format("2006-01-02")
 	read := func(events ...map[string]any) queue.Message {
 		raw, _ := json.Marshal(map[string]any{"from": from, "to": to, "events": events})
-		return queue.Message{Kind: KindCalendarNear, Payload: raw, OccurredAt: now}
+		return queue.Message{Kind: model.KindCalendarNear, Payload: raw, OccurredAt: now}
 	}
 	day := now.AddDate(0, 0, 3).Format("2006-01-02")
 	if err := s.Take(ctx, read(map[string]any{"id": "e1", "title": "치과", "date": day, "start": "10:00"})); err != nil {
@@ -107,7 +107,7 @@ func TestOnlyACameraTakesPhotos(t *testing.T) {
 		{"id": "saved", "fileCreatedAt": wall, "localDateTime": wall},
 		{"id": "camera", "fileCreatedAt": wall, "localDateTime": wall, "exifInfo": map[string]any{"dateTimeOriginal": wall, "make": "Canon"}},
 	}})
-	if err := s.Take(ctx, queue.Message{Kind: KindPhotos, Payload: raw, OccurredAt: now}); err != nil {
+	if err := s.Take(ctx, queue.Message{Kind: model.KindPhotosRecent, Payload: raw, OccurredAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"photo:shot", "photo:saved"} {
@@ -134,7 +134,7 @@ func TestTakePhotos(t *testing.T) {
 	stamp := now.Add(-time.Hour).Format(time.RFC3339)
 	raw, _ := json.Marshal(map[string]any{"items": []map[string]any{{"id": "p1", "fileCreatedAt": stamp, "isFavorite": true,
 		"exifInfo": map[string]any{"city": "가평", "make": "Apple", "timeZone": "UTC+9"}, "people": []map[string]any{{"name": "민수"}}}}})
-	if err := s.Take(ctx, queue.Message{Kind: KindPhotos, Payload: raw, OccurredAt: now}); err != nil {
+	if err := s.Take(ctx, queue.Message{Kind: model.KindPhotosRecent, Payload: raw, OccurredAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	o, err := st.Occurrence(ctx, "photo:p1")
@@ -145,7 +145,7 @@ func TestTakePhotos(t *testing.T) {
 		"exifInfo": map[string]any{"city": "가평", "country": "대한민국"}, "people": []map[string]any{{"name": "민수"}}}}}}})
 	take := func() {
 		t.Helper()
-		if err := s.Take(ctx, queue.Message{Kind: KindPhotoDays, Payload: day, OccurredAt: now}); err != nil {
+		if err := s.Take(ctx, queue.Message{Kind: model.KindPhotosDays, Payload: day, OccurredAt: now}); err != nil {
 			t.Fatal(err)
 		}
 		if err := s.flush(ctx); err != nil {
@@ -167,7 +167,7 @@ func TestTakePhotos(t *testing.T) {
 func TestTakeForecast(t *testing.T) {
 	s, st, now := takeSetup(t)
 	raw, _ := json.Marshal(map[string]any{"forecasts": map[string]any{"집": map[string]any{"point": map[string]any{"name": "집"}}, "가평": map[string]any{"point": map[string]any{"name": "가평"}}}})
-	if err := s.Take(context.Background(), queue.Message{Kind: KindForecast, Payload: raw, OccurredAt: now}); err != nil {
+	if err := s.Take(context.Background(), queue.Message{Kind: model.KindWeatherForecast, Payload: raw, OccurredAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"집", "가평"} {
@@ -191,7 +191,7 @@ func TestTakeWorkout(t *testing.T) {
 			"exercises": []map[string]any{{"id": "e1", "name": "스쿼트", "sets": []map[string]any{{"weight": 100, "reps": 5, "done": true}}}}},
 		{"id": "w2", "date": now.Format("2006-01-02"), "startedAt": start, "exercises": []map[string]any{}},
 	}})
-	if err := s.Take(ctx, queue.Message{Kind: KindWorkout, Payload: raw, OccurredAt: now}); err != nil {
+	if err := s.Take(ctx, queue.Message{Kind: model.KindWorkoutChanges, Payload: raw, OccurredAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	o, err := st.Occurrence(ctx, "workout:w1")
@@ -204,10 +204,10 @@ func TestTakeWorkout(t *testing.T) {
 	if len(s.incoming) == 0 {
 		t.Fatal("기억에도 알려야 합니다")
 	}
-	if _, _, err := st.Latest(ctx, KindWorkout); err == nil {
+	if _, _, err := st.Latest(ctx, model.KindWorkoutChanges); err == nil {
 		t.Fatal("운동 기록은 투영에 있고 여기 둘 것이 없습니다")
 	}
-	if err := s.Take(ctx, queue.Message{Kind: KindWorkout, Payload: []byte(`nope`), OccurredAt: now}); !errors.Is(err, queue.ErrRefused) {
+	if err := s.Take(ctx, queue.Message{Kind: model.KindWorkoutChanges, Payload: []byte(`nope`), OccurredAt: now}); !errors.Is(err, queue.ErrRefused) {
 		t.Fatalf("%v", err)
 	}
 }

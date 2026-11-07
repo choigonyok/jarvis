@@ -92,7 +92,7 @@ func TestAreaReminderGoesByTheFixes(t *testing.T) {
 	fix := func(h, m int, lat, lon float64) {
 		f.clk.Pin(f.at(h, m))
 		data, _ := json.Marshal(map[string]float64{"lat": lat, "lon": lon, "acc": 12})
-		f.handle(t, obs.Observation{Source: "context", Type: LocationFix, Data: data, OccurredAt: f.clk.Now()})
+		f.handle(t, obs.Observation{Source: "context", Type: model.KindLocationFix, Data: data, OccurredAt: f.clk.Now()})
 	}
 	fix(19, 40, 36.40, 128.30) // on the way, outside
 	fix(20, 10, 36.25, 128.15)

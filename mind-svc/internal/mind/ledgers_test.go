@@ -180,7 +180,7 @@ func TestPortfolioBandIsOneQuestion(t *testing.T) {
 	m, st, _ := testMind(t, time.Date(2026, 10, 16, 9, 0, 0, 0, seoul))
 	ctx := context.Background()
 	for _, title := range []string{"코인 비중이 범위를 벗어났어요", "금 비중이 범위를 벗어났어요"} {
-		o := obs.Observation{Source: "assets", Type: AssetsBand, Notify: []byte(`{"title":"` + title + `","body":"지금 30% · 목표 20%"}`)}
+		o := obs.Observation{Source: "assets", Type: model.KindAssetsBand, Notify: []byte(`{"title":"` + title + `","body":"지금 30% · 목표 20%"}`)}
 		if err := m.Handle(ctx, o); err != nil {
 			t.Fatal(err)
 		}
@@ -235,7 +235,7 @@ func TestRebalanceCardPlacesWhatItShowed(t *testing.T) {
 	m := New(Options{Store: st, Log: obs.NewMemoryLog(quiet), LLM: &llm.Script{}, Calendar: act.NewMemoryCalendar(), Notifier: &act.MemoryNotifier{},
 		Loc: seoul, Now: clk.Now, Logger: quiet, Interpret: interpret.Config{Owner: "나"}, Policy: gate.DefaultPolicy(), Mode: "eval", Orders: orders})
 	ctx := context.Background()
-	o := obs.Observation{Source: "assets", Type: AssetsBand, Key: "assets:band:coin:2026-10-16", Notify: []byte(`{"title":"코인 비중이 범위를 벗어났어요","body":"지금 30% · 목표 20%"}`)}
+	o := obs.Observation{Source: "assets", Type: model.KindAssetsBand, Key: "assets:band:coin:2026-10-16", Notify: []byte(`{"title":"코인 비중이 범위를 벗어났어요","body":"지금 30% · 목표 20%"}`)}
 	if err := m.Handle(ctx, o); err != nil {
 		t.Fatal(err)
 	}

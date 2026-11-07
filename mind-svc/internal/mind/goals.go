@@ -74,7 +74,7 @@ func (m *Mind) goalSay(ctx context.Context, who, key, title, body, why string, a
 	if len(asks) > 0 {
 		data["goals"] = asks
 	}
-	n := act.Notice{Kind: "remind.goal", Title: title, Body: strings.TrimSpace(body + "\n" + why), URL: "/goals", Tier: "now", Level: "warn",
+	n := act.Notice{Kind: model.KindRemindGoal, Title: title, Body: strings.TrimSpace(body + "\n" + why), URL: "/goals", Tier: "now", Level: "warn",
 		At: m.Opts.Now(), Key: key, Card: true, Data: data}
 	if who == goals.Guest {
 		n.Audience, data["who"] = goals.Guest, goals.Guest

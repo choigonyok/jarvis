@@ -122,7 +122,7 @@ func (m *Mind) toldRule(ctx context.Context, n model.Note) {
 		return
 	}
 	m.Opts.Notifier.Notify(ctx, act.Notice{
-		Kind: "memory.rule", Tier: "now", Level: "info",
+		Kind: model.KindMemoryRule, Tier: "now", Level: "info",
 		Title: "자비스가 지킬 규칙을 남겼어요", Body: n.Text + " - 아니면 생활 탭에서 거두세요.",
 		URL: "/life?focus=note:" + n.ID, Key: "rule:" + n.ID + ":" + fmt.Sprint(n.Version), At: m.Opts.Now(),
 	})

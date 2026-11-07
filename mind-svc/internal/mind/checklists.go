@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/mind-svc/internal/checklist"
+	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/moments"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
 )
@@ -18,10 +19,6 @@ import (
 // the agent: when the conversation brings one up, at a reminder's moment
 // (the reminder carries the list, and its card shows it as it stands then),
 // or when mind itself puts one in front of the operator (ShowChecklist).
-
-// ChecklistShown asks the agent to put a list in the conversation now, as a
-// card: data {checklist, title, lead}.
-const ChecklistShown = "checklist.shown"
 
 // reminderList is the list a reminder carries, if it still has one.
 func (m *Mind) reminderList(ctx context.Context, r moments.Reminder) (checklist.List, bool) {
@@ -53,8 +50,8 @@ func (m *Mind) ShowChecklist(ctx context.Context, id, lead string) (checklist.Li
 	}
 	data, _ := json.Marshal(shown)
 	return l, m.Opts.Log.Append(ctx, obs.Observation{
-		Source: "mind", Type: ChecklistShown, Subject: l.ID, Data: data,
-		Key: ChecklistShown + ":" + l.ID + ":" + strconv.FormatInt(now.UnixNano(), 36), OccurredAt: now,
+		Source: "mind", Type: model.KindChecklistShown, Subject: l.ID, Data: data,
+		Key: model.KindChecklistShown + ":" + l.ID + ":" + strconv.FormatInt(now.UnixNano(), 36), OccurredAt: now,
 	})
 }
 

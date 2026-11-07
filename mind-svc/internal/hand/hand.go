@@ -26,11 +26,11 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 )
 
+// KindResult is what came of a write on its way to an adapter
+// (model.KindAdapterCall), the kind mind's results lane reads.
+const KindResult = model.KindExecuteResult
+
 const (
-	// KindCall is a write on its way to an adapter.
-	KindCall = "adapter.call"
-	// KindResult is what came of one.
-	KindResult = "execute.result"
 	// Wait is how long a write is given. Past it the hand refuses it, so a
 	// write that was reported as failed cannot happen after all.
 	Wait = 90 * time.Second
@@ -98,7 +98,7 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return nil, err
 	}
 	ctx := req.Context()
-	if err := t.Publish(ctx, queue.Message{Kind: KindCall, Source: "mind", SourceKey: key, Actor: "mind", Subject: call.Service, Payload: payload}); err != nil {
+	if err := t.Publish(ctx, queue.Message{Kind: model.KindAdapterCall, Source: "mind", SourceKey: key, Actor: "mind", Subject: call.Service, Payload: payload}); err != nil {
 		return nil, fmt.Errorf("쓰기를 보내지 못했습니다: %w", err)
 	}
 	ctx, cancel := context.WithTimeout(ctx, wait)
@@ -136,5 +136,5 @@ func Result(ctx context.Context, st store.Store, m queue.Message) error {
 	if len(r.Body) == 0 || !json.Valid(r.Body) {
 		r.Body = json.RawMessage("{}")
 	}
-	return st.PutCommand(ctx, model.Command{Key: r.Key, Kind: KindResult, Who: "owner", Status: r.Status, Body: r.Body})
+	return st.PutCommand(ctx, model.Command{Key: r.Key, Kind: model.KindExecuteResult, Who: "owner", Status: r.Status, Body: r.Body})
 }

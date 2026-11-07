@@ -181,7 +181,7 @@ func TestAssetsAndJobs(t *testing.T) {
 	now := time.Date(2026, 10, 15, 10, 0, 0, 0, seoul)
 	s := &Structured{Store: st, Observer: observer{st}, Loc: seoul, Now: func() time.Time { return now }, ReadJobs: readJobs, Records: rec}
 	assets := func() error {
-		return s.Take(ctx, queue.Message{Kind: KindHoldings, Payload: json.RawMessage(portfolio), OccurredAt: now})
+		return s.Take(ctx, queue.Message{Kind: model.KindAssetsHoldings, Payload: json.RawMessage(portfolio), OccurredAt: now})
 	}
 	if err := assets(); err != nil {
 		t.Fatal(err)

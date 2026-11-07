@@ -678,7 +678,7 @@ func Run(ctx context.Context, sc Scenario, client llm.Client, loc *time.Location
 		obsAll, _ := log.Read(ctx, logSeen, 100000)
 		for _, o := range obsAll {
 			logSeen = o.ID
-			if o.Type == gate.CardRaised {
+			if o.Type == model.KindCardRaised {
 				var c gate.Card
 				_ = json.Unmarshal(o.Data, &c)
 				cards = append(cards, c)

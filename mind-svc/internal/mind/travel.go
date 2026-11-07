@@ -33,7 +33,7 @@ type Travel interface {
 type TravelLatest struct{ Store store.Store }
 
 func (t TravelLatest) Routes(ctx context.Context) ([]Route, error) {
-	raw, _, err := t.Store.Latest(ctx, sensorTravel)
+	raw, _, err := t.Store.Latest(ctx, model.KindContextTravel)
 	if err != nil {
 		return nil, err
 	}

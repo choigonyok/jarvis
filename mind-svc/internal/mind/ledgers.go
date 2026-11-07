@@ -496,10 +496,6 @@ func (m *Mind) Meals(ctx context.Context, days int) ([]Meal, error) {
 
 // --- portfolio out of band ------------------------------------------------------
 
-// AssetsBand is assets-svc's event: a bucket of the portfolio has left the
-// band around its target.
-const AssetsBand = "assets.band"
-
 // portfolioBand raises one rebalance question for the whole portfolio. The
 // gate's ledger keeps it quiet after it was raised or turned down, as it does
 // any topic.

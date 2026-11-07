@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 )
 
@@ -38,7 +39,7 @@ func TestHome(t *testing.T) {
 	}
 
 	answer := `{"regions":[{"name":"회사","kind":"work","lat":37.49,"lon":127.02},{"name":"집","kind":"home","lat":37.556,"lon":126.901}]}`
-	if err := st.PutLatest(ctx, sensorRegions, json.RawMessage(answer), time.Now()); err != nil {
+	if err := st.PutLatest(ctx, model.KindContextRegions, json.RawMessage(answer), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	h = &Home{Store: st, Fixed: seoul}

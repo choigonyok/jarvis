@@ -228,12 +228,12 @@ func TestAnOpenCardIsToldWhatChanged(t *testing.T) {
 	var said Card
 	for _, o := range all {
 		switch o.Type {
-		case CardRaised:
+		case model.KindCardRaised:
 			raised++
-		case CardUpdated:
+		case model.KindCardUpdated:
 			updated++
 			_ = json.Unmarshal(o.Data, &said)
-		case CardClosed:
+		case model.KindCardClosed:
 			closed++
 		}
 	}
@@ -300,7 +300,7 @@ func TestCardsGoOutAndClose(t *testing.T) {
 	for _, o := range all {
 		got = append(got, o.Type+":"+o.Subject)
 	}
-	want := []string{CardRaised + ":" + first.ID, CardClosed + ":" + first.ID, CardRaised + ":" + second.ID, CardClosed + ":" + second.ID}
+	want := []string{model.KindCardRaised + ":" + first.ID, model.KindCardClosed + ":" + first.ID, model.KindCardRaised + ":" + second.ID, model.KindCardClosed + ":" + second.ID}
 	if len(got) != len(want) {
 		t.Fatalf("카드 이벤트: %v", got)
 	}
@@ -478,7 +478,7 @@ func TestCoveredStandsAside(t *testing.T) {
 	all, _ := f.log.Read(ctx, 0, 100)
 	var closed bool
 	for _, o := range all {
-		if o.Type == CardClosed {
+		if o.Type == model.KindCardClosed {
 			closed = o.Subject == in.ID
 		}
 	}
@@ -682,7 +682,7 @@ func cardOf(t *testing.T, f *fixture) Card {
 	var c Card
 	found := false
 	for _, o := range all {
-		if o.Type == CardRaised {
+		if o.Type == model.KindCardRaised {
 			c, found = Card{}, true
 			_ = json.Unmarshal(o.Data, &c)
 		}
@@ -884,7 +884,7 @@ func TestAlikeCalendarCardIsOneQuestion(t *testing.T) {
 	all, _ := f.log.Read(ctx, 0, 100)
 	closed := false
 	for _, o := range all {
-		if o.Type == CardClosed && strings.Contains(string(o.Data), first.ID) {
+		if o.Type == model.KindCardClosed && strings.Contains(string(o.Data), first.ID) {
 			closed = true
 		}
 	}

@@ -28,6 +28,7 @@ import (
 
 	"github.com/choigonyok/jarvis/gocommon/queue"
 	"github.com/choigonyok/jarvis/gocommon/record"
+	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 )
 
 // Observation is one thing that happened, as the event log delivered it.
@@ -42,16 +43,6 @@ type Observation struct {
 	// Notify is wording for a person (output-svc reads it).
 	Notify json.RawMessage `json:"notify,omitempty"`
 }
-
-// Types the loop reads.
-const (
-	MessageObserved = "message.observed" // a chat message; text in the content store
-	ActionExecuted  = "action.executed"  // the gate did something
-	ActionUndone    = "action.undone"    // and took it back
-	// OccurrenceObserved is something that happened, read from a structured
-	// source (a payment, a photo, a workout); the occurrence is in the store.
-	OccurrenceObserved = "occurrence.observed"
-)
 
 // OccurrenceRef is an occurrence.observed's data.
 type OccurrenceRef struct {
@@ -173,11 +164,11 @@ func NewStream(url, token string, db *pgxpool.Pool, kinds []string) *Stream {
 // through the outbox. What the sensors read is the second, and so is what the
 // gate did (action.*), which the loop reads back.
 func IsEffect(o Observation) bool {
-	return o.Source == mindSource && !strings.HasPrefix(o.Type, "action.") && o.Type != TimerFired
+	return o.Source == mindSource && !strings.HasPrefix(o.Type, "action.") && o.Type != model.KindTimerFired
 }
 
 // TimerFired is mind's clock on the log: a timer whose moment came.
-const TimerFired = "timer.fired"
+const TimerFired = model.KindTimerFired
 
 // Command puts a request for mind on the stream, from whoever came to mind's
 // door with it (the console, the screen's note): nothing changes but through
@@ -254,18 +245,10 @@ func (l *Stream) Wake(ctx context.Context, guest bool) error {
 	if guest {
 		topic = queue.GuestEffects
 	}
-	_, _, err := queue.Publish(ctx, l.db, topic, queue.Message{Kind: KindJobsWake, Source: mindSource,
+	_, _, err := queue.Publish(ctx, l.db, topic, queue.Message{Kind: model.KindJobsWake, Source: mindSource,
 		SourceKey: "wake-" + hex.EncodeToString(raw), Actor: mindSource, Subject: "jobs"})
 	return err
 }
-
-// KindJobsWake says a job may be due: the scheduler looks now rather than on
-// its own long clock.
-const KindJobsWake = "jobs.wake"
-
-// KindListChanged says how a list stands has changed: the screens showing it
-// redraw it, on every device.
-const KindListChanged = "checklist.changed"
 
 // ListChanged tells a person's agent a list changed: the operator's, or the
 // guest's on the guest's topic.
@@ -282,13 +265,10 @@ func (l *Stream) ListChanged(ctx context.Context, guest bool, id string) error {
 	if guest {
 		topic = queue.GuestEffects
 	}
-	_, _, err = queue.Publish(ctx, l.db, topic, queue.Message{Kind: KindListChanged, Source: mindSource,
+	_, _, err = queue.Publish(ctx, l.db, topic, queue.Message{Kind: model.KindChecklistChanged, Source: mindSource,
 		SourceKey: "list-" + hex.EncodeToString(raw), Actor: mindSource, Subject: id, Payload: payload})
 	return err
 }
-
-// KindCalendarChanged says what an entry became: the screens showing it redraw.
-const KindCalendarChanged = "calendar.changed"
 
 // CalendarChanged tells a person's agent what a screen did to an entry.
 func (l *Stream) CalendarChanged(ctx context.Context, guest bool, op string, event json.RawMessage) error {
@@ -304,7 +284,7 @@ func (l *Stream) CalendarChanged(ctx context.Context, guest bool, op string, eve
 	if guest {
 		topic = queue.GuestEffects
 	}
-	_, _, err = queue.Publish(ctx, l.db, topic, queue.Message{Kind: KindCalendarChanged, Source: mindSource,
+	_, _, err = queue.Publish(ctx, l.db, topic, queue.Message{Kind: model.KindCalendarChanged, Source: mindSource,
 		SourceKey: "cal-" + hex.EncodeToString(raw), Actor: mindSource, Subject: "calendar", Payload: payload})
 	return err
 }
@@ -318,7 +298,7 @@ func (l *Stream) Effect(ctx context.Context, m queue.Message) error {
 
 // relayed are the kinds without wording that output still has to hear of:
 // what took a notification's place, what answered it, and being busy.
-var relayed = map[string]bool{"suggestion.raised": true, "proposal.decided": true, "context.state": true}
+var relayed = map[string]bool{model.KindSuggestionRaised: true, model.KindProposalDecided: true, model.KindContextState: true}
 
 // direct is what output reads from the records itself, so it does not need
 // mind to be up: that mind is down cannot be said through mind, and a payment

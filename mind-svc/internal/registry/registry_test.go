@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"slices"
 	"testing"
+
+	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 )
 
 func TestTheSeedReads(t *testing.T) {
@@ -47,6 +49,35 @@ func TestAKindFindsItsLane(t *testing.T) {
 	}
 	if s.Known("처음.보는.종류") || !s.Known("job.step") {
 		t.Fatal("등록 여부")
+	}
+}
+
+// The kinds the code reads by name (model) have their rows here, on the lane
+// whose reader takes them: a kind the code reads with no row, or with another
+// lane's, never reaches its reader.
+func TestTheCodesKindsHaveTheirLanes(t *testing.T) {
+	s := Default()
+	for lane, kinds := range map[Lane][]string{
+		Structured: {model.KindCalendarNear, model.KindCalendarYear, model.KindContextVisits, model.KindAssetsHoldings,
+			model.KindContextNow, model.KindContextNowGuest, model.KindContextRegions, model.KindContextTravel,
+			model.KindWeatherForecast, model.KindPhotosRecent, model.KindPhotosDays, model.KindAssetsFX,
+			model.KindAssetsOutflows, model.KindWorkoutChanges, model.KindChatTurn},
+		Deterministic: {model.KindIntentAnswer, model.KindExecuteResult, model.KindManualEdit, model.KindPaymentRequested,
+			model.KindTimerFired, model.KindRegistryChanged, model.KindContextState},
+		Interpret: {model.KindMessageObserved, model.KindOccurrenceObserved, model.KindActionExecuted, model.KindActionUndone,
+			model.KindAssetsBand, model.KindLocationEnter, model.KindLocationLeave, model.KindLocationGuestEnter,
+			model.KindLocationGuestLeave, model.KindLocationFix},
+	} {
+		for _, k := range kinds {
+			if !s.Known(k) || s.LaneOf(k) != lane {
+				t.Errorf("%s: %s 레인이어야 합니다 (지금 %s)", k, lane, s.LaneOf(k))
+			}
+		}
+	}
+	for _, k := range locked {
+		if s.LaneOf(k) != Deterministic {
+			t.Errorf("%s: 고정된 종류는 결정 레인입니다", k)
+		}
 	}
 }
 

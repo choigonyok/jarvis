@@ -51,7 +51,7 @@ func (h *Home) Point(ctx context.Context) (weather.Point, error) {
 				Lon  float64 `json:"lon"`
 			} `json:"regions"`
 		}
-		raw, _, err := h.Store.Latest(ctx, sensorRegions)
+		raw, _, err := h.Store.Latest(ctx, model.KindContextRegions)
 		if err == nil {
 			err = json.Unmarshal(raw, &out)
 		}

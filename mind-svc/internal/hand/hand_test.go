@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/gocommon/queue"
+	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 )
 
@@ -56,7 +57,7 @@ func TestAWriteGoesThroughTheHand(t *testing.T) {
 	if err := json.Unmarshal(m.Payload, &c); err != nil {
 		t.Fatal(err)
 	}
-	if m.Kind != KindCall || c.Service != "calendar" || c.Method != "POST" || c.Path != "/events?x=1" || string(c.Body) != `{"title":"치과"}` {
+	if m.Kind != model.KindAdapterCall || c.Service != "calendar" || c.Method != "POST" || c.Path != "/events?x=1" || string(c.Body) != `{"title":"치과"}` {
 		t.Fatalf("%+v %+v", m, c)
 	}
 	if !c.Deadline.Equal(time.Unix(1000, 0).Add(Wait)) {

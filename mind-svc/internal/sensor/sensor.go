@@ -26,7 +26,7 @@ import (
 const KindMessage = collect.KindMessage
 
 // KindTurn is a turn of the conversation with jarvis, sealed (input-svc).
-const KindTurn = "chat.turn"
+const KindTurn = model.KindChatTurn
 
 // Messages takes what the chat collectors (kakaotalk-client, imessage-client)
 // hand on. Every message comes; which are worth reading is said here.

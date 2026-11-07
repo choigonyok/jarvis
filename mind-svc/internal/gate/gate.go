@@ -405,7 +405,7 @@ func (g *Gate) retell(ctx context.Context, in, open model.Intent) (model.Intent,
 	if len(in.Evidence) == 0 {
 		in.Evidence = open.Evidence
 	}
-	g.send(ctx, in, "ask", CardUpdated, fmt.Sprintf("%s:%s:%d", CardUpdated, in.ID, g.now().UnixNano()))
+	g.send(ctx, in, "ask", model.KindCardUpdated, fmt.Sprintf("%s:%s:%d", model.KindCardUpdated, in.ID, g.now().UnixNano()))
 	return in, g.st.PutIntent(ctx, in)
 }
 
@@ -533,7 +533,7 @@ func (g *Gate) undoLocked(ctx context.Context, id string) (model.Intent, error) 
 		return in, fmt.Errorf("되돌리지 못했습니다: %w", err)
 	}
 	in.Status = model.Undone
-	g.observe(ctx, obs.ActionUndone, in, res)
+	g.observe(ctx, model.KindActionUndone, in, res)
 	_ = g.st.CountPolicy(ctx, in.Skill, in.ContextKey(), model.OutcomeUndone, g.now())
 	g.closeCard(ctx, in)
 	return in, g.decided(ctx, in)
@@ -915,7 +915,7 @@ func (g *Gate) run(ctx context.Context, a act.Actuator, in *model.Intent, by str
 		return
 	}
 	in.Status, in.Result, in.Undo, in.ExecutedAt = model.Executed, res, undo, &at
-	g.observe(ctx, obs.ActionExecuted, *in, res)
+	g.observe(ctx, model.KindActionExecuted, *in, res)
 }
 
 // linkOnly records an action whose result was there already: done, with
@@ -929,7 +929,7 @@ func (g *Gate) linkOnly(ctx context.Context, in *model.Intent, by string, alread
 		in.Why = "캘린더에 이미 그렇게 적혀 있어요: " + already.Line
 	}
 	in.Result, _ = json.Marshal(map[string]any{"calendarId": already.ID, "linked": true})
-	g.observe(ctx, obs.ActionExecuted, *in, in.Result)
+	g.observe(ctx, model.KindActionExecuted, *in, in.Result)
 }
 
 func (g *Gate) observe(ctx context.Context, typ string, in model.Intent, res json.RawMessage) {
@@ -958,11 +958,11 @@ func (g *Gate) tell(ctx context.Context, in model.Intent, title, body string) {
 	if in.Kind == "info" {
 		// Told only: the inbox answers it with one tap (Heard), which a
 		// thing done and told is not.
-		n.Kind = "mind.info"
+		n.Kind = model.KindMindInfo
 	}
 	if in.Moment != "" && in.Tier == "now" {
 		// Said at its moment (the rain at the door): in the conversation too.
-		n.Kind, n.Card, n.Data = "remind."+in.Moment, true, map[string]any{"why": in.Reason}
+		n.Kind, n.Card, n.Data = model.RemindKind(in.Moment), true, map[string]any{"why": in.Reason}
 	}
 	g.notify.Notify(ctx, n)
 }
@@ -1217,15 +1217,8 @@ type Card struct {
 	Quiet bool `json:"quiet,omitempty"`
 }
 
-// The one path a card takes to the operator, and back.
-const (
-	CardRaised  = "mind.card"
-	CardUpdated = "mind.card.updated"
-	CardClosed  = "mind.card.closed"
-)
-
 func (g *Gate) card(ctx context.Context, in model.Intent, mode string) {
-	g.send(ctx, in, mode, CardRaised, CardRaised+":"+in.ID)
+	g.send(ctx, in, mode, model.KindCardRaised, model.KindCardRaised+":"+in.ID)
 }
 
 func (g *Gate) send(ctx context.Context, in model.Intent, mode, typ, key string) {
@@ -1246,8 +1239,8 @@ func (g *Gate) closeCard(ctx context.Context, in model.Intent) {
 		return
 	}
 	data, _ := json.Marshal(map[string]string{"intentId": in.ID, "status": in.Status})
-	g.append(ctx, obs.Observation{Source: "mind", Type: CardClosed, Subject: in.ID, Data: data,
-		Key: CardClosed + ":" + in.ID + ":" + in.Status, OccurredAt: g.now()})
+	g.append(ctx, obs.Observation{Source: "mind", Type: model.KindCardClosed, Subject: in.ID, Data: data,
+		Key: model.KindCardClosed + ":" + in.ID + ":" + in.Status, OccurredAt: g.now()})
 }
 
 // tellLocal puts a card in the console's notices when there is no agent to
