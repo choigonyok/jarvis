@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -12,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/choigonyok/jarvis/vault-svc/internal/seal"
+	"github.com/choigonyok/jarvis/gocommon/seal"
 	"github.com/choigonyok/jarvis/vault-svc/internal/store"
 )
 
@@ -21,9 +23,15 @@ type fake struct {
 	pins     map[string]store.Pin
 	profiles map[string]store.Profile
 	uses     []store.Use
+	down     bool
 }
 
-func (f *fake) Ping(context.Context) error { return nil }
+func (f *fake) Ping(context.Context) error {
+	if f.down {
+		return errors.New("연결 거부")
+	}
+	return nil
+}
 func (f *fake) Put(_ context.Context, l store.Login) error {
 	f.logins[l.Domain] = l
 	return nil
@@ -320,5 +328,91 @@ func TestAShippingProfileIsReadWholeAndNeedsItsBuildingNumber(t *testing.T) {
 	}
 	if code, _ := call(h, http.MethodDelete, "/profiles/기본", "svc", ""); code != http.StatusNotFound {
 		t.Fatalf("없는 배송지 지우기: %d", code)
+	}
+}
+
+// legacyKey is the test key gocommon/seal's fixtures are sealed with (bytes
+// 0..31); the rows below are two of those fixtures, as the vault keeps a seal
+// without the prefix.
+func legacyKey() []byte {
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i)
+	}
+	return key
+}
+
+func b64(t *testing.T, s string) []byte {
+	t.Helper()
+	b, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// What is already in the vault keeps opening: a login and a shipping profile
+// sealed in the form without the prefix. Saved again, a login is in the form
+// with it, and opens the same.
+func TestRowsWithoutThePrefixStillOpen(t *testing.T) {
+	s, err := seal.New(legacyKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := &fake{logins: map[string]store.Login{}, pins: map[string]store.Pin{}, profiles: map[string]store.Profile{}}
+	h := (&Server{Store: f, Sealer: s, Token: "svc", ReleaseToken: "browser", Log: slog.New(slog.NewTextHandler(io.Discard, nil))}).Handler()
+	f.logins["example.com"] = store.Login{Domain: "example.com", Name: "예시", Hint: "me***@e***", KeyID: "257335f4",
+		Nonce: b64(t, "AwwalwJ61+a0j+l4"), Sealed: b64(t, "//CLReJoBi/V4HOGIklNUK9O4xeSYbZpKfiz3LNY2skHaFdmRFpIDwixgP8zPdvWI3rxCwweLdBq")}
+	f.profiles["기본"] = store.Profile{Name: "기본", KeyID: "257335f4", Nonce: b64(t, "omcITuSdejeNDrjN"),
+		Sealed: b64(t, "iwhHviKIIOpLTcqa4DE1kV8x9z0k/XNwW9UrHsGcSMvd4R6tgwaqJRkwQdxjAAdiJbtBSRYDQIFvWfBuDRVFQMaKXub9iy9hkcvk/zJtDnECpOgCLL0ehHjcs3BiNS4bMUkeuxVP+ie+wn8VqsdGYNoqnCypRSY+ArogHkPEmkbReAi/apJMaIa+rQXRhkMSUVdyHlQiQsqmg+KNPSjZ")}
+	release := func() map[string]string {
+		t.Helper()
+		code, body := call(h, http.MethodPost, "/release", "browser", `{"host":"www.example.com","purpose":"chat"}`)
+		var got map[string]string
+		if code != http.StatusOK || json.Unmarshal([]byte(body), &got) != nil {
+			t.Fatalf("꺼내기: %d %s", code, body)
+		}
+		return got
+	}
+	if got := release(); got["username"] != "me@example.com" || got["password"] != "pw-test-1234" {
+		t.Fatalf("%v", got)
+	}
+	code, body := call(h, http.MethodGet, "/profiles", "svc", "")
+	if code != http.StatusOK || !strings.Contains(body, "홍길동") || !strings.Contains(body, "101동 101호") {
+		t.Fatalf("배송지: %d %s", code, body)
+	}
+
+	if code, _ := call(h, http.MethodPut, "/logins/example.com", "svc", `{"username":"me@example.com","password":"pw-new-5678"}`); code != http.StatusOK {
+		t.Fatalf("다시 저장: %d", code)
+	}
+	l := f.logins["example.com"]
+	if len(l.Nonce) != seal.HeadSize || !bytes.HasPrefix(l.Nonce, []byte("jsl2")) || l.KeyID != s.ID() {
+		t.Fatalf("다시 쓴 행: %x %s", l.Nonce, l.KeyID)
+	}
+	if got := release(); got["password"] != "pw-new-5678" {
+		t.Fatalf("%v", got)
+	}
+}
+
+// /health is the stack's contract, with the key the vault seals with.
+func TestHealthSaysTheKey(t *testing.T) {
+	h, f := server(t)
+	code, body := call(h, http.MethodGet, "/health", "", "")
+	var rep struct {
+		Status string         `json:"status"`
+		Error  string         `json:"error"`
+		About  map[string]any `json:"about"`
+	}
+	if code != http.StatusOK || json.Unmarshal([]byte(body), &rep) != nil || rep.Status != "ok" {
+		t.Fatalf("%d %s", code, body)
+	}
+	if key, _ := rep.About["key"].(string); len(key) != 8 {
+		t.Fatalf("키 id: %s", body)
+	}
+	f.down = true
+	code, body = call(h, http.MethodGet, "/health", "", "")
+	rep.Status, rep.Error = "", ""
+	if code != http.StatusServiceUnavailable || json.Unmarshal([]byte(body), &rep) != nil || rep.Status != "down" || rep.Error == "" {
+		t.Fatalf("%d %s", code, body)
 	}
 }

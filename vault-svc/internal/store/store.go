@@ -11,7 +11,9 @@ import (
 )
 
 // Login is one saved login, sealed. Name and Hint are what is shown; the
-// username and password are inside Sealed.
+// username and password are inside Sealed. Nonce and Sealed are one seal kept
+// apart (gocommon/seal SealApart): its head, and the rest. Pins and profiles
+// keep theirs the same way.
 type Login struct {
 	Domain string
 	Name   string

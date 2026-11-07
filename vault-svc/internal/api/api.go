@@ -25,7 +25,6 @@ package api
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -35,9 +34,11 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/gocommon/pay"
+	"github.com/choigonyok/jarvis/gocommon/seal"
 	"github.com/choigonyok/jarvis/gocommon/site"
-	"github.com/choigonyok/jarvis/vault-svc/internal/seal"
+	"github.com/choigonyok/jarvis/gocommon/svc"
 	"github.com/choigonyok/jarvis/vault-svc/internal/store"
 )
 
@@ -95,12 +96,16 @@ type Server struct {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	// The stack's contract (gocommon/health), with the key it seals with:
+	// after a key changes, which one a running vault holds.
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+		rep := health.Report{About: map[string]any{"key": s.Sealer.ID()}}
 		if err := s.Store.Ping(r.Context()); err != nil {
-			writeErr(w, http.StatusServiceUnavailable, "데이터베이스에 연결할 수 없습니다.")
+			rep.Error = "데이터베이스에 연결할 수 없습니다."
+			health.Write(w, http.StatusServiceUnavailable, rep)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "key": s.Sealer.ID()})
+		health.Write(w, http.StatusOK, rep)
 	})
 	mux.HandleFunc("GET /logins", s.with(s.Token, s.list))
 	mux.HandleFunc("PUT /logins/{domain}", s.with(s.Token, s.put))
@@ -122,7 +127,7 @@ func (s *Server) Handler() http.Handler {
 // worth having.
 func (s *Server) with(token string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if token == "" || subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+token)) != 1 {
+		if !svc.Bearer(r, token) {
 			writeErr(w, http.StatusUnauthorized, "인증이 필요합니다.")
 			return
 		}
@@ -173,7 +178,7 @@ func (s *Server) put(w http.ResponseWriter, r *http.Request) {
 		in.Name = domain
 	}
 	plain, _ := json.Marshal(secret{U: in.Username, P: in.Password})
-	nonce, sealed, err := s.Sealer.Seal(domain, plain)
+	nonce, sealed, err := s.Sealer.SealApart(domain, plain)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "봉인하지 못했습니다.")
 		return
@@ -259,7 +264,7 @@ func (s *Server) release(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, "다른 키로 저장된 정보라 열 수 없습니다. 다시 저장해 주세요.")
 		return
 	}
-	plain, err := s.Sealer.Open(domain, l.Nonce, l.Sealed)
+	plain, err := s.Sealer.OpenApart(domain, l.Nonce, l.Sealed)
 	var sec secret
 	if err == nil {
 		err = json.Unmarshal(plain, &sec)
@@ -318,7 +323,7 @@ func (s *Server) putPin(w http.ResponseWriter, r *http.Request) {
 		name = PinSites[where]
 	}
 	plain, _ := json.Marshal(map[string]string{"pin": in.Pin})
-	nonce, sealed, err := s.Sealer.Seal(pinSeal(where), plain)
+	nonce, sealed, err := s.Sealer.SealApart(pinSeal(where), plain)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "봉인하지 못했습니다.")
 		return
@@ -393,7 +398,7 @@ func (s *Server) releasePin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, "다른 키로 저장된 결제 비밀번호라 열 수 없습니다. 다시 저장해 주세요.")
 		return
 	}
-	plain, err := s.Sealer.Open(pinSeal(where), p.Nonce, p.Sealed)
+	plain, err := s.Sealer.OpenApart(pinSeal(where), p.Nonce, p.Sealed)
 	var got struct {
 		Pin string `json:"pin"`
 	}
@@ -486,7 +491,7 @@ func (s *Server) listProfiles(w http.ResponseWriter, r *http.Request) {
 			s.Log.Warn("다른 키로 봉인된 배송지라 건너뜁니다", "name", p.Name)
 			continue
 		}
-		plain, err := s.Sealer.Open(profileSeal(p.Name), p.Nonce, p.Sealed)
+		plain, err := s.Sealer.OpenApart(profileSeal(p.Name), p.Nonce, p.Sealed)
 		var sh Shipping
 		if err == nil {
 			err = json.Unmarshal(plain, &sh)
@@ -519,7 +524,7 @@ func (s *Server) putProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	plain, _ := json.Marshal(sh)
-	nonce, sealed, err := s.Sealer.Seal(profileSeal(name), plain)
+	nonce, sealed, err := s.Sealer.SealApart(profileSeal(name), plain)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "봉인하지 못했습니다.")
 		return
