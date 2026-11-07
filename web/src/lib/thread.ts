@@ -20,6 +20,13 @@ import type {
  * that holds one of a known few - and adds what is this page's own.
  */
 
+/**
+ * T without the fields K, to be given narrower types. Unlike a plain Omit, a
+ * K that is not one of T's fields fails the build: a field narrowed here and
+ * renamed or dropped in Go is not quietly kept under its old name.
+ */
+type Narrow<T, K extends keyof T> = Omit<T, K>;
+
 /** proposal.State's values: generated, State is only a string (its constants are typed ones). */
 export type ProposalState = "pending" | "approved" | "rejected" | "executed" | "failed";
 
@@ -27,10 +34,10 @@ export type ProposalState = "pending" | "approved" | "rejected" | "executed" | "
 export type Decision = "approved" | "rejected";
 
 /** What a module was asked to do. `input` is the tool's own arguments. */
-export type ProposalAction = Omit<Action, "input"> & { input: Record<string, unknown> };
+export type ProposalAction = Narrow<Action, "input"> & { input: Record<string, unknown> };
 
 /** One value on a card the operator may change before approving. */
-export type CardField = Omit<Field, "kind"> & {
+export type CardField = Narrow<Field, "kind"> & {
   /** multi: several options, kept comma-joined ("소음·매너,청결"). secret: typed hidden (a password). */
   kind: "text" | "textarea" | "number" | "select" | "multi" | "secret";
 };
@@ -40,7 +47,7 @@ export function isPrivateField(f: CardField): boolean {
   return Boolean(f.private) || f.kind === "secret";
 }
 
-export type ProposalCardBody = Omit<Card, "fields"> & {
+export type ProposalCardBody = Narrow<Card, "fields"> & {
   /** Present when the card is a form (a Joongna draft). */
   fields?: CardField[];
 };
@@ -50,16 +57,16 @@ export type ProposalCardBody = Omit<Card, "fields"> & {
  * raised with no conversation behind it, which is how a detector will
  * eventually suggest something nobody asked for.
  */
-export type Proposal = Omit<ProposalWire, "action" | "card" | "state"> & {
+export type Proposal = Narrow<ProposalWire, "action" | "card" | "state"> & {
   action: ProposalAction;
   card: ProposalCardBody;
   state: ProposalState;
 };
 
 /** An earlier turn a message quotes - swiped on the thread before sending. */
-export type TurnRef = Omit<Ref, "role"> & { role: "agent" | "user" };
+export type TurnRef = Narrow<Ref, "role"> & { role: "agent" | "user" };
 
-export type Turn = Omit<TurnWire, "role" | "ref" | "origin" | "feedback"> & {
+export type Turn = Narrow<TurnWire, "role" | "ref" | "origin" | "feedback"> & {
   role: "agent" | "user";
   /** The earlier message this one quotes. */
   ref?: TurnRef;
@@ -82,9 +89,9 @@ export type Turn = Omit<TurnWire, "role" | "ref" | "origin" | "feedback"> & {
 };
 
 /** A mark on one of Jarvis's answers: it was good, or wrong - and why. */
-export type TurnFeedback = Omit<Feedback, "mark"> & { mark: "good" | "bad" };
+export type TurnFeedback = Narrow<Feedback, "mark"> & { mark: "good" | "bad" };
 
-export type TurnOrigin = Omit<Origin, "kind" | "goals"> & {
+export type TurnOrigin = Narrow<Origin, "kind" | "goals"> & {
   kind: typeof OriginJob | typeof OriginNotice | typeof OriginChecklist;
   /** The days a notice asks about, answered on the card. */
   goals?: GoalAsk[];
