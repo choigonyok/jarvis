@@ -100,8 +100,8 @@ async function read<T>(res: Response): Promise<T> {
   return body;
 }
 
-export async function readDepartures(who: Who): Promise<Departures> {
-  return read(await fetch(base(who), { cache: "no-store" }));
+export async function readDepartures(who: Who, signal?: AbortSignal): Promise<Departures> {
+  return read(await fetch(base(who), { cache: "no-store", signal }));
 }
 
 export async function saveRoutes(who: Who, routes: Route[]): Promise<Route[]> {

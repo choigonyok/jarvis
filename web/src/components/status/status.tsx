@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { ChevronDown, RotateCw } from "lucide-react";
 import { Header, PageTop } from "@/components/shell/header";
 import { TabBar } from "@/components/shell/tab-bar";
@@ -16,7 +16,7 @@ import {
   roots,
   since,
 } from "@/lib/status";
-import { onResume } from "@/lib/resume";
+import { type Fetcher, useResource } from "@/lib/use-resource";
 import { isPending } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
 import {
@@ -62,8 +62,12 @@ export function Status() {
   const waiting = proposals.filter(isPending);
   const usage = useUsage();
 
-  const [report, setReport] = useState<StatusReport | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // Read on opening, on coming back to the app (a pull to refresh too) and
+  // every 30 seconds - only while the tab is visible: a phone left on this
+  // screen in a pocket should not keep polling.
+  const status = useResource("status", reportOf("GET"), { interval: 30_000 });
+  const report = status.data ?? null;
+  const error = status.error?.message ?? null;
   const [refreshing, setRefreshing] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   // The group whose sheet is up, and the check a notification named: its group
@@ -72,32 +76,11 @@ export function Status() {
   const [aim, setAim] = useState<string | null>(null);
   const [, tick] = useState(0);
 
-  const apply = useCallback((out: Fetched) => {
-    if (out.report) {
-      setReport(out.report);
-      setError(null);
-    } else {
-      setError(out.error);
-    }
-  }, []);
-
+  // "확인 3분 전" moves on while the screen stays.
   useEffect(() => {
-    const load = () => void fetchReport("GET").then(apply);
-    load();
-    // Only while the tab is visible: a phone left on this screen in a pocket
-    // should not keep polling.
-    const id = setInterval(() => {
-      if (document.visibilityState === "visible") load();
-    }, 30_000);
     const clock = setInterval(() => tick((n) => n + 1), 30_000);
-    // Back to the app, or a pull to refresh.
-    const stop = onResume(() => fetchReport("GET").then(apply));
-    return () => {
-      clearInterval(id);
-      clearInterval(clock);
-      stop();
-    };
-  }, [apply]);
+    return () => clearInterval(clock);
+  }, []);
 
   // A notification about a check lands on its row (lib/focus.ts): open it
   // too, so what is wrong and what to do are on screen. The row is in its
@@ -122,7 +105,7 @@ export function Status() {
 
   async function refresh() {
     setRefreshing(true);
-    apply(await fetchReport("POST"));
+    await status.reloadWith(reportOf("POST"));
     setRefreshing(false);
   }
 
@@ -223,22 +206,29 @@ export function Status() {
   );
 }
 
-type Fetched = { report: StatusReport; error?: undefined } | { report?: undefined; error: string };
-
-/** POST makes the service look again before answering; GET reads what it has. */
-async function fetchReport(method: "GET" | "POST"): Promise<Fetched> {
-  try {
-    const res = await fetch(method === "POST" ? "/api/status/refresh" : "/api/status/status", {
-      method,
-      cache: "no-store",
-    });
-    const body = await res.json();
-    if (!res.ok) return { error: body.error ?? "상태를 불러오지 못했어요." };
-    return { report: body as StatusReport };
-  } catch {
-    return { error: "상태를 불러오지 못했어요." };
-  }
-}
+/**
+ * The report, read: POST makes the service look again before answering; GET
+ * reads what it has. A failure is said in the service's words when it has
+ * them.
+ */
+const reportOf =
+  (method: "GET" | "POST"): Fetcher<StatusReport> =>
+  async (signal) => {
+    let res: Response;
+    let body: { error?: string } & Partial<StatusReport>;
+    try {
+      res = await fetch(method === "POST" ? "/api/status/refresh" : "/api/status/status", {
+        method,
+        cache: "no-store",
+        signal,
+      });
+      body = await res.json();
+    } catch {
+      throw new Error("상태를 불러오지 못했어요.");
+    }
+    if (!res.ok) throw new Error(body.error ?? "상태를 불러오지 못했어요.");
+    return body as StatusReport;
+  };
 
 const USAGE = "사용량";
 

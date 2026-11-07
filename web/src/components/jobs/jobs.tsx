@@ -17,10 +17,10 @@ import { Pager } from "@/components/ui/pager";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { type BlockedSite, type Job, LIVE, stateLabel, stateTone, when } from "@/lib/jobs";
 import { usePaged } from "@/lib/paging";
-import { onResume } from "@/lib/resume";
 import { ago } from "@/lib/spending";
 import { isPending, type Checklist } from "@/lib/thread";
 import { photoUrl } from "@/lib/uploads";
+import { HttpError, useResource } from "@/lib/use-resource";
 import { useThread } from "@/lib/use-thread";
 import { cn } from "@/lib/utils";
 
@@ -56,12 +56,6 @@ export function Jobs() {
     });
   }, []);
 
-  const [jobs, setJobs] = useState<Job[] | null>(null);
-  const [blocked, setBlocked] = useState<BlockedSite[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  // When the list on screen was read: a refresh that fails leaves it, and says
-  // it is that read - a run shown as going on may have ended since.
-  const [readAt, setReadAt] = useState<Date | null>(null);
   // The sheet left open stays open across a tab switch, and a link to one job
   // (?focus=job:<id> - a job's news in the conversation) opens its sheet, not
   // the top of the list.
@@ -73,39 +67,27 @@ export function Jobs() {
   }, [setOpenId]);
   const [showEnded, setShowEnded] = useState(false);
 
-  const load = useCallback(async () => {
-    void loadOpenLists().then((open) => {
-      if (open) setListIds((cur) => [...new Set([...cur, ...open.filter(unfinished).map((l) => l.id)])]);
-    });
-    try {
-      const res = await fetch("/api/jobs/jobs", { cache: "no-store" });
-      if (!res.ok) throw new Error(String(res.status));
-      const body = (await res.json()) as { jobs: Job[]; blockedSites: BlockedSite[] };
-      setJobs(body.jobs);
-      setBlocked(body.blockedSites);
-      setError(null);
-      setReadAt(new Date());
-    } catch {
-      setError("작업을 불러오지 못했어요. 잠시 뒤 다시 시도하세요.");
-    }
-  }, [loadOpenLists]);
-
-  useEffect(() => {
-    // load sets state only after its fetch resolves; the rule cannot see that.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load();
-  }, [load]);
-  // Back to the app, or a pull to refresh: read again at once.
-  useEffect(() => onResume(load), [load]);
-
-  // While something runs, progress should move on screen without a pull.
-  const running = jobs?.some((j) => j.running) ?? false;
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      if (document.visibilityState === "visible") void load();
-    }, running ? 3_000 : 20_000);
-    return () => window.clearInterval(id);
-  }, [load, running]);
+  // Read on opening and on coming back to the app (a pull to refresh too).
+  const read = useResource<{ jobs: Job[]; blockedSites: BlockedSite[] }>(
+    "jobs",
+    async (signal) => {
+      void loadOpenLists().then((open) => {
+        if (open) setListIds((cur) => [...new Set([...cur, ...open.filter(unfinished).map((l) => l.id)])]);
+      });
+      const res = await fetch("/api/jobs/jobs", { cache: "no-store", signal });
+      if (!res.ok) throw new HttpError(res.status);
+      return (await res.json()) as { jobs: Job[]; blockedSites: BlockedSite[] };
+    },
+    // While something runs, progress should move on screen without a pull.
+    { interval: (body) => (body?.jobs?.some((j) => j.running) ? 3_000 : 20_000) },
+  );
+  const jobs = read.data?.jobs ?? null;
+  const blocked = read.data?.blockedSites ?? [];
+  const error = read.error ? "작업을 불러오지 못했어요. 잠시 뒤 다시 시도하세요." : null;
+  // When the list on screen was read: a refresh that fails leaves it, and says
+  // it is that read - a run shown as going on may have ended since.
+  const readAt = read.readAt;
+  const load = read.reload;
 
   // What is open and not done - and a list made meanwhile (it reaches this
   // screen on the stream) joins them.

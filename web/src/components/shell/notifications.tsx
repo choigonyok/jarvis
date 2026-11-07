@@ -1,10 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { openTarget, targetOf } from "@/lib/focus";
 import { MIND_KEY, NOTE } from "@/lib/kinds";
-import { onInboxRequest, onResume } from "@/lib/resume";
+import { onInboxRequest } from "@/lib/resume";
 import { Bell, Settings2 } from "lucide-react";
 import { HeaderPanel } from "@/components/shell/panel";
 import { useRole } from "@/components/shell/role";
@@ -13,6 +13,7 @@ import { Pager } from "@/components/ui/pager";
 import { Popover, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
 import { usePush } from "@/lib/use-push";
+import { HttpError, useResource } from "@/lib/use-resource";
 import { readable } from "@/lib/brief";
 import { dayOf, monthDay } from "@/lib/when";
 import { cn } from "@/lib/utils";
@@ -89,6 +90,9 @@ const ago = (iso: string) => {
 /** How many the inbox shows a page: output-svc counts them all and sends one page. */
 const INBOX_PAGE = 20;
 
+/** The inbox before its first read: one empty list, the same each time it is drawn. */
+const NO_NOTES: Note[] = [];
+
 export function Notifications() {
   const router = useRouter();
   const role = useRole();
@@ -96,53 +100,46 @@ export function Notifications() {
   const [unheard, setUnheard] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<"list" | "settings">("list");
-  const [notes, setNotes] = useState<Note[]>([]);
-  const [unread, setUnread] = useState(0);
-  const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [failed, setFailed] = useState(false);
   const list = useRef<HTMLUListElement>(null);
   // The page the timer and a return to the app read again.
   const shownPage = useRef(1);
 
-  const load = useCallback(async (at?: number) => {
-    const p = at ?? shownPage.current;
-    try {
+  // The badge stays current while the console is open - read every minute
+  // while it is on screen, and again on coming back to it; a push arriving
+  // means the next look already has it.
+  const inbox = useResource(
+    "inbox",
+    async (signal) => {
+      const p = shownPage.current;
       const res = await fetch(`/api/notify/notifications?limit=${INBOX_PAGE}&offset=${(p - 1) * INBOX_PAGE}`, {
         cache: "no-store",
+        signal,
       });
-      if (!res.ok) throw new Error(String(res.status));
+      if (!res.ok) throw new HttpError(res.status);
       const body = (await res.json()) as { items: Note[]; unread: number; total?: number };
-      setNotes(body.items);
-      setUnread(body.unread);
-      setTotal(body.total ?? body.items.length);
-      setFailed(false);
-    } catch {
-      setFailed(true);
-    }
-  }, []);
+      return { notes: body.items, unread: body.unread, total: body.total ?? body.items.length };
+    },
+    { interval: 60_000 },
+  );
+  const notes = inbox.data?.notes ?? NO_NOTES;
+  const unread = inbox.data?.unread ?? 0;
+  const total = inbox.data?.total ?? 0;
+  const failed = inbox.error !== null;
+  const load = inbox.reload;
 
   const turn = (p: number) => {
     shownPage.current = p;
     setPage(p);
-    void load(p);
+    void load();
     list.current?.scrollTo({ top: 0 });
   };
 
-  // The badge stays current while the console is open; a push arriving means
-  // the next look already has it.
+  // A card decided on this screen: its "결재 대기" was just marked read.
   useEffect(() => {
-    void load();
-    const id = window.setInterval(() => void load(), 60_000);
-    const stop = onResume(() => load());
-    // A card decided on this screen: its "결재 대기" was just marked read.
     const decided = () => void load();
     window.addEventListener("jarvis:decided", decided);
-    return () => {
-      window.clearInterval(id);
-      window.removeEventListener("jarvis:decided", decided);
-      stop();
-    };
+    return () => window.removeEventListener("jarvis:decided", decided);
   }, [load]);
 
   // A grouped push ("밤사이 알림 3건") opens the console with ?inbox=1.
@@ -171,8 +168,13 @@ export function Notifications() {
   };
 
   const markRead = async (ids: number[]) => {
-    setNotes((ns) => ns.map((n) => (ids.length === 0 || ids.includes(n.id) ? { ...n, readAt: n.readAt ?? new Date().toISOString() } : n)));
-    setUnread((u) => (ids.length === 0 ? 0 : Math.max(0, u - ids.filter((id) => notes.find((n) => n.id === id && !n.readAt)).length)));
+    inbox.mutate((cur) =>
+      cur && {
+        ...cur,
+        notes: cur.notes.map((n) => (ids.length === 0 || ids.includes(n.id) ? { ...n, readAt: n.readAt ?? new Date().toISOString() } : n)),
+        unread: ids.length === 0 ? 0 : Math.max(0, cur.unread - ids.filter((id) => notes.find((n) => n.id === id && !n.readAt)).length),
+      },
+    );
     await fetch("/api/notify/notifications/read", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -190,7 +192,7 @@ export function Notifications() {
         // Opened, the inbox starts at its newest page.
         shownPage.current = 1;
         setPage(1);
-        void load(1);
+        void load();
       }}
     >
       <PopoverTrigger

@@ -1,12 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { CopyButton } from "@/components/ui/copy-button";
 import { DetailSheet } from "@/components/ui/detail-sheet";
 import { Pager } from "@/components/ui/pager";
 import { usePaged } from "@/lib/paging";
 import { detail, outcome, outcomeTone, type Reminder, waiting } from "@/lib/reminders";
-import { onResume } from "@/lib/resume";
+import { HttpError, useResource } from "@/lib/use-resource";
 import { cn } from "@/lib/utils";
 
 /**
@@ -16,31 +16,19 @@ import { cn } from "@/lib/utils";
  * read on opening, coming back, and once a minute.
  */
 export function useReminders() {
-  const [reminders, setReminders] = useState<Reminder[] | null>(null);
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/mind/reminders?days=30", { cache: "no-store" });
-      if (!res.ok) return;
+  const { data } = useResource(
+    "reminders",
+    async (signal) => {
+      const res = await fetch("/api/mind/reminders?days=30", { cache: "no-store", signal });
+      if (!res.ok) throw new HttpError(res.status);
       const body = (await res.json()) as { reminders?: Reminder[] };
-      setReminders(body.reminders ?? []);
-    } catch {
-      // Kept as it was: the list is a convenience here, the jobs are not.
-    }
-  }, []);
-  useEffect(() => {
-    // load sets state only after its fetch resolves; the rule cannot see that.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load();
-    const id = window.setInterval(() => {
-      if (document.visibilityState === "visible") void load();
-    }, 60_000);
-    const off = onResume(load);
-    return () => {
-      window.clearInterval(id);
-      off();
-    };
-  }, [load]);
-  return reminders;
+      return body.reminders ?? [];
+    },
+    { interval: 60_000 },
+  );
+  // A read that fails keeps the list as it was, and says nothing: the list
+  // is a convenience here, the jobs are not.
+  return data ?? null;
 }
 
 /** What is waiting to be said, soonest first. */

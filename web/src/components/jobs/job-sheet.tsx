@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { ArrowUp, ChevronRight, ExternalLink } from "lucide-react";
 import { WithUploads } from "@/components/chat/inline-photos";
 import { ProposalCard } from "@/components/chat/proposal-card";
@@ -38,6 +38,7 @@ import { ACTION, JOB_EVENT } from "@/lib/kinds";
 import { usePaged } from "@/lib/paging";
 import type { Decision, Proposal } from "@/lib/thread";
 import { photoUrl } from "@/lib/uploads";
+import { HttpError, useResource } from "@/lib/use-resource";
 import { SAY } from "@/lib/say";
 import { cn } from "@/lib/utils";
 
@@ -77,41 +78,28 @@ function Body({
   onDecide: (id: string, d: Decision, edits?: Record<string, string>, reason?: string) => Promise<string | null>;
   onChanged: () => void;
 }) {
-  const [detail, setDetail] = useState<JobDetail | null>(null);
+  // Every step lands here a few seconds after it happens while a run is live.
+  // Not read again on coming back to the app: the list under the sheet is,
+  // and this reads within seconds anyway.
+  const read = useResource<JobDetail>(
+    `job:${job.id}`,
+    async (signal) => {
+      const res = await fetch(`/api/jobs/jobs/${job.id}?events=300`, { cache: "no-store", signal });
+      if (!res.ok) throw new HttpError(res.status);
+      return (await res.json()) as JobDetail;
+    },
+    { interval: (d) => ((d?.job.running ?? job.running) ? 2_500 : 15_000), resume: false },
+  );
+  const detail = read.data ?? null;
   // Whether the last read of the detail failed, and when the one on screen
   // was read: a failure is said as one, not as "아직 기록이 없습니다".
-  const [failed, setFailed] = useState(false);
-  const [readAt, setReadAt] = useState<Date | null>(null);
+  const failed = read.error !== null;
+  const readAt = read.readAt;
+  const load = read.reload;
   const [text, setText] = useState("");
   // What the last thing done here came to - a failure in the failure's colour,
   // with the way to try again; it read the same as success.
   const [note, setNote] = useState<{ text: string; failed?: boolean; retry?: () => void } | null>(null);
-
-  const load = useCallback(async () => {
-    const res = await fetch(`/api/jobs/jobs/${job.id}?events=300`, { cache: "no-store" }).catch(() => null);
-    if (res?.ok) {
-      setDetail((await res.json()) as JobDetail);
-      setFailed(false);
-      setReadAt(new Date());
-    } else {
-      setFailed(true);
-    }
-  }, [job.id]);
-
-  useEffect(() => {
-    // load sets state only after its fetch resolves; the rule cannot see that.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load();
-  }, [load]);
-
-  // Every step lands here a few seconds after it happens while a run is live.
-  const live = detail?.job.running ?? job.running;
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      if (document.visibilityState === "visible") void load();
-    }, live ? 2_500 : 15_000);
-    return () => window.clearInterval(id);
-  }, [load, live]);
 
   const j = detail?.job ?? job;
   const card = j.waitingCard ? proposals.find((p) => p.id === j.waitingCard && p.state === "pending") : undefined;

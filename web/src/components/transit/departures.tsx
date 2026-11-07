@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Pencil, Plus } from "lucide-react";
 import { Header, PageTop } from "@/components/shell/header";
 import { TabBar } from "@/components/shell/tab-bar";
@@ -12,10 +12,10 @@ import { RouteEditor } from "@/components/transit/route-editor";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { onResume } from "@/lib/resume";
 import { isPending } from "@/lib/thread";
 import type { Who } from "@/lib/track";
 import { type Departures as Read, type Plan, type Route, clockOf, readDepartures, saveRoutes, stageOf } from "@/lib/transit";
+import { useResource } from "@/lib/use-resource";
 import { useThread } from "@/lib/use-thread";
 import { SAY } from "@/lib/say";
 import { cn } from "@/lib/utils";
@@ -35,8 +35,12 @@ export function Departures() {
   const waiting = proposals.filter(isPending);
   const role = useRole();
   const who: Who = role === "guest" ? "guest" : "owner";
-  const [read, setRead] = useState<Read | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // Read on opening, on coming back to the app, and while on screen every 20
+  // seconds: the feeds move every few tens of seconds.
+  const departures = useResource<Read>(`transit:${who}`, (signal) => readDepartures(who, signal), { interval: 20_000 });
+  const read = departures.data ?? null;
+  const error = departures.error?.message ?? null;
+  const load = departures.reload;
   const [now, setNow] = useState(() => Date.now());
   const [picked, setPicked] = useState<string | null>(() => {
     if (typeof window === "undefined") return null;
@@ -48,32 +52,11 @@ export function Departures() {
   });
   const [editing, setEditing] = useState<Route | null | undefined>(undefined);
 
-  const load = useCallback(
-    () =>
-      readDepartures(who).then(
-        (r) => {
-          setRead(r);
-          setError(null);
-        },
-        (e) => setError(e instanceof Error ? e.message : "출발 정보를 읽지 못했어요."),
-      ),
-    [who],
-  );
+  // The countdown moves every second.
   useEffect(() => {
-    void load();
-  }, [load]);
-  useEffect(() => onResume(load), [load]);
-  // The feeds move every few tens of seconds; the countdown every second.
-  useEffect(() => {
-    const read = window.setInterval(() => {
-      if (document.visibilityState === "visible") void load();
-    }, 20_000);
     const tick = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => {
-      window.clearInterval(read);
-      window.clearInterval(tick);
-    };
-  }, [load]);
+    return () => window.clearInterval(tick);
+  }, []);
 
   function pick(id: string) {
     setPicked(id);
@@ -99,7 +82,7 @@ export function Departures() {
     const adding = editing === null;
     const saved = await saveRoutes(who, next);
     setEditing(undefined);
-    setRead((r) => (r ? { ...r, routes: saved } : r));
+    departures.mutate((r) => (r ? { ...r, routes: saved } : r));
     // A route just added is what one wants to see.
     if (adding && saved.length) pick(saved[saved.length - 1].id);
     void load();
