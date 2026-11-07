@@ -55,13 +55,16 @@ export const CLAUDE_MCP = `${MODULE.claude}.mcp__`;
  * Kind): the sender's name, a dot, and what happened.
  */
 export const NOTE = {
-  /** mind-svc/internal/gate/gate.go: a notice of mind's, sent under MIND_KEY. */
+  /**
+   * mind-svc/internal/model/kinds.go KindMindInfo: a notice of mind's that
+   * only tells, sent under MIND_KEY (internal/gate/gate.go).
+   */
   mindInfo: "mind.info",
   /** mind-svc/internal/spending/watch/watch.go. */
   spendingUnparsed: "spending.unparsed",
   spendingBudget: "spending.budget",
   spendingDaily: "spending.daily",
-  /** assets-svc/src/notify.ts (read by mind-svc/internal/mind/ledgers.go AssetsBand). */
+  /** assets-svc/src/notify.ts (read by mind-svc as internal/model/kinds.go KindAssetsBand). */
   assetsBand: "assets.band",
   /** assets-svc/src/notify.ts. */
   assetsFlow: "assets.flow",
@@ -75,7 +78,9 @@ export const MIND_KEY = "mind:";
 /**
  * The senders, as the start of a kind: spending (mind-svc), assets
  * (assets-svc), status (status-svc/main.go), calendar (calendar-svc),
- * location (mind-svc/internal/mind/moments.go), job (agent/cmd/agent/main.go).
+ * location (context-svc/internal/api/api.go announce; mind-svc reads them as
+ * internal/model/kinds.go KindLocation*), job
+ * (agent/internal/assemble/assemble.go ringCards).
  */
 export const SENDER = {
   spending: "spending.",
