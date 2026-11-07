@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/gocommon/queue"
-	"github.com/choigonyok/jarvis/mind-svc/internal/mind"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 )
 
@@ -91,7 +90,7 @@ func (s *Structured) Take(ctx context.Context, m queue.Message) error {
 		}
 		if err = json.Unmarshal(m.Payload, &f); err == nil {
 			for name, raw := range f.Forecasts {
-				if err := s.Store.PutLatest(ctx, mind.ForecastKey(name), raw, m.OccurredAt); err != nil {
+				if err := s.Store.PutLatest(ctx, model.ForecastKey(name), raw, m.OccurredAt); err != nil {
 					return err
 				}
 			}

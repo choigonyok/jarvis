@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/gocommon/queue"
-	"github.com/choigonyok/jarvis/mind-svc/internal/mind"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 	"github.com/choigonyok/jarvis/mind-svc/internal/world"
@@ -171,7 +170,7 @@ func TestTakeForecast(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"집", "가평"} {
-		if _, _, err := st.Latest(context.Background(), mind.ForecastKey(name)); err != nil {
+		if _, _, err := st.Latest(context.Background(), model.ForecastKey(name)); err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
 	}

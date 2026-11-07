@@ -84,9 +84,6 @@ type WeatherState struct {
 	Error string     `json:"error,omitempty"` // why the latest try failed
 }
 
-// ForecastKey is where the forecast of a name is kept.
-func ForecastKey(name string) string { return "weather:" + name }
-
 // homeForecast is the name home's forecast goes by, whatever home is called.
 const homeForecast = "집"
 
@@ -97,7 +94,7 @@ type LatestWeather struct{ Store store.Store }
 
 func (l LatestWeather) read(ctx context.Context, name string) (weather.Forecast, error) {
 	var f weather.Forecast
-	raw, _, err := l.Store.Latest(ctx, ForecastKey(name))
+	raw, _, err := l.Store.Latest(ctx, model.ForecastKey(name))
 	if err != nil {
 		return f, err
 	}

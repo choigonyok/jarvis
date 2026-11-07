@@ -14,6 +14,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/moments"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
+	"github.com/choigonyok/jarvis/mind-svc/internal/observe"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 )
 
@@ -96,7 +97,7 @@ func (m *Mind) Replay(ctx context.Context, client llm.Client, after int64, limit
 		if !msg.IsMine && !msg.Notice {
 			others[msg.Room] = true
 		}
-		if err := Observe(rctx, st, log, msg); err != nil {
+		if err := observe.Message(rctx, st, log, msg); err != nil {
 			return rep, err
 		}
 		log.Drain()

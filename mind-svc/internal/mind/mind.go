@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -32,6 +31,7 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/moments"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
+	"github.com/choigonyok/jarvis/mind-svc/internal/observe"
 	"github.com/choigonyok/jarvis/mind-svc/internal/predict"
 	"github.com/choigonyok/jarvis/mind-svc/internal/prefs"
 	"github.com/choigonyok/jarvis/mind-svc/internal/reflect"
@@ -370,44 +370,14 @@ func (m *Mind) SimulateMessage(ctx context.Context, msg model.Message) (model.Me
 		msg.SentAt = m.Opts.Now()
 	}
 	msg.Ref, msg.Source = fmt.Sprintf("sim:%d", n), "sim"
-	return msg, Observe(ctx, m.Opts.Store, m.Opts.Log, msg)
+	return msg, observe.Message(ctx, m.Opts.Store, m.Opts.Log, msg)
 }
-
-// Observe stores a message's text and logs that it was seen - what every
-// sensor does.
-//
-// The observation's key is not the message's ref: a collector already left
-// the message itself in the stream under that key (message.received,
-// gocommon/collect), and the way in keeps one record per (source, key). With
-// the same key this observation was dropped as a repeat, no room ever came
-// due, and nothing said in KakaoTalk was read.
-func Observe(ctx context.Context, st store.Store, log obs.Log, msg model.Message) error {
-	if err := st.PutMessage(ctx, msg); err != nil {
-		return err
-	}
-	data, _ := json.Marshal(obs.MessageRef{Ref: msg.Ref, Room: msg.Room})
-	return log.Append(ctx, obs.Observation{
-		Source: msg.Source, Type: model.KindMessageObserved, Subject: msg.Room,
-		Data: data, Key: ObservedKey(msg.Ref), OccurredAt: msg.SentAt,
-	})
-}
-
-// ObservedKey is the record key of the observation that a message was seen:
-// its ref, set apart from the record the collector left under the ref itself.
-func ObservedKey(ref string) string { return "observed:" + ref }
 
 // Observe records an occurrence read from a structured source and logs that
-// it was seen, as a sensor does. Seeing the same one again (a payment's
-// items filled in later) updates it.
+// it was seen, as a sensor does (observe.Occurrence). Seeing the same one
+// again (a payment's items filled in later) updates it.
 func (m *Mind) Observe(ctx context.Context, o model.Occurrence) error {
-	if err := m.Opts.Store.PutOccurrence(ctx, o); err != nil {
-		return err
-	}
-	data, _ := json.Marshal(obs.OccurrenceRef{ID: o.ID, Kind: o.Kind})
-	return m.Opts.Log.Append(ctx, obs.Observation{
-		Source: strings.SplitN(o.ID, ":", 2)[0], Type: model.KindOccurrenceObserved, Subject: o.ID,
-		Data: data, Key: "occurrence:" + o.ID + ":" + o.At.UTC().Format(time.RFC3339), OccurredAt: o.At,
-	})
+	return observe.Occurrence(ctx, m.Opts.Store, m.Opts.Log, o)
 }
 
 // ReadAll interprets every room with something new, now.

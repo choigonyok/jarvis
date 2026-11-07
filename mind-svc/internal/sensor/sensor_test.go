@@ -15,9 +15,9 @@ import (
 
 	"github.com/choigonyok/jarvis/gocommon/queue"
 	"github.com/choigonyok/jarvis/gocommon/seal"
-	"github.com/choigonyok/jarvis/mind-svc/internal/mind"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
+	"github.com/choigonyok/jarvis/mind-svc/internal/observe"
 	"github.com/choigonyok/jarvis/mind-svc/internal/spending/ingest"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 )
@@ -58,7 +58,7 @@ func TestMessagesTakesWhatIsWorthReading(t *testing.T) {
 		}
 	}
 	log.Drain()
-	if len(seen) != 1 || seen[0].Key != mind.ObservedKey("kakao:2") {
+	if len(seen) != 1 || seen[0].Key != observe.MessageKey("kakao:2") {
 		t.Fatalf("최근 대화 한 건만 관측해야 합니다: %+v", seen)
 	}
 	// The collector's own record of the message sits in the stream under the

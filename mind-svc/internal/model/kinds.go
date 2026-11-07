@@ -25,7 +25,7 @@ const (
 	KindContextRegions  = "context.regions"
 	KindContextTravel   = "context.travel"
 	// KindWeatherForecast is what is forecast at home and where the plans
-	// are.
+	// are; each place's forecast is also kept on its own (ForecastKey).
 	KindWeatherForecast = "weather.forecast"
 	// The last two days' photos, and the days that are over.
 	KindPhotosRecent = "photos.recent"
@@ -42,6 +42,11 @@ const (
 	// (input-svc).
 	KindChatTurn = "chat.turn"
 )
+
+// ForecastKey is where the forecast of a place is kept: one latest row for
+// each place a weather.forecast record names, which the sensor writes and the
+// loop reads.
+func ForecastKey(name string) string { return "weather:" + name }
 
 // What comes back to mind from its own loop, or is asked of it: read on the
 // deterministic lane, no model. The registry locks the first six to that

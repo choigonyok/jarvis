@@ -15,9 +15,9 @@ import (
 	"github.com/choigonyok/jarvis/gocommon/collect"
 	"github.com/choigonyok/jarvis/gocommon/queue"
 	"github.com/choigonyok/jarvis/gocommon/seal"
-	"github.com/choigonyok/jarvis/mind-svc/internal/mind"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/obs"
+	"github.com/choigonyok/jarvis/mind-svc/internal/observe"
 	"github.com/choigonyok/jarvis/mind-svc/internal/spending/ingest"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 )
@@ -74,7 +74,7 @@ func (s *Messages) Take(ctx context.Context, q queue.Message) error {
 	if !s.worth(m) {
 		return nil
 	}
-	return mind.Observe(ctx, s.Store, s.Log, model.Message{
+	return observe.Message(ctx, s.Store, s.Log, model.Message{
 		Ref: fmt.Sprintf("%s:%d", name, m.RowID), Source: name,
 		Room: fmt.Sprintf("%s:%d", name, m.ChatID), RoomName: m.ChatName,
 		Sender: m.Author, IsMine: m.IsMine, SentAt: sent, Text: m.Text,
@@ -155,7 +155,7 @@ func (s *Messages) TakeTurn(ctx context.Context, q queue.Message) error {
 	if !ok {
 		return nil
 	}
-	return mind.Observe(ctx, s.Store, s.Log, msg)
+	return observe.Message(ctx, s.Store, s.Log, msg)
 }
 
 // message is a turn as a message of the jarvis room; ok is false when it has

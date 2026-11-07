@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
 	"github.com/choigonyok/jarvis/mind-svc/internal/weather"
 )
@@ -19,7 +20,7 @@ func TestLatestWeather(t *testing.T) {
 	put := func(name string, f weather.Forecast) {
 		t.Helper()
 		raw, _ := json.Marshal(f)
-		if err := st.PutLatest(ctx, ForecastKey(name), raw, time.Now()); err != nil {
+		if err := st.PutLatest(ctx, model.ForecastKey(name), raw, time.Now()); err != nil {
 			t.Fatal(err)
 		}
 	}
