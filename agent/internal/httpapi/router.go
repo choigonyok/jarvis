@@ -360,8 +360,9 @@ func (s *Server) getThread(w http.ResponseWriter, r *http.Request) {
 	// Proposals ride along: a client hydrating the thread needs the cards
 	// those turns point at, and one round trip is one less way to be stale.
 	// The live cards come too - every one waiting, drawn apart from any turn,
-	// and those decided lately, which the record lists and the pages above
-	// point at - but not every card there ever was.
+	// and those that changed lately, which the pages above point at - but not
+	// every card there ever was: the record reads the archive on its own
+	// (GET /proposals?scope=archive).
 	var cards []string
 	for _, t := range turns {
 		if t.ProposalID != "" {
@@ -542,8 +543,23 @@ func (s *Server) accept(said thread.Said) string {
 	return ""
 }
 
+// getProposals is the live cards - every one waiting, and those that changed
+// lately - or with ?scope=archive the cards archived beside them, which the
+// record lists with the live ones.
 func (s *Server) getProposals(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"proposals": s.proposals.List()})
+	switch r.URL.Query().Get("scope") {
+	case "":
+		writeJSON(w, http.StatusOK, map[string]any{"proposals": s.proposals.List()})
+	case "archive":
+		cards, err := s.proposals.Archived()
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "지난 카드를 읽지 못했습니다.")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"proposals": cards})
+	default:
+		writeErr(w, http.StatusBadRequest, "scope 는 archive 만 받습니다.")
+	}
 }
 
 // postDecision takes an answer to a card with secret fields: a secret is a

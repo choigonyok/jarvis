@@ -10,9 +10,10 @@ import { StandingBar } from "@/components/shell/standing-bar";
 import { Pager } from "@/components/ui/pager";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
-import { filters, groupByDay, matches, newestFirst, waitingSince, type Filter } from "@/lib/ledger";
+import { filters, groupByDay, matches, newestFirst, readArchive, waitingSince, withArchive, type Filter } from "@/lib/ledger";
 import { usePaged } from "@/lib/paging";
 import { isPending, type Decision, type Proposal } from "@/lib/thread";
+import { useResource } from "@/lib/use-resource";
 import { useThread } from "@/lib/use-thread";
 
 /**
@@ -24,11 +25,18 @@ import { useThread } from "@/lib/use-thread";
  * handled without actually being decided.
  */
 export function Ledger() {
-  const { proposals, connection, error, hydrated, decide } = useThread();
+  const { proposals: live, connection, error, hydrated, decide } = useThread();
+  // The thread carries the live cards; those decided long ago are in the
+  // agent's archive, read when this opens and again on coming back to the
+  // console - the agent may have archived more meanwhile, which the live
+  // list then no longer holds. Not on a timer: cards move there in one pass
+  // a day at most.
+  const archive = useResource("record:archive", readArchive);
+  const proposals = useMemo(() => withArchive(live, archive.data), [live, archive.data]);
   // The filter stays across a tab switch (lib/keep.ts).
   const [filter, setFilter] = useKept<Filter>("record:filter", "all");
 
-  const pending = proposals.filter(isPending);
+  const pending = live.filter(isPending);
   // What waits stands above the days: every screen's bar lands here, and a card
   // from yesterday is on the second page of a busy day's list. In the full view
   // it is said once, up there.
@@ -42,7 +50,9 @@ export function Ledger() {
   const paged = usePaged(shown, { reset: filter });
   const days = groupByDay(paged.items);
 
-  const empty = hydrated && shown.length === 0 && waiting.length === 0;
+  // Nothing raised is said once the archive has answered too: until then the
+  // older days may only be on their way, and if it fails that is said instead.
+  const empty = hydrated && archive.data !== undefined && shown.length === 0 && waiting.length === 0;
   const decideOn = (proposal: Proposal) => (d: Decision, reason?: string) => void decide(proposal.id, d, undefined, reason);
 
   return (
@@ -123,6 +133,14 @@ export function Ledger() {
             ))}
           </div>
           <Pager {...paged} unit="장" />
+
+          {/* Only when none came: a later read that fails leaves the ones
+              read before, which are still so. */}
+          {archive.error && archive.data === undefined ? (
+            <Failed onRetry={archive.reload} className="mt-6">
+              지난 요청을 불러오지 못했어요.
+            </Failed>
+          ) : null}
 
           {error ? (
             <Failed className="mt-6">{error}</Failed>

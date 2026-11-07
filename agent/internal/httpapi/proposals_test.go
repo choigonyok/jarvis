@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -74,5 +75,67 @@ func TestThreadCarriesTheCardsItShows(t *testing.T) {
 	}
 	if p, ok := props.Get(offPage); !ok || p.State != proposal.Rejected {
 		t.Fatalf("빠진 카드도 id 로는 찾습니다: %+v %v", p, ok)
+	}
+}
+
+// The record reads the archive on its own: ?scope=archive is every card the
+// archive holds, while GET /proposals stays the live ones. A scope it does not
+// know is refused rather than read as either.
+func TestTheArchiveIsListedApart(t *testing.T) {
+	now := time.Now()
+	weeks := now.Add(-30 * 24 * time.Hour)
+	id := func(at time.Time, seq int) string { return fmt.Sprintf("p-%d-%d", at.UnixMilli(), seq) }
+	old, waiting := id(weeks, 1), id(weeks, 2)
+	path := filepath.Join(t.TempDir(), "proposals.json")
+	err := jsonfile.Save(path, map[string]any{"seq": 2, "proposals": []proposal.Proposal{
+		{ID: old, Origin: proposal.OriginChat, State: proposal.Executed, Card: action.Card{Title: "한 달 전 일정"}},
+		{ID: waiting, Origin: proposal.OriginNotice, State: proposal.Pending, Card: action.Card{Title: "로그인해 주세요"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	props := proposal.NewStore(bus.New())
+	if err := props.Persist(path, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+		t.Fatal(err)
+	}
+	s := New(Deps{Thread: thread.NewStore("http://127.0.0.1:1", "", bus.New()), Proposals: props, Runner: bgRunner{}, APIToken: "svc"})
+	get := func(target string) (int, []string) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, target, nil)
+		req.Header.Set("Authorization", "Bearer svc")
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, req)
+		var body struct {
+			Proposals []proposal.Proposal `json:"proposals"`
+		}
+		_ = json.Unmarshal(rec.Body.Bytes(), &body)
+		ids := []string{}
+		for _, p := range body.Proposals {
+			ids = append(ids, p.ID)
+		}
+		return rec.Code, ids
+	}
+	if code, ids := get("/proposals"); code != http.StatusOK || !slices.Equal(ids, []string{waiting}) {
+		t.Fatalf("살아 있는 카드: %d %v", code, ids)
+	}
+	if code, ids := get("/proposals?scope=archive"); code != http.StatusOK || !slices.Equal(ids, []string{old}) {
+		t.Fatalf("보관한 카드: %d %v", code, ids)
+	}
+	if code, _ := get("/proposals?scope=everything"); code != http.StatusBadRequest {
+		t.Fatalf("모르는 scope: %d", code)
+	}
+
+	// An archive that cannot be read is said as a failure, not as no cards.
+	broken := filepath.Join(t.TempDir(), "proposals.json")
+	if err := os.WriteFile(filepath.Join(filepath.Dir(broken), "proposals-archive.json"), []byte("{깨진"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	props = proposal.NewStore(bus.New())
+	if err := props.Persist(broken, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+		t.Fatal(err)
+	}
+	s = New(Deps{Thread: thread.NewStore("http://127.0.0.1:1", "", bus.New()), Proposals: props, Runner: bgRunner{}, APIToken: "svc"})
+	if code, _ := get("/proposals?scope=archive"); code != http.StatusInternalServerError {
+		t.Fatalf("읽지 못한 보관 파일: %d", code)
 	}
 }

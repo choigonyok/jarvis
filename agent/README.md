@@ -415,6 +415,7 @@ cd web && AGENT_URL=http://localhost:8080 \
 | POST | `/messages/{id}/steer` · `/messages/{id}/drop` | 대기열의 말을 진행 중인 턴에 끼워 넣거나 뺀다 |
 | POST | `/thread/stop` | 쓰고 있는 답을 멈춘다(CLI 에 stream-json `interrupt`). 쓴 데까지 남고 "(여기서 멈췄어요)"가 붙으며, 기다리던 말은 이어서 간다. 5초 안에 끝나지 않으면 프로세스를 끝내고 다음 말은 새 세션으로 연다. 멈출 답이 없으면 409 |
 | GET | `/proposals` | 기다리는 카드와 최근(마지막으로 바뀐 지 14일 안)에 결정한 카드. 그보다 오래된 카드는 `proposals-archive.json` 으로 옮겨 두고 id 로 찾는다. 보관한 카드를 정리(Settle)하면 다시 살아 있는 카드가 된다 |
+| GET | `/proposals?scope=archive` | 보관한 카드 전부. 기록 탭이 열 때 읽어 살아 있는 카드와 합쳐 보여 준다 |
 | POST | `/proposals/{id}/decision` | 비밀 칸이 있는 카드의 답만 `{"decision":"approved"\|"rejected","edits":{}}`. 다른 카드의 답은 입구로 온다 |
 | GET | `/usage` | 구독 사용량 |
 | POST | `/uploads` · GET `/uploads/{name}` | 사진 첨부 |

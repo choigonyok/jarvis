@@ -1,12 +1,33 @@
 import { readableTitle } from "@/lib/card-body";
 import { dayLabel as whenDayLabel, dayOf, monthDay } from "@/lib/when";
-import type { Proposal, ProposalState } from "@/lib/thread";
+import { API, type Proposal, type ProposalState } from "@/lib/thread";
+import { HttpError } from "@/lib/use-resource";
 
 /**
- * The record surface reads the same proposals the chat does - there is no
- * second store and no read/unread flag. A decision's state is the only state
- * there is, so a request cannot be "dismissed" into looking handled.
+ * The record surface reads the same proposals the chat does, and the ones
+ * the agent's store keeps in its archive - there is no second store and no
+ * read/unread flag. A decision's state is the only state there is, so a
+ * request cannot be "dismissed" into looking handled.
  */
+
+/**
+ * The cards in the agent's archive: decided, and unchanged for two weeks.
+ * The thread's pages carry the live cards and those their turns point at,
+ * so the record reads the rest here.
+ */
+export async function readArchive(signal: AbortSignal): Promise<Proposal[]> {
+  const res = await fetch(`${API}/proposals?scope=archive`, { cache: "no-store", signal });
+  if (!res.ok) throw new HttpError(res.status);
+  return ((await res.json()) as { proposals?: Proposal[] }).proposals ?? [];
+}
+
+/** Every card once: the live ones, then the archive's not among them - the live copy is the one the stream keeps current. */
+export function withArchive(live: Proposal[], archived: Proposal[] | undefined): Proposal[] {
+  if (!archived?.length) return live;
+  const have = new Set(live.map((p) => p.id));
+  const old = archived.filter((p) => !have.has(p.id));
+  return old.length > 0 ? [...live, ...old] : live;
+}
 
 export type Filter = "all" | "pending" | "approved" | "rejected";
 
