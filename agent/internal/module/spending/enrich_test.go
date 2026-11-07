@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/choigonyok/jarvis/agent/internal/claudecode"
+	"github.com/choigonyok/jarvis/agent/internal/core/run"
 )
 
 type fakeSvc struct {
@@ -46,13 +46,13 @@ func (f *fakeSvc) server(t *testing.T) *httptest.Server {
 type fakeBG struct {
 	calls  int
 	prompt string
-	task   claudecode.Task
+	task   run.Task
 	run    func()
 	err    error
 }
 
 func (b *fakeBG) CanStart(bool) bool { return true }
-func (b *fakeBG) Background(_ context.Context, t claudecode.Task) (string, error) {
+func (b *fakeBG) Background(_ context.Context, t run.Task) (string, error) {
 	b.calls++
 	b.prompt, b.task = t.Prompt, t
 	if b.run != nil {
@@ -97,7 +97,7 @@ func TestEnrichOnceReportsOnlyTheUnanswered(t *testing.T) {
 func TestYieldRecordsNothing(t *testing.T) {
 	f := &fakeSvc{reported: map[int64]string{}, pending: []Pending{{ID: 1, Merchant: "쿠팡", AmountKrw: 8900}}}
 	m := New(NewStore(f.server(t).URL, "", nil))
-	m.enrichOnce(context.Background(), &fakeBG{err: claudecode.ErrYielded}, EnrichConfig{}, f.pending, quiet)
+	m.enrichOnce(context.Background(), &fakeBG{err: run.ErrYielded}, EnrichConfig{}, f.pending, quiet)
 	if len(f.reported) != 0 {
 		t.Fatalf("양보했는데 기록됨: %v", f.reported)
 	}

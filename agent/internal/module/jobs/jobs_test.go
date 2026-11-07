@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/choigonyok/jarvis/agent/internal/claudecode"
 	"github.com/choigonyok/jarvis/agent/internal/core/action"
 	"github.com/choigonyok/jarvis/agent/internal/core/bus"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
+	"github.com/choigonyok/jarvis/agent/internal/core/run"
 )
 
 func newModule() *Module {
@@ -140,13 +140,13 @@ func TestJobsWithoutSitesRunBesideTheConversation(t *testing.T) {
 
 func TestDescribe(t *testing.T) {
 	cases := []struct {
-		step claudecode.Step
+		step run.Step
 		want string
 	}{
-		{claudecode.Step{Tool: "mcp__mcp-browser__browser_navigate", Input: json.RawMessage(`{"url":"https://web.joongna.com/product/form"}`)}, "열기: https://web.joongna.com/product/form"},
-		{claudecode.Step{Tool: "mcp__mcp-browser__browser_upload_files", Input: json.RawMessage(`{"paths":["a","b"]}`)}, "사진 2장 넣기"},
-		{claudecode.Step{Tool: "mcp__job__schedule_next", Input: json.RawMessage(`{}`)}, ""},
-		{claudecode.Step{Text: "판매 글 양식을 확인합니다."}, "판매 글 양식을 확인합니다."},
+		{run.Step{Tool: "mcp__mcp-browser__browser_navigate", Input: json.RawMessage(`{"url":"https://web.joongna.com/product/form"}`)}, "열기: https://web.joongna.com/product/form"},
+		{run.Step{Tool: "mcp__mcp-browser__browser_upload_files", Input: json.RawMessage(`{"paths":["a","b"]}`)}, "사진 2장 넣기"},
+		{run.Step{Tool: "mcp__job__schedule_next", Input: json.RawMessage(`{}`)}, ""},
+		{run.Step{Text: "판매 글 양식을 확인합니다."}, "판매 글 양식을 확인합니다."},
 	}
 	for _, c := range cases {
 		if _, got := describe(c.step); got != c.want {

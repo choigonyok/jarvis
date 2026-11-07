@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/choigonyok/jarvis/agent/internal/claudecode"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
+	"github.com/choigonyok/jarvis/agent/internal/core/run"
 	"github.com/choigonyok/jarvis/agent/internal/steps"
 )
 
@@ -47,13 +47,15 @@ func runTools(browser bool) []string {
 // beside the conversation.
 func needsBrowser(j Job) bool { return len(j.Sites) > 0 }
 
+// Background is the runner as the scheduler uses it: the runs themselves,
+// the places they take and the browser given up for a job put first.
 type Background interface {
+	run.Background
 	// Reserve takes a place for a run about to begin, or says none is free:
 	// with the browser, only while the conversation is not using it and no
 	// other run holds it; without, while one of the places is free. The run
 	// carries it (Task.Place), and it goes back if the run never begins.
-	Reserve(browser bool) (claudecode.Place, bool)
-	Background(ctx context.Context, t claudecode.Task) (string, error)
+	Reserve(browser bool) (run.Place, bool)
 	// YieldBrowser stops the run on the browser for a job put first, and
 	// says whether there was one.
 	YieldBrowser(why string) bool
@@ -187,7 +189,7 @@ func (m *Module) Run(ctx context.Context, bg Background, cfg SchedulerConfig) {
 				lastBrowser = time.Now()
 			}
 			wg.Add(1)
-			go func(j Job, place claudecode.Place) {
+			go func(j Job, place run.Place) {
 				defer wg.Done()
 				// Its place is free, and the job (or another) may be due again.
 				defer m.wake()
@@ -240,7 +242,7 @@ func (m *Module) unclaim(job int64) {
 	m.activeMu.Unlock()
 }
 
-func (m *Module) runOnce(ctx context.Context, bg Background, cfg SchedulerConfig, j Job, place claudecode.Place) {
+func (m *Module) runOnce(ctx context.Context, bg Background, cfg SchedulerConfig, j Job, place run.Place) {
 	// Its turn came: a 먼저 card it raised while it waited has done its part.
 	m.closeOffer(j.ID, "차례가 와서 시작했습니다.")
 	d, err := m.store.Detail(ctx, j.ID)
@@ -250,7 +252,7 @@ func (m *Module) runOnce(ctx context.Context, bg Background, cfg SchedulerConfig
 	}
 	browser := needsBrowser(d.Job)
 	// The browser is held to the job's sites only while the run has it
-	// (claudecode.Task.Hold), and let go before anyone else gets it (Done):
+	// (run.Task.Hold), and let go before anyone else gets it (Done):
 	// the conversation taking it over must not find itself held to them.
 	var hold func(context.Context) error
 	var release func()
@@ -265,20 +267,20 @@ func (m *Module) runOnce(ctx context.Context, bg Background, cfg SchedulerConfig
 			}
 		}
 	}
-	run, err := m.store.StartRun(ctx, j.ID)
+	runID, err := m.store.StartRun(ctx, j.ID)
 	if err != nil {
 		m.log.Warn("실행을 시작하지 못했습니다", "job", j.ID, "err", err)
 		return
 	}
-	m.current.add(run, d.Job, browser)
-	defer m.current.remove(run)
+	m.current.add(runID, d.Job, browser)
+	defer m.current.remove(runID)
 	// A payment card decided before this run reaches it as a card answer.
 	m.pay.settled(j.ID)
 	model := cfg.Model
 	if j.Attempts > 0 && cfg.RetryModel != "" {
 		model = cfg.RetryModel
 	}
-	m.log.Info("작업을 실행합니다", "job", j.ID, "run", run, "title", j.Title, "model", model, "browser", browser)
+	m.log.Info("작업을 실행합니다", "job", j.ID, "run", runID, "title", j.Title, "model", model, "browser", browser)
 
 	bctx := context.WithoutCancel(ctx)
 	// What this run did, step by step - handed to the next run if the
@@ -302,14 +304,14 @@ func (m *Module) runOnce(ctx context.Context, bg Background, cfg SchedulerConfig
 			text += noBrowserWebNote
 		}
 	}
-	servers := map[string]string{RunServerName: fmt.Sprintf("%s/%d", cfg.RunURL, run)}
+	servers := map[string]string{RunServerName: fmt.Sprintf("%s/%d", cfg.RunURL, runID)}
 	allowed, system := runTools(browser), runSystem
 	if cfg.Web != nil {
 		servers[cfg.Web.Name] = cfg.Web.URL
 		allowed = append(allowed, cfg.Web.Tools...)
 		system += webRunRules
 	}
-	result, err := bg.Background(ctx, claudecode.Task{
+	result, err := bg.Background(ctx, run.Task{
 		Name:    "작업 " + j.Title,
 		Prompt:  text,
 		System:  system,
@@ -322,9 +324,9 @@ func (m *Module) runOnce(ctx context.Context, bg Background, cfg SchedulerConfig
 		Place:   place,
 		Hold:    hold,
 		Done:    release,
-		OnStep: func(s claudecode.Step) {
+		OnStep: func(s run.Step) {
 			if kind, text := describe(s); text != "" {
-				_ = m.store.Step(bctx, run, kind, text)
+				_ = m.store.Step(bctx, runID, kind, text)
 				did = append(did, text)
 			}
 		},
@@ -332,11 +334,11 @@ func (m *Module) runOnce(ctx context.Context, bg Background, cfg SchedulerConfig
 
 	outcome, note := "ok", ""
 	switch {
-	case errors.Is(err, claudecode.ErrYielded), errors.Is(err, claudecode.ErrBusy):
+	case errors.Is(err, run.ErrYielded), errors.Is(err, run.ErrBusy):
 		outcome = "yielded"
 		// It gave the browser to a job the operator put first: it keeps its
 		// place in line, right after that one.
-		if first := m.current.behind(run); first != "" {
+		if first := m.current.behind(runID); first != "" {
 			outcome, note = "deferred", first
 		}
 		m.cutMu.Lock()
@@ -346,7 +348,7 @@ func (m *Module) runOnce(ctx context.Context, bg Background, cfg SchedulerConfig
 			m.cut[j.ID] = before
 		}
 		m.cutMu.Unlock()
-	case errors.Is(err, claudecode.ErrHold):
+	case errors.Is(err, run.ErrHold):
 		m.log.Warn("작업을 사이트 안에 묶지 못해 실행하지 못했습니다", "job", j.ID, "err", err)
 		outcome, note = "error", clampText(err.Error(), 200)
 	case err != nil:
@@ -355,20 +357,20 @@ func (m *Module) runOnce(ctx context.Context, bg Background, cfg SchedulerConfig
 	// A run that said nothing of what comes next while its question is still
 	// up - a run for an instruction, say, that had nothing to ask - leaves
 	// the job waiting on that card again, not counted as having failed.
-	if outcome == "ok" && !m.current.decidedOf(run) {
+	if outcome == "ok" && !m.current.decidedOf(runID) {
 		if open := m.waitingOn(j.ID); len(open) > 0 {
 			last := open[len(open)-1]
-			if werr := m.store.Wait(bctx, run, last.ID, "카드 답 대기: "+clampText(last.Card.Title, 80)); werr != nil {
+			if werr := m.store.Wait(bctx, runID, last.ID, "카드 답 대기: "+clampText(last.Card.Title, 80)); werr != nil {
 				m.log.Warn("작업을 남은 카드에 다시 걸지 못했습니다", "job", j.ID, "card", last.ID, "err", werr)
 			}
 		}
 	}
-	end, eerr := m.store.EndRun(bctx, run, outcome, note)
+	end, eerr := m.store.EndRun(bctx, runID, outcome, note)
 	if eerr != nil {
-		m.log.Warn("실행을 닫지 못했습니다", "run", run, "err", eerr)
+		m.log.Warn("실행을 닫지 못했습니다", "run", runID, "err", eerr)
 		return
 	}
-	m.log.Info("작업 실행이 끝났습니다", "job", j.ID, "run", run, "outcome", outcome, "again", end.Again, "result", clampText(result, 200))
+	m.log.Info("작업 실행이 끝났습니다", "job", j.ID, "run", runID, "outcome", outcome, "again", end.Again, "result", clampText(result, 200))
 	if end.Over {
 		// Done or called off: what it still asks has nobody to answer.
 		if n := m.withdrawCards(j.ID); n > 0 {
@@ -376,13 +378,13 @@ func (m *Module) runOnce(ctx context.Context, bg Background, cfg SchedulerConfig
 		}
 		// Done by its run (not called off from the 작업 tab): the phone
 		// hears it, whatever the conversation is doing.
-		if summary, done := m.current.finishedOf(run); done {
-			m.ended(EndNote{Job: d.Job, Run: run, Done: true, Text: summary})
+		if summary, done := m.current.finishedOf(runID); done {
+			m.ended(EndNote{Job: d.Job, Run: runID, Done: true, Text: summary})
 		}
 	}
 	if end.Failed {
-		m.say(d.Job, run, "세 번 연달아 잘 끝나지 않아 멈췄습니다: "+end.Note+"\n작업 탭에서 확인하고 다시 시작할 수 있습니다.")
-		m.ended(EndNote{Job: d.Job, Run: run, Text: end.Note})
+		m.say(d.Job, runID, "세 번 연달아 잘 끝나지 않아 멈췄습니다: "+end.Note+"\n작업 탭에서 확인하고 다시 시작할 수 있습니다.")
+		m.ended(EndNote{Job: d.Job, Run: runID, Text: end.Note})
 	}
 }
 
@@ -413,7 +415,7 @@ func (m *Module) purge(ctx context.Context) {
 // What a person watching wants: where it went, what it pressed and typed
 // (steps.Line, which the conversation's progress line reads too). The job's
 // own tools log themselves in mind (schedule, card, report).
-func describe(s claudecode.Step) (string, string) {
+func describe(s run.Step) (string, string) {
 	if s.Tool == "" {
 		return "note", clampText(s.Text, 300)
 	}

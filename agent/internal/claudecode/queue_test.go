@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/agent/internal/core/bus"
+	"github.com/choigonyok/jarvis/agent/internal/core/run"
 	"github.com/choigonyok/jarvis/agent/internal/thread"
 )
 
@@ -96,7 +97,7 @@ func TestQueueSteerAndDrop(t *testing.T) {
 	if err := r.Drop(q[1].ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Drop(q[1].ID); !errors.Is(err, ErrNotQueued) {
+	if err := r.Drop(q[1].ID); !errors.Is(err, run.ErrNotQueued) {
 		t.Fatalf("두 번 뺄 수는 없습니다: %v", err)
 	}
 

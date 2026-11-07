@@ -30,6 +30,7 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/core/bus"
 	"github.com/choigonyok/jarvis/agent/internal/core/module"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
+	"github.com/choigonyok/jarvis/agent/internal/core/run"
 	"github.com/choigonyok/jarvis/agent/internal/httpapi"
 	"github.com/choigonyok/jarvis/agent/internal/memorywatch"
 	"github.com/choigonyok/jarvis/agent/internal/module/assets"
@@ -923,7 +924,7 @@ var loginSites = []browsercheck.Site{
 // presses the button. Anything beyond a plain login - a code by text, a
 // captcha, a new-device check - it leaves for the operator. said hears the
 // task's own one-line account of what it saw.
-func relogin(runner *claudecode.Runner, v *vault.Module, browserURL, browserToken string, said func(site, result string)) func(context.Context, browsercheck.Site) error {
+func relogin(bg run.Background, v *vault.Module, browserURL, browserToken string, said func(site, result string)) func(context.Context, browsercheck.Site) error {
 	return func(ctx context.Context, s browsercheck.Site) error {
 		domain, err := site.Domain(s.LoginHost)
 		if err != nil {
@@ -940,7 +941,7 @@ func relogin(runner *claudecode.Runner, v *vault.Module, browserURL, browserToke
 		for _, t := range []string{"browser_navigate", "browser_get_state", "browser_click", "browser_fill_login", "browser_screenshot", "browser_list_tabs", "browser_switch_tab", "browser_close_tab"} {
 			tools = append(tools, "mcp__"+jobs.BrowserServer+"__"+t)
 		}
-		result, err := runner.Background(ctx, claudecode.Task{
+		result, err := bg.Background(ctx, run.Task{
 			Name: "재로그인 " + s.ID,
 			Prompt: fmt.Sprintf("%s(%s) 로그인이 풀렸습니다. 다시 로그인하세요.\n"+
 				"1. browser_navigate 로 %s 를 엽니다. 로그인 화면으로 넘어갑니다.\n"+

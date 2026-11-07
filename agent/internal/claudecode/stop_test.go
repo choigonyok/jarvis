@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/agent/internal/core/bus"
+	"github.com/choigonyok/jarvis/agent/internal/core/run"
 	"github.com/choigonyok/jarvis/agent/internal/thread"
 )
 
@@ -95,7 +96,7 @@ func listening(r *Runner) bool {
 // meanwhile is answered next.
 func TestStopEndsTheTurnWhereItIs(t *testing.T) {
 	r, read := stopRunner(t)
-	if _, err := r.Stop(); !errors.Is(err, ErrNotRunning) {
+	if _, err := r.Stop(); !errors.Is(err, run.ErrNotRunning) {
 		t.Fatalf("쓰고 있는 답이 없으면 멈출 것도 없습니다: %v", err)
 	}
 	if _, err := r.Submit("LONG count", nil, nil); err != nil {

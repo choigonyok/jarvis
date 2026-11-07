@@ -23,6 +23,8 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/agent/internal/core/module"
+	// search-svc's places as the web module's client reads them: Naver's map
+	// is asked through that one client (NaverPlaces), not a second one here.
 	"github.com/choigonyok/jarvis/agent/internal/module/web"
 	"github.com/choigonyok/jarvis/agent/internal/tool"
 )

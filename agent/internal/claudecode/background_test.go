@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/agent/internal/config"
+	"github.com/choigonyok/jarvis/agent/internal/core/run"
 )
 
 // A stand-in CLI that prints a result line and then takes its time.
@@ -34,7 +35,7 @@ func runner(t *testing.T, bin string) *Runner {
 
 func TestBackgroundFinishes(t *testing.T) {
 	r := runner(t, fakeClaude(t, "0"))
-	out, err := r.Background(context.Background(), Task{Name: "t", Extra: []string{"mcp-browser"}, Browser: true, Timeout: 5 * time.Second})
+	out, err := r.Background(context.Background(), run.Task{Name: "t", Extra: []string{"mcp-browser"}, Browser: true, Timeout: 5 * time.Second})
 	if err != nil || out != "done" || !r.Idle() {
 		t.Fatalf("out %q err %v idle %v", out, err, r.Idle())
 	}
@@ -49,7 +50,7 @@ func TestTakeBrowserStopsTheTaskOnIt(t *testing.T) {
 	done := make(chan error, 1)
 	released := make(chan struct{})
 	go func() {
-		_, err := r.Background(context.Background(), Task{Name: "t", Browser: true, Timeout: 30 * time.Second,
+		_, err := r.Background(context.Background(), run.Task{Name: "t", Browser: true, Timeout: 30 * time.Second,
 			Done: func() { time.Sleep(100 * time.Millisecond); close(released) }})
 		done <- err
 	}()
@@ -71,7 +72,7 @@ func TestTakeBrowserStopsTheTaskOnIt(t *testing.T) {
 	if time.Since(start) > 3*time.Second {
 		t.Fatal("양보가 늦습니다")
 	}
-	if err := <-done; !errors.Is(err, ErrYielded) {
+	if err := <-done; !errors.Is(err, run.ErrYielded) {
 		t.Fatalf("err %v", err)
 	}
 	if r.CanStart(true) {
@@ -88,16 +89,16 @@ func TestTakeBrowserStopsTheTaskOnIt(t *testing.T) {
 func TestBrowserTaskRunsBesideATalkingTurn(t *testing.T) {
 	r := runner(t, fakeClaude(t, "0"))
 	r.running = true
-	if out, err := r.Background(context.Background(), Task{Browser: true, Timeout: 5 * time.Second}); err != nil || out != "done" {
+	if out, err := r.Background(context.Background(), run.Task{Browser: true, Timeout: 5 * time.Second}); err != nil || out != "done" {
 		t.Fatalf("말만 하는 대화 중에도 브라우저 작업은 돌아야 합니다: %q %v", out, err)
 	}
 	r.mu.Lock()
 	r.chatBrowser = true
 	r.mu.Unlock()
-	if _, err := r.Background(context.Background(), Task{Browser: true, Timeout: time.Second}); !errors.Is(err, ErrBusy) {
+	if _, err := r.Background(context.Background(), run.Task{Browser: true, Timeout: time.Second}); !errors.Is(err, run.ErrBusy) {
 		t.Fatalf("대화가 브라우저를 쓰는 중에 브라우저 작업을 시작했습니다: %v", err)
 	}
-	if out, err := r.Background(context.Background(), Task{Timeout: 5 * time.Second}); err != nil || out != "done" {
+	if out, err := r.Background(context.Background(), run.Task{Timeout: 5 * time.Second}); err != nil || out != "done" {
 		t.Fatalf("브라우저 없는 작업은 대화 중에도 돌아야 합니다: %q %v", out, err)
 	}
 }
@@ -106,7 +107,7 @@ func TestBackgroundWithoutBrowserRunsThroughTheConversation(t *testing.T) {
 	r := runner(t, fakeClaude(t, "2"))
 	done := make(chan error, 1)
 	go func() {
-		_, err := r.Background(context.Background(), Task{Name: "t", Timeout: 30 * time.Second})
+		_, err := r.Background(context.Background(), run.Task{Name: "t", Timeout: 30 * time.Second})
 		done <- err
 	}()
 	for r.Idle() {
@@ -130,7 +131,7 @@ func TestBackgroundSlots(t *testing.T) {
 	start := func(browser bool) chan error {
 		done := make(chan error, 1)
 		go func() {
-			_, err := r.Background(context.Background(), Task{Browser: browser, Timeout: 30 * time.Second})
+			_, err := r.Background(context.Background(), run.Task{Browser: browser, Timeout: 30 * time.Second})
 			done <- err
 		}()
 		return done
@@ -142,7 +143,7 @@ func TestBackgroundSlots(t *testing.T) {
 	for r.CanStart(false) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if _, err := r.Background(context.Background(), Task{Timeout: time.Second}); !errors.Is(err, ErrBusy) {
+	if _, err := r.Background(context.Background(), run.Task{Timeout: time.Second}); !errors.Is(err, run.ErrBusy) {
 		t.Fatalf("자리를 넘는 작업은 기다려야 합니다: %v", err)
 	}
 	if !r.CanStart(true) {
@@ -152,7 +153,7 @@ func TestBackgroundSlots(t *testing.T) {
 	for r.CanStart(true) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if _, err := r.Background(context.Background(), Task{Browser: true, Timeout: time.Second}); !errors.Is(err, ErrBusy) {
+	if _, err := r.Background(context.Background(), run.Task{Browser: true, Timeout: time.Second}); !errors.Is(err, run.ErrBusy) {
 		t.Fatalf("브라우저는 한 번에 하나입니다: %v", err)
 	}
 	for _, done := range runs {
@@ -189,7 +190,7 @@ func TestTheBrowserComesBackAfterTheTurns(t *testing.T) {
 func TestHoldRunsOnceTheBrowserIsTheTasks(t *testing.T) {
 	r := runner(t, fakeClaude(t, "0"))
 	var order []string
-	_, err := r.Background(context.Background(), Task{Browser: true, Timeout: 5 * time.Second,
+	_, err := r.Background(context.Background(), run.Task{Browser: true, Timeout: 5 * time.Second,
 		Hold: func(context.Context) error {
 			if r.CanStart(true) {
 				order = append(order, "브라우저가 비어 있음")
@@ -201,10 +202,10 @@ func TestHoldRunsOnceTheBrowserIsTheTasks(t *testing.T) {
 	if err != nil || strings.Join(order, ",") != "hold,done" {
 		t.Fatalf("err %v order %v", err, order)
 	}
-	_, err = r.Background(context.Background(), Task{Browser: true, Timeout: 5 * time.Second,
+	_, err = r.Background(context.Background(), run.Task{Browser: true, Timeout: 5 * time.Second,
 		Hold: func(context.Context) error { return errors.New("bridge down") },
 		Done: func() { order = append(order, "done again") }})
-	if !errors.Is(err, ErrHold) || order[len(order)-1] != "done again" || !r.CanStart(true) {
+	if !errors.Is(err, run.ErrHold) || order[len(order)-1] != "done again" || !r.CanStart(true) {
 		t.Fatalf("err %v order %v", err, order)
 	}
 }
@@ -214,7 +215,7 @@ func TestHoldRunsOnceTheBrowserIsTheTasks(t *testing.T) {
 // starts in it; one never used goes back on Release, once.
 func TestReservedPlaces(t *testing.T) {
 	r := runner(t, fakeClaude(t, "0"))
-	var places []Place
+	var places []run.Place
 	for i := 0; i < MaxPlain; i++ {
 		p, ok := r.Reserve(false)
 		if !ok {
@@ -229,7 +230,7 @@ func TestReservedPlaces(t *testing.T) {
 		t.Fatal("브라우저 자리는 따로입니다")
 	}
 	// The task carrying a place starts in it, full as the runner is.
-	if out, err := r.Background(context.Background(), Task{Place: places[0], Timeout: 5 * time.Second}); err != nil || out != "done" {
+	if out, err := r.Background(context.Background(), run.Task{Place: places[0], Timeout: 5 * time.Second}); err != nil || out != "done" {
 		t.Fatalf("예약한 자리로 시작해야 합니다: %q %v", out, err)
 	}
 	places[0].Release() // used: nothing to give back
@@ -266,9 +267,9 @@ func TestTakingTheBrowserFromAReservedPlace(t *testing.T) {
 	case <-time.After(150 * time.Millisecond):
 	}
 	held := false
-	_, err := r.Background(context.Background(), Task{Browser: true, Place: p, Timeout: 5 * time.Second,
+	_, err := r.Background(context.Background(), run.Task{Browser: true, Place: p, Timeout: 5 * time.Second,
 		Hold: func(context.Context) error { held = true; return nil }})
-	if !errors.Is(err, ErrBusy) || held {
+	if !errors.Is(err, run.ErrBusy) || held {
 		t.Fatalf("대화가 가져간 브라우저로 시작했습니다: err=%v held=%v", err, held)
 	}
 	if !<-taken {
@@ -285,7 +286,7 @@ func TestYieldBrowser(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := r.Background(context.Background(), Task{Name: "t", Browser: true, Timeout: 30 * time.Second})
+		_, err := r.Background(context.Background(), run.Task{Name: "t", Browser: true, Timeout: 30 * time.Second})
 		done <- err
 	}()
 	for r.Idle() {
@@ -294,7 +295,7 @@ func TestYieldBrowser(t *testing.T) {
 	if !r.YieldBrowser("먼저") {
 		t.Fatal("브라우저의 작업을 멈추지 않았습니다")
 	}
-	if err := <-done; !errors.Is(err, ErrYielded) {
+	if err := <-done; !errors.Is(err, run.ErrYielded) {
 		t.Fatalf("err %v", err)
 	}
 	if !r.CanStart(true) {
@@ -307,7 +308,7 @@ func TestYieldBrowser(t *testing.T) {
 func TestBackgroundArgs(t *testing.T) {
 	r := runner(t, "claude")
 	r.cfg.Model = "chat-model"
-	args, err := r.backgroundArgs(Task{Name: "t", Prompt: "할 일", System: "규칙", Model: "sonnet"})
+	args, err := r.backgroundArgs(run.Task{Name: "t", Prompt: "할 일", System: "규칙", Model: "sonnet"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,7 +322,7 @@ func TestBackgroundArgs(t *testing.T) {
 	if !strings.Contains(args[1], "오늘은 ") || !strings.HasSuffix(args[1], "할 일") {
 		t.Fatalf("시각은 프롬프트 앞에: %q", args[1])
 	}
-	args, _ = r.backgroundArgs(Task{Name: "t"})
+	args, _ = r.backgroundArgs(run.Task{Name: "t"})
 	if !strings.Contains(strings.Join(args, "\n"), "--model\nchat-model") {
 		t.Fatal("모델이 없으면 대화의 모델")
 	}
@@ -354,7 +355,7 @@ func TestBackgroundEndingFreesAPlace(t *testing.T) {
 	r := runner(t, fakeClaude(t, "0"))
 	freed := make(chan struct{}, 4)
 	r.OnFree(func() { freed <- struct{}{} })
-	if _, err := r.Background(context.Background(), Task{Name: "t", Timeout: 5 * time.Second}); err != nil {
+	if _, err := r.Background(context.Background(), run.Task{Name: "t", Timeout: 5 * time.Second}); err != nil {
 		t.Fatal(err)
 	}
 	select {

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/choigonyok/jarvis/agent/internal/config"
+	"github.com/choigonyok/jarvis/agent/internal/core/run"
 )
 
 // The agent's own MCP servers refuse callers without the internal token, so
@@ -40,7 +41,7 @@ func TestInternalMCPToken(t *testing.T) {
 		t.Errorf("browser: %q", got)
 	}
 
-	args, err := r.backgroundArgs(Task{Name: "t", Servers: map[string]string{"suggest": "http://127.0.0.1:8080/mcp/suggest"}})
+	args, err := r.backgroundArgs(run.Task{Name: "t", Servers: map[string]string{"suggest": "http://127.0.0.1:8080/mcp/suggest"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +72,7 @@ func TestEveryRunCarriesThePolicyHook(t *testing.T) {
 	if !strings.Contains(chat, `"PreToolUse"`) || !strings.Contains(chat, "agent policy-hook") || !strings.Contains(chat, "blockReadsOutsideWorkingDirectories") {
 		t.Fatalf("대화: %s", chat)
 	}
-	args, err := r.backgroundArgs(Task{Name: "작업", Prompt: "p", System: "s", Allowed: []string{"mcp__job__ask"}})
+	args, err := r.backgroundArgs(run.Task{Name: "작업", Prompt: "p", System: "s", Allowed: []string{"mcp__job__ask"}})
 	if err != nil {
 		t.Fatal(err)
 	}

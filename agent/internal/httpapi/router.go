@@ -18,11 +18,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/choigonyok/jarvis/agent/internal/claudecode"
 	"github.com/choigonyok/jarvis/agent/internal/core/action"
 	"github.com/choigonyok/jarvis/agent/internal/core/bus"
 	"github.com/choigonyok/jarvis/agent/internal/core/module"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
+	"github.com/choigonyok/jarvis/agent/internal/core/run"
 	"github.com/choigonyok/jarvis/agent/internal/holder"
 	"github.com/choigonyok/jarvis/agent/internal/policy"
 	"github.com/choigonyok/jarvis/agent/internal/thread"
@@ -103,7 +103,7 @@ type refSender interface {
 // the operator steer a waiting one into that turn or drop it.
 type queuer interface {
 	Submit(text string, images []string, ref *thread.Ref) (queued bool, err error)
-	Queue() []claudecode.Queued
+	Queue() []run.Queued
 	Steer(id string) (steered bool, err error)
 	Drop(id string) error
 }
@@ -428,7 +428,7 @@ func (s *Server) stopTurn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	stopped, err := st.Stop()
-	if errors.Is(err, claudecode.ErrNotRunning) {
+	if errors.Is(err, run.ErrNotRunning) {
 		writeErr(w, http.StatusConflict, "지금 쓰고 있는 답이 없습니다.")
 		return
 	}
@@ -524,7 +524,7 @@ func (s *Server) accept(said thread.Said) string {
 	} else {
 		err = s.runner.Send(text, said.Images)
 	}
-	if errors.Is(err, claudecode.ErrBusy) {
+	if errors.Is(err, run.ErrBusy) {
 		return err.Error()
 	}
 	if err != nil {

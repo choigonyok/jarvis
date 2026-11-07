@@ -10,65 +10,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/choigonyok/jarvis/agent/internal/core/run"
 	"github.com/choigonyok/jarvis/agent/internal/usage"
 )
 
-// ErrYielded is what a background task returns when it gave the browser
-// up while it ran - the conversation went to use it, or the operator put
-// another job first. It is not a failure of the task; it is asked again
-// later.
-var ErrYielded = errors.New("브라우저를 내주느라 백그라운드 작업을 멈췄습니다")
-
-// ErrHold is a task whose Hold failed: it never started.
-var ErrHold = errors.New("백그라운드 작업을 브라우저에 묶지 못했습니다")
-
-// Task is work the assistant does on its own, outside the conversation.
-//
-// It shares nothing with the thread: no session to resume, nothing written
-// to the transcript, and none of the chat's tools. What it may touch is
-// exactly Servers plus the named Extra servers, and of their tools exactly
-// Allowed - every other call is refused without asking anyone
-// (--permission-mode dontAsk), and the CLI's own built-in tools (shell,
-// files) are not loaded at all. Nobody is watching a background task, so
-// nothing it can do may need watching.
-type Task struct {
-	Name string
-	// Prompt is the task's message; today's date and the time go in front of
-	// it. System is appended to the CLI's system prompt and should not change
-	// from run to run: requests whose instructions match share their cache.
-	Prompt string
-	System string
-	// Model is the model the task runs on; empty uses the conversation's.
-	Model string
-	// Servers are this agent's own MCP endpoints (loopback, no credential).
-	Servers map[string]string
-	// Extra names entries of JARVIS_EXTRA_MCP to include, with their token.
-	Extra   []string
-	Allowed []string
-	Timeout time.Duration
-	// Browser says the task drives the shared browser window. One such task
-	// at a time, and none while the conversation is using the browser: a
-	// turn that calls a browser tool takes it (TakeBrowser) and stops the
-	// task. A turn that does not use it leaves the task running. A task
-	// without the browser runs beside everything, up to MaxPlain at once.
-	Browser bool
-	// Place, when set, is the place Reserve took for this task: it is used
-	// instead of looking for a free one now.
-	Place Place
-	// Hold, when set, runs once the task has its place - the browser its
-	// own - and before its process starts: where a site guard goes on, so it
-	// is never on while someone else has the browser. An error ends the task
-	// there (ErrHold).
-	Hold func(ctx context.Context) error
-	// Done, when set, runs once the task's process has ended (or Hold
-	// failed) and before the browser counts as free again - where the site
-	// guard is released, so whoever takes the browser next is not held to
-	// the task's sites.
-	Done func()
-	// OnStep, when set, hears each tool call and each bit of text the model
-	// writes while the task runs - how a person watching sees progress.
-	OnStep func(Step)
-}
+// The runner is what modules hand their background work to.
+var _ run.Background = (*Runner)(nil)
 
 // MaxPlain is how many background tasks without the browser may run at
 // once, beside the one on the browser: a task that does not need the
@@ -76,12 +23,6 @@ type Task struct {
 // hundred MB; the Mac mini (16GB) runs the conversation, the services and
 // the voice beside them.
 const MaxPlain = 4
-
-// Place is a place for a background task, taken before the task starts
-// (Reserve) and used by the Background call that carries it (Task.Place).
-// Release gives it back if that call never comes; after it, Release does
-// nothing.
-type Place interface{ Release() }
 
 type place struct {
 	r       *Runner
@@ -96,7 +37,7 @@ type place struct {
 // minutes for no reason. Taken here, the place counts from now: the browser's
 // is the task's before any guard goes on, and the conversation taking the
 // browser (TakeBrowser) waits for it to start or go.
-func (r *Runner) Reserve(browser bool) (Place, bool) {
+func (r *Runner) Reserve(browser bool) (run.Place, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if !r.canStartLocked(browser) {
@@ -127,14 +68,6 @@ type bgTask struct {
 	browser bool
 	cancel  func()
 	yielded bool
-}
-
-// Step is one thing a background task did: a tool call (Tool and Input set)
-// or a line of its own text (Text set).
-type Step struct {
-	Tool  string
-	Input json.RawMessage
-	Text  string
 }
 
 // InBackground is true while a background task holds the browser.
@@ -263,7 +196,7 @@ func (r *Runner) Idle() bool {
 // one shared window, and the person's own request always wins it. A task
 // without the browser runs on through everything; it has nothing to fight
 // over.
-func (r *Runner) Background(parent context.Context, t Task) (string, error) {
+func (r *Runner) Background(parent context.Context, t run.Task) (string, error) {
 	ctx, cancel := context.WithTimeout(parent, t.Timeout)
 	defer cancel()
 
@@ -279,10 +212,10 @@ func (r *Runner) Background(parent context.Context, t Task) (string, error) {
 		// ready: its place goes back, and nothing was held to its sites.
 		r.mu.Unlock()
 		r.freed()
-		return "", ErrBusy
+		return "", run.ErrBusy
 	case !reserved && !r.canStartLocked(t.Browser):
 		r.mu.Unlock()
-		return "", ErrBusy
+		return "", run.ErrBusy
 	}
 	task := &bgTask{name: t.Name, browser: t.Browser}
 	task.cancel = func() { task.yielded = true; cancel() }
@@ -311,9 +244,9 @@ func (r *Runner) Background(parent context.Context, t Task) (string, error) {
 		switch {
 		case taken:
 			// The browser was taken while the task was being held to it.
-			return "", ErrYielded
+			return "", run.ErrYielded
 		case herr != nil:
-			return "", fmt.Errorf("%w: %v", ErrHold, herr)
+			return "", fmt.Errorf("%w: %v", run.ErrHold, herr)
 		}
 	}
 
@@ -346,7 +279,7 @@ func (r *Runner) Background(parent context.Context, t Task) (string, error) {
 	// Logged however it ended: a run cut short is tokens thrown away.
 	r.log.Info("백그라운드 사용량", append([]any{"task", t.Name, "model", r.modelOf(t), "yielded", gaveWay}, used.attrs()...)...)
 	if gaveWay {
-		return "", ErrYielded
+		return "", run.ErrYielded
 	}
 	if msg := strings.TrimSpace(stderr.String()); msg != "" {
 		r.log.Warn("background stderr", "task", t.Name, "msg", clamp(msg, 1000))
@@ -377,7 +310,7 @@ func (r *Runner) stopBrowserLocked(why string) int {
 	return n
 }
 
-func (r *Runner) backgroundArgs(t Task) ([]string, error) {
+func (r *Runner) backgroundArgs(t run.Task) ([]string, error) {
 	servers := map[string]any{}
 	for name, url := range t.Servers {
 		servers[name] = r.internal(url)
@@ -429,7 +362,7 @@ func (r *Runner) backgroundArgs(t Task) ([]string, error) {
 }
 
 // modelOf is the model a task runs on: its own, or the conversation's.
-func (r *Runner) modelOf(t Task) string {
+func (r *Runner) modelOf(t run.Task) string {
 	if t.Model != "" {
 		return t.Model
 	}
@@ -439,7 +372,7 @@ func (r *Runner) modelOf(t Task) string {
 // backgroundResult reads the stream only for its outcome: the final result
 // text (for the log), whether the CLI reported an error, and what it used -
 // and hands what the tools gave back to onSeen.
-func backgroundResult(stdout interface{ Read([]byte) (int, error) }, onStep func(Step), onRate func(json.RawMessage), used *tally, onSeen func(string)) (string, error) {
+func backgroundResult(stdout interface{ Read([]byte) (int, error) }, onStep func(run.Step), onRate func(json.RawMessage), used *tally, onSeen func(string)) (string, error) {
 	var result string
 	var failed error
 	err := scan(stdout, func(ev event) {
@@ -473,7 +406,7 @@ func backgroundResult(stdout interface{ Read([]byte) (int, error) }, onStep func
 	return result, err
 }
 
-func stepsOf(raw json.RawMessage) []Step {
+func stepsOf(raw json.RawMessage) []run.Step {
 	var msg struct {
 		Content []struct {
 			Type  string          `json:"type"`
@@ -485,14 +418,14 @@ func stepsOf(raw json.RawMessage) []Step {
 	if len(raw) == 0 || json.Unmarshal(raw, &msg) != nil {
 		return nil
 	}
-	var out []Step
+	var out []run.Step
 	for _, b := range msg.Content {
 		switch b.Type {
 		case "tool_use":
-			out = append(out, Step{Tool: b.Name, Input: b.Input})
+			out = append(out, run.Step{Tool: b.Name, Input: b.Input})
 		case "text":
 			if t := strings.TrimSpace(b.Text); t != "" {
-				out = append(out, Step{Text: t})
+				out = append(out, run.Step{Text: t})
 			}
 		}
 	}

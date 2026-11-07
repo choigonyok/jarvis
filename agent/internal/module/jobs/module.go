@@ -38,6 +38,9 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/core/action"
 	"github.com/choigonyok/jarvis/agent/internal/core/module"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
+	// Imported, not mirrored: the cards a run raises to save a PIN or an
+	// address are the vault's own kinds, and an order sheet is filled from
+	// its shipping record. What the vault does is reached through VaultCards.
 	"github.com/choigonyok/jarvis/agent/internal/module/vault"
 	"github.com/choigonyok/jarvis/agent/internal/shot"
 	"github.com/choigonyok/jarvis/agent/internal/thread"

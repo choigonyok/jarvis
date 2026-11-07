@@ -28,17 +28,10 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/adapter/permission"
 	"github.com/choigonyok/jarvis/agent/internal/config"
 	"github.com/choigonyok/jarvis/agent/internal/core/jsonfile"
+	"github.com/choigonyok/jarvis/agent/internal/core/run"
 	"github.com/choigonyok/jarvis/agent/internal/thread"
 	"github.com/choigonyok/jarvis/agent/internal/usage"
 )
-
-var ErrBusy = errors.New("이미 처리 중인 요청이 있습니다")
-
-// ErrNotQueued is a steer or drop of a message no longer waiting.
-var ErrNotQueued = errors.New("대기 중인 메시지가 아닙니다")
-
-// ErrNotRunning is a stop with no answer being written.
-var ErrNotRunning = errors.New("멈출 답이 없습니다")
 
 // stopGrace is how long a turn asked to stop has to end by itself before its
 // process is killed: the CLI answers an interrupt at once (2.1.287: 10ms), so
@@ -52,19 +45,16 @@ const (
 	stoppedLine = "(답을 멈췄어요)"
 )
 
-// Queued is one message waiting behind the running turn.
-type Queued struct {
-	ID     string      `json:"id"`
-	Text   string      `json:"text"`
-	Images []string    `json:"images,omitempty"`
-	Ref    *thread.Ref `json:"ref,omitempty"`
-	At     time.Time   `json:"at"`
+// pendingTurn is one turn in line behind the running one: a message the
+// operator typed, as the screens show it (run.Queued), or a turn nobody typed.
+type pendingTurn struct {
+	run.Queued
 	// prompt is a turn nobody typed (a card's decision): not shown, and
 	// its words are the prompt as given.
 	prompt string
 }
 
-func (q *Queued) typed() bool { return q.prompt == "" }
+func (q *pendingTurn) typed() bool { return q.prompt == "" }
 
 type Runner struct {
 	cfg   config.Config
@@ -111,7 +101,7 @@ type Runner struct {
 	// queue is what waits behind the running turn, in order: messages the
 	// operator sent meanwhile (shown, and each can be steered into the
 	// running turn or dropped) and turns nobody typed - a card's decision.
-	queue []*Queued
+	queue []*pendingTurn
 	// input is the running turn's stdin while it still takes messages (until
 	// its result): a steered message is written here.
 	input io.WriteCloser
@@ -358,7 +348,7 @@ func (r *Runner) SendRef(text string, images []string, ref *thread.Ref) error {
 // steered into the running one. queued says which.
 func (r *Runner) Submit(text string, images []string, ref *thread.Ref) (queued bool, err error) {
 	now := time.Now()
-	q := &Queued{ID: queueID("q"), Text: text, Images: images, Ref: ref, At: now}
+	q := &pendingTurn{Queued: run.Queued{ID: queueID("q"), Text: text, Images: images, Ref: ref, At: now}}
 	// Asked before taking the lock: the cards have their own.
 	held := r.hold != nil && r.hold(now)
 	r.mu.Lock()
@@ -377,7 +367,7 @@ func (r *Runner) Submit(text string, images []string, ref *thread.Ref) (queued b
 
 // start writes a typed message into the transcript, now that it is being
 // read, and returns its prompt; a turn nobody typed is its prompt.
-func (r *Runner) start(q *Queued) string {
+func (r *Runner) start(q *pendingTurn) string {
 	if !q.typed() {
 		return q.prompt
 	}
@@ -465,13 +455,13 @@ func queueID(kind string) string {
 }
 
 // Queue is the operator's messages waiting behind the running turn.
-func (r *Runner) Queue() []Queued {
+func (r *Runner) Queue() []run.Queued {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	out := []Queued{}
+	out := []run.Queued{}
 	for _, q := range r.queue {
 		if q.typed() {
-			out = append(out, *q)
+			out = append(out, q.Queued)
 		}
 	}
 	return out
@@ -486,10 +476,10 @@ func (r *Runner) showQueue() { r.store.ShowQueue(r.Queue()) }
 // steered says which.
 func (r *Runner) Steer(id string) (steered bool, err error) {
 	r.mu.Lock()
-	at := slices.IndexFunc(r.queue, func(q *Queued) bool { return q.ID == id && q.typed() })
+	at := slices.IndexFunc(r.queue, func(q *pendingTurn) bool { return q.ID == id && q.typed() })
 	if at < 0 {
 		r.mu.Unlock()
-		return false, ErrNotQueued
+		return false, run.ErrNotQueued
 	}
 	q := r.queue[at]
 	r.queue = slices.Delete(r.queue, at, at+1)
@@ -516,10 +506,10 @@ func (r *Runner) Steer(id string) (steered bool, err error) {
 // Drop takes a waiting message out of the queue unsent.
 func (r *Runner) Drop(id string) error {
 	r.mu.Lock()
-	at := slices.IndexFunc(r.queue, func(q *Queued) bool { return q.ID == id && q.typed() })
+	at := slices.IndexFunc(r.queue, func(q *pendingTurn) bool { return q.ID == id && q.typed() })
 	if at < 0 {
 		r.mu.Unlock()
-		return ErrNotQueued
+		return run.ErrNotQueued
 	}
 	r.queue = slices.Delete(r.queue, at, at+1)
 	r.mu.Unlock()
@@ -537,7 +527,7 @@ func (r *Runner) Stop() (stopped bool, err error) {
 	r.mu.Lock()
 	if !r.running {
 		r.mu.Unlock()
-		return false, ErrNotRunning
+		return false, run.ErrNotRunning
 	}
 	gen := r.gen
 	if r.ended == gen || r.resulted == gen || r.stopGen == gen {
@@ -647,7 +637,7 @@ func withImages(text string, images []string, dir string) string {
 func (r *Runner) Enqueue(prompt string) {
 	r.mu.Lock()
 	if r.running {
-		r.queue = append(r.queue, &Queued{ID: queueID("c"), At: time.Now(), prompt: prompt})
+		r.queue = append(r.queue, &pendingTurn{Queued: run.Queued{ID: queueID("c"), At: time.Now()}, prompt: prompt})
 		r.mu.Unlock()
 		return
 	}

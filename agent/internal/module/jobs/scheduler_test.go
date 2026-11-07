@@ -11,9 +11,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/choigonyok/jarvis/agent/internal/claudecode"
 	"github.com/choigonyok/jarvis/agent/internal/core/bus"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
+	"github.com/choigonyok/jarvis/agent/internal/core/run"
 )
 
 // fakeRuns is mind as far as one run needs it.
@@ -35,8 +35,8 @@ func fakeRuns(t *testing.T, attempts int) *httptest.Server {
 // steps, lets go (Done), and ends as told.
 type bgFake struct {
 	mu       sync.Mutex
-	tasks    []claudecode.Task
-	steps    []claudecode.Step
+	tasks    []run.Task
+	steps    []run.Step
 	err      error
 	canStart func(browser bool) bool
 	yields   []string
@@ -56,13 +56,13 @@ type fakePlace struct{}
 
 func (fakePlace) Release() {}
 
-func (b *bgFake) Reserve(browser bool) (claudecode.Place, bool) {
+func (b *bgFake) Reserve(browser bool) (run.Place, bool) {
 	if b.canStart != nil && !b.canStart(browser) {
 		return nil, false
 	}
 	return fakePlace{}, true
 }
-func (b *bgFake) Background(ctx context.Context, t claudecode.Task) (string, error) {
+func (b *bgFake) Background(ctx context.Context, t run.Task) (string, error) {
 	b.mu.Lock()
 	b.tasks = append(b.tasks, t)
 	b.mu.Unlock()
@@ -71,7 +71,7 @@ func (b *bgFake) Background(ctx context.Context, t claudecode.Task) (string, err
 	}
 	if t.Hold != nil {
 		if err := t.Hold(ctx); err != nil {
-			return "", claudecode.ErrHold
+			return "", run.ErrHold
 		}
 	}
 	for _, s := range b.steps {
@@ -93,11 +93,11 @@ func TestCutShortRunIsPickedUp(t *testing.T) {
 	cfg := SchedulerConfig{RunURL: "http://agent/mcp/job-run", Model: "sonnet", RetryModel: "opus"}
 	j := Job{ID: 5, Title: "가격 지켜보기"}
 
-	step := func(url string) claudecode.Step {
+	step := func(url string) run.Step {
 		raw, _ := json.Marshal(map[string]string{"url": url})
-		return claudecode.Step{Tool: "mcp__mcp-browser__browser_navigate", Input: raw}
+		return run.Step{Tool: "mcp__mcp-browser__browser_navigate", Input: raw}
 	}
-	bg := &bgFake{steps: []claudecode.Step{step("https://shop.example/item/1")}, err: claudecode.ErrYielded}
+	bg := &bgFake{steps: []run.Step{step("https://shop.example/item/1")}, err: run.ErrYielded}
 	m.runOnce(context.Background(), bg, cfg, j, fakePlace{})
 	bg.steps, bg.err = nil, nil
 	m.runOnce(context.Background(), bg, cfg, j, fakePlace{})

@@ -16,7 +16,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/choigonyok/jarvis/agent/internal/browsercheck"
-	"github.com/choigonyok/jarvis/agent/internal/claudecode"
+	"github.com/choigonyok/jarvis/agent/internal/core/run"
 )
 
 // EnrichServerName is the MCP server only the background lookup is given.
@@ -172,11 +172,12 @@ func toolText(s string, isErr bool) *mcp.CallToolResult {
 
 // --- the loop --------------------------------------------------------------
 
+// Background is the runner as the lookup uses it.
 type Background interface {
+	run.Background
 	// CanStart is whether a task needing the shared browser may start now:
 	// nobody is using the assistant, and no other task holds the browser.
 	CanStart(browser bool) bool
-	Background(ctx context.Context, t claudecode.Task) (string, error)
 }
 
 type EnrichConfig struct {
@@ -242,7 +243,7 @@ func (m *Module) enrichOnce(ctx context.Context, bg Background, cfg EnrichConfig
 	}
 	log.Info("묶음 결제의 주문을 조회합니다", "count", len(pending), "ids", strings.Join(ids, ","))
 
-	result, err := bg.Background(ctx, claudecode.Task{
+	result, err := bg.Background(ctx, run.Task{
 		Name:    "주문 조회",
 		Browser: true,
 		Prompt:  enrichPrompt(pending),
@@ -254,7 +255,7 @@ func (m *Module) enrichOnce(ctx context.Context, bg Background, cfg EnrichConfig
 		Model:   cfg.Model,
 	})
 	switch {
-	case errors.Is(err, claudecode.ErrYielded), errors.Is(err, claudecode.ErrBusy):
+	case errors.Is(err, run.ErrYielded), errors.Is(err, run.ErrBusy):
 		// The person needed the assistant. Nothing is recorded; the same
 		// charges come up again after the cooldown.
 		log.Info("주문 조회를 미뤘습니다", "reason", err)

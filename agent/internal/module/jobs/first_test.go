@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/choigonyok/jarvis/agent/internal/claudecode"
 	"github.com/choigonyok/jarvis/agent/internal/core/bus"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
+	"github.com/choigonyok/jarvis/agent/internal/core/run"
 )
 
 func firstCards(props *proposal.Store) []proposal.Proposal {
@@ -159,7 +159,7 @@ func TestADeferredRunKeepsItsPlace(t *testing.T) {
 	svc := &endSvc{}
 	m := New(NewStore(svc.serve(t).URL, ""), nil, proposal.NewStore(bus.New()), &transcript{}, quietLog())
 	g := &fakeGuard{}
-	bg := &bgFake{err: claudecode.ErrYielded, during: func() { m.current.putBehind(9, "쿠팡 장작 주문") }}
+	bg := &bgFake{err: run.ErrYielded, during: func() { m.current.putBehind(9, "쿠팡 장작 주문") }}
 	m.runOnce(context.Background(), bg, SchedulerConfig{RunURL: "http://agent/mcp/job-run", Guard: g, Timeout: time.Minute}, Job{ID: 5}, fakePlace{})
 	svc.mu.Lock()
 	ended := svc.ended
@@ -280,7 +280,7 @@ func (p *capPlace) Release() {
 	}
 }
 
-func (c *capRunner) Reserve(bool) (claudecode.Place, bool) {
+func (c *capRunner) Reserve(bool) (run.Place, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.free == 0 {
@@ -290,13 +290,13 @@ func (c *capRunner) Reserve(bool) (claudecode.Place, bool) {
 	return &capPlace{c: c}, true
 }
 
-func (c *capRunner) Background(_ context.Context, t claudecode.Task) (string, error) {
+func (c *capRunner) Background(_ context.Context, t run.Task) (string, error) {
 	p, _ := t.Place.(*capPlace)
 	c.mu.Lock()
 	if p == nil || p.done {
 		c.busy++
 		c.mu.Unlock()
-		return "", claudecode.ErrBusy
+		return "", run.ErrBusy
 	}
 	p.done = true // the place is the run's now; it comes back when the run ends
 	c.running++

@@ -21,6 +21,8 @@ import (
 	"strings"
 	"time"
 
+	// place.Area is the outline mind keeps with a reminder: the map draws it
+	// (Map) and a reminder only hands it on, so there is one shape of it.
 	"github.com/choigonyok/jarvis/agent/internal/module/place"
 	"github.com/choigonyok/jarvis/agent/internal/tool"
 )
