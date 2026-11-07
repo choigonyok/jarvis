@@ -14,20 +14,18 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/base64"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"os"
-	"os/signal"
 	"regexp"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	_ "time/tzdata"
@@ -40,6 +38,8 @@ import (
 	"github.com/choigonyok/jarvis/gocommon/queue"
 	"github.com/choigonyok/jarvis/gocommon/record"
 	"github.com/choigonyok/jarvis/gocommon/seal"
+	"github.com/choigonyok/jarvis/gocommon/svc"
+	"github.com/choigonyok/jarvis/gocommon/svc/pg"
 	"github.com/choigonyok/jarvis/mind-svc/internal/act"
 	"github.com/choigonyok/jarvis/mind-svc/internal/api"
 	"github.com/choigonyok/jarvis/mind-svc/internal/backtest"
@@ -80,15 +80,15 @@ const (
 )
 
 func main() {
-	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	log := svc.Logger()
+	ctx, stop := svc.Signals()
 	defer stop()
 
-	loc, err := time.LoadLocation(getenv("TZ", "Asia/Seoul"))
+	loc, err := time.LoadLocation(svc.Env("TZ", "Asia/Seoul"))
 	if err != nil {
 		loc = time.FixedZone("KST", 9*60*60)
 	}
-	client := llm.NewAnthropic(firstOf(os.Getenv("MIND_ANTHROPIC_API_KEY"), os.Getenv("ANTHROPIC_API_KEY")), os.Getenv("MIND_MODEL"), number("MIND_DAILY_USD", 1.0))
+	client := llm.NewAnthropic(cmp.Or(os.Getenv("MIND_ANTHROPIC_API_KEY"), os.Getenv("ANTHROPIC_API_KEY")), os.Getenv("MIND_MODEL"), svc.Float("MIND_DAILY_USD", 1.0))
 
 	if len(os.Args) > 1 && os.Args[1] == "eval" {
 		os.Exit(runEval(ctx, client, loc))
@@ -98,12 +98,12 @@ func main() {
 	}
 
 	cfg := interpret.Config{
-		Owner:    getenv("MIND_OWNER_NAME", "나"),
-		Idle:     duration("MIND_IDLE", 3*time.Minute),
-		IdleSelf: duration("MIND_IDLE_SELF", 45*time.Second),
-		IdleSim:  duration("MIND_IDLE_SIM", 4*time.Second),
-		Noise:    regexp.MustCompile(getenv("MIND_EXCLUDE_ROOMS", `카드|은행|뱅크|페이|증권|알림|광고|쿠폰|배송|택배|채널`)),
-		Search:   atoiOr(os.Getenv("MIND_WEB_SEARCH"), 2),
+		Owner:    svc.Env("MIND_OWNER_NAME", "나"),
+		Idle:     svc.Duration("MIND_IDLE", 3*time.Minute),
+		IdleSelf: svc.Duration("MIND_IDLE_SELF", 45*time.Second),
+		IdleSim:  svc.Duration("MIND_IDLE_SIM", 4*time.Second),
+		Noise:    regexp.MustCompile(svc.Env("MIND_EXCLUDE_ROOMS", `카드|은행|뱅크|페이|증권|알림|광고|쿠폰|배송|택배|채널`)),
+		Search:   svc.Int("MIND_WEB_SEARCH", 2),
 	}
 	token := os.Getenv("API_TOKEN")
 	dsn := os.Getenv("DATABASE_URL")
@@ -119,7 +119,7 @@ func main() {
 		clk                       = clock.New()
 		movable                   = clk
 		mode                      = "memory"
-		settle                    = duration("MIND_SETTLE", 3*time.Second)
+		settle                    = svc.Duration("MIND_SETTLE", 3*time.Second)
 	)
 	// What is said at a moment waits here, and the operator's checklists;
 	// in memory on a laptop.
@@ -137,16 +137,10 @@ func main() {
 			log.Error("API_TOKEN 이 비어 있습니다. 스택에서는 관측 로그와 콘솔을 지키는 토큰이 필요합니다")
 			os.Exit(1)
 		}
-		settle = duration("MIND_SETTLE", time.Minute)
-		pcfg, err := pgxpool.ParseConfig(dsn)
+		settle = svc.Duration("MIND_SETTLE", time.Minute)
+		pool, err := pg.Open(ctx, dsn, 8, log)
 		if err != nil {
-			log.Error("DATABASE_URL 을 해석하지 못했습니다", "err", err)
-			os.Exit(1)
-		}
-		pcfg.MaxConns = 8
-		pool, err := pgxpool.NewWithConfig(ctx, pcfg)
-		if err != nil {
-			log.Error("데이터베이스 풀을 만들지 못했습니다", "err", err)
+			log.Error("데이터베이스에 연결하지 못했습니다", "err", err)
 			os.Exit(1)
 		}
 		defer pool.Close()
@@ -179,9 +173,9 @@ func main() {
 			memLog = obs.NewMemoryLog(log)
 			logOut = memLog
 		}
-		if getenv("MIND_CALENDAR", "memory") == "http" {
-			calendar = act.HTTPCalendar{URL: getenv("CALENDAR_URL", "http://calendar:8093"), Token: token, HTTP: handed(stream, st)}
-			calendarDoor = &api.CalendarDoor{URL: getenv("CALENDAR_URL", "http://calendar:8093"), Token: token, HTTP: handed(stream, st)}
+		if svc.Env("MIND_CALENDAR", "memory") == "http" {
+			calendar = act.HTTPCalendar{URL: svc.Env("CALENDAR_URL", "http://calendar:8093"), Token: token, HTTP: handed(stream, st)}
+			calendarDoor = &api.CalendarDoor{URL: svc.Env("CALENDAR_URL", "http://calendar:8093"), Token: token, HTTP: handed(stream, st)}
 			log.Warn("실제 캘린더(calendar-svc)에 씁니다")
 		}
 	}
@@ -246,7 +240,7 @@ func main() {
 		}
 		defer jobsDB.Close()
 		// 작업이 끝나고 이만큼 지나면 첨부 사진 파일을 지운다.
-		jobsAPI = jobsapi.New(jobsDB, duration("JOBS_PURGE_AFTER", 30*24*time.Hour), log)
+		jobsAPI = jobsapi.New(jobsDB, svc.Duration("JOBS_PURGE_AFTER", 30*24*time.Hour), log)
 		if stream != nil {
 			jobsAPI.SetWake(func(who string) {
 				if err := stream.Wake(context.Background(), who == jobsstore.Guest); err != nil {
@@ -266,7 +260,7 @@ func main() {
 	// phone, else MIND_WEATHER_HOME, else 서울.
 	var sky *weather.Service
 	if os.Getenv("MIND_WEATHER") != "false" {
-		fixed, err := mind.ParsePoint(getenv("MIND_WEATHER_HOME", seoul))
+		fixed, err := mind.ParsePoint(svc.Env("MIND_WEATHER_HOME", seoul))
 		if err != nil {
 			log.Warn("MIND_WEATHER_HOME 을 읽지 못해 서울로 둡니다", "err", err)
 			fixed, _ = mind.ParsePoint(seoul)
@@ -296,7 +290,7 @@ func main() {
 		defer ledgerDB.Close()
 		// 카톡은 하루에 몇 번은 뭔가 온다. 그보다 오래 아무것도 없으면 맥의
 		// 카카오톡이 꺼졌을 가능성이 높고, 그동안의 결제 알림도 들어오지 않는다.
-		cards = ingest.New(strings.Split(os.Getenv("SPENDING_EXTRA_CHANNELS"), ","), ledgerDB, duration("SPENDING_STALE_AFTER", 12*time.Hour), log)
+		cards = ingest.New(strings.Split(os.Getenv("SPENDING_EXTRA_CHANNELS"), ","), ledgerDB, svc.Duration("SPENDING_STALE_AFTER", 12*time.Hour), log)
 		bookAPI = spendingapi.New(ledgerDB, cards, log)
 		bookAPI.Loops = loops
 		book = &act.Spending{Book: bookAPI}
@@ -323,10 +317,10 @@ func main() {
 	m := mind.New(mind.Options{
 		Store: st, Log: logOut, LLM: client, Calendar: calendar, Notifier: notifier, Spending: book, EmitTimer: emitTimer,
 		Loc: loc, Now: clk.Now, Logger: log, Interpret: cfg, Settle: settle,
-		Policy: gate.DefaultPolicy(), URL: getenv("MIND_UI_URL", "http://localhost:8102/"), Mode: mode,
-		MessageRetain: time.Duration(atoiOr(getenv("MIND_MESSAGE_RETAIN_DAYS", "365"), 365)) * 24 * time.Hour,
+		Policy: gate.DefaultPolicy(), URL: svc.Env("MIND_UI_URL", "http://localhost:8102/"), Mode: mode,
+		MessageRetain: time.Duration(svc.Int("MIND_MESSAGE_RETAIN_DAYS", 365)) * 24 * time.Hour,
 		Memory:        mem, GuestMemory: guestMem, Photos: photos, Jobs: jobs, Orders: orders, Travel: travel,
-		Weather: sky, DailyUSD: number("MIND_DAILY_USD", 1.0), Reminders: reminders, Here: here, GuestHere: guestHere, Checklists: lists, Goals: kept,
+		Weather: sky, DailyUSD: svc.Float("MIND_DAILY_USD", 1.0), Reminders: reminders, Here: here, GuestHere: guestHere, Checklists: lists, Goals: kept,
 	})
 	if err := m.LoadRegistry(ctx); err != nil {
 		log.Warn("레지스트리를 읽지 못해 코드에 딸린 값으로 돕니다", "err", err)
@@ -370,7 +364,7 @@ func main() {
 				os.Exit(1)
 			}
 			messages = &sensor.Messages{Store: st, Log: logOut, Seal: sealer, Exclude: cfg.Noise,
-				Payments: regexp.MustCompile(getenv("MIND_PAYMENT_ROOMS", `^(카카오페이|토스)$`)), Occur: m, Cards: cards.Take}
+				Payments: regexp.MustCompile(svc.Env("MIND_PAYMENT_ROOMS", `^(카카오페이|토스)$`)), Occur: m, Cards: cards.Take}
 		}
 		// Structured sources, read by rule into occurrences: the book and jobs.
 		// The calendar (whose entries also become plans), the phones, the
@@ -386,7 +380,7 @@ func main() {
 		if h, ok := mem.(*memory.HTTP); ok && os.Getenv("MIND_RECORDS") != "false" {
 			structured.Records = h
 		}
-		go structured.Run(ctx, duration("MIND_STRUCTURED_POLL", 2*time.Minute))
+		go structured.Run(ctx, svc.Duration("MIND_STRUCTURED_POLL", 2*time.Minute))
 	}
 	if stream != nil {
 		take := func(ctx context.Context, msg queue.Message) error {
@@ -537,24 +531,15 @@ func main() {
 		}()
 	}
 
-	addr := getenv("LISTEN_ADDR", ":8102")
-	srv := &http.Server{
-		Addr:         addr,
-		Handler:      handler,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 3 * time.Minute, // a replay runs the model
+	if svc.Serve(ctx, svc.Server{
+		Name: "mind-svc", Addr: svc.Env("LISTEN_ADDR", ":8102"), Handler: handler, Log: log,
+		Says: []any{"mode", mode, "model", client.Model()},
+		Read: 15 * time.Second,
+		// A replay runs the model, and a command waits up to a minute.
+		Write: 3 * time.Minute,
+	}) != nil {
+		os.Exit(1)
 	}
-	go func() {
-		log.Info("mind-svc 가 듣기 시작했습니다", "addr", addr, "mode", mode, "model", client.Model())
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Error("HTTP 서버", "err", err)
-			stop()
-		}
-	}()
-	<-ctx.Done()
-	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_ = srv.Shutdown(shutdown)
 }
 
 // seoul is home for the weather when nothing says otherwise: City Hall.
@@ -663,8 +648,6 @@ func runEval(ctx context.Context, client llm.Client, loc *time.Location) int {
 	return 0
 }
 
-// contentKey is the AES-256 key message text is sealed with in Postgres.
-// Without one the text is stored as it is.
 // handed is the client an actuator writes through: a write goes to output-svc
 // as an effect, and a read as it did. Without the stream (a laptop) the
 // actuator goes by itself.
@@ -675,6 +658,8 @@ func handed(stream *obs.Stream, st store.Store) *http.Client {
 	return &http.Client{Transport: &hand.Transport{Publish: stream.Effect, Store: st}, Timeout: hand.Wait + 5*time.Second}
 }
 
+// contentKey is the AES-256 key message text is sealed with in Postgres.
+// Without one the text is stored as it is.
 func contentKey() ([]byte, error) {
 	v := os.Getenv("MIND_CONTENT_KEY")
 	if v == "" {
@@ -685,42 +670,4 @@ func contentKey() ([]byte, error) {
 		return nil, errors.New("base64 로 된 32바이트여야 합니다 (openssl rand -base64 32)")
 	}
 	return k, nil
-}
-
-func getenv(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
-}
-
-func firstOf(vs ...string) string {
-	for _, v := range vs {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
-func duration(key string, fallback time.Duration) time.Duration {
-	if d, err := time.ParseDuration(os.Getenv(key)); err == nil && d >= 0 {
-		return d
-	}
-	return fallback
-}
-
-func number(key string, fallback float64) float64 {
-	if f, err := strconv.ParseFloat(os.Getenv(key), 64); err == nil {
-		return f
-	}
-	return fallback
-}
-
-func atoiOr(s string, fallback int) int {
-	n, err := strconv.Atoi(s)
-	if err != nil || n < 0 {
-		return fallback
-	}
-	return n
 }
