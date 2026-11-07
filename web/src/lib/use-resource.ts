@@ -1,25 +1,28 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { onResume } from "@/lib/resume";
+import { onAsked, onShown } from "@/lib/resume";
 
 /**
  * What a screen reads from the server and shows: read on opening and when its
- * key changes, again on coming back to the console (lib/resume.ts - the page
- * shown again, a pull to refresh, a tapped notification) and, if asked, every
- * so often while the page is on screen.
+ * key changes, again on coming back to the console and when the console asks
+ * (lib/resume.ts - the page shown again; a push, a tapped notification, the
+ * network back, a pull to refresh) and, if asked, every so often while the
+ * page is on screen.
  *
  * The newest read is the one whose answer is shown. A newer read does not
  * call off one under way, only stops showing what it brings: cutting a
  * request short cuts short what it set going on the service, which may keep
  * that as a failure. A read made before the page was last shown again - before
  * it was hidden, or while it was - is the exception: a phone drops a hidden
- * page's connections without an error, so it may never answer, and coming
- * back or the next poll calls it off and reads again. One made since is
- * waited for instead: coming back makes no other, and a pull to refresh waits
- * for it. A poll leaves a read under way to finish unless it has hung for
- * three rounds and half a minute at least. Leaving the screen or a new key
- * calls off every read under way.
+ * page's connections without an error, so it may never answer, and the next
+ * read calls it off. The page shown again reads unless a read was made since
+ * (a page back from the back-forward cache says so twice). The console asking
+ * reads even so - what changed may have come after the read under way left -
+ * and a pull to refresh waits for that read; only an action under way is
+ * waited for instead. A poll leaves a read under way to finish unless it has
+ * hung for three rounds and half a minute at least. Leaving the screen or a
+ * new key calls off every read under way.
  *
  * A read that fails is tried again after a wait that doubles; until one
  * succeeds, what was shown stays, and the error is beside it. A key that
@@ -112,7 +115,7 @@ if (typeof document !== "undefined") {
     hidden = false;
     shows += 1;
   };
-  // Added when this module loads, before any screen's onResume: listeners
+  // Added when this module loads, before any screen's onShown: listeners
   // run in the order they were added, so a screen coming back sees the count
   // that includes this time.
   document.addEventListener("visibilitychange", () => (document.visibilityState === "visible" ? show() : hide()));
@@ -236,17 +239,31 @@ export function useResource<T>(key: string | null, fetcher: Fetcher<T>, options:
     return () => window.clearInterval(id);
   }, [interval, key, read]);
 
-  // Back to the console: a read made since the page was shown again is the
-  // one coming back wants, and whoever asked (a pull to refresh) waits for it.
-  // One made before may have died with the connection the phone dropped in
-  // the background, so it is called off and made again.
+  // The page shown again: a read made since is the one coming back wants. One
+  // made before may have died with the connection the phone dropped in the
+  // background, so it is called off and made again.
+  //
+  // The console asking (a push, a tapped notification, the network back, a
+  // pull to refresh): what it asks about may have come after the read under
+  // way left, so a new read is made and the pull waits for it; the one under
+  // way lands unseen. An action under way is waited for instead - it brings
+  // the newest there is, and a read made now would hide its answer.
   useEffect(() => {
     if (!resume || key === null) return;
-    return onResume(() => {
+    const offShown = onShown(() => {
       const f = flight.current;
       if (f && f.shows === shows) return caughtUp();
       return read(keyRef.current);
     });
+    const offAsked = onAsked(() => {
+      const f = flight.current;
+      if (f && !f.ctrl && f.shows === shows) return caughtUp();
+      return read(keyRef.current);
+    });
+    return () => {
+      offShown();
+      offAsked();
+    };
   }, [resume, key, read, caughtUp]);
 
   const reload = useCallback(() => read(keyRef.current), [read]);

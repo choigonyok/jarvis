@@ -37,21 +37,44 @@ export function onPushShown(fn: (p: ShownPush) => void): () => void {
 /** A re-read that answers with a promise lets a pull to refresh wait for it. */
 type Wait = (done: Promise<unknown>) => void;
 
-export function onResume(fn: () => unknown): () => void {
+/**
+ * The page shown again: visible after it was hidden, or back from the
+ * back-forward cache - which says so twice, pageshow and then
+ * visibilitychange.
+ */
+export function onShown(fn: () => unknown): () => void {
   const visible = () => document.visibilityState === "visible" && fn();
   const shown = (e: PageTransitionEvent) => e.persisted && fn();
+  document.addEventListener("visibilitychange", visible);
+  window.addEventListener("pageshow", shown);
+  return () => {
+    document.removeEventListener("visibilitychange", visible);
+    window.removeEventListener("pageshow", shown);
+  };
+}
+
+/**
+ * Asked to re-read: a push or a notice in the page (something changed), a
+ * tapped notification, the network back, a stream that went quiet, a pull
+ * to refresh - which waits for the promise fn answers with.
+ */
+export function onAsked(fn: () => unknown): () => void {
   const asked = (e: Event) => {
     const done = fn();
     const wait = (e as CustomEvent<{ wait?: Wait } | null>).detail?.wait;
     if (wait && done instanceof Promise) wait(done);
   };
-  document.addEventListener("visibilitychange", visible);
-  window.addEventListener("pageshow", shown);
   window.addEventListener(RESUME, asked);
+  return () => window.removeEventListener(RESUME, asked);
+}
+
+/** Either one: the page shown again, or asked to re-read. */
+export function onResume(fn: () => unknown): () => void {
+  const offShown = onShown(fn);
+  const offAsked = onAsked(fn);
   return () => {
-    document.removeEventListener("visibilitychange", visible);
-    window.removeEventListener("pageshow", shown);
-    window.removeEventListener(RESUME, asked);
+    offShown();
+    offAsked();
   };
 }
 
