@@ -6,15 +6,19 @@ import { problem } from "./accounts.js";
 /**
  * Reading the two brokerages.
  *
- * Moved here from the web service unchanged, comments included: the awkward
- * parts of these two APIs were learned the hard way and the notes are the
- * record of it. The keys can place orders, which is the main reason this file
- * is now in a service of its own rather than one import away from a browser
- * bundle.
+ * The awkward parts of these two APIs were learned the hard way, and the
+ * notes beside the code are the record of it. The keys can place orders,
+ * which is the main reason this file is in a service of its own rather than
+ * one import away from a browser bundle.
  *
  * Reading is most of it: balances, prices and past trades. The one writing
  * part is at the end - placing an order (upbitOrder, kisUsOrder) - and only
  * orders.ts calls it, after a person approved exactly those orders.
+ *
+ * Each call asks, then hands what came back to a function that turns it into
+ * the service's data (the ...Of functions) or walks its pages (the walk...
+ * functions, told how to ask for one). Those touch no network, so
+ * test/venues-*.test.ts pins them against answers in the venues' real shapes.
  */
 
 function env(name: string): string {
@@ -104,13 +108,17 @@ function upbitToken(query?: string): string {
   return `${header}.${payload}.${signature}`;
 }
 
-type UpbitAccount = {
+/** One row of Upbit's balances (/v1/accounts). */
+export type UpbitAccount = {
   currency: string;
   balance: string;
   locked: string;
   avg_buy_price: string;
   unit_currency: string;
 };
+
+/** One row of Upbit's ticker answer (/v1/ticker). */
+export type UpbitTicker = { market: string; trade_price: number };
 
 /**
  * Which KRW markets Upbit actually lists.
@@ -130,33 +138,87 @@ async function upbitKrwMarkets(): Promise<Set<string>> {
   const all = await json<{ market: string }[]>(
     "https://api.upbit.com/v1/market/all",
   );
-  const set = new Set(
-    all.map((m) => m.market).filter((m) => m.startsWith("KRW-")),
-  );
+  const set = krwMarketsOf(all);
   krwMarkets = { value: set, expires: Date.now() + 6 * 3600_000 };
   return set;
+}
+
+/** The won markets in Upbit's listing (/v1/market/all): "KRW-BTC", not "BTC-ETH". */
+export function krwMarketsOf(all: { market: string }[]): Set<string> {
+  return new Set(
+    all.map((m) => m.market).filter((m) => m.startsWith("KRW-")),
+  );
 }
 
 /** Coins held to be dollars. Shown and allocated as dollar cash. */
 export const DOLLAR_COINS = new Set(["USDT", "USDC"]);
 
-export async function upbitHoldings(): Promise<{
+/** Upbit's side of the portfolio, as upbitHoldings answers it. */
+export type UpbitHoldings = {
   holdings: Holding[];
   cashKrw: number;
   cash: CashLine[];
   /** What the dollar coins held cost (Upbit's average), so their own move can be told apart. */
   dollarCostKrw: number;
   problems: string[];
-}> {
+};
+
+/** The coins in a balance answer with anything held, locked included. */
+function heldCoins(accounts: UpbitAccount[]): UpbitAccount[] {
+  return accounts.filter(
+    (a) => a.currency !== "KRW" && Number(a.balance) + Number(a.locked) > 0,
+  );
+}
+
+export async function upbitHoldings(): Promise<UpbitHoldings> {
   if (!env("UPBIT_ACCESS_KEY")) throw new Error("업비트 키가 설정되지 않았습니다.");
 
   const accounts = await json<UpbitAccount[]>("https://api.upbit.com/v1/accounts", {
     headers: { Authorization: `Bearer ${upbitToken()}` },
   });
 
-  const coins = accounts.filter(
-    (a) => a.currency !== "KRW" && Number(a.balance) + Number(a.locked) > 0,
-  );
+  const coins = heldCoins(accounts);
+  if (coins.length === 0) return upbitHoldingsOf(accounts, new Set(), []);
+
+  const problems: string[] = [];
+  const listed = await upbitKrwMarkets().catch(() => {
+    problems.push("업비트 마켓 목록을 불러오지 못했습니다.");
+    return new Set<string>();
+  });
+
+  const quotable = coins.filter((c) => listed.has(`KRW-${c.currency}`));
+
+  let tickers: UpbitTicker[] = [];
+  if (quotable.length > 0) {
+    // One call for every price rather than one per coin - but only for
+    // markets that exist, or the whole call fails.
+    const markets = quotable.map((c) => `KRW-${c.currency}`).join(",");
+    try {
+      tickers = await json<UpbitTicker[]>(
+        `https://api.upbit.com/v1/ticker?markets=${encodeURIComponent(markets)}`,
+      );
+    } catch (e) {
+      // Silently falling back to cost would print a confident 0.0% for every
+      // coin. Say it instead.
+      problems.push(`업비트 시세를 불러오지 못했습니다: ${(e as Error).message}`);
+    }
+  }
+
+  const read = upbitHoldingsOf(accounts, listed, tickers);
+  return { ...read, problems: [...problems, ...read.problems] };
+}
+
+/**
+ * Upbit's balances as holdings and cash: each coin at its ticker price, and
+ * one without a price (no won market in `listed`, or none in `tickers`) at
+ * its own average.
+ */
+export function upbitHoldingsOf(
+  accounts: UpbitAccount[],
+  listed: Set<string>,
+  tickers: UpbitTicker[],
+): UpbitHoldings {
+  const coins = heldCoins(accounts);
   const cashKrw = Number(
     accounts.find((a) => a.currency === "KRW")?.balance ?? 0,
   );
@@ -166,32 +228,10 @@ export async function upbitHoldings(): Promise<{
   const cash: CashLine[] = [
     { id: "upbit:KRW", venue: "upbit", currency: "KRW", label: "업비트 원화", amount: cashKrw, valueKrw: cashKrw },
   ];
-  if (coins.length === 0) return { holdings: [], cashKrw, cash, dollarCostKrw: 0, problems };
 
-  const listed = await upbitKrwMarkets().catch(() => {
-    problems.push("업비트 마켓 목록을 불러오지 못했습니다.");
-    return new Set<string>();
-  });
-
-  const quotable = coins.filter((c) => listed.has(`KRW-${c.currency}`));
   const unquotable = coins.filter((c) => !listed.has(`KRW-${c.currency}`));
-
   const priceOf = new Map<string, number>();
-  if (quotable.length > 0) {
-    // One call for every price rather than one per coin - but only for
-    // markets that exist, or the whole call fails.
-    const markets = quotable.map((c) => `KRW-${c.currency}`).join(",");
-    try {
-      const tickers = await json<{ market: string; trade_price: number }[]>(
-        `https://api.upbit.com/v1/ticker?markets=${encodeURIComponent(markets)}`,
-      );
-      for (const t of tickers) priceOf.set(t.market, t.trade_price);
-    } catch (e) {
-      // Silently falling back to cost would print a confident 0.0% for every
-      // coin. Say it instead.
-      problems.push(`업비트 시세를 불러오지 못했습니다: ${(e as Error).message}`);
-    }
-  }
+  for (const t of tickers) priceOf.set(t.market, t.trade_price);
 
   const dollars = coins.filter((c) => DOLLAR_COINS.has(c.currency));
   let dollarKrw = 0;
@@ -246,7 +286,8 @@ export async function upbitHoldings(): Promise<{
   return { holdings, cashKrw: cashKrw + dollarKrw, cash, dollarCostKrw, problems };
 }
 
-type UpbitTransfer = {
+/** One row of Upbit's deposits or withdrawals (/v1/deposits, /v1/withdraws). */
+export type UpbitTransfer = {
   uuid: string;
   currency: string;
   state: string;
@@ -255,6 +296,9 @@ type UpbitTransfer = {
   transaction_type: string;
   created_at: string;
 };
+
+/** Money across Upbit's edge, as upbitFlows answers it. */
+export type UpbitFlows = { flows: Flow[]; feesKrw: number; interestKrw: number; problems: string[] };
 
 /**
  * Money that crossed Upbit's edge since `since` (YYYY-MM-DD), in won.
@@ -267,36 +311,70 @@ type UpbitTransfer = {
  * out is valued at that day's close; a coin with no won market cannot be,
  * and is named instead of guessed.
  */
-export async function upbitFlows(
-  since: string,
-): Promise<{ flows: Flow[]; feesKrw: number; interestKrw: number; problems: string[] }> {
+export async function upbitFlows(since: string): Promise<UpbitFlows> {
   if (!env("UPBIT_ACCESS_KEY")) return { flows: [], feesKrw: 0, interestKrw: 0, problems: [] };
 
-  const list = async (path: "deposits" | "withdraws") => {
-    const out: UpbitTransfer[] = [];
-    // Newest first; stop at the first page that reaches back past `since`.
-    for (let page = 1; page <= 20; page += 1) {
+  const list = (path: "deposits" | "withdraws") =>
+    walkUpbitTransfers((page) => {
       const query = `limit=100&page=${page}&order_by=desc`;
-      const rows = await json<UpbitTransfer[]>(
+      return json<UpbitTransfer[]>(
         `https://api.upbit.com/v1/${path}?${query}`,
         { headers: { Authorization: `Bearer ${upbitToken(query)}` } },
       );
-      out.push(...rows);
-      if (rows.length < 100 || rows.some((r) => r.created_at.slice(0, 10) < since)) break;
-    }
-    return out.filter((r) => r.created_at.slice(0, 10) >= since);
-  };
+    }, since);
 
   const [deposits, withdraws] = await Promise.all([list("deposits"), list("withdraws")]);
-  const done = [
+  // The closes of each coin moved, read once per coin.
+  const closes = new Map<string, Map<string, number>>();
+  for (const { row } of principalMoves(deposits, withdraws)) {
+    if (row.currency === "KRW" || closes.has(row.currency)) continue;
+    const days = Math.ceil((Date.now() - Date.parse(since)) / 86_400_000) + 2;
+    closes.set(row.currency, await upbitDailyCloses(row.currency, days));
+  }
+  return upbitFlowsOf(deposits, withdraws, closes);
+}
+
+/**
+ * Every row since `since` of one of Upbit's transfer listings, asked a page
+ * (1, 2, ...) at a time.
+ */
+export async function walkUpbitTransfers(
+  page: (n: number) => Promise<UpbitTransfer[]>,
+  since: string,
+): Promise<UpbitTransfer[]> {
+  const out: UpbitTransfer[] = [];
+  // Newest first; stop at the first page that reaches back past `since`.
+  for (let n = 1; n <= 20; n += 1) {
+    const rows = await page(n);
+    out.push(...rows);
+    if (rows.length < 100 || rows.some((r) => r.created_at.slice(0, 10) < since)) break;
+  }
+  return out.filter((r) => r.created_at.slice(0, 10) >= since);
+}
+
+/** The transfers that move principal, signed: deposits accepted, Upbit's own interest aside, and withdrawals done. */
+function principalMoves(
+  deposits: UpbitTransfer[],
+  withdraws: UpbitTransfer[],
+): { row: UpbitTransfer; sign: number }[] {
+  return [
     ...deposits
       .filter((d) => d.state === "ACCEPTED" && d.transaction_type !== "internal")
       .map((d) => ({ row: d, sign: 1 })),
     ...withdraws.filter((w) => w.state === "DONE").map((w) => ({ row: w, sign: -1 })),
   ];
+}
 
+/**
+ * Upbit's deposits and withdrawals as upbitFlows counts them, each coin
+ * moved valued at its close that day (`closes`: coin -> day -> close).
+ */
+export function upbitFlowsOf(
+  deposits: UpbitTransfer[],
+  withdraws: UpbitTransfer[],
+  closes: Map<string, Map<string, number>>,
+): UpbitFlows {
   const problems: string[] = [];
-  const closes = new Map<string, Map<string, number>>();
   const flows: Flow[] = [];
   // Won withdrawals carry a ₩1,000 fee on top of the amount; the amount is
   // what counts as taken out, so the fee is a cost - added up here to be named.
@@ -306,15 +384,11 @@ export async function upbitFlows(
   const interestKrw = deposits
     .filter((d) => d.state === "ACCEPTED" && d.transaction_type === "internal" && d.currency === "KRW")
     .reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
-  for (const { row, sign } of done) {
+  for (const { row, sign } of principalMoves(deposits, withdraws)) {
     const date = row.created_at.slice(0, 10);
     let krw = Number(row.amount);
     if (row.currency !== "KRW") {
-      if (!closes.has(row.currency)) {
-        const days = Math.ceil((Date.now() - Date.parse(since)) / 86_400_000) + 2;
-        closes.set(row.currency, await upbitDailyCloses(row.currency, days));
-      }
-      const close = closes.get(row.currency)!.get(date);
+      const close = closes.get(row.currency)?.get(date);
       if (!close) {
         problems.push(problem("upbit", `${date} ${row.currency} 이체를 원화로 환산하지 못해 원금에서 빠졌습니다.`));
         continue;
@@ -351,7 +425,8 @@ export type UpbitFill = {
   feeKrw: number;
 };
 
-type UpbitOrder = {
+/** One row of Upbit's closed orders (/v1/orders/closed). */
+export type UpbitOrder = {
   uuid: string;
   side: "bid" | "ask";
   market: string;
@@ -374,7 +449,7 @@ export async function upbitFills(since: string): Promise<UpbitFill[]> {
   if (!env("UPBIT_ACCESS_KEY")) return [];
   const iso = (d: Date) => d.toISOString().replace(/\.\d+Z$/, "+00:00");
   const floor = Date.parse(`${since}T00:00:00+09:00`);
-  const out = new Map<string, UpbitFill>();
+  const orders: UpbitOrder[] = [];
 
   for (let end = Date.now(); end > floor; end -= 7 * 86_400_000) {
     const start = Math.max(floor, end - 7 * 86_400_000);
@@ -384,24 +459,35 @@ export async function upbitFills(since: string): Promise<UpbitFill[]> {
         `https://api.upbit.com/v1/orders/closed?${query.replace(/\+/g, "%2B")}`,
         { headers: { Authorization: `Bearer ${upbitToken(query)}` } },
       );
-      for (const o of rows) {
-        const volume = Number(o.executed_volume);
-        if (!(volume > 0) || !o.market.startsWith("KRW-")) continue;
-        const at = o.created_at;
-        out.set(o.uuid, {
-          uuid: o.uuid,
-          date: new Date(at).toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" }),
-          at,
-          symbol: o.market.slice(4),
-          side: o.side,
-          volume,
-          fundsKrw: Number(o.executed_funds ?? 0),
-          feeKrw: Number(o.paid_fee),
-        });
-      }
+      orders.push(...rows);
       // Upbit allows a handful of these a second.
       await new Promise((r) => setTimeout(r, 120));
     }
+  }
+  return upbitFillsOf(orders);
+}
+
+/**
+ * Closed orders as fills, oldest first and each order once, however many
+ * windows listed it: only what filled on a won market, whether the order
+ * ended done or cancelled.
+ */
+export function upbitFillsOf(orders: UpbitOrder[]): UpbitFill[] {
+  const out = new Map<string, UpbitFill>();
+  for (const o of orders) {
+    const volume = Number(o.executed_volume);
+    if (!(volume > 0) || !o.market.startsWith("KRW-")) continue;
+    const at = o.created_at;
+    out.set(o.uuid, {
+      uuid: o.uuid,
+      date: new Date(at).toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" }),
+      at,
+      symbol: o.market.slice(4),
+      side: o.side,
+      volume,
+      fundsKrw: Number(o.executed_funds ?? 0),
+      feeKrw: Number(o.paid_fee),
+    });
   }
   return [...out.values()].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
 }
@@ -416,21 +502,36 @@ export async function upbitDailyCloses(
   symbol: string,
   days: number,
 ): Promise<Map<string, number>> {
+  return walkUpbitCandles((count, to) => {
+    const url =
+      `https://api.upbit.com/v1/candles/days?market=KRW-${symbol}&count=${count}` +
+      (to ? `&to=${encodeURIComponent(to)}` : "");
+    return json<UpbitCandle[]>(url).catch(() => []);
+  }, days);
+}
+
+/** One of Upbit's day candles (/v1/candles/days), newest first. */
+export type UpbitCandle = { candle_date_time_kst: string; trade_price: number };
+
+/**
+ * Day closes by the candle's own KST day, asked `count` candles at a time
+ * before `to` (the oldest candle of the page before), until `days` are in
+ * hand or a page comes back empty.
+ */
+export async function walkUpbitCandles(
+  page: (count: number, to: string) => Promise<UpbitCandle[]>,
+  days: number,
+): Promise<Map<string, number>> {
   const out = new Map<string, number>();
   let to = "";
   while (out.size < days) {
     const count = Math.min(200, days - out.size);
-    const url =
-      `https://api.upbit.com/v1/candles/days?market=KRW-${symbol}&count=${count}` +
-      (to ? `&to=${encodeURIComponent(to)}` : "");
-    const page = await json<
-      { candle_date_time_kst: string; trade_price: number }[]
-    >(url).catch(() => []);
-    if (page.length === 0) break;
-    for (const c of page) {
+    const candles = await page(count, to);
+    if (candles.length === 0) break;
+    for (const c of candles) {
       out.set(c.candle_date_time_kst.slice(0, 10), c.trade_price);
     }
-    to = page[page.length - 1].candle_date_time_kst;
+    to = candles[candles.length - 1].candle_date_time_kst;
   }
   return out;
 }
@@ -515,7 +616,8 @@ function kisAccount() {
   };
 }
 
-type KisDomestic = {
+/** One row of KIS's domestic balance (TTTC8434R output1). */
+export type KisDomestic = {
   pdno: string;
   prdt_name: string;
   hldg_qty: string;
@@ -523,7 +625,8 @@ type KisDomestic = {
   prpr: string;
 };
 
-type KisOverseas = {
+/** One row of KIS's overseas balance (TTTS3012R output1). */
+export type KisOverseas = {
   ovrs_pdno: string;
   ovrs_item_name: string;
   ovrs_cblc_qty: string;
@@ -531,7 +634,8 @@ type KisOverseas = {
   now_pric2: string;
 };
 
-type KisCurrency = {
+/** One currency of KIS's present balance (CTRP6504R output2). */
+export type KisCurrency = {
   crcy_cd: string;
   /** Settled foreign-currency deposit. */
   frcr_dncl_amt_2: string;
@@ -539,6 +643,29 @@ type KisCurrency = {
   frcr_sll_amt_smtl: string;
   /** Bought today, not yet settled - money that is already spent. */
   frcr_buy_amt_smtl: string;
+};
+
+/** KIS's present balance (CTRP6504R): a row per holding, carrying KIS's rate, and a row per currency. */
+export type KisPresentBalance = {
+  output1?: { bass_exrt?: string; buy_crcy_cd?: string }[];
+  output2?: KisCurrency[];
+};
+
+/** The share account's foreign cash, as kisForeignCash answers it. */
+export type KisForeignCash = {
+  usd: number;
+  /**
+   * The same dollars for the cash checks (kis-flows.ts): settled, sold and
+   * bought alike, signed, with a waiting limit buy's dollars still counted.
+   * They move when a fill happens and not when it settles - a settlement only
+   * moves dollars from "unsettled" into the deposit - so a check against the
+   * fills by trade day never has to guess when KIS posts a settlement.
+   * Null when the waiting buys could not be read: a half would read as money
+   * moved.
+   */
+  bookUsd: number | null;
+  rate: number | null;
+  problems: string[];
 };
 
 /**
@@ -553,21 +680,7 @@ type KisCurrency = {
  * Upbit's USDT price runs a premium over it and would read the dollar side
  * a percent or two richer than KIS says it is.
  */
-async function kisForeignCash(token: string): Promise<{
-  usd: number;
-  /**
-   * The same dollars for the cash checks (kis-flows.ts): settled, sold and
-   * bought alike, signed, with a waiting limit buy's dollars still counted.
-   * They move when a fill happens and not when it settles - a settlement only
-   * moves dollars from "unsettled" into the deposit - so a check against the
-   * fills by trade day never has to guess when KIS posts a settlement.
-   * Null when the waiting buys could not be read: a half would read as money
-   * moved.
-   */
-  bookUsd: number | null;
-  rate: number | null;
-  problems: string[];
-}> {
+async function kisForeignCash(token: string): Promise<KisForeignCash> {
   const { cano, prod } = kisAccount();
   const query = new URLSearchParams({
     CANO: cano,
@@ -577,11 +690,30 @@ async function kisForeignCash(token: string): Promise<{
     TR_MKET_CD: "00",
     INQR_DVSN_CD: "00",
   });
-  const body = await json<{ output1?: { bass_exrt?: string; buy_crcy_cd?: string }[]; output2?: KisCurrency[] }>(
+  const body = await json<KisPresentBalance>(
     `${KIS_BASE}/uapi/overseas-stock/v1/trading/inquire-present-balance?${query}`,
     { headers: kisHeaders(token, "CTRP6504R") },
   );
 
+  // A limit buy waiting for its price holds dollars that KIS already counts
+  // as spent (frcr_buy_amt_smtl) though nothing was bought: without this the
+  // total, the return and the deposit check all dropped by it while the
+  // order waited.
+  let held: number | null = null;
+  try {
+    held = await kisUnfilledBuyUsd(token);
+  } catch {
+    // shown as if nothing waited; the checks skip this look
+  }
+  return kisForeignCashOf(body, held);
+}
+
+/**
+ * The present balance's dollars and KIS's rate. `held` is the dollars waiting
+ * buys hold (kisUnfilledBuyUsd), null when they could not be read. A currency
+ * other than the dollar has no rate here, so it is named rather than counted.
+ */
+export function kisForeignCashOf(body: KisPresentBalance, held: number | null): KisForeignCash {
   let usd = 0;
   let bookUsd = 0;
   const unpriced: string[] = [];
@@ -595,16 +727,6 @@ async function kisForeignCash(token: string): Promise<{
     if (row.crcy_cd === "USD") usd += amount;
     else unpriced.push(row.crcy_cd);
   }
-  // A limit buy waiting for its price holds dollars that KIS already counts
-  // as spent (frcr_buy_amt_smtl) though nothing was bought: without this the
-  // total, the return and the deposit check all dropped by it while the
-  // order waited.
-  let held: number | null = null;
-  try {
-    held = await kisUnfilledBuyUsd(token);
-  } catch {
-    // shown as if nothing waited; the checks skip this look
-  }
   usd += held ?? 0;
   const rate = Number(body.output1?.find((r) => r.buy_crcy_cd === "USD" && Number(r.bass_exrt) > 0)?.bass_exrt);
   return {
@@ -616,6 +738,9 @@ async function kisForeignCash(token: string): Promise<{
       : [],
   };
 }
+
+/** KIS's unfilled orders (TTTS3018R). */
+export type KisUnfilled = { rt_cd?: string; msg1?: string; output?: Record<string, string>[] };
 
 /** Dollars held by US buy orders not yet filled (KIS 미체결, TTTS3018R): shares × limit price. */
 export async function kisUnfilledBuyUsd(token?: string): Promise<number> {
@@ -630,10 +755,15 @@ export async function kisUnfilledBuyUsd(token?: string): Promise<number> {
     CTX_AREA_FK200: "",
     CTX_AREA_NK200: "",
   });
-  const body = await json<{ rt_cd?: string; msg1?: string; output?: Record<string, string>[] }>(
+  const body = await json<KisUnfilled>(
     `${KIS_BASE}/uapi/overseas-stock/v1/trading/inquire-nccs?${q}`,
     { headers: kisHeaders(t, mock ? "VTTS3018R" : "TTTS3018R") },
   );
+  return kisUnfilledBuyUsdOf(body);
+}
+
+/** The buys among KIS's unfilled orders, in dollars; a refusal throws what KIS said. */
+export function kisUnfilledBuyUsdOf(body: KisUnfilled): number {
   if (body.rt_cd !== "0") throw new Error((body.msg1 ?? "미체결 내역을 읽지 못했습니다").trim());
   let usd = 0;
   for (const o of body.output ?? []) {
@@ -645,12 +775,14 @@ export async function kisUnfilledBuyUsd(token?: string): Promise<number> {
   return usd;
 }
 
-/**
- * The share account: holdings, cash, and the rate they are valued at.
- * `fallbackRate` (Upbit's USDT) is used only when KIS gives no rate - with no
- * dollar holding to quote one against.
- */
-export async function kisHoldings(fallbackRate: number): Promise<{
+/** KIS's domestic balance (TTTC8434R): the shares, and the won deposit in output2. */
+export type KisDomesticBalance = { output1?: KisDomestic[]; output2?: { dnca_tot_amt?: string }[] };
+
+/** KIS's overseas balance under one exchange code (TTTS3012R). */
+export type KisOverseasBalance = { output1?: KisOverseas[] };
+
+/** The share account, as kisHoldings answers it. */
+export type KisHoldings = {
   holdings: Holding[];
   cashKrw: number;
   cash: CashLine[];
@@ -665,12 +797,18 @@ export async function kisHoldings(fallbackRate: number): Promise<{
   /** The rate everything dollar here was valued at. */
   usdKrw: number;
   problems: string[];
-}> {
+};
+
+/**
+ * The share account: holdings, cash, and the rate they are valued at.
+ * `fallbackRate` (Upbit's USDT) is used only when KIS gives no rate - with no
+ * dollar holding to quote one against.
+ */
+export async function kisHoldings(fallbackRate: number): Promise<KisHoldings> {
   if (!env("KIS_APP_KEY")) throw new Error("한국투자증권 키가 설정되지 않았습니다.");
 
   const token = await kisAccessToken();
   const { cano, prod } = kisAccount();
-  const holdings: Holding[] = [];
 
   // Asked first: its rate values everything below. A failed lookup is named,
   // not fatal - the shares still answer, at the fallback rate.
@@ -680,7 +818,6 @@ export async function kisHoldings(fallbackRate: number): Promise<{
     rate: null,
     problems: [`한국투자증권 외화 예수금: ${e.message}`],
   }));
-  const usdKrw = foreign.rate ?? fallbackRate;
 
   // 국내
   const domesticQuery = new URLSearchParams({
@@ -696,13 +833,46 @@ export async function kisHoldings(fallbackRate: number): Promise<{
     CTX_AREA_FK100: "",
     CTX_AREA_NK100: "",
   });
-  const domestic = await json<{
-    output1?: KisDomestic[];
-    output2?: { dnca_tot_amt?: string }[];
-  }>(
+  const domestic = await json<KisDomesticBalance>(
     `${KIS_BASE}/uapi/domestic-stock/v1/trading/inquire-balance?${domesticQuery}`,
     { headers: kisHeaders(token, "TTTC8434R") },
   );
+
+  // 해외, under each exchange code in turn (see kisHoldingsOf).
+  const overseas: KisOverseasBalance[] = [];
+  for (const exchange of ["NASD", "NYSE", "AMEX"]) {
+    const query = new URLSearchParams({
+      CANO: cano,
+      ACNT_PRDT_CD: prod,
+      OVRS_EXCG_CD: exchange,
+      TR_CRCY_CD: "USD",
+      CTX_AREA_FK200: "",
+      CTX_AREA_NK200: "",
+    });
+    overseas.push(
+      await json<KisOverseasBalance>(
+        `${KIS_BASE}/uapi/overseas-stock/v1/trading/inquire-balance?${query}`,
+        { headers: kisHeaders(token, "TTTS3012R") },
+      ).catch(() => ({ output1: [] as KisOverseas[] })),
+    );
+  }
+
+  return kisHoldingsOf({ foreign, domestic, overseas }, fallbackRate);
+}
+
+/**
+ * The share account from KIS's answers: its foreign cash, the domestic
+ * balance, and the overseas balance under each exchange code in the order
+ * asked. Everything dollar is valued at KIS's rate, or at `fallbackRate`
+ * when KIS gave none.
+ */
+export function kisHoldingsOf(
+  read: { foreign: KisForeignCash; domestic: KisDomesticBalance; overseas: KisOverseasBalance[] },
+  fallbackRate: number,
+): KisHoldings {
+  const { foreign, domestic, overseas } = read;
+  const usdKrw = foreign.rate ?? fallbackRate;
+  const holdings: Holding[] = [];
 
   for (const row of domestic.output1 ?? []) {
     const qty = Number(row.hldg_qty);
@@ -728,21 +898,8 @@ export async function kisHoldings(fallbackRate: number): Promise<{
   // 해외. KIS answers some exchange codes with the same holding, so the
   // symbol decides identity and the first answer wins.
   const seen = new Set<string>();
-  for (const exchange of ["NASD", "NYSE", "AMEX"]) {
-    const query = new URLSearchParams({
-      CANO: cano,
-      ACNT_PRDT_CD: prod,
-      OVRS_EXCG_CD: exchange,
-      TR_CRCY_CD: "USD",
-      CTX_AREA_FK200: "",
-      CTX_AREA_NK200: "",
-    });
-    const overseas = await json<{ output1?: KisOverseas[] }>(
-      `${KIS_BASE}/uapi/overseas-stock/v1/trading/inquire-balance?${query}`,
-      { headers: kisHeaders(token, "TTTS3012R") },
-    ).catch(() => ({ output1: [] as KisOverseas[] }));
-
-    for (const row of overseas.output1 ?? []) {
+  for (const page of overseas) {
+    for (const row of page.output1 ?? []) {
       const qty = Number(row.ovrs_cblc_qty);
       if (qty <= 0 || seen.has(row.ovrs_pdno)) continue;
       seen.add(row.ovrs_pdno);
@@ -822,7 +979,8 @@ export type KisTrade = {
   settled: boolean;
 };
 
-type KisTrans = {
+/** One row of KIS's overseas fills by period (CTOS4001R output1). */
+export type KisTrans = {
   trad_dt: string;
   sttl_dt: string;
   sll_buy_dvsn_cd: string;
@@ -838,6 +996,45 @@ type KisTrans = {
 
 const dashed = (d: string) => `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
 
+/** One page of a KIS listing paged by continuation keys (CTX_AREA_FK100 / NK100). */
+export type KisPage<T> = {
+  rt_cd: string;
+  msg1?: string;
+  output1?: T[];
+  ctx_area_fk100?: string;
+  ctx_area_nk100?: string;
+};
+
+/**
+ * Every row of a KIS listing paged by continuation keys, at most twenty
+ * pages. `ask` gets the keys the page before handed back, trimmed, and the
+ * page's index from 0; an empty key or an empty page is the last. A refusal
+ * throws what KIS said, or `failure`.
+ */
+export async function walkKisPages<T>(
+  ask: (fk: string, nk: string, page: number) => Promise<KisPage<T>>,
+  failure: string,
+): Promise<T[]> {
+  const rows: T[] = [];
+  let lastPage = "";
+  let fk = "";
+  let nk = "";
+  for (let page = 0; page < 20; page += 1) {
+    const body = await ask(fk, nk, page);
+    if (body.rt_cd !== "0") throw new Error(body.msg1?.trim() || failure);
+    // Two identical fills on one day are two trades, so rows are not deduped;
+    // only a page handed back twice is.
+    const pageKey = JSON.stringify(body.output1 ?? []);
+    if (pageKey === lastPage) break;
+    lastPage = pageKey;
+    rows.push(...(body.output1 ?? []));
+    fk = body.ctx_area_fk100?.trim() ?? "";
+    nk = body.ctx_area_nk100?.trim() ?? "";
+    if (!nk || (body.output1 ?? []).length === 0) break;
+  }
+  return rows;
+}
+
 /**
  * Overseas fills traded since `since` (CTOS4001R), oldest first. Both the
  * realized returns (realized.ts) and the cash checks (movementsOf) are
@@ -849,11 +1046,7 @@ export async function kisTrades(since: string): Promise<KisTrade[]> {
   const token = await kisAccessToken();
   const { cano, prod } = kisAccount();
   const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
-  const trades: KisTrade[] = [];
-  let lastPage = "";
-  let fk = "";
-  let nk = "";
-  for (let page = 0; page < 20; page += 1) {
+  const rows = await walkKisPages<KisTrans>((fk, nk, page) => {
     const query = new URLSearchParams({
       CANO: cano,
       ACNT_PRDT_CD: prod,
@@ -866,42 +1059,33 @@ export async function kisTrades(since: string): Promise<KisTrade[]> {
       CTX_AREA_FK100: fk,
       CTX_AREA_NK100: nk,
     });
-    const body = await json<{
-      rt_cd: string;
-      msg1?: string;
-      output1?: KisTrans[];
-      ctx_area_fk100?: string;
-      ctx_area_nk100?: string;
-    }>(`${KIS_BASE}/uapi/overseas-stock/v1/trading/inquire-period-trans?${query}`, {
+    return json<KisPage<KisTrans>>(`${KIS_BASE}/uapi/overseas-stock/v1/trading/inquire-period-trans?${query}`, {
       headers: { ...kisHeaders(token, "CTOS4001R"), ...(page > 0 ? { tr_cont: "N" } : {}) },
     });
-    if (body.rt_cd !== "0") throw new Error(body.msg1?.trim() || "거래내역 조회 실패");
-    // Two identical fills on one day are two trades, so rows are not deduped;
-    // only a page handed back twice is.
-    const pageKey = JSON.stringify(body.output1 ?? []);
-    if (pageKey === lastPage) break;
-    lastPage = pageKey;
-    for (const row of body.output1 ?? []) {
-      if (!row.trad_dt || !row.sttl_dt || !(Number(row.ccld_qty) > 0)) continue;
-      const sell = row.sll_buy_dvsn_cd === "01";
-      trades.push({
-        date: dashed(row.trad_dt),
-        settleDate: dashed(row.sttl_dt),
-        side: sell ? "sell" : "buy",
-        symbol: row.pdno,
-        name: row.ovrs_item_name || row.pdno,
-        quantity: Number(row.ccld_qty),
-        netKrw: Number(row.wcrc_excc_amt),
-        grossKrw: Number(row.tr_amt),
-        netUsd: Number(row.frcr_excc_amt_1),
-        grossUsd: Number(row.tr_frcr_amt2),
-        rate: Number(row.erlm_exrt),
-        settled: Number(row.erlm_exrt) > 0,
-      });
-    }
-    fk = body.ctx_area_fk100?.trim() ?? "";
-    nk = body.ctx_area_nk100?.trim() ?? "";
-    if (!nk || (body.output1 ?? []).length === 0) break;
+  }, "거래내역 조회 실패");
+  return kisTradesOf(rows);
+}
+
+/** CTOS4001R's rows as fills, oldest first: a row without both dates or with nothing filled is none. */
+export function kisTradesOf(rows: KisTrans[]): KisTrade[] {
+  const trades: KisTrade[] = [];
+  for (const row of rows) {
+    if (!row.trad_dt || !row.sttl_dt || !(Number(row.ccld_qty) > 0)) continue;
+    const sell = row.sll_buy_dvsn_cd === "01";
+    trades.push({
+      date: dashed(row.trad_dt),
+      settleDate: dashed(row.sttl_dt),
+      side: sell ? "sell" : "buy",
+      symbol: row.pdno,
+      name: row.ovrs_item_name || row.pdno,
+      quantity: Number(row.ccld_qty),
+      netKrw: Number(row.wcrc_excc_amt),
+      grossKrw: Number(row.tr_amt),
+      netUsd: Number(row.frcr_excc_amt_1),
+      grossUsd: Number(row.tr_frcr_amt2),
+      rate: Number(row.erlm_exrt),
+      settled: Number(row.erlm_exrt) > 0,
+    });
   }
   return trades.sort((a, b) => a.date.localeCompare(b.date));
 }
@@ -940,10 +1124,39 @@ export async function kisDailyCloses(
   symbol: string,
   days: number,
 ): Promise<Map<string, number>> {
-  const out = new Map<string, number>();
-  if (!env("KIS_APP_KEY")) return out;
+  if (!env("KIS_APP_KEY")) return new Map<string, number>();
 
   const token = await kisAccessToken();
+  return walkKisCloses(async (excd, before) => {
+    const query = new URLSearchParams({
+      AUTH: "",
+      EXCD: excd,
+      SYMB: symbol,
+      GUBN: "0",
+      BYMD: before,
+      MODP: "1",
+    });
+    const body = await json<{ output2?: KisDailyPrice[] }>(
+      `${KIS_BASE}/uapi/overseas-price/v1/quotations/dailyprice?${query}`,
+      { headers: kisHeaders(token, "HHDFS76240000") },
+    ).catch(() => ({ output2: [] as KisDailyPrice[] }));
+    return body.output2 ?? [];
+  }, days);
+}
+
+/** One row of KIS's overseas daily prices (HHDFS76240000 output2), newest first. */
+export type KisDailyPrice = { xymd: string; clos: string };
+
+/**
+ * The closes kisDailyCloses walks, from `ask`: one page of rows under an
+ * exchange code (NAS, NYS or AMS), back from a day (BYMD, YYYYMMDD; empty
+ * for the latest).
+ */
+export async function walkKisCloses(
+  ask: (excd: string, before: string) => Promise<KisDailyPrice[]>,
+  days: number,
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
   let before = "";
 
   // The daily-price endpoint wants the exchange, and answers nothing for the
@@ -952,28 +1165,15 @@ export async function kisDailyCloses(
   let exchange: string | null = null;
 
   for (let page = 0; page < 5 && out.size < days; page += 1) {
-    const ask = async (excd: string) => {
-      const query = new URLSearchParams({
-        AUTH: "",
-        EXCD: excd,
-        SYMB: symbol,
-        GUBN: "0",
-        BYMD: before,
-        MODP: "1",
-      });
-      const body = await json<{ output2?: { xymd: string; clos: string }[] }>(
-        `${KIS_BASE}/uapi/overseas-price/v1/quotations/dailyprice?${query}`,
-        { headers: kisHeaders(token, "HHDFS76240000") },
-      ).catch(() => ({ output2: [] as { xymd: string; clos: string }[] }));
-      return (body.output2 ?? []).filter((r) => r.xymd && Number(r.clos) > 0);
-    };
+    const closes = async (excd: string) =>
+      (await ask(excd, before)).filter((r) => r.xymd && Number(r.clos) > 0);
 
-    let rows: { xymd: string; clos: string }[] = [];
+    let rows: KisDailyPrice[] = [];
     if (exchange) {
-      rows = await ask(exchange);
+      rows = await closes(exchange);
     } else {
       for (const excd of ["NAS", "NYS", "AMS"]) {
-        rows = await ask(excd);
+        rows = await closes(excd);
         if (rows.length > 0) {
           exchange = excd;
           break;
@@ -1000,21 +1200,28 @@ export async function kisDailyCloses(
   return out;
 }
 
+/** The stale figure the page adds up against when Upbit gives no rate. */
+const USD_KRW_FALLBACK = 1350;
+
 /**
  * One rate for the whole page, so a dollar holding and the total never
  * disagree. Upbit publishes the same USDT market everyone prices off; if it
  * is unreachable the page still adds up, just against a stale figure.
  */
 export async function usdKrwRate(): Promise<number> {
-  const fallback = 1350;
   try {
-    const [t] = await json<{ trade_price: number }[]>(
+    return usdtRateOf(await json<UpbitTicker[]>(
       "https://api.upbit.com/v1/ticker?markets=KRW-USDT",
-    );
-    return t?.trade_price > 0 ? t.trade_price : fallback;
+    ));
   } catch {
-    return fallback;
+    return USD_KRW_FALLBACK;
   }
+}
+
+/** The USDT ticker's price as the dollar rate, or the fallback when it has none. */
+export function usdtRateOf(tickers: UpbitTicker[]): number {
+  const [t] = tickers;
+  return t?.trade_price > 0 ? t.trade_price : USD_KRW_FALLBACK;
 }
 
 /* ─────────────────── 한국투자증권 금현물 (KRX 금시장) ─────────────────── */
@@ -1034,13 +1241,7 @@ const KRX_GOLD = "M04020000";
  *
  * Null when no key is configured - the account is simply not connected.
  */
-export async function kisGoldAccount(): Promise<{
-  holdings: Holding[];
-  cashKrw: number;
-  cash: CashLine[];
-  /** Won per gram, asked even when nothing is held, so gold can be planned. */
-  gramKrw: number | null;
-} | null> {
+export async function kisGoldAccount(): Promise<KisGoldAccount | null> {
   const app = goldApp();
   if (!app.key) return null;
 
@@ -1051,37 +1252,69 @@ export async function kisGoldAccount(): Promise<{
     INQR_DVSN_1: "",
     BSPR_BF_DT_APLY_YN: "",
   });
-  const body = await json<{
-    rt_cd: string;
-    msg1?: string;
-    output2?: { tot_asst_amt?: string; dncl_amt?: string; pchs_amt_smtl?: string };
-  }>(
+  const balance = kisGoldBalanceOf(await json<KisGoldBalance>(
     `${KIS_BASE}/uapi/domestic-stock/v1/trading/inquire-account-balance?${query}`,
     { headers: kisHeaders(token, "CTRP6548R", app) },
-  );
-  if (body.rt_cd !== "0") throw new Error(body.msg1?.trim() || "잔고 조회 실패");
+  ));
 
-  const total = Number(body.output2?.tot_asst_amt ?? 0);
-  const cashKrw = Number(body.output2?.dncl_amt ?? 0);
-  const valueKrw = Math.max(0, total - cashKrw);
-  const cash: CashLine[] = cashKrw > 0
-    ? [{ id: "gold:KRW", venue: "gold", currency: "KRW", label: "금현물 계좌 원화", amount: cashKrw, valueKrw: cashKrw }]
-    : [];
-
-  const price = await json<{ output?: { stck_prpr?: string } }>(
+  const quote = await json<KisQuote>(
     `${KIS_BASE}/uapi/domestic-stock/v1/quotations/inquire-price?${new URLSearchParams({
       FID_COND_MRKT_DIV_CODE: "J",
       FID_INPUT_ISCD: KRX_GOLD,
     })}`,
     { headers: kisHeaders(token, "FHKST01010100", app) },
-  ).then((b) => Number(b.output?.stck_prpr ?? 0)).catch(() => 0);
+  ).catch(() => null);
+  return kisGoldAccountOf(balance, quote);
+}
+
+/** KIS's asset overview (CTRP6548R) of the gold account. */
+export type KisGoldBalance = {
+  rt_cd: string;
+  msg1?: string;
+  output2?: { tot_asst_amt?: string; dncl_amt?: string; pchs_amt_smtl?: string };
+};
+
+/** The gold account's balance in won: everything in it, its cash, and what was paid for the gold (0: KIS did not say). */
+export type GoldBalance = { totalKrw: number; cashKrw: number; boughtKrw: number };
+
+/** A KRX quote (FHKST01010100). */
+export type KisQuote = { output?: { stck_prpr?: string } };
+
+/** The gold account, as kisGoldAccount answers it. */
+export type KisGoldAccount = {
+  holdings: Holding[];
+  cashKrw: number;
+  cash: CashLine[];
+  /** Won per gram, asked even when nothing is held, so gold can be planned. */
+  gramKrw: number | null;
+};
+
+/** The gold account's balance from the asset overview; a refusal throws what KIS said. */
+export function kisGoldBalanceOf(body: KisGoldBalance): GoldBalance {
+  if (body.rt_cd !== "0") throw new Error(body.msg1?.trim() || "잔고 조회 실패");
+  return {
+    totalKrw: Number(body.output2?.tot_asst_amt ?? 0),
+    cashKrw: Number(body.output2?.dncl_amt ?? 0),
+    boughtKrw: Number(body.output2?.pchs_amt_smtl ?? 0),
+  };
+}
+
+/** The gold account from its balance and KRX's quote for gold (null: it could not be read). */
+export function kisGoldAccountOf(balance: GoldBalance, quote: KisQuote | null): KisGoldAccount {
+  const cashKrw = balance.cashKrw;
+  const valueKrw = Math.max(0, balance.totalKrw - cashKrw);
+  const cash: CashLine[] = cashKrw > 0
+    ? [{ id: "gold:KRW", venue: "gold", currency: "KRW", label: "금현물 계좌 원화", amount: cashKrw, valueKrw: cashKrw }]
+    : [];
+
+  const price = Number(quote?.output?.stck_prpr ?? 0);
   const gramKrw = price > 0 ? price : null;
   if (valueKrw < 1) return { holdings: [], cashKrw, cash, gramKrw };
 
   const grams = price > 0 ? valueKrw / price : 0;
   // A zero purchase total means KIS did not say - fall back to value, which
   // reads as flat rather than as a 100% gain.
-  const costKrw = Number(body.output2?.pchs_amt_smtl ?? 0) || valueKrw;
+  const costKrw = balance.boughtKrw || valueKrw;
   return {
     holdings: [
       {
@@ -1104,7 +1337,8 @@ export async function kisGoldAccount(): Promise<{
   };
 }
 
-type KisPeriodTrade = {
+/** One row of KIS's period trade profit (TTTC8715R output1). */
+export type KisPeriodTrade = {
   trad_dt: string;
   buy_amt: string;
   sll_amt: string;
@@ -1122,11 +1356,7 @@ export async function goldSettlements(since: string): Promise<Settlement[]> {
   if (!app.key) return [];
   const token = await kisAccessToken(app);
   const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
-  const byDay = new Map<string, Settlement>();
-  let lastPage = "";
-  let fk = "";
-  let nk = "";
-  for (let page = 0; page < 20; page += 1) {
+  const rows = await walkKisPages<KisPeriodTrade>((fk, nk, page) => {
     const query = new URLSearchParams({
       CANO: env("KIS_GOLD_ACCOUNT_NO").replace(/-/g, "").slice(0, 8),
       ACNT_PRDT_CD: env("KIS_GOLD_ACCOUNT_PRODUCT") || "01",
@@ -1138,58 +1368,69 @@ export async function goldSettlements(since: string): Promise<Settlement[]> {
       CTX_AREA_FK100: fk,
       CTX_AREA_NK100: nk,
     });
-    const body = await json<{
-      rt_cd: string;
-      msg1?: string;
-      output1?: KisPeriodTrade[];
-      ctx_area_fk100?: string;
-      ctx_area_nk100?: string;
-    }>(`${KIS_BASE}/uapi/domestic-stock/v1/trading/inquire-period-trade-profit?${query}`, {
+    return json<KisPage<KisPeriodTrade>>(`${KIS_BASE}/uapi/domestic-stock/v1/trading/inquire-period-trade-profit?${query}`, {
       headers: { ...kisHeaders(token, "TTTC8715R", app), ...(page > 0 ? { tr_cont: "N" } : {}) },
     });
-    if (body.rt_cd !== "0") throw new Error(body.msg1?.trim() || "매매 내역 조회 실패");
-    const pageKey = JSON.stringify(body.output1 ?? []);
-    if (pageKey === lastPage) break;
-    lastPage = pageKey;
-    for (const row of body.output1 ?? []) {
-      const d = row.trad_dt;
-      if (!d) continue;
-      const date = `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
-      const krw = Number(row.sll_amt) - Number(row.buy_amt) - Number(row.fee) - Number(row.tl_tax);
-      const day = byDay.get(date) ?? { date, krw: 0, usd: 0, rate: 0 };
-      day.krw += krw;
-      byDay.set(date, day);
-    }
-    fk = body.ctx_area_fk100?.trim() ?? "";
-    nk = body.ctx_area_nk100?.trim() ?? "";
-    if (!nk || (body.output1 ?? []).length === 0) break;
+  }, "매매 내역 조회 실패");
+  return goldSettlementsOf(rows);
+}
+
+/** TTTC8715R's rows as the won each trading day moved: sales in; purchases, fees and tax out. */
+export function goldSettlementsOf(rows: KisPeriodTrade[]): Settlement[] {
+  const byDay = new Map<string, Settlement>();
+  for (const row of rows) {
+    const d = row.trad_dt;
+    if (!d) continue;
+    const date = `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
+    const krw = Number(row.sll_amt) - Number(row.buy_amt) - Number(row.fee) - Number(row.tl_tax);
+    const day = byDay.get(date) ?? { date, krw: 0, usd: 0, rate: 0 };
+    day.krw += krw;
+    byDay.set(date, day);
   }
   return [...byDay.values()].sort((a, b) => a.date.localeCompare(b.date));
 }
 
 /** KRX gold closes per gram, YYYY-MM-DD -> price, a hundred days a call. */
 export async function kisGoldDailyCloses(days: number): Promise<Map<string, number>> {
-  const out = new Map<string, number>();
   const app = goldApp();
-  if (!app.key) return out;
+  if (!app.key) return new Map<string, number>();
   const token = await kisAccessToken(app);
-  const ymd = (d: Date) => d.toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" }).replace(/-/g, "");
-
-  let end = new Date();
-  for (let page = 0; page < 5 && out.size < days; page += 1) {
-    const start = new Date(end.getTime() - 140 * 86_400_000);
-    const body = await json<{ output2?: { stck_bsop_date: string; stck_clpr: string }[] }>(
+  return walkKisGoldCloses(async (from, to) => {
+    const body = await json<{ output2?: KisDailyChart[] }>(
       `${KIS_BASE}/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice?${new URLSearchParams({
         FID_COND_MRKT_DIV_CODE: "J",
         FID_INPUT_ISCD: KRX_GOLD,
-        FID_INPUT_DATE_1: ymd(start),
-        FID_INPUT_DATE_2: ymd(end),
+        FID_INPUT_DATE_1: from,
+        FID_INPUT_DATE_2: to,
         FID_PERIOD_DIV_CODE: "D",
         FID_ORG_ADJ_PRC: "0",
       })}`,
       { headers: kisHeaders(token, "FHKST03010100", app) },
     ).catch(() => ({ output2: [] }));
-    const rows = (body.output2 ?? []).filter((r) => r.stck_bsop_date && Number(r.stck_clpr) > 0);
+    return body.output2 ?? [];
+  }, days);
+}
+
+/** One day of KIS's daily chart (FHKST03010100 output2), newest first. */
+export type KisDailyChart = { stck_bsop_date: string; stck_clpr: string };
+
+/**
+ * The closes kisGoldDailyCloses walks back from `now`, from `ask`: the
+ * chart between two Seoul days (YYYYMMDD), 140 days a call, each next window
+ * ending the day before the last one began.
+ */
+export async function walkKisGoldCloses(
+  ask: (from: string, to: string) => Promise<KisDailyChart[]>,
+  days: number,
+  now = new Date(),
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  const ymd = (d: Date) => d.toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" }).replace(/-/g, "");
+
+  let end = now;
+  for (let page = 0; page < 5 && out.size < days; page += 1) {
+    const start = new Date(end.getTime() - 140 * 86_400_000);
+    const rows = (await ask(ymd(start), ymd(end))).filter((r) => r.stck_bsop_date && Number(r.stck_clpr) > 0);
     if (rows.length === 0) break;
     for (const r of rows) {
       const d = r.stck_bsop_date;
@@ -1204,7 +1445,12 @@ export async function kisGoldDailyCloses(days: number): Promise<Map<string, numb
 
 /** Upbit's last trade price for a KRW market, for turning won into a coin amount. */
 export async function upbitPrice(market: string): Promise<number> {
-  const [t] = await json<{ trade_price: number }[]>(`https://api.upbit.com/v1/ticker?markets=${encodeURIComponent(market)}`);
+  return upbitPriceOf(market, await json<UpbitTicker[]>(`https://api.upbit.com/v1/ticker?markets=${encodeURIComponent(market)}`));
+}
+
+/** The ticker's last price for `market`; none is an error, never a price of zero. */
+export function upbitPriceOf(market: string, tickers: UpbitTicker[]): number {
+  const [t] = tickers;
   if (!t?.trade_price) throw new Error(`${market} 시세를 읽지 못했습니다`);
   return t.trade_price;
 }
@@ -1237,7 +1483,12 @@ export async function upbitOrder(o: {
     headers: { authorization: `Bearer ${upbitToken(query)}`, "content-type": "application/json" },
     body: JSON.stringify(params),
   });
-  const body = (await res.json().catch(() => null)) as (UpbitOrderAnswer & { error?: { message?: string; name?: string } }) | null;
+  return upbitOrderAnswerOf(res, await res.json().catch(() => null));
+}
+
+/** Upbit's answer to an order (`answer`: its body, null when it was not JSON); a refusal throws Upbit's own words. */
+export function upbitOrderAnswerOf(res: { ok: boolean; status: number }, answer: unknown): UpbitOrderAnswer {
+  const body = answer as (UpbitOrderAnswer & { error?: { message?: string; name?: string } }) | null;
   if (!res.ok || !body?.uuid) {
     throw new Error(body?.error?.message ?? body?.error?.name ?? `업비트가 거절했습니다 (${res.status})`);
   }
@@ -1258,16 +1509,24 @@ export async function kisUsQuote(symbol: string): Promise<{ excd: string; last: 
   const known = usExchange.get(symbol);
   for (const excd of known ? [known] : ["NAS", "NYS", "AMS"]) {
     const q = new URLSearchParams({ AUTH: "", EXCD: excd, SYMB: symbol });
-    const body = await json<{ output?: { last?: string } }>(`${KIS_BASE}/uapi/overseas-price/v1/quotations/price?${q}`, {
+    const body = await json<KisUsPrice>(`${KIS_BASE}/uapi/overseas-price/v1/quotations/price?${q}`, {
       headers: kisHeaders(token, "HHDFS00000300"),
-    }).catch(() => ({}) as { output?: { last?: string } });
-    const last = Number(body.output?.last ?? 0);
+    }).catch(() => ({}) as KisUsPrice);
+    const last = kisLastOf(body);
     if (last > 0) {
       usExchange.set(symbol, excd);
       return { excd, last };
     }
   }
   throw new Error(`${symbol} 의 시세를 찾지 못했습니다`);
+}
+
+/** KIS's quote for a US share (HHDFS00000300). */
+export type KisUsPrice = { output?: { last?: string } };
+
+/** The last trade in KIS's quote for a US share; 0 when it has none, as under the wrong exchange. */
+export function kisLastOf(body: KisUsPrice): number {
+  return Number(body.output?.last ?? 0);
 }
 
 /**
@@ -1300,10 +1559,18 @@ export async function kisUsOrder(o: {
     ORD_SVR_DVSN_CD: "0",
     ORD_DVSN: "00",
   };
-  const res = await json<{ rt_cd?: string; msg_cd?: string; msg1?: string; output?: { ODNO?: string } }>(
+  const res = await json<KisOrderAnswer>(
     `${KIS_BASE}/uapi/overseas-stock/v1/trading/order`,
     { method: "POST", headers: kisHeaders(token, trId), body: JSON.stringify(body) },
   );
+  return kisOrderAnswerOf(res);
+}
+
+/** KIS's answer to an order or a cancel. */
+export type KisOrderAnswer = { rt_cd?: string; msg_cd?: string; msg1?: string; output?: { ODNO?: string } };
+
+/** The order number KIS gave an order, and its message; a refusal throws its message and code. */
+export function kisOrderAnswerOf(res: KisOrderAnswer): { odno: string; message: string } {
   if (res.rt_cd !== "0") throw new Error(`${(res.msg1 ?? "").trim()} (${res.msg_cd ?? "?"})`);
   return { odno: res.output?.ODNO ?? "", message: (res.msg1 ?? "").trim() };
 }
@@ -1323,10 +1590,18 @@ export async function kisUsBuyable(symbol: string, excd: string, price: number):
     OVRS_ORD_UNPR: price.toFixed(2),
     ITEM_CD: symbol,
   });
-  const body = await json<{ rt_cd?: string; msg1?: string; output?: Record<string, string> }>(
+  const body = await json<KisBuyable>(
     `${KIS_BASE}/uapi/overseas-stock/v1/trading/inquire-psamount?${q}`,
     { headers: kisHeaders(token, mock ? "VTTS3007R" : "TTTS3007R") },
   );
+  return kisBuyableOf(body);
+}
+
+/** KIS's buyable amount for a US share (TTTS3007R). */
+export type KisBuyable = { rt_cd?: string; msg1?: string; output?: Record<string, string> };
+
+/** The shares and dollars KIS says the account can buy; a refusal throws what KIS said. */
+export function kisBuyableOf(body: KisBuyable): { qty: number; amount: number; raw: Record<string, string> } {
   if (body.rt_cd !== "0" || !body.output) throw new Error((body.msg1 ?? "매수 가능 금액을 읽지 못했습니다").trim());
   const o = body.output;
   return {
@@ -1341,7 +1616,7 @@ export async function kisUsCancel(o: { symbol: string; excd: string; odno: strin
   const token = await kisAccessToken();
   const { cano, prod } = kisAccount();
   const mock = env("KIS_MOCK") === "true";
-  const res = await json<{ rt_cd?: string; msg_cd?: string; msg1?: string }>(
+  const res = await json<KisOrderAnswer>(
     `${KIS_BASE}/uapi/overseas-stock/v1/trading/order-rvsecncl`,
     {
       method: "POST",
@@ -1360,6 +1635,11 @@ export async function kisUsCancel(o: { symbol: string; excd: string; odno: strin
       }),
     },
   );
+  return kisCancelAnswerOf(res);
+}
+
+/** KIS's message on a cancel; a refusal throws its message and code. */
+export function kisCancelAnswerOf(res: KisOrderAnswer): string {
   if (res.rt_cd !== "0") throw new Error(`${(res.msg1 ?? "").trim()} (${res.msg_cd ?? "?"})`);
   return (res.msg1 ?? "").trim();
 }
