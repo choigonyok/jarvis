@@ -9,20 +9,15 @@
 package main
 
 import (
-	"context"
-	"log"
-	"log/slog"
-	"net/http"
 	"os"
-	"os/signal"
-	"strconv"
-	"syscall"
+	"path/filepath"
 	"time"
 
 	"github.com/choigonyok/jarvis/gocommon/collect"
 	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/gocommon/record"
 	"github.com/choigonyok/jarvis/gocommon/seal"
+	"github.com/choigonyok/jarvis/gocommon/svc"
 	"github.com/choigonyok/jarvis/kakaotalk-client/internal/api"
 	"github.com/choigonyok/jarvis/kakaotalk-client/internal/kakao"
 	"github.com/choigonyok/jarvis/kakaotalk-client/internal/poller"
@@ -30,46 +25,44 @@ import (
 )
 
 func main() {
+	log := svc.Logger()
 	cfg := kakao.Config{
 		ContainerDir: os.Getenv("KAKAO_CONTAINER_DIR"),
 		HomeDir:      os.Getenv("KAKAO_HOME"),
 		UUID:         os.Getenv("KAKAO_UUID"),
-		UserID:       envInt64("KAKAO_USER_ID", 0),
+		UserID:       int64(svc.Int("KAKAO_USER_ID", 0)),
 		Key:          os.Getenv("KAKAO_SQLCIPHER_KEY"),
 		PlistDir:     os.Getenv("KAKAO_PLIST_DIR"),
 		ScratchDir:   os.Getenv("KAKAO_SCRATCH_DIR"),
 	}
 
-	storePath := getenv("STORE_PATH", "./data/kakaotalk.db")
-	if err := os.MkdirAll(dirOf(storePath), 0o700); err != nil {
-		log.Fatalf("store dir: %v", err)
+	storePath := svc.Env("STORE_PATH", "./data/kakaotalk.db")
+	if err := os.MkdirAll(filepath.Dir(storePath), 0o700); err != nil {
+		log.Error("저장소 폴더를 만들지 못했습니다", "err", err)
+		os.Exit(1)
 	}
-	interval := envDuration("POLL_INTERVAL", time.Second)
-	batch := int(envInt64("POLL_BATCH", 500))
-	addr := getenv("LISTEN_ADDR", ":8090")
-	// An empty token would leave every route open to anything on the
-	// network. Only a local trial may run that way, and must say so.
-	if os.Getenv("API_TOKEN") == "" && os.Getenv("API_TOKEN_OPTIONAL") != "true" {
-		log.Fatal("API_TOKEN 이 비어 있습니다. 로컬 시험이라면 API_TOKEN_OPTIONAL=true")
-	}
-	token := os.Getenv("API_TOKEN")
+	interval := svc.Duration("POLL_INTERVAL", time.Second)
+	batch := svc.Int("POLL_BATCH", 500)
+	token := svc.Token(log)
 
 	st, err := store.Open(storePath)
 	if err != nil {
-		log.Fatalf("open store: %v", err)
+		log.Error("저장소를 열지 못했습니다", "err", err)
+		os.Exit(1)
 	}
 	defer st.Close()
 
 	reader, err := kakao.Open(cfg)
 	if err != nil {
-		log.Fatalf("open kakao source: %v", err)
+		log.Error("카카오톡 DB 를 열지 못했습니다", "err", err)
+		os.Exit(1)
 	}
-	log.Printf("kakaotalk-client: source unlocked (user_id=%d), polling every %s", reader.UserID(), interval)
+	log.Info("카카오톡 DB 를 열었습니다", "user_id", reader.UserID(), "interval", interval)
 
 	p := poller.New(reader, st, interval, batch)
 	p.ImportHistory = os.Getenv("KAKAO_IMPORT_HISTORY") != "false"
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := svc.Signals()
 	defer stop()
 
 	loops := health.NewLoops()
@@ -80,12 +73,12 @@ func main() {
 	if url, key := os.Getenv("INPUT_URL"), os.Getenv("MESSAGE_KEY"); url != "" && key != "" {
 		sealer, err := seal.FromBase64(key)
 		if err != nil {
-			log.Fatalf("MESSAGE_KEY: %v", err)
+			log.Error("MESSAGE_KEY 를 읽지 못했습니다", "err", err)
+			os.Exit(1)
 		}
-		logger := slog.Default()
 		pub := &collect.Publisher{
-			Source: "kakao", CursorPath: storePath + ".published", Seal: sealer, Every: interval, Loops: loops, Log: logger,
-			Send:   record.Post(url, token, logger),
+			Source: "kakao", CursorPath: storePath + ".published", Seal: sealer, Every: interval, Loops: loops, Log: log,
+			Send:   record.Post(url, token, log),
 			Latest: func() (int64, error) { _, top, err := st.RowIDRange(); return top, err },
 			After: func(rowid int64, limit int) ([]collect.Item, error) {
 				msgs, err := st.MessagesAfter(rowid, limit)
@@ -102,60 +95,12 @@ func main() {
 		go pub.Run(ctx)
 	}
 	// 평문 사본의 보존 기한(일). 0 이면 지우지 않는다.
-	go collect.Retain(ctx, int(envInt64("RETAIN_DAYS", 730)), st.Prune, func(n int64, err error) {
-		log.Printf("retain: deleted=%d err=%v", n, err)
+	go collect.Retain(ctx, svc.Int("RETAIN_DAYS", 730), st.Prune, func(n int64, err error) {
+		log.Info("보존 기한이 지난 메시지를 지웠습니다", "count", n, "err", err)
 	})
 
-	srv := &http.Server{
-		Addr:         addr,
-		Handler:      api.New(st, p, token, loops).Handler(),
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 30 * time.Second,
+	if svc.Serve(ctx, svc.Server{Name: "kakaotalk-client", Addr: svc.Env("LISTEN_ADDR", ":8090"), Handler: api.New(st, p, token, loops).Handler(),
+		Read: 10 * time.Second, Write: 30 * time.Second, Log: log}) != nil {
+		os.Exit(1)
 	}
-	go func() {
-		log.Printf("kakaotalk-client: HTTP listening on %s", addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("http: %v", err)
-		}
-	}()
-
-	<-ctx.Done()
-	log.Printf("kakaotalk-client: shutting down")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_ = srv.Shutdown(shutdownCtx)
-}
-
-func getenv(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
-}
-
-func envInt64(key string, def int64) int64 {
-	if v := os.Getenv(key); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
-			return n
-		}
-	}
-	return def
-}
-
-func envDuration(key string, def time.Duration) time.Duration {
-	if v := os.Getenv(key); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			return d
-		}
-	}
-	return def
-}
-
-func dirOf(path string) string {
-	for i := len(path) - 1; i >= 0; i-- {
-		if path[i] == '/' {
-			return path[:i]
-		}
-	}
-	return "."
 }

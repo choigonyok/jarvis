@@ -10,15 +10,10 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
-	"errors"
-	"log/slog"
-	"net/http"
 	"os"
-	"os/signal"
-	"strconv"
-	"syscall"
 	"time"
 
 	"github.com/choigonyok/jarvis/context-svc/internal/api"
@@ -29,29 +24,22 @@ import (
 	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/gocommon/notify"
 	"github.com/choigonyok/jarvis/gocommon/record"
+	"github.com/choigonyok/jarvis/gocommon/svc"
+	"github.com/choigonyok/jarvis/gocommon/svc/pg"
 	"github.com/choigonyok/jarvis/gocommon/watch"
 	"github.com/choigonyok/jarvis/gocommon/weather"
 )
 
 func main() {
-	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	// An empty token would leave every route open to anything on the
-	// network. Only a local trial may run that way, and must say so.
-	if os.Getenv("API_TOKEN") == "" && os.Getenv("API_TOKEN_OPTIONAL") != "true" {
-		log.Error("API_TOKEN 이 비어 있습니다. 로컬 시험이라면 API_TOKEN_OPTIONAL=true")
-		os.Exit(1)
-	}
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		log.Error("DATABASE_URL 이 없습니다.")
-		os.Exit(1)
-	}
+	log := svc.Logger()
+	token := svc.Token(log)
+	dsn := svc.Need(log, "DATABASE_URL")
 	cfg := api.Config{
-		Token: os.Getenv("API_TOKEN"), SignalToken: os.Getenv("SIGNAL_TOKEN"),
+		Token: token, SignalToken: os.Getenv("SIGNAL_TOKEN"),
 		User: os.Getenv("OWNTRACKS_USER"), Pass: os.Getenv("OWNTRACKS_PASSWORD"),
 		GuestUser: os.Getenv("OWNTRACKS_GUEST_USER"), GuestPass: os.Getenv("OWNTRACKS_GUEST_PASSWORD"),
 		GuestToken: os.Getenv("API_GUEST_TOKEN"),
-		Public:     getenv("CONTEXT_PUBLIC_URL", "https://jarvis-be.choigonyok.com/context"),
+		Public:     svc.Env("CONTEXT_PUBLIC_URL", "https://jarvis-be.choigonyok.com/context"),
 		DataKey:    os.Getenv("DATA_GO_KR_KEY"), SubwayKey: os.Getenv("SEOUL_SUBWAY_KEY"),
 	}
 	if cfg.User == "" || cfg.Pass == "" {
@@ -60,15 +48,13 @@ func main() {
 	if cfg.DataKey == "" || cfg.SubwayKey == "" {
 		log.Warn("DATA_GO_KR_KEY/SEOUL_SUBWAY_KEY 가 비어 출발 탭의 실시간 버스·지하철 정보가 일부 없습니다")
 	}
-	days := 30
-	if n, err := strconv.Atoi(os.Getenv("CONTEXT_RAW_DAYS")); err == nil && n > 0 {
-		days = n
-	}
+	// Zero days is no number of days to keep: the default.
+	days := cmp.Or(svc.Int("CONTEXT_RAW_DAYS", 30), 30)
 	cfg.RawDays = days
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := svc.Signals()
 	defer stop()
-	st, err := openWithRetry(ctx, dsn, 30, time.Second, log)
+	st, err := pg.Retry(ctx, log, func(ctx context.Context) (*store.Store, error) { return store.Open(ctx, dsn) })
 	if err != nil {
 		log.Error("데이터베이스에 연결하지 못했습니다", "err", err)
 		os.Exit(1)
@@ -95,7 +81,6 @@ func main() {
 		}
 	}()
 
-	addr := getenv("LISTEN_ADDR", ":8103")
 	server := api.New(st, cfg, events, log)
 	go server.Watch(ctx, time.Minute)
 	handler := server.Handler()
@@ -106,7 +91,7 @@ func main() {
 	records := record.New(dsn, loops, log)
 	go records.Run(ctx)
 	now := watch.Local(handler, cfg.Token, "/now")
-	go (&host.Watch{File: getenv("HOST_FACTS", "/host/host.json"), FileVaultOffAccepted: os.Getenv("HOST_FILEVAULT_OFF_ACCEPTED") == "true",
+	go (&host.Watch{File: svc.Env("HOST_FACTS", "/host/host.json"), FileVaultOffAccepted: os.Getenv("HOST_FILEVAULT_OFF_ACCEPTED") == "true",
 		Location: func(ctx context.Context) (*time.Time, string, error) {
 			raw, err := now(ctx)
 			if err != nil {
@@ -134,13 +119,13 @@ func main() {
 	// The weather: read here, and nowhere else. Home is the 집 region made on
 	// the phone, else WEATHER_HOME, else 서울.
 	if os.Getenv("WEATHER") != "false" {
-		fixed, err := weather.ParsePoint(getenv("WEATHER_HOME", "37.5665,126.9780,서울"))
+		fixed, err := weather.ParsePoint(svc.Env("WEATHER_HOME", "37.5665,126.9780,서울"))
 		if err != nil {
 			log.Warn("WEATHER_HOME 을 읽지 못해 서울로 둡니다", "err", err)
 			fixed = weather.Point{Name: "서울", Lat: 37.5665, Lon: 126.978}
 		}
 		forecasts := &sky.Reader{
-			Source: &sky.OpenMeteo{Agent: "jarvis-context/1.0 (+https://github.com/choigonyok/jarvis)", Zone: getenv("TZ", "Asia/Seoul")},
+			Source: &sky.OpenMeteo{Agent: "jarvis-context/1.0 (+https://github.com/choigonyok/jarvis)", Zone: svc.Env("TZ", "Asia/Seoul")},
 			Fixed:  fixed, MindURL: os.Getenv("MIND_URL"), Token: cfg.Token,
 			Home: func(ctx context.Context) (weather.Point, bool, error) {
 				regions, err := st.Regions(ctx)
@@ -158,43 +143,8 @@ func main() {
 		(&watch.Watcher{Service: "context", Records: records, Loops: loops, Log: log}).Run(ctx,
 			watch.Source{Kind: "weather.forecast", Label: "날씨 예보", Every: time.Hour, Read: forecasts.Read})
 	}
-	srv := &http.Server{Addr: addr, Handler: handler, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second}
-	go func() {
-		log.Info("context-svc 가 듣기 시작했습니다", "addr", addr)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Error("HTTP 서버", "err", err)
-			stop()
-		}
-	}()
-	<-ctx.Done()
-	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_ = srv.Shutdown(shutdown)
-}
-
-func openWithRetry(ctx context.Context, dsn string, tries int, wait time.Duration, log *slog.Logger) (*store.Store, error) {
-	var last error
-	for i := 0; i < tries; i++ {
-		st, err := store.Open(ctx, dsn)
-		if err == nil {
-			return st, nil
-		}
-		last = err
-		if i == 0 {
-			log.Info("데이터베이스를 기다립니다", "err", err)
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(wait):
-		}
+	if svc.Serve(ctx, svc.Server{Name: "context-svc", Addr: svc.Env("LISTEN_ADDR", ":8103"), Handler: handler,
+		Read: 15 * time.Second, Write: 30 * time.Second, Log: log}) != nil {
+		os.Exit(1)
 	}
-	return nil, last
-}
-
-func getenv(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
 }

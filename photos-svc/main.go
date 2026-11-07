@@ -11,25 +11,22 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"os"
-	"os/signal"
 	"regexp"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	_ "time/tzdata"
 
 	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/gocommon/record"
+	"github.com/choigonyok/jarvis/gocommon/svc"
 	"github.com/choigonyok/jarvis/gocommon/watch"
 )
 
@@ -303,18 +300,13 @@ var assetID = regexp.MustCompile(`^[0-9a-fA-F-]{36}$`)
 func door(im Immich, token string, loc *time.Location) http.Handler {
 	mux := http.NewServeMux()
 	guard := func(next http.HandlerFunc) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
-			got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-			if token != "" && subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
-				writeError(w, http.StatusUnauthorized, "인증이 필요합니다")
-				return
-			}
+		return svc.Guard(token, func(w http.ResponseWriter, r *http.Request) {
 			if im.URL == "" {
-				writeError(w, http.StatusServiceUnavailable, "사진 서버가 연결되지 않았습니다")
+				svc.Error(w, http.StatusServiceUnavailable, "사진 서버가 연결되지 않았습니다")
 				return
 			}
 			next(w, r)
-		}
+		})
 	}
 	mux.HandleFunc("GET /search", guard(func(w http.ResponseWriter, r *http.Request) {
 		in := r.URL.Query()
@@ -330,7 +322,7 @@ func door(im Immich, token string, loc *time.Location) http.Handler {
 			}
 			day, err := time.ParseInLocation("2006-01-02", v, loc)
 			if err != nil {
-				writeError(w, http.StatusBadRequest, key+" 는 YYYY-MM-DD 입니다")
+				svc.Error(w, http.StatusBadRequest, key+" 는 YYYY-MM-DD 입니다")
 				return
 			}
 			if key == "to" {
@@ -340,21 +332,20 @@ func door(im Immich, token string, loc *time.Location) http.Handler {
 		}
 		items, err := im.Find(r.Context(), q)
 		if err != nil {
-			writeError(w, http.StatusBadGateway, err.Error())
+			svc.Error(w, http.StatusBadGateway, err.Error())
 			return
 		}
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		_ = json.NewEncoder(w).Encode(map[string]any{"items": items})
+		svc.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
 	}))
 	mux.HandleFunc("GET /assets/{id}/preview", guard(func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		if !assetID.MatchString(id) {
-			writeError(w, http.StatusBadRequest, "사진 id 가 아닙니다")
+			svc.Error(w, http.StatusBadRequest, "사진 id 가 아닙니다")
 			return
 		}
 		data, kind, err := im.Preview(r.Context(), id)
 		if err != nil {
-			writeError(w, http.StatusBadGateway, err.Error())
+			svc.Error(w, http.StatusBadGateway, err.Error())
 			return
 		}
 		if kind != "" {
@@ -365,22 +356,12 @@ func door(im Immich, token string, loc *time.Location) http.Handler {
 	return mux
 }
 
-func writeError(w http.ResponseWriter, code int, text string) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": text})
-}
-
 func main() {
-	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	token, url := os.Getenv("API_TOKEN"), os.Getenv("INPUT_URL")
-	if token == "" && os.Getenv("API_TOKEN_OPTIONAL") != "true" {
-		log.Error("API_TOKEN 이 비어 있습니다. 로컬 시험이라면 API_TOKEN_OPTIONAL=true")
-		os.Exit(1)
-	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	log := svc.Logger()
+	token, url := svc.Token(log), os.Getenv("INPUT_URL")
+	ctx, stop := svc.Signals()
 	defer stop()
-	loc, err := time.LoadLocation(getenv("TZ", "Asia/Seoul"))
+	loc, err := time.LoadLocation(svc.Env("TZ", "Asia/Seoul"))
 	if err != nil {
 		loc = time.FixedZone("KST", 9*60*60)
 	}
@@ -403,24 +384,9 @@ func main() {
 		health.Write(w, http.StatusOK, health.Report{Loops: loops.List()})
 	})
 	mux.Handle("/", door(im, token, loc))
-	addr := getenv("LISTEN_ADDR", ":8107")
-	srv := &http.Server{Addr: addr, Handler: mux, ReadTimeout: 10 * time.Second, WriteTimeout: 70 * time.Second}
-	go func() {
-		log.Info("photos-svc 가 듣기 시작했습니다", "addr", addr)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Error("HTTP 서버", "err", err)
-			stop()
-		}
-	}()
-	<-ctx.Done()
-	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_ = srv.Shutdown(shutdown)
-}
-
-func getenv(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
+	// A photo is fetched from Immich within its client's minute.
+	if svc.Serve(ctx, svc.Server{Name: "photos-svc", Addr: svc.Env("LISTEN_ADDR", ":8107"), Handler: mux,
+		Read: 10 * time.Second, Write: 70 * time.Second, Log: log}) != nil {
+		os.Exit(1)
 	}
-	return fallback
 }

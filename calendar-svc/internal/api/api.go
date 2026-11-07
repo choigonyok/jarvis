@@ -92,11 +92,13 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 func same(a, b string) bool { return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
+	rep := health.Report{Loops: s.loops.List()}
 	if err := s.store.Ping(r.Context()); err != nil {
-		writeErr(w, http.StatusServiceUnavailable, "데이터베이스에 연결할 수 없습니다.")
+		rep.Error = "데이터베이스에 연결할 수 없습니다."
+		health.Write(w, http.StatusServiceUnavailable, rep)
 		return
 	}
-	health.Write(w, http.StatusOK, health.Report{Loops: s.loops.List()})
+	health.Write(w, http.StatusOK, rep)
 }
 
 func (s *Server) list(w http.ResponseWriter, r *http.Request) {

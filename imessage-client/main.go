@@ -9,15 +9,9 @@
 package main
 
 import (
-	"context"
-	"errors"
-	"log/slog"
-	"net/http"
+	"cmp"
 	"os"
-	"os/signal"
 	"path/filepath"
-	"strconv"
-	"syscall"
 	"time"
 
 	_ "time/tzdata"
@@ -26,23 +20,19 @@ import (
 	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/gocommon/record"
 	"github.com/choigonyok/jarvis/gocommon/seal"
+	"github.com/choigonyok/jarvis/gocommon/svc"
 	"github.com/choigonyok/jarvis/imessage-client/internal/api"
 	"github.com/choigonyok/jarvis/imessage-client/internal/imsg"
 	"github.com/choigonyok/jarvis/imessage-client/internal/store"
 )
 
 func main() {
-	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	// An empty token would leave every route open to anything on the
-	// network. Only a local trial may run that way, and must say so.
-	if os.Getenv("API_TOKEN") == "" && os.Getenv("API_TOKEN_OPTIONAL") != "true" {
-		log.Error("API_TOKEN 이 비어 있습니다. 로컬 시험이라면 API_TOKEN_OPTIONAL=true")
-		os.Exit(1)
-	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	log := svc.Logger()
+	token := svc.Token(log)
+	ctx, stop := svc.Signals()
 	defer stop()
 
-	storePath := getenv("STORE_PATH", "./data/imessage.db")
+	storePath := svc.Env("STORE_PATH", "./data/imessage.db")
 	if err := os.MkdirAll(filepath.Dir(storePath), 0o755); err != nil {
 		log.Error("저장소 폴더를 만들지 못했습니다", "err", err)
 		os.Exit(1)
@@ -55,11 +45,12 @@ func main() {
 	defer st.Close()
 
 	status := &api.Status{}
-	interval := duration("POLL_INTERVAL", 2*time.Second)
+	// A ticker needs a period: zero is the default too.
+	interval := cmp.Or(svc.Duration("POLL_INTERVAL", 2*time.Second), 2*time.Second)
 	cfg := imsg.Config{
-		ChatDB:     getenv("CHAT_DB", "/messages/chat.db"),
+		ChatDB:     svc.Env("CHAT_DB", "/messages/chat.db"),
 		ContactsDB: os.Getenv("CONTACTS_DB"),
-		Scratch:    getenv("SCRATCH_DIR", "/tmp/imessage-scratch"),
+		Scratch:    svc.Env("SCRATCH_DIR", "/tmp/imessage-scratch"),
 	}
 
 	loops := health.NewLoops()
@@ -122,7 +113,7 @@ func main() {
 		}
 		pub := &collect.Publisher{
 			Source: "imessage", CursorPath: storePath + ".published", Seal: sealer, Every: interval, Loops: loops, Log: log,
-			Send:   record.Post(url, os.Getenv("API_TOKEN"), log),
+			Send:   record.Post(url, token, log),
 			Latest: st.Cursor,
 			After: func(rowid int64, limit int) ([]collect.Item, error) {
 				msgs, err := st.After(rowid, limit)
@@ -140,39 +131,14 @@ func main() {
 	}
 
 	// 보존 기한이 지난 메시지는 하루에 한 번 지운다(0 = 모두 둔다).
-	days, _ := strconv.Atoi(getenv("RETAIN_DAYS", "730"))
+	days := svc.Int("RETAIN_DAYS", 730)
 	go collect.Retain(ctx, days, st.Prune, func(n int64, err error) {
 		log.Info("보존 기한이 지난 메시지를 지웠습니다", "count", n, "days", days, "err", err)
 	})
 
-	srv := &http.Server{
-		Addr:              getenv("LISTEN_ADDR", ":8099"),
-		Handler:           api.New(st, status, os.Getenv("API_TOKEN"), loops).Handler(),
-		ReadHeaderTimeout: 10 * time.Second,
+	// The same limits as the KakaoTalk collector, whose surface it shares.
+	if svc.Serve(ctx, svc.Server{Name: "imessage-client", Addr: svc.Env("LISTEN_ADDR", ":8099"), Handler: api.New(st, status, token, loops).Handler(),
+		Read: 10 * time.Second, Write: 30 * time.Second, Log: log}) != nil {
+		os.Exit(1)
 	}
-	go func() {
-		log.Info("imessage-client 가 듣기 시작했습니다", "addr", srv.Addr)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Error("HTTP 서버", "err", err)
-			stop()
-		}
-	}()
-	<-ctx.Done()
-	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_ = srv.Shutdown(shutdown)
-}
-
-func getenv(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
-}
-
-func duration(key string, def time.Duration) time.Duration {
-	if d, err := time.ParseDuration(os.Getenv(key)); err == nil && d > 0 {
-		return d
-	}
-	return def
 }

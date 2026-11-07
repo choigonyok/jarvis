@@ -8,23 +8,18 @@
 package main
 
 import (
-	"context"
-	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	_ "time/tzdata"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/gocommon/queue"
 	"github.com/choigonyok/jarvis/gocommon/record"
+	"github.com/choigonyok/jarvis/gocommon/svc"
+	"github.com/choigonyok/jarvis/gocommon/svc/pg"
 	"github.com/choigonyok/jarvis/output-svc/internal/api"
 	"github.com/choigonyok/jarvis/output-svc/internal/calls"
 	"github.com/choigonyok/jarvis/output-svc/internal/live"
@@ -34,30 +29,20 @@ import (
 )
 
 func main() {
-	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	// An empty token would leave every route open to anything on the
-	// network. Only a local trial may run that way, and must say so.
-	if os.Getenv("API_TOKEN") == "" && os.Getenv("API_TOKEN_OPTIONAL") != "true" {
-		log.Error("API_TOKEN 이 비어 있습니다. 로컬 시험이라면 API_TOKEN_OPTIONAL=true")
-		os.Exit(1)
-	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	log := svc.Logger()
+	token := svc.Token(log)
+	dsn := svc.Need(log, "DATABASE_URL")
+	ctx, stop := svc.Signals()
 	defer stop()
 
-	cfg, err := pgxpool.ParseConfig(os.Getenv("DATABASE_URL"))
+	pool, err := pg.Open(ctx, dsn, 6, log)
 	if err != nil {
-		log.Error("DATABASE_URL 을 해석하지 못했습니다", "err", err)
-		os.Exit(1)
-	}
-	cfg.MaxConns = 6
-	pool, err := pgxpool.NewWithConfig(ctx, cfg)
-	if err != nil {
-		log.Error("데이터베이스 풀을 만들지 못했습니다", "err", err)
+		log.Error("데이터베이스에 연결하지 못했습니다", "err", err)
 		os.Exit(1)
 	}
 	defer pool.Close()
 
-	loc, err := time.LoadLocation(getenv("TZ", "Asia/Seoul"))
+	loc, err := time.LoadLocation(svc.Env("TZ", "Asia/Seoul"))
 	if err != nil {
 		loc = time.FixedZone("KST", 9*60*60)
 	}
@@ -67,12 +52,12 @@ func main() {
 	pusher := push.New(push.Keys{
 		Public:  os.Getenv("VAPID_PUBLIC_KEY"),
 		Private: os.Getenv("VAPID_PRIVATE_KEY"),
-		Subject: getenv("VAPID_SUBJECT", "https://jarvis.choigonyok.com"),
+		Subject: svc.Env("VAPID_SUBJECT", "https://jarvis.choigonyok.com"),
 	}, st, hub, log)
 	if !pusher.Ready() {
 		log.Warn("VAPID 키가 없어 푸시는 보내지 않고 알림함에만 쌓습니다")
 	}
-	svc := notify.New(st, pusher, loc)
+	notes := notify.New(st, pusher, loc)
 	loops := health.NewLoops()
 	loops.Add("tick", "미뤄 둔 알림·저녁 요약 보내기", 10*time.Minute)
 
@@ -85,7 +70,7 @@ func main() {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				if err := svc.Tick(ctx); err != nil {
+				if err := notes.Tick(ctx); err != nil {
 					log.Error("예약 알림을 보내지 못했습니다", "err", err)
 					loops.Fail("tick", err)
 				} else {
@@ -95,12 +80,12 @@ func main() {
 		}
 	}()
 
-	server := api.New(svc, st, pusher, hub, os.Getenv("API_TOKEN"), log).WithLoops(loops)
+	server := api.New(notes, st, pusher, hub, token, log).WithLoops(loops)
 	// What went out is a record too. Its text is not in it: what is in an
 	// inbox stays there.
-	sent := record.New(os.Getenv("DATABASE_URL"), loops, log)
+	sent := record.New(dsn, loops, log)
 	go sent.Run(ctx)
-	svc.Sent = func(who string, ns []store.Notification, group string) {
+	notes.Sent = func(who string, ns []store.Notification, group string) {
 		actor := "output"
 		if who == store.Guest {
 			actor = store.Guest
@@ -113,7 +98,6 @@ func main() {
 	}
 	// The hand: what mind decided to write, carried out against the adapters'
 	// fixed APIs, each once.
-	token := os.Getenv("API_TOKEN")
 	bearer := func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+token) }
 	hand := &calls.Hand{Pool: pool, Records: sent, Log: log, HTTP: &http.Client{}, Services: map[string]calls.Service{
 		"calendar": {URL: os.Getenv("CALENDAR_URL"), Auth: bearer},
@@ -133,30 +117,9 @@ func main() {
 		go c.Run(ctx)
 	}
 
-	addr := getenv("LISTEN_ADDR", ":8097")
-	srv := &http.Server{
-		Addr:         addr,
-		Handler:      server.Handler(),
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 60 * time.Second,
+	// The console's /stream lifts the write limit for itself (svc.Stream).
+	if svc.Serve(ctx, svc.Server{Name: "output-svc", Addr: svc.Env("LISTEN_ADDR", ":8097"), Handler: server.Handler(),
+		Read: 10 * time.Second, Write: 60 * time.Second, Log: log}) != nil {
+		os.Exit(1)
 	}
-	go func() {
-		log.Info("output-svc 가 듣기 시작했습니다", "addr", addr)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Error("HTTP 서버", "err", err)
-			stop()
-		}
-	}()
-
-	<-ctx.Done()
-	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_ = srv.Shutdown(shutdown)
-}
-
-func getenv(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
 }

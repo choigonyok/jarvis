@@ -10,23 +10,20 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"log/slog"
-	"net/http"
 	"os"
-	"os/signal"
-	"strconv"
-	"syscall"
 	"time"
 
 	_ "time/tzdata"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/gocommon/queue"
 	"github.com/choigonyok/jarvis/gocommon/seal"
+	"github.com/choigonyok/jarvis/gocommon/svc"
+	"github.com/choigonyok/jarvis/gocommon/svc/pg"
 	"github.com/choigonyok/jarvis/input-svc/internal/api"
 	chat "github.com/choigonyok/jarvis/input-svc/internal/chat/store"
 	"github.com/choigonyok/jarvis/input-svc/internal/store"
@@ -42,25 +39,15 @@ const (
 )
 
 func main() {
-	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	// An empty token would leave every route open to anything on the
-	// network. Only a local trial may run that way, and must say so.
-	if os.Getenv("API_TOKEN") == "" && os.Getenv("API_TOKEN_OPTIONAL") != "true" {
-		log.Error("API_TOKEN 이 비어 있습니다. 로컬 시험이라면 API_TOKEN_OPTIONAL=true")
-		os.Exit(1)
-	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	log := svc.Logger()
+	token := svc.Token(log)
+	dsn := svc.Need(log, "DATABASE_URL")
+	ctx, stop := svc.Signals()
 	defer stop()
 
-	cfg, err := pgxpool.ParseConfig(os.Getenv("DATABASE_URL"))
+	pool, err := pg.Open(ctx, dsn, 6, log)
 	if err != nil {
-		log.Error("DATABASE_URL 을 해석하지 못했습니다", "err", err)
-		os.Exit(1)
-	}
-	cfg.MaxConns = 6
-	pool, err := pgxpool.NewWithConfig(ctx, cfg)
-	if err != nil {
-		log.Error("데이터베이스 풀을 만들지 못했습니다", "err", err)
+		log.Error("데이터베이스에 연결하지 못했습니다", "err", err)
 		os.Exit(1)
 	}
 	defer pool.Close()
@@ -75,7 +62,7 @@ func main() {
 	if err := turns.Resume(ctx); err != nil {
 		log.Warn("id 순번을 이어받지 못했습니다", "err", err)
 	}
-	views := api.Views{Chat: turns, Workout: workout.New(pool), Seal: sealer, TZ: getenv("TZ", "Asia/Seoul")}
+	views := api.Views{Chat: turns, Workout: workout.New(pool), Seal: sealer, TZ: svc.Env("TZ", "Asia/Seoul")}
 	loops := health.NewLoops()
 	loops.Add("drain", "outbox 를 기록으로", 5*time.Minute)
 	loops.Add("keep", "보존기간·파티션", 26*time.Hour)
@@ -87,27 +74,18 @@ func main() {
 		}
 	}, log)
 	go drain(ctx, st, wake, loops, log)
-	go keep(ctx, st, time.Duration(atoi(getenv("INPUT_RAW_RETAIN_DAYS", "90")))*24*time.Hour, loops, log)
+	// Zero days is no number of days to keep: the default.
+	retain := cmp.Or(svc.Int("INPUT_RAW_RETAIN_DAYS", 90), 90)
+	go keep(ctx, st, time.Duration(retain)*24*time.Hour, loops, log)
 
-	addr := getenv("LISTEN_ADDR", ":8101")
-	srv := &http.Server{
-		Addr:         addr,
-		Handler:      api.New(st, os.Getenv("API_TOKEN"), os.Getenv("API_GUEST_TOKEN"), views, loops, log).Handler(),
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 30 * time.Second,
+	if svc.Serve(ctx, svc.Server{
+		Name: "input-svc", Addr: svc.Env("LISTEN_ADDR", ":8101"), Log: log,
+		Handler: api.New(st, token, os.Getenv("API_GUEST_TOKEN"), views, loops, log).Handler(),
+		Read:    10 * time.Second,
+		Write:   30 * time.Second,
+	}) != nil {
+		os.Exit(1)
 	}
-	go func() {
-		log.Info("input-svc 가 듣기 시작했습니다", "addr", addr)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Error("HTTP 서버", "err", err)
-			stop()
-		}
-	}()
-
-	<-ctx.Done()
-	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_ = srv.Shutdown(shutdown)
 }
 
 // drain keeps the outbox empty. It is woken by what lands there, and looks
@@ -169,19 +147,4 @@ func partitions(ctx context.Context, st *store.Store, log *slog.Logger) error {
 		log.Info("기록 파티션을 만들었습니다", "count", n)
 	}
 	return err
-}
-
-func atoi(s string) int {
-	n, err := strconv.Atoi(s)
-	if err != nil || n <= 0 {
-		return 90
-	}
-	return n
-}
-
-func getenv(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
 }

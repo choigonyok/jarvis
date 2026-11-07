@@ -19,7 +19,6 @@ package api
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,6 +32,7 @@ import (
 
 	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/gocommon/queue"
+	"github.com/choigonyok/jarvis/gocommon/svc"
 	"github.com/choigonyok/jarvis/output-svc/internal/live"
 	"github.com/choigonyok/jarvis/output-svc/internal/notify"
 	"github.com/choigonyok/jarvis/output-svc/internal/push"
@@ -118,15 +118,7 @@ func audience(r *http.Request) string {
 	return store.Owner
 }
 
-func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if s.token != "" && subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+s.token)) != 1 {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "인증이 필요합니다."})
-			return
-		}
-		next(w, r)
-	}
-}
+func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc { return svc.Guard(s.token, next) }
 
 func (s *Server) event(w http.ResponseWriter, r *http.Request) {
 	var e notify.Event
@@ -366,8 +358,7 @@ func (s *Server) presence(w http.ResponseWriter, r *http.Request) {
 // stream sends an open console each push as it goes out (server-sent
 // events), so the page can show it in place of the phone's banner.
 func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
-	rc := http.NewResponseController(w)
-	_ = rc.SetWriteDeadline(time.Time{}) // open for as long as the page is
+	rc := svc.Stream(w) // open for as long as the page is
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Accel-Buffering", "no")

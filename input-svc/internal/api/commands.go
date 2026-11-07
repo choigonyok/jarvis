@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/choigonyok/jarvis/gocommon/record"
+	"github.com/choigonyok/jarvis/gocommon/svc"
 	"github.com/choigonyok/jarvis/input-svc/internal/envelope"
 )
 
@@ -26,11 +27,15 @@ const (
 	commandWait = 30 * time.Second
 	commandPoll = 25 * time.Millisecond
 	maxCommand  = 256 << 10
+	// commandReply is how long a command's answer has to go out: its wait,
+	// and a margin past the server's write limit, which is as long.
+	commandReply = commandWait + 10*time.Second
 )
 
 // command leaves one request for mind and answers with what came of it. The
 // path is mind's, the gateway having said which may come this way.
 func (s *Server) command(w http.ResponseWriter, r *http.Request) {
+	svc.Extend(w, commandReply)
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxCommand))
 	if err != nil {
 		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "본문이 너무 큽니다."})

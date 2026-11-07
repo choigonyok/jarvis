@@ -12,12 +12,7 @@ package main
 
 import (
 	"context"
-	"errors"
-	"log/slog"
-	"net/http"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/choigonyok/jarvis/calendar-svc/internal/api"
@@ -26,30 +21,20 @@ import (
 	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/gocommon/notify"
 	"github.com/choigonyok/jarvis/gocommon/record"
+	"github.com/choigonyok/jarvis/gocommon/svc"
+	"github.com/choigonyok/jarvis/gocommon/svc/pg"
 	"github.com/choigonyok/jarvis/gocommon/watch"
 )
 
 func main() {
-	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	// An empty token would leave every route open to anything on the
-	// network. Only a local trial may run that way, and must say so.
-	if os.Getenv("API_TOKEN") == "" && os.Getenv("API_TOKEN_OPTIONAL") != "true" {
-		log.Error("API_TOKEN 이 비어 있습니다. 로컬 시험이라면 API_TOKEN_OPTIONAL=true")
-		os.Exit(1)
-	}
+	log := svc.Logger()
+	token := svc.Token(log)
+	dsn := svc.Need(log, "DATABASE_URL")
 
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		log.Error("DATABASE_URL 이 없습니다.")
-		os.Exit(1)
-	}
-	addr := getenv("LISTEN_ADDR", ":8093")
-	token := os.Getenv("API_TOKEN")
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := svc.Signals()
 	defer stop()
 
-	st, err := openWithRetry(ctx, dsn, 30, time.Second, log)
+	st, err := pg.Retry(ctx, log, func(ctx context.Context) (*store.Store, error) { return store.Open(ctx, dsn) })
 	if err != nil {
 		log.Error("데이터베이스에 연결하지 못했습니다", "err", err)
 		os.Exit(1)
@@ -66,9 +51,9 @@ func main() {
 	// CALENDAR_BACKEND=postgres 는 되돌릴 때를 위해 남겨 둔다. Postgres 는
 	// 어느 쪽이든 필요하다 - uniple 의 회전하는 로그인 토큰을 여기에 적어 둔다.
 	var backend api.Backend = st
-	if getenv("CALENDAR_BACKEND", "uniple") == "uniple" {
+	if svc.Env("CALENDAR_BACKEND", "uniple") == "uniple" {
 		u, err := uniple.Open(ctx, dsn, uniple.Config{
-			BaseURL:     getenv("UNIPLE_URL", "https://api.uniple.app"),
+			BaseURL:     svc.Env("UNIPLE_URL", "https://api.uniple.app"),
 			AnonKey:     os.Getenv("UNIPLE_ANON_KEY"),
 			SeedRefresh: os.Getenv("UNIPLE_REFRESH_TOKEN"),
 			BlockID:     os.Getenv("UNIPLE_BLOCK_ID"),
@@ -92,26 +77,14 @@ func main() {
 		watch.Source{Kind: "calendar.year", Label: "앞뒤 1년 일정 읽기", Every: time.Hour, Read: span(backend, 1, 0, 12)},
 	)
 
-	srv := &http.Server{
-		Addr:         addr,
-		Handler:      api.New(backend, token, os.Getenv("API_GUEST_TOKEN"), log, notify.New(os.Getenv("NOTIFY_URL"), dsn, token, log)).WithLoops(loops).Handler(),
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 30 * time.Second,
+	if svc.Serve(ctx, svc.Server{
+		Name: "calendar-svc", Addr: svc.Env("LISTEN_ADDR", ":8093"), Log: log,
+		Handler: api.New(backend, token, os.Getenv("API_GUEST_TOKEN"), log, notify.New(os.Getenv("NOTIFY_URL"), dsn, token, log)).WithLoops(loops).Handler(),
+		Read:    15 * time.Second,
+		Write:   30 * time.Second,
+	}) != nil {
+		os.Exit(1)
 	}
-
-	go func() {
-		log.Info("calendar-svc 가 듣기 시작했습니다", "addr", addr)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Error("HTTP 서버", "err", err)
-			stop()
-		}
-	}()
-
-	<-ctx.Done()
-	log.Info("calendar-svc 를 내립니다")
-	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_ = srv.Shutdown(shutdown)
 }
 
 // span reads the calendar from years and days back to months ahead.
@@ -125,33 +98,4 @@ func span(b api.Backend, years, days, months int) func(context.Context) (any, er
 		}
 		return map[string]any{"from": from, "to": to, "events": events}, nil
 	}
-}
-
-func openWithRetry(
-	ctx context.Context, dsn string, tries int, wait time.Duration, log *slog.Logger,
-) (*store.Store, error) {
-	var last error
-	for i := 0; i < tries; i++ {
-		st, err := store.Open(ctx, dsn)
-		if err == nil {
-			return st, nil
-		}
-		last = err
-		if i == 0 {
-			log.Info("데이터베이스를 기다립니다", "err", err)
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(wait):
-		}
-	}
-	return nil, last
-}
-
-func getenv(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
 }
