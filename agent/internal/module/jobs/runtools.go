@@ -353,6 +353,11 @@ type AskToolInput struct {
 	Images   []string     `json:"images,omitempty" jsonschema:"카드에 보일 사진 이름"`
 }
 
+type WithdrawToolInput struct {
+	Card string `json:"card,omitempty" jsonschema:"내릴 카드 id(작업 상태의 '아직 운영자의 답을 기다리는 카드'). 비우면 이 작업의 질문 카드를 모두 내린다."`
+	Why  string `json:"why" jsonschema:"왜 이제 묻지 않아도 되는지 한 줄. 예: '스크롤해서 7개를 모두 찾았습니다'"`
+}
+
 type SitesToolInput struct {
 	Sites  []string `json:"sites" jsonschema:"더 열어야 할 사이트 호스트. 예: ['ticket.melon.com']"`
 	Reason string   `json:"reason" jsonschema:"왜 필요한지 한 줄. 운영자가 카드에서 본다."`
@@ -553,6 +558,10 @@ func (m *Module) runServer(run int64) *mcp.Server {
 			})
 		}
 		raw, _ := json.Marshal(ask)
+		// One question at a time: what the job asked before and is still
+		// waiting on is what this asks now, or no longer matters. Three cards
+		// stood for one question, two of them after it was settled.
+		m.dropQuestions(j.ID, "같은 작업이 새로 물어 이 카드는 내렸습니다.")
 		p, _ := m.proposals.Open(proposal.Proposal{
 			Origin: proposal.OriginNotice,
 			Action: action.Action{Kind: KindAsk, Input: raw},
@@ -569,6 +578,34 @@ func (m *Module) runServer(run int64) *mcp.Server {
 		m.attach(p.ID)
 		return ok("카드를 올렸습니다. 운영자가 승인하거나 반려하면 작업이 곧바로 다시 실행되어 그 답을 받습니다. " +
 			"답을 확인하러 다시 올 시각을 잡지 말고(schedule_next 없이) 지금 실행을 마치세요."), nil, nil
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "withdraw_question",
+		Description: "앞서 ask 로 올린 질문 카드가 아직 기다리는데 이제 물을 필요가 없을 때(스스로 답을 찾았거나 상황이 바뀜) 그 카드를 내린다. " +
+			"기다리는 질문이 있는 동안은 다음 실행을 잡을 수 없으니, 해결했으면 내리고 schedule_next 나 finish 로 마친다. 결제·로그인 카드는 내리지 않는다.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in WithdrawToolInput) (*mcp.CallToolResult, any, error) {
+		j, bad := guard()
+		if bad != nil {
+			return bad, nil, nil
+		}
+		why := "작업이 내렸습니다"
+		if w := strings.TrimSpace(in.Why); w != "" {
+			why += ": " + w
+		}
+		n := 0
+		for _, p := range m.waitingOn(j.ID) {
+			if p.Action.Kind != KindAsk || (in.Card != "" && p.ID != in.Card) {
+				continue
+			}
+			m.proposals.Abandon(p.ID, why)
+			m.current.unpark(p.ID)
+			n++
+		}
+		if n == 0 {
+			return toolText("내릴 질문 카드가 없습니다.", false), nil, nil
+		}
+		return ok(fmt.Sprintf("질문 카드 %d장을 내렸습니다. 할 일을 이어 가고 schedule_next 나 finish 로 마치세요.", n)), nil, nil
 	})
 
 	mcp.AddTool(server, &mcp.Tool{

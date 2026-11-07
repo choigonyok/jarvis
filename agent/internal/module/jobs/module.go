@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -415,7 +416,7 @@ func (m *Module) decided(p proposal.Proposal, d proposal.Decision) {
 		if json.Unmarshal(p.Action.Input, &in) != nil {
 			return
 		}
-		if err := m.store.Answer(ctx, in.JobID, p.ID, answerText(in, d)); err != nil {
+		if err := m.store.Answer(ctx, in.JobID, p.ID, answerText(in, d, p.Reason)); err != nil {
 			if JobEnded(err) {
 				m.endedAnswer(p.ID, d)
 				return
@@ -514,6 +515,24 @@ func (m *Module) endedAnswer(id string, d proposal.Decision) {
 // done, or called off - and says how many. Job 18 asked and finished in the
 // same run; its card stayed up and was answered forty minutes later, into a
 // job that would never read it.
+// dropQuestions takes down a job's question cards still waiting - not a
+// payment, a login or a vault card, which wait on something only the
+// operator can do: a newer question took their place, the operator's
+// instruction is their answer, or the run found the answer itself. The job is
+// told nothing; whoever took them down knows. How many came down.
+func (m *Module) dropQuestions(job int64, why string) int {
+	n := 0
+	for _, p := range m.waitingOn(job) {
+		if p.Action.Kind != KindAsk {
+			continue
+		}
+		m.proposals.Abandon(p.ID, why)
+		m.current.unpark(p.ID)
+		n++
+	}
+	return n
+}
+
 func (m *Module) withdrawCards(job int64) int {
 	n := 0
 	for _, p := range m.waitingOn(job) {
@@ -617,7 +636,7 @@ func lateAnswer(p proposal.Proposal) string {
 			if approved {
 				d = proposal.Approve
 			}
-			return answerText(in, d) + "\n(늦게 전해진 답입니다)"
+			return answerText(in, d, p.Reason) + "\n(늦게 전해진 답입니다)"
 		}
 	}
 	word := "반려"
@@ -636,14 +655,22 @@ func lateAnswer(p proposal.Proposal) string {
 	return text
 }
 
-func answerText(in AskInput, d proposal.Decision) string {
-	if d != proposal.Approve {
-		return fmt.Sprintf("[반려] %s", in.Question)
-	}
+// answerText is a question card's answer as the job hears it: approved with
+// the form as the operator left it, or turned down - and what the operator
+// said when deciding, which is often the answer itself ("이미 해결됐다,
+// 월요일로 잡아라").
+func answerText(in AskInput, d proposal.Decision, said string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "[승인] %s", in.Question)
-	for _, f := range in.Fields {
-		fmt.Fprintf(&b, "\n- %s: %s", f.Label, f.Value)
+	if d != proposal.Approve {
+		fmt.Fprintf(&b, "[반려] %s", in.Question)
+	} else {
+		fmt.Fprintf(&b, "[승인] %s", in.Question)
+		for _, f := range in.Fields {
+			fmt.Fprintf(&b, "\n- %s: %s", f.Label, f.Value)
+		}
+	}
+	if said = strings.TrimSpace(said); said != "" {
+		fmt.Fprintf(&b, "\n- 운영자의 말: %s", said)
 	}
 	return b.String()
 }
@@ -709,13 +736,21 @@ func (m *Module) Handler() http.Handler {
 	})
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "instruct_job",
-		Description: "진행 중인 작업에 지시를 더한다(가격 변경, 중단 조건 등). 작업이 곧 다시 실행되어 반영한다.",
+		Description: "진행 중인 작업에 지시를 더한다(가격 변경, 중단 조건, 작업이 물은 것의 답 등). 작업이 곧 다시 실행되어 반영한다. 작업이 기다리던 질문 카드는 이 지시를 답으로 받아 내려간다.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in InstructInput) (*mcp.CallToolResult, any, error) {
 		if err := m.store.Instruct(ctx, in.ID, in.Text); err != nil {
 			return toolText(err.Error(), true), nil, nil
 		}
+		// The operator spoke to the job: what it asked is answered by it, or
+		// asked again by the run that reads it. A question left up beside the
+		// instruction stood unanswered and kept the job from its next clock.
+		dropped := m.dropQuestions(in.ID, "운영자가 대화로 지시해, 그 지시를 답으로 받아 내렸습니다.")
 		m.wake()
-		return toolText("작업에 전했습니다. 곧 반영합니다.", false), nil, nil
+		text := "작업에 전했습니다. 곧 반영합니다."
+		if dropped > 0 {
+			text += fmt.Sprintf(" 작업이 기다리던 질문 카드 %d장은 이 지시를 답으로 받아 내렸습니다(아직 물을 것이 남았으면 작업이 다시 묻습니다).", dropped)
+		}
+		return toolText(text, false), nil, nil
 	})
 	return mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
 }
@@ -731,8 +766,8 @@ func (m *Module) Look(b *tool.Board) {
 			}
 			return m.renderList(js, in.All), nil
 		})
-	tool.Add(b, "job", "작업 하나의 자세한 현황: 목표, 지시, 쓰는 사이트, 기다리는 카드, 최근 기록(진행·카드·답·보고). "+
-		"작업이 지금 무엇을 하고 있는지, 결제가 어디까지 갔는지 운영자에게 답하기 전에 본다.",
+	tool.Add(b, "job", "작업 하나의 자세한 현황: 목표, 지시, 다음 실행, 기다리는 카드, 기록한 값, 마지막 보고(전문), 최근 기록. "+
+		"작업이 지금 무엇을 하고 있는지, 결제가 어디까지 갔는지, 무엇을 기록했는지 운영자에게 답하기 전에 본다.",
 		func(ctx context.Context, in GetJobInput) (string, error) {
 			d, err := m.store.Detail(ctx, in.ID)
 			if err != nil {
@@ -848,6 +883,59 @@ func lastTouched(j Job) time.Time {
 // eventsShown is how many of a job's latest log lines the job row shows.
 const eventsShown = 15
 
+// lastShown is how much of what a job said last the job row shows whole: a
+// run's report of seven prices ran past the 200 a log line keeps, and the
+// conversation, seeing three, said it could not see the rest.
+const lastShown = 1500
+
+// recordsShown is how many of a job's records the job row lists.
+const recordsShown = 40
+
+// nextRun says when the job runs next as the store has it. What the
+// conversation tells the operator of it is this line, not what a run's
+// report hoped for ("월요일 19:30 재확인 예정" while a card kept the clock away).
+func (m *Module) nextRun(j Job) string {
+	switch {
+	case j.Running:
+		return "다음 실행: 지금 실행 중"
+	case len(j.BlockedSites) > 0:
+		return "다음 실행: 없음 - 로그인을 기다립니다(" + strings.Join(j.BlockedSites, ", ") + ")"
+	case j.State == "waiting":
+		why := "운영자의 카드 답"
+		if p, ok := m.proposals.Get(j.WaitingCard); ok && j.WaitingCard != "" {
+			why = "카드 '" + clampRunes(p.Card.Title, 60) + "'의 답"
+		}
+		return "다음 실행: 없음 - " + why + "을 기다립니다(답하면 곧바로 실행)"
+	case j.State == "active" && j.NextAt != nil:
+		t := j.NextAt.Local()
+		s := fmt.Sprintf("다음 실행: %s(%s) %s", t.Format("1/2"), weekdays[int(t.Weekday())], t.Format("15:04"))
+		if j.NextReason != "" {
+			s += " - " + j.NextReason
+		}
+		return s
+	default:
+		return "다음 실행: 없음 (" + stateLabel[j.State] + ")"
+	}
+}
+
+// recordLine is one record as the conversation reads it.
+func recordLine(r Record) string {
+	parts := []string{r.Title}
+	if r.Status != "" {
+		parts = append(parts, r.Status)
+	}
+	if r.Amount != nil {
+		parts = append(parts, won(*r.Amount))
+	}
+	if r.Note != "" {
+		parts = append(parts, r.Note)
+	}
+	if r.URL != "" {
+		parts = append(parts, r.URL)
+	}
+	return strings.Join(parts, " · ")
+}
+
 // renderDetail is one job as the job row tells it: what it is for, what it waits
 // on, and its latest log, newest last. What it remembers is named, not shown
 // (an order's phone number and address are in it).
@@ -855,6 +943,7 @@ func (m *Module) renderDetail(d Detail) string {
 	j := d.Job
 	var b strings.Builder
 	b.WriteString(m.describe(j) + "\n")
+	b.WriteString(m.nextRun(j) + "\n")
 	if g := clampRunes(j.Goal, 300); g != "" {
 		b.WriteString("목표: " + g + "\n")
 	}
@@ -873,10 +962,30 @@ func (m *Module) renderDetail(d Detail) string {
 		b.WriteString("기억(키만): " + strings.Join(keys, ", ") + "\n")
 	}
 	if len(d.Records) > 0 {
-		fmt.Fprintf(&b, "추적 중인 대상 %d개\n", len(d.Records))
+		fmt.Fprintf(&b, "기록한 값 %d개:\n", len(d.Records))
+		for _, r := range d.Records[:min(recordsShown, len(d.Records))] {
+			b.WriteString("- " + recordLine(r) + "\n")
+		}
+		if len(d.Records) > recordsShown {
+			fmt.Fprintf(&b, "- 외 %d개\n", len(d.Records)-recordsShown)
+		}
 	}
 	ev := d.Events
 	sort.SliceStable(ev, func(i, k int) bool { return ev[i].At.Before(ev[k].At) })
+	// What the job said last, whole: its one-line report and what it wrote
+	// to the operator at the end of a run.
+	for _, kinds := range [][]string{{"report", "finish"}, {"note"}} {
+		for i := len(ev) - 1; i >= 0; i-- {
+			if slices.Contains(kinds, ev[i].Kind) {
+				label := "마지막 보고"
+				if ev[i].Kind == "note" {
+					label = "마지막으로 남긴 말"
+				}
+				fmt.Fprintf(&b, "%s(%s, 전문):\n%s\n", label, ev[i].At.Local().Format("1/2 15:04"), clampText(ev[i].Text, lastShown))
+				break
+			}
+		}
+	}
 	var kept []Event
 	for _, e := range ev {
 		if e.Kind == "step" {

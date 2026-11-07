@@ -55,11 +55,11 @@ func TestReviseRequiresAndApplies(t *testing.T) {
 	if in.Fields[0].Value != "에어팟 프로 2세대" || in.Fields[1].Value != "150000" || c.Fields[1].Value != "150000" {
 		t.Fatalf("edits not applied: %+v", in.Fields)
 	}
-	text := answerText(in, proposal.Approve)
+	text := answerText(in, proposal.Approve, "")
 	if !strings.Contains(text, "[승인]") || !strings.Contains(text, "가격(원): 150000") {
 		t.Fatalf("answer: %s", text)
 	}
-	if answerText(in, proposal.Reject) != "[반려] 이대로 올릴까요?" {
+	if answerText(in, proposal.Reject, "") != "[반려] 이대로 올릴까요?" {
 		t.Fatal("reject text")
 	}
 }

@@ -366,9 +366,10 @@ func (s *Store) event(ctx context.Context, jobID int64, runID *int64, kind, text
 // failed job comes back to life for it; a cancelled one does not.
 func (s *Store) Instruct(ctx context.Context, id int64, text string) error {
 	// A job waiting on a card still runs for a new instruction - the
-	// instruction may be the answer to what the card asked. The card stays
-	// up: if the run has nothing else to do, the agent puts the job back to
-	// waiting on it, and its answer wakes the job like any other.
+	// instruction may be the answer to what the card asked. The agent takes
+	// the job's question cards down with it (the instruction is their
+	// answer); a payment or a login card stays, and if the run has nothing
+	// else to do the agent puts the job back to waiting on it.
 	tag, err := s.pool.Exec(ctx, `
 		update mind.jobs set state = 'active', next_at = now(), next_reason = '새 지시', attempts = 0,
 		       waiting_card = '', finished_at = null, updated_at = now()
