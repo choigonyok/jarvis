@@ -52,10 +52,11 @@ export interface Turn {
   role: Role;
   at: string;
   /**
-   * AtISO is the full timestamp input-svc records beside the wall clock. The
-   * console does not read it yet; the record surface currently parses the
-   * epoch out of the id to recover the date, and this is what that should be
-   * built on instead (web/src/lib/ledger.ts).
+   * AtISO is the full timestamp input-svc records beside the wall clock,
+   * which has no date. The console dates a turn by it - its time, the day
+   * dividers, whether a card belongs to the pages above - and puts a turn
+   * sent again with a newer one where that time falls; a quote of the turn
+   * carries its day (RefTo).
    */
   atIso?: string;
   paragraphs?: string[];

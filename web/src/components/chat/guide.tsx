@@ -15,7 +15,7 @@ type Ask = {
   body: string;
   /** The guest's own wording, where their account does it differently. */
   guest?: string;
-  /** The guest's agent has no tool for it (agent cmd/agent/main.go). */
+  /** The guest's agent has no tool for it (agent internal/assemble/assemble.go). */
   ownerOnly?: true;
 };
 

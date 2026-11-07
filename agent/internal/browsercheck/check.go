@@ -46,7 +46,8 @@ type Checker struct {
 	Idle     func() bool
 	Log      *slog.Logger
 	// Relogin, when set, signs a logged-out site back in (with the login the
-	// vault keeps - see main), and the site is looked at again right after.
+	// vault keeps - internal/assemble/login.go), and the site is looked at
+	// again right after.
 	// It is tried at most once per ReloginEvery a site: a login that keeps
 	// failing is a locked account waiting to happen.
 	Relogin      func(ctx context.Context, s Site) error
