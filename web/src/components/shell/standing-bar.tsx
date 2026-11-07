@@ -43,7 +43,7 @@ function StandingBarView({
       aria-live="polite"
       className={cn(
         "inset-x-safe shrink-0 overflow-hidden border-edge-soft bg-glass transition-[height,border] duration-200 motion-reduce:transition-none",
-        show ? "border-b" : "h-0 border-b-0",
+        show ? "border-t" : "h-0 border-t-0",
       )}
     >
       <div className="mx-auto flex w-full max-w-page items-center gap-2.5 px-4 py-2 sm:px-8">

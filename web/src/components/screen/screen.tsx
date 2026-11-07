@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { type RemoteRFB, RemoteTouch } from "@/components/screen/remote-touch";
-import { Header, TabBar } from "@/components/shell/header";
+import { Header, PageTop, TabBar } from "@/components/shell/header";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { useThread } from "@/lib/use-thread";
@@ -114,17 +114,12 @@ export function Screen({ vncUrl, ticketed = false }: { vncUrl: string; ticketed?
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div
-        className={cn(
-          "shrink-0 transition-opacity duration-200 motion-reduce:transition-none",
-          controlling && "opacity-25",
-        )}
-      >
+      <PageTop className={cn("transition-opacity duration-200 motion-reduce:transition-none", controlling && "opacity-25")}>
         <Header connection={connection} pending={pending} />
         {/* Inside the dimmed block on purpose: while you are driving the
             remote browser the room goes quiet, and that includes this. */}
         <StandingBar pending={waitingList} />
-      </div>
+      </PageTop>
 
       <main
         className={cn(

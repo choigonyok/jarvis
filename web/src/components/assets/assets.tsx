@@ -9,7 +9,7 @@ import { ProfitLines, ProfitOther, Row } from "@/components/assets/summary";
 import { AllocationDetail, DriftColumns } from "@/components/assets/target";
 import { Track } from "@/components/assets/track";
 import { Failed } from "@/components/shell/failed";
-import { Header, TabBar } from "@/components/shell/header";
+import { Header, PageTop, TabBar } from "@/components/shell/header";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { AsOf } from "@/components/shell/as-of";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
@@ -180,10 +180,12 @@ export function Assets() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <Header connection={connection} pending={waiting.length} />
-      <StandingBar pending={waiting} />
+      <PageTop>
+        <Header connection={connection} pending={waiting.length} />
+        <StandingBar pending={waiting} />
+      </PageTop>
 
-      <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
+      <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain under-top pb-tabbar">
         <div className="mx-auto w-full max-w-page px-4 pt-5 pb-12 sm:px-8 sm:pt-7 sm:pb-6 lg:grid lg:max-w-page-wider lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)] lg:gap-14">
           <div className="min-w-0">
             <div className="mb-6 flex items-start justify-between gap-4">

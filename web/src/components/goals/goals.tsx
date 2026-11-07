@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, Minus, Plus } from "lucide-react";
 import { GoalForm } from "@/components/goals/goal-form";
 import { GoalSheet } from "@/components/goals/goal-sheet";
-import { Header, TabBar } from "@/components/shell/header";
+import { Header, PageTop, TabBar } from "@/components/shell/header";
 import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { Button } from "@/components/ui/button";
@@ -70,10 +70,12 @@ export function Goals() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <Header connection={connection} pending={waiting.length} />
-      <StandingBar pending={waiting} />
+      <PageTop>
+        <Header connection={connection} pending={waiting.length} />
+        <StandingBar pending={waiting} />
+      </PageTop>
 
-      <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
+      <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain under-top pb-tabbar">
         <div className="mx-auto w-full max-w-page px-4 pt-5 pb-12 sm:px-8 sm:pt-7 sm:pb-8">
           {error && !goals ? (
             <div className="py-16 text-center">

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ChevronDown, RotateCw } from "lucide-react";
-import { Header, TabBar } from "@/components/shell/header";
+import { Header, PageTop, TabBar } from "@/components/shell/header";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { Progress } from "@/components/ui/progress";
 import { DetailRow } from "@/components/ui/detail-sheet";
@@ -153,12 +153,14 @@ export function Status() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <Header connection={connection} pending={waiting.length} />
-      <StandingBar pending={waiting} />
+      <PageTop>
+        <Header connection={connection} pending={waiting.length} />
+        <StandingBar pending={waiting} />
+      </PageTop>
 
       {/* inset-x-safe and px-4 both set padding-left, so they sit on
           different elements: the notch inset outside, the gutter inside. */}
-      <main className="scrollbar-hairline inset-x-safe min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
+      <main className="scrollbar-hairline inset-x-safe min-h-0 flex-1 overflow-y-auto overscroll-contain under-top pb-tabbar">
         <div className="mx-auto w-full max-w-page px-4 pt-6 pb-10 sm:px-8 sm:pt-10">
           {!report ? (
             <p className="pt-10 text-center text-ui text-faint">

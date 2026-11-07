@@ -24,7 +24,7 @@ import { onFocusProposal } from "@/lib/resume";
 import { Markdown } from "@/components/chat/markdown";
 import { uploadsIn } from "@/components/chat/inline-photos";
 import { VoiceStage } from "@/components/chat/voice-stage";
-import { Header, TabBar } from "@/components/shell/header";
+import { Header, PageTop, TabBar } from "@/components/shell/header";
 import { useRole } from "@/components/shell/role";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
@@ -681,9 +681,10 @@ const Transcript = memo(function Transcript({
 
   // Every row is a direct child of the scroller's content. The room under
   // the last row is the content's own, so the bottom the scroller keeps to is
-  // the page's.
+  // the page's - and it is the composer's and the tab bar's too, which float
+  // over the thread's end (--footer-space): the newest row stops above them.
   return (
-    <MessageScrollerContent className="gap-7 pb-12 sm:pb-6">
+    <MessageScrollerContent className="gap-7 pb-[calc(var(--footer-space)+1.25rem)] sm:pb-[calc(var(--footer-space)+1.5rem)]">
       {hydrated && turns.length === 0 ? (
         <MessageScrollerItem className={ROW}>
           <Rail />
@@ -852,6 +853,10 @@ export function Thread() {
     decide,
   } = useThread();
   const scrollRef = useRef<HTMLDivElement>(null);
+  // The screen's root, which carries --footer-space, and the footer it is
+  // measured from.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const footerRef = useRef<HTMLElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const search = useThreadSearch(scrollRef, { hasMore, failed: olderFailed, load: loadOlder });
   // What can be asked of Jarvis in words (ⓘ, left of search). Its sheet is
@@ -1200,6 +1205,23 @@ export function Thread() {
     // Again for the scroller the voice stage's return builds.
   }, [mode]);
 
+  // The composer and the tab bar float over the thread's end: how tall they
+  // stand is the room under its last row (--footer-space), kept as it changes
+  // - a long message, a quote, the bar stepping away while typing.
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    const footer = footerRef.current;
+    if (!root || !footer) return;
+    const put = () => root.style.setProperty("--footer-space", `${footer.getBoundingClientRect().height}px`);
+    put();
+    const watch = new ResizeObserver(put);
+    // Its border box: the tab bar's room is the footer's own padding, which
+    // a content-box watch never sees change.
+    watch.observe(footer, { box: "border-box" });
+    return () => watch.disconnect();
+    // Again for the screen the voice stage's return builds.
+  }, [mode]);
+
   // Watch the waiting cards themselves rather than guessing from scroll
   // position: the bar exists to speak for a decision you cannot see, so what
   // it needs to know is literally whether one is on screen.
@@ -1215,6 +1237,9 @@ export function Thread() {
       return;
     }
     const seen = new Set<Element>();
+    // Under the glass top or under the composer a card is not one you can read.
+    const style = getComputedStyle(root);
+    const inset = (name: string) => Math.round(parseFloat(style.getPropertyValue(name)) || 0);
     const observer = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
@@ -1223,7 +1248,7 @@ export function Thread() {
         }
         setCardsVisible(seen.size > 0);
       },
-      { root, threshold: 0.35 },
+      { root, threshold: 0.35, rootMargin: `-${inset("--top-space")}px 0px -${inset("--footer-space")}px 0px` },
     );
     for (const card of cards) observer.observe(card);
     return () => observer.disconnect();
@@ -1346,15 +1371,20 @@ export function Thread() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <Header connection={connection} pending={pending} actions={headerActions} />
+    <div ref={rootRef} className="flex h-full min-h-0 flex-col">
+      <PageTop>
+        <Header connection={connection} pending={pending} actions={headerActions} />
+        <SearchBar search={search} />
+        <StandingBar pending={waiting} onGo={goToCard} muted={cardsVisible} />
+      </PageTop>
       <GuideSheet open={guide} onOpenChange={setGuide} role={role} />
-      <SearchBar search={search} />
-      <StandingBar pending={waiting} onGo={goToCard} muted={cardsVisible} />
 
       <MessageScrollerProvider autoScroll defaultScrollPosition="end">
         <ScrollerMoves toRef={scroller} />
-        <main className="flex min-h-0 flex-1 flex-col">
+        {/* The thread runs the whole height of the screen: under the glass
+            top, and under the composer and the tab bar floating over its end,
+            as every other screen's page runs under its bars. */}
+        <main className="-mt-(--top-space) -mb-(--footer-space) flex min-h-0 flex-1 flex-col">
           <MessageScroller>
             <MessageScrollerViewport
               ref={scrollRef}
@@ -1400,7 +1430,9 @@ export function Thread() {
                 repin();
               }}
               onKeyUp={repin}
-              className="scrollbar-hairline inset-x-safe relative"
+              // What is brought into view - a card, a quoted message - lands
+              // between the bars, not under them.
+              className="scrollbar-hairline inset-x-safe relative scroll-pt-(--top-space) scroll-pb-(--footer-space)"
             >
               {/* The scroller takes any touch move or wheel turn as the reader
                   scrolling and stops following the bottom. A finger resting
@@ -1439,7 +1471,7 @@ export function Thread() {
                   wheelEnd.current = window.setTimeout(repin, 150);
                 }}
               >
-                <div className="mx-auto w-full max-w-page px-4 pt-7 sm:px-8 sm:pt-10">
+                <div className="mx-auto w-full max-w-page px-4 pt-[calc(var(--top-space)+1.75rem)] sm:px-8 sm:pt-[calc(var(--top-space)+2.5rem)]">
                   {turns.length > 0 && (hasMore || loadingOlder) ? (
                     olderFailed && !loadingOlder ? (
                       <button
@@ -1491,13 +1523,13 @@ export function Thread() {
       {/* Lifted above the floating tab bar; it drops back down while typing,
           when the bar hides. On a phone it floats a gutter above the bar and
           a gutter in from the edges - the bar's own spacing, so the two read
-          as a pair. */}
-      <footer className="pb-tabbar relative shrink-0 transition-[padding] duration-300 ease-out motion-reduce:transition-none">
-        {/* The transcript dissolves into the composer instead of stopping at a rule. */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-x-0 -top-10 h-10 bg-gradient-to-b from-transparent to-background"
-        />
+          as a pair. It floats over the thread's end rather than cutting it
+          short: what it does not cover is the thread's, to see and to scroll
+          by (its height is --footer-space, the room under the last row). */}
+      <footer
+        ref={footerRef}
+        className="pb-tabbar pointer-events-none relative z-20 shrink-0 transition-[padding] duration-300 ease-out motion-reduce:transition-none"
+      >
         {/* Back to the newest: a bead of the composer's own glass, centred
             over it, there only while the newest turn is out of sight. It
             says how many replies came meanwhile, so a reply that landed while
@@ -1541,6 +1573,7 @@ export function Thread() {
         <div className="inset-x-safe">
           <div className={cn("mx-auto w-full max-w-page px-4 sm:px-8 sm:pb-6", typing ? "pb-2" : "pb-0")}>
             <Composer
+              className="pointer-events-auto"
               onSend={sendFromComposer}
               allowPhotos
               // The guest's jobs open no website: no selling for them.
@@ -1559,7 +1592,7 @@ export function Thread() {
             />
             {/* On a phone this switch is the mic inside the composer; spending a
                 third bar on it would leave the transcript a strip. */}
-            <div className="mt-2 hidden justify-center sm:flex">
+            <div className="pointer-events-auto mx-auto mt-2 hidden w-fit justify-center sm:flex">
               <ModeToggle mode={mode} onChange={switchMode} />
             </div>
           </div>

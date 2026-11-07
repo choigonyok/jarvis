@@ -520,10 +520,11 @@
    of frosted glass, lifted off the edges, with a lit rim along its top and a
    lens of brighter glass under the current tab that slides when you tap.
 
-   Glass is for what floats over the page and moves with it, and nothing
-   else: the tab bar, a running workout's dock, the 되돌리기 line and a push
-   shown in the app. Everything that sits in the page - the composer, cards,
-   panels, sheets - is a solid surface.
+   Glass is for the bars that float over the page and the things that move
+   with it, and nothing else: the tab bar, the top of every screen
+   (.glass-pane), a running workout's dock, the 되돌리기 line and a push shown
+   in the app. Everything else - the composer, though it floats over the
+   thread's end, cards, panels, sheets - is a solid surface.
 
    The rim is light, not a line: a border in this product is for what a
    hand is on - a decision, a field, one's own words (web/DESIGN.md). */
@@ -533,10 +534,51 @@
      bar is on screen, so a page without it (or a hidden one, while typing)
      keeps its content where it was. */
   --tabbar-space: 0px;
+  /* What the floating top (PageTop, shell/header.tsx) takes from the top of
+     the page. PageTop measures it as it changes; this is the header alone,
+     for the first paint, before any script has run. */
+  --top-space: calc(env(safe-area-inset-top) + 3.25rem + 1px);
+  /* What the conversation's composer and the tab bar under it take from the
+     thread's end; its screen measures it (chat/thread.tsx). */
+  --footer-space: 0px;
+}
+@media (width >= 40rem) {
+  :root {
+    --top-space: calc(env(safe-area-inset-top) + 3.5rem + 1px);
+  }
 }
 @media (max-width: 639px) {
   body:has([data-tabbar]:not([data-hidden])) {
     --tabbar-space: calc(4.75rem + max(env(safe-area-inset-bottom), 0.5rem));
+  }
+}
+
+/* A page's scroller that runs on under the floating top: pulled up beneath
+   it, its first words starting below it, and whatever is scrolled to
+   (a notification's row, a page of a list) landing below it too. */
+@utility under-top {
+  margin-top: calc(-1 * var(--top-space));
+  padding-top: var(--top-space);
+  scroll-padding-top: var(--top-space);
+}
+
+/* Frosted glass for the top of every screen (PageTop): the page's own colour
+   half the way, over a blur of what passes beneath - a line scrolling under
+   it is a soft shape, never a second line of words behind the header's.
+   Thicker than the tab bar's glass, which carries icons. At rest, over
+   nothing, it is the page itself. */
+.glass-pane {
+  background-color: color-mix(in oklab, var(--background) 52%, transparent);
+  -webkit-backdrop-filter: blur(14px) saturate(180%);
+  backdrop-filter: blur(14px) saturate(180%);
+}
+:root[data-theme="light"] .glass-pane {
+  background-color: color-mix(in oklab, var(--background) 62%, transparent);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass-pane,
+  :root[data-theme="light"] .glass-pane {
+    background-color: var(--background);
   }
 }
 

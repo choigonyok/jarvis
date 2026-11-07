@@ -6,7 +6,7 @@ import { Brush, ChevronLeft, Play, Search } from "lucide-react";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { Lightbox } from "@/components/ui/lightbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Header, TabBar } from "@/components/shell/header";
+import { Header, PageTop, TabBar } from "@/components/shell/header";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Failed } from "@/components/shell/failed";
@@ -44,23 +44,25 @@ export function Photos() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <Header
-        connection={connection}
-        pending={waiting.length}
-        actions={
-          <Link
-            href="/edit"
-            aria-label="사진 편집"
-            title="사진 편집"
-            className="flex size-11 items-center justify-center rounded-lg text-faint transition-colors hover:text-dim focus-ring"
-          >
-            <Brush aria-hidden className="size-[18px]" strokeWidth={1.8} />
-          </Link>
-        }
-      />
-      <StandingBar pending={waiting} />
+      <PageTop>
+        <Header
+          connection={connection}
+          pending={waiting.length}
+          actions={
+            <Link
+              href="/edit"
+              aria-label="사진 편집"
+              title="사진 편집"
+              className="flex size-11 items-center justify-center rounded-lg text-faint transition-colors hover:text-dim focus-ring"
+            >
+              <Brush aria-hidden className="size-[18px]" strokeWidth={1.8} />
+            </Link>
+          }
+        />
+        <StandingBar pending={waiting} />
+      </PageTop>
 
-      <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
+      <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain under-top pb-tabbar">
         <div className="mx-auto w-full max-w-page-wider px-3 pt-3 pb-10 sm:px-6 sm:pt-5">
           {/* 보관함 and 앨범 are tabs; a search is neither - its results show with no tab lit. */}
           <Tabs

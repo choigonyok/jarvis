@@ -64,6 +64,7 @@ function ComposerView({
   draftKey,
   fillRef,
   onGuide,
+  className,
 }: {
   /** Resolves false when the message did not go out, so what was typed comes back. */
   onSend: (text: string, images: string[]) => Promise<boolean> | void;
@@ -98,6 +99,7 @@ function ComposerView({
    * the words: in the header it was one of five grey icons on a phone.
    */
   onGuide?: () => void;
+  className?: string;
 }) {
   const [value, setValue] = useState("");
   // Text only: a photo's preview is an object URL that does not outlive the page.
@@ -223,12 +225,20 @@ function ComposerView({
 
   // The tab bar's own shape, so the two read as one family: a pill the bar's
   // height (3.75rem) on a single line, round controls the size of a tab slot.
-  // Solid, not glass: glass is kept for what floats over the page. It grows
-  // from there, keeping the radius, as a message gets long.
+  // Solid, not glass: glass is kept for the bars. It floats over the
+  // thread's end, the words going on beneath it, so a shadow and - a field -
+  // an edge set it off from them. It grows from there, keeping the radius, as
+  // a message gets long.
   // data-lead tells what sits left of the text - the photo button or only
   // padding - so a queued line above can start where the typing starts.
   return (
-    <div className="composer group/composer rounded-[1.875rem] bg-popover p-1.5 transition-shadow focus-within:ring-1 focus-within:ring-edge" data-lead={allowPhotos ? "icon" : "text"}>
+    <div
+      className={cn(
+        "composer group/composer rounded-[1.875rem] bg-popover p-1.5 shadow-lg ring-1 ring-edge-soft transition-shadow focus-within:ring-edge",
+        className,
+      )}
+      data-lead={allowPhotos ? "icon" : "text"}
+    >
       {queued}
       {quoting ? (
         <div className="flex items-start gap-2 pt-1.5 pr-1 pb-1 pl-3.5">

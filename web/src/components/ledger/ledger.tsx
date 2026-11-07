@@ -4,7 +4,7 @@ import { useKept } from "@/lib/keep";
 import { useMemo } from "react";
 import { Entry } from "@/components/ledger/entry";
 import { Failed } from "@/components/shell/failed";
-import { Header, TabBar } from "@/components/shell/header";
+import { Header, PageTop, TabBar } from "@/components/shell/header";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { Pager } from "@/components/ui/pager";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -46,12 +46,14 @@ export function Ledger() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <Header connection={connection} pending={pending.length} />
-      {/* Muted here: the waiting rows are in the list below, named and
-          decidable. A bar pointing at what is already on screen is nagging. */}
-      <StandingBar pending={pending} muted />
+      <PageTop>
+        <Header connection={connection} pending={pending.length} />
+        {/* Muted here: the waiting rows are in the list below, named and
+            decidable. A bar pointing at what is already on screen is nagging. */}
+        <StandingBar pending={pending} muted />
+      </PageTop>
 
-      <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
+      <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain under-top pb-tabbar">
         <div className="mx-auto w-full max-w-page px-4 pt-5 pb-10 sm:px-8 sm:pt-6 sm:pb-6">
           <ToggleGroup
             type="single"

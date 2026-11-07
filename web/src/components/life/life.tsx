@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Header, TabBar } from "@/components/shell/header";
+import { Header, PageTop, TabBar } from "@/components/shell/header";
 import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { Meals } from "@/components/life/meals";
@@ -101,10 +101,12 @@ export function Life() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <Header connection={connection} pending={waiting.length} />
-      <StandingBar pending={waiting} />
+      <PageTop>
+        <Header connection={connection} pending={waiting.length} />
+        <StandingBar pending={waiting} />
+      </PageTop>
 
-      <main className="scrollbar-hairline inset-x-safe min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
+      <main className="scrollbar-hairline inset-x-safe min-h-0 flex-1 overflow-y-auto overscroll-contain under-top pb-tabbar">
         <div className="mx-auto w-full max-w-page px-4 pt-6 pb-12 sm:px-8 sm:pt-10">
           {!book ? (
             <p className="pt-10 text-center text-ui text-faint">{SAY.loading}</p>

@@ -11,7 +11,7 @@ import { RoutinePicker } from "@/components/workout/routine-picker";
 import { WorkoutCalendar } from "@/components/workout/workout-calendar";
 import { VolumeBar } from "@/components/workout/volume-bar";
 import { Failed } from "@/components/shell/failed";
-import { Header, ScreenMenu, TabBar } from "@/components/shell/header";
+import { Header, PageTop, ScreenMenu, TabBar } from "@/components/shell/header";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { useUndo } from "@/components/shell/undo";
 import { Pager } from "@/components/ui/pager";
@@ -161,14 +161,16 @@ export function Workout() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <Header
-        connection={connection}
-        pending={waiting.length}
-        actions={lifting ? <ScreenMenu pending={waiting.length} /> : undefined}
-      />
-      <StandingBar pending={waiting} muted={lifting} />
+      <PageTop>
+        <Header
+          connection={connection}
+          pending={waiting.length}
+          actions={lifting ? <ScreenMenu pending={waiting.length} /> : undefined}
+        />
+        <StandingBar pending={waiting} muted={lifting} />
+      </PageTop>
 
-      <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
+      <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain under-top pb-tabbar">
         <div className="mx-auto w-full max-w-page px-4 pt-5 pb-12 sm:px-8 sm:pt-7 sm:pb-8">
           {error ? (
             // Again only for a log that never came: one that did not save is

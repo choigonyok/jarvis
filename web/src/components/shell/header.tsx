@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useRef, useState, useTransition, type ReactNode } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState, useTransition, type ReactNode } from "react";
 import { PROBE_KEY } from "@/components/shell/viewport-probe";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -226,9 +226,7 @@ function scrollPageToTop() {
  * decision rather than a red numeric badge: red here means 반려 and 실패, and
  * spending it on "you have mail" would break the colour grammar.
  *
- * The header stays solid, with plain text tabs on a wide screen. Only the
- * phone's floating tab bar is glass: two backdrop-filter bars on one screen
- * sample each other in Chrome, and the tab labels ghost into the header.
+ * It draws no surface of its own: PageTop, below, is the glass it sits in.
  */
 function HeaderView({
   connection,
@@ -308,7 +306,7 @@ function HeaderView({
 
   return (
     <header
-      className="inset-x-safe pt-safe shrink-0 border-b border-edge-soft bg-background"
+      className="inset-x-safe pt-safe shrink-0"
       onClick={(e) => {
         // A tap on the bar itself - not on one of its controls.
         if ((e.target as Element).closest("a, button, input, [role='button'], [role='tooltip'], [role='dialog']")) return;
@@ -408,6 +406,32 @@ function HeaderView({
       </div>
       {online ? null : <Offline />}
     </header>
+  );
+}
+
+/**
+ * The top of every screen - the header and what stands under it (the waiting
+ * line, the conversation's search) - as one pane of frosted glass that the
+ * page scrolls beneath. A page's scroller runs on under it (under-top in
+ * globals.css) by its height, which is measured here as it changes - the
+ * waiting line coming and going, the offline line, the search - into
+ * --top-space.
+ */
+export function PageTop({ children, className }: { children: ReactNode; className?: string }) {
+  const pane = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = pane.current;
+    if (!el) return;
+    const put = () => document.documentElement.style.setProperty("--top-space", `${el.getBoundingClientRect().height}px`);
+    put();
+    const watch = new ResizeObserver(put);
+    watch.observe(el, { box: "border-box" });
+    return () => watch.disconnect();
+  }, []);
+  return (
+    <div ref={pane} className={cn("glass-pane relative z-30 shrink-0 border-b border-edge-soft", className)}>
+      {children}
+    </div>
   );
 }
 

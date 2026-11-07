@@ -1,7 +1,7 @@
 "use client";
 
 import { editorSlot } from "@/components/edit/photocraft";
-import { Header, ScreenMenu, TabBar } from "@/components/shell/header";
+import { Header, PageTop, ScreenMenu, TabBar } from "@/components/shell/header";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { isPending } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
@@ -26,12 +26,14 @@ export function Edit() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <Header
-        connection={connection}
-        pending={waiting.length}
-        actions={<ScreenMenu pending={waiting.length} />}
-      />
-      <StandingBar pending={waiting} />
+      <PageTop>
+        <Header
+          connection={connection}
+          pending={waiting.length}
+          actions={<ScreenMenu pending={waiting.length} />}
+        />
+        <StandingBar pending={waiting} />
+      </PageTop>
 
       {/* Clear of the home indicator, and of the notch on a phone turned on its side. */}
       <div className="inset-x-safe pb-safe flex min-h-0 flex-1 flex-col">

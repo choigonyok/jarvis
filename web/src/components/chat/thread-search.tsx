@@ -315,7 +315,7 @@ function SearchRow({ search }: { search: ThreadSearch }) {
         : `${search.at + 1}/${search.total}${search.further ? "+" : ""}`;
   const offerMore = Boolean(q) && !search.seeking && search.further && (search.total === 0 || search.at >= search.total - 1);
   return (
-    <div className="inset-x-safe shrink-0 border-b border-edge-soft bg-background" role="search">
+    <div className="inset-x-safe shrink-0 border-t border-edge-soft" role="search">
       <div className="mx-auto flex h-14 w-full max-w-page items-center gap-1 px-4 sm:px-8">
         <InputGroup
           surface="well"

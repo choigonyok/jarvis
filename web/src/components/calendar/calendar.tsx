@@ -9,7 +9,7 @@ import { type DayMark } from "@/components/calendar/month-grid";
 import { MonthSwipe, type MonthSwipeHandle } from "@/components/calendar/month-swipe";
 import { OWNER_LABEL, OWNERS, OwnerDot, ownerOf, type Owner } from "@/components/calendar/owner";
 import { Failed } from "@/components/shell/failed";
-import { Header, TabBar } from "@/components/shell/header";
+import { Header, PageTop, TabBar } from "@/components/shell/header";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { useUndo } from "@/components/shell/undo";
 import { Button } from "@/components/ui/button";
@@ -183,10 +183,12 @@ export function Calendar() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <Header connection={connection} pending={pendingCount} />
-      <StandingBar pending={waiting} />
+      <PageTop>
+        <Header connection={connection} pending={pendingCount} />
+        <StandingBar pending={waiting} />
+      </PageTop>
 
-      <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
+      <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain under-top pb-tabbar">
         {/* The month and the day it selects are one view, so on a screen wide
             enough to hold both side by side they stop taking turns down the
             page: the grid keeps its place while the day's detail changes

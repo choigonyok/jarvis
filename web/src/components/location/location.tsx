@@ -3,7 +3,7 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, Info, LocateFixed, Pause, Play } from "lucide-react";
-import { Header, TabBar } from "@/components/shell/header";
+import { Header, PageTop, TabBar } from "@/components/shell/header";
 import { Retry } from "@/components/shell/retry";
 import { useRole } from "@/components/shell/role";
 import { StandingBar } from "@/components/shell/standing-bar";
@@ -170,8 +170,10 @@ export function Location() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <Header connection={connection} pending={waiting.length} />
-      <StandingBar pending={waiting} />
+      <PageTop>
+        <Header connection={connection} pending={waiting.length} />
+        <StandingBar pending={waiting} />
+      </PageTop>
       {scene ? (
         <Viewer
           scene={scene}

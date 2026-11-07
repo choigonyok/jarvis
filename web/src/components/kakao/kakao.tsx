@@ -2,7 +2,7 @@
 
 import { useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ChevronDown } from "lucide-react";
-import { Header, TabBar } from "@/components/shell/header";
+import { Header, PageTop, TabBar } from "@/components/shell/header";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { BottomSheetContent, BottomSheetHeader, BottomSheetTitle } from "@/components/ui/bottom-sheet";
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
@@ -58,8 +58,10 @@ export function Kakao() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <Header connection={connection} pending={pending} />
-      <StandingBar pending={waitingList} />
+      <PageTop>
+        <Header connection={connection} pending={pending} />
+        <StandingBar pending={waitingList} />
+      </PageTop>
       {/* The root draws no box: the list and the panel stay in this column. */}
       <Tabs value={source} onValueChange={(v) => pick(v as Source)} className="contents">
         <div className="px-gutter mx-auto w-full max-w-page shrink-0 pt-2 sm:pt-3">

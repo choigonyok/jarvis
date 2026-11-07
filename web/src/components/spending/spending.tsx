@@ -6,7 +6,7 @@ import { ChevronLeft, ChevronRight, Plus, Search } from "lucide-react";
 import { ClearChip } from "@/components/ui/badge";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { Failed } from "@/components/shell/failed";
-import { Header, TabBar } from "@/components/shell/header";
+import { Header, PageTop, TabBar } from "@/components/shell/header";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { AsOf } from "@/components/shell/as-of";
 import { useKept } from "@/lib/keep";
@@ -190,10 +190,12 @@ export function Spending() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <Header connection={connection} pending={waiting.length} />
-      <StandingBar pending={waiting} />
+      <PageTop>
+        <Header connection={connection} pending={waiting.length} />
+        <StandingBar pending={waiting} />
+      </PageTop>
 
-      <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-tabbar">
+      <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain under-top pb-tabbar">
         <div className="mx-auto w-full max-w-page px-4 pt-4 pb-12 sm:px-8 sm:pt-7 sm:pb-8">
           <div className="-ms-2 mb-3 flex items-center gap-1">
             <button
