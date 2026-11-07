@@ -1,0 +1,39 @@
+{
+  "about": "The two forms without the prefix, made by the code that wrote them, with a test key (bytes 0..31) and made-up values. messages: Seal(plain) as nonce then sealed text, nothing bound. vault: vault-svc's Seal(place, plain) with the nonce kept apart, bound to jarvis-vault/v1/<place>. keyID is that code's id for the key.",
+  "key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+  "keyID": "257335f4",
+  "messages": [
+    {
+      "plain": "안녕하세요",
+      "sealed": "nKgvGOy7qnCAKD3Ao1sU+gGiN1P7WTm2SnSltkpp2psBr8Y8CtWjf1eOPg=="
+    },
+    {
+      "plain": "",
+      "sealed": "6yAEh63HQxkjUaXh5KCXL1iSmgqyG94ZF0ou3A=="
+    },
+    {
+      "plain": "{\"rowid\":42,\"chat_id\":7,\"text\":\"내일 7시에 보자\",\"chat_name\":\"테스트방\"}",
+      "sealed": "l+DM3VLtjbaTZFi8M5whmoaCebqrmYyFmjmhHtuMjnZNLDIVwBQG17oxU06pDBn0oiGn58T64ZrxrpD+i1nfEODZQ4F4VoBw8oXf1fNt4uJmYJTovd0TOOiEHhn3oHR9o1ixsExmyjuHJ8QhTyw="
+    }
+  ],
+  "vault": [
+    {
+      "place": "example.com",
+      "plain": "{\"u\":\"me@example.com\",\"p\":\"pw-test-1234\"}",
+      "nonce": "AwwalwJ61+a0j+l4",
+      "sealed": "//CLReJoBi/V4HOGIklNUK9O4xeSYbZpKfiz3LNY2skHaFdmRFpIDwixgP8zPdvWI3rxCwweLdBq"
+    },
+    {
+      "place": "pin:pay.example.com",
+      "plain": "{\"pin\":\"123456\"}",
+      "nonce": "TEyXfAI/LGehKWky",
+      "sealed": "c+WCICTmoCHhkGJX/6jenJ3qHyTpn2eefzOzBOX4ljU="
+    },
+    {
+      "place": "profile:기본",
+      "plain": "{\"name\":\"\",\"recipient\":\"홍길동\",\"phone\":\"01000000000\",\"zip\":\"00000\",\"address\":\"테스트시 시험구 예시로 1\",\"detail\":\"101동 101호\"}",
+      "nonce": "omcITuSdejeNDrjN",
+      "sealed": "iwhHviKIIOpLTcqa4DE1kV8x9z0k/XNwW9UrHsGcSMvd4R6tgwaqJRkwQdxjAAdiJbtBSRYDQIFvWfBuDRVFQMaKXub9iy9hkcvk/zJtDnECpOgCLL0ehHjcs3BiNS4bMUkeuxVP+ie+wn8VqsdGYNoqnCypRSY+ArogHkPEmkbReAi/apJMaIa+rQXRhkMSUVdyHlQiQsqmg+KNPSjZ"
+    }
+  ]
+}
