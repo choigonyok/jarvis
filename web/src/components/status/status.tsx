@@ -16,7 +16,7 @@ import {
   roots,
   since,
 } from "@/lib/status";
-import { type Fetcher, useResource } from "@/lib/use-resource";
+import { useResource } from "@/lib/use-resource";
 import { isPending } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
 import {
@@ -65,7 +65,7 @@ export function Status() {
   // Read on opening, on coming back to the app (a pull to refresh too) and
   // every 30 seconds - only while the tab is visible: a phone left on this
   // screen in a pocket should not keep polling.
-  const status = useResource("status", reportOf("GET"), { interval: 30_000 });
+  const status = useResource("status", (signal) => reportOf("GET", signal), { interval: 30_000 });
   const report = status.data ?? null;
   const error = status.error?.message ?? null;
   const [refreshing, setRefreshing] = useState(false);
@@ -103,9 +103,12 @@ export function Status() {
     };
   }, []);
 
+  // An action, which nothing cuts short - not leaving the tab, coming back or
+  // another read: status-svc runs the checks again for it, and a request cut
+  // short could cut them short too, to be kept as checks that did not answer.
   async function refresh() {
     setRefreshing(true);
-    await status.reloadWith(reportOf("POST"));
+    await status.reloadWith(() => reportOf("POST"));
     setRefreshing(false);
   }
 
@@ -225,13 +228,11 @@ async function fetchReport(method: "GET" | "POST", signal?: AbortSignal): Promis
 }
 
 /** The report as useResource reads it: a failure, in the service's words when it has them, is thrown. */
-const reportOf =
-  (method: "GET" | "POST"): Fetcher<StatusReport> =>
-  async (signal) => {
-    const out = await fetchReport(method, signal);
-    if (out.error !== undefined) throw new Error(out.error);
-    return out.report;
-  };
+async function reportOf(method: "GET" | "POST", signal?: AbortSignal): Promise<StatusReport> {
+  const out = await fetchReport(method, signal);
+  if (out.error === undefined) return out.report;
+  throw new Error(out.error);
+}
 
 const USAGE = "사용량";
 

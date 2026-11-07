@@ -79,8 +79,10 @@ function Body({
   onChanged: () => void;
 }) {
   // Every step lands here a few seconds after it happens while a run is live.
-  // Coming back to the app, the list under the sheet is read at once; this
-  // waits for its own next read (15 seconds at the most).
+  // Coming back to the app, the list under the sheet is read at once; this is
+  // read at its next round, one interval at the most (15 seconds, 2.5 while a
+  // run is live): a read still under way from before the page was shown again
+  // is called off then, not waited on (useResource).
   const read = useResource<JobDetail>(
     `job:${job.id}`,
     async (signal) => {

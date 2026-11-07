@@ -36,8 +36,13 @@ export function Departures() {
   const role = useRole();
   const who: Who = role === "guest" ? "guest" : "owner";
   // Read on opening, on coming back to the app, and while on screen every 20
-  // seconds: the feeds move every few tens of seconds.
-  const departures = useResource<Read>(`transit:${who}`, (signal) => readDepartures(who, signal), { interval: 20_000 });
+  // seconds: the feeds move every few tens of seconds. It is not handed the
+  // signal, so nothing cuts it short: context-svc reads the feeds for it and
+  // keeps what they said a little while for whoever asks next
+  // (internal/transit/feeds.go), and a feed read cut short with this request
+  // could be kept as the feed failing - the board would say there is no live
+  // data.
+  const departures = useResource<Read>(`transit:${who}`, () => readDepartures(who), { interval: 20_000 });
   const read = departures.data ?? null;
   const error = departures.error?.message ?? null;
   const load = departures.reload;

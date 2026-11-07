@@ -9,14 +9,22 @@ import { onResume } from "@/lib/resume";
  * shown again, a pull to refresh, a tapped notification) and, if asked, every
  * so often while the page is on screen.
  *
- * One read at a time, each with its own AbortController: leaving the screen,
- * a new key or a newer read calls off the one under way, and what it brings
- * is never shown. A poll leaves a read under way to finish rather than cut
- * it off - a slow answer would otherwise never land - unless it has hung for
- * three rounds and half a minute at least. A read that fails is tried again
- * after a wait that doubles; until one succeeds, what was shown stays, and
- * the error is beside it. A key that changes keeps the data shown until the
- * new key's read lands (dataKey says whose it is).
+ * The newest read is the one whose answer is shown. A newer read does not
+ * call off one under way, only stops showing what it brings: cutting a
+ * request short cuts short what it set going on the service, which may keep
+ * that as a failure. A read made before the page was last shown again - before
+ * it was hidden, or while it was - is the exception: a phone drops a hidden
+ * page's connections without an error, so it may never answer, and coming
+ * back or the next poll calls it off and reads again. One made since is
+ * waited for instead: coming back makes no other, and a pull to refresh waits
+ * for it. A poll leaves a read under way to finish unless it has hung for
+ * three rounds and half a minute at least. Leaving the screen or a new key
+ * calls off every read under way.
+ *
+ * A read that fails is tried again after a wait that doubles; until one
+ * succeeds, what was shown stays, and the error is beside it. A key that
+ * changes keeps the data shown until the new key's read lands (dataKey says
+ * whose it is).
  */
 
 /** How a resource is read, given the signal that calls the read off. */
@@ -52,18 +60,63 @@ export type Resource<T> = {
   error: Error | null;
   /** When `data` was read. */
   readAt: Date | null;
-  /** Reads now, calling off a read under way, and resolves once it has landed. */
+  /** Reads now, and resolves once its answer, or a newer read's, has landed or failed. */
   reload: () => Promise<void>;
   /**
-   * Reads now this once another way (a POST that makes the service look
-   * again). It is an action, so its failure shows at once, untried again.
+   * Reads now this once another way: an action, such as a POST that makes
+   * the service look again. Nothing calls it off - not leaving the screen,
+   * coming back or another read - as that would cut it short where it runs;
+   * its answer is shown unless a newer read has been made since. It is an
+   * action, so its failure shows at once, untried again. It resolves as
+   * reload does.
    */
-  reloadWith: (once: Fetcher<T>) => Promise<void>;
+  reloadWith: (action: () => Promise<T>) => Promise<void>;
   /** Changes what is shown until the next read lands: what an action here just did. */
   mutate: (next: (prev: T | undefined) => T | undefined) => void;
 };
 
 type Shown<T> = Pick<Resource<T>, "data" | "dataKey" | "error" | "readAt">;
+
+/** A read under way. */
+type Flight = {
+  /** How many times the page had been shown again when it started (shows). */
+  shows: number;
+  /** When it started: a read waited on for rounds is taken for hung. */
+  at: number;
+  /** What calls it off; an action has none. */
+  ctrl?: AbortController;
+  /** Set while it waits to be tried again. */
+  retry?: number;
+};
+
+/**
+ * How many times the page has been shown again after it was hidden. A read
+ * made before the last of them may have died with a connection the phone
+ * dropped meanwhile, and is not waited on.
+ */
+let shows = 0;
+if (typeof document !== "undefined") {
+  let hidden = document.visibilityState === "hidden";
+  const hide = () => {
+    hidden = true;
+  };
+  // Counted once each time, though a page back from the back-forward cache
+  // says so twice (pageshow, visibilitychange): the second must not take the
+  // read the first one started for a stale one.
+  const show = () => {
+    if (!hidden) return;
+    hidden = false;
+    shows += 1;
+  };
+  // Added when this module loads, before any screen's onResume: listeners
+  // run in the order they were added, so a screen coming back sees the count
+  // that includes this time.
+  document.addEventListener("visibilitychange", () => (document.visibilityState === "visible" ? show() : hide()));
+  window.addEventListener("pagehide", hide);
+  window.addEventListener("pageshow", (e) => {
+    if (e.persisted) show();
+  });
+}
 
 const retryable = (err: unknown) => !(err instanceof HttpError && err.status >= 400 && err.status < 500);
 
@@ -78,52 +131,83 @@ export function useResource<T>(key: string | null, fetcher: Fetcher<T>, options:
     latest.current = fetcher;
   });
   const keyRef = useRef(key);
-  // The read under way, and when it started.
-  const flight = useRef<{ ctrl: AbortController; at: number } | null>(null);
-  const again = useRef<number | undefined>(undefined);
+  // The newest read, whose answer is the one shown.
+  const flight = useRef<Flight | null>(null);
+  // Every read under way that can be called off: the newest, and the older
+  // ones it left to finish.
+  const out = useRef(new Set<Flight>());
+  // Whoever waits for the screen to catch up (a reload, a pull to refresh):
+  // let go once the newest read lands or fails, or everything is called off.
+  const waiting = useRef<(() => void)[]>([]);
 
-  const stop = useCallback(() => {
-    flight.current?.ctrl.abort();
-    flight.current = null;
-    window.clearTimeout(again.current);
+  const letGo = useCallback(() => {
+    const done = waiting.current;
+    waiting.current = [];
+    for (const resolve of done) resolve();
   }, []);
+  const caughtUp = useCallback(() => new Promise<void>((resolve) => waiting.current.push(resolve)), []);
+
+  // Leaving the screen, or a new key: every read under way is called off. An
+  // action is not, but what it brings is no longer shown.
+  const stop = useCallback(() => {
+    for (const f of out.current) f.ctrl?.abort();
+    out.current.clear();
+    window.clearTimeout(flight.current?.retry);
+    flight.current = null;
+    letGo();
+  }, [letGo]);
 
   const read = useCallback(
-    (k: string | null, once?: Fetcher<T>): Promise<void> => {
-      stop();
+    (k: string | null, action?: () => Promise<T>): Promise<void> => {
       if (k === null) return Promise.resolve();
+      const prev = flight.current;
+      if (prev?.retry !== undefined) {
+        // Waiting to be tried again, it has nothing out.
+        window.clearTimeout(prev.retry);
+        out.current.delete(prev);
+      }
+      // One made before the page was last shown again may never answer.
+      for (const f of out.current) {
+        if (f.shows === shows) continue;
+        f.ctrl?.abort();
+        out.current.delete(f);
+      }
       const ctrl = new AbortController();
-      const mine = { ctrl, at: Date.now() };
+      const mine: Flight = { shows, at: Date.now(), ctrl: action ? undefined : ctrl };
       flight.current = mine;
-      const tries = once ? 0 : retries;
-      return new Promise<void>((resolve) => {
-        // Called off: whoever waits on it (a pull to refresh) waits no more.
-        ctrl.signal.addEventListener("abort", () => resolve(), { once: true });
-        const attempt = (n: number) => {
-          (once ?? latest.current)(ctrl.signal).then(
-            (data) => {
-              if (flight.current !== mine) return;
-              flight.current = null;
-              setShown({ data, dataKey: k, error: null, readAt: new Date() });
-              resolve();
-            },
-            (err: unknown) => {
-              if (flight.current !== mine) return;
-              if (n < tries && retryable(err)) {
-                again.current = window.setTimeout(() => attempt(n + 1), retryDelay * 2 ** n);
-                return;
-              }
-              flight.current = null;
-              const error = err instanceof Error ? err : new Error(String(err));
-              setShown((s) => ({ ...s, error }));
-              resolve();
-            },
-          );
-        };
-        attempt(0);
-      });
+      if (!action) out.current.add(mine);
+      const done = caughtUp();
+      const tries = action ? 0 : retries;
+      const attempt = (n: number) => {
+        (action ? action() : latest.current(ctrl.signal)).then(
+          (data) => {
+            out.current.delete(mine);
+            if (flight.current !== mine) return;
+            flight.current = null;
+            setShown({ data, dataKey: k, error: null, readAt: new Date() });
+            letGo();
+          },
+          (err: unknown) => {
+            if (flight.current === mine && n < tries && retryable(err)) {
+              mine.retry = window.setTimeout(() => {
+                mine.retry = undefined;
+                attempt(n + 1);
+              }, retryDelay * 2 ** n);
+              return;
+            }
+            out.current.delete(mine);
+            if (flight.current !== mine) return;
+            flight.current = null;
+            const error = err instanceof Error ? err : new Error(String(err));
+            setShown((s) => ({ ...s, error }));
+            letGo();
+          },
+        );
+      };
+      attempt(0);
+      return done;
     },
-    [stop, retries, retryDelay],
+    [caughtUp, letGo, retries, retryDelay],
   );
 
   // The key's own read: on opening, and when the key changes.
@@ -133,27 +217,36 @@ export function useResource<T>(key: string | null, fetcher: Fetcher<T>, options:
     return stop;
   }, [key, read, stop]);
 
-  // Every so often, only while the page is on screen.
+  // Every so often, only while the page is on screen. A read under way is
+  // left to finish - a slow answer would otherwise never land - unless it was
+  // made before the page was last shown again, or has hung for three rounds
+  // and half a minute at least.
   useEffect(() => {
     if (!interval || key === null) return;
     const id = window.setInterval(() => {
       if (document.visibilityState !== "visible") return;
       const f = flight.current;
-      if (f && Date.now() - f.at < Math.max(interval * 3, 30_000)) return;
+      if (f && f.shows === shows && Date.now() - f.at < Math.max(interval * 3, 30_000)) return;
       void read(keyRef.current);
     }, interval);
     return () => window.clearInterval(id);
   }, [interval, key, read]);
 
-  // Back to the console: a read under way may have died with the connection
-  // the phone dropped in the background, so it is called off and made again.
+  // Back to the console: a read made since the page was shown again is the
+  // one coming back wants, and whoever asked (a pull to refresh) waits for it.
+  // One made before may have died with the connection the phone dropped in
+  // the background, so it is called off and made again.
   useEffect(() => {
     if (!resume || key === null) return;
-    return onResume(() => read(keyRef.current));
-  }, [resume, key, read]);
+    return onResume(() => {
+      const f = flight.current;
+      if (f && f.shows === shows) return caughtUp();
+      return read(keyRef.current);
+    });
+  }, [resume, key, read, caughtUp]);
 
   const reload = useCallback(() => read(keyRef.current), [read]);
-  const reloadWith = useCallback((once: Fetcher<T>) => read(keyRef.current, once), [read]);
+  const reloadWith = useCallback((action: () => Promise<T>) => read(keyRef.current, action), [read]);
   const mutate = useCallback((next: (prev: T | undefined) => T | undefined) => {
     setShown((s) => ({ ...s, data: next(s.data) }));
   }, []);
