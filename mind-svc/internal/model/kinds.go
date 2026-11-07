@@ -28,9 +28,9 @@ func IsCalendar(kind string) bool { return strings.HasPrefix(kind, "calendar.") 
 func IsCalendarUpdate(kind string) bool { return strings.HasPrefix(kind, CalendarUpdate) }
 
 // Record kinds: what a record on the stream is, as the registry's kind rows
-// name it (registry/seed.json says which lane reads each). Every layer names
-// a kind by these, so each is spelled once, and the registry's tests hold the
-// rows to what the code reads.
+// name it (registry/seed.json says which lane reads each). The loop's layers
+// name a kind by these, so each is spelled once, and the registry's tests hold
+// the rows to what the code reads.
 //
 // The latest record of a kind is kept under the kind itself
 // (store.PutLatest), so the adapters' records are read back by these names
@@ -128,17 +128,19 @@ const (
 	KindCardRaised  = "mind.card"
 	KindCardUpdated = "mind.card.updated"
 	KindCardClosed  = "mind.card.closed"
-	// KindMindNotice is a notice that says no kind of its own. KindMindInfo
+	// KindMindNotice is a notice that names no kind of its own. KindMindInfo
 	// is one that only tells, which the inbox answers with one tap (Heard).
 	KindMindNotice = "mind.notice"
 	KindMindInfo   = "mind.info"
 	// A reminder said at its moment rings even in quiet hours: the operator's
-	// own, a list's left the evening before its day, a goal's. The assistant's
-	// own at a moment goes by the moment's name (RemindKind).
+	// own (asked), what is left on a list the evening before its day (list),
+	// a goal's (goal). The assistant's own at a moment of the operator's
+	// movement goes by that moment's name (RemindKind).
 	KindRemindAsked = "remind.asked"
 	KindRemindList  = "remind.list"
 	KindRemindGoal  = "remind.goal"
-	// KindMemoryRule tells the operator a rule of theirs now stands.
+	// KindMemoryRule tells the operator a rule the assistant keeps now stands,
+	// and where to take it back.
 	KindMemoryRule = "memory.rule"
 	// KindChecklistShown asks the agent to put a list in the conversation
 	// now, as a card: data {checklist, title, lead}.
