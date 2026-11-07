@@ -69,6 +69,10 @@ type Proposal struct {
 	Note      string `json:"note,omitempty"`
 	At        string `json:"at"`
 	DecidedAt string `json:"decidedAt,omitempty"`
+	// ChangedAt is when the card last changed (RFC 3339): raised, edited,
+	// redrawn, decided, settled or abandoned. A decided card stays live for
+	// two weeks after it (archive.go), however long it waited before.
+	ChangedAt string `json:"changedAt,omitempty"`
 	// Reason is what the operator said when deciding - why a card was
 	// turned down. It is what the next judgement about the same thing reads.
 	Reason string `json:"reason,omitempty"`
@@ -92,6 +96,18 @@ func (p Proposal) Opened() time.Time {
 	return time.UnixMilli(n)
 }
 
+// Changed is when the card last changed: ChangedAt, or when it was raised
+// for a card that does not carry it.
+func (p Proposal) Changed() time.Time {
+	if t, err := time.Parse(time.RFC3339, p.ChangedAt); err == nil {
+		return t
+	}
+	return p.Opened()
+}
+
+// changed stamps the card as changed at now.
+func (p *Proposal) changed(now time.Time) { p.ChangedAt = now.Format(time.RFC3339) }
+
 // Edit is one revision of a form card by the operator.
 type Edit struct {
 	At     string            `json:"at"`
@@ -114,11 +130,11 @@ var (
 // a decision. One operator, one process, so a mutex and a slice are the whole
 // concurrency story; Persist adds a file behind them so the record of what was
 // decided outlives the container it was decided in, and an archive beside it
-// for the cards decided long ago (archive.go).
+// for the decided cards that have not changed in a while (archive.go).
 type Store struct {
 	mu sync.Mutex
 	// order and byID are the live cards: every one still waiting, and those
-	// decided lately.
+	// that changed lately.
 	order   []*Proposal
 	byID    map[string]*Proposal
 	waiters map[string]chan Decision
@@ -136,9 +152,6 @@ type Store struct {
 	archivedOrder []*Proposal
 	archiveBroken bool
 	archivedAt    time.Time
-	// changed is when each card last changed in this process: a card stays
-	// live a while after it, whatever its age (settledFor).
-	changed map[string]time.Time
 	// now is the clock: time.Now, but for a test.
 	now func() time.Time
 	// onDecide hears every decision after it is recorded. Nobody blocks on a
@@ -163,9 +176,9 @@ type file struct {
 // refused at once, and approving it only opens the host for a retry. Anything
 // else still pending is settled as rejected on the way in.
 //
-// Decided cards raised long enough ago move to the archive beside the file
-// on the way in, and once a day after (archive.go); the archive itself is
-// not read until a card in it is asked for.
+// Decided cards that have not changed for long enough move to the archive
+// beside the file on the way in, and once a day after (archive.go); the
+// archive itself is not read until a card in it is asked for.
 func (s *Store) Persist(path string, log *slog.Logger) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -186,6 +199,7 @@ func (s *Store) Persist(path string, log *slog.Logger) error {
 			if p.DecidedAt == "" {
 				p.DecidedAt = now.Format("15:04")
 			}
+			p.changed(now)
 		}
 		s.byID[p.ID] = p
 	}
@@ -199,29 +213,43 @@ func (s *Store) Persist(path string, log *slog.Logger) error {
 }
 
 // save must be called with the lock held. Logged rather than returned for the
-// same reason as the transcript: the decision was already made.
-func (s *Store) save() {
+// same reason as the transcript: the decision was already made. It says
+// whether the live file was written.
+func (s *Store) save() bool {
 	if s.path == "" {
-		return
+		return false
 	}
 	if now := s.now(); now.Sub(s.archivedAt) >= archiveEvery {
 		s.archiveLocked(now)
 	}
-	s.writeLocked()
+	return s.writeLocked()
 }
 
-// writeLocked writes the live file.
-func (s *Store) writeLocked() {
-	if err := jsonfile.Save(s.path, file{Proposals: s.order, Seq: s.seq}); err != nil && s.log != nil {
-		s.log.Error("제안을 저장하지 못했습니다", "err", err)
+// saveChange saves a change just made to p. A card brought back from the
+// archive for it (unarchived) leaves the archive once the live file holding
+// it is written - in that order, a write cut short leaves it in both files,
+// and the live copy is the one read.
+func (s *Store) saveChange(p *Proposal, unarchived bool) {
+	if s.save() && unarchived {
+		s.dropArchivedLocked(p.ID)
 	}
+}
+
+// writeLocked writes the live file, and says whether it did.
+func (s *Store) writeLocked() bool {
+	if err := jsonfile.Save(s.path, file{Proposals: s.order, Seq: s.seq}); err != nil {
+		if s.log != nil {
+			s.log.Error("제안을 저장하지 못했습니다", "err", err)
+		}
+		return false
+	}
+	return true
 }
 
 func NewStore(b *bus.Bus) *Store {
 	return &Store{
 		byID:    map[string]*Proposal{},
 		waiters: map[string]chan Decision{},
-		changed: map[string]time.Time{},
 		bus:     b,
 		now:     time.Now,
 	}
@@ -237,13 +265,13 @@ func (s *Store) Open(p Proposal) (*Proposal, <-chan Decision) {
 	p.ID = fmt.Sprintf("p-%d-%d", now.UnixMilli(), s.seq)
 	p.State = Pending
 	p.At = now.Format("15:04")
+	p.changed(now)
 	if p.Origin == "" {
 		p.Origin = OriginChat
 	}
 	stored := &p
 	s.order = append(s.order, stored)
 	s.byID[stored.ID] = stored
-	s.changed[stored.ID] = now
 
 	// Buffered so a producer that walked away never blocks the deciding side.
 	ch := make(chan Decision, 1)
@@ -289,18 +317,14 @@ func (s *Store) DecideWhy(id string, d Decision, reason string) error {
 		return fmt.Errorf("invalid decision %q", d)
 	}
 	s.mu.Lock()
-	p, _, ok := s.lookupLocked(id)
-	if !ok {
+	p, unarchived, err := s.takeLocked(id, waiting)
+	if err != nil {
 		s.mu.Unlock()
-		return ErrNotFound
-	}
-	if p.State != Pending {
-		s.mu.Unlock()
-		return ErrAlreadyDecided
+		return err
 	}
 	now := s.now()
 	p.DecidedAt = now.Format("15:04")
-	s.changed[id] = now
+	p.changed(now)
 	if r := []rune(strings.TrimSpace(reason)); len(r) > 0 {
 		if len(r) > 500 {
 			r = r[:500]
@@ -314,7 +338,7 @@ func (s *Store) DecideWhy(id string, d Decision, reason string) error {
 	}
 	ch := s.waiters[id]
 	delete(s.waiters, id)
-	s.save()
+	s.saveChange(p, unarchived)
 	snapshot := *p
 	listeners := s.onDecide
 	s.mu.Unlock()
@@ -342,14 +366,10 @@ func (s *Store) Revise(id string, a action.Action, c action.Card) error {
 // ReviseWith revises a form card and records the operator's edits.
 func (s *Store) ReviseWith(id string, a action.Action, c action.Card, edits map[string]string) error {
 	s.mu.Lock()
-	p, _, ok := s.lookupLocked(id)
-	if !ok {
+	p, unarchived, err := s.takeLocked(id, waiting)
+	if err != nil {
 		s.mu.Unlock()
-		return ErrNotFound
-	}
-	if p.State != Pending {
-		s.mu.Unlock()
-		return ErrAlreadyDecided
+		return err
 	}
 	now := s.now()
 	p.Action = a
@@ -357,28 +377,27 @@ func (s *Store) ReviseWith(id string, a action.Action, c action.Card, edits map[
 	if len(edits) > 0 {
 		p.Edits = append(p.Edits, Edit{At: now.Format(time.RFC3339), Fields: edits})
 	}
-	s.changed[id] = now
-	s.save()
+	p.changed(now)
+	s.saveChange(p, unarchived)
 	s.mu.Unlock()
 	return nil
 }
 
 // Refresh puts on a waiting card what it asks now, for the screens to redraw
 // where it is: unlike ReviseWith nobody edited it, and it is said at once.
+// Asking what it asked already is no change to the card (ChangedAt).
 func (s *Store) Refresh(id string, a action.Action, c action.Card, confidence float64) error {
 	s.mu.Lock()
-	p, _, ok := s.lookupLocked(id)
-	if !ok {
+	p, unarchived, err := s.takeLocked(id, waiting)
+	if err != nil {
 		s.mu.Unlock()
-		return ErrNotFound
+		return err
 	}
-	if p.State != Pending {
-		s.mu.Unlock()
-		return ErrAlreadyDecided
+	if !p.asks(a, c, confidence) {
+		p.changed(s.now())
 	}
 	p.Action, p.Card, p.Confidence = a, c, confidence
-	s.changed[id] = s.now()
-	s.save()
+	s.saveChange(p, unarchived)
 	snapshot := *p
 	s.mu.Unlock()
 	s.bus.Publish(bus.Event{Type: "proposal", Proposal: snapshot})
@@ -444,6 +463,20 @@ func (s *Store) FindPending(a action.Action) (Proposal, bool) {
 	return Proposal{}, false
 }
 
+// asks is whether the card already asks this: the same action, card and
+// confidence.
+func (p *Proposal) asks(a action.Action, c action.Card, confidence float64) bool {
+	if a.Kind != p.Action.Kind || confidence != p.Confidence || !bytes.Equal(Canonical(a.Input), Canonical(p.Action.Input)) {
+		return false
+	}
+	was, err := json.Marshal(p.Card)
+	if err != nil {
+		return false
+	}
+	now, err := json.Marshal(c)
+	return err == nil && bytes.Equal(was, now)
+}
+
 // Canonical re-encodes JSON with sorted keys and no insignificant whitespace,
 // so two encodings of the same arguments compare equal.
 func Canonical(raw json.RawMessage) []byte {
@@ -458,11 +491,13 @@ func Canonical(raw json.RawMessage) []byte {
 	return out
 }
 
-// Settle records how the action ended. Called by whoever ran it.
+// Settle records how the action ended. Called by whoever ran it, however
+// long after the decision: a card archived meanwhile comes back among the
+// live ones, so what acts on a decision always finds its card.
 func (s *Store) Settle(id string, state State, note string) {
 	s.mu.Lock()
-	p, ok := s.byID[id]
-	if !ok {
+	p, unarchived, err := s.takeLocked(id, nil)
+	if err != nil {
 		s.mu.Unlock()
 		return
 	}
@@ -472,8 +507,8 @@ func (s *Store) Settle(id string, state State, note string) {
 	if p.DecidedAt == "" {
 		p.DecidedAt = now.Format("15:04")
 	}
-	s.changed[id] = now
-	s.save()
+	p.changed(now)
+	s.saveChange(p, unarchived)
 	snapshot := *p
 	s.mu.Unlock()
 	s.bus.Publish(bus.Event{Type: "proposal", Proposal: snapshot})
@@ -484,8 +519,8 @@ func (s *Store) Settle(id string, state State, note string) {
 // is listening to. Nobody decided it, so OnDecide is not told; OnClose is.
 func (s *Store) Abandon(id, note string) {
 	s.mu.Lock()
-	p, ok := s.byID[id]
-	if !ok || p.State != Pending {
+	p, unarchived, err := s.takeLocked(id, waiting)
+	if err != nil {
 		s.mu.Unlock()
 		return
 	}
@@ -493,9 +528,9 @@ func (s *Store) Abandon(id, note string) {
 	p.State = Rejected
 	p.Note = note
 	p.DecidedAt = now.Format("15:04")
-	s.changed[id] = now
+	p.changed(now)
 	delete(s.waiters, id)
-	s.save()
+	s.saveChange(p, unarchived)
 	snapshot := *p
 	hooks := append([]func(Proposal){}, s.onClose...)
 	s.mu.Unlock()
@@ -518,7 +553,8 @@ func (s *Store) Get(id string) (Proposal, bool) {
 }
 
 // List is the live cards, oldest first: every one still waiting, and those
-// decided lately. An archived card is reached by its id (Get, ListWith).
+// that changed lately. An archived card is reached by its id (Get, ListWith)
+// or in the archive's own list (Archived).
 func (s *Store) List() []Proposal {
 	s.mu.Lock()
 	defer s.mu.Unlock()

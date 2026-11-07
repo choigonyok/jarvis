@@ -65,6 +65,12 @@ export interface Proposal {
   at: string;
   decidedAt?: string;
   /**
+   * ChangedAt is when the card last changed (RFC 3339): raised, edited,
+   * redrawn, decided, settled or abandoned. A decided card stays live for
+   * two weeks after it (archive.go), however long it waited before.
+   */
+  changedAt?: string;
+  /**
    * Reason is what the operator said when deciding - why a card was
    * turned down. It is what the next judgement about the same thing reads.
    */
@@ -89,7 +95,8 @@ export const Reject: Decision = "rejected";
  * Store keeps every proposal raised here, and releases whoever is waiting on
  * a decision. One operator, one process, so a mutex and a slice are the whole
  * concurrency story; Persist adds a file behind them so the record of what was
- * decided outlives the container it was decided in.
+ * decided outlives the container it was decided in, and an archive beside it
+ * for the decided cards that have not changed in a while (archive.go).
  */
 export interface Store {
 }
