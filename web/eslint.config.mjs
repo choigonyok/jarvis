@@ -14,6 +14,8 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // PhotoCraft's generated loader (scripts/photocraft.mjs puts it there).
     "public/photocraft/**",
+    // The agent's types, written from its Go structs (scripts/gen-types.sh).
+    "src/lib/gen/**",
   ]),
 ]);
 

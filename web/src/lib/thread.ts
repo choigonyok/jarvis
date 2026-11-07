@@ -1,32 +1,38 @@
-// These shapes mirror the agent's JSON exactly; the agent is the source of truth.
+import type { Action, Card, Field } from "@/lib/gen/action";
+import type { Proposal as ProposalWire } from "@/lib/gen/proposal";
+import type {
+  Draft as DraftWire,
+  Feedback,
+  Origin,
+  OriginChecklist,
+  OriginJob,
+  OriginNotice,
+  Ref,
+  Step as StepWire,
+  Turn as TurnWire,
+} from "@/lib/gen/thread";
 
+/*
+ * The agent's payloads are its own Go structs, written to lib/gen/ by
+ * scripts/gen-types.sh (core/action, core/proposal, thread): a field renamed
+ * or dropped there fails the build here once they are written again. What
+ * follows narrows them where the console tells values apart - a Go string
+ * that holds one of a known few - and adds what is this page's own.
+ */
+
+/** proposal.State's values: generated, State is only a string (its constants are typed ones). */
 export type ProposalState = "pending" | "approved" | "rejected" | "executed" | "failed";
 
+/** proposal.Decision's values, for the same reason. */
 export type Decision = "approved" | "rejected";
 
 /** What a module was asked to do. `input` is the tool's own arguments. */
-export type ProposalAction = {
-  kind: string;
-  input: Record<string, unknown>;
-};
+export type ProposalAction = Omit<Action, "input"> & { input: Record<string, unknown> };
 
 /** One value on a card the operator may change before approving. */
-export type CardField = {
-  key: string;
-  label: string;
+export type CardField = Omit<Field, "kind"> & {
   /** multi: several options, kept comma-joined ("소음·매너,청결"). secret: typed hidden (a password). */
   kind: "text" | "textarea" | "number" | "select" | "multi" | "secret";
-  value: string;
-  options?: string[];
-  /** Approval stays off while this is empty. */
-  required?: boolean;
-  /** A line under the field: a price reference, a format. */
-  hint?: string;
-  /**
-   * Never kept with the card nor told to Jarvis: at approval the agent hands
-   * it to the module (a login to the vault) and drops it. A secret always is.
-   */
-  private?: boolean;
 };
 
 /** Whether a field's value bypasses the card's record (a login). */
@@ -34,12 +40,7 @@ export function isPrivateField(f: CardField): boolean {
   return Boolean(f.private) || f.kind === "secret";
 }
 
-export type ProposalCardBody = {
-  title: string;
-  body: string;
-  consequence: string;
-  /** Upload names shown on the card. */
-  images?: string[];
+export type ProposalCardBody = Omit<Card, "fields"> & {
   /** Present when the card is a form (a Joongna draft). */
   fields?: CardField[];
 };
@@ -49,51 +50,19 @@ export type ProposalCardBody = {
  * raised with no conversation behind it, which is how a detector will
  * eventually suggest something nobody asked for.
  */
-export type Proposal = {
-  id: string;
-  origin: string;
+export type Proposal = Omit<ProposalWire, "action" | "card" | "state"> & {
   action: ProposalAction;
   card: ProposalCardBody;
-  confidence?: number;
   state: ProposalState;
-  note?: string;
-  at: string;
-  decidedAt?: string;
-  /** What the operator said when deciding - why it was turned down. */
-  reason?: string;
-  /** Every change the operator made to a form card before deciding. */
-  edits?: { at: string; fields: Record<string, string> }[];
 };
 
 /** An earlier turn a message quotes - swiped on the thread before sending. */
-export type TurnRef = {
-  id: string;
-  role: "agent" | "user";
-  at?: string;
-  text: string;
-};
+export type TurnRef = Omit<Ref, "role"> & { role: "agent" | "user" };
 
-export type Turn = {
-  id: string;
-  /**
-   * The row it is drawn in, when not its id: the answer's that typed it (this
-   * page's own, never the server's) - the row that wrote the answer keeps it.
-   */
-  rowKey?: string;
+export type Turn = Omit<TurnWire, "role" | "ref" | "origin" | "feedback"> & {
   role: "agent" | "user";
-  at: string;
-  /** Full timestamp (input-svc); `at` is only the wall clock. */
-  atIso?: string;
   /** The earlier message this one quotes. */
   ref?: TurnRef;
-  paragraphs?: string[];
-  text?: string;
-  /** Photos the operator attached, by upload name (see lib/uploads.ts). */
-  images?: string[];
-  /** Points at a proposal; the card itself lives in the proposal store. */
-  proposalId?: string;
-  /** This page's own: a newer word came for a card open in front of the reader, written where it is. */
-  freshNews?: boolean;
   /**
    * Set when the turn is not the conversation's own words: news from a
    * background job's run (drawn beside the thread; a later word from the
@@ -103,21 +72,20 @@ export type Turn = {
   origin?: TurnOrigin;
   /** The operator's mark on this answer, as it was left last. */
   feedback?: TurnFeedback;
+  /**
+   * The row it is drawn in, when not its id: the answer's that typed it (this
+   * page's own, never the server's) - the row that wrote the answer keeps it.
+   */
+  rowKey?: string;
+  /** This page's own: a newer word came for a card open in front of the reader, written where it is. */
+  freshNews?: boolean;
 };
 
 /** A mark on one of Jarvis's answers: it was good, or wrong - and why. */
-export type TurnFeedback = { mark: "good" | "bad"; note?: string; at: string };
+export type TurnFeedback = Omit<Feedback, "mark"> & { mark: "good" | "bad" };
 
-export type TurnOrigin = {
-  kind: "job" | "notice" | "checklist";
-  job?: number;
-  run?: number;
-  /** A job's name; a notice's why-now ("집에 도착하셔서 알려 드려요"); a list's name. */
-  title?: string;
-  /** What a notice was sent as. */
-  ref?: string;
-  /** The checklist the card shows, by id. */
-  checklist?: string;
+export type TurnOrigin = Omit<Origin, "kind" | "goals"> & {
+  kind: typeof OriginJob | typeof OriginNotice | typeof OriginChecklist;
   /** The days a notice asks about, answered on the card. */
   goals?: GoalAsk[];
 };
@@ -188,12 +156,7 @@ export type Queued = {
  * index) of what it says so far, `at` 0 being the whole of it. `gone` says it
  * will not become a turn. The turn it becomes arrives with `replaces` set.
  */
-export type DraftFrame = {
-  id: string;
-  at: number;
-  text?: string;
-  gone?: boolean;
-};
+export type DraftFrame = DraftWire;
 
 /**
  * An answer as far as it has been written. `joined` says this screen came to
@@ -238,8 +201,9 @@ export function applyDraft(cur: Draft | null, f: DraftFrame): Draft | null {
  * One thing the turn under way has done since the last thing said, in a line
  * (agent internal/steps): the newest is what it is doing now.
  */
-export type Step = { text: string; at: string };
+export type Step = StepWire;
 
+/** A frame of the agent's stream, by its type (agent/internal/core/bus Event: one slot set per type). */
 export type AgentEvent =
   | { type: "queue"; queue?: Queued[] }
   | { type: "turn"; turn: Turn; replaces?: string }

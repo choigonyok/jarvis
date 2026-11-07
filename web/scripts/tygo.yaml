@@ -1,0 +1,22 @@
+# The agent's payloads the console reads most - the thread, its cards and what
+# a card asks to run - as TypeScript, from the Go structs (web/src/lib/gen/).
+# Run through scripts/gen-types.sh, from the agent module: paths below are
+# relative to agent/.
+type_mappings:
+  # The raw JSON a tool call or a notice carries: the console narrows it where
+  # it reads it (lib/thread.ts).
+  json.RawMessage: "unknown"
+packages:
+  - path: "github.com/choigonyok/jarvis/agent/internal/core/action"
+    output_path: "../web/src/lib/gen/action.ts"
+  - path: "github.com/choigonyok/jarvis/agent/internal/core/proposal"
+    output_path: "../web/src/lib/gen/proposal.ts"
+    include_files: ["proposal.go"]
+    type_mappings:
+      action.Action: "Action"
+      action.Card: "Card"
+    frontmatter: |
+      import type { Action, Card } from "./action";
+  - path: "github.com/choigonyok/jarvis/agent/internal/thread"
+    output_path: "../web/src/lib/gen/thread.ts"
+    include_files: ["store.go", "draft.go", "steps.go"]
