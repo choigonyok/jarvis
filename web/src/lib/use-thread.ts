@@ -69,6 +69,17 @@ function upsert<T extends { id: string; atIso?: string }>(list: T[], next: T, in
   return copy;
 }
 
+/**
+ * The cards of next not in list yet, put after it. One list holds already
+ * stays as it is: the stream may have brought a newer word on it since next
+ * was read.
+ */
+function addMissing(list: Proposal[], next: Proposal[]): Proposal[] {
+  const have = new Set(list.map((p) => p.id));
+  const missing = next.filter((p) => !have.has(p.id));
+  return missing.length > 0 ? [...list, ...missing] : list;
+}
+
 // The last thread this page saw. Coming back to a tab renders it at once -
 // already scrolled to the newest turn - and the fetch then only corrects it.
 let cached: { turns: Turn[]; proposals: Proposal[]; thinking: boolean; hasMore?: boolean } | null = null;
@@ -217,9 +228,17 @@ export function useThread() {
       // came out as a space on the far side of the proxies.
       const res = await fetch(`${API}/thread?limit=${PAGE}&before=${encodeURIComponent(oldest.id)}`, { cache: "no-store" });
       if (!res.ok) throw new Error(String(res.status));
-      const data = (await res.json()) as { turns: Turn[]; hasMore?: boolean; checklists?: Record<string, Checklist> };
+      const data = (await res.json()) as {
+        turns: Turn[];
+        hasMore?: boolean;
+        proposals?: Proposal[];
+        checklists?: Record<string, Checklist>;
+      };
       const older = data.turns ?? [];
       putLists(data.checklists);
+      // The cards its turns point at come with the page - one decided long
+      // ago only with it: the newest page carries the live cards, not those.
+      setProposals((prev) => addMissing(prev, data.proposals ?? []));
       setTurns((prev) => {
         const have = new Set(prev.map((t) => t.id));
         return [...older.filter((t) => !have.has(t.id)), ...prev];
@@ -231,7 +250,7 @@ export function useThread() {
     } finally {
       setLoadingOlder(false);
     }
-  }, [loadingOlder, setTurns, setMore, putLists]);
+  }, [loadingOlder, setTurns, setMore, setProposals, putLists]);
 
   // When the stream last carried anything at all - see send.
   const heardAt = useRef(0);
