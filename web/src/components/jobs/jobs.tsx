@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Header, PageTop, TabBar } from "@/components/shell/header";
+import { Header, PageTop } from "@/components/shell/header";
+import { TabBar } from "@/components/shell/tab-bar";
 import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { AsOf } from "@/components/shell/as-of";

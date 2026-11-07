@@ -1,3 +1,5 @@
+import { GUEST_HUBS } from "@/lib/hubs";
+
 /**
  * Who is at the console, and what they may open.
  *
@@ -38,8 +40,11 @@ export function roleFor(email: string): Role | null {
   return null;
 }
 
-/** The pages a guest can open - also the tabs a guest is shown. */
-export const GUEST_PAGES = new Set(["/", "/jobs", "/goals", "/workout", "/calendar", "/edit", "/location", "/transit"]);
+/**
+ * The pages a guest can open: the screens of the guest's places (lib/hubs.ts),
+ * so the tabs a guest is shown and the pages let through are one list.
+ */
+export const GUEST_PAGES = new Set(GUEST_HUBS.flatMap((hub) => hub.screens.map((tab) => tab.href)));
 /** API routes a guest may call: the route itself, or anything beneath it - never a sibling with a longer name. */
 const GUEST_API = [
   "/api/agent",

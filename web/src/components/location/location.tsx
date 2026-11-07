@@ -3,7 +3,8 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, Info, LocateFixed, Pause, Play } from "lucide-react";
-import { Header, PageTop, TabBar } from "@/components/shell/header";
+import { Header, PageTop } from "@/components/shell/header";
+import { TabBar } from "@/components/shell/tab-bar";
 import { Retry } from "@/components/shell/retry";
 import { useRole } from "@/components/shell/role";
 import { StandingBar } from "@/components/shell/standing-bar";

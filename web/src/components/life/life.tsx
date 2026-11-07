@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Header, PageTop, TabBar } from "@/components/shell/header";
+import { Header, PageTop } from "@/components/shell/header";
+import { TabBar } from "@/components/shell/tab-bar";
 import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { Meals } from "@/components/life/meals";

@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { type RemoteRFB, RemoteTouch } from "@/components/screen/remote-touch";
-import { Header, PageTop, TabBar } from "@/components/shell/header";
+import { Header, PageTop } from "@/components/shell/header";
+import { TabBar } from "@/components/shell/tab-bar";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { useThread } from "@/lib/use-thread";

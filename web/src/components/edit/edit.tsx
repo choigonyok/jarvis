@@ -1,7 +1,9 @@
 "use client";
 
 import { editorSlot } from "@/components/edit/photocraft";
-import { Header, PageTop, ScreenMenu, TabBar } from "@/components/shell/header";
+import { Header, PageTop } from "@/components/shell/header";
+import { TabBar } from "@/components/shell/tab-bar";
+import { ScreenMenu } from "@/components/shell/screen-menu";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { isPending } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
