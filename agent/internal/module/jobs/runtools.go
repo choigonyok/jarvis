@@ -45,6 +45,10 @@ type runEntry struct {
 	// is done (the phone hears it when the run ends).
 	finished    string
 	hasFinished bool
+	// scheduled is the clock this run set (schedule_next), and warned that
+	// a finish after it was turned back once.
+	scheduled *time.Time
+	warned    bool
 	// firstFor is the job the operator put ahead of this run (the 먼저
 	// card): the run gave the browser to it, and keeps its place in line.
 	firstFor string
@@ -92,6 +96,30 @@ func (r *running) decide(run int64) {
 	if e := r.runs[run]; e != nil {
 		e.decided = true
 	}
+}
+
+// schedule notes the clock the run set.
+func (r *running) schedule(run int64, at time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if e := r.runs[run]; e != nil {
+		e.scheduled = &at
+	}
+}
+
+// finishAfterClock is the clock the run set before calling finish, the first
+// time only: a run that set its next look and then ends the job loses that
+// look - it did, told to "이번 실행을 마쳐라". Called again, the finish
+// stands.
+func (r *running) finishAfterClock(run int64) *time.Time {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	e := r.runs[run]
+	if e == nil || e.scheduled == nil || e.warned {
+		return nil
+	}
+	e.warned = true
+	return e.scheduled
 }
 
 // finish notes what the run's finish said.
@@ -715,7 +743,8 @@ func (m *Module) runServer(run int64) *mcp.Server {
 		}
 		m.current.park(run, "")
 		m.current.decide(run)
-		return ok("다음 실행: " + got.Local().Format("2006-01-02 15:04") + ". 할 일이 끝났으면 실행을 마치세요."), nil, nil
+		m.current.schedule(run, got)
+		return ok("다음 실행: " + got.Local().Format("2006-01-02 15:04") + ". 할 일이 끝났으면 finish 없이 그대로 실행을 마치세요 - finish 는 작업 전체를 끝내 이 예약도 지웁니다."), nil, nil
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -790,7 +819,7 @@ func (m *Module) runServer(run int64) *mcp.Server {
 
 	m.addOrderTools(server, run, guard, payUp)
 
-	mcp.AddTool(server, &mcp.Tool{Name: "finish", Description: "목표를 이뤘거나 더 할 수 있는 일이 없을 때 작업을 끝낸다."},
+	mcp.AddTool(server, &mcp.Tool{Name: "finish", Description: "목표를 이뤘거나 더 할 수 있는 일이 없을 때 작업 전체를 끝낸다(다음 실행 예약도 지운다). 나중에 다시 볼 일이 남았으면 부르지 않는다 - 이번 실행만 마치는 것은 schedule_next 다."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in FinishInput) (*mcp.CallToolResult, any, error) {
 			j, bad := guard()
 			if bad != nil {
@@ -801,6 +830,10 @@ func (m *Module) runServer(run int64) *mcp.Server {
 			if card := m.current.parkedOn(run); card != "" {
 				return toolText("이 실행에서 올린 카드("+card+")가 운영자의 답을 기다립니다. 작업을 끝내면 그 답이 갈 곳이 없어집니다. "+
 					"finish 를 부르지 말고 지금 실행을 마치세요 - 답이 오면 다음 실행에서 이어집니다.", true), nil, nil
+			}
+			if at := m.current.finishAfterClock(run); at != nil {
+				return toolText("이 실행에서 다음 실행을 "+at.Local().Format("2006-01-02 15:04")+" 에 잡았습니다. 그때 할 일이 남았다는 뜻이니 finish 를 부르지 말고 이대로 실행을 마치세요 - "+
+					"finish 는 작업 전체를 끝내 그 예약을 지웁니다. 목표를 정말 다 이뤘다면 finish 를 한 번 더 부르세요.", true), nil, nil
 			}
 			if err := m.store.Finish(ctx, run, in.Summary); err != nil {
 				return fail(err), nil, nil

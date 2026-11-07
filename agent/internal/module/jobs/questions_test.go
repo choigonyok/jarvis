@@ -176,3 +176,29 @@ func TestTheJobRowSaysWhatItRecordedAndWhenItRunsNext(t *testing.T) {
 		t.Fatalf("카드를 기다리는 작업은 다음 실행이 없다고 말해야 합니다:\n%s", out)
 	}
 }
+
+// A run that set its next look and then ends the job is turned back once:
+// told "이번 실행을 마쳐라", one did, and the Monday look was gone. Called
+// again, the finish stands.
+func TestAFinishAfterAClockIsTurnedBackOnce(t *testing.T) {
+	svc := &jobsSvc{}
+	m := New(NewStore(svc.serve(t).URL, ""), nil, proposal.NewStore(bus.New()), &transcript{}, quietLog())
+	m.current.add(7, Job{ID: 117, Title: "장바구니 할인율 비교"}, true)
+	s := runSession(t, m, "7")
+
+	if text, isErr := callRun(t, s, "schedule_next", map[string]any{"at": "2026-11-09 19:30", "reason": "세일 뒤 가격 재확인"}); isErr || !strings.Contains(text, "finish 없이") {
+		t.Fatalf("schedule_next: %q", text)
+	}
+	text, isErr := callRun(t, s, "finish", map[string]any{"summary": "기준을 기억에 남겼습니다"})
+	if !isErr || !strings.Contains(text, "finish 를 부르지 말고") {
+		t.Fatalf("예약한 실행의 finish 는 한 번 막아야 합니다: %q", text)
+	}
+	for _, c := range svc.got() {
+		if strings.HasSuffix(c, "/finish") {
+			t.Fatalf("작업이 끝났습니다: %v", svc.got())
+		}
+	}
+	if text, isErr := callRun(t, s, "finish", map[string]any{"summary": "정말 끝났습니다"}); isErr {
+		t.Fatalf("두 번째 finish 는 받아들입니다: %q", text)
+	}
+}
