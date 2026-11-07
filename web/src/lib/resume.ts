@@ -18,7 +18,7 @@ const INBOX = "jarvis:inbox";
 const SHOWN = "jarvis:push-shown";
 const FOCUS = "jarvis:focus-proposal";
 
-/** A tapped push about one card: the thread scrolls to it (chat/thread.tsx). */
+/** A tapped push about one card: the thread scrolls to it (chat/thread-scroll.tsx). */
 export function onFocusProposal(fn: (id: string) => void): () => void {
   const handle = (e: Event) => fn((e as CustomEvent<string>).detail);
   window.addEventListener(FOCUS, handle);

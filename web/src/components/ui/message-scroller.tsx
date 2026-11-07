@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils"
  * reader taking the view: following stops, and starts again only at the very
  * bottom. A row is gone to by its turn's id (messageId).
  *
- * What the console adds on top lives in chat/thread.tsx: when older turns are
+ * What the console adds on top lives in chat/thread-scroll.tsx: when older turns are
  * asked for and where the reader is kept as they come in front, the hold at
  * the bottom while a phone's keyboard comes up, and a card a push landed on
  * being kept in view.

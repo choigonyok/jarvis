@@ -76,7 +76,7 @@ let cachedQueue: Queued[] = [];
 // The lists the thread's checklist cards show, by id, as they stood last.
 let cachedLists: Record<string, Checklist> = {};
 // Every card that was waiting while this page was open: one decided here
-// stays on screen even when no turn points at it (thread.tsx).
+// stays on screen even when no turn points at it (chat/transcript.tsx).
 const waited = new Set<string>();
 
 /** The checklists the turns' cards show that are not known yet. */

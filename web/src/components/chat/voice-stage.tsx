@@ -533,7 +533,7 @@ function useHeard(signal: number): number {
 
 /**
  * What a fatal recognizer error means, in words that say what to do. The
- * code itself is the diagnostics' (lib/use-speech.ts, rec.error): "(network)"
+ * code itself is the diagnostics' (lib/speech-listen.ts, rec.error): "(network)"
  * at the end of a sentence told nobody anything.
  */
 function failure(code: string | null) {

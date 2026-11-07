@@ -83,7 +83,7 @@ export function ProposalCard({
       // The thread's standing bar watches for these: a decision on screen
       // does not need announcing at the top of the page.
       data-pending-card={settled ? undefined : ""}
-      // A tapped push about this card scrolls here (chat/thread.tsx).
+      // A tapped push about this card scrolls here (chat/thread-scroll.tsx).
       data-proposal-id={proposal.id}
       className={cn(
         "relative mt-4 w-full max-w-[34rem] overflow-hidden rounded-xl border border-edge bg-glass",

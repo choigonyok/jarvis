@@ -539,7 +539,7 @@
      for the first paint, before any script has run. */
   --top-space: calc(env(safe-area-inset-top) + 3.25rem + 1px);
   /* What the conversation's composer and the tab bar under it take from the
-     thread's end; its screen measures it (chat/thread.tsx). */
+     thread's end; its screen measures it (chat/thread-footer.tsx). */
   --footer-space: 0px;
 }
 @media (width >= 40rem) {

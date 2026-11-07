@@ -13,7 +13,7 @@ import { NOTE, SENDER } from "@/lib/kinds";
  * the page - the screen opens, the part is brought to the middle and lit for
  * a moment. The screen may still be loading, so it is waited for.
  *
- * Approval cards keep their own ?proposal= (chat/thread.tsx), which also
+ * Approval cards keep their own ?proposal= (chat/thread-scroll.tsx), which also
  * holds the thread still while photos above the card load.
  */
 
