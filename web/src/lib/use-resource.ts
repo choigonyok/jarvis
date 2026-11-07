@@ -27,8 +27,12 @@ import { onResume } from "@/lib/resume";
  * whose it is).
  */
 
-/** How a resource is read, given the signal that calls the read off. */
-export type Fetcher<T> = (signal: AbortSignal) => Promise<T>;
+/**
+ * How a resource is read, given the signal that calls the read off and which
+ * try this is: 0, then 1, 2, ... for the tries again after a failure. Work a
+ * read does beside its request is done on the first.
+ */
+export type Fetcher<T> = (signal: AbortSignal, attempt: number) => Promise<T>;
 
 /** A response that said no. A refusal (4xx) is not tried again: asking again gets the same answer. */
 export class HttpError extends Error {
@@ -179,7 +183,7 @@ export function useResource<T>(key: string | null, fetcher: Fetcher<T>, options:
       const done = caughtUp();
       const tries = action ? 0 : retries;
       const attempt = (n: number) => {
-        (action ? action() : latest.current(ctrl.signal)).then(
+        (action ? action() : latest.current(ctrl.signal, n)).then(
           (data) => {
             out.current.delete(mine);
             if (flight.current !== mine) return;

@@ -6,6 +6,7 @@
  * guest's (…/guest), which is all the guest's token opens.
  */
 import type { Who } from "@/lib/track";
+import { HttpError } from "@/lib/use-resource";
 
 export type StopKind = "bus" | "subway";
 
@@ -94,9 +95,16 @@ export type Departures = {
 
 const base = (who: Who) => `/api/context/transit${who === "guest" ? "/guest" : ""}`;
 
+/**
+ * A response's body, or why there is none: an HttpError when the service
+ * answered with a failure, so that a refusal (4xx) is not read again
+ * (lib/use-resource.ts).
+ */
 async function read<T>(res: Response): Promise<T> {
   const body = (await res.json().catch(() => null)) as (T & { error?: string }) | null;
-  if (!res.ok || !body) throw new Error(body?.error ?? `출발 정보가 ${res.status}로 답했어요.`);
+  const message = body?.error ?? `출발 정보가 ${res.status}로 답했어요.`;
+  if (!res.ok) throw new HttpError(res.status, message);
+  if (!body) throw new Error(message);
   return body;
 }
 

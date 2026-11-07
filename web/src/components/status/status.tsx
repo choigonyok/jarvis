@@ -16,7 +16,7 @@ import {
   roots,
   since,
 } from "@/lib/status";
-import { useResource } from "@/lib/use-resource";
+import { HttpError, useResource } from "@/lib/use-resource";
 import { isPending } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
 import {
@@ -209,29 +209,35 @@ export function Status() {
   );
 }
 
-type Fetched = { report: StatusReport; error?: undefined } | { report?: undefined; error: string };
+/** A failure carries the status the service answered with, if it did: a refusal (4xx) is not read again. */
+type Fetched = { report: StatusReport; error?: undefined } | { report?: undefined; error: string; status?: number };
 
 /** POST makes the service look again before answering; GET reads what it has. */
 async function fetchReport(method: "GET" | "POST", signal?: AbortSignal): Promise<Fetched> {
+  let status: number | undefined;
   try {
     const res = await fetch(method === "POST" ? "/api/status/refresh" : "/api/status/status", {
       method,
       cache: "no-store",
       signal,
     });
+    if (!res.ok) status = res.status;
     const body = await res.json();
-    if (!res.ok) return { error: body.error ?? "상태를 불러오지 못했어요." };
+    if (!res.ok) return { error: body.error ?? "상태를 불러오지 못했어요.", status };
     return { report: body as StatusReport };
   } catch {
-    return { error: "상태를 불러오지 못했어요." };
+    return { error: "상태를 불러오지 못했어요.", status };
   }
 }
 
-/** The report as useResource reads it: a failure, in the service's words when it has them, is thrown. */
+/**
+ * The report as useResource reads it: a failure, in the service's words when
+ * it has them, is thrown - an HttpError when the service answered.
+ */
 async function reportOf(method: "GET" | "POST", signal?: AbortSignal): Promise<StatusReport> {
   const out = await fetchReport(method, signal);
   if (out.error === undefined) return out.report;
-  throw new Error(out.error);
+  throw out.status === undefined ? new Error(out.error) : new HttpError(out.status, out.error);
 }
 
 const USAGE = "사용량";

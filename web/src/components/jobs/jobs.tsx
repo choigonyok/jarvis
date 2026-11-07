@@ -70,10 +70,15 @@ export function Jobs() {
   // Read on opening and on coming back to the app (a pull to refresh too).
   const read = useResource<{ jobs: Job[]; blockedSites: BlockedSite[] }>(
     "jobs",
-    async (signal) => {
-      void loadOpenLists().then((open) => {
-        if (open) setListIds((cur) => [...new Set([...cur, ...open.filter(unfinished).map((l) => l.id)])]);
-      });
+    async (signal, attempt) => {
+      // The open lists are read beside the jobs once a read - not again when
+      // the jobs are tried again: their failing says nothing about the lists,
+      // and each try would read them once more.
+      if (attempt === 0) {
+        void loadOpenLists().then((open) => {
+          if (open) setListIds((cur) => [...new Set([...cur, ...open.filter(unfinished).map((l) => l.id)])]);
+        });
+      }
       const res = await fetch("/api/jobs/jobs", { cache: "no-store", signal });
       if (!res.ok) throw new HttpError(res.status);
       return (await res.json()) as { jobs: Job[]; blockedSites: BlockedSite[] };
