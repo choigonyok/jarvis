@@ -234,7 +234,7 @@ function ComposerView({
   return (
     <div
       className={cn(
-        "composer group/composer rounded-[1.875rem] bg-popover p-1.5 shadow-lg ring-1 ring-edge-soft transition-shadow focus-within:ring-edge",
+        "composer group/composer rounded-[1.875rem] bg-popover p-1.5 shadow-lg ring-1 ring-edge transition-shadow focus-within:ring-foreground/15",
         className,
       )}
       data-lead={allowPhotos ? "icon" : "text"}

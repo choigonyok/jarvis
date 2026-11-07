@@ -562,18 +562,29 @@
   scroll-padding-top: var(--top-space);
 }
 
-/* Frosted glass for the top of every screen (PageTop): the page's own colour
-   half the way, over a blur of what passes beneath - a line scrolling under
-   it is a soft shape, never a second line of words behind the header's.
-   Thicker than the tab bar's glass, which carries icons. At rest, over
-   nothing, it is the page itself. */
+/* Frosted glass for the top of every screen (PageTop): a little of the
+   page's own colour over a blur of what passes beneath - a line scrolling
+   under it is a soft shape, never a second line of words behind the
+   header's. At rest, over nothing, it is the page itself. */
 .glass-pane {
-  background-color: color-mix(in oklab, var(--background) 52%, transparent);
+  background-color: color-mix(in oklab, var(--background) 30%, transparent);
   -webkit-backdrop-filter: blur(14px) saturate(180%);
   backdrop-filter: blur(14px) saturate(180%);
 }
 :root[data-theme="light"] .glass-pane {
-  background-color: color-mix(in oklab, var(--background) 62%, transparent);
+  background-color: color-mix(in oklab, var(--background) 40%, transparent);
+}
+/* What is drawn on it - the name, the icons, the waiting line - keeps a rim
+   of the page's colour. The header's greys sit in the middle of the scale,
+   and some passing thing always matches them: a white page under the night
+   theme, a photo of the sky, a night photo by day; however thick the glass,
+   an icon went into one of them. With the rim it is a grey line in a dark
+   (or light) halo, legible over all of them - and over the page itself the
+   rim is the page, and does not show. Nothing in these bars is fixed in
+   place (their popovers and sheets are portals), which a filter would
+   break. */
+.glass-pane > * {
+  filter: drop-shadow(0 0 1px var(--background)) drop-shadow(0 0 3px var(--background));
 }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .glass-pane,
