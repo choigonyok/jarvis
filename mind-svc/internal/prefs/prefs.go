@@ -646,9 +646,9 @@ func Stated(relation, text string) (string, int, bool) {
 	default:
 		return "", 0, false
 	}
-	// The word said first decides, and a word inside another (리뷰, 자연스럽게)
-	// is not that word: "리뷰 많은 식당" was a view, and which of two dimensions a
-	// sentence came out as was the map's order (2026-11-03).
+	// The word said first decides, and a word inside another (리뷰, 자연스럽게) is
+	// not that word: "리뷰 많은 식당" was a view, and which of two dimensions a
+	// sentence came out as was the map's order.
 	at, dim, word := -1, "", ""
 	for _, d := range statedWords {
 		for _, w := range d.words {

@@ -641,11 +641,11 @@ func main() {
 	if cfg.Guest {
 		guestFolders = policy.Folders{cfg.UploadsDir, cfg.MemoryDir}
 	}
-	// A card stands only before a change or money (2026-10-20): a job made or
-	// instructed (jobs.CardFree) and the browser's own tools - reading,
-	// pressing, typing, the PIN at a keypad a payment card already let
-	// through - go by. The browser's guard stops a payment on the network and
-	// raises its card; a job asks before it posts, sends or deletes.
+	// A card stands only before a change or money: a job made or instructed
+	// (jobs.CardFree) and the browser's own tools - reading, pressing,
+	// typing, the PIN at a keypad a payment card already let through - go by.
+	// The browser's guard stops a payment on the network and raises its card;
+	// a job asks before it posts, sends or deletes.
 	gate.SetAutoAllow(func(tool string, input json.RawMessage) bool {
 		if cfg.Guest {
 			if file, inside := guestFolders.Judge(tool, input); file {
@@ -654,8 +654,7 @@ func main() {
 		}
 		if jobs.BrowserTool(tool) {
 			// The conversation is about to drive the browser: a job on it gives
-			// way now, and only now - a turn that only talks leaves it be
-			// (2026-10-28: "대화턴은 실제 브라우저 도구를 쓸 때만 양도").
+			// way now, and only now - a turn that only talks leaves it be.
 			if !runner.TakeBrowser(browserHandover) {
 				log.Warn("브라우저를 쓰던 백그라운드 작업이 제때 비켜 주지 않았습니다", "tool", tool)
 			}
@@ -693,7 +692,7 @@ func main() {
 			// What the card is, as its title says it, over the gist of its
 			// body; what kind of card it is goes in the kind (the inbox says
 			// it, and it is what is muted). The title was the kind's word
-			// ("결재 대기", "제안") over the whole card (2026-11-07).
+			// ("결재 대기", "제안") over the whole card.
 			body := notify.Brief(p.Card.Body, 140)
 			if body == "" {
 				body = title
@@ -721,7 +720,7 @@ func main() {
 			}
 			// Which job and how it ended over the gist of its last word: the
 			// title was "작업을 끝냈어요" for every job, over the first 300
-			// characters of its report (2026-11-07).
+			// characters of its report.
 			jobsModule.OnEnd(func(e jobs.EndNote) {
 				kind, title, level := "job.done", "끝냈어요: ", "info"
 				if !e.Done {
@@ -911,8 +910,8 @@ func checklistConsole(m *checklist.Module) httpapi.Checklists {
 // host the payment guard asks about (browser/payment-hosts.json): the guard
 // stops every write there, the page's own too, and with nobody behind the
 // check it is the operator's screen that gets the cards. 네이버페이's history
-// raised two at its first look, for its own point lookups (2026-11-03). Its
-// sign-in is read off what the order lookups ran into instead (Say).
+// raised two at its first look, for its own point lookups. Its sign-in is
+// read off what the order lookups ran into instead (Say).
 var loginSites = []browsercheck.Site{
 	{ID: "coupang", Name: "쿠팡 주문 내역", Orders: "https://mc.coupang.com/ssr/desktop/order/list", LoginHost: "login.coupang.com"},
 }

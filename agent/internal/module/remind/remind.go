@@ -2,11 +2,10 @@
 // 가면 알려줘", "나갈 때 알려줘" - kept by mind-svc, which says each at its
 // moment as a push to the phone.
 //
-// They used to be jobs, and a job was the wrong thing for them: a job run
-// knows neither where the operator is nor how to ring the phone (its news
-// lands in the conversation only), so "퇴근해서 집에 오면" could not be kept
-// and nothing rang at the time (2026-10-20). A reminder has nothing to watch
-// or do on the web, only a moment to wait for.
+// They are not jobs: a job run knows neither where the operator is nor how
+// to ring the phone (its news lands in the conversation only), and a
+// reminder has nothing to watch or do on the web, only a moment to wait
+// for.
 //
 // What a row answers is what mind stored, so the conversation tells the
 // operator what will happen - not what it meant to set.
@@ -228,7 +227,7 @@ func (m *Module) Change(b *tool.Board) {
 // area puts the outline of a place that is none of the operator's regions in
 // body (mind waits for it by the phone's fixes), and says what the map found;
 // "" when the place is a region or there is none. A place the map does not
-// know is not kept as a region that never comes (2026-11-06: "수원").
+// know is not kept as a region that never comes.
 func (m *Module) area(ctx context.Context, p string, body map[string]any) (string, error) {
 	p = strings.TrimSpace(p)
 	if p == "" || m.mapper == nil {
@@ -251,8 +250,7 @@ func (m *Module) area(ctx context.Context, p string, body map[string]any) (strin
 }
 
 // words is a reminder as the operator is told it: when, and what - its id is
-// the tools' handle and never said (2026-11-06: "[rem_7270d1c1]" in an
-// answer, copied from here).
+// the tools' handle and never said (an id here is copied into the answer).
 func words(r Reminder) string {
 	return r.When + " · " + r.Text
 }

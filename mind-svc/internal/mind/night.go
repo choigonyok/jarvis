@@ -125,7 +125,7 @@ func (m *Mind) ended(ctx context.Context, since, until time.Time) ([]model.Entit
 
 // lapsedAfter is how long past its deadline an open loop is folded: a to-do
 // a fortnight overdue is not coming, and read out every morning until it
-// does it only buries the day's (8 of 34 open loops were, 2026-10-27).
+// does it only buries the day's.
 const lapsedAfter = 14 * 24 * time.Hour
 
 // lapseLoops folds the loops long past their deadline and says so once, for
@@ -210,8 +210,8 @@ func (m *Mind) countPlan(ctx context.Context, p model.Entity) error {
 	}
 	// The other plans of the kind in those two weeks: a thing bought before
 	// one of them counts for that one, the nearest after it, never for
-	// every plan that follows (one purchase was "bought before" four plans
-	// in a row, and a rule rested on it, 2026-10-20).
+	// every plan that follows: one purchase is not "bought before" four
+	// plans in a row for a rule to rest on.
 	var starts []time.Time
 	if others, err := st.PlansOn(ctx, sp.Start.Add(-14*24*time.Hour).In(m.Opts.Loc).Format("2006-01-02"), sp.Start.In(m.Opts.Loc).Format("2006-01-02")); err == nil {
 		for _, o := range others {
@@ -385,7 +385,7 @@ func (m *Mind) pruneMessages(ctx context.Context) error {
 
 // retype, each night: a plan of no kind whose title says one is given it - a
 // kind added to the table, or a title the model left 기타 ("밴드 합주") - so
-// linking and learning see it. 92 of 165 plans were of no kind (2026-11-03).
+// linking and learning see it. 92 of 165 plans were of no kind.
 func (m *Mind) retype(ctx context.Context) error {
 	plans, err := m.Opts.Store.Entities(ctx, model.KindPlan, "", false)
 	if err != nil {

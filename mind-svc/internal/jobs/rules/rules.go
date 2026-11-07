@@ -27,7 +27,7 @@ const (
 	// Deferred: the run gave the browser to a job the operator put first
 	// (the agent's 먼저 card). Not an attempt either, and the job keeps its
 	// place in line - it goes on right after that one, ahead of the jobs
-	// asked for after it (2026-10-28: "브라우저 작업은 요청 순대로").
+	// asked for after it.
 	Deferred = "deferred"
 	Error    = "error"
 )

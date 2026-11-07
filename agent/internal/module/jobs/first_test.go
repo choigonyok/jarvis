@@ -314,9 +314,7 @@ func (c *capRunner) Background(_ context.Context, t claudecode.Task) (string, er
 func (c *capRunner) YieldBrowser(string) bool { return false }
 
 // More jobs due than places: as many start as there are places, the rest
-// start as places come free, and none is turned away to wait out a backoff
-// (2026-10-28: the fifth of five plain jobs gave way at once into a
-// five-minute wait).
+// start as places come free, and none is turned away to wait out a backoff.
 func TestMoreDueJobsThanPlacesWaitForAPlace(t *testing.T) {
 	var mu sync.Mutex
 	done := map[int64]bool{}

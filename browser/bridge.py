@@ -139,7 +139,7 @@ def chromium_alive() -> bool:
     """Whether a Chromium is running in this container. browser-use starts one
     on the first tool call and it goes down on its own when idle, so whoever
     only wants to know must not ask through a tool - that would start it
-    (the agent's login check did, every 30 minutes, 2026-10-27)."""
+    (a login check every 30 minutes would keep it up)."""
     try:
         for pid in os.listdir("/proc"):
             if not pid.isdigit():

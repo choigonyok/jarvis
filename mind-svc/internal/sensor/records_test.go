@@ -118,8 +118,7 @@ func (r *refuser) Records(_ context.Context, recs []model.Record) error {
 // A record longer than memory takes is cut to fit, and one memory still
 // turns down does not hold back the rest: it is let go, not offered again
 // until it changes, and the rest go in. A failure that may pass keeps
-// everything queued (2026-10-23~26: one job's 2,170-character fact kept
-// every record out for three days).
+// everything queued.
 func TestFlushLetsARefusedRecordGo(t *testing.T) {
 	ctx := context.Background()
 	rec := &refuser{bad: "job:2"}

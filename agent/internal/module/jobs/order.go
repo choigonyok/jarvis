@@ -19,12 +19,10 @@ import (
 // a payment password, and the card alerts that say whether a payment went
 // through.
 //
-// 2026-10-29~30 (장범준 LP): a run asked for the orderer and the address on
-// six cards, the answers differed each time, and four order sheets went out
-// with a wrong phone number or a building number one digit short; a run that found
-// no payment password could only ask the conversation to raise its card; and
-// whether a payment had gone through was asked of the operator twice, who
-// looked it up by hand.
+// Kept once and read back whole, the orderer and the address are the same on
+// every order sheet rather than asked again on every card; a run that finds
+// no payment password raises the card itself; and whether a payment went
+// through is read from the alerts, not asked of the operator.
 
 // VaultCards is the vault module's half: the saved shipping profile, and the
 // cards that save one or a payment password.
@@ -47,7 +45,7 @@ type Charge struct {
 
 // Charges is what the card alerts say since a time, and whether they are
 // still coming in: the alerts are KakaoTalk's, read on the Mac mini, and a
-// logged-out KakaoTalk once stopped them for 33 hours (10/28 17:56).
+// logged-out KakaoTalk stops them.
 type Charges struct {
 	List        []Charge
 	LastAlertAt *time.Time

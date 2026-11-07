@@ -128,7 +128,7 @@ func (s *Server) appendTurn(w http.ResponseWriter, r *http.Request) {
 // empty is a turn with nothing to show: no words, no photos, no card. A
 // checklist card is its list (kept by mind, named in the origin) - with or
 // without a line above it. Refusing it as empty let it reach the screen
-// unsaved and vanish on the next read (2026-10-21, "다른 탭 갔다 오면 사라져").
+// unsaved and vanish on the next read.
 func empty(t turn.Turn) bool {
 	if t.Origin != nil && t.Origin.Checklist != "" {
 		return false

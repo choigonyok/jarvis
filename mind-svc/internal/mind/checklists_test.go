@@ -17,8 +17,8 @@ import (
 
 // A reminder that carries a list is said with it: the push says what is
 // left, and the notice asks for a card in the conversation, naming the list
-// for the card to show as it stands (2026-10-21: "집 가서 할 일" reached the
-// phone only). The conversation's situation names the open lists.
+// for the card to show as it stands. The conversation's situation names the
+// open lists.
 func TestReminderShowsItsChecklist(t *testing.T) {
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	f := newMomentsFixture(t, time.Date(2026, 10, 21, 21, 0, 0, 0, seoul), nil)

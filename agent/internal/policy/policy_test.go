@@ -43,7 +43,7 @@ func TestWhatIsNotRegisteredDoesNotRun(t *testing.T) {
 }
 
 // Every tool the conversations and the guest have really used (their session
-// records, 2026-10-31) still goes: a rule that stops ordinary work is worse
+// records) still goes: a rule that stops ordinary work is worse
 // than no rule. What is gone is what no longer exists.
 func TestWhatIsInUseIsNotStopped(t *testing.T) {
 	p := Policy{

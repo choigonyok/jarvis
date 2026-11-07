@@ -30,7 +30,7 @@ const outcomeCopy: Record<Use["outcome"], string> = {
 };
 
 
-/** "오늘 14:02", "10월 18일 14:02" - on Seoul's clock, as everywhere (lib/when.ts); it read the phone's own. */
+/** "오늘 14:02", "10월 18일 14:02" - on Seoul's clock, as everywhere (lib/when.ts). */
 const when = (iso: string) => dateTime(iso);
 
 /**

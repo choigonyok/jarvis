@@ -623,7 +623,7 @@ func TestAReadIsRepeatedOnce(t *testing.T) {
 // The same plan told in two rooms is one plan: the other room's coming plan,
 // not on the calendar yet, is shown here, and a create for the same days at
 // the same place fills in what it lacked instead of making a second one -
-// one camping reserved was two entries and two cards (2026-11-01).
+// one camping reserved was two entries and two cards.
 func TestAPlanFromAnotherRoomIsNotMadeTwice(t *testing.T) {
 	ctx := context.Background()
 	c, st, script := setup(t, `{"changes":[{"op":"create","kind":"plan","set":{"title":"쉼오지캠프 2박3일","status":"confirmed","date":"2026-11-20","endDate":"2026-11-22","place":"쉼오지캠프","type":"캠핑"},"evidence":[{"line":1,"quote":"예약 완료했어"}],"confidence":0.9}]}`)
@@ -647,7 +647,7 @@ func TestAPlanFromAnotherRoomIsNotMadeTwice(t *testing.T) {
 }
 
 // A part of an outing already known goes on its plan, whatever the model made
-// of it: one morning was five plans and four cards (2026-11-02).
+// of it: one morning was five plans and four cards.
 func TestAPartOfAnOutingIsThatOuting(t *testing.T) {
 	ctx := context.Background()
 	c, st, _ := setup(t, `{"changes":[{"op":"create","kind":"plan","set":{"title":"지수와 점심","status":"confirmed","date":"2026-11-28","dateFrom":"28일","start":"11:00","people":["지수"],"type":"식사"},"evidence":[{"line":1,"quote":"점심을 11시에"}],"confidence":0.7}]}`)
@@ -671,7 +671,7 @@ func TestAPartOfAnOutingIsThatOuting(t *testing.T) {
 
 // Dated today with nothing said about the day, by the same people as a plan
 // ahead: it is that plan going on. "10시부터 14시?" settling the room for the
-// 28th became a plan for that morning (2026-11-02).
+// 28th became a plan for that morning.
 func TestADayNobodySaidIsTheConversationsDay(t *testing.T) {
 	ctx := context.Background()
 	made := func(date string) string {

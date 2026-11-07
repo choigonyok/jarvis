@@ -1,9 +1,9 @@
-# 바깥 이름은 공유기 DNS 를 거치지 않는다(2026-10-27: 공유기가 간헐적으로
-# SERVFAIL·NXDOMAIN 을 돌려 uniple·anthropic·Voyage 호출이 끊겼다). 그 길로는
+# 바깥 이름은 공유기 DNS 를 거치지 않는다(공유기가 간헐적으로 SERVFAIL·NXDOMAIN 을
+# 돌려 uniple·anthropic·Voyage 호출이 끊긴다). 그 길로는
 # host.docker.internal 이 풀리지 않아 extra_hosts 로 박는다 - 프로세스가 /etc/hosts 를
 # 읽는 서비스에만 통한다. 터널(cloudflared)은 받지 않는다: Workers VPC 서비스의 이름은
 # cloudflared 가 컨테이너의 DNS 서버에 물어 풀기 때문에, 1.1.1.1 로는 호스트의
-# 목소리 서비스(jarvis-tts = host.docker.internal)가 dns_error 로 끊긴다(10/27~11/01 그랬다).
+# 목소리 서비스(jarvis-tts = host.docker.internal)가 dns_error 로 끊긴다.
 x-outside: &outside
   dns: ["1.1.1.1", "8.8.8.8"]
   extra_hosts: ["host.docker.internal:host-gateway"]
@@ -146,7 +146,7 @@ services:
       JARVIS_PHOTOS_URL: http://photos:8107
       JARVIS_MEMORY_URL: http://memory:8100
       # 웹 찾기(search-svc): 네이버 검색, 페이지와 그림 속 글자 읽기, 네이버 지도. 토큰이 비어 있으면
-      # web 도구가 없고 예전대로(WebFetch, 근처 찾기는 OpenStreetMap).
+      # web 도구가 없고 WebFetch 로 돈다(근처 찾기는 OpenStreetMap).
       JARVIS_SEARCH_URL: http://search:8104
       JARVIS_SEARCH_TOKEN: ${JARVIS_SEARCH_TOKEN:-}
       # 대화에 첨부한 사진. 브라우저 컨테이너도 같은 볼륨을 읽기 전용으로 붙여
@@ -212,8 +212,8 @@ services:
       JARVIS_MODEL: ${JARVIS_MODEL:-}
       JARVIS_CACHE_TTL: ${JARVIS_CACHE_TTL:-5m}
       JARVIS_ROLE: guest
-      # 운영자의 agent(8080)와 다른 포트. 둘이 한 터널을 쓰는데, 같은 포트일 때
-      # Workers VPC 의 연결이 다른 쪽에 붙는 일이 있었다(2026-10-08).
+      # 운영자의 agent(8080)와 다른 포트. 둘이 한 터널을 쓰는데, 같은 포트면
+      # Workers VPC 의 연결이 다른 쪽에 붙을 수 있다.
       JARVIS_ADDR: ":8081"
       JARVIS_MCP_URL: http://127.0.0.1:8081/mcp
       # 서비스들의 토큰이 아니라 손님 것: 게이트웨이가 이것으로 부르고, 이것으로는
@@ -529,8 +529,8 @@ services:
       # the browser puts them into forms and never writes here.
       - jarvis-uploads:/uploads:ro
       # The guard's log (guard.log, five of 5MB): payment decisions and the
-      # path a payment took. Kept past a recreated container - the deploy of
-      # 2026-10-30 01:32 took the log of the two failed payments with it.
+      # path a payment took. Kept past a recreated container, so a deploy does
+      # not take the log of a failed payment with it.
       - browser-logs:/logs
     ports:
       # noVNC, for the first login and for watching what it is doing. Bound to
@@ -916,7 +916,7 @@ services:
       API_GUEST_TOKEN: ${JARVIS_GUEST_API_TOKEN:-}
       INPUT_URL: http://input:8101
       CALENDAR_URL: http://calendar:8093
-      # 관문이 하나로 합쳐져(2026-10-15) mind 의 카드가 에이전트의 결재 카드로 나간다.
+      # 관문이 하나라 mind 의 카드가 에이전트의 결재 카드로 나간다.
       # 승인하면 mind 가 calendar-svc 에 실제로 쓴다.
       MIND_CALENDAR: ${MIND_CALENDAR:-http}
       MIND_UI_URL: /

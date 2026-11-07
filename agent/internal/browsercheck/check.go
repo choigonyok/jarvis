@@ -29,9 +29,9 @@ type Result struct {
 //
 // It lives in the agent because the agent is the browser's one user: the
 // conversation, the jobs and the order lookups all drive it, and only the
-// agent knows when none of them is. status-svc used to open tabs on its own
-// clock and could land in the middle of a job; now it reads what is said here
-// (Say).
+// agent knows when none of them is. status-svc reads what is said here (Say)
+// rather than open tabs on its own clock, which could land in the middle of a
+// job.
 type Checker struct {
 	Client    *Client
 	Sites     []Site
@@ -39,9 +39,9 @@ type Checker struct {
 	Every     time.Duration
 	// WhenDown, when set, is how often a site is looked at while the
 	// browser is not running: opening it then starts the browser for the
-	// look alone, which the idle browser did every half hour, all day
-	// (48 starts a day, 2026-10-27). A check that something else brought
-	// the browser up for is cheap and stays at Every.
+	// look alone, which the idle browser did every half hour, all day.
+	// A check that something else brought the browser up for is cheap
+	// and stays at Every.
 	WhenDown time.Duration
 	Idle     func() bool
 	Log      *slog.Logger

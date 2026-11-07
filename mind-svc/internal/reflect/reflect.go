@@ -122,8 +122,8 @@ func (r *Reflector) Night(ctx context.Context) ([]Result, error) {
 	for _, key := range order {
 		res, answered, err := r.reflectOn(ctx, key, by[key])
 		// Reflected on once the model has answered on them; a night without
-		// the model, or a call that failed, leaves them for the next - they
-		// were marked all the same, and never looked at (2026-11-07).
+		// the model, or a call that failed, leaves them for the next rather
+		// than marking them done unseen.
 		for _, p := range by[key] {
 			if !answered {
 				break
@@ -343,7 +343,7 @@ func (r *Reflector) prompt(tg target, pool []predict.Day, surprised map[string]b
 // turnedDown is what the operator said was not so of the target: the rate
 // notes they rejected, with why when they said. Proposed again, the same one
 // comes to nothing (self.Hold keeps a rejection), and took one of the night's
-// few hypotheses: the model was never told (until 2026-11-07).
+// few hypotheses: the model was never told.
 func (r *Reflector) turnedDown(ctx context.Context, key string) string {
 	notes, err := r.St.Notes(ctx)
 	if err != nil {

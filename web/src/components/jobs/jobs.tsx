@@ -63,7 +63,7 @@ export function Jobs() {
   const [readAt, setReadAt] = useState<Date | null>(null);
   // The sheet left open stays open across a tab switch, and a link to one job
   // (?focus=job:<id> - a job's news in the conversation) opens its sheet, not
-  // the top of the list (2026-11-06 review).
+  // the top of the list.
   const [openId, setOpenId] = useKept<number | null>("jobs:open", null);
   useEffect(() => {
     const focus = new URLSearchParams(window.location.search).get("focus") ?? "";

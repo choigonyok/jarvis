@@ -57,13 +57,13 @@ const (
 	KindAsk = "job.ask"
 	// KindLogin asks the operator to log in to a site in the 화면 tab.
 	KindLogin = "job.login"
-	// KindSites was a job asking to open sites it was not given. Since
-	// 2026-10-20 a run adds them itself (request_sites); a card of this kind
-	// still waiting from before is decided as it was.
+	// KindSites was a job asking to open sites it was not given. A run adds
+	// them itself now (request_sites); a card of this kind still waiting from
+	// before is decided as it was.
 	KindSites = "job.sites"
 	// KindFirst asks whether a job the operator just asked for should go
 	// ahead of the one on the browser: browser jobs go in the order they
-	// were asked for, and this is the way to the front (2026-10-28).
+	// were asked for, and this is the way to the front.
 	KindFirst = "job.first"
 )
 
@@ -148,9 +148,8 @@ type EndNote struct {
 }
 
 // OnEnd has fn hear every job that is over - done, or stopped for failing -
-// whatever the conversation is doing (2026-10-28: "무슨 작업이든 작업이
-// 끝나면 대화 진행 여부와 무관하게 알리기"). A job the operator called off is
-// not told back to them.
+// whatever the conversation is doing. A job the operator called off is not
+// told back to them.
 func (m *Module) OnEnd(fn func(EndNote)) { m.onEnd = fn }
 
 func (m *Module) ended(n EndNote) {
@@ -173,9 +172,8 @@ func (m *Module) NoBrowser() { m.noBrowser = true }
 // (the permission gate asks): making a job or instructing one, always. A job
 // changes nothing by being made - a run asks before it posts, sends, deletes
 // or books, and the payment guard's card stands before money - so a card at
-// the start stood only between the operator and work they had just asked for
-// (2026-10-20: "바꾸거나 결제하는 게 아니면 브라우저 작업도 카드 없이"). The
-// calls still come through the gate, which logs each.
+// the start would stand only between the operator and work they had just
+// asked for. The calls still come through the gate, which logs each.
 func (m *Module) CardFree(tool string, _ json.RawMessage) bool {
 	return tool == QualifiedToolName("create_job") || tool == QualifiedToolName("instruct_job")
 }
@@ -478,8 +476,8 @@ func (m *Module) decided(p proposal.Proposal, d proposal.Decision) {
 		}
 		if d != proposal.Approve {
 			// Turned down: no login is coming. Waiting on it kept the site
-			// blocked and its jobs silent for good (job 27, 2026-10-20), so the
-			// site opens again and its jobs are told to go on without one.
+			// blocked and its jobs silent for good, so the site opens again and
+			// its jobs are told to go on without one.
 			if err := m.store.SetLogin(ctx, in.Site, false, ""); err != nil {
 				m.proposals.Settle(p.ID, proposal.Failed, err.Error())
 				return
@@ -514,8 +512,8 @@ func (m *Module) endedAnswer(id string, d proposal.Decision) {
 
 // withdrawCards takes down the cards a job still waits on once it is over -
 // done, or called off - and says how many. Job 18 asked and finished in the
-// same run (2026-10-18); its card stayed up and was answered forty minutes
-// later, into a job that would never read it.
+// same run; its card stayed up and was answered forty minutes later, into a
+// job that would never read it.
 func (m *Module) withdrawCards(job int64) int {
 	n := 0
 	for _, p := range m.waitingOn(job) {
@@ -755,15 +753,15 @@ type GetJobInput struct {
 
 // "waiting" is waiting on a card - any card, a question as much as a
 // payment: "승인 대기" read as "the payment waits for approval" when the card
-// was "결제는 성공했는데 주문 반영이 안 보여요" (2026-10-30 01:12).
+// was "결제는 성공했는데 주문 반영이 안 보여요".
 var stateLabel = map[string]string{
 	"active": "진행 중", "waiting": "카드 대기", "paused": "멈춤",
 	"done": "끝남", "cancelled": "그만둠", "failed": "실패",
 }
 
 // summaryShown is how much of a job's one-line status a list shows: a run's
-// report can run long, and a list of every job came to 55,000 characters
-// (2026-10-29), too much for the conversation to read at once.
+// report can run long, and a list of every job came to 55,000 characters,
+// too much for the conversation to read at once.
 const summaryShown = 160
 
 func clampRunes(s string, n int) string {

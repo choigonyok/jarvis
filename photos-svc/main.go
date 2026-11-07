@@ -1,7 +1,7 @@
 // Command photos-svc is the photo server's adapter. It reads what Immich holds
 // and leaves a record when that changed: the last two days' photos, and the
 // days that are over. It does not judge a photo and it keeps nothing of its
-// own: mind no longer goes to Immich to read.
+// own: mind does not go to Immich to read.
 //
 // It is also the window the conversation looks through: find photos by what is
 // in them, where and when (GET /search), and fetch one to show

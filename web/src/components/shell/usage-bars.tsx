@@ -32,7 +32,7 @@ const WARM = 70;
  * Only once one of them warms (70%, tone below). Always there, they were five
  * hairlines in 48px beside the bell on a phone - unreadable, and taking the
  * bell's room - on every screen, while the 상태 tab has the same lines in
- * words (2026-11-07 review). Quiet until they fill now means not there.
+ * words. Quiet until they fill now means not there.
  *
  * Every line in the panel is the same meter: a name and its figure, the bar,
  * and one line under it that says when it resets or what the month came to.

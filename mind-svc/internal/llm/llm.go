@@ -83,9 +83,8 @@ var ErrNoAnswer = errors.New("모델이 답을 쓰지 않았습니다")
 // Haiku 5.5 thinks before it answers unless told not to, and the thinking
 // counts against max_tokens. At 2000 a long batch could think the whole of
 // it away and answer nothing - a 40-message group-chat batch thought about
-// 1,500 tokens for a 150-token answer, and the reads that failed ran out
-// (2026-10-22, "JSON 이 없습니다" on one busy room for hours). Only what is
-// used is paid for.
+// 1,500 tokens for a 150-token answer, and the reads that failed ran out.
+// Only what is used is paid for.
 const maxTokens = 8000
 
 // searchPrice is one web search: $10 per thousand. Its results are read as
@@ -94,7 +93,7 @@ const searchPrice = 0.01
 
 // webSearch is the server-side search tool. Haiku 5.5 takes the basic
 // version; the 2026-02-09 one (dynamic filtering) answers its queries with
-// invalid_tool_input there (2026-10-26).
+// invalid_tool_input there.
 const webSearch = "web_search_20250305"
 
 // maxResumes bounds how often a turn the server paused (pause_turn, its

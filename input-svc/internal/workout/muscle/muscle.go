@@ -1,7 +1,7 @@
 // Package muscle says which part a movement trains.
 //
-// This table used to live in the browser (web/src/lib/workout.ts). It is here
-// too, and on purpose: the group is written into the row when the set is
+// The browser has its own list of the groups (web/src/lib/workout.ts); the
+// table is here on purpose: the group is written into the row when the set is
 // logged rather than derived when it is read. If it were derived, editing this
 // table would silently rewrite what last March's leg volume was.
 //

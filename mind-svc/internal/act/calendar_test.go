@@ -30,10 +30,10 @@ func TestMovedTripKeepsItsLength(t *testing.T) {
 	}
 }
 
-// The place lives in the memo (calendar-svc, 2026-10-30). A move to another
-// place puts it on the memo's first line and keeps what the memo said: the
-// assistant's "퇴근 후 · 망원" stayed under 모퉁이맥주 (2026-11-04). The old place,
-// alone on its line, gives way; a plan that knows no place takes none off.
+// The place lives in the memo. A move to another place puts it on the
+// memo's first line and keeps what the memo said: the assistant's "퇴근 후 ·
+// 망원" stayed under 모퉁이맥주. The old place, alone on its line, gives way; a
+// plan that knows no place takes none off.
 func TestAMoveKeepsTheMemo(t *testing.T) {
 	ctx := context.Background()
 	for _, c := range []struct {

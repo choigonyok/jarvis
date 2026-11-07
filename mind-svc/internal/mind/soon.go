@@ -62,7 +62,7 @@ func (m *Mind) people(ctx context.Context) error {
 	}
 	// One notice a person, with everything open with them. One a loop was
 	// nine pushes at 07:00 for one friend, and they spent the day's budget
-	// before the 08:00 brief (2026-10-25).
+	// before the 08:00 brief.
 	type open struct {
 		id   string
 		line string

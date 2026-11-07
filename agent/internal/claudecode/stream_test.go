@@ -16,7 +16,7 @@ import (
 )
 
 // A stand-in CLI that writes as the real one does with
-// --include-partial-messages (2.1.287, seen 2026-10-27): each block's pieces,
+// --include-partial-messages (2.1.287): each block's pieces,
 // then the block's whole text as an assistant line, then the block's stop.
 // It says a line, calls a tool, and answers in two paragraphs.
 func streamingClaude(t *testing.T, dir string) string {

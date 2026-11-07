@@ -277,7 +277,7 @@ type asset struct {
 // occurrence is the photo as something that happened. Only what a camera took
 // is: a screenshot or a saved picture names no camera, and with no time zone
 // Immich reads its hour as UTC, so tonight's screenshot was tomorrow morning's
-// photo (2026-11-02). A camera with no zone stays on its own clock.
+// photo. A camera with no zone stays on its own clock.
 func (a asset) occurrence(loc *time.Location) (model.Occurrence, bool) {
 	if a.IsTrashed || a.ID == "" || a.ExifInfo == nil || a.ExifInfo.Make == nil || *a.ExifInfo.Make == "" {
 		return model.Occurrence{}, false
@@ -348,8 +348,8 @@ func (s *Structured) takeCalendar(ctx context.Context, c calendarRead) error {
 	return s.SyncCalendar(ctx, c.Events, c.From, c.To)
 }
 
-// takeCalendarYear is a year each way, which memory remembers. Copies left
-// before 2026-10-20, when every night re-made a past entry's plan, go here too.
+// takeCalendarYear is a year each way, which memory remembers. Copies of a
+// past entry's plan, left from when every night made it again, go here too.
 func (s *Structured) takeCalendarYear(ctx context.Context, c calendarRead) error {
 	if s.World == nil {
 		return nil
@@ -448,7 +448,7 @@ func (s *Structured) SyncCalendar(ctx context.Context, events []entry, from, to 
 		}
 		// A plan from a conversation stays what was said, but the entry it
 		// held was taken off by hand: it no longer holds one, or the next card
-		// about it asks to change what is not there (2026-11-02, "not found").
+		// about it asks to change what is not there.
 		set := func(st *model.State) bool { st.CalendarID, st.Declined = "", GoneByHand; return true }
 		if p.Room == CalendarRoom {
 			set = func(st *model.State) bool { st.Status = model.Cancelled; return true }
@@ -474,7 +474,7 @@ func (s *Structured) syncEntry(ctx context.Context, ev entry, linked []model.Ent
 	spoken := false
 	// A plan that is over still is its entry: the night marks a past plan
 	// done, and a done one not counted here was read as missing and made
-	// again, every night for as long as the entry was read (2026-10-20).
+	// again, every night for as long as the entry was read.
 	for i, p := range linked {
 		if p.State.Status == model.Cancelled {
 			continue
@@ -529,10 +529,10 @@ func (s *Structured) syncEntry(ctx context.Context, ev entry, linked []model.Ent
 	_, _, err := s.World.Update(ctx, own.ID, func(st *model.State) bool {
 		want := fromEntry(ev)
 		want.Type, want.PlaceKind, want.Area = keep(st.Type, want.Type), keep(st.PlaceKind, want.PlaceKind), keep(st.Area, want.Area)
-		// Where is kept in the memo now, not in a field (calendar-svc,
-		// 2026-10-30): an entry whose memo says the plan's place still has it,
-		// and reading it again took it off the plan - after the move to it
-		// was approved, too (2026-11-03 캠핑장, 2026-11-04 망원).
+		// Where is kept in the memo, not in a field (calendar-svc): an entry
+		// whose memo says the plan's place still has it, and reading it again
+		// must not take it off the plan - after the move to it was approved,
+		// too.
 		if want.Place == "" && st.Place != "" && strings.Contains(ev.Memo, st.Place) {
 			want.Place = st.Place
 		}

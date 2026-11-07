@@ -274,7 +274,7 @@ func TestAPaymentPasswordIsForItsKeypadOnly(t *testing.T) {
 // token - an order sheet is typed from it - and only with that token. An
 // address without its building number is refused: the address search of an
 // order sheet finds a road by it, and a run once picked a building number
-// one digit short (2026-10-30).
+// one digit short.
 func TestAShippingProfileIsReadWholeAndNeedsItsBuildingNumber(t *testing.T) {
 	h, f := server(t)
 	good := `{"recipient":"홍길동","phone":"010-1234-5678","email":"a@example.com","zip":"04524","address":"서울 중구 세종대로 110","detail":"101동 1001호"}`

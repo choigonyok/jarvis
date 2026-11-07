@@ -14,13 +14,13 @@ import (
 )
 
 // One calendar change, one card. mind reads the conversation with the
-// assistant like any room, so what the operator asks the assistant to put
-// on the calendar becomes mind's plan too, and with the entry not there yet
-// mind asked again: one entry, two cards, minutes apart (2026-10-26). The
-// card raised in the conversation is the question. mind is told what it asks,
-// puts its own card away and raises none: whether two cards are about one
-// entry is mind's to say, in one place, and not a copy of its rule kept here
-// (mind-svc gate.Asked).
+// assistant like any room, so what the operator asks the assistant to put on
+// the calendar becomes mind's plan too, and with the entry not there yet mind
+// asked again: one entry, two cards, minutes apart. The card raised in the
+// conversation is the question. mind is told what it asks, puts its own card
+// away and raises none: whether two cards are about one entry is mind's to
+// say, in one place, and not a copy of its rule kept here (mind-svc
+// gate.Asked).
 
 // OnOpen hears every card raised. One the conversation raised for a
 // calendar change is told to mind, off the producer's goroutine: telling
@@ -49,10 +49,10 @@ func (e *Engine) tellAsked(p proposal.Proposal) {
 
 // Consult is asked before a calendar card goes up in the conversation: an entry
 // the operator turned down the like of is not asked again. The conversation's
-// card passed no gate, and "차 예약은 일정 카드 필요없어" said on one was asked
-// again in the next session (2026-11-03). mind says which no, if any, speaks for
-// it; what the operator said just now (said) is the newer word, and a request in
-// it stands. With no answer from mind the card goes up as before.
+// card passed no gate, and "차 예약은 일정 카드 필요없어" said on one was asked again in the
+// next session. mind says which no, if any, speaks for it; what the operator
+// said just now (said) is the newer word, and a request in it stands. With no
+// answer from mind the card goes up as before.
 func (e *Engine) Consult(ctx context.Context, a action.Action, said string) string {
 	if e.cfg.Mind == nil || a.Kind != calendar.KindCreate {
 		return ""

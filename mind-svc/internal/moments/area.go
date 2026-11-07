@@ -7,10 +7,10 @@ import (
 )
 
 // Area is a place by its name on the map - a city, a district, a station -
-// that is none of the phone's regions (2026-11-06: "수원쪽에 도착하면", kept
-// as a region named 수원 that never was, so it could never ring). Where the
-// phone is is judged here, by the fixes context-svc passes on as they come
-// (Fixed): nothing is sent anywhere to ask, and nothing asks the phone.
+// that is none of the phone's regions: kept as a region by that name, it
+// could never ring. Where the phone is is judged here, by the fixes
+// context-svc passes on as they come (Fixed): nothing is sent anywhere to
+// ask, and nothing asks the phone.
 type Area struct {
 	// Name is the map's own name for it: "수원시".
 	Name string `json:"name"`

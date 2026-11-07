@@ -180,11 +180,10 @@ export function useThreadSearch(root: RefObject<HTMLElement | null>, above?: Abo
     [],
   );
 
-  // What is shown is only what is loaded: "없음" there was said of the whole
-  // conversation, and three weeks back was never looked at (2026-11-06
-  // review). Looking further reads the pages above, one at a time, until the
-  // word turns up further back - or the conversation's start, or a few pages,
-  // after which it asks again.
+  // What is shown is only what is loaded, and "없음" there is no word on the
+  // whole conversation. Looking further reads the pages above, one at a time,
+  // until the word turns up further back - or the conversation's start, or a
+  // few pages, after which it asks again.
   const [seeking, setSeeking] = useState(false);
   const aboveRef = useRef(above);
   const totalRef = useRef(0);

@@ -190,9 +190,9 @@ func TestReviseTakesOnlyAnAnswerThatCanBeWritten(t *testing.T) {
 	}
 	a := pendingCards(props)[0].Action
 	for _, edits := range []map[string]string{
-		{},                                // 어디로 갔는지 고르지 않음
-		{"use": "몰라"},                     // 없는 선택지
-		{"use": useSpend},                 // 지출인데 분류가 없음
+		{},                // 어디로 갔는지 고르지 않음
+		{"use": "몰라"},     // 없는 선택지
+		{"use": useSpend}, // 지출인데 분류가 없음
 		{"use": useSpend, "category": "없는분류"},
 		{"use": useCard, "amount": "0"},
 		{"use": useCard, "amount": "120001"}, // 나간 돈보다 많이

@@ -5,7 +5,7 @@
 // The same scenarios run two ways. With each turn's "script" standing in for
 // the model they test everything around it - evidence checks, the world
 // model, skills, the gate - deterministically (go test). With the real model
-// they measure how well it reads (go run . eval): a change to the prompt or
+// they measure how well it reads (go run. eval): a change to the prompt or
 // the model is checked here before it reaches anyone's calendar.
 package eval
 
@@ -83,7 +83,7 @@ type Turn struct {
 	// Submit is an intent from outside the loop (the agent's judging turn),
 	// handed to the gate as POST /api/intents would.
 	Submit *model.Intent `json:"submit,omitempty"`
-	// At pins the clock before the turn runs (2026-10-12T20:01).
+	// At pins the clock before the turn runs ("2026-10-12T20:01").
 	At string `json:"at,omitempty"`
 	// Occur is things that happened, as a sensor would record them.
 	Occur []Occur `json:"occur,omitempty"`
@@ -861,8 +861,7 @@ func check(ctx context.Context, st store.Store, cal *act.MemoryCalendar, ex Expe
 	for _, want := range ex.Calendar {
 		found := false
 		for _, e := range cal.All() {
-			// Where is kept in the memo (calendar-svc, 2026-10-30), and a move
-			// puts it there.
+			// Where is kept in the memo, and a move puts it there.
 			if (want.Place == "" || e.Place == want.Place || strings.Contains(e.Memo, want.Place)) && (want.Date == "" || e.Date == want.Date) &&
 				(want.TitleHas == "" || strings.Contains(e.Title, want.TitleHas)) {
 				found = true

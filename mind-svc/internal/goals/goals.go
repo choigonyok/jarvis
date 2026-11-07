@@ -932,7 +932,7 @@ func (g Goal) Rule() string {
 // answer: "운동 (주 3회) 이번 주 1/3 · 남은 4일 중 2번 · 오늘 기록 없음 (id goal_1a2b)",
 // "물 마시기 (매일 4번) · 오늘 2/4번 (id goal_3c4d)". The id is last, named for
 // the tools' handle it is - put first, it was said back to the operator with
-// the rest (2026-11-06).
+// the rest.
 func (g Goal) Line(p Progress) string {
 	s := g.Title + " (" + g.Rule() + ")"
 	if p.Says != "" {

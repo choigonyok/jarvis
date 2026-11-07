@@ -233,7 +233,7 @@ func (m *Mind) prepIntent(ctx context.Context, pr model.Prediction) (model.Inten
 		Skill: "predict", Kind: "cart.add", EntityID: plan.ID, Topic: "prep:" + class + ":" + plan.ID, Context: "prep:" + plan.State.Type,
 		// The prediction's own chance: a 30% one was sent as 75% sure, and
 		// what the ledger learnt of prep cards was learnt of a number that
-		// never moved (2026-11-07).
+		// never moved.
 		Payload: payload, Title: title, Body: body, Reason: "준비물을 아직 안 사셨어요", Confidence: pr.Prob,
 		Value: 0.9, Evidence: ev, Reversible: true,
 	}, true
@@ -337,9 +337,9 @@ func (m *Mind) notesFromPatterns(ctx context.Context, kinds []string) error {
 			// candidate: it predicts, and the card comes before the next
 			// plan of the kind, but the operator is not asked to confirm a
 			// habit from one time - a campsite booked once before a 취미
-			// and once before a 모임 was shown as a habit of each ("취미
-			// 며칠 전에 캠핑장을 산다", 2026-11-07). Common sense judges
-			// the class against the kind of plan, not the plan itself.
+			// and once before a 모임 is a habit of neither. Common sense
+			// judges the class against the kind of plan, not the plan
+			// itself.
 			j, err := st.LinkCache(ctx, class, kind)
 			common := err == nil && j.Rel != "unrelated" && j.Plausibility >= 0.5
 			status := model.Hypothesis

@@ -3,12 +3,12 @@
 // here, so every tool call it wants to make that is not pre-allowed lands in
 // this handler.
 //
-// The handler does not wait for the person. It used to - and the CLI's HTTP
-// client gives up on an MCP call after five minutes no matter what
-// MCP_TOOL_TIMEOUT says, so a card left for five minutes came back as a
-// failed call, the model retried, and the same card appeared twice. Now the
-// call returns at once with "the card is up", the turn ends, and the decision
-// starts a new turn when it comes (Resolve).
+// The handler does not wait for the person: the CLI's HTTP client gives up on
+// an MCP call after five minutes no matter what MCP_TOOL_TIMEOUT says, so a
+// card left that long would come back as a failed call, the model would
+// retry, and the same card would appear twice. The call returns at once with
+// "the card is up", the turn ends, and the decision starts a new turn when it
+// comes (Resolve).
 package permission
 
 import (

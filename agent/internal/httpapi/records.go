@@ -124,8 +124,7 @@ func (s *Server) recordRaised(asked string, p Payment, opened *proposal.Proposal
 // where they can be deleted. The reason is the operator's own words: only
 // whether there was one - but for a calendar card of the conversation's, whose
 // no mind hears as one given on its own card (mind-svc gate.Answered): it went
-// to that session's model alone, and the next session asked the same again
-// (2026-11-03).
+// to that session's model alone, and the next session asked the same again.
 func (s *Server) recordDecision(p proposal.Proposal, d proposal.Decision) {
 	tier, trace, subject, cause := record.Raw, "chat", p.Action.Kind, ""
 	if p.Origin == proposal.OriginIntercept {

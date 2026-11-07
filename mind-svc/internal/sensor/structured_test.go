@@ -94,10 +94,9 @@ func TestSyncCalendar(t *testing.T) {
 
 func Meta() world.Meta { return world.Meta{Actor: "test"} }
 
-// Where is kept in the memo now (calendar-svc, 2026-10-30). Reading an entry
-// again keeps the place of its plan when the memo says it, and only then: the
-// approved move to 캠핑장 (2026-11-03) and 망원 (2026-11-04) were read off
-// their plans minutes later.
+// Where is kept in the memo now. Reading an entry again keeps the place of
+// its plan when the memo says it, and only then: the approved move to 캠핑장 and
+// 망원 were read off their plans minutes later.
 func TestSyncCalendarKeepsThePlaceTheMemoSays(t *testing.T) {
 	ctx := context.Background()
 	st := store.NewMemory()
@@ -177,10 +176,10 @@ func TestSyncCalendarTiesAConversationPlanToItsEntry(t *testing.T) {
 	}
 }
 
-// 2026-10-26: the conversation with the assistant was read as an all-day
-// plan, and the assistant's card put the same title on the calendar at
-// 20:00. Read from the calendar, that entry is the plan - tied, with the
-// entry's time - and no plan of the calendar's own is made beside it. A
+// The conversation with the assistant read as an all-day plan, and the
+// assistant's card put the same title on the calendar at 20:00. Read from
+// the calendar, that entry is the plan - tied, with the entry's time - and
+// no plan of the calendar's own is made beside it. A
 // plan tied before it had a time (linked when its card found the entry
 // there) takes the entry's time the same way.
 func TestSyncCalendarTiesAPlanToldWithoutATime(t *testing.T) {
@@ -245,8 +244,8 @@ func TestSyncCalendarMendsASplitPair(t *testing.T) {
 }
 
 // A past entry's plan the night marked done is still that entry: read
-// again, it is not made anew (every night made one more, 2026-10-20) - and
-// the copies left from before are called off, the first one kept.
+// again, it is not made anew - and the copies left from before are called
+// off, the first one kept.
 func TestSyncCalendarKeepsADonePlan(t *testing.T) {
 	ctx := context.Background()
 	st := store.NewMemory()
@@ -309,7 +308,7 @@ func TestSyncCalendarKeepsADonePlan(t *testing.T) {
 	}
 }
 
-// Everyday titles that were 기타 before (2026-10-20).
+// Everyday titles are classified, not left as 기타.
 func TestClassifyMoreTitles(t *testing.T) {
 	for in, want := range map[string]string{"호캉스": "여행", "민지와 삼겹살": "식사", "아빠 생신": "기념일", "서연이랑 야구 보기": "공연",
 		"레코드 페어": "공연", "독감 접종": "병원", "지수와 치킨 저녁": "식사"} {
@@ -321,7 +320,7 @@ func TestClassifyMoreTitles(t *testing.T) {
 
 // The entry of a conversation's plan deleted by hand: the plan stays what was
 // said, holds no entry any more, and says so - or the next card about it asks
-// to change what is not there ("not found", 2026-11-02).
+// to change what is not there.
 func TestSyncCalendarLetsGoOfAnEntryDeletedByHand(t *testing.T) {
 	ctx := context.Background()
 	st := store.NewMemory()

@@ -4,7 +4,7 @@
  * names and numbers (no words), posted to /api/diag, which writes it to the
  * Worker's log (wrangler tail jarvis). The chat screen's own sampling, which
  * read the layout ten times a second while an answer was written on every
- * phone, is gone (2026-11-03).
+ * phone, is gone.
  */
 const BUILD = process.env.JARVIS_BUILD ?? "";
 

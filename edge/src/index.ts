@@ -49,9 +49,9 @@ const PHONE_DOOR_LIMIT = 120;
 /**
  * One address's count at the phone's doors: a Durable Object per address, so
  * the count is one number wherever on Cloudflare the requests land. (The
- * Workers rate-limit binding keeps a count per machine instead, and let one
- * address through 190 times in half a minute - a ceiling for a crowd, none
- * for one guesser; 2026-10-29.) The count lives in memory: an object idle
+ * Workers rate-limit binding keeps a count per machine instead, and lets one
+ * address through some 190 times in half a minute - a ceiling for a crowd,
+ * none for one guesser.) The count lives in memory: an object idle
  * long enough to be put away starts over, and an address that has gone quiet
  * may.
  */
@@ -455,11 +455,11 @@ async function gateway(request: Request, env: Env, internal: boolean): Promise<R
   // Both agents ride one tunnel, and a pooled connection has been seen to
   // land on the other one. Each agent names itself on every response; one
   // from the wrong agent is dropped here, never passed on - the guest must
-  // not be handed the operator's conversation, nor the other way round.
-  // (The wrong agent also refuses the other's token, so nothing was done.)
-  // A read is asked again: a 502 handed to the console's event stream closed
-  // it for good, and the thread then showed nothing sent until the app was
-  // restarted (2026-10-22). A request with a body cannot be sent twice.
+  // not be handed the operator's conversation, nor the other way round. (The
+  // wrong agent also refuses the other's token, so nothing was done.) A read
+  // is asked again: a 502 handed to the console's event stream closed it for
+  // good, and the thread then showed nothing sent until the app was
+  // restarted. A request with a body cannot be sent twice.
   const expect = AGENT_ROLE[name];
   const tries = expect && !hasBody ? 3 : 1;
   try {

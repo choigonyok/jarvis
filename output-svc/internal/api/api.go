@@ -184,7 +184,7 @@ func (s *Server) Take(ctx context.Context, m queue.Message) error {
 	}
 	if e.Type == "proposal.decided" {
 		// The card was approved or turned down: its "결재 대기" is done with,
-		// read without a tap (2026-10-19).
+		// read without a tap.
 		var d struct {
 			NotifyKey string `json:"notifyKey"`
 		}

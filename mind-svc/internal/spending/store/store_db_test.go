@@ -71,8 +71,8 @@ func (l *ledger) cancelledBy(id int64) int64 {
 }
 
 // G-D6: a cancellation pairs with the charge it undoes - the same merchant
-// first. The newest charge of that amount on the same card used to win even
-// at another merchant.
+// first, before the newest charge of that amount on the same card at another
+// merchant.
 func TestCancelPairsWithItsOwnCharge(t *testing.T) {
 	l := &ledger{t: t, s: testStore(t)}
 	t0 := time.Date(2026, 10, 16, 9, 0, 0, 0, time.FixedZone("KST", 9*3600))

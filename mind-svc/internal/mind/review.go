@@ -139,7 +139,7 @@ func (m *Mind) reviews(ctx context.Context) error {
 			kind = "식당"
 		// A café of its own, sat in: a branch of a chain is like the next, and a
 		// coffee to go is no visit. Preferences learned 카페 and nothing asked
-		// about one (2026-11-03).
+		// about one.
 		case o.Class == "카페·간식" && o.Amount >= cafeVisit && !category.IsCafeChain(o.Title):
 			kind = "카페"
 		default:
@@ -207,8 +207,7 @@ func (m *Mind) reviews(ctx context.Context) error {
 			continue
 		}
 		// One trip, one question: the calendar's place, the region stayed
-		// at and the trip's town are the same nights, not three
-		// (2026-10-24~26: 양평, 메리지아레캠핑장, 메리지아레 캠핑장 (양평)).
+		// at and the trip's town are the same nights, not three.
 		if stay(c.subjectType) && m.tripAsked(ctx, c.at.In(loc)) {
 			continue
 		}

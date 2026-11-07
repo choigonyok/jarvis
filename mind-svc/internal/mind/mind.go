@@ -104,7 +104,7 @@ type Options struct {
 type Mind struct {
 	busy   busy
 	rhythm rhythmCache
-	Opts Options
+	Opts   Options
 	// reg is the registry as it stands.
 	reg *registry.Live
 	// OnRegistry hears a new registry, once the gate has it.
@@ -279,9 +279,9 @@ func (m *Mind) Handle(ctx context.Context, o obs.Observation) error {
 }
 
 // occurred has everything that listens hear an occurrence, each on its own: a
-// listener that fails no longer keeps the ones after it from hearing, and a
-// failed read of the occurrence is tried again instead of skipping them all
-// (it was taken as "not there"). What failed is said and the message comes
+// listener that fails does not keep the ones after it from hearing, and a
+// failed read of the occurrence is tried again, not taken as "not there" for
+// all of them. What failed is said and the message comes
 // again; each listener hears the same occurrence again as the same.
 func (m *Mind) occurred(ctx context.Context, id string) error {
 	var errs []error
@@ -380,7 +380,7 @@ func (m *Mind) SimulateMessage(ctx context.Context, msg model.Message) (model.Me
 // the message itself in the stream under that key (message.received,
 // gocommon/collect), and the way in keeps one record per (source, key). With
 // the same key this observation was dropped as a repeat, no room ever came
-// due, and nothing said in KakaoTalk was read (2026-10-31 ~ 11-01).
+// due, and nothing said in KakaoTalk was read.
 func Observe(ctx context.Context, st store.Store, log obs.Log, msg model.Message) error {
 	if err := st.PutMessage(ctx, msg); err != nil {
 		return err

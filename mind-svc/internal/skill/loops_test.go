@@ -40,7 +40,7 @@ func TestAssistantsPromiseIsNotToldAgain(t *testing.T) {
 
 // The brief is the operator's day: the partner's own entries are not in it,
 // and a loop long past its deadline is counted, not read out again - the
-// 13th's to-do was in every brief for a fortnight (2026-10-27).
+// 13th's to-do was in every brief for a fortnight.
 func TestBriefIsTheOperatorsDay(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 10, 27, 8, 0, 0, 0, seoul)
@@ -71,8 +71,7 @@ func TestBriefIsTheOperatorsDay(t *testing.T) {
 
 // A loop is told about once for its deadline: a note added later is the same
 // loop, and its timer stays as it was - not set again for "now" when the time
-// has gone by (2026-11-06: a second push 32 minutes after the first, when the
-// order list was added). A deadline moved is told again.
+// has gone by. A deadline moved is told again.
 func TestLoopIsToldOncePerDeadline(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 11, 6, 17, 59, 0, 0, seoul)
@@ -111,8 +110,7 @@ func TestLoopIsToldOncePerDeadline(t *testing.T) {
 
 // The operator's own promise is not pushed: it is offered as a reminder on a
 // card - when and in what words, both theirs to change - and rings only as
-// the reminder it becomes (the operator's rule, 2026-11-06). Money owed is
-// still a line at its deadline.
+// the reminder it becomes. Money owed is still a line at its deadline.
 func TestOperatorsPromiseIsOfferedAsAReminder(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 11, 6, 17, 59, 0, 0, seoul)

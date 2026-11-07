@@ -5,9 +5,9 @@ package permission
 // made or instructed). A module's action is rendered by the module itself,
 // which is the only place that knows what the change actually means.
 //
-// What a person reads is never the JSON the model sent (2026-10-20: a job's
-// card showed its arguments in braces): a title in Korean, and the arguments
-// as "항목: 값" lines in an order that leads with what the call is about.
+// What a person reads is never the JSON the model sent: a title in Korean,
+// and the arguments as "항목: 값" lines in an order that leads with what the
+// call is about.
 
 import (
 	"fmt"

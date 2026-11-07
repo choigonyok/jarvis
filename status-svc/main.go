@@ -105,8 +105,7 @@ func main() {
 	if notifier := notify.New(os.Getenv("NOTIFY_URL"), os.Getenv("DATABASE_URL"), token, log); notifier != nil {
 		// told is which probes the operator was told are broken: only those
 		// are told mended. A blip that never rang is not news either way -
-		// a fortnight of "다시 정상" lines in the inbox said nothing
-		// (2026-10-27: 149 of them).
+		// a fortnight of "다시 정상" lines in the inbox said nothing.
 		var mu sync.Mutex
 		told := map[string]bool{}
 		runner.OnChange(func(p check.Probe, prev check.State, v check.Verdict) {

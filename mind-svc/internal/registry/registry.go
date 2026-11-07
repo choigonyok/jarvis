@@ -123,7 +123,7 @@ type Source struct {
 // the payments that are of it, and what follows it. The kinds were a list in
 // the model, another in the prompt, the classifier's words and names compared
 // in eight places; a kind not on the list was 기타, out of linking and learning
-// - 92 of 165 plans, 24 of 28 band rehearsals (2026-11-03).
+// - 92 of 165 plans, 24 of 28 band rehearsals.
 type PlanKind struct {
 	Name string `json:"-"`
 	// Order is where it stands: in the interpreter's list, and which kind a

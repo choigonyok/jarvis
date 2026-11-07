@@ -23,8 +23,8 @@ func TestHowReadingStands(t *testing.T) {
 		want string
 	}{
 		{st(true, 0), checks.OK},
-		{st(true, 40 * time.Minute), checks.Warn},
-		{st(true, 3 * time.Hour), checks.Fail},
+		{st(true, 40*time.Minute), checks.Warn},
+		{st(true, 3*time.Hour), checks.Fail},
 		{st(false, 0), checks.Fail},
 	} {
 		if got := reading(c.s, now); got.State != c.want || got.Summary == "" {

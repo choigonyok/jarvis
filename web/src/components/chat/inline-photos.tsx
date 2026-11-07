@@ -8,15 +8,14 @@ import { cn } from "@/lib/utils";
 /**
  * A photo of the agent's own named in words - a photo the operator sent, a
  * screen a job took - by the name the agent keeps it under (agent
- * internal/uploads: 32 hex digits and the kind of picture). A job that took
- * 32 screens listed them by name in its last word, brand by brand, and the
- * card showed 32 file names (2026-11-07).
+ * internal/uploads: 32 hex digits and the kind of picture) - a job lists the
+ * screens it took by name in its last word, brand by brand.
  *
  * Written anywhere, a name is shown as a numbered mark where it stands - "사진
  * 1" - and the photo under the line or the paragraph it is in, with the same
  * number: the words keep their shape, and each photo stays beside what the
- * words say of it. Drawn inside the line at first, the photos tangled the
- * words around them (2026-11-07).
+ * words say of it. Drawn inside the line, the photos would tangle the words
+ * around them.
  */
 export const UPLOAD_NAME = /\b[0-9a-f]{32}\.(?:jpg|png|webp)\b/g;
 

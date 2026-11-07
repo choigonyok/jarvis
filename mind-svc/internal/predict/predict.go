@@ -323,8 +323,7 @@ func (p *Predictor) Prep(ctx context.Context, plan model.Entity) ([]model.Predic
 		text := fmt.Sprintf("%d/%d까지 %s 구매", int(due.Month()), due.Day(), r.Class)
 		// The operator said what was bought before was left over, and none of
 		// it has been bought since: the plan does not call for it, and what is
-		// left is the chance it is bought anyway. Every condition once took
-		// a fifth off, forever, whatever it said (until 2026-11-07).
+		// left is the chance it is bought anyway.
 		if left := p.LeftOver(ctx, r); left != nil {
 			prob = base
 			text += " (" + left.Text + ")"
@@ -422,11 +421,10 @@ func (p *Predictor) Match(ctx context.Context, o model.Occurrence) ([]string, er
 		if err != nil {
 			return met, err
 		}
-		// What reached mind after its prediction was scored a miss - the card
-		// payments of 10/28-10/30, passed on only when KakaoTalk signed in
-		// again - meets it all the same, and the prediction is scored again:
-		// one truth. Before, the ledger went by what happened while the
-		// rules' records and the night's reflection went by the miss.
+		// What reached mind after its prediction was scored a miss - card
+		// payments passed on only when KakaoTalk signs in again - meets it
+		// all the same, and the prediction is scored again: one truth, for
+		// the ledger, the rules' records and the night's reflection alike.
 		late, err := p.St.MissedExpectations(ctx, k, o.At)
 		if err != nil {
 			return met, err
@@ -569,8 +567,8 @@ var Features = map[string]string{
 	"evening":    "arg 시각(HH:MM) 이후에 시작하는 일정이 있음",
 	"spent_over": "그날 결제 합이 arg 원 이상",
 	"rain":       "그날 집 근처에 arg mm 이상 비나 눈이 옴(지난날은 내린 양, 다가올 날은 예보)",
-	// What else a day is made of, beyond the seven a reflection was held to
-	// (2026-11-03): who it was with, where, what kind of spending, a workout.
+	// What else a day is made of, beyond the seven a reflection was held to:
+	// who it was with, where, what kind of spending, a workout.
 	"with":    "arg 이름의 사람과 함께하는 일정이 있음",
 	"place":   "arg 동네나 장소에서 결제·체류했거나 그곳 일정이 있음",
 	"class":   "arg 분류(식비·카페·간식·교통·쇼핑 …)의 결제가 있음",

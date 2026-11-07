@@ -63,7 +63,7 @@ const RECAPTURE_MS = 1200;
 /**
  * A session opened hands-free that reports no sound at all for this long is
  * taken to be deaf and replaced: an iPhone's recognizer, opened right after the
- * answer played, says it is capturing and hears nothing (2026-11-01).
+ * answer played, says it is capturing and hears nothing.
  */
 const AUTO_SOUND_MS = 5000;
 /** A session that says it started sooner than this after start() opened no microphone (phones, iOS 27). */
@@ -88,8 +88,8 @@ export function capturesAlone(): boolean {
  * A session ends often - a phrase settles, the engine times out on silence,
  * the stage closes it while Jarvis talks - and the next one is a new
  * SpeechRecognition, not the old one started again: an engine reused after an
- * abort can come back saying it listens while it hears nothing (2026-10-19,
- * on an iPhone after two exchanges). Every timer and flag of a session lives
+ * abort can come back saying it listens while it hears nothing (on an
+ * iPhone, after a couple of exchanges). Every timer and flag of a session lives
  * in that session, so nothing stuck in one can leak into the next. "Listening"
  * is the engine's own word (onstart), and a session that says so but never
  * opens the mic, or hears sound but never words, is replaced.
@@ -390,8 +390,8 @@ export function useRecognition({
         const refused = event.error === "not-allowed" || event.error === "service-not-allowed";
         // Opened hands-free right after the answer played and got no audio:
         // on an iPhone the element that just spoke can still hold the audio
-        // route, and the engine reports it only seconds later (2026-11-01).
-        // Settle the element as a tap would (primePlayer) and open once more.
+        // route, and the engine reports it only seconds later. Settle the
+        // element as a tap would (primePlayer) and open once more.
         if (!tapped.current && event.error === "audio-capture" && recaptures.current < RECAPTURE_TRIES) {
           recaptures.current += 1;
           diag("voice", { ev: "rec.recapture", n: recaptures.current });
@@ -551,11 +551,11 @@ function pickVoice(voices: SpeechSynthesisVoice[], lang: string) {
  * The cloned voice plays through Web Audio, not a media element, on purpose.
  * Since iOS 27 a media element that has played leaves the page's speech
  * recognition deaf: the next session says it started and hears nothing
- * (WebKit 321436; here 2026-11-01, "듣고 있습니다" with no words). Web Audio
+ * (WebKit 321436: "듣고 있습니다" with no words). Web Audio
  * playback does not do that. Each answer gets a context of its own, made when
  * the hardware runs at the rate it will play at and closed after - a context
  * kept from before the microphone was used played everything a fraction high
- * once the hardware had moved to 48 kHz for it (2026-10-19).
+ * once the hardware had moved to 48 kHz for it.
  */
 function newContext(): AudioContext | null {
   if (typeof window === "undefined") return null;
@@ -585,7 +585,7 @@ let shared: AudioContext | null = null;
 /**
  * The one context the answers play through. A context an iPhone has started
  * inside a tap goes on playing on its own; one made later, outside any tap,
- * stays suspended for good (2026-11-01, "브라우저 음성으로 대신" every answer).
+ * stays suspended for good.
  */
 export function sharedContext(): AudioContext | null {
   if (shared && shared.state !== "closed") return shared;
@@ -836,7 +836,7 @@ export function useSpeech(lang = "ko-KR", server = false) {
     fetches.current = null;
     window.speechSynthesis?.cancel();
     // The piece playing is settled, not left pending: a pending piece's
-    // timer used to fire later and take the handlers of whatever answer was
+    // timer would fire later and take the handlers of whatever answer was
     // playing by then.
     const piece = stopPiece.current;
     stopPiece.current = null;
@@ -943,8 +943,8 @@ export function useSpeech(lang = "ko-KR", server = false) {
       };
       // The hardware's rate now, read off a context made for the purpose: a
       // context kept across the microphone's use plays a fraction high and
-      // fast once the hardware moved to 48 kHz for it (2026-10-19), and the
-      // pieces are slowed by that much to come out right.
+      // fast once the hardware moved to 48 kHz for it, and the pieces are
+      // slowed by that much to come out right.
       let hw = ctx.sampleRate;
       const probe = newContext();
       if (probe) {

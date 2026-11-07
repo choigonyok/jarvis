@@ -12,8 +12,7 @@ import (
 
 // An entry like one turned down lately is not asked again: the same title
 // on another day, or one that carries the word the reason was about. An
-// entry that shares neither is asked as before (2026-10-25: "롤체 약속은
-// 캘린더에 추가하지마", and "은주와 롤체" was asked twice more the next day).
+// entry that shares neither is asked as before.
 func TestEntryLikeOneTurnedDownIsNotAskedAgain(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 10, 26, 15, 0, 0, 0, seoul)
@@ -85,7 +84,7 @@ func TestOnlyWhatIsComingIsAskedAbout(t *testing.T) {
 }
 
 // A card still open stands while its plan gathers notes: asked again each time,
-// one question left and came back five times in a day (2026-11-02).
+// one question would leave and come back again and again in a day.
 func TestAnOpenCardIsNotAskedAgain(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 11, 2, 11, 13, 0, 0, seoul)
@@ -112,7 +111,7 @@ func TestAnOpenCardIsNotAskedAgain(t *testing.T) {
 
 // A move still waiting has not happened. Told 15:00, then 16:00, then 15:00 again
 // with nobody answering, the calendar never left 15:00: the card said 16:00 → 15:00,
-// and turned down it would have left the plan at an hour nobody holds (2026-11-02).
+// and turned down it would have left the plan at an hour nobody holds.
 func TestAMoveMovesFromWhatTheCalendarHolds(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 11, 2, 15, 8, 0, 0, seoul)

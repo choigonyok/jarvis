@@ -34,7 +34,7 @@ const BrowserServer = "mcp-browser"
 // The screenshot is how it reads an order's date and amount: Coupang's order
 // list shows them as plain text, which browser_get_state's element list
 // leaves out, and browser_extract_content needs an LLM key the browser does
-// not have - every lookup on 2026-10-18 ended "주문일·금액이 안 보임".
+// not have.
 var enrichTools = []string{
 	"mcp__" + BrowserServer + "__browser_navigate",
 	"mcp__" + BrowserServer + "__browser_get_state",

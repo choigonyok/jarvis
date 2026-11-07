@@ -1,10 +1,9 @@
 //go:build darwin
 
 // Command relogin logs KakaoTalk on the Mac mini back in when it has been
-// logged out - as it is when the network comes back after a long drop
-// (2026-10-19 and 2026-10-22: twelve minutes offline, logged out on the way
-// back). kakaotalk-client reads KakaoTalk's database, so a logged-out
-// KakaoTalk silently stops every message.
+// logged out - as it is when the network comes back after a long drop (a
+// dozen minutes offline is enough). kakaotalk-client reads KakaoTalk's
+// database, so a logged-out KakaoTalk silently stops every message.
 //
 // It looks at KakaoTalk every five seconds through the accessibility API.
 // Whether it is logged in is read from its own app menu, whose 로그아웃 can be
@@ -14,11 +13,11 @@
 // little longer each time but never more than 5 minutes apart. A refused
 // password stops it at once (tried on and on, it locks the account), and so
 // does a screen asking for the phone. While the Mac's screen is locked macOS
-// hides every window (2026-10-23: locked since the night before, a logout
-// went unseen for eleven hours), and it counts as locked whenever the display
-// sleeps; with no password on the lock, a logout wakes the display, which
-// unlocks it. A lock that keeps a password is said, not opened. What it sees and did goes to
-// ~/.jarvis-host/kakaotalk-login.json, which the 상태 tab reads.
+// hides every window, so a logout behind it goes unseen, and it counts as
+// locked whenever the display sleeps; with no password on the lock, a logout
+// wakes the display, which unlocks it. A lock that keeps a password is said,
+// not opened. What it sees and did goes to ~/.jarvis-host/kakaotalk-login.json,
+// which the 상태 tab reads.
 //
 // It runs as the LaunchAgent com.jarvis.kakaotalk-relogin
 // (scripts/kakaotalk-relogin install) and needs, once, Accessibility for this

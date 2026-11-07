@@ -326,9 +326,9 @@ function ComposerView({
           onKeyDown={(e) => {
             // Enter sends only where there is a shift to hold - a keyboard
             // under a mouse. Judged by the pointer, not the width: an iPad is
-            // wide, and its on-screen Enter was sending (2026-11-06 review).
-            // On a touch keyboard Enter is a newline, and a stray line is
-            // better than a stray send.
+            // wide, and its on-screen Enter was sending. On a touch keyboard
+            // Enter is a newline, and a stray line is better than a stray
+            // send.
             if (
               e.key === "Enter" &&
               !e.shiftKey &&

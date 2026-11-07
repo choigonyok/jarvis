@@ -32,9 +32,9 @@ type Turned struct {
 // TurnedDown is what the operator said turning down calendar cards, the newest
 // first and at most max: mind's own (mine) and the conversation's (held, the
 // assistant's cards). A no given on the conversation's card reached that
-// session's model alone, and "차 예약은 일정 카드 필요없어" was asked again in
-// the next one (2026-11-03). One of mind's that stood aside for the
-// conversation's card is answered by that card, and said once.
+// session's model alone, and "차 예약은 일정 카드 필요없어" was asked again in the next
+// one. One of mind's that stood aside for the conversation's card is answered
+// by that card, and said once.
 func TurnedDown(mine, held []Intent, max int) []Turned {
 	var all []Turned
 	for _, in := range mine {

@@ -342,8 +342,8 @@ func TestSearchReplacesWebFetch(t *testing.T) {
 
 // The browser's tools never skip the gate, whatever JARVIS_ALLOWED_TOOLS or a
 // module says: the gate passes them without a card and gives the browser to
-// the conversation as it does (2026-10-28). They are not "dropped" - nothing
-// unsafe was asked for.
+// the conversation as it does. They are not "dropped" - nothing unsafe was
+// asked for.
 func TestBrowserToolsGoThroughTheGate(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "x")
 	t.Setenv("JARVIS_API_TOKEN", "api")

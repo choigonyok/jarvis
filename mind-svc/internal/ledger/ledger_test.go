@@ -37,7 +37,7 @@ func purchase(id string, at time.Time, class string) model.Occurrence {
 	return model.Occurrence{ID: id, Kind: "purchase", At: at, Title: "가게", Class: class}
 }
 
-// The 10/28 payment that reached the assistant on the 30th did happen.
+// A payment that reached the assistant two days late did happen.
 func TestAPredictionIsScoredByWhatHappened(t *testing.T) {
 	from := day.Add(-7 * time.Hour)
 	pr := model.Prediction{ID: "p", Key: "purchase/식비", Prob: 0.9, Base: 0.7, From: &from,

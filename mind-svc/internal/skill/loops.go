@@ -27,7 +27,7 @@ func (Loops) OnTick(context.Context, View, string) Result { return Result{} }
 func (Loops) OnChange(_ context.Context, v View, e model.Entity, changes []model.Change) Result {
 	// The assistant's own promise is told by the reminder or the job it
 	// became - not again, as "Jarvis가 하기로 한 것" at 09:00 on the day,
-	// knowing neither its time nor its changes (2026-10-20).
+	// knowing neither its time nor its changes.
 	if !e.Live() || e.State.Due == "" || e.AssistantsPromise() {
 		return Result{CancelTimers: true}
 	}
@@ -35,7 +35,7 @@ func (Loops) OnChange(_ context.Context, v View, e model.Entity, changes []model
 	// the same loop and the same deadline: its timer stays as it was, fired or
 	// not. Setting it anew put a deadline already gone by at "now", so the
 	// order list added to a "사 가기" at 18:31 rang its 18:00 push again at
-	// 18:32 (2026-11-06).
+	// 18:32.
 	if !newDeadline(changes) {
 		return Result{}
 	}
@@ -45,9 +45,8 @@ func (Loops) OnChange(_ context.Context, v View, e model.Entity, changes []model
 	}
 	if operators(e) {
 		// The operator's own promise is offered as a reminder and rings only as
-		// one: a card, never a push of its own. The operator's rule
-		// (2026-11-06): "내가 명시적으로 말한 게 아니면 리마인드 생성 카드를
-		// 띄우는 쪽으로" - and the 18:00 push went out past it.
+		// one: a card, never a push of its own. The operator's rule: "내가 명시적으로
+		// 말한 게 아니면 리마인드 생성 카드를 띄우는 쪽으로" - and the 18:00 push went out past it.
 		r := Result{CancelTimers: true}
 		if in, ok := remindCard(e, at, v); ok {
 			r.Intents = []model.Intent{in}
@@ -266,7 +265,7 @@ func (Brief) OnTick(ctx context.Context, v View, tick string) Result {
 	m, older := 0, 0
 	// A loop is listed from a day before it is due until three days after.
 	// Older than that it is counted, not named: one from the 13th was read
-	// out every morning for a fortnight (2026-10-27), burying the day's.
+	// out every morning for a fortnight, burying the day's.
 	since := now.AddDate(0, 0, -briefOverdueDays).Format("2006-01-02")
 	for _, l := range loops {
 		if len(l.State.Due) < 10 || l.AssistantsPromise() {

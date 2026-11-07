@@ -1,5 +1,5 @@
 """Fixes to graphiti-core 0.30.2 (pinned in requirements.txt), applied before
-anything uses it. All were found on 2026-10-11.
+anything uses it.
 
 Edge range indices. FalkorDB 4.22 answers an edge range-index scan that starts
 from a label scan without the edges of some nodes: in the owner graph, every

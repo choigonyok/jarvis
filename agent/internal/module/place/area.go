@@ -13,8 +13,7 @@ import (
 // (mind's moments): the outline OpenStreetMap has for a city, a district, a
 // town, or a circle round a place that has none worth following - a station,
 // a neighbourhood's point. What is asked is the name; where the phone is never
-// leaves - mind holds its fixes against this (2026-11-06: "수원쪽에 도착하면",
-// a region that never was).
+// leaves - mind holds its fixes against this.
 type Area struct {
 	Name   string         `json:"name"`
 	Rings  [][][2]float64 `json:"rings,omitempty"`

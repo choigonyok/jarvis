@@ -14,7 +14,7 @@ func TestSameEvent(t *testing.T) {
 		a, b State
 		want bool
 	}{
-		// 2026-11-03: one stay, named by a conversation and by the calendar.
+		// One stay, named by a conversation and by the calendar.
 		{"며칠 일정의 첫날·끝날이 같음", trip("지수와 캠핑 2박3일", "2027-01-01", "2027-01-03"), trip("숲속 캠핑 2박3일 (4번 사이트)", "2027-01-01", "2027-01-03"), true},
 		{"며칠 일정의 끝날이 다름", trip("지수와 캠핑", "2027-01-01", "2027-01-03"), trip("숲속 캠핑", "2027-01-01", "2027-01-02"), false},
 		{"같은 날짜 겹치는 말 없음", trip("부산 출장", "2027-01-01", "2027-01-03"), trip("제주 여행", "2027-01-01", "2027-01-03"), false},
@@ -26,7 +26,7 @@ func TestSameEvent(t *testing.T) {
 		{"다른 날", plan("은주와 합주", "2026-10-17", "15:00", "은주"), plan("기타 합주 (은주)", "2026-10-18", "15:00"), false},
 		{"한 시간 넘게 차이", plan("은주와 합주", "2026-10-17", "15:00", "은주"), plan("기타 합주 (은주)", "2026-10-17", "16:00"), false},
 		{"시각 없음", plan("은주와 합주", "2026-10-17", "", "은주"), plan("기타 합주 (은주)", "2026-10-17", "15:00"), false},
-		// 2026-10-26: read without a time, put on the calendar at 20:00.
+		// Read without a time, put on the calendar at 20:00.
 		{"시각 없이 같은 제목", plan("Netflix 플랜 변경·해지", "2026-11-15", ""), plan("Netflix 플랜 변경·해지", "2026-11-15", "20:00"), true},
 		{"시각 없이 띄어쓰기·기호만 다름", plan("netflix 플랜 변경/해지", "2026-11-15", ""), plan("Netflix 플랜 변경·해지", "2026-11-15", "20:00"), true},
 		{"시각 없이 한쪽이 다른 쪽을 품음", plan("재택근무", "2026-10-20", ""), plan("재택", "2026-10-20", ""), true},

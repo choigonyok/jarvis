@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
  * to it: the oldest waiting card itself, in the conversation, as a tapped
  * push does. It took every screen to the 기록 tab, a tab away even from the
  * conversation the card stood in, and the guest, who cannot open 기록, back to
- * the conversation's bottom (2026-11-06 review).
+ * the conversation's bottom.
  */
 function StandingBarView({
   pending,

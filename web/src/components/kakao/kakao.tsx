@@ -160,7 +160,7 @@ function Feed({ source }: { source: Source }) {
  * Which room. Up to two hundred are collected, and a wall of chips - or a
  * small box of them scrolling up and down - put the room you wanted below
  * everything else. Sideways is out too: a strip that scrolls sideways drags
- * the whole tab with it on a phone (2026-10-08).
+ * the whole tab with it on a phone.
  *
  * So one line: the room being read, which opens all of them with a search,
  * and then as many of the other recent rooms as fit - a room that does not

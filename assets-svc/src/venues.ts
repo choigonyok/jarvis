@@ -30,10 +30,10 @@ const KIS_BASE: string =
  * KIS allows each app key a handful of calls a second (20 on a real account)
  * and answers the excess with EGW00201 "초당 거래건수를 초과하였습니다".
  * Everything a portfolio build asks for - balances on three exchanges,
- * foreign cash, a page of closes per share, the gold account - used to leave
- * at once, so a single tap after the cache expired could trip it. Calls to KIS
- * now queue per key, a fixed gap apart, and a rate-limit answer is waited out
- * and asked again instead of becoming an error on screen.
+ * foreign cash, a page of closes per share, the gold account - leaving at
+ * once, a single tap after the cache expired could trip it. So calls to KIS
+ * queue per key, a fixed gap apart, and a rate-limit answer is waited out and
+ * asked again instead of becoming an error on screen.
  */
 const KIS_GAP_MS = Number(process.env.KIS_GAP_MS ?? 80);
 const kisQueues = new Map<string, Promise<void>>();
@@ -162,8 +162,7 @@ export async function upbitHoldings(): Promise<{
   );
   const problems: string[] = [];
   // The won account is listed even when it is empty: the 자산 tab names each
-  // account's cash, and Upbit's won read as missing beside the others
-  // (2026-10-28, ₩0.23 left after buying USDT).
+  // account's cash, and Upbit's won read as missing beside the others.
   const cash: CashLine[] = [
     { id: "upbit:KRW", venue: "upbit", currency: "KRW", label: "업비트 원화", amount: cashKrw, valueKrw: cashKrw },
   ];
@@ -546,13 +545,13 @@ type KisCurrency = {
  * Dollars sitting in the account, settled or about to be, and KIS's own rate
  * for the day.
  *
- * The domestic balance only counts won. Without this, selling a share made
- * the total drop by the whole sale until settlement - and even after it, the
- * dollars never showed up at all.
+ * The domestic balance only counts won. Without this, selling a share would
+ * drop the total by the whole sale until settlement, and the dollars would
+ * not show up even after it.
  *
  * The rate is KIS's base rate (bass_exrt), the one its own valuation uses.
- * Upbit's USDT price was used before and runs a premium over it (1,361 against
- * 1,339 on 2026-10-10) - the dollar side read 1.6% richer than KIS says it is.
+ * Upbit's USDT price runs a premium over it and would read the dollar side
+ * a percent or two richer than KIS says it is.
  */
 async function kisForeignCash(token: string): Promise<{
   usd: number;
@@ -599,7 +598,7 @@ async function kisForeignCash(token: string): Promise<{
   // A limit buy waiting for its price holds dollars that KIS already counts
   // as spent (frcr_buy_amt_smtl) though nothing was bought: without this the
   // total, the return and the deposit check all dropped by it while the
-  // order waited (a standing order, 2026-10-17).
+  // order waited.
   let held: number | null = null;
   try {
     held = await kisUnfilledBuyUsd(token);
@@ -915,9 +914,8 @@ export async function kisTrades(since: string): Promise<KisTrade[]> {
  * By the trade day and not the settlement day, because the cash the checks
  * read (bookCash) moves at the fill: KIS posts a settlement into the deposit
  * the Korean morning after New York settles, at an hour nothing here can
- * know, and counting a sale on any guessed day read the gap as money taken
- * out - ₩125,721 on 2026-10-19 at 00:03, ₩125,152 on 2026-10-20 at 00:02,
- * the same $93.23 both times.
+ * know, and counting a sale on any guessed day reads the gap as money taken
+ * out.
  */
 export function movementsOf(trades: KisTrade[], since: string): Settlement[] {
   const byDay = new Map<string, Settlement>();

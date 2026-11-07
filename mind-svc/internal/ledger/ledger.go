@@ -6,9 +6,9 @@
 // It is rebuilt from the intents, the predictions and the occurrences, so it
 // can be deleted and made again. A prediction is scored here from what the
 // world's record says, not taken from how it was scored at its deadline: a
-// payment that reached the assistant late (card alerts stopped from 10/28 to
-// 10/30 while the KakaoTalk app was logged out) did happen, and scoring it as
-// a miss teaches the engine that the operator stopped eating.
+// payment that reached the assistant late (card alerts held back while the
+// KakaoTalk app was logged out) did happen, and scoring it as a miss teaches
+// the engine that the operator stopped eating.
 //
 // Silence is held to account the same way: what the assistant held back and
 // the operator then did by hand is marked Manual. Without that, a judgement

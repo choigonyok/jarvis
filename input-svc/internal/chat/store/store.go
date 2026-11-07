@@ -92,14 +92,14 @@ func (s *Store) All(ctx context.Context, tz, thread string, since time.Time) ([]
 // Window is the newest `limit` turns of a thread before `before` (zero: the
 // newest of all), oldest first, and whether older ones remain. The console
 // opens on the newest page and asks for the one above as the reader scrolls
-// up - the thread is months long, and all of it at once was the page's
+// up - the thread is months long, and all of it at once would be the page's
 // slowest part.
 //
 // The cursor is the id of the oldest turn on the page below (`beforeID`):
 // the page is what comes before that turn in the thread's order. A time
 // (`before`) is taken too, for callers that have one - but an id survives a
-// trip through URLs that a timestamp's "+09:00" did not (2026-10-19: the
-// console's cursor arrived with a space for the plus).
+// trip through URLs that a timestamp's "+09:00" does not (its plus arrives
+// as a space).
 func (s *Store) Window(ctx context.Context, tz, thread string, before time.Time, beforeID string, limit int) ([]turn.Turn, bool, error) {
 	if limit <= 0 {
 		limit = 50
@@ -148,8 +148,8 @@ func (s *Store) Window(ctx context.Context, tz, thread string, before time.Time,
 // Append stores one turn and returns it as stored, with the id and the clock
 // the service minted.
 //
-// The id prefix says who spoke ('u' or 'a'), which is what the old file-backed
-// store did; the record surface reads the epoch back out of this format.
+// The id prefix says who spoke ('u' or 'a'); the record surface reads the
+// epoch back out of this format.
 func (s *Store) Append(ctx context.Context, t turn.Turn, tz string, after After) (turn.Turn, error) {
 	if t.Role != turn.RoleUser && t.Role != turn.RoleAgent {
 		return turn.Turn{}, fmt.Errorf("모르는 역할입니다: %q", t.Role)

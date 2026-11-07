@@ -95,10 +95,9 @@ func (s Session) Fingerprint() string {
 	return hex.EncodeToString(sum[:])
 }
 
-// Normalize sorts sessions the way every reader expects - newest last, which
-// is the order the file used to be written in - and drops the obviously
-// broken. A session with no id cannot be addressed later, so keeping it would
-// create a row nothing can ever update.
+// Normalize sorts sessions the way every reader expects - newest last - and
+// drops the obviously broken. A session with no id cannot be addressed later,
+// so keeping it would create a row nothing can ever update.
 func Normalize(b *Book) {
 	kept := b.Sessions[:0]
 	for _, s := range b.Sessions {

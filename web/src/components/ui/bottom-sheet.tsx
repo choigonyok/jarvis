@@ -126,8 +126,7 @@ function BottomSheetBody({
 
 /**
  * A sheet with a title (and a line under it) over what scrolls: the shape
- * the ledger's, the workout's and the orders' sheets each used to draw for
- * themselves.
+ * the ledger's, the workout's and the orders' sheets share.
  */
 function Panel({
   open,

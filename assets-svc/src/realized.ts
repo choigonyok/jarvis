@@ -6,8 +6,8 @@ import { DOLLAR_COINS, type KisTrade, type UpbitFill } from "./venues.js";
  *
  * A holding's card shows what the units still held have made. Selling some
  * of them moves that profit out of the card and into cash - the total and the
- * return against principal do not change, but nothing said any more how much
- * that one holding had earned. And buying it again later blends the average,
+ * return against principal do not change, but nothing would say any more how
+ * much that one holding had earned. And buying it again later blends the average,
  * so the card's own rate stops meaning "this is how it went".
  *
  * So sales are kept as their own record: each one with what it cost and what
@@ -114,12 +114,12 @@ export function replayUpbit(
  * The buy fees still inside what is held at Upbit, dollar coins included.
  *
  * A holding's cost is Upbit's own average buy price, which leaves the fee
- * out, while a sale's cost (replayUpbit) keeps it in. So the fee on a coin
- * not sold yet was counted nowhere - it sat in the return's remainder as a
- * few hundred won nobody could explain (2026-10-20: ₩461 on BTC, ₩227 on
- * USDT). It is carried the way Upbit carries its average - a sale takes its
- * share, a position sold out starts again - and named with the fees.
- * Whatever was held before the fills start came without a fee here.
+ * out, while a sale's cost (replayUpbit) keeps it in. Left at that, the fee
+ * on a coin not sold yet would be counted nowhere - a few hundred won in the
+ * return's remainder that nothing explains. It is carried the way Upbit
+ * carries its average - a sale takes its share, a position sold out starts
+ * again - and named with the fees. Whatever was held before the fills start
+ * came without a fee here.
  */
 export function upbitHeldFees(fills: UpbitFill[], heldNow: Map<string, number>): number {
   const bySymbol = new Map<string, UpbitFill[]>();
@@ -180,8 +180,7 @@ export function priceUnsettled(trades: KisTrade[], rate: number): KisTrade[] {
  * KIS's own profit per sale (its period-profit report) converts the cost and
  * the proceeds both at the sale day's rate, so a won that strengthened while
  * the shares were held does not show: shares bought at 1,466 and sold at
- * 1,430 read far richer than they were - by about 40% on this account's
- * sales up to 2026-10-10.
+ * 1,430 read far richer than they were.
  * The won actually paid and received is in every fill (KisTrade.netKrw), so
  * the sales are replayed from those instead, on a moving average in won - the
  * same footing a capital-gains return takes, each leg at its own day's rate.

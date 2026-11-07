@@ -1,11 +1,10 @@
 // Package calendar is the first module: it changes the world (adds and edits
 // events) and it answers questions about it (what is already booked).
 //
-// The events themselves live in calendar-svc now. What stayed here is what the
-// agent is for: the approval card, the tool schema the model sees, and the
-// declaration of which actions are reversible. This file used to be the JSON
-// file; it is the client to that service, with the same method set, so
-// module.go and mcp.go did not change.
+// The events themselves live in calendar-svc. What is here is what the agent
+// is for: the approval card, the tool schema the model sees, and the
+// declaration of which actions are reversible. This file is the client to
+// that service.
 package calendar
 
 import (
@@ -94,9 +93,8 @@ func NewStore(baseURL, token string, b *bus.Bus) *Store {
 	}
 }
 
-// Load is the health check at boot. It used to read the file; now it confirms
-// the service answers, which is the same question - can this module do its job
-// - asked of the new backend.
+// Load is the health check at boot: it confirms the service answers - can this
+// module do its job.
 func (s *Store) Load() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

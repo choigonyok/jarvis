@@ -43,10 +43,10 @@ type Fact struct {
 const JobRelation = "맡긴 작업"
 
 // What is put in front of a message on its own (Recall). Measured on the live
-// graph (2026-11-03, ten typical messages): a fact that answers the message
-// scored 0.6~0.86, one that only shared a word 0.35~0.55 - all of "응 그거
-// 해줘"'s were 0.47~0.53 - and a job's report came first for "예약 확정됐어?"
-// and filled all eight places for "쿠팡 주문한 거 어떻게 됐어?".
+// graph: a fact that answers the message scored 0.6~0.86, one that only
+// shared a word 0.35~0.55 - all of "응 그거 해줘"'s were 0.47~0.53 - and a job's
+// report came first for "예약 확정됐어?" and filled all eight places for "쿠팡 주문한 거
+// 어떻게 됐어?".
 const (
 	recallMin   = 0.55
 	recallMax   = 6

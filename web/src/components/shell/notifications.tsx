@@ -243,7 +243,7 @@ export function Notifications() {
                 notes.map((n) => {
                   const about = role === "owner" ? noticeOf(n) : null;
                   // One line of title, two of body: a job's report ran to
-                  // 300 characters of document here (2026-11-07).
+                  // 300 characters of document here.
                   const said = readable(n.title, n.body);
                   return (
                   <li key={n.id}>

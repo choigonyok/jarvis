@@ -114,7 +114,7 @@ func behavior(t *testing.T, res *mcp.CallToolResult) Response {
 }
 
 // The card goes up and the call returns at once - nothing holds the turn open
-// for a person, which is what used to time out and raise the card twice.
+// for a person, which would time out and raise the card twice.
 func TestCardDoesNotBlockAndIsNotRaisedTwice(t *testing.T) {
 	g, store, _ := newTestGate(t, module.NewRegistry())
 	req := Request{"tool_name": "Bash", "input": map[string]any{"command": "ls"}}
@@ -230,8 +230,7 @@ func TestRejectionWakesTheModel(t *testing.T) {
 }
 
 // A corrected call replaces the card it corrects - the same event with a
-// changed time - while a call about something else leaves it waiting
-// (2026-10-19: both cards stayed up and the operator had to turn one down).
+// changed time - while a call about something else leaves it waiting.
 func TestCorrectedCallReplacesTheWaitingCard(t *testing.T) {
 	store := calendar.NewStore("http://127.0.0.1:1", "", bus.New())
 	modules := module.NewRegistry()

@@ -17,8 +17,8 @@ const designatedPrefix = "DESIGNATEDFRIENDSREVISION:"
 var lowerHex128 = regexp.MustCompile(`^[0-9a-f]{128}$`)
 
 // resolveUserID finds the account id following the reference precedence:
-//   1. AlertKakaoIDsList candidates (verified against the on-disk filename)
-//   2. SHA-512 recovery from the active DESIGNATEDFRIENDSREVISION hash
+//  1. AlertKakaoIDsList candidates (verified against the on-disk filename)
+//  2. SHA-512 recovery from the active DESIGNATEDFRIENDSREVISION hash
 func resolveUserID(cfg Config, uuid, filename string) (int64, error) {
 	candidates, activeHash := scanPlists(cfg.PlistDir)
 

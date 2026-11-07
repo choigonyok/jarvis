@@ -45,8 +45,8 @@ func TestGuestTokenOpensTheGuestThreadOnly(t *testing.T) {
 }
 
 // A turn with nothing to show is refused - but a checklist card is its list,
-// with or without a line above it (2026-10-21: refused, the card reached the
-// screen unsaved and was gone after the next read).
+// with or without a line above it: refused, the card would reach the screen
+// unsaved and be gone after the next read.
 func TestChecklistCardIsNotEmpty(t *testing.T) {
 	for _, c := range []struct {
 		name string

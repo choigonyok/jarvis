@@ -62,16 +62,16 @@ const MODE_KEY = "jarvis:chat-mode";
 /**
  * Where the reader was in the conversation when they left it for another tab:
  * the row at the top of the view, how far into the view it stood, and the
- * newest turn then. Coming back lands there - it had always landed at the
- * bottom (2026-11-06 review) - unless they had been at the bottom, and what
- * came meanwhile is counted on the way down (새 메시지 N).
+ * newest turn then. Coming back lands there, not at the bottom - unless they
+ * had been at the bottom - and what came meanwhile is counted on the way
+ * down (새 메시지 N).
  */
 let readingSpot: { row: string; offset: number; newest: string | null } | null = null;
 
 // The cards opened here (by turn) - checklists, a job's news - live in
 // lib/use-thread.ts (openedTurns), for as long as the app is open. A card
 // comes folded - its title, how far along, what is left - and is opened by
-// its title when wanted (2026-10-22: "접힌 게 디폴트").
+// its title when wanted.
 
 /**
  * An agent turn as it is read aloud: a job's card is announced as the job's,
@@ -228,7 +228,7 @@ const ROW =
  * square grid, the way a messenger stacks an album. A photo deleted after its
  * listing ended shows as an empty tile, not a broken icon. A tap opens it
  * full screen here (ui/lightbox.tsx): a link to the file took a home-screen
- * app out to the browser (2026-11-06 review).
+ * app out to the browser.
  */
 function Photos({ names, alt = "보낸 사진" }: { names: string[]; alt?: string }) {
   const single = names.length === 1;
@@ -498,8 +498,8 @@ const SPREAD_MS = 600;
 const MIN_RATE = 0.08;
 /**
  * The fastest, short of falling behind (180 a second): a whole answer that
- * lands in one piece - 458 characters in one frame on the phone, 2026-10-27 -
- * spread over SPREAD_MS came out a sentence a redraw, not a few characters.
+ * lands in one piece - hundreds of characters in one frame on the phone -
+ * spread over SPREAD_MS comes out a sentence a redraw, not a few characters.
  * Opus writes about 150 a second, so this keeps up with it.
  */
 const MAX_RATE = 0.18;
@@ -523,7 +523,7 @@ const progress = new Map<string, number>();
 /**
  * The words of an answer let out at an even pace. They reach the screen in
  * bursts - from the Mac mini a few dozen characters every half second or so
- * (2026-10-27) - and drawn as they landed they jumped a line at a time. What
+ * - and drawn as they landed they jumped a line at a time. What
  * waits is spread over about the time the next burst takes to come, so it
  * reads as typing, and a burst that lands early speeds it up. One joined
  * midway (Draft.joined: the stream opened to an answer under way) is shown
@@ -663,14 +663,14 @@ const Transcript = memo(function Transcript({
   opened: ReadonlySet<string>;
   onFold: (turnId: string) => void;
 }) {
-  // A card with no turn pointing at it - one raised before every card was
-  // laid in the conversation - floats below the thread while it waits. One
-  // that was waiting on this screen stays once decided: a card answered
-  // under your thumb and then gone reads as one that never came (2026-10-21).
-  // A card raised before the oldest turn loaded is not one of these: its turn
-  // is on a page above, and it shows there. Taken for one, it sat at the bottom
-  // of the thread from the moment 60 newer turns had passed it - and stayed
-  // there once decided, on a phone that keeps the page open (2026-11-02).
+  // A card with no turn pointing at it - one raised before every card was laid
+  // in the conversation - floats below the thread while it waits. One that was
+  // waiting on this screen stays once decided: a card answered under your thumb
+  // and then gone reads as one that never came. A card raised before the oldest
+  // turn loaded is not one of these: its turn is on a page above, and it shows
+  // there. Taken for one, it would sit at the bottom of the thread once 60
+  // newer turns had passed it - and stay there once decided, on a phone that
+  // keeps the page open.
   const attached = new Set(turns.map((t) => t.proposalId).filter(Boolean));
   const oldest = hasMore && turns[0]?.atIso ? Date.parse(turns[0].atIso) : NaN;
   const above = (p: Proposal) => (raisedAt(p)?.getTime() ?? Infinity) < oldest;
@@ -689,8 +689,7 @@ const Transcript = memo(function Transcript({
           <Rail />
           {error ? (
             // Nothing could be read: said as that, with the way to read again
-            // - not as a conversation yet to start (2026-11-06 review: both
-            // showed, and the only way back was a reload).
+            // - not as a conversation yet to start.
             <Failed onRetry={onRetry} className="max-w-[32rem]">
               {error}
             </Failed>
@@ -904,9 +903,9 @@ export function Thread() {
   // pulled back down by the next turn. Its moves are reached from here.
   const scroller = useRef<Scroller | null>(null);
   // Until when a send holds the view at the bottom (toNewest): one scrollTop
-  // did not stick on the phone - iOS put the view back where it had been
-  // within 120ms as the keyboard and the layout moved (2026-10-27 23:56). A
-  // finger on the thread ends it.
+  // does not stick on the phone - iOS puts the view back where it had been
+  // within 120ms as the keyboard and the layout move. A finger on the
+  // thread ends it.
   const holdUntil = useRef(0);
   // When that send was: the hold is stretched while the view is still moving
   // (iOS momentum, the keyboard) but never past HOLD_MAX_MS from it.
@@ -933,7 +932,7 @@ export function Thread() {
   // system's while a finger or a fling moves it, so the page's height put
   // back mid-fling was overwritten: the view fell into the page just added,
   // was near the top again, asked for the next one - one flick up ran
-  // through page after page (2026-10-24).
+  // through page after page.
   const touching = useRef(false);
   // When the finger last moved, or came down. A touch whose end never came -
   // the row under it replaced as it was touched (a draft turning into its
@@ -955,7 +954,7 @@ export function Thread() {
   // front by its first row changing, and the first row is often the day's
   // divider, which goes when older turns of the same day come in front of it
   // - on an iPhone the reader was dropped onto the oldest turn of the new
-  // page (2026-11-05, simulator Safari).
+  // page.
   const above = useRef<{ height: number; top: number } | null>(null);
   useLayoutEffect(() => {
     const el = scrollRef.current;
@@ -1043,8 +1042,8 @@ export function Thread() {
   // card may arrive after the tap (the thread is still loading): it is
   // looked for again as turns and cards come in.
   const wanted = useRef<string | null>(null);
-  // Pages above being read for the card: said over the composer meanwhile -
-  // the view sat still at the bottom with nothing to show for it (2026-11-06 review).
+  // Pages above being read for the card: said over the composer meanwhile - the view
+  // sat still at the bottom with nothing to show for it.
   const [seeking, setSeeking] = useState(false);
   const focusCard = useCallback(() => {
     const id = wanted.current;
@@ -1160,9 +1159,9 @@ export function Thread() {
     scroller.current?.scrollToEnd({ behavior: smooth ? "smooth" : "auto" });
     if (!smooth) return;
     // A smooth ride is stopped by anything else that moves the view - a page
-    // of older turns landing in front is put back where the reader was
-    // (WebKit, 2026-11-05). Where it stopped short and the reader has not
-    // taken the view since, the rest of the way is gone at once.
+    // of older turns landing in front is put back where the reader was.
+    // Where it stopped short and the reader has not taken the view since,
+    // the rest of the way is gone at once.
     const asked = performance.now();
     window.setTimeout(() => {
       const el = scrollRef.current;
@@ -1410,12 +1409,12 @@ export function Thread() {
               <div
                 onPointerDownCapture={(e) => {
                   if (!(e.target as Element).closest("[aria-expanded]")) return;
-                  // Opening or closing something to read it is the reader taking
-                  // the view, as a scroll is: left to the scroller, the view went
-                  // on following the bottom as the card grew - and the finger let
-                  // go at the bottom put it back there - and the head of what was
-                  // opened went up out of sight (2026-11-06 review). The scroller
-                  // lets go on the keys it scrolls by; one is said here, not pressed.
+                  // Opening or closing something to read it is the reader taking the
+                  // view, as a scroll is: left to the scroller, the view went on
+                  // following the bottom as the card grew - and the finger let go at
+                  // the bottom put it back there - and the head of what was opened
+                  // went up out of sight. The scroller lets go on the keys it scrolls
+                  // by; one is said here, not pressed.
                   expanding.current = performance.now();
                   scrollRef.current?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
                 }}

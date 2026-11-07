@@ -338,8 +338,8 @@ const (
 // about the same amount (15%). This month's may have changed from a price that
 // held (5%): Before says from what - two months alone say nothing of a change,
 // and must agree. The spending screen, the evening's word on a changed bill and
-// the word on one that did not come each had a rule of their own (2026-11-03:
-// two of four months ±15%, three running ±5%, and the engine's cycles).
+// the word on one that did not come all read it here, so none of them says
+// otherwise.
 func Monthly(charges []Charge, now time.Time) []Recurring {
 	loc := now.Location()
 	groups := map[string][]Charge{}

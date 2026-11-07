@@ -31,7 +31,7 @@ const letGo = new Set<string>();
  * nothing was sent. Leaving the screen, or the phone putting the page away,
  * lets go of it too: a payment is not sent in the moment nobody is looking -
  * a held approval sent on the way out was the commonest way the wait came to
- * nothing (2026-11-06 review). The card then says it was held back
+ * nothing. The card then says it was held back
  * (interrupted), and 다시 승인 holds it again.
  */
 export function useHold(id: string, send: () => void) {
@@ -107,9 +107,8 @@ export function useHold(id: string, send: () => void) {
 }
 
 /**
- * The decision on its way, where the buttons were. Without it the pair came
- * back dimmed the moment the hold ended, and read as "not sent yet"
- * (2026-11-06 review, measured: 반려·승인 at 50% for the whole round trip).
+ * The decision on its way, where the buttons were. Without it the pair would
+ * come back dimmed the moment the hold ended, and read as "not sent yet".
  */
 export function Sending({ className }: { className?: string }) {
   return (

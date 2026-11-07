@@ -63,14 +63,14 @@ func lastDay(s State) string {
 // A plan told without a time has no time to agree on: it is the entry of
 // its day under the same title. "전날에 플랜 바꾸게 일정 추가해 줘" was read as
 // an all-day "Netflix 플랜 변경·해지" while the assistant put the same
-// title at 20:00, and the two were never tied (2026-10-26).
+// title at 20:00, and the two were never tied.
 func SameEvent(a, b State) bool {
 	if a.Date == "" || a.Date != b.Date {
 		return false
 	}
 	// A stay of days told twice: the same first and last day is one trip,
 	// whatever each telling calls it. "지수와 캠핑 2박3일" read from a conversation
-	// and "숲속 캠핑 2박3일" put on the calendar were two (2026-11-03).
+	// and "숲속 캠핑 2박3일" put on the calendar were two.
 	if a.EndDate != "" && a.EndDate != a.Date && a.EndDate == b.EndDate && titlesMeet(a, b) {
 		return true
 	}
@@ -97,8 +97,8 @@ const outingGap = 2 * time.Hour
 // SameOuting is whether two plans are parts of one outing told apart: the
 // same day, with the same person, and no long gap between them. "톤 세팅" at
 // ten and "점심" at eleven with one friend are one thing to have on the
-// calendar, and asking about each is how one morning became four cards
-// (2026-11-02). A part told without a time is taken to be of it too.
+// calendar, and asking about each is how one morning became four cards.
+// A part told without a time is taken to be of it too.
 func SameOuting(a, b State) bool {
 	return sharePerson(a, b) && near(a, b)
 }

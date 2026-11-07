@@ -105,8 +105,8 @@ func (l List) Count() string {
 
 // Line is a list in one line, for the conversation's situation and a
 // tool's answer: "캠핑 준비물 3/7 (10/24 용) · 남은 것: 장갑, 베개 (id chk_1a2b)".
-// The id is last, named for the tools' handle it is (2026-11-06: said back to
-// the operator when it led).
+// The id is last, named for the tools' handle it is: one that leads is said
+// back to the operator.
 func (l List) Line() string {
 	s := l.Title + " " + l.Count()
 	if d, err := time.Parse("2006-01-02", l.Date); err == nil {

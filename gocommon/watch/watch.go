@@ -1,8 +1,8 @@
 // Package watch is what an adapter does with the outside: reads it every so
-// often and leaves a record when what it read has changed. mind no longer
-// polls anyone: what it knows of the calendar, the phone and the accounts came
-// to it through the stream, and it reads the outside only as far as records
-// carry it.
+// often and leaves a record when what it read has changed. mind polls no one:
+// what it knows of the calendar, the phone and the accounts comes to it
+// through the stream, and it reads the outside only as far as records carry
+// it.
 //
 // A read that says the same as the last says nothing. After a restart the
 // first read goes out once more, which a reader takes as it takes any other:
@@ -100,8 +100,8 @@ func (w *Watcher) round(ctx context.Context, s Source, last string) (string, err
 	return sum, nil
 }
 
-// Local reads the service's own read API, as the one who used to poll it did:
-// what goes out is what that route answers. With keys, only those of the
+// Local reads the service's own read API: what goes out is what that route
+// answers. With keys, only those of the
 // answer: the rest (the time it was asked, a live price) would make every read
 // a change.
 func Local(h http.Handler, token, path string, keys ...string) func(context.Context) (any, error) {

@@ -369,10 +369,9 @@ func baseOf(pr model.Prediction) float64 {
 // Tracks is how each rule's predictions went: the scored predictions of the
 // last year, by the rule they were made from (RuleOf), counted from the
 // rule's Since, the latest trackMax of them - and, for each rate note that
-// moved one (movedBy), against what it said before it was moved. Until
-// 2026-11-07 only a prediction's first note was credited: a reflection's
-// note that kept being right never grew surer, and one that kept being
-// wrong was never stopped.
+// moved one (movedBy), against what it said before it was moved. Every
+// note is credited, not only a prediction's first: a reflection's note that
+// keeps being right grows surer, and one that keeps being wrong is stopped.
 func (p *Predictor) Tracks(ctx context.Context) (map[string]model.Track, error) {
 	now := p.Now()
 	prs, err := p.St.Predictions(ctx, now.AddDate(-1, 0, 0), now.Add(time.Minute))

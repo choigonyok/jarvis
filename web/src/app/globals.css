@@ -8,9 +8,9 @@
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 /* A wide screen worked with a mouse or a trackpad: the one place a control may
-   shrink to a pointer's size. Width alone (sm) used to decide it, and gave an
-   iPad, or a phone turned on its side, 32px buttons under a finger. Layout
-   still follows the width; only the size of what is pressed follows this. */
+   shrink to a pointer's size. Width alone (sm) would give an iPad, or a phone
+   turned on its side, 32px buttons under a finger. Layout still follows the
+   width; only the size of what is pressed follows this. */
 @custom-variant mouse (@media (width >= 40rem) and (pointer: fine));
 
 @theme inline {
@@ -520,10 +520,10 @@
    of frosted glass, lifted off the edges, with a lit rim along its top and a
    lens of brighter glass under the current tab that slides when you tap.
 
-   Glass is for what floats over the page and moves with it, and nothing else
-   (2026-10-20): the tab bar, a running workout's dock, the 되돌리기 line and
-   a push shown in the app. Everything that sits in the page - the composer,
-   cards, panels, sheets - is a solid surface.
+   Glass is for what floats over the page and moves with it, and nothing
+   else: the tab bar, a running workout's dock, the 되돌리기 line and a push
+   shown in the app. Everything that sits in the page - the composer, cards,
+   panels, sheets - is a solid surface.
 
    The rim is light, not a line: a border in this product is for what a
    hand is on - a decision, a field, one's own words (web/DESIGN.md). */
@@ -780,10 +780,10 @@ html {
    inset added. Under the opaque bar (default) the page starts below it and is
    dvh tall, while lvh may still count the bar in - 874 against 812 on an
    iPhone 17 Pro (iOS 26.2), at one launch of two - and the inset is 0. Under
-   black-translucent, from before 2026-11-07, the page runs under the bar: lvh
-   was the whole screen every time, and dvh the screen less the bar (793 of
-   852, measured on an iPhone) at one launch and the whole screen at the next,
-   which showed as an empty strip under the page - so lvh it is there.
+   black-translucent (an app added before the bar was opaque) the page runs
+   under the bar: lvh is the whole screen every time, and dvh the screen less
+   the bar at one launch and the whole screen at the next, which shows as an
+   empty strip under the page - so lvh it is there.
 
    Things pinned to the bottom (the tab bar, the voice and screen overlays)
    are placed from the top with this height rather than with bottom: 0, so

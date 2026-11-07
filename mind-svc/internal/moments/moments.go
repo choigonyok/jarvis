@@ -123,8 +123,9 @@ type Reminder struct {
 	UpdatedAt time.Time  `json:"updatedAt"`
 }
 
-// How a reminder went, as what reads it reads it (web/src/lib/reminders.ts): it
-// read the words, and "목록이 닫혀 말하지 않음" showed as said (2026-11-03).
+// How a reminder went, as what reads it reads it (web/src/lib/reminders.ts):
+// by these values, not the words - read by its words, "목록이 닫혀 말하지
+// 않음" would show as said.
 const (
 	HowPush   = "push"
 	HowCard   = "card"
@@ -836,7 +837,7 @@ func (r Reminder) Why(loc *time.Location) string {
 // Line is a reminder in one line, for a list and for the conversation's
 // situation: "10/24(토) 08:00 · 베개 챙기기 (id rem_1a2b)". The id is last and
 // named for what it is - the tools' handle, not words to say: first, it was
-// said back to the operator with the rest (2026-11-06).
+// said back to the operator with the rest.
 func (r Reminder) Line(loc *time.Location) string {
 	s := r.When(loc) + " · " + r.Text
 	if r.Checklist != "" {

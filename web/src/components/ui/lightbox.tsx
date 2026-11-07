@@ -25,16 +25,16 @@ const TURN_MS = 260;
  * the next one. Everything the console shows full size opens here - the
  * photos tab, a photo in the conversation, the photos on a card, a screen a
  * job took - so a tap on a picture never leaves the app for the browser (a
- * home-screen app opened them in Safari, 2026-11-06 review).
+ * home-screen app would open them in Safari).
  *
  * The photos lie side by side and a finger slides them: the one before or
  * after comes in with it, and once let go a fifth of the way across, or
- * flicked, it slides the rest of the way. They used to change in one step
- * when the finger lifted, and did not read as something to swipe
- * (2026-11-07). A finger pulls down to close; two fingers zoom into a photo
- * and one moves it around while it is zoomed, and a double tap zooms in and
- * out - the page itself does not zoom (components/shell/no-zoom.tsx), so the
- * photo has to. Arrow keys move, Esc closes (the dialog's own).
+ * flicked, it slides the rest of the way - a photo that changed in one step
+ * as the finger lifted would not read as something to swipe. A finger pulls
+ * down to close; two fingers zoom into a photo and one moves it around while
+ * it is zoomed, and a double tap zooms in and out - the page itself does not
+ * zoom (components/shell/no-zoom.tsx), so the photo has to. Arrow keys move,
+ * Esc closes (the dialog's own).
  */
 export function Lightbox({ items, start = 0, onClose }: { items: LightboxItem[]; start?: number; onClose: () => void }) {
   const [index, setIndex] = useState(Math.min(Math.max(0, start), items.length - 1));
@@ -94,8 +94,8 @@ export function Lightbox({ items, start = 0, onClose }: { items: LightboxItem[];
         // components it was opened from: a portal bubbles where React put
         // it. Opened from a message, a finger sliding the photos was the
         // message's own pull to quote (chat/swipe-row.tsx), which took the
-        // finger on its first move - the photos never slid on a phone
-        // (2026-11-07). Nothing that happens in here goes out.
+        // finger on its first move - the photos never slid on a phone.
+        // Nothing that happens in here goes out.
         onPointerDown={stopHere}
         onPointerMove={stopHere}
         onPointerUp={stopHere}

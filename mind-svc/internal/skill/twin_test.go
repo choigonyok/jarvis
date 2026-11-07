@@ -85,10 +85,9 @@ func (v view) Weather(_ context.Context, area, place, date string) (weather.Day,
 	return d, v.hours, ok
 }
 
-// The incident of 2026-10-17: the assistant put "기타 합주 (은주)" 15:00 on the
-// calendar while the plan heard in conversation was "은주와 합주" 15:00. That
-// is one event - tie them, and say neither "not on the calendar" nor "they
-// collide".
+// The assistant puts "기타 합주 (은주)" 15:00 on the calendar while the plan
+// heard in conversation is "은주와 합주" 15:00. That is one event - tie them,
+// and say neither "not on the calendar" nor "they collide".
 func TestAPlanAndItsCalendarEntryAreOneEvent(t *testing.T) {
 	talked := model.Entity{ID: "p1", Kind: model.KindPlan, Room: "kakao:7", State: model.State{
 		Title: "은주와 합주", Status: model.Confirmed, Date: "2026-10-17", Start: "15:00", People: []string{"은주"}}}
@@ -152,10 +151,10 @@ func TestLinkingWithdrawsTheAddQuestion(t *testing.T) {
 	}
 }
 
-// 2026-10-26: "전날에 플랜 바꾸게 일정 추가해 줘" in the conversation with the
-// assistant was read as an all-day plan while the assistant's own card put
-// the same title at 20:00. Once that entry is on the calendar, the plan is
-// it - tied, with the entry's time - and not "missing from the calendar".
+// "전날에 플랜 바꾸게 일정 추가해 줘" in the conversation with the assistant
+// reads as an all-day plan while the assistant's own card puts the same
+// title at 20:00. Once that entry is on the calendar, the plan is it - tied,
+// with the entry's time - and not "missing from the calendar".
 func TestAPlanToldWithoutATimeIsItsEntry(t *testing.T) {
 	talked := model.Entity{ID: "p1", Kind: model.KindPlan, Room: model.OwnerRoom, State: model.State{
 		Title: "Netflix 플랜 변경·해지", Status: model.Confirmed, Date: "2026-11-15"}}
@@ -222,7 +221,7 @@ func talked(id, title, start, calendarID string, created time.Time, people ...st
 
 // A second telling of one event, tied to the entry the first holds, is merged
 // into the first - and what it adds is the one question asked. Two plans on one
-// entry each asked their own move (2026-11-02).
+// entry each asked their own move.
 func TestTwoPlansOnOneEntryBecomeOne(t *testing.T) {
 	t0 := time.Date(2026, 10, 26, 23, 0, 0, 0, seoul)
 	first := talked("p1", "지수와 톤 세팅 만남", "10:00", "c1", t0, "지수")
@@ -252,8 +251,7 @@ func TestTwoPlansOnOneEntryBecomeOne(t *testing.T) {
 }
 
 // What protect moves an entry for: another entry. Not a plan turned down, not a
-// plan nobody has agreed to put on the calendar, not a part of the same outing
-// (2026-11-02).
+// plan nobody has agreed to put on the calendar, not a part of the same outing.
 func TestOnlyAnotherEntryMovesAnEntry(t *testing.T) {
 	now := time.Date(2026, 11, 2, 15, 41, 0, 0, seoul)
 	band := model.Entity{ID: "cal", Kind: model.KindPlan, Room: CalendarRoom, State: model.State{Title: "그림자", Status: model.Confirmed, Date: "2026-11-28", Start: "15:00", End: "18:00", CalendarID: "c9"}}

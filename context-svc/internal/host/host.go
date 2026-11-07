@@ -490,8 +490,7 @@ func (w *Watch) judgeLogin() checks.Result {
 	case "locked":
 		// While the Mac's screen is locked no app's window can be read. A
 		// sleeping display is woken for that, but a lock with a password is
-		// not opened by it, so a logout stays until a person unlocks it
-		// (2026-10-23: eleven hours).
+		// not opened by it, so a logout stays until a person unlocks it.
 		v.State, v.Summary = checks.Fail, "카톡이 로그아웃됐는데 맥미니 화면이 비밀번호로 잠겨 있어 다시 로그인하지 못해요. 화면 잠금을 풀어 주세요."
 	case "locked-in":
 		v.State, v.Summary = checks.Warn, "카톡은 로그인돼 있지만 맥미니 잠금에 비밀번호가 걸려 있어요. 로그아웃되면 저절로 다시 로그인하지 못해요(시스템 설정 → 잠금 화면)."

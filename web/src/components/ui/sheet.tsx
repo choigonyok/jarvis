@@ -49,7 +49,7 @@ function SheetOverlay({
  * A sheet is a place of its own in the browser's history: opening one adds an
  * entry, and going back - an edge swipe, Android's back - closes it, one sheet
  * at a time, where it went to the screen before or, in a home-screen app, out
- * of the app (2026-11-06 review). Closed any other way, the entry it added goes
+ * of the app. Closed any other way, the entry it added goes
  * too; closed by going to another screen from inside it, the entry is left to
  * that screen's history.
  */

@@ -307,7 +307,7 @@ class Engine:
                     # Cooler sampling than the library's 0.9/50: a clone from
                     # one short recording drifts in timbre between sentences
                     # when sampled hot - heard as "a different voice every
-                    # answer" (2026-10-19). Cooler keeps it on the recording.
+                    # answer". Cooler keeps it on the recording.
                     temperature=0.6,
                     top_k=20,
                     verbose=False,

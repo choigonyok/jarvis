@@ -21,8 +21,8 @@ import type { Settlement } from "./venues.js";
  * not move them at all - and the trades are counted on their trade day. Both
  * sides then move together; nothing here has to know when KIS posts a
  * settlement into the deposit (it is the Korean morning after New York
- * settles, at no fixed hour: guessing it read a sale's dollars as taken out,
- * twice - 2026-10-19 and 2026-10-20).
+ * settles, at no fixed hour, and a guessed day reads a sale's dollars as
+ * taken out).
  *
  * Going forward that is exact to the day: the cash is written down once a day
  * per currency (db.recordCash) and each day is measured against the last, at
@@ -30,7 +30,7 @@ import type { Settlement } from "./venues.js";
  * nothing. An exchange seen between two looks the same day is taken out of
  * the day's sum (exchangeBetween): money put in and changed into dollars that
  * night is the won put in, not the dollars at the day's rate, which left the
- * exchange's spread off the deposit (2026-10-28). Put in and changed between
+ * exchange's spread off the deposit. Put in and changed between
  * two looks, it cannot be told apart, and the rate stands. The past has no
  * such record, so there the hand-kept ledger stays and is checked instead
  * (reconcile).
@@ -283,7 +283,7 @@ export function reconcile(
       // Ended the next day by money put in: the trade's day against the
       // deposit's. KIS dates a fill by New York's day, and a deposit found
       // from the day's cash takes Seoul's - won put in after midnight for that
-      // night's purchase read as a day short (2026-10-27).
+      // night's purchase read as a day short.
       const nextDayIn = date <= nextDay(short.date ?? date) && (putIn.get(date) ?? 0) > 0;
       if (!nextDayIn) checks.push(short);
       short = null;

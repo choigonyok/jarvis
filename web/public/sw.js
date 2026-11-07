@@ -49,8 +49,8 @@ self.addEventListener("notificationclick", (event) => {
         if (new URL(w.url).origin === self.location.origin) {
           // The open console re-reads and moves to the screen itself
           // (lib/resume.ts). navigate() would reload the whole app - and a
-          // home-screen app on iOS does not reliably do even that, so the
-          // tap used to show what the page had before it was suspended.
+          // home-screen app on iOS does not reliably do even that, leaving
+          // the tap on what the page had before it was suspended.
           // Refused focus (a browser that allows it only for some taps)
           // must not cost the re-read.
           await w.focus().catch(() => {});

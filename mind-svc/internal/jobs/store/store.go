@@ -157,7 +157,7 @@ func scanJob(row pgx.Row) (Job, error) {
 
 // askedReasons are the next_reason words of a run the operator asked for, as
 // the statements here write them. The agent reads Asked: it compared these
-// words itself, across the service line (2026-11-03).
+// words itself, across the service line.
 var askedReasons = map[string]bool{"첫 실행": true, "새 지시": true, "지금 실행": true, "다시 시작": true, "끝내는 중에 온 지시": true}
 
 type NewJob struct {
@@ -456,8 +456,7 @@ func (s *Store) Control(ctx context.Context, id int64, action string) error {
 
 // cancel ends a job for good. What it had not read - an instruction, a card's
 // answer - goes with it, since nothing runs it any more; its history keeps
-// every one. Job 6 kept an answer that came a quarter of an hour before it
-// was called off, unread for good (2026-10-08).
+// every one.
 func (s *Store) cancel(ctx context.Context, id int64) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -487,17 +486,14 @@ func (s *Store) cancel(ctx context.Context, id int64) error {
 	return nil
 }
 
-// Answer records the operator's decision on a card a job raised and wakes
-// the job now, whatever it was waiting for: an answer is news, and the job
-// acts on it at once. Waking only a job waiting on that very card left an
-// answer sitting for the job's own clock - job 30 (2026-10-21) asked, then
-// scheduled itself to "check the card's answer" in 20 minutes, and an answer
-// given a minute later waited the rest of them. A paused or failed job keeps
-// the answer for when it runs again. A job done or cancelled does not run for
-// a card any more: the answer goes into its history and nowhere else
-// (ErrEnded) - one given to a job that had already finished sat in its inbox
-// for good (job 18, 2026-10-18). A new instruction is what brings a done job
-// back.
+// Answer records the operator's decision on a card a job raised and wakes the
+// job now, whatever it was waiting for: an answer is news, and the job acts
+// on it at once: waking only a job waiting on that very card would leave an
+// answer sitting for the job's own clock. A paused or failed job keeps the
+// answer for when it runs again. A job done or cancelled does not run for a
+// card any more: the answer goes into its history and nowhere else
+// (ErrEnded), never into an inbox nothing reads. A new instruction is what
+// brings a done job back.
 func (s *Store) Answer(ctx context.Context, id int64, card, text string) error {
 	var state string
 	if err := s.pool.QueryRow(ctx, `select state from mind.jobs where id = $1`, id).Scan(&state); errors.Is(err, pgx.ErrNoRows) {
@@ -746,8 +742,7 @@ func (s *Store) EndRun(ctx context.Context, runID int64, outcome, note string) (
 	// A job this run finished keeps nothing unread. An instruction that came
 	// while it was finishing was never in front of it, and brings it back;
 	// what is left - the answer to a card it raised and then finished without
-	// waiting for (job 18, 2026-10-18) - has no run to go to, and the history
-	// keeps it.
+	// waiting for - has no run to go to, and the history keeps it.
 	revived := false
 	if state == rules.Done && !end.Fail {
 		tag, err := tx.Exec(ctx, `

@@ -1,8 +1,7 @@
 // Package show lets the conversation put a picture in front of the person:
 // a photo from a page it read, or one already here (a photo the person sent,
 // a job's photo), as a message of its own in the thread - the way a friend
-// sends the product's picture instead of describing it (2026-10-28: "대화탭에
-// ai가 이미지를 띄울 수 있도록").
+// sends the product's picture instead of describing it.
 //
 // A picture from the web is fetched here and kept with the uploads, so the
 // thread shows it as long as it shows anything. Only an address the

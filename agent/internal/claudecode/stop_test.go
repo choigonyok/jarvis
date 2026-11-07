@@ -14,7 +14,7 @@ import (
 )
 
 // stoppableClaude stands in for the CLI as 2.1.287 behaves on stream-json
-// input when an interrupt comes (checked 2026-11-03): a message saying LONG
+// input when an interrupt comes: a message saying LONG
 // starts writing and waits; a control_request to interrupt flushes what was
 // written as an assistant message, says the request was interrupted and gives
 // an error_during_execution result. One saying DEAF hears nothing and never

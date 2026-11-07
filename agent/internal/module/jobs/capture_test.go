@@ -56,8 +56,7 @@ func screen(t *testing.T) *httptest.Server {
 
 // A run keeps the browser's screen as a photo for the operator - its line in
 // the run's record, and on the conversation's job card with the report that
-// names it (2026-11-06: "작업카드에서 사진 볼 수 있게"). A photo that is not
-// the job's is not shown as its own.
+// names it. A photo that is not the job's is not shown as its own.
 func TestARunShowsTheScreenItTook(t *testing.T) {
 	svc := &jobsSvc{}
 	up, err := uploads.New(t.TempDir())

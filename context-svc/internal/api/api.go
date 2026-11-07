@@ -944,10 +944,9 @@ const fixLate = 10 * time.Minute
 // announceFix passes a fix of the operator's phone on (location.fix), as it
 // comes, at most about once a minute: what a reminder for a place on the map -
 // a city, a station, which no region marks - is judged by in mind, without
-// anyone asking where the phone is (2026-11-06: only the regions' comings and
-// goings reached mind, so "수원에 도착하면" could not ring). The coordinates
-// stay in the records two days (input-svc), the raw reports here
-// CONTEXT_RAW_DAYS.
+// anyone asking where the phone is: the regions' comings and goings alone
+// could never ring one. The coordinates stay in the records two days
+// (input-svc), the raw reports here CONTEXT_RAW_DAYS.
 func (s *Server) announceFix(rep report, at time.Time) {
 	if s.now().Sub(at) > fixLate || !s.lastFix.IsZero() && at.Sub(s.lastFix) < fixEvery {
 		return

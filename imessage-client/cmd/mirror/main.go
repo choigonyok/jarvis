@@ -8,7 +8,7 @@
 // (scripts/imessage-mirror install) and copies only what changed, every two
 // seconds.
 //
-// Until the access is granted it keeps the mirror going the old way: with
+// Until the access is granted it keeps the mirror going over SSH: with
 // -ssh-key it runs the SSH loop (scripts/imessage-mirror.sh, the key's forced
 // command) as a child, and every few minutes it exits so launchd starts it
 // afresh - macOS settles a process's access when it starts, so a fresh

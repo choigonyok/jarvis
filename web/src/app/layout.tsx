@@ -41,12 +41,10 @@ export const metadata: Metadata = {
   // status bar is its own, opaque, and the page starts below it: iOS paints
   // it the page's colour with the clock in ink by day and white by night, and
   // follows the header's theme switch as it happens (measured on an iPhone 17
-  // Pro, iOS 26.2). black-translucent ran the page under the clock, and iOS
-  // 26.1 draws a dark blur over the top of such an app that no page can take
-  // off - with the dark strip the light theme laid under the clock, the notch
-  // looked wrong (2026-11-07). iOS reads this when the app is added to the
-  // home screen: an app added before keeps the old bar until it is added
-  // again.
+  // Pro, iOS 26.2). Not black-translucent, which runs the page under the
+  // clock: iOS 26.1 draws a dark blur over the top of such an app that no page
+  // can take off. iOS reads this when the app is added to the home screen: an
+  // app added before keeps the bar it had until it is added again.
   appleWebApp: { capable: true, statusBarStyle: "default", title: "Jarvis" },
   // Next emits only the newer "mobile-web-app-capable"; iOS still keys a
   // home-screen app's status bar off the Apple name.

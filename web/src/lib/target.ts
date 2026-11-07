@@ -1,11 +1,10 @@
 /**
  * The target allocation, as assets-svc computes it.
  *
- * The buckets, the symbol lists and the band used to live here. They moved to
- * assets-svc/src/target.ts so the console and the agent answer "how far off
- * target" from one calculation - two copies would disagree the first time a
- * new dividend share was added to only one of them. This file keeps only the
- * wire shape.
+ * The buckets, the symbol lists and the band live in assets-svc/src/target.ts,
+ * so the console and the agent answer "how far off target" from one
+ * calculation - two copies would disagree the first time a new dividend share
+ * was added to only one of them. This file is only the wire shape.
  */
 export type Bucket = "growth" | "coin" | "cash" | "dividend" | "gold";
 

@@ -3,7 +3,7 @@
  * each is said under ("업비트: 허용되지 않은 IP"). Written here and read here:
  * the status rows, the guard against a half-read portfolio and the trade plan
  * found a problem's account by its first words, each with its own copy of the
- * names (2026-11-03).
+ * names.
  */
 export const ACCOUNTS = {
   upbit: "업비트",

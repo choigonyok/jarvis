@@ -12,8 +12,8 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/core/bus"
 )
 
-// fakeChat stands in for input-svc, so these tests say what they used to say
-// without needing Postgres: the bus carries what was appended, and a card
+// fakeChat stands in for input-svc, so these tests need no Postgres: the bus
+// carries what was appended, and a card
 // raised mid-conversation leaves a mark in the transcript.
 type fakeChat struct {
 	mu    sync.Mutex

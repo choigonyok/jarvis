@@ -15,13 +15,12 @@ import (
 
 // Rules are what the operator told the assistant to keep doing, or not to:
 // "렌터카 대여는 일정에 넣지 마", "답에 링크는 붙이지 마". Said once in the
-// conversation, they used to last as long as its session; a card turned down
-// with a reason reached mind only from 11/03, and a word to the conversation
-// never did. Kept here as notes of their own scope (model.RuleScope) -
-// confirmed when said, nothing to predict from - they are read by the
-// conversation in front of its turns, by the interpreter reading any room, and
-// by the jobs. The 생활 screen shows them with the other notes, where one is
-// taken back or reworded (the notes' own door).
+// conversation, they would last only as long as its session, so they are
+// kept here as notes of their own scope (model.RuleScope) - confirmed when
+// said, nothing to predict from - and read by the conversation in front of
+// its turns, by the interpreter reading any room, and by the jobs. The 생활
+// screen shows them with the other notes, where one is taken back or reworded
+// (the notes' own door).
 
 // maxRules is how many rules may stand at once: every turn carries them.
 const maxRules = 30

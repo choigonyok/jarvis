@@ -98,9 +98,8 @@ const saidFor = 40 * 24 * time.Hour
 // unsaid is what of events was not sent yet. The check says what the month
 // says now, every five minutes, and every payment, budget line and alert in
 // it went out again each time - dropped by input-svc's dedupe, but an
-// outbox row, a delivery and a refused insert apiece, every five minutes
-// (2026-10-27). A restart forgets, and says each once more; input-svc drops
-// that.
+// outbox row, a delivery and a refused insert apiece, every five minutes.
+// A restart forgets, and says each once more; input-svc drops that.
 func (w *Watcher) unsaid(events []notify.Event, now time.Time) []notify.Event {
 	if w.said == nil {
 		w.said = map[string]time.Time{}

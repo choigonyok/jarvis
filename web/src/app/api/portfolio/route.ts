@@ -2,10 +2,9 @@ import { forward } from "@/lib/proxy";
 
 // Server-side proxy to assets-svc.
 //
-// This route used to call the brokerages itself, which meant the Upbit and KIS
-// keys lived in this process. They are in assets-svc now: the keys can place
-// orders, and the surface that serves HTML to a browser is the wrong place for
-// them to sit. Nothing about the response shape changed.
+// The Upbit and KIS keys are in assets-svc, not in this process: the keys can
+// place orders, and the surface that serves HTML to a browser is the wrong
+// place for them to sit.
 //
 // On Cloudflare there is no compose network, so ASSETS_URL has to point at
 // whatever is published in front of the service.

@@ -57,8 +57,8 @@ func (s Schedule) OnChange(ctx context.Context, v View, e model.Entity, changes 
 	r.Updates = append(r.Updates, closeLoopsTitled(ctx, v, e, "날짜 정하기")...)
 
 	// Two plans from conversations on one entry speak over each other: each
-	// moved it its own way, and one morning asked two moves of one entry
-	// (2026-11-02). The first to hold it keeps it; this one is merged into it.
+	// moved it its own way, and one morning asked two moves of one entry. The
+	// first to hold it keeps it; this one is merged into it.
 	if st.CalendarID != "" {
 		if first, ok := entryHolder(ctx, v, e); ok {
 			return s.merge(e, first, changes)
@@ -93,9 +93,9 @@ func (s Schedule) OnChange(ctx context.Context, v View, e model.Entity, changes 
 			return s.merge(e, first, changes)
 		}
 		// The calendar is for what is coming: a plan for today or a day gone by
-		// stays a plan, and a card for another day no longer stands. Of 25 cards
-		// asking to add today's, none was approved (to 2026-11-03), and read late,
-		// a card came for what had already happened (2026-10-22).
+		// stays a plan, and a card for another day no longer stands: a card to add
+		// today's is not wanted, and read late it comes for what has already
+		// happened.
 		if st.Date <= v.Now().In(v.Loc()).Format("2006-01-02") {
 			r.Withdraw = true
 			return r
@@ -303,8 +303,8 @@ func (s Schedule) add(ctx context.Context, v View, e model.Entity, changes []mod
 	}
 	// Nor the like of an entry turned down lately, on mind's card or the
 	// conversation's - the same title on another day, or what the reason
-	// named: "롤체 약속은 캘린더에 추가하지마" was about the kind of thing, and
-	// "지수와 롤체" was asked again the next day (2026-10-25~26).
+	// named: "롤체 약속은 캘린더에 추가하지마" was about the kind of thing, and "지수와
+	// 롤체" was asked again the next day.
 	if recent, err := v.IntentsSince(ctx, v.Now().Add(-turnedDownFor)); err == nil {
 		for _, p := range recent {
 			if (p.Kind != "calendar.create" && p.Kind != model.HeldCalendarCreate) || (p.Status != model.Rejected && p.Status != model.Undone) {

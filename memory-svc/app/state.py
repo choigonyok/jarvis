@@ -25,8 +25,7 @@ class State:
     async def execute(self, query, params=None):
         """Run a statement, on a new connection if the old one is gone: one
         connection is held for the life of the process, and a Postgres that
-        restarted would otherwise fail every call until this one restarts too
-        (2026-10-31)."""
+        restarted would otherwise fail every call until this one restarts too."""
         try:
             if self.conn is None or self.conn.closed:
                 await self.open()

@@ -9,13 +9,12 @@ import { Textarea } from "@/components/ui/textarea";
 import type { CalendarEvent } from "@/lib/thread";
 
 /**
- * One of your own entries, changed in place. A typo in a title, an hour moved
- * - these used to take a sentence to Jarvis and a card to approve (2026-11-06
- * review: the way to save an edit was there, lib/use-calendar.ts, and nothing
- * opened it). What you write here is yours and is saved as you save it; a new
- * entry still comes through the conversation, where Jarvis reads the rest of
- * the day with it. The partner's entries are not opened here: changing
- * someone else's day is a conversation, not a form.
+ * One of your own entries, changed in place: a typo in a title or an hour
+ * moved takes no sentence to Jarvis and no card to approve. What you write
+ * here is yours and is saved as you save it; a new entry still comes through
+ * the conversation, where Jarvis reads the rest of the day with it. The
+ * partner's entries are not opened here: changing someone else's day is a
+ * conversation, not a form.
  *
  * The place lives in the memo's first line (calendar-svc keeps no field for
  * it), so it is edited there.

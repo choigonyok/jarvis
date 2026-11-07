@@ -69,8 +69,8 @@ export function PullToRefresh() {
   // then - unless something would be lost: the editor's work, or words in a
   // field that does not keep them. The chat's composer keeps its draft, so
   // its focus does not hold the reload back: skipping on any focused field
-  // left the phone on an old build for an evening (2026-10-27 - a figure
-  // typed on the 자산 tab was still focused on every return).
+  // would leave the phone on an old build for as long as a field stayed
+  // focused across returns.
   useEffect(
     () =>
       onResume(async () => {

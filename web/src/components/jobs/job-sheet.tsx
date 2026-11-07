@@ -78,7 +78,7 @@ function Body({
 }) {
   const [detail, setDetail] = useState<JobDetail | null>(null);
   // Whether the last read of the detail failed, and when the one on screen
-  // was read: a failure had been swallowed into "아직 기록이 없습니다".
+  // was read: a failure is said as one, not as "아직 기록이 없습니다".
   const [failed, setFailed] = useState(false);
   const [readAt, setReadAt] = useState<Date | null>(null);
   const [text, setText] = useState("");
@@ -444,8 +444,7 @@ const TONE: Record<string, string> = {
 
 /**
  * One run: when, and how many things it did, opening to what it did step by
- * step. The run going now has a light passing over its line (Trace) where the
- * breathing dot used to be.
+ * step. The run going now has a light passing over its line (Trace).
  */
 function Run({ group: g, live, open, gone }: { group: RunGroup; live: boolean; open: boolean; gone: boolean }) {
   const steps = g.events.filter((e) => e.kind === "step").length;

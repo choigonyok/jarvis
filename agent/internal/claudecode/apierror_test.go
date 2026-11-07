@@ -13,12 +13,12 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/usage"
 )
 
-// failingClaude stands in for the CLI on stream-json input, as the real one
-// behaves past an API error: a message saying FAIL is answered with an API
-// error (overloaded); one saying LIMIT first reports the usage limit as
-// rejected, resetting in one to two seconds, then the error. Either way it gives its
-// result and then waits for stdin to close before it exits - the wait that
-// held a turn for two hours (2026-10-27). Any other message is echoed.
+// failingClaude stands in for the CLI on stream-json input, as the real one behaves
+// past an API error: a message saying FAIL is answered with an API error
+// (overloaded); one saying LIMIT first reports the usage limit as rejected,
+// resetting in one to two seconds, then the error. Either way it gives its result
+// and then waits for stdin to close before it exits - the wait that held a turn for
+// two hours. Any other message is echoed.
 func failingClaude(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "claude")

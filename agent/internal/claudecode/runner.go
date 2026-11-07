@@ -236,10 +236,10 @@ type session struct {
 	ID string `json:"id"`
 	// Prompt fingerprints the system prompt the session was opened with. The
 	// CLI keeps a session's first system prompt for good: --append-system-prompt
-	// on a --resume is ignored (Claude Code 2.1.292, checked 2026-10-17 - a
-	// changed payment rule never reached the model for days). So a session
-	// opened under other instructions is not resumed; a new one is opened
-	// with the conversation so far put in front of it.
+	// on a --resume is ignored (Claude Code 2.1.292), and a changed rule would
+	// never reach the model. A session opened under other instructions is
+	// therefore not resumed; a new one is opened with the conversation so far
+	// put in front of it.
 	Prompt string `json:"prompt,omitempty"`
 	// Prefs is the taste list those instructions carry, kept so a restart
 	// while mind is down resumes the session instead of dropping the list.
@@ -396,9 +396,9 @@ func (r *Runner) start(q *Queued) string {
 }
 
 // shortSaid is how short a message is, in characters, for the exchange before
-// it to be searched with it: "응 그거 해줘", "그날 몇 시였지?" say little alone,
-// and memory answered "응 그거 해줘" alone with eight facts that only shared a
-// word with it (2026-11-03).
+// it to be searched with it: "응 그거 해줘", "그날 몇 시였지?" say little alone, and
+// memory answered "응 그거 해줘" alone with eight facts that only shared a word
+// with it.
 const shortSaid = 40
 
 // exchangeFresh is how recent the exchange before a message must be to count
@@ -1241,8 +1241,8 @@ func (r *Runner) marks(now time.Time) string {
 // cards is the cards on the screen still waiting for an answer, for the front
 // of this turn's message. They are what "이 카드 뭐야" asks about, and no tool
 // lists them: asked about two payment cards the guard had raised, the model
-// looked at the jobs and said none was waiting (2026-11-03). The list the
-// session last saw is one line; one that emptied since is said once.
+// looked at the jobs and said none was waiting. The list the session last saw
+// is one line; one that emptied since is said once.
 func (r *Runner) cards() string {
 	if r.waiting == nil {
 		return ""
@@ -1637,10 +1637,10 @@ func (r *Runner) consume(stdout interface{ Read([]byte) (int, error) }, t *tally
 		}
 		if failed = r.handle(ev); failed != nil {
 			// The turn is lost: its input ends, and the CLI with it. Left
-			// open, the CLI waited on stdin for the turn's whole timeout - two
-			// hours past a usage limit - and a message steered into it was
-			// answered into a turn nobody read any more (2026-10-27
-			// 00:47~02:47). Closed, a message sent now waits its own turn.
+			// open, the CLI would wait on stdin for the turn's whole timeout,
+			// and a message steered into it would be answered into a turn
+			// nobody reads any more. Closed, a message sent now waits its own
+			// turn.
 			r.closeInput()
 		}
 	})
@@ -1698,9 +1698,9 @@ func (r *Runner) handle(ev event) error {
 				r.tools(u.Name, u.Input)
 			}
 		}
-		// One message, one turn. Splitting it per paragraph used to read
-		// fine as plain text, but a fenced code block with a blank line
-		// in it would land as two turns and stop being one block.
+		// One message, one turn: split per paragraph, a fenced code block
+		// with a blank line in it would land as two turns and stop being
+		// one block.
 		paragraphs := paragraphsOf(ev.Message)
 		if len(paragraphs) > 0 && ev.ParentToolUseID == "" && r.stopping() {
 			// The words written when the turn was stopped, flushed by the

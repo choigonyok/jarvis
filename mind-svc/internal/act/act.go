@@ -168,7 +168,7 @@ func (c CalendarActuator) Preview(ctx context.Context, kind string, payload json
 	}
 	if kind == "calendar.update" {
 		// Said there already - the place in the memo the assistant's own card
-		// wrote ("퇴근 후 · 망원", 2026-11-04): nothing to ask.
+		// wrote: nothing to ask.
 		if prev, err := c.Cal.Get(ctx, a.EventID); err == nil && unchanged(prev, moved(prev, a)) {
 			return "", &Already{ID: prev.ID, Line: entryLine(prev)}
 		}
@@ -236,7 +236,7 @@ func (c CalendarActuator) Execute(ctx context.Context, kind string, payload json
 	case "calendar.create":
 		// Looked at again when it runs, not only when it was asked: a card
 		// waits, and the same entry may have gone on the calendar meanwhile
-		// - the assistant's own card for it approved first (2026-10-26).
+		// - the assistant's own card for it approved first.
 		if same, ok := c.existing(ctx, a.Event); ok {
 			return nil, nil, &Already{ID: same.ID, Line: entryLine(same)}
 		}
@@ -287,9 +287,9 @@ func (c CalendarActuator) Undo(ctx context.Context, _ string, undo json.RawMessa
 
 // moved is the entry as a move leaves it: when and what as the plan says, and
 // the entry's own memo with where in it. The calendar keeps where in the memo
-// (calendar-svc event.Validate, 2026-10-30), and the memo is the operator's:
-// a move wrote mind's line over it, and "퇴근 후 · 망원" would have gone with the
-// move to 모퉁이맥주 (2026-11-04).
+// (calendar-svc event.Validate), and the memo is the operator's: a move puts
+// the new place on its first line and leaves the rest as the operator wrote
+// it, never mind's line over it.
 func moved(prev model.CalendarEvent, a model.CalendarAction) model.CalendarEvent {
 	next := a.Event
 	next.ID = a.EventID

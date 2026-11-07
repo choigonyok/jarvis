@@ -56,7 +56,7 @@ NS = uuid.UUID("6f1d3c52-8a3e-4c1b-9a63-6b9e3b8f2a11")
 OWNER = (os.environ.get("MEMORY_OWNER_NAME") or "운영자") + "(나)"
 SELF_NAME = {"owner": OWNER, "guest": "손님(나)"}
 
-# Measured on the owner graph (2026-10-11, 99 questions): voyage-4-large alone
+# Measured on the owner graph (99 questions): voyage-4-large alone
 # puts the answer first 93% of the time against bge-m3's 78%; rerank-3 on top
 # of either takes it to 96%. Changing EMBED_MODEL re-embeds the whole graph
 # once at the next start (see reembed).
@@ -558,7 +558,7 @@ class Graph:
 
         With Voyage out of reach (the embedding or the reranker), by the
         words alone, ranked without a model: an answer short of its best
-        rather than none - it was a 500 and a traceback (2026-10-27).
+        rather than none, not a 500 and a traceback.
 
         Ranked by the reranker, each fact carries its score (0~1): how well
         it answers the question, which a caller putting facts in front of

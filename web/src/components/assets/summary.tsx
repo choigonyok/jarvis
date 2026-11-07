@@ -8,11 +8,10 @@ import { type Bridge, signedKrw } from "@/lib/portfolio";
 /**
  * One question, answered in a line, with the detail in a sheet.
  *
- * The tab used to lay every section out at full length - four phone screens
- * - and then split them into tabs, which hid the answers behind a choice. A
- * row says what matters in the line itself; the section it came from opens
- * over the page for whoever wants to check the working, and the page stays
- * the length it was.
+ * Every section at full length would be four phone screens, and tabs would
+ * hide the answers behind a choice. A row says what matters in the line
+ * itself; the section it came from opens over the page for whoever wants to
+ * check the working, and the page stays the length it was.
  */
 export function Row({
   id,

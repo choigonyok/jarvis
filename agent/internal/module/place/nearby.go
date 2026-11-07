@@ -40,10 +40,9 @@ type Point struct {
 const userAgent = "jarvis-personal/1 (personal assistant; github.com/choigonyok/jarvis)"
 
 // Endpoints, replaceable in tests. Overpass is run by volunteers and an
-// instance is often busy or down (2026-10-15: one of four answered, in 19
-// s), so all are asked at once and the first answer is taken; when none
-// answers, Nominatim's category search over the same box stands in (less
-// detail: no addresses).
+// instance is often busy or down, so all are asked at once and the first
+// answer is taken; when none answers, Nominatim's category search over the
+// same box stands in (less detail: no addresses).
 var (
 	overpassURLs = []string{
 		"https://maps.mail.ru/osm/tools/overpass/api/interpreter",

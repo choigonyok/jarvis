@@ -62,8 +62,8 @@ type OutflowInput struct {
 type AskConfig struct {
 	Every time.Duration
 	// MaxOpen is how many of these cards may wait at once - a guard, not a
-	// pace: every withdrawal is asked about now (the operator's choice,
-	// 2026-10-26), and this only stops a wall of cards if something breaks.
+	// pace: every withdrawal is asked about (the operator's choice), and this
+	// only stops a wall of cards if something breaks.
 	MaxOpen int
 	// Categories is the 가계부's list, for the card's 분류.
 	Categories func(ctx context.Context) ([]string, error)

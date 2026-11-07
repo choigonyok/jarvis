@@ -290,8 +290,8 @@ type Rule struct {
 	Base     float64  `json:"base,omitempty"`
 	Days     int      `json:"days,omitempty"`
 	Except   []string `json:"except,omitempty"` // conditions the operator added ("직전 캠핑 후 남은 경우")
-	// Exceptions are the same conditions in a form they can be checked by
-	// (since 2026-11-07; Except keeps their words on the note).
+	// Exceptions are the same conditions in a form they can be checked by;
+	// Except keeps their words on the note.
 	Exceptions []Exception `json:"exceptions,omitempty"`
 	// travel: from From to To usually takes Minutes.
 	From    string `json:"from,omitempty"`
@@ -417,7 +417,7 @@ type Prediction struct {
 	// Prior is what the rule said before the rate notes in Basis moved it
 	// (the weekday's share, the comparable days'): what each of those notes
 	// is measured against - did moving it help. Nil: nothing moved it, or
-	// it was made before 2026-11-07, when nothing kept what it said.
+	// it was made before Prior was kept.
 	Prior     *float64   `json:"prior,omitempty"`
 	Outcome   *bool      `json:"outcome,omitempty"`
 	Score     *float64   `json:"score,omitempty"`

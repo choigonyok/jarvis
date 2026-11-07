@@ -168,8 +168,6 @@ func (g *Gate) noticeReading(in model.Intent) engine.Reading {
 // (each night), and the next notices of its kind are held to that record
 // (admit): a kind said again and again not to be needed is no longer sent,
 // but for the odd one, and one mostly not needed waits for the evening.
-// Until 2026-11-07 a notice could not be answered, so nothing ever learnt
-// which of them were wanted.
 func (g *Gate) Heard(ctx context.Context, id string, useful bool) (model.Intent, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -234,9 +232,9 @@ func (g *Gate) submit(ctx context.Context, in model.Intent) (model.Intent, bool,
 			return in, in.Status == model.Rejected, g.st.PutIntent(ctx, in)
 		}
 		// One entry asked about twice - the same days at the same place, read
-		// in two rooms as two plans (2026-11-01), or a move and a move of it -
-		// is one question: the card still open for the other is closed and
-		// this one, the newer, stands.
+		// in two rooms as two plans, or a move and a move of it - is one
+		// question: the card still open for the other is closed and this one,
+		// the newer, stands.
 		by := in.ID
 		if asked {
 			by = open.ID
@@ -272,9 +270,7 @@ func (g *Gate) admit(ctx context.Context, in, open model.Intent, asked bool) (mo
 		if in.Urgent {
 			in.Decision, in.Tier, in.Why = model.Notify, "now", "지금 알 일"
 			// The morning brief is the day's first word and is not held
-			// for the evening by what rang before it: nine loops with one
-			// friend at 07:00 once sent the 08:00 brief to the evening
-			// digest (2026-10-25).
+			// for the evening by what rang before it, however much rang.
 			if in.Moment == "" && in.Skill != BriefSkill && g.overBudget(ctx) {
 				in.Decision, in.Tier, in.Why = model.Digest, "digest", "오늘 알림 한도를 넘어 저녁 요약으로"
 			}
@@ -363,8 +359,8 @@ func (g *Gate) admit(ctx context.Context, in, open model.Intent, asked bool) (mo
 		// shows, answered back here. A quiet one (low confidence, the day's
 		// interruptions used up, not worth a buzz) is a card all the same -
 		// it just rings with the evening digest instead of now. A notice
-		// with no card behind it read as "확인해 주세요" with nothing to
-		// confirm and no calendar change (2026-10-18).
+		// with no card behind it read as "확인해 주세요" with nothing to confirm
+		// and no calendar change.
 		in.Card = true
 		g.card(ctx, in, "ask")
 		g.tellLocal(ctx, in, "확인해 주세요", in.Title+"\n"+in.Reason)
@@ -401,9 +397,9 @@ func (g *Gate) openCard(ctx context.Context, in model.Intent) (model.Intent, boo
 }
 
 // retell puts what a question has become on the card asking it. A time moved
-// again before anyone answered is one question: closed and raised anew each
-// time it rang each time, and 45 entries took 81 cards (to 2026-11-03). The card
-// keeps its place, its ring and its count; only what it says changes.
+// again before anyone answered is one question, not a new card ringing each
+// time: the card keeps its place, its ring and its count; only what it says
+// changes.
 func (g *Gate) retell(ctx context.Context, in, open model.Intent) (model.Intent, error) {
 	in.ID, in.CreatedAt, in.Card, in.Tier, in.Why = open.ID, open.CreatedAt, true, open.Tier, open.Why
 	if len(in.Evidence) == 0 {
@@ -661,11 +657,11 @@ func (g *Gate) planOf(ctx context.Context, in model.Intent, a model.CalendarActi
 const askedWithin = 48 * time.Hour
 
 // Asked enters a calendar card the assistant raised in the conversation. What
-// the operator asked for by name is the card they are looking at: mind read the
-// same words as a plan, found no entry and asked as well, and 6 of the 7 entries
-// asked for that way took two cards (to 2026-11-03). mind's card still open about
-// it stands aside, and none is raised while the row speaks (askedInChat). With
-// no card in the conversation mind's is the only question, and stands.
+// the operator asked for by name is the card they are looking at - mind reads
+// the same words as a plan, finds no entry and would ask as well. mind's card
+// still open about it stands aside, and none is raised while the row speaks
+// (askedInChat). With no card in the conversation mind's is the only
+// question, and stands.
 func (g *Gate) Asked(ctx context.Context, card, kind, title string, a model.CalendarAction) (model.Intent, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -730,9 +726,9 @@ type HeldAnswer struct {
 // conversation's turned down is turned down for mind as well: its own question
 // that stood aside for it (cover) is turned down with the operator's words, so
 // the next read and the next card hear them - they reached that session's model
-// alone, and the next session asked the same again (2026-11-03). Only a card
-// mind was told of (Asked) speaks for the operator: the guest's agent tells mind
-// nothing, and the guest's words are not theirs.
+// alone, and the next session asked the same again. Only a card mind was told of
+// (Asked) speaks for the operator: the guest's agent tells mind nothing, and the
+// guest's words are not theirs.
 func (g *Gate) Answered(ctx context.Context, a HeldAnswer) (model.Intent, error) {
 	g.mu.Lock()
 	in, turned, err := g.answered(ctx, a)
@@ -795,8 +791,8 @@ func (g *Gate) turnDownCovered(ctx context.Context, held model.Intent) ([]model.
 
 // TurnedDown is the no the operator already gave to the like of an entry the
 // assistant would ask for in the conversation: its card passed no gate, and
-// asked again what "차 예약은 일정 카드 필요없어" turned down (2026-11-03).
-// What they said just now (said) is the newer word, and a request in it stands.
+// asked again what "차 예약은 일정 카드 필요없어" turned down. What they said just now
+// (said) is the newer word, and a request in it stands.
 func (g *Gate) TurnedDown(ctx context.Context, ev model.CalendarEvent, said string) (model.Turned, bool, error) {
 	if g.Turned == nil {
 		return model.Turned{}, false, nil
@@ -835,7 +831,7 @@ func (g *Gate) asksSame(ctx context.Context, in, held model.Intent) bool {
 	// A card that asked to add an entry speaks for adding it, not for what
 	// changes about it after: approved at 11:56, '은주와 저녁' kept both moves of
 	// its place that day (망원, then 모퉁이맥주 from KakaoTalk) off the calendar
-	// for its 48 hours (2026-11-04).
+	// for its 48 hours.
 	if in.Kind != "calendar.create" && held.Kind == model.HeldCalendarCreate {
 		return false
 	}

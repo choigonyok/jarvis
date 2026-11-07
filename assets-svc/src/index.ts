@@ -1,10 +1,8 @@
 /**
  * assets-svc owns reading the two brokerages.
  *
- * It used to be a route handler in the web service, which meant the Upbit and
- * KIS keys - keys that can place orders - sat in the environment of a Next.js
- * process that also serves the browser. They are here now, and the web service
- * proxies to this.
+ * The Upbit and KIS keys - keys that can place orders - are here, not in the
+ * Next.js process that serves the browser; the web service proxies to this.
  *
  * Toward the brokerages it reads - balances and prices - and places orders
  * only through /orders, the orders a person approved (orders.ts). It writes

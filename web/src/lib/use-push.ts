@@ -40,9 +40,8 @@ async function registration(): Promise<ServiceWorkerRegistration> {
 /**
  * The device's push subscription, made again if it is gone: a phone whose
  * permission is granted but whose subscription the platform dropped would
- * otherwise get no push at all, with nothing on screen to say so (2026-11-01:
- * output-svc delivered to two older subscriptions of the phone, the app on it
- * held none). Resolves the endpoint, or "" where there is none to have.
+ * otherwise get no push at all, with nothing on screen to say so. Resolves
+ * the endpoint, or "" where there is none to have.
  */
 export async function ensurePush(): Promise<string> {
   if (!supported() || Notification.permission !== "granted") {

@@ -53,7 +53,7 @@ func move(entity string) model.Intent {
 
 // The day's push budget holds other notices for the evening, never the
 // morning brief: loops told at 07:00 must not send the 08:00 brief to the
-// digest (2026-10-25: nine loops with one person did).
+// digest.
 func TestBriefIsNotHeldByTheDaysBudget(t *testing.T) {
 	ctx := context.Background()
 	p := DefaultPolicy()
@@ -404,9 +404,9 @@ func TestFixedContextIsAlwaysAsked(t *testing.T) {
 	}
 }
 
-// 2026-10-26: the card waited while the assistant's own card for the same
-// entry was approved. Approving it then links to that entry - it does not
-// put the entry on the calendar a second time.
+// A card that waited while the assistant's own card for the same entry was
+// approved links to that entry when it is approved - it does not put the
+// entry on the calendar a second time.
 func TestApprovalLinksWhatWentOnMeanwhile(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(DefaultPolicy())
@@ -584,10 +584,10 @@ func TestAMoveAskedInTheConversation(t *testing.T) {
 }
 
 // A card in the conversation that added an entry does not speak for changing
-// it after: approved at 11:56, it kept both moves of '은주와 저녁's place - 망원
-// at 12:00, 모퉁이맥주 from KakaoTalk at 17:30 - off the calendar (2026-11-04).
-// Adding the same again is still its question; a move the memo says already
-// is no question at all.
+// it after: approved at 11:56, it does not keep the later moves of '은주와
+// 저녁's place - 망원 at 12:00, 모퉁이맥주 from KakaoTalk at 17:30 - off the
+// calendar. Adding the same again is still its question; a move the memo says
+// already is no question at all.
 func TestAChangeAfterTheConversationAddedItIsAsked(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(DefaultPolicy())
@@ -858,7 +858,7 @@ func TestOneSubjectRingsOnce(t *testing.T) {
 }
 
 // Two plans for one entry - the same day at the same place, read in two rooms
-// - are one question: the newer card closes the older (2026-11-01).
+// - are one question: the newer card closes the older.
 func TestAlikeCalendarCardIsOneQuestion(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(DefaultPolicy())
@@ -894,8 +894,7 @@ func TestAlikeCalendarCardIsOneQuestion(t *testing.T) {
 }
 
 // One stay asked about under two names: the same first and last day and a word
-// in common are one question, and approving both would put it on twice
-// (2026-11-03).
+// in common are one question, and approving both would put it on twice.
 func TestCardsAboutOneStayAreOneQuestion(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(DefaultPolicy())
@@ -911,9 +910,9 @@ func TestCardsAboutOneStayAreOneQuestion(t *testing.T) {
 	}
 }
 
-// One morning's plans asked four cards and none closed another (2026-11-02):
-// a question about an entry closes the other plans' questions about it, and a
-// question about one outing closes the other parts'. Another day's stays.
+// One morning's plans asked four cards and none closed another: a question
+// about an entry closes the other plans' questions about it, and a question
+// about one outing closes the other parts'. Another day's stays.
 func TestCardsAboutOneOutingAreOneQuestion(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(DefaultPolicy())

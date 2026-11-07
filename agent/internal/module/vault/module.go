@@ -19,9 +19,8 @@
 // the card the same way - not into the conversation, and not kept in the
 // card's record - but they are no secret from the model: an order sheet is
 // typed from them, so shipping_address reads them back whole. Saved once,
-// an order no longer asks for them (2026-10-29~30: six cards asked, and the
-// answers that came back put a wrong phone number and a wrong building
-// number on four order sheets).
+// an order no longer asks for them, and every order sheet is typed from the
+// same words.
 package vault
 
 import (

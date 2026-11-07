@@ -213,9 +213,8 @@ export function ProposalCard({
 /**
  * The photos a card is about. A listing's are shown as it will show them, the
  * first the cover; the ones a question asks about (cover false) are all alike.
- * A tap opens them full screen, one after another under the finger: a card
- * showed several only as small tiles, with no way to see one whole
- * (2026-11-07).
+ * A tap opens them full screen, one after another under the finger - small
+ * tiles alone are no way to see one whole.
  */
 function CardPhotos({ names, cover }: { names: string[]; cover: boolean }) {
   const [open, setOpen] = useState<number | null>(null);

@@ -135,10 +135,9 @@ const OWNER_HUBS: Hub[] = [
 ];
 
 /**
- * The guest's places, grouped as the operator's are: eight screens were eight
- * wordless icons, more slots than the operator's five, and every one a single
- * screen, so neither the bar nor the header said where you were (2026-11-06
- * review). Five places keep their words.
+ * The guest's places, grouped as the operator's are. Five places keep their
+ * words; eight screens would be eight wordless icons, and neither the bar nor
+ * the header would say where you are.
  */
 const GUEST_HUBS: Hub[] = [
   { id: "talk", label: "대화", icon: MessageCircle, screens: [{ href: "/", label: "대화" }] },
@@ -190,7 +189,7 @@ function remember(hub: Hub, pathname: string) {
 /**
  * Where a waiting decision is announced: the conversation, where the card
  * stands and is decided - the mark sat on 더보기, two taps from a card that
- * was a tab away (2026-11-06 review).
+ * was a tab away.
  */
 const pendingHome = "/";
 
@@ -229,8 +228,7 @@ function scrollPageToTop() {
  *
  * The header stays solid, with plain text tabs on a wide screen. Only the
  * phone's floating tab bar is glass: two backdrop-filter bars on one screen
- * sample each other in Chrome, which once showed as the tab labels ghosting
- * into the header.
+ * sample each other in Chrome, and the tab labels ghost into the header.
  */
 function HeaderView({
   connection,
@@ -263,8 +261,7 @@ function HeaderView({
     wasOnline.current = online;
   }, [online]);
   // The stream down while the phone is online: the word stands beside the
-  // dot on a phone too, where the dot alone looked like any quiet dot
-  // (2026-11-07 review).
+  // dot on a phone too, where the dot alone looked like any quiet dot.
   const dropped = connection === "closed" && online;
 
   useEffect(() => {

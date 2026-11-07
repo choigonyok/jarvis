@@ -8,8 +8,8 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/core/module"
 )
 
-// The cards that showed their arguments in braces (2026-10-20): a job made and
-// a job instructed, as the model sent them. A card reads as words.
+// The cards that showed their arguments in braces: a job made and a job
+// instructed, as the model sent them. A card reads as words.
 func TestCardsReadAsWordsNotJSON(t *testing.T) {
 	g := &Gate{modules: module.NewRegistry()}
 	cases := []struct {

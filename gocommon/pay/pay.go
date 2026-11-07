@@ -1,7 +1,7 @@
 // Package pay is the payments whose password is kept in the vault and typed on
 // their own keypad, in one table (pins.json): the vault that keeps them, the
 // agent that asks for them by name and the browser that types them each had a
-// list of their own (2026-11-03).
+// list of their own.
 package pay
 
 import (

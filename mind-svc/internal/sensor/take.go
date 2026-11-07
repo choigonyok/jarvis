@@ -10,10 +10,10 @@ import (
 	"github.com/choigonyok/jarvis/mind-svc/internal/mind"
 )
 
-// What the adapters leave in the stream. mind no longer goes to the calendar,
-// the phones or the accounts: each reads its own outside and leaves a record
-// when what it read changed (gocommon/watch), and this is the lane that takes
-// them - by rule, no model.
+// What the adapters leave in the stream. mind does not go to the calendar,
+// the phones or the accounts itself: each reads its own outside and leaves a
+// record when what it read changed (gocommon/watch), and this is the lane
+// that takes them - by rule, no model.
 const (
 	KindCalendarNear = "calendar.near"
 	KindCalendarYear = "calendar.year"

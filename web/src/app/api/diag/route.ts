@@ -1,6 +1,6 @@
-// Temporary (2026-10-27): the chat screen's numbers from the phone, written
-// to the Worker's log for `wrangler tail jarvis` (lib/diag.ts). Behind the
-// same gate as everything else (middleware).
+// Temporary: the chat screen's numbers from the phone, written to the
+// Worker's log for `wrangler tail jarvis` (lib/diag.ts). Behind the same
+// gate as everything else (middleware).
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {

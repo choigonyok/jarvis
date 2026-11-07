@@ -35,11 +35,9 @@ const (
 func Qualified(name string) string { return "mcp__" + name + "__" + name }
 
 // keep is what the CLI keeps of a tool's description: past about 2,000
-// characters it is cut off, and what lay below the cut did not exist for the
-// model. The rows below the checklists had been out of its sight since the
-// boards were made - a goal.check came with no mark, and said it had recorded
-// it (2026-11-02). So a board that does not fit says each row in short, and
-// help says the rest.
+// characters it is cut off, and what lies below the cut does not exist for
+// the model. So a board that does not fit says each row in short, and help
+// says the rest.
 const keep = 2000
 
 // Help is what asks a board for one row's whole description.

@@ -8,8 +8,7 @@ import { cn } from "@/lib/utils";
 /**
  * A password field, hidden as typed, with a 보기 toggle - a phone keyboard
  * makes a typo easy and this is the only chance to see it. The card's secret
- * field and the login's password are the same field (2026-11-06 review: the
- * login had no way to look).
+ * field and the login's password are the same field.
  */
 export function SecretInput({
   id,

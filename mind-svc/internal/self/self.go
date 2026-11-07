@@ -181,7 +181,7 @@ func Condition(n model.Note, reason string) string {
 		return ""
 	}
 	// Left over, said so: "집에 남았어", "아직 있어". A bare "있어" was any
-	// reason at all - "일정이 있어" read as leftovers (2026-11-03).
+	// reason at all - "일정이 있어" read as leftovers.
 	if n.Rule != nil && n.Rule.Kind == "prep" {
 		for _, w := range []string{"남았", "남아", "아직 있", "집에 있", "이미 있", "많이 있"} {
 			if strings.Contains(r, w) {
@@ -203,7 +203,7 @@ func PrepText(kind, class, bucket string) string {
 
 // Verb is what one does with a class of thing: a place or a ticket is
 // booked, anything else bought. "캠핑장을 산다" asked what buying a campsite
-// could mean (2026-11-07). The ending: "다" for a note, "었다" for evidence.
+// could mean. The ending: "다" for a note, "었다" for evidence.
 func Verb(class, ending string) string {
 	for _, w := range []string{"캠핑장", "야영장", "글램핑", "숙소", "펜션", "호텔", "리조트", "예약", "티켓", "입장권", "항공권", "승차권"} {
 		if strings.Contains(class, w) {

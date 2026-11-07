@@ -32,7 +32,7 @@ type Config struct {
 	// what the operator asked it to remember. Read without a card like the
 	// workspace - and written without one too: the CLI lets its model write
 	// its auto memory without asking, whatever the permission mode (tried in
-	// the agent container, 2026-10-17). So what a page talks the model into
+	// the agent container). So what a page talks the model into
 	// writing there is loaded into every later session - which is why every
 	// change is told to the operator, with its words (memorywatch: the
 	// operator chose being told over a card). The guest's agent has its own,
@@ -89,16 +89,14 @@ type Config struct {
 	// server does not - so this is what stands between that port and anyone
 	// else on the same wifi. Empty means no header is sent.
 	ExtraMCPToken string
-	// CalendarURL is where calendar-svc listens. The events used to be a file
-	// here, kept deliberately outside the workspace mount so the CLI's own
-	// Read and Write could not be a second door into them. They are in
-	// Postgres behind that service now, which closes the same door more
-	// firmly: there is no path on this filesystem to walk past the calendar
+	// CalendarURL is where calendar-svc listens. The events are in Postgres
+	// behind that service, so the CLI's own Read and Write are no second door
+	// into them: there is no path on this filesystem to walk past the calendar
 	// tools' schema and approval cards.
 	CalendarURL string
-	// ChatURL is where the turns are kept (input-svc). The transcript used to be a file in
-	// /data, kept outside the workspace so the CLI's own Read and Write could
-	// not be a second door into it; it is in Postgres behind that service now.
+	// ChatURL is where the turns are kept (input-svc): in Postgres behind that
+	// service, so the CLI's own Read and Write are no second door into the
+	// transcript.
 	ChatURL string
 	// AssetsURL is where assets-svc listens. The agent reads it and nothing
 	// more: the brokerage keys stay in that service, and the routes this

@@ -83,7 +83,7 @@ func TestPhotosInNoPlanAreAskedAbout(t *testing.T) {
 }
 
 // A card shows six plans, nearest the photos first: 14:53's photos were asked
-// about with the day's other plans and not the rehearsal at 15:00 (2026-11-02).
+// about with the day's other plans and not the rehearsal at 15:00.
 func TestTheNearestPlansAreOffered(t *testing.T) {
 	ctx := context.Background()
 	m, st, _ := chargeMind(t, "")

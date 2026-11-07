@@ -1,13 +1,12 @@
 // Package proposal is the heart of this assistant: something wants to change
 // the world, and a person decides whether it may.
 //
-// It deliberately knows nothing about Claude Code. The approval card used to
-// live inside the CLI's permission callback, which meant a card could only
-// exist while a tool call sat blocked waiting on it - and the assistant this
-// is growing into must be able to propose things nobody asked for ("캠핑
-// 일정 추가할까요?"), where there is no blocked call to hang a card on. So a
+// It deliberately knows nothing about Claude Code. A card inside the CLI's
+// permission callback could only exist while a tool call sat blocked waiting
+// on it, and the assistant proposes things nobody asked for ("캠핑 일정
+// 추가할까요?"), where there is no blocked call to hang a card on. So a
 // proposal is a stored object with its own lifecycle, and the permission
-// callback became just one of the things that can open one.
+// callback is just one of the things that can open one.
 package proposal
 
 import (
@@ -126,8 +125,8 @@ type Store struct {
 	path string
 	log  *slog.Logger
 	// onDecide hears every decision after it is recorded. Nobody blocks on a
-	// card raised in conversation any more; this is how its decision gets
-	// back to whoever has to act on it.
+	// card raised in conversation; this is how its decision gets back to
+	// whoever has to act on it.
 	onDecide []func(Proposal, Decision)
 	// onOpen hears every new card - how it reaches the phone (output-svc).
 	onOpen  []func(Proposal)

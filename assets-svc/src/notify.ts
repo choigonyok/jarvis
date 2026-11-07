@@ -49,8 +49,8 @@ export function eventsOf(p: Portfolio, now = new Date()): Event[] {
   // Out of band: kept in the inbox only. mind-svc reads the event and brings
   // the rebalance up in the evening at home, after work (its moments) - a
   // line in the evening's summary as well would say it twice. Not from a
-  // portfolio half read: with a broker timed out, "유망주 0%" is a gap, not
-  // a bucket out of band (2026-10-24~27: three such days).
+  // portfolio half read: with a broker timed out, "유망주 0%" is a gap, not a
+  // bucket out of band.
   for (const r of halfRead(p.problems) ? [] : p.allocation.rows) {
     if (r.inBand) continue;
     const pp = Math.round((r.current - r.target) * 100);

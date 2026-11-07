@@ -186,7 +186,7 @@ func (m *Mind) loadBook(ctx context.Context) {
 
 // trial is the judgement engine held to its own past (engine.Walk) as the
 // ledger was last made: for the status tab, which had no way to see whether
-// the correction it applies does better than what was said (2026-11-07).
+// the correction it applies does better than what was said.
 type trial struct {
 	mu sync.Mutex
 	at time.Time

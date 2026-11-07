@@ -63,7 +63,7 @@ def uri(img):
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
-# 2026-10-30 00:07 네이버페이 결제 비밀번호 화면(pay.naver.com/authentication/pw/check)의 실제 스프라이트.
+# 네이버페이 결제 비밀번호 화면(pay.naver.com/authentication/pw/check)의 실제 스프라이트.
 # 120×200, 칸 40×50(화면에는 반으로 줄여 20×25). 칸 순서(행 우선)로 0 2 6 / 1 3 7 / 8 5 9 / _ 4 _ 이
 # 그려져 있다(그 화면 사진과 대조함). 키 배치만 담긴 그림이라 비밀번호와는 상관이 없다.
 NAVER_SPRITE = (
@@ -399,7 +399,7 @@ class KeypadInABrowser(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await self.entered(t), "135790", kind)
 
     async def test_enters_on_the_naver_pay_picture_keypad(self):
-        # 2026-10-30 00:07 에 넣지 못한 그 키패드의 짜임과 그림 그대로.
+        # 실제 키패드의 짜임과 그림 그대로.
         t = await self.open(f"http://pay.naver.com:{self.web}/naverpay")
         self.assertEqual(await pin.enter(pin="135790", port=self.cdp), "네이버페이 결제 비밀번호를 넣었습니다")
         self.assertEqual(await self.entered(t), "135790")

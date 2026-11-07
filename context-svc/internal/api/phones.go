@@ -609,8 +609,8 @@ func (s *Server) saveWatching(ctx context.Context, source string, w watching) er
 // commandSettle is how long after the report a mode command answered the
 // phone's next reports may still have been made before it heard the command.
 // A region's transition and the fixes made with it go out one after another,
-// and each still said the old mode: three in three seconds, all fixes of
-// 13:58:13, each answered with the same command again (2026-10-27).
+// each still saying the old mode, and each would be answered with the same
+// command again.
 const commandSettle = time.Minute
 
 // sentMode is the mode last commanded to a phone, and the fix of the report

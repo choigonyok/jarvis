@@ -31,7 +31,7 @@ const (
 	dailyMinDays = 14 // days seen, at least, before a daily rule
 	// dailyMinWeekday: a weekday (or the weekend) must have come round this
 	// often before it can stand out. From two, one Tuesday in three made a
-	// rule ("화요일엔 … 거의 없다", 2026-11-07).
+	// rule.
 	dailyMinWeekday = 3
 	dailyTest       = 28 // days a daily rule is tried on, walking forward
 	dailyEffect     = 0.2
@@ -213,8 +213,7 @@ func (p *Predictor) Mine(ctx context.Context) ([]model.Note, error) {
 	// Every stream is tried for a weekday that stands out: of so many tries
 	// some stand out by chance. A daily rule found for the first time must
 	// stand out among all the streams tried tonight (discoveries); one already
-	// known is held to its own record instead (Grade). Until 2026-11-07 each
-	// stream's least likely of eight looks was taken at p ≤ 0.1 as it was.
+	// known is held to its own record instead (Grade).
 	var found []dailyFound
 	tried := 0
 	for _, k := range keys {
@@ -271,8 +270,8 @@ func (p *Predictor) Mine(ctx context.Context) ([]model.Note, error) {
 
 // broad is a key too wide to be a habit of its own: arriving anywhere one
 // goes often (the bare visit key - home, work and the rest together) is
-// most days, and a rule on it ("화요일엔 자주 가는 곳 도착이 거의 없다") said
-// nothing a person could place (2026-11-07). Each place has its own key.
+// most days, and a rule on it ("화요일엔 자주 가는 곳 도착이 거의 없다") said nothing a
+// person could place. Each place has its own key.
 func broad(key string) bool { return key == "visit" }
 
 // hasTime is whether a calendar entry's time says when it starts: one with
@@ -489,7 +488,7 @@ func dailyText(label string, f dailyFit) (string, []string) {
 	ev := []string{fmt.Sprintf("최근 %d일 중 %s %d일에 %d번, 다른 날 %d일에 %d번", f.N, when, n, k, f.N-n, f.K-k)}
 	// Said by how much, not only which way: "거의 없다" was said of a day
 	// that had it half the time, "있는 편이다" of one that had it a third of
-	// the time (2026-11-07).
+	// the time.
 	var how string
 	switch {
 	case on > off && on >= 0.5:

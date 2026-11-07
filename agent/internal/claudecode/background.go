@@ -71,11 +71,10 @@ type Task struct {
 }
 
 // MaxPlain is how many background tasks without the browser may run at
-// once, beside the one on the browser. Each is a CLI process of a few
+// once, beside the one on the browser: a task that does not need the
+// browser does not wait for one that does. Each is a CLI process of a few
 // hundred MB; the Mac mini (16GB) runs the conversation, the services and
-// the voice beside them. It was two for all of them, browser included,
-// until 2026-10-28 - a job on the browser and one checking a price filled
-// it, and a third waited for no reason.
+// the voice beside them.
 const MaxPlain = 4
 
 // Place is a place for a background task, taken before the task starts
@@ -91,12 +90,12 @@ type place struct {
 
 // Reserve takes a place for a task about to start - the check and the taking
 // in one step - or says none is free. Between a scheduler deciding a task may
-// start and the task starting there are calls to other services; counted
-// only once the task started, a scheduler looking at five due jobs started
-// all five into four places, and the fifth gave way at once and waited five
-// minutes for no reason (2026-10-28). Taken here, the place counts from now:
-// the browser's is the task's before any guard goes on, and the conversation
-// taking the browser (TakeBrowser) waits for it to start or go.
+// start and the task starting there are calls to other services; counted only
+// once the task started, a scheduler looking at five due jobs started all
+// five into four places, and the fifth gave way at once and waited five
+// minutes for no reason. Taken here, the place counts from now: the browser's
+// is the task's before any guard goes on, and the conversation taking the
+// browser (TakeBrowser) waits for it to start or go.
 func (r *Runner) Reserve(browser bool) (Place, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -190,8 +189,8 @@ func (r *Runner) plainLocked() int {
 // be using it (TakeBrowser) - a turn that only talks leaves it be; one that
 // does not want it needs only one of the MaxPlain places. It does not wait
 // for the conversation to stay quiet a while first - a job the operator just
-// asked for waited five minutes on "예약됨" for that (2026-10-18), and a run
-// the conversation cuts short is picked up by the next one (yield backoff).
+// asked for waited five minutes on "예약됨" for that, and a run the
+// conversation cuts short is picked up by the next one (yield backoff).
 func (r *Runner) CanStart(browser bool) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -212,8 +211,8 @@ func (r *Runner) canStartLocked(browser bool) bool {
 // and its site guard released (Task.Done) - so the call finds the browser
 // the conversation's own; false when the task had not let go by then.
 //
-// Before 2026-10-28 every turn did this as it started, whatever it was
-// about: "안녕" stopped a listing half typed on 중고나라.
+// Only a turn about to use the browser takes it, never a turn as it starts:
+// a greeting does not stop a listing half typed.
 func (r *Runner) TakeBrowser(wait time.Duration) bool {
 	r.mu.Lock()
 	// Out of a turn nothing of the conversation is calling: a call that

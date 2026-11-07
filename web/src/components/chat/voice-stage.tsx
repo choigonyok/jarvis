@@ -72,7 +72,7 @@ export function VoiceStage({
   /**
    * Sent, and Jarvis has not yet said he is on it. Without this the moment
    * between the two showed the previous answer again - and the open mic
-   * meanwhile - before "생각하는 중" (2026-10-19). It looks the same as
+   * meanwhile - before "생각하는 중". It looks the same as
    * thinking, and ends when thinking begins, when the answer comes, or after
    * a while with nothing back (then the thread is re-read).
    */
@@ -372,7 +372,7 @@ export function VoiceStage({
   return (
     <div className="pb-safe pt-safe inset-x-safe screen-h fixed inset-x-0 top-0 z-50 flex flex-col bg-background">
       {/* One way out, the keyboard on the right: an ✕ on the left did the
-          same thing under another name (2026-11-06 review). */}
+          same thing under another name. */}
       <div className="flex h-13 shrink-0 items-center justify-end px-3 sm:h-14 sm:px-6">
         <div className="flex items-center gap-1">
           <IconButton onClick={openSetup} label={ownVoice ? "내 목소리 (등록됨)" : "내 목소리 등록"}>
@@ -534,7 +534,7 @@ function useHeard(signal: number): number {
 /**
  * What a fatal recognizer error means, in words that say what to do. The
  * code itself is the diagnostics' (lib/use-speech.ts, rec.error): "(network)"
- * at the end of a sentence told nobody anything (2026-11-07 review).
+ * at the end of a sentence told nobody anything.
  */
 function failure(code: string | null) {
   switch (code) {

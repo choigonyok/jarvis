@@ -5,12 +5,11 @@ import (
 	"strings"
 )
 
-// Brief is words as a notification says them: one line however many they
-// came in (" · " between them), without the marks of a document - a list's
-// "-" or "1.", a heading's "#", **bold**, `code`, a link's brackets - without
-// the name the writer opened with ("고뇩님,"), at most n characters. A job's
-// report and a card's body, written for the conversation, came to the phone
-// as they were: 300 characters of a document, asterisks and all (2026-11-07).
+// Brief is words as a notification says them: one line however many they came
+// in (" · " between them), without the marks of a document - a list's "-" or
+// "1.", a heading's "#", **bold**, `code`, a link's brackets - without the
+// name the writer opened with ("고뇩님,"), at most n characters: a job's report
+// and a card's body are written for the conversation, not for a phone's notice.
 func Brief(s string, n int) string {
 	var parts []string
 	for _, line := range strings.Split(s, "\n") {

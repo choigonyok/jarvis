@@ -11,8 +11,8 @@ import (
 
 // The login check opens no page the payment guard asks about: the page's own
 // writes would stop there and raise cards in front of someone who started
-// nothing (네이버페이's history, 2026-11-03). Hosts as the guard reads them -
-// the host or one under it - and the patterns over the whole address.
+// nothing. Hosts as the guard reads them - the host or one under it - and
+// the patterns over the whole address.
 func TestTheLoginCheckOpensNoPaymentPage(t *testing.T) {
 	raw, err := os.ReadFile("../../../browser/payment-hosts.json")
 	if err != nil {

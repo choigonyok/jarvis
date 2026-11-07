@@ -84,11 +84,10 @@ func TestUpdateIsAPatch(t *testing.T) {
 // The calendar must survive a restart: it is the one part of this process
 // whose loss the operator would actually notice.
 //
-// What that means changed with the split. The agent no longer holds the events
-// at all, so this is no longer "the file is re-read" but "a fresh agent sees
-// what the previous one wrote" - which is the property the operator actually
-// cares about, and now it holds across a restart of *this* process without the
-// events ever being on its disk.
+// The agent holds no events itself, so what this means is "a fresh agent sees
+// what the previous one wrote" - the property the operator actually cares
+// about - across a restart of *this* process, without the events ever being
+// on its disk.
 func TestSurvivesRestart(t *testing.T) {
 	service := newFakeService(t)
 

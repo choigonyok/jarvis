@@ -3,7 +3,7 @@
  * removal that did not go, the agent out of reach - said one way. The
  * console speaks 해요체 (web/DESIGN.md): the same failure read
  * "저장하지 못했어요" on one screen and "저장하지 못했습니다" on the next, and
- * reading was said three ways (2026-11-07 review). A screen with something
+ * reading was said three ways. A screen with something
  * more particular to say ("이전 대화를 불러오는 중…") says it in the same form.
  */
 export const SAY = {

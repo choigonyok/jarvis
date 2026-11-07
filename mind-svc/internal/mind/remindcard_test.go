@@ -17,8 +17,7 @@ import (
 // The operator's own promise comes as a card offering a reminder, and
 // approving it - with the time and the words the operator left - is what
 // keeps one; nothing is pushed for the loop itself. The loop's note changed
-// afterwards asks nothing again (2026-11-06: one promise, two pushes and no
-// card).
+// afterwards asks nothing again.
 func TestPromiseIsOfferedAndApprovedAsAReminder(t *testing.T) {
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	f := newMomentsFixture(t, time.Date(2026, 11, 6, 17, 59, 0, 0, seoul), nil)
@@ -80,7 +79,7 @@ func TestPromiseIsOfferedAndApprovedAsAReminder(t *testing.T) {
 
 // A reminder for a place on the map goes by the fixes: one outside, then one
 // inside after it starts to count, is the arrival - no region named for it,
-// and nothing polled (2026-11-06: "수원쪽에 도착하면" never rang).
+// and nothing polled.
 func TestAreaReminderGoesByTheFixes(t *testing.T) {
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	f := newMomentsFixture(t, time.Date(2026, 11, 6, 18, 38, 0, 0, seoul), nil)

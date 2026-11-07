@@ -166,11 +166,10 @@ func TestPaymentAlertsSayWhenTheyMayBeLate(t *testing.T) {
 	}
 }
 
-// A list of every job came to 55,000 characters (2026-10-29) and the
-// conversation read it through a file: the jobs under way are listed in
-// full, the finished ones counted, and a waiting job names the card it
-// waits on - "승인 대기" read as "the payment waits" when the card was a
-// question (2026-10-30 01:12).
+// A list of every job came to 55,000 characters and the conversation
+// read it through a file: the jobs under way are listed in full, the
+// finished ones counted, and a waiting job names the card it waits on -
+// "승인 대기" read as "the payment waits" when the card was a question.
 func TestListJobsIsShortAndNamesTheCard(t *testing.T) {
 	props := proposal.NewStore(bus.New())
 	m := New(NewStore("http://unused", ""), nil, props, nil, nil)

@@ -71,8 +71,8 @@ func TestClassifyLoggedIn(t *testing.T) {
 }
 
 // While the screen is locked every window comes back as the app itself and is
-// left out: that is no window that could be logged in (2026-10-23 it read as
-// logged in for eleven hours while KakaoTalk was logged out).
+// left out: that is no window that could be logged in, and taken for one it
+// reads as logged in while KakaoTalk is logged out.
 func TestBlindWindowsAreNotLoggedIn(t *testing.T) {
 	for _, v := range []view{{Blind: true}, {Blind: true, Windows: 1}} {
 		if v.loggedIn() {
@@ -124,8 +124,8 @@ func TestLockedScreenSaysWhatItCannotDo(t *testing.T) {
 // The Mac says its screen is locked whenever the display sleeps, password or
 // not: a sleeping display is woken for a logout. Behind a lock that wants a
 // password it is not woken again if it stays locked; behind one that wants
-// none it is woken again every wakeEvery - one wake that did not take once
-// stopped it for 33 hours (10/28 17:56 to 10/30 02:40).
+// none it is woken again every wakeEvery, so one wake that did not take does
+// not stop it.
 func TestSleepingDisplayIsWokenForALogout(t *testing.T) {
 	never := time.Since(time.Time{})
 	for _, c := range []struct {

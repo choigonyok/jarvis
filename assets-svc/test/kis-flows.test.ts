@@ -5,9 +5,9 @@ import { dayFlow, exchangeBetween, reconcile } from "../src/kis-flows.js";
 import type { Flow } from "../src/types.js";
 import type { Settlement } from "../src/venues.js";
 
-// 2026-10-27 23:56 and 2026-10-28 01:04, the share account as kis_cash_daily
-// kept it: ₩130,000 put in after midnight (seen at 00:21, before anything
-// else), changed into dollars, and two shares of KO bought for $184.53.
+// The share account as kis_cash_daily keeps it on two looks a night apart:
+// ₩130,000 put in after midnight (seen before anything else), changed into
+// dollars, and two shares of KO bought for $184.53.
 const oct27 = { cashKrw: 0, cashUsd: 93.23, settledKrw: 0, settledUsd: -679.07 };
 const atDeposit = { cashKrw: 130_000, cashUsd: 93.23, settledKrw: 0, settledUsd: -679.07 };
 const after = { cash: { krw: 8, usd: 5.28 }, settled: { krw: 0, usd: -863.6 } };

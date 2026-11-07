@@ -367,7 +367,7 @@ export async function buildPortfolio(): Promise<Portfolio> {
   // lists apart), USDT's own price, Upbit's interest on idle won, and fees
   // outside any trade's cost - Upbit's withdrawal fees, and the buy fees of
   // what is still held. What is left is KIS rounding each fill's won to the
-  // won (₩12 over 17 fills on 2026-10-20) and anything with no measure yet.
+  // won and anything with no measure yet.
   let bridge: Bridge | null = null;
   if (principal && realized) {
     const unrealizedKrw = holdings.reduce((sum, h) => sum + h.valueKrw - h.costKrw, 0);

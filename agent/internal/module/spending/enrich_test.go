@@ -122,7 +122,7 @@ func TestYieldWait(t *testing.T) {
 
 // The lookup reads an order's date and amount from a screenshot: the element
 // list leaves plain text out, and the extraction tool needs an LLM key the
-// browser does not have (2026-10-18, every lookup ended without them).
+// browser does not have.
 func TestTheLookupCanSeeThePage(t *testing.T) {
 	has := map[string]bool{}
 	for _, tool := range enrichTools {

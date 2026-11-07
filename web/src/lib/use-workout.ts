@@ -24,7 +24,7 @@ import { onResume } from "@/lib/resume";
  *
  * Only what changed since the last save goes over the wire - sessions by id,
  * deletions by id. The guest and the operator share this book, and sending
- * the whole thing used to delete whatever the other had added since.
+ * the whole thing would delete whatever the other had added since.
  */
 type Changes = {
   sessions?: Session[];

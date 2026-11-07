@@ -251,9 +251,9 @@ func (f *fakeJobs) wait(n int) []string {
 }
 
 // A job's run that reaches a payment raises a card for that job - not a
-// refusal nobody is asked about (job 16, 2026-10-17: Coupang's order sheet
-// failed with "주문중 오류" four times), and not the conversation's card.
-// Its approval opens the site to that job alone.
+// refusal nobody is asked about, which leaves an order sheet failing with
+// "주문중 오류" - and not the conversation's card. Its approval opens the
+// site to that job alone.
 func TestInterceptRaisesAJobsOwnCard(t *testing.T) {
 	props := proposal.NewStore(bus.New())
 	fu := &followUps{}
@@ -586,11 +586,11 @@ func TestASecondPaymentRaisesItsOwnCard(t *testing.T) {
 }
 
 // A mall whose only method is 신용카드 opens a PG's payment window, and the
-// 네이버페이 is picked inside it (장범준 LP, 2026-10-29: the guard blocked
-// POST stdpay.inicis.com/payMain/pay and the window came up blank). One card
-// stands before the window opens and shows what the window was handed; its
-// approval covers the window, whichever PG's host, and the 네이버페이 inside
-// it - only while the window is open, and only for that payer.
+// 네이버페이 is picked inside it; the window posts to the PG's own host
+// (stdpay.inicis.com/payMain/pay), and blocked there it comes up blank. One
+// card stands before the window opens and shows what the window was handed;
+// its approval covers the window, whichever PG's host, and the 네이버페이
+// inside it - only while the window is open, and only for that payer.
 func TestAPaymentWindowIsOneCard(t *testing.T) {
 	props := proposal.NewStore(bus.New())
 	jobs := &fakeJobs{id: 1, title: "장범준 2집·3집 LP 재발매 구매", summary: "결제 직전 · 2집 LP · 1 · 64,000원 · 네이버페이(결제창)"}
@@ -640,10 +640,10 @@ func TestAPaymentWindowIsOneCard(t *testing.T) {
 	if err := props.Decide(first["pending"], proposal.Approve); err != nil {
 		t.Fatal(err)
 	}
-	// 2026-10-30: twice the job went straight from the 네이버페이 PIN to the
-	// card company's 결제완료 and got only '네이버페이 인증을 완료하여
-	// 주십시오' - the result reaches that window only from the 확인 on the
-	// card company's result page in the 네이버페이 window.
+	// Going straight from the 네이버페이 PIN to the card company's 결제완료
+	// gets only '네이버페이 인증을 완료하여 주십시오': the result reaches that
+	// window only from the 확인 on the card company's result page in the
+	// 네이버페이 window.
 	if got := jobs.wait(1); len(got) != 1 || !strings.Contains(got[0], "결제창이 열립니다") || !strings.Contains(got[0], "신용카드") ||
 		!strings.Contains(got[0], "하나카드") || !strings.Contains(got[0], "카드사 앱 결제") || !strings.Contains(got[0], "다른 간편결제") ||
 		!strings.Contains(got[0], "카드사 창에서는 간편결제의 네이버페이") || !strings.Contains(got[0], "인증 결과 화면에서 확인을 눌러야") {
@@ -713,11 +713,10 @@ func TestAWindowIsOpenOnlyWhileItsPaymentIs(t *testing.T) {
 }
 
 // A stopped payment request waits for its card a little: approved in time,
-// it goes on as it was and the job is told not to take the step again - the
-// guest order sheet typed again from the top after every approval is where a
-// wrong phone number and a wrong building number got in (2026-10-30). Not
-// decided in time, it is refused, and a later approval sends the job back
-// to the step as before.
+// it goes on as it was and the job is told not to take the step again, so the
+// order sheet is not typed again from the top after every approval. Not
+// decided in time, it is refused, and a later approval sends the job back to
+// the step.
 func TestAHeldPaymentGoesOnWhenApprovedInTime(t *testing.T) {
 	props := proposal.NewStore(bus.New())
 	jobs := &fakeJobs{id: 1, title: "장범준 LP", summary: "결제 직전 · 113,000원"}
@@ -762,8 +761,8 @@ func TestAHeldPaymentGoesOnWhenApprovedInTime(t *testing.T) {
 		t.Fatalf("작업에는 결제하기를 다시 누르지 말라고 가야 합니다: %v", d)
 	}
 
-	// Not decided in time: refused with the card, and a later approval is
-	// the old way round.
+	// Not decided in time: refused with the card, and a later approval lets
+	// that payment through and tells the job to take the step again.
 	s.holdDur = 50 * time.Millisecond
 	other := post(`{"url":"https://stdpay.inicis.com/payMain/pay","method":"POST","host":"stdpay.inicis.com","window":true,"amount":"54000"}`)
 	if other["decision"] != string(proposal.Reject) || other["pending"] == "" || other["pending"] == card {
@@ -816,8 +815,8 @@ func TestAHeldPaymentWaitsForItsRun(t *testing.T) {
 }
 
 // The payment card shows the shipping address the vault keeps, and says so
-// first when the job's report names another (2026-10-30: four order sheets
-// went out with a building number one digit short).
+// first when the job's report names another: an order sheet typed from a
+// wrong address is caught before it is paid.
 func TestAPaymentCardShowsTheSavedAddress(t *testing.T) {
 	saved := &SavedAddress{Recipient: "홍길동", Address: "서울 중구 세종대로 110", Detail: "101동 1001호"}
 	right := Payment{Host: "stdpay.inicis.com", Window: true, JobID: 1, JobTitle: "LP",
@@ -847,8 +846,7 @@ func TestAPaymentCardShowsTheSavedAddress(t *testing.T) {
 // How much is the first thing a payment card says: the title - which is how
 // the phone's notice begins - and the body's first line, with where it was
 // read. A 네이버페이 order's request carries no amount, so a job's says what
-// the job reported right before paying; the books of 2026-11-05 had theirs
-// only inside that report.
+// the job reported right before paying.
 func TestAPaymentCardSaysHowMuch(t *testing.T) {
 	book := Payment{Host: "m.pay.naver.com", URL: "https://m.pay.naver.com/orderApi/payment/universal/log", JobID: 7, JobTitle: "책 주문",
 		JobSummary: "결제 직전 · 책 1권 (알라딘) · 17,100원(배송비 0) · 네이버페이 · 배송지 서울 중구 세종대로 110 101동 1001호"}
@@ -886,8 +884,8 @@ func TestAPaymentCardSaysHowMuch(t *testing.T) {
 	}
 }
 
-// The reports jobs actually left before paying (2026-10-30 LP, 2026-11-05
-// books, addresses replaced), and the shapes the amount is not read from.
+// Reports as jobs really leave them before paying (addresses replaced), and
+// the shapes the amount is not read from.
 func TestReportedAmount(t *testing.T) {
 	for summary, want := range map[string]string{
 		"결제 직전 · 소설 1권 (알라딘) · 17,100원(배송비 0) · 네이버페이 · 배송지 서울 중구 세종대로 110":                                    "17100",

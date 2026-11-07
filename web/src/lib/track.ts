@@ -149,9 +149,9 @@ const SAME_PLACE = 180;
 /**
  * Shorter than this, a way is too brief for its distance over its time: a
  * stay's last fixes may have been on the way out already, and 100 m "in 19
- * seconds" out of one was drawn as a ride while the phone said 3 km/h
- * (2026-10-27). The phone's own measure of the speed, if it gave one, says
- * then how the way was gone.
+ * seconds" out of one would be drawn as a ride while the phone says 3 km/h.
+ * The phone's own measure of the speed, if it gave one, says then how the
+ * way was gone.
  */
 const BRIEF = 60_000;
 
@@ -281,7 +281,7 @@ function modeOf(a: Node, b: Node, kmh: number): Mode {
   if ((said.includes("walking") || said.includes("running")) && kmh < 15) return "walk";
   if (said.includes("cycling")) return "move";
   if (kmh >= 25) return "drive";
-  // Under 12 km/h is on foot - a brisk walk or a run (it was 7, 2026-10-27).
+  // Under 12 km/h is on foot - a brisk walk or a run.
   return kmh < 12 ? "walk" : "move";
 }
 

@@ -115,7 +115,7 @@ const ASKS: Ask[] = [
  * The first things to say on an empty conversation, by account - four of the
  * phrases above, as the guide has them for that account. Behind the ⓘ alone,
  * a first day (the guest's above all) began at one sentence and an empty
- * field (2026-11-07 review).
+ * field.
  */
 const FIRST: Record<Role, string[]> = {
   owner: ["일정 보기", "리마인드 걸기", "체크리스트 만들기", "지출 조회"],

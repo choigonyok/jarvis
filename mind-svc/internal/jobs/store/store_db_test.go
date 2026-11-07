@@ -104,9 +104,9 @@ func TestYieldedRunsBackOff(t *testing.T) {
 
 // Against a throwaway Postgres, as svc_jobs (scripts/dbtest): a card's answer
 // wakes the job at once, whether it was waiting on that card or had put
-// itself on a clock after asking (job 30, 2026-10-21); what comes while a
-// run is in flight sends the job again the moment the run ends, whatever the
-// run set; and the scheduler is told when the next clock comes due.
+// itself on a clock after asking; what comes while a run is in flight sends
+// the job again the moment the run ends, whatever the run set; and the
+// scheduler is told when the next clock comes due.
 func TestAnswersAndInstructionsWakeAtOnce(t *testing.T) {
 	dsn := os.Getenv("JARVIS_TEST_DSN")
 	if dsn == "" {
@@ -310,9 +310,9 @@ func TestABadRunWaitingOnACardWaitsForTheAnswer(t *testing.T) {
 }
 
 // A job that is over keeps nothing unread, and an answer to it goes into its
-// history only (job 6: an answer before it was called off; job 18: one to a
-// card it raised and then finished without waiting for, 2026-10-08/18). An
-// instruction that came while it was finishing brings it back.
+// history only (an answer from before it was called off, or to a card it
+// raised and then finished without waiting for). An instruction that came
+// while it was finishing brings it back.
 func TestAJobThatIsOverKeepsNothingUnread(t *testing.T) {
 	dsn := os.Getenv("JARVIS_TEST_DSN")
 	if dsn == "" {
@@ -423,9 +423,9 @@ func TestAJobThatIsOverKeepsNothingUnread(t *testing.T) {
 }
 
 // Against a throwaway Postgres, as svc_jobs (scripts/dbtest): a job the
-// operator puts first (the agent's 먼저 card) goes ahead of every due job
-// and of the run in flight; the run it stops goes on right after it, ahead of
-// the job asked for while it ran - and that is no attempt (2026-10-28).
+// operator puts first (the agent's 먼저 card) goes ahead of every due job and
+// of the run in flight; the run it stops goes on right after it, ahead of the
+// job asked for while it ran - and that is no attempt.
 func TestAJobPutFirstAndTheRunItStops(t *testing.T) {
 	dsn := os.Getenv("JARVIS_TEST_DSN")
 	if dsn == "" {

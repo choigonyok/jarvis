@@ -62,7 +62,7 @@ func TestRotatedTokenSurvivesAFailedSave(t *testing.T) {
 	if _, err := c.token(ctx, true); err != nil { // rt-0 → rt-1, saved
 		t.Fatal(err)
 	}
-	c.pool.Close() // from here every save fails
+	c.pool.Close()                                // from here every save fails
 	if _, err := c.token(ctx, true); err != nil { // rt-1 → rt-2, not saved
 		t.Fatalf("저장에 실패해도 받은 토큰으로 계속해야 합니다: %v", err)
 	}

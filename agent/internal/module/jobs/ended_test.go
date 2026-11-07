@@ -56,7 +56,7 @@ func askFor(props *proposal.Store, job int64, question string) string {
 }
 
 // A card answered after its job was over says the answer went nowhere - not
-// "작업에 전했습니다" - and is not tried again (job 18, 2026-10-18).
+// "작업에 전했습니다" - and is not tried again.
 func TestAnswerToAJobThatIsOverSaysSo(t *testing.T) {
 	svc := &endedSvc{}
 	props := proposal.NewStore(bus.New())

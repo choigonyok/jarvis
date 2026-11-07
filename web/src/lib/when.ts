@@ -1,9 +1,7 @@
 /**
- * Dates and times as the console says them, in one place. Every screen used
- * to spell a day its own way - "10월 15일 수요일", "10월 6일 (화)", "11/2(월)",
- * "10/12 09:00", "10/31", "10. 3." - and a date read on one tab was not the
- * date read on the next (2026-11-06 review). Four shapes now, all on Seoul's
- * clock whatever timezone the phone is in:
+ * Dates and times as the console says them, in one place, so a date read on
+ * one tab is the date read on the next - all on Seoul's clock whatever
+ * timezone the phone is in:
  *
  * - dateLabel  "11월 7일 (토)"       a day, named; the year first when it is not this one
  * - monthDay   "11월 7일"            the same without its weekday, for a dense row

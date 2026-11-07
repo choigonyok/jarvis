@@ -370,8 +370,8 @@ type ScheduleInput struct {
 }
 
 // FinishInput is the end of a job. Every end is told - in the conversation
-// and on the phone - whatever the run thinks of it (2026-10-28: "무슨
-// 작업이든 작업이 끝나면 알리기"); there is no quiet finish any more.
+// and on the phone - whatever the run thinks of it; there is no quiet
+// finish.
 type FinishInput struct {
 	Summary string `json:"summary" jsonschema:"결과 한두 줄. 운영자에게 그대로 알림으로 갑니다."`
 }
@@ -448,8 +448,8 @@ func (m *Module) runServer(run int64) *mcp.Server {
 	// finishes on its own while the page waits. The run must still hold the
 	// browser when it does: the page then sends the payment on, and a request
 	// sent while no job runs is the conversation's - its card is not this
-	// job's, and it is stopped (2026-10-30). So the run waits here, a minute
-	// at a time, instead of ending.
+	// job's, and it is stopped. So the run waits here, a minute at a time,
+	// instead of ending.
 	mcp.AddTool(server, &mcp.Tool{Name: "wait", Description: "화면이 저절로 바뀌기를 기다려야 할 때(카드사 앱 승인처럼 운영자가 폰에서 하는 일) 잠깐 기다린다. " +
 		"5~60초. 기다린 뒤 화면을 다시 본다. 그보다 오래 기다릴 일은 schedule_next 나 ask 로 마친다."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in WaitInput) (*mcp.CallToolResult, any, error) {
@@ -469,8 +469,7 @@ func (m *Module) runServer(run int64) *mcp.Server {
 		})
 
 	// The screen as a photo for the operator - browser_screenshot shows the
-	// page to the run alone (2026-11-06: "브라우저에서 필요할 때 캡처해서
-	// 사진 따서 보여줄 수 있게").
+	// page to the run alone.
 	mcp.AddTool(server, &mcp.Tool{Name: "capture", Description: "지금 브라우저 화면을 사진으로 남긴다(작업 탭의 실행 기록에도 보인다). 운영자가 봐야 알 화면(주문 완료, 올린 글, 막힌 화면)일 때 부르고, 돌려받은 이름을 report 의 images 나 record 의 image 에 넣는다."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in CaptureInput) (*mcp.CallToolResult, any, error) {
 			j, bad := guard()
@@ -590,8 +589,8 @@ func (m *Module) runServer(run int64) *mcp.Server {
 		if len(add) == 0 {
 			return toolText("더할 사이트가 없습니다(이미 쓰는 사이트이거나 비어 있음).", true), nil, nil
 		}
-		// Browsing changes nothing, so no card (2026-10-20): the site goes on
-		// the job and in its log, where the operator sees what it opened.
+		// Browsing changes nothing, so no card: the site goes on the job and
+		// in its log, where the operator sees what it opened.
 		if err := m.store.AddSites(ctx, j.ID, add); err != nil {
 			return fail(err), nil, nil
 		}
@@ -658,9 +657,8 @@ func (m *Module) runServer(run int64) *mcp.Server {
 			return up, nil, nil
 		}
 		// Waiting on a card is waiting on its decision, which wakes the job
-		// the moment it is made - a clock beside it only came back to look
-		// whether it was made yet (job 30, 2026-10-21: six runs, 18:21 to
-		// 20:43, each finding "카드 답 대기 중").
+		// the moment it is made - a clock beside it would only come back, run
+		// after run, to look whether it was made yet.
 		if open := m.waitingOn(j.ID); len(open) > 0 {
 			last := open[len(open)-1]
 			return toolText(fmt.Sprintf("카드 '%s'(%s)의 답을 기다리는 중입니다. 운영자가 승인하거나 반려하면 작업이 곧바로 다시 실행되어 그 답을 받으니, "+
@@ -762,8 +760,7 @@ func (m *Module) runServer(run int64) *mcp.Server {
 				return bad, nil, nil
 			}
 			// A run that just asked the operator and then ends the job leaves the
-			// card with nowhere to go: answering it wakes nothing (job 18,
-			// 2026-10-18, "어떻게 할까요?" then finish).
+			// card with nowhere to go: answering it wakes nothing.
 			if card := m.current.parkedOn(run); card != "" {
 				return toolText("이 실행에서 올린 카드("+card+")가 운영자의 답을 기다립니다. 작업을 끝내면 그 답이 갈 곳이 없어집니다. "+
 					"finish 를 부르지 말고 지금 실행을 마치세요 - 답이 오면 다음 실행에서 이어집니다.", true), nil, nil
@@ -847,8 +844,7 @@ func (m *Module) runServer(run int64) *mcp.Server {
 
 // attach puts a card a run raised in the conversation, as its own turn: it
 // stays where it was raised once decided, rather than floating below the
-// thread only while it waits (and vanishing the moment it is answered - the
-// "card that never came" of 2026-10-21 17:55).
+// thread only while it waits and vanishing the moment it is answered.
 func (m *Module) attach(proposalID string) {
 	if m.notify != nil {
 		m.notify.AttachProposal(proposalID)

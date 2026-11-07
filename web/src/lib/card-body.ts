@@ -32,8 +32,8 @@ const TITLES: Record<string, string> = {
 };
 
 /**
- * A card's title as words: before 2026-10-20 a tool with no card of its own
- * was titled by its name ("mcp__jobs__instruct_job 실행을 요청합니다").
+ * A card's title as words: an older card for a tool with no card of its own
+ * is titled by the tool's name ("mcp__jobs__instruct_job 실행을 요청합니다").
  */
 export function readableTitle(title: string): string {
   const m = /^mcp__([a-z0-9_-]+)__([a-z0-9_]+) 실행을 요청합니다$/i.exec(title.trim());
@@ -47,9 +47,9 @@ export function readableConsequence(text: string): string {
 }
 
 /**
- * A card's body as words. Cards made before 2026-10-20 carried some tools'
- * arguments as JSON - a job made or instructed showed its braces; those read
- * here as the agent now writes them. Any other body is left as it is.
+ * A card's body as words. Older cards carry some tools' arguments as JSON -
+ * a job made or instructed, braces and all; those read here as the agent
+ * now writes them. Any other body is left as it is.
  */
 export function readableBody(body: string): string {
   const text = body.trim();

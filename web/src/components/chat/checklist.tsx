@@ -37,8 +37,8 @@ export type Fold = { open: boolean; onToggle: () => void };
  * line through it from the left, and let go past the mark it is struck off,
  * with 되돌리기 on its row for five seconds before it leaves the list. To the
  * right, not the left: a pull to the left on this same screen quotes a
- * message, and one hand's gesture should not mean two things (2026-11-06
- * review). A strike-through means only that - taken off - never "done".
+ * message, and one hand's gesture should not mean two things. A
+ * strike-through means only that - taken off - never "done".
  *
  * What is ticked and taken off is kept by mind, so the list reads the same
  * the next time it is shown, wherever.

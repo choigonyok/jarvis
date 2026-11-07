@@ -1,8 +1,7 @@
 // Package shot takes a picture of the shared browser's page, for a person to
 // see: the conversation showing what a job has on its screen, a job showing
-// the order it just placed (2026-11-06: "브라우저에서 필요할 때 캡처해서 사진
-// 따서 보여줄 수 있게"). The model's own browser_screenshot shows the page to
-// the model and to nobody else; this one is kept as a photo.
+// the order it just placed. The model's own browser_screenshot shows the page
+// to the model and to nobody else; this one is kept as a photo.
 //
 // It asks the browser bridge itself, as one more client of its MCP: the CLI's
 // tools go to the bridge directly, so their pictures never pass here. It only

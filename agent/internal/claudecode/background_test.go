@@ -83,9 +83,8 @@ func TestTakeBrowserStopsTheTaskOnIt(t *testing.T) {
 }
 
 // A turn that does not use the browser leaves it to the background: a task
-// on it starts during the turn and is not stopped by it (2026-10-28: "대화턴은
-// 실제 브라우저 도구를 쓸 때만 양도"). Only a turn that took it (TakeBrowser)
-// keeps it from them.
+// on it starts during the turn and is not stopped by it. Only a turn that
+// took it (TakeBrowser) keeps it from them.
 func TestBrowserTaskRunsBesideATalkingTurn(t *testing.T) {
 	r := runner(t, fakeClaude(t, "0"))
 	r.running = true
@@ -212,8 +211,7 @@ func TestHoldRunsOnceTheBrowserIsTheTasks(t *testing.T) {
 
 // A place reserved counts as taken at once - a scheduler starting several
 // tasks cannot take more places than there are - and the task carrying it
-// starts in it; one never used goes back on Release, once (2026-10-28: five
-// jobs started into four places, and the fifth gave way at once).
+// starts in it; one never used goes back on Release, once.
 func TestReservedPlaces(t *testing.T) {
 	r := runner(t, fakeClaude(t, "0"))
 	var places []Place
@@ -330,7 +328,7 @@ func TestBackgroundArgs(t *testing.T) {
 }
 
 // A background task may start the moment the conversation is not running:
-// a job asked for a second ago does not sit on "예약됨" (2026-10-18).
+// a job asked for a second ago does not sit on "예약됨".
 func TestIdleRightAfterTheConversation(t *testing.T) {
 	r := runner(t, "claude")
 	r.lastAt = time.Now()

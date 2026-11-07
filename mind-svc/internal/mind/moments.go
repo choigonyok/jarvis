@@ -99,9 +99,9 @@ func (m *Mind) say(ctx context.Context, r moments.Reminder) (moments.Said, error
 		// Down at its time (a restart, a deploy): said late, and so.
 		why = moments.Stamp(*r.At, m.Opts.Loc) + "에 알려 드렸어야 했는데 늦었어요"
 	}
-	// In the conversation too, as a card (2026-10-21: "집 가서 할 일" reached
-	// the phone and the inbox only) - with the reminder's list, if it has
-	// one, as it stands now; the push says what is left on it.
+	// In the conversation too, as a card, not on the phone and in the inbox
+	// only - with the reminder's list, if it has one, as it stands now; the
+	// push says what is left on it.
 	data := map[string]any{"reminder": r.ID, "why": why, "by": r.SentBy, "body": r.Body}
 	lines := []string{r.Body}
 	if l, ok := m.reminderList(ctx, r); ok {

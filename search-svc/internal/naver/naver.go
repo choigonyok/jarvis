@@ -2,7 +2,7 @@
 // search the Naver site gives a person - blogs, news, cafe posts, 지식iN,
 // web documents, the encyclopedia and local businesses - as JSON.
 //
-// It replaced developers.naver.com's open API on 2026-06-25: another host
+// It replaced developers.naver.com's open API: another host
 // (naverapihub.apigw.ntruss.com) and other headers (X-NCP-APIGW-API-KEY-ID
 // and -KEY, an HUB application's Client ID and Secret). Shopping, books and
 // specialist documents were not carried over. One key, about 775,000 calls a

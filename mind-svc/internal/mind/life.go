@@ -322,8 +322,8 @@ func (m *Mind) restock(ctx context.Context) error {
 // restockChance is how likely a thing is bought about now: the engine's own
 // prediction of its cycle while one is open, else the share of the gaps
 // between its purchases that came round in the window the card is raised
-// in, pulled toward even while there are few. It was 0.75 for every thing
-// until 2026-11-07: a thing bought twice at random looked as sure as water.
+// in, pulled toward even while there are few - so a thing bought twice at
+// random does not look as sure as water.
 func (m *Mind) restockChance(ctx context.Context, t Thing) float64 {
 	st := m.Opts.Store
 	if n, err := st.Note(ctx, self.ID(predict.Cycle, "purchase.item/"+t.Class)); err == nil && n.Rule != nil && n.Rule.Kind == predict.Cycle && !n.Rule.Off {

@@ -56,8 +56,7 @@ func waitFor(t *testing.T, what string, ok func() bool) {
 }
 
 // A run that asked waits on the card, never on a clock of its own: asking
-// and then scheduling a look at the answer is refused (job 30, 2026-10-21 -
-// six runs from 18:21 to 20:43 found "카드 답 대기 중"), the card goes into
+// and then scheduling a look at the answer is refused, the card goes into
 // the conversation, and its decision wakes the job at once.
 func TestAskedRunWaitsForTheDecision(t *testing.T) {
 	svc := &jobsSvc{}
@@ -211,9 +210,9 @@ func TestSweepTellsWhatAJobNeverHeard(t *testing.T) {
 	}
 }
 
-// A login card turned down no longer leaves the site blocked and its jobs
-// silent for good (job 27, 2026-10-20): the site opens, and every live job
-// on it is told and woken.
+// A login card turned down does not leave the site blocked and its jobs
+// silent for good: the site opens, and every live job on it is told and
+// woken.
 func TestRejectedLoginTellsTheSitesJobs(t *testing.T) {
 	var mu sync.Mutex
 	var calls []string

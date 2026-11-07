@@ -340,7 +340,7 @@ export function Calendar() {
 
           {error ? (
             // The month that could not be read, read again on the spot - the
-            // way back was leaving the tab (2026-11-06 review).
+            // way back was leaving the tab.
             <Failed onRetry={loaded ? reload : undefined} className="mt-6 lg:col-span-2">
               {error}
             </Failed>

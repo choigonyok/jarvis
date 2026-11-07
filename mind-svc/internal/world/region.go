@@ -51,9 +51,9 @@ var romanized = map[string]string{
 var romanSuffixes = []string{"-si", "-gun", "-gu", "-dong", "-eup", "-myeon"}
 
 // korean is a region's Korean name from Immich's English, with or without the
-// suffix: "Hongcheon-gun", "Pocheon-si" and "Yongsan-dong" are the table's
-// 홍천, 포천 and 용산 - the suffix used to come off only after the table was
-// looked in, and 7 of the 15 photos with a region stayed "yongsan" (2026-11-03).
+// suffix: "Hongcheon-gun", "Pocheon-si" and "Yongsan-dong" are the table's 홍천,
+// 포천 and 용산. A name the table does not hold as it is, it is looked up by
+// without its suffix.
 func korean(name string) (string, bool) {
 	if k, ok := romanized[name]; ok {
 		return k, true

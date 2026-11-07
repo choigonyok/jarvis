@@ -52,7 +52,7 @@ class GraphTest(unittest.IsolatedAsyncioTestCase):
     async def test_without_voyage_facts_are_found_by_their_words(self):
         """Voyage out of reach - the embedding and the reranker both - and the
         facts and names still come, by their words: not a 500 and a
-        traceback (2026-10-27)."""
+        traceback."""
         await self.g.fact("guest", "k-words", "LIKES", ("Place", "p9", "망원 카페"), "나는 망원 카페를 좋아한다")
 
         async def unreachable(*args, **kwargs):

@@ -80,8 +80,8 @@ func callRun(t *testing.T, s *mcp.ClientSession, tool string, args map[string]an
 }
 
 // A run the browser's guard stopped at a payment hears of its card through
-// wait_payment and waits on it; the decision reaches the job as a card answer
-// (job 16, 2026-10-17: the payment was refused with no card, four times).
+// wait_payment and waits on it; the decision reaches the job as a card
+// answer, never as a refusal with no card.
 func TestPaymentCardParksTheRunAndTheDecisionWakesIt(t *testing.T) {
 	defer func(d time.Duration) { payAppear = d }(payAppear)
 	payAppear = 50 * time.Millisecond
@@ -138,9 +138,8 @@ func TestPaymentCardParksTheRunAndTheDecisionWakesIt(t *testing.T) {
 	}
 }
 
-// A run that asked the operator does not end the job in the same breath:
-// the answer would have nowhere to go (job 18, 2026-10-18). Once the card is
-// decided, it may.
+// A run that asked the operator does not end the job in the same breath: the
+// answer would have nowhere to go. Once the card is decided, it may.
 func TestFinishWaitsForTheCardItsRunRaised(t *testing.T) {
 	svc := &jobsSvc{}
 	props := proposal.NewStore(bus.New())
@@ -220,9 +219,9 @@ func (g *fakeGuard) Release(context.Context) error {
 	return nil
 }
 
-// A site a run finds it needs goes on the job without a card (2026-10-20) -
-// in its log, where the operator sees it - and a run on the browser may open
-// it at once; one without the browser hears to come back on the next run.
+// A site a run finds it needs goes on the job without a card - in its log,
+// where the operator sees it - and a run on the browser may open it at once;
+// one without the browser hears to come back on the next run.
 func TestSitesAreAddedWithoutACard(t *testing.T) {
 	svc := &jobsSvc{}
 	props := proposal.NewStore(bus.New())

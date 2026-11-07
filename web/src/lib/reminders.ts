@@ -20,7 +20,7 @@ export type Reminder = {
   sentAt?: string;
   /**
    * How it went once its moment came: mind's code, read here instead of its
-   * words - "목록이 닫혀 말하지 않음" read as said (2026-11-03). silent: nothing
+   * words - "목록이 닫혀 말하지 않음" read as said. silent: nothing
    * went out, for `unsaid`.
    */
   how?: "push" | "card" | "digest" | "silent" | "failed";

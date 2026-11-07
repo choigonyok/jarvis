@@ -376,7 +376,7 @@ func (s *Server) ReadJobs(ctx context.Context, into any) error {
 }
 
 // due is the jobs whose turn it is, most overdue first: `job` is the first
-// (what the scheduler read before it ran several at once), `jobs` up to
+// (for a caller that runs one at a time), `jobs` up to
 // ?limit= of them, and `next` when the soonest of the rest comes due by its
 // own clock (null when none is on one) - so the scheduler sleeps until then.
 func (s *Server) due(w http.ResponseWriter, r *http.Request) {

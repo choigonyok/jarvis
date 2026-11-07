@@ -416,11 +416,9 @@ func (c *Conversation) LastRead() (time.Time, string) {
 }
 
 // turnedDown is what the operator said turning down calendar cards lately,
-// mind's and the conversation's, the newest first: "X 가 밴드 합주야" said once
-// on a card is how the next read should take a band's rehearsal, and it went
-// unread until it had been said twice and asked again (2026-10-16, 10-22). The
-// quick answers say nothing beside the card they were on, and the plan shows
-// those itself.
+// mind's and the conversation's, the newest first: "X 가 밴드 합주야" said once on a
+// card is how the next read should take a band's rehearsal. The quick answers
+// say nothing beside the card they were on, and the plan shows those itself.
 func (c *Conversation) turnedDown(ctx context.Context) []string {
 	since := c.now().Add(-model.TurnedWithin)
 	mine, err := c.st.IntentsSince(ctx, since)
@@ -510,16 +508,16 @@ func (c *Conversation) known(ctx context.Context, room string) ([]view, error) {
 		}
 	}
 	// The calendar is the operator's wherever its entries were made, and a
-	// conversation anywhere may call one off - "11월에 판교 안 간대" ends
-	// the office day put on the calendar by hand (2026-10-26). Its coming
-	// plans are shown in every room, nearest first. The partner's own
-	// entries are theirs, not the operator's to change.
+	// conversation anywhere may call one off - "11월에 판교 안 간대" ends the
+	// office day put on the calendar by hand. Its coming plans are shown
+	// in every room, nearest first. The partner's own entries are theirs,
+	// not the operator's to change.
 	until := c.now().In(c.loc).AddDate(0, 0, calendarDays).Format("2006-01-02")
 	// A plan made in another room that lies ahead and is not on the calendar
 	// yet - its card still open, say - is shown here too, so a room talking
 	// about the same days at the same place names it instead of making it
 	// again: one camping reserved, told in two rooms, was two entries and two
-	// cards (2026-11-01).
+	// cards.
 	for _, e := range plans {
 		st := e.State
 		if e.Room == room || shown[e.ID] || st.CalendarID != "" || st.Status != model.Confirmed || st.Declined != "" ||
@@ -899,7 +897,7 @@ func partOf(cur *model.State, s model.State) bool {
 // continued is the live plan a create really continues: the model filled in
 // today for a day nobody named, and a plan with one of the same people lies
 // ahead. "10시부터 14시?" settling the room for the 28th was read as a plan for
-// that morning, for hours nobody was free (2026-11-02).
+// that morning, for hours nobody was free.
 func (c *Conversation) continued(s model.State, o op, earlier, fresh []model.Message, known []view) string {
 	if s.Date == "" || len(fresh) == 0 || s.Date != fresh[len(fresh)-1].SentAt.In(c.loc).Format("2006-01-02") {
 		return ""

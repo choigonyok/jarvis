@@ -30,8 +30,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"sync"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/choigonyok/jarvis/gocommon/health"

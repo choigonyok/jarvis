@@ -20,7 +20,7 @@ export function clock(at: Date | string, seconds = false): string {
  * stands is that earlier read, with the way to read again. A failed read keeps
  * what was there and says so: "14:05 값 · 다시 시도". It had read as current -
  * one month's figures under the next month's name, a run "going on" that may
- * have ended, "없음" for what could not be read (2026-11-06 review).
+ * have ended, "없음" for what could not be read.
  */
 export function AsOf({
   at,

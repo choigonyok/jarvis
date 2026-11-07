@@ -191,7 +191,7 @@ func (m *Module) Change(b *tool.Board) {
 			case in.Add != 0:
 				body["add"] = in.Add
 			default:
-				// Nothing said is no mark to make: told as made, it was not (2026-11-02).
+				// Nothing said is no mark to make: told as made, it was not.
 				return "", fmt.Errorf("goal.check 에 mark, count, add 중 하나가 필요합니다")
 			}
 			g, err := m.one(ctx, http.MethodPost, "/api/goals/"+url.PathEscape(in.ID)+"/checks", body)

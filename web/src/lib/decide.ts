@@ -10,11 +10,10 @@ export type Posted = { ok: true; already?: boolean } | { ok: false; error: strin
 /**
  * Decisions this page sent that the card has not come back with yet, by card.
  * A card that has one says so - "승인을 보냈어요 · 반영 중" - instead of
- * offering its buttons again: they came back the moment the post returned,
- * while the card stayed 결재 대기 until the stream brought it, and a second
- * press met "이미 결재된 요청" in red on a card about to read 승인함
- * (2026-11-07 review). Kept for as long as the page is open, so a card drawn
- * again (another tab and back) still says it.
+ * offering its buttons again: the card stays 결재 대기 until the stream
+ * brings it, and a second press would meet "이미 결재된 요청" in red on a
+ * card about to read 승인함. Kept for as long as the page is open, so a card
+ * drawn again (another tab and back) still says it.
  */
 const sent = new Map<string, Decision>();
 

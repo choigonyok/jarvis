@@ -59,8 +59,8 @@ export function useAgentStream(
         // request reached the guest's agent through the tunnel they share,
         // or a service restarting - closes it for good (CLOSED), and nothing
         // opened it again until the app came back from the background: what
-        // was sent meanwhile showed only after a restart (2026-10-22). So a
-        // closed stream is opened again here, sooner the first time.
+        // was sent meanwhile showed only after a restart. So a closed stream
+        // is opened again here, sooner the first time.
         if (source.readyState !== EventSource.CLOSED) return;
         wait = Math.min(wait ? wait * 2 : 1000, 15_000);
         clearTimeout(again);

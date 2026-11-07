@@ -75,8 +75,8 @@ func TestTools(t *testing.T) {
 	if isErr || !strings.Contains(got, "운영자에게 말할 때와 문구: 10/24(토) 08:00 · 베개 챙기세요\n") || strings.Contains(got, "[rem_1]") {
 		t.Fatalf("저장된 때와 문구를 돌려줘야 합니다: %q", got)
 	}
-	// The id apart from the words to say, named for what it is (2026-11-06:
-	// copied into an answer when it led the line).
+	// The id apart from the words to say, named for what it is: one leading the
+	// line is copied into an answer.
 	if !strings.Contains(got, "(고칠 때 도구에 넣는 id: rem_1 - 답에는 쓰지 않습니다)") {
 		t.Fatalf("id 는 따로: %q", got)
 	}
@@ -130,7 +130,7 @@ func (a *atlas) FindArea(_ context.Context, name string) (place.Area, error) {
 
 // A place that is none of the operator's regions is found on the map and
 // waited for by its outline; one the map does not know is not kept as a
-// region that never comes (2026-11-06: "수원").
+// region that never comes.
 func TestPlaceOnTheMap(t *testing.T) {
 	var calls []call
 	maps := &atlas{}

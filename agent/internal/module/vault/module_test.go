@@ -59,10 +59,9 @@ func pinAction(kind, pay string) action.Action {
 	return action.Action{Kind: kind, Input: raw}
 }
 
-// 2026-10-30: the PIN tool stopped at 네이버페이's keypad with no password
-// to type, and there was no card to give it one - only a shell on the Mac
-// mini. Now the card is one secret field, and the digits go from the card to
-// vault-svc and nowhere else.
+// A payment password comes through a card with one secret field - not a
+// shell on the Mac mini - and the digits go from the card to vault-svc and
+// nowhere else.
 func TestAPaymentPasswordIsACardWithOneSecretField(t *testing.T) {
 	m, f := module(t)
 	ctx := context.Background()

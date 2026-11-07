@@ -360,8 +360,8 @@ function Waiting({ standing, names, onChanged }: { standing: Standing[]; names: 
                 </span>
               </span>
               {o.status === "active" ? (
-                // One press used to cancel at once - and today's order at the
-                // broker with it. Asked first, as every irreversible step is.
+                // Asked first, as every irreversible step is: one press would
+                // cancel today's order at the broker with it.
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
                     <Button variant="discard" size="inline" disabled={busy === o.id} className="tap shrink-0 px-2 text-aside">

@@ -53,7 +53,7 @@ function upsert<T extends { id: string; atIso?: string }>(list: T[], next: T, in
   const copy = list.slice();
   // A newer word on a card open in front of the reader is written where it
   // is, marked as news: moved down to its time, the card being read vanished
-  // and came back at the bottom (2026-11-06 review).
+  // and came back at the bottom.
   if (inPlace?.(next.id) && next.atIso && copy[at].atIso && next.atIso > copy[at].atIso) {
     copy[at] = { ...next, freshNews: true };
     return copy;
@@ -110,9 +110,8 @@ export function useThread() {
   // place (draftShown). Not cached: a stream that opens mid-answer is sent
   // it whole first.
   const [draft, setDraft] = useState<Draft | null>(null);
-  // What the turn under way has done since the last thing said (the line
-  // where the dots used to be). Not cached: a run is not under way on a
-  // fresh page until the thread says so.
+  // What the turn under way has done since the last thing said. Not cached:
+  // a run is not under way on a fresh page until the thread says so.
   const [steps, setSteps] = useState<Step[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(() => cached !== null);
@@ -198,7 +197,7 @@ export function useThread() {
       setQueue(data.queue ?? []);
       putLists(data.checklists);
       // Read: a failure said before this (a first load that did not come) is
-      // over - it had stood at the bottom of the thread for good (2026-11-06 review).
+      // over, not left at the bottom of the thread for good.
       setError(null);
     } catch {
       setError("대화를 불러오지 못했어요.");
@@ -215,7 +214,7 @@ export function useThread() {
     setLoadingOlder(true);
     try {
       // The cursor is the turn's id, not its time: a "+09:00" in the query
-      // came out as a space on the far side of the proxies (2026-10-19).
+      // came out as a space on the far side of the proxies.
       const res = await fetch(`${API}/thread?limit=${PAGE}&before=${encodeURIComponent(oldest.id)}`, { cache: "no-store" });
       if (!res.ok) throw new Error(String(res.status));
       const data = (await res.json()) as { turns: Turn[]; hasMore?: boolean; checklists?: Record<string, Checklist> };

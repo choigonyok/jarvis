@@ -17,10 +17,9 @@ import (
 )
 
 // One reader for each source: what mind reads from a service into
-// occurrences, it also hands to long-term memory as records - the facts
-// memory-svc's collectors used to write after reading the same service
-// again. The wording and the edge keys are the collectors', so the graph
-// carries on where they left off.
+// occurrences, it also hands to long-term memory as records, so nothing
+// reads the same service a second time for memory. The wording and the edge
+// keys are the ones memory's graph already carries.
 
 // Recorder takes records to long-term memory (memory.HTTP).
 type Recorder interface {
@@ -40,7 +39,7 @@ func (s *Structured) record(ctx context.Context, r model.Record) error {
 		return nil
 	}
 	// Longer than memory takes is cut to fit here rather than turned down
-	// there: a job's summary ran its fact to 2,170 characters (2026-10-23).
+	// there: a job's summary ran its fact to 2,170 characters.
 	r.Fact = clip(r.Fact, maxFact)
 	r.Target.Name = clip(r.Target.Name, maxName)
 	if r.Source != nil {
@@ -65,11 +64,10 @@ type queued struct {
 	hash string
 }
 
-// flush sends what is queued; what memory did not take stays queued for
-// the next round. A batch memory turns down as it is goes again a record at
-// a time, so that the one record it will not take does not hold back the
-// rest - one job's fact kept every record out of memory for three days
-// (2026-10-23~26).
+// flush sends what is queued; what memory did not take stays queued for the
+// next round. A batch memory turns down as it is goes again a record at a
+// time, so that the one record it will not take does not hold back the rest
+// - one job's fact kept every record out of memory for three days.
 func (s *Structured) flush(ctx context.Context) error {
 	s.inMu.Lock()
 	s.queued, s.incoming = append(s.queued, s.incoming...), nil
@@ -297,9 +295,9 @@ var jobOver = map[string]bool{"done": true, "cancelled": true, "failed": true}
 
 // JobRecord is a job as memory keeps it: that it was asked for, and once it
 // is over what it did. A run's summary while the job goes on is its guess of
-// the moment ("접수가 안 됐을 수 있어요"), and kept as a fact it was handed
-// to the conversation as one after the job had found otherwise (2026-11-03);
-// where a job stands now is the job's to say (look 의 job).
+// the moment ("접수가 안 됐을 수 있어요"), and kept as a fact it was handed to the
+// conversation as one after the job had found otherwise; where a job stands
+// now is the job's to say (look 의 job).
 func (s *Structured) JobRecord(j job) model.Record {
 	state := jobState[j.State]
 	if state == "" {

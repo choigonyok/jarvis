@@ -163,7 +163,7 @@ func TestLateTabIsStillClosed(t *testing.T) {
 // A browser just started has one blank tab, and the navigate asked for a new
 // tab lands in it (browser-use reuses blank tabs). The check follows that tab
 // to the login page and blanks it again - left there, every later check took
-// it for someone logging in and never looked again (2026-10-17).
+// it for someone logging in and never looked again.
 func TestOpenFollowsTheBlankTabItReused(t *testing.T) {
 	login := "https://login.shop.example/login?rtnUrl=orders"
 	f := &fakeBrowser{tabs: []tab{{ID: "t-blank", URL: "about:blank"}}, reuse: true, landing: login}
@@ -264,7 +264,7 @@ func TestLoggedInIsTheSitesOwnPage(t *testing.T) {
 }
 
 // A check that lands on the site's own page says so, and what waited on the
-// login (the book's lookups, 2026-10-18) can go on without a person.
+// login can go on without a person.
 func TestACheckThatFindsTheSiteSignedInSaysSo(t *testing.T) {
 	f := &fakeBrowser{tabs: []tab{{ID: "t-agent", URL: "https://agent.example/working"}}}
 	srv := httptest.NewServer(http.HandlerFunc(f.handle))
@@ -295,7 +295,7 @@ func TestACheckThatFindsTheSiteSignedInSaysSo(t *testing.T) {
 
 // While the browser is down, a look would start it for the look alone: the
 // check waits WhenDown instead, and looks at once when something else has
-// the browser up (48 starts a day for the looks alone, 2026-10-27).
+// the browser up.
 func TestALookDoesNotStartTheBrowser(t *testing.T) {
 	f := &fakeBrowser{tabs: []tab{{ID: "t-agent", URL: "https://agent.example/working"}}}
 	srv := httptest.NewServer(http.HandlerFunc(f.handle))

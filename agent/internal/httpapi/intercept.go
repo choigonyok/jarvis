@@ -21,15 +21,13 @@ import (
 // it was headed for a payment provider.
 //
 // A person is waited for only a little. Holding the request until a decision
-// held the browser, and the turn driving it, for as long as the card sat
-// unread (up to 40 minutes); refusing it at once sent the payer back over
-// the whole order sheet after every approval - a guest order sheet typed
-// again from the top, which is where a wrong phone number and a wrong
-// building number got in (2026-10-30). So the request is held for
-// holder.Hold while its card waits: approved in that time, it goes on as it
-// was; otherwise it is refused, and approving later lets that one payment
-// through (holder.Payments) and tells the payer to take the step again.
-// Rejecting it tells the payer not to.
+// would hold the browser, and the turn driving it, for as long as the card
+// sits unread; refusing it at once would send the payer back over the whole
+// order sheet after every approval, typed again from the top. So the request
+// is held for holder.Hold while its card waits: approved in that time, it
+// goes on as it was; otherwise it is refused, and approving later lets that
+// one payment through (holder.Payments) and tells the payer to take the step
+// again. Rejecting it tells the payer not to.
 //
 // This is the only place a payment is let through. The browser's guard
 // keeps no approval of its own: it asks here for every request it stops.
@@ -49,7 +47,7 @@ type Payment struct {
 	// method is 신용카드. Which of the window's ways a payment then takes is
 	// on no address, so the card stands before the window opens, and its
 	// approval covers the window, whichever PG's, and the 네이버페이 picked
-	// inside it (2026-10-29).
+	// inside it.
 	Window bool `json:"window,omitempty"`
 	// Amount and Item are what the request hands the window (price,
 	// goodname...), when the guard could read them: shown on the card, never
@@ -161,17 +159,16 @@ type verdict struct {
 func (s *Server) judgePayment(ctx context.Context, p Payment, host string, background, isJob bool, asked string) verdict {
 	// A background task has no one behind it. Asking a person here would put
 	// a card in front of someone who did not start anything - which is what a
-	// background order lookup on 네이버페이 did (2026-10-07). So it is decided
+	// background order lookup on 네이버페이 did. So it is decided
 	// on the spot: the sign-in hosts it is allowed to use (signing in with the
 	// browser's saved password, chosen by the operator) go through, and every
 	// other host - every payment host - is refused.
 	//
 	// A job is the exception: the operator asked for it in conversation, and a
 	// purchase they asked for reaches its payment there - the conversation
-	// hands every browser task to a job. Refusing it outright made Coupang's
-	// order sheet fail with "주문중 오류" four times and never asked anyone
-	// (job 16, 2026-10-17). So a job's payment raises a card bound to that
-	// job, and the job waits on it.
+	// hands every browser task to a job. Refused outright, its order sheet fails
+	// with "주문중 오류" and nobody is asked. So a job's payment raises a card
+	// bound to that job, and the job waits on it.
 	if background {
 		if s.backgroundLogin[host] {
 			s.log.Info("백그라운드 작업의 로그인 요청을 허용했습니다", "host", p.Host, "method", p.Method)
@@ -229,7 +226,7 @@ func (s *Server) insideWindow(p Payment) bool {
 // decision goes to whoever raised it.
 func (s *Server) raisePayment(ctx context.Context, p Payment, asked string) string {
 	// Finding and opening are one step: a page sends its writes together, and
-	// two that both found none opened two cards 5ms apart (2026-11-03).
+	// two that both found none opened two cards 5ms apart.
 	s.raising.Lock()
 	defer s.raising.Unlock()
 	if waiting, ok := s.proposals.FindPendingWhere(func(q proposal.Proposal) bool {
@@ -253,9 +250,9 @@ func (s *Server) raisePayment(ctx context.Context, p Payment, asked string) stri
 		Card:   paymentCard(p, addr),
 	})
 	s.recordRaised(asked, p, opened)
-	// In the conversation either way - a job's too, which used to float below
-	// the thread only while it waited and was gone the moment it was
-	// answered (2026-10-21 22:03). The card names the job it is for.
+	// In the conversation either way - a job's too, so it stays where it was
+	// raised once answered instead of floating below the thread only while it
+	// waits. The card names the job it is for.
 	if s.thread != nil {
 		s.thread.AttachProposal(opened.ID)
 	}
@@ -409,9 +406,9 @@ type SavedAddress struct {
 // number: (태평로1가).
 var trailingParens = regexp.MustCompile(`\s*\([^()]*\)\s*$`)
 
-// roadKey is a road address's road and building number with no space -
-// "세종대로110" - the part an order sheet's address search goes by, and
-// the part a wrong one differs in (2026-10-30: a building number one digit short).
+// roadKey is a road address's road and building number with no space - "세종대로110" -
+// the part an order sheet's address search goes by, and the part a wrong one
+// differs in.
 func roadKey(address string) string {
 	f := strings.Fields(trailingParens.ReplaceAllString(address, ""))
 	if len(f) < 2 {
@@ -445,13 +442,12 @@ func addressLines(p Payment, addr *SavedAddress) (warn, saved string) {
 	return warn, saved
 }
 
-// paymentCard says what is being asked: a payment, every time - a sign-in
-// host is let through without a card (backgroundLogin) and none is on the ask
-// list, so a card for opening a sign-in page never came (2026-11-03). How much
-// is said first - in the title, which is also how the phone's notice begins,
-// and in the body's first line with where it was read - because it is the
-// thing being approved: a book's 17,100원 was a word inside the job's report,
-// and the notice and the card did not show it (2026-11-05).
+// paymentCard says what is being asked: a payment, every time - a sign-in host
+// is let through without a card (backgroundLogin) and none is on the ask list,
+// so no card is for opening a sign-in page. How much is said first - in the
+// title, which is also how the phone's notice begins, and in the body's first
+// line with where it was read - because it is the thing being approved, even
+// when it is only a word inside the job's report.
 func paymentCard(p Payment, addr *SavedAddress) action.Card {
 	// The host is the part a person can actually judge; the path is there
 	// for the case where two flows share a provider.
@@ -552,7 +548,7 @@ func payTitle(where, amount, unknown string) string {
 // that: what the request hands a payment window, else what the job said right
 // before paying. No other payment's request carries one - 네이버페이's held
 // writes were a log line, a password check and the order sheet's ids
-// (2026-11-05) - and a guess is worse than none on this card.
+// - and a guess is worse than none on this card.
 func paidAmount(p Payment) (amount, from string) {
 	if p.Amount != "" {
 		return p.Amount, "결제창이 받은 금액"

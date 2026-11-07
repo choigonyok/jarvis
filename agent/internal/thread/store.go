@@ -1,11 +1,10 @@
 // Package thread holds the single 1:1 conversation.
 //
-// It used to hold the approval cards too; those live in core/proposal now,
-// because a proposal can outlive - and start outside - a conversation. And the
-// transcript itself now lives in input-svc, because what was said is what the
-// operator would notice losing.
+// The approval cards live in core/proposal, because a proposal can outlive -
+// and start outside - a conversation; the transcript lives in input-svc,
+// because what was said is what the operator would notice losing.
 //
-// What is left here is the seam: the live SSE stream and the "is a run in
+// What is here is the seam: the live SSE stream and the "is a run in
 // flight" flag. Neither survives a restart on purpose - a process that just
 // started is not in the middle of a turn, whatever it was doing when it
 // stopped - so neither belongs in a database.
@@ -182,10 +181,9 @@ func NewStore(baseURL, token string, b *bus.Bus) *Store {
 	}
 }
 
-// Connect confirms the service answers, and is the boot check that used to be
-// "read the file before anything can write". A boot that silently started an
-// empty transcript over a full one would erase it on the first turn; the same
-// risk exists over HTTP, so the same check happens first.
+// Connect confirms the service answers before anything can write: a boot that
+// silently started an empty transcript over a full one would erase it on the
+// first turn.
 func (s *Store) Connect(log *slog.Logger) error {
 	if log != nil {
 		s.log = log

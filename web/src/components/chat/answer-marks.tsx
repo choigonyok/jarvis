@@ -40,8 +40,8 @@ export function MarkButtons({
 }) {
   const good = feedback?.mark === "good";
   const bad = feedback?.mark === "bad";
-  // A thumb's width each and a gap between them - they mean opposite things
-  // (28px side by side, 2026-11-06 review). Under a mouse, the mark's own size.
+  // A thumb's width each and a gap between them - they mean opposite things.
+  // Under a mouse, the mark's own size.
   const mark =
     "tap-y flex h-5 min-w-11 items-center justify-center rounded-md transition-colors focus-ring disabled:opacity-40 mouse:min-w-7";
   return (

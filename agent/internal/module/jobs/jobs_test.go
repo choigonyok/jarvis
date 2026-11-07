@@ -84,7 +84,7 @@ func TestRunToolsOnlyForTheRunInFlight(t *testing.T) {
 
 // Jobs without sites run beside the conversation, without the browser; a
 // job with sites waits for it. The scheduler looks past the one it cannot
-// start (2026-10-18: everything waited on the conversation, one at a time).
+// start.
 func TestJobsWithoutSitesRunBesideTheConversation(t *testing.T) {
 	var mu sync.Mutex
 	runs := 0
@@ -218,9 +218,8 @@ func TestSitesCardAddsOnlyWhenApproved(t *testing.T) {
 	}
 }
 
-// Making or instructing a job takes no card, with sites or without
-// (2026-10-20: "바꾸거나 결제하는 게 아니면 브라우저 작업도 카드 없이"); what
-// a run changes is asked at that step, and money on the payment card. Other
+// Making or instructing a job takes no card, with sites or without; what a
+// run changes is asked at that step, and money on the payment card. Other
 // job tools are not the gate's to wave through.
 func TestJobsNeedNoCard(t *testing.T) {
 	svc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
