@@ -56,6 +56,10 @@
     "eximbay.com",
     "stripe.com"
   ],
+  "_flow": "결제 흐름 - 결제가 끝난 뒤 주문을 확정하러 지나가는 곳(쇼핑몰이 쓰는 자기 결제 회사의 결과 화면 같은 것). 작업이 도는 동안 작업의 사이트가 아니어도 이 주소로 가는 페이지 이동은 열린다 - 결제창과 같은 까닭이다. 묻지도 막지도 않는 목록이라, 이 호스트로 가는 쓰기도 위의 규칙(ask·ask_patterns·window·block)이 그대로 판단한다. 무신사는 결제(주문서의 payment-session, 결제창)가 끝나면 탭을 pay.musinsapayments.com/mps/payment/… 로 옮겨 그 결과(resultCode)로 주문을 확정하고, 29CM 는 결제 페이지가 그 주소다. 호스트는 그 아래 주소를 모두 뜻한다. 여기 없는 곳으로 가는 작업의 이동은 에이전트가 판단한다(/intercept/site): 운영자가 결제 흐름 카드로 더한 곳은 에이전트가 기억해 열고, 결제하던 중이거나 주소가 결제 페이지로 보이면 그 이동을 2분 붙잡은 채 카드를 올린다.",
+  "flow": [
+    "musinsapayments.com"
+  ],
   "_pass": "묻는 호스트·패턴에 걸리지만 돈이 나가지 않는 쓰기 요청 - 보낸다. 쿠팡 주문서(2026-10-17, assets.coupangcdn.com/front/purchase-next 스크립트로 확인)는 배송지·결제수단·쿠폰을 바꿀 때마다 /api/node/checkout/events 로 이벤트를 보내고, 결제하기도 같은 주소의 eventName 'order'(eventType createOrder)다. 이것들을 묻거나 막으면 주문서가 결제하기 전부터 '시스템 오류: 주문중 오류가 발생하였습니다'를 띄운다(작업 16, 2026-10-17 04:37~11:42 네 번). 그래서 그 주소는 eventName 이 values 에 있을 때만 보내고 'order' 와 여기 없는 이벤트(원클릭 구매, 재결제 등)는 묻는다. url 은 소문자로 맞춘 주소의 fnmatch 패턴, json_field/values 는 본문 JSON 의 그 칸이 values 중 하나일 때, json_key 는 본문 JSON 에 그 키가 있을 때, script_path 는 페이지가 스크립트로 받아 간 경로로 가는 쓰기일 때 보낸다. 본문을 읽지 못한 요청은 보내지 않는다(묻는다). why 는 설명일 뿐이다.",
   "pass": [
     {

@@ -21,21 +21,22 @@ type SiteGuard interface {
 	Release(ctx context.Context) error
 }
 
-// BridgeGuard is the browser container's /job-sites, beside its MCP bridge.
+// BridgeGuard is the browser container's /job-sites, beside its MCP bridge,
+// and its /notices: what a run is told with its next browser tool.
 type BridgeGuard struct {
-	base   string
+	root   string
 	token  string
 	client *http.Client
 }
 
 // NewBridgeGuard takes the bridge's MCP URL (JARVIS_EXTRA_MCP mcp-browser)
-// and its token; /job-sites is on the same host.
+// and its token; /job-sites and /notices are on the same host.
 func NewBridgeGuard(mcpURL, token string) (*BridgeGuard, error) {
 	u, err := url.Parse(mcpURL)
 	if err != nil || u.Host == "" {
 		return nil, fmt.Errorf("브라우저 주소를 읽지 못했습니다: %q", mcpURL)
 	}
-	return &BridgeGuard{base: u.Scheme + "://" + u.Host + "/job-sites", token: token, client: &http.Client{Timeout: 10 * time.Second}}, nil
+	return &BridgeGuard{root: u.Scheme + "://" + u.Host, token: token, client: &http.Client{Timeout: 10 * time.Second}}, nil
 }
 
 func (g *BridgeGuard) Restrict(ctx context.Context, sites []string, d time.Duration) error {
@@ -43,15 +44,23 @@ func (g *BridgeGuard) Restrict(ctx context.Context, sites []string, d time.Durat
 		sites = []string{}
 	}
 	body, _ := json.Marshal(map[string]any{"sites": sites, "seconds": int(d.Seconds())})
-	return g.call(ctx, http.MethodPost, body)
+	return g.call(ctx, http.MethodPost, "/job-sites", body)
 }
 
 func (g *BridgeGuard) Release(ctx context.Context) error {
-	return g.call(ctx, http.MethodDelete, nil)
+	return g.call(ctx, http.MethodDelete, "/job-sites", nil)
 }
 
-func (g *BridgeGuard) call(ctx context.Context, method string, body []byte) error {
-	req, err := http.NewRequestWithContext(ctx, method, g.base, bytes.NewReader(body))
+// Tell hands the run holding the browser text with the result of its next
+// browser tool - only while a job holds it: the bridge drops it once the job
+// lets go (browser/notices.py).
+func (g *BridgeGuard) Tell(ctx context.Context, text string) error {
+	body, _ := json.Marshal(map[string]string{"text": text})
+	return g.call(ctx, http.MethodPost, "/notices", body)
+}
+
+func (g *BridgeGuard) call(ctx context.Context, method, path string, body []byte) error {
+	req, err := http.NewRequestWithContext(ctx, method, g.root+path, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}

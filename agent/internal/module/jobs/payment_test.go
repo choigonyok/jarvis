@@ -15,6 +15,7 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/core/action"
 	"github.com/choigonyok/jarvis/agent/internal/core/bus"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
+	"github.com/choigonyok/jarvis/agent/internal/holder"
 )
 
 // jobsSvc stands in for mind: it keeps what the run tools sent.
@@ -198,11 +199,113 @@ func TestRunToolsCanPay(t *testing.T) {
 	}
 }
 
-// fakeGuard keeps what the browser was held to, and how often it was let go.
+// A flow card - the page of a paying run held on its way back - is waited on
+// like a payment card, and wait_payment says what became of the page: gone
+// on with the approval, or stopped before it, so the orders come first.
+func TestAFlowCardIsWaitedOnLikeAPaymentCard(t *testing.T) {
+	defer func(d time.Duration) { payAppear = d }(payAppear)
+	payAppear = 50 * time.Millisecond
+	svc := &jobsSvc{}
+	props := proposal.NewStore(bus.New())
+	m := New(NewStore(svc.serve(t).URL, ""), nil, props, nil, nil)
+	m.current.add(5, Job{ID: 137, Title: "무신사 구매"}, true)
+	s := runSession(t, m, "5")
+
+	m.FlowRaised(137, "p-9", "musinsapayments.com", time.Now().Add(5*time.Second))
+	if text, isErr := callRun(t, s, "ask", map[string]any{"question": "결제가 됐나요?"}); !isErr || !strings.Contains(text, "결제 흐름 카드가 이미") {
+		t.Fatalf("결제 흐름 카드가 떠 있는 동안 ask 는 막아야 합니다: %q", text)
+	}
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		_ = m.PaymentDecided(137, "p-9", true, true, "[결제 흐름 승인됨] ...")
+	}()
+	if text, isErr := callRun(t, s, "wait_payment", nil); isErr || !strings.Contains(text, "결제 흐름에 더했고") || !strings.Contains(text, "그대로 나갔습니다") {
+		t.Fatalf("승인과 함께 이동이 나갔다고 해야 합니다: %q", text)
+	}
+	if got := svc.got(); !contains(got, "/runs/5/step") || contains(got, "/jobs/137/answer p-9") {
+		t.Fatalf("나간 결정은 이 실행의 기록에만 남습니다: %v", got)
+	}
+
+	// Run out of time with no decision: the job waits on the card, and a
+	// later approval says the payment may not have gone through.
+	m.FlowRaised(137, "p-10", "musinsapayments.com", time.Now())
+	if text, isErr := callRun(t, s, "wait_payment", nil); isErr || !strings.Contains(text, "결제 흐름 카드를 기다립니다") {
+		t.Fatalf("결제 흐름 카드를 기다려야 합니다: %q", text)
+	}
+	if got := svc.got(); !contains(got, "/runs/5/wait p-10") {
+		t.Fatalf("작업을 그 카드에 걸어야 합니다: %v", got)
+	}
+	m.pay.decided(137, "p-10", true, false)
+	c, _ := m.pay.get(137)
+	if res := flowDecided(c); res == nil || !strings.Contains(res.Content[0].(*mcp.TextContent).Text, "주문 내역에서 이 주문이 생겼는지") {
+		t.Fatalf("늦은 승인은 주문 내역부터: %+v", res)
+	}
+	m.pay.decided(137, "p-10", false, false)
+	c, _ = m.pay.get(137)
+	if res := flowDecided(c); res == nil || !strings.Contains(res.Content[0].(*mcp.TextContent).Text, "이어 가지 말고") {
+		t.Fatalf("반려: %+v", res)
+	}
+}
+
+// What the guard stopped of a run goes in the job's log and to the run
+// itself, through the bridge - only for the run holding the browser.
+func TestStoppedTellsTheRunHoldingTheBrowser(t *testing.T) {
+	svc := &jobsSvc{}
+	m := New(NewStore(svc.serve(t).URL, ""), nil, proposal.NewStore(bus.New()), nil, nil)
+	g := &fakeGuard{}
+	m.guard = g
+	m.current.add(5, Job{ID: 134, Title: "배송 확인"}, true)
+	m.current.add(6, Job{ID: 22, Title: "할 일 알림"}, false)
+
+	m.Stopped(22, "막은 이동: x", "알림")
+	m.Stopped(134, "막은 이동: view.queryship.com/track/", "request_sites 로 더하세요")
+	for i := 0; i < 200 && (len(g.heard()) == 0 || !contains(svc.got(), "/runs/5/step")); i++ {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := g.heard(); len(got) != 1 || got[0] != "request_sites 로 더하세요" {
+		t.Fatalf("브라우저를 쥔 실행에만 알려야 합니다: %v", got)
+	}
+	if got := svc.got(); !contains(got, "/runs/5/step") || contains(got, "/runs/6/step") {
+		t.Fatalf("그 실행의 기록에 남겨야 합니다: %v", got)
+	}
+}
+
+// A flow card's decision that reached no run is told as a flow card's.
+func TestALateFlowAnswerSaysWhatToDo(t *testing.T) {
+	p := proposal.Proposal{ID: "p-9", Origin: proposal.OriginIntercept, Action: action.Action{Kind: holder.KindFlow}, Card: action.Card{Title: "결제 흐름에 더하기 · musinsapayments.com"}, State: proposal.Executed}
+	if text := lateAnswer(p); !strings.Contains(text, "주문 내역") || strings.Contains(text, "결제 단계를 다시 진행하세요") {
+		t.Fatalf("승인: %q", text)
+	}
+	p.State = proposal.Rejected
+	if text := lateAnswer(p); !strings.Contains(text, "이어 가지 마세요") {
+		t.Fatalf("반려: %q", text)
+	}
+	p.Action.Kind = holder.KindPayment
+	if text := lateAnswer(p); !strings.Contains(text, "결제하지 마세요") {
+		t.Fatalf("결제 카드: %q", text)
+	}
+}
+
+// fakeGuard keeps what the browser was held to, how often it was let go, and
+// what the runs were told.
 type fakeGuard struct {
 	mu       sync.Mutex
 	sites    [][]string
 	released int
+	told     []string
+}
+
+func (g *fakeGuard) Tell(_ context.Context, text string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.told = append(g.told, text)
+	return nil
+}
+
+func (g *fakeGuard) heard() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return append([]string(nil), g.told...)
 }
 
 func (g *fakeGuard) Restrict(_ context.Context, sites []string, _ time.Duration) error {

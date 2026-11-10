@@ -238,6 +238,18 @@ type payCard struct {
 	// does not take the step again (passed).
 	until  time.Time
 	passed bool
+	// flow is the site a flow card asks to add to the payment flow: the card
+	// is not the payment's own but the page on its way back, held at the
+	// guard the same way (FlowRaised). Empty for a payment card.
+	flow string
+}
+
+// what names the card to the run: the payment's, or the payment flow's.
+func (c payCard) what() string {
+	if c.flow != "" {
+		return "결제 흐름 카드"
+	}
+	return "결제 승인 카드"
 }
 
 const (
@@ -313,6 +325,49 @@ func (m *Module) PaymentRaised(job int64, card string, until time.Time) {
 		return
 	}
 	m.pay.set(job, payCard{id: card, state: payPending, until: until})
+}
+
+// FlowRaised: the browser's guard holds a page of the job's run on its way
+// out of the job's sites while it pays, until until, and a card asks whether
+// site joins the payment flow. The run waits on it through wait_payment, as on
+// a payment card: approved in time, the page goes on, and the payment with it.
+func (m *Module) FlowRaised(job int64, card, site string, until time.Time) {
+	if c, ok := m.pay.get(job); ok && c.id == card {
+		return
+	}
+	m.pay.set(job, payCard{id: card, state: payPending, until: until, flow: site})
+}
+
+// Stopped tells the run of job that holds the browser what the browser's
+// guard stopped of it: line goes in the job's log, where the operator reads
+// it in the 작업 tab, and tell is handed to the run with its next browser
+// tool's result. The page itself shows the guard's notice, but the run may
+// not be looking at it - a payment's popup, or an address whose
+// resultCode=0000 it took for the payment done. Off the guard's way: the
+// guard is waiting for its answer meanwhile.
+func (m *Module) Stopped(job int64, line, tell string) {
+	run, j := m.current.now()
+	if run == 0 || j.ID != job {
+		return
+	}
+	teller, _ := m.guard.(interface {
+		Tell(ctx context.Context, text string) error
+	})
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if line != "" {
+			if err := m.store.Step(ctx, run, "step", line); err != nil {
+				m.log.Warn("가드가 막은 것을 작업 기록에 남기지 못했습니다", "job", job, "err", err)
+			}
+		}
+		if tell == "" || teller == nil {
+			return
+		}
+		if err := teller.Tell(ctx, tell); err != nil {
+			m.log.Warn("가드가 막은 것을 실행에 전하지 못했습니다", "job", job, "err", err)
+		}
+	}()
 }
 
 // PaymentDecided hands the operator's decision on the job's payment card to
@@ -461,7 +516,7 @@ func (m *Module) runServer(run int64) *mcp.Server {
 	// next run on its own clock, would leave that one with nobody to wake.
 	payUp := func(j Job) *mcp.CallToolResult {
 		if c, up := m.pay.get(j.ID); up && c.state == payPending {
-			return toolText("결제 승인 카드가 이미 운영자에게 올라가 있습니다. 카드를 더 올리거나 다음 실행을 잡지 말고 wait_payment 를 부른 뒤 실행을 마치세요.", true)
+			return toolText(c.what()+"가 이미 운영자에게 올라가 있습니다. 카드를 더 올리거나 다음 실행을 잡지 말고 wait_payment 를 부른 뒤 실행을 마치세요.", true)
 		}
 		return nil
 	}
@@ -750,7 +805,8 @@ func (m *Module) runServer(run int64) *mcp.Server {
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "wait_payment",
 		Description: "결제하기를 눌렀는데 결제가 멈췄을 때(결제창이 '자비스 · 결제 승인 대기' 화면이나 빈 화면으로 뜨거나 로딩에 멈춤, 쿠팡은 '시스템 오류: 주문중 오류' 창) 부른다. 그때 결제 승인 카드가 운영자에게 올라가 있다. " +
-			"멈춘 결제 요청은 카드가 올라간 뒤 2분 동안 그대로 기다리므로, 그 사이 승인되면 이 도구가 그렇게 알려 주고 실행은 결제하기를 다시 누르지 않고 이어 간다. " +
+			"결제를 이어 가는 페이지 이동이 작업의 사이트 밖이라 멈췄다는 [자비스 가드] 알림을 받았을 때도 부른다 - 그때는 결제 흐름 카드가 올라가 있다. " +
+			"멈춘 요청은 카드가 올라간 뒤 2분 동안 그대로 기다리므로, 그 사이 승인되면 이 도구가 그렇게 알려 주고 실행은 결제하기를 다시 누르지 않고 이어 간다. " +
 			"그때까지 결정이 없으면 작업이 그 카드를 기다리게 하고 실행을 마친다.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ ListInput) (*mcp.CallToolResult, any, error) {
 		j, bad := guard()
@@ -758,6 +814,9 @@ func (m *Module) runServer(run int64) *mcp.Server {
 			return bad, nil, nil
 		}
 		decided := func(c payCard) *mcp.CallToolResult {
+			if c.flow != "" {
+				return flowDecided(c)
+			}
 			switch {
 			case c.state == payApproved && c.passed:
 				return ok("결제가 승인됐고, 멈춰 있던 결제 요청이 그대로 나갔습니다. 결제하기를 다시 누르지 말고(결제창을 다시 열지도 말고) 화면을 보며 이어 가세요 - 결제창이 열리고 있습니다. " +
@@ -800,7 +859,11 @@ func (m *Module) runServer(run int64) *mcp.Server {
 		if res := decided(c); res != nil {
 			return res, nil, nil
 		}
-		if err := m.store.Wait(ctx, run, c.id, "결제 승인 대기"); err != nil {
+		waitWhat := "결제 승인 대기"
+		if c.flow != "" {
+			waitWhat = "결제 흐름 승인 대기"
+		}
+		if err := m.store.Wait(ctx, run, c.id, waitWhat); err != nil {
 			return fail(err), nil, nil
 		}
 		m.current.park(run, c.id)
@@ -814,7 +877,7 @@ func (m *Module) runServer(run int64) *mcp.Server {
 			m.current.park(run, "")
 			return decided(now), nil, nil
 		}
-		return ok("결제 승인 카드를 기다립니다. 승인하거나 반려하면 작업이 바로 다시 실행됩니다. 지금 실행을 마치세요."), nil, nil
+		return ok(c.what() + "를 기다립니다. 승인하거나 반려하면 작업이 바로 다시 실행됩니다. 지금 실행을 마치세요."), nil, nil
 	})
 
 	m.addOrderTools(server, run, guard, payUp)
@@ -910,6 +973,25 @@ func (m *Module) runServer(run int64) *mcp.Server {
 		return ok("남겼습니다."), nil, nil
 	})
 	return server
+}
+
+// flowDecided is what wait_payment says of a decided flow card: whether the
+// page it held went on, and with it the payment - and if not, that the
+// payment may not have gone through, so the orders come first.
+func flowDecided(c payCard) *mcp.CallToolResult {
+	card := "결제 흐름 카드(" + c.flow + ")"
+	switch c.state {
+	case payApproved:
+		if c.passed {
+			return toolText("운영자가 "+card+"를 승인해 그곳을 결제 흐름에 더했고, 멈춰 있던 페이지 이동이 그대로 나갔습니다. 결제하기를 다시 누르지 말고 화면을 보며 이어 가세요 - "+
+				"주문 완료 화면이 뜨는지 보고, 주문 내역에서 주문을 확인합니다.", false)
+		}
+		return toolText("운영자가 "+card+"를 승인해 그곳을 결제 흐름에 더했습니다. 멈춰 있던 페이지 이동은 그 전에 막혀서 결제가 끝나지 않았을 수 있습니다. "+
+			"주문 내역에서 이 주문이 생겼는지 먼저 확인하고, 없으면 주문서에서 결제를 처음부터 다시 진행하세요(결제 승인 카드가 다시 올라갈 수 있습니다).", false)
+	case payRejected:
+		return toolText("운영자가 "+card+"를 반려했습니다. 이 결제는 이어 가지 말고, 주문 내역을 확인한 뒤 결과를 finish 나 ask 로 알리세요.", false)
+	}
+	return nil
 }
 
 // attach puts a card a run raised in the conversation, as its own turn: it

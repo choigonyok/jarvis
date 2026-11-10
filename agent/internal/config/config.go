@@ -184,6 +184,10 @@ type Config struct {
 	// other half, and a handler that does not return until a decision is made
 	// is not something to put behind a network hop while moving storage around.
 	ProposalsPath string
+	// FlowSitesPath keeps the sites the operator added to the payment flow on
+	// a card - outside the workspace like the cards themselves: what the
+	// browser lets a job's page reach is not the model's to write.
+	FlowSitesPath string
 	// SessionPath keeps the CLI session id. Without it a restart starts a new
 	// session, and the transcript on screen would be one the model has no
 	// memory of.
@@ -274,6 +278,7 @@ func Load() (Config, error) {
 		EnrichCooldown:  envDuration("JARVIS_ENRICH_COOLDOWN", 10*time.Minute),
 		EnrichTimeout:   envDuration("JARVIS_ENRICH_TIMEOUT", 8*time.Minute),
 		ProposalsPath:   env("JARVIS_PROPOSALS_PATH", "./data/proposals.json"),
+		FlowSitesPath:   env("JARVIS_FLOW_SITES_PATH", "./data/flow-sites.json"),
 		SessionPath:     env("JARVIS_SESSION_PATH", "./data/session.json"),
 		AllowedOrigin:   env("JARVIS_ALLOWED_ORIGIN", ""),
 		APIToken:        os.Getenv("JARVIS_API_TOKEN"),

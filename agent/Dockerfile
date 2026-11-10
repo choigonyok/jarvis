@@ -34,6 +34,7 @@ ENV JARVIS_ADDR=:8080 \
     JARVIS_WORKSPACE=/workspace \
     JARVIS_HOME=/home/jarvis \
     JARVIS_PROPOSALS_PATH=/data/proposals.json \
+    JARVIS_FLOW_SITES_PATH=/data/flow-sites.json \
     JARVIS_SESSION_PATH=/data/session.json \
     JARVIS_MCP_URL=http://127.0.0.1:8080/mcp
 EXPOSE 8080

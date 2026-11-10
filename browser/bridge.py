@@ -24,6 +24,7 @@ from mcp.types import (
     CallToolResult,
     ListToolsResult,
     PaginatedRequestParams,
+    TextContent,
     Tool,
 )
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
@@ -35,6 +36,7 @@ from starlette.routing import Mount, Route
 
 import jobsites
 import login
+import notices
 import pin
 import upload
 
@@ -75,6 +77,22 @@ async def handle_list_tools(_ctx, _params: PaginatedRequestParams | None) -> Lis
 
 
 async def handle_call_tool(_ctx, params: CallToolRequestParams) -> CallToolResult:
+    return with_notices(await call_tool(params))
+
+
+def with_notices(result: CallToolResult) -> CallToolResult:
+    """작업이 도는 동안이면, 에이전트가 넣어 둔 가드의 말(notices)을 결과 끝에 붙인다. 작업이 없으면
+    남은 말은 버린다 - 그 실행은 끝났고, 지금 도구를 부른 것은 대화일 수 있다."""
+    if jobsites.current() is None:
+        notices.clear()
+        return result
+    said = notices.take()
+    if said:
+        result.content = [*result.content, TextContent(type="text", text=notices.render(said))]
+    return result
+
+
+async def call_tool(params: CallToolRequestParams) -> CallToolResult:
     if params.name in HIDDEN:
         return CallToolResult(
             content=[{"type": "text", "text": f"{params.name} is not available here"}],
@@ -121,6 +139,8 @@ async def job_sites(request):
     if request.method == "DELETE":
         with contextlib.suppress(FileNotFoundError):
             os.remove(jobsites.FILE)
+        # 그 실행에 전하려던 말도 함께 끝난다.
+        notices.clear()
         return JSONResponse({"ok": True})
     try:
         body = await request.json()
@@ -133,6 +153,22 @@ async def job_sites(request):
         json.dump({"sites": sites, "until": time.time() + seconds}, f)
     os.replace(tmp, jobsites.FILE)
     return JSONResponse({"ok": True, "sites": sites})
+
+
+async def notice(request):
+    """도는 작업 실행에 전할 말을 넣는다(POST {text}) - 가드가 그 실행의 페이지 이동을 막거나 붙잡았을
+    때 에이전트가 부른다. 실행의 다음 브라우저 도구 결과 끝에 붙는다(with_notices). DELETE 는 비운다."""
+    if request.method == "DELETE":
+        notices.clear()
+        return JSONResponse({"ok": True})
+    try:
+        body = await request.json()
+        text = str(body.get("text") or "")
+    except (ValueError, TypeError, AttributeError):
+        return JSONResponse({"error": "text 가 필요합니다"}, status_code=400)
+    if not text.strip():
+        return JSONResponse({"error": "text 가 비었습니다"}, status_code=400)
+    return JSONResponse({"ok": True, "added": notices.add(text)})
 
 
 def chromium_alive() -> bool:
@@ -185,6 +221,7 @@ def build_app() -> Starlette:
     return Starlette(
         routes=[
             Route("/job-sites", job_sites, methods=["POST", "DELETE"]),
+            Route("/notices", notice, methods=["POST", "DELETE"]),
             Route("/alive", alive, methods=["GET"]),
             Mount("/", app=handle),
         ],

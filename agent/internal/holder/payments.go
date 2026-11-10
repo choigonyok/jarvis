@@ -141,6 +141,27 @@ func (p *Payments) Live(job int64) bool {
 	return false
 }
 
+// UnderWay is the site of this payer's approved payment that is under way -
+// the payer came back to it and its window has not run out - the latest when
+// there are two. While one is, a page of the payer's going somewhere new is
+// most likely that payment on its way back: a PG's result, the mall's own
+// payment company finishing the order.
+func (p *Payments) UnderWay(job int64) (string, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	now := p.clock()
+	site, latest := "", time.Time{}
+	for k, g := range p.sites {
+		if k.job != job || g.opened.IsZero() || now.After(g.opened.Add(Window)) {
+			continue
+		}
+		if site == "" || g.opened.After(latest) {
+			site, latest = k.site, g.opened
+		}
+	}
+	return site, site != ""
+}
+
 // IsOpen says whether this payer's approved payment on site is under way: the
 // payer came back to it and its window has not run out. It opens nothing itself.
 func (p *Payments) IsOpen(site string, job int64) bool {

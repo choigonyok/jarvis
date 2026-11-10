@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
+	"github.com/choigonyok/jarvis/agent/internal/holder"
 	"github.com/choigonyok/jarvis/gocommon/record"
 )
 
@@ -127,7 +128,12 @@ func (s *Server) recordRaised(asked string, p Payment, opened *proposal.Proposal
 // to that session's model alone, and the next session asked the same again.
 func (s *Server) recordDecision(p proposal.Proposal, d proposal.Decision) {
 	tier, trace, subject, cause := record.Raw, "chat", p.Action.Kind, ""
-	if p.Origin == proposal.OriginIntercept {
+	switch {
+	case p.Origin == proposal.OriginIntercept && p.Action.Kind == holder.KindFlow:
+		// A site joining the payment flow is a decision about payments too.
+		f := flowOf(p.Action.Input)
+		tier, trace, subject = record.Durable, payerOf(f.JobID), f.Site
+	case p.Origin == proposal.OriginIntercept:
 		pay := paymentOf(p.Action.Input)
 		tier, trace, subject, cause = record.Durable, payerOf(pay.JobID), pay.grantSite(), "requested:"+p.ID
 	}

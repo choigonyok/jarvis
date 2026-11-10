@@ -206,6 +206,22 @@ type fakeJobs struct {
 	summary string
 	raised  []string
 	decided []string
+	// flows are the flow cards raised ("job card site"), stopped what the
+	// runs were told ("job line | tell").
+	flows   []string
+	stopped []string
+}
+
+func (f *fakeJobs) FlowRaised(job int64, card, site string, _ time.Time) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.flows = append(f.flows, fmt.Sprintf("%d %s %s", job, card, site))
+}
+
+func (f *fakeJobs) Stopped(job int64, line, tell string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stopped = append(f.stopped, fmt.Sprintf("%d %s | %s", job, line, tell))
 }
 
 func (f *fakeJobs) RunningJob() (int64, string, string, bool) {

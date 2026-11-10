@@ -107,6 +107,8 @@
 남는다). 상태 탭의 "쿠팡 주문 내역"이 이상으로 바뀌면 화면 탭에서 쿠팡에 다시 로그인한다.
 브라우저 가드의 로그(결제 결정, 결제 흐름의 이동·새 창)는 `browser-logs` 볼륨의 `guard.log`(5MB 다섯 개)에도
 남아, 컨테이너를 다시 만들어도 지난 결제를 볼 수 있다: `docker compose exec browser tail -n 200 /logs/guard.log`.
+운영자가 결제 흐름 카드로 더한 곳은 에이전트의 `/data/flow-sites.json`(jarvis-data 볼륨, 매일 백업)에 남는다. 하나를 빼려면
+그 항목을 지우고 에이전트를 다시 띄운다. 브라우저가 처음부터 아는 결제 흐름은 `browser/payment-hosts.json` 의 `flow` 다.
 
 위 전제는 `scripts/host-check`(LaunchAgent com.jarvis.host-check, 10분마다)가 점검해
 `~/.jarvis-host/host.json` 에 적고, context-svc 가 그것을 읽어 판정을 기록(`check.result`)으로 남기면 상태 탭 "기반"의

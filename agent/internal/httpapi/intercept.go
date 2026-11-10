@@ -94,8 +94,16 @@ type JobPayments interface {
 	// request held until until.
 	PaymentRaised(job int64, card string, until time.Time)
 	// PaymentDecided hands the decision to the job and wakes it. passed: the
-	// held request went on with the approval, in the run still going.
+	// held request went on with the approval, in the run still going. A flow
+	// card's decision comes here too.
 	PaymentDecided(job int64, card string, approved, passed bool, text string) error
+	// FlowRaised tells the job a flow card is waiting for it (leave.go): a
+	// page of its run held until until, which joins the payment flow - site -
+	// if the card is approved. The run waits on it as on a payment card.
+	FlowRaised(job int64, card, site string, until time.Time)
+	// Stopped tells the job's run what the guard stopped of it: line for the
+	// job's log, tell for the run itself.
+	Stopped(job int64, line, tell string)
 }
 
 func (s *Server) postIntercept(w http.ResponseWriter, r *http.Request) {
@@ -149,7 +157,8 @@ type verdict struct {
 	pending string
 	// card is the card the request went through or stopped at, however it
 	// came out; why is how the verdict was reached, in a word a replay can
-	// compare: login | background | granted | held | waiting.
+	// compare: login | background | granted | held | waiting - and for a page
+	// leaving a job's sites (leave.go) flow | held | waiting | turned | site.
 	card string
 	why  string
 }
@@ -231,7 +240,7 @@ func (s *Server) raisePayment(ctx context.Context, p Payment, asked string) stri
 	defer s.raising.Unlock()
 	if waiting, ok := s.proposals.FindPendingWhere(func(q proposal.Proposal) bool {
 		w := paymentOf(q.Action.Input)
-		return q.Origin == proposal.OriginIntercept && w.grantSite() == p.grantSite() && w.JobID == p.JobID
+		return q.Origin == proposal.OriginIntercept && q.Action.Kind == holder.KindPayment && w.grantSite() == p.grantSite() && w.JobID == p.JobID
 	}); ok {
 		return waiting.ID
 	}
@@ -246,7 +255,7 @@ func (s *Server) raisePayment(ctx context.Context, p Payment, asked string) stri
 	raw, _ := json.Marshal(p)
 	opened, _ := s.proposals.Open(proposal.Proposal{
 		Origin: proposal.OriginIntercept,
-		Action: action.Action{Kind: "browser.payment", Input: raw},
+		Action: action.Action{Kind: holder.KindPayment, Input: raw},
 		Card:   paymentCard(p, addr),
 	})
 	s.recordRaised(asked, p, opened)
@@ -267,9 +276,13 @@ func paymentOf(raw json.RawMessage) Payment {
 
 // resolvePayment acts on a decision about a payment card: approved, the host
 // is open for a few minutes and the assistant is told to take the step again;
-// rejected, it is told not to pay.
+// rejected, it is told not to pay. A flow card's goes to resolveFlow.
 func (s *Server) resolvePayment(p proposal.Proposal, d proposal.Decision) {
 	if p.Origin != proposal.OriginIntercept {
+		return
+	}
+	if p.Action.Kind == holder.KindFlow {
+		s.resolveFlow(p, d)
 		return
 	}
 	pay := paymentOf(p.Action.Input)

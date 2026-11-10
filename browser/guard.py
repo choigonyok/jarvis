@@ -26,6 +26,10 @@ browser-use는 건드리지 않는다. 같은 Chromium에 CDP로 따로 붙은 �
 백그라운드 작업이 도는 동안에는 하나를 더 본다: 탭의 페이지 이동이 그 작업의
 사이트(jobsites.py) 밖으로 가면 막는다. 작업은 아무도 보지 않는 채로 로그인된
 브라우저를 쓰므로, 읽은 페이지가 어디로 가라고 하든 제 사이트 밖으로는 못 간다.
+결제가 지나가는 곳(결제창, 결제 호스트, 결제 흐름)은 예외로 연다. 그 밖으로 가는 이동은
+에이전트에 묻는다(/intercept/site): 운영자가 결제 흐름에 더한 곳이면 열고, 결제하던
+중이면 그 이동을 붙잡은 채 카드로 묻고, 아니면 막고 작업에 알린다. 물을 수 없으면 막는다 -
+결제를 마무리하는 이동이 막히면 결제창은 정상(resultCode=0000)인데 주문이 생기지 않는다.
 
 막은 페이지 이동(결제창, 작업 사이트 밖)은 Chrome 의 오류 화면 대신 자비스의 안내 화면으로
 채운다(info_page): 승인을 기다리는지, 허용하지 않은 결제 수단인지, 작업 사이트 밖인지. 오류
@@ -83,8 +87,8 @@ SKIP_TYPES = {"Image", "Stylesheet", "Font", "Media", "Script", "Manifest"}
 WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
-def load_rules() -> tuple[list[str], list[str], list[str], list[dict], list[str]]:
-    """묻는 호스트, 묻는 URL 패턴, 막는 URL 패턴, 묻는 것 중 통과시킬 규칙, 결제창(PG) 호스트.
+def load_rules() -> tuple[list[str], list[str], list[str], list[dict], list[str], list[str]]:
+    """묻는 호스트, 묻는 URL 패턴, 막는 URL 패턴, 묻는 것 중 통과시킬 규칙, 결제창(PG) 호스트, 결제 흐름 호스트.
     예전 형식(hosts)도 읽어서, 규칙 파일을 갈아끼우는 중에 가드가 빈손으로 뜨는 일이 없게 한다."""
     with open(HOSTS_FILE, encoding="utf-8") as f:
         data = json.load(f)
@@ -105,7 +109,8 @@ def load_rules() -> tuple[list[str], list[str], list[str], list[dict], list[str]
             rule["script_path"] = True
         passes.append(rule)
     windows = [h.strip().lower() for h in data.get("window", []) if h.strip()]
-    return ask, ask_patterns, block, passes, windows
+    flows = [h.strip().lower() for h in data.get("flow", []) if h.strip()]
+    return ask, ask_patterns, block, passes, windows, flows
 
 
 def body_of(request: dict) -> str | None:
@@ -168,6 +173,17 @@ INFO_PAGES = {
         "작업의 사이트 밖",
         "이 작업이 쓰는 사이트가 아니라서 열지 않았습니다: {host}",
         "꼭 필요하면 request_sites 로 사이트를 더하세요.",
+    ),
+    "flow": (
+        "결제 흐름 승인 대기",
+        "결제를 이어 가는 이 페이지({host})는 작업의 사이트 밖이라, 운영자에게 결제 흐름 카드를 올리고 열지 않았습니다.",
+        "결제가 아직 끝나지 않았을 수 있습니다. 작업이라면 결제하기를 다시 누르지 말고 wait_payment 를 부르세요 - "
+        "승인되면 이 결제를 어떻게 이을지 알려 줍니다.",
+    ),
+    "turned": (
+        "결제 흐름 반려",
+        "운영자가 이 페이지({host})를 결제 흐름에 더하지 않기로 해서 열지 않았습니다.",
+        "이 결제는 끝나지 않았습니다. 다른 길로 돌아가지 말고 주문 내역을 확인한 뒤 알리세요.",
     ),
 }
 
@@ -257,10 +273,10 @@ def find_cdp_port() -> int | None:
 
 
 class Answer:
-    """에이전트의 답: 보낼지(참이면 보낸다)와, 막았다면 기다리는 결제 카드."""
+    """에이전트의 답: 보낼지(참이면 보낸다)와, 막았다면 기다리는 카드, 그리고 어떻게 정했는지(why)."""
 
-    def __init__(self, approved: bool, pending: str = ""):
-        self.approved, self.pending = approved, pending
+    def __init__(self, approved: bool, pending: str = "", why: str = ""):
+        self.approved, self.pending, self.why = approved, pending, why
 
     def __bool__(self) -> bool:
         return self.approved
@@ -274,12 +290,16 @@ class Guard:
         block_patterns: list[str],
         pass_rules: list[dict] | None = None,
         window_hosts: list[str] | None = None,
+        flow_hosts: list[str] | None = None,
     ):
         self.hosts = ask_hosts
         self.ask_patterns = ask_patterns
         self.blocks = block_patterns
         self.pass_rules = pass_rules or []
         self.windows = window_hosts or []
+        # 결제 흐름은 멈춰 세울 대상에 더하지 않는다: 페이지 이동은 아래의 "*" 로 이미 멈추고,
+        # 그 밖의 요청은 다른 규칙이 판단한다.
+        self.flows = flow_hosts or []
         # 멈춰 세울 대상은 네 목록의 합집합이다. 패턴에 없는 요청은 Chrome이
         # 아예 멈추지 않으므로, 여기 빠진 것은 판단 대상에도 오르지 못한다.
         self.patterns = (
@@ -331,9 +351,10 @@ class Guard:
         page = self.pages.get(session or "")
         if page is None or (frame_id and frame_id != page):
             return False
-        # 결제가 지나가는 곳(결제창, 네이버페이·쿠팡 결제 호스트)은 작업의 사이트가 아니어도 연다 -
-        # 결제창을 새 창으로 띄우는 PG 가 있고, 거기서 돈이 나가는 쓰기는 이 가드가 따로 묻는다.
-        if self.is_window(url) or self.matches(urlparse(url).netloc):
+        # 결제가 지나가는 곳(결제창, 네이버페이·쿠팡 결제 호스트, 결제 흐름)은 작업의 사이트가 아니어도
+        # 연다 - 결제창을 새 창으로 띄우는 PG 가 있고, 결제가 끝나면 쇼핑몰 자기 결제 회사의 주소로 돌아와
+        # 주문을 확정하는 곳이 있다. 거기서 돈이 나가는 쓰기는 이 가드가 따로 묻는다.
+        if self.is_window(url) or self.is_flow(url) or self.matches(urlparse(url).netloc):
             return False
         return not jobsites.allowed(url, sites)
 
@@ -345,6 +366,11 @@ class Guard:
         """PG 결제창(이니시스·KCP…)으로 가는 요청인가 - payment-hosts.json 의 window."""
         host = (urlparse(url).hostname or "").lower()
         return any(host == h or host.endswith("." + h) for h in self.windows)
+
+    def is_flow(self, url: str) -> bool:
+        """결제를 마무리하러 지나가는 곳(무신사의 pay.musinsapayments.com)인가 - payment-hosts.json 의 flow."""
+        host = (urlparse(url).hostname or "").lower()
+        return any(host == h or host.endswith("." + h) for h in self.flows)
 
     def opened_by_window(self, session: str | None) -> bool:
         """이 세션의 탭을 결제창(카드사 창, PG 창)의 페이지나 프레임이 열었나 - 연 쪽을 거슬러 세 단계까지.
@@ -497,6 +523,25 @@ class Guard:
             log.error("승인을 받지 못했습니다: %s", e)
             return Answer(False)
 
+    async def ask_leave(self, url: str, method: str, host: str, came_from: str = "", from_window: bool = False) -> Answer:
+        """작업의 사이트 밖으로 가는 페이지 이동을 에이전트에 묻는다(/intercept/site). 에이전트는 운영자가
+        결제 흐름에 더한 곳이면 열고, 결제하던 중이면 카드를 올려 2분까지 붙잡았다 답하고, 아니면 막고
+        작업에 알린다. came_from 은 그 프레임이 있던 주소의 모양(값 없이)이다."""
+        payload = {"url": url, "method": method, "host": host}
+        if came_from:
+            payload["from"] = came_from
+        if from_window:
+            payload["fromWindow"] = True
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=DECISION_TIMEOUT)) as s:
+                async with s.post(AGENT_URL + "/site", json=payload, headers={"Authorization": f"Bearer {TOKEN}"}) as r:
+                    body = await r.json()
+                    return Answer(body.get("decision") == "approved", str(body.get("pending") or ""), str(body.get("why") or ""))
+        except Exception as e:
+            # 물어볼 수 없으면 작업의 사이트 밖은 막는다 - 에이전트가 없던 때의 판단 그대로다.
+            log.error("작업의 사이트 밖 이동을 묻지 못했습니다: %s", e)
+            return Answer(False)
+
     async def refuse(self, ws, rid: str, session: str | None, resource_type: str | None, kind: str, host: str = ""):
         """보내지 않는다. 페이지 이동이면 그 자리를 자비스의 안내 화면으로 채운다(오류 화면 대신)."""
         if resource_type != "Document":
@@ -532,23 +577,35 @@ class Guard:
         async def go():
             await self.send(ws, "Fetch.continueRequest", {"requestId": rid}, session)
 
+        # 그 프레임이 이 이동 전에 있던 주소: 작업의 사이트 밖으로 갈 때 어디서 왔는지 에이전트에 알린다.
+        came_from = ""
         if rtype == "Document":
             if fid := p.get("frameId"):
-                self.frames.pop(fid, None)
+                came_from = self.frames.pop(fid, "")
                 self.frames[fid] = url
                 while len(self.frames) > self.FRAMES_KEPT:
                     self.frames.pop(next(iter(self.frames)))
-            if self.is_window(url) or self.matches(host):
+            if self.is_window(url) or self.is_flow(url) or self.matches(host):
                 # 결제 흐름의 길: 값은 빼고 모양만, 어느 탭에서인지와 함께.
                 tab = (self.pages.get(session or "") or "?")[:6]
                 log.info("결제 흐름 이동: %s %s (탭 %s)", method, url_shape(url)[:160], tab)
                 self.note("guard.flow", host, method=method, url=url_shape(url)[:300], tab=tab)
 
         if rtype == "Document" and self.leaves_job(session, p.get("frameId"), url):
-            log.warning("작업의 사이트 밖으로 가는 이동을 막았습니다: %s", url[:120])
-            self.note("guard.refused", host, why="site", method=method, url=url_shape(url)[:300])
-            await self.refuse(ws, rid, session, rtype, "site", host)
-            return
+            came = url_shape(came_from)[:300] if came_from.startswith("http") else ""
+            answer = await self.ask_leave(url, method, host, came, self.opened_by_window(session))
+            if not answer:
+                # 카드가 기다리면 그 기다림을, 운영자가 반려했으면 반려를, 아니면 작업의 사이트 밖을 보인다.
+                pending, why = getattr(answer, "pending", ""), getattr(answer, "why", "")
+                page = "flow" if pending else ("turned" if why == "turned" else "site")
+                log.warning("작업의 사이트 밖으로 가는 이동을 막았습니다: %s", url[:120])
+                self.note("guard.refused", host, why=page, method=method, url=url_shape(url)[:300])
+                await self.refuse(ws, rid, session, rtype, page, host)
+                return
+            # 운영자가 결제 흐름에 더한 곳이거나, 붙잡은 사이 카드가 승인됐다. 그 이동의 쓰기는 아래 규칙이
+            # 그대로 판단한다.
+            log.info("작업의 사이트 밖이지만 결제 흐름이라 열었습니다: %s %s", method, url_shape(url)[:160])
+            self.note("guard.passed", host, why="flow", method=method, url=url_shape(url)[:300])
 
         if p.get("resourceType") == "Script" and method.upper() == "GET":
             self.saw_script(url)
@@ -602,11 +659,12 @@ class Guard:
 
         async with websockets.connect(ws_url, max_size=None) as ws:
             log.info(
-                "CDP에 붙었습니다 (port %s), 묻는 호스트 %d개 · 묻는 패턴 %d개 · 결제창 %d개 · 막는 패턴 %d개 · 통과 규칙 %d개",
+                "CDP에 붙었습니다 (port %s), 묻는 호스트 %d개 · 묻는 패턴 %d개 · 결제창 %d개 · 결제 흐름 %d개 · 막는 패턴 %d개 · 통과 규칙 %d개",
                 port,
                 len(self.hosts),
                 len(self.ask_patterns),
                 len(self.windows),
+                len(self.flows),
                 len(self.blocks),
                 len(self.pass_rules),
             )

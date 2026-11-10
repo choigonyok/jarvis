@@ -60,3 +60,25 @@ func TestBridgeGuardHoldsAndReleases(t *testing.T) {
 		t.Fatal("거절을 오류로 알려야 합니다(그러면 실행하지 않습니다)")
 	}
 }
+
+// What a run is told goes to the bridge's /notices, with its token.
+func TestBridgeGuardTellsTheRun(t *testing.T) {
+	var text string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/notices" || r.Method != http.MethodPost || r.Header.Get("Authorization") != "Bearer tok" {
+			http.Error(w, "no", http.StatusUnauthorized)
+			return
+		}
+		var in struct {
+			Text string `json:"text"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&in)
+		text = in.Text
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	g, _ := NewBridgeGuard(srv.URL+"/mcp", "tok")
+	if err := g.Tell(context.Background(), "wait_payment 를 부르세요"); err != nil || text != "wait_payment 를 부르세요" {
+		t.Fatalf("알림: %q %v", text, err)
+	}
+}

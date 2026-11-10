@@ -651,6 +651,7 @@ func Assemble(cfg *config.Config, d Deps) (*Assembly, error) {
 		FollowUp:        runner,
 		Jobs:            jobPayments,
 		SavedAddress:    savedAddress(vaultModule),
+		FlowSitesPath:   cfg.FlowSitesPath,
 		Checklists:      checklistConsole(checklistModule),
 		Records:         records,
 		Loops:           loops,

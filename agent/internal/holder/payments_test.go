@@ -37,6 +37,33 @@ func TestHeldRequestsHearTheirCard(t *testing.T) {
 	}
 }
 
+// UnderWay: approved, come back to, and still in its window - the latest of
+// the payer's, never another payer's.
+func TestAPaymentIsUnderWayOnceThePayerIsBack(t *testing.T) {
+	now := time.Date(2026, 11, 10, 22, 33, 0, 0, time.UTC)
+	p := Payments{Now: func() time.Time { return now }}
+	p.Grant("musinsa.com", 137, "")
+	if _, ok := p.UnderWay(137); ok {
+		t.Fatal("돌아오기 전에는 진행 중이 아닙니다")
+	}
+	p.Allow("musinsa.com", 137, "", "")
+	now = now.Add(time.Minute)
+	p.Grant(windowSite, 137, "")
+	p.Allow(windowSite, 137, "", "")
+	if site, ok := p.UnderWay(137); !ok || site != windowSite {
+		t.Fatalf("마지막에 돌아온 결제: %q %v", site, ok)
+	}
+	if _, ok := p.UnderWay(7); ok {
+		t.Fatal("다른 결제자의 결제")
+	}
+	now = now.Add(Window + time.Minute)
+	if _, ok := p.UnderWay(137); ok {
+		t.Fatal("창이 지나면 끝납니다")
+	}
+}
+
+const windowSite = "pg-window"
+
 // Live: approved and not yet come back to, or under way.
 func TestAnApprovalIsLiveWhileItCanStillHappen(t *testing.T) {
 	now := time.Date(2026, 10, 31, 6, 0, 0, 0, time.UTC)

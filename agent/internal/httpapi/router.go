@@ -62,6 +62,9 @@ type Server struct {
 	holdDur  time.Duration
 	// raising is held from looking for a flow's card to opening one.
 	raising sync.Mutex
+	// flows are the sites the operator added to the payment flow on a flow
+	// card (leave.go): a job's page may go to them outside its sites.
+	flows *flowSites
 	// savedAddress is the shipping address the vault keeps, for the payment
 	// card; nil shows none.
 	savedAddress func(ctx context.Context) (SavedAddress, bool)
@@ -154,6 +157,9 @@ type Deps struct {
 	// SavedAddress, when set, is the shipping address the vault keeps: the
 	// payment card shows it beside the one the job reported.
 	SavedAddress func(ctx context.Context) (SavedAddress, bool)
+	// FlowSitesPath is where the sites added to the payment flow are kept
+	// (leave.go). Empty keeps them for the life of the process.
+	FlowSitesPath string
 	// Checklists, when set, is the lists the conversation's cards show: read
 	// with a page of the thread, ticked on a card.
 	Checklists Checklists
@@ -205,6 +211,11 @@ func New(d Deps) *Server {
 		loops:           d.Loops,
 		policy:          d.Policy,
 	}
+	flows, err := openFlowSites(d.FlowSitesPath)
+	if err != nil && d.Log != nil {
+		d.Log.Error("결제 흐름에 더한 곳을 읽지 못해 비어 있는 채로 시작합니다", "path", d.FlowSitesPath, "err", err)
+	}
+	s.flows = flows
 	if d.Proposals != nil {
 		d.Proposals.OnDecide(s.resolvePayment)
 		d.Proposals.OnDecide(s.recordDecision)
@@ -243,8 +254,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /proposals", s.guard(s.getProposals))
 	mux.HandleFunc("POST /proposals/{id}/decision", s.guard(s.postDecision))
 
-	// The browser container dials this when a page tries to pay.
+	// The browser container dials this when a page tries to pay, and when a
+	// page of a job's run tries to leave the job's sites.
 	mux.HandleFunc("POST /intercept", s.postIntercept)
+	mux.HandleFunc("POST /intercept/site", s.postSite)
 	mux.HandleFunc("POST /intercept/records", s.postGuardRecords)
 	// The CLI's PreToolUse hook, from inside this container (policy.RunHook).
 	mux.Handle("POST /policy/check", s.guardMCP(http.HandlerFunc(s.postPolicyCheck)))

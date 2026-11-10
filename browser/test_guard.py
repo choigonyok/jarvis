@@ -320,6 +320,11 @@ class Records(unittest.IsolatedAsyncioTestCase):
         got = self.noted()
         self.assertEqual(got[0]["kind"], "guard.flow")
         self.assertNotIn("abc", json.dumps(got))
+        # 결제 흐름(쇼핑몰 자기 결제 회사로 돌아가는 길)도 길로 남는다.
+        await self.g.on_paused(self.ws, self.paused("https://pay.musinsapayments.com/mps/payment/PP5?resultCode=0000", "", "GET", "Document"))
+        got = self.noted()
+        self.assertEqual(got[0]["kind"], "guard.flow")
+        self.assertIn("resultCode=0000", got[0]["payload"]["url"])
 
     async def test_keys_differ_and_a_full_queue_does_not_wait(self):
         self.g.records = asyncio.Queue(maxsize=2)
@@ -387,6 +392,21 @@ class JobSites(unittest.TestCase):
                     "https://pay.naver.com/payments/abc", "https://orders.pay.naver.com/order/sheet/1"]:
             self.assertFalse(self.g.leaves_job("s-page", "T1", url), url)
         self.assertTrue(self.g.leaves_job("s-page", "T1", "https://evil.example/pay"))
+
+    def test_the_payment_flow_opens_for_any_job(self):
+        # 무신사 결제가 주문을 확정하러 가는 곳. 작업의 사이트가 무신사뿐이어도 열린다 - 막히면 결제창은
+        # 정상(0000)인데 주문이 생기지 않는다.
+        self.hold(["www.musinsa.com", "musinsa.com"])
+        for url in ["https://pay.musinsapayments.com/mps/payment/PP5TEST?resultCode=0000&resultMessage=x",
+                    "https://musinsapayments.com/x"]:
+            self.assertTrue(self.g.is_flow(url), url)
+            self.assertFalse(self.g.leaves_job("s-page", "T1", url), url)
+        for url in ["https://notmusinsapayments.com/x", "https://musinsapayments.com.evil.example/x"]:
+            self.assertFalse(self.g.is_flow(url), url)
+            self.assertTrue(self.g.leaves_job("s-page", "T1", url), url)
+        # 결제 흐름은 묻지도 막지도 않는다: 그 호스트의 쓰기는 다른 규칙대로.
+        self.assertFalse(self.g.asks("https://pay.musinsapayments.com/mps/payment/PP5", "POST"))
+        self.assertFalse(self.g.blocked("https://pay.musinsapayments.com/mps/payment/PP5", "POST"))
 
     def test_a_job_without_sites_opens_none(self):
         self.hold([])
@@ -476,23 +496,84 @@ class InfoPagesAndWindows(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.sent, ["Fetch.fulfillRequest"])
         self.assertIn("허용하지 않은 결제 수단", base64.b64decode(self.params[0]["body"]).decode("utf-8"))
 
-    async def test_leaving_the_jobs_sites_is_said_on_the_page(self):
+    def hold_job(self, sites):
         import tempfile
         import time
-
-        import jobsites
 
         d = tempfile.TemporaryDirectory()
         self.addCleanup(d.cleanup)
         jobsites.FILE = os.path.join(d.name, "job-sites.json")
         jobsites._cache.update(mtime=None, value=None)
-        json.dump({"sites": ["shampoomusicent.com"], "until": time.time() + 600}, open(jobsites.FILE, "w"))
+        json.dump({"sites": sites, "until": time.time() + 600}, open(jobsites.FILE, "w"))
         self.g.pages["s-tab"] = "T1"
+
+    def answer_leave(self, answer):
+        """에이전트의 /intercept/site 대신: 물은 것을 남기고 answer 로 답한다."""
+        self.leaves = []
+
+        async def ask_leave(url, method, host, came_from="", from_window=False):
+            self.leaves.append((url, method, host, came_from, from_window))
+            return answer
+
+        self.g.ask_leave = ask_leave
+
+    async def test_leaving_the_jobs_sites_is_said_on_the_page(self):
+        self.hold_job(["shampoomusicent.com"])
+        self.answer_leave(guard.Answer(False, "", "site"))
         await self.g.on_paused(self.ws, self.doc("https://evil.example/x", session="s-tab", frame="T1", method="GET", body=""))
         self.assertEqual(self.sent, ["Fetch.fulfillRequest"])
         page = base64.b64decode(self.params[0]["body"]).decode("utf-8")
         self.assertIn("작업의 사이트 밖", page)
         self.assertIn("evil.example", page)
+        self.assertEqual([lv[2] for lv in self.leaves], ["evil.example"], "막기 전에 에이전트에 묻는다")
+
+    async def test_leaving_is_asked_with_where_the_page_was(self):
+        # 무신사 결제는 결제창이 끝나면 탭을 pay.musinsapayments.com 으로 옮겨 주문을 확정한다. 결제 흐름 목록에
+        # 없는 곳이라면 에이전트가 정한다 - 승인하면 그 이동은 나간다. 어디서 왔는지는 값 없이 넘긴다.
+        self.hold_job(["www.musinsa.com"])
+        self.g.flows = []
+        self.g.frames["T1"] = "https://order.musinsa.com/order/sheet?token=SECRET"
+        self.answer_leave(guard.Answer(True, "", "held"))
+        back = "https://pay.musinsapayments.com/mps/payment/PP5?resultCode=0000&resultMessage=%EC%A0%95"
+        await self.g.on_paused(self.ws, self.doc(back, session="s-tab", frame="T1", method="GET", body=""))
+        self.assertEqual(self.sent, ["Fetch.continueRequest"])
+        self.assertEqual(self.leaves, [(back, "GET", "pay.musinsapayments.com", "order.musinsa.com/order/sheet?token", False)])
+
+    async def test_a_held_page_whose_card_waits_says_so(self):
+        self.hold_job(["www.musinsa.com"])
+        self.g.flows = []
+        self.answer_leave(guard.Answer(False, "p-9", "waiting"))
+        await self.g.on_paused(self.ws, self.doc("https://pay.musinsapayments.com/mps/payment/PP5", session="s-tab", frame="T1", method="GET", body=""))
+        page = self.page_of()
+        self.assertIn("<title>자비스 · 결제 흐름 승인 대기</title>", page)
+        self.assertIn("wait_payment", page)
+
+    async def test_a_turned_down_page_says_so(self):
+        self.hold_job(["www.musinsa.com"])
+        self.g.flows = []
+        self.answer_leave(guard.Answer(False, "", "turned"))
+        await self.g.on_paused(self.ws, self.doc("https://pay.musinsapayments.com/mps/payment/PP5", session="s-tab", frame="T1", method="GET", body=""))
+        self.assertIn("결제 흐름 반려", self.page_of())
+
+    async def test_unasked_leave_is_refused(self):
+        # 에이전트에 물을 수 없으면(ask_leave 가 실패를 Answer(False) 로 돌려준다) 그대로 막는다.
+        self.hold_job(["www.musinsa.com"])
+        old = guard.AGENT_URL
+        guard.AGENT_URL = "http://127.0.0.1:9/intercept"
+        self.addCleanup(lambda: setattr(guard, "AGENT_URL", old))
+        answer = await self.g.ask_leave("https://evil.example/", "GET", "evil.example")
+        self.assertFalse(answer)
+
+    async def test_a_page_let_out_still_meets_the_payment_rules(self):
+        # 에이전트가 사이트 밖 이동을 열어도, 그 이동이 허용하지 않은 결제로 가는 쓰기면 그대로 막는다.
+        self.hold_job(["www.musinsa.com"])
+        self.answer_leave(guard.Answer(True, "", "flow"))
+        await self.g.on_paused(self.ws, self.doc("https://online-pay.kakaopay.com/pay/x", session="s-tab", frame="T1"))
+        self.assertEqual(self.sent, ["Fetch.fulfillRequest"])
+        self.assertIn("허용하지 않은 결제 수단", self.page_of())
+
+    def page_of(self, i=-1):
+        return base64.b64decode(self.params[i]["body"]).decode("utf-8")
 
     async def test_naver_pay_from_the_card_companys_popup_says_so(self):
         # 카드사 창(acs.hanacard.co.kr)이 연 네이버페이 팝업의 요청만 '결제창이 연 창'이다 - 에이전트는 그것만

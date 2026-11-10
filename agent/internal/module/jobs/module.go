@@ -38,6 +38,7 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/core/action"
 	"github.com/choigonyok/jarvis/agent/internal/core/module"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
+	"github.com/choigonyok/jarvis/agent/internal/holder"
 	// Imported, not mirrored: the cards a run raises to save a PIN or an
 	// address are the vault's own kinds, and an order sheet is filled from
 	// its shipping record. What the vault does is reached through VaultCards.
@@ -647,9 +648,14 @@ func lateAnswer(p proposal.Proposal) string {
 		word = "승인"
 	}
 	text := fmt.Sprintf("[카드 결정 · 늦게 전함] '%s' 카드(%s)가 %s됐습니다.", p.Card.Title, p.ID, word)
-	if p.Origin == proposal.OriginIntercept && approved {
+	switch {
+	case p.Action.Kind == holder.KindFlow && approved:
+		text += " 그곳을 결제 흐름에 더했습니다. 막혔던 결제는 끝나지 않았을 수 있으니 주문 내역에서 그 주문이 생겼는지 먼저 확인하고, 없으면 결제를 처음부터 다시 진행하세요."
+	case p.Action.Kind == holder.KindFlow:
+		text += " 그곳을 결제 흐름에 더하지 않았습니다. 그 결제는 이어 가지 마세요."
+	case p.Origin == proposal.OriginIntercept && approved:
 		text += " 결제 단계를 다시 진행하세요 - 다시 막히면 결제 카드가 새로 올라갑니다(wait_payment)."
-	} else if p.Origin == proposal.OriginIntercept {
+	case p.Origin == proposal.OriginIntercept:
 		text += " 결제하지 마세요."
 	}
 	if p.Note != "" {
