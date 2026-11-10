@@ -537,14 +537,17 @@
   /* What the floating top (PageTop, shell/header.tsx) takes from the top of
      the page. PageTop measures it as it changes; this is the header alone,
      for the first paint, before any script has run. */
-  --top-space: calc(env(safe-area-inset-top) + 3.25rem + 1px);
+  --top-space: calc(env(safe-area-inset-top) + 3.25rem);
+  /* How far below it the floating top's glass runs on, fading out (.glass-pane):
+     less than any page's top margin, so at rest it lies over nothing. */
+  --top-fade: 0.75rem;
   /* What the conversation's composer and the tab bar under it take from the
      thread's end; its screen measures it (chat/thread-footer.tsx). */
   --footer-space: 0px;
 }
 @media (width >= 40rem) {
   :root {
-    --top-space: calc(env(safe-area-inset-top) + 3.5rem + 1px);
+    --top-space: calc(env(safe-area-inset-top) + 3.5rem);
   }
 }
 @media (max-width: 639px) {
@@ -555,24 +558,53 @@
 
 /* A page's scroller that runs on under the floating top: pulled up beneath
    it, its first words starting below it, and whatever is scrolled to
-   (a notification's row, a page of a list) landing below it too. */
+   (a notification's row, a page of a list) landing below it and its fade. */
 @utility under-top {
   margin-top: calc(-1 * var(--top-space));
   padding-top: var(--top-space);
-  scroll-padding-top: var(--top-space);
+  scroll-padding-top: calc(var(--top-space) + var(--top-fade));
 }
 
 /* Frosted glass for the top of every screen (PageTop): a little of the
    page's own colour over a blur of what passes beneath - a line scrolling
    under it is a soft shape, never a second line of words behind the
-   header's. At rest, over nothing, it is the page itself. */
+   header's. At rest, over nothing, it is the page itself.
+
+   It has no edge at either end. At the top it is the page's colour outright -
+   the colour the browser paints its own bar above it (lib/theme-name.ts
+   BAR_COLOR) - and thins to the glass over --glass-rise, so the bar and the
+   header are one surface. Below, the glass runs on past the header by
+   --top-fade and fades out there, so what scrolls up goes under it without a
+   line. The glass is a layer behind what the header shows: faded as a
+   whole, it would take the name and the icons with it. */
 .glass-pane {
-  background-color: color-mix(in oklab, var(--background) 30%, transparent);
-  -webkit-backdrop-filter: blur(14px) saturate(180%);
-  backdrop-filter: blur(14px) saturate(180%);
+  --glass-tint: 30%;
+  --glass-rise: calc(env(safe-area-inset-top) + 1.75rem);
+  --glass-fall: var(--top-fade);
 }
 :root[data-theme="light"] .glass-pane {
-  background-color: color-mix(in oklab, var(--background) 40%, transparent);
+  --glass-tint: 40%;
+}
+/* Over a screen whose content starts below the header and never goes under
+   it (PageTop fade={false}), the fade would only blur the top of what is
+   shown there: the glass stops at the header. */
+.glass-pane[data-fade="off"] {
+  --glass-fall: 0px;
+}
+.glass-pane::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 calc(-1 * var(--glass-fall));
+  z-index: -1;
+  pointer-events: none;
+  background-image: linear-gradient(
+    var(--background) env(safe-area-inset-top),
+    color-mix(in oklab, var(--background) var(--glass-tint), transparent) var(--glass-rise)
+  );
+  -webkit-backdrop-filter: blur(14px) saturate(180%);
+  backdrop-filter: blur(14px) saturate(180%);
+  -webkit-mask-image: linear-gradient(#000 calc(100% - var(--glass-fall)), transparent);
+  mask-image: linear-gradient(#000 calc(100% - var(--glass-fall)), transparent);
 }
 /* What is drawn on it - the name, the icons, the waiting line - keeps a rim
    of the page's colour. The header's greys sit in the middle of the scale,
@@ -587,8 +619,8 @@
   filter: drop-shadow(0 0 1px var(--background)) drop-shadow(0 0 3px var(--background));
 }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .glass-pane,
-  :root[data-theme="light"] .glass-pane {
+  .glass-pane::before {
+    background-image: none;
     background-color: var(--background);
   }
 }

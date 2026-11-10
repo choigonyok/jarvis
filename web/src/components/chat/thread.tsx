@@ -282,7 +282,7 @@ export function Thread() {
               {...scroll.viewport}
               // What is brought into view - a card, a quoted message - lands
               // between the bars, not under them.
-              className="scrollbar-hairline inset-x-safe relative scroll-pt-(--top-space) scroll-pb-(--footer-space)"
+              className="scrollbar-hairline inset-x-safe relative scroll-pt-[calc(var(--top-space)+var(--top-fade))] scroll-pb-(--footer-space)"
             >
               {/* Only a move up or down of the reader's reaches the scroller
                   (chat/thread-scroll.tsx). */}

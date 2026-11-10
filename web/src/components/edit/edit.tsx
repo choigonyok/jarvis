@@ -28,7 +28,7 @@ export function Edit() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <PageTop>
+      <PageTop fade={false}>
         <Header
           connection={connection}
           pending={waiting.length}

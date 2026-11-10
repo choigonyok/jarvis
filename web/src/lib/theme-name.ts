@@ -15,5 +15,9 @@ export const THEME_COOKIE = "jarvis-theme";
 /** A cookie's value as a theme: dark unless it says light. */
 export const themeOf = (value: string | null | undefined): Theme => (value === "light" ? "light" : "dark");
 
-/** The browser's own bars, in each theme: the page's background. */
-export const BAR_COLOR: Record<Theme, string> = { light: "#f9fafb", dark: "#0b0d12" };
+/**
+ * The browser's own bars, in each theme: the page's background exactly -
+ * globals.css --background as Safari draws it - since the top of the header
+ * is that colour and runs on from the bar as one surface (.glass-pane).
+ */
+export const BAR_COLOR: Record<Theme, string> = { light: "#f9fafb", dark: "#0c0d0f" };

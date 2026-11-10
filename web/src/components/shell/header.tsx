@@ -247,8 +247,22 @@ function HeaderView({
  * globals.css) by its height, which is measured here as it changes - the
  * waiting line coming and going, the offline line, the search - into
  * --top-space.
+ *
+ * The glass has no edges: it comes out of the browser's bar above it and
+ * fades out a little way below it (.glass-pane). fade={false} stops it at the
+ * header, over a screen whose content starts below it and never goes under
+ * it - the remote screen, the editor, and 카톡, whose rooms scroll in a box of
+ * their own.
  */
-export function PageTop({ children, className }: { children: ReactNode; className?: string }) {
+export function PageTop({
+  children,
+  className,
+  fade = true,
+}: {
+  children: ReactNode;
+  className?: string;
+  fade?: boolean;
+}) {
   const pane = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const el = pane.current;
@@ -260,7 +274,7 @@ export function PageTop({ children, className }: { children: ReactNode; classNam
     return () => watch.disconnect();
   }, []);
   return (
-    <div ref={pane} className={cn("glass-pane relative z-30 shrink-0 border-b border-edge-soft", className)}>
+    <div ref={pane} data-fade={fade ? undefined : "off"} className={cn("glass-pane relative z-30 shrink-0", className)}>
       {children}
     </div>
   );

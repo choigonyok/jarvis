@@ -115,7 +115,10 @@ export function Screen({ vncUrl, ticketed = false }: { vncUrl: string; ticketed?
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <PageTop className={cn("transition-opacity duration-200 motion-reduce:transition-none", controlling && "opacity-25")}>
+      <PageTop
+        fade={false}
+        className={cn("transition-opacity duration-200 motion-reduce:transition-none", controlling && "opacity-25")}
+      >
         <Header connection={connection} pending={pending} />
         {/* Inside the dimmed block on purpose: while you are driving the
             remote browser the room goes quiet, and that includes this. */}

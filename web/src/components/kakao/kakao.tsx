@@ -59,7 +59,7 @@ export function Kakao() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <PageTop>
+      <PageTop fade={false}>
         <Header connection={connection} pending={pending} />
         <StandingBar pending={waitingList} />
       </PageTop>
