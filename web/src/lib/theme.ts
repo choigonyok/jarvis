@@ -35,11 +35,39 @@ export function setTheme(theme: Theme) {
   const secure = location.protocol === "https:" ? "; secure" : "";
   // Two years: a choice, not a session.
   document.cookie = `${THEME_COOKIE}=${theme}; path=/; max-age=${60 * 60 * 24 * 730}; samesite=lax${secure}`;
-  for (const meta of document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')) {
-    meta.content = BAR_COLOR[theme];
-    meta.removeAttribute("media");
-  }
+  paintBars(theme);
   window.dispatchEvent(new Event(CHANGED));
+}
+
+/**
+ * The browser's own bars (theme-color) in a theme's colour. A tag already in
+ * it is left alone, so painting answers no change with another.
+ */
+function paintBars(theme: Theme) {
+  for (const meta of document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')) {
+    if (meta.content !== BAR_COLOR[theme]) meta.content = BAR_COLOR[theme];
+    if (meta.hasAttribute("media")) meta.removeAttribute("media");
+  }
+}
+
+/**
+ * Holds the browser's bars in the page's theme for as long as the page runs,
+ * and returns the stop. The home-screen app's status bar is coloured by them.
+ *
+ * Next writes the theme-color tag anew on each navigation, from the payload
+ * of the screen it goes to, and a payload fetched before the switch was
+ * turned carries the colour of that moment: the tab bar prefetches every
+ * screen and keeps each for five minutes, while the root's data-theme is
+ * never drawn again. So whenever the tag is written, it is painted over at
+ * once - before the page is drawn - in the theme data-theme holds.
+ */
+export function keepBarsInTheme(): () => void {
+  const paint = () => paintBars(themeNow());
+  paint();
+  // The head alone: React puts a <meta> there wherever it is rendered.
+  const watch = new MutationObserver(paint);
+  watch.observe(document.head, { childList: true, subtree: true, attributes: true, attributeFilter: ["content", "media"] });
+  return () => watch.disconnect();
 }
 
 /** The theme, for a component that draws by it. Dark on the server, until the page is read. */

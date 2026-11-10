@@ -7,6 +7,7 @@ import { cookies, headers } from "next/headers";
 import { RoleProvider } from "@/components/shell/role";
 import { NoZoom } from "@/components/shell/no-zoom";
 import { PullToRefresh } from "@/components/shell/pull-to-refresh";
+import { ThemeBars } from "@/components/shell/theme-bars";
 import { ViewportProbe } from "@/components/shell/viewport-probe";
 import { ROLE_HEADER } from "@/lib/role";
 import { BAR_COLOR, THEME_COOKIE, themeOf } from "@/lib/theme-name";
@@ -67,7 +68,9 @@ export async function generateViewport(): Promise<Viewport> {
     // the safe-area insets are what keep controls out from under them.
     viewportFit: "cover",
     // The browser's own bars: the page's background, in the theme the
-    // header's switch chose (lib/theme-name.ts). The switch repaints them.
+    // header's switch chose (lib/theme-name.ts). The switch repaints them,
+    // and ThemeBars repaints what a navigation writes from a payload
+    // prefetched before the switch (lib/theme.ts keepBarsInTheme).
     themeColor: BAR_COLOR[themeOf((await cookies()).get(THEME_COOKIE)?.value)],
     // maximum-scale=1 is what stops iOS from zooming in when a text field takes
     // focus. Safari ignores it for a pinch since iOS 10, so the browser can
@@ -98,6 +101,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           <Toasts />
         </RoleProvider>
         <ViewportProbe />
+        <ThemeBars />
         <NoZoom />
         <PullToRefresh />
       </body>
