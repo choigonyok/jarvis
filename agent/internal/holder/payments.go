@@ -64,9 +64,20 @@ type grant struct {
 	// amount is what the approved card showed a payment window was handed. A
 	// window has no 결제하기 to count: each order opens it anew, so the approval
 	// is held to that amount - a window opened for another is another payment.
-	// Empty when the guard could not read it.
+	// Empty when the guard could not read it. A mall's own payment carries no
+	// amount of its own; its approval holds the amount its card said, which a
+	// window it opens must match (Carry).
 	amount string
+	// last is when a request last went through on this approval: a payment
+	// window that follows it within CarryGap is that payment handed to its PG.
+	last time.Time
 }
+
+// CarryGap is how soon after a mall's payment request went through a payment
+// window may open on its approval: a 결제하기 hands the order to its PG at
+// once (under a second, 무신사 → 토스페이먼츠·헥토), and a window that opens
+// later is another step - or another payment - with its own card.
+const CarryGap = time.Minute
 
 func (p *Payments) clock() time.Time {
 	if p.Now != nil {
@@ -117,7 +128,63 @@ func (p *Payments) Allow(site string, job int64, event, amount string) bool {
 		}
 		g.charged = true
 	}
+	g.last = now
 	return true
+}
+
+// Carry opens the payment window for this payer under the approved payment it
+// is making at another site: a mall's 결제하기 hands that same payment to its
+// PG (무신사 → 토스페이먼츠·헥토), and the card the operator approved said what
+// it was and how much. Only right after that payment's request went through
+// (CarryGap), and - when the approval and the window both know an amount -
+// only at that amount. The window is then held as approved and under way, so
+// what passes inside it (the card company's window, the 네이버페이 picked
+// there) is that same payment. It says the site whose approval carried it.
+func (p *Payments) Carry(window string, job int64, amount string) (string, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	window = strings.ToLower(window)
+	now := p.clock()
+	from, latest := "", time.Time{}
+	var g *grant
+	for k, v := range p.sites {
+		if k.job != job || k.site == window || v.opened.IsZero() || now.After(v.opened.Add(Window)) {
+			continue
+		}
+		if v.last.IsZero() || now.Sub(v.last) > CarryGap {
+			continue
+		}
+		if g == nil || v.last.After(latest) {
+			from, latest, g = k.site, v.last, v
+		}
+	}
+	if g == nil || (amount != "" && g.amount != "" && amount != g.amount) {
+		return "", false
+	}
+	if amount == "" {
+		amount = g.amount
+	}
+	p.sites[key{window, job}] = &grant{approved: now, opened: now, amount: amount, last: now}
+	return from, true
+}
+
+// LiveOn is the payers with an approved payment on site that can still happen:
+// approved and not yet come back to, or under way.
+func (p *Payments) LiveOn(site string) []int64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	site = strings.ToLower(site)
+	now := p.clock()
+	var out []int64
+	for k, g := range p.sites {
+		if k.site != site {
+			continue
+		}
+		if (g.opened.IsZero() && !now.After(g.approved.Add(Wait))) || (!g.opened.IsZero() && !now.After(g.opened.Add(Window))) {
+			out = append(out, k.job)
+		}
+	}
+	return out
 }
 
 // Live says whether this payer has an approved payment that can still happen,

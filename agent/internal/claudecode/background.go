@@ -172,6 +172,15 @@ func (r *Runner) TakeBrowser(wait time.Duration) bool {
 	}
 }
 
+// ChatOnBrowser is whether a turn of the conversation took the browser
+// (TakeBrowser) and the conversation is not out of its turns yet: what the
+// browser sends now is the conversation's doing.
+func (r *Runner) ChatOnBrowser() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.chatBrowser
+}
+
 // YieldBrowser stops the background task on the browser, if one is there,
 // for another task to go first - the operator put a waiting job ahead of
 // the one running (the jobs module's 먼저 card). It says whether one was

@@ -116,6 +116,25 @@ class GuardRules(unittest.TestCase):
         self.assertTrue(self.g.passes(sensor, '{"sensor_data":"3;0;1;0;3360836;..."}'))
         self.assertFalse(self.g.passes(sensor, '{"x":1}'), "센서가 아닌 같은 경로의 쓰기는 묻는다")
 
+    def test_logs_of_a_payment_window_go_without_asking(self):
+        # 결제창·네이버페이 화면의 로그·통계는 돈을 움직이지 않는다. 묻으면 로그마다 질의가 쌓이고, 작업이 실행을
+        # 마친 뒤 열린 결제창이 보내는 로그에 카드가 또 뜬다.
+        for url in ["https://log.tosspayments.com/v1/log", "https://event.tosspayments.com/api/v1/logs",
+                    "https://tr.pay.naver.com/trace/web", "https://tr.pay.naver.com/trace/content",
+                    "https://pay.naver.com/orderApi/payment/universal/log", "https://m.pay.naver.com/orderApi/payment/universal/log",
+                    "https://orders.pay.naver.com/orderApi/orderSheet/universal/log", "https://pay.naver.com/authentication/api/nelo/web"]:
+            self.assertTrue(self.g.asks(url, "POST"), url)
+            self.assertTrue(self.g.passes(url, '{"code":"x"}'), url)
+        # 같은 호스트의 결제 요청, 로그 경로에 무언가를 덧붙인 주소는 그대로 묻는다.
+        for url in ["https://apigw.tosspayments.com/payment-gateway-window/open/pg-window/v1/px-payment-parameters",
+                    "https://pay.naver.com/orderApi/payment/partners/apply",
+                    "https://pay.naver.com/authentication/api/secure/password-check",
+                    "https://pay.naver.com/orderApi/payment/universal/log?next=/orderApi/payment/partners/apply",
+                    "https://pay.naver.com/orderApi/payment/universal/logout",
+                    "https://pay.naver.com/orderApi/payment/partners/apply?x=/orderApi/payment/universal/log"]:
+            self.assertTrue(self.g.asks(url, "POST"), url)
+            self.assertFalse(self.g.passes(url, '{"code":"x"}'), url)
+
     def test_coupang_pay_button_is_asked(self):
         order = json.dumps({"checkoutId": 1, "eventName": "order", "eventData": {"eventType": "createOrder"}})
         self.assertFalse(self.g.passes(EVENTS, order))
@@ -187,6 +206,10 @@ class Paused(unittest.IsolatedAsyncioTestCase):
 
     async def test_choosing_a_card_goes_through(self):
         await self.g.on_paused(self.ws, self.paused(EVENTS, json.dumps({"eventName": "changePayType"})))
+        self.assertEqual((self.sent, self.asked), (["Fetch.continueRequest"], []))
+
+    async def test_a_windows_log_goes_on_unasked(self):
+        await self.g.on_paused(self.ws, self.paused("https://log.tosspayments.com/v1/log", json.dumps({"level": "info"})))
         self.assertEqual((self.sent, self.asked), (["Fetch.continueRequest"], []))
 
     async def test_the_pay_button_is_asked_and_held(self):
