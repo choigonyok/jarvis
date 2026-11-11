@@ -11,6 +11,7 @@ import {
   AttachmentMedia,
   AttachmentTitle,
 } from "@/components/ui/attachment";
+import { pageState, reactHolds, RemovalProbe } from "@/components/chat/removal-probe";
 import { Spinner } from "@/components/ui/spinner";
 import { diag } from "@/lib/diag";
 import { uploadPhoto } from "@/lib/uploads";
@@ -51,23 +52,34 @@ const draft = {
 };
 
 /**
- * Keeps a row to the elements given: anything else found in it after a render
+ * Keeps a row to the elements given. Anything else found in it after a render
  * - a control left behind by a removal that did not take, or put there by
- * something other than this component - is taken out, and said in the
- * console and the diagnostics (lib/diag.ts). It runs after every render,
- * when the row's own controls are known by their refs.
+ * something other than this component - is hidden before the screen is
+ * drawn; once React is done with what it removed (useEffect), it is said in
+ * the console and the diagnostics (lib/diag.ts) and taken out if React has
+ * let go of it (one React still holds stays hidden: React removes it itself).
+ * The row's own controls are known by their refs; the removal probe's nodes
+ * are the probe's to count (chat/removal-probe.tsx).
  */
 function useOnlyOurs(rowRef: RefObject<HTMLElement | null>, refs: RefObject<Element | null>[]) {
-  useLayoutEffect(() => {
+  const strays = () => {
     const row = rowRef.current;
-    if (!row) return;
+    if (!row) return [];
     const ours = new Set(refs.map((r) => r.current).filter(Boolean));
-    const strays = [...row.children].filter((el) => !ours.has(el));
-    if (strays.length === 0) return;
-    for (const el of strays) el.remove();
-    const what = strays.map((el) => el.getAttribute("aria-label") || el.tagName.toLowerCase());
-    console.warn("입력창 줄에 이 화면이 그리지 않은 요소가 있어 치웠어요:", what);
-    diag("composer", { ev: "strays", n: strays.length, what: what.join(",") });
+    return [...row.children].filter((el) => !ours.has(el) && !el.hasAttribute("data-probe"));
+  };
+  useLayoutEffect(() => {
+    for (const el of strays()) (el as HTMLElement).style.display = "none";
+  });
+  useEffect(() => {
+    const found = strays().map((el) => {
+      const react = reactHolds(el);
+      if (!react) el.remove();
+      return { what: el.getAttribute("aria-label") || el.tagName.toLowerCase(), react };
+    });
+    if (found.length === 0) return;
+    console.warn("입력창 줄에 이 화면이 그리지 않은 요소가 있어 치웠어요:", found);
+    diag("composer", { ev: "strays", n: found.length, found, ...pageState() }, { always: true });
   });
 }
 
@@ -399,6 +411,8 @@ function ComposerView({
             allowPhotos ? "px-1" : "pl-3.5 pr-1",
           )}
         />
+
+        <RemovalProbe guide={showGuide} mic={showMic} stop={stoppable} />
 
         {/* The controls after the words are drawn once and stay: what each
             moment shows is which of them are hidden. Buttons made and thrown

@@ -21,8 +21,13 @@ function enabled(): boolean {
   return on;
 }
 
-export function diag(kind: string, data: Record<string, unknown>) {
-  if (!enabled()) return;
+/**
+ * `always` sends without the flag: for the rare report a screen makes when
+ * something it checks for goes wrong (chat/removal-probe.tsx), which is no
+ * use if it has to be asked for in advance on the device where it happens.
+ */
+export function diag(kind: string, data: Record<string, unknown>, { always = false }: { always?: boolean } = {}) {
+  if (!always && !enabled()) return;
   try {
     const body = JSON.stringify({ kind, build: BUILD, now: Date.now(), ...data });
     const blob = new Blob([body], { type: "application/json" });
