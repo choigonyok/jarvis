@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { ArrowUp, ImagePlus, Info, Mic, Reply, X } from "lucide-react";
 import {
   Attachment,
@@ -12,6 +12,7 @@ import {
   AttachmentTitle,
 } from "@/components/ui/attachment";
 import { Spinner } from "@/components/ui/spinner";
+import { diag } from "@/lib/diag";
 import { uploadPhoto } from "@/lib/uploads";
 import { cn } from "@/lib/utils";
 
@@ -48,6 +49,27 @@ const draft = {
     } catch {}
   },
 };
+
+/**
+ * Keeps a row to the elements given: anything else found in it after a render
+ * - a control left behind by a removal that did not take, or put there by
+ * something other than this component - is taken out, and said in the
+ * console and the diagnostics (lib/diag.ts). It runs after every render,
+ * when the row's own controls are known by their refs.
+ */
+function useOnlyOurs(rowRef: RefObject<HTMLElement | null>, refs: RefObject<Element | null>[]) {
+  useLayoutEffect(() => {
+    const row = rowRef.current;
+    if (!row) return;
+    const ours = new Set(refs.map((r) => r.current).filter(Boolean));
+    const strays = [...row.children].filter((el) => !ours.has(el));
+    if (strays.length === 0) return;
+    for (const el of strays) el.remove();
+    const what = strays.map((el) => el.getAttribute("aria-label") || el.tagName.toLowerCase());
+    console.warn("입력창 줄에 이 화면이 그리지 않은 요소가 있어 치웠어요:", what);
+    diag("composer", { ev: "strays", n: strays.length, what: what.join(",") });
+  });
+}
 
 function ComposerView({
   onSend,
@@ -160,6 +182,16 @@ function ComposerView({
   // him - the grammar of every assistant. Typing turns it back into send:
   // what is sent then waits its turn.
   const stoppable = busy && !composing && Boolean(onStop);
+  // The ⓘ stands in the field while nothing is typed; the mic, on a phone,
+  // while nothing is typed and there is nothing to stop.
+  const showGuide = Boolean(onGuide) && !composing && !quoting;
+  const showMic = Boolean(onVoice) && !composing && !stoppable;
+  const rowRef = useRef<HTMLDivElement>(null);
+  const photoRef = useRef<HTMLButtonElement>(null);
+  const guideRef = useRef<HTMLButtonElement>(null);
+  const micRef = useRef<HTMLButtonElement>(null);
+  const actRef = useRef<HTMLButtonElement>(null);
+  useOnlyOurs(rowRef, [fileRef, photoRef, areaRef, guideRef, micRef, actRef]);
   // Pressed once, it waits for the answer to end; the next answer can be
   // stopped again.
   const [stopping, setStopping] = useState(false);
@@ -300,7 +332,7 @@ function ComposerView({
         </AttachmentGroup>
       ) : null}
 
-      <div className="flex items-end">
+      <div ref={rowRef} className="flex items-end">
         {allowPhotos ? (
           <>
             <input
@@ -315,6 +347,7 @@ function ComposerView({
               }}
             />
             <button
+              ref={photoRef}
               type="button"
               onClick={() => fileRef.current?.click()}
               disabled={photos.length >= MAX_PHOTOS}
@@ -367,8 +400,15 @@ function ComposerView({
           )}
         />
 
-        {onGuide && !composing && !quoting ? (
+        {/* The controls after the words are drawn once and stay: what each
+            moment shows is which of them are hidden. Buttons made and thrown
+            away on every message are what pile up in this row when a removal
+            does not take (an ⓘ more per message, stop beside stop, until a
+            reload); a row that never adds or removes one has nothing to pile
+            up, and the row keeps only these (useOnlyOurs below). */}
+        {onGuide ? (
           <button
+            ref={guideRef}
             type="button"
             // Keeps the field's focus on the way down, as send does: losing it
             // brings the tab bar back and moves this button from under the finger.
@@ -377,7 +417,7 @@ function ComposerView({
             aria-label="말로 시킬 수 있는 일"
             aria-haspopup="dialog"
             title="말로 시킬 수 있는 일"
-            className={cn(round, "text-faint hover:text-foreground")}
+            className={cn(round, "text-faint hover:text-foreground", !showGuide && "hidden")}
           >
             <Info aria-hidden className="size-5" strokeWidth={1.8} />
           </button>
@@ -387,38 +427,24 @@ function ComposerView({
             under the composer would put three bars between the transcript and
             the bottom of the screen; a mic in the send button's place while
             nothing is typed is the grammar every messaging app already taught. */}
-        {onVoice && !composing && !stoppable ? (
+        {onVoice ? (
           <button
+            ref={micRef}
             type="button"
             onClick={onVoice}
             aria-label="음성으로 말하기"
-            className={cn(round, "text-faint hover:text-foreground sm:hidden")}
+            className={cn(round, "text-faint hover:text-foreground sm:hidden", !showMic && "hidden")}
           >
             <Mic aria-hidden className="size-5" strokeWidth={1.8} />
           </button>
         ) : null}
 
-        {stoppable ? (
-          // Quiet like send, and not red: stopping is not turning anything down.
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => {
-              setStopping(true);
-              onStop?.();
-            }}
-            disabled={stopping}
-            aria-label={stopping ? "멈추는 중" : "답 멈추기"}
-            title="답 멈추기"
-            className={cn(round, "group text-dim disabled:opacity-40")}
-          >
-            <span className="flex size-9 items-center justify-center rounded-full bg-glass-raised transition-colors group-enabled:group-hover:text-foreground">
-              <span aria-hidden className="size-2.5 rounded-[2px] bg-current" />
-            </span>
-          </button>
-        ) : (
-        /* Deliberately quiet: the brightest control in this product is 승인. */
+        {/* Send, and in its place while Jarvis writes and nothing is typed,
+            stop: one button, its square or its arrow shown. Deliberately
+            quiet: the brightest control in this product is 승인 - and stop is
+            not red either: stopping is not turning anything down. */}
         <button
+          ref={actRef}
           type="button"
           onPointerDown={(e) => {
             pressedBy.current = e.pointerType;
@@ -429,18 +455,25 @@ function ComposerView({
           // field once the message is out.
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => {
-            void send({ closeKeyboard: pressedBy.current === "touch" || pressedBy.current === "pen" });
+            const by = pressedBy.current;
             pressedBy.current = "";
+            if (stoppable) {
+              setStopping(true);
+              onStop?.();
+              return;
+            }
+            void send({ closeKeyboard: by === "touch" || by === "pen" });
           }}
-          disabled={!canSend}
-          aria-label={uploading ? "사진을 올리는 중" : "메시지 보내기"}
-          className={cn(round, "group text-dim disabled:opacity-40", onVoice && !composing && "max-sm:hidden")}
+          disabled={stoppable ? stopping : !canSend}
+          aria-label={stoppable ? (stopping ? "멈추는 중" : "답 멈추기") : uploading ? "사진을 올리는 중" : "메시지 보내기"}
+          title={stoppable ? "답 멈추기" : undefined}
+          className={cn(round, "group text-dim disabled:opacity-40", !stoppable && onVoice && !composing && "max-sm:hidden")}
         >
           <span className="flex size-9 items-center justify-center rounded-full bg-glass-raised transition-colors group-enabled:group-hover:text-foreground">
-            <ArrowUp aria-hidden className="size-[18px]" />
+            <span aria-hidden className={cn("size-2.5 rounded-[2px] bg-current", !stoppable && "hidden")} />
+            <ArrowUp aria-hidden className={cn("size-[18px]", stoppable && "hidden")} />
           </span>
         </button>
-        )}
       </div>
     </div>
   );
