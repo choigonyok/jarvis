@@ -7,6 +7,7 @@ import { TabBar } from "@/components/shell/tab-bar";
 import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { AsOf } from "@/components/shell/as-of";
+import { onOpenParams } from "@/lib/focus";
 import { useKept } from "@/lib/keep";
 import { ChecklistCard } from "@/components/chat/checklist";
 import { JobSheet } from "@/components/jobs/job-sheet";
@@ -61,9 +62,13 @@ export function Jobs() {
   // the top of the list.
   const [openId, setOpenId] = useKept<number | null>("jobs:open", null);
   useEffect(() => {
-    const focus = new URLSearchParams(window.location.search).get("focus") ?? "";
-    const m = /^job:(\d+)$/.exec(focus);
-    if (m) setOpenId(Number(m[1]));
+    const open = (params: URLSearchParams) => {
+      const m = /^job:(\d+)$/.exec(params.get("focus") ?? "");
+      if (m) setOpenId(Number(m[1]));
+    };
+    open(new URLSearchParams(window.location.search));
+    // ...and when told while already here: a job's push tapped on this tab.
+    return onOpenParams(open);
   }, [setOpenId]);
   const [showEnded, setShowEnded] = useState(false);
 

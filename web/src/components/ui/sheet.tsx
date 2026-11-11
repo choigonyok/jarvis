@@ -98,12 +98,23 @@ function SheetHistory({ close }: { close: () => void }) {
 const DISMISS_PX = 96
 const DISMISS_SPEED = 0.6
 
+/**
+ * A toast is not the page around a sheet: a tap on one (a push shown in the
+ * app, 되돌리기) goes to the toast and leaves the sheet as it is - the toast
+ * says where it goes. The toasters take taps over an open sheet
+ * (globals.css), so the touch reaches them at all.
+ */
+export function keepForToasts(e: { target: EventTarget | null; preventDefault: () => void }) {
+  if (e.target instanceof Element && e.target.closest("[data-sonner-toaster]")) e.preventDefault()
+}
+
 function SheetContent({
   className,
   children,
   side = "right",
   showCloseButton = true,
   style,
+  onInteractOutside,
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Content> & {
   side?: "top" | "right" | "bottom" | "left"
@@ -173,6 +184,10 @@ function SheetContent({
         style={style}
         {...pull}
         onPointerCancel={pull.onPointerUp}
+        onInteractOutside={(e) => {
+          onInteractOutside?.(e)
+          keepForToasts(e)
+        }}
         {...props}
       >
         {side === "bottom" ? (

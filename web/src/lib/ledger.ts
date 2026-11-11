@@ -1,6 +1,7 @@
 import { readableTitle } from "@/lib/card-body";
 import { dayLabel as whenDayLabel, dayOf, monthDay } from "@/lib/when";
-import { API, type Proposal, type ProposalState } from "@/lib/thread";
+import { outcomeOf, type Outcome } from "@/lib/outcome";
+import { API, type Proposal } from "@/lib/thread";
 import { HttpError } from "@/lib/use-resource";
 
 /**
@@ -38,8 +39,12 @@ export const filters: { value: Filter; label: string }[] = [
   { value: "rejected", label: "반려" },
 ];
 
-/** How each state reads, and which edge it draws down the margin. */
-export const stateCopy: Record<ProposalState, { label: string; edge: string }> = {
+/**
+ * How each outcome reads, and which edge it draws down the margin. A card
+ * nobody decided (taken down) and a question's 아니요 are not 반려: grey,
+ * not red (lib/outcome.ts).
+ */
+export const outcomeCopy: Record<Outcome, { label: string; edge: string }> = {
   // The margin edges are held back from full strength on purpose. At full
   // chroma a column of them outshines the rows they belong to, and the point
   // of the column is to be readable at a glance *before* the words - not
@@ -49,18 +54,24 @@ export const stateCopy: Record<ProposalState, { label: string; edge: string }> =
   executed: { label: "실행함", edge: "bg-approve-fill" },
   rejected: { label: "반려함", edge: "bg-reject-fill" },
   failed: { label: "실패함", edge: "bg-reject-fill" },
+  yes: { label: "예", edge: "bg-approve-fill" },
+  no: { label: "아니요", edge: "bg-dim/50" },
+  closed: { label: "닫힘", edge: "bg-dim/50" },
 };
 
 export function matches(proposal: Proposal, filter: Filter): boolean {
+  const outcome = outcomeOf(proposal);
   switch (filter) {
     case "all":
       return true;
     case "pending":
-      return proposal.state === "pending";
+      return outcome === "pending";
     case "approved":
-      return proposal.state === "approved" || proposal.state === "executed";
+      return outcome === "approved" || outcome === "executed" || outcome === "yes";
     case "rejected":
-      return proposal.state === "rejected" || proposal.state === "failed";
+      // What the operator turned down, and what failed - not what was
+      // taken down without them, nor a question's other answer.
+      return outcome === "rejected" || outcome === "failed";
   }
 }
 

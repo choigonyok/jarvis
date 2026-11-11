@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, X } from "lucide-react";
+import { Check, Minus, X } from "lucide-react";
 import { HeldBack, HoldBar, Sending, Sent, holdsMoney, useHold } from "@/components/chat/hold";
 import { RejectForm } from "@/components/chat/reject-form";
 import { Button } from "@/components/ui/button";
@@ -12,21 +12,25 @@ import { Lightbox } from "@/components/ui/lightbox";
 import { SecretInput } from "@/components/ui/secret-input";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { isPrivateField, type CardField, type Decision, type Proposal, type ProposalState } from "@/lib/thread";
+import { isPrivateField, type CardField, type Decision, type Proposal } from "@/lib/thread";
 import { ACTION, MODULE, ofModule } from "@/lib/kinds";
 import { isLiteral, readableBody, readableConsequence, readableTitle } from "@/lib/card-body";
 import { heardBack, sentOn } from "@/lib/decide";
+import { asksYesNo, outcomeOf, type Outcome } from "@/lib/outcome";
 import { photoUrl } from "@/lib/uploads";
 import { cn } from "@/lib/utils";
 
-const settledCopy: Record<
-  Exclude<ProposalState, "pending">,
-  { label: string; tone: string; edge: string; Icon: typeof Check }
-> = {
+// Red is 반려 and 실패 only. A card taken down without anyone deciding it (its
+// job's turn came) and a question's 아니요 are neither: they read in the
+// quiet grey of everything that is simply over.
+const settledCopy: Record<Exclude<Outcome, "pending">, { label: string; tone: string; edge: string; Icon: typeof Check }> = {
   approved: { label: "승인함", tone: "text-approve", edge: "bg-approve", Icon: Check },
   executed: { label: "실행함", tone: "text-approve", edge: "bg-approve", Icon: Check },
   rejected: { label: "반려함", tone: "text-reject", edge: "bg-reject", Icon: X },
   failed: { label: "실패함", tone: "text-reject", edge: "bg-reject", Icon: X },
+  yes: { label: "예", tone: "text-approve", edge: "bg-approve", Icon: Check },
+  no: { label: "아니요", tone: "text-dim", edge: "bg-dim", Icon: Minus },
+  closed: { label: "닫힘", tone: "text-dim", edge: "bg-dim", Icon: Minus },
 };
 
 export function ProposalCard({
@@ -37,8 +41,10 @@ export function ProposalCard({
   /** May resolve to a reason the decision was refused (a form card missing a value). */
   onDecide: (decision: Decision, edits?: Record<string, string>, reason?: string) => Promise<string | null> | void;
 }) {
-  const settled =
-    proposal.state === "pending" ? null : settledCopy[proposal.state];
+  const outcome = outcomeOf(proposal);
+  const settled = outcome === "pending" ? null : settledCopy[outcome];
+  // A question with two answers (the 먼저 card): 예 and 아니요, no reason asked.
+  const yesNo = asksYesNo(proposal);
   const fields = proposal.card.fields ?? [];
   const form = fields.length > 0;
   const [values, setValues] = useState<Record<string, string>>(() =>
@@ -103,7 +109,7 @@ export function ProposalCard({
         {settled ? null : (
           <div className="mb-2 flex items-center gap-2 text-meta text-faint">
             <span aria-hidden className="anim-breathe size-[5px] rounded-full bg-dim" />
-            <span>{busy ? "보내는 중" : onItsWay ? "반영 중" : "결재 대기"}</span>
+            <span>{busy ? "보내는 중" : onItsWay ? "반영 중" : yesNo ? "답 대기" : "결재 대기"}</span>
           </div>
         )}
 
@@ -162,7 +168,7 @@ export function ProposalCard({
             {/* Where a no goes: mind's own question, turned down, is not put
                 again for a while (its topic two weeks, an entry like it a
                 month, a place told 다시 묻지 마 never). */}
-            {proposal.state === "rejected" && proposal.action.kind === ACTION.mindApprove ? (
+            {outcome === "rejected" && proposal.action.kind === ACTION.mindApprove ? (
               <span className="w-full text-faint">같은 제안은 한동안 다시 묻지 않아요.</span>
             ) : null}
           </p>
@@ -171,9 +177,20 @@ export function ProposalCard({
         ) : busy ? (
           <Sending />
         ) : onItsWay ? (
-          <Sent decision={onItsWay} />
+          <Sent decision={onItsWay} yesNo={yesNo} />
         ) : asking ? (
           <RejectForm busy={busy} onCancel={() => setAsking(false)} onReject={(why) => void decide("rejected", why)} />
+        ) : yesNo ? (
+          // Two answers of one weight: 아니요 is not a turn-down, so it asks
+          // no reason and is not red; 예 keeps the approval's place and look.
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end sm:gap-1.5">
+            <Button variant="soft" size="pair" onClick={() => void decide("rejected")} disabled={busy}>
+              아니요
+            </Button>
+            <Button variant="approve" size="pair" onClick={() => void decide("approved")} disabled={busy}>
+              예
+            </Button>
+          </div>
         ) : (
           /* This is the decision the whole product exists to collect, and on
              a phone it was a pair of 32px targets sitting a thumb-width apart.

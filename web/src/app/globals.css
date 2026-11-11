@@ -643,6 +643,20 @@
   padding-bottom: max(var(--tabbar-space), env(safe-area-inset-bottom));
 }
 
+/* The toasts (a push shown in the app, 되돌리기) take taps over an open
+   sheet: a sheet makes the page around it untouchable (pointer-events: none
+   on the body), and the banner was too - the tap went through to the sheet's
+   backdrop and closed the sheet instead. The sheet leaves a tap on a toast
+   alone (ui/sheet.tsx keepForToasts). A toast on its way out takes none: for
+   its last moments it covers twice its height (sonner's ::before), which at
+   the top of the screen is the header's controls. */
+[data-sonner-toaster] {
+  pointer-events: auto;
+}
+[data-sonner-toast][data-removed="true"] {
+  pointer-events: none;
+}
+
 .liquid-glass {
   /* Barely any paint of its own: the colour is whatever is behind it,
      brightened and saturated the way thick glass concentrates light. */

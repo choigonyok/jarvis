@@ -135,6 +135,43 @@ class GuardRules(unittest.TestCase):
             self.assertTrue(self.g.asks(url, "POST"), url)
             self.assertFalse(self.g.passes(url, '{"code":"x"}'), url)
 
+    def test_reading_the_payment_history_raises_no_card(self):
+        # 결제내역·주문 상세는 열리자마자 스스로 POST 로 포인트·배너·혜택을 읽는다. 읽기만 하는 작업이 그 화면을
+        # 열었다고 결제 카드가 뜨면 안 된다.
+        for url in ["https://pay.naver.com/web-api/timeline/v1/points/booking-points",
+                    "https://pay.naver.com/web-api/timeline/v1/points/accumulable-points",
+                    "https://pay.naver.com/web-api/timeline/v1/points/review-points",
+                    "https://ica.pay.naver.com/inventory/area/dynamic-contents",
+                    "https://orders.pay.naver.com/orderApi/orderSheet/detail/assignments",
+                    "https://orders.pay.naver.com/orderApi/orderSheet/detail/externalBanner",
+                    "https://orders.pay.naver.com/orderApi/orderSheet/detail/merchants/dangolMembership",
+                    "https://orders.pay.naver.com/orderApi/orderSheet/universal/fds/merchant/penaltyDetails",
+                    "https://orders.pay.naver.com/orderApi/orderSheet/universal/expectedMembership",
+                    "https://pbf.lotteon.com/payment/v2/paymentApi/getInstallmentBenefitSummary"]:
+            self.assertTrue(self.g.asks(url, "POST"), url)
+            self.assertTrue(self.g.passes(url, '{"items":[]}'), url)
+        # 주문서에서 결제를 실제로 진행하는 쓰기는 그대로 묻는다.
+        for url in ["https://orders.pay.naver.com/orderApi/orderSheet/seller/order/apply",
+                    "https://orders.pay.naver.com/orderApi/orderSheet/seller/order/process",
+                    "https://m.pay.naver.com/orderApi/payment/naverFinancialPayment/orderSheet/register",
+                    "https://pay.naver.com/orderApi/payment/partners/register",
+                    "https://orders.pay.naver.com/orderApi/orderSheet/universal/expectedMembership/../../seller/order/apply"]:
+            self.assertTrue(self.g.asks(url, "POST"), url)
+            self.assertFalse(self.g.passes(url, '{"x":1}'), url)
+
+    def test_a_charge_to_a_saved_payment_method_is_asked(self):
+        # 쏘카는 결제창 없이 계정에 등록한 네이버페이로 서버가 바로 청구한다: 브라우저가 보내는 것은 grpc.socar.kr 의
+        # 예약 만들기 호출 하나다. 돈이 걸린 메서드만 묻고, 조회·미리보기(모두 POST)는 묻지 않는다.
+        base = "https://grpc.socar.kr/socar.carsharing.reservation.frontend.v1.ReservationService/"
+        for method in ["CreateReservation", "ExtendReservation", "PullReservation", "UpdateEndLocation"]:
+            self.assertTrue(self.g.asks(base + method, "POST"), method)
+            self.assertFalse(self.g.passes(base + method, "\x00\x00"), method)
+        self.assertTrue(self.g.asks("https://grpc.socar.kr/socar.carsharing.reservation.v1.ReservationService/BatchCreateReservations", "POST"))
+        for method in ["PreviewCreateReservation", "GetReservation", "ListMyPaymentMethods", "ListMyCoupons", "PreviewPullReservation", "CancelReservation"]:
+            self.assertFalse(self.g.asks(base + method, "POST"), method)
+        self.assertFalse(self.g.asks("https://grpc-open.socar.kr/socar.carsharing.open.frontend.v1.SearchService/SearchCarZoneViews", "POST"))
+        self.assertFalse(self.g.asks(base + "CreateReservation", "GET"), "보기만 하는 GET")
+
     def test_coupang_pay_button_is_asked(self):
         order = json.dumps({"checkoutId": 1, "eventName": "order", "eventData": {"eventType": "createOrder"}})
         self.assertFalse(self.g.passes(EVENTS, order))

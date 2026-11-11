@@ -495,6 +495,154 @@ func TestAJobPutFirstAndTheRunItStops(t *testing.T) {
 	}
 }
 
+// Against a throwaway Postgres, as svc_mind (scripts/dbtest): a job whose
+// site waits on a login rests until it is done - but an instruction or a
+// card's answer for it is news it runs for at once, and a job never run
+// gets its first run whatever its site waits on.
+func TestALoginWaitHoldsOnlyAJobWithNothingNew(t *testing.T) {
+	dsn := os.Getenv("JARVIS_TEST_DSN")
+	if dsn == "" {
+		t.Skip("JARVIS_TEST_DSN 이 없어 건너뜁니다 (scripts/dbtest)")
+	}
+	ctx := context.Background()
+	s, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.Close)
+	const site = "login-wait.example"
+	t.Cleanup(func() { _ = s.SetLogin(context.Background(), site, false, "") })
+	due := func(id int64) bool {
+		t.Helper()
+		jobs, err := s.DueN(ctx, Owner, 20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, j := range jobs {
+			if j.ID == id {
+				return true
+			}
+		}
+		return false
+	}
+	running := func(id int64) bool {
+		t.Helper()
+		jobs, err := s.Running(ctx, Owner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, j := range jobs {
+			if j.ID == id {
+				if !j.Running {
+					t.Fatalf("진행 중인 목록의 작업은 Running: %+v", j)
+				}
+				return true
+			}
+		}
+		return false
+	}
+
+	a, err := s.Create(ctx, NewJob{Title: "dbtest 로그인 대기", Goal: "로그인 뒤에 잇기", Sites: []string{site}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Its run asks for the login and ends: it rests.
+	r, err := s.StartRun(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !running(a.ID) {
+		t.Fatal("실행 중인 작업은 진행 중인 목록에 있습니다")
+	}
+	if err := s.SetLogin(ctx, site, true, "다시 로그인"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Schedule(ctx, r, time.Now(), "로그인 뒤에 이어서"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EndRun(ctx, r, rules.OK, ""); err != nil {
+		t.Fatal(err)
+	}
+	if running(a.ID) {
+		t.Fatal("끝난 실행의 작업은 진행 중인 목록에 없습니다")
+	}
+	if due(a.ID) {
+		t.Fatal("새로 온 것이 없으면 로그인을 기다립니다")
+	}
+	got, err := s.Get(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got.BlockedSites, []string{site}) {
+		t.Fatalf("로그인을 기다리는 사이트: %v", got.BlockedSites)
+	}
+
+	// Another job on the same site, never run: its first run goes.
+	b, err := s.Create(ctx, NewJob{Title: "dbtest 같은 사이트 새 작업", Goal: "첫 실행", Sites: []string{site}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !due(b.ID) {
+		t.Fatal("한 번도 돌지 않은 작업은 다른 작업의 로그인 대기와 상관없이 돕니다")
+	}
+	if err := s.Control(ctx, b.ID, "cancel"); err != nil {
+		t.Fatal(err)
+	}
+
+	// An instruction while it waits: it runs for it now.
+	if err := s.Instruct(ctx, a.ID, "로그인 말고 공개 페이지로 해"); err != nil {
+		t.Fatal(err)
+	}
+	if !due(a.ID) {
+		t.Fatal("로그인을 기다리는 작업도 새 지시가 오면 바로 돕니다")
+	}
+	// The run that read it goes badly: the instruction stays unread, and
+	// the job is on its retry clock rather than resting.
+	r, err = s.StartRun(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EndRun(ctx, r, rules.Error, "화면이 안 열림"); err != nil {
+		t.Fatal(err)
+	}
+	next, err := s.NextDue(ctx, Owner)
+	if err != nil || next == nil || time.Until(*next) > 20*time.Minute {
+		t.Fatalf("읽지 못한 지시가 남은 작업은 다시 할 시각이 있습니다: %v %v", next, err)
+	}
+	// The run that reads it and goes well: nothing new is left, and it
+	// rests on the login again.
+	if _, err := s.pool.Exec(ctx, `update mind.jobs set next_at = now() where id = $1`, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if !due(a.ID) {
+		t.Fatal("읽지 못한 지시가 남아 있으면 돕니다")
+	}
+	r, err = s.StartRun(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Schedule(ctx, r, time.Now(), "로그인 뒤에 이어서"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EndRun(ctx, r, rules.OK, ""); err != nil {
+		t.Fatal(err)
+	}
+	if due(a.ID) {
+		t.Fatal("지시를 읽고 나면 다시 로그인을 기다립니다")
+	}
+
+	// A card's answer is news too.
+	if err := s.Answer(ctx, a.ID, "p-dbtest-login", "[승인] 물어본 것"); err != nil {
+		t.Fatal(err)
+	}
+	if !due(a.ID) {
+		t.Fatal("카드 답이 오면 돕니다")
+	}
+	if err := s.Control(ctx, a.ID, "cancel"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // The screens a run took go with the job's photos once it is over: a job with
 // only those is purged too, and none twice.
 func TestPurgeTakesTheScreensARunTook(t *testing.T) {

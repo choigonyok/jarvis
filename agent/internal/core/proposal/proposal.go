@@ -79,6 +79,12 @@ type Proposal struct {
 	// Edits is every change the operator made to a form card before
 	// deciding, oldest first: what was proposed and what they wanted instead.
 	Edits []Edit `json:"edits,omitempty"`
+	// Abandoned: nobody decided it - it was taken down (Abandon) because what
+	// it asked stopped mattering: the job's turn came, a corrected card took
+	// its place, the run behind it ended. Its state reads rejected for every
+	// caller that waits on it; the console shows it as taken down, not as
+	// the operator's no.
+	Abandoned bool `json:"abandoned,omitempty"`
 }
 
 // Opened is when the card was raised, read off its id (Open stamps it there;
@@ -195,6 +201,7 @@ func (s *Store) Persist(path string, log *slog.Logger) error {
 		// no turn that the restart could have cut short.
 		if p.State == Pending && p.Origin != OriginChat && p.Origin != OriginNotice && p.Origin != OriginSuggest && p.Origin != OriginIntercept {
 			p.State = Rejected
+			p.Abandoned = true
 			p.Note = "에이전트가 재시작되어 만료되었습니다."
 			if p.DecidedAt == "" {
 				p.DecidedAt = now.Format("15:04")
@@ -504,6 +511,8 @@ func (s *Store) Settle(id string, state State, note string) {
 	now := s.now()
 	p.State = state
 	p.Note = note
+	// How it ended is said now: no longer a card nobody decided.
+	p.Abandoned = false
 	if p.DecidedAt == "" {
 		p.DecidedAt = now.Format("15:04")
 	}
@@ -526,6 +535,7 @@ func (s *Store) Abandon(id, note string) {
 	}
 	now := s.now()
 	p.State = Rejected
+	p.Abandoned = true
 	p.Note = note
 	p.DecidedAt = now.Format("15:04")
 	p.changed(now)

@@ -269,11 +269,13 @@ type FirstInput struct {
 	Holder string `json:"holder"`
 }
 
+// firstCard is a question with two answers, 예 and 아니요, and no reason to
+// give for either (the console draws it so, by its kind).
 func firstCard(in FirstInput) action.Card {
 	return action.Card{
 		Title:       "'" + in.JobTitle + "' 먼저 할까요?",
-		Body:        "기다리는 작업: " + in.JobTitle + "\n지금 하는 작업: " + in.Holder,
-		Consequence: "승인하면 지금 하는 작업을 잠시 멈추고 이 작업을 먼저 한 뒤, 멈춘 작업을 이어서 합니다. 반려하면 요청한 순서대로 합니다.",
+		Body:        "기다리는 작업: " + in.JobTitle + "\n지금 브라우저를 쓰는 작업: " + in.Holder,
+		Consequence: "예: 지금 작업을 잠시 멈추고 이 작업을 먼저 한 뒤 멈춘 작업을 이어서 해요. 아니요: 요청한 순서대로 해요.",
 	}
 }
 

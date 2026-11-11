@@ -182,6 +182,18 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) list(w http.ResponseWriter, r *http.Request) {
+	// ?running=1: only the jobs with a run in flight - what the conversation
+	// shows while they work, read every few seconds, without the rest.
+	if r.URL.Query().Get("running") == "1" {
+		jobs, err := s.store.Running(r.Context(), s.who(r))
+		if err != nil {
+			s.fail(w, "진행 중인 작업을 읽지 못했습니다", err)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, http.StatusOK, map[string]any{"jobs": jobs})
+		return
+	}
 	jobs, err := s.store.List(r.Context(), s.who(r))
 	if err != nil {
 		s.fail(w, "작업 목록을 읽지 못했습니다", err)

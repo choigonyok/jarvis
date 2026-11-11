@@ -6,7 +6,9 @@ import { Composer } from "@/components/chat/composer";
 import { ModeToggle, type ChatMode } from "@/components/chat/mode-toggle";
 import { GuideSheet, starters } from "@/components/chat/guide";
 import { QueuedMessages } from "@/components/chat/queued";
+import { RunningJobs, useRunningJobs } from "@/components/chat/running-jobs";
 import { ThreadFooter, useFooterSpace } from "@/components/chat/thread-footer";
+import { JobSheet } from "@/components/jobs/job-sheet";
 import { ScrollerMoves, useThreadScroll } from "@/components/chat/thread-scroll";
 import { SearchBar, SearchToggle, useThreadSearch } from "@/components/chat/thread-search";
 import { Transcript } from "@/components/chat/transcript";
@@ -20,6 +22,7 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller";
+import type { Job } from "@/lib/jobs";
 import { isPending, type Turn, type TurnRef } from "@/lib/thread";
 import { diag } from "@/lib/diag";
 import { speakable, useSpeech, useVoiceStatus } from "@/lib/use-speech";
@@ -125,6 +128,17 @@ export function Thread() {
 
   const waiting = useMemo(() => proposals.filter(isPending), [proposals]);
   const pending = waiting.length;
+
+  // The jobs working behind the conversation, and the one whose sheet is
+  // open here. The sheet keeps the job it opened with: a run that ends while
+  // it is read leaves the line, not the sheet.
+  const newsAt = useMemo(() => {
+    for (let i = turns.length - 1; i >= 0; i--) if (turns[i].origin?.kind === "job") return turns[i].atIso ?? "";
+    return "";
+  }, [turns]);
+  const { jobs: running, reload: rereadRunning } = useRunningJobs({ thinking, newsAt });
+  const [sheetJob, setSheetJob] = useState<Job | null>(null);
+  const openJob = useCallback((id: number) => setSheetJob(running.find((j) => j.id === id) ?? null), [running]);
 
   const scroll = useThreadScroll({ scrollRef, turns, proposals, byId, hasMore, loadingOlder, olderFailed, loadOlder, mode });
   const { toNewest } = scroll;
@@ -265,8 +279,18 @@ export function Thread() {
         <Header connection={connection} pending={pending} actions={headerActions} />
         <SearchBar search={search} />
         <StandingBar pending={waiting} onGo={scroll.goToCard} muted={cardsVisible} />
+        <RunningJobs jobs={running} onOpen={openJob} />
       </PageTop>
       <GuideSheet open={guide} onOpenChange={setGuide} role={role} />
+      {/* Outside the header, as the guide's: a tap on its backdrop would
+          otherwise reach the header's own tap. */}
+      <JobSheet
+        job={sheetJob}
+        proposals={proposals}
+        onDecide={decide}
+        onOpenChange={(open) => !open && setSheetJob(null)}
+        onChanged={() => void rereadRunning()}
+      />
 
       <MessageScrollerProvider autoScroll defaultScrollPosition="end">
         <ScrollerMoves toRef={scroll.scroller} />

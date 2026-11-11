@@ -247,6 +247,30 @@ func (s *Store) List(ctx context.Context, who string) ([]Job, error) {
 	return out, rows.Err()
 }
 
+// Running is who's jobs with a run in flight now, the one that started
+// first first: what the conversation shows of the jobs while they work,
+// without reading every job there is.
+func (s *Store) Running(ctx context.Context, who string) ([]Job, error) {
+	rows, err := s.pool.Query(ctx, `select `+jobCols+` from mind.jobs j
+		join lateral (select min(r.started_at) as started from mind.job_runs r
+		               where r.job_id = j.id and r.ended_at is null) flight on flight.started is not null
+		where j.who = $1
+		order by flight.started`, who)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Job{}
+	for rows.Next() {
+		j, err := scanJob(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, j)
+	}
+	return out, rows.Err()
+}
+
 type Event struct {
 	ID    int64     `json:"id"`
 	RunID *int64    `json:"runId,omitempty"`
@@ -520,8 +544,19 @@ func (s *Store) Answer(ctx context.Context, id int64, card, text string) error {
 
 // --- the scheduler -----------------------------------------------------------
 
-// Due is the job most overdue whose sites are all logged in and which is not
-// already running, or nil.
+// loginHeld is a job resting on a login: one of its sites waits for the
+// operator to sign in again, and there is nothing new for it - no
+// instruction or card answer unread, and it has run before. Such a job goes
+// again once the login is done. One with news goes now all the same, since
+// the news may be what it was waiting for ("로그인 말고 이렇게 해", "그만해"),
+// and so does one never run, whose site may be another job's login; its run
+// is told which sites wait.
+const loginHeld = `(exists (select 1 from mind.job_sites s where s.login_required and s.site = any(j.sites))
+		  and j.last_run_at is not null
+		  and not exists (select 1 from mind.job_inbox i where i.job_id = j.id and i.consumed_run is null))`
+
+// Due is the job most overdue that is not resting on a login (loginHeld) and
+// is not already running, or nil.
 func (s *Store) Due(ctx context.Context, who string) (*Job, error) {
 	jobs, err := s.DueN(ctx, who, 1)
 	if err != nil || len(jobs) == 0 {
@@ -539,7 +574,7 @@ func (s *Store) DueN(ctx context.Context, who string, n int) ([]Job, error) {
 	}
 	rows, err := s.pool.Query(ctx, `select `+jobCols+` from mind.jobs j
 		where j.who = $2 and j.state = 'active' and j.next_at <= now()
-		  and not exists (select 1 from mind.job_sites s where s.login_required and s.site = any(j.sites))
+		  and not `+loginHeld+`
 		  and not exists (select 1 from mind.job_runs r where r.job_id = j.id and r.ended_at is null)
 		order by j.next_at limit $1`, n, who)
 	if err != nil {
@@ -559,13 +594,13 @@ func (s *Store) DueN(ctx context.Context, who string, n int) ([]Job, error) {
 
 // NextDue is when the next job comes due by its own clock, or nil when none
 // is on one: the scheduler sleeps until then rather than asking every few
-// seconds. A job waiting on a card or a login has no clock - what wakes it
-// is the decision.
+// seconds. A job waiting on a card or resting on a login has no clock - what
+// wakes it is the decision, or something new for it.
 func (s *Store) NextDue(ctx context.Context, who string) (*time.Time, error) {
 	var at *time.Time
 	err := s.pool.QueryRow(ctx, `select min(j.next_at) from mind.jobs j
 		where j.who = $1 and j.state = 'active' and j.next_at > now()
-		  and not exists (select 1 from mind.job_sites s where s.login_required and s.site = any(j.sites))`, who).Scan(&at)
+		  and not `+loginHeld, who).Scan(&at)
 	return at, err
 }
 

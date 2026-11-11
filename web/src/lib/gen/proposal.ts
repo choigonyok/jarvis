@@ -80,6 +80,14 @@ export interface Proposal {
    * deciding, oldest first: what was proposed and what they wanted instead.
    */
   edits?: Edit[];
+  /**
+   * Abandoned: nobody decided it - it was taken down (Abandon) because what
+   * it asked stopped mattering: the job's turn came, a corrected card took
+   * its place, the run behind it ended. Its state reads rejected for every
+   * caller that waits on it; the console shows it as taken down, not as
+   * the operator's no.
+   */
+  abandoned?: boolean;
 }
 /**
  * Edit is one revision of a form card by the operator.

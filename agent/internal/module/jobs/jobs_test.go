@@ -182,6 +182,19 @@ func TestPrompt(t *testing.T) {
 	if got := lastSteps([]string{"a", "b", "c"}, 2); strings.Join(got, ",") != "b,c" {
 		t.Errorf("마지막 단계만: %v", got)
 	}
+	if strings.Contains(p, "로그인을 기다리는 사이트") {
+		t.Error("로그인을 기다리지 않으면 그 이야기도 없습니다")
+	}
+	// A run that goes while a site waits on a login - for an instruction -
+	// is told which, and that the card is up already.
+	d.Job.BlockedSites = []string{"www.linkedin.com"}
+	d.Inbox = []Inbox{{Kind: "instruction", Text: "로그인 말고 공개 공고만 봐", At: time.Now()}}
+	held := prompt(d, "/uploads", time.Now(), nil, nil)
+	for _, want := range []string{"로그인을 기다리는 사이트: www.linkedin.com", "[지시", "로그인 말고 공개 공고만 봐", "request_login"} {
+		if !strings.Contains(held, want) {
+			t.Errorf("prompt lacks %q:\n%s", want, held)
+		}
+	}
 }
 
 // Approving a job's request for more sites adds them to the job and tells

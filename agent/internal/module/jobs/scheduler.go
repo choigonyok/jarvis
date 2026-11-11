@@ -525,6 +525,14 @@ func prompt(d Detail, uploadsDir string, now time.Time, cut []string, waiting []
 	} else {
 		b.WriteString("\n쓰는 사이트: 없음 - 이 작업은 웹사이트를 열 수 없습니다.\n")
 	}
+	if len(j.BlockedSites) > 0 {
+		// mind runs a job resting on a login only for something new (an
+		// instruction, a card's answer) or for its first run.
+		fmt.Fprintf(&b, "\n로그인을 기다리는 사이트: %s - 운영자에게 로그인 카드가 올라가 있고, 로그인되면 작업이 곧바로 다시 실행됩니다. "+
+			"이번 실행은 새로 온 것(지시·카드 답)이나 첫 실행 때문에 로그인 전에 도는 것입니다. 새 지시가 있으면 그대로 따르고(로그인 없이 하라거나 그만하라는 지시 포함), "+
+			"그 사이트가 이미 로그인돼 있으면 그대로 이어 갑니다. 로그인이 꼭 필요한 일만 남았으면 request_login 으로 마칩니다 - 같은 카드가 다시 뜨지는 않습니다.\n",
+			strings.Join(j.BlockedSites, ", "))
+	}
 	if len(j.Photos) > 0 {
 		b.WriteString("\n첨부 사진 (view_photos 로 보고, 업로드는 아래 경로로 browser_upload_files)\n")
 		for _, p := range j.Photos {

@@ -1,6 +1,6 @@
 {
   "_comment": "결제로 향하는 요청을 세 갈래로 나눈다. 판단은 값을 보내는 요청(POST/PUT/PATCH/DELETE)에만 한다 - 페이지를 보거나 목록을 불러오는 GET 은 돈을 움직이지 않으므로, 네이버쇼핑 상품 페이지가 뒤에서 pay.naver.com 을 읽는다고 막히지 않는다(2026-10-17). ask 는 그 호스트로 가는 쓰기 요청을 사람에게 묻는다(네이버페이). ask_patterns 는 쇼핑몰이 자기 도메인 안에서 끝내는 결제의 쓰기 요청을 묻는다(쿠팡 쿠페이 - 비밀번호는 browser_enter_payment_pin 이 넣는다, 그리고 큰 쇼핑몰의 결제 경로 - 2026-10-30 부터 신용카드 결제를 허용하면서 막기에서 묻기로 옮겼다). window 는 PG 결제창(이니시스·KCP 등)과 카드사 창으로 가는 쓰기 요청을 묻는다(아래 _window). block 은 묻지 않고 막는다 - 허용하지 않은 간편결제(카카오페이·페이코·SSG페이·11페이·페이플·페이팔)와 휴대폰 결제, 그리고 카드사 앱 결제 중 경로를 아는 것(하나카드 하나Pay 앱카드: acs.hanacard.co.kr/payapp/M003… - 2026-10-30 실제 시도에서 M003121110MCAC 로 시작해 M003121510HCAAC 로 앱 승인을 기다렸다. 운영자 '하나pay 같은 거 사용하지 말고'. 하나카드 창 안 네이버페이는 NVP001001~003 이라 걸리지 않는다. 다른 카드사의 앱카드 경로는 아직 몰라 지시문이 막는다)이다. 허용하는 결제 수단은 네이버페이·신용카드·쿠팡 쿠페이이고, 어느 것이든 결제 승인 카드를 거친다(2026-10-30 운영자 규칙). 묻는 것은 카드를 올리고 그 결정을 2분까지 기다린다 - 그 안에 승인되면 멈춘 요청이 그대로 나가고, 아니면 막았다가 나중의 승인으로 그 결제 한 건이 통과한다(막은 페이지 이동은 자비스의 안내 화면으로 채운다) - 승인을 기억하는 것은 에이전트 /intercept 하나이고, 가드는 멈춘 요청마다 묻는다. 쿠팡은 주문서·결제 호스트(checkout·pay·rocketpay·payment.coupang.com)로 가는 쓰기 요청을 모두 묻는다 - 실제 결제 요청의 경로를 다 알 수 없어서, 패턴이 놓쳐 카드 없이 결제되는 일이 없게(2026-10-17). 그중 돈이 나가지 않는다고 확인한 것만 pass 로 보낸다.",
-  "_limit": "block 은 '아는 것만 막기'다. 여기 없는 쇼핑몰의 자사 간편결제는 여전히 통과한다. 실질적인 방어선은 프로필에 허용한 것 외의 결제수단을 등록해두지 않는 것이고, 이 목록은 거기까지 가지 않게 하는 안내다. 결제창(window)을 막지 않고 묻는 것도 이 한계 때문이다 - 결제창 안에서 어느 길로 돈이 나가는지는 주소로 가릴 수 없다.",
+  "_limit": "block 은 '아는 것만 막기'다. 여기 없는 쇼핑몰의 자사 간편결제는 여전히 통과한다. 묻는 쪽도 마찬가지다: 계정에 등록해 둔 결제수단으로 서버가 바로 청구하는 서비스(쏘카처럼 결제창이 없는 곳)는 그 서비스의 결제 호출을 ask_patterns 에 적어야 카드가 뜬다 - 적지 않은 곳은 결제 버튼 한 번에 카드 없이 결제된다. 실질적인 방어선은 프로필에 허용한 것 외의 결제수단을 등록해두지 않는 것이고, 이 목록은 거기까지 가지 않게 하는 안내다. 결제창(window)을 막지 않고 묻는 것도 이 한계 때문이다 - 결제창 안에서 어느 길로 돈이 나가는지는 주소로 가릴 수 없다.",
   "ask": [
     "pay.naver.com",
     "npay.naver.com",
@@ -28,8 +28,14 @@
     "*wemakeprice.com/*payment*",
     "*tmon.co.kr/*payment*",
     "*aliexpress.com/*payment*",
-    "*amazon.*/*checkout*"
+    "*amazon.*/*checkout*",
+    "*socar.kr/*reservationservice/createreservation*",
+    "*socar.kr/*reservationservice/batchcreatereservations*",
+    "*socar.kr/*reservationservice/extendreservation*",
+    "*socar.kr/*reservationservice/pullreservation*",
+    "*socar.kr/*reservationservice/updateendlocation*"
   ],
+  "_socar": "쏘카는 결제창이 없다: 계정에 등록한 결제수단(네이버페이 간편결제)으로 쏘카 서버가 바로 청구하고, 브라우저는 grpc.socar.kr 의 Connect 호출만 보낸다. 쏘카의 API 는 조회까지 모두 POST 라서 호스트째 묻지 않고, 돈이 걸린 메서드만 묻는다 - 예약 만들기(CreateReservation·BatchCreateReservations), 연장(ExtendReservation), 앞당기기(PullReservation), 반납지 바꾸기(UpdateEndLocation). 미리보기(PreviewCreateReservation 같은 것)는 주소가 달라 걸리지 않는다. 주소는 grpc.socar.kr/<패키지>.ReservationService/<메서드> 이고 패키지 이름은 버전에 따라 바뀌어 * 로 둔다.",
   "_window": "PG 결제창 - 쇼핑몰의 결제수단이 '신용카드'뿐일 때 뜨는 이니시스·KCP·토스페이먼츠 같은 창. 그 안의 간편결제에서 네이버페이를 고를 수 있어서 막지 않고 묻는다(2026-10-29, 장범준 LP: 공식몰의 결제하기가 보낸 POST stdpay.inicis.com/payMain/pay 를 block 이 막아 결제창이 빈 화면으로 떴다). 묻는 것은 결제창으로 가는 첫 쓰기(창을 여는 요청)이고, 승인 하나가 그 결제 한 건의 결제창(어느 PG 든)과 그 안에서 고른 네이버페이(결제창·카드사 창이 연 팝업의 것만 - 가드가 fromWindow 로 알린다. 다른 탭의 네이버페이 주문은 다른 결제라 카드가 따로 뜬다)를 함께 연다 - 결제창을 다시 연 때부터 10분, 카드에 보인 금액만(금액이 다른 주문은 새 카드, 에이전트 /intercept). 통과시키지 않고 묻는 까닭: 결제창 안에서 앱카드·휴대폰 결제·계좌이체 중 어느 길로 돈이 나가는지는 주소로 가릴 수 없고, 휴대폰 문자가 맥미니 메시지로 넘어와 자비스가 읽을 수 있어서 '사람만 할 수 있는 인증'을 방어선으로 믿을 수 없다. 다른 간편결제·휴대폰 결제로 가는 쓰기는 승인 뒤에도 block 이 막는다. 카드에는 결제창이 받은 금액·상품 이름이 보인다(본문의 price·goodname 등, 판단에는 쓰지 않음). 작업 중에는 작업의 사이트가 아니어도 열린다 - 결제창을 새 창으로 띄우는 PG 가 있다. 호스트는 그 아래 주소를 모두 뜻한다(inicis.com 은 stdpay.inicis.com 도). 카드사(하나·신한·KB국민·삼성·현대·롯데·BC·우리·NH)는 PG 가 아니라 결제창에서 카드를 고르면 이어지는 카드사 결제 창이다(하나카드는 acs.hanacard.co.kr). 2026-10-30 부터 신용카드 결제를 허용해서, 그 창이 카드사 주소로 떠도 같은 결제창 승인으로 지나가고 작업 중에도 열리게 여기 둔다 - 카드사 창 안의 간편결제 네이버페이도 같다. 해외 카드 결제(eximbay, stripe)도 막지 않고 묻는다. card.nonghyup.com 은 NH농협카드만(은행 nonghyup.com 은 아님).",
   "window": [
     "inicis.com",
@@ -90,7 +96,13 @@
     {"url": "https://pay.naver.com/orderapi/payment/universal/log", "why": "네이버페이 결제 화면이 보내는 로그. 결제 호스트 위라 경로를 그대로만 연다(뒤에 무엇이 붙은 주소는 묻는다)"},
     {"url": "https://m.pay.naver.com/orderapi/payment/universal/log", "why": "같은 로그의 모바일 주소"},
     {"url": "https://orders.pay.naver.com/orderapi/ordersheet/universal/log", "why": "네이버페이 주문서가 보내는 로그"},
-    {"url": "https://pay.naver.com/authentication/api/nelo/web", "why": "네이버페이 인증 화면의 오류 로그(NELO)"}
+    {"url": "https://pay.naver.com/authentication/api/nelo/web", "why": "네이버페이 인증 화면의 오류 로그(NELO)"},
+    {"url": "https://pay.naver.com/web-api/timeline/*", "why": "네이버페이 결제내역(타임라인)의 조회 - 내역과 적립 포인트를 읽는다. 결제는 이 경로로 가지 않는다(주문서 orderApi, 결제 payments)"},
+    {"url": "https://ica.pay.naver.com/inventory/area/*", "why": "네이버페이 화면의 배너 자리에 넣을 내용 조회"},
+    {"url": "https://orders.pay.naver.com/orderapi/ordersheet/detail/*", "why": "이미 한 주문의 상세 화면이 읽는 것(배정·배너·단골 혜택). 결제하기는 orderSheet 의 다른 경로(apply 등)다"},
+    {"url": "https://orders.pay.naver.com/orderapi/ordersheet/universal/fds/merchant/penaltydetails", "why": "주문 상세·주문서가 읽는 판매자 제재 내역"},
+    {"url": "https://orders.pay.naver.com/orderapi/ordersheet/universal/expectedmembership", "why": "주문 상세·주문서가 읽는 멤버십 예상 혜택"},
+    {"url": "https://pbf.lotteon.com/payment/v2/paymentapi/getinstallmentbenefitsummary", "why": "롯데온 상품 화면이 읽는 무이자 할부 혜택"}
   ],
   "block": [
     "*ssgpay*",

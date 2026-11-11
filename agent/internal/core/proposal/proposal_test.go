@@ -75,8 +75,20 @@ func TestAbandonClosesTheCard(t *testing.T) {
 	if got.State != Rejected {
 		t.Fatalf("카드가 닫히지 않았습니다: %+v", got)
 	}
+	// Taken down, not turned down: the console tells the two apart.
+	if !got.Abandoned {
+		t.Fatalf("아무도 결정하지 않은 카드는 내린 것으로 남습니다: %+v", got)
+	}
 	if err := s.Decide(p.ID, Approve); err != ErrAlreadyDecided {
 		t.Fatalf("버려진 제안이 다시 결재됐습니다: %v", err)
+	}
+	// The operator's own no is not.
+	q, _ := s.Open(Proposal{Card: action.Card{Title: "다른 것"}})
+	if err := s.Decide(q.ID, Reject); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Get(q.ID); got.State != Rejected || got.Abandoned {
+		t.Fatalf("운영자가 반려한 카드는 내린 카드가 아닙니다: %+v", got)
 	}
 }
 

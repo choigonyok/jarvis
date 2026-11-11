@@ -7,7 +7,8 @@ import { HeldBack, HoldBar, holdsMoney, useHold } from "@/components/chat/hold";
 import { RejectForm } from "@/components/chat/reject-form";
 import { Button } from "@/components/ui/button";
 import { isLiteral, readableBody, readableConsequence } from "@/lib/card-body";
-import { stateCopy, summarize } from "@/lib/ledger";
+import { outcomeCopy, summarize } from "@/lib/ledger";
+import { asksYesNo, outcomeOf } from "@/lib/outcome";
 import type { Decision, Proposal } from "@/lib/thread";
 import { cn } from "@/lib/utils";
 
@@ -33,7 +34,9 @@ export function Entry({
   /** In place of the time, where no day stands above the row. */
   when?: string;
 }) {
-  const copy = stateCopy[proposal.state];
+  const copy = outcomeCopy[outcomeOf(proposal)];
+  // The 먼저 card: 예 and 아니요, no reason asked (lib/outcome.ts).
+  const yesNo = asksYesNo(proposal);
   const waiting = proposal.state === "pending";
   const literal = isLiteral(proposal);
   const time = when ?? (waiting ? proposal.at : (proposal.decidedAt ?? proposal.at));
@@ -118,6 +121,15 @@ export function Entry({
           ) : waiting && asking ? (
             <div className="mt-3">
               <RejectForm onCancel={() => setAsking(false)} onReject={(why) => onDecide("rejected", why)} />
+            </div>
+          ) : waiting && yesNo ? (
+            <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-1.5">
+              <Button variant="soft" size="pair-sm" onClick={() => onDecide("rejected")}>
+                아니요
+              </Button>
+              <Button variant="approve" size="pair-sm" onClick={() => onDecide("approved")}>
+                예
+              </Button>
             </div>
           ) : waiting ? (
             <div className="mt-3">
