@@ -1,9 +1,9 @@
 "use client";
 
-import { useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Pin, Plus, X } from "lucide-react";
 import { KoreaMap, percent, useKoreaMap, type Face } from "@/components/couple/korea-map";
-import { PhotoTiles, PickPhotos, ViewerAction, useUploads } from "@/components/couple/photos";
+import { PhotoTiles, PickBar, PickPhotos, SaveAction, ViewerAction, useUploads } from "@/components/couple/photos";
 import { BlockTitle } from "@/components/couple/screen";
 import { Failed } from "@/components/shell/failed";
 import {
@@ -24,6 +24,7 @@ import { Lightbox } from "@/components/ui/lightbox";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
 import { photoSrc, today, writeCouple, type Block, type DateRecord, type Visit } from "@/lib/couple";
+import { onOpenParams } from "@/lib/focus";
 import { SAY } from "@/lib/say";
 import { dayRange, monthDay } from "@/lib/when";
 import { cn } from "@/lib/utils";
@@ -43,8 +44,27 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
   const [viewing, setViewing] = useState<{ list: Visit[]; at: number } | null>(null);
   const [pinning, setPinning] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  // The region's photos picked to take off together; null while not picking.
+  const [picking, setPicking] = useState<ReadonlySet<string> | null>(null);
+  const [dropping, setDropping] = useState(false);
   const panel = useRef<HTMLElement>(null);
   const uploads = useUploads(block.id);
+
+  // News about a region opens it (?region=, news.tsx): its 시/도 on the map,
+  // the region picked.
+  useEffect(() => {
+    if (!map) return;
+    const open = (params: URLSearchParams) => {
+      const code = params.get("region");
+      const r = code ? map.regions.find((x) => x.code === code) : undefined;
+      if (!r) return;
+      setView((v) => (v === "all" || v === r.sido ? v : r.sido));
+      setPicked(r.code);
+      requestAnimationFrame(() => panel.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }));
+    };
+    open(new URLSearchParams(window.location.search));
+    return onOpenParams(open);
+  }, [map]);
 
   const visits = useMemo(() => block.visits ?? [], [block.visits]);
   const faces = useMemo(() => {
@@ -55,6 +75,8 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
     }
     return out;
   }, [visits]);
+  // A region with a record but no photo yet: marked on the map, not counted -
+  // the app counts a region once it has a photo, and so does the home's card.
   const written = useMemo(() => new Set((block.records ?? []).map((r) => r.region).filter((r) => !faces.has(r))), [block.records, faces]);
   const been = (code: string) => faces.has(code) || written.has(code);
 
@@ -62,7 +84,8 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
   if (!map) return <p className="pt-10 text-center text-ui text-faint">{SAY.loading}</p>;
 
   const regions = view === "all" ? map.regions : map.regions.filter((r) => r.sido === view);
-  const visited = regions.filter((r) => been(r.code)).length;
+  const visited = regions.filter((r) => faces.has(r.code)).length;
+  const recordOnly = regions.filter((r) => written.has(r.code)).length;
   const region = picked ? map.regions.find((r) => r.code === picked) : undefined;
   const here = visits.filter((v) => v.region === picked && v.asset);
   const face = here.find((v) => v.rep) ?? null;
@@ -71,6 +94,7 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
   function pick(code: string) {
     setPicked((p) => (p === code ? null : code));
     setNote(null);
+    setPicking(null);
     requestAnimationFrame(() => panel.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }));
   }
 
@@ -136,6 +160,7 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
           <span className="text-heading font-semibold text-foreground tabular-nums">
             {view === "all" ? percent(visited, regions.length) : `${visited}/${regions.length}`}
           </span>
+          {recordOnly ? <span className="text-aside text-faint"> · 기록만 {recordOnly}곳</span> : null}
         </p>
       </div>
 
@@ -206,12 +231,48 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
 
           {here.filter((v) => v !== face).length ? (
             <div className="mt-4">
-              <h3 className="text-aside text-dim">이 지역의 사진</h3>
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-aside text-dim">이 지역의 사진</h3>
+                {!picking && here.filter((v) => v !== face).length > 1 ? (
+                  <Button variant="quiet" size="touch-sm" onClick={() => setPicking(new Set())} className="-mr-2">
+                    여러 장 지우기
+                  </Button>
+                ) : null}
+              </div>
               <PhotoTiles
                 className="mt-1"
                 assets={here.filter((v) => v !== face).map((v) => ({ key: v.id, asset: v.asset }))}
                 onOpen={(i) => setViewing({ list: here.filter((v) => v !== face), at: i })}
+                picked={picking ?? undefined}
+                onPick={(key) =>
+                  setPicking((s) => {
+                    const next = new Set(s);
+                    if (next.has(key)) next.delete(key);
+                    else next.add(key);
+                    return next;
+                  })
+                }
               />
+              {picking ? (
+                <PickBar
+                  count={picking.size}
+                  busy={dropping}
+                  onCancel={() => setPicking(null)}
+                  onRemove={() => {
+                    setDropping(true);
+                    void act(async () => {
+                      for (const id of picking) {
+                        const sent = await writeCouple("DELETE", `/blocks/${block.id}/visits/${id}`);
+                        if (!sent.ok) return sent;
+                      }
+                      return { ok: true };
+                    }).then(() => {
+                      setDropping(false);
+                      setPicking(null);
+                    });
+                  }}
+                />
+              ) : null}
             </div>
           ) : null}
 
@@ -285,6 +346,18 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
             if (!v) return null;
             return (
               <>
+                <SaveAction asset={v.asset} name={region?.name} />
+                {v === face ? (
+                  // The face turned a quarter inside the region's shape.
+                  <ViewerAction
+                    onClick={() => {
+                      setViewing(null);
+                      void act(() => writeCouple("PATCH", `/blocks/${block.id}/visits/${v.id}`, { rotation: ((v.rotation ?? 0) + 90) % 360 }));
+                    }}
+                  >
+                    돌리기
+                  </ViewerAction>
+                ) : null}
                 {v !== face && picked ? (
                   <ViewerAction
                     onClick={() => {

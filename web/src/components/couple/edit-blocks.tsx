@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowDown, ArrowUp, Archive } from "lucide-react";
+import { ArrowDown, ArrowUp, Archive, ArchiveRestore } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -14,12 +14,15 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Panel } from "@/components/ui/bottom-sheet";
 import { Button } from "@/components/ui/button";
+import { useArchived } from "@/components/couple/use-space";
 import { BLOCK_NAME, writeCouple, type Block } from "@/lib/couple";
+import { dayOf, monthDay } from "@/lib/when";
 
 /**
- * The home's blocks, kept: their order, and putting one away. The order is
- * the two's - the partner's app shows the same. A block put away is the app's
- * 보관: the app can bring it back. The calendar stays (this console reads it).
+ * The home's blocks, kept: their order, putting one away, and bringing one
+ * back. The order is the two's - the partner's app shows the same. A block put
+ * away is the app's 보관, its items kept; brought back it goes last. The
+ * calendar stays (this console reads it).
  */
 export function EditBlocks({
   open,
@@ -44,6 +47,7 @@ function Editor({ blocks, onClose, onChanged }: { blocks: Block[]; onClose: () =
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [away, setAway] = useState<Block | null>(null);
+  const archived = useArchived(true);
   const moved = order.some((b, i) => b.id !== [...blocks].sort((x, y) => x.order - y.order)[i]?.id);
 
   function move(i: number, by: -1 | 1) {
@@ -74,7 +78,17 @@ function Editor({ blocks, onClose, onChanged }: { blocks: Block[]; onClose: () =
     setBusy(false);
     if (!sent.ok) return setError(sent.error);
     setOrder((list) => list.filter((x) => x.id !== b.id));
-    await onChanged();
+    await Promise.all([onChanged(), archived.reload()]);
+  }
+
+  async function bringBack(b: Block) {
+    setBusy(true);
+    setError(null);
+    const sent = await writeCouple("POST", `/blocks/${b.id}/restore`);
+    setBusy(false);
+    if (!sent.ok) return setError(sent.error);
+    setOrder((list) => [...list, { ...b, order: Math.max(-1, ...list.map((x) => x.order)) + 1 }]);
+    await Promise.all([onChanged(), archived.reload()]);
   }
 
   return (
@@ -114,6 +128,30 @@ function Editor({ blocks, onClose, onChanged }: { blocks: Block[]; onClose: () =
           {error}
         </p>
       ) : null}
+      {archived.data?.length ? (
+        <section className="mt-6" aria-labelledby="archived-blocks">
+          <h3 id="archived-blocks" className="text-ui text-dim">
+            보관함 <span className="tabular-nums">{archived.data.length}</span>
+          </h3>
+          <ul className="mt-1 divide-y divide-edge-soft">
+            {archived.data.map((b) => (
+              <li key={b.id} className="flex min-h-14 items-center gap-2 py-1">
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-body text-dim">{b.title}</span>
+                  <span className="block text-meta text-faint">
+                    {BLOCK_NAME[b.type] ?? b.type}
+                    {b.archived ? ` · ${monthDay(dayOf(new Date(b.archived)))} 보관` : ""}
+                  </span>
+                </span>
+                <Button variant="soft" size="touch-sm" disabled={busy} onClick={() => void bringBack(b)} className="shrink-0 gap-1.5">
+                  <ArchiveRestore aria-hidden className="size-4" />
+                  꺼내기
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       <div className="mt-4 flex gap-2">
         <Button variant="soft" size="touch-sm" onClick={onClose} className="flex-1">
           닫기
@@ -126,7 +164,7 @@ function Editor({ blocks, onClose, onChanged }: { blocks: Block[]; onClose: () =
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{away?.title} 블록을 보관할까요?</AlertDialogTitle>
-            <AlertDialogDescription>홈에서 사라지고 상대의 uniple 앱에서도 보이지 않아요. 보관한 블록은 uniple 앱에서 다시 꺼낼 수 있어요.</AlertDialogDescription>
+            <AlertDialogDescription>홈에서 사라지고 상대의 uniple 앱에서도 보이지 않아요. 안의 내용은 그대로 남고, 이 화면의 보관함에서 다시 꺼낼 수 있어요.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>두기</AlertDialogCancel>

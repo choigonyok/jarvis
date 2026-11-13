@@ -9,7 +9,7 @@ import { EventRow, GhostRow } from "@/components/calendar/event-row";
 import { EventSheet } from "@/components/calendar/event-sheet";
 import { FindSheet } from "@/components/calendar/find-sheet";
 import { MonthPicker } from "@/components/calendar/month-picker";
-import { PhotoTiles, PickPhotos, ViewerAction, useUploads } from "@/components/couple/photos";
+import { PhotoTiles, PickBar, PickPhotos, SaveAction, ViewerAction, useUploads } from "@/components/couple/photos";
 import { useDayPhotos, useSpace } from "@/components/couple/use-space";
 import { useRole } from "@/components/shell/role";
 import { Lightbox } from "@/components/ui/lightbox";
@@ -22,7 +22,8 @@ import { TabBar } from "@/components/shell/tab-bar";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { useUndo } from "@/components/shell/undo";
 import { Button } from "@/components/ui/button";
-import { HOLIDAYS, between, photoSrc, writeCouple } from "@/lib/couple";
+import { between, photoSrc, writeCouple } from "@/lib/couple";
+import { useHolidays } from "@/lib/holidays";
 import {
   addDays,
   cursorOf,
@@ -68,17 +69,26 @@ export function Calendar() {
   // narrows the month to one person's days and back.
   const [hidden, setHidden] = useState<ReadonlySet<Owner>>(new Set());
 
-  const { events: fetched, proposed, waiting, pendingCount, connection, error, loaded, reload, save, create, remove, decide } =
+  const { events: fetched, proposed, waiting, pendingCount, connection, error, loaded, reload, save, change, create, remove, decide } =
     useCalendar(cursor);
 
   // The operator writes entries here: a new one on the form, one of theirs
   // changed on the same form (entry-sheet.tsx). The guest's console keeps the
   // short edit sheet - the couple's space opens only on the operator's side.
   const owner = useRole() === "owner";
-  const [entry, setEntry] = useState<{ event: CalendarEvent | null; day: string } | null>(null);
+  const [entry, setEntry] = useState<{ event: CalendarEvent | null; day: string; occurrence?: CalendarEvent } | null>(null);
   const bounds = useMemo(() => gridBounds(cursor), [cursor]);
+  const holidays = useHolidays(bounds.from, bounds.to).data;
   const photos = useDayPhotos(bounds.from, bounds.to, owner);
   const [viewing, setViewing] = useState<number | null>(null);
+  // Photos of the day picked to take off together; null while not picking.
+  const [picking, setPicking] = useState<ReadonlySet<string> | null>(null);
+  const [dropping, setDropping] = useState(false);
+  const [pickDay, setPickDay] = useState(selected);
+  if (pickDay !== selected) {
+    setPickDay(selected);
+    setPicking(null);
+  }
   // The day's photo in its cell instead of dots, while the app is open.
   const [photoCells, setPhotoCells] = useKept("calendar:photos", false);
   const [finding, setFinding] = useState(false);
@@ -100,19 +110,24 @@ export function Calendar() {
   }
 
   // One of your own entries being changed in place (event-sheet.tsx). The
-  // partner's are not: changing someone else's day is a conversation. Nor
-  // one day of a repeating entry: the shared calendar takes that only in its
-  // own app (calendar-svc refuses it).
+  // partner's are not: changing someone else's day is a conversation. A day
+  // of a repeating entry opens its whole series on the operator's form; the
+  // guest's short sheet changes single entries only.
   const [editing, setEditing] = useState<CalendarEvent | null>(null);
   // An anniversary the app writes from the D-day block is changed there.
-  const editable = (e: CalendarEvent) => ownerOf(e) !== "partner" && !e.id.includes("#") && !e.origin;
+  const editable = (e: CalendarEvent) =>
+    ownerOf(e) !== "partner" && !e.origin && (!e.id.includes("#") || (owner && !!e.seriesDate));
 
   // A removal waits five seconds with 되돌리기 on screen before it is sent:
   // the row is gone at once, and an undo means the shared calendar never
   // heard of it (components/shell/undo.tsx).
   const { offer } = useUndo();
   const [leaving, setLeaving] = useState<ReadonlySet<string>>(new Set());
-  const allEvents = useMemo(() => fetched.filter((e) => !leaving.has(e.id)), [fetched, leaving]);
+  // A series taken off takes every day of it off the screen.
+  const allEvents = useMemo(
+    () => fetched.filter((e) => !leaving.has(e.id) && !leaving.has(e.id.split("#")[0])),
+    [fetched, leaving],
+  );
   function erase(event: CalendarEvent) {
     const keep = (on: boolean) =>
       setLeaving((prev) => {
@@ -123,7 +138,11 @@ export function Calendar() {
       });
     keep(true);
     offer(
-      event.recurrence ? `${event.title} - 반복 중 이 날만 지웠어요` : `${event.title} 일정을 지웠어요`,
+      event.id.includes("#")
+        ? `${event.title} - 반복 중 이 날만 지웠어요`
+        : event.recurrence
+          ? `${event.title} - 반복 일정을 모두 지웠어요`
+          : `${event.title} 일정을 지웠어요`,
       () => keep(false),
       () => void remove(event.id).then((gone) => !gone && keep(false)),
     );
@@ -203,9 +222,9 @@ export function Calendar() {
         if (!m.photo || p.cover) m.photo = p.asset;
       }
     }
-    for (const [date, name] of Object.entries(HOLIDAYS)) if (out.has(date) || date.startsWith(selected.slice(0, 4))) mark(date).holiday = name;
+    for (const [date, name] of Object.entries(holidays ?? {})) mark(date).holiday = name;
     return out;
-  }, [events, allEvents, creates, attached, photoCells, photos.data, selected]);
+  }, [events, allEvents, creates, attached, photoCells, photos.data, holidays]);
 
   const dayEvents = events.filter((e) => covers(e, selected));
   const dayPhotos = owner ? (photos.data ?? []).filter((p) => p.date === selected) : [];
@@ -387,7 +406,7 @@ export function Calendar() {
             <h3 className="mb-3 px-2 text-ui text-dim">
               {korDate(selected)}
               {selected === today ? <span className="text-faint"> · 오늘</span> : null}
-              {HOLIDAYS[selected] ? <span className="text-faint"> · {HOLIDAYS[selected]}</span> : null}
+              {holidays?.[selected] ? <span className="text-faint"> · {holidays[selected]}</span> : null}
             </h3>
 
             {owner ? (
@@ -401,8 +420,17 @@ export function Calendar() {
                     mark: p.cover ? <span className="rounded bg-black/60 px-1 text-tiny text-white">대표</span> : undefined,
                   }))}
                   onOpen={setViewing}
+                  picked={picking ?? undefined}
+                  onPick={(key) =>
+                    setPicking((s) => {
+                      const next = new Set(s);
+                      if (next.has(key)) next.delete(key);
+                      else next.add(key);
+                      return next;
+                    })
+                  }
                   trailing={
-                    calendarBlock ? (
+                    picking ? null : calendarBlock ? (
                       <PickPhotos
                         variant="quiet"
                         label={dayPhotos.length ? "사진" : "이 날에 사진 추가"}
@@ -423,6 +451,32 @@ export function Calendar() {
                     ) : null
                   }
                 />
+                {picking ? (
+                  <PickBar
+                    count={picking.size}
+                    busy={dropping}
+                    onCancel={() => setPicking(null)}
+                    onRemove={() => {
+                      setDropping(true);
+                      void (async () => {
+                        for (const id of picking) {
+                          const sent = await writeCouple("DELETE", `/photos/${id}`);
+                          if (!sent.ok) {
+                            setPhotoNote(sent.error);
+                            break;
+                          }
+                        }
+                        await photos.reload();
+                        setDropping(false);
+                        setPicking(null);
+                      })();
+                    }}
+                  />
+                ) : dayPhotos.length > 1 ? (
+                  <Button variant="quiet" size="touch-sm" onClick={() => setPicking(new Set())} className="-ml-2">
+                    여러 장 지우기
+                  </Button>
+                ) : null}
                 {photoNote || uploads.error ? (
                   <p role="alert" className="mt-1 text-aside text-reject">
                     {photoNote ?? uploads.error}
@@ -460,10 +514,16 @@ export function Calendar() {
                         event.origin === "dday" && owner && ddayBlock
                           ? () => router.push(`/couple/${ddayBlock}`)
                           : editable(event) && !ghost
-                            ? () => (owner ? setEntry({ event, day: event.date }) : setEditing(event))
+                            ? () =>
+                                owner
+                                  ? event.id.includes("#")
+                                    ? setEntry({ event: seriesOf(event), day: event.date, occurrence: event })
+                                    : setEntry({ event, day: event.date })
+                                  : setEditing(event)
                             : undefined
                       }
-                      onDelete={() => erase(event)}
+                      // An anniversary of the D-day block is taken off there.
+                      onDelete={event.origin ? undefined : () => erase(event)}
                     />
                     {ghost ? (
                       <GhostRow
@@ -499,6 +559,7 @@ export function Calendar() {
       <EntrySheet
         open={entry !== null}
         event={entry?.event ?? null}
+        occurrence={entry?.occurrence}
         day={entry?.day ?? selected}
         block={calendarBlock}
         photos={entry?.event ? (photos.data ?? []).filter((p) => p.event && p.event === entry.event!.id.split("#")[0]) : []}
@@ -506,10 +567,11 @@ export function Calendar() {
           if (!open) setEntry(null);
         }}
         onSave={async (next: Entry) => {
-          const { photos: change, ...rest } = next;
+          const { photos: moved, ...rest } = next;
           let id = rest.id;
           if (id) {
-            if (!(await save(rest))) return "저장하지 못했어요. 잠시 뒤 다시 해 주세요.";
+            const failed = await change(rest);
+            if (failed) return failed;
           } else {
             const made = await create(rest);
             if (made.error) return made.error;
@@ -517,12 +579,13 @@ export function Calendar() {
             setSelected(rest.date ?? selected);
           }
           // The photos go on the entry's first day, filed under it.
-          if (change && id) {
-            for (const asset of change.add) {
+          if (moved && !id) return "일정은 저장했지만 아직 반영 전이라 사진을 붙이지 못했어요. 잠시 뒤 일정을 열어 붙여 주세요.";
+          if (moved && id) {
+            for (const asset of moved.add) {
               const sent = await writeCouple("POST", "/photos", { date: rest.date, asset, event: id });
               if (!sent.ok) return `일정은 저장했지만 사진을 붙이지 못했어요: ${sent.error}`;
             }
-            for (const photo of change.drop) {
+            for (const photo of moved.drop) {
               const sent = await writeCouple("DELETE", `/photos/${photo}`);
               if (!sent.ok) return `일정은 저장했지만 사진을 빼지 못했어요: ${sent.error}`;
             }
@@ -531,11 +594,17 @@ export function Calendar() {
           return null;
         }}
         onCopy={async (next, days) => {
-          // Each day gets the entry whole, its length kept.
+          // Each day gets the entry whole, its length kept. A day that does
+          // not go stops the rest, and says which went in before it.
           const span = next.endDate && next.date ? between(next.date, next.endDate) : 0;
+          const done: string[] = [];
           for (const day of days) {
             const made = await create({ ...next, date: day, endDate: span ? addDays(day, span) : undefined });
-            if (made.error) return made.error;
+            if (made.error) {
+              const went = done.length ? `${done.map(korDate).join(", ")}에는 들어갔고, ` : "";
+              return `${days.length}개 날짜 중 ${done.length}개만 복사했어요. ${went}${korDate(day)}부터 멈췄어요: ${made.error}`;
+            }
+            done.push(day);
           }
           return null;
         }}
@@ -555,6 +624,7 @@ export function Calendar() {
             if (!p) return null;
             return (
               <>
+                <SaveAction asset={p.asset} name={`${p.date}-${i + 1}`} />
                 {!p.cover ? (
                   <ViewerAction
                     onClick={() => {
@@ -606,4 +676,15 @@ export function Calendar() {
       <TabBar pending={pendingCount} />
     </div>
   );
+}
+
+/**
+ * A day of a repeating entry as the whole series: its own id, the day it
+ * starts, and each day's length kept.
+ */
+function seriesOf(day: CalendarEvent): CalendarEvent {
+  const series = day.id.split("#")[0];
+  const start = day.seriesDate ?? day.date;
+  const span = day.endDate ? between(day.date, day.endDate) : 0;
+  return { ...day, id: series, date: start, endDate: span ? addDays(start, span) : undefined, seriesDate: undefined };
 }

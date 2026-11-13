@@ -156,6 +156,8 @@ export type CalendarEvent = {
   reminder?: number;
   /** Set on an entry the app writes itself: "dday", an anniversary of the D-day block. */
   origin?: string;
+  /** On one day of a repeating entry: the day the series starts. */
+  seriesDate?: string;
 };
 
 /** True when the entry is on `date`, counting every day of a multi-day one. */

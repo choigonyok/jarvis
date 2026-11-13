@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/choigonyok/jarvis/calendar-svc/internal/api"
+	"github.com/choigonyok/jarvis/calendar-svc/internal/holiday"
 	"github.com/choigonyok/jarvis/calendar-svc/internal/store"
 	"github.com/choigonyok/jarvis/calendar-svc/internal/uniple"
 	"github.com/choigonyok/jarvis/gocommon/health"
@@ -79,9 +80,20 @@ func main() {
 		watch.Source{Kind: "calendar.year", Label: "앞뒤 1년 일정 읽기", Every: time.Hour, Read: span(backend, 1, 0, 12)},
 	)
 
+	// 공휴일은 공개 피드에서 하루 한 번 읽는다. HOLIDAYS_ICS_URL=off 면 이 서비스가 가진 목록만.
+	holidaysURL := svc.Env("HOLIDAYS_ICS_URL", holiday.GoogleKR)
+	if holidaysURL == "off" {
+		holidaysURL = ""
+	}
+	holidays := holiday.New(holidaysURL, log)
+	go func() {
+		today := time.Now().Format(time.DateOnly)
+		_, _ = holidays.Between(context.WithoutCancel(ctx), today, today)
+	}()
+
 	if svc.Serve(ctx, svc.Server{
 		Name: "calendar-svc", Addr: svc.Env("LISTEN_ADDR", ":8093"), Log: log,
-		Handler: api.New(backend, token, os.Getenv("API_GUEST_TOKEN"), log, notify.New(os.Getenv("NOTIFY_URL"), dsn, token, log)).WithLoops(loops).WithCouple(couple).Handler(),
+		Handler: api.New(backend, token, os.Getenv("API_GUEST_TOKEN"), log, notify.New(os.Getenv("NOTIFY_URL"), dsn, token, log)).WithLoops(loops).WithCouple(couple).WithHolidays(holidays).Handler(),
 		Read:    15 * time.Second,
 		Write:   30 * time.Second,
 	}) != nil {

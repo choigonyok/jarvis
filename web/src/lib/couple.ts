@@ -60,6 +60,8 @@ export type Block = {
   free?: Free[];
   visits?: Visit[];
   records?: DateRecord[];
+  /** When a block in 보관 was put there. */
+  archived?: string;
 };
 
 export type Space = {
@@ -82,6 +84,8 @@ export type News = {
   blockTitle?: string;
   kind: string;
   at: string;
+  /** The thing the news is about, by its id (an entry, a photo, a wish). */
+  itemId?: string;
   item?: NewsItem;
 };
 
@@ -168,7 +172,13 @@ export async function uploadPhoto(block: string, file: File): Promise<Sent<strin
   try {
     blob = await shrink(file);
   } catch {
-    return { ok: false, error: "사진을 읽지 못했어요. 다른 사진을 골라 주세요." };
+    const heic = /hei[cf]/i.test(file.type) || /\.hei[cf]$/i.test(file.name);
+    return {
+      ok: false,
+      error: heic
+        ? "HEIC 사진은 이 브라우저에서 열 수 없어요. 사진 앱에서 JPEG로 내보내거나 휴대폰에서 올려 주세요."
+        : "사진을 읽지 못했어요. 다른 사진을 골라 주세요.",
+    };
   }
   if (blob.size > 4 * 1024 * 1024) return { ok: false, error: "사진이 너무 커요(4MB 까지)." };
   try {
@@ -207,20 +217,6 @@ async function shrink(file: File): Promise<Blob> {
     bitmap.close();
   }
 }
-
-/** Korea's public holidays, as the app shows them (no red: red is a refusal here). */
-export const HOLIDAYS: Record<string, string> = {
-  "2026-01-01": "신정", "2026-02-16": "설날 연휴", "2026-02-17": "설날", "2026-02-18": "설날 연휴", "2026-03-01": "삼일절",
-  "2026-03-02": "대체공휴일", "2026-05-05": "어린이날", "2026-05-24": "부처님오신날", "2026-05-25": "대체공휴일",
-  "2026-06-03": "지방선거", "2026-06-06": "현충일", "2026-07-17": "제헌절", "2026-08-15": "광복절", "2026-08-17": "대체공휴일",
-  "2026-09-24": "추석 연휴", "2026-09-25": "추석", "2026-09-26": "추석 연휴", "2026-10-03": "개천절", "2026-10-05": "대체공휴일",
-  "2026-10-09": "한글날", "2026-12-25": "성탄절",
-  "2027-01-01": "신정", "2027-02-06": "설날 연휴", "2027-02-07": "설날", "2027-02-08": "설날 연휴", "2027-02-09": "대체공휴일",
-  "2027-03-01": "삼일절", "2027-05-03": "대체공휴일", "2027-05-05": "어린이날", "2027-05-13": "부처님오신날", "2027-06-06": "현충일",
-  "2027-07-17": "제헌절", "2027-07-19": "대체공휴일", "2027-08-15": "광복절", "2027-08-16": "대체공휴일", "2027-09-14": "추석 연휴",
-  "2027-09-15": "추석", "2027-09-16": "추석 연휴", "2027-10-03": "개천절", "2027-10-04": "대체공휴일", "2027-10-09": "한글날",
-  "2027-10-11": "대체공휴일", "2027-12-25": "성탄절", "2027-12-27": "대체공휴일",
-};
 
 /** A photo of the space, through the console: thumb for tiles, display to look at. */
 export const photoSrc = (asset: string, size: "thumb" | "display" = "thumb") =>

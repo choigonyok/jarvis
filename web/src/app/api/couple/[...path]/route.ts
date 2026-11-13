@@ -10,11 +10,11 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const readable = (p: string) =>
-  ["news", "photos", "cover"].includes(p) || /^blocks\/[^/]+(\/checks)?$/.test(p) || /^media\/[^/]+$/.test(p);
+  ["news", "photos", "cover", "archived"].includes(p) || /^blocks\/[^/]+(\/checks)?$/.test(p) || /^media\/[^/]+$/.test(p);
 
 const writable = (p: string) =>
   ["blocks", "order", "photos"].includes(p) ||
-  /^blocks\/[^/]+(\/(dday|bucket|free|checks|records|visits|start)(\/[^/]+)?)?$/.test(p) ||
+  /^blocks\/[^/]+(\/(dday|bucket|free|checks|records|visits|start|restore)(\/[^/]+)?)?$/.test(p) ||
   /^photos\/[^/]+(\/cover)?$/.test(p);
 
 export const GET = pathProxy(`${CALENDAR_URL}/couple`, {

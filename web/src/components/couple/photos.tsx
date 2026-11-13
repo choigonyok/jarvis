@@ -1,7 +1,7 @@
 "use client";
 
-import { useRef, useState, type ReactNode } from "react";
-import { ImagePlus, X } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Check, ImagePlus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { photoSrc, uploadPhoto } from "@/lib/couple";
 import { cn } from "@/lib/utils";
@@ -60,7 +60,9 @@ export function PickPhotos({
       <input
         ref={input}
         type="file"
-        accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/*"
+        // No HEIC on the list: then the phone hands its photos over as JPEG,
+        // which every browser here can read.
+        accept="image/jpeg,image/png,image/webp,image/*"
         multiple={multiple}
         hidden
         onChange={(e) => {
@@ -77,11 +79,16 @@ export function PickPhotos({
   );
 }
 
-/** A row of photos: tap one to look at it; with onRemove, each has a way off. */
+/**
+ * A row of photos: tap one to look at it; with onRemove, each has a way off.
+ * With picked, a tap picks it instead - several to take off at once.
+ */
 export function PhotoTiles({
   assets,
   onOpen,
   onRemove,
+  picked,
+  onPick,
   size = "md",
   className,
   trailing,
@@ -89,6 +96,9 @@ export function PhotoTiles({
   assets: { key: string; asset: string; mark?: ReactNode }[];
   onOpen?: (index: number) => void;
   onRemove?: (index: number) => void;
+  /** The photos picked, by key; set while picking. */
+  picked?: ReadonlySet<string>;
+  onPick?: (key: string) => void;
   size?: "sm" | "md" | "lg";
   className?: string;
   /** What comes after the photos in the row (a way to add one). */
@@ -101,15 +111,27 @@ export function PhotoTiles({
         <li key={p.key} className="relative shrink-0">
           <button
             type="button"
-            onClick={() => onOpen?.(i)}
+            onClick={() => (picked ? onPick?.(p.key) : onOpen?.(i))}
             className="block overflow-hidden rounded-xl bg-glass-raised focus-ring"
-            aria-label={`사진 ${i + 1} 크게 보기`}
+            aria-label={picked ? `사진 ${i + 1} ${picked.has(p.key) ? "고르기 취소" : "고르기"}` : `사진 ${i + 1} 크게 보기`}
+            aria-pressed={picked ? picked.has(p.key) : undefined}
           >
             {/* eslint-disable-next-line @next/next/no-img-element -- through the console's own proxy */}
-            <img src={photoSrc(p.asset)} alt="" loading="lazy" className={cn("object-cover", box)} />
+            <img src={photoSrc(p.asset)} alt="" loading="lazy" className={cn("object-cover transition-opacity", box, picked && !picked.has(p.key) && "opacity-60")} />
           </button>
           {p.mark ? <span className="pointer-events-none absolute bottom-1 left-1">{p.mark}</span> : null}
-          {onRemove ? (
+          {picked ? (
+            <span
+              aria-hidden
+              className={cn(
+                "pointer-events-none absolute top-1 right-1 flex size-6 items-center justify-center rounded-full ring-2 ring-white/90",
+                picked.has(p.key) ? "bg-foreground text-background" : "bg-black/30",
+              )}
+            >
+              {picked.has(p.key) ? <Check className="size-3.5" strokeWidth={3} /> : null}
+            </span>
+          ) : null}
+          {onRemove && !picked ? (
             <button
               type="button"
               onClick={() => onRemove(i)}
@@ -142,5 +164,68 @@ export function ViewerAction({ onClick, children, danger, disabled }: { onClick:
     >
       {children}
     </button>
+  );
+}
+
+/**
+ * 저장 on the photo viewer: the phone's own share sheet (사진에 저장, 보내기),
+ * or a download where there is none. The photo is fetched as the viewer
+ * shows it, so the tap hands it over at once - a share sheet opens only
+ * straight from a tap.
+ */
+export function SaveAction({ asset, name }: { asset: string; name?: string }) {
+  const [file, setFile] = useState<{ asset: string; file: File } | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let live = true;
+    fetch(photoSrc(asset, "display"))
+      .then((res) => (res.ok ? res.blob() : Promise.reject(new Error(String(res.status)))))
+      .then((blob) => {
+        if (!live) return;
+        const ext = blob.type === "image/png" ? "png" : blob.type === "image/webp" ? "webp" : "jpg";
+        setFile({ asset, file: new File([blob], `${name || "photo"}.${ext}`, { type: blob.type || "image/jpeg" }) });
+      })
+      .catch(() => live && setFailed(true));
+    return () => {
+      live = false;
+    };
+  }, [asset, name]);
+  const ready = file?.asset === asset ? file.file : null;
+
+  function save() {
+    if (!ready) return;
+    if (navigator.canShare?.({ files: [ready] })) {
+      navigator.share({ files: [ready] }).catch(() => undefined);
+      return;
+    }
+    const url = URL.createObjectURL(ready);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = ready.name;
+    document.body.append(a);
+    a.click();
+    a.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  }
+
+  return (
+    <ViewerAction onClick={save} disabled={!ready}>
+      {failed ? "저장 못 함" : "저장"}
+    </ViewerAction>
+  );
+}
+
+/** A tool bar for picking several photos to take off: how many, take them off, or stop. */
+export function PickBar({ count, busy, onRemove, onCancel }: { count: number; busy?: boolean; onRemove: () => void; onCancel: () => void }) {
+  return (
+    <div className="mt-2 flex items-center gap-2">
+      <span className="mr-auto text-aside text-dim tabular-nums">{count ? `${count}장 골랐어요` : "지울 사진을 골라요"}</span>
+      <Button variant="soft" size="touch-sm" onClick={onCancel} disabled={busy}>
+        취소
+      </Button>
+      <Button variant="discard" size="touch-sm" onClick={onRemove} disabled={!count || busy}>
+        {busy ? "지우는 중…" : `${count}장 지우기`}
+      </Button>
+    </div>
   );
 }

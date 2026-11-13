@@ -70,6 +70,9 @@ type Client struct {
 	// assets remembers where each photo's sizes are (media.go).
 	assetsOnce sync.Once
 	assets     *assetCache
+
+	// pushes are the partner's pushes still on their way (tell).
+	pushes sync.WaitGroup
 }
 
 func Open(ctx context.Context, dsn string, cfg Config) (*Client, error) {
@@ -179,7 +182,7 @@ func (c *Client) token(ctx context.Context, force bool) (string, error) {
 	req.Header.Set("Content-Type", "application/json")
 	res, err := c.http.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("uniple 로그인 갱신: %w", err)
+		return "", unreachable(ctx, "로그인 갱신", err)
 	}
 	defer res.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(res.Body, 1<<16))
@@ -193,10 +196,14 @@ func (c *Client) token(ctx context.Context, force bool) (string, error) {
 		Msg string `json:"msg"`
 	}
 	_ = json.Unmarshal(raw, &out)
+	if res.StatusCode >= 500 {
+		// uniple 쪽 장애다. 토큰은 원본에 닿지 않았으니 그대로 쓸 수 있다.
+		return "", &Refused{Status: res.StatusCode, Message: "로그인 갱신"}
+	}
 	if res.StatusCode != http.StatusOK || out.AccessToken == "" {
 		// 회전된 토큰이 무효가 된 경우다. 다시 로그인해 새 토큰을 넣는 것
 		// 말고는 방법이 없으므로 그렇게 말한다.
-		return "", fmt.Errorf("uniple 로그인이 만료됐습니다(%s). 새 UNIPLE_REFRESH_TOKEN 이 필요합니다", res.Status)
+		return "", fmt.Errorf("%w(%s). 새 UNIPLE_REFRESH_TOKEN 이 필요합니다", ErrSession, res.Status)
 	}
 
 	// 옛 토큰은 이미 쓰였다. 저장이 실패해도 메모리의 토큰은 새 것으로 바꿔
@@ -245,7 +252,7 @@ func (c *Client) rest(ctx context.Context, method, path string, body any, out an
 		req.Header.Set("Prefer", "return=representation")
 		res, err := c.http.Do(req)
 		if err != nil {
-			return fmt.Errorf("uniple 호출: %w", err)
+			return unreachable(ctx, "호출", err)
 		}
 		raw, _ := io.ReadAll(io.LimitReader(res.Body, 4<<20))
 		res.Body.Close()
@@ -254,17 +261,18 @@ func (c *Client) rest(ctx context.Context, method, path string, body any, out an
 		}
 		if res.StatusCode >= 300 {
 			var e struct {
+				Code    string `json:"code"`
 				Message string `json:"message"`
 			}
 			_ = json.Unmarshal(raw, &e)
-			return fmt.Errorf("uniple 이 거부했습니다(%s): %s", res.Status, e.Message)
+			return &Refused{Status: res.StatusCode, Code: e.Code, Message: e.Message}
 		}
 		if out == nil {
 			return nil
 		}
 		return json.Unmarshal(raw, out)
 	}
-	return errors.New("uniple 인증에 실패했습니다")
+	return fmt.Errorf("%w: 새로 받은 접속 토큰도 거부됐습니다", ErrSession)
 }
 
 // calendar finds the couple's calendar block once.
@@ -328,6 +336,9 @@ type row struct {
 	ReminderMinutes        *int     `json:"reminder_minutes"`
 	Origin                 *string  `json:"origin"`
 	UpdatedAt              string   `json:"updated_at"`
+
+	// seriesStart is, on an occurrence, the series' own first day.
+	seriesStart string
 }
 
 func str(p *string) string {
@@ -379,6 +390,7 @@ func (r row) toEvent(me string) event.Event {
 		Recurrence: str(r.Recurrence),
 		Reminder:   r.ReminderMinutes,
 		Origin:     str(r.Origin),
+		SeriesDate: r.seriesStart,
 	}
 	if end := str(r.EndDate); end != "" && end != r.StartDate {
 		e.EndDate = end
@@ -557,6 +569,9 @@ func (c *Client) Put(ctx context.Context, e event.Event) (event.Event, error) {
 		if err != nil {
 			return event.Event{}, err
 		}
+		if err := derived(current); err != nil {
+			return event.Event{}, err
+		}
 		owner, err := ownerID(e.Owner, me, false, current.OwnerUserID)
 		if err != nil {
 			return event.Event{}, err
@@ -574,6 +589,20 @@ func (c *Client) Put(ctx context.Context, e event.Event) (event.Event, error) {
 		return event.Event{}, errors.New("uniple 이 저장된 일정을 돌려주지 않았습니다")
 	}
 	return saved[0].toEvent(me), nil
+}
+
+// derived refuses an entry another block writes: the D-day block keeps its
+// anniversaries on the calendar and writes them again whenever its dates
+// change, so a change made to one here would be undone, or leave the two apart.
+func derived(r row) error {
+	switch str(r.Origin) {
+	case "":
+		return nil
+	case "dday":
+		return event.ValidationError{Msg: "기념일에서 만든 일정이에요. 디데이에서 바꾸거나 지워 주세요"}
+	default:
+		return event.ValidationError{Msg: "다른 블록이 만든 일정이에요. 그 블록에서 바꿔 주세요"}
+	}
 }
 
 // partnerID is the other person in the couple, read off an entry they own.
@@ -641,6 +670,9 @@ func (c *Client) Delete(ctx context.Context, id string) (event.Event, error) {
 	if err != nil {
 		return event.Event{}, err
 	}
+	if err := derived(r); err != nil {
+		return event.Event{}, err
+	}
 
 	q := url.Values{}
 	q.Set("block_id", "eq."+block)
@@ -653,6 +685,24 @@ func (c *Client) Delete(ctx context.Context, id string) (event.Event, error) {
 			return event.Event{}, err
 		}
 		return gone, nil
+	}
+
+	// A day of a series changed on its own is an override row. Taking it
+	// away must not bring the series' own day back, so that day joins the
+	// series' exceptions first.
+	if r.RecurrenceParentID != nil && r.RecurrenceOverrideDate != nil {
+		parent, err := c.row(ctx, *r.RecurrenceParentID)
+		switch {
+		case err == nil:
+			pq := url.Values{"block_id": {"eq." + block}, "id": {"eq." + parent.ID}}
+			ex := append(append([]string{}, parent.RecurrenceExdates...), *r.RecurrenceOverrideDate)
+			if err := c.rest(ctx, http.MethodPatch, "calendar_events?"+pq.Encode(),
+				map[string]any{"recurrence_exdates": ex}, nil); err != nil {
+				return event.Event{}, err
+			}
+		case !errors.Is(err, event.ErrNotFound):
+			return event.Event{}, err
+		}
 	}
 
 	// A series takes its per-day overrides with it.

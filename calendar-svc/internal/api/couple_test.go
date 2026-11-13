@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -73,5 +75,31 @@ func TestCoupleRoutes(t *testing.T) {
 	plain := New(nil, "owner", "", quiet, nil).Handler()
 	if rec := call(plain, "GET", "/couple", "owner", ""); rec.Code != http.StatusNotFound {
 		t.Fatalf("uniple 이 아니면 404: %d", rec.Code)
+	}
+}
+
+// What went wrong in uniple reads as what to do about it, not one sentence for all.
+func TestUnipleTroubleReadsAsWhatToDo(t *testing.T) {
+	for _, c := range []struct {
+		err    error
+		status int
+		says   string
+	}{
+		{event.ValidationError{Msg: "버킷은 1자에서 100자까지예요"}, 400, "100자"},
+		{uniple.ErrBlock, 404, "블록"},
+		{fmt.Errorf("%w(400). 새 토큰", uniple.ErrSession), 503, "로그인"},
+		{fmt.Errorf("%w: 호출: dial", uniple.ErrUnreachable), 503, "닿지 않아요"},
+		{&uniple.Refused{Status: 521}, 503, "응답하지 않아요"},
+		{&uniple.Refused{Status: 403, Code: "42501"}, 403, "상대가 만든"},
+		{&uniple.Refused{Status: 400, Code: "42501"}, 403, "상대가 만든"},
+		{&uniple.Refused{Status: 404}, 404, "새로고침"},
+		{&uniple.Refused{Status: 409, Code: "23505"}, 409, "이미"},
+		{&uniple.Refused{Status: 400, Code: "22P02"}, 400, "값을"},
+		{errors.New("뭔가"), 502, "잠시 뒤"},
+	} {
+		status, says := trouble(c.err)
+		if status != c.status || !strings.Contains(says, c.says) || !strings.HasSuffix(strings.TrimSuffix(says, "."), "요") {
+			t.Errorf("%v: %d %q", c.err, status, says)
+		}
 	}
 }

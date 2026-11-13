@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"sort"
@@ -52,6 +53,8 @@ type Block struct {
 	// face, in a block's detail every one.
 	Visits  []Visit  `json:"visits,omitempty"`
 	Records []Record `json:"records,omitempty"`
+	// Archived is when a block in 보관 was put there.
+	Archived string `json:"archived,omitempty"`
 }
 
 // DDay is an anniversary on the D-day block. Start marks the day they met.
@@ -144,7 +147,7 @@ type DayPhoto struct {
 }
 
 // ErrBlock is a block that is not in the space, or not of the kind asked.
-var ErrBlock = errors.New("그런 블록이 없습니다")
+var ErrBlock = errors.New("그런 블록이 없어요")
 
 // What a block may hold at most, as the app counts (a second bucket list,
 // a second habit), and the caps on items.
@@ -452,13 +455,13 @@ func Region(code string) string {
 // stored is the code the app keeps a region under: Seoul's back to S01-S25.
 func stored(region string) (string, error) {
 	if len(region) != 5 || strings.Trim(region, "0123456789") != "" {
-		return "", event.ValidationError{Msg: "지역 코드는 다섯 자리 숫자여야 합니다"}
+		return "", event.ValidationError{Msg: "지역 코드는 다섯 자리 숫자여야 해요"}
 	}
 	if strings.HasPrefix(region, "11") {
 		n := 0
 		fmt.Sscanf(region[2:], "%d", &n)
 		if n%10 != 0 || n < 10 || n > 250 {
-			return "", event.ValidationError{Msg: "서울에 없는 구입니다"}
+			return "", event.ValidationError{Msg: "서울에 없는 구예요"}
 		}
 		return fmt.Sprintf("S%02d", n/10), nil
 	}
@@ -520,7 +523,7 @@ func (c *Client) Checks(ctx context.Context, block, from, to string) ([]Check, e
 		return nil, err
 	}
 	if !day(from) || !day(to) {
-		return nil, event.ValidationError{Msg: "from 과 to 는 YYYY-MM-DD 여야 합니다"}
+		return nil, event.ValidationError{Msg: "from 과 to 는 YYYY-MM-DD 여야 해요"}
 	}
 	var rows []checkRow
 	q := url.Values{"block_id": {"eq." + block}, "select": {"id,user_id,date,memo"}, "order": {"date.asc"}}
@@ -543,7 +546,7 @@ func (c *Client) DayPhotos(ctx context.Context, from, to string) ([]DayPhoto, er
 		return nil, err
 	}
 	if !day(from) || !day(to) {
-		return nil, event.ValidationError{Msg: "from 과 to 는 YYYY-MM-DD 여야 합니다"}
+		return nil, event.ValidationError{Msg: "from 과 to 는 YYYY-MM-DD 여야 해요"}
 	}
 	q := url.Values{
 		"block_id": {"eq." + block},
@@ -563,7 +566,7 @@ func (c *Client) Cover(ctx context.Context, date string) (*DayPhoto, error) {
 		return nil, err
 	}
 	if !day(date) {
-		return nil, event.ValidationError{Msg: "date 는 YYYY-MM-DD 여야 합니다"}
+		return nil, event.ValidationError{Msg: "date 는 YYYY-MM-DD 여야 해요"}
 	}
 	for _, q := range []url.Values{
 		{"block_id": {"eq." + block}, "date": {"lte." + date}, "order": {"date.desc,is_cover.desc,sort_order.asc,created_at.asc"}},
@@ -850,7 +853,7 @@ func (in DDayInput) fields(isNew bool) (map[string]any, error) {
 	if in.Date != nil || isNew {
 		d := strings.TrimSpace(deref(in.Date))
 		if !day(d) {
-			return nil, event.ValidationError{Msg: "날짜는 YYYY-MM-DD 여야 합니다"}
+			return nil, event.ValidationError{Msg: "날짜는 YYYY-MM-DD 여야 해요"}
 		}
 		f["date"] = d
 	}
@@ -1081,6 +1084,72 @@ func (c *Client) AddFree(ctx context.Context, block, content string) (Free, erro
 	return Free{ID: s.ID, Content: s.Content, By: side(s.CreatedBy, me), Order: s.OrderIndex, CreatedAt: s.CreatedAt}, nil
 }
 
+// SetFree rewrites a note's words.
+func (c *Client) SetFree(ctx context.Context, block, id, content string) (Free, error) {
+	if _, err := c.typed(ctx, block, "free"); err != nil {
+		return Free{}, err
+	}
+	_, me, _ := c.where(ctx)
+	content = strings.TrimSpace(content)
+	if content == "" || utf8.RuneCountInString(content) > 500 {
+		return Free{}, event.ValidationError{Msg: "기록은 1자에서 500자까지예요"}
+	}
+	q := url.Values{"id": {"eq." + id}, "block_id": {"eq." + block}, "select": {"id,content,created_at,created_by,order_index"}}
+	var saved []freeRow
+	if err := c.rest(ctx, http.MethodPatch, "free_items?"+q.Encode(), map[string]any{"content": content}, &saved); err != nil {
+		return Free{}, err
+	}
+	if len(saved) == 0 {
+		return Free{}, event.ErrNotFound
+	}
+	f := saved[0]
+	return Free{ID: f.ID, Content: f.Content, By: side(f.CreatedBy, me), Order: f.OrderIndex, CreatedAt: f.CreatedAt}, nil
+}
+
+// OrderItems puts a bucket or free block's items in the given order: every
+// item, each once. Only the ones whose place changed are written.
+func (c *Client) OrderItems(ctx context.Context, block, kind string, ids []string) error {
+	table := map[string]string{"bucket": "bucket_items", "free": "free_items"}[kind]
+	if table == "" {
+		return event.ValidationError{Msg: "순서는 버킷과 자유 블록만 바꿀 수 있어요"}
+	}
+	if _, err := c.typed(ctx, block, kind); err != nil {
+		return err
+	}
+	var have []struct {
+		ID         string `json:"id"`
+		OrderIndex int    `json:"order_index"`
+	}
+	q := url.Values{"block_id": {"eq." + block}, "select": {"id,order_index"}}
+	if err := c.rest(ctx, http.MethodGet, table+"?"+q.Encode(), nil, &have); err != nil {
+		return err
+	}
+	at := make(map[string]int, len(have))
+	for _, h := range have {
+		at[h.ID] = h.OrderIndex
+	}
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		if _, ok := at[id]; !ok || seen[id] {
+			return event.ValidationError{Msg: "목록이 바뀌었어요. 새로고침한 뒤 다시 옮겨 주세요"}
+		}
+		seen[id] = true
+	}
+	if len(seen) != len(at) {
+		return event.ValidationError{Msg: "목록이 바뀌었어요. 새로고침한 뒤 다시 옮겨 주세요"}
+	}
+	for i, id := range ids {
+		if at[id] == i {
+			continue
+		}
+		q := url.Values{"id": {"eq." + id}, "block_id": {"eq." + block}}
+		if err := c.rest(ctx, http.MethodPatch, table+"?"+q.Encode(), map[string]any{"order_index": i}, nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // DeleteFree takes a note off a free block.
 func (c *Client) DeleteFree(ctx context.Context, block, id string) error {
 	if _, err := c.typed(ctx, block, "free"); err != nil {
@@ -1100,7 +1169,7 @@ func (c *Client) Check(ctx context.Context, block, date, memo string) (Check, er
 	}
 	_, me, _ := c.where(ctx)
 	if !day(date) {
-		return Check{}, event.ValidationError{Msg: "날짜는 YYYY-MM-DD 여야 합니다"}
+		return Check{}, event.ValidationError{Msg: "날짜는 YYYY-MM-DD 여야 해요"}
 	}
 	if date > today() {
 		return Check{}, event.ValidationError{Msg: "오지 않은 날은 체크할 수 없어요"}
@@ -1122,6 +1191,7 @@ func (c *Client) Check(ctx context.Context, block, date, memo string) (Check, er
 		return Check{}, errors.New("uniple 이 저장한 체크를 돌려주지 않았습니다")
 	}
 	out := Check{ID: saved[0].ID, Date: saved[0].Date, Who: "me"}
+	c.tell(ctx, block, map[string]any{"date": date})
 	if memo = strings.TrimSpace(memo); memo != "" {
 		if err := c.SetCheckMemo(ctx, block, out.ID, memo); err != nil {
 			return out, err
@@ -1195,13 +1265,13 @@ func (in RecordInput) fields(isNew bool) (map[string]any, error) {
 	from, to := strings.TrimSpace(deref(in.From)), strings.TrimSpace(deref(in.To))
 	if in.From != nil {
 		if from != "" && !day(from) {
-			return nil, event.ValidationError{Msg: "시작일은 YYYY-MM-DD 여야 합니다"}
+			return nil, event.ValidationError{Msg: "시작일은 YYYY-MM-DD 여야 해요"}
 		}
 		f["date_start"] = nullable(from)
 	}
 	if in.To != nil {
 		if to != "" && !day(to) {
-			return nil, event.ValidationError{Msg: "종료일은 YYYY-MM-DD 여야 합니다"}
+			return nil, event.ValidationError{Msg: "종료일은 YYYY-MM-DD 여야 해요"}
 		}
 		if to != "" && from != "" && to < from {
 			return nil, event.ValidationError{Msg: "종료일이 시작일보다 빨라요"}
@@ -1372,6 +1442,7 @@ func (c *Client) AddVisit(ctx context.Context, block string, in VisitInput) (Vis
 		}, nil); err != nil {
 			return Visit{}, err
 		}
+		c.tell(ctx, block, map[string]any{"itemId": id})
 		return c.visit(ctx, block, id)
 	}
 	var recs []recordRow
@@ -1398,6 +1469,10 @@ func (c *Client) AddVisit(ctx context.Context, block string, in VisitInput) (Vis
 	if len(saved) == 0 {
 		return Visit{}, errors.New("uniple 이 저장한 사진을 돌려주지 않았습니다")
 	}
+	// A record's photos come several at once; the first one tells.
+	if len(have) == 0 {
+		c.tell(ctx, block, map[string]any{"itemId": id})
+	}
 	return saved[0].toVisit(), nil
 }
 
@@ -1415,22 +1490,44 @@ func (c *Client) visit(ctx context.Context, block, id string) (Visit, error) {
 
 // SetVisit changes a region's face to another uploaded photo, as the app's
 // 대표 사진 변경 does.
-func (c *Client) SetVisit(ctx context.Context, block, id, asset string) (Visit, error) {
+func (c *Client) SetVisit(ctx context.Context, block, id string, in VisitChange) (Visit, error) {
 	if _, err := c.typed(ctx, block, "map"); err != nil {
 		return Visit{}, err
 	}
-	if !uuidLike(asset) {
-		return Visit{}, event.ValidationError{Msg: "올린 사진이 없어요"}
+	f := map[string]any{}
+	if in.Asset != "" {
+		if !uuidLike(in.Asset) {
+			return Visit{}, event.ValidationError{Msg: "올린 사진이 없어요"}
+		}
+		// A new photo starts upright, uncut.
+		f["asset_id"], f["clip_asset_id"], f["rotation"] = in.Asset, nil, 0
+	}
+	if in.Rotation != nil {
+		r := *in.Rotation
+		if math.IsNaN(r) || math.IsInf(r, 0) {
+			return Visit{}, event.ValidationError{Msg: "돌릴 각도가 숫자가 아니에요"}
+		}
+		f["rotation"] = math.Mod(math.Mod(r, 360)+360, 360)
+	}
+	if len(f) == 0 {
+		return Visit{}, event.ValidationError{Msg: "바꿀 것이 없어요"}
 	}
 	q := url.Values{"id": {"eq." + id}, "block_id": {"eq." + block}, "select": {"id"}}
 	var saved []visitRow
-	if err := c.rest(ctx, http.MethodPatch, "map_visits?"+q.Encode(), map[string]any{"asset_id": asset, "clip_asset_id": nil, "rotation": 0}, &saved); err != nil {
+	if err := c.rest(ctx, http.MethodPatch, "map_visits?"+q.Encode(), f, &saved); err != nil {
 		return Visit{}, err
 	}
 	if len(saved) == 0 {
 		return Visit{}, event.ErrNotFound
 	}
 	return c.visit(ctx, block, id)
+}
+
+// VisitChange is a map photo changed: a new photo for it, or how far it is
+// turned inside its region's shape, in degrees.
+type VisitChange struct {
+	Asset    string   `json:"asset"`
+	Rotation *float64 `json:"rotation"`
 }
 
 // DeleteVisit takes a photo off the map.
@@ -1457,7 +1554,7 @@ func (c *Client) AddDayPhoto(ctx context.Context, in DayPhotoInput) (DayPhoto, e
 		return DayPhoto{}, err
 	}
 	if !day(in.Date) {
-		return DayPhoto{}, event.ValidationError{Msg: "날짜는 YYYY-MM-DD 여야 합니다"}
+		return DayPhoto{}, event.ValidationError{Msg: "날짜는 YYYY-MM-DD 여야 해요"}
 	}
 	if !uuidLike(in.Asset) {
 		return DayPhoto{}, event.ValidationError{Msg: "올린 사진이 없어요"}
@@ -1595,6 +1692,80 @@ func (c *Client) ArchiveBlock(ctx context.Context, id string) error {
 	return nil
 }
 
+// Archived is the blocks put away, the last put away first: what the app's
+// 보관함 holds.
+func (c *Client) Archived(ctx context.Context) ([]Block, error) {
+	space, _, err := c.where(ctx)
+	if err != nil {
+		return nil, err
+	}
+	q := url.Values{
+		"space_id":    {"eq." + space},
+		"archived_at": {"not.is.null"},
+		"select":      {"id,type,title,order_index,archived_at"},
+		"order":       {"archived_at.desc"},
+	}
+	var rows []struct {
+		ID         string `json:"id"`
+		Type       string `json:"type"`
+		Title      string `json:"title"`
+		OrderIndex int    `json:"order_index"`
+		ArchivedAt string `json:"archived_at"`
+	}
+	if err := c.rest(ctx, http.MethodGet, "blocks?"+q.Encode(), nil, &rows); err != nil {
+		return nil, err
+	}
+	out := make([]Block, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, Block{ID: r.ID, Type: r.Type, Title: r.Title, Order: r.OrderIndex, Archived: r.ArchivedAt})
+	}
+	return out, nil
+}
+
+// Restore takes a block out of 보관 and puts it last on the home, its items
+// as they were. A type already at its count stays put away.
+func (c *Client) Restore(ctx context.Context, id string) error {
+	space, _, err := c.where(ctx)
+	if err != nil {
+		return err
+	}
+	var rows []struct {
+		Type string `json:"type"`
+	}
+	q := url.Values{"id": {"eq." + id}, "space_id": {"eq." + space}, "archived_at": {"not.is.null"}, "select": {"type"}}
+	if err := c.rest(ctx, http.MethodGet, "blocks?"+q.Encode(), nil, &rows); err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		return ErrBlock
+	}
+	live, err := c.blocks(ctx, space, "")
+	if err != nil {
+		return err
+	}
+	n, last := 0, -1
+	for _, b := range live {
+		if b.Type == rows[0].Type {
+			n++
+		}
+		last = max(last, b.OrderIndex)
+	}
+	if limit := max(blockCap[rows[0].Type], 1); n >= limit {
+		return event.ValidationError{Msg: fmt.Sprintf("이 블록은 %d개까지 둘 수 있어요. 같은 블록 하나를 보관한 뒤 꺼내 주세요", limit)}
+	}
+	q = url.Values{"id": {"eq." + id}, "space_id": {"eq." + space}, "select": {"id"}}
+	var saved []struct {
+		ID string `json:"id"`
+	}
+	if err := c.rest(ctx, http.MethodPatch, "blocks?"+q.Encode(), map[string]any{"archived_at": nil, "order_index": last + 1}, &saved); err != nil {
+		return err
+	}
+	if len(saved) == 0 {
+		return ErrBlock
+	}
+	return nil
+}
+
 // OrderBlocks puts the home's blocks in the given order: every live block,
 // each once.
 func (c *Client) OrderBlocks(ctx context.Context, ids []string) error {
@@ -1644,7 +1815,7 @@ func (c *Client) SetStart(ctx context.Context, block, title, date string) error 
 	_, me, _ := c.where(ctx)
 	date = strings.TrimSpace(date)
 	if !day(date) {
-		return event.ValidationError{Msg: "날짜는 YYYY-MM-DD 여야 합니다"}
+		return event.ValidationError{Msg: "날짜는 YYYY-MM-DD 여야 해요"}
 	}
 	if date > today() {
 		return event.ValidationError{Msg: "만난 날은 오늘이나 그 전이에요"}

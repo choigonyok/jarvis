@@ -34,7 +34,11 @@ type Couple interface {
 	SetBucket(ctx context.Context, block, id string, in uniple.BucketInput) (uniple.Bucket, error)
 	DeleteBucket(ctx context.Context, block, id string) error
 	AddFree(ctx context.Context, block, content string) (uniple.Free, error)
+	SetFree(ctx context.Context, block, id, content string) (uniple.Free, error)
 	DeleteFree(ctx context.Context, block, id string) error
+	OrderItems(ctx context.Context, block, kind string, ids []string) error
+	Archived(ctx context.Context) ([]uniple.Block, error)
+	Restore(ctx context.Context, id string) error
 	Check(ctx context.Context, block, date, memo string) (uniple.Check, error)
 	SetCheckMemo(ctx context.Context, block, id, memo string) error
 	Uncheck(ctx context.Context, block, id string) error
@@ -44,7 +48,7 @@ type Couple interface {
 
 	Upload(ctx context.Context, block, kind string, body []byte) (string, error)
 	AddVisit(ctx context.Context, block string, in uniple.VisitInput) (uniple.Visit, error)
-	SetVisit(ctx context.Context, block, id, asset string) (uniple.Visit, error)
+	SetVisit(ctx context.Context, block, id string, in uniple.VisitChange) (uniple.Visit, error)
 	DeleteVisit(ctx context.Context, block, id string) error
 	AddDayPhoto(ctx context.Context, in uniple.DayPhotoInput) (uniple.DayPhoto, error)
 	DeleteDayPhoto(ctx context.Context, id string) error
@@ -95,6 +99,10 @@ func (s *Server) coupleRoutes(mux *http.ServeMux) {
 		s.answer(w, map[string]any{"cover": cover}, err)
 	})
 	read("/couple/media/{id}", s.photo)
+	read("/couple/archived", func(w http.ResponseWriter, r *http.Request) {
+		blocks, err := s.couple.Archived(r.Context())
+		s.answer(w, map[string]any{"blocks": blocks}, err)
+	})
 
 	write("POST /couple/blocks", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
@@ -114,6 +122,9 @@ func (s *Server) coupleRoutes(mux *http.ServeMux) {
 	})
 	write("DELETE /couple/blocks/{block}", func(w http.ResponseWriter, r *http.Request) {
 		s.answer(w, ok, s.couple.ArchiveBlock(r.Context(), r.PathValue("block")))
+	})
+	write("POST /couple/blocks/{block}/restore", func(w http.ResponseWriter, r *http.Request) {
+		s.answer(w, ok, s.couple.Restore(r.Context(), r.PathValue("block")))
 	})
 	write("POST /couple/order", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
@@ -144,11 +155,9 @@ func (s *Server) coupleRoutes(mux *http.ServeMux) {
 		}
 	})
 	write("PATCH /couple/blocks/{block}/visits/{item}", func(w http.ResponseWriter, r *http.Request) {
-		var in struct {
-			Asset string `json:"asset"`
-		}
+		var in uniple.VisitChange
 		if decode(w, r, &in) {
-			v, err := s.couple.SetVisit(r.Context(), r.PathValue("block"), r.PathValue("item"), in.Asset)
+			v, err := s.couple.SetVisit(r.Context(), r.PathValue("block"), r.PathValue("item"), in)
 			s.answer(w, v, err)
 		}
 	})
@@ -225,9 +234,29 @@ func (s *Server) coupleRoutes(mux *http.ServeMux) {
 			s.answer(w, f, err)
 		}
 	})
+	write("PATCH /couple/blocks/{block}/free/{item}", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Content string `json:"content"`
+		}
+		if decode(w, r, &in) {
+			f, err := s.couple.SetFree(r.Context(), r.PathValue("block"), r.PathValue("item"), in.Content)
+			s.answer(w, f, err)
+		}
+	})
 	write("DELETE /couple/blocks/{block}/free/{item}", func(w http.ResponseWriter, r *http.Request) {
 		s.answer(w, ok, s.couple.DeleteFree(r.Context(), r.PathValue("block"), r.PathValue("item")))
 	})
+	// The order of a list's items, both kinds the same way.
+	for _, kind := range []string{"bucket", "free"} {
+		write("POST /couple/blocks/{block}/"+kind+"/order", func(w http.ResponseWriter, r *http.Request) {
+			var in struct {
+				IDs []string `json:"ids"`
+			}
+			if decode(w, r, &in) {
+				s.answer(w, ok, s.couple.OrderItems(r.Context(), r.PathValue("block"), kind, in.IDs))
+			}
+		})
+	}
 
 	write("POST /couple/blocks/{block}/checks", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
@@ -278,7 +307,7 @@ var ok = map[string]bool{"ok": true}
 func (s *Server) owner(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if s.couple == nil {
-			writeErr(w, http.StatusNotFound, "uniple 을 쓰지 않는 캘린더입니다.")
+			writeErr(w, http.StatusNotFound, "uniple 을 쓰지 않는 캘린더예요.")
 			return
 		}
 		if r.Header.Get("X-Jarvis-Side") == "partner" {
@@ -291,25 +320,51 @@ func (s *Server) owner(next http.HandlerFunc) http.HandlerFunc {
 
 func decode(w http.ResponseWriter, r *http.Request, into any) bool {
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(into); err != nil {
-		writeErr(w, http.StatusBadRequest, "본문을 읽을 수 없습니다.")
+		writeErr(w, http.StatusBadRequest, "보낸 내용을 읽지 못했어요.")
 		return false
 	}
 	return true
 }
 
-// answer writes what came back, or the error as the screen should read it.
+// answer writes what came back, or the error as the screen should read it:
+// what happened, and what to do about it.
 func (s *Server) answer(w http.ResponseWriter, v any, err error) {
-	var invalid event.ValidationError
-	switch {
-	case err == nil:
+	if err == nil {
 		writeJSON(w, http.StatusOK, v)
-	case errors.As(err, &invalid):
-		writeErr(w, http.StatusBadRequest, invalid.Error())
-	case errors.Is(err, uniple.ErrBlock), errors.Is(err, event.ErrNotFound):
-		writeErr(w, http.StatusNotFound, err.Error())
-	default:
+		return
+	}
+	status, say := trouble(err)
+	if status >= 500 {
 		s.log.Error("uniple 블록을 다루지 못했습니다", "err", err)
-		writeErr(w, http.StatusBadGateway, "uniple 에서 처리하지 못했습니다.")
+	}
+	writeErr(w, status, say)
+}
+
+// trouble is an error from uniple as a status and a sentence for the screen.
+func trouble(err error) (int, string) {
+	var invalid event.ValidationError
+	var refused *uniple.Refused
+	switch {
+	case errors.As(err, &invalid):
+		return http.StatusBadRequest, invalid.Error()
+	case errors.Is(err, uniple.ErrBlock), errors.Is(err, event.ErrNotFound), errors.Is(err, uniple.ErrNoPhoto):
+		return http.StatusNotFound, err.Error()
+	case errors.Is(err, uniple.ErrSession):
+		return http.StatusServiceUnavailable, "uniple 로그인이 풀렸어요. uniple 에 다시 로그인해 새 토큰을 넣어야 다시 돼요."
+	case errors.Is(err, uniple.ErrUnreachable):
+		return http.StatusServiceUnavailable, "uniple 에 닿지 않아요. 연결을 확인하고 잠시 뒤 다시 해 주세요."
+	case errors.As(err, &refused) && refused.Down():
+		return http.StatusServiceUnavailable, "uniple 이 지금 응답하지 않아요. 잠시 뒤 다시 해 주세요."
+	case errors.As(err, &refused) && refused.Forbidden():
+		return http.StatusForbidden, "uniple 이 이 변경을 받지 않았어요. 상대가 만든 것은 상대만 바꿀 수 있는 항목일 수 있어요."
+	case errors.As(err, &refused) && refused.Missing():
+		return http.StatusNotFound, "uniple 에 그 항목이 없어요. 다른 기기에서 지웠을 수 있으니 새로고침해 보세요."
+	case errors.As(err, &refused) && refused.Duplicate():
+		return http.StatusConflict, "이미 같은 것이 있어요."
+	case errors.As(err, &refused):
+		return http.StatusBadRequest, "uniple 이 이 값을 받지 않았어요. 입력을 확인해 주세요."
+	default:
+		return http.StatusBadGateway, "uniple 에서 처리하지 못했어요. 잠시 뒤 다시 해 주세요."
 	}
 }
 
@@ -321,13 +376,12 @@ func (s *Server) photo(w http.ResponseWriter, r *http.Request) {
 		size = "display"
 	}
 	p, err := s.couple.Photo(r.Context(), r.PathValue("id"), size)
-	if errors.Is(err, uniple.ErrNoPhoto) {
-		writeErr(w, http.StatusNotFound, err.Error())
-		return
-	}
 	if err != nil {
-		s.log.Warn("사진을 읽지 못했습니다", "err", err)
-		writeErr(w, http.StatusBadGateway, "사진을 읽지 못했습니다.")
+		status, say := trouble(err)
+		if status >= 500 {
+			s.log.Warn("사진을 읽지 못했습니다", "err", err)
+		}
+		writeErr(w, status, say)
 		return
 	}
 	defer p.Body.Close()

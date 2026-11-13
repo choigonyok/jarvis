@@ -482,6 +482,16 @@ func TestACommandIsARecord(t *testing.T) {
 		t.Fatalf("종류: %q", got)
 	}
 
+	// The rest of the couple's space, changed on the 일정 screens, comes the same way.
+	path = "/api/couple/blocks/" + unique("b") + "/bucket"
+	kind = answers(t, owner, "records", path, http.StatusOK, `{"id":"w1"}`)
+	if code, out := call(t, http.MethodPost, srv.URL+"/mind"+path, token, `{"title":"제주"}`); code != http.StatusOK {
+		t.Fatalf("커플 공간 쓰기: %d %s", code, out)
+	}
+	if got := <-kind; got != "manual.edit" {
+		t.Fatalf("종류: %q", got)
+	}
+
 	// A path no command has is not a record, nor a read one.
 	if code, _ := call(t, http.MethodPost, srv.URL+"/mind/api/replay", token, "{}"); code != http.StatusNotFound {
 		t.Fatalf("없는 명령: %d", code)

@@ -1,18 +1,23 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, X } from "lucide-react";
+import { ArrowUpDown, Plus, X } from "lucide-react";
+import { ReorderSheet } from "@/components/couple/reorder";
 import { BlockTitle } from "@/components/couple/screen";
 import { useUndo } from "@/components/shell/undo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Toggle } from "@/components/ui/toggle";
 import { useKept } from "@/lib/keep";
 import { writeCouple, type Block, type Free, type Space } from "@/lib/couple";
 import { ago } from "@/lib/when";
 import { cn } from "@/lib/utils";
 
-/** A free block: short notes either of us leaves, oldest first, each with who left it. */
+/**
+ * A free block: short notes either of us leaves, in the order the two keep
+ * them, each with who left it. A note's words open to be rewritten on a tap.
+ */
 export function FreePage({ block, space, onChanged }: { block: Block; space: Space; onChanged: () => Promise<void> }) {
   const [items, setItems] = useState<Free[]>(block.free ?? []);
   const [base, setBase] = useState(block.free);
@@ -27,6 +32,8 @@ export function FreePage({ block, space, onChanged }: { block: Block; space: Spa
   // Who left each and when: shown or not, as this phone last chose.
   const [showWho, setShowWho] = useKept(`couple:free:${block.id}:who`, true);
   const [showWhen, setShowWhen] = useKept(`couple:free:${block.id}:when`, true);
+  const [ordering, setOrdering] = useState(false);
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
 
   async function add(e: React.FormEvent) {
     e.preventDefault();
@@ -40,6 +47,30 @@ export function FreePage({ block, space, onChanged }: { block: Block; space: Spa
     setDraft("");
     setItems((list) => [...list, sent.data]);
     void onChanged();
+  }
+
+  async function rewrite(f: Free, content: string) {
+    setEditing(null);
+    const text = content.trim();
+    if (!text || text === f.content) return;
+    setError(null);
+    setItems((list) => list.map((x) => (x.id === f.id ? { ...x, content: text } : x)));
+    const sent = await writeCouple<Free>("PATCH", `/blocks/${block.id}/free/${f.id}`, { content: text });
+    if (!sent.ok) {
+      setItems((list) => list.map((x) => (x.id === f.id ? { ...x, content: f.content } : x)));
+      setError(sent.error);
+      return;
+    }
+    void onChanged();
+  }
+
+  async function reorder(ids: string[]): Promise<string | null> {
+    const sent = await writeCouple("POST", `/blocks/${block.id}/free/order`, { ids });
+    if (!sent.ok) return sent.error;
+    const at = new Map(ids.map((id, i) => [id, i]));
+    setItems((list) => list.map((f) => ({ ...f, order: at.get(f.id) ?? f.order })).sort((a, b) => a.order - b.order));
+    void onChanged();
+    return null;
   }
 
   function remove(f: Free) {
@@ -64,6 +95,11 @@ export function FreePage({ block, space, onChanged }: { block: Block; space: Spa
         <p className="mr-auto text-ui text-dim">
           <span className="tabular-nums">{items.length}</span>개
         </p>
+        {items.length > 1 ? (
+          <Button variant="ghost" size="icon-touch" onClick={() => setOrdering(true)} aria-label="기록 순서 바꾸기" className="text-dim hover:text-foreground">
+            <ArrowUpDown aria-hidden className="size-4" />
+          </Button>
+        ) : null}
         <Toggle pressed={showWho} onPressedChange={setShowWho} variant="pill" size="chip" aria-label="쓴 사람 보이기">
           쓴 사람
         </Toggle>
@@ -87,10 +123,42 @@ export function FreePage({ block, space, onChanged }: { block: Block; space: Spa
       ) : (
         <ul className="mt-3 divide-y divide-edge-soft">
           {items.map((f) => (
-            <li key={f.id} className="flex items-start gap-3 py-3">
+            <li key={f.id} data-focus={`free:${f.id}`} className="flex items-start gap-3 py-3">
               <span aria-hidden className={cn("mt-[8px] size-[7px] shrink-0 rounded-full", !showWho ? "bg-dim" : f.by === "me" ? "bg-mine" : "bg-partner")} />
               <div className="min-w-0 flex-1">
-                <p className="text-body break-keep whitespace-pre-line text-foreground">{f.content}</p>
+                {editing?.id === f.id ? (
+                  <div className="space-y-2">
+                    <Textarea
+                      autoFocus
+                      surface="glass"
+                      rows={3}
+                      maxLength={500}
+                      value={editing.text}
+                      aria-label="기록 고치기"
+                      onChange={(e) => setEditing({ id: f.id, text: e.target.value })}
+                      onKeyDown={(e) => {
+                        if (e.key === "Escape") setEditing(null);
+                      }}
+                    />
+                    <div className="flex gap-2">
+                      <Button variant="soft" size="touch-sm" onClick={() => setEditing(null)}>
+                        두기
+                      </Button>
+                      <Button variant="raised" size="touch-sm" disabled={!editing.text.trim()} onClick={() => void rewrite(f, editing.text)}>
+                        저장
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setEditing({ id: f.id, text: f.content })}
+                    aria-label={`${f.content} 고치기`}
+                    className="-mx-1 block w-[calc(100%+0.5rem)] rounded-md px-1 text-left text-body break-keep whitespace-pre-line text-foreground focus-ring"
+                  >
+                    {f.content}
+                  </button>
+                )}
                 {showWho || showWhen ? (
                   <p className="mt-0.5 text-meta text-faint">
                     {[showWho ? (f.by === "me" ? space.me.name || "나" : space.partner?.name || "상대") : null, showWhen ? ago(f.createdAt) : null]
@@ -106,6 +174,7 @@ export function FreePage({ block, space, onChanged }: { block: Block; space: Spa
           ))}
         </ul>
       )}
+      <ReorderSheet open={ordering} onOpenChange={setOrdering} title="기록 순서" items={items} label={(f) => f.content} onSave={reorder} />
     </div>
   );
 }

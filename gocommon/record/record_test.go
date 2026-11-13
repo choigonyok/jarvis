@@ -180,6 +180,16 @@ func TestCommandKind(t *testing.T) {
 		{"POST", "/api/notes/n1", "note.decided"},
 		{"POST", "/api/rules", "note.rule"},
 		{"POST", "/api/links", "link.decided"},
+		{"POST", "/api/calendar", "manual.edit"},
+		{"DELETE", "/api/calendar/e1%23d", "manual.edit"},
+		// Every write the 일정 screens make to the couple's space: none may
+		// be turned away at the door as an unknown path.
+		{"POST", "/api/couple/blocks", "manual.edit"},
+		{"POST", "/api/couple/blocks/b1/bucket", "manual.edit"},
+		{"POST", "/api/couple/blocks/b1/checks", "manual.edit"},
+		{"PATCH", "/api/couple/blocks/b1/free/i1", "manual.edit"},
+		{"DELETE", "/api/couple/photos/p1", "manual.edit"},
+		{"POST", "/api/couple/order", "manual.edit"},
 		{"POST", "/somewhere", "command"},
 	} {
 		if got := CommandKind(c.method, c.path); got != c.want {

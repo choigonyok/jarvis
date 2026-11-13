@@ -38,6 +38,7 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/module/assets"
 	"github.com/choigonyok/jarvis/agent/internal/module/calendar"
 	"github.com/choigonyok/jarvis/agent/internal/module/checklist"
+	"github.com/choigonyok/jarvis/agent/internal/module/couple"
 	"github.com/choigonyok/jarvis/agent/internal/module/goal"
 	"github.com/choigonyok/jarvis/agent/internal/module/jobs"
 	"github.com/choigonyok/jarvis/agent/internal/module/memory"
@@ -375,6 +376,14 @@ func Assemble(cfg *config.Config, d Deps) (*Assembly, error) {
 		modules.Add(goalModule)
 		goalModule.Look(look)
 		goalModule.Change(change)
+	}
+	// 커플 공간(uniple 의 디데이·버킷·습관·자유·지도): calendar-svc 가 하나뿐인
+	// uniple 세션으로 읽고 쓴다. 운영자의 것만 - 손님 쪽 세션은 없다.
+	if cfg.CalendarURL != "" && !cfg.Guest {
+		coupleModule := couple.New(cfg.CalendarURL, cfg.APIToken)
+		modules.Add(coupleModule)
+		coupleModule.Look(look)
+		coupleModule.Change(change)
 	}
 	// The boards' servers read the boards as they stand: every module has
 	// added its rows by now.

@@ -10,6 +10,11 @@ export const dynamic = "force-dynamic";
 
 const write = pathProxy(`${MIND_WRITES}/api/calendar`, { label: "캘린더", allow: (p) => p !== "events" && !p.includes("/") });
 
-export const GET = pathProxy(CALENDAR_URL, { label: "캘린더", requestHeaders: [], allow: (p) => p === "events" });
+export const GET = pathProxy(CALENDAR_URL, {
+  label: "캘린더",
+  requestHeaders: [],
+  responseHeaders: ["cache-control"],
+  allow: (p) => p === "events" || p === "holidays",
+});
 export const PATCH = write;
 export const DELETE = write;

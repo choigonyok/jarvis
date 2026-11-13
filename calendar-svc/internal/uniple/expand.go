@@ -109,6 +109,7 @@ func occurrence(s row, date string) row {
 	o := s
 	length := days(effEnd(s)) - days(s.StartDate)
 	o.ID = s.ID + "#" + date
+	o.seriesStart = s.StartDate
 	o.StartDate = date
 	o.EndDate = nil
 	if length > 0 {

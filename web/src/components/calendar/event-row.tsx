@@ -31,7 +31,8 @@ export function EventRow({
   pending?: Ghost;
   /** Set where the entry may be changed here (calendar/event-sheet.tsx). */
   onEdit?: () => void;
-  onDelete: () => void;
+  /** Set where the entry may be taken off here: not an anniversary the D-day block writes. */
+  onDelete?: () => void;
 }) {
   const leaving = pending?.op === "delete";
   const owner = ownerOf(event);
@@ -70,7 +71,7 @@ export function EventRow({
       </Body>
       {/* Hidden until pointed at is hidden forever on a touch screen, so
           `touch-visible` brings it back wherever hover does not exist. */}
-      {owner === "partner" ? null : (
+      {owner === "partner" || !onDelete ? null : (
       <Button
         variant="ghost"
         size="icon-xs"

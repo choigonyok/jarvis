@@ -83,7 +83,7 @@ func assembled(t *testing.T, cfg *config.Config) *Assembly {
 func TestTheOperatorsAgent(t *testing.T) {
 	cfg := agentConfig(t, "", nil)
 	a := assembled(t, cfg)
-	if got, want := a.Modules.Names(), []string{"calendar", "assets", "spending", "vault", "job", "memory", "web", "show", "photos", "context", "mind", "messages", "remind", "checklist", "goal"}; !slices.Equal(got, want) {
+	if got, want := a.Modules.Names(), []string{"calendar", "assets", "spending", "vault", "job", "memory", "web", "show", "photos", "context", "mind", "messages", "remind", "checklist", "goal", "couple"}; !slices.Equal(got, want) {
 		t.Fatalf("모듈:\n%v\n%v", got, want)
 	}
 	if got, want := slices.Sorted(maps.Keys(a.Mounts)), []string{"/mcp", "/mcp/calendar", "/mcp/change", "/mcp/job-run", "/mcp/jobs", "/mcp/look", "/mcp/show", "/mcp/spending-enrich", "/mcp/vault", "/mcp/web"}; !slices.Equal(got, want) {

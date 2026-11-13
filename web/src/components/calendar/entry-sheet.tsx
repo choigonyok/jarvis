@@ -24,8 +24,9 @@ import { cn } from "@/lib/utils";
  * saved as typed - it is a person's, not the assistant's guess - and goes on
  * the partner's phone at once. An entry of mine can be copied to other days.
  *
- * A day of a repeating entry is not changed here: the shared calendar takes
- * that only in its own app. It can still be taken off, that day alone.
+ * A day of a repeating entry opens the whole series: what is changed here
+ * changes every day of it. That one day can be taken off alone, or the
+ * series with all its days.
  */
 export type Entry = Partial<CalendarEvent> & {
   repeat?: string;
@@ -38,6 +39,7 @@ export function EntrySheet({
   open,
   event,
   day,
+  occurrence,
   block,
   photos = [],
   onOpenChange,
@@ -46,8 +48,10 @@ export function EntrySheet({
   onDelete,
 }: {
   open: boolean;
-  /** The entry being changed; none for a new one. */
+  /** The entry being changed; none for a new one. A series is changed whole. */
   event: CalendarEvent | null;
+  /** The day of a series that was tapped, by its own id: it can be taken off alone. */
+  occurrence?: CalendarEvent;
   /** The day a new entry starts on. */
   day: string;
   /** The calendar block photos are uploaded for; none, no photos here. */
@@ -61,11 +65,23 @@ export function EntrySheet({
   onDelete: (event: CalendarEvent) => void;
 }) {
   return (
-    <Panel open={open} onOpenChange={onOpenChange} title={event ? "일정 고치기" : "일정 추가"} description={event ? undefined : "저장하면 바로 공유 캘린더에 들어가 상대 폰에도 보여요."}>
+    <Panel
+      open={open}
+      onOpenChange={onOpenChange}
+      title={occurrence ? "반복 일정 고치기" : event ? "일정 고치기" : "일정 추가"}
+      description={
+        occurrence
+          ? "바꾸면 반복되는 모든 날이 바뀌어요. 하루만 바꾸는 것은 uniple 앱에서 해요."
+          : event
+            ? undefined
+            : "저장하면 바로 공유 캘린더에 들어가 상대 폰에도 보여요."
+      }
+    >
       {open ? (
         <Form
-          key={event?.id ?? `new-${day}`}
+          key={occurrence?.id ?? event?.id ?? `new-${day}`}
           event={event}
+          occurrence={occurrence}
           day={day}
           block={block}
           photos={photos}
@@ -81,6 +97,7 @@ export function EntrySheet({
 
 function Form({
   event,
+  occurrence,
   day,
   block,
   photos,
@@ -90,6 +107,7 @@ function Form({
   onClose,
 }: {
   event: CalendarEvent | null;
+  occurrence?: CalendarEvent;
   day: string;
   block?: string;
   photos: DayPhoto[];
@@ -119,6 +137,8 @@ function Form({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copying, setCopying] = useState(false);
+  // A series asks which to take off: the day tapped, or every day.
+  const [erasing, setErasing] = useState(false);
 
   const multi = endDate > date;
   const ready =
@@ -243,7 +263,7 @@ function Form({
         </Field>
       </div>
 
-      {block ? (
+      {block && !occurrence ? (
         <Field>
           <FieldLabel>사진</FieldLabel>
           <PhotoTiles
@@ -272,9 +292,32 @@ function Form({
         </p>
       ) : null}
 
+      {erasing && event && occurrence ? (
+        <div role="group" aria-label="무엇을 지울지" className="space-y-2 rounded-xl bg-glass p-3">
+          <p className="text-aside text-dim">반복 일정이에요. 무엇을 지울까요?</p>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="discard" size="touch-sm" onClick={() => onDelete(occurrence)}>
+              {dateLabel(occurrence.date)}만 지우기
+            </Button>
+            <Button type="button" variant="discard" size="touch-sm" onClick={() => onDelete(event)}>
+              반복 전체 지우기
+            </Button>
+            <Button type="button" variant="soft" size="touch-sm" onClick={() => setErasing(false)}>
+              두기
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
       <div className="flex gap-2 pt-1">
         {event ? (
-          <Button type="button" variant="discard" size="touch-sm" onClick={() => onDelete(event)} disabled={busy}>
+          <Button
+            type="button"
+            variant="discard"
+            size="touch-sm"
+            onClick={() => (occurrence ? setErasing(true) : onDelete(event))}
+            disabled={busy || erasing}
+          >
             지우기
           </Button>
         ) : (
@@ -286,7 +329,7 @@ function Form({
           {busy ? "저장하는 중…" : "저장"}
         </Button>
       </div>
-      {event ? (
+      {event && !occurrence ? (
         <Button type="button" variant="quiet" size="touch-sm" onClick={() => setCopying(true)} className="-ml-2 gap-1.5">
           <Copy aria-hidden className="size-4" />
           다른 날짜에 복사

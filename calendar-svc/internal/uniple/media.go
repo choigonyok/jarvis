@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -31,7 +32,7 @@ type Photo struct {
 }
 
 // ErrNoPhoto is an asset that is not there, or has no such size yet.
-var ErrNoPhoto = errors.New("그런 사진이 없습니다")
+var ErrNoPhoto = errors.New("그런 사진이 없어요")
 
 type asset struct {
 	ID       string                  `json:"id"`
@@ -318,7 +319,7 @@ func (c *Client) app(ctx context.Context, method, path string, body any, out any
 	req.Header.Set("Origin", strings.TrimRight(c.cfg.AppURL, "/"))
 	res, err := photoHTTP.Do(req)
 	if err != nil {
-		return fmt.Errorf("uniple 앱 서버: %w", err)
+		return unreachable(ctx, "앱 서버", err)
 	}
 	defer res.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
@@ -329,19 +330,39 @@ func (c *Client) app(ctx context.Context, method, path string, body any, out any
 			Error   string `json:"error"`
 		}
 		_ = json.Unmarshal(raw, &e)
-		switch e.Code {
-		case "storage_full":
+		if e.Code == "storage_full" {
 			return event.ValidationError{Msg: "uniple 저장 공간이 가득 찼어요. 앱에서 사진을 정리하거나 플랜을 바꿔야 해요"}
-		case "":
-		default:
-			return fmt.Errorf("uniple 앱 서버가 거절했습니다(%s): %s", res.Status, e.Code)
 		}
-		return fmt.Errorf("uniple 앱 서버가 거절했습니다(%s)", res.Status)
+		return &Refused{Status: res.StatusCode, Code: e.Code, Message: firstOf(e.Message, e.Error)}
 	}
 	if out == nil {
 		return nil
 	}
 	return json.Unmarshal(raw, out)
+}
+
+// tell has the app's server push the partner's phone, as the app does after a
+// photo goes on the map or a habit day is checked: the block and what was
+// added. The server files it among the partner's 알림 and spaces the pushes
+// out; a push that does not go is not the change's failure, so it is sent on
+// its own and only logged.
+func (c *Client) tell(ctx context.Context, block string, extra map[string]any) {
+	if c.cfg.AppURL == "" {
+		return
+	}
+	body := map[string]any{"blockId": block}
+	for k, v := range extra {
+		body[k] = v
+	}
+	c.pushes.Add(1)
+	go func() {
+		defer c.pushes.Done()
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+		defer cancel()
+		if err := c.app(ctx, http.MethodPost, "/api/push/notify-partner", body, nil); err != nil {
+			slog.Warn("uniple 상대 알림을 보내지 못했습니다", "block", block, "err", err)
+		}
+	}()
 }
 
 // sessionCookies is a session cookie value as @supabase/ssr writes it: one
@@ -357,4 +378,13 @@ func sessionCookies(value string) []*http.Cookie {
 		value = value[n:]
 	}
 	return out
+}
+
+func firstOf(s ...string) string {
+	for _, v := range s {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }

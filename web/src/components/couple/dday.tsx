@@ -115,6 +115,7 @@ export function DDayPage({ block, space, onChanged }: { block: Block; space: Spa
             {days.map((d) => (
               <Row
                 key={d.id}
+                focus={`dday:${d.id}`}
                 title={d.title}
                 line={`${dateLabel(d.next)}${d.repeat === "yearly" ? " · 매년" : ""}`}
                 mark={dMark(d.next, now)}
@@ -153,7 +154,7 @@ export function DDayPage({ block, space, onChanged }: { block: Block; space: Spa
   );
 }
 
-function Row({ title, line, mark, onOpen }: { title: string; line: string; mark: string; onOpen?: () => void }) {
+function Row({ title, line, mark, onOpen, focus }: { title: string; line: string; mark: string; onOpen?: () => void; focus?: string }) {
   const body = (
     <>
       <span className="min-w-0 flex-1">
@@ -164,7 +165,7 @@ function Row({ title, line, mark, onOpen }: { title: string; line: string; mark:
     </>
   );
   return (
-    <li>
+    <li data-focus={focus}>
       {onOpen ? (
         <button type="button" onClick={onOpen} className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-lg px-2 py-3 text-left transition-colors hover:bg-glass focus-ring">
           {body}

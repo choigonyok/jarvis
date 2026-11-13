@@ -48,6 +48,19 @@ type Server struct {
 	loops      *health.Loops
 	// couple is the rest of the couple's space (couple.go). Nil off uniple.
 	couple Couple
+	// holidays are the public holidays the calendar marks. Nil marks none.
+	holidays Holidays
+}
+
+// Holidays is Korea's public holidays between two days (holiday.Source).
+type Holidays interface {
+	Between(ctx context.Context, from, to string) (map[string]string, error)
+}
+
+// WithHolidays marks the public holidays on the calendar.
+func (s *Server) WithHolidays(h Holidays) *Server {
+	s.holidays = h
+	return s
 }
 
 // WithLoops shows the service's background reads on /health.
@@ -73,6 +86,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /events/{id}", s.auth(s.remove))
 	// 겹치는 일정. 막지 않고 알려주는 것이 이 경로의 존재 이유다.
 	mux.HandleFunc("GET /events/{id}/conflicts", s.auth(s.conflicts))
+	// 달력에 표시할 공휴일. 손님 달력에도 같다.
+	mux.HandleFunc("GET /holidays", s.auth(s.holidayList))
 	// 커플 공간의 나머지(디데이·버킷·습관·지도·소식·사진). uniple 일 때만 있다.
 	s.coupleRoutes(mux)
 	return mux
@@ -226,12 +241,33 @@ func (s *Server) remove(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, err.Error())
 		return
 	}
+	var invalid event.ValidationError
+	if errors.As(err, &invalid) {
+		writeErr(w, http.StatusBadRequest, invalid.Error())
+		return
+	}
 	if err != nil {
 		s.log.Error("일정 삭제에 실패했습니다", "err", err)
 		writeErr(w, http.StatusInternalServerError, "일정을 삭제하지 못했습니다.")
 		return
 	}
 	writeJSON(w, http.StatusOK, seen(r, gone))
+}
+
+func (s *Server) holidayList(w http.ResponseWriter, r *http.Request) {
+	if s.holidays == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"holidays": map[string]string{}})
+		return
+	}
+	q := r.URL.Query()
+	days, err := s.holidays.Between(r.Context(), q.Get("from"), q.Get("to"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	// A day's holidays are the same for everyone: the browser may keep them.
+	w.Header().Set("Cache-Control", "private, max-age=3600")
+	writeJSON(w, http.StatusOK, map[string]any{"holidays": days})
 }
 
 func (s *Server) conflicts(w http.ResponseWriter, r *http.Request) {

@@ -1,13 +1,15 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Check as CheckMark, ChevronDown, Plus, Search, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowUpDown, Check as CheckMark, ChevronDown, Plus, Search, X } from "lucide-react";
+import { ReorderSheet, placeInto } from "@/components/couple/reorder";
 import { BlockTitle } from "@/components/couple/screen";
 import { useUndo } from "@/components/shell/undo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { writeCouple, type Block, type Bucket } from "@/lib/couple";
+import { onFocusWanted, wantedFocus } from "@/lib/focus";
 import { cn } from "@/lib/utils";
 
 /**
@@ -23,7 +25,17 @@ export function BucketPage({ block, onChanged }: { block: Block; onChanged: () =
   const [showDone, setShowDone] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [ordering, setOrdering] = useState(false);
   const { offer } = useUndo();
+
+  // A wish done that the news points at is in the folded list: it opens.
+  useEffect(() => {
+    const open = (id: string | null) => {
+      if (id?.startsWith("bucket:") && (block.bucket ?? []).some((b) => b.done && `bucket:${b.id}` === id)) setShowDone(true);
+    };
+    open(wantedFocus());
+    return onFocusWanted(open);
+  }, [block.bucket]);
 
   // What the server sent last stands, but a change made here stays until it is read back.
   const [base, setBase] = useState(block.bucket);
@@ -80,6 +92,18 @@ export function BucketPage({ block, onChanged }: { block: Block; onChanged: () =
     void onChanged();
   }
 
+  /** The wishes ahead in a new order, the ones done left in their places. */
+  async function reorder(ids: string[]): Promise<string | null> {
+    const all = [...items].sort((a, b) => a.order - b.order).map((b) => b.id);
+    const full = placeInto(all, ids);
+    const sent = await writeCouple("POST", `/blocks/${block.id}/bucket/order`, { ids: full });
+    if (!sent.ok) return sent.error;
+    const at = new Map(full.map((id, i) => [id, i]));
+    setItems((list) => list.map((b) => ({ ...b, order: at.get(b.id) ?? b.order })).sort((a, b) => a.order - b.order));
+    void onChanged();
+    return null;
+  }
+
   function remove(b: Bucket) {
     const at = items.findIndex((x) => x.id === b.id);
     setItems((list) => list.filter((x) => x.id !== b.id));
@@ -104,6 +128,11 @@ export function BucketPage({ block, onChanged }: { block: Block; onChanged: () =
   return (
     <div>
       <BlockTitle title={block.title} block={block} onRenamed={onChanged}>
+        {ahead.length > 1 ? (
+          <Button variant="ghost" size="icon-touch" onClick={() => setOrdering(true)} aria-label="할 것 순서 바꾸기" className="text-dim hover:text-foreground">
+            <ArrowUpDown aria-hidden className="size-5" />
+          </Button>
+        ) : null}
         <Button
           variant="ghost"
           size="icon-touch"
@@ -182,6 +211,7 @@ export function BucketPage({ block, onChanged }: { block: Block; onChanged: () =
           ) : null}
         </>
       )}
+      <ReorderSheet open={ordering} onOpenChange={setOrdering} title="할 것 순서" items={ahead} label={(b) => b.title} onSave={reorder} />
     </div>
   );
 }
@@ -209,7 +239,7 @@ function List({
   return (
     <ul className={cn("divide-y divide-edge-soft", className)}>
       {items.map((b) => (
-        <li key={b.id} className="flex min-h-12 items-center gap-3">
+        <li key={b.id} data-focus={`bucket:${b.id}`} className="flex min-h-12 items-center gap-3">
           <button
             type="button"
             onClick={() => onMark(b, !b.done)}

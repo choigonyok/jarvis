@@ -241,11 +241,12 @@ function coupleWrite(method: string, rest: string): boolean {
     case "POST":
       return (
         ["blocks", "order", "photos"].includes(rest) ||
-        new RegExp(`^blocks/${id}/(dday|bucket|free|checks|records|visits|start)$`).test(rest) ||
+        new RegExp(`^blocks/${id}/(dday|bucket|free|checks|records|visits|start|restore)$`).test(rest) ||
+        new RegExp(`^blocks/${id}/(bucket|free)/order$`).test(rest) ||
         new RegExp(`^photos/${id}/cover$`).test(rest)
       );
     case "PATCH":
-      return new RegExp(`^blocks/${id}$`).test(rest) || new RegExp(`^blocks/${id}/(dday|bucket|checks|records|visits)/${id}$`).test(rest);
+      return new RegExp(`^blocks/${id}$`).test(rest) || new RegExp(`^blocks/${id}/(dday|bucket|free|checks|records|visits)/${id}$`).test(rest);
     case "DELETE":
       return (
         new RegExp(`^blocks/${id}$`).test(rest) ||
@@ -288,7 +289,7 @@ function calendarRoute(method: string, path: string): boolean {
   if (method !== "GET") return false;
   const id = "[A-Za-z0-9_-]+";
   return (
-    ["events", "couple", "couple/news", "couple/photos", "couple/cover"].includes(path) ||
+    ["events", "holidays", "couple", "couple/news", "couple/photos", "couple/cover", "couple/archived"].includes(path) ||
     new RegExp(`^couple/blocks/${id}(/checks)?$`).test(path) ||
     new RegExp(`^couple/media/${id}$`).test(path)
   );

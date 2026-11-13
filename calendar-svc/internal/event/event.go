@@ -60,6 +60,9 @@ type Event struct {
 	// Origin is where an entry the app wrote itself comes from ("dday": an
 	// anniversary of the D-day block). Such an entry is changed at its origin.
 	Origin string `json:"origin,omitempty"`
+	// SeriesDate is, on one day of a series, the day the series starts: the
+	// whole series is changed from there, under the series' own id.
+	SeriesDate string `json:"seriesDate,omitempty"`
 }
 
 // Repeats is the repeats an entry may have.

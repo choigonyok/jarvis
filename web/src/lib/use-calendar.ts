@@ -107,9 +107,9 @@ export function useCalendar(cursor: Cursor) {
   const waiting = useMemo(() => proposals.filter(isPending), [proposals]);
   const pendingCount = waiting.length;
 
-  const save = useCallback(
-    async (event: Partial<CalendarEvent>) => {
-      setError(null);
+  /** A change to what is already on the calendar. Resolves to why it did not go, or null. */
+  const change = useCallback(
+    async (event: Partial<CalendarEvent> & { repeat?: string; reminder?: number }): Promise<string | null> => {
       try {
         // Only what is already on the calendar: a new one is create's.
         // Encoded: see remove.
@@ -120,16 +120,25 @@ export function useCalendar(cursor: Cursor) {
         });
         if (!res.ok) {
           const body = (await res.json().catch(() => null)) as { error?: string } | null;
-          setError(body?.error ?? "일정을 저장하지 못했어요.");
-          return false;
+          return body?.error ?? "일정을 저장하지 못했어요.";
         }
-        return true;
+        void hydrate();
+        return null;
       } catch {
-        setError("에이전트에 연결하지 못했어요.");
-        return false;
+        return "에이전트에 연결하지 못했어요.";
       }
     },
-    [],
+    [hydrate],
+  );
+
+  const save = useCallback(
+    async (event: Partial<CalendarEvent>) => {
+      setError(null);
+      const failed = await change(event);
+      if (failed) setError(failed);
+      return failed === null;
+    },
+    [change],
   );
 
   /**
@@ -168,7 +177,8 @@ export function useCalendar(cursor: Cursor) {
       // series. keepalive: a removal's undo window can close as the page goes.
       const res = await fetch(`${CALENDAR}/${encodeURIComponent(id)}`, { method: "DELETE", keepalive: true });
       if (!res.ok && res.status !== 204) {
-        setError("일정을 지우지 못했어요.");
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        setError(body?.error ?? "일정을 지우지 못했어요.");
         return false;
       }
       return true;
@@ -217,6 +227,7 @@ export function useCalendar(cursor: Cursor) {
     /** Reads the month again, by hand - under "불러오지 못했어요". */
     reload: hydrate,
     save,
+    change,
     create,
     remove,
     decide,

@@ -487,7 +487,8 @@ func CommandKind(method, path string) string {
 		return KindJobsWrite
 	case "registry":
 		return KindRegistryWrite
-	case "calendar":
+	case "calendar", "couple":
+		// The calendar and the rest of the couple's space, changed on a screen.
 		return KindManualEdit
 	case "reminders":
 		switch method {
