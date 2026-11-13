@@ -2,8 +2,10 @@ package uniple
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -34,6 +36,14 @@ type seenReq struct {
 
 func (f *fakeREST) handler(t *testing.T) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if path, ok := strings.CutPrefix(r.URL.Path, "/storage/v1/object/upload/sign/"); ok && r.Method == http.MethodPut {
+			raw, _ := io.ReadAll(r.Body)
+			f.mu.Lock()
+			f.seen = append(f.seen, seenReq{Method: "PUT", Table: "storage:" + path, Query: url.Values{"type": {r.Header.Get("Content-Type")}, "size": {fmt.Sprint(len(raw))}}})
+			f.mu.Unlock()
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 		if path, ok := strings.CutPrefix(r.URL.Path, "/storage/v1/object/public/"); ok {
 			body, found := f.objects[path]
 			if !found {
@@ -243,15 +253,18 @@ func TestDDayChangesSyncTheCalendar(t *testing.T) {
 	}
 }
 
-func TestRecordWithPhotosStays(t *testing.T) {
-	f := &fakeREST{answers: map[string]string{"GET blocks": mapBlock, "GET map_visits": `[{"id":"v1"}]`}}
+func TestRecordGoesWithItsPhotos(t *testing.T) {
+	f := &fakeREST{answers: map[string]string{"GET blocks": mapBlock, "DELETE map_records": `[{"id":"r1"}]`}}
 	c := signedIn(t, f)
-	var invalid event.ValidationError
-	if err := c.DeleteRecord(context.Background(), "b-map", "r1"); !errors.As(err, &invalid) {
-		t.Fatalf("사진 있는 기록은 앱에서: %v", err)
+	if err := c.DeleteRecord(context.Background(), "b-map", "r1"); err != nil {
+		t.Fatal(err)
 	}
-	if len(f.find("DELETE", "map_records")) != 0 {
-		t.Fatal("지우지 않아야 합니다")
+	photos := f.find("DELETE", "map_visits")
+	if len(photos) != 1 || photos[0].Query.Get("record_id") != "eq.r1" || photos[0].Query.Get("block_id") != "eq.b-map" {
+		t.Fatalf("기록의 사진부터: %+v", photos)
+	}
+	if len(f.find("DELETE", "map_records")) != 1 {
+		t.Fatal("그다음 기록")
 	}
 }
 
@@ -281,8 +294,8 @@ func TestBlockCap(t *testing.T) {
 	if _, err := c.AddBlock(context.Background(), "bucket", ""); !errors.As(err, &invalid) {
 		t.Fatalf("버킷리스트는 둘까지: %v", err)
 	}
-	if _, err := c.AddBlock(context.Background(), "album", ""); !errors.As(err, &invalid) {
-		t.Fatalf("앨범은 앱에서: %v", err)
+	if _, err := c.AddBlock(context.Background(), "photos", ""); !errors.As(err, &invalid) {
+		t.Fatalf("없는 블록: %v", err)
 	}
 	f.answers["POST blocks"] = `[{"id":"3","type":"workout","title":"🔥 습관 체크","order_index":6}]`
 	got, err := c.AddBlock(context.Background(), "workout", "")
@@ -364,5 +377,211 @@ func TestEventRepeatAndReminderOnlyWhenChosen(t *testing.T) {
 	}
 	if v, has := b["reminder_minutes"]; !has || v != nil {
 		t.Fatalf("알림 끄기: %+v", b)
+	}
+}
+
+// An upload asks the app's server for a slot with a session cookie it can
+// check but not refresh, puts the bytes in the slot and marks the asset ready.
+func TestUploadGoesThroughTheAppsSlot(t *testing.T) {
+	f := &fakeREST{answers: map[string]string{
+		"GET blocks": mapBlock,
+	}}
+	c := signedIn(t, f)
+	var asked map[string]any
+	var session map[string]any
+	app := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/media/uploads" || r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		var joined string
+		for i := 0; ; i++ {
+			ck, err := r.Cookie(fmt.Sprintf("%s.%d", cookieName, i))
+			if err != nil {
+				break
+			}
+			joined += ck.Value
+		}
+		if ck, err := r.Cookie(cookieName); err == nil {
+			joined = ck.Value
+		}
+		raw, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(joined, "base64-"))
+		if !strings.HasPrefix(joined, "base64-") || err != nil || json.Unmarshal(raw, &session) != nil {
+			t.Errorf("세션 쿠키를 읽지 못했습니다: %.40q", joined)
+		}
+		_ = json.NewDecoder(r.Body).Decode(&asked)
+		item := asked["items"].([]any)[0].(map[string]any)
+		id := item["assetId"].(string)
+		f.answers["POST rpc/complete_media_uploads"] = `[{"id":"` + id + `","status":"ready"}]`
+		_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{map[string]any{
+			"assetId": id, "files": []any{map[string]any{"role": "display", "path": "s-1/" + id + ".jpg", "signedUrl": c.cfg.BaseURL + "/storage/v1/object/upload/sign/media/s-1/" + id + ".jpg?token=t"}},
+		}}})
+	}))
+	defer app.Close()
+	c.cfg.AppURL = app.URL
+
+	id, err := c.Upload(context.Background(), "b-map", "image/jpeg", []byte("JPEGDATA"))
+	if err != nil || !uuidLike(id) {
+		t.Fatalf("올리기: %q %v", id, err)
+	}
+	if session["access_token"] != "at" || session["refresh_token"] == "" || session["refresh_token"] == "rt" {
+		t.Fatalf("쿠키는 접속 토큰만 진짜여야 합니다: %v", session)
+	}
+	if asked["blockId"] != "b-map" {
+		t.Fatalf("블록의 자리: %v", asked)
+	}
+	put := f.find("PUT", "storage:media/s-1/"+id+".jpg")
+	if len(put) != 1 || put[0].Query.Get("type") != "image/jpeg" || put[0].Query.Get("size") != "8" {
+		t.Fatalf("저장소에 올리기: %+v", put)
+	}
+	if done := f.find("POST", "rpc/complete_media_uploads"); len(done) != 1 {
+		t.Fatalf("마무리: %+v", done)
+	}
+	if len(f.find("POST", "rpc/abandon_media_uploads")) != 0 {
+		t.Fatal("성공했으면 반납하지 않습니다")
+	}
+
+	// Not ready: the slot is given back.
+	f.answers["POST rpc/complete_media_uploads"] = `[]`
+	app.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var in map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&in)
+		id := in["items"].([]any)[0].(map[string]any)["assetId"].(string)
+		_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{map[string]any{"assetId": id, "files": []any{map[string]any{"role": "display", "uploaded": true}}}}})
+	})
+	if _, err := c.Upload(context.Background(), "b-map", "image/jpeg", []byte("x")); err == nil {
+		t.Fatal("받지 않은 사진은 실패여야 합니다")
+	}
+	if len(f.find("POST", "rpc/abandon_media_uploads")) != 1 {
+		t.Fatal("받지 않은 자리는 반납합니다")
+	}
+	var invalid event.ValidationError
+	if _, err := c.Upload(context.Background(), "b-map", "image/gif", []byte("x")); !errors.As(err, &invalid) {
+		t.Fatalf("gif 는 안 받습니다: %v", err)
+	}
+}
+
+func TestSessionCookieChunks(t *testing.T) {
+	long := "base64-" + strings.Repeat("a", cookieChunk*2+10)
+	cks := sessionCookies(long)
+	if len(cks) != 3 || cks[0].Name != cookieName+".0" || cks[2].Name != cookieName+".2" || cks[0].Value+cks[1].Value+cks[2].Value != long {
+		t.Fatalf("나눠 담기: %d", len(cks))
+	}
+	if one := sessionCookies("base64-short"); len(one) != 1 || one[0].Name != cookieName {
+		t.Fatalf("한 개: %+v", one)
+	}
+}
+
+func TestPhotosOnTheMap(t *testing.T) {
+	asset := "6f1c2c8e-0000-4000-8000-000000000002"
+	f := &fakeREST{answers: map[string]string{
+		"GET blocks":      mapBlock,
+		"GET map_records": `[{"id":"r1","region_code":"S04","order_index":0,"created_at":"t"}]`,
+		"GET map_visits":  `[{"id":"v0","region_code":"S04","asset_id":"a","created_at":"t","is_rep":false}]`,
+		"POST map_visits": `[{"id":"v1","region_code":"S04","asset_id":"` + asset + `","created_at":"t","is_rep":false,"record_id":"r1"}]`,
+	}}
+	c := signedIn(t, f)
+	ctx := context.Background()
+	v, err := c.AddVisit(ctx, "b-map", VisitInput{Record: "r1", Asset: asset})
+	if err != nil || v.Region != "11040" || v.Record != "r1" {
+		t.Fatalf("기록의 사진: %+v %v", v, err)
+	}
+	b := f.find("POST", "map_visits")[0].Body
+	if b["region_code"] != "S04" || b["record_id"] != "r1" || b["is_rep"] != false || b["order_index"] != float64(1) {
+		t.Fatalf("기록의 지역, 맨 뒤: %+v", b)
+	}
+	if _, err := c.AddVisit(ctx, "b-map", VisitInput{Region: "31580", Asset: asset, Face: true}); err != nil && !errors.Is(err, event.ErrNotFound) {
+		t.Fatal(err)
+	}
+	face := f.find("POST", "rpc/add_map_face_asset")
+	if len(face) != 1 || face[0].Body["p_region_code"] != "31580" || face[0].Body["p_asset_id"] != asset || face[0].Body["p_clip_asset_id"] != nil {
+		t.Fatalf("대표 사진은 앱의 호출로: %+v", face)
+	}
+	var invalid event.ValidationError
+	if _, err := c.AddVisit(ctx, "b-map", VisitInput{Record: "r1", Asset: "../x"}); !errors.As(err, &invalid) {
+		t.Fatalf("올린 사진이 아니면: %v", err)
+	}
+}
+
+func TestCalendarDayPhotos(t *testing.T) {
+	asset := "6f1c2c8e-0000-4000-8000-000000000003"
+	f := &fakeREST{answers: map[string]string{
+		"GET calendar_day_photos":  `[{"id":"p0"},{"id":"p1"}]`,
+		"POST calendar_day_photos": `[{"id":"p2","date":"2026-11-11","asset_id":"` + asset + `","event_id":"e1","is_cover":false}]`,
+	}}
+	c := signedIn(t, f)
+	got, err := c.AddDayPhoto(context.Background(), DayPhotoInput{Date: "2026-11-11", Asset: asset, Event: "e1#2026-11-11"})
+	if err != nil || got.ID != "p2" {
+		t.Fatalf("날 사진: %+v %v", got, err)
+	}
+	b := f.find("POST", "calendar_day_photos")[0].Body
+	if b["event_id"] != "e1" || b["sort_order"] != float64(2) || b["block_id"] != "b-cal" || b["space_id"] != "s-1" {
+		t.Fatalf("반복 일정의 하루는 시리즈에, 맨 뒤에: %+v", b)
+	}
+	if err := c.CoverDayPhoto(context.Background(), "6f1c2c8e-0000-4000-8000-0000000000aa"); err != nil {
+		t.Fatal(err)
+	}
+	if cover := f.find("POST", "rpc/set_calendar_day_photo_cover"); len(cover) != 1 {
+		t.Fatalf("대표 사진: %+v", cover)
+	}
+}
+
+func TestBlocksKept(t *testing.T) {
+	f := &fakeREST{answers: map[string]string{
+		"GET blocks": `[{"id":"b1","type":"calendar","order_index":0},{"id":"b2","type":"bucket","order_index":1}]`,
+	}}
+	c := signedIn(t, f)
+	ctx := context.Background()
+	var invalid event.ValidationError
+	if err := c.OrderBlocks(ctx, []string{"b2"}); !errors.As(err, &invalid) {
+		t.Fatalf("모든 블록이어야: %v", err)
+	}
+	if err := c.OrderBlocks(ctx, []string{"b2", "b1"}); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(f.find("PATCH", "blocks")); n != 2 {
+		t.Fatalf("바뀐 것만 둘: %d", n)
+	}
+	if err := c.ArchiveBlock(ctx, "b1"); !errors.As(err, &invalid) {
+		t.Fatalf("캘린더는 앱에서 보관: %v", err)
+	}
+	up, region := true, "31"
+	if err := c.UpdateBlock(ctx, "b2", BlockInput{ShowUpcoming: &up, CardRegion: &region}); err != nil {
+		t.Fatal(err)
+	}
+	patch := f.find("POST", "rpc/patch_block_config")
+	if len(patch) != 1 {
+		t.Fatalf("설정은 앱의 호출로: %+v", patch)
+	}
+	set := patch[0].Body["p_set"].(map[string]any)
+	if set["showUpcoming"] != true || set["card_region"] != "31" {
+		t.Fatalf("설정: %+v", set)
+	}
+	bad := "seoul"
+	if err := c.UpdateBlock(ctx, "b2", BlockInput{CardRegion: &bad}); !errors.As(err, &invalid) {
+		t.Fatalf("시/도 코드만: %v", err)
+	}
+}
+
+func TestStartDateNeedsTheSpace(t *testing.T) {
+	f := &fakeREST{answers: map[string]string{"GET blocks": `[{"id":"b-d","type":"dday"}]`}}
+	c := signedIn(t, f)
+	var invalid event.ValidationError
+	if err := c.SetStart(context.Background(), "b-d", "", "2026-08-15"); !errors.As(err, &invalid) {
+		t.Fatalf("공간을 못 바꾸면 아무것도 안 바꿉니다: %v", err)
+	}
+	if len(f.find("PATCH", "dday_items")) != 0 || len(f.find("POST", "dday_items")) != 0 {
+		t.Fatal("시작일 항목도 그대로")
+	}
+	f.answers["PATCH spaces"] = `[{"id":"s-1"}]`
+	f.answers["GET dday_items"] = `[{"id":"d0","title":"우리","date":"2026-08-14","is_start_date":true}]`
+	if err := c.SetStart(context.Background(), "b-d", "", "2026-08-15"); err != nil {
+		t.Fatal(err)
+	}
+	if p := f.find("PATCH", "dday_items"); len(p) != 1 || p[0].Body["date"] != "2026-08-15" || p[0].Query.Get("id") != "eq.d0" {
+		t.Fatalf("시작일 항목: %+v", p)
+	}
+	if len(f.find("POST", "rpc/sync_dday_calendar_events")) != 1 {
+		t.Fatal("캘린더 기념일도")
 	}
 }

@@ -106,11 +106,20 @@ export const BLOCK_NAME: Record<BlockType, string> = {
 /** The blocks this console opens. The rest show on the home and open in uniple. */
 export const OPENS: ReadonlySet<BlockType> = new Set(["dday", "calendar", "workout", "bucket", "map", "free"]);
 
-/** The blocks a person may add here, and how many of each the space may hold. */
+/** The blocks a space may hold, how many of each, and what each is for. */
 export const ADDABLE: { type: BlockType; cap: number; line: string }[] = [
-  { type: "bucket", cap: 2, line: "같이 하고 싶은 것을 적고 하나씩 지워요" },
+  { type: "bucket", cap: 2, line: "같이 하고 싶은 것을 적고 하나씩 이뤄요" },
   { type: "workout", cap: 2, line: "둘이 매일 하는 것을 날마다 체크해요" },
   { type: "free", cap: 2, line: "무엇이든 짧게 적어 두는 목록" },
+  { type: "dday", cap: 1, line: "만난 날부터 며칠, 기념일까지 며칠" },
+  { type: "calendar", cap: 1, line: "둘의 일정을 한 달에" },
+  { type: "map", cap: 1, line: "가 본 시/군/구를 사진으로 채우는 지도" },
+  { type: "worldmap", cap: 1, line: "가 본 나라 - uniple 앱에서 열어요" },
+  { type: "log", cap: 1, line: "영화·전시·공연 기록 - uniple 앱에서 열어요" },
+  { type: "food", cap: 1, line: "맛집·카페 기록 - uniple 앱에서 열어요" },
+  { type: "diary", cap: 1, line: "둘이 쓰는 일기 - uniple 앱에서 열어요" },
+  { type: "budget", cap: 1, line: "데이트에 쓴 돈 - uniple 앱에서 열어요" },
+  { type: "album", cap: 1, line: "둘이 올리는 사진 - uniple 앱에서 열어요" },
 ];
 
 /* ───────────────────────────── reading and writing ───────────────────────────── */
@@ -148,6 +157,70 @@ export async function writeCouple<T>(method: "POST" | "PATCH" | "DELETE", path: 
     return { ok: false, error: "연결하지 못했어요." };
   }
 }
+
+/**
+ * A photo picked on the phone, made the size the app keeps (no side over
+ * 2048px, JPEG) and uploaded for a block. Resolves to the asset to put
+ * somewhere, or why it did not go. Nothing shows until something names it.
+ */
+export async function uploadPhoto(block: string, file: File): Promise<Sent<string>> {
+  let blob: Blob;
+  try {
+    blob = await shrink(file);
+  } catch {
+    return { ok: false, error: "사진을 읽지 못했어요. 다른 사진을 골라 주세요." };
+  }
+  if (blob.size > 4 * 1024 * 1024) return { ok: false, error: "사진이 너무 커요(4MB 까지)." };
+  try {
+    const res = await fetch(`${READ}/uploads?block=${encodeURIComponent(block)}`, {
+      method: "POST",
+      headers: { "content-type": blob.type },
+      body: blob,
+    });
+    if (!res.ok) return { ok: false, error: await failure(res) };
+    const body = (await res.json()) as { asset?: string };
+    return body.asset ? { ok: true, data: body.asset } : { ok: false, error: "사진을 올리지 못했어요." };
+  } catch {
+    return { ok: false, error: "사진을 올리지 못했어요. 연결을 확인해 주세요." };
+  }
+}
+
+/** A photo no side over 2048px, as a JPEG - what the app itself uploads is no bigger. */
+async function shrink(file: File): Promise<Blob> {
+  const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+  try {
+    const scale = Math.min(1, 2048 / Math.max(bitmap.width, bitmap.height));
+    const w = Math.max(1, Math.round(bitmap.width * scale));
+    const h = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const g = canvas.getContext("2d");
+    if (!g) throw new Error("canvas");
+    g.imageSmoothingQuality = "high";
+    g.drawImage(bitmap, 0, 0, w, h);
+    const out = await new Promise<Blob | null>((ok) => canvas.toBlob(ok, "image/jpeg", 0.86));
+    canvas.width = canvas.height = 0;
+    if (!out) throw new Error("encode");
+    return out;
+  } finally {
+    bitmap.close();
+  }
+}
+
+/** Korea's public holidays, as the app shows them (no red: red is a refusal here). */
+export const HOLIDAYS: Record<string, string> = {
+  "2026-01-01": "신정", "2026-02-16": "설날 연휴", "2026-02-17": "설날", "2026-02-18": "설날 연휴", "2026-03-01": "삼일절",
+  "2026-03-02": "대체공휴일", "2026-05-05": "어린이날", "2026-05-24": "부처님오신날", "2026-05-25": "대체공휴일",
+  "2026-06-03": "지방선거", "2026-06-06": "현충일", "2026-07-17": "제헌절", "2026-08-15": "광복절", "2026-08-17": "대체공휴일",
+  "2026-09-24": "추석 연휴", "2026-09-25": "추석", "2026-09-26": "추석 연휴", "2026-10-03": "개천절", "2026-10-05": "대체공휴일",
+  "2026-10-09": "한글날", "2026-12-25": "성탄절",
+  "2027-01-01": "신정", "2027-02-06": "설날 연휴", "2027-02-07": "설날", "2027-02-08": "설날 연휴", "2027-02-09": "대체공휴일",
+  "2027-03-01": "삼일절", "2027-05-03": "대체공휴일", "2027-05-05": "어린이날", "2027-05-13": "부처님오신날", "2027-06-06": "현충일",
+  "2027-07-17": "제헌절", "2027-07-19": "대체공휴일", "2027-08-15": "광복절", "2027-08-16": "대체공휴일", "2027-09-14": "추석 연휴",
+  "2027-09-15": "추석", "2027-09-16": "추석 연휴", "2027-10-03": "개천절", "2027-10-04": "대체공휴일", "2027-10-09": "한글날",
+  "2027-10-11": "대체공휴일", "2027-12-25": "성탄절", "2027-12-27": "대체공휴일",
+};
 
 /** A photo of the space, through the console: thumb for tiles, display to look at. */
 export const photoSrc = (asset: string, size: "thumb" | "display" = "thumb") =>

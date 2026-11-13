@@ -67,6 +67,19 @@ export function BucketPage({ block, onChanged }: { block: Block; onChanged: () =
     void onChanged();
   }
 
+  async function rename(b: Bucket, title: string) {
+    setError(null);
+    const was = b.title;
+    setItems((list) => list.map((x) => (x.id === b.id ? { ...x, title } : x)));
+    const sent = await writeCouple<Bucket>("PATCH", `/blocks/${block.id}/bucket/${b.id}`, { title });
+    if (!sent.ok) {
+      setItems((list) => list.map((x) => (x.id === b.id ? { ...x, title: was } : x)));
+      setError(sent.error);
+      return;
+    }
+    void onChanged();
+  }
+
   function remove(b: Bucket) {
     const at = items.findIndex((x) => x.id === b.id);
     setItems((list) => list.filter((x) => x.id !== b.id));
@@ -90,7 +103,7 @@ export function BucketPage({ block, onChanged }: { block: Block; onChanged: () =
 
   return (
     <div>
-      <BlockTitle title={block.title}>
+      <BlockTitle title={block.title} block={block} onRenamed={onChanged}>
         <Button
           variant="ghost"
           size="icon-touch"
@@ -146,7 +159,7 @@ export function BucketPage({ block, onChanged }: { block: Block; onChanged: () =
         found.length === 0 ? (
           <p className="mt-5 text-ui text-faint">찾는 버킷이 없어요.</p>
         ) : (
-          <List items={found} onMark={mark} onRemove={remove} className="mt-3" />
+          <List items={found} onMark={mark} onRename={rename} onRemove={remove} className="mt-3" />
         )
       ) : (
         <>
@@ -154,7 +167,7 @@ export function BucketPage({ block, onChanged }: { block: Block; onChanged: () =
             할 것 <span className="tabular-nums">{ahead.length}</span>
           </h2>
           {ahead.length ? (
-            <List items={ahead} onMark={mark} onRemove={remove} className="mt-1" />
+            <List items={ahead} onMark={mark} onRename={rename} onRemove={remove} className="mt-1" />
           ) : (
             <p className="mt-2 text-ui text-faint">{items.length ? "전부 이뤘어요. 다음 버킷을 적어 볼까요?" : "작은 것부터 적어도 좋아요."}</p>
           )}
@@ -164,7 +177,7 @@ export function BucketPage({ block, onChanged }: { block: Block; onChanged: () =
                 이룬 것 <span className="tabular-nums">{done.length}</span>
                 <ChevronDown aria-hidden className={cn("size-4 transition-transform", showDone && "rotate-180")} />
               </Button>
-              {showDone ? <List items={done} onMark={mark} onRemove={remove} className="mt-1" /> : null}
+              {showDone ? <List items={done} onMark={mark} onRename={rename} onRemove={remove} className="mt-1" /> : null}
             </>
           ) : null}
         </>
@@ -176,14 +189,23 @@ export function BucketPage({ block, onChanged }: { block: Block; onChanged: () =
 function List({
   items,
   onMark,
+  onRename,
   onRemove,
   className,
 }: {
   items: Bucket[];
   onMark: (b: Bucket, done: boolean) => void;
+  onRename: (b: Bucket, title: string) => void;
   onRemove: (b: Bucket) => void;
   className?: string;
 }) {
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  function finish(b: Bucket) {
+    const t = draft.trim();
+    setEditing(null);
+    if (t && t !== b.title) onRename(b, t);
+  }
   return (
     <ul className={cn("divide-y divide-edge-soft", className)}>
       {items.map((b) => (
@@ -205,7 +227,34 @@ function List({
               {b.done ? <CheckMark className="size-3.5" strokeWidth={3} /> : null}
             </span>
           </button>
-          <span className={cn("min-w-0 flex-1 text-body break-keep", b.done ? "text-dim" : "text-foreground")}>{b.title}</span>
+          {editing === b.id ? (
+            <Input
+              autoFocus
+              surface="glass"
+              value={draft}
+              maxLength={100}
+              aria-label="버킷 이름"
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={() => finish(b)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                if (e.key === "Escape") setEditing(null);
+              }}
+              className="h-10 min-w-0 flex-1"
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setDraft(b.title);
+                setEditing(b.id);
+              }}
+              aria-label={`${b.title} 이름 고치기`}
+              className={cn("min-w-0 flex-1 rounded-md py-2 text-left text-body break-keep focus-ring", b.done ? "text-dim" : "text-foreground")}
+            >
+              {b.title}
+            </button>
+          )}
           <Button variant="discard" size="icon-touch" onClick={() => onRemove(b)} aria-label={`${b.title} 지우기`} className="-mr-2 shrink-0">
             <X aria-hidden className="size-4" />
           </Button>

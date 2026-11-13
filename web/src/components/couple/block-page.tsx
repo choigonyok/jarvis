@@ -34,7 +34,7 @@ export function BlockPage({ id }: { id: string }) {
       ) : b.type === "bucket" ? (
         <BucketPage block={b} onChanged={reload} />
       ) : b.type === "workout" ? (
-        <HabitPage block={b} space={space.data} />
+        <HabitPage block={b} space={space.data} onChanged={reload} />
       ) : b.type === "map" ? (
         <DateMapPage block={b} onChanged={reload} />
       ) : b.type === "free" ? (

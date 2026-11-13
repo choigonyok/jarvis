@@ -86,8 +86,20 @@ uniple 의 홈은 캘린더 말고도 블록이 있다: 디데이, 버킷리스�
 | POST · PATCH · DELETE | `/couple/blocks/{id}/checks[/{item}]` | 내 체크(오지 않은 날은 거절, 같은 날 두 번은 하나), 메모, 취소 - 내 것만 |
 | POST · PATCH · DELETE | `/couple/blocks/{id}/records[/{item}]` | 데이트 지도의 기록. 서울의 구는 앱처럼 `S01`~`S25` 로 쓰고 다섯 자리로 읽는다. 사진이 붙은 기록은 지우지 않는다(사진 파일 정리는 앱이 한다) |
 
-사진 올리기는 하지 않는다: 앱은 자기 서버(`/api/media/uploads`)에서 서명한 주소로 올리고 RPC 로 마무리하는데, 그 서버는 쿠키
-세션으로만 열린다. 쓰기는 모두 mind 의 문(`/api/couple/...`)과 손(output 의 허용 목록)을 거쳐 온다.
+| PATCH · DELETE | `/couple/blocks/{id}` | 이름, 설정(`showUpcoming`, 지도 카드의 `card_region` - `patch_block_config`) · 보관(`archived_at`, 캘린더는 앱에서) |
+| POST | `/couple/order` | 홈의 블록 순서(살아 있는 블록 전부, 하나씩) |
+| POST | `/couple/blocks/{id}/start` | 만난 날: 공간의 `anniversary_date` 를 먼저 바꾸고(못 바꾸면 아무것도 안 바꿈) 시작일 항목, 캘린더 기념일 |
+| POST · PATCH · DELETE | `/couple/blocks/{id}/visits[/{item}]` | 지도 사진: 지역의 대표(`add_map_face_asset`)나 기록의 사진, 대표 바꾸기(asset), 지우기 |
+| POST · DELETE | `/couple/photos[/{id}]`, POST `/couple/photos/{id}/cover` | 캘린더 날의 사진(일정에 딸리면 시리즈 id), 지우기, 그날의 대표(`set_calendar_day_photo_cover`) |
+| POST | `/couple/uploads?block=` | 사진 한 장(jpeg·png·webp, 4MB) → `{asset}` |
+
+**사진 올리기:** 앱처럼 세 단계다. 앱 서버(`UNIPLE_APP_URL`, `https://uniple.app`)의 `/api/media/uploads` 가 블록에 올릴 자리(서명한
+주소)를 주고, 바이트를 그 주소에 올리고, `complete_media_uploads` 로 마친다(실패하면 `abandon_media_uploads` 로 자리를 돌려준다).
+앱 서버는 쿠키 세션(`sb-<ref>-auth-token`, `base64-` + JSON, 3180자씩 나눔)만 읽어서, 이 서비스는 살아 있는 접속 토큰과 **가짜
+리프레시 토큰**을 담은 쿠키를 만든다 - 앱 서버는 누구인지 확인만 하고 이 서비스의 세션을 회전시키지 못한다. 접속 토큰이 5분 안에
+끝나면 먼저 새로 받는다. 올린 사진은 어떤 블록의 행이 이름을 부르기 전까지 아무 데도 보이지 않는다. 바이트는 입구를 거치지 않고
+(게이트웨이가 `POST couple/uploads` 만 바로 연다), 사진을 붙이는 쓰기는 다른 쓰기처럼 mind 의 문(`/api/couple/...`)과 손(output 의
+허용 목록)을 거친다. 일정의 `origin`(앱이 디데이에서 쓴 기념일은 `dday`)을 함께 읽는다.
 
 ## 벽시계가 진실입니다
 

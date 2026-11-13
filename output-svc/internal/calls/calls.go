@@ -47,12 +47,18 @@ type route struct {
 var routes = map[string][]route{
 	"calendar": {
 		{http.MethodPut, regexp.MustCompile(`^/events$`)}, {http.MethodPatch, regexp.MustCompile(`^/events/[^/?]+$`)}, {http.MethodDelete, regexp.MustCompile(`^/events/[^/?]+$`)},
-		// The rest of the couple's space: a block, and what is on one.
+		// The rest of the couple's space: a block, what is on one, the
+		// home's order, and the photos on calendar days.
 		{http.MethodPost, regexp.MustCompile(`^/couple/blocks$`)},
 		{http.MethodPatch, regexp.MustCompile(`^/couple/blocks/[^/?]+$`)},
-		{http.MethodPost, regexp.MustCompile(`^/couple/blocks/[^/?]+/(dday|bucket|free|checks|records)$`)},
-		{http.MethodPatch, regexp.MustCompile(`^/couple/blocks/[^/?]+/(dday|bucket|checks|records)/[^/?]+$`)},
-		{http.MethodDelete, regexp.MustCompile(`^/couple/blocks/[^/?]+/(dday|bucket|free|checks|records)/[^/?]+$`)},
+		{http.MethodDelete, regexp.MustCompile(`^/couple/blocks/[^/?]+$`)},
+		{http.MethodPost, regexp.MustCompile(`^/couple/order$`)},
+		{http.MethodPost, regexp.MustCompile(`^/couple/blocks/[^/?]+/(dday|bucket|free|checks|records|visits|start)$`)},
+		{http.MethodPatch, regexp.MustCompile(`^/couple/blocks/[^/?]+/(dday|bucket|checks|records|visits)/[^/?]+$`)},
+		{http.MethodDelete, regexp.MustCompile(`^/couple/blocks/[^/?]+/(dday|bucket|free|checks|records|visits)/[^/?]+$`)},
+		{http.MethodPost, regexp.MustCompile(`^/couple/photos$`)},
+		{http.MethodDelete, regexp.MustCompile(`^/couple/photos/[^/?]+$`)},
+		{http.MethodPost, regexp.MustCompile(`^/couple/photos/[^/?]+/cover$`)},
 	},
 	"assets":   {{http.MethodPost, regexp.MustCompile(`^/orders$`)}, {http.MethodPost, regexp.MustCompile(`^/orders/rebalance$`)}},
 	"immich":   {{http.MethodPost, regexp.MustCompile(`^/api/albums$`)}, {http.MethodDelete, regexp.MustCompile(`^/api/albums/[^/?]+$`)}},

@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useMemo, useState, type ReactNode } from "react";
-import { Check as CheckMark, ChevronRight, Plus } from "lucide-react";
+import { Check as CheckMark, ChevronRight, ListOrdered, Plus } from "lucide-react";
 import { AddBlock } from "@/components/couple/add-block";
+import { EditBlocks } from "@/components/couple/edit-blocks";
 import { KoreaMap, percent, useKoreaMap, type Face, type KoreaMapData } from "@/components/couple/korea-map";
 import { NewsLine } from "@/components/couple/news";
 import { CoupleScreen } from "@/components/couple/screen";
@@ -17,7 +18,9 @@ import {
   OPENS,
   between,
   checkedDays,
+  dMark,
   milestones,
+  nextOn,
   photoSrc,
   today,
   together,
@@ -44,6 +47,7 @@ export function CoupleHome() {
   const space = useSpace();
   const { map } = useKoreaMap();
   const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState(false);
   const blocks = useMemo(() => (space.data?.blocks ?? []).filter((b) => b.type !== "dday"), [space.data]);
   const dday = space.data?.blocks.find((b) => b.type === "dday");
 
@@ -73,36 +77,64 @@ export function CoupleHome() {
             ))}
           </div>
 
-          <Button variant="quiet" size="touch-sm" onClick={() => setAdding(true)} className="mt-4 -ml-2 gap-1.5">
-            <Plus aria-hidden className="size-4" />
-            블록 추가
-          </Button>
+          <div className="mt-4 -ml-2 flex flex-wrap gap-1">
+            <Button variant="quiet" size="touch-sm" onClick={() => setAdding(true)} className="gap-1.5">
+              <Plus aria-hidden className="size-4" />
+              블록 추가
+            </Button>
+            <Button variant="quiet" size="touch-sm" onClick={() => setEditing(true)} className="gap-1.5">
+              <ListOrdered aria-hidden className="size-4" />
+              블록 편집
+            </Button>
+          </div>
           <AddBlock open={adding} onOpenChange={setAdding} space={space.data} onAdded={space.reload} />
+          <EditBlocks open={editing} onOpenChange={setEditing} blocks={space.data.blocks} onChanged={space.reload} />
         </>
       )}
     </CoupleScreen>
   );
 }
 
-/** The first line: the day count, and the next day worth counting. */
+/** The first line: the day count, and the next day worth counting - or, as the D-day block asks, the next three. */
 function Together({ space, dday }: { space: Space; dday?: Block }) {
   const start = space.anniversary;
   const now = today();
+  const coming =
+    start && dday?.config?.showUpcoming === true
+      ? [
+          ...milestones(start, 3, now).map((m) => ({ key: m.key, title: m.label, date: m.date })),
+          ...(dday.dday ?? []).filter((d) => !d.start).map((d) => ({ key: d.id, title: d.title, date: nextOn(d.date, d.repeat, now) })),
+        ]
+          .filter((d) => d.date >= now)
+          .sort((a, b) => a.date.localeCompare(b.date))
+          .slice(0, 3)
+      : [];
   const body = start ? (
     <>
       <p className="text-display-lg leading-none font-semibold tracking-tight text-foreground tabular-nums">
         D+{together(start, now)}
       </p>
-      <p className="mt-2 text-ui text-dim">
-        {todayIs(start, now) ? (
-          <span className="text-ink">오늘 {todayIs(start, now)}</span>
-        ) : (
-          (() => {
-            const next = milestones(start, 1, now)[0];
-            return `${next.label}까지 ${between(now, next.date)}일 · ${dateLabel(next.date)}`;
-          })()
-        )}
-      </p>
+      {coming.length ? (
+        <ul className="mt-3 max-w-[22rem] space-y-1">
+          {coming.map((d) => (
+            <li key={d.key} className="flex items-baseline justify-between gap-3 text-ui">
+              <span className="min-w-0 truncate text-ink">{d.title}</span>
+              <span className="shrink-0 font-semibold text-foreground tabular-nums">{dMark(d.date, now)}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-2 text-ui text-dim">
+          {todayIs(start, now) ? (
+            <span className="text-ink">오늘 {todayIs(start, now)}</span>
+          ) : (
+            (() => {
+              const next = milestones(start, 1, now)[0];
+              return `${next.label}까지 ${between(now, next.date)}일 · ${dateLabel(next.date)}`;
+            })()
+          )}
+        </p>
+      )}
     </>
   ) : (
     <>
@@ -367,12 +399,23 @@ export function facesOf(block: Block): Map<string, Face> {
   return out;
 }
 
+/** The date map, as the two pinned it to the card: the whole country, or one 시/도 near. */
 function MapCard({ block, map }: { block: Block; map: KoreaMapData | null }) {
   const faces = facesOf(block);
+  const pinned = typeof block.config?.card_region === "string" ? (block.config.card_region as string) : "all";
+  const view = map && pinned !== "all" && map.provinces.some((p) => p.code === pinned) ? pinned : "all";
+  const figure = !map
+    ? undefined
+    : view === "all"
+      ? `전국 ${percent(faces.size, map.regions.length)}`
+      : (() => {
+          const rs = map.regions.filter((r) => r.sido === view);
+          return `${map.provinces.find((p) => p.code === view)?.name} ${rs.filter((r) => faces.has(r.code)).length}/${rs.length}`;
+        })();
   return (
-    <Card block={block} figure={map ? `전국 ${percent(faces.size, map.regions.length)}` : undefined}>
+    <Card block={block} figure={figure}>
       {map ? (
-        <KoreaMap map={map} faces={faces} className="mx-auto h-auto max-h-80 w-full" />
+        <KoreaMap map={map} view={view} faces={faces} className="mx-auto h-auto max-h-80 w-full" />
       ) : (
         <div aria-hidden className="mx-auto aspect-[3/5] max-h-80 rounded-xl bg-glass-raised" />
       )}

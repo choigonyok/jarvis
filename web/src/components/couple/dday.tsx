@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { SwitchRow } from "@/components/ui/switch";
 import { dMark, milestones, nextOn, today, together, todayIs, writeCouple, type Block, type DDay, type Space } from "@/lib/couple";
 import { dateLabel } from "@/lib/when";
 import { cn } from "@/lib/utils";
@@ -16,13 +17,34 @@ import { cn } from "@/lib/utils";
 /**
  * Since when, and what is coming: the day count, every hundredth day and
  * year ahead, and the anniversaries the two keep (a birthday comes round
- * every year). The day they met is set in the app; anniversaries here.
+ * every year). The day they met is changed here too, and whether the home
+ * shows the days coming.
  */
 export function DDayPage({ block, space, onChanged }: { block: Block; space: Space; onChanged: () => Promise<void> }) {
   const now = today();
   const start = space.anniversary;
   const [more, setMore] = useState(false);
   const [editing, setEditing] = useState<DDay | "new" | null>(null);
+  const [setting, setSetting] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const upcoming = block.config?.showUpcoming === true;
+  const [showing, setShowing] = useState(upcoming);
+  const [seenUpcoming, setSeenUpcoming] = useState(upcoming);
+  if (seenUpcoming !== upcoming) {
+    setSeenUpcoming(upcoming);
+    setShowing(upcoming);
+  }
+  async function toggleUpcoming(next: boolean) {
+    setShowing(next);
+    setNote(null);
+    const sent = await writeCouple("PATCH", `/blocks/${block.id}`, { showUpcoming: next });
+    if (!sent.ok) {
+      setShowing(!next);
+      setNote(sent.error);
+      return;
+    }
+    await onChanged();
+  }
   const ahead = start ? milestones(start, more ? 12 : 3, now) : [];
   const days = (block.dday ?? [])
     .filter((d) => !d.start)
@@ -31,17 +53,37 @@ export function DDayPage({ block, space, onChanged }: { block: Block; space: Spa
 
   return (
     <div>
-      <BlockTitle title={block.title} />
+      <BlockTitle title={block.title} block={block} onRenamed={onChanged} />
       {start ? (
         <div className="mt-4">
           <p className="text-display-lg leading-none font-semibold tracking-tight text-foreground tabular-nums">D+{together(start, now)}</p>
-          <p className="mt-2 text-ui text-dim">
+          <p className="mt-2 flex flex-wrap items-center gap-x-1 text-ui text-dim">
             {dateLabel(start)}부터{todayIs(start, now) ? <span className="text-ink"> · 오늘 {todayIs(start, now)}</span> : null}
+            <Button variant="underline" size="inline" onClick={() => setSetting(true)} className="tap ml-1 text-ui">
+              바꾸기
+            </Button>
           </p>
         </div>
       ) : (
-        <p className="mt-4 text-ui text-dim">만난 날이 아직 없어요. uniple 앱의 디데이에서 정해 주세요.</p>
+        <div className="mt-4">
+          <p className="text-ui text-dim">만난 날이 아직 없어요.</p>
+          <Button variant="raised" size="touch" onClick={() => setSetting(true)} className="mt-2">
+            만난 날 정하기
+          </Button>
+        </div>
       )}
+      <SwitchRow
+        label="홈에 다가오는 날 보이기"
+        hint="우리 화면의 D+ 아래에 가까운 기념일 셋을 둬요"
+        checked={showing}
+        onCheckedChange={(v) => void toggleUpcoming(v)}
+        className="mt-4"
+      />
+      {note ? (
+        <p role="alert" className="text-aside text-reject">
+          {note}
+        </p>
+      ) : null}
 
       {ahead.length ? (
         <section className="mt-7" aria-label="다가오는 날">
@@ -82,6 +124,21 @@ export function DDayPage({ block, space, onChanged }: { block: Block; space: Spa
           </ul>
         )}
       </section>
+
+      <Panel open={setting} onOpenChange={setSetting} title="만난 날" description="바꾸면 상대의 uniple 앱의 디데이와 캘린더 기념일도 함께 바뀌어요.">
+        {setting ? (
+          <StartForm
+            block={block}
+            start={start}
+            title={(block.dday ?? []).find((d) => d.start)?.title ?? ""}
+            onClose={() => setSetting(false)}
+            onSaved={async () => {
+              setSetting(false);
+              await onChanged();
+            }}
+          />
+        ) : null}
+      </Panel>
 
       <AnniversarySheet
         block={block}
@@ -225,6 +282,63 @@ function AnniversaryForm({ block, item, onClose, onSaved }: { block: Block; item
             두기
           </Button>
         )}
+        <Button type="submit" variant="raised" size="touch" disabled={!ready || busy} className="flex-1">
+          {busy ? "저장하는 중…" : "저장"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+/** The day they met, and what it is called. */
+function StartForm({
+  block,
+  start,
+  title,
+  onClose,
+  onSaved,
+}: {
+  block: Block;
+  start?: string;
+  title: string;
+  onClose: () => void;
+  onSaved: () => Promise<void>;
+}) {
+  const id = useId();
+  const [name, setName] = useState(title);
+  const [date, setDate] = useState(start ?? today());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const ready = /^\d{4}-\d{2}-\d{2}$/.test(date) && date <= today() && (date !== start || name.trim() !== title);
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    if (!ready || busy) return;
+    setBusy(true);
+    setError(null);
+    const sent = await writeCouple("POST", `/blocks/${block.id}/start`, { title: name.trim(), date });
+    setBusy(false);
+    if (!sent.ok) return setError(sent.error);
+    await onSaved();
+  }
+  return (
+    <form onSubmit={(e) => void save(e)} className="space-y-4">
+      <Field>
+        <FieldLabel htmlFor={`${id}-name`}>이름</FieldLabel>
+        <Input id={`${id}-name`} surface="glass" value={name} maxLength={40} placeholder="예: 우리가 만난 날" onChange={(e) => setName(e.target.value)} />
+      </Field>
+      <Field>
+        <FieldLabel htmlFor={`${id}-date`}>날짜 · 그날이 D+1</FieldLabel>
+        <Input id={`${id}-date`} surface="glass" type="date" max={today()} required value={date} onChange={(e) => setDate(e.target.value)} />
+      </Field>
+      {error ? (
+        <p role="alert" className="text-aside text-reject">
+          {error}
+        </p>
+      ) : null}
+      <div className="flex gap-2 pt-1">
+        <Button type="button" variant="soft" size="touch-sm" onClick={onClose} className="flex-1">
+          두기
+        </Button>
         <Button type="submit" variant="raised" size="touch" disabled={!ready || busy} className="flex-1">
           {busy ? "저장하는 중…" : "저장"}
         </Button>

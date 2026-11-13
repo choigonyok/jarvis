@@ -2,6 +2,7 @@
 
 import { useId, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Copy } from "lucide-react";
+import { PhotoTiles, PickPhotos, useUploads } from "@/components/couple/photos";
 import { Segment } from "@/components/couple/segment";
 import { Panel } from "@/components/ui/bottom-sheet";
 import { Button } from "@/components/ui/button";
@@ -10,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { SwitchRow } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { REMINDERS, REPEATS, between } from "@/lib/couple";
+import { REMINDERS, REPEATS, between, type DayPhoto } from "@/lib/couple";
 import { addDays, cursorOf, monthCells, shiftMonth, type Cursor } from "@/lib/month";
 import type { CalendarEvent } from "@/lib/thread";
 import { dateLabel } from "@/lib/when";
@@ -26,12 +27,19 @@ import { cn } from "@/lib/utils";
  * A day of a repeating entry is not changed here: the shared calendar takes
  * that only in its own app. It can still be taken off, that day alone.
  */
-export type Entry = Partial<CalendarEvent> & { repeat?: string; reminder?: number };
+export type Entry = Partial<CalendarEvent> & {
+  repeat?: string;
+  reminder?: number;
+  /** Photos put on the entry's day with it (uploaded assets), and its photos taken off. */
+  photos?: { add: string[]; drop: string[] };
+};
 
 export function EntrySheet({
   open,
   event,
   day,
+  block,
+  photos = [],
   onOpenChange,
   onSave,
   onCopy,
@@ -42,6 +50,10 @@ export function EntrySheet({
   event: CalendarEvent | null;
   /** The day a new entry starts on. */
   day: string;
+  /** The calendar block photos are uploaded for; none, no photos here. */
+  block?: string;
+  /** The entry's photos as they stand. */
+  photos?: DayPhoto[];
   onOpenChange: (open: boolean) => void;
   /** Resolves to why it did not go, or null. */
   onSave: (entry: Entry) => Promise<string | null>;
@@ -51,7 +63,17 @@ export function EntrySheet({
   return (
     <Panel open={open} onOpenChange={onOpenChange} title={event ? "일정 고치기" : "일정 추가"} description={event ? undefined : "저장하면 바로 공유 캘린더에 들어가 상대 폰에도 보여요."}>
       {open ? (
-        <Form key={event?.id ?? `new-${day}`} event={event} day={day} onSave={onSave} onCopy={onCopy} onDelete={onDelete} onClose={() => onOpenChange(false)} />
+        <Form
+          key={event?.id ?? `new-${day}`}
+          event={event}
+          day={day}
+          block={block}
+          photos={photos}
+          onSave={onSave}
+          onCopy={onCopy}
+          onDelete={onDelete}
+          onClose={() => onOpenChange(false)}
+        />
       ) : null}
     </Panel>
   );
@@ -60,6 +82,8 @@ export function EntrySheet({
 function Form({
   event,
   day,
+  block,
+  photos,
   onSave,
   onCopy,
   onDelete,
@@ -67,11 +91,17 @@ function Form({
 }: {
   event: CalendarEvent | null;
   day: string;
+  block?: string;
+  photos: DayPhoto[];
   onSave: (entry: Entry) => Promise<string | null>;
   onCopy: (entry: Entry, days: string[]) => Promise<string | null>;
   onDelete: (event: CalendarEvent) => void;
   onClose: () => void;
 }) {
+  const [added, setAdded] = useState<string[]>([]);
+  const [dropped, setDropped] = useState<ReadonlySet<string>>(new Set());
+  const uploads = useUploads(block ?? null);
+  const kept = photos.filter((p) => !dropped.has(p.id));
   const id = useId();
   const [owner, setOwner] = useState<"me" | "shared">(event?.owner === "shared" ? "shared" : "me");
   const [title, setTitle] = useState(event?.title ?? "");
@@ -112,6 +142,7 @@ function Form({
       // Sent only when chosen here: a whole entry without them leaves them be.
       ...(event && repeat === (event.recurrence || "none") ? {} : { repeat }),
       ...(event && reminder === initialReminder ? {} : { reminder }),
+      ...(added.length || dropped.size ? { photos: { add: added, drop: [...dropped] } } : {}),
     };
   }
 
@@ -132,7 +163,7 @@ function Form({
         from={event.date}
         onBack={() => setCopying(false)}
         onCopy={async (days) => {
-          const failed = await onCopy({ ...entry(), id: undefined, recurrence: undefined, repeat: undefined }, days);
+          const failed = await onCopy({ ...entry(), id: undefined, recurrence: undefined, repeat: undefined, photos: undefined }, days);
           if (!failed) onClose();
           return failed;
         }}
@@ -212,6 +243,24 @@ function Form({
         </Field>
       </div>
 
+      {block ? (
+        <Field>
+          <FieldLabel>사진</FieldLabel>
+          <PhotoTiles
+            size="sm"
+            assets={[...kept.map((p) => ({ key: p.id, asset: p.asset })), ...added.map((a) => ({ key: a, asset: a }))]}
+            onRemove={(i) => {
+              if (i < kept.length) setDropped((s) => new Set(s).add(kept[i].id));
+              else setAdded((list) => list.filter((_, j) => j !== i - kept.length));
+            }}
+            trailing={
+              <PickPhotos label="사진" busy={uploads.busy} onPick={(files) => void uploads.upload(files).then((assets) => setAdded((list) => [...list, ...assets]))} />
+            }
+          />
+          {uploads.error ? <p className="text-aside text-reject">{uploads.error}</p> : null}
+        </Field>
+      ) : null}
+
       <Field>
         <FieldLabel htmlFor={`${id}-memo`}>메모 · 장소는 첫 줄에</FieldLabel>
         <Textarea id={`${id}-memo`} surface="glass" rows={3} maxLength={500} value={memo} onChange={(e) => setMemo(e.target.value)} className="min-h-[5.5rem]" />
@@ -233,7 +282,7 @@ function Form({
             두기
           </Button>
         )}
-        <Button type="submit" variant="raised" size="touch" disabled={!ready || busy} className="flex-1">
+        <Button type="submit" variant="raised" size="touch" disabled={!ready || busy || !!uploads.busy} className="flex-1">
           {busy ? "저장하는 중…" : "저장"}
         </Button>
       </div>

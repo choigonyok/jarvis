@@ -137,22 +137,23 @@ export function useCalendar(cursor: Cursor) {
    * not go, or null; the stream brings it onto the month, and a read makes sure.
    */
   const create = useCallback(
-    async (entry: Partial<CalendarEvent> & { repeat?: string; reminder?: number }): Promise<string | null> => {
+    async (entry: Partial<CalendarEvent> & { repeat?: string; reminder?: number }): Promise<{ error: string | null; event?: CalendarEvent }> => {
       try {
         const res = await fetch(CALENDAR, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ ...entry, id: undefined }),
         });
-        if (res.status === 202) return "받았지만 아직 반영되지 않았어요. 잠시 뒤 다시 보세요.";
+        if (res.status === 202) return { error: "받았지만 아직 반영되지 않았어요. 잠시 뒤 다시 보세요." };
         if (!res.ok) {
           const body = (await res.json().catch(() => null)) as { error?: string } | null;
-          return body?.error ?? "일정을 저장하지 못했어요.";
+          return { error: body?.error ?? "일정을 저장하지 못했어요." };
         }
+        const saved = (await res.json().catch(() => null)) as CalendarEvent | null;
         void hydrate();
-        return null;
+        return { error: null, event: saved?.id ? saved : undefined };
       } catch {
-        return "에이전트에 연결하지 못했어요.";
+        return { error: "에이전트에 연결하지 못했어요." };
       }
     },
     [hydrate],

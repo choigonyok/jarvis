@@ -3,9 +3,9 @@
 import { readCouple, type Block, type Check, type DayPhoto, type News, type Space } from "@/lib/couple";
 import { useResource } from "@/lib/use-resource";
 
-/** The couple's home: the two, since when, every block with what the home shows of it. */
-export function useSpace() {
-  return useResource<Space>("couple:space", (signal) => readCouple<Space>("", signal));
+/** The couple's home: the two, since when, every block with what the home shows of it; none read when not wanted. */
+export function useSpace(wanted = true) {
+  return useResource<Space>(wanted ? "couple:space" : null, (signal) => readCouple<Space>("", signal));
 }
 
 /** One block whole - a date map with every photo and record. */

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/choigonyok/jarvis/calendar-svc/internal/event"
 	"github.com/choigonyok/jarvis/calendar-svc/internal/uniple"
@@ -40,6 +41,18 @@ type Couple interface {
 	AddRecord(ctx context.Context, block string, in uniple.RecordInput) (uniple.Record, error)
 	SetRecord(ctx context.Context, block, id string, in uniple.RecordInput) (uniple.Record, error)
 	DeleteRecord(ctx context.Context, block, id string) error
+
+	Upload(ctx context.Context, block, kind string, body []byte) (string, error)
+	AddVisit(ctx context.Context, block string, in uniple.VisitInput) (uniple.Visit, error)
+	SetVisit(ctx context.Context, block, id, asset string) (uniple.Visit, error)
+	DeleteVisit(ctx context.Context, block, id string) error
+	AddDayPhoto(ctx context.Context, in uniple.DayPhotoInput) (uniple.DayPhoto, error)
+	DeleteDayPhoto(ctx context.Context, id string) error
+	CoverDayPhoto(ctx context.Context, id string) error
+	UpdateBlock(ctx context.Context, id string, in uniple.BlockInput) error
+	ArchiveBlock(ctx context.Context, id string) error
+	OrderBlocks(ctx context.Context, ids []string) error
+	SetStart(ctx context.Context, block, title, date string) error
 }
 
 var _ Couple = (*uniple.Client)(nil)
@@ -94,11 +107,74 @@ func (s *Server) coupleRoutes(mux *http.ServeMux) {
 		}
 	})
 	write("PATCH /couple/blocks/{block}", func(w http.ResponseWriter, r *http.Request) {
+		var in uniple.BlockInput
+		if decode(w, r, &in) {
+			s.answer(w, ok, s.couple.UpdateBlock(r.Context(), r.PathValue("block"), in))
+		}
+	})
+	write("DELETE /couple/blocks/{block}", func(w http.ResponseWriter, r *http.Request) {
+		s.answer(w, ok, s.couple.ArchiveBlock(r.Context(), r.PathValue("block")))
+	})
+	write("POST /couple/order", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
-			Title string `json:"title"`
+			IDs []string `json:"ids"`
 		}
 		if decode(w, r, &in) {
-			s.answer(w, ok, s.couple.RenameBlock(r.Context(), r.PathValue("block"), in.Title))
+			s.answer(w, ok, s.couple.OrderBlocks(r.Context(), in.IDs))
+		}
+	})
+
+	// A photo, uploaded first and put somewhere after: the bytes do not go
+	// through the way in, and a photo nothing names shows nowhere.
+	write("POST /couple/uploads", func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, uniple.MaxPhoto+1))
+		if err != nil {
+			writeErr(w, http.StatusRequestEntityTooLarge, "사진은 4MB 까지 올릴 수 있어요.")
+			return
+		}
+		kind, _, _ := strings.Cut(r.Header.Get("Content-Type"), ";")
+		asset, err := s.couple.Upload(r.Context(), r.URL.Query().Get("block"), strings.TrimSpace(kind), body)
+		s.answer(w, map[string]string{"asset": asset}, err)
+	})
+	write("POST /couple/blocks/{block}/visits", func(w http.ResponseWriter, r *http.Request) {
+		var in uniple.VisitInput
+		if decode(w, r, &in) {
+			v, err := s.couple.AddVisit(r.Context(), r.PathValue("block"), in)
+			s.answer(w, v, err)
+		}
+	})
+	write("PATCH /couple/blocks/{block}/visits/{item}", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Asset string `json:"asset"`
+		}
+		if decode(w, r, &in) {
+			v, err := s.couple.SetVisit(r.Context(), r.PathValue("block"), r.PathValue("item"), in.Asset)
+			s.answer(w, v, err)
+		}
+	})
+	write("DELETE /couple/blocks/{block}/visits/{item}", func(w http.ResponseWriter, r *http.Request) {
+		s.answer(w, ok, s.couple.DeleteVisit(r.Context(), r.PathValue("block"), r.PathValue("item")))
+	})
+	write("POST /couple/photos", func(w http.ResponseWriter, r *http.Request) {
+		var in uniple.DayPhotoInput
+		if decode(w, r, &in) {
+			p, err := s.couple.AddDayPhoto(r.Context(), in)
+			s.answer(w, p, err)
+		}
+	})
+	write("DELETE /couple/photos/{item}", func(w http.ResponseWriter, r *http.Request) {
+		s.answer(w, ok, s.couple.DeleteDayPhoto(r.Context(), r.PathValue("item")))
+	})
+	write("POST /couple/photos/{item}/cover", func(w http.ResponseWriter, r *http.Request) {
+		s.answer(w, ok, s.couple.CoverDayPhoto(r.Context(), r.PathValue("item")))
+	})
+	write("POST /couple/blocks/{block}/start", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Title string `json:"title"`
+			Date  string `json:"date"`
+		}
+		if decode(w, r, &in) {
+			s.answer(w, ok, s.couple.SetStart(r.Context(), r.PathValue("block"), in.Title, in.Date))
 		}
 	})
 

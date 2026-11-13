@@ -57,6 +57,9 @@ type Event struct {
 	// Reminder is minutes before the start that the app reminds both phones,
 	// read back as it is set. On a write absent leaves it, -1 takes it off.
 	Reminder *int `json:"reminder,omitempty"`
+	// Origin is where an entry the app wrote itself comes from ("dday": an
+	// anniversary of the D-day block). Such an entry is changed at its origin.
+	Origin string `json:"origin,omitempty"`
 }
 
 // Repeats is the repeats an entry may have.

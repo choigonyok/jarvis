@@ -12,7 +12,10 @@ export const dynamic = "force-dynamic";
 const readable = (p: string) =>
   ["news", "photos", "cover"].includes(p) || /^blocks\/[^/]+(\/checks)?$/.test(p) || /^media\/[^/]+$/.test(p);
 
-const writable = (p: string) => p === "blocks" || /^blocks\/[^/]+(\/(dday|bucket|free|checks|records)(\/[^/]+)?)?$/.test(p);
+const writable = (p: string) =>
+  ["blocks", "order", "photos"].includes(p) ||
+  /^blocks\/[^/]+(\/(dday|bucket|free|checks|records|visits|start)(\/[^/]+)?)?$/.test(p) ||
+  /^photos\/[^/]+(\/cover)?$/.test(p);
 
 export const GET = pathProxy(`${CALENDAR_URL}/couple`, {
   label: "우리",
@@ -23,6 +26,13 @@ export const GET = pathProxy(`${CALENDAR_URL}/couple`, {
 });
 
 const write = pathProxy(`${MIND_WRITES}/api/couple`, { label: "우리", allow: writable });
-export const POST = write;
+
+// A photo's bytes go straight to the adapter, which hands back the asset to
+// put somewhere - that putting is a change like any other, at the way in.
+const upload = pathProxy(`${CALENDAR_URL}/couple`, { label: "우리", allow: (p) => p === "uploads" });
+
+export function POST(request: Request, context: { params: Promise<{ path: string[] }> }) {
+  return context.params.then(({ path }) => (path.join("/") === "uploads" ? upload : write)(request, context));
+}
 export const PATCH = write;
 export const DELETE = write;

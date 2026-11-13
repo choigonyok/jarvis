@@ -157,12 +157,20 @@ const (
 	tz        = "Asia/Seoul"
 )
 
-// The block types a new block may be. The rest are made in the app, where
-// their photos and forms are.
+// The blocks a space may hold, by the titles the app gives new ones.
 var newBlockTitle = map[string]string{
-	"bucket":  "🪣 버킷리스트",
-	"workout": "🔥 습관 체크",
-	"free":    "📝 자유 블록",
+	"dday":     "📅 디데이",
+	"calendar": "🗓️ 커플 캘린더",
+	"bucket":   "🪣 버킷리스트",
+	"workout":  "🔥 습관 체크",
+	"free":     "📝 자유 블록",
+	"map":      "🗺️ 데이트 지도",
+	"worldmap": "🌍 세계 지도",
+	"log":      "📜 문화 기록장",
+	"food":     "🍜 맛집 기록장",
+	"diary":    "✍🏻 커플 일기장",
+	"budget":   "💰 데이트 가계부",
+	"album":    "📸 공유 앨범",
 }
 
 /* ───────────────────────────── space ───────────────────────────── */
@@ -771,7 +779,7 @@ func (c *Client) AddBlock(ctx context.Context, kind, title string) (Block, error
 	}
 	def, ok := newBlockTitle[kind]
 	if !ok {
-		return Block{}, event.ValidationError{Msg: "이 블록은 uniple 앱에서 추가해 주세요"}
+		return Block{}, event.ValidationError{Msg: "그런 블록은 없어요"}
 	}
 	if title = strings.TrimSpace(title); title == "" {
 		title = def
@@ -1266,19 +1274,14 @@ func (c *Client) SetRecord(ctx context.Context, block, id string, in RecordInput
 	return saved[0].toRecord(), nil
 }
 
-// DeleteRecord takes a date off the map. One with photos stays: taking its
-// photos away is the app's, which clears the files with them.
+// DeleteRecord takes a date off the map, its photos with it, as the app does.
 func (c *Client) DeleteRecord(ctx context.Context, block, id string) error {
 	if _, err := c.typed(ctx, block, "map"); err != nil {
 		return err
 	}
-	var photos []visitRow
-	q := url.Values{"block_id": {"eq." + block}, "record_id": {"eq." + id}, "select": {"id"}, "limit": {"1"}}
-	if err := c.rest(ctx, http.MethodGet, "map_visits?"+q.Encode(), nil, &photos); err != nil {
+	q := url.Values{"block_id": {"eq." + block}, "record_id": {"eq." + id}}
+	if err := c.rest(ctx, http.MethodDelete, "map_visits?"+q.Encode(), nil, nil); err != nil {
 		return err
-	}
-	if len(photos) > 0 {
-		return event.ValidationError{Msg: "사진이 있는 기록은 uniple 앱에서 지워 주세요"}
 	}
 	return c.deleteOne(ctx, "map_records", block, id, nil)
 }
@@ -1332,4 +1335,358 @@ func nullable(s string) any {
 		return nil
 	}
 	return s
+}
+
+/* ───────────────────────────── photos on the map ───────────────────────────── */
+
+// VisitInput is a photo put on the date map: a region's face, or one of a
+// record's photos.
+type VisitInput struct {
+	Region string `json:"region"`
+	Asset  string `json:"asset"`
+	Record string `json:"record"`
+	Face   bool   `json:"face"`
+}
+
+const visitColumns = "id,region_code,asset_id,created_at,note,is_rep,rotation,order_index,record_id"
+
+// AddVisit puts an uploaded photo on the map: as the region's face (the app's
+// own call, which takes over from the face before), or under a record, in the
+// record's region.
+func (c *Client) AddVisit(ctx context.Context, block string, in VisitInput) (Visit, error) {
+	space, err := c.typed(ctx, block, "map")
+	if err != nil {
+		return Visit{}, err
+	}
+	if !uuidLike(in.Asset) {
+		return Visit{}, event.ValidationError{Msg: "올린 사진이 없어요"}
+	}
+	id := newUUID()
+	if in.Face {
+		code, err := stored(strings.TrimSpace(in.Region))
+		if err != nil {
+			return Visit{}, err
+		}
+		if err := c.rest(ctx, http.MethodPost, "rpc/add_map_face_asset", map[string]any{
+			"p_id": id, "p_block_id": block, "p_space_id": space, "p_region_code": code, "p_asset_id": in.Asset, "p_clip_asset_id": nil,
+		}, nil); err != nil {
+			return Visit{}, err
+		}
+		return c.visit(ctx, block, id)
+	}
+	var recs []recordRow
+	q := url.Values{"id": {"eq." + in.Record}, "block_id": {"eq." + block}, "select": {"id,region_code,order_index,created_at"}}
+	if err := c.rest(ctx, http.MethodGet, "map_records?"+q.Encode(), nil, &recs); err != nil {
+		return Visit{}, err
+	}
+	if len(recs) == 0 {
+		return Visit{}, event.ValidationError{Msg: "사진을 붙일 기록이 없어요"}
+	}
+	var have []visitRow
+	q = url.Values{"block_id": {"eq." + block}, "record_id": {"eq." + in.Record}, "select": {"id"}}
+	if err := c.rest(ctx, http.MethodGet, "map_visits?"+q.Encode(), nil, &have); err != nil {
+		return Visit{}, err
+	}
+	body := map[string]any{
+		"id": id, "block_id": block, "space_id": space, "region_code": recs[0].RegionCode, "record_id": in.Record,
+		"asset_id": in.Asset, "note": nil, "is_rep": false, "rotation": 0, "order_index": len(have),
+	}
+	var saved []visitRow
+	if err := c.rest(ctx, http.MethodPost, "map_visits?select="+visitColumns, body, &saved); err != nil {
+		return Visit{}, err
+	}
+	if len(saved) == 0 {
+		return Visit{}, errors.New("uniple 이 저장한 사진을 돌려주지 않았습니다")
+	}
+	return saved[0].toVisit(), nil
+}
+
+func (c *Client) visit(ctx context.Context, block, id string) (Visit, error) {
+	var rows []visitRow
+	q := url.Values{"id": {"eq." + id}, "block_id": {"eq." + block}, "select": {visitColumns}}
+	if err := c.rest(ctx, http.MethodGet, "map_visits?"+q.Encode(), nil, &rows); err != nil {
+		return Visit{}, err
+	}
+	if len(rows) == 0 {
+		return Visit{}, event.ErrNotFound
+	}
+	return rows[0].toVisit(), nil
+}
+
+// SetVisit changes a region's face to another uploaded photo, as the app's
+// 대표 사진 변경 does.
+func (c *Client) SetVisit(ctx context.Context, block, id, asset string) (Visit, error) {
+	if _, err := c.typed(ctx, block, "map"); err != nil {
+		return Visit{}, err
+	}
+	if !uuidLike(asset) {
+		return Visit{}, event.ValidationError{Msg: "올린 사진이 없어요"}
+	}
+	q := url.Values{"id": {"eq." + id}, "block_id": {"eq." + block}, "select": {"id"}}
+	var saved []visitRow
+	if err := c.rest(ctx, http.MethodPatch, "map_visits?"+q.Encode(), map[string]any{"asset_id": asset, "clip_asset_id": nil, "rotation": 0}, &saved); err != nil {
+		return Visit{}, err
+	}
+	if len(saved) == 0 {
+		return Visit{}, event.ErrNotFound
+	}
+	return c.visit(ctx, block, id)
+}
+
+// DeleteVisit takes a photo off the map.
+func (c *Client) DeleteVisit(ctx context.Context, block, id string) error {
+	if _, err := c.typed(ctx, block, "map"); err != nil {
+		return err
+	}
+	return c.deleteOne(ctx, "map_visits", block, id, nil)
+}
+
+/* ───────────────────────────── photos on calendar days ───────────────────────────── */
+
+// DayPhotoInput is an uploaded photo put on a calendar day, maybe of an entry.
+type DayPhotoInput struct {
+	Date  string `json:"date"`
+	Asset string `json:"asset"`
+	Event string `json:"event"`
+}
+
+// AddDayPhoto puts an uploaded photo on a day, last among the day's.
+func (c *Client) AddDayPhoto(ctx context.Context, in DayPhotoInput) (DayPhoto, error) {
+	block, space, _, err := c.calendar(ctx)
+	if err != nil {
+		return DayPhoto{}, err
+	}
+	if !day(in.Date) {
+		return DayPhoto{}, event.ValidationError{Msg: "날짜는 YYYY-MM-DD 여야 합니다"}
+	}
+	if !uuidLike(in.Asset) {
+		return DayPhoto{}, event.ValidationError{Msg: "올린 사진이 없어요"}
+	}
+	// A day of a repeating entry is filed under the series.
+	series, _, _ := strings.Cut(in.Event, "#")
+	var have []struct {
+		ID string `json:"id"`
+	}
+	q := url.Values{"block_id": {"eq." + block}, "date": {"eq." + in.Date}, "select": {"id"}}
+	if err := c.rest(ctx, http.MethodGet, "calendar_day_photos?"+q.Encode(), nil, &have); err != nil {
+		return DayPhoto{}, err
+	}
+	body := map[string]any{"id": newUUID(), "block_id": block, "space_id": space, "date": in.Date, "asset_id": in.Asset, "event_id": nullable(series), "sort_order": len(have)}
+	q = url.Values{"select": {"id,date,asset_id,event_id,is_cover,sort_order,created_at"}}
+	got, err := c.dayPhotosPost(ctx, q, body)
+	if err != nil {
+		return DayPhoto{}, err
+	}
+	return got, nil
+}
+
+func (c *Client) dayPhotosPost(ctx context.Context, q url.Values, body map[string]any) (DayPhoto, error) {
+	var rows []struct {
+		ID      string  `json:"id"`
+		Date    string  `json:"date"`
+		AssetID string  `json:"asset_id"`
+		EventID *string `json:"event_id"`
+		IsCover bool    `json:"is_cover"`
+	}
+	if err := c.rest(ctx, http.MethodPost, "calendar_day_photos?"+q.Encode(), body, &rows); err != nil {
+		return DayPhoto{}, err
+	}
+	if len(rows) == 0 {
+		return DayPhoto{}, errors.New("uniple 이 저장한 사진을 돌려주지 않았습니다")
+	}
+	r := rows[0]
+	return DayPhoto{ID: r.ID, Date: r.Date, Asset: r.AssetID, Event: str(r.EventID), Cover: r.IsCover}, nil
+}
+
+// DeleteDayPhoto takes a photo off its day.
+func (c *Client) DeleteDayPhoto(ctx context.Context, id string) error {
+	block, _, _, err := c.calendar(ctx)
+	if err != nil {
+		return err
+	}
+	return c.deleteOne(ctx, "calendar_day_photos", block, id, nil)
+}
+
+// CoverDayPhoto makes a photo the face of its day, the one the calendar
+// card shows.
+func (c *Client) CoverDayPhoto(ctx context.Context, id string) error {
+	if _, _, _, err := c.calendar(ctx); err != nil {
+		return err
+	}
+	if !uuidLike(id) {
+		return event.ErrNotFound
+	}
+	return c.rest(ctx, http.MethodPost, "rpc/set_calendar_day_photo_cover", map[string]any{"p_photo_id": id}, nil)
+}
+
+/* ───────────────────────────── blocks, kept ───────────────────────────── */
+
+// BlockInput is what changes on a block: its title, and the settings the app
+// keeps in its config that this console offers - the D-day card's upcoming
+// days, the date map card's 시/도.
+type BlockInput struct {
+	Title        *string `json:"title"`
+	ShowUpcoming *bool   `json:"showUpcoming"`
+	CardRegion   *string `json:"cardRegion"`
+}
+
+// UpdateBlock renames a block or changes those settings.
+func (c *Client) UpdateBlock(ctx context.Context, id string, in BlockInput) error {
+	if _, err := c.typed(ctx, id, ""); err != nil {
+		return err
+	}
+	if in.Title != nil {
+		if err := c.RenameBlock(ctx, id, *in.Title); err != nil {
+			return err
+		}
+	}
+	set, unset := map[string]any{}, []string{}
+	if in.ShowUpcoming != nil {
+		set["showUpcoming"] = *in.ShowUpcoming
+	}
+	if in.CardRegion != nil {
+		switch r := strings.TrimSpace(*in.CardRegion); {
+		case r == "" || r == "all":
+			unset = append(unset, "card_region")
+		case len(r) == 2 && strings.Trim(r, "0123456789") == "":
+			set["card_region"] = r
+		default:
+			return event.ValidationError{Msg: "카드에 둘 지도는 전국이나 시/도예요"}
+		}
+	}
+	if len(set) == 0 && len(unset) == 0 {
+		return nil
+	}
+	return c.rest(ctx, http.MethodPost, "rpc/patch_block_config", map[string]any{
+		"p_block_id": id, "p_set": set, "p_unset": unset, "p_add": map[string]any{}, "p_remove": map[string]any{},
+	}, nil)
+}
+
+// ArchiveBlock puts a block away, as the app's 보관 does - the app can bring
+// it back. The calendar stays: this service reads it.
+func (c *Client) ArchiveBlock(ctx context.Context, id string) error {
+	space, _, err := c.where(ctx)
+	if err != nil {
+		return err
+	}
+	var rows []struct {
+		Type string `json:"type"`
+	}
+	q := url.Values{"id": {"eq." + id}, "space_id": {"eq." + space}, "archived_at": {"is.null"}, "select": {"type"}}
+	if err := c.rest(ctx, http.MethodGet, "blocks?"+q.Encode(), nil, &rows); err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		return ErrBlock
+	}
+	if rows[0].Type == "calendar" {
+		return event.ValidationError{Msg: "캘린더 블록은 uniple 앱에서 보관해 주세요"}
+	}
+	q = url.Values{"id": {"eq." + id}, "space_id": {"eq." + space}, "select": {"id"}}
+	var saved []struct {
+		ID string `json:"id"`
+	}
+	if err := c.rest(ctx, http.MethodPatch, "blocks?"+q.Encode(), map[string]any{"archived_at": time.Now().UTC().Format(time.RFC3339)}, &saved); err != nil {
+		return err
+	}
+	if len(saved) == 0 {
+		return ErrBlock
+	}
+	return nil
+}
+
+// OrderBlocks puts the home's blocks in the given order: every live block,
+// each once.
+func (c *Client) OrderBlocks(ctx context.Context, ids []string) error {
+	space, _, err := c.where(ctx)
+	if err != nil {
+		return err
+	}
+	rows, err := c.blocks(ctx, space, "")
+	if err != nil {
+		return err
+	}
+	at := map[string]int{}
+	for _, b := range rows {
+		at[b.ID] = b.OrderIndex
+	}
+	seen := map[string]bool{}
+	for _, id := range ids {
+		if _, ok := at[id]; !ok || seen[id] {
+			return event.ValidationError{Msg: "블록 순서가 홈과 맞지 않아요. 새로 읽고 다시 해 주세요"}
+		}
+		seen[id] = true
+	}
+	if len(ids) != len(at) {
+		return event.ValidationError{Msg: "블록 순서가 홈과 맞지 않아요. 새로 읽고 다시 해 주세요"}
+	}
+	for i, id := range ids {
+		if at[id] == i {
+			continue
+		}
+		q := url.Values{"id": {"eq." + id}, "space_id": {"eq." + space}}
+		if err := c.rest(ctx, http.MethodPatch, "blocks?"+q.Encode(), map[string]any{"order_index": i}, nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+/* ───────────────────────────── the day they met ───────────────────────────── */
+
+// SetStart moves the day they met: the space's own date and the D-day
+// block's start entry, then the calendar's anniversary entries.
+func (c *Client) SetStart(ctx context.Context, block, title, date string) error {
+	space, err := c.typed(ctx, block, "dday")
+	if err != nil {
+		return err
+	}
+	_, me, _ := c.where(ctx)
+	date = strings.TrimSpace(date)
+	if !day(date) {
+		return event.ValidationError{Msg: "날짜는 YYYY-MM-DD 여야 합니다"}
+	}
+	if date > today() {
+		return event.ValidationError{Msg: "만난 날은 오늘이나 그 전이에요"}
+	}
+	title = strings.TrimSpace(title)
+	if utf8.RuneCountInString(title) > 40 {
+		return event.ValidationError{Msg: "이름은 40자까지예요"}
+	}
+	// The space first: a person who may not change it changes nothing.
+	var saved []struct {
+		ID string `json:"id"`
+	}
+	q := url.Values{"id": {"eq." + space}, "select": {"id"}}
+	if err := c.rest(ctx, http.MethodPatch, "spaces?"+q.Encode(), map[string]any{"anniversary_date": date}, &saved); err != nil {
+		return err
+	}
+	if len(saved) == 0 {
+		return event.ValidationError{Msg: "만난 날은 uniple 앱에서 바꿔 주세요"}
+	}
+	var start []ddayRow
+	q = url.Values{"block_id": {"eq." + block}, "is_start_date": {"eq.true"}, "select": {"id,title,date,is_start_date"}}
+	if err := c.rest(ctx, http.MethodGet, "dday_items?"+q.Encode(), nil, &start); err != nil {
+		return err
+	}
+	if len(start) > 0 {
+		f := map[string]any{"date": date}
+		if title != "" {
+			f["title"] = title
+		}
+		q = url.Values{"id": {"eq." + start[0].ID}, "block_id": {"eq." + block}}
+		if err := c.rest(ctx, http.MethodPatch, "dday_items?"+q.Encode(), f, nil); err != nil {
+			return err
+		}
+	} else {
+		if title == "" {
+			title = "우리가 만난 날"
+		}
+		body := map[string]any{"id": newUUID(), "block_id": block, "space_id": space, "title": title, "date": date, "is_start_date": true, "created_by": me}
+		if err := c.rest(ctx, http.MethodPost, "dday_items", body, nil); err != nil {
+			return err
+		}
+	}
+	c.syncDDays(ctx, space)
+	return nil
 }

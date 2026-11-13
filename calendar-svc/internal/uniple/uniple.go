@@ -37,6 +37,9 @@ import (
 type Config struct {
 	BaseURL string // https://api.uniple.app
 	AnonKey string // the app's public anon key
+	// AppURL is the app's own server (https://uniple.app), which hands out
+	// the slots photos are uploaded into (media.go).
+	AppURL string
 	// SeedRefresh is UNIPLE_REFRESH_TOKEN from the environment. It is only a
 	// seed: Supabase rotates the token on every use, so the live one is kept
 	// in Postgres and this is consulted only when it differs from the seed the
@@ -304,7 +307,7 @@ func (c *Client) calendar(ctx context.Context) (block, space, me string, err err
 
 const columns = "id,title,start_date,end_date,start_time,end_time,memo,created_by,owner_user_id," +
 	"recurrence,recurrence_from,recurrence_until,recurrence_parent_id,recurrence_override_date," +
-	"recurrence_exdates,reminder_minutes,updated_at"
+	"recurrence_exdates,reminder_minutes,origin,updated_at"
 
 type row struct {
 	ID                     string   `json:"id"`
@@ -323,6 +326,7 @@ type row struct {
 	RecurrenceOverrideDate *string  `json:"recurrence_override_date"`
 	RecurrenceExdates      []string `json:"recurrence_exdates"`
 	ReminderMinutes        *int     `json:"reminder_minutes"`
+	Origin                 *string  `json:"origin"`
 	UpdatedAt              string   `json:"updated_at"`
 }
 
@@ -374,6 +378,7 @@ func (r row) toEvent(me string) event.Event {
 		UpdatedAt:  r.UpdatedAt,
 		Recurrence: str(r.Recurrence),
 		Reminder:   r.ReminderMinutes,
+		Origin:     str(r.Origin),
 	}
 	if end := str(r.EndDate); end != "" && end != r.StartDate {
 		e.EndDate = end

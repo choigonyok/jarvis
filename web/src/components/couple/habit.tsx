@@ -82,7 +82,7 @@ export function useCheckToday(block: string, checks: Resource<Check[]>) {
 }
 
 /** The habit's page: a month of days, and the day picked under it. */
-export function HabitPage({ block, space }: { block: Block; space: Space }) {
+export function HabitPage({ block, space, onChanged }: { block: Block; space: Space; onChanged?: () => Promise<void> }) {
   const now = today();
   const [month, setMonth] = useState(now.slice(0, 7));
   const [picked, setPicked] = useState(now);
@@ -107,7 +107,7 @@ export function HabitPage({ block, space }: { block: Block; space: Space }) {
 
   return (
     <div>
-      <BlockTitle title={block.title} />
+      <BlockTitle title={block.title} block={block} onRenamed={onChanged} />
       <div className="mt-5 flex items-center justify-between">
         <h2 className="text-title font-medium tracking-tight text-foreground tabular-nums">
           {y}년 {m}월

@@ -1,7 +1,10 @@
 package uniple
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/choigonyok/jarvis/calendar-svc/internal/event"
 )
 
 // Photos in uniple are media assets: one id, a few sizes (variants) in a
@@ -166,4 +171,190 @@ func uuidLike(s string) bool {
 		}
 	}
 	return true
+}
+
+/* ───────────────────────────── uploads ───────────────────────────── */
+
+// MaxPhoto is the largest photo the app takes, and the kinds it takes.
+const MaxPhoto = 4 << 20
+
+var photoKinds = map[string]bool{"image/jpeg": true, "image/png": true, "image/webp": true}
+
+// cookieName is the app's session cookie (@supabase/ssr), one per project.
+const cookieName = "sb-jhocdjivutqcczrjocvk-auth-token"
+
+// cookieChunk is the most @supabase/ssr puts in one cookie before chunking.
+const cookieChunk = 3180
+
+// Upload puts one photo into the space's media the way the app does: its
+// server hands out a signed slot for the block, the bytes go to storage, and
+// the asset is marked ready. The asset shows nowhere until a block's row names
+// it. A slot that is not filled is given back.
+func (c *Client) Upload(ctx context.Context, block, kind string, body []byte) (string, error) {
+	if _, err := c.typed(ctx, block, ""); err != nil {
+		return "", err
+	}
+	if !photoKinds[kind] {
+		return "", event.ValidationError{Msg: "사진은 jpeg, png, webp 만 올릴 수 있어요"}
+	}
+	if len(body) == 0 || len(body) > MaxPhoto {
+		return "", event.ValidationError{Msg: "사진은 4MB 까지 올릴 수 있어요"}
+	}
+	id := newUUID()
+	var slots struct {
+		Items []struct {
+			AssetID string `json:"assetId"`
+			Files   []struct {
+				Role      string `json:"role"`
+				SignedURL string `json:"signedUrl"`
+				Path      string `json:"path"`
+				Uploaded  bool   `json:"uploaded"`
+			} `json:"files"`
+		} `json:"items"`
+		Code string `json:"code"`
+	}
+	ask := map[string]any{"blockId": block, "items": []map[string]any{{
+		"assetId": id, "kind": "image", "takenAt": nil,
+		"files": []map[string]any{{"role": "display", "bytes": len(body), "mime": kind}},
+	}}}
+	if err := c.app(ctx, http.MethodPost, "/api/media/uploads", ask, &slots); err != nil {
+		return "", err
+	}
+	giveBack := func() {
+		_ = c.rest(context.WithoutCancel(ctx), http.MethodPost, "rpc/abandon_media_uploads", map[string]any{"p_ids": []string{id}}, nil)
+	}
+	var signed string
+	uploaded := false
+	for _, it := range slots.Items {
+		if it.AssetID != id {
+			continue
+		}
+		for _, f := range it.Files {
+			if f.Role == "display" {
+				signed, uploaded = f.SignedURL, f.Uploaded
+			}
+		}
+	}
+	if signed == "" && !uploaded {
+		giveBack()
+		return "", errors.New("uniple 이 사진 올릴 자리를 주지 않았습니다")
+	}
+	if !uploaded {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPut, signed, bytes.NewReader(body))
+		if err != nil {
+			giveBack()
+			return "", err
+		}
+		req.Header.Set("Content-Type", kind)
+		req.Header.Set("Cache-Control", "max-age=31536000")
+		res, err := photoHTTP.Do(req)
+		if err != nil {
+			giveBack()
+			return "", fmt.Errorf("uniple 사진 올리기: %w", err)
+		}
+		_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 1<<16))
+		res.Body.Close()
+		if res.StatusCode >= 300 {
+			giveBack()
+			return "", fmt.Errorf("uniple 사진 올리기: %s", res.Status)
+		}
+	}
+	var done []struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+	if err := c.rest(ctx, http.MethodPost, "rpc/complete_media_uploads", map[string]any{"p_ids": []string{id}}, &done); err != nil {
+		giveBack()
+		return "", err
+	}
+	for _, d := range done {
+		if d.ID == id && d.Status == "ready" {
+			return id, nil
+		}
+	}
+	giveBack()
+	return "", errors.New("uniple 이 올린 사진을 받지 않았습니다")
+}
+
+// app calls the app's own server as the signed-in person: it reads the
+// session from the cookie its pages set. The cookie carries a live access
+// token and no refresh token, so the app's server can check who is asking but
+// never rotates the session this service keeps.
+func (c *Client) app(ctx context.Context, method, path string, body any, out any) error {
+	access, err := c.token(ctx, false)
+	if err != nil {
+		return err
+	}
+	c.mu.Lock()
+	left := time.Until(c.accessExp)
+	c.mu.Unlock()
+	// The app's server refreshes a session about to end; one with room left
+	// it only checks.
+	if left < 5*time.Minute {
+		if access, err = c.token(ctx, true); err != nil {
+			return err
+		}
+	}
+	c.mu.Lock()
+	exp, me := c.accessExp, c.me
+	c.mu.Unlock()
+	session, _ := json.Marshal(map[string]any{
+		"access_token":  access,
+		"token_type":    "bearer",
+		"expires_in":    int(time.Until(exp).Seconds()),
+		"expires_at":    exp.Unix(),
+		"refresh_token": "jarvis-never-refresh",
+		"user":          map[string]any{"id": me, "aud": "authenticated", "role": "authenticated"},
+	})
+	encoded, _ := json.Marshal(body)
+	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(c.cfg.AppURL, "/")+path, bytes.NewReader(encoded))
+	if err != nil {
+		return err
+	}
+	for _, ck := range sessionCookies("base64-" + base64.RawURLEncoding.EncodeToString(session)) {
+		req.AddCookie(ck)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", strings.TrimRight(c.cfg.AppURL, "/"))
+	res, err := photoHTTP.Do(req)
+	if err != nil {
+		return fmt.Errorf("uniple 앱 서버: %w", err)
+	}
+	defer res.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+	if res.StatusCode >= 300 {
+		var e struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+			Error   string `json:"error"`
+		}
+		_ = json.Unmarshal(raw, &e)
+		switch e.Code {
+		case "storage_full":
+			return event.ValidationError{Msg: "uniple 저장 공간이 가득 찼어요. 앱에서 사진을 정리하거나 플랜을 바꿔야 해요"}
+		case "":
+		default:
+			return fmt.Errorf("uniple 앱 서버가 거절했습니다(%s): %s", res.Status, e.Code)
+		}
+		return fmt.Errorf("uniple 앱 서버가 거절했습니다(%s)", res.Status)
+	}
+	if out == nil {
+		return nil
+	}
+	return json.Unmarshal(raw, out)
+}
+
+// sessionCookies is a session cookie value as @supabase/ssr writes it: one
+// cookie when it fits, else name.0, name.1, ... in order.
+func sessionCookies(value string) []*http.Cookie {
+	if len(value) <= cookieChunk {
+		return []*http.Cookie{{Name: cookieName, Value: value}}
+	}
+	var out []*http.Cookie
+	for i := 0; len(value) > 0; i++ {
+		n := min(cookieChunk, len(value))
+		out = append(out, &http.Cookie{Name: fmt.Sprintf("%s.%d", cookieName, i), Value: value[:n]})
+		value = value[n:]
+	}
+	return out
 }

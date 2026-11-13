@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Panel } from "@/components/ui/bottom-sheet";
-import { ADDABLE, BLOCK_NAME, writeCouple, type Block, type Space } from "@/lib/couple";
+import { ADDABLE, BLOCK_NAME, OPENS, writeCouple, type Block, type Space } from "@/lib/couple";
 import { cn } from "@/lib/utils";
 
 /**
@@ -34,11 +34,17 @@ export function AddBlock({
     if (!sent.ok) return setError(sent.error);
     onOpenChange(false);
     await onAdded();
-    if (sent.data.id) router.push(`/couple/${sent.data.id}`);
+    if (sent.data.id && OPENS.has(sent.data.type)) router.push(sent.data.type === "calendar" ? "/calendar" : `/couple/${sent.data.id}`);
   }
 
   return (
-    <Panel open={open} onOpenChange={onOpenChange} title="블록 추가" description="여기서 더할 수 있는 블록이에요. 사진·일기·가계부 블록은 uniple 앱에서 더해요.">
+    <Panel
+      open={open}
+      onOpenChange={onOpenChange}
+      title="블록 추가"
+      description="더하면 상대의 uniple 앱 홈에도 생겨요. 앱에서 열어요 라고 적힌 블록은 여기서는 이름만 보여요."
+      height="tall"
+    >
       <ul className="divide-y divide-edge-soft">
         {ADDABLE.map((a) => {
           const have = space.blocks.filter((b) => b.type === a.type).length;

@@ -239,11 +239,19 @@ function coupleWrite(method: string, rest: string): boolean {
   const id = "[A-Za-z0-9_-]+";
   switch (method) {
     case "POST":
-      return rest === "blocks" || new RegExp(`^blocks/${id}/(dday|bucket|free|checks|records)$`).test(rest);
+      return (
+        ["blocks", "order", "photos"].includes(rest) ||
+        new RegExp(`^blocks/${id}/(dday|bucket|free|checks|records|visits|start)$`).test(rest) ||
+        new RegExp(`^photos/${id}/cover$`).test(rest)
+      );
     case "PATCH":
-      return new RegExp(`^blocks/${id}$`).test(rest) || new RegExp(`^blocks/${id}/(dday|bucket|checks|records)/${id}$`).test(rest);
+      return new RegExp(`^blocks/${id}$`).test(rest) || new RegExp(`^blocks/${id}/(dday|bucket|checks|records|visits)/${id}$`).test(rest);
     case "DELETE":
-      return new RegExp(`^blocks/${id}/(dday|bucket|free|checks|records)/${id}$`).test(rest);
+      return (
+        new RegExp(`^blocks/${id}$`).test(rest) ||
+        new RegExp(`^blocks/${id}/(dday|bucket|free|checks|records|visits)/${id}$`).test(rest) ||
+        new RegExp(`^photos/${id}$`).test(rest)
+      );
   }
   return false;
 }
@@ -270,10 +278,13 @@ function goalsRoute(method: string, rest: string): boolean {
 /**
  * What the 일정 screens read from the adapter: the calendar, and the rest of
  * the couple's space - the blocks, one block, a habit's days, what the two did,
- * the photos on calendar days and a photo itself. A change goes in at the way
- * in like any other (mindRoute).
+ * the photos on calendar days and a photo itself - and a photo uploaded to be
+ * put somewhere. A change goes in at the way in like any other (mindRoute).
  */
 function calendarRoute(method: string, path: string): boolean {
+  // A photo's bytes, uploaded before it is put anywhere: they do not go
+  // through the way in, and a photo nothing names shows nowhere.
+  if (method === "POST") return path === "couple/uploads";
   if (method !== "GET") return false;
   const id = "[A-Za-z0-9_-]+";
   return (

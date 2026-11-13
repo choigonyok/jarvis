@@ -2,11 +2,15 @@
 
 import { useKept } from "@/lib/keep";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ChevronDown, ChevronLeft, ChevronRight, Images, Plus, Search } from "lucide-react";
 import { EntrySheet, type Entry } from "@/components/calendar/entry-sheet";
 import { EventRow, GhostRow } from "@/components/calendar/event-row";
 import { EventSheet } from "@/components/calendar/event-sheet";
-import { useDayPhotos } from "@/components/couple/use-space";
+import { FindSheet } from "@/components/calendar/find-sheet";
+import { MonthPicker } from "@/components/calendar/month-picker";
+import { PhotoTiles, PickPhotos, ViewerAction, useUploads } from "@/components/couple/photos";
+import { useDayPhotos, useSpace } from "@/components/couple/use-space";
 import { useRole } from "@/components/shell/role";
 import { Lightbox } from "@/components/ui/lightbox";
 import { type DayMark } from "@/components/calendar/month-grid";
@@ -18,7 +22,7 @@ import { TabBar } from "@/components/shell/tab-bar";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { useUndo } from "@/components/shell/undo";
 import { Button } from "@/components/ui/button";
-import { between, photoSrc } from "@/lib/couple";
+import { HOLIDAYS, between, photoSrc, writeCouple } from "@/lib/couple";
 import {
   addDays,
   cursorOf,
@@ -75,13 +79,33 @@ export function Calendar() {
   const bounds = useMemo(() => gridBounds(cursor), [cursor]);
   const photos = useDayPhotos(bounds.from, bounds.to, owner);
   const [viewing, setViewing] = useState<number | null>(null);
+  // The day's photo in its cell instead of dots, while the app is open.
+  const [photoCells, setPhotoCells] = useKept("calendar:photos", false);
+  const [finding, setFinding] = useState(false);
+  const [choosingMonth, setChoosingMonth] = useState(false);
+  const [photoNote, setPhotoNote] = useState<string | null>(null);
+  const router = useRouter();
+  // The space's blocks: where a day's photo is uploaded for, and the D-day
+  // an anniversary entry belongs to.
+  const space = useSpace(owner);
+  const calendarBlock = space.data?.blocks.find((b) => b.type === "calendar")?.id;
+  const ddayBlock = space.data?.blocks.find((b) => b.type === "dday")?.id;
+  const uploads = useUploads(calendarBlock ?? null);
+
+  async function photoChange(run: () => Promise<{ ok: boolean; error?: string }>) {
+    setPhotoNote(null);
+    const sent = await run();
+    if (!sent.ok) setPhotoNote(sent.error ?? "사진을 바꾸지 못했어요.");
+    await photos.reload();
+  }
 
   // One of your own entries being changed in place (event-sheet.tsx). The
   // partner's are not: changing someone else's day is a conversation. Nor
   // one day of a repeating entry: the shared calendar takes that only in its
   // own app (calendar-svc refuses it).
   const [editing, setEditing] = useState<CalendarEvent | null>(null);
-  const editable = (e: CalendarEvent) => ownerOf(e) !== "partner" && !e.id.includes("#");
+  // An anniversary the app writes from the D-day block is changed there.
+  const editable = (e: CalendarEvent) => ownerOf(e) !== "partner" && !e.id.includes("#") && !e.origin;
 
   // A removal waits five seconds with 되돌리기 on screen before it is sent:
   // the row is gone at once, and an undo means the shared calendar never
@@ -173,8 +197,15 @@ export function Calendar() {
       if (target) mark(target.date).pending = true;
       if (ghost.op === "update") mark(ghost.preview.date).pending = true;
     }
+    if (photoCells) {
+      for (const p of photos.data ?? []) {
+        const m = mark(p.date);
+        if (!m.photo || p.cover) m.photo = p.asset;
+      }
+    }
+    for (const [date, name] of Object.entries(HOLIDAYS)) if (out.has(date) || date.startsWith(selected.slice(0, 4))) mark(date).holiday = name;
     return out;
-  }, [events, allEvents, creates, attached]);
+  }, [events, allEvents, creates, attached, photoCells, photos.data, selected]);
 
   const dayEvents = events.filter((e) => covers(e, selected));
   const dayPhotos = owner ? (photos.data ?? []).filter((p) => p.date === selected) : [];
@@ -214,10 +245,25 @@ export function Calendar() {
         <div className="mx-auto grid w-full max-w-page-narrow grid-cols-1 gap-x-10 px-4 pt-5 pb-12 sm:px-8 sm:pt-6 sm:pb-6 lg:max-w-page-wide lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
           <div>
             <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-title font-medium tracking-tight text-foreground">
+              <button
+                type="button"
+                onClick={() => setChoosingMonth(true)}
+                aria-label={`${cursor.year}년 ${cursor.month + 1}월 - 다른 달로`}
+                className="-ml-1 inline-flex items-center gap-1 rounded-lg px-1 py-1 text-title font-medium tracking-tight text-foreground focus-ring"
+              >
                 {cursor.year}년 {cursor.month + 1}월
-              </h2>
+                <ChevronDown aria-hidden className="size-4 text-faint" />
+              </button>
               <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => setFinding(true)}
+                  aria-label="일정 찾기"
+                  className="tap text-dim hover:text-foreground mouse:size-7 mouse:min-h-0 mouse:min-w-0"
+                >
+                  <Search aria-hidden className="size-[18px] mouse:size-4" />
+                </Button>
                 {owner ? (
                   <Button
                     variant="ghost"
@@ -296,6 +342,22 @@ export function Calendar() {
                   </button>
                 );
               })}
+              {owner ? (
+                // The days' photos in their cells, in place of the dots.
+                <button
+                  type="button"
+                  aria-pressed={photoCells}
+                  onClick={() => setPhotoCells((v) => !v)}
+                  className={cn(
+                    "tap-y flex h-9 items-center gap-1.5 rounded-full border px-3 text-aside transition-colors outline-none mouse:h-7 mouse:px-2.5",
+                    "focus-ring",
+                    photoCells ? "border-edge bg-glass-raised text-foreground" : "border-edge-soft text-faint hover:text-dim",
+                  )}
+                >
+                  <Images aria-hidden className="size-3.5" />
+                  사진
+                </button>
+              ) : null}
             </div>
 
             {elsewhere.length > 0 ? (
@@ -325,19 +387,48 @@ export function Calendar() {
             <h3 className="mb-3 px-2 text-ui text-dim">
               {korDate(selected)}
               {selected === today ? <span className="text-faint"> · 오늘</span> : null}
+              {HOLIDAYS[selected] ? <span className="text-faint"> · {HOLIDAYS[selected]}</span> : null}
             </h3>
 
-            {dayPhotos.length ? (
-              <ul className="scrollbar-none mb-3 flex gap-2 overflow-x-auto px-2" aria-label="이 날의 사진">
-                {dayPhotos.map((p, i) => (
-                  <li key={p.id} className="shrink-0">
-                    <button type="button" onClick={() => setViewing(i)} className="block overflow-hidden rounded-xl focus-ring" aria-label={`사진 ${i + 1}`}>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={photoSrc(p.asset)} alt="" loading="lazy" className="size-20 object-cover" />
-                    </button>
-                  </li>
-                ))}
-              </ul>
+            {owner ? (
+              // The day's photos: tap one to look at it, make it the day's face
+              // or take it off; a new one goes on the day itself.
+              <div className="mb-3 px-2">
+                <PhotoTiles
+                  assets={dayPhotos.map((p) => ({
+                    key: p.id,
+                    asset: p.asset,
+                    mark: p.cover ? <span className="rounded bg-black/60 px-1 text-tiny text-white">대표</span> : undefined,
+                  }))}
+                  onOpen={setViewing}
+                  trailing={
+                    calendarBlock ? (
+                      <PickPhotos
+                        variant="quiet"
+                        label={dayPhotos.length ? "사진" : "이 날에 사진 추가"}
+                        busy={uploads.busy}
+                        onPick={(files) =>
+                          void uploads.upload(files).then(async (assets) => {
+                            for (const asset of assets) {
+                              const sent = await writeCouple("POST", "/photos", { date: selected, asset });
+                              if (!sent.ok) {
+                                setPhotoNote(sent.error);
+                                break;
+                              }
+                            }
+                            await photos.reload();
+                          })
+                        }
+                      />
+                    ) : null
+                  }
+                />
+                {photoNote || uploads.error ? (
+                  <p role="alert" className="mt-1 text-aside text-reject">
+                    {photoNote ?? uploads.error}
+                  </p>
+                ) : null}
+              </div>
             ) : null}
 
             {dayEvents.length === 0 && dayCreates.length === 0 ? (
@@ -365,7 +456,13 @@ export function Calendar() {
                     <EventRow
                       event={event}
                       pending={ghost}
-                      onEdit={editable(event) && !ghost ? () => (owner ? setEntry({ event, day: event.date }) : setEditing(event)) : undefined}
+                      onEdit={
+                        event.origin === "dday" && owner && ddayBlock
+                          ? () => router.push(`/couple/${ddayBlock}`)
+                          : editable(event) && !ghost
+                            ? () => (owner ? setEntry({ event, day: event.date }) : setEditing(event))
+                            : undefined
+                      }
                       onDelete={() => erase(event)}
                     />
                     {ghost ? (
@@ -403,21 +500,42 @@ export function Calendar() {
         open={entry !== null}
         event={entry?.event ?? null}
         day={entry?.day ?? selected}
+        block={calendarBlock}
+        photos={entry?.event ? (photos.data ?? []).filter((p) => p.event && p.event === entry.event!.id.split("#")[0]) : []}
         onOpenChange={(open) => {
           if (!open) setEntry(null);
         }}
         onSave={async (next: Entry) => {
-          if (next.id) return (await save(next)) ? null : "저장하지 못했어요. 잠시 뒤 다시 해 주세요.";
-          const failed = await create(next);
-          if (!failed) setSelected(next.date ?? selected);
-          return failed;
+          const { photos: change, ...rest } = next;
+          let id = rest.id;
+          if (id) {
+            if (!(await save(rest))) return "저장하지 못했어요. 잠시 뒤 다시 해 주세요.";
+          } else {
+            const made = await create(rest);
+            if (made.error) return made.error;
+            id = made.event?.id;
+            setSelected(rest.date ?? selected);
+          }
+          // The photos go on the entry's first day, filed under it.
+          if (change && id) {
+            for (const asset of change.add) {
+              const sent = await writeCouple("POST", "/photos", { date: rest.date, asset, event: id });
+              if (!sent.ok) return `일정은 저장했지만 사진을 붙이지 못했어요: ${sent.error}`;
+            }
+            for (const photo of change.drop) {
+              const sent = await writeCouple("DELETE", `/photos/${photo}`);
+              if (!sent.ok) return `일정은 저장했지만 사진을 빼지 못했어요: ${sent.error}`;
+            }
+            await photos.reload();
+          }
+          return null;
         }}
         onCopy={async (next, days) => {
           // Each day gets the entry whole, its length kept.
           const span = next.endDate && next.date ? between(next.date, next.endDate) : 0;
           for (const day of days) {
-            const failed = await create({ ...next, date: day, endDate: span ? addDays(day, span) : undefined });
-            if (failed) return failed;
+            const made = await create({ ...next, date: day, endDate: span ? addDays(day, span) : undefined });
+            if (made.error) return made.error;
           }
           return null;
         }}
@@ -428,8 +546,51 @@ export function Calendar() {
       />
 
       {viewing !== null && dayPhotos.length ? (
-        <Lightbox items={dayPhotos.map((p) => ({ src: photoSrc(p.asset, "display"), title: korDate(p.date) }))} start={viewing} onClose={() => setViewing(null)} />
+        <Lightbox
+          items={dayPhotos.map((p) => ({ src: photoSrc(p.asset, "display"), title: korDate(p.date) }))}
+          start={viewing}
+          onClose={() => setViewing(null)}
+          actions={(i) => {
+            const p = dayPhotos[i];
+            if (!p) return null;
+            return (
+              <>
+                {!p.cover ? (
+                  <ViewerAction
+                    onClick={() => {
+                      setViewing(null);
+                      void photoChange(() => writeCouple("POST", `/photos/${p.id}/cover`));
+                    }}
+                  >
+                    대표로
+                  </ViewerAction>
+                ) : null}
+                <ViewerAction
+                  danger
+                  onClick={() => {
+                    setViewing(null);
+                    void photoChange(() => writeCouple("DELETE", `/photos/${p.id}`));
+                  }}
+                >
+                  지우기
+                </ViewerAction>
+              </>
+            );
+          }}
+        />
       ) : null}
+
+      <FindSheet open={finding} onOpenChange={setFinding} onFound={setSelected} />
+      <MonthPicker
+        open={choosingMonth}
+        onOpenChange={setChoosingMonth}
+        cursor={cursor}
+        onPick={(c) => {
+          const day = Number(selected.slice(8, 10));
+          const last = new Date(c.year, c.month + 1, 0).getDate();
+          setSelected(isoDate(new Date(c.year, c.month, Math.min(day, last))));
+        }}
+      />
 
       <EventSheet
         event={editing}

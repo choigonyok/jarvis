@@ -55,6 +55,7 @@ func main() {
 	if svc.Env("CALENDAR_BACKEND", "uniple") == "uniple" {
 		u, err := uniple.Open(ctx, dsn, uniple.Config{
 			BaseURL:     svc.Env("UNIPLE_URL", "https://api.uniple.app"),
+			AppURL:      svc.Env("UNIPLE_APP_URL", "https://uniple.app"),
 			AnonKey:     os.Getenv("UNIPLE_ANON_KEY"),
 			SeedRefresh: os.Getenv("UNIPLE_REFRESH_TOKEN"),
 			BlockID:     os.Getenv("UNIPLE_BLOCK_ID"),

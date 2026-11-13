@@ -4,12 +4,17 @@ import { useEffect, useRef } from "react";
 import { addDays, monthCells, WEEKDAYS, type Cursor } from "@/lib/month";
 import { cn } from "@/lib/utils";
 import { OWNER_LABEL, OwnerDot, type Owner } from "@/components/calendar/owner";
+import { photoSrc } from "@/lib/couple";
 
 export type DayMark = {
   /** 그날 확정된 일정마다 그 주인. 점의 개수와 색을 정한다. */
   owners: Owner[];
   /** 결재를 기다리는 제안이 있는 날. */
   pending: boolean;
+  /** 사진으로 보기일 때 그날의 대표 사진(그날 칸을 채운다). */
+  photo?: string;
+  /** 공휴일 이름. 칸에는 그리지 않고 읽어 줄 때만 쓴다. */
+  holiday?: string;
 };
 
 /**
@@ -119,14 +124,24 @@ export function MonthGrid({
               aria-label={ariaLabel(cell.date, cell.day, cell.weekday, mark)}
               onClick={() => onSelect(cell.date)}
               className={cn(
-                "flex h-12 flex-col items-center justify-center gap-[3px] rounded-lg transition-colors outline-none sm:h-14",
+                "relative flex h-12 flex-col items-center justify-center gap-[3px] overflow-hidden rounded-lg transition-colors outline-none sm:h-14",
                 "focus-ring",
                 isSelected ? "bg-glass-raised" : "hover:bg-glass",
+                isSelected && mark?.photo && "ring-2 ring-foreground",
               )}
             >
+              {mark?.photo ? (
+                // The day's photo fills its cell; the date stays readable on a scrim.
+                <>
+                  {/* eslint-disable-next-line @next/next/no-img-element -- through the console's own proxy */}
+                  <img src={photoSrc(mark.photo)} alt="" loading="lazy" className={cn("absolute inset-0 size-full object-cover", !cell.inMonth && "opacity-40")} />
+                  <span aria-hidden className="absolute inset-0 bg-gradient-to-b from-black/45 via-black/10 to-black/35" />
+                </>
+              ) : null}
               <span
                 className={cn(
-                  "tnum grid size-6 place-items-center rounded-full text-ui leading-none",
+                  "relative tnum grid size-6 place-items-center rounded-full text-ui leading-none",
+                  mark?.photo && "font-semibold text-white",
                   !cell.inMonth && "text-faint",
                   cell.inMonth && (isSelected || isToday ? "text-foreground" : "text-dim"),
                   isToday && "font-semibold ring-1 ring-foreground/45",
@@ -139,7 +154,7 @@ export function MonthGrid({
                   반반은 함께. 숨쉬는 빈 원은 결재 대기. */}
               <span
                 aria-hidden
-                className={cn("flex h-[7px] items-center gap-[3px]", !cell.inMonth && "opacity-40")}
+                className={cn("relative flex h-[7px] items-center gap-[3px]", !cell.inMonth && "opacity-40")}
               >
                 {mark?.pending ? (
                   <span className="anim-breathe size-[7px] rounded-full border border-dim" />
@@ -159,6 +174,8 @@ export function MonthGrid({
 function ariaLabel(date: string, day: number, weekday: number, mark?: DayMark): string {
   const month = Number(date.slice(5, 7));
   const parts = [`${month}월 ${day}일 ${WEEKDAYS[weekday]}요일`];
+  if (mark?.holiday) parts.push(mark.holiday);
+  if (mark?.photo) parts.push("사진 있음");
   if (mark?.owners.length) {
     const counts = new Map<Owner, number>();
     for (const o of mark.owners) counts.set(o, (counts.get(o) ?? 0) + 1);

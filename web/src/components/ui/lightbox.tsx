@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Download, X } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
@@ -36,7 +36,18 @@ const TURN_MS = 260;
  * zoom (components/shell/no-zoom.tsx), so the photo has to. Arrow keys move,
  * Esc closes (the dialog's own).
  */
-export function Lightbox({ items, start = 0, onClose }: { items: LightboxItem[]; start?: number; onClose: () => void }) {
+export function Lightbox({
+  items,
+  start = 0,
+  onClose,
+  actions,
+}: {
+  items: LightboxItem[];
+  start?: number;
+  onClose: () => void;
+  /** What can be done to the photo on screen, beside the way out (a photo of the couple's space: make it the face, take it off). */
+  actions?: (index: number) => ReactNode;
+}) {
   const [index, setIndex] = useState(Math.min(Math.max(0, start), items.length - 1));
   const track = useRef<HTMLDivElement>(null);
   const turning = useRef(false);
@@ -120,6 +131,7 @@ export function Lightbox({ items, start = 0, onClose }: { items: LightboxItem[];
               </span>
             ) : null}
           </p>
+          {actions ? actions(index) : null}
           {item.download ? (
             <a
               href={item.download}
