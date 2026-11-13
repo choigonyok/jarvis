@@ -230,7 +230,7 @@ func outflowCard(in OutflowInput) action.Card {
 	o := in.Outflow
 	account := venueLabel[o.Venue]
 	what := strings.TrimSpace(account + " " + o.Memo)
-	body := fmt.Sprintf("%s %s · %s", what, krw(o.AmountKrw), day(o.Date))
+	facts := []action.Fact{{Label: "뺀 돈", Value: fmt.Sprintf("%s %s · %s", what, krw(o.AmountKrw), day(o.Date))}}
 	var known []string
 	for _, p := range o.Parts {
 		line := fmt.Sprintf("%s %s", useLabels[p.Use], krw(p.AmountKrw))
@@ -239,27 +239,31 @@ func outflowCard(in OutflowInput) action.Card {
 		}
 		known = append(known, line)
 	}
+	// What is asked is the whole withdrawal, or what is left of it once the
+	// parts already known are taken away. The title says it as it is: there
+	// may be several cards at once, and the form comes before the facts.
+	asked := o.AmountKrw
 	if len(known) == 0 {
-		body += "\n다른 투자 계좌로 다시 들어온 돈이 없어요."
+		facts = append(facts, action.Fact{Label: "옮겨 간 돈", Value: "다른 투자 계좌로 다시 들어온 돈이 없어요."})
 	} else {
-		body += "\n" + strings.Join(known, " · ") + fmt.Sprintf("\n남은 %s을 물어요.", krw(o.AskKrw))
+		asked = o.AskKrw
+		facts = append(facts, action.Fact{Label: "알아낸 곳", Value: strings.Join(known, " · ")})
 	}
+	facts = append(facts, action.Fact{Label: "물어보는 돈", Value: krw(asked), Lead: true})
 	if len(o.Candidates) > 0 {
 		var near []string
 		for _, c := range o.Candidates {
 			near = append(near, fmt.Sprintf("%s %s %s", shortDay(c.Date), venueLabel[c.Venue], krw(c.AmountKrw)))
 		}
-		body += "\n그 뒤 들어온 돈: " + strings.Join(near, " · ") + " - 같은 돈이면 '다른 투자 계좌로'"
+		facts = append(facts, action.Fact{Label: "그 뒤 들어온 돈", Value: strings.Join(near, " · ") + " - 같은 돈이면 '다른 투자 계좌로'"})
 	}
-	// The form comes before the body on the card, and there may be several
-	// cards at once: the title alone has to say which withdrawal this is.
 	title := fmt.Sprintf("%s %s에서 뺀 %s, 어디로 갔나요?", shortDay(o.Date), account, krw(o.AmountKrw))
 	if len(o.Parts) > 0 {
 		title = fmt.Sprintf("%s %s에서 뺀 돈 중 %s은 어디로 갔나요?", shortDay(o.Date), account, krw(o.AskKrw))
 	}
 	return action.Card{
 		Title: title,
-		Body:  body,
+		Facts: facts,
 		Consequence: "승인하면 자산 탭에 적어요. 지출이면 가계부에 투자금으로 들어가고, 나머지는 가계부에 넣지 않아요. " +
 			"수익률은 그대로예요. 반려하면 일주일 뒤에 다시 물어요.",
 		Fields: in.Fields,

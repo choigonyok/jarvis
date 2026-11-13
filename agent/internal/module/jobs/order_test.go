@@ -102,7 +102,7 @@ func TestOrderToolsReadTheProfileAndRaiseTheVaultCards(t *testing.T) {
 		t.Fatalf("결제 비밀번호 카드: %q", text)
 	}
 	cards := props.List()
-	if len(cards) != 1 || cards[0].Action.Kind != vault.KindSavePin || vaultJob(cards[0]) != 16 || !strings.Contains(cards[0].Card.Title, "장범준 LP") {
+	if len(cards) != 1 || cards[0].Action.Kind != vault.KindSavePin || vaultJob(cards[0]) != 16 || !strings.Contains(cards[0].Card.Text(), "작업: 장범준 LP") {
 		t.Fatalf("작업 16 의 결제 비밀번호 카드여야 합니다: %+v", cards)
 	}
 	var in vaultCard

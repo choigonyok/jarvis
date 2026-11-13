@@ -308,8 +308,8 @@ func TestInterceptRaisesAJobsOwnCard(t *testing.T) {
 		t.Fatalf("카드는 실행 중인 작업 16 의 것이어야 합니다: %+v", pay)
 	}
 	for _, want := range []string{"탁상시계 구매", "34,350원", "결제하기(주문)"} {
-		if !strings.Contains(cards[0].Card.Body, want) {
-			t.Fatalf("카드에 %q 가 없습니다: %s", want, cards[0].Card.Body)
+		if !strings.Contains(cards[0].Card.Text(), want) {
+			t.Fatalf("카드에 %q 가 없습니다: %s", want, cards[0].Card.Text())
 		}
 	}
 	if len(jobs.raised) != 1 || jobs.raised[0] != "16 "+first["pending"] {
@@ -645,9 +645,9 @@ func TestAPaymentWindowIsOneCard(t *testing.T) {
 	if len(cards) != 1 || cards[0].Card.Title != "결제창에서 64,000원을 결제합니다" {
 		t.Fatalf("결제창 카드: %+v", cards)
 	}
-	for _, want := range []string{"결제 금액: 64,000원 (결제창이 받은 금액)", "결제창이 받은 상품: 장범준 2집 LP", "stdpay.inicis.com", "작업: 장범준"} {
-		if !strings.Contains(cards[0].Card.Body, want) {
-			t.Fatalf("카드에 %q 가 없습니다: %s", want, cards[0].Card.Body)
+	for _, want := range []string{"결제 금액: 64,000원\n금액을 읽은 곳: 결제창이 받은 금액", "결제창이 받은 상품: 장범준 2집 LP", "stdpay.inicis.com", "작업: 장범준"} {
+		if !strings.Contains(cards[0].Card.Text(), want) {
+			t.Fatalf("카드에 %q 가 없습니다: %s", want, cards[0].Card.Text())
 		}
 	}
 	if c := cards[0].Card.Consequence; !strings.Contains(c, "결제 한 건(64,000원)") || !strings.Contains(c, "네이버페이·신용카드") {
@@ -844,21 +844,21 @@ func TestAPaymentCardShowsTheSavedAddress(t *testing.T) {
 	right := Payment{Host: "stdpay.inicis.com", Window: true, JobID: 1, JobTitle: "LP",
 		JobSummary: "결제 직전 · LP · 113,000원 · 배송지 세종대로 110 101동 1001호"}
 	card := paymentCard(right, saved)
-	if !strings.Contains(card.Body, "저장된 배송지: 서울 중구 세종대로 110 101동 1001호 (홍길동)") || strings.Contains(card.Body, "⚠") {
-		t.Fatalf("저장된 배송지를 보여 주고, 같으면 경고하지 않습니다: %s", card.Body)
+	if factOf(card, "저장된 배송지") != "서울 중구 세종대로 110 101동 1001호 (홍길동)" || len(warnsOf(card)) != 0 {
+		t.Fatalf("저장된 배송지를 보여 주고, 같으면 경고하지 않습니다: %+v", card.Facts)
 	}
 	wrong := right
 	wrong.JobSummary = "결제 직전 · LP · 113,000원 · 배송지 04524 서울 중구 세종대로 11 101-1001"
-	if card := paymentCard(wrong, saved); !strings.HasPrefix(card.Body, "⚠ 작업이 남긴 배송지가 저장된 배송지와 다릅니다") {
-		t.Fatalf("다른 배송지면 맨 앞에 경고합니다: %s", card.Body)
+	if card := paymentCard(wrong, saved); !card.Facts[0].Warn || !strings.HasPrefix(card.Facts[0].Value, "작업이 남긴 배송지가 저장된 배송지와 다릅니다") {
+		t.Fatalf("다른 배송지면 맨 앞에 경고합니다: %+v", card.Facts)
 	}
 	noAddress := right
 	noAddress.JobSummary = "결제 직전 · 쿠팡 · 34,350원"
-	if card := paymentCard(noAddress, saved); strings.Contains(card.Body, "⚠") {
-		t.Fatalf("배송지를 남기지 않은 현황에는 경고하지 않습니다: %s", card.Body)
+	if card := paymentCard(noAddress, saved); len(warnsOf(card)) != 0 {
+		t.Fatalf("배송지를 남기지 않은 현황에는 경고하지 않습니다: %+v", card.Facts)
 	}
-	if card := paymentCard(right, nil); strings.Contains(card.Body, "저장된 배송지") {
-		t.Fatalf("저장된 배송지가 없으면 그 줄도 없습니다: %s", card.Body)
+	if card := paymentCard(right, nil); factOf(card, "저장된 배송지") != "" {
+		t.Fatalf("저장된 배송지가 없으면 그 줄도 없습니다: %+v", card.Facts)
 	}
 	if roadKey("서울 중구 세종대로 110 (태평로1가)") != "세종대로110" {
 		t.Fatalf("괄호를 뺀 도로명+건물번호: %q", roadKey("서울 중구 세종대로 110 (태평로1가)"))
@@ -866,9 +866,10 @@ func TestAPaymentCardShowsTheSavedAddress(t *testing.T) {
 }
 
 // How much is the first thing a payment card says: the title - which is how
-// the phone's notice begins - and the body's first line, with where it was
-// read. A 네이버페이 order's request carries no amount, so a job's says what
-// the job reported right before paying.
+// the phone's notice begins - and the first fact, with where it was read, which
+// a writer of the card's words must say in its title too (Lead). A 네이버페이
+// order's request carries no amount, so a job's says what the job reported
+// right before paying.
 func TestAPaymentCardSaysHowMuch(t *testing.T) {
 	book := Payment{Host: "m.pay.naver.com", URL: "https://m.pay.naver.com/orderApi/payment/universal/log", JobID: 7, JobTitle: "책 주문",
 		JobSummary: "결제 직전 · 책 1권 (알라딘) · 17,100원(배송비 0) · 네이버페이 · 배송지 서울 중구 세종대로 110 101동 1001호"}
@@ -876,15 +877,22 @@ func TestAPaymentCardSaysHowMuch(t *testing.T) {
 	if card.Title != "17,100원을 결제합니다" {
 		t.Fatalf("제목: %q", card.Title)
 	}
-	if !strings.HasPrefix(card.Body, "결제 금액: 17,100원 (작업이 결제 직전에 남긴 금액)\n작업: 책 주문\n") {
-		t.Fatalf("본문 첫 줄: %s", card.Body)
+	f := card.Facts
+	if len(f) < 3 || f[0] != (action.Fact{Label: "결제 금액", Value: "17,100원", Lead: true}) ||
+		f[1] != (action.Fact{Label: "금액을 읽은 곳", Value: "작업이 결제 직전에 남긴 금액"}) || f[2] != (action.Fact{Label: "작업", Value: "책 주문"}) {
+		t.Fatalf("사실의 첫 줄들: %+v", f)
 	}
 	if !strings.Contains(card.Consequence, "결제 한 건(17,100원)") {
 		t.Fatalf("결과 문구: %q", card.Consequence)
 	}
+	// What the approval is held to is a fact too: the words may leave it out.
+	if scope := factOf(card, "승인 범위"); !strings.HasPrefix(scope, "결제 한 건(17,100원) · 다시 진행한 때부터 ") {
+		t.Fatalf("승인 범위: %q", scope)
+	}
 	// The conversation's own payment has no report: the card says it could not read one.
 	bare := paymentCard(Payment{Host: "pay.naver.com", URL: "https://pay.naver.com/x"}, nil)
-	if bare.Title != "결제를 진행합니다" || !strings.HasPrefix(bare.Body, "결제 금액: 읽지 못했습니다") || strings.Contains(bare.Consequence, "원)") {
+	if bare.Title != "결제를 진행합니다" || !bare.Facts[0].Warn || bare.Facts[0].Lead || !strings.HasPrefix(bare.Facts[0].Value, "읽지 못했습니다") ||
+		strings.Contains(bare.Consequence, "원)") {
 		t.Fatalf("금액을 모르면 모른다고 합니다: %+v", bare)
 	}
 	coupang := paymentCard(Payment{Host: "checkout.coupang.com", JobID: 3, JobTitle: "휴지", JobSummary: "결제 직전 · 휴지 · 1개 · 결제 금액 34,350원 · 쿠페이"}, nil)
@@ -896,13 +904,14 @@ func TestAPaymentCardSaysHowMuch(t *testing.T) {
 	window := Payment{Host: "stdpay.inicis.com", Window: true, Amount: "113000", JobID: 1, JobTitle: "LP",
 		JobSummary: "결제 직전 · LP 2장 · 결제 금액 108,000원 · 신용카드"}
 	card = paymentCard(window, nil)
-	if card.Title != "결제창에서 113,000원을 결제합니다" || !strings.HasPrefix(card.Body, "⚠ 작업이 남긴 금액(108,000원)과 결제창이 받은 금액(113,000원)이 다릅니다") ||
-		!strings.Contains(card.Body, "결제 금액: 113,000원 (결제창이 받은 금액)") {
+	if card.Title != "결제창에서 113,000원을 결제합니다" || !card.Facts[0].Warn ||
+		!strings.HasPrefix(card.Facts[0].Value, "작업이 남긴 금액(108,000원)과 결제창이 받은 금액(113,000원)이 다릅니다") ||
+		factOf(card, "결제 금액") != "113,000원" || factOf(card, "금액을 읽은 곳") != "결제창이 받은 금액" {
 		t.Fatalf("결제창과 작업의 금액이 다르면: %+v", card)
 	}
 	window.JobSummary = "결제 직전 · LP 2장 · 113,000원(상품 108,000+배송 5,000) · 신용카드"
-	if card := paymentCard(window, nil); strings.Contains(card.Body, "⚠") {
-		t.Fatalf("같은 금액이면 경고하지 않습니다: %s", card.Body)
+	if card := paymentCard(window, nil); len(warnsOf(card)) != 0 {
+		t.Fatalf("같은 금액이면 경고하지 않습니다: %+v", card.Facts)
 	}
 }
 
@@ -931,22 +940,42 @@ func TestReportedAmount(t *testing.T) {
 // card is the last place a person can catch it.
 func TestAPaymentCardSaysTheAddressMayBeOld(t *testing.T) {
 	addr := &SavedAddress{Recipient: "홍길동", Address: "서울 중구 세종대로 110", Doubt: "저장한 뒤 11월 2일에 사는 곳이 바뀐 기록이 있어요"}
-	warn, saved := addressLines(Payment{}, addr)
-	if !strings.HasPrefix(warn, "⚠ 저장한 뒤") || !strings.Contains(saved, "세종대로") {
-		t.Fatalf("%q %q", warn, saved)
+	warns, saved := addressLines(Payment{}, addr)
+	if len(warns) != 1 || !strings.HasPrefix(warns[0], "저장한 뒤") || !strings.Contains(saved, "세종대로") {
+		t.Fatalf("%q %q", warns, saved)
 	}
 	card := paymentCard(Payment{Host: "pay.naver.com"}, addr)
-	if !strings.HasPrefix(card.Body, "⚠ 저장한 뒤") {
-		t.Fatalf("맨 위에 있어야 합니다: %s", card.Body)
+	if !card.Facts[0].Warn || !strings.HasPrefix(card.Facts[0].Value, "저장한 뒤") {
+		t.Fatalf("맨 위에 있어야 합니다: %+v", card.Facts)
 	}
 	// Both worries are said.
-	both, _ := addressLines(Payment{JobSummary: "배송지 부산 해운대로 1"}, addr)
-	if strings.Count(both, "⚠") != 2 {
+	if both, _ := addressLines(Payment{JobSummary: "배송지 부산 해운대로 1"}, addr); len(both) != 2 {
 		t.Fatalf("%q", both)
 	}
 	clean := *addr
 	clean.Doubt = ""
-	if warn, _ := addressLines(Payment{}, &clean); warn != "" {
-		t.Fatalf("%q", warn)
+	if warns, _ := addressLines(Payment{}, &clean); len(warns) != 0 {
+		t.Fatalf("%q", warns)
 	}
+}
+
+// factOf is the value of a card's fact of this label; empty when it has none.
+func factOf(c action.Card, label string) string {
+	for _, f := range c.Facts {
+		if f.Label == label {
+			return f.Value
+		}
+	}
+	return ""
+}
+
+// warnsOf is what a card says to check before deciding.
+func warnsOf(c action.Card) []string {
+	var out []string
+	for _, f := range c.Facts {
+		if f.Warn && f.Label == "주의" {
+			out = append(out, f.Value)
+		}
+	}
+	return out
 }

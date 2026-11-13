@@ -116,6 +116,12 @@ type Config struct {
 	VaultURL string
 	// MemoryURL is memory-svc (the Graphiti knowledge graph).
 	MemoryURL string
+	// CardWords is whether mind's writer words the cards raised here
+	// (internal/words); off, every card is in the code's words.
+	CardWords bool
+	// CardWordsWait is as long as a card waits for its words before it goes
+	// up in the code's.
+	CardWordsWait time.Duration
 	// MindURL is mind-svc: the one gate every suggestion goes through, and
 	// the world model the conversation is told about. Empty: no mind.
 	MindURL string
@@ -261,14 +267,18 @@ func Load() (Config, error) {
 		UploadsDir:       env("JARVIS_UPLOADS_DIR", ""),
 		VaultURL:         os.Getenv("JARVIS_VAULT_URL"),
 		// Empty turns long-term memory off: no tool, nothing recalled.
-		MemoryURL:    os.Getenv("JARVIS_MEMORY_URL"),
-		MindURL:      os.Getenv("JARVIS_MIND_URL"),
-		ContextURL:   os.Getenv("JARVIS_CONTEXT_URL"),
-		PhotosURL:    os.Getenv("JARVIS_PHOTOS_URL"),
-		SearchURL:    os.Getenv("JARVIS_SEARCH_URL"),
-		SearchToken:  os.Getenv("JARVIS_SEARCH_TOKEN"),
-		Jobs:         envBool("JARVIS_JOBS", true),
-		JobsInterval: envDuration("JARVIS_JOBS_INTERVAL", 5*time.Minute),
+		MemoryURL: os.Getenv("JARVIS_MEMORY_URL"),
+		MindURL:   os.Getenv("JARVIS_MIND_URL"),
+		// A card waits this long for its words (Haiku, thinking little,
+		// answers in a few seconds); after it, it goes up in the code's.
+		CardWords:     envBool("JARVIS_CARD_WORDS", true),
+		CardWordsWait: envDuration("JARVIS_CARD_WORDS_WAIT", 8*time.Second),
+		ContextURL:    os.Getenv("JARVIS_CONTEXT_URL"),
+		PhotosURL:     os.Getenv("JARVIS_PHOTOS_URL"),
+		SearchURL:     os.Getenv("JARVIS_SEARCH_URL"),
+		SearchToken:   os.Getenv("JARVIS_SEARCH_TOKEN"),
+		Jobs:          envBool("JARVIS_JOBS", true),
+		JobsInterval:  envDuration("JARVIS_JOBS_INTERVAL", 5*time.Minute),
 		// Least time between two runs of any job. Sites watch for bots; a
 		// person does not click through two shops in the same minute.
 		JobsCooldown:    envDuration("JARVIS_JOBS_COOLDOWN", time.Minute),

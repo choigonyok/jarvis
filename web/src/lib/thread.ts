@@ -1,4 +1,4 @@
-import type { Action, Card, Field } from "@/lib/gen/action";
+import type { Action, Card, Choice, Fact, Field } from "@/lib/gen/action";
 import type { Proposal as ProposalWire } from "@/lib/gen/proposal";
 import type {
   Draft as DraftWire,
@@ -47,9 +47,23 @@ export function isPrivateField(f: CardField): boolean {
   return Boolean(f.private) || f.kind === "secret";
 }
 
-export type ProposalCardBody = Narrow<Card, "fields"> & {
+/** A thing a card is about, as the code that raised it knows it: shown as it is, apart from the words. */
+export type CardFact = Fact;
+
+/**
+ * One answer a card offers (agent core/action Choice): it approves the card's
+ * one action - filling in its values first - or turns it down.
+ */
+export type CardChoice = Narrow<Choice, "decision" | "tone"> & {
+  decision: Decision;
+  tone?: "approve" | "neutral" | "reject";
+};
+
+export type ProposalCardBody = Narrow<Card, "fields" | "choices"> & {
   /** Present when the card is a form (a Joongna draft). */
   fields?: CardField[];
+  /** The answers the card offers; none: 승인 and 반려. */
+  choices?: CardChoice[];
 };
 
 /**

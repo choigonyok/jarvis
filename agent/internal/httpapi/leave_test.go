@@ -90,12 +90,12 @@ func TestAPayingJobsWayBackIsHeldOnAFlowCard(t *testing.T) {
 	for _, want := range []string{"작업: 무신사 방한화 구매", "진행 중인 결제: musinsa.com",
 		"막힌 이동: order.musinsa.com/order/sheet → pay.musinsapayments.com/mps/payment/PP5TESTPAYMENT0001?resultCode=0000&resultMessage",
 		"더하는 곳: musinsapayments.com 아래 모든 주소"} {
-		if !strings.Contains(card.Card.Body, want) {
-			t.Fatalf("본문에 %q 가 없습니다:\n%s", want, card.Card.Body)
+		if !strings.Contains(card.Card.Text(), want) {
+			t.Fatalf("카드에 %q 가 없습니다:\n%s", want, card.Card.Text())
 		}
 	}
-	if strings.Contains(card.Card.Body, "%EC") {
-		t.Fatalf("주소의 값은 카드에 남기지 않습니다:\n%s", card.Card.Body)
+	if strings.Contains(card.Card.Text(), "%EC") {
+		t.Fatalf("주소의 값은 카드에 남기지 않습니다:\n%s", card.Card.Text())
 	}
 	jobs.mu.Lock()
 	flows, stopped := append([]string(nil), jobs.flows...), append([]string(nil), jobs.stopped...)
@@ -222,7 +222,7 @@ func TestAPaymentLookingLeaveIsAskedBeforeAnyPayment(t *testing.T) {
 	if out["why"] != "waiting" || out["pending"] == "" {
 		t.Fatalf("결제 페이지로 보이면 카드로 묻습니다: %v", out)
 	}
-	if body := props.List()[0].Card.Body; !strings.Contains(body, "물은 까닭: 결제 페이지로 보이는 주소입니다") || strings.Contains(body, "진행 중인 결제") {
+	if body := props.List()[0].Card.Text(); !strings.Contains(body, "물은 까닭: 결제 페이지로 보이는 주소입니다") || strings.Contains(body, "진행 중인 결제") {
 		t.Fatalf("왜 물었는지: %s", body)
 	}
 

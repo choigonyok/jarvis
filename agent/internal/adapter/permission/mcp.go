@@ -308,15 +308,21 @@ func (g *Gate) Resolve(p proposal.Proposal, d proposal.Decision) {
 		return
 	}
 	title := p.Card.Title
+	// The answer the operator chose, in the card's own words, when it
+	// offered more than 승인 and 반려.
+	picked := ""
+	if label := p.Picked(); label != "" {
+		picked = "\n고른 답: " + label
+	}
 
 	if d == proposal.Reject {
 		why := ""
 		if p.Reason != "" {
 			why = "\n반려 이유: " + p.Reason
 		}
-		g.enqueue(fmt.Sprintf("[반려] 운영자가 승인 카드 %s(%s)를 반려했습니다.\n%s%s\n\n"+
+		g.enqueue(fmt.Sprintf("[반려] 운영자가 승인 카드 %s(%s)를 반려했습니다.\n%s%s%s\n\n"+
 			"실행하지 마세요. 이유를 캐묻지 말고, 같은 목적을 이루는 덜 위험한 방법이 있으면 제안하고 없으면 짧게 확인만 하세요.",
-			p.ID, title, p.Card.Body, why))
+			p.ID, title, p.Card.Text(), picked, why))
 		return
 	}
 
@@ -331,17 +337,17 @@ func (g *Gate) Resolve(p proposal.Proposal, d proposal.Decision) {
 			return
 		}
 		g.proposals.Settle(p.ID, proposal.Executed, res.Note)
-		g.enqueue(fmt.Sprintf("[승인됨·실행 완료] 운영자가 승인 카드 %s(%s)를 승인했고, 이미 실행했습니다: %s\n\n"+
+		g.enqueue(fmt.Sprintf("[승인됨·실행 완료] 운영자가 승인 카드 %s(%s)를 승인했고, 이미 실행했습니다: %s%s\n\n"+
 			"같은 도구를 다시 호출하지 마세요. 원래 하던 일이 남았으면 이어서 하고, 없으면 결과를 짧게 알리세요.",
-			p.ID, title, res.Note))
+			p.ID, title, res.Note, picked))
 		return
 	}
 
 	tool := toolOf(p.Action.Kind)
 	g.grant(tool, p.Action.Input)
-	g.enqueue(fmt.Sprintf("[승인됨] 운영자가 승인 카드 %s(%s)를 승인했습니다. 아직 실행되지 않았습니다.\n"+
+	g.enqueue(fmt.Sprintf("[승인됨] 운영자가 승인 카드 %s(%s)를 승인했습니다. 아직 실행되지 않았습니다.%s\n"+
 		"지금 %s 도구를 정확히 이 인자로 다시 호출하면 카드 없이 실행됩니다. 인자를 하나라도 바꾸면 새 카드가 올라갑니다.\n%s\n\n"+
-		"실행한 뒤 원래 하던 일을 이어서 하세요.", p.ID, title, tool, string(proposal.Canonical(p.Action.Input))))
+		"실행한 뒤 원래 하던 일을 이어서 하세요.", p.ID, title, picked, tool, string(proposal.Canonical(p.Action.Input))))
 }
 
 // resolveSuggestion settles a card the assistant raised on its own. Approved,

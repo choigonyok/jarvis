@@ -10,6 +10,7 @@ import {
   type AgentEvent,
   type Checklist,
   type Draft,
+  type CardChoice,
   type Decision,
   type Proposal,
   type Queued,
@@ -452,10 +453,16 @@ export function useThread() {
   );
 
   const decide = useCallback(
-    async (proposalId: string, decision: Decision, edits?: Record<string, string>, reason?: string) => {
+    async (
+      proposalId: string,
+      decision: Decision,
+      edits?: Record<string, string>,
+      reason?: string,
+      choice?: Pick<CardChoice, "id" | "label">,
+    ) => {
       setError(null);
       const secret = proposals.find((p) => p.id === proposalId)?.card.fields?.some(isPrivateField);
-      const posted = await decideProposal(proposalId, decision, edits, reason, secret);
+      const posted = await decideProposal(proposalId, decision, edits, reason, secret, choice);
       if (!posted.ok) {
         setError(posted.error);
         void hydrate();

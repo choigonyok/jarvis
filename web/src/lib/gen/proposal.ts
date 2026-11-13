@@ -81,6 +81,11 @@ export interface Proposal {
    */
   edits?: Edit[];
   /**
+   * Choice is the id of the answer the operator chose (Card.Choices); empty
+   * on a card of 승인 and 반려 alone.
+   */
+  choice?: string;
+  /**
    * Abandoned: nobody decided it - it was taken down (Abandon) because what
    * it asked stopped mattering: the job's turn came, a corrected card took
    * its place, the run behind it ended. Its state reads rejected for every

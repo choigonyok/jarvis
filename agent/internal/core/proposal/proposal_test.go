@@ -1,6 +1,7 @@
 package proposal
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -197,5 +198,77 @@ func TestWaitingIsWhatIsOnTheScreen(t *testing.T) {
 	long := Proposal{Card: action.Card{Title: "t", Body: strings.Repeat("가", 300)}, Origin: "kakao", At: "09:00"}
 	if l := long.line(now); !strings.Contains(l, strings.Repeat("가", waitingRunes)+"… (kakao, 09:00)") {
 		t.Fatalf("%s", l)
+	}
+}
+
+// wordsBy is a writer that puts its own title on every card it is given, and
+// counts how often it was asked.
+type wordsBy struct {
+	title string
+	asked int
+}
+
+func (w *wordsBy) Write(_ context.Context, p Proposal) action.Card {
+	w.asked++
+	c := p.Card
+	c.Title, c.Writer = w.title, action.WriterModel
+	c.Choices = []action.Choice{
+		{ID: "c1", Label: "22일로 옮기기", Decision: action.ChoiceApprove, Values: map[string]string{"date": "2026-11-22"}},
+		{ID: "c2", Label: "그대로 두기", Decision: action.ChoiceReject},
+	}
+	return c
+}
+
+// A card is worded before it is kept or told anyone; the same card asked
+// again keeps its words and is not worded twice, a changed one is worded
+// again; an edit by the operator changes values, not words.
+func TestTheWriterWordsACardOnce(t *testing.T) {
+	b := bus.New()
+	s := NewStore(b)
+	w := &wordsBy{title: "캠핑을 22일로 옮길까요?"}
+	s.SetWriter(w)
+	code := action.Card{Title: "일정 수정", Fields: []action.Field{{Key: "date", Label: "날짜", Value: "2026-11-15"}}}
+	p, _ := s.Open(Proposal{Action: action.Action{Kind: "x.y", Input: []byte(`{"a":1}`)}, Card: code})
+	if p.Card.Title != "캠핑을 22일로 옮길까요?" || p.Card.Draft != Digest(code) || w.asked != 1 {
+		t.Fatalf("%+v %d", p.Card, w.asked)
+	}
+	if err := s.Refresh(p.ID, action.Action{Kind: "x.y", Input: []byte(`{"a":1}`)}, code, 0); err != nil || w.asked != 1 {
+		t.Fatalf("같은 카드는 다시 쓰지 않습니다: %v %d", err, w.asked)
+	}
+	changed := code
+	changed.Body = "비가 와요"
+	w.title = "비가 와서, 22일로 옮길까요?"
+	if err := s.Refresh(p.ID, action.Action{Kind: "x.y", Input: []byte(`{"a":1}`)}, changed, 0); err != nil || w.asked != 2 {
+		t.Fatalf("바뀐 카드는 다시 씁니다: %v %d", err, w.asked)
+	}
+	edited := changed
+	edited.Fields = []action.Field{{Key: "date", Label: "날짜", Value: "2026-11-29"}}
+	if err := s.ReviseWith(p.ID, action.Action{Kind: "x.y"}, edited, map[string]string{"date": "2026-11-29"}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Get(p.ID)
+	if got.Card.Title != "비가 와서, 22일로 옮길까요?" || got.Card.Fields[0].Value != "2026-11-29" || len(got.Card.Choices) != 2 || w.asked != 2 {
+		t.Fatalf("고친 값에 쓴 문구 그대로: %+v", got.Card)
+	}
+}
+
+// A chosen answer is kept on the card, and must be one the card offers and
+// decide as it says.
+func TestAChoiceIsOneTheCardOffers(t *testing.T) {
+	s := NewStore(bus.New())
+	s.SetWriter(&wordsBy{title: "옮길까요?"})
+	p, _ := s.Open(Proposal{Action: action.Action{Kind: "x.y"}, Card: action.Card{Title: "일정 수정"}})
+	if err := s.DecideAs(p.ID, Approve, "", "nope"); err != ErrNoSuchChoice {
+		t.Fatalf("없는 답: %v", err)
+	}
+	if err := s.DecideAs(p.ID, Approve, "", "c2"); err != ErrNoSuchChoice {
+		t.Fatalf("반려하는 답으로 승인할 수 없습니다: %v", err)
+	}
+	if err := s.DecideAs(p.ID, Reject, "바빠서", "c2"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Get(p.ID)
+	if got.State != Rejected || got.Choice != "c2" || got.Picked() != "그대로 두기" || got.Reason != "바빠서" {
+		t.Fatalf("%+v", got)
 	}
 }

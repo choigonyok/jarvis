@@ -65,12 +65,12 @@ func TestAPasswordAskedFirstRaisesItsOwnCard(t *testing.T) {
 		t.Fatalf("제목: %q", card.Card.Title)
 	}
 	for _, want := range []string{"네이버페이 포인트 쿠폰 등록", "비밀번호 키패드가 떴습니다", "pay.naver.com", "읽지 못했습니다"} {
-		if !strings.Contains(card.Card.Body, want) {
-			t.Fatalf("카드에 %q 가 없습니다: %s", want, card.Card.Body)
+		if !strings.Contains(card.Card.Text(), want) {
+			t.Fatalf("카드에 %q 가 없습니다: %s", want, card.Card.Text())
 		}
 	}
-	if strings.Contains(card.Card.Body, "결제하기") || strings.Contains(card.Card.Body, "배송지") {
-		t.Fatalf("비밀번호 카드는 주문서를 말하지 않습니다: %s", card.Card.Body)
+	if strings.Contains(card.Card.Text(), "결제하기") || strings.Contains(card.Card.Text(), "배송지") {
+		t.Fatalf("비밀번호 카드는 주문서를 말하지 않습니다: %s", card.Card.Text())
 	}
 	if len(jobs.raised) != 1 || jobs.raised[0] != "165 "+first["pending"]+" pin" {
 		t.Fatalf("작업에 비밀번호 카드로 알려야 합니다: %v", jobs.raised)

@@ -780,3 +780,52 @@ func TestTheAgentAsksWhatWasTurnedDown(t *testing.T) {
 		t.Fatalf("토큰 없이는 안 됩니다: %d", code)
 	}
 }
+
+// A card's words come from the model for the services alone, and say why not
+// when there is no model or nothing to word: the agent then raises the card
+// in the code's words.
+func TestCardWords(t *testing.T) {
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	script := &llm.Script{Answer: func(_, _ string) (string, error) {
+		return `{"title":"토요일 캠핑을 일정에 넣을까요?","body":"","consequence":"넣으면 상대방 화면에도 보여요.","fields":[],"choices":[]}`, nil
+	}}
+	m := mind.New(mind.Options{
+		Store: store.NewMemory(), Log: obs.NewMemoryLog(quiet), LLM: script, Calendar: act.NewMemoryCalendar(),
+		Notifier: &act.MemoryNotifier{}, Loc: seoul, Now: time.Now, Logger: quiet, Policy: gate.DefaultPolicy(), Mode: "stack",
+	})
+	srv := httptest.NewServer(New(m, "secret", "console-secret", false, nil, quiet).Handler())
+	defer srv.Close()
+	post := func(token string, body string) (int, map[string]any) {
+		req, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/cards/words", strings.NewReader(body))
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var out map[string]any
+		_ = json.NewDecoder(resp.Body).Decode(&out)
+		return resp.StatusCode, out
+	}
+	card := `{"kind":"calendar.create_event","origin":"chat","title":"일정을 추가합니다","facts":[{"label":"더할 일정","value":"11월 14일 (토) 캠핑"}]}`
+	if code, _ := post("", card); code != http.StatusUnauthorized {
+		t.Fatalf("서비스 토큰 없이는 쓰지 않습니다: %d", code)
+	}
+	code, out := post("secret", card)
+	if code != http.StatusOK || out["title"] != "토요일 캠핑을 일정에 넣을까요?" {
+		t.Fatalf("%d %v", code, out)
+	}
+	if code, _ := post("secret", `{"kind":"x"}`); code != http.StatusBadRequest {
+		t.Fatalf("빈 카드: %d", code)
+	}
+	script.Answer = func(_, _ string) (string, error) { return "", llm.ErrBudget }
+	if code, _ := post("secret", card); code != http.StatusServiceUnavailable {
+		t.Fatalf("예산을 다 쓰면 503: %d", code)
+	}
+	script.Answer = func(_, _ string) (string, error) { return "모르겠어요", nil }
+	if code, _ := post("secret", card); code != http.StatusBadGateway {
+		t.Fatalf("읽을 수 없는 답은 502: %d", code)
+	}
+}

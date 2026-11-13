@@ -1,15 +1,12 @@
 "use client";
 
-import { useState } from "react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ChevronDown } from "lucide-react";
-import { HeldBack, HoldBar, holdsMoney, useHold } from "@/components/chat/hold";
-import { RejectForm } from "@/components/chat/reject-form";
-import { Button } from "@/components/ui/button";
+import { CardAnswers, CardFacts } from "@/components/chat/card-answers";
 import { isLiteral, readableBody, readableConsequence } from "@/lib/card-body";
 import { outcomeCopy, summarize } from "@/lib/ledger";
-import { asksYesNo, outcomeOf } from "@/lib/outcome";
-import type { Decision, Proposal } from "@/lib/thread";
+import { chosenOf, outcomeOf } from "@/lib/outcome";
+import type { CardChoice, Decision, Proposal } from "@/lib/thread";
 import { cn } from "@/lib/utils";
 
 /**
@@ -30,20 +27,28 @@ export function Entry({
   when,
 }: {
   proposal: Proposal;
-  onDecide: (decision: Decision, reason?: string) => void;
+  onDecide: (decision: Decision, reason?: string, choice?: Pick<CardChoice, "id" | "label">) => void;
   /** In place of the time, where no day stands above the row. */
   when?: string;
 }) {
-  const copy = outcomeCopy[outcomeOf(proposal)];
-  // The 먼저 card: 예 and 아니요, no reason asked (lib/outcome.ts).
-  const yesNo = asksYesNo(proposal);
+  const outcome = outcomeOf(proposal);
+  // An answer of the card's own is the word for how it ended; the other
+  // answer (아니요, 순서대로) keeps a question's grey edge.
+  const chosen = chosenOf(proposal);
+  const own = chosen && outcome !== "pending" && outcome !== "failed" && outcome !== "closed";
+  const copy = own
+    ? {
+        label: chosen.label,
+        edge: outcomeCopy[chosen.decision === "rejected" ? (chosen.tone === "neutral" ? "no" : "rejected") : outcome === "yes" ? "yes" : outcome].edge,
+      }
+    : outcomeCopy[outcome];
   const waiting = proposal.state === "pending";
   const literal = isLiteral(proposal);
   const time = when ?? (waiting ? proposal.at : (proposal.decidedAt ?? proposal.at));
-  // Money waits five seconds with 되돌리기, as on the chat's card (chat/hold.tsx).
-  const hold = useHold(proposal.id, () => onDecide("approved"));
-  // Turned down here as in the chat: asked why first (chat/reject-form.tsx).
-  const [asking, setAsking] = useState(false);
+  // The words and the facts apart, as on the chat's card.
+  const facts = proposal.card.facts ?? [];
+  const apart = facts.length > 0 || Boolean(proposal.card.writer);
+  const body = readableBody(proposal.card.body).trim();
 
   return (
     <Collapsible
@@ -82,7 +87,7 @@ export function Entry({
             left the word brighter than the request it describes, so the word
             keeps only what the edge cannot say - rejected from failed,
             approved from executed. */}
-        <span className="shrink-0 text-meta whitespace-nowrap text-dim">
+        <span className="max-w-[40%] shrink-0 truncate text-meta whitespace-nowrap text-dim">
           {copy.label}
         </span>
 
@@ -95,61 +100,42 @@ export function Entry({
       <CollapsibleContent className="overflow-hidden data-[state=closed]:animate-none">
         <div className="pt-0.5 pr-2 pb-3 pl-4">
           {/* What would actually run. A literal command keeps its line breaks
-              and scrolls; a module's sentence wraps. */}
-          <pre
-            className={cn(
-              "scrollbar-hairline rounded-md bg-well px-3 py-2.5 leading-relaxed text-dim",
-              literal
-                ? "overflow-x-auto font-mono text-aside"
-                : "tnum font-sans text-aside whitespace-pre-wrap [&_code]:font-sans",
-            )}
-          >
-            <code>{readableBody(proposal.card.body)}</code>
-          </pre>
+              and scrolls; a module's sentence wraps. A card with facts says
+              its words in prose and its facts in the well. */}
+          {apart ? (
+            <>
+              {body ? <p className="text-aside leading-relaxed whitespace-pre-wrap text-ink">{body}</p> : null}
+              <CardFacts facts={facts} className={cn(body && "mt-2")} />
+            </>
+          ) : (
+            <pre
+              className={cn(
+                "scrollbar-hairline rounded-md bg-well px-3 py-2.5 leading-relaxed text-dim",
+                literal
+                  ? "overflow-x-auto font-mono text-aside"
+                  : "tnum font-sans text-aside whitespace-pre-wrap [&_code]:font-sans",
+              )}
+            >
+              <code>{readableBody(proposal.card.body)}</code>
+            </pre>
+          )}
 
-          <p className="mt-2 text-aside leading-normal text-dim">
-            {readableConsequence(proposal.card.consequence)}
-          </p>
+          {proposal.card.consequence ? (
+            <p className="mt-2 text-aside leading-normal text-dim">{readableConsequence(proposal.card.consequence)}</p>
+          ) : null}
 
           {proposal.note ? (
             <p className="mt-1.5 text-meta text-faint">{proposal.note}</p>
           ) : null}
           {proposal.reason ? <p className="mt-1.5 text-aside leading-normal text-dim">이유: {proposal.reason}</p> : null}
 
-          {waiting && hold.holding ? (
-            <HoldBar className="mt-3" left={hold.left} onCancel={hold.cancel} />
-          ) : waiting && asking ? (
+          {waiting ? (
             <div className="mt-3">
-              <RejectForm onCancel={() => setAsking(false)} onReject={(why) => onDecide("rejected", why)} />
-            </div>
-          ) : waiting && yesNo ? (
-            <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-1.5">
-              <Button variant="soft" size="pair-sm" onClick={() => onDecide("rejected")}>
-                아니요
-              </Button>
-              <Button variant="approve" size="pair-sm" onClick={() => onDecide("approved")}>
-                예
-              </Button>
-            </div>
-          ) : waiting ? (
-            <div className="mt-3">
-              {hold.interrupted ? <HeldBack /> : null}
-              <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-1.5">
-                <Button
-                  variant="reject"
-                  size="pair-sm"
-                  onClick={() => setAsking(true)}
-                >
-                  반려
-                </Button>
-                <Button
-                  variant="approve"
-                  size="pair-sm"
-                  onClick={() => (holdsMoney(proposal) ? hold.start() : onDecide("approved"))}
-                >
-                  {hold.interrupted ? "다시 승인" : "승인"}
-                </Button>
-              </div>
+              <CardAnswers
+                proposal={proposal}
+                size="pair-sm"
+                onAnswer={(c, why) => onDecide(c.decision, why, c.id ? { id: c.id, label: c.label } : undefined)}
+              />
             </div>
           ) : null}
         </div>

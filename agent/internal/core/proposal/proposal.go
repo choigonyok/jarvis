@@ -79,6 +79,9 @@ type Proposal struct {
 	// Edits is every change the operator made to a form card before
 	// deciding, oldest first: what was proposed and what they wanted instead.
 	Edits []Edit `json:"edits,omitempty"`
+	// Choice is the id of the answer the operator chose (Card.Choices); empty
+	// on a card of 승인 and 반려 alone.
+	Choice string `json:"choice,omitempty"`
 	// Abandoned: nobody decided it - it was taken down (Abandon) because what
 	// it asked stopped mattering: the job's turn came, a corrected card took
 	// its place, the run behind it ended. Its state reads rejected for every
@@ -113,6 +116,18 @@ func (p Proposal) Changed() time.Time {
 
 // changed stamps the card as changed at now.
 func (p *Proposal) changed(now time.Time) { p.ChangedAt = now.Format(time.RFC3339) }
+
+// Picked is the label of the answer the operator chose; empty when the card
+// offered 승인 and 반려 alone, or is not decided.
+func (p Proposal) Picked() string {
+	if p.Choice == "" {
+		return ""
+	}
+	if ch, ok := p.Card.Choice(p.Choice); ok {
+		return ch.Label
+	}
+	return ""
+}
 
 // Edit is one revision of a form card by the operator.
 type Edit struct {
@@ -167,6 +182,9 @@ type Store struct {
 	// onOpen hears every new card - how it reaches the phone (output-svc).
 	onOpen  []func(Proposal)
 	onClose []func(Proposal)
+	// writer words every card raised, and every card asked again changed;
+	// nil leaves the code's words.
+	writer Writer
 }
 
 type file struct {
@@ -266,6 +284,9 @@ func NewStore(b *bus.Bus) *Store {
 // will arrive on. A producer that must block (the CLI permission callback)
 // reads the channel; one that must not (a background detector) ignores it.
 func (s *Store) Open(p Proposal) (*Proposal, <-chan Decision) {
+	// Worded before it is kept or told anyone: the phone and the screen see
+	// one card.
+	p.Card = s.word(p)
 	s.mu.Lock()
 	s.seq++
 	now := s.now()
@@ -320,6 +341,16 @@ func (s *Store) Decide(id string, d Decision) error { return s.DecideWhy(id, d, 
 
 // DecideWhy decides with the operator's reason, kept on the proposal.
 func (s *Store) DecideWhy(id string, d Decision, reason string) error {
+	return s.DecideAs(id, d, reason, "")
+}
+
+// ErrNoSuchChoice is an answer the card does not offer, or one that decides
+// otherwise than it says.
+var ErrNoSuchChoice = errors.New("이 카드에 없는 답입니다")
+
+// DecideAs decides with the operator's reason and the answer they chose of
+// the card's choices (empty: 승인 or 반려 of a card that offers no others).
+func (s *Store) DecideAs(id string, d Decision, reason, choice string) error {
 	if d != Approve && d != Reject {
 		return fmt.Errorf("invalid decision %q", d)
 	}
@@ -328,6 +359,13 @@ func (s *Store) DecideWhy(id string, d Decision, reason string) error {
 	if err != nil {
 		s.mu.Unlock()
 		return err
+	}
+	if choice != "" {
+		if ch, ok := p.Card.Choice(choice); !ok || ch.Decision != string(d) {
+			s.mu.Unlock()
+			return ErrNoSuchChoice
+		}
+		p.Choice = choice
 	}
 	now := s.now()
 	p.DecidedAt = now.Format("15:04")
@@ -380,7 +418,7 @@ func (s *Store) ReviseWith(id string, a action.Action, c action.Card, edits map[
 	}
 	now := s.now()
 	p.Action = a
-	p.Card = c
+	p.Card = keepWords(p.Card, c)
 	if len(edits) > 0 {
 		p.Edits = append(p.Edits, Edit{At: now.Format(time.RFC3339), Fields: edits})
 	}
@@ -394,6 +432,22 @@ func (s *Store) ReviseWith(id string, a action.Action, c action.Card, edits map[
 // where it is: unlike ReviseWith nobody edited it, and it is said at once.
 // Asking what it asked already is no change to the card (ChangedAt).
 func (s *Store) Refresh(id string, a action.Action, c action.Card, confidence float64) error {
+	if s.writer != nil {
+		// Asked as it was, the card keeps its words; asked otherwise, it is
+		// worded again - outside the lock, for the writer takes a while.
+		cur, ok := s.Get(id)
+		switch {
+		case !ok:
+			return ErrNotFound
+		case cur.State != Pending:
+			return ErrAlreadyDecided
+		case cur.Card.Draft != "" && cur.Card.Draft == Digest(c) && cur.Action.Kind == a.Kind &&
+			bytes.Equal(Canonical(cur.Action.Input), Canonical(a.Input)):
+			c = cur.Card
+		default:
+			c = s.word(Proposal{ID: cur.ID, Origin: cur.Origin, Action: a, Card: c, Confidence: confidence, Quiet: cur.Quiet})
+		}
+	}
 	s.mu.Lock()
 	p, unarchived, err := s.takeLocked(id, waiting)
 	if err != nil {
@@ -611,7 +665,7 @@ const waitingRunes = 240
 
 func (p Proposal) line(now time.Time) string {
 	var parts []string
-	for _, l := range strings.Split(p.Card.Body, "\n") {
+	for _, l := range strings.Split(p.Card.Text(), "\n") {
 		if l = strings.TrimSpace(l); l != "" {
 			parts = append(parts, l)
 		}

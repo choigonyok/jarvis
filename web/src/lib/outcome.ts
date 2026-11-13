@@ -1,5 +1,5 @@
 import { ACTION } from "@/lib/kinds";
-import type { Proposal } from "@/lib/thread";
+import type { CardChoice, Proposal } from "@/lib/thread";
 
 /**
  * A card that asks a question with two answers rather than for an approval:
@@ -29,4 +29,21 @@ export function outcomeOf(p: Pick<Proposal, "state" | "abandoned" | "action">): 
     if (p.state === "rejected") return "no";
   }
   return p.state;
+}
+
+/** The answer the operator chose among the card's own, when it offered its own. */
+export function chosenOf(p: Pick<Proposal, "choice" | "card">): CardChoice | undefined {
+  if (!p.choice) return undefined;
+  return p.card.choices?.find((c) => c.id === p.choice);
+}
+
+/**
+ * Whether a decided card's answer was a turn-down: 반려, or an answer of the
+ * card's own drawn as one. An answer that is only the other answer (아니요, 순서대로)
+ * is not, and says so in grey.
+ */
+export function turnedDown(p: Pick<Proposal, "state" | "abandoned" | "action" | "choice" | "card">): boolean {
+  if (outcomeOf(p) !== "rejected") return false;
+  const chosen = chosenOf(p);
+  return !chosen || chosen.tone !== "neutral";
 }

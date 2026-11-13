@@ -1,4 +1,4 @@
-import { API, type Decision } from "@/lib/thread";
+import { API, type CardChoice, type Decision } from "@/lib/thread";
 
 /**
  * What became of a decision posted: taken, or why not. `already`: the card had
@@ -17,14 +17,23 @@ export type Posted = { ok: true; already?: boolean } | { ok: false; error: strin
  */
 const sent = new Map<string, Decision>();
 
+/** The answer chosen on a card and not yet back, by its label, when the card offered its own answers. */
+const chosen = new Map<string, string>();
+
 /** The decision sent on a card and not yet back, if one was. */
 export function sentOn(proposalId: string): Decision | undefined {
   return sent.get(proposalId);
 }
 
+/** The label of the answer sent on a card and not yet back, if it offered its own. */
+export function sentChoice(proposalId: string): string | undefined {
+  return chosen.get(proposalId);
+}
+
 /** The card came back decided: it says so itself now. */
 export function heardBack(proposalId: string) {
   sent.delete(proposalId);
+  chosen.delete(proposalId);
 }
 
 /** How long a card may take to come back decided over the stream before it is read again. */
@@ -43,18 +52,26 @@ export async function decideProposal(
   reason?: string,
   /** The card has a secret field: a secret is a value, not a record, so its answer goes straight to the agent. */
   secret?: boolean,
+  /** The answer chosen among the card's own: it, not the decision, says what is decided. */
+  choice?: Pick<CardChoice, "id" | "label">,
 ): Promise<Posted> {
   try {
     const res = await fetch(secret ? `${API}/proposals/${proposalId}/decision` : `/api/chat/cards/${encodeURIComponent(proposalId)}/decision`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ decision, ...(edits ? { edits } : {}), ...(reason?.trim() ? { reason: reason.trim() } : {}) }),
+      body: JSON.stringify({
+        decision,
+        ...(edits ? { edits } : {}),
+        ...(reason?.trim() ? { reason: reason.trim() } : {}),
+        ...(choice ? { choice: choice.id } : {}),
+      }),
       // Sent as the page goes away too: an answer given is an answer kept.
       keepalive: true,
     });
     // 202 too: the answer is kept and will be done; the card says it is on its way.
     if (res.ok) {
       sent.set(proposalId, decision);
+      if (choice) chosen.set(proposalId, choice.label);
       return { ok: true };
     }
     // Decided already (agent: 이미 결재된 요청입니다) - read the card again.

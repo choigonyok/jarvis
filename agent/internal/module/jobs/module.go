@@ -270,12 +270,19 @@ type FirstInput struct {
 }
 
 // firstCard is a question with two answers, 예 and 아니요, and no reason to
-// give for either (the console draws it so, by its kind).
+// give for either: its 아니요 is the other answer, not a turn-down.
 func firstCard(in FirstInput) action.Card {
 	return action.Card{
-		Title:       "'" + in.JobTitle + "' 먼저 할까요?",
-		Body:        "기다리는 작업: " + in.JobTitle + "\n지금 브라우저를 쓰는 작업: " + in.Holder,
+		Title: "'" + in.JobTitle + "' 먼저 할까요?",
+		Facts: []action.Fact{
+			{Label: "기다리는 작업", Value: in.JobTitle},
+			{Label: "지금 브라우저를 쓰는 작업", Value: in.Holder},
+		},
 		Consequence: "예: 지금 작업을 잠시 멈추고 이 작업을 먼저 한 뒤 멈춘 작업을 이어서 해요. 아니요: 요청한 순서대로 해요.",
+		Choices: []action.Choice{
+			{ID: "yes", Label: "예", Decision: action.ChoiceApprove, Tone: action.ToneApprove},
+			{ID: "no", Label: "아니요", Decision: action.ChoiceReject, Tone: action.ToneNeutral},
+		},
 	}
 }
 
@@ -287,6 +294,24 @@ type AskInput struct {
 	Body     string         `json:"body,omitempty"`
 	Images   []string       `json:"images,omitempty"`
 	Fields   []action.Field `json:"fields,omitempty"`
+	// Choices are the answer buttons the job offered; none: 승인 and 반려.
+	Choices []action.Choice `json:"choices,omitempty"`
+}
+
+// jobChoices are the answer buttons a job offered, as a card's choices: one
+// that runs goes on with the answer, one that does not is an answer too -
+// drawn quietly, asking no reason.
+func jobChoices(in []ChoiceInput) []action.Choice {
+	var out []action.Choice
+	for i, c := range in {
+		ch := action.Choice{ID: fmt.Sprintf("c%d", i+1), Label: strings.TrimSpace(c.Label),
+			Decision: action.ChoiceReject, Tone: action.ToneNeutral}
+		if c.Run {
+			ch.Decision, ch.Tone, ch.Values = action.ChoiceApprove, action.ToneApprove, c.Values
+		}
+		out = append(out, ch)
+	}
+	return out
 }
 
 type LoginInput struct {
@@ -303,39 +328,45 @@ type SitesInput struct {
 }
 
 func sitesCard(in SitesInput) action.Card {
-	body := "작업: " + in.JobTitle + "\n더할 사이트: " + strings.Join(in.Sites, ", ")
+	body := ""
 	if in.Reason != "" {
-		body += "\n이유: " + in.Reason
+		body = "이유: " + in.Reason
 	}
 	return action.Card{
-		Title:       "작업이 사이트를 더 열려고 해요",
-		Body:        body,
+		Title: "작업이 사이트를 더 열려고 해요",
+		Body:  body,
+		Facts: []action.Fact{
+			{Label: "작업", Value: in.JobTitle},
+			{Label: "더할 사이트", Value: strings.Join(in.Sites, ", ")},
+		},
 		Consequence: "승인하면 이 작업이 이 사이트들(같은 도메인의 다른 주소 포함)도 열 수 있습니다. 반려하면 지금 사이트만 씁니다.",
 	}
 }
 
+// askCard is a job's question in the job's own words: its model wrote the
+// question, the body and the buttons, so no writer words it again.
 func askCard(in AskInput) action.Card {
-	body := "작업: " + in.JobTitle
-	if strings.TrimSpace(in.Body) != "" {
-		body += "\n\n" + in.Body
-	}
 	return action.Card{
 		Title:       in.Question,
-		Body:        body,
+		Body:        strings.TrimSpace(in.Body),
+		Facts:       []action.Fact{{Label: "작업", Value: in.JobTitle}},
 		Consequence: "승인하면 작업이 이 내용으로 이어서 합니다. 반려하면 하지 않습니다.",
 		Images:      in.Images,
 		Fields:      in.Fields,
+		Choices:     in.Choices,
+		Writer:      action.WriterJob,
 	}
 }
 
 func loginCard(in LoginInput) action.Card {
-	body := in.Site + " 에 로그인이 필요합니다."
+	body := "화면 탭에서 브라우저로 로그인한 뒤 승인을 누르세요."
 	if in.Reason != "" {
-		body += "\n" + in.Reason
+		body = in.Reason + "\n\n" + body
 	}
 	return action.Card{
 		Title:       "다시 로그인해 주세요: " + in.Site,
-		Body:        body + "\n\n화면 탭에서 브라우저로 로그인한 뒤 승인을 누르세요.",
+		Body:        body,
+		Facts:       []action.Fact{{Label: "로그인할 사이트", Value: in.Site}},
 		Consequence: "승인하면 이 사이트를 쓰는 작업을 바로 이어서 합니다. 반려하면 작업이 로그인 없이 할 수 있는 만큼만 하고 알려 드립니다.",
 	}
 }
@@ -422,7 +453,7 @@ func (m *Module) decided(p proposal.Proposal, d proposal.Decision) {
 		if json.Unmarshal(p.Action.Input, &in) != nil {
 			return
 		}
-		if err := m.store.Answer(ctx, in.JobID, p.ID, answerText(in, d, p.Reason)); err != nil {
+		if err := m.store.Answer(ctx, in.JobID, p.ID, answerOf(in, d, p.Reason, p.Picked())); err != nil {
 			if JobEnded(err) {
 				m.endedAnswer(p.ID, d)
 				return
@@ -642,7 +673,7 @@ func lateAnswer(p proposal.Proposal) string {
 			if approved {
 				d = proposal.Approve
 			}
-			return answerText(in, d, p.Reason) + "\n(늦게 전해진 답입니다)"
+			return answerOf(in, d, p.Reason, p.Picked()) + "\n(늦게 전해진 답입니다)"
 		}
 	}
 	word := "반려"
@@ -650,6 +681,9 @@ func lateAnswer(p proposal.Proposal) string {
 		word = "승인"
 	}
 	text := fmt.Sprintf("[카드 결정 · 늦게 전함] '%s' 카드(%s)가 %s됐습니다.", p.Card.Title, p.ID, word)
+	if label := p.Picked(); label != "" {
+		text += " 고른 답: " + label + "."
+	}
 	switch {
 	case p.Action.Kind == holder.KindFlow && approved:
 		text += " 그곳을 결제 흐름에 더했습니다. 막혔던 결제는 끝나지 않았을 수 있으니 주문 내역에서 그 주문이 생겼는지 먼저 확인하고, 없으면 결제를 처음부터 다시 진행하세요."
@@ -671,11 +705,22 @@ func lateAnswer(p proposal.Proposal) string {
 // said when deciding, which is often the answer itself ("이미 해결됐다,
 // 월요일로 잡아라").
 func answerText(in AskInput, d proposal.Decision, said string) string {
+	return answerOf(in, d, said, "")
+}
+
+// answerOf is answerText with the answer the operator chose among the card's
+// choices, by its label: what the job asked to tell apart.
+func answerOf(in AskInput, d proposal.Decision, said, picked string) string {
 	var b strings.Builder
 	if d != proposal.Approve {
 		fmt.Fprintf(&b, "[반려] %s", in.Question)
 	} else {
 		fmt.Fprintf(&b, "[승인] %s", in.Question)
+	}
+	if picked != "" {
+		fmt.Fprintf(&b, "\n- 고른 답: %s", picked)
+	}
+	if d == proposal.Approve {
 		for _, f := range in.Fields {
 			fmt.Fprintf(&b, "\n- %s: %s", f.Label, f.Value)
 		}

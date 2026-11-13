@@ -144,6 +144,11 @@ func (s *Server) recordDecision(p proposal.Proposal, d proposal.Decision) {
 	if p.Origin == proposal.OriginChat && strings.HasPrefix(p.Action.Kind, "calendar.") && p.Reason != "" {
 		payload["reason"] = p.Reason
 	}
+	// The answer chosen, in the card's words, when it offered more than 승인
+	// and 반려: a model's words, not the operator's.
+	if picked := p.Picked(); picked != "" {
+		payload["picked"] = picked
+	}
 	s.records.Write(record.Record{
 		Kind: KindIntentAnswer, Source: recordSource, SourceKey: "answer:" + p.ID,
 		Actor: "operator", Channel: "console", Subject: subject,

@@ -396,14 +396,21 @@ func (e *Engine) OnDecide(p proposal.Proposal, d proposal.Decision) {
 		if json.Unmarshal(p.Action.Input, &in) == nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			if err := e.cfg.Mind.Reject(ctx, in.IntentID, p.Reason); err != nil {
+			// The answer chosen says why as much as words do ("이미 했어요"):
+			// mind reads both.
+			why := p.Reason
+			if picked := p.Picked(); picked != "" {
+				why = strings.TrimSpace(picked + " · " + p.Reason)
+				why = strings.TrimSuffix(why, " ·")
+			}
+			if err := e.cfg.Mind.Reject(ctx, in.IntentID, why); err != nil {
 				e.log.Warn("mind 에 거절을 알리지 못했습니다", "intent", in.IntentID, "err", err)
 			}
 		}
 	}
 	e.emit(map[string]any{
 		"source": "agent", "type": "suggestion.decided", "subject": p.ID,
-		"data": map[string]any{"topic": "mind", "proposalId": p.ID, "title": p.Card.Title, "decision": string(d), "reason": p.Reason, "edits": len(p.Edits)},
+		"data": map[string]any{"topic": "mind", "proposalId": p.ID, "title": p.Card.Title, "decision": string(d), "reason": p.Reason, "edits": len(p.Edits), "picked": p.Picked()},
 		"key":  "suggestion:decided:" + p.ID,
 	})
 }

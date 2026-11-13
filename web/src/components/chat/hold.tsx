@@ -126,11 +126,24 @@ export function Sending({ className }: { className?: string }) {
  * waiting card has: it is still waiting, on Jarvis now, not on you. Still no
  * green: the colour comes with the card's own word that it is done.
  */
-export function Sent({ decision, yesNo, className }: { decision: Decision; yesNo?: boolean; className?: string }) {
+export function Sent({
+  decision,
+  yesNo,
+  label,
+  className,
+}: {
+  decision: Decision;
+  yesNo?: boolean;
+  /** The answer sent, as the card's own button said it. */
+  label?: string;
+  className?: string;
+}) {
   // A question's answer is said as the answer, not as an approval (lib/outcome.ts).
-  const said = yesNo
-    ? (decision === "approved" ? "예라고 답했어요" : "아니요라고 답했어요")
-    : (decision === "approved" ? "승인을 보냈어요" : "반려를 보냈어요");
+  const said = label
+    ? `'${label}' 보냈어요`
+    : yesNo
+      ? (decision === "approved" ? "예라고 답했어요" : "아니요라고 답했어요")
+      : (decision === "approved" ? "승인을 보냈어요" : "반려를 보냈어요");
   return (
     <p role="status" className={cn("anim-settle flex min-h-12 items-center gap-2 px-1 text-aside text-dim mouse:min-h-8", className)}>
       <span aria-hidden className="anim-breathe size-[5px] shrink-0 rounded-full bg-dim" />

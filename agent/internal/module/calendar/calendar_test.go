@@ -52,11 +52,12 @@ func TestUpdatePreviewShowsBothSides(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Preview: %v", err)
 	}
-	if !strings.Contains(card.Body, "- ") || !strings.Contains(card.Body, "+ ") {
-		t.Fatalf("이전/이후가 모두 보이지 않습니다:\n%s", card.Body)
+	// Both sides are facts: the code says them, whoever words the card.
+	if len(card.Facts) != 2 || card.Facts[0].Label != "지금" || card.Facts[1].Label != "바뀐 뒤" {
+		t.Fatalf("이전/이후가 모두 보이지 않습니다: %+v", card.Facts)
 	}
-	if !strings.Contains(card.Body, "19:00") || !strings.Contains(card.Body, "20:00") {
-		t.Fatalf("바뀌는 값이 카드에 없습니다:\n%s", card.Body)
+	if !strings.Contains(card.Facts[0].Value, "19:00") || !strings.Contains(card.Facts[1].Value, "20:00") {
+		t.Fatalf("바뀌는 값이 카드에 없습니다: %+v", card.Facts)
 	}
 }
 

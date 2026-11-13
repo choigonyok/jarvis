@@ -55,8 +55,8 @@ func TestModuleActionGetsTheModulesCard(t *testing.T) {
 	if card.Title != "일정을 추가합니다" {
 		t.Fatalf("모듈 카드가 아닙니다: %+v", card)
 	}
-	if card.Body != "9월 25일 (금) 19:00  합주" {
-		t.Fatalf("카드 본문: %q", card.Body)
+	if len(card.Facts) != 1 || card.Facts[0].Value != "9월 25일 (금) 19:00  합주" {
+		t.Fatalf("카드의 일정: %+v", card.Facts)
 	}
 }
 
@@ -257,7 +257,7 @@ func TestCorrectedCallReplacesTheWaitingCard(t *testing.T) {
 		t.Fatalf("치과와 고친 합주 둘이 기다려야 합니다: %d", n)
 	}
 	for _, p := range proposals.PendingChat() {
-		if p.Card.Body == first.Card.Body {
+		if p.Card.Text() == first.Card.Text() {
 			t.Fatalf("옛 합주 카드가 아직 기다립니다: %+v", p)
 		}
 	}

@@ -179,4 +179,9 @@ export interface Answer {
    * Reason is why, when the operator says (a rejection, mostly).
    */
   reason: string;
+  /**
+   * Choice is the id of the answer chosen among the card's choices; the
+   * choice, not Decision, then says what was decided.
+   */
+  choice?: string;
 }

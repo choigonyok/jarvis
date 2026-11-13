@@ -234,23 +234,23 @@ func (s *Server) raiseFlow(f FlowHost) string {
 // every job - and why it came up: the payment the job was making, or an
 // address that reads as a payment's; and the page that was stopped.
 func flowCard(f FlowHost) action.Card {
-	var lines []string
+	var facts []action.Fact
 	if f.JobTitle != "" {
-		lines = append(lines, "작업: "+f.JobTitle)
+		facts = append(facts, action.Fact{Label: "작업", Value: f.JobTitle})
 	}
 	if f.Paying != "" {
-		lines = append(lines, "진행 중인 결제: "+f.Paying+" (승인한 결제가 마무리하러 가는 길입니다)")
+		facts = append(facts, action.Fact{Label: "진행 중인 결제", Value: f.Paying + " (승인한 결제가 마무리하러 가는 길입니다)"})
 	} else {
-		lines = append(lines, "물은 까닭: 결제 페이지로 보이는 주소입니다")
+		facts = append(facts, action.Fact{Label: "물은 까닭", Value: "결제 페이지로 보이는 주소입니다"})
 	}
 	move := f.URL
 	if f.From != "" {
 		move = f.From + " → " + f.URL
 	}
-	lines = append(lines, "막힌 이동: "+move, "더하는 곳: "+f.Site+" 아래 모든 주소")
+	facts = append(facts, action.Fact{Label: "막힌 이동", Value: move}, action.Fact{Label: "더하는 곳", Value: f.Site + " 아래 모든 주소"})
 	return action.Card{
 		Title: "결제 흐름에 더하기 · " + f.Site,
-		Body:  strings.Join(lines, "\n"),
+		Facts: facts,
 		Consequence: fmt.Sprintf("승인하면 이곳을 결제 흐름에 남겨, 모든 작업이 작업의 사이트와 상관없이 이곳으로 페이지를 옮길 수 있습니다(결제 요청은 지금처럼 결제 카드로 묻습니다) · "+
 			"%d분 안에 승인하면 멈춰 있는 이동이 그대로 이어집니다", int(holder.Hold.Minutes())),
 	}

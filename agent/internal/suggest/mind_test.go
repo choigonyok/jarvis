@@ -93,8 +93,8 @@ func TestMindCards(t *testing.T) {
 	if len(list) != 1 || list[0].Action.Kind != mind.Approve {
 		t.Fatalf("카드 한 장: %+v", list)
 	}
-	if !strings.Contains(list[0].Card.Body, "“그러자”") || !strings.Contains(list[0].Card.Body, "내 일정에 추가") {
-		t.Fatalf("근거와 미리보기가 카드에: %q", list[0].Card.Body)
+	if !strings.Contains(list[0].Card.Body, "“그러자”") || len(list[0].Card.Facts) != 1 || list[0].Card.Facts[0].Value != "내 일정에 추가: 2026-10-17 강릉" {
+		t.Fatalf("근거는 글로, 미리보기는 실행될 일로 카드에: %+v", list[0].Card)
 	}
 
 	e.OnDecide(list[0], proposal.Reject)

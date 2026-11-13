@@ -156,7 +156,7 @@ func (m *Module) raiseVault(ctx context.Context, run int64, j Job, kind string, 
 	if err != nil {
 		return toolText(err.Error(), true), nil
 	}
-	card.Title = card.Title + " · 작업: " + j.Title
+	card.Facts = append(card.Facts, action.Fact{Label: "작업", Value: j.Title})
 	if open, ok := m.proposals.FindPendingWhere(func(p proposal.Proposal) bool {
 		return p.Action.Kind == kind && vaultJob(p) == j.ID
 	}); ok {

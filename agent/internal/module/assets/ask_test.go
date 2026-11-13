@@ -108,8 +108,8 @@ func TestEveryUnexplainedWithdrawalGetsACard(t *testing.T) {
 	}
 	first := cards[0]
 	if first.Origin != proposal.OriginNotice || first.Card.Title != "3/4 업비트에서 뺀 ₩120,000, 어디로 갔나요?" ||
-		!strings.Contains(first.Card.Body, "업비트 원화 출금 ₩120,000 · 3/4(수)") ||
-		!strings.Contains(first.Card.Body, "다른 투자 계좌로 다시 들어온 돈이 없어요.") {
+		!strings.Contains(first.Card.Text(), "뺀 돈: 업비트 원화 출금 ₩120,000 · 3/4(수)") ||
+		!strings.Contains(first.Card.Text(), "다른 투자 계좌로 다시 들어온 돈이 없어요.") {
 		t.Fatalf("카드: %+v", first.Card)
 	}
 	f := first.Card.Fields
@@ -118,12 +118,12 @@ func TestEveryUnexplainedWithdrawalGetsACard(t *testing.T) {
 		f[2].Key != "memo" || f[3].Key != "amount" || f[3].Value != "120000" {
 		t.Fatalf("칸: %+v", f)
 	}
-	if !strings.Contains(cards[1].Card.Body, "그 뒤 들어온 돈: 3/18 업비트 ₩175,000") {
-		t.Fatalf("후보 입금: %s", cards[1].Card.Body)
+	if !strings.Contains(cards[1].Card.Text(), "그 뒤 들어온 돈: 3/18 업비트 ₩175,000") {
+		t.Fatalf("후보 입금: %s", cards[1].Card.Text())
 	}
 	part := cards[2].Card
 	if part.Title != "4/22 한국투자증권에서 뺀 돈 중 ₩250,000은 어디로 갔나요?" ||
-		!strings.Contains(part.Body, "4/24 업비트 입금으로 옮김 ₩650,000") || !strings.Contains(part.Body, "남은 ₩250,000을 물어요.") ||
+		!strings.Contains(part.Text(), "4/24 업비트 입금으로 옮김 ₩650,000") || !strings.Contains(part.Text(), "물어보는 돈: ₩250,000") ||
 		part.Fields[3].Value != "250000" {
 		t.Fatalf("일부만 찾은 출금: %+v", part)
 	}

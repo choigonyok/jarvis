@@ -72,8 +72,8 @@ func TestAPaymentPasswordIsACardWithOneSecretField(t *testing.T) {
 	if !strings.Contains(card.Title, "네이버페이") || len(card.Fields) != 1 || !card.Fields[0].Private || card.Fields[0].Kind != "secret" {
 		t.Fatalf("비밀 칸 하나짜리 카드여야 합니다: %+v", card)
 	}
-	if !strings.Contains(card.Body, "pay.naver.com") || !strings.Contains(card.Body, "보이지 않으며") {
-		t.Fatalf("어디에 넣고 누가 못 보는지 말해야 합니다: %s", card.Body)
+	if !strings.Contains(card.Text(), "pay.naver.com") || !strings.Contains(card.Text(), "보이지 않으며") {
+		t.Fatalf("어디에 넣고 누가 못 보는지 말해야 합니다: %s", card.Text())
 	}
 	for _, bad := range []string{"", "12345", "1234567", "12a456", " 12 345"} {
 		if err := m.AcceptSecrets(ctx, pinAction(KindSavePin, "네이버페이"), map[string]string{"pin": bad}); err == nil {
@@ -94,8 +94,8 @@ func TestAPaymentPasswordIsACardWithOneSecretField(t *testing.T) {
 		t.Fatalf("모델에게는 저장했다는 말만: %q %v", res.Note, err)
 	}
 	again, _ := m.Preview(ctx, pinAction(KindSavePin, "네이버페이"))
-	if !strings.Contains(again.Body, "새로 바꿉니다") {
-		t.Fatalf("이미 있으면 바꾼다고 말해야 합니다: %s", again.Body)
+	if !strings.Contains(again.Text(), "저장된 비밀번호: 새 비밀번호로 바꿉니다") {
+		t.Fatalf("이미 있으면 바꾼다고 말해야 합니다: %s", again.Text())
 	}
 	if _, err := m.Execute(ctx, pinAction(KindForgetPin, "네이버페이")); err != nil || len(f.pins) != 0 {
 		t.Fatalf("지우기: %v %v", f.pins, err)

@@ -2,9 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { Check, Minus, X } from "lucide-react";
-import { HeldBack, HoldBar, Sending, Sent, holdsMoney, useHold } from "@/components/chat/hold";
-import { RejectForm } from "@/components/chat/reject-form";
-import { Button } from "@/components/ui/button";
+import { CardAnswers, CardFacts, answersOf } from "@/components/chat/card-answers";
+import { Sending, Sent } from "@/components/chat/hold";
 import { CodeBlock, CodeBlockContent, CodeBlockCopyButton } from "@/components/ui/code-block";
 import { FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -12,11 +11,11 @@ import { Lightbox } from "@/components/ui/lightbox";
 import { SecretInput } from "@/components/ui/secret-input";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { isPrivateField, type CardField, type Decision, type Proposal } from "@/lib/thread";
+import { isPrivateField, type CardChoice, type CardField, type Decision, type Proposal } from "@/lib/thread";
 import { ACTION, MODULE, ofModule } from "@/lib/kinds";
 import { isLiteral, readableBody, readableConsequence, readableTitle } from "@/lib/card-body";
-import { heardBack, sentOn } from "@/lib/decide";
-import { asksYesNo, outcomeOf, type Outcome } from "@/lib/outcome";
+import { heardBack, sentChoice, sentOn } from "@/lib/decide";
+import { asksYesNo, chosenOf, outcomeOf, turnedDown, type Outcome } from "@/lib/outcome";
 import { photoUrl } from "@/lib/uploads";
 import { cn } from "@/lib/utils";
 
@@ -39,10 +38,23 @@ export function ProposalCard({
 }: {
   proposal: Proposal;
   /** May resolve to a reason the decision was refused (a form card missing a value). */
-  onDecide: (decision: Decision, edits?: Record<string, string>, reason?: string) => Promise<string | null> | void;
+  onDecide: (
+    decision: Decision,
+    edits?: Record<string, string>,
+    reason?: string,
+    choice?: Pick<CardChoice, "id" | "label">,
+  ) => Promise<string | null> | void;
 }) {
   const outcome = outcomeOf(proposal);
-  const settled = outcome === "pending" ? null : settledCopy[outcome];
+  // An answer of the card's own says how it ended in its own words; one that
+  // is the other answer (아니요, 순서대로) reads in grey, as a question's 아니요.
+  const chosen = chosenOf(proposal);
+  const settled =
+    outcome === "pending"
+      ? null
+      : chosen && outcome !== "failed" && outcome !== "closed"
+        ? { ...settledCopy[chosen.decision === "rejected" ? (chosen.tone === "neutral" ? "no" : "rejected") : outcome === "yes" ? "yes" : outcome], label: chosen.label }
+        : settledCopy[outcome];
   // A question with two answers (the 먼저 card): 예 and 아니요, no reason asked.
   const yesNo = asksYesNo(proposal);
   const fields = proposal.card.fields ?? [];
@@ -52,22 +64,31 @@ export function ProposalCard({
   );
   const [refusal, setRefusal] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [asking, setAsking] = useState(false);
   // Taken, and the card not back with it yet (lib/decide.ts): said in the
   // buttons' place until it is, here or wherever the card is drawn again.
   const [sentAs, setSentAs] = useState(() => sentOn(proposal.id));
   const onItsWay = settled ? undefined : sentAs;
+  const decided = outcome !== "pending";
   useEffect(() => {
-    if (settled) heardBack(proposal.id);
-  }, [settled, proposal.id]);
+    if (decided) heardBack(proposal.id);
+  }, [decided, proposal.id]);
   // A required field left empty (the price of a listing, say) is the one thing
-  // a form card cannot be approved without: the operator fills it in, never the model.
-  const missing = fields.filter((f) => f.required && !(values[f.key] ?? "").trim());
+  // a form card cannot be approved without: the operator fills it in, never the
+  // model - or an answer of the card's own that fills it in.
+  const missingFor = (c?: CardChoice) =>
+    fields.filter((f) => f.required && !(c?.values?.[f.key] ?? values[f.key] ?? "").trim());
+  const missing = missingFor();
+  // Said under the buttons only when no answer that runs can be chosen yet.
+  const runs = answersOf(proposal).filter((c) => c.decision === "approved");
+  const stuck = runs.length > 0 && runs.every((c) => missingFor(c).length > 0);
+  // A card that offers only answers, none of them a turn-down, is a question.
+  const question = yesNo || Boolean(proposal.card.choices?.length && proposal.card.choices.every((c) => c.tone !== "reject"));
 
-  async function decide(d: Decision, because?: string) {
+  async function decide(c: CardChoice, because?: string) {
     setRefusal(null);
     setBusy(true);
-    const reason = await onDecide(d, form && d === "approved" ? values : undefined, because);
+    const own = c.id ? { id: c.id, label: c.label } : undefined;
+    const reason = await onDecide(c.decision, form && c.decision === "approved" ? values : undefined, because, own);
     setBusy(false);
     if (reason) {
       setRefusal(reason);
@@ -77,12 +98,16 @@ export function ProposalCard({
     // A typed password is not kept on screen once it has been handed over.
     setValues((cur) => Object.fromEntries(Object.entries(cur).map(([k, v]) => [k, fields.some((f) => f.key === k && isPrivateField(f)) ? "" : v])));
   }
-  // Money: the approval waits five seconds with 되돌리기 on the card (chat/hold.tsx).
-  const hold = useHold(proposal.id, () => void decide("approved"));
   // A command or a file's content the CLI would run is shown as the literal
   // call; anything else - a module's change, a job's or the browser's
   // arguments - as words (lib/card-body.ts).
   const literal = isLiteral(proposal);
+  // What Jarvis says and what the code knows, apart: the words in prose, the
+  // facts in the well. A card from before cards had facts keeps its body in
+  // the well, as it was drawn.
+  const facts = proposal.card.facts ?? [];
+  const apart = facts.length > 0 || Boolean(proposal.card.writer);
+  const body = readableBody(proposal.card.body).trim();
 
   return (
     <article
@@ -109,13 +134,16 @@ export function ProposalCard({
         {settled ? null : (
           <div className="mb-2 flex items-center gap-2 text-meta text-faint">
             <span aria-hidden className="anim-breathe size-[5px] rounded-full bg-dim" />
-            <span>{busy ? "보내는 중" : onItsWay ? "반영 중" : yesNo ? "답 대기" : "결재 대기"}</span>
+            <span>{busy ? "보내는 중" : onItsWay ? "반영 중" : question ? "답 대기" : "결재 대기"}</span>
           </div>
         )}
 
         <h3 className="text-body leading-snug font-medium text-foreground">
           {readableTitle(proposal.card.title)}
         </h3>
+
+        {apart && body ? <p className="mt-1.5 text-ui leading-relaxed whitespace-pre-wrap text-ink">{body}</p> : null}
+        {apart ? <CardFacts facts={facts} className="mt-3" /> : null}
 
         {proposal.card.images?.length ? (
           <CardPhotos names={proposal.card.images} cover={!ofModule(proposal.action.kind, MODULE.mind)} />
@@ -134,7 +162,7 @@ export function ProposalCard({
             because a broken line changes what it says, so it scrolls. A
             sentence has no such constraint and wraps, which is what a narrow
             screen needs. */}
-        {form && settled ? null : literal ? (
+        {form && settled ? null : apart ? null : literal ? (
           <CodeBlock className="mt-3 text-dim">
             <CodeBlockContent>
               <code>{readableBody(proposal.card.body)}</code>
@@ -147,9 +175,9 @@ export function ProposalCard({
           </pre>
         )}
 
-        <p className="mt-2.5 text-aside leading-normal text-dim">
-          {readableConsequence(proposal.card.consequence)}
-        </p>
+        {proposal.card.consequence ? (
+          <p className="mt-2.5 text-aside leading-normal text-dim">{readableConsequence(proposal.card.consequence)}</p>
+        ) : null}
       </div>
 
       <div className="border-t border-edge-soft px-3 py-2.5 sm:px-4">
@@ -168,57 +196,28 @@ export function ProposalCard({
             {/* Where a no goes: mind's own question, turned down, is not put
                 again for a while (its topic two weeks, an entry like it a
                 month, a place told 다시 묻지 마 never). */}
-            {outcome === "rejected" && proposal.action.kind === ACTION.mindApprove ? (
+            {turnedDown(proposal) && proposal.action.kind === ACTION.mindApprove ? (
               <span className="w-full text-faint">같은 제안은 한동안 다시 묻지 않아요.</span>
             ) : null}
           </p>
-        ) : hold.holding ? (
-          <HoldBar left={hold.left} onCancel={hold.cancel} />
         ) : busy ? (
           <Sending />
         ) : onItsWay ? (
-          <Sent decision={onItsWay} yesNo={yesNo} />
-        ) : asking ? (
-          <RejectForm busy={busy} onCancel={() => setAsking(false)} onReject={(why) => void decide("rejected", why)} />
-        ) : yesNo ? (
-          // Two answers of one weight: 아니요 is not a turn-down, so it asks
-          // no reason and is not red; 예 keeps the approval's place and look.
-          <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end sm:gap-1.5">
-            <Button variant="soft" size="pair" onClick={() => void decide("rejected")} disabled={busy}>
-              아니요
-            </Button>
-            <Button variant="approve" size="pair" onClick={() => void decide("approved")} disabled={busy}>
-              예
-            </Button>
-          </div>
+          <Sent decision={onItsWay} yesNo={yesNo} label={sentChoice(proposal.id)} />
         ) : (
           /* This is the decision the whole product exists to collect, and on
              a phone it was a pair of 32px targets sitting a thumb-width apart.
              Full width, 48px, and a real gap between them: reaching for 승인
              must not be able to land on 반려. */
-          <div>
-            {hold.interrupted ? <HeldBack /> : null}
-            <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end sm:gap-1.5">
-              <Button
-                variant="reject"
-                size="pair"
-                onClick={() => setAsking(true)}
-                disabled={busy}
-              >
-                반려
-              </Button>
-              <Button
-                variant="approve"
-                size="pair"
-                onClick={() => (holdsMoney(proposal) ? hold.start() : void decide("approved"))}
-                disabled={busy || missing.length > 0}
-              >
-                {hold.interrupted ? "다시 승인" : "승인"}
-              </Button>
-            </div>
-          </div>
+          <CardAnswers
+            proposal={proposal}
+            size="pair"
+            busy={busy}
+            blocked={(c) => c.decision === "approved" && missingFor(c).length > 0}
+            onAnswer={(c, why) => void decide(c, why)}
+          />
         )}
-        {!settled && (refusal || missing.length > 0) ? (
+        {!settled && (refusal || stuck) ? (
           <p role={refusal ? "alert" : undefined} className={cn("mt-2 px-1 text-aside", refusal ? "text-reject" : "text-faint")}>
             {refusal ?? `${missing.map((f) => f.label).join(", ")}을(를) 적으면 승인할 수 있어요.`}
           </p>

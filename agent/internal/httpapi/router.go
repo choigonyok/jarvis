@@ -627,6 +627,29 @@ func (s *Server) takeAnswer(ctx context.Context, m queue.Message) error {
 // decide applies an answer to a card and says how it went: a status, and why
 // when it did not.
 func (s *Server) decide(ctx context.Context, id string, a thread.Answer) (int, string) {
+	if a.Choice != "" {
+		// A chosen answer decides as it says, with what it fills in over
+		// the form as the operator left it.
+		p, ok := s.proposals.Get(id)
+		if !ok {
+			return http.StatusNotFound, "그런 요청이 없습니다."
+		}
+		ch, ok := p.Card.Choice(a.Choice)
+		if !ok {
+			return http.StatusBadRequest, proposal.ErrNoSuchChoice.Error()
+		}
+		a.Decision = ch.Decision
+		if len(ch.Values) > 0 {
+			edits := map[string]string{}
+			for k, v := range a.Edits {
+				edits[k] = v
+			}
+			for k, v := range ch.Values {
+				edits[k] = v
+			}
+			a.Edits = edits
+		}
+	}
 	if proposal.Decision(a.Decision) == proposal.Approve {
 		// Private fields first, and out of the edits before they are kept.
 		if msg, code := s.acceptSecrets(ctx, id, a.Edits); msg != "" {
@@ -636,12 +659,14 @@ func (s *Server) decide(ctx context.Context, id string, a thread.Answer) (int, s
 			return code, msg
 		}
 	}
-	err := s.proposals.DecideWhy(id, proposal.Decision(a.Decision), a.Reason)
+	err := s.proposals.DecideAs(id, proposal.Decision(a.Decision), a.Reason, a.Choice)
 	switch {
 	case errors.Is(err, proposal.ErrNotFound):
 		return http.StatusNotFound, "그런 요청이 없습니다."
 	case errors.Is(err, proposal.ErrAlreadyDecided):
 		return http.StatusConflict, "이미 결재된 요청입니다."
+	case errors.Is(err, proposal.ErrNoSuchChoice):
+		return http.StatusBadRequest, err.Error()
 	case err != nil:
 		return http.StatusBadRequest, err.Error()
 	}

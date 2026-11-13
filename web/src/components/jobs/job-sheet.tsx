@@ -36,7 +36,7 @@ import {
 import { type Job, type JobDetail, type JobEvent, LIVE, send, stateLabel, stateTone, when } from "@/lib/jobs";
 import { ACTION, JOB_EVENT } from "@/lib/kinds";
 import { usePaged } from "@/lib/paging";
-import type { Decision, Proposal } from "@/lib/thread";
+import type { CardChoice, Decision, Proposal } from "@/lib/thread";
 import { photoUrl } from "@/lib/uploads";
 import { HttpError, useResource } from "@/lib/use-resource";
 import { SAY } from "@/lib/say";
@@ -52,7 +52,13 @@ export function JobSheet({
 }: {
   job: Job | null;
   proposals: Proposal[];
-  onDecide: (id: string, d: Decision, edits?: Record<string, string>, reason?: string) => Promise<string | null>;
+  onDecide: (
+    id: string,
+    d: Decision,
+    edits?: Record<string, string>,
+    reason?: string,
+    choice?: Pick<CardChoice, "id" | "label">,
+  ) => Promise<string | null>;
   onOpenChange: (open: boolean) => void;
   onChanged: () => void;
 }) {
@@ -75,7 +81,13 @@ function Body({
 }: {
   job: Job;
   proposals: Proposal[];
-  onDecide: (id: string, d: Decision, edits?: Record<string, string>, reason?: string) => Promise<string | null>;
+  onDecide: (
+    id: string,
+    d: Decision,
+    edits?: Record<string, string>,
+    reason?: string,
+    choice?: Pick<CardChoice, "id" | "label">,
+  ) => Promise<string | null>;
   onChanged: () => void;
 }) {
   // Every step lands here a few seconds after it happens while a run is live.
@@ -158,8 +170,8 @@ function Body({
           <ProposalCard
             key={p.id}
             proposal={p}
-            onDecide={async (d, edits, reason) => {
-              const err = await onDecide(p.id, d, edits, reason);
+            onDecide={async (d, edits, reason, choice) => {
+              const err = await onDecide(p.id, d, edits, reason, choice);
               if (!err) {
                 await load();
                 onChanged();

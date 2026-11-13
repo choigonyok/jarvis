@@ -24,6 +24,9 @@ export interface Action {
  * Card is what a person actually judges. Body is the whole point: approving a
  * change while seeing only its title is approving blind, so a card that edits
  * or removes something renders both sides of the change.
+ * The words - title, body, consequence, the fields' labels, the choices - may
+ * be a model's (Writer). Facts are the code's, and so are the fields' keys and
+ * kinds: what the card is about and what runs are never put in words alone.
  */
 export interface Card {
   title: string;
@@ -39,7 +42,106 @@ export interface Card {
    * approving, and the module turns the edits into a new input (Editor).
    */
   fields?: Field[];
+  /**
+   * Facts are what the card is about as the code that raised it knows it:
+   * the amount a payment window took, the site, the entry. They are shown
+   * as they are, apart from the words, and no writer changes them.
+   */
+  facts?: Fact[];
+  /**
+   * Choices are the answers the card offers, in the order shown. None: 승인
+   * and 반려.
+   */
+  choices?: Choice[];
+  /**
+   * Writer is whose words these are: empty, the code's that raised the card;
+   * WriterModel, mind's writer's; WriterJob, the job's own model.
+   */
+  writer?: string;
+  /**
+   * Draft is the digest of the code's card the words were written from: the
+   * same card asked again keeps its words (proposal.Store.Refresh).
+   */
+  draft?: string;
 }
+/**
+ * Whose words a card's are (Card.Writer).
+ */
+export const WriterModel = "model";
+/**
+ * Whose words a card's are (Card.Writer).
+ */
+export const WriterJob = "job";
+/**
+ * Fact is one thing a card is about, as a label and a value.
+ */
+export interface Fact {
+  label: string;
+  value: string;
+  /**
+   * Lead: the title says this value as it is - a payment's amount, which
+   * the operator must read before anything else.
+   */
+  lead?: boolean;
+  /**
+   * Warn: something to see before deciding - two amounts that differ.
+   */
+  warn?: boolean;
+}
+/**
+ * Choice is one answer a card offers. Every answer approves or turns down the
+ * card's one action: approving runs it as the form stands with Values put in,
+ * turning down runs nothing. What a button may do is the card's action, and
+ * nothing a writer can make up.
+ */
+export interface Choice {
+  id: string;
+  label: string;
+  /**
+   * Decision is ChoiceApprove or ChoiceReject.
+   */
+  decision: string;
+  /**
+   * Values fill the card's fields when it is chosen: "22일로 옮기기" is the
+   * form with its day set.
+   */
+  values?: { [key: string]: string};
+  /**
+   * Tone is how it is drawn: ToneApprove, ToneNeutral (an answer that is
+   * neither a yes to run nor a turn-down: 아니요 of a question), ToneReject.
+   */
+  tone?: string;
+  /**
+   * Why: choosing it asks why first (a turn-down the next judgement learns from).
+   */
+  why?: boolean;
+}
+/**
+ * A choice's decision: proposal.Approve and proposal.Reject, which this
+ * package cannot import.
+ */
+export const ChoiceApprove = "approved";
+/**
+ * A choice's decision: proposal.Approve and proposal.Reject, which this
+ * package cannot import.
+ */
+export const ChoiceReject = "rejected";
+/**
+ * A choice's tone.
+ */
+export const ToneApprove = "approve";
+/**
+ * A choice's tone.
+ */
+export const ToneNeutral = "neutral";
+/**
+ * A choice's tone.
+ */
+export const ToneReject = "reject";
+/**
+ * MaxChoices is as many answers as fit side by side on a phone, two rows.
+ */
+export const MaxChoices = 4;
 /**
  * Field is one value on a card the operator may edit.
  */

@@ -12,7 +12,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { filters, groupByDay, matches, newestFirst, readArchive, waitingSince, withArchive, type Filter } from "@/lib/ledger";
 import { usePaged } from "@/lib/paging";
-import { isPending, type Decision, type Proposal } from "@/lib/thread";
+import { isPending, type CardChoice, type Decision, type Proposal } from "@/lib/thread";
 import { useResource } from "@/lib/use-resource";
 import { useThread } from "@/lib/use-thread";
 
@@ -53,7 +53,8 @@ export function Ledger() {
   // Nothing raised is said once the archive has answered too: until then the
   // older days may only be on their way, and if it fails that is said instead.
   const empty = hydrated && archive.data !== undefined && shown.length === 0 && waiting.length === 0;
-  const decideOn = (proposal: Proposal) => (d: Decision, reason?: string) => void decide(proposal.id, d, undefined, reason);
+  const decideOn = (proposal: Proposal) => (d: Decision, reason?: string, choice?: Pick<CardChoice, "id" | "label">) =>
+    void decide(proposal.id, d, undefined, reason, choice);
 
   return (
     <div className="flex h-full min-h-0 flex-col">

@@ -19,15 +19,20 @@ export function RejectForm({
   busy,
   onCancel,
   onReject,
+  label = "반려",
 }: {
   busy?: boolean;
   onCancel: () => void;
   onReject: (reason: string) => void;
+  /** The answer being given, as its button says it: 반려, or the card's own word for it. */
+  label?: string;
 }) {
   const [why, setWhy] = useState("");
   return (
     <div className="anim-settle space-y-2">
-      <p className="px-1 text-aside text-dim">반려하는 이유가 있으면 알려 주세요. 다음 제안에 반영해요.</p>
+      <p className="px-1 text-aside text-dim">
+        {label === "반려" ? "반려하는" : "이렇게 답하는"} 이유가 있으면 알려 주세요. 다음 제안에 반영해요.
+      </p>
       {/* The chip lit is the reason written: typing another lights none. */}
       <ToggleGroup
         type="single"
@@ -71,7 +76,7 @@ export function RejectForm({
           onClick={() => onReject(why)}
           disabled={busy}
         >
-          반려
+          {label}
         </Button>
       </div>
     </div>

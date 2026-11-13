@@ -236,14 +236,15 @@ func (m *Module) Preview(ctx context.Context, a action.Action) (action.Card, err
 	}
 	switch a.Kind {
 	case KindSave:
-		body := fmt.Sprintf("%s 와 그 하위 주소(예: login.%s)의 로그인 화면에서만 자동으로 넣습니다.\n"+
-			"넣은 아이디·비밀번호는 암호화해서 보관하고, 자비스(모델)에게 보이지 않으며 대화 기록에도 남지 않습니다.", domain, domain)
+		body := "넣은 아이디·비밀번호는 암호화해서 보관하고, 자비스(모델)에게 보이지 않으며 대화 기록에도 남지 않습니다."
+		facts := []action.Fact{{Label: "넣는 곳", Value: fmt.Sprintf("%s 와 그 하위 주소(예: login.%s)의 로그인 화면", domain, domain)}}
 		if old, ok := m.find(ctx, domain); ok {
-			body += fmt.Sprintf("\n이미 저장된 정보(아이디 %s)를 새로 바꿉니다.", old.Hint)
+			facts = append(facts, action.Fact{Label: "바꿀 저장된 아이디", Value: old.Hint})
 		}
 		return action.Card{
 			Title:       "로그인 정보 저장: " + in.Name,
 			Body:        body,
+			Facts:       facts,
 			Consequence: "승인하면 이 사이트의 로그인 화면에서 카드 없이 자동으로 로그인합니다.",
 			Fields: []action.Field{
 				{Key: "username", Label: "아이디", Kind: "text", Required: true, Private: true},
@@ -251,11 +252,12 @@ func (m *Module) Preview(ctx context.Context, a action.Action) (action.Card, err
 			},
 		}, nil
 	case KindForget:
-		body := domain + " 에 저장된 로그인 정보를 지웁니다."
+		facts := []action.Fact{{Label: "사이트", Value: domain}}
 		if old, ok := m.find(ctx, domain); ok {
-			body = fmt.Sprintf("%s 에 저장된 로그인 정보(아이디 %s)를 지웁니다.", domain, old.Hint)
+			facts = append(facts, action.Fact{Label: "지울 아이디", Value: old.Hint})
 		}
-		return action.Card{Title: "로그인 정보 지우기: " + in.Name, Body: body, Consequence: "지우면 이 사이트에 자동으로 로그인하지 않습니다."}, nil
+		return action.Card{Title: "로그인 정보 지우기: " + in.Name, Body: "저장된 로그인 정보를 지웁니다.", Facts: facts,
+			Consequence: "지우면 이 사이트에 자동으로 로그인하지 않습니다."}, nil
 	}
 	return action.Card{}, fmt.Errorf("모르는 동작: %s", a.Kind)
 }
@@ -269,18 +271,20 @@ func (m *Module) previewPin(ctx context.Context, a action.Action) (action.Card, 
 	}
 	_, saved := m.pinSaved(ctx, site)
 	if a.Kind == KindForgetPin {
-		return action.Card{Title: "결제 비밀번호 지우기: " + name, Body: name + " 결제 비밀번호를 보관함에서 지웁니다.",
+		return action.Card{Title: "결제 비밀번호 지우기: " + name, Body: "결제 비밀번호를 보관함에서 지웁니다.",
+			Facts:       []action.Fact{{Label: "결제 수단", Value: name}},
 			Consequence: "지우면 " + name + " 결제 비밀번호 키패드에 자동으로 넣지 않습니다."}, nil
 	}
-	body := fmt.Sprintf("%s 결제 비밀번호 키패드(%s 아래의 결제 화면)에서만 자동으로 넣습니다.\n"+
-		"넣은 숫자는 암호화해서 보관하고, 자비스(모델)에게 보이지 않으며 대화 기록에도 남지 않습니다.\n"+
-		"결제는 지금처럼 결제 승인 카드를 승인한 것만 진행됩니다.", name, site)
+	body := "넣은 숫자는 암호화해서 보관하고, 자비스(모델)에게 보이지 않으며 대화 기록에도 남지 않습니다.\n" +
+		"결제는 지금처럼 결제 승인 카드를 승인한 것만 진행됩니다."
+	facts := []action.Fact{{Label: "결제 수단", Value: name}, {Label: "넣는 곳", Value: name + " 결제 비밀번호 키패드(" + site + " 아래의 결제 화면)"}}
 	if saved {
-		body += "\n이미 저장된 비밀번호를 새로 바꿉니다."
+		facts = append(facts, action.Fact{Label: "저장된 비밀번호", Value: "새 비밀번호로 바꿉니다"})
 	}
 	return action.Card{
 		Title:       "결제 비밀번호 저장: " + name,
 		Body:        body,
+		Facts:       facts,
 		Consequence: "승인하면 승인된 결제의 비밀번호 키패드에서 이 비밀번호를 자동으로 넣습니다.",
 		Fields: []action.Field{
 			{Key: "pin", Label: "결제 비밀번호(숫자 6자리)", Kind: "secret", Required: true, Private: true},
@@ -301,18 +305,21 @@ func (m *Module) previewShipping(ctx context.Context, a action.Action) (action.C
 		}
 	}
 	if a.Kind == KindForgetShipping {
-		return action.Card{Title: "배송지 지우기: " + name, Body: "저장된 배송지(" + name + ")를 지웁니다.",
+		return action.Card{Title: "배송지 지우기: " + name, Body: "저장된 배송지를 지웁니다.",
+			Facts:       []action.Fact{{Label: "지울 배송지", Value: name}},
 			Consequence: "지우면 주문할 때 배송지를 다시 묻습니다."}, nil
 	}
 	body := "주문서의 주문자·받는 분·연락처·이메일·배송지 칸에 이 정보를 그대로 넣습니다. 한 번 저장하면 주문할 때마다 묻지 않습니다.\n" +
 		"주소는 도로명과 건물번호까지(예: 서울 중구 세종대로 110) - 주문서의 주소 검색이 이것으로 찾습니다.\n" +
 		"보관함에 암호화해 두고, 자비스가 주문서를 채울 때 읽습니다."
+	facts := []action.Fact{{Label: "배송지 이름", Value: name}}
 	if old != nil {
-		body += "\n지금 저장된 배송지(" + old.Address + " " + old.Detail + ")를 새로 바꿉니다."
+		facts = append(facts, action.Fact{Label: "바꿀 저장된 배송지", Value: strings.TrimSpace(old.Address + " " + old.Detail)})
 	}
 	return action.Card{
 		Title:       "배송지 저장: " + name,
 		Body:        body,
+		Facts:       facts,
 		Consequence: "승인하면 작업과 대화가 주문서를 이 정보로 채웁니다.",
 		Fields: []action.Field{
 			{Key: "recipient", Label: "받는 분(주문자) 이름", Kind: "text", Required: true, Private: true},

@@ -332,18 +332,13 @@ func (c Client) Slot(ctx context.Context, name, saved string) (Slot, error) {
 	return out, err
 }
 
-// CardText is how a mind card reads on an approval card: what, then what
-// will run, then why and on what grounds.
+// CardText is how a mind card reads on an approval card: what, then why and
+// on what grounds - and what will run, as its actuator says it, as a fact
+// apart from the words.
 func CardText(c Card) action.Card {
 	var b strings.Builder
 	if c.Body != "" {
 		b.WriteString(c.Body)
-	}
-	if c.Preview != "" {
-		if b.Len() > 0 {
-			b.WriteString("\n\n")
-		}
-		b.WriteString(c.Preview)
 	}
 	if c.Reason != "" {
 		b.WriteString("\n\n왜: " + c.Reason)
@@ -357,6 +352,13 @@ func CardText(c Card) action.Card {
 		}
 	}
 	card := action.Card{Title: c.Title, Body: strings.TrimSpace(b.String()), Fields: c.Fields}
+	if p := strings.TrimSpace(c.Preview); p != "" {
+		label := "실행될 일"
+		if c.Mode == "undo" {
+			label = "한 일"
+		}
+		card.Facts = []action.Fact{{Label: label, Value: p}}
+	}
 	switch {
 	case c.Kind == KindCategory && c.Mode != "undo":
 		card.Consequence = "승인하면 이 분류로 바꿉니다. '앞으로도'면 이 가맹점의 지난·다음 결제도 같은 분류가 됩니다. 반려하면 기타로 두고 다시 묻지 않습니다."

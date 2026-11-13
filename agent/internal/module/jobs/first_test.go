@@ -40,7 +40,7 @@ func TestARequestedJobIsOfferedTheFront(t *testing.T) {
 		t.Fatalf("먼저 카드는 요청한 작업에 하나만: %+v", cards)
 	}
 	c := cards[0]
-	if c.Card.Title != "'쿠팡 장작 주문' 먼저 할까요?" || !strings.Contains(c.Card.Body, "지금 브라우저를 쓰는 작업: 중고나라에 올리기") {
+	if c.Card.Title != "'쿠팡 장작 주문' 먼저 할까요?" || !strings.Contains(c.Card.Text(), "지금 브라우저를 쓰는 작업: 중고나라에 올리기") {
 		t.Fatalf("카드: %+v", c.Card)
 	}
 	if len(chat.attached) != 1 || chat.attached[0] != c.ID {

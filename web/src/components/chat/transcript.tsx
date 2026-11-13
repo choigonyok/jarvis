@@ -365,7 +365,7 @@ const TurnRow = memo(function TurnRow({
                 {proposal ? (
                   <ProposalCard
                     proposal={proposal}
-                    onDecide={(d, edits, reason) => onDecide(proposal.id, d, edits, reason)}
+                    onDecide={(d, edits, reason, choice) => onDecide(proposal.id, d, edits, reason, choice)}
                   />
                 ) : null}
                 {answer ? <WrongNote feedback={turn.feedback} /> : null}
@@ -710,7 +710,7 @@ export const Transcript = memo(function Transcript({
             <div className="min-w-0">
               <ProposalCard
                 proposal={proposal}
-                onDecide={(d, edits, reason) => onDecide(proposal.id, d, edits, reason)}
+                onDecide={(d, edits, reason, choice) => onDecide(proposal.id, d, edits, reason, choice)}
               />
             </div>
           </MessageScrollerItem>

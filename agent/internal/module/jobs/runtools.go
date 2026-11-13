@@ -447,11 +447,19 @@ type FieldInput struct {
 	Hint     string   `json:"hint,omitempty" jsonschema:"칸 아래 한 줄 도움말(시세 등)"`
 }
 
+// ChoiceInput is one answer button a job offers on its card.
+type ChoiceInput struct {
+	Label  string            `json:"label" jsonschema:"버튼 이름. 고르면 무엇이 되는지 24자 안으로. 예: 'A안으로 올리기', '올리지 않기'"`
+	Run    bool              `json:"run" jsonschema:"true: 이 답으로 이어 감(승인) / false: 하지 않음(반려)"`
+	Values map[string]string `json:"values,omitempty" jsonschema:"고르면 채울 칸(fields 의 key → 값)"`
+}
+
 type AskToolInput struct {
-	Question string       `json:"question" jsonschema:"카드 제목. 운영자가 무엇을 결정하는지. 예: '이 내용으로 중고나라에 올릴까요?'"`
-	Body     string       `json:"body,omitempty" jsonschema:"판단에 필요한 정보(시세, 바뀌는 점, 결과). 짧게."`
-	Fields   []FieldInput `json:"fields,omitempty" jsonschema:"운영자가 고치거나 채울 값. 없으면 승인/반려만."`
-	Images   []string     `json:"images,omitempty" jsonschema:"카드에 보일 사진 이름"`
+	Question string        `json:"question" jsonschema:"카드 제목. 운영자가 무엇을 결정하는지. 예: '이 내용으로 중고나라에 올릴까요?'"`
+	Body     string        `json:"body,omitempty" jsonschema:"판단에 필요한 정보(시세, 바뀌는 점, 결과). 짧게."`
+	Fields   []FieldInput  `json:"fields,omitempty" jsonschema:"운영자가 고치거나 채울 값. 없으면 승인/반려만."`
+	Images   []string      `json:"images,omitempty" jsonschema:"카드에 보일 사진 이름"`
+	Choices  []ChoiceInput `json:"choices,omitempty" jsonschema:"승인/반려 대신 보일 답 버튼 2~4개. run true 와 false 가 하나씩은 있어야 한다. 고른 답은 '고른 답: 이름'으로 온다."`
 }
 
 type WithdrawToolInput struct {
@@ -657,6 +665,10 @@ func (m *Module) runServer(run int64) *mcp.Server {
 				Key: f.Key, Label: f.Label, Kind: kind, Value: f.Value,
 				Options: f.Options, Required: f.Required, Hint: f.Hint,
 			})
+		}
+		ask.Choices = jobChoices(in.Choices)
+		if err := askCard(ask).CheckChoices(); err != nil {
+			return toolText("답 버튼을 쓸 수 없습니다: "+err.Error()+". 고쳐서 다시 ask 하거나 choices 없이 물으세요.", true), nil, nil
 		}
 		raw, _ := json.Marshal(ask)
 		// One question at a time: what the job asked before and is still

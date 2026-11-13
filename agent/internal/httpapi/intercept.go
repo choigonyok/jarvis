@@ -609,39 +609,83 @@ func roadKey(address string) string {
 }
 
 // addressLines is what a payment card says of where the order goes: the
-// saved address, and a warning first when the job's report names another.
-func addressLines(p Payment, addr *SavedAddress) (warn, saved string) {
+// saved address, and what to check first when the job's report names another
+// or the operator may have moved since.
+func addressLines(p Payment, addr *SavedAddress) (warns []string, saved string) {
 	if addr == nil || addr.Address == "" {
-		return "", ""
+		return nil, ""
 	}
-	saved = "저장된 배송지: " + strings.TrimSpace(addr.Address+" "+addr.Detail)
+	saved = strings.TrimSpace(addr.Address + " " + addr.Detail)
 	if addr.Recipient != "" {
 		saved += " (" + addr.Recipient + ")"
 	}
 	summary := strings.Join(strings.Fields(p.JobSummary), "")
 	if key := roadKey(addr.Address); key != "" && strings.Contains(summary, "배송지") && !strings.Contains(summary, key) {
-		warn = "⚠ 작업이 남긴 배송지가 저장된 배송지와 다릅니다 - 승인하기 전에 주문서의 주소를 확인하세요."
+		warns = append(warns, "작업이 남긴 배송지가 저장된 배송지와 다릅니다 - 승인하기 전에 주문서의 주소를 확인하세요.")
 	}
 	if addr.Doubt != "" {
-		line := "⚠ " + addr.Doubt + " - 지금 사는 곳이 맞는지 확인하고 승인하세요."
-		if warn == "" {
-			warn = line
-		} else {
-			warn += "\n" + line
-		}
+		warns = append(warns, addr.Doubt+" - 지금 사는 곳이 맞는지 확인하고 승인하세요.")
 	}
-	return warn, saved
+	return warns, saved
+}
+
+// warnFacts are what to check before deciding, as the facts that go first.
+func warnFacts(warns []string) []action.Fact {
+	var out []action.Fact
+	for _, w := range warns {
+		out = append(out, action.Fact{Label: "주의", Value: w, Warn: true})
+	}
+	return out
+}
+
+// amountFacts are how much a payment card is for and where that was read -
+// lead: the title says the amount as it is - or, unread, a warning that says
+// so and what to do instead.
+func amountFacts(p Payment, lead bool, unread string) []action.Fact {
+	amount, from := paidAmount(p)
+	if amount == "" {
+		return []action.Fact{{Label: "결제 금액", Value: "읽지 못했습니다 - " + unread, Warn: true}}
+	}
+	return []action.Fact{{Label: "결제 금액", Value: won(amount), Lead: lead}, {Label: "금액을 읽은 곳", Value: from}}
+}
+
+// jobFacts are the job a payment card is for and what it last said it was
+// doing: what is being bought is the job's to say - the request carries no
+// amount but a payment window's.
+func jobFacts(p Payment) []action.Fact {
+	if p.JobID == 0 {
+		return nil
+	}
+	out := []action.Fact{{Label: "작업", Value: p.JobTitle}}
+	if s := strings.TrimSpace(p.JobSummary); s != "" {
+		out = append(out, action.Fact{Label: "작업이 남긴 현황", Value: s})
+	}
+	return out
 }
 
 // paymentCard says what is being asked: a payment, every time - a sign-in host
 // is let through without a card (backgroundLogin) and none is on the ask list,
 // so no card is for opening a sign-in page. How much is said first - in the
-// title, which is also how the phone's notice begins, and in the body's first
-// line with where it was read - because it is the thing being approved, even
-// when it is only a word inside the job's report.
+// title, which is also how the phone's notice begins, and first among the
+// facts with where it was read - because it is the thing being approved, even
+// when it is only a word inside the job's report. What to check goes above it.
 func paymentCard(p Payment, addr *SavedAddress) action.Card {
 	if p.PIN {
 		return pinCard(p)
+	}
+	amount, _ := paidAmount(p)
+	warns, saved := addressLines(p, addr)
+	if told := reportedAmount(p.JobSummary); p.Amount != "" && told != "" && told != p.Amount {
+		warns = append(warns, "작업이 남긴 금액("+won(told)+")과 결제창이 받은 금액("+won(p.Amount)+")이 다릅니다 - 주문서를 확인하고 승인하세요.")
+	}
+	facts := warnFacts(warns)
+	facts = append(facts, amountFacts(p, true, "결제 화면에서 금액을 확인하고 승인하세요")...)
+	facts = append(facts, jobFacts(p)...)
+	if saved != "" {
+		facts = append(facts, action.Fact{Label: "저장된 배송지", Value: saved})
+	}
+	if item := windowItem(p); item != "" {
+		facts = append(facts, action.Fact{Label: "결제창이 받은 상품", Value: item})
 	}
 	// The host is the part a person can actually judge; the path is there
 	// for the case where two flows share a provider.
@@ -649,48 +693,19 @@ func paymentCard(p Payment, addr *SavedAddress) action.Card {
 	if label := eventLabel(p.Event); label != "" {
 		where += " · " + label
 	}
-	body := strings.TrimSpace(where + "\n" + clampURL(p.URL))
-	if order := windowOrder(p); order != "" {
-		body = order + "\n" + body
-	}
-	warn, saved := addressLines(p, addr)
-	if saved != "" {
-		body = saved + "\n" + body
-	}
-	amount, from := paidAmount(p)
-	if p.JobID != 0 {
-		// What is being bought is the job's to say: the request carries no
-		// amount (but a payment window's), and the job's last report is what
-		// it said it is buying.
-		job := "작업: " + p.JobTitle
-		if s := strings.TrimSpace(p.JobSummary); s != "" {
-			job += "\n작업이 남긴 현황: " + s
-		}
-		body = job + "\n\n" + body
-	}
-	line := "결제 금액: 읽지 못했습니다 - 결제 화면에서 금액을 확인하고 승인하세요"
-	if amount != "" {
-		line = "결제 금액: " + won(amount) + " (" + from + ")"
-	}
-	if p.JobID != 0 {
-		body = line + "\n" + body
-	} else {
-		body = line + "\n\n" + body
-	}
-	if told := reportedAmount(p.JobSummary); p.Amount != "" && told != "" && told != p.Amount {
-		line := "⚠ 작업이 남긴 금액(" + won(told) + ")과 결제창이 받은 금액(" + won(p.Amount) + ")이 다릅니다 - 주문서를 확인하고 승인하세요."
-		if warn == "" {
-			warn = line
-		} else {
-			warn += "\n" + line
-		}
-	}
-	if warn != "" {
-		body = warn + "\n\n" + body
+	facts = append(facts, action.Fact{Label: "결제하는 곳", Value: where})
+	if u := clampURL(p.URL); u != "" {
+		facts = append(facts, action.Fact{Label: "주소", Value: u})
 	}
 	note := ""
 	if amount != "" {
 		note = "(" + won(amount) + ")"
+	}
+	// What an approval lets through, as a fact: the words may say it more
+	// shortly, or not at all, and it is what the approval is held to.
+	minutes := int(holder.Window.Minutes())
+	scope := func(how string) []action.Fact {
+		return append(facts, action.Fact{Label: "승인 범위", Value: fmt.Sprintf("결제 한 건%s · %s", note, fmt.Sprintf(how, minutes))})
 	}
 	if p.Window {
 		consequence := fmt.Sprintf("결제가 청구됩니다 · 되돌릴 수 없습니다 · 승인하면 결제창을 다시 연 때부터 %d분 동안 결제 한 건%s이 진행됩니다(결제창 안에서는 네이버페이·신용카드)",
@@ -701,7 +716,7 @@ func paymentCard(p Payment, addr *SavedAddress) action.Card {
 		}
 		return action.Card{
 			Title:       payTitle("결제창에서 ", amount, "결제창에서 결제합니다"),
-			Body:        body,
+			Facts:       scope("결제창을 다시 연 때부터 %d분 · 결제창 안의 네이버페이·신용카드까지"),
 			Consequence: consequence,
 		}
 	}
@@ -714,7 +729,7 @@ func paymentCard(p Payment, addr *SavedAddress) action.Card {
 		}
 		return action.Card{
 			Title:       payTitle("쿠팡에서 쿠페이로 ", amount, "쿠팡에서 쿠페이로 결제합니다"),
-			Body:        body,
+			Facts:       scope("다시 진행한 때부터 %d분 · 결제하기 한 번"),
 			Consequence: consequence,
 		}
 	}
@@ -724,7 +739,7 @@ func paymentCard(p Payment, addr *SavedAddress) action.Card {
 	}
 	return action.Card{
 		Title:       payTitle("", amount, "결제를 진행합니다"),
-		Body:        body,
+		Facts:       scope("다시 진행한 때부터 %d분 · 이 결제가 여는 결제창까지"),
 		Consequence: consequence,
 	}
 }
@@ -741,26 +756,19 @@ func pinCard(p Payment) action.Card {
 	case "coupang.com":
 		name = "쿠페이 비밀번호"
 	}
-	line := "결제 금액: 읽지 못했습니다 - 쿠폰 등록·포인트 전환처럼 결제가 아닐 수도 있습니다. 무엇을 위한 비밀번호인지 아래를 보고 승인하세요"
-	if amount, from := paidAmount(p); amount != "" {
-		line = "결제 금액: " + won(amount) + " (" + from + ")"
+	facts := amountFacts(p, false, "쿠폰 등록·포인트 전환처럼 결제가 아닐 수도 있습니다. 무엇을 위한 비밀번호인지 아래를 보고 승인하세요")
+	facts = append(facts, jobFacts(p)...)
+	facts = append(facts, action.Fact{Label: "비밀번호를 묻는 화면", Value: p.Host})
+	if u := clampURL(p.URL); u != "" {
+		facts = append(facts, action.Fact{Label: "주소", Value: u})
 	}
-	body := line + "\n"
-	if p.JobID != 0 {
-		body += "작업: " + p.JobTitle
-		if s := strings.TrimSpace(p.JobSummary); s != "" {
-			body += "\n작업이 남긴 현황: " + s
-		}
-		body += "\n"
-	}
-	body += "\n비밀번호를 묻는 화면: " + p.Host + "\n" + clampURL(p.URL)
 	who := "자비스가"
 	if p.JobID != 0 {
 		who = "이 작업이"
 	}
 	return action.Card{
 		Title: name + "를 넣습니다",
-		Body:  body,
+		Facts: facts,
 		Consequence: fmt.Sprintf("결제나 포인트 사용이 일어나면 되돌릴 수 없습니다 · 승인하면 %s 저장된 %s를 넣고, %d분 동안 %s 의 비밀번호 입력과 그 뒤의 요청이 통과합니다",
 			who, name, int(holder.Window.Minutes()), siteOf(p.Host)),
 	}
@@ -832,18 +840,14 @@ func amountDigits(s string) string {
 	return strconv.FormatUint(n, 10)
 }
 
-// windowOrder is what a payment window was handed besides its amount (the
-// card's first line), as the card shows it - the mall's own words, so cut
-// short and kept on one line.
-func windowOrder(p Payment) string {
+// windowItem is what a payment window was handed besides its amount, as the
+// card shows it - the mall's own words, so cut short and kept on one line.
+func windowItem(p Payment) string {
 	item := strings.Join(strings.Fields(p.Item), " ")
-	if item == "" {
-		return ""
-	}
 	if r := []rune(item); len(r) > 60 {
 		item = string(r[:60]) + "…"
 	}
-	return "결제창이 받은 상품: " + item
+	return item
 }
 
 // amountNote is the amount an approval of a window is held to, in

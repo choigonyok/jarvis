@@ -18,6 +18,7 @@
 //	POST /api/policy/rebuild          recount approval stats from the intents
 //	POST /api/patterns/rebuild        recount repetitions from the plans and purchases
 //	POST /api/ledger/rebuild          make the result ledger and the facts table again
+//	POST /api/cards/words             a card the agent is about to raise, in a model's words (token; changes nothing)
 //	GET  /api/registry                the registry's rows, and the kinds seen with no row
 //	PUT  /api/registry/{section}/{key}  a row's body: kinds, actions, slots, relations, policy
 //	POST /api/facts/adopt             copy into the facts table what memory's graph holds and it does not
@@ -90,12 +91,14 @@ import (
 	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/mind-svc/internal/clock"
 	jobs "github.com/choigonyok/jarvis/mind-svc/internal/jobs/api"
+	"github.com/choigonyok/jarvis/mind-svc/internal/llm"
 	"github.com/choigonyok/jarvis/mind-svc/internal/mind"
 	"github.com/choigonyok/jarvis/mind-svc/internal/model"
 	"github.com/choigonyok/jarvis/mind-svc/internal/moments"
 	"github.com/choigonyok/jarvis/mind-svc/internal/slot"
 	spending "github.com/choigonyok/jarvis/mind-svc/internal/spending/api"
 	"github.com/choigonyok/jarvis/mind-svc/internal/store"
+	"github.com/choigonyok/jarvis/mind-svc/internal/words"
 	"github.com/choigonyok/jarvis/mind-svc/internal/world"
 )
 
@@ -186,6 +189,7 @@ func (s *Server) Handler() http.Handler {
 	}
 	mux.HandleFunc("GET /api/registry", s.auth(false, s.registry))
 	write("PUT /api/registry/{section}/{key}", owner, s.writeRegistry)
+	mux.HandleFunc("POST /api/cards/words", s.auth(true, s.cardWords))
 	mux.HandleFunc("POST /api/facts/adopt", s.auth(true, func(w http.ResponseWriter, r *http.Request) {
 		n, err := s.m.AdoptFacts(r.Context())
 		if err != nil {
@@ -754,6 +758,39 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// cardWords words a card the agent is about to raise (internal/words). Nothing
+// of mind changes, so it does not go through the stream; the agent checks
+// what comes back and raises the card in its own words if this fails.
+func (s *Server) cardWords(w http.ResponseWriter, r *http.Request) {
+	var in words.Ask
+	if !readJSON(w, r, &in) {
+		return
+	}
+	model := s.m.Opts.LLM
+	if model == nil || !model.Ready() {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "문구를 쓸 모델이 없습니다."})
+		return
+	}
+	now := time.Now()
+	if s.m.Opts.Now != nil {
+		now = s.m.Opts.Now()
+	}
+	if s.m.Opts.Loc != nil {
+		now = now.In(s.m.Opts.Loc)
+	}
+	out, err := words.Write(r.Context(), model, in, now)
+	switch {
+	case errors.Is(err, words.ErrEmpty):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+	case errors.Is(err, llm.ErrBudget), errors.Is(err, llm.ErrNoKey):
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
+	case err != nil:
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+	default:
+		writeJSON(w, http.StatusOK, out)
+	}
 }
 
 func (s *Server) tick(w http.ResponseWriter, r *http.Request) {

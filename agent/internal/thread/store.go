@@ -359,6 +359,9 @@ type Answer struct {
 	Edits map[string]string `json:"edits"`
 	// Reason is why, when the operator says (a rejection, mostly).
 	Reason string `json:"reason"`
+	// Choice is the id of the answer chosen among the card's choices; the
+	// choice, not Decision, then says what was decided.
+	Choice string `json:"choice,omitempty"`
 }
 
 // Answered reads an answer by its record's key.

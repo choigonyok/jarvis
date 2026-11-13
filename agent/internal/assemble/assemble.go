@@ -58,6 +58,7 @@ import (
 	"github.com/choigonyok/jarvis/agent/internal/tool"
 	"github.com/choigonyok/jarvis/agent/internal/uploads"
 	"github.com/choigonyok/jarvis/agent/internal/usage"
+	"github.com/choigonyok/jarvis/agent/internal/words"
 	"github.com/choigonyok/jarvis/gocommon/checks"
 	"github.com/choigonyok/jarvis/gocommon/health"
 	"github.com/choigonyok/jarvis/gocommon/notify"
@@ -147,6 +148,12 @@ func Assemble(cfg *config.Config, d Deps) (*Assembly, error) {
 	}
 	if err := proposals.Persist(cfg.ProposalsPath, log); err != nil {
 		return nil, fmt.Errorf("제안을 읽지 못했습니다: %w", err)
+	}
+	// Every card goes up in mind's writer's words, checked against the
+	// code's card (internal/words). The guest's agent has no mind to word
+	// them: its cards are in the code's words, as are any while mind is down.
+	if cfg.CardWords && cfg.MindURL != "" && !cfg.Guest {
+		proposals.SetWriter(&words.Writer{URL: cfg.MindURL, Token: cfg.APIToken, Wait: cfg.CardWordsWait, Log: log})
 	}
 
 	// What the payment path did, as records a replay can read, and what is

@@ -30,7 +30,28 @@ const (
 	Judge     = "judge"
 	Reflect   = "reflect"
 	Draft     = "draft"
+	Words     = "words" // a card's words, before it is raised
 )
+
+type shapeKey struct{}
+
+// Shape is how a call's answer is held: Effort is how hard the model thinks
+// (low, for a short answer waited on), Schema the JSON its answer must be.
+type Shape struct {
+	Effort string
+	Schema json.RawMessage
+}
+
+// WithShape holds the calls made with ctx to s. A script only notes it.
+func WithShape(ctx context.Context, s Shape) context.Context {
+	return context.WithValue(ctx, shapeKey{}, s)
+}
+
+// ShapeOf is how the calls made with ctx are held; zero, as the model likes.
+func ShapeOf(ctx context.Context) Shape {
+	s, _ := ctx.Value(shapeKey{}).(Shape)
+	return s
+}
 
 type purposeKey struct{}
 
@@ -163,6 +184,16 @@ func (a *Anthropic) Complete(ctx context.Context, system, user string) (string, 
 	if n := SearchOf(ctx); n > 0 {
 		params["tools"] = []map[string]any{{"type": webSearch, "name": "web_search", "max_uses": n}}
 	}
+	if s := ShapeOf(ctx); s.Effort != "" || len(s.Schema) > 0 {
+		out := map[string]any{}
+		if s.Effort != "" {
+			out["effort"] = s.Effort
+		}
+		if len(s.Schema) > 0 {
+			out["format"] = map[string]any{"type": "json_schema", "schema": s.Schema}
+		}
+		params["output_config"] = out
+	}
 	// A turn the server paused goes back as it is, and goes on from there.
 	var blocks []json.RawMessage
 	var stop string
@@ -276,6 +307,8 @@ type Script struct {
 	Prompts []string
 	// Searches is how many searches each call was let make.
 	Searches []int
+	// Shapes is how each call's answer was held.
+	Shapes []Shape
 }
 
 func (s *Script) Ready() bool    { return s.Answer != nil }
@@ -286,6 +319,7 @@ func (s *Script) Complete(ctx context.Context, system, user string) (string, err
 	s.mu.Lock()
 	s.Prompts = append(s.Prompts, user)
 	s.Searches = append(s.Searches, SearchOf(ctx))
+	s.Shapes = append(s.Shapes, ShapeOf(ctx))
 	s.mu.Unlock()
 	if s.Answer == nil {
 		return "", ErrNoKey
