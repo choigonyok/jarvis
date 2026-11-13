@@ -208,6 +208,12 @@ class SpriteKeypad(unittest.TestCase):
 
 
 class Sites(unittest.TestCase):
+    def test_the_agent_hears_names_not_values(self):
+        # 쿠폰 번호·세션 값은 카드와 기록에 남기지 않는다.
+        self.assertEqual(pin._shape("https://pay.naver.com/authentication/pw/check?action=changePointCoupon&couponNo=SKPO1&sessionKey=abc#k"),
+                         "https://pay.naver.com/authentication/pw/check?action&couponNo&sessionKey")
+        self.assertEqual(pin._shape("https://rocketpay.coupang.com/pin"), "https://rocketpay.coupang.com/pin")
+
     def test_where_a_pin_may_go(self):
         # 키패드가 있는 프레임의 출처로 가린다. 네이버는 결제 호스트만 - 블로그·카페는 누구나 글을 올린다.
         for origin, host in [("https://rocketpay.coupang.com", "coupang.com"), ("https://checkout.coupang.com/x?y", "coupang.com"),
@@ -318,6 +324,14 @@ class KeypadInABrowser(unittest.IsolatedAsyncioTestCase):
                 # 보관함의 결제 비밀번호 꺼내기(vault-svc /release-pin) 흉내: 브라우저 토큰이어야 하고, 받은 것을 적어 둔다.
                 body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
                 cls.released.append((self.path, self.headers.get("Authorization"), body))
+                if self.path == "/intercept":
+                    # 에이전트 /intercept 흉내: 결제 비밀번호를 묻는 것(pin)에 브라우저 토큰이면 승인한다.
+                    ok = self.headers.get("Authorization") == "Bearer browser" and body.get("pin") is True
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"decision": "approved" if ok else "rejected", "why": "granted"}).encode())
+                    return
                 ok = self.path == "/release-pin" and self.headers.get("Authorization") == "Bearer browser" and \
                     body.get("site") == "pay.naver.com" and body.get("host", "").endswith("pay.naver.com")
                 self.send_response(200 if ok else 403)
@@ -480,14 +494,20 @@ class KeypadInABrowser(unittest.IsolatedAsyncioTestCase):
             await pin.enter(pin="246802", port=self.cdp)
 
     async def test_asks_the_agent_first_and_names_no_values(self):
-        # 넣기 전에 에이전트에 그 키패드의 호스트와 주소 모양(값 없이)을 묻는다.
-        t = await self.open(self.url("pay.naver.com", "kind=text&couponNo=SKPO1&sessionKey=abc"))
-        self.assertEqual(await pin.enter(pin="135790", port=self.cdp), "네이버페이 결제 비밀번호를 넣었습니다")
-        self.assertEqual(await self.entered(t), "135790")
-        self.assertEqual(len(self.asked), 1)
-        host, url = self.asked[0]
-        self.assertEqual(host, "pay.naver.com")
-        self.assertTrue(url.endswith("/keypad?kind&couponNo&sessionKey"), url)
+        # 넣기 전에 에이전트에 그 키패드의 호스트와 주소를 묻는다 - 에이전트에는 값 없이 이름만, 브라우저 토큰으로.
+        pin.ask_agent = self._ask
+        agent, token = pin.AGENT_URL, pin.TOKEN
+        pin.AGENT_URL, pin.TOKEN = f"http://127.0.0.1:{self.web}/intercept", "browser"
+        try:
+            self.released.clear()
+            t = await self.open(self.url("pay.naver.com", "couponNo=SKPO1"))
+            self.assertEqual(await pin.enter(pin="135790", port=self.cdp), "네이버페이 결제 비밀번호를 넣었습니다")
+            self.assertEqual(await self.entered(t), "135790")
+            self.assertEqual([(p, b) for p, _, b in self.released],
+                             [("/intercept", {"url": f"http://pay.naver.com:{self.web}/keypad?couponNo", "method": "PIN",
+                                              "host": "pay.naver.com", "pin": True})])
+        finally:
+            pin.AGENT_URL, pin.TOKEN = agent, token
 
     async def test_no_approval_no_press(self):
         # 승인된 결제가 없으면 에이전트가 카드를 올리고 기다린다 - 결정이 없거나 반려면 누르지 않는다.
