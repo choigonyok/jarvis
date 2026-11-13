@@ -121,6 +121,7 @@ type News struct {
 	BlockTitle string    `json:"blockTitle,omitempty"`
 	Kind       string    `json:"kind"`
 	At         string    `json:"at"`
+	ItemID     string    `json:"itemId,omitempty"`
 	Item       *NewsItem `json:"item,omitempty"`
 }
 
@@ -646,8 +647,12 @@ func (c *Client) News(ctx context.Context, limit int) ([]News, error) {
 		}
 		n.BlockTitle = titles[n.Block]
 		if r.ItemID != nil {
+			n.ItemID = *r.ItemID
 			if it, ok := items[*r.ItemID]; ok {
 				n.Item = &it
+			} else if day(*r.ItemID) {
+				// Some news is about a day rather than a row: the day itself.
+				n.Item = &NewsItem{Date: *r.ItemID}
 			}
 		}
 		out = append(out, n)
