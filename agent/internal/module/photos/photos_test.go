@@ -120,3 +120,50 @@ func TestSearchAsksForSomething(t *testing.T) {
 		t.Fatal("아무것도 주지 않으면 말해야 합니다")
 	}
 }
+
+// Photos a search listed by id open by those ids, as many at once as a search
+// opens: nothing is searched, a photo opened before is the same file, what is
+// past the first few is said, and an id of another shape is not asked for.
+func TestOpenByIDs(t *testing.T) {
+	f := &fake{}
+	_, base := f.serve(t)
+	m := module(t, base)
+	listed, err := m.search(context.Background(), SearchIn{Query: "캠핑", Limit: 6})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(listed, "id p5") || !strings.Contains(listed, "ids 로 다시 부르면") {
+		t.Fatalf("id 만 나온 사진은 ids 로 열 수 있다고 말해야 합니다:\n%s", listed)
+	}
+	searched, fetched := len(f.searches), f.previews
+
+	out, err := m.search(context.Background(), SearchIn{IDs: []string{"p5", " p6 ", "p5"}, Query: "무시"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.searches) != searched || f.previews != fetched+2 {
+		t.Fatalf("찾지 않고 두 장만 가져와야 합니다: 검색 %d, 미리보기 %d", len(f.searches)-searched, f.previews-fetched)
+	}
+	for _, want := range []string{"id p5 · 이름 ", "id p6 · 이름 ", "경로 ", "Read", "show_image"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("%q 가 없습니다:\n%s", want, out)
+		}
+	}
+	// One already opened is the same file; a search's first few too.
+	if _, err := m.search(context.Background(), SearchIn{IDs: []string{"p5", "p1"}}); err != nil || f.previews != fetched+2 {
+		t.Fatalf("이미 가져온 사진은 다시 받지 않습니다: %v %d", err, f.previews-fetched)
+	}
+
+	out, err = m.search(context.Background(), SearchIn{IDs: []string{"a1", "a2", "a3", "a4", "a5", "a6"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.previews != fetched+2+previewed || !strings.Contains(out, "열지 않은 id: a5, a6") {
+		t.Fatalf("한 번에 %d장, 나머지는 말해야 합니다 (%d):\n%s", previewed, f.previews-fetched, out)
+	}
+	for _, bad := range [][]string{{"../search"}, {"p1?x=1"}, {" "}} {
+		if _, err := m.search(context.Background(), SearchIn{IDs: bad}); err == nil {
+			t.Errorf("%q 는 열지 않아야 합니다", bad)
+		}
+	}
+}

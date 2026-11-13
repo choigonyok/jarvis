@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -93,19 +94,25 @@ type SearchIn struct {
 	To       string `json:"to,omitempty" jsonschema:"이 날까지(YYYY-MM-DD)"`
 	Favorite bool   `json:"favorite,omitempty" jsonschema:"즐겨찾기한 것만"`
 	Limit    int    `json:"limit,omitempty" jsonschema:"몇 장까지(기본 6, 최대 12)"`
+	// IDs open photos already found rather than find: what a search lists
+	// past the first few, by id.
+	IDs []string `json:"ids,omitempty" jsonschema:"열어 볼 사진의 id(앞서 찾은 목록의 'id …', 한 번에 4장까지). 주면 찾지 않고 이 사진들만 가져온다"`
 }
 
 // Look puts the search on the board.
 func (m *Module) Look(b *tool.Board) {
 	tool.Add(b, "photos", "운영자의 사진 보관함(사진 탭, 지금까지 찍은 사진 전부)을 찾는다. 사진에 담긴 것(query), 갔던 곳(place), 도시(city), 날(from·to)로 찾고 함께 쓸 수 있다. "+
-		"앞의 몇 장은 사진 파일로 가져와 이름과 경로를 답한다. query 는 비슷한 순으로 언제나 답이 나오니 그 경로를 Read 로 열어 정말 그 사진인지 보고 나서 말하고, 보여 줄 때는 그 이름을 show_image 의 uploads 에 넣는다.",
+		"앞의 몇 장은 사진 파일로 가져와 이름과 경로를 답하고, 나머지는 id 로 답한다 - ids 로 다시 부르면 그 사진들을 가져온다. query 는 비슷한 순으로 언제나 답이 나오니 그 경로를 Read 로 열어 정말 그 사진인지 보고 나서 말하고, 보여 줄 때는 그 이름을 show_image 의 uploads 에 넣는다.",
 		func(ctx context.Context, in SearchIn) (string, error) { return m.search(ctx, in) })
 }
 
 func (m *Module) search(ctx context.Context, in SearchIn) (string, error) {
+	if len(in.IDs) > 0 {
+		return m.open(ctx, in.IDs)
+	}
 	in.Query, in.Place = strings.TrimSpace(in.Query), strings.TrimSpace(in.Place)
 	if in.Query == "" && in.Place == "" && in.City == "" && in.From == "" && in.To == "" && !in.Favorite {
-		return "", errors.New("무엇을 찾을지 query, place, city, from·to 중 하나는 주세요")
+		return "", errors.New("무엇을 찾을지 query, place, city, from·to 중 하나는 주세요(찾은 사진을 열려면 ids)")
 	}
 	limit := in.Limit
 	if limit <= 0 {
@@ -163,9 +170,53 @@ func (m *Module) search(ctx context.Context, in SearchIn) (string, error) {
 		lines = append(lines, line)
 	}
 	lines = append(lines, "보여 줄 때는 이름을 show_image 의 uploads 에 넣는다.")
+	if len(found) > previewed {
+		lines = append(lines, fmt.Sprintf("id 만 있는 사진은 ids 로 다시 부르면 가져온다(한 번에 %d장까지).", previewed))
+	}
 	if in.Query != "" {
 		lines = append(lines, "비슷한 순이라 아닌 것이 섞일 수 있다: 말하기 전에 경로를 Read 로 열어 본다.")
 	}
+	return strings.Join(lines, "\n"), nil
+}
+
+// photoID is the shape of a photo's id (Immich's are UUIDs): anything else
+// is not asked for.
+var photoID = regexp.MustCompile(`^[A-Za-z0-9-]{1,64}$`)
+
+// open brings photos already found into the uploads by their ids, as many as
+// a search would at once: each opens to look at, and what is past them is
+// said, for a call of its own.
+func (m *Module) open(ctx context.Context, ids []string) (string, error) {
+	var want []string
+	seen := map[string]bool{}
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		if !photoID.MatchString(id) {
+			return "", fmt.Errorf("사진 id 가 아닙니다: %q - 찾은 목록의 'id …' 를 그대로 주세요", id)
+		}
+		seen[id] = true
+		want = append(want, id)
+	}
+	if len(want) == 0 {
+		return "", errors.New("열어 볼 사진의 id 를 주세요")
+	}
+	var lines []string
+	for _, id := range want[:min(len(want), previewed)] {
+		name, path, err := m.Keep(ctx, id)
+		if err != nil {
+			m.log.Warn("사진을 가져오지 못했습니다", "photo", id, "err", err)
+			lines = append(lines, "- id "+id+" · (가져오지 못함: "+err.Error()+")")
+			continue
+		}
+		lines = append(lines, "- id "+id+" · 이름 "+name+" · 경로 "+path)
+	}
+	if rest := want[min(len(want), previewed):]; len(rest) > 0 {
+		lines = append(lines, fmt.Sprintf("한 번에 %d장까지라 열지 않은 id: %s - 다시 ids 로 부른다.", previewed, strings.Join(rest, ", ")))
+	}
+	lines = append(lines, "경로를 Read 로 열어 본다. 보여 줄 때는 이름을 show_image 의 uploads 에 넣는다.")
 	return strings.Join(lines, "\n"), nil
 }
 
