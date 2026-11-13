@@ -631,7 +631,8 @@ func (c *Client) News(ctx context.Context, limit int) ([]News, error) {
 	// What each is about, read once per table.
 	ids := map[string][]string{}
 	for _, r := range rows {
-		if r.ItemID != nil && r.BlockType != nil {
+		// Only ids go into the filter below: an item id that is not one is not read.
+		if r.ItemID != nil && r.BlockType != nil && uuidLike(*r.ItemID) {
 			ids[*r.BlockType] = append(ids[*r.BlockType], *r.ItemID)
 		}
 	}
@@ -676,6 +677,22 @@ func (c *Client) newsItems(ctx context.Context, ids map[string][]string) map[str
 	if read("calendar_events", "id,title,start_date,start_time", ids["calendar"], &events) {
 		for _, e := range events {
 			out[e.ID] = NewsItem{Title: e.Title, Date: e.StartDate, Time: hm(e.StartTime)}
+		}
+	}
+	// A photo put on a calendar day is the day's, not an entry's.
+	var dayPhotos []struct {
+		ID   string `json:"id"`
+		Date string `json:"date"`
+	}
+	var unseen []string
+	for _, id := range ids["calendar"] {
+		if _, ok := out[id]; !ok {
+			unseen = append(unseen, id)
+		}
+	}
+	if read("calendar_day_photos", "id,date", unseen, &dayPhotos) {
+		for _, p := range dayPhotos {
+			out[p.ID] = NewsItem{Date: p.Date}
 		}
 	}
 	var records []recordRow

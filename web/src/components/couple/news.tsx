@@ -13,55 +13,54 @@ import { cn } from "@/lib/utils";
 
 /**
  * What the two did in the space, as one sentence each - the app's activity
- * list, in the console's words. The adapter says what kind of change it was
- * (kind) and on which block; the sentence is put together here, and a kind it
- * does not know still reads as "바꿨어요".
+ * list, in the console's words. The app files each by its block and a kind:
+ * no kind for the block's own thing added (an entry, a map photo), `update`
+ * for one changed, `photo`, `memo`, `record` for those added. A kind not seen
+ * yet reads as "바꿨어요".
  */
-function verb(kind: string): string {
-  const k = kind.toLowerCase();
-  if (/(delete|remove)/.test(k)) return "지웠어요";
-  if (/uncheck/.test(k)) return "체크를 취소했어요";
-  if (/check/.test(k)) return "체크했어요";
-  if (/complete|done/.test(k)) return "이뤘어요";
-  if (/(update|edit|change|move)/.test(k)) return "바꿨어요";
-  if (/(create|add|insert|new|upload|photo)/.test(k)) return "남겼어요";
-  return "바꿨어요";
-}
+type Told = { noun: string; verb: string; added: boolean };
 
-/** What the change was made to, by the block it is on. */
-function noun(n: News): string {
+function told(n: News): Told {
   const k = n.kind.toLowerCase();
+  const gone = /(delete|remove)/.test(k);
+  const changed = /(update|edit|change|move)/.test(k);
+  const plain = (noun: string, add = "추가했어요"): Told =>
+    gone ? { noun, verb: "지웠어요", added: false } : changed || k ? { noun, verb: changed ? "변경했어요" : "바꿨어요", added: false } : { noun, verb: add, added: true };
   switch (n.blockType) {
     case "calendar":
-      return /photo/.test(k) ? "사진" : "일정";
+      if (k === "photo") return { noun: "사진", verb: "추가했어요", added: true };
+      if (k === "memo") return { noun: "메모", verb: "남겼어요", added: true };
+      return plain("일정");
     case "map":
     case "worldmap":
-      return /(photo|visit|face)/.test(k) ? "사진" : "기록";
+      if (k === "record") return { noun: n.blockType === "map" ? "데이트 기록" : "여행 기록", verb: "남겼어요", added: true };
+      if (k === "photo") return { noun: "사진", verb: "추가했어요", added: true };
+      return plain("사진");
     case "bucket":
-      return "버킷";
+      if (/(complete|done)/.test(k)) return { noun: "버킷", verb: "이뤘어요", added: false };
+      return plain("버킷");
     case "dday":
-      return "기념일";
+      return plain("기념일");
     case "workout":
-      return "습관";
+      return { noun: "", verb: /uncheck/.test(k) || gone ? "체크를 취소했어요" : "체크했어요", added: true };
     case "diary":
-      return "일기";
-    case "album":
-      return "사진";
+      return plain("일기", "남겼어요");
+    case "free":
+      return plain("기록", "남겼어요");
     default:
-      return "기록";
+      return plain("기록", "남겼어요");
   }
 }
 
-/** "바다가 여행 지도의 기록을 남겼어요" */
+/** "바다가 여행 지도에 데이트 기록을 남겼어요", "바다가 우리 캘린더의 일정을 변경했어요" */
 export function sentence(n: News, space: Space | undefined): string {
   const who = n.who === "me" ? space?.me.name || "내" : space?.partner?.name || "상대";
   const subject = who === "내" ? "내가" : `${who}${josa(who, "이", "가")}`;
-  const v = verb(n.kind);
-  if (v === "체크했어요" || v === "체크를 취소했어요") return `${subject} ${n.blockTitle ? `${n.blockTitle}에서 ` : ""}${v}`;
-  const what = noun(n);
-  // A plan is added; a record, a photo, a diary entry is left.
-  const said = v === "남겼어요" && ["일정", "버킷", "기념일"].includes(what) ? "추가했어요" : v;
-  return `${subject} ${n.blockTitle ? `${n.blockTitle}의 ` : ""}${what}${josa(what, "을", "를")} ${said}`;
+  const t = told(n);
+  if (!t.noun) return `${subject} ${n.blockTitle ? `${n.blockTitle}에서 ` : ""}${t.verb}`;
+  // Something added is put on the block; something changed is the block's.
+  const where = n.blockTitle ? `${n.blockTitle}${t.added ? "에" : "의"} ` : "";
+  return `${subject} ${where}${t.noun}${josa(t.noun, "을", "를")} ${t.verb}`;
 }
 
 /** The particle a word takes: 이/을 after a closing consonant, 가/를 after a vowel. */
