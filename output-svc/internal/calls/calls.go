@@ -55,6 +55,7 @@ var routes = map[string][]route{
 		{http.MethodPost, regexp.MustCompile(`^/couple/order$`)},
 		{http.MethodPost, regexp.MustCompile(`^/couple/blocks/[^/?]+/restore$`)},
 		{http.MethodPost, regexp.MustCompile(`^/couple/blocks/[^/?]+/(bucket|free)/order$`)},
+		{http.MethodPost, regexp.MustCompile(`^/couple/blocks/[^/?]+/album(/(delete|pin))?$`)},
 		{http.MethodPost, regexp.MustCompile(`^/couple/blocks/[^/?]+/(dday|bucket|free|checks|records|visits|start)$`)},
 		{http.MethodPatch, regexp.MustCompile(`^/couple/blocks/[^/?]+/(dday|bucket|free|checks|records|visits)/[^/?]+$`)},
 		{http.MethodDelete, regexp.MustCompile(`^/couple/blocks/[^/?]+/(dday|bucket|free|checks|records|visits)/[^/?]+$`)},

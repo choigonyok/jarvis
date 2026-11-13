@@ -1,12 +1,15 @@
 "use client";
 
+import { AlbumPage } from "@/components/couple/album";
 import { BucketPage } from "@/components/couple/bucket";
 import { DateMapPage } from "@/components/couple/date-map";
 import { DDayPage } from "@/components/couple/dday";
 import { FreePage } from "@/components/couple/free";
 import { HabitPage } from "@/components/couple/habit";
 import { CoupleScreen } from "@/components/couple/screen";
+import { BudgetPage, DiaryPage, FoodPage, LogPage } from "@/components/couple/shelf";
 import { useBlock, useSpace } from "@/components/couple/use-space";
+import { WorldMapPage } from "@/components/couple/world-page";
 import { Failed } from "@/components/shell/failed";
 import { BLOCK_NAME } from "@/lib/couple";
 import { SAY } from "@/lib/say";
@@ -39,6 +42,18 @@ export function BlockPage({ id }: { id: string }) {
         <DateMapPage block={b} onChanged={reload} />
       ) : b.type === "free" ? (
         <FreePage block={b} space={space.data} onChanged={reload} />
+      ) : b.type === "worldmap" ? (
+        <WorldMapPage block={b} onChanged={reload} />
+      ) : b.type === "album" ? (
+        <AlbumPage block={b} space={space.data} onChanged={reload} />
+      ) : b.type === "log" ? (
+        <LogPage block={b} space={space.data} onChanged={reload} />
+      ) : b.type === "food" ? (
+        <FoodPage block={b} space={space.data} onChanged={reload} />
+      ) : b.type === "diary" ? (
+        <DiaryPage block={b} space={space.data} onChanged={reload} />
+      ) : b.type === "budget" ? (
+        <BudgetPage block={b} space={space.data} onChanged={reload} />
       ) : (
         <div>
           <h1 className="text-display leading-[1.2] font-semibold tracking-tight text-foreground">{b.title}</h1>

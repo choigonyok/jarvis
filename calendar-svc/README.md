@@ -19,8 +19,15 @@ agent 에 남아 있습니다.
 - **공유 캘린더입니다.** 쓰기는 상대방 휴대폰에 바로 보입니다. 새 일정은 승인 카드로만
   들어오고(agent 의 `POST /calendar` 는 새 일정을 403 으로 거절), 알림은 걸지 않습니다.
 - **반복 일정**은 앱의 펼치기 로직을 그대로 옮겼습니다(`internal/uniple/expand.go`).
-  하루치의 id 는 `시리즈#날짜` 이고, 그 하루를 지우면 시리즈의 예외 날짜로 들어갑니다.
-  하루만 수정하는 것은 앱에서 합니다.
+  하루치의 id 는 `시리즈#날짜` 이고 `seriesDate` 에 시리즈가 시작하는 날을 싣습니다. 그 하루를 지우면
+  시리즈의 예외 날짜로 들어가고, 시리즈 id 로 고치거나 지우면 반복 전체가 바뀝니다. 하루만 따로 고친
+  날(덮어쓰기 행)을 지우면 그날을 시리즈의 예외 날짜에 넣고 지웁니다 - 원래 날이 되살아나지 않게.
+  하루만 수정하는 것은 앱에서 합니다(앱의 `save_calendar_event_scope` 범위 값을 모릅니다).
+- 디데이 블록이 쓴 기념일 일정(`origin` 이 있는 일정)은 고치거나 지우지 않습니다(400). 디데이가 날짜를
+  바꿀 때마다 다시 쓰므로 여기서 바꾸면 덮이거나 둘이 어긋납니다.
+- **공휴일**: `GET /holidays?from=&to=` 는 공개 피드(`HOLIDAYS_ICS_URL`, 기본 구글의 한국 공휴일 캘린더 -
+  설명이 `공휴일` 인 것만)를 하루 한 번 읽고, 정부가 정한 해의 목록(`internal/holiday`)과 합쳐 줍니다. 피드가
+  빠뜨린 날(2027 설 연휴 첫날)과 피드를 못 읽을 때를 목록이 메웁니다. `HOLIDAYS_ICS_URL=off` 면 목록만.
 - `owner` 는 me | partner | shared 로 *누구의 일정인지* 표시할 뿐 숨기지 않습니다.
 - 장소는 칸을 따로 두지 않고 메모에 적습니다. 쓰는 쪽이 장소를 따로 넘겨도 저장할 때 메모 첫 줄이 되고
   (`event.Validate`), 메모에 이미 있으면 그대로입니다. 예전 일정의 첫 줄 `📍 장소` 는 읽을 때만 장소로
@@ -68,8 +75,21 @@ agent 에 남아 있습니다.
 
 uniple 의 홈은 캘린더 말고도 블록이 있다: 디데이, 버킷리스트, 습관 체크, 데이트 지도, 자유 블록, 그리고 사진·일기·가계부 같은
 것들. 같은 세션(회전하는 토큰은 이 프로세스 하나가 쥔다)으로 앱이 읽는 표를 앱처럼 읽고, 앱이 쓰는 칸만 쓴다. 표와 칸은 앱
-번들의 블록 정의(`itemTable`·`itemSelectColumns`)와 쓰기 코드에서 읽었다. uniple 이 아닐 때(`CALENDAR_BACKEND=postgres`)는 404,
-손님 토큰은 403 이다(세션이 운영자 것이라 손님의 체크가 운영자 이름으로 들어가게 된다).
+번들의 블록 정의(`itemTable`·`itemSelectColumns`)와 쓰기 코드에서 읽었고, 번들에 없는 칸은 anon 키로 하나씩 있는지 확인했다.
+uniple 이 아닐 때(`CALENDAR_BACKEND=postgres`)는 404 다. 손님 토큰은 읽기만 하고 나와 상대를 뒤집어 받는다(`Space.Flipped` 등 -
+손님이 자기 앱에서 보듯이). 손님의 쓰기는 403 이다(세션이 운영자 것이라 손님의 체크가 운영자 이름으로 들어가게 된다).
+
+블록 열두 종류를 모두 읽는다. 문화 기록장(`log_entries`)·맛집 기록장(`food_entries`)·커플 일기장(`diary_entries`, 답글
+`diary_comments`)·데이트 가계부(`budget_dates`, 지출 `budget_expenses`)는 **읽기만** 한다: 별점의 단위, 누가 냈는지의 값, 답글이
+어디에 붙는지 같은 쓰기 규칙이 앱이 보여 준 코드에 없어서, 짐작으로 쓰면 앱이 잘못 읽을 행이 남는다. 홈은 이 넷을 앱의 칸 그대로
+붙여 읽고, uniple 이 그 묶음을 거절하면(400) 넷 없이 다시 읽어 홈은 열린다. 세계 지도(`worldmap_visits`·`worldmap_records`, 나라는
+ISO 두 글자)는 데이트 지도와 같은 `visits`·`records` 경로로 읽고 쓴다 - 블록의 종류가 표를 고르고, `region` 은 나라, 기록의
+`title` 은 도시다. 나라의 대표 사진은 `set_worldmap_fill_asset`. 공유 앨범은 `album_photos` 와 `album_bulk_delete`·
+`set_album_pinned_asset`.
+
+uniple 의 오류는 무엇을 하면 되는지로 답한다: 로그인 풀림·닿지 않음·장애는 503, 권한(42501)은 403, 없어짐은 404, 중복은 409,
+받지 않은 값은 400(`trouble`). 지도 사진·나라의 첫 사진·습관 체크·앨범의 찍은 사진 뒤에는 앱처럼 앱 서버의
+`/api/push/notify-partner` 로 상대 폰에 알린다(따로, 실패해도 그 쓰기는 된 것).
 
 | 메서드 | 경로 | 하는 일 |
 |---|---|---|
@@ -82,14 +102,16 @@ uniple 의 홈은 캘린더 말고도 블록이 있다: 디데이, 버킷리스�
 | POST · PATCH | `/couple/blocks` · `/couple/blocks/{id}` | 블록 추가(버킷·습관·자유, 앱과 같은 개수 한도) · 이름 바꾸기 |
 | POST · PATCH · DELETE | `/couple/blocks/{id}/dday[/{item}]` | 기념일. 바꾸면 `sync_dday_calendar_events` 로 캘린더의 기념일 일정도 다시 쓴다. 만난 날은 앱에서 |
 | POST · PATCH · DELETE | `/couple/blocks/{id}/bucket[/{item}]` | 버킷(맨 뒤에), 이룸·이름, 지우기 |
-| POST · DELETE | `/couple/blocks/{id}/free[/{item}]` | 자유 블록의 기록 |
+| POST · PATCH · DELETE | `/couple/blocks/{id}/free[/{item}]` | 자유 블록의 기록, 글 고치기 |
+| POST | `/couple/blocks/{id}/bucket/order` · `/couple/blocks/{id}/free/order` | 목록의 순서(항목 전부, 하나씩 - 바뀐 자리만 쓴다) |
 | POST · PATCH · DELETE | `/couple/blocks/{id}/checks[/{item}]` | 내 체크(오지 않은 날은 거절, 같은 날 두 번은 하나), 메모, 취소 - 내 것만 |
-| POST · PATCH · DELETE | `/couple/blocks/{id}/records[/{item}]` | 데이트 지도의 기록. 서울의 구는 앱처럼 `S01`~`S25` 로 쓰고 다섯 자리로 읽는다. 사진이 붙은 기록은 지우지 않는다(사진 파일 정리는 앱이 한다) |
-
+| POST · PATCH · DELETE | `/couple/blocks/{id}/records[/{item}]` | 데이트 지도의 기록(세계 지도는 여행 기록). 서울의 구는 앱처럼 `S01`~`S25` 로 쓰고 다섯 자리로 읽는다. 기록을 지우면 그 사진도 지운다 |
 | PATCH · DELETE | `/couple/blocks/{id}` | 이름, 설정(`showUpcoming`, 지도 카드의 `card_region` - `patch_block_config`) · 보관(`archived_at`, 캘린더는 앱에서) |
+| GET · POST | `/couple/archived` · `/couple/blocks/{id}/restore` | 보관한 블록들 · 꺼내기(홈 맨 뒤로, 개수 한도는 그대로) |
+| POST | `/couple/blocks/{id}/album` · `.../album/delete` · `.../album/pin` | 앨범에 사진 넣기(한 번에 30장, `snap` 은 찍은 사진 - 상대에게 알림) · 지우기 · 홈에 띄우기(빈 값은 내리기) |
 | POST | `/couple/order` | 홈의 블록 순서(살아 있는 블록 전부, 하나씩) |
 | POST | `/couple/blocks/{id}/start` | 만난 날: 공간의 `anniversary_date` 를 먼저 바꾸고(못 바꾸면 아무것도 안 바꿈) 시작일 항목, 캘린더 기념일 |
-| POST · PATCH · DELETE | `/couple/blocks/{id}/visits[/{item}]` | 지도 사진: 지역의 대표(`add_map_face_asset`)나 기록의 사진, 대표 바꾸기(asset), 지우기 |
+| POST · PATCH · DELETE | `/couple/blocks/{id}/visits[/{item}]` | 지도 사진: 지역(나라)의 대표나 기록의 사진, 대표 바꾸기(`asset`)·돌리기(`rotation`, 도), 지우기. 앱의 편집기가 잘라 둔 그림(`clip_asset_id`)도 함께 읽는다 |
 | POST · DELETE | `/couple/photos[/{id}]`, POST `/couple/photos/{id}/cover` | 캘린더 날의 사진(일정에 딸리면 시리즈 id), 지우기, 그날의 대표(`set_calendar_day_photo_cover`) |
 | POST | `/couple/uploads?block=` | 사진 한 장(jpeg·png·webp, 4MB) → `{asset}` |
 

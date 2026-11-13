@@ -243,6 +243,7 @@ function coupleWrite(method: string, rest: string): boolean {
         ["blocks", "order", "photos"].includes(rest) ||
         new RegExp(`^blocks/${id}/(dday|bucket|free|checks|records|visits|start|restore)$`).test(rest) ||
         new RegExp(`^blocks/${id}/(bucket|free)/order$`).test(rest) ||
+        new RegExp(`^blocks/${id}/album(/(delete|pin))?$`).test(rest) ||
         new RegExp(`^photos/${id}/cover$`).test(rest)
       );
     case "PATCH":

@@ -68,6 +68,10 @@ type block struct {
 	Free    []note   `json:"free"`
 	Visits  []visit  `json:"visits"`
 	Records []record `json:"records"`
+	Log     []any    `json:"log"`
+	Food    []any    `json:"food"`
+	Diary   []any    `json:"diary"`
+	Budget  []any    `json:"budget"`
 }
 
 type dday struct {
@@ -414,8 +418,21 @@ func (m *Module) gist(ctx context.Context, s space, b block, today string) strin
 			}
 		}
 		return fmt.Sprintf("사진으로 채운 지역 %d곳(%.1f%%)", len(faces), float64(len(faces))*100/float64(len(regions.list)))
+	case "worldmap":
+		faces := map[string]bool{}
+		for _, v := range b.Visits {
+			if v.Asset != "" {
+				faces[v.Region] = true
+			}
+		}
+		return fmt.Sprintf("사진으로 채운 나라 %d곳. 바꾸는 것은 일정 탭에서", len(faces))
+	case "album":
+		return "사진은 일정 탭에서 보고 올린다"
+	case "log", "food", "diary", "budget":
+		n := len(b.Log) + len(b.Food) + len(b.Diary) + len(b.Budget)
+		return fmt.Sprintf("기록 %d개(최근). 일정 탭에서 보고, 쓰기는 uniple 앱에서", n)
 	}
-	return "이 콘솔에서 열지 않는 블록(uniple 앱에서 연다)"
+	return "uniple 앱에서 여는 블록"
 }
 
 func (m *Module) detail(ctx context.Context, s space, b block, in LookInput) (string, error) {
@@ -514,7 +531,7 @@ func (m *Module) detail(ctx context.Context, s space, b block, in LookInput) (st
 	case "calendar":
 		out = append(out, "일정은 look 의 calendar 로 읽고, 바꾸는 것은 일정 도구(카드)로 한다.")
 	default:
-		out = append(out, "이 콘솔에서 열지 않는 블록이다. uniple 앱에서 연다.")
+		out = append(out, "대화로는 읽고 쓰지 않는 블록이다. 일정 탭에서 본다(문화·맛집·일기·가계부는 쓰기가 uniple 앱에서).")
 	}
 	return strings.Join(out, "\n"), nil
 }

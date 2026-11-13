@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { writeCouple, type Block } from "@/lib/couple";
 import { Header, PageTop } from "@/components/shell/header";
+import { useRole } from "@/components/shell/role";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { TabBar } from "@/components/shell/tab-bar";
 import { isPending } from "@/lib/thread";
@@ -19,6 +20,13 @@ import { cn } from "@/lib/utils";
  * page one scroll under the header's glass. A block's page has the way back to
  * 우리 above its name - it is one of 우리's, not a place of its own.
  */
+/**
+ * The guest reads the space here and changes it in their own uniple app:
+ * uniple holds the operator's session only, and a change made with it would
+ * go under the operator's name. Every way to change something asks this.
+ */
+export const useViewOnly = () => useRole() !== "owner";
+
 export function CoupleScreen({
   back,
   wide,
@@ -32,6 +40,7 @@ export function CoupleScreen({
 }) {
   const { proposals, connection } = useThread();
   const waiting = proposals.filter(isPending);
+  const viewOnly = useViewOnly();
   return (
     <div className="flex h-full min-h-0 flex-col">
       <PageTop>
@@ -49,6 +58,7 @@ export function CoupleScreen({
               우리
             </Link>
           ) : null}
+          {viewOnly ? <p className="mb-3 text-aside text-faint">여기서는 보기만 해요. 바꾸는 것은 uniple 앱에서 해요.</p> : null}
           {children}
         </div>
       </main>
@@ -73,11 +83,12 @@ export function BlockTitle({
   children?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  const viewOnly = useViewOnly();
   return (
     <div className="flex items-start justify-between gap-3">
       <h1 className="min-w-0 text-display leading-[1.2] font-semibold tracking-tight break-keep text-foreground">
         {title}
-        {block ? (
+        {block && !viewOnly ? (
           <button
             type="button"
             onClick={() => setOpen(true)}

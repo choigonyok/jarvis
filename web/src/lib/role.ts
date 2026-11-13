@@ -55,6 +55,9 @@ const GUEST_API = [
   "/api/mind/checklists",
   "/api/mind/goals",
   "/api/calendar",
+  // The couple's space, read from the guest's side; calendar-svc and the
+  // gateway refuse a guest's change to it.
+  "/api/couple",
   "/api/chat",
   "/api/workout",
   "/api/notify",
@@ -67,11 +70,13 @@ const GUEST_API = [
   "/api/context/transit/lines",
   "/api/map",
 ];
-/** Static files a guest may load: the editor the 편집 tab frames (scripts/photocraft.mjs). */
-const GUEST_FILES = ["/photocraft/"];
+/** Static files a guest may load: the editor the 편집 tab frames (scripts/photocraft.mjs), the maps of 우리. */
+const GUEST_FILES = ["/photocraft/", "/maps/"];
 
 export function guestMay(pathname: string): boolean {
   if (GUEST_PAGES.has(pathname)) return true;
+  // A block of the couple's space is 우리's page (lib/hubs.ts screenOf).
+  if (/^\/couple\/[A-Za-z0-9_-]+$/.test(pathname)) return true;
   if (GUEST_FILES.some((p) => pathname.startsWith(p))) return true;
   return GUEST_API.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }

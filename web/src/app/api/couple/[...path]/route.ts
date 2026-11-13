@@ -15,7 +15,8 @@ const readable = (p: string) =>
 const writable = (p: string) =>
   ["blocks", "order", "photos"].includes(p) ||
   /^blocks\/[^/]+(\/(dday|bucket|free|checks|records|visits|start|restore)(\/[^/]+)?)?$/.test(p) ||
-  /^photos\/[^/]+(\/cover)?$/.test(p);
+  /^photos\/[^/]+(\/cover)?$/.test(p) ||
+  /^blocks\/[^/]+\/album(\/(delete|pin))?$/.test(p);
 
 export const GET = pathProxy(`${CALENDAR_URL}/couple`, {
   label: "우리",

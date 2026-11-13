@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowUpDown, Check as CheckMark, ChevronDown, Plus, Search, X } from "lucide-react";
 import { ReorderSheet, placeInto } from "@/components/couple/reorder";
-import { BlockTitle } from "@/components/couple/screen";
+import { BlockTitle, useViewOnly } from "@/components/couple/screen";
 import { useUndo } from "@/components/shell/undo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
  * five seconds with 되돌리기 before it goes.
  */
 export function BucketPage({ block, onChanged }: { block: Block; onChanged: () => Promise<void> }) {
+  const viewOnly = useViewOnly();
   const [items, setItems] = useState<Bucket[]>(block.bucket ?? []);
   const [draft, setDraft] = useState("");
   const [query, setQuery] = useState<string | null>(null);
@@ -128,7 +129,7 @@ export function BucketPage({ block, onChanged }: { block: Block; onChanged: () =
   return (
     <div>
       <BlockTitle title={block.title} block={block} onRenamed={onChanged}>
-        {ahead.length > 1 ? (
+        {ahead.length > 1 && !viewOnly ? (
           <Button variant="ghost" size="icon-touch" onClick={() => setOrdering(true)} aria-label="할 것 순서 바꾸기" className="text-dim hover:text-foreground">
             <ArrowUpDown aria-hidden className="size-5" />
           </Button>
@@ -162,7 +163,7 @@ export function BucketPage({ block, onChanged }: { block: Block; onChanged: () =
           aria-label="버킷 찾기"
           className="mt-5"
         />
-      ) : (
+      ) : viewOnly ? null : (
         <form onSubmit={(e) => void add(e)} className="mt-5 flex gap-2">
           <Input
             surface="glass"
@@ -231,6 +232,7 @@ function List({
 }) {
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const viewOnly = useViewOnly();
   function finish(b: Bucket) {
     const t = draft.trim();
     setEditing(null);
@@ -242,6 +244,7 @@ function List({
         <li key={b.id} data-focus={`bucket:${b.id}`} className="flex min-h-12 items-center gap-3">
           <button
             type="button"
+            disabled={viewOnly}
             onClick={() => onMark(b, !b.done)}
             aria-label={b.done ? `${b.title} 이룬 것 취소` : `${b.title} 이뤘어요로 표시`}
             aria-pressed={b.done}
@@ -257,7 +260,9 @@ function List({
               {b.done ? <CheckMark className="size-3.5" strokeWidth={3} /> : null}
             </span>
           </button>
-          {editing === b.id ? (
+          {viewOnly ? (
+            <span className={cn("min-w-0 flex-1 py-2 text-body break-keep", b.done ? "text-dim" : "text-foreground")}>{b.title}</span>
+          ) : editing === b.id ? (
             <Input
               autoFocus
               surface="glass"
@@ -285,9 +290,11 @@ function List({
               {b.title}
             </button>
           )}
-          <Button variant="discard" size="icon-touch" onClick={() => onRemove(b)} aria-label={`${b.title} 지우기`} className="-mr-2 shrink-0">
-            <X aria-hidden className="size-4" />
-          </Button>
+          {viewOnly ? null : (
+            <Button variant="discard" size="icon-touch" onClick={() => onRemove(b)} aria-label={`${b.title} 지우기`} className="-mr-2 shrink-0">
+              <X aria-hidden className="size-4" />
+            </Button>
+          )}
         </li>
       ))}
     </ul>

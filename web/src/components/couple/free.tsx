@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { ArrowUpDown, Plus, X } from "lucide-react";
 import { ReorderSheet } from "@/components/couple/reorder";
-import { BlockTitle } from "@/components/couple/screen";
+import { BlockTitle, useViewOnly } from "@/components/couple/screen";
 import { useUndo } from "@/components/shell/undo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
  * them, each with who left it. A note's words open to be rewritten on a tap.
  */
 export function FreePage({ block, space, onChanged }: { block: Block; space: Space; onChanged: () => Promise<void> }) {
+  const viewOnly = useViewOnly();
   const [items, setItems] = useState<Free[]>(block.free ?? []);
   const [base, setBase] = useState(block.free);
   if (base !== block.free) {
@@ -95,7 +96,7 @@ export function FreePage({ block, space, onChanged }: { block: Block; space: Spa
         <p className="mr-auto text-ui text-dim">
           <span className="tabular-nums">{items.length}</span>개
         </p>
-        {items.length > 1 ? (
+        {items.length > 1 && !viewOnly ? (
           <Button variant="ghost" size="icon-touch" onClick={() => setOrdering(true)} aria-label="기록 순서 바꾸기" className="text-dim hover:text-foreground">
             <ArrowUpDown aria-hidden className="size-4" />
           </Button>
@@ -107,12 +108,14 @@ export function FreePage({ block, space, onChanged }: { block: Block; space: Spa
           시간
         </Toggle>
       </div>
+      {viewOnly ? null : (
       <form onSubmit={(e) => void add(e)} className="mt-4 flex gap-2">
         <Input surface="glass" value={draft} maxLength={500} onChange={(e) => setDraft(e.target.value)} placeholder="우리 둘만의 기록" aria-label="새 기록" className="flex-1" />
         <Button type="submit" variant="raised" size="icon-touch" disabled={!draft.trim() || busy} aria-label="기록 추가">
           <Plus aria-hidden className="size-5" />
         </Button>
       </form>
+      )}
       {error ? (
         <p role="alert" className="mt-2 text-aside text-reject">
           {error}
@@ -149,6 +152,8 @@ export function FreePage({ block, space, onChanged }: { block: Block; space: Spa
                       </Button>
                     </div>
                   </div>
+                ) : viewOnly ? (
+                  <p className="text-body break-keep whitespace-pre-line text-foreground">{f.content}</p>
                 ) : (
                   <button
                     type="button"
@@ -167,9 +172,11 @@ export function FreePage({ block, space, onChanged }: { block: Block; space: Spa
                   </p>
                 ) : null}
               </div>
-              <Button variant="discard" size="icon-touch" onClick={() => remove(f)} aria-label="기록 지우기" className="-mr-2 shrink-0">
-                <X aria-hidden className="size-4" />
-              </Button>
+              {viewOnly ? null : (
+                <Button variant="discard" size="icon-touch" onClick={() => remove(f)} aria-label="기록 지우기" className="-mr-2 shrink-0">
+                  <X aria-hidden className="size-4" />
+                </Button>
+              )}
             </li>
           ))}
         </ul>

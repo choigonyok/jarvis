@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { BlockTitle } from "@/components/couple/screen";
+import { BlockTitle, useViewOnly } from "@/components/couple/screen";
 import { useChecks } from "@/components/couple/use-space";
 import { Failed } from "@/components/shell/failed";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -213,6 +213,7 @@ function Day({
   onChanged: () => Promise<void>;
   loading: boolean;
 }) {
+  const viewOnly = useViewOnly();
   const mine = checks.find((c) => c.who === "me");
   const theirs = checks.find((c) => c.who === "partner");
   const [memo, setMemo] = useState(mine?.memo ?? "");
@@ -261,16 +262,27 @@ function Day({
       </h3>
       {loading ? null : (
         <>
-          <Button
-            variant={mine ? "soft" : "raised"}
-            size="touch"
-            disabled={busy}
-            onClick={() => (mine ? (mine.memo ? setAsking(true) : void uncheck()) : void check())}
-            className="mt-3 w-full"
-          >
-            {busy ? "보내는 중…" : mine ? "체크 취소하기" : "체크하기"}
-          </Button>
-          {mine ? (
+          {viewOnly ? (
+            mine ? (
+              <p className="mt-3 flex items-start gap-2 text-ui text-ink">
+                <span aria-hidden className="mt-[7px] size-[7px] shrink-0 rounded-full bg-mine" />
+                <span>
+                  {space.me.name || "나"}도 했어요{mine.memo ? <span className="text-dim"> · {mine.memo}</span> : null}
+                </span>
+              </p>
+            ) : null
+          ) : (
+            <Button
+              variant={mine ? "soft" : "raised"}
+              size="touch"
+              disabled={busy}
+              onClick={() => (mine ? (mine.memo ? setAsking(true) : void uncheck()) : void check())}
+              className="mt-3 w-full"
+            >
+              {busy ? "보내는 중…" : mine ? "체크 취소하기" : "체크하기"}
+            </Button>
+          )}
+          {mine && !viewOnly ? (
             <Input
               surface="glass"
               value={memo}

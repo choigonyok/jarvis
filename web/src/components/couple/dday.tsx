@@ -2,7 +2,7 @@
 
 import { useId, useState } from "react";
 import { ChevronDown, Plus } from "lucide-react";
-import { BlockTitle } from "@/components/couple/screen";
+import { BlockTitle, useViewOnly } from "@/components/couple/screen";
 import { Segment } from "@/components/couple/segment";
 import { Panel } from "@/components/ui/bottom-sheet";
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils";
  * shows the days coming.
  */
 export function DDayPage({ block, space, onChanged }: { block: Block; space: Space; onChanged: () => Promise<void> }) {
+  const viewOnly = useViewOnly();
   const now = today();
   const start = space.anniversary;
   const [more, setMore] = useState(false);
@@ -59,26 +60,32 @@ export function DDayPage({ block, space, onChanged }: { block: Block; space: Spa
           <p className="text-display-lg leading-none font-semibold tracking-tight text-foreground tabular-nums">D+{together(start, now)}</p>
           <p className="mt-2 flex flex-wrap items-center gap-x-1 text-ui text-dim">
             {dateLabel(start)}부터{todayIs(start, now) ? <span className="text-ink"> · 오늘 {todayIs(start, now)}</span> : null}
-            <Button variant="underline" size="inline" onClick={() => setSetting(true)} className="tap ml-1 text-ui">
-              바꾸기
-            </Button>
+            {viewOnly ? null : (
+              <Button variant="underline" size="inline" onClick={() => setSetting(true)} className="tap ml-1 text-ui">
+                바꾸기
+              </Button>
+            )}
           </p>
         </div>
       ) : (
         <div className="mt-4">
           <p className="text-ui text-dim">만난 날이 아직 없어요.</p>
-          <Button variant="raised" size="touch" onClick={() => setSetting(true)} className="mt-2">
-            만난 날 정하기
-          </Button>
+          {viewOnly ? null : (
+            <Button variant="raised" size="touch" onClick={() => setSetting(true)} className="mt-2">
+              만난 날 정하기
+            </Button>
+          )}
         </div>
       )}
-      <SwitchRow
-        label="홈에 다가오는 날 보이기"
-        hint="우리 화면의 D+ 아래에 가까운 기념일 셋을 둬요"
-        checked={showing}
-        onCheckedChange={(v) => void toggleUpcoming(v)}
-        className="mt-4"
-      />
+      {viewOnly ? null : (
+        <SwitchRow
+          label="홈에 다가오는 날 보이기"
+          hint="우리 화면의 D+ 아래에 가까운 기념일 셋을 둬요"
+          checked={showing}
+          onCheckedChange={(v) => void toggleUpcoming(v)}
+          className="mt-4"
+        />
+      )}
       {note ? (
         <p role="alert" className="text-aside text-reject">
           {note}
@@ -103,10 +110,12 @@ export function DDayPage({ block, space, onChanged }: { block: Block; space: Spa
       <section className="mt-6" aria-label="기념일">
         <div className="flex items-center justify-between">
           <h2 className="text-ui text-dim">기념일</h2>
-          <Button variant="quiet" size="touch-sm" onClick={() => setEditing("new")} className="-mr-2 gap-1">
-            <Plus aria-hidden className="size-4" />
-            기념일 추가
-          </Button>
+          {viewOnly ? null : (
+            <Button variant="quiet" size="touch-sm" onClick={() => setEditing("new")} className="-mr-2 gap-1">
+              <Plus aria-hidden className="size-4" />
+              기념일 추가
+            </Button>
+          )}
         </div>
         {days.length === 0 ? (
           <p className="mt-1 text-ui text-faint">생일이나 처음 여행 간 날을 적어 두면 날을 세 줘요.</p>
@@ -119,7 +128,7 @@ export function DDayPage({ block, space, onChanged }: { block: Block; space: Spa
                 title={d.title}
                 line={`${dateLabel(d.next)}${d.repeat === "yearly" ? " · 매년" : ""}`}
                 mark={dMark(d.next, now)}
-                onOpen={() => setEditing(d)}
+                onOpen={viewOnly ? undefined : () => setEditing(d)}
               />
             ))}
           </ul>

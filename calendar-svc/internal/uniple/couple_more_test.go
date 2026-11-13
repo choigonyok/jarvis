@@ -21,6 +21,7 @@ import (
 type routed struct {
 	mu     sync.Mutex
 	seen   []seenReq
+	raw    []string // "METHOD table body", for bodies that are not one object
 	answer func(method, table string, q url.Values, body map[string]any) (int, string)
 }
 
@@ -40,11 +41,13 @@ func signedInRouted(t *testing.T, f *routed) *Client {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		table := strings.TrimPrefix(r.URL.Path, "/rest/v1/")
 		var body map[string]any
-		if raw, _ := io.ReadAll(r.Body); len(raw) > 0 {
+		raw, _ := io.ReadAll(r.Body)
+		if len(raw) > 0 {
 			_ = json.Unmarshal(raw, &body)
 		}
 		f.mu.Lock()
 		f.seen = append(f.seen, seenReq{Method: r.Method, Table: table, Query: r.URL.Query(), Body: body})
+		f.raw = append(f.raw, r.Method+" "+table+" "+string(raw))
 		f.mu.Unlock()
 		code, out := f.answer(r.Method, table, r.URL.Query(), body)
 		w.Header().Set("Content-Type", "application/json")
@@ -343,3 +346,203 @@ func TestRefusalsKeepTheirStatus(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// A world map keeps its countries and trips in its own tables, through the
+// same calls the date map takes.
+func TestTheWorldMapKeepsItsOwn(t *testing.T) {
+	const asset = "11111111-2222-3333-4444-555555555555"
+	f := &routed{answer: func(method, table string, q url.Values, body map[string]any) (int, string) {
+		switch {
+		case method == "GET" && table == "blocks":
+			return 200, `[{"id":"b-w","type":"worldmap"}]`
+		case method == "GET" && table == "worldmap_visits" && q.Get("record_id") == "is.null":
+			return 200, `[]`
+		case method == "POST" && table == "rpc/set_worldmap_fill_asset":
+			return 200, `[{"id":"wv1","country_code":"JP","asset_id":"` + asset + `","clip_asset_id":"` + asset + `","created_at":"x","record_id":null}]`
+		case method == "POST" && table == "worldmap_records":
+			return 201, `[{"id":"wr1","country_code":"JP","city":"교토","date_start":"2026-10-01","created_at":"x"}]`
+		case method == "GET" && table == "worldmap_records":
+			return 200, `[{"id":"wr1","country_code":"JP","city":"교토","created_at":"x"}]`
+		case method == "POST" && table == "worldmap_visits":
+			return 201, `[{"id":"wv2","country_code":"JP","asset_id":"` + asset + `","record_id":"wr1","created_at":"x"}]`
+		case method == "DELETE" && table == "worldmap_records":
+			return 200, `[{"id":"wr1"}]`
+		}
+		return 200, `[]`
+	}}
+	c := signedInRouted(t, f)
+	var told []map[string]any
+	var mu sync.Mutex
+	app := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var b map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&b)
+		mu.Lock()
+		told = append(told, b)
+		mu.Unlock()
+	}))
+	defer app.Close()
+	c.cfg.AppURL = app.URL
+	ctx := context.Background()
+
+	face, err := c.AddVisit(ctx, "b-w", VisitInput{Region: "jp", Asset: asset, Face: true})
+	if err != nil || face.Region != "JP" || !face.Rep || face.Clip != "" {
+		t.Fatalf("얼굴: %+v %v", face, err)
+	}
+	fill := f.find("POST", "rpc/set_worldmap_fill_asset")[0].Body
+	if fill["p_country_code"] != "JP" || fill["p_clip_asset_id"] != asset || fill["p_rotation"] != float64(0) || fill["p_space_id"] != "s-1" {
+		t.Fatalf("나라 사진: %v", fill)
+	}
+	trip, err := c.AddRecord(ctx, "b-w", RecordInput{Region: ptr("JP"), Title: ptr("교토"), From: ptr("2026-10-01"), To: ptr("2026-10-03")})
+	if err != nil || trip.Title != "교토" {
+		t.Fatalf("여행: %+v %v", trip, err)
+	}
+	rec := f.find("POST", "worldmap_records")[0].Body
+	if rec["city"] != "교토" || rec["country_code"] != "JP" || rec["date_end"] != "2026-10-03" || rec["title"] != nil {
+		t.Fatalf("여행 기록: %v", rec)
+	}
+	if _, err := c.AddVisit(ctx, "b-w", VisitInput{Record: "wr1", Asset: asset}); err != nil {
+		t.Fatal(err)
+	}
+	photo := f.find("POST", "worldmap_visits")[0].Body
+	if photo["record_id"] != "wr1" || photo["country_code"] != "JP" {
+		t.Fatalf("여행 사진: %v", photo)
+	}
+	if err := c.DeleteRecord(ctx, "b-w", "wr1"); err != nil {
+		t.Fatal(err)
+	}
+	gone := f.find("DELETE", "worldmap_visits")
+	if len(gone) != 1 || gone[0].Query.Get("record_id") != "eq.wr1" || len(f.find("DELETE", "worldmap_records")) != 1 {
+		t.Fatalf("여행을 지우면 사진도: %+v", gone)
+	}
+	if _, err := c.AddVisit(ctx, "b-w", VisitInput{Region: "Japan", Asset: asset, Face: true}); err == nil {
+		t.Fatal("나라는 두 글자 코드")
+	}
+	c.pushes.Wait()
+	mu.Lock()
+	defer mu.Unlock()
+	if len(told) < 1 || told[0]["itemId"] != "wv1" {
+		t.Fatalf("나라의 첫 사진은 상대 폰에: %v", told)
+	}
+}
+
+func TestTheAlbum(t *testing.T) {
+	const a1, a2 = "11111111-2222-3333-4444-555555555551", "11111111-2222-3333-4444-555555555552"
+	f := &routed{answer: func(method, table string, q url.Values, body map[string]any) (int, string) {
+		switch {
+		case method == "GET" && table == "blocks":
+			return 200, `[{"id":"b-a","type":"album"}]`
+		case method == "POST" && table == "album_photos":
+			return 201, `[{"id":"p1","uploaded_by":"u-me","asset_id":"` + a1 + `","media_type":"photo","width":1080,"height":810,"created_at":"x"},{"id":"p2","uploaded_by":"u-me","asset_id":"` + a2 + `","media_type":"photo","created_at":"y"}]`
+		}
+		return 200, `[]`
+	}}
+	c := signedInRouted(t, f)
+	in := AlbumInput{Snap: true}
+	in.Photos = append(in.Photos, struct {
+		Asset  string `json:"asset"`
+		Width  int    `json:"width"`
+		Height int    `json:"height"`
+	}{a1, 1080, 810}, struct {
+		Asset  string `json:"asset"`
+		Width  int    `json:"width"`
+		Height int    `json:"height"`
+	}{a2, 0, 0})
+	got, err := c.AddAlbumPhotos(context.Background(), "b-a", in)
+	if err != nil || len(got) != 2 || got[0].By != "me" || got[0].Width != 1080 {
+		t.Fatalf("%+v %v", got, err)
+	}
+	var sent string
+	for _, r := range f.raw {
+		if strings.HasPrefix(r, "POST album_photos ") {
+			sent = strings.TrimPrefix(r, "POST album_photos ")
+		}
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(sent), &rows); err != nil || len(rows) != 2 {
+		t.Fatalf("한 번에 넣어야 합니다: %s", sent)
+	}
+	if rows[0]["uploaded_by"] != "u-me" || rows[0]["is_snap"] != true || rows[0]["media_type"] != "photo" || rows[1]["width"] != nil || rows[0]["space_id"] != "s-1" {
+		t.Fatalf("앨범 행: %v", rows)
+	}
+	if err := c.DeleteAlbumPhotos(context.Background(), "b-a", []string{a1}); err != nil {
+		t.Fatal(err)
+	}
+	del := f.find("POST", "rpc/album_bulk_delete")[0].Body
+	if ids, _ := del["p_photo_ids"].([]any); len(ids) != 1 || del["p_block_id"] != "b-a" || !uuidLike(del["p_request_id"].(string)) {
+		t.Fatalf("지우기: %v", del)
+	}
+	if err := c.PinAlbum(context.Background(), "b-a", ""); err != nil {
+		t.Fatal(err)
+	}
+	if pin := f.find("POST", "rpc/set_album_pinned_asset")[0].Body; pin["p_asset_id"] != nil {
+		t.Fatalf("홈에서 내리기: %v", pin)
+	}
+	if err := c.DeleteAlbumPhotos(context.Background(), "b-a", nil); err == nil {
+		t.Fatal("고른 사진이 없으면 거절")
+	}
+}
+
+// The blocks shown but not written are read with the columns uniple has, and
+// what the two wrote reads from the viewer's side.
+func TestShelvesReadWhatTheyHold(t *testing.T) {
+	f := &routed{answer: func(method, table string, q url.Values, body map[string]any) (int, string) {
+		switch table {
+		case "blocks":
+			return 200, `[{"id":"b-x","type":"` + q.Get("id")[len("eq.b-"):] + `","title":"t","order_index":0}]`
+		case "log_entries":
+			return 200, `[{"id":"l1","category":"movie","title":"헤어질 결심","rating":4.5,"note":"또 보자","photo_asset_ids":["p1"],"card_asset":"c1","experienced_on":"2026-10-01","experienced_end":"2026-10-02","created_by":"u-you","created_at":"x"}]`
+		case "food_entries":
+			return 200, `[{"id":"f1","meal_type":"dinner","title":"을지로 노포","rating":5,"tags":["mood","revisit"],"photo_asset_ids":null,"card_asset":"c2","experienced_on":"2026-11-01","created_by":"u-me","created_at":"x"}]`
+		case "diary_entries":
+			return 200, `[{"id":"d1","author_id":"u-you","entry_at":"2026-11-10T12:00:00Z","title":null,"body":"오늘","photo_asset_ids":[],"comment_count":1,"created_at":"x","diary_comments":[{"id":"c1","author_id":"u-me","body":"나도","created_at":"y"}]}]`
+		case "budget_dates":
+			return 200, `[{"id":"g1","title":"온천","start_on":"2026-09-07","end_on":null,"total_amount":115000,"expense_count":2,"top_category":"stay","memo":"좋았다","created_at":"x","budget_expenses":[{"id":"e1","amount":90000,"category":"stay","paid_by":"u-me","created_at":"x"},{"id":"e2","amount":25000,"category":"meal","paid_by":"shared","created_at":"y"}]}]`
+		}
+		return 200, `[]`
+	}}
+	c := signedInRouted(t, f)
+	ctx := context.Background()
+	b, err := c.Block(ctx, "b-log")
+	if err != nil || len(b.Log) != 1 || b.Log[0].Title != "헤어질 결심" || *b.Log[0].Rating != 4.5 || b.Log[0].Cover != "p1" || b.Log[0].To != "2026-10-02" || b.Log[0].By != "partner" {
+		t.Fatalf("문화 기록장: %+v %v", b.Log, err)
+	}
+	b, err = c.Block(ctx, "b-food")
+	if err != nil || len(b.Food) != 1 || len(b.Food[0].Tags) != 2 || b.Food[0].Cover != "c2" || b.Food[0].By != "me" {
+		t.Fatalf("맛집: %+v %v", b.Food, err)
+	}
+	b, err = c.Block(ctx, "b-diary")
+	if err != nil || len(b.Diary) != 1 || b.Diary[0].By != "partner" || len(b.Diary[0].Replies) != 1 || b.Diary[0].Replies[0].By != "me" {
+		t.Fatalf("일기: %+v %v", b.Diary, err)
+	}
+	b, err = c.Block(ctx, "b-budget")
+	if err != nil || len(b.Budget) != 1 || b.Budget[0].Total != 115000 || len(b.Budget[0].Expenses) != 2 || b.Budget[0].Expenses[0].PaidBy != "me" || b.Budget[0].Expenses[1].PaidBy != "shared" {
+		t.Fatalf("가계부: %+v %v", b.Budget, err)
+	}
+	for _, s := range f.find("GET", "budget_dates") {
+		if !strings.Contains(s.Query.Get("select"), "budget_expenses(") {
+			t.Fatalf("지출은 날짜에 붙여 읽습니다: %v", s.Query)
+		}
+	}
+}
+
+// A home whose shown-only tables uniple turns down still opens.
+func TestTheHomeOpensWithoutTheShelves(t *testing.T) {
+	f := &routed{answer: func(method, table string, q url.Values, body map[string]any) (int, string) {
+		if table == "blocks" && strings.Contains(q.Get("select"), "log_entries(") {
+			return 400, `{"code":"PGRST200","message":"Could not find a relationship"}`
+		}
+		if table == "blocks" {
+			return 200, `[{"id":"b-b","type":"bucket","title":"버킷","order_index":0,"bucket_items":[{"id":"w1","title":"제주"}]}]`
+		}
+		return 200, `[]`
+	}}
+	c := signedInRouted(t, f)
+	rows, err := c.blocks(context.Background(), "s-1", "")
+	if err != nil || len(rows) != 1 || len(rows[0].BucketItems) != 1 {
+		t.Fatalf("%+v %v", rows, err)
+	}
+	asked := f.find("GET", "blocks")
+	if len(asked) != 2 || asked[1].Query.Get("log_entries.order") != "" || strings.Contains(asked[1].Query.Get("select"), "log_entries") {
+		t.Fatalf("두 번째 읽기는 기본 목록으로: %+v", asked)
+	}
+}

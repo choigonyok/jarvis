@@ -15,8 +15,12 @@ export type Shape = { code: string; name: string; d: string; box: [number, numbe
 export type Region = Shape & { sido: string };
 export type KoreaMapData = { source: string; viewBox: string; provinces: Shape[]; regions: Region[] };
 
-/** A region's face: the photo it shows, turned as it was placed. */
-export type Face = { asset: string; rotation?: number };
+/**
+ * A region's photo: the clip the app's crop editor made of it (the photo
+ * already placed and turned for the region) or else the photo, filling the
+ * region's box, turned by rotation - as the app lays it.
+ */
+export type Face = { asset: string; clip?: string; rotation?: number };
 
 let loaded: Promise<KoreaMapData> | null = null;
 
@@ -157,20 +161,23 @@ export function KoreaMap({
           const [x, y, w, h] = r.box;
           const cx = x + w / 2;
           const cy = y + h / 2;
-          // Turned, the photo must still cover the shape: grown to the box's diagonal.
-          const side = face.rotation ? Math.hypot(w, h) : 0;
+          // As the app lays it: the photo fills the region's box; turned, a
+          // square grown until the turned photo still covers the box.
+          const turn = face.rotation ?? 0;
+          const rad = (turn * Math.PI) / 180;
+          const side = turn ? Math.max(w, h) * (Math.abs(Math.cos(rad)) + Math.abs(Math.sin(rad))) : 0;
           return (
             <g key={r.code} {...press} opacity={here ? undefined : 0.35}>
               <path d={r.d} className="fill-glass-raised" />
               <image
-                href={photoSrc(face.asset, size)}
-                x={face.rotation ? cx - side / 2 : x}
-                y={face.rotation ? cy - side / 2 : y}
-                width={face.rotation ? side : w}
-                height={face.rotation ? side : h}
+                href={photoSrc(face.clip ?? face.asset, size)}
+                x={turn ? cx - side / 2 : x}
+                y={turn ? cy - side / 2 : y}
+                width={turn ? side : w}
+                height={turn ? side : h}
                 preserveAspectRatio="xMidYMid slice"
                 clipPath={`url(#${uid}-${r.code})`}
-                transform={face.rotation ? `rotate(${face.rotation} ${cx} ${cy})` : undefined}
+                transform={turn ? `rotate(${turn} ${cx} ${cy})` : undefined}
               />
               <path d={r.d} fill="none" className="stroke-background" strokeWidth={0.6} vectorEffect="non-scaling-stroke" />
             </g>

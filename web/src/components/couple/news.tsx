@@ -47,7 +47,17 @@ function told(n: News): Told {
     case "workout":
       return { noun: "", verb: /uncheck/.test(k) || gone ? "체크를 취소했어요" : "체크했어요", added: true };
     case "diary":
+      if (/comment/.test(k)) return { noun: "댓글", verb: "남겼어요", added: true };
       return plain("일기", "남겼어요");
+    case "album":
+      if (k === "snap") return { noun: "사진", verb: "찍어 올렸어요", added: true };
+      return plain("사진", "올렸어요");
+    case "log":
+      return plain("기록", "남겼어요");
+    case "food":
+      return plain("맛집", "남겼어요");
+    case "budget":
+      return plain("지출", "적었어요");
     case "free":
       return plain("기록", "남겼어요");
     default:

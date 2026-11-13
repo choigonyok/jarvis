@@ -32,6 +32,8 @@ export type Visit = {
   id: string;
   region: string;
   asset: string;
+  /** The face as the app's crop editor made it: moved and turned to fill the region's square. */
+  clip?: string;
   rotation?: number;
   rep?: boolean;
   record?: string;
@@ -49,6 +51,73 @@ export type DateRecord = {
   createdAt: string;
 };
 
+/** A photo of the shared album. A video plays only in the app. */
+export type AlbumPhoto = {
+  id: string;
+  asset: string;
+  width?: number;
+  height?: number;
+  media: "photo" | "video";
+  duration?: number;
+  by: Who;
+  folder?: string;
+  takenAt?: string;
+  /** When it sorts: taken, else put in. */
+  at: string;
+  createdAt: string;
+};
+export type LogEntry = {
+  id: string;
+  category: string;
+  title?: string;
+  rating?: number;
+  note?: string;
+  photos?: string[];
+  cover?: string;
+  from?: string;
+  to?: string;
+  by?: Who;
+  createdAt: string;
+};
+export type FoodEntry = {
+  id: string;
+  meal?: string;
+  title?: string;
+  rating?: number;
+  note?: string;
+  tags?: string[];
+  photos?: string[];
+  cover?: string;
+  day?: string;
+  by?: Who;
+  createdAt: string;
+};
+export type DiaryReply = { id: string; by: Who; body: string; createdAt: string };
+export type DiaryEntry = {
+  id: string;
+  by: Who;
+  at: string;
+  title?: string;
+  body: string;
+  photos?: string[];
+  comments?: number;
+  replies?: DiaryReply[];
+  createdAt: string;
+};
+export type Expense = { id: string; amount: number; category?: string; paidBy?: "me" | "partner" | "shared" | string; memo?: string; createdAt: string };
+export type BudgetDate = {
+  id: string;
+  title?: string;
+  from: string;
+  to?: string;
+  total: number;
+  count: number;
+  top?: string;
+  memo?: string;
+  expenses?: Expense[];
+  createdAt: string;
+};
+
 export type Block = {
   id: string;
   type: BlockType;
@@ -58,8 +127,14 @@ export type Block = {
   dday?: DDay[];
   bucket?: Bucket[];
   free?: Free[];
+  /** A date map's photos and records; a world map's, by country (region) and city (title). */
   visits?: Visit[];
   records?: DateRecord[];
+  album?: AlbumPhoto[];
+  log?: LogEntry[];
+  food?: FoodEntry[];
+  diary?: DiaryEntry[];
+  budget?: BudgetDate[];
   /** When a block in 보관 was put there. */
   archived?: string;
 };
@@ -107,8 +182,16 @@ export const BLOCK_NAME: Record<BlockType, string> = {
   food: "맛집 기록장",
 };
 
-/** The blocks this console opens. The rest show on the home and open in uniple. */
-export const OPENS: ReadonlySet<BlockType> = new Set(["dday", "calendar", "workout", "bucket", "map", "free"]);
+/** The blocks this console opens: every kind. */
+export const OPENS: ReadonlySet<BlockType> = new Set([
+  "dday", "calendar", "workout", "bucket", "map", "free", "worldmap", "album", "log", "food", "diary", "budget",
+]);
+
+/**
+ * The blocks shown here but written in uniple: how the app fills in their
+ * rows - a rating's scale, who paid, a reply - is in code it has not shown.
+ */
+export const READ_ONLY: ReadonlySet<BlockType> = new Set(["log", "food", "diary", "budget"]);
 
 /** The blocks a space may hold, how many of each, and what each is for. */
 export const ADDABLE: { type: BlockType; cap: number; line: string }[] = [
@@ -118,12 +201,12 @@ export const ADDABLE: { type: BlockType; cap: number; line: string }[] = [
   { type: "dday", cap: 1, line: "만난 날부터 며칠, 기념일까지 며칠" },
   { type: "calendar", cap: 1, line: "둘의 일정을 한 달에" },
   { type: "map", cap: 1, line: "가 본 시/군/구를 사진으로 채우는 지도" },
-  { type: "worldmap", cap: 1, line: "가 본 나라 - uniple 앱에서 열어요" },
-  { type: "log", cap: 1, line: "영화·전시·공연 기록 - uniple 앱에서 열어요" },
-  { type: "food", cap: 1, line: "맛집·카페 기록 - uniple 앱에서 열어요" },
-  { type: "diary", cap: 1, line: "둘이 쓰는 일기 - uniple 앱에서 열어요" },
-  { type: "budget", cap: 1, line: "데이트에 쓴 돈 - uniple 앱에서 열어요" },
-  { type: "album", cap: 1, line: "둘이 올리는 사진 - uniple 앱에서 열어요" },
+  { type: "worldmap", cap: 1, line: "가 본 나라를 사진으로 채우는 세계 지도" },
+  { type: "album", cap: 1, line: "둘이 올리는 사진을 한곳에" },
+  { type: "log", cap: 1, line: "영화·전시·공연 기록 - 여기선 보기만, 쓰기는 uniple 앱에서" },
+  { type: "food", cap: 1, line: "맛집·카페 기록 - 여기선 보기만, 쓰기는 uniple 앱에서" },
+  { type: "diary", cap: 1, line: "둘이 쓰는 일기 - 여기선 보기만, 쓰기는 uniple 앱에서" },
+  { type: "budget", cap: 1, line: "데이트에 쓴 돈 - 여기선 보기만, 쓰기는 uniple 앱에서" },
 ];
 
 /* ───────────────────────────── reading and writing ───────────────────────────── */
@@ -168,9 +251,17 @@ export async function writeCouple<T>(method: "POST" | "PATCH" | "DELETE", path: 
  * somewhere, or why it did not go. Nothing shows until something names it.
  */
 export async function uploadPhoto(block: string, file: File): Promise<Sent<string>> {
+  const sent = await uploadSized(block, file);
+  return sent.ok ? { ok: true, data: sent.data.asset } : sent;
+}
+
+/** A photo uploaded, with the size it went up at (the album keeps it). */
+export async function uploadSized(block: string, file: File): Promise<Sent<{ asset: string; width: number; height: number }>> {
   let blob: Blob;
+  let width = 0;
+  let height = 0;
   try {
-    blob = await shrink(file);
+    ({ blob, width, height } = await shrink(file));
   } catch {
     const heic = /hei[cf]/i.test(file.type) || /\.hei[cf]$/i.test(file.name);
     return {
@@ -189,17 +280,21 @@ export async function uploadPhoto(block: string, file: File): Promise<Sent<strin
     });
     if (!res.ok) return { ok: false, error: await failure(res) };
     const body = (await res.json()) as { asset?: string };
-    return body.asset ? { ok: true, data: body.asset } : { ok: false, error: "사진을 올리지 못했어요." };
+    return body.asset ? { ok: true, data: { asset: body.asset, width, height } } : { ok: false, error: "사진을 올리지 못했어요." };
   } catch {
     return { ok: false, error: "사진을 올리지 못했어요. 연결을 확인해 주세요." };
   }
 }
 
-/** A photo no side over 2048px, as a JPEG - what the app itself uploads is no bigger. */
-async function shrink(file: File): Promise<Blob> {
+/**
+ * A photo as the app itself uploads one: no side over 1080px, WebP, or JPEG
+ * where the browser cannot write WebP. The space's storage is counted by the
+ * byte, so a photo here costs what one from the app does.
+ */
+async function shrink(file: File): Promise<{ blob: Blob; width: number; height: number }> {
   const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
   try {
-    const scale = Math.min(1, 2048 / Math.max(bitmap.width, bitmap.height));
+    const scale = Math.min(1, 1080 / Math.max(bitmap.width, bitmap.height));
     const w = Math.max(1, Math.round(bitmap.width * scale));
     const h = Math.max(1, Math.round(bitmap.height * scale));
     const canvas = document.createElement("canvas");
@@ -209,10 +304,13 @@ async function shrink(file: File): Promise<Blob> {
     if (!g) throw new Error("canvas");
     g.imageSmoothingQuality = "high";
     g.drawImage(bitmap, 0, 0, w, h);
-    const out = await new Promise<Blob | null>((ok) => canvas.toBlob(ok, "image/jpeg", 0.86));
+    const encode = (type: string, quality: number) => new Promise<Blob | null>((ok) => canvas.toBlob(ok, type, quality));
+    let out = await encode("image/webp", 0.8);
+    // A browser that cannot write WebP hands back a PNG instead.
+    if (!out || out.type !== "image/webp") out = await encode("image/jpeg", 0.82);
     canvas.width = canvas.height = 0;
     if (!out) throw new Error("encode");
-    return out;
+    return { blob: out, width: w, height: h };
   } finally {
     bitmap.close();
   }

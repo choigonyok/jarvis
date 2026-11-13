@@ -4,7 +4,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Pin, Plus, X } from "lucide-react";
 import { KoreaMap, percent, useKoreaMap, type Face } from "@/components/couple/korea-map";
 import { PhotoTiles, PickBar, PickPhotos, SaveAction, ViewerAction, useUploads } from "@/components/couple/photos";
-import { BlockTitle } from "@/components/couple/screen";
+import { BlockTitle, useViewOnly } from "@/components/couple/screen";
 import { Failed } from "@/components/shell/failed";
 import {
   AlertDialog,
@@ -36,6 +36,7 @@ import { cn } from "@/lib/utils";
  * the phone: a region's face, or a record's photos.
  */
 export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () => Promise<void> }) {
+  const viewOnly = useViewOnly();
   const { map, failed } = useKoreaMap();
   const pinned = typeof block.config?.card_region === "string" ? (block.config.card_region as string) : "all";
   const [view, setView] = useState(pinned);
@@ -71,7 +72,7 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
     const out = new Map<string, Face>();
     for (const v of visits) {
       if (!v.asset) continue;
-      if (!out.has(v.region) || v.rep) out.set(v.region, { asset: v.asset, rotation: v.rotation });
+      if (!out.has(v.region) || v.rep) out.set(v.region, { asset: v.asset, clip: v.clip, rotation: v.rotation });
     }
     return out;
   }, [visits]);
@@ -146,6 +147,7 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
           <Button
             variant="ghost"
             size="icon-touch"
+            hidden={viewOnly}
             disabled={pinning || pinned === view}
             onClick={() => void pin()}
             aria-label={pinned === view ? "이 지도가 홈 카드에 있어요" : "이 지도를 홈 카드에 두기"}
@@ -215,7 +217,7 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
                 <p className="px-6 text-ui text-faint">지도에 채울 대표 사진이 없어요</p>
               </div>
             )}
-            <div className="mt-2 flex flex-wrap gap-2">
+            <div className={cn("mt-2 flex flex-wrap gap-2", viewOnly && "hidden")}>
               <PickPhotos multiple={false} busy={uploads.busy} label={face ? "대표 사진 바꾸기" : "대표 사진 추가"} onPick={(f) => void putFace(f)} />
               {face ? (
                 <Button
@@ -233,7 +235,7 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
             <div className="mt-4">
               <div className="flex items-center justify-between gap-2">
                 <h3 className="text-aside text-dim">이 지역의 사진</h3>
-                {!picking && here.filter((v) => v !== face).length > 1 ? (
+                {!picking && !viewOnly && here.filter((v) => v !== face).length > 1 ? (
                   <Button variant="quiet" size="touch-sm" onClick={() => setPicking(new Set())} className="-mr-2">
                     여러 장 지우기
                   </Button>
@@ -284,7 +286,7 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
                   <li key={r.id}>
                     <button
                       type="button"
-                      onClick={() => setEditing(r)}
+                      onClick={() => !viewOnly && setEditing(r)}
                       className="-mx-2 flex w-[calc(100%+1rem)] items-start gap-3 rounded-lg px-2 py-3 text-left transition-colors hover:bg-glass-raised focus-ring"
                     >
                       {shots[0] ? (
@@ -315,10 +317,12 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
             </p>
           ) : null}
 
-          <Button variant="raised" size="touch" onClick={() => setEditing("new")} className="mt-3 w-full gap-1.5">
-            <Plus aria-hidden className="size-4" />
-            데이트 기록 추가
-          </Button>
+          {viewOnly ? null : (
+            <Button variant="raised" size="touch" onClick={() => setEditing("new")} className="mt-3 w-full gap-1.5">
+              <Plus aria-hidden className="size-4" />
+              데이트 기록 추가
+            </Button>
+          )}
         </section>
       ) : (
         <p className="mt-4 text-ui text-faint">{view === "all" ? "지역을 누르면 그곳의 사진과 기록이 열려요. 위에서 시/도를 고르면 가까이 봐요." : "지역을 눌러 사진과 기록을 보거나 남겨요."}</p>
@@ -347,7 +351,7 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
             return (
               <>
                 <SaveAction asset={v.asset} name={region?.name} />
-                {v === face ? (
+                {viewOnly ? null : v === face ? (
                   // The face turned a quarter inside the region's shape.
                   <ViewerAction
                     onClick={() => {
@@ -358,7 +362,7 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
                     돌리기
                   </ViewerAction>
                 ) : null}
-                {v !== face && picked ? (
+                {v !== face && picked && !viewOnly ? (
                   <ViewerAction
                     onClick={() => {
                       setViewing(null);
@@ -374,6 +378,7 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
                 ) : null}
                 <ViewerAction
                   danger
+                  disabled={viewOnly}
                   onClick={() => {
                     setViewing(null);
                     void act(() => writeCouple("DELETE", `/blocks/${block.id}/visits/${v.id}`));
@@ -390,7 +395,11 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
   );
 }
 
-function RecordSheet({
+/** What a record is called: a date on the date map, a trip on the world map. */
+export type RecordWords = { noun: string; title: string; placeholder: string };
+const DATE_WORDS: RecordWords = { noun: "데이트 기록", title: "제목", placeholder: "예: 바다 보러 간 날" };
+
+export function RecordSheet({
   block,
   region,
   regionName,
@@ -398,6 +407,7 @@ function RecordSheet({
   photos,
   onClose,
   onSaved,
+  words = DATE_WORDS,
 }: {
   block: Block;
   region: string | null;
@@ -406,9 +416,10 @@ function RecordSheet({
   photos: Visit[];
   onClose: () => void;
   onSaved: () => Promise<void>;
+  words?: RecordWords;
 }) {
   return (
-    <Panel open={editing !== null} onOpenChange={(open) => !open && onClose()} title={editing === "new" ? `${regionName} 데이트 기록` : "데이트 기록 고치기"}>
+    <Panel open={editing !== null} onOpenChange={(open) => !open && onClose()} title={editing === "new" ? `${regionName} ${words.noun}` : `${words.noun} 고치기`}>
       {editing && region ? (
         <RecordForm
           key={editing === "new" ? "new" : editing.id}
@@ -416,6 +427,7 @@ function RecordSheet({
           region={region}
           record={editing === "new" ? null : editing}
           photos={photos}
+          words={words}
           onClose={onClose}
           onSaved={onSaved}
         />
@@ -433,6 +445,7 @@ function RecordForm({
   region,
   record,
   photos,
+  words,
   onClose,
   onSaved,
 }: {
@@ -440,6 +453,7 @@ function RecordForm({
   region: string;
   record: DateRecord | null;
   photos: Visit[];
+  words: RecordWords;
   onClose: () => void;
   onSaved: () => Promise<void>;
 }) {
@@ -503,8 +517,8 @@ function RecordForm({
   return (
     <form onSubmit={(e) => void save(e)} className="space-y-4">
       <Field>
-        <FieldLabel htmlFor={`${id}-title`}>제목</FieldLabel>
-        <Input id={`${id}-title`} surface="glass" value={title} maxLength={60} placeholder="예: 바다 보러 간 날" onChange={(e) => setTitle(e.target.value)} />
+        <FieldLabel htmlFor={`${id}-title`}>{words.title}</FieldLabel>
+        <Input id={`${id}-title`} surface="glass" value={title} maxLength={60} placeholder={words.placeholder} onChange={(e) => setTitle(e.target.value)} />
       </Field>
       <div className="grid grid-cols-2 gap-2">
         <Field>

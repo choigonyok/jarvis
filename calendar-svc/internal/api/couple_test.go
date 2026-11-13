@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -22,7 +23,13 @@ type stubCouple struct {
 }
 
 func (s *stubCouple) Space(context.Context) (uniple.Space, error) {
-	return uniple.Space{Me: uniple.Person{ID: "u-me", Name: "하늘"}, Blocks: []uniple.Block{}}, nil
+	return uniple.Space{Me: uniple.Person{ID: "u-me", Name: "하늘"}, Partner: &uniple.Person{ID: "u-you", Name: "바다"}, Blocks: []uniple.Block{
+		{ID: "b-f", Type: "free", Free: []uniple.Free{{ID: "n1", Content: "우산", By: "me"}}},
+	}}, nil
+}
+
+func (s *stubCouple) News(context.Context, int) ([]uniple.News, error) {
+	return []uniple.News{{ID: "x1", Who: "partner", Kind: ""}}, nil
 }
 
 func (s *stubCouple) Check(_ context.Context, block, date, _ string) (uniple.Check, error) {
@@ -52,8 +59,17 @@ func TestCoupleRoutes(t *testing.T) {
 	if rec := call(h, "GET", "/couple", "owner", ""); rec.Code != 200 || !strings.Contains(rec.Body.String(), "하늘") {
 		t.Fatalf("공간 읽기: %d %s", rec.Code, rec.Body)
 	}
-	if rec := call(h, "GET", "/couple", "guest", ""); rec.Code != http.StatusForbidden {
-		t.Fatalf("손님은 아직: %d", rec.Code)
+	// The guest reads it from their own side, and changes nothing here.
+	rec := call(h, "GET", "/couple", "guest", "")
+	var seen uniple.Space
+	if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &seen) != nil || seen.Me.Name != "바다" || seen.Partner.Name != "하늘" || seen.Blocks[0].Free[0].By != "partner" {
+		t.Fatalf("손님은 자기 쪽에서 봅니다: %d %s", rec.Code, rec.Body)
+	}
+	if rec := call(h, "GET", "/couple/news", "guest", ""); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"who":"me"`) {
+		t.Fatalf("손님의 소식: %d %s", rec.Code, rec.Body)
+	}
+	if rec := call(h, "POST", "/couple/blocks/b-h/checks", "guest", `{"date":"2026-11-13"}`); rec.Code != http.StatusForbidden || stub.checked != "" || !strings.Contains(rec.Body.String(), "uniple 앱") {
+		t.Fatalf("손님의 쓰기는 거절: %d %s", rec.Code, rec.Body)
 	}
 	if rec := call(h, "GET", "/couple", "nobody", ""); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("토큰 없으면: %d", rec.Code)

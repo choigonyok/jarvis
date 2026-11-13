@@ -46,6 +46,8 @@ export function PickPhotos({
   multiple = true,
   className,
   variant = "soft",
+  camera = false,
+  icon,
 }: {
   onPick: (files: File[]) => void;
   busy?: { done: number; of: number } | null;
@@ -53,6 +55,9 @@ export function PickPhotos({
   multiple?: boolean;
   className?: string;
   variant?: "soft" | "raised" | "quiet";
+  /** The phone's camera straight away, one photo. */
+  camera?: boolean;
+  icon?: ReactNode;
 }) {
   const input = useRef<HTMLInputElement>(null);
   return (
@@ -63,7 +68,8 @@ export function PickPhotos({
         // No HEIC on the list: then the phone hands its photos over as JPEG,
         // which every browser here can read.
         accept="image/jpeg,image/png,image/webp,image/*"
-        multiple={multiple}
+        multiple={multiple && !camera}
+        capture={camera ? "environment" : undefined}
         hidden
         onChange={(e) => {
           const files = Array.from(e.target.files ?? []);
@@ -72,7 +78,7 @@ export function PickPhotos({
         }}
       />
       <Button type="button" variant={variant} size="touch-sm" disabled={!!busy} onClick={() => input.current?.click()} className={cn("gap-1.5", className)}>
-        <ImagePlus aria-hidden className="size-4" />
+        {icon ?? <ImagePlus aria-hidden className="size-4" />}
         {busy ? `올리는 중… ${busy.done + 1}/${busy.of}` : label}
       </Button>
     </>
@@ -99,20 +105,22 @@ export function PhotoTiles({
   /** The photos picked, by key; set while picking. */
   picked?: ReadonlySet<string>;
   onPick?: (key: string) => void;
-  size?: "sm" | "md" | "lg";
+  /** fill: one tile as wide as its cell, square (a grid's). */
+  size?: "sm" | "md" | "lg" | "fill";
   className?: string;
   /** What comes after the photos in the row (a way to add one). */
   trailing?: ReactNode;
 }) {
-  const box = size === "sm" ? "size-16" : size === "lg" ? "size-28 sm:size-32" : "size-20 sm:size-24";
+  const box = size === "sm" ? "size-16" : size === "lg" ? "size-28 sm:size-32" : size === "fill" ? "aspect-square w-full" : "size-20 sm:size-24";
+  const fill = size === "fill";
   return (
-    <ul className={cn("scrollbar-none -mx-1 flex gap-2 overflow-x-auto px-1 py-1", className)}>
+    <ul className={cn(fill ? "block" : "scrollbar-none -mx-1 flex gap-2 overflow-x-auto px-1 py-1", className)}>
       {assets.map((p, i) => (
-        <li key={p.key} className="relative shrink-0">
+        <li key={p.key} className={cn("relative", fill ? "block" : "shrink-0")}>
           <button
             type="button"
             onClick={() => (picked ? onPick?.(p.key) : onOpen?.(i))}
-            className="block overflow-hidden rounded-xl bg-glass-raised focus-ring"
+            className={cn("block overflow-hidden bg-glass-raised focus-ring", fill ? "w-full rounded-md" : "rounded-xl")}
             aria-label={picked ? `사진 ${i + 1} ${picked.has(p.key) ? "고르기 취소" : "고르기"}` : `사진 ${i + 1} 크게 보기`}
             aria-pressed={picked ? picked.has(p.key) : undefined}
           >

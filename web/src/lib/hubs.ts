@@ -91,6 +91,7 @@ export const GUEST_HUBS: Hub[] = [
     id: "today",
     label: "오늘",
     screens: [
+      { href: "/couple", label: "우리" },
       { href: "/calendar", label: "캘린더" },
       { href: "/jobs", label: "작업" },
       { href: "/goals", label: "목표" },

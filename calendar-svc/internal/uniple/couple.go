@@ -53,6 +53,13 @@ type Block struct {
 	// face, in a block's detail every one.
 	Visits  []Visit  `json:"visits,omitempty"`
 	Records []Record `json:"records,omitempty"`
+	// The album's photos (its page only; the home has the config's latest
+	// and pinned), and the blocks shown but not written here.
+	Album  []AlbumPhoto `json:"album,omitempty"`
+	Log    []LogEntry   `json:"log,omitempty"`
+	Food   []FoodEntry  `json:"food,omitempty"`
+	Diary  []DiaryEntry `json:"diary,omitempty"`
+	Budget []BudgetDate `json:"budget,omitempty"`
 	// Archived is when a block in 보관 was put there.
 	Archived string `json:"archived,omitempty"`
 }
@@ -85,9 +92,12 @@ type Free struct {
 
 // Visit is a photo on the date map, in a region and maybe of a record.
 type Visit struct {
-	ID        string  `json:"id"`
-	Region    string  `json:"region"`
-	Asset     string  `json:"asset"`
+	ID     string `json:"id"`
+	Region string `json:"region"`
+	Asset  string `json:"asset"`
+	// Clip is the face as the app's crop editor made it: the photo moved and
+	// turned to fill the region's square, the turn already in it.
+	Clip      string  `json:"clip,omitempty"`
 	Rotation  float64 `json:"rotation,omitempty"`
 	Rep       bool    `json:"rep,omitempty"`
 	Record    string  `json:"record,omitempty"`
@@ -178,11 +188,21 @@ var newBlockTitle = map[string]string{
 
 /* ───────────────────────────── space ───────────────────────────── */
 
+// blockBasics is the home without the blocks it only shows: what it reads
+// when uniple turns the whole down.
+const blockBasics = "*," +
+	"dday_items(id,title,date,is_start_date,recurrence,reminder_minutes)," +
+	"bucket_items(id,title,is_completed,created_at,order_index)," +
+	"free_items(id,content,created_at,created_by,order_index)," +
+	"map_visits(id,region_code,asset_id,clip_asset_id,created_at,is_rep,rotation)"
+
 const blockItems = "*," +
 	"dday_items(id,title,date,is_start_date,recurrence,reminder_minutes)," +
 	"bucket_items(id,title,is_completed,created_at,order_index)," +
 	"free_items(id,content,created_at,created_by,order_index)," +
-	"map_visits(id,region_code,asset_id,created_at,is_rep,rotation)"
+	"map_visits(id,region_code,asset_id,clip_asset_id,created_at,is_rep,rotation)," +
+	"worldmap_visits(id,country_code,asset_id,clip_asset_id,created_at,rotation,record_id)," +
+	logHome + "," + foodHome + "," + diaryHome + "," + budgetHome
 
 type blockRow struct {
 	ID          string          `json:"id"`
@@ -194,6 +214,11 @@ type blockRow struct {
 	BucketItems []bucketRow     `json:"bucket_items"`
 	FreeItems   []freeRow       `json:"free_items"`
 	MapVisits   []visitRow      `json:"map_visits"`
+	WorldVisits []worldVisitRow `json:"worldmap_visits"`
+	LogEntries  []logRow        `json:"log_entries"`
+	FoodEntries []logRow        `json:"food_entries"`
+	Diary       []diaryRow      `json:"diary_entries"`
+	BudgetDates []budgetRow     `json:"budget_dates"`
 }
 
 type ddayRow struct {
@@ -225,6 +250,7 @@ type visitRow struct {
 	ID         string   `json:"id"`
 	RegionCode string   `json:"region_code"`
 	AssetID    *string  `json:"asset_id"`
+	ClipID     *string  `json:"clip_asset_id"`
 	CreatedAt  string   `json:"created_at"`
 	IsRep      bool     `json:"is_rep"`
 	Rotation   *float64 `json:"rotation"`
@@ -337,12 +363,33 @@ func (c *Client) blocks(ctx context.Context, space, id string) ([]blockRow, erro
 		"free_items.order":   {"order_index.asc"},
 		"map_visits.order":   {"created_at.desc"},
 		"dday_items.order":   {"date.asc"},
+		// The home's world map: each country's face, as the app's card reads it.
+		"worldmap_visits.record_id": {"is.null"},
+		"log_entries.order":         {"experienced_on.desc.nullslast,created_at.desc"},
+		"food_entries.order":        {"experienced_on.desc.nullslast,created_at.desc"},
+		"diary_entries.order":       {"entry_at.desc,created_at.desc"},
+		"diary_entries.limit":       {"10"},
+		"budget_dates.order":        {"start_on.desc,created_at.desc"},
 	}
 	if id != "" {
 		q.Set("id", "eq."+id)
 	}
 	var rows []blockRow
-	if err := c.rest(ctx, http.MethodGet, "blocks?"+q.Encode(), nil, &rows); err != nil {
+	err := c.rest(ctx, http.MethodGet, "blocks?"+q.Encode(), nil, &rows)
+	var refused *Refused
+	if errors.As(err, &refused) && refused.Status == http.StatusBadRequest {
+		// One of the tables the home only shows was turned down: the home
+		// still opens, those blocks without their items.
+		for k := range q {
+			if strings.HasPrefix(k, "worldmap_visits.") || strings.HasPrefix(k, "log_entries.") || strings.HasPrefix(k, "food_entries.") ||
+				strings.HasPrefix(k, "diary_entries.") || strings.HasPrefix(k, "budget_dates.") {
+				q.Del(k)
+			}
+		}
+		q.Set("select", blockBasics)
+		err = c.rest(ctx, http.MethodGet, "blocks?"+q.Encode(), nil, &rows)
+	}
+	if err != nil {
 		return nil, err
 	}
 	return rows, nil
@@ -362,10 +409,18 @@ func (c *Client) Block(ctx context.Context, id string) (Block, error) {
 		return Block{}, ErrBlock
 	}
 	b := rows[0].toBlock(me)
-	if b.Type == "map" {
-		if b.Visits, b.Records, err = c.mapItems(ctx, b.ID); err != nil {
-			return Block{}, err
-		}
+	switch b.Type {
+	case "map":
+		b.Visits, b.Records, err = c.mapItems(ctx, b.ID)
+	case "worldmap":
+		b.Visits, b.Records, err = c.worldItems(ctx, b.ID)
+	case "album":
+		b.Album, err = c.albumItems(ctx, b.ID, me)
+	case "log", "food", "diary", "budget":
+		err = c.shelfItems(ctx, &b, me)
+	}
+	if err != nil {
+		return Block{}, err
 	}
 	return b, nil
 }
@@ -387,6 +442,21 @@ func (r blockRow) toBlock(me string) Block {
 	for _, v := range r.MapVisits {
 		b.Visits = append(b.Visits, v.toVisit())
 	}
+	for _, v := range r.WorldVisits {
+		b.Visits = append(b.Visits, v.toVisit())
+	}
+	for _, e := range r.LogEntries {
+		b.Log = append(b.Log, e.toLog(me))
+	}
+	for _, e := range r.FoodEntries {
+		b.Food = append(b.Food, e.toFood(me))
+	}
+	for _, e := range r.Diary {
+		b.Diary = append(b.Diary, e.toEntry(me))
+	}
+	for _, d := range r.BudgetDates {
+		b.Budget = append(b.Budget, d.toDate(me))
+	}
 	return b
 }
 
@@ -396,6 +466,9 @@ func (d ddayRow) toDDay() DDay {
 
 func (v visitRow) toVisit() Visit {
 	out := Visit{ID: v.ID, Region: Region(v.RegionCode), Asset: str(v.AssetID), Rep: v.IsRep, Record: str(v.RecordID), Note: str(v.Note), CreatedAt: v.CreatedAt}
+	if clip := str(v.ClipID); clip != out.Asset {
+		out.Clip = clip
+	}
 	if v.Rotation != nil {
 		out.Rotation = *v.Rotation
 	}
@@ -474,7 +547,7 @@ func (c *Client) mapItems(ctx context.Context, block string) ([]Visit, []Record,
 	var visits []visitRow
 	q := url.Values{
 		"block_id": {"eq." + block},
-		"select":   {"id,region_code,asset_id,created_at,note,is_rep,rotation,order_index,record_id"},
+		"select":   {visitColumns},
 		"order":    {"created_at.desc,id.asc"},
 	}
 	if err := c.rest(ctx, http.MethodGet, "map_visits?"+q.Encode(), nil, &visits); err != nil {
@@ -1293,9 +1366,12 @@ func (in RecordInput) fields(isNew bool) (map[string]any, error) {
 
 // AddRecord writes a date down against a region of a date map.
 func (c *Client) AddRecord(ctx context.Context, block string, in RecordInput) (Record, error) {
-	space, err := c.typed(ctx, block, "map")
+	space, kind, err := c.kindOf(ctx, block, "map", "worldmap")
 	if err != nil {
 		return Record{}, err
+	}
+	if kind == "worldmap" {
+		return c.addWorldRecord(ctx, block, space, in)
 	}
 	f, err := in.fields(true)
 	if err != nil {
@@ -1323,8 +1399,12 @@ func (c *Client) AddRecord(ctx context.Context, block string, in RecordInput) (R
 
 // SetRecord changes a date's title, days or note.
 func (c *Client) SetRecord(ctx context.Context, block, id string, in RecordInput) (Record, error) {
-	if _, err := c.typed(ctx, block, "map"); err != nil {
+	_, kind, err := c.kindOf(ctx, block, "map", "worldmap")
+	if err != nil {
 		return Record{}, err
+	}
+	if kind == "worldmap" {
+		return c.setWorldRecord(ctx, block, id, in)
 	}
 	f, err := in.fields(false)
 	if err != nil {
@@ -1346,8 +1426,12 @@ func (c *Client) SetRecord(ctx context.Context, block, id string, in RecordInput
 
 // DeleteRecord takes a date off the map, its photos with it, as the app does.
 func (c *Client) DeleteRecord(ctx context.Context, block, id string) error {
-	if _, err := c.typed(ctx, block, "map"); err != nil {
+	_, kind, err := c.kindOf(ctx, block, "map", "worldmap")
+	if err != nil {
 		return err
+	}
+	if kind == "worldmap" {
+		return c.deleteWorldRecord(ctx, block, id)
 	}
 	q := url.Values{"block_id": {"eq." + block}, "record_id": {"eq." + id}}
 	if err := c.rest(ctx, http.MethodDelete, "map_visits?"+q.Encode(), nil, nil); err != nil {
@@ -1418,15 +1502,18 @@ type VisitInput struct {
 	Face   bool   `json:"face"`
 }
 
-const visitColumns = "id,region_code,asset_id,created_at,note,is_rep,rotation,order_index,record_id"
+const visitColumns = "id,region_code,asset_id,clip_asset_id,created_at,note,is_rep,rotation,order_index,record_id"
 
 // AddVisit puts an uploaded photo on the map: as the region's face (the app's
 // own call, which takes over from the face before), or under a record, in the
 // record's region.
 func (c *Client) AddVisit(ctx context.Context, block string, in VisitInput) (Visit, error) {
-	space, err := c.typed(ctx, block, "map")
+	space, kind, err := c.kindOf(ctx, block, "map", "worldmap")
 	if err != nil {
 		return Visit{}, err
+	}
+	if kind == "worldmap" {
+		return c.addWorldVisit(ctx, block, space, in)
 	}
 	if !uuidLike(in.Asset) {
 		return Visit{}, event.ValidationError{Msg: "올린 사진이 없어요"}
@@ -1491,8 +1578,12 @@ func (c *Client) visit(ctx context.Context, block, id string) (Visit, error) {
 // SetVisit changes a region's face to another uploaded photo, as the app's
 // 대표 사진 변경 does.
 func (c *Client) SetVisit(ctx context.Context, block, id string, in VisitChange) (Visit, error) {
-	if _, err := c.typed(ctx, block, "map"); err != nil {
+	space, kind, err := c.kindOf(ctx, block, "map", "worldmap")
+	if err != nil {
 		return Visit{}, err
+	}
+	if kind == "worldmap" {
+		return c.setWorldVisit(ctx, block, space, id, in)
 	}
 	f := map[string]any{}
 	if in.Asset != "" {
@@ -1503,11 +1594,11 @@ func (c *Client) SetVisit(ctx context.Context, block, id string, in VisitChange)
 		f["asset_id"], f["clip_asset_id"], f["rotation"] = in.Asset, nil, 0
 	}
 	if in.Rotation != nil {
-		r := *in.Rotation
-		if math.IsNaN(r) || math.IsInf(r, 0) {
-			return Visit{}, event.ValidationError{Msg: "돌릴 각도가 숫자가 아니에요"}
+		r, err := turned(*in.Rotation)
+		if err != nil {
+			return Visit{}, err
 		}
-		f["rotation"] = math.Mod(math.Mod(r, 360)+360, 360)
+		f["rotation"] = r
 	}
 	if len(f) == 0 {
 		return Visit{}, event.ValidationError{Msg: "바꿀 것이 없어요"}
@@ -1523,6 +1614,14 @@ func (c *Client) SetVisit(ctx context.Context, block, id string, in VisitChange)
 	return c.visit(ctx, block, id)
 }
 
+// turned is a turn in degrees, from 0 up to 360.
+func turned(r float64) (float64, error) {
+	if math.IsNaN(r) || math.IsInf(r, 0) {
+		return 0, event.ValidationError{Msg: "돌릴 각도가 숫자가 아니에요"}
+	}
+	return math.Mod(math.Mod(r, 360)+360, 360), nil
+}
+
 // VisitChange is a map photo changed: a new photo for it, or how far it is
 // turned inside its region's shape, in degrees.
 type VisitChange struct {
@@ -1532,10 +1631,11 @@ type VisitChange struct {
 
 // DeleteVisit takes a photo off the map.
 func (c *Client) DeleteVisit(ctx context.Context, block, id string) error {
-	if _, err := c.typed(ctx, block, "map"); err != nil {
+	_, kind, err := c.kindOf(ctx, block, "map", "worldmap")
+	if err != nil {
 		return err
 	}
-	return c.deleteOne(ctx, "map_visits", block, id, nil)
+	return c.deleteOne(ctx, map[string]string{"map": "map_visits", "worldmap": "worldmap_visits"}[kind], block, id, nil)
 }
 
 /* ───────────────────────────── photos on calendar days ───────────────────────────── */

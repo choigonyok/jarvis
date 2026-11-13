@@ -39,6 +39,9 @@ type Couple interface {
 	OrderItems(ctx context.Context, block, kind string, ids []string) error
 	Archived(ctx context.Context) ([]uniple.Block, error)
 	Restore(ctx context.Context, id string) error
+	AddAlbumPhotos(ctx context.Context, block string, in uniple.AlbumInput) ([]uniple.AlbumPhoto, error)
+	DeleteAlbumPhotos(ctx context.Context, block string, ids []string) error
+	PinAlbum(ctx context.Context, block, asset string) error
 	Check(ctx context.Context, block, date, memo string) (uniple.Check, error)
 	SetCheckMemo(ctx context.Context, block, id, memo string) error
 	Uncheck(ctx context.Context, block, id string) error
@@ -71,22 +74,35 @@ func (s *Server) coupleRoutes(mux *http.ServeMux) {
 	read := func(pattern string, h http.HandlerFunc) { mux.HandleFunc("GET "+pattern, s.auth(s.owner(h))) }
 	write := func(pattern string, h http.HandlerFunc) { mux.HandleFunc(pattern, s.auth(s.owner(h))) }
 
+	// The guest reads it all from their side; they change it in the app.
 	read("/couple", func(w http.ResponseWriter, r *http.Request) {
 		space, err := s.couple.Space(r.Context())
+		if guest(r) {
+			space = space.Flipped()
+		}
 		s.answer(w, space, err)
 	})
 	read("/couple/blocks/{block}", func(w http.ResponseWriter, r *http.Request) {
 		b, err := s.couple.Block(r.Context(), r.PathValue("block"))
+		if guest(r) {
+			b = b.Flipped()
+		}
 		s.answer(w, b, err)
 	})
 	read("/couple/blocks/{block}/checks", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		checks, err := s.couple.Checks(r.Context(), r.PathValue("block"), q.Get("from"), q.Get("to"))
+		if guest(r) {
+			checks = uniple.FlippedChecks(checks)
+		}
 		s.answer(w, map[string]any{"checks": checks}, err)
 	})
 	read("/couple/news", func(w http.ResponseWriter, r *http.Request) {
 		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 		news, err := s.couple.News(r.Context(), limit)
+		if guest(r) {
+			news = uniple.FlippedNews(news)
+		}
 		s.answer(w, map[string]any{"news": news}, err)
 	})
 	read("/couple/photos", func(w http.ResponseWriter, r *http.Request) {
@@ -125,6 +141,30 @@ func (s *Server) coupleRoutes(mux *http.ServeMux) {
 	})
 	write("POST /couple/blocks/{block}/restore", func(w http.ResponseWriter, r *http.Request) {
 		s.answer(w, ok, s.couple.Restore(r.Context(), r.PathValue("block")))
+	})
+	// The shared album: photos put in, taken out, one pinned to the home.
+	write("POST /couple/blocks/{block}/album", func(w http.ResponseWriter, r *http.Request) {
+		var in uniple.AlbumInput
+		if decode(w, r, &in) {
+			photos, err := s.couple.AddAlbumPhotos(r.Context(), r.PathValue("block"), in)
+			s.answer(w, map[string]any{"photos": photos}, err)
+		}
+	})
+	write("POST /couple/blocks/{block}/album/delete", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			IDs []string `json:"ids"`
+		}
+		if decode(w, r, &in) {
+			s.answer(w, ok, s.couple.DeleteAlbumPhotos(r.Context(), r.PathValue("block"), in.IDs))
+		}
+	})
+	write("POST /couple/blocks/{block}/album/pin", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Asset string `json:"asset"`
+		}
+		if decode(w, r, &in) {
+			s.answer(w, ok, s.couple.PinAlbum(r.Context(), r.PathValue("block"), in.Asset))
+		}
 	})
 	write("POST /couple/order", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
@@ -301,22 +341,26 @@ func (s *Server) coupleRoutes(mux *http.ServeMux) {
 
 var ok = map[string]bool{"ok": true}
 
-// owner keeps the couple's space to the operator's side for now: the guest's
-// console has no screen for it, and uniple holds one session - the
-// operator's - so a guest's check would be filed under the operator's name.
+// owner keeps changes to the couple's space to the operator's side. uniple
+// holds one session - the operator's - so a guest's check or wish would be
+// filed under the operator's name; the guest reads the space from their own
+// side and changes it in their own app.
 func (s *Server) owner(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if s.couple == nil {
 			writeErr(w, http.StatusNotFound, "uniple 을 쓰지 않는 캘린더예요.")
 			return
 		}
-		if r.Header.Get("X-Jarvis-Side") == "partner" {
-			writeErr(w, http.StatusForbidden, "손님 화면에는 아직 없습니다.")
+		if guest(r) && r.Method != http.MethodGet && r.Method != http.MethodHead {
+			writeErr(w, http.StatusForbidden, "이 화면에서는 보기만 해요. 바꾸는 것은 uniple 앱에서 해 주세요.")
 			return
 		}
 		next(w, r)
 	}
 }
+
+// guest is a request from the guest's side.
+func guest(r *http.Request) bool { return r.Header.Get("X-Jarvis-Side") == "partner" }
 
 func decode(w http.ResponseWriter, r *http.Request, into any) bool {
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(into); err != nil {
