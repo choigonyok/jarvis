@@ -503,8 +503,8 @@ func TestRolesCanDoTheirPart(t *testing.T) {
 	}
 }
 
-// The agent reads what mind sends it and what is said to it. What happened is
-// not its to read.
+// The agent reads what mind sends it, and what is said to it comes that way
+// too. What happened, at the way in, is not its to read.
 func TestTheAgentReadsOnlyEffects(t *testing.T) {
 	ctx := context.Background()
 	agent := as(t, "svc_agent")
@@ -512,13 +512,11 @@ func TestTheAgentReadsOnlyEffects(t *testing.T) {
 		t.Fatal("손님 효과를 읽을 수 없어야 합니다")
 	}
 	w := newWorld(t, Records)
-	w.publish("a.b", "")
-	for _, q := range []string{`select count(*) from input.records where kind <> 'chat.message'`,
-		`select count(*) from input.deliveries where consumer <> 'agent-chat'`,
-		`select count(*) from input.consumers where name <> 'agent-chat'`} {
-		var n int
-		if err := agent.QueryRow(ctx, q).Scan(&n); err != nil || n != 0 {
-			t.Fatalf("%s: %d %v", q, n, err)
+	w.publish("chat.message", "chat:")
+	for _, q := range []string{`select count(*) from input.records`, `select count(*) from input.deliveries`,
+		`select count(*) from input.consumers`, `select count(*) from input.guest_records`} {
+		if err := agent.QueryRow(ctx, q).Scan(new(int)); err == nil {
+			t.Fatalf("%s 를 읽을 수 없어야 합니다", q)
 		}
 	}
 }
@@ -570,7 +568,7 @@ func TestTheGuestsRoleSeesOnlyItsOwn(t *testing.T) {
 	eventually(t, "받게", func() bool { return slices.Contains(seen.list(), id) })
 
 	var n int
-	if err := guest.QueryRow(ctx, `select count(*) from mind.guest_effect_deliveries where consumer <> 'agent-guest'`).Scan(&n); err != nil || n != 0 {
+	if err := guest.QueryRow(ctx, `select count(*) from mind.guest_effect_deliveries where consumer not in ('agent-guest', 'agent-chat-guest')`).Scan(&n); err != nil || n != 0 {
 		t.Fatalf("남의 배달이 보입니다: %d %v", n, err)
 	}
 	if tag, err := guest.Exec(ctx, `delete from mind.guest_effect_deliveries where consumer = $1`, w.name); err != nil || tag.RowsAffected() != 0 {
@@ -580,20 +578,17 @@ func TestTheGuestsRoleSeesOnlyItsOwn(t *testing.T) {
 		on conflict (name) do update set kinds = excluded.kinds`); err == nil {
 		t.Fatal("남의 이름으로 등록할 수 없어야 합니다")
 	}
+	// Not even the guest's own records: what is said to the guest comes through
+	// mind like where the guest's phone is.
 	for _, q := range []string{
 		`select count(*) from input.records`, `select count(*) from input.deliveries`,
+		`select count(*) from input.guest_records`, `select count(*) from input.guest_deliveries`,
 		`select count(*) from input.outbox`, `select count(*) from mind.effects`, `select count(*) from mind.effect_deliveries`,
 		`select count(*) from mind_intents`, `select count(*) from output.notifications`,
 	} {
 		if err := guest.QueryRow(ctx, q).Scan(new(int)); err == nil {
 			t.Fatalf("%s 를 읽을 수 없어야 합니다", q)
 		}
-	}
-	// Of the guest's records only what was said, sealed: where the guest's phone
-	// is comes through mind or not at all.
-	var other int
-	if err := guest.QueryRow(ctx, `select count(*) from input.guest_records where kind <> 'chat.message'`).Scan(&other); err != nil || other != 0 {
-		t.Fatalf("손님 기록의 다른 종류가 보입니다: %d %v", other, err)
 	}
 	if _, err := guest.Exec(ctx, `insert into input.outbox (payload) values ('{}')`); err == nil {
 		t.Fatal("손님은 outbox 에 쓸 수 없습니다")
@@ -603,14 +598,15 @@ func TestTheGuestsRoleSeesOnlyItsOwn(t *testing.T) {
 	}
 }
 
-// What is said reaches each agent through the queue, under its own role: the
-// operator's on the records, the guest's on the guest's. An agent that cannot
-// subscribe hears nothing, and says so only in its log.
+// What is said reaches each agent through mind, and each takes it from mind's
+// effects under its own role: the operator's on the effects, the guest's on
+// the guest's. An agent that cannot subscribe hears nothing, and says so only
+// in its log.
 func TestTheAgentsTakeWhatIsSaid(t *testing.T) {
 	for _, c := range []struct {
 		role, name string
 		topic      Topic
-	}{{"svc_agent", "agent-chat", Records}, {"svc_guest", "agent-chat-guest", Guest}} {
+	}{{"svc_agent", "agent-chat", Effects}, {"svc_guest", "agent-chat-guest", GuestEffects}} {
 		t.Run(c.name, func(t *testing.T) {
 			role := as(t, c.role)
 			w := newWorld(t, c.topic)

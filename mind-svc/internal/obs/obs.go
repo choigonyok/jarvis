@@ -328,6 +328,33 @@ func (l *Stream) Relay(topic queue.Topic) func(context.Context, queue.Message) e
 	}
 }
 
+// Pass hands what a person said, or their answer to a card, on to their
+// agent: every input reaches the agent through mind. It reads on a consumer
+// of its own (mind-chat), so nothing else mind reads stands in front of a
+// stopped payment waiting on its card. The words stay sealed at the way in:
+// only the record's key goes on, and an answer's card, and the agent reads
+// the rest there by the key. A key passed on once is not passed on again.
+func (l *Stream) Pass(topic queue.Topic) func(context.Context, queue.Message) error {
+	return func(ctx context.Context, m queue.Message) error {
+		if m.Kind != record.KindMessage && m.Kind != record.KindAnswer {
+			return fmt.Errorf("%w: %s 는 넘기지 않습니다", queue.ErrRefused, m.Kind)
+		}
+		var p struct {
+			Card string `json:"card,omitempty"`
+		}
+		if err := json.Unmarshal(m.Payload, &p); err != nil {
+			return fmt.Errorf("%w: %v", queue.ErrRefused, err)
+		}
+		payload, err := json.Marshal(p)
+		if err != nil {
+			return err
+		}
+		m.Payload, m.CausationID = payload, m.SourceKey
+		_, _, err = queue.Publish(ctx, l.db, topic, m)
+		return err
+	}
+}
+
 // PruneEffects forgets what went out long ago and everyone has taken. An
 // effect is on its way somewhere: what happened is in the records.
 func (l *Stream) PruneEffects(ctx context.Context, keep time.Duration) (int64, error) {

@@ -61,9 +61,9 @@
     "spending.*": {"lane": "relay"},
     "status.*": {"lane": "relay"},
     "check.result": {"lane": "relay"},
-    "chat.message": {"lane": "relay"},
+    "chat.message": {"lane": "relay", "guest": true, "consumer": "mind-chat"},
     "chat.feedback": {"lane": "relay"},
-    "card.answer": {"lane": "relay"},
+    "card.answer": {"lane": "relay", "guest": true, "consumer": "mind-chat"},
     "suggestion.*": {"lane": "relay"}
   },
   "action": {

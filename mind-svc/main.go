@@ -459,6 +459,7 @@ func main() {
 			}
 		}
 		reg := m.Registry()
+		chat := []string{record.KindMessage, record.KindAnswer}
 		relay := func(handle func(context.Context, queue.Message) error) func(context.Context, queue.Message) error {
 			return func(ctx context.Context, msg queue.Message) error {
 				m.NoteKind(msg.Kind)
@@ -497,6 +498,10 @@ func main() {
 			{Pool: lanes, Topic: queue.Guest, Name: "mind-commands-guest", Kinds: reg.Kinds(registry.Deterministic, true), Handle: command, Log: log},
 			{Pool: lanes, Topic: queue.Records, Name: "mind-relay", Kinds: []string{"*"}, Handle: relay(stream.Relay(queue.Effects)), Log: log},
 			{Pool: lanes, Topic: queue.Guest, Name: "mind-relay-guest", Kinds: []string{"*"}, Handle: stream.Relay(queue.GuestEffects), Log: log},
+			// What a person says and how they answer a card go on to their
+			// agent, on readers of their own (the registry's consumer).
+			{Pool: lanes, Topic: queue.Records, Name: "mind-chat", Kinds: chat, Handle: stream.Pass(queue.Effects), Log: log},
+			{Pool: lanes, Topic: queue.Guest, Name: "mind-chat-guest", Kinds: chat, Handle: stream.Pass(queue.GuestEffects), Log: log},
 		} {
 			go c.Run(ctx)
 		}

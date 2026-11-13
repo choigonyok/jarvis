@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/choigonyok/jarvis/gocommon/queue"
+	"github.com/choigonyok/jarvis/gocommon/record"
 )
 
 func TestWhatGoesOutAndWhatComesIn(t *testing.T) {
@@ -195,6 +196,53 @@ func TestTheGuestsRelayPassesApprovals(t *testing.T) {
 	}
 	if n := one(t, owner, `select count(*) from mind.guest_effects where source_key = $1`, k); n != 1 {
 		t.Fatalf("%d", n)
+	}
+}
+
+// What is said and how a card is answered go on to the agent with the key and
+// the card, never the words - not even sealed - and once for each key.
+func TestThePassCarriesTheKeyNotTheWords(t *testing.T) {
+	s, owner, name := setup(t)
+	ctx := context.Background()
+	for _, c := range []struct {
+		topic               queue.Topic
+		effects, deliveries string
+	}{
+		{queue.Effects, "mind.effects", "mind.effect_deliveries"},
+		{queue.GuestEffects, "mind.guest_effects", "mind.guest_effect_deliveries"},
+	} {
+		pass := s.Pass(c.topic)
+		said, answered := key("msg"), key("ans")
+		for _, m := range []queue.Message{
+			{ID: 1, Kind: record.KindMessage, Source: "web", SourceKey: said, Actor: "operator", Subject: "chat:", OccurredAt: time.Now(),
+				Payload: json.RawMessage(`{"sealed":"c2VhbGVk","images":["a.jpg"],"ref":{"id":"u-1"}}`)},
+			{ID: 2, Kind: record.KindAnswer, Source: "web", SourceKey: answered, Actor: "operator", Subject: "card:p-1", OccurredAt: time.Now(),
+				Payload: json.RawMessage(`{"card":"p-1","sealed":"c2VhbGVk"}`)},
+		} {
+			for range 2 {
+				if err := pass(ctx, m); err != nil {
+					t.Fatalf("%s: %v", c.topic.Name, err)
+				}
+			}
+		}
+		if n := one(t, owner, `select count(*) from `+c.effects+` where source = 'web' and source_key = $1
+			and kind = 'chat.message' and subject = 'chat:' and payload = '{}'::jsonb and causation_id = $1`, said); n != 1 {
+			t.Fatalf("%s: 말 %d", c.topic.Name, n)
+		}
+		if n := one(t, owner, `select count(*) from `+c.effects+` where source = 'web' and source_key = $1
+			and kind = 'card.answer' and payload = '{"card":"p-1"}'::jsonb and causation_id = $1`, answered); n != 1 {
+			t.Fatalf("%s: 답 %d", c.topic.Name, n)
+		}
+		if n := one(t, owner, `select count(*) from `+c.deliveries+` d join `+c.effects+` e on e.id = d.id
+			where d.consumer = $1 and e.source_key in ($2, $3)`, name, said, answered); n != 2 {
+			t.Fatalf("%s: 배달 %d", c.topic.Name, n)
+		}
+	}
+	if err := s.Pass(queue.Effects)(ctx, relayMessage("assets.daily", key("x"), `{}`)); !errors.Is(err, queue.ErrRefused) {
+		t.Fatalf("다른 종류는 넘기지 않음: %v", err)
+	}
+	if err := s.Pass(queue.Effects)(ctx, queue.Message{Kind: record.KindAnswer, Source: "web", SourceKey: key("x"), Payload: json.RawMessage(`[1`)}); !errors.Is(err, queue.ErrRefused) {
+		t.Fatalf("읽지 못하는 것은 거절: %v", err)
 	}
 }
 

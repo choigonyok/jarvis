@@ -475,7 +475,9 @@ func (s *Server) dropMessage(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// Take takes what a person did at the way in from the queue.
+// Take takes what a person did at the way in, as mind passes it on: the
+// record's key, and an answer's card. The words are read at the way in by the
+// key.
 func (s *Server) Take(ctx context.Context, m queue.Message) error {
 	if m.Kind == record.KindAnswer {
 		return s.takeAnswer(ctx, m)
@@ -483,9 +485,9 @@ func (s *Server) Take(ctx context.Context, m queue.Message) error {
 	return s.TakeMessage(ctx, m)
 }
 
-// TakeMessage takes one thing said at the way in from the queue and starts its
-// turn, or puts it behind the running one. What cannot be taken is said on the
-// screen and not tried again; words that could not be read yet are.
+// TakeMessage takes one thing said and starts its turn, or puts it behind the
+// running one. What cannot be taken is said on the screen and not tried
+// again; words that could not be read yet are.
 func (s *Server) TakeMessage(ctx context.Context, m queue.Message) error {
 	said, err := s.thread.Said(ctx, m.SourceKey)
 	if err != nil {
@@ -602,10 +604,12 @@ func secret(p proposal.Proposal) bool {
 	return slices.ContainsFunc(p.Card.Fields, action.Field.IsPrivate)
 }
 
-// takeAnswer takes a person's answer to a card from the queue and carries on
-// with whatever waits on it: the answer is passed on, not judged, so a stopped
-// payment goes on with mind down. How it went goes back to the press; words
-// that could not be read yet are tried again.
+// takeAnswer takes a person's answer to a card and carries on with whatever
+// waits on it. mind passes the answer on without judging it, and a stopped
+// payment request waits for it as long as it is held (holder.Hold), mind's
+// hop included: past that the request is refused, and an approval that comes
+// later has the payer take the step again. How it went goes back to the
+// press; words that could not be read yet are tried again.
 func (s *Server) takeAnswer(ctx context.Context, m queue.Message) error {
 	var card struct {
 		Card string `json:"card"`

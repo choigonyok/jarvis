@@ -32,9 +32,10 @@ func (h *heard) Send(text string, _ []string) error {
 	return nil
 }
 
-// What is said waits at the way in; the agent takes it from the queue, reads its
-// words there, and starts the turn. What it cannot do is said on the screen, not
-// tried again, and words it could not read yet are.
+// What is said waits at the way in, and mind passes its key on; the agent takes
+// the key from the queue, reads the words at the way in, and starts the turn.
+// What it cannot do is said on the screen, not tried again, and words it could
+// not read yet are.
 func TestWhatIsSaidComesFromTheQueue(t *testing.T) {
 	var down bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -131,15 +132,17 @@ func (r *replies) of(key string) string {
 	return r.got[key]
 }
 
+// answerOf is an answer as mind passes it on (mind-svc obs.Pass): its key and
+// its card, the words left sealed at the way in.
 func answerOf(card, key string) queue.Message {
-	raw, _ := json.Marshal(map[string]string{"card": card, "sealed": "x"})
-	return queue.Message{Kind: record.KindAnswer, SourceKey: key, Payload: raw}
+	raw, _ := json.Marshal(map[string]string{"card": card})
+	return queue.Message{Kind: record.KindAnswer, Source: "web", SourceKey: key, CausationID: key, Payload: raw}
 }
 
-// The check of the to-be structure: a person's answer goes from the way in to
-// what waits on the card, with no mind anywhere in it. A payment held for its
-// card goes on as it was.
-func TestAHeldPaymentGoesOnFromTheQueue(t *testing.T) {
+// A person's answer comes to what waits on the card as mind passes it on, and
+// the agent reads it at the way in by its key. A payment held for its card
+// goes on as it was.
+func TestAHeldPaymentGoesOnWithTheAnswerMindPasses(t *testing.T) {
 	srv, said := inputDoor(t, map[string]string{"ans-1": `{"decision":"approved"}`, "ans-2": `{"decision":"approved"}`})
 	events := bus.New()
 	props := proposal.NewStore(events)

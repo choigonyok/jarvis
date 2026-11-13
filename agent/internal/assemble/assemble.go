@@ -829,12 +829,14 @@ func (a *Assembly) Start(ctx context.Context) error {
 		a.records.Run(recordsCtx)
 	}()
 
-	// What is said and how cards are answered come in at the way in and wait
-	// there for this agent.
+	// What is said and how cards are answered come in at the way in, and mind
+	// passes them on (mind-chat): they wait on the effects for this agent. A
+	// consumer apart from the cards' own, so a card being raised holds up no
+	// answer.
 	if a.pool != nil {
-		talk := &queue.Consumer{Pool: a.pool, Topic: queue.Records, Name: "agent-chat", Kinds: []string{record.KindMessage, record.KindAnswer}, Handle: a.API.Take, Log: log}
+		talk := &queue.Consumer{Pool: a.pool, Topic: queue.Effects, Name: "agent-chat", Kinds: []string{record.KindMessage, record.KindAnswer}, Handle: a.API.Take, Log: log}
 		if cfg.Guest {
-			talk.Topic, talk.Name = queue.Guest, "agent-chat-guest"
+			talk.Topic, talk.Name = queue.GuestEffects, "agent-chat-guest"
 		}
 		go talk.Run(ctx)
 	}

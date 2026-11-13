@@ -18,9 +18,10 @@ import (
 )
 
 // What a person says in the conversation comes in here first, like everything
-// else: it is a record before anything reads it, so an agent that is restarting
-// finds it waiting. The words go in sealed, and the agent asks for them by the
-// record's key rather than holding the key to everything.
+// else: it is a record before anything reads it, and mind passes it on to the
+// agent, so a mind or an agent that is restarting finds it waiting. The words
+// go in sealed and stay here: mind passes on only the record's key, and the
+// agent asks for the words by it rather than holding the key to everything.
 
 const maxImages = 12
 
@@ -121,14 +122,14 @@ func (s *Server) opened(w http.ResponseWriter, r *http.Request, kind string, int
 	return plain, true
 }
 
-// A person's answer to a card comes in the same way: a record, read directly by
-// whoever waits on the card - a stopped payment goes on whatever mind is doing,
-// and mind only closes its ledger. The answer can hold what they typed on a
-// form, so it is sealed too. A card with a secret field does not come here: a
-// secret is a value, not a record.
+// A person's answer to a card comes in the same way: a record that mind passes
+// on to whoever waits on the card, which reads it here by its key. The answer
+// can hold what they typed on a form, so it is sealed too. A card with a secret
+// field does not come here: a secret is a value, not a record.
 
-// answerWait is how long a person's press waits to hear how it went. Past it
-// the answer stays in the queue and the card moves when it is taken.
+// answerWait is how long a person's press waits to hear how it went, through
+// mind and the agent. Past it the answer stays in the queue and the card moves
+// when it is taken.
 const answerWait = 10 * time.Second
 
 // reply is how an answer went.

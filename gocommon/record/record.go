@@ -441,12 +441,12 @@ const KindSpendingWrite = "spending.write"
 // KindJobsWrite is a change to a job, which mind keeps.
 const KindJobsWrite = "jobs.write"
 
-// KindMessage is what a person said in the conversation: the agent takes it
-// from the queue.
+// KindMessage is what a person said in the conversation: mind passes its key on
+// to the agent (mind-chat), which reads the words at the way in.
 const KindMessage = "chat.message"
 
-// KindAnswer is a person's answer to a card: whoever waits on the card reads it
-// from the queue, whatever mind is doing.
+// KindAnswer is a person's answer to a card: mind passes it on the same way to
+// whoever waits on the card.
 const KindAnswer = "card.answer"
 
 // KindFeedback is a person's mark on one of the assistant's answers (input-svc

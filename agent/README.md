@@ -94,8 +94,8 @@ Claude Code는 `--permission-prompt-tool`로 지정된 MCP 도구에 권한을 �
 `[답을 기다리는 카드]`로 놓입니다(`proposal.Store.Waiting` → `Runner.cards`). 운영자는 화면에 뜬 카드를 묻는데, 결제 감시의
 카드는 어느 조회 도구에도 없습니다. 세션이 본 목록과 같으면 한 줄로, 그사이 비었으면 한 번만 알립니다.
 
-카드의 답은 입구 `POST /chat/cards/{id}/decision` 으로 기록 `card.answer` 가 되고, 에이전트가 큐에서
-바로 읽어 이어 갑니다(`takeAnswer`). 반려 이유는 기록에 남기지 않고 있었는지만 적는데, 대화의 캘린더 카드만은 이유를 함께 적어 mind 가 읽습니다. 비밀 칸이 있는 카드만 비밀이 기록에 남지 않게 에이전트의
+카드의 답은 입구 `POST /chat/cards/{id}/decision` 으로 기록 `card.answer` 가 되고, mind 가 키와 카드만 효과로
+넘기면(`mind-chat`) 에이전트가 효과에서 집어 입구에서 답을 읽고 이어 갑니다(`agent-chat`, `takeAnswer`). 반려 이유는 기록에 남기지 않고 있었는지만 적는데, 대화의 캘린더 카드만은 이유를 함께 적어 mind 가 읽습니다. 비밀 칸이 있는 카드만 비밀이 기록에 남지 않게 에이전트의
 `POST /proposals/{id}/decision` 으로 옵니다.
 
 CLI에 넘기는 `MCP_TIMEOUT`/`MCP_TOOL_TIMEOUT`은 **밀리초**입니다(CLI 기본 30000). 결제 카드에 걸린
@@ -445,8 +445,10 @@ cd web && AGENT_URL=http://localhost:8080 \
 ## 에이전트 API
 
 화면이 부르는 것은 에이전트 자기 상태뿐입니다: 대화 페이지, 답 스트림, 대기열, 카드 목록, 사진 파일, 구독 사용량. 대화에서 한 말과
-카드의 답은 입구로 들어오고(`chat.message`, `card.answer`) 에이전트가 큐에서 집습니다(`agent-chat`). 일정은 calendar-svc, 리마인드·
-체크리스트는 mind 에서 화면이 바로 읽습니다. 결제의 승인·보류 상태는 `internal/holder` 에 있고 mind 와 무관합니다.
+카드의 답은 입구로 들어와(`chat.message`, `card.answer`) mind 를 거쳐 오고(`mind-chat` → 효과), 에이전트가 효과에서 집습니다
+(`agent-chat`, 손님은 `agent-chat-guest`). 일정은 calendar-svc, 리마인드·체크리스트는 mind 에서 화면이 바로 읽습니다. 결제의
+승인·보류 상태는 `internal/holder` 에 있습니다. 결제 카드의 답도 mind 를 거쳐 오므로, mind 가 보류 시간(2분)보다 오래 내려가 있으면
+멈춘 요청은 거절되고 늦게 온 승인으로 결제자가 그 단계를 다시 합니다.
 
 | 메서드 | 경로 | 하는 일 |
 |---|---|---|
