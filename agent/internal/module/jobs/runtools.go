@@ -242,12 +242,20 @@ type payCard struct {
 	// is not the payment's own but the page on its way back, held at the
 	// guard the same way (FlowRaised). Empty for a payment card.
 	flow string
+	// pin: the card asks for the payment password itself, the PIN tool
+	// waiting on it (PinRaised) - approved, the run calls the tool again on
+	// the keypad rather than taking the payment step again.
+	pin bool
 }
 
-// what names the card to the run: the payment's, or the payment flow's.
+// what names the card to the run: the payment's, the payment password's, or
+// the payment flow's.
 func (c payCard) what() string {
-	if c.flow != "" {
+	switch {
+	case c.flow != "":
 		return "결제 흐름 카드"
+	case c.pin:
+		return "결제 비밀번호 승인 카드"
 	}
 	return "결제 승인 카드"
 }
@@ -325,6 +333,16 @@ func (m *Module) PaymentRaised(job int64, card string, until time.Time) {
 		return
 	}
 	m.pay.set(job, payCard{id: card, state: payPending, until: until})
+}
+
+// PinRaised: the PIN tool of the job's run found no approved payment of the
+// job's and a card asks for the password itself, the tool waiting on it until
+// until. Should the wait run out, the run waits on it through wait_payment.
+func (m *Module) PinRaised(job int64, card string, until time.Time) {
+	if c, ok := m.pay.get(job); ok && c.id == card {
+		return
+	}
+	m.pay.set(job, payCard{id: card, state: payPending, until: until, pin: true})
 }
 
 // FlowRaised: the browser's guard holds a page of the job's run on its way
@@ -817,6 +835,9 @@ func (m *Module) runServer(run int64) *mcp.Server {
 			if c.flow != "" {
 				return flowDecided(c)
 			}
+			if c.pin {
+				return pinDecided(c)
+			}
 			switch {
 			case c.state == payApproved && c.passed:
 				return ok("결제가 승인됐고, 멈춰 있던 결제 요청이 그대로 나갔습니다. 결제하기를 다시 누르지 말고(결제창을 다시 열지도 말고) 화면을 보며 이어 가세요 - 결제창이 열리고 있습니다. " +
@@ -860,8 +881,11 @@ func (m *Module) runServer(run int64) *mcp.Server {
 			return res, nil, nil
 		}
 		waitWhat := "결제 승인 대기"
-		if c.flow != "" {
+		switch {
+		case c.flow != "":
 			waitWhat = "결제 흐름 승인 대기"
+		case c.pin:
+			waitWhat = "결제 비밀번호 승인 대기"
 		}
 		if err := m.store.Wait(ctx, run, c.id, waitWhat); err != nil {
 			return fail(err), nil, nil
@@ -990,6 +1014,22 @@ func flowDecided(c payCard) *mcp.CallToolResult {
 			"주문 내역에서 이 주문이 생겼는지 먼저 확인하고, 없으면 주문서에서 결제를 처음부터 다시 진행하세요(결제 승인 카드가 다시 올라갈 수 있습니다).", false)
 	case payRejected:
 		return toolText("운영자가 "+card+"를 반려했습니다. 이 결제는 이어 가지 말고, 주문 내역을 확인한 뒤 결과를 finish 나 ask 로 알리세요.", false)
+	}
+	return nil
+}
+
+// pinDecided is what wait_payment says of a decided payment password card:
+// the PIN tool, called again on the keypad, now types it - the payment step
+// itself is not taken again.
+func pinDecided(c payCard) *mcp.CallToolResult {
+	switch {
+	case c.state == payApproved && c.passed:
+		return toolText("결제 비밀번호 입력이 승인됐고, 기다리던 browser_enter_payment_pin 이 비밀번호를 넣었습니다. 버튼을 다시 누르지 말고 화면을 보며 이어 가세요.", false)
+	case c.state == payApproved:
+		return toolText("결제 비밀번호 입력이 이미 승인됐습니다. 먼저 화면에서 그 일이 이미 끝났는지(등록·결제 완료) 확인하고, 아니면 키패드가 떠 있을 때 browser_enter_payment_pin 을 다시 부르세요(이번에는 넣습니다). "+
+			"키패드가 사라졌으면 그 단계를 한 번 다시 해서 키패드를 띄운 뒤 부르세요.", false)
+	case c.state == payRejected:
+		return toolText("운영자가 결제 비밀번호 입력을 반려했습니다. 비밀번호를 넣지 말고 finish 로 마치세요.", false)
 	}
 	return nil
 }

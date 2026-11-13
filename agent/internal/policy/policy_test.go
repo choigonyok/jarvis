@@ -148,19 +148,6 @@ func TestTheCLIsOwnConfigIsNotWritten(t *testing.T) {
 	}
 }
 
-func TestThePaymentPasswordNeedsAnApproval(t *testing.T) {
-	if v := owner.Check(Call{Tool: PaymentPINTool}); !v.Deny || v.Rule != RulePaymentPIN {
-		t.Fatalf("%+v", v)
-	}
-	if v := owner.Check(Call{Tool: PaymentPINTool, PaymentApproved: true}); v.Deny {
-		t.Fatalf("%+v", v)
-	}
-	// An approval opens that one tool, nothing else.
-	if v := owner.Check(Call{Tool: "Bash", PaymentApproved: true}); !v.Deny {
-		t.Fatalf("%+v", v)
-	}
-}
-
 const hookInput = `{"session_id":"s","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls"}}`
 
 func runHook(t *testing.T, url string) (out string) {

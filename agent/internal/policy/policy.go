@@ -22,12 +22,7 @@ const (
 	RuleUnregistered = "unregistered-tool"
 	RuleCLIConfig    = "cli-config"
 	RuleFolders      = "guest-folders"
-	RulePaymentPIN   = "payment-pin"
 )
-
-// PaymentPINTool is the one tool that spends: it types the payment password
-// on a keypad. Who may call it is the rule the operator gave in words.
-const PaymentPINTool = "mcp__mcp-browser__browser_enter_payment_pin"
 
 // Policy is one agent's rules: what is registered for it and where it may
 // write. It is fixed at boot and holds no state.
@@ -62,12 +57,15 @@ func Servers(mounts []string, extra []string, runs ...string) []string {
 }
 
 // Call is one tool call about to run.
+//
+// The payment password is not judged here: the PIN tool asks the agent's
+// /intercept before it types, as the guard does for a payment, and the
+// password goes in only for a payer whose payment the operator approved.
+// Here it could only be refused, and a payment that asks for the password
+// first - a coupon, a point conversion - would then have no way to be asked.
 type Call struct {
 	Tool  string
 	Input json.RawMessage
-	// PaymentApproved: whoever makes this call has an approved payment that
-	// can still happen.
-	PaymentApproved bool
 }
 
 // Verdict is what the policy said. A refusal carries the rule and the reason
@@ -92,10 +90,6 @@ func (p Policy) Check(c Call) Verdict {
 		if file, inside := p.Folders.Judge(c.Tool, c.Input); file && !inside {
 			return refuse(RuleFolders, "이 계정에서는 첨부한 사진과 자비스 기억 밖의 파일을 열거나 쓸 수 없습니다. 다시 시도하지 마세요.")
 		}
-	}
-	if c.Tool == PaymentPINTool && !c.PaymentApproved {
-		return refuse(RulePaymentPIN, "승인된 결제가 없어 결제 비밀번호를 넣지 않았습니다. 결제 승인 카드가 승인된 뒤에만 넣습니다. "+
-			"카드 없이 비밀번호 단계에 왔다면 진행하지 말고 그대로 알리세요.")
 	}
 	return Verdict{}
 }

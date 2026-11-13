@@ -358,7 +358,19 @@ class KeypadInABrowser(unittest.IsolatedAsyncioTestCase):
         cls.profile.cleanup()
         cls.capture.cleanup()
 
+    def setUp(self):
+        # 에이전트 대신: 승인된 결제가 있는 실행. 묻는 것은 기록해 둔다.
+        self.asked = []
+        self._ask = pin.ask_agent
+
+        async def approve(host, url):
+            self.asked.append((host, url))
+            return pin.Answer(True, why="granted")
+
+        pin.ask_agent = approve
+
     def tearDown(self):
+        pin.ask_agent = getattr(self, "_ask", pin.ask_agent)
         pin._halted_until = 0.0
         for t in json.load(urllib.request.urlopen(f"http://127.0.0.1:{self.cdp}/json/list")):
             if t.get("type") == "page":
@@ -466,6 +478,43 @@ class KeypadInABrowser(unittest.IsolatedAsyncioTestCase):
         await self.open(self.url("pay.naver.com"))
         with self.assertRaisesRegex(RuntimeError, "멈춘 키패드"):
             await pin.enter(pin="246802", port=self.cdp)
+
+    async def test_asks_the_agent_first_and_names_no_values(self):
+        # 넣기 전에 에이전트에 그 키패드의 호스트와 주소 모양(값 없이)을 묻는다.
+        t = await self.open(self.url("pay.naver.com", "kind=text&couponNo=SKPO1&sessionKey=abc"))
+        self.assertEqual(await pin.enter(pin="135790", port=self.cdp), "네이버페이 결제 비밀번호를 넣었습니다")
+        self.assertEqual(await self.entered(t), "135790")
+        self.assertEqual(len(self.asked), 1)
+        host, url = self.asked[0]
+        self.assertEqual(host, "pay.naver.com")
+        self.assertTrue(url.endswith("/keypad?kind&couponNo&sessionKey"), url)
+
+    async def test_no_approval_no_press(self):
+        # 승인된 결제가 없으면 에이전트가 카드를 올리고 기다린다 - 결정이 없거나 반려면 누르지 않는다.
+        for answer, says in [(pin.Answer(False, "p-9", "waiting"), "승인 카드\\(p-9\\)"),
+                             (pin.Answer(False, why="background"), "넣을 승인이 없어"),
+                             (pin.Answer(False, why="에이전트에 묻지 못했습니다: 연결 거부"), "에이전트에 묻지 못했습니다")]:
+            async def refuse(host, url, answer=answer):
+                return answer
+
+            pin.ask_agent = refuse
+            t = await self.open(self.url("pay.naver.com", "kind=text"))
+            with self.assertRaisesRegex(RuntimeError, says):
+                await pin.enter(pin="135790", port=self.cdp)
+            self.assertEqual(await self.entered(t), "", says)
+            self.tearDown()
+
+    async def test_reads_the_keypad_again_after_the_approval(self):
+        # 승인을 기다리는 동안 키패드가 다시 섞여도 지금 배치로 누른다.
+        t = await self.open(self.url("pay.naver.com", "kind=text"))
+
+        async def approve_late(host, url):
+            await self.entered(t, "(draw(), 1)")
+            return pin.Answer(True, why="held")
+
+        pin.ask_agent = approve_late
+        self.assertEqual(await pin.enter(pin="864200", port=self.cdp), "네이버페이 결제 비밀번호를 넣었습니다")
+        self.assertEqual(await self.entered(t), "864200")
 
     async def test_the_pin_must_be_set(self):
         # 보관함에도 환경변수에도 없으면 누르지 않고, 대화의 저장 카드로 넣어 달라고 한다.

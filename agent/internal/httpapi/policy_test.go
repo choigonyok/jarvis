@@ -6,11 +6,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/choigonyok/jarvis/agent/internal/core/bus"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
-	"github.com/choigonyok/jarvis/agent/internal/holder"
 	"github.com/choigonyok/jarvis/agent/internal/policy"
 	"github.com/choigonyok/jarvis/gocommon/record"
 )
@@ -39,6 +37,8 @@ func askPolicy(t *testing.T, s *Server, token, body string) (int, policy.Verdict
 	return rec.Code, v
 }
 
+// The PIN tool is the browser's, registered: the policy does not stop it - it
+// asks /intercept before it types (pin_test.go).
 const pinCall = `{"tool_name":"mcp__mcp-browser__browser_enter_payment_pin","tool_input":{}}`
 
 func TestThePolicyAnswersOnlyTheCLI(t *testing.T) {
@@ -51,6 +51,9 @@ func TestThePolicyAnswersOnlyTheCLI(t *testing.T) {
 	}
 	if code, v := askPolicy(t, s, "mcp", `{"tool_name":"Read","tool_input":{"file_path":"a"}}`); code != http.StatusOK || v.Deny {
 		t.Fatalf("%d %+v", code, v)
+	}
+	if code, v := askPolicy(t, s, "mcp", pinCall); code != http.StatusOK || v.Deny {
+		t.Fatalf("비밀번호 도구는 /intercept 에 묻습니다: %d %+v", code, v)
 	}
 }
 
@@ -68,43 +71,6 @@ func TestARefusalLeavesARecord(t *testing.T) {
 	raw, _ := json.Marshal(r.Payload)
 	if strings.Contains(string(raw), "SECRET") {
 		t.Fatalf("인자가 남았습니다: %s", raw)
-	}
-}
-
-// The password goes in only inside an approved payment of the one making the
-// call: the conversation's approval is not a job's, and it runs out.
-func TestThePasswordFollowsThePaymentsApproval(t *testing.T) {
-	jobs := &fakeJobs{}
-	runner := &switchRunner{}
-	s, _ := policyServer(t, Deps{Runner: runner, Jobs: jobs})
-	now := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
-	s.payments.Now = func() time.Time { return now }
-
-	if _, v := askPolicy(t, s, "mcp", pinCall); !v.Deny || v.Rule != policy.RulePaymentPIN {
-		t.Fatalf("승인 없이: %+v", v)
-	}
-	s.payments.Grant("coupang.com", 0, "")
-	if _, v := askPolicy(t, s, "mcp", pinCall); v.Deny {
-		t.Fatalf("대화의 승인: %+v", v)
-	}
-	// A job's run holds the browser: the conversation's approval is not its.
-	jobs.running(7)
-	runner.mu.Lock()
-	runner.bg = true
-	runner.mu.Unlock()
-	if _, v := askPolicy(t, s, "mcp", pinCall); !v.Deny {
-		t.Fatalf("다른 결제자: %+v", v)
-	}
-	s.payments.Grant("pg-window", 7, "113000")
-	if _, v := askPolicy(t, s, "mcp", pinCall); v.Deny {
-		t.Fatalf("작업의 승인: %+v", v)
-	}
-	if !s.payments.Allow("pg-window", 7, "", "113000") {
-		t.Fatal("결제자가 돌아왔습니다")
-	}
-	now = now.Add(holder.Window + time.Minute)
-	if _, v := askPolicy(t, s, "mcp", pinCall); !v.Deny {
-		t.Fatalf("창이 지났습니다: %+v", v)
 	}
 }
 

@@ -360,3 +360,32 @@ func TestSitesAreAddedWithoutACard(t *testing.T) {
 		t.Fatalf("브라우저가 없는 실행은 가드를 건드리지 않습니다: %v", g.sites)
 	}
 }
+
+// A card for the payment password itself (a coupon asks for it first): the
+// run waits on it like a payment card, and once it is approved it calls the
+// PIN tool again - it does not take the step, 등록하기 or 결제하기, again.
+func TestWaitingOnAPasswordCard(t *testing.T) {
+	svc := &jobsSvc{}
+	props := proposal.NewStore(bus.New())
+	m := New(NewStore(svc.serve(t).URL, ""), nil, props, nil, nil)
+	m.current.add(5, Job{ID: 165, Title: "네이버페이 포인트 쿠폰 등록"}, true)
+	s := runSession(t, m, "5")
+
+	m.PinRaised(165, "p-7", time.Now())
+	if text, isErr := callRun(t, s, "ask", map[string]any{"question": "비밀번호를 넣어 주세요"}); !isErr || !strings.Contains(text, "결제 비밀번호 승인 카드") {
+		t.Fatalf("비밀번호 카드가 떠 있는 동안 ask 는 막아야 합니다: %q", text)
+	}
+	if text, isErr := callRun(t, s, "wait_payment", nil); isErr || !strings.Contains(text, "결제 비밀번호 승인 카드를 기다립니다") {
+		t.Fatalf("비밀번호 카드를 기다려야 합니다: %q", text)
+	}
+	if got := svc.got(); !contains(got, "/runs/5/wait p-7") {
+		t.Fatalf("작업을 비밀번호 카드에 걸어야 합니다: %v", got)
+	}
+	if err := m.PaymentDecided(165, "p-7", true, false, "[결제 승인됨] 운영자가 결제 비밀번호 카드를 승인했습니다."); err != nil {
+		t.Fatal(err)
+	}
+	text, _ := callRun(t, s, "wait_payment", nil)
+	if !strings.Contains(text, "browser_enter_payment_pin 을 다시 부르세요") || strings.Contains(text, "결제하기") {
+		t.Fatalf("승인된 비밀번호 카드는 도구를 다시 부르라고 해야 합니다: %q", text)
+	}
+}

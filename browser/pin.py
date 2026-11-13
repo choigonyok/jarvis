@@ -30,6 +30,12 @@ coupang.com, 네이버페이면 pay.naver.com 아래여야 한다(SITES). 탭 �
 pay.naver.com 인 것은, 같은 naver.com 의 블로그·카페는 누구나 글을 올리는 곳이라 키패드처럼
 보이는 것을 둘 수 있어서다. 다른 곳이면 넣지 않는다 - 비밀번호를 받아 가는 가짜 키패드에
 넣는 통로가 되지 않게. 넣은 뒤 결제가 진행되는 요청은 결제 가드가 따로 판정한다(승인 카드).
+
+넣기 전에 에이전트에 묻는다(/intercept, 가드와 같은 길·토큰, pin 표시): 비밀번호는 그것을 부른
+쪽(실행 중인 작업, 아니면 대화)에게 승인된 결제가 살아 있을 때만 들어간다. 없으면 에이전트가 그
+쪽 명의로 결제 비밀번호 승인 카드를 올리고 2분까지 기다렸다 답한다 - 쿠폰 등록·포인트 전환처럼
+결제하기 없이 비밀번호부터 묻는 일은 비밀번호 뒤의 요청이 처음 멈추는 곳이라, 미리 승인을 받을
+곳이 이 키패드뿐이다. 승인이 없거나 물을 수 없으면 넣지 않는다.
 """
 
 import asyncio
@@ -48,7 +54,9 @@ from urllib.parse import urlparse
 
 import websockets
 
-from guard import find_cdp_port
+import aiohttp
+
+from guard import AGENT_URL, DECISION_TIMEOUT, TOKEN, find_cdp_port
 from upload import _Session, _visible
 
 # 키패드가 있는 프레임의 출처(host 와 그 아래) → 그곳의 비밀번호(환경변수, 맥미니 .env 의 이름).
@@ -80,7 +88,10 @@ TOOL = {
         "비밀번호는 운영자가 결제 비밀번호 저장 카드로 보관함에 넣었거나 맥미니 설정에 있을 때만 넣을 수 있고, 당신에게는 보이지 않는다 - "
         "묻거나 추측하거나 키패드를 직접 누르지 말고 이 도구만 부른다. 저장돼 있지 않으면 넣지 않고 그렇다고 답한다 "
         "(그때 작업은 request_payment_pin, 대화는 save_payment_pin 으로 저장 카드를 올린다). "
-        "쿠팡·네이버페이의 결제 화면(그 결제 호스트의 키패드)에서만 동작한다. 넣은 뒤에는 그 창의 다음 화면을 본다 - "
+        "쿠팡·네이버페이의 결제 화면(그 결제 호스트의 키패드)에서만 동작한다. "
+        "승인된 결제가 없으면(쿠폰 등록·포인트 전환처럼 결제하기 없이 비밀번호부터 묻는 일) 결제 비밀번호 승인 카드를 올리고 2분까지 기다렸다가, "
+        "승인되면 그대로 넣는다. 그때까지 결정이 없으면 넣지 않고 카드를 올렸다고 답한다 - 키패드를 그대로 두고, 작업은 wait_payment 를 부른 뒤 실행을 마치고, "
+        "대화는 승인을 기다린다고 알린 뒤 응답을 마친다. 넣은 뒤에는 그 창의 다음 화면을 본다 - "
         "카드사 창 안의 네이버페이는 인증 결과 화면의 확인을 눌러야 카드사 창으로 넘어간다. "
         "넣지 못했다고 하면 키패드를 직접 누르지 말고, 다시 부르지도 말고 알린다."
     ),
@@ -361,8 +372,9 @@ async def _says(s: _Session, ctx: int, text: str) -> bool:
     return res.get("result", {}).get("value") is True
 
 
-async def _keypad(s: _Session) -> tuple[dict, list[str], str] | None:
-    """이 탭에서 비밀번호를 넣을 수 있는 키패드: (그곳, 숫자 요소 열 개의 objectId - 0~9 순서, 그 프레임의 호스트).
+async def _keypad(s: _Session) -> tuple[dict, list[str], str, str] | None:
+    """이 탭에서 비밀번호를 넣을 수 있는 키패드: (그곳, 숫자 요소 열 개의 objectId - 0~9 순서, 그 프레임의 호스트,
+    그 프레임의 주소).
     넣을 수 있는 출처(SITES)의 프레임에서만 찾는다 - 쿠팡이면 쿠페이 그림 키패드를 먼저, 그다음 숫자가
     글자로 적힌 키패드. 그곳의 text 가 그 프레임에도 탭의 맨 위 프레임에도 없으면 키패드로 보지 않는다.
     쿠페이 그림을 확실히 읽지 못하면 RuntimeError."""
@@ -397,7 +409,7 @@ async def _keypad(s: _Session) -> tuple[dict, list[str], str] | None:
             top = await _world(s, frames[0]["id"])
             if top is None or not await _says(s, top, site["text"]):
                 continue
-        return site, ids, (urlparse(frame["origin"] or frame["url"]).hostname or "").lower()
+        return site, ids, (urlparse(frame["origin"] or frame["url"]).hostname or "").lower(), frame["url"]
     return None
 
 
@@ -434,6 +446,46 @@ async def _hits(s: _Session, object_id: str) -> bool:
 def _bare(url: str) -> str:
     """기록에 남길 주소 - ? 와 # 뒤(주문·인증 값이 실리는 곳)는 뺀다."""
     return re.split(r"[?#]", url or "", maxsplit=1)[0]
+
+
+def _shape(url: str) -> str:
+    """카드에 보일 주소 - 값은 빼고 파라미터 이름만 남긴다(…/pw/check?action&couponNo). 쿠폰 번호·세션
+    값은 카드와 기록에 남기지 않는다."""
+    bare = _bare(url)
+    query = urlparse(url or "").query
+    names = [part.split("=", 1)[0] for part in query.split("&") if part]
+    return bare + ("?" + "&".join(names) if names else "")
+
+
+class Answer:
+    """에이전트의 답: approved 면 넣는다. pending 은 승인을 기다리는 카드, why 는 그 답에 이른 길."""
+
+    def __init__(self, approved: bool, pending: str = "", why: str = ""):
+        self.approved, self.pending, self.why = approved, pending, why
+
+
+async def ask_agent(host: str, url: str) -> Answer:
+    """이 키패드에 비밀번호를 넣어도 되는지 에이전트에 묻는다. 승인된 결제가 없으면 에이전트가 카드를
+    올리고 2분까지 기다렸다 답한다. 물을 수 없으면 넣지 않는다."""
+    payload = {"url": _shape(url), "method": "PIN", "host": host, "pin": True}
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=DECISION_TIMEOUT)) as s:
+            async with s.post(AGENT_URL, json=payload, headers={"Authorization": f"Bearer {TOKEN}"}) as r:
+                body = await r.json()
+                return Answer(body.get("decision") == "approved", str(body.get("pending") or ""), str(body.get("why") or ""))
+    except Exception as e:  # noqa: BLE001
+        return Answer(False, why=f"에이전트에 묻지 못했습니다: {e}")
+
+
+def _refused(site: dict, a: Answer) -> str:
+    """넣지 않은 까닭을 부른 쪽에 하는 말."""
+    if a.pending:
+        return (f"승인된 결제가 없어 {site['name']} 승인 카드({a.pending})를 운영자에게 올렸고, 2분 안에 결정이 없어 넣지 않았습니다. "
+                "키패드를 누르지 말고 이 도구를 다시 부르지도 말고 그대로 두세요 - 작업은 wait_payment 를 부른 뒤 실행을 마치고, "
+                "대화는 승인을 기다린다고 한 줄로 알린 뒤 응답을 마치세요. 승인되면 다시 부르라는 메시지가 옵니다")
+    if a.why.startswith("에이전트에 묻지 못했습니다"):
+        return a.why + " - 넣지 않았습니다. 키패드를 누르지 말고 알리세요"
+    return f"{site['name']}를 넣을 승인이 없어(반려됐거나 이 실행은 결제할 수 없음) 넣지 않았습니다. 키패드를 누르지 말고 알리세요"
 
 
 async def _capture(targets: list[dict], why: str) -> str | None:
@@ -508,9 +560,9 @@ async def _press(s: _Session, x: float, y: float):
     await s.call("Input.dispatchMouseEvent", {"type": "mouseReleased", "x": x, "y": y, "button": "left", "clickCount": 1})
 
 
-async def enter(pin: str | None = None, port: int | None = None) -> str:
-    """보이는 탭부터 넣을 수 있는 키패드를 찾아 그곳의 비밀번호를 넣는다. pin·port 는 시험용(없으면
-    그곳의 환경변수, 이 컨테이너의 브라우저)."""
+async def enter(pin: str | None = None, port: int | None = None, ask=None) -> str:
+    """보이는 탭부터 넣을 수 있는 키패드를 찾아, 에이전트가 승인하면 그곳의 비밀번호를 넣는다. pin·port·ask 는
+    시험용(없으면 그곳의 환경변수, 이 컨테이너의 브라우저, 에이전트)."""
     global _halted_until
     if time.time() < _halted_until:
         raise RuntimeError("조금 전에 비밀번호를 넣다가 멈춘 키패드가 있어 넣지 않았습니다 - 키패드에 숫자가 남아 있을 수 있습니다. "
@@ -552,11 +604,23 @@ async def enter(pin: str | None = None, port: int | None = None) -> str:
                 raise
             if found is None:
                 continue
-            site, keys, host = found
+            site, keys, host, url = found
             code = pin if pin is not None else (os.environ.get(site["env"], "") or _vault_pin(site, host))
             if not re.fullmatch(r"[0-9]{6}", code or ""):
                 raise RuntimeError(f"{site['name']}가 저장되어 있지 않아 넣지 않았습니다. 키패드를 누르지 말고 저장 카드를 올리세요 - "
                                    "작업은 request_payment_pin, 대화는 save_payment_pin(운영자가 카드의 비밀 칸에 넣습니다)")
+            answer = await (ask or ask_agent)(host, url)
+            if not answer.approved:
+                raise RuntimeError(_refused(site, answer))
+            # 승인을 기다리는 사이 키패드가 바뀌었을 수 있다(다시 섞임, 시간이 지나 닫힘): 지금 것을 다시 읽는다.
+            try:
+                again = await _keypad(s)
+            except RuntimeError:
+                again = None
+            if again is None or again[0] is not site:
+                raise RuntimeError("승인됐지만 그사이 키패드가 사라지거나 바뀌어 넣지 않았습니다. 그 단계를 다시 해서 키패드를 띄운 뒤 "
+                                   "이 도구를 다시 부르세요(이번 승인으로 넣습니다)")
+            keys = again[1]
             entered = 0
             try:
                 for ch in code:

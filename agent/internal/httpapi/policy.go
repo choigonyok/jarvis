@@ -8,10 +8,9 @@ import (
 	"github.com/choigonyok/jarvis/gocommon/record"
 )
 
-// checkPolicy judges one tool call with what only this process knows: who is
-// driving (the run holding the browser, as /intercept reads it, never what the
-// request says) and whether that payer has an approved payment. A refusal
-// leaves a record: which tool, which rule, and not its arguments.
+// checkPolicy judges one tool call. A refusal leaves a record: which tool,
+// which rule, who was driving (the run holding the browser, as /intercept
+// reads it, never what the request says), and not its arguments.
 func (s *Server) checkPolicy(tool string, input json.RawMessage) policy.Verdict {
 	if s.policy == nil {
 		return policy.Verdict{}
@@ -20,7 +19,7 @@ func (s *Server) checkPolicy(tool string, input json.RawMessage) policy.Verdict 
 	if bg, ok := s.runner.(interface{ InBackground() bool }); ok && bg.InBackground() && s.jobs != nil {
 		job, _, _, _ = s.jobs.RunningJob()
 	}
-	v := s.policy.Check(policy.Call{Tool: tool, Input: input, PaymentApproved: s.payments.Live(job)})
+	v := s.policy.Check(policy.Call{Tool: tool, Input: input})
 	if !v.Deny {
 		return v
 	}

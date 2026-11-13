@@ -236,6 +236,12 @@ func (f *fakeJobs) PaymentRaised(job int64, card string, _ time.Time) {
 	f.raised = append(f.raised, fmt.Sprintf("%d %s", job, card))
 }
 
+func (f *fakeJobs) PinRaised(job int64, card string, _ time.Time) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.raised = append(f.raised, fmt.Sprintf("%d %s pin", job, card))
+}
+
 func (f *fakeJobs) PaymentDecided(job int64, card string, approved, _ bool, text string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

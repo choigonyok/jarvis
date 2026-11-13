@@ -60,6 +60,14 @@ type Payment struct {
 	// what an approved window lets 네이버페이 through for. A 네이버페이 payment
 	// of a tab of its own is its own payment, with its own card.
 	FromWindow bool `json:"fromWindow,omitempty"`
+	// PIN is the browser's PIN tool asking before it types the payment
+	// password on a keypad (쿠페이, 네이버페이): the password goes in only for a
+	// payer with an approved payment that can still happen, on any site - the
+	// 네이버페이 keypad a card company's window opens is that window's payment.
+	// With none, the card is for the password itself: a coupon or a point
+	// conversion asks for it first, and what follows it is the first request
+	// the guard would stop - after the password is in.
+	PIN bool `json:"pin,omitempty"`
 	// JobID is the background job whose run reached the payment; zero is the
 	// conversation. Set here from the run holding the browser, never taken
 	// from the request.
@@ -94,6 +102,9 @@ type JobPayments interface {
 	// PaymentRaised tells the job a payment card is waiting for it, its
 	// request held until until.
 	PaymentRaised(job int64, card string, until time.Time)
+	// PinRaised is PaymentRaised for a card that asks for the payment
+	// password itself (Payment.PIN): the PIN tool waits on it until until.
+	PinRaised(job int64, card string, until time.Time)
 	// PaymentDecided hands the decision to the job and wakes it. passed: the
 	// held request went on with the approval, in the run still going. A flow
 	// card's decision comes here too.
@@ -208,8 +219,8 @@ func (s *Server) judgePayment(ctx context.Context, p Payment, host string, backg
 			s.log.Warn("백그라운드 작업 중 결제 도메인 요청을 묻지 않고 거부했습니다", "host", p.Host, "url", clampURL(p.URL))
 			return verdict{decision: proposal.Reject, why: "background"}
 		}
-		if s.payments.Allow(p.grantSite(), p.JobID, p.Event, p.Amount) || s.insideWindow(p) {
-			s.log.Info("작업에 승인된 결제 흐름의 요청을 통과시켰습니다", "job", p.JobID, "host", host, "method", p.Method, "event", p.Event, "window", p.Window)
+		if s.granted(p) {
+			s.log.Info("작업에 승인된 결제 흐름의 요청을 통과시켰습니다", "job", p.JobID, "host", host, "method", p.Method, "event", p.Event, "window", p.Window, "pin", p.PIN)
 			return verdict{decision: proposal.Approve, why: "granted"}
 		}
 		if s.carried(p) {
@@ -217,10 +228,14 @@ func (s *Server) judgePayment(ctx context.Context, p Payment, host string, backg
 		}
 		card := s.raisePayment(ctx, p, asked)
 		until := time.Now().Add(s.holdDur)
-		s.jobs.PaymentRaised(p.JobID, card, until)
-		s.log.Info("작업의 결제 요청을 멈추고 카드를 올렸습니다", "job", p.JobID, "card", card, "host", host, "event", p.Event)
-		if s.payments.Wait(ctx, card, until) && s.payments.Allow(p.grantSite(), p.JobID, p.Event, p.Amount) {
-			s.log.Info("기다리는 동안 승인돼 멈춘 결제 요청을 그대로 보냈습니다", "job", p.JobID, "card", card, "host", host)
+		if p.PIN {
+			s.jobs.PinRaised(p.JobID, card, until)
+		} else {
+			s.jobs.PaymentRaised(p.JobID, card, until)
+		}
+		s.log.Info("작업의 결제 요청을 멈추고 카드를 올렸습니다", "job", p.JobID, "card", card, "host", host, "event", p.Event, "pin", p.PIN)
+		if s.payments.Wait(ctx, card, until) && s.grantedNow(p) {
+			s.log.Info("기다리는 동안 승인돼 멈춘 결제 요청을 그대로 보냈습니다", "job", p.JobID, "card", card, "host", host, "pin", p.PIN)
 			return verdict{decision: proposal.Approve, card: card, why: "held"}
 		}
 		return verdict{decision: proposal.Reject, pending: card, card: card, why: "waiting"}
@@ -229,19 +244,40 @@ func (s *Server) judgePayment(ctx context.Context, p Payment, host string, backg
 	// The second half of an approval: the operator said yes, and the browser
 	// is back making the payment. Approval covers the site: one payment can
 	// cross several of its hosts (checkout, then pay.coupang.com for the PIN).
-	if s.payments.Allow(p.grantSite(), 0, p.Event, p.Amount) || s.insideWindow(p) {
-		s.log.Info("승인된 결제 흐름의 요청을 통과시켰습니다", "host", host, "method", p.Method, "window", p.Window)
+	if s.granted(p) {
+		s.log.Info("승인된 결제 흐름의 요청을 통과시켰습니다", "host", host, "method", p.Method, "window", p.Window, "pin", p.PIN)
 		return verdict{decision: proposal.Approve, why: "granted"}
 	}
 	if s.carried(p) {
 		return verdict{decision: proposal.Approve, why: "carried"}
 	}
 	card := s.raisePayment(ctx, p, asked)
-	if s.payments.Wait(ctx, card, time.Now().Add(s.holdDur)) && s.payments.Allow(p.grantSite(), 0, p.Event, p.Amount) {
-		s.log.Info("기다리는 동안 승인돼 멈춘 결제 요청을 그대로 보냈습니다", "card", card, "host", host)
+	if s.payments.Wait(ctx, card, time.Now().Add(s.holdDur)) && s.grantedNow(p) {
+		s.log.Info("기다리는 동안 승인돼 멈춘 결제 요청을 그대로 보냈습니다", "card", card, "host", host, "pin", p.PIN)
 		return verdict{decision: proposal.Approve, card: card, why: "held"}
 	}
 	return verdict{decision: proposal.Reject, pending: card, card: card, why: "waiting"}
+}
+
+// granted is a stopped request of a payer's approved payment: the payment
+// going on at its site, or the 네이버페이 picked inside its open window. The
+// PIN tool's keypad goes by any approved payment of its payer that can still
+// happen (Payment.PIN) - typing the password sends nothing yet: the request
+// it then sends is judged here again, as the payment's own.
+func (s *Server) granted(p Payment) bool {
+	if p.PIN {
+		return s.payments.Live(p.JobID)
+	}
+	return s.payments.Allow(p.grantSite(), p.JobID, p.Event, p.Amount) || s.insideWindow(p)
+}
+
+// grantedNow is granted for a request held on its card that was just
+// approved: that approval, at that site.
+func (s *Server) grantedNow(p Payment) bool {
+	if p.PIN {
+		return s.payments.Live(p.JobID)
+	}
+	return s.payments.Allow(p.grantSite(), p.JobID, p.Event, p.Amount)
 }
 
 // carried is a payment window opened by a payment this payer approved at the
@@ -331,7 +367,7 @@ func (s *Server) raisePayment(ctx context.Context, p Payment, asked string) stri
 		return waiting.ID
 	}
 	var addr *SavedAddress
-	if s.savedAddress != nil {
+	if s.savedAddress != nil && !p.PIN {
 		actx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		if a, ok := s.savedAddress(actx); ok {
 			addr = &a
@@ -384,6 +420,15 @@ func (s *Server) resolvePayment(p proposal.Proposal, d proposal.Decision) {
 	if s.followUp == nil {
 		return
 	}
+	if d == proposal.Approve && pay.PIN {
+		if passed {
+			s.proposals.Settle(p.ID, proposal.Executed, "승인했습니다. 결제 비밀번호를 넣습니다.")
+		} else {
+			s.proposals.Settle(p.ID, proposal.Executed, "승인했습니다. 결제 비밀번호를 다시 넣게 합니다.")
+		}
+		s.followUp.Enqueue(pinApproved(p.ID, pay, passed))
+		return
+	}
 	if d == proposal.Approve {
 		if passed {
 			s.proposals.Settle(p.ID, proposal.Executed, "승인했습니다. 멈춰 있던 결제 요청이 그대로 나갔습니다.")
@@ -405,8 +450,29 @@ func (s *Server) resolvePayment(p proposal.Proposal, d proposal.Decision) {
 	if p.Reason != "" {
 		why = "\n반려 이유: " + p.Reason
 	}
+	if pay.PIN {
+		s.followUp.Enqueue(fmt.Sprintf("[결제 반려됨] 운영자가 결제 비밀번호 카드 %s(%s)를 반려했습니다.%s\n"+
+			"결제 비밀번호를 넣지 마세요(browser_enter_payment_pin 을 다시 부르지 않습니다). 이유를 캐묻지 말고 짧게 확인만 하세요.", p.ID, pay.Host, why))
+		return
+	}
 	s.followUp.Enqueue(fmt.Sprintf("[결제 반려됨] 운영자가 결제 카드 %s(%s)를 반려했습니다.%s\n"+
 		"결제하지 마세요. 이유를 캐묻지 말고 짧게 확인만 하세요.", p.ID, pay.Host, why))
+}
+
+// pinApproved is what the payer hears of an approved password card: the
+// held PIN tool goes on and types it, or - its wait over - the payer calls
+// it again on the keypad. Not 결제하기 again: what the password then sends
+// is the step itself, and taking the step twice is a second payment.
+func pinApproved(card string, pay Payment, passed bool) string {
+	scope := fmt.Sprintf("이 승인으로 %d분 동안 %s 의 결제 비밀번호 입력과 그 뒤의 요청이 통과합니다. 그 뒤의 다른 결제는 다시 카드를 올립니다.",
+		int(holder.Window.Minutes()), siteOf(pay.Host))
+	if passed {
+		return fmt.Sprintf("[결제 승인됨] 운영자가 결제 비밀번호 카드 %s(%s)를 승인했고, 기다리던 browser_enter_payment_pin 이 이어서 비밀번호를 넣습니다.\n"+
+			"도구의 결과를 보고 화면을 보며 이어 가세요 - 버튼을 다시 누르지 마세요. %s", card, pay.Host, scope)
+	}
+	return fmt.Sprintf("[결제 승인됨] 운영자가 결제 비밀번호 카드 %s(%s)를 승인했습니다. 비밀번호는 아직 넣지 않았습니다.\n"+
+		"먼저 화면에서 그 일이 이미 끝났는지(등록·결제 완료) 확인하세요. 아니면 비밀번호 키패드가 떠 있을 때 browser_enter_payment_pin 을 다시 부르세요(이번에는 넣습니다). "+
+		"키패드가 사라졌으면 그 단계를 한 번 다시 해서 키패드를 띄운 뒤 부르세요. %s", card, pay.Host, scope)
 }
 
 // resolveJobPayment is a decision on a card a job's run raised. Approved,
@@ -426,6 +492,14 @@ func (s *Server) resolveJobPayment(p proposal.Proposal, pay Payment, d proposal.
 	passed := s.payments.Release(p.ID, passes) && passes
 	var text string
 	switch {
+	case approved && pay.PIN:
+		text = pinApproved(p.ID, pay, passed)
+	case pay.PIN:
+		text = fmt.Sprintf("[결제 반려됨] 운영자가 결제 비밀번호 카드 %s(%s)를 반려했습니다.", p.ID, pay.Host)
+		if p.Reason != "" {
+			text += "\n반려 이유: " + p.Reason
+		}
+		text += "\n결제 비밀번호를 넣지 마세요(browser_enter_payment_pin 을 다시 부르지 않습니다)."
 	case passed:
 		text = fmt.Sprintf("[결제 승인됨] 운영자가 결제 카드 %s(%s)를 승인했고, 멈춰 있던 결제 요청이 승인과 함께 그대로 나갔습니다.\n"+
 			"결제하기를 다시 누르지 말고(결제창을 다시 열지도 말고) 화면을 보며 이어 가세요. %s", p.ID, pay.Host, approvedScope(pay))
@@ -456,7 +530,12 @@ func (s *Server) resolveJobPayment(p proposal.Proposal, pay Payment, d proposal.
 		return
 	}
 	note := fmt.Sprintf("승인했습니다. 작업이 이 결제 한 건을 이어서 합니다(다시 진행한 때부터 %d분).", int(holder.Window.Minutes()))
-	if passed {
+	switch {
+	case pay.PIN && passed:
+		note = "승인했습니다. 작업이 결제 비밀번호를 넣습니다."
+	case pay.PIN:
+		note = "승인했습니다. 작업이 결제 비밀번호를 다시 넣습니다."
+	case passed:
 		note = "승인했습니다. 멈춰 있던 결제 요청이 그대로 나갔고, 작업이 이어서 합니다."
 	}
 	if err != nil {
@@ -561,6 +640,9 @@ func addressLines(p Payment, addr *SavedAddress) (warn, saved string) {
 // line with where it was read - because it is the thing being approved, even
 // when it is only a word inside the job's report.
 func paymentCard(p Payment, addr *SavedAddress) action.Card {
+	if p.PIN {
+		return pinCard(p)
+	}
 	// The host is the part a person can actually judge; the path is there
 	// for the case where two flows share a provider.
 	where := p.Host
@@ -644,6 +726,43 @@ func paymentCard(p Payment, addr *SavedAddress) action.Card {
 		Title:       payTitle("", amount, "결제를 진행합니다"),
 		Body:        body,
 		Consequence: consequence,
+	}
+}
+
+// pinCard asks for the payment password itself: no payment was approved
+// before its keypad - a coupon or a point conversion asks for the password
+// first, or a payment the guard did not stop. What it is for is the job's
+// to say, and the keypad's page; an amount only when the job wrote one.
+func pinCard(p Payment) action.Card {
+	name := "결제 비밀번호"
+	switch siteOf(p.Host) {
+	case naverPaySite:
+		name = "네이버페이 비밀번호"
+	case "coupang.com":
+		name = "쿠페이 비밀번호"
+	}
+	line := "결제 금액: 읽지 못했습니다 - 쿠폰 등록·포인트 전환처럼 결제가 아닐 수도 있습니다. 무엇을 위한 비밀번호인지 아래를 보고 승인하세요"
+	if amount, from := paidAmount(p); amount != "" {
+		line = "결제 금액: " + won(amount) + " (" + from + ")"
+	}
+	body := line + "\n"
+	if p.JobID != 0 {
+		body += "작업: " + p.JobTitle
+		if s := strings.TrimSpace(p.JobSummary); s != "" {
+			body += "\n작업이 남긴 현황: " + s
+		}
+		body += "\n"
+	}
+	body += "\n비밀번호를 묻는 화면: " + p.Host + "\n" + clampURL(p.URL)
+	who := "자비스가"
+	if p.JobID != 0 {
+		who = "이 작업이"
+	}
+	return action.Card{
+		Title: name + "를 넣습니다",
+		Body:  body,
+		Consequence: fmt.Sprintf("결제나 포인트 사용이 일어나면 되돌릴 수 없습니다 · 승인하면 %s 저장된 %s를 넣고, %d분 동안 %s 의 비밀번호 입력과 그 뒤의 요청이 통과합니다",
+			who, name, int(holder.Window.Minutes()), siteOf(p.Host)),
 	}
 }
 
