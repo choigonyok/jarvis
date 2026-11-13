@@ -60,6 +60,35 @@ agent 에 남아 있습니다.
 | DELETE | `/events/{id}` | 삭제 |
 | GET | `/events/{id}/conflicts?buffer=30m` | 겹치는 확정 일정 |
 
+`PUT /events` 와 `PATCH /events/{id}` 는 화면의 일정 양식이 고른 것만 받는다: `repeat`(none·daily·weekly·biweekly·monthly·yearly)
+와 `reminder`(시작 몇 분 전, -1 은 끔)가 없으면 반복과 알림을 건드리지 않는다. 대화와 카드가 보내는 일정은 둘을 보내지 않으니
+새 일정에는 반복도 알림도 없고, 고친 일정은 있던 그대로다. 읽을 때 `reminder` 는 걸린 알림(분)이다.
+
+## 커플 공간의 나머지
+
+uniple 의 홈은 캘린더 말고도 블록이 있다: 디데이, 버킷리스트, 습관 체크, 데이트 지도, 자유 블록, 그리고 사진·일기·가계부 같은
+것들. 같은 세션(회전하는 토큰은 이 프로세스 하나가 쥔다)으로 앱이 읽는 표를 앱처럼 읽고, 앱이 쓰는 칸만 쓴다. 표와 칸은 앱
+번들의 블록 정의(`itemTable`·`itemSelectColumns`)와 쓰기 코드에서 읽었다. uniple 이 아닐 때(`CALENDAR_BACKEND=postgres`)는 404,
+손님 토큰은 403 이다(세션이 운영자 것이라 손님의 체크가 운영자 이름으로 들어가게 된다).
+
+| 메서드 | 경로 | 하는 일 |
+|---|---|---|
+| GET | `/couple` | 두 사람(별명), 만난 날(`spaces.anniversary_date`), 주의 첫날, 홈의 블록과 그 항목. 지도는 지역마다 대표 사진 하나 |
+| GET | `/couple/blocks/{id}` | 블록 하나. 지도는 사진 전부와 기록 |
+| GET | `/couple/blocks/{id}/checks?from=&to=` | 습관 블록의 두 사람 체크 |
+| GET | `/couple/news?limit=` | 공간에서 한 일(앱의 알림 목록), 그 항목의 지금 모습과 함께 |
+| GET | `/couple/photos?from=&to=` · `/couple/cover?date=` | 캘린더 날의 사진, 캘린더 카드가 보이는 사진 |
+| GET | `/couple/media/{asset}?size=thumb\|display` | 사진 한 장(공개 저장소에서 받아 그대로, 브라우저 캐시 7일) |
+| POST · PATCH | `/couple/blocks` · `/couple/blocks/{id}` | 블록 추가(버킷·습관·자유, 앱과 같은 개수 한도) · 이름 바꾸기 |
+| POST · PATCH · DELETE | `/couple/blocks/{id}/dday[/{item}]` | 기념일. 바꾸면 `sync_dday_calendar_events` 로 캘린더의 기념일 일정도 다시 쓴다. 만난 날은 앱에서 |
+| POST · PATCH · DELETE | `/couple/blocks/{id}/bucket[/{item}]` | 버킷(맨 뒤에), 이룸·이름, 지우기 |
+| POST · DELETE | `/couple/blocks/{id}/free[/{item}]` | 자유 블록의 기록 |
+| POST · PATCH · DELETE | `/couple/blocks/{id}/checks[/{item}]` | 내 체크(오지 않은 날은 거절, 같은 날 두 번은 하나), 메모, 취소 - 내 것만 |
+| POST · PATCH · DELETE | `/couple/blocks/{id}/records[/{item}]` | 데이트 지도의 기록. 서울의 구는 앱처럼 `S01`~`S25` 로 쓰고 다섯 자리로 읽는다. 사진이 붙은 기록은 지우지 않는다(사진 파일 정리는 앱이 한다) |
+
+사진 올리기는 하지 않는다: 앱은 자기 서버(`/api/media/uploads`)에서 서명한 주소로 올리고 RPC 로 마무리하는데, 그 서버는 쿠키
+세션으로만 열린다. 쓰기는 모두 mind 의 문(`/api/couple/...`)과 손(output 의 허용 목록)을 거쳐 온다.
+
 ## 벽시계가 진실입니다
 
 `date` + `start`/`end` 를 문자열로 저장합니다. 한 시간대에서 쓰는 개인

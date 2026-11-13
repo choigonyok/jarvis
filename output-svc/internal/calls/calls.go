@@ -45,7 +45,15 @@ type route struct {
 // routes is the fixed API: what may be written, by service. A write that is
 // not here is refused, whoever sent it (입구는 관대, 출구는 보수).
 var routes = map[string][]route{
-	"calendar": {{http.MethodPut, regexp.MustCompile(`^/events$`)}, {http.MethodPatch, regexp.MustCompile(`^/events/[^/?]+$`)}, {http.MethodDelete, regexp.MustCompile(`^/events/[^/?]+$`)}},
+	"calendar": {
+		{http.MethodPut, regexp.MustCompile(`^/events$`)}, {http.MethodPatch, regexp.MustCompile(`^/events/[^/?]+$`)}, {http.MethodDelete, regexp.MustCompile(`^/events/[^/?]+$`)},
+		// The rest of the couple's space: a block, and what is on one.
+		{http.MethodPost, regexp.MustCompile(`^/couple/blocks$`)},
+		{http.MethodPatch, regexp.MustCompile(`^/couple/blocks/[^/?]+$`)},
+		{http.MethodPost, regexp.MustCompile(`^/couple/blocks/[^/?]+/(dday|bucket|free|checks|records)$`)},
+		{http.MethodPatch, regexp.MustCompile(`^/couple/blocks/[^/?]+/(dday|bucket|checks|records)/[^/?]+$`)},
+		{http.MethodDelete, regexp.MustCompile(`^/couple/blocks/[^/?]+/(dday|bucket|free|checks|records)/[^/?]+$`)},
+	},
 	"assets":   {{http.MethodPost, regexp.MustCompile(`^/orders$`)}, {http.MethodPost, regexp.MustCompile(`^/orders/rebalance$`)}},
 	"immich":   {{http.MethodPost, regexp.MustCompile(`^/api/albums$`)}, {http.MethodDelete, regexp.MustCompile(`^/api/albums/[^/?]+$`)}},
 }

@@ -51,6 +51,7 @@ func main() {
 	// CALENDAR_BACKEND=postgres 는 되돌릴 때를 위해 남겨 둔다. Postgres 는
 	// 어느 쪽이든 필요하다 - uniple 의 회전하는 로그인 토큰을 여기에 적어 둔다.
 	var backend api.Backend = st
+	var couple api.Couple
 	if svc.Env("CALENDAR_BACKEND", "uniple") == "uniple" {
 		u, err := uniple.Open(ctx, dsn, uniple.Config{
 			BaseURL:     svc.Env("UNIPLE_URL", "https://api.uniple.app"),
@@ -63,7 +64,7 @@ func main() {
 			os.Exit(1)
 		}
 		defer u.Close()
-		backend = u
+		backend, couple = u, u
 		log.Info("일정 저장소: uniple")
 	}
 
@@ -79,7 +80,7 @@ func main() {
 
 	if svc.Serve(ctx, svc.Server{
 		Name: "calendar-svc", Addr: svc.Env("LISTEN_ADDR", ":8093"), Log: log,
-		Handler: api.New(backend, token, os.Getenv("API_GUEST_TOKEN"), log, notify.New(os.Getenv("NOTIFY_URL"), dsn, token, log)).WithLoops(loops).Handler(),
+		Handler: api.New(backend, token, os.Getenv("API_GUEST_TOKEN"), log, notify.New(os.Getenv("NOTIFY_URL"), dsn, token, log)).WithLoops(loops).WithCouple(couple).Handler(),
 		Read:    15 * time.Second,
 		Write:   30 * time.Second,
 	}) != nil {

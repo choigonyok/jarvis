@@ -46,6 +46,8 @@ type Server struct {
 	log        *slog.Logger
 	notify     *notify.Client
 	loops      *health.Loops
+	// couple is the rest of the couple's space (couple.go). Nil off uniple.
+	couple Couple
 }
 
 // WithLoops shows the service's background reads on /health.
@@ -71,6 +73,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /events/{id}", s.auth(s.remove))
 	// 겹치는 일정. 막지 않고 알려주는 것이 이 경로의 존재 이유다.
 	mux.HandleFunc("GET /events/{id}/conflicts", s.auth(s.conflicts))
+	// 커플 공간의 나머지(디데이·버킷·습관·지도·소식·사진). uniple 일 때만 있다.
+	s.coupleRoutes(mux)
 	return mux
 }
 

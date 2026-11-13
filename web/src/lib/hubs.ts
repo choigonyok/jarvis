@@ -10,7 +10,7 @@ import type { Role } from "@/lib/role";
 /** One screen: where it is, and the word it goes by. */
 export type Tab = { href: string; label: string };
 
-export type HubId = "talk" | "today" | "money" | "life" | "more" | "workout" | "location" | "edit";
+export type HubId = "talk" | "today" | "plan" | "money" | "life" | "more" | "workout" | "location" | "edit";
 
 /** One place on the phone's bar, and the screens that live there. */
 export type Hub = {
@@ -22,11 +22,12 @@ export type Hub = {
 };
 
 /**
- * Sixteen screens are more than a thumb bar can hold - five is the limit before
- * a slot is too narrow for its word. So the bar names five places, by what you
- * came for, and a place's screens sit in the header where the name was: going
- * between them costs no row, and each stays one short page. 더보기 is the screens
- * you reach for only when something is up.
+ * Seventeen screens are more than a thumb bar can hold - six is the limit before
+ * a slot is too narrow for its word (two-syllable words, 320px). So the bar
+ * names six places, by what you came for, and a place's screens sit in the
+ * header where the name was: going between them costs no row, and each stays
+ * one short page. 일정 is the two of us - the couple's space and its calendar;
+ * 더보기 is the screens you reach for only when something is up.
  */
 export const OWNER_HUBS: Hub[] = [
   { id: "talk", label: "대화", screens: [{ href: "/", label: "대화" }] },
@@ -34,12 +35,19 @@ export const OWNER_HUBS: Hub[] = [
     id: "today",
     label: "오늘",
     screens: [
-      { href: "/calendar", label: "일정" },
       { href: "/jobs", label: "작업" },
       { href: "/goals", label: "목표" },
       { href: "/workout", label: "운동" },
       { href: "/transit", label: "출발" },
       { href: "/record", label: "기록" },
+    ],
+  },
+  {
+    id: "plan",
+    label: "일정",
+    screens: [
+      { href: "/couple", label: "우리" },
+      { href: "/calendar", label: "캘린더" },
     ],
   },
   {
@@ -97,9 +105,14 @@ export const GUEST_HUBS: Hub[] = [
 /** The places a role is shown. The middleware is what actually refuses the rest. */
 export const hubsFor = (role: Role) => (role === "guest" ? GUEST_HUBS : OWNER_HUBS);
 
+/** The screen a page is one of: a block of the couple's space is 우리's. */
+export const screenOf = (pathname: string) => (pathname.startsWith("/couple/") ? "/couple" : pathname);
+
 /** The place a screen belongs to. 편집 is reached from 사진 and is no screen of its own there. */
-export const hubOf = (hubs: Hub[], pathname: string) =>
-  hubs.find((h) => h.screens.some((s) => s.href === pathname)) ?? (pathname === "/edit" ? hubs.find((h) => h.id === "life") : undefined);
+export const hubOf = (hubs: Hub[], pathname: string) => {
+  const screen = screenOf(pathname);
+  return hubs.find((h) => h.screens.some((s) => s.href === screen)) ?? (pathname === "/edit" ? hubs.find((h) => h.id === "life") : undefined);
+};
 
 /**
  * Where a waiting decision is announced: the conversation, where the card

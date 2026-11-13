@@ -209,6 +209,9 @@ function mindRoute(method: string, path: string): boolean {
   if (path.startsWith("api/jobs/")) return jobsRoute(method, path.slice("api/jobs/".length));
   if (path.startsWith("api/spending/")) return spendingRoute(method, path.slice("api/spending/".length));
   if (path === "api/goals" || path.startsWith("api/goals/")) return goalsRoute(method, path.slice("api/goals".length));
+  if (path.startsWith("api/couple/")) return coupleWrite(method, path.slice("api/couple/".length));
+  // A new entry a person filled in on the calendar's form.
+  if (path === "api/calendar") return method === "POST";
   if (method === "GET") {
     return (
       /^api\/(notes|places|things|meals|reminders|checklists|attention)$/.test(path) ||
@@ -224,6 +227,25 @@ function mindRoute(method: string, path: string): boolean {
   }
   if (method !== "PATCH" && method !== "DELETE") return false;
   return /^api\/checklists\/[A-Za-z0-9_-]+$/.test(path) || /^api\/calendar\/[^/]+$/.test(path);
+}
+
+/**
+ * What the 일정 screens change in the rest of the couple's space (uniple): a
+ * block, and what is on one - an anniversary, a wish, a note, a habit's day, a
+ * date on the map. `rest` follows api/couple/. The same list as the hand's
+ * (output-svc calls.go), which refuses anything else again.
+ */
+function coupleWrite(method: string, rest: string): boolean {
+  const id = "[A-Za-z0-9_-]+";
+  switch (method) {
+    case "POST":
+      return rest === "blocks" || new RegExp(`^blocks/${id}/(dday|bucket|free|checks|records)$`).test(rest);
+    case "PATCH":
+      return new RegExp(`^blocks/${id}$`).test(rest) || new RegExp(`^blocks/${id}/(dday|bucket|checks|records)/${id}$`).test(rest);
+    case "DELETE":
+      return new RegExp(`^blocks/${id}/(dday|bucket|free|checks|records)/${id}$`).test(rest);
+  }
+  return false;
 }
 
 /**
@@ -245,9 +267,20 @@ function goalsRoute(method: string, rest: string): boolean {
   return false;
 }
 
-/** What the 캘린더 tab reads from the adapter. A change goes in at the way in like any other (mindRoute). */
+/**
+ * What the 일정 screens read from the adapter: the calendar, and the rest of
+ * the couple's space - the blocks, one block, a habit's days, what the two did,
+ * the photos on calendar days and a photo itself. A change goes in at the way
+ * in like any other (mindRoute).
+ */
 function calendarRoute(method: string, path: string): boolean {
-  return method === "GET" && path === "events";
+  if (method !== "GET") return false;
+  const id = "[A-Za-z0-9_-]+";
+  return (
+    ["events", "couple", "couple/news", "couple/photos", "couple/cover"].includes(path) ||
+    new RegExp(`^couple/blocks/${id}(/checks)?$`).test(path) ||
+    new RegExp(`^couple/media/${id}$`).test(path)
+  );
 }
 
 /**

@@ -111,8 +111,8 @@ export function useCalendar(cursor: Cursor) {
     async (event: Partial<CalendarEvent>) => {
       setError(null);
       try {
-        // Only what is already on the calendar: a new entry comes through the
-        // conversation and its card. Encoded: see remove.
+        // Only what is already on the calendar: a new one is create's.
+        // Encoded: see remove.
         const res = await fetch(`${CALENDAR}/${encodeURIComponent(event.id ?? "")}`, {
           method: "PATCH",
           headers: { "content-type": "application/json" },
@@ -130,6 +130,32 @@ export function useCalendar(cursor: Cursor) {
       }
     },
     [],
+  );
+
+  /**
+   * A new entry a person filled in, in at the way in. Resolves to why it did
+   * not go, or null; the stream brings it onto the month, and a read makes sure.
+   */
+  const create = useCallback(
+    async (entry: Partial<CalendarEvent> & { repeat?: string; reminder?: number }): Promise<string | null> => {
+      try {
+        const res = await fetch(CALENDAR, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ...entry, id: undefined }),
+        });
+        if (res.status === 202) return "받았지만 아직 반영되지 않았어요. 잠시 뒤 다시 보세요.";
+        if (!res.ok) {
+          const body = (await res.json().catch(() => null)) as { error?: string } | null;
+          return body?.error ?? "일정을 저장하지 못했어요.";
+        }
+        void hydrate();
+        return null;
+      } catch {
+        return "에이전트에 연결하지 못했어요.";
+      }
+    },
+    [hydrate],
   );
 
   /** True when the entry is gone. */
@@ -190,6 +216,7 @@ export function useCalendar(cursor: Cursor) {
     /** Reads the month again, by hand - under "불러오지 못했어요". */
     reload: hydrate,
     save,
+    create,
     remove,
     decide,
   };

@@ -61,8 +61,10 @@
 //	POST /api/checklists/{id}/items/{item}  {done, by?} a tap on the card
 //	DELETE /api/checklists/{id}       close it
 //	POST /api/checklists/{id}/show    {lead?} ask the agent to put it in the conversation now (checklist.shown)
-//	PATCH /api/calendar/{id}          an entry as a person left it on the screen (calendar.go)
+//	POST /api/calendar                an entry a person filled in on the calendar's form (calendar.go)
+//	PATCH /api/calendar/{id}          an entry as a person left it on the screen
 //	DELETE /api/calendar/{id}         an entry a person took off the screen
+//	POST|PATCH|DELETE /api/couple/... the couple's space in uniple (a block, an anniversary, a wish, a habit's day, a date on the map), to the calendar's adapter as it came
 //
 // /api and the console need a token unless open: in the stack the port is
 // bound to the host's loopback, and a laptop run has nothing to protect. The
@@ -377,8 +379,12 @@ func (s *Server) Handler() http.Handler {
 	write("POST /api/checklists/{id}/items/{item}", s.person, s.checkItem)
 	write("DELETE /api/checklists/{id}", s.person, s.closeChecklist)
 	write("POST /api/checklists/{id}/show", s.person, s.showChecklist)
+	write("POST /api/calendar", owner, s.addEntry)
 	write("PATCH /api/calendar/{id}", s.person, s.editEntry)
 	write("DELETE /api/calendar/{id}", s.person, s.removeEntry)
+	write("POST /api/couple/{path...}", owner, s.coupleWrite)
+	write("PATCH /api/couple/{path...}", owner, s.coupleWrite)
+	write("DELETE /api/couple/{path...}", owner, s.coupleWrite)
 	mux.HandleFunc("GET /api/commands/{key}", s.person(s.commandResult))
 	return mux
 }

@@ -48,7 +48,22 @@ type Event struct {
 	// Recurrence is daily | weekly | biweekly | monthly | yearly on a series.
 	// An occurrence of one carries an id of the form "<series id>#<date>".
 	Recurrence string `json:"recurrence,omitempty"`
+
+	// Repeat is what a person picked for how it repeats, sent only by the
+	// screen that offers it: absent leaves the entry's repeat as it is, ""
+	// or "none" stops it, one of the Recurrence values sets it. Other
+	// writers send whole entries without it, and a series stays a series.
+	Repeat *string `json:"repeat,omitempty"`
+	// Reminder is minutes before the start that the app reminds both phones,
+	// read back as it is set. On a write absent leaves it, -1 takes it off.
+	Reminder *int `json:"reminder,omitempty"`
 }
+
+// Repeats is the repeats an entry may have.
+var Repeats = []string{"daily", "weekly", "biweekly", "monthly", "yearly"}
+
+// ReminderMax is how early a reminder may be: four weeks.
+const ReminderMax = 4 * 7 * 24 * 60
 
 const (
 	SourceAgent   = "jarvis"
@@ -141,6 +156,24 @@ func (e *Event) Validate() error {
 	}
 	if e.Source != SourceAgent && e.Source != SourceHuman {
 		e.Source = SourceHuman
+	}
+	if e.Repeat != nil {
+		switch r := strings.TrimSpace(*e.Repeat); r {
+		case "", "none":
+			e.Repeat = &r
+		default:
+			known := false
+			for _, v := range Repeats {
+				known = known || v == r
+			}
+			if !known {
+				return invalid("repeat 는 none, daily, weekly, biweekly, monthly, yearly 중 하나여야 합니다: %q", r)
+			}
+			e.Repeat = &r
+		}
+	}
+	if e.Reminder != nil && (*e.Reminder < -1 || *e.Reminder > ReminderMax) {
+		return invalid("알림은 시작 4주 전까지예요: %d분", *e.Reminder)
 	}
 	return nil
 }

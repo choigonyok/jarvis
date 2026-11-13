@@ -44,7 +44,7 @@ function TabBarView({
 
   const hubs = hubsFor(role);
   // Five places have room for their word.
-  const worded = hubs.length <= 5;
+  const worded = hubs.length <= 6;
   const here = hubOf(hubs, pathname);
   const at = here ? hubs.indexOf(here) : -1;
   const slots = hubs.length;

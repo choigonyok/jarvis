@@ -355,6 +355,54 @@ func TestAScreenEditGoesByTheHand(t *testing.T) {
 	}
 }
 
+// What a person fills in on the calendar's form and what they do on the
+// couple's blocks go to the same adapter by the hand: a new entry without an
+// id, a block's change by its own path. The guest has neither yet.
+func TestAScreenAdditionGoesByTheHand(t *testing.T) {
+	s, h, _ := commandServer(t)
+	s.SetGuestToken("guest")
+	stream := &fakeStream{s: s, done: true}
+	s.SetStream(stream)
+	var asked []string
+	s.SetCalendar(CalendarDoor{URL: "http://calendar:8093", Token: "cal", HTTP: &http.Client{Transport: carried(func(r *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(r.Body)
+		asked = append(asked, strings.TrimSpace(r.Method+" "+r.URL.RequestURI()+" "+string(body)))
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"id":"n1","title":"합주"}`))}, nil
+	})}})
+	do := func(token, method, path, body string) int {
+		t.Helper()
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if code := do("tok", http.MethodPost, "/api/calendar", `{"id":"sneaky","title":"합주","date":"2026-11-24"}`); code != http.StatusOK {
+		t.Fatal(code)
+	}
+	if code := do("tok", http.MethodPost, "/api/couple/blocks/b1/checks", `{"date":"2026-11-13"}`); code != http.StatusOK {
+		t.Fatal(code)
+	}
+	if code := do("tok", http.MethodDelete, "/api/couple/blocks/b1/bucket/i9", ""); code != http.StatusOK {
+		t.Fatal(code)
+	}
+	if code := do("guest", http.MethodPost, "/api/couple/blocks/b1/checks", `{"date":"2026-11-13"}`); code == http.StatusOK {
+		t.Fatal("손님은 아직 없습니다")
+	}
+	want := []string{
+		`PUT /events {"date":"2026-11-24","title":"합주"}`,
+		`POST /couple/blocks/b1/checks {"date":"2026-11-13"}`,
+		`DELETE /couple/blocks/b1/bucket/i9`,
+	}
+	if strings.Join(asked, "|") != strings.Join(want, "|") {
+		t.Fatalf("%q", asked)
+	}
+	// Only the calendar entry is the calendar's news; the blocks' screens read again themselves.
+	if len(stream.entries) != 1 || !strings.HasPrefix(stream.entries[0], "upsert:false:") {
+		t.Fatalf("화면에 알린 것: %v", stream.entries)
+	}
+}
+
 // The inbox's one tap on a notice comes by the stream like a card's answer,
 // and is kept on the notice; a card is not answered this way.
 func TestANoticeIsHeardByTheStream(t *testing.T) {

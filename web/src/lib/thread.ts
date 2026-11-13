@@ -152,6 +152,8 @@ export type CalendarEvent = {
   owner?: "me" | "partner" | "shared";
   /** Set on a repeating entry; its days carry ids "<series>#<date>". */
   recurrence?: string;
+  /** Minutes before the start the app reminds both phones; absent for none. */
+  reminder?: number;
 };
 
 /** True when the entry is on `date`, counting every day of a multi-day one. */

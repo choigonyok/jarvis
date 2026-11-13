@@ -12,7 +12,7 @@ import { useRole } from "@/components/shell/role";
 import { useSignOut } from "@/components/shell/sign-out";
 import { UsageBars } from "@/components/shell/usage-bars";
 import { focusSection, forgetFocus, onFocusRequest } from "@/lib/focus";
-import { hubOf, hubsFor, pendingHome, type Tab } from "@/lib/hubs";
+import { hubOf, hubsFor, pendingHome, screenOf, type Tab } from "@/lib/hubs";
 import { useOnline } from "@/lib/online";
 import { requestResume } from "@/lib/resume";
 import type { Connection } from "@/lib/thread";
@@ -314,7 +314,7 @@ function Strip({
   wide?: boolean;
   className?: string;
 }) {
-  const pathname = usePathname();
+  const pathname = screenOf(usePathname());
   const router = useRouter();
   const [chosen, setChosen] = useState(pathname);
   const [, startNavigation] = useTransition();

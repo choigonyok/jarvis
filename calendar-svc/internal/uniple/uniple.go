@@ -63,6 +63,10 @@ type Client struct {
 	space     string
 	// partner is the other person's user id, learned from their own entries.
 	partner string
+
+	// assets remembers where each photo's sizes are (media.go).
+	assetsOnce sync.Once
+	assets     *assetCache
 }
 
 func Open(ctx context.Context, dsn string, cfg Config) (*Client, error) {
@@ -300,7 +304,7 @@ func (c *Client) calendar(ctx context.Context) (block, space, me string, err err
 
 const columns = "id,title,start_date,end_date,start_time,end_time,memo,created_by,owner_user_id," +
 	"recurrence,recurrence_from,recurrence_until,recurrence_parent_id,recurrence_override_date," +
-	"recurrence_exdates,updated_at"
+	"recurrence_exdates,reminder_minutes,updated_at"
 
 type row struct {
 	ID                     string   `json:"id"`
@@ -318,6 +322,7 @@ type row struct {
 	RecurrenceParentID     *string  `json:"recurrence_parent_id"`
 	RecurrenceOverrideDate *string  `json:"recurrence_override_date"`
 	RecurrenceExdates      []string `json:"recurrence_exdates"`
+	ReminderMinutes        *int     `json:"reminder_minutes"`
 	UpdatedAt              string   `json:"updated_at"`
 }
 
@@ -368,6 +373,7 @@ func (r row) toEvent(me string) event.Event {
 		Source:     event.SourceHuman,
 		UpdatedAt:  r.UpdatedAt,
 		Recurrence: str(r.Recurrence),
+		Reminder:   r.ReminderMinutes,
 	}
 	if end := str(r.EndDate); end != "" && end != r.StartDate {
 		e.EndDate = end
@@ -495,6 +501,18 @@ func (c *Client) Put(ctx context.Context, e event.Event) (event.Event, error) {
 		"end_time":   opt(withSeconds(e.End)),
 		"memo":       opt(e.Memo),
 	}
+	// How it repeats and when it reminds, only when the writer chose: the
+	// screen's form does, the agent and the cards send whole entries without.
+	if e.Repeat != nil {
+		fields["recurrence"] = opt(strings.TrimPrefix(*e.Repeat, "none"))
+	}
+	if e.Reminder != nil {
+		if *e.Reminder < 0 {
+			fields["reminder_minutes"], fields["reminder_tz"] = nil, nil
+		} else {
+			fields["reminder_minutes"], fields["reminder_tz"] = *e.Reminder, "Asia/Seoul"
+		}
+	}
 
 	var saved []row
 	if e.ID == "" {
@@ -515,11 +533,16 @@ func (c *Client) Put(ctx context.Context, e event.Event) (event.Event, error) {
 		fields["space_id"] = space
 		fields["created_by"] = me
 		fields["owner_user_id"] = owner
-		fields["recurrence"] = nil
-		// 알림은 걸지 않는다. 앱에서 고르는 값이고, 여기서 정하면 상대
-		// 휴대폰에 예상하지 못한 푸시가 간다.
-		fields["reminder_minutes"] = nil
-		fields["reminder_tz"] = nil
+		// 반복과 알림은 사람이 화면에서 고른 것만 건다. 대화와 카드로 들어오는
+		// 일정은 고르지 않았으니 없다 - 알림을 여기서 정하면 상대 휴대폰에
+		// 예상하지 못한 푸시가 간다.
+		if e.Repeat == nil {
+			fields["recurrence"] = nil
+		}
+		if e.Reminder == nil {
+			fields["reminder_minutes"] = nil
+			fields["reminder_tz"] = nil
+		}
 		err = c.rest(ctx, http.MethodPost, "calendar_events?select="+columns, fields, &saved)
 		if err != nil {
 			return event.Event{}, err

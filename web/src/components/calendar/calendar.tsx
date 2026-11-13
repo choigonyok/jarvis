@@ -2,9 +2,13 @@
 
 import { useKept } from "@/lib/keep";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import { EntrySheet, type Entry } from "@/components/calendar/entry-sheet";
 import { EventRow, GhostRow } from "@/components/calendar/event-row";
 import { EventSheet } from "@/components/calendar/event-sheet";
+import { useDayPhotos } from "@/components/couple/use-space";
+import { useRole } from "@/components/shell/role";
+import { Lightbox } from "@/components/ui/lightbox";
 import { type DayMark } from "@/components/calendar/month-grid";
 import { MonthSwipe, type MonthSwipeHandle } from "@/components/calendar/month-swipe";
 import { OWNER_LABEL, OWNERS, OwnerDot, ownerOf, type Owner } from "@/components/calendar/owner";
@@ -14,9 +18,11 @@ import { TabBar } from "@/components/shell/tab-bar";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { useUndo } from "@/components/shell/undo";
 import { Button } from "@/components/ui/button";
+import { between, photoSrc } from "@/lib/couple";
 import {
   addDays,
   cursorOf,
+  gridBounds,
   isoDate,
   korDate,
   monthCells,
@@ -58,8 +64,17 @@ export function Calendar() {
   // narrows the month to one person's days and back.
   const [hidden, setHidden] = useState<ReadonlySet<Owner>>(new Set());
 
-  const { events: fetched, proposed, waiting, pendingCount, connection, error, loaded, reload, save, remove, decide } =
+  const { events: fetched, proposed, waiting, pendingCount, connection, error, loaded, reload, save, create, remove, decide } =
     useCalendar(cursor);
+
+  // The operator writes entries here: a new one on the form, one of theirs
+  // changed on the same form (entry-sheet.tsx). The guest's console keeps the
+  // short edit sheet - the couple's space opens only on the operator's side.
+  const owner = useRole() === "owner";
+  const [entry, setEntry] = useState<{ event: CalendarEvent | null; day: string } | null>(null);
+  const bounds = useMemo(() => gridBounds(cursor), [cursor]);
+  const photos = useDayPhotos(bounds.from, bounds.to, owner);
+  const [viewing, setViewing] = useState<number | null>(null);
 
   // One of your own entries being changed in place (event-sheet.tsx). The
   // partner's are not: changing someone else's day is a conversation. Nor
@@ -162,6 +177,7 @@ export function Calendar() {
   }, [events, allEvents, creates, attached]);
 
   const dayEvents = events.filter((e) => covers(e, selected));
+  const dayPhotos = owner ? (photos.data ?? []).filter((p) => p.date === selected) : [];
   const dayCreates = creates.filter((g) => g.preview.date === selected);
 
   // Anything waiting outside the six weeks on screen would otherwise be
@@ -202,6 +218,17 @@ export function Calendar() {
                 {cursor.year}년 {cursor.month + 1}월
               </h2>
               <div className="flex items-center gap-1">
+                {owner ? (
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => setEntry({ event: null, day: selected })}
+                    aria-label="일정 추가"
+                    className="tap text-dim hover:text-foreground mouse:size-7 mouse:min-h-0 mouse:min-w-0"
+                  >
+                    <Plus aria-hidden className="size-5 mouse:size-4" />
+                  </Button>
+                ) : null}
                 {sameMonth(today, cursor) ? null : (
                   <Button
                     variant="ghost"
@@ -300,12 +327,32 @@ export function Calendar() {
               {selected === today ? <span className="text-faint"> · 오늘</span> : null}
             </h3>
 
+            {dayPhotos.length ? (
+              <ul className="scrollbar-none mb-3 flex gap-2 overflow-x-auto px-2" aria-label="이 날의 사진">
+                {dayPhotos.map((p, i) => (
+                  <li key={p.id} className="shrink-0">
+                    <button type="button" onClick={() => setViewing(i)} className="block overflow-hidden rounded-xl focus-ring" aria-label={`사진 ${i + 1}`}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={photoSrc(p.asset)} alt="" loading="lazy" className="size-20 object-cover" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+
             {dayEvents.length === 0 && dayCreates.length === 0 ? (
-              <p className="px-2 text-ui leading-relaxed text-faint">
-                {/* The calendar is written by the assistant now, so an empty
-                    day is an instruction rather than a dead end. */}
-                비어 있는 날이에요. 일정은 대화로 Jarvis에게 맡기세요.
-              </p>
+              owner ? (
+                // An empty day is a place to write one, here or in the conversation.
+                <div className="px-2">
+                  <p className="text-ui leading-relaxed text-faint">비어 있는 날이에요.</p>
+                  <Button variant="quiet" size="touch-sm" onClick={() => setEntry({ event: null, day: selected })} className="-ml-2 gap-1.5">
+                    <Plus aria-hidden className="size-4" />
+                    일정 추가
+                  </Button>
+                </div>
+              ) : (
+                <p className="px-2 text-ui leading-relaxed text-faint">비어 있는 날이에요. 일정은 대화로 Jarvis에게 맡기세요.</p>
+              )
             ) : null}
 
             <div className="space-y-1.5">
@@ -318,7 +365,7 @@ export function Calendar() {
                     <EventRow
                       event={event}
                       pending={ghost}
-                      onEdit={editable(event) && !ghost ? () => setEditing(event) : undefined}
+                      onEdit={editable(event) && !ghost ? () => (owner ? setEntry({ event, day: event.date }) : setEditing(event)) : undefined}
                       onDelete={() => erase(event)}
                     />
                     {ghost ? (
@@ -351,6 +398,38 @@ export function Calendar() {
         </div>
 
       </main>
+
+      <EntrySheet
+        open={entry !== null}
+        event={entry?.event ?? null}
+        day={entry?.day ?? selected}
+        onOpenChange={(open) => {
+          if (!open) setEntry(null);
+        }}
+        onSave={async (next: Entry) => {
+          if (next.id) return (await save(next)) ? null : "저장하지 못했어요. 잠시 뒤 다시 해 주세요.";
+          const failed = await create(next);
+          if (!failed) setSelected(next.date ?? selected);
+          return failed;
+        }}
+        onCopy={async (next, days) => {
+          // Each day gets the entry whole, its length kept.
+          const span = next.endDate && next.date ? between(next.date, next.endDate) : 0;
+          for (const day of days) {
+            const failed = await create({ ...next, date: day, endDate: span ? addDays(day, span) : undefined });
+            if (failed) return failed;
+          }
+          return null;
+        }}
+        onDelete={(event) => {
+          setEntry(null);
+          erase(event);
+        }}
+      />
+
+      {viewing !== null && dayPhotos.length ? (
+        <Lightbox items={dayPhotos.map((p) => ({ src: photoSrc(p.asset, "display"), title: korDate(p.date) }))} start={viewing} onClose={() => setViewing(null)} />
+      ) : null}
 
       <EventSheet
         event={editing}
