@@ -16,4 +16,18 @@ export const SAY = {
   couldNotDelete: "지우지 못했어요.",
   /** The agent, or what stands behind it, out of reach. */
   unreachable: "에이전트에 연결하지 못했어요.",
+  /** A request that got no answer at all: no network, or the line dropped on the way. */
+  offline: "연결하지 못했어요. 인터넷 연결을 확인해 주세요.",
 } as const;
+
+/**
+ * What to say of a request that failed: its own words when it has them. When
+ * fetch itself gave up - offline, the line dropped - it throws a TypeError
+ * whose message is the browser's English ("Load failed" in Safari, "Failed to
+ * fetch" in Chrome), and the screens printed that in red as it was.
+ */
+export function failureText(err: unknown, fallback: string): string {
+  if (err instanceof TypeError) return SAY.offline;
+  if (err instanceof Error && err.message) return err.message;
+  return fallback;
+}

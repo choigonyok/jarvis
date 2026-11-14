@@ -4,6 +4,16 @@ import * as React from "react"
 import { cn } from "@/lib/utils"
 import { Dialog as SheetPrimitive } from "radix-ui"
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { XIcon } from "lucide-react"
 
@@ -51,9 +61,10 @@ function SheetOverlay({
  * at a time, where it went to the screen before or, in a home-screen app, out
  * of the app. Closed any other way, the entry it added goes
  * too; closed by going to another screen from inside it, the entry is left to
- * that screen's history.
+ * that screen's history. A sheet holding words not yet saved (held) does not
+ * go back: its entry is put back and it asks first.
  */
-function useSheetHistory(close: () => void) {
+function useSheetHistory(close: () => void, held: React.RefObject<boolean>, ask: () => void) {
   React.useEffect(() => {
     let depth = 0
     let path = ""
@@ -61,6 +72,11 @@ function useSheetHistory(close: () => void) {
     const onPop = () => {
       if (!depth || popped) return
       if ((Number(window.history.state?.jarvisSheet) || 0) < depth) {
+        if (held.current) {
+          window.history.pushState({ ...window.history.state, jarvisSheet: depth }, "")
+          ask()
+          return
+        }
         popped = true
         close()
       }
@@ -80,7 +96,7 @@ function useSheetHistory(close: () => void) {
         window.history.back()
       }
     }
-  }, [close])
+  }, [close, held, ask])
 }
 
 /**
@@ -89,8 +105,8 @@ function useSheetHistory(close: () => void) {
  * is drawn for a closed sheet too, and three closed sheets of a screen had
  * pushed three entries as it opened.
  */
-function SheetHistory({ close }: { close: () => void }) {
-  useSheetHistory(close)
+function SheetHistory({ close, held, ask }: { close: () => void; held: React.RefObject<boolean>; ask: () => void }) {
+  useSheetHistory(close, held, ask)
   return null
 }
 
@@ -115,14 +131,31 @@ function SheetContent({
   showCloseButton = true,
   style,
   onInteractOutside,
+  onEscapeKeyDown,
+  guard = false,
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Content> & {
   side?: "top" | "right" | "bottom" | "left"
   showCloseButton?: boolean
+  /**
+   * Words typed into it and not saved yet. Every way out but saving - a tap
+   * outside, Esc, a pull down, going back, the ✕ - then asks before it goes:
+   * the sheets are made to close at a touch, and a form in one lost a long
+   * memo or a page of steps to a thumb that only meant to scroll.
+   */
+  guard?: boolean
 }) {
   const content = React.useRef<HTMLDivElement>(null)
   const closer = React.useRef<HTMLButtonElement>(null)
   const close = React.useCallback(() => closer.current?.click(), [])
+  // Read where a way out is taken, which is not where the sheet draws.
+  const held = React.useRef(guard)
+  React.useLayoutEffect(() => {
+    held.current = guard
+  })
+  const [asking, setAsking] = React.useState(false)
+  const ask = React.useCallback(() => setAsking(true), [])
+  const leave = React.useCallback(() => (held.current ? setAsking(true) : close()), [close])
 
   // Pulled down by its top - the handle and the title - a bottom sheet goes,
   // as a phone's own sheets do: the ✕ sits in the corner a thumb reaches
@@ -156,7 +189,12 @@ function SheetContent({
       if (!d || !el) return
       const speed = d.dy / Math.max(1, e.timeStamp - d.t)
       el.style.transition = "transform 180ms ease-out, opacity 180ms ease-out"
-      if (d.dy > DISMISS_PX || (d.dy > 32 && speed > DISMISS_SPEED)) {
+      const away = d.dy > DISMISS_PX || (d.dy > 32 && speed > DISMISS_SPEED)
+      if (away && held.current) {
+        // Back up into place, and the question where the closing would be.
+        el.style.transform = ""
+        ask()
+      } else if (away) {
         el.style.transform = "translateY(100%)"
         el.style.opacity = "0"
         // Its own way down, not the closing animation over it from the top.
@@ -187,6 +225,17 @@ function SheetContent({
         onInteractOutside={(e) => {
           onInteractOutside?.(e)
           keepForToasts(e)
+          if (!e.defaultPrevented && held.current) {
+            e.preventDefault()
+            ask()
+          }
+        }}
+        onEscapeKeyDown={(e) => {
+          onEscapeKeyDown?.(e)
+          if (!e.defaultPrevented && held.current) {
+            e.preventDefault()
+            ask()
+          }
         }}
         {...props}
       >
@@ -199,23 +248,37 @@ function SheetContent({
           />
         ) : null}
         {children}
-        <SheetHistory close={close} />
+        <SheetHistory close={close} held={held} ask={ask} />
         {/* What closing by hand, by the handle or by going back clicks. */}
         <SheetPrimitive.Close ref={closer} tabIndex={-1} aria-hidden className="hidden" />
         {showCloseButton && (
-          <SheetPrimitive.Close data-slot="sheet-close" asChild>
-            {/* A thumb's size, as every control here (44px; a pointer's 32). */}
-            <Button
-              variant="ghost"
-              className="absolute top-2 right-2"
-              size="icon-touch"
-              aria-label="닫기"
-            >
-              <XIcon
-              />
-            </Button>
-          </SheetPrimitive.Close>
+          // A thumb's size, as every control here (44px; a pointer's 32).
+          <Button
+            data-slot="sheet-close"
+            type="button"
+            variant="ghost"
+            className="absolute top-2 right-2"
+            size="icon-touch"
+            aria-label="닫기"
+            onClick={leave}
+          >
+            <XIcon />
+          </Button>
         )}
+        {/* Drawn inside the sheet, so a tap or the focus in it is the sheet's
+            own and not a way out (Radix follows the React tree, portal or not). */}
+        <AlertDialog open={asking} onOpenChange={setAsking}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>쓰던 내용을 버릴까요?</AlertDialogTitle>
+              <AlertDialogDescription>닫으면 적은 것이 사라져요. 되돌릴 수 없어요.</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>두기</AlertDialogCancel>
+              <AlertDialogAction onClick={close}>버리기</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </SheetPrimitive.Content>
     </SheetPortal>
   )

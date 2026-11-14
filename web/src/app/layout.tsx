@@ -5,6 +5,7 @@ import type { Metadata, Viewport } from "next";
 import { Barlow_Condensed, Instrument_Sans, JetBrains_Mono } from "next/font/google";
 import { cookies, headers } from "next/headers";
 import { RoleProvider } from "@/components/shell/role";
+import { SessionWatch } from "@/components/shell/session-watch";
 import { NoZoom } from "@/components/shell/no-zoom";
 import { PullToRefresh } from "@/components/shell/pull-to-refresh";
 import { ThemeBars } from "@/components/shell/theme-bars";
@@ -100,6 +101,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           <PushBridge />
           <Toasts />
         </RoleProvider>
+        <SessionWatch />
         <ViewportProbe />
         <ThemeBars />
         <NoZoom />

@@ -136,6 +136,7 @@ function Panel({
   width,
   height,
   bodyClassName,
+  guard,
   children,
 }: {
   open: boolean
@@ -143,6 +144,8 @@ function Panel({
   title: React.ReactNode
   description?: React.ReactNode
   bodyClassName?: string
+  /** Something typed in it is not saved: closing asks first (ui/sheet.tsx). */
+  guard?: boolean
   children: React.ReactNode
 } & VariantProps<typeof bottomSheetVariants>) {
   return (
@@ -150,6 +153,7 @@ function Panel({
       <BottomSheetContent
         width={width}
         height={height}
+        guard={guard}
         // Without a line under the title there is nothing to describe the
         // sheet by; said so, rather than left for Radix to warn about.
         {...(description ? {} : { "aria-describedby": undefined })}

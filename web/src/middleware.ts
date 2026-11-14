@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { accessIdentity } from "@/lib/access";
 import { SESSION_COOKIE, valid } from "@/lib/auth";
 import { ROLE_HEADER, type Role, guestMay, roleFor } from "@/lib/role";
+import { SIGNED_OUT_HEADER } from "@/lib/signed-out";
 
 /**
  * The gate. Everything behind it - the thread, the calendar, the live browser
@@ -45,9 +46,10 @@ export async function middleware(request: NextRequest) {
   }
 
   // An expired session inside a fetch should read as 401, not as a login page
-  // arriving where JSON was expected.
+  // arriving where JSON was expected - and say it is this 401, which the page
+  // follows to the login (lib/signed-out.ts), and not one from further in.
   if (isApi) {
-    return NextResponse.json({ error: "로그인이 필요해요." }, { status: 401 });
+    return NextResponse.json({ error: "로그인이 필요해요." }, { status: 401, headers: { [SIGNED_OUT_HEADER]: "1" } });
   }
 
   const login = new URL("/login", request.url);
