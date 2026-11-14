@@ -146,9 +146,10 @@ function Coming({ plan, now }: { plan: Plan; now: number }) {
  * The board for one route: one's face saying how it stands, how long until one
  * must leave, the rail, the line to catch - "18:09 7770 타기 · 도보 10분" - and
  * what is coming, with the seats left on each. Between reads the countdown and
- * the words go on with the clock.
+ * the words go on with the clock; a plan past refreshing (stale) counts on
+ * dimmed, as one with no live data does.
  */
-export function Board({ who, route, plan, now }: { who: Who; route: Route; plan?: Plan; now: number }) {
+export function Board({ who, route, plan, now, stale }: { who: Who; route: Route; plan?: Plan; now: number; stale?: boolean }) {
   const leave = plan?.leave ? Date.parse(plan.leave) : NaN;
   const last = plan?.last ? Date.parse(plan.last) : leave;
   const running = plan && plan.catch && Number.isFinite(leave) ? stageOf(leave, now, last) : null;
@@ -190,7 +191,7 @@ export function Board({ who, route, plan, now }: { who: Who; route: Route; plan?
       </div>
 
       <div className="mt-4">
-        <p className={cn("font-score tnum text-[84px] leading-[0.95] font-semibold tracking-[-0.01em]", late ? "text-reject" : live ? "text-foreground" : "text-faint")}>
+        <p className={cn("font-score tnum text-[84px] leading-[0.95] font-semibold tracking-[-0.01em]", late ? "text-reject" : live && !stale ? "text-foreground" : "text-faint")}>
           {live ? countdown(Math.abs((pastGood ? last : leave) - now)) : "--:--"}
         </p>
         <p className="mt-1 text-ui text-dim">{caption}</p>

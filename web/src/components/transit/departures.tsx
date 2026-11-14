@@ -2,9 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Pencil, Plus } from "lucide-react";
+import { AsOf } from "@/components/shell/as-of";
+import { Failed } from "@/components/shell/failed";
 import { Header, PageTop } from "@/components/shell/header";
 import { TabBar } from "@/components/shell/tab-bar";
-import { Retry } from "@/components/shell/retry";
 import { useRole } from "@/components/shell/role";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { Board } from "@/components/transit/board";
@@ -17,7 +18,7 @@ import type { Who } from "@/lib/track";
 import { type Departures as Read, type Plan, type Route, clockOf, readDepartures, saveRoutes, stageOf } from "@/lib/transit";
 import { useResource } from "@/lib/use-resource";
 import { useThread } from "@/lib/use-thread";
-import { SAY } from "@/lib/say";
+import { failureText, SAY } from "@/lib/say";
 import { cn } from "@/lib/utils";
 
 /** The route a person last looked at, in their own browser. */
@@ -44,7 +45,7 @@ export function Departures() {
   // data.
   const departures = useResource<Read>(`transit:${who}`, () => readDepartures(who), { interval: 20_000 });
   const read = departures.data ?? null;
-  const error = departures.error?.message ?? null;
+  const error = departures.error ? failureText(departures.error, "출발 정보를 불러오지 못했어요.") : null;
   const load = departures.reload;
   const [now, setNow] = useState(() => Date.now());
   const [picked, setPicked] = useState<string | null>(() => {
@@ -62,6 +63,11 @@ export function Departures() {
     const tick = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(tick);
   }, []);
+  // The board counts on from the plan last read. Past refreshing - the last
+  // read failed, or none has landed for three rounds (a phone in a lift, whose
+  // reads hang rather than fail) - it says from when, and the count dims:
+  // someone may run for a bus that is no longer coming.
+  const stale = read !== null && (departures.error !== null || now - (departures.readAt?.getTime() ?? now) > 60_000);
 
   function pick(id: string) {
     setPicked(id);
@@ -103,10 +109,9 @@ export function Departures() {
         <div className="mx-auto w-full max-w-page-narrow px-4 pt-5 pb-10 sm:px-8 sm:pt-8">
           {!read ? (
             error ? (
-              <div className="pt-10 text-center">
-                <p className="mb-3 text-ui text-dim">{error}</p>
-                <Retry onRetry={load} />
-              </div>
+              <Failed onRetry={load} className="pt-10">
+                {error}
+              </Failed>
             ) : (
               <p className="pt-10 text-center text-ui text-faint">{SAY.loading}</p>
             )
@@ -125,9 +130,12 @@ export function Departures() {
                     ))}
                   </TabsList>
                 ) : null}
+                {stale ? (
+                  <AsOf at={departures.readAt} seconds failed={departures.error !== null} onRetry={() => void load()} className="mb-3" />
+                ) : null}
                 {current ? (
                   <TabsContent value={current.id}>
-                    <Board who={who} route={current} plan={planOf.get(current.id)} now={now} />
+                    <Board who={who} route={current} plan={planOf.get(current.id)} now={now} stale={stale} />
                   </TabsContent>
                 ) : null}
               </Tabs>

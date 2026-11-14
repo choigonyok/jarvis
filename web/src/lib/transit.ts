@@ -5,6 +5,7 @@
  * Each person reads and keeps only their own: the operator's paths, or the
  * guest's (…/guest), which is all the guest's token opens.
  */
+import { SAY } from "@/lib/say";
 import type { Who } from "@/lib/track";
 import { HttpError } from "@/lib/use-resource";
 
@@ -98,18 +99,19 @@ const base = (who: Who) => `/api/context/transit${who === "guest" ? "/guest" : "
 /**
  * A response's body, or why there is none: an HttpError when the service
  * answered with a failure, so that a refusal (4xx) is not read again
- * (lib/use-resource.ts).
+ * (lib/use-resource.ts). An answer without words of its own (a gateway's
+ * page) fails as `fallback`, not as its status number.
  */
-async function read<T>(res: Response): Promise<T> {
+async function read<T>(res: Response, fallback: string): Promise<T> {
   const body = (await res.json().catch(() => null)) as (T & { error?: string }) | null;
-  const message = body?.error ?? `출발 정보가 ${res.status}로 답했어요.`;
+  const message = body?.error ?? fallback;
   if (!res.ok) throw new HttpError(res.status, message);
   if (!body) throw new Error(message);
   return body;
 }
 
 export async function readDepartures(who: Who): Promise<Departures> {
-  return read(await fetch(base(who), { cache: "no-store" }));
+  return read(await fetch(base(who), { cache: "no-store" }), "출발 정보를 불러오지 못했어요.");
 }
 
 export async function saveRoutes(who: Who, routes: Route[]): Promise<Route[]> {
@@ -118,7 +120,7 @@ export async function saveRoutes(who: Who, routes: Route[]): Promise<Route[]> {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ routes }),
   });
-  return (await read<{ routes: Route[] }>(res)).routes;
+  return (await read<{ routes: Route[] }>(res, SAY.couldNotSave)).routes;
 }
 
 /**
@@ -134,12 +136,12 @@ export async function findStops(
     "q" in by
       ? `q=${encodeURIComponent(by.q)}`
       : `near=${by.near === "me" ? "me" : `${by.near.lat.toFixed(6)},${by.near.lon.toFixed(6)}`}`;
-  return read(await fetch(`${base(who)}/stops?${q}`, { cache: "no-store" }));
+  return read(await fetch(`${base(who)}/stops?${q}`, { cache: "no-store" }), "정류장을 찾지 못했어요.");
 }
 
 export async function findLines(stop: Stop): Promise<Line[]> {
   const q = new URLSearchParams({ kind: stop.kind, id: stop.id, ...(stop.region ? { region: stop.region } : {}) });
-  return (await read<{ lines: Line[] }>(await fetch(`/api/context/transit/lines?${q}`, { cache: "no-store" }))).lines;
+  return (await read<{ lines: Line[] }>(await fetch(`/api/context/transit/lines?${q}`, { cache: "no-store" }), "노선을 불러오지 못했어요.")).lines;
 }
 
 /** Minutes a walk of meters takes (the server's own estimate: streets a quarter longer, 70 m a minute). */

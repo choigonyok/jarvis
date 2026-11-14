@@ -1,5 +1,6 @@
 // A goal, and how it stands, as mind worked it out from its marks. Nothing here
 // adds up: the screen shows what mind says, so a phone and a laptop never differ.
+import { SAY } from "@/lib/say";
 import { dateLabel } from "@/lib/when";
 
 export type Mark = "done" | "missed";
@@ -84,41 +85,58 @@ export type Draft = {
 
 const BASE = "/api/mind/goals";
 
-async function call<T>(path: string, init?: RequestInit): Promise<T> {
+/** How long after a change was taken in (call) to read again: mind has mostly got to it by then. */
+export const READ_AGAIN_MS = 5_000;
+
+/**
+ * mind's answer. A change goes in at the way in (input-svc), which answers 202
+ * when mind has not answered in time: mind is away, and the record is in and
+ * will be done. That is null - neither a failure nor a reason to send it
+ * again; there is nothing to draw yet, and a read a moment later has it. An
+ * answer without words of its own (a gateway's page) fails as `fallback`.
+ */
+async function call<T>(path: string, init: RequestInit | undefined, fallback: string): Promise<T | null> {
   const res = await fetch(`${BASE}${path}`, {
     cache: "no-store",
     ...init,
     headers: init?.body ? { "content-type": "application/json" } : undefined,
   });
+  if (res.status === 202) return null;
   const body = (await res.json().catch(() => null)) as (T & { error?: string }) | null;
-  // 202: mind is away. The record is in and will be done; there is nothing to
-  // draw yet, and the next read has it.
-  if (!res.ok || res.status === 202 || !body) throw new Error(body?.error ?? "목표를 불러오지 못했어요.");
+  if (!res.ok || !body) throw new Error(body?.error ?? fallback);
+  return body;
+}
+
+/** A read: mind answers it itself, so none is only taken in. */
+async function read<T>(path: string): Promise<T> {
+  const body = await call<T>(path, undefined, "목표를 불러오지 못했어요.");
+  if (!body) throw new Error("목표를 불러오지 못했어요.");
   return body;
 }
 
 export async function listGoals(all = false): Promise<{ goals: Goal[]; today: string }> {
-  return call(all ? "?all=1" : "");
+  return read(all ? "?all=1" : "");
 }
 
 export async function readGoal(id: string): Promise<{ goal: Goal; stats: Stats }> {
-  return call(`/${encodeURIComponent(id)}`);
+  return read(`/${encodeURIComponent(id)}`);
 }
 
-export async function makeGoal(draft: Draft): Promise<{ goal: Goal }> {
-  return call("", { method: "POST", body: JSON.stringify(draft) });
+/** The goal made, or null: taken in, and not made yet (call). */
+export async function makeGoal(draft: Draft): Promise<{ goal: Goal } | null> {
+  return call("", { method: "POST", body: JSON.stringify(draft) }, SAY.couldNotSave);
 }
 
-export async function changeGoal(id: string, change: Partial<Draft> & { pause?: boolean; finish?: boolean }): Promise<{ goal: Goal }> {
-  return call(`/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(change) });
+export async function changeGoal(id: string, change: Partial<Draft> & { pause?: boolean; finish?: boolean }): Promise<{ goal: Goal } | null> {
+  return call(`/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(change) }, SAY.couldNotSave);
 }
 
 export async function removeGoal(id: string): Promise<unknown> {
-  return call(`/${encodeURIComponent(id)}`, { method: "DELETE" });
+  return call(`/${encodeURIComponent(id)}`, { method: "DELETE" }, SAY.couldNotDelete);
 }
 
 /** Says how a day went; "" takes it back. */
-export async function markDay(id: string, day: string, mark: Mark | ""): Promise<{ goal: Goal; stats: Stats }> {
+export async function markDay(id: string, day: string, mark: Mark | ""): Promise<{ goal: Goal; stats: Stats } | null> {
   return checkDay(id, day, { mark });
 }
 
@@ -128,8 +146,8 @@ export async function markDay(id: string, day: string, mark: Mark | ""): Promise
  */
 export type Check = { mark: Mark | "" } | { count: number } | { add: number };
 
-export async function checkDay(id: string, day: string, check: Check): Promise<{ goal: Goal; stats: Stats }> {
-  return call(`/${encodeURIComponent(id)}/checks`, { method: "POST", body: JSON.stringify({ day, ...check }) });
+export async function checkDay(id: string, day: string, check: Check): Promise<{ goal: Goal; stats: Stats } | null> {
+  return call(`/${encodeURIComponent(id)}/checks`, { method: "POST", body: JSON.stringify({ day, ...check }) }, "기록하지 못했어요.");
 }
 
 /** How many times a day the goal asks: 1 unless it asks more. */

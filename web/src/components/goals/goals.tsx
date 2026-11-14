@@ -5,16 +5,19 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, Minus, Plus } from "lucide-react";
 import { GoalForm } from "@/components/goals/goal-form";
 import { GoalSheet } from "@/components/goals/goal-sheet";
+import { Taken } from "@/components/goals/taken";
+import { AsOf } from "@/components/shell/as-of";
+import { Failed } from "@/components/shell/failed";
 import { Header, PageTop } from "@/components/shell/header";
 import { TabBar } from "@/components/shell/tab-bar";
-import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
-import { type Cell, type Check as DayCheck, type Goal, type Mark, checkDay, listGoals, perDayOf, tally, waitsToday, weekdayOf, WEEK_ROW, whenLabel } from "@/lib/goals";
-import { onResume } from "@/lib/resume";
+import { type Cell, type Check as DayCheck, type Goal, type Mark, checkDay, listGoals, perDayOf, READ_AGAIN_MS, tally, waitsToday, weekdayOf, WEEK_ROW, whenLabel } from "@/lib/goals";
+import { failureText } from "@/lib/say";
 import { isPending } from "@/lib/thread";
+import { useResource } from "@/lib/use-resource";
 import { useThread } from "@/lib/use-thread";
 import { cn } from "@/lib/utils";
 
@@ -28,40 +31,42 @@ import { cn } from "@/lib/utils";
 export function Goals() {
   const { proposals, connection } = useThread();
   const waiting = proposals.filter(isPending);
-  const [goals, setGoals] = useState<Goal[] | null>(null);
-  const [ended, setEnded] = useState<Goal[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  // Read on opening, on coming back, and once a minute while on screen: a
+  // screen left standing (a desk's laptop overnight) moves on to the new day,
+  // and what was marked on the other phone comes.
+  const read = useResource("goals", () => listGoals(true), { interval: 60_000 });
+  const all = read.data?.goals;
+  const goals = useMemo(() => all?.filter((g) => g.status !== "ended") ?? null, [all]);
+  const ended = useMemo(() => all?.filter((g) => g.status === "ended") ?? [], [all]);
+  const error = read.error ? failureText(read.error, "목표를 불러오지 못했어요.") : null;
+  const load = read.reload;
+  const mutate = read.mutate;
   // The goal left open stays open across a tab switch (lib/keep.ts).
   const [openId, setOpenId] = useKept<string | null>("goals:open", null);
   const [making, setMaking] = useState(false);
   const [editing, setEditing] = useState<Goal | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const { goals: all } = await listGoals(true);
-      setGoals(all.filter((g) => g.status !== "ended"));
-      setEnded(all.filter((g) => g.status === "ended"));
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "목표를 불러오지 못했어요.");
-    }
-  }, []);
-
-  useEffect(() => {
-    // load sets state only after its fetch resolves; the rule cannot see that.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load();
-  }, [load]);
-  useEffect(() => onResume(load), [load]);
   // The name a notification gives: straight to that goal.
   useEffect(() => {
     const id = new URLSearchParams(window.location.search).get("goal");
     if (id) setOpenId(id);
   }, [setOpenId]);
 
-  const replace = useCallback((next: Goal) => {
-    setGoals((cur) => cur?.map((g) => (g.id === next.id ? next : g)) ?? cur);
-  }, []);
+  const replace = useCallback(
+    (next: Goal) => mutate((cur) => cur && { ...cur, goals: cur.goals.map((g) => (g.id === next.id ? next : g)) }),
+    [mutate],
+  );
+
+  // A change taken in and not done yet (lib/goals.ts) is read again in a
+  // moment. A row says its own; one made in a sheet is said over the list
+  // until that read has landed - a new goal's sheet closes as on saving.
+  const soon = useCallback(() => window.setTimeout(() => void load(), READ_AGAIN_MS), [load]);
+  const [takenAt, setTakenAt] = useState<number | null>(null);
+  const took = useCallback(() => {
+    setTakenAt(Date.now());
+    soon();
+  }, [soon]);
+  const taken = takenAt !== null && (read.readAt?.getTime() ?? 0) < takenAt + READ_AGAIN_MS;
 
   const going = useMemo(() => (goals ?? []).filter((g) => g.status === "active"), [goals]);
   const resting = useMemo(() => (goals ?? []).filter((g) => g.status === "paused"), [goals]);
@@ -79,11 +84,15 @@ export function Goals() {
       <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain under-top pb-tabbar">
         <div className="mx-auto w-full max-w-page px-4 pt-5 pb-12 sm:px-8 sm:pt-7 sm:pb-8">
           {error && !goals ? (
-            <div className="py-16 text-center">
-              <p className="text-ui text-dim">{error}</p>
-              <Retry onRetry={load} />
-            </div>
+            <Failed onRetry={load} className="py-8">
+              {error}
+            </Failed>
           ) : null}
+          {/* A read again that failed leaves the register as it was read, and
+              says when that was: a mark made since on the other phone is not
+              on it, and today may be yesterday. */}
+          {error && goals ? <AsOf at={read.readAt} failed onRetry={() => void load()} className="mb-3" /> : null}
+          {taken && goals ? <Taken className="mb-3" /> : null}
 
           {goals && goals.length === 0 && ended.length === 0 ? (
             <NoGoals onMake={() => setMaking(true)} />
@@ -111,7 +120,7 @@ export function Goals() {
               <WeekHead today={today} />
               <ol>
                 {going.map((g) => (
-                  <Row key={g.id} goal={g} onOpen={() => setOpenId(g.id)} onChanged={replace} />
+                  <Row key={g.id} goal={g} onOpen={() => setOpenId(g.id)} onChanged={replace} onTaken={soon} />
                 ))}
               </ol>
             </>
@@ -152,7 +161,7 @@ export function Goals() {
         onOpenChange={(v) => {
           if (!v) setOpenId(null);
         }}
-        onChanged={() => void load()}
+        onChanged={(taken) => (taken ? took() : void load())}
         onEdit={(g) => setEditing(g)}
       />
       <GoalForm
@@ -164,7 +173,7 @@ export function Goals() {
             setEditing(null);
           }
         }}
-        onSaved={() => void load()}
+        onSaved={(taken) => (taken ? took() : void load())}
       />
     </div>
   );
@@ -222,7 +231,7 @@ type DayState = { mark?: Mark; count: number };
  * marks nothing. A goal of more than one a day answers a time at a time: one
  * more tap for each, and the day is done when they are all there.
  */
-function Row({ goal, onOpen, onChanged }: { goal: Goal; onOpen: () => void; onChanged: (g: Goal) => void }) {
+function Row({ goal, onOpen, onChanged, onTaken }: { goal: Goal; onOpen: () => void; onChanged: (g: Goal) => void; onTaken: () => void }) {
   const p = goal.progress;
   const n = perDayOf(goal);
   const many = n > 1;
@@ -230,9 +239,16 @@ function Row({ goal, onOpen, onChanged }: { goal: Goal; onOpen: () => void; onCh
   // Said at once, then as mind has it: a thumb does not wait on a round trip.
   const [saying, setSaying] = useState<DayState | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
+  // Taken in and not done by mind yet (lib/goals.ts): shown as it will be, and
+  // the answers held back until a read has the day moved from where it stood -
+  // pressed again, it would count twice. Kept across a tab switch.
+  const [taken, setTaken] = useKept<{ day: string; was: DayState; to: DayState } | null>(`goals:taken:${goal.id}`, null);
+  const there = taken ? p.week.find((c) => c.day === taken.day) : undefined;
+  if (taken && (!there || there.mark !== taken.was.mark || (there.count ?? 0) !== taken.was.count)) setTaken(null);
   const day = picked ?? p.today;
   const cell = p.week.find((c) => c.day === day);
-  const now: DayState = saying ?? { mark: cell?.mark, count: cell?.count ?? 0 };
+  const now: DayState = saying ?? (taken?.day === day ? taken.to : null) ?? { mark: cell?.mark, count: cell?.count ?? 0 };
+  const busy = saying !== null || taken !== null;
   const quietToday = !picked && !p.asks && goal.cadence !== "weekly" && goal.cadence !== "monthly";
   const when = whenLabel(day, p.today);
 
@@ -240,12 +256,16 @@ function Row({ goal, onOpen, onChanged }: { goal: Goal; onOpen: () => void; onCh
     setFailed(null);
     setSaying(next);
     try {
-      const { goal: got } = await checkDay(goal.id, day, check);
-      onChanged(got);
+      const got = await checkDay(goal.id, day, check);
+      if (got) onChanged(got.goal);
+      else {
+        setTaken({ day, was: now, to: next });
+        onTaken();
+      }
       // Once a time at a time, the day stays picked until it is said.
       if (!many || next.mark) setPicked(null);
     } catch (e) {
-      setFailed(e instanceof Error ? e.message : "기록하지 못했어요. 다시 눌러 주세요.");
+      setFailed(failureText(e, "기록하지 못했어요. 다시 눌러 주세요."));
     } finally {
       setSaying(null);
     }
@@ -270,16 +290,19 @@ function Row({ goal, onOpen, onChanged }: { goal: Goal; onOpen: () => void; onCh
           </span>
         </button>
         <div className={WEEK_GRID} role="group" aria-label={`${goal.title} 이번 주`}>
-          {p.week.map((c) => (
-            <Dot
-              key={c.day}
-              cell={c.day === day && saying ? { ...c, mark: saying.mark, count: saying.count } : c}
-              of={n}
-              today={p.today}
-              picked={c.day === picked}
-              onPick={() => setPicked(picked === c.day || c.day === p.today ? null : c.day)}
-            />
-          ))}
+          {p.week.map((c) => {
+            const as = c.day === day && saying ? saying : taken && c.day === taken.day ? taken.to : null;
+            return (
+              <Dot
+                key={c.day}
+                cell={as ? { ...c, mark: as.mark, count: as.count } : c}
+                of={n}
+                today={p.today}
+                picked={c.day === picked}
+                onPick={() => setPicked(picked === c.day || c.day === p.today ? null : c.day)}
+              />
+            );
+          })}
         </div>
       </div>
 
@@ -290,7 +313,7 @@ function Row({ goal, onOpen, onChanged }: { goal: Goal; onOpen: () => void; onCh
           {now.mark === "done" ? (many ? `${n}번 다 했어요` : "했어요") : now.count > 0 ? `안 했어요 (${tally(now.count, n)})` : "안 했어요"}
           <button
             type="button"
-            disabled={saying !== null}
+            disabled={busy}
             onClick={() => void (many && now.mark === "done" ? fewer() : unsay())}
             className="tap-y ml-1 text-aside text-faint underline-offset-2 hover:text-dim hover:underline focus-ring"
           >
@@ -308,7 +331,7 @@ function Row({ goal, onOpen, onChanged }: { goal: Goal; onOpen: () => void; onCh
               {now.count > 0 ? (
                 <button
                   type="button"
-                  disabled={saying !== null}
+                  disabled={busy}
                   onClick={() => void fewer()}
                   className="tap-y ml-1 text-aside text-faint underline-offset-2 hover:text-dim hover:underline focus-ring"
                 >
@@ -324,7 +347,7 @@ function Row({ goal, onOpen, onChanged }: { goal: Goal; onOpen: () => void; onCh
             <Button
               variant="reject"
               size="pair-sm"
-              disabled={saying !== null}
+              disabled={busy}
               onClick={() => void say({ mark: "missed" }, { mark: "missed", count: now.count })}
             >
               안 했다
@@ -332,7 +355,7 @@ function Row({ goal, onOpen, onChanged }: { goal: Goal; onOpen: () => void; onCh
             <Button
               variant="approve"
               size="pair-sm"
-              disabled={saying !== null}
+              disabled={busy}
               onClick={() => void (many ? once() : say({ mark: "done" }, { mark: "done", count: 0 }))}
             >
               {many ? "한 번 했다" : "했다"}
@@ -340,6 +363,7 @@ function Row({ goal, onOpen, onChanged }: { goal: Goal; onOpen: () => void; onCh
           </div>
         </div>
       )}
+      {taken ? <Taken className="mt-1.5" /> : null}
       {failed ? (
         <p role="alert" className="mt-1.5 text-aside text-reject">
           {failed}

@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { BusFront, LocateFixed, Minus, Plus, Search, TrainFront } from "lucide-react";
 import {
   AlertDialog,
@@ -21,6 +21,7 @@ import { InputGroupAddon, InputGroupButton } from "@/components/ui/input-group";
 import { Sheet } from "@/components/ui/sheet";
 import { SwitchRow } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { failureText, SAY } from "@/lib/say";
 import type { Who } from "@/lib/track";
 import { DAY_NAMES, type Line, type Route, type Stop, findLines, findStops, walkMinutes } from "@/lib/transit";
 
@@ -110,27 +111,44 @@ export function RouteEditor({
   onSave: (route: Route) => Promise<void>;
   onDelete?: () => Promise<void>;
 }) {
+  // Four steps and two lookups in, closing by hand - a thumb slipping to the
+  // edge, the title pulled down - asks before it throws them away (ui/sheet.tsx).
+  const [entered, setEntered] = useState(false);
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <BottomSheetContent width="full" height="tall" keepFocus={false} aria-describedby={undefined} className="gap-4 overflow-y-auto">
+      <BottomSheetContent width="full" height="tall" keepFocus={false} aria-describedby={undefined} className="gap-4 overflow-y-auto" guard={entered}>
         <BottomSheetHeader className="pb-1 sm:px-6">
           <BottomSheetTitle className="pr-0">{route ? `${route.name} 경로 고치기` : "경로 추가"}</BottomSheetTitle>
         </BottomSheetHeader>
         {/* Keyed so a new opening starts from what is being changed. */}
-        {open ? <Form key={route?.id ?? "new"} who={who} route={route} onSave={onSave} onDelete={onDelete} /> : null}
+        {open ? <Form key={route?.id ?? "new"} who={who} route={route} onSave={onSave} onDelete={onDelete} onEntered={setEntered} /> : null}
       </BottomSheetContent>
     </Sheet>
   );
 }
 
-function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null; onSave: (r: Route) => Promise<void>; onDelete?: () => Promise<void> }) {
+function Form({
+  who,
+  route,
+  onSave,
+  onDelete,
+  onEntered,
+}: {
+  who: Who;
+  route: Route | null;
+  onSave: (r: Route) => Promise<void>;
+  onDelete?: () => Promise<void>;
+  /** Whether anything differs from what it opened with. */
+  onEntered: (entered: boolean) => void;
+}) {
   const [place, setPlace] = useState<Place | null>(route ? places([route.stop])[0] : null);
   const [stop, setStop] = useState<Stop | null>(route?.stop ?? null);
   const [line, setLine] = useState<Line | null>(route?.line ?? null);
   const [walk, setWalk] = useState(route?.walk ?? 5);
   const [spare, setSpare] = useState(route?.spare ?? 1);
   const [name, setName] = useState(route?.name ?? "");
-  const [days, setDays] = useState<number[]>(route?.days ?? [1, 2, 3, 4, 5]);
+  // A route kept with no days is every day: it opens so, not as 월-금.
+  const [days, setDays] = useState<number[]>(route ? (route.days ?? []) : [1, 2, 3, 4, 5]);
   const [from, setFrom] = useState(route?.from ?? "");
   const [to, setTo] = useState(route?.to ?? "");
   const [push, setPush] = useState(route?.push ?? true);
@@ -144,6 +162,16 @@ function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null;
   // The stop the arrow keys light in what was found; Enter takes it.
   const [lit, setLit] = useState("");
 
+  // What saving would keep, against how it stood on opening - or a name typed
+  // to search by.
+  const kept = JSON.stringify([place?.key, stop?.region, stop?.id, line?.id, line?.order, walk, spare, name.trim(), days, from, to, push]);
+  const [opened] = useState(kept);
+  const entered = kept !== opened || q.trim() !== "";
+  useEffect(() => {
+    onEntered(entered);
+    return () => onEntered(false);
+  }, [entered, onEntered]);
+
   async function look(by: Parameters<typeof findStops>[1]) {
     setBusy("stops");
     setError(null);
@@ -153,7 +181,7 @@ function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null;
       setStops(found.stops);
       setMissed(found.missed ?? null);
     } catch (e) {
-      const why = e instanceof Error ? e.message : "정류장을 찾지 못했어요.";
+      const why = failureText(e, "정류장을 찾지 못했어요.");
       // No fix from the phone yet: the browser's own place, then.
       if ("near" in by && by.near === "me" && navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
@@ -187,7 +215,7 @@ function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null;
     const rows = got.flatMap((g) => (g.status === "fulfilled" ? g.value : []));
     if (!rows.length) {
       const failed = got.find((g): g is PromiseRejectedResult => g.status === "rejected");
-      setError(failed?.reason instanceof Error ? failed.reason.message : "노선을 불러오지 못했어요.");
+      setError(failureText(failed?.reason, "노선을 불러오지 못했어요."));
     }
     setChoices(choicesOf(rows));
     setBusy(null);
@@ -199,19 +227,27 @@ function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null;
     if (c.stop.dist) setWalk(walkMinutes(c.stop.dist));
   }
 
+  const windowSet = from !== "" && to !== "";
+
   async function save() {
     if (!stop || !line || !name.trim()) return;
+    // One end of the hours is no window: the service refuses it, in words
+    // about HH:MM. Said here in the form's own, before it goes.
+    if ((from === "") !== (to === "")) {
+      setError("시간대는 시작과 끝을 둘 다 넣거나 둘 다 비워 주세요.");
+      return;
+    }
     setBusy("save");
     setError(null);
     try {
-      await onSave({ id: route?.id ?? "", name: name.trim(), stop, line, walk, spare, days, from, to, push: push && from !== "" });
+      // The alert as the switch shows it: on only with the hours it comes in.
+      await onSave({ id: route?.id ?? "", name: name.trim(), stop, line, walk, spare, days, from, to, push: push && windowSet });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "저장하지 못했어요.");
+      setError(failureText(e, SAY.couldNotSave));
       setBusy(null);
     }
   }
 
-  const windowSet = from !== "" && to !== "";
   return (
     <div className="mx-auto w-full max-w-[40rem] space-y-6 px-4 pb-8 text-ui sm:px-6">
       <Step title="어디서 타요">
@@ -385,6 +421,13 @@ function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null;
                 </ToggleGroupItem>
               ))}
             </ToggleGroup>
+            {/* No day lit reads as no day, and is every day: one who turned
+                them all off to quiet the alert had it at the weekend too. */}
+            {days.length === 0 ? (
+              <p className="mt-1.5 text-aside leading-[1.55] break-keep text-faint">
+                요일을 고르지 않으면 매일이에요.{push && windowSet ? " 알림을 끄려면 아래 스위치를 꺼 주세요." : ""}
+              </p>
+            ) : null}
             <div className="mt-3 flex items-center gap-2 text-dim">
               <Input surface="glass" type="time" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="시간대 시작" className="tnum w-auto" />
               부터
@@ -399,7 +442,9 @@ function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null;
               className="mt-2"
             />
             <p className="mt-1.5 text-aside leading-[1.55] break-keep text-faint">
-              나가기 15분 전에 ‘슬슬 짐 싸야 해요’, 2분 전에 ‘지금 나가요’를 보내요. 방해 금지 시간에도 울려요.
+              {windowSet
+                ? "나가기 15분 전에 ‘슬슬 짐 싸야 해요’, 2분 전에 ‘지금 나가요’를 보내요. 방해 금지 시간에도 울려요."
+                : "시간대를 정하면 알림을 켤 수 있어요."}
             </p>
           </Step>
         </>
@@ -433,7 +478,7 @@ function Form({ who, route, onSave, onDelete }: { who: Who; route: Route | null;
                   onClick={() => {
                     setBusy("save");
                     void onDelete().catch((e) => {
-                      setError(e instanceof Error ? e.message : "지우지 못했어요.");
+                      setError(failureText(e, SAY.couldNotDelete));
                       setBusy(null);
                     });
                   }}

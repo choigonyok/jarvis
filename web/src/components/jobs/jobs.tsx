@@ -4,9 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Header, PageTop } from "@/components/shell/header";
 import { TabBar } from "@/components/shell/tab-bar";
-import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { AsOf } from "@/components/shell/as-of";
+import { Failed } from "@/components/shell/failed";
 import { onOpenParams } from "@/lib/focus";
 import { useKept } from "@/lib/keep";
 import { ChecklistCard } from "@/components/chat/checklist";
@@ -124,10 +124,9 @@ export function Jobs() {
       <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain under-top pb-tabbar">
         <div className="mx-auto w-full max-w-page px-4 pt-4 pb-12 sm:px-8 sm:pt-7 sm:pb-8">
           {error && !jobs ? (
-            <div className="py-16 text-center">
-              <p className="text-ui text-dim">{error}</p>
-              <Retry onRetry={load} />
-            </div>
+            <Failed onRetry={load} className="py-8">
+              {error}
+            </Failed>
           ) : null}
           {error && jobs ? <AsOf at={readAt} failed onRetry={() => void load()} className="mb-3" /> : null}
 

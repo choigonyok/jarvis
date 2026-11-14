@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Minus, Plus } from "lucide-react";
 import { useRole } from "@/components/shell/role";
 import { BottomSheetContent, BottomSheetDescription, BottomSheetHeader, BottomSheetTitle } from "@/components/ui/bottom-sheet";
@@ -11,7 +11,7 @@ import { Sheet } from "@/components/ui/sheet";
 import { SwitchRow } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { type Cadence, type Draft, type Goal, changeGoal, makeGoal, WEEK_ROW } from "@/lib/goals";
-import { SAY } from "@/lib/say";
+import { failureText, SAY } from "@/lib/say";
 
 const RULES: { value: Cadence; label: string }[] = [
   { value: "daily", label: "매일" },
@@ -54,23 +54,45 @@ export function GoalForm({
   open: boolean;
   goal: Goal | null;
   onOpenChange: (open: boolean) => void;
-  onSaved: () => void;
+  /** taken: in, and not done by mind yet (lib/goals.ts). */
+  onSaved: (taken: boolean) => void;
 }) {
+  // Once something is entered, closing by hand - a tap outside, a pull down,
+  // going back - asks before it throws that away (ui/sheet.tsx).
+  const [entered, setEntered] = useState(false);
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <BottomSheetContent width="lg" height="tall" keepFocus={false}>
-        {open ? <Form key={goal?.id ?? "new"} goal={goal} onClose={() => onOpenChange(false)} onSaved={onSaved} /> : null}
+      <BottomSheetContent width="lg" height="tall" keepFocus={false} guard={entered}>
+        {open ? <Form key={goal?.id ?? "new"} goal={goal} onClose={() => onOpenChange(false)} onSaved={onSaved} onEntered={setEntered} /> : null}
       </BottomSheetContent>
     </Sheet>
   );
 }
 
-function Form({ goal, onClose, onSaved }: { goal: Goal | null; onClose: () => void; onSaved: () => void }) {
+function Form({
+  goal,
+  onClose,
+  onSaved,
+  onEntered,
+}: {
+  goal: Goal | null;
+  onClose: () => void;
+  onSaved: (taken: boolean) => void;
+  /** Whether anything differs from what it opened with. */
+  onEntered: (entered: boolean) => void;
+}) {
   const role = useRole();
   const [v, setV] = useState(() => start(goal));
   const [more, setMore] = useState(Boolean(goal?.note || goal?.end || goal?.remind || goal?.auto));
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
+  // Anything changed from how the form opened.
+  const [opened] = useState(v);
+  const entered = JSON.stringify(v) !== JSON.stringify(opened);
+  useEffect(() => {
+    onEntered(entered);
+    return () => onEntered(false);
+  }, [entered, onEntered]);
   const set = <K extends keyof typeof v>(key: K, value: (typeof v)[K]) => setV((cur) => ({ ...cur, [key]: value }));
   const counted = v.cadence === "weekly" || v.cadence === "monthly";
   const most = v.cadence === "weekly" ? 6 : 28;
@@ -97,12 +119,13 @@ function Form({ goal, onClose, onSaved }: { goal: Goal | null; onClose: () => vo
       auto: v.workout ? "workout" : "",
     };
     try {
-      if (goal) await changeGoal(goal.id, draft);
-      else await makeGoal(draft);
-      onSaved();
+      // Taken in and not done yet, it is in all the same: the form goes as on
+      // saving, and the list says so - not the button back for a second goal.
+      const saved = goal ? await changeGoal(goal.id, draft) : await makeGoal(draft);
+      onSaved(saved === null);
       onClose();
     } catch (e) {
-      setFailed(e instanceof Error ? e.message : SAY.couldNotSave);
+      setFailed(failureText(e, SAY.couldNotSave));
       setBusy(false);
     }
   }

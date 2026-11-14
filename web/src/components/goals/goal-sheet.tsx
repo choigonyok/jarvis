@@ -13,6 +13,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Taken } from "@/components/goals/taken";
 import { BottomSheetContent, BottomSheetDescription, BottomSheetHeader, BottomSheetTitle } from "@/components/ui/bottom-sheet";
 import { Button } from "@/components/ui/button";
 import { Sheet } from "@/components/ui/sheet";
@@ -28,13 +29,14 @@ import {
   monthWeeks,
   perDayOf,
   percent,
+  READ_AGAIN_MS,
   readGoal,
   removeGoal,
   tally,
   WEEK_ROW,
   whenLabel,
 } from "@/lib/goals";
-import { SAY } from "@/lib/say";
+import { failureText, SAY } from "@/lib/say";
 import { monthDay } from "@/lib/when";
 import { cn } from "@/lib/utils";
 
@@ -51,7 +53,8 @@ export function GoalSheet({
 }: {
   goal: Goal | null;
   onOpenChange: (open: boolean) => void;
-  onChanged: () => void;
+  /** taken: in, and not done by mind yet (lib/goals.ts). */
+  onChanged: (taken?: boolean) => void;
   onEdit: (g: Goal) => void;
 }) {
   return (
@@ -63,10 +66,11 @@ export function GoalSheet({
   );
 }
 
-function Body({ goal, onChanged, onClose, onEdit }: { goal: Goal; onChanged: () => void; onClose: () => void; onEdit: (g: Goal) => void }) {
+function Body({ goal, onChanged, onClose, onEdit }: { goal: Goal; onChanged: (taken?: boolean) => void; onClose: () => void; onEdit: (g: Goal) => void }) {
   const [now, setNow] = useState(goal);
   const [stats, setStats] = useState<Stats | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
+  const [taken, setTaken] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -74,7 +78,7 @@ function Body({ goal, onChanged, onClose, onEdit }: { goal: Goal; onChanged: () 
       setNow(got.goal);
       setStats(got.stats);
     } catch (e) {
-      setFailed(e instanceof Error ? e.message : SAY.couldNotLoad);
+      setFailed(failureText(e, SAY.couldNotLoad));
     }
   }, [goal.id]);
   useEffect(() => {
@@ -85,34 +89,45 @@ function Body({ goal, onChanged, onClose, onEdit }: { goal: Goal; onChanged: () 
 
   const p = now.progress;
 
+  // Taken in and not done by mind yet (lib/goals.ts): said so, not in red, and
+  // the sheet and the list read again in a moment.
+  function took() {
+    setFailed(null);
+    setTaken(true);
+    onChanged(true);
+    window.setTimeout(() => void load().then(() => setTaken(false)), READ_AGAIN_MS);
+  }
+
   async function act(change: { pause?: boolean; finish?: boolean }) {
     try {
-      const { goal: next } = await changeGoal(now.id, change);
-      setNow(next);
+      const got = await changeGoal(now.id, change);
+      if (!got) return took();
+      setNow(got.goal);
       onChanged();
     } catch (e) {
-      setFailed(e instanceof Error ? e.message : "바꾸지 못했어요.");
+      setFailed(failureText(e, "바꾸지 못했어요."));
     }
   }
 
   async function remove() {
     try {
-      await removeGoal(now.id);
-      onChanged();
+      const gone = await removeGoal(now.id);
+      onChanged(gone === null);
       onClose();
     } catch (e) {
-      setFailed(e instanceof Error ? e.message : SAY.couldNotDelete);
+      setFailed(failureText(e, SAY.couldNotDelete));
     }
   }
 
   async function mark(day: string, check: DayCheck) {
     try {
       const got = await checkDay(now.id, day, check);
+      if (!got) return took();
       setNow(got.goal);
       setStats(got.stats);
       onChanged();
     } catch (e) {
-      setFailed(e instanceof Error ? e.message : "기록하지 못했어요.");
+      setFailed(failureText(e, "기록하지 못했어요."));
     }
   }
 
@@ -151,6 +166,7 @@ function Body({ goal, onChanged, onClose, onEdit }: { goal: Goal; onChanged: () 
           </>
         ) : null}
 
+        {taken ? <Taken /> : null}
         {failed ? (
           <p role="alert" className="text-aside text-reject">
             {failed}

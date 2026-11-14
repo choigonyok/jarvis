@@ -114,6 +114,10 @@ function Body({
   // What the last thing done here came to - a failure in the failure's colour,
   // with the way to try again; it read the same as success.
   const [note, setNote] = useState<{ text: string; failed?: boolean; retry?: () => void } | null>(null);
+  // Something sent and the job not read back yet: nothing here sends again
+  // meanwhile. A second press on a slow line gave the same instruction, or a
+  // second run, twice.
+  const [busy, setBusy] = useState(false);
 
   const j = detail?.job ?? job;
   const card = j.waitingCard ? proposals.find((p) => p.id === j.waitingCard && p.state === "pending") : undefined;
@@ -130,12 +134,24 @@ function Body({
     return card && !own.includes(card) ? [card, ...own] : own;
   }, [proposals, card, j.id, j.sites]);
 
-  const act = async (path: string, body: unknown, done: string): Promise<string | null> => {
-    const err = await send(`jobs/${j.id}/${path}`, body);
-    setNote(err ? { text: err, failed: true, retry: () => void act(path, body, done) } : { text: done });
-    await load();
-    onChanged();
-    return err;
+  const act = async (path: string, body: unknown, done: string) => {
+    setBusy(true);
+    setNote(null);
+    try {
+      const err = await send(`jobs/${j.id}/${path}`, body);
+      // An instruction that went leaves the field, sent from it or by 다시 시도 -
+      // unless something else has been written there since.
+      if (!err && path === "instruct") setText((cur) => (cur.trim() === (body as { text: string }).text ? "" : cur));
+      setNote(
+        err
+          ? { text: path === "instruct" ? `전하지 못했어요: ${err}` : err, failed: true, retry: () => void act(path, body, done) }
+          : { text: done },
+      );
+      await load();
+      onChanged();
+    } finally {
+      setBusy(false);
+    }
   };
 
   const runs = useMemo(() => group(detail?.events ?? []), [detail]);
@@ -270,7 +286,6 @@ function Body({
       <div className="border-t border-edge-soft px-4 pt-3 pb-3 sm:px-5">
         {note ? (
           <p role="status" className={cn("mb-2 text-aside", note.failed ? "text-reject" : "text-dim")}>
-            {note.failed ? "전하지 못했어요: " : ""}
             {note.text}
             {note.retry ? (
               <>
@@ -278,6 +293,7 @@ function Body({
                 <button
                   type="button"
                   onClick={note.retry}
+                  disabled={busy}
                   className="tap-y underline decoration-reject-fill underline-offset-[3px] hover:text-reject focus-ring"
                 >
                   다시 시도
@@ -285,15 +301,18 @@ function Body({
               </>
             ) : null}
           </p>
+        ) : busy ? (
+          <p role="status" className="mb-2 text-aside text-dim">
+            보내는 중…
+          </p>
         ) : null}
         {j.state !== "cancelled" ? (
           <form
-            onSubmit={async (e) => {
+            onSubmit={(e) => {
               e.preventDefault();
               const t = text.trim();
-              if (!t) return;
-              const err = await act("instruct", { text: t }, "작업에 전했어요. 곧 반영해요.");
-              if (!err) setText("");
+              if (!t || busy) return;
+              void act("instruct", { text: t }, "작업에 전했어요. 곧 반영해요.");
             }}
             className="flex items-end gap-2"
           >
@@ -301,34 +320,35 @@ function Body({
               surface="glass"
               aria-label="작업에 지시하기"
               value={text}
+              readOnly={busy}
               onChange={(e) => setText(e.target.value)}
               placeholder={ended ? "다시 맡길 일 (예: 가격 내려서 다시 올려줘)" : "지시하기 (예: 가격 6만 원으로 내려줘)"}
               className="min-w-0 flex-1"
             />
-            <Button type="submit" variant="soft" size="icon-touch" disabled={!text.trim()} aria-label="지시 보내기" className="mouse:size-9">
+            <Button type="submit" variant="soft" size="icon-touch" disabled={!text.trim() || busy} aria-label="지시 보내기" className="mouse:size-9">
               <ArrowUp aria-hidden />
             </Button>
           </form>
         ) : null}
         <div className="mt-2 flex gap-2">
           {j.state === "active" || j.state === "paused" ? (
-            <Button variant="soft" size="touch-sm" disabled={j.running} onClick={() => void act("run", {}, "지금 실행해요.")} className="flex-1">
+            <Button variant="soft" size="touch-sm" disabled={j.running || busy} onClick={() => void act("run", {}, "지금 실행해요.")} className="flex-1">
               지금 실행
             </Button>
           ) : null}
           {j.state === "active" || j.state === "waiting" ? (
-            <Button variant="soft" size="touch-sm" onClick={() => void act("pause", {}, "멈췄어요.")} className="flex-1">
+            <Button variant="soft" size="touch-sm" disabled={busy} onClick={() => void act("pause", {}, "멈췄어요.")} className="flex-1">
               멈추기
             </Button>
           ) : j.state === "paused" || j.state === "failed" ? (
-            <Button variant="soft" size="touch-sm" onClick={() => void act("resume", {}, "다시 시작해요.")} className="flex-1">
+            <Button variant="soft" size="touch-sm" disabled={busy} onClick={() => void act("resume", {}, "다시 시작해요.")} className="flex-1">
               다시 시작
             </Button>
           ) : null}
           {!ended || j.state === "failed" ? (
             <AlertDialog>
               <AlertDialogTrigger asChild>
-                <Button variant="soft" size="touch-sm" className="flex-1">
+                <Button variant="soft" size="touch-sm" disabled={busy} className="flex-1">
                   그만두기
                 </Button>
               </AlertDialogTrigger>
