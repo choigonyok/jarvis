@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Keyboard, MousePointer2, MousePointerClick, Move } from "lucide-react";
+import { Keyboard, MousePointer2, MousePointerClick, Move, X } from "lucide-react";
 import { Toggle } from "@/components/ui/toggle";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
@@ -52,6 +52,9 @@ export function typeText(rfb: RemoteRFB, text: string) {
 
 type Mode = "click" | "drag";
 
+/** Set once the hint over the buttons has been put away, in this browser. */
+const HINT_KEY = "jarvis.screen-touch-hint";
+
 /**
  * Touch control of the remote screen, laid over the canvas on touch devices.
  *
@@ -61,6 +64,11 @@ type Mode = "click" | "drag";
  *   two fingers = scroll.
  * - 드래그: press, move, let go = a drag with the button held.
  * - 우클릭: the next tap is a right click.
+ *
+ * Two are still gestures with no button: a finger sliding to scroll only
+ * moved the pointer, and a finger that paused on its target got a context
+ * menu from nowhere. So they are said over the buttons until put away, and a
+ * hold marks where it landed - an iPhone does not vibrate for a web page.
  */
 export function RemoteTouch({
   rfb,
@@ -74,6 +82,23 @@ export function RemoteTouch({
   const [typing, setTyping] = useState(false);
   const [text, setText] = useState("");
   const input = useRef<HTMLInputElement>(null);
+  const layer = useRef<HTMLDivElement>(null);
+  // Where the last hold landed, for a moment.
+  const [held, setHeld] = useState<{ x: number; y: number; n: number } | null>(null);
+  // Only ever drawn on a phone in control, never by the server: read at once.
+  const [hint, setHint] = useState(() => {
+    try {
+      return localStorage.getItem(HINT_KEY) === null;
+    } catch {
+      return false;
+    }
+  });
+  const putAway = () => {
+    setHint(false);
+    try {
+      localStorage.setItem(HINT_KEY, "seen");
+    } catch {}
+  };
 
   // Per-gesture state, read only in handlers.
   const g = useRef<{
@@ -114,6 +139,7 @@ export function RemoteTouch({
   return (
     <>
       <div
+        ref={layer}
         className="absolute inset-0 touch-none select-none [-webkit-touch-callout:none]"
         onContextMenu={(e) => e.preventDefault()}
         onPointerDown={(e) => {
@@ -151,6 +177,11 @@ export function RemoteTouch({
             state.timer = null;
             navigator.vibrate?.(10);
             click(state.x, state.y, RIGHT);
+            const r = layer.current?.getBoundingClientRect();
+            if (!r) return;
+            const n = Date.now();
+            setHeld({ x: state.x - r.left, y: state.y - r.top, n });
+            window.setTimeout(() => setHeld((h) => (h?.n === n ? null : h)), 600);
           }, 500);
         }}
         onPointerMove={(e) => {
@@ -202,8 +233,33 @@ export function RemoteTouch({
           g.current = null;
         }}
       />
+      {/* A ring that grows out from under the finger, which covers the spot -
+          in both inks, as the page under it may be light or dark. */}
+      {held ? (
+        <span
+          key={held.n}
+          aria-hidden
+          className="pointer-events-none absolute size-12 -translate-x-1/2 -translate-y-1/2 animate-ping rounded-full border-2 border-foreground/80 ring-2 ring-background/70 motion-reduce:animate-none"
+          style={{ left: held.x, top: held.y }}
+        />
+      ) : null}
 
       <div className="absolute inset-x-2 bottom-2 z-10 space-y-1.5">
+        {hint && !typing ? (
+          <div className="flex items-center gap-1 rounded-xl bg-popover ps-3">
+            <p className="min-w-0 flex-1 py-1.5 text-meta leading-[1.5] text-dim">
+              스크롤은 두 손가락으로 밀어요 · 길게 누르면 우클릭이에요
+            </p>
+            <button
+              type="button"
+              onClick={putAway}
+              aria-label="닫기"
+              className="tap flex shrink-0 items-center justify-center rounded-lg text-faint transition-colors hover:text-foreground focus-ring"
+            >
+              <X aria-hidden className="size-4" />
+            </button>
+          </div>
+        ) : null}
         {typing ? (
           <form
             onSubmit={(e) => {

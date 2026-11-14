@@ -34,26 +34,28 @@ const step = "w-full sm:w-auto";
 export function PhoneSetup({ who = "owner" }: { who?: "owner" | "guest" }) {
   const guest = who === "guest";
   const [setup, setSetup] = useState<Setup | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // Said under the step whose button it was: at the end of the list it was
+  // two steps away, and below the fold of a phone's sheet.
+  const [error, setError] = useState<{ step: 3 | 5; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [showSignals, setShowSignals] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
 
-  async function load(): Promise<Setup | null> {
+  async function load(step: 3 | 5): Promise<Setup | null> {
     if (setup) return setup;
     setBusy(true);
     try {
       const res = await fetch(guest ? "/api/context/owntracks/setup/guest" : "/api/context/owntracks/setup", { cache: "no-store" });
       const body = await res.json();
       if (!res.ok) {
-        setError(body.error ?? "설정을 불러오지 못했어요.");
+        setError({ step, text: body.error ?? "설정을 불러오지 못했어요." });
         return null;
       }
       setSetup(body as Setup);
       setError(null);
       return body as Setup;
-    } catch {
-      setError("설정을 불러오지 못했어요.");
+    } catch (e) {
+      setError({ step, text: e instanceof TypeError ? SAY.offline : "설정을 불러오지 못했어요." });
       return null;
     } finally {
       setBusy(false);
@@ -67,9 +69,16 @@ export function PhoneSetup({ who = "owner" }: { who?: "owner" | "guest" }) {
       setCopied(key);
       setTimeout(() => setCopied((k) => (k === key ? null : k)), 1500);
     } catch {
-      setError("복사하지 못했어요.");
+      setError({ step: key === "link" ? 3 : 5, text: "복사하지 못했어요." });
     }
   }
+
+  const said = (step: 3 | 5) =>
+    error?.step === step ? (
+      <span role="alert" className="mt-2 block text-aside text-reject">
+        {error.text}
+      </span>
+    ) : null;
 
   return (
     <div>
@@ -103,10 +112,11 @@ export function PhoneSetup({ who = "owner" }: { who?: "owner" | "guest" }) {
                 </Button>
               </span>
             ) : (
-              <Button variant="raised" size="touch" className={`mt-2 ${step}`} onClick={() => void load()} disabled={busy}>
+              <Button variant="raised" size="touch" className={`mt-2 ${step}`} onClick={() => void load(3)} disabled={busy}>
                 {busy ? SAY.loading : "jarvis 설정 불러오기"}
               </Button>
             )}
+            {said(3)}
             <span className="mt-2 block text-aside text-faint">
               OwnTracks가 열렸는데 아무것도 바뀌지 않으면 2번 스위치가 꺼져 있는 거예요. 링크 복사 후 Safari 주소창에 붙여 넣어도 열려요.
             </span>
@@ -136,7 +146,7 @@ export function PhoneSetup({ who = "owner" }: { who?: "owner" | "guest" }) {
                 variant="quiet"
                 size="touch-sm"
                 className={`mt-1 ${step} sm:-ms-3`}
-                onClick={() => void load().then((s) => s && setShowSignals(true))}
+                onClick={() => void load(5).then((s) => s && setShowSignals(true))}
                 disabled={busy}
               >
                 단축어에 넣을 값 보기
@@ -157,14 +167,10 @@ export function PhoneSetup({ who = "owner" }: { who?: "owner" | "guest" }) {
                 ))}
               </ul>
             ) : null}
+            {said(5)}
           </Step>
           )}
       </ol>
-      {error ? (
-        <p role="alert" className="mt-3 text-aside text-reject">
-          {error}
-        </p>
-      ) : null}
     </div>
   );
 }

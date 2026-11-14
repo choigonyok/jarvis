@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { AsOf } from "@/components/shell/as-of";
+import { Failed } from "@/components/shell/failed";
 import { Header, PageTop } from "@/components/shell/header";
 import { TabBar } from "@/components/shell/tab-bar";
-import { Retry } from "@/components/shell/retry";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { Meals } from "@/components/life/meals";
 import { Notes } from "@/components/life/notes";
@@ -142,18 +142,12 @@ export function Life() {
       <main className="scrollbar-hairline inset-x-safe min-h-0 flex-1 overflow-y-auto overscroll-contain under-top pb-tabbar">
         <div className="mx-auto w-full max-w-page px-4 pt-6 pb-12 sm:px-8 sm:pt-10">
           {!book ? (
-            <p className="pt-10 text-center text-ui text-faint">{SAY.loading}</p>
+            <Placeholder />
           ) : [book.notes, book.places, book.things, book.meals].every((x) => x.error) ? (
             // Nothing came back: one sentence for it, not four of the same.
-            <div>
-              <p className="text-display leading-[1.25] font-semibold tracking-tight text-foreground">
-                생활 장부를 불러오지 못했어요
-              </p>
-              <p role="alert" className="mt-2 max-w-[34rem] text-ui leading-[1.6] break-keep text-pretty text-dim">
-                {book.notes.error} 계속 이러면 상태 탭에서 인지 루프(mind)가 응답하는지 보세요.
-              </p>
-              <Retry onRetry={load} />
-            </div>
+            <Failed onRetry={load} className="max-w-[34rem] break-keep text-pretty">
+              생활 장부를 불러오지 못했어요. {book.notes.error} 계속 이러면 상태 탭에서 인지 루프(mind)가 응답하는지 보세요.
+            </Failed>
           ) : (
             <>
               <Stale of={[book.notes, book.places, book.things, book.meals]} onRetry={load} className="mb-3" />
@@ -293,14 +287,37 @@ function Stale({ of, onRetry, className }: { of: Kept<unknown>[]; onRetry: () =>
   return <AsOf at={new Date(Math.min(...at))} failed onRetry={() => void onRetry()} className={className} />;
 }
 
-/** One part that did not come back, while the others did. */
+/** One part that did not come back, while the others did - in its sheet, so quiet. */
 function Trouble({ what, children, onRetry }: { what: string; children: ReactNode; onRetry: () => unknown }) {
   return (
-    <div className="py-3">
-      <p role="alert" className="text-ui leading-[1.55] break-keep text-pretty text-dim">
-        {what} 불러오지 못했어요. {children}
+    <Failed quiet onRetry={onRetry} className="py-3 break-keep text-pretty">
+      {what} 불러오지 못했어요. {children}
+    </Failed>
+  );
+}
+
+/**
+ * The screen's place while the ledgers are read: the headline, the words
+ * under it and the four lines, as still blocks of their size.
+ */
+function Placeholder() {
+  return (
+    <div>
+      <p role="status" className="sr-only">
+        {SAY.loading}
       </p>
-      <Retry onRetry={onRetry} />
+      <div aria-hidden>
+        <div className="h-8 w-56 rounded-lg bg-well" />
+        <div className="mt-3 h-4 w-full max-w-[34rem] rounded bg-well" />
+        <div className="mt-2 h-4 w-2/3 max-w-[22rem] rounded bg-well" />
+        <div className="mt-7">
+          {["w-28", "w-24", "w-20", "w-16"].map((w) => (
+            <div key={w} className="flex h-14 items-center">
+              <div className={cn("h-4 rounded bg-well", w)} />
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

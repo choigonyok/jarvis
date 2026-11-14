@@ -2,6 +2,8 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { ChevronDown, RotateCw } from "lucide-react";
+import { AsOf } from "@/components/shell/as-of";
+import { Failed } from "@/components/shell/failed";
 import { Header, PageTop } from "@/components/shell/header";
 import { TabBar } from "@/components/shell/tab-bar";
 import { StandingBar } from "@/components/shell/standing-bar";
@@ -17,6 +19,7 @@ import {
   since,
 } from "@/lib/status";
 import { HttpError, useResource } from "@/lib/use-resource";
+import { SAY } from "@/lib/say";
 import { isPending } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
 import {
@@ -55,7 +58,9 @@ import { SavedLogins } from "./saved-logins";
  *
  * States reuse the product's marks rather than adding colours: --online for
  * ok, --reject for a fault, the breathing hollow ring ("waiting on you") for
- * a warning, a faint dash for "not measured".
+ * a warning, a faint dash for one with no measure: not read yet (읽지 못함),
+ * or with no key to read with (측정 안 함) - counted apart, as they are not
+ * the same news.
  */
 export function Status() {
   const { proposals, connection } = useThread();
@@ -155,12 +160,21 @@ export function Status() {
           different elements: the notch inset outside, the gutter inside. */}
       <main className="scrollbar-hairline inset-x-safe min-h-0 flex-1 overflow-y-auto overscroll-contain under-top pb-tabbar">
         <div className="mx-auto w-full max-w-page px-4 pt-6 pb-10 sm:px-8 sm:pt-10">
+          {/* Never read: the failure in its place, with the way back - it had
+              been the loading line's faint centred words, with nothing to
+              press, on the screen that is opened to see what is broken. A read
+              again that failed keeps the report and says when it is from. */}
           {!report ? (
-            <p className="pt-10 text-center text-ui text-faint">
-              {error ?? "상태를 불러오는 중…"}
-            </p>
+            error ? (
+              <Failed onRetry={() => status.reload()} className="pt-4">
+                {error}
+              </Failed>
+            ) : (
+              <Placeholder />
+            )
           ) : (
             <>
+              {error ? <AsOf at={status.readAt} failed onRetry={() => void status.reload()} className="mb-3" /> : null}
               <Headline results={[...results, ...spend]} onPick={reveal} />
 
               <div className="mt-3 flex items-center gap-3 text-meta text-faint">
@@ -174,19 +188,18 @@ export function Status() {
                   <RotateCw aria-hidden className={cn("size-3.5", refreshing && "anim-spin-slow")} />
                   {refreshing ? "확인하는 중" : "다시 확인"}
                 </button>
-                {error ? <span role="alert">{error}</span> : null}
               </div>
 
               <ul className="mt-7 divide-y divide-edge-soft border-y border-edge-soft">
                 {order.map((group) => {
                   const rows = group === USAGE ? spend : results.filter((r) => r.group === group);
                   if (rows.length === 0) return null;
-                  const { worst, tally, trouble } = standing(rows);
+                  const { worst, off, tally, trouble } = standing(rows);
                   return (
                     <DetailRow
                       key={group}
                       title={group}
-                      mark={<Mark state={worst} />}
+                      mark={<Mark state={worst} off={off} />}
                       line={trouble}
                       figure={<span className={worst === "fail" || worst === "warn" ? "text-dim" : undefined}>{tally}</span>}
                       open={shown === group}
@@ -261,11 +274,29 @@ type Line = Pick<CheckResult, "id" | "name" | "summary"> &
   Partial<CheckResult> & {
     /** What opening it shows, when it is not the check's facts and rule. */
     detail?: ReactNode;
+    /** Unknown because there is nothing to measure with (no key), not because it is not read yet. */
+    off?: boolean;
   };
 
-function windowRow(id: string, name: string, w: UsageWindow | undefined, status: string | undefined): Line {
+/**
+ * The window a refusal is said on. The CLI's status is the subscription's,
+ * not a window's: given to both, one window running out was two faults in
+ * the headline, and the week a red mark beside "남은 60%". A full window says
+ * it by itself; with neither full the refusal goes on the fuller one - and on
+ * none once a window has started over since it was read, as it may be over.
+ */
+function refusedWindow(u: Usage): "five" | "week" | null {
+  if (u.status !== "rejected" || u.fiveHour?.reset || u.sevenDay?.reset) return null;
+  const five = pct(u.fiveHour);
+  const week = pct(u.sevenDay);
+  if (five === null && week === null) return null;
+  if ((five ?? 0) >= 100 || (week ?? 0) >= 100) return null;
+  return (week ?? -1) > (five ?? -1) ? "week" : "five";
+}
+
+function windowRow(id: string, name: string, w: UsageWindow | undefined, refused: boolean): Line {
   const p = pct(w);
-  const state: CheckState = p == null ? "unknown" : p >= 100 || status === "rejected" ? "fail" : p >= 90 ? "warn" : "ok";
+  const state: CheckState = p == null ? "unknown" : p >= 100 || refused ? "fail" : p >= 90 ? "warn" : "ok";
   return {
     id,
     name,
@@ -284,10 +315,14 @@ function windowRow(id: string, name: string, w: UsageWindow | undefined, status:
 }
 
 function usageRows(u: Usage | null): Line[] {
-  if (!u) return [];
+  // Not come yet, or not coming - the agent's /usage failing is never said
+  // (lib/use-usage.ts): either way the group keeps its place and says it is
+  // not read, rather than missing, which counted the screen as all fine.
+  if (!u) return [{ id: "usage", name: "Claude 사용량", state: "unknown", summary: "아직 읽지 못했어요." }];
+  const refused = refusedWindow(u);
   const rows: Line[] = [
-    windowRow("usage.five", "Claude 5시간", u.fiveHour, u.status),
-    windowRow("usage.week", "Claude 주간", u.sevenDay, u.status),
+    windowRow("usage.five", "Claude 5시간", u.fiveHour, refused === "five"),
+    windowRow("usage.week", "Claude 주간", u.sevenDay, refused === "week"),
   ];
   const api = u.api;
   if (api) {
@@ -296,6 +331,7 @@ function usageRows(u: Usage | null): Line[] {
       id: "usage.memory",
       name: "기억 API",
       state: !api.enabled ? "unknown" : p != null && p >= 100 ? "warn" : "ok",
+      off: !api.enabled,
       figure: `${usd(api.todayUsd)} / ${usd(api.dailyUsd)}`,
       meter: p,
       summary: !api.enabled
@@ -314,6 +350,7 @@ function usageRows(u: Usage | null): Line[] {
       id: "usage.search",
       name: "검색 API",
       state: !v.enabled ? "unknown" : v.billedUsd > 0 || (p ?? 0) >= 90 ? "warn" : "ok",
+      off: !v.enabled,
       figure: usd(v.todayUsd),
       meter: p,
       summary: !v.enabled ? "API 키가 없어요." : `무료 토큰 ${freeLabel(v)} 사용 · 청구 ${usd(v.billedUsd)}`,
@@ -346,7 +383,10 @@ function Headline({ results, onPick }: { results: Line[]; onPick: (id: string) =
   const top = roots(results as CheckResult[]);
   const fails = top.filter((r) => r.state === "fail").length;
   const warns = top.length - fails;
-  const unmeasured = results.filter((r) => r.state === "unknown").length;
+  // Not read yet - a window just started over, a check not heard from - is
+  // not "not measured": that is only what has no key to measure with.
+  const off = results.filter((r) => r.state === "unknown" && r.off).length;
+  const unread = results.filter((r) => r.state === "unknown").length - off;
 
   let sentence = "모두 정상이에요";
   if (fails > 0) sentence = `${fails}개가 이상해요`;
@@ -378,11 +418,37 @@ function Headline({ results, onPick }: { results: Line[]; onPick: (id: string) =
         </ul>
       ) : (
         <p className="mt-2 text-ui text-dim">
-          {results.length}개 항목을 확인했어요
-          {unmeasured > 0 ? `. ${unmeasured}개는 측정하지 않아요.` : "."}
+          {results.length}개 항목을 확인했어요.
+          {unread > 0 ? ` ${unread}개는 아직 읽지 못했어요.` : ""}
+          {off > 0 ? ` ${off}개는 측정하지 않아요.` : ""}
         </p>
       )}
       {extra ? <p className="mt-2 text-aside text-faint">{extra}</p> : null}
+    </div>
+  );
+}
+
+/**
+ * The screen's place while the report is read: the headline, the line under
+ * it and the groups' lines, as still blocks of their size.
+ */
+function Placeholder() {
+  return (
+    <div>
+      <p role="status" className="sr-only">
+        {SAY.loading}
+      </p>
+      <div aria-hidden>
+        <div className="h-8 w-44 rounded-lg bg-well" />
+        <div className="mt-3 h-4 w-56 rounded bg-well" />
+        <div className="mt-7">
+          {["w-28", "w-20", "w-24", "w-16", "w-24"].map((w, i) => (
+            <div key={i} className="flex h-14 items-center">
+              <div className={cn("h-4 rounded bg-well", w)} />
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -391,16 +457,17 @@ function Headline({ results, onPick }: { results: Line[]; onPick: (id: string) =
 function standing(rows: Line[]) {
   const count = (state: CheckState) => rows.filter((r) => r.state === state).length;
   const [fail, warn, unknown] = [count("fail"), count("warn"), count("unknown")];
+  const off = rows.filter((r) => r.state === "unknown" && r.off).length;
   // "모두 정상" only when every row was measured and is fine.
   const tally =
     fail || warn
       ? [fail && `이상 ${fail}`, warn && `주의 ${warn}`].filter(Boolean).join(" · ")
       : unknown
-        ? `측정 안 함 ${unknown}`
+        ? [unknown > off && `읽지 못함 ${unknown - off}`, off && `측정 안 함 ${off}`].filter(Boolean).join(" · ")
         : "모두 정상";
   const worst: CheckState = fail ? "fail" : warn ? "warn" : unknown ? "unknown" : "ok";
   const trouble = rows.filter((r) => r.state === "fail" || r.state === "warn").map((r) => r.name).join(", ");
-  return { worst, tally, trouble: trouble || undefined };
+  return { worst, off: unknown > 0 && unknown === off, tally, trouble: trouble || undefined };
 }
 
 /**
@@ -481,7 +548,7 @@ function Row({
         aria-expanded={open}
         className="flex min-h-12 w-full items-start gap-3 py-3 text-left focus-ring"
       >
-        <Mark state={r.state} className="mt-[7px]" />
+        <Mark state={r.state} off={r.off} className="mt-[7px]" />
         <span className="min-w-0 flex-1">
           <span className="flex items-baseline justify-between gap-3">
             <span className={cn("text-body", trouble ? "text-foreground" : "text-ink")}>{r.name}</span>
@@ -592,15 +659,15 @@ const markLabel: Record<CheckState, string> = {
   ok: "정상",
   warn: "주의",
   fail: "이상",
-  unknown: "측정 안 함",
+  unknown: "읽지 못함",
 };
 
 /** One 7px box for every state, so the column of marks lines up. A row with no state (a setup) keeps the space. */
-function Mark({ state, className }: { state?: CheckState; className?: string }) {
+function Mark({ state, off, className }: { state?: CheckState; off?: boolean; className?: string }) {
   return (
     <span
       role={state ? "img" : undefined}
-      aria-label={state ? markLabel[state] : undefined}
+      aria-label={state ? (state === "unknown" && off ? "측정 안 함" : markLabel[state]) : undefined}
       className={cn("flex size-[7px] shrink-0 items-center justify-center", className)}
     >
       {state === "ok" ? (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 import { Header, PageTop } from "@/components/shell/header";
 import { TabBar } from "@/components/shell/tab-bar";
@@ -11,9 +11,10 @@ import { Pager } from "@/components/ui/pager";
 import { Sheet, SheetTrigger } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { AsOf } from "@/components/shell/as-of";
 import { Failed } from "@/components/shell/failed";
 import { usePaged } from "@/lib/paging";
-import { useKakao, type KakaoMessage, type KakaoRoom, type Source } from "@/lib/use-kakao";
+import { LIMIT, useKakao, type KakaoMessage, type KakaoRoom, type Source } from "@/lib/use-kakao";
 import { useThread } from "@/lib/use-thread";
 import { isPending } from "@/lib/thread";
 import { SAY } from "@/lib/say";
@@ -83,7 +84,14 @@ export function Kakao() {
 }
 
 function Feed({ source }: { source: Source }) {
-  const { rooms, selected, setSelected, messages, loading, error, hydrated, reload } = useKakao(source);
+  const { rooms, selected, setSelected, messages, loading, error, readAt, hydrated, reload } = useKakao(source);
+  // A read again that fails leaves the conversation on screen, said to be
+  // from when it was read: one poll lost in a tunnel had put "불러오지
+  // 못했어요" in its place until the next, and it came back at its top. Only
+  // what never came is the failure in its place - an iMessage collector not
+  // set up yet says how to set it up instead.
+  const stale = error !== null && rooms.length > 0 && !loading;
+  const failed = error !== null && (rooms.length > 0 ? loading : source !== "imessage");
 
   // 방을 열면 맨 아래(최근 대화)로. 그 뒤 수집이 새로 고칠 때는, 이미 맨
   // 아래를 보고 있을 때만 따라 내려간다 - 위로 올려 읽던 사람을 몇 초마다
@@ -111,7 +119,18 @@ function Feed({ source }: { source: Source }) {
       <main className="px-gutter pb-tabbar mx-auto flex min-h-0 w-full max-w-page flex-1 flex-col overflow-x-hidden">
         {/* 방 고르기. 수집된 방만 나온다 - 목록 상태만 있고 본문이 없는 방은
             읽을 것이 없으므로 자리를 차지할 이유가 없다. */}
-        {rooms.length > 0 ? <RoomPicker rooms={rooms} selected={selected} onSelect={setSelected} /> : null}
+        {rooms.length > 0 ? (
+          <RoomPicker rooms={rooms} selected={selected} onSelect={setSelected} />
+        ) : !hydrated ? (
+          // The picker's place on opening, so the conversation is not pushed
+          // down by it when the rooms come.
+          <div aria-hidden className="shrink-0 py-1 sm:py-2">
+            <div className="flex h-11 items-center">
+              <div className="h-9 w-36 rounded-lg bg-well" />
+            </div>
+          </div>
+        ) : null}
+        {stale ? <AsOf at={readAt} failed onRetry={() => void reload()} className="shrink-0 pb-1" /> : null}
 
         <div
           ref={scroller}
@@ -121,7 +140,9 @@ function Feed({ source }: { source: Source }) {
           }}
           className="scrollbar-hairline min-h-0 flex-1 touch-pan-y overflow-x-hidden overflow-y-auto overscroll-contain pb-4 sm:pb-6"
         >
-          {!hydrated ? null : error && source !== "imessage" ? (
+          {!hydrated ? (
+            <Placeholder />
+          ) : failed ? (
             <Failed onRetry={reload} className="pt-10">
               {error}
             </Failed>
@@ -147,10 +168,16 @@ function Feed({ source }: { source: Source }) {
                 </>
               )}
             </Empty>
-          ) : loading && !error ? (
+          ) : loading ? (
             <Placeholder />
           ) : (
             <div className="space-y-2.5">
+              {/* Where the list stops when it was cut there: a busy room's
+                  two hundred are a day or two, and the top of them had read
+                  as the start of the conversation. */}
+              {messages.length >= LIMIT ? (
+                <p className="pt-2 text-center text-meta text-faint">최근 {LIMIT}개만 보여요</p>
+              ) : null}
               {messages.map((m, i) => (
                 <Line key={i} message={m} previous={messages[i - 1]} />
               ))}
@@ -198,6 +225,25 @@ function RoomPicker({
     list.current?.scrollTo({ top: 0 });
   };
 
+  // A room that wrapped onto the line never shown is out of reach of a key
+  // and a screen reader as well. Up to 199 unseen chips stood in the tab
+  // order, and the browser scrolled the clipped strip to show the one
+  // focused, taking the recent rooms out of sight with no way back.
+  const strip = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = strip.current;
+    if (!el) return;
+    const mark = () => {
+      const chips = [...el.children] as HTMLElement[];
+      const line = chips[0]?.offsetTop ?? 0;
+      for (const chip of chips) chip.inert = chip.offsetTop > line;
+    };
+    mark();
+    const resized = new ResizeObserver(mark);
+    resized.observe(el);
+    return () => resized.disconnect();
+  });
+
   return (
     <div className="flex shrink-0 items-start gap-1 py-1 sm:py-2">
       <Sheet
@@ -229,7 +275,7 @@ function RoomPicker({
         >
           <BottomSheetHeader className="sm:px-4">
             <BottomSheetTitle className="text-body">
-              대화방 <span className="tabular-nums text-faint">{rooms.length}</span>
+              대화방 <span className="tabular-nums text-faint">{rooms.length >= LIMIT ? `${LIMIT}+` : rooms.length}</span>
             </BottomSheetTitle>
           </BottomSheetHeader>
           {/* Found by name, gone through with the arrow keys; Enter opens the
@@ -272,12 +318,13 @@ function RoomPicker({
       </Sheet>
 
       {/* The rest, newest first: one line's worth, and nothing sideways. */}
-      <div className="flex h-11 min-w-0 flex-1 flex-wrap content-start gap-x-0.5 gap-y-8 overflow-hidden">
+      <div ref={strip} className="flex h-11 min-w-0 flex-1 flex-wrap content-start gap-x-0.5 gap-y-8 overflow-hidden">
         {others.map((room) => (
           <button
             key={room.id}
             type="button"
             onClick={() => onSelect(room.id)}
+            aria-label={`${room.name}, 메시지 ${room.messages}개`}
             className="group flex h-11 max-w-full shrink-0 items-center outline-none"
           >
             <span className="flex min-w-0 items-center rounded-md px-2.5 py-2 text-aside whitespace-nowrap text-faint transition-colors group-hover:text-dim group-focus-visible:ring-3 group-focus-visible:ring-ring/50">
@@ -292,9 +339,9 @@ function RoomPicker({
 }
 
 /**
- * A room's place while its messages are read: still blocks where they will
- * be - theirs on the left past the times, mine on the right - and nothing of
- * the room chosen before.
+ * A room's place while its messages are read - and on opening, while the
+ * rooms are: still blocks where they will be - theirs on the left past the
+ * times, mine on the right - and nothing of the room chosen before.
  */
 function Placeholder() {
   return (
@@ -319,6 +366,36 @@ function when(room: KakaoRoom): string {
   if (room.lastDate === today) return room.lastTime;
   return /(\d+월 \d+일)/.exec(room.lastDate)?.[1] ?? room.lastDate;
 }
+
+/**
+ * A message's words with its web addresses as links, drawn as the
+ * conversation's are. Reading is all this screen does, and what is read here
+ * - a booking link, a map, an address, an account number - is taken
+ * elsewhere: the words are selectable on a touch screen too, as the
+ * conversation's are, and a link opens. Neither could be done on a phone.
+ */
+function linked(text: string): ReactNode {
+  const parts = text.split(LINK);
+  if (parts.length === 1) return text;
+  return parts.map((part, i) =>
+    i % 2 === 1 ? (
+      <a
+        key={i}
+        href={part}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="underline decoration-dim underline-offset-[3px] transition-colors hover:decoration-foreground focus-ring"
+      >
+        {part}
+      </a>
+    ) : (
+      part
+    ),
+  );
+}
+
+/** An address up to the space after it, less the punctuation a sentence puts after it. */
+const LINK = /(https?:\/\/[^\s<>"']*[^\s<>"'.,!?)\]}」』…])/;
 
 /**
  * One message. The date only appears when it changes, so a long day of
@@ -355,8 +432,8 @@ function Line({
             <span className="shrink-0 text-meta text-faint tabular-nums">
               {message.time}
             </span>
-            <p className="max-w-[78%] rounded-xl bg-glass-raised px-3 py-1.5 text-body leading-[1.7] [overflow-wrap:anywhere] whitespace-pre-wrap text-foreground sm:max-w-[26rem]">
-              {message.text}
+            <p className="selectable max-w-[78%] rounded-xl bg-glass-raised px-3 py-1.5 text-body leading-[1.7] [overflow-wrap:anywhere] whitespace-pre-wrap text-foreground sm:max-w-[26rem]">
+              {linked(message.text)}
             </p>
           </>
         ) : (
@@ -368,8 +445,8 @@ function Line({
               {!repeated && message.sender && (
                 <p className="text-meta text-dim">{message.sender}</p>
               )}
-              <p className="text-body leading-[1.7] [overflow-wrap:anywhere] whitespace-pre-wrap text-ink sm:max-w-[30rem]">
-                {message.text}
+              <p className="selectable text-body leading-[1.7] [overflow-wrap:anywhere] whitespace-pre-wrap text-ink sm:max-w-[30rem]">
+                {linked(message.text)}
               </p>
             </div>
           </>

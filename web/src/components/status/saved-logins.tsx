@@ -12,11 +12,12 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Failed } from "@/components/shell/failed";
 import { Button } from "@/components/ui/button";
 import { Pager } from "@/components/ui/pager";
 import { usePaged } from "@/lib/paging";
 import { API } from "@/lib/thread";
-import { SAY } from "@/lib/say";
+import { SAY, failureText } from "@/lib/say";
 import { dateTime } from "@/lib/when";
 
 type Login = { domain: string; name: string; hint: string; lastUsedAt?: string; uses: number };
@@ -55,12 +56,12 @@ export function SavedLogins() {
   async function load() {
     try {
       const res = await fetch(`${API}/vault`, { cache: "no-store" });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error ?? "불러오지 못했어요.");
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body) throw new Error(body?.error ?? SAY.couldNotLoad);
       setData(body);
       setError(null);
     } catch (e) {
-      setError((e as Error).message || "불러오지 못했어요.");
+      setError(failureText(e, SAY.couldNotLoad));
     }
   }
 
@@ -75,25 +76,54 @@ export function SavedLogins() {
       const res = await fetch(`${API}/vault/${encodeURIComponent(domain)}`, { method: "DELETE" });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body.error ?? "지우지 못했어요.");
+        throw new Error(body.error ?? SAY.couldNotDelete);
       }
       await load();
     } catch (e) {
-      setError((e as Error).message);
+      setError(failureText(e, SAY.couldNotDelete));
     } finally {
       setForgetting(null);
     }
   }
 
+  const intro = (
+    <p className="text-aside leading-relaxed text-dim">
+      대화에서 &ldquo;쿠팡 로그인 정보 저장해줘&rdquo;라고 하면 저장 카드가 올라와요. 카드에 넣은 아이디·비밀번호는 암호화해서
+      보관하고, 그 사이트의 로그인 화면에서만 자동으로 넣어요. Jarvis는 값을 볼 수 없어요.
+    </p>
+  );
+  // Not read yet: the sites' place under the words, and a failure there with
+  // the way back - a faint line had said it, and only closing the sheet and
+  // opening it again read again.
   if (!data) {
-    return <p className="py-2 text-aside text-faint">{error ?? SAY.loading}</p>;
+    return (
+      <div className="space-y-4 py-1">
+        {intro}
+        {error ? (
+          <Failed quiet onRetry={load}>
+            {error}
+          </Failed>
+        ) : (
+          <div>
+            <p role="status" className="sr-only">
+              {SAY.loading}
+            </p>
+            <div aria-hidden>
+              {["w-36", "w-28"].map((w) => (
+                <div key={w} className="py-2.5">
+                  <div className={`h-4 rounded bg-well ${w}`} />
+                  <div className="mt-1.5 h-3 w-48 rounded bg-well" />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
   }
   return (
     <div className="space-y-4 py-1">
-      <p className="text-aside leading-relaxed text-dim">
-        대화에서 &ldquo;쿠팡 로그인 정보 저장해줘&rdquo;라고 하면 저장 카드가 올라와요. 카드에 넣은 아이디·비밀번호는 암호화해서
-        보관하고, 그 사이트의 로그인 화면에서만 자동으로 넣어요. Jarvis는 값을 볼 수 없어요.
-      </p>
+      {intro}
       {error ? (
         <p role="alert" className="text-aside text-reject">
           {error}

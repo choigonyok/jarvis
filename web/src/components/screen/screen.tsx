@@ -2,15 +2,27 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { type RemoteRFB, RemoteTouch } from "@/components/screen/remote-touch";
+import { Failed } from "@/components/shell/failed";
 import { Header, PageTop } from "@/components/shell/header";
 import { TabBar } from "@/components/shell/tab-bar";
 import { StandingBar } from "@/components/shell/standing-bar";
-import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { onAsked, onShown } from "@/lib/resume";
+import { SAY } from "@/lib/say";
+import { HttpError } from "@/lib/use-resource";
 import { useThread } from "@/lib/use-thread";
 import { isPending } from "@/lib/thread";
 import { cn } from "@/lib/utils";
 
-type State = "connecting" | "open" | "closed";
+/**
+ * Not connected is said with why, as far as the page can tell: the ticket
+ * refused (in the console server's words), no network, the screen's password
+ * refused, a connection that was open and dropped, or one that never opened -
+ * the container not answering, the one case the docker command is for. All of
+ * them had read "브라우저 컨테이너가 응답하지 않아요" with that command.
+ */
+type State = { at: "connecting" | "open" } | { at: "closed"; why: string; container?: boolean };
+
+const OPEN_FAILED = "원격 화면을 열지 못했어요.";
 
 /**
  * What the agent is looking at.
@@ -40,8 +52,20 @@ export function Screen({ vncUrl, ticketed = false }: { vncUrl: string; ticketed?
     () => window.matchMedia("(pointer: coarse)").matches,
     () => false,
   );
-  const [state, setState] = useState<State>("connecting");
+  const [state, setState] = useState<State>({ at: "connecting" });
   const [controlling, setControlling] = useState(false);
+  // Each one is a connection of its own, with a ticket of its own.
+  const [attempt, setAttempt] = useState(0);
+  const closed = useRef(false);
+  useEffect(() => {
+    closed.current = state.at === "closed";
+  }, [state]);
+
+  const reconnect = useCallback(() => {
+    setControlling(false);
+    setState({ at: "connecting" });
+    setAttempt((n) => n + 1);
+  }, []);
 
   useEffect(() => {
     const target = mount.current;
@@ -55,8 +79,9 @@ export function Screen({ vncUrl, ticketed = false }: { vncUrl: string; ticketed?
     // it is fixed.
     const address: Promise<{ url: string; password?: string }> = ticketed
       ? fetch("/api/screen/ticket", { cache: "no-store" }).then(async (res) => {
-          if (!res.ok) throw new Error(String(res.status));
-          return (await res.json()) as { url: string; password?: string };
+          const body = await res.json().catch(() => ({}));
+          if (!res.ok) throw new HttpError(res.status, body.error ?? OPEN_FAILED);
+          return body as { url: string; password?: string };
         })
       : Promise.resolve({ url: vncUrl || defaultURL() });
 
@@ -76,16 +101,41 @@ export function Screen({ vncUrl, ticketed = false }: { vncUrl: string; ticketed?
       // its own grey behind it would show as a second surface.
       instance.background = "transparent";
 
-      instance.addEventListener("connect", () => setState("open"));
+      let opened = false;
+      let refused = false;
+      instance.addEventListener("connect", () => {
+        opened = true;
+        if (live) setState({ at: "open" });
+      });
+      // A wrong password fails the handshake; a missing one leaves noVNC
+      // waiting for it, which had kept "connecting" up for good.
+      instance.addEventListener("securityfailure", () => {
+        refused = true;
+      });
+      instance.addEventListener("credentialsrequired", () => {
+        refused = true;
+        instance.disconnect();
+      });
       instance.addEventListener("disconnect", () => {
-        setState("closed");
+        if (!live) return;
         setControlling(false);
+        setState(
+          refused
+            ? { at: "closed", why: "화면 비밀번호가 맞지 않아요." }
+            : opened
+              ? { at: "closed", why: "화면 연결이 끊겼어요." }
+              : { at: "closed", why: "브라우저 컨테이너가 응답하지 않아요.", container: true },
+        );
       });
 
       client = instance;
       rfb.current = instance as unknown as RemoteRFB;
-    }).catch(() => {
-      if (live) setState("closed");
+    }).catch((err: unknown) => {
+      if (!live) return;
+      // A failed fetch or module load is a TypeError: the network. Anything
+      // else but the ticket's own refusal speaks English, so is not repeated.
+      const why = err instanceof HttpError ? err.message : err instanceof TypeError ? SAY.offline : OPEN_FAILED;
+      setState({ at: "closed", why });
     });
 
     return () => {
@@ -93,7 +143,36 @@ export function Screen({ vncUrl, ticketed = false }: { vncUrl: string; ticketed?
       client?.disconnect();
       rfb.current = null;
     };
-  }, [vncUrl, ticketed]);
+  }, [vncUrl, ticketed, attempt]);
+
+  // A phone kills a put-away app's sockets without a word, which left the
+  // last frame standing as if it were live. So the socket is closed on
+  // leaving and a new one, on a new ticket, opened on coming back - once,
+  // though a page back from the back-forward cache says so twice. Asked to
+  // read again (the network back, a pull to refresh), a screen that is not
+  // there tries once more; one that is stays as it is.
+  useEffect(() => {
+    let away = false;
+    const hidden = () => {
+      if (document.visibilityState !== "hidden") return;
+      away = true;
+      rfb.current?.disconnect();
+    };
+    document.addEventListener("visibilitychange", hidden);
+    const offShown = onShown(() => {
+      if (!away) return;
+      away = false;
+      reconnect();
+    });
+    const offAsked = onAsked(() => {
+      if (closed.current && !away) reconnect();
+    });
+    return () => {
+      document.removeEventListener("visibilitychange", hidden);
+      offShown();
+      offAsked();
+    };
+  }, [reconnect]);
 
   const toggleControl = useCallback(() => {
     setControlling((on) => {
@@ -134,7 +213,7 @@ export function Screen({ vncUrl, ticketed = false }: { vncUrl: string; ticketed?
         )}
       >
         <div className="mb-2.5 flex shrink-0 items-center justify-between gap-3">
-          {/* The empty states speak inside the well; saying it twice here
+          {/* The well says why the screen is not in it; saying it twice here
               would be the same sentence in two places.
 
               Esc is the desktop way out. A phone has no Esc, so the button on
@@ -152,7 +231,7 @@ export function Screen({ vncUrl, ticketed = false }: { vncUrl: string; ticketed?
           <button
             type="button"
             onClick={toggleControl}
-            disabled={state !== "open"}
+            disabled={state.at !== "open"}
             aria-pressed={controlling}
             className={cn(
               "flex shrink-0 items-center justify-center rounded-lg px-3 text-aside transition-colors outline-none",
@@ -191,27 +270,24 @@ export function Screen({ vncUrl, ticketed = false }: { vncUrl: string; ticketed?
           )}
         >
           <div ref={mount} data-no-pull className="absolute inset-0" />
-          {controlling && touch && state === "open" ? <RemoteTouch rfb={rfb} canvasHost={mount} /> : null}
+          {controlling && touch && state.at === "open" ? <RemoteTouch rfb={rfb} canvasHost={mount} /> : null}
 
-          {state !== "open" && (
-            <Empty className="absolute inset-0 px-8">
-              {state === "connecting" ? (
-                <EmptyHeader>
-                  <EmptyTitle>아직 쓰는 화면이 없어요</EmptyTitle>
-                  <EmptyDescription>에이전트가 브라우저를 쓰기 시작하면 여기에 나타나요.</EmptyDescription>
-                </EmptyHeader>
-              ) : (
-                <>
-                  <EmptyHeader>
-                    <EmptyTitle>브라우저 컨테이너가 응답하지 않아요</EmptyTitle>
-                  </EmptyHeader>
-                  <EmptyContent>
-                    <code className="font-mono text-aside text-dim">docker compose up -d browser</code>
-                  </EmptyContent>
-                </>
-              )}
-            </Empty>
-          )}
+          {/* The well is the screen's place while it connects; a failure says
+              why in it, with the way back. */}
+          {state.at === "connecting" ? (
+            <p role="status" className="absolute inset-0 flex items-center justify-center px-8 text-aside text-faint">
+              화면에 연결하는 중…
+            </p>
+          ) : state.at === "closed" ? (
+            <div className="absolute inset-0 flex items-center justify-center px-8">
+              <Failed onRetry={reconnect}>
+                {state.why}
+                {state.container ? (
+                  <code className="mt-1 block font-mono text-aside text-faint">docker compose up -d browser</code>
+                ) : null}
+              </Failed>
+            </div>
+          ) : null}
         </div>
       </main>
 

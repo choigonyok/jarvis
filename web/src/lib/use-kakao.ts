@@ -65,8 +65,15 @@ function fmtTime(epoch: number): string {
   return epoch > 0 ? timeFmt.format(new Date(epoch * 1000)) : "";
 }
 
+/**
+ * The most rooms, and the most messages of a room, read at once - the newest.
+ * The collectors take no cursor to read further back, so a list this long
+ * may not be all there is, and the screen says so.
+ */
+export const LIMIT = 200;
+
 async function fetchRooms(api: string): Promise<KakaoRoom[]> {
-  const res = await fetch(`${api}/chats?limit=200`, { cache: "no-store" });
+  const res = await fetch(`${api}/chats?limit=${LIMIT}`, { cache: "no-store" });
   if (!res.ok) throw new Error(String(res.status));
   const { chats } = (await res.json()) as { chats: ChatWire[] | null };
   return (chats ?? []).map((c) => ({
@@ -81,7 +88,7 @@ async function fetchRooms(api: string): Promise<KakaoRoom[]> {
 
 async function fetchMessages(api: string, chatId: string): Promise<KakaoMessage[]> {
   const res = await fetch(
-    `${api}/messages?chat=${encodeURIComponent(chatId)}&limit=200`,
+    `${api}/messages?chat=${encodeURIComponent(chatId)}&limit=${LIMIT}`,
     { cache: "no-store" },
   );
   if (!res.ok) throw new Error(String(res.status));
@@ -113,8 +120,9 @@ const NONE: KakaoMessage[] = [];
 export function useKakao(source: Source = "kakao") {
   const API = BASE[source];
   const [rooms, setRooms] = useState<KakaoRoom[]>([]);
+  const [roomsAt, setRoomsAt] = useState<number | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
-  const [shown, setShown] = useState<{ room: string; list: KakaoMessage[] } | null>(null);
+  const [shown, setShown] = useState<{ room: string; list: KakaoMessage[]; at: number } | null>(null);
   // What failed last: the rooms, or one room's messages - said for that room only.
   const [error, setError] = useState<{ text: string; room?: string } | null>(null);
   const [hydrated, setHydrated] = useState(false);
@@ -126,6 +134,7 @@ export function useKakao(source: Source = "kakao") {
       fetchRooms(API).then(
         (data) => {
           setRooms(data);
+          setRoomsAt(Date.now());
           setError(null);
           // 처음 들어왔을 때는 가장 최근 방을 연다.
           setSelected((cur) => cur ?? data[0]?.id ?? null);
@@ -145,7 +154,7 @@ export function useKakao(source: Source = "kakao") {
       fetchMessages(API, chatId).then(
         (list) => {
           if (wanted.current !== chatId) return;
-          setShown({ room: chatId, list });
+          setShown({ room: chatId, list, at: Date.now() });
           setError(null);
         },
         () => {
@@ -178,6 +187,8 @@ export function useKakao(source: Source = "kakao") {
   useEffect(() => onResume(reload), [reload]);
 
   const own = shown?.room === selected;
+  // The older of the two reads on screen: the one a failure left standing.
+  const at = own ? Math.min(shown.at, roomsAt ?? shown.at) : roomsAt;
   return {
     rooms,
     selected,
@@ -186,6 +197,8 @@ export function useKakao(source: Source = "kakao") {
     /** The chosen room's messages are on their way. */
     loading: selected !== null && !own,
     error: error && (error.room === undefined || error.room === selected) ? error.text : null,
+    /** When what is shown was read. */
+    readAt: at === null ? null : new Date(at),
     hydrated,
     reload,
   };
