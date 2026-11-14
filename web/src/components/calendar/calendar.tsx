@@ -74,12 +74,13 @@ export function Calendar() {
 
   // The operator writes entries here: a new one on the form, one of theirs
   // changed on the same form (entry-sheet.tsx). The guest's console keeps the
-  // short edit sheet - the couple's space opens only on the operator's side.
+  // short edit sheet, and sees the days' photos without changing them -
+  // uniple holds one session, the operator's.
   const owner = useRole() === "owner";
   const [entry, setEntry] = useState<{ event: CalendarEvent | null; day: string; occurrence?: CalendarEvent } | null>(null);
   const bounds = useMemo(() => gridBounds(cursor), [cursor]);
   const holidays = useHolidays(bounds.from, bounds.to).data;
-  const photos = useDayPhotos(bounds.from, bounds.to, owner);
+  const photos = useDayPhotos(bounds.from, bounds.to);
   const [viewing, setViewing] = useState<number | null>(null);
   // Photos of the day picked to take off together; null while not picking.
   const [picking, setPicking] = useState<ReadonlySet<string> | null>(null);
@@ -97,7 +98,7 @@ export function Calendar() {
   const router = useRouter();
   // The space's blocks: where a day's photo is uploaded for, and the D-day
   // an anniversary entry belongs to.
-  const space = useSpace(owner);
+  const space = useSpace();
   const calendarBlock = space.data?.blocks.find((b) => b.type === "calendar")?.id;
   const ddayBlock = space.data?.blocks.find((b) => b.type === "dday")?.id;
   const uploads = useUploads(calendarBlock ?? null);
@@ -227,7 +228,7 @@ export function Calendar() {
   }, [events, allEvents, creates, attached, photoCells, photos.data, holidays]);
 
   const dayEvents = events.filter((e) => covers(e, selected));
-  const dayPhotos = owner ? (photos.data ?? []).filter((p) => p.date === selected) : [];
+  const dayPhotos = (photos.data ?? []).filter((p) => p.date === selected);
   const dayCreates = creates.filter((g) => g.preview.date === selected);
 
   // Anything waiting outside the six weeks on screen would otherwise be
@@ -361,22 +362,20 @@ export function Calendar() {
                   </button>
                 );
               })}
-              {owner ? (
-                // The days' photos in their cells, in place of the dots.
-                <button
-                  type="button"
-                  aria-pressed={photoCells}
-                  onClick={() => setPhotoCells((v) => !v)}
-                  className={cn(
-                    "tap-y flex h-9 items-center gap-1.5 rounded-full border px-3 text-aside transition-colors outline-none mouse:h-7 mouse:px-2.5",
-                    "focus-ring",
-                    photoCells ? "border-edge bg-glass-raised text-foreground" : "border-edge-soft text-faint hover:text-dim",
-                  )}
-                >
-                  <Images aria-hidden className="size-3.5" />
-                  사진
-                </button>
-              ) : null}
+              {/* The days' photos in their cells, in place of the dots. */}
+              <button
+                type="button"
+                aria-pressed={photoCells}
+                onClick={() => setPhotoCells((v) => !v)}
+                className={cn(
+                  "tap-y flex h-9 items-center gap-1.5 rounded-full border px-3 text-aside transition-colors outline-none mouse:h-7 mouse:px-2.5",
+                  "focus-ring",
+                  photoCells ? "border-edge bg-glass-raised text-foreground" : "border-edge-soft text-faint hover:text-dim",
+                )}
+              >
+                <Images aria-hidden className="size-3.5" />
+                사진
+              </button>
             </div>
 
             {elsewhere.length > 0 ? (
@@ -409,9 +408,10 @@ export function Calendar() {
               {holidays?.[selected] ? <span className="text-faint"> · {holidays[selected]}</span> : null}
             </h3>
 
-            {owner ? (
+            {owner || dayPhotos.length ? (
               // The day's photos: tap one to look at it, make it the day's face
-              // or take it off; a new one goes on the day itself.
+              // or take it off; a new one goes on the day itself. The guest
+              // looks and saves.
               <div className="mb-3 px-2">
                 <PhotoTiles
                   assets={dayPhotos.map((p) => ({
@@ -430,7 +430,7 @@ export function Calendar() {
                     })
                   }
                   trailing={
-                    picking ? null : calendarBlock ? (
+                    picking || !owner ? null : calendarBlock ? (
                       <PickPhotos
                         variant="quiet"
                         label={dayPhotos.length ? "사진" : "이 날에 사진 추가"}
@@ -472,7 +472,7 @@ export function Calendar() {
                       })();
                     }}
                   />
-                ) : dayPhotos.length > 1 ? (
+                ) : owner && dayPhotos.length > 1 ? (
                   <Button variant="quiet" size="touch-sm" onClick={() => setPicking(new Set())} className="-ml-2">
                     여러 장 지우기
                   </Button>
@@ -511,7 +511,7 @@ export function Calendar() {
                       event={event}
                       pending={ghost}
                       onEdit={
-                        event.origin === "dday" && owner && ddayBlock
+                        event.origin === "dday" && ddayBlock
                           ? () => router.push(`/couple/${ddayBlock}`)
                           : editable(event) && !ghost
                             ? () =>
@@ -625,7 +625,7 @@ export function Calendar() {
             return (
               <>
                 <SaveAction asset={p.asset} name={`${p.date}-${i + 1}`} />
-                {!p.cover ? (
+                {owner && !p.cover ? (
                   <ViewerAction
                     onClick={() => {
                       setViewing(null);
@@ -635,15 +635,17 @@ export function Calendar() {
                     대표로
                   </ViewerAction>
                 ) : null}
-                <ViewerAction
-                  danger
-                  onClick={() => {
-                    setViewing(null);
-                    void photoChange(() => writeCouple("DELETE", `/photos/${p.id}`));
-                  }}
-                >
-                  지우기
-                </ViewerAction>
+                {owner ? (
+                  <ViewerAction
+                    danger
+                    onClick={() => {
+                      setViewing(null);
+                      void photoChange(() => writeCouple("DELETE", `/photos/${p.id}`));
+                    }}
+                  >
+                    지우기
+                  </ViewerAction>
+                ) : null}
               </>
             );
           }}

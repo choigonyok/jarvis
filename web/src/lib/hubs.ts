@@ -80,10 +80,11 @@ export const OWNER_HUBS: Hub[] = [
 ];
 
 /**
- * The guest's places, grouped as the operator's are. Five places keep their
- * words; eight screens would be eight wordless icons, and neither the bar nor
- * the header would say where you are. These screens are also every page a
- * guest may open (lib/role.ts GUEST_PAGES).
+ * The guest's places, grouped as the operator's are. Six places keep their
+ * words; nine screens would be nine wordless icons, and neither the bar nor
+ * the header would say where you are. 일정 is the same place as on the
+ * operator's bar, the two of us seen from the guest's side. These screens are
+ * also every page a guest may open (lib/role.ts GUEST_PAGES).
  */
 export const GUEST_HUBS: Hub[] = [
   { id: "talk", label: "대화", screens: [{ href: "/", label: "대화" }] },
@@ -91,11 +92,17 @@ export const GUEST_HUBS: Hub[] = [
     id: "today",
     label: "오늘",
     screens: [
-      { href: "/couple", label: "우리" },
-      { href: "/calendar", label: "캘린더" },
       { href: "/jobs", label: "작업" },
       { href: "/goals", label: "목표" },
       { href: "/transit", label: "출발" },
+    ],
+  },
+  {
+    id: "plan",
+    label: "일정",
+    screens: [
+      { href: "/couple", label: "우리" },
+      { href: "/calendar", label: "캘린더" },
     ],
   },
   { id: "workout", label: "운동", screens: [{ href: "/workout", label: "운동" }] },
