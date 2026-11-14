@@ -46,32 +46,37 @@ function StandingBarView({
         show ? "border-t" : "h-0 border-t-0",
       )}
     >
-      <div className="mx-auto flex w-full max-w-page items-center gap-2.5 px-4 py-2 sm:px-8">
-        <span aria-hidden className="anim-breathe size-[5px] shrink-0 rounded-full bg-dim" />
+      {/* Folded, it has nothing in it: a 결재하기 at no height took the focus
+          out of sight and was read out with nothing to decide. The live
+          region stays, so what comes is said. */}
+      {show ? (
+        <div className="mx-auto flex w-full max-w-page items-center gap-2.5 px-4 py-2 sm:px-8">
+          <span aria-hidden className="anim-breathe size-[5px] shrink-0 rounded-full bg-dim" />
 
-        <p className="min-w-0 flex-1 truncate text-aside text-dim">
-          {/* The oldest one by name: "2건" alone tells you there is work
-              without telling you whether it can wait. */}
-          {count > 1 ? (
-            <>
-              <span className="tnum text-foreground">{count}건</span> 대기 ·{" "}
-              {summarize(pending[0])}
-            </>
-          ) : count === 1 ? (
-            summarize(pending[0])
-          ) : null}
-        </p>
+          <p className="min-w-0 flex-1 truncate text-aside text-dim">
+            {/* The oldest one by name: "2건" alone tells you there is work
+                without telling you whether it can wait. */}
+            {count > 1 ? (
+              <>
+                <span className="tnum text-foreground">{count}건</span> 대기 ·{" "}
+                {summarize(pending[0])}
+              </>
+            ) : (
+              summarize(pending[0])
+            )}
+          </p>
 
-        {onGo ? (
-          <button type="button" onClick={() => first && onGo(first.id)} className={go}>
-            결재하기
-          </button>
-        ) : (
-          <Link href={first ? `/?proposal=${encodeURIComponent(first.id)}` : "/"} className={go}>
-            결재하기
-          </Link>
-        )}
-      </div>
+          {onGo ? (
+            <button type="button" onClick={() => first && onGo(first.id)} className={go}>
+              결재하기
+            </button>
+          ) : (
+            <Link href={first ? `/?proposal=${encodeURIComponent(first.id)}` : "/"} className={go}>
+              결재하기
+            </Link>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }

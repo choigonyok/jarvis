@@ -3,10 +3,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { openTarget, targetOf } from "@/lib/focus";
-import { SAY } from "@/lib/say";
+import { SAY, failureText } from "@/lib/say";
 import { MIND_KEY, NOTE } from "@/lib/kinds";
 import { onInboxRequest } from "@/lib/resume";
 import { Bell, Settings2 } from "lucide-react";
+import { AsOf } from "@/components/shell/as-of";
+import { Failed } from "@/components/shell/failed";
 import { HeaderPanel } from "@/components/shell/panel";
 import { useRole } from "@/components/shell/role";
 import { Button } from "@/components/ui/button";
@@ -94,6 +96,13 @@ const INBOX_PAGE = 20;
 /** The inbox before its first read: one empty list, the same each time it is drawn. */
 const NO_NOTES: Note[] = [];
 
+/**
+ * The bell as the last read left it. Every screen draws its own header, and
+ * a new header's bell had no dot until its own first read came back: the dot
+ * went out and came on again at each change of tab.
+ */
+let lastBell = { unread: 0, alert: false };
+
 export function Notifications() {
   const router = useRouter();
   const role = useRole();
@@ -117,14 +126,21 @@ export function Notifications() {
         cache: "no-store",
         signal,
       });
-      if (!res.ok) throw new HttpError(res.status);
+      if (!res.ok) throw new HttpError(res.status, SAY.couldNotLoad);
       const body = (await res.json()) as { items: Note[]; unread: number; total?: number };
       return { notes: body.items, unread: body.unread, total: body.total ?? body.items.length };
     },
     { interval: 60_000 },
   );
   const notes = inbox.data?.notes ?? NO_NOTES;
-  const unread = inbox.data?.unread ?? 0;
+  const unread = inbox.data ? inbox.data.unread : lastBell.unread;
+  // Red only for an alert not read yet (a service that failed), as in the
+  // list below; anything else unread is the grey of a waiting decision. Red
+  // here is 반려 and 실패, and "you have mail" was neither.
+  const alert = inbox.data ? notes.some((n) => !n.readAt && n.level === "alert") : lastBell.alert;
+  useEffect(() => {
+    if (inbox.data) lastBell = { unread, alert };
+  }, [inbox.data, unread, alert]);
   const total = inbox.data?.total ?? 0;
   const failed = inbox.error !== null;
   const load = inbox.reload;
@@ -202,7 +218,13 @@ export function Notifications() {
       >
         <Bell aria-hidden className="size-[18px] mouse:size-4" />
         {unread ? (
-          <span aria-hidden className="absolute top-2.5 right-2.5 size-[7px] rounded-full bg-reject ring-2 ring-background sm:top-1 sm:right-1" />
+          <span
+            aria-hidden
+            className={cn(
+              "absolute top-2.5 right-2.5 size-[7px] rounded-full ring-2 ring-background sm:top-1 sm:right-1",
+              alert ? "bg-reject" : "bg-foreground/80",
+            )}
+          />
         ) : null}
       </PopoverTrigger>
 
@@ -211,6 +233,11 @@ export function Notifications() {
           title={view === "list" ? "알림" : "알림 설정"}
           aside={
             <>
+              {/* A re-read that failed under a list still shown: the list is
+                  the earlier read's, and says so. */}
+              {view === "list" && failed && notes.length > 0 ? (
+                <AsOf at={inbox.readAt} failed onRetry={() => void load()} />
+              ) : null}
               {view === "list" && unread ? (
                 <button
                   type="button"
@@ -240,7 +267,13 @@ export function Notifications() {
             <>
             <ul ref={list} className="max-h-[min(28rem,70vh)] overflow-x-hidden overflow-y-auto overscroll-contain">
               {failed && notes.length === 0 ? (
-                <li className="px-3.5 py-6 text-center text-aside text-dim">알림 서비스에 연결하지 못했어요.</li>
+                <li className="px-3.5 py-4">
+                  <Failed quiet onRetry={load}>
+                    {failureText(inbox.error, SAY.couldNotLoad)}
+                  </Failed>
+                </li>
+              ) : !inbox.data ? (
+                <InboxPlaceholder />
               ) : notes.length === 0 ? (
                 <li className="px-3.5 py-6 text-center text-aside text-faint">아직 알림이 없어요.</li>
               ) : (
@@ -336,13 +369,32 @@ function HeardRow({ said, failed, onSay }: { said?: Heard; failed: boolean; onSa
  */
 type Attention = { known: boolean; cards: number; evening?: { hour: number; rate: number; rang: number } };
 
+/** What the settings are drawn from: what is set, and the kinds there are to set it for. */
+type Setup = { settings: Settings; categories: Category[] };
+
+/** Both or neither: kinds without the settings have nothing to switch, and settings without the kinds showed no switch at all. */
+async function readSetup(signal: AbortSignal): Promise<Setup> {
+  const [s, c] = await Promise.all([
+    fetch("/api/notify/settings", { cache: "no-store", signal }),
+    fetch("/api/notify/categories", { cache: "no-store", signal }),
+  ]);
+  if (!s.ok || !c.ok) throw new HttpError(s.ok ? c.status : s.status, SAY.couldNotLoad);
+  const settings = (await s.json()) as Settings;
+  const body = (await c.json()) as { categories?: Category[] };
+  return { settings, categories: body.categories ?? [] };
+}
+
 function NotifySettings() {
   const push = usePush();
-  const [set, setSet] = useState<Settings | null>(null);
+  // Read as they open, and not again on coming back to the app: a read asked
+  // while a save is on its way can answer with what was there before it, and
+  // put the switch back.
+  const setup = useResource("notify-settings", readSetup, { resume: false });
+  const set = setup.data?.settings ?? null;
+  const categories = setup.data?.categories ?? [];
   // A save that did not go, said beside what was pressed: the panel scrolls,
   // and a line at its foot was out of sight of a switch at its top.
   const [note, setNote] = useState<{ where: "muted" | "time"; text: string } | null>(null);
-  const [categories, setCategories] = useState<Category[]>([]);
   const [attention, setAttention] = useState<Attention | null>(null);
 
   useEffect(() => {
@@ -351,19 +403,11 @@ function NotifySettings() {
       .then((r) => (r.ok ? (r.json() as Promise<Attention>) : null))
       .then((a) => a && setAttention(a))
       .catch(() => {});
-    void fetch("/api/notify/categories", { cache: "no-store" })
-      .then((r) => (r.ok ? (r.json() as Promise<{ categories: Category[] }>) : null))
-      .then((b) => b && setCategories(b.categories ?? []))
-      .catch(() => {});
-    void fetch("/api/notify/settings", { cache: "no-store" })
-      .then((r) => (r.ok ? (r.json() as Promise<Settings>) : null))
-      .then((s) => s && setSet(s))
-      .catch(() => {});
   }, []);
 
   const save = async (next: Settings, where: "muted" | "time") => {
     const before = set;
-    setSet(next);
+    setup.mutate((d) => d && { ...d, settings: next });
     const res = await fetch("/api/notify/settings", {
       method: "PUT",
       headers: { "content-type": "application/json" },
@@ -375,7 +419,7 @@ function NotifySettings() {
     }
     // Back to what the service still holds: a switch left where it was
     // flipped said the alerts had stopped while they kept coming.
-    setSet(before);
+    setup.mutate((d) => (d && before ? { ...d, settings: before } : d));
     setNote({ where, text: SAY.couldNotSave });
   };
 
@@ -492,7 +536,74 @@ function NotifySettings() {
             ) : null}
           </section>
         </>
-      ) : null}
+      ) : setup.error ? (
+        // Not left out: without them the settings read as this device's alone.
+        <Failed quiet onRetry={setup.reload}>
+          {failureText(setup.error, SAY.couldNotLoad)}
+        </Failed>
+      ) : (
+        <SettingsPlaceholder />
+      )}
+    </div>
+  );
+}
+
+/**
+ * The inbox while its first read is on its way: rows of a notice's shape,
+ * which the notices come into. "아직 알림이 없어요" stood there first, then
+ * gave way to the list.
+ */
+function InboxPlaceholder() {
+  return (
+    <li>
+      <p role="status" className="sr-only">
+        {SAY.loading}
+      </p>
+      <div aria-hidden>
+        {["w-3/5", "w-2/5", "w-1/2"].map((width) => (
+          <div key={width} className="flex gap-2.5 px-3.5 py-2.5">
+            <span className="mt-1.5 size-[6px] shrink-0" />
+            <span className="min-w-0 flex-1">
+              <span className={cn("block h-3.5 rounded bg-well", width)} />
+              <span className="mt-2 block h-3 w-4/5 rounded bg-well" />
+            </span>
+          </div>
+        ))}
+      </div>
+    </li>
+  );
+}
+
+/** The kinds' switches and the times while they are read, as quiet blocks of their shape. */
+function SettingsPlaceholder() {
+  return (
+    <div>
+      <p role="status" className="sr-only">
+        {SAY.loading}
+      </p>
+      <div aria-hidden className="space-y-4">
+        <div>
+          <span className="mb-1.5 block h-3 w-14 rounded bg-well" />
+          {["w-16", "w-24", "w-20"].map((width) => (
+            <div key={width} className="flex min-h-11 items-center gap-3 py-1.5">
+              <span className="min-w-0 flex-1">
+                <span className={cn("block h-3.5 rounded bg-well", width)} />
+                <span className="mt-1.5 block h-3 w-36 rounded bg-well" />
+              </span>
+              <span className="h-6 w-10 shrink-0 rounded-full bg-well" />
+            </div>
+          ))}
+        </div>
+        <div className="space-y-2">
+          <span className="block h-3 w-8 rounded bg-well" />
+          {["w-14", "w-16"].map((width) => (
+            <div key={width} className="flex items-center justify-between gap-3">
+              <span className={cn("block h-3.5 rounded bg-well", width)} />
+              <span className="h-11 w-24 rounded-lg bg-well mouse:h-9" />
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

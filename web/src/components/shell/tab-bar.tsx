@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { Ellipsis, LogOut } from "lucide-react";
 import { BottomSheetContent, BottomSheetHeader, BottomSheetTitle } from "@/components/ui/bottom-sheet";
 import { Sheet, SheetTrigger } from "@/components/ui/sheet";
+import { Spinner } from "@/components/ui/spinner";
 import { HUB_ICON, SCREEN_ICON, lastIn } from "@/components/shell/places";
 import { useRole } from "@/components/shell/role";
 import { ScreenList } from "@/components/shell/screen-menu";
@@ -40,7 +41,7 @@ function TabBarView({
   const role = useRole();
   const [more, setMore] = useState(false);
   const [navigating, startNavigation] = useTransition();
-  const signOut = useSignOut();
+  const out = useSignOut();
 
   const hubs = hubsFor(role);
   // Five places have room for their word.
@@ -214,6 +215,10 @@ function TabBarView({
       aria-label="화면"
       data-tabbar
       data-hidden={hidden || undefined}
+      // Put away, it is out of reach of the keys and of a screen reader too,
+      // not only out of sight: its six places were read out under the words
+      // being typed.
+      inert={hidden}
       className={cn(
         "screen-h pointer-events-none fixed inset-x-0 top-0 z-40 flex flex-col justify-end transition-[transform,opacity] duration-300 ease-out motion-reduce:transition-none sm:hidden",
         hidden ? "translate-y-[140%] opacity-0" : "translate-y-0 opacity-100",
@@ -365,12 +370,18 @@ function TabBarView({
                 <div className="border-t border-edge-soft px-2 pt-2 pb-4">
                   <button
                     type="button"
-                    onClick={() => void signOut()}
+                    disabled={out.busy}
+                    onClick={() => void out.signOut()}
                     className="flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-body text-dim focus-ring"
                   >
                     <LogOut aria-hidden className="size-[18px]" strokeWidth={1.8} />
-                    로그아웃
+                    {out.busy ? "로그아웃하는 중…" : "로그아웃"}
                   </button>
+                  {out.failed ? (
+                    <p role="status" className="px-3 pb-1 text-aside text-reject">
+                      {out.failed}
+                    </p>
+                  ) : null}
                 </div>
               </BottomSheetContent>
             </Sheet>
@@ -379,10 +390,9 @@ function TabBarView({
       </div>
       {menu ? (
         <div
-          ref={menuBox}
           role="menu"
           aria-label={`${hubs[menu.slot].label}의 화면`}
-          className="liquid-glass pointer-events-auto origin-bottom animate-in rounded-3xl p-1.5 duration-150 fade-in-0 zoom-in-95 motion-reduce:animate-none"
+          className="liquid-glass pointer-events-auto origin-bottom animate-in rounded-3xl duration-150 fade-in-0 zoom-in-95 motion-reduce:animate-none"
           // Inline: .liquid-glass sets its own position and next to no paint,
           // and words read over a page need more than the bar's icons do.
           style={{
@@ -393,32 +403,65 @@ function TabBarView({
             bottom: "calc(max(env(safe-area-inset-bottom), 0.5rem) + 4.25rem)",
           }}
         >
-          {hubs[menu.slot].screens.map((tab, i) => {
-            const Icon = SCREEN_ICON[tab.href] ?? Ellipsis;
-            return (
-              <Link
-                key={tab.href}
-                href={tab.href}
+          {/* What a sliding finger chooses among (itemAt): the screens alone. */}
+          <div ref={menuBox} className="p-1.5">
+            {hubs[menu.slot].screens.map((tab, i) => {
+              const Icon = SCREEN_ICON[tab.href] ?? Ellipsis;
+              return (
+                <Link
+                  key={tab.href}
+                  href={tab.href}
+                  role="menuitem"
+                  draggable={false}
+                  aria-current={tab.href === pathname ? "page" : undefined}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    openScreen(menu.slot, tab.href);
+                  }}
+                  className={cn(
+                    "flex h-12 items-center gap-2.5 rounded-[1.1rem] px-3 text-body transition-colors duration-75 select-none focus-ring",
+                    i === menu.at ? "bg-glass-raised text-foreground" : tab.href === pathname ? "text-foreground" : "text-dim",
+                  )}
+                >
+                  <Icon aria-hidden className="size-[18px]" strokeWidth={i === menu.at ? 2.1 : 1.8} />
+                  {tab.label}
+                  {pending > 0 && tab.href === pendingHome ? (
+                    <span aria-hidden className="anim-breathe size-[6px] rounded-full bg-foreground/80" />
+                  ) : null}
+                </Link>
+              );
+            })}
+          </div>
+          {/* 더보기's 로그아웃, as at the foot of its sheet: inside 더보기 the
+              slot goes round its screens and the sheet does not open, and
+              카톡, 화면 and 상태 had no way to sign out. Under the screens and
+              out of itemAt's reach, so a finger let go over it on the way up
+              to them does not sign out: it takes a tap. */}
+          {menu.slot === moreSlot ? (
+            <div className="mx-1.5 border-t border-edge-soft py-1.5">
+              <button
+                type="button"
                 role="menuitem"
-                draggable={false}
-                aria-current={tab.href === pathname ? "page" : undefined}
-                onClick={(e) => {
-                  e.preventDefault();
-                  openScreen(menu.slot, tab.href);
-                }}
-                className={cn(
-                  "flex h-12 items-center gap-2.5 rounded-[1.1rem] px-3 text-body transition-colors duration-75 select-none focus-ring",
-                  i === menu.at ? "bg-glass-raised text-foreground" : tab.href === pathname ? "text-foreground" : "text-dim",
-                )}
+                disabled={out.busy}
+                aria-label={out.busy ? "로그아웃하는 중…" : undefined}
+                onClick={() => void out.signOut()}
+                className="flex h-12 w-full items-center gap-2.5 rounded-[1.1rem] px-3 text-body text-dim select-none focus-ring"
               >
-                <Icon aria-hidden className="size-[18px]" strokeWidth={i === menu.at ? 2.1 : 1.8} />
-                {tab.label}
-                {pending > 0 && tab.href === pendingHome ? (
-                  <span aria-hidden className="anim-breathe size-[6px] rounded-full bg-foreground/80" />
-                ) : null}
-              </Link>
-            );
-          })}
+                {/* The list is too narrow for "로그아웃하는 중…": the mark turns instead. */}
+                {out.busy ? (
+                  <Spinner aria-hidden className="size-[18px]" />
+                ) : (
+                  <LogOut aria-hidden className="size-[18px]" strokeWidth={1.8} />
+                )}
+                로그아웃
+              </button>
+              {out.failed ? (
+                <p role="status" className="px-3 pb-1 text-meta text-reject">
+                  {out.failed}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </nav>

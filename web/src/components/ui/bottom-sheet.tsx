@@ -53,8 +53,8 @@ function BottomSheetContent({
   VariantProps<typeof bottomSheetVariants> & {
     /**
      * Opening a sheet does not throw up the keyboard (or a date picker)
-     * before anything in it has been read: focus stays put unless a sheet
-     * says otherwise.
+     * before anything in it has been read: the focus goes to the sheet
+     * itself, not its first field, unless a sheet says otherwise.
      */
     keepFocus?: boolean
   }) {
@@ -64,6 +64,14 @@ function BottomSheetContent({
       onOpenAutoFocus={(e) => {
         if (keepFocus) e.preventDefault()
         onOpenAutoFocus?.(e)
+        // Inside, all the same: left on the line that opened the sheet, the
+        // focus stayed under the veil, Tab went on through the page behind
+        // it, and the trap had nowhere in the sheet to bring it back to. The
+        // sheet's own box has nothing to type into, so nothing comes up.
+        const box = e.currentTarget
+        if (keepFocus && box instanceof HTMLElement && !box.contains(document.activeElement)) {
+          box.focus({ preventScroll: true })
+        }
       }}
       className={cn(bottomSheetVariants({ width, height }), className)}
       {...props}

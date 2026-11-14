@@ -11,6 +11,7 @@ import { ThemeToggle } from "@/components/shell/theme-toggle";
 import { useRole } from "@/components/shell/role";
 import { useSignOut } from "@/components/shell/sign-out";
 import { UsageBars } from "@/components/shell/usage-bars";
+import { Spinner } from "@/components/ui/spinner";
 import { focusSection, forgetFocus, onFocusRequest } from "@/lib/focus";
 import { hubOf, hubsFor, pendingHome, screenOf, type Tab } from "@/lib/hubs";
 import { useOnline } from "@/lib/online";
@@ -78,7 +79,7 @@ function HeaderView({
   // nobody where they were. The conversation is Jarvis's own.
   const title = here && !strip && here.screens[0].href !== "/" ? here.screens[0].label : "Jarvis";
   const router = useRouter();
-  const signOut = useSignOut();
+  const out = useSignOut();
   const status = connectionCopy[connection];
   // No network at all: said in a line under the header (below), not by the
   // dot - and once it is back, every screen reads again (lib/resume.ts), as
@@ -223,18 +224,25 @@ function HeaderView({
           {/* 더보기 has it on a phone: the name's row is the screens' now. */}
           <button
             type="button"
-            onClick={() => void signOut()}
-            aria-label="로그아웃"
+            disabled={out.busy}
+            onClick={() => void out.signOut()}
+            aria-label={out.busy ? "로그아웃하는 중…" : "로그아웃"}
             className={cn(
               "-mr-2 h-11 min-w-11 items-center justify-center rounded-lg text-faint transition-colors hover:text-dim focus-ring sm:mr-0 sm:px-1.5 sm:text-meta mouse:h-auto mouse:min-w-0 mouse:px-0",
               role === "guest" ? "flex" : "hidden sm:flex",
             )}
           >
-            <LogOut aria-hidden className="size-4 sm:hidden" />
-            <span className="hidden sm:inline">로그아웃</span>
+            {out.busy ? <Spinner aria-hidden className="sm:hidden" /> : <LogOut aria-hidden className="size-4 sm:hidden" />}
+            <span className="hidden sm:inline">{out.busy ? "로그아웃하는 중…" : "로그아웃"}</span>
           </button>
         </div>
       </div>
+      {/* Under the button, at the row's end: the row itself has no room. */}
+      {out.failed ? (
+        <p role="status" className="mx-auto w-full max-w-page px-4 pb-2 text-right text-meta text-reject sm:px-8">
+          {out.failed}
+        </p>
+      ) : null}
       {online ? null : <Offline />}
     </header>
   );

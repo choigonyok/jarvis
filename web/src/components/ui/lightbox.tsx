@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { Download, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, X } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { BackCloses } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
@@ -21,6 +21,10 @@ export type LightboxItem = {
 /** How long a photo takes to slide the rest of the way, once let go. */
 const TURN_MS = 260;
 
+/** The bar's round buttons: the way out, the one before and the next, the original. */
+const barButton =
+  "flex size-11 items-center justify-center rounded-lg outline-none focus-visible:ring-3 focus-visible:ring-white/50 disabled:opacity-40";
+
 /**
  * One photo or video, the whole screen: black ground, a way out, the way to
  * the next one. Everything the console shows full size opens here - the
@@ -34,8 +38,9 @@ const TURN_MS = 260;
  * as the finger lifted would not read as something to swipe. A finger pulls
  * down to close; two fingers zoom into a photo and one moves it around while
  * it is zoomed, and a double tap zooms in and out - the page itself does not
- * zoom (components/shell/no-zoom.tsx), so the photo has to. Arrow keys move,
- * Esc closes (the dialog's own).
+ * zoom (components/shell/no-zoom.tsx), so the photo has to. A video slides
+ * and pulls down the same, away from its own controls. The arrow keys and the
+ * bar's ‹ › move too, Esc closes (the dialog's own).
  */
 export function Lightbox({
   items,
@@ -88,6 +93,10 @@ export function Lightbox({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // A field, the video's own controls (the arrows seek there), a question
+      // asked over the viewer and the browser's own shortcuts keep their keys.
+      if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      if (e.target instanceof Element && e.target.closest("input, textarea, select, [contenteditable='true'], video, [role='alertdialog']")) return;
       if (e.key === "ArrowLeft") turn(-1);
       if (e.key === "ArrowRight") turn(1);
     };
@@ -97,6 +106,14 @@ export function Lightbox({
 
   if (!item) return null;
   const edge = (dx: number) => (dx > 0 && index === 0) || (dx < 0 && index === items.length - 1);
+  // A finger across what is on screen, a photo or a video: the row follows
+  // it, held back at either end, and goes on once let go far or fast enough.
+  const pan = (dx: number) => place(edge(dx) ? dx * 0.3 : dx, false);
+  const panEnd = (dx: number, v: number) => {
+    const w = track.current?.clientWidth ?? 1;
+    if (!edge(dx) && (Math.abs(dx) > w * 0.2 || Math.abs(v) > 0.45)) turn(dx < 0 ? 1 : -1);
+    else place(0, true);
+  };
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent
@@ -117,15 +134,11 @@ export function Lightbox({
         <DialogTitle className="sr-only">{item.alt || "사진 보기"}</DialogTitle>
         <BackCloses close={onClose} />
         <div className="pt-safe relative z-10 flex shrink-0 items-center gap-2 px-2 py-2 text-white">
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="닫기"
-            className="flex size-11 items-center justify-center rounded-lg outline-none focus-visible:ring-3 focus-visible:ring-white/50"
-          >
+          <button type="button" onClick={onClose} aria-label="닫기" className={barButton}>
             <X aria-hidden className="size-5" />
           </button>
-          <p className="tnum min-w-0 flex-1 truncate text-aside text-white/75">
+          {/* Said as it changes, to whoever moves on by the buttons without seeing it. */}
+          <p aria-live="polite" className="tnum min-w-0 flex-1 truncate text-aside text-white/75">
             {item.title ?? ""}
             {many ? (
               <span className={cn("text-white/45", item.title && "ms-2")}>
@@ -133,14 +146,35 @@ export function Lightbox({
               </span>
             ) : null}
           </p>
+          {many ? (
+            // The way on for a mouse, a keyboard and a screen reader, not only
+            // a finger - and past a video, which once stopped every swipe. On
+            // a phone only where nothing else is on the bar: beside 저장,
+            // 대표로 and 지우기 a 320px phone has no room for two more.
+            <>
+              <button
+                type="button"
+                onClick={() => turn(-1)}
+                disabled={index === 0}
+                aria-label="이전 사진"
+                className={cn(barButton, actions && "hidden sm:flex")}
+              >
+                <ChevronLeft aria-hidden className="size-5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => turn(1)}
+                disabled={index === items.length - 1}
+                aria-label="다음 사진"
+                className={cn(barButton, actions && "hidden sm:flex")}
+              >
+                <ChevronRight aria-hidden className="size-5" />
+              </button>
+            </>
+          ) : null}
           {actions ? actions(index) : null}
           {item.download ? (
-            <a
-              href={item.download}
-              download
-              aria-label="원본 받기"
-              className="flex size-11 items-center justify-center rounded-lg outline-none focus-visible:ring-3 focus-visible:ring-white/50"
-            >
+            <a href={item.download} download aria-label="원본 받기" className={barButton}>
               <Download aria-hidden className="size-5" />
             </a>
           ) : null}
@@ -156,7 +190,7 @@ export function Lightbox({
                 <div key={it ? `${i}:${it.src}` : `none-${slot}`} className="relative flex h-full w-full shrink-0 items-center justify-center px-2.5">
                   {!it ? null : it.kind === "video" ? (
                     slot === 1 ? (
-                      <video src={it.src} poster={it.poster} controls autoPlay playsInline className="max-h-full max-w-full" />
+                      <SlidingVideo src={it.src} poster={it.poster} onPan={pan} onPanEnd={panEnd} onClose={onClose} />
                     ) : it.poster ? (
                       // eslint-disable-next-line @next/next/no-img-element -- served through the console's own proxy
                       <img src={it.poster} alt="" draggable={false} className="max-h-full max-w-full object-contain" />
@@ -166,12 +200,8 @@ export function Lightbox({
                       src={it.src}
                       alt={it.alt ?? ""}
                       active={slot === 1}
-                      onPan={(dx) => place(edge(dx) ? dx * 0.3 : dx, false)}
-                      onPanEnd={(dx, v) => {
-                        const w = track.current?.clientWidth ?? 1;
-                        if (!edge(dx) && (Math.abs(dx) > w * 0.2 || Math.abs(v) > 0.45)) turn(dx < 0 ? 1 : -1);
-                        else place(0, true);
-                      }}
+                      onPan={pan}
+                      onPanEnd={panEnd}
                       onClose={onClose}
                     />
                   )}
@@ -417,6 +447,108 @@ function Zoomable({
         {/* eslint-disable-next-line @next/next/no-img-element -- served through the console's own proxy */}
         <img src={src} alt={alt} draggable={false} className="max-h-full max-w-full object-contain select-none" />
       </div>
+    </div>
+  );
+}
+
+/** How much of a video's foot its own controls take - the scrubber, play, full screen. */
+const CONTROLS = 64;
+
+/**
+ * The video on screen, in the row: one finger across it slides the row as
+ * over a photo, and pulled down it closes; nothing zooms. A video stopped
+ * every swipe - the way on was to close the viewer and tap the next tile. Its
+ * controls stay its own: a finger that starts along its foot is left to them,
+ * and so is one that only taps - a finger is taken once it has moved.
+ */
+function SlidingVideo({
+  src,
+  poster,
+  onPan,
+  onPanEnd,
+  onClose,
+}: {
+  src: string;
+  poster?: string;
+  onPan: (dx: number) => void;
+  onPanEnd: (dx: number, v: number) => void;
+  onClose: () => void;
+}) {
+  const video = useRef<HTMLVideoElement>(null);
+  const drag = useRef<{
+    id: number;
+    x0: number;
+    y0: number;
+    dx: number;
+    dy: number;
+    axis: "x" | "y" | null;
+    t: number;
+    v: number;
+  } | null>(null);
+
+  /** A pull let go short of closing: back where it was. */
+  const settle = () => {
+    const v = video.current;
+    if (!v) return;
+    v.style.transition = "transform 180ms ease-out";
+    v.style.transform = "";
+  };
+
+  return (
+    <div
+      className="flex h-full w-full touch-none items-center justify-center"
+      onPointerDown={(e) => {
+        const r = video.current?.getBoundingClientRect();
+        if (drag.current || !r) return;
+        if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.bottom - CONTROLS && e.clientY <= r.bottom) return;
+        drag.current = { id: e.pointerId, x0: e.clientX, y0: e.clientY, dx: 0, dy: 0, axis: null, t: e.timeStamp, v: 0 };
+      }}
+      onPointerMove={(e) => {
+        const d = drag.current;
+        if (!d || d.id !== e.pointerId) return;
+        const dx = e.clientX - d.x0;
+        const dy = e.clientY - d.y0;
+        const dt = e.timeStamp - d.t;
+        if (dt > 0) d.v = (dx - d.dx) / dt;
+        d.t = e.timeStamp;
+        d.dx = dx;
+        d.dy = dy;
+        if (!d.axis) {
+          if (Math.abs(dx) <= SLOP && Math.abs(dy) <= SLOP) return;
+          d.axis = Math.abs(dx) > Math.abs(dy) ? "x" : "y";
+          // A slide or a pull from here, not a tap for the controls.
+          try {
+            e.currentTarget.setPointerCapture(e.pointerId);
+          } catch {
+            // A pointer the browser does not hold: the moves still come.
+          }
+        }
+        if (d.axis === "x") onPan(dx);
+        else if (video.current) {
+          video.current.style.transition = "none";
+          video.current.style.transform = `translate(0, ${Math.max(0, dy) * 0.6}px)`;
+        }
+      }}
+      onPointerUp={(e) => {
+        const d = drag.current;
+        if (!d || d.id !== e.pointerId) return;
+        drag.current = null;
+        // Held still before letting go is not a flick.
+        if (d.axis === "x") onPanEnd(d.dx, e.timeStamp - d.t > 80 ? 0 : d.v);
+        else if (d.axis === "y") {
+          if (d.dy > FLICK_Y) onClose();
+          else settle();
+        }
+      }}
+      onPointerCancel={(e) => {
+        const d = drag.current;
+        if (!d || d.id !== e.pointerId) return;
+        drag.current = null;
+        if (d.axis === "x") onPanEnd(0, 0);
+        else settle();
+      }}
+    >
+      <video ref={video} src={src} poster={poster} controls autoPlay playsInline className="max-h-full max-w-full" />
     </div>
   );
 }

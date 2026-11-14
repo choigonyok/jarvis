@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { ChevronDown, RotateCw } from "lucide-react";
+import { ChevronDown, LogOut, RotateCw } from "lucide-react";
 import { AsOf } from "@/components/shell/as-of";
 import { Failed } from "@/components/shell/failed";
 import { Header, PageTop } from "@/components/shell/header";
+import { useSignOut } from "@/components/shell/sign-out";
 import { TabBar } from "@/components/shell/tab-bar";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { Progress } from "@/components/ui/progress";
@@ -220,10 +221,40 @@ export function Status() {
               </ul>
             </>
           )}
+          <SignOutRow />
         </div>
       </main>
 
       <TabBar pending={waiting.length} />
+    </div>
+  );
+}
+
+/**
+ * 로그아웃 on a phone, at the foot of the screen the account and the device
+ * are looked after on. Its place is the foot of 더보기's sheet, and from in
+ * here that sheet does not open - the slot goes round its screens - so it had
+ * been out of reach from all three. Even with the status unread: signing out
+ * is wanted most when something is wrong. A wide screen has it in the header.
+ */
+function SignOutRow() {
+  const out = useSignOut();
+  return (
+    <div className="mt-8 sm:hidden">
+      <button
+        type="button"
+        disabled={out.busy}
+        onClick={() => void out.signOut()}
+        className="-mx-3 flex min-h-12 items-center gap-3 rounded-xl px-3 text-body text-dim focus-ring"
+      >
+        <LogOut aria-hidden className="size-[18px]" strokeWidth={1.8} />
+        {out.busy ? "로그아웃하는 중…" : "로그아웃"}
+      </button>
+      {out.failed ? (
+        <p role="status" className="text-aside text-reject">
+          {out.failed}
+        </p>
+      ) : null}
     </div>
   );
 }

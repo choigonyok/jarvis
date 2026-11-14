@@ -67,11 +67,21 @@ export function useUndo() {
   );
 
   // Leaving the screen, or the phone putting the page away, is not an undo.
+  // A phone puts it away without a pagehide - another app, the screen locked -
+  // with the toast's five seconds frozen, and may drop it from memory later
+  // without a word: a commit still waiting would never go. So it goes as the
+  // page is hidden. One that only waits to be put back (restore) loses
+  // nothing by staying, and is still there on coming back.
   useEffect(() => {
     const away = () => settle(true);
+    const hidden = () => {
+      if (document.visibilityState === "hidden" && current.current?.commit) settle(true);
+    };
     window.addEventListener("pagehide", away);
+    document.addEventListener("visibilitychange", hidden);
     return () => {
       window.removeEventListener("pagehide", away);
+      document.removeEventListener("visibilitychange", hidden);
       settle(true);
     };
   }, [settle]);

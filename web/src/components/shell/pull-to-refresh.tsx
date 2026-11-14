@@ -31,13 +31,45 @@ async function newerBuild(): Promise<boolean> {
 }
 
 /**
+ * The fields a hand has typed into on this page. React writes a controlled
+ * field's value into its default as well, so value against defaultValue
+ * cannot tell words typed from words read.
+ */
+const typed = new WeakSet<EventTarget>();
+/** Fields that are pressed rather than typed into. */
+const PRESSED = new Set(["checkbox", "radio", "range", "color", "file", "button", "submit", "reset", "image", "hidden"]);
+
+/**
+ * Whether loading the page again now would throw something away: the
+ * editor's work; a sheet or a dialog left open - what is in one lives only in
+ * memory (the header's panels are dialogs too, but what is set in them is
+ * saved as it is set, and one left open must not hold a build back); a field
+ * in use; or words typed into a field still on the page, focused or not - the
+ * keyboard put away with 완료 leaves them unfocused. The chat's composer keeps
+ * its draft, so its words do not hold a reload back: they would have kept the
+ * phone on an old build for as long as a draft stood.
+ */
+function wouldLose(): boolean {
+  if (window.location.pathname.startsWith("/edit")) return true;
+  if (document.querySelector('[role="dialog"]:not([data-header-panel]), [role="alertdialog"]')) return true;
+  const focused = document.activeElement;
+  if (focused?.matches("input, textarea, select, [contenteditable='true']") && !focused.matches("[data-keeps-draft]")) return true;
+  for (const field of document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input, textarea")) {
+    if (typed.has(field) && field.value && !field.matches("[data-keeps-draft]")) return true;
+  }
+  return false;
+}
+
+/**
  * What a pull does. Every screen re-reads what it shows, in place - the scroll,
  * an open row and the live streams stay as they are (a full reload threw all
  * three away). Only when a newer build has been deployed since this page came
  * up does it load the page again: that is the one thing a re-read cannot bring.
+ * Not while that would throw something away, though: it re-reads, and the new
+ * build waits for the next return to the app.
  */
 async function refresh() {
-  if (await newerBuild()) {
+  if ((await newerBuild()) && !wouldLose()) {
     window.location.reload();
     return new Promise<never>(() => {});
   }
@@ -66,22 +98,23 @@ export function PullToRefresh() {
   // A home-screen app lives on in the background for days and never asks for
   // a newer build on its own; a pull cannot reach the top of a long thread to
   // ask either. So coming back to the app asks, and a newer build is loaded
-  // then - unless something would be lost: the editor's work, or words in a
-  // field that does not keep them. The chat's composer keeps its draft, so
-  // its focus does not hold the reload back: skipping on any focused field
-  // would leave the phone on an old build for as long as a field stayed
-  // focused across returns.
-  useEffect(
-    () =>
-      onResume(async () => {
-        if (!(await newerBuild())) return;
-        if (window.location.pathname.startsWith("/edit")) return;
-        const focused = document.activeElement;
-        if (focused?.matches("input, textarea, [contenteditable='true']") && !focused.matches("[data-keeps-draft]")) return;
-        window.location.reload();
-      }),
-    [],
-  );
+  // then - unless something would be lost (wouldLose). Held back, it is asked
+  // again at the next return, push or pull.
+  useEffect(() => {
+    const note = (e: Event) => {
+      const t = e.target;
+      if (t instanceof HTMLTextAreaElement || (t instanceof HTMLInputElement && !PRESSED.has(t.type))) typed.add(t);
+    };
+    document.addEventListener("input", note, true);
+    const off = onResume(async () => {
+      if (!(await newerBuild()) || wouldLose()) return;
+      window.location.reload();
+    });
+    return () => {
+      document.removeEventListener("input", note, true);
+      off();
+    };
+  }, []);
 
   useEffect(() => {
     const scrollerOf = (node: Element | null): Element | null => {
