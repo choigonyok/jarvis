@@ -117,6 +117,9 @@ export function Screen({ vncUrl, ticketed = false }: { vncUrl: string; ticketed?
         instance.disconnect();
       });
       instance.addEventListener("disconnect", () => {
+        // Over: nothing is left to disconnect, on leaving the page or the app.
+        client = null;
+        if (rfb.current === (instance as unknown as RemoteRFB)) rfb.current = null;
         if (!live) return;
         setControlling(false);
         setState(
