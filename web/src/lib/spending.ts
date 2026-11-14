@@ -149,6 +149,23 @@ export function ago(iso: string, now = Date.now()): string {
   return whenAgo(iso, new Date(now));
 }
 
+/**
+ * A charge made abroad, in the currency it was made in - "$12.50", "¥1,280",
+ * "€12.50", each with its own decimals - which the won figure beside it was
+ * worked out from. Every one had been printed as dollars. A code Intl does
+ * not know is written as it came, not taken for dollars either.
+ */
+export function foreign(t: Tx): string {
+  if (t.foreignAmount === null) return "";
+  try {
+    return new Intl.NumberFormat("ko-KR", { style: "currency", currency: t.currency, currencyDisplay: "narrowSymbol" }).format(
+      t.foreignAmount,
+    );
+  } catch {
+    return `${t.foreignAmount.toLocaleString("ko-KR")} ${t.currency}`.trim();
+  }
+}
+
 /** Card and issuer, short: "하나 5*2*". */
 export function cardLabel(t: Tx): string {
   if (t.source === "manual") return "직접 적음";

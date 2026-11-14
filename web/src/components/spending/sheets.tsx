@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -20,6 +20,7 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Pager } from "@/components/ui/pager";
 import { SwitchRow } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { keepValue, keptValue } from "@/lib/keep";
 import { usePaged } from "@/lib/paging";
 import { krw } from "@/lib/portfolio";
 import {
@@ -32,6 +33,7 @@ import {
   clock,
   dayKey,
   dayLabel,
+  foreign,
   send,
 } from "@/lib/spending";
 
@@ -82,21 +84,36 @@ function CategoryPicker({
 
 // ── 내역 하나 ────────────────────────────────────────────────────────────
 
+/** A payment's form changed and not saved, kept while the app is open (lib/keep.ts). */
+type TxValues = { category: string; remember: boolean; memo: string; excluded: boolean; merchant: string; amount: string };
+const txKey = (id: number) => `spending:tx:${id}`;
+
 export function TxSheet({
   tx,
   names,
   onClose,
   onSaved,
+  onChanged,
 }: {
   tx: Tx | null;
   names: string[];
   onClose: () => void;
   onSaved: (note: string) => void;
+  /** Something in it was saved as it was picked, the sheet staying open: the book is read again. */
+  onChanged: () => void;
 }) {
+  // Changed and not saved: closing it by hand asks first (ui/sheet.tsx).
+  const [held, setHeld] = useState(false);
   return (
     <Panel
       open={tx !== null}
-      onOpenChange={(o) => !o && onClose()}
+      onOpenChange={(o) => {
+        if (o) return;
+        // Closed by hand - asked first, if anything was changed: it goes.
+        if (tx) keepValue(txKey(tx.id), undefined);
+        onClose();
+      }}
+      guard={held}
       title={tx?.merchant ?? ""}
       description={
         tx
@@ -106,7 +123,9 @@ export function TxSheet({
       }
     >
       {/* Keyed by id so the form starts from this charge, not the last one opened. */}
-      {tx ? <TxForm key={tx.id} tx={tx} names={names} onSaved={onSaved} onClose={onClose} /> : null}
+      {tx ? (
+        <TxForm key={tx.id} tx={tx} names={names} onSaved={onSaved} onClose={onClose} onChanged={onChanged} onHeld={setHeld} />
+      ) : null}
     </Panel>
   );
 }
@@ -116,18 +135,25 @@ function TxForm({
   names,
   onSaved,
   onClose,
+  onChanged,
+  onHeld,
 }: {
   tx: Tx;
   names: string[];
   onSaved: (note: string) => void;
   onClose: () => void;
+  onChanged: () => void;
+  onHeld: (held: boolean) => void;
 }) {
-  const [category, setCategory] = useState(tx.category);
-  const [remember, setRemember] = useState(true);
-  const [memo, setMemo] = useState(tx.memo);
-  const [excluded, setExcluded] = useState(tx.excluded);
-  const [merchant, setMerchant] = useState(tx.merchant);
-  const [amount, setAmount] = useState(tx.amountKrw.toLocaleString("ko-KR"));
+  // What was changed is kept while the app is open, as an order half typed
+  // is (lib/keep.ts): the sheet came back after a tab switch, its memo gone.
+  const [kept] = useState(() => keptValue<TxValues>(txKey(tx.id)));
+  const [category, setCategory] = useState(kept?.category ?? tx.category);
+  const [remember, setRemember] = useState(kept?.remember ?? true);
+  const [memo, setMemo] = useState(kept?.memo ?? tx.memo);
+  const [excluded, setExcluded] = useState(kept?.excluded ?? tx.excluded);
+  const [merchant, setMerchant] = useState(kept?.merchant ?? tx.merchant);
+  const [amount, setAmount] = useState(kept?.amount ?? tx.amountKrw.toLocaleString("ko-KR"));
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const id = useId();
@@ -138,17 +164,27 @@ function TxForm({
   const amountEditable = tx.source === "manual" || tx.estimated;
   const recategorised = category !== tx.category;
 
+  // What saving would send: nothing, and nothing here is unsaved.
+  const patch: Record<string, unknown> = {};
+  if (recategorised) {
+    patch.category = category;
+    patch.remember = remember;
+  }
+  if (memo.trim() !== tx.memo) patch.memo = memo.trim();
+  if (excluded !== tx.excluded) patch.excluded = excluded;
+  if (tx.source === "manual" && merchant.trim() !== tx.merchant) patch.merchant = merchant.trim();
+  if (amountEditable && digits(amount) !== tx.amountKrw) patch.amountKrw = digits(amount);
+  const changed = Object.keys(patch).length > 0;
+  useEffect(() => {
+    keepValue(txKey(tx.id), changed ? { category, remember, memo, excluded, merchant, amount } : undefined);
+  }, [tx.id, changed, category, remember, memo, excluded, merchant, amount]);
+  useEffect(() => {
+    onHeld(changed);
+    return () => onHeld(false);
+  }, [changed, onHeld]);
+
   const save = async () => {
-    const patch: Record<string, unknown> = {};
-    if (recategorised) {
-      patch.category = category;
-      patch.remember = remember;
-    }
-    if (memo.trim() !== tx.memo) patch.memo = memo.trim();
-    if (excluded !== tx.excluded) patch.excluded = excluded;
-    if (tx.source === "manual" && merchant.trim() !== tx.merchant) patch.merchant = merchant.trim();
-    if (amountEditable && digits(amount) !== tx.amountKrw) patch.amountKrw = digits(amount);
-    if (Object.keys(patch).length === 0) {
+    if (!changed) {
       onClose();
       return;
     }
@@ -159,6 +195,7 @@ function TxForm({
       setError(err);
       return;
     }
+    keepValue(txKey(tx.id), undefined);
     onSaved(
       recategorised && remember
         ? `${tx.merchant}의 다른 내역도 ${category}로 바꿨어요`
@@ -169,8 +206,9 @@ function TxForm({
   // Asked first (the 지우기 below opens the question): a deleted line is gone.
   const remove = async () => {
     const err = await send(`transactions/${tx.id}`, "DELETE");
-    if (err) setError(err);
-    else onSaved("지웠어요");
+    if (err) return setError(err);
+    keepValue(txKey(tx.id), undefined);
+    onSaved("지웠어요");
   };
 
   return (
@@ -179,7 +217,7 @@ function TxForm({
         {tx.estimated ? "약 " : ""}
         {krw(tx.amountKrw)}
         {tx.foreignAmount !== null ? (
-          <span className="ms-2 text-ui font-normal text-faint">${tx.foreignAmount.toFixed(2)}</span>
+          <span className="ms-2 text-ui font-normal text-faint">{foreign(tx)}</span>
         ) : null}
         {tx.installment > 0 ? (
           <span className="ms-2 text-ui font-normal text-faint">{tx.installment}개월 할부</span>
@@ -198,7 +236,7 @@ function TxForm({
         </p>
       ) : null}
 
-      {tx.enrichSource ? <OrderSection tx={tx} names={names} onSaved={onSaved} /> : null}
+      {tx.enrichSource ? <OrderSection tx={tx} names={names} onSaved={onSaved} onChanged={onChanged} /> : null}
 
       <section>
         <h3 className="mb-2 text-aside text-dim">
@@ -300,10 +338,12 @@ function OrderSection({
   tx,
   names,
   onSaved,
+  onChanged,
 }: {
   tx: Tx;
   names: string[];
   onSaved: (note: string) => void;
+  onChanged: () => void;
 }) {
   const site = SITE_LABEL[tx.enrichSource ?? ""] ?? "주문";
   const [error, setError] = useState<string | null>(null);
@@ -331,7 +371,7 @@ function OrderSection({
       {items.length > 0 ? (
         <ul className="space-y-1">
           {items.map((it) => (
-            <ItemRow key={it.id} item={it} names={names} onError={setError} />
+            <ItemRow key={it.id} item={it} names={names} onError={setError} onChanged={onChanged} />
           ))}
         </ul>
       ) : null}
@@ -352,12 +392,17 @@ function ItemRow({
   item,
   names,
   onError,
+  onChanged,
 }: {
   item: Item;
   names: string[];
   onError: (e: string | null) => void;
+  onChanged: () => void;
 }) {
   const [category, setCategory] = useState(item.category);
+  // Saved as it is picked. The list's item line and the category totals are
+  // the book's, read again for it - they had kept the old category until the
+  // screen was left, and so had this picker when the payment was opened again.
   const change = async (next: string) => {
     const before = category;
     setCategory(next);
@@ -365,7 +410,10 @@ function ItemRow({
     if (err) {
       setCategory(before);
       onError(err);
-    } else onError(null);
+    } else {
+      onError(null);
+      onChanged();
+    }
   };
   return (
     <li className="flex items-center gap-2 rounded-lg bg-glass px-3 py-2">
@@ -394,6 +442,10 @@ function ItemRow({
 
 export type Draft = { date: string; time: string; from?: Unparsed };
 
+/** What is typed into one entry and not written down yet, kept while the app is open (lib/keep.ts). */
+type AddValues = { date: string; time: string; merchant: string; amount: string; category: string; memo: string };
+const addKey = (draft: Draft) => `spending:add:${draft.from?.messageId ?? "new"}`;
+
 export function AddSheet({
   draft,
   names,
@@ -405,10 +457,18 @@ export function AddSheet({
   onClose: () => void;
   onSaved: (note: string) => void;
 }) {
+  // Typed and not written down: closing it by hand asks first (ui/sheet.tsx).
+  const [held, setHeld] = useState(false);
   return (
     <Panel
       open={draft !== null}
-      onOpenChange={(o) => !o && onClose()}
+      onOpenChange={(o) => {
+        if (o) return;
+        // Closed by hand - asked first, if anything was typed: it goes.
+        if (draft) keepValue(addKey(draft), undefined);
+        onClose();
+      }}
+      guard={held}
       title={draft?.from ? "알림 내용 적기" : "직접 적기"}
       description={
         draft?.from
@@ -416,7 +476,9 @@ export function AddSheet({
           : "현금이나 알림이 오지 않는 카드로 쓴 돈"
       }
     >
-      {draft ? <AddForm key={draft.from?.messageId ?? "new"} draft={draft} names={names} onSaved={onSaved} /> : null}
+      {draft ? (
+        <AddForm key={draft.from?.messageId ?? "new"} draft={draft} names={names} onSaved={onSaved} onHeld={setHeld} />
+      ) : null}
     </Panel>
   );
 }
@@ -425,20 +487,37 @@ function AddForm({
   draft,
   names,
   onSaved,
+  onHeld,
 }: {
   draft: Draft;
   names: string[];
   onSaved: (note: string) => void;
+  onHeld: (held: boolean) => void;
 }) {
-  const [date, setDate] = useState(draft.date);
-  const [time, setTime] = useState(draft.time);
-  const [merchant, setMerchant] = useState("");
-  const [amount, setAmount] = useState("");
-  const [category, setCategory] = useState("");
-  const [memo, setMemo] = useState("");
+  // What was typed is kept while the app is open, as an order half typed is
+  // (lib/keep.ts): a look at another tab had closed the sheet and lost all
+  // six fields - and with an unread alert, the way back to its text.
+  const [kept] = useState(() => keptValue<AddValues>(addKey(draft)));
+  const [date, setDate] = useState(kept?.date ?? draft.date);
+  const [time, setTime] = useState(kept?.time ?? draft.time);
+  const [merchant, setMerchant] = useState(kept?.merchant ?? "");
+  const [amount, setAmount] = useState(kept?.amount ?? "");
+  const [category, setCategory] = useState(kept?.category ?? "");
+  const [memo, setMemo] = useState(kept?.memo ?? "");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const id = useId();
+
+  const typed =
+    Boolean(merchant.trim() || amount || category || memo.trim()) || date !== draft.date || time !== draft.time;
+  const key = addKey(draft);
+  useEffect(() => {
+    keepValue(key, typed ? { date, time, merchant, amount, category, memo } : undefined);
+  }, [key, typed, date, time, merchant, amount, category, memo]);
+  useEffect(() => {
+    onHeld(typed);
+    return () => onHeld(false);
+  }, [typed, onHeld]);
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -451,6 +530,7 @@ function AddForm({
       : await send("transactions", "POST", body);
     setSaving(false);
     if (err) return setError(err);
+    keepValue(key, undefined);
     onSaved(`${merchant.trim()} ${krw(digits(amount))}을 적었어요`);
   };
 
@@ -607,15 +687,25 @@ export function UnparsedSheet({
   open: boolean;
   onClose: () => void;
   onWrite: (u: Unparsed) => void;
-  onDismissed: (note: string) => void;
+  /** One set aside; last: none are left, and the sheet can go. */
+  onDismissed: (note: string, last: boolean) => void;
 }) {
   const [error, setError] = useState<string | null>(null);
+  // Set aside: off the list as soon as the server has it, not when the book
+  // is next read. The sheet stays for the rest - it had closed after each.
+  const [gone, setGone] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const left = items.filter((u) => !gone.includes(u.messageId));
   // Each is the whole alert: ten a page.
-  const paged = usePaged(items, { size: 10 });
+  const paged = usePaged(left, { size: 10 });
   const dismiss = async (u: Unparsed) => {
+    setBusy(true);
+    setError(null);
     const err = await send(`unparsed/${encodeURIComponent(u.messageId)}/dismiss`, "POST");
-    if (err) setError(err);
-    else onDismissed("결제가 아닌 알림으로 넘겼어요");
+    setBusy(false);
+    if (err) return setError(err);
+    setGone((g) => [...g, u.messageId]);
+    onDismissed("결제가 아닌 알림으로 넘겼어요", left.length <= 1);
   };
   return (
     <Panel
@@ -634,10 +724,30 @@ export function UnparsedSheet({
             {u.reason ? <p className="mb-2 text-meta break-words text-faint">{u.reason}</p> : null}
             <pre className="font-sans text-aside leading-relaxed whitespace-pre-wrap text-dim">{u.body}</pre>
             <div className="mt-3 flex gap-2">
-              <Button variant="quiet" size="touch-sm" onClick={() => void dismiss(u)}>
-                결제 아님
-              </Button>
-              <Button variant="raised" size="touch" onClick={() => onWrite(u)} className="flex-1">
+              {/* Asked first: the server cannot put an alert back, and with it
+                  goes the only copy of what it said - a payment set aside here
+                  by a slip of the thumb stays out of the totals for good. */}
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="quiet" size="touch-sm" disabled={busy}>
+                    결제 아님
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>결제가 아닌 알림으로 넘길까요?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      {u.chatName} {dayLabel(dayKey(u.sentAt))} {clock(u.sentAt)} 알림이 목록에서 빠지고, 결제였더라도 합계에
+                      들어가지 않아요. 되돌릴 수 없어요.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>두기</AlertDialogCancel>
+                    <AlertDialogAction onClick={() => void dismiss(u)}>넘기기</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+              <Button variant="raised" size="touch" disabled={busy} onClick={() => onWrite(u)} className="flex-1">
                 내용 적기
               </Button>
             </div>

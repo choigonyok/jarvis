@@ -73,9 +73,10 @@ export function Spending() {
   const [category, setCategory] = useKept<string | null>("spending:category", null);
   const [query, setQuery] = useState("");
 
-  // The payment left open stays open across a tab switch (lib/keep.ts).
+  // The payment left open, and an entry being written, stay open across a
+  // tab switch (lib/keep.ts) - what was typed in them too (sheets.tsx).
   const [open, setOpen] = useKept<Tx | null>("spending:open", null);
-  const [draft, setDraft] = useState<Draft | null>(null);
+  const [draft, setDraft] = useKept<Draft | null>("spending:draft", null);
   const [budgetOpen, setBudgetOpen] = useState(false);
   const [unparsedOpen, setUnparsedOpen] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -373,14 +374,22 @@ export function Spending() {
 
       {book ? (
         <>
-          <TxSheet tx={open} names={book.categoryNames} onClose={() => setOpen(null)} onSaved={done} />
+          <TxSheet
+            // The payment as the book was last read, not as it was tapped: a
+            // change saved inside the sheet comes back into it.
+            tx={open ? (book.transactions.find((t) => t.id === open.id) ?? open) : null}
+            names={book.categoryNames}
+            onClose={() => setOpen(null)}
+            onSaved={done}
+            onChanged={() => void load(month)}
+          />
           <AddSheet draft={draft} names={book.categoryNames} onClose={() => setDraft(null)} onSaved={done} />
           <BudgetSheet book={book} open={budgetOpen} onClose={() => setBudgetOpen(false)} onSaved={done} />
           <UnparsedSheet
             items={book.unparsed}
             open={unparsedOpen}
             onClose={() => setUnparsedOpen(false)}
-            onDismissed={done}
+            onDismissed={(note, last) => (last ? done(note) : void load(month))}
             onWrite={(u) => {
               setUnparsedOpen(false);
               setDraft({ date: dayKey(u.sentAt), time: clock(u.sentAt), from: u });

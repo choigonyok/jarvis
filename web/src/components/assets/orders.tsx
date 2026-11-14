@@ -14,16 +14,28 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { AsOf } from "@/components/shell/as-of";
+import { Failed } from "@/components/shell/failed";
 import { Panel } from "@/components/ui/bottom-sheet";
 import { Button } from "@/components/ui/button";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Pager } from "@/components/ui/pager";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { type OrderRequest, type OrderResult, type PlacedOrder, type Standing, cancelStanding, sendOrders } from "@/lib/orders";
+import {
+  type OrderRequest,
+  type OrderResult,
+  type PlacedOrder,
+  type Standing,
+  Unanswered,
+  cancelStanding,
+  findSent,
+  sendOrders,
+} from "@/lib/orders";
 import { usePaged } from "@/lib/paging";
 import { type Holding, krw, quantity } from "@/lib/portfolio";
-import { dateTime } from "@/lib/when";
+import { SAY, failureText } from "@/lib/say";
+import { clock, dateTime } from "@/lib/when";
 import { cn } from "@/lib/utils";
 
 /**
@@ -53,8 +65,11 @@ const statusText: Record<OrderResult["status"], string> = {
   preview: "",
 };
 
+/** What became of one order: as assets-svc answered it, or as its record has it. */
+type Outcome = OrderRequest & Pick<OrderResult, "status" | "message">;
+
 /** The orders a confirm will send, then what became of each. */
-function OrderList({ results, names }: { results: OrderResult[]; names: Map<string, string> }) {
+function OrderList({ results, names }: { results: Outcome[]; names: Map<string, string> }) {
   return (
     <ul className="divide-y divide-edge-soft">
       {results.map((r, i) => (
@@ -88,6 +103,36 @@ function OrderList({ results, names }: { results: OrderResult[]; names: Map<stri
 }
 
 /**
+ * A send's own planId, by which the record says what came of it when no
+ * answer does - each press its own. randomUUID is there only on https and
+ * localhost; anywhere else the press must not fail on it.
+ */
+function newPlanId(): string {
+  const id = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(16).slice(2) + Date.now().toString(16);
+  return id.replace(/-/g, "").slice(0, 8);
+}
+
+/** A send that got no answer, not in the record either once it has had time to be. */
+const NOT_IN_RECORD = "주문 기록에 없어요. 주문이 들어가지 않은 것 같아요.";
+
+/**
+ * In the send button's place while a send that got no answer back (lib/orders.ts
+ * Unanswered) is looked for in the record: it may be in, and the same button
+ * pressed again would send it twice.
+ */
+function Looking({ failed, onRetry }: { failed: boolean; onRetry: () => unknown }) {
+  return failed ? (
+    <Failed quiet onRetry={onRetry}>
+      주문 기록을 불러오지 못했어요. 들어갔는지 확인한 뒤에 다시 보낼 수 있어요.
+    </Failed>
+  ) : (
+    <p role="status" className="text-aside text-faint">
+      주문 기록을 확인하는 중…
+    </p>
+  );
+}
+
+/**
  * Several orders at once - the rebalance plan, or what new cash buys. Opens
  * on assets-svc's check of exactly these; the button sends what was checked
  * and could go (refused and by-hand lines stay as they are).
@@ -112,9 +157,11 @@ export function PlanSheet({
 }) {
   const names = new Map(holdings.map((h) => [`${h.venue}:${h.symbol}`, h.name]));
   const [checked, setChecked] = useState<{ results: OrderResult[]; planId?: string | null } | null>(null);
-  const [placed, setPlaced] = useState<OrderResult[] | null>(null);
+  const [placed, setPlaced] = useState<Outcome[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Sent with no answer back, and looked for in the record by its planId.
+  const [looking, setLooking] = useState<{ planId: string; failed: boolean } | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -125,7 +172,7 @@ export function PlanSheet({
     setError(null);
     load()
       .then((c) => alive && setChecked(c))
-      .catch((e: Error) => alive && setError(e.message));
+      .catch((e: unknown) => alive && setError(failureText(e, SAY.couldNotLoad)));
     return () => {
       alive = false;
     };
@@ -133,15 +180,31 @@ export function PlanSheet({
   }, [open]);
 
   const ready = checked?.results.filter((r) => r.status === "preview") ?? [];
+  const unsent = checked?.results.filter((r) => r.status !== "preview") ?? [];
+  const look = async (planId: string) => {
+    setLooking({ planId, failed: false });
+    const rows = await findSent(planId);
+    if (!rows) return setLooking({ planId, failed: true });
+    setLooking(null);
+    if (rows.length) {
+      setError(null);
+      setPlaced([...rows, ...unsent]);
+      onPlaced();
+    } else setError(NOT_IN_RECORD);
+  };
   const send = async () => {
+    // Its own planId, by which the record says what came of it when no answer
+    // does - each press its own, so one sent again is never taken for the last.
+    const planId = newPlanId();
     setBusy(true);
     setError(null);
     try {
-      const out = await sendOrders(ready, { reason, planId: checked?.planId ?? undefined });
-      setPlaced([...out.results, ...(checked?.results.filter((r) => r.status !== "preview") ?? [])]);
+      const out = await sendOrders(ready, { reason, planId });
+      setPlaced([...out.results, ...unsent]);
       onPlaced();
     } catch (e) {
-      setError((e as Error).message);
+      setError(failureText(e, "주문을 보내지 못했어요."));
+      if (e instanceof Unanswered) void look(planId);
     } finally {
       setBusy(false);
     }
@@ -166,9 +229,13 @@ export function PlanSheet({
             미국 주식은 지금가보다 0.3% 유리하게 지정가로 내서 바로 체결되게 해요. 업비트는 시장가예요. 원금 대비 수익률에는 들어가지
             않아요 - 원금은 입출금만이에요.
           </p>
-          <Button variant="raised" size="touch" className="w-full" disabled={busy} onClick={() => void send()}>
-            {busy ? "보내는 중…" : `주문 ${ready.length}건 보내기${sells ? ` (매도 ${sells}건 먼저)` : ""}`}
-          </Button>
+          {looking ? (
+            <Looking failed={looking.failed} onRetry={() => look(looking.planId)} />
+          ) : (
+            <Button variant="raised" size="touch" className="w-full" disabled={busy} onClick={() => void send()}>
+              {busy ? "보내는 중…" : `주문 ${ready.length}건 보내기${sells ? ` (매도 ${sells}건 먼저)` : ""}`}
+            </Button>
+          )}
         </div>
       ) : null}
     </Panel>
@@ -176,16 +243,25 @@ export function PlanSheet({
 }
 
 /**
+ * One holding's sheet while the app is open (lib/keep.ts): the order half
+ * typed - with a planId, sent and its answer not here - or what came of it.
+ */
+type Kept = { side: "buy" | "sell"; amount: string; planId?: string } | { sent: Outcome };
+
+/**
  * One holding: buy more or sell some. Shares by the share, a coin by the won.
  * The button says the order in full before it goes.
  */
 export function OrderSheet({
   holding,
+  at,
   usdKrw,
   onOpenChange,
   onPlaced,
 }: {
   holding: Holding | null;
+  /** When the holding's numbers were read. */
+  at?: string;
   usdKrw: number;
   onOpenChange: (open: boolean) => void;
   onPlaced: () => void;
@@ -193,23 +269,52 @@ export function OrderSheet({
   const [side, setSide] = useState<"buy" | "sell">("buy");
   const [amount, setAmount] = useState("");
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<OrderResult | null>(null);
+  const [result, setResult] = useState<Outcome | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Sent with no answer back, and looked for in the record by its planId.
+  const [looking, setLooking] = useState<{ planId: string; failed: boolean } | null>(null);
+
+  const look = async (id: string, planId: string, draft: { side: "buy" | "sell"; amount: string }) => {
+    setLooking({ planId, failed: false });
+    const rows = await findSent(planId);
+    if (!rows) return setLooking({ planId, failed: true });
+    setLooking(null);
+    if (rows[0]) {
+      setError(null);
+      setResult(rows[0]);
+      keepValue(`order:${id}`, { sent: rows[0] });
+      onPlaced();
+    } else {
+      setError(NOT_IN_RECORD);
+      keepValue(`order:${id}`, draft);
+    }
+  };
 
   // A fresh form for each holding - but one half typed is kept for it while
   // the app is open, so a tab switch does not lose the amount (lib/keep.ts).
+  // Once sent it is no longer half typed: what came of it is kept in its
+  // place, and coming back finds that rather than the same order ready to go
+  // again - or, left while it was out, finds it looked for in the record.
   const holdingId = holding?.id;
   useEffect(() => {
-    const draft = holdingId ? keptValue<{ side: "buy" | "sell"; amount: string }>(`order:${holdingId}`) : undefined;
+    const kept = holdingId ? keptValue<Kept>(`order:${holdingId}`) : undefined;
+    const draft = kept && "side" in kept ? kept : undefined;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- the form of this holding
     setSide(draft?.side ?? "buy");
     setAmount(draft?.amount ?? "");
-    setResult(null);
+    setResult(kept && "sent" in kept ? kept.sent : null);
     setError(null);
+    if (holdingId && draft?.planId) void look(holdingId, draft.planId, { side: draft.side, amount: draft.amount });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per holding; the sheet is keyed by it (assets.tsx)
   }, [holdingId]);
-  useEffect(() => {
-    if (holding) keepValue(`order:${holding.id}`, amount ? { side, amount } : undefined);
-  }, [holding, side, amount]);
+  // Kept as it is typed, not from an effect: one that ran as the sheet came
+  // back would write the empty form over what was kept.
+  const edit = (next: { side?: "buy" | "sell"; amount?: string }) => {
+    const draft = { side, amount, ...next };
+    setSide(draft.side);
+    setAmount(draft.amount);
+    if (holding) keepValue(`order:${holding.id}`, draft.amount ? draft : undefined);
+  };
 
   if (!holding) return null;
   const coin = holding.kind === "coin";
@@ -231,14 +336,25 @@ export function OrderSheet({
   const tooSmall = coin && n > 0 && n < 5_000;
 
   const send = async () => {
+    // Its own planId, by which the record says what came of it when no answer
+    // does - each press its own, so one sent again is never taken for the last.
+    const planId = newPlanId();
+    const draft = { side, amount };
     setBusy(true);
     setError(null);
+    keepValue(`order:${holding.id}`, { ...draft, planId });
     try {
-      const out = await sendOrders([req], { reason: "manual" });
-      setResult(out.results[0] ?? null);
+      const out = await sendOrders([req], { reason: "manual", planId });
+      const sent = out.results[0] ?? null;
+      setResult(sent);
+      setAmount("");
+      keepValue(`order:${holding.id}`, sent ? { sent } : undefined);
       onPlaced();
     } catch (e) {
-      setError((e as Error).message);
+      setError(failureText(e, "주문을 보내지 못했어요."));
+      if (e instanceof Unanswered) void look(holding.id, planId, draft);
+      // Turned down: nothing went, and the form is half typed again.
+      else keepValue(`order:${holding.id}`, draft);
     } finally {
       setBusy(false);
     }
@@ -248,81 +364,99 @@ export function OrderSheet({
   return (
     <Panel
       open
-      onOpenChange={onOpenChange}
+      onOpenChange={(open) => {
+        // Closed on what was sent: the next opening is a fresh form.
+        if (!open && result) keepValue(`order:${holding.id}`, undefined);
+        onOpenChange(open);
+      }}
       title={`${holding.name} 주문`}
-      description={`보유 ${quantity(holding.quantity)}${coin ? "" : gold ? "g" : "주"} · 지금 ${price}`}
+      // The price is as of a read, and says which; once sent, what is held
+      // is about to change, and the line says that instead.
+      description={
+        result
+          ? "보낸 결과예요. 체결은 잠시 뒤 잔고에 반영돼요."
+          : `보유 ${quantity(holding.quantity)}${coin ? "" : gold ? "g" : "주"} · ${price}${at ? ` · ${clock(at)} 기준` : ""}`
+      }
     >
       {result ? (
         <OrderList results={[result]} names={names} />
       ) : (
         <div className="space-y-3">
-          <ToggleGroup
-            type="single"
-            aria-label="매수 또는 매도"
-            variant="segment"
-            spacing={1}
-            value={side}
-            onValueChange={(v) => {
-              if (v) setSide(v as "buy" | "sell");
-            }}
-            className="grid w-full grid-cols-2 rounded-lg bg-well p-1"
-          >
-            {(["buy", "sell"] as const).map((s) => (
-              <ToggleGroupItem
-                key={s}
-                value={s}
-                disabled={s === "sell" && holding.quantity <= 0}
-                className="tap text-ui text-dim"
-              >
-                {s === "buy" ? "매수" : "매도"}
-              </ToggleGroupItem>
-            ))}
-          </ToggleGroup>
-          <Field>
-            <FieldLabel htmlFor={`order-${holding.id}`} className="text-faint">
-              {coin ? "금액 (원)" : gold ? "그램" : "주 수"}
-            </FieldLabel>
-            <Input
-              id={`order-${holding.id}`}
-              surface="glass"
-              className="tnum"
-              inputMode="numeric"
-              value={n ? n.toLocaleString("ko-KR") : ""}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder={coin ? "예: 50,000" : "예: 1"}
-            />
-          </Field>
-          <div className="flex flex-wrap gap-1.5">
-            {(coin ? [10_000, 50_000, 100_000] : [1, 2, 5]).map((v) => (
-              <button
-                key={v}
-                type="button"
-                onClick={() => setAmount(String(v))}
-                className="tap rounded-full bg-glass px-3 text-aside text-dim hover:text-foreground focus-ring"
-              >
-                {coin ? krw(v) : `${v}${gold ? "g" : "주"}`}
-              </button>
-            ))}
-            {side === "sell" && holding.quantity > 0 ? (
-              <button
-                type="button"
-                onClick={() => setAmount(String(coin ? Math.floor(holding.valueKrw) : held))}
-                className="tap rounded-full bg-glass px-3 text-aside text-dim hover:text-foreground focus-ring"
-              >
-                전부
-              </button>
-            ) : null}
-          </div>
-          <p className="tnum text-aside leading-relaxed text-faint">
-            {n > 0 ? `약 ${krw(amountKrw)}` : ""}
-            {tooMuch ? <span className="text-reject"> · 갖고 있는 것보다 많아요</span> : null}
-            {tooSmall ? <span className="text-reject"> · 업비트는 ₩5,000부터예요</span> : null}
-            {gold ? " · 금현물은 한국투자 앱에서 직접 주문해야 해요" : null}
-          </p>
+          {/* Not changed while it is out, or while whether it went is not
+              known: what was sent stays in view, and stays what is kept. */}
+          <fieldset disabled={busy || looking !== null} className="min-w-0 space-y-3">
+            <ToggleGroup
+              type="single"
+              aria-label="매수 또는 매도"
+              variant="segment"
+              spacing={1}
+              value={side}
+              onValueChange={(v) => {
+                if (v) edit({ side: v as "buy" | "sell" });
+              }}
+              className="grid w-full grid-cols-2 rounded-lg bg-well p-1"
+            >
+              {(["buy", "sell"] as const).map((s) => (
+                <ToggleGroupItem
+                  key={s}
+                  value={s}
+                  disabled={s === "sell" && holding.quantity <= 0}
+                  className="tap text-ui text-dim"
+                >
+                  {s === "buy" ? "매수" : "매도"}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+            <Field>
+              <FieldLabel htmlFor={`order-${holding.id}`} className="text-faint">
+                {coin ? "금액 (원)" : gold ? "그램" : "주 수"}
+              </FieldLabel>
+              <Input
+                id={`order-${holding.id}`}
+                surface="glass"
+                className="tnum"
+                inputMode="numeric"
+                value={n ? n.toLocaleString("ko-KR") : ""}
+                onChange={(e) => edit({ amount: e.target.value })}
+                placeholder={coin ? "예: 50,000" : "예: 1"}
+              />
+            </Field>
+            <div className="flex flex-wrap gap-1.5">
+              {(coin ? [10_000, 50_000, 100_000] : [1, 2, 5]).map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => edit({ amount: String(v) })}
+                  className="tap rounded-full bg-glass px-3 text-aside text-dim hover:text-foreground focus-ring disabled:opacity-40"
+                >
+                  {coin ? krw(v) : `${v}${gold ? "g" : "주"}`}
+                </button>
+              ))}
+              {side === "sell" && holding.quantity > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => edit({ amount: String(coin ? Math.floor(holding.valueKrw) : held) })}
+                  className="tap rounded-full bg-glass px-3 text-aside text-dim hover:text-foreground focus-ring disabled:opacity-40"
+                >
+                  전부
+                </button>
+              ) : null}
+            </div>
+            <p className="tnum text-aside leading-relaxed text-faint">
+              {n > 0 ? `약 ${krw(amountKrw)}` : ""}
+              {tooMuch ? <span className="text-reject"> · 갖고 있는 것보다 많아요</span> : null}
+              {tooSmall ? <span className="text-reject"> · 업비트는 ₩5,000부터예요</span> : null}
+              {gold ? " · 금현물은 한국투자 앱에서 직접 주문해야 해요" : null}
+            </p>
+          </fieldset>
           {error ? <p className="text-aside text-reject">{error}</p> : null}
-          <Button variant="raised" size="touch" className="w-full" disabled={busy || n <= 0 || tooMuch || tooSmall} onClick={() => void send()}>
-            {busy ? "보내는 중…" : n > 0 ? `${line} 주문 보내기` : "수량을 적어 주세요"}
-          </Button>
+          {looking ? (
+            <Looking failed={looking.failed} onRetry={() => look(holding.id, looking.planId, { side, amount })} />
+          ) : (
+            <Button variant="raised" size="touch" className="w-full" disabled={busy || n <= 0 || tooMuch || tooSmall} onClick={() => void send()}>
+              {busy ? "보내는 중…" : n > 0 ? `${line} 주문 보내기` : "수량을 적어 주세요"}
+            </Button>
+          )}
         </div>
       )}
     </Panel>
@@ -339,7 +473,7 @@ const when = (iso: string) => dateTime(iso);
  */
 function Waiting({ standing, names, onChanged }: { standing: Standing[]; names: Map<string, string>; onChanged: () => void }) {
   const [busy, setBusy] = useState<number | null>(null);
-  const [note, setNote] = useState<string | null>(null);
+  const [note, setNote] = useState<{ text: string; failed?: boolean } | null>(null);
   const active = standing.filter((o) => o.status === "active");
   const done = standing.filter((o) => o.status !== "active").slice(0, 3);
   if (active.length === 0 && done.length === 0) return null;
@@ -382,10 +516,12 @@ function Waiting({ standing, names, onChanged }: { standing: Standing[]; names: 
                         onClick={async () => {
                           setBusy(o.id);
                           try {
-                            setNote(await cancelStanding(o.id));
+                            setNote({ text: await cancelStanding(o.id) });
                             onChanged();
                           } catch (e) {
-                            setNote((e as Error).message);
+                            setNote({ text: failureText(e, "취소하지 못했어요."), failed: true });
+                            // The line may have dropped after it was done: the list says.
+                            onChanged();
                           } finally {
                             setBusy(null);
                           }
@@ -401,28 +537,57 @@ function Waiting({ standing, names, onChanged }: { standing: Standing[]; names: 
           );
         })}
       </ul>
-      {note ? <p className="mt-1 text-meta text-dim">{note}</p> : null}
+      {note ? <p className={cn("mt-1 text-meta", note.failed ? "text-reject" : "text-dim")}>{note.text}</p> : null}
     </section>
   );
 }
 
-/** The record: standing orders waiting, then what was sent, when, and how it went. */
+/**
+ * The record: standing orders waiting, then what was sent, when, and how it
+ * went. Reading, not read, and nothing sent yet are three different things
+ * said three ways - a failed read had read as "아직 낸 주문이 없어요".
+ */
 export function OrderRecord({
   orders,
   holdings,
   standing = [],
+  at = null,
+  failed = false,
   onChanged = () => {},
 }: {
-  orders: PlacedOrder[];
+  /** Null until it is read. */
+  orders: PlacedOrder[] | null;
   holdings: Holding[];
   standing?: Standing[];
-  onChanged?: () => void;
+  /** When what is shown was read. */
+  at?: Date | null;
+  /** The last read did not come: what is shown is the one before it. */
+  failed?: boolean;
+  onChanged?: () => unknown;
 }) {
   const names = new Map(holdings.map((h) => [`${h.venue}:${h.symbol}`, h.name]));
-  const paged = usePaged(orders);
-  if (orders.length === 0 && standing.length === 0) return <p className="text-aside text-faint">아직 낸 주문이 없어요.</p>;
+  const paged = usePaged(orders ?? []);
+  if (!orders) {
+    return failed ? (
+      <Failed quiet onRetry={onChanged}>
+        주문 기록을 불러오지 못했어요.
+      </Failed>
+    ) : (
+      <p className="text-aside text-faint">{SAY.loading}</p>
+    );
+  }
+  const asOf = failed ? <AsOf at={at} failed onRetry={() => void onChanged()} className="mb-2" /> : null;
+  if (orders.length === 0 && standing.length === 0) {
+    return (
+      <>
+        {asOf}
+        <p className="text-aside text-faint">아직 낸 주문이 없어요.</p>
+      </>
+    );
+  }
   return (
     <>
+    {asOf}
     <Waiting standing={standing} names={names} onChanged={onChanged} />
     <div id={paged.anchor} className="scroll-mt-4" />
     <ul className="divide-y divide-edge-soft">

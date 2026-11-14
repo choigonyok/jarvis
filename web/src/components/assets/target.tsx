@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { plannedGains } from "@/components/assets/realized";
+import { Failed } from "@/components/shell/failed";
 import { type Realized, krw, signedKrw, taxFor } from "@/lib/portfolio";
 import { cn } from "@/lib/utils";
 import type { Allocation, Bucket, Drift } from "@/lib/target";
@@ -113,24 +114,46 @@ const NO_PLAN: Plan = { orders: [], cashAfterKrw: 0, cashChangeKrw: 0, buckets: 
  * The orders that would bring the pot to target, and what to buy with new
  * cash - asked of assets-svc, which holds the prices. Asked again when the
  * pot moves or the amount typed settles.
+ *
+ * What to buy is for the amount it was asked with: until the answer for the
+ * amount now typed comes, there is none (working). The last amount's had
+ * stood beside a new figure, 이대로 사기 under it; and a plan that could not
+ * be read had looked the same as nothing to do.
  */
-function usePlan(totalKrw: number, deposit: number): { rebalance: Plan; fill: Plan | null } {
-  const [plan, setPlan] = useState<{ rebalance: Plan; deposit: Plan | null } | null>(null);
+function usePlan(totalKrw: number, deposit: number) {
+  const [plan, setPlan] = useState<{ rebalance: Plan; deposit: Plan | null; for: number } | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [asked, setAsked] = useState(0);
   useEffect(() => {
     const ctl = new AbortController();
     const t = setTimeout(() => {
       const q = deposit > 0 ? `&deposit=${deposit}` : "";
       fetch(`/api/portfolio?plan=1${q}`, { cache: "no-store", signal: ctl.signal })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((b: { rebalance: Plan; deposit: Plan | null } | null) => b && setPlan(b))
-        .catch(() => {});
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+        .then((b: { rebalance: Plan; deposit: Plan | null }) => {
+          setPlan({ ...b, for: deposit });
+          setFailed(false);
+        })
+        .catch(() => {
+          if (!ctl.signal.aborted) setFailed(true);
+        });
     }, 300);
     return () => {
       clearTimeout(t);
       ctl.abort();
     };
-  }, [totalKrw, deposit]);
-  return { rebalance: plan?.rebalance ?? NO_PLAN, fill: deposit > 0 ? (plan?.deposit ?? null) : null };
+  }, [totalKrw, deposit, asked]);
+  const current = plan?.for === deposit;
+  return {
+    rebalance: plan?.rebalance ?? NO_PLAN,
+    fill: deposit > 0 && current ? (plan?.deposit ?? null) : null,
+    working: deposit > 0 && !current && !failed,
+    failed,
+    retry: () => {
+      setFailed(false);
+      setAsked((n) => n + 1);
+    },
+  };
 }
 
 /**
@@ -154,7 +177,7 @@ export function AllocationDetail({
   const { rows } = allocation;
   const [amount, setAmount] = useState("");
   const deposit = Number(amount.replace(/[^\d]/g, "")) || 0;
-  const { rebalance, fill } = usePlan(allocation.totalKrw, deposit);
+  const { rebalance, fill, working, failed, retry } = usePlan(allocation.totalKrw, deposit);
   const sells = rebalance.orders.filter((o) => o.side === "sell");
   const gains = plannedGains(sells);
   const overseas = tax?.baskets.find((b) => b.kind === "overseas" && b.inForce);
@@ -205,6 +228,11 @@ export function AllocationDetail({
           ) : null}
         </div>
       ) : null}
+      {failed ? (
+        <Failed quiet onRetry={retry}>
+          주문 계획을 불러오지 못했어요.
+        </Failed>
+      ) : null}
 
       <label className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-aside text-dim">
         <span className="shrink-0">새로 넣을 돈</span>
@@ -220,7 +248,9 @@ export function AllocationDetail({
             원
           </span>
         </span>
-        {fill ? (
+        {working ? (
+          <span className="basis-full text-faint sm:basis-auto">→ 계산하는 중…</span>
+        ) : fill ? (
           <span className="basis-full text-dim sm:basis-auto">
             {fill.orders.length
               ? `→ ${fill.orders.map((o) => orderText(o)).join(" · ")}`

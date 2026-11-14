@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { Pager } from "@/components/ui/pager";
 import { usePaged } from "@/lib/paging";
 import { krw } from "@/lib/portfolio";
-import { type Tx, cardLabel, clock, dayLabel, groupByDay } from "@/lib/spending";
+import { type Tx, cardLabel, clock, dayLabel, foreign, groupByDay } from "@/lib/spending";
 import { cn } from "@/lib/utils";
 
 /**
@@ -114,7 +114,7 @@ function Row({ t, onOpen }: { t: Tx; onOpen: () => void }) {
           {krw(t.amountKrw)}
         </span>
         {t.foreignAmount !== null ? (
-          <span className="tnum block text-meta text-faint">${t.foreignAmount.toFixed(2)}</span>
+          <span className="tnum block text-meta text-faint">{foreign(t)}</span>
         ) : null}
       </span>
     </button>

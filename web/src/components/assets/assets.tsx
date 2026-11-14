@@ -38,6 +38,7 @@ import {
 import { onFocusWanted, wantedFocus } from "@/lib/focus";
 import type { Plan } from "@/lib/trade-plan";
 import { onResume } from "@/lib/resume";
+import { SAY } from "@/lib/say";
 import { isPending } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
 import { dayLabel, dayOf, monthDay } from "@/lib/when";
@@ -47,6 +48,9 @@ type Fold = "bridge" | "alloc" | "orders" | "principal";
 
 /** A confirm sheet for several orders: what it is called, why, and how its orders are checked. */
 type PlanAsk = { title: string; reason: string; load: () => Promise<{ results: OrderResult[]; planId?: string | null }> };
+
+/** A holding as one read of the portfolio had it: when that was, and the dollar's rate then. */
+type Quote = { holding: Holding; at: string; usdKrw: number };
 
 /**
  * What you own, and how far it has moved from what you paid.
@@ -72,17 +76,24 @@ export function Assets() {
   const [open, setOpen] = useState<Record<Fold, boolean>>({ bridge: false, alloc: false, orders: false, principal: false });
   const toggle = (k: Fold) => setOpen((o) => ({ ...o, [k]: !o[k] }));
   // The order sheet left open stays open across a tab switch (lib/keep.ts).
-  const [ordering, setOrdering] = useKept<Holding | null>("assets:ordering", null);
+  const [ordering, setOrdering] = useKept<Quote | null>("assets:ordering", null);
   const [asking, setAsking] = useState<PlanAsk | null>(null);
-  const [record, setRecord] = useState<PlacedOrder[]>([]);
-  const [standing, setStanding] = useState<Standing[]>([]);
-  const reloadRecord = useCallback(() => {
-    // As far back as assets-svc keeps on one page; the record pages them (orders.tsx).
-    void recentOrders(100).then(setRecord);
-    void standingOrders().then(setStanding);
-  }, []);
+  // The record and the standing orders, read together: null until they first
+  // come. A read that fails keeps what came before and says so - a standing
+  // order still out had vanished into "nothing yet" when its list failed.
+  const [record, setRecord] = useState<{ orders: PlacedOrder[]; standing: Standing[]; at: Date } | null>(null);
+  const [recordFailed, setRecordFailed] = useState(false);
+  const reloadRecord = useCallback(
+    () =>
+      // As far back as assets-svc keeps on one page; the record pages them (orders.tsx).
+      Promise.all([recentOrders(100), standingOrders()]).then(([orders, standing]) => {
+        if (orders && standing) setRecord({ orders, standing, at: new Date() });
+        setRecordFailed(!orders || !standing);
+      }),
+    [],
+  );
   useEffect(() => {
-    reloadRecord();
+    void reloadRecord();
   }, [reloadRecord]);
 
   // A notification about a section opens its sheet (lib/focus.ts): the
@@ -132,12 +143,13 @@ export function Assets() {
   useEffect(() => {
     again.current = (tries) => void load(false, tries);
   }, [load]);
-  // Back to the app, or a pull to refresh: what the service has now.
-  useEffect(() => onResume(() => load()), [load]);
+  // Back to the app, or a pull to refresh: what the service has now - and the
+  // record, where a standing order may have filled in the meantime.
+  useEffect(() => onResume(() => Promise.all([load(), reloadRecord()])), [load, reloadRecord]);
 
   // A placed order changes the holdings: read them afresh, and the record.
   const placed = () => {
-    reloadRecord();
+    void reloadRecord();
     window.setTimeout(() => void load(true), 1500);
   };
 
@@ -178,6 +190,13 @@ export function Assets() {
   const first = track[0];
   const rateOf0 = (p: { totalKrw: number; principalKrw: number }) =>
     p.principalKrw > 0 ? (p.totalKrw - p.principalKrw) / p.principalKrw : 0;
+  const active = record?.standing.filter((o) => o.status === "active") ?? [];
+  // The order sheet follows its holding as the portfolio is read again - how
+  // many are held, the price - not the moment it was tapped. One gone from
+  // the list since (sold out, its account not read) keeps the read it was
+  // opened on, dated. Nothing until the portfolio is read: no form on no numbers.
+  const live = ordering ? data?.holdings.find((h) => h.id === ordering.holding.id) : undefined;
+  const quote = ordering && data ? (live ? { holding: live, at: data.at, usdKrw: data.usdKrw } : ordering) : null;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -361,19 +380,34 @@ export function Assets() {
                   focus="orders"
                   open={open.orders}
                   onToggle={() => toggle("orders")}
-                  detail={<OrderRecord orders={record} holdings={data.holdings} standing={standing} onChanged={reloadRecord} />}
+                  detail={
+                    <OrderRecord
+                      orders={record?.orders ?? null}
+                      holdings={data.holdings}
+                      standing={record?.standing}
+                      at={record?.at}
+                      failed={recordFailed}
+                      onChanged={reloadRecord}
+                    />
+                  }
                 >
-                  <p className="text-ui text-dim">
-                    {standing.some((o) => o.status === "active")
-                      ? `대기 주문 ${standing.filter((o) => o.status === "active").length}건 · ` +
-                        standing
-                          .filter((o) => o.status === "active")
-                          .map((o) => `${data.holdings.find((h) => h.symbol === o.symbol)?.name ?? o.symbol} $${o.limitPrice.toFixed(2)} ${o.side === "buy" ? "이하 매수" : "이상 매도"}`)
-                          .join(", ")
-                      : record[0]
-                      ? `최근 ${dayLabel(dayOf(new Date(record[0].createdAt)))} · ${record.filter((o) => o.status === "placed").length}건 보냄`
-                      : "종목을 누르면 사고팔 수 있어요"}
-                  </p>
+                  {recordFailed ? (
+                    // Its 다시 시도 is in the sheet the row opens: the row is itself a button.
+                    <Failed quiet>주문 기록을 불러오지 못했어요.</Failed>
+                  ) : (
+                    <p className="text-ui text-dim">
+                      {!record
+                        ? SAY.loading
+                        : active.length
+                          ? `대기 주문 ${active.length}건 · ` +
+                            active
+                              .map((o) => `${data.holdings.find((h) => h.symbol === o.symbol)?.name ?? o.symbol} $${o.limitPrice.toFixed(2)} ${o.side === "buy" ? "이하 매수" : "이상 매도"}`)
+                              .join(", ")
+                          : record.orders[0]
+                            ? `최근 ${dayLabel(dayOf(new Date(record.orders[0].createdAt)))} · ${record.orders.filter((o) => o.status === "placed").length}건 보냄`
+                            : "종목을 누르면 사고팔 수 있어요"}
+                    </p>
+                  )}
                 </Row>
               </div>
             ) : null}
@@ -394,7 +428,7 @@ export function Assets() {
                         type="button"
                         key={h.id}
                         data-focus={`holding:${h.id}`}
-                        onClick={() => setOrdering(h)}
+                        onClick={() => setOrdering({ holding: h, at: data.at, usdKrw: data.usdKrw })}
                         aria-label={`${h.name} 주문`}
                         className="flex w-full items-baseline gap-3 rounded-lg px-2 py-2.5 text-left transition-colors hover:bg-glass focus-ring"
                       >
@@ -517,8 +551,12 @@ export function Assets() {
       </main>
 
       <OrderSheet
-        holding={ordering}
-        usdKrw={data?.usdKrw ?? 0}
+        // One sheet per holding: what one holding's send comes back with,
+        // found later in the record, is never shown in another's.
+        key={ordering?.holding.id}
+        holding={quote?.holding ?? null}
+        at={quote?.at}
+        usdKrw={quote?.usdKrw ?? 0}
         onOpenChange={(v) => !v && setOrdering(null)}
         onPlaced={placed}
       />
