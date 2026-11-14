@@ -37,7 +37,7 @@ import { cn } from "@/lib/utils";
  */
 export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () => Promise<void> }) {
   const viewOnly = useViewOnly();
-  const { map, failed } = useKoreaMap();
+  const { map, failed, retry } = useKoreaMap();
   const pinned = typeof block.config?.card_region === "string" ? (block.config.card_region as string) : "all";
   const [view, setView] = useState(pinned);
   const [picked, setPicked] = useState<string | null>(null);
@@ -86,8 +86,32 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
   const written = useMemo(() => new Set((block.records ?? []).map((r) => r.region).filter((r) => !faces.has(r))), [block.records, faces]);
   const been = (code: string) => faces.has(code) || written.has(code);
 
-  if (failed) return <Failed>지도를 불러오지 못했어요. 새로고침해 보세요.</Failed>;
-  if (!map) return <p className="pt-10 text-center text-ui text-faint">{SAY.loading}</p>;
+  // The outline on its way, or not come: the page keeps its name, and the
+  // map's place holds its shape or says it did not come.
+  if (!map) {
+    return (
+      <div>
+        <BlockTitle title={block.title} block={block} onRenamed={onChanged} />
+        {failed ? (
+          <Failed onRetry={retry} className="mt-4">
+            지도를 불러오지 못했어요.
+          </Failed>
+        ) : (
+          <>
+            <p role="status" className="sr-only">
+              {SAY.loading}
+            </p>
+            <div aria-hidden>
+              <div className="mt-4 h-11 w-32 rounded-lg bg-well" />
+              <div className="mt-3 rounded-2xl bg-glass p-2 sm:p-4">
+                <div className="mx-auto aspect-[1000/1791] max-h-[70dvh] w-full" />
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
 
   const regions = view === "all" ? map.regions : map.regions.filter((r) => r.sido === view);
   const visited = regions.filter((r) => faces.has(r.code)).length;
@@ -296,7 +320,7 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
                   <li key={r.id}>
                     <button
                       type="button"
-                      onClick={() => !viewOnly && setEditing(r)}
+                      onClick={() => setEditing(r)}
                       className="-mx-2 flex w-[calc(100%+1rem)] items-start gap-3 rounded-lg px-2 py-3 text-left transition-colors hover:bg-glass-raised focus-ring"
                     >
                       {shots[0] ? (
@@ -387,9 +411,11 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
                     대표로
                   </ViewerAction>
                 ) : null}
-                <ViewerAction danger disabled={viewOnly} onClick={() => ask(v)}>
-                  지우기
-                </ViewerAction>
+                {viewOnly ? null : (
+                  <ViewerAction danger onClick={() => ask(v)}>
+                    지우기
+                  </ViewerAction>
+                )}
               </>
             );
           }}
@@ -443,14 +469,20 @@ export function RecordSheet({
 }) {
   // Something in the form not saved yet, as the form says: closing by hand asks first.
   const [held, setHeld] = useState(false);
+  // The guest opens a record to read it - the list cuts its note at two
+  // lines - and changes it in their own uniple app.
+  const viewOnly = useViewOnly();
+  const read = viewOnly && editing && editing !== "new" ? editing : null;
   return (
     <Panel
       open={editing !== null}
       onOpenChange={(open) => !open && onClose()}
       guard={held}
-      title={editing === "new" ? `${regionName} ${words.noun}` : `${words.noun} 고치기`}
+      title={read ? read.title || words.noun : editing === "new" ? `${regionName} ${words.noun}` : `${words.noun} 고치기`}
     >
-      {editing && region ? (
+      {read ? (
+        <RecordView record={read} photos={photos} name={read.title || regionName} />
+      ) : editing && region && !viewOnly ? (
         <RecordForm
           key={editing === "new" ? "new" : editing.id}
           block={block}
@@ -465,6 +497,26 @@ export function RecordSheet({
         />
       ) : null}
     </Panel>
+  );
+}
+
+/** A record as the guest reads it: its days, the note whole and its photos - to look at and save, nothing to change. */
+function RecordView({ record, photos, name }: { record: DateRecord; photos: Visit[]; name: string }) {
+  const [viewing, setViewing] = useState<number | null>(null);
+  return (
+    <div className="space-y-4">
+      <p className="text-ui text-dim">{record.from ? (record.to ? dayRange(record.from, record.to) : monthDay(record.from)) : "날짜 없음"}</p>
+      {record.note ? <p className="selectable text-body leading-relaxed break-keep break-words whitespace-pre-line text-ink">{record.note}</p> : null}
+      {photos.length ? <PhotoTiles assets={photos.map((v) => ({ key: v.id, asset: v.asset }))} onOpen={setViewing} /> : null}
+      {viewing !== null ? (
+        <Lightbox
+          items={photos.map((v) => ({ src: photoSrc(v.asset, "display"), title: name }))}
+          start={viewing}
+          onClose={() => setViewing(null)}
+          actions={(i) => (photos[i] ? <SaveAction asset={photos[i].asset} name={name} /> : null)}
+        />
+      ) : null}
+    </div>
   );
 }
 

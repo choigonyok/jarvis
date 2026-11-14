@@ -5,6 +5,7 @@ import type { Map as MapLibre } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { Maximize2 } from "lucide-react";
 import { baseStyle } from "@/components/location/map-style";
+import { Failed } from "@/components/shell/failed";
 import { type Theme, onThemeChange, themeNow } from "@/lib/theme";
 import { type Day, type Mode, type Node, type Person, type Scene, type Stay, type Who, headAt, hm, meters } from "@/lib/track";
 
@@ -76,6 +77,9 @@ export function DayMap({
   const layer = useRef<Layer | null>(null);
   const [ready, setReady] = useState(false);
   const [broken, setBroken] = useState<string | null>(null);
+  // Each 다시 시도 makes the map again from the start: nothing cleared what
+  // broke it, and the screen had to be left and opened again.
+  const [attempt, setAttempt] = useState(0);
   // What a draw reads: the map's own events call it outside React.
   const now = useRef({ scene, t, live, follow, spot });
   // The phone's theme, which the renderer and the canvas cannot read from CSS.
@@ -150,8 +154,8 @@ export function DayMap({
       map.current = null;
       layer.current = null;
     };
-    // Made once; everything after reads `now`.
-  }, []);
+    // Made once a try; everything after reads `now`.
+  }, [attempt]);
 
   // Another day, or other people, open on their own view; the same read
   // again keeps the view.
@@ -303,9 +307,17 @@ export function DayMap({
       {/* Sized by height, not by inset: MapLibre's own stylesheet makes this box position: relative. */}
       <div ref={box} className="size-full bg-background" />
       {broken !== null ? (
-        <p role="alert" className="absolute inset-x-0 top-1/2 -translate-y-1/2 px-8 text-center text-ui text-dim">
-          {broken}
-        </p>
+        <div className="absolute inset-x-0 top-1/2 flex -translate-y-1/2 justify-center px-8">
+          <Failed
+            onRetry={() => {
+              setBroken(null);
+              setReady(false);
+              setAttempt((n) => n + 1);
+            }}
+          >
+            {broken}
+          </Failed>
+        </div>
       ) : null}
       {scene.bounds ? (
         <button

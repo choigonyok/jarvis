@@ -35,7 +35,7 @@ const TRIP_WORDS: RecordWords = { noun: "여행 기록", title: "도시", placeh
  */
 export function WorldMapPage({ block, onChanged }: { block: Block; onChanged: () => Promise<void> }) {
   const viewOnly = useViewOnly();
-  const { map, failed } = useWorldMap();
+  const { map, failed, retry } = useWorldMap();
   const [picked, setPicked] = useState<string | null>(null);
   const [finding, setFinding] = useState(false);
   const [editing, setEditing] = useState<DateRecord | "new" | null>(null);
@@ -62,8 +62,31 @@ export function WorldMapPage({ block, onChanged }: { block: Block; onChanged: ()
     return onOpenParams(open);
   }, [map]);
 
-  if (failed) return <Failed>지도를 불러오지 못했어요. 새로고침해 보세요.</Failed>;
-  if (!map) return <p className="pt-10 text-center text-ui text-faint">{SAY.loading}</p>;
+  // As on the date map: the name stays while the outline comes, or says it did not.
+  if (!map) {
+    return (
+      <div>
+        <BlockTitle title={block.title} block={block} onRenamed={onChanged} />
+        {failed ? (
+          <Failed onRetry={retry} className="mt-4">
+            지도를 불러오지 못했어요.
+          </Failed>
+        ) : (
+          <>
+            <p role="status" className="sr-only">
+              {SAY.loading}
+            </p>
+            <div aria-hidden>
+              <div className="mt-2 h-6 w-28 rounded bg-well" />
+              <div className="mt-3 rounded-2xl bg-glass p-2 sm:p-3">
+                <div className="aspect-[1000/436] w-full" />
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
 
   const country = picked ? map.countries.find((c) => c.code === picked) : undefined;
   const face = visits.find((v) => v.region === picked && v.rep && v.asset) ?? null;
@@ -178,7 +201,7 @@ export function WorldMapPage({ block, onChanged }: { block: Block; onChanged: ()
                   <li key={r.id}>
                     <button
                       type="button"
-                      onClick={() => !viewOnly && setEditing(r)}
+                      onClick={() => setEditing(r)}
                       className="-mx-2 flex w-[calc(100%+1rem)] items-start gap-3 rounded-lg px-2 py-3 text-left transition-colors hover:bg-glass-raised focus-ring"
                     >
                       {shots[0] ? (
@@ -262,9 +285,11 @@ export function WorldMapPage({ block, onChanged }: { block: Block; onChanged: ()
                     대표로
                   </ViewerAction>
                 )}
-                <ViewerAction danger disabled={viewOnly} onClick={() => ask(v)}>
-                  지우기
-                </ViewerAction>
+                {viewOnly ? null : (
+                  <ViewerAction danger onClick={() => ask(v)}>
+                    지우기
+                  </ViewerAction>
+                )}
               </>
             );
           }}

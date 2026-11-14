@@ -5,10 +5,12 @@ import { Trash2 } from "lucide-react";
 import { Sending, Sent } from "@/components/chat/hold";
 import { RejectForm } from "@/components/chat/reject-form";
 import { Button } from "@/components/ui/button";
+import { CopyButton } from "@/components/ui/copy-button";
+import { DetailSheet } from "@/components/ui/detail-sheet";
 import { sentOn } from "@/lib/decide";
 import { timeLabel, type Ghost } from "@/lib/proposed";
 import type { CalendarEvent, Decision } from "@/lib/thread";
-import { dayRange } from "@/lib/when";
+import { dateLabel, dayRange } from "@/lib/when";
 import { cn } from "@/lib/utils";
 
 import { OWNER_LABEL, OwnerBar, ownerOf, ownerText } from "@/components/calendar/owner";
@@ -20,7 +22,9 @@ import { OWNER_LABEL, OwnerBar, ownerOf, ownerText } from "@/components/calendar
  *
  *  A partner's entry has no delete button, and does not open to be changed.
  *  Removing or changing something in someone else's day is a conversation,
- *  not a tap. One of your own opens, on a tap, to be changed in place. */
+ *  not a tap. One of your own opens, on a tap, to be changed in place; one
+ *  that is not to be changed here opens to be read - its memo is cut at two
+ *  lines in the row, and the partner's is the day you know least. */
 export function EventRow({
   event,
   pending,
@@ -37,6 +41,7 @@ export function EventRow({
   const leaving = pending?.op === "delete";
   const owner = ownerOf(event);
   const rest = meta(event);
+  const [reading, setReading] = useState(false);
 
   return (
     <div
@@ -47,7 +52,7 @@ export function EventRow({
       )}
     >
       <OwnerBar owner={owner} className="my-0.5" />
-      <Body onEdit={onEdit}>
+      <Body onEdit={onEdit} onRead={() => setReading(true)}>
       <span className="tnum w-[3.6rem] shrink-0 pt-px text-aside leading-snug text-dim sm:w-[4.25rem]">
         {timeLabel(event)}
       </span>
@@ -82,32 +87,66 @@ export function EventRow({
         <Trash2 aria-hidden className="size-4 mouse:size-3.5" />
       </Button>
       )}
+      {onEdit ? null : (
+        <DetailSheet title={event.title} open={reading} onOpenChange={setReading}>
+          <Reading event={event} />
+        </DetailSheet>
+      )}
     </div>
   );
 }
 
 /**
- * The time and the words: a button that opens the entry where it may be
- * changed, else just themselves. Read out as the entry it is, then 고치기.
+ * The time and the words: a button that opens the entry - to be changed
+ * where it may be, else to be read. Read out as the entry it is, then 고치기
+ * or 자세히 보기.
  */
-function Body({ onEdit, children }: { onEdit?: () => void; children: ReactNode }) {
-  if (!onEdit) return <>{children}</>;
+function Body({ onEdit, onRead, children }: { onEdit?: () => void; onRead: () => void; children: ReactNode }) {
   return (
     <button
       type="button"
-      onClick={onEdit}
+      onClick={onEdit ?? onRead}
       className="-my-1 flex min-w-0 flex-1 items-start gap-3 rounded-md py-1 text-left focus-ring"
     >
       {children}
-      <span className="sr-only">고치기</span>
+      <span className="sr-only">{onEdit ? "고치기" : "자세히 보기"}</span>
     </button>
   );
 }
 
-function meta(e: CalendarEvent): string {
+/**
+ * An entry read whole where it is not to be changed: its days and hours,
+ * whose it is, the place and the memo - nothing to change or take off.
+ */
+function Reading({ event }: { event: CalendarEvent }) {
+  const owner = ownerOf(event);
+  const rest = meta(event, false);
+  return (
+    <div className="space-y-3">
+      <div>
+        <p className="tnum text-ui text-dim">
+          {event.endDate ? dayRange(event.date, event.endDate) : dateLabel(event.date)} · {timeLabel(event)}
+        </p>
+        <p className="mt-0.5 text-meta text-faint">
+          <span className={cn("font-medium", ownerText[owner])}>{OWNER_LABEL[owner]}</span>
+          {rest ? ` · ${rest}` : null}
+        </p>
+      </div>
+      {event.place ? <p className="selectable text-body break-words text-ink">{event.place}</p> : null}
+      {event.memo ? (
+        <div className="flex items-start gap-1">
+          <p className="selectable min-w-0 flex-1 pt-2.5 text-body leading-relaxed break-words whitespace-pre-line text-ink">{event.memo}</p>
+          <CopyButton text={event.memo} label="메모 복사" className="-mr-2" />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function meta(e: CalendarEvent, range = true): string {
   const parts: string[] = [];
   if (e.source === "partner" && ownerOf(e) !== "partner") parts.push("상대가 등록");
-  if (e.endDate) parts.push(dayRange(e.date, e.endDate));
+  if (range && e.endDate) parts.push(dayRange(e.date, e.endDate));
   if (e.recurrence) parts.push("반복");
   return parts.join(" · ");
 }

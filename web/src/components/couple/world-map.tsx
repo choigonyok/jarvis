@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useId, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import type { Face } from "@/components/couple/korea-map";
 import { photoSrc, type Visit } from "@/lib/couple";
+import { onResume } from "@/lib/resume";
 import { cn } from "@/lib/utils";
 
 /**
@@ -60,7 +61,13 @@ export function useWorldMap() {
       live = false;
     };
   }, []);
-  return { map, failed };
+  // Read again as the date map's outline is (korea-map.tsx useKoreaMap).
+  const retry = useCallback(() => {
+    setFailed(false);
+    return loadWorldMap().then(setMap, () => setFailed(true));
+  }, []);
+  useEffect(() => (failed ? onResume(retry) : undefined), [failed, retry]);
+  return { map, failed, retry };
 }
 
 /**
@@ -112,7 +119,7 @@ export function WorldMap({
 
   const ordered = useMemo(() => [...map.countries].sort((a, b) => Number(!!a.dot) - Number(!!b.dot)), [map.countries]);
   return (
-    <svg viewBox={viewBox} role="img" aria-label="세계 지도" className={className}>
+    <svg viewBox={viewBox} role={onSelect ? "group" : "img"} aria-label="세계 지도" className={className}>
       <defs>
         {map.countries
           .filter((c) => faces.has(c.code))
@@ -130,6 +137,7 @@ export function WorldMap({
               role: "button" as const,
               tabIndex: -1,
               "aria-label": `${c.name}${face ? " · 가 봤어요" : ""}`,
+              "aria-pressed": selected === c.code,
               className: "cursor-pointer outline-none",
             }
           : {};

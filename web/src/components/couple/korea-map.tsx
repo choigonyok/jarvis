@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useId, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { photoSrc } from "@/lib/couple";
+import { onResume } from "@/lib/resume";
 import { cn } from "@/lib/utils";
 
 /**
@@ -49,7 +50,15 @@ export function useKoreaMap() {
       live = false;
     };
   }, []);
-  return { map, failed };
+  // The outline that did not come is read again on 다시 시도, and on coming
+  // back or a pull to refresh: it said 새로고침해 보세요, and a home-screen
+  // app has no reload.
+  const retry = useCallback(() => {
+    setFailed(false);
+    return loadKoreaMap().then(setMap, () => setFailed(true));
+  }, []);
+  useEffect(() => (failed ? onResume(retry) : undefined), [failed, retry]);
+  return { map, failed, retry };
 }
 
 /** The share of the country's 시/군/구 we have been to, one decimal: "5.2%". */
@@ -128,8 +137,15 @@ export function KoreaMap({
     [labels, map, view, font],
   );
 
+  // A map to press is a group of its regions' buttons - an image's insides
+  // are read as nothing - named for the 시/도 on it, not the list's first.
   return (
-    <svg viewBox={viewBox} className={cn("block select-none", className)} role="img" aria-label={view === "all" ? "전국 지도" : `${provinces[0]?.name ?? ""} 지도`}>
+    <svg
+      viewBox={viewBox}
+      className={cn("block select-none", className)}
+      role={onSelect ? "group" : "img"}
+      aria-label={view === "all" ? "전국 지도" : `${provinces.find((p) => p.code === view)?.name ?? ""} 지도`}
+    >
       <defs>
         {regions
           .filter((r) => faces.has(r.code))
@@ -148,6 +164,7 @@ export function KoreaMap({
               role: "button" as const,
               tabIndex: view === "all" ? -1 : 0,
               "aria-label": `${r.name}${face || marked?.has(r.code) ? " · 가 봤어요" : ""}`,
+              "aria-pressed": selected === r.code,
               onKeyDown: (e: React.KeyboardEvent) => {
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();

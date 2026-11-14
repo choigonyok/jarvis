@@ -159,8 +159,42 @@ export function Photos() {
 function Timeline({ albumId, onOpen }: { albumId?: string; onOpen: (list: Asset[], index: number) => void }) {
   const [buckets, setBuckets] = useState<Bucket[] | null>(null);
   const [months, setMonths] = useState<Record<string, Asset[]>>({});
+  // Months whose read failed, said where their photos go: left as grey
+  // squares, they looked like months still coming.
+  const [missed, setMissed] = useState<ReadonlySet<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const q = albumId ? `&albumId=${albumId}` : "";
+  // Months on their way, asked for once: every draw had made each month's
+  // watcher anew, and each new one asked again for a month already coming.
+  const asking = useRef(new Set<string>());
+  // What is on hand, for the counts read on coming back to be held against.
+  const onHand = useRef(months);
+  useEffect(() => {
+    onHand.current = months;
+  }, [months]);
+
+  /** Reads a month now: the first time, again, or once more after it failed. */
+  const load = useCallback(
+    async (bucket: string) => {
+      if (asking.current.has(bucket)) return;
+      asking.current.add(bucket);
+      try {
+        const cols = await get<Parameters<typeof flatten>[0]>(`timeline/bucket?timeBucket=${encodeURIComponent(bucket)}${q}`);
+        setMonths((m) => ({ ...m, [bucket]: flatten(cols) }));
+        setMissed((s) => {
+          if (!s.has(bucket)) return s;
+          const next = new Set(s);
+          next.delete(bucket);
+          return next;
+        });
+      } catch {
+        setMissed((s) => new Set(s).add(bucket));
+      } finally {
+        asking.current.delete(bucket);
+      }
+    },
+    [q],
+  );
 
   const readBuckets = useCallback(
     () =>
@@ -168,28 +202,22 @@ function Timeline({ albumId, onOpen }: { albumId?: string; onOpen: (list: Asset[
         .then((b) => {
           setBuckets(b);
           setError(null);
+          // A month read before whose count has moved - a photo just backed
+          // up - is read again, showing what it had until then: only the
+          // number beside its name had changed.
+          for (const x of b) {
+            const had = onHand.current[x.timeBucket];
+            if (had && had.length !== x.count) void load(x.timeBucket);
+          }
         })
         .catch(() => setError("사진 서버에 연결하지 못했어요.")),
-    [albumId],
+    [albumId, load],
   );
   useEffect(() => {
     void readBuckets();
   }, [readBuckets]);
   // Back to the app, or a pull to refresh: months backed up meanwhile.
   useEffect(() => onResume(readBuckets), [readBuckets]);
-
-  const load = useCallback(
-    async (bucket: string) => {
-      if (months[bucket]) return;
-      try {
-        const cols = await get<Parameters<typeof flatten>[0]>(`timeline/bucket?timeBucket=${encodeURIComponent(bucket)}${q}`);
-        setMonths((m) => ({ ...m, [bucket]: flatten(cols) }));
-      } catch {
-        // Left as placeholders; scrolling past again retries.
-      }
-    },
-    [months, q],
-  );
 
   if (error) {
     return (
@@ -224,7 +252,8 @@ function Timeline({ albumId, onOpen }: { albumId?: string; onOpen: (list: Asset[
           key={b.timeBucket}
           bucket={b}
           assets={months[b.timeBucket]}
-          onNear={() => void load(b.timeBucket)}
+          failed={missed.has(b.timeBucket)}
+          onNear={load}
           onOpen={(a) => onOpen(loaded, loaded.findIndex((x) => x.id === a.id))}
         />
       ))}
@@ -235,33 +264,44 @@ function Timeline({ albumId, onOpen }: { albumId?: string; onOpen: (list: Asset[
 function Month({
   bucket,
   assets,
+  failed,
   onNear,
   onOpen,
 }: {
   bucket: Bucket;
   assets?: Asset[];
-  onNear: () => void;
+  /** Its last read failed. */
+  failed?: boolean;
+  /** Reads the month: as it scrolls near, and on 다시 시도. The same function every draw, so its watcher is made once. */
+  onNear: (bucket: string) => unknown;
   onOpen: (a: Asset) => void;
 }) {
   const ref = useRef<HTMLElement>(null);
+  const key = bucket.timeBucket;
   useEffect(() => {
     if (assets) return;
     const el = ref.current;
     if (!el) return;
-    const io = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && onNear(), {
+    const io = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && onNear(key), {
       rootMargin: "800px 0px",
     });
     io.observe(el);
     return () => io.disconnect();
-  }, [assets, onNear]);
+  }, [assets, onNear, key]);
 
   return (
-    <section ref={ref} aria-label={monthLabel(bucket.timeBucket)}>
+    <section ref={ref} aria-label={monthLabel(key)}>
       <h2 className="mb-2 flex items-baseline gap-2 px-1 text-ui text-ink">
-        {monthLabel(bucket.timeBucket)}
+        {monthLabel(key)}
         <span className="tnum text-meta text-faint">{bucket.count}</span>
       </h2>
-      <Grid count={bucket.count} assets={assets} onOpen={onOpen} />
+      {failed && !assets ? (
+        <Failed onRetry={() => onNear(key)} className="px-1">
+          이 달의 사진을 불러오지 못했어요.
+        </Failed>
+      ) : (
+        <Grid count={bucket.count} assets={assets} onOpen={onOpen} />
+      )}
     </section>
   );
 }
@@ -272,11 +312,13 @@ function Grid({ count, assets, onOpen }: { count: number; assets?: Asset[]; onOp
       {assets
         ? assets.map((a) => (
             <li key={a.id}>
+              {/* Named by when it was taken - hundreds of 사진 보기 told nothing apart -
+                  and its ring above the tiles next to it, which covered it at a 2px gap. */}
               <button
                 type="button"
                 onClick={() => onOpen(a)}
-                aria-label={a.isImage ? "사진 보기" : "영상 보기"}
-                className="relative block aspect-square w-full overflow-hidden bg-well outline-none focus-visible:ring-3 focus-visible:ring-ring/60"
+                aria-label={`${dateTime(a.takenAt)} ${a.isImage ? "사진" : "영상"} 보기`}
+                className="relative block aspect-square w-full overflow-hidden bg-well focus-ring focus-visible:z-10"
               >
                 {/* eslint-disable-next-line @next/next/no-img-element -- Immich thumbnails through the proxy */}
                 <img src={thumbUrl(a.id)} alt="" loading="lazy" className="size-full object-cover" />

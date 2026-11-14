@@ -44,15 +44,21 @@ export function BucketPage({ block, onChanged }: { block: Block; onChanged: () =
     setBase(block.bucket);
     setItems(block.bucket ?? []);
   }
+  // Wishes taken off here stay off, as the calendar keeps its own: for the
+  // five seconds of 되돌리기 the server still has them, and any read landing
+  // meanwhile - the minute's, or the one after another change - brought the
+  // row back under its own 지웠어요.
+  const [leaving, setLeaving] = useState<ReadonlySet<string>>(new Set());
+  const shown = useMemo(() => items.filter((b) => !leaving.has(b.id)), [items, leaving]);
 
-  const done = items.filter((b) => b.done);
-  const ahead = items.filter((b) => !b.done);
-  const share = items.length ? Math.round((done.length / items.length) * 100) : 0;
+  const done = shown.filter((b) => b.done);
+  const ahead = shown.filter((b) => !b.done);
+  const share = shown.length ? Math.round((done.length / shown.length) * 100) : 0;
   const found = useMemo(() => {
     const q = query?.trim();
     if (!q) return null;
-    return items.filter((b) => b.title.includes(q));
-  }, [items, query]);
+    return shown.filter((b) => b.title.includes(q));
+  }, [shown, query]);
 
   async function add(e: React.FormEvent) {
     e.preventDefault();
@@ -93,7 +99,7 @@ export function BucketPage({ block, onChanged }: { block: Block; onChanged: () =
     void onChanged();
   }
 
-  /** The wishes ahead in a new order, the ones done left in their places. */
+  /** The wishes ahead in a new order, the ones done - and one being taken off, still the server's - left in their places. */
   async function reorder(ids: string[]): Promise<string | null> {
     const all = [...items].sort((a, b) => a.order - b.order).map((b) => b.id);
     const full = placeInto(all, ids);
@@ -106,22 +112,27 @@ export function BucketPage({ block, onChanged }: { block: Block; onChanged: () =
   }
 
   function remove(b: Bucket) {
-    const at = items.findIndex((x) => x.id === b.id);
-    setItems((list) => list.filter((x) => x.id !== b.id));
+    const keep = (on: boolean) =>
+      setLeaving((prev) => {
+        const next = new Set(prev);
+        if (on) next.add(b.id);
+        else next.delete(b.id);
+        return next;
+      });
+    keep(true);
     offer(
       `${b.title} 지웠어요`,
-      () =>
-        setItems((list) => {
-          const next = list.slice();
-          next.splice(Math.min(at, next.length), 0, b);
-          return next;
-        }),
+      () => keep(false),
       () =>
         void writeCouple("DELETE", `/blocks/${block.id}/bucket/${b.id}`).then((sent) => {
           if (!sent.ok) {
-            setItems((list) => [...list, b].sort((x, y) => x.order - y.order));
+            keep(false);
             setError(sent.error);
-          } else void onChanged();
+            return;
+          }
+          // Gone from the server too: an order saved before the read lands names only what is left.
+          setItems((list) => list.filter((x) => x.id !== b.id));
+          void onChanged();
         }),
     );
   }
@@ -147,7 +158,7 @@ export function BucketPage({ block, onChanged }: { block: Block; onChanged: () =
 
       <div className="mt-4 flex items-baseline justify-between text-ui">
         <span className="text-dim">
-          {done.length}/{items.length} 이뤘어요
+          {done.length}/{shown.length} 이뤘어요
         </span>
         <span className="text-heading font-semibold text-foreground tabular-nums">{share}%</span>
       </div>
@@ -199,7 +210,7 @@ export function BucketPage({ block, onChanged }: { block: Block; onChanged: () =
           {ahead.length ? (
             <List items={ahead} onMark={mark} onRename={rename} onRemove={remove} className="mt-1" />
           ) : (
-            <p className="mt-2 text-ui text-faint">{items.length ? "전부 이뤘어요. 다음 버킷을 적어 볼까요?" : "작은 것부터 적어도 좋아요."}</p>
+            <p className="mt-2 text-ui text-faint">{shown.length ? "전부 이뤘어요. 다음 버킷을 적어 볼까요?" : "작은 것부터 적어도 좋아요."}</p>
           )}
           {done.length ? (
             <>

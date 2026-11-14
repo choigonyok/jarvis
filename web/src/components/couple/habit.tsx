@@ -166,8 +166,15 @@ export function HabitPage({ block, space, onChanged }: { block: Block; space: Sp
               {s.label}
             </dt>
             <dd className="mt-0.5 text-lead font-semibold tracking-tight text-foreground tabular-nums">
-              {s.n}
-              <span className="ml-0.5 text-aside font-normal text-faint">일</span>
+              {checks.data ? (
+                <>
+                  {s.n}
+                  <span className="ml-0.5 text-aside font-normal text-faint">일</span>
+                </>
+              ) : (
+                // The month not read yet: the figure's place, not a 0.
+                <span aria-hidden className="my-1 block h-5.5 w-10 rounded bg-well" />
+              )}
             </dd>
           </div>
         ))}

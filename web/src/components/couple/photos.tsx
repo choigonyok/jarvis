@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Check, ImagePlus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { photoSrc, uploadPhoto } from "@/lib/couple";
+import { photoSrc, uploadEach, uploadPhoto } from "@/lib/couple";
 import { cn } from "@/lib/utils";
 
 /**
@@ -18,22 +18,19 @@ export function useUploads(block: string | null) {
   const [busy, setBusy] = useState<{ done: number; of: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  /** Resolves to the assets that went up, in order; the first failure stops the rest. */
+  /** Resolves to the assets that went up, in order; how many of the rest did not, and why, is said beside the button. */
   async function upload(files: File[]): Promise<string[]> {
     if (!block || files.length === 0) return [];
     setError(null);
-    const out: string[] = [];
-    for (let i = 0; i < files.length; i++) {
-      setBusy({ done: i, of: files.length });
-      const sent = await uploadPhoto(block, files[i]);
-      if (!sent.ok) {
-        setError(files.length > 1 ? `${i + 1}번째 사진: ${sent.error}` : sent.error);
-        break;
-      }
-      out.push(sent.data);
-    }
+    const { up, missed, why } = await uploadEach(
+      files,
+      (file) => uploadPhoto(block, file),
+      (done) => setBusy({ done, of: files.length }),
+    );
+    // "3번째 사진" was a place in the phone's picker, which no one can go back to.
+    if (missed) setError(files.length > 1 ? `${files.length}장 중 ${missed}장은 올리지 못했어요: ${why}` : why);
     setBusy(null);
-    return out;
+    return up;
   }
   return { busy, error, setError, upload };
 }
@@ -42,6 +39,7 @@ export function useUploads(block: string | null) {
 export function PickPhotos({
   onPick,
   busy,
+  disabled,
   label = "사진 추가",
   multiple = true,
   className,
@@ -50,7 +48,10 @@ export function PickPhotos({
   icon,
 }: {
   onPick: (files: File[]) => void;
+  /** This button's own upload under way: it counts it. */
   busy?: { done: number; of: number } | null;
+  /** Held while something else is under way beside it - another button's upload, a removal - which it does not count. */
+  disabled?: boolean;
   label?: string;
   multiple?: boolean;
   className?: string;
@@ -77,7 +78,7 @@ export function PickPhotos({
           if (files.length) onPick(files);
         }}
       />
-      <Button type="button" variant={variant} size="touch-sm" disabled={!!busy} onClick={() => input.current?.click()} className={cn("gap-1.5", className)}>
+      <Button type="button" variant={variant} size="touch-sm" disabled={!!busy || disabled} onClick={() => input.current?.click()} className={cn("gap-1.5", className)}>
         {icon ?? <ImagePlus aria-hidden className="size-4" />}
         {busy ? `올리는 중… ${busy.done + 1}/${busy.of}` : label}
       </Button>
@@ -87,7 +88,8 @@ export function PickPhotos({
 
 /**
  * A row of photos: tap one to look at it; with onRemove, each has a way off.
- * With picked, a tap picks it instead - several to take off at once.
+ * With picked, a tap picks it instead - several to take off at once. With
+ * neither, a tile is a photo and not a button that does nothing.
  */
 export function PhotoTiles({
   assets,
@@ -99,7 +101,8 @@ export function PhotoTiles({
   className,
   trailing,
 }: {
-  assets: { key: string; asset: string; mark?: ReactNode }[];
+  /** label: what the tile is read out as, "사진 3" where none is given - a grid of one-tile rows was "사진 1" all through. */
+  assets: { key: string; asset: string; mark?: ReactNode; label?: string }[];
   onOpen?: (index: number) => void;
   onRemove?: (index: number) => void;
   /** The photos picked, by key; set while picking. */
@@ -115,44 +118,55 @@ export function PhotoTiles({
   const fill = size === "fill";
   return (
     <ul className={cn(fill ? "block" : "scrollbar-none -mx-1 flex gap-2 overflow-x-auto px-1 py-1", className)}>
-      {assets.map((p, i) => (
-        <li key={p.key} className={cn("relative", fill ? "block" : "shrink-0")}>
-          <button
-            type="button"
-            onClick={() => (picked ? onPick?.(p.key) : onOpen?.(i))}
-            className={cn("block overflow-hidden bg-glass-raised focus-ring", fill ? "w-full rounded-md" : "rounded-xl")}
-            aria-label={picked ? `사진 ${i + 1} ${picked.has(p.key) ? "고르기 취소" : "고르기"}` : `사진 ${i + 1} 크게 보기`}
-            aria-pressed={picked ? picked.has(p.key) : undefined}
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element -- through the console's own proxy */}
-            <img src={photoSrc(p.asset)} alt="" loading="lazy" className={cn("object-cover transition-opacity", box, picked && !picked.has(p.key) && "opacity-60")} />
-          </button>
-          {p.mark ? <span className="pointer-events-none absolute bottom-1 left-1">{p.mark}</span> : null}
-          {picked ? (
-            <span
-              aria-hidden
-              className={cn(
-                "pointer-events-none absolute top-1 right-1 flex size-6 items-center justify-center rounded-full ring-2 ring-white/90",
-                picked.has(p.key) ? "bg-foreground text-background" : "bg-black/30",
-              )}
-            >
-              {picked.has(p.key) ? <Check className="size-3.5" strokeWidth={3} /> : null}
-            </span>
-          ) : null}
-          {onRemove && !picked ? (
-            <button
-              type="button"
-              onClick={() => onRemove(i)}
-              aria-label={`사진 ${i + 1} 빼기`}
-              className="tap absolute -top-1 -right-1 flex items-center justify-center focus-ring"
-            >
-              <span className="flex size-6 items-center justify-center rounded-full bg-background/90 text-ink shadow-sm ring-1 ring-edge">
-                <X aria-hidden className="size-3.5" />
+      {assets.map((p, i) => {
+        const name = p.label ?? `사진 ${i + 1}`;
+        const frame = cn("block overflow-hidden bg-glass-raised", fill ? "w-full rounded-md" : "rounded-xl");
+        // eslint-disable-next-line @next/next/no-img-element -- through the console's own proxy
+        const img = <img src={photoSrc(p.asset)} alt="" loading="lazy" className={cn("object-cover transition-opacity", box, picked && !picked.has(p.key) && "opacity-60")} />;
+        return (
+          <li key={p.key} className={cn("relative", fill ? "block" : "shrink-0")}>
+            {picked || onOpen ? (
+              <button
+                type="button"
+                onClick={() => (picked ? onPick?.(p.key) : onOpen?.(i))}
+                className={cn(frame, "focus-ring")}
+                aria-label={picked ? `${name} ${picked.has(p.key) ? "고르기 취소" : "고르기"}` : `${name} 크게 보기`}
+                aria-pressed={picked ? picked.has(p.key) : undefined}
+              >
+                {img}
+              </button>
+            ) : (
+              <div role="img" aria-label={name} className={frame}>
+                {img}
+              </div>
+            )}
+            {p.mark ? <span className="pointer-events-none absolute bottom-1 left-1">{p.mark}</span> : null}
+            {picked ? (
+              <span
+                aria-hidden
+                className={cn(
+                  "pointer-events-none absolute top-1 right-1 flex size-6 items-center justify-center rounded-full ring-2 ring-white/90",
+                  picked.has(p.key) ? "bg-foreground text-background" : "bg-black/30",
+                )}
+              >
+                {picked.has(p.key) ? <Check className="size-3.5" strokeWidth={3} /> : null}
               </span>
-            </button>
-          ) : null}
-        </li>
-      ))}
+            ) : null}
+            {onRemove && !picked ? (
+              <button
+                type="button"
+                onClick={() => onRemove(i)}
+                aria-label={`${name} 빼기`}
+                className="tap absolute -top-1 -right-1 flex items-center justify-center focus-ring"
+              >
+                <span className="flex size-6 items-center justify-center rounded-full bg-background/90 text-ink shadow-sm ring-1 ring-edge">
+                  <X aria-hidden className="size-3.5" />
+                </span>
+              </button>
+            ) : null}
+          </li>
+        );
+      })}
       {trailing ? <li className="flex shrink-0 items-center">{trailing}</li> : null}
     </ul>
   );
@@ -223,10 +237,28 @@ export function SaveAction({ asset, name }: { asset: string; name?: string }) {
   );
 }
 
-/** A tool bar for picking several photos to take off: how many, take them off, or stop. */
-export function PickBar({ count, busy, onRemove, onCancel }: { count: number; busy?: boolean; onRemove: () => void; onCancel: () => void }) {
-  return (
-    <div className="mt-2 flex items-center gap-2">
+/**
+ * A tool bar for picking several photos to take off: how many, take them off,
+ * or stop. Under a grid longer than the screen it floats over the tab bar
+ * while the grid scrolls under it: a line above the grid went off the top
+ * with the count and the way to take them off.
+ */
+export function PickBar({
+  count,
+  busy,
+  float,
+  onRemove,
+  onCancel,
+}: {
+  count: number;
+  busy?: boolean;
+  /** Put after the grid it picks from, and held at the bottom of the screen until the grid's end comes up. */
+  float?: boolean;
+  onRemove: () => void;
+  onCancel: () => void;
+}) {
+  const bar = (
+    <div className={cn("flex items-center gap-2", float ? "liquid-glass rounded-2xl py-1.5 ps-3.5 pe-1.5" : "mt-2")}>
       <span className="mr-auto text-aside text-dim tabular-nums">{count ? `${count}장 골랐어요` : "지울 사진을 골라요"}</span>
       <Button variant="soft" size="touch-sm" onClick={onCancel} disabled={busy}>
         취소
@@ -236,4 +268,6 @@ export function PickBar({ count, busy, onRemove, onCancel }: { count: number; bu
       </Button>
     </div>
   );
+  // bottom-2, not the tab bar's height: the scroller's own padding (pb-tabbar) already insets where a sticky child sits.
+  return float ? <div className="sticky bottom-2 z-10 mt-3">{bar}</div> : bar;
 }

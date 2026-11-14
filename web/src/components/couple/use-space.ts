@@ -22,12 +22,20 @@ export function useBlock(id: string) {
   });
 }
 
-/** A habit block's checks between two days, both people's. */
+/**
+ * A habit block's checks between two days, both people's - those days' own
+ * or none yet. A month paged to keeps the month before in the resource until
+ * its own read lands (or for good, when it fails), and shown under the new
+ * name those were its figures, its unchecked days and a 체크하기 for a day
+ * already checked.
+ */
 export function useChecks(block: string | null, from: string, to: string) {
-  return useResource<Check[]>(block ? `couple:checks:${block}:${from}:${to}` : null, (signal) =>
+  const key = block ? `couple:checks:${block}:${from}:${to}` : null;
+  const checks = useResource<Check[]>(key, (signal) =>
     readCouple<{ checks: Check[] }>(`/blocks/${encodeURIComponent(block!)}/checks?from=${from}&to=${to}`, signal).then((r) => r.checks ?? []),
     { interval: LIVE },
   );
+  return checks.dataKey === key ? checks : { ...checks, data: undefined };
 }
 
 /** What the two did in the space, newest first. */

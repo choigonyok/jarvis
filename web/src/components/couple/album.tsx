@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Lightbox } from "@/components/ui/lightbox";
-import { photoSrc, uploadSized, writeCouple, type AlbumPhoto, type Block, type Space } from "@/lib/couple";
+import { photoSrc, uploadEach, uploadSized, writeCouple, type AlbumPhoto, type Block, type Space } from "@/lib/couple";
 import { dateLabel } from "@/lib/when";
 import { cn } from "@/lib/utils";
 
@@ -42,44 +42,71 @@ export function shownOf(block: Block, person: string | undefined): string | unde
 export function AlbumPage({ block, space, onChanged }: { block: Block; space: Space; onChanged: () => Promise<void> }) {
   const viewOnly = useViewOnly();
   const photos = useMemo(() => block.album ?? [], [block.album]);
-  const [busy, setBusy] = useState<{ done: number; of: number } | null>(null);
+  // An upload under way, and which button sent it: that one counts it, and a
+  // removal counts nothing - both buttons said 올리는 중… 1/3 while photos
+  // were being taken out.
+  const [busy, setBusy] = useState<{ done: number; of: number; snap: boolean } | null>(null);
+  const [removing, setRemoving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [picking, setPicking] = useState<ReadonlySet<string> | null>(null);
+  // What a 지우기 asks about first: the photos picked, or the one open in the
+  // viewer. Kept as the question fades out, so its words stay as they were.
   const [asking, setAsking] = useState(false);
+  const [asked, setAsked] = useState<string[]>([]);
   const [viewing, setViewing] = useState<number | null>(null);
   const shown = useMemo(() => photos.filter((p) => p.media === "photo"), [photos]);
   const mine = shownOf(block, space.me.id);
+  // Who put a photo in, and the day it was taken: the line over it in the viewer, and what its tile is read out as.
+  const about = (p: AlbumPhoto) => `${p.by === "me" ? space.me.name || "나" : space.partner?.name || "상대"} · ${dateLabel((p.takenAt ?? p.at).slice(0, 10))}`;
 
   async function put(files: File[], snap: boolean) {
-    if (files.length > BATCH) return setError(`한 번에 ${BATCH}장까지 올릴 수 있어요. 나눠서 올려 주세요.`);
     setError(null);
     setNote(null);
-    const up: { asset: string; width: number; height: number }[] = [];
-    for (let i = 0; i < files.length; i++) {
-      setBusy({ done: i, of: files.length });
-      const sent = await uploadSized(block.id, files[i]);
-      if (!sent.ok) {
-        setError(files.length > 1 ? `${i + 1}번째 사진: ${sent.error}` : sent.error);
-        break;
-      }
-      up.push(sent.data);
-    }
+    // As many go as one upload puts in (the server holds to it too), and the
+    // rest are said: picked one by one on the phone, all of them had been
+    // dropped for being one too many. What went and what did not are both
+    // said - a line naming one photo's failure left the rest unknown.
+    const sending = files.slice(0, BATCH);
+    const left = files.length - sending.length;
+    const { up, missed, why } = await uploadEach(
+      sending,
+      (file) => uploadSized(block.id, file),
+      (done) => setBusy({ done, of: sending.length, snap }),
+    );
+    const notUp = [
+      missed ? (files.length > 1 ? `${missed}장은 올리지 못했어요: ${why}` : why) : "",
+      left ? `한 번에 ${BATCH}장까지라 ${left}장은 올리지 않았어요. 다시 골라 올려 주세요.` : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
     if (up.length) {
       const sent = await writeCouple("POST", `/blocks/${block.id}/album`, { photos: up, snap });
       if (!sent.ok) setError(sent.error);
-      else setNote(snap ? "찍은 사진을 올렸어요. 상대 폰에 알림이 가요." : `${up.length}장을 올렸어요.`);
+      else {
+        setNote(snap ? "찍은 사진을 올렸어요. 상대 폰에 알림이 가요." : up.length < files.length ? `${files.length}장 중 ${up.length}장을 올렸어요.` : `${up.length}장을 올렸어요.`);
+        setError(notUp || null);
+      }
       await onChanged();
-    }
+    } else setError(notUp || null);
     setBusy(null);
   }
 
+  function ask(ids: string[]) {
+    setAsked(ids);
+    setAsking(true);
+  }
+
+  /** The photos asked about, taken out once the answer is yes; a viewer it was asked from closes only now. */
   async function takeOut() {
-    if (!picking?.size) return;
+    if (!asked.length) return;
     setAsking(false);
-    setBusy({ done: 0, of: picking.size });
-    const sent = await writeCouple("POST", `/blocks/${block.id}/album/delete`, { ids: [...picking] });
-    setBusy(null);
+    setViewing(null);
+    setRemoving(true);
+    setError(null);
+    setNote(null);
+    const sent = await writeCouple("POST", `/blocks/${block.id}/album/delete`, { ids: asked });
+    setRemoving(false);
     if (!sent.ok) return setError(sent.error);
     setPicking(null);
     setNote("사진을 지웠어요.");
@@ -87,6 +114,8 @@ export function AlbumPage({ block, space, onChanged }: { block: Block; space: Sp
   }
 
   async function pin(p: AlbumPhoto | null) {
+    setError(null);
+    setNote(null);
     const sent = await writeCouple("POST", `/blocks/${block.id}/album/pin`, { asset: p?.asset ?? "" });
     if (!sent.ok) return setError(sent.error);
     setNote(p ? "홈에 띄웠어요." : "홈에서 내렸어요.");
@@ -101,24 +130,33 @@ export function AlbumPage({ block, space, onChanged }: { block: Block; space: Sp
         {photos.length !== shown.length ? <span className="text-faint"> · 동영상 {photos.length - shown.length}개는 uniple 앱에서 봐요</span> : null}
       </p>
       <div className={cn("mt-3 flex flex-wrap gap-2", viewOnly && "hidden")}>
-        <PickPhotos camera label="사진 찍기" busy={busy} variant="raised" icon={<Camera aria-hidden className="size-4" />} onPick={(f) => void put(f, true)} />
-        <PickPhotos label="사진 추가" busy={busy} onPick={(f) => void put(f, false)} />
+        <PickPhotos
+          camera
+          label="사진 찍기"
+          busy={busy?.snap ? busy : null}
+          disabled={!!busy || removing}
+          variant="raised"
+          icon={<Camera aria-hidden className="size-4" />}
+          onPick={(f) => void put(f, true)}
+        />
+        <PickPhotos label="사진 추가" busy={busy && !busy.snap ? busy : null} disabled={!!busy || removing} onPick={(f) => void put(f, false)} />
         {shown.length > 1 && !picking ? (
           <Button variant="quiet" size="touch-sm" onClick={() => setPicking(new Set())}>
             여러 장 지우기
           </Button>
         ) : null}
       </div>
-      {error ? (
-        <p role="alert" className="mt-2 text-aside text-reject">
-          {error}
-        </p>
-      ) : note ? (
+      {/* Both, when some photos went and some did not. */}
+      {note ? (
         <p className="mt-2 text-aside text-dim" role="status">
           {note}
         </p>
       ) : null}
-      {picking ? <PickBar count={picking.size} busy={!!busy} onCancel={() => setPicking(null)} onRemove={() => setAsking(true)} /> : null}
+      {error ? (
+        <p role="alert" className="mt-2 text-aside text-reject">
+          {error}
+        </p>
+      ) : null}
 
       {shown.length === 0 ? (
         <p className="mt-6 text-ui text-faint">둘이 찍은 사진을 여기에 모아요. 사진 찍기로 바로 올리면 상대 홈에도 떠요.</p>
@@ -128,6 +166,7 @@ export function AlbumPage({ block, space, onChanged }: { block: Block; space: Sp
             <li key={p.id} className="relative">
               <PhotoTile
                 photo={p}
+                label={`사진 ${i + 1} · ${about(p)}`}
                 pinned={p.asset === mine}
                 picked={picking ? picking.has(p.id) : undefined}
                 onTap={() =>
@@ -145,11 +184,14 @@ export function AlbumPage({ block, space, onChanged }: { block: Block; space: Sp
           ))}
         </ul>
       )}
+      {picking ? <PickBar float count={picking.size} busy={removing} onCancel={() => setPicking(null)} onRemove={() => ask([...picking])} /> : null}
 
       <AlertDialog open={asking} onOpenChange={setAsking}>
-        <AlertDialogContent>
+        {/* Over the photo viewer (z-70, ui/dialog.tsx) when asked from there:
+            the photo stays in sight until the question is answered. */}
+        <AlertDialogContent className="z-[80]">
           <AlertDialogHeader>
-            <AlertDialogTitle>사진 {picking?.size ?? 0}장을 지울까요?</AlertDialogTitle>
+            <AlertDialogTitle>사진 {asked.length}장을 지울까요?</AlertDialogTitle>
             <AlertDialogDescription>앨범에서 빠지고 상대의 uniple 앱에서도 사라져요.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -161,7 +203,7 @@ export function AlbumPage({ block, space, onChanged }: { block: Block; space: Sp
 
       {viewing !== null && shown[viewing] ? (
         <Lightbox
-          items={shown.map((p) => ({ src: photoSrc(p.asset, "display"), title: `${p.by === "me" ? space.me.name || "나" : space.partner?.name || "상대"} · ${dateLabel((p.takenAt ?? p.at).slice(0, 10))}` }))}
+          items={shown.map((p) => ({ src: photoSrc(p.asset, "display"), title: about(p) }))}
           start={viewing}
           onClose={() => setViewing(null)}
           actions={(i) => {
@@ -170,15 +212,22 @@ export function AlbumPage({ block, space, onChanged }: { block: Block; space: Sp
             return (
               <>
                 <SaveAction asset={p.asset} name={`album-${i + 1}`} />
-                <ViewerAction
-                  disabled={viewOnly}
-                  onClick={() => {
-                    setViewing(null);
-                    void pin(p.asset === mine ? null : p);
-                  }}
-                >
-                  {p.asset === mine ? "홈에서 내리기" : "홈에 띄우기"}
-                </ViewerAction>
+                {viewOnly ? null : (
+                  <ViewerAction
+                    onClick={() => {
+                      setViewing(null);
+                      void pin(p.asset === mine ? null : p);
+                    }}
+                  >
+                    {p.asset === mine ? "홈에서 내리기" : "홈에 띄우기"}
+                  </ViewerAction>
+                )}
+                {/* One photo taken out where it is looked at: 여러 장 지우기 is for two or more. */}
+                {viewOnly ? null : (
+                  <ViewerAction danger onClick={() => ask([p.id])}>
+                    지우기
+                  </ViewerAction>
+                )}
               </>
             );
           }}
@@ -188,12 +237,12 @@ export function AlbumPage({ block, space, onChanged }: { block: Block; space: Sp
   );
 }
 
-function PhotoTile({ photo, pinned, picked, onTap }: { photo: AlbumPhoto; pinned: boolean; picked?: boolean; onTap: () => void }) {
+function PhotoTile({ photo, label, pinned, picked, onTap }: { photo: AlbumPhoto; label: string; pinned: boolean; picked?: boolean; onTap: () => void }) {
   return (
     <>
       <PhotoTiles
         className="m-0 block p-0"
-        assets={[{ key: photo.id, asset: photo.asset }]}
+        assets={[{ key: photo.id, asset: photo.asset, label }]}
         picked={picked === undefined ? undefined : new Set(picked ? [photo.id] : [])}
         onPick={onTap}
         onOpen={onTap}

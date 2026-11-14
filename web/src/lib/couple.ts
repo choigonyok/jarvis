@@ -225,8 +225,8 @@ export async function readCouple<T>(path: string, signal?: AbortSignal): Promise
   return (await res.json()) as T;
 }
 
-/** What a change came to: the saved thing, or why it did not go. */
-export type Sent<T> = { ok: true; data: T } | { ok: false; error: string };
+/** What a change came to: the saved thing, or why it did not go - offline when no answer came at all. */
+export type Sent<T> = { ok: true; data: T } | { ok: false; error: string; offline?: boolean };
 
 /** Changes something of the space at the way in, and answers as the adapter did. */
 export async function writeCouple<T>(method: "POST" | "PATCH" | "DELETE", path: string, body?: unknown): Promise<Sent<T>> {
@@ -282,8 +282,40 @@ export async function uploadSized(block: string, file: File): Promise<Sent<{ ass
     const body = (await res.json()) as { asset?: string };
     return body.asset ? { ok: true, data: { asset: body.asset, width, height } } : { ok: false, error: "사진을 올리지 못했어요." };
   } catch {
-    return { ok: false, error: "사진을 올리지 못했어요. 연결을 확인해 주세요." };
+    return { ok: false, error: "사진을 올리지 못했어요. 연결을 확인해 주세요.", offline: true };
   }
+}
+
+/**
+ * Photos uploaded one after another, saying which is going up. One that does
+ * not go - a photo the browser cannot read - no longer stops the ones after
+ * it; a dropped line still does, as every one after it would fail the same
+ * way, each after its own wait. Resolves to what went up, how many did not
+ * and why.
+ */
+export async function uploadEach<T>(
+  files: File[],
+  send: (file: File) => Promise<Sent<T>>,
+  onNext: (done: number) => void,
+): Promise<{ up: T[]; missed: number; why: string }> {
+  const up: T[] = [];
+  const why = new Set<string>();
+  let missed = 0;
+  for (let i = 0; i < files.length; i++) {
+    onNext(i);
+    const sent = await send(files[i]);
+    if (sent.ok) {
+      up.push(sent.data);
+      continue;
+    }
+    why.add(sent.error);
+    if (sent.offline) {
+      missed += files.length - i;
+      break;
+    }
+    missed += 1;
+  }
+  return { up, missed, why: [...why].join(" ") };
 }
 
 /**

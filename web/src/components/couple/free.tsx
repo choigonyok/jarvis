@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ArrowUpDown, Plus, X } from "lucide-react";
-import { ReorderSheet } from "@/components/couple/reorder";
+import { ReorderSheet, placeInto } from "@/components/couple/reorder";
 import { BlockTitle, useViewOnly } from "@/components/couple/screen";
 import { useUndo } from "@/components/shell/undo";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,10 @@ export function FreePage({ block, space, onChanged }: { block: Block; space: Spa
     setBase(block.free);
     setItems(block.free ?? []);
   }
+  // Notes taken off here stay off while the server still has them - the five
+  // seconds of 되돌리기 - through any read that lands meanwhile, as the bucket's do.
+  const [leaving, setLeaving] = useState<ReadonlySet<string>>(new Set());
+  const shown = useMemo(() => items.filter((f) => !leaving.has(f.id)), [items, leaving]);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,25 +70,37 @@ export function FreePage({ block, space, onChanged }: { block: Block; space: Spa
   }
 
   async function reorder(ids: string[]): Promise<string | null> {
-    const sent = await writeCouple("POST", `/blocks/${block.id}/free/order`, { ids });
+    // The server wants every note: one being taken off is still there, in its place.
+    const full = placeInto(items.map((f) => f.id), ids);
+    const sent = await writeCouple("POST", `/blocks/${block.id}/free/order`, { ids: full });
     if (!sent.ok) return sent.error;
-    const at = new Map(ids.map((id, i) => [id, i]));
+    const at = new Map(full.map((id, i) => [id, i]));
     setItems((list) => list.map((f) => ({ ...f, order: at.get(f.id) ?? f.order })).sort((a, b) => a.order - b.order));
     void onChanged();
     return null;
   }
 
   function remove(f: Free) {
-    setItems((list) => list.filter((x) => x.id !== f.id));
+    const keep = (on: boolean) =>
+      setLeaving((prev) => {
+        const next = new Set(prev);
+        if (on) next.add(f.id);
+        else next.delete(f.id);
+        return next;
+      });
+    keep(true);
     offer(
       "기록을 지웠어요",
-      () => setItems((list) => [...list, f].sort((a, b) => a.order - b.order)),
+      () => keep(false),
       () =>
         void writeCouple("DELETE", `/blocks/${block.id}/free/${f.id}`).then((sent) => {
           if (!sent.ok) {
-            setItems((list) => [...list, f].sort((a, b) => a.order - b.order));
+            keep(false);
             setError(sent.error);
-          } else void onChanged();
+            return;
+          }
+          setItems((list) => list.filter((x) => x.id !== f.id));
+          void onChanged();
         }),
     );
   }
@@ -94,9 +110,9 @@ export function FreePage({ block, space, onChanged }: { block: Block; space: Spa
       <BlockTitle title={block.title} block={block} onRenamed={onChanged} />
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <p className="mr-auto text-ui text-dim">
-          <span className="tabular-nums">{items.length}</span>개
+          <span className="tabular-nums">{shown.length}</span>개
         </p>
-        {items.length > 1 && !viewOnly ? (
+        {shown.length > 1 && !viewOnly ? (
           <Button variant="ghost" size="icon-touch" onClick={() => setOrdering(true)} aria-label="기록 순서 바꾸기" className="text-dim hover:text-foreground">
             <ArrowUpDown aria-hidden className="size-4" />
           </Button>
@@ -121,11 +137,11 @@ export function FreePage({ block, space, onChanged }: { block: Block; space: Spa
           {error}
         </p>
       ) : null}
-      {items.length === 0 ? (
+      {shown.length === 0 ? (
         <p className="mt-5 text-ui text-faint">첫 기록을 기다리고 있어요.</p>
       ) : (
         <ul className="mt-3 divide-y divide-edge-soft">
-          {items.map((f) => (
+          {shown.map((f) => (
             <li key={f.id} data-focus={`free:${f.id}`} className="flex items-start gap-3 py-3">
               <span aria-hidden className={cn("mt-[8px] size-[7px] shrink-0 rounded-full", !showWho ? "bg-dim" : f.by === "me" ? "bg-mine" : "bg-partner")} />
               <div className="min-w-0 flex-1">
@@ -181,7 +197,7 @@ export function FreePage({ block, space, onChanged }: { block: Block; space: Spa
           ))}
         </ul>
       )}
-      <ReorderSheet open={ordering} onOpenChange={setOrdering} title="기록 순서" items={items} label={(f) => f.content} onSave={reorder} />
+      <ReorderSheet open={ordering} onOpenChange={setOrdering} title="기록 순서" items={shown} label={(f) => f.content} onSave={reorder} />
     </div>
   );
 }
