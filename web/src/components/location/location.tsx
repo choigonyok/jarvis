@@ -838,11 +838,16 @@ function DayList({ scene, t, onSeek, busy }: { scene: Scene; t: number; onSeek: 
                   active ? "bg-glass-raised" : "hover:bg-glass",
                 )}
               >
+                {/* A name on a bare span is not read out: the dot is for the
+                    eye, the words beside it for a screen reader. */}
                 {both ? (
-                  <span
-                    aria-label={p.me ? "나" : "상대"}
-                    className={cn("size-[6px] shrink-0 -translate-y-px self-center rounded-full", p.me ? "bg-mine" : "bg-partner")}
-                  />
+                  <>
+                    <span
+                      aria-hidden
+                      className={cn("size-[6px] shrink-0 -translate-y-px self-center rounded-full", p.me ? "bg-mine" : "bg-partner")}
+                    />
+                    <span className="sr-only">{p.me ? "나" : "상대"}: </span>
+                  </>
                 ) : null}
                 <span className="tnum w-[6.25rem] shrink-0 text-aside text-faint">
                   {from}–{to}

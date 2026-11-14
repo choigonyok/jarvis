@@ -192,7 +192,7 @@ export function AlbumPage({ block, space, onChanged }: { block: Block; space: Sp
         <AlertDialogContent className="z-[80]">
           <AlertDialogHeader>
             <AlertDialogTitle>사진 {asked.length}장을 지울까요?</AlertDialogTitle>
-            <AlertDialogDescription>앨범에서 빠지고 상대의 uniple 앱에서도 사라져요.</AlertDialogDescription>
+            <AlertDialogDescription>앨범에서 빠지고 상대의 uniple 앱에서도 사라져요. 되돌릴 수 없어요.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>두기</AlertDialogCancel>
