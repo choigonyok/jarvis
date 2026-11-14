@@ -3,6 +3,7 @@
 import { useKept } from "@/lib/keep";
 import { useEffect, useMemo, useState } from "react";
 import { Minus, Plus, Trash2, TrendingUp, X } from "lucide-react";
+import { Unsent } from "@/components/workout/dock";
 import { ExerciseHistory } from "@/components/workout/exercise-history";
 import { Lifts } from "@/components/workout/lifts";
 import { LiveSession } from "@/components/workout/live-session";
@@ -10,6 +11,7 @@ import { RoutineEditor } from "@/components/workout/routine-editor";
 import { RoutinePicker } from "@/components/workout/routine-picker";
 import { WorkoutCalendar } from "@/components/workout/workout-calendar";
 import { VolumeBar } from "@/components/workout/volume-bar";
+import { AsOf } from "@/components/shell/as-of";
 import { Failed } from "@/components/shell/failed";
 import { Header, PageTop } from "@/components/shell/header";
 import { TabBar } from "@/components/shell/tab-bar";
@@ -19,6 +21,7 @@ import { useUndo } from "@/components/shell/undo";
 import { Pager } from "@/components/ui/pager";
 import { isoDate } from "@/lib/month";
 import { usePaged } from "@/lib/paging";
+import { SAY } from "@/lib/say";
 import { isPending } from "@/lib/thread";
 import { useThread } from "@/lib/use-thread";
 import { useWorkout } from "@/lib/use-workout";
@@ -68,7 +71,7 @@ export function Workout() {
   const waiting = proposals.filter(isPending);
 
   const w = useWorkout();
-  const { book, routines, live, loaded, error } = w;
+  const { book, routines, live, readAt, readError, unsent } = w;
 
   const [editing, setEditing] = useState(false);
   const [looking, setLooking] = useState<string | null>(null);
@@ -174,13 +177,21 @@ export function Workout() {
 
       <main className="scrollbar-hairline inset-x-safe relative min-h-0 flex-1 overflow-y-auto overscroll-contain under-top pb-tabbar">
         <div className="mx-auto w-full max-w-page px-4 pt-5 pb-12 sm:px-8 sm:pt-7 sm:pb-8">
-          {error ? (
-            // Again only for a log that never came: one that did not save is
-            // saved again with the next change.
-            <Failed onRetry={book.sessions.length === 0 ? w.reload : undefined} className="mb-5">
-              {error}
-            </Failed>
+          {readAt === null ? (
+            // Never read: not the log, and not 시작 under the failure - a
+            // session may be running that this page could not see, and a
+            // second one started beside it.
+            readError ? (
+              <Failed onRetry={w.reload}>{readError}</Failed>
+            ) : (
+              <Placeholder />
+            )
+          ) : readError ? (
+            // Read before but not again: what stands is that read, and says so.
+            <AsOf at={readAt} failed onRetry={w.reload} className="mb-5" />
           ) : null}
+          {/* While lifting, the dock says it instead - where the eyes are. */}
+          {unsent && !live ? <Unsent onRetry={w.reload} className="mb-5" /> : null}
 
           {live ? (
             <LiveSession
@@ -200,7 +211,11 @@ export function Workout() {
               }
               onNote={(note) => w.setNote(live.id, note)}
               onBodyWeight={(weight) => w.setBodyWeight(live.id, weight)}
-              onEnd={(at) => w.endSession(live.id, at)}
+              onEnd={(at) => {
+                const before = w.endSession(live.id, at);
+                if (before)
+                  offerUndo("운동을 끝냈어요", () => w.restoreSession(before));
+              }}
               onDiscard={() => {
                 const removed = w.removeSession(live.id);
                 if (removed)
@@ -209,8 +224,10 @@ export function Workout() {
                   );
               }}
               onUndoable={offerUndo}
+              unsent={unsent}
+              onResend={w.reload}
             />
-          ) : loaded ? (
+          ) : readAt ? (
             <Tabs value={view} onValueChange={(v) => choose(v as View)}>
               <ViewTabs />
 
@@ -398,6 +415,33 @@ export function Workout() {
       />
 
       <TabBar pending={waiting.length} hidden={lifting} />
+    </div>
+  );
+}
+
+/**
+ * The tab's place while the log is read: the views, the day to train with its
+ * start button and the week's seven days, as quiet blocks of their size - the
+ * log arrives into them instead of onto a blank screen.
+ */
+function Placeholder() {
+  return (
+    <div>
+      <p role="status" className="sr-only">
+        {SAY.loading}
+      </p>
+      <div aria-hidden>
+        <div className="mb-7 h-13 rounded-xl bg-well" />
+        <div className="h-4 w-32 rounded bg-well" />
+        <div className="mt-2 h-8 w-44 rounded-lg bg-well" />
+        <div className="mt-2.5 h-4 w-60 max-w-full rounded bg-well" />
+        <div className="mt-4 h-12 w-full rounded-xl bg-well sm:w-32" />
+        <div className="mt-10 grid grid-cols-7 gap-1">
+          {Array.from({ length: 7 }, (_, i) => (
+            <div key={i} className="h-14 rounded-lg bg-well" />
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

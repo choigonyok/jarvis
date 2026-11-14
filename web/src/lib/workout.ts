@@ -165,13 +165,13 @@ export function bestSet(
   sessions: Session[],
   name: string,
 ): { weight: number; reps: number; oneRm: number; date: string } | null {
-  const normalized = name.trim().toLowerCase();
+  const normalized = nameKey(name);
   let best: { weight: number; reps: number; oneRm: number; date: string } | null =
     null;
 
   for (const session of sessions) {
     for (const exercise of session.exercises) {
-      if (exercise.name.trim().toLowerCase() !== normalized) continue;
+      if (nameKey(exercise.name) !== normalized) continue;
       for (const set of exercise.sets) {
         if (!set.done || set.warmup) continue;
         const oneRm = estimate1RM(set.weight, set.reps);
@@ -187,11 +187,11 @@ export function bestSet(
 
 /** Heaviest single working set ever, regardless of reps. */
 export function heaviest(sessions: Session[], name: string): number {
-  const normalized = name.trim().toLowerCase();
+  const normalized = nameKey(name);
   let top = 0;
   for (const session of sessions) {
     for (const exercise of session.exercises) {
-      if (exercise.name.trim().toLowerCase() !== normalized) continue;
+      if (nameKey(exercise.name) !== normalized) continue;
       for (const set of exercise.sets) {
         if (set.done && !set.warmup && set.weight > top) top = set.weight;
       }
@@ -281,14 +281,14 @@ export function previousVolume(
   name: string,
   excludeId: string,
 ): number | null {
-  const normalized = name.trim().toLowerCase();
+  const normalized = nameKey(name);
   const earlier = sessions
     .filter((s) => s.id !== excludeId)
     .sort((a, b) => b.startedAt - a.startedAt);
 
   for (const session of earlier) {
     const match = session.exercises.find(
-      (e) => e.name.trim().toLowerCase() === normalized,
+      (e) => nameKey(e.name) === normalized,
     );
     if (match) {
       const volume = volumeOf(match);
@@ -353,8 +353,17 @@ export function groupOf(name: string): MuscleGroup {
   return g && (MUSCLE_GROUPS as readonly string[]).includes(g) ? (g as MuscleGroup) : "기타";
 }
 
-const sameName = (a: string, b: string) =>
-  a.trim().toLowerCase() === b.trim().toLowerCase();
+/**
+ * A movement's name as names are compared: without spaces or case. Korean
+ * names are spaced one way one day and another the next ("바벨 로우",
+ * "바벨로우"), and a movement split in two keeps two histories that never meet
+ * - no 지난번, no record, a trend that stops. What is shown stays as typed.
+ */
+export function nameKey(name: string): string {
+  return name.replace(/\s+/g, "").toLowerCase();
+}
+
+const sameName = (a: string, b: string) => nameKey(a) === nameKey(b);
 
 /** Newest first, the one in progress (`excludeId`) left out. */
 function earlierThan(sessions: Session[], excludeId?: string): Session[] {
@@ -422,7 +431,7 @@ export function recentExercises(
   const seen = new Map<string, { name: string; date: string; top: WorkoutSet | null }>();
   for (const session of earlierThan(sessions)) {
     for (const exercise of session.exercises) {
-      const key = exercise.name.trim().toLowerCase();
+      const key = nameKey(exercise.name);
       if (seen.has(key)) continue;
       const working = exercise.sets.filter((s) => s.done && !s.warmup);
       if (working.length === 0) continue;

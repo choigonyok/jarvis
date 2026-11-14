@@ -3,6 +3,16 @@
 import { useState } from "react";
 import { ArrowDown, ArrowUp, Plus, X } from "lucide-react";
 import { ExercisePicker } from "@/components/workout/exercise-picker";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Panel } from "@/components/ui/bottom-sheet";
 import { Button } from "@/components/ui/button";
 import type { Routine, Session } from "@/lib/workout";
@@ -51,10 +61,14 @@ export function RoutineEditor({
     });
 
   const valid = draft.every((r) => r.name.trim());
+  // Edited and not saved: every way out but 저장 asks first - a pull on the
+  // sheet or an edge swipe back had dropped minutes of reordering unasked.
+  const dirty = open && JSON.stringify(draft) !== JSON.stringify(routines);
+  const [asking, setAsking] = useState(false);
 
   return (
     <>
-      <Panel open={open && adding === null} onOpenChange={onOpenChange} title="루틴 편집">
+      <Panel open={open && adding === null} onOpenChange={onOpenChange} title="루틴 편집" guard={dirty}>
         <div className="space-y-6">
           {draft.map((routine) => (
             <section key={routine.id} aria-label={routine.name || "새 루틴"}>
@@ -135,7 +149,12 @@ export function RoutineEditor({
         </button>
 
         <div className="mt-5 flex gap-2">
-          <Button variant="soft" size="touch-sm" onClick={() => onOpenChange(false)} className="flex-1">
+          <Button
+            variant="soft"
+            size="touch-sm"
+            onClick={() => (dirty ? setAsking(true) : onOpenChange(false))}
+            className="flex-1"
+          >
             닫기
           </Button>
           <Button
@@ -152,6 +171,22 @@ export function RoutineEditor({
           </Button>
         </div>
         {!valid ? <p className="mt-2 text-center text-aside text-faint">이름 없는 루틴이 있어요.</p> : null}
+
+        {/* 닫기 is the editor's own way out, which the sheet's guard does not
+            see; it asks the same question. Drawn inside the sheet, so a tap
+            on it is not a tap outside. */}
+        <AlertDialog open={asking} onOpenChange={setAsking}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>쓰던 내용을 버릴까요?</AlertDialogTitle>
+              <AlertDialogDescription>닫으면 적은 것이 사라져요. 되돌릴 수 없어요.</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>두기</AlertDialogCancel>
+              <AlertDialogAction onClick={() => onOpenChange(false)}>버리기</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </Panel>
 
       <ExercisePicker

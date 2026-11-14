@@ -10,6 +10,7 @@ import {
   MUSCLE_GROUPS,
   dayLabel,
   groupOf,
+  nameKey,
   recentExercises,
   setLabel,
   type MuscleGroup,
@@ -45,8 +46,8 @@ export function ExercisePicker({
 
   const rows = useMemo(() => {
     const recent = recentExercises(sessions);
-    const known = new Set(recent.map((r) => r.name.toLowerCase()));
-    const rest = COMMON_EXERCISES.filter((e) => !known.has(e.name.toLowerCase())).map((e) => ({
+    const known = new Set(recent.map((r) => nameKey(r.name)));
+    const rest = COMMON_EXERCISES.filter((e) => !known.has(nameKey(e.name))).map((e) => ({
       name: e.name,
       date: null as string | null,
       top: null as { weight: number; reps: number } | null,
@@ -54,12 +55,14 @@ export function ExercisePicker({
     return [...recent.map((r) => ({ ...r, date: r.date as string | null })), ...rest];
   }, [sessions]);
 
-  const q = query.trim().toLowerCase();
+  // Spaces left out on both sides: "바벨 로우" finds 바벨로우 rather than
+  // offering it again as a new movement with no history (lib/workout.ts nameKey).
+  const q = nameKey(query);
   const shown = rows.filter(
-    (r) => (!group || groupOf(r.name) === group) && (!q || r.name.toLowerCase().includes(q)),
+    (r) => (!group || groupOf(r.name) === group) && (!q || nameKey(r.name).includes(q)),
   );
-  const exact = rows.some((r) => r.name.toLowerCase() === q);
-  const takenSet = new Set(taken.map((t) => t.trim().toLowerCase()));
+  const exact = rows.some((r) => nameKey(r.name) === q);
+  const takenSet = new Set(taken.map(nameKey));
   // The row Enter takes. Typing lights the first match again (the offer of
   // a new name sits above the matches but is not the default); the arrow
   // keys move it from there. With nothing typed nothing is lit, and Enter
@@ -118,7 +121,7 @@ export function ExercisePicker({
             </CommandItem>
           ) : null}
           {shown.map((row) => {
-            const already = takenSet.has(row.name.toLowerCase());
+            const already = takenSet.has(nameKey(row.name));
             return (
               <CommandItem key={row.name} value={row.name} onSelect={() => pick(row.name)} className="min-h-12 py-1.5">
                 <span className="min-w-0 flex-1">

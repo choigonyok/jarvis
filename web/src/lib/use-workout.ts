@@ -13,6 +13,7 @@ import {
   type WorkoutSet,
 } from "@/lib/workout";
 import { onResume } from "@/lib/resume";
+import { local } from "@/lib/use-gym";
 
 /**
  * The training log, loaded once and written back whenever it changes.
@@ -25,6 +26,12 @@ import { onResume } from "@/lib/resume";
  * Only what changed since the last save goes over the wire - sessions by id,
  * deletions by id. The guest and the operator share this book, and sending
  * the whole thing would delete whatever the other had added since.
+ *
+ * Those same changes are kept on the device until the server has them. A gym
+ * in a basement has no signal, and a phone puts a home-screen app away without
+ * a word - an hour logged there had lived only in the page, and went with it.
+ * They go back over the book each time it is read, and are sent again
+ * whenever the page comes back, the network with it.
  */
 type Changes = {
   sessions?: Session[];
@@ -32,6 +39,8 @@ type Changes = {
   restTarget?: number;
   routines?: Routine[];
 };
+
+const UNSENT = "jarvis.workout.unsent";
 
 function diff(from: Book, to: Book): Changes | null {
   const before = new Map(from.sessions.map((s) => [s.id, JSON.stringify(s)]));
@@ -48,31 +57,98 @@ function diff(from: Book, to: Book): Changes | null {
   return Object.keys(out).length ? out : null;
 }
 
+/** Changes laid over a book as it was read - sessions by id, deletions by id. */
+function overlay(book: Book, changes: Changes): Book {
+  const changed = new Map((changes.sessions ?? []).map((s) => [s.id, s]));
+  const gone = new Set(changes.deleted);
+  const known = new Set(book.sessions.map((s) => s.id));
+  const sessions = book.sessions
+    .filter((s) => !gone.has(s.id))
+    .map((s) => changed.get(s.id) ?? s);
+  for (const s of changed.values()) if (!known.has(s.id)) sessions.push(s);
+  return {
+    ...book,
+    sessions,
+    restTarget: changes.restTarget ?? book.restTarget,
+    routines: changes.routines ?? book.routines,
+  };
+}
+
 export function useWorkout() {
   const [book, setBook] = useState<Book>({ sessions: [] });
-  const [loaded, setLoaded] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // When the book was last read, null until it first has been: an empty book
+  // that was never read is not an empty log, and is not shown as one.
+  const [readAt, setReadAt] = useState<Date | null>(null);
+  const [readError, setReadError] = useState<string | null>(null);
+  // A save that did not go, and none has since: what was logged since is on
+  // this device only.
+  const [unsent, setUnsent] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latest = useRef<Book>(book);
   // What the server is known to hold. Changes are measured against this.
   const saved = useRef<Book>(book);
+  const sending = useRef(false);
+  const again = useRef(false);
+
+  // One save at a time, and whatever came while it was on its way right after
+  // it: two at once could land in either order, the older one last.
+  const save = useCallback(async () => {
+    if (sending.current) {
+      again.current = true;
+      return;
+    }
+    sending.current = true;
+    try {
+      do {
+        again.current = false;
+        const next = latest.current;
+        const changes = diff(saved.current, next);
+        if (!changes) break;
+        const res = await fetch("/api/workout/changes", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(changes),
+        });
+        if (!res.ok) throw new Error(String(res.status));
+        saved.current = next;
+      } while (again.current);
+      setUnsent(false);
+    } catch {
+      setUnsent(true);
+    } finally {
+      sending.current = false;
+      local.set(UNSENT, diff(saved.current, latest.current));
+    }
+  }, []);
 
   const read = useCallback(async () => {
+    const asked = latest.current;
     try {
       const res = await fetch("/api/workout", { cache: "no-store" });
       if (!res.ok) throw new Error(String(res.status));
       const data = (await res.json()) as Book;
+      // A press made while this was on its way is newer than the answer: it
+      // stands, and the next time the page comes back reads again.
+      if (latest.current !== asked) return;
       setGroups(data.groups);
-      setBook(data);
-      latest.current = data;
+      // What had not reached the server - this page's, or one a phone put
+      // away with it - goes back over what has, and is sent.
+      const kept = local.get<Changes>(UNSENT);
+      const next = kept ? overlay(data, kept) : data;
+      setBook(next);
+      latest.current = next;
       saved.current = data;
-      setError(null);
+      setReadAt(new Date());
+      setReadError(null);
+      if (kept) void save();
     } catch {
-      setError("기록을 불러오지 못했어요.");
-    } finally {
-      setLoaded(true);
+      setReadError(
+        local.get<Changes>(UNSENT)
+          ? "기록을 불러오지 못했어요. 아직 보내지 못한 기록은 이 기기에 있어요."
+          : "기록을 불러오지 못했어요.",
+      );
     }
-  }, []);
+  }, [save]);
 
   useEffect(() => {
     // read sets state only after its fetch resolves; the rule cannot see that.
@@ -80,50 +156,46 @@ export function useWorkout() {
     void read();
   }, [read]);
 
-  // Read again on coming back to the app or a pull to refresh - another
-  // device may have logged - unless something done here has not reached the
-  // server yet: this copy is the newer one then, and a read would undo it.
-  const reload = useCallback(
-    () => (timer.current || diff(saved.current, latest.current) ? undefined : read()),
-    [read],
-  );
-  useEffect(() => onResume(reload), [reload]);
-
-  const save = useCallback(async (next: Book) => {
-    const changes = diff(saved.current, next);
-    if (!changes) return;
-    try {
-      const res = await fetch("/api/workout/changes", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(changes),
-      });
-      if (!res.ok) throw new Error(String(res.status));
-      saved.current = next;
-      setError(null);
-    } catch {
-      setError("기록을 저장하지 못했어요.");
+  // Coming back to the app, the network back, a pull to refresh: what has not
+  // reached the server goes first - this copy is the newer one until it has,
+  // and a read would undo it - and then the book is read again, since another
+  // device may have logged.
+  const reload = useCallback(async () => {
+    if (timer.current) return;
+    if (diff(saved.current, latest.current)) {
+      await save();
+      if (diff(saved.current, latest.current)) return;
     }
-  }, []);
+    return read();
+  }, [read, save]);
+  useEffect(() => onResume(reload), [reload]);
 
   const update = useCallback(
     (fn: (book: Book) => Book) => {
       setBook((prev) => {
         const next = fn(prev);
         latest.current = next;
+        // On the device at once, not when the save goes: a phone can put the
+        // page away in between.
+        local.set(UNSENT, diff(saved.current, next));
         if (timer.current) clearTimeout(timer.current);
-        timer.current = setTimeout(() => void save(next), 600);
+        // Cleared as it fires: a timer left set read as a save always on its
+        // way, and the book was never read again after the first change.
+        timer.current = setTimeout(() => {
+          timer.current = null;
+          void save();
+        }, 600);
         return next;
       });
     },
     [save],
   );
 
-  // A tab closed mid-set should not lose it.
+  // A tab closed mid-set should not lose it - nor one closed after a save
+  // that did not go.
   useEffect(() => {
     const flush = () => {
-      if (!timer.current) return;
-      clearTimeout(timer.current);
+      if (timer.current) clearTimeout(timer.current);
       timer.current = null;
       const changes = diff(saved.current, latest.current);
       if (!changes) return;
@@ -212,10 +284,12 @@ export function useWorkout() {
    * Sets never ticked were planned, not lifted, so they are dropped rather
    * than kept as zeroes - next time's "지난번" is then what actually happened.
    * A session with nothing ticked was a false start, not a rest day with a
-   * zero in it, and goes entirely.
+   * zero in it, and goes entirely. Returns it as it was, so the caller can
+   * offer undo - the sets dropped here exist nowhere else.
    */
   const endSession = useCallback(
-    (id: string, at?: number) => {
+    (id: string, at?: number): Session | null => {
+      const found = latest.current.sessions.find((s) => s.id === id) ?? null;
       update((b) => ({
         ...b,
         sessions: b.sessions.flatMap((s) => {
@@ -227,6 +301,7 @@ export function useWorkout() {
           return [{ ...s, exercises, endedAt: Math.max(s.startedAt, at ?? Date.now()) }];
         }),
       }));
+      return found;
     },
     [update],
   );
@@ -241,11 +316,12 @@ export function useWorkout() {
     [update],
   );
 
+  /** Put a session back as it was: taken out, or finished (its unticked sets and all). */
   const restoreSession = useCallback(
     (session: Session) =>
       update((b) =>
         b.sessions.some((s) => s.id === session.id)
-          ? b
+          ? { ...b, sessions: b.sessions.map((s) => (s.id === session.id ? session : s)) }
           : { ...b, sessions: [...b.sessions, session] },
       ),
     [update],
@@ -336,8 +412,9 @@ export function useWorkout() {
     book,
     routines,
     live,
-    loaded,
-    error,
+    readAt,
+    readError,
+    unsent,
     reload,
     startSession,
     startRoutine,

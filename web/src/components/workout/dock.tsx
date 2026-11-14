@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Check, Minus, Plus, TrendingUp, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { SAY } from "@/lib/say";
 import { chime } from "@/lib/use-gym";
 import {
   clock,
@@ -44,6 +45,8 @@ export function Dock({
   onAddExercise,
   onAddSet,
   onFinish,
+  unsent,
+  onResend,
 }: {
   now: number;
   rest: Rest | null;
@@ -62,6 +65,9 @@ export function Dock({
   onAddExercise: () => void;
   onAddSet: () => void;
   onFinish: () => void;
+  /** A save did not go: said here, where the eyes are mid-set, not at the top of the scroll. */
+  unsent: boolean;
+  onResend: () => void;
 }) {
   // The dock's height, published for the set rows' scroll margin: a row
   // scrolled into view has to clear the dock, and the dock is taller while a
@@ -118,6 +124,8 @@ export function Dock({
     // (pb-tabbar) already insets where a sticky child can sit.
     <div ref={measured} className="sticky bottom-2 z-20 mt-6">
       <div className="liquid-glass rounded-2xl p-3 sm:p-3.5">
+        {/* On top, so the dock grows upwards and 완료 stays under the thumb. */}
+        {unsent ? <Unsent onRetry={onResend} className="-mt-0.5 mb-2" /> : null}
         {rest ? <RestStrip now={now} rest={rest} onRest={onRest} /> : null}
 
         {exercise && focus && set ? (
@@ -246,6 +254,28 @@ export function Dock({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * A save that did not go, as a red line beside what was being done. Nothing
+ * logged is lost by it: it stays on the phone and goes by itself with the next
+ * change, or when the page or the network comes back (lib/use-workout.ts).
+ * 다시 시도 is for not waiting.
+ */
+export function Unsent({ onRetry, className }: { onRetry: () => void; className?: string }) {
+  return (
+    <p role="status" className={cn("text-aside text-reject", className)}>
+      저장하지 못했어요 · 연결되면 다시 보내요
+      {" · "}
+      <button
+        type="button"
+        onClick={onRetry}
+        className="tap-y underline decoration-reject-fill underline-offset-[3px] focus-ring"
+      >
+        {SAY.retry}
+      </button>
+    </p>
   );
 }
 

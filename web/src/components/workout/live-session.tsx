@@ -71,6 +71,8 @@ export function LiveSession({
   onEnd,
   onDiscard,
   onUndoable,
+  unsent,
+  onResend,
 }: {
   session: Session;
   history: Session[];
@@ -87,6 +89,9 @@ export function LiveSession({
   onBodyWeight: (weight: number) => void;
   onEnd: (at?: number) => void;
   onDiscard: () => void;
+  /** A save that did not go, said in the dock. */
+  unsent: boolean;
+  onResend: () => void;
   onUndoable: (label: string, restore: () => void) => void;
   /** The undo toast, shown on top of the dock rather than under it. */
 }) {
@@ -96,6 +101,8 @@ export function LiveSession({
   const [picking, setPicking] = useState(false);
   const [looking, setLooking] = useState<string | null>(null);
   const [finishing, setFinishing] = useState(false);
+  // When it ended, if not now: the last set, for a session left open.
+  const [endAt, setEndAt] = useState<number | undefined>();
   const [chosen, setChosen] = useState<SetRef | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
 
@@ -128,6 +135,14 @@ export function LiveSession({
     const at = stamp();
     local.set(activeKey(session.id), at);
     setLastActive(at);
+  }
+
+  // Every way to finish goes through the summary, the stale banner's too: it
+  // names the unticked sets before they are dropped, and a slip next to
+  // 계속하기 costs a second rather than the session.
+  function finish(at?: number) {
+    setEndAt(at);
+    setFinishing(true);
   }
 
   function reveal(ref: SetRef | null) {
@@ -354,7 +369,7 @@ export function LiveSession({
         </div>
         <button
           type="button"
-          onClick={() => setFinishing(true)}
+          onClick={() => finish()}
           className="tap mt-1 shrink-0 rounded-lg bg-glass-raised px-4 text-ui text-foreground transition-colors hover:bg-approve-wash hover:text-approve focus-ring"
         >
           끝내기
@@ -381,11 +396,11 @@ export function LiveSession({
           </p>
           <div className="-ms-3 mt-1.5 flex flex-wrap items-center">
             {lastActive ? (
-              <Button variant="quiet" size="touch-sm" onClick={() => onEnd(lastActive)}>
+              <Button variant="quiet" size="touch-sm" onClick={() => finish(lastActive)}>
                 마지막 세트 시각으로 끝내기
               </Button>
             ) : (
-              <Button variant="quiet" size="touch-sm" onClick={() => setFinishing(true)}>
+              <Button variant="quiet" size="touch-sm" onClick={() => finish()}>
                 끝내기
               </Button>
             )}
@@ -555,7 +570,9 @@ export function LiveSession({
           const last = session.exercises.at(-1);
           if (last) addSet(last, false);
         }}
-        onFinish={() => setFinishing(true)}
+        onFinish={() => finish()}
+        unsent={unsent}
+        onResend={onResend}
       />
 
       <ExercisePicker
@@ -575,11 +592,11 @@ export function LiveSession({
         onOpenChange={setFinishing}
         session={session}
         history={history}
-        elapsed={now - session.startedAt}
+        elapsed={(endAt ?? now) - session.startedAt}
         onEnd={() => {
           setFinishing(false);
           setRest(null);
-          onEnd();
+          onEnd(endAt);
         }}
         onDiscard={() => {
           setFinishing(false);
