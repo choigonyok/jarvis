@@ -138,9 +138,11 @@ function JobNews({ turn, fold }: { turn: Turn; fold: Fold }) {
           {turn.freshNews ? <span className="ms-1.5 text-ink">· 새 소식</span> : null}
         </span>
         <Link
-          // To this job's own sheet, not the top of the list.
+          // To this job's own sheet, not the top of the list. A thumb's
+          // width and, unseen, its height on a touch screen: the words alone
+          // were 16px tall.
           href={job ? `/jobs?focus=${encodeURIComponent(`job:${job}`)}` : "/jobs"}
-          className="shrink-0 text-meta text-faint underline-offset-2 hover:text-dim hover:underline focus-ring"
+          className="tap-y -mx-1 shrink-0 px-1 text-meta text-faint underline-offset-2 hover:text-dim hover:underline focus-ring mouse:before:hidden"
         >
           작업 탭
         </Link>
@@ -393,15 +395,28 @@ const TurnRow = memo(function TurnRow({
                 {/* With a pointer the marks wait under the answer, in the gap
                     before the next turn - taking no room of their own - until
                     the answer is hovered, like 참조; set, they stay: they are
-                    its status. */}
-                {answer
-                  ? markButtons(
-                      cn(
-                        "absolute top-full left-0 mt-1 -ml-1.5 hidden sm:pointer-fine:flex",
-                        !turn.feedback && !marks.asking && "opacity-0 group-hover/turn:opacity-100 focus-within:opacity-100",
-                      ),
-                    )
-                  : null}
+                    its status. A mark that could not be kept says so beside
+                    them, and stays too: the footer that says it on a phone is
+                    not drawn here. */}
+                {answer ? (
+                  <span
+                    className={cn(
+                      "absolute top-full left-0 mt-1 -ml-1.5 hidden items-center gap-1.5 sm:pointer-fine:flex",
+                      !turn.feedback &&
+                        !marks.asking &&
+                        !marks.error &&
+                        "opacity-0 group-hover/turn:opacity-100 focus-within:opacity-100",
+                    )}
+                    data-search-skip
+                  >
+                    {markButtons()}
+                    {marks.error && !marks.asking ? (
+                      <span className="text-meta whitespace-nowrap text-reject" role="status">
+                        {marks.error}
+                      </span>
+                    ) : null}
+                  </span>
+                ) : null}
               </MessageContent>
             </Message>
           </SwipeRow>
@@ -567,6 +582,7 @@ export const Transcript = memo(function Transcript({
   steps,
   onDraftShown,
   error,
+  readFailed,
   hydrated,
   hasMore,
   onQuote,
@@ -606,6 +622,8 @@ export const Transcript = memo(function Transcript({
   steps: Step[];
   onDraftShown: (id: string, turn?: string) => void;
   error: string | null;
+  /** The error is the thread not read again: what is shown may be from before. */
+  readFailed: boolean;
   hydrated: boolean;
   onQuote: (ref: TurnRef) => void;
   onJump: (id: string) => void;
@@ -746,10 +764,15 @@ export const Transcript = memo(function Transcript({
           </MessageScrollerItem>
         ) : null}
 
+        {/* A read that failed under turns already drawn (from before a tab
+            switch) has its way back as an empty thread's does; a message that
+            did not go is sent again from the field, which has it back. */}
         {error && !(hydrated && turns.length === 0) ? (
           <MessageScrollerItem className={ROW}>
             <Rail />
-            <Failed className="max-w-[36rem]">{error}</Failed>
+            <Failed onRetry={readFailed ? onRetry : undefined} className="max-w-[36rem]">
+              {error}
+            </Failed>
           </MessageScrollerItem>
         ) : null}
     </MessageScrollerContent>

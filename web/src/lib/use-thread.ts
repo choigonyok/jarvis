@@ -125,7 +125,20 @@ export function useThread() {
   // What the turn under way has done since the last thing said. Not cached:
   // a run is not under way on a fresh page until the thread says so.
   const [steps, setSteps] = useState<Step[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  // What went wrong, said at the end of the thread. A read of the thread that
+  // failed (read) is said with the way to read it again; a message that did
+  // not go, or a turn that broke off, is not brought back by reading.
+  const [failure, setFailure] = useState<{ text: string; read?: boolean } | null>(null);
+  // What a press on the answer under way could not do - stop it, hand on or
+  // take back a message waiting behind it - said beside those controls (the
+  // composer), and gone once that answer is over: at the end of the thread it
+  // stayed under an answer long finished, out of sight of a reader above.
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [wasThinking, setWasThinking] = useState(thinking);
+  if (thinking !== wasThinking) {
+    setWasThinking(thinking);
+    setActionError(null);
+  }
   const [hydrated, setHydrated] = useState(() => cached !== null);
   const [queue, setQueueState] = useState<Queued[]>(() => cachedQueue);
   const setQueue = useCallback((next: Queued[]) => {
@@ -210,9 +223,9 @@ export function useThread() {
       putLists(data.checklists);
       // Read: a failure said before this (a first load that did not come) is
       // over, not left at the bottom of the thread for good.
-      setError(null);
+      setFailure(null);
     } catch {
-      setError("대화를 불러오지 못했어요.");
+      setFailure({ text: "대화를 불러오지 못했어요.", read: true });
     } finally {
       setHydrated(true);
     }
@@ -305,7 +318,7 @@ export function useThread() {
         setQueue(event.queue ?? []);
         break;
       case "error":
-        setError(event.message);
+        setFailure({ text: event.message });
         setThinking(false);
         setDraft(null);
         setSteps([]);
@@ -353,7 +366,7 @@ export function useThread() {
 
   /** Resolves true once the agent took the message - to answer now, or queued behind the running turn. */
   const send = useCallback(async (text: string, images?: string[], refId?: string) => {
-    setError(null);
+    setFailure(null);
     try {
       const res = await fetch("/api/chat/messages", {
         method: "POST",
@@ -366,7 +379,7 @@ export function useThread() {
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { error?: string } | null;
-        setError(body?.error ?? "메시지를 보내지 못했어요.");
+        setFailure({ text: body?.error ?? "메시지를 보내지 못했어요." });
         return false;
       }
       // What was sent comes back over the stream within a moment - as a turn,
@@ -382,7 +395,7 @@ export function useThread() {
       }, SEND_ECHO_MS);
       return true;
     } catch {
-      setError("에이전트에 연결하지 못했어요.");
+      setFailure({ text: "에이전트에 연결하지 못했어요." });
       return false;
     }
   }, [resync]);
@@ -392,16 +405,16 @@ export function useThread() {
    * takes it back unsent. The queue itself arrives over the stream.
    */
   const onQueued = useCallback(async (id: string, action: "steer" | "drop") => {
-    setError(null);
+    setActionError(null);
     try {
       const res = await fetch(`${API}/messages/${encodeURIComponent(id)}/${action}`, { method: "POST" });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { error?: string } | null;
-        setError(body?.error ?? "대기 중인 메시지를 바꾸지 못했어요.");
+        setActionError(body?.error ?? "대기 중인 메시지를 바꾸지 못했어요.");
         void hydrate();
       }
     } catch {
-      setError("에이전트에 연결하지 못했어요.");
+      setActionError("에이전트에 연결하지 못했어요.");
     }
   }, [hydrate]);
   // Stable, so the composer's queue is not drawn again on every frame.
@@ -411,18 +424,21 @@ export function useThread() {
   /**
    * Stops the answer being written: what it wrote so far stays, marked where it
    * stopped, and what waits behind it goes on. The end arrives over the
-   * stream; an answer that had just ended has nothing to stop.
+   * stream; an answer that had just ended has nothing to stop (409), which is
+   * as good as stopped. Resolves false when the stop did not get there, so it
+   * can be pressed again.
    */
-  const stop = useCallback(async () => {
+  const stop = useCallback(async (): Promise<boolean> => {
+    setActionError(null);
     try {
       const res = await fetch(`${API}/thread/stop`, { method: "POST" });
-      if (!res.ok && res.status !== 409) {
-        const body = (await res.json().catch(() => null)) as { error?: string } | null;
-        setError(body?.error ?? "답을 멈추지 못했어요.");
-      }
+      if (res.ok || res.status === 409) return true;
+      const body = (await res.json().catch(() => null)) as { error?: string } | null;
+      setActionError(body?.error ?? "답을 멈추지 못했어요.");
     } catch {
-      setError("에이전트에 연결하지 못했어요.");
+      setActionError("에이전트에 연결하지 못했어요.");
     }
+    return false;
   }, []);
 
   /**
@@ -460,11 +476,11 @@ export function useThread() {
       reason?: string,
       choice?: Pick<CardChoice, "id" | "label">,
     ) => {
-      setError(null);
+      setFailure(null);
       const secret = proposals.find((p) => p.id === proposalId)?.card.fields?.some(isPrivateField);
       const posted = await decideProposal(proposalId, decision, edits, reason, secret, choice);
       if (!posted.ok) {
-        setError(posted.error);
+        setFailure({ text: posted.error });
         void hydrate();
         return posted.error;
       }
@@ -600,7 +616,10 @@ export function useThread() {
     draftShown,
     queue,
     connection,
-    error,
+    error: failure?.text ?? null,
+    /** The failure is the thread not read: reading again (resync) is the way back. */
+    readFailed: Boolean(failure?.read),
+    actionError,
     hydrated,
     hasMore,
     loadingOlder,

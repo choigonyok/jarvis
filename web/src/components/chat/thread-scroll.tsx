@@ -65,6 +65,7 @@ export function ScrollerMoves({ toRef }: { toRef: RefObject<Scroller | null> }) 
 export function useThreadScroll({
   scrollRef,
   turns,
+  writing,
   proposals,
   byId,
   hasMore,
@@ -75,6 +76,8 @@ export function useThreadScroll({
 }: {
   scrollRef: RefObject<HTMLDivElement | null>;
   turns: Turn[];
+  /** An answer is being written under the last turn, in a row of its own. */
+  writing: boolean;
   proposals: Proposal[];
   byId: Map<string, Proposal>;
   hasMore: boolean;
@@ -103,15 +106,33 @@ export function useThreadScroll({
   // Up far enough that the newest turn is out of sight: the way back down is
   // offered (the button over the composer).
   const [away, setAway] = useState(false);
+  // Off the bottom, past the band that counts as being there (seenAt): what
+  // Jarvis says now lands below, unseen - a reader half a screen up was
+  // not `away`, and an answer came in under them with nothing to say so.
+  const [below, setBelow] = useState(false);
+  // At the bottom as the scroller keeps it (within its 8px): it is following,
+  // and what grows is brought into view without anything said.
+  const pinned = useRef(true);
   // The newest turn when the reader was last at the bottom; what Jarvis said
   // after it is what the button counts as new.
   const [seenAt, setSeenAt] = useState<string | null>(null);
   const unseen = useMemo(() => {
-    if (!away || !seenAt) return 0;
+    if (!below || !seenAt) return 0;
     const at = turns.findIndex((t) => t.id === seenAt);
     if (at === -1) return 0;
-    return turns.slice(at + 1).filter((t) => t.role === "agent").length;
-  }, [away, seenAt, turns]);
+    // An answer still being written counts as the one on its way.
+    return turns.slice(at + 1).filter((t) => t.role === "agent").length + (writing ? 1 : 0);
+  }, [below, seenAt, turns, writing]);
+  // Where the reader is, whoever moved the view or the page under it: the
+  // button is about position.
+  const place = useCallback((el: HTMLElement, newestId: string | null) => {
+    const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+    pinned.current = gap <= 8;
+    setAway(gap > Math.max(320, el.clientHeight * 0.6));
+    setBelow(gap >= 80);
+    if (gap < 80) setSeenAt((prev) => (prev === newestId ? prev : newestId));
+    return gap;
+  }, []);
   // The card a tapped push brought the reader to. While set it is kept in the
   // middle - photos above finishing their layout would push it down - until
   // the reader touches the thread themselves.
@@ -174,8 +195,10 @@ export function useThreadScroll({
       // The reader's own place, as a scroll would take it: the scroller lets go of the bottom.
       el.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
       el.scrollTop += row.getBoundingClientRect().top - el.getBoundingClientRect().top - spot.offset;
+      pinned.current = false;
       setSeenAt(spot.newest);
       setAway(true);
+      setBelow(true);
     }
     return () => {
       // The view on screen as the reader leaves - voice mode builds it anew -
@@ -372,30 +395,36 @@ export function useThreadScroll({
   // landed on is this screen's: photos above it finishing their layout push
   // it down, and the view itself changes height (the bar over the thread
   // folds once the card is in sight), so it is put back in the middle.
+  // And what grows under a reader who has scrolled up moves no scroll
+  // position, so no scroll says the newest is now out of sight: it is looked
+  // at here, a frame on - the scroller, still following, has taken the view
+  // down by then.
   useEffect(() => {
     const el = scrollRef.current;
     const content = el?.firstElementChild;
     if (!el || !content) return;
+    let frame = 0;
     const ro = new ResizeObserver(() => {
       held.current?.scrollIntoView({ block: "center" });
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (!pinned.current) place(el, newest.current);
+      });
     });
     ro.observe(content);
     ro.observe(el);
-    return () => ro.disconnect();
+    return () => {
+      cancelAnimationFrame(frame);
+      ro.disconnect();
+    };
     // Again for the scroller the voice stage's return builds.
-  }, [mode, scrollRef]);
+  }, [mode, scrollRef, place]);
 
   // The scroller's viewport: where the reader is, and their hand on it.
   const viewport = {
     onScroll: (e: UIEvent<HTMLDivElement>) => {
       const el = e.currentTarget;
-      const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
-      // Where the reader is, whoever scrolled: the button is about position.
-      setAway(gap > Math.max(320, el.clientHeight * 0.6));
-      if (gap < 80) {
-        const newest = turns.at(-1)?.id ?? null;
-        setSeenAt((prev) => (prev === newest ? prev : newest));
-      }
+      const gap = place(el, turns.at(-1)?.id ?? null);
       if (held.current) return; // our own scroll to a card, not the reader's
       // Still moving without a finger after a send - iOS momentum,
       // the keyboard - so the hold lasts until it has stopped.
@@ -467,5 +496,18 @@ export function useThreadScroll({
     },
   };
 
-  return { scroller, away, unseen, seeking, askOlder, goToCard, toNewest, toBottom, jumpTo, viewport, content };
+  return {
+    scroller,
+    // Far up - or not far, with something said since below.
+    away: away || unseen > 0,
+    unseen,
+    seeking,
+    askOlder,
+    goToCard,
+    toNewest,
+    toBottom,
+    jumpTo,
+    viewport,
+    content,
+  };
 }

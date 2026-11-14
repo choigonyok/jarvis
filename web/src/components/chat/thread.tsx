@@ -23,6 +23,7 @@ import {
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller";
 import type { Job } from "@/lib/jobs";
+import { keepValue, useKept } from "@/lib/keep";
 import { isPending, type Turn, type TurnRef } from "@/lib/thread";
 import { diag } from "@/lib/diag";
 import { speakable, useSpeech, useVoiceStatus } from "@/lib/use-speech";
@@ -72,6 +73,8 @@ export function Thread() {
     queue,
     connection,
     error,
+    readFailed,
+    actionError,
     hydrated,
     hasMore,
     loadingOlder,
@@ -97,8 +100,12 @@ export function Thread() {
   // header's own tap, which scrolls the thread to the top and loads older turns.
   const [guide, setGuide] = useState(false);
   // The earlier message the next one quotes: swiped (or, with a pointer, the
-  // button beside its time), shown above the composer until sent or dropped.
-  const [quoting, setQuoting] = useState<TurnRef | null>(null);
+  // button beside its time), shown above the composer until sent or dropped -
+  // and kept across tabs while the app is open, as the words under it are
+  // (the composer's draft): back from checking a date, "이 날로 바꿔줘" was
+  // still in the field and what it was about was gone.
+  const quoteKey = `chat:quoting:${role}`;
+  const [quoting, setQuoting] = useKept<TurnRef | null>(quoteKey, null);
   const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set(openedTurns));
   const fold = useCallback((turnId: string) => {
     setOpened((cur) => {
@@ -140,7 +147,19 @@ export function Thread() {
   const [sheetJob, setSheetJob] = useState<Job | null>(null);
   const openJob = useCallback((id: number) => setSheetJob(running.find((j) => j.id === id) ?? null), [running]);
 
-  const scroll = useThreadScroll({ scrollRef, turns, proposals, byId, hasMore, loadingOlder, olderFailed, loadOlder, mode });
+  const scroll = useThreadScroll({
+    scrollRef,
+    turns,
+    // The transcript's own test for the answer's row before its turn has come.
+    writing: Boolean(draft?.text.trim() && !draft.turn),
+    proposals,
+    byId,
+    hasMore,
+    loadingOlder,
+    olderFailed,
+    loadOlder,
+    mode,
+  });
   const { toNewest } = scroll;
 
   const quote = useCallback((ref: TurnRef) => {
@@ -149,7 +168,7 @@ export function Thread() {
     // lets it scroll the composer into view above the keyboard, the way a
     // tap on the field does: with preventScroll, iOS left it underneath.
     inputRef.current?.focus();
-  }, []);
+  }, [setQuoting]);
 
   useFooterSpace(rootRef, footerRef, mode);
 
@@ -215,13 +234,17 @@ export function Thread() {
     async (text: string, images: string[]) => {
       toNewest();
       const ok = await send(text, images, quoting?.id);
-      if (ok) setQuoting(null);
+      if (ok) {
+        setQuoting(null);
+        // Gone with the message even if the screen was left before it went.
+        keepValue(quoteKey, undefined);
+      }
       return ok;
     },
-    [toNewest, send, quoting],
+    [toNewest, send, quoting, setQuoting, quoteKey],
   );
   const toVoice = useCallback(() => switchMode("voice"), [switchMode]);
-  const cancelQuote = useCallback(() => setQuoting(null), []);
+  const cancelQuote = useCallback(() => setQuoting(null), [setQuoting]);
   const quotingLine = useMemo(
     () =>
       quoting
@@ -338,6 +361,7 @@ export function Thread() {
                     steps={steps}
                     onDraftShown={draftShown}
                     error={error}
+                    readFailed={readFailed}
                     hydrated={hydrated}
                     hasMore={hasMore}
                     onQuote={quote}
@@ -383,6 +407,7 @@ export function Thread() {
           onGuide={openGuide}
           busy={thinking}
           onStop={stop}
+          failure={actionError}
           draftKey={`jarvis:composer-draft:${role}`}
           queued={queued}
         />

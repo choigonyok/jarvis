@@ -136,6 +136,13 @@ export function useThreadSearch(root: RefObject<HTMLElement | null>, above?: Abo
   const searching = open && query.trim() !== "";
   const live = searching ? hits : NONE;
 
+  // The hit last made the current one. The thread changing under an open
+  // search finds every hit again, newest first: a new word with the query in
+  // it came in at the front and moved the count on to the hit beside it, and
+  // the view was taken back to it - from wherever the reader had scrolled to
+  // read around it.
+  const shown = useRef<Hit | null>(null);
+
   // Look again as the query settles and as the thread changes under it.
   useEffect(() => {
     const el = root.current;
@@ -144,7 +151,9 @@ export function useThreadSearch(root: RefObject<HTMLElement | null>, above?: Abo
     if (index.current?.version !== version) index.current = { version, entries: textOf(el) };
     const found = find(index.current.entries, q);
     setHits(found);
-    setAt((i) => (first.current ? 0 : Math.min(i, Math.max(0, found.length - 1))));
+    const was = shown.current;
+    const still = was ? found.findIndex((h) => h.node === was.node && h.start === was.start) : -1;
+    setAt((i) => (first.current ? 0 : still !== -1 ? still : Math.min(i, Math.max(0, found.length - 1))));
   }, [open, query, version, root]);
 
   // Mark the hits around the current one, and bring it to the middle.
@@ -164,6 +173,11 @@ export function useThreadSearch(root: RefObject<HTMLElement | null>, above?: Abo
     const current = rangeOf(hit);
     mark("chat-search-current", current ? [current] : []);
     if (!el || !current) return;
+    // Only a hit newly made current - an arrow, a new query - is brought to
+    // the middle; the same one, found again, is only marked again.
+    const same = shown.current?.node === hit.node && shown.current.start === hit.start;
+    shown.current = hit;
+    if (same && !first.current) return;
     const box = current.getBoundingClientRect();
     const frame = el.getBoundingClientRect();
     if (box.height === 0) return;
@@ -247,6 +261,7 @@ export function useThreadSearch(root: RefObject<HTMLElement | null>, above?: Abo
       close: () => {
         setOpen(false);
         asked.current = "";
+        shown.current = null;
         setQuery("");
         setHits(NONE);
         setAt(0);
@@ -320,7 +335,7 @@ function SearchRow({ search }: { search: ThreadSearch }) {
         <InputGroup
           surface="well"
           // The caret is the focus here: the row is nothing but this field.
-          className="h-10 min-w-0 flex-1 rounded-full border-transparent mouse:h-10 has-[[data-slot=input-group-control]:focus-visible]:border-transparent has-[[data-slot=input-group-control]:focus-visible]:ring-0"
+          className="h-11 min-w-0 flex-1 rounded-full border-transparent mouse:h-10 has-[[data-slot=input-group-control]:focus-visible]:border-transparent has-[[data-slot=input-group-control]:focus-visible]:ring-0"
         >
           <InputGroupAddon className="pl-3.5">
             <Search aria-hidden />
@@ -366,7 +381,7 @@ function SearchRow({ search }: { search: ThreadSearch }) {
           onClick={search.older}
           disabled={search.seeking || (search.at >= search.total - 1 && !search.further)}
           aria-label="이전 결과 (더 오래된)"
-          className="flex size-10 shrink-0 items-center justify-center rounded-full text-dim hover:text-foreground focus-ring disabled:opacity-30"
+          className="flex size-11 shrink-0 items-center justify-center rounded-full text-dim hover:text-foreground focus-ring disabled:opacity-30 mouse:size-10"
         >
           <ChevronUp aria-hidden className="size-[18px]" />
         </button>
@@ -375,7 +390,7 @@ function SearchRow({ search }: { search: ThreadSearch }) {
           onClick={search.newer}
           disabled={search.at <= 0}
           aria-label="다음 결과 (더 최근)"
-          className="flex size-10 shrink-0 items-center justify-center rounded-full text-dim hover:text-foreground focus-ring disabled:opacity-30"
+          className="flex size-11 shrink-0 items-center justify-center rounded-full text-dim hover:text-foreground focus-ring disabled:opacity-30 mouse:size-10"
         >
           <ChevronDown aria-hidden className="size-[18px]" />
         </button>
@@ -383,7 +398,7 @@ function SearchRow({ search }: { search: ThreadSearch }) {
           type="button"
           onClick={search.close}
           aria-label="검색 닫기"
-          className="-mr-2 flex size-10 shrink-0 items-center justify-center rounded-full text-faint hover:text-foreground focus-ring"
+          className="-mr-2 flex size-11 shrink-0 items-center justify-center rounded-full text-faint hover:text-foreground focus-ring mouse:size-10"
         >
           <X aria-hidden className="size-[18px]" />
         </button>

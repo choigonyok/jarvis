@@ -96,6 +96,7 @@ function ComposerView({
   queued,
   busy = false,
   onStop,
+  failure,
   draftKey,
   fillRef,
   onGuide,
@@ -118,8 +119,14 @@ function ComposerView({
   queued?: ReactNode;
   /** Jarvis is working: what is sent now waits its turn, and the field says so. */
   busy?: boolean;
-  /** Stops the answer being written: offered in the send button's place while nothing is typed. */
-  onStop?: () => void;
+  /**
+   * Stops the answer being written: offered in the send button's place while
+   * nothing is typed. Resolves false when it could not, and the button can be
+   * pressed again.
+   */
+  onStop?: () => Promise<boolean> | void;
+  /** What a press in this glass could not do - stop, a waiting message's controls - said here, in red. */
+  failure?: string | null;
   /** Where what is typed but not sent is kept, so leaving the tab does not lose it. */
   draftKey?: string;
   /**
@@ -210,7 +217,9 @@ function ComposerView({
   const actRef = useRef<HTMLButtonElement>(null);
   useOnlyOurs(rowRef, [fileRef, photoRef, areaRef, guideRef, micRef, actRef]);
   // Pressed once, it waits for the answer to end; the next answer can be
-  // stopped again.
+  // stopped again. A stop that did not get there gives it back at once: it
+  // stayed greyed out as 멈추는 중, with nothing stopping, until the answer
+  // ended on its own.
   const [stopping, setStopping] = useState(false);
   const [wasBusy, setWasBusy] = useState(busy);
   if (busy !== wasBusy) {
@@ -218,15 +227,7 @@ function ComposerView({
     if (!busy) setStopping(false);
   }
 
-  // Escape lets go of a quote, the way it closes anything else that is open.
-  useEffect(() => {
-    if (!quoting) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onCancelQuote?.();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [quoting, onCancelQuote]);
-
-  function attach(files: FileList | null) {
+  function attach(files: FileList | File[] | null) {
     if (!files) return;
     const room = MAX_PHOTOS - photos.length;
     const picked = Array.from(files).slice(0, Math.max(0, room));
@@ -238,6 +239,13 @@ function ComposerView({
     setPhotos((cur) => [...cur, ...added]);
     for (const a of added) upload(a.key, a.file);
   }
+
+  // A screenshot pasted, a photo dragged in from the desktop: on a computer
+  // that is how a photo comes to hand, more than as a file to pick. Only
+  // images, and only where the photo button is; they come in as its own do.
+  const [dragging, setDragging] = useState(false);
+  const carriesFiles = (data: DataTransfer) => allowPhotos && data.types.includes("Files");
+  const imagesIn = (data: DataTransfer) => Array.from(data.files).filter((f) => f.type.startsWith("image/"));
 
   function upload(key: string, file: File) {
     uploadPhoto(file)
@@ -292,11 +300,40 @@ function ComposerView({
     <div
       className={cn(
         "composer group/composer rounded-[1.875rem] bg-popover p-1.5 shadow-lg ring-1 ring-edge transition-shadow focus-within:ring-foreground/15",
+        // Lit as focus lights it while a file is held over it: here is where to let go.
+        dragging && "ring-foreground/15",
         className,
       )}
       data-lead={allowPhotos ? "icon" : "text"}
+      onDragOver={(e) => {
+        if (!carriesFiles(e.dataTransfer)) return;
+        // Taken here, a file let go is the composer's: left alone, the
+        // browser opened it in the app's place.
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+        setDragging(true);
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
+      }}
+      onDrop={(e) => {
+        if (!carriesFiles(e.dataTransfer)) return;
+        e.preventDefault();
+        setDragging(false);
+        attach(imagesIn(e.dataTransfer));
+      }}
     >
       {queued}
+      {/* Said where the press was: under the waiting messages, over the stop
+          button - starting where the typing does, as their lines do. */}
+      {failure ? (
+        <p
+          role="alert"
+          className="pt-1.5 pr-3.5 pb-1 pl-13 text-aside leading-snug text-reject group-data-[lead=text]/composer:pl-3.5"
+        >
+          {failure}
+        </p>
+      ) : null}
       {quoting ? (
         <div className="flex items-start gap-2 pt-1.5 pr-1 pb-1 pl-3.5">
           <Reply aria-hidden className="mt-[3px] size-3.5 shrink-0 text-faint" />
@@ -304,11 +341,13 @@ function ComposerView({
             <p className="text-aside leading-snug text-dim">{quoting.label}</p>
             <p className="truncate text-aside leading-snug text-faint">{quoting.text}</p>
           </div>
+          {/* A thumb's size, in the row's own height: a miss landed in the
+              field below and brought the keyboard up. */}
           <button
             type="button"
             onClick={onCancelQuote}
             aria-label="참조 빼기"
-            className="flex size-8 shrink-0 items-center justify-center rounded-full text-faint hover:text-foreground focus-ring"
+            className="-my-1.5 -mr-1 flex size-11 shrink-0 items-center justify-center rounded-full text-faint hover:text-foreground focus-ring mouse:my-0 mouse:mr-0 mouse:size-8"
           >
             <X aria-hidden className="size-4" />
           </button>
@@ -334,10 +373,14 @@ function ComposerView({
                       <Spinner aria-label="사진을 올리는 중" className="text-ink" />
                     </span>
                   ) : null}
+                  {/* The mark stays small on the photo; on a touch screen an
+                      unseen 44px around it takes the thumb. It reaches into
+                      its own photo, not past the strip's edge (which clips
+                      it) or onto the next photo. */}
                   <AttachmentAction
                     onClick={() => remove(p.key)}
                     aria-label="사진 빼기"
-                    className="absolute -top-0.5 -right-0.5 size-6 rounded-full bg-background/90 text-dim hover:bg-background/90 hover:text-foreground"
+                    className="absolute -top-0.5 -right-0.5 size-6 rounded-full bg-background/90 text-dim after:absolute after:-top-1 after:-right-1 after:-bottom-4 after:-left-4 hover:bg-background/90 hover:text-foreground mouse:after:hidden"
                   >
                     <X aria-hidden className="size-3.5" />
                   </AttachmentAction>
@@ -396,9 +439,24 @@ function ComposerView({
           rows={1}
           value={value}
           onChange={(e) => type(e.target.value)}
+          onPaste={(e) => {
+            const images = allowPhotos ? imagesIn(e.clipboardData) : [];
+            if (images.length === 0) return;
+            e.preventDefault();
+            attach(images);
+          }}
           onFocus={() => onFocusChange?.(true)}
           onBlur={() => onFocusChange?.(false)}
           onKeyDown={(e) => {
+            // Escape lets go of a quote, the way it closes anything else that
+            // is open - typed in the field the quote is for. Heard on the
+            // whole window, the Escape that closed a photo, a sheet or the
+            // search took the quote with it, unnoticed until the answer.
+            if (e.key === "Escape" && quoting && !e.defaultPrevented && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              onCancelQuote?.();
+              return;
+            }
             // Enter sends only where there is a shift to hold - a keyboard
             // under a mouse. Judged by the pointer, not the width: an iPad is
             // wide, and its on-screen Enter was sending. On a touch keyboard
@@ -493,7 +551,9 @@ function ComposerView({
             pressedBy.current = "";
             if (stoppable) {
               setStopping(true);
-              onStop?.();
+              void Promise.resolve(onStop?.()).then((ok) => {
+                if (ok === false) setStopping(false);
+              });
               return;
             }
             void send({ closeKeyboard: by === "touch" || by === "pen" });
