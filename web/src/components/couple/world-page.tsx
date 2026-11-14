@@ -7,6 +7,16 @@ import { PhotoTiles, PickPhotos, SaveAction, ViewerAction, useUploads } from "@/
 import { BlockTitle, useViewOnly } from "@/components/couple/screen";
 import { CONTINENTS, WorldMap, useWorldMap, worldFaces, type Country } from "@/components/couple/world-map";
 import { Failed } from "@/components/shell/failed";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Lightbox } from "@/components/ui/lightbox";
@@ -31,6 +41,10 @@ export function WorldMapPage({ block, onChanged }: { block: Block; onChanged: ()
   const [editing, setEditing] = useState<DateRecord | "new" | null>(null);
   const [viewing, setViewing] = useState<{ list: Visit[]; at: number } | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  // The photo a 지우기 asks about first - the one open in the viewer, or the
+  // face - kept as the question fades out, so its words stay as they were.
+  const [asking, setAsking] = useState(false);
+  const [asked, setAsked] = useState<Visit | null>(null);
   const panel = useRef<HTMLElement>(null);
   const uploads = useUploads(block.id);
 
@@ -74,6 +88,17 @@ export function WorldMapPage({ block, onChanged }: { block: Block; onChanged: ()
     const [asset] = await uploads.upload(files.slice(0, 1));
     if (!asset || !picked) return;
     await act(() => writeCouple("POST", `/blocks/${block.id}/visits`, { region: picked, asset, face: true }));
+  }
+
+  function ask(v: Visit) {
+    setAsked(v);
+    setAsking(true);
+  }
+
+  /** The photo asked about, taken off once the answer is yes; a viewer it was asked from closes only now. */
+  function drop() {
+    setViewing(null);
+    if (asked) void act(() => writeCouple("DELETE", `/blocks/${block.id}/visits/${asked.id}`));
   }
 
   return (
@@ -138,7 +163,7 @@ export function WorldMapPage({ block, onChanged }: { block: Block; onChanged: ()
             <div className={cn("mt-2 flex flex-wrap gap-2", viewOnly && "hidden")}>
               <PickPhotos multiple={false} busy={uploads.busy} label={face ? "대표 사진 바꾸기" : "대표 사진 추가"} onPick={(f) => void putFace(f)} />
               {face ? (
-                <Button variant="discard" size="touch-sm" onClick={() => void act(() => writeCouple("DELETE", `/blocks/${block.id}/visits/${face.id}`))}>
+                <Button variant="discard" size="touch-sm" onClick={() => ask(face)}>
                   대표 사진 지우기
                 </Button>
               ) : null}
@@ -214,6 +239,7 @@ export function WorldMapPage({ block, onChanged }: { block: Block; onChanged: ()
           setEditing(null);
           await onChanged();
         }}
+        onChanged={onChanged}
       />
       {viewing ? (
         <Lightbox
@@ -236,14 +262,7 @@ export function WorldMapPage({ block, onChanged }: { block: Block; onChanged: ()
                     대표로
                   </ViewerAction>
                 )}
-                <ViewerAction
-                  danger
-                  disabled={viewOnly}
-                  onClick={() => {
-                    setViewing(null);
-                    void act(() => writeCouple("DELETE", `/blocks/${block.id}/visits/${v.id}`));
-                  }}
-                >
+                <ViewerAction danger disabled={viewOnly} onClick={() => ask(v)}>
                   지우기
                 </ViewerAction>
               </>
@@ -251,6 +270,20 @@ export function WorldMapPage({ block, onChanged }: { block: Block; onChanged: ()
           }}
         />
       ) : null}
+      <AlertDialog open={asking} onOpenChange={setAsking}>
+        {/* Over the photo viewer (z-70, ui/dialog.tsx) when asked from there:
+            the photo stays in sight until the question is answered. */}
+        <AlertDialogContent className="z-[80]">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{asked?.rep ? "대표 사진을 지울까요?" : "이 사진을 지울까요?"}</AlertDialogTitle>
+            <AlertDialogDescription>상대의 uniple 앱에서도 사라지고, 되돌릴 수 없어요.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>두기</AlertDialogCancel>
+            <AlertDialogAction onClick={drop}>지우기</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

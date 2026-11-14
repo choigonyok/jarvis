@@ -4,6 +4,16 @@ import { useId, useState } from "react";
 import { ChevronDown, Plus } from "lucide-react";
 import { BlockTitle, useViewOnly } from "@/components/couple/screen";
 import { Segment } from "@/components/couple/segment";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Panel } from "@/components/ui/bottom-sheet";
 import { Button } from "@/components/ui/button";
 import { Field, FieldLabel } from "@/components/ui/field";
@@ -219,28 +229,31 @@ function AnniversaryForm({ block, item, onClose, onSaved }: { block: Block; item
   const [date, setDate] = useState(item?.date ?? today());
   const [repeat, setRepeat] = useState<"none" | "yearly">(item?.repeat === "yearly" ? "yearly" : "none");
   const [reminder, setReminder] = useState(item?.reminder ?? -1);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"save" | "remove" | null>(null);
+  const [asking, setAsking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const ready = title.trim() !== "" && /^\d{4}-\d{2}-\d{2}$/.test(date);
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
     if (!ready || busy) return;
-    setBusy(true);
+    setBusy("save");
     setError(null);
     const body = { title: title.trim(), date, repeat, reminder };
     const sent = item
       ? await writeCouple("PATCH", `/blocks/${block.id}/dday/${item.id}`, body)
       : await writeCouple("POST", `/blocks/${block.id}/dday`, body);
-    setBusy(false);
+    setBusy(null);
     if (!sent.ok) return setError(sent.error);
     await onSaved();
   }
   async function remove() {
     if (!item || busy) return;
-    setBusy(true);
+    setAsking(false);
+    setBusy("remove");
+    setError(null);
     const sent = await writeCouple("DELETE", `/blocks/${block.id}/dday/${item.id}`);
-    setBusy(false);
+    setBusy(null);
     if (!sent.ok) return setError(sent.error);
     await onSaved();
   }
@@ -284,18 +297,30 @@ function AnniversaryForm({ block, item, onClose, onSaved }: { block: Block; item
       ) : null}
       <div className="flex gap-2 pt-1">
         {item ? (
-          <Button type="button" variant="discard" size="touch-sm" onClick={() => void remove()} disabled={busy}>
-            지우기
+          <Button type="button" variant="discard" size="touch-sm" onClick={() => setAsking(true)} disabled={busy !== null}>
+            {busy === "remove" ? "지우는 중…" : "지우기"}
           </Button>
         ) : (
           <Button type="button" variant="soft" size="touch-sm" onClick={onClose} className="flex-1">
             두기
           </Button>
         )}
-        <Button type="submit" variant="raised" size="touch" disabled={!ready || busy} className="flex-1">
-          {busy ? "저장하는 중…" : "저장"}
+        <Button type="submit" variant="raised" size="touch" disabled={!ready || busy !== null} className="flex-1">
+          {busy === "save" ? "저장하는 중…" : "저장"}
         </Button>
       </div>
+      <AlertDialog open={asking} onOpenChange={setAsking}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>이 기념일을 지울까요?</AlertDialogTitle>
+            <AlertDialogDescription>상대의 uniple 앱과 캘린더에서도 사라지고, 되돌릴 수 없어요.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>두기</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void remove()}>지우기</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </form>
   );
 }

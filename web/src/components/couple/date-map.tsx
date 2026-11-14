@@ -48,6 +48,11 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
   // The region's photos picked to take off together; null while not picking.
   const [picking, setPicking] = useState<ReadonlySet<string> | null>(null);
   const [dropping, setDropping] = useState(false);
+  // What a 지우기 asks about first: a photo (the one open in the viewer, or
+  // the face) or the ones picked. Kept as the question fades out, so its
+  // words stay as they were.
+  const [asking, setAsking] = useState(false);
+  const [asked, setAsked] = useState<Visit | "picked" | null>(null);
   const panel = useRef<HTMLElement>(null);
   const uploads = useUploads(block.id);
 
@@ -120,6 +125,32 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
     setPinning(true);
     await act(() => writeCouple("PATCH", `/blocks/${block.id}`, { cardRegion: view }));
     setPinning(false);
+  }
+
+  function ask(what: Visit | "picked") {
+    setAsked(what);
+    setAsking(true);
+  }
+
+  /** What was asked about, taken off once the answer is yes; a viewer it was asked from closes only now. */
+  function drop() {
+    setViewing(null);
+    if (asked !== "picked") {
+      if (asked) void act(() => writeCouple("DELETE", `/blocks/${block.id}/visits/${asked.id}`));
+      return;
+    }
+    if (!picking) return;
+    setDropping(true);
+    void act(async () => {
+      for (const id of picking) {
+        const sent = await writeCouple("DELETE", `/blocks/${block.id}/visits/${id}`);
+        if (!sent.ok) return sent;
+      }
+      return { ok: true };
+    }).then(() => {
+      setDropping(false);
+      setPicking(null);
+    });
   }
 
   const provinceName = (code: string) => map.provinces.find((p) => p.code === code)?.name ?? "";
@@ -220,11 +251,7 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
             <div className={cn("mt-2 flex flex-wrap gap-2", viewOnly && "hidden")}>
               <PickPhotos multiple={false} busy={uploads.busy} label={face ? "대표 사진 바꾸기" : "대표 사진 추가"} onPick={(f) => void putFace(f)} />
               {face ? (
-                <Button
-                  variant="discard"
-                  size="touch-sm"
-                  onClick={() => void act(() => writeCouple("DELETE", `/blocks/${block.id}/visits/${face.id}`))}
-                >
+                <Button variant="discard" size="touch-sm" onClick={() => ask(face)}>
                   대표 사진 지우기
                 </Button>
               ) : null}
@@ -256,24 +283,7 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
                 }
               />
               {picking ? (
-                <PickBar
-                  count={picking.size}
-                  busy={dropping}
-                  onCancel={() => setPicking(null)}
-                  onRemove={() => {
-                    setDropping(true);
-                    void act(async () => {
-                      for (const id of picking) {
-                        const sent = await writeCouple("DELETE", `/blocks/${block.id}/visits/${id}`);
-                        if (!sent.ok) return sent;
-                      }
-                      return { ok: true };
-                    }).then(() => {
-                      setDropping(false);
-                      setPicking(null);
-                    });
-                  }}
-                />
+                <PickBar count={picking.size} busy={dropping} onCancel={() => setPicking(null)} onRemove={() => ask("picked")} />
               ) : null}
             </div>
           ) : null}
@@ -339,6 +349,7 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
           setEditing(null);
           await onChanged();
         }}
+        onChanged={onChanged}
       />
       {viewing ? (
         <Lightbox
@@ -376,14 +387,7 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
                     대표로
                   </ViewerAction>
                 ) : null}
-                <ViewerAction
-                  danger
-                  disabled={viewOnly}
-                  onClick={() => {
-                    setViewing(null);
-                    void act(() => writeCouple("DELETE", `/blocks/${block.id}/visits/${v.id}`));
-                  }}
-                >
+                <ViewerAction danger disabled={viewOnly} onClick={() => ask(v)}>
                   지우기
                 </ViewerAction>
               </>
@@ -391,6 +395,22 @@ export function DateMapPage({ block, onChanged }: { block: Block; onChanged: () 
           }}
         />
       ) : null}
+      <AlertDialog open={asking} onOpenChange={setAsking}>
+        {/* Over the photo viewer (z-70, ui/dialog.tsx) when asked from there:
+            the photo stays in sight until the question is answered. */}
+        <AlertDialogContent className="z-[80]">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {asked === "picked" ? `사진 ${picking?.size ?? 0}장을 지울까요?` : asked?.rep ? "대표 사진을 지울까요?" : "이 사진을 지울까요?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>상대의 uniple 앱에서도 사라지고, 되돌릴 수 없어요.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>두기</AlertDialogCancel>
+            <AlertDialogAction onClick={drop}>지우기</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -407,6 +427,7 @@ export function RecordSheet({
   photos,
   onClose,
   onSaved,
+  onChanged,
   words = DATE_WORDS,
 }: {
   block: Block;
@@ -416,10 +437,19 @@ export function RecordSheet({
   photos: Visit[];
   onClose: () => void;
   onSaved: () => Promise<void>;
+  /** Reads the map again with the sheet still open: a save that stopped partway saved the record all the same. */
+  onChanged: () => Promise<void>;
   words?: RecordWords;
 }) {
+  // Something in the form not saved yet, as the form says: closing by hand asks first.
+  const [held, setHeld] = useState(false);
   return (
-    <Panel open={editing !== null} onOpenChange={(open) => !open && onClose()} title={editing === "new" ? `${regionName} ${words.noun}` : `${words.noun} 고치기`}>
+    <Panel
+      open={editing !== null}
+      onOpenChange={(open) => !open && onClose()}
+      guard={held}
+      title={editing === "new" ? `${regionName} ${words.noun}` : `${words.noun} 고치기`}
+    >
       {editing && region ? (
         <RecordForm
           key={editing === "new" ? "new" : editing.id}
@@ -430,6 +460,8 @@ export function RecordSheet({
           words={words}
           onClose={onClose}
           onSaved={onSaved}
+          onChanged={onChanged}
+          onHeld={setHeld}
         />
       ) : null}
     </Panel>
@@ -448,6 +480,8 @@ function RecordForm({
   words,
   onClose,
   onSaved,
+  onChanged,
+  onHeld,
 }: {
   block: Block;
   region: string;
@@ -456,6 +490,8 @@ function RecordForm({
   words: RecordWords;
   onClose: () => void;
   onSaved: () => Promise<void>;
+  onChanged: () => Promise<void>;
+  onHeld: (held: boolean) => void;
 }) {
   const id = useId();
   const [title, setTitle] = useState(record?.title ?? "");
@@ -464,12 +500,30 @@ function RecordForm({
   const [note, setNote] = useState(record?.note ?? "");
   const [added, setAdded] = useState<string[]>([]);
   const [dropped, setDropped] = useState<ReadonlySet<string>>(new Set());
+  // How far a save got. One that stopped partway - the record saved, a photo
+  // not - goes on from there when tried again: it changes the record it made
+  // rather than making a second, and puts on or takes off only what is left.
+  const [savedId, setSavedId] = useState(record?.id ?? null);
+  const [attached, setAttached] = useState<Visit[]>([]);
+  const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [asking, setAsking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const uploads = useUploads(block.id);
   const ready = (!to || !from || to >= from) && !uploads.busy;
-  const kept = photos.filter((v) => !dropped.has(v.id));
+  // The record's photos as the map read them, and those a save put on that it has not read back yet.
+  const kept = [...photos, ...attached.filter((v) => !photos.some((p) => p.id === v.id))].filter((v) => !dropped.has(v.id));
+  const held =
+    added.length > 0 ||
+    [...dropped].some((v) => !gone.has(v)) ||
+    title.trim() !== (record?.title ?? "") ||
+    note.trim() !== (record?.note ?? "") ||
+    from !== (record?.from ?? today()) ||
+    to !== (record?.to ?? "");
+  useEffect(() => {
+    onHeld(held);
+    return () => onHeld(false);
+  }, [held, onHeld]);
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -477,27 +531,32 @@ function RecordForm({
     setBusy(true);
     setError(null);
     const body = { region, title: title.trim(), from, to: to || from, note: note.trim() };
-    const sent = record
-      ? await writeCouple<DateRecord>("PATCH", `/blocks/${block.id}/records/${record.id}`, body)
+    const sent = savedId
+      ? await writeCouple<DateRecord>("PATCH", `/blocks/${block.id}/records/${savedId}`, body)
       : await writeCouple<DateRecord>("POST", `/blocks/${block.id}/records`, body);
     if (!sent.ok) {
       setBusy(false);
       return setError(sent.error);
     }
-    const recordId = record?.id ?? sent.data.id;
+    const recordId = savedId ?? sent.data.id;
+    setSavedId(recordId);
+    // The record is saved whatever comes of its photos: the list behind the sheet shows it now.
+    const stop = (why: string) => {
+      setBusy(false);
+      setError(why);
+      void onChanged();
+    };
     for (const asset of added) {
-      const put = await writeCouple("POST", `/blocks/${block.id}/visits`, { record: recordId, asset });
-      if (!put.ok) {
-        setBusy(false);
-        return setError(`기록은 저장했지만 사진을 붙이지 못했어요: ${put.error}`);
-      }
+      const put = await writeCouple<Visit>("POST", `/blocks/${block.id}/visits`, { record: recordId, asset });
+      if (!put.ok) return stop(`기록은 저장했지만 사진을 붙이지 못했어요: ${put.error}`);
+      setAdded((list) => list.filter((a) => a !== asset));
+      setAttached((list) => [...list, put.data]);
     }
     for (const visit of dropped) {
-      const gone = await writeCouple("DELETE", `/blocks/${block.id}/visits/${visit}`);
-      if (!gone.ok) {
-        setBusy(false);
-        return setError(`기록은 저장했지만 사진을 빼지 못했어요: ${gone.error}`);
-      }
+      if (gone.has(visit)) continue;
+      const off = await writeCouple("DELETE", `/blocks/${block.id}/visits/${visit}`);
+      if (!off.ok) return stop(`기록은 저장했지만 사진을 빼지 못했어요: ${off.error}`);
+      setGone((s) => new Set(s).add(visit));
     }
     setBusy(false);
     await onSaved();

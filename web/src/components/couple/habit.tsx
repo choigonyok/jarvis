@@ -81,6 +81,26 @@ export function useCheckToday(block: string, checks: Resource<Check[]>) {
   return { mine, busy, error, toggle };
 }
 
+/** Asked before a check with a memo is taken off - on the habit's page and on the home's card alike. */
+export function UncheckQuestion({ open, onOpenChange, onUncheck }: { open: boolean; onOpenChange: (open: boolean) => void; onUncheck: () => void }) {
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>체크를 취소할까요?</AlertDialogTitle>
+          <AlertDialogDescription>이 날의 메모도 함께 지워져요. 되돌릴 수 없어요.</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>두기</AlertDialogCancel>
+          <AlertDialogAction variant="refuse" onClick={onUncheck}>
+            취소하기
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 /** The habit's page: a month of days, and the day picked under it. */
 export function HabitPage({ block, space, onChanged }: { block: Block; space: Space; onChanged?: () => Promise<void> }) {
   const now = today();
@@ -312,20 +332,7 @@ function Day({
           ) : null}
         </>
       )}
-      <AlertDialog open={asking} onOpenChange={setAsking}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>체크를 취소할까요?</AlertDialogTitle>
-            <AlertDialogDescription>이 날의 메모도 함께 지워져요. 되돌릴 수 없어요.</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>두기</AlertDialogCancel>
-            <AlertDialogAction variant="refuse" onClick={() => void uncheck()}>
-              취소하기
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <UncheckQuestion open={asking} onOpenChange={setAsking} onUncheck={() => void uncheck()} />
     </section>
   );
 }

@@ -12,7 +12,7 @@ import { logKind, meal, monthTotal, spend, won } from "@/components/couple/shelf
 import { WorldMap, useWorldMap, worldFaces } from "@/components/couple/world-map";
 import { CoupleScreen, useViewOnly } from "@/components/couple/screen";
 import { useChecks, useCover, useSpace } from "@/components/couple/use-space";
-import { WeekStrip, useCheckToday } from "@/components/couple/habit";
+import { UncheckQuestion, WeekStrip, useCheckToday } from "@/components/couple/habit";
 import { Failed } from "@/components/shell/failed";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -440,6 +440,8 @@ function HabitCard({ block, space }: { block: Block; space: Space }) {
   const days = checkedDays(checks.data ?? []);
   const { mine, busy, error, toggle } = useCheckToday(block.id, checks);
   const viewOnly = useViewOnly();
+  // Today's memo goes with the check, unseen on the card: asked first, as on the habit's page.
+  const [asking, setAsking] = useState(false);
   return (
     <Card block={block}>
       <p className="mb-3 flex items-center gap-3 text-aside" aria-label="이번 주">
@@ -453,7 +455,7 @@ function HabitCard({ block, space }: { block: Block; space: Space }) {
           variant={mine ? "soft" : "raised"}
           size="touch"
           disabled={busy || !checks.data}
-          onClick={() => void toggle()}
+          onClick={() => (mine?.memo ? setAsking(true) : void toggle())}
           className="mt-3 w-full gap-1.5"
         >
           {mine ? null : <CheckMark aria-hidden className="size-4" />}
@@ -465,6 +467,13 @@ function HabitCard({ block, space }: { block: Block; space: Space }) {
           {error}
         </p>
       ) : null}
+      <UncheckQuestion
+        open={asking}
+        onOpenChange={setAsking}
+        onUncheck={() => {
+          if (mine) void toggle();
+        }}
+      />
     </Card>
   );
 }
