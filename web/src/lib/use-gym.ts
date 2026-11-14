@@ -24,37 +24,9 @@ export function useNow(ms = 1000): number {
   return now;
 }
 
-/**
- * Keep the screen on while `active`.
- *
- * Unlocking the phone with chalky hands between every set is the friction the
- * apps that get used remove first. The lock is dropped by the browser when the
- * tab is hidden, so it is asked for again on the way back.
- */
-export function useWakeLock(active: boolean) {
-  useEffect(() => {
-    if (!active || !("wakeLock" in navigator)) return;
-    let lock: WakeLockSentinel | null = null;
-    let cancelled = false;
-    const take = async () => {
-      if (document.visibilityState !== "visible") return;
-      try {
-        const next = await navigator.wakeLock.request("screen");
-        if (cancelled) void next.release();
-        else lock = next;
-      } catch {
-        // Low battery mode or a denied request: the screen just sleeps as usual.
-      }
-    };
-    void take();
-    document.addEventListener("visibilitychange", take);
-    return () => {
-      cancelled = true;
-      document.removeEventListener("visibilitychange", take);
-      void lock?.release();
-    };
-  }, [active]);
-}
+// The screen kept on through a session: unlocking the phone with chalky hands
+// between every set is the friction the apps that get used remove first.
+export { useWakeLock } from "@/lib/use-wake-lock";
 
 let audio: AudioContext | null = null;
 

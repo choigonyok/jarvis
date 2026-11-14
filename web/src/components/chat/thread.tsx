@@ -285,6 +285,7 @@ export function Thread() {
         speechBins={spectrum}
         progress={progress}
         onStopSpeaking={cancel}
+        onStop={stop}
         muted={muted}
         onMutedChange={setMuted}
         onExit={() => switchMode("text")}

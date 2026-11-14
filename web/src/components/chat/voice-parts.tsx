@@ -63,7 +63,10 @@ export function QuietButton({ className, ...props }: React.ComponentProps<typeof
  *
  * While Jarvis speaks, the words he has already said
  * are lit and the rest wait in grey - you can read along with your ears -
- * and a long answer scrolls itself to keep the spoken edge in view.
+ * and a long answer scrolls itself to keep the spoken edge in view. A hand
+ * scrolls it too: on through an answer not read aloud (음성 답변 끄기), back
+ * to a number already said. The spoken edge is not followed for a moment
+ * after, or the words would be pulled from under the finger.
  */
 export function Caption({
   text,
@@ -79,12 +82,17 @@ export function Caption({
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const edge = useRef<HTMLSpanElement>(null);
+  // When a hand last moved the words.
+  const handAt = useRef(-Infinity);
+  const hand = () => {
+    handAt.current = performance.now();
+  };
   const long = text.length + (pending?.length ?? 0) > 90;
 
   useEffect(() => {
     const box = scroller.current;
     const mark = edge.current;
-    if (!box || !mark) return;
+    if (!box || !mark || performance.now() - handAt.current < HAND_MS) return;
     box.scrollTo({
       top: Math.max(0, mark.offsetTop - box.clientHeight * 0.4),
       behavior: "smooth",
@@ -96,7 +104,11 @@ export function Caption({
   return (
     <div
       ref={scroller}
-      className="max-h-[26dvh] overflow-hidden [mask-image:linear-gradient(to_bottom,transparent,black_1.25rem,black_calc(100%-1.75rem),transparent)] py-5"
+      onTouchStart={hand}
+      onTouchMove={hand}
+      onTouchEnd={hand}
+      onWheel={hand}
+      className="scrollbar-none max-h-[26dvh] overflow-y-auto overscroll-contain [mask-image:linear-gradient(to_bottom,transparent,black_1.25rem,black_calc(100%-1.75rem),transparent)] py-5"
     >
       <p
         className={cn(
@@ -130,6 +142,9 @@ export function Caption({
     </div>
   );
 }
+
+/** How long after a hand moved the caption it is left where the hand put it: the conversation's own pause. */
+const HAND_MS = 1500;
 
 /**
  * The ring: a circular spectrum.

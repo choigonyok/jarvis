@@ -234,10 +234,10 @@ export function ChecklistBody({
 }
 
 /**
- * One item. A tap ticks it; a pull to the right strikes it off. Only a
- * sideways pull on a touch screen is taken (a vertical move scrolls), and the
- * row is marked data-no-swipe so the conversation's own pull - quoting the
- * turn, to the left - does not start under it.
+ * One item. A tap ticks it; a pull to the right, or its ✕, strikes it off.
+ * Only a sideways pull on a touch screen is taken (a vertical move scrolls),
+ * and the row is marked data-no-swipe so the conversation's own pull -
+ * quoting the turn, to the left - does not start under it.
  */
 function Row({
   item,
@@ -362,13 +362,16 @@ function Row({
           <>
             <CopyButton text={item.text} label={`${item.text} 복사`} className="self-center" />
             {onStrike ? (
-              // With a pointer there is no pull: the row offers the same, on hover.
+              // The pull says nothing of itself, a pointer has none, and
+              // VoiceOver takes a one-finger pull for its own: the row offers
+              // the same as a button - on hover under a pointer, always on a
+              // touch screen.
               <button
                 type="button"
                 onClick={onStrike}
                 aria-label={`${item.text} 빼기`}
                 title="빼기"
-                className="hidden size-9 shrink-0 items-center justify-center self-center rounded-md text-faint opacity-0 transition-opacity group-hover/item:opacity-100 hover:text-reject focus-visible:opacity-100 focus-ring pointer-fine:flex"
+                className="touch-visible flex size-11 shrink-0 items-center justify-center self-center rounded-md text-faint opacity-0 transition-opacity group-hover/item:opacity-100 hover:text-reject focus-visible:opacity-100 focus-ring mouse:size-9"
               >
                 <X aria-hidden className="size-3.5" />
               </button>

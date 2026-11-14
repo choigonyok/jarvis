@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Caption, DOT, IconButton, PrimaryButton, QuietButton, Spectrum, type Tone } from "@/components/chat/voice-parts";
 import { unlockSpeech, type VoiceInfo } from "@/lib/use-speech";
+import { useWakeLock } from "@/lib/use-wake-lock";
 import { concatSamples, encodeWav, toBase64 } from "@/lib/wav";
 import { cn } from "@/lib/utils";
 
@@ -191,6 +192,8 @@ export function VoiceSetup({
   const onFull = useRef<() => void>(() => undefined);
   const recorder = useRecorder(() => onFull.current());
   const [step, setStep] = useState<Step>("idle");
+  // Read aloud for up to 25 seconds without a touch: the screen stays on.
+  useWakeLock(step === "recording");
   const [take, setTake] = useState<Take | null>(null);
   const [playing, setPlaying] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);

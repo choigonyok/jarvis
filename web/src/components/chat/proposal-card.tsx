@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Check, Minus, X } from "lucide-react";
 import { CardAnswers, CardFacts, answersOf } from "@/components/chat/card-answers";
 import { Sending, Sent } from "@/components/chat/hold";
@@ -14,7 +14,8 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { isPrivateField, type CardChoice, type CardField, type Decision, type Proposal } from "@/lib/thread";
 import { ACTION, MODULE, ofModule } from "@/lib/kinds";
 import { isLiteral, readableBody, readableConsequence, readableTitle } from "@/lib/card-body";
-import { sentChoice, useDecision } from "@/lib/decide";
+import { sentChoice, typedOn, useDecision } from "@/lib/decide";
+import { keepValue, keptValue } from "@/lib/keep";
 import { asksYesNo, chosenOf, outcomeOf, turnedDown, type Outcome } from "@/lib/outcome";
 import { photoUrl } from "@/lib/uploads";
 import { cn } from "@/lib/utils";
@@ -59,9 +60,22 @@ export function ProposalCard({
   const yesNo = asksYesNo(proposal);
   const fields = proposal.card.fields ?? [];
   const form = fields.length > 0;
-  const [values, setValues] = useState<Record<string, string>>(() =>
-    Object.fromEntries(fields.map((f) => [f.key, f.value])),
-  );
+  // What was typed into the fields is kept while the app is open, as an order
+  // half typed is (lib/keep.ts): the card is drawn again after another tab,
+  // and a price typed and a description rewritten on a phone were gone. A
+  // private field's value (a login) is not - it is held no longer than it has
+  // to be - and nothing is once the card is decided.
+  const typedKey = typedOn(proposal.id, "values");
+  const [values, setValues] = useState<Record<string, string>>(() => ({
+    ...Object.fromEntries(fields.map((f) => [f.key, f.value])),
+    ...keptValue<Record<string, string>>(typedKey),
+  }));
+  const waiting = outcome === "pending";
+  const cardFields = proposal.card.fields;
+  useEffect(() => {
+    const typed = (cardFields ?? []).filter((f) => !isPrivateField(f) && values[f.key] !== f.value);
+    keepValue(typedKey, waiting && typed.length > 0 ? Object.fromEntries(typed.map((f) => [f.key, values[f.key]])) : undefined);
+  }, [typedKey, cardFields, values, waiting]);
   // Taken, and the card not back with it yet (lib/decide.ts): said in the
   // buttons' place until it is, here or wherever the card is drawn again.
   const decision = useDecision(proposal, (d, reason, choice) =>

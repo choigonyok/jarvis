@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { keepValue } from "@/lib/keep";
 import { API, type CardChoice, type Decision, type Proposal } from "@/lib/thread";
 
 /**
@@ -33,10 +34,21 @@ export function sentChoice(proposalId: string): string | undefined {
   return chosen.get(proposalId);
 }
 
-/** The card came back decided: it says so itself now. */
+/**
+ * Where what is being written on a waiting card is kept while the app is
+ * open (lib/keep.ts), by the card: its fields, and a turn-down's reason - the
+ * answer that asked for it, and the words. A card drawn again (another tab
+ * and back, a send refused) has them still; back decided, it lets them go.
+ */
+export function typedOn(proposalId: string, what: "values" | "asking" | "why"): string {
+  return `card:${proposalId}:${what}`;
+}
+
+/** The card came back decided: it says so itself now, and nothing typed on it is kept. */
 export function heardBack(proposalId: string) {
   sent.delete(proposalId);
   chosen.delete(proposalId);
+  for (const what of ["values", "asking", "why"] as const) keepValue(typedOn(proposalId, what), undefined);
 }
 
 /**

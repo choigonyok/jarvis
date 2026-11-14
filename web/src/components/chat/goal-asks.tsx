@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Minus } from "lucide-react";
+import { Failed } from "@/components/shell/failed";
 import { Button } from "@/components/ui/button";
-import { type Mark, checkDay, readGoal, tally, whenLabel } from "@/lib/goals";
+import { type Goal, type Mark, type Stats, checkDay, tally, whenLabel } from "@/lib/goals";
+import { onResume } from "@/lib/resume";
 import type { GoalAsk } from "@/lib/thread";
+import { HttpError } from "@/lib/use-resource";
 import { cn } from "@/lib/utils";
 
 /**
@@ -15,12 +18,24 @@ import { cn } from "@/lib/utils";
  */
 export function GoalAsks({ asks, said }: { asks: GoalAsk[]; said?: string }) {
   return (
-    <ul className="mt-3 space-y-3 border-t border-edge-soft pt-3">
+    // With every goal it asks about gone, no rule is left standing on its own.
+    <ul className="mt-3 space-y-3 border-t border-edge-soft pt-3 empty:hidden">
       {asks.map((a) => (
         <Ask key={`${a.goal}:${a.day}`} ask={a} named={asks.length > 1 || !said?.includes(a.title)} />
       ))}
     </ul>
   );
+}
+
+/**
+ * The goal an ask is about, read as lib/goals.ts reads it but with mind's
+ * answer kept: a 404 is the goal gone - deleted, or not the asker's - the one
+ * failure that leaves nothing to ask. Any other is a read that did not come.
+ */
+async function readAsked(id: string): Promise<{ goal: Goal; stats: Stats }> {
+  const res = await fetch(`/api/mind/goals/${encodeURIComponent(id)}`, { cache: "no-store" });
+  if (!res.ok) throw new HttpError(res.status);
+  return (await res.json()) as { goal: Goal; stats: Stats };
 }
 
 /** One ask: the notice's own words say it when they name the goal; otherwise it is named here. */
@@ -31,24 +46,41 @@ function Ask({ ask, named }: { ask: GoalAsk; named: boolean }) {
   const [count, setCount] = useState(0);
   const [today, setToday] = useState("");
   const [gone, setGone] = useState(false);
+  // The read did not come: said where the answers would be, with 다시 시도.
+  // Taken for the goal gone, the ask vanished, and the question a push
+  // brought the operator to was left with nothing to answer it.
+  const [unread, setUnread] = useState(false);
   const [failed, setFailed] = useState(false);
 
-  useEffect(() => {
-    let alive = true;
-    readGoal(ask.goal)
-      .then(({ goal, stats }) => {
-        if (!alive) return;
+  // What a read brings is shown only if no newer one was asked for since and
+  // the ask is still on screen.
+  const asked = useRef(0);
+  const read = useCallback(() => {
+    const mine = ++asked.current;
+    return readAsked(ask.goal).then(
+      ({ goal, stats }) => {
+        if (asked.current !== mine) return;
+        setUnread(false);
         setToday(goal.progress.today);
         setSaid(stats.marks[ask.day] ?? null);
         if (!stats.marks[ask.day]) setCount(stats.counts?.[ask.day] ?? 0);
-      })
-      .catch(() => {
-        if (alive) setGone(true);
-      });
-    return () => {
-      alive = false;
-    };
+      },
+      (err: unknown) => {
+        if (asked.current !== mine) return;
+        if (err instanceof HttpError && err.status === 404) setGone(true);
+        else setUnread(true);
+      },
+    );
   }, [ask.goal, ask.day]);
+  useEffect(() => {
+    void read();
+    return () => {
+      asked.current += 1;
+    };
+  }, [read]);
+  // Not read, it is read again with the screens: the app back on screen, the
+  // network back, a pull to refresh.
+  useEffect(() => (unread ? onResume(read) : undefined), [unread, read]);
 
   async function say(mark: Mark | "") {
     const before = said;
@@ -86,6 +118,10 @@ function Ask({ ask, named }: { ask: GoalAsk; named: boolean }) {
             되돌리기
           </button>
         </p>
+      ) : unread ? (
+        <Failed quiet onRetry={read}>
+          목표를 불러오지 못했어요.
+        </Failed>
       ) : (
         <div className={cn("grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-1.5", said === undefined && "opacity-50")}>
           <Button

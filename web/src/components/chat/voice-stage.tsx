@@ -6,6 +6,7 @@ import { Caption, DOT, IconButton, PrimaryButton, QuietButton, Spectrum, type To
 import { VoiceSetup } from "@/components/chat/voice-setup";
 import { useMicLevel } from "@/lib/use-mic-level";
 import { capturesAlone, primePlayer, unlockSpeech, useRecognition, type Speaker, type VoiceInfo } from "@/lib/use-speech";
+import { useWakeLock } from "@/lib/use-wake-lock";
 import { cn } from "@/lib/utils";
 import { diag } from "@/lib/diag";
 
@@ -29,6 +30,7 @@ export function VoiceStage({
   pulse,
   speechBins,
   onStopSpeaking,
+  onStop,
   muted,
   onMutedChange,
   onExit,
@@ -52,6 +54,8 @@ export function VoiceStage({
   /** The cloned voice's live spectrum while it plays; the ring draws it. */
   speechBins: React.RefObject<Uint8Array | null>;
   onStopSpeaking: () => void;
+  /** Stops the answer being thought out, as the conversation's 멈추기 does; false when it did not get there. */
+  onStop?: () => Promise<boolean> | void;
   muted: boolean;
   onMutedChange: (muted: boolean) => void;
   onExit: () => void;
@@ -65,6 +69,9 @@ export function VoiceStage({
   onVoiceChanged: () => void | Promise<void>;
 }) {
   const [started, setStarted] = useState(false);
+  // Hands-free while a session runs: an iPhone left to lock itself ends the
+  // listening and the answer, and opens the mic again only for a tap.
+  useWakeLock(started);
   const [setup, setSetup] = useState(false);
   const [draft, setDraft] = useState("");
   /** Your last sent line, kept above Jarvis's answer to it. */
@@ -77,8 +84,15 @@ export function VoiceStage({
    * a while with nothing back (then the thread is re-read).
    */
   const [sending, setSending] = useState(false);
-  /** A line under the caption when something needs saying (a send that failed). */
-  const [notice, setNotice] = useState<string | null>(null);
+  /** A line under the caption when something needs saying: a send that failed, or no answer coming. */
+  const [notice, setNotice] = useState<{ text: string; failed?: boolean } | null>(null);
+  // 멈추기, once pressed, waits for the answer to end, as the conversation's does.
+  const [stopping, setStopping] = useState(false);
+  const [wasThinking, setWasThinking] = useState(thinking);
+  if (thinking !== wasThinking) {
+    setWasThinking(thinking);
+    if (!thinking) setStopping(false);
+  }
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // The draft lives in a ref as well so sending happens outside a state
   // updater - React may run an updater twice, and that would send twice.
@@ -103,7 +117,7 @@ export function VoiceStage({
         diag("voice", { ev: "stage.sent", ok: ok ? 1 : 0 });
         if (ok) return;
         setSending(false);
-        setNotice("보내지 못했어요. 다시 말해 주세요.");
+        setNotice({ text: "보내지 못했어요. 다시 말해 주세요.", failed: true });
       });
     }
   }, [onSend]);
@@ -202,7 +216,7 @@ export function VoiceStage({
     const stalled = setTimeout(() => {
       diag("voice", { ev: "stage.stall" });
       setSending(false);
-      setNotice("답이 오지 않아 연결을 다시 확인했어요.");
+      setNotice({ text: "답이 오지 않아 연결을 다시 확인했어요." });
       onStall?.();
     }, 8000);
     return () => clearTimeout(stalled);
@@ -240,6 +254,9 @@ export function VoiceStage({
     return () => clearTimeout(reopen);
   }, [started, setup, speaking, thinking, sending, listening, state, start, stop]);
   const said = [draft, interim].filter(Boolean).join(" ");
+  // A line that did not go stays the caption, the failure in red under it.
+  // Put under the answer before it, it read as that answer's question.
+  const unsent = Boolean(notice?.failed && lastSent) && !thinking && !sending && !speaking;
 
   // One number drives the ring, whichever side of the conversation is live.
   const energy = speaking ? pulse : listening ? level : 0;
@@ -247,7 +264,11 @@ export function VoiceStage({
   const paused = state === "paused";
   const ownVoice = voice.state === "ready";
 
-  /** The tap a device like iOS Safari asks for before it lets the mic reopen. */
+  /**
+   * The tap a device like iOS Safari asks for before it lets the mic reopen -
+   * and, while Jarvis talks, the way to cut him short: what is said over his
+   * answer is dropped (holding), so a long one had to be heard to its end.
+   */
   function resume() {
     onStopSpeaking();
     // After the stop, not before: stopping cancels whatever is queued.
@@ -354,7 +375,7 @@ export function VoiceStage({
     );
   } else if (said) {
     caption = <Caption tone="you" text={draft} pending={interim} />;
-  } else if ((thinking || sending) && lastSent) {
+  } else if ((thinking || sending || unsent) && lastSent) {
     caption = <Caption tone="you" text={lastSent} />;
   } else if (lastSaid && (speaking || lastSent)) {
     echo = lastSent;
@@ -442,9 +463,9 @@ export function VoiceStage({
           <div className={cn("min-h-0 w-full", echo ? "mt-0.5" : "mt-2")}>
             {caption}
           </div>
-          {notice && !said ? (
-            <p className="mt-1 text-ui leading-relaxed text-faint" role="status">
-              {notice}
+          {notice && !said && (unsent || !notice.failed) ? (
+            <p className={cn("mt-1 text-ui leading-relaxed", unsent ? "text-reject" : "text-faint")} role={unsent ? "alert" : "status"}>
+              {notice.text}
             </p>
           ) : null}
           {quietLong && !said && !notice ? (
@@ -468,12 +489,29 @@ export function VoiceStage({
             이 브라우저는 음성 인식을 지원하지 않아요. Chrome이나 Safari에서
             열면 쓸 수 있어요.
           </p>
-        ) : started && paused && !speaking ? (
+        ) : started && (paused || (speaking && !stopped)) ? (
           <div className="flex items-center gap-3">
             <PrimaryButton onClick={resume}>
               <Mic aria-hidden className="size-4" />
               말하기
             </PrimaryButton>
+            <QuietButton onClick={end}>끝내기</QuietButton>
+          </div>
+        ) : started && thinking && !stopped && onStop ? (
+          <div className="flex items-center gap-3">
+            <QuietButton
+              onClick={() => {
+                setStopping(true);
+                // As the conversation's: a stop that did not get there gives
+                // the button back, rather than 멈추는 중 until the answer ends.
+                void Promise.resolve(onStop()).then((ok) => {
+                  if (ok === false) setStopping(false);
+                });
+              }}
+              disabled={stopping}
+            >
+              {stopping ? "멈추는 중" : "멈추기"}
+            </QuietButton>
             <QuietButton onClick={end}>끝내기</QuietButton>
           </div>
         ) : started ? (

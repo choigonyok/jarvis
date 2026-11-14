@@ -1,10 +1,12 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { TriangleAlert } from "lucide-react";
 import { HeldBack, HoldBar, holdsMoney, useHold } from "@/components/chat/hold";
 import { RejectForm } from "@/components/chat/reject-form";
 import { Button } from "@/components/ui/button";
+import { typedOn } from "@/lib/decide";
+import { keepValue, keptValue } from "@/lib/keep";
 import { asksYesNo } from "@/lib/outcome";
 import type { CardChoice, CardFact, Proposal } from "@/lib/thread";
 import { cn } from "@/lib/utils";
@@ -110,35 +112,50 @@ export function CardAnswers({
     offered.length === 2 && offered[0].decision === "approved" && offered[1].decision === "rejected"
       ? [offered[1], offered[0]]
       : offered;
-  const [asking, setAsking] = useState<CardChoice | null>(null);
-  // The answer a held payment goes as, once its five seconds are up.
-  const held = useRef<CardChoice | null>(null);
+  // The answer whose reason is being asked for, by its place: asked for still
+  // when the card is drawn again (another tab and back, a send refused), as
+  // its fields are, until the card is back decided (lib/decide.ts).
+  const askKey = typedOn(proposal.id, "asking");
+  const [askingAt, setAskingAt] = useState<number | null>(() => keptValue<number>(askKey) ?? null);
+  useEffect(() => {
+    keepValue(askKey, askingAt ?? undefined);
+  }, [askKey, askingAt]);
+  const asking = askingAt === null ? null : (answers[askingAt] ?? null);
+  // The answer a held payment goes as, once its five seconds are up, and its place.
+  const held = useRef<{ c: CardChoice; at: number } | null>(null);
   const hold = useHold(proposal.id, () => {
-    if (held.current) onAnswer(held.current);
+    if (held.current) onAnswer(held.current.c);
   });
 
-  if (hold.holding) return <HoldBar left={hold.left} onCancel={hold.cancel} />;
-  if (asking) {
-    return (
-      <RejectForm
-        busy={busy}
-        label={asking.label}
-        onCancel={() => setAsking(null)}
-        onReject={(why) => {
-          setAsking(null);
-          onAnswer(asking, why);
-        }}
-      />
-    );
-  }
+  // Pressed from the keyboard, an answer's button left the page under the
+  // focus, and the focus fell to the top: 되돌리기's five seconds were out of
+  // reach. It goes on to what takes the button's place, and back to the
+  // button when that is let go. A tap leaves no focus here and moves none.
+  // The reason's field takes it under a mouse however 반려 was pressed - the
+  // reason is what comes next - and never on a touch screen, where it would
+  // raise the keyboard for a reason that may be left empty.
+  const box = useRef<HTMLDivElement>(null);
+  const focusNext = useRef<string | null>(null);
+  useEffect(() => {
+    const target = focusNext.current;
+    focusNext.current = null;
+    if (target) box.current?.querySelector<HTMLElement>(target)?.focus();
+  });
+  const follow = (target: string) => {
+    if (box.current?.contains(document.activeElement)) focusNext.current = target;
+  };
+  const answerAt = (at: number) => `[data-answer="${at}"]`;
 
-  const choose = (c: CardChoice) => {
+  const choose = (c: CardChoice, at: number) => {
     if (c.why && c.decision === "rejected") {
-      setAsking(c);
+      if (window.matchMedia("(pointer: fine)").matches) focusNext.current = "input";
+      else follow("button");
+      setAskingAt(at);
       return;
     }
     if (c.decision === "approved" && holdsMoney(proposal)) {
-      held.current = c;
+      follow("button");
+      held.current = { c, at };
       hold.start();
       return;
     }
@@ -146,30 +163,56 @@ export function CardAnswers({
   };
   const pair = answers.length <= 2;
   return (
-    <div>
-      {hold.interrupted ? <HeldBack /> : null}
-      <div
-        className={cn(
-          pair
-            ? "grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end sm:gap-1.5"
-            : "flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end sm:gap-1.5",
-        )}
-      >
-        {answers.map((c, i) => (
-          <Button
-            key={c.id || `${c.decision}-${i}`}
-            variant={VARIANT[c.tone ?? (c.decision === "approved" ? "approve" : "reject")]}
-            size={size}
-            onClick={() => choose(c)}
-            disabled={busy || (blocked?.(c) ?? false)}
-            // A label of the card's own may run to two lines on a phone: the
-            // button grows with it and never cuts it.
-            className={cn("h-auto py-2 whitespace-normal mouse:h-auto mouse:min-h-8", size === "pair" ? "min-h-12" : "min-h-11")}
+    <div ref={box}>
+      {hold.holding ? (
+        <HoldBar
+          left={hold.left}
+          onCancel={() => {
+            follow(answerAt(held.current?.at ?? 0));
+            hold.cancel();
+          }}
+        />
+      ) : asking ? (
+        <RejectForm
+          busy={busy}
+          label={asking.label}
+          keepKey={typedOn(proposal.id, "why")}
+          onCancel={() => {
+            follow(answerAt(askingAt ?? 0));
+            setAskingAt(null);
+          }}
+          // Still asked for while it goes: a send refused draws the form
+          // again with the reason as it was written, the refusal under it.
+          onReject={(why) => onAnswer(asking, why)}
+        />
+      ) : (
+        <>
+          {hold.interrupted ? <HeldBack /> : null}
+          <div
+            className={cn(
+              pair
+                ? "grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end sm:gap-1.5"
+                : "flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end sm:gap-1.5",
+            )}
           >
-            {c.label}
-          </Button>
-        ))}
-      </div>
+            {answers.map((c, i) => (
+              <Button
+                key={c.id || `${c.decision}-${i}`}
+                data-answer={i}
+                variant={VARIANT[c.tone ?? (c.decision === "approved" ? "approve" : "reject")]}
+                size={size}
+                onClick={() => choose(c, i)}
+                disabled={busy || (blocked?.(c) ?? false)}
+                // A label of the card's own may run to two lines on a phone: the
+                // button grows with it and never cuts it.
+                className={cn("h-auto py-2 whitespace-normal mouse:h-auto mouse:min-h-8", size === "pair" ? "min-h-12" : "min-h-11")}
+              >
+                {c.label}
+              </Button>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }
