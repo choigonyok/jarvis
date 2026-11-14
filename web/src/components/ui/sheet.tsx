@@ -110,6 +110,26 @@ function SheetHistory({ close, held, ask }: { close: () => void; held: React.Ref
   return null
 }
 
+const never: React.RefObject<boolean> = { current: false }
+const nothing = () => {}
+
+/**
+ * Going back closes this, as it closes a sheet: for what covers the screen
+ * without being a sheet (the full-screen photo viewer). Without it an edge
+ * swipe on a photo - the photos' own gesture - left the screen under it, or
+ * closed the sheet the photo was opened from. close may be new at every
+ * render; the entry is made once.
+ */
+function BackCloses({ close }: { close: () => void }) {
+  const latest = React.useRef(close)
+  React.useLayoutEffect(() => {
+    latest.current = close
+  })
+  const stable = React.useCallback(() => latest.current(), [])
+  useSheetHistory(stable, never, nothing)
+  return null
+}
+
 /** How far down a sheet is pulled before letting go closes it, and how fast a flick must be. */
 const DISMISS_PX = 96
 const DISMISS_SPEED = 0.6
@@ -334,6 +354,7 @@ function SheetDescription({
 }
 
 export {
+  BackCloses,
   Sheet,
   SheetTrigger,
   SheetClose,

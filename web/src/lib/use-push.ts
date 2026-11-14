@@ -34,6 +34,30 @@ async function registration(): Promise<ServiceWorkerRegistration> {
 }
 
 /**
+ * This device turned off by hand (이 기기 끄기). A granted permission with no
+ * subscription otherwise reads as one the platform dropped, and ensurePush
+ * made it again at the next launch - the device that was turned off got the
+ * alerts again, its switch back on. Signing out does not set it: signing in
+ * again brings the alerts back.
+ */
+const OFF_HERE = "jarvis.push.off";
+
+function offHere(): boolean {
+  try {
+    return localStorage.getItem(OFF_HERE) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function keepOff(off: boolean) {
+  try {
+    if (off) localStorage.setItem(OFF_HERE, "1");
+    else localStorage.removeItem(OFF_HERE);
+  } catch {}
+}
+
+/**
  * Stop this device's notifications - on sign-out, so a shared or handed-on
  * device does not keep receiving the operator's alerts.
  */
@@ -51,6 +75,10 @@ export async function ensurePush(): Promise<string> {
   try {
     const reg = (await navigator.serviceWorker.getRegistration("/")) ?? (await registration());
     let sub = await reg.pushManager.getSubscription();
+    if (!sub && offHere()) {
+      diag("push", { permission: "granted", had: 0, off: 1 });
+      return "";
+    }
     if (!sub) {
       const keyRes = await fetch("/api/notify/vapid", { cache: "no-store" });
       const key = (await keyRes.json()) as { publicKey?: string };
@@ -139,6 +167,7 @@ export function usePush() {
         headers: { "content-type": "application/json", "x-client-user-agent": navigator.userAgent },
         body: JSON.stringify(sub.toJSON()),
       });
+      if (res.ok) keepOff(false);
       setState(res.ok ? "on" : "unavailable");
     } catch {
       setState("unavailable");
@@ -160,6 +189,7 @@ export function usePush() {
         }).catch(() => {});
         await sub.unsubscribe();
       }
+      keepOff(true);
       setState("off");
     } finally {
       setBusy(false);

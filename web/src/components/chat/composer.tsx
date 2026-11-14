@@ -14,11 +14,12 @@ import {
 import { pageState, reactHolds, RemovalProbe } from "@/components/chat/removal-probe";
 import { Spinner } from "@/components/ui/spinner";
 import { diag } from "@/lib/diag";
+import { SAY, failureText } from "@/lib/say";
 import { uploadPhoto } from "@/lib/uploads";
 import { cn } from "@/lib/utils";
 
 /** One photo on its way in: shown from memory at once, sent by name once uploaded. */
-type Photo = { key: string; preview: string; name?: string; error?: string };
+type Photo = { key: string; preview: string; name?: string; error?: string; file?: File };
 
 const MAX_PHOTOS = 12;
 
@@ -184,8 +185,12 @@ function ComposerView({
   }, [value, areaRef]);
 
   const uploading = photos.some((p) => !p.name && !p.error);
+  // A photo that did not go up holds the message back: sent, it went without
+  // the photo it was about ("중고나라에 올려줘" with no listing photo), and the
+  // field was cleared as if all had gone. Taken out or sent again, it lets go.
+  const failed = photos.some((p) => p.error);
   const ready = photos.filter((p) => p.name);
-  const canSend = !uploading && (value.trim() !== "" || ready.length > 0);
+  const canSend = !uploading && !failed && (value.trim() !== "" || ready.length > 0);
   // Something is on its way out: on a phone the send button takes the mic's
   // place, as in every messenger, and the words get the width the second
   // button held.
@@ -230,14 +235,22 @@ function ComposerView({
       preview: URL.createObjectURL(file),
       file,
     }));
-    setPhotos((cur) => [...cur, ...added.map(({ key, preview }) => ({ key, preview }))]);
-    for (const a of added) {
-      uploadPhoto(a.file)
-        .then((name) => setPhotos((cur) => cur.map((p) => (p.key === a.key ? { ...p, name } : p))))
-        .catch((e: Error) =>
-          setPhotos((cur) => cur.map((p) => (p.key === a.key ? { ...p, error: e.message } : p))),
-        );
-    }
+    setPhotos((cur) => [...cur, ...added]);
+    for (const a of added) upload(a.key, a.file);
+  }
+
+  function upload(key: string, file: File) {
+    uploadPhoto(file)
+      .then((name) => setPhotos((cur) => cur.map((p) => (p.key === key ? { ...p, name, error: undefined } : p))))
+      .catch((e: unknown) =>
+        setPhotos((cur) => cur.map((p) => (p.key === key ? { ...p, error: failureText(e, "사진을 올리지 못했어요.") } : p))),
+      );
+  }
+
+  function retry(p: Photo) {
+    if (!p.file) return;
+    setPhotos((cur) => cur.map((q) => (q.key === p.key ? { ...q, error: undefined } : q)));
+    upload(p.key, p.file);
   }
 
   function remove(key: string) {
@@ -336,6 +349,13 @@ function ComposerView({
                     <AttachmentDescription className="line-clamp-2 text-meta leading-snug whitespace-normal text-dim group-data-[state=error]/attachment:text-dim">
                       {p.error}
                     </AttachmentDescription>
+                    <button
+                      type="button"
+                      onClick={() => retry(p)}
+                      className="tap -my-2.5 -ms-1 flex items-center px-1 text-meta text-dim underline decoration-edge underline-offset-[3px] hover:text-foreground focus-ring mouse:min-h-7 mouse:min-w-0"
+                    >
+                      {SAY.retry}
+                    </button>
                   </AttachmentContent>
                 ) : null}
               </Attachment>
@@ -479,7 +499,17 @@ function ComposerView({
             void send({ closeKeyboard: by === "touch" || by === "pen" });
           }}
           disabled={stoppable ? stopping : !canSend}
-          aria-label={stoppable ? (stopping ? "멈추는 중" : "답 멈추기") : uploading ? "사진을 올리는 중" : "메시지 보내기"}
+          aria-label={
+            stoppable
+              ? stopping
+                ? "멈추는 중"
+                : "답 멈추기"
+              : uploading
+                ? "사진을 올리는 중"
+                : failed
+                  ? "올리지 못한 사진이 있어요"
+                  : "메시지 보내기"
+          }
           title={stoppable ? "답 멈추기" : undefined}
           className={cn(round, "group text-dim disabled:opacity-40", !stoppable && onVoice && !composing && "max-sm:hidden")}
         >

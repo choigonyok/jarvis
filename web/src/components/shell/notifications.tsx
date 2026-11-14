@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { openTarget, targetOf } from "@/lib/focus";
+import { SAY } from "@/lib/say";
 import { MIND_KEY, NOTE } from "@/lib/kinds";
 import { onInboxRequest } from "@/lib/resume";
 import { Bell, Settings2 } from "lucide-react";
@@ -338,7 +339,9 @@ type Attention = { known: boolean; cards: number; evening?: { hour: number; rate
 function NotifySettings() {
   const push = usePush();
   const [set, setSet] = useState<Settings | null>(null);
-  const [note, setNote] = useState<string | null>(null);
+  // A save that did not go, said beside what was pressed: the panel scrolls,
+  // and a line at its foot was out of sight of a switch at its top.
+  const [note, setNote] = useState<{ where: "muted" | "time"; text: string } | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
   const [attention, setAttention] = useState<Attention | null>(null);
 
@@ -358,17 +361,22 @@ function NotifySettings() {
       .catch(() => {});
   }, []);
 
-  const save = async (next: Settings) => {
+  const save = async (next: Settings, where: "muted" | "time") => {
+    const before = set;
     setSet(next);
     const res = await fetch("/api/notify/settings", {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(next),
     }).catch(() => null);
-    if (!res?.ok) {
-      const msg = (await res?.json().catch(() => null)) as { error?: string } | null;
-      setNote(msg?.error ?? "저장하지 못했어요.");
-    } else setNote(null);
+    if (res?.ok) {
+      setNote(null);
+      return;
+    }
+    // Back to what the service still holds: a switch left where it was
+    // flipped said the alerts had stopped while they kept coming.
+    setSet(before);
+    setNote({ where, text: SAY.couldNotSave });
   };
 
   const device: Record<string, string> = {
@@ -436,7 +444,7 @@ function NotifySettings() {
                       <Switch
                         checked={on}
                         onCheckedChange={() =>
-                          void save({ ...set, muted: on ? [...set.muted, id] : set.muted.filter((m) => m !== id) })
+                          void save({ ...set, muted: on ? [...set.muted, id] : set.muted.filter((m) => m !== id) }, "muted")
                         }
                       />
                     </label>
@@ -444,6 +452,11 @@ function NotifySettings() {
                 );
               })}
             </ul>
+            {note?.where === "muted" ? (
+              <p role="status" className="mt-1 text-meta text-reject">
+                {note.text}
+              </p>
+            ) : null}
             <p className="mt-1 text-meta leading-relaxed text-faint">끈 알림도 알림함에는 남아요.</p>
           </section>
 
@@ -455,39 +468,74 @@ function NotifySettings() {
             <label className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
               <span className="text-dim">방해 금지</span>
               <span className="ms-auto flex items-center gap-1.5">
-                <input
-                  type="time"
-                  value={set.quietStart}
-                  onChange={(e) => void save({ ...set, quietStart: e.target.value })}
-                  className="tnum h-11 rounded-lg border border-edge-soft bg-glass px-2 text-field text-foreground mouse:h-9 mouse:text-aside"
-                />
+                <TimeField label="방해 금지 시작" value={set.quietStart} onSave={(v) => void save({ ...set, quietStart: v }, "time")} />
                 <span className="text-faint">~</span>
-                <input
-                  type="time"
-                  value={set.quietEnd}
-                  onChange={(e) => void save({ ...set, quietEnd: e.target.value })}
-                  className="tnum h-11 rounded-lg border border-edge-soft bg-glass px-2 text-field text-foreground mouse:h-9 mouse:text-aside"
-                />
+                <TimeField label="방해 금지 끝" value={set.quietEnd} onSave={(v) => void save({ ...set, quietEnd: v }, "time")} />
               </span>
             </label>
             <label className="flex items-center justify-between gap-3">
               <span className="text-dim">하루 요약</span>
-              <input
-                type="time"
-                value={set.digestAt}
-                onChange={(e) => void save({ ...set, digestAt: e.target.value })}
-                className="tnum h-11 rounded-lg border border-edge-soft bg-glass px-2 text-field text-foreground mouse:h-9 mouse:text-aside"
-              />
+              <TimeField label="하루 요약 시각" value={set.digestAt} onSave={(v) => void save({ ...set, digestAt: v }, "time")} />
             </label>
-            <DigestHint attention={attention} digestAt={set.digestAt} onUse={(at) => void save({ ...set, digestAt: at })} />
+            <DigestHint
+              attention={attention}
+              digestAt={set.digestAt}
+              onUse={(at) => void save({ ...set, digestAt: at }, "time")}
+            />
             <p className="text-meta leading-relaxed text-faint">
               방해 금지 시간에 생긴 알림은 끝나는 시각에 한 번에 와요. 큰 결제·비중 이탈 같은 건 하루 요약으로 모아서 와요.
             </p>
-            {note ? <p className="text-meta text-reject">{note}</p> : null}
+            {note?.where === "time" ? (
+              <p role="status" className="text-meta text-reject">
+                {note.text}
+              </p>
+            ) : null}
           </section>
         </>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * A time that is saved once it has been picked, not at every stop of the way:
+ * a phone's wheel says change at each hour it passes, and each was a save of
+ * the whole settings, any of which could land last. Left empty (a desktop
+ * field cleared), it goes back to what was saved. Saved too when the panel
+ * closes around it - a field taken away while focused is not blurred.
+ */
+function TimeField({ label, value, onSave }: { label: string; value: string; onSave: (value: string) => void }) {
+  const [draft, setDraft] = useState(value);
+  const [was, setWas] = useState(value);
+  if (value !== was) {
+    setWas(value);
+    setDraft(value);
+  }
+  const latest = useRef({ draft, value, onSave });
+  useLayoutEffect(() => {
+    latest.current = { draft, value, onSave };
+  });
+  const commit = () => {
+    const { draft: d, value: v, onSave: save } = latest.current;
+    if (d && d !== v) save(d);
+    else if (!d) setDraft(v);
+  };
+  useEffect(
+    () => () => {
+      const { draft: d, value: v, onSave: save } = latest.current;
+      if (d && d !== v) save(d);
+    },
+    [],
+  );
+  return (
+    <input
+      type="time"
+      aria-label={label}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      className="tnum h-11 rounded-lg border border-edge-soft bg-glass px-2 text-field text-foreground mouse:h-9 mouse:text-aside"
+    />
   );
 }
 

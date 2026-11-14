@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Download, X } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { BackCloses } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 
 export type LightboxItem = {
@@ -114,6 +115,7 @@ export function Lightbox({
         onClick={stopHere}
       >
         <DialogTitle className="sr-only">{item.alt || "사진 보기"}</DialogTitle>
+        <BackCloses close={onClose} />
         <div className="pt-safe relative z-10 flex shrink-0 items-center gap-2 px-2 py-2 text-white">
           <button
             type="button"
