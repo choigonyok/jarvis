@@ -14,6 +14,8 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Taken } from "@/components/goals/taken";
+import { AsOf } from "@/components/shell/as-of";
+import { Failed } from "@/components/shell/failed";
 import { BottomSheetContent, BottomSheetDescription, BottomSheetHeader, BottomSheetTitle } from "@/components/ui/bottom-sheet";
 import { Button } from "@/components/ui/button";
 import { Sheet } from "@/components/ui/sheet";
@@ -69,67 +71,100 @@ export function GoalSheet({
 function Body({ goal, onChanged, onClose, onEdit }: { goal: Goal; onChanged: (taken?: boolean) => void; onClose: () => void; onEdit: (g: Goal) => void }) {
   const [now, setNow] = useState(goal);
   const [stats, setStats] = useState<Stats | null>(null);
+  // When the sheet was read, and why a read since failed, until one lands.
+  const [readAt, setReadAt] = useState<Date | null>(null);
+  const [unread, setUnread] = useState<string | null>(null);
+  // A change pressed under the graphs: on its way, and why it did not go.
+  const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
-  const [taken, setTaken] = useState(false);
+  // Taken in and not done by mind yet: a day said on the calendar, or the goal changed.
+  const [taken, setTaken] = useState<"day" | "goal" | null>(null);
 
   const load = useCallback(async () => {
     try {
       const got = await readGoal(goal.id);
       setNow(got.goal);
       setStats(got.stats);
+      setReadAt(new Date());
+      setUnread(null);
     } catch (e) {
-      setFailed(failureText(e, SAY.couldNotLoad));
+      setUnread(failureText(e, SAY.couldNotLoad));
     }
   }, [goal.id]);
+  // The goal comes down again whenever the list has it new - changed in the
+  // form over this sheet, marked on the other phone - and the sheet draws it
+  // at once and reads it again with its stats, which a new rule changes too.
+  // Read only on opening, a saved change left the old name and rule here, and
+  // 고치기 again opened on them: saving that put the old goal back.
+  const [had, setHad] = useState(goal);
+  if (goal !== had) {
+    setHad(goal);
+    setNow(goal);
+  }
   useEffect(() => {
     // load sets state only after its fetch resolves; the rule cannot see that.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
-  }, [load]);
+  }, [load, goal]);
 
   const p = now.progress;
 
   // Taken in and not done by mind yet (lib/goals.ts): said so, not in red, and
   // the sheet and the list read again in a moment.
-  function took() {
-    setFailed(null);
-    setTaken(true);
+  function took(what: "day" | "goal") {
+    setTaken(what);
     onChanged(true);
-    window.setTimeout(() => void load().then(() => setTaken(false)), READ_AGAIN_MS);
+    window.setTimeout(() => void load().then(() => setTaken(null)), READ_AGAIN_MS);
   }
 
+  // Each press clears what the last one left: a red line that stayed through
+  // a later success read as that one having failed.
   async function act(change: { pause?: boolean; finish?: boolean }) {
+    setBusy(true);
+    setFailed(null);
     try {
       const got = await changeGoal(now.id, change);
-      if (!got) return took();
+      if (!got) return took("goal");
       setNow(got.goal);
       onChanged();
     } catch (e) {
       setFailed(failureText(e, "바꾸지 못했어요."));
+    } finally {
+      setBusy(false);
     }
   }
 
   async function remove() {
+    setBusy(true);
+    setFailed(null);
     try {
       const gone = await removeGoal(now.id);
       onChanged(gone === null);
       onClose();
     } catch (e) {
       setFailed(failureText(e, SAY.couldNotDelete));
+    } finally {
+      setBusy(false);
     }
   }
 
-  async function mark(day: string, check: DayCheck) {
+  /** A day said on the calendar: why it did not go, or null - done, or taken in. */
+  async function mark(day: string, check: DayCheck): Promise<string | null> {
     try {
       const got = await checkDay(now.id, day, check);
-      if (!got) return took();
-      setNow(got.goal);
-      setStats(got.stats);
-      onChanged();
+      if (!got) took("day");
+      else {
+        setNow(got.goal);
+        setStats(got.stats);
+        onChanged();
+      }
+      return null;
     } catch (e) {
-      setFailed(failureText(e, "기록하지 못했어요."));
+      return failureText(e, "기록하지 못했어요.");
     }
   }
+
+  const held = busy || taken === "goal";
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -146,70 +181,83 @@ function Body({ goal, onChanged, onClose, onEdit }: { goal: Goal; onChanged: (ta
       <div className="scrollbar-hairline min-h-0 flex-1 space-y-7 overflow-y-auto overscroll-contain px-4 pt-4 pb-8 sm:px-6">
         {now.note ? <p className="text-ui leading-relaxed text-dim">{now.note}</p> : null}
 
-        <section aria-label="달성률" className="flex items-end justify-between gap-4">
-          <div>
-            <p className="tnum text-display-lg leading-none font-semibold tracking-tight text-foreground">{percent(p.rate)}</p>
-            <p className="mt-1.5 text-aside text-dim">{p.rate === null ? "아직 지난 기록이 없어요" : "지금까지 달성률"}</p>
-          </div>
-          <dl className="tnum grid grid-cols-3 gap-5 text-right">
-            <Figure label="연속" value={`${p.streak}${p.unit}`} />
-            <Figure label="최고" value={`${p.best}${p.unit}`} />
-            <Figure label="해낸 날" value={`${p.times}일`} />
-          </dl>
-        </section>
+        <div>
+          {/* A read again that failed leaves the sheet as it was read, and says when that was. */}
+          {stats && unread ? <AsOf at={readAt} failed onRetry={() => void load()} className="mb-3" /> : null}
+          <section aria-label="달성률" className="flex items-end justify-between gap-4">
+            <div>
+              <p className="tnum text-display-lg leading-none font-semibold tracking-tight text-foreground">{percent(p.rate)}</p>
+              <p className="mt-1.5 text-aside text-dim">{p.rate === null ? "아직 지난 기록이 없어요" : "지금까지 달성률"}</p>
+            </div>
+            <dl className="tnum grid grid-cols-3 gap-5 text-right">
+              <Figure label="연속" value={`${p.streak}${p.unit}`} />
+              <Figure label="최고" value={`${p.best}${p.unit}`} />
+              <Figure label="해낸 날" value={`${p.times}일`} />
+            </dl>
+          </section>
+        </div>
 
+        {/* Being read, and not read, are not the same blank. */}
         {stats ? (
           <>
             <Bars goal={now} bars={stats.bars} />
-            <Month goal={now} stats={stats} onMark={mark} />
+            <Month goal={now} stats={stats} taken={taken === "day"} onMark={mark} />
             <Weekdays goal={now} stats={stats} />
           </>
-        ) : null}
+        ) : unread ? (
+          <Failed quiet onRetry={load}>
+            {unread}
+          </Failed>
+        ) : (
+          <GraphsPlaceholder />
+        )}
 
-        {taken ? <Taken /> : null}
-        {failed ? (
-          <p role="alert" className="text-aside text-reject">
-            {failed}
-          </p>
-        ) : null}
-
-        <div className="flex flex-wrap gap-2">
-          {now.status === "ended" ? (
-            <Button variant="soft" size="touch-sm" onClick={() => void act({ finish: false })}>
-              다시 시작
-            </Button>
-          ) : (
-            <>
-              <Button variant="soft" size="touch-sm" onClick={() => onEdit(now)}>
-                고치기
+        <div>
+          <div className="flex flex-wrap gap-2">
+            {now.status === "ended" ? (
+              <Button variant="soft" size="touch-sm" disabled={held} onClick={() => void act({ finish: false })}>
+                다시 시작
               </Button>
-              <Button variant="soft" size="touch-sm" onClick={() => void act({ pause: now.status !== "paused" })}>
-                {now.status === "paused" ? "다시 시작" : "잠깐 쉬기"}
-              </Button>
-              <Button variant="soft" size="touch-sm" onClick={() => void act({ finish: true })}>
-                끝내기
-              </Button>
-            </>
-          )}
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button variant="soft" size="touch-sm">
-                지우기
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>{now.title} 목표를 지울까요?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  지금까지의 기록도 함께 지워져요. 기록을 남기려면 지우지 말고 끝내기를 누르세요. 되돌릴 수 없어요.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>두기</AlertDialogCancel>
-                <AlertDialogAction onClick={() => void remove()}>기록까지 지우기</AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+            ) : (
+              <>
+                <Button variant="soft" size="touch-sm" disabled={held} onClick={() => onEdit(now)}>
+                  고치기
+                </Button>
+                <Button variant="soft" size="touch-sm" disabled={held} onClick={() => void act({ pause: now.status !== "paused" })}>
+                  {now.status === "paused" ? "다시 시작" : "잠깐 쉬기"}
+                </Button>
+                <Button variant="soft" size="touch-sm" disabled={held} onClick={() => void act({ finish: true })}>
+                  끝내기
+                </Button>
+              </>
+            )}
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="soft" size="touch-sm" disabled={held}>
+                  지우기
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>{now.title} 목표를 지울까요?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    지금까지의 기록도 함께 지워져요. 기록을 남기려면 지우지 말고 끝내기를 누르세요. 되돌릴 수 없어요.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>두기</AlertDialogCancel>
+                  <AlertDialogAction onClick={() => void remove()}>기록까지 지우기</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
+          {/* What was pressed here and did not go is said here, not above the graphs. */}
+          {failed ? (
+            <p role="alert" className="mt-2 text-aside text-reject">
+              {failed}
+            </p>
+          ) : null}
+          {taken === "goal" ? <Taken className="mt-2" /> : null}
         </div>
         {now.status === "active" || now.status === "paused" ? (
           <p className="text-aside leading-relaxed text-faint">쉬는 날은 달성률에 세지 않아요. 끝내면 기록은 남고 목록에서만 내려가요.</p>
@@ -219,11 +267,30 @@ function Body({ goal, onChanged, onClose, onEdit }: { goal: Goal; onChanged: (ta
   );
 }
 
-function Figure({ label, value }: { label: string; value: string }) {
+/**
+ * The graphs' place while the goal is read: quiet blocks of their size, so
+ * they arrive into it and the buttons under them do not drop when they come.
+ */
+function GraphsPlaceholder() {
   return (
     <div>
-      <dd className="text-title leading-none font-medium text-foreground">{value}</dd>
+      <p role="status" className="sr-only">
+        {SAY.loading}
+      </p>
+      <div aria-hidden className="space-y-7">
+        <div className="h-40 rounded-lg bg-well" />
+        <div className="h-80 rounded-lg bg-well" />
+      </div>
+    </div>
+  );
+}
+
+/** The name comes first, as a list of terms is read (연속, 12일), and is drawn under its figure. */
+function Figure({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex flex-col-reverse">
       <dt className="mt-1.5 text-meta text-faint">{label}</dt>
+      <dd className="text-title leading-none font-medium text-foreground">{value}</dd>
     </div>
   );
 }
@@ -289,15 +356,40 @@ function Bars({ goal, bars }: { goal: Goal; bars: Bar[] }) {
   );
 }
 
+/** How a day stands while it is being said: its mark, and of a goal of more than one a day how many times. */
+type Said = { mark?: Mark; count: number };
+
 /**
  * Each day of a month, the same marks as the register. A past day can be
  * changed here: tap it, and its two answers open under the grid.
  */
-function Month({ goal, stats, onMark }: { goal: Goal; stats: Stats; onMark: (day: string, check: DayCheck) => Promise<void> }) {
+function Month({
+  goal,
+  stats,
+  taken,
+  onMark,
+}: {
+  goal: Goal;
+  stats: Stats;
+  /** The last day said was taken in and not done by mind yet. */
+  taken: boolean;
+  onMark: (day: string, check: DayCheck) => Promise<string | null>;
+}) {
   const today = goal.progress.today;
   const n = perDayOf(goal);
   const [ym, setYm] = useState(() => ({ y: Number(today.slice(0, 4)), m: Number(today.slice(5, 7)) }));
   const [picked, setPicked] = useState<string | null>(null);
+  // Said at once, as on the register, and held until the sheet has the day
+  // from mind - its answer, or the read after it was only taken in. The
+  // answers wait meanwhile: on a slow line a second 했다 took the first back.
+  const [saying, setSaying] = useState<({ day: string } & Said) | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  const [shown, setShown] = useState(stats);
+  if (stats !== shown) {
+    setShown(stats);
+    setSaying(null);
+  }
+  const busy = saying !== null;
   const weeks = useMemo(() => monthWeeks(ym.y, ym.m), [ym]);
   const counted = (d: string) => d >= goal.start && d <= today && (!goal.end || d <= goal.end);
   const first = `${String(ym.y)}-${String(ym.m).padStart(2, "0")}-01`;
@@ -308,8 +400,23 @@ function Month({ goal, stats, onMark }: { goal: Goal; stats: Stats; onMark: (day
       return { y: Math.floor(at / 12), m: (at % 12) + 1 };
     });
   };
-  const said = picked ? stats.marks[picked] : undefined;
-  const count = picked ? (stats.counts?.[picked] ?? 0) : 0;
+  const markOf = (d: string) => (saying?.day === d ? saying.mark : stats.marks[d]);
+  const countOf = (d: string) => (saying?.day === d ? saying.count : (stats.counts?.[d] ?? 0));
+  const said = picked ? markOf(picked) : undefined;
+  const count = picked ? countOf(picked) : 0;
+  // Pressed while one is on its way, an answer does nothing; it is not
+  // disabled, so focus stays on it under the keyboard.
+  const tell = (check: DayCheck, next: Said) => {
+    if (!picked || busy) return;
+    const day = picked;
+    setFailed(null);
+    setSaying({ day, ...next });
+    void onMark(day, check).then((err) => {
+      if (!err) return;
+      setSaying(null);
+      setFailed(err);
+    });
+  };
   return (
     <section aria-label="달력">
       <div className="flex items-center justify-between">
@@ -340,8 +447,8 @@ function Month({ goal, stats, onMark }: { goal: Goal; stats: Stats; onMark: (day
                 <Day
                   key={d}
                   day={d}
-                  mark={stats.marks[d]}
-                  share={n > 1 ? (stats.counts?.[d] ?? 0) / n : 0}
+                  mark={markOf(d)}
+                  share={n > 1 ? countOf(d) / n : 0}
                   open={counted(d)}
                   today={d === today}
                   picked={d === picked}
@@ -380,18 +487,40 @@ function Month({ goal, stats, onMark }: { goal: Goal; stats: Stats; onMark: (day
           <span className="flex gap-1.5">
             <button
               type="button"
+              aria-pressed={said === "missed"}
+              aria-disabled={busy || undefined}
               className={choice(said === "missed")}
-              onClick={() => void onMark(picked, said === "missed" ? (count > 0 ? { count } : { mark: "" }) : { mark: "missed" })}
+              onClick={() => tell(said === "missed" ? (count > 0 ? { count } : { mark: "" }) : { mark: "missed" }, said === "missed" ? { count } : { mark: "missed", count })}
             >
               안 했다
             </button>
-            <button type="button" aria-label="하나 빼기" disabled={count === 0} className={choice(false)} onClick={() => void onMark(picked, { add: -1 })}>
+            <button
+              type="button"
+              aria-label="하나 빼기"
+              disabled={count === 0}
+              aria-disabled={busy || undefined}
+              className={choice(false)}
+              onClick={() => tell({ add: -1 }, { count: Math.max(count - 1, 0) })}
+            >
               <Minus aria-hidden className="size-3.5" />
             </button>
-            <button type="button" aria-label="한 번 더" disabled={said === "done"} className={choice(false)} onClick={() => void onMark(picked, { add: 1 })}>
+            <button
+              type="button"
+              aria-label="한 번 더"
+              disabled={said === "done"}
+              aria-disabled={busy || undefined}
+              className={choice(false)}
+              onClick={() => tell({ add: 1 }, count + 1 >= n ? { mark: "done", count: n } : { count: count + 1 })}
+            >
               <Plus aria-hidden className="size-3.5" />
             </button>
-            <button type="button" className={choice(said === "done")} onClick={() => void onMark(picked, said === "done" ? { mark: "" } : { mark: "done" })}>
+            <button
+              type="button"
+              aria-pressed={said === "done"}
+              aria-disabled={busy || undefined}
+              className={choice(said === "done")}
+              onClick={() => tell(said === "done" ? { mark: "" } : { mark: "done" }, said === "done" ? { count } : { mark: "done", count: n })}
+            >
               다 했다
             </button>
           </span>
@@ -400,14 +529,34 @@ function Month({ goal, stats, onMark }: { goal: Goal; stats: Stats; onMark: (day
         <div className="anim-settle mt-2 flex items-center justify-between gap-2 rounded-lg bg-well px-3 py-2">
           <span className="text-aside text-dim">{whenLabel(picked, today)}</span>
           <span className="flex gap-1.5">
-            <button type="button" className={choice(said === "missed")} onClick={() => void onMark(picked, { mark: said === "missed" ? "" : "missed" })}>
+            <button
+              type="button"
+              aria-pressed={said === "missed"}
+              aria-disabled={busy || undefined}
+              className={choice(said === "missed")}
+              onClick={() => tell({ mark: said === "missed" ? "" : "missed" }, { mark: said === "missed" ? undefined : "missed", count: 0 })}
+            >
               안 했다
             </button>
-            <button type="button" className={choice(said === "done")} onClick={() => void onMark(picked, { mark: said === "done" ? "" : "done" })}>
+            <button
+              type="button"
+              aria-pressed={said === "done"}
+              aria-disabled={busy || undefined}
+              className={choice(said === "done")}
+              onClick={() => tell({ mark: said === "done" ? "" : "done" }, { mark: said === "done" ? undefined : "done", count: 0 })}
+            >
               했다
             </button>
           </span>
         </div>
+      ) : null}
+      {/* What became of the day said: right under its answers, gone with the next press. */}
+      {failed ? (
+        <p role="alert" className="mt-2 text-aside text-reject">
+          {failed}
+        </p>
+      ) : taken ? (
+        <Taken className="mt-2" />
       ) : null}
     </section>
   );
@@ -418,7 +567,7 @@ const stepper =
 
 const choice = (on: boolean) =>
   cn(
-    "flex min-h-10 min-w-10 items-center justify-center rounded-lg border px-3 text-ui focus-ring disabled:opacity-35 mouse:min-h-8 mouse:min-w-8",
+    "flex min-h-10 min-w-10 items-center justify-center rounded-lg border px-3 text-ui focus-ring disabled:opacity-35 aria-disabled:opacity-35 mouse:min-h-8 mouse:min-w-8",
     on ? "border-edge bg-glass-raised text-foreground" : "border-edge-soft text-dim hover:bg-glass",
   );
 

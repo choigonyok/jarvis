@@ -445,7 +445,22 @@ function group(events: JobEvent[]): RunGroup[] {
       last.events.push(e);
       last.at = e.at;
     } else {
-      out.push({ key: `${e.runId ?? "x"}-${e.id}`, runId: e.runId, at: e.at, events: [e] });
+      out.push({ key: "", runId: e.runId, at: e.at, events: [e] });
+    }
+  }
+  // A live run grows on top, so a group keyed by its newest line was a new
+  // group at every step: what was open in it closed (a photo full screen) and
+  // what was folded opened again. A run keys by its id, other lines by their
+  // oldest; an instruction given mid-run splits the run, and the part above
+  // it keys by its own oldest line.
+  const seen = new Set<number>();
+  for (let i = out.length - 1; i >= 0; i--) {
+    const g = out[i];
+    if (g.runId && !seen.has(g.runId)) {
+      seen.add(g.runId);
+      g.key = `run-${g.runId}`;
+    } else {
+      g.key = `${g.runId ?? "x"}-${g.events[g.events.length - 1].id}`;
     }
   }
   return out;

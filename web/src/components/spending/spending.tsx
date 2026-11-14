@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, Plus, Search } from "lucide-react";
+import { toast } from "sonner";
 import { ClearChip } from "@/components/ui/badge";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { Failed } from "@/components/shell/failed";
+import { UNDO_TOASTER } from "@/components/shell/toasts";
 import { Header, PageTop } from "@/components/shell/header";
 import { TabBar } from "@/components/shell/tab-bar";
 import { StandingBar } from "@/components/shell/standing-bar";
@@ -79,7 +81,6 @@ export function Spending() {
   const [draft, setDraft] = useKept<Draft | null>("spending:draft", null);
   const [budgetOpen, setBudgetOpen] = useState(false);
   const [unparsedOpen, setUnparsedOpen] = useState(false);
-  const [note, setNote] = useState<string | null>(null);
 
   const load = useCallback(
     async (m: string) => {
@@ -124,18 +125,16 @@ export function Spending() {
     return () => window.clearInterval(id);
   }, [load, month]);
 
-  useEffect(() => {
-    if (!note) return;
-    const id = window.setTimeout(() => setNote(null), 3500);
-    return () => window.clearTimeout(id);
-  }, [note]);
-
+  // What a save came to is said where the app's other toasts are, above the
+  // tab bar (shell/toasts.tsx), one at a time. A pill of its own at the foot
+  // of the page sat under the tab bar on a phone, and with it the only word
+  // that a merchant's other payments had been changed too.
   const done = (message: string) => {
     setOpen(null);
     setDraft(null);
     setBudgetOpen(false);
     setUnparsedOpen(false);
-    setNote(message);
+    toast.custom(() => <Note text={message} />, { id: "spending-note", toasterId: UNDO_TOASTER, duration: NOTE_MS });
     void load(month);
   };
 
@@ -189,6 +188,10 @@ export function Spending() {
 
   const current = month === thisMonth();
   const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
+  // The arrows count from the month on its way, while it is read: from the
+  // month on screen, ‹ pressed again asked for that same month again, and
+  // three months back took three waits. The name still waits for its figures.
+  const from = asked && loading ? asked : month;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -202,7 +205,7 @@ export function Spending() {
           <div className="-ms-2 mb-3 flex items-center gap-1">
             <button
               type="button"
-              onClick={() => goMonth(shiftMonth(month, -1))}
+              onClick={() => goMonth(shiftMonth(from, -1))}
               aria-label="지난달"
               className="tap flex items-center justify-center rounded-lg text-faint transition-colors hover:text-dim focus-ring"
             >
@@ -213,8 +216,8 @@ export function Spending() {
             </h2>
             <button
               type="button"
-              onClick={() => goMonth(shiftMonth(month, 1))}
-              disabled={current}
+              onClick={() => goMonth(shiftMonth(from, 1))}
+              disabled={from === thisMonth()}
               aria-label="다음 달"
               className="tap flex items-center justify-center rounded-lg text-faint transition-colors hover:text-dim focus-ring disabled:opacity-30"
             >
@@ -362,12 +365,6 @@ export function Spending() {
             <Placeholder />
           ) : null}
         </div>
-
-        {note ? (
-          <div className="pointer-events-none sticky bottom-3 flex justify-center px-4" role="status">
-            <p className="rounded-full bg-popover px-4 py-2 text-aside text-foreground shadow-lg">{note}</p>
-          </div>
-        ) : null}
       </main>
 
       <TabBar pending={waiting.length} />
@@ -397,6 +394,17 @@ export function Spending() {
           />
         </>
       ) : null}
+    </div>
+  );
+}
+
+const NOTE_MS = 3500;
+
+/** What was saved, on the glass the undo line takes (shell/undo.tsx), with nothing to press. */
+function Note({ text }: { text: string }) {
+  return (
+    <div role="status" className="liquid-glass flex min-h-13 w-full items-center rounded-2xl px-3.5 py-2 text-ui text-ink">
+      {text}
     </div>
   );
 }

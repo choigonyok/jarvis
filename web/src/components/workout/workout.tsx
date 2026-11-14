@@ -3,7 +3,7 @@
 import { useKept } from "@/lib/keep";
 import { useEffect, useMemo, useState } from "react";
 import { Minus, Plus, Trash2, TrendingUp, X } from "lucide-react";
-import { Unsent } from "@/components/workout/dock";
+import { Stepper, Unsent } from "@/components/workout/dock";
 import { ExerciseHistory } from "@/components/workout/exercise-history";
 import { Lifts } from "@/components/workout/lifts";
 import { LiveSession } from "@/components/workout/live-session";
@@ -18,6 +18,8 @@ import { TabBar } from "@/components/shell/tab-bar";
 import { ScreenMenu } from "@/components/shell/screen-menu";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { useUndo } from "@/components/shell/undo";
+import { Panel } from "@/components/ui/bottom-sheet";
+import { Button } from "@/components/ui/button";
 import { Pager } from "@/components/ui/pager";
 import { isoDate } from "@/lib/month";
 import { usePaged } from "@/lib/paging";
@@ -40,8 +42,11 @@ import {
   streak,
   volumeByGroup,
   weeklyCounts,
+  weightStep,
   volumeOf,
   type Session,
+  type SetRef,
+  type WorkoutSet,
 } from "@/lib/workout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { dayOf, monthDay } from "@/lib/when";
@@ -383,6 +388,10 @@ export function Workout() {
                             all={book.sessions}
                             onLook={setLooking}
                             onRemove={() => removeSession(session)}
+                            onPatchSets={(exerciseId, fn) => w.patchSets(session.id, exerciseId, fn)}
+                            onUndoable={offerUndo}
+                            unsent={unsent}
+                            onResend={w.reload}
                           />
                         ))}
                       </div>
@@ -467,20 +476,65 @@ function ViewTabs() {
   );
 }
 
+/** 2세트, or 워밍업 1: a set's place among its own kind, as a running session counts it. */
+function setName(sets: WorkoutSet[], index: number): string {
+  const set = sets[index];
+  const nth = sets.slice(0, index + 1).filter((s) => Boolean(s.warmup) === Boolean(set?.warmup)).length;
+  return set?.warmup ? `워밍업 ${nth}` : `${nth}세트`;
+}
+
 /** One finished session: what was lifted, set by set, against last time. */
 function SessionLog({
   session,
   all,
   onLook,
   onRemove,
+  onPatchSets,
+  onUndoable,
+  unsent,
+  onResend,
 }: {
   session: Session;
   all: Session[];
   onLook: (name: string) => void;
   onRemove: () => void;
+  onPatchSets: (exerciseId: string, fn: (sets: WorkoutSet[]) => WorkoutSet[]) => void;
+  onUndoable: (label: string, restore: () => void) => void;
+  unsent: boolean;
+  onResend: () => void;
 }) {
   // What this session beat, against the ones before it.
   const records = sessionRecords(session, all);
+  // A set typed wrong is put right here, through the save a running session
+  // uses. The day could only be thrown away whole, and until then its typo was
+  // 최고 기록, 지난번 and the next session's numbers - all read from the log.
+  // A mode, as on a running session's movement, so the log reads as one the
+  // rest of the time.
+  const [editing, setEditing] = useState(false);
+  const [picked, setPicked] = useState<SetRef | null>(null);
+  const pickedExercise = picked ? session.exercises.find((e) => e.id === picked.exerciseId) : undefined;
+  const pickedSet = picked ? pickedExercise?.sets[picked.index] : undefined;
+
+  function setField(ref: SetRef, field: "weight" | "reps", value: number) {
+    onPatchSets(ref.exerciseId, (c) => c.map((s, j) => (j === ref.index ? { ...s, [field]: value } : s)));
+  }
+
+  // As on a running session: gone at once, with 되돌리기 for five seconds.
+  function removeSet(ref: SetRef) {
+    const exercise = session.exercises.find((e) => e.id === ref.exerciseId);
+    const set = exercise?.sets[ref.index];
+    if (!exercise || !set) return;
+    setPicked(null);
+    onPatchSets(ref.exerciseId, (c) => c.filter((_, j) => j !== ref.index));
+    onUndoable(`${exercise.name} 세트를 지웠어요`, () =>
+      onPatchSets(ref.exerciseId, (c) => {
+        const out = [...c];
+        out.splice(Math.min(ref.index, out.length), 0, set);
+        return out;
+      }),
+    );
+  }
+
   return (
     <article
       aria-label={`${dayLabel(session.date)} ${session.routineName ?? "운동"}`}
@@ -490,6 +544,17 @@ function SessionLog({
           <span className="text-dim">{dayLabel(session.date)}</span>
           <span className="ms-2">{session.routineName ?? "운동"}</span>
         </h3>
+        <button
+          type="button"
+          onClick={() => setEditing(!editing)}
+          aria-pressed={editing}
+          className={cn(
+            "tap shrink-0 rounded-lg px-3 text-aside transition-colors focus-ring",
+            editing ? "bg-glass-raised text-foreground" : "text-faint hover:text-dim",
+          )}
+        >
+          {editing ? "마침" : "편집"}
+        </button>
         <button
           type="button"
           onClick={onRemove}
@@ -537,17 +602,40 @@ function SessionLog({
                   >
                     {exercise.name}
                   </button>
-                  <span className="tnum min-w-0 truncate text-aside text-dim">
-                    {working.map((s, i) => (
-                      <span key={i} className="me-2.5">
-                        {setLabel(s)}
-                      </span>
-                    ))}
-                    {warm ? (
-                      <span className="text-faint">워밍업 {warm}</span>
-                    ) : null}
-                  </span>
+                  {editing ? null : (
+                    <span className="tnum min-w-0 truncate text-aside text-dim">
+                      {working.map((s, i) => (
+                        <span key={i} className="me-2.5">
+                          {setLabel(s)}
+                        </span>
+                      ))}
+                      {warm ? (
+                        <span className="text-faint">워밍업 {warm}</span>
+                      ) : null}
+                    </span>
+                  )}
                 </div>
+                {editing ? (
+                  // Every set lifted, warm-ups too: they are last time's ramp.
+                  <ul aria-label={`${exercise.name} 세트`} className="mt-1.5 flex flex-wrap gap-1.5">
+                    {exercise.sets.map((s, i) =>
+                      s.done ? (
+                        <li key={i}>
+                          <button
+                            type="button"
+                            onClick={() => setPicked({ exerciseId: exercise.id, index: i })}
+                            aria-haspopup="dialog"
+                            aria-label={`${setName(exercise.sets, i)} ${load(s.weight)}kg ${s.reps}회 고치기`}
+                            className="tnum flex min-h-11 items-center gap-1 rounded-lg bg-glass px-3 text-aside text-ink transition-colors hover:bg-glass-raised focus-ring mouse:min-h-8"
+                          >
+                            {s.warmup ? <span className="text-faint">W</span> : null}
+                            {setLabel(s)}
+                          </button>
+                        </li>
+                      ) : null,
+                    )}
+                  </ul>
+                ) : null}
                 {volumeOf(exercise) > 0 ? (
                   <VolumeBar
                     volume={volumeOf(exercise)}
@@ -563,6 +651,49 @@ function SessionLog({
             );
           })}
       </ul>
+
+      {/* The dock's steppers, each change saved as it is made - and kept on
+          the phone until it is, as everything logged is (lib/use-workout.ts). */}
+      <Panel
+        open={pickedSet !== undefined}
+        onOpenChange={(open) => {
+          if (!open) setPicked(null);
+        }}
+        title={picked && pickedExercise ? `${pickedExercise.name} ${setName(pickedExercise.sets, picked.index)}` : ""}
+        description={dayLabel(session.date)}
+      >
+        {picked && pickedExercise && pickedSet ? (
+          <>
+            {unsent ? <Unsent onRetry={onResend} className="mb-3" /> : null}
+            <div className="grid grid-cols-2 gap-2">
+              <Stepper
+                label="무게"
+                unit="kg"
+                decimal
+                value={pickedSet.weight}
+                step={weightStep(pickedExercise.name)}
+                onChange={(v) => setField(picked, "weight", v)}
+              />
+              <Stepper
+                label="횟수"
+                unit="회"
+                value={pickedSet.reps}
+                step={1}
+                onChange={(v) => setField(picked, "reps", v)}
+              />
+            </div>
+            <p className="mt-2.5 text-aside leading-relaxed text-dim">
+              바꾸면 바로 저장되고, 최고 기록과 지난번에도 반영돼요.
+            </p>
+            <div className="mt-5 flex justify-end">
+              <Button variant="discard" size="touch-sm" onClick={() => removeSet(picked)}>
+                <Trash2 aria-hidden />
+                이 세트 지우기
+              </Button>
+            </div>
+          </>
+        ) : null}
+      </Panel>
     </article>
   );
 }

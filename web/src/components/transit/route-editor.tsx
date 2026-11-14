@@ -13,6 +13,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Failed } from "@/components/shell/failed";
 import { BottomSheetContent, BottomSheetHeader, BottomSheetTitle } from "@/components/ui/bottom-sheet";
 import { Button } from "@/components/ui/button";
 import { Command, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
@@ -156,6 +157,9 @@ function Form({
   const [stops, setStops] = useState<Stop[] | null>(null);
   const [q, setQ] = useState("");
   const [choices, setChoices] = useState<Choice[] | null>(null);
+  // A place's lines that could not be read: all of them - not "no lines
+  // here" - or some stops' (a side of the road missing from the list).
+  const [unread, setUnread] = useState<{ why: string; all: boolean } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [missed, setMissed] = useState<string | null>(null);
@@ -209,15 +213,16 @@ function Form({
 
   async function loadChoices(p: Place) {
     setChoices(null);
+    setUnread(null);
     setBusy("lines");
     setError(null);
     const got = await Promise.allSettled(p.stops.map((s) => findLines(s).then((ls) => ls.map((l) => ({ stop: s, line: l })))));
     const rows = got.flatMap((g) => (g.status === "fulfilled" ? g.value : []));
-    if (!rows.length) {
-      const failed = got.find((g): g is PromiseRejectedResult => g.status === "rejected");
-      setError(failureText(failed?.reason, "노선을 불러오지 못했어요."));
-    }
-    setChoices(choicesOf(rows));
+    const failed = got.find((g): g is PromiseRejectedResult => g.status === "rejected");
+    if (failed) setUnread({ why: failureText(failed.reason, "노선을 불러오지 못했어요."), all: !rows.length });
+    // Nothing read leaves nothing to choose from, so the line's 바꾸기 reads
+    // again; an empty list stood for it, and the editor had no way on.
+    setChoices(failed && !rows.length ? null : choicesOf(rows));
     setBusy(null);
   }
 
@@ -297,12 +302,19 @@ function Form({
                   </InputGroupAddon>
                 </CommandInput>
               </div>
-              {busy === "stops" ? <p className="mt-3 text-faint">찾는 중…</p> : null}
+              {/* What a search came to is said as it comes, to one who cannot see the list arrive. */}
+              {busy === "stops" ? (
+                <p role="status" className="mt-3 text-faint">
+                  찾는 중…
+                </p>
+              ) : null}
               {stops ? (
                 stops.length ? (
                   <>
                     {stops.every((s) => s.like) ? (
-                      <p className="mt-3 text-aside leading-[1.55] break-keep text-dim">그 이름의 정류장은 없어서 이름의 일부로 찾았어요.</p>
+                      <p role="status" className="mt-3 text-aside leading-[1.55] break-keep text-dim">
+                        그 이름의 정류장은 없어서 이름의 일부로 찾았어요.
+                      </p>
                     ) : null}
                     <CommandList className="mt-2 *:divide-y *:divide-edge-soft">
                       {places(stops).slice(0, 40).map((p) => (
@@ -313,7 +325,9 @@ function Form({
                     </CommandList>
                   </>
                 ) : (
-                  <p className="mt-3 text-dim">찾은 정류장이 없어요. 다른 이름으로 찾아 보세요.</p>
+                  <p role="status" className="mt-3 text-dim">
+                    찾은 정류장이 없어요. 다른 이름으로 찾아 보세요.
+                  </p>
                 )
               ) : null}
               {missed ? <p className="mt-2 text-aside leading-[1.55] break-keep text-dim">{missed}</p> : null}
@@ -334,29 +348,60 @@ function Form({
               <span className="shrink-0 text-body font-medium text-foreground">{line.name}</span>
               <span className="min-w-0 truncate text-dim">{line.toward}</span>
             </Picked>
-          ) : busy === "lines" ? (
-            <p className="text-faint">노선을 불러오는 중…</p>
-          ) : choices && choices.length ? (
+          ) : (
             <>
-              {sides(place) > 1 ? (
-                <p className="mb-1 text-aside leading-[1.55] break-keep text-faint">
-                  이름이 같은 정류장 {sides(place)}곳의 노선이에요. 타는 방향을 고르면 그쪽 정류장으로 정해져요 - 끝의 번호는 정류장 표지판의 번호예요.
+              {busy === "lines" ? (
+                <p role="status" className="text-faint">
+                  노선을 불러오는 중…
+                </p>
+              ) : unread?.all ? (
+                <Failed quiet onRetry={() => loadChoices(place)}>
+                  {unread.why}
+                </Failed>
+              ) : choices && choices.length ? (
+                <>
+                  {sides(place) > 1 ? (
+                    <p role="status" className="mb-1 text-aside leading-[1.55] break-keep text-faint">
+                      이름이 같은 정류장 {sides(place)}곳의 노선이에요. 타는 방향을 고르면 그쪽 정류장으로 정해져요 - 끝의 번호는 정류장 표지판의 번호예요.
+                    </p>
+                  ) : null}
+                  <ul className="divide-y divide-edge-soft">
+                    {choices.map((c) => (
+                      <li key={`${c.stop.region ?? ""}:${c.stop.id}:${c.line.id}:${c.line.order ?? ""}`}>
+                        <button type="button" onClick={() => choose(c)} className="flex w-full items-baseline gap-2 py-2.5 text-left hover:bg-glass focus-ring">
+                          <span className="shrink-0 text-body font-medium text-foreground">{c.line.name}</span>
+                          <span className="min-w-0 flex-1 truncate text-dim">{c.line.toward}</span>
+                          {sides(place) > 1 && c.stop.no ? <span className="tnum shrink-0 text-aside text-faint">{c.stop.no}</span> : null}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                  {unread ? (
+                    <Failed quiet onRetry={() => loadChoices(place)} className="mt-2">
+                      일부 정류장의 노선은 불러오지 못했어요.
+                    </Failed>
+                  ) : null}
+                </>
+              ) : choices ? (
+                <p role="status" className="text-dim">
+                  이 정류장을 지나는 노선이 없어요. 다른 정류장을 골라 보세요.
                 </p>
               ) : null}
-              <ul className="divide-y divide-edge-soft">
-                {choices.map((c) => (
-                  <li key={`${c.stop.region ?? ""}:${c.stop.id}:${c.line.id}:${c.line.order ?? ""}`}>
-                    <button type="button" onClick={() => choose(c)} className="flex w-full items-baseline gap-2 py-2.5 text-left hover:bg-glass focus-ring">
-                      <span className="shrink-0 text-body font-medium text-foreground">{c.line.name}</span>
-                      <span className="min-w-0 flex-1 truncate text-dim">{c.line.toward}</span>
-                      {sides(place) > 1 && c.stop.no ? <span className="tnum shrink-0 text-aside text-faint">{c.stop.no}</span> : null}
-                    </button>
-                  </li>
-                ))}
-              </ul>
+              {/* Changing a route's line, the one it had stays a press away: the
+                  lines may not come, and 경로 저장 waits on one. */}
+              {route && place.stops.some((s) => s.kind === route.stop.kind && s.region === route.stop.region && s.id === route.stop.id) ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStop(route.stop);
+                    setLine(route.line);
+                  }}
+                  className="tap-y mt-3 text-aside text-dim underline-offset-2 hover:text-foreground hover:underline focus-ring"
+                >
+                  원래 노선으로
+                </button>
+              ) : null}
             </>
-          ) : (
-            <p className="text-dim">이 정류장의 노선을 받지 못했어요.</p>
           )}
         </Step>
       ) : null}

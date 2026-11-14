@@ -1,7 +1,7 @@
 "use client";
 
 import { useKept } from "@/lib/keep";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Check, Minus, Plus } from "lucide-react";
 import { GoalForm } from "@/components/goals/goal-form";
 import { GoalSheet } from "@/components/goals/goal-sheet";
@@ -173,7 +173,12 @@ export function Goals() {
             setEditing(null);
           }
         }}
-        onSaved={(taken) => (taken ? took() : void load())}
+        onSaved={(taken, saved) => {
+          if (taken) return took();
+          // Changed from its sheet, the goal is drawn new there at once (goal-sheet.tsx).
+          if (saved) replace(saved);
+          void load();
+        }}
       />
     </div>
   );
@@ -224,6 +229,9 @@ function WeekHead({ today }: { today: string }) {
 /** How a day stands while it is being said: its mark, and of a goal of more than one a day how many times. */
 type DayState = { mark?: Mark; count: number };
 
+/** An answer held while a word is on its way: a disabled one's look, and it keeps focus (Row). */
+const held = "aria-disabled:pointer-events-none aria-disabled:opacity-50";
+
 /**
  * One goal: its name and how it stands, its week, and under them the answer for
  * the day picked - today, until another day's cell is tapped. A day is changed
@@ -252,7 +260,26 @@ function Row({ goal, onOpen, onChanged, onTaken }: { goal: Goal; onOpen: () => v
   const quietToday = !picked && !p.asks && goal.cadence !== "weekly" && goal.cadence !== "monthly";
   const when = whenLabel(day, p.today);
 
+  // Answered from the keys, the pressed answer leaves the page as the row
+  // takes its next look (했다 → 했어요 · 되돌리기), and focus went with it to
+  // the top of the page: each answer began again from the header. It is put
+  // on the row's answer standing there now. The answers are held while a word
+  // is on its way, not disabled, so that one can take it at once.
+  const row = useRef<HTMLLIElement>(null);
+  const refocus = useRef(false);
+  useLayoutEffect(() => {
+    if (!refocus.current) return;
+    const at = document.activeElement;
+    if (!at || at === document.body) {
+      const to = row.current?.querySelector<HTMLElement>("[data-lands]") ?? row.current?.querySelector<HTMLElement>("button");
+      to?.focus({ preventScroll: true });
+    }
+    if (saying === null) refocus.current = false;
+  });
+
   async function say(check: DayCheck, next: DayState) {
+    if (busy) return;
+    refocus.current = row.current?.contains(document.activeElement) ?? false;
     setFailed(null);
     setSaying(next);
     try {
@@ -277,7 +304,7 @@ function Row({ goal, onOpen, onChanged, onTaken }: { goal: Goal; onOpen: () => v
   const unsay = () => (many && now.count > 0 ? say({ count: now.count }, { count: now.count }) : say({ mark: "" }, { count: 0 }));
 
   return (
-    <li data-focus={`goal:${goal.id}`} className="border-b border-edge-soft py-3">
+    <li ref={row} data-focus={`goal:${goal.id}`} className="border-b border-edge-soft py-3">
       <div className="flex items-start justify-between gap-3">
         <button
           type="button"
@@ -309,11 +336,14 @@ function Row({ goal, onOpen, onChanged, onTaken }: { goal: Goal; onOpen: () => v
       {quietToday ? null : now.mark ? (
         <p className="anim-settle mt-1.5 flex min-h-9 items-center gap-1.5 text-aside text-dim">
           {now.mark === "done" ? <Check aria-hidden className="size-3.5 text-approve" /> : <Minus aria-hidden className="size-3.5 text-reject" />}
-          {when}{" "}
-          {now.mark === "done" ? (many ? `${n}번 다 했어요` : "했어요") : now.count > 0 ? `안 했어요 (${tally(now.count, n)})` : "안 했어요"}
+          <span role="status">
+            {when}{" "}
+            {now.mark === "done" ? (many ? `${n}번 다 했어요` : "했어요") : now.count > 0 ? `안 했어요 (${tally(now.count, n)})` : "안 했어요"}
+          </span>
           <button
             type="button"
-            disabled={busy}
+            data-lands
+            aria-disabled={busy || undefined}
             onClick={() => void (many && now.mark === "done" ? fewer() : unsay())}
             className="tap-y ml-1 text-aside text-faint underline-offset-2 hover:text-dim hover:underline focus-ring"
           >
@@ -325,13 +355,13 @@ function Row({ goal, onOpen, onChanged, onTaken }: { goal: Goal; onOpen: () => v
         <div className="mt-2 sm:flex sm:items-center sm:gap-3">
           {many ? (
             <p className="mb-1.5 flex min-h-6 items-center gap-1.5 text-aside text-dim sm:mb-0">
-              <span className="tnum">
+              <span role="status" className="tnum">
                 {when} {tally(now.count, n)}
               </span>
               {now.count > 0 ? (
                 <button
                   type="button"
-                  disabled={busy}
+                  aria-disabled={busy || undefined}
                   onClick={() => void fewer()}
                   className="tap-y ml-1 text-aside text-faint underline-offset-2 hover:text-dim hover:underline focus-ring"
                 >
@@ -347,16 +377,19 @@ function Row({ goal, onOpen, onChanged, onTaken }: { goal: Goal; onOpen: () => v
             <Button
               variant="reject"
               size="pair-sm"
-              disabled={busy}
+              aria-disabled={busy || undefined}
               onClick={() => void say({ mark: "missed" }, { mark: "missed", count: now.count })}
+              className={held}
             >
               안 했다
             </Button>
             <Button
               variant="approve"
               size="pair-sm"
-              disabled={busy}
+              data-lands
+              aria-disabled={busy || undefined}
               onClick={() => void (many ? once() : say({ mark: "done" }, { mark: "done", count: 0 }))}
+              className={held}
             >
               {many ? "한 번 했다" : "했다"}
             </Button>

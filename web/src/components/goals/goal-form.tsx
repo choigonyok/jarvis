@@ -54,8 +54,8 @@ export function GoalForm({
   open: boolean;
   goal: Goal | null;
   onOpenChange: (open: boolean) => void;
-  /** taken: in, and not done by mind yet (lib/goals.ts). */
-  onSaved: (taken: boolean) => void;
+  /** taken: in, and not done by mind yet (lib/goals.ts); else the goal as mind saved it. */
+  onSaved: (taken: boolean, saved?: Goal) => void;
 }) {
   // Once something is entered, closing by hand - a tap outside, a pull down,
   // going back - asks before it throws that away (ui/sheet.tsx).
@@ -77,7 +77,7 @@ function Form({
 }: {
   goal: Goal | null;
   onClose: () => void;
-  onSaved: (taken: boolean) => void;
+  onSaved: (taken: boolean, saved?: Goal) => void;
   /** Whether anything differs from what it opened with. */
   onEntered: (entered: boolean) => void;
 }) {
@@ -122,7 +122,7 @@ function Form({
       // Taken in and not done yet, it is in all the same: the form goes as on
       // saving, and the list says so - not the button back for a second goal.
       const saved = goal ? await changeGoal(goal.id, draft) : await makeGoal(draft);
-      onSaved(saved === null);
+      onSaved(saved === null, saved?.goal);
       onClose();
     } catch (e) {
       setFailed(failureText(e, SAY.couldNotSave));
