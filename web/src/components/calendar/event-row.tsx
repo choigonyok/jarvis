@@ -137,11 +137,16 @@ export function GhostRow({
   // (lib/decide.ts) - never the pair again while it is.
   const [busy, setBusy] = useState(false);
   const [sentAs, setSentAs] = useState(() => sentOn(ghost.proposal.id));
+  // A decision that did not go is said under the pair it came from, as the
+  // card says it; the pair alone coming back read as a press that missed.
+  const [refusal, setRefusal] = useState<string | null>(null);
   async function decide(d: Decision, why?: string) {
+    setRefusal(null);
     setBusy(true);
     const failed = await onDecide(d, why);
     setBusy(false);
-    if (!failed) setSentAs(sentOn(ghost.proposal.id));
+    if (failed) setRefusal(failed);
+    else setSentAs(sentOn(ghost.proposal.id));
   }
 
   return (
@@ -174,7 +179,13 @@ export function GhostRow({
         <Sent decision={sentAs} className="mt-1" />
       ) : asking ? (
         <div className="mt-2.5">
-          <RejectForm onCancel={() => setAsking(false)} onReject={(why) => void decide("rejected", why)} />
+          <RejectForm
+            onCancel={() => setAsking(false)}
+            onReject={(why) => {
+              setAsking(false);
+              void decide("rejected", why);
+            }}
+          />
         </div>
       ) : (
         <div className="mt-2.5 grid grid-cols-2 gap-2 sm:mt-2 sm:flex sm:items-center sm:justify-end sm:gap-1.5">
@@ -194,6 +205,11 @@ export function GhostRow({
           </Button>
         </div>
       )}
+      {refusal ? (
+        <p role="alert" className="mt-2 px-1 text-aside text-reject">
+          {refusal}
+        </p>
+      ) : null}
     </div>
   );
 }

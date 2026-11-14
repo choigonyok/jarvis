@@ -13,7 +13,7 @@ import type { CalendarEvent } from "@/lib/thread";
  * Finding an entry by its words, a year either way of today - as far as the
  * shared calendar is read. A repeating entry is found once, at its next day.
  */
-export function FindSheet({ open, onOpenChange, onFound }: { open: boolean; onOpenChange: (open: boolean) => void; onFound: (date: string) => void }) {
+export function FindSheet({ open, onOpenChange, onFound }: { open: boolean; onOpenChange: (open: boolean) => void; onFound: (event: CalendarEvent) => void }) {
   const [query, setQuery] = useState("");
   // A sheet opened again starts empty.
   const [wasOpen, setWasOpen] = useState(open);
@@ -71,7 +71,7 @@ export function FindSheet({ open, onOpenChange, onFound }: { open: boolean; onOp
                 <button
                   type="button"
                   onClick={() => {
-                    onFound(e.date);
+                    onFound(e);
                     onOpenChange(false);
                   }}
                   className="-mx-2 flex w-[calc(100%+1rem)] items-start gap-3 rounded-lg px-2 py-3 text-left transition-colors hover:bg-glass focus-ring"

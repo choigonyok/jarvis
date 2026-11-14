@@ -67,7 +67,15 @@ function Form({
     start !== (event.start ?? "") ||
     end !== (event.end ?? "") ||
     memo.trim() !== (event.memo ?? "");
-  const ready = title.trim() !== "" && /^\d{4}-\d{2}-\d{2}$/.test(date) && (!end || Boolean(start)) && (!endDate || endDate >= date);
+  // The same check as the operator's form (entry-sheet.tsx), said the same way.
+  const lastEarly = endDate !== "" && endDate < date;
+  const endEarly = !(endDate > date) && start !== "" && end !== "" && end < start;
+  const early = lastEarly
+    ? "마지막 날이 날짜보다 일러요."
+    : endEarly
+      ? "끝이 시작보다 일러요. 다음 날까지면 마지막 날을 바꿔 주세요."
+      : null;
+  const ready = title.trim() !== "" && /^\d{4}-\d{2}-\d{2}$/.test(date) && (!end || Boolean(start)) && !early;
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -101,7 +109,7 @@ function Form({
         </Field>
         <Field>
           <FieldLabel htmlFor={`${id}-end-date`}>마지막 날 (여러 날일 때)</FieldLabel>
-          <Input id={`${id}-end-date`} surface="glass" type="date" min={date} value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+          <Input id={`${id}-end-date`} surface="glass" type="date" min={date} value={endDate} aria-invalid={lastEarly || undefined} onChange={(e) => setEndDate(e.target.value)} />
         </Field>
       </div>
       <div className="grid grid-cols-2 gap-2">
@@ -111,13 +119,18 @@ function Form({
         </Field>
         <Field>
           <FieldLabel htmlFor={`${id}-end`}>끝</FieldLabel>
-          <Input id={`${id}-end`} surface="glass" type="time" value={end} disabled={!start} onChange={(e) => setEnd(e.target.value)} />
+          <Input id={`${id}-end`} surface="glass" type="time" value={end} disabled={!start} aria-invalid={endEarly || undefined} onChange={(e) => setEnd(e.target.value)} />
         </Field>
       </div>
       <Field>
         <FieldLabel htmlFor={`${id}-memo`}>메모 · 장소는 첫 줄에</FieldLabel>
         <Textarea id={`${id}-memo`} surface="glass" rows={3} maxLength={500} value={memo} onChange={(e) => setMemo(e.target.value)} className="min-h-[5.5rem]" />
       </Field>
+      {early ? (
+        <p role="alert" className="text-aside text-reject">
+          {early}
+        </p>
+      ) : null}
       {error ? (
         <p role="alert" className="text-aside text-reject">
           {error}

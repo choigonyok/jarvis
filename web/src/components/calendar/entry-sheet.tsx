@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Copy } from "lucide-react";
 import { PhotoTiles, PickPhotos, useUploads } from "@/components/couple/photos";
 import { Segment } from "@/components/couple/segment";
@@ -12,7 +12,7 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { SwitchRow } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { REMINDERS, REPEATS, between, type DayPhoto } from "@/lib/couple";
-import { addDays, cursorOf, monthCells, shiftMonth, type Cursor } from "@/lib/month";
+import { addDays, cursorOf, monthCells, pad, shiftMonth, type Cursor } from "@/lib/month";
 import type { CalendarEvent } from "@/lib/thread";
 import { dateLabel } from "@/lib/when";
 import { cn } from "@/lib/utils";
@@ -34,6 +34,15 @@ export type Entry = Partial<CalendarEvent> & {
   /** Photos put on the entry's day with it (uploaded assets), and its photos taken off. */
   photos?: { add: string[]; drop: string[] };
 };
+
+/** Why a copy stopped, if it did, and the days it went into before that. */
+type Copied = { error: string | null; done: string[] };
+
+const TIME = /^\d{2}:\d{2}$/;
+const DAY_MINUTES = 24 * 60;
+/** "19:30" as minutes into its day, and back. */
+const minutes = (hm: string) => Number(hm.slice(0, 2)) * 60 + Number(hm.slice(3, 5));
+const clockOf = (m: number) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
 
 export function EntrySheet({
   open,
@@ -61,13 +70,18 @@ export function EntrySheet({
   onOpenChange: (open: boolean) => void;
   /** Resolves to why it did not go, or null. */
   onSave: (entry: Entry) => Promise<string | null>;
-  onCopy: (entry: Entry, days: string[]) => Promise<string | null>;
+  onCopy: (entry: Entry, days: string[]) => Promise<Copied>;
   onDelete: (event: CalendarEvent) => void;
 }) {
+  // The form has something in it that is not saved: a pull down, a tap
+  // outside, Back or the ✕ asks before it goes (ui/sheet.tsx). The most
+  // fields in the app, and the pull that closes it is the scroll's way.
+  const [dirty, setDirty] = useState(false);
   return (
     <Panel
       open={open}
       onOpenChange={onOpenChange}
+      guard={dirty}
       title={occurrence ? "반복 일정 고치기" : event ? "일정 고치기" : "일정 추가"}
       description={
         occurrence
@@ -89,6 +103,7 @@ export function EntrySheet({
           onCopy={onCopy}
           onDelete={onDelete}
           onClose={() => onOpenChange(false)}
+          onDirty={setDirty}
         />
       ) : null}
     </Panel>
@@ -105,6 +120,7 @@ function Form({
   onCopy,
   onDelete,
   onClose,
+  onDirty,
 }: {
   event: CalendarEvent | null;
   occurrence?: CalendarEvent;
@@ -112,9 +128,11 @@ function Form({
   block?: string;
   photos: DayPhoto[];
   onSave: (entry: Entry) => Promise<string | null>;
-  onCopy: (entry: Entry, days: string[]) => Promise<string | null>;
+  onCopy: (entry: Entry, days: string[]) => Promise<Copied>;
   onDelete: (event: CalendarEvent) => void;
   onClose: () => void;
+  /** Whether anything differs from what the form opened with. */
+  onDirty: (dirty: boolean) => void;
 }) {
   const [added, setAdded] = useState<string[]>([]);
   const [dropped, setDropped] = useState<ReadonlySet<string>>(new Set());
@@ -140,13 +158,44 @@ function Form({
   // A series asks which to take off: the day tapped, or every day.
   const [erasing, setErasing] = useState(false);
 
+  // Changed from what the form opened with - a new entry left as it came,
+  // its 09:00-10:00 and all, is not - or photos on their way up.
+  const [opened] = useState(() => ({ owner, title, allDay, date, endDate, start, end, repeat, reminder, memo }));
+  const dirty =
+    owner !== opened.owner ||
+    title.trim() !== opened.title.trim() ||
+    allDay !== opened.allDay ||
+    date !== opened.date ||
+    endDate !== opened.endDate ||
+    start !== opened.start ||
+    end !== opened.end ||
+    repeat !== opened.repeat ||
+    reminder !== opened.reminder ||
+    memo.trim() !== opened.memo.trim() ||
+    added.length > 0 ||
+    dropped.size > 0 ||
+    !!uploads.busy;
+  useEffect(() => {
+    onDirty(dirty);
+    return () => onDirty(false);
+  }, [dirty, onDirty]);
+
   const multi = endDate > date;
+  // An end before its start is why 저장 does not go: said above it, and on
+  // the field to change. A dimmed button alone sent a thumb up and down the
+  // sheet looking for what was wrong.
+  const endDateEarly = endDate !== "" && endDate < date;
+  const endEarly = !allDay && !multi && end !== "" && end < start;
+  const early = endDateEarly
+    ? "종료 날짜가 시작 날짜보다 일러요."
+    : endEarly
+      ? "종료가 시작보다 일러요. 다음 날까지면 종료 날짜를 바꿔 주세요."
+      : null;
   const ready =
     title.trim() !== "" &&
     /^\d{4}-\d{2}-\d{2}$/.test(date) &&
-    (!multi || endDate >= date) &&
-    (allDay || /^\d{2}:\d{2}$/.test(start)) &&
-    (allDay || multi || !end || end >= start);
+    (allDay || TIME.test(start)) &&
+    !early;
 
   function entry(): Entry {
     return {
@@ -183,9 +232,9 @@ function Form({
         from={event.date}
         onBack={() => setCopying(false)}
         onCopy={async (days) => {
-          const failed = await onCopy({ ...entry(), id: undefined, recurrence: undefined, repeat: undefined, photos: undefined }, days);
-          if (!failed) onClose();
-          return failed;
+          const copied = await onCopy({ ...entry(), id: undefined, recurrence: undefined, repeat: undefined, photos: undefined }, days);
+          if (!copied.error) onClose();
+          return copied;
         }}
       />
     );
@@ -226,15 +275,45 @@ function Form({
             setDate(next);
           }}
         />
-        <Input surface="glass" type="time" aria-label="시작 시간" value={start} disabled={allDay} onChange={(e) => setStart(e.target.value)} className={cn("min-w-0", allDay && "invisible")} />
+        <Input
+          surface="glass"
+          type="time"
+          aria-label="시작 시간"
+          value={start}
+          disabled={allDay}
+          onChange={(e) => {
+            const next = e.target.value;
+            // The end keeps its length too: an hour from 09:00 moved to the
+            // evening is an hour from 19:00, past midnight into the next day.
+            if (TIME.test(next) && TIME.test(start) && TIME.test(end) && (multi || end >= start)) {
+              const at = minutes(end) + minutes(next) - minutes(start);
+              const days = Math.floor(at / DAY_MINUTES);
+              const endsOn = multi ? endDate : date;
+              setEnd(clockOf(at - days * DAY_MINUTES));
+              if (days && endsOn) setEndDate(addDays(endsOn, days));
+            }
+            setStart(next);
+          }}
+          className={cn("min-w-0", allDay && "invisible")}
+        />
         <span className="text-ui text-dim">종료</span>
-        <Input surface="glass" type="date" aria-label="종료 날짜" min={date} value={endDate} onChange={(e) => setEndDate(e.target.value)} className="min-w-0" />
+        <Input
+          surface="glass"
+          type="date"
+          aria-label="종료 날짜"
+          min={date}
+          value={endDate}
+          aria-invalid={endDateEarly || undefined}
+          onChange={(e) => setEndDate(e.target.value)}
+          className="min-w-0"
+        />
         <Input
           surface="glass"
           type="time"
           aria-label="종료 시간"
           value={end}
           disabled={allDay}
+          aria-invalid={endEarly || undefined}
           onChange={(e) => setEnd(e.target.value)}
           className={cn("min-w-0", allDay && "invisible")}
         />
@@ -286,6 +365,11 @@ function Form({
         <Textarea id={`${id}-memo`} surface="glass" rows={3} maxLength={500} value={memo} onChange={(e) => setMemo(e.target.value)} className="min-h-[5.5rem]" />
       </Field>
 
+      {early ? (
+        <p role="alert" className="text-aside text-reject">
+          {early}
+        </p>
+      ) : null}
       {error ? (
         <p role="alert" className="text-aside text-reject">
           {error}
@@ -340,9 +424,13 @@ function Form({
 }
 
 /** Days to copy an entry to, picked on a month. */
-function CopyDays({ from, onBack, onCopy }: { from: string; onBack: () => void; onCopy: (days: string[]) => Promise<string | null> }) {
+function CopyDays({ from, onBack, onCopy }: { from: string; onBack: () => void; onCopy: (days: string[]) => Promise<Copied> }) {
   const [cursor, setCursor] = useState<Cursor>(cursorOf(from));
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
+  // Days a copy that stopped went into before it did: no longer picked, and
+  // not to be picked again - pressed again, the copy goes on from where it
+  // stopped instead of into those days a second time.
+  const [copied, setCopied] = useState<ReadonlySet<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const cells = useMemo(() => monthCells(cursor), [cursor]);
@@ -385,17 +473,24 @@ function CopyDays({ from, onBack, onCopy }: { from: string; onBack: () => void; 
         {cells.map((c) => {
           const on = picked.has(c.date);
           const self = c.date === from;
+          const went = copied.has(c.date);
           return (
             <button
               key={c.date}
               type="button"
-              disabled={self}
+              disabled={self || went}
               aria-pressed={on}
-              aria-label={dateLabel(c.date)}
+              aria-label={went ? `${dateLabel(c.date)}, 복사했어요` : dateLabel(c.date)}
               onClick={() => toggle(c.date)}
               className={cn(
                 "flex aspect-square items-center justify-center rounded-lg text-ui tabular-nums transition-colors focus-ring",
-                on ? "bg-foreground font-semibold text-background" : c.inMonth ? "text-ink hover:bg-glass" : "text-faint",
+                on
+                  ? "bg-foreground font-semibold text-background"
+                  : went
+                    ? "bg-approve-wash text-approve"
+                    : c.inMonth
+                      ? "text-ink hover:bg-glass"
+                      : "text-faint",
                 self && "ring-1 ring-edge",
               )}
             >
@@ -416,9 +511,12 @@ function CopyDays({ from, onBack, onCopy }: { from: string; onBack: () => void; 
         onClick={async () => {
           setBusy(true);
           setError(null);
-          const failed = await onCopy([...picked].sort());
+          const { error: failed, done } = await onCopy([...picked].sort());
           setBusy(false);
-          if (failed) setError(failed);
+          if (!failed) return;
+          setError(failed);
+          setPicked((s) => new Set([...s].filter((d) => !done.includes(d))));
+          setCopied((s) => new Set([...s, ...done]));
         }}
         className="mt-4 w-full"
       >

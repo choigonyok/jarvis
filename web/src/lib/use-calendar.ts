@@ -27,7 +27,15 @@ function byStart(a: CalendarEvent, b: CalendarEvent): number {
 export function useCalendar(cursor: Cursor) {
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [proposals, setProposals] = useState<Proposal[]>([]);
+  // What a change made here could not do (a removal, the guest's edit).
   const [error, setError] = useState<string | null>(null);
+  // Why the month could not be read, until a read lands. Kept apart from a
+  // change that did not go: it is said where the day's entries go.
+  const [readError, setReadError] = useState<string | null>(null);
+  // The days the entries on hand were read for. Outside them - before the
+  // first read lands, a month jumped to past them - a day with no entries is
+  // not known to be a free one.
+  const [covered, setCovered] = useState<{ from: string; to: string } | null>(null);
   const [loaded, setLoaded] = useState(false);
 
   // The grid shows the tail of the previous month and the head of the next,
@@ -39,7 +47,15 @@ export function useCalendar(cursor: Cursor) {
     [cursor],
   );
 
+  // Reads land in any order. What lands is shown if it was asked for after
+  // what is on screen, so a month paged past cannot land last over the month
+  // paged to; and only the newest read's failure is said (as
+  // lib/use-resource.ts does).
+  const asked = useRef(0);
+  const shown = useRef(0);
+
   const hydrate = useCallback(async () => {
+    const seq = ++asked.current;
     try {
       const [calendar, pending] = await Promise.all([
         fetch(`${CALENDAR}/events?from=${from}&to=${to}`, { cache: "no-store" }),
@@ -48,11 +64,18 @@ export function useCalendar(cursor: Cursor) {
       if (!calendar.ok || !pending.ok) throw new Error("bad status");
       const days = (await calendar.json()) as { events: CalendarEvent[] };
       const props = (await pending.json()) as { proposals: Proposal[] };
+      if (seq < shown.current) return;
+      shown.current = seq;
       setEvents((days.events ?? []).slice().sort(byStart));
       setProposals(props.proposals ?? []);
-      setError(null);
+      setCovered({ from, to });
+      // An older read landing late does not undo what the newest one said.
+      if (seq === asked.current) {
+        setReadError(null);
+        setError(null);
+      }
     } catch {
-      setError("캘린더를 불러오지 못했어요.");
+      if (seq === asked.current) setReadError("캘린더를 불러오지 못했어요.");
     } finally {
       setLoaded(true);
     }
@@ -143,7 +166,8 @@ export function useCalendar(cursor: Cursor) {
 
   /**
    * A new entry a person filled in, in at the way in. Resolves to why it did
-   * not go, or null; the stream brings it onto the month, and a read makes sure.
+   * not go, or null - with the entry as saved, when the calendar answered
+   * with it; the stream brings it onto the month, and a read makes sure.
    */
   const create = useCallback(
     async (entry: Partial<CalendarEvent> & { repeat?: string; reminder?: number }): Promise<{ error: string | null; event?: CalendarEvent }> => {
@@ -153,7 +177,10 @@ export function useCalendar(cursor: Cursor) {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ ...entry, id: undefined }),
         });
-        if (res.status === 202) return { error: "받았지만 아직 반영되지 않았어요. 잠시 뒤 다시 보세요." };
+        // Kept at the way in, to be handed on when the calendar can take it
+        // (202): taken, not failed. Said as a failure, 저장 pressed again
+        // made the entry twice.
+        if (res.status === 202) return { error: null };
         if (!res.ok) {
           const body = (await res.json().catch(() => null)) as { error?: string } | null;
           return { error: body?.error ?? "일정을 저장하지 못했어요." };
@@ -194,12 +221,14 @@ export function useCalendar(cursor: Cursor) {
     latest.current = proposals;
   }, [proposals]);
 
-  /** Resolves to what to say when the decision did not go; the row says it is on its way when it did. */
+  /**
+   * Resolves to what to say when the decision did not go - the row says it,
+   * under its own buttons - and the row says it is on its way when it did.
+   */
   const decide = useCallback(
     async (proposalId: string, decision: Decision, reason?: string): Promise<string | null> => {
       const posted = await decideProposal(proposalId, decision, undefined, reason);
       if (!posted.ok) {
-        setError(posted.error);
         void hydrate();
         return posted.error;
       }
@@ -218,11 +247,14 @@ export function useCalendar(cursor: Cursor) {
 
   return {
     events,
+    /** The days `events` were read for; null until a read has landed. */
+    covered,
     proposed,
     waiting,
     pendingCount,
     connection,
     error,
+    readError,
     loaded,
     /** Reads the month again, by hand - under "불러오지 못했어요". */
     reload: hydrate,

@@ -21,6 +21,16 @@ import { Header, PageTop } from "@/components/shell/header";
 import { TabBar } from "@/components/shell/tab-bar";
 import { StandingBar } from "@/components/shell/standing-bar";
 import { useUndo } from "@/components/shell/undo";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { between, photoSrc, writeCouple } from "@/lib/couple";
 import { useHolidays } from "@/lib/holidays";
@@ -37,6 +47,7 @@ import {
 } from "@/lib/month";
 import { onOpenParams } from "@/lib/focus";
 import { ghostsFor, type CreateGhost, type Ghost } from "@/lib/proposed";
+import { SAY } from "@/lib/say";
 import { covers, type CalendarEvent } from "@/lib/thread";
 import { useCalendar } from "@/lib/use-calendar";
 import { cn } from "@/lib/utils";
@@ -69,7 +80,7 @@ export function Calendar() {
   // narrows the month to one person's days and back.
   const [hidden, setHidden] = useState<ReadonlySet<Owner>>(new Set());
 
-  const { events: fetched, proposed, waiting, pendingCount, connection, error, loaded, reload, save, change, create, remove, decide } =
+  const { events: fetched, covered, proposed, waiting, pendingCount, connection, error, readError, loaded, reload, save, change, create, remove, decide } =
     useCalendar(cursor);
 
   // The operator writes entries here: a new one on the form, one of theirs
@@ -78,6 +89,10 @@ export function Calendar() {
   // uniple holds one session, the operator's.
   const owner = useRole() === "owner";
   const [entry, setEntry] = useState<{ event: CalendarEvent | null; day: string; occurrence?: CalendarEvent } | null>(null);
+  // New entries taken at the way in and not on the calendar yet (a 202): said
+  // on their day by name until they are, as a decision says 반영 중 - with
+  // the sheet gone, a day showing nothing read as a save that was lost.
+  const [onTheWay, setOnTheWay] = useState<{ date: string; title: string }[]>([]);
   const bounds = useMemo(() => gridBounds(cursor), [cursor]);
   const holidays = useHolidays(bounds.from, bounds.to).data;
   const photos = useDayPhotos(bounds.from, bounds.to);
@@ -94,7 +109,14 @@ export function Calendar() {
   const [photoCells, setPhotoCells] = useKept("calendar:photos", false);
   const [finding, setFinding] = useState(false);
   const [choosingMonth, setChoosingMonth] = useState(false);
-  const [photoNote, setPhotoNote] = useState<string | null>(null);
+  // What did not go with a day's photos - or with an entry's, saved from the
+  // sheet - said under them, on that day and not on the next one looked at.
+  const [photoNote, setPhotoNote] = useState<{ day: string; text: string } | null>(null);
+  // Photos asked about before they go - the ones picked, or the one open in
+  // the viewer - as the album asks: they leave the partner's uniple too, and
+  // nothing brings them back.
+  const [asking, setAsking] = useState(false);
+  const [toDrop, setToDrop] = useState<string[]>([]);
   const router = useRouter();
   // The space's blocks: where a day's photo is uploaded for, and the D-day
   // an anniversary entry belongs to.
@@ -106,8 +128,47 @@ export function Calendar() {
   async function photoChange(run: () => Promise<{ ok: boolean; error?: string }>) {
     setPhotoNote(null);
     const sent = await run();
-    if (!sent.ok) setPhotoNote(sent.error ?? "사진을 바꾸지 못했어요.");
+    if (!sent.ok) setPhotoNote({ day: selected, text: sent.error ?? "사진을 바꾸지 못했어요." });
     await photos.reload();
+  }
+
+  function askDrop(ids: string[]) {
+    setToDrop(ids);
+    setAsking(true);
+  }
+
+  // The day's photos taken off, once asked. One that does not go stops the
+  // rest and says how many did; what is left stays picked to try again.
+  async function drop(ids: string[]) {
+    setViewing(null);
+    setDropping(true);
+    setPhotoNote(null);
+    let gone = 0;
+    for (const id of ids) {
+      const sent = await writeCouple("DELETE", `/photos/${id}`);
+      if (!sent.ok) {
+        setPhotoNote({ day: selected, text: gone ? `${ids.length}장 중 ${gone}장만 지웠어요: ${sent.error}` : sent.error });
+        break;
+      }
+      gone += 1;
+    }
+    await photos.reload();
+    setDropping(false);
+    setPicking((s) => (s && gone < ids.length ? new Set(ids.slice(gone)) : null));
+  }
+
+  // An entry's photos put on its first day, filed under it, and the ones
+  // taken off it. Resolves to what did not go, or null.
+  async function movePhotos(event: string, date: string | undefined, moved: { add: string[]; drop: string[] }) {
+    for (const asset of moved.add) {
+      const sent = await writeCouple("POST", "/photos", { date, asset, event });
+      if (!sent.ok) return `일정은 저장했지만 사진을 붙이지 못했어요: ${sent.error}`;
+    }
+    for (const photo of moved.drop) {
+      const sent = await writeCouple("DELETE", `/photos/${photo}`);
+      if (!sent.ok) return `일정은 저장했지만 사진을 빼지 못했어요: ${sent.error}`;
+    }
+    return null;
   }
 
   // One of your own entries being changed in place (event-sheet.tsx). The
@@ -154,6 +215,12 @@ export function Calendar() {
     [allEvents, hidden],
   );
 
+  // Whether what is on hand was read for the day, and for the whole month on
+  // screen. Before that - the first read, a month jumped to - no entries is
+  // not an empty day, and no count is not a zero.
+  const dayRead = covered !== null && covered.from <= selected && selected <= covered.to;
+  const monthRead = covered !== null && covered.from <= bounds.from && bounds.to <= covered.to;
+
   // Counted before the filter, so a hidden chip still says what it hides.
   const monthCounts = useMemo(() => {
     const counts = new Map<Owner, number>();
@@ -169,6 +236,18 @@ export function Calendar() {
       const next = new Set(prev);
       if (next.has(owner)) next.delete(owner);
       else next.add(owner);
+      return next;
+    });
+  }
+
+  // An entry just saved, or found, is shown even when its owner's chip is
+  // off: hidden the moment it was saved, it read as a save that did not go
+  // and was written a second time.
+  function show(owner: Owner) {
+    setHidden((prev) => {
+      if (!prev.has(owner)) return prev;
+      const next = new Set(prev);
+      next.delete(owner);
       return next;
     });
   }
@@ -228,8 +307,13 @@ export function Calendar() {
   }, [events, allEvents, creates, attached, photoCells, photos.data, holidays]);
 
   const dayEvents = events.filter((e) => covers(e, selected));
+  // What the legend's filter keeps off the day: a day filtered down to
+  // nothing is not a free day.
+  const dayHidden = allEvents.filter((e) => covers(e, selected) && hidden.has(ownerOf(e))).length;
   const dayPhotos = (photos.data ?? []).filter((p) => p.date === selected);
   const dayCreates = creates.filter((g) => g.preview.date === selected);
+  const dayOnTheWay = onTheWay.filter((w) => w.date === selected && !fetched.some((e) => e.date === w.date && e.title === w.title));
+  const dayNote = photoNote?.day === selected ? photoNote.text : null;
 
   // Anything waiting outside the six weeks on screen would otherwise be
   // invisible; the operator is told it exists and can jump to it.
@@ -358,7 +442,11 @@ export function Calendar() {
                   >
                     <OwnerDot owner={owner} className={cn(!on && "opacity-30")} />
                     {OWNER_LABEL[owner]}
-                    <span className="tnum text-faint">{count}</span>
+                    {monthRead ? (
+                      <span className="tnum text-faint">{count}</span>
+                    ) : (
+                      <span aria-hidden className="h-2.5 w-2 rounded-sm bg-well" />
+                    )}
                   </button>
                 );
               })}
@@ -440,7 +528,7 @@ export function Calendar() {
                             for (const asset of assets) {
                               const sent = await writeCouple("POST", "/photos", { date: selected, asset });
                               if (!sent.ok) {
-                                setPhotoNote(sent.error);
+                                setPhotoNote({ day: selected, text: sent.error });
                                 break;
                               }
                             }
@@ -452,40 +540,29 @@ export function Calendar() {
                   }
                 />
                 {picking ? (
-                  <PickBar
-                    count={picking.size}
-                    busy={dropping}
-                    onCancel={() => setPicking(null)}
-                    onRemove={() => {
-                      setDropping(true);
-                      void (async () => {
-                        for (const id of picking) {
-                          const sent = await writeCouple("DELETE", `/photos/${id}`);
-                          if (!sent.ok) {
-                            setPhotoNote(sent.error);
-                            break;
-                          }
-                        }
-                        await photos.reload();
-                        setDropping(false);
-                        setPicking(null);
-                      })();
-                    }}
-                  />
+                  <PickBar count={picking.size} busy={dropping} onCancel={() => setPicking(null)} onRemove={() => askDrop([...picking])} />
                 ) : owner && dayPhotos.length > 1 ? (
                   <Button variant="quiet" size="touch-sm" onClick={() => setPicking(new Set())} className="-ml-2">
                     여러 장 지우기
                   </Button>
                 ) : null}
-                {photoNote || uploads.error ? (
+                {dayNote || uploads.error ? (
                   <p role="alert" className="mt-1 text-aside text-reject">
-                    {photoNote ?? uploads.error}
+                    {dayNote ?? uploads.error}
                   </p>
                 ) : null}
               </div>
             ) : null}
 
-            {dayEvents.length === 0 && dayCreates.length === 0 ? (
+            {readError ? (
+              // The month that could not be read, said where its entries go
+              // and read again on the spot - not a free day.
+              <Failed onRetry={reload} className="mb-3 px-2">
+                {readError}
+              </Failed>
+            ) : !dayRead ? (
+              <DayPlaceholder />
+            ) : dayEvents.length === 0 && dayCreates.length === 0 && dayOnTheWay.length === 0 && !dayHidden ? (
               owner ? (
                 // An empty day is a place to write one, here or in the conversation.
                 <div className="px-2">
@@ -541,13 +618,30 @@ export function Calendar() {
                   onDecide={(d, reason) => decide(ghost.proposal.id, d, reason)}
                 />
               ))}
+              {dayOnTheWay.map((w, i) => (
+                <p key={`${i}:${w.title}`} className="flex items-center gap-2 py-2 pl-2 text-aside text-dim">
+                  <span aria-hidden className="anim-breathe size-[5px] shrink-0 rounded-full bg-dim" />
+                  <span className="min-w-0">
+                    {w.title} 일정을 보냈어요
+                    <span className="text-faint"> · 반영 중</span>
+                  </span>
+                </p>
+              ))}
             </div>
+            {dayHidden ? (
+              <p className="mt-1 flex flex-wrap items-center gap-x-1 px-2 text-aside text-faint">
+                가려 둔 일정 {dayHidden}건
+                <Button variant="underline" size="inline" onClick={() => setHidden(new Set())} className="tap ml-1 text-aside">
+                  모두 보기
+                </Button>
+              </p>
+            ) : null}
             </div>
           </section>
 
           {error ? (
-            // The month that could not be read, read again on the spot - the
-            // way back was leaving the tab.
+            // A change that did not go (a removal, the guest's edit), and the
+            // month read again on the spot to show it as it stands.
             <Failed onRetry={loaded ? reload : undefined} className="mt-6 lg:col-span-2">
               {error}
             </Failed>
@@ -569,6 +663,8 @@ export function Calendar() {
         onSave={async (next: Entry) => {
           const { photos: moved, ...rest } = next;
           let id = rest.id;
+          // The day on screen once it is saved: a new entry's own.
+          const day = id ? selected : (rest.date ?? selected);
           if (id) {
             const failed = await change(rest);
             if (failed) return failed;
@@ -576,37 +672,38 @@ export function Calendar() {
             const made = await create(rest);
             if (made.error) return made.error;
             id = made.event?.id;
-            setSelected(rest.date ?? selected);
+            setSelected(day);
+            if (!made.event) setOnTheWay((list) => [...list, { date: day, title: rest.title ?? "" }]);
           }
-          // The photos go on the entry's first day, filed under it.
-          if (moved && !id) return "일정은 저장했지만 아직 반영 전이라 사진을 붙이지 못했어요. 잠시 뒤 일정을 열어 붙여 주세요.";
-          if (moved && id) {
-            for (const asset of moved.add) {
-              const sent = await writeCouple("POST", "/photos", { date: rest.date, asset, event: id });
-              if (!sent.ok) return `일정은 저장했지만 사진을 붙이지 못했어요: ${sent.error}`;
-            }
-            for (const photo of moved.drop) {
-              const sent = await writeCouple("DELETE", `/photos/${photo}`);
-              if (!sent.ok) return `일정은 저장했지만 사진을 빼지 못했어요: ${sent.error}`;
-            }
+          show(ownerOf(rest));
+          // The entry is in, so the sheet closes whatever comes of its
+          // photos: left open on a red line, its 저장 made the entry a second
+          // time. What did not go is said on the day, under its photos.
+          if (moved) {
+            const failed = id
+              ? await movePhotos(id, rest.date, moved)
+              : "일정은 저장했지만 아직 반영 전이라 사진을 붙이지 못했어요. 잠시 뒤 일정을 열어 붙여 주세요.";
+            setPhotoNote(failed ? { day, text: failed } : null);
             await photos.reload();
           }
           return null;
         }}
         onCopy={async (next, days) => {
           // Each day gets the entry whole, its length kept. A day that does
-          // not go stops the rest, and says which went in before it.
+          // not go stops the rest, and says which went in before it - and
+          // hands them back, so they are not copied into again.
           const span = next.endDate && next.date ? between(next.date, next.endDate) : 0;
           const done: string[] = [];
           for (const day of days) {
             const made = await create({ ...next, date: day, endDate: span ? addDays(day, span) : undefined });
             if (made.error) {
               const went = done.length ? `${done.map(korDate).join(", ")}에는 들어갔고, ` : "";
-              return `${days.length}개 날짜 중 ${done.length}개만 복사했어요. ${went}${korDate(day)}부터 멈췄어요: ${made.error}`;
+              return { error: `${days.length}개 날짜 중 ${done.length}개만 복사했어요. ${went}${korDate(day)}부터 멈췄어요: ${made.error}`, done };
             }
+            if (!made.event) setOnTheWay((list) => [...list, { date: day, title: next.title ?? "" }]);
             done.push(day);
           }
-          return null;
+          return { error: null, done };
         }}
         onDelete={(event) => {
           setEntry(null);
@@ -636,13 +733,7 @@ export function Calendar() {
                   </ViewerAction>
                 ) : null}
                 {owner ? (
-                  <ViewerAction
-                    danger
-                    onClick={() => {
-                      setViewing(null);
-                      void photoChange(() => writeCouple("DELETE", `/photos/${p.id}`));
-                    }}
-                  >
+                  <ViewerAction danger onClick={() => askDrop([p.id])}>
                     지우기
                   </ViewerAction>
                 ) : null}
@@ -652,7 +743,28 @@ export function Calendar() {
         />
       ) : null}
 
-      <FindSheet open={finding} onOpenChange={setFinding} onFound={setSelected} />
+      <AlertDialog open={asking} onOpenChange={setAsking}>
+        {/* Over the photo viewer too, which sits above every sheet and dialog. */}
+        <AlertDialogContent className="z-[80]">
+          <AlertDialogHeader>
+            <AlertDialogTitle>사진 {toDrop.length}장을 지울까요?</AlertDialogTitle>
+            <AlertDialogDescription>이 날에서 빠지고 상대의 uniple 앱에서도 사라져요. 되돌릴 수 없어요.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>두기</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void drop(toDrop)}>지우기</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <FindSheet
+        open={finding}
+        onOpenChange={setFinding}
+        onFound={(found) => {
+          setSelected(found.date);
+          show(ownerOf(found));
+        }}
+      />
       <MonthPicker
         open={choosingMonth}
         onOpenChange={setChoosingMonth}
@@ -676,6 +788,33 @@ export function Calendar() {
       />
 
       <TabBar pending={pendingCount} />
+    </div>
+  );
+}
+
+/**
+ * The day's entries while its month is read: rows of their shape - the
+ * owner's edge, the time, the title and the line under it - as quiet blocks
+ * the entries arrive into, as the ledger's figures do.
+ */
+function DayPlaceholder() {
+  return (
+    <div>
+      <p role="status" className="sr-only">
+        {SAY.loading}
+      </p>
+      <div aria-hidden className="space-y-1.5">
+        {["w-3/5", "w-2/5"].map((width) => (
+          <div key={width} className="flex items-start gap-3 py-2 pr-1 pl-2">
+            <span className="my-0.5 w-[3px] shrink-0 self-stretch rounded-full bg-well" />
+            <span className="mt-1 h-3 w-[3.6rem] shrink-0 rounded bg-well sm:w-[4.25rem]" />
+            <span className="min-w-0 flex-1 pt-0.5">
+              <span className={cn("block h-4 rounded bg-well", width)} />
+              <span className="mt-2 block h-2.5 w-10 rounded bg-well" />
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
