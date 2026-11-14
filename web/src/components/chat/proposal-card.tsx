@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { Check, Minus, X } from "lucide-react";
 import { CardAnswers, CardFacts, answersOf } from "@/components/chat/card-answers";
 import { Sending, Sent } from "@/components/chat/hold";
@@ -14,7 +14,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { isPrivateField, type CardChoice, type CardField, type Decision, type Proposal } from "@/lib/thread";
 import { ACTION, MODULE, ofModule } from "@/lib/kinds";
 import { isLiteral, readableBody, readableConsequence, readableTitle } from "@/lib/card-body";
-import { heardBack, sentChoice, sentOn } from "@/lib/decide";
+import { sentChoice, useDecision } from "@/lib/decide";
 import { asksYesNo, chosenOf, outcomeOf, turnedDown, type Outcome } from "@/lib/outcome";
 import { photoUrl } from "@/lib/uploads";
 import { cn } from "@/lib/utils";
@@ -62,16 +62,11 @@ export function ProposalCard({
   const [values, setValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(fields.map((f) => [f.key, f.value])),
   );
-  const [refusal, setRefusal] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
   // Taken, and the card not back with it yet (lib/decide.ts): said in the
   // buttons' place until it is, here or wherever the card is drawn again.
-  const [sentAs, setSentAs] = useState(() => sentOn(proposal.id));
-  const onItsWay = settled ? undefined : sentAs;
-  const decided = outcome !== "pending";
-  useEffect(() => {
-    if (decided) heardBack(proposal.id);
-  }, [decided, proposal.id]);
+  const decision = useDecision(proposal, (d, reason, choice) =>
+    onDecide(d, form && d === "approved" ? values : undefined, reason, choice),
+  );
   // A required field left empty (the price of a listing, say) is the one thing
   // a form card cannot be approved without: the operator fills it in, never the
   // model - or an answer of the card's own that fills it in.
@@ -85,16 +80,7 @@ export function ProposalCard({
   const question = yesNo || Boolean(proposal.card.choices?.length && proposal.card.choices.every((c) => c.tone !== "reject"));
 
   async function decide(c: CardChoice, because?: string) {
-    setRefusal(null);
-    setBusy(true);
-    const own = c.id ? { id: c.id, label: c.label } : undefined;
-    const reason = await onDecide(c.decision, form && c.decision === "approved" ? values : undefined, because, own);
-    setBusy(false);
-    if (reason) {
-      setRefusal(reason);
-      return;
-    }
-    setSentAs(sentOn(proposal.id));
+    if (!(await decision.answer(c, because))) return;
     // A typed password is not kept on screen once it has been handed over.
     setValues((cur) => Object.fromEntries(Object.entries(cur).map(([k, v]) => [k, fields.some((f) => f.key === k && isPrivateField(f)) ? "" : v])));
   }
@@ -134,7 +120,7 @@ export function ProposalCard({
         {settled ? null : (
           <div className="mb-2 flex items-center gap-2 text-meta text-faint">
             <span aria-hidden className="anim-breathe size-[5px] rounded-full bg-dim" />
-            <span>{busy ? "보내는 중" : onItsWay ? "반영 중" : question ? "답 대기" : "결재 대기"}</span>
+            <span>{decision.busy ? "보내는 중" : decision.sent ? "반영 중" : question ? "답 대기" : "결재 대기"}</span>
           </div>
         )}
 
@@ -200,10 +186,10 @@ export function ProposalCard({
               <span className="w-full text-faint">같은 제안은 한동안 다시 묻지 않아요.</span>
             ) : null}
           </p>
-        ) : busy ? (
+        ) : decision.busy ? (
           <Sending />
-        ) : onItsWay ? (
-          <Sent decision={onItsWay} yesNo={yesNo} label={sentChoice(proposal.id)} />
+        ) : decision.sent ? (
+          <Sent decision={decision.sent} yesNo={yesNo} label={sentChoice(proposal.id)} />
         ) : (
           /* This is the decision the whole product exists to collect, and on
              a phone it was a pair of 32px targets sitting a thumb-width apart.
@@ -212,14 +198,16 @@ export function ProposalCard({
           <CardAnswers
             proposal={proposal}
             size="pair"
-            busy={busy}
+            busy={decision.busy}
             blocked={(c) => c.decision === "approved" && missingFor(c).length > 0}
             onAnswer={(c, why) => void decide(c, why)}
           />
         )}
-        {!settled && (refusal || stuck) ? (
-          <p role={refusal ? "alert" : undefined} className={cn("mt-2 px-1 text-aside", refusal ? "text-reject" : "text-faint")}>
-            {refusal ?? `${missing.map((f) => f.label).join(", ")}을(를) 적으면 승인할 수 있어요.`}
+        {/* What a field still needs is said with the buttons, not under a
+            decision on its way: a login's typed values are cleared once sent. */}
+        {!settled && (decision.refusal || (stuck && !decision.busy && !decision.sent)) ? (
+          <p role={decision.refusal ? "alert" : undefined} className={cn("mt-2 px-1 text-aside", decision.refusal ? "text-reject" : "text-faint")}>
+            {decision.refusal ?? `${missing.map((f) => (f.kind === "number" ? money(f).label : f.label)).join(", ")}을(를) 적으면 승인할 수 있어요.`}
           </p>
         ) : null}
       </div>
@@ -282,6 +270,7 @@ function FormFields({
       {fields.map((f) => {
         const id = `field-${f.key}`;
         const value = values[f.key] ?? "";
+        const { label, won } = f.kind === "number" ? money(f) : { label: f.label, won: false };
         return (
           <div key={f.key}>
             {f.kind === "select" || f.kind === "multi" ? (
@@ -290,25 +279,14 @@ function FormFields({
               </p>
             ) : (
               <FieldLabel htmlFor={id} className="mb-1.5">
-                {f.label}
+                {label}
+                {/* The 원 after the number is not read out: the label says it. */}
+                {won ? <span className="sr-only">(원)</span> : null}
               </FieldLabel>
             )}
             {f.kind === "number" ? (
               // The price is the decision on this card; it gets the type size.
-              <div className="relative">
-                <Input
-                  id={id}
-                  inputMode="numeric"
-                  autoComplete="off"
-                  value={value ? Number(value.replace(/[^\d]/g, "") || 0).toLocaleString("ko-KR") : ""}
-                  onChange={(e) => onChange(f.key, e.target.value.replace(/[^\d]/g, ""))}
-                  placeholder="숫자로 적기"
-                  className="tnum h-12 pe-9 text-lead font-medium mouse:h-11"
-                />
-                <span aria-hidden className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-body text-faint">
-                  원
-                </span>
-              </div>
+              <NumberField id={id} value={value} won={won} onChange={(v) => onChange(f.key, v)} />
             ) : f.kind === "textarea" ? (
               <Textarea
                 id={id}
@@ -374,6 +352,98 @@ function FormFields({
       })}
     </div>
   );
+}
+
+/**
+ * Whether a number field is money, and its label then. To the agent a field
+ * is only a number (core/action Field), so this goes by its words: a label
+ * ending in "(원)" - taken off, so 원 is said once, after the number - one
+ * that says 금액 or 가격, or a price's or an amount's key. A label with
+ * brackets of another kind ("수량(개)") says what it needs to, and anything
+ * else stands bare: a count with 원 after it reads as a price.
+ */
+function money(f: CardField): { label: string; won: boolean } {
+  const own = /\s*\(원\)\s*$/;
+  if (own.test(f.label)) return { label: f.label.replace(own, ""), won: true };
+  if (/\)\s*$/.test(f.label)) return { label: f.label, won: false };
+  return { label: f.label, won: /금액|가격/.test(f.label) || /price|amount/i.test(f.key) };
+}
+
+/**
+ * A whole number, its thousands marked as it is typed. Marked again after
+ * every key, the field had its caret thrown to the end: a digit changed in the
+ * middle of 1,250,000 went on after the last 0, and the price approved was
+ * another one. The caret is put back after as many digits as stood before it.
+ */
+function NumberField({
+  id,
+  value,
+  won,
+  onChange,
+}: {
+  id: string;
+  value: string;
+  /** Money: 원 after the number. */
+  won: boolean;
+  onChange: (digits: string) => void;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  // The digits before the caret as it was typed, until the number is drawn marked.
+  const caret = useRef<number | null>(null);
+  const shown = grouped(value);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    const n = caret.current;
+    caret.current = null;
+    if (!el || n === null || document.activeElement !== el) return;
+    const at = afterDigits(shown, n);
+    el.setSelectionRange(at, at);
+  });
+  return (
+    <div className="relative">
+      <Input
+        ref={ref}
+        id={id}
+        inputMode="numeric"
+        autoComplete="off"
+        value={shown}
+        onChange={(e) => {
+          const el = e.target;
+          caret.current = el.value.slice(0, el.selectionStart ?? el.value.length).replace(/\D/g, "").length;
+          onChange(el.value.replace(/\D/g, ""));
+        }}
+        // Leading zeros stay while typing - 1,050,000 with its 1 taken out is
+        // 050,000 until a 2 goes in front - and go once the field is left.
+        onBlur={() => {
+          const digits = value.replace(/\D/g, "");
+          const bare = digits.replace(/^0+(?=\d)/, "");
+          if (bare !== digits) onChange(bare);
+        }}
+        placeholder="숫자로 적기"
+        className={cn("tnum h-12 text-lead font-medium mouse:h-11", won && "pe-9")}
+      />
+      {won ? (
+        <span aria-hidden className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-body text-faint">
+          원
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+/** The digits of a value with their thousands marked - by hand: Number rounds past 16 digits. */
+function grouped(value: string): string {
+  return value.replace(/\D/g, "").replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+/** Where the caret stands after the first n digits of a marked number. */
+function afterDigits(text: string, n: number): number {
+  let seen = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (seen === n) return i;
+    if (/\d/.test(text[i])) seen++;
+  }
+  return text.length;
 }
 
 /** A decided form card shows what was approved, not the inputs. */

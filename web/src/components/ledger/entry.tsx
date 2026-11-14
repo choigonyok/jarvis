@@ -1,11 +1,15 @@
 "use client";
 
+import Link from "next/link";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ChevronDown } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { CardAnswers, CardFacts } from "@/components/chat/card-answers";
+import { Sending, Sent } from "@/components/chat/hold";
 import { isLiteral, readableBody, readableConsequence } from "@/lib/card-body";
+import { sentChoice, useDecision } from "@/lib/decide";
 import { outcomeCopy, summarize } from "@/lib/ledger";
-import { chosenOf, outcomeOf } from "@/lib/outcome";
+import { asksYesNo, chosenOf, outcomeOf } from "@/lib/outcome";
 import type { CardChoice, Decision, Proposal } from "@/lib/thread";
 import { cn } from "@/lib/utils";
 
@@ -27,7 +31,8 @@ export function Entry({
   when,
 }: {
   proposal: Proposal;
-  onDecide: (decision: Decision, reason?: string, choice?: Pick<CardChoice, "id" | "label">) => void;
+  /** Resolves to why the decision was refused, if it was. */
+  onDecide: (decision: Decision, reason?: string, choice?: Pick<CardChoice, "id" | "label">) => Promise<string | null>;
   /** In place of the time, where no day stands above the row. */
   when?: string;
 }) {
@@ -43,6 +48,16 @@ export function Entry({
       }
     : outcomeCopy[outcome];
   const waiting = proposal.state === "pending";
+  // As on the conversation's card (lib/decide.ts): on its way, then taken and
+  // not back yet - in the buttons' place, and in the row's word for when it
+  // is folded - and a refusal under the buttons, not at the foot of the list.
+  const decision = useDecision(proposal, onDecide);
+  // Fields and photos are shown on the conversation's card, not on this line.
+  // Approved from here, what the model had put in the fields went unseen, a
+  // required one left empty was refused on every press, and a listing's photos
+  // were never looked at: such a card is decided where they are.
+  const fields = Boolean(proposal.card.fields?.length);
+  const photos = Boolean(proposal.card.images?.length);
   const literal = isLiteral(proposal);
   const time = when ?? (waiting ? proposal.at : (proposal.decidedAt ?? proposal.at));
   // The words and the facts apart, as on the chat's card.
@@ -88,7 +103,7 @@ export function Entry({
             keeps only what the edge cannot say - rejected from failed,
             approved from executed. */}
         <span className="max-w-[40%] shrink-0 truncate text-meta whitespace-nowrap text-dim">
-          {copy.label}
+          {decision.busy ? "보내는 중" : decision.sent ? "반영 중" : copy.label}
         </span>
 
         <ChevronDown
@@ -131,11 +146,32 @@ export function Entry({
 
           {waiting ? (
             <div className="mt-3">
-              <CardAnswers
-                proposal={proposal}
-                size="pair-sm"
-                onAnswer={(c, why) => onDecide(c.decision, why, c.id ? { id: c.id, label: c.label } : undefined)}
-              />
+              {decision.busy ? (
+                <Sending />
+              ) : decision.sent ? (
+                <Sent decision={decision.sent} yesNo={asksYesNo(proposal)} label={sentChoice(proposal.id)} />
+              ) : fields || photos ? (
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                  <p className="px-1 text-aside leading-normal text-dim">
+                    {fields && photos ? "적을 칸과 사진" : fields ? "적을 칸" : "사진"}이 있는 카드라 대화에서 결재해요.
+                  </p>
+                  <Button asChild variant="raised" size="pair-sm" className="sm:shrink-0">
+                    <Link href={`/?proposal=${encodeURIComponent(proposal.id)}`}>대화에서 열기</Link>
+                  </Button>
+                </div>
+              ) : (
+                <CardAnswers
+                  proposal={proposal}
+                  size="pair-sm"
+                  busy={decision.busy}
+                  onAnswer={(c, why) => void decision.answer(c, why)}
+                />
+              )}
+              {decision.refusal ? (
+                <p role="alert" className="mt-2 px-1 text-aside text-reject">
+                  {decision.refusal}
+                </p>
+              ) : null}
             </div>
           ) : null}
         </div>

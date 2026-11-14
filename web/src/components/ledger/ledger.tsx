@@ -54,7 +54,7 @@ export function Ledger() {
   // older days may only be on their way, and if it fails that is said instead.
   const empty = hydrated && archive.data !== undefined && shown.length === 0 && waiting.length === 0;
   const decideOn = (proposal: Proposal) => (d: Decision, reason?: string, choice?: Pick<CardChoice, "id" | "label">) =>
-    void decide(proposal.id, d, undefined, reason, choice);
+    decide(proposal.id, d, undefined, reason, choice);
 
   return (
     <div className="flex h-full min-h-0 flex-col">

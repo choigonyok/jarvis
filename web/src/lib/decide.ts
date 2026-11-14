@@ -1,4 +1,7 @@
-import { API, type CardChoice, type Decision } from "@/lib/thread";
+"use client";
+
+import { useEffect, useState } from "react";
+import { API, type CardChoice, type Decision, type Proposal } from "@/lib/thread";
 
 /**
  * What became of a decision posted: taken, or why not. `already`: the card had
@@ -34,6 +37,43 @@ export function sentChoice(proposalId: string): string | undefined {
 export function heardBack(proposalId: string) {
   sent.delete(proposalId);
   chosen.delete(proposalId);
+}
+
+/**
+ * A waiting card's decision, from the press until the card comes back with
+ * it: on its way, then taken and not back yet - said where its buttons were,
+ * never the buttons again while it is - or refused, and why, to be said where
+ * it was pressed. Every place a card is decided (the conversation, 기록) keeps
+ * it this one way. `post` resolves to why it was refused.
+ */
+export function useDecision(
+  proposal: Pick<Proposal, "id" | "state">,
+  post: (decision: Decision, reason?: string, choice?: Pick<CardChoice, "id" | "label">) => Promise<string | null> | void,
+) {
+  const [busy, setBusy] = useState(false);
+  const [refusal, setRefusal] = useState<string | null>(null);
+  const [sentAs, setSentAs] = useState(() => sentOn(proposal.id));
+  const decided = proposal.state !== "pending";
+  useEffect(() => {
+    if (decided) heardBack(proposal.id);
+  }, [decided, proposal.id]);
+
+  /** Resolves to whether it was taken. */
+  async function answer(c: CardChoice, reason?: string): Promise<boolean> {
+    setRefusal(null);
+    setBusy(true);
+    // An answer of the card's own goes back with its id; 반려 and 승인 stand for none.
+    const refused = await post(c.decision, reason, c.id ? { id: c.id, label: c.label } : undefined);
+    setBusy(false);
+    if (refused) {
+      setRefusal(refused);
+      return false;
+    }
+    setSentAs(sentOn(proposal.id));
+    return true;
+  }
+
+  return { busy, refusal, sent: decided ? undefined : sentAs, answer };
 }
 
 /** How long a card may take to come back decided over the stream before it is read again. */
