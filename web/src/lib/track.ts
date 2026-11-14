@@ -117,10 +117,15 @@ export type Clock = {
 export type Day = {
   date: string;
   start: number;
-  /** Midnight at the day's end, or now for today. */
+  /** Midnight at the day's end, or now for today - when it was read, for a stale one. */
   end: number;
   dayEnd: number;
   today: boolean;
+  /**
+   * Kept from an earlier read because reading it again failed: it ends when
+   * that read was, and nothing in it goes on now.
+   */
+  stale: boolean;
   nodes: Node[];
   steps: Step[];
   items: Item[];
@@ -292,7 +297,12 @@ function regionOf(at: LatLon, regions: Region[]): Region | undefined {
     .sort((a, b) => a.radiusM - b.radiusM)[0];
 }
 
-export function buildDay(track: Track, now: number): Day {
+/**
+ * The day as read at `now` - for a track kept from an earlier read (stale),
+ * the moment of that read, so a read that failed does not carry the last
+ * place on to the present.
+ */
+export function buildDay(track: Track, now: number, stale = false): Day {
   const start = Date.parse(track.from);
   const dayEnd = Date.parse(track.to);
   const today = now >= start && now < dayEnd;
@@ -334,7 +344,7 @@ export function buildDay(track: Track, now: number): Day {
     if (n.stay) {
       if (way.length) items.push(moveOf(way, from, n));
       way = [];
-      items.push({ type: "stay", start: n.start, end: n.leave, node: n, ongoing: today && n === last && n.leave >= end });
+      items.push({ type: "stay", start: n.start, end: n.leave, node: n, ongoing: today && !stale && n === last && n.leave >= end });
       from = n;
     }
     if (steps[k]) way.push(steps[k]);
@@ -357,6 +367,7 @@ export function buildDay(track: Track, now: number): Day {
     end,
     dayEnd,
     today,
+    stale,
     nodes,
     steps,
     items,
@@ -483,6 +494,8 @@ export type Scene = {
   end: number;
   dayEnd: number;
   today: boolean;
+  /** Someone's day in it is stale (Day.stale): it does not read as now. */
+  stale: boolean;
   people: Person[];
   clock: Clock;
   bounds: Day["bounds"];
@@ -510,6 +523,7 @@ export function sceneOf(people: Person[]): Scene {
     end,
     dayEnd: first.dayEnd,
     today: first.today,
+    stale: days.some((d) => d.stale),
     people,
     clock: days.length === 1 ? first.clock : clockFor(days.flatMap((d) => movesOf(d.items)), first.start, end),
     bounds,
@@ -586,6 +600,25 @@ export function todayOf(now: number): string {
 export function shiftDay(date: string, by: number): string {
   const [y, m, d] = date.split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, d + by)).toISOString().slice(0, 10);
+}
+
+/**
+ * A day with nothing read of it - its hours alone: what the 위치 screen
+ * stands up for a day whose read failed, so the map and the date stay
+ * around the failure instead of going with it.
+ */
+export function blankTrack(date: string, keepDays: number): Track {
+  // Seoul keeps no summer time: every day there begins at 00:00 +09:00.
+  return {
+    date,
+    from: `${date}T00:00:00+09:00`,
+    to: `${shiftDay(date, 1)}T00:00:00+09:00`,
+    fixes: [],
+    before: null,
+    visits: [],
+    regions: [],
+    keepDays,
+  };
 }
 
 /** What a region made in the console comes back as: the region, and - when the phone's list is known - a link that puts it on the phone at once. */

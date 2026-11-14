@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { BatteryLow, LocateFixed } from "lucide-react";
+import { Failed } from "@/components/shell/failed";
 import { BottomSheetContent, BottomSheetHeader, BottomSheetTitle } from "@/components/ui/bottom-sheet";
 import { Sheet } from "@/components/ui/sheet";
 import { RADIUS } from "@/components/location/register";
@@ -78,8 +79,8 @@ export function ModesSheet({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** The viewer's phone first. */
-  phones: { who: Who; me: boolean; track?: Track }[];
+  /** The viewer's phone first; unread, when its read failed with nothing to keep. */
+  phones: { who: Who; me: boolean; track?: Track; unread?: boolean }[];
   today: boolean;
   /** When the phones' state was read. */
   readAt: number;
@@ -96,7 +97,7 @@ export function ModesSheet({
             <Part title="지금">
               <ul className="space-y-3">
                 {phones.map((p) => (
-                  <Phone key={p.who} me={p.me} track={p.track} readAt={readAt} />
+                  <Phone key={p.who} me={p.me} track={p.track} unread={p.unread} readAt={readAt} />
                 ))}
               </ul>
             </Part>
@@ -182,7 +183,7 @@ function Setting({ term, children }: { term: string; children: ReactNode }) {
 }
 
 /** One phone, now: its mode and why, its battery, and what is on its way to it. */
-function Phone({ me, track, readAt }: { me: boolean; track?: Track; readAt: number }) {
+function Phone({ me, track, unread, readAt }: { me: boolean; track?: Track; unread?: boolean; readAt: number }) {
   const w = track?.watch;
   const pending = track?.pending ?? [];
   const since = w ? Math.max(0, readAt - Date.parse(w.at)) : 0;
@@ -208,6 +209,9 @@ function Phone({ me, track, readAt }: { me: boolean; track?: Track; readAt: numb
               {since > 6 * 3_600_000 ? ` · 그 뒤로 ${span(since)} 동안 위치가 없어요` : ""}
             </p>
           </>
+        ) : unread ? (
+          // Not read is not "nothing yet": the phone may well be sending.
+          <Failed quiet>위치를 불러오지 못했어요.</Failed>
         ) : (
           <p>아직 위치가 들어오지 않아 모드를 정하지 않았어요.</p>
         )}

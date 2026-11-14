@@ -1,8 +1,10 @@
 "use client";
 
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, Info, LocateFixed, Pause, Play } from "lucide-react";
+import { AsOf } from "@/components/shell/as-of";
+import { Failed } from "@/components/shell/failed";
 import { Header, PageTop } from "@/components/shell/header";
 import { TabBar } from "@/components/shell/tab-bar";
 import { Retry } from "@/components/shell/retry";
@@ -28,6 +30,7 @@ import {
   type Who,
   MODE_WORD,
   ago,
+  blankTrack,
   buildDay,
   dateLabel,
   distance,
@@ -42,7 +45,7 @@ import {
   toward,
 } from "@/lib/track";
 import { useThread } from "@/lib/use-thread";
-import { SAY } from "@/lib/say";
+import { SAY, failureText } from "@/lib/say";
 import { cn } from "@/lib/utils";
 
 /** Whose day is on the screen: the viewer's, both, or the other's - the calendar's 나 · 함께 · 상대. */
@@ -59,9 +62,14 @@ const VIEW_KEY = "jarvis:location-view";
 
 type Read = {
   date: string;
+  /** When the read was made: what ages ("3분 전") count from. */
   at: number;
   tracks: Partial<Record<Who, Track>>;
+  /** When each track was read: before `at` for one kept because reading it again failed. */
+  okAt: Partial<Record<Who, number>>;
   errors: Partial<Record<Who, string>>;
+  /** How many days are kept, as the last day that came said: how far back a day not read can still go. */
+  keepDays?: number;
 };
 
 /**
@@ -93,6 +101,13 @@ export function Location() {
     }
   });
   const [read, setRead] = useState<Read | null>(null);
+  // The day asked for, as an answer coming back checks it. Days passed
+  // quickly had let the slowest answer land last: another day's way under
+  // this day's name, and 불러오는 중… that never ended.
+  const wanted = useRef(date);
+  useLayoutEffect(() => {
+    wanted.current = date;
+  }, [date]);
 
   function choose(next: View) {
     setView(next);
@@ -105,21 +120,29 @@ export function Location() {
   const load = useCallback(
     () =>
       Promise.allSettled([readTrack(date, "owner"), readTrack(date, "guest")]).then((results) => {
+        if (wanted.current !== date) return;
         const at = Date.now();
         setRead((r) => {
           const tracks: Read["tracks"] = {};
+          const okAt: Read["okAt"] = {};
           const errors: Read["errors"] = {};
           (["owner", "guest"] as const).forEach((who, i) => {
             const res = results[i];
             if (res.status === "fulfilled") {
               tracks[who] = res.value;
+              okAt[who] = at;
               return;
             }
-            errors[who] = res.reason instanceof Error ? res.reason.message : "위치를 읽지 못했어요.";
-            // A read that fails keeps what was shown of the same day.
-            if (r?.date === date && r.tracks[who]) tracks[who] = r.tracks[who];
+            errors[who] = failureText(res.reason, "위치를 읽지 못했어요.");
+            // A read that fails keeps what was shown of the same day, as of
+            // when that was read: it had been stretched to now, and a dead
+            // service went on saying "지금" over a place hours old.
+            if (r?.date === date && r.tracks[who]) {
+              tracks[who] = r.tracks[who];
+              okAt[who] = r.okAt[who];
+            }
           });
-          return { date, at, tracks, errors };
+          return { date, at, tracks, okAt, errors, keepDays: (tracks.owner ?? tracks.guest)?.keepDays ?? r?.keepDays };
         });
       }),
     [date],
@@ -152,7 +175,7 @@ export function Location() {
     if (!read) return out;
     for (const who of ["owner", "guest"] as const) {
       const track = read.tracks[who];
-      if (track) out[who] = buildDay(track, read.at);
+      if (track) out[who] = buildDay(track, read.okAt[who] ?? read.at, Boolean(read.errors[who]));
     }
     return out;
   }, [read]);
@@ -163,11 +186,24 @@ export function Location() {
       return day ? [{ who, me: who === me, day }] : [];
     };
     const people = view === "me" ? pick(me) : view === "partner" ? pick(partner) : [...pick(me), ...pick(partner)];
-    return people.length ? sceneOf(people) : null;
-  }, [days, view, me, partner]);
+    if (people.length) return sceneOf(people);
+    // Nothing came of the read for who is on screen, after a day did before:
+    // the day stands empty - the map, the date and the way to another day
+    // stay up, and why is said where its hours would be. A failed read of
+    // another day had taken them all down with it, and 다시 시도 failing too
+    // left no way back. Only a first read that failed leaves nothing to stand.
+    if (!read?.keepDays) return null;
+    return sceneOf([{ who: me, me: true, day: buildDay(blankTrack(read.date, read.keepDays), read.at) }]);
+  }, [days, view, me, partner, read]);
 
   const shown: Who[] = view === "me" ? [me] : view === "partner" ? [partner] : [me, partner];
   const error = shown.map((who) => read?.errors[who]).find(Boolean);
+  const blank = shown.every((who) => !days[who]);
+  // What failed of the read on screen: the days on it kept from a read before
+  // (since when), and the phones with nothing to keep - in 함께, one of them
+  // had simply been left off the map, a failure reading as a day of nothing.
+  const kept = shown.flatMap((who) => (read?.errors[who] && read.tracks[who] ? [read.okAt[who] ?? read.at] : []));
+  const unread = (["owner", "guest"] as const).filter((who) => read?.errors[who] && !read.tracks[who]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -187,6 +223,9 @@ export function Location() {
           me={me}
           tracks={read?.tracks ?? {}}
           readAt={read?.at ?? 0}
+          keptAt={kept.length ? Math.min(...kept) : undefined}
+          unread={unread}
+          failed={blank ? error : undefined}
           onReload={load}
         />
       ) : (
@@ -216,7 +255,7 @@ function Waiting({
         <div>
           <p className="text-lead leading-[1.3] font-medium text-foreground">위치를 불러오지 못했어요</p>
           <p role="alert" className="mt-2 max-w-[30rem] text-ui leading-[1.6] break-keep text-pretty text-dim">
-            {error} 계속 이러면 상태 탭에서 위치 서비스(context)가 응답하는지 보세요.
+            {error} <IfItKeepsFailing />
           </p>
           <Retry onRetry={onRetry} />
         </div>
@@ -224,6 +263,28 @@ function Waiting({
         <p className="text-ui text-faint">{SAY.loading}</p>
       )}
     </main>
+  );
+}
+
+/**
+ * Under a read that failed: what to do if it keeps failing, as each person
+ * can. The operator looks at the service on the 상태 tab; the guest has no
+ * such tab, and was sent to it.
+ */
+function IfItKeepsFailing() {
+  const role = useRole();
+  if (role === "guest") return <>계속 이러면 상대에게 알려 주세요.</>;
+  return (
+    <>
+      계속 이러면{" "}
+      <Link
+        href="/status?focus=check:svc.context"
+        className="underline decoration-edge underline-offset-[3px] hover:text-foreground"
+      >
+        상태 탭
+      </Link>
+      에서 위치 서비스가 응답하는지 보세요.
+    </>
   );
 }
 
@@ -317,6 +378,9 @@ function Viewer({
   me,
   tracks,
   readAt,
+  keptAt,
+  unread,
+  failed,
   onReload,
 }: {
   scene: Scene;
@@ -329,17 +393,36 @@ function Viewer({
   me: Who;
   tracks: Partial<Record<Who, Track>>;
   readAt: number;
+  /** When what is shown was read, when it is kept from a read before because reading it again failed. */
+  keptAt?: number;
+  /** The phones whose read failed with nothing to keep. */
+  unread: Who[];
+  /** Nothing of the day came for who is on screen - why: the scene is the day's frame, empty. */
+  failed?: string;
   onReload: () => Promise<void>;
 }) {
   const { t, playing, speed, setSpeed, play, pause, seek } = usePlayback(scene);
   const [connecting, setConnecting] = useState(false);
   // 위치 등록: the panel under the map asks the name while the map shows the
-  // circle; ⓘ says what it does and how each phone watches now.
-  const [registering, setRegistering] = useState(false);
+  // circle; ⓘ says what it does and how each phone watches now. It is about
+  // now, so it opens on today: asked for from another day, the screen goes to
+  // today first and the panel opens once today is on it. It had opened on the
+  // day shown, offering that day's last place as where the phone is now -
+  // and a name already there moves to it.
+  const [wantsRegister, setWantsRegister] = useState(false);
   const [spot, setSpot] = useState<Spot | null>(null);
+  const registering = wantsRegister && scene.today && !loading;
+  // Going to another day meanwhile lets it go.
+  if (wantsRegister && date !== today) {
+    setWantsRegister(false);
+    setSpot(null);
+  }
   const [explaining, setExplaining] = useState(false);
   const atEnd = t >= scene.end;
-  const live = scene.today && atEnd && !playing;
+  // A day kept from a read before is not now: no 지금, no breathing light.
+  const live = scene.today && !scene.stale && atEnd && !playing;
+  // In 함께, whose read failed: said in the place of their line.
+  const missing = view === "both" ? unread[0] : undefined;
   const first = earliest(scene, today);
   const both = scene.people.length > 1;
   const still = scene.people.every((p) => p.day.nodes.length === 0);
@@ -351,10 +434,11 @@ function Viewer({
     setExplaining(false);
     pause();
     if (scene.today) seek(scene.end);
-    setRegistering(true);
+    else onDate(today);
+    setWantsRegister(true);
   }
   function stopRegistering() {
-    setRegistering(false);
+    setWantsRegister(false);
     setSpot(null);
   }
 
@@ -365,7 +449,8 @@ function Viewer({
         <ViewSwitch view={view} onView={onView} />
         {registering ? null : (
           <>
-            <NoTrack scene={scene} onConnect={() => setConnecting(true)} />
+            {/* A day not read is not a day without a place: no 기록이 없어요 over it. */}
+            {failed ? null : <NoTrack scene={scene} onConnect={() => setConnecting(true)} />}
             <PlaceButtons onExplain={() => setExplaining(true)} onRegister={register} />
           </>
         )}
@@ -426,64 +511,92 @@ function Viewer({
             )}
           </div>
 
-          <div className="mt-0.5 flex items-center justify-between gap-4">
-            <p className="tnum text-display-lg leading-none font-semibold tracking-tight text-foreground">
-              {live ? "지금" : hm(t, scene.dayEnd)}
-            </p>
-            <div className="flex shrink-0 items-center gap-1">
-              <button
-                type="button"
-                onClick={() => setSpeed(speed === 4 ? 1 : speed * 2)}
-                aria-label={`재생 속도 ${speed}배`}
-                className="tnum tap rounded-full px-2 text-aside text-dim transition-colors hover:text-foreground focus-ring"
-              >
-                {speed}×
-              </button>
-              <button
-                type="button"
-                onClick={playing ? pause : play}
-                disabled={scene.clock.length <= 0 || still}
-                aria-label={playing ? "멈춤" : atEnd ? "하루 처음부터 보기" : "이어서 보기"}
-                className="flex size-12 items-center justify-center rounded-full bg-glass-raised text-foreground transition-colors hover:bg-foreground/15 focus-ring disabled:opacity-40"
-              >
-                {playing ? (
-                  <Pause aria-hidden className="size-5" strokeWidth={1.8} fill="currentColor" />
+          {/* Another day being read: until it comes, what stands is the day
+              it was asked from, dimmed - not that day under this one's name. */}
+          <div aria-busy={loading || undefined} className={cn("transition-opacity", loading && "opacity-60")}>
+            {failed ? (
+              // Where the day's hours would be; the date and 오늘로 above stay.
+              <Failed onRetry={onReload} className="mt-1 mb-2">
+                위치를 불러오지 못했어요. {failed} <IfItKeepsFailing />
+              </Failed>
+            ) : (
+              <>
+                {missing ? (
+                  <AsOf
+                    at={null}
+                    failed
+                    failedText={`${missing === me ? "내" : "상대"} 위치를 불러오지 못했어요`}
+                    onRetry={() => void onReload()}
+                  />
+                ) : keptAt !== undefined ? (
+                  <AsOf at={new Date(keptAt)} failed onRetry={() => void onReload()} />
+                ) : null}
+                <div className="mt-0.5 flex items-center justify-between gap-4">
+                  <p className="tnum text-display-lg leading-none font-semibold tracking-tight text-foreground">
+                    {live ? "지금" : hm(t, scene.dayEnd)}
+                  </p>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setSpeed(speed === 4 ? 1 : speed * 2)}
+                      aria-label={`재생 속도 ${speed}배`}
+                      className="tnum tap rounded-full px-2 text-aside text-dim transition-colors hover:text-foreground focus-ring"
+                    >
+                      {speed}×
+                    </button>
+                    <button
+                      type="button"
+                      onClick={playing ? pause : play}
+                      disabled={scene.clock.length <= 0 || still}
+                      aria-label={playing ? "멈춤" : atEnd ? "하루 처음부터 보기" : "이어서 보기"}
+                      className="flex size-12 items-center justify-center rounded-full bg-glass-raised text-foreground transition-colors hover:bg-foreground/15 focus-ring disabled:opacity-40"
+                    >
+                      {playing ? (
+                        <Pause aria-hidden className="size-5" strokeWidth={1.8} fill="currentColor" />
+                      ) : (
+                        <Play aria-hidden className="ml-0.5 size-5" strokeWidth={1.8} fill="currentColor" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+                {/* The whole width: the line runs long while a way is being gone. */}
+                {both ? (
+                  <div aria-live={playing ? "off" : "polite"} className="mt-1.5 space-y-0.5">
+                    {scene.people.map((p) => (
+                      <p key={p.who} className="flex min-w-0 items-center gap-2 text-ui text-dim">
+                        <span aria-hidden className={cn("size-[6px] shrink-0 rounded-full", p.me ? "bg-mine" : "bg-partner")} />
+                        <span className="sr-only">{p.me ? "나" : "상대"}: </span>
+                        <span className="truncate">{sentence(p.day, t, live)}</span>
+                        <ModeTag watch={watchOf(p)} onOpen={() => setExplaining(true)} />
+                      </p>
+                    ))}
+                  </div>
                 ) : (
-                  <Play aria-hidden className="ml-0.5 size-5" strokeWidth={1.8} fill="currentColor" />
+                  <p aria-live={playing ? "off" : "polite"} className="mt-1.5 flex min-w-0 items-center gap-2 text-ui text-dim">
+                    <span className="truncate">{sentence(scene.people[0].day, t, live)}</span>
+                    <ModeTag watch={watchOf(scene.people[0])} onOpen={() => setExplaining(true)} />
+                  </p>
                 )}
-              </button>
-            </div>
-          </div>
-          {/* The whole width: the line runs long while a way is being gone. */}
-          {both ? (
-            <div aria-live={playing ? "off" : "polite"} className="mt-1.5 space-y-0.5">
-              {scene.people.map((p) => (
-                <p key={p.who} className="flex min-w-0 items-center gap-2 text-ui text-dim">
-                  <span aria-hidden className={cn("size-[6px] shrink-0 rounded-full", p.me ? "bg-mine" : "bg-partner")} />
-                  <span className="sr-only">{p.me ? "나" : "상대"}: </span>
-                  <span className="truncate">{sentence(p.day, t, live)}</span>
-                  <ModeTag watch={watchOf(p)} onOpen={() => setExplaining(true)} />
-                </p>
-              ))}
-            </div>
-          ) : (
-            <p aria-live={playing ? "off" : "polite"} className="mt-1.5 flex min-w-0 items-center gap-2 text-ui text-dim">
-              <span className="truncate">{sentence(scene.people[0].day, t, live)}</span>
-              <ModeTag watch={watchOf(scene.people[0])} onOpen={() => setExplaining(true)} />
-            </p>
-          )}
 
-          <div className="mt-3">
-            <Strip scene={scene} t={t} onSeek={seek} onHold={(held) => held && pause()} />
+                <div className="mt-3">
+                  <Strip scene={scene} t={t} onSeek={seek} onHold={(held) => held && pause()} />
+                </div>
+              </>
+            )}
           </div>
         </div>
-        {registering ? null : <DayList scene={scene} t={t} onSeek={seek} />}
+        {registering ? null : <DayList scene={scene} t={t} onSeek={seek} busy={loading} />}
       </aside>
 
       <ModesSheet
         open={explaining}
         onOpenChange={setExplaining}
-        phones={([me, me === "owner" ? "guest" : "owner"] as Who[]).map((who) => ({ who, me: who === me, track: tracks[who] }))}
+        phones={([me, me === "owner" ? "guest" : "owner"] as Who[]).map((who) => ({
+          who,
+          me: who === me,
+          track: tracks[who],
+          unread: unread.includes(who),
+        }))}
         today={scene.today}
         readAt={readAt}
         onRegister={register}
@@ -680,7 +793,7 @@ function sentence(day: Day, t: number, live: boolean): string {
  * way, with its hours; a row goes to its moment. Both people: one list in
  * time, each row with its person's dot.
  */
-function DayList({ scene, t, onSeek }: { scene: Scene; t: number; onSeek: (t: number) => void }) {
+function DayList({ scene, t, onSeek, busy }: { scene: Scene; t: number; onSeek: (t: number) => void; busy?: boolean }) {
   const both = scene.people.length > 1;
   const rows = scene.people
     .flatMap((p) => p.day.items.map((it) => ({ it, p })))
@@ -690,7 +803,14 @@ function DayList({ scene, t, onSeek }: { scene: Scene; t: number; onSeek: (t: nu
   const moved = moves.reduce((s, it) => s + (it.type === "move" ? it.meters : 0), 0);
   const time = moves.reduce((s, it) => s + (it.end - it.start), 0);
   return (
-    <section aria-labelledby="day-list" className="hidden min-h-0 flex-1 flex-col border-t border-edge-soft sm:landscape:flex">
+    <section
+      aria-labelledby="day-list"
+      aria-busy={busy || undefined}
+      className={cn(
+        "hidden min-h-0 flex-1 flex-col border-t border-edge-soft transition-opacity sm:landscape:flex",
+        busy && "opacity-60",
+      )}
+    >
       <div className="flex items-baseline justify-between gap-3 px-5 pt-4 pb-1">
         <h2 id="day-list" className="text-aside text-faint">
           하루

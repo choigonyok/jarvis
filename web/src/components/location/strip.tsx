@@ -213,7 +213,8 @@ function Hours({ day }: { day: Scene }) {
           className={cn("absolute text-dim", nowAt > 94 ? "-translate-x-full" : nowAt < 6 ? "" : "-translate-x-1/2")}
           style={{ left: `${nowAt}%` }}
         >
-          지금
+          {/* Kept from a read before: where it ends is when that was, not now. */}
+          {day.stale ? hm(day.end) : "지금"}
         </span>
       ) : null}
     </div>

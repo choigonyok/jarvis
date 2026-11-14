@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { AsOf } from "@/components/shell/as-of";
 import { Header, PageTop } from "@/components/shell/header";
 import { TabBar } from "@/components/shell/tab-bar";
 import { Retry } from "@/components/shell/retry";
@@ -36,12 +37,24 @@ type Shelf = "notes" | "places" | "things" | "meals";
 /** Notes asked about on the screen itself; the rest are one line away. */
 const ASKED_HERE = 3;
 
+/**
+ * A ledger as shown: what was read and when - or, when reading it again
+ * failed, what was read before, marked stale - or why it was never read.
+ */
+type Kept<T> = Loaded<T> & { at?: number; stale?: boolean };
+
 type Book = {
-  notes: Loaded<Note[]>;
-  places: Loaded<Place[]>;
-  things: Loaded<Thing[]>;
-  meals: Loaded<Meal[]>;
+  notes: Kept<Note[]>;
+  places: Kept<Place[]>;
+  things: Kept<Thing[]>;
+  meals: Kept<Meal[]>;
 };
+
+/** A ledger read again: what came back - or, when that failed, what was read before, kept and marked stale. */
+function reread<T>(next: Loaded<T>, prev: Kept<T> | undefined, at: number): Kept<T> {
+  if (next.error === undefined) return { ...next, at };
+  return prev?.data !== undefined ? { data: prev.data, at: prev.at, stale: true } : next;
+}
 
 /**
  * What Jarvis has come to know about the operator's life (mind): the notes
@@ -60,9 +73,11 @@ export function Life() {
   const waiting = proposals.filter(isPending);
   const [book, setBook] = useState<Book | null>(null);
   const [shelf, setShelf] = useState<Shelf | null>(null);
-  // The notes asked about on the screen itself, as they were when it was read:
-  // one answered stays where it is until the next visit.
-  const [asked, setAsked] = useState<ReadonlySet<string>>(new Set());
+  // The notes asked about on the screen itself, as they were when they were
+  // first read: one answered stays where it is until the next visit, and a
+  // read again - a push, coming back to the app - moves none of them, not the
+  // one whose why is being typed.
+  const [asked, setAsked] = useState<ReadonlySet<string> | null>(null);
 
   const load = useCallback(
     () =>
@@ -72,10 +87,23 @@ export function Life() {
         read<Thing[]>("things", "things"),
         read<Meal[]>("meals?days=30", "meals"),
       ]).then(([notes, places, things, meals]) => {
+        const at = Date.now();
         // The order is the visit's: an answered note keeps its place until next time.
         if (notes.data) notes = { data: byAttention(notes.data) };
-        setBook({ notes, places, things, meals });
-        setAsked(new Set((notes.data ?? []).filter((n) => n.status === "hypothesis").slice(0, ASKED_HERE).map((n) => n.id)));
+        // A ledger not read again keeps what was read, said to be from then.
+        // The first request on coming back to the app often fails, and it had
+        // put "불러오지 못했어요" in place of the whole screen - an open sheet
+        // and a reason being typed with it.
+        setBook((b) => ({
+          notes: reread(notes, b?.notes, at),
+          places: reread(places, b?.places, at),
+          things: reread(things, b?.things, at),
+          meals: reread(meals, b?.meals, at),
+        }));
+        const first = notes.data;
+        if (first) {
+          setAsked((cur) => cur ?? new Set(first.filter((n) => n.status === "hypothesis").slice(0, ASKED_HERE).map((n) => n.id)));
+        }
       }),
     [],
   );
@@ -97,7 +125,11 @@ export function Life() {
   }, []);
 
   function changed(next: Note) {
-    setBook((b) => (b?.notes.data ? { ...b, notes: { data: b.notes.data.map((n) => (n.id === next.id ? next : n)) } } : b));
+    setBook((b) => {
+      const notes = b?.notes;
+      if (!b || !notes?.data) return b;
+      return { ...b, notes: { ...notes, data: notes.data.map((n) => (n.id === next.id ? next : n)) } };
+    });
   }
 
   return (
@@ -124,11 +156,12 @@ export function Life() {
             </div>
           ) : (
             <>
+              <Stale of={[book.notes, book.places, book.things, book.meals]} onRetry={load} className="mb-3" />
               <Headline notes={book.notes} />
 
-              {book.notes.data?.some((n) => asked.has(n.id)) ? (
+              {book.notes.data?.some((n) => asked?.has(n.id)) ? (
                 <div className="mt-5">
-                  <Notes notes={book.notes.data.filter((n) => asked.has(n.id))} onChange={changed} />
+                  <Notes notes={book.notes.data.filter((n) => asked?.has(n.id))} onChange={changed} />
                 </div>
               ) : null}
 
@@ -140,6 +173,7 @@ export function Life() {
                   open={shelf === "notes"}
                   onOpenChange={(v) => setShelf(v ? "notes" : null)}
                 >
+                  <Stale of={[book.notes]} onRetry={load} className="pb-1" />
                   {book.notes.error ? (
                     <Trouble what="노트를" onRetry={load}>{book.notes.error}</Trouble>
                   ) : book.notes.data!.length === 0 ? (
@@ -157,6 +191,7 @@ export function Life() {
                   open={shelf === "places"}
                   onOpenChange={(v) => setShelf(v ? "places" : null)}
                 >
+                  <Stale of={[book.places]} onRetry={load} className="pb-1" />
                   {book.places.error ? (
                     <Trouble what="지도를" onRetry={load}>{book.places.error}</Trouble>
                   ) : book.places.data!.length === 0 ? (
@@ -174,6 +209,7 @@ export function Life() {
                   open={shelf === "things"}
                   onOpenChange={(v) => setShelf(v ? "things" : null)}
                 >
+                  <Stale of={[book.things]} onRetry={load} className="pb-1" />
                   {book.things.error ? (
                     <Trouble what="물건을" onRetry={load}>{book.things.error}</Trouble>
                   ) : book.things.data!.length === 0 ? (
@@ -190,6 +226,7 @@ export function Life() {
                   open={shelf === "meals"}
                   onOpenChange={(v) => setShelf(v ? "meals" : null)}
                 >
+                  <Stale of={[book.meals]} onRetry={load} className="pb-1" />
                   {book.meals.error ? <Trouble what="식사를" onRetry={load}>{book.meals.error}</Trouble> : <Meals meals={book.meals.data!} />}
                 </DetailRow>
               </ul>
@@ -242,6 +279,18 @@ function thingLine(things: Thing[] | undefined): string | undefined {
 
 function Empty({ children }: { children: ReactNode }) {
   return <p className="py-3 text-ui leading-[1.55] break-keep text-pretty text-faint">{children}</p>;
+}
+
+/**
+ * Over ledgers read before and not again: when what is shown is from - the
+ * oldest of them - in the red of a read that failed, and 다시 시도. On the
+ * screen for all four, and in a ledger's own sheet for it, so an open sheet
+ * says it too.
+ */
+function Stale({ of, onRetry, className }: { of: Kept<unknown>[]; onRetry: () => unknown; className?: string }) {
+  const at = of.flatMap((x) => (x.stale && x.at ? [x.at] : []));
+  if (at.length === 0) return null;
+  return <AsOf at={new Date(Math.min(...at))} failed onRetry={() => void onRetry()} className={className} />;
 }
 
 /** One part that did not come back, while the others did. */

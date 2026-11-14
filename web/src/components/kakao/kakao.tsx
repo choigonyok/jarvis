@@ -16,6 +16,7 @@ import { usePaged } from "@/lib/paging";
 import { useKakao, type KakaoMessage, type KakaoRoom, type Source } from "@/lib/use-kakao";
 import { useThread } from "@/lib/use-thread";
 import { isPending } from "@/lib/thread";
+import { SAY } from "@/lib/say";
 import { cn } from "@/lib/utils";
 
 /**
@@ -82,7 +83,7 @@ export function Kakao() {
 }
 
 function Feed({ source }: { source: Source }) {
-  const { rooms, selected, setSelected, messages, error, hydrated, reload } = useKakao(source);
+  const { rooms, selected, setSelected, messages, loading, error, hydrated, reload } = useKakao(source);
 
   // 방을 열면 맨 아래(최근 대화)로. 그 뒤 수집이 새로 고칠 때는, 이미 맨
   // 아래를 보고 있을 때만 따라 내려간다 - 위로 올려 읽던 사람을 몇 초마다
@@ -146,6 +147,8 @@ function Feed({ source }: { source: Source }) {
                 </>
               )}
             </Empty>
+          ) : loading && !error ? (
+            <Placeholder />
           ) : (
             <div className="space-y-2.5">
               {messages.map((m, i) => (
@@ -287,6 +290,28 @@ function RoomPicker({
     </div>
   );
 }
+
+/**
+ * A room's place while its messages are read: still blocks where they will
+ * be - theirs on the left past the times, mine on the right - and nothing of
+ * the room chosen before.
+ */
+function Placeholder() {
+  return (
+    <div className="pt-4">
+      <p role="status" className="sr-only">
+        {SAY.loading}
+      </p>
+      <div aria-hidden className="space-y-2.5">
+        {SHAPE.map((place, i) => (
+          <div key={i} className={cn("h-7 rounded-lg bg-well", place)} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const SHAPE = ["ms-[3.25rem] w-[48%]", "ms-[3.25rem] w-[62%]", "ms-auto w-[38%]", "ms-[3.25rem] w-[54%]", "ms-auto w-[46%]"];
 
 /** "23:59" for a room heard from today, "10월 18일" before that. */
 function when(room: KakaoRoom): string {

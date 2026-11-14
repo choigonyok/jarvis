@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { onResume } from "@/lib/resume";
 
 // The collectors' read-only surfaces, behind the login proxy. The browser never
@@ -65,68 +65,95 @@ function fmtTime(epoch: number): string {
   return epoch > 0 ? timeFmt.format(new Date(epoch * 1000)) : "";
 }
 
+async function fetchRooms(api: string): Promise<KakaoRoom[]> {
+  const res = await fetch(`${api}/chats?limit=200`, { cache: "no-store" });
+  if (!res.ok) throw new Error(String(res.status));
+  const { chats } = (await res.json()) as { chats: ChatWire[] | null };
+  return (chats ?? []).map((c) => ({
+    id: String(c.chat_id),
+    name: c.chat_name,
+    messages: c.message_count,
+    unread: 0,
+    lastDate: fmtDate(c.last_message_at),
+    lastTime: fmtTime(c.last_message_at),
+  }));
+}
+
+async function fetchMessages(api: string, chatId: string): Promise<KakaoMessage[]> {
+  const res = await fetch(
+    `${api}/messages?chat=${encodeURIComponent(chatId)}&limit=200`,
+    { cache: "no-store" },
+  );
+  if (!res.ok) throw new Error(String(res.status));
+  const { messages } = (await res.json()) as { messages: MessageWire[] | null };
+  // 수집기는 최신순으로 준다. 화면은 시간순(아래가 최신)이라 뒤집는다.
+  return (messages ?? []).slice().reverse().map((m) => ({
+    room: m.chat_name,
+    date: fmtDate(m.sent_at),
+    time: fmtTime(m.sent_at),
+    mine: m.is_mine,
+    sender: m.author,
+    text: m.text,
+  }));
+}
+
+/** A room whose own messages have not come yet shows none. */
+const NONE: KakaoMessage[] = [];
+
 /**
  * Reads what the Mac-side collector stored. Polls rather than streams: this
  * surface is a window onto a database, not a live conversation, and the
  * collector itself only looks once a second.
+ *
+ * Messages are kept with the room they were read for, and only the chosen
+ * room's are given out: choosing another had left the room before's
+ * conversation under the new room's name until its first answer came - or
+ * after it, when the room before's poll came back late.
  */
 export function useKakao(source: Source = "kakao") {
   const API = BASE[source];
   const [rooms, setRooms] = useState<KakaoRoom[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
-  const [messages, setMessages] = useState<KakaoMessage[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [shown, setShown] = useState<{ room: string; list: KakaoMessage[] } | null>(null);
+  // What failed last: the rooms, or one room's messages - said for that room only.
+  const [error, setError] = useState<{ text: string; room?: string } | null>(null);
   const [hydrated, setHydrated] = useState(false);
+  // The room chosen, as an answer coming back checks it.
+  const wanted = useRef<string | null>(null);
 
-  const loadRooms = useCallback(async () => {
-    try {
-      const res = await fetch(`${API}/chats?limit=200`, { cache: "no-store" });
-      if (!res.ok) throw new Error(String(res.status));
-      const { chats } = (await res.json()) as { chats: ChatWire[] | null };
-      const data: KakaoRoom[] = (chats ?? []).map((c) => ({
-        id: String(c.chat_id),
-        name: c.chat_name,
-        messages: c.message_count,
-        unread: 0,
-        lastDate: fmtDate(c.last_message_at),
-        lastTime: fmtTime(c.last_message_at),
-      }));
-      setRooms(data);
-      setError(null);
-      // 처음 들어왔을 때는 가장 최근 방을 연다.
-      setSelected((cur) => cur ?? data[0]?.id ?? null);
-    } catch {
-      setError("수집된 대화를 불러오지 못했어요.");
-    } finally {
-      setHydrated(true);
-    }
-  }, [API]);
+  const loadRooms = useCallback(
+    () =>
+      fetchRooms(API).then(
+        (data) => {
+          setRooms(data);
+          setError(null);
+          // 처음 들어왔을 때는 가장 최근 방을 연다.
+          setSelected((cur) => cur ?? data[0]?.id ?? null);
+          setHydrated(true);
+        },
+        () => {
+          setError({ text: "수집된 대화를 불러오지 못했어요." });
+          setHydrated(true);
+        },
+      ),
+    [API],
+  );
 
-  const loadMessages = useCallback(async (chatId: string) => {
-    try {
-      const res = await fetch(
-        `${API}/messages?chat=${encodeURIComponent(chatId)}&limit=200`,
-        { cache: "no-store" },
-      );
-      if (!res.ok) throw new Error(String(res.status));
-      const { messages } = (await res.json()) as { messages: MessageWire[] | null };
-      // 수집기는 최신순으로 준다. 화면은 시간순(아래가 최신)이라 뒤집는다.
-      const ordered = (messages ?? []).slice().reverse();
-      setMessages(
-        ordered.map((m) => ({
-          room: m.chat_name,
-          date: fmtDate(m.sent_at),
-          time: fmtTime(m.sent_at),
-          mine: m.is_mine,
-          sender: m.author,
-          text: m.text,
-        })),
-      );
-      setError(null);
-    } catch {
-      setError("메시지를 불러오지 못했어요.");
-    }
-  }, [API]);
+  // An answer for a room no longer chosen is dropped, its failure too.
+  const loadMessages = useCallback(
+    (chatId: string) =>
+      fetchMessages(API, chatId).then(
+        (list) => {
+          if (wanted.current !== chatId) return;
+          setShown({ room: chatId, list });
+          setError(null);
+        },
+        () => {
+          if (wanted.current === chatId) setError({ text: "메시지를 불러오지 못했어요.", room: chatId });
+        },
+      ),
+    [API],
+  );
 
   useEffect(() => {
     void loadRooms();
@@ -135,6 +162,7 @@ export function useKakao(source: Source = "kakao") {
   }, [loadRooms]);
 
   useEffect(() => {
+    wanted.current = selected;
     if (!selected) return;
     void loadMessages(selected);
     const id = setInterval(() => void loadMessages(selected), 3_000);
@@ -149,5 +177,16 @@ export function useKakao(source: Source = "kakao") {
   );
   useEffect(() => onResume(reload), [reload]);
 
-  return { rooms, selected, setSelected, messages, error, hydrated, reload };
+  const own = shown?.room === selected;
+  return {
+    rooms,
+    selected,
+    setSelected,
+    messages: own ? shown.list : NONE,
+    /** The chosen room's messages are on their way. */
+    loading: selected !== null && !own,
+    error: error && (error.room === undefined || error.room === selected) ? error.text : null,
+    hydrated,
+    reload,
+  };
 }

@@ -114,7 +114,13 @@ export function Status() {
 
   const results = report?.results ?? [];
   const spend = usageRows(usage);
-  const groupOf = (id: string) => results.find((r) => r.id === id)?.group ?? (spend.some((r) => r.id === id) ? USAGE : null);
+  // The setups under the groups are sheets of their own, not checks: a link
+  // to one (위치 수신's 폰 연결 설정 열기, the 위치 screen's ?focus=check:phone)
+  // opens it. Looked up as a check, it had only closed the sheet it was in.
+  const groupOf = (id: string) =>
+    SETUPS.includes(id)
+      ? id
+      : (results.find((r) => r.id === id)?.group ?? (spend.some((r) => r.id === id) ? USAGE : null));
 
   function reveal(id: string) {
     setOpen(id);
@@ -241,6 +247,9 @@ async function reportOf(method: "GET" | "POST", signal?: AbortSignal): Promise<S
 }
 
 const USAGE = "사용량";
+
+/** The sheets of the rows under the groups: 폰 연결, 로그인 정보. */
+const SETUPS = ["phone", "logins"];
 
 /**
  * A row, as every line on this screen is drawn. Checks come from status-svc;
