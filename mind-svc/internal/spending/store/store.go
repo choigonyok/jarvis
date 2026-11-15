@@ -608,7 +608,7 @@ func (s *Store) Delete(ctx context.Context, id int64) error {
 	switch source {
 	case "manual":
 	case "asset":
-		return KeptError{"투자 계좌 출금에서 온 내역은 여기서 지울 수 없어요. 자산 탭에서 다시 물어 주세요."}
+		return KeptError{"투자 계좌 출금에서 온 내역은 여기서 지울 수 없어요. 자산 탭 원금에서 그 답을 지우고 다시 답해 주세요."}
 	default:
 		return KeptError{"카드 알림에서 온 내역은 지울 수 없어요. 합계에서 빼기를 쓰세요."}
 	}
