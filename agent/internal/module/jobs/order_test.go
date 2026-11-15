@@ -199,3 +199,16 @@ func TestListJobsIsShortAndNamesTheCard(t *testing.T) {
 		t.Fatalf("자세히: 기억은 키만, 누르기는 빼고, 카드·답은 보여야 합니다: %s", d)
 	}
 }
+
+// A paused job rests in the conversation as it does in the 작업 tab (쉬는 중):
+// 멈춤 beside 그만둠 read as two ways to stop for good.
+func TestAPausedJobRestsAsTheTabSays(t *testing.T) {
+	m := New(NewStore("http://unused", ""), nil, proposal.NewStore(bus.New()), nil, nil)
+	j := Job{ID: 3, Title: "캠핑 의자 가격", State: "paused"}
+	if out := m.renderList([]Job{j}, false); !strings.Contains(out, "[3 · 쉬는 중] 캠핑 의자 가격") {
+		t.Fatalf("목록: %s", out)
+	}
+	if got := m.nextRun(j); got != "다음 실행: 없음 (쉬는 중)" {
+		t.Fatalf("다음 실행: %s", got)
+	}
+}

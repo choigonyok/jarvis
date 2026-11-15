@@ -288,7 +288,8 @@ func (s *Structured) WorkoutRecords(w session) []model.Record {
 
 // --- jobs -------------------------------------------------------------------
 
-var jobState = map[string]string{"active": "진행 중", "waiting": "승인 대기", "paused": "멈춤", "done": "끝남", "cancelled": "그만둠", "failed": "실패"}
+// A paused job rests (쉬는 중), as the 작업 tab and a paused goal say it.
+var jobState = map[string]string{"active": "진행 중", "waiting": "승인 대기", "paused": "쉬는 중", "done": "끝남", "cancelled": "그만둠", "failed": "실패"}
 
 // jobOver is the states a job ends in: its last summary is then what it did.
 var jobOver = map[string]bool{"done": true, "cancelled": true, "failed": true}

@@ -875,9 +875,10 @@ type GetJobInput struct {
 
 // "waiting" is waiting on a card - any card, a question as much as a
 // payment: "승인 대기" read as "the payment waits for approval" when the card
-// was "결제는 성공했는데 주문 반영이 안 보여요".
+// was "결제는 성공했는데 주문 반영이 안 보여요". "paused" rests, as the 작업 tab
+// and a paused goal say it: 멈춤 beside 그만둠 read as two ways to stop for good.
 var stateLabel = map[string]string{
-	"active": "진행 중", "waiting": "카드 대기", "paused": "멈춤",
+	"active": "진행 중", "waiting": "카드 대기", "paused": "쉬는 중",
 	"done": "끝남", "cancelled": "그만둠", "failed": "실패",
 }
 

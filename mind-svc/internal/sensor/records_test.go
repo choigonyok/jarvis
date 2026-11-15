@@ -64,6 +64,10 @@ func TestRecordsWording(t *testing.T) {
 	if j := s.JobRecord(job{ID: 4, Title: "예약 확인", Goal: "캠핑장 예약 확정", State: "active", Summary: "접수가 안 됐을 수 있어요", CreatedAt: "2026-11-01T23:00:00+09:00"}); j.Fact != "2026-11-01에 맡긴 작업 '예약 확인': 캠핑장 예약 확정 - 지금 진행 중" {
 		t.Errorf("진행 중인 작업: %+v", j)
 	}
+	// Paused, it rests in the 작업 tab's word.
+	if j := s.JobRecord(job{ID: 5, Title: "의자 가격", Goal: "캠핑 의자 최저가 보기", State: "paused", CreatedAt: "2026-11-02T09:00:00+09:00"}); j.Fact != "2026-11-02에 맡긴 작업 '의자 가격': 캠핑 의자 최저가 보기 - 지금 쉬는 중" {
+		t.Errorf("쉬는 작업: %+v", j)
+	}
 	city, country := "Gapyeong", "South Korea"
 	day := time.Date(2026, 10, 11, 0, 0, 0, 0, seoul)
 	a := asset{ID: "a1"}

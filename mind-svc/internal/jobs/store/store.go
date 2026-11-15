@@ -447,7 +447,9 @@ func (s *Store) Control(ctx context.Context, id int64, action string) error {
 	var q, note string
 	switch action {
 	case "pause":
-		q, note = `update mind.jobs set state = 'paused', updated_at = now() where id = $1 and state in ('active', 'waiting')`, "멈췄습니다"
+		// The tab's 잠깐 쉬기, as a paused goal rests, in the 합니다체 every
+		// line of this log is in (the tab's own note says 잠깐 쉬어요).
+		q, note = `update mind.jobs set state = 'paused', updated_at = now() where id = $1 and state in ('active', 'waiting')`, "잠깐 쉽니다"
 	case "resume":
 		q, note = `update mind.jobs set state = 'active', next_at = now(), next_reason = '다시 시작', attempts = 0, updated_at = now()
 			where id = $1 and state in ('paused', 'failed')`, "다시 시작했습니다"

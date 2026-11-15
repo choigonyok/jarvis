@@ -491,7 +491,7 @@ func TestAJobPutFirstAndTheRunItStops(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := s.Control(ctx, c.ID, "first"); err == nil {
-		t.Fatal("멈춘 작업은 먼저 할 수 없습니다")
+		t.Fatal("쉬는 작업은 먼저 할 수 없습니다")
 	}
 }
 
