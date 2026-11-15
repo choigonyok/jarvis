@@ -7,7 +7,7 @@ import { ExercisePicker } from "@/components/workout/exercise-picker";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Input } from "@/components/ui/input";
-import { local, primeChime, useChimeReady, useNow, useWakeLock } from "@/lib/use-gym";
+import { local, primeChime, restPush, useChimeReady, useNow, useWakeLock } from "@/lib/use-gym";
 import {
   bestSet,
   clock,
@@ -117,6 +117,10 @@ export function LiveSession({
   const [staleDismissed, setStaleDismissed] = useState(false);
 
   useEffect(() => local.set(REST_KEY, rest), [rest]);
+  // The rest's end goes to this phone as a push too (lib/use-gym.ts). Going
+  // to another screen keeps it: the rest goes on, and that is when it is wanted.
+  const restEnd = rest ? rest.startedAt + rest.target * 1000 : null;
+  useEffect(() => restPush(restEnd), [restEnd]);
 
   const valid = (ref: SetRef | null) =>
     ref !== null &&
@@ -541,7 +545,7 @@ export function LiveSession({
             ))}
           </ToggleGroup>
           <p className="mt-1.5 text-aside leading-relaxed text-dim">
-            휴식이 끝나면 이 화면에서 소리로 알려요. 무음 모드인 아이폰에서는 소리가 나지 않아요.
+            휴식이 끝나면 이 화면에서 소리로 알려요. 무음 모드인 아이폰에서는 소리가 나지 않지만, 알림을 받는 기기라면 잠겨 있어도 알림이 와요.
           </p>
         </div>
       </section>
@@ -605,14 +609,18 @@ export function LiveSession({
         session={session}
         history={history}
         elapsed={(endAt ?? now) - session.startedAt}
+        // The push is taken back here: the session goes with this screen,
+        // before an effect could see its rest end.
         onEnd={() => {
           setFinishing(false);
           setRest(null);
+          restPush(null);
           onEnd(endAt);
         }}
         onDiscard={() => {
           setFinishing(false);
           setRest(null);
+          restPush(null);
           onDiscard();
         }}
       />

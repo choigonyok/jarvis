@@ -71,6 +71,12 @@ mind 가 승인된 일을 효과 `adapter.call` 로 내면 `internal/calls` 가 
 - `GET /settings`, `PUT /settings` `{muted, quietStart, quietEnd, digestAt}`
 - `GET /vapid` 브라우저가 구독할 공개키, `POST|DELETE /subscriptions`
 - `POST /test` 모든 기기에 시험 푸시
+- `POST /timers` `{endpoint, at, tag, title, body?, url?}` → `{id, at}` 정한 시각에 이 기기 하나로 푸시 한 통.
+  운동 휴식이 끝났을 때를 잠긴 폰에도 알리려고 콘솔이 쓴다(`tag: "rest"`). `at` 은 유닉스 밀리초나 RFC 3339,
+  30분 안쪽. `endpoint` 는 묻는 사람이 구독한 기기여야 하고(아니면 404), 보낼 때 다시 확인한다. 같은 기기·같은
+  `tag` 로 다시 맡기면 앞의 것을 바꾸고, 한 기기에 4개까지. `DELETE /timers/{id}` 로 거둔다(이미 갔거나 없으면 404).
+  급한 푸시(TTL 1분)이고 알림함에 남지 않으며, 방해 금지·꺼 둔 분류와 상관없고, 콘솔을 띄워 둔 기기에도 간다 -
+  운동 중에는 화면이 켜져 있어도 보고 있지 않다. 메모리에만 두므로 서비스가 다시 뜨면 기다리던 것은 사라진다.
 
 ## 받는 사람(audience)
 

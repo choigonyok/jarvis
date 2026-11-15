@@ -86,6 +86,13 @@ func TestEveryoneHasTheirOwn(t *testing.T) {
 	if len(guests) == 0 {
 		t.Fatal("손님 기기가 없습니다")
 	}
+	// What a push asked for one device checks: whose it is now.
+	if _, ok, err := s.Subscription(ctx, Owner, sub.Endpoint); err != nil || ok {
+		t.Fatalf("손님에게 옮긴 기기가 운영자의 것으로 읽힙니다: %v %v", ok, err)
+	}
+	if got, ok, err := s.Subscription(ctx, Guest, sub.Endpoint); err != nil || !ok || got.Auth != "a" {
+		t.Fatalf("손님 기기를 찾지 못했습니다: %+v %v %v", got, ok, err)
+	}
 
 	type set struct{ QuietStart string }
 	if err := s.WriteSettings(ctx, Guest, set{QuietStart: "23:00"}); err != nil {

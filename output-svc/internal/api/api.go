@@ -9,6 +9,8 @@
 //	POST   /subscriptions       a browser's PushSubscription
 //	DELETE /subscriptions       {endpoint}
 //	POST   /test                a push to every device, to see it arrive
+//	POST   /timers              a push to one of the person's own devices, at a time
+//	DELETE /timers/{id}         taken back
 //	POST   /presence            a console on screen, or leaving it
 //	GET    /stream              pushes as they go out, for an open console
 //
@@ -37,16 +39,18 @@ import (
 	"github.com/choigonyok/jarvis/output-svc/internal/notify"
 	"github.com/choigonyok/jarvis/output-svc/internal/push"
 	"github.com/choigonyok/jarvis/output-svc/internal/store"
+	"github.com/choigonyok/jarvis/output-svc/internal/timers"
 )
 
 type Server struct {
-	svc   *notify.Service
-	store *store.Store
-	push  *push.Pusher
-	live  *live.Hub
-	token string
-	log   *slog.Logger
-	loops *health.Loops
+	svc    *notify.Service
+	store  *store.Store
+	push   *push.Pusher
+	live   *live.Hub
+	timers *timers.Timers
+	token  string
+	log    *slog.Logger
+	loops  *health.Loops
 }
 
 func New(svc *notify.Service, st *store.Store, p *push.Pusher, hub *live.Hub, token string, log *slog.Logger) *Server {
@@ -56,6 +60,12 @@ func New(svc *notify.Service, st *store.Store, p *push.Pusher, hub *live.Hub, to
 // Loops are the background loops /health reports (the minute tick).
 func (s *Server) WithLoops(l *health.Loops) *Server {
 	s.loops = l
+	return s
+}
+
+// WithTimers opens /timers: pushes a console asks for at a time.
+func (s *Server) WithTimers(t *timers.Timers) *Server {
+	s.timers = t
 	return s
 }
 
@@ -105,6 +115,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /subscriptions", s.auth(s.subscribe))
 	mux.HandleFunc("DELETE /subscriptions", s.auth(s.unsubscribe))
 	mux.HandleFunc("POST /test", s.auth(s.test))
+	if s.timers != nil {
+		mux.HandleFunc("POST /timers", s.auth(s.schedule))
+		mux.HandleFunc("DELETE /timers/{id}", s.auth(s.unschedule))
+	}
 	mux.HandleFunc("POST /presence", s.auth(s.presence))
 	mux.HandleFunc("GET /stream", s.auth(s.stream))
 	return mux
@@ -340,6 +354,74 @@ func (s *Server) test(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]int{"sent": n})
+}
+
+// schedule is a push to one of the asking person's own devices at a time
+// (internal/timers): {endpoint, at, tag, title, body, url}, at in unix
+// milliseconds or RFC 3339, answered {id, at}. The same endpoint and tag
+// again replaces the earlier one.
+func (s *Server) schedule(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Endpoint string          `json:"endpoint"`
+		At       json.RawMessage `json:"at"`
+		Tag      string          `json:"tag"`
+		Title    string          `json:"title"`
+		Body     string          `json:"body"`
+		URL      string          `json:"url"`
+	}
+	if !readJSON(w, r, &in) {
+		return
+	}
+	at, ok := when(in.At)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "at 은 유닉스 밀리초나 RFC 3339 시각이어야 합니다."})
+		return
+	}
+	t, err := s.timers.Schedule(r.Context(), timers.Ask{
+		Audience: audience(r), Endpoint: in.Endpoint, At: at, Tag: in.Tag, Title: in.Title, Body: in.Body, URL: in.URL,
+	})
+	switch {
+	case errors.Is(err, timers.ErrInvalid):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+	case errors.Is(err, timers.ErrNotYours):
+		// Another person's device and no device at all answer alike.
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "이 기기의 푸시 구독이 없습니다."})
+	case errors.Is(err, timers.ErrTooMany):
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": fmt.Sprintf("한 기기에 예약해 둘 수 있는 푸시는 %d개까지입니다.", timers.PerDevice)})
+	case err != nil:
+		s.log.Error("푸시를 예약하지 못했습니다", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "푸시를 예약하지 못했습니다."})
+	default:
+		writeJSON(w, http.StatusCreated, t)
+	}
+}
+
+// unschedule takes back one the asking person asked for. One that already
+// went, was replaced or was lost to a restart is not there to take back.
+func (s *Server) unschedule(w http.ResponseWriter, r *http.Request) {
+	if !s.timers.Cancel(audience(r), r.PathValue("id")) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "그런 예약이 없습니다."})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// when reads a time sent as unix milliseconds or as RFC 3339 text.
+func when(raw json.RawMessage) (time.Time, bool) {
+	var ms float64
+	if err := json.Unmarshal(raw, &ms); err == nil {
+		// null reads as 0, no time; past 2^53 is no millisecond a browser sends.
+		if ms <= 0 || ms > 1<<53 {
+			return time.Time{}, false
+		}
+		return time.UnixMilli(int64(ms)), true
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err != nil {
+		return time.Time{}, false
+	}
+	t, err := time.Parse(time.RFC3339, text)
+	return t, err == nil
 }
 
 // presence is a console saying it is on screen ({endpoint, visible: true},

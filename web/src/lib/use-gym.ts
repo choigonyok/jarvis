@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ensurePush } from "@/lib/use-push";
 
 /**
  * Wall-clock now, re-read every `ms`.
@@ -111,3 +112,64 @@ export const local = {
     }
   },
 };
+
+/**
+ * The end of a rest, sent to this phone as a push as well (output-svc
+ * POST /timers). The chime is heard only from a page on screen and off mute;
+ * between sets the phone is locked, in a pocket or showing the music app, and
+ * a push buzzes it even on mute. The push follows the rest: asked for when
+ * one starts or is nudged, taken back when it ends early or the session
+ * does. A device without push has the chime alone, and a call that fails is
+ * let go without a word - the screen still says when the rest is over.
+ */
+const REST_PUSH = "jarvis.workout.rest-push";
+
+/** The push asked for, and when it goes: kept, so a reload can still take it back. */
+type RestPush = { id: string; at: number };
+
+// One call at a time, in order, each for the latest end asked: a nudge
+// pressed three times is one push at its last end, and a rest ended while
+// its push was being asked for takes that push back once it has an id. Each
+// call outlives the page (keepalive): the phone is locked right after the tick.
+let wanted: number | null = null;
+let line: Promise<void> = Promise.resolve();
+
+/** The rest now ends at `at` (ms), or there is none. Never waits, never throws. */
+export function restPush(at: number | null) {
+  wanted = at;
+  line = line.then(settleRestPush).catch(() => {});
+}
+
+async function settleRestPush() {
+  const at = wanted;
+  const held = local.get<RestPush>(REST_PUSH);
+  const now = Date.now();
+  // Over, or all but: the screen says so, and a push would only say it again.
+  if (at === null || at - now < 1000) {
+    if (!held) return;
+    local.set(REST_PUSH, null);
+    // One that already went has nothing left to take back.
+    if (held.at > now) await fetch(`/api/notify/timers/${encodeURIComponent(held.id)}`, { method: "DELETE", keepalive: true });
+    return;
+  }
+  if (held?.at === at) return;
+  const endpoint = await ensurePush();
+  if (!endpoint) return;
+  // The same device and tag again replaces the one asked before.
+  const res = await fetch("/api/notify/timers", {
+    method: "POST",
+    keepalive: true,
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      endpoint,
+      at,
+      tag: "rest",
+      title: "휴식이 끝났어요",
+      body: "다음 세트를 할 시간이에요.",
+      url: "/workout",
+    }),
+  });
+  if (!res.ok) return;
+  const { id } = (await res.json()) as { id?: string };
+  if (id) local.set(REST_PUSH, { id, at });
+}

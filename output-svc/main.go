@@ -26,6 +26,7 @@ import (
 	"github.com/choigonyok/jarvis/output-svc/internal/notify"
 	"github.com/choigonyok/jarvis/output-svc/internal/push"
 	"github.com/choigonyok/jarvis/output-svc/internal/store"
+	"github.com/choigonyok/jarvis/output-svc/internal/timers"
 )
 
 func main() {
@@ -80,7 +81,9 @@ func main() {
 		}
 	}()
 
-	server := api.New(notes, st, pusher, hub, token, log).WithLoops(loops)
+	// Pushes a console asks for at a time - the end of a rest - kept in
+	// memory: a restart loses them, minutes long as they are (internal/timers).
+	server := api.New(notes, st, pusher, hub, token, log).WithLoops(loops).WithTimers(timers.New(pusher, log))
 	// What went out is a record too. Its text is not in it: what is in an
 	// inbox stays there.
 	sent := record.New(dsn, loops, log)

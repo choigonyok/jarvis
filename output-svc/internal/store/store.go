@@ -190,6 +190,18 @@ func (s *Store) Subscriptions(ctx context.Context, audience string) ([]Subscript
 	return out, rows.Err()
 }
 
+// Subscription is one of a person's devices, by its endpoint - and false
+// when the endpoint is no device of theirs: another person's, or none.
+func (s *Store) Subscription(ctx context.Context, audience, endpoint string) (Subscription, bool, error) {
+	var sub Subscription
+	err := s.pool.QueryRow(ctx, `select audience, endpoint, p256dh, auth, user_agent from output.push_subscriptions where audience = $1 and endpoint = $2`,
+		who(audience), endpoint).Scan(&sub.Audience, &sub.Endpoint, &sub.P256dh, &sub.Auth, &sub.UserAgent)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Subscription{}, false, nil
+	}
+	return sub, err == nil, err
+}
+
 // Subscribe keeps a device for a person. The same browser signed in as the
 // other person moves to them.
 func (s *Store) Subscribe(ctx context.Context, sub Subscription) error {

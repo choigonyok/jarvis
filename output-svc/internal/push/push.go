@@ -1,6 +1,7 @@
 // Package push delivers one payload to every subscribed device over Web Push
-// (VAPID). It is the only way out of output-svc: no app to install, and a tap
-// opens the console on the screen the notification is about.
+// (VAPID) - or to the one device that asked for it (internal/timers). It is
+// the only way out of output-svc: no app to install, and a tap opens the
+// console on the screen the notification is about.
 package push
 
 import (
@@ -13,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	webpush "github.com/SherClockHolmes/webpush-go"
 
@@ -29,6 +31,10 @@ type Payload struct {
 	Tag string `json:"tag"`
 	// Urgent asks the push service to wake the device now.
 	Urgent bool `json:"-"`
+	// TTL is how long the push service keeps trying a device it cannot reach
+	// (a phone with no signal). Zero is a day; a push that is only worth its
+	// minute says less, and is dropped rather than arriving late.
+	TTL time.Duration `json:"-"`
 }
 
 type Keys struct {
@@ -75,10 +81,6 @@ func (p *Pusher) Send(ctx context.Context, audience string, pl Payload) (int, er
 	if err != nil {
 		return 0, err
 	}
-	urgency := webpush.UrgencyNormal
-	if pl.Urgent {
-		urgency = webpush.UrgencyHigh
-	}
 	sent := 0
 	for _, sub := range subs {
 		// On screen: the page shows it (above); a phone banner would only
@@ -87,38 +89,87 @@ func (p *Pusher) Send(ctx context.Context, audience string, pl Payload) (int, er
 			sent++
 			continue
 		}
-		resp, err := webpush.SendNotificationWithContext(ctx, body, &webpush.Subscription{
-			Endpoint: sub.Endpoint,
-			Keys:     webpush.Keys{P256dh: sub.P256dh, Auth: sub.Auth},
-		}, &webpush.Options{
-			Subscriber:      p.keys.Subject,
-			VAPIDPublicKey:  p.keys.Public,
-			VAPIDPrivateKey: p.keys.Private,
-			TTL:             24 * 60 * 60,
-			Urgency:         urgency,
-			Topic:           topic(pl.Tag),
-		})
-		if err != nil {
-			p.log.Warn("푸시를 보내지 못했습니다", "err", err)
-			_ = p.store.PushResult(ctx, sub.Endpoint, false)
-			continue
-		}
-		// The push service says why it refused in the body (Apple: {"reason": ...}).
-		reason, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		resp.Body.Close()
-		switch {
-		case resp.StatusCode == http.StatusGone || resp.StatusCode == http.StatusNotFound:
-			p.log.Info("만료된 푸시 구독을 지웁니다", "status", resp.StatusCode)
-			_ = p.store.Unsubscribe(ctx, sub.Endpoint)
-		case resp.StatusCode >= 200 && resp.StatusCode < 300:
+		if p.deliver(ctx, sub, body, pl) {
 			sent++
-			_ = p.store.PushResult(ctx, sub.Endpoint, true)
-		default:
-			p.log.Warn("푸시 서비스가 거절했습니다", "status", resp.StatusCode, "host", host(sub.Endpoint), "reason", strings.TrimSpace(string(reason)))
-			_ = p.store.PushResult(ctx, sub.Endpoint, false)
 		}
 	}
 	return sent, nil
+}
+
+// Owns says whether endpoint is one of audience's devices.
+func (p *Pusher) Owns(ctx context.Context, audience, endpoint string) (bool, error) {
+	_, ok, err := p.store.Subscription(ctx, audience, endpoint)
+	return ok, err
+}
+
+// SendTo pushes to one device of one person - the one that asked for it -
+// and says whether it took it. False, without a word, when the device is not
+// theirs (any more: a browser signed in as the other person since is that
+// person's) or when there are no keys to push with.
+//
+// Unlike Send it is not shown in their open consoles, and a device that has
+// the console on screen still gets it: what a device asks for itself is for
+// that device, and on screen is not the same as looked at - a phone on the
+// bench between sets keeps the workout screen awake, and only a push buzzes
+// it on mute.
+func (p *Pusher) SendTo(ctx context.Context, audience, endpoint string, pl Payload) (bool, error) {
+	if !p.Ready() {
+		return false, nil
+	}
+	sub, ok, err := p.store.Subscription(ctx, audience, endpoint)
+	if err != nil || !ok {
+		return false, err
+	}
+	body, err := json.Marshal(pl)
+	if err != nil {
+		return false, err
+	}
+	return p.deliver(ctx, sub, body, pl), nil
+}
+
+// deliver hands one push to one device's push service and keeps what came of
+// it: a device the push service says no longer exists is forgotten, a refusal
+// counts toward dropping it. True when the push service took it.
+func (p *Pusher) deliver(ctx context.Context, sub store.Subscription, body []byte, pl Payload) bool {
+	urgency := webpush.UrgencyNormal
+	if pl.Urgent {
+		urgency = webpush.UrgencyHigh
+	}
+	ttl := 24 * 60 * 60
+	if pl.TTL > 0 {
+		ttl = int(pl.TTL / time.Second)
+	}
+	resp, err := webpush.SendNotificationWithContext(ctx, body, &webpush.Subscription{
+		Endpoint: sub.Endpoint,
+		Keys:     webpush.Keys{P256dh: sub.P256dh, Auth: sub.Auth},
+	}, &webpush.Options{
+		Subscriber:      p.keys.Subject,
+		VAPIDPublicKey:  p.keys.Public,
+		VAPIDPrivateKey: p.keys.Private,
+		TTL:             ttl,
+		Urgency:         urgency,
+		Topic:           topic(pl.Tag),
+	})
+	if err != nil {
+		p.log.Warn("푸시를 보내지 못했습니다", "err", err)
+		_ = p.store.PushResult(ctx, sub.Endpoint, false)
+		return false
+	}
+	// The push service says why it refused in the body (Apple: {"reason": ...}).
+	reason, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+	resp.Body.Close()
+	switch {
+	case resp.StatusCode == http.StatusGone || resp.StatusCode == http.StatusNotFound:
+		p.log.Info("만료된 푸시 구독을 지웁니다", "status", resp.StatusCode)
+		_ = p.store.Unsubscribe(ctx, sub.Endpoint)
+	case resp.StatusCode >= 200 && resp.StatusCode < 300:
+		_ = p.store.PushResult(ctx, sub.Endpoint, true)
+		return true
+	default:
+		p.log.Warn("푸시 서비스가 거절했습니다", "status", resp.StatusCode, "host", host(sub.Endpoint), "reason", strings.TrimSpace(string(reason)))
+		_ = p.store.PushResult(ctx, sub.Endpoint, false)
+	}
+	return false
 }
 
 func host(endpoint string) string {
