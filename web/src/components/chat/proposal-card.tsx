@@ -146,7 +146,11 @@ export function ProposalCard({
         {apart ? <CardFacts facts={facts} className="mt-3" /> : null}
 
         {proposal.card.images?.length ? (
-          <CardPhotos names={proposal.card.images} cover={!ofModule(proposal.action.kind, MODULE.mind)} />
+          <CardPhotos
+            names={proposal.card.images}
+            cover={!proposal.card.screen && !ofModule(proposal.action.kind, MODULE.mind)}
+            screen={Boolean(proposal.card.screen)}
+          />
         ) : null}
 
         {form && !settled ? (
@@ -233,36 +237,52 @@ export function ProposalCard({
  * The photos a card is about. A listing's are shown as it will show them, the
  * first the cover; the ones a question asks about (cover false) are all alike.
  * A tap opens them full screen, one after another under the finger - small
- * tiles alone are no way to see one whole.
+ * tiles alone are no way to see one whole. With `screen` the first is the
+ * browser's screen the card asks about - a 보안문자 to read, a page waiting
+ * for a code - drawn whole at the card's width, since the answer is read off
+ * it; the rest stay tiles.
  */
-function CardPhotos({ names, cover }: { names: string[]; cover: boolean }) {
+function CardPhotos({ names, cover, screen = false }: { names: string[]; cover: boolean; screen?: boolean }) {
   const [open, setOpen] = useState<number | null>(null);
-  const alt = (i: number) => (cover && i === 0 ? "대표 사진" : `사진 ${i + 1}`);
+  const alt = (i: number) => (screen && i === 0 ? "물어보는 화면" : cover && i === 0 ? "대표 사진" : `사진 ${i + 1}`);
+  const thumbs = screen ? names.slice(1) : names;
+  const from = names.length - thumbs.length;
   return (
     <>
-      <ul className="scrollbar-none -mx-4 mt-3 flex gap-1.5 overflow-x-auto px-4 sm:-mx-5 sm:px-5" aria-label={cover ? "올릴 사진" : "사진"}>
-        {names.map((name, i) => (
-          <li key={name} className="relative shrink-0">
-            <button
-              type="button"
-              onClick={() => setOpen(i)}
-              aria-label={`${alt(i)} 크게 보기`}
-              className={cn("block overflow-hidden rounded-lg bg-well focus-ring", cover && i > 0 && "mt-4")}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element -- served by the agent behind the proxy */}
-              <img
-                src={photoUrl(name)}
-                alt={alt(i)}
-                loading="lazy"
-                className={cn("block object-cover", !cover ? "size-24" : i === 0 ? "size-24" : "size-20")}
-              />
-            </button>
-            {cover && i === 0 ? (
-              <span className="pointer-events-none absolute bottom-1 left-1 rounded bg-background/80 px-1.5 py-px text-tiny text-dim">대표</span>
-            ) : null}
-          </li>
-        ))}
-      </ul>
+      {screen ? (
+        <button type="button" onClick={() => setOpen(0)} aria-label={`${alt(0)} 크게 보기`} className="mt-3 block w-full overflow-hidden rounded-lg bg-well focus-ring">
+          {/* eslint-disable-next-line @next/next/no-img-element -- served by the agent behind the proxy */}
+          <img src={photoUrl(names[0])} alt={alt(0)} className="block h-auto max-h-[60vh] w-full object-contain" />
+        </button>
+      ) : null}
+      {thumbs.length ? (
+        <ul className="scrollbar-none -mx-4 mt-3 flex gap-1.5 overflow-x-auto px-4 sm:-mx-5 sm:px-5" aria-label={cover ? "올릴 사진" : "사진"}>
+          {thumbs.map((name, t) => {
+            const i = t + from;
+            return (
+              <li key={name} className="relative shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setOpen(i)}
+                  aria-label={`${alt(i)} 크게 보기`}
+                  className={cn("block overflow-hidden rounded-lg bg-well focus-ring", cover && i > 0 && "mt-4")}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element -- served by the agent behind the proxy */}
+                  <img
+                    src={photoUrl(name)}
+                    alt={alt(i)}
+                    loading="lazy"
+                    className={cn("block object-cover", !cover ? "size-24" : i === 0 ? "size-24" : "size-20")}
+                  />
+                </button>
+                {cover && i === 0 ? (
+                  <span className="pointer-events-none absolute bottom-1 left-1 rounded bg-background/80 px-1.5 py-px text-tiny text-dim">대표</span>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
       {open !== null ? (
         <Lightbox items={names.map((name, i) => ({ src: photoUrl(name), alt: alt(i) }))} start={open} onClose={() => setOpen(null)} />
       ) : null}

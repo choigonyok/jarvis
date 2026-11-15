@@ -38,6 +38,12 @@ export interface Card {
    */
   images?: string[];
   /**
+   * Screen: the first image is the browser's screen the card asks about (a
+   * 보안문자, a page waiting for a code) - the answer is read off it, so it
+   * is drawn whole and wide, not as a thumbnail.
+   */
+  screen?: boolean;
+  /**
    * Fields make the card a form: the operator may change these before
    * approving, and the module turns the edits into a new input (Editor).
    */

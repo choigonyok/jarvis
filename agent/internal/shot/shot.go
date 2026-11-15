@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"image/color"
 	"image/jpeg"
 	_ "image/png" // what browser-use answers with
 	"net/http"
@@ -124,4 +125,80 @@ func smaller(raw []byte) ([]byte, error) {
 		return nil, err
 	}
 	return out.Bytes(), nil
+}
+
+// Focus is the part of a screen picture (Take's JPEG) a person reads an
+// answer off: the area given, as [left, top, width, height] in percent of the
+// picture, or with none the picture without the plain margin around what is
+// on it - a 보안문자 page is a box in the middle of white, and a phone shows
+// the box readable where it shows the whole screen as a strip. ok is false
+// when that would keep nearly all of it (nothing to cut) or the area is no
+// area: the whole picture is then all there is.
+func Focus(screen []byte, area []float64) (focus []byte, ok bool, err error) {
+	img, _, err := image.Decode(bytes.NewReader(screen))
+	if err != nil {
+		return nil, false, fmt.Errorf("사진을 읽지 못했습니다: %w", err)
+	}
+	b := img.Bounds()
+	var r image.Rectangle
+	if len(area) == 4 {
+		x0 := b.Min.X + int(area[0]/100*float64(b.Dx()))
+		y0 := b.Min.Y + int(area[1]/100*float64(b.Dy()))
+		r = image.Rect(x0, y0, x0+int(area[2]/100*float64(b.Dx())), y0+int(area[3]/100*float64(b.Dy()))).Intersect(b)
+	} else {
+		r = content(img)
+	}
+	if r.Dx() < 40 || r.Dy() < 40 || r.Dx()*r.Dy() > b.Dx()*b.Dy()*85/100 {
+		return nil, false, nil
+	}
+	s, can := img.(interface {
+		SubImage(r image.Rectangle) image.Image
+	})
+	if !can {
+		return nil, false, nil
+	}
+	var out bytes.Buffer
+	if err := jpeg.Encode(&out, s.SubImage(r), &jpeg.Options{Quality: 88}); err != nil {
+		return nil, false, err
+	}
+	return out.Bytes(), true, nil
+}
+
+// scrollbar is how much of a screen's right edge is the page's scrollbar,
+// which is not content however it is coloured.
+const scrollbar = 20
+
+// content is where a screen is not its background - the colour of its
+// top-left corner - with a margin around it.
+func content(img image.Image) image.Rectangle {
+	b := img.Bounds()
+	bg := img.At(b.Min.X+1, b.Min.Y+1)
+	far := func(c color.Color) bool {
+		r1, g1, b1, _ := c.RGBA()
+		r2, g2, b2, _ := bg.RGBA()
+		d := absDiff(r1, r2) + absDiff(g1, g2) + absDiff(b1, b2)
+		return d > 3*24*257 // more than ~24 of 255 a channel, on average
+	}
+	minX, minY, maxX, maxY := b.Max.X, b.Max.Y, b.Min.X, b.Min.Y
+	for y := b.Min.Y; y < b.Max.Y; y += 2 {
+		for x := b.Min.X; x < b.Max.X-scrollbar; x += 2 {
+			if !far(img.At(x, y)) {
+				continue
+			}
+			minX, minY = min(minX, x), min(minY, y)
+			maxX, maxY = max(maxX, x+2), max(maxY, y+2)
+		}
+	}
+	if minX >= maxX || minY >= maxY {
+		return image.Rectangle{}
+	}
+	const margin = 16
+	return image.Rect(minX-margin, minY-margin, maxX+margin, maxY+margin).Intersect(b)
+}
+
+func absDiff(a, b uint32) uint32 {
+	if a > b {
+		return a - b
+	}
+	return b - a
 }

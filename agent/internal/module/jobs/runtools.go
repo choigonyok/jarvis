@@ -17,6 +17,7 @@ import (
 
 	"github.com/choigonyok/jarvis/agent/internal/core/action"
 	"github.com/choigonyok/jarvis/agent/internal/core/proposal"
+	"github.com/choigonyok/jarvis/agent/internal/shot"
 	"github.com/choigonyok/jarvis/agent/internal/thread"
 )
 
@@ -478,6 +479,13 @@ type LoginToolInput struct {
 	Reason string `json:"reason,omitempty" jsonschema:"무엇이 막았는지 한 줄. 예: '문자 인증'"`
 }
 
+type InputToolInput struct {
+	Ask   string    `json:"ask" jsonschema:"화면이 묻는 것 한두 줄, 화면의 글 그대로. 예: '영수증 보안문자 - 가게 위치는 Domaan St. [?] (빈칸 채우기)', '휴대폰 문자로 받은 인증번호 6자리'"`
+	Label string    `json:"label" jsonschema:"입력 칸 이름. 예: '보안문자 답', '인증번호'"`
+	Site  string    `json:"site,omitempty" jsonschema:"그 화면의 사이트 호스트. 예: search.shopping.naver.com"`
+	Area  []float64 `json:"area,omitempty" jsonschema:"크게 보여 줄 부분 [왼쪽, 위, 너비, 높이] - 화면에 대한 %. 화면 대부분이 다른 내용이고 묻는 부분이 작을 때만 browser_screenshot 으로 보고 정한다. 비우면 화면 가장자리의 빈 여백을 잘라 낸다."`
+}
+
 type CaptchaToolInput struct {
 	Site string `json:"site" jsonschema:"보안문자가 뜬 페이지의 호스트. 예: search.shopping.naver.com"`
 	Seen string `json:"seen,omitempty" jsonschema:"화면에 뜬 것 한 줄. 예: '네이버쇼핑 검색에 영수증 보안문자'"`
@@ -676,27 +684,65 @@ func (m *Module) runServer(run int64) *mcp.Server {
 		if err := askCard(ask).CheckChoices(); err != nil {
 			return toolText("답 버튼을 쓸 수 없습니다: "+err.Error()+". 고쳐서 다시 ask 하거나 choices 없이 물으세요.", true), nil, nil
 		}
-		raw, _ := json.Marshal(ask)
-		// One question at a time: what the job asked before and is still
-		// waiting on is what this asks now, or no longer matters. Three cards
-		// stood for one question, two of them after it was settled.
-		m.dropQuestions(j.ID, "같은 작업이 새로 물어 이 카드는 내렸습니다.")
-		p, _ := m.proposals.Open(proposal.Proposal{
-			Origin: proposal.OriginNotice,
-			Action: action.Action{Kind: KindAsk, Input: raw},
-			Card:   askCard(ask),
-		})
-		if err := m.store.Wait(ctx, run, p.ID, in.Question); err != nil {
-			m.proposals.Abandon(p.ID, "작업에 걸지 못했습니다: "+err.Error())
+		if err := m.raiseAsk(ctx, run, ask); err != nil {
 			return fail(err), nil, nil
 		}
-		m.current.park(run, p.ID)
-		m.current.decide(run)
-		// In the conversation where it was raised, so it stays there once
-		// decided instead of floating below the thread only while it waits.
-		m.attach(p.ID)
 		return ok("카드를 올렸습니다. 운영자가 승인하거나 반려하면 작업이 곧바로 다시 실행되어 그 답을 받습니다. " +
 			"답을 확인하러 다시 올 시각을 잡지 말고(schedule_next 없이) 지금 실행을 마치세요."), nil, nil
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "request_input",
+		Description: "화면이 사람의 답을 글자로 받아야 넘어갈 때 부른다: 글자·숫자를 읽어 적는 보안문자, 영수증·질문형 보안문자, 문자·이메일·앱으로 받은 인증번호. " +
+			"지금 브라우저 화면을 찍어(묻는 부분을 잘라 크게, 전체 화면과 함께) 운영자에게 대화 탭의 입력 카드로 보낸다 - 운영자는 화면 탭에 가지 않고 카드에 답을 적는다. " +
+			"묻는 화면을 앞에 띄운 채로 부르고, 부른 뒤에는 그 탭을 닫거나 옮기지 말고 바로 실행을 마친다. 답이 오면 작업이 곧바로 다시 실행된다. " +
+			"그림 고르기·퍼즐·체크박스처럼 글자로 답할 수 없는 것은 request_captcha 를 쓴다.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in InputToolInput) (*mcp.CallToolResult, any, error) {
+		j, bad := guard()
+		if bad != nil {
+			return bad, nil, nil
+		}
+		if up := payUp(j); up != nil {
+			return up, nil, nil
+		}
+		label := strings.TrimSpace(in.Label)
+		if label == "" || strings.TrimSpace(in.Ask) == "" {
+			return toolText("ask(화면이 묻는 것)와 label(칸 이름)을 모두 적으세요.", true), nil, nil
+		}
+		if m.camera == nil || m.uploads == nil || !needsBrowser(j) {
+			return toolText("이 작업에서는 브라우저 화면을 찍을 수 없어 입력 카드를 올릴 수 없습니다. 화면 탭에서 해 달라고 request_captcha 로 요청하세요.", true), nil, nil
+		}
+		if len(in.Area) != 0 && len(in.Area) != 4 {
+			return toolText("area 는 [왼쪽, 위, 너비, 높이] 네 값(화면에 대한 %)이거나 비워야 합니다.", true), nil, nil
+		}
+		shots, err := m.screenShots(ctx, run, j, in.Area)
+		if err != nil {
+			return fail(err), nil, nil
+		}
+		ask := AskInput{
+			JobID: j.ID, JobTitle: j.Title, Screen: true, Images: shots,
+			Question: "화면에 넣을 " + label + "을(를) 적어 주세요",
+			Body: strings.TrimSpace(in.Ask) + "\n\n사진은 지금 브라우저 화면이에요(눌러서 크게). 답을 적어 보내면 작업이 그 칸에 넣고 이어 가요. " +
+				"브라우저는 " + captchaIdle + " 동안 아무도 쓰지 않으면 닫히고 보안문자도 시간이 지나면 바뀌니, 늦으면 작업이 새 화면으로 다시 물어요.",
+			Fields: []action.Field{{Key: "answer", Label: label, Kind: "text", Required: true}},
+			Choices: jobChoices([]ChoiceInput{
+				{Label: "넣기", Run: true},
+				{Label: "화면 탭에서 직접 했어요", Run: true, Values: map[string]string{"answer": doneOnScreen}},
+				{Label: "하지 않기", Run: false},
+			}),
+		}
+		// Done by hand is an answer, not the card's main one.
+		ask.Choices[1].Tone = action.ToneNeutral
+		if s := host(in.Site); s != "" {
+			ask.Body = s + " - " + ask.Body
+		}
+		if err := m.raiseAsk(ctx, run, ask); err != nil {
+			return fail(err), nil, nil
+		}
+		return ok(fmt.Sprintf("입력 카드를 올렸습니다(화면 사진 %d장). 이 탭을 닫거나 다른 주소로 옮기지 말고, schedule_next 없이 지금 실행을 마치세요. ", len(shots)) +
+			"답이 오면 작업이 곧바로 다시 실행됩니다: 이 탭으로 돌아가(browser_switch_tab) 답을 그 칸에 넣고 확인을 누르세요. " +
+			"답이 '" + doneOnScreen + "'이면 넣지 말고 화면이 넘어갔는지만 봅니다. " +
+			"답을 넣었는데 틀렸다고 하거나, 탭이 닫혔거나 보안문자가 새로 바뀌었으면 그 화면으로 다시 request_input 을 부릅니다(틀렸으면 ask 에 그렇다고 적습니다). [반려]면 그 사이트 없이 할 수 있는 만큼 합니다."), nil, nil
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -784,7 +830,7 @@ func (m *Module) runServer(run int64) *mcp.Server {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "request_captcha",
-		Description: "페이지에 보안문자(그림·영수증 문제, '보안 확인을 완료해 주세요', 'I'm not a robot', 자동입력 방지)가 떠서 넘어갈 수 없을 때 부른다. " +
+		Description: "글자로 답할 수 없는 보안문자(그림 고르기, 퍼즐 맞추기, 'I'm not a robot' 체크)나 휴대폰 앱 승인이 떠서 넘어갈 수 없을 때 부른다 - 글자로 답할 수 있는 보안문자·인증번호는 request_input. " +
 			"운영자에게 화면 탭에서 풀어 달라는 카드를 올리고, 그 사이트를 쓰는 작업은 답이 올 때까지 쉰다. " +
 			"보안문자가 뜬 탭을 화면 앞에 띄워 둔 채로 부르고(닫거나 다른 주소로 옮기지 않는다), 부른 뒤에는 바로 실행을 마친다.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in CaptchaToolInput) (*mcp.CallToolResult, any, error) {
@@ -1049,6 +1095,65 @@ func pinDecided(c payCard) *mcp.CallToolResult {
 		return toolText("운영자가 결제 비밀번호 입력을 반려했습니다. 비밀번호를 넣지 말고 finish 로 마치세요.", false)
 	}
 	return nil
+}
+
+// doneOnScreen is the answer of an input card whose operator did it on the
+// 화면 tab instead: nothing to type, only the screen to look at.
+const doneOnScreen = "(화면 탭에서 직접 함)"
+
+// raiseAsk puts a job's question up as a card and has the run end waiting on
+// it: the answer wakes the job.
+func (m *Module) raiseAsk(ctx context.Context, run int64, ask AskInput) error {
+	raw, _ := json.Marshal(ask)
+	// One question at a time: what the job asked before and is still
+	// waiting on is what this asks now, or no longer matters. Three cards
+	// stood for one question, two of them after it was settled.
+	m.dropQuestions(ask.JobID, "같은 작업이 새로 물어 이 카드는 내렸습니다.")
+	p, _ := m.proposals.Open(proposal.Proposal{
+		Origin: proposal.OriginNotice,
+		Action: action.Action{Kind: KindAsk, Input: raw},
+		Card:   askCard(ask),
+	})
+	if err := m.store.Wait(ctx, run, p.ID, ask.Question); err != nil {
+		m.proposals.Abandon(p.ID, "작업에 걸지 못했습니다: "+err.Error())
+		return err
+	}
+	m.current.park(run, p.ID)
+	m.current.decide(run)
+	// In the conversation where it was raised, so it stays there once
+	// decided instead of floating below the thread only while it waits.
+	m.attach(p.ID)
+	return nil
+}
+
+// screenShots keeps the browser's screen as the job's photos for an input
+// card: the part that asks, cut out large (shot.Focus), then the whole
+// screen it came from - or only the whole screen when there is nothing to
+// cut. Each is a line of the run's record, as a capture is.
+func (m *Module) screenShots(ctx context.Context, run int64, j Job, area []float64) ([]string, error) {
+	whole, err := m.camera.Take(ctx, false)
+	if err != nil {
+		return nil, err
+	}
+	pics := [][]byte{whole}
+	if focus, ok, err := shot.Focus(whole, area); err != nil {
+		m.log.Warn("묻는 부분을 잘라 내지 못해 화면 전체만 보입니다", "job", j.ID, "err", err)
+	} else if ok {
+		pics = [][]byte{focus, whole}
+	}
+	var names []string
+	for _, pic := range pics {
+		name, err := m.uploads.Save(bytes.NewReader(pic))
+		if err != nil {
+			return nil, err
+		}
+		m.shots.add(j.ID, name)
+		if err := m.store.Step(ctx, run, "shot", name); err != nil {
+			m.log.Warn("찍은 화면을 실행 기록에 남기지 못했습니다", "job", j.ID, "err", err)
+		}
+		names = append(names, name)
+	}
+	return names, nil
 }
 
 // blockSite rests a site the run cannot get past by itself - logged out, or a

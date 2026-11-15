@@ -296,6 +296,9 @@ type AskInput struct {
 	Fields   []action.Field `json:"fields,omitempty"`
 	// Choices are the answer buttons the job offered; none: 승인 and 반려.
 	Choices []action.Choice `json:"choices,omitempty"`
+	// Screen: Images begin with the browser's screen the answer is read off
+	// (request_input), drawn whole on the card.
+	Screen bool `json:"screen,omitempty"`
 }
 
 // jobChoices are the answer buttons a job offered, as a card's choices: one
@@ -356,6 +359,7 @@ func askCard(in AskInput) action.Card {
 		Facts:       []action.Fact{{Label: "작업", Value: in.JobTitle}},
 		Consequence: "승인하면 작업이 이 내용으로 이어서 합니다. 반려하면 하지 않습니다.",
 		Images:      in.Images,
+		Screen:      in.Screen && len(in.Images) > 0,
 		Fields:      in.Fields,
 		Choices:     in.Choices,
 		Writer:      action.WriterJob,
